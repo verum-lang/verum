@@ -1,0 +1,124 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: nursery, closures, concurrency, structured
+// @description: Nursery structured concurrency with closure captures
+
+fn compute(x: Int) -> Int {
+    x * x
+}
+
+fn test_nursery_basic_spawn() -> Int {
+    // Basic nursery with multiple spawned tasks
+    let h1 = spawn { compute(5) };
+    let h2 = spawn { compute(6) };
+    let h3 = spawn { compute(7) };
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+    let total = r1 + r2 + r3;
+    // 25 + 36 + 49 = 110
+    if total != 110 {
+        print(f"FAIL basic_spawn: expected 110, got {total}");
+        return 1;
+    }
+    print("  nursery_basic_spawn: OK");
+    0
+}
+
+fn test_nursery_with_captures() -> Int {
+    // Spawned tasks capturing shared data
+    let base = 100;
+    let h1 = spawn { base + 1 };
+    let h2 = spawn { base + 2 };
+    let h3 = spawn { base + 3 };
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+    let total = r1 + r2 + r3;
+    // 101 + 102 + 103 = 306
+    if total != 306 {
+        print(f"FAIL captures: expected 306, got {total}");
+        return 1;
+    }
+    print("  nursery_with_captures: OK");
+    0
+}
+
+fn test_nursery_parallel_sum() -> Int {
+    // Parallel sum using captured range parameters
+    let h1 = spawn {
+        let mut sum = 0;
+        let mut i = 1;
+        while i <= 25 {
+            sum = sum + i;
+            i = i + 1;
+        }
+        sum
+    };
+    let h2 = spawn {
+        let mut sum = 0;
+        let mut i = 26;
+        while i <= 50 {
+            sum = sum + i;
+            i = i + 1;
+        }
+        sum
+    };
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let total = r1 + r2;
+    // sum(1..50) = 1275
+    if total != 1275 {
+        print(f"FAIL parallel_sum: expected 1275, got {total}");
+        return 1;
+    }
+    print("  nursery_parallel_sum: OK");
+    0
+}
+
+fn test_nursery_text_captures() -> Int {
+    // Spawned tasks with text captures
+    let greeting = "hello";
+    let h = spawn { greeting.len() };
+    let result = h.await;
+    if result != 5 {
+        print(f"FAIL text_captures: expected 5, got {result}");
+        return 1;
+    }
+    print("  nursery_text_captures: OK");
+    0
+}
+
+fn test_nursery_chain() -> Int {
+    // Chain: spawn task, use result to spawn another
+    let h1 = spawn { 10 + 20 };
+    let v1 = h1.await;
+    let h2 = spawn { v1 * 3 };
+    let result = h2.await;
+    if result != 90 {
+        print(f"FAIL chain: expected 90, got {result}");
+        return 1;
+    }
+    print("  nursery_chain: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Nursery + Closure Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_nursery_basic_spawn();
+    failures = failures + test_nursery_with_captures();
+    failures = failures + test_nursery_parallel_sum();
+    failures = failures + test_nursery_text_captures();
+    failures = failures + test_nursery_chain();
+
+    if failures == 0 {
+        print("All nursery + closure tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+
+    failures
+}

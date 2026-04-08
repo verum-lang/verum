@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, defer, block, unclosed, error
+// @description: Test defer statement with unclosed block
+// @expected-error: E011
+
+fn test() {
+    defer {
+        cleanup();
+}

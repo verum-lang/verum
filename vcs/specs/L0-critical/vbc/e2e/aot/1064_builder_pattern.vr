@@ -1,0 +1,96 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: builder, pattern, production
+// @expect: pass
+
+// Production pattern: builder for HTTP-like request.
+
+type Request is {
+    method: Text,
+    url: Text,
+    headers: List<Text>,
+    body: Text,
+    timeout_ms: Int,
+};
+
+type RequestBuilder is {
+    method: Text,
+    url: Text,
+    headers: List<Text>,
+    body: Text,
+    timeout_ms: Int,
+};
+
+fn new_request(url: Text) -> RequestBuilder {
+    RequestBuilder {
+        method: "GET",
+        url: url,
+        headers: List.new(),
+        body: "",
+        timeout_ms: 30000,
+    }
+}
+
+implement RequestBuilder {
+    fn method(&mut self, m: Text) -> &mut RequestBuilder {
+        self.method = m;
+        self
+    }
+
+    fn header(&mut self, h: Text) -> &mut RequestBuilder {
+        self.headers.push(h);
+        self
+    }
+
+    fn body(&mut self, b: Text) -> &mut RequestBuilder {
+        self.body = b;
+        self
+    }
+
+    fn timeout(&mut self, ms: Int) -> &mut RequestBuilder {
+        self.timeout_ms = ms;
+        self
+    }
+
+    fn build(&self) -> Request {
+        Request {
+            method: self.method,
+            url: self.url,
+            headers: self.headers,
+            body: self.body,
+            timeout_ms: self.timeout_ms,
+        }
+    }
+}
+
+fn main() -> Int {
+    let mut builder = new_request("https://api.example.com/data");
+    builder.method("POST");
+    builder.header("Content-Type: application/json");
+    builder.header("Authorization: Bearer token123");
+    builder.body("{\"key\": \"value\"}");
+    builder.timeout(5000);
+
+    let req = builder.build();
+
+    if req.method != "POST" {
+        print(f"FAIL: method = {req.method}");
+        return 1;
+    }
+    if req.url != "https://api.example.com/data" {
+        print("FAIL: url mismatch");
+        return 1;
+    }
+    if req.headers.len() != 2 {
+        print(f"FAIL: headers len = {req.headers.len()}");
+        return 1;
+    }
+    if req.timeout_ms != 5000 {
+        print(f"FAIL: timeout = {req.timeout_ms}");
+        return 1;
+    }
+
+    print("PASS: builder pattern works");
+    0
+}

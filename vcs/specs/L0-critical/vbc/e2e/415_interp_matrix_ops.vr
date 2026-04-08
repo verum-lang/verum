@@ -1,0 +1,138 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, matrix, linear-algebra
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests matrix operations using flat arrays.
+
+// 3x3 matrix stored as flat array of 9 elements
+fn mat3_get(m: List<Int>, row: Int, col: Int) -> Int {
+    m[row * 3 + col]
+}
+
+fn test_matrix_multiply() {
+    // A = [[1,2,3],[4,5,6],[7,8,9]]
+    let a = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    // B = [[9,8,7],[6,5,4],[3,2,1]]
+    let b = [9, 8, 7, 6, 5, 4, 3, 2, 1];
+    // C = A * B
+    let mut c = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 3 {
+            let mut sum = 0;
+            let mut k = 0;
+            while k < 3 {
+                sum = sum + mat3_get(a, i, k) * mat3_get(b, k, j);
+                k = k + 1;
+            }
+            c[i * 3 + j] = sum;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    // C[0][0] = 1*9 + 2*6 + 3*3 = 9+12+9 = 30
+    assert_eq(c[0], 30);
+    // C[0][1] = 1*8 + 2*5 + 3*2 = 8+10+6 = 24
+    assert_eq(c[1], 24);
+    // C[1][1] = 4*8 + 5*5 + 6*2 = 32+25+12 = 69
+    assert_eq(c[4], 69);
+    // C[2][2] = 7*7 + 8*4 + 9*1 = 49+32+9 = 90
+    assert_eq(c[8], 90);
+    print("matrix_multiply: ok");
+}
+
+fn test_matrix_transpose() {
+    let a = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let mut t = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 3 {
+            t[j * 3 + i] = a[i * 3 + j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    assert_eq(t[0], 1); assert_eq(t[1], 4); assert_eq(t[2], 7);
+    assert_eq(t[3], 2); assert_eq(t[4], 5); assert_eq(t[5], 8);
+    assert_eq(t[6], 3); assert_eq(t[7], 6); assert_eq(t[8], 9);
+    print("matrix_transpose: ok");
+}
+
+fn test_matrix_trace() {
+    let a = [5, 1, 2, 3, 7, 4, 6, 8, 9];
+    let trace = a[0] + a[4] + a[8]; // diagonal sum
+    assert_eq(trace, 21); // 5+7+9
+    print("matrix_trace: ok");
+}
+
+fn test_matrix_determinant() {
+    // det([[1,2,3],[4,5,6],[7,8,9]])
+    // = 1*(5*9-6*8) - 2*(4*9-6*7) + 3*(4*8-5*7)
+    // = 1*(45-48) - 2*(36-42) + 3*(32-35)
+    // = -3 + 12 - 9 = 0
+    let a = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let det = a[0] * (a[4] * a[8] - a[5] * a[7])
+            - a[1] * (a[3] * a[8] - a[5] * a[6])
+            + a[2] * (a[3] * a[7] - a[4] * a[6]);
+    assert_eq(det, 0);
+
+    // det([[2,1,0],[0,3,1],[1,0,2]]) = 2*(6-0) - 1*(0-1) + 0 = 12+1 = 13
+    let b = [2, 1, 0, 0, 3, 1, 1, 0, 2];
+    let det_b = b[0] * (b[4] * b[8] - b[5] * b[7])
+              - b[1] * (b[3] * b[8] - b[5] * b[6])
+              + b[2] * (b[3] * b[7] - b[4] * b[6]);
+    assert_eq(det_b, 13);
+    print("matrix_determinant: ok");
+}
+
+fn test_matrix_identity() {
+    // A * I = A
+    let a = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let identity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    let mut result = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 3 {
+            let mut sum = 0;
+            let mut k = 0;
+            while k < 3 {
+                sum = sum + a[i * 3 + k] * identity[k * 3 + j];
+                k = k + 1;
+            }
+            result[i * 3 + j] = sum;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    // Check A*I == A
+    let mut matches = 0;
+    i = 0;
+    while i < 9 {
+        if result[i] == a[i] { matches = matches + 1; }
+        i = i + 1;
+    }
+    assert_eq(matches, 9);
+    print("matrix_identity: ok");
+}
+
+fn main() -> Int {
+    test_matrix_multiply();
+    test_matrix_transpose();
+    test_matrix_trace();
+    test_matrix_determinant();
+    test_matrix_identity();
+    print("[OK] 415_interp_matrix_ops");
+    0
+}

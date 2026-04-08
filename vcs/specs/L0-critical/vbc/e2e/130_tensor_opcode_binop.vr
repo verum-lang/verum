@@ -1,0 +1,161 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, binop
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Tensor binary operations — elementwise add, sub, mul, div on flat 8-element arrays
+
+// ============================================================================
+// Tensor8: Fixed-size flat tensor of 8 Ints
+// ============================================================================
+
+type Tensor8 is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    len: Int
+};
+
+fn t_get(t: Tensor8, i: Int) -> Int {
+    if i == 0 { t.d0 } else if i == 1 { t.d1 } else if i == 2 { t.d2 }
+    else if i == 3 { t.d3 } else if i == 4 { t.d4 } else if i == 5 { t.d5 }
+    else if i == 6 { t.d6 } else { t.d7 }
+}
+
+fn t_from4(a: Int, b: Int, c: Int, d: Int) -> Tensor8 {
+    Tensor8 { d0: a, d1: b, d2: c, d3: d, d4: 0, d5: 0, d6: 0, d7: 0, len: 4 }
+}
+
+fn tensor_add(a: Tensor8, b: Tensor8) -> Tensor8 {
+    Tensor8 {
+        d0: a.d0 + b.d0, d1: a.d1 + b.d1, d2: a.d2 + b.d2, d3: a.d3 + b.d3,
+        d4: a.d4 + b.d4, d5: a.d5 + b.d5, d6: a.d6 + b.d6, d7: a.d7 + b.d7,
+        len: a.len
+    }
+}
+
+fn tensor_sub(a: Tensor8, b: Tensor8) -> Tensor8 {
+    Tensor8 {
+        d0: a.d0 - b.d0, d1: a.d1 - b.d1, d2: a.d2 - b.d2, d3: a.d3 - b.d3,
+        d4: a.d4 - b.d4, d5: a.d5 - b.d5, d6: a.d6 - b.d6, d7: a.d7 - b.d7,
+        len: a.len
+    }
+}
+
+fn tensor_mul(a: Tensor8, b: Tensor8) -> Tensor8 {
+    Tensor8 {
+        d0: a.d0 * b.d0, d1: a.d1 * b.d1, d2: a.d2 * b.d2, d3: a.d3 * b.d3,
+        d4: a.d4 * b.d4, d5: a.d5 * b.d5, d6: a.d6 * b.d6, d7: a.d7 * b.d7,
+        len: a.len
+    }
+}
+
+fn tensor_div(a: Tensor8, b: Tensor8) -> Tensor8 {
+    Tensor8 {
+        d0: if b.d0 != 0 { a.d0 / b.d0 } else { 0 },
+        d1: if b.d1 != 0 { a.d1 / b.d1 } else { 0 },
+        d2: if b.d2 != 0 { a.d2 / b.d2 } else { 0 },
+        d3: if b.d3 != 0 { a.d3 / b.d3 } else { 0 },
+        d4: if b.d4 != 0 { a.d4 / b.d4 } else { 0 },
+        d5: if b.d5 != 0 { a.d5 / b.d5 } else { 0 },
+        d6: if b.d6 != 0 { a.d6 / b.d6 } else { 0 },
+        d7: if b.d7 != 0 { a.d7 / b.d7 } else { 0 },
+        len: a.len
+    }
+}
+
+// ============================================================================
+// Test 1: Elementwise add
+// ============================================================================
+
+@test
+fn test_tensor_add() {
+    let a = t_from4(1, 2, 3, 4);
+    let b = t_from4(10, 20, 30, 40);
+    let c = tensor_add(a, b);
+    assert_eq(t_get(c, 0), 11);
+    assert_eq(t_get(c, 1), 22);
+    assert_eq(t_get(c, 2), 33);
+    assert_eq(t_get(c, 3), 44);
+    print("  test_tensor_add: ok");
+}
+
+// ============================================================================
+// Test 2: Elementwise sub
+// ============================================================================
+
+@test
+fn test_tensor_sub() {
+    let a = t_from4(50, 40, 30, 20);
+    let b = t_from4(10, 20, 30, 40);
+    let c = tensor_sub(a, b);
+    assert_eq(t_get(c, 0), 40);
+    assert_eq(t_get(c, 1), 20);
+    assert_eq(t_get(c, 2), 0);
+    assert_eq(t_get(c, 3), -20);
+    print("  test_tensor_sub: ok");
+}
+
+// ============================================================================
+// Test 3: Elementwise mul
+// ============================================================================
+
+@test
+fn test_tensor_mul() {
+    let a = t_from4(2, 3, 4, 5);
+    let b = t_from4(10, 10, 10, 10);
+    let c = tensor_mul(a, b);
+    assert_eq(t_get(c, 0), 20);
+    assert_eq(t_get(c, 1), 30);
+    assert_eq(t_get(c, 2), 40);
+    assert_eq(t_get(c, 3), 50);
+    print("  test_tensor_mul: ok");
+}
+
+// ============================================================================
+// Test 4: Elementwise div
+// ============================================================================
+
+@test
+fn test_tensor_div() {
+    let a = t_from4(100, 200, 300, 400);
+    let b = t_from4(10, 20, 30, 40);
+    let c = tensor_div(a, b);
+    assert_eq(t_get(c, 0), 10);
+    assert_eq(t_get(c, 1), 10);
+    assert_eq(t_get(c, 2), 10);
+    assert_eq(t_get(c, 3), 10);
+    print("  test_tensor_div: ok");
+}
+
+// ============================================================================
+// Test 5: Combined operations
+// ============================================================================
+
+@test
+fn test_tensor_combined() {
+    let a = t_from4(5, 10, 15, 20);
+    let b = t_from4(1, 2, 3, 4);
+    // (a + b) * b = [6*1, 12*2, 18*3, 24*4] = [6, 24, 54, 96]
+    let sum_ab = tensor_add(a, b);
+    let result = tensor_mul(sum_ab, b);
+    assert_eq(t_get(result, 0), 6);
+    assert_eq(t_get(result, 1), 24);
+    assert_eq(t_get(result, 2), 54);
+    assert_eq(t_get(result, 3), 96);
+    print("  test_tensor_combined: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_tensor_add();
+    test_tensor_sub();
+    test_tensor_mul();
+    test_tensor_div();
+    test_tensor_combined();
+    print("[OK] 130_tensor_opcode_binop");
+    0
+}

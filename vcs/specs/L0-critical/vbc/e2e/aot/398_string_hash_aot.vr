@@ -1,0 +1,358 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, hash, string-hash, collision, probing
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for multiple polynomial hash functions, collision detection,
+// and hash table probing (linear and quadratic).
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 } else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 } else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 } else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 } else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 } else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// ========== Hash Function 1: Polynomial (base 31) ==========
+fn hash_poly31(chars: Arr8, n: Int, modulus: Int) -> Int {
+    let mut h = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < n {
+        h = (h + a8_get(chars, i) * power) % modulus;
+        power = (power * 31) % modulus;
+        i = i + 1;
+    }
+    abs_val(h % modulus)
+}
+
+// ========== Hash Function 2: Polynomial (base 37) ==========
+fn hash_poly37(chars: Arr8, n: Int, modulus: Int) -> Int {
+    let mut h = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < n {
+        h = (h + a8_get(chars, i) * power) % modulus;
+        power = (power * 37) % modulus;
+        i = i + 1;
+    }
+    abs_val(h % modulus)
+}
+
+// ========== Hash Function 3: DJB2-style ==========
+fn hash_djb2(chars: Arr8, n: Int, modulus: Int) -> Int {
+    let mut h = 5381;
+    let mut i = 0;
+    while i < n {
+        h = ((h * 33) + a8_get(chars, i)) % modulus;
+        i = i + 1;
+    }
+    abs_val(h % modulus)
+}
+
+// ========== Hash Function 4: FNV-1a style ==========
+fn hash_fnv(chars: Arr8, n: Int, modulus: Int) -> Int {
+    let mut h = 2166136261;
+    let mut i = 0;
+    while i < n {
+        // XOR via arithmetic: h ^ c approximated as (h + c) for simplicity
+        // Real FNV uses XOR, we simulate with add + multiply
+        h = ((h + a8_get(chars, i)) * 16777619) % modulus;
+        i = i + 1;
+    }
+    abs_val(h % modulus)
+}
+
+fn test_hash_basic() -> Int {
+    // "hello" as ASCII codes: 104, 101, 108, 108, 111
+    let hello = Arr8 { a0: 104, a1: 101, a2: 108, a3: 108, a4: 111, a5: 0, a6: 0, a7: 0 };
+    let m = 1000003;
+    let h1 = hash_poly31(hello, 5, m);
+    let h2 = hash_poly37(hello, 5, m);
+    let h3 = hash_djb2(hello, 5, m);
+    let h4 = hash_fnv(hello, 5, m);
+    // All hashes should be non-negative and in range
+    assert(h1 >= 0);
+    assert(h1 < m);
+    assert(h2 >= 0);
+    assert(h2 < m);
+    assert(h3 >= 0);
+    assert(h4 >= 0);
+    0
+}
+
+fn test_hash_deterministic() -> Int {
+    let s = Arr8 { a0: 65, a1: 66, a2: 67, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let m = 997;
+    let h1a = hash_poly31(s, 3, m);
+    let h1b = hash_poly31(s, 3, m);
+    assert_eq(h1a, h1b);
+    let h2a = hash_djb2(s, 3, m);
+    let h2b = hash_djb2(s, 3, m);
+    assert_eq(h2a, h2b);
+    0
+}
+
+fn test_hash_different_strings() -> Int {
+    let s1 = Arr8 { a0: 65, a1: 66, a2: 67, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let s2 = Arr8 { a0: 67, a1: 66, a2: 65, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let m = 1000003;
+    // Different strings should (usually) have different hashes
+    let h1a = hash_poly31(s1, 3, m);
+    let h1b = hash_poly31(s2, 3, m);
+    // With a good hash function and large modulus, collision is unlikely
+    assert(h1a != h1b);
+    let h2a = hash_djb2(s1, 3, m);
+    let h2b = hash_djb2(s2, 3, m);
+    assert(h2a != h2b);
+    0
+}
+
+// ========== Collision Detection ==========
+// Hash multiple strings, check how many collide in a small table
+
+fn count_collisions(size: Int) -> Int {
+    // Hash 8 different "strings" into a table of given size
+    let mut table = a16_zero(); // counts per bucket
+    let mut collisions = 0;
+    let mut i = 0;
+    while i < 8 {
+        // Generate different "strings": [i*10+1, i*10+2, i*10+3]
+        let s = Arr8 { a0: i * 10 + 1, a1: i * 10 + 2, a2: i * 10 + 3,
+                       a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+        let h = hash_poly31(s, 3, size);
+        let bucket = abs_val(h % size);
+        let cur = a16_get(table, bucket);
+        if cur > 0 {
+            collisions = collisions + 1;
+        }
+        table = a16_set(table, bucket, cur + 1);
+        i = i + 1;
+    }
+    collisions
+}
+
+fn test_collision_detection() -> Int {
+    // Very small table (4 buckets) => many collisions
+    let c4 = count_collisions(4);
+    assert(c4 > 0);
+    // Larger table (16 buckets) => fewer collisions
+    let c16 = count_collisions(16);
+    assert(c16 <= c4);
+    0
+}
+
+// ========== Linear Probing Hash Table ==========
+// Table of 16 slots, keys stored directly, -1 = empty
+
+fn ht_insert_linear(keys: Arr16, key: Int, table_size: Int) -> Arr16 {
+    let h = abs_val(key * 31 + 7) % table_size;
+    let mut pos = h;
+    let mut ks = keys;
+    let mut found = 0;
+    let mut steps = 0;
+    while steps < table_size {
+        if a16_get(ks, pos) == 0 - 1 {
+            ks = a16_set(ks, pos, key);
+            found = 1;
+            steps = table_size; // break
+        } else {
+            pos = (pos + 1) % table_size;
+            steps = steps + 1;
+        }
+    }
+    ks
+}
+
+fn ht_find_linear(keys: Arr16, key: Int, table_size: Int) -> Int {
+    let h = abs_val(key * 31 + 7) % table_size;
+    let mut pos = h;
+    let mut steps = 0;
+    while steps < table_size {
+        let k = a16_get(keys, pos);
+        if k == key { return 1; }
+        if k == 0 - 1 { return 0; }
+        pos = (pos + 1) % table_size;
+        steps = steps + 1;
+    }
+    0
+}
+
+fn init_empty_table() -> Arr16 {
+    // Fill with -1 (empty marker)
+    let mut t = a16_zero();
+    let mut i = 0;
+    while i < 16 {
+        t = a16_set(t, i, 0 - 1);
+        i = i + 1;
+    }
+    t
+}
+
+fn test_linear_probing() -> Int {
+    let mut t = init_empty_table();
+    t = ht_insert_linear(t, 10, 16);
+    t = ht_insert_linear(t, 26, 16);  // may collide with 10
+    t = ht_insert_linear(t, 42, 16);
+    assert_eq(ht_find_linear(t, 10, 16), 1);
+    assert_eq(ht_find_linear(t, 26, 16), 1);
+    assert_eq(ht_find_linear(t, 42, 16), 1);
+    assert_eq(ht_find_linear(t, 99, 16), 0);
+    0
+}
+
+// ========== Quadratic Probing ==========
+
+fn ht_insert_quad(keys: Arr16, key: Int, table_size: Int) -> Arr16 {
+    let h = abs_val(key * 31 + 7) % table_size;
+    let mut ks = keys;
+    let mut step = 0;
+    while step < table_size {
+        let pos = (h + step * step) % table_size;
+        if a16_get(ks, pos) == 0 - 1 {
+            ks = a16_set(ks, pos, key);
+            return ks;
+        }
+        step = step + 1;
+    }
+    ks
+}
+
+fn ht_find_quad(keys: Arr16, key: Int, table_size: Int) -> Int {
+    let h = abs_val(key * 31 + 7) % table_size;
+    let mut step = 0;
+    while step < table_size {
+        let pos = (h + step * step) % table_size;
+        let k = a16_get(keys, pos);
+        if k == key { return 1; }
+        if k == 0 - 1 { return 0; }
+        step = step + 1;
+    }
+    0
+}
+
+fn test_quadratic_probing() -> Int {
+    let mut t = init_empty_table();
+    t = ht_insert_quad(t, 5, 16);
+    t = ht_insert_quad(t, 21, 16);
+    t = ht_insert_quad(t, 37, 16);
+    assert_eq(ht_find_quad(t, 5, 16), 1);
+    assert_eq(ht_find_quad(t, 21, 16), 1);
+    assert_eq(ht_find_quad(t, 37, 16), 1);
+    assert_eq(ht_find_quad(t, 100, 16), 0);
+    0
+}
+
+// ========== Double Hashing ==========
+
+fn hash2_probe(key: Int, table_size: Int) -> Int {
+    let h = abs_val(key * 13 + 5) % (table_size - 1);
+    if h == 0 { 1 } else { h }
+}
+
+fn ht_insert_double(keys: Arr16, key: Int, table_size: Int) -> Arr16 {
+    let h1 = abs_val(key * 31 + 7) % table_size;
+    let h2 = hash2_probe(key, table_size);
+    let mut ks = keys;
+    let mut step = 0;
+    while step < table_size {
+        let pos = (h1 + step * h2) % table_size;
+        if a16_get(ks, pos) == 0 - 1 {
+            ks = a16_set(ks, pos, key);
+            return ks;
+        }
+        step = step + 1;
+    }
+    ks
+}
+
+fn ht_find_double(keys: Arr16, key: Int, table_size: Int) -> Int {
+    let h1 = abs_val(key * 31 + 7) % table_size;
+    let h2 = hash2_probe(key, table_size);
+    let mut step = 0;
+    while step < table_size {
+        let pos = (h1 + step * h2) % table_size;
+        let k = a16_get(keys, pos);
+        if k == key { return 1; }
+        if k == 0 - 1 { return 0; }
+        step = step + 1;
+    }
+    0
+}
+
+fn test_double_hashing() -> Int {
+    let mut t = init_empty_table();
+    t = ht_insert_double(t, 3, 16);
+    t = ht_insert_double(t, 19, 16);
+    t = ht_insert_double(t, 35, 16);
+    t = ht_insert_double(t, 51, 16);
+    assert_eq(ht_find_double(t, 3, 16), 1);
+    assert_eq(ht_find_double(t, 19, 16), 1);
+    assert_eq(ht_find_double(t, 35, 16), 1);
+    assert_eq(ht_find_double(t, 51, 16), 1);
+    assert_eq(ht_find_double(t, 200, 16), 0);
+    0
+}
+
+fn main() -> Int {
+    test_hash_basic();
+    test_hash_deterministic();
+    test_hash_different_strings();
+    test_collision_detection();
+    test_linear_probing();
+    test_quadratic_probing();
+    test_double_hashing();
+    print("All string hash tests passed!");
+    0
+}

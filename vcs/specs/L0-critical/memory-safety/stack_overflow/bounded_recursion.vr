@@ -1,0 +1,42 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, stack-overflow, bounded-recursion
+// @description: Tests that bounded recursion with proper base cases succeeds
+
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+fn count_down(n: Int) {
+    if n > 0 {
+        count_down(n - 1);
+    }
+}
+
+fn sum_recursive(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else {
+        n + sum_recursive(n - 1)
+    }
+}
+
+fn main() {
+    // Bounded fibonacci recursion - no overflow
+    let fib15 = fibonacci(15);
+    assert(fib15 == 610);
+
+    // Simple countdown - bounded
+    count_down(500);
+
+    // Recursive sum - bounded
+    let sum = sum_recursive(100);
+    assert(sum == 5050);
+
+    print("Bounded recursion test passed");
+}

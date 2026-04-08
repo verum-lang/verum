@@ -1,0 +1,193 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, variant, tagged
+// @description: Test variant-like pattern matching using tagged tuples in meta functions
+
+// =============================================================================
+// SIMULATING VARIANTS WITH TAGGED TUPLES
+// =============================================================================
+// Since Some/None/Ok/Err are not available as meta builtins,
+// we test variant-like behavior using tagged tuples
+
+// Tag 0 = "none", Tag 1 = "some"
+meta fn test_tagged_none() -> Text {
+    let m = (0, 0);  // Simulates None
+    match m {
+        (1, value) => "some",
+        (0, _) => "none",
+        _ => "unknown",
+    }
+}
+
+meta fn test_tagged_some() -> Int {
+    let m = (1, 42);  // Simulates Some(42)
+    match m {
+        (1, value) => value,
+        (0, _) => 0,
+        _ => -1,
+    }
+}
+
+// Tag 0 = "ok", Tag 1 = "err"
+meta fn test_tagged_ok() -> Int {
+    let r = (0, 100);  // Simulates Ok(100)
+    match r {
+        (0, value) => value,
+        (1, _) => -1,
+        _ => -2,
+    }
+}
+
+meta fn test_tagged_err() -> Text {
+    let r = (1, "error");  // Simulates Err("error")
+    match r {
+        (0, _) => "success",
+        (1, msg) => msg,
+        _ => "unknown",
+    }
+}
+
+// =============================================================================
+// NESTED TAGGED PATTERNS
+// =============================================================================
+
+meta fn test_nested_tagged() -> Int {
+    // Simulates Some(Some(100))
+    let nested = (1, (1, 100));
+    match nested {
+        (1, (1, n)) => n,
+        (1, (0, _)) => -1,
+        (0, _) => -2,
+        _ => -3,
+    }
+}
+
+meta fn test_result_with_maybe() -> Int {
+    // Simulates Ok(Some(50))
+    let r = (0, (1, 50));
+    match r {
+        (0, (1, n)) => n,
+        (0, (0, _)) => -1,
+        (1, _) => -2,
+        _ => -3,
+    }
+}
+
+// =============================================================================
+// TAGGED PATTERNS WITH WILDCARDS
+// =============================================================================
+
+meta fn test_tagged_wildcard_some() -> Bool {
+    let m = (1, "hello");  // Simulates Some("hello")
+    match m {
+        (1, _) => true,
+        (0, _) => false,
+        _ => false,
+    }
+}
+
+meta fn test_tagged_wildcard_ok() -> Bool {
+    let r = (0, 123);  // Simulates Ok(123)
+    match r {
+        (0, _) => true,
+        (1, _) => false,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// TAGGED PATTERNS WITH GUARDS
+// =============================================================================
+
+meta fn test_tagged_guard() -> Text {
+    let m = (1, 50);  // Simulates Some(50)
+    match m {
+        (1, n) if n > 100 => "large",
+        (1, n) if n > 0 => "positive",
+        (1, n) if n < 0 => "negative",
+        (1, 0) => "zero",
+        (0, _) => "none",
+        _ => "unknown",
+    }
+}
+
+meta fn test_result_guard() -> Text {
+    let r = (0, 75);  // Simulates Ok(75)
+    match r {
+        (0, n) if n >= 90 => "A",
+        (0, n) if n >= 80 => "B",
+        (0, n) if n >= 70 => "C",
+        (0, n) if n >= 60 => "D",
+        (0, _) => "F",
+        (1, _) => "Invalid",
+        _ => "Unknown",
+    }
+}
+
+// =============================================================================
+// MULTI-VARIANT PATTERNS
+// =============================================================================
+
+// Status: 0=Pending, 1=Running, 2=Success, 3=Failure
+meta fn test_status_pattern() -> Text {
+    let s = (2, 0);  // Success status
+    match s {
+        (0, _) => "pending",
+        (1, _) => "running",
+        (2, _) => "success",
+        (3, _) => "failure",
+        _ => "unknown",
+    }
+}
+
+// Color: 0=Red, 1=Green, 2=Blue, 3=RGB(r,g,b)
+meta fn test_color_pattern() -> Text {
+    let c = (3, (255, 128, 0));  // Simulates RGB(255, 128, 0)
+    match c {
+        (0, _) => "red",
+        (1, _) => "green",
+        (2, _) => "blue",
+        (3, (r, g, b)) => "rgb",
+        _ => "unknown",
+    }
+}
+
+meta fn test_rgb_components() -> Int {
+    let c = (3, (100, 150, 200));  // RGB(100, 150, 200)
+    match c {
+        (3, (r, g, b)) => r + g + b,
+        _ => 0,
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Tagged maybe patterns
+    @const assert_eq(test_tagged_none(), "none");
+    @const assert_eq(test_tagged_some(), 42);
+
+    // Tagged result patterns
+    @const assert_eq(test_tagged_ok(), 100);
+    @const assert_eq(test_tagged_err(), "error");
+
+    // Nested tagged patterns
+    @const assert_eq(test_nested_tagged(), 100);
+    @const assert_eq(test_result_with_maybe(), 50);
+
+    // Wildcards
+    @const assert(test_tagged_wildcard_some());
+    @const assert(test_tagged_wildcard_ok());
+
+    // Guards
+    @const assert_eq(test_tagged_guard(), "positive");
+    @const assert_eq(test_result_guard(), "C");
+
+    // Multi-variant
+    @const assert_eq(test_status_pattern(), "success");
+    @const assert_eq(test_color_pattern(), "rgb");
+    @const assert_eq(test_rgb_components(), 450);
+}

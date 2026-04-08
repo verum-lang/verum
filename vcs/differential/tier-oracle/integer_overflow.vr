@@ -1,0 +1,320 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @category: arithmetic
+// @description: Integer overflow and underflow behavior tests
+// @tags: integer, overflow, underflow, wrapping, saturation
+
+/// Integer overflow behavior must be consistent across execution tiers.
+/// Tests signed and unsigned overflow, division edge cases, and modular arithmetic.
+
+module IntegerOverflow;
+
+// Integer type bounds
+const I8_MAX: Int = 127;
+const I8_MIN: Int = -128;
+const I16_MAX: Int = 32767;
+const I16_MIN: Int = -32768;
+const I32_MAX: Int = 2147483647;
+const I32_MIN: Int = -2147483648;
+const I64_MAX: Int = 9223372036854775807;
+const I64_MIN: Int = -9223372036854775808;
+
+const U8_MAX: UInt = 255;
+const U16_MAX: UInt = 65535;
+const U32_MAX: UInt = 4294967295;
+const U64_MAX: UInt = 18446744073709551615;
+
+/// Test signed overflow addition
+fn test_signed_overflow_add() {
+    // Max + 1 should overflow
+    // @expect-behavior: overflow or wrap to I64_MIN
+    let result = I64_MAX + 1;
+    print(result);
+
+    // Overflow detection
+    let (sum, overflow) = I64_MAX.overflowing_add(1);
+    // @expect-output: true
+    print(overflow);
+
+    // Wrapping add
+    let wrapped = I64_MAX.wrapping_add(1);
+    // @expect-output: -9223372036854775808
+    print(wrapped);
+
+    // Saturating add
+    let saturated = I64_MAX.saturating_add(1);
+    // @expect-output: 9223372036854775807
+    print(saturated);
+}
+
+/// Test signed overflow subtraction
+fn test_signed_overflow_sub() {
+    // Min - 1 should underflow
+    // @expect-behavior: overflow or wrap to I64_MAX
+    let result = I64_MIN - 1;
+    print(result);
+
+    // Overflow detection
+    let (diff, overflow) = I64_MIN.overflowing_sub(1);
+    // @expect-output: true
+    print(overflow);
+
+    // Wrapping sub
+    let wrapped = I64_MIN.wrapping_sub(1);
+    // @expect-output: 9223372036854775807
+    print(wrapped);
+
+    // Saturating sub
+    let saturated = I64_MIN.saturating_sub(1);
+    // @expect-output: -9223372036854775808
+    print(saturated);
+}
+
+/// Test signed overflow multiplication
+fn test_signed_overflow_mul() {
+    // Large values that overflow when multiplied
+    let a = I64_MAX / 2 + 1;  // > I64_MAX/2
+    let b = 3;
+
+    // @expect-behavior: overflow or wrap
+    let result = a * b;
+    print(result);
+
+    // Overflow detection
+    let (prod, overflow) = a.overflowing_mul(b);
+    // @expect-output: true
+    print(overflow);
+
+    // Wrapping multiply
+    let wrapped = a.wrapping_mul(b);
+    print(wrapped);
+
+    // Saturating multiply
+    let saturated = a.saturating_mul(b);
+    // @expect-output: 9223372036854775807
+    print(saturated);
+}
+
+/// Test division edge cases
+fn test_division_edge_cases() {
+    // Division by zero
+    // @expect-error: Division by zero or panic
+    // let result = 42 / 0;
+
+    // Minimum divided by -1 (overflow)
+    // I64_MIN / -1 = I64_MAX + 1 (overflow!)
+    let (quot, overflow) = I64_MIN.overflowing_div(-1);
+    // @expect-output: true
+    print(overflow);
+
+    // Checked division
+    let checked = I64_MIN.checked_div(-1);
+    // @expect-output: None
+    print(checked);
+
+    // Normal division
+    // @expect-output: 5
+    print(10 / 2);
+
+    // Integer division truncates toward zero
+    // @expect-output: -2
+    print(-5 / 2);
+
+    // @expect-output: 2
+    print(5 / 2);
+}
+
+/// Test modulo operation edge cases
+fn test_modulo_edge_cases() {
+    // Modulo by zero
+    // @expect-error: Division by zero or panic
+    // let result = 42 % 0;
+
+    // Modulo with negative dividend (sign follows dividend in Verum)
+    // @expect-output: -1
+    print(-5 % 2);
+
+    // @expect-output: 1
+    print(5 % -2);
+
+    // @expect-output: -1
+    print(-5 % -2);
+
+    // Minimum modulo -1
+    // @expect-output: 0
+    print(I64_MIN % -1);
+}
+
+/// Test unsigned overflow
+fn test_unsigned_overflow() {
+    // Max + 1 wraps to 0
+    let (sum, overflow) = U64_MAX.overflowing_add(1);
+    // @expect-output: 0
+    print(sum);
+    // @expect-output: true
+    print(overflow);
+
+    // 0 - 1 wraps to MAX
+    let (diff, overflow) = 0u64.overflowing_sub(1);
+    // @expect-output: 18446744073709551615
+    print(diff);
+    // @expect-output: true
+    print(overflow);
+}
+
+/// Test negation overflow
+fn test_negation_overflow() {
+    // -I64_MIN overflows
+    // @expect-behavior: overflow or wrap
+    let result = -I64_MIN;
+    print(result);
+
+    // Overflow detection
+    let (neg, overflow) = I64_MIN.overflowing_neg();
+    // @expect-output: true
+    print(overflow);
+
+    // Wrapping negation
+    let wrapped = I64_MIN.wrapping_neg();
+    // @expect-output: -9223372036854775808
+    print(wrapped);  // Wraps to itself
+}
+
+/// Test absolute value edge cases
+fn test_abs_edge_cases() {
+    // abs(I64_MIN) overflows
+    // @expect-behavior: overflow or return I64_MIN
+    let result = I64_MIN.abs();
+    print(result);
+
+    // Overflow detection
+    let (abs_val, overflow) = I64_MIN.overflowing_abs();
+    // @expect-output: true
+    print(overflow);
+
+    // Normal abs
+    // @expect-output: 42
+    print((-42).abs());
+}
+
+/// Test bit shift overflow
+fn test_shift_overflow() {
+    // Shift by type width
+    // @expect-behavior: zero or same value
+    let result = 1i64 << 64;
+    print(result);
+
+    // Shift by more than width
+    // @expect-behavior: undefined or zero
+    let result = 1i64 << 65;
+    print(result);
+
+    // Right shift of negative (arithmetic shift)
+    // @expect-output: -1
+    print((-1i64) >> 1);  // Sign extends
+
+    // Wrapping shift
+    let wrapped = 1i64.wrapping_shl(64);
+    // @expect-output: 1
+    print(wrapped);  // (64 % 64) = 0, so no shift
+}
+
+/// Test power overflow
+fn test_power_overflow() {
+    // Large power that overflows
+    let (pow, overflow) = 2i64.overflowing_pow(63);
+    // @expect-output: true
+    print(overflow);
+
+    // Saturating power
+    let saturated = 2i64.saturating_pow(100);
+    // @expect-output: 9223372036854775807
+    print(saturated);
+
+    // Normal power
+    // @expect-output: 1024
+    print(2i64.pow(10));
+}
+
+/// Test type conversion overflow
+fn test_conversion_overflow() {
+    // Large Int to smaller type
+    let large: Int = 256;
+    let small: I8 = large as I8;
+    // @expect-behavior: truncation or error
+    print(small);
+
+    // Checked conversion
+    let checked = large.try_into<I8>();
+    // @expect-output: None
+    print(checked);
+
+    // Valid conversion
+    let valid: Int = 100;
+    let ok = valid.try_into<I8>();
+    // @expect-output: Some(100)
+    print(ok);
+}
+
+/// Test arithmetic with checked operations
+fn test_checked_arithmetic() {
+    // Checked add that succeeds
+    let sum = 100i64.checked_add(200);
+    // @expect-output: Some(300)
+    print(sum);
+
+    // Checked add that fails
+    let overflow = I64_MAX.checked_add(1);
+    // @expect-output: None
+    print(overflow);
+
+    // Checked sub
+    let diff = I64_MIN.checked_sub(1);
+    // @expect-output: None
+    print(diff);
+
+    // Checked mul
+    let prod = I64_MAX.checked_mul(2);
+    // @expect-output: None
+    print(prod);
+}
+
+/// Test factorial overflow detection
+fn test_factorial_overflow() {
+    fn factorial(n: Int) -> Maybe<Int> {
+        if n <= 1 {
+            Some(1)
+        } else {
+            factorial(n - 1)?.checked_mul(n)
+        }
+    }
+
+    // 20! fits in i64
+    // @expect-output: Some(2432902008176640000)
+    print(factorial(20));
+
+    // 21! overflows i64
+    // @expect-output: None
+    print(factorial(21));
+}
+
+fn main() {
+    print("Testing integer overflow behavior...");
+
+    test_signed_overflow_add();
+    test_signed_overflow_sub();
+    test_signed_overflow_mul();
+    test_division_edge_cases();
+    test_modulo_edge_cases();
+    test_unsigned_overflow();
+    test_negation_overflow();
+    test_abs_edge_cases();
+    test_shift_overflow();
+    test_power_overflow();
+    test_conversion_overflow();
+    test_checked_arithmetic();
+    test_factorial_overflow();
+
+    print("Integer overflow tests complete.");
+}

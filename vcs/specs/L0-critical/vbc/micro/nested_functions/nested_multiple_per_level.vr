@@ -1,0 +1,56 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, multiple-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn outer_a(x: Int) -> Int {
+        fn inner_a1(y: Int) -> Int {
+            fn deep_a(z: Int) -> Int {
+                return z * 3;
+            }
+            return deep_a(y) + 1;
+        }
+        fn inner_a2(y: Int) -> Int {
+            fn deep_b(z: Int) -> Int {
+                return z * 5;
+            }
+            return deep_b(y) + 2;
+        }
+        return inner_a1(x) + inner_a2(x);
+    }
+
+    fn outer_b(x: Int) -> Int {
+        fn inner_b1(y: Int) -> Int {
+            return y + 10;
+        }
+        fn inner_b2(y: Int) -> Int {
+            fn nested_in_b2(z: Int) -> Int {
+                return z * 2;
+            }
+            return nested_in_b2(y) + 5;
+        }
+        fn inner_b3(y: Int) -> Int {
+            return y - 3;
+        }
+        return inner_b1(x) + inner_b2(x) + inner_b3(x);
+    }
+
+    // outer_a(4):
+    // inner_a1(4) = deep_a(4) + 1 = 12 + 1 = 13
+    // inner_a2(4) = deep_b(4) + 2 = 20 + 2 = 22
+    // outer_a(4) = 13 + 22 = 35
+    assert_eq(outer_a(4), 35);
+
+    // outer_b(10):
+    // inner_b1(10) = 10 + 10 = 20
+    // inner_b2(10) = nested_in_b2(10) + 5 = 20 + 5 = 25
+    // inner_b3(10) = 10 - 3 = 7
+    // outer_b(10) = 20 + 25 + 7 = 52
+    assert_eq(outer_b(10), 52);
+
+    // Combine both
+    assert_eq(outer_a(4) + outer_b(10), 87);
+}

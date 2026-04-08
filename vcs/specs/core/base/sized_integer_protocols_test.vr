@@ -1,0 +1,1185 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: primitives, protocols, arithmetic, sized-integers, zero, one
+// @description: Tests for arithmetic protocol implementations on sized integer types and Float32
+
+mount core.*;
+mount core.base.protocols.{Zero, One, Add, Sub, Mul, Div, Rem};
+mount core.base.protocols.{BitAnd, BitOr, BitXor};
+mount core.base.protocols.{AddAssign, SubAssign, MulAssign, DivAssign, RemAssign};
+mount core.base.protocols.{BitAndAssign, BitOrAssign, BitXorAssign, ShlAssign, ShrAssign};
+
+// =============================================================================
+// Section 1: Zero and One protocols — signed integers
+// =============================================================================
+
+@test
+fn test_zero_int8() {
+    let z: Int8 = Int8.zero();
+    assert(z.is_zero());
+    assert_eq(z, 0 as Int8);
+}
+
+@test
+fn test_one_int8() {
+    let o: Int8 = Int8.one();
+    assert(o.is_one());
+    assert_eq(o, 1 as Int8);
+}
+
+@test
+fn test_zero_int16() {
+    let z: Int16 = Int16.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_one_int16() {
+    let o: Int16 = Int16.one();
+    assert(o.is_one());
+}
+
+@test
+fn test_zero_int32() {
+    let z: Int32 = Int32.zero();
+    assert(z.is_zero());
+    assert_eq(z, 0 as Int32);
+}
+
+@test
+fn test_one_int32() {
+    let o: Int32 = Int32.one();
+    assert(o.is_one());
+    assert_eq(o, 1 as Int32);
+}
+
+@test
+fn test_zero_int64() {
+    let z: Int64 = Int64.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_one_int64() {
+    let o: Int64 = Int64.one();
+    assert(o.is_one());
+}
+
+@test
+fn test_zero_int128() {
+    let z: Int128 = Int128.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_one_int128() {
+    let o: Int128 = Int128.one();
+    assert(o.is_one());
+}
+
+@test
+fn test_zero_isize() {
+    let z: ISize = ISize.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_one_isize() {
+    let o: ISize = ISize.one();
+    assert(o.is_one());
+}
+
+// =============================================================================
+// Section 2: Zero and One protocols — unsigned integers
+// =============================================================================
+
+@test
+fn test_zero_uint8() {
+    let z: UInt8 = UInt8.zero();
+    assert(z.is_zero());
+    assert_eq(z, 0 as UInt8);
+}
+
+@test
+fn test_one_uint8() {
+    let o: UInt8 = UInt8.one();
+    assert(o.is_one());
+    assert_eq(o, 1 as UInt8);
+}
+
+@test
+fn test_zero_uint16() {
+    let z: UInt16 = UInt16.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_one_uint16() {
+    let o: UInt16 = UInt16.one();
+    assert(o.is_one());
+}
+
+@test
+fn test_zero_uint32() {
+    let z: UInt32 = UInt32.zero();
+    assert(z.is_zero());
+    assert_eq(z, 0 as UInt32);
+}
+
+@test
+fn test_one_uint32() {
+    let o: UInt32 = UInt32.one();
+    assert(o.is_one());
+    assert_eq(o, 1 as UInt32);
+}
+
+@test
+fn test_zero_uint64() {
+    let z: UInt64 = UInt64.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_one_uint64() {
+    let o: UInt64 = UInt64.one();
+    assert(o.is_one());
+}
+
+@test
+fn test_zero_uint128() {
+    let z: UInt128 = UInt128.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_one_uint128() {
+    let o: UInt128 = UInt128.one();
+    assert(o.is_one());
+}
+
+@test
+fn test_zero_usize() {
+    let z: USize = USize.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_one_usize() {
+    let o: USize = USize.one();
+    assert(o.is_one());
+}
+
+// =============================================================================
+// Section 3: Zero and One for Float32
+// =============================================================================
+
+@test
+fn test_zero_float32() {
+    let z: Float32 = Float32.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_one_float32() {
+    let o: Float32 = Float32.one();
+    assert(o.is_one());
+}
+
+// =============================================================================
+// Section 4: Arithmetic protocols for Int32 (representative signed)
+// =============================================================================
+
+@test
+fn test_int32_add() {
+    let a: Int32 = 10 as Int32;
+    let b: Int32 = 20 as Int32;
+    let c: Int32 = a + b;
+    assert_eq(c, 30 as Int32);
+}
+
+@test
+fn test_int32_sub() {
+    let a: Int32 = 50 as Int32;
+    let b: Int32 = 20 as Int32;
+    let c: Int32 = a - b;
+    assert_eq(c, 30 as Int32);
+}
+
+@test
+fn test_int32_mul() {
+    let a: Int32 = 6 as Int32;
+    let b: Int32 = 7 as Int32;
+    let c: Int32 = a * b;
+    assert_eq(c, 42 as Int32);
+}
+
+@test
+fn test_int32_div() {
+    let a: Int32 = 100 as Int32;
+    let b: Int32 = 4 as Int32;
+    let c: Int32 = a / b;
+    assert_eq(c, 25 as Int32);
+}
+
+@test
+fn test_int32_rem() {
+    let a: Int32 = 17 as Int32;
+    let b: Int32 = 5 as Int32;
+    let c: Int32 = a % b;
+    assert_eq(c, 2 as Int32);
+}
+
+// =============================================================================
+// Section 5: Bitwise protocols for Int32 (using decimal values)
+// =============================================================================
+
+@test
+fn test_int32_bitand() {
+    let a: Int32 = 255 as Int32;
+    let b: Int32 = 15 as Int32;
+    let c: Int32 = a & b;
+    assert_eq(c, 15 as Int32);
+}
+
+@test
+fn test_int32_bitor() {
+    let a: Int32 = 240 as Int32;
+    let b: Int32 = 15 as Int32;
+    let c: Int32 = a | b;
+    assert_eq(c, 255 as Int32);
+}
+
+@test
+fn test_int32_bitxor() {
+    let a: Int32 = 255 as Int32;
+    let b: Int32 = 15 as Int32;
+    let c: Int32 = a ^ b;
+    assert_eq(c, 240 as Int32);
+}
+
+// =============================================================================
+// Section 6: Arithmetic protocols for UInt32 (representative unsigned)
+// =============================================================================
+
+@test
+fn test_uint32_add() {
+    let a: UInt32 = 10 as UInt32;
+    let b: UInt32 = 20 as UInt32;
+    let c: UInt32 = a + b;
+    assert_eq(c, 30 as UInt32);
+}
+
+@test
+fn test_uint32_sub() {
+    let a: UInt32 = 50 as UInt32;
+    let b: UInt32 = 20 as UInt32;
+    let c: UInt32 = a - b;
+    assert_eq(c, 30 as UInt32);
+}
+
+@test
+fn test_uint32_mul() {
+    let a: UInt32 = 6 as UInt32;
+    let b: UInt32 = 7 as UInt32;
+    let c: UInt32 = a * b;
+    assert_eq(c, 42 as UInt32);
+}
+
+@test
+fn test_uint32_div() {
+    let a: UInt32 = 100 as UInt32;
+    let b: UInt32 = 4 as UInt32;
+    let c: UInt32 = a / b;
+    assert_eq(c, 25 as UInt32);
+}
+
+@test
+fn test_uint32_rem() {
+    let a: UInt32 = 17 as UInt32;
+    let b: UInt32 = 5 as UInt32;
+    let c: UInt32 = a % b;
+    assert_eq(c, 2 as UInt32);
+}
+
+@test
+fn test_uint32_bitand() {
+    let a: UInt32 = 255 as UInt32;
+    let b: UInt32 = 15 as UInt32;
+    let c: UInt32 = a & b;
+    assert_eq(c, 15 as UInt32);
+}
+
+@test
+fn test_uint32_bitor() {
+    let a: UInt32 = 240 as UInt32;
+    let b: UInt32 = 15 as UInt32;
+    let c: UInt32 = a | b;
+    assert_eq(c, 255 as UInt32);
+}
+
+// =============================================================================
+// Section 7: Arithmetic protocols for Int8 (smallest signed)
+// =============================================================================
+
+@test
+fn test_int8_add() {
+    let a: Int8 = 10 as Int8;
+    let b: Int8 = 20 as Int8;
+    let c: Int8 = a + b;
+    assert_eq(c, 30 as Int8);
+}
+
+@test
+fn test_int8_sub() {
+    let a: Int8 = 50 as Int8;
+    let b: Int8 = 20 as Int8;
+    let c: Int8 = a - b;
+    assert_eq(c, 30 as Int8);
+}
+
+@test
+fn test_int8_mul() {
+    let a: Int8 = 6 as Int8;
+    let b: Int8 = 7 as Int8;
+    let c: Int8 = a * b;
+    assert_eq(c, 42 as Int8);
+}
+
+// =============================================================================
+// Section 8: Arithmetic protocols for UInt8 (smallest unsigned)
+// =============================================================================
+
+@test
+fn test_uint8_add() {
+    let a: UInt8 = 10 as UInt8;
+    let b: UInt8 = 20 as UInt8;
+    let c: UInt8 = a + b;
+    assert_eq(c, 30 as UInt8);
+}
+
+@test
+fn test_uint8_sub() {
+    let a: UInt8 = 50 as UInt8;
+    let b: UInt8 = 20 as UInt8;
+    let c: UInt8 = a - b;
+    assert_eq(c, 30 as UInt8);
+}
+
+@test
+fn test_uint8_mul() {
+    let a: UInt8 = 6 as UInt8;
+    let b: UInt8 = 7 as UInt8;
+    let c: UInt8 = a * b;
+    assert_eq(c, 42 as UInt8);
+}
+
+// =============================================================================
+// Section 9: Arithmetic protocols for Int64
+// =============================================================================
+
+@test
+fn test_int64_add() {
+    let a: Int64 = 100000 as Int64;
+    let b: Int64 = 200000 as Int64;
+    let c: Int64 = a + b;
+    assert_eq(c, 300000 as Int64);
+}
+
+@test
+fn test_int64_mul() {
+    let a: Int64 = 1000 as Int64;
+    let b: Int64 = 1000 as Int64;
+    let c: Int64 = a * b;
+    assert_eq(c, 1000000 as Int64);
+}
+
+@test
+fn test_int64_sub() {
+    let a: Int64 = 500 as Int64;
+    let b: Int64 = 200 as Int64;
+    let c: Int64 = a - b;
+    assert_eq(c, 300 as Int64);
+}
+
+// =============================================================================
+// Section 10: Arithmetic protocols for UInt64
+// =============================================================================
+
+@test
+fn test_uint64_add() {
+    let a: UInt64 = 100000 as UInt64;
+    let b: UInt64 = 200000 as UInt64;
+    let c: UInt64 = a + b;
+    assert_eq(c, 300000 as UInt64);
+}
+
+@test
+fn test_uint64_mul() {
+    let a: UInt64 = 1000 as UInt64;
+    let b: UInt64 = 1000 as UInt64;
+    let c: UInt64 = a * b;
+    assert_eq(c, 1000000 as UInt64);
+}
+
+// =============================================================================
+// Section 11: Float32 arithmetic protocols
+// =============================================================================
+
+@test
+fn test_float32_add() {
+    let a: Float32 = 1.5 as Float32;
+    let b: Float32 = 2.5 as Float32;
+    let c: Float32 = a + b;
+    let expected: Float32 = 4.0 as Float32;
+    assert_eq(c, expected);
+}
+
+@test
+fn test_float32_sub() {
+    let a: Float32 = 5.0 as Float32;
+    let b: Float32 = 2.0 as Float32;
+    let c: Float32 = a - b;
+    let expected: Float32 = 3.0 as Float32;
+    assert_eq(c, expected);
+}
+
+@test
+fn test_float32_mul() {
+    let a: Float32 = 3.0 as Float32;
+    let b: Float32 = 4.0 as Float32;
+    let c: Float32 = a * b;
+    let expected: Float32 = 12.0 as Float32;
+    assert_eq(c, expected);
+}
+
+@test
+fn test_float32_div() {
+    let a: Float32 = 10.0 as Float32;
+    let b: Float32 = 2.0 as Float32;
+    let c: Float32 = a / b;
+    let expected: Float32 = 5.0 as Float32;
+    assert_eq(c, expected);
+}
+
+@test
+fn test_float32_zero_one() {
+    let z: Float32 = Float32.zero();
+    let o: Float32 = Float32.one();
+    let result: Float32 = z + o;
+    assert_eq(result, 1.0 as Float32);
+}
+
+// =============================================================================
+// Section 12: ISize / USize arithmetic
+// =============================================================================
+
+@test
+fn test_isize_add() {
+    let a: ISize = 10 as ISize;
+    let b: ISize = 20 as ISize;
+    let c: ISize = a + b;
+    assert_eq(c, 30 as ISize);
+}
+
+@test
+fn test_usize_add() {
+    let a: USize = 10 as USize;
+    let b: USize = 20 as USize;
+    let c: USize = a + b;
+    assert_eq(c, 30 as USize);
+}
+
+@test
+fn test_usize_mul() {
+    let a: USize = 6 as USize;
+    let b: USize = 7 as USize;
+    let c: USize = a * b;
+    assert_eq(c, 42 as USize);
+}
+
+// =============================================================================
+// Section 13: Int128 / UInt128 arithmetic
+// =============================================================================
+
+@test
+fn test_int128_add() {
+    let a: Int128 = 100 as Int128;
+    let b: Int128 = 200 as Int128;
+    let c: Int128 = a + b;
+    assert_eq(c, 300 as Int128);
+}
+
+@test
+fn test_uint128_add() {
+    let a: UInt128 = 100 as UInt128;
+    let b: UInt128 = 200 as UInt128;
+    let c: UInt128 = a + b;
+    assert_eq(c, 300 as UInt128);
+}
+
+@test
+fn test_uint128_mul() {
+    let a: UInt128 = 1000 as UInt128;
+    let b: UInt128 = 1000 as UInt128;
+    let c: UInt128 = a * b;
+    assert_eq(c, 1000000 as UInt128);
+}
+
+// =============================================================================
+// Section 14: Int16 / UInt16 arithmetic
+// =============================================================================
+
+@test
+fn test_int16_add() {
+    let a: Int16 = 100 as Int16;
+    let b: Int16 = 200 as Int16;
+    let c: Int16 = a + b;
+    assert_eq(c, 300 as Int16);
+}
+
+@test
+fn test_int16_mul() {
+    let a: Int16 = 10 as Int16;
+    let b: Int16 = 20 as Int16;
+    let c: Int16 = a * b;
+    assert_eq(c, 200 as Int16);
+}
+
+@test
+fn test_uint16_add() {
+    let a: UInt16 = 100 as UInt16;
+    let b: UInt16 = 200 as UInt16;
+    let c: UInt16 = a + b;
+    assert_eq(c, 300 as UInt16);
+}
+
+// =============================================================================
+// Section 15: Compound assignment protocols for Int
+// =============================================================================
+
+@test
+fn test_int_add_assign() {
+    let mut x = 10;
+    x += 5;
+    assert_eq(x, 15);
+}
+
+@test
+fn test_int_sub_assign() {
+    let mut x = 10;
+    x -= 3;
+    assert_eq(x, 7);
+}
+
+@test
+fn test_int_mul_assign() {
+    let mut x = 6;
+    x *= 7;
+    assert_eq(x, 42);
+}
+
+@test
+fn test_int_div_assign() {
+    let mut x = 100;
+    x /= 4;
+    assert_eq(x, 25);
+}
+
+@test
+fn test_int_rem_assign() {
+    let mut x = 17;
+    x %= 5;
+    assert_eq(x, 2);
+}
+
+@test
+fn test_int_bitand_assign() {
+    let mut x = 255;
+    x &= 15;
+    assert_eq(x, 15);
+}
+
+@test
+fn test_int_bitor_assign() {
+    let mut x = 240;
+    x |= 15;
+    assert_eq(x, 255);
+}
+
+@test
+fn test_int_bitxor_assign() {
+    let mut x = 255;
+    x ^= 15;
+    assert_eq(x, 240);
+}
+
+@test
+fn test_int_shl_assign() {
+    let mut x = 1;
+    x <<= 3;
+    assert_eq(x, 8);
+}
+
+@test
+fn test_int_shr_assign() {
+    let mut x = 64;
+    x >>= 2;
+    assert_eq(x, 16);
+}
+
+// =============================================================================
+// Section 16: Compound assignment for Float
+// =============================================================================
+
+@test
+fn test_float_add_assign() {
+    let mut x = 1.5;
+    x += 2.5;
+    assert_eq(x, 4.0);
+}
+
+@test
+fn test_float_sub_assign() {
+    let mut x = 10.0;
+    x -= 3.0;
+    assert_eq(x, 7.0);
+}
+
+@test
+fn test_float_mul_assign() {
+    let mut x = 3.0;
+    x *= 4.0;
+    assert_eq(x, 12.0);
+}
+
+@test
+fn test_float_div_assign() {
+    let mut x = 10.0;
+    x /= 2.0;
+    assert_eq(x, 5.0);
+}
+
+@test
+fn test_float_rem_assign() {
+    let mut x = 10.0;
+    x %= 3.0;
+    assert_eq(x, 1.0);
+}
+
+// =============================================================================
+// Section 17: Iterator sum/product with sized types
+// =============================================================================
+
+@test
+fn test_sum_int32_list() {
+    let items: List<Int32> = [1 as Int32, 2 as Int32, 3 as Int32, 4 as Int32];
+    let total: Int32 = items.iter().cloned().sum();
+    assert_eq(total, 10 as Int32);
+}
+
+@test
+fn test_product_int32_list() {
+    let items: List<Int32> = [1 as Int32, 2 as Int32, 3 as Int32, 4 as Int32];
+    let total: Int32 = items.iter().cloned().product();
+    assert_eq(total, 24 as Int32);
+}
+
+@test
+fn test_sum_uint32_list() {
+    let items: List<UInt32> = [10 as UInt32, 20 as UInt32, 30 as UInt32];
+    let total: UInt32 = items.iter().cloned().sum();
+    assert_eq(total, 60 as UInt32);
+}
+
+@test
+fn test_product_uint32_list() {
+    let items: List<UInt32> = [2 as UInt32, 3 as UInt32, 5 as UInt32];
+    let total: UInt32 = items.iter().cloned().product();
+    assert_eq(total, 30 as UInt32);
+}
+
+@test
+fn test_sum_int64_list() {
+    let items: List<Int64> = [100 as Int64, 200 as Int64, 300 as Int64];
+    let total: Int64 = items.iter().cloned().sum();
+    assert_eq(total, 600 as Int64);
+}
+
+@test
+fn test_sum_float32_list() {
+    let items: List<Float32> = [1.0 as Float32, 2.0 as Float32, 3.0 as Float32];
+    let total: Float32 = items.iter().cloned().sum();
+    assert_eq(total, 6.0 as Float32);
+}
+
+@test
+fn test_product_float32_list() {
+    let items: List<Float32> = [2.0 as Float32, 3.0 as Float32, 4.0 as Float32];
+    let total: Float32 = items.iter().cloned().product();
+    assert_eq(total, 24.0 as Float32);
+}
+
+@test
+fn test_sum_empty_int32() {
+    let items: List<Int32> = [];
+    let total: Int32 = items.iter().cloned().sum();
+    assert_eq(total, 0 as Int32);
+}
+
+@test
+fn test_product_empty_int32() {
+    let items: List<Int32> = [];
+    let total: Int32 = items.iter().cloned().product();
+    assert_eq(total, 1 as Int32);
+}
+
+// =============================================================================
+// Section 18: Zero/One identity properties
+// =============================================================================
+
+@test
+fn test_zero_additive_identity_int32() {
+    let a: Int32 = 42 as Int32;
+    let z: Int32 = Int32.zero();
+    assert_eq(a + z, a);
+    assert_eq(z + a, a);
+}
+
+@test
+fn test_one_multiplicative_identity_int32() {
+    let a: Int32 = 42 as Int32;
+    let o: Int32 = Int32.one();
+    assert_eq(a * o, a);
+    assert_eq(o * a, a);
+}
+
+@test
+fn test_zero_additive_identity_uint64() {
+    let a: UInt64 = 12345 as UInt64;
+    let z: UInt64 = UInt64.zero();
+    assert_eq(a + z, a);
+}
+
+@test
+fn test_one_multiplicative_identity_float32() {
+    let a: Float32 = 3.14 as Float32;
+    let o: Float32 = Float32.one();
+    let result: Float32 = a * o;
+    assert_eq(result, a);
+}
+
+// =============================================================================
+// Section 19: Non-zero/non-one checks
+// =============================================================================
+
+@test
+fn test_nonzero_is_not_zero() {
+    let a: Int32 = 42 as Int32;
+    assert(!a.is_zero());
+}
+
+@test
+fn test_nonone_is_not_one() {
+    let a: UInt32 = 42 as UInt32;
+    assert(!a.is_one());
+}
+
+// =============================================================================
+// Section 20: Mixed operations using protocol constraints
+// =============================================================================
+
+@test
+fn test_sum_by_manual_fold_int32() {
+    let items: List<Int32> = [1 as Int32, 2 as Int32, 3 as Int32];
+    let mut total: Int32 = Int32.zero();
+    for item in items {
+        total = total + item;
+    }
+    assert_eq(total, 6 as Int32);
+}
+
+@test
+fn test_product_by_manual_fold_uint32() {
+    let items: List<UInt32> = [2 as UInt32, 3 as UInt32, 5 as UInt32];
+    let mut total: UInt32 = UInt32.one();
+    for item in items {
+        total = total * item;
+    }
+    assert_eq(total, 30 as UInt32);
+}
+
+// =============================================================================
+// Section 21: Compound assignment for sized integers
+// =============================================================================
+
+@test
+fn test_int8_add_assign() {
+    let mut x: Int8 = 10;
+    x += 5;
+    assert_eq(x, 15 as Int8);
+}
+
+@test
+fn test_int8_sub_assign() {
+    let mut x: Int8 = 20;
+    x -= 7;
+    assert_eq(x, 13 as Int8);
+}
+
+@test
+fn test_int16_mul_assign() {
+    let mut x: Int16 = 6;
+    x *= 7;
+    assert_eq(x, 42 as Int16);
+}
+
+@test
+fn test_int32_div_assign() {
+    let mut x: Int32 = 100;
+    x /= 4;
+    assert_eq(x, 25 as Int32);
+}
+
+@test
+fn test_int64_rem_assign() {
+    let mut x: Int64 = 17;
+    x %= 5;
+    assert_eq(x, 2 as Int64);
+}
+
+@test
+fn test_uint8_add_assign() {
+    let mut x: UInt8 = 200;
+    x += 55;
+    assert_eq(x, 255 as UInt8);
+}
+
+@test
+fn test_uint16_sub_assign() {
+    let mut x: UInt16 = 1000;
+    x -= 500;
+    assert_eq(x, 500 as UInt16);
+}
+
+@test
+fn test_uint32_mul_assign() {
+    let mut x: UInt32 = 100;
+    x *= 200;
+    assert_eq(x, 20000 as UInt32);
+}
+
+@test
+fn test_uint64_div_assign() {
+    let mut x: UInt64 = 1000000;
+    x /= 1000;
+    assert_eq(x, 1000 as UInt64);
+}
+
+// =============================================================================
+// Section 22: Bitwise compound assignment for sized integers
+// =============================================================================
+
+@test
+fn test_int32_bitand_assign() {
+    let mut x: Int32 = 0xFF;
+    x &= 0x0F;
+    assert_eq(x, 0x0F as Int32);
+}
+
+@test
+fn test_int32_bitor_assign() {
+    let mut x: Int32 = 0xF0;
+    x |= 0x0F;
+    assert_eq(x, 0xFF as Int32);
+}
+
+@test
+fn test_int32_bitxor_assign() {
+    let mut x: Int32 = 0xFF;
+    x ^= 0x0F;
+    assert_eq(x, 0xF0 as Int32);
+}
+
+@test
+fn test_uint64_shl_assign() {
+    let mut x: UInt64 = 1;
+    x <<= 8;
+    assert_eq(x, 256 as UInt64);
+}
+
+@test
+fn test_uint64_shr_assign() {
+    let mut x: UInt64 = 256;
+    x >>= 4;
+    assert_eq(x, 16 as UInt64);
+}
+
+// =============================================================================
+// Section 23: Unary negation for sized signed integers
+// =============================================================================
+
+@test
+fn test_int8_negation() {
+    let x: Int8 = 42;
+    let neg: Int8 = -x;
+    let double_neg: Int8 = -neg;
+    assert_eq(double_neg, x);
+}
+
+@test
+fn test_int16_negation() {
+    let x: Int16 = 1000;
+    let neg: Int16 = -x;
+    let double_neg: Int16 = -neg;
+    assert_eq(double_neg, x);
+}
+
+@test
+fn test_int32_negation() {
+    let x: Int32 = 100000;
+    let neg: Int32 = -x;
+    let double_neg: Int32 = -neg;
+    assert_eq(double_neg, x);
+}
+
+@test
+fn test_int64_negation() {
+    let x: Int64 = 1000000;
+    let neg: Int64 = -x;
+    let double_neg: Int64 = -neg;
+    assert_eq(double_neg, x);
+}
+
+@test
+fn test_negation_zero_int32() {
+    let x: Int32 = 0;
+    let neg: Int32 = -x;
+    assert_eq(neg, 0 as Int32);
+}
+
+@test
+fn test_negation_double_int16() {
+    let x: Int16 = 42;
+    let neg: Int16 = -x;
+    let double_neg: Int16 = -neg;
+    assert_eq(double_neg, x);
+}
+
+// =============================================================================
+// Section 24: Checked arithmetic edge cases
+// =============================================================================
+
+@test
+fn test_int_max_checked_add_overflows() {
+    assert(Int.MAX.checked_add(1).is_none());
+}
+
+@test
+fn test_int_min_checked_sub_overflows() {
+    assert(Int.MIN.checked_sub(1).is_none());
+}
+
+@test
+fn test_int_checked_add_zero_identity() {
+    assert_eq(Int.MAX.checked_add(0), Some(Int.MAX));
+    assert_eq(Int.MIN.checked_add(0), Some(Int.MIN));
+}
+
+@test
+fn test_int_checked_mul_overflow() {
+    assert(Int.MAX.checked_mul(2).is_none());
+}
+
+@test
+fn test_int_checked_div_zero() {
+    assert((42).checked_div(0).is_none());
+    assert((0).checked_div(0).is_none());
+}
+
+@test
+fn test_int_checked_div_normal() {
+    assert_eq((42).checked_div(7), Some(6));
+    assert_eq((0).checked_div(42), Some(0));
+}
+
+// =============================================================================
+// Section 25: Compound assignment for remaining sized types
+// =============================================================================
+
+@test
+fn test_int128_add_assign() {
+    let mut x: Int128 = 100;
+    x += 50;
+    assert_eq(x, 150 as Int128);
+}
+
+@test
+fn test_int128_sub_assign() {
+    let mut x: Int128 = 200;
+    x -= 75;
+    assert_eq(x, 125 as Int128);
+}
+
+@test
+fn test_isize_mul_assign() {
+    let mut x: ISize = 12;
+    x *= 3;
+    assert_eq(x, 36 as ISize);
+}
+
+@test
+fn test_isize_div_assign() {
+    let mut x: ISize = 100;
+    x /= 5;
+    assert_eq(x, 20 as ISize);
+}
+
+@test
+fn test_uint128_add_assign() {
+    let mut x: UInt128 = 1000;
+    x += 234;
+    assert_eq(x, 1234 as UInt128);
+}
+
+@test
+fn test_usize_rem_assign() {
+    let mut x: USize = 17;
+    x %= 5;
+    assert_eq(x, 2 as USize);
+}
+
+@test
+fn test_float64_add_assign() {
+    let mut x: Float64 = 1.5;
+    x += 2.5;
+    assert_eq(x, 4.0 as Float64);
+}
+
+@test
+fn test_float64_sub_assign() {
+    let mut x: Float64 = 10.0;
+    x -= 3.5;
+    assert_eq(x, 6.5 as Float64);
+}
+
+@test
+fn test_float64_mul_assign() {
+    let mut x: Float64 = 4.0;
+    x *= 2.5;
+    assert_eq(x, 10.0 as Float64);
+}
+
+@test
+fn test_float64_div_assign() {
+    let mut x: Float64 = 15.0;
+    x /= 3.0;
+    assert_eq(x, 5.0 as Float64);
+}
+
+// =============================================================================
+// Section 26: Bitwise compound assignment for remaining sized integer types
+// =============================================================================
+
+@test
+fn test_int8_bitand_assign() {
+    let mut x: Int8 = 0x7F;
+    x &= 0x0F;
+    assert_eq(x, 0x0F as Int8);
+}
+
+@test
+fn test_int8_bitor_assign() {
+    let mut x: Int8 = 0x30;
+    x |= 0x0F;
+    assert_eq(x, 0x3F as Int8);
+}
+
+@test
+fn test_int8_bitxor_assign() {
+    let mut x: Int8 = 0x3F;
+    x ^= 0x0F;
+    assert_eq(x, 0x30 as Int8);
+}
+
+@test
+fn test_int16_shl_assign() {
+    let mut x: Int16 = 1;
+    x <<= 8;
+    assert_eq(x, 256 as Int16);
+}
+
+@test
+fn test_int16_shr_assign() {
+    let mut x: Int16 = 256;
+    x >>= 4;
+    assert_eq(x, 16 as Int16);
+}
+
+@test
+fn test_int64_bitand_assign() {
+    let mut x: Int64 = 0xFF;
+    x &= 0x0F;
+    assert_eq(x, 0x0F as Int64);
+}
+
+@test
+fn test_int128_bitor_assign() {
+    let mut x: Int128 = 0xF0;
+    x |= 0x0F;
+    assert_eq(x, 0xFF as Int128);
+}
+
+@test
+fn test_isize_bitxor_assign() {
+    let mut x: ISize = 0xFF;
+    x ^= 0x0F;
+    assert_eq(x, 0xF0 as ISize);
+}
+
+@test
+fn test_uint8_bitand_assign() {
+    let mut x: UInt8 = 0xFF;
+    x &= 0x0F;
+    assert_eq(x, 0x0F as UInt8);
+}
+
+@test
+fn test_uint16_bitor_assign() {
+    let mut x: UInt16 = 0xF0;
+    x |= 0x0F;
+    assert_eq(x, 0xFF as UInt16);
+}
+
+@test
+fn test_uint32_shl_assign() {
+    let mut x: UInt32 = 1;
+    x <<= 4;
+    assert_eq(x, 16 as UInt32);
+}
+
+@test
+fn test_uint128_bitxor_assign() {
+    let mut x: UInt128 = 0xFF;
+    x ^= 0xF0;
+    assert_eq(x, 0x0F as UInt128);
+}
+
+@test
+fn test_usize_shr_assign() {
+    let mut x: USize = 1024;
+    x >>= 5;
+    assert_eq(x, 32 as USize);
+}
+
+// =============================================================================
+// Section 27: Float64 negation
+// =============================================================================
+
+@test
+fn test_float64_negation() {
+    let x: Float64 = 3.14;
+    let neg: Float64 = -x;
+    let double_neg: Float64 = -neg;
+    assert_eq(double_neg, x);
+}

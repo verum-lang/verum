@@ -1,0 +1,230 @@
+// @test: run
+// @expected-stdout: Logger configured\nDatabase configured\nMetrics configured\nAll services ready
+// @tier: 0
+// @level: L2
+// @tags: contexts, providers
+// @description: Context providers for dependency injection
+
+/// Context providers create and configure context implementations
+
+// Context declarations
+context Logger {
+    fn log(&self, level: LogLevel, message: Text);
+    fn debug(&self, message: Text);
+    fn info(&self, message: Text);
+    fn error(&self, message: Text);
+}
+
+context async Database {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+context Metrics {
+    fn increment(name: Text, value: Int);
+    fn gauge(name: Text, value: Float);
+}
+
+type LogLevel is Debug | Info | Warn | Error;
+type Value is Int(Int) | Float(Float) | Text(Text) | Null;
+type Row is Map<Text, Value>;
+type DbError is ConnectionError | QueryError(Text);
+type ConnectionPool is ();
+
+// Connection type with connect method
+type Connection is ();
+
+implement Connection {
+    async fn connect(connection_string: &Text) -> Result<Connection, ProviderError> {
+        // Simulate connection
+        Ok(Connection)
+    }
+}
+
+// Provider protocol
+type Provider<T> is protocol {
+    fn provide(&self) -> T;
+    fn shutdown(&self);
+};
+
+// Async provider for resources needing initialization
+type AsyncProvider<T> is protocol {
+    async fn provide(&self) -> Result<T, ProviderError>;
+    async fn shutdown(&self);
+};
+
+type ProviderError is InitializationFailed(Text);
+
+// Concrete implementations
+type ConsoleLogger is ();
+
+implement Logger for ConsoleLogger {
+    fn log(&self, level: LogLevel, message: Text) {
+        let prefix = match level {
+            LogLevel.Debug => "[DEBUG]",
+            LogLevel.Info => "[INFO]",
+            LogLevel.Warn => "[WARN]",
+            LogLevel.Error => "[ERROR]",
+        };
+        println(f"{prefix} {message}");
+    }
+
+    fn debug(&self, message: Text) { self.log(LogLevel.Debug, message); }
+    fn info(&self, message: Text) { self.log(LogLevel.Info, message); }
+    fn error(&self, message: Text) { self.log(LogLevel.Error, message); }
+}
+
+// Provider for Logger
+type LoggerProvider is {
+    config: LogConfig,
+};
+
+type LogConfig is {
+    level: LogLevel,
+    format: Text,
+};
+
+implement Provider<ConsoleLogger> for LoggerProvider {
+    fn provide(&self) -> ConsoleLogger {
+        println("Logger configured");
+        ConsoleLogger
+    }
+
+    fn shutdown(&self) {
+        // Flush logs
+    }
+}
+
+// Database provider
+type PostgresProvider is {
+    connection_string: Text,
+};
+
+type PostgresDb is {
+    conn: Connection,
+};
+
+implement Database for PostgresDb {
+    async fn query(sql: Text) -> Result<List<Row>, DbError> {
+        // Execute query
+        Ok([])
+    }
+
+    async fn execute(sql: Text) -> Result<Int, DbError> {
+        // Execute statement
+        Ok(0)
+    }
+}
+
+implement AsyncProvider<PostgresDb> for PostgresProvider {
+    async fn provide(&self) -> Result<PostgresDb, ProviderError> {
+        println("Database configured");
+        // Connect to database
+        let conn = Connection.connect(&self.connection_string).await?;
+
+        Ok(PostgresDb { conn })
+    }
+
+    async fn shutdown(&self) {
+        // Close connection pool
+    }
+}
+
+// Metrics provider
+type PrometheusMetrics is {
+    endpoint: Text,
+};
+
+implement Metrics for PrometheusMetrics {
+    fn increment(name: Text, value: Int) {
+        // Record counter
+    }
+
+    fn gauge(name: Text, value: Float) {
+        // Record gauge
+    }
+}
+
+type MetricsProvider is {
+    endpoint: Text,
+};
+
+implement Provider<PrometheusMetrics> for MetricsProvider {
+    fn provide(&self) -> PrometheusMetrics {
+        println("Metrics configured");
+        PrometheusMetrics { endpoint: self.endpoint.clone() }
+    }
+
+    fn shutdown(&self) {
+        // Flush metrics
+    }
+}
+
+// Service container
+type ServiceContainer is {
+    logger_provider: LoggerProvider,
+    db_provider: PostgresProvider,
+    metrics_provider: MetricsProvider,
+};
+
+implement ServiceContainer {
+    async fn initialize(&self) -> Result<(), ProviderError> {
+        // Initialize all providers
+        let logger = self.logger_provider.provide();
+        let db = self.db_provider.provide().await?;
+        let metrics = self.metrics_provider.provide();
+
+        // Make available as contexts
+        provide Logger = logger;
+        provide Database = db;
+        provide Metrics = metrics;
+
+        println("All services ready");
+        Ok(())
+    }
+
+    async fn shutdown(&self) {
+        self.logger_provider.shutdown();
+        self.db_provider.shutdown().await;
+        self.metrics_provider.shutdown();
+    }
+}
+
+// Function using injected contexts
+async fn do_work() using [Logger, Database, Metrics] {
+    Logger.info("Starting work");
+    Metrics.increment("work_started", 1);
+
+    let result = Database.query("SELECT * FROM items").await;
+
+    match result {
+        Ok(rows) => {
+            Logger.info(f"Found {rows.len()} rows");
+            Metrics.gauge("rows_found", rows.len() as Float);
+        }
+        Err(e) => {
+            Logger.error(f"Query failed: {e}");
+            Metrics.increment("query_errors", 1);
+        }
+    }
+}
+
+async fn main() {
+    let container = ServiceContainer {
+        logger_provider: LoggerProvider {
+            config: LogConfig { level: LogLevel.Info, format: "json" }
+        },
+        db_provider: PostgresProvider {
+            connection_string: "postgres://localhost/test"
+        },
+        metrics_provider: MetricsProvider {
+            endpoint: "http://localhost:9090"
+        },
+    };
+
+    container.initialize().await.unwrap();
+
+    // do_work().await;
+
+    // container.shutdown().await;
+}

@@ -1,0 +1,67 @@
+// @test: parse
+// @level: L0
+// @tags: parser, attributes
+// @description: Test basic attribute parsing
+
+// Simple attribute
+@inline
+fn inlined_function() {}
+
+// Attribute with arguments
+@inline(always)
+fn always_inline() {}
+
+@inline(never)
+fn never_inline() {}
+
+// Derive attribute
+@derive(Clone, Debug, Eq)
+type Point is {
+    x: Int,
+    y: Int
+};
+
+// Multiple attributes
+@inline
+@cold
+fn cold_inlined() {}
+
+// Verification attributes
+@requires(x > 0)
+@ensures(result >= 0)
+fn sqrt(x: Float) -> Float {
+    x.sqrt()
+}
+
+// Stability attributes
+@deprecated(since = "2.0", note = "Use new_function instead")
+fn old_function() {}
+
+@unstable(feature = "new_api", issue = "123")
+fn experimental() {}
+
+// Platform attributes
+@cfg(target_os = "linux")
+fn linux_only() {}
+
+@cfg(debug)
+fn debug_only() {}
+
+// Optimization attributes
+@optimize(speed)
+fn fast_function() {}
+
+@optimize(size)
+fn small_function() {}
+
+// Memory attributes
+@align(16)
+type AlignedData is {
+    data: [u8; 64]
+};
+
+@repr(C)
+type CCompatible is {
+    a: i32,
+    b: i32
+};

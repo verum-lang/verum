@@ -1,0 +1,110 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: spawn, sleep, time, channels, concurrency
+// @description: Test timed spawn operations - spawned threads with sleep and timing
+
+fn sleep_ms(millis: Int) -> Int { 0 }
+fn time_now_ms() -> Int { 0 }
+
+fn test_spawn_with_sleep() -> Int {
+    // Spawn a thread that sleeps then sends a result
+    let ch = Channel.new(1);
+    let t = spawn {
+        sleep_ms(30);
+        ch.send(42);
+        0
+    };
+    let result = match ch.recv() { Some(v) => v, None => -1 };
+    t.await;
+    if result != 42 {
+        print(f"FAIL spawn_sleep: expected 42, got {result}");
+        return 1;
+    }
+    print("  spawn_sleep: OK");
+    0
+}
+
+fn test_concurrent_timed_work() -> Int {
+    // Two spawned threads doing timed work concurrently
+    let ch = Channel.new(4);
+    let t1_start = time_now_ms();
+
+    let t1 = spawn {
+        sleep_ms(50);
+        ch.send(1);
+        0
+    };
+    let t2 = spawn {
+        sleep_ms(50);
+        ch.send(2);
+        0
+    };
+
+    t1.await;
+    t2.await;
+    let elapsed = time_now_ms() - t1_start;
+
+    let v1 = match ch.recv() { Some(v) => v, None => 0 };
+    let v2 = match ch.recv() { Some(v) => v, None => 0 };
+
+    // Both threads should finish: sum should be 3
+    if v1 + v2 != 3 {
+        print(f"FAIL concurrent_timed: expected sum 3, got {v1 + v2}");
+        return 1;
+    }
+    // Both ran concurrently, so total elapsed should be ~50ms, not ~100ms
+    if elapsed > 150 {
+        print(f"FAIL concurrent_timed: elapsed {elapsed}ms > 150ms (not parallel?)");
+        return 1;
+    }
+    print(f"  concurrent_timed: OK (elapsed {elapsed}ms)");
+    0
+}
+
+fn test_timeout_pattern() -> Int {
+    // Simulate timeout: race between work and timer
+    let work_ch = Channel.new(1);
+    let timer_ch = Channel.new(1);
+
+    let worker = spawn {
+        // Simulate fast work (10ms)
+        sleep_ms(10);
+        work_ch.send(100);
+        0
+    };
+    let timer = spawn {
+        // Timeout after 200ms
+        sleep_ms(200);
+        timer_ch.send(-1);
+        0
+    };
+
+    // Try to receive from work channel first (should arrive before timeout)
+    let result = match work_ch.recv() { Some(v) => v, None => -999 };
+    worker.await;
+
+    if result != 100 {
+        print(f"FAIL timeout_pattern: expected 100, got {result}");
+        return 1;
+    }
+    // Clean up timer (will complete after ~200ms but we don't need to wait)
+    timer.await;
+    print("  timeout_pattern: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Timed Spawn Tests:");
+    let mut failures = 0;
+    failures = failures + test_spawn_with_sleep();
+    failures = failures + test_concurrent_timed_work();
+    failures = failures + test_timeout_pattern();
+
+    if failures == 0 {
+        print("All timed spawn tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

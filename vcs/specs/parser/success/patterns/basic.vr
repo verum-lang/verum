@@ -1,0 +1,54 @@
+// @test: parse
+// @level: L0
+// @tags: parser, patterns, basic
+// @description: Test basic pattern parsing
+
+fn test_basic_patterns() {
+    // Wildcard
+    let _ = value;
+    match x {
+        _ => default()
+    }
+
+    // Identifier binding
+    let x = value;
+    let name = text;
+    let mut mutable = 0;
+
+    // Reference patterns
+    let &ref_val = &value;
+    let &mut mut_ref = &mut value;
+    let ref x = value;
+    let ref mut x = value;
+
+    // Literal patterns
+    match n {
+        0 => zero(),
+        1 => one(),
+        42 => answer(),
+        -1 => negative(),
+        _ => other()
+    }
+
+    match s {
+        "hello" => greet(),
+        "bye" => farewell(),
+        _ => fallback()
+    }
+
+    match c {
+        'a' => a(),
+        'b' => b(),
+        _ => other()
+    }
+
+    match b {
+        true => yes(),
+        false => no()
+    }
+
+    // Rest pattern
+    let [first, ..] = array;
+    let [first, .., last] = array;
+    let [.., last] = array;
+}

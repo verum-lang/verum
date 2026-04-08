@@ -1,0 +1,48 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, stress
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn l1() -> Int {
+        fn l2() -> Int {
+            fn l3() -> Int {
+                fn l4() -> Int {
+                    fn l5() -> Int {
+                        fn l6() -> Int {
+                            fn l7() -> Int {
+                                fn l8() -> Int {
+                                    fn l9() -> Int {
+                                        fn l10() -> Int {
+                                            fn l11() -> Int {
+                                                fn l12() -> Int {
+                                                    return 12;
+                                                }
+                                                return l12() + 1;
+                                            }
+                                            return l11() + 1;
+                                        }
+                                        return l10() + 1;
+                                    }
+                                    return l9() + 1;
+                                }
+                                return l8() + 1;
+                            }
+                            return l7() + 1;
+                        }
+                        return l6() + 1;
+                    }
+                    return l5() + 1;
+                }
+                return l4() + 1;
+            }
+            return l3() + 1;
+        }
+        return l2() + 1;
+    }
+
+    let result = l1();
+    assert_eq(result, 23);  // 12 + 11 increments = 23
+}

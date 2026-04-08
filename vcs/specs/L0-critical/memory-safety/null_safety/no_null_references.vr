@@ -1,0 +1,71 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, type-system, critical
+// @description: Verum has no null references - use Maybe<T> instead
+
+/// Verum fundamentally has no null value in the language.
+/// This is a critical safety guarantee that prevents:
+/// - Null pointer dereferences
+/// - The billion-dollar mistake
+/// - Undefined behavior from null access
+///
+/// Instead, Verum uses Maybe<T> for optional values:
+/// - Maybe<T> = Some(T) | None
+/// - Forces explicit handling of absence
+/// - Compile-time checked, runtime safe
+
+fn demonstrate_maybe_usage() {
+    // Explicit absence with None
+    let a: Maybe<Int> = Maybe.None;
+
+    // Explicit presence with Some
+    let b: Maybe<Int> = Maybe.Some(42);
+
+    // Pattern matching for safe handling
+    match a {
+        Some(value) => print(f"Got: {value}"),
+        None => print("No value"),
+    }
+}
+
+fn demonstrate_reference_safety() {
+    // References in Verum are always valid - no null references
+    let x: Int = 42;
+    let r: &Int = &x;  // Always valid, cannot be null
+
+    // For optional references, use Maybe
+    let opt_ref: Maybe<&Int> = Maybe.Some(&x);
+
+    match opt_ref {
+        Some(ref_val) => print(f"Reference to: {*ref_val}"),
+        None => print("No reference"),
+    }
+}
+
+fn demonstrate_no_null_comparison() {
+    // In Verum, you cannot compare to null because null doesn't exist
+    // Instead, use pattern matching or is_some()/is_none()
+    let maybe_val: Maybe<Int> = Maybe.Some(42);
+
+    // Check for presence/absence
+    if maybe_val.is_some() {
+        print("Has value");
+    }
+
+    if maybe_val.is_none() {
+        print("No value");
+    }
+
+    // Pattern test with `is` expression
+    if maybe_val is Some(_) {
+        print("Matched Some");
+    }
+}
+
+fn main() -> Int {
+    demonstrate_maybe_usage();
+    demonstrate_reference_safety();
+    demonstrate_no_null_comparison();
+    0
+}

@@ -1,0 +1,158 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, real-opcode, advanced
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests advanced REAL tensor operations through VBC interpreter.
+// Exercises complex multi-step tensor pipelines, numerical algorithms,
+// and validates algebraic identities using real tensor opcodes.
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let diff = tensor_binop(t, e, 1);
+    let val = tensor_get_scalar(diff, idx);
+    if val == 0 { 0 } else { 1 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // --- Test 1: Power iteration approximation ---
+    // Compute x = A*x repeatedly where A is a scaling operator
+    // Start: x = [1, 1, 1, 1]
+    // A = [2, 2, 2, 2] (element-wise multiply = scale by 2)
+    // After 3 iterations: x = [8, 8, 8, 8]
+    let x = tensor_fill(4, 1, 1);
+    let scale = tensor_fill(4, 2, 1);
+    let x = tensor_binop(x, scale, 2);
+    let x = tensor_binop(x, scale, 2);
+    let x = tensor_binop(x, scale, 2);
+    errors = errors + check_val(x, 0, 8);
+    errors = errors + check_val(x, 3, 8);
+
+    // --- Test 2: Running average ---
+    // avg_n = (n-1)/n * avg_{n-1} + 1/n * x_n
+    // Simplified: just compute sum and divide
+    // data = [10, 20, 30, 40, 50], sum = 150, mean via reduce
+    let data = tensor_new(5, 1);
+    let data = tensor_set_scalar(data, 0, 10);
+    let data = tensor_set_scalar(data, 1, 20);
+    let data = tensor_set_scalar(data, 2, 30);
+    let data = tensor_set_scalar(data, 3, 40);
+    let data = tensor_set_scalar(data, 4, 50);
+    let total = tensor_reduce(data, 0, 0);
+    errors = errors + check_val(total, 0, 150);
+
+    // --- Test 3: Polynomial evaluation ---
+    // p(x) = 2x^2 + 3x + 5 at x=[0, 1, 2, 3]
+    // p(0) = 5, p(1) = 10, p(2) = 19, p(3) = 32
+    let xs = tensor_new(4, 1);
+    let xs = tensor_set_scalar(xs, 0, 0);
+    let xs = tensor_set_scalar(xs, 1, 1);
+    let xs = tensor_set_scalar(xs, 2, 2);
+    let xs = tensor_set_scalar(xs, 3, 3);
+
+    let x2 = tensor_binop(xs, xs, 2);
+    let two = tensor_fill(4, 2, 1);
+    let three = tensor_fill(4, 3, 1);
+    let five = tensor_fill(4, 5, 1);
+
+    let term1 = tensor_binop(x2, two, 2);
+    let term2 = tensor_binop(xs, three, 2);
+    let poly = tensor_binop(term1, term2, 0);
+    let poly = tensor_binop(poly, five, 0);
+
+    errors = errors + check_val(poly, 0, 5);
+    errors = errors + check_val(poly, 1, 10);
+    errors = errors + check_val(poly, 2, 19);
+    errors = errors + check_val(poly, 3, 32);
+
+    // --- Test 4: Fibonacci-like sequence via tensor ops ---
+    // [1, 1] → shift and add → [1, 2] → [2, 3] → ...
+    // Just verify we can build up values
+    let fib = tensor_new(2, 1);
+    let fib = tensor_set_scalar(fib, 0, 1);
+    let fib = tensor_set_scalar(fib, 1, 1);
+    let f0 = tensor_get_scalar(fib, 0);
+    let f1 = tensor_get_scalar(fib, 1);
+    // f0 and f1 are f64, construct next values via tensor ops
+    let fib_sum = tensor_reduce(fib, 0, 0);
+    errors = errors + check_val(fib_sum, 0, 2);
+
+    // --- Test 5: Distance computation ---
+    // ||a - b||^2 for a=[1,2,3], b=[4,5,6]
+    // diff = [-3,-3,-3], sq = [9,9,9], sum = 27
+    let a = tensor_new(3, 1);
+    let a = tensor_set_scalar(a, 0, 1);
+    let a = tensor_set_scalar(a, 1, 2);
+    let a = tensor_set_scalar(a, 2, 3);
+
+    let b = tensor_new(3, 1);
+    let b = tensor_set_scalar(b, 0, 4);
+    let b = tensor_set_scalar(b, 1, 5);
+    let b = tensor_set_scalar(b, 2, 6);
+
+    let d = tensor_binop(a, b, 1);
+    let d2 = tensor_binop(d, d, 2);
+    let dist_sq = tensor_reduce(d2, 0, 0);
+    errors = errors + check_val(dist_sq, 0, 27);
+
+    // --- Test 6: Softmax numerics (shifted) ---
+    // For numerical stability: subtract max before exp
+    // x = [1, 2, 3], max = 3, shifted = [-2, -1, 0]
+    let xx = tensor_new(3, 1);
+    let xx = tensor_set_scalar(xx, 0, 1);
+    let xx = tensor_set_scalar(xx, 1, 2);
+    let xx = tensor_set_scalar(xx, 2, 3);
+
+    let mx = tensor_reduce(xx, 2, 0);
+    errors = errors + check_val(mx, 0, 3);
+
+    // Broadcast max to same size and subtract
+    let mx_bcast = tensor_fill(3, 3, 1);
+    let shifted = tensor_binop(xx, mx_bcast, 1);
+    errors = errors + check_val(shifted, 0, -2);
+    errors = errors + check_val(shifted, 1, -1);
+    errors = errors + check_val(shifted, 2, 0);
+
+    // exp(0) = 1 (last element)
+    let exp_shifted = tensor_unop(shifted, 2);
+    errors = errors + check_val(exp_shifted, 2, 1);
+
+    // --- Test 7: Accumulation pattern (simulated reduction) ---
+    let vals = tensor_new(4, 1);
+    let vals = tensor_set_scalar(vals, 0, 10);
+    let vals = tensor_set_scalar(vals, 1, 20);
+    let vals = tensor_set_scalar(vals, 2, 30);
+    let vals = tensor_set_scalar(vals, 3, 40);
+
+    // Sum via reduce
+    let acc = tensor_reduce(vals, 0, 0);
+    errors = errors + check_val(acc, 0, 100);
+
+    // Product via reduce
+    let prod = tensor_reduce(vals, 4, 0);
+    errors = errors + check_val(prod, 0, 240000);
+
+    // --- Test 8: Many-tensor pipeline ---
+    // Create 10 tensors, add them all together
+    let base = tensor_fill(3, 1, 1);
+    let acc = base;
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    // acc = 10 * base = [10, 10, 10]
+    errors = errors + check_val(acc, 0, 10);
+    errors = errors + check_val(acc, 1, 10);
+    errors = errors + check_val(acc, 2, 10);
+
+    errors
+}

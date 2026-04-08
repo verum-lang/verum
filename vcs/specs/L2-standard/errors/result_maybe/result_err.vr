@@ -1,0 +1,324 @@
+// @test: run
+// @expected-stdout: Error: not found\nMapped error: NOT FOUND\nRecovered: 0
+// @tier: 0
+// @level: L2
+// @tags: errors, result, err, failure
+// @description: Result.Err handling patterns
+
+/// Result.Err handling - working with error results.
+/// Demonstrates various patterns for handling and transforming errors.
+
+type AppError is
+    | NotFound(Text)
+    | InvalidInput(Text)
+    | NetworkError(Text)
+    | Timeout
+    | PermissionDenied;
+
+type LowLevelError is
+    | IoError(Text)
+    | ParseError(Int);  // Line number
+
+/// Basic Err creation
+fn create_err_values() {
+    // Direct Err construction
+    let result1: Result<Int, AppError> = Err(AppError.NotFound("user"));
+    let result2: Result<Text, AppError> = Err(AppError.Timeout);
+    let result3: Result<List<Int>, Text> = Err("something went wrong");
+
+    // Error with context
+    let with_context: Result<Int, AppError> =
+        Err(AppError.InvalidInput("Expected positive number, got -5"));
+}
+
+/// Checking if result is Err
+fn check_err_status() {
+    let success: Result<Int, Text> = Ok(42);
+    let failure: Result<Int, Text> = Err("failed");
+
+    // is_err() method
+    assert(!success.is_err());
+    assert(failure.is_err());
+
+    // is_ok() method (opposite)
+    assert(success.is_ok());
+    assert(!failure.is_ok());
+}
+
+/// Extracting Err values
+fn extract_err_values() {
+    let result: Result<Int, Text> = Err("something went wrong");
+
+    // err() converts to Maybe<E>
+    let error: Maybe<Text> = result.err();
+    assert_eq(error, Some("something went wrong"));
+
+    // unwrap_err() - panics on Ok
+    let result2: Result<Int, Text> = Err("error message");
+    let e = result2.unwrap_err();
+    assert_eq(e, "error message");
+
+    // expect_err() - panics with message on Ok
+    let result3: Result<Int, Text> = Err("expected error");
+    let e = result3.expect_err("Should have been an error");
+    assert_eq(e, "expected error");
+
+    // err() returns None for Ok
+    let success: Result<Int, Text> = Ok(42);
+    assert_eq(success.err(), None);
+}
+
+/// Pattern matching on Err
+fn match_err_patterns() {
+    let result: Result<Int, AppError> = Err(AppError.NotFound("user_123"));
+
+    // Basic match
+    let message = match result {
+        Ok(n) => format("Success: {}", n),
+        Err(AppError.NotFound(id)) => format("Not found: {}", id),
+        Err(AppError.InvalidInput(msg)) => format("Invalid: {}", msg),
+        Err(AppError.NetworkError(msg)) => format("Network: {}", msg),
+        Err(AppError.Timeout) => "Request timed out",
+        Err(AppError.PermissionDenied) => "Access denied"
+    };
+
+    // Match with catch-all
+    let simplified = match result {
+        Ok(n) => format("Got: {}", n),
+        Err(e) => format("Error: {:?}", e)
+    };
+
+    // Match only on Err variants
+    fn handle_error(e: AppError) -> Text {
+        match e {
+            AppError.NotFound(id) => format("Resource {} not found", id),
+            AppError.Timeout | AppError.NetworkError(_) => "Retry the operation",
+            AppError.InvalidInput(msg) => format("Bad input: {}", msg),
+            AppError.PermissionDenied => "Contact administrator"
+        }
+    }
+}
+
+/// If-let pattern for Err
+fn if_let_err_pattern() {
+    let result: Result<Int, AppError> = Err(AppError.Timeout);
+
+    // if let Err(e) = result
+    if let Err(AppError.Timeout) = result {
+        println("Operation timed out, retrying...");
+    }
+
+    // Capture error value
+    if let Err(e) = result {
+        log_error(&e);
+    }
+}
+
+fn log_error(e: &AppError) {
+    println(format("Error occurred: {:?}", e));
+}
+
+/// Transforming Err values with map_err
+fn transform_err() {
+    let result: Result<Int, LowLevelError> =
+        Err(LowLevelError.IoError("file not found"));
+
+    // map_err transforms the error type
+    let mapped: Result<Int, AppError> = result.map_err(|e| {
+        match e {
+            LowLevelError.IoError(msg) => AppError.NetworkError(msg.clone()),
+            LowLevelError.ParseError(line) =>
+                AppError.InvalidInput(format("Parse error at line {}", line))
+        }
+    });
+
+    // map_err preserves Ok
+    let success: Result<Int, LowLevelError> = Ok(42);
+    let still_ok: Result<Int, AppError> = success.map_err(|e| AppError.Timeout);
+    assert_eq(still_ok.unwrap(), 42);
+
+    // Chain map_err for error enhancement
+    let enhanced = result
+        .map_err(|e| format("{:?}", e))
+        .map_err(|s| s.to_uppercase());
+}
+
+/// Handling Err with or and or_else
+fn err_alternatives() {
+    let primary: Result<Int, Text> = Err("primary failed");
+    let backup: Result<Int, Text> = Ok(42);
+
+    // or() provides alternative Result
+    let with_backup = primary.or(backup);
+    assert_eq(with_backup.unwrap(), 42);
+
+    // or_else() for lazy alternative
+    let result: Result<Int, Text> = Err("failed");
+    let recovered = result.or_else(|e| {
+        if e == "recoverable" {
+            Ok(0)
+        } else {
+            Err(format("unrecoverable: {}", e))
+        }
+    });
+
+    // Chain multiple fallbacks
+    fn try_primary() -> Result<Int, Text> { Err("primary failed") }
+    fn try_secondary() -> Result<Int, Text> { Err("secondary failed") }
+    fn try_tertiary() -> Result<Int, Text> { Ok(42) }
+
+    let result = try_primary()
+        .or_else(|_| try_secondary())
+        .or_else(|_| try_tertiary());
+    assert_eq(result.unwrap(), 42);
+}
+
+/// Inspecting Err values
+fn inspect_err() {
+    let result: Result<Int, Text> = Err("something bad");
+
+    // inspect_err for side effects without consuming
+    let inspected = result.inspect_err(|e| {
+        println(format("Error occurred: {}", e));
+    });
+
+    // Error is still accessible
+    assert(inspected.is_err());
+}
+
+/// Err with references
+fn err_with_refs() {
+    let result: Result<Int, Text> = Err("error message");
+
+    // as_ref() borrows the error
+    let ref_result: Result<&Int, &Text> = result.as_ref();
+    assert_eq(*ref_result.unwrap_err(), "error message");
+}
+
+/// Err in collections
+fn err_in_collections() {
+    let results: List<Result<Int, Text>> = [
+        Ok(1),
+        Err("error a"),
+        Ok(2),
+        Err("error b"),
+        Ok(3)
+    ];
+
+    // Collect only errors
+    let errors: List<Text> = results.iter()
+        .filter_map(|r| r.clone().err())
+        .collect();
+    assert_eq(errors.len(), 2);
+
+    // Find first error
+    let first_err = results.iter()
+        .find(|r| r.is_err())
+        .map(|r| r.clone().unwrap_err());
+    assert_eq(first_err, Some("error a"));
+
+    // Partition into Ok and Err
+    // Commented out: .partition_result() not yet implemented in stdlib
+    // let (oks, errs): (List<Int>, List<Text>) = results.into_iter()
+    //     .partition_result();
+}
+
+/// Error conversion patterns
+fn error_conversion() {
+    // From trait for automatic conversion
+    implement From<LowLevelError> for AppError {
+        fn from(e: LowLevelError) -> AppError {
+            match e {
+                LowLevelError.IoError(m) => AppError.NetworkError(m),
+                LowLevelError.ParseError(l) =>
+                    AppError.InvalidInput(format("line {}", l))
+            }
+        }
+    }
+
+    fn low_level_op() -> Result<Int, LowLevelError> {
+        Err(LowLevelError.IoError("connection lost"))
+    }
+
+    // ? operator uses From for automatic conversion
+    fn high_level_op() -> Result<Int, AppError> {
+        let result = low_level_op()?;  // LowLevelError -> AppError
+        Ok(result)
+    }
+}
+
+/// Error context adding
+fn add_error_context() {
+    fn read_config(path: &Text) -> Result<Text, Text> {
+        Err("file not found")
+    }
+
+    // Add context to error
+    let result = read_config("/app/config.toml")
+        .map_err(|e| format("Failed to read config: {}", e));
+
+    // with_context pattern (if implemented)
+    fn with_context<T, E: Display>(
+        result: Result<T, E>,
+        context: &Text
+    ) -> Result<T, Text> {
+        result.map_err(|e| format("{}: {}", context, e))
+    }
+}
+
+/// Practical error handling patterns
+fn practical_patterns() {
+    // Retry on specific errors
+    fn with_retry<T, F: Fn() -> Result<T, Text>>(mut attempts: Int, operation: F) -> Result<T, Text> {
+        loop {
+            match operation() {
+                Ok(v) => return Ok(v),
+                Err(e) if attempts > 0 && is_retriable(&e) => {
+                    attempts -= 1;
+                    continue
+                },
+                Err(e) => return Err(e)
+            }
+        }
+    }
+
+    fn is_retriable(e: &Text) -> Bool {
+        e.contains("timeout") || e.contains("temporary")
+    }
+
+    // Error aggregation
+    fn collect_errors<T>(
+        operations: List<fn() -> Result<T, Text>>
+    ) -> (List<T>, List<Text>) {
+        let mut successes: List<T> = List.new();
+        let mut errors: List<Text> = List.new();
+
+        for op in operations {
+            match op() {
+                Ok(v) => successes.push(v),
+                Err(e) => errors.push(e)
+            }
+        }
+
+        (successes, errors)
+    }
+}
+
+fn main() {
+    // Basic Err handling
+    let result: Result<Int, Text> = Err("not found");
+    match result {
+        Ok(n) => println(format("Success: {}", n)),
+        Err(e) => println(format("Error: {}", e))
+    }
+
+    // Error transformation
+    let transformed: Result<Int, Text> = Err("not found");
+    let mapped = transformed.map_err(|e| e.to_uppercase());
+    println(format("Mapped error: {}", mapped.unwrap_err()));
+
+    // Recovery from error
+    let failed: Result<Int, Text> = Err("failed");
+    let recovered = failed.unwrap_or(0);
+    println(format("Recovered: {}", recovered));
+}

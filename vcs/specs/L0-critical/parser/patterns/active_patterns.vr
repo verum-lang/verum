@@ -1,0 +1,231 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: parser, patterns, active-patterns, pattern-matching
+// @timeout: 10000
+// @expect: pass
+//
+// Active Pattern Tests - Section 11 of docs/improvements.md
+//
+// Active patterns (F#-style) allow defining custom pattern matchers.
+// They are functions that take a value and return Bool (total patterns)
+// or Maybe<T> (partial patterns that can extract values).
+//
+// Grammar (from verum.ebnf):
+//   active_pattern = identifier , [ '(' , expression_list , ')' ] , '(' , ')' ;
+//   pattern_def = visibility , 'pattern' , identifier , [ pattern_type_params ]
+//               , '(' , pattern_params , ')' , '->' , type_expr , '=' , expression , ';' ;
+
+// =============================================================================
+// Pattern Definitions - Total Patterns (-> Bool)
+// =============================================================================
+
+// Simple total pattern - tests if a number is even
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+
+// Simple total pattern - tests if a number is positive
+pattern Positive(n: Int) -> Bool = n > 0;
+
+// Simple total pattern - tests if a number is negative
+pattern Negative(n: Int) -> Bool = n < 0;
+
+// Simple total pattern - tests if a number is zero
+pattern Zero(n: Int) -> Bool = n == 0;
+
+// Parameterized total pattern - tests if a number is in range
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+
+// Parameterized total pattern - tests if a number is divisible by d
+pattern DivisibleBy(d: Int)(n: Int) -> Bool = n % d == 0;
+
+// Parameterized total pattern - tests if a string starts with prefix
+pattern StartsWith(prefix: Text)(s: Text) -> Bool = s.starts_with(prefix);
+
+// Parameterized total pattern - tests if a string ends with suffix
+pattern EndsWith(suffix: Text)(s: Text) -> Bool = s.ends_with(suffix);
+
+// =============================================================================
+// Pattern Definitions - Partial Patterns (-> Maybe<T>)
+// =============================================================================
+
+// Partial pattern - extracts first element from non-empty list
+pattern First<T>(list: List<T>) -> Maybe<T> =
+    if list.is_empty() { Maybe.None } else { Maybe.Some(list[0]) };
+
+// Partial pattern - extracts last element from non-empty list
+pattern Last<T>(list: List<T>) -> Maybe<T> =
+    if list.is_empty() { Maybe.None } else { Maybe.Some(list[list.len() - 1]) };
+
+// Partial pattern with parameters - matches items at specific index
+pattern At<T>(index: Int)(list: List<T>) -> Maybe<T> =
+    if index >= 0 && index < list.len() { Maybe.Some(list[index]) } else { Maybe.None };
+
+// =============================================================================
+// Pattern Usage in Match Expressions
+// =============================================================================
+
+fn test_simple_active_pattern(n: Int) -> Text {
+    match n {
+        Even() => "even",
+        _ => "odd",
+    }
+}
+
+fn test_multiple_active_patterns(n: Int) -> Text {
+    match n {
+        Zero() => "zero",
+        Positive() => "positive",
+        Negative() => "negative",
+        _ => "impossible", // unreachable but for exhaustiveness
+    }
+}
+
+fn test_parameterized_active_pattern(n: Int) -> Text {
+    match n {
+        InRange(0, 10)() => "small",
+        InRange(11, 100)() => "medium",
+        InRange(101, 1000)() => "large",
+        _ => "very large",
+    }
+}
+
+fn test_divisibility_pattern(n: Int) -> Text {
+    match n {
+        DivisibleBy(15)() => "fizzbuzz",
+        DivisibleBy(3)() => "fizz",
+        DivisibleBy(5)() => "buzz",
+        _ => f"{n}",
+    }
+}
+
+// =============================================================================
+// Pattern Combinations with & (And Pattern)
+// =============================================================================
+
+fn test_and_pattern_combination(n: Int) -> Text {
+    match n {
+        Even() & Positive() => "positive even",
+        Even() & Negative() => "negative even",
+        Even() => "zero (even)",
+        Positive() => "positive odd",
+        Negative() => "negative odd",
+        _ => "zero (odd)", // unreachable
+    }
+}
+
+fn test_triple_and_pattern(n: Int) -> Text {
+    match n {
+        Even() & Positive() & InRange(0, 100)() => "small positive even",
+        Even() & Positive() => "large positive even",
+        _ => "other",
+    }
+}
+
+fn test_and_with_or_pattern(n: Int) -> Text {
+    // OR has lower precedence than AND
+    // This parses as: (Even() & Positive()) | (DivisibleBy(3)() & Negative())
+    match n {
+        Even() & Positive() | DivisibleBy(3)() & Negative() => "special",
+        _ => "normal",
+    }
+}
+
+// =============================================================================
+// String Patterns
+// =============================================================================
+
+fn test_string_active_pattern(s: Text) -> Text {
+    match s {
+        StartsWith("http://")() | StartsWith("https://")() => "URL",
+        EndsWith(".rs")() => "Rust file",
+        EndsWith(".vr")() => "Verum file",
+        _ => "unknown",
+    }
+}
+
+// =============================================================================
+// Partial Patterns with Value Extraction
+// =============================================================================
+
+fn test_partial_pattern(list: List<Int>) -> Text {
+    match list {
+        First() => "has first element",
+        _ => "empty",
+    }
+}
+
+fn test_indexed_access_pattern(list: List<Int>, index: Int) -> Text {
+    match list {
+        At(index)() => "index exists",
+        _ => "index out of bounds",
+    }
+}
+
+// =============================================================================
+// Integration with Other Pattern Features
+// =============================================================================
+
+fn test_active_with_guard(n: Int) -> Text {
+    match n {
+        Even() if n > 100 => "large even",
+        Even() => "small even",
+        _ => "odd",
+    }
+}
+
+fn test_active_with_binding(n: Int) -> Text {
+    // The value is bound via standard pattern matching, not active pattern
+    match n {
+        x @ Even() => f"even number: {x}",
+        x => f"odd number: {x}",
+    }
+}
+
+// =============================================================================
+// Main Test Function
+// =============================================================================
+
+fn main() {
+    // Test simple active patterns
+    assert_eq(test_simple_active_pattern(4), "even");
+    assert_eq(test_simple_active_pattern(7), "odd");
+
+    // Test multiple patterns
+    assert_eq(test_multiple_active_patterns(0), "zero");
+    assert_eq(test_multiple_active_patterns(5), "positive");
+    assert_eq(test_multiple_active_patterns(-3), "negative");
+
+    // Test parameterized patterns
+    assert_eq(test_parameterized_active_pattern(5), "small");
+    assert_eq(test_parameterized_active_pattern(50), "medium");
+    assert_eq(test_parameterized_active_pattern(500), "large");
+    assert_eq(test_parameterized_active_pattern(5000), "very large");
+
+    // Test divisibility (FizzBuzz)
+    assert_eq(test_divisibility_pattern(15), "fizzbuzz");
+    assert_eq(test_divisibility_pattern(9), "fizz");
+    assert_eq(test_divisibility_pattern(10), "buzz");
+    assert_eq(test_divisibility_pattern(7), "7");
+
+    // Test and pattern combinations
+    assert_eq(test_and_pattern_combination(4), "positive even");
+    assert_eq(test_and_pattern_combination(-6), "negative even");
+    assert_eq(test_and_pattern_combination(3), "positive odd");
+    assert_eq(test_and_pattern_combination(-5), "negative odd");
+
+    // Test triple and pattern
+    assert_eq(test_triple_and_pattern(50), "small positive even");
+    assert_eq(test_triple_and_pattern(200), "large positive even");
+
+    // Test string patterns
+    assert_eq(test_string_active_pattern("https://example.com"), "URL");
+    assert_eq(test_string_active_pattern("main.rs"), "Rust file");
+    assert_eq(test_string_active_pattern("lib.vr"), "Verum file");
+
+    // Test with guards
+    assert_eq(test_active_with_guard(200), "large even");
+    assert_eq(test_active_with_guard(10), "small even");
+    assert_eq(test_active_with_guard(7), "odd");
+
+    print("All active pattern tests passed!");
+}

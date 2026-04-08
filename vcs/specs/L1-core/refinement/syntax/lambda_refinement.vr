@@ -1,0 +1,201 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, syntax, lambda
+
+/// Lambda-style refinement syntax with explicit parameter binding.
+/// Uses |x| closure syntax for refinement predicates.
+/// More expressive than inline syntax when predicates are complex.
+
+// ============================================================================
+// Basic lambda refinements with single parameter
+// ============================================================================
+
+/// Positive integer with explicit binding
+type Positive is Int where |x| x > 0;
+
+/// Non-negative with different variable name
+type NonNegative is Int where |n| n >= 0;
+
+/// Negative integer
+type Negative is Int where |v| v < 0;
+
+/// Non-zero integer
+type NonZero is Int where |x| x != 0;
+
+// ============================================================================
+// Range refinements with lambda syntax
+// ============================================================================
+
+/// Percentage as float in [0.0, 100.0]
+type Percentage is Float where |p| p >= 0.0 && p <= 100.0;
+
+/// Unit interval [0, 1]
+type UnitInterval is Float where |u| u >= 0.0 && u <= 1.0;
+
+/// Byte range [0, 256)
+type Byte is Int where |b| b >= 0 && b < 256;
+
+/// Valid age with inclusive bounds
+type ValidAge is Int where |age| age >= 0 && age <= 150;
+
+/// TCP port number
+type Port is Int where |p| p >= 1 && p <= 65535;
+
+// ============================================================================
+// Complex boolean expressions in lambdas
+// ============================================================================
+
+/// Even and positive (conjunction)
+type EvenPositive is Int where |x| x > 0 && x % 2 == 0;
+
+/// Odd and negative
+type OddNegative is Int where |x| x < 0 && x % 2 != 0;
+
+/// Divisible by both 3 and 5
+type DivisibleBy15 is Int where |n| n % 3 == 0 && n % 5 == 0;
+
+/// Power of two check
+type PowerOfTwo is Int where |n| n > 0 && (n & (n - 1)) == 0;
+
+// ============================================================================
+// Disjunctive refinements (OR in lambda)
+// ============================================================================
+
+/// Boundary values
+type Boundary is Int where |x| x == 0 || x == 100;
+
+/// Non-middle values
+type OutsideRange is Int where |x| x < 10 || x > 90;
+
+/// Sign indicator
+type SignValue is Int where |s| s == -1 || s == 0 || s == 1;
+
+/// Weekend day number (Saturday=6, Sunday=0)
+type Weekend is Int where |d| d == 0 || d == 6;
+
+// ============================================================================
+// Text/Text refinements with lambdas
+// ============================================================================
+
+/// Non-empty string
+type NonEmptyText is Text where |s| len(s) > 0;
+
+/// Short string with max length
+type ShortString is Text where |s| len(s) <= 255;
+
+/// Username constraints
+type Username is Text where |u| len(u) >= 3 && len(u) <= 20;
+
+/// Password strength (minimum length)
+type StrongPassword is Text where |p| len(p) >= 12;
+
+/// Trimmed string (no leading/trailing whitespace)
+type TrimmedText is Text where |s| s == trim(s);
+
+/// Email-like text
+type EmailAddress is Text where |e| contains(e, "@") && contains(e, ".");
+
+// ============================================================================
+// Collection refinements with lambda
+// ============================================================================
+
+/// Non-empty list
+type NonEmptyList<T> is List<T> where |lst| len(lst) > 0;
+
+/// Singleton list
+type SingletonList<T> is List<T> where |lst| len(lst) == 1;
+
+/// Pair list (exactly two elements)
+type PairList<T> is List<T> where |lst| len(lst) == 2;
+
+/// Small list (bounded size)
+type SmallList<T> is List<T> where |lst| len(lst) <= 100;
+
+/// Even-length list
+type EvenLengthList<T> is List<T> where |lst| len(lst) % 2 == 0;
+
+// ============================================================================
+// Function parameters with lambda refinements (single-param only)
+// ============================================================================
+
+fn safe_divide(x: Float, y: Float where |v| v != 0.0) -> Float {
+    x / y
+}
+
+fn scale(value: Float, factor: Float where |f| f > 0.0) -> Float {
+    value * factor
+}
+
+// ============================================================================
+// Struct fields with lambda refinements
+// ============================================================================
+
+type Rectangle is {
+    width: Float where |w| w > 0.0,
+    height: Float where |h| h > 0.0,
+};
+
+type Circle is {
+    radius: Float where |r| r > 0.0,
+};
+
+type BoundedCounter is {
+    value: Int,
+    max: Int where |m| m > 0,
+};
+
+// ============================================================================
+// Main function demonstrating usage
+// ============================================================================
+
+fn main() {
+    // Basic refinements
+    let pos: Positive = 42;
+    let non_neg: NonNegative = 0;
+    let neg: Negative = -5;
+    let nz: NonZero = -1;
+
+    // Ranges
+    let pct: Percentage = 75.5;
+    let unit: UnitInterval = 0.5;
+    let byte: Byte = 255;
+    let age: ValidAge = 25;
+    let port: Port = 8080;
+
+    // Complex conditions
+    let even_pos: EvenPositive = 4;
+    let div15: DivisibleBy15 = 30;
+
+    // Disjunctions
+    let boundary: Boundary = 0;
+    let sign_val: SignValue = 1;
+
+    // Strings
+    let non_empty: NonEmptyText = "hello";
+    let short: ShortString = "brief";
+    let username: Username = "alice";
+    let strong: StrongPassword = "mysecurepassword";
+    let email: EmailAddress = "user@example.com";
+
+    // Collections
+    let items: NonEmptyList<Int> = [1, 2, 3];
+    let single: SingletonList<Int> = [42];
+    let pair: PairList<Int> = [1, 2];
+    let small: SmallList<Int> = [1, 2, 3, 4, 5];
+    let even_len: EvenLengthList<Int> = [1, 2, 3, 4];
+
+    // Function calls
+    let result = safe_divide(10.0, 2.0);
+    let scaled = scale(5.0, 2.0);
+
+    // Structs
+    let rect = Rectangle { width: 10.0, height: 5.0 };
+    let circle = Circle { radius: 3.0 };
+
+    // Assertions
+    assert(pos > 0);
+    assert(pct >= 0.0 && pct <= 100.0);
+    assert(even_pos > 0 && even_pos % 2 == 0);
+    assert(result == 5.0);
+}

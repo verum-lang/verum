@@ -1,0 +1,135 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: struct, nested, composition, e2e
+// @description: Test nested struct composition, deep field access, and struct-in-list patterns
+
+type Address is {
+    street: Text,
+    city: Text,
+    zip: Int,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    address: Address,
+};
+
+implement Person {
+    fn new(name: Text, age: Int, street: Text, city: Text, zip: Int) -> Person {
+        Person {
+            name: name,
+            age: age,
+            address: Address { street: street, city: city, zip: zip },
+        }
+    }
+
+    fn has_zip(&self, zip: Int) -> Bool {
+        self.address.zip == zip
+    }
+
+    fn has_city(&self, city: Text) -> Bool {
+        self.address.city == city
+    }
+
+    fn check_name(&self, expected: Text) -> Bool {
+        self.name == expected
+    }
+}
+
+type Team is {
+    name: Text,
+    members: List<Int>,
+    size: Int,
+};
+
+implement Team {
+    fn new(name: Text) -> Team {
+        Team { name: name, members: List.new(), size: 0 }
+    }
+
+    fn add(&mut self, member_id: Int) {
+        self.members.push(member_id);
+        self.size = self.size + 1;
+    }
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Nested struct creation and access
+    let p = Person.new("Alice", 30, "123 Main", "Springfield", 62701);
+    if p.name != "Alice" {
+        print("FAIL: name");
+        failures = failures + 1;
+    }
+    if p.age != 30 {
+        print("FAIL: age");
+        failures = failures + 1;
+    }
+    if p.address.zip != 62701 {
+        print(f"FAIL: zip expected 62701, got {p.address.zip}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  nested_access: OK");
+    }
+
+    // Test 2: Method on nested data
+    if !p.has_zip(62701) {
+        print("FAIL: has_zip 62701");
+        failures = failures + 1;
+    }
+    if p.has_zip(99999) {
+        print("FAIL: should not have zip 99999");
+        failures = failures + 1;
+    }
+    // Test 2b: Text comparison in nested method
+    if !p.check_name("Alice") {
+        print("FAIL: check_name Alice");
+        failures = failures + 1;
+    }
+    if !p.has_city("Springfield") {
+        print("FAIL: has_city Springfield");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  nested_method: OK");
+    }
+
+    // Test 3: Struct with list field
+    let mut team = Team.new("Engineering");
+    team.add(101);
+    team.add(102);
+    team.add(103);
+    if team.size != 3 {
+        print(f"FAIL: team size expected 3, got {team.size}");
+        failures = failures + 1;
+    }
+    if team.members[0] != 101 {
+        print(f"FAIL: member[0] expected 101, got {team.members[0]}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  struct_list: OK");
+    }
+
+    // Test 4: List of structs (via fields)
+    let a1 = Address { street: "1st", city: "NYC", zip: 10001 };
+    let a2 = Address { street: "2nd", city: "LA", zip: 90001 };
+    let mut zips = List.new();
+    zips.push(a1.zip);
+    zips.push(a2.zip);
+    if zips[0] + zips[1] != 100002 {
+        print("FAIL: zip sum");
+        failures = failures + 1;
+    } else {
+        print("  address_list: OK");
+    }
+
+    if failures == 0 {
+        print("All nested struct tests passed");
+    }
+    failures
+}

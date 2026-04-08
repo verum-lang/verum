@@ -1,0 +1,220 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @was-skip: type checker limitations (various type errors)
+// @tags: reference_system, cbgr, reference-tiers, conversion
+
+/// Test conversions between reference tiers.
+/// Tier 0 (&T) -> Tier 1 (&checked T) -> Tier 2 (&unsafe T)
+/// Downgrade is always safe, upgrade requires proof.
+
+fn main() {
+    test_downgrade_managed_to_checked();
+    test_downgrade_checked_to_unsafe();
+    test_downgrade_managed_to_unsafe();
+    test_upgrade_checked_to_managed();
+    test_conversion_in_generics();
+    test_protocol_auto_deref();
+}
+
+/// Downgrade: Managed -> Checked
+/// Safe when compiler can verify lifetime
+fn test_downgrade_managed_to_checked() {
+    let value = 42;
+    let managed: &Int = &value;
+
+    // Downgrade to checked - compiler verifies safety
+    let checked_ref: &checked Int = managed.to_checked();
+
+    // Use checked reference
+    let result = *checked_ref;
+    assert(result == 42);
+
+    // In function scope, often automatic
+    fn local_use(r: &checked Int) -> Int {
+        *r
+    }
+
+    // Managed automatically downgrades when passed to checked param
+    let result2 = local_use(managed.to_checked());
+    assert(result2 == 42);
+}
+
+/// Downgrade: Checked -> Unsafe
+/// Always allowed (programmer takes responsibility)
+fn test_downgrade_checked_to_unsafe() {
+    let value = 42;
+    let checked_ref: &checked Int = &checked value;
+
+    // Downgrade to unsafe
+    // SAFETY: value is on stack and outlives this scope
+    let unsafe_ptr: &unsafe Int = checked_ref.to_unsafe();
+
+    // Use requires unsafe block
+    let result = unsafe { *unsafe_ptr };
+    assert(result == 42);
+}
+
+/// Downgrade: Managed -> Unsafe (skip checked tier)
+/// Allowed with explicit unsafe
+fn test_downgrade_managed_to_unsafe() {
+    let value = 42;
+    let managed: &Int = &value;
+
+    // Direct downgrade to unsafe
+    // SAFETY: value outlives this scope
+    let unsafe_ref: &unsafe Int = unsafe { managed.to_unsafe() };
+
+    let result = unsafe { *unsafe_ref };
+    assert(result == 42);
+}
+
+/// Upgrade: Checked -> Managed
+/// Always safe (adds runtime checks)
+fn test_upgrade_checked_to_managed() {
+    let value = 42;
+    let checked_ref: &checked Int = &checked value;
+
+    // Upgrade to managed - adds CBGR checks
+    let managed: &Int = checked_ref.to_managed();
+
+    // Now has full CBGR protection
+    let result = *managed;
+    assert(result == 42);
+}
+
+/// Note: Unsafe -> Checked/Managed upgrade is not allowed
+/// Once you've gone unsafe, compiler cannot recover safety guarantees
+fn upgrade_from_unsafe_not_allowed() {
+    let value = 42;
+
+    // SAFETY: for demonstration
+    let unsafe_ref: &unsafe Int = unsafe { &unsafe value };
+
+    // These would NOT compile:
+    // let checked: &checked Int = unsafe_ref.to_checked();  // ERROR
+    // let managed: &Int = unsafe_ref.to_managed();          // ERROR
+
+    // To use the value safely, must re-borrow from original
+    let managed: &Int = &value;  // Fresh safe borrow
+}
+
+/// Conversions in generic code
+/// Protocol-based auto-deref: R: Ref<T> -> *r automatically calls r.deref()
+fn test_conversion_in_generics() {
+    // Basic generic function with reference parameter works
+    fn read_value<T>(r: &T) -> T {
+        *r
+    }
+
+    let value = 42;
+
+    // Direct reference passing works
+    let managed: &Int = &value;
+    let r1 = read_value(managed);
+    assert(r1 == 42);
+
+    // Checked reference with explicit conversion
+    let checked_ref: &checked Int = &checked value;
+    let r2 = read_value(checked_ref.to_managed());
+    assert(r2 == 42);
+}
+
+/// Auto-deref through protocol bounds
+/// When a type R has bound R: Ref<T>, dereferencing *r calls r.deref() automatically
+fn test_protocol_auto_deref() {
+    // Generic function that works with any Ref<T> implementation
+    fn read_through_ref<R, T>(r: R) -> T where R: Ref<T> {
+        // *r automatically calls r.deref() through the Ref<T> protocol
+        *r
+    }
+
+    let value = 42;
+
+    // Works with managed reference (implements Ref<Int>)
+    let managed: &Int = &value;
+    let r1 = read_through_ref(managed);
+    assert(r1 == 42);
+
+    // Works with checked reference (implements Ref<Int>)
+    let checked_ref: &checked Int = &checked value;
+    let r2 = read_through_ref(checked_ref);
+    assert(r2 == 42);
+}
+
+/// Conversion coercion rules
+fn coercion_rules() {
+    // Coercion from higher to lower tier happens automatically in some contexts
+
+    fn needs_managed(r: &Int) -> Int { *r }
+    fn needs_checked(r: &checked Int) -> Int { *r }
+    fn needs_unsafe(r: &unsafe Int) -> Int { unsafe { *r } }
+
+    let value = 42;
+
+    // Managed ref
+    let managed: &Int = &value;
+
+    // Checked ref
+    let checked_ref: &checked Int = &checked value;
+
+    // Coercion: checked -> managed (adds checks)
+    let r1 = needs_managed(checked_ref.to_managed());
+
+    // Coercion: managed -> checked (when compiler can prove safe)
+    let r2 = needs_checked(managed.to_checked());
+
+    // No implicit coercion to unsafe - always explicit
+    // needs_unsafe(managed);  // ERROR: must be explicit
+
+    // SAFETY: explicit downgrade
+    let r3 = needs_unsafe(unsafe { managed.to_unsafe() });
+}
+
+/// Tier conversion for mutable references
+fn mutable_conversion() {
+    let mut value = 42;
+
+    // Managed mutable
+    let managed_mut: &mut Int = &mut value;
+
+    // Downgrade to checked mutable
+    let checked_mut: &checked mut Int = managed_mut.to_checked_mut();
+    *checked_mut = 100;
+
+    // Downgrade to unsafe mutable
+    // SAFETY: we have exclusive access
+    let unsafe_mut: &unsafe mut Int = checked_mut.to_unsafe_mut();
+    unsafe { *unsafe_mut = 200; }
+
+    assert(value == 200);
+}
+
+/// Reference tier protocols
+type Ref<T> is protocol {
+    fn deref(&self) -> &T;
+};
+
+// Note: RefMut extends Ref using explicit method delegation
+type RefMut<T> is protocol {
+    fn deref(&self) -> &T;
+    fn deref_mut(&mut self) -> &mut T;
+};
+
+// Protocol implementations for reference types
+// Auto-deref through protocol bounds (*r where r: Ref<T>) is now implemented
+// See test_protocol_auto_deref() for examples
+implement<T> Ref<T> for &T {
+    fn deref(&self) -> &T { *self }
+}
+
+implement<T> Ref<T> for &checked T {
+    fn deref(&self) -> &T { self.to_managed() }
+}
+
+implement<T> Ref<T> for &unsafe T {
+    fn deref(&self) -> &T {
+        // SAFETY: Caller guarantees ref is valid
+        unsafe { transmute(*self) }
+    }
+}

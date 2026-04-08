@@ -1,0 +1,150 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, calls, chained, method-chain
+
+// Test chained method calls - all code must be inside functions
+
+fn test_simple_two_method_chain() {
+    // Simple two-method chain
+    a.b().c();
+    obj.first().second();
+}
+
+fn test_three_method_chain() {
+    // Three-method chain
+    a.b().c().d();
+    list.filter().map().collect();
+}
+
+fn test_long_method_chain() {
+    // Long method chain
+    object
+        .method1()
+        .method2()
+        .method3()
+        .method4()
+        .method5();
+}
+
+fn test_chain_with_arguments() {
+    // Chain with arguments
+    builder
+        .set_name("test")
+        .set_value(42)
+        .set_flag(true)
+        .build();
+}
+
+fn test_chain_mixing_methods() {
+    // Chain mixing no-arg and with-arg methods
+    text
+        .trim()
+        .to_lowercase()
+        .replace("old", "new")
+        .len();
+}
+
+fn test_chain_with_closures() {
+    // Chain with closures
+    list
+        .iter()
+        .filter(|x| x > 0)
+        .map(|x| x * 2)
+        .collect();
+}
+
+fn test_chain_starting_from_function_call() {
+    // Chain starting from function call
+    create_builder()
+        .configure()
+        .validate()
+        .build();
+}
+
+fn test_chain_on_literal() {
+    // Chain on literal
+    "hello world"
+        .split(" ")
+        .map(|s| s.to_uppercase())
+        .collect();
+
+    [1, 2, 3, 4, 5]
+        .iter()
+        .sum();
+}
+
+fn test_chain_with_field_access() {
+    // Chain with field access mixed in
+    object.field.method().other_field.another_method();
+}
+
+fn test_chain_with_indexing() {
+    // Chain with indexing
+    array[0].method().field[1].nested_method();
+}
+
+fn test_chain_with_type_parameters() {
+    // Chain with type parameters
+    collection
+        .into_iter<T>()
+        .map<U>(transform)
+        .collect<List<U>>();
+}
+
+fn test_chain_with_optional_calls() {
+    // Chain with optional/null-safe calls (if supported)
+    maybe_obj?.method()?.another()?;
+}
+
+fn test_chain_with_await() {
+    // Chain with await
+    let result = client
+        .connect()
+        .send(request)
+        .receive()
+        .await;
+}
+
+fn test_chain_with_error_propagation() {
+    // Chain with error propagation
+    let data = file
+        .read()?
+        .parse()?
+        .validate()?;
+}
+
+fn test_chain_as_expression() {
+    // Chain as expression
+    let length = text.trim().to_lowercase().len();
+    let sum = list.filter(pred).map(f).sum();
+}
+
+fn test_chain_with_early_termination() {
+    // Chain with early termination methods
+    list
+        .iter()
+        .find(|x| x.matches(pattern))
+        .map(|x| x.value);
+}
+
+fn test_complex_chained_expression() {
+    // Complex chained expression
+    let result = input
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| line.parse<Int>())
+        .filter_map(|r| r.ok())
+        .fold(0, |acc, n| acc + n);
+}
+
+fn test_chain_returning_builder_pattern() {
+    // Chain returning builder pattern
+    let config = ConfigBuilder.new()
+        .host("localhost")
+        .port(8080)
+        .timeout(30)
+        .retries(3)
+        .build()
+        .expect("Invalid configuration");
+}

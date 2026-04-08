@@ -1,0 +1,27 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, reflection, context, error
+// @description: Test that fields_of requires MetaTypes context
+// @expected-error: E101
+
+type Point is { x: Int, y: Int };
+
+// =============================================================================
+// FIELDS_OF MISSING CONTEXT TESTS
+// =============================================================================
+
+// fields_of requires MetaTypes context
+meta fn test_fields_of_no_context() -> List<FieldInfo> {
+    fields_of(Point)  // ERROR: requires MetaTypes context
+}
+
+// variants_of requires MetaTypes context
+meta fn test_variants_of_no_context() -> List<VariantInfo> {
+    type Color is Red | Green | Blue;
+    variants_of(Color)  // ERROR: requires MetaTypes context
+}
+
+fn main() {
+    @const assert(list_len(test_fields_of_no_context()) > 0);
+}

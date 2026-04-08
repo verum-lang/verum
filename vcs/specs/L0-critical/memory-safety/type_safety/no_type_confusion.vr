@@ -1,0 +1,142 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, type-safety, type-confusion, compile-time
+// @description: Tests that type confusion is prevented at compile time
+
+/// Type confusion vulnerabilities occur when code misinterprets
+/// data of one type as another. Verum's strong type system prevents:
+/// - Implicit type coercions
+/// - Union type punning
+/// - Reinterpret casts in safe code
+/// - Variant/enum confusion
+///
+/// This prevents exploitation of memory layout differences.
+
+fn main() {
+    test_basic_type_mismatch();
+    test_struct_confusion();
+    test_variant_confusion();
+    test_generic_confusion();
+}
+
+fn test_basic_type_mismatch() {
+    // INVALID: Assign string to int
+    let x: Int = "hello";  // ERROR: Type mismatch: expected 'Int', found 'Text'
+
+    // INVALID: Assign float to int (no implicit truncation)
+    let y: Int = 3.14;  // ERROR: Cannot assign value of type 'Float' to variable of type 'Int'
+
+    // INVALID: Assign int to bool (no truthiness)
+    let z: Bool = 1;  // ERROR: Type mismatch: expected 'Bool', found 'Int'
+}
+
+// Different types with same layout are NOT interchangeable
+type User is {
+    id: Int,
+    name: Text,
+};
+
+type Admin is {
+    id: Int,
+    name: Text,
+};
+
+fn test_struct_confusion() {
+    let user = User { id: 1, name: Text.from("Alice") };
+
+    // INVALID: Different struct types are distinct
+    let admin: Admin = user;  // ERROR: Type mismatch: expected 'Admin', found 'User'
+
+    // INVALID: Function expecting different type
+    process_admin(user);  // ERROR: Type mismatch: expected 'Admin', found 'User'
+}
+
+fn process_admin(admin: Admin) {
+    print(f"Admin: {admin.name}");
+}
+
+// Variants prevent confusion between different cases
+type Shape is
+    Circle { radius: Float }
+  | Rectangle { width: Float, height: Float }
+  | Triangle { base: Float, height: Float };
+
+fn test_variant_confusion() {
+    let shape = Shape.Circle { radius: 10.0 };
+
+    // INVALID: Cannot access wrong variant's fields
+    let width = shape.width;  // ERROR: 'Circle' variant does not have field 'width'
+
+    // VALID: Must use pattern matching
+    let area = match shape {
+        Shape.Circle { radius } => 3.14159 * radius * radius,
+        Shape.Rectangle { width, height } => width * height,
+        Shape.Triangle { base, height } => 0.5 * base * height,
+    };
+}
+
+fn test_generic_confusion() {
+    let int_list: List<Int> = [1, 2, 3];
+    let text_list: List<Text> = ["a", "b", "c"];
+
+    // INVALID: Generic types with different parameters are distinct
+    let confusion: List<Int> = text_list;  // ERROR: Type mismatch
+
+    // INVALID: Cannot pass wrong generic type to function
+    fn sum_ints(nums: List<Int>) -> Int {
+        nums.iter().sum()
+    }
+    sum_ints(text_list);  // ERROR: Type mismatch
+}
+
+// VALID patterns for type conversion
+
+fn valid_explicit_conversion() {
+    // Explicit numeric conversion
+    let x: Float = 3.14;
+    let y: Int = x as Int;  // Explicit truncation
+    assert(y == 3);
+
+    // Parse from string
+    let s = "42";
+    let n: Result<Int, ParseError> = s.parse();
+    match n {
+        Ok(value) => print(f"Parsed: {value}"),
+        Err(e) => print(f"Parse error: {e}"),
+    }
+}
+
+fn valid_type_narrowing() {
+    // Use newtype pattern for distinct types
+    type UserId is (Int);
+    type AdminId is (Int);
+
+    let user_id = UserId(1);
+    let admin_id = AdminId(1);
+
+    // Cannot confuse them even though both contain Int
+    // let confusion: UserId = admin_id;  // Would be ERROR
+
+    // Must explicitly convert if needed
+    fn user_id_value(id: UserId) -> Int {
+        id.0
+    }
+}
+
+// Protocol for safe conversions
+type Into<T> is protocol {
+    fn into(self) -> T;
+};
+
+implement Into<Text> for Int {
+    fn into(self) -> Text {
+        format("{}", self)
+    }
+}
+
+fn valid_protocol_based_conversion() {
+    let n: Int = 42;
+    let s: Text = n.into();  // Explicit, type-safe conversion
+    assert(s == "42");
+}

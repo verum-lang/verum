@@ -1,0 +1,210 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, brainfuck, interpreter
+// @timeout: 30000
+
+// Milestone test: Brainfuck-style tape machine interpreter
+// Instructions encoded as integers:
+// 0=halt, 1=inc, 2=dec, 3=right, 4=left, 5=jz(target), 6=jnz(target), 7=output
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Instruction encoding: opcode * 100 + operand
+fn instr_op(i: Int) -> Int { i / 100 }
+fn instr_arg(i: Int) -> Int { i % 100 }
+
+// Execute program on tape, return tape state
+// Program: Arr8 of encoded instructions
+// Returns: final value at tape position 0
+fn exec_tape(prog: Arr8, prog_len: Int) -> Arr8 {
+    let mut tape = zeros();
+    let mut ptr = 0; // tape pointer
+    let mut pc = 0;  // program counter
+    let mut steps = 0;
+    let max_steps = 1000;
+
+    while pc < prog_len {
+        if steps >= max_steps { pc = prog_len; }
+        else {
+            let instr = get8(prog, pc);
+            let op = instr_op(instr);
+            let arg = instr_arg(instr);
+
+            if op == 0 {
+                // halt
+                pc = prog_len;
+            } else if op == 1 {
+                // inc
+                tape = set8(tape, ptr, get8(tape, ptr) + 1);
+                pc = pc + 1;
+            } else if op == 2 {
+                // dec
+                tape = set8(tape, ptr, get8(tape, ptr) - 1);
+                pc = pc + 1;
+            } else if op == 3 {
+                // right
+                ptr = ptr + 1;
+                if ptr > 7 { ptr = 7; }
+                pc = pc + 1;
+            } else if op == 4 {
+                // left
+                ptr = ptr - 1;
+                if ptr < 0 { ptr = 0; }
+                pc = pc + 1;
+            } else if op == 5 {
+                // jz: jump to arg if current cell is 0
+                if get8(tape, ptr) == 0 {
+                    pc = arg;
+                } else {
+                    pc = pc + 1;
+                }
+            } else if op == 6 {
+                // jnz: jump to arg if current cell is not 0
+                if get8(tape, ptr) != 0 {
+                    pc = arg;
+                } else {
+                    pc = pc + 1;
+                }
+            } else {
+                pc = pc + 1; // skip unknown
+            }
+            steps = steps + 1;
+        }
+    }
+    tape
+}
+
+// Get final value at a specific tape position
+fn exec_tape_at(prog: Arr8, prog_len: Int, pos: Int) -> Int {
+    let tape = exec_tape(prog, prog_len);
+    get8(tape, pos)
+}
+
+fn test_simple_inc() -> Int {
+    // Program: inc, inc, inc → tape[0] = 3
+    // inc = 1*100+0 = 100
+    let prog = Arr8 { v0: 100, v1: 100, v2: 100, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(exec_tape_at(prog, 3, 0), 3);
+    1
+}
+
+fn test_move_and_inc() -> Int {
+    // Program: inc, inc, right, inc, inc, inc
+    // tape[0]=2, tape[1]=3
+    // inc=100, right=300
+    let prog = Arr8 { v0: 100, v1: 100, v2: 300, v3: 100, v4: 100, v5: 100, v6: 0, v7: 0 };
+    let tape = exec_tape(prog, 6);
+    assert_eq(get8(tape, 0), 2);
+    assert_eq(get8(tape, 1), 3);
+    1
+}
+
+fn test_dec() -> Int {
+    // Program: inc, inc, inc, dec → tape[0] = 2
+    // inc=100, dec=200
+    let prog = Arr8 { v0: 100, v1: 100, v2: 100, v3: 200, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(exec_tape_at(prog, 4, 0), 2);
+    1
+}
+
+fn test_loop() -> Int {
+    // Program: set tape[0]=3, then loop: dec, jnz(start_of_loop), move right, inc
+    // This copies value 3 to tape[0] decrements (loop 3 times) then tape[1] should be set
+    // Actually simpler: set tape[0]=5, loop: dec tape[0], right, inc tape[1], left, jnz(loop_start)
+    // That copies tape[0]'s initial value to tape[1]
+
+    // Set tape[0] = 3: inc, inc, inc (pc=0,1,2)
+    // Loop start at pc=3: dec (pc=3)
+    // right (pc=4), inc (pc=5), left (pc=6)
+    // jnz(3) at pc=7: jump to pc=3 if tape[0] != 0
+    // enc: inc=100, dec=200, right=300, left=400, jnz(3)=600+3=603
+
+    let prog = Arr8 { v0: 100, v1: 100, v2: 100, v3: 200, v4: 300, v5: 100, v6: 400, v7: 603 };
+    let tape = exec_tape(prog, 8);
+    assert_eq(get8(tape, 0), 0); // decremented to 0
+    assert_eq(get8(tape, 1), 3); // incremented 3 times
+    1
+}
+
+fn test_multiply() -> Int {
+    // Multiply 2 * 4 = 8
+    // tape[0]=2, tape[1]=4
+    // Algorithm: outer loop on tape[0], inner copies tape[1] to tape[2], uses tape[3] as temp
+    // Simplified: just manually set values and do the loop
+
+    // Set tape[0]=2: inc, inc (pc=0,1)
+    // Set tape[1]=4: right, inc, inc, inc, inc, left (pc=2,3,4,5,6,7) → now at tape[0]
+    // But we only have 8 instructions... let me use a simpler approach
+
+    // Actually let's just test: set tape[0]=4, loop 4 times adding 3 to tape[1]
+    // tape[0]=4, each iteration: dec tape[0], right, inc inc inc, left, jnz
+    // That gives tape[1] = 12. But we need more than 8 instructions.
+
+    // Simplest multiplication: set tape[0] = 3, loop: dec, right, inc, inc, left, jnz
+    // This computes 3 * 2 = 6 in tape[1]
+    // inc*3 at pc 0,1,2 → tape[0]=3
+    // pc3: dec(200), pc4: right(300), pc5: inc(100), pc6: inc(100), pc7: left(400)
+    // We need jnz at pc8 but only have 8 slots (0-7)!
+
+    // Use shorter init: tape[0]=2 (2 incs), then loop
+    // pc0: inc(100), pc1: inc(100) → tape[0]=2
+    // pc2: dec(200), pc3: right(300), pc4: inc(100), pc5: inc(100), pc6: left(400), pc7: jnz(602)
+    // Result: tape[1] = 2*2 = 4
+
+    let prog = Arr8 { v0: 100, v1: 100, v2: 200, v3: 300, v4: 100, v5: 100, v6: 400, v7: 602 };
+    let tape = exec_tape(prog, 8);
+    assert_eq(get8(tape, 0), 0);
+    assert_eq(get8(tape, 1), 4); // 2 * 2
+    1
+}
+
+fn test_halt() -> Int {
+    // Program: inc, halt, inc → tape[0] = 1 (halt stops before second inc)
+    // halt = 0*100+0 = 0
+    let prog = Arr8 { v0: 100, v1: 0, v2: 100, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(exec_tape_at(prog, 3, 0), 1);
+    1
+}
+
+fn test_jz() -> Int {
+    // Program: jz(2) → jumps to pc=2 because tape[0]=0, then inc, halt
+    // jz(2) = 500+2 = 502
+    // pc0: jz(502), pc1: inc(100), pc2: inc(100), pc3: inc(100)
+    // tape[0]=0 → jump to pc=2, then inc twice (pc2, pc3) → tape[0]=2
+    let prog = Arr8 { v0: 502, v1: 100, v2: 100, v3: 100, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(exec_tape_at(prog, 4, 0), 2);
+    1
+}
+
+fn main() -> Int {
+    test_simple_inc();
+    test_move_and_inc();
+    test_dec();
+    test_loop();
+    test_multiply();
+    test_halt();
+    test_jz();
+    print("[OK] 485_milestone_aot");
+    0
+}

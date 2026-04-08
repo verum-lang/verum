@@ -1,0 +1,74 @@
+// @test: run
+// @expected-stdout: PostgreSQL connected to localhost:5432/app_db\nUser saved: Alice
+// @tier: 0
+// @level: L2
+// @tags: contexts, provide
+// @description: Tests the provide statement for binding context implementations
+
+context async Database {
+    async fn save_user(user: &User) -> Result<(), DbError>;
+    async fn fetch_user(id: Int) -> Maybe<User>;
+}
+
+type User is {
+    id: Int,
+    name: Text,
+};
+
+type DbError is
+    | ConnectionFailed(Text)
+    | QueryFailed(Text);
+
+// Concrete implementation of Database context
+type PostgresDatabase is {
+    host: Text,
+    port: Int,
+    database: Text,
+    connected: Bool,
+};
+
+implement PostgresDatabase {
+    async fn connect(host: Text, port: Int, database: Text) -> Self {
+        println("PostgreSQL connected to " + host + ":" + port.to_text() + "/" + database);
+        Self {
+            host,
+            port,
+            database,
+            connected: true,
+        }
+    }
+}
+
+// Implement the Database context for PostgresDatabase
+implement Database for PostgresDatabase {
+    async fn save_user(user: &User) -> Result<(), DbError> {
+        println("User saved: " + user.name);
+        Ok(())
+    }
+
+    async fn fetch_user(id: Int) -> Maybe<User> {
+        Some(User { id, name: "Alice" })
+    }
+}
+
+// Function that uses the Database context
+async fn create_user(name: Text) -> Result<User, DbError> using [Database] {
+    let user = User { id: 1, name };
+    match Database.save_user(&user).await {
+        Ok(_) => Ok(user),
+        Err(e) => Err(e),
+    }
+}
+
+async fn main() {
+    // Provide the Database context with a PostgreSQL implementation
+    provide Database = PostgresDatabase.connect("localhost", 5432, "app_db").await;
+
+    // Now we can call functions that use the Database context
+    let result = create_user("Alice").await;
+
+    match result {
+        Ok(user) => assert(user.name == "Alice"),
+        Err(e) => panic("Failed to create user"),
+    }
+}

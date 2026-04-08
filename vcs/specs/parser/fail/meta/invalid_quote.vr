@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, meta, quote, unclosed, error
+// @description: Test unclosed quote expression block
+// @expected-error: E011
+
+meta fn gen_code() {
+    quote {
+        let x = 42;
+}

@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, block, semicolon, error
+// @description: Test block with only semicolon inside
+// @expected-error: E018
+
+fn test() {
+    {;}
+}

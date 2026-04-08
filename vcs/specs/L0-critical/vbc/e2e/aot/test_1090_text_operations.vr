@@ -1,0 +1,108 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: text, string, operations, formatting
+// @description: Test text/string operations and f-string formatting
+
+fn test_text_concat() -> Int {
+    let a = "Hello";
+    let b = " World";
+    let c = a + b;
+    if c != "Hello World" {
+        print(f"FAIL concat: got '{c}'");
+        return 1;
+    }
+    print("  text_concat: OK");
+    0
+}
+
+fn test_text_len() -> Int {
+    let s = "abcdef";
+    if s.len() != 6 {
+        print(f"FAIL len: {s.len()}, expected 6");
+        return 1;
+    }
+    let empty = "";
+    if empty.len() != 0 {
+        print(f"FAIL len: empty={empty.len()}, expected 0");
+        return 1;
+    }
+    print("  text_len: OK");
+    0
+}
+
+fn test_fstring() -> Int {
+    let x = 42;
+    let y = 100;
+    let s = f"x={x}, y={y}, sum={x + y}";
+    if s != "x=42, y=100, sum=142" {
+        print(f"FAIL fstring: got '{s}'");
+        return 1;
+    }
+    print("  fstring: OK");
+    0
+}
+
+fn test_text_compare() -> Int {
+    let a = "hello";
+    let b = "hello";
+    let c = "world";
+    if a != b {
+        print("FAIL compare: a != b");
+        return 1;
+    }
+    if a == c {
+        print("FAIL compare: a == c");
+        return 1;
+    }
+    print("  text_compare: OK");
+    0
+}
+
+fn test_text_repeat() -> Int {
+    let mut result = "";
+    let mut i = 0;
+    while i < 5 {
+        result = result + "ab";
+        i = i + 1;
+    }
+    if result != "ababababab" {
+        print(f"FAIL repeat: got '{result}'");
+        return 1;
+    }
+    if result.len() != 10 {
+        print(f"FAIL repeat: len={result.len()}, expected 10");
+        return 1;
+    }
+    print("  text_repeat: OK");
+    0
+}
+
+fn test_int_to_text() -> Int {
+    let n = 12345;
+    let s = f"{n}";
+    if s != "12345" {
+        print(f"FAIL int_to_text: got '{s}'");
+        return 1;
+    }
+    print("  int_to_text: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Text Operations Tests:");
+    let mut failures = 0;
+    failures = failures + test_text_concat();
+    failures = failures + test_text_len();
+    failures = failures + test_fstring();
+    failures = failures + test_text_compare();
+    failures = failures + test_text_repeat();
+    failures = failures + test_int_to_text();
+
+    if failures == 0 {
+        print("All text operations tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

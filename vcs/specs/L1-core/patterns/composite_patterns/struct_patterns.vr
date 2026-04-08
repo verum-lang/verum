@@ -1,0 +1,362 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, structs, composite
+//
+// Tests struct patterns for destructuring and matching struct values.
+// Struct patterns allow extracting fields by name with various features.
+
+//------------------------------------------------------------------------------
+// Basic Struct Definitions
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Point3D is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    active: Bool,
+};
+
+type Config is {
+    host: Text,
+    port: Int,
+    timeout: Int,
+    debug: Bool,
+};
+
+type Nested is {
+    point: Point,
+    label: Text,
+};
+
+//------------------------------------------------------------------------------
+// Basic Struct Pattern Destructuring
+//------------------------------------------------------------------------------
+
+/// Simple field extraction.
+fn destructure_point(p: Point) -> Int {
+    match p {
+        Point { x, y } => x + y,
+    }
+}
+
+/// All fields with shorthand syntax.
+fn destructure_all(person: Person) -> Text {
+    match person {
+        Person { name, age, active } => {
+            if active {
+                f"{name} ({age}) - active"
+            } else {
+                f"{name} ({age}) - inactive"
+            }
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+// Field Renaming in Patterns
+//------------------------------------------------------------------------------
+
+/// Rename fields during destructure.
+fn rename_fields(p: Point) -> Int {
+    match p {
+        Point { x: px, y: py } => px * py,
+    }
+}
+
+/// Mix of shorthand and rename.
+fn mixed_rename(p: Point3D) -> Int {
+    match p {
+        Point3D { x, y: vertical, z } => x + vertical + z,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Rest Pattern (..) in Structs
+//------------------------------------------------------------------------------
+
+/// Ignore some fields with rest.
+fn struct_rest(config: Config) -> Text {
+    match config {
+        Config { host, port, .. } => f"{host}:{port}",
+    }
+}
+
+/// Extract just one field.
+fn struct_single_field(person: Person) -> Int {
+    match person {
+        Person { age, .. } => age,
+    }
+}
+
+/// Rest with renamed field.
+fn struct_rest_renamed(config: Config) -> Int {
+    match config {
+        Config { timeout: t, .. } => t,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Literal Patterns in Struct Fields
+//------------------------------------------------------------------------------
+
+/// Match specific field values.
+fn struct_literal_fields(p: Point) -> Text {
+    match p {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x: 0, y } => f"on y-axis at {y}",
+        Point { x, y: 0 } => f"on x-axis at {x}",
+        Point { x, y } => f"({x}, {y})",
+    }
+}
+
+/// Multiple literal matches.
+fn struct_multi_literal(config: Config) -> Text {
+    match config {
+        Config { port: 80, debug: false, .. } => "production http",
+        Config { port: 443, debug: false, .. } => "production https",
+        Config { port: 80, debug: true, .. } => "development http",
+        Config { port: 443, debug: true, .. } => "development https",
+        Config { debug: true, .. } => "development other",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Struct Patterns
+//------------------------------------------------------------------------------
+
+/// Destructure nested structs.
+fn nested_struct(n: Nested) -> Int {
+    match n {
+        Nested { point: Point { x, y }, label } => {
+            x + y + label.len() as Int
+        }
+    }
+}
+
+/// Partially destructure nested.
+fn nested_partial(n: Nested) -> Text {
+    match n {
+        Nested { point: Point { x, .. }, label } => f"{label}: x={x}",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Struct Patterns with Guards
+//------------------------------------------------------------------------------
+
+/// Guard conditions on struct fields.
+fn struct_guard(p: Point) -> Text {
+    match p {
+        Point { x, y } if x == y => "on diagonal",
+        Point { x, y } if x == -y => "on anti-diagonal",
+        Point { x, y } if x > 0 && y > 0 => "first quadrant",
+        Point { x, y } if x < 0 && y > 0 => "second quadrant",
+        _ => "other",
+    }
+}
+
+/// Complex guard with computed condition.
+fn struct_complex_guard(p: Point) -> Text {
+    match p {
+        Point { x, y } if x * x + y * y < 100 => "inside circle",
+        Point { x, y } if x * x + y * y == 100 => "on circle",
+        Point { x, y } if x * x + y * y > 100 => "outside circle",
+        _ => "error",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Struct Patterns with Ranges
+//------------------------------------------------------------------------------
+
+/// Range patterns in struct fields.
+fn struct_range(person: Person) -> Text {
+    match person {
+        Person { age: 0..=17, .. } => "minor",
+        Person { age: 18..=64, .. } => "adult",
+        Person { age: 65.., .. } => "senior",
+        _ => "error",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Struct Patterns with Or (|)
+//------------------------------------------------------------------------------
+
+/// Or-pattern with struct literals.
+fn struct_or_pattern(p: Point) -> Text {
+    match p {
+        Point { x: 0, y: 0 } | Point { x: 1, y: 1 } => "special points",
+        Point { x: 0, .. } | Point { y: 0, .. } => "on axis",
+        _ => "general",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Struct Patterns with Bindings (@)
+//------------------------------------------------------------------------------
+
+/// Bind whole struct while destructuring.
+fn struct_at_binding(p: Point) -> (Point, Int) {
+    match p {
+        point @ Point { x, y } => (point, x + y),
+    }
+}
+
+/// Bind nested part.
+fn struct_nested_at(n: Nested) -> (Point, Text) {
+    match n {
+        Nested { point: pt @ Point { .. }, label } => (pt, label),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Mutable Field Bindings
+//------------------------------------------------------------------------------
+
+/// Mutable bindings from struct.
+fn struct_mut_binding(p: Point) -> Point {
+    match p {
+        Point { mut x, mut y } => {
+            x = x * 2;
+            y = y * 2;
+            Point { x, y }
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+// Struct Patterns in Different Contexts
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+/// Struct in let binding.
+fn struct_let_binding(p: Point) -> Int {
+    let Point { x, y } = p;
+    x + y
+}
+
+/// Struct in if-let.
+fn struct_if_let(maybe_point: Maybe<Point>) -> Int {
+    if let Some(Point { x, y }) = maybe_point {
+        x + y
+    } else {
+        0
+    }
+}
+
+/// Struct in function parameter.
+fn struct_param(p: Point) -> Int {
+    let Point { x, y } = p;
+    x * y
+}
+
+/// Struct in closure.
+fn struct_closure() -> Int {
+    let distance = |p: Point| p.x * p.x + p.y * p.y;
+    distance(Point { x: 3, y: 4 })
+}
+
+/// Struct in for loop.
+fn struct_for_loop(points: List<Point>) -> Int {
+    let mut sum = 0;
+    for Point { x, y } in points {
+        sum = sum + x + y;
+    }
+    sum
+}
+
+//------------------------------------------------------------------------------
+// Tuple-like Struct Patterns
+//------------------------------------------------------------------------------
+
+type Pair is (Int, Int);
+type Triple is (Int, Text, Bool);
+
+/// Tuple struct destructuring.
+fn tuple_struct_pattern(p: Pair) -> Int {
+    match p {
+        Pair(a, b) => a + b,
+    }
+}
+
+/// Complex tuple struct.
+fn tuple_struct_complex(t: Triple) -> Text {
+    match t {
+        Triple(n, s, true) => f"{s}: {n} (active)",
+        Triple(n, s, false) => f"{s}: {n} (inactive)",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Basic destructuring
+    assert(destructure_point(Point { x: 3, y: 4 }) == 7);
+
+    // Rename
+    assert(rename_fields(Point { x: 3, y: 4 }) == 12);
+
+    // Rest pattern
+    assert(struct_rest(Config {
+        host: "localhost",
+        port: 8080,
+        timeout: 30,
+        debug: true
+    }) == "localhost:8080");
+
+    // Literal fields
+    assert(struct_literal_fields(Point { x: 0, y: 0 }) == "origin");
+    assert(struct_literal_fields(Point { x: 0, y: 5 }) == "on y-axis at 5");
+    assert(struct_literal_fields(Point { x: 5, y: 0 }) == "on x-axis at 5");
+
+    // Guards
+    assert(struct_guard(Point { x: 5, y: 5 }) == "on diagonal");
+    assert(struct_guard(Point { x: 5, y: -5 }) == "on anti-diagonal");
+    assert(struct_guard(Point { x: 3, y: 4 }) == "first quadrant");
+
+    // Circle
+    assert(struct_complex_guard(Point { x: 6, y: 8 }) == "on circle");
+    assert(struct_complex_guard(Point { x: 3, y: 4 }) == "inside circle");
+
+    // Age range
+    let minor = Person { name: "Alice", age: 16, active: true };
+    let adult = Person { name: "Bob", age: 30, active: true };
+    let senior = Person { name: "Carol", age: 70, active: false };
+    assert(struct_range(minor) == "minor");
+    assert(struct_range(adult) == "adult");
+    assert(struct_range(senior) == "senior");
+
+    // Let binding
+    assert(struct_let_binding(Point { x: 5, y: 6 }) == 11);
+
+    // If-let
+    assert(struct_if_let(Some(Point { x: 3, y: 4 })) == 7);
+    assert(struct_if_let(None) == 0);
+
+    // Function param
+    assert(struct_param(Point { x: 3, y: 4 }) == 12);
+
+    // Closure
+    assert(struct_closure() == 25);
+
+    // Tuple struct
+    assert(tuple_struct_pattern(Pair(3, 4)) == 7);
+}

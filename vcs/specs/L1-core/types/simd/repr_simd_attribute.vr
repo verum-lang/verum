@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: simd, attributes, repr, layout
+// @description: Test @repr(simd) attribute for SIMD vector types
+
+/// @repr(simd) marks types as SIMD vectors requiring special alignment.
+/// Spec: low-level-features.md Section 5.1
+
+/// A 4-element float vector type with SIMD layout
+@repr(simd)
+type Vec4f is [Float; 4];
+
+/// An 8-element float vector (AVX 256-bit)
+@repr(simd)
+type Vec8f is [Float; 8];
+
+/// A 4-element int vector type
+@repr(simd)
+type Vec4i is [Int; 4];
+
+/// SIMD mask type for conditional operations
+@repr(simd_mask)
+type Mask4 is [Bool; 4];
+
+/// Test basic SIMD vector creation
+fn test_simd_vector_creation() {
+    let v4f: Vec4f = [1.0, 2.0, 3.0, 4.0];
+    let v8f: Vec8f = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let v4i: Vec4i = [1, 2, 3, 4];
+}
+
+/// Test SIMD mask creation
+fn test_simd_mask_creation() {
+    let mask: Mask4 = [true, false, true, false];
+}
+
+/// Record type with SIMD alignment requirement
+type SimdRecord is {
+    position: Vec4f,
+    velocity: Vec4f,
+};
+
+fn test_simd_record() {
+    let particle: SimdRecord = SimdRecord {
+        position: [0.0, 0.0, 0.0, 0.0],
+        velocity: [1.0, 0.0, 0.0, 0.0],
+    };
+}
+
+fn main() {
+    test_simd_vector_creation();
+    test_simd_mask_creation();
+    test_simd_record();
+}

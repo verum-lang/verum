@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tags-extra: const-generic
+// @level: L1
+// @tags: dependent-types, type-level-literals, meta-arithmetic
+
+/// Type-level literals and meta arithmetic in type position.
+/// Grammar: type_level_literal = integer_lit | bool_lit | char_lit ;
+///          meta_type_expr = meta_arith_expr ;
+
+// Array types with literal sizes
+type Byte8 is [Int; 8];
+type Word32 is [Int; 32];
+type CacheLine is [Int; 64];
+
+// Generic type with literal parameter
+type SmallVec<T> is [T; 4];
+type Pair<T> is [T; 2];
+
+// Meta arithmetic in type position
+type DoubleBuffer<T, N: meta Int> is [T; N * 2];
+type PaddedArray<T, N: meta Int> is [T; N + 1];
+type HalfSize<T, N: meta Int> is [T; N / 2];
+
+// Complex meta arithmetic
+type BlockMatrix<T, Rows: meta Int, Cols: meta Int, BlockSize: meta Int> is {
+    blocks: [[T; BlockSize * BlockSize]; (Rows / BlockSize) * (Cols / BlockSize)],
+};
+
+// Type-level boolean
+type Flagged<T, Active: meta Bool> is {
+    value: T,
+    active: Bool,
+};
+
+// Functions using type-level sizes
+fn sum_array(arr: [Int; 4]) -> Int {
+    arr[0] + arr[1] + arr[2] + arr[3]
+}
+
+fn dot_product(a: [Float; 3], b: [Float; 3]) -> Float {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn fill<T, N: meta Int>(value: T) -> [T; N] {
+    [value; N]
+}
+
+fn double_array<T, N: meta Int>(arr: [T; N]) -> [T; N * 2] {
+    // Conceptually concatenate arr with itself
+    let mut result = [arr[0]; N * 2];
+    let mut i = 0;
+    while i < N {
+        result[i] = arr[i];
+        result[i + N] = arr[i];
+        i = i + 1;
+    }
+    result
+}
+
+fn main() {
+    let arr: [Int; 4] = [1, 2, 3, 4];
+    assert(sum_array(arr) == 10);
+
+    let a: [Float; 3] = [1.0, 0.0, 0.0];
+    let b: [Float; 3] = [0.0, 1.0, 0.0];
+    assert(dot_product(a, b) == 0.0);
+
+    let zeros: [Int; 8] = fill.<Int, 8>(0);
+    assert(zeros[7] == 0);
+
+    let pair: SmallVec<Int> = [10, 20, 30, 40];
+    assert(pair[3] == 40);
+}

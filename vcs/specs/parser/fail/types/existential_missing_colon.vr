@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, existential, colon, error
+// @description: Test detection of existential type missing colon
+// @expected-error: E050
+
+// Existential type must have colon between identifier and bounds
+fn test() -> some T Display {}

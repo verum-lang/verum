@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, slice-pattern, array-pattern
+// @description: Array patterns with exhaustiveness checking
+
+// Fixed-size array exhaustiveness
+fn array_match(arr: [Int; 3]) -> Text =
+    match arr {
+        [0, 0, 0] => "all zeros",
+        [0, _, _] => "starts zero",
+        [_, 0, _] => "middle zero",
+        [_, _, 0] => "ends zero",
+        [_, _, _] => "no zeros"
+    };
+
+// Fixed-size array with two elements
+fn pair_match(pair: [Int; 2]) -> Text =
+    match pair {
+        [0, 0] => "both zero",
+        [0, _] => "first zero",
+        [_, 0] => "second zero",
+        [_, _] => "neither zero"
+    };
+
+// Fixed-size array in variant context (concrete, not generic)
+type ArrayBox is Boxed([Int; 3]) | Empty;
+
+fn boxed_match(b: ArrayBox) -> Int =
+    match b {
+        Empty => 0,
+        Boxed([x, _, _]) => x
+    };
+
+// Combined with variants using fixed arrays (concrete type, not generic)
+type MaybeIntPair is NoArr | SomeArr([Int; 2]);
+
+fn maybe_array(m: MaybeIntPair) -> Int =
+    match m {
+        NoArr => 0,
+        SomeArr([x, _]) => x
+    };
+
+// Nested array pattern
+fn nested_array(arr: [[Int; 2]; 2]) -> Int =
+    match arr {
+        [[a, _], [_, _]] => a
+    };
+
+// Single element array
+fn single_match(arr: [Int; 1]) -> Int =
+    match arr {
+        [x] => x
+    };
+
+fn main() {
+    assert(array_match([1, 2, 3]) == "no zeros");
+    assert(array_match([0, 1, 2]) == "starts zero");
+    assert(pair_match([0, 5]) == "first zero");
+    assert(pair_match([3, 0]) == "second zero");
+    assert(boxed_match(Boxed([7, 8, 9])) == 7);
+    assert(maybe_array(SomeArr([42, 0])) == 42);
+    assert(maybe_array(NoArr) == 0);
+    assert(single_match([99]) == 99);
+    assert(nested_array([[1, 2], [3, 4]]) == 1);
+}

@@ -1,0 +1,169 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: builder-pattern, recursive-tree, sum-type-methods, closures, functional
+// @description: Advanced production patterns: builder, recursive tree methods, functional ops
+
+type Color is Red | Green | Blue;
+
+implement Color {
+    fn name(&self) -> Text {
+        match self {
+            Red => "red",
+            Green => "green",
+            Blue => "blue",
+        }
+    }
+}
+
+// Builder pattern
+type QueryBuilder is { table: Text, cond_count: Int, limit_val: Int };
+
+implement QueryBuilder {
+    fn new(table: Text) -> QueryBuilder {
+        QueryBuilder { table: table, cond_count: 0, limit_val: 0 }
+    }
+    fn where_clause(&self, cond: Text) -> QueryBuilder {
+        QueryBuilder { table: self.table, cond_count: self.cond_count + 1, limit_val: self.limit_val }
+    }
+    fn limit(&self, n: Int) -> QueryBuilder {
+        QueryBuilder { table: self.table, cond_count: self.cond_count, limit_val: n }
+    }
+}
+
+// Recursive tree with methods
+type Tree is Leaf(Int) | Node(Heap<Tree>, Heap<Tree>);
+
+implement Tree {
+    @allow(unbounded_recursion)
+    fn sum(&self) -> Int {
+        match self {
+            Leaf(v) => v,
+            Node(left, right) => left.sum() + right.sum(),
+        }
+    }
+    @allow(unbounded_recursion)
+    fn depth(&self) -> Int {
+        match self {
+            Leaf(_) => 1,
+            Node(left, right) => {
+                let ld = left.depth();
+                let rd = right.depth();
+                if (ld > rd) { 1 + ld } else { 1 + rd }
+            }
+        }
+    }
+}
+
+fn map_list(lst: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while (i < lst.len()) {
+        result.push(f(lst[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(lst: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while (i < lst.len()) {
+        if (pred(lst[i])) {
+            result.push(lst[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_list(lst: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while (i < lst.len()) {
+        acc = f(acc, lst[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    let mut passed = 0;
+    let mut failed = 0;
+
+    // Test 1: Sum type method returning Text
+    let c = Red;
+    if (c.name() == "red") { passed = passed + 1; }
+    else { print(f"FAIL 1: name={c.name()}"); failed = failed + 1; }
+
+    // Test 2: Builder pattern (method chaining)
+    let q = QueryBuilder.new("users")
+        .where_clause("age > 18")
+        .where_clause("active = true")
+        .limit(10);
+    if (q.cond_count == 2 && q.limit_val == 10) { passed = passed + 1; }
+    else { print(f"FAIL 2: conds={q.cond_count} limit={q.limit_val}"); failed = failed + 1; }
+
+    // Test 3: Recursive tree sum
+    let tree = Node(
+        Heap(Node(Heap(Leaf(1)), Heap(Leaf(2)))),
+        Heap(Node(Heap(Leaf(3)), Heap(Leaf(4))))
+    );
+    if (tree.sum() == 10) { passed = passed + 1; }
+    else { print(f"FAIL 3: sum={tree.sum()}"); failed = failed + 1; }
+
+    // Test 4: Recursive tree depth
+    if (tree.depth() == 3) { passed = passed + 1; }
+    else { print(f"FAIL 4: depth={tree.depth()}"); failed = failed + 1; }
+
+    // Test 5: Map over list with closure
+    let mut nums = List.new();
+    nums.push(1);
+    nums.push(2);
+    nums.push(3);
+    nums.push(4);
+    let doubled = map_list(nums, |x: Int| -> Int { x * 2 });
+    if (doubled.len() == 4 && doubled[0] == 2 && doubled[3] == 8) { passed = passed + 1; }
+    else { print(f"FAIL 5: doubled[0]={doubled[0]} [3]={doubled[3]}"); failed = failed + 1; }
+
+    // Test 6: Filter list with closure
+    let evens = filter_list(doubled, |x: Int| -> Bool { x > 4 });
+    if (evens.len() == 2 && evens[0] == 6 && evens[1] == 8) { passed = passed + 1; }
+    else { print(f"FAIL 6: evens len={evens.len()}"); failed = failed + 1; }
+
+    // Test 7: Fold list
+    let sum = fold_list(doubled, 0, |acc: Int, x: Int| -> Int { acc + x });
+    if (sum == 20) { passed = passed + 1; }
+    else { print(f"FAIL 7: sum={sum}"); failed = failed + 1; }
+
+    // Test 8: Chained functional ops
+    let result = fold_list(
+        filter_list(
+            map_list(nums, |x: Int| -> Int { x * x }),
+            |x: Int| -> Bool { x > 4 }
+        ),
+        0,
+        |acc: Int, x: Int| -> Int { acc + x }
+    );
+    // nums=[1,2,3,4], squared=[1,4,9,16], filtered=[9,16], sum=25
+    if (result == 25) { passed = passed + 1; }
+    else { print(f"FAIL 8: result={result}"); failed = failed + 1; }
+
+    // Test 9: Heap-wrapped tree methods
+    let htree = Heap(Node(Heap(Leaf(10)), Heap(Leaf(20))));
+    if (htree.sum() == 30) { passed = passed + 1; }
+    else { print(f"FAIL 9: htree.sum={htree.sum()}"); failed = failed + 1; }
+
+    // Test 10: Multiple Color variant methods
+    let g = Green;
+    let b = Blue;
+    if (g.name() == "green" && b.name() == "blue") { passed = passed + 1; }
+    else { print(f"FAIL 10"); failed = failed + 1; }
+
+    if (failed > 0) {
+        print(f"1007_advanced_production_patterns: {passed}/{passed + failed} passed");
+        return 1;
+    }
+    print(f"1007_advanced_production_patterns: PASS ({passed}/{passed} tests)");
+    0
+}

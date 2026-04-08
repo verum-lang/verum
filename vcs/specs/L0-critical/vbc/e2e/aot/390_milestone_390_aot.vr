@@ -1,0 +1,475 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, integration, string-hashing, modular-arithmetic, dp, graph
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Milestone 390 integration test combining:
+// 1. String hashing (polynomial rolling hash)
+// 2. Modular arithmetic (exp, inverse, CRT)
+// 3. Dynamic programming (knapsack, LCS)
+// 4. Graph theory (topological sort, shortest path)
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn min_val(a: Int, bv: Int) -> Int { if a < bv { a } else { bv } }
+fn max_val(a: Int, bv: Int) -> Int { if a > bv { a } else { bv } }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// ========== Part 1: String Hashing ==========
+
+// Polynomial rolling hash: hash = sum(char[i] * base^i) mod modulus
+// chars stored as integers in Arr8
+fn poly_hash(chars: Arr8, n: Int, base: Int, modulus: Int) -> Int {
+    let mut h = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < n {
+        h = (h + a8_get(chars, i) * power) % modulus;
+        power = (power * base) % modulus;
+        i = i + 1;
+    }
+    h
+}
+
+// Rolling hash: remove leftmost char, add new rightmost char
+fn roll_hash(old_hash: Int, old_char: Int, new_char: Int, base: Int, base_pow_n: Int, modulus: Int) -> Int {
+    let mut h = (old_hash - old_char + modulus) % modulus;
+    h = (h * mod_inv(base, modulus)) % modulus;
+    h = (h + new_char * base_pow_n) % modulus;
+    h
+}
+
+// ========== Part 2: Modular Arithmetic ==========
+
+fn mod_exp(base: Int, exp: Int, modulus: Int) -> Int {
+    if modulus == 1 { return 0; }
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % modulus;
+        }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+fn gcd(a: Int, bv: Int) -> Int {
+    let mut x = a;
+    let mut y = bv;
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// Modular inverse using Fermat's little theorem (p must be prime)
+fn mod_inv(a: Int, p: Int) -> Int {
+    mod_exp(a, p - 2, p)
+}
+
+// Chinese Remainder Theorem for 2 congruences:
+// x ≡ r1 (mod m1), x ≡ r2 (mod m2)
+// Requires gcd(m1, m2) = 1
+fn crt2(r1: Int, m1: Int, r2: Int, m2: Int) -> Int {
+    let inv = mod_inv(m1 % m2, m2);
+    let x = r1 + m1 * (((r2 - r1) % m2 + m2) % m2 * inv % m2);
+    x % (m1 * m2)
+}
+
+// ========== Part 3: Dynamic Programming ==========
+
+// 0-1 Knapsack: items have weight and value, capacity is limited
+// Using 1D DP array (capacity up to 8)
+fn knapsack(weights: Arr8, values: Arr8, n: Int, capacity: Int) -> Int {
+    let mut dp = a8_zero(); // dp[j] = max value with capacity j
+    let mut i = 0;
+    while i < n {
+        let w = a8_get(weights, i);
+        let v = a8_get(values, i);
+        let mut j = capacity;
+        while j >= w {
+            let with_item = a8_get(dp, j - w) + v;
+            let without = a8_get(dp, j);
+            dp = a8_set(dp, j, max_val(with_item, without));
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+    a8_get(dp, capacity)
+}
+
+// Longest Common Subsequence of two sequences (up to length 8 each)
+// Uses a 2D grid flattened into two rows
+fn lcs_length(a: Arr8, a_len: Int, b: Arr8, b_len: Int) -> Int {
+    let mut prev = a8_zero();
+    let mut i = 1;
+    while i <= a_len {
+        let mut curr = a8_zero();
+        let mut j = 1;
+        while j <= b_len {
+            if a8_get(a, i - 1) == a8_get(b, j - 1) {
+                curr = a8_set(curr, j, a8_get(prev, j - 1) + 1);
+            } else {
+                curr = a8_set(curr, j, max_val(a8_get(curr, j - 1), a8_get(prev, j)));
+            }
+            j = j + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+    a8_get(prev, b_len)
+}
+
+// ========== Part 4: Graph Theory ==========
+
+// Adjacency matrix for up to 6 nodes (stored in Arr8 rows)
+// adj[i*6 + j] = weight of edge i->j (0 means no edge)
+// We use 6 Arr8s for 6 rows (only first 6 elements used)
+
+type Graph6 is {
+    r0: Arr8, r1: Arr8, r2: Arr8,
+    r3: Arr8, r4: Arr8, r5: Arr8,
+    n: Int
+};
+
+fn g6_new(n: Int) -> Graph6 {
+    Graph6 {
+        r0: a8_zero(), r1: a8_zero(), r2: a8_zero(),
+        r3: a8_zero(), r4: a8_zero(), r5: a8_zero(),
+        n: n
+    }
+}
+
+fn g6_get_row(g: Graph6, r: Int) -> Arr8 {
+    if r == 0 { g.r0 } else if r == 1 { g.r1 }
+    else if r == 2 { g.r2 } else if r == 3 { g.r3 }
+    else if r == 4 { g.r4 } else { g.r5 }
+}
+
+fn g6_set_row(g: Graph6, r: Int, row: Arr8) -> Graph6 {
+    Graph6 {
+        r0: if r == 0 { row } else { g.r0 },
+        r1: if r == 1 { row } else { g.r1 },
+        r2: if r == 2 { row } else { g.r2 },
+        r3: if r == 3 { row } else { g.r3 },
+        r4: if r == 4 { row } else { g.r4 },
+        r5: if r == 5 { row } else { g.r5 },
+        n: g.n
+    }
+}
+
+fn g6_edge(g: Graph6, from: Int, to: Int) -> Int {
+    a8_get(g6_get_row(g, from), to)
+}
+
+fn g6_set_edge(g: Graph6, from: Int, to: Int, w: Int) -> Graph6 {
+    let row = a8_set(g6_get_row(g, from), to, w);
+    g6_set_row(g, from, row)
+}
+
+// In-degree of a node
+fn in_degree(g: Graph6, node: Int) -> Int {
+    let mut deg = 0;
+    let mut i = 0;
+    while i < g.n {
+        if g6_edge(g, i, node) > 0 {
+            deg = deg + 1;
+        }
+        i = i + 1;
+    }
+    deg
+}
+
+// Topological sort using Kahn's algorithm (BFS)
+// Returns sorted order in Arr8
+fn topo_sort(g: Graph6) -> Arr8 {
+    let mut in_deg = a8_zero();
+    let mut i = 0;
+    while i < g.n {
+        in_deg = a8_set(in_deg, i, in_degree(g, i));
+        i = i + 1;
+    }
+    // Queue: use Arr8 with front/back pointers
+    let mut queue = a8_zero();
+    let mut front = 0;
+    let mut back = 0;
+    i = 0;
+    while i < g.n {
+        if a8_get(in_deg, i) == 0 {
+            queue = a8_set(queue, back, i);
+            back = back + 1;
+        }
+        i = i + 1;
+    }
+    let mut order = a8_zero();
+    let mut order_idx = 0;
+    while front < back {
+        let u = a8_get(queue, front);
+        front = front + 1;
+        order = a8_set(order, order_idx, u);
+        order_idx = order_idx + 1;
+        let mut v = 0;
+        while v < g.n {
+            if g6_edge(g, u, v) > 0 {
+                let new_deg = a8_get(in_deg, v) - 1;
+                in_deg = a8_set(in_deg, v, new_deg);
+                if new_deg == 0 {
+                    queue = a8_set(queue, back, v);
+                    back = back + 1;
+                }
+            }
+            v = v + 1;
+        }
+    }
+    order
+}
+
+// Dijkstra shortest path from source (simplified for small graphs)
+fn dijkstra(g: Graph6, src: Int) -> Arr8 {
+    let inf = 999999;
+    let mut dist = a8_zero();
+    let mut visited = a8_zero();
+    let mut i = 0;
+    while i < g.n {
+        dist = a8_set(dist, i, inf);
+        i = i + 1;
+    }
+    dist = a8_set(dist, src, 0);
+    let mut count = 0;
+    while count < g.n {
+        // Find unvisited node with min distance
+        let mut u = -1;
+        let mut min_d = inf + 1;
+        i = 0;
+        while i < g.n {
+            if a8_get(visited, i) == 0 {
+                if a8_get(dist, i) < min_d {
+                    min_d = a8_get(dist, i);
+                    u = i;
+                }
+            }
+            i = i + 1;
+        }
+        if u == -1 { return dist; } // unreachable nodes
+        visited = a8_set(visited, u, 1);
+        // Relax neighbors
+        let mut v = 0;
+        while v < g.n {
+            let w = g6_edge(g, u, v);
+            if w > 0 {
+                let new_dist = a8_get(dist, u) + w;
+                if new_dist < a8_get(dist, v) {
+                    dist = a8_set(dist, v, new_dist);
+                }
+            }
+            v = v + 1;
+        }
+        count = count + 1;
+    }
+    dist
+}
+
+// ========== Integration Tests ==========
+
+fn test_hash_basic() {
+    // Hash "abc" = [97, 98, 99] with base=31, mod=1000003
+    let chars = Arr8 { a0: 97, a1: 98, a2: 99, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let h = poly_hash(chars, 3, 31, 1000003);
+    // Same string should give same hash
+    let h2 = poly_hash(chars, 3, 31, 1000003);
+    assert_eq(h, h2);
+    // Different string should (very likely) give different hash
+    let chars2 = Arr8 { a0: 98, a1: 99, a2: 97, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let h3 = poly_hash(chars2, 3, 31, 1000003);
+    assert(h != h3);
+}
+
+fn test_mod_arithmetic() {
+    let p = 97; // prime
+    // Fermat's little theorem
+    assert_eq(mod_exp(2, p - 1, p), 1);
+    assert_eq(mod_exp(5, p - 1, p), 1);
+    // Modular inverse
+    let inv5 = mod_inv(5, p);
+    assert_eq((5 * inv5) % p, 1);
+    let inv3 = mod_inv(3, p);
+    assert_eq((3 * inv3) % p, 1);
+}
+
+fn test_crt() {
+    // x ≡ 2 (mod 3), x ≡ 3 (mod 5) -> x = 8 (mod 15)
+    let x = crt2(2, 3, 3, 5);
+    assert_eq(x % 3, 2);
+    assert_eq(x % 5, 3);
+    assert_eq(x, 8);
+    // x ≡ 1 (mod 7), x ≡ 4 (mod 11) -> x = 15 (mod 77)
+    let y = crt2(1, 7, 4, 11);
+    assert_eq(y % 7, 1);
+    assert_eq(y % 11, 4);
+    assert_eq(y, 15);
+}
+
+fn test_knapsack() {
+    // Items: weight=[2,3,4,5], value=[3,4,5,6], capacity=7
+    let weights = Arr8 { a0: 2, a1: 3, a2: 4, a3: 5, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let values = Arr8 { a0: 3, a1: 4, a2: 5, a3: 6, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let result = knapsack(weights, values, 4, 7);
+    // Best: items 1+2 (weight=7, value=9)
+    assert_eq(result, 9);
+}
+
+fn test_knapsack_tight() {
+    // Single item fits exactly
+    let weights = Arr8 { a0: 5, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let values = Arr8 { a0: 10, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(weights, values, 1, 5), 10);
+    assert_eq(knapsack(weights, values, 1, 4), 0);
+}
+
+fn test_lcs() {
+    // LCS of [1,3,4,1,2] and [1,4,1,2,3]
+    let a = Arr8 { a0: 1, a1: 3, a2: 4, a3: 1, a4: 2, a5: 0, a6: 0, a7: 0 };
+    let b = Arr8 { a0: 1, a1: 4, a2: 1, a3: 2, a4: 3, a5: 0, a6: 0, a7: 0 };
+    let l = lcs_length(a, 5, b, 5);
+    // LCS = [1,4,1,2] or [1,4,2] ... [1,1,2] length 3
+    // Actually: [1,4,1,2] -> check: 1 in both, 4 in both, 1 in both, 2 in both = length 4? No.
+    // a: 1,3,4,1,2  b: 1,4,1,2,3
+    // One LCS: 1, 4, 1, 2 -> length 4? Let's trace:
+    // a[0]=1 matches b[0]=1 -> take
+    // a[2]=4 matches b[1]=4 -> take
+    // a[3]=1 matches b[2]=1 -> take
+    // a[4]=2 matches b[3]=2 -> take
+    // LCS length = 4
+    assert_eq(l, 4);
+}
+
+fn test_lcs_identical() {
+    let a = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(lcs_length(a, 3, a, 3), 3);
+}
+
+fn test_lcs_no_common() {
+    let a = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let b = Arr8 { a0: 4, a1: 5, a2: 6, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(lcs_length(a, 3, b, 3), 0);
+}
+
+fn test_topo_sort() {
+    // DAG: 0->1, 0->2, 1->3, 2->3, 3->4
+    let mut g = g6_new(5);
+    g = g6_set_edge(g, 0, 1, 1);
+    g = g6_set_edge(g, 0, 2, 1);
+    g = g6_set_edge(g, 1, 3, 1);
+    g = g6_set_edge(g, 2, 3, 1);
+    g = g6_set_edge(g, 3, 4, 1);
+    let order = topo_sort(g);
+    // 0 must come first, 4 must come last
+    assert_eq(a8_get(order, 0), 0);
+    assert_eq(a8_get(order, 4), 4);
+    // 3 must come after both 1 and 2
+    // Find positions
+    let mut pos1 = 0;
+    let mut pos2 = 0;
+    let mut pos3 = 0;
+    let mut i = 0;
+    while i < 5 {
+        if a8_get(order, i) == 1 { pos1 = i; }
+        if a8_get(order, i) == 2 { pos2 = i; }
+        if a8_get(order, i) == 3 { pos3 = i; }
+        i = i + 1;
+    }
+    assert(pos3 > pos1);
+    assert(pos3 > pos2);
+}
+
+fn test_dijkstra_basic() {
+    // Graph: 0->1(2), 0->2(4), 1->2(1), 1->3(7), 2->3(3)
+    let mut g = g6_new(4);
+    g = g6_set_edge(g, 0, 1, 2);
+    g = g6_set_edge(g, 0, 2, 4);
+    g = g6_set_edge(g, 1, 2, 1);
+    g = g6_set_edge(g, 1, 3, 7);
+    g = g6_set_edge(g, 2, 3, 3);
+    let dist = dijkstra(g, 0);
+    assert_eq(a8_get(dist, 0), 0);
+    assert_eq(a8_get(dist, 1), 2);
+    assert_eq(a8_get(dist, 2), 3); // 0->1->2 = 3 (cheaper than 0->2 = 4)
+    assert_eq(a8_get(dist, 3), 6); // 0->1->2->3 = 6
+}
+
+fn test_cross_hash_and_mod() {
+    // Hash a sequence, then use mod arithmetic to verify properties
+    let chars = Arr8 { a0: 65, a1: 66, a2: 67, a3: 68, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let p = 1000003;
+    let h = poly_hash(chars, 4, 31, p);
+    // Hash should be in range [0, p)
+    assert(h >= 0);
+    assert(h < p);
+    // mod_exp(31, p-1, p) = 1 (Fermat)
+    assert_eq(mod_exp(31, p - 1, p), 1);
+}
+
+fn test_dp_with_graph() {
+    // Use knapsack to select which edges to include in a path
+    // Then verify with Dijkstra
+    let mut g = g6_new(4);
+    g = g6_set_edge(g, 0, 1, 1);
+    g = g6_set_edge(g, 0, 2, 5);
+    g = g6_set_edge(g, 1, 2, 2);
+    g = g6_set_edge(g, 1, 3, 6);
+    g = g6_set_edge(g, 2, 3, 2);
+    let dist = dijkstra(g, 0);
+    // Shortest to node 3: 0->1->2->3 = 1+2+2 = 5
+    assert_eq(a8_get(dist, 3), 5);
+
+    // LCS between shortest path [0,1,2,3] and another path [0,2,3]
+    let path1 = Arr8 { a0: 0, a1: 1, a2: 2, a3: 3, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let path2 = Arr8 { a0: 0, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let common = lcs_length(path1, 4, path2, 3);
+    // Common subsequence: [0, 2, 3] = length 3
+    assert_eq(common, 3);
+}
+
+fn main() -> Int {
+    test_hash_basic();
+    test_mod_arithmetic();
+    test_crt();
+    test_knapsack();
+    test_knapsack_tight();
+    test_lcs();
+    test_lcs_identical();
+    test_lcs_no_common();
+    test_topo_sort();
+    test_dijkstra_basic();
+    test_cross_hash_and_mod();
+    test_dp_with_graph();
+    print("[OK] 390_milestone_390_aot");
+    0
+}

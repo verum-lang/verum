@@ -1,0 +1,132 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, bisection, numerical, root-finding
+// @timeout: 10000
+
+// Integer-scaled bisection: find root of f(x) = 0
+// All values scaled by 1000 for fixed-point arithmetic
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// f(x) = x^2 - 4000000 (roots at x = ±2000, i.e., ±2.0 scaled by 1000)
+fn f_quadratic(x: Int) -> Int {
+    (x * x) / 1000 - 4000
+}
+
+// f(x) = x^3 / 1000000 - x (roots at 0, ±1000)
+fn f_cubic(x: Int) -> Int {
+    (x * x / 1000 * x) / 1000 - x
+}
+
+// Bisection: find x in [lo, hi] where f(x) ≈ 0
+// Assumes f(lo) < 0 and f(hi) > 0 (or vice versa)
+fn bisect_quadratic(lo: Int, hi: Int, iterations: Int) -> Int {
+    let mut a = lo;
+    let mut b = hi;
+    let mut i = 0;
+    while i < iterations {
+        let mid = (a + b) / 2;
+        let fmid = f_quadratic(mid);
+        let fa = f_quadratic(a);
+        if fmid == 0 { return mid; }
+        // Same sign as f(a)?
+        if (fa > 0) == (fmid > 0) {
+            a = mid;
+        } else {
+            b = mid;
+        }
+        i = i + 1;
+    }
+    (a + b) / 2
+}
+
+fn bisect_cubic(lo: Int, hi: Int, iterations: Int) -> Int {
+    let mut a = lo;
+    let mut b = hi;
+    let mut i = 0;
+    while i < iterations {
+        let mid = (a + b) / 2;
+        let fmid = f_cubic(mid);
+        let fa = f_cubic(a);
+        if fmid == 0 { return mid; }
+        if (fa > 0) == (fmid > 0) {
+            a = mid;
+        } else {
+            b = mid;
+        }
+        i = i + 1;
+    }
+    (a + b) / 2
+}
+
+// Fixed-point iteration: x_{n+1} = g(x_n)
+// For sqrt(4) ≈ 2: use Heron's method x_{n+1} = (x + 4000/x) / 2
+fn heron_sqrt4(initial: Int, iterations: Int) -> Int {
+    let mut x = initial;
+    let mut i = 0;
+    while i < iterations {
+        if x != 0 {
+            x = (x + 4000000 / x) / 2;
+        }
+        i = i + 1;
+    }
+    x
+}
+
+// Newton's method for x^2 = N (scaled)
+// x_{n+1} = (x + N*1000/x) / 2
+fn newton_sqrt(n_scaled: Int, initial: Int, iterations: Int) -> Int {
+    let mut x = initial;
+    let mut i = 0;
+    while i < iterations {
+        if x != 0 {
+            x = (x + n_scaled * 1000 / x) / 2;
+        }
+        i = i + 1;
+    }
+    x
+}
+
+fn main() -> Int {
+    // Bisect quadratic: root at 2000 (= 2.0 * 1000)
+    let root1 = bisect_quadratic(0, 3000, 30);
+    assert_eq(abs_val(root1 - 2000) < 2, true); // within 0.002
+
+    // Bisect from negative side
+    let root2 = bisect_quadratic(-3000, 0, 30);
+    assert_eq(abs_val(root2 + 2000) < 2, true); // root near -2000
+
+    // Bisect cubic: root at 1000 (= 1.0 * 1000) in [500, 1500]
+    let root3 = bisect_cubic(500, 1500, 30);
+    assert_eq(abs_val(root3 - 1000) < 2, true);
+
+    // Bisect cubic: root at -1000 in [-1500, -500]
+    let root4 = bisect_cubic(-1500, -500, 30);
+    assert_eq(abs_val(root4 + 1000) < 2, true);
+
+    // Heron's method for sqrt(4) = 2.0 → 2000 scaled
+    let h1 = heron_sqrt4(3000, 20);
+    assert_eq(abs_val(h1 - 2000) < 2, true);
+
+    // Newton for sqrt(9) = 3.0 → 3000 scaled
+    let n1 = newton_sqrt(9000, 5000, 20);
+    assert_eq(abs_val(n1 - 3000) < 2, true);
+
+    // Newton for sqrt(16) = 4.0 → 4000 scaled
+    let n2 = newton_sqrt(16000, 5000, 20);
+    assert_eq(abs_val(n2 - 4000) < 2, true);
+
+    // Newton for sqrt(1) = 1.0 → 1000 scaled
+    let n3 = newton_sqrt(1000, 2000, 20);
+    assert_eq(abs_val(n3 - 1000) < 2, true);
+
+    // Verify quadratic evaluation
+    assert_eq(f_quadratic(2000), 0); // exact root
+    assert_eq(f_quadratic(0), -4000); // negative at 0
+    assert_eq(f_quadratic(3000), 5000); // positive at 3
+
+    print("DIFF_OK: bisection_method");
+    0
+}

@@ -1,0 +1,88 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, const_eval, arithmetic
+// @description: Test constant evaluation of arithmetic expressions
+
+// =============================================================================
+// BASIC ARITHMETIC
+// =============================================================================
+
+meta fn const_add() -> Int { 2 + 3 }
+meta fn const_sub() -> Int { 10 - 4 }
+meta fn const_mul() -> Int { 6 * 7 }
+meta fn const_div() -> Int { 100 / 5 }
+meta fn const_mod() -> Int { 17 % 5 }
+
+// =============================================================================
+// COMPLEX EXPRESSIONS
+// =============================================================================
+
+meta fn const_precedence() -> Int {
+    2 + 3 * 4  // Should be 14, not 20
+}
+
+meta fn const_parens() -> Int {
+    (2 + 3) * 4  // Should be 20
+}
+
+meta fn const_nested() -> Int {
+    ((1 + 2) * (3 + 4)) / 7
+}
+
+// =============================================================================
+// NEGATIVE NUMBERS
+// =============================================================================
+
+meta fn const_negative() -> Int { -42 }
+meta fn const_neg_add() -> Int { -10 + 5 }
+meta fn const_neg_mul() -> Int { -3 * -4 }
+
+// =============================================================================
+// FACTORIAL (CLASSIC CONST EVAL EXAMPLE)
+// =============================================================================
+
+meta fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+// =============================================================================
+// FIBONACCI (ANOTHER CLASSIC)
+// =============================================================================
+
+meta fn fibonacci(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+// Main test function
+fn main() {
+    // Basic arithmetic
+    @const assert_eq(const_add(), 5);
+    @const assert_eq(const_sub(), 6);
+    @const assert_eq(const_mul(), 42);
+    @const assert_eq(const_div(), 20);
+    @const assert_eq(const_mod(), 2);
+
+    // Complex expressions
+    @const assert_eq(const_precedence(), 14);
+    @const assert_eq(const_parens(), 20);
+    @const assert_eq(const_nested(), 3);
+
+    // Negative numbers
+    @const assert_eq(const_negative(), -42);
+    @const assert_eq(const_neg_add(), -5);
+    @const assert_eq(const_neg_mul(), 12);
+
+    // Factorial
+    @const assert_eq(factorial(0), 1);
+    @const assert_eq(factorial(1), 1);
+    @const assert_eq(factorial(5), 120);
+    @const assert_eq(factorial(10), 3628800);
+
+    // Fibonacci
+    @const assert_eq(fibonacci(0), 0);
+    @const assert_eq(fibonacci(1), 1);
+    @const assert_eq(fibonacci(10), 55);
+}

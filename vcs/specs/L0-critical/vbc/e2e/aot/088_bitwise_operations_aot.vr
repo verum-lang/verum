@@ -1,0 +1,291 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, bitwise, operations, bit-manipulation
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT bitwise AND, OR, XOR, shifts, and bit counting operations
+
+// Bitwise AND
+fn bit_and(a: Int, b: Int) -> Int { a & b }
+
+// Bitwise OR
+fn bit_or(a: Int, b: Int) -> Int { a | b }
+
+// Bitwise XOR
+fn bit_xor(a: Int, b: Int) -> Int { a ^ b }
+
+// Left shift
+fn shl(a: Int, n: Int) -> Int { a << n }
+
+// Right shift (arithmetic)
+fn shr(a: Int, n: Int) -> Int { a >> n }
+
+// Count number of set bits (popcount) for non-negative integers
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x != 0 {
+        count = count + (x & 1);
+        x = x >> 1;
+    }
+    count
+}
+
+// Check if n is a power of 2 (n > 0)
+fn is_power_of_two(n: Int) -> Bool {
+    n > 0 && (n & (n - 1)) == 0
+}
+
+// Get the i-th bit (0-indexed from LSB)
+fn get_bit(n: Int, i: Int) -> Int {
+    (n >> i) & 1
+}
+
+// Set the i-th bit
+fn set_bit(n: Int, i: Int) -> Int {
+    n | (1 << i)
+}
+
+// Clear the i-th bit
+fn clear_bit(n: Int, i: Int) -> Int {
+    n & (!(1 << i))
+}
+
+// Toggle the i-th bit
+fn toggle_bit(n: Int, i: Int) -> Int {
+    n ^ (1 << i)
+}
+
+// Lowest set bit
+fn lowest_set_bit(n: Int) -> Int {
+    n & (0 - n)
+}
+
+// Clear lowest set bit
+fn clear_lowest_bit(n: Int) -> Int {
+    n & (n - 1)
+}
+
+// Swap two bit positions in a value
+fn swap_bits(n: Int, i: Int, j: Int) -> Int {
+    let bi = get_bit(n, i);
+    let bj = get_bit(n, j);
+    if bi == bj { n }
+    else {
+        // Toggle both positions
+        let toggled = n ^ (1 << i) ^ (1 << j);
+        toggled
+    }
+}
+
+// Reverse lower 8 bits
+fn reverse_byte(n: Int) -> Int {
+    let b = n & 255;
+    let mut result = 0;
+    let mut i = 0;
+    while i < 8 {
+        if (b >> i) & 1 == 1 {
+            result = result | (1 << (7 - i));
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Next power of two >= n (for n > 0)
+fn next_power_of_two(n: Int) -> Int {
+    if n <= 1 { 1 }
+    else {
+        let mut p = 1;
+        while p < n {
+            p = p << 1;
+        }
+        p
+    }
+}
+
+// Parity (1 if odd number of set bits, 0 if even)
+fn parity(n: Int) -> Int {
+    popcount(n) % 2
+}
+
+fn main() -> Int {
+    // === Basic AND truth table ===
+    assert_eq(bit_and(0, 0), 0);
+    assert_eq(bit_and(0, 1), 0);
+    assert_eq(bit_and(1, 0), 0);
+    assert_eq(bit_and(1, 1), 1);
+
+    // === Basic OR truth table ===
+    assert_eq(bit_or(0, 0), 0);
+    assert_eq(bit_or(0, 1), 1);
+    assert_eq(bit_or(1, 0), 1);
+    assert_eq(bit_or(1, 1), 1);
+
+    // === Basic XOR truth table ===
+    assert_eq(bit_xor(0, 0), 0);
+    assert_eq(bit_xor(0, 1), 1);
+    assert_eq(bit_xor(1, 0), 1);
+    assert_eq(bit_xor(1, 1), 0);
+
+    // === AND with masks ===
+    assert_eq(bit_and(0xFF, 0x0F), 0x0F);  // 255 & 15 = 15
+    assert_eq(bit_and(0xAA, 0x55), 0);     // alternating bits = 0
+    assert_eq(bit_and(0xFF, 0xFF), 0xFF);
+    assert_eq(bit_and(12, 10), 8);  // 1100 & 1010 = 1000
+
+    // === OR combining ===
+    assert_eq(bit_or(0xF0, 0x0F), 0xFF);   // 240 | 15 = 255
+    assert_eq(bit_or(0xAA, 0x55), 0xFF);   // alternating bits combine
+    assert_eq(bit_or(12, 10), 14);  // 1100 | 1010 = 1110
+
+    // === XOR properties ===
+    assert_eq(bit_xor(42, 42), 0);         // x ^ x = 0
+    assert_eq(bit_xor(42, 0), 42);         // x ^ 0 = x
+    assert_eq(bit_xor(0xFF, 0xFF), 0);
+    assert_eq(bit_xor(12, 10), 6);  // 1100 ^ 1010 = 0110
+
+    // XOR is self-inverse: (a ^ b) ^ b = a
+    assert_eq(bit_xor(bit_xor(123, 456), 456), 123);
+
+    // === Shifts ===
+    assert_eq(shl(1, 0), 1);
+    assert_eq(shl(1, 1), 2);
+    assert_eq(shl(1, 2), 4);
+    assert_eq(shl(1, 3), 8);
+    assert_eq(shl(1, 4), 16);
+    assert_eq(shl(1, 8), 256);
+    assert_eq(shl(1, 10), 1024);
+    assert_eq(shl(3, 4), 48);    // 11 << 4 = 110000 = 48
+    assert_eq(shl(5, 3), 40);    // 101 << 3 = 101000 = 40
+
+    assert_eq(shr(16, 1), 8);
+    assert_eq(shr(16, 2), 4);
+    assert_eq(shr(16, 3), 2);
+    assert_eq(shr(16, 4), 1);
+    assert_eq(shr(255, 4), 15);  // 11111111 >> 4 = 00001111
+    assert_eq(shr(1024, 10), 1);
+
+    // Shift left then right
+    assert_eq(shr(shl(42, 5), 5), 42);
+
+    // === Popcount ===
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(2), 1);
+    assert_eq(popcount(3), 2);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(15), 4);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(1023), 10);
+    assert_eq(popcount(1024), 1);     // 2^10
+
+    // === Power of two ===
+    assert(is_power_of_two(1));
+    assert(is_power_of_two(2));
+    assert(is_power_of_two(4));
+    assert(is_power_of_two(8));
+    assert(is_power_of_two(16));
+    assert(is_power_of_two(256));
+    assert(is_power_of_two(1024));
+    assert(!is_power_of_two(0));
+    assert(!is_power_of_two(3));
+    assert(!is_power_of_two(6));
+    assert(!is_power_of_two(7));
+    assert(!is_power_of_two(12));
+
+    // === Get/Set/Clear/Toggle bits ===
+    // 42 = 101010
+    assert_eq(get_bit(42, 0), 0);
+    assert_eq(get_bit(42, 1), 1);
+    assert_eq(get_bit(42, 2), 0);
+    assert_eq(get_bit(42, 3), 1);
+    assert_eq(get_bit(42, 4), 0);
+    assert_eq(get_bit(42, 5), 1);
+
+    assert_eq(set_bit(42, 0), 43);     // 101010 | 1 = 101011
+    assert_eq(set_bit(42, 2), 46);     // 101010 | 100 = 101110
+    assert_eq(set_bit(42, 1), 42);     // already set, no change
+
+    assert_eq(clear_bit(42, 1), 40);   // 101010 & ~10 = 101000
+    assert_eq(clear_bit(42, 3), 34);   // 101010 & ~1000 = 100010
+    assert_eq(clear_bit(42, 0), 42);   // already clear, no change
+
+    assert_eq(toggle_bit(42, 0), 43);  // set bit 0
+    assert_eq(toggle_bit(42, 1), 40);  // clear bit 1
+    assert_eq(toggle_bit(toggle_bit(42, 3), 3), 42);  // double toggle = identity
+
+    // === Lowest set bit ===
+    assert_eq(lowest_set_bit(12), 4);   // 1100 -> lowest = 100
+    assert_eq(lowest_set_bit(8), 8);    // 1000 -> 1000
+    assert_eq(lowest_set_bit(6), 2);    // 110 -> 10
+    assert_eq(lowest_set_bit(1), 1);
+
+    // === Clear lowest set bit ===
+    assert_eq(clear_lowest_bit(12), 8);  // 1100 -> 1000
+    assert_eq(clear_lowest_bit(8), 0);   // 1000 -> 0
+    assert_eq(clear_lowest_bit(7), 6);   // 111 -> 110
+
+    // === Swap bits ===
+    // 42 = 101010, swap bits 1 and 4: bit1=1, bit4=0 -> 110000 + 001000 + 000010 -> swap -> 010010 = 50... let me compute
+    // 42 = 101010. bit1=1, bit4=0. After swap: bit1=0, bit4=1 -> 111000 = no...
+    // 42 = 32+8+2 = 101010. Toggle bit1 and bit4: 101010 ^ 000010 ^ 010000 = 111000 = 56
+    assert_eq(swap_bits(42, 1, 4), 56);
+    // Swap same positions = no change
+    assert_eq(swap_bits(42, 1, 1), 42);
+    // Swap both set = no change
+    assert_eq(swap_bits(42, 1, 3), 42);
+
+    // === Reverse byte ===
+    assert_eq(reverse_byte(0), 0);
+    assert_eq(reverse_byte(255), 255);
+    assert_eq(reverse_byte(1), 128);    // 00000001 -> 10000000
+    assert_eq(reverse_byte(128), 1);    // 10000000 -> 00000001
+    assert_eq(reverse_byte(0xAA), 0x55); // 10101010 -> 01010101
+    assert_eq(reverse_byte(0x55), 0xAA); // 01010101 -> 10101010
+    // Double reverse = identity
+    assert_eq(reverse_byte(reverse_byte(42)), 42);
+
+    // === Parity ===
+    assert_eq(parity(0), 0);   // 0 set bits
+    assert_eq(parity(1), 1);   // 1 set bit
+    assert_eq(parity(3), 0);   // 2 set bits
+    assert_eq(parity(7), 1);   // 3 set bits
+    assert_eq(parity(15), 0);  // 4 set bits
+    assert_eq(parity(255), 0); // 8 set bits
+
+    // === Next power of two ===
+    assert_eq(next_power_of_two(1), 1);
+    assert_eq(next_power_of_two(2), 2);
+    assert_eq(next_power_of_two(3), 4);
+    assert_eq(next_power_of_two(4), 4);
+    assert_eq(next_power_of_two(5), 8);
+    assert_eq(next_power_of_two(7), 8);
+    assert_eq(next_power_of_two(9), 16);
+    assert_eq(next_power_of_two(100), 128);
+    assert_eq(next_power_of_two(1000), 1024);
+    assert_eq(next_power_of_two(1025), 2048);
+
+    // === Bit manipulation identities ===
+    // De Morgan's: ~(a & b) = ~a | ~b (for lower 8 bits)
+    let a = 0xCA;
+    let b = 0x35;
+    let mask = 0xFF;
+    assert_eq((!(a & b)) & mask, ((!a) | (!b)) & mask);
+
+    // Distributive: a & (b | c) = (a & b) | (a & c)
+    let c = 0x66;
+    assert_eq(a & (b | c), (a & b) | (a & c));
+
+    // XOR swap algorithm
+    let mut x = 42;
+    let mut y = 99;
+    x = x ^ y;
+    y = x ^ y;
+    x = x ^ y;
+    assert_eq(x, 99);
+    assert_eq(y, 42);
+
+    0
+}

@@ -1,0 +1,472 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @tags: performance, cbgr, epoch, region, validation
+// @description: Epoch validation overhead for region safety (target: < 3ns per validation)
+
+/// Epoch Validation Performance Benchmark
+///
+/// This benchmark measures the overhead of epoch validation, which provides
+/// region-based memory safety guarantees in CBGR.
+///
+/// Performance target: < 3ns per epoch validation
+///
+/// How epoch validation works:
+/// 1. Memory is organized into epochs (logical regions)
+/// 2. Each epoch has a validity marker
+/// 3. References store their origin epoch
+/// 4. On access, reference epoch is validated against current state
+/// 5. Invalid epoch = region has been invalidated (e.g., arena reset)
+///
+/// Epoch use cases:
+/// - Arena allocators: reset invalidates all references in epoch
+/// - Stack frames: returning invalidates frame's epoch
+/// - Scoped resources: scope exit invalidates epoch
+///
+/// Memory layout in epoch_caps field (4 bytes):
+/// - epoch_id: 24 bits (16M unique epochs)
+/// - capabilities: 8 bits (read, write, exclusive, etc.)
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Baseline: Access without epoch check
+fn benchmark_no_epoch_check() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let ptr: *const i64 = &*data;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "no_epoch_check",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 0.0,
+        is_baseline: true,
+    }
+}
+
+/// Epoch validation: Same epoch (typical case)
+fn benchmark_epoch_same() -> BenchmarkResult {
+    // Reference and allocation in same epoch
+    let epoch = Epoch.current();
+    let data = epoch.alloc(42i64);
+    let managed_ref = &*data;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*managed_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Epoch check: ref.epoch_id == current_epoch.id
+        // Should be very fast (single integer comparison)
+        black_box(*managed_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_same",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+        is_baseline: false,
+    }
+}
+
+/// Epoch validation: Nested epochs
+fn benchmark_epoch_nested() -> BenchmarkResult {
+    let outer_epoch = Epoch.current();
+    let outer_data = outer_epoch.alloc(1i64);
+
+    let _inner_scope = Epoch.enter();
+    let inner_epoch = Epoch.current();
+    let inner_data = inner_epoch.alloc(2i64);
+
+    let outer_ref = &*outer_data;
+    let inner_ref = &*inner_data;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*outer_ref);
+        black_box(*inner_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 2) {
+        // Both references valid, different epochs
+        black_box(*outer_ref);
+        black_box(*inner_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_nested_access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+        is_baseline: false,
+    }
+}
+
+/// Epoch validation: Arena pattern
+fn benchmark_epoch_arena() -> BenchmarkResult {
+    let arena = Arena.new(1024 * 1024);  // 1MB arena
+
+    // Allocate from arena epoch
+    let mut refs: List<&i64> = List.with_capacity(1000);
+    for i in 0..1000 {
+        refs.push(arena.alloc(i as i64));
+    }
+
+    for _ in 0..(WARMUP_ITERATIONS / 1000) {
+        for r in refs.iter() {
+            black_box(**r);
+        }
+    }
+
+    let start = Instant.now();
+
+    let passes = BENCHMARK_ITERATIONS / 1000;
+    for _ in 0..passes {
+        for r in refs.iter() {
+            // All refs in same arena epoch
+            black_box(**r);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_arena_access",
+        iterations: passes * 1000,
+        per_op_ns: elapsed.as_nanos() as f64 / (passes * 1000) as f64,
+        target_ns: 3.0,
+        is_baseline: false,
+    }
+}
+
+/// Epoch validation: Hot path (branch predictor trained)
+fn benchmark_epoch_hot_path() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let managed_ref = &*data;
+
+    // Train branch predictor heavily
+    for _ in 0..(WARMUP_ITERATIONS * 10) {
+        black_box(*managed_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Branch predictor should predict "valid epoch"
+        black_box(*managed_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_hot_path",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+        is_baseline: false,
+    }
+}
+
+/// Epoch validation: Capability check (read)
+fn benchmark_epoch_read_capability() -> BenchmarkResult {
+    let data = Heap(42i64);
+    // Reference with read capability
+    let read_ref: &i64 = &*data;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*read_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Epoch check includes: has_capability(READ)
+        black_box(*read_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_read_capability",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+        is_baseline: false,
+    }
+}
+
+/// Epoch validation: Capability check (write)
+fn benchmark_epoch_write_capability() -> BenchmarkResult {
+    let mut data = Heap(0i64);
+    // Reference with write capability
+    let write_ref: &mut i64 = &mut *data;
+
+    for i in 0..WARMUP_ITERATIONS {
+        *write_ref = i as i64;
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // Epoch check includes: has_capability(WRITE)
+        *write_ref = i as i64;
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_write_capability",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+        is_baseline: false,
+    }
+}
+
+/// Epoch validation: Multiple epochs active
+fn benchmark_epoch_multiple_active() -> BenchmarkResult {
+    // Create multiple active epochs
+    let epochs: List<Epoch> = (0..10).map(|_| Epoch.new()).collect();
+    let data: List<EpochRef<i64>> = epochs.iter()
+        .enumerate()
+        .map(|(i, e)| e.alloc(i as i64))
+        .collect();
+
+    let refs: List<&i64> = data.iter().map(|d| &**d).collect();
+
+    for _ in 0..(WARMUP_ITERATIONS / 10) {
+        for r in refs.iter() {
+            black_box(**r);
+        }
+    }
+
+    let start = Instant.now();
+
+    let passes = BENCHMARK_ITERATIONS / 10;
+    for _ in 0..passes {
+        for r in refs.iter() {
+            // Each ref validates against its own epoch
+            black_box(**r);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_multiple_active",
+        iterations: passes * 10,
+        per_op_ns: elapsed.as_nanos() as f64 / (passes * 10) as f64,
+        target_ns: 5.0,  // Slightly higher due to different epochs
+        is_baseline: false,
+    }
+}
+
+/// Epoch validation: Combined with generation check
+fn benchmark_epoch_plus_generation() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let managed_ref = &*data;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*managed_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Full CBGR check: generation + epoch + capabilities
+        black_box(*managed_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_plus_generation",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 8.0,  // Combined overhead
+        is_baseline: false,
+    }
+}
+
+/// Epoch validation: Epoch table lookup
+fn benchmark_epoch_table_lookup() -> BenchmarkResult {
+    // Simulate epoch validity table
+    const EPOCH_TABLE_SIZE: usize = 65536;
+    let epoch_table: [bool; EPOCH_TABLE_SIZE] = [true; EPOCH_TABLE_SIZE];
+    let epoch_id: u32 = 12345;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let valid = epoch_table[(epoch_id as usize) % EPOCH_TABLE_SIZE];
+        black_box(valid);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Simple table lookup for epoch validity
+        let valid = epoch_table[(epoch_id as usize) % EPOCH_TABLE_SIZE];
+        if !valid {
+            panic("invalid epoch");
+        }
+        black_box(valid);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_table_lookup",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+        is_baseline: false,
+    }
+}
+
+/// Epoch validation: Bitmap-based validity
+fn benchmark_epoch_bitmap() -> BenchmarkResult {
+    const BITMAP_SIZE: usize = 8192;  // 65536 epochs / 8 bits
+    let validity_bitmap: [u8; BITMAP_SIZE] = [0xFF; BITMAP_SIZE];  // All valid
+    let epoch_id: u32 = 12345;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let byte_idx = (epoch_id / 8) as usize;
+        let bit_idx = epoch_id % 8;
+        let valid = (validity_bitmap[byte_idx] & (1 << bit_idx)) != 0;
+        black_box(valid);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Bitmap lookup for epoch validity
+        let byte_idx = (epoch_id / 8) as usize;
+        let bit_idx = epoch_id % 8;
+        let valid = (validity_bitmap[byte_idx] & (1 << bit_idx)) != 0;
+        if !valid {
+            panic("invalid epoch");
+        }
+        black_box(valid);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_bitmap_check",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+        is_baseline: false,
+    }
+}
+
+fn main() {
+    println("=== Epoch Validation Performance Benchmark ===\n");
+    println("Target: < 3ns per epoch validation\n");
+    println("Epochs provide region-based memory safety.\n");
+
+    let baseline = benchmark_no_epoch_check();
+    let baseline_ns = baseline.per_op_ns;
+
+    let results = [
+        baseline,
+        benchmark_epoch_same(),
+        benchmark_epoch_nested(),
+        benchmark_epoch_arena(),
+        benchmark_epoch_hot_path(),
+        benchmark_epoch_read_capability(),
+        benchmark_epoch_write_capability(),
+        benchmark_epoch_multiple_active(),
+        benchmark_epoch_plus_generation(),
+        benchmark_epoch_table_lookup(),
+        benchmark_epoch_bitmap(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>10} {:>8}",
+            "Benchmark", "Time (ns)", "Overhead", "Target", "Status");
+    println("{}", "-".repeat(75));
+
+    for result in results {
+        let overhead = if result.is_baseline {
+            0.0
+        } else {
+            result.per_op_ns - baseline_ns
+        };
+
+        let passed = result.is_baseline || overhead <= result.target_ns;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.2} {:>12.2} {:>10.1} {:>8}",
+                result.name, result.per_op_ns, overhead, result.target_ns, status);
+    }
+
+    println("");
+    println("Epoch/Capability Layout (4 bytes):");
+    println("  epoch_id:     24 bits (16M unique epochs)");
+    println("  capabilities: 8 bits (READ=1, WRITE=2, EXCLUSIVE=4, ...)");
+    println("");
+    println("Epoch Use Cases:");
+    println("  - Arena reset invalidates all arena references");
+    println("  - Stack frame return invalidates local references");
+    println("  - Scope exit invalidates scoped resources");
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    per_op_ns: f64,
+    target_ns: f64,
+    is_baseline: Bool,
+};
+
+// Helper types
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+type Epoch is { id: u32 };
+implement Epoch {
+    fn new() -> Self { Self { id: 0 } }
+    fn current() -> Self { Self { id: 0 } }
+    fn enter() -> EpochGuard { EpochGuard {} }
+    fn alloc<T>(&self, val: T) -> EpochRef<T> { EpochRef { data: val } }
+}
+
+type EpochGuard is {};
+type EpochRef<T> is { data: T };
+
+type Arena is { size: usize };
+implement Arena {
+    fn new(size: usize) -> Self { Self { size } }
+    fn alloc<T>(&self, val: T) -> &T { todo() }
+}
+
+fn black_box<T>(x: T) -> T { x }

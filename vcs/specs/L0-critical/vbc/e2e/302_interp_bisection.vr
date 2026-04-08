@@ -1,0 +1,356 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, bisection
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Bisection method for root finding.
+// Uses integer-scaled arithmetic (scale factor 1000) to simulate fixed-point.
+// Tests: sqrt, cube root, polynomial roots, and convergence properties.
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn assert_near(actual: Int, expected: Int, tolerance: Int) {
+    let diff = abs_val(actual - expected);
+    assert(diff <= tolerance);
+}
+
+// =============================================================================
+// Bisection for f(x) = x^2 - N (finding sqrt(N))
+// All values scaled by 1000: x represents x/1000
+// f(x_scaled) = x_scaled^2 / 1000 - N * 1000
+// =============================================================================
+
+fn f_sqrt(x_scaled: Int, n: Int) -> Int {
+    // f(x) = x^2 - N, with x = x_scaled/1000
+    // f_scaled = x_scaled^2 / 1000 - N * 1000
+    (x_scaled * x_scaled) / 1000 - n * 1000
+}
+
+fn bisect_sqrt(n: Int) -> Int {
+    // Returns sqrt(n) * 1000
+    if n <= 0 { return 0; }
+    let mut lo = 0;
+    let mut hi = n * 1000; // Upper bound: n itself (works for n >= 1)
+    if hi > 1000000 {
+        hi = 1000000; // Cap for safety
+    }
+    let mut i = 0;
+    while i < 100 {
+        let mid = (lo + hi) / 2;
+        if mid == lo {
+            return mid;
+        }
+        let fmid = f_sqrt(mid, n);
+        if fmid == 0 {
+            return mid;
+        }
+        if fmid < 0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        i = i + 1;
+    }
+    (lo + hi) / 2
+}
+
+fn test_bisect_sqrt() {
+    // sqrt(4) = 2.0 => 2000
+    let s4 = bisect_sqrt(4);
+    assert_near(s4, 2000, 5);
+
+    // sqrt(9) = 3.0 => 3000
+    let s9 = bisect_sqrt(9);
+    assert_near(s9, 3000, 5);
+
+    // sqrt(16) = 4.0 => 4000
+    let s16 = bisect_sqrt(16);
+    assert_near(s16, 4000, 5);
+
+    // sqrt(25) = 5.0 => 5000
+    let s25 = bisect_sqrt(25);
+    assert_near(s25, 5000, 5);
+
+    // sqrt(2) ~ 1.414 => 1414
+    let s2 = bisect_sqrt(2);
+    assert_near(s2, 1414, 5);
+
+    // sqrt(100) = 10.0 => 10000
+    let s100 = bisect_sqrt(100);
+    assert_near(s100, 10000, 5);
+}
+
+// =============================================================================
+// Bisection for f(x) = x^3 - N (finding cbrt(N))
+// x_scaled = x * 1000
+// f = x_scaled^3 / 1000000 - N * 1000
+// =============================================================================
+
+fn f_cbrt(x_scaled: Int, n: Int) -> Int {
+    // x^3 with x = x_scaled/1000
+    // x^3 * 1000 = x_scaled^3 / 1000000
+    (x_scaled * x_scaled / 1000 * x_scaled) / 1000 - n * 1000
+}
+
+fn bisect_cbrt(n: Int) -> Int {
+    // Returns cbrt(n) * 1000
+    if n <= 0 { return 0; }
+    let mut lo = 0;
+    let mut hi = n * 1000;
+    if hi > 1000000 {
+        hi = 1000000;
+    }
+    let mut i = 0;
+    while i < 100 {
+        let mid = (lo + hi) / 2;
+        if mid == lo {
+            return mid;
+        }
+        let fmid = f_cbrt(mid, n);
+        if fmid == 0 {
+            return mid;
+        }
+        if fmid < 0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        i = i + 1;
+    }
+    (lo + hi) / 2
+}
+
+fn test_bisect_cbrt() {
+    // cbrt(8) = 2.0 => 2000
+    let c8 = bisect_cbrt(8);
+    assert_near(c8, 2000, 5);
+
+    // cbrt(27) = 3.0 => 3000
+    let c27 = bisect_cbrt(27);
+    assert_near(c27, 3000, 5);
+
+    // cbrt(64) = 4.0 => 4000
+    let c64 = bisect_cbrt(64);
+    assert_near(c64, 4000, 5);
+
+    // cbrt(125) = 5.0 => 5000
+    let c125 = bisect_cbrt(125);
+    assert_near(c125, 5000, 5);
+}
+
+// =============================================================================
+// Bisection for quadratic: x^2 - 5x + 6 = 0 (roots at x=2, x=3)
+// f_scaled = x_scaled^2 / 1000 - 5 * x_scaled + 6 * 1000
+// =============================================================================
+
+fn f_quadratic(x_scaled: Int) -> Int {
+    (x_scaled * x_scaled) / 1000 - 5 * x_scaled + 6000
+}
+
+fn bisect_quadratic_root1() -> Int {
+    // Find root near x=2 (between 0 and 2.5)
+    let mut lo = 0;   // f(0) = 6000 > 0
+    let mut hi = 2500; // f(2.5) = 6250/1000 - 12500 + 6000 = 6250 - 12500 + 6000 = -250
+    // Actually: f(2500) = 2500*2500/1000 - 5*2500 + 6000 = 6250 - 12500 + 6000 = -250
+    // f(0) = 0 - 0 + 6000 = 6000 > 0
+    // Sign change between lo and hi, so bisection works
+    let mut i = 0;
+    while i < 100 {
+        let mid = (lo + hi) / 2;
+        if mid == lo {
+            return mid;
+        }
+        let fmid = f_quadratic(mid);
+        if fmid == 0 {
+            return mid;
+        }
+        // f(lo) > 0, f(hi) < 0 => root between
+        if fmid > 0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        i = i + 1;
+    }
+    (lo + hi) / 2
+}
+
+fn bisect_quadratic_root2() -> Int {
+    // Find root near x=3 (between 2.5 and 5)
+    let mut lo = 2500; // f(2500) = -250 < 0
+    let mut hi = 5000;  // f(5000) = 25000000/1000 - 25000 + 6000 = 25000 - 25000 + 6000 = 6000 > 0
+    let mut i = 0;
+    while i < 100 {
+        let mid = (lo + hi) / 2;
+        if mid == lo {
+            return mid;
+        }
+        let fmid = f_quadratic(mid);
+        if fmid == 0 {
+            return mid;
+        }
+        // f(lo) < 0, f(hi) > 0
+        if fmid < 0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        i = i + 1;
+    }
+    (lo + hi) / 2
+}
+
+fn test_bisect_quadratic() {
+    let r1 = bisect_quadratic_root1();
+    assert_near(r1, 2000, 5); // x = 2.0
+
+    let r2 = bisect_quadratic_root2();
+    assert_near(r2, 3000, 5); // x = 3.0
+}
+
+// =============================================================================
+// Bisection integer square root (pure integer, no scaling)
+// Find largest x such that x*x <= n
+// =============================================================================
+
+fn bisect_isqrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut lo = 0;
+    let mut hi = n;
+    if hi > 1000000 { hi = 1000000; }
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if mid * mid <= n {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+fn test_bisect_isqrt() {
+    assert_eq(bisect_isqrt(0), 0);
+    assert_eq(bisect_isqrt(1), 1);
+    assert_eq(bisect_isqrt(4), 2);
+    assert_eq(bisect_isqrt(9), 3);
+    assert_eq(bisect_isqrt(16), 4);
+    assert_eq(bisect_isqrt(25), 5);
+    assert_eq(bisect_isqrt(100), 10);
+    assert_eq(bisect_isqrt(2), 1);
+    assert_eq(bisect_isqrt(8), 2);
+    assert_eq(bisect_isqrt(10), 3);
+    assert_eq(bisect_isqrt(50), 7);
+
+    // Verify invariant
+    let mut n = 1;
+    while n <= 200 {
+        let s = bisect_isqrt(n);
+        assert(s * s <= n);
+        assert((s + 1) * (s + 1) > n);
+        n = n + 1;
+    }
+}
+
+// =============================================================================
+// Bisection convergence: count iterations
+// =============================================================================
+
+fn bisect_sqrt_iters(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut lo = 0;
+    let mut hi = n * 1000;
+    if hi > 1000000 { hi = 1000000; }
+    let mut iters = 0;
+    while iters < 200 {
+        let mid = (lo + hi) / 2;
+        if mid == lo {
+            return iters;
+        }
+        let fmid = f_sqrt(mid, n);
+        if fmid == 0 {
+            return iters;
+        }
+        if fmid < 0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        iters = iters + 1;
+    }
+    iters
+}
+
+fn test_bisect_convergence() {
+    // Perfect squares converge immediately (fmid == 0 on first hit)
+    let i4 = bisect_sqrt_iters(4);
+    assert(i4 >= 0);
+    assert(i4 <= 30);
+
+    // Non-perfect squares take more iterations
+    let i2 = bisect_sqrt_iters(2);
+    assert(i2 > 0);  // sqrt(2) is irrational, needs iterations
+    assert(i2 <= 50);
+
+    let i3 = bisect_sqrt_iters(3);
+    assert(i3 > 0);
+    assert(i3 <= 50);
+}
+
+// =============================================================================
+// Bisection for finding zero crossing in integer sequence
+// Given a function that goes from negative to positive, find the transition
+// =============================================================================
+
+fn f_transition(x: Int) -> Int {
+    // f(x) = x - 42 (zero at x = 42)
+    x - 42
+}
+
+fn bisect_transition(lo_init: Int, hi_init: Int) -> Int {
+    let mut lo = lo_init;
+    let mut hi = hi_init;
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if f_transition(mid) < 0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    hi
+}
+
+fn test_bisect_transition() {
+    let z = bisect_transition(0, 100);
+    assert_eq(z, 42);
+
+    let z2 = bisect_transition(0, 1000);
+    assert_eq(z2, 42);
+
+    let z3 = bisect_transition(40, 50);
+    assert_eq(z3, 42);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_bisect_sqrt();
+    test_bisect_cbrt();
+    test_bisect_quadratic();
+    test_bisect_isqrt();
+    test_bisect_convergence();
+    test_bisect_transition();
+    print("[OK] 302_interp_bisection");
+    0
+}

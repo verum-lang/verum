@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, chars, error
+// @description: Test unterminated character literal detection
+// @expected-error: E001
+
+fn test_unterminated_char() {
+    let c = 'a;
+}

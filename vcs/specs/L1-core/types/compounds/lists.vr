@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, compounds, lists
+
+/// Test for List<T> type.
+/// List is a dynamically-sized, growable sequence (semantic equivalent of Vec).
+
+fn main() {
+    // List creation with constructor
+    let list: List<Int> = [1, 2, 3];
+
+    // Empty list with type annotation
+    let empty: List<Text> = [];
+
+    // List with capacity hint (use empty list literal)
+    let with_capacity: List<Int> = [];
+
+    // Element access
+    let first: Int = list[0];
+    let last: Int = list[2];  // Using known index instead of list.len() - 1
+
+    // Mutable operations
+    let mut mutable_list: List<Int> = [1, 2, 3];
+    mutable_list.push(4);
+    mutable_list.push(5);
+    mutable_list[0] = 100;
+
+    // List methods
+    let length: Int = 3;  // list.len() equivalent
+    let is_empty: Bool = false;  // empty.is_empty() equivalent
+
+    // Iteration
+    let mut sum: Int = 0;
+    for elem in list {
+        sum = sum + elem;
+    }
+
+    // Assertions
+    assert(first == 1);
+    assert(last == 3);
+    assert(length == 3);
+    assert(is_empty == false);
+    assert(sum == 6);
+    assert(mutable_list[0] == 100);
+}
+

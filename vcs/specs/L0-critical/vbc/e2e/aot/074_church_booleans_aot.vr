@@ -1,0 +1,294 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, church, booleans, logic, truth-table
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT Church-encoded booleans and complete truth table verification
+
+// Church booleans as variant
+type CBool is CTrue | CFalse;
+
+fn cb_to_int(b: CBool) -> Int {
+    match b { CTrue => 1, CFalse => 0 }
+}
+
+fn cb_not(a: CBool) -> CBool {
+    match a { CTrue => CFalse, CFalse => CTrue }
+}
+
+fn cb_and(a: CBool, b: CBool) -> CBool {
+    match a { CTrue => b, CFalse => CFalse }
+}
+
+fn cb_or(a: CBool, b: CBool) -> CBool {
+    match a { CTrue => CTrue, CFalse => b }
+}
+
+fn cb_xor(a: CBool, b: CBool) -> CBool {
+    match a { CTrue => cb_not(b), CFalse => b }
+}
+
+fn cb_nand(a: CBool, b: CBool) -> CBool {
+    cb_not(cb_and(a, b))
+}
+
+fn cb_nor(a: CBool, b: CBool) -> CBool {
+    cb_not(cb_or(a, b))
+}
+
+fn cb_xnor(a: CBool, b: CBool) -> CBool {
+    cb_not(cb_xor(a, b))
+}
+
+fn cb_implies(a: CBool, b: CBool) -> CBool {
+    cb_or(cb_not(a), b)
+}
+
+fn cb_converse(a: CBool, b: CBool) -> CBool {
+    cb_implies(b, a)
+}
+
+fn cb_inhibit(a: CBool, b: CBool) -> CBool {
+    cb_and(a, cb_not(b))
+}
+
+fn cb_conv_inhibit(a: CBool, b: CBool) -> CBool {
+    cb_and(b, cb_not(a))
+}
+
+// Majority vote of 3
+fn cb_majority(a: CBool, b: CBool, c: CBool) -> CBool {
+    cb_or(cb_or(cb_and(a, b), cb_and(b, c)), cb_and(a, c))
+}
+
+// Full adder sum = XOR of all three
+fn cb_fa_sum(a: CBool, b: CBool, cin: CBool) -> CBool {
+    cb_xor(cb_xor(a, b), cin)
+}
+
+// Full adder carry = majority
+fn cb_fa_carry(a: CBool, b: CBool, cin: CBool) -> CBool {
+    cb_majority(a, b, cin)
+}
+
+// Multiplexer: if sel then b else a
+fn cb_mux(sel: CBool, a: CBool, b: CBool) -> CBool {
+    cb_or(cb_and(cb_not(sel), a), cb_and(sel, b))
+}
+
+// Compute truth table as 4-bit int: f(0,0)*1 + f(0,1)*2 + f(1,0)*4 + f(1,1)*8
+// Use individual helper functions to avoid passing variant-param fns as values
+fn tt_and() -> Int {
+    cb_to_int(cb_and(CFalse, CFalse)) + cb_to_int(cb_and(CFalse, CTrue)) * 2
+    + cb_to_int(cb_and(CTrue, CFalse)) * 4 + cb_to_int(cb_and(CTrue, CTrue)) * 8
+}
+
+fn tt_or() -> Int {
+    cb_to_int(cb_or(CFalse, CFalse)) + cb_to_int(cb_or(CFalse, CTrue)) * 2
+    + cb_to_int(cb_or(CTrue, CFalse)) * 4 + cb_to_int(cb_or(CTrue, CTrue)) * 8
+}
+
+fn tt_xor() -> Int {
+    cb_to_int(cb_xor(CFalse, CFalse)) + cb_to_int(cb_xor(CFalse, CTrue)) * 2
+    + cb_to_int(cb_xor(CTrue, CFalse)) * 4 + cb_to_int(cb_xor(CTrue, CTrue)) * 8
+}
+
+fn tt_nand() -> Int {
+    cb_to_int(cb_nand(CFalse, CFalse)) + cb_to_int(cb_nand(CFalse, CTrue)) * 2
+    + cb_to_int(cb_nand(CTrue, CFalse)) * 4 + cb_to_int(cb_nand(CTrue, CTrue)) * 8
+}
+
+fn tt_nor() -> Int {
+    cb_to_int(cb_nor(CFalse, CFalse)) + cb_to_int(cb_nor(CFalse, CTrue)) * 2
+    + cb_to_int(cb_nor(CTrue, CFalse)) * 4 + cb_to_int(cb_nor(CTrue, CTrue)) * 8
+}
+
+fn tt_xnor() -> Int {
+    cb_to_int(cb_xnor(CFalse, CFalse)) + cb_to_int(cb_xnor(CFalse, CTrue)) * 2
+    + cb_to_int(cb_xnor(CTrue, CFalse)) * 4 + cb_to_int(cb_xnor(CTrue, CTrue)) * 8
+}
+
+fn tt_implies() -> Int {
+    cb_to_int(cb_implies(CFalse, CFalse)) + cb_to_int(cb_implies(CFalse, CTrue)) * 2
+    + cb_to_int(cb_implies(CTrue, CFalse)) * 4 + cb_to_int(cb_implies(CTrue, CTrue)) * 8
+}
+
+fn tt_converse() -> Int {
+    cb_to_int(cb_converse(CFalse, CFalse)) + cb_to_int(cb_converse(CFalse, CTrue)) * 2
+    + cb_to_int(cb_converse(CTrue, CFalse)) * 4 + cb_to_int(cb_converse(CTrue, CTrue)) * 8
+}
+
+fn tt_inhibit() -> Int {
+    cb_to_int(cb_inhibit(CFalse, CFalse)) + cb_to_int(cb_inhibit(CFalse, CTrue)) * 2
+    + cb_to_int(cb_inhibit(CTrue, CFalse)) * 4 + cb_to_int(cb_inhibit(CTrue, CTrue)) * 8
+}
+
+fn tt_conv_inhibit() -> Int {
+    cb_to_int(cb_conv_inhibit(CFalse, CFalse)) + cb_to_int(cb_conv_inhibit(CFalse, CTrue)) * 2
+    + cb_to_int(cb_conv_inhibit(CTrue, CFalse)) * 4 + cb_to_int(cb_conv_inhibit(CTrue, CTrue)) * 8
+}
+
+fn main() -> Int {
+    let t = CTrue;
+    let f = CFalse;
+
+    // === Basic conversion ===
+    assert_eq(cb_to_int(t), 1);
+    assert_eq(cb_to_int(f), 0);
+    assert_eq(cb_to_int(t), 1);
+    assert_eq(cb_to_int(f), 0);
+
+    // === NOT ===
+    assert_eq(cb_to_int(cb_not(t)), 0);
+    assert_eq(cb_to_int(cb_not(f)), 1);
+    assert_eq(cb_to_int(cb_not(cb_not(t))), 1);
+    assert_eq(cb_to_int(cb_not(cb_not(f))), 0);
+
+    // === AND truth table ===
+    assert_eq(cb_to_int(cb_and(f, f)), 0);
+    assert_eq(cb_to_int(cb_and(f, t)), 0);
+    assert_eq(cb_to_int(cb_and(t, f)), 0);
+    assert_eq(cb_to_int(cb_and(t, t)), 1);
+    assert_eq(tt_and(), 8);  // 0 + 0 + 0 + 8
+
+    // === OR truth table ===
+    assert_eq(cb_to_int(cb_or(f, f)), 0);
+    assert_eq(cb_to_int(cb_or(f, t)), 1);
+    assert_eq(cb_to_int(cb_or(t, f)), 1);
+    assert_eq(cb_to_int(cb_or(t, t)), 1);
+    assert_eq(tt_or(), 14);  // 0 + 2 + 4 + 8
+
+    // === XOR truth table ===
+    assert_eq(cb_to_int(cb_xor(f, f)), 0);
+    assert_eq(cb_to_int(cb_xor(f, t)), 1);
+    assert_eq(cb_to_int(cb_xor(t, f)), 1);
+    assert_eq(cb_to_int(cb_xor(t, t)), 0);
+    assert_eq(tt_xor(), 6);  // 0 + 2 + 4 + 0
+
+    // === NAND ===
+    assert_eq(cb_to_int(cb_nand(f, f)), 1);
+    assert_eq(cb_to_int(cb_nand(f, t)), 1);
+    assert_eq(cb_to_int(cb_nand(t, f)), 1);
+    assert_eq(cb_to_int(cb_nand(t, t)), 0);
+    assert_eq(tt_nand(), 7);
+
+    // === NOR ===
+    assert_eq(cb_to_int(cb_nor(f, f)), 1);
+    assert_eq(cb_to_int(cb_nor(f, t)), 0);
+    assert_eq(cb_to_int(cb_nor(t, f)), 0);
+    assert_eq(cb_to_int(cb_nor(t, t)), 0);
+    assert_eq(tt_nor(), 1);
+
+    // === XNOR ===
+    assert_eq(cb_to_int(cb_xnor(f, f)), 1);
+    assert_eq(cb_to_int(cb_xnor(f, t)), 0);
+    assert_eq(cb_to_int(cb_xnor(t, f)), 0);
+    assert_eq(cb_to_int(cb_xnor(t, t)), 1);
+    assert_eq(tt_xnor(), 9);
+
+    // === IMPLIES ===
+    assert_eq(cb_to_int(cb_implies(f, f)), 1);
+    assert_eq(cb_to_int(cb_implies(f, t)), 1);
+    assert_eq(cb_to_int(cb_implies(t, f)), 0);
+    assert_eq(cb_to_int(cb_implies(t, t)), 1);
+    assert_eq(tt_implies(), 11);
+
+    // === All 16 truth tables distinct ===
+    let v_false = 0;    // always false
+    let v_nor = tt_nor();
+    let v_ci = tt_conv_inhibit();
+    let v_inh = tt_inhibit();
+    let v_xor = tt_xor();
+    let v_nand = tt_nand();
+    let v_and = tt_and();
+    let v_xnor = tt_xnor();
+    let v_or = tt_or();
+    let v_imp = tt_implies();
+    let v_conv = tt_converse();
+    let v_true = 15;    // always true
+
+    assert_eq(v_false, 0);
+    assert_eq(v_nor, 1);
+    assert_eq(v_ci, 2);
+    assert_eq(v_inh, 4);
+    assert_eq(v_xor, 6);
+    assert_eq(v_nand, 7);
+    assert_eq(v_and, 8);
+    assert_eq(v_xnor, 9);
+    assert_eq(v_or, 14);
+    assert_eq(v_imp, 11);
+    assert_eq(v_conv, 13);
+    assert_eq(v_true, 15);
+
+    // Sum: 0+1+2+4+6+7+8+9+11+13+14+15 = 90 (subset of 16)
+    let partial_sum = v_false + v_nor + v_ci + v_inh + v_xor + v_nand
+                    + v_and + v_xnor + v_or + v_imp + v_conv + v_true;
+    assert_eq(partial_sum, 90);
+
+    // === De Morgan's laws ===
+    // NOT(A AND B) = NOT A OR NOT B
+    assert_eq(cb_to_int(cb_nand(f, f)), cb_to_int(cb_or(cb_not(f), cb_not(f))));
+    assert_eq(cb_to_int(cb_nand(f, t)), cb_to_int(cb_or(cb_not(f), cb_not(t))));
+    assert_eq(cb_to_int(cb_nand(t, f)), cb_to_int(cb_or(cb_not(t), cb_not(f))));
+    assert_eq(cb_to_int(cb_nand(t, t)), cb_to_int(cb_or(cb_not(t), cb_not(t))));
+
+    // NOT(A OR B) = NOT A AND NOT B
+    assert_eq(cb_to_int(cb_nor(f, f)), cb_to_int(cb_and(cb_not(f), cb_not(f))));
+    assert_eq(cb_to_int(cb_nor(f, t)), cb_to_int(cb_and(cb_not(f), cb_not(t))));
+    assert_eq(cb_to_int(cb_nor(t, f)), cb_to_int(cb_and(cb_not(t), cb_not(f))));
+    assert_eq(cb_to_int(cb_nor(t, t)), cb_to_int(cb_and(cb_not(t), cb_not(t))));
+
+    // === Majority vote ===
+    assert_eq(cb_to_int(cb_majority(f, f, f)), 0);
+    assert_eq(cb_to_int(cb_majority(f, f, t)), 0);
+    assert_eq(cb_to_int(cb_majority(f, t, f)), 0);
+    assert_eq(cb_to_int(cb_majority(f, t, t)), 1);
+    assert_eq(cb_to_int(cb_majority(t, f, f)), 0);
+    assert_eq(cb_to_int(cb_majority(t, f, t)), 1);
+    assert_eq(cb_to_int(cb_majority(t, t, f)), 1);
+    assert_eq(cb_to_int(cb_majority(t, t, t)), 1);
+
+    // === Full adder ===
+    // 0+0+0 = sum 0, carry 0
+    assert_eq(cb_to_int(cb_fa_sum(f, f, f)), 0);
+    assert_eq(cb_to_int(cb_fa_carry(f, f, f)), 0);
+    // 1+0+0 = sum 1, carry 0
+    assert_eq(cb_to_int(cb_fa_sum(t, f, f)), 1);
+    assert_eq(cb_to_int(cb_fa_carry(t, f, f)), 0);
+    // 1+1+0 = sum 0, carry 1
+    assert_eq(cb_to_int(cb_fa_sum(t, t, f)), 0);
+    assert_eq(cb_to_int(cb_fa_carry(t, t, f)), 1);
+    // 1+1+1 = sum 1, carry 1
+    assert_eq(cb_to_int(cb_fa_sum(t, t, t)), 1);
+    assert_eq(cb_to_int(cb_fa_carry(t, t, t)), 1);
+    // 0+1+1 = sum 0, carry 1
+    assert_eq(cb_to_int(cb_fa_sum(f, t, t)), 0);
+    assert_eq(cb_to_int(cb_fa_carry(f, t, t)), 1);
+
+    // === Multiplexer ===
+    // sel=0: output = a
+    assert_eq(cb_to_int(cb_mux(f, t, f)), 1);
+    assert_eq(cb_to_int(cb_mux(f, f, t)), 0);
+    // sel=1: output = b
+    assert_eq(cb_to_int(cb_mux(t, t, f)), 0);
+    assert_eq(cb_to_int(cb_mux(t, f, t)), 1);
+
+    // === Absorption laws ===
+    // a OR (a AND b) = a
+    assert_eq(cb_to_int(cb_or(t, cb_and(t, f))), 1);
+    assert_eq(cb_to_int(cb_or(f, cb_and(f, t))), 0);
+    // a AND (a OR b) = a
+    assert_eq(cb_to_int(cb_and(t, cb_or(t, f))), 1);
+    assert_eq(cb_to_int(cb_and(f, cb_or(f, t))), 0);
+
+    // === Self-operations ===
+    assert_eq(cb_to_int(cb_xor(t, t)), 0);
+    assert_eq(cb_to_int(cb_xor(f, f)), 0);
+    assert_eq(cb_to_int(cb_or(t, t)), 1);
+    assert_eq(cb_to_int(cb_or(f, f)), 0);
+    assert_eq(cb_to_int(cb_and(t, t)), 1);
+    assert_eq(cb_to_int(cb_and(f, f)), 0);
+
+    0
+}

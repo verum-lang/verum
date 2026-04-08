@@ -1,0 +1,202 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, bitwise
+// @timeout: 10000
+
+/// Bitwise operations for differential testing.
+/// All bit operations must produce identical results across tiers.
+
+fn main() {
+    test_basic_bitwise();
+    test_shifts();
+    test_masks();
+    test_flags();
+    test_signed_unsigned();
+}
+
+/// Basic bitwise operations
+fn test_basic_bitwise() {
+    println("=== Basic Bitwise ===");
+
+    let a = 0b1010;  // 10
+    let b = 0b1100;  // 12
+
+    println(f"a = {a} (0b{a:b})");
+    println(f"b = {b} (0b{b:b})");
+
+    // AND
+    let and_result = a & b;  // 0b1000 = 8
+    println(f"a & b = {and_result} (0b{and_result:b})");
+
+    // OR
+    let or_result = a | b;  // 0b1110 = 14
+    println(f"a | b = {or_result} (0b{or_result:b})");
+
+    // XOR
+    let xor_result = a ^ b;  // 0b0110 = 6
+    println(f"a ^ b = {xor_result} (0b{xor_result:b})");
+
+    // NOT
+    let not_a: U8 = ~(a as U8);
+    println(f"~a (U8) = {not_a} (0b{not_a:b})");
+
+    // Combined
+    let combined = (a | b) & ~(a & b);  // XOR via AND/OR/NOT
+    println(f"XOR via AND/OR/NOT = {combined}");
+}
+
+/// Shift operations
+fn test_shifts() {
+    println("\n=== Shifts ===");
+
+    // Left shift
+    for shift in 0..8 {
+        let result = 1 << shift;
+        println(f"1 << {shift} = {result}");
+    }
+
+    // Right shift
+    let val = 256;
+    for shift in 0..9 {
+        let result = val >> shift;
+        println(f"{val} >> {shift} = {result}");
+    }
+
+    // Signed right shift (arithmetic)
+    let neg: I32 = -16;
+    println(f"-16 >> 1 = {neg >> 1}");
+    println(f"-16 >> 2 = {neg >> 2}");
+    println(f"-16 >> 3 = {neg >> 3}");
+
+    // Unsigned right shift
+    let unsigned: U32 = 0x80000000;
+    println(f"0x80000000 >> 1 (unsigned) = 0x{unsigned >> 1:x}");
+
+    // Shift by zero
+    println(f"42 << 0 = {42 << 0}");
+    println(f"42 >> 0 = {42 >> 0}");
+}
+
+/// Mask operations
+fn test_masks() {
+    println("\n=== Masks ===");
+
+    fn get_bits(value: Int, start: Int, count: Int) -> Int {
+        let mask = (1 << count) - 1;
+        (value >> start) & mask
+    }
+
+    fn set_bits(value: Int, start: Int, count: Int, new_bits: Int) -> Int {
+        let mask = ((1 << count) - 1) << start;
+        (value & ~mask) | ((new_bits << start) & mask)
+    }
+
+    let value = 0b11010110;
+    println(f"value = 0b{value:b}");
+
+    // Extract bits
+    println(f"bits 0-2 = {get_bits(value, 0, 3)}");
+    println(f"bits 2-4 = {get_bits(value, 2, 3)}");
+    println(f"bits 4-6 = {get_bits(value, 4, 3)}");
+
+    // Set bits
+    let modified = set_bits(value, 2, 3, 0b111);
+    println(f"set bits 2-4 to 111: 0b{modified:b}");
+
+    // Common masks
+    let byte_mask = 0xFF;
+    let nibble_mask = 0x0F;
+
+    let sample: U32 = 0x12345678;
+    println(f"sample = 0x{sample:x}");
+    println(f"low byte = 0x{sample & byte_mask:x}");
+    println(f"low nibble = 0x{sample & nibble_mask:x}");
+    println(f"high nibble of low byte = 0x{(sample >> 4) & nibble_mask:x}");
+}
+
+/// Flag manipulation
+fn test_flags() {
+    println("\n=== Flags ===");
+
+    // Define flags
+    let FLAG_A = 0b0001;
+    let FLAG_B = 0b0010;
+    let FLAG_C = 0b0100;
+    let FLAG_D = 0b1000;
+
+    let mut flags = 0;
+
+    // Set flags
+    flags = flags | FLAG_A;
+    println(f"after setting A: 0b{flags:04b}");
+
+    flags = flags | FLAG_C;
+    println(f"after setting C: 0b{flags:04b}");
+
+    // Check flags
+    println(f"has A: {(flags & FLAG_A) != 0}");
+    println(f"has B: {(flags & FLAG_B) != 0}");
+    println(f"has C: {(flags & FLAG_C) != 0}");
+
+    // Toggle flag
+    flags = flags ^ FLAG_A;
+    println(f"after toggling A: 0b{flags:04b}");
+    flags = flags ^ FLAG_A;
+    println(f"after toggling A again: 0b{flags:04b}");
+
+    // Clear flag
+    flags = flags & ~FLAG_C;
+    println(f"after clearing C: 0b{flags:04b}");
+
+    // Set multiple
+    flags = FLAG_A | FLAG_B | FLAG_D;
+    println(f"A|B|D: 0b{flags:04b}");
+
+    // Check if any set
+    println(f"any of B|C set: {(flags & (FLAG_B | FLAG_C)) != 0}");
+
+    // Check if all set
+    let required = FLAG_A | FLAG_B;
+    println(f"all of A|B set: {(flags & required) == required}");
+}
+
+/// Signed vs unsigned behavior
+fn test_signed_unsigned() {
+    println("\n=== Signed vs Unsigned ===");
+
+    // Same bit pattern, different interpretation
+    let signed: I8 = -1;
+    let unsigned: U8 = 255;
+
+    println(f"I8(-1) bits = 0b{signed as U8:b}");
+    println(f"U8(255) bits = 0b{unsigned:b}");
+
+    // Comparison
+    println(f"I8(-1) < 0: {signed < 0}");
+    println(f"U8(255) > 0: {unsigned > 0}");
+
+    // Shift behavior
+    let neg: I32 = -8;
+    let pos: U32 = 0xFFFFFFF8;
+
+    println(f"I32(-8) >> 1 = {neg >> 1}");  // Arithmetic: -4
+    println(f"U32(same bits) >> 1 = 0x{pos >> 1:x}");  // Logical
+
+    // Overflow
+    let max_i8: I8 = 127;
+    let max_u8: U8 = 255;
+
+    // Note: in Verum, overflow behavior depends on configuration
+    println(f"I8 max: {max_i8}");
+    println(f"U8 max: {max_u8}");
+
+    // Sign extension
+    let small: I8 = -5;
+    let extended: I32 = small as I32;
+    println(f"I8(-5) as I32 = {extended}");
+
+    let small_u: U8 = 251;
+    let extended_u: U32 = small_u as U32;
+    println(f"U8(251) as U32 = {extended_u}");
+}

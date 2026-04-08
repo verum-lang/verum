@@ -1,0 +1,223 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, quote, hygiene, capture, nested, scopes
+// @description: Tests proper handling of captures in nested quote contexts
+
+// =============================================================================
+// BASIC NESTED CAPTURE
+// =============================================================================
+
+// Inner quote captures from outer quote's scope
+meta fn outer_captures_inner() -> TokenStream {
+    let outer_val = 42;
+    quote {
+        let x = ${outer_val};  // Capture from meta scope
+        quote {
+            // This is stage 2 quote
+            let y = $$x;  // Double-splice to get x from outer quote
+        }
+    }
+}
+
+// =============================================================================
+// MULTI-LEVEL CAPTURE CHAIN
+// =============================================================================
+
+// Value flows through multiple quote levels
+meta fn three_level_capture() -> TokenStream {
+    let base = 10;
+    quote {
+        let level1 = ${base};  // 10
+        quote {
+            let level2 = $$level1;  // Still 10
+            quote {
+                let level3 = $$$level2;  // Still 10
+            }
+        }
+    }
+}
+
+// =============================================================================
+// CAPTURE FROM DIFFERENT SCOPES
+// =============================================================================
+
+// Capture from function parameter scope
+meta fn param_capture(input: Int) -> TokenStream {
+    quote {
+        let captured = ${input};
+        captured * 2
+    }
+}
+
+// Capture from local binding scope
+meta fn local_capture() -> TokenStream {
+    let local = 100;
+    quote {
+        let captured = ${local};
+        captured + 1
+    }
+}
+
+// Capture from loop iteration scope
+meta fn loop_capture() -> TokenStream {
+    let values = [1, 2, 3];
+    let results = [];
+    for v in values {
+        let captured = quote { ${v} };
+        results.push(captured);
+    }
+    quote {
+        $[for r in results { $r }]
+    }
+}
+
+// =============================================================================
+// CAPTURE WITH SHADOWING PRESERVATION
+// =============================================================================
+
+// Captured value preserves its original scope
+meta fn capture_preserves_scope() -> TokenStream {
+    let x = "outer";
+    quote {
+        let captured = ${x};
+        let x = "inner";  // Shadow doesn't affect captured value
+        assert(captured == "outer");
+        assert(x == "inner");
+    }
+}
+
+// =============================================================================
+// CAPTURE IN NESTED FUNCTIONS
+// =============================================================================
+
+// Capture works correctly in nested meta functions
+meta fn outer_fn() -> TokenStream {
+    let shared = 42;
+
+    // Inner function that captures from outer scope
+    meta fn inner_fn(val: Int) -> TokenStream {
+        quote {
+            let result = ${val};
+            result
+        }
+    }
+
+    quote {
+        let a = @inner_fn(${shared});
+        let b = @inner_fn(${shared + 1});
+        a + b  // 42 + 43
+    }
+}
+
+// =============================================================================
+// CAPTURE WITH GENSYM INTERACTION
+// =============================================================================
+
+// Capture interacts correctly with gensym-ed identifiers
+meta fn capture_with_gensym() -> TokenStream {
+    let value = 100;
+    let temp_name = gensym("temp");
+    quote {
+        let $temp_name = ${value};
+        $temp_name + 1
+    }
+}
+
+// =============================================================================
+// CAPTURE IN CONDITIONAL CONTEXTS
+// =============================================================================
+
+// Capture works in conditional quote generation
+meta fn conditional_capture(use_first: Bool) -> TokenStream {
+    let first = 10;
+    let second = 20;
+    if use_first {
+        quote { ${first} }
+    } else {
+        quote { ${second} }
+    }
+}
+
+// =============================================================================
+// CAPTURE IN REPETITION CONTEXTS
+// =============================================================================
+
+// Capture from outer scope in repetition body
+meta fn repetition_capture() -> TokenStream {
+    let multiplier = 2;
+    let values = [1, 2, 3, 4, 5];
+    quote {
+        let results = [];
+        $[for v in values {
+            results.push(${multiplier} * $v);
+        }]
+        results  // [2, 4, 6, 8, 10]
+    }
+}
+
+// =============================================================================
+// CAPTURE TYPE PRESERVATION
+// =============================================================================
+
+// Captured values preserve their types
+meta fn capture_types() -> TokenStream {
+    let int_val: Int = 42;
+    let text_val: Text = "hello";
+    let bool_val: Bool = true;
+    let list_val: List<Int> = [1, 2, 3];
+
+    quote {
+        let a: Int = ${int_val};
+        let b: Text = ${text_val};
+        let c: Bool = ${bool_val};
+        let d: List<Int> = ${list_val};
+        assert(a == 42);
+        assert(b == "hello");
+        assert(c == true);
+        assert(d.len() == 3);
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_outer_captures_inner() {
+    @outer_captures_inner();
+}
+
+fn test_param_capture() {
+    let result = @param_capture(25);
+    assert(result == 50);
+}
+
+fn test_local_capture() {
+    let result = @local_capture();
+    assert(result == 101);
+}
+
+fn test_capture_preserves_scope() {
+    @capture_preserves_scope();
+}
+
+fn test_capture_with_gensym() {
+    let result = @capture_with_gensym();
+    assert(result == 101);
+}
+
+fn test_conditional_capture() {
+    let first = @conditional_capture(true);
+    let second = @conditional_capture(false);
+    assert(first == 10);
+    assert(second == 20);
+}
+
+fn main() {
+    test_outer_captures_inner();
+    test_param_capture();
+    test_local_capture();
+    test_capture_preserves_scope();
+    test_capture_with_gensym();
+    test_conditional_capture();
+}

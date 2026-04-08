@@ -1,0 +1,206 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, collections, stack, queue, custom
+// @description: Test custom generic collection implementations
+
+// Generic stack using List
+type Stack<T> is { items: List<T> };
+
+implement<T> Stack<T> {
+    fn new() -> Stack<T> {
+        Stack { items: List.new() }
+    }
+
+    fn push(&mut self, item: T) {
+        self.items.push(item);
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        self.items.pop()
+    }
+
+    fn peek(&self) -> Maybe<T> {
+        if self.items.len() == 0 {
+            None
+        } else {
+            Some(self.items[self.items.len() - 1])
+        }
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.items.len() == 0
+    }
+}
+
+fn test_stack() -> Int {
+    let mut s = Stack.new();
+    s.push(10);
+    s.push(20);
+    s.push(30);
+
+    if s.len() != 3 {
+        print(f"FAIL stack: len={s.len()}, expected 3");
+        return 1;
+    }
+
+    let top = match s.peek() { Some(v) => v, None => -1 };
+    if top != 30 {
+        print(f"FAIL stack: peek={top}, expected 30");
+        return 1;
+    }
+
+    let p1 = match s.pop() { Some(v) => v, None => -1 };
+    let p2 = match s.pop() { Some(v) => v, None => -1 };
+    if p1 != 30 || p2 != 20 {
+        print(f"FAIL stack: pop={p1},{p2}, expected 30,20");
+        return 1;
+    }
+    if s.len() != 1 {
+        print(f"FAIL stack: after pops len={s.len()}");
+        return 1;
+    }
+    print("  stack: OK");
+    0
+}
+
+// Ring buffer / fixed-size circular buffer
+type RingBuffer is {
+    data: List<Int>,
+    head: Int,
+    tail: Int,
+    size: Int,
+    capacity: Int,
+};
+
+implement RingBuffer {
+    fn new(cap: Int) -> RingBuffer {
+        let mut data = List.new();
+        let mut i = 0;
+        while i < cap {
+            data.push(0);
+            i = i + 1;
+        }
+        RingBuffer { data: data, head: 0, tail: 0, size: 0, capacity: cap }
+    }
+
+    fn push(&mut self, value: Int) -> Bool {
+        if self.size >= self.capacity { return false; }
+        self.data[self.tail] = value;
+        self.tail = (self.tail + 1) % self.capacity;
+        self.size = self.size + 1;
+        true
+    }
+
+    fn pop(&mut self) -> Int {
+        if self.size == 0 { return -1; }
+        let value = self.data[self.head];
+        self.head = (self.head + 1) % self.capacity;
+        self.size = self.size - 1;
+        value
+    }
+
+    fn len(&self) -> Int { self.size }
+    fn is_full(&self) -> Bool { self.size >= self.capacity }
+}
+
+fn test_ring_buffer() -> Int {
+    let mut rb = RingBuffer.new(3);
+
+    rb.push(1);
+    rb.push(2);
+    rb.push(3);
+
+    if !rb.is_full() {
+        print("FAIL ring_buffer: should be full");
+        return 1;
+    }
+
+    // Should fail (full)
+    if rb.push(4) {
+        print("FAIL ring_buffer: push on full should fail");
+        return 1;
+    }
+
+    let v1 = rb.pop();
+    let v2 = rb.pop();
+    if v1 != 1 || v2 != 2 {
+        print(f"FAIL ring_buffer: pop={v1},{v2}, expected 1,2");
+        return 1;
+    }
+
+    // Now can push again (circular)
+    rb.push(4);
+    rb.push(5);
+    let v3 = rb.pop();
+    let v4 = rb.pop();
+    let v5 = rb.pop();
+    if v3 != 3 || v4 != 4 || v5 != 5 {
+        print(f"FAIL ring_buffer: circular pop={v3},{v4},{v5}, expected 3,4,5");
+        return 1;
+    }
+    print("  ring_buffer: OK");
+    0
+}
+
+// Generic pair with methods
+type GPair<A, B> is { first: A, second: B };
+
+implement<A, B> GPair<A, B> {
+    fn new(a: A, b: B) -> GPair<A, B> {
+        GPair { first: a, second: b }
+    }
+}
+
+fn test_generic_pair() -> Int {
+    let p1 = GPair.new(42, 99);
+    if p1.first != 42 || p1.second != 99 {
+        print(f"FAIL generic_pair: ({p1.first}, {p1.second})");
+        return 1;
+    }
+    print("  generic_pair: OK");
+    0
+}
+
+// Array-based linked list using parallel arrays
+fn test_array_linked_list() -> Int {
+    let mut values = List.new();
+    let mut nexts = List.new();
+    values.push(10); nexts.push(1);
+    values.push(20); nexts.push(2);
+    values.push(30); nexts.push(-1);
+
+    // Traverse and sum
+    let mut sum = 0;
+    let mut idx = 0;
+    while idx >= 0 {
+        sum = sum + values[idx];
+        idx = nexts[idx];
+    }
+    if sum != 60 {
+        print(f"FAIL array_linked_list: sum={sum}, expected 60");
+        return 1;
+    }
+    print("  array_linked_list: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Generic Collection Tests:");
+    let mut failures = 0;
+    failures = failures + test_stack();
+    failures = failures + test_ring_buffer();
+    failures = failures + test_generic_pair();
+    failures = failures + test_array_linked_list();
+
+    if failures == 0 {
+        print("All generic collection tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

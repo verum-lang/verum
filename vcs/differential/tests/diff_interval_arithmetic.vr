@@ -1,0 +1,57 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, interval, arithmetic
+// @timeout: 10000
+
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+type Interval is { lo: Int, hi: Int };
+
+fn ivl_add(a: Interval, b: Interval) -> Interval {
+    Interval { lo: a.lo + b.lo, hi: a.hi + b.hi }
+}
+
+fn ivl_sub(a: Interval, b: Interval) -> Interval {
+    Interval { lo: a.lo - b.hi, hi: a.hi - b.lo }
+}
+
+fn ivl_mul(a: Interval, b: Interval) -> Interval {
+    let p1 = a.lo * b.lo;
+    let p2 = a.lo * b.hi;
+    let p3 = a.hi * b.lo;
+    let p4 = a.hi * b.hi;
+    Interval {
+        lo: min2(min2(p1, p2), min2(p3, p4)),
+        hi: max2(max2(p1, p2), max2(p3, p4))
+    }
+}
+
+fn main() -> Int {
+    let a = Interval { lo: 2, hi: 4 };
+    let b = Interval { lo: 1, hi: 3 };
+
+    let sum = ivl_add(a, b);
+    assert_eq(sum.lo, 3);
+    assert_eq(sum.hi, 7);
+
+    let diff = ivl_sub(a, b);
+    assert_eq(diff.lo, -1);
+    assert_eq(diff.hi, 3);
+
+    let prod = ivl_mul(a, b);
+    assert_eq(prod.lo, 2);
+    assert_eq(prod.hi, 12);
+
+    // Negative ranges
+    let c = Interval { lo: -2, hi: 3 };
+    let d = Interval { lo: -1, hi: 4 };
+    let prod2 = ivl_mul(c, d);
+    assert_eq(prod2.lo, -8);
+    assert_eq(prod2.hi, 12);
+
+    print("DIFF_OK: interval_arithmetic");
+    0
+}

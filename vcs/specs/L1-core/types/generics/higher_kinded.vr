@@ -1,0 +1,165 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, higher-kinded-types, hkt
+
+/// Test for higher-kinded types.
+/// HKT allows abstracting over type constructors like List<_>, Maybe<_>.
+
+// Higher-kinded Functor protocol
+// F<_> means F is a type constructor that takes one type parameter
+type Functor is protocol {
+    type F<_>;
+
+    fn map<A, B>(fa: Self.F<A>, f: fn(A) -> B) -> Self.F<B>;
+};
+
+// Higher-kinded Applicative protocol
+type Applicative is protocol extends Functor {
+    fn pure<A>(value: A) -> Self.F<A>;
+    fn apply<A, B>(ff: Self.F<fn(A) -> B>, fa: Self.F<A>) -> Self.F<B>;
+};
+
+// Higher-kinded Monad protocol
+type Monad is protocol extends Applicative {
+    fn flat_map<A, B>(fa: Self.F<A>, f: fn(A) -> Self.F<B>) -> Self.F<B>;
+};
+
+// Higher-kinded Foldable protocol
+type Foldable is protocol {
+    type F<_>;
+
+    fn fold_left<A, B>(fa: Self.F<A>, init: B, f: fn(B, A) -> B) -> B;
+    fn fold_right<A, B>(fa: Self.F<A>, init: B, f: fn(A, B) -> B) -> B;
+};
+
+// Instance type for Maybe
+type MaybeInstance is ();
+
+// Functor instance for Maybe
+implement Functor for MaybeInstance {
+    type F<T> = Maybe<T>;
+
+    fn map<A, B>(fa: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+        match fa {
+            Some(a) => Some(f(a)),
+            None => None,
+        }
+    }
+}
+
+// Applicative instance for Maybe
+implement Applicative for MaybeInstance {
+    fn pure<A>(value: A) -> Maybe<A> {
+        Some(value)
+    }
+
+    fn apply<A, B>(ff: Maybe<fn(A) -> B>, fa: Maybe<A>) -> Maybe<B> {
+        match (ff, fa) {
+            (Some(f), Some(a)) => Some(f(a)),
+            _ => None,
+        }
+    }
+}
+
+// Monad instance for Maybe
+implement Monad for MaybeInstance {
+    fn flat_map<A, B>(fa: Maybe<A>, f: fn(A) -> Maybe<B>) -> Maybe<B> {
+        match fa {
+            Some(a) => f(a),
+            None => None,
+        }
+    }
+}
+
+// Instance type for List
+type ListInstance is ();
+
+// Functor instance for List
+implement Functor for ListInstance {
+    type F<T> = List<T>;
+
+    fn map<A, B>(fa: List<A>, f: fn(A) -> B) -> List<B> {
+        fa.into_iter().map(f).collect()
+    }
+}
+
+// Applicative instance for List
+implement Applicative for ListInstance {
+    fn pure<A>(value: A) -> List<A> {
+        [value]
+    }
+
+    fn apply<A, B>(ff: List<fn(A) -> B>, fa: List<A>) -> List<B> {
+        let mut result: List<B> = [];
+        for f in ff {
+            for i in 0..fa.len() {
+                result.push(f(fa[i]));
+            }
+        }
+        result
+    }
+}
+
+// Monad instance for List
+implement Monad for ListInstance {
+    fn flat_map<A, B>(fa: List<A>, f: fn(A) -> List<B>) -> List<B> {
+        fa.into_iter().flat_map(f).collect()
+    }
+}
+
+// Generic function using Functor
+fn double_all<F: Functor>(fa: F.F<Int>) -> F.F<Int> {
+    F.map(fa, |x| x * 2)
+}
+
+// Generic function using Monad
+fn safe_divide_all<M: Monad>(ma: M.F<Int>, divisor: Int) -> M.F<Int> {
+    M.flat_map(ma, |x| {
+        if divisor == 0 {
+            M.pure(0)
+        } else {
+            M.pure(x / divisor)
+        }
+    })
+}
+
+fn main() {
+    // Using Functor for Maybe
+    let maybe_int: Maybe<Int> = Some(21);
+    let doubled: Maybe<Int> = MaybeInstance.map(maybe_int, |x| x * 2);
+    assert(doubled == Some(42));
+
+    // Using Functor for List
+    let list_int: List<Int> = [1, 2, 3];
+    let doubled_list: List<Int> = ListInstance.map(list_int, |x| x * 2);
+    assert(doubled_list == [2, 4, 6]);
+
+    // Using Monad for Maybe
+    let maybe_value: Maybe<Int> = Some(10);
+    let result: Maybe<Int> = MaybeInstance.flat_map(maybe_value, |x| {
+        if x > 5 {
+            Some(x * 2)
+        } else {
+            None
+        }
+    });
+    assert(result == Some(20));
+
+    // Using Monad for List
+    let list_value: List<Int> = [1, 2, 3];
+    let expanded: List<Int> = ListInstance.flat_map(list_value, |x| [x, x * 10]);
+    assert(expanded == [1, 10, 2, 20, 3, 30]);
+
+    // Using generic Functor function
+    let maybe_result: Maybe<Int> = double_all<MaybeInstance>(Some(5));
+    assert(maybe_result == Some(10));
+
+    let list_result: List<Int> = double_all<ListInstance>([1, 2, 3]);
+    assert(list_result == [2, 4, 6]);
+
+    // Using Applicative
+    let maybe_fn: Maybe<fn(Int) -> Int> = Some(|x| x + 1);
+    let applied: Maybe<Int> = MaybeInstance.apply(maybe_fn, Some(41));
+    assert(applied == Some(42));
+}

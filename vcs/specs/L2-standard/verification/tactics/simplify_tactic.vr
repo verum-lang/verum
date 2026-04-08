@@ -1,0 +1,151 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, tactics, simplify
+// @timeout: 10000
+// @description: Simplify tactic for algebraic simplification
+
+/// Simplify tactic applies algebraic rules to reduce expressions
+
+// Arithmetic simplification
+@verify(proof)
+fn add_zero(x: Int) -> Int {
+    contract#"
+        ensures result == x;
+    ";
+    // Simplifies x + 0 to x
+    x + 0
+}
+
+@verify(proof)
+fn mul_one(x: Int) -> Int {
+    contract#"
+        ensures result == x;
+    ";
+    // Simplifies x * 1 to x
+    x * 1
+}
+
+@verify(proof)
+fn mul_zero(x: Int) -> Int {
+    contract#"
+        ensures result == 0;
+    ";
+    // Simplifies x * 0 to 0
+    x * 0
+}
+
+@verify(proof)
+fn sub_self(x: Int) -> Int {
+    contract#"
+        ensures result == 0;
+    ";
+    // Simplifies x - x to 0
+    x - x
+}
+
+// Boolean simplification
+@verify(proof)
+fn and_true(x: Bool) -> Bool {
+    contract#"
+        ensures result == x;
+    ";
+    x && true
+}
+
+@verify(proof)
+fn or_false(x: Bool) -> Bool {
+    contract#"
+        ensures result == x;
+    ";
+    x || false
+}
+
+@verify(proof)
+fn double_neg(x: Bool) -> Bool {
+    contract#"
+        ensures result == x;
+    ";
+    !!x
+}
+
+// Algebraic identities
+@verify(proof)
+fn distributive(a: Int, b: Int, c: Int) -> Int {
+    contract#"
+        ensures result == a * b + a * c;
+    ";
+    // Simplify: a * (b + c) = a * b + a * c
+    a * (b + c)
+}
+
+@verify(proof)
+fn associative_add(a: Int, b: Int, c: Int) -> Int {
+    contract#"
+        ensures result == a + b + c;
+    ";
+    // Simplify: (a + b) + c = a + (b + c)
+    (a + b) + c
+}
+
+// Comparison simplification
+@verify(proof)
+fn reflexive_eq<T: Eq>(x: &T) -> Bool {
+    contract#"
+        ensures result == true;
+    ";
+    // Simplify: x == x is always true
+    x == x
+}
+
+@verify(proof)
+fn greater_implies_not_less(a: Int, b: Int) -> Bool {
+    contract#"
+        requires a > b;
+        ensures result == false;
+    ";
+    // Simplify: if a > b, then a < b is false
+    a < b
+}
+
+// Expression simplification with substitution
+@verify(proof)
+fn substitute_and_simplify(x: Int) -> Int {
+    contract#"
+        requires x > 0;
+        ensures result == 2 * x;
+    ";
+    // Let binding creates substitution opportunity
+    let y = x;
+    x + y  // Simplifies with y = x to x + x = 2x
+}
+
+// Complex simplification chain
+@verify(proof)
+fn complex_simplify(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result == a + b;
+    ";
+    // Multiple simplifications needed:
+    // (a + 0) + (b * 1) + 0 - 0
+    // = a + b + 0 - 0
+    // = a + b
+    (a + 0) + (b * 1) + 0 - 0
+}
+
+// Floating point simplification (with caveats)
+@verify(proof)
+fn float_identity(x: Float) -> Float {
+    contract#"
+        ensures result == x;
+    ";
+    // Note: FP has special values, but for regular numbers:
+    x * 1.0
+}
+
+fn main() {
+    assert(add_zero(42) == 42);
+    assert(mul_zero(99) == 0);
+    assert(and_true(true) == true);
+    assert(double_neg(true) == true);
+}

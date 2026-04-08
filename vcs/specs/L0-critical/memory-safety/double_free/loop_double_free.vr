@@ -1,0 +1,18 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, double-free, cbgr, loop
+// @description: Tests that CBGR detects double-free in loop context
+
+fn main() {
+    let data = Heap.new(100);
+
+    // Loop that incorrectly tries to free multiple times
+    for i in 0..3 {
+        if i > 0 {
+            // First iteration: valid free
+            // Subsequent iterations: double free
+            drop(data);  // CBGR detects double free on i > 0
+        }
+    }
+}

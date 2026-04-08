@@ -1,0 +1,304 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: memory, cbgr, allocator, heap
+// @description: CBGR memory model integration test - heap, allocator, and memory layout
+
+fn test_layout() -> Int {
+    // Test basic memory layout calculations
+    let l1 = 16;  // Size of a small allocation
+    let l2 = 8;   // Alignment
+
+    // Power of 2 alignment check
+    if l2 <= 0 || (l2 & (l2 - 1)) != 0 {
+        print("FAIL: alignment check");
+        return 1;
+    }
+
+    // Aligned size: round up to next alignment boundary
+    let aligned_size = (l1 + l2 - 1) & (0 - l2);
+    if aligned_size != 16 {
+        print(f"FAIL: expected aligned_size=16, got {aligned_size}");
+        return 1;
+    }
+
+    // Test alignment for odd sizes
+    let odd_size = 13;
+    let aligned_odd = (odd_size + l2 - 1) & (0 - l2);
+    if aligned_odd != 16 {
+        print(f"FAIL: expected aligned_odd=16, got {aligned_odd}");
+        return 1;
+    }
+
+    print("  layout: OK");
+    0
+}
+
+fn test_size_classes() -> Int {
+    // Test size class bin selection logic (mirrors core/mem/size_class.vr)
+    let size_classes = [16, 32, 48, 64, 80, 96, 128, 256, 512, 1024, 2048];
+
+    // Find correct bin for a given size
+    let size = 50;
+    let mut bin = 0;
+    let mut i = 0;
+    while i < 11 {
+        if size_classes[i] >= size {
+            bin = i;
+            i = 11;  // break
+        } else {
+            i = i + 1;
+        }
+    }
+
+    // size=50 fits in bin 3 (64 bytes), since bins are [16,32,48,64,...]
+    // 50 > 48 so it goes to bin 3 (64)
+    if bin != 3 {
+        print(f"FAIL: expected bin=3 for size=50, got {bin}");
+        return 1;
+    }
+
+    // Verify bin size covers request
+    if size_classes[bin] < size {
+        print("FAIL: bin size doesn't cover request");
+        return 1;
+    }
+
+    // Test edge cases
+    let size16 = 16;
+    let mut bin16 = 0;
+    i = 0;
+    while i < 11 {
+        if size_classes[i] >= size16 {
+            bin16 = i;
+            i = 11;
+        } else {
+            i = i + 1;
+        }
+    }
+    if bin16 != 0 {
+        print(f"FAIL: expected bin=0 for size=16, got {bin16}");
+        return 1;
+    }
+
+    print("  size_classes: OK");
+    0
+}
+
+fn test_generation_tracking() -> Int {
+    // Simulate CBGR generation counter tracking
+    let mut base_generation: Int = 0;
+    let mut current_gen: Int = 0;
+
+    // Allocate: increment generation
+    current_gen = current_gen + 1;
+    let gen_at_alloc = current_gen;
+
+    // Validate: generation must match
+    if gen_at_alloc != current_gen {
+        print("FAIL: generation mismatch immediately after alloc");
+        return 1;
+    }
+
+    // Deallocate: increment generation again
+    current_gen = current_gen + 1;
+
+    // Validate: generation must NOT match (use-after-free detection)
+    if gen_at_alloc == current_gen {
+        print("FAIL: generation should not match after dealloc");
+        return 1;
+    }
+
+    // Test wrapping behavior (delta from base)
+    base_generation = 250;
+    let delta1 = (255 - base_generation) & 0xFF;  // 5
+    let delta2 = (256 - base_generation) & 0xFF;  // 6 (wraps)
+
+    if delta1 != 5 {
+        print(f"FAIL: expected delta1=5, got {delta1}");
+        return 1;
+    }
+    if delta2 != 6 {
+        print(f"FAIL: expected delta2=6, got {delta2}");
+        return 1;
+    }
+
+    print("  generation_tracking: OK");
+    0
+}
+
+fn test_capability_flags() -> Int {
+    // Test CBGR capability flag operations
+    let cap_read: Int = 0x01;
+    let cap_write: Int = 0x02;
+    let cap_owned: Int = 0x80;
+
+    // Default capabilities for owned reference: read + write + owned
+    let owned_caps = cap_read | cap_write | cap_owned;
+
+    // Check individual flags
+    if (owned_caps & cap_read) == 0 {
+        print("FAIL: owned ref should have read capability");
+        return 1;
+    }
+    if (owned_caps & cap_write) == 0 {
+        print("FAIL: owned ref should have write capability");
+        return 1;
+    }
+    if (owned_caps & cap_owned) == 0 {
+        print("FAIL: owned ref should have owned capability");
+        return 1;
+    }
+
+    // Shared reference: read only (strip write + owned)
+    let shared_caps = owned_caps & cap_read;
+    if (shared_caps & cap_write) != 0 {
+        print("FAIL: shared ref should not have write capability");
+        return 1;
+    }
+    if shared_caps != cap_read {
+        print(f"FAIL: shared_caps should be {cap_read}, got {shared_caps}");
+        return 1;
+    }
+
+    print("  capability_flags: OK");
+    0
+}
+
+fn test_epoch_management() -> Int {
+    // Simulate epoch-based reclamation
+    let mut global_epoch: Int = 0;
+    let mut thread_epoch: Int = 0;
+
+    // Enter critical section: read global epoch
+    thread_epoch = global_epoch;
+
+    // Advance global epoch
+    global_epoch = global_epoch + 1;
+
+    // Thread is still in old epoch
+    if thread_epoch == global_epoch {
+        print("FAIL: thread should be in old epoch");
+        return 1;
+    }
+
+    // Exit critical section: catch up to global
+    thread_epoch = global_epoch;
+    if thread_epoch != global_epoch {
+        print("FAIL: thread should match global after exit");
+        return 1;
+    }
+
+    // Test epoch wrapping
+    global_epoch = 65534;
+    global_epoch = (global_epoch + 1) & 0xFFFF;
+    if global_epoch != 65535 {
+        print(f"FAIL: expected 65535, got {global_epoch}");
+        return 1;
+    }
+    global_epoch = (global_epoch + 1) & 0xFFFF;
+    if global_epoch != 0 {
+        print(f"FAIL: expected epoch wrap to 0, got {global_epoch}");
+        return 1;
+    }
+
+    print("  epoch_management: OK");
+    0
+}
+
+fn test_pointer_encoding() -> Int {
+    // Simulate mimalloc-style pointer encoding (XOR with keys)
+    let key1: Int = 0x5A5A5A5A;
+    let key2: Int = 0xA5A5A5A5;
+
+    let original_ptr: Int = 0x7FFF00001000;
+
+    // Encode: XOR with keys
+    let encoded = original_ptr ^ key1 ^ key2;
+
+    // Decode: XOR again (XOR is its own inverse)
+    let decoded = encoded ^ key1 ^ key2;
+
+    if decoded != original_ptr {
+        print(f"FAIL: expected {original_ptr}, got {decoded}");
+        return 1;
+    }
+
+    // Null pointer encodes to a non-null value (security feature)
+    let null_encoded = 0 ^ key1 ^ key2;
+    if null_encoded == 0 {
+        print("FAIL: encoded null should not be 0");
+        return 1;
+    }
+
+    print("  pointer_encoding: OK");
+    0
+}
+
+fn test_free_list() -> Int {
+    // Simulate a free list using a List as backing store
+    let mut free_list: List<Int> = [];
+
+    // "Allocate" 10 slots and push to free list
+    let mut i = 0;
+    while i < 10 {
+        free_list.push(i * 16);  // Simulated block addresses
+        i = i + 1;
+    }
+
+    if free_list.len() != 10 {
+        print(f"FAIL: expected 10 free blocks, got {free_list.len()}");
+        return 1;
+    }
+
+    // "Allocate" from free list (LIFO order)
+    let block1 = free_list[free_list.len() - 1];
+    // Pop last element
+    let mut new_list: List<Int> = [];
+    i = 0;
+    while i < free_list.len() - 1 {
+        new_list.push(free_list[i]);
+        i = i + 1;
+    }
+    free_list = new_list;
+
+    if block1 != 144 {
+        print(f"FAIL: expected block1=144, got {block1}");
+        return 1;
+    }
+    if free_list.len() != 9 {
+        print(f"FAIL: expected 9 free blocks after alloc, got {free_list.len()}");
+        return 1;
+    }
+
+    // "Deallocate" — return block to free list
+    free_list.push(block1);
+    if free_list.len() != 10 {
+        print(f"FAIL: expected 10 free blocks after dealloc, got {free_list.len()}");
+        return 1;
+    }
+
+    print("  free_list: OK");
+    0
+}
+
+fn main() -> Int {
+    print("CBGR Memory Model Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_layout();
+    failures = failures + test_size_classes();
+    failures = failures + test_generation_tracking();
+    failures = failures + test_capability_flags();
+    failures = failures + test_epoch_management();
+    failures = failures + test_pointer_encoding();
+    failures = failures + test_free_list();
+
+    if failures == 0 {
+        print("All CBGR memory model tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+
+    failures
+}

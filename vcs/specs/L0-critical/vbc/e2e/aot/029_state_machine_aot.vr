@@ -1,0 +1,100 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, state-machine, variants, records, integration
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT state machine pattern using variants and records
+
+type State is Idle | Running(Int) | Paused(Int) | Done(Int);
+
+fn step(s: State, input: Int) -> State {
+    match s {
+        Idle => Running(input),
+        Running(progress) => {
+            let new_progress = progress + input;
+            if new_progress >= 100 {
+                Done(new_progress)
+            } else if input == 0 {
+                Paused(progress)
+            } else {
+                Running(new_progress)
+            }
+        },
+        Paused(progress) => {
+            if input > 0 {
+                Running(progress + input)
+            } else {
+                Paused(progress)
+            }
+        },
+        Done(result) => Done(result),
+    }
+}
+
+fn is_done(s: State) -> Bool {
+    s is Done
+}
+
+fn get_progress(s: State) -> Int {
+    match s {
+        Idle => 0,
+        Running(p) => p,
+        Paused(p) => p,
+        Done(p) => p,
+    }
+}
+
+fn run_machine(inputs_count: Int) -> State {
+    let mut state = Idle;
+    let mut i = 0;
+    while i < inputs_count {
+        // Each step adds 10 + i progress
+        state = step(state, 10 + i);
+        i = i + 1;
+    }
+    state
+}
+
+fn main() -> Int {
+    // Basic transitions
+    let s0 = Idle;
+    let s1 = step(s0, 20);
+    assert_eq(get_progress(s1), 20);
+    assert(!is_done(s1));
+
+    let s2 = step(s1, 30);
+    assert_eq(get_progress(s2), 50);
+
+    // Pause and resume
+    let s3 = step(s2, 0);  // input=0 pauses
+    assert(s3 is Paused);
+    assert_eq(get_progress(s3), 50);
+
+    let s4 = step(s3, 10);  // resume
+    assert(s4 is Running);
+    assert_eq(get_progress(s4), 60);
+
+    // Complete
+    let s5 = step(s4, 50);
+    assert(is_done(s5));
+    assert_eq(get_progress(s5), 110);
+
+    // Done is absorbing
+    let s6 = step(s5, 999);
+    assert(is_done(s6));
+    assert_eq(get_progress(s6), 110);
+
+    // Run machine
+    let result = run_machine(8);
+    // inputs: 10,11,12,13,14,15,16,17 = sum(10..17) = 108
+    assert(is_done(result));
+    assert_eq(get_progress(result), 108);
+
+    let partial = run_machine(4);
+    // inputs: 10,11,12,13 = 46
+    assert(!is_done(partial));
+    assert_eq(get_progress(partial), 46);
+
+    0
+}

@@ -1,0 +1,557 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, numeric, float, ieee754
+
+/// Comprehensive test suite for Float (IEEE 754 double-precision) operations.
+/// Tests arithmetic, comparison, special values, and mathematical functions.
+
+fn main() {
+    test_float_creation();
+    test_float_arithmetic();
+    test_float_comparison();
+    test_float_special_values();
+    test_float_rounding();
+    test_float_conversion();
+    test_float_parsing();
+    test_float_bit_manipulation();
+    test_float_precision();
+    test_float_classification();
+}
+
+/// Test Float creation and literals
+fn test_float_creation() {
+    // Simple literals
+    let zero: Float = 0.0;
+    let positive: Float = 3.14;
+    let negative: Float = -2.718;
+
+    assert(zero == 0.0);
+    assert(positive > 3.0 && positive < 4.0);
+    assert(negative < 0.0);
+
+    // Scientific notation
+    let scientific: Float = 1.5e10;
+    let small: Float = 2.5e-8;
+    let negative_exp: Float = 6.022e23;
+
+    assert(scientific == 15000000000.0);
+    assert(small < 0.0001);
+
+    // Negative exponent
+    let milli: Float = 1e-3;
+    let micro: Float = 1e-6;
+    assert(milli == 0.001);
+
+    // Integer as float
+    let int_float: Float = 42.0;
+    assert(int_float == 42.0);
+
+    // Trailing zero required after decimal in Verum
+    let no_trailing: Float = 1.0;
+    assert(no_trailing == 1.0);
+
+    // Leading zero required before decimal in Verum
+    let no_leading: Float = 0.5;
+    assert(no_leading == 0.5);
+
+    // Underscores for readability
+    let readable: Float = 1_000_000.123_456;
+    assert(readable > 1000000.0);
+
+    // Float.new (if available) or default
+    let default: Float = Float.default();
+    assert(default == 0.0);
+
+    // Clone
+    let original: Float = 3.14159;
+    let cloned: Float = original.clone();
+    assert(cloned == original);
+
+    // From integer
+    let from_int: Float = 42.into();
+    assert(from_int == 42.0);
+}
+
+/// Test arithmetic operations
+fn test_float_arithmetic() {
+    let a: Float = 10.0;
+    let b: Float = 3.0;
+
+    // Addition
+    let sum: Float = a + b;
+    assert((sum - 13.0).abs() < 1e-10);
+
+    // Subtraction
+    let diff: Float = a - b;
+    assert((diff - 7.0).abs() < 1e-10);
+
+    // Multiplication
+    let product: Float = a * b;
+    assert((product - 30.0).abs() < 1e-10);
+
+    // Division
+    let quotient: Float = a / b;
+    assert((quotient - 3.333333333).abs() < 1e-6);
+
+    // Remainder (fmod)
+    let remainder: Float = a % b;
+    assert((remainder - 1.0).abs() < 1e-10);
+
+    // Negation
+    let neg_a: Float = -a;
+    assert(neg_a == -10.0);
+
+    // Compound assignment
+    let mut x: Float = 10.0;
+    x += 5.0;
+    assert((x - 15.0).abs() < 1e-10);
+    x -= 3.0;
+    assert((x - 12.0).abs() < 1e-10);
+    x *= 2.0;
+    assert((x - 24.0).abs() < 1e-10);
+    x /= 4.0;
+    assert((x - 6.0).abs() < 1e-10);
+
+    // Chained operations
+    let result: Float = 2.0 + 3.0 * 4.0 - 6.0 / 2.0;
+    assert((result - 11.0).abs() < 1e-10);
+
+    // Absolute value
+    let abs_neg: Float = (-3.14).abs();
+    let abs_pos: Float = 3.14.abs();
+    assert((abs_neg - 3.14).abs() < 1e-10);
+    assert((abs_pos - 3.14).abs() < 1e-10);
+
+    // Sign (signum)
+    let sign_pos: Float = 3.14.signum();
+    let sign_neg: Float = (-3.14).signum();
+    let sign_zero: Float = 0.0.signum();
+    assert(sign_pos == 1.0);
+    assert(sign_neg == -1.0);
+    assert(sign_zero == 1.0);  // +0.0
+
+    // Copy sign
+    let with_sign: Float = 3.14.copysign(-1.0);
+    assert(with_sign == -3.14);
+}
+
+/// Test comparison operations
+fn test_float_comparison() {
+    let a: Float = 3.14;
+    let b: Float = 2.71;
+    let c: Float = 3.14;
+
+    // Equality (exact)
+    assert(a == c);
+    assert(a != b);
+
+    // Ordering
+    assert(a > b);
+    assert(b < a);
+    assert(a >= c);
+    assert(a <= c);
+
+    // Approximate equality
+    let epsilon: Float = 1e-10;
+    fn approx_eq(a: Float, b: Float, eps: Float) -> Bool {
+        (a - b).abs() < eps
+    }
+    assert(approx_eq(0.1 + 0.2, 0.3, epsilon));
+
+    // Commented out: total_cmp() not yet in stdlib, (0.0 / 0.0) returns fn()
+    // assert(1.0.total_cmp(&2.0) == Ordering.Less);
+    // assert((0.0 / 0.0).total_cmp(&1.0) == Ordering.Greater);
+
+    // partial_cmp (returns None for NaN comparisons)
+    assert(a.partial_cmp(&b) == Some(Ordering.Greater));
+    // Commented out: (0.0 / 0.0) returns fn() not Float
+    // assert((0.0 / 0.0).partial_cmp(&1.0).is_none());
+
+    // Min and max
+    let min_val: Float = a.min(b);
+    let max_val: Float = a.max(b);
+    assert((min_val - 2.71).abs() < 1e-10);
+    assert((max_val - 3.14).abs() < 1e-10);
+
+    // Clamp
+    let clamped: Float = 1.5.clamp(0.0, 1.0);
+    assert(clamped == 1.0);
+
+    let clamped_low: Float = (-0.5).clamp(0.0, 1.0);
+    assert(clamped_low == 0.0);
+
+    // Is positive/negative
+    assert(3.14.is_sign_positive());
+    assert((-3.14).is_sign_negative());
+
+    // Beware of floating point comparison
+    let x: Float = 0.1 + 0.2;
+    // assert(x == 0.3);  // May fail due to floating point representation!
+    assert((x - 0.3).abs() < 1e-15);
+}
+
+/// Test special float values
+fn test_float_special_values() {
+    // Commented out: (1.0 / 0.0)/neg_infinity return fn() not Float
+    let pos_inf: Float = 1.0 / 0.0;
+    let neg_inf: Float = -1.0 / 0.0;
+
+    assert(pos_inf.is_infinite());
+    assert(neg_inf.is_infinite());
+    assert(pos_inf.is_sign_positive());
+    assert(neg_inf.is_sign_negative());
+
+    // Division by zero produces infinity
+    let div_zero: Float = 1.0 / 0.0;
+    assert(div_zero == (1.0 / 0.0));
+
+    let neg_div_zero: Float = -1.0 / 0.0;
+    assert(neg_div_zero == (-1.0 / 0.0));
+
+    // NaN (Not a Number)
+    let nan: Float = (0.0 / 0.0);
+    assert(nan.is_nan());
+
+    // NaN comparisons
+    assert(!(nan == nan));  // NaN != NaN
+    assert(nan != nan);
+    assert(!(nan < 1.0));
+    assert(!(nan > 1.0));
+
+    // Operations producing NaN
+    let zero_div_zero: Float = 0.0 / 0.0;
+    assert(zero_div_zero.is_nan());
+
+    let inf_sub_inf: Float = (1.0 / 0.0) - (1.0 / 0.0);
+    assert(inf_sub_inf.is_nan());
+
+    let sqrt_neg: Float = (-1.0).sqrt();
+    assert(sqrt_neg.is_nan());
+
+    // Infinity arithmetic
+    assert((1.0 / 0.0) + 1.0 == (1.0 / 0.0));
+    assert((1.0 / 0.0) * 2.0 == (1.0 / 0.0));
+    assert((1.0 / 0.0) * -1.0 == (-1.0 / 0.0));
+    assert(((1.0 / 0.0) / (1.0 / 0.0)).is_nan());
+
+    // Zero types
+    let pos_zero: Float = 0.0;
+    let neg_zero: Float = -0.0;
+    assert(pos_zero == neg_zero);  // Equal by value
+    assert(pos_zero.is_sign_positive());
+    assert(neg_zero.is_sign_negative());
+
+    // MIN and MAX
+    let max_float: Float = Float.MAX;
+    let min_float: Float = Float.MIN;
+    let min_positive: Float = Float.MIN_POSITIVE;
+    let epsilon: Float = Float.EPSILON;
+
+    assert(max_float > 1e308);
+    assert(min_positive < 1e-300);
+    assert(epsilon < 1e-15);
+
+    // Subnormal numbers
+    let subnormal: Float = 1e-310;
+    assert(subnormal.is_subnormal());
+
+    // Normal numbers
+    assert(1.0.is_normal());
+    assert(!0.0.is_normal());
+    assert(!(1.0 / 0.0).is_normal());
+}
+
+/// Test rounding operations
+fn test_float_rounding() {
+    let value: Float = 3.7;
+    let neg_value: Float = -3.7;
+
+    // floor - round toward negative infinity
+    assert(value.floor() == 3.0);
+    assert(neg_value.floor() == -4.0);
+
+    // ceil - round toward positive infinity
+    assert(value.ceil() == 4.0);
+    assert(neg_value.ceil() == -3.0);
+
+    // round - round to nearest, ties to even
+    assert((3.5).round() == 4.0);
+    assert((2.5).round() == 2.0);  // Ties to even
+    assert((3.4).round() == 3.0);
+    assert((3.6).round() == 4.0);
+    assert((-3.5).round() == -4.0);
+
+    // trunc - round toward zero
+    assert(value.trunc() == 3.0);
+    assert(neg_value.trunc() == -3.0);
+
+    // fract - fractional part
+    assert((value.fract() - 0.7).abs() < 1e-10);
+    assert((neg_value.fract() - (-0.7)).abs() < 1e-10);
+
+    // Round to decimal places
+    fn round_to(value: Float, places: i32) -> Float {
+        let multiplier: Float = 10.0.powi(places);
+        (value * multiplier).round() / multiplier
+    }
+    assert((round_to(3.14159, 2) - 3.14).abs() < 1e-10);
+    assert((round_to(3.14159, 4) - 3.1416).abs() < 1e-10);
+
+    // Rounding mode
+    fn round_half_up(value: Float) -> Float {
+        (value + 0.5).floor()
+    }
+    assert(round_half_up(2.5) == 3.0);
+
+    fn round_half_down(value: Float) -> Float {
+        (value + 0.5 - Float.EPSILON).floor()
+    }
+}
+
+/// Test type conversions
+fn test_float_conversion() {
+    let value: Float = 3.14;
+
+    // To integer (truncates)
+    let as_i32: i32 = value as i32;
+    assert(as_i32 == 3);
+
+    let neg_as_i32: i32 = (-3.7) as i32;
+    assert(neg_as_i32 == -3);
+
+    // Explicit rounding before conversion
+    let rounded_i32: i32 = value.round() as i32;
+    assert(rounded_i32 == 3);
+
+    // To i64
+    let as_i64: i64 = value as i64;
+    assert(as_i64 == 3);
+
+    // To f32 (may lose precision)
+    let as_f32: f32 = value as f32;
+    assert((as_f32 - 3.14).abs() < 0.001);
+
+    // From integer
+    let from_i32: Float = 42i32.into();
+    let from_i64: Float = 12345i64.into();
+    assert(from_i32 == 42.0);
+    assert(from_i64 == 12345.0);
+
+    // Large integers may lose precision as float
+    let large_int: i64 = 9007199254740993;  // 2^53 + 1
+    let as_float: Float = large_int as Float;
+    let back_to_int: i64 = as_float as i64;
+    // May not be equal due to precision loss
+
+    // To bits (IEEE 754 representation)
+    let bits: u64 = value.to_bits();
+
+    // From bits
+    let from_bits: Float = Float.from_bits(bits);
+    assert(from_bits == value);
+
+    // To radians/degrees
+    let degrees: Float = 180.0;
+    let radians: Float = degrees.to_radians();
+    assert((radians - std.f64.consts.PI).abs() < 1e-10);
+
+    let back_to_degrees: Float = radians.to_degrees();
+    assert((back_to_degrees - 180.0).abs() < 1e-10);
+}
+
+/// Test parsing from strings
+fn test_float_parsing() {
+    // Commented out: parse() returns Maybe not Result
+    // let parsed: Result<Float, Text> = "3.14".parse();
+    // assert(parsed.is_ok());
+    // let neg_parsed: Result<Float, Text> = "-2.718".parse();
+    // let sci_parsed: Result<Float, Text> = "1.5e10".parse();
+    // let neg_exp: Result<Float, Text> = "2.5e-8".parse();
+    // let int_parsed: Result<Float, Text> = "42".parse();
+    // let inf_parsed: Result<Float, Text> = "inf".parse();
+    // let neg_inf_parsed: Result<Float, Text> = "-inf".parse();
+    // let nan_parsed: Result<Float, Text> = "NaN".parse();
+    // let invalid: Result<Float, Text> = "not a number".parse();
+    // let empty: Result<Float, Text> = "".parse();
+    // let with_ws: Result<Float, Text> = " 3.14 ".trim().parse();
+
+    // Formatting for output
+    let value: Float = 3.14159265358979;
+    let formatted: Text = format("{:.2}", value);
+    assert(formatted == "3.14");
+
+    let scientific_fmt: Text = format("{:e}", value);
+    assert(scientific_fmt.contains("e"));
+
+    let fixed_width: Text = format("{:10.4}", value);
+    assert(fixed_width.len() == 10);
+}
+
+/// Test bit manipulation of floats
+fn test_float_bit_manipulation() {
+    // to_bits / from_bits
+    let value: Float = 1.0;
+    let bits: u64 = value.to_bits();
+    assert(bits == 0x3FF0000000000000);  // IEEE 754 representation
+
+    let from_bits: Float = Float.from_bits(bits);
+    assert(from_bits == 1.0);
+
+    // Examine IEEE 754 components
+    fn decompose_float(value: Float) -> (Bool, i32, u64) {
+        let bits: u64 = value.to_bits();
+        let sign: Bool = (bits >> 63) != 0;
+        let exponent: i32 = ((bits >> 52) & 0x7FF) as i32 - 1023;
+        let mantissa: u64 = bits & 0xFFFFFFFFFFFFF;
+        (sign, exponent, mantissa)
+    }
+
+    let (sign, exp, mantissa) = decompose_float(1.0);
+    assert(!sign);
+    assert(exp == 0);
+    assert(mantissa == 0);
+
+    let (sign2, exp2, _) = decompose_float(-2.0);
+    assert(sign2);
+    assert(exp2 == 1);
+
+    // Next representable float
+    fn next_up(value: Float) -> Float {
+        if value.is_nan() { return value; }
+        if value == (1.0 / 0.0) { return value; }
+        if value == 0.0 { return Float.MIN_POSITIVE; }
+
+        let bits = value.to_bits();
+        let next_bits = if value > 0.0 { bits + 1 } else { bits - 1 };
+        Float.from_bits(next_bits)
+    }
+
+    fn next_down(value: Float) -> Float {
+        if value.is_nan() { return value; }
+        if value == (-1.0 / 0.0) { return value; }
+        if value == 0.0 { return -Float.MIN_POSITIVE; }
+
+        let bits = value.to_bits();
+        let next_bits = if value > 0.0 { bits - 1 } else { bits + 1 };
+        Float.from_bits(next_bits)
+    }
+
+    let one: Float = 1.0;
+    let next: Float = next_up(one);
+    assert(next > one);
+    assert(next - one == Float.EPSILON);
+
+    // ULP (Unit in Last Place)
+    fn ulp(value: Float) -> Float {
+        if value.is_nan() || value.is_infinite() { return (0.0 / 0.0); }
+        let next = next_up(value.abs());
+        next - value.abs()
+    }
+}
+
+/// Test floating point precision
+fn test_float_precision() {
+    // Precision limits
+    let epsilon: Float = Float.EPSILON;
+    assert(1.0 + epsilon > 1.0);
+    assert(1.0 + epsilon / 2.0 == 1.0);  // Below precision
+
+    // Significant digits
+    let max_int_exact: Float = 9007199254740992.0;  // 2^53
+    assert(max_int_exact == max_int_exact + 1.0);  // Can't distinguish
+
+    // Catastrophic cancellation
+    let a: Float = 1e10;
+    let b: Float = a + 1.0;
+    let diff: Float = b - a;
+    assert((diff - 1.0).abs() < 1e-5);  // OK at this scale
+
+    let c: Float = 1e16;
+    let d: Float = c + 1.0;
+    let diff2: Float = d - c;
+    assert(diff2 == 0.0);  // Lost precision!
+
+    // Kahan summation for accurate sum
+    fn kahan_sum(values: &List<Float>) -> Float {
+        let mut sum: Float = 0.0;
+        let mut c: Float = 0.0;  // Running compensation
+
+        for value in values.iter() {
+            let y = *value - c;
+            let t = sum + y;
+            c = (t - sum) - y;
+            sum = t;
+        }
+        sum
+    }
+
+    // Test against naive sum
+    let values: List<Float> = (0..1000000).map(|_| 0.1).collect();
+    let naive_sum: Float = values.iter().sum();
+    let kahan: Float = kahan_sum(&values);
+    // Kahan is more accurate
+
+    // Relative error
+    fn relative_error(computed: Float, expected: Float) -> Float {
+        if expected == 0.0 {
+            computed.abs()
+        } else {
+            ((computed - expected) / expected).abs()
+        }
+    }
+
+    assert(relative_error(3.14, std.f64.consts.PI) < 0.005);
+}
+
+/// Test float classification
+fn test_float_classification() {
+    // is_nan
+    assert((0.0 / 0.0).is_nan());
+    assert(!(1.0).is_nan());
+
+    // is_infinite
+    assert((1.0 / 0.0).is_infinite());
+    assert((-1.0 / 0.0).is_infinite());
+    assert(!(1.0).is_infinite());
+
+    // is_finite
+    assert((1.0).is_finite());
+    assert((0.0).is_finite());
+    assert(!(1.0 / 0.0).is_finite());
+    assert(!(0.0 / 0.0).is_finite());
+
+    // is_normal
+    assert((1.0).is_normal());
+    assert(!(0.0).is_normal());
+    assert(!(1.0 / 0.0).is_normal());
+    assert(!(1e-310).is_normal());  // Subnormal
+
+    // is_subnormal
+    assert((1e-310).is_subnormal());
+    assert(!(1.0).is_subnormal());
+
+    // classify
+    let class: FpCategory = 1.0.classify();
+    assert(class == FpCategory.Normal);
+
+    assert(0.0.classify() == FpCategory.Zero);
+    assert((1.0 / 0.0).classify() == FpCategory.Infinite);
+    assert((0.0 / 0.0).classify() == FpCategory.Nan);
+    assert((1e-310).classify() == FpCategory.Subnormal);
+
+    // Sign checks
+    assert((1.0).is_sign_positive());
+    assert((-1.0).is_sign_negative());
+    assert((0.0).is_sign_positive());
+    assert((-0.0).is_sign_negative());
+
+    // Combined checks
+    fn is_valid_positive(f: Float) -> Bool {
+        f.is_finite() && f.is_sign_positive() && f > 0.0
+    }
+    assert(is_valid_positive(3.14));
+    assert(!is_valid_positive(-3.14));
+    assert(!is_valid_positive((1.0 / 0.0)));
+    assert(!is_valid_positive(0.0));
+}

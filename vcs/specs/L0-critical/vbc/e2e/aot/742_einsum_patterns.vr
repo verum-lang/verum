@@ -1,0 +1,194 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, tensor, einsum, contraction
+// @expected-exit: 0
+
+// Tests Einstein summation convention patterns using explicit implementations.
+// Verifies trace, matmul, outer product, batch matmul, and Hadamard product.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// 2x2 matrix multiply (row-major flat arrays)
+fn mm2(a: List<Int>, b: List<Int>) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    r[0] = a[0]*b[0] + a[1]*b[2];
+    r[1] = a[0]*b[1] + a[1]*b[3];
+    r[2] = a[2]*b[0] + a[3]*b[2];
+    r[3] = a[2]*b[1] + a[3]*b[3];
+    r
+}
+
+// Trace: "ii->"
+fn trace2(a: List<Int>) -> Int {
+    a[0] + a[3]
+}
+
+// Row sum: "ij->i"
+fn row_sum(a: List<Int>, rows: Int, cols: Int) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < rows) {
+        let mut sum = 0;
+        let mut j = 0;
+        while (j < cols) {
+            sum = sum + a[i * cols + j];
+            j = j + 1;
+        }
+        r[i] = sum;
+        i = i + 1;
+    }
+    r
+}
+
+// Column sum: "ij->j"
+fn col_sum(a: List<Int>, rows: Int, cols: Int) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut j = 0;
+    while (j < cols) {
+        let mut sum = 0;
+        let mut i = 0;
+        while (i < rows) {
+            sum = sum + a[i * cols + j];
+            i = i + 1;
+        }
+        r[j] = sum;
+        j = j + 1;
+    }
+    r
+}
+
+// Hadamard product: "ij,ij->ij"
+fn hadamard(a: List<Int>, b: List<Int>, n: Int) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        r[i] = a[i] * b[i];
+        i = i + 1;
+    }
+    r
+}
+
+// Outer product: "i,j->ij"
+fn outer(a: List<Int>, b: List<Int>, m: Int, n: Int) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < m) {
+        let mut j = 0;
+        while (j < n) {
+            r[i * n + j] = a[i] * b[j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    r
+}
+
+// Inner product: "i,i->"
+fn dot(a: List<Int>, b: List<Int>, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < n) {
+        sum = sum + a[i] * b[i];
+        i = i + 1;
+    }
+    sum
+}
+
+// Frobenius inner product: "ij,ij->"
+fn frob_inner(a: List<Int>, b: List<Int>, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < n) {
+        sum = sum + a[i] * b[i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    // Setup matrices
+    let a = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // [[1,2],[3,4]]
+    let b = [5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // [[5,6],[7,8]]
+
+    // Test 1: "ij,jk->ik" — Matrix multiplication
+    let c = mm2(a, b);
+    // [[1*5+2*7, 1*6+2*8],[3*5+4*7, 3*6+4*8]] = [[19,22],[43,50]]
+    assert_eq(c[0], 19);
+    assert_eq(c[1], 22);
+    assert_eq(c[2], 43);
+    assert_eq(c[3], 50);
+
+    // Test 2: "ii->" — Trace
+    let tr_a = trace2(a);  // 1+4 = 5
+    let tr_b = trace2(b);  // 5+8 = 13
+    assert_eq(tr_a, 5);
+    assert_eq(tr_b, 13);
+    // Trace is linear: trace(A+B) = trace(A) + trace(B)
+    let apb = [6, 8, 10, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(trace2(apb), tr_a + tr_b);
+
+    // Test 3: "ij->i" — Row sum
+    let rs = row_sum(a, 2, 2);
+    assert_eq(rs[0], 3);  // 1+2
+    assert_eq(rs[1], 7);  // 3+4
+
+    // Test 4: "ij->j" — Column sum
+    let cs = col_sum(a, 2, 2);
+    assert_eq(cs[0], 4);  // 1+3
+    assert_eq(cs[1], 6);  // 2+4
+
+    // Test 5: "ij,ij->ij" — Hadamard product
+    let h = hadamard(a, b, 4);
+    assert_eq(h[0], 5);   // 1*5
+    assert_eq(h[1], 12);  // 2*6
+    assert_eq(h[2], 21);  // 3*7
+    assert_eq(h[3], 32);  // 4*8
+
+    // Test 6: "i,j->ij" — Outer product
+    let u = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let v = [4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let op = outer(u, v, 3, 2);
+    assert_eq(op[0], 4);   // 1*4
+    assert_eq(op[1], 5);   // 1*5
+    assert_eq(op[2], 8);   // 2*4
+    assert_eq(op[3], 10);  // 2*5
+    assert_eq(op[4], 12);  // 3*4
+    assert_eq(op[5], 15);  // 3*5
+
+    // Test 7: "i,i->" — Dot product
+    let dp = dot(u, u, 3);  // 1+4+9 = 14
+    assert_eq(dp, 14);
+
+    // Test 8: "ij,ij->" — Frobenius inner product
+    let fi = frob_inner(a, b, 4);  // 5+12+21+32 = 70
+    assert_eq(fi, 70);
+    // Equals trace(A^T * B) = trace([[1*5+3*7, 1*6+3*8],[2*5+4*7, 2*6+4*8]])
+    // = trace([[26,30],[38,44]]) = 26+44 = 70 ✓
+
+    // Test 9: Einsum identity: trace(AB) = sum_{ij} A_{ij} B_{ji}
+    // trace(A*B) = 19+50 = 69
+    let tr_ab = trace2(c);
+    assert_eq(tr_ab, 69);
+    // sum A_{ij} * B_{ji} = 1*5 + 2*7 + 3*6 + 4*8 = 5+14+18+32 = 69
+    let sum_aij_bji = 1*5 + 2*7 + 3*6 + 4*8;
+    assert_eq(sum_aij_bji, tr_ab);
+
+    // Test 10: Batch matmul property
+    // Two 2x2 matmuls batched should give same result as individual
+    // Batch 0: A * B, Batch 1: B * A
+    let ba = mm2(b, a);
+    // B*A = [[5+18, 10+24],[7+24, 14+32]] = [[23,34],[31,46]]
+    assert_eq(ba[0], 23);
+    assert_eq(ba[1], 34);
+    assert_eq(ba[2], 31);
+    assert_eq(ba[3], 46);
+    // trace(AB) = trace(BA) only for square matrices
+    let tr_ba = trace2(ba);
+    assert_eq(tr_ab, tr_ba);  // Both 69
+
+    print("Einsum patterns: PASS");
+    0
+}

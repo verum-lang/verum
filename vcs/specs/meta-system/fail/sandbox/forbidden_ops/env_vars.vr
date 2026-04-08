@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, sandbox, forbidden, env, nondeterministic
+// @description: Test that environment variable access is forbidden
+// @expected-error: E103
+
+// Environment variables are non-deterministic
+meta fn test_env_access() -> Text {
+    // Attempting to read environment variable should fail with M301 ForbiddenOperation
+    // The `env` function is in the env_functions allowlist
+    std.env.var("HOME")
+}
+
+fn main() {
+    // Call meta function at compile time
+    @const assert(text_len(test_env_access()) > 0);
+}

@@ -1,0 +1,361 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, nn
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Neural network operations — activation functions, loss computation, forward pass
+
+// ============================================================================
+// Float helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool {
+    abs_f(a - b) < tol
+}
+
+fn round_milli(x: Float) -> Int {
+    let scaled = x * 1000.0;
+    if scaled >= 0.0 {
+        (scaled + 0.5) as Int
+    } else {
+        (scaled - 0.5) as Int
+    }
+}
+
+// ============================================================================
+// 4-element float array
+// ============================================================================
+
+type FArr4 is { e0: Float, e1: Float, e2: Float, e3: Float };
+
+fn farr4_get(a: FArr4, i: Int) -> Float {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn farr4_set(a: FArr4, i: Int, val: Float) -> FArr4 {
+    FArr4 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 }
+    }
+}
+
+fn farr4_zeros() -> FArr4 {
+    FArr4 { e0: 0.0, e1: 0.0, e2: 0.0, e3: 0.0 }
+}
+
+// ============================================================================
+// 2x2 float matrix
+// ============================================================================
+
+type FMat2x2 is { a00: Float, a01: Float, a10: Float, a11: Float };
+
+// ============================================================================
+// Test 1: Sigmoid — approximate: x / (1 + |x|) (fast sigmoid)
+// ============================================================================
+
+fn fast_sigmoid(x: Float) -> Float {
+    x / (1.0 + abs_f(x))
+}
+
+@test
+fn test_sigmoid() {
+    // fast_sigmoid(0) = 0 / (1 + 0) = 0
+    let s0 = fast_sigmoid(0.0);
+    assert(approx_eq(s0, 0.0, 0.001));
+
+    // fast_sigmoid(1) = 1 / (1 + 1) = 0.5
+    let s1 = fast_sigmoid(1.0);
+    assert(approx_eq(s1, 0.5, 0.001));
+
+    // fast_sigmoid(-1) = -1 / (1 + 1) = -0.5
+    let sm1 = fast_sigmoid(0.0 - 1.0);
+    assert(approx_eq(sm1, 0.0 - 0.5, 0.001));
+
+    // fast_sigmoid(large positive) approaches 1
+    let s100 = fast_sigmoid(100.0);
+    assert(s100 > 0.99);
+
+    // fast_sigmoid(large negative) approaches -1
+    let sm100 = fast_sigmoid(0.0 - 100.0);
+    assert(sm100 < 0.0 - 0.99);
+
+    // Monotonicity: sigmoid(a) < sigmoid(b) when a < b
+    assert(fast_sigmoid(0.0 - 2.0) < fast_sigmoid(0.0));
+    assert(fast_sigmoid(0.0) < fast_sigmoid(2.0));
+
+    print("  test_sigmoid: ok");
+}
+
+// ============================================================================
+// Test 2: ReLU — max(0, x) for an array
+// ============================================================================
+
+fn relu(x: Float) -> Float {
+    if x > 0.0 { x } else { 0.0 }
+}
+
+@test
+fn test_relu() {
+    // ReLU on array [-2.0, -1.0, 0.0, 3.0]
+    let src = FArr4 { e0: 0.0 - 2.0, e1: 0.0 - 1.0, e2: 0.0, e3: 3.0 };
+
+    let mut result = farr4_zeros();
+    let mut i = 0;
+    while i < 4 {
+        result = farr4_set(result, i, relu(farr4_get(src, i)));
+        i = i + 1;
+    }
+
+    assert(approx_eq(farr4_get(result, 0), 0.0, 0.001));
+    assert(approx_eq(farr4_get(result, 1), 0.0, 0.001));
+    assert(approx_eq(farr4_get(result, 2), 0.0, 0.001));
+    assert(approx_eq(farr4_get(result, 3), 3.0, 0.001));
+
+    // ReLU preserves positive, zeros negative
+    assert(approx_eq(relu(5.0), 5.0, 0.001));
+    assert(approx_eq(relu(0.0 - 5.0), 0.0, 0.001));
+    assert(approx_eq(relu(0.0), 0.0, 0.001));
+
+    print("  test_relu: ok");
+}
+
+// ============================================================================
+// Test 3: MSE Loss — mean squared error between two arrays
+// ============================================================================
+
+@test
+fn test_mse_loss() {
+    // Predicted: [1.0, 2.0, 3.0, 4.0]
+    // Target:    [1.5, 2.5, 3.0, 3.5]
+    // Diff:      [-0.5, -0.5, 0.0, 0.5]
+    // Sq diff:   [0.25, 0.25, 0.0, 0.25]
+    // MSE = (0.25 + 0.25 + 0.0 + 0.25) / 4 = 0.75 / 4 = 0.1875
+    let pred = FArr4 { e0: 1.0, e1: 2.0, e2: 3.0, e3: 4.0 };
+    let target = FArr4 { e0: 1.5, e1: 2.5, e2: 3.0, e3: 3.5 };
+    let n = 4;
+
+    let mut sum_sq = 0.0;
+    let mut i = 0;
+    while i < n {
+        let diff = farr4_get(pred, i) - farr4_get(target, i);
+        sum_sq = sum_sq + diff * diff;
+        i = i + 1;
+    }
+    let mse = sum_sq / 4.0;
+
+    assert(approx_eq(mse, 0.1875, 0.001));
+
+    // Perfect prediction -> MSE = 0
+    let same = FArr4 { e0: 1.0, e1: 2.0, e2: 3.0, e3: 4.0 };
+    let mut sq2 = 0.0;
+    let mut j = 0;
+    while j < n {
+        let d2 = farr4_get(same, j) - farr4_get(pred, j);
+        sq2 = sq2 + d2 * d2;
+        j = j + 1;
+    }
+    assert(approx_eq(sq2 / 4.0, 0.0, 0.001));
+
+    print("  test_mse_loss: ok");
+}
+
+// ============================================================================
+// Test 4: Cross-entropy loss — simplified: -sum(y * log(p))
+// We approximate log(x) with a simple formula for x near 1:
+// log(x) ≈ (x-1) - (x-1)^2/2 + (x-1)^3/3 (Taylor series for 0.5 < x < 1.5)
+// ============================================================================
+
+fn approx_log(x: Float) -> Float {
+    // For values near 1: log(x) ≈ (x-1) - (x-1)^2/2 + (x-1)^3/3
+    let d = x - 1.0;
+    d - d * d / 2.0 + d * d * d / 3.0
+}
+
+@test
+fn test_cross_entropy_loss() {
+    // True labels (one-hot): [1.0, 0.0, 0.0, 0.0]
+    // Predictions (probs):   [0.7, 0.1, 0.1, 0.1]
+    // CE = -sum(y_i * log(p_i)) = -(1.0 * log(0.7))
+    let y = FArr4 { e0: 1.0, e1: 0.0, e2: 0.0, e3: 0.0 };
+    let p = FArr4 { e0: 0.7, e1: 0.1, e2: 0.1, e3: 0.1 };
+    let n = 4;
+
+    let mut ce = 0.0;
+    let mut i = 0;
+    while i < n {
+        let yi = farr4_get(y, i);
+        if yi > 0.0 {
+            ce = ce - yi * approx_log(farr4_get(p, i));
+        }
+        i = i + 1;
+    }
+
+    // log(0.7) ≈ -0.3567 (exact), our approx gives ≈ -0.3433
+    // So CE ≈ 0.3433
+    // Check it's in reasonable range
+    assert(ce > 0.3);
+    assert(ce < 0.4);
+
+    // Perfect prediction: y=[1,0,0,0], p=[1.0,0,0,0] -> CE = -log(1.0) = 0
+    let p_perfect = FArr4 { e0: 1.0, e1: 0.0, e2: 0.0, e3: 0.0 };
+    let mut ce2 = 0.0;
+    let mut j = 0;
+    while j < n {
+        let yj = farr4_get(y, j);
+        if yj > 0.0 {
+            ce2 = ce2 - yj * approx_log(farr4_get(p_perfect, j));
+        }
+        j = j + 1;
+    }
+    assert(approx_eq(ce2, 0.0, 0.01));
+
+    print("  test_cross_entropy_loss: ok");
+}
+
+// ============================================================================
+// Test 5: Linear layer — y = Wx + b for 2x2 matrix * 2-vec + 2-bias
+// W = [[1,2],[3,4]], x = [5,6], b = [1,1]
+// y[0] = 1*5 + 2*6 + 1 = 5 + 12 + 1 = 18
+// y[1] = 3*5 + 4*6 + 1 = 15 + 24 + 1 = 40
+// ============================================================================
+
+@test
+fn test_linear_layer() {
+    let w00 = 1.0;
+    let w01 = 2.0;
+    let w10 = 3.0;
+    let w11 = 4.0;
+
+    let x0 = 5.0;
+    let x1 = 6.0;
+
+    let b0 = 1.0;
+    let b1 = 1.0;
+
+    let y0 = w00 * x0 + w01 * x1 + b0;
+    let y1 = w10 * x0 + w11 * x1 + b1;
+
+    assert(approx_eq(y0, 18.0, 0.001));
+    assert(approx_eq(y1, 40.0, 0.001));
+
+    // Apply ReLU after linear: relu(18) = 18, relu(40) = 40
+    assert(approx_eq(relu(y0), 18.0, 0.001));
+    assert(approx_eq(relu(y1), 40.0, 0.001));
+
+    // With negative bias to test ReLU
+    let b0n = 0.0 - 20.0;
+    let b1n = 0.0 - 50.0;
+    let y0n = w00 * x0 + w01 * x1 + b0n;
+    let y1n = w10 * x0 + w11 * x1 + b1n;
+    // y0n = 17 - 20 = -3, y1n = 39 - 50 = -11
+    assert(approx_eq(relu(y0n), 0.0, 0.001));
+    assert(approx_eq(relu(y1n), 0.0, 0.001));
+
+    print("  test_linear_layer: ok");
+}
+
+// ============================================================================
+// Test 6: Batch normalization — (x - mean) / sqrt(var + eps)
+// We approximate sqrt using Newton's method: 3 iterations
+// ============================================================================
+
+fn approx_sqrt(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        // Newton's method: guess = x/2, iterate g = (g + x/g) / 2
+        let mut g = x / 2.0;
+        if g < 1.0 { g = 1.0; }
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g
+    }
+}
+
+@test
+fn test_batch_norm() {
+    // Input: [2.0, 4.0, 6.0, 8.0]
+    // Mean = (2+4+6+8)/4 = 5.0
+    // Var = ((2-5)^2 + (4-5)^2 + (6-5)^2 + (8-5)^2) / 4 = (9+1+1+9)/4 = 5.0
+    // eps = 0.001
+    // sqrt(5.001) ≈ 2.2363
+    // Normalized: [(2-5)/2.2363, (4-5)/2.2363, (6-5)/2.2363, (8-5)/2.2363]
+    //           = [-1.3416, -0.4472, 0.4472, 1.3416]
+
+    let src = FArr4 { e0: 2.0, e1: 4.0, e2: 6.0, e3: 8.0 };
+    let n = 4;
+    let eps = 0.001;
+
+    // Compute mean
+    let mut sum = 0.0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + farr4_get(src, i);
+        i = i + 1;
+    }
+    let mean = sum / 4.0;
+    assert(approx_eq(mean, 5.0, 0.001));
+
+    // Compute variance
+    let mut var_sum = 0.0;
+    let mut j = 0;
+    while j < n {
+        let diff = farr4_get(src, j) - mean;
+        var_sum = var_sum + diff * diff;
+        j = j + 1;
+    }
+    let variance = var_sum / 4.0;
+    assert(approx_eq(variance, 5.0, 0.001));
+
+    // Normalize
+    let std_dev = approx_sqrt(variance + eps);
+    let mut normed = farr4_zeros();
+    let mut k = 0;
+    while k < n {
+        normed = farr4_set(normed, k, (farr4_get(src, k) - mean) / std_dev);
+        k = k + 1;
+    }
+
+    // Check normalized values
+    assert(approx_eq(farr4_get(normed, 0), 0.0 - 1.3416, 0.01));
+    assert(approx_eq(farr4_get(normed, 1), 0.0 - 0.4472, 0.01));
+    assert(approx_eq(farr4_get(normed, 2), 0.4472, 0.01));
+    assert(approx_eq(farr4_get(normed, 3), 1.3416, 0.01));
+
+    // Verify normalized mean ≈ 0
+    let mut norm_sum = 0.0;
+    let mut m = 0;
+    while m < n {
+        norm_sum = norm_sum + farr4_get(normed, m);
+        m = m + 1;
+    }
+    assert(approx_eq(norm_sum / 4.0, 0.0, 0.01));
+
+    print("  test_batch_norm: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_sigmoid();
+    test_relu();
+    test_mse_loss();
+    test_cross_entropy_loss();
+    test_linear_layer();
+    test_batch_norm();
+    print("[OK] 077_tensor_nn_ops");
+    0
+}

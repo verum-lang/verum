@@ -1,0 +1,148 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, integers, hexadecimal
+
+// Hexadecimal integer literals
+
+fn test_basic_hex() {
+    // Basic hex with lowercase prefix
+    let hex_zero = 0x0;
+    let hex_one = 0x1;
+    let hex_fifteen = 0xF;
+    let hex_sixteen = 0x10;
+}
+
+fn test_lowercase_digits() {
+    // Lowercase hex digits
+    let hex_lower_a = 0xa;
+    let hex_lower_b = 0xb;
+    let hex_lower_c = 0xc;
+    let hex_lower_d = 0xd;
+    let hex_lower_e = 0xe;
+    let hex_lower_f = 0xf;
+    let hex_lower_all = 0xabcdef;
+}
+
+fn test_uppercase_digits() {
+    // Uppercase hex digits
+    let hex_upper_A = 0xA;
+    let hex_upper_B = 0xB;
+    let hex_upper_C = 0xC;
+    let hex_upper_D = 0xD;
+    let hex_upper_E = 0xE;
+    let hex_upper_F = 0xF;
+    let hex_upper_all = 0xABCDEF;
+}
+
+fn test_mixed_case() {
+    // Mixed case
+    let hex_mixed = 0xAbCdEf;
+    let hex_mixed2 = 0xaB12cD34;
+}
+
+fn test_byte_values() {
+    // Common byte values
+    let byte_max = 0xFF;
+    let byte_half = 0x80;
+    let byte_quarter = 0x40;
+}
+
+fn test_word_values() {
+    // 16-bit values
+    let word_max = 0xFFFF;
+    let word_value = 0x1234;
+    let word_value2 = 0xABCD;
+}
+
+fn test_dword_values() {
+    // 32-bit values
+    let dword_max = 0xFFFFFFFF;
+    let dword_value = 0x12345678;
+    let dword_magic = 0xDEADBEEF;
+    let dword_cafe = 0xCAFEBABE;
+}
+
+fn test_qword_values() {
+    // 64-bit values (within u64 range)
+    let qword_high = 0x7FFFFFFFFFFFFFFF;  // i64 max
+    let qword_value = 0x123456789ABCDEF;  // 15 hex digits ok
+}
+
+fn test_patterns() {
+    // Common patterns
+    let all_ones = 0xFFFFFFFF;
+    let alternating = 0xAAAAAAAA;
+    let alternating2 = 0x55555555;
+    let pattern = 0x0F0F0F0F;
+}
+
+fn test_underscores() {
+    // With underscores for readability
+    let grouped_byte = 0xFF_FF;
+    let grouped_word = 0xFF_FF_FF_FF;
+    let grouped_qword = 0x1234_5678_9ABC_DEF0;
+    let spaced = 0x12_34_56_78;
+}
+
+fn test_colors() {
+    // Color values (common in graphics)
+    let red = 0xFF0000;
+    let green = 0x00FF00;
+    let blue = 0x0000FF;
+    let white = 0xFFFFFF;
+    let black = 0x000000;
+    let orange = 0xFF8800;
+    let purple = 0x8800FF;
+}
+
+fn test_addresses() {
+    // Memory addresses (conceptual)
+    let base_address = 0x10000000;
+    let stack_top = 0x7FFFFFFF;
+    let kernel_base = 0xC0000000;
+}
+
+fn test_masks() {
+    // Bit masks
+    let mask_bit0 = 0x1;
+    let mask_bit1 = 0x2;
+    let mask_bit2 = 0x4;
+    let mask_bit3 = 0x8;
+    let mask_nibble = 0xF;
+    let mask_byte = 0xFF;
+    let mask_word = 0xFFFF;
+}
+
+fn test_expressions() {
+    // In expressions
+    let masked = 0xABCD & 0xFF;
+    let shifted = 0x12 << 8;
+    let combined = 0x12 << 8 | 0x34;
+}
+
+fn test_comparisons() {
+    let flags = 0x80;
+    let value = 0x00;
+
+    // In comparisons
+    let is_set = (flags & 0x80) != 0;
+    let is_clear = (value & 0xFF) == 0;
+}
+
+// Note: Uppercase 0X prefix not supported in Verum
+// Use lowercase 0x prefix only
+
+fn test_minimal() {
+    // Minimal hex (just one digit after prefix)
+    let min_hex = 0x0;
+    let min_hex1 = 0x1;
+    let min_hexF = 0xF;
+}
+
+fn test_arrays() {
+    // In arrays
+    let bytes = [0x00, 0x01, 0x02, 0xFF];
+    let magic = [0xDE, 0xAD, 0xBE, 0xEF];
+    let header = [0x89, 0x50, 0x4E, 0x47];
+}

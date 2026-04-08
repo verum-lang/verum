@@ -1,0 +1,169 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, activity_selection, greedy, interval_scheduling, compatible_activities
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Activity selection problem: given n activities with start[i]/finish[i] times,
+// select the maximum number of mutually compatible (non-overlapping) activities.
+// Classic greedy: sort by finish time (here activities are pre-sorted), then
+// greedily pick the next activity whose start >= finish of last selected.
+// Activities encoded as parallel arrays: start[], finish[]; active count n.
+// All arrays are [Int; 16].
+
+// Greedy activity selection on pre-sorted (by finish time) activities.
+// Returns count of selected activities.
+// selected[] is filled with 0/1 to mark chosen activities.
+fn activity_select(start: [Int; 16], finish: [Int; 16],
+                   selected: [Int; 16], n: Int) -> Int {
+    let mut count = 0;
+    let mut last_finish = -1;
+    let mut i = 0;
+    while i < n {
+        selected[i] = 0;
+        i = i + 1;
+    }
+    i = 0;
+    while i < n {
+        if start[i] >= last_finish {
+            selected[i] = 1;
+            last_finish = finish[i];
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Sort activities by finish time (insertion sort on parallel arrays).
+fn sort_by_finish(start: [Int; 16], finish: [Int; 16], n: Int) {
+    let mut i = 1;
+    while i < n {
+        let ks = start[i];
+        let kf = finish[i];
+        let mut j = i;
+        while j > 0 && finish[j - 1] > kf {
+            finish[j] = finish[j - 1];
+            start[j]  = start[j - 1];
+            j = j - 1;
+        }
+        finish[j] = kf;
+        start[j]  = ks;
+        i = i + 1;
+    }
+}
+
+// Count selected activities.
+fn count_selected(selected: [Int; 16], n: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < n { c = c + selected[i]; i = i + 1; }
+    c
+}
+
+// Verify no two selected activities overlap.
+fn no_overlap(start: [Int; 16], finish: [Int; 16],
+              selected: [Int; 16], n: Int) -> Int {
+    let mut prev_f = -1;
+    let mut i = 0;
+    while i < n {
+        if selected[i] == 1 {
+            if start[i] < prev_f { return 0; }
+            prev_f = finish[i];
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_classic_example() {
+    // Activities (already sorted by finish):
+    // (1,4),(3,5),(0,6),(5,7),(3,9),(5,9),(6,10),(8,11),(8,12),(2,14),(12,16)
+    // Greedy picks: (1,4),(5,7),(8,11),(12,16) -> 4 activities
+    let mut s = [1, 3, 0, 5, 3, 5, 6, 8, 8,  2, 12, 0, 0, 0, 0, 0];
+    let mut f = [4, 5, 6, 7, 9, 9,10,11,12, 14, 16, 0, 0, 0, 0, 0];
+    let mut sel = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = activity_select(s, f, sel, 11);
+    assert_eq(cnt, 4);
+    assert_eq(no_overlap(s, f, sel, 11), 1);
+    assert_eq(sel[0], 1);   // (1,4) selected
+    assert_eq(sel[3], 1);   // (5,7) selected
+    print("classic_example: ok");
+}
+
+fn test_all_compatible() {
+    // Activities: (0,1),(2,3),(4,5),(6,7) — no overlaps; all 4 selected.
+    let mut s = [0, 2, 4, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut f = [1, 3, 5, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sel = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = activity_select(s, f, sel, 4);
+    assert_eq(cnt, 4);
+    assert_eq(no_overlap(s, f, sel, 4), 1);
+    assert_eq(count_selected(sel, 4), 4);
+    print("all_compatible: ok");
+}
+
+fn test_all_overlapping() {
+    // Activities: (0,10),(1,10),(2,10),(3,10) sorted by finish (all finish=10).
+    // Greedy picks first one: (0,10). Others start < 10. Count = 1.
+    let mut s = [0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut f = [10,10,10,10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sel = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = activity_select(s, f, sel, 4);
+    assert_eq(cnt, 1);
+    assert_eq(sel[0], 1);
+    assert_eq(no_overlap(s, f, sel, 4), 1);
+    print("all_overlapping: ok");
+}
+
+fn test_with_sorting() {
+    // Unsorted activities: need to sort by finish first.
+    // (5,9),(1,4),(3,5),(0,6),(8,11)  -> sorted by finish:
+    // (1,4),(3,5),(0,6),(5,9),(8,11)  -> greedy: (1,4),(5,9) then (8,11) starts at 8 < 9, skip
+    // Wait: (1,4) picked, last=4; (3,5) starts 3<4 skip; (0,6) starts 0<4 skip;
+    //        (5,9) starts 5>=4 pick, last=9; (8,11) starts 8<9 skip.
+    // Count = 2.
+    let mut s = [5, 1, 3, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut f = [9, 4, 5, 6,11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sel = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sort_by_finish(s, f, 5);
+    // After sort by finish: f = [4,5,6,9,11]
+    assert_eq(f[0], 4);
+    assert_eq(f[4], 11);
+    let cnt = activity_select(s, f, sel, 5);
+    assert_eq(cnt, 2);
+    assert_eq(no_overlap(s, f, sel, 5), 1);
+    print("with_sorting: ok");
+}
+
+fn test_single_activity() {
+    // One activity always selected.
+    let mut s = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut f = [7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sel = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = activity_select(s, f, sel, 1);
+    assert_eq(cnt, 1);
+    assert_eq(sel[0], 1);
+
+    // Adjacent activities (finish of one == start of next): both selected.
+    // (0,5),(5,10): start[1]=5 >= finish[0]=5, so both picked.
+    let mut s2 = [0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut f2 = [5,10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sel2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt2 = activity_select(s2, f2, sel2, 2);
+    assert_eq(cnt2, 2);
+    assert_eq(sel2[0], 1);
+    assert_eq(sel2[1], 1);
+    print("single_activity: ok");
+}
+
+fn main() -> Int {
+    test_classic_example();
+    test_all_compatible();
+    test_all_overlapping();
+    test_with_sorting();
+    test_single_activity();
+    print("[OK] 552_interp_activity_selection");
+    0
+}

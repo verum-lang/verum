@@ -1,0 +1,205 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, treap, bst, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for treap-like sorted structure (sorted array with priorities)
+
+type TreapNode is { key: Int, priority: Int, valid: Int };
+
+type Treap8 is {
+    n0: TreapNode, n1: TreapNode, n2: TreapNode, n3: TreapNode,
+    n4: TreapNode, n5: TreapNode, n6: TreapNode, n7: TreapNode,
+    size: Int
+};
+
+fn empty_node() -> TreapNode { TreapNode { key: 0, priority: 0, valid: 0 } }
+
+fn treap_new() -> Treap8 {
+    let e = empty_node();
+    Treap8 { n0: e, n1: e, n2: e, n3: e, n4: e, n5: e, n6: e, n7: e, size: 0 }
+}
+
+fn treap_get(t: Treap8, i: Int) -> TreapNode {
+    if i == 0 { t.n0 } else if i == 1 { t.n1 }
+    else if i == 2 { t.n2 } else if i == 3 { t.n3 }
+    else if i == 4 { t.n4 } else if i == 5 { t.n5 }
+    else if i == 6 { t.n6 } else { t.n7 }
+}
+
+fn treap_set(t: Treap8, i: Int, n: TreapNode) -> Treap8 {
+    Treap8 {
+        n0: if i == 0 { n } else { t.n0 }, n1: if i == 1 { n } else { t.n1 },
+        n2: if i == 2 { n } else { t.n2 }, n3: if i == 3 { n } else { t.n3 },
+        n4: if i == 4 { n } else { t.n4 }, n5: if i == 5 { n } else { t.n5 },
+        n6: if i == 6 { n } else { t.n6 }, n7: if i == 7 { n } else { t.n7 },
+        size: t.size
+    }
+}
+
+// Simple hash for pseudo-random priority
+fn hash_priority(key: Int) -> Int {
+    let mut h = key;
+    h = ((h >> 16) ^ h) * 45;
+    h = ((h >> 16) ^ h) * 45;
+    h = (h >> 16) ^ h;
+    if h < 0 { -h } else { h }
+}
+
+// Insert maintaining sorted order by key
+fn treap_insert(t: Treap8, key: Int) -> Treap8 {
+    if t.size >= 8 { return t; }
+    // Check for duplicate
+    let mut i = 0;
+    while i < t.size {
+        if treap_get(t, i).key == key { return t; }
+        i = i + 1;
+    }
+
+    let pri = hash_priority(key);
+    let node = TreapNode { key: key, priority: pri, valid: 1 };
+
+    // Find insertion point (keep sorted by key)
+    let mut pos = 0;
+    while pos < t.size && treap_get(t, pos).key < key {
+        pos = pos + 1;
+    }
+
+    // Shift elements right
+    let mut t2 = t;
+    let mut j = t2.size;
+    while j > pos {
+        let prev = treap_get(t2, j - 1);
+        t2 = treap_set(t2, j, prev);
+        j = j - 1;
+    }
+    t2 = treap_set(t2, pos, node);
+    Treap8 {
+        n0: t2.n0, n1: t2.n1, n2: t2.n2, n3: t2.n3,
+        n4: t2.n4, n5: t2.n5, n6: t2.n6, n7: t2.n7,
+        size: t2.size + 1
+    }
+}
+
+fn treap_contains(t: Treap8, key: Int) -> Bool {
+    let mut i = 0;
+    while i < t.size {
+        if treap_get(t, i).key == key { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+fn treap_min(t: Treap8) -> Int {
+    if t.size == 0 { return -1; }
+    treap_get(t, 0).key
+}
+
+fn treap_max(t: Treap8) -> Int {
+    if t.size == 0 { return -1; }
+    treap_get(t, t.size - 1).key
+}
+
+// Check if sorted
+fn treap_is_sorted(t: Treap8) -> Bool {
+    let mut i = 1;
+    while i < t.size {
+        if treap_get(t, i).key <= treap_get(t, i - 1).key { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Remove key (shift left)
+fn treap_remove(t: Treap8, key: Int) -> Treap8 {
+    let mut pos = -1;
+    let mut i = 0;
+    while i < t.size {
+        if treap_get(t, i).key == key { pos = i; }
+        i = i + 1;
+    }
+    if pos == -1 { return t; }
+    // Shift left
+    let mut t2 = t;
+    let mut j = pos;
+    while j < t2.size - 1 {
+        let next = treap_get(t2, j + 1);
+        t2 = treap_set(t2, j, next);
+        j = j + 1;
+    }
+    Treap8 {
+        n0: t2.n0, n1: t2.n1, n2: t2.n2, n3: t2.n3,
+        n4: t2.n4, n5: t2.n5, n6: t2.n6, n7: t2.n7,
+        size: t2.size - 1
+    }
+}
+
+fn test_insert_and_search() {
+    let mut t = treap_new();
+    t = treap_insert(t, 5);
+    t = treap_insert(t, 3);
+    t = treap_insert(t, 7);
+    t = treap_insert(t, 1);
+    assert_eq(t.size, 4);
+    assert_eq(treap_contains(t, 5), true);
+    assert_eq(treap_contains(t, 3), true);
+    assert_eq(treap_contains(t, 7), true);
+    assert_eq(treap_contains(t, 2), false);
+    assert_eq(treap_is_sorted(t), true);
+}
+
+fn test_min_max() {
+    let mut t = treap_new();
+    t = treap_insert(t, 5);
+    t = treap_insert(t, 3);
+    t = treap_insert(t, 7);
+    t = treap_insert(t, 1);
+    assert_eq(treap_min(t), 1);
+    assert_eq(treap_max(t), 7);
+}
+
+fn test_remove() {
+    let mut t = treap_new();
+    t = treap_insert(t, 10);
+    t = treap_insert(t, 20);
+    t = treap_insert(t, 30);
+    assert_eq(t.size, 3);
+
+    t = treap_remove(t, 20);
+    assert_eq(t.size, 2);
+    assert_eq(treap_contains(t, 20), false);
+    assert_eq(treap_contains(t, 10), true);
+    assert_eq(treap_contains(t, 30), true);
+    assert_eq(treap_is_sorted(t), true);
+}
+
+fn test_no_duplicate() {
+    let mut t = treap_new();
+    t = treap_insert(t, 5);
+    t = treap_insert(t, 5);
+    assert_eq(t.size, 1);
+}
+
+fn test_sorted_invariant() {
+    let mut t = treap_new();
+    t = treap_insert(t, 50);
+    t = treap_insert(t, 20);
+    t = treap_insert(t, 40);
+    t = treap_insert(t, 10);
+    t = treap_insert(t, 30);
+    assert_eq(treap_is_sorted(t), true);
+    assert_eq(treap_get(t, 0).key, 10);
+    assert_eq(treap_get(t, 4).key, 50);
+}
+
+fn main() -> Int {
+    test_insert_and_search();
+    test_min_max();
+    test_remove();
+    test_no_duplicate();
+    test_sorted_invariant();
+    print("[OK] 271_treap_aot");
+    0
+}

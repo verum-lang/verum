@@ -1,0 +1,93 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, maybe, type-inference, phi-node
+// @description: Tests that Maybe<T> type inference correctly generates
+//              matching LLVM types for Some and None variants.
+//              This is critical for phi nodes in match expressions.
+
+/// Test that match expressions with Maybe<Int> work correctly.
+/// Both Some(value) and None should produce the same LLVM struct type.
+fn test_maybe_int() {
+    let result = match 1 {
+        1 => Maybe.Some(42),
+        _ => Maybe.None,
+    };
+
+    match result {
+        Some(x) => assert(x == 42),
+        None => assert(false),
+    }
+}
+
+/// Test that match expressions with Maybe<Text> work correctly.
+/// This was previously broken because None generated {i8, i32}
+/// while Some("text") generated {i8, {ptr, i64}}.
+fn test_maybe_text() {
+    let result = match 1 {
+        1 => Maybe.Some("hello"),
+        _ => Maybe.None,
+    };
+
+    match result {
+        Some(s) => assert(s == "hello"),
+        None => assert(false),
+    }
+}
+
+/// Test multiple arms with Some and None.
+fn test_multiple_arms() {
+    fn find_name(id: Int) -> Maybe<Text> {
+        match id {
+            1 => Maybe.Some("Alice"),
+            2 => Maybe.Some("Bob"),
+            3 => Maybe.Some("Charlie"),
+            _ => Maybe.None,
+        }
+    }
+
+    let alice = find_name(1);
+    let bob = find_name(2);
+    let charlie = find_name(3);
+    let not_found = find_name(99);
+
+    assert(alice.is_some());
+    assert(bob.is_some());
+    assert(charlie.is_some());
+    assert(not_found.is_none());
+}
+
+/// Test nested Maybe types.
+fn test_nested_maybe() {
+    let nested: Maybe<Maybe<Int>> = Maybe.Some(Maybe.Some(42));
+
+    match nested {
+        Some(inner) => {
+            match inner {
+                Some(x) => assert(x == 42),
+                None => assert(false),
+            }
+        }
+        None => assert(false),
+    }
+}
+
+/// Test Maybe with None-returning function.
+fn test_none_return() {
+    fn always_none() -> Maybe<Int> {
+        Maybe.None
+    }
+
+    let result = always_none();
+    assert(result.is_none());
+}
+
+fn main() {
+    test_maybe_int();
+    test_maybe_text();
+    test_multiple_arms();
+    test_nested_maybe();
+    test_none_return();
+
+    print("All Maybe type inference tests passed!");
+}

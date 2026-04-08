@@ -1,0 +1,132 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, leaky-relu, activation, neural-network
+// @timeout: 50000
+// @expected-exit: 0
+// @description: LeakyReLU activation function
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn leaky_relu(x: Float, alpha: Float) -> Float {
+    if x >= 0.0 { x } else { alpha * x }
+}
+
+type Arr6 is { d0: Float, d1: Float, d2: Float, d3: Float, d4: Float, d5: Float };
+
+fn apply_leaky_relu6(a: Arr6, alpha: Float) -> Arr6 {
+    Arr6 {
+        d0: leaky_relu(a.d0, alpha),
+        d1: leaky_relu(a.d1, alpha),
+        d2: leaky_relu(a.d2, alpha),
+        d3: leaky_relu(a.d3, alpha),
+        d4: leaky_relu(a.d4, alpha),
+        d5: leaky_relu(a.d5, alpha)
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_leaky_relu_positive() {
+    // Positive values pass through unchanged regardless of alpha
+    let alpha = 0.01;
+    assert_eq(leaky_relu(1.0, alpha), 1.0);
+    assert_eq(leaky_relu(5.0, alpha), 5.0);
+    assert_eq(leaky_relu(100.0, alpha), 100.0);
+    assert_eq(leaky_relu(0.001, alpha), 0.001);
+
+    // Larger alpha shouldn't affect positive values
+    assert_eq(leaky_relu(3.0, 0.5), 3.0);
+    assert_eq(leaky_relu(7.0, 1.0), 7.0);
+    print("  test_leaky_relu_positive: ok");
+}
+
+@test
+fn test_leaky_relu_negative() {
+    // Negative values scaled by alpha
+    let alpha = 0.1;
+
+    // -10.0 * 0.1 = -1.0
+    let r0 = leaky_relu(-10.0, alpha);
+    assert(abs_f(r0 - (-1.0)) < 0.0001);
+
+    // -20.0 * 0.1 = -2.0
+    let r1 = leaky_relu(-20.0, alpha);
+    assert(abs_f(r1 - (-2.0)) < 0.0001);
+
+    // -5.0 * 0.1 = -0.5
+    let r2 = leaky_relu(-5.0, alpha);
+    assert(abs_f(r2 - (-0.5)) < 0.0001);
+
+    // Verify with array
+    let data = Arr6 { d0: -1.0, d1: -2.0, d2: -3.0, d3: -4.0, d4: -5.0, d5: -6.0 };
+    let result = apply_leaky_relu6(data, 0.1);
+    assert(abs_f(result.d0 - (-0.1)) < 0.0001);
+    assert(abs_f(result.d1 - (-0.2)) < 0.0001);
+    assert(abs_f(result.d5 - (-0.6)) < 0.0001);
+    print("  test_leaky_relu_negative: ok");
+}
+
+@test
+fn test_leaky_relu_zero() {
+    // Zero stays zero for any alpha
+    assert_eq(leaky_relu(0.0, 0.01), 0.0);
+    assert_eq(leaky_relu(0.0, 0.1), 0.0);
+    assert_eq(leaky_relu(0.0, 0.5), 0.0);
+    assert_eq(leaky_relu(0.0, 1.0), 0.0);
+    assert_eq(leaky_relu(0.0, 0.0), 0.0);
+    print("  test_leaky_relu_zero: ok");
+}
+
+@test
+fn test_leaky_relu_various_alpha() {
+    // alpha = 0.01 (standard)
+    let r1 = leaky_relu(-10.0, 0.01);
+    assert(abs_f(r1 - (-0.1)) < 0.0001);
+
+    // alpha = 0.2 (aggressive leak)
+    let r2 = leaky_relu(-10.0, 0.2);
+    assert(abs_f(r2 - (-2.0)) < 0.0001);
+
+    // alpha = 0.0 (standard ReLU behavior)
+    let r3 = leaky_relu(-10.0, 0.0);
+    assert_eq(r3, 0.0);
+
+    // alpha = 1.0 (linear / identity)
+    let r4 = leaky_relu(-10.0, 1.0);
+    assert(abs_f(r4 - (-10.0)) < 0.0001);
+
+    // Mixed positive/negative array with alpha=0.2
+    let mixed = Arr6 { d0: 3.0, d1: -2.0, d2: 0.0, d3: -5.0, d4: 7.0, d5: -1.0 };
+    let out = apply_leaky_relu6(mixed, 0.2);
+    assert_eq(out.d0, 3.0);
+    assert(abs_f(out.d1 - (-0.4)) < 0.0001);
+    assert_eq(out.d2, 0.0);
+    assert(abs_f(out.d3 - (-1.0)) < 0.0001);
+    assert_eq(out.d4, 7.0);
+    assert(abs_f(out.d5 - (-0.2)) < 0.0001);
+    print("  test_leaky_relu_various_alpha: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_leaky_relu_positive();
+    test_leaky_relu_negative();
+    test_leaky_relu_zero();
+    test_leaky_relu_various_alpha();
+
+    print("[OK] 013_leaky_relu");
+    0
+}

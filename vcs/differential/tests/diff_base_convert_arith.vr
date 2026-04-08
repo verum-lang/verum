@@ -1,0 +1,281 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, base-conversion, arithmetic, number-system
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Convert decimal to base, digits stored LSB first, returns (digits_arr, length)
+// We return length separately via to_base_len
+fn to_base_digits(n: Int, base: Int) -> Arr8 {
+    if n == 0 {
+        let mut d = zeros();
+        d = set(d, 0, 0);
+        return d;
+    }
+    let mut d = zeros();
+    let mut x = n;
+    let mut i = 0;
+    while x > 0 {
+        d = set(d, i, x % base);
+        x = x / base;
+        i = i + 1;
+    }
+    d
+}
+
+fn to_base_len(n: Int, base: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 {
+        x = x / base;
+        count = count + 1;
+    }
+    count
+}
+
+// Convert digits back to decimal
+fn from_base(digits: Arr8, n_digits: Int, base: Int) -> Int {
+    let mut result = 0;
+    let mut multiplier = 1;
+    let mut i = 0;
+    while i < n_digits {
+        result = result + get(digits, i) * multiplier;
+        multiplier = multiplier * base;
+        i = i + 1;
+    }
+    result
+}
+
+// Add two numbers represented in a given base (LSB first)
+// Returns sum digits in that base
+fn base_add(a: Arr8, na: Int, b_arr: Arr8, nb: Int, base: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut carry = 0;
+    let n = if na > nb { na } else { nb };
+    let mut i = 0;
+    while i < n + 1 {
+        let av = if i < na { get(a, i) } else { 0 };
+        let bv = if i < nb { get(b_arr, i) } else { 0 };
+        let total = av + bv + carry;
+        result = set(result, i, total % base);
+        carry = total / base;
+        i = i + 1;
+    }
+    result
+}
+
+fn base_add_len(na: Int, nb: Int, base: Int, a: Arr8, b_arr: Arr8) -> Int {
+    let n = if na > nb { na } else { nb };
+    let sum = base_add(a, na, b_arr, nb, base);
+    // Find actual length (last non-zero digit + 1)
+    let mut len = 1;
+    let mut i = 0;
+    while i <= n {
+        if get(sum, i) != 0 { len = i + 1; }
+        i = i + 1;
+    }
+    len
+}
+
+// Multiply a base-number by a single digit
+fn base_mul_digit(a: Arr8, na: Int, digit: Int, base: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut carry = 0;
+    let mut i = 0;
+    while i < na {
+        let prod = get(a, i) * digit + carry;
+        result = set(result, i, prod % base);
+        carry = prod / base;
+        i = i + 1;
+    }
+    if carry > 0 {
+        result = set(result, na, carry);
+    }
+    result
+}
+
+fn base_mul_digit_len(na: Int, digit: Int, base: Int, a: Arr8) -> Int {
+    let result = base_mul_digit(a, na, digit, base);
+    let mut len = 1;
+    let mut i = 0;
+    while i < na + 1 {
+        if get(result, i) != 0 { len = i + 1; }
+        i = i + 1;
+    }
+    len
+}
+
+// Check if a number is a palindrome in given base
+fn is_palindrome_in_base(n: Int, base: Int) -> Int {
+    let digits = to_base_digits(n, base);
+    let len = to_base_len(n, base);
+    let mut i = 0;
+    while i < len / 2 {
+        if get(digits, i) != get(digits, len - 1 - i) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Count set bits (number of 1s in binary)
+fn popcount_int(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 {
+        count = count + x % 2;
+        x = x / 2;
+    }
+    count
+}
+
+fn test_roundtrip() -> Int {
+    // Binary roundtrip
+    let d = to_base_digits(42, 2);
+    let len = to_base_len(42, 2);
+    assert_eq(len, 6); // 101010
+    assert_eq(from_base(d, len, 2), 42);
+
+    // Octal roundtrip
+    let d2 = to_base_digits(255, 8);
+    let len2 = to_base_len(255, 8);
+    assert_eq(len2, 3); // 377
+    assert_eq(from_base(d2, len2, 8), 255);
+
+    // Hex roundtrip
+    let d3 = to_base_digits(171, 16);
+    let len3 = to_base_len(171, 16);
+    assert_eq(len3, 2); // AB = (11, 10) LSB first
+    assert_eq(from_base(d3, len3, 16), 171);
+    0
+}
+
+fn test_binary_details() -> Int {
+    // 13 = 1101 in binary (LSB first: 1, 0, 1, 1)
+    let d = to_base_digits(13, 2);
+    assert_eq(get(d, 0), 1);
+    assert_eq(get(d, 1), 0);
+    assert_eq(get(d, 2), 1);
+    assert_eq(get(d, 3), 1);
+    assert_eq(to_base_len(13, 2), 4);
+    0
+}
+
+fn test_base_addition() -> Int {
+    // Binary: 5 (101) + 3 (011) = 8 (1000)
+    let a = to_base_digits(5, 2);
+    let b_arr = to_base_digits(3, 2);
+    let sum = base_add(a, 3, b_arr, 2, 2);
+    let sum_dec = from_base(sum, 4, 2);
+    assert_eq(sum_dec, 8);
+
+    // Decimal: 37 + 85 = 122
+    let a2 = to_base_digits(37, 10);
+    let b2 = to_base_digits(85, 10);
+    let sum2 = base_add(a2, 2, b2, 2, 10);
+    let sum2_dec = from_base(sum2, 3, 10);
+    assert_eq(sum2_dec, 122);
+    0
+}
+
+fn test_base_addition_carry() -> Int {
+    // Octal: 7 + 1 = 10 (carry)
+    let a = to_base_digits(7, 8);
+    let b_arr = to_base_digits(1, 8);
+    let sum = base_add(a, 1, b_arr, 1, 8);
+    assert_eq(from_base(sum, 2, 8), 8);
+
+    // Hex: 15 (F) + 1 = 16 (10)
+    let a2 = to_base_digits(15, 16);
+    let b2 = to_base_digits(1, 16);
+    let sum2 = base_add(a2, 1, b2, 1, 16);
+    assert_eq(from_base(sum2, 2, 16), 16);
+    0
+}
+
+fn test_mul_digit() -> Int {
+    // Binary: 5 (101) * 2 = 10 (1010)
+    let a = to_base_digits(5, 2);
+    let prod = base_mul_digit(a, 3, 2, 2);
+    // Actually this is: multiply digits by scalar 2 in base 2
+    // 101 * 10 in binary = 1010
+    // But we do digit-by-digit: not a shift, but multiply and carry
+    // 1*2=2, carry 1, rem 0; 0*2+1=1; 1*2=2, carry 1, rem 0; carry=1
+    // Result: 0, 1, 0, 1 = 1010 which is 10
+    assert_eq(from_base(prod, 4, 2), 10);
+
+    // Decimal: 123 * 3 = 369
+    let a2 = to_base_digits(123, 10);
+    let prod2 = base_mul_digit(a2, 3, 3, 10);
+    assert_eq(from_base(prod2, 4, 10), 369);
+    0
+}
+
+fn test_palindrome() -> Int {
+    // 7 in binary = 111 -> palindrome
+    assert_eq(is_palindrome_in_base(7, 2), 1);
+    // 5 in binary = 101 -> palindrome
+    assert_eq(is_palindrome_in_base(5, 2), 1);
+    // 6 in binary = 110 -> not palindrome
+    assert_eq(is_palindrome_in_base(6, 2), 0);
+    // 121 in base 10 -> palindrome (1,2,1)
+    assert_eq(is_palindrome_in_base(121, 10), 1);
+    // 123 in base 10 -> not palindrome
+    assert_eq(is_palindrome_in_base(123, 10), 0);
+    0
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount_int(0), 0);
+    assert_eq(popcount_int(1), 1);
+    assert_eq(popcount_int(7), 3);   // 111
+    assert_eq(popcount_int(255), 8); // 11111111
+    assert_eq(popcount_int(128), 1); // 10000000
+    assert_eq(popcount_int(42), 3);  // 101010
+    0
+}
+
+fn test_zero() -> Int {
+    // Zero in any base
+    let d = to_base_digits(0, 2);
+    assert_eq(to_base_len(0, 2), 1);
+    assert_eq(get(d, 0), 0);
+    assert_eq(from_base(d, 1, 2), 0);
+
+    assert_eq(to_base_len(0, 10), 1);
+    assert_eq(to_base_len(0, 16), 1);
+    assert_eq(is_palindrome_in_base(0, 2), 1);
+    0
+}
+
+fn main() -> Int {
+    test_roundtrip();
+    test_binary_details();
+    test_base_addition();
+    test_base_addition_carry();
+    test_mul_digit();
+    test_palindrome();
+    test_popcount();
+    test_zero();
+    print("DIFF_OK: base_convert_arith");
+    0
+}

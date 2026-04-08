@@ -1,0 +1,276 @@
+// =============================================================================
+// text_trim_methods_test.vr - Tests for trim_start fix, insert_str,
+//                              replace_range, and AddAssign
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, trim, insert_str, replace_range, addassign, core
+// @description: Tests for trim_start bugfix and new Text methods
+// =============================================================================
+
+mount core.text.Text;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: trim_start bugfix - all-whitespace strings
+// =============================================================================
+
+@test
+fn test_trim_start_all_whitespace() {
+    let s = "   ";
+    let trimmed = s.trim_start();
+    assert(trimmed.is_empty());
+    assert_eq(trimmed.len(), 0);
+}
+
+@test
+fn test_trim_start_single_space() {
+    let s = " ";
+    let trimmed = s.trim_start();
+    assert(trimmed.is_empty());
+}
+
+@test
+fn test_trim_start_tabs_and_spaces() {
+    let s = " \t \t ";
+    let trimmed = s.trim_start();
+    assert(trimmed.is_empty());
+}
+
+@test
+fn test_trim_start_newlines() {
+    let s = "\n\n\n";
+    let trimmed = s.trim_start();
+    assert(trimmed.is_empty());
+}
+
+@test
+fn test_trim_start_normal() {
+    let s = "  hello  ";
+    assert_eq(s.trim_start(), "hello  ");
+}
+
+@test
+fn test_trim_start_no_whitespace() {
+    let s = "hello";
+    assert_eq(s.trim_start(), "hello");
+}
+
+@test
+fn test_trim_start_empty() {
+    let s = "";
+    let trimmed = s.trim_start();
+    assert(trimmed.is_empty());
+}
+
+@test
+fn test_trim_start_whitespace_in_middle() {
+    let s = "  hello world  ";
+    assert_eq(s.trim_start(), "hello world  ");
+}
+
+// =============================================================================
+// Section 2: trim all-whitespace (depends on trim_start fix)
+// =============================================================================
+
+@test
+fn test_trim_all_whitespace() {
+    let s = "   ";
+    let trimmed = s.trim();
+    assert(trimmed.is_empty());
+}
+
+@test
+fn test_trim_mixed_whitespace() {
+    let s = " \t\n\r ";
+    let trimmed = s.trim();
+    assert(trimmed.is_empty());
+}
+
+// =============================================================================
+// Section 3: insert_str - Insert a string at byte position
+// =============================================================================
+
+@test
+fn test_insert_str_at_start() {
+    let mut s = "world".clone();
+    s.insert_str(0, "hello ");
+    assert_eq(s, "hello world");
+}
+
+@test
+fn test_insert_str_at_end() {
+    let mut s = "hello".clone();
+    s.insert_str(5, " world");
+    assert_eq(s, "hello world");
+}
+
+@test
+fn test_insert_str_in_middle() {
+    let mut s = "hd".clone();
+    s.insert_str(1, "ello worl");
+    assert_eq(s, "hello world");
+}
+
+@test
+fn test_insert_str_empty_string() {
+    let mut s = "hello".clone();
+    s.insert_str(3, "");
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_insert_str_into_empty() {
+    let mut s = Text.new();
+    s.insert_str(0, "hello");
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_insert_str_multiple() {
+    let mut s = "ac".clone();
+    s.insert_str(1, "b");
+    assert_eq(s, "abc");
+    s.insert_str(3, "d");
+    assert_eq(s, "abcd");
+    s.insert_str(0, "0");
+    assert_eq(s, "0abcd");
+}
+
+// =============================================================================
+// Section 4: replace_range - Replace a byte range with new text
+// =============================================================================
+
+@test
+fn test_replace_range_basic() {
+    let mut s = "hello world".clone();
+    s.replace_range(5, 11, " earth");
+    assert_eq(s, "hello earth");
+}
+
+@test
+fn test_replace_range_shrink() {
+    let mut s = "hello world".clone();
+    s.replace_range(5, 11, "!");
+    assert_eq(s, "hello!");
+}
+
+@test
+fn test_replace_range_grow() {
+    let mut s = "hi".clone();
+    s.replace_range(0, 2, "hello");
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_replace_range_at_start() {
+    let mut s = "hello world".clone();
+    s.replace_range(0, 5, "greetings");
+    assert_eq(s, "greetings world");
+}
+
+@test
+fn test_replace_range_at_end() {
+    let mut s = "hello world".clone();
+    s.replace_range(6, 11, "earth");
+    assert_eq(s, "hello earth");
+}
+
+@test
+fn test_replace_range_empty_replacement() {
+    let mut s = "hello world".clone();
+    s.replace_range(5, 11, "");
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_replace_range_empty_range() {
+    let mut s = "hello".clone();
+    s.replace_range(3, 3, "XY");
+    assert_eq(s, "helXYlo");
+}
+
+@test
+fn test_replace_range_whole_string() {
+    let mut s = "hello".clone();
+    s.replace_range(0, 5, "world");
+    assert_eq(s, "world");
+}
+
+// =============================================================================
+// Section 5: AddAssign (+=) operator
+// =============================================================================
+
+@test
+fn test_add_assign_basic() {
+    let mut s = "hello".clone();
+    s += " world";
+    assert_eq(s, "hello world");
+}
+
+@test
+fn test_add_assign_empty() {
+    let mut s = "hello".clone();
+    s += "";
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_add_assign_to_empty() {
+    let mut s = Text.new();
+    s += "hello";
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_add_assign_multiple() {
+    let mut s = Text.new();
+    s += "a";
+    s += "b";
+    s += "c";
+    assert_eq(s, "abc");
+}
+
+@test
+fn test_add_assign_long_string() {
+    let mut s = "start".clone();
+    s += " - this is a longer string that will exceed SSO";
+    assert(s.starts_with("start"));
+    assert(s.ends_with("SSO"));
+}
+
+// =============================================================================
+// Section 6: Combination tests
+// =============================================================================
+
+@test
+fn test_trim_start_then_operations() {
+    let s = "   hello   ";
+    let trimmed = s.trim_start();
+    assert_eq(trimmed, "hello   ");
+    assert_eq(trimmed.trim_end(), "hello");
+}
+
+@test
+fn test_insert_str_preserves_existing() {
+    let mut s = "abcdef".clone();
+    s.insert_str(3, "XYZ");
+    assert_eq(s, "abcXYZdef");
+    assert_eq(s.len(), 9);
+}
+
+@test
+fn test_replace_range_then_insert_str() {
+    let mut s = "hello world".clone();
+    s.replace_range(5, 6, " beautiful ");
+    assert_eq(s, "hello beautiful world");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

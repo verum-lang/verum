@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, module, error
+// @description: Test missing module brace detection
+// @expected-error: E062
+
+module utils
+    fn helper() {}
+
+module math fn add(a: Int, b: Int) -> Int { a + b }
+
+public module types
+    type Point is { x: Int, y: Int };

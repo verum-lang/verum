@@ -1,0 +1,258 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, deque
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Deque (double-ended queue) operations — push/pop front/back, peek
+
+// Simulate deque with a fixed-size circular buffer of 4 elements.
+// Slots: d0..d3. front/back are indices, count tracks size.
+type Deque4 is { d0: Int, d1: Int, d2: Int, d3: Int, front: Int, back: Int, count: Int };
+
+fn deque_new() -> Deque4 {
+    Deque4 { d0: 0, d1: 0, d2: 0, d3: 0, front: 0, back: 0, count: 0 }
+}
+
+fn deque_get(d: Deque4, idx: Int) -> Int {
+    if idx == 0 { d.d0 }
+    else if idx == 1 { d.d1 }
+    else if idx == 2 { d.d2 }
+    else { d.d3 }
+}
+
+fn deque_set(d: Deque4, idx: Int, val: Int) -> Deque4 {
+    let mut r = Deque4 { d0: d.d0, d1: d.d1, d2: d.d2, d3: d.d3, front: d.front, back: d.back, count: d.count };
+    if idx == 0 { r.d0 = val; }
+    else if idx == 1 { r.d1 = val; }
+    else if idx == 2 { r.d2 = val; }
+    else { r.d3 = val; }
+    r
+}
+
+fn deque_push_back(d: Deque4, val: Int) -> Deque4 {
+    let slot = d.back;
+    let mut r = deque_set(d, slot, val);
+    r.back = (r.back + 1) % 4;
+    r.count = r.count + 1;
+    r
+}
+
+fn deque_push_front(d: Deque4, val: Int) -> Deque4 {
+    let new_front = (d.front + 3) % 4;
+    let mut r = deque_set(d, new_front, val);
+    r.front = new_front;
+    r.count = r.count + 1;
+    r
+}
+
+fn deque_pop_back(d: Deque4) -> Deque4 {
+    let new_back = (d.back + 3) % 4;
+    let mut r = Deque4 { d0: d.d0, d1: d.d1, d2: d.d2, d3: d.d3, front: d.front, back: new_back, count: d.count - 1 };
+    r
+}
+
+fn deque_pop_front(d: Deque4) -> Deque4 {
+    let new_front = (d.front + 1) % 4;
+    Deque4 { d0: d.d0, d1: d.d1, d2: d.d2, d3: d.d3, front: new_front, back: d.back, count: d.count - 1 }
+}
+
+fn deque_peek_back(d: Deque4) -> Int {
+    let idx = (d.back + 3) % 4;
+    deque_get(d, idx)
+}
+
+fn deque_peek_front(d: Deque4) -> Int {
+    deque_get(d, d.front)
+}
+
+// =============================================================================
+// Test 1: LIFO stack behavior (push back, pop back)
+// =============================================================================
+
+@test
+fn test_push_back_pop_back() {
+    let d0 = deque_new();
+    let d1 = deque_push_back(d0, 10);
+    let d2 = deque_push_back(d1, 20);
+    let d3 = deque_push_back(d2, 30);
+    assert_eq(d3.count, 3);
+
+    // peek back should be 30 (last pushed)
+    assert_eq(deque_peek_back(d3), 30);
+
+    // pop back removes 30
+    let d4 = deque_pop_back(d3);
+    assert_eq(d4.count, 2);
+    assert_eq(deque_peek_back(d4), 20);
+
+    // pop back removes 20
+    let d5 = deque_pop_back(d4);
+    assert_eq(d5.count, 1);
+    assert_eq(deque_peek_back(d5), 10);
+
+    print("  test_push_back_pop_back: ok");
+}
+
+// =============================================================================
+// Test 2: FIFO queue from front (push front, pop front)
+// =============================================================================
+
+@test
+fn test_push_front_pop_front() {
+    let d0 = deque_new();
+    let d1 = deque_push_front(d0, 10);
+    let d2 = deque_push_front(d1, 20);
+    let d3 = deque_push_front(d2, 30);
+    assert_eq(d3.count, 3);
+
+    // peek front should be 30 (last pushed to front)
+    assert_eq(deque_peek_front(d3), 30);
+
+    // pop front removes 30
+    let d4 = deque_pop_front(d3);
+    assert_eq(d4.count, 2);
+    assert_eq(deque_peek_front(d4), 20);
+
+    // pop front removes 20
+    let d5 = deque_pop_front(d4);
+    assert_eq(d5.count, 1);
+    assert_eq(deque_peek_front(d5), 10);
+
+    print("  test_push_front_pop_front: ok");
+}
+
+// =============================================================================
+// Test 3: FIFO queue behavior (push back, pop front)
+// =============================================================================
+
+@test
+fn test_push_back_pop_front() {
+    let d0 = deque_new();
+    let d1 = deque_push_back(d0, 10);
+    let d2 = deque_push_back(d1, 20);
+    let d3 = deque_push_back(d2, 30);
+
+    // pop front should give 10 (first in, first out)
+    assert_eq(deque_peek_front(d3), 10);
+    let d4 = deque_pop_front(d3);
+    assert_eq(d4.count, 2);
+
+    // next front should be 20
+    assert_eq(deque_peek_front(d4), 20);
+    let d5 = deque_pop_front(d4);
+    assert_eq(d5.count, 1);
+
+    // next front should be 30
+    assert_eq(deque_peek_front(d5), 30);
+
+    print("  test_push_back_pop_front: ok");
+}
+
+// =============================================================================
+// Test 4: Empty deque operations
+// =============================================================================
+
+@test
+fn test_deque_empty() {
+    let d = deque_new();
+    assert_eq(d.count, 0);
+    assert_eq(d.front, 0);
+    assert_eq(d.back, 0);
+
+    // push one element, then pop it => empty again
+    let d1 = deque_push_back(d, 42);
+    assert_eq(d1.count, 1);
+    assert_eq(deque_peek_front(d1), 42);
+    assert_eq(deque_peek_back(d1), 42);
+
+    let d2 = deque_pop_back(d1);
+    assert_eq(d2.count, 0);
+
+    print("  test_deque_empty: ok");
+}
+
+// =============================================================================
+// Test 5: Rotate elements — pop front, push back
+// =============================================================================
+
+@test
+fn test_deque_rotate() {
+    // Start: [10, 20, 30]
+    let d0 = deque_new();
+    let d1 = deque_push_back(d0, 10);
+    let d2 = deque_push_back(d1, 20);
+    let d3 = deque_push_back(d2, 30);
+
+    // Rotate: pop front (10), push back (10) => [20, 30, 10]
+    let front_val = deque_peek_front(d3);
+    assert_eq(front_val, 10);
+    let d4 = deque_pop_front(d3);
+    let d5 = deque_push_back(d4, front_val);
+    assert_eq(d5.count, 3);
+
+    // Now front should be 20
+    assert_eq(deque_peek_front(d5), 20);
+
+    // Rotate again: pop front (20), push back (20) => [30, 10, 20]
+    let front_val2 = deque_peek_front(d5);
+    assert_eq(front_val2, 20);
+    let d6 = deque_pop_front(d5);
+    let d7 = deque_push_back(d6, front_val2);
+
+    // Now front should be 30
+    assert_eq(deque_peek_front(d7), 30);
+
+    print("  test_deque_rotate: ok");
+}
+
+// =============================================================================
+// Test 6: Size tracking through mixed operations
+// =============================================================================
+
+@test
+fn test_deque_size_tracking() {
+    let d0 = deque_new();
+    assert_eq(d0.count, 0);
+
+    let d1 = deque_push_back(d0, 1);
+    assert_eq(d1.count, 1);
+
+    let d2 = deque_push_front(d1, 2);
+    assert_eq(d2.count, 2);
+
+    let d3 = deque_push_back(d2, 3);
+    assert_eq(d3.count, 3);
+
+    let d4 = deque_pop_front(d3);
+    assert_eq(d4.count, 2);
+
+    let d5 = deque_pop_back(d4);
+    assert_eq(d5.count, 1);
+
+    let d6 = deque_push_front(d5, 4);
+    assert_eq(d6.count, 2);
+
+    let d7 = deque_pop_front(d6);
+    assert_eq(d7.count, 1);
+
+    let d8 = deque_pop_front(d7);
+    assert_eq(d8.count, 0);
+
+    print("  test_deque_size_tracking: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_push_back_pop_back();
+    test_push_front_pop_front();
+    test_push_back_pop_front();
+    test_deque_empty();
+    test_deque_rotate();
+    test_deque_size_tracking();
+    print("[OK] 006_deque_methods");
+    0
+}

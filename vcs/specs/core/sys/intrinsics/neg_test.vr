@@ -1,0 +1,29 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Test negation
+
+module test.stdlib.sys.intrinsics.neg_test;
+
+mount core.intrinsics.{floor_f64};
+
+fn main() {
+    print("Testing negative literals...");
+    let a = -3.7;
+    print(f"a = {a}");
+
+    let b = floor_f64(-3.7);
+    print(f"floor(-3.7) = {b}");
+
+    // Use negative literal directly since Float64 negation operator not supported
+    let c: Float64 = 3.7;
+    let d: Float64 = -3.7;
+    print(f"-c = {d}");
+
+    print("Testing floor of negative...");
+    let e = floor_f64(d);
+    print(f"floor(-c) = {e}");
+
+    print("All tests passed!");
+}

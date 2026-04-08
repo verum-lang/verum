@@ -1,0 +1,52 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: mmio, volatile, pointer, systems
+// @timeout: 5000
+// @description: Verify volatile pointer type syntax and basic usage.
+
+mount sys.mmio;
+
+/// Test volatile pointer type declaration and usage.
+fn test_volatile_pointer_type() {
+    // Volatile pointer type syntax: *volatile T and *volatile mut T
+    let read_ptr: *volatile UInt32 = 0x4000_0000 as *volatile UInt32;
+    let write_ptr: *volatile mut UInt32 = 0x4000_0004 as *volatile mut UInt32;
+
+    // Both should be valid pointer types
+    let addr1: USize = read_ptr as USize;
+    let addr2: USize = write_ptr as USize;
+
+    assert(addr1 == 0x4000_0000);
+    assert(addr2 == 0x4000_0004);
+}
+
+/// Test volatile load intrinsic.
+fn test_volatile_load() {
+    // Create a local value to read from
+    let value: UInt32 = 0x1234_5678;
+    let ptr: *volatile UInt32 = &value as *volatile UInt32;
+
+    // Volatile load should prevent optimization
+    let loaded = volatile_load(ptr);
+
+    assert(loaded == 0x1234_5678);
+}
+
+/// Test volatile store intrinsic.
+fn test_volatile_store() {
+    let mut value: UInt32 = 0;
+    let ptr: *volatile mut UInt32 = &mut value as *volatile mut UInt32;
+
+    // Volatile store should prevent optimization
+    volatile_store(ptr, 0xDEAD_BEEF);
+
+    assert(value == 0xDEAD_BEEF);
+}
+
+fn main() -> Int {
+    test_volatile_pointer_type();
+    test_volatile_load();
+    test_volatile_store();
+    0
+}

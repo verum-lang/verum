@@ -1,0 +1,48 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, mutation, set, indexing
+// @expected-exit: 0
+
+fn sum_list(xs: List<Int>, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while (i < n) {
+        total = total + xs[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Test list mutation via SetE
+    let mut arr = [1, 2, 3, 4, 5];
+    arr[0] = 100;
+    arr[4] = 500;
+    assert_eq(arr[0], 100);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[4], 500);
+
+    // Test len
+    assert_eq(arr.len(), 5);
+
+    // Test passing list to function
+    let items = [1, 2, 3, 4, 5];
+    let total = sum_list(items, 5);
+    print(total);
+    assert_eq(total, 15);
+
+    // Test list with computed values
+    let mut computed = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < 10) {
+        computed[i] = i * i;
+        i = i + 1;
+    }
+    assert_eq(computed[0], 0);
+    assert_eq(computed[3], 9);
+    assert_eq(computed[9], 81);
+    print(computed[9]);
+
+    0
+}

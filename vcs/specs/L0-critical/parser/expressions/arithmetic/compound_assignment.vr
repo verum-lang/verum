@@ -1,0 +1,236 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arithmetic, assignment, compound
+
+fn test_addition_assignment() {
+    let mut x = 0;
+    let mut counter = 0;
+    let mut total = 0;
+
+    let increment = 1;
+    let item = 5;
+
+    // Addition assignment
+    x += 1;
+    counter += increment;
+    total += item;
+}
+
+fn test_subtraction_assignment() {
+    let mut x = 10;
+    let mut remaining = 100;
+    let mut balance = 1000;
+
+    let consumed = 10;
+    let withdrawal = 50;
+
+    // Subtraction assignment
+    x -= 1;
+    remaining -= consumed;
+    balance -= withdrawal;
+}
+
+fn test_multiplication_assignment() {
+    let mut x = 1;
+    let mut scale = 1;
+    let mut accumulator = 1;
+
+    let factor = 2;
+    let multiplier = 3;
+
+    // Multiplication assignment
+    x *= 2;
+    scale *= factor;
+    accumulator *= multiplier;
+}
+
+fn test_division_assignment() {
+    let mut x = 100;
+    let mut average = 100;
+    let mut normalized = 255;
+
+    let count = 10;
+    let max_value = 255;
+
+    // Division assignment
+    x /= 2;
+    average /= count;
+    normalized /= max_value;
+}
+
+fn test_modulo_assignment() {
+    let mut x = 105;
+    let mut index = 50;
+    let mut remainder = 100;
+
+    let array_length = 10;
+    let divisor = 7;
+
+    // Modulo assignment
+    x %= 10;
+    index %= array_length;
+    remainder %= divisor;
+}
+
+fn test_power_assignment() {
+    let mut x = 2;
+    let mut base_val = 3;
+    let exponent = 2;
+
+    // Power assignment (using explicit operation since **= is not in grammar)
+    x = x ** 2;
+    base_val = base_val ** exponent;
+}
+
+fn test_bitwise_and_assignment() {
+    let mut flags = 0xFF;
+    let mut bits = 0xAA;
+
+    let mask = 0x0F;
+
+    // Bitwise AND assignment
+    flags &= mask;
+    bits &= 0xFF;
+}
+
+fn test_bitwise_or_assignment() {
+    let mut flags = 0x00;
+    let mut bits = 0x55;
+
+    let new_flag = 0x10;
+    let enabled_bits = 0xAA;
+
+    // Bitwise OR assignment
+    flags |= new_flag;
+    bits |= enabled_bits;
+}
+
+fn test_bitwise_xor_assignment() {
+    let mut bits = 0xFF;
+    let mut checksum = 0x00;
+
+    let toggle_mask = 0x0F;
+    let byte_val = 0xAB;
+
+    // Bitwise XOR assignment
+    bits ^= toggle_mask;
+    checksum ^= byte_val;
+}
+
+fn test_shift_assignment() {
+    let mut value = 1;
+    let mut bits = 0xFF;
+
+    let shift_amount = 2;
+
+    // Left shift assignment
+    value <<= 1;
+    bits <<= shift_amount;
+
+    // Right shift assignment
+    value >>= 1;
+    bits >>= shift_amount;
+}
+
+fn test_compound_with_expressions() {
+    let mut x = 10;
+    let mut y = 20;
+    let mut z = 100;
+
+    let a = 5;
+    let b = 3;
+    let c = 2;
+    let d = 1;
+
+    fn compute_divisor() -> Int { 2 }
+
+    // Compound assignment with expressions
+    x += a + b;
+    y *= (c - d);
+    z /= compute_divisor();
+}
+
+fn test_compound_on_struct_fields() {
+    type Point is { x: Int, y: Int };
+    type Config is { timeout: Int };
+
+    let mut point = Point { x: 0, y: 0 };
+    let mut config = Config { timeout: 1000 };
+
+    let delta_x = 5;
+    let delta_y = 10;
+
+    // Compound assignment on struct fields
+    point.x += delta_x;
+    point.y += delta_y;
+    config.timeout *= 2;
+}
+
+fn test_compound_on_array_elements() {
+    let mut array = [0, 1, 2, 3, 4];
+    let mut matrix = [[1, 2], [3, 4]];
+
+    let i = 1;
+    let factor = 2;
+    let row = 0;
+    let col = 1;
+    let value = 10;
+
+    // Compound assignment on array elements
+    array[0] += 1;
+    array[i] *= factor;
+    matrix[row][col] += value;
+}
+
+fn test_compound_on_map_values() {
+    type Map<K, V> is { entries: List<(K, V)> };
+
+    fn get(m: &mut Map<Text, Int>, k: Text) -> &mut Int {
+        &mut m.entries[0].1
+    }
+
+    let mut counts = Map { entries: [("key", 0)] };
+    let key = "key";
+
+    // Compound assignment on map values (conceptual)
+    // counts[key] += 1;
+    // sums[category] += amount;
+}
+
+fn test_compound_in_loops() {
+    let mut sum = 0;
+    let mut product = 1;
+
+    // Compound assignment in loops
+    for i in 0..10 {
+        sum += i;
+        product *= i + 1;
+    }
+}
+
+fn test_compound_with_method_results() {
+    type Container is { items: List<Int> };
+
+    fn pop(c: &mut Container) -> Int { 1 }
+    fn len(c: &Container) -> Int { c.items.len() }
+
+    let mut total = 0;
+    let mut count = 10;
+    let mut list = Container { items: [1, 2, 3] };
+    let removed = Container { items: [] };
+
+    // Compound assignment with method results
+    total += pop(&mut list);
+    count -= len(&removed);
+}
+
+fn test_compound_with_references() {
+    let mut value = 0;
+    let ptr = &mut value;
+    let mut ref_val = 10;
+
+    // Compound assignment with references
+    *ptr += 1;
+    ref_val *= 2;
+}

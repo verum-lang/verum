@@ -1,0 +1,98 @@
+// @test: meta-pass
+// @level: L2
+// @tier: 0
+// @tags: meta, parallel, independence, pure
+// @description: Test independent meta computations that could be parallelized
+
+// =============================================================================
+// INDEPENDENT COMPUTATIONS
+// =============================================================================
+
+// These functions have no dependencies and can be evaluated independently
+
+meta fn compute_a() -> Int {
+    // Sum of 0..10 = 45
+    0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9
+}
+
+meta fn compute_b() -> Int {
+    // 5! = 120
+    1 * 2 * 3 * 4 * 5
+}
+
+meta fn compute_c() -> Int {
+    // Fibonacci sequence computed directly
+    // fib(10) = 55
+    55
+}
+
+meta fn compute_d() -> Text {
+    text_concat("a", text_concat("b", text_concat("c", text_concat("d", "e"))))
+}
+
+// =============================================================================
+// PURE FUNCTION PATTERNS
+// =============================================================================
+
+meta fn add_pair(a: Int, b: Int) -> Int { a + b }
+meta fn mul_pair(a: Int, b: Int) -> Int { a * b }
+
+// =============================================================================
+// INDEPENDENT COMPUTATIONS (NO LOOPS)
+// =============================================================================
+
+meta fn square(x: Int) -> Int { x * x }
+meta fn cube(x: Int) -> Int { x * x * x }
+
+meta fn lookup_at_8() -> Int { square(8) % 256 }
+meta fn lookup_at_10() -> Int { square(10) % 256 }
+meta fn lookup_at_16() -> Int { square(16) % 256 }
+
+// =============================================================================
+// DETERMINISTIC RESULTS
+// =============================================================================
+
+meta fn deterministic_f(n: Int) -> Int {
+    n * n + n
+}
+
+meta fn verify_determinism() -> Bool {
+    let a = deterministic_f(5);
+    let b = deterministic_f(5);
+    (a == b) && (a == 30)
+}
+
+// =============================================================================
+// ISOLATION VERIFICATION
+// =============================================================================
+
+meta fn verify_isolation() -> Bool {
+    (compute_a() == 45) && (compute_b() == 120) && (compute_c() == 55)
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Independent computations
+    @const assert_eq(compute_a(), 45);
+    @const assert_eq(compute_b(), 120);
+    @const assert_eq(compute_c(), 55);
+    @const assert_eq(compute_d(), "abcde");
+
+    // Pure function patterns
+    @const assert_eq(add_pair(3, 5), 8);
+    @const assert_eq(mul_pair(4, 7), 28);
+
+    // Lookup values
+    @const assert_eq(lookup_at_8(), 64);
+    @const assert_eq(lookup_at_10(), 100);
+    @const assert_eq(lookup_at_16(), 0);
+
+    // Verify determinism
+    @const assert(verify_determinism());
+
+    // Isolation verification
+    @const assert(verify_isolation());
+}

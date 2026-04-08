@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, coercion, conversion
+// @description: Tests tier coercions using to_managed(), to_checked(), to_unsafe(), as_ref()
+
+/// Test valid tier coercions and conversions.
+/// Some tier conversions are implicit, others require explicit casts.
+/// Spec: 26-cbgr-implementation.md#tier-coercion
+
+fn main() {
+    test_checked_to_managed();
+    test_managed_coercion();
+    test_tier_in_function_params();
+}
+
+/// Checked can be coerced to managed (safe widening)
+fn test_checked_to_managed() {
+    let value = 42;
+    let checked_ref: &checked Int = &checked value;
+
+    // Coercion: checked -> managed (adds runtime checks, always safe)
+    let managed_ref: &Int = checked_ref.to_managed();
+
+    assert(*managed_ref == 42);
+}
+
+/// Function accepting managed can receive checked
+fn takes_managed(r: &Int) -> Int {
+    *r
+}
+
+fn test_managed_coercion() {
+    let value = 100;
+    let checked_ref: &checked Int = &checked value;
+
+    // Implicit coercion: checked -> managed when calling function
+    let result = takes_managed(checked_ref.as_ref());
+
+    assert(result == 100);
+}
+
+/// Test tier in function parameters
+fn test_tier_in_function_params() {
+    let heap_val = Heap.new(200);
+    let stack_val = 300;
+
+    // Function that takes managed ref
+    let r1 = takes_managed(&*heap_val);
+    assert(r1 == 200);
+
+    // Checked ref can be passed where managed is expected
+    let checked_ref: &checked Int = &checked stack_val;
+    let r2 = takes_managed(checked_ref.as_ref());
+    assert(r2 == 300);
+}
+
+/// Explicit conversion using intrinsics
+fn test_explicit_tier_conversion() {
+    let value = Heap.new(42);
+    let managed: &Int = &*value;
+
+    // Explicit downgrade to unsafe (requires unsafe block)
+    unsafe {
+        let unsafe_ref: &unsafe Int = managed.to_unsafe();
+        assert(*unsafe_ref == 42);
+    }
+
+    // Cannot upgrade unsafe to checked without proof
+    // (this would require additional verification)
+}
+
+/// Test that conversions preserve the pointed-to value
+fn test_conversion_preserves_value() {
+    let data = ComplexData {
+        name: Text.from("test"),
+        value: 123,
+    };
+
+    let checked_ref: &checked ComplexData = &checked data;
+
+    // Convert to managed
+    let managed_ref = checked_ref.to_managed();
+
+    // Value should be identical
+    assert(managed_ref.name == "test");
+    assert(managed_ref.value == 123);
+}
+
+type ComplexData is {
+    name: Text,
+    value: Int,
+};
+
+// Helper trait for tier conversion
+type RefConvertible is protocol {
+    fn to_managed(&self) -> &Self;
+    fn as_ref(&self) -> &Self;
+    fn to_unsafe(&self) -> &unsafe Self;
+};

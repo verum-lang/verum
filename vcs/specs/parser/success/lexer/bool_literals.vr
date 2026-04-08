@@ -1,0 +1,252 @@
+// @test: parse-pass
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, booleans
+// @description: Comprehensive tests for boolean literal parsing per grammar/verum.ebnf
+//
+// Grammar productions tested:
+//   bool_lit = 'true' | 'false'
+
+// ============================================================================
+// BASIC BOOLEAN LITERALS
+// ============================================================================
+
+fn test_basic_true() {
+    let a = true;
+}
+
+fn test_basic_false() {
+    let a = false;
+}
+
+fn test_both_booleans() {
+    let t = true;
+    let f = false;
+}
+
+// ============================================================================
+// BOOLEAN LITERALS WITH TYPE ANNOTATIONS
+// ============================================================================
+
+fn test_typed_booleans() {
+    let a: Bool = true;
+    let b: Bool = false;
+}
+
+fn test_mutable_booleans() {
+    let mut a = true;
+    let mut b = false;
+    a = false;
+    b = true;
+}
+
+// ============================================================================
+// BOOLEAN LITERALS IN EXPRESSIONS
+// ============================================================================
+
+fn test_boolean_logical_and() {
+    let a = true && true;
+    let b = true && false;
+    let c = false && true;
+    let d = false && false;
+}
+
+fn test_boolean_logical_or() {
+    let a = true || true;
+    let b = true || false;
+    let c = false || true;
+    let d = false || false;
+}
+
+fn test_boolean_logical_not() {
+    let a = !true;
+    let b = !false;
+    let c = !!true;
+    let d = !!false;
+    let e = !!!true;
+}
+
+fn test_boolean_complex_expressions() {
+    let a = true && !false;
+    let b = !true || false;
+    let c = (true && false) || true;
+    let d = !(true && false);
+    let e = (true || false) && (false || true);
+    let f = !(!true && !false);
+}
+
+// ============================================================================
+// BOOLEAN LITERALS IN CONTROL FLOW
+// ============================================================================
+
+fn test_boolean_in_if() {
+    if true {
+        let x = 1;
+    }
+
+    if false {
+        let x = 2;
+    }
+
+    if true {
+        let x = 3;
+    } else {
+        let x = 4;
+    }
+}
+
+fn test_boolean_in_if_else_chain() {
+    if true {
+        let x = 1;
+    } else if false {
+        let x = 2;
+    } else if true {
+        let x = 3;
+    } else {
+        let x = 4;
+    }
+}
+
+fn test_boolean_in_while() {
+    while false {
+        let x = 1;
+    }
+
+    // Note: while true would be infinite loop, but parses correctly
+    let mut count = 0;
+    while true {
+        count = count + 1;
+        if count > 10 {
+            break;
+        }
+    }
+}
+
+fn test_boolean_in_match() {
+    let val = true;
+    match val {
+        true => { let x = 1; }
+        false => { let x = 0; }
+    }
+}
+
+// ============================================================================
+// BOOLEAN LITERALS IN DATA STRUCTURES
+// ============================================================================
+
+fn test_boolean_in_arrays() {
+    let a = [true];
+    let b = [false];
+    let c = [true, false];
+    let d = [false, true];
+    let e = [true, true, true];
+    let f = [false, false, false];
+    let g = [true, false, true, false];
+}
+
+fn test_boolean_in_tuples() {
+    let a = (true,);
+    let b = (false,);
+    let c = (true, false);
+    let d = (false, true);
+    let e = (true, true, true);
+    let f = (false, false, false);
+}
+
+fn test_boolean_in_nested_structures() {
+    let a = [[true, false], [false, true]];
+    let b = [(true, false), (false, true)];
+    let c = ([true, false], [false, true]);
+}
+
+// ============================================================================
+// BOOLEAN LITERALS IN FUNCTION CONTEXTS
+// ============================================================================
+
+fn test_boolean_as_argument() {
+    some_function(true);
+    some_function(false);
+    another_function(true, false);
+    another_function(false, true);
+}
+
+fn test_boolean_return() -> Bool {
+    true
+}
+
+fn test_boolean_return_false() -> Bool {
+    false
+}
+
+fn test_boolean_conditional_return() -> Bool {
+    if true {
+        true
+    } else {
+        false
+    }
+}
+
+// ============================================================================
+// BOOLEAN LITERALS WITH OTHER EXPRESSIONS
+// ============================================================================
+
+fn test_boolean_with_comparison() {
+    let a = true == true;
+    let b = true == false;
+    let c = false == false;
+    let d = true != false;
+    let e = false != true;
+}
+
+fn test_boolean_ternary_style() {
+    let x = 5;
+    let result = if true { 1 } else { 0 };
+    let result2 = if false { 1 } else { 0 };
+}
+
+fn test_boolean_as_struct_field() {
+    type Config is {
+        enabled: Bool,
+        debug: Bool,
+        verbose: Bool,
+    };
+
+    let config = Config {
+        enabled: true,
+        debug: false,
+        verbose: true,
+    };
+}
+
+// ============================================================================
+// EDGE CASES
+// ============================================================================
+
+fn test_boolean_shadowing() {
+    let true_val = true;
+    let false_val = false;
+
+    // Note: 'true' and 'false' are keywords, not identifiers
+    // So this creates new bindings, not shadowing
+    let a = true_val;
+    let b = false_val;
+}
+
+fn test_boolean_in_complex_type() {
+    // Boolean in generic type
+    let opt: Maybe<Bool> = Some(true);
+    let opt2: Maybe<Bool> = Some(false);
+
+    // Boolean in array type
+    let arr: [Bool; 3] = [true, false, true];
+}
+
+// Helper functions for tests
+fn some_function(b: Bool) {
+    let x = b;
+}
+
+fn another_function(a: Bool, b: Bool) {
+    let x = a && b;
+}

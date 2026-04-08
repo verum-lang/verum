@@ -1,0 +1,60 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, mutex, lock, unlock
+// @expected-exit: 0
+
+// Test: Mutex primitives — create, lock, unlock.
+
+fn __mutex_new_raw() -> Int {
+    0
+}
+
+fn __mutex_lock_raw(mtx: Int) -> Int {
+    0
+}
+
+fn __mutex_unlock_raw(mtx: Int) -> Int {
+    0
+}
+
+fn main() -> Int {
+    // Test 1: create mutex
+    let mtx = __mutex_new_raw();
+    if (mtx == 0) {
+        print("FAIL test1: mutex_new returned null");
+        return 1;
+    }
+
+    // Test 2: lock and unlock
+    __mutex_lock_raw(mtx);
+    __mutex_unlock_raw(mtx);
+
+    // Test 3: multiple lock/unlock cycles
+    let mut i = 0;
+    while (i < 100) {
+        __mutex_lock_raw(mtx);
+        __mutex_unlock_raw(mtx);
+        i = i + 1;
+    }
+
+    // Test 4: create second mutex (different address)
+    let mtx2 = __mutex_new_raw();
+    if (mtx2 == 0) {
+        print("FAIL test4: second mutex_new returned null");
+        return 1;
+    }
+    if (mtx2 == mtx) {
+        print("FAIL test4b: two mutexes have same address");
+        return 1;
+    }
+
+    // Lock both, unlock both
+    __mutex_lock_raw(mtx);
+    __mutex_lock_raw(mtx2);
+    __mutex_unlock_raw(mtx2);
+    __mutex_unlock_raw(mtx);
+
+    print("910_mutex: PASS");
+    0
+}

@@ -1,0 +1,65 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, differential, arithmetic
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT arithmetic operations — mirror of interpreter test for differential comparison
+
+// This test produces deterministic output that can be compared with interpreter tier.
+// All results are printed to stdout for differential verification.
+
+fn main() -> Int {
+    // Integer arithmetic
+    assert_eq(42 + 17, 59);
+    assert_eq(100 - 58, 42);
+    assert_eq(6 * 7, 42);
+    assert_eq(84 / 2, 42);
+    assert_eq(47 % 5, 2);
+
+    // Negative number arithmetic
+    assert_eq(-10 + 5, -5);
+    assert_eq(-3 * -4, 12);
+    assert_eq(-7 / 2, -3);
+    assert_eq(-7 % 2, -1);
+
+    // Operator precedence
+    assert_eq(2 + 3 * 4, 14);
+    assert_eq((2 + 3) * 4, 20);
+    assert_eq(100 / 10 + 5, 15);
+    assert_eq(100 / (10 + 5), 6);
+
+    // Large numbers
+    assert_eq(1000000 * 1000, 1000000000);
+    assert_eq(999999999 + 1, 1000000000);
+
+    // Chained operations
+    let mut x = 1;
+    let mut i = 0;
+    while i < 20 {
+        x = x * 2;
+        i = i + 1;
+    }
+    assert_eq(x, 1048576);
+
+    // Sum of 1..100
+    let mut sum = 0;
+    i = 1;
+    while i <= 100 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    assert_eq(sum, 5050);
+
+    // Product of 1..12 (12!)
+    let mut prod = 1;
+    i = 1;
+    while i <= 12 {
+        prod = prod * i;
+        i = i + 1;
+    }
+    assert_eq(prod, 479001600);
+
+    print("[OK] 123_arithmetic_diff_aot");
+    0
+}

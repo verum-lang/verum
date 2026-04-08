@@ -1,0 +1,156 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, matrix, chain, dp
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for matrix chain multiplication cost (dynamic programming)
+
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// Flat 8x8 table for DP
+type Table8 is {
+    r0: Int, r1: Int, r2: Int, r3: Int, r4: Int, r5: Int, r6: Int, r7: Int,
+    r8: Int, r9: Int, r10: Int, r11: Int, r12: Int, r13: Int, r14: Int, r15: Int,
+    r16: Int, r17: Int, r18: Int, r19: Int, r20: Int, r21: Int, r22: Int, r23: Int,
+    r24: Int, r25: Int, r26: Int, r27: Int, r28: Int, r29: Int, r30: Int, r31: Int,
+    r32: Int, r33: Int, r34: Int, r35: Int, r36: Int, r37: Int, r38: Int, r39: Int,
+    r40: Int, r41: Int, r42: Int, r43: Int, r44: Int, r45: Int, r46: Int, r47: Int,
+    r48: Int, r49: Int, r50: Int, r51: Int, r52: Int, r53: Int, r54: Int, r55: Int,
+    r56: Int, r57: Int, r58: Int, r59: Int, r60: Int, r61: Int, r62: Int, r63: Int
+};
+
+fn t8_new() -> Table8 {
+    Table8 {
+        r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0,
+        r8: 0, r9: 0, r10: 0, r11: 0, r12: 0, r13: 0, r14: 0, r15: 0,
+        r16: 0, r17: 0, r18: 0, r19: 0, r20: 0, r21: 0, r22: 0, r23: 0,
+        r24: 0, r25: 0, r26: 0, r27: 0, r28: 0, r29: 0, r30: 0, r31: 0,
+        r32: 0, r33: 0, r34: 0, r35: 0, r36: 0, r37: 0, r38: 0, r39: 0,
+        r40: 0, r41: 0, r42: 0, r43: 0, r44: 0, r45: 0, r46: 0, r47: 0,
+        r48: 0, r49: 0, r50: 0, r51: 0, r52: 0, r53: 0, r54: 0, r55: 0,
+        r56: 0, r57: 0, r58: 0, r59: 0, r60: 0, r61: 0, r62: 0, r63: 0
+    }
+}
+
+fn t8_get(t: Table8, idx: Int) -> Int {
+    if idx == 0 { t.r0 } else if idx == 1 { t.r1 } else if idx == 2 { t.r2 } else if idx == 3 { t.r3 }
+    else if idx == 4 { t.r4 } else if idx == 5 { t.r5 } else if idx == 6 { t.r6 } else if idx == 7 { t.r7 }
+    else if idx == 8 { t.r8 } else if idx == 9 { t.r9 } else if idx == 10 { t.r10 } else if idx == 11 { t.r11 }
+    else if idx == 12 { t.r12 } else if idx == 13 { t.r13 } else if idx == 14 { t.r14 } else if idx == 15 { t.r15 }
+    else if idx == 16 { t.r16 } else if idx == 17 { t.r17 } else if idx == 18 { t.r18 } else if idx == 19 { t.r19 }
+    else if idx == 20 { t.r20 } else if idx == 21 { t.r21 } else if idx == 22 { t.r22 } else if idx == 23 { t.r23 }
+    else if idx == 24 { t.r24 } else if idx == 25 { t.r25 } else if idx == 26 { t.r26 } else if idx == 27 { t.r27 }
+    else if idx == 28 { t.r28 } else if idx == 29 { t.r29 } else if idx == 30 { t.r30 } else if idx == 31 { t.r31 }
+    else if idx == 32 { t.r32 } else if idx == 33 { t.r33 } else if idx == 34 { t.r34 } else if idx == 35 { t.r35 }
+    else { 0 }
+}
+
+fn t8_set(t: Table8, idx: Int, v: Int) -> Table8 {
+    Table8 {
+        r0: if idx == 0 { v } else { t.r0 }, r1: if idx == 1 { v } else { t.r1 },
+        r2: if idx == 2 { v } else { t.r2 }, r3: if idx == 3 { v } else { t.r3 },
+        r4: if idx == 4 { v } else { t.r4 }, r5: if idx == 5 { v } else { t.r5 },
+        r6: if idx == 6 { v } else { t.r6 }, r7: if idx == 7 { v } else { t.r7 },
+        r8: if idx == 8 { v } else { t.r8 }, r9: if idx == 9 { v } else { t.r9 },
+        r10: if idx == 10 { v } else { t.r10 }, r11: if idx == 11 { v } else { t.r11 },
+        r12: if idx == 12 { v } else { t.r12 }, r13: if idx == 13 { v } else { t.r13 },
+        r14: if idx == 14 { v } else { t.r14 }, r15: if idx == 15 { v } else { t.r15 },
+        r16: if idx == 16 { v } else { t.r16 }, r17: if idx == 17 { v } else { t.r17 },
+        r18: if idx == 18 { v } else { t.r18 }, r19: if idx == 19 { v } else { t.r19 },
+        r20: if idx == 20 { v } else { t.r20 }, r21: if idx == 21 { v } else { t.r21 },
+        r22: if idx == 22 { v } else { t.r22 }, r23: if idx == 23 { v } else { t.r23 },
+        r24: if idx == 24 { v } else { t.r24 }, r25: if idx == 25 { v } else { t.r25 },
+        r26: if idx == 26 { v } else { t.r26 }, r27: if idx == 27 { v } else { t.r27 },
+        r28: if idx == 28 { v } else { t.r28 }, r29: if idx == 29 { v } else { t.r29 },
+        r30: if idx == 30 { v } else { t.r30 }, r31: if idx == 31 { v } else { t.r31 },
+        r32: if idx == 32 { v } else { t.r32 }, r33: if idx == 33 { v } else { t.r33 },
+        r34: if idx == 34 { v } else { t.r34 }, r35: if idx == 35 { v } else { t.r35 },
+        r36: t.r36, r37: t.r37, r38: t.r38, r39: t.r39,
+        r40: t.r40, r41: t.r41, r42: t.r42, r43: t.r43,
+        r44: t.r44, r45: t.r45, r46: t.r46, r47: t.r47,
+        r48: t.r48, r49: t.r49, r50: t.r50, r51: t.r51,
+        r52: t.r52, r53: t.r53, r54: t.r54, r55: t.r55,
+        r56: t.r56, r57: t.r57, r58: t.r58, r59: t.r59,
+        r60: t.r60, r61: t.r61, r62: t.r62, r63: t.r63
+    }
+}
+
+// Dimensions array (up to 8 entries)
+type Dims is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn dims_get(d: Dims, i: Int) -> Int {
+    if i == 0 { d.d0 } else if i == 1 { d.d1 }
+    else if i == 2 { d.d2 } else if i == 3 { d.d3 }
+    else if i == 4 { d.d4 } else if i == 5 { d.d5 }
+    else if i == 6 { d.d6 } else { d.d7 }
+}
+
+// Matrix chain DP: given dimensions p[0..n], find min multiplications
+// n matrices: matrix i has dimensions p[i] x p[i+1]
+fn matrix_chain_cost(p: Dims, n: Int) -> Int {
+    // dp[i][j] = min cost to multiply matrices i..j
+    let mut dp = t8_new();
+    // dp[i][i] = 0 (already initialized)
+
+    let mut chain_len = 2;
+    while chain_len <= n {
+        let mut i = 0;
+        while i <= n - chain_len {
+            let j = i + chain_len - 1;
+            let mut best = 999999999;
+            let mut k = i;
+            while k < j {
+                let cost = t8_get(dp, i * 6 + k) + t8_get(dp, (k + 1) * 6 + j)
+                           + dims_get(p, i) * dims_get(p, k + 1) * dims_get(p, j + 1);
+                if cost < best { best = cost; }
+                k = k + 1;
+            }
+            dp = t8_set(dp, i * 6 + j, best);
+            j;
+            i = i + 1;
+        }
+        chain_len = chain_len + 1;
+    }
+    t8_get(dp, 0 * 6 + (n - 1))
+}
+
+fn test_two_matrices() {
+    // A: 10x30, B: 30x5 -> cost = 10*30*5 = 1500
+    let p = Dims { d0: 10, d1: 30, d2: 5, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(matrix_chain_cost(p, 2), 1500);
+}
+
+fn test_three_matrices() {
+    // A: 10x30, B: 30x5, C: 5x60
+    // (AB)C: 10*30*5 + 10*5*60 = 1500 + 3000 = 4500
+    // A(BC): 30*5*60 + 10*30*60 = 9000 + 18000 = 27000
+    // Optimal: 4500
+    let p = Dims { d0: 10, d1: 30, d2: 5, d3: 60, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(matrix_chain_cost(p, 3), 4500);
+}
+
+fn test_four_matrices() {
+    // Classic example: dimensions [40, 20, 30, 10, 30]
+    // Optimal = 26000
+    let p = Dims { d0: 40, d1: 20, d2: 30, d3: 10, d4: 30, d5: 0, d6: 0, d7: 0 };
+    assert_eq(matrix_chain_cost(p, 4), 26000);
+}
+
+fn test_identical_dims() {
+    // All 10x10 matrices: n matrices, each 10x10
+    // Cost for 2: 10*10*10 = 1000
+    let p = Dims { d0: 10, d1: 10, d2: 10, d3: 10, d4: 0, d5: 0, d6: 0, d7: 0 };
+    // 3 matrices of 10x10: always 2000 (any order)
+    assert_eq(matrix_chain_cost(p, 3), 2000);
+}
+
+fn main() -> Int {
+    test_two_matrices();
+    test_three_matrices();
+    test_four_matrices();
+    test_identical_dims();
+    print("[OK] 257_matrix_chain_aot");
+    0
+}

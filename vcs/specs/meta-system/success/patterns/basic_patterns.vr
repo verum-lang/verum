@@ -1,0 +1,91 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, wildcard, literal, identifier
+// @description: Test basic pattern matching in meta functions (wildcard, literal, identifier)
+
+// =============================================================================
+// WILDCARD PATTERNS
+// =============================================================================
+
+meta fn test_wildcard() -> Int {
+    match 42 {
+        _ => 100,
+    }
+}
+
+meta fn test_wildcard_in_tuple() -> Int {
+    match (1, 2, 3) {
+        (_, second, _) => second,
+    }
+}
+
+// =============================================================================
+// LITERAL PATTERNS
+// =============================================================================
+
+meta fn test_literal_int() -> Text {
+    match 42 {
+        0 => "zero",
+        1 => "one",
+        42 => "answer",
+        _ => "other",
+    }
+}
+
+meta fn test_literal_bool() -> Int {
+    match true {
+        true => 1,
+        false => 0,
+    }
+}
+
+meta fn test_literal_text() -> Int {
+    match "hello" {
+        "hello" => 1,
+        "world" => 2,
+        _ => 0,
+    }
+}
+
+// =============================================================================
+// IDENTIFIER BINDING PATTERNS
+// =============================================================================
+
+meta fn test_ident_binding() -> Int {
+    match 42 {
+        x => x * 2,
+    }
+}
+
+meta fn test_multiple_ident_bindings() -> Int {
+    match (10, 20) {
+        (a, b) => a + b,
+    }
+}
+
+meta fn test_nested_ident_bindings() -> Int {
+    match ((1, 2), (3, 4)) {
+        ((a, b), (c, d)) => a + b + c + d,
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Wildcard tests
+    @const assert_eq(test_wildcard(), 100);
+    @const assert_eq(test_wildcard_in_tuple(), 2);
+
+    // Literal tests
+    @const assert_eq(test_literal_int(), "answer");
+    @const assert_eq(test_literal_bool(), 1);
+    @const assert_eq(test_literal_text(), 1);
+
+    // Identifier binding tests
+    @const assert_eq(test_ident_binding(), 84);
+    @const assert_eq(test_multiple_ident_bindings(), 30);
+    @const assert_eq(test_nested_ident_bindings(), 10);
+}

@@ -1,0 +1,153 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, dynamic-dispatch, closures, strategy-pattern
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT dynamic dispatch via closure tables (strategy pattern)
+
+// Strategy pattern: different algorithms selected at runtime
+type Strategy is { compute: fn(Int, Int) -> Int, name_id: Int };
+
+fn make_add_strategy() -> Strategy {
+    Strategy { compute: |a: Int, b: Int| -> Int { a + b }, name_id: 1 }
+}
+
+fn make_mul_strategy() -> Strategy {
+    Strategy { compute: |a: Int, b: Int| -> Int { a * b }, name_id: 2 }
+}
+
+fn make_max_strategy() -> Strategy {
+    Strategy { compute: |a: Int, b: Int| -> Int { if a > b { a } else { b } }, name_id: 3 }
+}
+
+fn make_min_strategy() -> Strategy {
+    Strategy { compute: |a: Int, b: Int| -> Int { if a < b { a } else { b } }, name_id: 4 }
+}
+
+fn apply_strategy(s: Strategy, a: Int, b: Int) -> Int {
+    (s.compute)(a, b)
+}
+
+// Function table: select operation by index
+fn get_op(idx: Int) -> fn(Int) -> Int {
+    if idx == 0 { |x: Int| -> Int { x * 2 } }
+    else if idx == 1 { |x: Int| -> Int { x + 10 } }
+    else if idx == 2 { |x: Int| -> Int { x * x } }
+    else { |x: Int| -> Int { 0 - x } }
+}
+
+// Comparator-based operations
+fn sort3(a: Int, b: Int, c: Int, cmp: fn(Int, Int) -> Bool) -> Int {
+    // Return sum to verify it's correct (sorting preserves sum)
+    // Also check ordering
+    let mut x = a;
+    let mut y = b;
+    let mut z = c;
+    // Simple bubble sort of 3 elements
+    if cmp(y, x) { let t = x; x = y; y = t; }
+    if cmp(z, y) { let t = y; y = z; z = t; }
+    if cmp(y, x) { let t = x; x = y; y = t; }
+    // x <= y <= z if cmp is less-than
+    x * 100 + y * 10 + z  // encode sorted order
+}
+
+// Pipeline: chain of functions
+type Pipeline is PEnd | PStep { func: fn(Int) -> Int, next: Pipeline };
+
+fn run_pipeline(p: Pipeline, val: Int) -> Int {
+    match p {
+        PEnd => val,
+        PStep { func, next } => run_pipeline(next, func(val)),
+    }
+}
+
+fn pipeline_len(p: Pipeline) -> Int {
+    match p {
+        PEnd => 0,
+        PStep { func: _, next } => 1 + pipeline_len(next),
+    }
+}
+
+fn main() -> Int {
+    // Strategy pattern
+    let add_s = make_add_strategy();
+    let mul_s = make_mul_strategy();
+    let max_s = make_max_strategy();
+    let min_s = make_min_strategy();
+
+    assert_eq(apply_strategy(add_s, 10, 20), 30);
+    assert_eq(apply_strategy(mul_s, 10, 20), 200);
+    assert_eq(apply_strategy(max_s, 10, 20), 20);
+    assert_eq(apply_strategy(min_s, 10, 20), 10);
+
+    assert_eq(add_s.name_id, 1);
+    assert_eq(mul_s.name_id, 2);
+
+    // Select strategy at runtime
+    let mut strategy_sum = 0;
+    let mut i = 0;
+    while i < 4 {
+        let s = if i == 0 { make_add_strategy() }
+                else if i == 1 { make_mul_strategy() }
+                else if i == 2 { make_max_strategy() }
+                else { make_min_strategy() };
+        strategy_sum = strategy_sum + apply_strategy(s, 5, 3);
+        i = i + 1;
+    }
+    // add(5,3)=8 + mul(5,3)=15 + max(5,3)=5 + min(5,3)=3 = 31
+    assert_eq(strategy_sum, 31);
+
+    // Function table
+    assert_eq(get_op(0)(5), 10);   // 5*2
+    assert_eq(get_op(1)(5), 15);   // 5+10
+    assert_eq(get_op(2)(5), 25);   // 5*5
+    assert_eq(get_op(3)(5), -5);   // -5
+
+    // Apply all operations and sum
+    let mut op_sum = 0;
+    let mut j = 0;
+    while j < 4 {
+        let op = get_op(j);
+        op_sum = op_sum + op(3);
+        j = j + 1;
+    }
+    // 6 + 13 + 9 + (-3) = 25
+    assert_eq(op_sum, 25);
+
+    // Comparator-based sorting
+    let ascending = sort3(3, 1, 2, |a, b| a < b);
+    assert_eq(ascending, 123);  // sorted: 1,2,3
+
+    let descending = sort3(3, 1, 2, |a, b| a > b);
+    assert_eq(descending, 321);  // sorted desc: 3,2,1
+
+    // Pipeline
+    let p = PStep {
+        func: |x| x + 10,
+        next: PStep {
+            func: |x| x * 2,
+            next: PStep {
+                func: |x| x - 5,
+                next: PEnd,
+            },
+        },
+    };
+    assert_eq(pipeline_len(p), 3);
+    // 0 -> +10 -> 10 -> *2 -> 20 -> -5 -> 15
+    assert_eq(run_pipeline(p, 0), 15);
+    // 5 -> +10 -> 15 -> *2 -> 30 -> -5 -> 25
+    assert_eq(run_pipeline(p, 5), 25);
+
+    // Build pipeline imperatively
+    let mut pipe = PEnd;
+    pipe = PStep { func: |x| x + 1, next: pipe };
+    pipe = PStep { func: |x| x * 3, next: pipe };
+    pipe = PStep { func: |x| x - 2, next: pipe };
+    assert_eq(pipeline_len(pipe), 3);
+    // Note: pipe is built in reverse: -2 first, then *3, then +1
+    // 10 -> -2 -> 8 -> *3 -> 24 -> +1 -> 25
+    assert_eq(run_pipeline(pipe, 10), 25);
+
+    0
+}

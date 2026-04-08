@@ -1,0 +1,343 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, dynamic-programming, knapsack, optimization
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT dynamic programming 0/1 knapsack with solution reconstruction
+
+// Items: up to 8 items, each with weight and value
+type Items is {
+    w0: Int, w1: Int, w2: Int, w3: Int,
+    w4: Int, w5: Int, w6: Int, w7: Int,
+    v0: Int, v1: Int, v2: Int, v3: Int,
+    v4: Int, v5: Int, v6: Int, v7: Int,
+    count: Int
+};
+
+fn item_weight(items: Items, i: Int) -> Int {
+    if i == 0 { items.w0 }
+    else if i == 1 { items.w1 }
+    else if i == 2 { items.w2 }
+    else if i == 3 { items.w3 }
+    else if i == 4 { items.w4 }
+    else if i == 5 { items.w5 }
+    else if i == 6 { items.w6 }
+    else { items.w7 }
+}
+
+fn item_value(items: Items, i: Int) -> Int {
+    if i == 0 { items.v0 }
+    else if i == 1 { items.v1 }
+    else if i == 2 { items.v2 }
+    else if i == 3 { items.v3 }
+    else if i == 4 { items.v4 }
+    else if i == 5 { items.v5 }
+    else if i == 6 { items.v6 }
+    else { items.v7 }
+}
+
+// DP table: we need (n+1) rows x (capacity+1) columns
+// For n=5, capacity=10: 6 x 11 = 66 cells -- too many for one record.
+// Use a rolling 1D array approach: only keep current and previous row.
+// Max capacity = 15, so we need Arr16 for a row.
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn arr_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn arr_zero() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// Full DP table stored as 8 rows of Arr16 (for reconstruction)
+type DPTable is {
+    r0: Arr16, r1: Arr16, r2: Arr16, r3: Arr16,
+    r4: Arr16, r5: Arr16, r6: Arr16, r7: Arr16
+};
+
+fn dp_get_row(t: DPTable, i: Int) -> Arr16 {
+    if i == 0 { t.r0 }
+    else if i == 1 { t.r1 }
+    else if i == 2 { t.r2 }
+    else if i == 3 { t.r3 }
+    else if i == 4 { t.r4 }
+    else if i == 5 { t.r5 }
+    else if i == 6 { t.r6 }
+    else { t.r7 }
+}
+
+fn dp_set_row(t: DPTable, i: Int, r: Arr16) -> DPTable {
+    DPTable {
+        r0: if i == 0 { r } else { t.r0 },
+        r1: if i == 1 { r } else { t.r1 },
+        r2: if i == 2 { r } else { t.r2 },
+        r3: if i == 3 { r } else { t.r3 },
+        r4: if i == 4 { r } else { t.r4 },
+        r5: if i == 5 { r } else { t.r5 },
+        r6: if i == 6 { r } else { t.r6 },
+        r7: if i == 7 { r } else { t.r7 }
+    }
+}
+
+// Solve knapsack: returns the full DP table
+// dp[i][w] = max value using items 0..i-1 with capacity w
+// Row 0 = all zeros (no items)
+// Row i: for each w, dp[i][w] = max(dp[i-1][w], dp[i-1][w-wi] + vi) if w >= wi
+fn knapsack_solve(items: Items, capacity: Int) -> DPTable {
+    let z = arr_zero();
+    let mut table = DPTable { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z };
+
+    let n = items.count;
+    let mut i = 1;
+    while i <= n {
+        let wi = item_weight(items, i - 1);
+        let vi = item_value(items, i - 1);
+        let prev = dp_get_row(table, i - 1);
+        let mut row = arr_zero();
+        let mut w = 0;
+        while w <= capacity {
+            let skip = arr_get(prev, w);
+            let take = if w >= wi { arr_get(prev, w - wi) + vi } else { 0 };
+            row = arr_set(row, w, max_val(skip, take));
+            w = w + 1;
+        }
+        table = dp_set_row(table, i, row);
+        i = i + 1;
+    }
+    table
+}
+
+// Get optimal value from the DP table
+fn knapsack_value(table: DPTable, n: Int, capacity: Int) -> Int {
+    arr_get(dp_get_row(table, n), capacity)
+}
+
+// Reconstruct which items were selected
+// Returns Arr16 where position i = 1 if item i was taken, 0 otherwise
+fn knapsack_items(table: DPTable, items: Items, capacity: Int) -> Arr16 {
+    let n = items.count;
+    let mut selected = arr_zero();
+    let mut w = capacity;
+    let mut i = n;
+    while i > 0 {
+        let cur = arr_get(dp_get_row(table, i), w);
+        let prev = arr_get(dp_get_row(table, i - 1), w);
+        if cur != prev {
+            // Item i-1 was taken
+            selected = arr_set(selected, i - 1, 1);
+            w = w - item_weight(items, i - 1);
+        }
+        i = i - 1;
+    }
+    selected
+}
+
+fn main() -> Int {
+    // === Test 1: Classic knapsack ===
+    // 5 items, capacity 10
+    // Item 0: weight=2, value=6
+    // Item 1: weight=3, value=5
+    // Item 2: weight=4, value=8
+    // Item 3: weight=5, value=9
+    // Item 4: weight=7, value=12
+    let items1 = Items {
+        w0: 2, w1: 3, w2: 4, w3: 5, w4: 7, w5: 0, w6: 0, w7: 0,
+        v0: 6, v1: 5, v2: 8, v3: 9, v4: 12, v5: 0, v6: 0, v7: 0,
+        count: 5
+    };
+
+    let t1 = knapsack_solve(items1, 10);
+    // Optimal: take items 0,2,3 => weight=2+4+5=11 too heavy
+    // take items 0,1,3 => weight=2+3+5=10, value=6+5+9=20
+    // take items 0,2,3 => weight=2+4+5=11 no
+    // take items 0,1,2 => weight=2+3+4=9, value=6+5+8=19
+    // take items 1,4 => weight=3+7=10, value=5+12=17
+    // take items 0,3 => weight=2+5=7, value=6+9=15
+    // take items 2,3 => weight=4+5=9, value=8+9=17
+    // take items 0,2 => weight=2+4=6, value=6+8=14
+    // take items 0,1,3: value=20, weight=10 -- fits exactly
+    let opt1 = knapsack_value(t1, 5, 10);
+    assert_eq(opt1, 20);
+
+    let sel1 = knapsack_items(t1, items1, 10);
+    assert_eq(arr_get(sel1, 0), 1);  // item 0 taken
+    assert_eq(arr_get(sel1, 1), 1);  // item 1 taken
+    assert_eq(arr_get(sel1, 2), 0);  // item 2 not taken
+    assert_eq(arr_get(sel1, 3), 1);  // item 3 taken
+    assert_eq(arr_get(sel1, 4), 0);  // item 4 not taken
+
+    // Verify: total weight <= capacity
+    let mut total_w1 = 0;
+    let mut total_v1 = 0;
+    let mut i = 0;
+    while i < 5 {
+        if arr_get(sel1, i) == 1 {
+            total_w1 = total_w1 + item_weight(items1, i);
+            total_v1 = total_v1 + item_value(items1, i);
+        }
+        i = i + 1;
+    }
+    assert(total_w1 <= 10);
+    assert_eq(total_v1, 20);
+
+    // === Test 2: All items fit ===
+    // 3 items, capacity 15
+    let items2 = Items {
+        w0: 1, w1: 2, w2: 3, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 10, v1: 20, v2: 30, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 3
+    };
+    let t2 = knapsack_solve(items2, 15);
+    let opt2 = knapsack_value(t2, 3, 15);
+    assert_eq(opt2, 60);  // Take all: value=10+20+30=60, weight=1+2+3=6
+
+    let sel2 = knapsack_items(t2, items2, 15);
+    assert_eq(arr_get(sel2, 0), 1);
+    assert_eq(arr_get(sel2, 1), 1);
+    assert_eq(arr_get(sel2, 2), 1);
+
+    // === Test 3: No items fit ===
+    // All items too heavy for capacity 1
+    let items3 = Items {
+        w0: 5, w1: 6, w2: 7, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 100, v1: 200, v2: 300, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 3
+    };
+    let t3 = knapsack_solve(items3, 1);
+    assert_eq(knapsack_value(t3, 3, 1), 0);
+
+    // === Test 4: Single item fits ===
+    let items4 = Items {
+        w0: 3, w1: 0, w2: 0, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 42, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 1
+    };
+    let t4 = knapsack_solve(items4, 5);
+    assert_eq(knapsack_value(t4, 1, 5), 42);
+    assert_eq(knapsack_value(t4, 1, 2), 0);  // Too heavy
+
+    // === Test 5: Greedy fails but DP succeeds ===
+    // Greedy by value/weight ratio would pick item 0 (ratio=5), then nothing fits
+    // But taking items 1 and 2 is better.
+    // Item 0: weight=6, value=30 (ratio 5)
+    // Item 1: weight=3, value=14 (ratio 4.67)
+    // Item 2: weight=3, value=14 (ratio 4.67)
+    // Capacity = 6
+    // Greedy: take item 0 -> value=30, weight=6, done
+    // DP: items 1+2 -> value=28, weight=6 -- actually 30 > 28 so greedy wins here.
+    // Better example:
+    // Item 0: weight=5, value=10 (ratio 2)
+    // Item 1: weight=3, value=7  (ratio 2.33)
+    // Item 2: weight=3, value=7  (ratio 2.33)
+    // Capacity = 6
+    // Greedy by ratio: pick item1(3,7), pick item2(3,7) -> total=14
+    // Could also pick item0(5,10) + nothing -> 10
+    // So DP should give 14
+    let items5 = Items {
+        w0: 5, w1: 3, w2: 3, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 10, v1: 7, v2: 7, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 3
+    };
+    let t5 = knapsack_solve(items5, 6);
+    assert_eq(knapsack_value(t5, 3, 6), 14);
+
+    let sel5 = knapsack_items(t5, items5, 6);
+    assert_eq(arr_get(sel5, 0), 0);  // item 0 not taken
+    assert_eq(arr_get(sel5, 1), 1);  // item 1 taken
+    assert_eq(arr_get(sel5, 2), 1);  // item 2 taken
+
+    // === Test 6: DP table boundary values ===
+    // With items1, capacity 0 => value = 0
+    assert_eq(knapsack_value(t1, 5, 0), 0);
+
+    // Capacity = 2 => only item 0 fits (weight=2, value=6)
+    assert_eq(knapsack_value(t1, 5, 2), 6);
+
+    // Capacity = 3 => item 0(w=2,v=6) or item 1(w=3,v=5); take item 0
+    assert_eq(knapsack_value(t1, 5, 3), 6);
+
+    // Capacity = 5 => items 0+1 (w=2+3=5, v=6+5=11) or item 3 (w=5,v=9)
+    assert_eq(knapsack_value(t1, 5, 5), 11);
+
+    // === Test 7: Equal weight items, choose highest value ===
+    let items7 = Items {
+        w0: 4, w1: 4, w2: 4, w3: 4, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 4
+    };
+    let t7 = knapsack_solve(items7, 8);
+    // Can take 2 items. Best: items 2+3 => value=3+4=7
+    assert_eq(knapsack_value(t7, 4, 8), 7);
+    // With capacity=4, take item 3 (value=4)
+    assert_eq(knapsack_value(t7, 4, 4), 4);
+
+    // === Test 8: Verify DP monotonicity ===
+    // dp[n][w] >= dp[n][w-1] for all w
+    let row5 = dp_get_row(t1, 5);
+    let mut w = 1;
+    while w <= 10 {
+        assert(arr_get(row5, w) >= arr_get(row5, w - 1));
+        w = w + 1;
+    }
+
+    // dp[i][capacity] >= dp[i-1][capacity] for all i
+    let mut ii = 1;
+    while ii <= 5 {
+        assert(arr_get(dp_get_row(t1, ii), 10) >= arr_get(dp_get_row(t1, ii - 1), 10));
+        ii = ii + 1;
+    }
+
+    0
+}

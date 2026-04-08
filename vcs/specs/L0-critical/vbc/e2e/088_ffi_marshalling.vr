@@ -1,0 +1,244 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, ffi, marshalling, layout
+// @timeout: 50000
+// @expected-exit: 0
+// @description: FFI marshalling concepts — struct layout, padding, alignment, endianness simulation
+
+// ============================================================================
+// Alignment/padding helpers
+// ============================================================================
+
+fn align_up(offset: Int, alignment: Int) -> Int {
+    let remainder = offset % alignment;
+    if remainder == 0 { offset }
+    else { offset + alignment - remainder }
+}
+
+fn padding_needed(offset: Int, alignment: Int) -> Int {
+    let aligned = align_up(offset, alignment);
+    aligned - offset
+}
+
+// ============================================================================
+// Field descriptor for struct layout
+// ============================================================================
+
+type FieldLayout is { offset: Int, size: Int, alignment: Int };
+
+// ============================================================================
+// 4-field struct layout
+// ============================================================================
+
+type StructLayout4 is { f0: FieldLayout, f1: FieldLayout, f2: FieldLayout, f3: FieldLayout, total_size: Int, max_align: Int };
+
+fn compute_layout_4(s0: Int, a0: Int, s1: Int, a1: Int, s2: Int, a2: Int, s3: Int, a3: Int) -> StructLayout4 {
+    // Field 0 at offset 0
+    let off0 = 0;
+    let f0 = FieldLayout { offset: off0, size: s0, alignment: a0 };
+
+    // Field 1 aligned after field 0
+    let off1 = align_up(off0 + s0, a1);
+    let f1 = FieldLayout { offset: off1, size: s1, alignment: a1 };
+
+    // Field 2 aligned after field 1
+    let off2 = align_up(off1 + s1, a2);
+    let f2 = FieldLayout { offset: off2, size: s2, alignment: a2 };
+
+    // Field 3 aligned after field 2
+    let off3 = align_up(off2 + s2, a3);
+    let f3 = FieldLayout { offset: off3, size: s3, alignment: a3 };
+
+    // Total size aligned to max alignment
+    let mut max_a = a0;
+    if a1 > max_a { max_a = a1; }
+    if a2 > max_a { max_a = a2; }
+    if a3 > max_a { max_a = a3; }
+    let total = align_up(off3 + s3, max_a);
+
+    StructLayout4 { f0: f0, f1: f1, f2: f2, f3: f3, total_size: total, max_align: max_a }
+}
+
+// ============================================================================
+// Test 1: Simple aligned struct
+// ============================================================================
+
+@test
+fn test_simple_layout() {
+    // struct { i32, i32, i32 } — all 4-byte aligned, no padding
+    let layout = compute_layout_4(4, 4, 4, 4, 4, 4, 0, 1);
+    assert_eq(layout.f0.offset, 0);
+    assert_eq(layout.f1.offset, 4);
+    assert_eq(layout.f2.offset, 8);
+    assert_eq(layout.total_size, 12);
+
+    print("  test_simple_layout: ok");
+}
+
+// ============================================================================
+// Test 2: Mixed alignment with padding
+// ============================================================================
+
+@test
+fn test_mixed_alignment() {
+    // struct { i8(1,1), i32(4,4), i8(1,1), i64(8,8) }
+    // i8 at 0 (size 1)
+    // i32 needs align 4 -> pad 3 -> offset 4
+    // i8 at 8 (after i32)
+    // i64 needs align 8 -> pad 7 -> offset 16
+    // Total: 16 + 8 = 24, aligned to 8 = 24
+    let layout = compute_layout_4(1, 1, 4, 4, 1, 1, 8, 8);
+    assert_eq(layout.f0.offset, 0);
+    assert_eq(layout.f1.offset, 4);
+    assert_eq(layout.f2.offset, 8);
+    assert_eq(layout.f3.offset, 16);
+    assert_eq(layout.total_size, 24);
+    assert_eq(layout.max_align, 8);
+
+    // Total padding = total_size - sum of field sizes = 24 - (1+4+1+8) = 10
+    let field_bytes = 1 + 4 + 1 + 8;
+    let total_padding = layout.total_size - field_bytes;
+    assert_eq(total_padding, 10);
+
+    print("  test_mixed_alignment: ok");
+}
+
+// ============================================================================
+// Test 3: Alignment utility
+// ============================================================================
+
+@test
+fn test_alignment_utils() {
+    assert_eq(align_up(0, 4), 0);
+    assert_eq(align_up(1, 4), 4);
+    assert_eq(align_up(2, 4), 4);
+    assert_eq(align_up(3, 4), 4);
+    assert_eq(align_up(4, 4), 4);
+    assert_eq(align_up(5, 4), 8);
+
+    assert_eq(align_up(0, 8), 0);
+    assert_eq(align_up(1, 8), 8);
+    assert_eq(align_up(7, 8), 8);
+    assert_eq(align_up(8, 8), 8);
+    assert_eq(align_up(9, 8), 16);
+
+    assert_eq(padding_needed(0, 4), 0);
+    assert_eq(padding_needed(1, 4), 3);
+    assert_eq(padding_needed(2, 4), 2);
+    assert_eq(padding_needed(3, 4), 1);
+    assert_eq(padding_needed(5, 8), 3);
+
+    print("  test_alignment_utils: ok");
+}
+
+// ============================================================================
+// Test 4: Endianness conversion (little-endian <-> big-endian for 32-bit)
+// ============================================================================
+
+fn byte0(x: Int) -> Int { x % 256 }
+fn byte1(x: Int) -> Int { (x / 256) % 256 }
+fn byte2(x: Int) -> Int { (x / 65536) % 256 }
+fn byte3(x: Int) -> Int { (x / 16777216) % 256 }
+
+fn swap_endian_32(x: Int) -> Int {
+    let b0 = byte0(x);
+    let b1 = byte1(x);
+    let b2 = byte2(x);
+    let b3 = byte3(x);
+    b0 * 16777216 + b1 * 65536 + b2 * 256 + b3
+}
+
+@test
+fn test_endian_swap() {
+    // 0x01020304 -> 0x04030201
+    let val = 1 * 16777216 + 2 * 65536 + 3 * 256 + 4;
+    let swapped = swap_endian_32(val);
+    let expected = 4 * 16777216 + 3 * 65536 + 2 * 256 + 1;
+    assert_eq(swapped, expected);
+
+    // Double swap = identity
+    let double_swapped = swap_endian_32(swapped);
+    assert_eq(double_swapped, val);
+
+    // 0x00000001 -> 0x01000000
+    assert_eq(swap_endian_32(1), 16777216);
+
+    // 0xFF000000 -> 0x000000FF
+    assert_eq(swap_endian_32(255 * 16777216), 255);
+
+    print("  test_endian_swap: ok");
+}
+
+// ============================================================================
+// Test 5: Marshalling buffer — pack fields into byte offsets
+// ============================================================================
+
+type MarshalBuf is {
+    b0: Int, b1: Int, b2: Int, b3: Int,
+    b4: Int, b5: Int, b6: Int, b7: Int
+};
+
+fn mbuf_get(buf: MarshalBuf, i: Int) -> Int {
+    if i == 0 { buf.b0 } else if i == 1 { buf.b1 }
+    else if i == 2 { buf.b2 } else if i == 3 { buf.b3 }
+    else if i == 4 { buf.b4 } else if i == 5 { buf.b5 }
+    else if i == 6 { buf.b6 } else { buf.b7 }
+}
+
+fn mbuf_set(buf: MarshalBuf, i: Int, val: Int) -> MarshalBuf {
+    MarshalBuf {
+        b0: if i == 0 { val } else { buf.b0 },
+        b1: if i == 1 { val } else { buf.b1 },
+        b2: if i == 2 { val } else { buf.b2 },
+        b3: if i == 3 { val } else { buf.b3 },
+        b4: if i == 4 { val } else { buf.b4 },
+        b5: if i == 5 { val } else { buf.b5 },
+        b6: if i == 6 { val } else { buf.b6 },
+        b7: if i == 7 { val } else { buf.b7 }
+    }
+}
+
+fn mbuf_zeros() -> MarshalBuf {
+    MarshalBuf { b0: 0, b1: 0, b2: 0, b3: 0, b4: 0, b5: 0, b6: 0, b7: 0 }
+}
+
+@test
+fn test_marshal_pack() {
+    let mut buf = mbuf_zeros();
+
+    // Pack a 16-bit value (0x0102) at offset 0 (little-endian)
+    buf = mbuf_set(buf, 0, 2);    // low byte
+    buf = mbuf_set(buf, 1, 1);    // high byte
+
+    // Pack a 32-bit value (0x03040506) at offset 4
+    buf = mbuf_set(buf, 4, 6);    // byte 0
+    buf = mbuf_set(buf, 5, 5);    // byte 1
+    buf = mbuf_set(buf, 6, 4);    // byte 2
+    buf = mbuf_set(buf, 7, 3);    // byte 3
+
+    // Read back 16-bit value
+    let val16 = mbuf_get(buf, 0) + mbuf_get(buf, 1) * 256;
+    assert_eq(val16, 258);  // 0x0102
+
+    // Read back 32-bit value
+    let val32 = mbuf_get(buf, 4) + mbuf_get(buf, 5) * 256
+              + mbuf_get(buf, 6) * 65536 + mbuf_get(buf, 7) * 16777216;
+    assert_eq(val32, 50595078);  // 0x03040506
+
+    print("  test_marshal_pack: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_simple_layout();
+    test_mixed_alignment();
+    test_alignment_utils();
+    test_endian_swap();
+    test_marshal_pack();
+    print("[OK] 088_ffi_marshalling");
+    0
+}

@@ -1,0 +1,95 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/mod.vr - Intrinsics Test Module Index
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, module, index
+// @description: Index file documenting the comprehensive test suite for
+//               sys/intrinsics.vr covering all 200+ VBC runtime intrinsics.
+//
+// Test Organization (SOLID Principles):
+// - Single Responsibility: Each file tests one category of intrinsics
+// - Open/Closed: New intrinsics get new test files
+// - Liskov Substitution: Generic intrinsics tested with all applicable types
+// - Interface Segregation: Tests grouped by usage patterns
+// - Dependency Inversion: Tests depend only on intrinsics, not implementations
+//
+// Coverage Categories:
+// 1.  memory_test.vr      - memcpy, memmove, memset, memcmp
+// 2.  atomic_test.vr      - atomic_load, atomic_store, atomic_cas, atomic_fetch_*
+// 3.  sync_test.vr        - spin_hint, memory_fence, futex_*, spinlock_*
+// 4.  arithmetic_test.vr  - checked, wrapping, saturating arithmetic
+// 5.  bitwise_test.vr     - clz, ctz, popcnt, bswap, rotl, rotr
+// 6.  float_math_test.vr  - sin, cos, exp, log, sqrt, etc. (Float32 + Float64)
+// 7.  platform_test.vr    - target_os, target_arch, is_debug, num_cpus, tier
+// 8.  tls_test.vr         - tls_slot_*, tls_frame_*, tls_read_*, context system
+// 9.  time_test.vr        - monotonic_nanos, realtime_secs, rdtsc, sleep_ms
+// 10. pointer_test.vr     - ptr_read, ptr_write, ptr_offset, null_ptr
+// 11. slice_test.vr       - slice_len, slice_as_ptr, slice_get_unchecked
+// 12. text_test.vr        - utf8_decode_char, char_is_*, text_parse_*
+// 13. cbgr_test.vr        - cbgr_validate, cbgr_current_epoch
+// 14. panic_test.vr       - panic, abort, unreachable, debug_assert
+// 15. conversion_test.vr  - int_to_float, to_le_bytes, f64_to_bits
+// 16. comparison_test.vr  - eq, ne, lt, le, gt, ge (generic)
+// 17. syscall_test.vr     - syscall0-syscall6 (Linux raw syscalls)
+// 18. random_test.vr      - random_float, random_u64
+// 19. async_test.vr       - async_sleep_*, spawn_with_env, executor_*
+// 20. runtime_test.vr     - supervisor_*, recovery, global resources
+// 21. exception_test.vr   - catch_unwind, PanicInfo, SourceLocation
+// 22. poly_arith_test.vr  - Polymorphic arithmetic overflow tests
+// 23. minimal_test.vr     - Minimal smoke tests for basic intrinsics
+//
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.mod;
+
+// =============================================================================
+// Module Index
+// =============================================================================
+// This file serves as documentation and an index for the intrinsics test suite.
+// Each test file is run independently by the test runner.
+//
+// Core Intrinsics Tests (L0 - Must Pass):
+//   - memory_test.vr      : Foundation: memcpy, memmove, memset, memcmp
+//   - atomic_test.vr      : Foundation: atomic operations for concurrency
+//   - sync_test.vr        : Foundation: futex, spinlock, fences
+//   - pointer_test.vr     : Foundation: ptr_read, ptr_write, ptr_offset
+//   - slice_test.vr       : Foundation: slice operations
+//
+// Arithmetic and Numeric Tests (L0):
+//   - arithmetic_test.vr  : checked, wrapping, saturating arithmetic
+//   - bitwise_test.vr     : clz, ctz, popcnt, bswap, rotl, rotr
+//   - float_math_test.vr  : trigonometric, exponential, logarithmic
+//   - conversion_test.vr  : int_to_float, to_le_bytes, f64_to_bits
+//   - comparison_test.vr  : generic comparisons
+//
+// System and Platform Tests (L0):
+//   - platform_test.vr    : target_os, target_arch, is_debug, tier
+//   - tls_test.vr         : thread-local storage operations
+//   - time_test.vr        : monotonic_nanos, realtime_secs, rdtsc
+//   - syscall_test.vr     : syscall0-syscall6 (Linux)
+//
+// Text and CBGR Tests (L0):
+//   - text_test.vr        : utf8_decode_char, char_is_*, text_parse_*
+//   - cbgr_test.vr        : CBGR validation and epoch
+//
+// Error Handling Tests (L0):
+//   - panic_test.vr       : panic, abort, unreachable, debug_assert
+//   - exception_test.vr   : catch_unwind, PanicInfo
+//
+// Runtime and Async Tests (L1 - Require Runtime):
+//   - async_test.vr       : async_sleep_*, spawn_with_env, executor_*
+//   - runtime_test.vr     : supervisor_*, recovery, global resources
+//
+// Miscellaneous Tests:
+//   - random_test.vr      : random_float, random_u64
+//   - poly_arith_test.vr  : Polymorphic arithmetic overflow tests
+//   - minimal_test.vr     : Minimal smoke tests for basic intrinsics
+// =============================================================================
+
+fn main() {
+    // This is an index/documentation file.
+    // All tests are in their respective test files and run independently.
+    print("Intrinsics test module index loaded successfully");
+}

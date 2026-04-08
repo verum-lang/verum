@@ -1,0 +1,495 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for deeply nested patterns
+
+// ============================================================================
+// SECTION 1: Deeply Nested Tuples
+// ============================================================================
+
+fn test_nested_tuples() {
+    // Two levels
+    let ((a, b), c) = nested;
+    let (a, (b, c)) = nested;
+    let ((a, b), (c, d)) = nested;
+
+    // Three levels
+    let (((a, b), c), d) = deep;
+    let ((a, (b, c)), d) = deep;
+    let ((a, b), (c, (d, e))) = deep;
+    let (a, (b, (c, d))) = deep;
+
+    // Four levels
+    let ((((a, b), c), d), e) = very_deep;
+    let (a, (b, (c, (d, e)))) = very_deep;
+    let (((a, b), (c, d)), ((e, f), (g, h))) = balanced_deep;
+
+    // Five or more levels
+    let (((((a, b), c), d), e), f) = extremely_deep;
+}
+
+// ============================================================================
+// SECTION 2: Deeply Nested Arrays
+// ============================================================================
+
+fn test_nested_arrays() {
+    // Two levels (2D)
+    let [[a, b], [c, d]] = matrix;
+    let [[a], [b, c], [d, e, f]] = jagged;
+
+    // Three levels (3D)
+    let [[[a, b], [c, d]], [[e, f], [g, h]]] = cube;
+    let [[[a]]] = single_deep;
+
+    // Four levels
+    let [[[[a, b]]]] = hypercube;
+    let [[[[a], [b]], [[c], [d]]], [[[e], [f]], [[g], [h]]]] = balanced_4d;
+
+    // With rest at various levels
+    let [[first, ..], ..] = matrix;
+    let [[[a, ..], ..], ..] = cube;
+}
+
+// ============================================================================
+// SECTION 3: Deeply Nested Records
+// ============================================================================
+
+fn test_nested_records() {
+    // Two levels
+    let Outer { inner: Inner { value } } = nested;
+    let Line { start: Point { x, y }, end: Point { x: x2, y: y2 } } = line;
+
+    // Three levels
+    let Container {
+        wrapper: Wrapper {
+            content: Content { data }
+        }
+    } = deep;
+
+    // Many fields at each level
+    let Company {
+        ceo: Person { name: ceo_name, contact: Contact { email, phone, .. }, .. },
+        headquarters: Address { city, country, .. },
+        ..
+    } = company;
+
+    // With rest at various levels
+    let Outer { inner: Inner { value, .. }, .. } = nested;
+}
+
+// ============================================================================
+// SECTION 4: Deeply Nested Variants
+// ============================================================================
+
+fn test_nested_variants() {
+    // Two levels
+    match nested {
+        Some(Some(value)) => deep_some(value),
+        Some(None) => shallow_none(),
+        None => outer_none()
+    }
+
+    // Three levels
+    match very_nested {
+        Some(Some(Some(value))) => very_deep(value),
+        Some(Some(None)) => two_deep(),
+        Some(None) => one_deep(),
+        None => none()
+    }
+
+    // Four levels
+    match ultra_nested {
+        Some(Some(Some(Some(value)))) => ultra_deep(value),
+        _ => not_deep()
+    }
+
+    // Mixed variant types
+    match result_option {
+        Ok(Some(value)) => ok_some(value),
+        Ok(None) => ok_none(),
+        Err(Some(error)) => err_some(error),
+        Err(None) => err_none()
+    }
+
+    // Result of result
+    match double_result {
+        Ok(Ok(value)) => double_ok(value),
+        Ok(Err(inner_err)) => ok_err(inner_err),
+        Err(Ok(inner_ok)) => err_ok(inner_ok),
+        Err(Err(double_err)) => double_err(double_err)
+    }
+}
+
+// ============================================================================
+// SECTION 5: Mixed Nesting (Tuples + Arrays)
+// ============================================================================
+
+fn test_tuples_and_arrays() {
+    // Array of tuples
+    let [(a, b), (c, d)] = array_of_pairs;
+
+    // Tuple of arrays
+    let ([a, b], [c, d]) = pair_of_arrays;
+
+    // Deep mixing
+    let [([a, b], c), ([d, e], f)] = complex;
+    let ([(a, b)], [(c, d)]) = complex2;
+
+    // Three levels alternating
+    let [([(a, b)], c)] = alternating;
+    let ([([a])]) = alternating2;
+}
+
+// ============================================================================
+// SECTION 6: Mixed Nesting (Tuples + Records)
+// ============================================================================
+
+fn test_tuples_and_records() {
+    // Tuple with records
+    let (Point { x, y }, Point { x: x2, y: y2 }) = point_pair;
+
+    // Record with tuples
+    let Data { coords: (x, y), size: (w, h) } = data;
+
+    // Deep mixing
+    let (Data { point: Point { x, y }, .. }, z) = complex;
+    let Outer { pair: (Inner { a }, Inner { b }) } = complex2;
+}
+
+// ============================================================================
+// SECTION 7: Mixed Nesting (Arrays + Records)
+// ============================================================================
+
+fn test_arrays_and_records() {
+    // Array of records
+    let [Point { x: x1, y: y1 }, Point { x: x2, y: y2 }] = points;
+
+    // Record with arrays
+    let Data { values: [a, b, c], indices: [i, j, k] } = data;
+
+    // Deep mixing
+    let Matrix {
+        rows: [[Cell { value: v1 }, Cell { value: v2 }], ..rest]
+    } = matrix;
+
+    let [Data { items: [first, ..], .. }, ..] = data_list;
+}
+
+// ============================================================================
+// SECTION 8: Mixed Nesting (Tuples + Variants)
+// ============================================================================
+
+fn test_tuples_and_variants() {
+    // Tuple of options
+    match pair {
+        (Some(a), Some(b)) => both_some(a, b),
+        (Some(a), None) => first_some(a),
+        (None, Some(b)) => second_some(b),
+        (None, None) => both_none()
+    }
+
+    // Option of tuple
+    match option {
+        Some((a, b)) => some_pair(a, b),
+        None => none()
+    }
+
+    // Deep mixing
+    match complex {
+        Some((Some(a), Some(b))) => deep_both(a, b),
+        Some((Some(a), None)) => deep_first(a),
+        Some((None, Some(b))) => deep_second(b),
+        Some((None, None)) => deep_neither(),
+        None => outer_none()
+    }
+}
+
+// ============================================================================
+// SECTION 9: Mixed Nesting (Arrays + Variants)
+// ============================================================================
+
+fn test_arrays_and_variants() {
+    // Array of options
+    match arr {
+        [Some(a), Some(b)] => both_some(a, b),
+        [Some(a), None] => first_some(a),
+        [None, Some(b)] => second_some(b),
+        [None, None] => both_none()
+    }
+
+    // Option of array
+    match option {
+        Some([a, b, c]) => some_triple(a, b, c),
+        Some([a, b]) => some_pair(a, b),
+        Some([a]) => some_single(a),
+        Some([]) => some_empty(),
+        None => none()
+    }
+
+    // Deep mixing
+    match complex {
+        Some([Some(a), ..rest]) => deep_start(a, rest),
+        Some([None, ..rest]) => deep_skip(rest),
+        Some([]) => some_empty(),
+        None => none()
+    }
+}
+
+// ============================================================================
+// SECTION 10: Mixed Nesting (Records + Variants)
+// ============================================================================
+
+fn test_records_and_variants() {
+    // Record with optional field
+    let Data { value: Some(v), status } = data;
+    let Config { host: Some(h), port: Some(p), .. } = config;
+
+    // Variant containing record
+    match result {
+        Ok(Person { name, age, .. }) => ok_person(name, age),
+        Err(Error { code, message, .. }) => err_details(code, message)
+    }
+
+    // Deep mixing
+    match data {
+        Container {
+            item: Some(Item { value: Ok(v), .. }),
+            ..
+        } => deep_ok(v),
+        Container {
+            item: Some(Item { value: Err(e), .. }),
+            ..
+        } => deep_err(e),
+        Container { item: None, .. } => no_item()
+    }
+}
+
+// ============================================================================
+// SECTION 11: All Pattern Types Combined
+// ============================================================================
+
+fn test_all_combined() {
+    // Everything in one pattern
+    let Outer {
+        tuple: (
+            [first, Point { x, y }, ..rest],
+            Some(Inner { values: [a, b], .. })
+        ),
+        result: Ok((c, d)),
+        ..
+    } = complex;
+
+    // In match
+    match mega_complex {
+        Container {
+            data: Some([
+                (Point { x: 0, y }, _),
+                (Point { x, y: 0 }, result @ Ok(_)),
+                ..rest
+            ]),
+            status: Active { since, .. },
+            ..
+        } if x > 0 => special_case(y, result, rest, since),
+
+        Container {
+            data: Some([first, ..]),
+            ..
+        } => has_data(first),
+
+        Container { data: None, .. } => no_data()
+    }
+}
+
+// ============================================================================
+// SECTION 12: Nested with @ Bindings
+// ============================================================================
+
+fn test_nested_with_at() {
+    // @ at various nesting levels
+    let outer @ (inner @ (a, b), c) = nested;
+    let outer @ [inner @ [a, b], c] = nested;
+    let outer @ Outer { inner: inner @ Inner { value } } = nested;
+
+    // @ in deeply nested match
+    match data {
+        all @ Some(middle @ (first @ Point { x, y }, second)) => {
+            use_all(all, middle, first, x, y, second)
+        }
+        None => none()
+    }
+
+    // Multiple @ at same level
+    let (a @ (b, c), d @ (e, f)) = nested;
+}
+
+// ============================================================================
+// SECTION 13: Nested with Wildcards
+// ============================================================================
+
+fn test_nested_with_wildcards() {
+    // Wildcards at various levels
+    let ((_, b), (c, _)) = nested;
+    let [[_, b], [c, _]] = matrix;
+    let Outer { inner: Inner { a: _, b } } = nested;
+
+    // Deep wildcards
+    let (((_, _), _), _) = very_deep;
+    let [[[_, _], _], _] = cube;
+
+    // Mixed with bindings
+    let ((a, _), (_, d)) = partial;
+    let Outer { a: _, inner: Inner { value, .. }, .. } = partial;
+}
+
+// ============================================================================
+// SECTION 14: Nested with Rest
+// ============================================================================
+
+fn test_nested_with_rest() {
+    // Rest at various nesting levels
+    let [[first, ..], ..] = matrix;
+    let [Outer { inner: Inner { values: [a, ..], .. }, .. }, ..] = complex;
+
+    // Rest in records at various levels
+    let Outer { inner: Inner { value, .. }, .. } = nested;
+
+    // Named rest in nested
+    let [[first, ..row_rest], ..rows_rest] = matrix;
+}
+
+// ============================================================================
+// SECTION 15: Nested with Guards
+// ============================================================================
+
+fn test_nested_with_guards() {
+    match data {
+        // Guard on nested destructure
+        ((a, b), (c, d)) if a + b == c + d => balanced(a, b, c, d),
+
+        // Guard on deeply nested
+        Some(Some((x, y))) if x == y => diagonal(x),
+
+        // Guard with nested record
+        Outer { inner: Inner { value } } if value > threshold => above(value),
+
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 16: Nested with Or Patterns
+// ============================================================================
+
+fn test_nested_with_or() {
+    // Or at various levels
+    let ((0 | 1, b), c) = nested;
+    let (a, (0 | 1, c)) = nested;
+    let ((0 | 1, b), (c, 0 | 1)) = nested;
+
+    // Or in deeply nested
+    match data {
+        Some(Some(0 | 1)) | Some(None) | None => collapsed(),
+        Some(Some(n)) => deep_value(n)
+    }
+}
+
+// ============================================================================
+// SECTION 17: Nested with References
+// ============================================================================
+
+fn test_nested_with_refs() {
+    // Reference in nested
+    let &(a, b) = pair_ref;
+    let (&a, &b) = pair_of_refs;
+    let &((&a, b), c) = complex_ref;
+
+    // Mixed ref and regular
+    let (ref a, (b, ref c)) = nested;
+    let Outer { inner: &Inner { value } } = nested;
+}
+
+// ============================================================================
+// SECTION 18: Extremely Deep Nesting
+// ============================================================================
+
+fn test_extreme_depth() {
+    // 6 levels deep tuple
+    let ((((((a, b), c), d), e), f), g) = extreme;
+
+    // 5 levels deep array
+    let [[[[[a]]]]] = deep_array;
+
+    // 4 levels deep record
+    let A { b: B { c: C { d: D { value } } } } = deep_record;
+
+    // 5 levels deep variant
+    match extreme {
+        Some(Some(Some(Some(Some(value))))) => ultra_deep(value),
+        _ => not_deep()
+    }
+
+    // Mixed extreme depth
+    let Outer {
+        data: Some([
+            (Point { x, y }, [[[value]]])
+        ])
+    } = extreme_mixed;
+}
+
+// ============================================================================
+// SECTION 19: Practical Nested Examples
+// ============================================================================
+
+fn test_practical_nested() {
+    // JSON-like structure
+    match json {
+        Object {
+            fields: [
+                ("name", String(name)),
+                ("age", Number(age)),
+                ("address", Object { fields: [("city", String(city)), ..], .. }),
+                ..
+            ]
+        } => person(name, age, city),
+        _ => invalid()
+    }
+
+    // AST node
+    match node {
+        Binary {
+            left: Unary { op: Negate, operand: Literal(a) },
+            op: Add,
+            right: Literal(b)
+        } => simplified_add_neg(a, b),
+        _ => complex_node()
+    }
+
+    // Config parsing
+    match config {
+        Config {
+            server: Server { host, port, ssl: Some(SSL { cert, key }) },
+            database: Database { connection: Connection { url, .. }, .. },
+            ..
+        } => full_config(host, port, cert, key, url),
+        _ => partial_config()
+    }
+}
+
+// ============================================================================
+// SECTION 20: Edge Cases
+// ============================================================================
+
+fn test_edge_cases() {
+    // Single element at each level
+    let ((((x,),),),) = single_deep;
+    let [[[[[x]]]]] = single_array;
+
+    // Empty at various levels
+    let ((), ((), ())) = nested_units;
+    let [[], [[]]] = nested_empty;
+    let Outer { inner: Inner { } } = nested_empty_record;
+
+    // All patterns minimal
+    let (_, (_, _)) = minimal;
+    let [_, [_, _]] = minimal_array;
+}

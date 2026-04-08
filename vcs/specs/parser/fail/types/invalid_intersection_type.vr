@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, intersection, syntax, error
+// @description: Test detection of double ampersand in intersection/bound type
+// @expected-error: E041
+
+// Double ampersand is not valid in type bounds
+fn test<T: Clone & & Debug>(x: T) {}

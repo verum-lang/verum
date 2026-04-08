@@ -1,0 +1,224 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, ternary-search, unimodal, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for ternary search: find the maximum of a unimodal function on integers.
+// A unimodal function increases then decreases, with exactly one peak.
+// Ternary search efficiently finds this peak.
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// Unimodal function 1: f(x) = -(x-50)^2 + 2500
+// Peak at x=50, f(50)=2500
+fn unimodal1(x: Int) -> Int {
+    let d = x - 50;
+    2500 - d * d
+}
+
+// Unimodal function 2: f(x) = -2*(x-30)^2 + 1800
+// Peak at x=30, f(30)=1800
+fn unimodal2(x: Int) -> Int {
+    let d = x - 30;
+    1800 - 2 * d * d
+}
+
+// Unimodal function 3: f(x) = -(x+10)^2 + 100 (peak at -10 in range -100..100)
+// For integer domain, peak at x=-10
+fn unimodal3(x: Int) -> Int {
+    let d = x + 10;
+    100 - d * d
+}
+
+// Unimodal function 4: triangular peak at x=7 in [0, 15]
+// f(x) = 7 - abs(x - 7), so f(7)=7, f(0)=0, f(14)=0
+fn unimodal4(x: Int) -> Int {
+    7 - abs_val(x - 7)
+}
+
+// Ternary search for maximum of f on integer interval [lo, hi]
+// f must be unimodal (increases then decreases)
+// Returns the x value where f(x) is maximum
+fn ternary_search_max(lo: Int, hi: Int, f: fn(Int) -> Int) -> Int {
+    let mut left = lo;
+    let mut right = hi;
+    while right - left > 2 {
+        let m1 = left + (right - left) / 3;
+        let m2 = right - (right - left) / 3;
+        if f(m1) < f(m2) {
+            left = m1 + 1;
+        } else {
+            right = m2 - 1;
+        }
+    }
+    // Check remaining 1-3 elements
+    let mut best_x = left;
+    let mut best_val = f(left);
+    let mut i = left + 1;
+    while i <= right {
+        let v = f(i);
+        if v > best_val {
+            best_val = v;
+            best_x = i;
+        }
+        i = i + 1;
+    }
+    best_x
+}
+
+// Also return the maximum value
+fn ternary_search_max_val(lo: Int, hi: Int, f: fn(Int) -> Int) -> Int {
+    let x = ternary_search_max(lo, hi, f);
+    f(x)
+}
+
+// Ternary search for minimum of f on [lo, hi]
+// f must be unimodal valley (decreases then increases)
+fn ternary_search_min(lo: Int, hi: Int, f: fn(Int) -> Int) -> Int {
+    let mut left = lo;
+    let mut right = hi;
+    while right - left > 2 {
+        let m1 = left + (right - left) / 3;
+        let m2 = right - (right - left) / 3;
+        if f(m1) > f(m2) {
+            left = m1 + 1;
+        } else {
+            right = m2 - 1;
+        }
+    }
+    let mut best_x = left;
+    let mut best_val = f(left);
+    let mut i = left + 1;
+    while i <= right {
+        let v = f(i);
+        if v < best_val {
+            best_val = v;
+            best_x = i;
+        }
+        i = i + 1;
+    }
+    best_x
+}
+
+// Valley function: f(x) = (x-25)^2
+fn valley1(x: Int) -> Int {
+    let d = x - 25;
+    d * d
+}
+
+// Valley function: f(x) = 3*(x-10)^2 + 5
+fn valley2(x: Int) -> Int {
+    let d = x - 10;
+    3 * d * d + 5
+}
+
+fn test_unimodal1() {
+    // Peak at x=50 in range [0, 100]
+    let peak = ternary_search_max(0, 100, unimodal1);
+    assert_eq(peak, 50);
+    assert_eq(unimodal1(50), 2500);
+    assert_eq(ternary_search_max_val(0, 100, unimodal1), 2500);
+}
+
+fn test_unimodal2() {
+    // Peak at x=30 in range [0, 60]
+    let peak = ternary_search_max(0, 60, unimodal2);
+    assert_eq(peak, 30);
+    assert_eq(unimodal2(30), 1800);
+}
+
+fn test_unimodal3() {
+    // Peak at x=-10 in range [-100, 100]
+    let peak = ternary_search_max(-100, 100, unimodal3);
+    assert_eq(peak, -10);
+    assert_eq(unimodal3(-10), 100);
+}
+
+fn test_unimodal4() {
+    // Triangular peak at x=7 in [0, 14]
+    let peak = ternary_search_max(0, 14, unimodal4);
+    assert_eq(peak, 7);
+    assert_eq(unimodal4(7), 7);
+}
+
+fn test_valley1() {
+    // Minimum at x=25 in [0, 50]
+    let valley = ternary_search_min(0, 50, valley1);
+    assert_eq(valley, 25);
+    assert_eq(valley1(25), 0);
+}
+
+fn test_valley2() {
+    // Minimum at x=10 in [-20, 40]
+    let valley = ternary_search_min(-20, 40, valley2);
+    assert_eq(valley, 10);
+    assert_eq(valley2(10), 5);
+}
+
+fn test_narrow_range() {
+    // Range with only 1 element
+    let peak1 = ternary_search_max(50, 50, unimodal1);
+    assert_eq(peak1, 50);
+
+    // Range with 2 elements
+    let peak2 = ternary_search_max(49, 50, unimodal1);
+    assert_eq(peak2, 50);
+
+    // Range with 3 elements
+    let peak3 = ternary_search_max(49, 51, unimodal1);
+    assert_eq(peak3, 50);
+}
+
+fn test_peak_at_boundary() {
+    // f(x) = x in [0, 10] -- monotonically increasing, peak at right boundary
+    // (Degenerate unimodal)
+    // We can't use a general function pointer for identity easily,
+    // but we can test with unimodal1 where the search range doesn't contain the peak
+    // If range is [0, 30], the peak of unimodal1 within [0,30] is at x=30
+    let peak = ternary_search_max(0, 30, unimodal1);
+    assert_eq(peak, 30);
+    // unimodal1(30) = 2500 - 400 = 2100
+
+    // Range [60, 100]: monotonically decreasing, peak at x=60
+    let peak2 = ternary_search_max(60, 100, unimodal1);
+    assert_eq(peak2, 60);
+}
+
+fn test_search_correctness() {
+    // Verify by brute force that ternary search found the true max
+    let peak = ternary_search_max(0, 100, unimodal1);
+    let peak_val = unimodal1(peak);
+
+    // Check all neighbors
+    if peak > 0 {
+        assert_eq(unimodal1(peak - 1) <= peak_val, true);
+    }
+    if peak < 100 {
+        assert_eq(unimodal1(peak + 1) <= peak_val, true);
+    }
+
+    // Brute force check for unimodal4 in [0, 14]
+    let peak4 = ternary_search_max(0, 14, unimodal4);
+    let pv4 = unimodal4(peak4);
+    let mut i = 0;
+    while i <= 14 {
+        assert_eq(unimodal4(i) <= pv4, true);
+        i = i + 1;
+    }
+}
+
+fn main() -> Int {
+    test_unimodal1();
+    test_unimodal2();
+    test_unimodal3();
+    test_unimodal4();
+    test_valley1();
+    test_valley2();
+    test_narrow_range();
+    test_peak_at_boundary();
+    test_search_correctness();
+    print("[OK] 327_ternary_search_aot");
+    0
+}

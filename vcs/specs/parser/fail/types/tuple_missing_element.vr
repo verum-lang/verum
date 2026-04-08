@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, tuple, comma, error
+// @description: Test detection of missing element in tuple type
+// @expected-error: E018
+
+// Missing type between commas
+fn test(x: (Int, , Text)) {}

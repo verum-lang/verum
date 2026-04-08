@@ -1,0 +1,19 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, mount, module, error
+// @description: Test invalid mount statement syntax detection
+// @expected-error: E063
+
+mount;
+
+mount 123;
+
+mount core.;
+
+mount core..collections;
+
+mount core.collections.{List Map};
+
+mount core.collections.{List,};
+
+mount core.* as;

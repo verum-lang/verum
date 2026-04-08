@@ -1,0 +1,389 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: compilation, parser, throughput, performance
+// @description: Parser throughput benchmark (target: > 50K LOC/sec)
+
+/// Parser Throughput Benchmark
+///
+/// Measures the parsing speed of the Verum recursive descent parser.
+/// The parser builds the AST from the token stream.
+///
+/// Performance targets:
+/// - Simple statements: > 100K LOC/sec
+/// - Function defs:     > 60K LOC/sec
+/// - Complex exprs:     > 40K LOC/sec
+/// - Full programs:     > 50K LOC/sec
+///
+/// The parser uses recursive descent with operator precedence climbing
+/// for expressions.
+///
+/// Spec reference: docs/detailed/05-syntax-grammar.md
+
+const WARMUP_ITERATIONS: Int = 5;
+const BENCHMARK_ITERATIONS: Int = 50;
+
+/// Generate source with simple let statements
+fn generate_simple_statements(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 30);
+
+    for i in 0..count {
+        source.push_str(&format("let x{} = {};\n", i, i * 7));
+    }
+
+    source
+}
+
+/// Generate source with function definitions
+fn generate_functions(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 150);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"fn func_{}(a: Int, b: Int) -> Int {{
+    let result = a + b;
+    result * {}
+}}
+
+"#,
+            i, i
+        ));
+    }
+
+    source
+}
+
+/// Generate source with nested expressions
+fn generate_nested_expressions(depth: Int, count: Int) -> Text {
+    let mut source = Text.with_capacity(count * depth * 20);
+
+    source.push_str("fn main() {\n");
+    for i in 0..count {
+        source.push_str("    let x = ");
+        for d in 0..depth {
+            source.push_str("(");
+        }
+        source.push_str(&format("{}", i));
+        for d in 0..depth {
+            source.push_str(&format(" + {})", d));
+        }
+        source.push_str(";\n");
+    }
+    source.push_str("}\n");
+
+    source
+}
+
+/// Generate source with pattern matching
+fn generate_pattern_matching(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 200);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"fn match_func_{}(x: Maybe<Int>) -> Int {{
+    match x {{
+        Some(val) if val > 0 => val * 2,
+        Some(val) => val,
+        None => {},
+    }}
+}}
+
+"#,
+            i, i
+        ));
+    }
+
+    source
+}
+
+/// Generate source with type annotations
+fn generate_typed_code(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 100);
+
+    for i in 0..count {
+        source.push_str(&format(
+            "let x{}: List<Map<Text, Maybe<Int> >> = List.new();\n",
+            i
+        ));
+    }
+
+    source
+}
+
+/// Generate source with control flow
+fn generate_control_flow(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 300);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"fn control_{}(n: Int) -> Int {{
+    let mut sum = 0;
+    for i in 0..n {{
+        if i % 2 == 0 {{
+            sum += i;
+        }} else if i % 3 == 0 {{
+            sum -= i;
+        }} else {{
+            continue;
+        }}
+    }}
+    while sum > {} {{
+        sum = sum / 2;
+    }}
+    sum
+}}
+
+"#,
+            i, i * 100
+        ));
+    }
+
+    source
+}
+
+/// Generate source with struct definitions
+fn generate_structs(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 300);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"type Struct{} is {{
+    field1: Int,
+    field2: Text,
+    field3: List<Int>,
+    field4: Maybe<Bool>,
+}};
+
+implement Struct{} {{
+    fn new(a: Int, b: Text) -> Self {{
+        Self {{
+            field1: a,
+            field2: b,
+            field3: List.new(),
+            field4: None,
+        }}
+    }}
+
+    fn method(&self) -> Int {{
+        self.field1 * 2
+    }}
+}}
+
+"#,
+            i, i
+        ));
+    }
+
+    source
+}
+
+/// Generate source with async code
+fn generate_async_code(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 200);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"async fn async_func_{}() -> Result<Int, Error> {{
+    let result = async_operation().await?;
+    spawn(async {{
+        process(result).await
+    }});
+    Ok(result + {})
+}}
+
+"#,
+            i, i
+        ));
+    }
+
+    source
+}
+
+/// Generate realistic mixed source
+fn generate_realistic_program(modules: Int) -> Text {
+    let mut source = Text.with_capacity(modules * 1000);
+
+    for m in 0..modules {
+        source.push_str(&format(
+            r#"/// Module {} documentation
+module module_{};
+
+mount std.collections.{{Map, Set}};
+mount std.io.{{Read, Write}};
+
+/// Configuration type for module {}
+type Config{} is {{
+    name: Text,
+    value: Int,
+    options: Map<Text, Bool>,
+}};
+
+implement Config{} {{
+    /// Create a new configuration
+    pub fn new(name: Text) -> Self {{
+        Self {{
+            name,
+            value: 0,
+            options: Map.new(),
+        }}
+    }}
+
+    /// Update the configuration value
+    pub fn update(&mut self, new_value: Int) {{
+        self.value = new_value;
+    }}
+}}
+
+/// Process data using configuration
+pub fn process_data_{}(config: &Config{}, data: List<Int>) -> Result<Int, Error> {{
+    let mut total = 0;
+
+    for item in data.iter() {{
+        match config.options.get("multiply") {{
+            Some(true) => total += item * config.value,
+            Some(false) => total += item,
+            None => return Err(Error.MissingOption),
+        }}
+    }}
+
+    if total > {} {{
+        Ok(total / 2)
+    }} else {{
+        Ok(total)
+    }}
+}}
+
+@test
+fn test_module_{}() {{
+    let config = Config{}.new("test");
+    let data = [1, 2, 3, 4, 5];
+    let result = process_data_{}(&config, data.to_list());
+    assert(result.is_ok());
+}}
+
+"#,
+            m, m, m, m, m, m, m, m * 1000, m, m, m
+        ));
+    }
+
+    source
+}
+
+/// Run a parser benchmark
+fn run_benchmark(name: Text, source: Text) -> ParserBenchmarkResult {
+    let lines = source.lines().count();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let ast = Parser.parse(&source);
+        black_box(ast);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let ast = Parser.parse(&source);
+        black_box(ast);
+    }
+
+    let elapsed = start.elapsed();
+    let total_lines = lines * BENCHMARK_ITERATIONS;
+
+    ParserBenchmarkResult {
+        name,
+        source_lines: lines,
+        total_lines_parsed: total_lines,
+        elapsed_ms: elapsed.as_millis(),
+        lines_per_sec: total_lines as f64 / elapsed.as_secs_f64(),
+    }
+}
+
+fn main() {
+    println("=== Parser Throughput Benchmark ===\n");
+
+    let benchmarks = [
+        ("simple_statements", generate_simple_statements(5000)),
+        ("function_definitions", generate_functions(500)),
+        ("nested_expressions", generate_nested_expressions(10, 1000)),
+        ("pattern_matching", generate_pattern_matching(300)),
+        ("typed_declarations", generate_typed_code(2000)),
+        ("control_flow", generate_control_flow(300)),
+        ("struct_definitions", generate_structs(200)),
+        ("async_code", generate_async_code(300)),
+        ("realistic_program", generate_realistic_program(50)),
+    ];
+
+    let mut results: List<ParserBenchmarkResult> = List.new();
+
+    for (name, source) in benchmarks {
+        results.push(run_benchmark(Text.from(name), source));
+    }
+
+    println("{:<25} {:>12} {:>15} {:>8}",
+            "Benchmark", "Lines", "LOC/sec", "Status");
+    println("{}", "-".repeat(65));
+
+    let targets = [
+        100_000.0,  // simple_statements
+        60_000.0,   // function_definitions
+        40_000.0,   // nested_expressions
+        50_000.0,   // pattern_matching
+        80_000.0,   // typed_declarations
+        50_000.0,   // control_flow
+        50_000.0,   // struct_definitions
+        50_000.0,   // async_code
+        50_000.0,   // realistic_program
+    ];
+
+    for (i, result) in results.iter().enumerate() {
+        let target = targets[i];
+        let passed = result.lines_per_sec >= target;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<25} {:>12} {:>15.0} {:>8}",
+                result.name, result.source_lines, result.lines_per_sec, status);
+    }
+
+    println("");
+
+    let avg_loc_per_sec = results.iter()
+        .map(|r| r.lines_per_sec)
+        .sum.<f64>() / results.len() as f64;
+
+    println("Average throughput: {:.0} LOC/sec", avg_loc_per_sec);
+    println("Target: > 50K LOC/sec");
+}
+
+type ParserBenchmarkResult is {
+    name: Text,
+    source_lines: Int,
+    total_lines_parsed: Int,
+    elapsed_ms: Int,
+    lines_per_sec: f64,
+};
+
+// Mock Parser for benchmark specification
+module Parser {
+    pub fn parse(source: &Text) -> AST {
+        AST { nodes: List.new() }
+    }
+}
+
+type AST is { nodes: List<ASTNode> };
+type ASTNode is Stmt | Expr | Decl;
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+    fn as_secs_f64(&self) -> f64 { self.nanos as f64 / 1e9 }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn format(fmt: &Text, args: List<Text>) -> Text { Text.new() }

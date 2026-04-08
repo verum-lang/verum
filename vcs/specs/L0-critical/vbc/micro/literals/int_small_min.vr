@@ -1,0 +1,6 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// LOAD_SMALL_I min value (-64)
+fn main() { assert_eq(-64, -64); }

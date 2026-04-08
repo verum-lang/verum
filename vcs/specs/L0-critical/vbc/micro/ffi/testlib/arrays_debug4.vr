@@ -1,0 +1,36 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, arrays, debug
+// @description: Debug test for FFI copy_array (two array refs)
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_copy_array_i64(dst: &mut Int, src: &Int, len: Int);
+}
+
+fn main() {
+    // Test copy_array
+    let src = [10, 20, 30, 40];
+    let mut dst = [0, 0, 0, 0];
+
+    print("Before copy:\n");
+    print("src[0] = "); print(src[0]); print("\n");
+    print("dst[0] = "); print(dst[0]); print("\n");
+
+    print("Calling ffi_copy_array_i64...\n");
+    ffi_copy_array_i64(&mut dst[0], &src[0], 4);
+
+    print("After copy:\n");
+    print("dst[0] = "); print(dst[0]); print("\n");
+    print("dst[1] = "); print(dst[1]); print("\n");
+    print("dst[2] = "); print(dst[2]); print("\n");
+    print("dst[3] = "); print(dst[3]); print("\n");
+
+    if dst[0] == 10 && dst[1] == 20 && dst[2] == 30 && dst[3] == 40 {
+        print("SUCCESS!\n");
+    } else {
+        print("FAILURE\n");
+    }
+}

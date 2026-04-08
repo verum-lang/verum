@@ -1,0 +1,304 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, error-handling, maybe, result
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Maybe type, Result type, early return,
+// ? operator, nested error propagation.
+// Uses only record/variant pattern matching (no List operations).
+
+// =============================================================================
+// Maybe type basics
+// =============================================================================
+
+fn test_maybe_some() {
+    let x: Maybe<Int> = Some(42);
+    let val = match x {
+        Some(v) => v,
+        None => -1
+    };
+    assert_eq(val, 42);
+}
+
+fn test_maybe_none() {
+    let x: Maybe<Int> = None;
+    let val = match x {
+        Some(v) => v,
+        None => -1
+    };
+    assert_eq(val, -1);
+}
+
+// =============================================================================
+// Helper functions returning Maybe
+// =============================================================================
+
+fn safe_div(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+fn test_safe_div() {
+    let r1 = safe_div(10, 2);
+    let v1 = match r1 { Some(v) => v, None => -999 };
+    assert_eq(v1, 5);
+
+    let r2 = safe_div(7, 2);
+    let v2 = match r2 { Some(v) => v, None => -999 };
+    assert_eq(v2, 3);
+
+    let r3 = safe_div(10, 0);
+    let v3 = match r3 { Some(v) => v, None => -999 };
+    assert_eq(v3, -999);
+
+    let r4 = safe_div(0, 5);
+    let v4 = match r4 { Some(v) => v, None => -999 };
+    assert_eq(v4, 0);
+}
+
+// =============================================================================
+// Maybe chaining (manual)
+// =============================================================================
+
+fn maybe_double(x: Maybe<Int>) -> Maybe<Int> {
+    match x {
+        Some(v) => Some(v * 2),
+        None => None
+    }
+}
+
+fn maybe_add_ten(x: Maybe<Int>) -> Maybe<Int> {
+    match x {
+        Some(v) => Some(v + 10),
+        None => None
+    }
+}
+
+fn test_maybe_chaining() {
+    let r1 = maybe_add_ten(maybe_double(Some(5)));
+    let v1 = match r1 { Some(v) => v, None => -1 };
+    assert_eq(v1, 20);  // (5*2)+10 = 20
+
+    let r2 = maybe_add_ten(maybe_double(None));
+    let v2 = match r2 { Some(v) => v, None => -1 };
+    assert_eq(v2, -1);  // None propagates
+}
+
+// =============================================================================
+// Result type basics
+// =============================================================================
+
+fn parse_positive(n: Int) -> Result<Int, Text> {
+    if n < 0 {
+        Err("negative")
+    } else {
+        Ok(n)
+    }
+}
+
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn test_result_ok() {
+    let r = parse_positive(10);
+    let val = match r {
+        Ok(v) => v,
+        Err(_) => -1
+    };
+    assert_eq(val, 10);
+}
+
+fn test_result_err() {
+    let r = parse_positive(-5);
+    let msg = match r {
+        Ok(_) => "ok",
+        Err(e) => e
+    };
+    assert_eq(msg, "negative");
+}
+
+fn test_result_safe_divide() {
+    let r1 = safe_divide(100, 5);
+    let v1 = match r1 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v1, 20);
+
+    let r2 = safe_divide(100, 0);
+    let m2 = match r2 { Ok(_) => "ok", Err(e) => e };
+    assert_eq(m2, "division by zero");
+}
+
+// =============================================================================
+// Question mark operator
+// =============================================================================
+
+fn double_positive(n: Int) -> Result<Int, Text> {
+    let val = parse_positive(n)?;
+    Ok(val * 2)
+}
+
+fn chain_operations(a: Int, b: Int) -> Result<Int, Text> {
+    let x = parse_positive(a)?;
+    let y = safe_divide(x, b)?;
+    Ok(y)
+}
+
+fn test_question_mark_ok() {
+    let r = double_positive(5);
+    let val = match r { Ok(v) => v, Err(_) => -1 };
+    assert_eq(val, 10);
+}
+
+fn test_question_mark_err() {
+    let r = double_positive(-3);
+    let msg = match r { Ok(_) => "ok", Err(e) => e };
+    assert_eq(msg, "negative");
+}
+
+fn test_chained_question_mark() {
+    let r1 = chain_operations(100, 5);
+    let v1 = match r1 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v1, 20);
+
+    let r2 = chain_operations(-5, 2);
+    let m2 = match r2 { Ok(_) => "ok", Err(e) => e };
+    assert_eq(m2, "negative");
+
+    let r3 = chain_operations(100, 0);
+    let m3 = match r3 { Ok(_) => "ok", Err(e) => e };
+    assert_eq(m3, "division by zero");
+}
+
+// =============================================================================
+// Early return patterns
+// =============================================================================
+
+fn early_return_validation(a: Int, b: Int) -> Result<Int, Text> {
+    if a < 0 {
+        return Err("a is negative");
+    }
+    if b < 0 {
+        return Err("b is negative");
+    }
+    if b == 0 {
+        return Err("b is zero");
+    }
+    Ok(a / b)
+}
+
+fn test_early_return_success() {
+    let r = early_return_validation(10, 2);
+    let val = match r { Ok(v) => v, Err(_) => -1 };
+    assert_eq(val, 5);
+}
+
+fn test_early_return_first_check() {
+    let r = early_return_validation(-1, 2);
+    let msg = match r { Ok(_) => "ok", Err(e) => e };
+    assert_eq(msg, "a is negative");
+}
+
+fn test_early_return_second_check() {
+    let r = early_return_validation(10, -1);
+    let msg = match r { Ok(_) => "ok", Err(e) => e };
+    assert_eq(msg, "b is negative");
+}
+
+fn test_early_return_third_check() {
+    let r = early_return_validation(10, 0);
+    let msg = match r { Ok(_) => "ok", Err(e) => e };
+    assert_eq(msg, "b is zero");
+}
+
+// =============================================================================
+// Nested error propagation
+// =============================================================================
+
+fn validate_and_compute(a: Int, b: Int) -> Result<Int, Text> {
+    let x = parse_positive(a)?;
+    let y = parse_positive(b)?;
+    let result = safe_divide(x + y, 2)?;
+    Ok(result)
+}
+
+fn test_nested_propagation_success() {
+    let r = validate_and_compute(10, 20);
+    let val = match r { Ok(v) => v, Err(_) => -1 };
+    assert_eq(val, 15);
+}
+
+fn test_nested_propagation_first_fails() {
+    let r = validate_and_compute(-5, 20);
+    let msg = match r { Ok(_) => "ok", Err(e) => e };
+    assert_eq(msg, "negative");
+}
+
+fn test_nested_propagation_second_fails() {
+    let r = validate_and_compute(10, -20);
+    let msg = match r { Ok(_) => "ok", Err(e) => e };
+    assert_eq(msg, "negative");
+}
+
+// =============================================================================
+// Maybe with records
+// =============================================================================
+
+type Pair is { first: Int, second: Int };
+
+fn find_pair_with_sum(target: Int) -> Maybe<Pair> {
+    // Simple brute force: find a+b=target with 0<=a<=b<=target
+    let mut a = 0;
+    while a <= target / 2 {
+        let b = target - a;
+        if a + b == target {
+            return Some(Pair { first: a, second: b });
+        }
+        a = a + 1;
+    }
+    None
+}
+
+fn test_maybe_with_records() {
+    let r = find_pair_with_sum(10);
+    let val = match r {
+        Some(p) => p.first + p.second,
+        None => -1
+    };
+    assert_eq(val, 10);
+
+    let r2 = find_pair_with_sum(-5);
+    let v2 = match r2 { Some(_) => 1, None => 0 };
+    assert_eq(v2, 0);  // negative target, loop doesn't execute
+}
+
+fn main() -> Int {
+    test_maybe_some();
+    test_maybe_none();
+    test_safe_div();
+    test_maybe_chaining();
+    test_result_ok();
+    test_result_err();
+    test_result_safe_divide();
+    test_question_mark_ok();
+    test_question_mark_err();
+    test_chained_question_mark();
+    test_early_return_success();
+    test_early_return_first_check();
+    test_early_return_second_check();
+    test_early_return_third_check();
+    test_nested_propagation_success();
+    test_nested_propagation_first_fails();
+    test_nested_propagation_second_fails();
+    test_maybe_with_records();
+    print("[OK] 182_interp_error_handling");
+    0
+}

@@ -1,0 +1,448 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for channel operations
+
+// ============================================================================
+// Channel Creation
+// ============================================================================
+
+fn test_channel_creation() {
+    // Unbounded channel
+    let (tx, rx) = channel();
+
+    // Bounded channel with capacity
+    let (tx, rx) = channel(100);
+
+    // With explicit type
+    let (tx, rx): (Sender<Message>, Receiver<Message>) = channel();
+
+    // Oneshot channel
+    let (tx, rx) = oneshot();
+
+    // Broadcast channel
+    let (tx, rx) = broadcast(16);
+
+    // Watch channel (single value)
+    let (tx, rx) = watch(initial_value);
+}
+
+// ============================================================================
+// Basic Send Operations
+// ============================================================================
+
+async fn test_send_operations() {
+    // Async send
+    tx.send(42).await;
+
+    // Send with expression
+    tx.send(compute_value()).await;
+
+    // Send struct
+    tx.send(Message { id: 1, data: "hello" }).await;
+
+    // Send tuple
+    tx.send((key, value)).await;
+
+    // Chained send
+    sender.clone().send(data).await;
+
+    // Send result handling
+    tx.send(message).await?;
+
+    // Try send (non-blocking)
+    let result = tx.try_send(data);
+}
+
+// ============================================================================
+// Basic Receive Operations
+// ============================================================================
+
+async fn test_receive_operations() {
+    // Async receive
+    let value = rx.recv().await;
+
+    // Receive with pattern
+    let Message { id, data } = rx.recv().await;
+
+    // Receive into variable
+    let message: Message = rx.recv().await;
+
+    // Try receive (non-blocking)
+    let maybe = rx.try_recv();
+
+    // Receive with timeout
+    let result = timeout(1000, rx.recv()).await;
+
+    // Receive or default
+    let value = rx.recv().await.unwrap_or(default);
+}
+
+// ============================================================================
+// Channel in Select
+// ============================================================================
+
+async fn test_channel_select() {
+    // Select on multiple channels
+    select {
+        msg = rx1.recv().await => handle1(msg),
+        msg = rx2.recv().await => handle2(msg),
+        msg = rx3.recv().await => handle3(msg)
+    };
+
+    // Select with send
+    select {
+        _ = tx.send(data).await => sent(),
+        msg = rx.recv().await => received(msg)
+    };
+
+    // Select with timeout channel
+    select {
+        data = source.recv().await => process(data),
+        _ = timer.recv().await => handle_tick()
+    };
+
+    // Biased select for priority
+    select biased {
+        urgent = urgent_rx.recv().await => handle_urgent(urgent),
+        normal = normal_rx.recv().await => handle_normal(normal)
+    };
+}
+
+// ============================================================================
+// Channel in Loops
+// ============================================================================
+
+async fn test_channel_loops() {
+    // Receive in loop
+    loop {
+        let msg = rx.recv().await;
+        if msg.is_done() {
+            break;
+        }
+        process(msg);
+    }
+
+    // While let receive pattern
+    while let Some(msg) = rx.recv().await {
+        process(msg);
+    }
+
+    // For await over channel
+    for await msg in rx.into_stream() {
+        handle(msg);
+    }
+
+    // Infinite receive with break
+    loop {
+        match rx.recv().await {
+            Some(data) => process(data),
+            None => break
+        }
+    }
+
+    // Send in loop
+    for item in items {
+        tx.send(item).await;
+    }
+}
+
+// ============================================================================
+// Channel Cloning and Sharing
+// ============================================================================
+
+async fn test_channel_sharing() {
+    // Clone sender
+    let tx2 = tx.clone();
+
+    // Clone receiver (broadcast)
+    let rx2 = rx.clone();
+
+    // Multiple senders
+    let tx1 = tx.clone();
+    let tx2 = tx.clone();
+    let tx3 = tx.clone();
+
+    // Spawn with cloned sender
+    nursery {
+        let sender = tx.clone();
+        spawn async move {
+            sender.send(result).await;
+        };
+    }
+
+    // Pass sender to function
+    process_with_sender(tx.clone());
+}
+
+// ============================================================================
+// Channel Methods
+// ============================================================================
+
+async fn test_channel_methods() {
+    // Check if closed
+    let closed = tx.is_closed();
+
+    // Get capacity
+    let cap = tx.capacity();
+
+    // Check if empty
+    let empty = rx.is_empty();
+
+    // Get length
+    let len = rx.len();
+
+    // Close sender
+    tx.close();
+
+    // Downgrade to weak
+    let weak_tx = tx.downgrade();
+
+    // Upgrade weak
+    if let Some(strong) = weak_tx.upgrade() {
+        strong.send(data).await;
+    }
+}
+
+// ============================================================================
+// Oneshot Channels
+// ============================================================================
+
+async fn test_oneshot_channels() {
+    // Create oneshot
+    let (tx, rx) = oneshot();
+
+    // Send once
+    tx.send(result);
+
+    // Receive once
+    let value = rx.await;
+
+    // Oneshot with spawn
+    let (tx, rx) = oneshot();
+    spawn async {
+        let result = compute().await;
+        tx.send(result);
+    };
+    let value = rx.await;
+
+    // Oneshot in select
+    let (tx, rx) = oneshot();
+    select {
+        result = rx.await => use_result(result),
+        _ = timeout(1000).await => handle_timeout()
+    };
+}
+
+// ============================================================================
+// Broadcast Channels
+// ============================================================================
+
+async fn test_broadcast_channels() {
+    // Create broadcast
+    let (tx, _) = broadcast(16);
+
+    // Subscribe
+    let rx1 = tx.subscribe();
+    let rx2 = tx.subscribe();
+
+    // Broadcast send
+    tx.send(event);
+
+    // Multiple receivers
+    select {
+        event = rx1.recv().await => handler1(event),
+        event = rx2.recv().await => handler2(event)
+    };
+
+    // Lagged receiver handling
+    match rx.recv().await {
+        Ok(msg) => handle(msg),
+        Err(Lagged(n)) => handle_lagged(n)
+    };
+}
+
+// ============================================================================
+// Watch Channels
+// ============================================================================
+
+async fn test_watch_channels() {
+    // Create watch
+    let (tx, rx) = watch(initial);
+
+    // Update value
+    tx.send(new_value);
+
+    // Borrow current value
+    let current = rx.borrow();
+
+    // Wait for change
+    rx.changed().await;
+
+    // Get and mark seen
+    let value = rx.borrow_and_update();
+
+    // Clone receiver
+    let rx2 = rx.clone();
+}
+
+// ============================================================================
+// Channel with Complex Types
+// ============================================================================
+
+async fn test_channel_types() {
+    // Channel of results
+    let (tx, rx): (Sender<Result<Data, Error>>, _) = channel();
+
+    // Channel of channels
+    let (tx, rx): (Sender<Sender<Int>>, _) = channel();
+
+    // Channel of async functions (using Future type)
+    let (tx, rx): (Sender<Future<Int>>, _) = channel();
+
+    // Generic channel function
+    async fn process_channel<T: Send>(rx: Receiver<T>) {
+        while let Some(item) = rx.recv().await {
+            handle_generic(item);
+        }
+    }
+}
+
+// ============================================================================
+// Channel Error Handling
+// ============================================================================
+
+async fn test_channel_errors() {
+    // Send error handling
+    match tx.send(data).await {
+        Ok(()) => success(),
+        Err(SendError(data)) => handle_send_error(data)
+    };
+
+    // Receive error handling
+    match rx.recv().await {
+        Some(msg) => process(msg),
+        None => handle_closed()
+    };
+
+    // Try operations
+    match tx.try_send(data) {
+        Ok(()) => sent(),
+        Err(Full(data)) => buffer_full(data),
+        Err(Closed(data)) => channel_closed(data)
+    };
+
+    match rx.try_recv() {
+        Ok(msg) => process(msg),
+        Err(Empty) => no_message(),
+        Err(Disconnected) => disconnected()
+    };
+}
+
+// ============================================================================
+// Channel Patterns
+// ============================================================================
+
+async fn test_channel_patterns() {
+    // Request-response pattern
+    let (request_tx, request_rx) = channel();
+    let (response_tx, response_rx) = oneshot();
+
+    request_tx.send(Request { response: response_tx }).await;
+    let response = response_rx.await;
+
+    // Fan-out pattern
+    let (tx, _) = broadcast(16);
+    for _ in 0..worker_count {
+        let rx = tx.subscribe();
+        spawn async move {
+            while let Ok(job) = rx.recv().await {
+                process_job(job);
+            }
+        };
+    }
+
+    // Fan-in pattern
+    let (tx, rx) = channel();
+    for source in sources {
+        let sender = tx.clone();
+        spawn async move {
+            for await item in source {
+                sender.send(item).await;
+            }
+        };
+    }
+
+    // Pipeline pattern
+    let (tx1, rx1) = channel();
+    let (tx2, rx2) = channel();
+    let (tx3, rx3) = channel();
+
+    spawn async move {
+        for await item in rx1 {
+            tx2.send(step1(item)).await;
+        }
+    };
+    spawn async move {
+        for await item in rx2 {
+            tx3.send(step2(item)).await;
+        }
+    };
+}
+
+// ============================================================================
+// Channel with Context
+// ============================================================================
+
+async fn test_channel_context() using [Logger] {
+    // Log on send
+    tx.send(data).await;
+    log("Sent message");
+
+    // Log on receive
+    let msg = rx.recv().await;
+    log(f"Received: {msg}");
+
+    // Channel operations in nursery
+    nursery {
+        spawn async {
+            for item in items {
+                tx.send(item).await;
+                log(f"Sent: {item}");
+            }
+        };
+        spawn async {
+            while let Some(msg) = rx.recv().await {
+                log(f"Processing: {msg}");
+                process(msg);
+            }
+        };
+    }
+}
+
+// ============================================================================
+// Buffered and Unbuffered Channels
+// ============================================================================
+
+async fn test_buffer_semantics() {
+    // Unbuffered (rendezvous)
+    let (tx, rx) = channel(0);
+
+    // Small buffer
+    let (tx, rx) = channel(1);
+
+    // Large buffer
+    let (tx, rx) = channel(1000);
+
+    // Check buffer state
+    if tx.is_full() {
+        handle_full();
+    }
+
+    if rx.is_empty() {
+        handle_empty();
+    }
+
+    // Reserve capacity
+    tx.reserve().await;
+}

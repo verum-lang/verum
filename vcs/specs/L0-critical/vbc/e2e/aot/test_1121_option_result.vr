@@ -1,0 +1,174 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: maybe, result, error-handling, option
+// @description: Test Maybe and Result type patterns
+
+type Result2<T, E> is Ok2(T) | Err2(E);
+
+fn safe_divide(a: Int, b: Int) -> Result2<Int, Text> {
+    if b == 0 {
+        return Err2("division by zero");
+    }
+    Ok2(a / b)
+}
+
+fn test_safe_divide() -> Int {
+    match safe_divide(10, 2) {
+        Ok2(v) => {
+            if v != 5 {
+                print(f"FAIL divide: {v}, expected 5");
+                return 1;
+            }
+        },
+        Err2(_) => {
+            print("FAIL: should not error");
+            return 1;
+        },
+    }
+    match safe_divide(10, 0) {
+        Ok2(_) => {
+            print("FAIL: should error on zero");
+            return 1;
+        },
+        Err2(msg) => {
+            if msg != "division by zero" {
+                print(f"FAIL: wrong error: {msg}");
+                return 1;
+            }
+        },
+    }
+    print("  safe_divide: OK");
+    0
+}
+
+fn find_first(items: List<Int>, pred: fn(Int) -> Bool) -> Int {
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            return items[i];
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn is_greater_than_5(x: Int) -> Bool {
+    x > 5
+}
+
+fn test_find_first() -> Int {
+    let mut items = List.new();
+    items.push(1);
+    items.push(3);
+    items.push(7);
+    items.push(2);
+
+    let found = find_first(items, is_greater_than_5);
+    if found != 7 {
+        print(f"FAIL find_first: {found}, expected 7");
+        return 1;
+    }
+
+    let mut small = List.new();
+    small.push(1);
+    small.push(2);
+    small.push(3);
+    let not_found = find_first(small, is_greater_than_5);
+    if not_found != -1 {
+        print(f"FAIL find_first_miss: {not_found}");
+        return 1;
+    }
+    print("  find_first: OK");
+    0
+}
+
+fn chain_results(a: Int, b: Int, c: Int) -> Result2<Int, Text> {
+    match safe_divide(a, b) {
+        Ok2(v1) => {
+            match safe_divide(v1, c) {
+                Ok2(v2) => Ok2(v2),
+                Err2(e) => Err2(e),
+            }
+        },
+        Err2(e) => Err2(e),
+    }
+}
+
+fn test_chain() -> Int {
+    match chain_results(100, 5, 2) {
+        Ok2(v) => {
+            // 100/5 = 20, 20/2 = 10
+            if v != 10 {
+                print(f"FAIL chain: {v}, expected 10");
+                return 1;
+            }
+        },
+        Err2(e) => {
+            print(f"FAIL chain: unexpected error {e}");
+            return 1;
+        },
+    }
+
+    match chain_results(100, 0, 2) {
+        Ok2(_) => {
+            print("FAIL chain: should error");
+            return 1;
+        },
+        Err2(_) => {},
+    }
+
+    match chain_results(100, 5, 0) {
+        Ok2(_) => {
+            print("FAIL chain: should error on second div");
+            return 1;
+        },
+        Err2(_) => {},
+    }
+    print("  chain_results: OK");
+    0
+}
+
+fn test_maybe_map() -> Int {
+    let mut items = List.new();
+    items.push(10);
+    items.push(20);
+    items.push(30);
+
+    // Pop returns Maybe<T>
+    match items.pop() {
+        Some(v) => {
+            if v != 30 {
+                print(f"FAIL pop: {v}, expected 30");
+                return 1;
+            }
+        },
+        None => {
+            print("FAIL: pop should return Some");
+            return 1;
+        },
+    }
+
+    if items.len() != 2 {
+        print(f"FAIL: len={items.len()} after pop");
+        return 1;
+    }
+    print("  maybe_map: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Option/Result Tests:");
+    let mut failures = 0;
+    failures = failures + test_safe_divide();
+    failures = failures + test_find_first();
+    failures = failures + test_chain();
+    failures = failures + test_maybe_map();
+
+    if failures == 0 {
+        print("All option/result tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

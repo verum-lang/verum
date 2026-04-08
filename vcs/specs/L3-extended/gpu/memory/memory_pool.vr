@@ -1,0 +1,382 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, memory, pool, allocation
+
+/// GPU memory pool management for efficient allocation/deallocation
+/// and reduced fragmentation in deep learning workloads.
+
+fn main() {
+    let device = Device.gpu(0);
+
+    // Basic memory pool
+    test_basic_pool(device);
+
+    // Caching allocator
+    test_caching_allocator(device);
+
+    // Block pool
+    test_block_pool(device);
+
+    // Stream-ordered pool
+    test_stream_ordered_pool(device);
+
+    // Multi-GPU pool
+    test_multi_gpu_pool();
+}
+
+fn test_basic_pool(device: Device) {
+    // Create memory pool with fixed capacity
+    let pool = MemoryPool.new(device, capacity: 1024 * 1024 * 1024);  // 1 GB
+
+    // Allocate from pool
+    let tensor_a: Tensor<f32, [1000000]> = pool.allocate();  // ~4 MB
+    assert(tensor_a.is_on_device());
+
+    let tensor_b: Tensor<f32, [2000000]> = pool.allocate();  // ~8 MB
+    let tensor_c: Tensor<f32, [500000]> = pool.allocate();   // ~2 MB
+
+    // Check pool stats
+    let stats = pool.stats();
+    assert(stats.allocated_bytes >= 14 * 1024 * 1024);
+    assert(stats.free_bytes <= pool.capacity() - stats.allocated_bytes);
+
+    // Release back to pool (not to OS)
+    pool.release(tensor_a);
+    pool.release(tensor_b);
+
+    // Reuse memory from pool
+    let tensor_d: Tensor<f32, [1000000]> = pool.allocate();  // May reuse tensor_aps memory
+
+    // Pool defragmentation
+    pool.defragment();
+
+    // Force release to OS (careful: invalidates all pool allocations!)
+    // pool.trim_to_size(512 * 1024 * 1024);
+
+    // Query fragmentation
+    let frag = pool.fragmentation_ratio();
+    // 0.0 = no fragmentation, 1.0 = completely fragmented
+}
+
+fn test_caching_allocator(device: Device) {
+    // PyTorch-style caching allocator
+    let allocator = CachingAllocator.new(device);
+
+    // Small allocations use small pool
+    let small_a: Tensor<f32, [256]> = allocator.allocate();   // 1 KB
+    let small_b: Tensor<f32, [512]> = allocator.allocate();   // 2 KB
+    let small_c: Tensor<f32, [1024]> = allocator.allocate();  // 4 KB
+
+    // Large allocations use large pool
+    let large_a: Tensor<f32, [1000000]> = allocator.allocate();  // 4 MB
+    let large_b: Tensor<f32, [5000000]> = allocator.allocate();  // 20 MB
+
+    // Free memory (returns to cache, not OS)
+    allocator.free(small_a);
+    allocator.free(large_a);
+
+    // Subsequent allocations may reuse cached memory
+    let small_d: Tensor<f32, [256]> = allocator.allocate();  // Reuses small_a
+    let large_c: Tensor<f32, [800000]> = allocator.allocate();  // Reuses part of large_a
+
+    // Empty cache
+    allocator.empty_cache();
+
+    // Memory snapshot for debugging
+    let snapshot = allocator.snapshot();
+    for block in snapshot.blocks {
+        // block.size, block.in_use, block.stream, etc.
+    }
+
+    // Set memory fraction limit
+    allocator.set_memory_fraction(0.9);  // Use at most 90% of GPU memory
+
+    // Peak memory usage
+    let peak = allocator.max_memory_allocated();
+    let reserved = allocator.max_memory_reserved();
+}
+
+fn test_block_pool(device: Device) {
+    // Fixed-size block pool for predictable allocation
+    let block_size = 1024 * 1024;  // 1 MB blocks
+    let num_blocks = 100;
+
+    let pool = BlockPool.new(device, block_size, num_blocks);
+
+    // Allocate exact blocks
+    let block_a = pool.allocate_block();
+    let block_b = pool.allocate_block();
+    let block_c = pool.allocate_block();
+
+    assert(block_a.size() == block_size);
+
+    // Return blocks
+    pool.free_block(block_a);
+    pool.free_block(block_b);
+
+    // Batch allocation
+    let blocks = pool.allocate_blocks(10);
+    assert(blocks.len() == 10);
+
+    // Check availability
+    let available = pool.available_blocks();
+    assert(available == num_blocks - 10 - 1);  // 10 + block_c
+
+    // Arena allocator within a block
+    let arena = Arena.new(pool.allocate_block());
+
+    let buf_a = arena.allocate(256);
+    let buf_b = arena.allocate(512);
+    let buf_c = arena.allocate(128);
+
+    // Reset arena (free all at once)
+    arena.reset();
+
+    // Reuse arena
+    let buf_d = arena.allocate(1024);
+}
+
+fn test_stream_ordered_pool(device: Device) {
+    // Stream-ordered memory pool (CUDA 11.2+)
+    let pool = StreamOrderedPool.new(device);
+
+    let stream1 = Stream.new(device);
+    let stream2 = Stream.new(device);
+
+    // Allocate on stream 1
+    let tensor_a: Tensor<f32, [1000000]> = pool.allocate_async(stream1);
+
+    // Work on stream 1
+    @kernel(block_size = 256)
+    fn process(data: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N { data[idx] = idx as f32; }
+    }
+
+// LAUNCH:     process<<<auto, 256, stream1>>>(&mut tensor_a);
+
+    // Free on stream 1 (actual free happens when stream reaches this point)
+    pool.free_async(tensor_a, stream1);
+
+    // Allocate on stream 2 (may reuse tensor_aps memory after stream1 completes)
+    let tensor_b: Tensor<f32, [1000000]> = pool.allocate_async(stream2);
+
+    // Event for cross-stream synchronization
+    let event = Event.new(device);
+    stream1.record(event);
+    stream2.wait(event);  // Ensures tensor_a is free before tensor_b might reuse it
+
+    // Synchronize all streams
+    Stream.synchronize_all([stream1, stream2]);
+
+    // Pool handles per-stream allocation tracking
+    let stream1_alloc = pool.stream_allocated(stream1);
+    let stream2_alloc = pool.stream_allocated(stream2);
+
+    // Trim pool memory
+    pool.trim(0);  // Release all cached memory
+}
+
+fn test_multi_gpu_pool() {
+    let devices = Device.all_gpus();
+
+    if devices.len() < 2 {
+        return;
+    }
+
+    // Per-device pools
+    let pools: List<MemoryPool> = devices.iter()
+        .map(|d| MemoryPool.new(*d, capacity: 1024 * 1024 * 1024))
+        .collect();
+
+    // Allocate across devices
+    let tensor_0: Tensor<f32, [1000000]> = pools[0].allocate();
+    let tensor_1: Tensor<f32, [1000000]> = pools[1].allocate();
+
+    assert(tensor_0.device() == devices[0]);
+    assert(tensor_1.device() == devices[1]);
+
+    // Unified pool view
+    let unified_pool = UnifiedPool.new(devices);
+
+    // Allocate on best device
+    let auto_tensor: Tensor<f32, [1000000]> = unified_pool.allocate_best();
+
+    // Allocate with affinity hint
+    let affinited: Tensor<f32, [1000000]> = unified_pool.allocate_with_affinity(
+        preferred_device: devices[0],
+        fallback: true
+    );
+
+    // Balance across devices
+    unified_pool.rebalance();
+
+    // Memory pressure handling
+    unified_pool.on_memory_pressure(|device, needed| {
+// DEVICE:         // Try to free memory on device
+        device.garbage_collect();
+    });
+}
+
+// Memory pool types
+type MemoryPool is {
+    device: Device,
+    capacity: Int,
+};
+
+implement MemoryPool {
+    fn new(device: Device, capacity: Int) -> Self {
+        Self { device: device, capacity: capacity }
+    }
+
+    fn allocate(&self) -> Int {
+        0
+    }
+
+    fn release(&self) {
+        // Return to pool
+    }
+
+    fn stats(&self) -> PoolStats {
+        PoolStats { allocated_bytes: 0, free_bytes: self.capacity }
+    }
+
+    fn capacity(&self) -> Int { self.capacity }
+
+    fn defragment(&self) {}
+
+    fn fragmentation_ratio(&self) -> f32 { 0.0 }
+}
+
+type PoolStats is {
+    allocated_bytes: Int,
+    free_bytes: Int,
+};
+
+type CachingAllocator is {
+    device: Device,
+};
+
+implement CachingAllocator {
+    fn new(device: Device) -> Self {
+        Self { device: device }
+    }
+
+    fn allocate(&self) -> Int {
+        0
+    }
+
+    fn free(&self, x: Int) {}
+
+    fn empty_cache(&self) {}
+
+    fn snapshot(&self) -> AllocatorSnapshot {
+        AllocatorSnapshot { blocks: [] }
+    }
+
+    fn set_memory_fraction(&self, fraction: f32) {}
+
+    fn max_memory_allocated(&self) -> Int { 0 }
+
+    fn max_memory_reserved(&self) -> Int { 0 }
+}
+
+type AllocatorSnapshot is {
+    blocks: List<BlockInfo>,
+};
+
+type BlockInfo is {
+    size: Int,
+    in_use: bool,
+};
+
+type BlockPool is {
+    device: Device,
+    block_size: Int,
+    num_blocks: Int,
+};
+
+implement BlockPool {
+    fn new(device: Device, block_size: Int, num_blocks: Int) -> Self {
+        Self { device, block_size, num_blocks }
+    }
+
+    fn allocate_block(&self) -> DeviceBuffer<u8> {
+        DeviceBuffer.allocate(self.device, self.block_size)
+    }
+
+    fn free_block(&self, block: DeviceBuffer<u8>) {}
+
+    fn allocate_blocks(&self, n: Int) -> List<DeviceBuffer<u8>> {
+        (0..n).map(|_| self.allocate_block()).collect()
+    }
+
+    fn available_blocks(&self) -> Int { self.num_blocks }
+}
+
+type Arena is {
+    buffer: DeviceBuffer<u8>,
+    offset: Int,
+};
+
+implement Arena {
+    fn new(buffer: DeviceBuffer<u8>) -> Self {
+        Self { buffer, offset: 0 }
+    }
+
+    fn allocate(&mut self, count: Int) -> DeviceSlice<u8> {
+        let size = count;
+        let ptr = self.offset;
+        self.offset += size;
+        // Return slice
+        unreachable()
+    }
+
+    fn reset(&mut self) {
+        self.offset = 0;
+    }
+}
+
+type StreamOrderedPool is {
+    device: Device,
+};
+
+implement StreamOrderedPool {
+    fn new(device: Device) -> Self { Self { device: device } }
+
+    fn allocate_async(&self, stream: Stream) -> Int {
+        0
+    }
+
+    fn free_async(&self, t: Tensor, stream: Stream) {}
+
+    fn stream_allocated(&self, stream: Stream) -> Int { 0 }
+
+    fn trim(&self, size: Int) {}
+}
+
+type UnifiedPool is {
+    devices: List<Device>,
+};
+
+implement UnifiedPool {
+    fn new(devices: List<Device>) -> Self { Self { devices } }
+
+    fn allocate_best(&self) -> Tensor {
+        Tensor.zeros().to(self.devices[0])
+    }
+
+    fn allocate_with_affinity(
+        &self,
+        preferred_device: Device,
+        fallback: bool
+    ) -> Tensor {
+        Tensor.zeros().to(preferred_device)
+    }
+
+    fn rebalance(&self) {}
+
+    fn on_memory_pressure<F: Fn(Device, Int)>(&self, handler: F) {}
+}

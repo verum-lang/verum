@@ -1,0 +1,1697 @@
+// =============================================================================
+// slice_test.vr - Comprehensive tests for slice types and methods
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, slice, view, core
+// @description: Comprehensive tests for slice types (&[T], &mut [T]) and methods
+//               including iteration, searching, sorting, and binary search
+// =============================================================================
+
+// Import all core modules to get slice extension methods
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// Section 1: Basic Properties Tests
+// =============================================================================
+
+@test
+fn test_slice_len() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    assert_eq(slice.len(), 5);
+}
+
+@test
+fn test_slice_is_empty() {
+    let arr = [1, 2, 3];
+    let empty: [Int; 0] = [];
+
+    assert(!(&arr).is_empty());
+    assert((&empty).is_empty());
+}
+
+@test
+fn test_slice_get() {
+    let arr = [10, 20, 30, 40, 50];
+    let slice = &arr;
+
+    match slice.get(0) {
+        Some(v) => assert_eq(*v, 10),
+        None => panic("Expected Some"),
+    }
+
+    match slice.get(4) {
+        Some(v) => assert_eq(*v, 50),
+        None => panic("Expected Some"),
+    }
+
+    match slice.get(10) {
+        None => {} // Expected - out of bounds
+        Some(_) => panic("Expected None"),
+    }
+
+    match slice.get(-1) {
+        None => {} // Expected - negative index
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_slice_first_last() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    match slice.first() {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+
+    match slice.last() {
+        Some(v) => assert_eq(*v, 5),
+        None => panic("Expected Some"),
+    }
+
+    let empty: [Int; 0] = [];
+    match (&empty).first() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    match (&empty).last() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 2: Slicing Tests
+// =============================================================================
+
+@test
+fn test_slice_subslice() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    let sub = slice.slice(1, 4);
+    assert_eq(sub.len(), 3);
+    assert_eq(sub[0], 2);
+    assert_eq(sub[1], 3);
+    assert_eq(sub[2], 4);
+}
+
+@test
+fn test_slice_from() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    let sub = slice.slice_from(2);
+    assert_eq(sub.len(), 3);
+    assert_eq(sub[0], 3);
+    assert_eq(sub[1], 4);
+    assert_eq(sub[2], 5);
+}
+
+@test
+fn test_slice_to() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    let sub = slice.slice_to(3);
+    assert_eq(sub.len(), 3);
+    assert_eq(sub[0], 1);
+    assert_eq(sub[1], 2);
+    assert_eq(sub[2], 3);
+}
+
+@test
+fn test_slice_split_at() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    let (left, right) = slice.split_at(2);
+
+    assert_eq(left.len(), 2);
+    assert_eq(left[0], 1);
+    assert_eq(left[1], 2);
+
+    assert_eq(right.len(), 3);
+    assert_eq(right[0], 3);
+    assert_eq(right[1], 4);
+    assert_eq(right[2], 5);
+}
+
+@test
+fn test_slice_split_at_zero() {
+    let arr = [1, 2, 3];
+    let slice = &arr;
+
+    let (left, right) = slice.split_at(0);
+
+    assert_eq(left.len(), 0);
+    assert_eq(right.len(), 3);
+}
+
+@test
+fn test_slice_split_at_end() {
+    let arr = [1, 2, 3];
+    let slice = &arr;
+
+    let (left, right) = slice.split_at(3);
+
+    assert_eq(left.len(), 3);
+    assert_eq(right.len(), 0);
+}
+
+// =============================================================================
+// Section 3: Iteration Tests
+// =============================================================================
+
+@test
+fn test_slice_iter() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    let mut sum = 0;
+    for item in slice.iter() {
+        sum = sum + *item;
+    }
+
+    assert_eq(sum, 15);  // 1 + 2 + 3 + 4 + 5
+}
+
+@test
+fn test_slice_iter_enumerate() {
+    let arr = [10, 20, 30];
+    let slice = &arr;
+
+    let mut index_sum = 0;
+    let mut value_sum = 0;
+
+    for (i, v) in slice.iter_enumerate() {
+        index_sum = index_sum + i;
+        value_sum = value_sum + *v;
+    }
+
+    assert_eq(index_sum, 3);   // 0 + 1 + 2
+    assert_eq(value_sum, 60);  // 10 + 20 + 30
+}
+
+@test
+fn test_slice_chunks() {
+    let arr = [1, 2, 3, 4, 5, 6, 7];
+    let slice = &arr;
+
+    let mut chunk_count = 0;
+    let mut chunk_sizes: [Int; 3] = [0, 0, 0];
+
+    for chunk in slice.chunks(3) {
+        chunk_sizes[chunk_count] = chunk.len();
+        chunk_count = chunk_count + 1;
+    }
+
+    assert_eq(chunk_count, 3);
+    assert_eq(chunk_sizes[0], 3);  // [1, 2, 3]
+    assert_eq(chunk_sizes[1], 3);  // [4, 5, 6]
+    assert_eq(chunk_sizes[2], 1);  // [7]
+}
+
+@test
+fn test_slice_chunks_exact() {
+    let arr = [1, 2, 3, 4, 5, 6, 7];
+    let slice = &arr;
+
+    let chunks_iter = slice.chunks_exact(3);
+
+    let mut chunk_count = 0;
+    for chunk in chunks_iter {
+        assert_eq(chunk.len(), 3);
+        chunk_count = chunk_count + 1;
+    }
+
+    assert_eq(chunk_count, 2);  // Only full chunks
+
+    // Check remainder
+    let remainder = slice.chunks_exact(3).remainder();
+    assert_eq(remainder.len(), 1);
+    assert_eq(remainder[0], 7);
+}
+
+@test
+fn test_slice_windows() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    let mut window_count = 0;
+    let mut window_sums: [Int; 3] = [0, 0, 0];
+
+    for window in slice.windows(3) {
+        let mut sum = 0;
+        for v in window.iter() {
+            sum = sum + *v;
+        }
+        window_sums[window_count] = sum;
+        window_count = window_count + 1;
+    }
+
+    assert_eq(window_count, 3);
+    assert_eq(window_sums[0], 6);   // 1 + 2 + 3
+    assert_eq(window_sums[1], 9);   // 2 + 3 + 4
+    assert_eq(window_sums[2], 12);  // 3 + 4 + 5
+}
+
+// =============================================================================
+// Section 4: Searching Tests
+// =============================================================================
+
+@test
+fn test_slice_contains() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    assert(slice.contains(&3));
+    assert(slice.contains(&1));
+    assert(slice.contains(&5));
+    assert(!slice.contains(&0));
+    assert(!slice.contains(&10));
+}
+
+@test
+fn test_slice_position() {
+    let arr = [10, 20, 30, 20, 40];
+    let slice = &arr;
+
+    match slice.position(&20) {
+        Some(idx) => assert_eq(idx, 1),  // First occurrence
+        None => panic("Expected Some"),
+    }
+
+    match slice.position(&30) {
+        Some(idx) => assert_eq(idx, 2),
+        None => panic("Expected Some"),
+    }
+
+    match slice.position(&100) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_slice_find() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    // Find first even number
+    match slice.find(|x| *x % 2 == 0) {
+        Some(v) => assert_eq(*v, 2),
+        None => panic("Expected Some"),
+    }
+
+    // Find number > 10 (none exist)
+    match slice.find(|x| *x > 10) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_slice_find_position() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    // Find position of first number > 3
+    match slice.find_position(|x| *x > 3) {
+        Some(idx) => assert_eq(idx, 3),  // Index of 4
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_slice_starts_with() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    assert(slice.starts_with(&[1, 2, 3]));
+    assert(slice.starts_with(&[1]));
+    assert(slice.starts_with(&[]));
+    assert(!slice.starts_with(&[2, 3]));
+    assert(!slice.starts_with(&[1, 2, 3, 4, 5, 6]));  // Longer than slice
+}
+
+@test
+fn test_slice_ends_with() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    assert(slice.ends_with(&[3, 4, 5]));
+    assert(slice.ends_with(&[5]));
+    assert(slice.ends_with(&[]));
+    assert(!slice.ends_with(&[4, 5, 6]));
+    assert(!slice.ends_with(&[1, 2, 3]));
+}
+
+// =============================================================================
+// Section 5: Binary Search Tests
+// =============================================================================
+
+@test
+fn test_slice_binary_search_found() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let slice = &arr;
+
+    match slice.binary_search(&5) {
+        Ok(idx) => assert_eq(idx, 4),
+        Err(_) => panic("Expected Ok"),
+    }
+
+    match slice.binary_search(&1) {
+        Ok(idx) => assert_eq(idx, 0),
+        Err(_) => panic("Expected Ok"),
+    }
+
+    match slice.binary_search(&10) {
+        Ok(idx) => assert_eq(idx, 9),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_slice_binary_search_not_found() {
+    let arr = [1, 3, 5, 7, 9];
+    let slice = &arr;
+
+    // Search for 4 (should return insertion point at index 2)
+    match slice.binary_search(&4) {
+        Err(idx) => assert_eq(idx, 2),  // Would be inserted between 3 and 5
+        Ok(_) => panic("Expected Err"),
+    }
+
+    // Search for 0 (before all elements)
+    match slice.binary_search(&0) {
+        Err(idx) => assert_eq(idx, 0),
+        Ok(_) => panic("Expected Err"),
+    }
+
+    // Search for 10 (after all elements)
+    match slice.binary_search(&10) {
+        Err(idx) => assert_eq(idx, 5),
+        Ok(_) => panic("Expected Err"),
+    }
+}
+
+@test
+fn test_slice_binary_search_by() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    // Search for 3 using custom comparator with explicit type annotation
+    match slice.binary_search_by(|x: &Int| {
+        if *x < 3 { Ordering.Less }
+        else if *x > 3 { Ordering.Greater }
+        else { Ordering.Equal }
+    }) {
+        Ok(idx) => assert_eq(idx, 2),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 6: Aggregation Tests
+// =============================================================================
+
+@test
+fn test_slice_count() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let slice = &arr;
+
+    // Count even numbers
+    let even_count = slice.count(|x| *x % 2 == 0);
+    assert_eq(even_count, 5);
+
+    // Count numbers > 5
+    let gt_five_count = slice.count(|x| *x > 5);
+    assert_eq(gt_five_count, 5);
+}
+
+@test
+fn test_slice_all() {
+    let arr = [2, 4, 6, 8, 10];
+    let slice = &arr;
+
+    assert(slice.all(|x| *x % 2 == 0));  // All even
+    assert(!slice.all(|x| *x < 5));      // Not all < 5
+}
+
+@test
+fn test_slice_any() {
+    let arr = [1, 3, 5, 7, 9];
+    let slice = &arr;
+
+    assert(slice.any(|x| *x > 5));       // Some > 5
+    assert(!slice.any(|x| *x % 2 == 0)); // None even
+}
+
+@test
+fn test_slice_min_max() {
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6];
+    let slice = &arr;
+
+    match slice.min() {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+
+    match slice.max() {
+        Some(v) => assert_eq(*v, 9),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_slice_min_max_empty() {
+    let empty: [Int; 0] = [];
+    let slice = &empty;
+
+    match slice.min() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    match slice.max() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 7: Comparison Tests
+// =============================================================================
+
+@test
+fn test_slice_eq_slice() {
+    let arr1 = [1, 2, 3];
+    let arr2 = [1, 2, 3];
+    let arr3 = [1, 2, 4];
+    let arr4 = [1, 2];
+
+    assert((&arr1).eq_slice(&arr2));
+    assert(!(&arr1).eq_slice(&arr3));  // Different element
+    assert(!(&arr1).eq_slice(&arr4));  // Different length
+}
+
+@test
+fn test_slice_cmp_slice() {
+    let arr1 = [1, 2, 3];
+    let arr2 = [1, 2, 3];
+    let arr3 = [1, 2, 4];
+    let arr4 = [1, 2];
+
+    match (&arr1).cmp_slice(&arr2) {
+        Ordering.Equal => {} // Expected
+        _ => panic("Expected Equal"),
+    }
+
+    match (&arr1).cmp_slice(&arr3) {
+        Ordering.Less => {} // Expected (3 < 4)
+        _ => panic("Expected Less"),
+    }
+
+    match (&arr1).cmp_slice(&arr4) {
+        Ordering.Greater => {} // Expected (longer)
+        _ => panic("Expected Greater"),
+    }
+}
+
+// =============================================================================
+// Section 8: Mutable Slice Tests
+// =============================================================================
+
+@test
+fn test_slice_get_mut() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    match slice.get_mut(2) {
+        Some(v) => *v = 30,
+        None => panic("Expected Some"),
+    }
+
+    assert_eq(arr[2], 30);
+}
+
+@test
+fn test_slice_first_last_mut() {
+    let mut arr = [1, 2, 3];
+    let slice = &mut arr;
+
+    match slice.first_mut() {
+        Some(v) => *v = 10,
+        None => panic("Expected Some"),
+    }
+
+    match slice.last_mut() {
+        Some(v) => *v = 30,
+        None => panic("Expected Some"),
+    }
+
+    assert_eq(arr[0], 10);
+    assert_eq(arr[2], 30);
+}
+
+@test
+fn test_slice_swap() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    slice.swap(0, 4);
+
+    assert_eq(arr[0], 5);
+    assert_eq(arr[4], 1);
+}
+
+@test
+fn test_slice_reverse() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    slice.reverse();
+
+    assert_eq(arr[0], 5);
+    assert_eq(arr[1], 4);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[3], 2);
+    assert_eq(arr[4], 1);
+}
+
+@test
+fn test_slice_fill() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    slice.fill(42);
+
+    for i in 0..5 {
+        assert_eq(arr[i], 42);
+    }
+}
+
+@test
+fn test_slice_copy_from_slice() {
+    let mut dest = [0, 0, 0];
+    let src = [1, 2, 3];
+
+    (&mut dest).copy_from_slice(&src);
+
+    assert_eq(dest[0], 1);
+    assert_eq(dest[1], 2);
+    assert_eq(dest[2], 3);
+}
+
+// =============================================================================
+// Section 9: Sorting Tests
+// =============================================================================
+
+@test
+fn test_slice_sort() {
+    let mut arr = [5, 2, 8, 1, 9, 3];
+    let slice = &mut arr;
+
+    slice.sort();
+
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[3], 5);
+    assert_eq(arr[4], 8);
+    assert_eq(arr[5], 9);
+}
+
+@test
+fn test_slice_sort_already_sorted() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    slice.sort();
+
+    for i in 0..5 {
+        assert_eq(arr[i], i + 1);
+    }
+}
+
+@test
+fn test_slice_sort_reverse_order() {
+    let mut arr = [5, 4, 3, 2, 1];
+    let slice = &mut arr;
+
+    slice.sort();
+
+    assert_eq(arr[0], 1);
+    assert_eq(arr[4], 5);
+}
+
+@test
+fn test_slice_sort_by() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    // Sort in reverse order
+    slice.sort_by(|a, b| {
+        if *a > *b { Ordering.Less }
+        else if *a < *b { Ordering.Greater }
+        else { Ordering.Equal }
+    });
+
+    assert_eq(arr[0], 5);
+    assert_eq(arr[4], 1);
+}
+
+@test
+fn test_slice_sort_duplicates() {
+    let mut arr = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+    let slice = &mut arr;
+
+    slice.sort();
+
+    // Verify sorted
+    for i in 0..(arr.len() - 1) {
+        assert(arr[i] <= arr[i + 1]);
+    }
+}
+
+// =============================================================================
+// Section 10: Rotation Tests
+// =============================================================================
+
+@test
+fn test_slice_rotate_left() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    slice.rotate_left(2);
+
+    assert_eq(arr[0], 3);
+    assert_eq(arr[1], 4);
+    assert_eq(arr[2], 5);
+    assert_eq(arr[3], 1);
+    assert_eq(arr[4], 2);
+}
+
+@test
+fn test_slice_rotate_right() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    slice.rotate_right(2);
+
+    assert_eq(arr[0], 4);
+    assert_eq(arr[1], 5);
+    assert_eq(arr[2], 1);
+    assert_eq(arr[3], 2);
+    assert_eq(arr[4], 3);
+}
+
+@test
+fn test_slice_rotate_zero() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    slice.rotate_left(0);
+
+    // Should be unchanged
+    for i in 0..5 {
+        assert_eq(arr[i], i + 1);
+    }
+}
+
+// =============================================================================
+// Section 11: Copy Within Tests
+// =============================================================================
+
+@test
+fn test_slice_copy_within() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    // Copy [1, 2] to position 3
+    slice.copy_within(0, 2, 3);
+
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[3], 1);
+    assert_eq(arr[4], 2);
+}
+
+@test
+fn test_slice_copy_within_overlap() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    // Copy [1, 2, 3] to position 1 (overlapping)
+    slice.copy_within(0, 3, 1);
+
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 1);
+    assert_eq(arr[2], 2);
+    assert_eq(arr[3], 3);
+    assert_eq(arr[4], 5);
+}
+
+// =============================================================================
+// Section 12: Double-Ended Iterator Tests
+// =============================================================================
+
+@test
+fn test_slice_iter_next_back() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    let mut iter = slice.iter();
+
+    // Forward
+    match iter.next() {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+
+    // Backward
+    match iter.next_back() {
+        Some(v) => assert_eq(*v, 5),
+        None => panic("Expected Some"),
+    }
+
+    match iter.next_back() {
+        Some(v) => assert_eq(*v, 4),
+        None => panic("Expected Some"),
+    }
+
+    // Forward again
+    match iter.next() {
+        Some(v) => assert_eq(*v, 2),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_slice_iter_rev() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    // Test reverse iteration using DoubleEndedIterator's next_back
+    // instead of .rev() adapter (which has type resolution issues)
+    let mut reversed: [Int; 5] = [0, 0, 0, 0, 0];
+    let mut iter = slice.iter();
+
+    // Manually iterate backwards using next_back
+    let mut i = 0;
+    while i < 5 {
+        match iter.next_back() {
+            Some(v) => {
+                reversed[i] = *v;
+                i = i + 1;
+            }
+            None => {}
+        }
+    }
+
+    assert_eq(reversed[0], 5);
+    assert_eq(reversed[1], 4);
+    assert_eq(reversed[2], 3);
+    assert_eq(reversed[3], 2);
+    assert_eq(reversed[4], 1);
+}
+
+// =============================================================================
+// Section 13: Split At Mut Tests
+// =============================================================================
+
+@test
+fn test_slice_split_at_mut() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    let (left, right) = slice.split_at_mut(2);
+
+    // Modify left
+    left[0] = 10;
+    left[1] = 20;
+
+    // Modify right
+    right[0] = 30;
+    right[1] = 40;
+    right[2] = 50;
+
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+    assert_eq(arr[3], 40);
+    assert_eq(arr[4], 50);
+}
+
+// =============================================================================
+// Section 14: Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_single_element() {
+    let arr = [42];
+    let slice = &arr;
+
+    assert_eq(slice.len(), 1);
+    assert(!slice.is_empty());
+
+    match slice.first() {
+        Some(v) => assert_eq(*v, 42),
+        None => panic("Expected Some"),
+    }
+
+    match slice.last() {
+        Some(v) => assert_eq(*v, 42),
+        None => panic("Expected Some"),
+    }
+
+    // Chunks of 1
+    let mut count = 0;
+    for chunk in slice.chunks(1) {
+        assert_eq(chunk.len(), 1);
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+@test
+fn test_slice_empty_operations() {
+    let empty: [Int; 0] = [];
+    let slice = &empty;
+
+    assert(slice.is_empty());
+    assert_eq(slice.len(), 0);
+    assert(!slice.contains(&0));
+
+    // Empty iteration
+    let mut count = 0;
+    for _x in slice.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+
+    // Empty chunks
+    for _chunk in slice.chunks(1) {
+        panic("Should not iterate");
+    }
+
+    // Empty binary search
+    match slice.binary_search(&0) {
+        Err(idx) => assert_eq(idx, 0),
+        Ok(_) => panic("Expected Err"),
+    }
+}
+
+// =============================================================================
+// Section: rposition (reverse position search)
+// =============================================================================
+
+@test
+fn test_slice_rposition() {
+    let arr = [10, 20, 30, 20, 40];
+    let slice = &arr;
+
+    // rposition finds last occurrence
+    match slice.rposition(&20) {
+        Some(idx) => assert_eq(idx, 3),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_slice_rposition_not_found() {
+    let arr = [1, 2, 3];
+    let slice = &arr;
+
+    match slice.rposition(&99) {
+        None => {},
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_slice_rposition_single() {
+    let arr = [42];
+    let slice = &arr;
+
+    match slice.rposition(&42) {
+        Some(idx) => assert_eq(idx, 0),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_slice_sort_by_key() {
+    // Sort by absolute value
+    let mut arr = [3, -1, 4, -1, 5, -9, 2, -6];
+    let slice = &mut arr;
+
+    // Sort by absolute value using sort_by_key
+    slice.sort_by_key(|x: &Int| {
+        let v = *x;
+        if v < 0 { 0 - v } else { v }
+    });
+
+    // First elements should have smallest absolute values
+    let first_abs = if arr[0] < 0 { 0 - arr[0] } else { arr[0] };
+    assert(first_abs <= 2);  // -1 or 1 should come first
+}
+
+@test
+fn test_slice_sort_by_key_identity() {
+    // sort_by_key with identity should behave like sort
+    let mut arr = [5, 3, 1, 4, 2];
+    let slice = &mut arr;
+
+    slice.sort_by_key(|x: &Int| *x);
+
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[3], 4);
+    assert_eq(arr[4], 5);
+}
+
+@test
+fn test_slice_clone_from_slice() {
+    let mut dest = [0, 0, 0, 0, 0];
+    let src = [10, 20, 30, 40, 50];
+
+    (&mut dest).clone_from_slice(&src);
+
+    assert_eq(dest[0], 10);
+    assert_eq(dest[1], 20);
+    assert_eq(dest[2], 30);
+    assert_eq(dest[3], 40);
+    assert_eq(dest[4], 50);
+}
+
+// =============================================================================
+// Section: Additional edge cases
+// =============================================================================
+
+@test
+fn test_slice_find_by_predicate() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    match slice.find(|x| *x > 3) {
+        Some(val) => assert_eq(*val, 4),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_slice_find_none_predicate() {
+    let arr = [1, 2, 3];
+    let slice = &arr;
+
+    match slice.find(|x| *x > 10) {
+        None => {},
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_slice_count_predicate() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let slice = &arr;
+    let even_count = slice.count(|x| *x % 2 == 0);
+    assert_eq(even_count, 5);
+}
+
+@test
+fn test_slice_rotate_both() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    slice.rotate_left(2);
+    // [3, 4, 5, 1, 2]
+    assert_eq(slice[0], 3);
+    assert_eq(slice[4], 2);
+
+    slice.rotate_right(2);
+    // Back to [1, 2, 3, 4, 5]
+    assert_eq(slice[0], 1);
+    assert_eq(slice[4], 5);
+}
+
+// =============================================================================
+// Section: Mutable Iterator Tests
+// =============================================================================
+
+@test
+fn test_slice_iter_mut_modify_all() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    let mut iter = slice.iter_mut();
+    loop {
+        match iter.next() {
+            Some(v) => { *v = *v * 10; }
+            None => { break; }
+        }
+    }
+
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+    assert_eq(arr[3], 40);
+    assert_eq(arr[4], 50);
+}
+
+@test
+fn test_slice_iter_mut_next_back() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+    let mut iter = slice.iter_mut();
+
+    // Forward
+    match iter.next() {
+        Some(v) => { *v = 100; }
+        None => panic("Expected Some"),
+    }
+
+    // Backward
+    match iter.next_back() {
+        Some(v) => { *v = 500; }
+        None => panic("Expected Some"),
+    }
+
+    assert_eq(arr[0], 100);
+    assert_eq(arr[4], 500);
+    // Middle unchanged
+    assert_eq(arr[2], 3);
+}
+
+@test
+fn test_slice_iter_mut_empty() {
+    let mut empty: [Int; 0] = [];
+    let slice = &mut empty;
+    let mut iter = slice.iter_mut();
+
+    match iter.next() {
+        None => {}
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section: Mutable Subslice Tests
+// =============================================================================
+
+@test
+fn test_slice_mut_subslice() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+
+    let sub = slice.slice_mut(1, 4);
+    sub[0] = 20;
+    sub[1] = 30;
+    sub[2] = 40;
+
+    assert_eq(arr[0], 1);   // unchanged
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+    assert_eq(arr[3], 40);
+    assert_eq(arr[4], 5);   // unchanged
+}
+
+@test
+fn test_slice_mut_full_range() {
+    let mut arr = [10, 20, 30];
+    let slice = &mut arr;
+
+    let full = slice.slice_mut(0, 3);
+    full[0] = 100;
+    full[2] = 300;
+
+    assert_eq(arr[0], 100);
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 300);
+}
+
+// =============================================================================
+// Section: Byte Slice Specialization Tests
+// =============================================================================
+
+@test
+fn test_byte_slice_eq_bytes_equal() {
+    let a: [Byte; 4] = [1 as Byte, 2 as Byte, 3 as Byte, 4 as Byte];
+    let b: [Byte; 4] = [1 as Byte, 2 as Byte, 3 as Byte, 4 as Byte];
+    assert((&a).eq_bytes(&b));
+}
+
+@test
+fn test_byte_slice_eq_bytes_not_equal() {
+    let a: [Byte; 3] = [1 as Byte, 2 as Byte, 3 as Byte];
+    let b: [Byte; 3] = [1 as Byte, 2 as Byte, 4 as Byte];
+    assert(!(&a).eq_bytes(&b));
+}
+
+@test
+fn test_byte_slice_eq_bytes_different_length() {
+    let a: [Byte; 2] = [1 as Byte, 2 as Byte];
+    let b: [Byte; 3] = [1 as Byte, 2 as Byte, 3 as Byte];
+    assert(!(&a).eq_bytes(&b));
+}
+
+@test
+fn test_byte_slice_eq_bytes_empty() {
+    let a: [Byte; 0] = [];
+    let b: [Byte; 0] = [];
+    assert((&a).eq_bytes(&b));
+}
+
+@test
+fn test_byte_slice_fill_byte() {
+    let mut arr: [Byte; 5] = [0 as Byte, 0 as Byte, 0 as Byte, 0 as Byte, 0 as Byte];
+    (&mut arr).fill_byte(0xFF as Byte);
+    for i in 0..5 {
+        assert_eq(arr[i], 0xFF as Byte);
+    }
+}
+
+@test
+fn test_byte_slice_zero() {
+    let mut arr: [Byte; 4] = [0xAA as Byte, 0xBB as Byte, 0xCC as Byte, 0xDD as Byte];
+    (&mut arr).zero();
+    for i in 0..4 {
+        assert_eq(arr[i], 0 as Byte);
+    }
+}
+
+@test
+fn test_byte_slice_copy_from_bytes() {
+    let mut dest: [Byte; 3] = [0 as Byte, 0 as Byte, 0 as Byte];
+    let src: [Byte; 3] = [10 as Byte, 20 as Byte, 30 as Byte];
+    (&mut dest).copy_from_bytes(&src);
+    assert_eq(dest[0], 10 as Byte);
+    assert_eq(dest[1], 20 as Byte);
+    assert_eq(dest[2], 30 as Byte);
+}
+
+// =============================================================================
+// Section: Windows Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_windows_size_equals_length() {
+    let arr = [1, 2, 3];
+    let slice = &arr;
+
+    let mut count = 0;
+    for window in slice.windows(3) {
+        assert_eq(window.len(), 3);
+        assert_eq(window[0], 1);
+        assert_eq(window[2], 3);
+        count = count + 1;
+    }
+    assert_eq(count, 1);  // Only one window
+}
+
+@test
+fn test_slice_windows_size_one() {
+    let arr = [10, 20, 30];
+    let slice = &arr;
+
+    let mut count = 0;
+    for window in slice.windows(1) {
+        assert_eq(window.len(), 1);
+        count = count + 1;
+    }
+    assert_eq(count, 3);  // Each element is a window
+}
+
+@test
+fn test_slice_windows_larger_than_slice() {
+    let arr = [1, 2];
+    let slice = &arr;
+
+    let mut count = 0;
+    for _window in slice.windows(5) {
+        count = count + 1;
+    }
+    assert_eq(count, 0);  // No windows fit
+}
+
+// =============================================================================
+// Section: Chunks Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_chunks_evenly_divisible() {
+    let arr = [1, 2, 3, 4, 5, 6];
+    let slice = &arr;
+
+    let mut count = 0;
+    for chunk in slice.chunks(3) {
+        assert_eq(chunk.len(), 3);
+        count = count + 1;
+    }
+    assert_eq(count, 2);
+}
+
+@test
+fn test_slice_chunks_size_equals_length() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr;
+
+    let mut count = 0;
+    for chunk in slice.chunks(5) {
+        assert_eq(chunk.len(), 5);
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+@test
+fn test_slice_chunks_size_one() {
+    let arr = [10, 20, 30];
+    let slice = &arr;
+
+    let mut count = 0;
+    for chunk in slice.chunks(1) {
+        assert_eq(chunk.len(), 1);
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_slice_chunks_exact_evenly_divisible() {
+    let arr = [1, 2, 3, 4, 5, 6];
+    let slice = &arr;
+
+    let mut count = 0;
+    for chunk in slice.chunks_exact(3) {
+        assert_eq(chunk.len(), 3);
+        count = count + 1;
+    }
+    assert_eq(count, 2);
+
+    // No remainder when evenly divisible
+    let remainder = slice.chunks_exact(3).remainder();
+    assert_eq(remainder.len(), 0);
+}
+
+// =============================================================================
+// Section: Sort Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_sort_single_element() {
+    let mut arr = [42];
+    let slice = &mut arr;
+    slice.sort();
+    assert_eq(arr[0], 42);
+}
+
+@test
+fn test_slice_sort_two_elements_already_sorted() {
+    let mut arr = [1, 2];
+    let slice = &mut arr;
+    slice.sort();
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+}
+
+@test
+fn test_slice_sort_two_elements_reversed() {
+    let mut arr = [5, 3];
+    let slice = &mut arr;
+    slice.sort();
+    assert_eq(arr[0], 3);
+    assert_eq(arr[1], 5);
+}
+
+@test
+fn test_slice_sort_negative_values() {
+    let mut arr = [3, -5, 1, -2, 4, 0];
+    let slice = &mut arr;
+    slice.sort();
+
+    assert_eq(arr[0], -5);
+    assert_eq(arr[1], -2);
+    assert_eq(arr[2], 0);
+    assert_eq(arr[3], 1);
+    assert_eq(arr[4], 3);
+    assert_eq(arr[5], 4);
+}
+
+@test
+fn test_slice_sort_all_same() {
+    let mut arr = [7, 7, 7, 7, 7];
+    let slice = &mut arr;
+    slice.sort();
+    for i in 0..5 {
+        assert_eq(arr[i], 7);
+    }
+}
+
+// =============================================================================
+// Section: Binary Search Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_binary_search_single_element_found() {
+    let arr = [42];
+    let slice = &arr;
+    match slice.binary_search(&42) {
+        Ok(idx) => assert_eq(idx, 0),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_slice_binary_search_single_element_not_found_lower() {
+    let arr = [42];
+    let slice = &arr;
+    match slice.binary_search(&10) {
+        Err(idx) => assert_eq(idx, 0),
+        Ok(_) => panic("Expected Err"),
+    }
+}
+
+@test
+fn test_slice_binary_search_single_element_not_found_higher() {
+    let arr = [42];
+    let slice = &arr;
+    match slice.binary_search(&100) {
+        Err(idx) => assert_eq(idx, 1),
+        Ok(_) => panic("Expected Err"),
+    }
+}
+
+@test
+fn test_slice_binary_search_duplicates() {
+    let arr = [1, 3, 3, 3, 5];
+    let slice = &arr;
+    match slice.binary_search(&3) {
+        Ok(idx) => {
+            // Should find one of the 3s (index 1, 2, or 3)
+            assert(idx >= 1);
+            assert(idx <= 3);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section: Comparison Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_eq_empty_slices() {
+    let a: [Int; 0] = [];
+    let b: [Int; 0] = [];
+    assert((&a).eq_slice(&b));
+}
+
+@test
+fn test_slice_cmp_empty_vs_nonempty() {
+    let empty: [Int; 0] = [];
+    let nonempty = [1];
+    match (&empty).cmp_slice(&nonempty) {
+        Ordering.Less => {}
+        _ => panic("Expected Less"),
+    }
+}
+
+@test
+fn test_slice_cmp_nonempty_vs_empty() {
+    let empty: [Int; 0] = [];
+    let nonempty = [1];
+    match (&nonempty).cmp_slice(&empty) {
+        Ordering.Greater => {}
+        _ => panic("Expected Greater"),
+    }
+}
+
+@test
+fn test_slice_cmp_same_prefix_shorter() {
+    let a = [1, 2, 3];
+    let b = [1, 2, 3, 4];
+    match (&a).cmp_slice(&b) {
+        Ordering.Less => {}  // a is shorter prefix
+        _ => panic("Expected Less"),
+    }
+}
+
+// =============================================================================
+// Section: Reverse Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_reverse_two_elements() {
+    let mut arr = [1, 2];
+    (&mut arr).reverse();
+    assert_eq(arr[0], 2);
+    assert_eq(arr[1], 1);
+}
+
+@test
+fn test_slice_reverse_single() {
+    let mut arr = [42];
+    (&mut arr).reverse();
+    assert_eq(arr[0], 42);
+}
+
+@test
+fn test_slice_reverse_even_length() {
+    let mut arr = [1, 2, 3, 4];
+    (&mut arr).reverse();
+    assert_eq(arr[0], 4);
+    assert_eq(arr[1], 3);
+    assert_eq(arr[2], 2);
+    assert_eq(arr[3], 1);
+}
+
+// =============================================================================
+// Section: Position/Find Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_position_first_element() {
+    let arr = [99, 1, 2, 3];
+    let slice = &arr;
+    match slice.position(&99) {
+        Some(idx) => assert_eq(idx, 0),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_slice_position_last_element() {
+    let arr = [1, 2, 3, 99];
+    let slice = &arr;
+    match slice.position(&99) {
+        Some(idx) => assert_eq(idx, 3),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_slice_find_position_no_match() {
+    let arr = [1, 2, 3];
+    let slice = &arr;
+    match slice.find_position(|x| *x > 100) {
+        None => {}
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_slice_rposition_first_of_duplicates() {
+    let arr = [5, 10, 5, 10, 5];
+    let slice = &arr;
+    match slice.rposition(&5) {
+        Some(idx) => assert_eq(idx, 4),  // Last occurrence
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section: Rotate Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_rotate_left_full() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+    slice.rotate_left(5);
+    // Full rotation = no change
+    assert_eq(arr[0], 1);
+    assert_eq(arr[4], 5);
+}
+
+@test
+fn test_slice_rotate_right_full() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice = &mut arr;
+    slice.rotate_right(5);
+    // Full rotation = no change
+    assert_eq(arr[0], 1);
+    assert_eq(arr[4], 5);
+}
+
+@test
+fn test_slice_rotate_left_single_element() {
+    let mut arr = [42];
+    let slice = &mut arr;
+    slice.rotate_left(1);
+    assert_eq(arr[0], 42);
+}
+
+// =============================================================================
+// Section: Swap Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_swap_same_index() {
+    let mut arr = [1, 2, 3];
+    let slice = &mut arr;
+    slice.swap(1, 1);  // No-op
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+}
+
+@test
+fn test_slice_swap_first_last() {
+    let mut arr = [10, 20, 30, 40];
+    let slice = &mut arr;
+    slice.swap(0, 3);
+    assert_eq(arr[0], 40);
+    assert_eq(arr[3], 10);
+    // Middle unchanged
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+}
+
+// =============================================================================
+// Section: All/Any Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_all_empty() {
+    let empty: [Int; 0] = [];
+    let slice = &empty;
+    // all() on empty is vacuously true
+    assert(slice.all(|x| *x > 0));
+}
+
+@test
+fn test_slice_any_empty() {
+    let empty: [Int; 0] = [];
+    let slice = &empty;
+    // any() on empty is false
+    assert(!slice.any(|x| *x > 0));
+}
+
+@test
+fn test_slice_all_single_true() {
+    let arr = [5];
+    assert((&arr).all(|x| *x > 0));
+}
+
+@test
+fn test_slice_all_single_false() {
+    let arr = [-1];
+    assert(!(&arr).all(|x| *x > 0));
+}
+
+// =============================================================================
+// Section: Copy Within Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_copy_within_non_overlapping() {
+    let mut arr = [1, 2, 3, 0, 0, 0];
+    let slice = &mut arr;
+    slice.copy_within(0, 3, 3);
+    assert_eq(arr[3], 1);
+    assert_eq(arr[4], 2);
+    assert_eq(arr[5], 3);
+}
+
+@test
+fn test_slice_copy_within_zero_length() {
+    let mut arr = [1, 2, 3];
+    let slice = &mut arr;
+    slice.copy_within(0, 0, 1);  // Copy 0 elements
+    // No change
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+}
+
+// =============================================================================
+// Section: Contains Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_contains_single_found() {
+    let arr = [42];
+    assert((&arr).contains(&42));
+}
+
+@test
+fn test_slice_contains_single_not_found() {
+    let arr = [42];
+    assert(!(&arr).contains(&99));
+}
+
+@test
+fn test_slice_contains_negative() {
+    let arr = [-3, -2, -1, 0, 1];
+    assert((&arr).contains(&-2));
+    assert(!(&arr).contains(&-5));
+}
+
+// =============================================================================
+// Section: Starts/Ends With Edge Cases
+// =============================================================================
+
+@test
+fn test_slice_starts_with_full_match() {
+    let arr = [1, 2, 3];
+    let slice = &arr;
+    assert(slice.starts_with(&[1, 2, 3]));
+}
+
+@test
+fn test_slice_ends_with_full_match() {
+    let arr = [1, 2, 3];
+    let slice = &arr;
+    assert(slice.ends_with(&[1, 2, 3]));
+}
+
+@test
+fn test_slice_starts_with_empty_on_empty() {
+    let empty: [Int; 0] = [];
+    let slice = &empty;
+    assert(slice.starts_with(&[]));
+}
+
+@test
+fn test_slice_ends_with_empty_on_empty() {
+    let empty: [Int; 0] = [];
+    let slice = &empty;
+    assert(slice.ends_with(&[]));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,44 @@
+// Complexity: Protocol implementation
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Counter is {
+    current: Int,
+    max: Int,
+};
+
+implement Iterator for Counter {
+    type Item is Int;
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.max {
+            let result = self.current;
+            self.current = self.current + 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+implement Display for Counter {
+    fn display(&self) -> Text {
+        "Counter"
+    }
+}
+
+fn main() {
+    let mut counter = Counter { current: 0, max: 10 };
+    let first = counter.next();
+    let second = counter.next();
+}

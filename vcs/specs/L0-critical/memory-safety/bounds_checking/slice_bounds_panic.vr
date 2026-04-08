@@ -1,0 +1,20 @@
+// @test: run-interpreter-panic
+// @expected-panic: Index out of bounds
+// @requires: bounds-checking
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-checking, slices, panic
+// @description: Tests that invalid slice creation causes a panic
+
+/// Slice creation is bounds-checked at runtime when bounds are dynamic.
+/// Creating a slice outside the source array bounds is a controlled panic.
+
+fn main() {
+    let arr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // This slice creation is invalid - end exceeds array length
+    let invalid_slice = &arr[5..15];  // PANIC: Slice bounds out of range
+
+    // Never reached
+    print(f"Length: {invalid_slice.len()}");
+}

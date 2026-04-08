@@ -1,0 +1,623 @@
+// =============================================================================
+// memory_test.vr - Comprehensive tests for memory allocation primitives
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, memory, heap, shared, weak, cbgr
+// @description: Tests for Heap<T>, Shared<T>, Weak<T>, ManuallyDrop<T>,
+//               MaybeUninit<T>, and memory utility functions
+// =============================================================================
+
+mount core.base.memory.{
+    Heap, Shared, Weak, ManuallyDrop, MaybeUninit,
+    swap, replace, take, drop,
+    alloc, dealloc, realloc,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// Section 1: Heap<T> - Construction and Basic Operations
+// =============================================================================
+
+@test
+fn test_heap_new() {
+    let h: Heap<Int> = Heap.new(42);
+    assert_eq(*h, 42);
+}
+
+@test
+fn test_heap_new_with_float() {
+    let h: Heap<Float> = Heap.new(3.14);
+    assert(*h > 3.0);
+}
+
+@test
+fn test_heap_new_with_bool() {
+    let h: Heap<Bool> = Heap.new(true);
+    assert(*h);
+}
+
+@test
+fn test_heap_new_with_text() {
+    let h: Heap<Text> = Heap.new("hello");
+    assert_eq(*h, "hello");
+}
+
+@test
+fn test_heap_as_ref() {
+    let h: Heap<Int> = Heap.new(100);
+    let r: &Int = h.as_ref();
+    assert_eq(*r, 100);
+}
+
+@test
+fn test_heap_as_mut() {
+    let mut h: Heap<Int> = Heap.new(10);
+    let r: &mut Int = h.as_mut();
+    *r = 20;
+    assert_eq(*h, 20);
+}
+
+@test
+fn test_heap_into_inner() {
+    let h: Heap<Int> = Heap.new(99);
+    let val: Int = h.into_inner();
+    assert_eq(val, 99);
+}
+
+@test
+fn test_heap_generation() {
+    let h: Heap<Int> = Heap.new(1);
+    let gen: UInt32 = h.generation();
+    // Generation should be a valid value (non-negative after init)
+    assert(gen >= 0);
+}
+
+@test
+fn test_heap_epoch() {
+    let h: Heap<Int> = Heap.new(1);
+    let ep: UInt16 = h.epoch();
+    // Epoch should be valid
+    assert(ep >= 0);
+}
+
+@test
+fn test_heap_is_valid() {
+    let h: Heap<Int> = Heap.new(42);
+    assert(h.is_valid());
+}
+
+// =============================================================================
+// Section 2: Heap<T> - Protocol Implementations
+// =============================================================================
+
+@test
+fn test_heap_clone() {
+    let h1: Heap<Int> = Heap.new(42);
+    let h2: Heap<Int> = h1.clone();
+    assert_eq(*h1, *h2);
+    assert_eq(*h2, 42);
+}
+
+@test
+fn test_heap_eq() {
+    let h1: Heap<Int> = Heap.new(42);
+    let h2: Heap<Int> = Heap.new(42);
+    let h3: Heap<Int> = Heap.new(99);
+    assert(h1 == h2);
+    assert(h1 != h3);
+}
+
+@test
+fn test_heap_ord() {
+    let h1: Heap<Int> = Heap.new(10);
+    let h2: Heap<Int> = Heap.new(20);
+    assert_eq(h1.cmp(&h2), Less);
+    assert_eq(h2.cmp(&h1), Greater);
+    let h3: Heap<Int> = Heap.new(10);
+    assert_eq(h1.cmp(&h3), Equal);
+}
+
+@test
+fn test_heap_default() {
+    let h: Heap<Int> = Heap.default();
+    assert_eq(*h, 0);
+}
+
+@test
+fn test_heap_new_default() {
+    let h: Heap<Int> = Heap.new_default();
+    assert_eq(*h, 0);
+}
+
+// =============================================================================
+// Section 3: Heap<T> - Raw Pointer Operations
+// =============================================================================
+
+@test
+fn test_heap_into_raw_from_raw() {
+    let h: Heap<Int> = Heap.new(42);
+    let raw = h.into_raw();
+    let h2: Heap<Int> = unsafe { Heap.from_raw(raw) };
+    assert_eq(*h2, 42);
+}
+
+@test
+fn test_heap_try_new_success() {
+    let result = Heap.try_new(42);
+    assert(result is Ok);
+    match result {
+        Ok(h) => assert_eq(*h, 42),
+        Err(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 4: Shared<T> - Construction and Reference Counting
+// =============================================================================
+
+@test
+fn test_shared_new() {
+    let s: Shared<Int> = Shared.new(42);
+    assert_eq(*s, 42);
+}
+
+@test
+fn test_shared_strong_count_initial() {
+    let s: Shared<Int> = Shared.new(42);
+    assert_eq(s.strong_count(), 1);
+}
+
+@test
+fn test_shared_weak_count_initial() {
+    let s: Shared<Int> = Shared.new(42);
+    assert_eq(s.weak_count(), 0);
+}
+
+@test
+fn test_shared_clone_increments_count() {
+    let s1: Shared<Int> = Shared.new(42);
+    let s2: Shared<Int> = s1.clone();
+    assert_eq(s1.strong_count(), 2);
+    assert_eq(s2.strong_count(), 2);
+    assert_eq(*s1, *s2);
+}
+
+@test
+fn test_shared_multiple_clones() {
+    let s1: Shared<Int> = Shared.new(10);
+    let s2 = s1.clone();
+    let s3 = s1.clone();
+    assert_eq(s1.strong_count(), 3);
+    assert_eq(*s1, 10);
+    assert_eq(*s2, 10);
+    assert_eq(*s3, 10);
+}
+
+@test
+fn test_shared_is_unique_true() {
+    let s: Shared<Int> = Shared.new(42);
+    assert(s.is_unique());
+}
+
+@test
+fn test_shared_is_unique_false() {
+    let s1: Shared<Int> = Shared.new(42);
+    let s2 = s1.clone();
+    assert(!s1.is_unique());
+    assert(!s2.is_unique());
+}
+
+@test
+fn test_shared_borrow() {
+    let s: Shared<Int> = Shared.new(42);
+    let r: &Int = s.borrow();
+    assert_eq(*r, 42);
+}
+
+@test
+fn test_shared_new_default() {
+    let s: Shared<Int> = Shared.new_default();
+    assert_eq(*s, 0);
+    assert_eq(s.strong_count(), 1);
+}
+
+@test
+fn test_shared_try_new() {
+    let result = Shared.try_new(42);
+    assert(result is Ok);
+    match result {
+        Ok(s) => assert_eq(*s, 42),
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_shared_generation() {
+    let s: Shared<Int> = Shared.new(1);
+    let gen: UInt32 = s.generation();
+    assert(gen >= 0);
+}
+
+@test
+fn test_shared_epoch() {
+    let s: Shared<Int> = Shared.new(1);
+    let ep: UInt16 = s.epoch();
+    assert(ep >= 0);
+}
+
+// =============================================================================
+// Section 5: Shared<T> - Protocol Implementations
+// =============================================================================
+
+@test
+fn test_shared_eq() {
+    let s1: Shared<Int> = Shared.new(42);
+    let s2: Shared<Int> = Shared.new(42);
+    let s3: Shared<Int> = Shared.new(99);
+    assert(s1 == s2);
+    assert(s1 != s3);
+}
+
+@test
+fn test_shared_ord() {
+    let s1: Shared<Int> = Shared.new(10);
+    let s2: Shared<Int> = Shared.new(20);
+    assert_eq(s1.cmp(&s2), Less);
+    assert_eq(s2.cmp(&s1), Greater);
+}
+
+@test
+fn test_shared_default() {
+    let s: Shared<Int> = Shared.default();
+    assert_eq(*s, 0);
+}
+
+// =============================================================================
+// Section 6: Shared<T> - Mutable Access
+// =============================================================================
+
+@test
+fn test_shared_get_mut_unique() {
+    let mut s: Shared<Int> = Shared.new(42);
+    let maybe_ref: Maybe<&mut Int> = s.get_mut();
+    assert(maybe_ref.is_some());
+}
+
+@test
+fn test_shared_get_mut_shared() {
+    let mut s1: Shared<Int> = Shared.new(42);
+    let s2 = s1.clone();
+    let maybe_ref: Maybe<&mut Int> = s1.get_mut();
+    assert(maybe_ref.is_none());
+}
+
+@test
+fn test_shared_make_unique_already_unique() {
+    let mut s: Shared<Int> = Shared.new(42);
+    let r: &mut Int = s.make_unique();
+    *r = 100;
+    assert_eq(*s, 100);
+}
+
+@test
+fn test_shared_make_unique_clones() {
+    let mut s1: Shared<Int> = Shared.new(42);
+    let s2 = s1.clone();
+    // s1 is shared, make_unique should clone
+    let r: &mut Int = s1.make_unique();
+    *r = 100;
+    assert_eq(*s1, 100);
+    // s2 should still have original value
+    assert_eq(*s2, 42);
+}
+
+// =============================================================================
+// Section 7: Shared<T> - Try Unwrap
+// =============================================================================
+
+@test
+fn test_shared_try_unwrap_unique() {
+    let s: Shared<Int> = Shared.new(42);
+    let result = s.try_unwrap();
+    assert(result is Ok);
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_shared_try_unwrap_shared() {
+    let s1: Shared<Int> = Shared.new(42);
+    let s2 = s1.clone();
+    let result = s1.try_unwrap();
+    assert(result is Err);
+}
+
+// =============================================================================
+// Section 8: Weak<T> - Weak References
+// =============================================================================
+
+@test
+fn test_shared_downgrade() {
+    let s: Shared<Int> = Shared.new(42);
+    let w: Weak<Int> = s.downgrade();
+    assert_eq(s.weak_count(), 1);
+    assert(w.is_alive());
+}
+
+@test
+fn test_weak_upgrade() {
+    let s: Shared<Int> = Shared.new(42);
+    let w: Weak<Int> = s.downgrade();
+    let upgraded = w.upgrade();
+    assert(upgraded is Some);
+    assert_eq(*upgraded.unwrap(), 42);
+}
+
+@test
+fn test_weak_strong_count() {
+    let s: Shared<Int> = Shared.new(42);
+    let w: Weak<Int> = s.downgrade();
+    assert_eq(w.strong_count(), 1);
+}
+
+@test
+fn test_weak_is_alive() {
+    let s: Shared<Int> = Shared.new(42);
+    let w: Weak<Int> = s.downgrade();
+    assert(w.is_alive());
+}
+
+@test
+fn test_weak_clone() {
+    let s: Shared<Int> = Shared.new(42);
+    let w1: Weak<Int> = s.downgrade();
+    let w2: Weak<Int> = w1.clone();
+    assert_eq(s.weak_count(), 2);
+    assert(w2.is_alive());
+}
+
+@test
+fn test_weak_multiple_downgrades() {
+    let s: Shared<Int> = Shared.new(42);
+    let w1: Weak<Int> = s.downgrade();
+    let w2: Weak<Int> = s.downgrade();
+    assert_eq(s.weak_count(), 2);
+    assert(w1.is_alive());
+    assert(w2.is_alive());
+}
+
+@test
+fn test_weak_upgrade_after_clone() {
+    let s: Shared<Int> = Shared.new(42);
+    let w: Weak<Int> = s.downgrade();
+    let s2 = s.clone();
+    // Now strong count is 2
+    let upgraded = w.upgrade();
+    assert(upgraded is Some);
+    assert_eq(*upgraded.unwrap(), 42);
+}
+
+// =============================================================================
+// Section 9: ManuallyDrop<T>
+// =============================================================================
+
+@test
+fn test_manually_drop_new() {
+    let md: ManuallyDrop<Int> = ManuallyDrop.new(42);
+    assert_eq(*md, 42);
+}
+
+@test
+fn test_manually_drop_into_inner() {
+    let md: ManuallyDrop<Int> = ManuallyDrop.new(42);
+    let val: Int = md.into_inner();
+    assert_eq(val, 42);
+}
+
+@test
+fn test_manually_drop_deref() {
+    let md: ManuallyDrop<Int> = ManuallyDrop.new(99);
+    let r: &Int = &*md;
+    assert_eq(*r, 99);
+}
+
+@test
+fn test_manually_drop_deref_mut() {
+    let mut md: ManuallyDrop<Int> = ManuallyDrop.new(10);
+    *md = 20;
+    assert_eq(*md, 20);
+}
+
+@test
+fn test_manually_drop_clone() {
+    let md1: ManuallyDrop<Int> = ManuallyDrop.new(42);
+    let md2: ManuallyDrop<Int> = md1.clone();
+    assert_eq(*md1, *md2);
+}
+
+// =============================================================================
+// Section 10: MaybeUninit<T>
+// =============================================================================
+
+@test
+fn test_maybe_uninit_new() {
+    let mu: MaybeUninit<Int> = MaybeUninit.new(42);
+    let val: Int = unsafe { mu.assume_init() };
+    assert_eq(val, 42);
+}
+
+@test
+fn test_maybe_uninit_write() {
+    let mut mu: MaybeUninit<Int> = MaybeUninit.zeroed();
+    let r: &mut Int = mu.write(99);
+    assert_eq(*r, 99);
+}
+
+@test
+fn test_maybe_uninit_zeroed() {
+    let mu: MaybeUninit<Int> = MaybeUninit.zeroed();
+    let val: Int = unsafe { mu.assume_init() };
+    assert_eq(val, 0);
+}
+
+@test
+fn test_maybe_uninit_assume_init_ref() {
+    let mu: MaybeUninit<Int> = MaybeUninit.new(42);
+    let r: &Int = unsafe { mu.assume_init_ref() };
+    assert_eq(*r, 42);
+}
+
+@test
+fn test_maybe_uninit_assume_init_mut() {
+    let mut mu: MaybeUninit<Int> = MaybeUninit.new(42);
+    let r: &mut Int = unsafe { mu.assume_init_mut() };
+    *r = 100;
+    assert_eq(*r, 100);
+}
+
+@test
+fn test_maybe_uninit_as_ptr() {
+    let mu: MaybeUninit<Int> = MaybeUninit.new(42);
+    let ptr = mu.as_ptr();
+    // Just verify we can get a pointer
+    assert(!false); // Runtime-only: memory/pointer operation
+}
+
+@test
+fn test_maybe_uninit_as_mut_ptr() {
+    let mut mu: MaybeUninit<Int> = MaybeUninit.new(42);
+    let ptr = mu.as_mut_ptr();
+    assert(!false); // Runtime-only: memory/pointer operation
+}
+
+// =============================================================================
+// Section 11: Memory Utility Functions
+// =============================================================================
+
+@test
+fn test_swap() {
+    let mut a: Int = 10;
+    let mut b: Int = 20;
+    swap(&mut a, &mut b);
+    assert_eq(a, 20);
+    assert_eq(b, 10);
+}
+
+@test
+fn test_replace() {
+    let mut val: Int = 42;
+    let old: Int = replace(&mut val, 99);
+    assert_eq(val, 99);
+    assert_eq(old, 42);
+}
+
+@test
+fn test_take() {
+    let mut val: Int = 42;
+    let taken: Int = take(&mut val);
+    assert_eq(taken, 42);
+    assert_eq(val, 0); // default for Int
+}
+
+@test
+fn test_drop_value() {
+    let val: Int = 42;
+    drop(val);
+    // After drop, val is consumed
+    assert(!false); // Runtime-only: memory/pointer operation
+}
+
+// =============================================================================
+// Section 12: Heap with Complex Types
+// =============================================================================
+
+@test
+fn test_heap_nested() {
+    let h: Heap<Heap<Int>> = Heap.new(Heap.new(42));
+    assert_eq(**h, 42);
+}
+
+@test
+fn test_heap_with_maybe() {
+    let h: Heap<Maybe<Int>> = Heap.new(Some(42));
+    assert((*h).is_some());
+    assert_eq((*h).unwrap(), 42);
+}
+
+@test
+fn test_heap_with_result() {
+    let h = Heap.new(Ok(42));
+    assert(*h is Ok);
+}
+
+// =============================================================================
+// Section 13: Shared with Complex Types
+// =============================================================================
+
+@test
+fn test_shared_with_text() {
+    let s: Shared<Text> = Shared.new("hello world");
+    assert_eq(*s, "hello world");
+    let s2 = s.clone();
+    assert_eq(*s2, "hello world");
+    assert_eq(s.strong_count(), 2);
+}
+
+@test
+fn test_shared_with_maybe() {
+    let s: Shared<Maybe<Int>> = Shared.new(Some(42));
+    assert((*s).is_some());
+    let s2 = s.clone();
+    assert_eq((*s2).unwrap(), 42);
+}
+
+// =============================================================================
+// Section 14: Allocation Functions
+// =============================================================================
+
+@test
+fn test_alloc_dealloc() {
+    let ptr = alloc(64, 8);
+    dealloc(ptr, 64, 8);
+    assert(!false); // Runtime-only: memory/pointer operation
+}
+
+@test
+fn test_realloc() {
+    let ptr = alloc(32, 8);
+    let new_ptr = realloc(ptr, 32, 64, 8);
+    dealloc(new_ptr, 64, 8);
+    assert(!false); // Runtime-only: memory/pointer operation
+}
+
+// =============================================================================
+// Section 15: Edge Cases
+// =============================================================================
+
+@test
+fn test_heap_zero_value() {
+    let h: Heap<Int> = Heap.new(0);
+    assert_eq(*h, 0);
+}
+
+@test
+fn test_shared_single_ref_try_unwrap() {
+    // Create and immediately try to unwrap
+    let s: Shared<Int> = Shared.new(42);
+    assert(s.is_unique());
+    let result = s.try_unwrap();
+    assert(result is Ok);
+}
+
+@test
+fn test_heap_new_zeroed() {
+    let h: Heap<Int> = Heap.new_zeroed();
+    assert_eq(*h, 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

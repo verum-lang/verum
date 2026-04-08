@@ -1,0 +1,1631 @@
+// =============================================================================
+// result_test.vr - Tests for Result<T, E> type and error handling
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: result, error-handling, option, monad, base, core
+// @description: Comprehensive tests for Result type: predicates, conversions,
+//               transformations, combinators, and protocol implementations
+// =============================================================================
+
+mount core.base.result.{
+    Result, Ok, Err, Error,
+    RetryBackoff, RetryOptions,
+    ContextError, Exit, Success, Failure, Defect, DefectInfo,
+    Cause, Fail, Die, Then, Both, Empty,
+    Validated, Valid, Invalid,
+    transpose_result, transpose_maybe,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// SECTION 1: Basic Predicates
+// =============================================================================
+
+@test
+fn test_is_ok_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    assert(r.is_ok());
+    assert(!r.is_err());
+}
+
+@test
+fn test_is_ok_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    assert(!r.is_ok());
+    assert(r.is_err());
+}
+
+@test
+fn test_is_ok_and_true() {
+    let r: Result<Int, Text> = Ok(42);
+    assert(r.is_ok_and(|v| *v > 0));
+}
+
+@test
+fn test_is_ok_and_false_condition() {
+    let r: Result<Int, Text> = Ok(42);
+    assert(!r.is_ok_and(|v| *v > 100));
+}
+
+@test
+fn test_is_ok_and_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    assert(!r.is_ok_and(|v| *v > 0));
+}
+
+@test
+fn test_is_err_and_true() {
+    let r: Result<Int, Text> = Err("not found");
+    assert(r.is_err_and(|e| e.len() > 0));
+}
+
+@test
+fn test_is_err_and_false_condition() {
+    let r: Result<Int, Text> = Err("x");
+    assert(!r.is_err_and(|e| e.len() > 10));
+}
+
+@test
+fn test_is_err_and_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    assert(!r.is_err_and(|_| true));
+}
+
+// =============================================================================
+// SECTION 2: Conversion to Maybe
+// =============================================================================
+
+@test
+fn test_ok_conversion_from_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let m: Maybe<Int> = r.ok();
+    assert(m.is_some());
+    assert_eq(m.unwrap(), 42);
+}
+
+@test
+fn test_ok_conversion_from_err() {
+    let r: Result<Int, Text> = Err("error");
+    let m: Maybe<Int> = r.ok();
+    assert(m.is_none());
+}
+
+@test
+fn test_err_conversion_from_err() {
+    let r: Result<Int, Text> = Err("error");
+    let m: Maybe<Text> = r.err();
+    assert(m.is_some());
+    assert_eq(m.unwrap(), "error");
+}
+
+@test
+fn test_err_conversion_from_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let m: Maybe<Text> = r.err();
+    assert(m.is_none());
+}
+
+// =============================================================================
+// SECTION 3: Unwrapping (safe variants only - avoiding panics in tests)
+// =============================================================================
+
+@test
+fn test_unwrap_or_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    assert_eq(r.unwrap_or(0), 42);
+}
+
+@test
+fn test_unwrap_or_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    assert_eq(r.unwrap_or(0), 0);
+}
+
+@test
+fn test_unwrap_or_else_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    assert_eq(r.unwrap_or_else(|_| -1), 42);
+}
+
+@test
+fn test_unwrap_or_else_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    // Compute default based on error
+    assert_eq(r.unwrap_or_else(|e| e.len() as Int), 5);
+}
+
+// unwrap_or_default() tested comprehensively in result_default_test.vr
+
+// =============================================================================
+// SECTION 4: Transformations - map
+// =============================================================================
+
+@test
+fn test_map_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let mapped: Result<Int, Text> = r.map(|v| v * 2);
+    assert(mapped.is_ok());
+    assert_eq(mapped.unwrap_or(0), 84);
+}
+
+@test
+fn test_map_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    let mapped: Result<Int, Text> = r.map(|v| v * 2);
+    assert(mapped.is_err());
+}
+
+@test
+fn test_map_err_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    let mapped: Result<Int, Text> = r.map_err(|e| e.to_uppercase());
+    assert(mapped.is_err());
+    assert_eq(mapped.err().unwrap(), "ERROR");
+}
+
+@test
+fn test_map_err_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let mapped: Result<Int, Text> = r.map_err(|e| e.to_uppercase());
+    assert(mapped.is_ok());
+    assert_eq(mapped.unwrap_or(0), 42);
+}
+
+@test
+fn test_map_or_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let value: Int = r.map_or(0, |v| v * 2);
+    assert_eq(value, 84);
+}
+
+@test
+fn test_map_or_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    let value: Int = r.map_or(0, |v| v * 2);
+    assert_eq(value, 0);
+}
+
+@test
+fn test_map_or_else_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let value: Int = r.map_or_else(|_| -1, |v| v * 2);
+    assert_eq(value, 84);
+}
+
+@test
+fn test_map_or_else_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    let value: Int = r.map_or_else(|e| e.len() as Int, |v| v * 2);
+    assert_eq(value, 5);  // "error".len() = 5
+}
+
+// =============================================================================
+// SECTION 5: Transformations - and_then, or_else
+// =============================================================================
+
+@test
+fn test_and_then_with_ok_returning_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = r.and_then(|v| Ok(v * 2));
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(0), 84);
+}
+
+@test
+fn test_and_then_with_ok_returning_err() {
+    let r: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = r.and_then(|_| Err("transformed error"));
+    assert(result.is_err());
+    assert_eq(result.err().unwrap(), "transformed error");
+}
+
+@test
+fn test_and_then_with_err() {
+    let r: Result<Int, Text> = Err("original error");
+    let result: Result<Int, Text> = r.and_then(|v| Ok(v * 2));
+    assert(result.is_err());
+    assert_eq(result.err().unwrap(), "original error");
+}
+
+@test
+fn test_or_else_with_err_returning_ok() {
+    let r: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = r.or_else(|_| Ok(0));
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(-1), 0);
+}
+
+@test
+fn test_or_else_with_err_returning_err() {
+    let r: Result<Int, Text> = Err("original");
+    let result: Result<Int, Text> = r.or_else(|e| Err(f"wrapped: {e}"));
+    assert(result.is_err());
+    assert_eq(result.err().unwrap(), "wrapped: original");
+}
+
+@test
+fn test_or_else_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = r.or_else(|_| Ok(0));
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(-1), 42);
+}
+
+// =============================================================================
+// SECTION 6: Combinators - and, or
+// =============================================================================
+
+@test
+fn test_and_ok_ok() {
+    let r1: Result<Int, Text> = Ok(1);
+    let r2: Result<Text, Text> = Ok("hello");
+    let result: Result<Text, Text> = r1.and(r2);
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(""), "hello");
+}
+
+@test
+fn test_and_ok_err() {
+    let r1: Result<Int, Text> = Ok(1);
+    let r2: Result<Text, Text> = Err("error");
+    let result: Result<Text, Text> = r1.and(r2);
+    assert(result.is_err());
+}
+
+@test
+fn test_and_err_ok() {
+    let r1: Result<Int, Text> = Err("error");
+    let r2: Result<Text, Text> = Ok("hello");
+    let result: Result<Text, Text> = r1.and(r2);
+    assert(result.is_err());
+}
+
+@test
+fn test_or_ok_ok() {
+    let r1: Result<Int, Text> = Ok(1);
+    let r2: Result<Int, Text> = Ok(2);
+    let result: Result<Int, Text> = r1.or(r2);
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(0), 1);  // First Ok wins
+}
+
+@test
+fn test_or_ok_err() {
+    let r1: Result<Int, Text> = Ok(1);
+    let r2: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = r1.or(r2);
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(0), 1);
+}
+
+@test
+fn test_or_err_ok() {
+    let r1: Result<Int, Text> = Err("error");
+    let r2: Result<Int, Text> = Ok(2);
+    let result: Result<Int, Text> = r1.or(r2);
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(0), 2);
+}
+
+@test
+fn test_or_err_err() {
+    let r1: Result<Int, Text> = Err("error1");
+    let r2: Result<Int, Text> = Err("error2");
+    let result: Result<Int, Text> = r1.or(r2);
+    assert(result.is_err());
+    assert_eq(result.err().unwrap(), "error2");  // Last error preserved
+}
+
+// =============================================================================
+// SECTION 7: References - as_ref, as_mut
+// =============================================================================
+
+@test
+fn test_as_ref_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let ref_result: Result<&Int, &Text> = r.as_ref();
+    assert(ref_result.is_ok());
+}
+
+@test
+fn test_as_ref_err() {
+    let r: Result<Int, Text> = Err("error");
+    let ref_result: Result<&Int, &Text> = r.as_ref();
+    assert(ref_result.is_err());
+}
+
+@test
+fn test_as_mut_ok() {
+    let mut r: Result<Int, Text> = Ok(42);
+    let mut_result: Result<&mut Int, &mut Text> = r.as_mut();
+    // Note: Use Ok(v) not Ok(ref mut v) since v is already &mut Int
+    if let Ok(v) = mut_result {
+        *v = 100;
+    }
+    assert_eq(r.unwrap_or(0), 100);
+}
+
+@test
+fn test_as_mut_err() {
+    let mut r: Result<Int, Text> = Err("error");
+    let mut_result: Result<&mut Int, &mut Text> = r.as_mut();
+    // Note: Use Err(e) not Err(ref mut e) since e is already &mut Text
+    if let Err(e) = mut_result {
+        *e = "modified";
+    }
+    assert_eq(r.err().unwrap(), "modified");
+}
+
+// =============================================================================
+// SECTION 8: Inspection - inspect, inspect_err
+// =============================================================================
+
+@test
+fn test_inspect_ok() {
+    // Test that inspect returns self and closure runs (verifiable via returned value)
+    let r: Result<Int, Text> = Ok(42);
+    let r2 = r.inspect(|v| {
+        assert_eq(*v, 42);
+    });
+    // Verify the result is returned unchanged
+    assert(r2.is_ok());
+    assert_eq(r2.unwrap(), 42);
+}
+
+@test
+fn test_inspect_err_not_called() {
+    // For Err case, inspect returns self without calling the closure
+    let r: Result<Int, Text> = Err("error");
+    let r2 = r.inspect(|_| {
+        // This would panic if called
+        panic("should not be called");
+    });
+    // Verify the result is returned unchanged
+    assert(r2.is_err());
+}
+
+@test
+fn test_inspect_err_called() {
+    // Test that inspect_err calls the closure on Err
+    let r: Result<Int, Text> = Err("error");
+    let r2 = r.inspect_err(|e| {
+        assert_eq(*e, "error");
+    });
+    // Verify the result is returned unchanged
+    assert(r2.is_err());
+}
+
+@test
+fn test_inspect_err_not_called_on_ok() {
+    // For Ok case, inspect_err returns self without calling the closure
+    let r: Result<Int, Text> = Ok(42);
+    let r2 = r.inspect_err(|_| {
+        // This would panic if called
+        panic("should not be called");
+    });
+    // Verify the result is returned unchanged
+    assert(r2.is_ok());
+    assert_eq(r2.unwrap(), 42);
+}
+
+// =============================================================================
+// SECTION 9: Protocol Implementations - Eq
+// =============================================================================
+
+@test
+fn test_eq_ok_ok_equal() {
+    let r1: Result<Int, Text> = Ok(42);
+    let r2: Result<Int, Text> = Ok(42);
+    assert(r1 == r2);
+}
+
+@test
+fn test_eq_ok_ok_not_equal() {
+    let r1: Result<Int, Text> = Ok(42);
+    let r2: Result<Int, Text> = Ok(43);
+    assert(r1 != r2);
+}
+
+@test
+fn test_eq_err_err_equal() {
+    let r1: Result<Int, Text> = Err("error");
+    let r2: Result<Int, Text> = Err("error");
+    assert(r1 == r2);
+}
+
+@test
+fn test_eq_err_err_not_equal() {
+    let r1: Result<Int, Text> = Err("error1");
+    let r2: Result<Int, Text> = Err("error2");
+    assert(r1 != r2);
+}
+
+@test
+fn test_eq_ok_err() {
+    let r1: Result<Int, Text> = Ok(42);
+    let r2: Result<Int, Text> = Err("error");
+    assert(r1 != r2);
+}
+
+// =============================================================================
+// SECTION 10: Protocol Implementations - Ord
+// =============================================================================
+
+@test
+fn test_ord_ok_ok() {
+    let r1: Result<Int, Int> = Ok(1);
+    let r2: Result<Int, Int> = Ok(2);
+    assert(r1.cmp(&r2) == Less);
+    assert(r2.cmp(&r1) == Greater);
+    assert(r1.cmp(&r1) == Equal);
+}
+
+@test
+fn test_ord_err_err() {
+    let r1: Result<Int, Int> = Err(1);
+    let r2: Result<Int, Int> = Err(2);
+    assert(r1.cmp(&r2) == Less);
+    assert(r2.cmp(&r1) == Greater);
+}
+
+@test
+fn test_ord_ok_vs_err() {
+    let ok: Result<Int, Int> = Ok(1);
+    let err: Result<Int, Int> = Err(1);
+    // Ok > Err in standard ordering
+    assert(ok.cmp(&err) == Greater);
+    assert(err.cmp(&ok) == Less);
+}
+
+// =============================================================================
+// SECTION 11: Protocol Implementations - Clone
+// =============================================================================
+
+@test
+fn test_clone_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let cloned: Result<Int, Text> = r.clone();
+    assert(cloned.is_ok());
+    assert_eq(cloned.unwrap_or(0), 42);
+}
+
+@test
+fn test_clone_err() {
+    let r: Result<Int, Text> = Err("error");
+    let cloned: Result<Int, Text> = r.clone();
+    assert(cloned.is_err());
+    assert_eq(cloned.err().unwrap(), "error");
+}
+
+@test
+fn test_clone_independence() {
+    let r1: Result<Int, Text> = Ok(42);
+    let r2: Result<Int, Text> = r1.clone();
+    // Original and clone are independent
+    assert_eq(r1.unwrap_or(0), 42);
+    assert_eq(r2.unwrap_or(0), 42);
+}
+
+// =============================================================================
+// SECTION 12: Error Type
+// =============================================================================
+
+@test
+fn test_error_new() {
+    let e = Error.new("Something went wrong");
+    assert_eq(e.message, "Something went wrong");
+}
+
+@test
+fn test_error_eq() {
+    let e1 = Error.new("error");
+    let e2 = Error.new("error");
+    let e3 = Error.new("different");
+    assert(e1 == e2);
+    assert(e1 != e3);
+}
+
+@test
+fn test_error_clone() {
+    let e1 = Error.new("error");
+    let e2 = e1.clone();
+    assert(e1 == e2);
+}
+
+// =============================================================================
+// SECTION 13: Advanced Combinators - tap
+// =============================================================================
+
+@test
+fn test_tap_ok() {
+    // Test that tap calls the closure and returns self
+    let r: Result<Int, Text> = Ok(42);
+    let result = r.tap(|v| {
+        assert_eq(*v, 42);
+    });
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_tap_err_not_called() {
+    // For Err case, tap should not call closure and return self
+    let r: Result<Int, Text> = Err("error");
+    let result = r.tap(|_| {
+        panic("should not be called");
+    });
+    assert(result.is_err());
+}
+
+@test
+fn test_tap_err() {
+    // Test that tap_err calls closure on Err and returns self
+    let r: Result<Int, Text> = Err("error");
+    let result = r.tap_err(|e| {
+        assert_eq(*e, "error");
+    });
+    assert(result.is_err());
+}
+
+@test
+fn test_tap_both_ok() {
+    // For Ok case, tap_both should call ok_fn but not err_fn
+    let r: Result<Int, Text> = Ok(42);
+    let result = r.tap_both(
+        |v| { assert_eq(*v, 42); },
+        |_| { panic("err_fn should not be called"); }
+    );
+    assert(result.is_ok());
+}
+
+@test
+fn test_tap_both_err() {
+    // For Err case, tap_both should call err_fn but not ok_fn
+    let r: Result<Int, Text> = Err("error");
+    let result = r.tap_both(
+        |_| { panic("ok_fn should not be called"); },
+        |e| { assert_eq(*e, "error"); }
+    );
+    assert(result.is_err());
+}
+
+// =============================================================================
+// SECTION 14: Recovery Combinators
+// =============================================================================
+
+@test
+fn test_recover_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = r.recover(0);
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(-1), 42);
+}
+
+@test
+fn test_recover_err() {
+    let r: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = r.recover(0);
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(-1), 0);
+}
+
+@test
+fn test_recover_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = r.recover_with(|_| 0);
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(-1), 42);
+}
+
+@test
+fn test_recover_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = r.recover_with(|e| e.len() as Int);
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(-1), 5);  // "error".len() = 5
+}
+
+// =============================================================================
+// SECTION 15: Containment Checks
+// =============================================================================
+
+@test
+fn test_contains_true() {
+    let r: Result<Int, Text> = Ok(42);
+    assert(r.contains(&42));
+}
+
+@test
+fn test_contains_false_different_value() {
+    let r: Result<Int, Text> = Ok(42);
+    assert(!r.contains(&43));
+}
+
+@test
+fn test_contains_false_err() {
+    let r: Result<Int, Text> = Err("error");
+    assert(!r.contains(&42));
+}
+
+@test
+fn test_contains_err_true() {
+    let r: Result<Int, Text> = Err("error");
+    assert(r.contains_err(&"error"));
+}
+
+@test
+fn test_contains_err_false_different_error() {
+    let r: Result<Int, Text> = Err("error");
+    assert(!r.contains_err(&"different"));
+}
+
+@test
+fn test_contains_err_false_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    assert(!r.contains_err(&"error"));
+}
+
+// =============================================================================
+// SECTION 16: Flip/Swap
+// =============================================================================
+
+@test
+fn test_flip_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let flipped: Result<Text, Int> = r.flip();
+    assert(flipped.is_err());
+    assert_eq(flipped.err().unwrap(), 42);
+}
+
+@test
+fn test_flip_err() {
+    let r: Result<Int, Text> = Err("error");
+    let flipped: Result<Text, Int> = r.flip();
+    assert(flipped.is_ok());
+    assert_eq(flipped.unwrap_or(""), "error");
+}
+
+@test
+fn test_flip_flip_identity() {
+    let r: Result<Int, Text> = Ok(42);
+    let double_flipped: Result<Int, Text> = r.flip().flip();
+    assert(double_flipped.is_ok());
+    assert_eq(double_flipped.unwrap_or(0), 42);
+}
+
+// =============================================================================
+// SECTION 17: Context/Wrapping
+// =============================================================================
+
+@test
+fn test_context_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let result = r.context("some context");
+    assert(result is Ok);
+    assert_eq(result.unwrap_or(0), 42);
+}
+
+@test
+fn test_context_err() {
+    let r: Result<Int, Text> = Err("original error");
+    let result = r.context("Failed to process");
+    assert(result is Err);
+    let ctx_err = result.err().unwrap();
+    assert_eq(*ctx_err.message(), "Failed to process");
+    assert_eq(*ctx_err.source(), "original error");
+}
+
+@test
+fn test_with_context_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let result = r.with_context(|| "lazy context");
+    assert(result is Ok);
+}
+
+@test
+fn test_with_context_err() {
+    let r: Result<Int, Text> = Err("error");
+    let result = r.with_context(|| "computed context");
+    assert(result is Err);
+    let ctx_err = result.err().unwrap();
+    assert_eq(*ctx_err.message(), "computed context");
+}
+
+// =============================================================================
+// SECTION 18: Fold
+// =============================================================================
+
+@test
+fn test_fold_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let message: Text = r.fold(
+        |v| f"Success: {v}",
+        |e| f"Error: {e}"
+    );
+    assert_eq(message, "Success: 42");
+}
+
+@test
+fn test_fold_err() {
+    let r: Result<Int, Text> = Err("not found");
+    let message: Text = r.fold(
+        |v| f"Success: {v}",
+        |e| f"Error: {e}"
+    );
+    assert_eq(message, "Error: not found");
+}
+
+// =============================================================================
+// SECTION 19: ContextError Type
+// =============================================================================
+
+@test
+fn test_context_error_new() {
+    let err: ContextError<Text> = ContextError.new("Operation failed", "underlying");
+    assert_eq(*err.message(), "Operation failed");
+    assert_eq(*err.source(), "underlying");
+}
+
+@test
+fn test_context_error_into_source() {
+    let err: ContextError<Text> = ContextError.new("context", "source error");
+    let source: Text = err.into_source();
+    assert_eq(source, "source error");
+}
+
+@test
+fn test_context_error_clone() {
+    let err: ContextError<Text> = ContextError.new("context", "source");
+    let cloned: ContextError<Text> = err.clone();
+    assert_eq(*cloned.message(), "context");
+    assert_eq(*cloned.source(), "source");
+}
+
+// =============================================================================
+// SECTION 20: RetryBackoff
+// =============================================================================
+
+@test
+fn test_backoff_none() {
+    let strategy = RetryBackoff.None;
+    assert_eq(strategy.delay_for_attempt(0), 0);
+    assert_eq(strategy.delay_for_attempt(5), 0);
+}
+
+@test
+fn test_backoff_linear() {
+    let strategy = RetryBackoff.Linear { delay_ms: 100 };
+    assert_eq(strategy.delay_for_attempt(0), 100);
+    assert_eq(strategy.delay_for_attempt(5), 100);  // Same delay each time
+}
+
+@test
+fn test_backoff_exponential() {
+    let strategy = RetryBackoff.Exponential {
+        initial_ms: 100,
+        max_ms: 10000,
+        multiplier: 2.0,
+    };
+    // Attempt 0: 100 * 2^0 = 100
+    assert_eq(strategy.delay_for_attempt(0), 100);
+    // Attempt 1: 100 * 2^1 = 200
+    assert_eq(strategy.delay_for_attempt(1), 200);
+    // Attempt 2: 100 * 2^2 = 400
+    assert_eq(strategy.delay_for_attempt(2), 400);
+}
+
+@test
+fn test_backoff_exponential_max_cap() {
+    let strategy = RetryBackoff.Exponential {
+        initial_ms: 1000,
+        max_ms: 5000,
+        multiplier: 2.0,
+    };
+    // Attempt 10: 1000 * 2^10 = 1024000, but capped at 5000
+    assert_eq(strategy.delay_for_attempt(10), 5000);
+}
+
+// =============================================================================
+// SECTION 21: RetryOptions
+// =============================================================================
+
+@test
+fn test_retry_config_simple() {
+    let config: RetryOptions<Text> = RetryOptions.simple(3);
+    assert_eq(config.max_attempts, 3);
+}
+
+@test
+fn test_retry_config_exponential() {
+    let config: RetryOptions<Text> = RetryOptions.exponential(5, 100, 10000);
+    assert_eq(config.max_attempts, 5);
+}
+
+@test
+fn test_retry_config_with_filter() {
+    // Note: Using simple predicate to avoid closure type inference issues with .len()
+    let config: RetryOptions<Text> = RetryOptions.simple(3)
+        .with_filter(|_: &Text| true);  // Always retry
+    assert_eq(config.max_attempts, 3);
+}
+
+// =============================================================================
+// SECTION 22: Exit Type
+// =============================================================================
+
+@test
+fn test_exit_success() {
+    let e: Exit<Text, Int> = Exit.succeed(42);
+    assert(e.is_success());
+    assert(!e.is_failure());
+    assert(!e.is_defect());
+}
+
+@test
+fn test_exit_failure() {
+    let e: Exit<Text, Int> = Exit.fail("error");
+    assert(!e.is_success());
+    assert(e.is_failure());
+    assert(!e.is_defect());
+}
+
+@test
+fn test_exit_defect() {
+    let e: Exit<Text, Int> = Exit.die("unexpected bug");
+    assert(!e.is_success());
+    assert(!e.is_failure());
+    assert(e.is_defect());
+}
+
+@test
+fn test_exit_map_success() {
+    let e: Exit<Text, Int> = Exit.succeed(42);
+    let mapped: Exit<Text, Int> = e.map(|v| v * 2);
+    assert(mapped.is_success());
+    // Extract value via to_result
+    let result: Result<Int, Text> = mapped.to_result();
+    assert_eq(result.unwrap_or(0), 84);
+}
+
+@test
+fn test_exit_map_failure() {
+    let e: Exit<Text, Int> = Exit.fail("error");
+    let mapped: Exit<Text, Int> = e.map(|v| v * 2);
+    assert(mapped.is_failure());
+}
+
+@test
+fn test_exit_map_error() {
+    let e: Exit<Text, Int> = Exit.fail("error");
+    let mapped: Exit<Text, Int> = e.map_error(|e| e.to_uppercase());
+    assert(mapped.is_failure());
+}
+
+@test
+fn test_exit_flat_map_success() {
+    let e: Exit<Text, Int> = Exit.succeed(42);
+    let result: Exit<Text, Int> = e.flat_map(|v| Exit.succeed(v * 2));
+    assert(result.is_success());
+}
+
+@test
+fn test_exit_flat_map_failure_in_continuation() {
+    let e: Exit<Text, Int> = Exit.succeed(42);
+    let result: Exit<Text, Int> = e.flat_map(|_| Exit.fail("operation failed"));
+    assert(result.is_failure());
+}
+
+@test
+fn test_exit_fold() {
+    let success: Exit<Text, Int> = Exit.succeed(42);
+    let failure: Exit<Text, Int> = Exit.fail("error");
+    let defect: Exit<Text, Int> = Exit.die("bug");
+
+    let s_result: Text = success.fold(
+        |v| f"success: {v}",
+        |e| f"failure: {e}",
+        |d| f"defect: {d.message}"
+    );
+    assert_eq(s_result, "success: 42");
+
+    let f_result: Text = failure.fold(
+        |v| f"success: {v}",
+        |e| f"failure: {e}",
+        |d| f"defect: {d.message}"
+    );
+    assert_eq(f_result, "failure: error");
+
+    let d_result: Text = defect.fold(
+        |v| f"success: {v}",
+        |e| f"failure: {e}",
+        |d| f"defect: {d.message}"
+    );
+    assert_eq(d_result, "defect: bug");
+}
+
+@test
+fn test_exit_to_result_success() {
+    let e: Exit<Text, Int> = Exit.succeed(42);
+    let r: Result<Int, Text> = e.to_result();
+    assert(r.is_ok());
+    assert_eq(r.unwrap_or(0), 42);
+}
+
+@test
+fn test_exit_to_result_failure() {
+    let e: Exit<Text, Int> = Exit.fail("error");
+    let r: Result<Int, Text> = e.to_result();
+    assert(r.is_err());
+    assert_eq(r.err().unwrap(), "error");
+}
+
+// =============================================================================
+// SECTION 23: DefectInfo
+// =============================================================================
+
+@test
+fn test_defect_info_new() {
+    let d = DefectInfo.new("unexpected state");
+    assert_eq(d.message, "unexpected state");
+    assert(d.location.is_none());
+    assert(d.backtrace.is_none());
+}
+
+@test
+fn test_defect_info_with_location() {
+    let d = DefectInfo.new("bug")
+        .with_location("src/main.vr:42");
+    assert_eq(d.message, "bug");
+    assert(d.location.is_some());
+    assert_eq(d.location.unwrap(), "src/main.vr:42");
+}
+
+@test
+fn test_defect_info_clone() {
+    let d1 = DefectInfo.new("error").with_location("file.vr:1");
+    let d2 = d1.clone();
+    assert_eq(d1.message, d2.message);
+}
+
+// =============================================================================
+// SECTION 24: Cause Type
+// =============================================================================
+
+@test
+fn test_cause_fail() {
+    let c: Cause<Text> = Cause.fail("error");
+    assert(!c.is_empty());
+    let failures = c.failures();
+    assert_eq(failures.len(), 1);
+}
+
+@test
+fn test_cause_die() {
+    let c: Cause<Text> = Cause.die("bug");
+    assert(!c.is_empty());
+    let defects = c.defects();
+    assert_eq(defects.len(), 1);
+}
+
+@test
+fn test_cause_empty() {
+    let c: Cause<Text> = Empty;
+    assert(c.is_empty());
+}
+
+@test
+fn test_cause_then() {
+    let c1: Cause<Text> = Cause.fail("first");
+    let c2: Cause<Text> = Cause.fail("second");
+    let combined: Cause<Text> = c1.then(c2);
+    assert(!combined.is_empty());
+    let failures = combined.failures();
+    assert_eq(failures.len(), 2);
+}
+
+@test
+fn test_cause_both() {
+    let c1: Cause<Text> = Cause.fail("error1");
+    let c2: Cause<Text> = Cause.fail("error2");
+    let combined: Cause<Text> = c1.both(c2);
+    assert(!combined.is_empty());
+    let failures = combined.failures();
+    assert_eq(failures.len(), 2);
+}
+
+@test
+fn test_cause_then_with_empty() {
+    let c: Cause<Text> = Cause.fail("error");
+    let empty: Cause<Text> = Empty;
+    // then with Empty should return the non-empty cause
+    let result: Cause<Text> = c.then(empty);
+    let failures = result.failures();
+    assert_eq(failures.len(), 1);
+}
+
+@test
+fn test_cause_failures_mixed() {
+    let c1: Cause<Text> = Cause.fail("error");
+    let c2: Cause<Text> = Cause.die("defect");
+    let combined: Cause<Text> = c1.then(c2);
+    // failures() only returns Fail variants
+    let failures = combined.failures();
+    assert_eq(failures.len(), 1);
+    // defects() only returns Die variants
+    let defects = combined.defects();
+    assert_eq(defects.len(), 1);
+}
+
+// =============================================================================
+// SECTION 25: Validated Type
+// =============================================================================
+
+@test
+fn test_validated_valid() {
+    let v: Validated<Text, Int> = Validated.valid(42);
+    assert(v.is_valid());
+    assert(!v.is_invalid());
+}
+
+@test
+fn test_validated_invalid_single() {
+    let v: Validated<Text, Int> = Validated.invalid("error");
+    assert(!v.is_valid());
+    assert(v.is_invalid());
+    let errors = v.errors();
+    assert_eq(errors.len(), 1);
+}
+
+@test
+fn test_validated_invalid_multiple() {
+    let v: Validated<Text, Int> = Validated.invalid_all(["error1", "error2", "error3"]);
+    assert(v.is_invalid());
+    let errors = v.errors();
+    assert_eq(errors.len(), 3);
+}
+
+@test
+fn test_validated_map_valid() {
+    let v: Validated<Text, Int> = Validated.valid(42);
+    let mapped: Validated<Text, Int> = v.map(|x| x * 2);
+    assert(mapped.is_valid());
+}
+
+@test
+fn test_validated_map_invalid() {
+    let v: Validated<Text, Int> = Validated.invalid("error");
+    let mapped: Validated<Text, Int> = v.map(|x| x * 2);
+    assert(mapped.is_invalid());
+}
+
+@test
+fn test_validated_from_result_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let v: Validated<Text, Int> = Validated.from_result(r);
+    assert(v.is_valid());
+}
+
+@test
+fn test_validated_from_result_err() {
+    let r: Result<Int, Text> = Err("error");
+    let v: Validated<Text, Int> = Validated.from_result(r);
+    assert(v.is_invalid());
+}
+
+@test
+fn test_validated_to_result_valid() {
+    let v: Validated<Text, Int> = Validated.valid(42);
+    let r = v.to_result();
+    assert(r is Ok);
+}
+
+@test
+fn test_validated_to_result_invalid() {
+    let v: Validated<Text, Int> = Validated.invalid_all(["e1", "e2"]);
+    let r = v.to_result();
+    assert(r is Err);
+    let errors = r.err().unwrap();
+    assert_eq(errors.len(), 2);
+}
+
+@test
+fn test_validated_zip_with_both_valid() {
+    let v1: Validated<Text, Int> = Validated.valid(10);
+    let v2: Validated<Text, Int> = Validated.valid(20);
+    let combined: Validated<Text, Int> = v1.zip_with(v2, |a, b| a + b);
+    assert(combined.is_valid());
+}
+
+@test
+fn test_validated_zip_with_first_invalid() {
+    let v1: Validated<Text, Int> = Validated.invalid("error1");
+    let v2: Validated<Text, Int> = Validated.valid(20);
+    let combined: Validated<Text, Int> = v1.zip_with(v2, |a, b| a + b);
+    assert(combined.is_invalid());
+    let errors = combined.errors();
+    assert_eq(errors.len(), 1);
+}
+
+@test
+fn test_validated_zip_with_both_invalid_accumulates() {
+    let v1: Validated<Text, Int> = Validated.invalid("error1");
+    let v2: Validated<Text, Int> = Validated.invalid("error2");
+    let combined: Validated<Text, Int> = v1.zip_with(v2, |a, b| a + b);
+    assert(combined.is_invalid());
+    let errors = combined.errors();
+    // Both errors should be accumulated
+    assert_eq(errors.len(), 2);
+}
+
+@test
+fn test_validated_and_then_valid() {
+    let v: Validated<Text, Int> = Validated.valid(42);
+    let result: Validated<Text, Int> = v.and_then(|x| {
+        if x > 0 {
+            Validated.valid(x * 2)
+        } else {
+            Validated.invalid("must be positive")
+        }
+    });
+    assert(result.is_valid());
+}
+
+@test
+fn test_validated_and_then_invalid_in_continuation() {
+    let v: Validated<Text, Int> = Validated.valid(-1);
+    let result: Validated<Text, Int> = v.and_then(|x| {
+        if x > 0 {
+            Validated.valid(x * 2)
+        } else {
+            Validated.invalid("must be positive")
+        }
+    });
+    assert(result.is_invalid());
+}
+
+@test
+fn test_validated_value_or_default_valid() {
+    let v: Validated<Text, Int> = Validated.valid(42);
+    assert_eq(v.value_or_default(), 42);
+}
+
+@test
+fn test_validated_value_or_default_invalid() {
+    let v: Validated<Text, Int> = Validated.invalid("error");
+    assert_eq(v.value_or_default(), 0);  // Int default
+}
+
+@test
+fn test_validated_clone() {
+    let v1: Validated<Text, Int> = Validated.valid(42);
+    let v2: Validated<Text, Int> = v1.clone();
+    assert(v2.is_valid());
+}
+
+// =============================================================================
+// SECTION 26: Iteration (using .next() since ResultIter doesn't impl IntoIterator)
+// =============================================================================
+
+@test
+fn test_iter_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let mut iter = r.iter();
+    // First call should return Some with the value
+    let first = iter.next();
+    assert(first.is_some());
+    assert_eq(*first.unwrap(), 42);
+    // Second call should return None
+    let second = iter.next();
+    assert(second.is_none());
+}
+
+@test
+fn test_iter_err() {
+    let r: Result<Int, Text> = Err("error");
+    let mut iter = r.iter();
+    // First call should return None for Err
+    let first = iter.next();
+    assert(first.is_none());
+}
+
+@test
+fn test_into_iter_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let mut iter = r.into_iter();
+    // First call should return Some with the value
+    let first = iter.next();
+    assert(first.is_some());
+    assert_eq(first.unwrap(), 42);
+    // Second call should return None
+    let second = iter.next();
+    assert(second.is_none());
+}
+
+@test
+fn test_into_iter_err() {
+    let r: Result<Int, Text> = Err("error");
+    let mut iter = r.into_iter();
+    // First call should return None for Err
+    let first = iter.next();
+    assert(first.is_none());
+}
+
+// =============================================================================
+// SECTION 27: map_err
+// =============================================================================
+
+@test
+fn test_map_err_with_err() {
+    let r: Result<Int, Text> = Err("error");
+    let mapped: Result<Int, Int> = r.map_err(|e| e.len());
+    assert(mapped.is_err());
+    assert_eq(mapped.err().unwrap(), 5); // "error".len() = 5
+}
+
+@test
+fn test_map_err_with_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    let mapped: Result<Int, Int> = r.map_err(|e| e.len());
+    assert(mapped.is_ok());
+    assert_eq(mapped.unwrap_or(0), 42);
+}
+
+@test
+fn test_map_err_transform_type() {
+    let r: Result<Int, Int> = Err(404);
+    let mapped: Result<Int, Text> = r.map_err(|code| f"Error code: {code}");
+    assert(mapped.is_err());
+    assert_eq(mapped.err().unwrap(), "Error code: 404");
+}
+
+@test
+fn test_map_err_identity() {
+    let r: Result<Int, Text> = Err("unchanged");
+    let mapped: Result<Int, Text> = r.map_err(|e| e);
+    assert(mapped.is_err());
+    assert_eq(mapped.err().unwrap(), "unchanged");
+}
+
+// =============================================================================
+// SECTION 28: Complex Chaining
+// =============================================================================
+
+@test
+fn test_chain_map_and_then() {
+    let r: Result<Int, Text> = Ok(5);
+    let result: Result<Int, Text> = r
+        .map(|v| v * 2)             // Ok(10)
+        .and_then(|v| {
+            if v > 5 { Ok(v + 100) } else { Err("too small") }
+        });                          // Ok(110)
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(0), 110);
+}
+
+@test
+fn test_chain_map_and_then_fail() {
+    let r: Result<Int, Text> = Ok(2);
+    let result: Result<Int, Text> = r
+        .map(|v| v * 2)             // Ok(4)
+        .and_then(|v| {
+            if v > 5 { Ok(v + 100) } else { Err("too small") }
+        });                          // Err("too small")
+    assert(result.is_err());
+    assert_eq(result.err().unwrap(), "too small");
+}
+
+@test
+fn test_chain_or_else_recovery() {
+    let r: Result<Int, Text> = Err("initial error");
+    let result: Result<Int, Text> = r
+        .or_else(|_| Err("second error"))
+        .or_else(|_| Ok(42));        // Recover on second try
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(0), 42);
+}
+
+@test
+fn test_chain_map_err_and_then() {
+    let r: Result<Int, Int> = Err(404);
+    let result: Result<Int, Text> = r
+        .map_err(|code| f"HTTP {code}")
+        .or_else(|e| {
+            if e == "HTTP 404" { Ok(-1) } else { Err(e) }
+        });
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(0), -1);
+}
+
+@test
+fn test_chain_multiple_maps() {
+    let r: Result<Int, Text> = Ok(2);
+    let result: Result<Int, Text> = r
+        .map(|v| v + 1)     // Ok(3)
+        .map(|v| v * 3)     // Ok(9)
+        .map(|v| v - 1);    // Ok(8)
+    assert_eq(result.unwrap_or(0), 8);
+}
+
+@test
+fn test_chain_and_then_sequence() {
+    // Simulate a multi-step validation
+    let input: Result<Int, Text> = Ok(50);
+    let result: Result<Int, Text> = input
+        .and_then(|v| {
+            if v > 0 { Ok(v) } else { Err("must be positive") }
+        })
+        .and_then(|v| {
+            if v <= 100 { Ok(v) } else { Err("must be <= 100") }
+        })
+        .and_then(|v| {
+            if v % 2 == 0 { Ok(v / 2) } else { Err("must be even") }
+        });
+    assert(result.is_ok());
+    assert_eq(result.unwrap_or(0), 25);
+}
+
+@test
+fn test_chain_and_then_early_failure() {
+    let input: Result<Int, Text> = Ok(-5);
+    let result: Result<Int, Text> = input
+        .and_then(|v| {
+            if v > 0 { Ok(v) } else { Err("must be positive") }
+        })
+        .and_then(|v| {
+            // Should not be reached
+            Ok(v * 2)
+        });
+    assert(result.is_err());
+    assert_eq(result.err().unwrap(), "must be positive");
+}
+
+// =============================================================================
+// SECTION 29: Nested Context
+// =============================================================================
+
+@test
+fn test_nested_context() {
+    let r: Result<Int, Text> = Err("root cause");
+    let result = r
+        .context("layer 1")
+        .context("layer 2");
+    assert(result is Err);
+    let outer = result.err().unwrap();
+    assert_eq(*outer.message(), "layer 2");
+    let inner = outer.source();
+    assert_eq(*inner.message(), "layer 1");
+    assert_eq(*inner.source(), "root cause");
+}
+
+@test
+fn test_context_preserves_ok_through_layers() {
+    let r: Result<Int, Text> = Ok(42);
+    let result = r
+        .context("layer 1")
+        .context("layer 2");
+    assert(result is Ok);
+    assert_eq(result.unwrap_or(0), 42);
+}
+
+// =============================================================================
+// SECTION 30: Flatten
+// =============================================================================
+
+@test
+fn test_flatten_ok_ok() {
+    let r: Result<Result<Int, Text>, Text> = Ok(Ok(42));
+    let flat: Result<Int, Text> = r.flatten();
+    assert(flat.is_ok());
+    assert_eq(flat.unwrap_or(0), 42);
+}
+
+@test
+fn test_flatten_ok_err() {
+    let r: Result<Result<Int, Text>, Text> = Ok(Err("inner error"));
+    let flat: Result<Int, Text> = r.flatten();
+    assert(flat.is_err());
+    assert_eq(flat.err().unwrap(), "inner error");
+}
+
+@test
+fn test_flatten_err() {
+    let r: Result<Result<Int, Text>, Text> = Err("outer error");
+    let flat: Result<Int, Text> = r.flatten();
+    assert(flat.is_err());
+    assert_eq(flat.err().unwrap(), "outer error");
+}
+
+// =============================================================================
+// SECTION 31: Additional Edge Cases
+// =============================================================================
+
+@test
+fn test_map_or_else_both_cases() {
+    let ok: Result<Int, Text> = Ok(10);
+    let err: Result<Int, Text> = Err("fail");
+
+    let ok_val: Text = ok.map_or_else(|e| f"err: {e}", |v| f"ok: {v}");
+    let err_val: Text = err.map_or_else(|e| f"err: {e}", |v| f"ok: {v}");
+
+    assert_eq(ok_val, "ok: 10");
+    assert_eq(err_val, "err: fail");
+}
+
+@test
+fn test_and_then_chain_type_change() {
+    // and_then can change the Ok type
+    let r: Result<Text, Text> = Ok("42");
+    let parsed: Result<Int, Text> = r.and_then(|s| {
+        // Simulate parsing
+        if s == "42" { Ok(42) } else { Err("parse error") }
+    });
+    assert(parsed.is_ok());
+    assert_eq(parsed.unwrap_or(0), 42);
+}
+
+@test
+fn test_result_eq_exhaustive() {
+    let ok1: Result<Int, Int> = Ok(1);
+    let ok2: Result<Int, Int> = Ok(1);
+    let ok3: Result<Int, Int> = Ok(2);
+    let err1: Result<Int, Int> = Err(1);
+    let err2: Result<Int, Int> = Err(1);
+    let err3: Result<Int, Int> = Err(2);
+
+    // Same variant, same value
+    assert(ok1 == ok2);
+    assert(err1 == err2);
+    // Same variant, different value
+    assert(ok1 != ok3);
+    assert(err1 != err3);
+    // Different variants
+    assert(ok1 != err1);
+    assert(err1 != ok1);
+}
+
+@test
+fn test_result_inspect_chain() {
+    let mut ok_count = 0;
+    let mut err_count = 0;
+
+    let r: Result<Int, Text> = Ok(42);
+    let _ = r
+        .inspect(|_| { ok_count = ok_count + 1; })
+        .inspect_err(|_| { err_count = err_count + 1; })
+        .map(|v| v * 2);
+
+    assert_eq(ok_count, 1);
+    assert_eq(err_count, 0);
+}
+
+@test
+fn test_result_recover_chain() {
+    // Chain recover operations
+    let r: Result<Int, Text> = Err("error");
+    let recovered: Int = r
+        .map(|v| v * 2)
+        .unwrap_or(0);
+    assert_eq(recovered, 0);
+}
+
+@test
+fn test_validated_zip_chain() {
+    // Multiple zip_with accumulating errors
+    let v1: Validated<Text, Int> = Validated.valid(10);
+    let v2: Validated<Text, Int> = Validated.valid(20);
+    let v3: Validated<Text, Int> = Validated.valid(30);
+
+    let combined: Validated<Text, Int> = v1
+        .zip_with(v2, |a, b| a + b)
+        .zip_with(v3, |ab, c| ab + c);
+    assert(combined.is_valid());
+}
+
+@test
+fn test_validated_zip_chain_with_errors() {
+    let v1: Validated<Text, Int> = Validated.invalid("error 1");
+    let v2: Validated<Text, Int> = Validated.invalid("error 2");
+    let v3: Validated<Text, Int> = Validated.invalid("error 3");
+
+    let combined: Validated<Text, Int> = v1
+        .zip_with(v2, |a, b| a + b)
+        .zip_with(v3, |ab, c| ab + c);
+    assert(combined.is_invalid());
+    let errors = combined.errors();
+    assert_eq(errors.len(), 3);
+}
+
+@test
+fn test_exit_to_result_defect() {
+    let e: Exit<Text, Int> = Exit.die("unexpected");
+    let r: Result<Int, Text> = e.to_result();
+    // Defect should also produce an error in to_result
+    assert(r.is_err());
+}
+
+@test
+fn test_cause_map_error() {
+    let c: Cause<Int> = Cause.fail(42);
+    let mapped: Cause<Text> = c.map_error(|i| f"error: {i}");
+    let failures = mapped.failures();
+    assert_eq(failures.len(), 1);
+}
+
+// =============================================================================
+// Section: Transposition Tests
+// =============================================================================
+
+@test
+fn test_transpose_result_ok_some() {
+    let r: Result<Maybe<Int>, Text> = Ok(Some(42));
+    let result = transpose_result(r);
+    assert(result.is_some());
+    let inner = result.unwrap();
+    assert(inner.is_ok());
+    assert_eq(inner.unwrap(), 42);
+}
+
+@test
+fn test_transpose_result_ok_none() {
+    let r: Result<Maybe<Int>, Text> = Ok(None);
+    let result = transpose_result(r);
+    assert(result.is_none());
+}
+
+@test
+fn test_transpose_result_err() {
+    let r: Result<Maybe<Int>, Text> = Err("fail");
+    let result = transpose_result(r);
+    assert(result.is_some());
+    let inner = result.unwrap();
+    assert(inner.is_err());
+}
+
+@test
+fn test_transpose_maybe_some_ok() {
+    let m: Maybe<Result<Int, Text>> = Some(Ok(42));
+    let result = transpose_maybe(m);
+    assert(result.is_ok());
+    let inner = result.unwrap();
+    assert(inner.is_some());
+    assert_eq(inner.unwrap(), 42);
+}
+
+@test
+fn test_transpose_maybe_some_err() {
+    let m: Maybe<Result<Int, Text>> = Some(Err("fail"));
+    let result = transpose_maybe(m);
+    assert(result.is_err());
+}
+
+@test
+fn test_transpose_maybe_none() {
+    let m: Maybe<Result<Int, Text>> = None;
+    let result = transpose_maybe(m);
+    assert(result.is_ok());
+    let inner = result.unwrap();
+    assert(inner.is_none());
+}
+
+@test
+fn test_transpose_roundtrip() {
+    // transpose_result then transpose_maybe should roundtrip (for Ok(Some(v)) and Err(e))
+    let original: Result<Maybe<Int>, Text> = Ok(Some(99));
+    let transposed = transpose_result(original);
+    let back = transpose_maybe(transposed);
+    assert(back.is_ok());
+    let maybe_val = back.unwrap();
+    assert(maybe_val.is_some());
+    assert_eq(maybe_val.unwrap(), 99);
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

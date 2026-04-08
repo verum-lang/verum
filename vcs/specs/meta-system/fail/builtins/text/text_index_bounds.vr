@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, text, bounds, error
+// @description: Test that text indexing out of bounds is caught
+// @expected-error: bounds
+
+// Test char_at with index >= length - should fail with bounds error
+meta fn test_char_at_too_large() -> Char {
+    let s = "hello";
+    text_char_at(s, 10)  // ERROR: index 10 out of bounds, length is 5
+}
+
+fn main() {
+    @const {
+        let _ = test_char_at_too_large();
+    };
+}

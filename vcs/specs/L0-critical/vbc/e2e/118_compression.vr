@@ -1,0 +1,291 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, compression, rle
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Run-length encoding and decoding using separate value/count arrays
+
+// ============================================================================
+// Arr16: Fixed-size array of 16 Ints
+// ============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int,
+    len: Int
+};
+
+fn arr_new() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0,
+        len: 0
+    }
+}
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        e8: if i == 8 { val } else { a.e8 },
+        e9: if i == 9 { val } else { a.e9 },
+        e10: if i == 10 { val } else { a.e10 },
+        e11: if i == 11 { val } else { a.e11 },
+        e12: if i == 12 { val } else { a.e12 },
+        e13: if i == 13 { val } else { a.e13 },
+        e14: if i == 14 { val } else { a.e14 },
+        e15: if i == 15 { val } else { a.e15 },
+        len: a.len
+    }
+}
+
+fn arr_push(a: Arr16, val: Int) -> Arr16 {
+    let idx = a.len;
+    let updated = arr_set(a, idx, val);
+    Arr16 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        e8: updated.e8, e9: updated.e9, e10: updated.e10, e11: updated.e11,
+        e12: updated.e12, e13: updated.e13, e14: updated.e14, e15: updated.e15,
+        len: idx + 1
+    }
+}
+
+// ============================================================================
+// RLE encoding result: parallel arrays for values and counts
+// ============================================================================
+
+type RleEncoded is {
+    vals: Arr16,
+    counts: Arr16,
+    run_count: Int
+};
+
+fn rle_encode(data: Arr16) -> RleEncoded {
+    if data.len == 0 {
+        RleEncoded { vals: arr_new(), counts: arr_new(), run_count: 0 }
+    } else {
+        let mut vals = arr_new();
+        let mut counts = arr_new();
+        let mut run_idx = 0;
+        let mut cur_val = arr_get(data, 0);
+        let mut cur_count = 1;
+        let mut i = 1;
+        while i < data.len {
+            let v = arr_get(data, i);
+            if v == cur_val {
+                cur_count = cur_count + 1;
+            } else {
+                // Flush current run
+                vals = arr_push(vals, cur_val);
+                counts = arr_push(counts, cur_count);
+                run_idx = run_idx + 1;
+                cur_val = v;
+                cur_count = 1;
+            }
+            i = i + 1;
+        }
+        // Flush last run
+        vals = arr_push(vals, cur_val);
+        counts = arr_push(counts, cur_count);
+        run_idx = run_idx + 1;
+        RleEncoded { vals: vals, counts: counts, run_count: run_idx }
+    }
+}
+
+fn rle_decode(enc: RleEncoded) -> Arr16 {
+    let mut result = arr_new();
+    let mut r = 0;
+    while r < enc.run_count {
+        let val = arr_get(enc.vals, r);
+        let count = arr_get(enc.counts, r);
+        let mut j = 0;
+        while j < count {
+            result = arr_push(result, val);
+            j = j + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+fn arr_equal(a: Arr16, b: Arr16) -> Int {
+    if a.len != b.len { 0 }
+    else {
+        let mut i = 0;
+        let mut eq = 1;
+        while i < a.len {
+            if arr_get(a, i) != arr_get(b, i) {
+                eq = 0;
+            }
+            i = i + 1;
+        }
+        eq
+    }
+}
+
+// ============================================================================
+// Test 1: Basic RLE encode
+// ============================================================================
+
+@test
+fn test_rle_encode_basic() {
+    // [1,1,1,2,2,3] -> values=[1,2,3], counts=[3,2,1]
+    let mut data = arr_new();
+    data = arr_push(data, 1);
+    data = arr_push(data, 1);
+    data = arr_push(data, 1);
+    data = arr_push(data, 2);
+    data = arr_push(data, 2);
+    data = arr_push(data, 3);
+
+    let enc = rle_encode(data);
+    assert_eq(enc.run_count, 3);
+
+    assert_eq(arr_get(enc.vals, 0), 1);
+    assert_eq(arr_get(enc.counts, 0), 3);
+
+    assert_eq(arr_get(enc.vals, 1), 2);
+    assert_eq(arr_get(enc.counts, 1), 2);
+
+    assert_eq(arr_get(enc.vals, 2), 3);
+    assert_eq(arr_get(enc.counts, 2), 1);
+
+    print("  test_rle_encode_basic: ok");
+}
+
+// ============================================================================
+// Test 2: RLE decode roundtrip
+// ============================================================================
+
+@test
+fn test_rle_roundtrip() {
+    // [1,1,1,2,2,3]
+    let mut data = arr_new();
+    data = arr_push(data, 1);
+    data = arr_push(data, 1);
+    data = arr_push(data, 1);
+    data = arr_push(data, 2);
+    data = arr_push(data, 2);
+    data = arr_push(data, 3);
+
+    let enc = rle_encode(data);
+    let dec = rle_decode(enc);
+
+    assert_eq(arr_equal(data, dec), 1);
+    assert_eq(dec.len, 6);
+
+    print("  test_rle_roundtrip: ok");
+}
+
+// ============================================================================
+// Test 3: All same values
+// ============================================================================
+
+@test
+fn test_rle_all_same() {
+    // [5,5,5,5,5] -> values=[5], counts=[5]
+    let mut data = arr_new();
+    data = arr_push(data, 5);
+    data = arr_push(data, 5);
+    data = arr_push(data, 5);
+    data = arr_push(data, 5);
+    data = arr_push(data, 5);
+
+    let enc = rle_encode(data);
+    assert_eq(enc.run_count, 1);
+    assert_eq(arr_get(enc.vals, 0), 5);
+    assert_eq(arr_get(enc.counts, 0), 5);
+
+    let dec = rle_decode(enc);
+    assert_eq(arr_equal(data, dec), 1);
+
+    print("  test_rle_all_same: ok");
+}
+
+// ============================================================================
+// Test 4: All different values (worst case — no compression)
+// ============================================================================
+
+@test
+fn test_rle_all_different() {
+    // [1,2,3,4,5] -> values=[1,2,3,4,5], counts=[1,1,1,1,1]
+    let mut data = arr_new();
+    data = arr_push(data, 1);
+    data = arr_push(data, 2);
+    data = arr_push(data, 3);
+    data = arr_push(data, 4);
+    data = arr_push(data, 5);
+
+    let enc = rle_encode(data);
+    assert_eq(enc.run_count, 5);
+
+    let mut i = 0;
+    while i < 5 {
+        assert_eq(arr_get(enc.vals, i), i + 1);
+        assert_eq(arr_get(enc.counts, i), 1);
+        i = i + 1;
+    }
+
+    let dec = rle_decode(enc);
+    assert_eq(arr_equal(data, dec), 1);
+
+    print("  test_rle_all_different: ok");
+}
+
+// ============================================================================
+// Test 5: Alternating pattern
+// ============================================================================
+
+@test
+fn test_rle_alternating() {
+    // [1,0,1,0,1,0] -> values=[1,0,1,0,1,0], counts=[1,1,1,1,1,1]
+    let mut data = arr_new();
+    data = arr_push(data, 1);
+    data = arr_push(data, 0);
+    data = arr_push(data, 1);
+    data = arr_push(data, 0);
+    data = arr_push(data, 1);
+    data = arr_push(data, 0);
+
+    let enc = rle_encode(data);
+    assert_eq(enc.run_count, 6);
+
+    // Roundtrip
+    let dec = rle_decode(enc);
+    assert_eq(arr_equal(data, dec), 1);
+
+    print("  test_rle_alternating: ok");
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_rle_encode_basic();
+    test_rle_roundtrip();
+    test_rle_all_same();
+    test_rle_all_different();
+    test_rle_alternating();
+    print("[OK] 118_compression");
+    0
+}

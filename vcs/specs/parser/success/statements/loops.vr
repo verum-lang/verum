@@ -1,0 +1,815 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for loop statements (for/while/loop)
+
+// =============================================================================
+// Grammar Reference:
+// loop_expr = infinite_loop | while_loop | for_loop | for_await_loop ;
+// infinite_loop = 'loop' , block_expr ;
+// while_loop = 'while' , expression , { loop_annotation } , block_expr ;
+// for_loop = 'for' , pattern , 'in' , expression , { loop_annotation } , block_expr ;
+// for_await_loop = 'for' , 'await' , pattern , 'in' , expression , { loop_annotation } , block_expr ;
+// loop_annotation = 'invariant' , expression | 'decreases' , expression ;
+// =============================================================================
+
+// =============================================================================
+// INFINITE LOOP (loop)
+// =============================================================================
+
+fn test_basic_loop() {
+    // Simple infinite loop
+    loop {
+        do_work();
+    }
+}
+
+fn test_loop_with_break() {
+    // Loop with conditional break
+    loop {
+        if done {
+            break;
+        }
+        work();
+    }
+}
+
+fn test_loop_with_continue() {
+    // Loop with continue
+    loop {
+        if skip {
+            continue;
+        }
+        process();
+    }
+}
+
+fn test_loop_as_expression() {
+    // Loop returning value via break
+    let result = loop {
+        let value = compute();
+        if value > threshold {
+            break value;
+        }
+    };
+}
+
+fn test_loop_with_multiple_breaks() {
+    let result = loop {
+        if condition_a {
+            break value_a;
+        }
+        if condition_b {
+            break value_b;
+        }
+        if condition_c {
+            break value_c;
+        }
+    };
+}
+
+fn test_loop_with_nested_control_flow() {
+    loop {
+        if outer_condition {
+            if inner_condition {
+                break;
+            } else {
+                continue;
+            }
+        }
+        process();
+    }
+}
+
+fn test_nested_loops() {
+    // Nested infinite loops
+    loop {
+        loop {
+            if inner_done {
+                break;  // Breaks inner loop
+            }
+        }
+        if outer_done {
+            break;  // Breaks outer loop
+        }
+    }
+}
+
+fn test_loop_with_let_bindings() {
+    loop {
+        let x = compute();
+        let y = transform(x);
+        if y > limit {
+            break;
+        }
+    }
+}
+
+fn test_loop_with_match() {
+    loop {
+        match get_event() {
+            Event.Continue => {},
+            Event.Skip => continue,
+            Event.Done => break,
+            Event.Error => break
+        }
+    }
+}
+
+fn test_loop_with_let_else() {
+    loop {
+        let Some(item) = try_get() else {
+            break;
+        };
+        process(item);
+    }
+}
+
+fn test_loop_as_complex_expression() {
+    let result = loop {
+        break {
+            let a = compute_a();
+            let b = compute_b();
+            combine(a, b)
+        };
+    };
+}
+
+// =============================================================================
+// WHILE LOOP
+// =============================================================================
+
+fn test_basic_while() {
+    // Simple while loop
+    while condition {
+        do_work();
+    }
+}
+
+fn test_while_with_variable_condition() {
+    let mut running = true;
+    while running {
+        if should_stop() {
+            running = false;
+        }
+        process();
+    }
+}
+
+fn test_while_with_comparison() {
+    let mut count = 0;
+    while count < 10 {
+        count += 1;
+    }
+}
+
+fn test_while_with_logical_condition() {
+    while a && b {
+        process_both();
+    }
+
+    while x || y {
+        process_either();
+    }
+
+    while !done {
+        process();
+    }
+}
+
+fn test_while_with_complex_condition() {
+    while index < len && buffer[index] != 0 {
+        process(buffer[index]);
+        index += 1;
+    }
+}
+
+fn test_while_with_method_call_condition() {
+    while iterator.has_next() {
+        let item = iterator.next();
+        process(item);
+    }
+}
+
+fn test_while_with_break() {
+    while condition {
+        if emergency {
+            break;
+        }
+        work();
+    }
+}
+
+fn test_while_with_continue() {
+    let mut i = 0;
+    while i < 100 {
+        i += 1;
+        if skip_condition(i) {
+            continue;
+        }
+        process(i);
+    }
+}
+
+fn test_while_true() {
+    // Equivalent to loop
+    while true {
+        if done {
+            break;
+        }
+    }
+}
+
+fn test_nested_while() {
+    let mut i = 0;
+    while i < 10 {
+        let mut j = 0;
+        while j < 10 {
+            process(i, j);
+            j += 1;
+        }
+        i += 1;
+    }
+}
+
+fn test_while_with_let_else() {
+    while running {
+        let Some(item) = try_get() else {
+            break;
+        };
+        process(item);
+    }
+}
+
+fn test_while_with_match() {
+    while active {
+        match poll() {
+            Poll.Ready(v) => handle(v),
+            Poll.Pending => {},
+            Poll.Closed => break
+        }
+    }
+}
+
+// =============================================================================
+// WHILE WITH ANNOTATIONS
+// =============================================================================
+
+fn test_while_with_invariant() {
+    let mut x = 0;
+    while x < 100
+        invariant x >= 0
+    {
+        x += 1;
+    }
+}
+
+fn test_while_with_decreases() {
+    let mut n = 100;
+    while n > 0
+        decreases n
+    {
+        n -= 1;
+    }
+}
+
+fn test_while_with_multiple_annotations() {
+    let mut i = 0;
+    let mut sum = 0;
+    while i < n
+        invariant sum == i * (i - 1) / 2 && i <= n
+        decreases n - i
+    {
+        sum += i;
+        i += 1;
+    }
+}
+
+fn test_while_with_complex_invariant() {
+    let mut lo = 0;
+    let mut hi = len;
+    // Multiple invariants combined with &&
+    while lo < hi
+        invariant 0 <= lo && lo <= hi && hi <= len
+        decreases hi - lo
+    {
+        let mid = lo + (hi - lo) / 2;
+        if arr[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+}
+
+// =============================================================================
+// FOR LOOP
+// =============================================================================
+
+fn test_basic_for() {
+    // Simple for loop
+    for item in collection {
+        process(item);
+    }
+}
+
+fn test_for_with_range() {
+    // Range iteration
+    for i in 0..10 {
+        process(i);
+    }
+
+    // Inclusive range
+    for i in 0..=10 {
+        process(i);
+    }
+}
+
+fn test_for_with_step() {
+    // Range with step (using method)
+    for i in (0..100).step_by(5) {
+        process(i);
+    }
+}
+
+fn test_for_with_reverse() {
+    // Reverse iteration
+    for i in (0..10).rev() {
+        process(i);
+    }
+}
+
+fn test_for_with_enumerate() {
+    // Enumerate pattern
+    for (index, item) in collection.iter().enumerate() {
+        process_indexed(index, item);
+    }
+}
+
+fn test_for_with_zip() {
+    // Zip iteration
+    for (a, b) in list_a.iter().zip(list_b.iter()) {
+        process_pair(a, b);
+    }
+}
+
+fn test_for_with_filter() {
+    // Filter iteration
+    for item in collection.iter().filter(|x| x.is_valid()) {
+        process(item);
+    }
+}
+
+fn test_for_with_map() {
+    // Map iteration
+    for transformed in collection.iter().map(|x| x * 2) {
+        process(transformed);
+    }
+}
+
+fn test_for_with_chained_iterators() {
+    // Chained iterator methods
+    for item in collection
+        .iter()
+        .filter(|x| x.is_active())
+        .map(|x| x.value)
+        .take(10)
+    {
+        process(item);
+    }
+}
+
+fn test_for_with_tuple_pattern() {
+    // Tuple destructuring
+    for (x, y) in points {
+        draw(x, y);
+    }
+
+    for (key, value) in map.iter() {
+        process_entry(key, value);
+    }
+}
+
+fn test_for_with_record_pattern() {
+    // Record destructuring
+    for Point { x, y } in points {
+        draw(x, y);
+    }
+
+    for Person { name, age, .. } in people {
+        greet(name, age);
+    }
+}
+
+fn test_for_with_variant_pattern() {
+    // Variant pattern
+    for Some(value) in options {
+        process(value);
+    }
+
+    // With filtering
+    for Some(Ok(data)) in results {
+        handle(data);
+    }
+}
+
+fn test_for_with_reference_pattern() {
+    // Reference pattern for borrowing
+    for &item in &collection {
+        process(item);
+    }
+
+    for &mut item in &mut collection {
+        modify(&mut item);
+    }
+}
+
+fn test_for_with_array() {
+    // Array iteration
+    let arr = [1, 2, 3, 4, 5];
+    for elem in arr {
+        process(elem);
+    }
+}
+
+fn test_for_with_slice() {
+    // Slice iteration
+    for elem in &array[start..end] {
+        process(elem);
+    }
+}
+
+fn test_for_with_break() {
+    // Early exit
+    for item in items {
+        if found(item) {
+            break;
+        }
+    }
+}
+
+fn test_for_with_continue() {
+    // Skip items
+    for item in items {
+        if skip(item) {
+            continue;
+        }
+        process(item);
+    }
+}
+
+fn test_nested_for() {
+    // Nested for loops
+    for i in 0..rows {
+        for j in 0..cols {
+            matrix[i][j] = i * cols + j;
+        }
+    }
+}
+
+fn test_for_with_let_else() {
+    for raw in raw_items {
+        let Some(parsed) = parse(raw) else {
+            continue;
+        };
+        let Ok(validated) = validate(parsed) else {
+            continue;
+        };
+        process(validated);
+    }
+}
+
+fn test_for_with_match() {
+    for result in results {
+        match result {
+            Ok(v) => process(v),
+            Err(e) if e.is_recoverable() => log(e),
+            Err(e) => break
+        }
+    }
+}
+
+// =============================================================================
+// FOR LOOP WITH ANNOTATIONS
+// =============================================================================
+
+fn test_for_with_invariant() {
+    let mut sum = 0;
+    for i in 0..n
+        invariant sum == i * (i - 1) / 2
+    {
+        sum += i;
+    }
+}
+
+fn test_for_with_decreases() {
+    for i in (0..n).rev()
+        decreases i
+    {
+        process(i);
+    }
+}
+
+fn test_for_with_multiple_annotations() {
+    let mut found_count = 0;
+    for i in 0..len
+        invariant 0 <= found_count && found_count <= i
+        decreases len - i
+    {
+        if is_match(arr[i]) {
+            found_count += 1;
+        }
+    }
+}
+
+// =============================================================================
+// FOR AWAIT LOOP (Async iteration)
+// =============================================================================
+
+async fn test_basic_for_await() {
+    // Async iteration
+    for await item in async_stream {
+        process(item);
+    }
+}
+
+async fn test_for_await_with_pattern() {
+    // Destructuring in async iteration
+    for await (key, value) in async_map_stream {
+        handle(key, value);
+    }
+
+    for await Point { x, y } in async_point_stream {
+        draw(x, y);
+    }
+}
+
+async fn test_for_await_with_result_pattern() {
+    // Handling results in async stream
+    for await Ok(data) in async_result_stream {
+        process(data);
+    }
+}
+
+async fn test_for_await_with_break() {
+    // Early exit from async iteration
+    for await item in stream {
+        if done(item) {
+            break;
+        }
+        process(item);
+    }
+}
+
+async fn test_for_await_with_continue() {
+    // Skip items in async iteration
+    for await item in stream {
+        if skip(item) {
+            continue;
+        }
+        process_async(item).await;
+    }
+}
+
+async fn test_for_await_with_let_else() {
+    for await raw in data_stream {
+        let Some(parsed) = parse(raw) else {
+            continue;
+        };
+        handle_async(parsed).await;
+    }
+}
+
+async fn test_nested_for_await() {
+    for await outer in outer_stream {
+        for await inner in outer.inner_stream() {
+            process(outer, inner).await;
+        }
+    }
+}
+
+async fn test_for_await_with_annotations() {
+    let mut count = 0;
+    for await item in stream
+        invariant count >= 0
+    {
+        process(item).await;
+        count += 1;
+    }
+}
+
+// =============================================================================
+// COMPLEX LOOP COMBINATIONS
+// =============================================================================
+
+fn test_loop_inside_for() {
+    for item in items {
+        loop {
+            let result = try_process(item);
+            if result.success {
+                break;
+            }
+        }
+    }
+}
+
+fn test_for_inside_loop() {
+    loop {
+        for item in get_batch() {
+            process(item);
+        }
+        if no_more_batches() {
+            break;
+        }
+    }
+}
+
+fn test_while_inside_for() {
+    for task in tasks {
+        while !task.is_complete() {
+            task.step();
+        }
+    }
+}
+
+fn test_for_inside_while() {
+    while has_work() {
+        for item in get_items() {
+            process(item);
+        }
+    }
+}
+
+fn test_deeply_nested_loops() {
+    for i in 0..x {
+        while condition_i(i) {
+            loop {
+                for j in 0..y {
+                    if found(i, j) {
+                        break;  // Breaks innermost for
+                    }
+                }
+                if inner_done {
+                    break;  // Breaks loop
+                }
+            }
+        }
+    }
+}
+
+fn test_loop_with_multiple_iterators() {
+    let mut iter_a = list_a.iter();
+    let mut iter_b = list_b.iter();
+
+    loop {
+        let a = iter_a.next();
+        let b = iter_b.next();
+
+        match (a, b) {
+            (Some(x), Some(y)) => process(x, y),
+            _ => break
+        }
+    }
+}
+
+fn test_loop_as_retry_pattern() {
+    let mut attempts = 0;
+    let result = loop {
+        attempts += 1;
+        match try_operation() {
+            Ok(v) => break v,
+            Err(e) if attempts < max_retries => {
+                delay(backoff(attempts));
+                continue;
+            },
+            Err(e) => break default_value
+        }
+    };
+}
+
+fn test_loop_with_state_machine() {
+    let mut state = State.Initial;
+
+    loop {
+        state = match state {
+            State.Initial => {
+                initialize();
+                State.Running
+            },
+            State.Running => {
+                if process() {
+                    State.Running
+                } else {
+                    State.Stopping
+                }
+            },
+            State.Stopping => {
+                cleanup();
+                State.Stopped
+            },
+            State.Stopped => break
+        };
+    }
+}
+
+// =============================================================================
+// LOOPS WITH RESOURCE MANAGEMENT
+// =============================================================================
+
+fn test_loop_with_defer() {
+    loop {
+        let resource = acquire();
+        defer resource.release();
+
+        if should_exit {
+            break;  // resource.release() called
+        }
+
+        process(resource);
+        // resource.release() called at end of iteration
+    }
+}
+
+fn test_for_with_defer() {
+    for item in items {
+        let lock = item.lock();
+        defer lock.unlock();
+
+        if skip(item) {
+            continue;  // lock.unlock() called
+        }
+
+        process(item);
+        // lock.unlock() called
+    }
+}
+
+fn test_loop_with_errdefer() {
+    loop {
+        let resource = acquire()?;
+        errdefer resource.rollback();
+
+        let value = process(resource)?;  // rollback on error
+        resource.commit();
+        break value;
+    }
+}
+
+// =============================================================================
+// LOOPS IN DIFFERENT CONTEXTS
+// =============================================================================
+
+fn test_loop_in_closure() {
+    let find = |predicate| {
+        for item in items {
+            if predicate(item) {
+                return Some(item);
+            }
+        }
+        None
+    };
+}
+
+fn test_loop_in_block_expression() {
+    let sum = {
+        let mut total = 0;
+        for i in 0..10 {
+            total += i;
+        }
+        total
+    };
+}
+
+fn test_loop_in_if_branch() {
+    if should_process {
+        for item in items {
+            process(item);
+        }
+    } else {
+        while has_work() {
+            do_work();
+        }
+    }
+}
+
+fn test_loop_in_match_arm() {
+    match mode {
+        Mode.Sequential => {
+            for item in items {
+                process(item);
+            }
+        },
+        Mode.Continuous => {
+            loop {
+                process(get_next());
+            }
+        },
+        Mode.Batched => {
+            while has_batch() {
+                for item in get_batch() {
+                    process(item);
+                }
+            }
+        }
+    }
+}

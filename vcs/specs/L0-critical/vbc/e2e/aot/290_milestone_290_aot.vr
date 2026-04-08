@@ -1,0 +1,334 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, comprehensive, integration
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Milestone test #290: integration covering sorting, searching, math, bitwise tricks
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+fn max2(a: Int, b_val: Int) -> Int { if a > b_val { a } else { b_val } }
+fn min2(a: Int, b_val: Int) -> Int { if a < b_val { a } else { b_val } }
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// === Sorting: selection sort (simpler, avoids j=-1 issue) ===
+fn selection_sort(a: Arr8) -> Arr8 {
+    let mut result = a;
+    let mut i = 0;
+    while i < result.len - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < result.len {
+            if arr8_get(result, j) < arr8_get(result, min_idx) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            let tmp = arr8_get(result, i);
+            result = arr8_set(result, i, arr8_get(result, min_idx));
+            result = arr8_set(result, min_idx, tmp);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn is_sorted(a: Arr8) -> Bool {
+    let mut i = 1;
+    while i < a.len {
+        if arr8_get(a, i) < arr8_get(a, i - 1) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// === Searching: binary search ===
+fn binary_search(a: Arr8, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = a.len - 1;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let val = arr8_get(a, mid);
+        if val == target { return mid; }
+        if val < target { lo = mid + 1; } else { hi = mid - 1; }
+    }
+    -1
+}
+
+// === Math: modular exponentiation ===
+fn mod_exp(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b_val = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b_val) % modulus; }
+        e = e / 2;
+        b_val = (b_val * b_val) % modulus;
+    }
+    result
+}
+
+// === Math: integer square root (Newton) ===
+fn isqrt(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+// === Math: GCD and LCM ===
+fn gcd(a: Int, b_val: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b_val);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+fn lcm(a: Int, b_val: Int) -> Int {
+    if a == 0 { return 0; }
+    if b_val == 0 { return 0; }
+    abs_val(a) / gcd(a, b_val) * abs_val(b_val)
+}
+
+// === Bitwise: popcount, is power of 2 ===
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 { count = count + (x & 1); x = x >> 1; }
+    count
+}
+
+fn is_power_of_2(n: Int) -> Bool {
+    if n <= 0 { return false; }
+    (n & (n - 1)) == 0
+}
+
+// === Bitwise: reverse bits of 8-bit value ===
+fn reverse_bits_8(n: Int) -> Int {
+    let mut result = 0;
+    let mut x = n & 255;
+    let mut i = 0;
+    while i < 8 {
+        result = (result << 1) | (x & 1);
+        x = x >> 1;
+        i = i + 1;
+    }
+    result
+}
+
+// === Integration: primality test ===
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    if n < 4 { return true; }
+    if n % 2 == 0 { return false; }
+    let mut d = 3;
+    while d * d <= n {
+        if n % d == 0 { return false; }
+        d = d + 2;
+    }
+    true
+}
+
+fn count_primes_up_to(limit: Int) -> Int {
+    let mut count = 0;
+    let mut n = 2;
+    while n <= limit {
+        if is_prime(n) { count = count + 1; }
+        n = n + 1;
+    }
+    count
+}
+
+// === Higher-order: apply and fold ===
+fn arr8_map(a: Arr8, f: fn(Int) -> Int) -> Arr8 {
+    let mut result = a;
+    let mut i = 0;
+    while i < a.len {
+        result = arr8_set(result, i, f(arr8_get(a, i)));
+        i = i + 1;
+    }
+    result
+}
+
+fn arr8_fold(a: Arr8, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < a.len {
+        acc = f(acc, arr8_get(a, i));
+        i = i + 1;
+    }
+    acc
+}
+
+fn double_it(x: Int) -> Int { x * 2 }
+fn add_em(acc: Int, x: Int) -> Int { acc + x }
+fn mul_em(acc: Int, x: Int) -> Int { acc * x }
+fn max_em(acc: Int, x: Int) -> Int { if x > acc { x } else { acc } }
+
+fn test_sorting_basic() {
+    let a = Arr8 { a0: 5, a1: 3, a2: 8, a3: 1, a4: 7, a5: 2, a6: 6, a7: 4, len: 8 };
+    let sorted = selection_sort(a);
+    assert_eq(is_sorted(sorted), true);
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 7), 8);
+}
+
+fn test_sorting_presorted() {
+    let b_arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let sorted2 = selection_sort(b_arr);
+    assert_eq(is_sorted(sorted2), true);
+}
+
+fn test_sorting_reverse() {
+    let c = Arr8 { a0: 6, a1: 5, a2: 4, a3: 3, a4: 2, a5: 1, a6: 0, a7: 0, len: 6 };
+    let sc = selection_sort(c);
+    assert_eq(arr8_get(sc, 0), 1);
+    assert_eq(arr8_get(sc, 5), 6);
+}
+
+fn test_searching() {
+    let a = Arr8 { a0: 10, a1: 20, a2: 30, a3: 40, a4: 50, a5: 60, a6: 70, a7: 80, len: 8 };
+    assert_eq(binary_search(a, 10), 0);
+    assert_eq(binary_search(a, 50), 4);
+    assert_eq(binary_search(a, 80), 7);
+    assert_eq(binary_search(a, 25), -1);
+    assert_eq(binary_search(a, 0), -1);
+    assert_eq(binary_search(a, 100), -1);
+}
+
+fn test_math() {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    assert_eq(mod_exp(2, 10, 1000), 24);
+    // 3^5 mod 100 = 243 mod 100 = 43
+    assert_eq(mod_exp(3, 5, 100), 43);
+    assert_eq(mod_exp(2, 0, 100), 1);
+    // 7^3 mod 13 = 343 mod 13 = 5
+    assert_eq(mod_exp(7, 3, 13), 5);
+
+    // isqrt
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(99), 9);
+    assert_eq(isqrt(10000), 100);
+
+    // GCD/LCM
+    assert_eq(gcd(252, 105), 21);
+    assert_eq(gcd(0, 5), 5);
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(12, 18), 36);
+}
+
+fn test_bitwise() {
+    // popcount
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(21845), 8);  // 0x5555
+
+    // is_power_of_2
+    assert_eq(is_power_of_2(1), true);
+    assert_eq(is_power_of_2(2), true);
+    assert_eq(is_power_of_2(4), true);
+    assert_eq(is_power_of_2(64), true);
+    assert_eq(is_power_of_2(3), false);
+    assert_eq(is_power_of_2(0), false);
+
+    // reverse_bits_8
+    assert_eq(reverse_bits_8(128), 1);    // 10000000 -> 00000001
+    assert_eq(reverse_bits_8(1), 128);    // 00000001 -> 10000000
+    assert_eq(reverse_bits_8(170), 85);   // 10101010 -> 01010101
+    assert_eq(reverse_bits_8(255), 255);
+}
+
+fn test_primes() {
+    assert_eq(is_prime(2), true);
+    assert_eq(is_prime(3), true);
+    assert_eq(is_prime(4), false);
+    assert_eq(is_prime(17), true);
+    assert_eq(is_prime(25), false);
+    assert_eq(is_prime(97), true);
+
+    // There are 25 primes <= 100
+    assert_eq(count_primes_up_to(100), 25);
+    assert_eq(count_primes_up_to(10), 4);
+}
+
+fn test_higher_order() {
+    let a = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+
+    let doubled = arr8_map(a, double_it);
+    assert_eq(arr8_get(doubled, 0), 2);
+    assert_eq(arr8_get(doubled, 3), 8);
+
+    let sum = arr8_fold(a, 0, add_em);
+    assert_eq(sum, 10);
+
+    let product = arr8_fold(a, 1, mul_em);
+    assert_eq(product, 24);
+
+    let mx = arr8_fold(a, 0, max_em);
+    assert_eq(mx, 4);
+}
+
+fn test_integration() {
+    // Sort, then search
+    let a = Arr8 { a0: 50, a1: 10, a2: 40, a3: 20, a4: 30, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sorted = selection_sort(a);
+    assert_eq(binary_search(sorted, 30), 2);
+    assert_eq(binary_search(sorted, 50), 4);
+
+    // Fermat's little theorem: a^(p-1) mod p == 1 for prime p
+    assert_eq(mod_exp(2, 12, 13), 1);
+    assert_eq(mod_exp(2, 16, 17), 1);
+    assert_eq(mod_exp(2, 96, 97), 1);
+
+    // isqrt + is_prime
+    let s = isqrt(49);
+    assert_eq(s, 7);
+    assert_eq(is_prime(s), true);
+}
+
+fn main() -> Int {
+    test_sorting_basic();
+    test_sorting_presorted();
+    test_sorting_reverse();
+    test_searching();
+    test_math();
+    test_bitwise();
+    test_primes();
+    test_higher_order();
+    test_integration();
+    print("[OK] 290_milestone_290_aot");
+    0
+}

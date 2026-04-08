@@ -1,0 +1,185 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, type_props, type_min, type_max
+// @description: Comprehensive tests for type_min and type_max builtins
+// @contexts: MetaTypes
+
+// =============================================================================
+// TYPE_MIN TESTS - UNSIGNED INTEGERS
+// =============================================================================
+
+meta fn test_type_min_u8() -> Int using [MetaTypes] {
+    type_min(U8)  // Should be 0
+}
+
+meta fn test_type_min_u16() -> Int using [MetaTypes] {
+    type_min(U16)  // Should be 0
+}
+
+meta fn test_type_min_u32() -> Int using [MetaTypes] {
+    type_min(U32)  // Should be 0
+}
+
+meta fn test_type_min_u64() -> Int using [MetaTypes] {
+    type_min(U64)  // Should be 0
+}
+
+// All unsigned types should have min of 0
+meta fn test_type_min_unsigned_all_zero() -> Bool using [MetaTypes] {
+    type_min(U8) == 0 &&
+    type_min(U16) == 0 &&
+    type_min(U32) == 0 &&
+    type_min(U64) == 0
+}
+
+// =============================================================================
+// TYPE_MIN TESTS - SIGNED INTEGERS
+// =============================================================================
+
+meta fn test_type_min_i8() -> Int using [MetaTypes] {
+    type_min(I8)  // Should be -128
+}
+
+meta fn test_type_min_i16() -> Int using [MetaTypes] {
+    type_min(I16)  // Should be -32768
+}
+
+meta fn test_type_min_i32() -> Int using [MetaTypes] {
+    type_min(I32)  // Should be -2147483648
+}
+
+meta fn test_type_min_i64() -> Int using [MetaTypes] {
+    type_min(I64)  // Should be -9223372036854775808
+}
+
+// =============================================================================
+// TYPE_MAX TESTS - UNSIGNED INTEGERS
+// =============================================================================
+
+meta fn test_type_max_u8() -> Int using [MetaTypes] {
+    type_max(U8)  // Should be 255
+}
+
+meta fn test_type_max_u16() -> Int using [MetaTypes] {
+    type_max(U16)  // Should be 65535
+}
+
+meta fn test_type_max_u32() -> Int using [MetaTypes] {
+    type_max(U32)  // Should be 4294967295
+}
+
+meta fn test_type_max_u64() -> Int using [MetaTypes] {
+    type_max(U64)  // Should be 18446744073709551615
+}
+
+// =============================================================================
+// TYPE_MAX TESTS - SIGNED INTEGERS
+// =============================================================================
+
+meta fn test_type_max_i8() -> Int using [MetaTypes] {
+    type_max(I8)  // Should be 127
+}
+
+meta fn test_type_max_i16() -> Int using [MetaTypes] {
+    type_max(I16)  // Should be 32767
+}
+
+meta fn test_type_max_i32() -> Int using [MetaTypes] {
+    type_max(I32)  // Should be 2147483647
+}
+
+meta fn test_type_max_i64() -> Int using [MetaTypes] {
+    type_max(I64)  // Should be 9223372036854775807
+}
+
+// =============================================================================
+// RELATIONSHIP TESTS
+// =============================================================================
+
+// Test min < max for all integer types
+meta fn test_min_less_than_max() -> Bool using [MetaTypes] {
+    type_min(U8) < type_max(U8) &&
+    type_min(U16) < type_max(U16) &&
+    type_min(U32) < type_max(U32) &&
+    type_min(U64) < type_max(U64) &&
+    type_min(I8) < type_max(I8) &&
+    type_min(I16) < type_max(I16) &&
+    type_min(I32) < type_max(I32) &&
+    type_min(I64) < type_max(I64)
+}
+
+// Test range = max - min + 1 equals 2^bits for unsigned
+meta fn test_unsigned_range_formula() -> Bool using [MetaTypes] {
+    // For unsigned types: max = 2^bits - 1
+    // So max + 1 = 2^bits
+    type_max(U8) == 255 &&
+    type_max(U16) == 65535 &&
+    type_max(U32) == 4294967295
+    // U64 max is too large to test with Int
+}
+
+// Test signed types: min = -2^(bits-1), max = 2^(bits-1) - 1
+meta fn test_signed_bounds_formula() -> Bool using [MetaTypes] {
+    // I8: min = -128 = -2^7, max = 127 = 2^7 - 1
+    type_min(I8) == -128 && type_max(I8) == 127 &&
+    // I16: min = -32768 = -2^15, max = 32767 = 2^15 - 1
+    type_min(I16) == -32768 && type_max(I16) == 32767 &&
+    // I32: min = -2147483648 = -2^31, max = 2147483647 = 2^31 - 1
+    type_min(I32) == -2147483648 && type_max(I32) == 2147483647
+}
+
+// Test that signed and unsigned of same size have different bounds
+meta fn test_signed_unsigned_differ() -> Bool using [MetaTypes] {
+    type_min(I8) != type_min(U8) &&
+    type_max(I8) != type_max(U8) &&
+    type_min(I16) != type_min(U16) &&
+    type_max(I16) != type_max(U16) &&
+    type_min(I32) != type_min(U32) &&
+    type_max(I32) != type_max(U32)
+}
+
+// Test that larger types have larger ranges
+meta fn test_larger_types_larger_ranges() -> Bool using [MetaTypes] {
+    type_max(U8) < type_max(U16) &&
+    type_max(U16) < type_max(U32) &&
+    type_max(U32) < type_max(U64) &&
+    type_max(I8) < type_max(I16) &&
+    type_max(I16) < type_max(I32) &&
+    type_max(I32) < type_max(I64)
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Type min - unsigned
+    @const assert(test_type_min_u8() == 0);
+    @const assert(test_type_min_u16() == 0);
+    @const assert(test_type_min_u32() == 0);
+    @const assert(test_type_min_u64() == 0);
+    @const assert(test_type_min_unsigned_all_zero());
+
+    // Type min - signed
+    @const assert(test_type_min_i8() == -128);
+    @const assert(test_type_min_i16() == -32768);
+    @const assert(test_type_min_i32() == -2147483648);
+
+    // Type max - unsigned
+    @const assert(test_type_max_u8() == 255);
+    @const assert(test_type_max_u16() == 65535);
+    @const assert(test_type_max_u32() == 4294967295);
+
+    // Type max - signed
+    @const assert(test_type_max_i8() == 127);
+    @const assert(test_type_max_i16() == 32767);
+    @const assert(test_type_max_i32() == 2147483647);
+
+    // Relationship tests
+    @const assert(test_min_less_than_max());
+    @const assert(test_unsigned_range_formula());
+    @const assert(test_signed_bounds_formula());
+    @const assert(test_signed_unsigned_differ());
+    @const assert(test_larger_types_larger_ranges());
+}

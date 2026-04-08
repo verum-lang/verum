@@ -1,0 +1,230 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, voronoi, nearest_neighbor, manhattan_distance, regions
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Voronoi-like nearest neighbor assignment using Manhattan distance.
+//
+// Given a set of "site" points, assign each query point to the nearest site
+// by Manhattan distance: |x1-x2| + |y1-y2|.
+//
+// Operations:
+//   - Assign each query point to the nearest site (returning site index).
+//   - Compute region sizes (how many query points are closest to each site).
+//   - Find the site with the most assigned query points.
+//   - Verify no ties are mishandled (deterministic: first site wins on tie).
+
+fn manhattan(x1: Int, y1: Int, x2: Int, y2: Int) -> Int {
+    let dx = if x1 > x2 { x1 - x2 } else { x2 - x1 };
+    let dy = if y1 > y2 { y1 - y2 } else { y2 - y1 };
+    dx + dy
+}
+
+// Assign a single point (px,py) to the nearest site.
+// Returns site index (0-based).
+fn nearest_site(
+    sx: [Int; 8],
+    sy: [Int; 8],
+    n_sites: Int,
+    px: Int,
+    py: Int
+) -> Int {
+    let mut best_site = 0;
+    let mut best_dist = manhattan(px, py, sx[0], sy[0]);
+    let mut i = 1;
+    while i < n_sites {
+        let d = manhattan(px, py, sx[i], sy[i]);
+        if d < best_dist {
+            best_dist = d;
+            best_site = i;
+        }
+        i = i + 1;
+    }
+    best_site
+}
+
+// Assign all query points to sites, filling assign[] array.
+fn assign_all(
+    sx:      [Int; 8],
+    sy:      [Int; 8],
+    n_sites: Int,
+    qx:      [Int; 16],
+    qy:      [Int; 16],
+    n_pts:   Int,
+    assign:  [Int; 16]
+) {
+    let mut i = 0;
+    while i < n_pts {
+        assign[i] = nearest_site(sx, sy, n_sites, qx[i], qy[i]);
+        i = i + 1;
+    }
+}
+
+// Count points assigned to each site.
+fn region_counts(
+    assign:  [Int; 16],
+    n_pts:   Int,
+    n_sites: Int,
+    counts:  [Int; 8]
+) {
+    let mut s = 0;
+    while s < n_sites { counts[s] = 0; s = s + 1; }
+    let mut i = 0;
+    while i < n_pts {
+        counts[assign[i]] = counts[assign[i]] + 1;
+        i = i + 1;
+    }
+}
+
+// Find site with maximum count.
+fn site_with_max_count(counts: [Int; 8], n_sites: Int) -> Int {
+    let mut best = 0;
+    let mut i = 1;
+    while i < n_sites {
+        if counts[i] > counts[best] { best = i; }
+        i = i + 1;
+    }
+    best
+}
+
+fn test_voronoi_basic() {
+    // 3 sites: A=(0,0), B=(10,0), C=(5,10).
+    // 6 query points assigned to nearest site.
+    let sx = [0, 10,  5, 0, 0, 0, 0, 0];
+    let sy = [0,  0, 10, 0, 0, 0, 0, 0];
+    let n_sites = 3;
+
+    // Points to assign:
+    //   (1,1): dist(A)=2, dist(B)=10, dist(C)=13 -> A=0
+    //   (9,1): dist(A)=10, dist(B)=2, dist(C)=13 -> B=1
+    //   (5,9): dist(A)=14, dist(B)=10, dist(C)=1  -> C=2
+    //   (0,5): dist(A)=5, dist(B)=15, dist(C)=10 -> A=0
+    //   (10,5): dist(A)=15, dist(B)=5, dist(C)=10 -> B=1
+    //   (5,5): dist(A)=10, dist(B)=10, dist(C)=5  -> C=2
+    let qx = [1, 9, 5, 0, 10, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let qy = [1, 1, 9, 5,  5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut assign = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assign_all(sx, sy, n_sites, qx, qy, 6, assign);
+
+    assert_eq(assign[0], 0); // (1,1) -> A
+    assert_eq(assign[1], 1); // (9,1) -> B
+    assert_eq(assign[2], 2); // (5,9) -> C
+    assert_eq(assign[3], 0); // (0,5) -> A
+    assert_eq(assign[4], 1); // (10,5) -> B
+    assert_eq(assign[5], 2); // (5,5) -> C
+
+    let mut counts = [0, 0, 0, 0, 0, 0, 0, 0];
+    region_counts(assign, 6, n_sites, counts);
+    assert_eq(counts[0], 2); // A has 2 points
+    assert_eq(counts[1], 2); // B has 2 points
+    assert_eq(counts[2], 2); // C has 2 points
+
+    print("voronoi_basic: ok");
+}
+
+fn test_voronoi_single_site() {
+    // Single site: all points assigned to it.
+    let sx = [5, 0, 0, 0, 0, 0, 0, 0];
+    let sy = [5, 0, 0, 0, 0, 0, 0, 0];
+    let n_sites = 1;
+    let qx = [0, 10, 3, 7, 1, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let qy = [0,  0, 3, 7, 9, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut assign = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assign_all(sx, sy, n_sites, qx, qy, 6, assign);
+
+    let mut i = 0;
+    while i < 6 {
+        assert_eq(assign[i], 0);
+        i = i + 1;
+    }
+    let mut counts = [0, 0, 0, 0, 0, 0, 0, 0];
+    region_counts(assign, 6, n_sites, counts);
+    assert_eq(counts[0], 6);
+    print("voronoi_single_site: ok");
+}
+
+fn test_voronoi_4_sites_grid() {
+    // 4 sites at corners of a 10x10 grid: (0,0),(10,0),(0,10),(10,10).
+    // Interior points assigned to nearest corner.
+    let sx = [0, 10,  0, 10, 0, 0, 0, 0];
+    let sy = [0,  0, 10, 10, 0, 0, 0, 0];
+    let n_sites = 4;
+
+    // Query points: center (5,5) ties all corners at dist=10 -> site 0 (first).
+    // (2,2): dist(0,0)=4, dist(10,0)=10, dist(0,10)=10, dist(10,10)=16 -> site 0
+    // (8,2): dist(0,0)=10, dist(10,0)=4, dist(0,10)=16, dist(10,10)=10 -> site 1
+    // (2,8): dist(0,0)=10, dist(10,0)=16, dist(0,10)=4, dist(10,10)=10 -> site 2
+    // (8,8): dist(0,0)=16, dist(10,0)=10, dist(0,10)=10, dist(10,10)=4 -> site 3
+    // (5,5): dist all=10 -> site 0 (tie, first wins)
+    // (1,9): dist(0,0)=10, dist(10,0)=18, dist(0,10)=2, dist(10,10)=10 -> site 2
+    let qx = [2,  8, 2, 8, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let qy = [2,  2, 8, 8, 5, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut assign = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assign_all(sx, sy, n_sites, qx, qy, 6, assign);
+
+    assert_eq(assign[0], 0); // (2,2) -> (0,0)
+    assert_eq(assign[1], 1); // (8,2) -> (10,0)
+    assert_eq(assign[2], 2); // (2,8) -> (0,10)
+    assert_eq(assign[3], 3); // (8,8) -> (10,10)
+    assert_eq(assign[4], 0); // (5,5) -> (0,0) tie -> first
+    assert_eq(assign[5], 2); // (1,9) -> (0,10)
+
+    let mut counts = [0, 0, 0, 0, 0, 0, 0, 0];
+    region_counts(assign, 6, n_sites, counts);
+    // site 0: (2,2)+(5,5) = 2
+    // site 1: (8,2) = 1
+    // site 2: (2,8)+(1,9) = 2
+    // site 3: (8,8) = 1
+    assert_eq(counts[0], 2);
+    assert_eq(counts[1], 1);
+    assert_eq(counts[2], 2);
+    assert_eq(counts[3], 1);
+
+    print("voronoi_4_sites_grid: ok");
+}
+
+fn test_voronoi_collinear_sites() {
+    // Sites on a line: (0,0),(5,0),(10,0). Points above or below assigned to nearest.
+    // manhattan distance to site (s,0) from point (px,py) = |px-s| + |py|.
+    let sx = [0, 5, 10, 0, 0, 0, 0, 0];
+    let sy = [0, 0,  0, 0, 0, 0, 0, 0];
+    let n_sites = 3;
+
+    // (2,3): dist(0,0)=5, dist(5,0)=6, dist(10,0)=11 -> site 0
+    // (4,1): dist(0,0)=5, dist(5,0)=2, dist(10,0)=7  -> site 1
+    // (8,2): dist(0,0)=10, dist(5,0)=5, dist(10,0)=4  -> site 2
+    // (5,5): dist(0,0)=10, dist(5,0)=5, dist(10,0)=10 -> site 1
+    // (3,0): dist(0,0)=3, dist(5,0)=2, dist(10,0)=7  -> site 1
+    let qx = [2, 4, 8, 5, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let qy = [3, 1, 2, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut assign = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assign_all(sx, sy, n_sites, qx, qy, 5, assign);
+
+    assert_eq(assign[0], 0); // (2,3) -> site 0
+    assert_eq(assign[1], 1); // (4,1) -> site 1
+    assert_eq(assign[2], 2); // (8,2) -> site 2
+    assert_eq(assign[3], 1); // (5,5) -> site 1
+    assert_eq(assign[4], 1); // (3,0) -> site 1
+
+    let mut counts = [0, 0, 0, 0, 0, 0, 0, 0];
+    region_counts(assign, 5, n_sites, counts);
+    assert_eq(counts[0], 1);
+    assert_eq(counts[1], 3);
+    assert_eq(counts[2], 1);
+
+    let dominant = site_with_max_count(counts, n_sites);
+    assert_eq(dominant, 1); // site 1 has most points
+
+    print("voronoi_collinear_sites: ok");
+}
+
+fn main() -> Int {
+    test_voronoi_basic();
+    test_voronoi_single_site();
+    test_voronoi_4_sites_grid();
+    test_voronoi_collinear_sites();
+    print("[OK] 497_interp_voronoi");
+    0
+}

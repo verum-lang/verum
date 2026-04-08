@@ -1,0 +1,167 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, attributes, registry, errors, diagnostics
+// @expect: error
+// @description: Attribute registry error detection tests
+// @spec: docs/detailed/31-attribute-registry.md Section 8
+
+// =============================================================================
+// ERROR TESTS: These tests verify that the registry correctly detects errors
+// Each test case should produce a specific error code (E0400-E0406)
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// E0400: Unknown attribute
+// Registry should detect unknown attribute names and suggest corrections
+// -----------------------------------------------------------------------------
+
+// TEST: Unknown attribute with no similar name
+// @unknown_attribute_that_does_not_exist  // E0400: unknown attribute `@unknown_attribute_that_does_not_exist`
+// fn test_unknown_attr() {}
+
+// TEST: Typo in attribute name - should suggest @inline
+// @inlien  // E0400: unknown attribute `@inlien`; did you mean `@inline`?
+// fn test_typo_inline() {}
+
+// TEST: Typo in attribute name - should suggest @serialize
+// @serailize  // E0400: unknown attribute `@serailize`; did you mean `@serialize`?
+// type TestTypo is { value: Int };
+
+// TEST: Typo in attribute name - should suggest @deprecated
+// @depreceted  // E0400: unknown attribute `@depreceted`; did you mean `@deprecated`?
+// fn test_typo_deprecated() {}
+
+// -----------------------------------------------------------------------------
+// E0401: Invalid target
+// Registry should detect when attributes are used on wrong targets
+// -----------------------------------------------------------------------------
+
+// TEST: @inline is only valid on Function, not Field
+type InvalidInlineOnField is {
+    // @inline  // E0401: `@inline` is not valid on field; valid targets: function
+    id: Int,
+};
+
+// TEST: @derive is only valid on Type, not Function
+// @derive(Clone)  // E0401: `@derive` is not valid on function; valid targets: type
+// fn invalid_derive_on_function() {}
+
+// TEST: @serialize on Param (invalid)
+fn invalid_serialize_on_param(
+    // @serialize  // E0401: `@serialize` is not valid on parameter; valid targets: type, field, variant
+    x: Int,
+) {}
+
+// TEST: @unroll is only valid on Loop, not Function
+// @unroll(4)  // E0401: `@unroll` is not valid on function; valid targets: loop
+// fn invalid_unroll_on_function() {}
+
+// TEST: @default is only valid on Variant, not Function
+// @default  // E0401: `@default` is not valid on function; valid targets: variant
+// fn invalid_default_on_function() {}
+
+// -----------------------------------------------------------------------------
+// E0402: Invalid arguments
+// Registry should validate argument types, counts, and names
+// -----------------------------------------------------------------------------
+
+// TEST: @inline with invalid mode
+// @inline(sometimes)  // E0402: `@inline`: invalid mode 'sometimes'; expected always, never, or release
+// fn invalid_inline_mode() {}
+
+// TEST: @align with non-integer argument
+// @align("16")  // E0402: `@align`: expected integer argument, got string
+// type InvalidAlignArg is { data: Int };
+
+// TEST: @align with zero (invalid)
+// @align(0)  // E0402: `@align`: alignment must be a power of 2
+// type ZeroAlign is { data: Int };
+
+// TEST: @deprecated with unknown named argument
+// @deprecated(since = "2.0", invalid_arg = true)  // E0402: `@deprecated`: unknown argument 'invalid_arg'
+// fn invalid_deprecated_arg() {}
+
+// TEST: @derive with invalid protocol name
+// @derive(NotAProtocol)  // E0402: `@derive`: unknown protocol 'NotAProtocol'
+// type InvalidDerive is { value: Int };
+
+// TEST: @validate with invalid constraint type
+// @validate(min_length = "not a number")  // E0402: `@validate`: 'min_length' expects integer
+// type InvalidValidateArg is { name: Text };
+
+// -----------------------------------------------------------------------------
+// E0403: Duplicate non-repeatable attribute
+// Registry should detect when non-repeatable attributes appear multiple times
+// -----------------------------------------------------------------------------
+
+// TEST: Duplicate @inline
+// @inline(always)
+// @inline(never)  // E0403: `@inline` can only appear once (first occurrence at line N)
+// fn duplicate_inline() {}
+
+// TEST: Duplicate @repr
+// @repr(C)
+// @repr(packed)  // E0403: `@repr` can only appear once
+// type DuplicateRepr is { data: Int };
+
+// TEST: Duplicate @default on variant
+type DuplicateDefault is
+    @default
+    A
+    // | @default  // E0403: `@default` can only appear once on variants
+    | B;
+
+// -----------------------------------------------------------------------------
+// E0404: Conflicting attributes
+// Registry should detect mutually exclusive attribute combinations
+// -----------------------------------------------------------------------------
+
+// TEST: @cold and @hot conflict
+// @cold
+// @hot  // E0404: `@hot` conflicts with `@cold`
+// fn cold_and_hot() {}
+
+// TEST: @inline and @cold conflict
+// @inline(always)
+// @cold  // E0404: `@cold` conflicts with `@inline`
+// fn inline_and_cold() {}
+
+// TEST: Conflicting match arm optimization hints
+fn conflicting_match_hints(x: Int) -> Int {
+    match x {
+        // @hot
+        // @cold  // E0404: `@cold` conflicts with `@hot`
+        n if n > 0 => n,
+        _ => 0,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// E0405: Missing required attribute
+// Registry should detect when required companion attributes are missing
+// -----------------------------------------------------------------------------
+
+// TEST: @specialize without implementation context
+// (This is a hypothetical example - actual requirements depend on attribute definitions)
+// @specialize  // E0405: `@specialize` requires an implementation block context
+// fn orphan_specialize() {}
+
+// -----------------------------------------------------------------------------
+// E0406: Feature gate required
+// Registry should detect unstable features without proper feature gate
+// -----------------------------------------------------------------------------
+
+// TEST: Unstable attribute without feature gate
+// @experimental_feature  // E0406: `@experimental_feature` requires feature `unstable_attrs` to be enabled
+// fn needs_feature_gate() {}
+
+// =============================================================================
+// Main function - these error tests are compile-time only
+// =============================================================================
+
+fn main() {
+    // This file contains error cases that should be detected at compile time.
+    // The file is expected to fail compilation with the appropriate error codes.
+    print("This should not compile - error cases above should be detected");
+}

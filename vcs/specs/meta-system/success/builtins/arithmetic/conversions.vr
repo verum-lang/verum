@@ -1,0 +1,84 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, conversions, int_to_text, text_to_int
+// @description: Test integer/text conversion builtins
+
+// =============================================================================
+// INT_TO_TEXT BUILTIN TESTS
+// =============================================================================
+
+// Test int_to_text with positive numbers
+meta fn test_int_to_text_positive() -> Text {
+    int_to_text(42)  // Should be "42"
+}
+
+meta fn test_int_to_text_zero() -> Text {
+    int_to_text(0)  // Should be "0"
+}
+
+meta fn test_int_to_text_negative() -> Text {
+    int_to_text(-123)  // Should be "-123"
+}
+
+meta fn test_int_to_text_large() -> Text {
+    int_to_text(1000000)  // Should be "1000000"
+}
+
+// =============================================================================
+// TEXT_TO_INT BUILTIN TESTS
+// =============================================================================
+
+// Test text_to_int with valid inputs
+meta fn test_text_to_int_positive() -> Int {
+    text_to_int("42")  // Should be 42
+}
+
+meta fn test_text_to_int_zero() -> Int {
+    text_to_int("0")  // Should be 0
+}
+
+meta fn test_text_to_int_negative() -> Int {
+    text_to_int("-123")  // Should be -123
+}
+
+meta fn test_text_to_int_large() -> Int {
+    text_to_int("1000000")  // Should be 1000000
+}
+
+// =============================================================================
+// ROUNDTRIP TESTS
+// =============================================================================
+
+// Test int -> text -> int roundtrip
+meta fn test_roundtrip_positive() -> Int {
+    text_to_int(int_to_text(42))  // Should be 42
+}
+
+meta fn test_roundtrip_negative() -> Int {
+    text_to_int(int_to_text(-789))  // Should be -789
+}
+
+meta fn test_roundtrip_zero() -> Int {
+    text_to_int(int_to_text(0))  // Should be 0
+}
+
+// Main test function
+fn main() {
+    // Int to text tests
+    assert_eq(@const(test_int_to_text_positive()), "42");
+    assert_eq(@const(test_int_to_text_zero()), "0");
+    assert_eq(@const(test_int_to_text_negative()), "-123");
+    assert_eq(@const(test_int_to_text_large()), "1000000");
+
+    // Text to int tests
+    assert_eq(@const(test_text_to_int_positive()), 42);
+    assert_eq(@const(test_text_to_int_zero()), 0);
+    assert_eq(@const(test_text_to_int_negative()), -123);
+    assert_eq(@const(test_text_to_int_large()), 1000000);
+
+    // Roundtrip tests
+    assert_eq(@const(test_roundtrip_positive()), 42);
+    assert_eq(@const(test_roundtrip_negative()), -789);
+    assert_eq(@const(test_roundtrip_zero()), 0);
+}

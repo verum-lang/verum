@@ -1,0 +1,469 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/conversion_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, conversion, type-cast, bytes
+// @description: Comprehensive tests for type conversion intrinsics that provide
+//               safe and unsafe type transformations.
+//
+// Coverage:
+// - int_to_float, float_to_int: Integer/float conversion
+// - to_le_bytes, to_be_bytes: Number to byte array conversion
+// - from_le_bytes, from_be_bytes: Byte array to number conversion
+// - f32_to_bits, f32_from_bits: Float32 bit representation
+// - f64_to_bits, f64_from_bits: Float64 bit representation
+// - int_to_bytes: Int to byte array
+//
+// Test Strategy:
+// - Round-trip conversions
+// - Edge cases (zero, max values, special floats)
+// - Endianness correctness
+// - IEEE 754 bit patterns
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.conversion_test;
+
+mount core.intrinsics.{
+    int_to_float, float_to_int,
+    to_le_bytes, to_be_bytes, from_le_bytes, from_be_bytes,
+    f32_to_bits, f32_from_bits, f64_to_bits, f64_from_bits,
+    f32_infinity, f32_neg_infinity, f32_nan,
+    f64_infinity, f64_neg_infinity, f64_nan,
+    int_to_bytes,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Int to Float Conversion Tests
+// =============================================================================
+
+@test
+fn test_int_float_conversion() {
+    // Zero
+    assert(int_to_float(0) == 0.0);
+
+    // Positive integers
+    assert(int_to_float(1) == 1.0);
+    assert(int_to_float(42) == 42.0);
+    assert(int_to_float(1000000) == 1000000.0);
+
+    // Negative integers
+    assert(int_to_float(-1) == -1.0);
+    assert(int_to_float(-42) == -42.0);
+    assert(int_to_float(-1000000) == -1000000.0);
+
+    // Large values (may lose precision)
+    let large: Int = 9007199254740993;  // 2^53 + 1
+    let f = int_to_float(large);
+    // Value should be approximately correct even if precision is lost
+    assert(f > 9.0e15 && f < 9.1e15);
+
+    // Powers of 2 (exact representation)
+    assert(int_to_float(2) == 2.0);
+    assert(int_to_float(4) == 4.0);
+    assert(int_to_float(1024) == 1024.0);
+    assert(int_to_float(1048576) == 1048576.0);  // 2^20
+
+    print("int_to_float tests passed");
+}
+
+// =============================================================================
+// Float to Int Conversion Tests
+// =============================================================================
+
+@test
+fn test_float_int_conversion() {
+    // Zero
+    assert(float_to_int(0.0) == 0);
+    assert(float_to_int(-0.0) == 0);  // Negative zero
+
+    // Positive floats
+    assert(float_to_int(1.0) == 1);
+    assert(float_to_int(42.0) == 42);
+    assert(float_to_int(1000.0) == 1000);
+
+    // Negative floats
+    assert(float_to_int(-1.0) == -1);
+    assert(float_to_int(-42.0) == -42);
+
+    // Truncation (floor toward zero)
+    assert(float_to_int(1.5) == 1);
+    assert(float_to_int(1.9) == 1);
+    assert(float_to_int(-1.5) == -1);
+    assert(float_to_int(-1.9) == -1);
+
+    // Very small fractions
+    assert(float_to_int(0.1) == 0);
+    assert(float_to_int(0.9999) == 0);
+    assert(float_to_int(-0.1) == 0);
+    assert(float_to_int(-0.9999) == 0);
+
+    // Large floats
+    let large_f = 1.0e15;
+    let large_i = float_to_int(large_f);
+    assert(large_i == 1000000000000000);
+
+    print("float_to_int tests passed");
+}
+
+// =============================================================================
+// To Little-Endian Bytes Tests
+// =============================================================================
+
+@test
+fn test_to_le_bytes() {
+    // UInt32
+    let bytes = to_le_bytes<UInt32>(0x12345678);
+    assert(bytes[0] == 0x78);  // LSB first
+    assert(bytes[1] == 0x56);
+    assert(bytes[2] == 0x34);
+    assert(bytes[3] == 0x12);  // MSB last
+
+    // UInt64
+    let bytes64 = to_le_bytes<UInt64>(0x123456789ABCDEF0);
+    assert(bytes64[0] == 0xF0);  // LSB
+    assert(bytes64[7] == 0x12);  // MSB
+
+    // UInt16
+    let bytes16 = to_le_bytes<UInt16>(0xABCD);
+    assert(bytes16[0] == 0xCD);  // LSB
+    assert(bytes16[1] == 0xAB);  // MSB
+
+    // Zero
+    let zero_bytes = to_le_bytes<UInt32>(0);
+    assert(zero_bytes[0] == 0);
+    assert(zero_bytes[1] == 0);
+    assert(zero_bytes[2] == 0);
+    assert(zero_bytes[3] == 0);
+
+    // Max value
+    let max_bytes = to_le_bytes<UInt32>(0xFFFFFFFF);
+    assert(max_bytes[0] == 0xFF);
+    assert(max_bytes[1] == 0xFF);
+    assert(max_bytes[2] == 0xFF);
+    assert(max_bytes[3] == 0xFF);
+
+    // Signed integers
+    let signed_bytes = to_le_bytes<Int32>(-1);
+    assert(signed_bytes[0] == 0xFF);  // Two's complement
+    assert(signed_bytes[1] == 0xFF);
+    assert(signed_bytes[2] == 0xFF);
+    assert(signed_bytes[3] == 0xFF);
+
+    print("to_le_bytes tests passed");
+}
+
+// =============================================================================
+// To Big-Endian Bytes Tests
+// =============================================================================
+
+@test
+fn test_to_be_bytes() {
+    // UInt32
+    let bytes = to_be_bytes<UInt32>(0x12345678);
+    assert(bytes[0] == 0x12);  // MSB first
+    assert(bytes[1] == 0x34);
+    assert(bytes[2] == 0x56);
+    assert(bytes[3] == 0x78);  // LSB last
+
+    // UInt64
+    let bytes64 = to_be_bytes<UInt64>(0x123456789ABCDEF0);
+    assert(bytes64[0] == 0x12);  // MSB
+    assert(bytes64[7] == 0xF0);  // LSB
+
+    // UInt16
+    let bytes16 = to_be_bytes<UInt16>(0xABCD);
+    assert(bytes16[0] == 0xAB);  // MSB
+    assert(bytes16[1] == 0xCD);  // LSB
+
+    // Network byte order is big-endian
+    // IP address 192.168.1.1 as UInt32
+    let ip: UInt32 = 0xC0A80101;  // 192.168.1.1
+    let ip_bytes = to_be_bytes<UInt32>(ip);
+    assert(ip_bytes[0] == 192);
+    assert(ip_bytes[1] == 168);
+    assert(ip_bytes[2] == 1);
+    assert(ip_bytes[3] == 1);
+
+    print("to_be_bytes tests passed");
+}
+
+// =============================================================================
+// From Little-Endian Bytes Tests
+// =============================================================================
+
+@test
+fn test_from_le_bytes() {
+    // UInt32
+    let bytes: [Byte; 4] = [0x78, 0x56, 0x34, 0x12];
+    let value = from_le_bytes<UInt32>(bytes);
+    assert(value == 0x12345678);
+
+    // UInt64
+    let bytes64: [Byte; 8] = [0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12];
+    let value64 = from_le_bytes<UInt64>(bytes64);
+    assert(value64 == 0x123456789ABCDEF0);
+
+    // UInt16
+    let bytes16: [Byte; 2] = [0xCD, 0xAB];
+    let value16 = from_le_bytes<UInt16>(bytes16);
+    assert(value16 == 0xABCD);
+
+    // Zero
+    let zero_bytes: [Byte; 4] = [0, 0, 0, 0];
+    assert(from_le_bytes<UInt32>(zero_bytes) == 0);
+
+    // Single byte value
+    let small_bytes: [Byte; 4] = [42, 0, 0, 0];
+    assert(from_le_bytes<UInt32>(small_bytes) == 42);
+
+    print("from_le_bytes tests passed");
+}
+
+// =============================================================================
+// From Big-Endian Bytes Tests
+// =============================================================================
+
+@test
+fn test_from_be_bytes() {
+    // UInt32
+    let bytes: [Byte; 4] = [0x12, 0x34, 0x56, 0x78];
+    let value = from_be_bytes<UInt32>(bytes);
+    assert(value == 0x12345678);
+
+    // UInt64
+    let bytes64: [Byte; 8] = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
+    let value64 = from_be_bytes<UInt64>(bytes64);
+    assert(value64 == 0x123456789ABCDEF0);
+
+    // Network byte order IP
+    let ip_bytes: [Byte; 4] = [192, 168, 1, 1];
+    let ip = from_be_bytes<UInt32>(ip_bytes);
+    assert(ip == 0xC0A80101);
+
+    print("from_be_bytes tests passed");
+}
+
+// =============================================================================
+// Float32 Bit Manipulation Tests
+// =============================================================================
+
+@test
+fn test_f32_bits() {
+    // Zero
+    let zero_bits = f32_to_bits(0.0);
+    assert(zero_bits == 0x00000000);
+
+    // Negative zero
+    let neg_zero_bits = f32_to_bits(-0.0);
+    assert(neg_zero_bits == 0x80000000);  // Sign bit set
+
+    // One
+    let one_bits = f32_to_bits(1.0);
+    assert(one_bits == 0x3F800000);  // IEEE 754: 1.0
+
+    // Two
+    let two_bits = f32_to_bits(2.0);
+    assert(two_bits == 0x40000000);
+
+    // Negative one
+    let neg_one_bits = f32_to_bits(-1.0);
+    assert(neg_one_bits == 0xBF800000);
+
+    // Round-trip
+    let original: Float32 = 3.14159;
+    let bits = f32_to_bits(original);
+    let recovered = f32_from_bits(bits);
+    assert(recovered == original);
+
+    // Known bit pattern
+    let val = f32_from_bits(0x3F800000);
+    assert(val == 1.0);
+
+    print("f32_bits tests passed");
+}
+
+// =============================================================================
+// Float64 Bit Manipulation Tests
+// =============================================================================
+
+@test
+fn test_f64_bits() {
+    // Zero
+    let zero_bits = f64_to_bits(0.0);
+    assert(zero_bits == 0x0000000000000000);
+
+    // Negative zero
+    let neg_zero_bits = f64_to_bits(-0.0);
+    assert(neg_zero_bits == 0x8000000000000000);
+
+    // One
+    let one_bits = f64_to_bits(1.0);
+    assert(one_bits == 0x3FF0000000000000);
+
+    // Two
+    let two_bits = f64_to_bits(2.0);
+    assert(two_bits == 0x4000000000000000);
+
+    // Pi (approximate)
+    let pi_bits = f64_to_bits(3.141592653589793);
+    assert(pi_bits == 0x400921FB54442D18);
+
+    // Round-trip for various values
+    let values: [Float64; 5] = [0.0, 1.0, -1.0, 3.14159265358979, 1.0e100];
+    for i in 0..5 {
+        let orig = values[i];
+        let bits = f64_to_bits(orig);
+        let recovered = f64_from_bits(bits);
+        assert(recovered == orig);
+    }
+
+    print("f64_bits tests passed");
+}
+
+// =============================================================================
+// Endianness Round-Trip Tests
+// =============================================================================
+
+@test
+fn test_endianness_round_trip() {
+    // LE round-trip
+    let le_values: [UInt32; 5] = [0, 1, 0x12345678, 0xFFFFFFFF, 0xDEADBEEF];
+    for i in 0..5 {
+        let original = le_values[i];
+        let bytes = to_le_bytes<UInt32>(original);
+        let recovered = from_le_bytes<UInt32>(bytes);
+        assert(recovered == original);
+    }
+
+    // BE round-trip
+    for i in 0..5 {
+        let original = le_values[i];
+        let bytes = to_be_bytes<UInt32>(original);
+        let recovered = from_be_bytes<UInt32>(bytes);
+        assert(recovered == original);
+    }
+
+    // UInt64 round-trip
+    let u64_values: [UInt64; 3] = [0, 0x123456789ABCDEF0, 0xFFFFFFFFFFFFFFFF];
+    for i in 0..3 {
+        let original = u64_values[i];
+
+        let le_bytes = to_le_bytes<UInt64>(original);
+        let le_recovered = from_le_bytes<UInt64>(le_bytes);
+        assert(le_recovered == original);
+
+        let be_bytes = to_be_bytes<UInt64>(original);
+        let be_recovered = from_be_bytes<UInt64>(be_bytes);
+        assert(be_recovered == original);
+    }
+
+    // Int32 round-trip (including negative values)
+    let i32_values: [Int32; 4] = [0, 1, -1, -2147483648];
+    for i in 0..4 {
+        let original = i32_values[i];
+
+        let le_bytes = to_le_bytes<Int32>(original);
+        let le_recovered = from_le_bytes<Int32>(le_bytes);
+        assert(le_recovered == original);
+    }
+
+    print("Endianness round-trip tests passed");
+}
+
+// =============================================================================
+// Special Float Bit Patterns Tests
+// =============================================================================
+
+@test
+fn test_special_float_bits() {
+    // Positive infinity (Float32)
+    let pos_inf: Float32 = f32_infinity();
+    let inf_bits = f32_to_bits(pos_inf);
+    assert(inf_bits == 0x7F800000);
+
+    // Negative infinity (Float32)
+    let neg_inf: Float32 = f32_neg_infinity();
+    let neg_inf_bits = f32_to_bits(neg_inf);
+    assert(neg_inf_bits == 0xFF800000);
+
+    // NaN (Float32) - any non-zero mantissa with all exponent bits set
+    let nan: Float32 = f32_nan();
+    let nan_bits = f32_to_bits(nan);
+    // NaN has exponent = 0xFF and non-zero mantissa
+    assert((nan_bits & 0x7F800000) == 0x7F800000);  // Exponent all 1s
+    assert((nan_bits & 0x007FFFFF) != 0);           // Mantissa non-zero
+
+    // Float64 infinity
+    let pos_inf64: Float64 = f64_infinity();
+    let inf64_bits = f64_to_bits(pos_inf64);
+    assert(inf64_bits == 0x7FF0000000000000);
+
+    // Float64 negative infinity
+    let neg_inf64: Float64 = f64_neg_infinity();
+    let neg_inf64_bits = f64_to_bits(neg_inf64);
+    assert(neg_inf64_bits == 0xFFF0000000000000);
+
+    // Float64 NaN
+    let nan64: Float64 = f64_nan();
+    let nan64_bits = f64_to_bits(nan64);
+    assert((nan64_bits & 0x7FF0000000000000) == 0x7FF0000000000000);
+    assert((nan64_bits & 0x000FFFFFFFFFFFFF) != 0);
+
+    // Reconstruct infinity from bits
+    let inf_reconstructed = f32_from_bits(0x7F800000);
+    assert(inf_reconstructed == pos_inf);
+
+    print("Special float bit patterns tests passed");
+}
+
+// =============================================================================
+// Int to Bytes Tests
+// =============================================================================
+
+@test
+fn test_int_to_bytes() {
+    // Zero
+    let bytes = int_to_bytes(0);
+    for i in 0..8 {
+        assert(bytes[i] == 0);
+    }
+
+    // Small positive
+    let bytes = int_to_bytes(42);
+    // Little-endian: LSB first
+    assert(bytes[0] == 42);
+    for i in 1..8 {
+        assert(bytes[i] == 0);
+    }
+
+    // Max positive Int (assuming 64-bit)
+    let max_pos: Int = 9223372036854775807;  // 2^63 - 1
+    let bytes = int_to_bytes(max_pos);
+    assert(bytes[7] == 0x7F);  // MSB (no sign bit)
+
+    // Negative one (two's complement: all 1s)
+    let bytes = int_to_bytes(-1);
+    for i in 0..8 {
+        assert(bytes[i] == 0xFF);
+    }
+
+    // Min negative Int
+    let min_neg: Int = -9223372036854775808;  // -2^63
+    let bytes = int_to_bytes(min_neg);
+    assert(bytes[7] == 0x80);  // MSB has sign bit
+    for i in 0..7 {
+        assert(bytes[i] == 0);
+    }
+
+    print("int_to_bytes tests passed");
+}

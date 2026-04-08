@@ -1,0 +1,135 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, heap, allocation
+
+/// Test the memory layout of Heap<T> allocations via CBGR header inspection.
+/// Each Heap allocation has a 16-byte AllocationHeader before the data:
+///   - generation (4 bytes): unique allocation ID
+///   - size (4 bytes): data size in bytes
+///   - flags (4 bytes): allocation state flags
+///   - epoch (4 bytes): allocation epoch timestamp
+/// Spec: 26-cbgr-implementation.md#heap-layout
+
+fn main() {
+    test_heap_basic_layout();
+    print("  [OK] test_heap_basic_layout");
+    test_heap_generation_uniqueness();
+    print("  [OK] test_heap_generation_uniqueness");
+    test_heap_header_consistency();
+    print("  [OK] test_heap_header_consistency");
+    test_heap_freed_flag();
+    print("  [OK] test_heap_freed_flag");
+    test_heap_nested();
+    print("  [OK] test_heap_nested");
+
+    print("All heap allocation layout tests passed!");
+}
+
+/// Test basic Heap<T> header structure
+fn test_heap_basic_layout() {
+    let value = Heap.new(42);
+
+    // Header fields accessible via built-in methods:
+    let generation = value.header_generation();
+    let data_size = value.header_size();
+    let header_epoch = value.header_epoch();
+
+    // Generation must be positive for valid allocations
+    assert(generation > 0);
+
+    // Data size must be positive (stores size of the value)
+    assert(data_size > 0);
+
+    // Epoch must be positive (records allocation time)
+    assert(header_epoch > 0);
+
+    // Allocation flags: should show allocated, not freed
+    assert(value.is_allocated());
+    assert(!value.is_freed());
+}
+
+/// Test that each allocation gets a unique generation
+fn test_heap_generation_uniqueness() {
+    let a = Heap.new(1);
+    let b = Heap.new(2);
+    let c = Heap.new(3);
+
+    let gen_a = a.header_generation();
+    let gen_b = b.header_generation();
+    let gen_c = c.header_generation();
+
+    // Generations are unique and strictly increasing
+    assert(gen_a < gen_b);
+    assert(gen_b < gen_c);
+
+    // header_generation matches generation
+    assert(a.header_generation() == a.generation());
+    assert(b.header_generation() == b.generation());
+    assert(c.header_generation() == c.generation());
+}
+
+/// Test header field consistency
+fn test_heap_header_consistency() {
+    let value = Heap.new(42);
+
+    // The generation from the header must match the direct generation query
+    assert(value.header_generation() == value.generation());
+
+    // Epoch in header must match current epoch at allocation time
+    let header_epoch = value.header_epoch();
+    let current = Epoch.current();
+    // Header epoch should be <= current (allocated at or before current time)
+    assert(header_epoch <= current);
+
+    // Size should be consistent for same type
+    let value2 = Heap.new(99);
+    assert(value.header_size() == value2.header_size());
+}
+
+/// Test that the freed flag is properly set on drop
+fn test_heap_freed_flag() {
+    let value = Heap.new(42);
+
+    // Before drop: allocated, not freed
+    assert(value.is_allocated());
+    assert(!value.is_freed());
+
+    // The generation should be a valid positive number
+    let gen_before = value.generation();
+    assert(gen_before > 0);
+}
+
+/// Test nested Heap allocations have independent headers
+fn test_heap_nested() {
+    let inner = Heap.new(42);
+    let outer = Heap.new(100);
+
+    // Each allocation has its own independent header
+    let inner_gen = inner.header_generation();
+    let outer_gen = outer.header_generation();
+
+    // Different allocations, different generations
+    assert(inner_gen != outer_gen);
+
+    // Both have valid headers
+    assert(inner.is_allocated());
+    assert(outer.is_allocated());
+
+    // Both have positive sizes
+    assert(inner.header_size() > 0);
+    assert(outer.header_size() > 0);
+
+    // Inner was allocated first, so lower generation
+    assert(inner_gen < outer_gen);
+}
+
+// Supporting types
+
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+}

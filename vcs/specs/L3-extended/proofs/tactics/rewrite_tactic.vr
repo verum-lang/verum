@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, rewrite
+// @description: Rewrite tactic for equational reasoning
+
+/// Basic rewrite
+theorem rewrite_basic(x: Int, y: Int)
+    requires x == y
+    ensures x + 1 == y + 1
+{
+    proof {
+        rewrite x == y in goal;
+        trivial
+    }
+}
+
+/// Rewrite with known lemma
+theorem rewrite_with_lemma(n: Nat): n + 0 == n {
+    proof {
+        rewrite add_zero;
+        trivial
+    }
+}
+
+lemma add_zero(n: Nat): n + 0 == n { proof by definition }
+
+/// Multiple rewrites
+theorem multi_rewrite(a: Int, b: Int, c: Int)
+    requires a == b
+    requires b == c
+    ensures a == c
+{
+    proof {
+        have h1: a == b by precondition;
+        have h2: b == c by precondition;
+        rewrite h1 in goal;
+        exact h2
+    }
+}
+
+/// Rewrite in hypothesis
+theorem rewrite_hyp(x: Int, y: Int, z: Int)
+    requires x == y
+    requires y + z > 0
+    ensures x + z > 0
+{
+    proof {
+        have h1: x == y by precondition;
+        have h2: y + z > 0 by precondition;
+        rewrite h1 in goal;
+        exact h2
+    }
+}
+
+/// Conditional rewrite
+theorem cond_rewrite(n: Int)
+    requires n > 0
+    ensures n * 1 == n
+{
+    proof by ring
+}
+
+/// Rewrite with calc chain
+theorem calc_rewrite(a: Int, b: Int): (a + b) * (a + b) == a*a + 2*a*b + b*b {
+    proof {
+        calc {
+            (a + b) * (a + b)
+            == { by ring } a*a + 2*a*b + b*b
+        }
+    }
+}
+
+/// Bidirectional rewrite
+theorem bidi_rewrite(xs: List<Int>): xs ++ [] == xs {
+    proof by auto
+}
+
+/// Rewrite under quantifiers
+theorem quant_rewrite(): forall n: Nat. n + 0 == n {
+    proof by auto
+}
+
+fn main() {}

@@ -1,0 +1,97 @@
+// @test: parse-pass
+// @tier: all
+// @level: L1
+// @tags: modules, prelude, implicit-imports
+
+/// Prelude system tests (Spec Section 9).
+/// The standard prelude is automatically imported into every module.
+
+module std {
+    pub module prelude {
+        // Common types
+        pub type Maybe<T> is
+            | Some(T)
+            | None;
+
+        pub type Result<T, E> is
+            | Ok(T)
+            | Err(E);
+
+        // Common protocols
+        pub type Default is protocol {
+            fn default() -> Self;
+        };
+
+        pub type Clone is protocol {
+            fn clone(&self) -> Self;
+        };
+
+        pub type Debug is protocol {
+            fn debug(&self) -> Text;
+        };
+
+        // Common functions
+        pub fn print(msg: Text) {
+            print(msg);
+        }
+    }
+
+    pub module collections {
+        pub type List<T> is { length: Int };
+        pub type Map<K, V> is { size: Int };
+        pub type Set<T> is { size: Int };
+    }
+}
+
+// Custom prelude for domain-specific code
+module domain_prelude {
+    // Re-export standard prelude
+    pub mount std.prelude.*;
+
+    // Add domain-specific items
+    pub type Entity is protocol {
+        fn id(&self) -> Int;
+    };
+
+    pub type Error is
+        | NotFound
+        | ValidationError(Text)
+        | DatabaseError(Text);
+}
+
+// Module using standard prelude (implicit link)
+module app_module {
+    // std.prelude.* is implicitly imported
+
+    pub fn example() -> Result<Int, Text> {
+        let v: Maybe<Int> = Maybe.Some(42);
+
+        match v {
+            Some(x) => Result.Ok(x),
+            None => Result.Err("No value")
+        }
+    }
+}
+
+// Module using custom domain prelude
+module domain_module {
+    mount domain_prelude.*;
+
+    pub type User is {
+        user_id: Int,
+        name: Text
+    };
+
+    implement Entity for User {
+        fn id(&self) -> Int {
+            self.user_id
+        }
+    }
+}
+
+fn main() -> Int {
+    // Prelude types available
+    let opt: Maybe<Int> = Maybe.Some(100);
+    let res: Result<Text, Int> = Result.Ok("success");
+    0
+}

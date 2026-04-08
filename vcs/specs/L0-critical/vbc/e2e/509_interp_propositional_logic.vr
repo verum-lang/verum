@@ -1,0 +1,332 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, propositional_logic, truth_tables, boolean_algebra, sat
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Propositional logic evaluator (AND, OR, NOT, IMPLIES, XOR, IFF) on truth tables.
+//
+// We encode formulas as expression trees (flat array):
+//   node[i*3+0] = type: 0=VAR(n), 1=NOT, 2=AND, 3=OR, 4=IMPLIES, 5=XOR, 6=IFF, 7=CONST
+//   node[i*3+1] = value: var index (for VAR), constant (for CONST), left child (for binary)
+//   node[i*3+2] = right child (for binary ops), unused for unary/leaf
+//
+// Evaluation: given variable assignment vars[0..n-1] (0=false, 1=true).
+//
+// Truth table: enumerate all 2^n assignments and collect results.
+
+// Evaluate formula tree rooted at node i.
+// vars[0..7] = variable assignments (0 or 1).
+@allow(unbounded_recursion)
+fn eval_formula(nodes: [Int; 96], i: Int, vars: [Int; 8]) -> Int {
+    let ty   = nodes[i * 3 + 0];
+    let left = nodes[i * 3 + 1];
+    let rgt  = nodes[i * 3 + 2];
+
+    if ty == 7 { return left; }   // CONST
+    if ty == 0 { return vars[left]; }  // VAR
+    if ty == 1 {  // NOT
+        let v = eval_formula(nodes, left, vars);
+        return if v == 0 { 1 } else { 0 };
+    }
+    let lv = eval_formula(nodes, left, vars);
+    let rv = eval_formula(nodes, rgt,  vars);
+    if ty == 2 { return lv * rv; }                                    // AND
+    if ty == 3 { return if lv + rv > 0 { 1 } else { 0 }; }           // OR
+    if ty == 4 { return if lv == 1 && rv == 0 { 0 } else { 1 }; }    // IMPLIES
+    if ty == 5 { return if lv == rv { 0 } else { 1 }; }               // XOR
+    // ty == 6: IFF
+    if lv == rv { 1 } else { 0 }
+}
+
+// Build truth table for a 2-variable formula into table[0..3].
+// Enumerates: (A=0,B=0), (A=0,B=1), (A=1,B=0), (A=1,B=1).
+fn truth_table_2(nodes: [Int; 96], root: Int, table: [Int; 4]) {
+    let mut row = 0;
+    let mut a = 0;
+    while a < 2 {
+        let mut b = 0;
+        while b < 2 {
+            let mut vars = [0, 0, 0, 0, 0, 0, 0, 0];
+            vars[0] = a;
+            vars[1] = b;
+            table[row] = eval_formula(nodes, root, vars);
+            row = row + 1;
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+}
+
+// Count satisfying assignments for a 2-variable formula.
+fn count_sat_2(nodes: [Int; 96], root: Int) -> Int {
+    let mut table = [0, 0, 0, 0];
+    truth_table_2(nodes, root, table);
+    table[0] + table[1] + table[2] + table[3]
+}
+
+// Count satisfying assignments for a 3-variable formula.
+fn count_sat_3(nodes: [Int; 96], root: Int) -> Int {
+    let mut cnt = 0;
+    let mut a = 0;
+    while a < 2 {
+        let mut b = 0;
+        while b < 2 {
+            let mut c = 0;
+            while c < 2 {
+                let mut vars = [0, 0, 0, 0, 0, 0, 0, 0];
+                vars[0] = a; vars[1] = b; vars[2] = c;
+                let v = eval_formula(nodes, root, vars);
+                cnt = cnt + v;
+                c = c + 1;
+            }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    cnt
+}
+
+fn test_basic_connectives() {
+    // Build formulas using simple node arrays.
+    // Formula: A AND B  (2 nodes: AND(VAR0, VAR1))
+    // node[0]: type=2(AND), left=1, right=2
+    // node[1]: type=0(VAR), left=0 (A)
+    // node[2]: type=0(VAR), left=1 (B)
+    let mut and_nodes = [0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0];
+    // node 0: AND(1, 2)
+    and_nodes[0] = 2; and_nodes[1] = 1; and_nodes[2] = 2;
+    // node 1: VAR 0 (A)
+    and_nodes[3] = 0; and_nodes[4] = 0; and_nodes[5] = 0;
+    // node 2: VAR 1 (B)
+    and_nodes[6] = 0; and_nodes[7] = 1; and_nodes[8] = 0;
+
+    // Truth table for A AND B: (0,0,0,1)
+    let mut tbl = [0, 0, 0, 0];
+    truth_table_2(and_nodes, 0, tbl);
+    assert_eq(tbl[0], 0); // F AND F = F
+    assert_eq(tbl[1], 0); // F AND T = F
+    assert_eq(tbl[2], 0); // T AND F = F
+    assert_eq(tbl[3], 1); // T AND T = T
+    assert_eq(count_sat_2(and_nodes, 0), 1);
+
+    // Formula: A OR B
+    let mut or_nodes = [0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0];
+    or_nodes[0] = 3; or_nodes[1] = 1; or_nodes[2] = 2; // OR(1,2)
+    or_nodes[3] = 0; or_nodes[4] = 0; or_nodes[5] = 0; // VAR 0
+    or_nodes[6] = 0; or_nodes[7] = 1; or_nodes[8] = 0; // VAR 1
+    let mut tbl2 = [0, 0, 0, 0];
+    truth_table_2(or_nodes, 0, tbl2);
+    assert_eq(tbl2[0], 0); // F OR F = F
+    assert_eq(tbl2[1], 1); // F OR T = T
+    assert_eq(tbl2[2], 1); // T OR F = T
+    assert_eq(tbl2[3], 1); // T OR T = T
+    assert_eq(count_sat_2(or_nodes, 0), 3);
+
+    print("basic_connectives: ok");
+}
+
+fn test_implies_xor_iff() {
+    // Reuse a node array for all three formulas (same structure, different root type).
+    let mut nodes = [0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0];
+    // node 1: VAR 0; node 2: VAR 1
+    nodes[3] = 0; nodes[4] = 0; nodes[5] = 0;
+    nodes[6] = 0; nodes[7] = 1; nodes[8] = 0;
+
+    // A IMPLIES B: (1,1,0,1)
+    nodes[0] = 4; nodes[1] = 1; nodes[2] = 2;
+    let mut tbl = [0, 0, 0, 0];
+    truth_table_2(nodes, 0, tbl);
+    assert_eq(tbl[0], 1); // F->F = T
+    assert_eq(tbl[1], 1); // F->T = T
+    assert_eq(tbl[2], 0); // T->F = F
+    assert_eq(tbl[3], 1); // T->T = T
+    assert_eq(count_sat_2(nodes, 0), 3);
+
+    // A XOR B: (0,1,1,0)
+    nodes[0] = 5; nodes[1] = 1; nodes[2] = 2;
+    let mut tbl2 = [0, 0, 0, 0];
+    truth_table_2(nodes, 0, tbl2);
+    assert_eq(tbl2[0], 0);
+    assert_eq(tbl2[1], 1);
+    assert_eq(tbl2[2], 1);
+    assert_eq(tbl2[3], 0);
+    assert_eq(count_sat_2(nodes, 0), 2);
+
+    // A IFF B: (1,0,0,1)
+    nodes[0] = 6; nodes[1] = 1; nodes[2] = 2;
+    let mut tbl3 = [0, 0, 0, 0];
+    truth_table_2(nodes, 0, tbl3);
+    assert_eq(tbl3[0], 1);
+    assert_eq(tbl3[1], 0);
+    assert_eq(tbl3[2], 0);
+    assert_eq(tbl3[3], 1);
+    assert_eq(count_sat_2(nodes, 0), 2);
+
+    print("implies_xor_iff: ok");
+}
+
+fn test_de_morgan() {
+    // De Morgan 1: NOT(A AND B) == (NOT A) OR (NOT B)
+    // Build NOT(A AND B):
+    //   node 0: NOT(1)
+    //   node 1: AND(2,3)
+    //   node 2: VAR 0 (A)
+    //   node 3: VAR 1 (B)
+    let mut lhs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    lhs[0] = 1; lhs[1] = 1; lhs[2] = 0; // NOT(1)
+    lhs[3] = 2; lhs[4] = 2; lhs[5] = 3; // AND(2,3)
+    lhs[6] = 0; lhs[7] = 0; lhs[8] = 0; // VAR 0
+    lhs[9] = 0; lhs[10]= 1; lhs[11]= 0; // VAR 1
+
+    // Build (NOT A) OR (NOT B):
+    //   node 0: OR(1,2)
+    //   node 1: NOT(3)
+    //   node 2: NOT(4)
+    //   node 3: VAR 0
+    //   node 4: VAR 1
+    let mut rhs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    rhs[0] = 3; rhs[1] = 1; rhs[2] = 2;  // OR(1,2)
+    rhs[3] = 1; rhs[4] = 3; rhs[5] = 0;  // NOT(3)
+    rhs[6] = 1; rhs[7] = 4; rhs[8] = 0;  // NOT(4)
+    rhs[9] = 0; rhs[10]= 0; rhs[11]= 0;  // VAR 0
+    rhs[12]= 0; rhs[13]= 1; rhs[14]= 0;  // VAR 1
+
+    // Both should have truth table (1,1,1,0)
+    let mut tl = [0, 0, 0, 0];
+    let mut tr = [0, 0, 0, 0];
+    truth_table_2(lhs, 0, tl);
+    truth_table_2(rhs, 0, tr);
+    assert_eq(tl[0], 1); assert_eq(tr[0], 1); // NOT(F AND F) = T, (NOT F) OR (NOT F) = T
+    assert_eq(tl[1], 1); assert_eq(tr[1], 1);
+    assert_eq(tl[2], 1); assert_eq(tr[2], 1);
+    assert_eq(tl[3], 0); assert_eq(tr[3], 0); // NOT(T AND T) = F
+
+    print("de_morgan: ok");
+}
+
+fn test_tautology_contradiction() {
+    // Tautology: A OR (NOT A) — always true (4/4 models).
+    // node 0: OR(1,2)
+    // node 1: VAR 0
+    // node 2: NOT(3)
+    // node 3: VAR 0
+    let mut taut = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // We only have 1 variable (A), but truth_table_2 uses 2 vars. VAR 1 is unused.
+    // Rows: (A=0,B=0), (A=0,B=1), (A=1,B=0), (A=1,B=1) all same since B unused.
+    taut[0] = 3; taut[1] = 1; taut[2] = 2; // OR(1,2)
+    taut[3] = 0; taut[4] = 0; taut[5] = 0; // VAR 0 (A)
+    taut[6] = 1; taut[7] = 3; taut[8] = 0; // NOT(3)
+    taut[9] = 0; taut[10]= 0; taut[11]= 0; // VAR 0 (A again)
+    assert_eq(count_sat_2(taut, 0), 4); // all 4 rows true
+
+    // Contradiction: A AND (NOT A) — always false (0/4 models).
+    let mut contra = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    contra[0] = 2; contra[1] = 1; contra[2] = 2; // AND(1,2)
+    contra[3] = 0; contra[4] = 0; contra[5] = 0; // VAR 0 (A)
+    contra[6] = 1; contra[7] = 3; contra[8] = 0; // NOT(3)
+    contra[9] = 0; contra[10]= 0; contra[11]= 0; // VAR 0 (A again)
+    assert_eq(count_sat_2(contra, 0), 0);
+
+    print("tautology_contradiction: ok");
+}
+
+fn test_three_variable_sat() {
+    // Formula: (A OR B) AND (NOT C)
+    // Satisfying: A OR B must be true, C must be false.
+    // Rows where C=0: (A,B,C) in {(0,1,0),(1,0,0),(1,1,0)} — 3 models.
+    // Build:
+    //   node 0: AND(1, 4)
+    //   node 1: OR(2, 3)
+    //   node 2: VAR 0 (A)
+    //   node 3: VAR 1 (B)
+    //   node 4: NOT(5)
+    //   node 5: VAR 2 (C)
+    let mut nodes = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    nodes[0] = 2; nodes[1] = 1; nodes[2] = 4;  // AND(1,4)
+    nodes[3] = 3; nodes[4] = 2; nodes[5] = 3;  // OR(2,3)
+    nodes[6] = 0; nodes[7] = 0; nodes[8] = 0;  // VAR 0 (A)
+    nodes[9] = 0; nodes[10]= 1; nodes[11]= 0;  // VAR 1 (B)
+    nodes[12]= 1; nodes[13]= 5; nodes[14]= 0;  // NOT(5)
+    nodes[15]= 0; nodes[16]= 2; nodes[17]= 0;  // VAR 2 (C)
+
+    assert_eq(count_sat_3(nodes, 0), 3);
+
+    print("three_variable_sat: ok");
+}
+
+fn main() -> Int {
+    test_basic_connectives();
+    test_implies_xor_iff();
+    test_de_morgan();
+    test_tautology_contradiction();
+    test_three_variable_sat();
+    print("[OK] 509_interp_propositional_logic");
+    0
+}

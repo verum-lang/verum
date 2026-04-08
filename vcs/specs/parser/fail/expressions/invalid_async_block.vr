@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, async, block, error
+// @description: Async keyword without block expression
+// @expected-error: E018
+
+fn test() {
+    let x = async 1 + 2;  // Async requires block, not expression
+}

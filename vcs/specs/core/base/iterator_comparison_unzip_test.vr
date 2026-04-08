@@ -1,0 +1,302 @@
+// =============================================================================
+// iterator_comparison_unzip_test.vr - Iterator comparison ops, unzip, rposition
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, iterator, comparison, unzip, rposition, try_rfold
+// @description: Tests for iterator lexicographic comparison (lt, le, gt, ge),
+//               unzip, rposition, and try_rfold.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering};
+mount core.collections.list.{List};
+
+// =============================================================================
+// SECTION 1: Iterator lt
+// =============================================================================
+
+@test
+fn test_lt_true() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 4];
+    assert(a.iter().lt(b.iter()));
+}
+
+@test
+fn test_lt_false_equal() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 3];
+    assert(!a.iter().lt(b.iter()));
+}
+
+@test
+fn test_lt_false_greater() {
+    let a: List<Int> = [1, 3, 0];
+    let b: List<Int> = [1, 2, 9];
+    assert(!a.iter().lt(b.iter()));
+}
+
+@test
+fn test_lt_shorter_is_less() {
+    let a: List<Int> = [1, 2];
+    let b: List<Int> = [1, 2, 3];
+    assert(a.iter().lt(b.iter()));
+}
+
+@test
+fn test_lt_longer_is_not_less() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2];
+    assert(!a.iter().lt(b.iter()));
+}
+
+// =============================================================================
+// SECTION 2: Iterator le
+// =============================================================================
+
+@test
+fn test_le_equal() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 3];
+    assert(a.iter().le(b.iter()));
+}
+
+@test
+fn test_le_less() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 4];
+    assert(a.iter().le(b.iter()));
+}
+
+@test
+fn test_le_greater() {
+    let a: List<Int> = [1, 3, 0];
+    let b: List<Int> = [1, 2, 9];
+    assert(!a.iter().le(b.iter()));
+}
+
+// =============================================================================
+// SECTION 3: Iterator gt
+// =============================================================================
+
+@test
+fn test_gt_true() {
+    let a: List<Int> = [1, 3, 0];
+    let b: List<Int> = [1, 2, 9];
+    assert(a.iter().gt(b.iter()));
+}
+
+@test
+fn test_gt_false_equal() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 3];
+    assert(!a.iter().gt(b.iter()));
+}
+
+@test
+fn test_gt_longer_is_greater() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2];
+    assert(a.iter().gt(b.iter()));
+}
+
+// =============================================================================
+// SECTION 4: Iterator ge
+// =============================================================================
+
+@test
+fn test_ge_equal() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 3];
+    assert(a.iter().ge(b.iter()));
+}
+
+@test
+fn test_ge_greater() {
+    let a: List<Int> = [1, 3, 0];
+    let b: List<Int> = [1, 2, 9];
+    assert(a.iter().ge(b.iter()));
+}
+
+@test
+fn test_ge_less() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 4];
+    assert(!a.iter().ge(b.iter()));
+}
+
+// =============================================================================
+// SECTION 5: Iterator comparison edge cases
+// =============================================================================
+
+@test
+fn test_cmp_empty_iterators() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+    assert(a.iter().le(b.iter()));
+    assert(a.iter().ge(b.iter()));
+    assert(!a.iter().lt(b.iter()));
+    assert(!a.iter().gt(b.iter()));
+}
+
+@test
+fn test_cmp_empty_vs_nonempty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [1];
+    assert(a.iter().lt(b.iter()));
+    assert(a.iter().le(b.iter()));
+    assert(!a.iter().gt(b.iter()));
+    assert(!a.iter().ge(b.iter()));
+}
+
+@test
+fn test_cmp_nonempty_vs_empty() {
+    let a: List<Int> = [1];
+    let b: List<Int> = [];
+    assert(!a.iter().lt(b.iter()));
+    assert(!a.iter().le(b.iter()));
+    assert(a.iter().gt(b.iter()));
+    assert(a.iter().ge(b.iter()));
+}
+
+// =============================================================================
+// SECTION 6: Unzip
+// =============================================================================
+
+@test
+fn test_unzip_basic() {
+    let pairs: List<(Int, Int)> = [(1, 10), (2, 20), (3, 30)];
+    let result: (List<Int>, List<Int>) = pairs.iter().unzip();
+    let (left, right) = result;
+    assert_eq(left.len(), 3);
+    assert_eq(right.len(), 3);
+}
+
+@test
+fn test_unzip_empty() {
+    let pairs: List<(Int, Int)> = [];
+    let result: (List<Int>, List<Int>) = pairs.iter().unzip();
+    let (left, right) = result;
+    assert_eq(left.len(), 0);
+    assert_eq(right.len(), 0);
+}
+
+@test
+fn test_unzip_single() {
+    let pairs: List<(Int, Int)> = [(42, 99)];
+    let result: (List<Int>, List<Int>) = pairs.iter().unzip();
+    let (left, right) = result;
+    assert_eq(left.len(), 1);
+    assert_eq(right.len(), 1);
+}
+
+@test
+fn test_unzip_from_enumerate() {
+    let items: List<Int> = [10, 20, 30];
+    let result: (List<Int>, List<Int>) = items.iter().enumerate().map(|pair| (pair.0, *pair.1)).unzip();
+    let (indices, values) = result;
+    assert_eq(indices.len(), 3);
+    assert_eq(values.len(), 3);
+}
+
+// =============================================================================
+// SECTION 7: rposition
+// =============================================================================
+
+@test
+fn test_rposition_found() {
+    let mut iter = range(0, 10);
+    let pos = iter.rposition(|x| *x == 5);
+    assert_eq(pos, Some(5));
+}
+
+@test
+fn test_rposition_first_from_back() {
+    let mut iter = range(0, 5);
+    let pos = iter.rposition(|x| *x == 4);
+    assert_eq(pos, Some(4));
+}
+
+@test
+fn test_rposition_first_element() {
+    let mut iter = range(0, 5);
+    let pos = iter.rposition(|x| *x == 0);
+    assert_eq(pos, Some(0));
+}
+
+@test
+fn test_rposition_not_found() {
+    let mut iter = range(0, 5);
+    let pos = iter.rposition(|x| *x == 99);
+    assert_eq(pos, None);
+}
+
+@test
+fn test_rposition_empty() {
+    let mut iter = range(0, 0);
+    let pos = iter.rposition(|x| *x == 0);
+    assert_eq(pos, None);
+}
+
+@test
+fn test_rposition_multiple_matches_returns_last() {
+    // range(0, 10) with predicate x % 3 == 0
+    // Matches: 0, 3, 6, 9
+    // rposition finds last (highest index): 9
+    let mut iter = range(0, 10);
+    let pos = iter.rposition(|x| *x % 3 == 0);
+    assert_eq(pos, Some(9));
+}
+
+// =============================================================================
+// SECTION 8: try_rfold
+// =============================================================================
+
+@test
+fn test_try_rfold_success() {
+    let result = range(1, 4).try_rfold(0, |acc, x| Ok(acc + x));
+    assert_eq(result, Ok(6));
+}
+
+@test
+fn test_try_rfold_short_circuit() {
+    let result: Result<Int, Text> = range(1, 10).try_rfold(0, |acc, x| {
+        if x == 5 {
+            Err("stopped")
+        } else {
+            Ok(acc + x)
+        }
+    });
+    assert(result is Err);
+}
+
+@test
+fn test_try_rfold_empty() {
+    let result = range(0, 0).try_rfold(42, |acc, x| Ok(acc + x));
+    assert_eq(result, Ok(42));
+}
+
+// =============================================================================
+// SECTION 9: Comparison with range iterators
+// =============================================================================
+
+@test
+fn test_range_lt() {
+    assert(range(0, 3).lt(range(0, 4)));
+    assert(range(0, 3).lt(range(1, 3)));
+}
+
+@test
+fn test_range_eq_via_comparison() {
+    assert(range(0, 3).le(range(0, 3)));
+    assert(range(0, 3).ge(range(0, 3)));
+}
+
+@test
+fn test_range_gt() {
+    assert(range(0, 4).gt(range(0, 3)));
+    assert(range(1, 3).gt(range(0, 3)));
+}

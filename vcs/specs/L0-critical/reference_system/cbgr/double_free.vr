@@ -1,0 +1,43 @@
+// @test: run-interpreter-panic
+// @expected-panic: CBGR use-after-free detected
+// @tier: 0
+// @level: L0
+
+// @tags: reference_system, cbgr, double-free, runtime, safety
+
+/// Test CBGR detection of double-free scenario at runtime.
+/// When memory is dropped and then accessed again via a dangling reference,
+/// CBGR detects the generation mismatch and panics.
+/// This prevents memory corruption and security vulnerabilities.
+/// Spec: 26-cbgr-implementation.md#double-free-prevention
+
+fn main() {
+    // CBGR double-free detection works via generation tracking:
+    // 1. When memory is allocated, it gets a generation counter
+    // 2. References capture the generation at creation time
+    // 3. When memory is freed/dropped, generation is bumped
+    // 4. Attempting to use old references fails generation check
+
+    // Simulate double-free scenario via dangling reference
+    let heap_val = Heap(42);
+
+    // Create reference that captures current generation
+    let ref_to_heap: &Int = &*heap_val;
+    let initial_gen = ref_to_heap.stored_generation();
+
+    // Verify initial generation is valid
+    assert(initial_gen > 0);
+    assert(ref_to_heap.is_valid());
+
+    // First "free" - drop the Heap value
+    // This increments the generation at that memory location
+    drop(heap_val);
+
+    // Reference is now dangling - generation mismatch
+    // This is equivalent to a double-free scenario:
+    // - First drop freed the memory
+    // - Attempting to access again triggers CBGR
+
+    // CBGR detects: stored_generation != current_generation
+    print(*ref_to_heap);  // PANIC: CBGR use-after-free detected
+}

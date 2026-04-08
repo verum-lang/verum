@@ -1,0 +1,357 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, math
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Extended math operations — approximations, numerical methods
+
+// ============================================================================
+// Helper: absolute value for floats
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+// ============================================================================
+// Test 1: Newton's method for square root
+// ============================================================================
+
+fn sqrt_newton(n: Float) -> Float {
+    let mut x = n;
+    let mut i = 0;
+    while i < 50 {
+        x = (x + n / x) / 2.0;
+        i = i + 1;
+    }
+    x
+}
+
+fn test_sqrt_newton() {
+    // sqrt(4) = 2
+    let s4 = sqrt_newton(4.0);
+    assert(abs_f(s4 - 2.0) < 0.0001);
+
+    // sqrt(9) = 3
+    let s9 = sqrt_newton(9.0);
+    assert(abs_f(s9 - 3.0) < 0.0001);
+
+    // sqrt(2) ~ 1.41421356
+    let s2 = sqrt_newton(2.0);
+    assert(abs_f(s2 - 1.41421356) < 0.0001);
+
+    // sqrt(100) = 10
+    let s100 = sqrt_newton(100.0);
+    assert(abs_f(s100 - 10.0) < 0.0001);
+
+    // sqrt(1) = 1
+    let s1 = sqrt_newton(1.0);
+    assert(abs_f(s1 - 1.0) < 0.0001);
+
+    // sqrt(0.25) = 0.5
+    let sq = sqrt_newton(0.25);
+    assert(abs_f(sq - 0.5) < 0.0001);
+
+    print("  test_sqrt_newton: ok");
+}
+
+// ============================================================================
+// Test 2: Factorial computation
+// ============================================================================
+
+fn factorial_iter(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 2;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_factorial() {
+    assert_eq(factorial_iter(0), 1);
+    assert_eq(factorial_iter(1), 1);
+    assert_eq(factorial_iter(2), 2);
+    assert_eq(factorial_iter(3), 6);
+    assert_eq(factorial_iter(5), 120);
+    assert_eq(factorial_iter(10), 3628800);
+    assert_eq(factorial_iter(12), 479001600);
+
+    print("  test_factorial: ok");
+}
+
+// ============================================================================
+// Test 3: Fibonacci sequence
+// ============================================================================
+
+fn fib_iter(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        let mut a = 0;
+        let mut b = 1;
+        let mut i = 2;
+        while i <= n {
+            let tmp = a + b;
+            a = b;
+            b = tmp;
+            i = i + 1;
+        }
+        b
+    }
+}
+
+fn test_fibonacci() {
+    assert_eq(fib_iter(0), 0);
+    assert_eq(fib_iter(1), 1);
+    assert_eq(fib_iter(2), 1);
+    assert_eq(fib_iter(3), 2);
+    assert_eq(fib_iter(5), 5);
+    assert_eq(fib_iter(10), 55);
+    assert_eq(fib_iter(20), 6765);
+    assert_eq(fib_iter(30), 832040);
+
+    print("  test_fibonacci: ok");
+}
+
+// ============================================================================
+// Test 4: GCD via Euclidean algorithm (iterative)
+// ============================================================================
+
+fn gcd_iter(a_in: Int, b_in: Int) -> Int {
+    let mut a = a_in;
+    let mut b = b_in;
+    while b != 0 {
+        let tmp = b;
+        b = a % b;
+        a = tmp;
+    }
+    a
+}
+
+fn test_gcd() {
+    assert_eq(gcd_iter(12, 8), 4);
+    assert_eq(gcd_iter(17, 13), 1);
+    assert_eq(gcd_iter(100, 75), 25);
+    assert_eq(gcd_iter(48, 36), 12);
+    assert_eq(gcd_iter(0, 5), 5);
+    assert_eq(gcd_iter(7, 0), 7);
+    assert_eq(gcd_iter(54, 24), 6);
+    assert_eq(gcd_iter(1071, 462), 21);
+
+    // LCM via GCD: lcm(a,b) = a / gcd(a,b) * b
+    let lcm_4_6 = 4 / gcd_iter(4, 6) * 6;
+    assert_eq(lcm_4_6, 12);
+    let lcm_12_18 = 12 / gcd_iter(12, 18) * 18;
+    assert_eq(lcm_12_18, 36);
+
+    print("  test_gcd: ok");
+}
+
+// ============================================================================
+// Test 5: Integer exponentiation by repeated squaring
+// ============================================================================
+
+fn power_int(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut b = base;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = result * b;
+        }
+        b = b * b;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_power_int() {
+    assert_eq(power_int(2, 0), 1);
+    assert_eq(power_int(2, 1), 2);
+    assert_eq(power_int(2, 10), 1024);
+    assert_eq(power_int(3, 5), 243);
+    assert_eq(power_int(5, 3), 125);
+    assert_eq(power_int(10, 6), 1000000);
+    assert_eq(power_int(7, 4), 2401);
+    assert_eq(power_int(1, 100), 1);
+    assert_eq(power_int(0, 5), 0);
+
+    print("  test_power_int: ok");
+}
+
+// ============================================================================
+// Test 6: Taylor series for e^x
+// ============================================================================
+
+fn taylor_exp(x: Float, terms: Int) -> Float {
+    let mut result = 1.0;
+    let mut term = 1.0;
+    let mut i = 1;
+    let mut divisor = 1.0;
+    while i < terms {
+        term = term * x / divisor;
+        result = result + term;
+        i = i + 1;
+        divisor = divisor + 1.0;
+    }
+    result
+}
+
+fn test_taylor_exp() {
+    // e^0 = 1
+    let e0 = taylor_exp(0.0, 20);
+    assert(abs_f(e0 - 1.0) < 0.0001);
+
+    // e^1 ~ 2.71828
+    let e1 = taylor_exp(1.0, 20);
+    assert(abs_f(e1 - 2.71828) < 0.001);
+
+    // e^2 ~ 7.38906
+    let e2 = taylor_exp(2.0, 25);
+    assert(abs_f(e2 - 7.38906) < 0.001);
+
+    // e^(-1) ~ 0.36788
+    let em1 = taylor_exp(0.0 - 1.0, 20);
+    assert(abs_f(em1 - 0.36788) < 0.001);
+
+    // e^0.5 ~ 1.64872
+    let eh = taylor_exp(0.5, 20);
+    assert(abs_f(eh - 1.64872) < 0.001);
+
+    print("  test_taylor_exp: ok");
+}
+
+// ============================================================================
+// Test 7: Bisection root finding for f(x) = x^2 - 2
+// ============================================================================
+
+fn f_bisect(x: Float) -> Float {
+    x * x - 2.0
+}
+
+fn bisection_root(lo_in: Float, hi_in: Float, iters: Int) -> Float {
+    let mut lo = lo_in;
+    let mut hi = hi_in;
+    let mut i = 0;
+    while i < iters {
+        let mid = (lo + hi) / 2.0;
+        let fmid = f_bisect(mid);
+        if fmid < 0.0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        i = i + 1;
+    }
+    (lo + hi) / 2.0
+}
+
+fn test_bisection_root() {
+    // Root of x^2 - 2 = 0 in [1, 2] is sqrt(2) ~ 1.41421356
+    let root = bisection_root(1.0, 2.0, 60);
+    assert(abs_f(root - 1.41421356) < 0.00001);
+
+    // Verify the function value at root is near 0
+    let fval = f_bisect(root);
+    assert(abs_f(fval) < 0.00001);
+
+    // Try different interval [0, 3] — should still converge
+    let root2 = bisection_root(0.0, 3.0, 60);
+    assert(abs_f(root2 - 1.41421356) < 0.00001);
+
+    print("  test_bisection_root: ok");
+}
+
+// ============================================================================
+// Test 8: 3x3 matrix determinant via cofactor expansion
+// ============================================================================
+
+// A 3x3 matrix stored in 9 fields: m00..m22
+type Mat3 is {
+    m00: Int, m01: Int, m02: Int,
+    m10: Int, m11: Int, m12: Int,
+    m20: Int, m21: Int, m22: Int
+};
+
+fn det3(m: Mat3) -> Int {
+    // Expand along first row:
+    // det = m00*(m11*m22 - m12*m21) - m01*(m10*m22 - m12*m20) + m02*(m10*m21 - m11*m20)
+    let cofactor0 = m.m11 * m.m22 - m.m12 * m.m21;
+    let cofactor1 = m.m10 * m.m22 - m.m12 * m.m20;
+    let cofactor2 = m.m10 * m.m21 - m.m11 * m.m20;
+    m.m00 * cofactor0 - m.m01 * cofactor1 + m.m02 * cofactor2
+}
+
+fn test_matrix_determinant() {
+    // Identity matrix: det = 1
+    let id = Mat3 {
+        m00: 1, m01: 0, m02: 0,
+        m10: 0, m11: 1, m12: 0,
+        m20: 0, m21: 0, m22: 1
+    };
+    assert_eq(det3(id), 1);
+
+    // Diagonal matrix: det = product of diagonal
+    let diag = Mat3 {
+        m00: 2, m01: 0, m02: 0,
+        m10: 0, m11: 3, m12: 0,
+        m20: 0, m21: 0, m22: 4
+    };
+    assert_eq(det3(diag), 24);
+
+    // Known matrix: [[1,2,3],[4,5,6],[7,8,9]] -> det = 0
+    let singular = Mat3 {
+        m00: 1, m01: 2, m02: 3,
+        m10: 4, m11: 5, m12: 6,
+        m20: 7, m21: 8, m22: 9
+    };
+    assert_eq(det3(singular), 0);
+
+    // [[2,1,1],[1,3,2],[1,0,0]] -> det = 2*(3*0-2*0) - 1*(1*0-2*1) + 1*(1*0-3*1) = 0 + 2 - 3 = -1
+    let m4 = Mat3 {
+        m00: 2, m01: 1, m02: 1,
+        m10: 1, m11: 3, m12: 2,
+        m20: 1, m21: 0, m22: 0
+    };
+    assert_eq(det3(m4), -1);
+
+    // [[6,1,1],[4,-2,5],[2,8,7]] -> det = 6*(-14-40) - 1*(28-10) + 1*(32+4)
+    //   = 6*(-54) - 1*(18) + 1*(36) = -324 - 18 + 36 = -306
+    let m5 = Mat3 {
+        m00: 6, m01: 1, m02: 1,
+        m10: 4, m11: -2, m12: 5,
+        m20: 2, m21: 8, m22: 7
+    };
+    assert_eq(det3(m5), -306);
+
+    // Transpose should have same determinant
+    let m5t = Mat3 {
+        m00: 6, m01: 4, m02: 2,
+        m10: 1, m11: -2, m12: 8,
+        m20: 1, m21: 5, m22: 7
+    };
+    assert_eq(det3(m5t), -306);
+
+    print("  test_matrix_determinant: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_sqrt_newton();
+    test_factorial();
+    test_fibonacci();
+    test_gcd();
+    test_power_int();
+    test_taylor_exp();
+    test_bisection_root();
+    test_matrix_determinant();
+
+    print("[OK] 075_stdlib_math_extended");
+    0
+}

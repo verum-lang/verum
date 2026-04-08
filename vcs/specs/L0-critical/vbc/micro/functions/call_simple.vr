@@ -1,0 +1,5 @@
+// @test: typecheck-pass
+// @level: L0
+// @expect: pass
+fn foo() -> Int { 42 }
+fn main() { assert_eq(foo(), 42); }

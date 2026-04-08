@@ -1,0 +1,140 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, splice, multi-level
+// @description: Test splice operators in quote expressions
+
+// =============================================================================
+// SINGLE-LEVEL SPLICE ($)
+// =============================================================================
+// The $ operator splices a value from the meta scope into the quote
+
+meta fn single_splice(x: Int) -> TokenStream {
+    quote {
+        let value = $x;
+    }
+}
+
+meta fn splice_multiple(a: Int, b: Int) -> TokenStream {
+    quote {
+        let sum = $a + $b;
+    }
+}
+
+// =============================================================================
+// EXPRESSION SPLICE (${...})
+// =============================================================================
+// The ${expr} form evaluates an expression and splices the result
+
+meta fn expr_splice(x: Int, y: Int) -> TokenStream {
+    quote {
+        let result = ${x + y};
+    }
+}
+
+meta fn complex_expr_splice(base: Int) -> TokenStream {
+    quote {
+        let a = ${base};
+        let b = ${base * 2};
+        let c = ${base * base};
+    }
+}
+
+// =============================================================================
+// IDENTIFIER SPLICE
+// =============================================================================
+// Splice can create identifiers in the generated code
+
+meta fn splice_ident(name: Ident) -> TokenStream {
+    quote {
+        let $name = 42;
+    }
+}
+
+meta fn splice_fn_name(name: Ident) -> TokenStream {
+    quote {
+        fn $name() -> Int {
+            42
+        }
+    }
+}
+
+// =============================================================================
+// SPLICE IN TYPE POSITION
+// =============================================================================
+
+meta fn splice_type(ty: Type) -> TokenStream {
+    quote {
+        fn typed_fn(x: $ty) -> $ty {
+            x
+        }
+    }
+}
+
+// =============================================================================
+// NESTED QUOTE WITH SPLICE
+// =============================================================================
+
+meta fn outer_meta() -> TokenStream {
+    let outer_val = 100;
+
+    quote {
+        fn outer_fn() -> Int {
+            $outer_val
+        }
+    }
+}
+
+// =============================================================================
+// SPLICE WITH GENSYM
+// =============================================================================
+
+meta fn hygienic_splice(value: Int) -> TokenStream {
+    let tmp = gensym("tmp");
+
+    quote {
+        fn safe_fn() -> Int {
+            let $tmp = $value;
+            $tmp * 2
+        }
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_single_splice() {
+    @single_splice(42);
+    assert(value == 42);
+}
+
+fn test_expr_splice() {
+    @expr_splice(10, 20);
+    assert(result == 30);
+}
+
+fn test_complex_expr() {
+    @complex_expr_splice(5);
+    assert(a == 5);
+    assert(b == 10);
+    assert(c == 25);
+}
+
+fn test_outer_meta() {
+    @outer_meta();
+    assert(outer_fn() == 100);
+}
+
+fn test_hygienic_splice() {
+    @hygienic_splice(21);
+    assert(safe_fn() == 42);
+}
+
+fn main() {
+    test_single_splice();
+    test_expr_splice();
+    test_complex_expr();
+    test_outer_meta();
+    test_hygienic_splice();
+}

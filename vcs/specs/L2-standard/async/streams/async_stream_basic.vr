@@ -1,0 +1,99 @@
+// @test: run
+// @expected-stdout: Received: 1\nReceived: 2\nReceived: 3\nReceived: 4\nReceived: 5\nStream complete
+// @tier: 0
+// @level: L2
+// @tags: async, streams, iterator
+// @description: Basic async stream creation and consumption
+
+// Async stream type - produces values asynchronously
+type AsyncStream<T> is protocol {
+    async fn next(&mut self) -> Maybe<T>
+};
+
+// Simple number stream
+type NumberStream is {
+    current: Int,
+    max: Int,
+};
+
+implement NumberStream {
+    fn new(max: Int) -> Self {
+        Self { current: 0, max }
+    }
+}
+
+implement AsyncStream<Int> for NumberStream {
+    async fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.max {
+            self.current += 1;
+            Some(self.current)
+        } else {
+            None
+        }
+    }
+}
+
+// Consume async stream with manual polling loop
+async fn consume_stream<T: Display>(stream: &mut impl AsyncStream<T>) {
+    loop {
+        match stream.next().await {
+            Some(item) => println(f"Received: {item}"),
+            None => break,
+        }
+    }
+    println("Stream complete");
+}
+
+// Map adapter for async streams
+type MapStream<S, T, U> is {
+    source: S,
+    mapper: fn(T) -> U,
+};
+
+implement<S: AsyncStream<T>, T, U> AsyncStream<U> for MapStream<S, T, U> {
+    async fn next(&mut self) -> Maybe<U> {
+        match self.source.next().await {
+            Some(item) => Some((self.mapper)(item)),
+            None => None,
+        }
+    }
+}
+
+// Filter adapter for async streams
+type FilterStream<S, T> is {
+    source: S,
+    predicate: fn(&T) -> Bool,
+};
+
+implement<S: AsyncStream<T>, T> AsyncStream<T> for FilterStream<S, T> {
+    async fn next(&mut self) -> Maybe<T> {
+        loop {
+            match self.source.next().await {
+                Some(item) if (self.predicate)(&item) => return Some(item),
+                Some(_) => continue,
+                None => return None,
+            }
+        }
+    }
+}
+
+// Take adapter
+type TakeStream<S, T> is {
+    source: S,
+    remaining: Int,
+};
+
+implement<S: AsyncStream<T>, T> AsyncStream<T> for TakeStream<S, T> {
+    async fn next(&mut self) -> Maybe<T> {
+        if self.remaining == 0 {
+            return None;
+        }
+        self.remaining -= 1;
+        self.source.next().await
+    }
+}
+
+async fn main() {
+    let mut stream = NumberStream.new(5);
+    consume_stream(&mut stream).await;
+}

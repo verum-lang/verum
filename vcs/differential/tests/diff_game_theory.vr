@@ -1,0 +1,125 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, game, theory, nim, sprague-grundy
+// @timeout: 10000
+
+// Combinatorial game theory: Nim and Sprague-Grundy
+
+// Nim game: XOR of all pile sizes
+fn nim_value(p1: Int, p2: Int, p3: Int) -> Int {
+    p1 ^ p2 ^ p3
+}
+
+// Is first player winning?
+fn nim_winning(p1: Int, p2: Int, p3: Int) -> Int {
+    if nim_value(p1, p2, p3) != 0 { 1 } else { 0 }
+}
+
+// Grundy number for subtraction game (can take 1, 2, or 3 stones)
+fn grundy_sub(n: Int) -> Int {
+    // G(n) = n % 4
+    n % 4
+}
+
+// Grundy value for a pile with max take = k
+fn grundy_bounded(n: Int, k: Int) -> Int {
+    n % (k + 1)
+}
+
+// Wythoff's game: two piles, can take from one or equal from both
+fn wythoff_winning(a: Int, b: Int) -> Int {
+    // Cold positions are (floor(k*phi), floor(k*phi^2)) for k=0,1,2,...
+    // phi ≈ 1.618, approximate with integer arithmetic
+    // phi ≈ 1618/1000
+    let small = if a < b { a } else { b };
+    let large = if a < b { b } else { a };
+    // Check if this is a cold (losing) position
+    // k = (large - small), cold if small = floor(k * phi)
+    let diff = large - small;
+    // Approximate: phi ≈ 1618/1000
+    let expected_small = diff * 1618 / 1000;
+    if small == expected_small { 0 } else { 1 } // 0 = losing (cold), 1 = winning (hot)
+}
+
+// Count winning moves in Nim(p1, p2, p3) — moves for first pile only
+fn count_winning_moves_p1(p1: Int, p2: Int, p3: Int) -> Int {
+    let mut count = 0;
+    let mut take = 1;
+    while take <= p1 {
+        if nim_value(p1 - take, p2, p3) == 0 {
+            count = count + 1;
+        }
+        take = take + 1;
+    }
+    count
+}
+
+// Sprague-Grundy for sum of two independent subtraction games
+fn sg_sum(n1: Int, n2: Int) -> Int {
+    grundy_sub(n1) ^ grundy_sub(n2)
+}
+
+fn test_nim() -> Int {
+    // Nim(3,4,5): XOR = 3^4^5 = 2, winning
+    assert_eq(nim_value(3, 4, 5), 2);
+    assert_eq(nim_winning(3, 4, 5), 1);
+
+    // Nim(1,2,3): XOR = 1^2^3 = 0, losing
+    assert_eq(nim_value(1, 2, 3), 0);
+    assert_eq(nim_winning(1, 2, 3), 0);
+
+    // Nim(5,5,5): XOR = 5^5^5 = 5, winning
+    assert_eq(nim_winning(5, 5, 5), 1);
+    1
+}
+
+fn test_grundy() -> Int {
+    assert_eq(grundy_sub(0), 0);
+    assert_eq(grundy_sub(1), 1);
+    assert_eq(grundy_sub(2), 2);
+    assert_eq(grundy_sub(3), 3);
+    assert_eq(grundy_sub(4), 0);
+    assert_eq(grundy_sub(7), 3);
+    1
+}
+
+fn test_bounded() -> Int {
+    // Max take = 2: G(n) = n % 3
+    assert_eq(grundy_bounded(0, 2), 0);
+    assert_eq(grundy_bounded(1, 2), 1);
+    assert_eq(grundy_bounded(2, 2), 2);
+    assert_eq(grundy_bounded(3, 2), 0);
+    assert_eq(grundy_bounded(6, 2), 0);
+    1
+}
+
+fn test_winning_moves() -> Int {
+    // Nim(3,4,5): need to find moves to make XOR=0
+    // From pile 1 (size 3): take 2 -> Nim(1,4,5), XOR=1^4^5=0. That's 1 winning move
+    assert_eq(count_winning_moves_p1(3, 4, 5), 1);
+
+    // Nim(7,4,2): XOR=7^4^2=1. Take 1 from pile 1: (6,4,2) XOR=6^4^2=0
+    assert_eq(count_winning_moves_p1(7, 4, 2), 1);
+    1
+}
+
+fn test_sg_sum() -> Int {
+    // Two subtraction games: (5, 7)
+    // G(5)=1, G(7)=3, XOR=1^3=2, non-zero -> winning
+    assert_eq(sg_sum(5, 7), 2);
+    // (4, 8): G(4)=0, G(8)=0, XOR=0 -> losing
+    assert_eq(sg_sum(4, 8), 0);
+    1
+}
+
+fn main() -> Int {
+    test_nim();
+    test_grundy();
+    test_bounded();
+    test_winning_moves();
+    test_sg_sum();
+    print("DIFF_OK: game_theory");
+    0
+}

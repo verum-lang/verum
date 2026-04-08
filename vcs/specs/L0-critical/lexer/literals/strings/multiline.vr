@@ -1,0 +1,237 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, multiline, triple-quotes
+
+// Multiline string literals using triple quotes
+
+fn test_basic_multiline() {
+    // Basic multiline string
+    let simple = """
+Hello
+World
+""";
+}
+
+fn test_formatted_multiline() {
+    // Multiline with preserved formatting
+    let formatted = """
+Line 1
+    Line 2 (indented)
+        Line 3 (more indented)
+    Line 4 (less indented)
+Line 5
+""";
+}
+
+fn test_empty_multiline() {
+    // Empty multiline
+    let empty_multiline = """
+""";
+}
+
+fn test_single_line_triple() {
+    // Single line in triple quotes
+    let single_line = """Single line content""";
+}
+
+fn test_blanks_multiline() {
+    // Multiline with blank lines
+    let with_blanks = """
+First paragraph.
+
+Second paragraph.
+
+Third paragraph.
+""";
+}
+
+fn test_code_block() {
+    // Code block example
+    let code_block = """
+fn main() {
+    let x = 42;
+    print(x)
+}
+""";
+}
+
+fn test_json_multiline() {
+    // JSON content
+    let json = """
+{
+    "name": "John",
+    "age": 30,
+    "city": "New York"
+}
+""";
+}
+
+fn test_sql_multiline() {
+    // SQL query
+    let sql = """
+SELECT
+    users.name,
+    users.email,
+    orders.total
+FROM users
+JOIN orders ON users.id = orders.user_id
+WHERE orders.date > '2025-01-01'
+ORDER BY orders.total DESC
+""";
+}
+
+fn test_html_multiline() {
+    // HTML content
+    let html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Example</title>
+</head>
+<body>
+    <h1>Hello, World!</h1>
+    <p>This is a paragraph.</p>
+</body>
+</html>
+""";
+}
+
+fn test_markdown_multiline() {
+    // Markdown content
+    let markdown = """
+# Heading 1
+
+This is a paragraph with **bold** and *italic* text.
+
+## Heading 2
+
+- Item 1
+- Item 2
+- Item 3
+
+```
+code block
+```
+""";
+}
+
+fn test_config_multiline() {
+    // Config file format
+    let config = """
+[database]
+host = localhost
+port = 5432
+name = mydb
+
+[server]
+host = 0.0.0.0
+port = 8080
+""";
+}
+
+fn test_quotes_multiline() {
+    // Multiline with quotes inside (no escaping needed)
+    let with_quotes = """
+She said "Hello"
+He replied "Hi there!"
+""";
+}
+
+fn test_backslashes_multiline() {
+    // Multiline with backslashes
+    let with_backslashes = """
+Path: C:\Users\Documents
+Another: \home\user\file
+""";
+}
+
+fn test_poem_multiline() {
+    // Poetry/text formatting
+    let poem = """
+Roses are red,
+Violets are blue,
+Multiline strings,
+Are useful too.
+""";
+}
+
+fn test_log_multiline() {
+    // Log format
+    let log = """
+[2025-01-15 10:30:00] INFO  - Application started
+[2025-01-15 10:30:01] DEBUG - Loading configuration
+[2025-01-15 10:30:02] INFO  - Ready to serve requests
+""";
+}
+
+fn test_template_multiline() {
+    // Error message template
+    let error_template = """
+Error: {error_type}
+Message: {message}
+Stack trace:
+    at {function} ({file}:{line})
+    at {caller} ({caller_file}:{caller_line})
+""";
+}
+
+fn test_multiline_expressions() {
+    // Multiline in expressions
+    let header = """HEADER""" + "\n" + """BODY""";
+}
+
+// Multiline in function
+fn generate_report(title: Text) -> Text {
+    """
+    =====================
+    """ + title + """
+    =====================
+    """
+}
+
+// Multiline in struct
+type Template is {
+    header: Text,
+    body: Text,
+    footer: Text,
+};
+
+fn test_multiline_struct() {
+    let template = Template {
+        header: """
+    <header>
+        <h1>Title</h1>
+    </header>
+    """,
+        body: """
+    <main>
+        <p>Content goes here</p>
+    </main>
+    """,
+        footer: """
+    <footer>
+        <p>Copyright 2025</p>
+    </footer>
+    """,
+    };
+}
+
+fn test_multiline_array() {
+    // Multiline in array
+    let paragraphs = [
+        """First paragraph
+    with multiple lines""",
+        """Second paragraph
+    also multiline""",
+        """Third paragraph""",
+    ];
+}
+
+fn test_whitespace_multiline() {
+    // With leading/trailing whitespace preservation
+    let whitespace_preserved = """
+   This line has leading spaces
+   This line too
+""";
+}

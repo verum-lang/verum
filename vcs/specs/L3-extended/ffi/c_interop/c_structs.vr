@@ -1,0 +1,369 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, structs
+// @description: Tests C struct layout compatibility and interoperability
+
+/// ============================================================
+/// C STRUCT LAYOUT COMPATIBILITY
+/// ============================================================
+///
+/// Verum structs with @repr(C) are laid out identically to C structs,
+/// enabling direct memory sharing with C code.
+
+// ------------------------------------------------------------
+// Basic C-Compatible Structs
+// ------------------------------------------------------------
+
+/// Simple C struct with primitive fields
+@repr(C)
+type Point is {
+    x: c_int,
+    y: c_int,
+};
+
+/// Struct with floating point
+@repr(C)
+type Point3D is {
+    x: c_double,
+    y: c_double,
+    z: c_double,
+};
+
+/// Struct with pointer field
+@repr(C)
+type StringView is {
+    data: *const c_char,
+    length: c_size,
+};
+
+/// Struct with array field
+@repr(C)
+type FixedBuffer is {
+    data: [c_char; 256],
+    used: c_size,
+};
+
+// ------------------------------------------------------------
+// Padding and Alignment
+// ------------------------------------------------------------
+
+/// Struct with natural padding
+@repr(C)
+type PaddedStruct is {
+    a: c_char,     // 1 byte
+    // 3 bytes padding for alignment
+    b: c_int,      // 4 bytes
+    c: c_char,     // 1 byte
+    // 7 bytes padding for alignment
+    d: c_double,   // 8 bytes
+};
+
+const _: () = {
+    // Total size: 1 + 3 (pad) + 4 + 1 + 7 (pad) + 8 = 24 bytes
+    static_assert(PaddedStruct.size == 24);
+    static_assert(PaddedStruct.alignment == 8);
+};
+
+/// Packed struct (no padding)
+@repr(C, packed)
+type PackedStruct is {
+    a: c_char,     // 1 byte
+    b: c_int,      // 4 bytes (unaligned!)
+    c: c_char,     // 1 byte
+    d: c_double,   // 8 bytes (unaligned!)
+};
+
+const _: () = {
+    // Total size without padding: 1 + 4 + 1 + 8 = 14 bytes
+    static_assert(PackedStruct.size == 14);
+    static_assert(PackedStruct.alignment == 1);
+};
+
+/// Struct with explicit alignment
+@repr(C, align(16))
+type AlignedStruct is {
+    value: c_double,
+};
+
+const _: () = {
+    static_assert(AlignedStruct.alignment == 16);
+    static_assert(AlignedStruct.size == 16);  // Padded to alignment
+};
+
+/// Combined packed and aligned
+@repr(C, packed(2))
+type PackedAlign2 is {
+    a: c_char,
+    b: c_int,  // Aligned to 2 bytes
+    c: c_char,
+};
+
+// ------------------------------------------------------------
+// Nested Structs
+// ------------------------------------------------------------
+
+/// Struct containing other structs
+@repr(C)
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+/// Deeply nested struct
+@repr(C)
+type Box3D is {
+    min_corner: Point3D,
+    max_corner: Point3D,
+};
+
+/// Struct with nested array of structs
+@repr(C)
+type Polygon is {
+    vertices: [Point; 16],
+    vertex_count: c_size,
+};
+
+// ------------------------------------------------------------
+// Struct with Pointers
+// ------------------------------------------------------------
+
+/// Linked list node (C-style)
+@repr(C)
+type ListNode is {
+    value: c_int,
+    next: *mut ListNode,
+    prev: *mut ListNode,
+};
+
+/// Tree node
+@repr(C)
+type TreeNode is {
+    value: c_int,
+    left: *mut TreeNode,
+    right: *mut TreeNode,
+    parent: *mut TreeNode,
+};
+
+/// Struct with opaque pointer
+@repr(C)
+type HandleWrapper is {
+    handle: *mut c_void,
+    type_id: c_int,
+};
+
+// ------------------------------------------------------------
+// Flexible Array Member (FAM)
+// ------------------------------------------------------------
+
+/// Struct with flexible array member pattern
+@repr(C)
+type FlexibleHeader is {
+    length: c_size,
+    capacity: c_size,
+    // data: [c_int; 0]  // FAM - elements follow in memory
+};
+
+implement FlexibleHeader {
+    /// Calculate total allocation size for n elements
+    fn allocation_size(n: usize) -> usize {
+        FlexibleHeader.size + n * c_int.size
+    }
+
+    /// Get pointer to data array
+    fn data_ptr(&self) -> *const c_int {
+        // SAFETY: Data immediately follows header in memory
+        unsafe {
+            (self as *const FlexibleHeader).add(1) as *const c_int
+        }
+    }
+
+    /// Get mutable pointer to data array
+    fn data_ptr_mut(&mut self) -> *mut c_int {
+        // SAFETY: Data immediately follows header in memory
+        unsafe {
+            (self as *mut FlexibleHeader).add(1) as *mut c_int
+        }
+    }
+
+    /// Get element at index
+    unsafe fn get(&self, index: usize) -> c_int {
+        // SAFETY: Caller must ensure index < length
+        *self.data_ptr().add(index)
+    }
+
+    /// Set element at index
+    unsafe fn set(&mut self, index: usize, value: c_int) {
+        // SAFETY: Caller must ensure index < length
+        *self.data_ptr_mut().add(index) = value;
+    }
+}
+
+// ------------------------------------------------------------
+// Bit Fields (Conceptual)
+// ------------------------------------------------------------
+
+/// Struct with bit fields
+@repr(C)
+type BitFields is {
+    @bits(1) flag_a: Bool,
+    @bits(1) flag_b: Bool,
+    @bits(6) small_value: u8,
+    @bits(8) byte_value: u8,
+    @bits(16) short_value: u16,
+};
+
+/// Manual bit field implementation
+@repr(C)
+type ManualBitFields is {
+    packed_flags: u32,
+};
+
+implement ManualBitFields {
+    const FLAG_A_MASK: u32 = 0x1;
+    const FLAG_B_MASK: u32 = 0x2;
+    const SMALL_VALUE_MASK: u32 = 0xFC;  // bits 2-7
+    const SMALL_VALUE_SHIFT: u32 = 2;
+
+    fn get_flag_a(&self) -> Bool {
+        (self.packed_flags & Self.FLAG_A_MASK) != 0
+    }
+
+    fn set_flag_a(&mut self, value: Bool) {
+        if value {
+            self.packed_flags |= Self.FLAG_A_MASK;
+        } else {
+            self.packed_flags &= (0xFFFFFFFF ^ Self.FLAG_A_MASK);
+        }
+    }
+
+    fn get_small_value(&self) -> u8 {
+        ((self.packed_flags & Self.SMALL_VALUE_MASK) >> Self.SMALL_VALUE_SHIFT) as u8
+    }
+
+    fn set_small_value(&mut self, value: u8) {
+        let masked = (value as u32) << Self.SMALL_VALUE_SHIFT;
+        self.packed_flags = (self.packed_flags & (0xFFFFFFFF ^ Self.SMALL_VALUE_MASK)) | masked;
+    }
+}
+
+// ------------------------------------------------------------
+// FFI Struct Functions
+// ------------------------------------------------------------
+
+ffi geometry {
+    @extern("C")
+    fn point_add(a: Point, b: Point) -> Point;
+
+    @extern("C")
+    fn point_distance(a: *const Point, b: *const Point) -> c_double;
+
+    @extern("C")
+    fn rect_area(rect: *const Rectangle) -> c_double;
+
+    @extern("C")
+    fn rect_contains_point(rect: *const Rectangle, point: *const Point) -> c_int;
+}
+
+/// Safe wrapper for point_add
+fn add_points(a: &Point, b: &Point) -> Point {
+    // SAFETY: Both points are valid
+    unsafe { geometry.point_add(*a, *b) }
+}
+
+/// Safe wrapper for rect_area
+fn rectangle_area(rect: &Rectangle) -> f64 {
+    // SAFETY: rect is valid
+    unsafe { geometry.rect_area(rect as *const Rectangle) }
+}
+
+// ------------------------------------------------------------
+// Struct Initialization
+// ------------------------------------------------------------
+
+/// Zero-initialize struct
+fn zero_point() -> Point {
+    Point { x: 0, y: 0 }
+}
+
+/// Initialize with designated initializers
+fn create_rectangle(x1: c_int, y1: c_int, x2: c_int, y2: c_int) -> Rectangle {
+    Rectangle {
+        top_left: Point { x: x1, y: y1 },
+        bottom_right: Point { x: x2, y: y2 },
+    }
+}
+
+/// Partial initialization (remaining fields zeroed)
+fn create_string_view(data: *const c_char, length: c_size) -> StringView {
+    StringView { data, length }
+}
+
+// ------------------------------------------------------------
+// Struct Conversion
+// ------------------------------------------------------------
+
+/// Convert between compatible struct types
+@repr(C)
+type Vec2 is {
+    x: c_float,
+    y: c_float,
+};
+
+@repr(C)
+type Complex is {
+    real: c_float,
+    imag: c_float,
+};
+
+implement Vec2 {
+    /// Convert to complex (same layout)
+    fn as_complex(&self) -> &Complex {
+        // SAFETY: Both types have identical layout
+        unsafe { &*(self as *const Vec2 as *const Complex) }
+    }
+
+    fn as_complex_mut(&mut self) -> &mut Complex {
+        // SAFETY: Both types have identical layout
+        unsafe { &mut *(self as *mut Vec2 as *mut Complex) }
+    }
+}
+
+// ------------------------------------------------------------
+// Layout Verification
+// ------------------------------------------------------------
+
+/// Static assertions for layout compatibility
+const _: () = {
+    // Verify sizes match C ABI
+    static_assert(Point.size == 8);      // 2 * 4 bytes
+    static_assert(Point3D.size == 24);   // 3 * 8 bytes
+    static_assert(Rectangle.size == 16); // 2 * Point
+
+    // Verify alignments
+    static_assert(Point.alignment == 4);
+    static_assert(Point3D.alignment == 8);
+
+    // Verify field offsets
+    static_assert(offset_of(Point, x) == 0);
+    static_assert(offset_of(Point, y) == 4);
+    static_assert(offset_of(Rectangle, top_left) == 0);
+    static_assert(offset_of(Rectangle, bottom_right) == 8);
+};
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_int is i32;
+type c_float is f32;
+type c_double is f64;
+type c_size is usize;
+type c_void is ();
+
+// Type properties: use T.size and T.alignment instead of deprecated intrinsics
+
+fn main() {
+    // Struct layout test
+}

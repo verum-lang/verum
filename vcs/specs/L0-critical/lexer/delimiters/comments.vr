@@ -1,0 +1,219 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, delimiters, comments
+
+// Comment syntax: // and /* */
+
+// Single-line comments with //
+
+// This is a single-line comment
+fn test_inline_comments() {
+    let x = 42;  // Inline comment after code
+
+    // Comment at the start of line
+    // Another comment
+    // Multiple consecutive comments
+    let y = 3.14;
+
+    // Empty comment
+    //
+    let z = "hello";
+
+    // Comment with special characters
+    // Special: @#$%^&*()!~`
+    // Unicode: Japanese Chinese Russian
+    // Emoji: Faces and symbols
+
+    // Comment with code-like content
+    // let commented_out = 42
+    // fn commented_function() { }
+}
+
+// Multi-line comments with /* */
+fn test_block_comments() {
+    /* Single line block comment */
+    let a = 1;
+
+    /*
+    Multi-line
+    block
+    comment
+    */
+    let b = 2;
+
+    /*
+     * Styled multi-line comment
+     * with asterisks for clarity
+     * commonly used for documentation
+     */
+    let c = 3;
+
+    /* Comment with no newlines inside */
+    let d = 4;
+
+    /*
+
+
+    Comment with blank lines
+
+
+    */
+    let e = 5;
+
+    // Nested block comments (if supported)
+    /* Outer comment
+       /* Inner comment */
+       Still in outer comment
+    */
+    let f = 6;
+
+    // Block comment inline
+    let g = /* inline block */ 7;
+    let h = 1 + /* comment in expression */ 2;
+
+    // Block comment spanning expression parts
+    let i = 1 /* + 2 */ + 3;  // Only adds 1 + 3
+}
+
+// Documentation comments (if different syntax)
+
+/// Single-line doc comment for next item
+fn documented_function() -> Int {
+    42
+}
+
+/// Doc comment with formatting
+///
+/// # Examples
+/// ```
+/// let result = example();
+/// assert_eq(result, 42);
+/// ```
+fn example() -> Int {
+    42
+}
+
+/**
+ * Block doc comment
+ *
+ * Describes the following item in detail.
+ * Can span multiple lines with markdown.
+ */
+type DocumentedType is {
+    /// Field documentation
+    value: Int,
+
+    /// Another field
+    name: Text,
+};
+
+//! Module-level documentation
+//! Describes this module's purpose
+
+/*!
+ * Block module-level documentation
+ * For the current module
+ */
+
+// Comments in various positions
+
+fn function_with_comments(
+    // Parameter comment
+    x: Int,
+    /* Another param comment */ y: Int,
+) -> Int {
+    // Body comment
+    x + y  // Return value comment
+}
+
+type StructWithComments is {
+    // Before field
+    field1: Int,
+    field2: Int,  // After field
+    /* Block comment */ field3: Int,
+};
+
+fn test_match_comments() {
+    let value = 1;
+    match value {
+        // Before pattern
+        1 => result1(),  // After result
+        /* Block */ 2 => result2(),
+        _ => default_result(),
+    }
+}
+
+// Edge cases
+fn test_edge_cases() {
+    // Comment with trailing whitespace
+    // Comment with tabs		between
+    //Comment without space after slashes
+
+    /*Comment without spaces*/
+    /* Asymmetric spacing*/
+    /*Asymmetric spacing */
+
+    // Very long comment that goes on and on and on to test handling of lengthy single-line comments that might wrap in editors but are still single tokens
+
+    /*
+    Very long block comment that contains lots of text to test
+    the handling of large block comments that span many lines
+    and contain various content including code samples:
+
+    fn sample() -> Int {
+        let x = 42;
+        x * 2
+    }
+
+    And more text after the code sample.
+    */
+
+    // Comment containing comment syntax
+    // This has // double slashes inside
+    // And /* block comment */ markers
+
+    /* This block has // single line markers */
+    /* And /* nested block */ markers */
+}
+
+// Comments and string interactions
+fn test_comments_and_strings() {
+    let str_with_slashes = "not a // comment";
+    let str_with_block = "not a /* comment */ either";
+    // These are strings "with quotes" not code
+
+    // Consecutive different comment types
+    // Line comment
+    /* Block comment */
+    // Line comment again
+    /* Block again */
+
+    // Empty block comment
+    /**/
+
+    // Minimal comments
+    //
+    /**/
+    /* */
+
+    // Comments around operators
+    let expr = 1 +/* comment */2 */* another */3;
+
+    // Comments in complex expressions
+    let complex = (
+        1 // one
+        + 2 // two
+        * 3 // three
+        - 4 // four
+        / 5 // five
+    );
+}
+
+// Unicode in comments
+// Greek: symbols
+// Math: symbols
+// CJK: Japanese Chinese Korean
+
+// Comment at end of file (no newline after)
+// Final comment

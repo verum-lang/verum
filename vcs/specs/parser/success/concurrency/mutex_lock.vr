@@ -1,0 +1,24 @@
+// @test: parse-pass
+// @tier: 0
+// @category: concurrency
+
+fn test_mutex() {
+    // Mutex creation
+    let data: Mutex<List<Int>> = Mutex.new(List.new());
+
+    // Lock and access
+    let guard = data.lock();
+    guard.push(42);
+
+    // Lock with block
+    data.with_lock(|list| {
+        list.push(1);
+        list.push(2);
+    });
+
+    // Try lock
+    match data.try_lock() {
+        Some(guard) => guard.push(3),
+        None => log("Could not acquire lock")
+    }
+}

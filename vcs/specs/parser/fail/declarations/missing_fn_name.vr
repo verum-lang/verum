@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, error
+// @description: Test missing function name detection
+// @expected-error: E030
+
+fn () {
+    let x = 1;
+}

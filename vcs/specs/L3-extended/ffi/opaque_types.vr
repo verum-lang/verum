@@ -1,0 +1,232 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, opaque-types, abstraction
+
+/// Opaque types for FFI
+/// Demonstrates hiding internal C library implementation details
+
+type LibError is
+    | CreationFailed
+    | OperationFailed(i32);
+
+type FileError is
+    | OpenFailed
+    | ReadFailed
+    | WriteFailed;
+
+type FileMode is
+    | FmRead
+    | FmWrite
+    | FmReadWrite;
+
+/// Opaque handle to a C library context
+@opaque
+type LibraryHandle is ();
+
+/// Opaque file stream handle
+@opaque
+type FileStream is ();
+
+/// Opaque database connection
+@opaque
+type DbConnection is ();
+
+/// Opaque SSL context
+@opaque
+type SslContext is ();
+
+/// FFI declarations using opaque types
+ffi Library {
+    @extern("C")
+    fn lib_create() -> *mut LibraryHandle;
+
+    @extern("C")
+    fn lib_destroy(handle: *mut LibraryHandle);
+
+    @extern("C")
+    fn lib_operation(handle: *mut LibraryHandle, arg: i32) -> i32;
+}
+
+ffi FileIO {
+    @extern("C")
+    fn file_open(path: *const i8, mode: *const i8) -> *mut FileStream;
+
+    @extern("C")
+    fn file_close(stream: *mut FileStream) -> i32;
+
+    @extern("C")
+    fn file_read(stream: *mut FileStream, buf: *mut u8, size: usize) -> usize;
+
+    @extern("C")
+    fn file_write(stream: *mut FileStream, buf: *const u8, size: usize) -> usize;
+
+    @extern("C")
+    fn file_eof(stream: *const FileStream) -> Bool;
+}
+
+ffi Database {
+    @extern("C")
+    fn db_connect(connection_string: *const i8) -> *mut DbConnection;
+
+    @extern("C")
+    fn db_disconnect(conn: *mut DbConnection);
+
+    @extern("C")
+    fn db_execute(conn: *mut DbConnection, query: *const i8) -> i32;
+
+    @extern("C")
+    fn db_get_error(conn: *const DbConnection) -> *const i8;
+}
+
+/// Safe wrapper around opaque handle
+type SafeLibrary is {
+    handle: *mut LibraryHandle,
+};
+
+implement SafeLibrary {
+    /// Create a new library instance
+    fn new() -> Result<SafeLibrary, LibError> {
+        let handle = unsafe { Library.lib_create() };
+        if handle.is_null() {
+            Err(CreationFailed)
+        } else {
+            Ok(SafeLibrary { handle })
+        }
+    }
+
+    /// Perform an operation on the library
+    fn operation(&self, arg: i32) -> Result<i32, LibError>
+        // requires: !self.handle.is_null();
+    {
+        let result = unsafe { Library.lib_operation(self.handle, arg) };
+        if result < 0 {
+            Err(OperationFailed(result))
+        } else {
+            Ok(result)
+        }
+    }
+}
+
+implement Drop for SafeLibrary {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            // Placeholder: real impl calls Library.lib_destroy
+        }
+    }
+}
+
+/// Safe file stream wrapper
+type SafeFile is {
+    stream: *mut FileStream,
+};
+
+implement SafeFile {
+    fn open(path: &str, mode: FileMode) -> Result<SafeFile, FileError> {
+        let stream: *mut FileStream = null as *mut FileStream;
+        // Placeholder: real impl calls FileIO.file_open
+
+        if stream.is_null() {
+            Err(OpenFailed)
+        } else {
+            Ok(SafeFile { stream })
+        }
+    }
+
+    fn read(&self, buf: &mut [u8]) -> Result<usize, FileError>
+        // requires: !self.stream.is_null();
+    {
+        let bytes = unsafe {
+            FileIO.file_read(self.stream, buf.as_mut_ptr(), buf.len())
+        };
+        Ok(bytes)
+    }
+
+    fn write(&self, buf: &[u8]) -> Result<usize, FileError>
+        // requires: !self.stream.is_null();
+    {
+        let bytes = unsafe {
+            FileIO.file_write(self.stream, buf.as_ptr(), buf.len())
+        };
+        Ok(bytes)
+    }
+
+    fn is_eof(&self) -> Bool
+        // requires: !self.stream.is_null();
+    {
+        unsafe { FileIO.file_eof(self.stream) }
+    }
+}
+
+implement Drop for SafeFile {
+    fn drop(&mut self) {
+        if !self.stream.is_null() {
+            unsafe { FileIO.file_close(self.stream); }
+        }
+    }
+}
+
+/// Database connection wrapper with error handling
+type DbError is
+    | ConnectionFailed
+    | ExecutionFailed(Text);
+
+type SafeDbConnection is {
+    conn: *mut DbConnection,
+};
+
+implement SafeDbConnection {
+    fn connect(connection_string: &str) -> Result<SafeDbConnection, DbError> {
+        let c_str = connection_string.to_c_string();
+        let conn = unsafe { Database.db_connect(c_str.as_ptr()) };
+
+        if conn.is_null() {
+            Err(ConnectionFailed)
+        } else {
+            Ok(SafeDbConnection { conn })
+        }
+    }
+
+    fn execute(&self, query: &str) -> Result<(), DbError>
+        // requires: !self.conn.is_null();
+    {
+        let c_query = query.to_c_string();
+        let result = unsafe { Database.db_execute(self.conn, c_query.as_ptr()) };
+
+        if result != 0 {
+            let error_ptr = unsafe { Database.db_get_error(self.conn) };
+            let error_msg = if error_ptr.is_null() {
+                "Unknown error".to_text()
+            } else {
+                "" // Placeholder: real impl converts C string
+            };
+            Err(ExecutionFailed(error_msg))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+implement Drop for SafeDbConnection {
+    fn drop(&mut self) {
+        if !self.conn.is_null() {
+            unsafe { Database.db_disconnect(self.conn); }
+        }
+    }
+}
+
+/// Opaque type with phantom type parameter for extra safety
+@opaque
+type TypedHandle<T> is ();
+
+/// Type-safe handle wrapper
+type Handle<T> is {
+    raw: *mut TypedHandle<T>,
+    _phantom: PhantomData<T>,
+};
+
+implement<T> Handle<T> {
+    fn is_valid(&self) -> Bool {
+        !self.raw.is_null()
+    }
+}

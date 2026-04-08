@@ -1,0 +1,126 @@
+// @test: parse-recover
+// @tier: 0
+// @level: L0
+// @tags: parser, error-recovery, control-flow, if, match, for, while
+// @description: Tests parser recovery from invalid control flow constructs.
+//              Parser should recover at statement/block boundaries.
+
+// Test 1: If without condition
+fn test_if_no_condition() {
+    if {
+        let x = 1;
+    }
+    let valid = 42;
+    valid
+}
+
+// Test 2: If without body
+fn test_if_no_body() {
+    if true
+    let valid = 42;
+    valid
+}
+
+// Test 3: Else without preceding if
+fn test_orphan_else() {
+    else {
+        let x = 1;
+    }
+    let valid = 42;
+    valid
+}
+
+// Test 4: Match without scrutinee
+fn test_match_no_scrutinee() {
+    match {
+        _ => 0,
+    }
+    let valid = 42;
+    valid
+}
+
+// Test 5: Match arm without pattern
+fn test_match_no_pattern() {
+    let x = 5;
+    match x {
+        => 1,
+        5 => 2,
+    }
+    let valid = 42;
+    valid
+}
+
+// Test 6: Match arm without body
+fn test_match_no_body() {
+    let x = 5;
+    match x {
+        1 =>,
+        2 => 10,
+        _ => 0,
+    }
+    let valid = 42;
+    valid
+}
+
+// Test 7: For without iterator
+fn test_for_no_iter() {
+    for x in {
+        let y = 1;
+    }
+    let valid = 42;
+    valid
+}
+
+// Test 8: For without binding variable
+fn test_for_no_binding() {
+    for in [1, 2, 3] {
+        let y = 1;
+    }
+    let valid = 42;
+    valid
+}
+
+// Test 9: While without condition
+fn test_while_no_condition() {
+    while {
+        break;
+    }
+    let valid = 42;
+    valid
+}
+
+// Test 10: Break outside of loop (semantic, but parser should accept)
+fn test_break_outside_loop() {
+    break;
+    let valid = 42;
+    valid
+}
+
+// Test 11: Return with invalid expression
+fn test_return_invalid() -> Int {
+    return @#$;
+    42
+}
+
+// Test 12: Nested broken control flow
+fn test_nested_broken() {
+    if true {
+        while {
+            for in {
+                let x = 1;
+            }
+        }
+    }
+    let valid = 42;
+    valid
+}
+
+// Valid function to confirm full recovery
+fn all_valid_control_flow() -> Int {
+    let result = if true { 1 } else { 2 };
+    let sum = 0;
+    for i in 0..5 {
+        let _ = i;
+    }
+    result
+}

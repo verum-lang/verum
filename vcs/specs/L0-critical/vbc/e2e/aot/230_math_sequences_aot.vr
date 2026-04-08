@@ -1,0 +1,182 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, math, sequences
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for mathematical sequences and series
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// Fibonacci
+fn fib(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b
+}
+
+// Triangular numbers: T(n) = n*(n+1)/2
+fn triangular(n: Int) -> Int {
+    n * (n + 1) / 2
+}
+
+// Catalan numbers: C(n) = C(2n, n) / (n+1)
+fn catalan(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut result = 0;
+    let mut i = 0;
+    while i < n {
+        result = result + catalan_cached(i) * catalan_cached(n - 1 - i);
+        i = i + 1;
+    }
+    result
+}
+
+// Iterative catalan for small n
+@allow(unbounded_recursion)
+fn catalan_cached(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    if n == 2 { return 2; }
+    if n == 3 { return 5; }
+    if n == 4 { return 14; }
+    if n == 5 { return 42; }
+    0 // Fallback for larger n
+}
+
+// Collatz sequence length
+fn collatz_len(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x != 1 {
+        if x % 2 == 0 {
+            x = x / 2;
+        } else {
+            x = 3 * x + 1;
+        }
+        count = count + 1;
+    }
+    count
+}
+
+// Sum of arithmetic series: a + (a+d) + (a+2d) + ... (n terms)
+fn arith_series(a: Int, d: Int, n: Int) -> Int {
+    // Sum = n * (2a + (n-1)*d) / 2
+    n * (2 * a + (n - 1) * d) / 2
+}
+
+// Sum of geometric series (integer): a + a*r + a*r^2 + ... (n terms)
+fn geom_series(a: Int, r: Int, n: Int) -> Int {
+    let mut sum = 0;
+    let mut term = a;
+    let mut i = 0;
+    while i < n {
+        sum = sum + term;
+        term = term * r;
+        i = i + 1;
+    }
+    sum
+}
+
+// Sum of squares: 1^2 + 2^2 + ... + n^2
+fn sum_squares(n: Int) -> Int {
+    n * (n + 1) * (2 * n + 1) / 6
+}
+
+// Sum of cubes: 1^3 + 2^3 + ... + n^3 = (n*(n+1)/2)^2
+fn sum_cubes(n: Int) -> Int {
+    let t = n * (n + 1) / 2;
+    t * t
+}
+
+fn test_fibonacci() {
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(2), 1);
+    assert_eq(fib(5), 5);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(15), 610);
+    assert_eq(fib(20), 6765);
+
+    // Fibonacci property: F(n+2) = F(n+1) + F(n)
+    assert_eq(fib(12), fib(11) + fib(10));
+}
+
+fn test_triangular() {
+    assert_eq(triangular(0), 0);
+    assert_eq(triangular(1), 1);
+    assert_eq(triangular(3), 6);
+    assert_eq(triangular(10), 55);
+    assert_eq(triangular(100), 5050);
+
+    // T(n) = sum of 1..n
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 10 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    assert_eq(sum, triangular(10));
+}
+
+fn test_catalan() {
+    assert_eq(catalan_cached(0), 1);
+    assert_eq(catalan_cached(1), 1);
+    assert_eq(catalan_cached(2), 2);
+    assert_eq(catalan_cached(3), 5);
+    assert_eq(catalan_cached(4), 14);
+    assert_eq(catalan_cached(5), 42);
+}
+
+fn test_collatz() {
+    assert_eq(collatz_len(1), 0);
+    assert_eq(collatz_len(2), 1);    // 2->1
+    assert_eq(collatz_len(3), 7);    // 3->10->5->16->8->4->2->1
+    assert_eq(collatz_len(6), 8);
+    assert_eq(collatz_len(27), 111);
+}
+
+fn test_series() {
+    // Arithmetic: 1 + 2 + 3 + ... + 10 = 55
+    assert_eq(arith_series(1, 1, 10), 55);
+    // 2 + 5 + 8 + 11 + 14 = 40
+    assert_eq(arith_series(2, 3, 5), 40);
+
+    // Geometric: 1 + 2 + 4 + 8 + 16 = 31
+    assert_eq(geom_series(1, 2, 5), 31);
+    // 3 + 9 + 27 = 39
+    assert_eq(geom_series(3, 3, 3), 39);
+}
+
+fn test_sum_powers() {
+    assert_eq(sum_squares(1), 1);
+    assert_eq(sum_squares(3), 14);   // 1+4+9
+    assert_eq(sum_squares(10), 385);
+
+    assert_eq(sum_cubes(1), 1);
+    assert_eq(sum_cubes(3), 36);     // 1+8+27
+    assert_eq(sum_cubes(10), 3025);
+
+    // Nice identity: sum_cubes(n) = triangular(n)^2
+    let t5 = triangular(5);
+    assert_eq(sum_cubes(5), t5 * t5);
+}
+
+fn main() -> Int {
+    test_fibonacci();
+    test_triangular();
+    test_catalan();
+    test_collatz();
+    test_series();
+    test_sum_powers();
+    print("[OK] 230_math_sequences_aot");
+    0
+}

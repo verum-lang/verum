@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine, functions
+
+/// Test copy and affine semantics when passing values to functions.
+/// Regular types are copied into functions (caller retains access).
+/// Affine types are moved into functions (caller loses access).
+/// Spec: 04-memory-model.md#copy-vs-affine
+
+// Affine type - moved into functions
+type affine Handle is {
+    fd: Int,
+    name: Text,
+};
+
+fn take_handle(h: Handle) {
+    print(h.name);
+    // h is dropped at end of function
+}
+
+fn take_and_return_handle(h: Handle) -> Handle {
+    print(h.name);
+    h  // Return ownership back to caller
+}
+
+fn take_text(s: Text) {
+    print(s);
+}
+
+fn take_struct(p: Point) -> Int {
+    p.x + p.y
+}
+
+fn take_list(items: List<Int>) -> Int {
+    let mut total = 0;
+    for item in items {
+        total = total + item;
+    }
+    total
+}
+
+fn main() {
+    // Copy into function - Text is Copy
+    let s1 = Text.from("hello");
+    take_text(s1);
+    // s1 is STILL valid (Text is Copy)
+    print(s1);
+
+    // Copy and return - struct is Copy
+    let point = Point { x: 5, y: 10 };
+    let sum = take_struct(point);
+    assert(sum == 15);
+    // point is STILL valid
+    assert(point.x == 5);
+
+    // Copy collection into function
+    let numbers = [1, 2, 3, 4, 5];
+    let total = take_list(numbers);
+    assert(total == 15);
+    // numbers is STILL valid (List is Copy)
+    assert(numbers.len() == 5);
+
+    // AFFINE: Move into function
+    let h1 = Handle { fd: 1, name: Text.from("file.txt") };
+    take_handle(h1);
+    // h1 is NO LONGER valid (Handle is affine)
+    // print(h1.name);  // Would panic
+
+    // AFFINE: Move and return
+    let h2 = Handle { fd: 2, name: Text.from("socket") };
+    let h3 = take_and_return_handle(h2);
+    // h2 is invalid, h3 is valid
+    assert(h3.fd == 2);
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};

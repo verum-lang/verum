@@ -1,0 +1,58 @@
+// @test: parse
+// @level: L1
+// @tags: meta, attributes, custom
+// @timeout: 5000
+
+/// Custom attributes using the general attribute syntax.
+/// Grammar: attribute = identifier ['(' attribute_args ')']
+///          attribute_item = '@' attribute item
+
+// Custom attribute with no args
+@test
+fn test_addition() {
+    assert_eq(1 + 1, 2);
+}
+
+// Custom attribute with single arg
+@timeout(5000)
+fn slow_test() {
+    // test that might take a while
+    print("slow test");
+}
+
+// Custom attribute with named args
+@api(version = 2, deprecated = false)
+fn get_users() -> List<Text> {
+    List.of("alice", "bob")
+}
+
+// Multiple custom attributes on a single item
+@public
+@cached(ttl = 60)
+@rate_limited(max = 100)
+fn expensive_query(id: Int) -> Text {
+    f"result_{id}"
+}
+
+// Custom attribute on type
+@table(name = "users")
+type UserRow is {
+    @column(primary_key = true)
+    id: Int,
+    @column(max_length = 255)
+    name: Text,
+    @column(nullable = true)
+    email: Maybe<Text>,
+};
+
+// Injectable attribute
+@injectable(Scope.Singleton)
+type DatabasePool is {
+    connection_string: Text,
+    max_connections: Int,
+};
+
+fn main() {
+    test_addition();
+    print("Custom attribute tests parsed");
+}

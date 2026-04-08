@@ -1,0 +1,252 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, modular-arithmetic, number-theory
+// @timeout: 30000
+
+// Milestone 615: Modular arithmetic and number theory
+// modpow, modinv (extended GCD), Chinese Remainder Theorem,
+// Euler's totient, primality testing
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// GCD via Euclidean algorithm
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+// Modular exponentiation: base^exp mod m
+// Uses repeated squaring
+fn modpow(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % m;
+        }
+        e = e / 2;
+        b = (b * b) % m;
+    }
+    result
+}
+
+// Extended GCD: returns packed (gcd, x, y) where a*x + b*y = gcd
+// Pack: gcd * 1000000 + (x + 500) * 1000 + (y + 500)
+// This limits x, y to range [-500, 499] and gcd < 1000
+@allow(unbounded_recursion)
+fn ext_gcd_packed(a: Int, b: Int) -> Int {
+    if b == 0 {
+        // gcd=a, x=1, y=0
+        a * 1000000 + (1 + 500) * 1000 + (0 + 500)
+    } else {
+        let r = ext_gcd_packed(b, a % b);
+        let g = r / 1000000;
+        let x1 = (r / 1000) % 1000 - 500;
+        let y1 = r % 1000 - 500;
+        // gcd=g, x=y1, y=x1 - (a/b)*y1
+        let new_x = y1;
+        let new_y = x1 - (a / b) * y1;
+        g * 1000000 + (new_x + 500) * 1000 + (new_y + 500)
+    }
+}
+
+// Modular inverse: a^(-1) mod m, returns -1 if no inverse exists
+fn modinv(a: Int, m: Int) -> Int {
+    let r = ext_gcd_packed(a, m);
+    let g = r / 1000000;
+    if g != 1 { 0 - 1 }
+    else {
+        let x = (r / 1000) % 1000 - 500;
+        // Ensure positive result
+        let mut inv = x % m;
+        if inv < 0 { inv = inv + m; }
+        inv
+    }
+}
+
+// Chinese Remainder Theorem for 2 equations:
+// x = a1 (mod m1), x = a2 (mod m2)
+// Requires gcd(m1, m2) = 1
+// Returns x mod (m1 * m2)
+fn crt2(a1: Int, m1: Int, a2: Int, m2: Int) -> Int {
+    let inv = modinv(m1, m2);
+    // x = a1 + m1 * ((a2 - a1) * inv mod m2)
+    let mut diff = (a2 - a1) % m2;
+    if diff < 0 { diff = diff + m2; }
+    let t = (diff * inv) % m2;
+    let result = a1 + m1 * t;
+    result % (m1 * m2)
+}
+
+// Euler's totient function phi(n)
+// Count of integers 1..n coprime to n
+fn euler_totient(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i <= n {
+        if gcd(i, n) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Simple primality test
+fn is_prime(n: Int) -> Int {
+    if n < 2 { 0 }
+    else if n == 2 { 1 }
+    else if n % 2 == 0 { 0 }
+    else {
+        let mut i = 3;
+        let mut prime = 1;
+        while i * i <= n {
+            if prime == 1 {
+                if n % i == 0 { prime = 0; }
+            }
+            i = i + 2;
+        }
+        prime
+    }
+}
+
+// Count primes up to n (inclusive)
+fn count_primes(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i <= n {
+        if is_prime(i) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+@allow(unbounded_recursion)
+fn test_modpow() -> Int {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    assert_eq(modpow(2, 10, 1000), 24);
+    // 3^5 mod 13 = 243 mod 13 = 243 - 18*13 = 243 - 234 = 9
+    assert_eq(modpow(3, 5, 13), 9);
+    // 7^3 mod 10 = 343 mod 10 = 3
+    assert_eq(modpow(7, 3, 10), 3);
+    // a^0 mod m = 1 for any a
+    assert_eq(modpow(5, 0, 7), 1);
+    assert_eq(modpow(100, 0, 3), 1);
+    // Fermat's little theorem: a^(p-1) = 1 mod p for prime p, gcd(a,p)=1
+    assert_eq(modpow(2, 6, 7), 1);    // 2^6 mod 7 = 1
+    assert_eq(modpow(3, 10, 11), 1);   // 3^10 mod 11 = 1
+    assert_eq(modpow(5, 12, 13), 1);   // 5^12 mod 13 = 1
+    1
+}
+
+@allow(unbounded_recursion)
+fn test_modinv() -> Int {
+    // 3 * ? = 1 mod 7 -> 3*5 = 15 = 2*7+1 -> inv = 5
+    assert_eq(modinv(3, 7), 5);
+    // Verify: 3 * 5 mod 7 = 15 mod 7 = 1
+    assert_eq((3 * modinv(3, 7)) % 7, 1);
+    // 2 * ? = 1 mod 5 -> 2*3 = 6 = 5+1 -> inv = 3
+    assert_eq(modinv(2, 5), 3);
+    assert_eq((2 * modinv(2, 5)) % 5, 1);
+    // 4 * ? = 1 mod 9 -> 4*7 = 28 = 3*9+1 -> inv = 7
+    assert_eq(modinv(4, 9), 7);
+    assert_eq((4 * modinv(4, 9)) % 9, 1);
+    // No inverse when gcd != 1
+    assert_eq(modinv(2, 4), 0 - 1);
+    assert_eq(modinv(6, 9), 0 - 1);
+    1
+}
+
+@allow(unbounded_recursion)
+fn test_crt() -> Int {
+    // x = 2 mod 3, x = 3 mod 5 -> x = 8 mod 15
+    // Check: 8 mod 3 = 2, 8 mod 5 = 3. Correct.
+    assert_eq(crt2(2, 3, 3, 5), 8);
+    // x = 1 mod 2, x = 2 mod 3 -> x = 5 mod 6
+    // Check: 5 mod 2 = 1, 5 mod 3 = 2. Correct.
+    assert_eq(crt2(1, 2, 2, 3), 5);
+    // x = 3 mod 5, x = 1 mod 7 -> x = 8 mod 35
+    // Check: 8 mod 5 = 3, 8 mod 7 = 1. Correct.
+    assert_eq(crt2(3, 5, 1, 7), 8);
+    // x = 0 mod 3, x = 4 mod 7 -> x = ? mod 21
+    // x = 3k, 3k = 4 mod 7, k = 4*modinv(3,7) mod 7 = 4*5 mod 7 = 20 mod 7 = 6
+    // x = 3*6 = 18. Check: 18 mod 3 = 0, 18 mod 7 = 4. Correct.
+    assert_eq(crt2(0, 3, 4, 7), 18);
+    1
+}
+
+fn test_euler_totient() -> Int {
+    // phi(1) = 1
+    assert_eq(euler_totient(1), 1);
+    // phi(p) = p-1 for prime p
+    assert_eq(euler_totient(2), 1);
+    assert_eq(euler_totient(7), 6);
+    assert_eq(euler_totient(11), 10);
+    assert_eq(euler_totient(13), 12);
+    // phi(p^k) for p=2: phi(4) = 2, phi(8) = 4
+    assert_eq(euler_totient(4), 2);
+    assert_eq(euler_totient(8), 4);
+    // phi(6) = 2 (1 and 5 are coprime to 6)
+    assert_eq(euler_totient(6), 2);
+    // phi(12) = 4 (1, 5, 7, 11)
+    assert_eq(euler_totient(12), 4);
+    // phi(10) = 4 (1, 3, 7, 9)
+    assert_eq(euler_totient(10), 4);
+    // Multiplicative property: phi(m*n) = phi(m)*phi(n) when gcd(m,n)=1
+    assert_eq(euler_totient(15), euler_totient(3) * euler_totient(5));
+    assert_eq(euler_totient(35), euler_totient(5) * euler_totient(7));
+    1
+}
+
+fn test_primality() -> Int {
+    // Small primes
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(5), 1);
+    assert_eq(is_prime(7), 1);
+    assert_eq(is_prime(11), 1);
+    assert_eq(is_prime(13), 1);
+    assert_eq(is_prime(17), 1);
+    assert_eq(is_prime(19), 1);
+    assert_eq(is_prime(23), 1);
+    // Non-primes
+    assert_eq(is_prime(0), 0);
+    assert_eq(is_prime(1), 0);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(9), 0);
+    assert_eq(is_prime(15), 0);
+    assert_eq(is_prime(25), 0);
+    // Count primes up to 30: 2,3,5,7,11,13,17,19,23,29 = 10
+    assert_eq(count_primes(30), 10);
+    // Count primes up to 10: 2,3,5,7 = 4
+    assert_eq(count_primes(10), 4);
+    1
+}
+
+@allow(unbounded_recursion)
+fn test_euler_fermat() -> Int {
+    // Euler's theorem: a^phi(n) = 1 mod n when gcd(a,n) = 1
+    // phi(12) = 4, so 5^4 mod 12 = 625 mod 12 = 1
+    assert_eq(modpow(5, euler_totient(12), 12), 1);
+    // phi(10) = 4, so 3^4 mod 10 = 81 mod 10 = 1
+    assert_eq(modpow(3, euler_totient(10), 10), 1);
+    // phi(9) = 6, so 2^6 mod 9 = 64 mod 9 = 1
+    assert_eq(modpow(2, euler_totient(9), 9), 1);
+    1
+}
+
+fn main() -> Int {
+    test_modpow();
+    test_modinv();
+    test_crt();
+    test_euler_totient();
+    test_primality();
+    test_euler_fermat();
+    print("[OK] 615_milestone_aot");
+    0
+}

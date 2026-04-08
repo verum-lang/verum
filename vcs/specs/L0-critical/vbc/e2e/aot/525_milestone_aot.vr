@@ -1,0 +1,212 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, regex-nfa, automaton
+// @timeout: 30000
+
+// Milestone: Simple regex matching via NFA simulation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn has_bit(mask: Int, k: Int) -> Int { (mask / pow2(k)) % 2 }
+fn set_bit(mask: Int, k: Int) -> Int { if has_bit(mask, k) == 1 { mask } else { mask + pow2(k) } }
+
+// Simple regex NFA: each state has:
+// - match_char: character to match (-1 for epsilon, -2 for wildcard '.')
+// - next1, next2: transition states (-1 = no transition)
+// State encoding: packed as match_char * 100 + next1 * 10 + next2
+// For simplicity, we use separate arrays for each field
+
+type NFA is { match_c: Arr8, next1: Arr8, next2: Arr8, n_states: Int, accept: Int };
+
+// Simulate NFA: given set of current states, advance on input character
+fn nfa_step(nfa: NFA, states: Int, ch: Int) -> Int {
+    let mut next_states = 0;
+    let mut s = 0;
+    while s < nfa.n_states {
+        if has_bit(states, s) == 1 {
+            let mc = get8(nfa.match_c, s);
+            if mc == ch {
+                // Character match
+                let n1 = get8(nfa.next1, s);
+                if n1 >= 0 { next_states = set_bit(next_states, n1); }
+                let n2 = get8(nfa.next2, s);
+                if n2 >= 0 { next_states = set_bit(next_states, n2); }
+            } else if mc == -2 {
+                // Wildcard matches any
+                let n1 = get8(nfa.next1, s);
+                if n1 >= 0 { next_states = set_bit(next_states, n1); }
+            }
+        }
+        s = s + 1;
+    }
+    next_states
+}
+
+// Follow epsilon transitions (closure)
+fn epsilon_closure(nfa: NFA, states: Int) -> Int {
+    let mut result = states;
+    let mut changed = 1;
+    while changed == 1 {
+        changed = 0;
+        let mut s = 0;
+        while s < nfa.n_states {
+            if has_bit(result, s) == 1 {
+                let mc = get8(nfa.match_c, s);
+                if mc == -1 {
+                    // Epsilon transition
+                    let n1 = get8(nfa.next1, s);
+                    if n1 >= 0 {
+                        if has_bit(result, n1) == 0 {
+                            result = set_bit(result, n1);
+                            changed = 1;
+                        }
+                    }
+                    let n2 = get8(nfa.next2, s);
+                    if n2 >= 0 {
+                        if has_bit(result, n2) == 0 {
+                            result = set_bit(result, n2);
+                            changed = 1;
+                        }
+                    }
+                }
+            }
+            s = s + 1;
+        }
+    }
+    result
+}
+
+// Run NFA on input sequence, returns 1 if accepted
+fn nfa_run(nfa: NFA, input: Arr8, ilen: Int) -> Int {
+    let mut states = set_bit(0, 0); // Start in state 0
+    states = epsilon_closure(nfa, states);
+
+    let mut i = 0;
+    while i < ilen {
+        let ch = get8(input, i);
+        states = nfa_step(nfa, states, ch);
+        states = epsilon_closure(nfa, states);
+        i = i + 1;
+    }
+    has_bit(states, nfa.accept)
+}
+
+fn test_literal_match() -> Int {
+    // Regex: "abc" (matches exactly [1,2,3])
+    // States: 0→(match 1)→1→(match 2)→2→(match 3)→3(accept)
+    let mc = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let n1 = Arr8 { v0: 1, v1: 2, v2: 3, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let n2 = Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let nfa = NFA { match_c: mc, next1: n1, next2: n2, n_states: 4, accept: 3 };
+
+    let good = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nfa_run(nfa, good, 3), 1);
+
+    let bad = Arr8 { v0: 1, v1: 2, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nfa_run(nfa, bad, 3), 0);
+
+    let short = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nfa_run(nfa, short, 2), 0);
+    1
+}
+
+fn test_wildcard() -> Int {
+    // Regex: "a.c" (matches [1, any, 3])
+    // States: 0→(match 1)→1→(wildcard)→2→(match 3)→3(accept)
+    let mc = Arr8 { v0: 1, v1: -2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let n1 = Arr8 { v0: 1, v1: 2, v2: 3, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let n2 = Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let nfa = NFA { match_c: mc, next1: n1, next2: n2, n_states: 4, accept: 3 };
+
+    let input1 = Arr8 { v0: 1, v1: 5, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nfa_run(nfa, input1, 3), 1);
+
+    let input2 = Arr8 { v0: 1, v1: 99, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nfa_run(nfa, input2, 3), 1);
+
+    let bad = Arr8 { v0: 2, v1: 5, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nfa_run(nfa, bad, 3), 0);
+    1
+}
+
+fn test_optional() -> Int {
+    // Regex: "ab?" (matches [1] or [1,2])
+    // States: 0→(match 1)→1→(epsilon)→2(accept), 1→(match 2)→2(accept)
+    // State 0: match 1, next→1
+    // State 1: epsilon, next1→2, next2→3
+    // State 2: accept (also for optional skip)
+    // State 3: match 2, next→2
+    // Wait, simpler: State 0: match 1 → State 1
+    // State 1: epsilon → State 2 (skip b), also match 2 → State 2
+    // But our NFA has one match_c per state. Let's use:
+    // State 0: match 1, next1→1
+    // State 1: epsilon, next1→2, next2→3  (epsilon to accept or to match-b)
+    // State 2: accept
+    // State 3: match 2, next1→2
+    let mc = Arr8 { v0: 1, v1: -1, v2: 0, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let n1 = Arr8 { v0: 1, v1: 2, v2: -1, v3: 2, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let n2 = Arr8 { v0: -1, v1: 3, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let nfa = NFA { match_c: mc, next1: n1, next2: n2, n_states: 4, accept: 2 };
+
+    // "a" → accept
+    let a_only = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nfa_run(nfa, a_only, 1), 1);
+
+    // "ab" → accept
+    let ab = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nfa_run(nfa, ab, 2), 1);
+
+    // "b" → reject (no initial 1)
+    let b_only = Arr8 { v0: 2, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nfa_run(nfa, b_only, 1), 0);
+    1
+}
+
+fn test_empty_input() -> Int {
+    // NFA that accepts empty string: state 0 is accept with epsilon
+    let mc = Arr8 { v0: -1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let n1 = Arr8 { v0: 1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let n2 = Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let nfa = NFA { match_c: mc, next1: n1, next2: n2, n_states: 2, accept: 1 };
+
+    let empty = zeros();
+    assert_eq(nfa_run(nfa, empty, 0), 1);
+    1
+}
+
+fn main() -> Int {
+    test_literal_match();
+    test_wildcard();
+    test_optional();
+    test_empty_input();
+    print("[OK] 525_milestone_aot");
+    0
+}

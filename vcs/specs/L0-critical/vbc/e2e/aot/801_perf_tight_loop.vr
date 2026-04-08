@@ -1,0 +1,30 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, performance, tight_loop
+// @expected-exit: 0
+
+// Performance: Sum 10M integers in a tight loop
+
+fn sum_range(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while (i < n) {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    let n = 10000000;
+    let result = sum_range(n);
+    // Expected: n*(n-1)/2 = 10000000*9999999/2 = 49999995000000
+    let expected = 49999995000000;
+    if (result != expected) {
+        print(f"FAIL: sum={result}, expected={expected}");
+        return 1;
+    }
+    print(f"OK: sum_10M={result}");
+    0
+}

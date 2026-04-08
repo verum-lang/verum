@@ -1,0 +1,228 @@
+// =============================================================================
+// list_chunk_by_test.vr - Tests for List.chunk_by
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, collections, list, chunk_by
+// @description: Tests for List.chunk_by method which groups consecutive elements.
+//
+// Coverage:
+// - chunk_by equal elements, ascending runs, custom predicates
+// - empty, single element, all same, all different
+// =============================================================================
+
+module specs.core.collections.list_chunk_by_test;
+
+mount core.base.protocols.{Eq, Clone, Ord};
+mount core.collections.list.List;
+
+// =============================================================================
+// Predicate functions
+// =============================================================================
+
+fn same_value(a: &Int, b: &Int) -> Bool {
+    *a == *b
+}
+
+fn ascending(a: &Int, b: &Int) -> Bool {
+    *b > *a
+}
+
+fn same_sign(a: &Int, b: &Int) -> Bool {
+    (*a >= 0 && *b >= 0) || (*a < 0 && *b < 0)
+}
+
+fn diff_le_1(a: &Int, b: &Int) -> Bool {
+    let d = *b - *a;
+    d >= 0 && d <= 1
+}
+
+fn same_parity(a: &Int, b: &Int) -> Bool {
+    *a % 2 == *b % 2
+}
+
+// =============================================================================
+// Section 1: Basic chunk_by
+// =============================================================================
+
+@test
+fn test_chunk_by_equal_runs() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    list.push(3);
+    list.push(3);
+    list.push(1);
+    let groups = list.chunk_by(same_value);
+    assert_eq(groups.len(), 4);
+    assert_eq(groups.get(0).unwrap().len(), 2);  // [1, 1]
+    assert_eq(groups.get(1).unwrap().len(), 1);  // [2]
+    assert_eq(groups.get(2).unwrap().len(), 3);  // [3, 3, 3]
+    assert_eq(groups.get(3).unwrap().len(), 1);  // [1]
+}
+
+@test
+fn test_chunk_by_ascending_runs() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(3);
+    list.push(5);
+    list.push(2);
+    list.push(4);
+    list.push(1);
+    let groups = list.chunk_by(ascending);
+    assert_eq(groups.len(), 3);
+    // [1, 3, 5], [2, 4], [1]
+    assert_eq(groups.get(0).unwrap().len(), 3);
+    assert_eq(groups.get(1).unwrap().len(), 2);
+    assert_eq(groups.get(2).unwrap().len(), 1);
+}
+
+@test
+fn test_chunk_by_empty() {
+    let list: List<Int> = List.new();
+    let groups = list.chunk_by(same_value);
+    assert_eq(groups.len(), 0);
+}
+
+@test
+fn test_chunk_by_single() {
+    let mut list: List<Int> = List.new();
+    list.push(42);
+    let groups = list.chunk_by(same_value);
+    assert_eq(groups.len(), 1);
+    assert_eq(*groups.get(0).unwrap().get(0).unwrap(), 42);
+}
+
+@test
+fn test_chunk_by_all_same() {
+    let mut list: List<Int> = List.new();
+    list.push(5);
+    list.push(5);
+    list.push(5);
+    list.push(5);
+    let groups = list.chunk_by(same_value);
+    assert_eq(groups.len(), 1);
+    assert_eq(groups.get(0).unwrap().len(), 4);
+}
+
+@test
+fn test_chunk_by_all_different() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    list.push(4);
+    let groups = list.chunk_by(same_value);
+    assert_eq(groups.len(), 4);
+    for i in range(0, 4) {
+        assert_eq(groups.get(i).unwrap().len(), 1);
+    }
+}
+
+@test
+fn test_chunk_by_sign_groups() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    list.push(-1);
+    list.push(-2);
+    list.push(4);
+    list.push(5);
+    let groups = list.chunk_by(same_sign);
+    assert_eq(groups.len(), 3);
+    // [1,2,3], [-1,-2], [4,5]
+    assert_eq(groups.get(0).unwrap().len(), 3);
+    assert_eq(groups.get(1).unwrap().len(), 2);
+    assert_eq(groups.get(2).unwrap().len(), 2);
+}
+
+@test
+fn test_chunk_by_consecutive_values() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    list.push(5);
+    list.push(6);
+    list.push(10);
+    let groups = list.chunk_by(diff_le_1);
+    assert_eq(groups.len(), 3);
+    // [1,2,3], [5,6], [10]
+    assert_eq(groups.get(0).unwrap().len(), 3);
+    assert_eq(groups.get(1).unwrap().len(), 2);
+    assert_eq(groups.get(2).unwrap().len(), 1);
+}
+
+@test
+fn test_chunk_by_parity() {
+    let mut list: List<Int> = List.new();
+    list.push(2);
+    list.push(4);
+    list.push(1);
+    list.push(3);
+    list.push(6);
+    let groups = list.chunk_by(same_parity);
+    assert_eq(groups.len(), 3);
+    // [2,4], [1,3], [6]
+    assert_eq(groups.get(0).unwrap().len(), 2);
+    assert_eq(groups.get(1).unwrap().len(), 2);
+    assert_eq(groups.get(2).unwrap().len(), 1);
+}
+
+@test
+fn test_chunk_by_two_elements_same() {
+    let mut list: List<Int> = List.new();
+    list.push(5);
+    list.push(5);
+    let groups = list.chunk_by(same_value);
+    assert_eq(groups.len(), 1);
+    assert_eq(groups.get(0).unwrap().len(), 2);
+}
+
+@test
+fn test_chunk_by_two_elements_different() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    let groups = list.chunk_by(same_value);
+    assert_eq(groups.len(), 2);
+}
+
+@test
+fn test_chunk_by_values_preserved() {
+    let mut list: List<Int> = List.new();
+    list.push(10);
+    list.push(10);
+    list.push(20);
+    list.push(20);
+    let groups = list.chunk_by(same_value);
+    assert_eq(*groups.get(0).unwrap().get(0).unwrap(), 10);
+    assert_eq(*groups.get(0).unwrap().get(1).unwrap(), 10);
+    assert_eq(*groups.get(1).unwrap().get(0).unwrap(), 20);
+    assert_eq(*groups.get(1).unwrap().get(1).unwrap(), 20);
+}
+
+@test
+fn test_chunk_by_alternating() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(1);
+    list.push(2);
+    list.push(1);
+    let groups = list.chunk_by(same_value);
+    assert_eq(groups.len(), 5);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

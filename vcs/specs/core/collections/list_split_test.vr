@@ -1,0 +1,912 @@
+// =============================================================================
+// list_split_test.vr - Tests for List split, sort-check, extract, and chunk methods
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, list, split, chunks, extract, core
+// @description: Tests for split_first, split_last, is_sorted, is_sorted_by,
+//               is_sorted_by_key, extract_if, fill_with, resize_with,
+//               dedup_by_key, chunks_exact, chunks_exact_remainder
+// =============================================================================
+
+mount core.collections.list.{List, list};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// PART 1: split_first
+// =============================================================================
+
+@test
+fn test_split_first_basic() {
+    let v: List<Int> = list([1, 2, 3, 4, 5]);
+    match v.split_first() {
+        Some(pair) => {
+            let first = pair.0;
+            let rest = pair.1;
+            assert_eq(*first, 1);
+            assert_eq(rest.len(), 4);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_split_first_single() {
+    let v: List<Int> = list([42]);
+    match v.split_first() {
+        Some(pair) => {
+            assert_eq(*pair.0, 42);
+            assert_eq(pair.1.len(), 0);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_split_first_empty() {
+    let v: List<Int> = List.new();
+    assert(v.split_first().is_none());
+}
+
+@test
+fn test_split_first_two_elements() {
+    let v: List<Int> = list([10, 20]);
+    match v.split_first() {
+        Some(pair) => {
+            assert_eq(*pair.0, 10);
+            assert_eq(pair.1.len(), 1);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// PART 2: split_last
+// =============================================================================
+
+@test
+fn test_split_last_basic() {
+    let v: List<Int> = list([1, 2, 3, 4, 5]);
+    match v.split_last() {
+        Some(pair) => {
+            let last = pair.0;
+            let init = pair.1;
+            assert_eq(*last, 5);
+            assert_eq(init.len(), 4);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_split_last_single() {
+    let v: List<Int> = list([42]);
+    match v.split_last() {
+        Some(pair) => {
+            assert_eq(*pair.0, 42);
+            assert_eq(pair.1.len(), 0);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_split_last_empty() {
+    let v: List<Int> = List.new();
+    assert(v.split_last().is_none());
+}
+
+@test
+fn test_split_last_two_elements() {
+    let v: List<Int> = list([10, 20]);
+    match v.split_last() {
+        Some(pair) => {
+            assert_eq(*pair.0, 20);
+            assert_eq(pair.1.len(), 1);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// PART 3: is_sorted
+// =============================================================================
+
+@test
+fn test_is_sorted_ascending() {
+    let v: List<Int> = list([1, 2, 3, 4, 5]);
+    assert(v.is_sorted());
+}
+
+@test
+fn test_is_sorted_not_sorted() {
+    let v: List<Int> = list([1, 3, 2, 4, 5]);
+    assert(!v.is_sorted());
+}
+
+@test
+fn test_is_sorted_empty() {
+    let v: List<Int> = List.new();
+    assert(v.is_sorted());
+}
+
+@test
+fn test_is_sorted_single() {
+    let v: List<Int> = list([42]);
+    assert(v.is_sorted());
+}
+
+@test
+fn test_is_sorted_two_sorted() {
+    let v: List<Int> = list([1, 2]);
+    assert(v.is_sorted());
+}
+
+@test
+fn test_is_sorted_two_unsorted() {
+    let v: List<Int> = list([2, 1]);
+    assert(!v.is_sorted());
+}
+
+@test
+fn test_is_sorted_equal_elements() {
+    let v: List<Int> = list([3, 3, 3, 3]);
+    assert(v.is_sorted());
+}
+
+@test
+fn test_is_sorted_descending() {
+    let v: List<Int> = list([5, 4, 3, 2, 1]);
+    assert(!v.is_sorted());
+}
+
+@test
+fn test_is_sorted_last_unsorted() {
+    let v: List<Int> = list([1, 2, 3, 4, 0]);
+    assert(!v.is_sorted());
+}
+
+// =============================================================================
+// PART 4: is_sorted_by
+// =============================================================================
+
+fn compare_ascending(a: &Int, b: &Int) -> Ordering {
+    if *a < *b {
+        Ordering.Less
+    } else if *a > *b {
+        Ordering.Greater
+    } else {
+        Ordering.Equal
+    }
+}
+
+fn compare_descending(a: &Int, b: &Int) -> Ordering {
+    if *a > *b {
+        Ordering.Less
+    } else if *a < *b {
+        Ordering.Greater
+    } else {
+        Ordering.Equal
+    }
+}
+
+@test
+fn test_is_sorted_by_ascending() {
+    let v: List<Int> = list([1, 2, 3, 4, 5]);
+    assert(v.is_sorted_by(compare_ascending));
+}
+
+@test
+fn test_is_sorted_by_descending() {
+    let v: List<Int> = list([5, 4, 3, 2, 1]);
+    assert(v.is_sorted_by(compare_descending));
+}
+
+@test
+fn test_is_sorted_by_not_sorted() {
+    let v: List<Int> = list([1, 3, 2]);
+    assert(!v.is_sorted_by(compare_ascending));
+}
+
+@test
+fn test_is_sorted_by_empty() {
+    let v: List<Int> = List.new();
+    assert(v.is_sorted_by(compare_ascending));
+}
+
+@test
+fn test_is_sorted_by_single() {
+    let v: List<Int> = list([1]);
+    assert(v.is_sorted_by(compare_ascending));
+}
+
+// =============================================================================
+// PART 5: is_sorted_by_key
+// =============================================================================
+
+fn negate_key(x: &Int) -> Int {
+    0 - *x
+}
+
+fn identity_key(x: &Int) -> Int {
+    *x
+}
+
+fn abs_key(x: &Int) -> Int {
+    if *x < 0 { 0 - *x } else { *x }
+}
+
+@test
+fn test_is_sorted_by_key_ascending() {
+    let v: List<Int> = list([1, 2, 3, 4, 5]);
+    assert(v.is_sorted_by_key(identity_key));
+}
+
+@test
+fn test_is_sorted_by_key_negated() {
+    // Sorted descending = sorted by negated key ascending
+    let v: List<Int> = list([5, 4, 3, 2, 1]);
+    assert(v.is_sorted_by_key(negate_key));
+}
+
+@test
+fn test_is_sorted_by_key_not_sorted() {
+    let v: List<Int> = list([1, 3, 2]);
+    assert(!v.is_sorted_by_key(identity_key));
+}
+
+@test
+fn test_is_sorted_by_key_abs() {
+    let v: List<Int> = list([1, -2, 3, -4]);
+    assert(v.is_sorted_by_key(abs_key));
+}
+
+@test
+fn test_is_sorted_by_key_empty() {
+    let v: List<Int> = List.new();
+    assert(v.is_sorted_by_key(identity_key));
+}
+
+@test
+fn test_is_sorted_by_key_single() {
+    let v: List<Int> = list([99]);
+    assert(v.is_sorted_by_key(identity_key));
+}
+
+// =============================================================================
+// PART 6: extract_if
+// =============================================================================
+
+fn is_even(x: &Int) -> Bool {
+    *x % 2 == 0
+}
+
+fn is_positive(x: &Int) -> Bool {
+    *x > 0
+}
+
+fn always_true(_x: &Int) -> Bool {
+    true
+}
+
+fn always_false(_x: &Int) -> Bool {
+    false
+}
+
+@test
+fn test_extract_if_basic() {
+    let mut v: List<Int> = list([1, 2, 3, 4, 5, 6]);
+    let extracted = v.extract_if(is_even);
+
+    assert_eq(v.len(), 3);
+    assert_eq(v[0], 1);
+    assert_eq(v[1], 3);
+    assert_eq(v[2], 5);
+
+    assert_eq(extracted.len(), 3);
+    assert_eq(extracted[0], 2);
+    assert_eq(extracted[1], 4);
+    assert_eq(extracted[2], 6);
+}
+
+@test
+fn test_extract_if_none_match() {
+    let mut v: List<Int> = list([1, 3, 5, 7]);
+    let extracted = v.extract_if(is_even);
+
+    assert_eq(v.len(), 4);
+    assert_eq(extracted.len(), 0);
+}
+
+@test
+fn test_extract_if_all_match() {
+    let mut v: List<Int> = list([2, 4, 6, 8]);
+    let extracted = v.extract_if(is_even);
+
+    assert_eq(v.len(), 0);
+    assert(v.is_empty());
+    assert_eq(extracted.len(), 4);
+    assert_eq(extracted[0], 2);
+    assert_eq(extracted[1], 4);
+    assert_eq(extracted[2], 6);
+    assert_eq(extracted[3], 8);
+}
+
+@test
+fn test_extract_if_empty() {
+    let mut v: List<Int> = List.new();
+    let extracted = v.extract_if(is_even);
+
+    assert(v.is_empty());
+    assert(extracted.is_empty());
+}
+
+@test
+fn test_extract_if_single_match() {
+    let mut v: List<Int> = list([2]);
+    let extracted = v.extract_if(is_even);
+
+    assert(v.is_empty());
+    assert_eq(extracted.len(), 1);
+    assert_eq(extracted[0], 2);
+}
+
+@test
+fn test_extract_if_single_no_match() {
+    let mut v: List<Int> = list([3]);
+    let extracted = v.extract_if(is_even);
+
+    assert_eq(v.len(), 1);
+    assert_eq(v[0], 3);
+    assert(extracted.is_empty());
+}
+
+@test
+fn test_extract_if_preserves_order() {
+    let mut v: List<Int> = list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let extracted = v.extract_if(is_even);
+
+    // Remaining: [1, 3, 5, 7, 9]
+    assert_eq(v.len(), 5);
+    assert_eq(v[0], 1);
+    assert_eq(v[1], 3);
+    assert_eq(v[2], 5);
+    assert_eq(v[3], 7);
+    assert_eq(v[4], 9);
+
+    // Extracted: [2, 4, 6, 8, 10]
+    assert_eq(extracted.len(), 5);
+    assert_eq(extracted[0], 2);
+    assert_eq(extracted[1], 4);
+    assert_eq(extracted[2], 6);
+    assert_eq(extracted[3], 8);
+    assert_eq(extracted[4], 10);
+}
+
+@test
+fn test_extract_if_all_true() {
+    let mut v: List<Int> = list([1, 2, 3]);
+    let extracted = v.extract_if(always_true);
+
+    assert(v.is_empty());
+    assert_eq(extracted.len(), 3);
+}
+
+@test
+fn test_extract_if_all_false() {
+    let mut v: List<Int> = list([1, 2, 3]);
+    let extracted = v.extract_if(always_false);
+
+    assert_eq(v.len(), 3);
+    assert(extracted.is_empty());
+}
+
+@test
+fn test_extract_if_mixed_signs() {
+    let mut v: List<Int> = list([-3, -2, -1, 0, 1, 2, 3]);
+    let extracted = v.extract_if(is_positive);
+
+    assert_eq(v.len(), 4);
+    assert_eq(v[0], -3);
+    assert_eq(v[1], -2);
+    assert_eq(v[2], -1);
+    assert_eq(v[3], 0);
+
+    assert_eq(extracted.len(), 3);
+    assert_eq(extracted[0], 1);
+    assert_eq(extracted[1], 2);
+    assert_eq(extracted[2], 3);
+}
+
+// =============================================================================
+// PART 7: fill_with
+// =============================================================================
+
+fn make_zero() -> Int {
+    0
+}
+
+fn make_seven() -> Int {
+    7
+}
+
+@test
+fn test_fill_with_basic() {
+    let mut v: List<Int> = list([1, 2, 3, 4, 5]);
+    v.fill_with(make_zero);
+
+    assert_eq(v.len(), 5);
+    for i in 0..5 {
+        assert_eq(v[i], 0);
+    }
+}
+
+@test
+fn test_fill_with_constant() {
+    let mut v: List<Int> = list([0, 0, 0]);
+    v.fill_with(make_seven);
+
+    assert_eq(v.len(), 3);
+    assert_eq(v[0], 7);
+    assert_eq(v[1], 7);
+    assert_eq(v[2], 7);
+}
+
+@test
+fn test_fill_with_empty() {
+    let mut v: List<Int> = List.new();
+    v.fill_with(make_zero);
+    assert(v.is_empty());
+}
+
+@test
+fn test_fill_with_single() {
+    let mut v: List<Int> = list([99]);
+    v.fill_with(make_seven);
+
+    assert_eq(v.len(), 1);
+    assert_eq(v[0], 7);
+}
+
+@test
+fn test_fill_with_preserves_len() {
+    let mut v: List<Int> = list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let original_len = v.len();
+    v.fill_with(make_zero);
+    assert_eq(v.len(), original_len);
+}
+
+// =============================================================================
+// PART 8: resize_with
+// =============================================================================
+
+fn make_default() -> Int {
+    0
+}
+
+fn make_forty_two() -> Int {
+    42
+}
+
+@test
+fn test_resize_with_grow() {
+    let mut v: List<Int> = list([1, 2]);
+    v.resize_with(5, make_default);
+
+    assert_eq(v.len(), 5);
+    assert_eq(v[0], 1);
+    assert_eq(v[1], 2);
+    assert_eq(v[2], 0);
+    assert_eq(v[3], 0);
+    assert_eq(v[4], 0);
+}
+
+@test
+fn test_resize_with_shrink() {
+    let mut v: List<Int> = list([1, 2, 3, 4, 5]);
+    v.resize_with(2, make_default);
+
+    assert_eq(v.len(), 2);
+    assert_eq(v[0], 1);
+    assert_eq(v[1], 2);
+}
+
+@test
+fn test_resize_with_same_size() {
+    let mut v: List<Int> = list([1, 2, 3]);
+    v.resize_with(3, make_default);
+
+    assert_eq(v.len(), 3);
+    assert_eq(v[0], 1);
+    assert_eq(v[1], 2);
+    assert_eq(v[2], 3);
+}
+
+@test
+fn test_resize_with_from_empty() {
+    let mut v: List<Int> = List.new();
+    v.resize_with(3, make_forty_two);
+
+    assert_eq(v.len(), 3);
+    assert_eq(v[0], 42);
+    assert_eq(v[1], 42);
+    assert_eq(v[2], 42);
+}
+
+@test
+fn test_resize_with_to_zero() {
+    let mut v: List<Int> = list([1, 2, 3]);
+    v.resize_with(0, make_default);
+
+    assert(v.is_empty());
+}
+
+@test
+fn test_resize_with_grow_with_value() {
+    let mut v: List<Int> = list([10, 20]);
+    v.resize_with(4, make_forty_two);
+
+    assert_eq(v.len(), 4);
+    assert_eq(v[0], 10);
+    assert_eq(v[1], 20);
+    assert_eq(v[2], 42);
+    assert_eq(v[3], 42);
+}
+
+// =============================================================================
+// PART 9: dedup_by_key
+// =============================================================================
+
+fn mod_three_key(x: &Int) -> Int {
+    *x % 3
+}
+
+fn div_ten_key(x: &Int) -> Int {
+    *x / 10
+}
+
+@test
+fn test_dedup_by_key_basic() {
+    // Elements with same key (mod 3) are consecutive
+    let mut v: List<Int> = list([1, 4, 7, 2, 5, 3, 6]);
+    // 1%3=1, 4%3=1, 7%3=1 -> consecutive same key
+    // Then 2%3=2, 5%3=2 -> consecutive same key
+    // Then 3%3=0, 6%3=0 -> consecutive same key
+    v.dedup_by_key(mod_three_key);
+
+    // Should keep: 1, 2, 3
+    assert_eq(v.len(), 3);
+    assert_eq(v[0], 1);
+    assert_eq(v[1], 2);
+    assert_eq(v[2], 3);
+}
+
+@test
+fn test_dedup_by_key_no_duplicates() {
+    let mut v: List<Int> = list([1, 2, 3]);
+    // mod 3: 1, 2, 0 — all different
+    v.dedup_by_key(mod_three_key);
+
+    assert_eq(v.len(), 3);
+    assert_eq(v[0], 1);
+    assert_eq(v[1], 2);
+    assert_eq(v[2], 3);
+}
+
+@test
+fn test_dedup_by_key_all_same() {
+    let mut v: List<Int> = list([3, 6, 9, 12]);
+    // mod 3: 0, 0, 0, 0 — all same key
+    v.dedup_by_key(mod_three_key);
+
+    assert_eq(v.len(), 1);
+    assert_eq(v[0], 3);
+}
+
+@test
+fn test_dedup_by_key_empty() {
+    let mut v: List<Int> = List.new();
+    v.dedup_by_key(mod_three_key);
+    assert(v.is_empty());
+}
+
+@test
+fn test_dedup_by_key_single() {
+    let mut v: List<Int> = list([42]);
+    v.dedup_by_key(mod_three_key);
+    assert_eq(v.len(), 1);
+    assert_eq(v[0], 42);
+}
+
+@test
+fn test_dedup_by_key_by_decade() {
+    // Group by decade (x / 10)
+    let mut v: List<Int> = list([10, 15, 12, 20, 25, 30]);
+    // Keys: 1, 1, 1, 2, 2, 3
+    v.dedup_by_key(div_ten_key);
+
+    assert_eq(v.len(), 3);
+    assert_eq(v[0], 10);
+    assert_eq(v[1], 20);
+    assert_eq(v[2], 30);
+}
+
+@test
+fn test_dedup_by_key_non_consecutive_not_deduped() {
+    // Non-consecutive duplicates should NOT be removed
+    let mut v: List<Int> = list([1, 2, 1]);
+    // Keys mod 3: 1, 2, 1 — not consecutive
+    v.dedup_by_key(mod_three_key);
+
+    assert_eq(v.len(), 3);
+    assert_eq(v[0], 1);
+    assert_eq(v[1], 2);
+    assert_eq(v[2], 1);
+}
+
+// =============================================================================
+// PART 10: chunks_exact
+// =============================================================================
+
+@test
+fn test_chunks_exact_basic() {
+    let v: List<Int> = list([1, 2, 3, 4, 5, 6]);
+    let chunks = v.chunks_exact(2);
+
+    assert_eq(chunks.len(), 3);
+    assert_eq(chunks[0].len(), 2);
+    assert_eq(chunks[0][0], 1);
+    assert_eq(chunks[0][1], 2);
+    assert_eq(chunks[1][0], 3);
+    assert_eq(chunks[1][1], 4);
+    assert_eq(chunks[2][0], 5);
+    assert_eq(chunks[2][1], 6);
+}
+
+@test
+fn test_chunks_exact_with_remainder() {
+    let v: List<Int> = list([1, 2, 3, 4, 5]);
+    let chunks = v.chunks_exact(2);
+
+    // Only full chunks: [1,2], [3,4] — element 5 excluded
+    assert_eq(chunks.len(), 2);
+    assert_eq(chunks[0][0], 1);
+    assert_eq(chunks[0][1], 2);
+    assert_eq(chunks[1][0], 3);
+    assert_eq(chunks[1][1], 4);
+}
+
+@test
+fn test_chunks_exact_chunk_size_larger_than_list() {
+    let v: List<Int> = list([1, 2, 3]);
+    let chunks = v.chunks_exact(5);
+
+    // No full chunks
+    assert_eq(chunks.len(), 0);
+}
+
+@test
+fn test_chunks_exact_single_element_chunks() {
+    let v: List<Int> = list([1, 2, 3]);
+    let chunks = v.chunks_exact(1);
+
+    assert_eq(chunks.len(), 3);
+    assert_eq(chunks[0][0], 1);
+    assert_eq(chunks[1][0], 2);
+    assert_eq(chunks[2][0], 3);
+}
+
+@test
+fn test_chunks_exact_entire_list() {
+    let v: List<Int> = list([1, 2, 3]);
+    let chunks = v.chunks_exact(3);
+
+    assert_eq(chunks.len(), 1);
+    assert_eq(chunks[0].len(), 3);
+    assert_eq(chunks[0][0], 1);
+    assert_eq(chunks[0][1], 2);
+    assert_eq(chunks[0][2], 3);
+}
+
+@test
+fn test_chunks_exact_empty_list() {
+    let v: List<Int> = List.new();
+    let chunks = v.chunks_exact(3);
+    assert_eq(chunks.len(), 0);
+}
+
+@test
+fn test_chunks_exact_large_chunks() {
+    let mut v: List<Int> = List.new();
+    for i in 0..20 {
+        v.push(i);
+    }
+    let chunks = v.chunks_exact(5);
+
+    assert_eq(chunks.len(), 4);
+    // First chunk: [0, 1, 2, 3, 4]
+    assert_eq(chunks[0][0], 0);
+    assert_eq(chunks[0][4], 4);
+    // Last chunk: [15, 16, 17, 18, 19]
+    assert_eq(chunks[3][0], 15);
+    assert_eq(chunks[3][4], 19);
+}
+
+// =============================================================================
+// PART 11: chunks_exact_remainder
+// =============================================================================
+
+@test
+fn test_chunks_exact_remainder_basic() {
+    let v: List<Int> = list([1, 2, 3, 4, 5]);
+    let rem = v.chunks_exact_remainder(2);
+
+    // 5 / 2 = 2 full chunks (4 elements), remainder = [5]
+    assert_eq(rem.len(), 1);
+    assert_eq(rem[0], 5);
+}
+
+@test
+fn test_chunks_exact_remainder_none() {
+    let v: List<Int> = list([1, 2, 3, 4, 5, 6]);
+    let rem = v.chunks_exact_remainder(2);
+
+    // 6 / 2 = 3 full chunks, no remainder
+    assert_eq(rem.len(), 0);
+}
+
+@test
+fn test_chunks_exact_remainder_all() {
+    let v: List<Int> = list([1, 2, 3]);
+    let rem = v.chunks_exact_remainder(5);
+
+    // 3 / 5 = 0 full chunks, remainder = [1, 2, 3]
+    assert_eq(rem.len(), 3);
+    assert_eq(rem[0], 1);
+    assert_eq(rem[1], 2);
+    assert_eq(rem[2], 3);
+}
+
+@test
+fn test_chunks_exact_remainder_empty() {
+    let v: List<Int> = List.new();
+    let rem = v.chunks_exact_remainder(3);
+    assert_eq(rem.len(), 0);
+}
+
+@test
+fn test_chunks_exact_remainder_multi() {
+    let v: List<Int> = list([1, 2, 3, 4, 5, 6, 7]);
+    let rem = v.chunks_exact_remainder(3);
+
+    // 7 / 3 = 2 full chunks (6 elements), remainder = [7]
+    assert_eq(rem.len(), 1);
+    assert_eq(rem[0], 7);
+}
+
+@test
+fn test_chunks_exact_and_remainder_cover_all() {
+    let v: List<Int> = list([1, 2, 3, 4, 5, 6, 7]);
+    let chunks = v.chunks_exact(3);
+    let rem = v.chunks_exact_remainder(3);
+
+    // Total elements = chunks * chunk_size + remainder
+    let total = chunks.len() * 3 + rem.len();
+    assert_eq(total, 7);
+}
+
+// =============================================================================
+// PART 12: Integration / Combined Tests
+// =============================================================================
+
+@test
+fn test_extract_if_then_is_sorted() {
+    let mut v: List<Int> = list([1, 2, 3, 4, 5]);
+    let _extracted = v.extract_if(is_even);
+
+    // Remaining: [1, 3, 5] — should still be sorted
+    assert(v.is_sorted());
+}
+
+@test
+fn test_resize_with_then_fill_with() {
+    let mut v: List<Int> = List.new();
+    v.resize_with(5, make_default);
+    assert_eq(v.len(), 5);
+    for i in 0..5 {
+        assert_eq(v[i], 0);
+    }
+
+    v.fill_with(make_seven);
+    for i in 0..5 {
+        assert_eq(v[i], 7);
+    }
+}
+
+@test
+fn test_chunks_exact_with_sorted_data() {
+    let v: List<Int> = list([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert(v.is_sorted());
+
+    let chunks = v.chunks_exact(3);
+    assert_eq(chunks.len(), 3);
+
+    // Each chunk should also be sorted
+    assert(chunks[0].is_sorted());
+    assert(chunks[1].is_sorted());
+    assert(chunks[2].is_sorted());
+}
+
+@test
+fn test_dedup_by_key_then_chunks() {
+    let mut v: List<Int> = list([10, 15, 20, 25, 30, 35]);
+    // Keys by decade: 1, 1, 2, 2, 3, 3
+    v.dedup_by_key(div_ten_key);
+    // After dedup: [10, 20, 30]
+    assert_eq(v.len(), 3);
+
+    let chunks = v.chunks_exact(3);
+    assert_eq(chunks.len(), 1);
+    assert_eq(chunks[0][0], 10);
+    assert_eq(chunks[0][1], 20);
+    assert_eq(chunks[0][2], 30);
+}
+
+@test
+fn test_split_first_on_sorted_list() {
+    let v: List<Int> = list([1, 2, 3, 4, 5]);
+    assert(v.is_sorted());
+
+    match v.split_first() {
+        Some(pair) => {
+            // First element should be the minimum
+            assert_eq(*pair.0, 1);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_split_last_on_sorted_list() {
+    let v: List<Int> = list([1, 2, 3, 4, 5]);
+    assert(v.is_sorted());
+
+    match v.split_last() {
+        Some(pair) => {
+            // Last element should be the maximum
+            assert_eq(*pair.0, 5);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_extract_if_large_list() {
+    let mut v: List<Int> = List.new();
+    for i in 0..100 {
+        v.push(i);
+    }
+
+    let extracted = v.extract_if(is_even);
+
+    // 50 even numbers (0, 2, 4, ..., 98)
+    assert_eq(extracted.len(), 50);
+    // 50 odd numbers (1, 3, 5, ..., 99)
+    assert_eq(v.len(), 50);
+
+    // Verify remaining are all odd
+    for i in 0..v.len() {
+        assert_eq(v[i] % 2, 1);
+    }
+
+    // Verify extracted are all even
+    for i in 0..extracted.len() {
+        assert_eq(extracted[i] % 2, 0);
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

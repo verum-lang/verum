@@ -1,0 +1,307 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, heap, filter, map, fold, for_each, count_where, filter_map, any, all
+// @description: Tests for BinaryHeap functional utility methods
+
+mount core.collections.heap.{BinaryHeap};
+
+// =============================================================================
+// filter tests
+// =============================================================================
+
+@test
+fn test_heap_filter_basic() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.push(4);
+    h.push(5);
+
+    let evens = h.filter(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert(evens.contains(&2));
+    assert(evens.contains(&4));
+}
+
+@test
+fn test_heap_filter_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let result = h.filter(|_v| true);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_heap_filter_none_match() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(3);
+    h.push(5);
+
+    let result = h.filter(|v| *v % 2 == 0);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_heap_filter_preserves_heap() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+
+    let filtered = h.filter(|v| *v >= 15);
+    // Max should be at top
+    assert_eq(*filtered.peek().unwrap(), 30);
+}
+
+// =============================================================================
+// map tests
+// =============================================================================
+
+@test
+fn test_heap_map_basic() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+
+    let doubled = h.map(|v| *v * 2);
+    assert_eq(doubled.len(), 3);
+    assert(doubled.contains(&2));
+    assert(doubled.contains(&4));
+    assert(doubled.contains(&6));
+}
+
+@test
+fn test_heap_map_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let result = h.map(|v| *v * 2);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_heap_map_preserves_heap() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+
+    let mapped = h.map(|v| *v * 10);
+    assert_eq(*mapped.peek().unwrap(), 30);
+}
+
+// =============================================================================
+// fold tests
+// =============================================================================
+
+@test
+fn test_heap_fold_sum() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.push(4);
+
+    let sum = h.fold(0, |acc, v| acc + *v);
+    assert_eq(sum, 10);
+}
+
+@test
+fn test_heap_fold_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let result = h.fold(42, |acc, v| acc + *v);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_heap_fold_count() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+
+    let count = h.fold(0, |acc, _v| acc + 1);
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// for_each tests
+// =============================================================================
+
+@test
+fn test_heap_for_each_basic() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+
+    let mut sum = 0;
+    h.for_each(|v| { sum = sum + *v; });
+    assert_eq(sum, 6);
+}
+
+@test
+fn test_heap_for_each_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let mut count = 0;
+    h.for_each(|_v| { count = count + 1; });
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// count_where tests
+// =============================================================================
+
+@test
+fn test_heap_count_where_basic() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.push(4);
+    h.push(5);
+
+    assert_eq(h.count_where(|v| *v > 3), 2);
+    assert_eq(h.count_where(|v| *v > 0), 5);
+    assert_eq(h.count_where(|v| *v > 10), 0);
+}
+
+@test
+fn test_heap_count_where_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    assert_eq(h.count_where(|_v| true), 0);
+}
+
+// =============================================================================
+// filter_map tests
+// =============================================================================
+
+@test
+fn test_heap_filter_map_basic() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.push(4);
+
+    let result = h.filter_map(|v| {
+        if *v % 2 == 0 {
+            Some(*v * 10)
+        } else {
+            None
+        }
+    });
+    assert_eq(result.len(), 2);
+    assert(result.contains(&20));
+    assert(result.contains(&40));
+}
+
+@test
+fn test_heap_filter_map_all_none() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+
+    let result: BinaryHeap<Int> = h.filter_map(|_v| None);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_heap_filter_map_all_some() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+
+    let result = h.filter_map(|v| Some(*v + 10));
+    assert_eq(result.len(), 3);
+}
+
+// =============================================================================
+// any / all tests
+// =============================================================================
+
+@test
+fn test_heap_any_true() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+
+    assert(h.any(|v| *v > 2));
+}
+
+@test
+fn test_heap_any_false() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+
+    assert(!h.any(|v| *v > 10));
+}
+
+@test
+fn test_heap_any_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    assert(!h.any(|_v| true));
+}
+
+@test
+fn test_heap_all_true() {
+    let mut h = BinaryHeap.new();
+    h.push(2);
+    h.push(4);
+    h.push(6);
+
+    assert(h.all(|v| *v % 2 == 0));
+}
+
+@test
+fn test_heap_all_false() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+
+    assert(!h.all(|v| *v > 2));
+}
+
+@test
+fn test_heap_all_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    assert(h.all(|_v| false));  // Vacuously true
+}
+
+// =============================================================================
+// Integration tests
+// =============================================================================
+
+@test
+fn test_filter_then_fold() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.push(4);
+    h.push(5);
+
+    let even_sum = h.filter(|v| *v % 2 == 0).fold(0, |acc, v| acc + *v);
+    assert_eq(even_sum, 6);
+}
+
+@test
+fn test_map_preserves_heap_property() {
+    let mut h = BinaryHeap.new();
+    h.push(5);
+    h.push(3);
+    h.push(7);
+    h.push(1);
+
+    let mut mapped = h.map(|v| *v * 2);
+    // Pop in descending order (max-heap)
+    assert_eq(mapped.pop().unwrap(), 14);
+    assert_eq(mapped.pop().unwrap(), 10);
+    assert_eq(mapped.pop().unwrap(), 6);
+    assert_eq(mapped.pop().unwrap(), 2);
+}

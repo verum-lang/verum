@@ -1,0 +1,364 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, tensor, reduction
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for tensor
+/// reduction operations. Tests sum, product, min, max, mean, and accumulate/scan
+/// using struct-based array simulation.
+
+// ============================================================================
+// Flat array representation (8 elements)
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_print(label: Text, a: Arr8, len: Int) {
+    let mut i = 0;
+    while i < len {
+        println(f"  {label}[{i}]: {arr8_get(a, i)}");
+        i = i + 1;
+    }
+}
+
+// ============================================================================
+// Reduction operations
+// ============================================================================
+
+fn arr8_sum(a: Arr8, len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len {
+        s = s + arr8_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn arr8_product(a: Arr8, len: Int) -> Int {
+    let mut p = 1;
+    let mut i = 0;
+    while i < len {
+        p = p * arr8_get(a, i);
+        i = i + 1;
+    }
+    p
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn arr8_max(a: Arr8, len: Int) -> Int {
+    let mut mx = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        mx = int_max(mx, arr8_get(a, i));
+        i = i + 1;
+    }
+    mx
+}
+
+fn arr8_min(a: Arr8, len: Int) -> Int {
+    let mut mn = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        mn = int_min(mn, arr8_get(a, i));
+        i = i + 1;
+    }
+    mn
+}
+
+/// Argmax: index of first occurrence of maximum value
+fn arr8_argmax(a: Arr8, len: Int) -> Int {
+    let mut mx = arr8_get(a, 0);
+    let mut idx = 0;
+    let mut i = 1;
+    while i < len {
+        let v = arr8_get(a, i);
+        if v > mx {
+            mx = v;
+            idx = i;
+        }
+        i = i + 1;
+    }
+    idx
+}
+
+/// Argmin: index of first occurrence of minimum value
+fn arr8_argmin(a: Arr8, len: Int) -> Int {
+    let mut mn = arr8_get(a, 0);
+    let mut idx = 0;
+    let mut i = 1;
+    while i < len {
+        let v = arr8_get(a, i);
+        if v < mn {
+            mn = v;
+            idx = i;
+        }
+        i = i + 1;
+    }
+    idx
+}
+
+/// Prefix sum (cumulative sum / scan)
+fn arr8_cumsum(a: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut running = 0;
+    let mut i = 0;
+    while i < len {
+        running = running + arr8_get(a, i);
+        out = arr8_set(out, i, running);
+        i = i + 1;
+    }
+    out
+}
+
+/// Prefix product (cumulative product)
+fn arr8_cumprod(a: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut running = 1;
+    let mut i = 0;
+    while i < len {
+        running = running * arr8_get(a, i);
+        out = arr8_set(out, i, running);
+        i = i + 1;
+    }
+    out
+}
+
+/// Running max (cumulative max)
+fn arr8_cummax(a: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut running = arr8_get(a, 0);
+    out = arr8_set(out, 0, running);
+    let mut i = 1;
+    while i < len {
+        running = int_max(running, arr8_get(a, i));
+        out = arr8_set(out, i, running);
+        i = i + 1;
+    }
+    out
+}
+
+/// Count elements matching a threshold
+fn arr8_count_above(a: Arr8, len: Int, threshold: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < len {
+        if arr8_get(a, i) > threshold {
+            c = c + 1;
+        }
+        i = i + 1;
+    }
+    c
+}
+
+// ============================================================================
+// Test functions
+// ============================================================================
+
+/// Test sum and product reductions
+fn test_sum_product() {
+    println("=== Sum and Product ===");
+
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    println(f"sum([1..8], 8): {arr8_sum(a, 8)}");
+    println(f"sum([1..8], 4): {arr8_sum(a, 4)}");
+    println(f"sum([1..8], 1): {arr8_sum(a, 1)}");
+
+    let b = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    println(f"product([1,2,3,4,5], 5): {arr8_product(b, 5)}");
+    println(f"product([1,2,3], 3): {arr8_product(b, 3)}");
+    println(f"product([1], 1): {arr8_product(b, 1)}");
+
+    // Sum of zeros
+    let z = arr8_zeros();
+    println(f"sum(zeros, 8): {arr8_sum(z, 8)}");
+
+    // Product with zero element
+    let with_zero = Arr8 { e0: 3, e1: 5, e2: 0, e3: 7, e4: 0, e5: 0, e6: 0, e7: 0 };
+    println(f"product([3,5,0,7], 4): {arr8_product(with_zero, 4)}");
+
+    // Negative numbers
+    let neg = Arr8 { e0: -3, e1: 5, e2: -2, e3: 4, e4: -1, e5: 0, e6: 0, e7: 0 };
+    println(f"sum([-3,5,-2,4,-1], 5): {arr8_sum(neg, 5)}");
+    println(f"product([-3,5,-2], 3): {arr8_product(neg, 3)}");
+}
+
+/// Test min and max reductions
+fn test_min_max() {
+    println("\n=== Min and Max ===");
+
+    let a = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    println(f"max([3,1,4,1,5,9,2,6], 8): {arr8_max(a, 8)}");
+    println(f"min([3,1,4,1,5,9,2,6], 8): {arr8_min(a, 8)}");
+    println(f"max first 4: {arr8_max(a, 4)}");
+    println(f"min first 4: {arr8_min(a, 4)}");
+
+    // All same values
+    let same = Arr8 { e0: 5, e1: 5, e2: 5, e3: 5, e4: 5, e5: 5, e6: 5, e7: 5 };
+    println(f"max(all 5s): {arr8_max(same, 8)}");
+    println(f"min(all 5s): {arr8_min(same, 8)}");
+
+    // Negative values
+    let neg = Arr8 { e0: -10, e1: -5, e2: -20, e3: -1, e4: -15, e5: 0, e6: 0, e7: 0 };
+    println(f"max([-10,-5,-20,-1,-15], 5): {arr8_max(neg, 5)}");
+    println(f"min([-10,-5,-20,-1,-15], 5): {arr8_min(neg, 5)}");
+
+    // Single element
+    let single = Arr8 { e0: 42, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    println(f"max([42], 1): {arr8_max(single, 1)}");
+    println(f"min([42], 1): {arr8_min(single, 1)}");
+
+    // Sorted ascending
+    let asc = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    println(f"max(sorted asc, 8): {arr8_max(asc, 8)}");
+    println(f"min(sorted asc, 8): {arr8_min(asc, 8)}");
+
+    // Sorted descending
+    let desc = Arr8 { e0: 8, e1: 7, e2: 6, e3: 5, e4: 4, e5: 3, e6: 2, e7: 1 };
+    println(f"max(sorted desc, 8): {arr8_max(desc, 8)}");
+    println(f"min(sorted desc, 8): {arr8_min(desc, 8)}");
+}
+
+/// Test argmax, argmin, and counting
+fn test_argmax_argmin_count() {
+    println("\n=== Argmax, Argmin, Count ===");
+
+    let a = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    println(f"argmax([3,1,4,1,5,9,2,6], 8): {arr8_argmax(a, 8)}");
+    println(f"argmin([3,1,4,1,5,9,2,6], 8): {arr8_argmin(a, 8)}");
+
+    // Verify argmax/argmin values
+    let max_idx = arr8_argmax(a, 8);
+    let min_idx = arr8_argmin(a, 8);
+    println(f"value at argmax: {arr8_get(a, max_idx)}");
+    println(f"value at argmin: {arr8_get(a, min_idx)}");
+
+    // Count above threshold
+    println(f"count > 3: {arr8_count_above(a, 8, 3)}");
+    println(f"count > 5: {arr8_count_above(a, 8, 5)}");
+    println(f"count > 0: {arr8_count_above(a, 8, 0)}");
+    println(f"count > 100: {arr8_count_above(a, 8, 100)}");
+
+    // Max at the start
+    let front_max = Arr8 { e0: 99, e1: 1, e2: 2, e3: 3, e4: 0, e5: 0, e6: 0, e7: 0 };
+    println(f"argmax([99,1,2,3], 4): {arr8_argmax(front_max, 4)}");
+
+    // Max at the end
+    let back_max = Arr8 { e0: 1, e1: 2, e2: 3, e3: 99, e4: 0, e5: 0, e6: 0, e7: 0 };
+    println(f"argmax([1,2,3,99], 4): {arr8_argmax(back_max, 4)}");
+}
+
+/// Test mean computation (integer division)
+fn test_mean() {
+    println("\n=== Mean (Integer Division) ===");
+
+    // Mean of [1,2,3,4,5] = 15/5 = 3
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let mean_a = arr8_sum(a, 5) / 5;
+    println(f"mean([1,2,3,4,5]): {mean_a}");
+
+    // Mean of [10,20,30,40] = 100/4 = 25
+    let b = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mean_b = arr8_sum(b, 4) / 4;
+    println(f"mean([10,20,30,40]): {mean_b}");
+
+    // Mean of all same = same
+    let same = Arr8 { e0: 7, e1: 7, e2: 7, e3: 7, e4: 7, e5: 7, e6: 7, e7: 7 };
+    let mean_same = arr8_sum(same, 8) / 8;
+    println(f"mean(all 7s, 8): {mean_same}");
+
+    // Mean with negatives: [-4, -2, 0, 2, 4] = 0/5 = 0
+    let sym = Arr8 { e0: -4, e1: -2, e2: 0, e3: 2, e4: 4, e5: 0, e6: 0, e7: 0 };
+    let mean_sym = arr8_sum(sym, 5) / 5;
+    println(f"mean([-4,-2,0,2,4]): {mean_sym}");
+
+    // Verify: sum == mean * len
+    let c = Arr8 { e0: 2, e1: 4, e2: 6, e3: 8, e4: 10, e5: 12, e6: 14, e7: 16 };
+    let sum_c = arr8_sum(c, 8);
+    let mean_c = sum_c / 8;
+    println(f"sum([2,4,...,16]): {sum_c}");
+    println(f"mean([2,4,...,16]): {mean_c}");
+    println(f"mean * 8: {mean_c * 8}");
+}
+
+/// Test cumulative/scan operations
+fn test_cumulative() {
+    println("\n=== Cumulative Operations ===");
+
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+
+    // Cumulative sum: [1, 3, 6, 10, 15]
+    let cs = arr8_cumsum(a, 5);
+    println(f"cumsum([1,2,3,4,5]):");
+    arr8_print("cs", cs, 5);
+
+    // Last element of cumsum == sum
+    let total = arr8_sum(a, 5);
+    let cs_last = arr8_get(cs, 4);
+    println(f"cumsum last == sum: {cs_last == total}");
+
+    // Cumulative product: [1, 2, 6, 24, 120]
+    let cp = arr8_cumprod(a, 5);
+    println(f"cumprod([1,2,3,4,5]):");
+    arr8_print("cp", cp, 5);
+
+    // Last element of cumprod == product
+    let prod_total = arr8_product(a, 5);
+    let cp_last = arr8_get(cp, 4);
+    println(f"cumprod last == product: {cp_last == prod_total}");
+
+    // Cumulative max: [3, 3, 4, 4, 5, 9, 9, 9]
+    let b = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    let cm = arr8_cummax(b, 8);
+    println(f"cummax([3,1,4,1,5,9,2,6]):");
+    arr8_print("cm", cm, 8);
+
+    // Cumsum of ones: [1, 2, 3, 4, 5, 6, 7, 8]
+    let ones = Arr8 { e0: 1, e1: 1, e2: 1, e3: 1, e4: 1, e5: 1, e6: 1, e7: 1 };
+    let cs_ones = arr8_cumsum(ones, 8);
+    println(f"cumsum(ones, 8):");
+    arr8_print("cs1", cs_ones, 8);
+}
+
+fn main() {
+    test_sum_product();
+    test_min_max();
+    test_argmax_argmin_count();
+    test_mean();
+    test_cumulative();
+}

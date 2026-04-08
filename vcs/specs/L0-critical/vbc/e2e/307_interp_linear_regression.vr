@@ -1,0 +1,342 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, regression, statistics
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Simple linear regression (y = slope*x + intercept),
+// mean, variance, correlation coefficient, and residual computation.
+// Uses integer-scaled arithmetic (scale 1000).
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn assert_near(actual: Int, expected: Int, tolerance: Int) {
+    let diff = abs_val(actual - expected);
+    assert(diff <= tolerance);
+}
+
+// =============================================================================
+// Statistical functions (all values and results in integer scale * 1000)
+// =============================================================================
+
+fn arr_sum(a: Arr8, n: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < n {
+        s = s + arr8_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn arr_mean(a: Arr8, n: Int) -> Int {
+    // Returns mean (same scale as input)
+    arr_sum(a, n) / n
+}
+
+fn arr_dot(a: Arr8, b: Arr8, n: Int) -> Int {
+    // Returns sum(a[i] * b[i]) (scale is input_scale^2)
+    let mut s = 0;
+    let mut i = 0;
+    while i < n {
+        s = s + arr8_get(a, i) * arr8_get(b, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn test_basic_stats() {
+    // x = [1, 2, 3, 4, 5] (plain integers)
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr_sum(x, 5), 15);
+    assert_eq(arr_mean(x, 5), 3);
+
+    // y = [2, 4, 6, 8, 10]
+    let y = Arr8 { e0: 2, e1: 4, e2: 6, e3: 8, e4: 10, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr_sum(y, 5), 30);
+    assert_eq(arr_mean(y, 5), 6);
+}
+
+// =============================================================================
+// Linear regression: y = slope * x + intercept
+// slope = (n * sum(x*y) - sum(x) * sum(y)) / (n * sum(x^2) - sum(x)^2)
+// intercept = (sum(y) - slope * sum(x)) / n
+// We work with integer x,y and return slope*1000, intercept*1000
+// =============================================================================
+
+type LinReg is { slope_s: Int, intercept_s: Int };
+
+fn linear_regression(x: Arr8, y: Arr8, n: Int) -> LinReg {
+    let sum_x = arr_sum(x, n);
+    let sum_y = arr_sum(y, n);
+    let sum_xy = arr_dot(x, y, n);
+    let sum_xx = arr_dot(x, x, n);
+
+    // slope = (n*sum_xy - sum_x*sum_y) / (n*sum_xx - sum_x^2)
+    let numer = n * sum_xy - sum_x * sum_y;
+    let denom = n * sum_xx - sum_x * sum_x;
+
+    if denom == 0 {
+        return LinReg { slope_s: 0, intercept_s: 0 };
+    }
+
+    // slope * 1000
+    let slope_s = (numer * 1000) / denom;
+
+    // intercept * 1000 = (sum_y * 1000 - slope_s * sum_x) / n
+    let intercept_s = (sum_y * 1000 - slope_s * sum_x) / n;
+
+    LinReg { slope_s: slope_s, intercept_s: intercept_s }
+}
+
+fn test_perfect_linear() {
+    // y = 2x + 1: (1,3), (2,5), (3,7), (4,9), (5,11)
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 3, e1: 5, e2: 7, e3: 9, e4: 11, e5: 0, e6: 0, e7: 0 };
+    let reg = linear_regression(x, y, 5);
+    assert_eq(reg.slope_s, 2000);     // slope = 2.0
+    assert_eq(reg.intercept_s, 1000); // intercept = 1.0
+}
+
+fn test_zero_slope() {
+    // All y = 5: (1,5), (2,5), (3,5), (4,5)
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 5, e1: 5, e2: 5, e3: 5, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let reg = linear_regression(x, y, 4);
+    assert_eq(reg.slope_s, 0);
+    assert_eq(reg.intercept_s, 5000);
+}
+
+fn test_negative_slope() {
+    // y = -3x + 10: (1,7), (2,4), (3,1), (4,-2)
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 7, e1: 4, e2: 1, e3: -2, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let reg = linear_regression(x, y, 4);
+    assert_eq(reg.slope_s, -3000);
+    assert_eq(reg.intercept_s, 10000);
+}
+
+fn test_through_origin() {
+    // y = 3x: (0,0), (1,3), (2,6), (3,9)
+    let x = Arr8 { e0: 0, e1: 1, e2: 2, e3: 3, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 0, e1: 3, e2: 6, e3: 9, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let reg = linear_regression(x, y, 4);
+    assert_eq(reg.slope_s, 3000);
+    assert_eq(reg.intercept_s, 0);
+}
+
+fn test_noisy_data() {
+    // Points close to y = x: (1,1), (2,3), (3,2), (4,4), (5,5)
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 1, e1: 3, e2: 2, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let reg = linear_regression(x, y, 5);
+    // slope should be close to 1.0, intercept close to 0
+    assert_near(reg.slope_s, 900, 200);
+    assert_near(reg.intercept_s, 200, 500);
+}
+
+// =============================================================================
+// Prediction and residuals
+// =============================================================================
+
+fn predict(reg: LinReg, x: Int) -> Int {
+    // Returns predicted y * 1000
+    reg.slope_s * x + reg.intercept_s
+}
+
+fn test_prediction() {
+    // y = 2x + 1
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 3, e1: 5, e2: 7, e3: 9, e4: 11, e5: 0, e6: 0, e7: 0 };
+    let reg = linear_regression(x, y, 5);
+
+    // Predict at x=6: y = 2*6 + 1 = 13 => 13000
+    assert_eq(predict(reg, 6), 13000);
+
+    // Predict at x=0: y = 1 => 1000
+    assert_eq(predict(reg, 0), 1000);
+
+    // Predict at x=10: y = 21 => 21000
+    assert_eq(predict(reg, 10), 21000);
+}
+
+fn sum_squared_residuals(x: Arr8, y: Arr8, n: Int, reg: LinReg) -> Int {
+    // Returns sum of (y[i]*1000 - predicted[i])^2 / 1000000
+    let mut ssr = 0;
+    let mut i = 0;
+    while i < n {
+        let predicted = predict(reg, arr8_get(x, i));
+        let residual = arr8_get(y, i) * 1000 - predicted;
+        ssr = ssr + (residual * residual) / 1000000;
+        i = i + 1;
+    }
+    ssr
+}
+
+fn test_residuals() {
+    // Perfect fit: residuals should be 0
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 3, e1: 5, e2: 7, e3: 9, e4: 11, e5: 0, e6: 0, e7: 0 };
+    let reg = linear_regression(x, y, 5);
+    let ssr = sum_squared_residuals(x, y, 5, reg);
+    assert_eq(ssr, 0);
+
+    // Noisy data: residuals should be > 0
+    let y2 = Arr8 { e0: 1, e1: 3, e2: 2, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let reg2 = linear_regression(x, y2, 5);
+    let ssr2 = sum_squared_residuals(x, y2, 5, reg2);
+    assert(ssr2 > 0);
+}
+
+// =============================================================================
+// Variance computation
+// =============================================================================
+
+fn arr_variance_s(a: Arr8, n: Int) -> Int {
+    // Returns variance * 1000
+    // var = (1/n) * sum((x[i] - mean)^2)
+    let mean_val = arr_mean(a, n);
+    let mut sum_sq = 0;
+    let mut i = 0;
+    while i < n {
+        let diff = arr8_get(a, i) - mean_val;
+        sum_sq = sum_sq + diff * diff;
+        i = i + 1;
+    }
+    (sum_sq * 1000) / n
+}
+
+fn test_variance() {
+    // x = [1, 2, 3, 4, 5], mean = 3
+    // var = (4+1+0+1+4)/5 = 10/5 = 2.0 => 2000
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr_variance_s(x, 5), 2000);
+
+    // All same: variance = 0
+    let y = Arr8 { e0: 5, e1: 5, e2: 5, e3: 5, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr_variance_s(y, 4), 0);
+
+    // x = [0, 10], mean = 5, var = (25+25)/2 = 25 => 25000
+    let z = Arr8 { e0: 0, e1: 10, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr_variance_s(z, 2), 25000);
+}
+
+// =============================================================================
+// R-squared (coefficient of determination)
+// R^2 = 1 - SSR / SST
+// where SST = sum((y_i - mean_y)^2)
+// Returns R^2 * 1000
+// =============================================================================
+
+fn r_squared(x: Arr8, y: Arr8, n: Int) -> Int {
+    let reg = linear_regression(x, y, n);
+    let mean_y = arr_mean(y, n);
+
+    let mut sst = 0;
+    let mut ssr = 0;
+    let mut i = 0;
+    while i < n {
+        let diff_total = arr8_get(y, i) - mean_y;
+        sst = sst + diff_total * diff_total;
+
+        let predicted = predict(reg, arr8_get(x, i));
+        let residual = arr8_get(y, i) * 1000 - predicted;
+        ssr = ssr + (residual / 100) * (residual / 100); // Avoid overflow
+        i = i + 1;
+    }
+
+    if sst == 0 {
+        return 1000; // Perfect fit trivially
+    }
+
+    // R^2 = 1 - SSR/(SST * 10000)
+    // SSR is in units of (residual/100)^2 = (value*10)^2
+    // SST is in units of value^2
+    // Need to match scales
+    let sst_scaled = sst * 100; // Now same scale as ssr
+    1000 - (ssr * 1000) / sst_scaled
+}
+
+fn test_r_squared() {
+    // Perfect fit: R^2 = 1.0 (1000 scaled)
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 3, e1: 5, e2: 7, e3: 9, e4: 11, e5: 0, e6: 0, e7: 0 };
+    let r2 = r_squared(x, y, 5);
+    assert_eq(r2, 1000);
+
+    // All same y (no variation): R^2 = 1 (trivial)
+    let y2 = Arr8 { e0: 5, e1: 5, e2: 5, e3: 5, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let r2b = r_squared(x, y2, 5);
+    assert_eq(r2b, 1000);
+}
+
+// =============================================================================
+// Multiple regression points test
+// =============================================================================
+
+fn test_two_point_regression() {
+    // Two points determine a unique line
+    // (0, 1) and (1, 3) => slope = 2, intercept = 1
+    let x = Arr8 { e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 1, e1: 3, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let reg = linear_regression(x, y, 2);
+    assert_eq(reg.slope_s, 2000);
+    assert_eq(reg.intercept_s, 1000);
+}
+
+fn test_symmetric_data() {
+    // Symmetric data around (0, 0): (-2,-2), (-1,-1), (0,0), (1,1), (2,2)
+    let x = Arr8 { e0: -2, e1: -1, e2: 0, e3: 1, e4: 2, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: -2, e1: -1, e2: 0, e3: 1, e4: 2, e5: 0, e6: 0, e7: 0 };
+    let reg = linear_regression(x, y, 5);
+    assert_eq(reg.slope_s, 1000);
+    assert_eq(reg.intercept_s, 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_basic_stats();
+    test_perfect_linear();
+    test_zero_slope();
+    test_negative_slope();
+    test_through_origin();
+    test_noisy_data();
+    test_prediction();
+    test_residuals();
+    test_variance();
+    test_r_squared();
+    test_two_point_regression();
+    test_symmetric_data();
+    print("[OK] 307_interp_linear_regression");
+    0
+}

@@ -1,0 +1,35 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, math, size
+// @description: Test with 'size' field name instead of 'len'
+
+module specs.core.math.size_field_test;
+
+type SimpleVec2 is {
+    data: List<Float>,
+    size: Int,
+};
+
+implement SimpleVec2 {
+    public fn new(n: Int) -> SimpleVec2 {
+        let data = List.with_capacity(n);
+        SimpleVec2 { data, size: n }
+    }
+
+    public fn get_size(&self) -> Int {
+        self.size
+    }
+}
+
+fn main() {
+    print("Creating SimpleVec2.new(3)...");
+    let v = SimpleVec2.new(3);
+    print("Vector created!");
+
+    print("Getting size...");
+    let s = v.get_size();
+    print(f"Size = {s}");
+
+    print("Test done!");
+}

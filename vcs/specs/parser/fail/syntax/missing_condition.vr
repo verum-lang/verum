@@ -1,0 +1,15 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, condition, error
+// @description: Test missing condition in control flow
+// @expected-error: E018
+
+fn test_missing_condition() {
+    if {
+        do_something();
+    }
+
+    while {
+        loop_body();
+    }
+}

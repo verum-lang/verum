@@ -1,0 +1,286 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, arithmetic, edge_cases, overflow
+// @timeout: 10000
+
+/// Arithmetic edge cases for Tier 0 vs Tier 3 equivalence testing.
+/// Tests overflow behavior, division edge cases, and numeric limits.
+
+fn main() {
+    test_integer_overflow();
+    test_integer_underflow();
+    test_division_edge_cases();
+    test_modulo_edge_cases();
+    test_bitwise_edge_cases();
+    test_shift_edge_cases();
+    test_power_edge_cases();
+    test_mixed_operations();
+}
+
+/// Integer overflow behavior
+fn test_integer_overflow() {
+    println("=== Integer Overflow ===");
+
+    // Maximum value operations
+    let max_i64: Int = 9223372036854775807;
+    println(f"max_i64 = {max_i64}");
+
+    // Overflow detection (if supported)
+    let overflow_add = max_i64.checked_add(1);
+    println(f"max_i64.checked_add(1) = {overflow_add}");
+
+    let overflow_mul = max_i64.checked_mul(2);
+    println(f"max_i64.checked_mul(2) = {overflow_mul}");
+
+    // Wrapping arithmetic
+    let wrap_add = max_i64.wrapping_add(1);
+    println(f"max_i64.wrapping_add(1) = {wrap_add}");
+
+    let wrap_mul = max_i64.wrapping_mul(2);
+    println(f"max_i64.wrapping_mul(2) = {wrap_mul}");
+
+    // Saturating arithmetic
+    let sat_add = max_i64.saturating_add(1);
+    println(f"max_i64.saturating_add(1) = {sat_add}");
+
+    let sat_mul = max_i64.saturating_mul(2);
+    println(f"max_i64.saturating_mul(2) = {sat_mul}");
+
+    // U64 max
+    let max_u64: U64 = 18446744073709551615;
+    println(f"max_u64 = {max_u64}");
+    println(f"max_u64 + 0 = {max_u64 + 0}");
+}
+
+/// Integer underflow behavior
+fn test_integer_underflow() {
+    println("\n=== Integer Underflow ===");
+
+    // Minimum value operations
+    let min_i64: Int = -9223372036854775808;
+    println(f"min_i64 = {min_i64}");
+
+    // Underflow detection
+    let underflow_sub = min_i64.checked_sub(1);
+    println(f"min_i64.checked_sub(1) = {underflow_sub}");
+
+    let underflow_mul = min_i64.checked_mul(-1);
+    println(f"min_i64.checked_mul(-1) = {underflow_mul}");
+
+    // Wrapping arithmetic
+    let wrap_sub = min_i64.wrapping_sub(1);
+    println(f"min_i64.wrapping_sub(1) = {wrap_sub}");
+
+    // Saturating arithmetic
+    let sat_sub = min_i64.saturating_sub(1);
+    println(f"min_i64.saturating_sub(1) = {sat_sub}");
+
+    // Unsigned underflow
+    let zero_u64: U64 = 0;
+    let wrap_usub = zero_u64.wrapping_sub(1);
+    println(f"0u64.wrapping_sub(1) = {wrap_usub}");
+}
+
+/// Division edge cases
+fn test_division_edge_cases() {
+    println("\n=== Division Edge Cases ===");
+
+    // Division by 1 and -1
+    let n = 42;
+    println(f"42 / 1 = {n / 1}");
+    println(f"42 / -1 = {n / -1}");
+
+    // Division of 0
+    println(f"0 / 1 = {0 / 1}");
+    println(f"0 / -1 = {0 / -1}");
+    println(f"0 / 42 = {0 / 42}");
+
+    // Negative division
+    println(f"17 / 5 = {17 / 5}");
+    println(f"-17 / 5 = {-17 / 5}");
+    println(f"17 / -5 = {17 / -5}");
+    println(f"-17 / -5 = {-17 / -5}");
+
+    // Division near limits
+    let max = 9223372036854775807i64;
+    let min = -9223372036854775808i64;
+    println(f"max / 1 = {max / 1}");
+    println(f"max / 2 = {max / 2}");
+    println(f"max / max = {max / max}");
+    println(f"min / 1 = {min / 1}");
+    println(f"min / 2 = {min / 2}");
+
+    // Division that would overflow (min / -1)
+    let div_overflow = min.checked_div(-1);
+    println(f"min.checked_div(-1) = {div_overflow}");
+
+    // Float division edge cases
+    println(f"\n1.0 / 0.0 = {1.0 / 0.0}");
+    println(f"-1.0 / 0.0 = {-1.0 / 0.0}");
+    println(f"0.0 / 0.0 = {0.0 / 0.0}");
+}
+
+/// Modulo edge cases
+fn test_modulo_edge_cases() {
+    println("\n=== Modulo Edge Cases ===");
+
+    // Basic modulo
+    println(f"17 % 5 = {17 % 5}");
+    println(f"20 % 5 = {20 % 5}");
+
+    // Negative modulo
+    println(f"-17 % 5 = {-17 % 5}");
+    println(f"17 % -5 = {17 % -5}");
+    println(f"-17 % -5 = {-17 % -5}");
+
+    // Zero dividend
+    println(f"0 % 5 = {0 % 5}");
+    println(f"0 % -5 = {0 % -5}");
+
+    // Modulo by 1 and -1
+    println(f"42 % 1 = {42 % 1}");
+    println(f"42 % -1 = {42 % -1}");
+    println(f"-42 % 1 = {-42 % 1}");
+
+    // Large numbers
+    let large = 9223372036854775807i64;
+    println(f"large % 10 = {large % 10}");
+    println(f"large % 3 = {large % 3}");
+
+    // Float modulo
+    println(f"5.5 % 2.0 = {5.5 % 2.0}");
+    println(f"-5.5 % 2.0 = {-5.5 % 2.0}");
+}
+
+/// Bitwise operation edge cases
+fn test_bitwise_edge_cases() {
+    println("\n=== Bitwise Edge Cases ===");
+
+    // All zeros and all ones
+    let zeros: U64 = 0;
+    let ones: U64 = 0xFFFFFFFFFFFFFFFF;
+
+    println(f"0 & ones = {zeros & ones}");
+    println(f"0 | ones = {zeros | ones}");
+    println(f"0 ^ ones = {zeros ^ ones}");
+    println(f"~0u64 = {!zeros}");
+    println(f"~ones = {!ones}");
+
+    // Single bit operations
+    for i in [0, 1, 31, 32, 62, 63] {
+        let bit: U64 = 1 << i;
+        println(f"1 << {i} = {bit}");
+    }
+
+    // AND, OR, XOR combinations
+    let a: U64 = 0xAAAAAAAAAAAAAAAA;
+    let b: U64 = 0x5555555555555555;
+    println(f"0xAAAA... & 0x5555... = {a & b}");
+    println(f"0xAAAA... | 0x5555... = {a | b}");
+    println(f"0xAAAA... ^ 0x5555... = {a ^ b}");
+
+    // Signed bitwise
+    let neg_one: Int = -1;
+    println(f"-1 (binary) = all ones");
+    println(f"-1 & 0xFF = {neg_one & 0xFF}");
+    println(f"-1 >> 1 = {neg_one >> 1}");
+}
+
+/// Shift edge cases
+fn test_shift_edge_cases() {
+    println("\n=== Shift Edge Cases ===");
+
+    let one: U64 = 1;
+
+    // Shift by 0
+    println(f"1 << 0 = {one << 0}");
+    println(f"1 >> 0 = {one >> 0}");
+
+    // Maximum valid shifts
+    println(f"1 << 63 = {one << 63}");
+    let max_u64: U64 = 0xFFFFFFFFFFFFFFFF;
+    println(f"max >> 63 = {max_u64 >> 63}");
+
+    // Arithmetic vs logical shift for negative numbers
+    let neg: Int = -8;
+    println(f"-8 >> 1 (arithmetic) = {neg >> 1}");
+    println(f"-8 >>> 1 (logical) = {neg >>> 1}");
+
+    // Shift amounts >= bit width (implementation defined)
+    // These might differ between tiers if not careful
+    let checked_shl = one.checked_shl(64);
+    let checked_shr = one.checked_shr(64);
+    println(f"1.checked_shl(64) = {checked_shl}");
+    println(f"1.checked_shr(64) = {checked_shr}");
+
+    // Shift with variable amounts
+    for shift in [0, 1, 31, 32, 63] {
+        println(f"0xFF << {shift} = {0xFF_u64 << shift}");
+    }
+}
+
+/// Power operation edge cases
+fn test_power_edge_cases() {
+    println("\n=== Power Edge Cases ===");
+
+    // Base cases
+    println(f"0 ** 0 = {0 ** 0}");  // Mathematically controversial
+    println(f"0 ** 1 = {0 ** 1}");
+    println(f"1 ** 0 = {1 ** 0}");
+    println(f"1 ** 1000000 = {1 ** 1000000}");
+
+    // Negative bases
+    println(f"(-1) ** 2 = {(-1) ** 2}");
+    println(f"(-1) ** 3 = {(-1) ** 3}");
+    println(f"(-2) ** 3 = {(-2) ** 3}");
+    println(f"(-2) ** 4 = {(-2) ** 4}");
+
+    // Large exponents (may overflow)
+    println(f"2 ** 62 = {2 ** 62}");
+    let pow_overflow = 2i64.checked_pow(63);
+    println(f"2.checked_pow(63) = {pow_overflow}");
+
+    // Float powers
+    println(f"2.0 ** 0.5 = {2.0 ** 0.5}");
+    println(f"(-1.0) ** 0.5 = {(-1.0) ** 0.5}");  // NaN
+    println(f"0.0 ** 0.0 = {0.0 ** 0.0}");
+    println(f"0.0 ** -1.0 = {0.0 ** -1.0}");
+}
+
+/// Mixed operation edge cases
+fn test_mixed_operations() {
+    println("\n=== Mixed Operations ===");
+
+    // Associativity edge cases with overflow
+    let a = 9223372036854775807i64;
+    let b = 1i64;
+    let c = -1i64;
+
+    // (a + b) + c vs a + (b + c)
+    let abc_1 = a.wrapping_add(b).wrapping_add(c);
+    let abc_2 = a.wrapping_add(b.wrapping_add(c));
+    println(f"(max + 1) + (-1) wrapping = {abc_1}");
+    println(f"max + (1 + (-1)) wrapping = {abc_2}");
+    println(f"equal? {abc_1 == abc_2}");
+
+    // Order of operations
+    println(f"2 + 3 * 4 = {2 + 3 * 4}");
+    println(f"(2 + 3) * 4 = {(2 + 3) * 4}");
+    println(f"2 ** 3 ** 2 = {2 ** 3 ** 2}");  // Right associative
+
+    // Division and modulo relationship
+    let dividend = 17;
+    let divisor = 5;
+    let quotient = dividend / divisor;
+    let remainder = dividend % divisor;
+    println(f"17 = 5 * {quotient} + {remainder}");
+    println(f"verify: {divisor * quotient + remainder}");
+
+    // Negative case
+    let neg_dividend = -17;
+    let neg_quotient = neg_dividend / divisor;
+    let neg_remainder = neg_dividend % divisor;
+    println(f"-17 = 5 * {neg_quotient} + {neg_remainder}");
+    println(f"verify: {divisor * neg_quotient + neg_remainder}");
+}

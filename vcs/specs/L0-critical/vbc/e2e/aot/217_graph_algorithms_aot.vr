@@ -1,0 +1,202 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, graph, algorithms, dfs, bfs
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for graph algorithms using adjacency matrix
+
+// 5-node graph represented as adjacency matrix (5x5 = 25 entries)
+// adj[i*5+j] = 1 means edge from i to j
+type Graph5 is {
+    // Row 0
+    e00: Int, e01: Int, e02: Int, e03: Int, e04: Int,
+    // Row 1
+    e10: Int, e11: Int, e12: Int, e13: Int, e14: Int,
+    // Row 2
+    e20: Int, e21: Int, e22: Int, e23: Int, e24: Int,
+    // Row 3
+    e30: Int, e31: Int, e32: Int, e33: Int, e34: Int,
+    // Row 4
+    e40: Int, e41: Int, e42: Int, e43: Int, e44: Int
+};
+
+fn graph_edge(g: Graph5, i: Int, j: Int) -> Int {
+    if i == 0 {
+        if j == 0 { g.e00 } else if j == 1 { g.e01 } else if j == 2 { g.e02 }
+        else if j == 3 { g.e03 } else { g.e04 }
+    } else if i == 1 {
+        if j == 0 { g.e10 } else if j == 1 { g.e11 } else if j == 2 { g.e12 }
+        else if j == 3 { g.e13 } else { g.e14 }
+    } else if i == 2 {
+        if j == 0 { g.e20 } else if j == 1 { g.e21 } else if j == 2 { g.e22 }
+        else if j == 3 { g.e23 } else { g.e24 }
+    } else if i == 3 {
+        if j == 0 { g.e30 } else if j == 1 { g.e31 } else if j == 2 { g.e32 }
+        else if j == 3 { g.e33 } else { g.e34 }
+    } else {
+        if j == 0 { g.e40 } else if j == 1 { g.e41 } else if j == 2 { g.e42 }
+        else if j == 3 { g.e43 } else { g.e44 }
+    }
+}
+
+// Visited array for 5 nodes
+type Vis5 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int };
+
+fn vis_new() -> Vis5 {
+    Vis5 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0 }
+}
+
+fn vis_get(v: Vis5, i: Int) -> Int {
+    if i == 0 { v.v0 } else if i == 1 { v.v1 }
+    else if i == 2 { v.v2 } else if i == 3 { v.v3 }
+    else { v.v4 }
+}
+
+fn vis_set(v: Vis5, i: Int) -> Vis5 {
+    Vis5 {
+        v0: if i == 0 { 1 } else { v.v0 },
+        v1: if i == 1 { 1 } else { v.v1 },
+        v2: if i == 2 { 1 } else { v.v2 },
+        v3: if i == 3 { 1 } else { v.v3 },
+        v4: if i == 4 { 1 } else { v.v4 }
+    }
+}
+
+fn vis_count(v: Vis5) -> Int {
+    v.v0 + v.v1 + v.v2 + v.v3 + v.v4
+}
+
+fn degree(g: Graph5, node: Int) -> Int {
+    let mut d = 0;
+    let mut j = 0;
+    while j < 5 {
+        d = d + graph_edge(g, node, j);
+        j = j + 1;
+    }
+    d
+}
+
+fn edge_count(g: Graph5) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let mut j = 0;
+        while j < 5 {
+            total = total + graph_edge(g, i, j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// BFS-like reachability using iterative expansion
+fn reachable_count(g: Graph5, start: Int) -> Int {
+    let mut vis = vis_new();
+    vis = vis_set(vis, start);
+    // Iterate until stable (5 rounds max for 5-node graph)
+    let mut round = 0;
+    while round < 5 {
+        let mut i = 0;
+        while i < 5 {
+            if vis_get(vis, i) == 1 {
+                let mut j = 0;
+                while j < 5 {
+                    if graph_edge(g, i, j) == 1 {
+                        vis = vis_set(vis, j);
+                    }
+                    j = j + 1;
+                }
+            }
+            i = i + 1;
+        }
+        round = round + 1;
+    }
+    vis_count(vis)
+}
+
+fn is_symmetric(g: Graph5) -> Bool {
+    let mut i = 0;
+    while i < 5 {
+        let mut j = i + 1;
+        while j < 5 {
+            if graph_edge(g, i, j) != graph_edge(g, j, i) {
+                return false;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_undirected_graph() {
+    // Triangle: 0-1-2-0
+    let g = Graph5 {
+        e00: 0, e01: 1, e02: 1, e03: 0, e04: 0,
+        e10: 1, e11: 0, e12: 1, e13: 0, e14: 0,
+        e20: 1, e21: 1, e22: 0, e23: 0, e24: 0,
+        e30: 0, e31: 0, e32: 0, e33: 0, e34: 0,
+        e40: 0, e41: 0, e42: 0, e43: 0, e44: 0
+    };
+    assert_eq(is_symmetric(g), true);
+    assert_eq(degree(g, 0), 2);
+    assert_eq(degree(g, 3), 0);  // Isolated
+    assert_eq(edge_count(g), 6);  // 3 edges * 2 (undirected)
+    assert_eq(reachable_count(g, 0), 3);
+    assert_eq(reachable_count(g, 3), 1);  // Only itself
+}
+
+fn test_directed_graph() {
+    // Chain: 0->1->2->3->4
+    let g = Graph5 {
+        e00: 0, e01: 1, e02: 0, e03: 0, e04: 0,
+        e10: 0, e11: 0, e12: 1, e13: 0, e14: 0,
+        e20: 0, e21: 0, e22: 0, e23: 1, e24: 0,
+        e30: 0, e31: 0, e32: 0, e33: 0, e34: 1,
+        e40: 0, e41: 0, e42: 0, e43: 0, e44: 0
+    };
+    assert_eq(is_symmetric(g), false);
+    assert_eq(reachable_count(g, 0), 5);  // All reachable from 0
+    assert_eq(reachable_count(g, 4), 1);  // Only 4 reachable from 4
+    assert_eq(reachable_count(g, 2), 3);  // 2, 3, 4
+}
+
+fn test_complete_graph() {
+    // K5 (all edges)
+    let g = Graph5 {
+        e00: 0, e01: 1, e02: 1, e03: 1, e04: 1,
+        e10: 1, e11: 0, e12: 1, e13: 1, e14: 1,
+        e20: 1, e21: 1, e22: 0, e23: 1, e24: 1,
+        e30: 1, e31: 1, e32: 1, e33: 0, e34: 1,
+        e40: 1, e41: 1, e42: 1, e43: 1, e44: 0
+    };
+    assert_eq(degree(g, 0), 4);
+    assert_eq(edge_count(g), 20);  // 5*4 = 20
+    assert_eq(reachable_count(g, 0), 5);
+    assert_eq(is_symmetric(g), true);
+}
+
+fn test_cycle_detection() {
+    // Cycle: 0->1->2->0, isolated: 3, 4
+    let g = Graph5 {
+        e00: 0, e01: 1, e02: 0, e03: 0, e04: 0,
+        e10: 0, e11: 0, e12: 1, e13: 0, e14: 0,
+        e20: 1, e21: 0, e22: 0, e23: 0, e24: 0,
+        e30: 0, e31: 0, e32: 0, e33: 0, e34: 0,
+        e40: 0, e41: 0, e42: 0, e43: 0, e44: 0
+    };
+    assert_eq(reachable_count(g, 0), 3);  // 0, 1, 2 in cycle
+    assert_eq(reachable_count(g, 3), 1);
+}
+
+fn main() -> Int {
+    test_undirected_graph();
+    test_directed_graph();
+    test_complete_graph();
+    test_cycle_detection();
+    print("[OK] 217_graph_algorithms_aot");
+    0
+}

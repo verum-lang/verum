@@ -1,0 +1,180 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, matrix_chain, dp, matrix_power
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests matrix chain multiplication order optimization using DP,
+// and matrix power computation via repeated squaring.
+
+// Matrix chain order DP
+// Given dimensions p[0..n], matrix i has dims p[i] x p[i+1]
+// m[i][j] = min scalar multiplications to compute chain from i to j
+
+fn test_matrix_chain_order_3() {
+    // 3 matrices: A(10x30), B(30x5), C(5x60)
+    // p = [10, 30, 5, 60]
+    // Optimal: (A*B)*C = 10*30*5 + 10*5*60 = 1500 + 3000 = 4500
+    // Alt:     A*(B*C) = 30*5*60 + 10*30*60 = 9000 + 18000 = 27000
+    // So optimal is 4500
+
+    let p = [10, 30, 5, 60];
+    let n = 3; // number of matrices
+
+    // DP table: m[i][j] stored in flat array m[i*n + j]
+    // Using 3x3 table indexed [0,2]
+    let mut dp = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Fill diagonal (length 1) = 0 (already initialized)
+    // Fill for chain length 2
+    // dp[0][1] = p[0]*p[1]*p[2] = 10*30*5 = 1500
+    dp[0 * 3 + 1] = p[0] * p[1] * p[2];
+    // dp[1][2] = p[1]*p[2]*p[3] = 30*5*60 = 9000
+    dp[1 * 3 + 2] = p[1] * p[2] * p[3];
+
+    // Fill for chain length 3: dp[0][2]
+    // Split at k=0: dp[0][0] + dp[1][2] + p[0]*p[1]*p[3] = 0 + 9000 + 10*30*60 = 9000 + 18000 = 27000
+    // Split at k=1: dp[0][1] + dp[2][2] + p[0]*p[2]*p[3] = 1500 + 0 + 10*5*60 = 1500 + 3000 = 4500
+    let cost_k0 = dp[0 * 3 + 0] + dp[1 * 3 + 2] + p[0] * p[1] * p[3];
+    let cost_k1 = dp[0 * 3 + 1] + dp[2 * 3 + 2] + p[0] * p[2] * p[3];
+    let optimal = if cost_k0 < cost_k1 { cost_k0 } else { cost_k1 };
+    dp[0 * 3 + 2] = optimal;
+
+    assert_eq(dp[0 * 3 + 1], 1500);
+    assert_eq(dp[1 * 3 + 2], 9000);
+    assert_eq(dp[0 * 3 + 2], 4500);
+
+    print("matrix_chain_order_3: ok");
+}
+
+fn test_matrix_chain_order_4() {
+    // 4 matrices: A(5x4), B(4x6), C(6x2), D(2x7)
+    // p = [5, 4, 6, 2, 7]
+    // n = 4
+    // Let's compute all dp[i][j] systematically.
+
+    let p = [5, 4, 6, 2, 7];
+    let n = 4;
+
+    // dp stored as flat 4x4 array
+    let mut dp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Length 2 chains:
+    // dp[0][1] = p[0]*p[1]*p[2] = 5*4*6 = 120
+    dp[0 * 4 + 1] = p[0] * p[1] * p[2];
+    // dp[1][2] = p[1]*p[2]*p[3] = 4*6*2 = 48
+    dp[1 * 4 + 2] = p[1] * p[2] * p[3];
+    // dp[2][3] = p[2]*p[3]*p[4] = 6*2*7 = 84
+    dp[2 * 4 + 3] = p[2] * p[3] * p[4];
+
+    // Length 3 chains:
+    // dp[0][2]: split at k=0 or k=1
+    //   k=0: dp[0][0]+dp[1][2]+p[0]*p[1]*p[3] = 0+48+5*4*2 = 48+40 = 88
+    //   k=1: dp[0][1]+dp[2][2]+p[0]*p[2]*p[3] = 120+0+5*6*2 = 120+60 = 180
+    let c02_k0 = dp[0 * 4 + 0] + dp[1 * 4 + 2] + p[0] * p[1] * p[3];
+    let c02_k1 = dp[0 * 4 + 1] + dp[2 * 4 + 2] + p[0] * p[2] * p[3];
+    dp[0 * 4 + 2] = if c02_k0 < c02_k1 { c02_k0 } else { c02_k1 };
+
+    // dp[1][3]: split at k=1 or k=2
+    //   k=1: dp[1][1]+dp[2][3]+p[1]*p[2]*p[4] = 0+84+4*6*7 = 84+168 = 252
+    //   k=2: dp[1][2]+dp[3][3]+p[1]*p[3]*p[4] = 48+0+4*2*7 = 48+56 = 104
+    let c13_k1 = dp[1 * 4 + 1] + dp[2 * 4 + 3] + p[1] * p[2] * p[4];
+    let c13_k2 = dp[1 * 4 + 2] + dp[3 * 4 + 3] + p[1] * p[3] * p[4];
+    dp[1 * 4 + 3] = if c13_k1 < c13_k2 { c13_k1 } else { c13_k2 };
+
+    // Length 4: dp[0][3]
+    // k=0: dp[0][0]+dp[1][3]+p[0]*p[1]*p[4] = 0+104+5*4*7 = 104+140 = 244
+    // k=1: dp[0][1]+dp[2][3]+p[0]*p[2]*p[4] = 120+84+5*6*7 = 204+210 = 414
+    // k=2: dp[0][2]+dp[3][3]+p[0]*p[3]*p[4] = 88+0+5*2*7 = 88+70 = 158
+    let c03_k0 = dp[0 * 4 + 0] + dp[1 * 4 + 3] + p[0] * p[1] * p[4];
+    let c03_k1 = dp[0 * 4 + 1] + dp[2 * 4 + 3] + p[0] * p[2] * p[4];
+    let c03_k2 = dp[0 * 4 + 2] + dp[3 * 4 + 3] + p[0] * p[3] * p[4];
+    let best_01 = if c03_k0 < c03_k1 { c03_k0 } else { c03_k1 };
+    dp[0 * 4 + 3] = if best_01 < c03_k2 { best_01 } else { c03_k2 };
+
+    assert_eq(dp[0 * 4 + 1], 120);
+    assert_eq(dp[1 * 4 + 2], 48);
+    assert_eq(dp[2 * 4 + 3], 84);
+    assert_eq(dp[0 * 4 + 2], 88);
+    assert_eq(dp[1 * 4 + 3], 104);
+    assert_eq(dp[0 * 4 + 3], 158);
+
+    print("matrix_chain_order_4: ok");
+}
+
+fn mat_mul_2x2(a: Int, b: Int, c: Int, d: Int,
+               e: Int, f_val: Int, g: Int, h: Int,
+               r: Int) -> Int {
+    // Returns element r of product of [a,b;c,d] * [e,f;g,h]
+    // r=0: (0,0)=a*e+b*g, r=1: (0,1)=a*f+b*h
+    // r=2: (1,0)=c*e+d*g, r=3: (1,1)=c*f+d*h
+    if r == 0 { a * e + b * g }
+    else if r == 1 { a * f_val + b * h }
+    else if r == 2 { c * e + d * g }
+    else { c * f_val + d * h }
+}
+
+fn test_matrix_power_2x2() {
+    // Matrix power: M^n using repeated squaring (2x2 matrices)
+    // M = [1,1; 1,0] (Fibonacci matrix)
+    // M^1 = [1,1; 1,0]
+    // M^2 = [2,1; 1,1]
+    // M^4 = M^2 * M^2 = [2,1;1,1]*[2,1;1,1] = [5,3;3,2]
+    // M^8 = M^4*M^4 = [5,3;3,2]*[5,3;3,2] = [34,21;21,13]
+    // Fibonacci: M^n[0][1] = F(n), M^n[1][0] = F(n-1)
+    // So M^8 gives F(8)=21
+
+    // Compute M^2
+    let m2_00 = mat_mul_2x2(1, 1, 1, 0, 1, 1, 1, 0, 0);
+    let m2_01 = mat_mul_2x2(1, 1, 1, 0, 1, 1, 1, 0, 1);
+    let m2_10 = mat_mul_2x2(1, 1, 1, 0, 1, 1, 1, 0, 2);
+    let m2_11 = mat_mul_2x2(1, 1, 1, 0, 1, 1, 1, 0, 3);
+    assert_eq(m2_00, 2); assert_eq(m2_01, 1);
+    assert_eq(m2_10, 1); assert_eq(m2_11, 1);
+
+    // Compute M^4 = M^2 * M^2
+    let m4_00 = mat_mul_2x2(m2_00, m2_01, m2_10, m2_11, m2_00, m2_01, m2_10, m2_11, 0);
+    let m4_01 = mat_mul_2x2(m2_00, m2_01, m2_10, m2_11, m2_00, m2_01, m2_10, m2_11, 1);
+    let m4_10 = mat_mul_2x2(m2_00, m2_01, m2_10, m2_11, m2_00, m2_01, m2_10, m2_11, 2);
+    let m4_11 = mat_mul_2x2(m2_00, m2_01, m2_10, m2_11, m2_00, m2_01, m2_10, m2_11, 3);
+    // [2,1;1,1]*[2,1;1,1]: (0,0)=2*2+1*1=5, (0,1)=2*1+1*1=3, (1,0)=1*2+1*1=3, (1,1)=1*1+1*1=2
+    assert_eq(m4_00, 5); assert_eq(m4_01, 3);
+    assert_eq(m4_10, 3); assert_eq(m4_11, 2);
+
+    // Compute M^8 = M^4 * M^4
+    let m8_01 = mat_mul_2x2(m4_00, m4_01, m4_10, m4_11, m4_00, m4_01, m4_10, m4_11, 1);
+    // [5,3;3,2]*[5,3;3,2]: (0,1)=5*3+3*2=15+6=21
+    assert_eq(m8_01, 21); // F(8) = 21
+
+    print("matrix_power_2x2: ok");
+}
+
+fn test_scalar_chain_cost() {
+    // Verify scalar multiplication cost formula for simple chains
+    // Chain ABC where A:2x3, B:3x4, C:4x2
+    // (AB)C: 2*3*4 + 2*4*2 = 24 + 16 = 40
+    // A(BC): 3*4*2 + 2*3*2 = 24 + 12 = 36
+    let cost_ab_c = 2 * 3 * 4 + 2 * 4 * 2;
+    let cost_a_bc = 3 * 4 * 2 + 2 * 3 * 2;
+    assert_eq(cost_ab_c, 40);
+    assert_eq(cost_a_bc, 36);
+    let optimal = if cost_a_bc < cost_ab_c { cost_a_bc } else { cost_ab_c };
+    assert_eq(optimal, 36);
+
+    // Count savings as percentage approximation (integer math)
+    // (40-36)*100/40 = 10%
+    let savings_pct = (cost_ab_c - optimal) * 100 / cost_ab_c;
+    assert_eq(savings_pct, 10);
+
+    print("scalar_chain_cost: ok");
+}
+
+fn main() -> Int {
+    test_matrix_chain_order_3();
+    test_matrix_chain_order_4();
+    test_matrix_power_2x2();
+    test_scalar_chain_cost();
+    print("[OK] 443_interp_matrix_chain");
+    0
+}

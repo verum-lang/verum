@@ -1,0 +1,66 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-verification, theorem
+// @timeout: 15000
+
+/// Theorem statement syntax for formal verification
+
+theorem simple_eq(x: Int): x == x { proof by trivial }
+theorem add_comm_int(a: Int, b: Int): a + b == b + a { proof by ring }
+theorem mul_comm_int(a: Int, b: Int): a * b == b * a { proof by ring }
+
+theorem with_requires(x: Int) requires x > 0 ensures x >= 1 { proof by omega }
+theorem with_ensures(x: Int, y: Int) requires x > y ensures x - y > 0 { proof by omega }
+
+theorem quantified(x: Int): x + 0 == x { proof by auto }
+
+theorem existential_nat(n: Nat)
+    ensures exists x: Nat. x > 0
+{
+    proof {
+        witness 1;
+        trivial
+    }
+}
+
+theorem add_zero_ind(n: Nat): n + 0 == n {
+    proof by induction on n {
+        case 0 => {
+            trivial
+        }
+        case succ(k) => {
+            have ih: k + 0 == k;
+            conclude by auto
+        }
+    }
+}
+
+theorem not_false_thm(): !false {
+    proof by auto
+}
+
+theorem by_cases(x: Int): x >= 0 || x < 0 {
+    proof by cases {
+        case x >= 0 => { left; trivial }
+        case x < 0 => { right; trivial }
+    }
+}
+
+theorem by_smt(x: Int, y: Int) requires x > 0 requires y > 0 ensures x + y > 1 { proof by smt }
+theorem by_ring<T: Ring>(a: T, b: T): (a + b) * (a + b) == a*a + 2*a*b + b*b { proof by ring }
+theorem by_omega(n: Int) requires n >= 5 ensures n >= 3 { proof by omega }
+
+theorem generic<T: Eq>(x: T, y: T) requires x == y ensures y == x { proof by auto }
+
+theorem calc_proof(a: Int, b: Int): (a + b) * 2 == 2 * a + 2 * b {
+    proof {
+        calc {
+            (a + b) * 2
+            == { by ring } 2 * (a + b)
+            == { by ring } 2 * a + 2 * b
+        }
+    }
+}
+
+fn main() {}

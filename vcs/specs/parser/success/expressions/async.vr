@@ -1,0 +1,52 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, async
+// @description: Test async expression parsing
+
+async fn test_async_expressions() {
+    // Async block
+    let future = async {
+        compute().await
+    };
+
+    // Await
+    let result = future.await;
+    let data = fetch_data().await;
+    let processed = process().await;
+
+    // Spawn basic
+    spawn async {
+        background_task();
+    };
+
+    // Spawn with expression
+    spawn compute_async();
+
+    // Simple select expression
+    select {
+        msg = channel.recv().await => handle_msg(msg),
+        result = timeout.await => handle_timeout(),
+        else => handle_none()
+    };
+
+    // Select with wildcard pattern
+    select {
+        data = fetch().await => process(data),
+        _ = timer.await => tick()
+    };
+
+    // Yield (in generator)
+    yield value;
+    yield compute();
+
+    // Basic nursery
+    nursery {
+        let a = spawn fetch_a();
+        let b = spawn fetch_b();
+    }
+
+    // Nursery with timeout option
+    nursery(timeout: 5000) {
+        spawn risky_task();
+    }
+}

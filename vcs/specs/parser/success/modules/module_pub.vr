@@ -1,0 +1,76 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Public module with pub keyword
+pub module public_api {}
+
+// Public module with public keyword
+public module explicit_public_api {}
+
+// Internal module
+internal module internal_impl {}
+
+// Protected module
+protected module protected_impl {}
+
+// Public module with public items
+pub module http {
+    pub fn get(url: Text) -> Response {
+        todo()
+    }
+
+    pub fn post(url: Text, body: Text) -> Response {
+        todo()
+    }
+
+    pub type Response is { status: Int, body: Text };
+}
+
+// Public module with mixed visibility
+pub module database {
+    // Public API
+    pub fn connect(url: Text) -> Connection {
+        internal_connect(url)
+    }
+
+    pub type Connection is { id: Int };
+
+    // Internal implementation details
+    fn internal_connect(url: Text) -> Connection {
+        Connection { id: 1 }
+    }
+
+    type InternalConfig is { timeout: Int };
+}
+
+// Nested public modules
+pub module outer_public {
+    pub module inner_public {
+        pub fn exposed() -> Int { 42 }
+    }
+
+    module inner_private {
+        fn hidden() -> Int { 0 }
+    }
+}
+
+// Public module with various item types
+pub module library {
+    pub type PublicType is { data: Int };
+    pub const PUBLIC_CONST: Int = 100;
+    pub fn public_function() -> Int { 1 }
+
+    type PrivateType is { secret: Int };
+    const PRIVATE_CONST: Int = 0;
+    fn private_function() -> Int { 0 }
+}
+
+// All visibility variants in nested modules
+module visibility_showcase {
+    pub module pub_child {}
+    public module public_child {}
+    internal module internal_child {}
+    protected module protected_child {}
+    module default_child {}
+}

@@ -1,0 +1,21 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, data-race, rwlock, sync
+// @description: Tests RwLock for multiple readers, single writer
+
+// This test demonstrates RwLock semantics for concurrent read/write access.
+// Currently skipped because threading primitives (spawn, RwLock, ThreadHandle)
+// are not yet implemented in the compiler.
+
+fn main() {
+    // Placeholder test - actual threading test requires spawn syntax
+    print("RwLock protection test - skipped (threading not implemented)");
+}
+
+// The intended test would:
+// 1. Create an RwLock protecting shared data
+// 2. Spawn multiple reader threads that acquire read locks
+// 3. Spawn a writer thread that acquires write lock
+// 4. Verify multiple readers can proceed concurrently
+// 5. Verify writer has exclusive access

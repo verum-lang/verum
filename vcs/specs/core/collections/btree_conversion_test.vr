@@ -1,0 +1,287 @@
+// =============================================================================
+// btree_conversion_test.vr - BTreeMap conversion method tests
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, collections, btree, conversion
+// @description: Tests for BTreeMap.from_entries, to_entries, keys_list, values_list.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.btree.{BTreeMap, BTreeSet};
+mount core.collections.list.{List};
+
+// =============================================================================
+// SECTION 1: from_entries
+// =============================================================================
+
+@test
+fn test_from_entries_basic() {
+    let entries: List<(Int, Int)> = [(1, 10), (2, 20), (3, 30)];
+    let map = BTreeMap.from_entries(&entries);
+    assert_eq(map.len(), 3);
+    assert_eq(map.get(&1), Some(&10));
+    assert_eq(map.get(&2), Some(&20));
+    assert_eq(map.get(&3), Some(&30));
+}
+
+@test
+fn test_from_entries_empty() {
+    let entries: List<(Int, Int)> = [];
+    let map = BTreeMap.from_entries(&entries);
+    assert(map.is_empty());
+    assert_eq(map.len(), 0);
+}
+
+@test
+fn test_from_entries_single() {
+    let entries: List<(Int, Int)> = [(42, 99)];
+    let map = BTreeMap.from_entries(&entries);
+    assert_eq(map.len(), 1);
+    assert_eq(map.get(&42), Some(&99));
+}
+
+@test
+fn test_from_entries_duplicate_keys() {
+    // Last entry should win for duplicate keys
+    let entries: List<(Int, Int)> = [(1, 10), (2, 20), (1, 100)];
+    let map = BTreeMap.from_entries(&entries);
+    assert_eq(map.len(), 2);
+    assert_eq(map.get(&1), Some(&100));
+    assert_eq(map.get(&2), Some(&20));
+}
+
+@test
+fn test_from_entries_preserves_order() {
+    let entries: List<(Int, Int)> = [(3, 30), (1, 10), (2, 20)];
+    let map = BTreeMap.from_entries(&entries);
+    // BTreeMap always yields in sorted key order
+    let mut iter = map.iter();
+    let first = iter.next();
+    assert(first.is_some());
+    // First key should be 1 (smallest)
+}
+
+@test
+fn test_from_entries_string_keys() {
+    let entries: List<(Text, Int)> = [("alpha", 1), ("beta", 2), ("gamma", 3)];
+    let map = BTreeMap.from_entries(&entries);
+    assert_eq(map.len(), 3);
+    assert(map.contains_key(&"alpha"));
+    assert(map.contains_key(&"beta"));
+    assert(map.contains_key(&"gamma"));
+}
+
+// =============================================================================
+// SECTION 2: to_entries
+// =============================================================================
+
+@test
+fn test_to_entries_basic() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    let entries = map.to_entries();
+    assert_eq(entries.len(), 3);
+}
+
+@test
+fn test_to_entries_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    let entries = map.to_entries();
+    assert(entries.is_empty());
+}
+
+@test
+fn test_to_entries_sorted_order() {
+    let mut map = BTreeMap.new();
+    map.insert(3, 30);
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let entries = map.to_entries();
+    assert_eq(entries.len(), 3);
+    // Entries should be in sorted key order
+}
+
+@test
+fn test_to_entries_single() {
+    let mut map = BTreeMap.new();
+    map.insert(42, 99);
+    let entries = map.to_entries();
+    assert_eq(entries.len(), 1);
+}
+
+@test
+fn test_from_entries_roundtrip() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    let entries = map.to_entries();
+    let map2 = BTreeMap.from_entries(&entries);
+    assert_eq(map2.len(), 3);
+    assert_eq(map2.get(&1), Some(&10));
+    assert_eq(map2.get(&2), Some(&20));
+    assert_eq(map2.get(&3), Some(&30));
+}
+
+// =============================================================================
+// SECTION 3: keys_list
+// =============================================================================
+
+@test
+fn test_keys_list_basic() {
+    let mut map = BTreeMap.new();
+    map.insert(3, "c");
+    map.insert(1, "a");
+    map.insert(2, "b");
+    let keys = map.keys_list();
+    assert_eq(keys.len(), 3);
+    // Keys should be sorted
+    assert_eq(keys[0], 1);
+    assert_eq(keys[1], 2);
+    assert_eq(keys[2], 3);
+}
+
+@test
+fn test_keys_list_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    let keys = map.keys_list();
+    assert(keys.is_empty());
+}
+
+@test
+fn test_keys_list_single() {
+    let mut map = BTreeMap.new();
+    map.insert(42, "answer");
+    let keys = map.keys_list();
+    assert_eq(keys.len(), 1);
+    assert_eq(keys[0], 42);
+}
+
+@test
+fn test_keys_list_does_not_consume_map() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let keys = map.keys_list();
+    // Map should still be usable
+    assert_eq(map.len(), 2);
+    assert_eq(map.get(&1), Some(&10));
+    assert_eq(keys.len(), 2);
+}
+
+// =============================================================================
+// SECTION 4: values_list
+// =============================================================================
+
+@test
+fn test_values_list_basic() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    let values = map.values_list();
+    assert_eq(values.len(), 3);
+    // Values in key-sorted order: 10, 20, 30
+    assert_eq(values[0], 10);
+    assert_eq(values[1], 20);
+    assert_eq(values[2], 30);
+}
+
+@test
+fn test_values_list_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    let values = map.values_list();
+    assert(values.is_empty());
+}
+
+@test
+fn test_values_list_single() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 99);
+    let values = map.values_list();
+    assert_eq(values.len(), 1);
+    assert_eq(values[0], 99);
+}
+
+@test
+fn test_values_list_does_not_consume_map() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let values = map.values_list();
+    // Map should still be usable
+    assert_eq(map.len(), 2);
+    assert_eq(map.get(&1), Some(&10));
+    assert_eq(values.len(), 2);
+}
+
+@test
+fn test_values_list_with_string_values() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "alpha");
+    map.insert(2, "beta");
+    map.insert(3, "gamma");
+    let values = map.values_list();
+    assert_eq(values.len(), 3);
+    assert_eq(values[0], "alpha");
+    assert_eq(values[1], "beta");
+    assert_eq(values[2], "gamma");
+}
+
+// =============================================================================
+// SECTION 5: iter_mut extended patterns
+// =============================================================================
+
+@test
+fn test_iter_mut_modify_all_values() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    for (_k, v) in map.iter_mut() {
+        *v = *v * 2;
+    }
+    assert_eq(map.get(&1), Some(&20));
+    assert_eq(map.get(&2), Some(&40));
+    assert_eq(map.get(&3), Some(&60));
+}
+
+@test
+fn test_iter_mut_selective_modify() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    map.insert(4, 40);
+    // Only modify even keys
+    for (k, v) in map.iter_mut() {
+        if *k % 2 == 0 {
+            *v = 0;
+        }
+    }
+    assert_eq(map.get(&1), Some(&10));
+    assert_eq(map.get(&2), Some(&0));
+    assert_eq(map.get(&3), Some(&30));
+    assert_eq(map.get(&4), Some(&0));
+}
+
+@test
+fn test_iter_mut_count() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    let count = map.iter_mut().count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_iter_mut_empty_map() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut iter = map.iter_mut();
+    assert(iter.next() is None);
+}

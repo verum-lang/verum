@@ -1,0 +1,160 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, dynamic-programming, algorithms
+// @timeout: 10000
+
+// Fibonacci (already tested separately, but as DP warmup)
+fn fib(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b
+}
+
+// Tribonacci: T(n) = T(n-1) + T(n-2) + T(n-3)
+fn tribonacci(n: Int) -> Int {
+    if n == 0 { return 0; }
+    if n == 1 { return 0; }
+    if n == 2 { return 1; }
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 1;
+    let mut i = 3;
+    while i <= n {
+        let d = a + b + c;
+        a = b;
+        b = c;
+        c = d;
+        i = i + 1;
+    }
+    c
+}
+
+// Staircase: ways to climb n stairs taking 1 or 2 steps at a time
+fn climb_stairs(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut a = 1;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b
+}
+
+// Max subarray sum (Kadane's algorithm)
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn arr_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn max_subarray(a: Arr8, n: Int) -> Int {
+    let mut best = arr_get(a, 0);
+    let mut current = arr_get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let v = arr_get(a, i);
+        if current + v > v { current = current + v; } else { current = v; }
+        if current > best { best = current; }
+        i = i + 1;
+    }
+    best
+}
+
+// Longest increasing subsequence length
+fn lis_length(a: Arr8, n: Int) -> Int {
+    // dp[i] = LIS ending at i
+    // Using O(n^2) approach
+    type Dp8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+    let mut dp = Dp8 { d0: 1, d1: 1, d2: 1, d3: 1, d4: 1, d5: 1, d6: 1, d7: 1 };
+
+    let mut i = 1;
+    while i < n {
+        let mut best_len = 1;
+        let mut j = 0;
+        while j < i {
+            let dpj = if j == 0 { dp.d0 } else if j == 1 { dp.d1 } else if j == 2 { dp.d2 }
+                      else if j == 3 { dp.d3 } else if j == 4 { dp.d4 } else if j == 5 { dp.d5 }
+                      else if j == 6 { dp.d6 } else { dp.d7 };
+            if arr_get(a, j) < arr_get(a, i) {
+                if dpj + 1 > best_len { best_len = dpj + 1; }
+            }
+            j = j + 1;
+        }
+        dp = if i == 0 { Dp8 { d0: best_len, d1: dp.d1, d2: dp.d2, d3: dp.d3, d4: dp.d4, d5: dp.d5, d6: dp.d6, d7: dp.d7 } }
+             else if i == 1 { Dp8 { d0: dp.d0, d1: best_len, d2: dp.d2, d3: dp.d3, d4: dp.d4, d5: dp.d5, d6: dp.d6, d7: dp.d7 } }
+             else if i == 2 { Dp8 { d0: dp.d0, d1: dp.d1, d2: best_len, d3: dp.d3, d4: dp.d4, d5: dp.d5, d6: dp.d6, d7: dp.d7 } }
+             else if i == 3 { Dp8 { d0: dp.d0, d1: dp.d1, d2: dp.d2, d3: best_len, d4: dp.d4, d5: dp.d5, d6: dp.d6, d7: dp.d7 } }
+             else if i == 4 { Dp8 { d0: dp.d0, d1: dp.d1, d2: dp.d2, d3: dp.d3, d4: best_len, d5: dp.d5, d6: dp.d6, d7: dp.d7 } }
+             else if i == 5 { Dp8 { d0: dp.d0, d1: dp.d1, d2: dp.d2, d3: dp.d3, d4: dp.d4, d5: best_len, d6: dp.d6, d7: dp.d7 } }
+             else if i == 6 { Dp8 { d0: dp.d0, d1: dp.d1, d2: dp.d2, d3: dp.d3, d4: dp.d4, d5: dp.d5, d6: best_len, d7: dp.d7 } }
+             else { Dp8 { d0: dp.d0, d1: dp.d1, d2: dp.d2, d3: dp.d3, d4: dp.d4, d5: dp.d5, d6: dp.d6, d7: best_len } };
+        i = i + 1;
+    }
+    // Find max in dp
+    let mut mx = 0;
+    let mut k = 0;
+    while k < n {
+        let v = if k == 0 { dp.d0 } else if k == 1 { dp.d1 } else if k == 2 { dp.d2 }
+                else if k == 3 { dp.d3 } else if k == 4 { dp.d4 } else if k == 5 { dp.d5 }
+                else if k == 6 { dp.d6 } else { dp.d7 };
+        if v > mx { mx = v; }
+        k = k + 1;
+    }
+    mx
+}
+
+fn main() -> Int {
+    // Tribonacci: 0,0,1,1,2,4,7,13,24,44
+    assert_eq(tribonacci(0), 0);
+    assert_eq(tribonacci(2), 1);
+    assert_eq(tribonacci(4), 2);
+    assert_eq(tribonacci(6), 7);
+    assert_eq(tribonacci(8), 24);
+
+    // Climb stairs = Fibonacci offset
+    assert_eq(climb_stairs(1), 1);
+    assert_eq(climb_stairs(2), 2);
+    assert_eq(climb_stairs(3), 3);
+    assert_eq(climb_stairs(4), 5);
+    assert_eq(climb_stairs(5), 8);
+    assert_eq(climb_stairs(10), 89);
+
+    // Kadane's max subarray
+    let a1 = Arr8 { d0: -2, d1: 1, d2: -3, d3: 4, d4: -1, d5: 2, d6: 1, d7: -5 };
+    assert_eq(max_subarray(a1, 8), 6);  // [4,-1,2,1]
+
+    let a2 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_subarray(a2, 5), 15);  // all positive
+
+    let a3 = Arr8 { d0: -1, d1: -2, d2: -3, d3: -4, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_subarray(a3, 4), -1);  // least negative
+
+    // LIS
+    let b1 = Arr8 { d0: 10, d1: 9, d2: 2, d3: 5, d4: 3, d5: 7, d6: 101, d7: 18 };
+    assert_eq(lis_length(b1, 8), 4);  // [2,3,7,101] or [2,5,7,101] etc.
+
+    let b2 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 6, d6: 7, d7: 8 };
+    assert_eq(lis_length(b2, 8), 8);  // already sorted
+
+    let b3 = Arr8 { d0: 8, d1: 7, d2: 6, d3: 5, d4: 4, d5: 3, d6: 2, d7: 1 };
+    assert_eq(lis_length(b3, 8), 1);  // decreasing
+
+    print("DIFF_OK: dp_problems");
+    0
+}

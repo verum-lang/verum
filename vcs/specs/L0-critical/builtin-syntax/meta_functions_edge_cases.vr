@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: builtin-syntax, meta, compile-time, edge-cases
+// @description: Tests edge cases for meta-level functions with @ prefix
+
+/// Comprehensive tests for meta-functions:
+/// 1. Nested @const expressions
+/// 2. @const with complex expressions
+/// 3. @cfg with nested conditions
+/// 4. @concat with dynamic and static parts
+/// 5. Location functions in different contexts
+
+fn main() {
+    test_const_expressions();
+    test_location_functions();
+    test_cfg_conditions();
+    test_string_operations();
+    test_const_in_patterns();
+}
+
+/// Test @const with various expressions
+fn test_const_expressions() {
+    // Simple constant
+    let a = @const 42;
+    assert(a == 42);
+
+    // Constant arithmetic
+    let b = @const (10 + 20 * 3);
+    assert(b == 70);
+
+    // Nested const
+    let c = @const (@const 5 + @const 3);
+    assert(c == 8);
+
+    // @const preserving type
+    let d: Float = @const 3.14159;
+    assert(d > 3.14);
+}
+
+/// Test location meta-functions
+fn test_location_functions() {
+    // Get source locations
+    let file = @file;
+    let line = @line;
+    let col = @column;
+    let current_module = @module;  // renamed to avoid keyword
+    let func = @function;
+
+    // Verify they return appropriate types
+    assert(file.len() > 0);
+    assert(line > 0);
+    assert(col > 0);
+    assert(func == "test_location_functions");
+
+    // Location in nested context
+    nested_location_check();
+}
+
+fn nested_location_check() {
+    let outer_line = @line;
+
+    let inner_check = || {
+        let inner_line = @line;
+        // Inner line should be different from outer
+        assert(inner_line != outer_line);
+    };
+    inner_check();
+}
+
+/// Test @cfg conditional compilation
+fn test_cfg_conditions() {
+    // Simple cfg check
+    if @cfg(test) {
+        // In test mode
+        let x = 1;
+        assert(x == 1);
+    }
+
+    // cfg with feature check
+    if @cfg(feature = "advanced") {
+        advanced_feature();
+    }
+
+    // cfg can be used in let expressions
+    let debug_mode = @cfg(debug);
+    // debug_mode is a Bool
+}
+
+fn advanced_feature() {
+    // Optional advanced functionality
+}
+
+/// Test @concat and @stringify
+fn test_string_operations() {
+    // Simple concat
+    let a = @concat("Hello", " ", "World");
+    assert(a == "Hello World");
+
+    // Concat with numbers (as strings)
+    let b = @concat("Value: ", "42");
+    assert(b == "Value: 42");
+
+    // Empty concat
+    let c = @concat();
+    assert(c == "");
+
+    // Single element
+    let d = @concat("alone");
+    assert(d == "alone");
+
+    // Stringify an identifier
+    let e = @stringify(my_variable);
+    assert(e == "my_variable");
+
+    // Stringify complex path
+    let f = @stringify(my_module.submodule.func);
+    assert(f == "my_module.submodule.func");
+}
+
+/// Test @const in pattern contexts (where applicable)
+fn test_const_in_patterns() {
+    const SIZE: Int = 5;
+
+    // Use const in array size
+    let arr: [Int; SIZE] = [1, 2, 3, 4, 5];
+
+    // Const in expressions
+    let doubled = @const SIZE * 2;
+    assert(doubled == 10);
+
+    // Const in array initializer
+    let zeros: [Int; @const 3] = [0, 0, 0];
+    assert(zeros.len() == 3);
+}

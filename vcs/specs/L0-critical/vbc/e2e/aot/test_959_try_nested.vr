@@ -1,0 +1,90 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: try, recover, nested, error-handling
+// @description: Test nested try/recover and advanced patterns
+
+fn test_nested_try() -> Int {
+    let result = try {
+        let inner = try {
+            throw 10;
+            0
+        } recover |e| {
+            e + 5
+        };
+        inner * 2
+    } recover |e| {
+        -1
+    };
+    // inner: throw 10 → recover: 10+5=15 → outer: 15*2=30
+    if result != 30 {
+        print(f"FAIL nested: expected 30, got {result}");
+        return 1;
+    }
+    print("  nested_try: OK");
+    0
+}
+
+fn test_outer_catches() -> Int {
+    let result = try {
+        let inner = try {
+            42
+        } recover |e| {
+            -1
+        };
+        // inner succeeds with 42, then outer throws
+        throw inner + 8;
+        0
+    } recover |e| {
+        e
+    };
+    // inner: 42, throw 50, outer recover: 50
+    if result != 50 {
+        print(f"FAIL outer_catches: expected 50, got {result}");
+        return 1;
+    }
+    print("  outer_catches: OK");
+    0
+}
+
+fn test_try_in_loop() -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let v = try {
+            if i == 3 {
+                throw -1;
+            }
+            i * 10
+        } recover |e| {
+            e
+        };
+        total = total + v;
+        i = i + 1;
+    }
+    // i=0: 0, i=1: 10, i=2: 20, i=3: -1, i=4: 40
+    // total = 0 + 10 + 20 + (-1) + 40 = 69
+    if total != 69 {
+        print(f"FAIL try_in_loop: expected 69, got {total}");
+        return 1;
+    }
+    print("  try_in_loop: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Nested Try/Recover Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_nested_try();
+    failures = failures + test_outer_catches();
+    failures = failures + test_try_in_loop();
+
+    if failures == 0 {
+        print("All nested try/recover tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+
+    failures
+}

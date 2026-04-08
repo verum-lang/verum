@@ -1,0 +1,175 @@
+// =============================================================================
+// env_protocols_test.vr - Tests for VarError protocol implementations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: env, error, protocols, display, debug, clone, eq, core
+// @description: Tests Debug, Display, Clone, Eq for VarError
+// =============================================================================
+
+mount core.base.env.{VarError};
+mount core.base.protocols.{Display, Debug, Clone, Eq};
+mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// =============================================================================
+// Section 1: VarError Display
+// =============================================================================
+
+@test
+fn test_var_error_not_present_display() {
+    let err = VarError.NotPresent;
+    let text = format_display(&err);
+    assert(text.contains("not found") || text.contains("environment"));
+}
+
+@test
+fn test_var_error_not_unicode_display() {
+    let bytes = [0xFF as Byte, 0xFE as Byte];
+    let err = VarError.NotUnicode(bytes);
+    let text = format_display(&err);
+    assert(text.contains("unicode") || text.contains("valid"));
+}
+
+@test
+fn test_var_error_display_differs_by_variant() {
+    let err1 = VarError.NotPresent;
+    let bytes = [0xFF as Byte];
+    let err2 = VarError.NotUnicode(bytes);
+    assert(format_display(&err1) != format_display(&err2));
+}
+
+@test
+fn test_var_error_display_is_actionable() {
+    let err = VarError.NotPresent;
+    let msg = format_display(&err);
+    assert(msg.len() > 10);
+}
+
+// =============================================================================
+// Section 2: VarError Debug
+// =============================================================================
+
+@test
+fn test_var_error_not_present_debug() {
+    let err = VarError.NotPresent;
+    let text = format_debug(&err);
+    assert(text.contains("NotPresent"));
+}
+
+@test
+fn test_var_error_not_unicode_debug() {
+    let bytes = [0xFF as Byte];
+    let err = VarError.NotUnicode(bytes);
+    let text = format_debug(&err);
+    assert(text.contains("NotUnicode"));
+}
+
+// =============================================================================
+// Section 3: VarError Clone
+// =============================================================================
+
+@test
+fn test_var_error_clone_not_present() {
+    let err = VarError.NotPresent;
+    let cloned = err.clone();
+    assert(cloned is VarError.NotPresent);
+}
+
+@test
+fn test_var_error_clone_not_unicode() {
+    let bytes = [0xFF as Byte, 0xFE as Byte];
+    let err = VarError.NotUnicode(bytes);
+    let cloned = err.clone();
+    assert(cloned is VarError.NotUnicode);
+}
+
+@test
+fn test_var_error_clone_display_matches() {
+    let err = VarError.NotPresent;
+    let cloned = err.clone();
+    assert_eq(format_display(&err), format_display(&cloned));
+}
+
+// =============================================================================
+// Section 4: VarError Eq
+// =============================================================================
+
+@test
+fn test_var_error_eq_not_present() {
+    let a = VarError.NotPresent;
+    let b = VarError.NotPresent;
+    assert(a == b);
+}
+
+@test
+fn test_var_error_eq_not_unicode() {
+    let bytes1 = [0xFF as Byte];
+    let bytes2 = [0xFF as Byte];
+    let a = VarError.NotUnicode(bytes1);
+    let b = VarError.NotUnicode(bytes2);
+    assert(a == b);
+}
+
+@test
+fn test_var_error_neq_different_variants() {
+    let a = VarError.NotPresent;
+    let bytes = [0xFF as Byte];
+    let b = VarError.NotUnicode(bytes);
+    assert(a != b);
+}
+
+@test
+fn test_var_error_neq_different_bytes() {
+    let a = VarError.NotUnicode([0xFF as Byte]);
+    let b = VarError.NotUnicode([0xFE as Byte]);
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 5: Protocol Function Existence
+// =============================================================================
+
+@test
+fn test_var_error_display_fn_exists() {
+    let err = VarError.NotPresent;
+    let text = format_display(&err);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_var_error_debug_fn_exists() {
+    let err = VarError.NotPresent;
+    let text = format_debug(&err);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_var_error_clone_fn_exists() {
+    let err = VarError.NotPresent;
+    let cloned = err.clone();
+    assert(cloned is VarError.NotPresent);
+}
+
+@test
+fn test_var_error_eq_fn_exists() {
+    let a = VarError.NotPresent;
+    let b = VarError.NotPresent;
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 6: Type Existence
+// =============================================================================
+
+@test
+fn test_var_error_type_exists() {
+    let err: VarError = VarError.NotPresent;
+    assert(err is VarError.NotPresent);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

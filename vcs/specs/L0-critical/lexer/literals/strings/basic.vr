@@ -1,0 +1,163 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, basic
+
+// Basic string literals
+
+fn test_simple_strings() {
+    // Simple strings
+    let empty = "";
+    let hello = "hello";
+    let world = "world";
+    let greeting = "Hello, World!";
+
+    // Single character strings
+    let a = "a";
+    let z = "z";
+    let zero = "0";
+    let space = " ";
+}
+
+fn test_strings_with_spaces() {
+    // Strings with spaces
+    let sentence = "The quick brown fox";
+    let with_spaces = "   leading and trailing   ";
+    let multiple_spaces = "word    word";
+}
+
+fn test_punctuation() {
+    // Strings with punctuation
+    let punctuated = "Hello, World!";
+    let question = "How are you?";
+    let exclaim = "Wow!";
+    let ellipsis = "Wait...";
+}
+
+fn test_strings_with_numbers() {
+    // Strings with numbers
+    let mixed = "Version 2.0";
+    let code = "Error 404";
+    let date = "2025-01-15";
+    let time = "14:30:00";
+}
+
+fn test_common_strings() {
+    // Common strings
+    let yes = "yes";
+    let no = "no";
+    let true_str = "true";
+    let false_str = "false";
+    let null_str = "null";
+    let undefined = "undefined";
+}
+
+fn test_path_strings() {
+    // Path-like strings
+    let unix_path = "/home/user/documents";
+    let windows_path = "C:\\Users\\Documents";
+    let relative = "./src/main.vr";
+    let url = "https://example.com/path";
+}
+
+fn test_string_expressions() {
+    let str = "Hello";
+    // Strings in expressions
+    let combined = "Hello" + " " + "World";
+
+    // Strings in comparisons
+    let is_empty = str == "";
+    let is_hello = str == "hello";
+}
+
+// Strings in function calls
+fn greet(name: Text) -> Text {
+    "Hello, " + name + "!"
+}
+
+fn test_function_calls() {
+    let message = greet("Alice");
+}
+
+fn test_arrays() {
+    // Strings in arrays
+    let words = ["apple", "banana", "cherry"];
+    let letters = ["a", "b", "c", "d", "e"];
+    let sentences = ["First sentence.", "Second sentence."];
+}
+
+fn test_tuples() {
+    // Strings in tuples
+    let pair = ("key", "value");
+    let triple = ("one", "two", "three");
+}
+
+// Strings in match expressions
+fn day_name(n: Int) -> Text {
+    match n {
+        0 => "Sunday"
+        1 => "Monday"
+        2 => "Tuesday"
+        3 => "Wednesday"
+        4 => "Thursday"
+        5 => "Friday"
+        6 => "Saturday"
+        _ => "Invalid"
+    }
+}
+
+// Strings in struct fields
+type Person is {
+    name: Text,
+    email: Text,
+    city: Text,
+};
+
+fn test_struct_fields() {
+    let person = Person {
+        name: "John Doe",
+        email: "john@example.com",
+        city: "New York",
+    };
+}
+
+fn test_special_chars() {
+    // Strings with special ASCII characters
+    let at = "user@domain.com";
+    let hash = "#hashtag";
+    let dollar = "$100.00";
+    let percent = "50%";
+    let ampersand = "A & B";
+    let asterisk = "2 * 3 = 6";
+}
+
+fn test_long_strings() {
+    // Long strings
+    let lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
+    let paragraph = "This is a longer string that contains multiple words and demonstrates that strings can be quite lengthy without any issues.";
+}
+
+fn test_case_variations() {
+    // Case variations
+    let lower = "lowercase";
+    let upper = "UPPERCASE";
+    let mixed_case = "MixedCase";
+    let camel = "camelCase";
+    let pascal = "PascalCase";
+    let snake = "snake_case";
+    let kebab = "kebab-case";
+}
+
+fn test_whitespace() {
+    // Whitespace only
+    let space_only = " ";
+    let tab_only = "\t";
+    let spaces = "     ";
+}
+
+fn test_edge_cases() {
+    // Edge cases
+    let quote_in_middle = "He said hello";
+    let numbers_only = "12345";
+    let special_chars = "@#$%^&*()";
+}

@@ -1,0 +1,330 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, deque, data-structure, palindrome
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for double-ended queue operations and palindrome checking
+
+// Circular buffer deque with max capacity 16
+// Uses a flat array with front/back indices
+type DequeData is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int, d12: Int, d13: Int, d14: Int, d15: Int
+};
+
+type Deque is { data: DequeData, front: Int, back: Int, size: Int, cap: Int };
+
+fn dd_get(d: DequeData, i: Int) -> Int {
+    if i == 0 { d.d0 } else if i == 1 { d.d1 }
+    else if i == 2 { d.d2 } else if i == 3 { d.d3 }
+    else if i == 4 { d.d4 } else if i == 5 { d.d5 }
+    else if i == 6 { d.d6 } else if i == 7 { d.d7 }
+    else if i == 8 { d.d8 } else if i == 9 { d.d9 }
+    else if i == 10 { d.d10 } else if i == 11 { d.d11 }
+    else if i == 12 { d.d12 } else if i == 13 { d.d13 }
+    else if i == 14 { d.d14 } else { d.d15 }
+}
+
+fn dd_set(d: DequeData, i: Int, v: Int) -> DequeData {
+    DequeData {
+        d0: if i == 0 { v } else { d.d0 }, d1: if i == 1 { v } else { d.d1 },
+        d2: if i == 2 { v } else { d.d2 }, d3: if i == 3 { v } else { d.d3 },
+        d4: if i == 4 { v } else { d.d4 }, d5: if i == 5 { v } else { d.d5 },
+        d6: if i == 6 { v } else { d.d6 }, d7: if i == 7 { v } else { d.d7 },
+        d8: if i == 8 { v } else { d.d8 }, d9: if i == 9 { v } else { d.d9 },
+        d10: if i == 10 { v } else { d.d10 }, d11: if i == 11 { v } else { d.d11 },
+        d12: if i == 12 { v } else { d.d12 }, d13: if i == 13 { v } else { d.d13 },
+        d14: if i == 14 { v } else { d.d14 }, d15: if i == 15 { v } else { d.d15 }
+    }
+}
+
+fn dd_new() -> DequeData {
+    DequeData {
+        d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0,
+        d8: 0, d9: 0, d10: 0, d11: 0, d12: 0, d13: 0, d14: 0, d15: 0
+    }
+}
+
+fn deque_new() -> Deque {
+    Deque { data: dd_new(), front: 0, back: 0, size: 0, cap: 16 }
+}
+
+fn wrap_index(idx: Int, cap: Int) -> Int {
+    let r = idx % cap;
+    if r < 0 { r + cap } else { r }
+}
+
+fn deque_is_empty(dq: Deque) -> Bool { dq.size == 0 }
+fn deque_is_full(dq: Deque) -> Bool { dq.size == dq.cap }
+
+// Push to back
+fn deque_push_back(dq: Deque, val: Int) -> Deque {
+    if deque_is_full(dq) { return dq; }
+    let new_data = dd_set(dq.data, dq.back, val);
+    Deque {
+        data: new_data,
+        front: dq.front,
+        back: wrap_index(dq.back + 1, dq.cap),
+        size: dq.size + 1,
+        cap: dq.cap
+    }
+}
+
+// Push to front
+fn deque_push_front(dq: Deque, val: Int) -> Deque {
+    if deque_is_full(dq) { return dq; }
+    let new_front = wrap_index(dq.front - 1, dq.cap);
+    let new_data = dd_set(dq.data, new_front, val);
+    Deque {
+        data: new_data,
+        front: new_front,
+        back: dq.back,
+        size: dq.size + 1,
+        cap: dq.cap
+    }
+}
+
+// Pop from back: returns (value, new_deque) encoded as PopResult
+type PopResult is { value: Int, dq: Deque, ok: Int };
+
+fn deque_pop_back(dq: Deque) -> PopResult {
+    if deque_is_empty(dq) { return PopResult { value: -1, dq: dq, ok: 0 }; }
+    let new_back = wrap_index(dq.back - 1, dq.cap);
+    let val = dd_get(dq.data, new_back);
+    let new_dq = Deque {
+        data: dq.data,
+        front: dq.front,
+        back: new_back,
+        size: dq.size - 1,
+        cap: dq.cap
+    };
+    PopResult { value: val, dq: new_dq, ok: 1 }
+}
+
+// Pop from front
+fn deque_pop_front(dq: Deque) -> PopResult {
+    if deque_is_empty(dq) { return PopResult { value: -1, dq: dq, ok: 0 }; }
+    let val = dd_get(dq.data, dq.front);
+    let new_dq = Deque {
+        data: dq.data,
+        front: wrap_index(dq.front + 1, dq.cap),
+        back: dq.back,
+        size: dq.size - 1,
+        cap: dq.cap
+    };
+    PopResult { value: val, dq: new_dq, ok: 1 }
+}
+
+// Peek front/back
+fn deque_peek_front(dq: Deque) -> Int {
+    if deque_is_empty(dq) { return -1; }
+    dd_get(dq.data, dq.front)
+}
+
+fn deque_peek_back(dq: Deque) -> Int {
+    if deque_is_empty(dq) { return -1; }
+    dd_get(dq.data, wrap_index(dq.back - 1, dq.cap))
+}
+
+// Get element at logical index (0 = front)
+fn deque_at(dq: Deque, idx: Int) -> Int {
+    dd_get(dq.data, wrap_index(dq.front + idx, dq.cap))
+}
+
+// Check if deque contents form a palindrome
+fn deque_is_palindrome(dq: Deque) -> Bool {
+    let mut lo = 0;
+    let mut hi = dq.size - 1;
+    while lo < hi {
+        if deque_at(dq, lo) != deque_at(dq, hi) { return false; }
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+    true
+}
+
+fn test_push_pop_back() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 10);
+    dq = deque_push_back(dq, 20);
+    dq = deque_push_back(dq, 30);
+    assert_eq(dq.size, 3);
+    assert_eq(deque_peek_front(dq), 10);
+    assert_eq(deque_peek_back(dq), 30);
+
+    let r1 = deque_pop_back(dq);
+    assert_eq(r1.value, 30);
+    assert_eq(r1.ok, 1);
+    let r2 = deque_pop_back(r1.dq);
+    assert_eq(r2.value, 20);
+    let r3 = deque_pop_back(r2.dq);
+    assert_eq(r3.value, 10);
+    assert_eq(r3.dq.size, 0);
+}
+
+fn test_push_pop_front() {
+    let mut dq = deque_new();
+    dq = deque_push_front(dq, 10);
+    dq = deque_push_front(dq, 20);
+    dq = deque_push_front(dq, 30);
+    assert_eq(dq.size, 3);
+    assert_eq(deque_peek_front(dq), 30);
+    assert_eq(deque_peek_back(dq), 10);
+
+    let r1 = deque_pop_front(dq);
+    assert_eq(r1.value, 30);
+    let r2 = deque_pop_front(r1.dq);
+    assert_eq(r2.value, 20);
+    let r3 = deque_pop_front(r2.dq);
+    assert_eq(r3.value, 10);
+    assert_eq(deque_is_empty(r3.dq), true);
+}
+
+fn test_mixed_operations() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_front(dq, 0);
+    // Logical order: [0, 1, 2]
+    assert_eq(dq.size, 3);
+    assert_eq(deque_at(dq, 0), 0);
+    assert_eq(deque_at(dq, 1), 1);
+    assert_eq(deque_at(dq, 2), 2);
+
+    let r = deque_pop_front(dq);
+    assert_eq(r.value, 0);
+    let mut dq2 = r.dq;
+    dq2 = deque_push_front(dq2, 99);
+    // Logical: [99, 1, 2]
+    assert_eq(deque_peek_front(dq2), 99);
+    assert_eq(deque_peek_back(dq2), 2);
+}
+
+fn test_circular_wrap() {
+    // Push and pop to force wrap-around
+    let mut dq = deque_new();
+    // Push 12 items to back
+    let mut i = 0;
+    while i < 12 {
+        dq = deque_push_back(dq, i * 10);
+        i = i + 1;
+    }
+    assert_eq(dq.size, 12);
+
+    // Pop 8 from front
+    i = 0;
+    while i < 8 {
+        let r = deque_pop_front(dq);
+        assert_eq(r.value, i * 10);
+        dq = r.dq;
+        i = i + 1;
+    }
+    assert_eq(dq.size, 4);
+
+    // Now push 8 more to back (this wraps around)
+    i = 0;
+    while i < 8 {
+        dq = deque_push_back(dq, 100 + i);
+        i = i + 1;
+    }
+    assert_eq(dq.size, 12);
+
+    // First 4 should be 80, 90, 100, 110
+    assert_eq(deque_at(dq, 0), 80);
+    assert_eq(deque_at(dq, 1), 90);
+    assert_eq(deque_at(dq, 2), 100);
+    assert_eq(deque_at(dq, 3), 110);
+}
+
+fn test_palindrome() {
+    // [1, 2, 3, 2, 1] is a palindrome
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_back(dq, 3);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_back(dq, 1);
+    assert_eq(deque_is_palindrome(dq), true);
+
+    // [1, 2, 3, 4] is not
+    let mut dq2 = deque_new();
+    dq2 = deque_push_back(dq2, 1);
+    dq2 = deque_push_back(dq2, 2);
+    dq2 = deque_push_back(dq2, 3);
+    dq2 = deque_push_back(dq2, 4);
+    assert_eq(deque_is_palindrome(dq2), false);
+
+    // Single element palindrome
+    let mut dq3 = deque_new();
+    dq3 = deque_push_back(dq3, 42);
+    assert_eq(deque_is_palindrome(dq3), true);
+
+    // Even palindrome [7, 3, 3, 7]
+    let mut dq4 = deque_new();
+    dq4 = deque_push_back(dq4, 7);
+    dq4 = deque_push_back(dq4, 3);
+    dq4 = deque_push_back(dq4, 3);
+    dq4 = deque_push_back(dq4, 7);
+    assert_eq(deque_is_palindrome(dq4), true);
+}
+
+fn test_palindrome_build() {
+    // Build palindrome by pushing to both ends
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 5);   // [5]
+    dq = deque_push_front(dq, 3);  // [3, 5]
+    dq = deque_push_back(dq, 3);   // [3, 5, 3]
+    assert_eq(deque_is_palindrome(dq), true);
+
+    dq = deque_push_front(dq, 1);  // [1, 3, 5, 3]
+    assert_eq(deque_is_palindrome(dq), false);
+    dq = deque_push_back(dq, 1);   // [1, 3, 5, 3, 1]
+    assert_eq(deque_is_palindrome(dq), true);
+}
+
+fn test_empty_pop() {
+    let dq = deque_new();
+    let r1 = deque_pop_front(dq);
+    assert_eq(r1.ok, 0);
+    let r2 = deque_pop_back(dq);
+    assert_eq(r2.ok, 0);
+}
+
+fn test_full_deque() {
+    let mut dq = deque_new();
+    let mut i = 0;
+    while i < 16 {
+        dq = deque_push_back(dq, i);
+        i = i + 1;
+    }
+    assert_eq(dq.size, 16);
+    assert_eq(deque_is_full(dq), true);
+
+    // Push should be no-op when full
+    let dq2 = deque_push_back(dq, 999);
+    assert_eq(dq2.size, 16);
+    let dq3 = deque_push_front(dq, 999);
+    assert_eq(dq3.size, 16);
+
+    // Verify all values
+    i = 0;
+    while i < 16 {
+        assert_eq(deque_at(dq, i), i);
+        i = i + 1;
+    }
+}
+
+fn main() -> Int {
+    test_push_pop_back();
+    test_push_pop_front();
+    test_mixed_operations();
+    test_circular_wrap();
+    test_palindrome();
+    test_palindrome_build();
+    test_empty_pop();
+    test_full_deque();
+    print("[OK] 292_deque_ops_aot");
+    0
+}

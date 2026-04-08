@@ -1,0 +1,45 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, contracts, requires, ensures
+// @timeout: 5000
+
+/// Combined requires and ensures in functions and theorems.
+
+// Theorem with both requires and ensures
+theorem bounded_add(a: Int, b: Int)
+    requires a >= 0, b >= 0
+    proof by omega;
+
+// Function with combined pre/postconditions
+fn binary_search(arr: List<Int>, target: Int) -> Int
+    where ensures result >= -1, ensures result < arr.len()
+{
+    let mut lo = 0;
+    let mut hi = arr.len() - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if arr[mid] == target {
+            return mid;
+        } else if arr[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    -1
+}
+
+// Function with ensures on recursive structure
+fn fibonacci(n: Int) -> Int
+    where ensures result >= 0
+{
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+fn main() {
+    let idx = binary_search([1, 3, 5, 7, 9], 5);
+    assert_eq(idx, 2);
+    print("Combined contract tests passed");
+}

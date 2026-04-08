@@ -1,0 +1,245 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, term, constraint, solver, layout
+// @expected-exit: 0
+// @description: Terminal 5-pass constraint solver for layout (Length, Min, Max, Percentage, Fill)
+
+fn max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+type Constraint is Length(Int) | Min(Int) | Max(Int) | Percentage(Int) | Fill(Int);
+
+// Resolve a list of constraints into widths that fit total_width.
+// 5-pass algorithm:
+//   Pass 1: Assign fixed Length values
+//   Pass 2: Clamp Min constraints
+//   Pass 3: Clamp Max constraints
+//   Pass 4: Assign Percentage of total
+//   Pass 5: Distribute remaining space to Fill proportionally
+fn resolve_constraints(constraints: List<Constraint>, total_width: Int) -> List<Int> {
+    let n = constraints.len();
+    let mut results: List<Int> = [];
+    let mut assigned: List<Bool> = [];
+    let mut i = 0;
+    while i < n {
+        results.push(0);
+        assigned.push(false);
+        i = i + 1;
+    }
+
+    let mut remaining = total_width;
+
+    // Pass 1: Fixed lengths
+    i = 0;
+    while i < n {
+        match constraints[i] {
+            Length(v) => {
+                let clamped = min(v, remaining);
+                results[i] = clamped;
+                assigned[i] = true;
+                remaining = remaining - clamped;
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+
+    // Pass 2: Min constraints
+    i = 0;
+    while i < n {
+        match constraints[i] {
+            Min(v) => {
+                let clamped = min(v, remaining);
+                results[i] = clamped;
+                assigned[i] = true;
+                remaining = remaining - clamped;
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+
+    // Pass 3: Max constraints
+    i = 0;
+    while i < n {
+        match constraints[i] {
+            Max(v) => {
+                let used = min(v, remaining);
+                results[i] = used;
+                assigned[i] = true;
+                remaining = remaining - used;
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+
+    // Pass 4: Percentage
+    i = 0;
+    while i < n {
+        match constraints[i] {
+            Percentage(pct) => {
+                let val = min(total_width * pct / 100, remaining);
+                results[i] = val;
+                assigned[i] = true;
+                remaining = remaining - val;
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+
+    // Pass 5: Fill — distribute remaining proportionally
+    let mut total_fill = 0;
+    i = 0;
+    while i < n {
+        match constraints[i] {
+            Fill(weight) => {
+                total_fill = total_fill + weight;
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+
+    if total_fill > 0 {
+        i = 0;
+        while i < n {
+            match constraints[i] {
+                Fill(weight) => {
+                    let share = remaining * weight / total_fill;
+                    results[i] = share;
+                },
+                _ => {},
+            }
+            i = i + 1;
+        }
+    }
+
+    results
+}
+
+fn test_fixed_lengths() -> Int {
+    let mut cs: List<Constraint> = [];
+    cs.push(Length(20));
+    cs.push(Length(30));
+    cs.push(Length(50));
+    let r = resolve_constraints(cs, 100);
+    if r[0] != 20 {
+        print(f"FAIL fixed[0]: {r[0]}");
+        return 1;
+    }
+    if r[1] != 30 {
+        print(f"FAIL fixed[1]: {r[1]}");
+        return 1;
+    }
+    if r[2] != 50 {
+        print(f"FAIL fixed[2]: {r[2]}");
+        return 1;
+    }
+    0
+}
+
+fn test_fill_distribution() -> Int {
+    let mut cs: List<Constraint> = [];
+    cs.push(Fill(1));
+    cs.push(Fill(2));
+    cs.push(Fill(1));
+    let r = resolve_constraints(cs, 80);
+    // Weights 1:2:1, total=4, space=80
+    // Expected: 20, 40, 20
+    if r[0] != 20 {
+        print(f"FAIL fill[0]: {r[0]}");
+        return 1;
+    }
+    if r[1] != 40 {
+        print(f"FAIL fill[1]: {r[1]}");
+        return 1;
+    }
+    if r[2] != 20 {
+        print(f"FAIL fill[2]: {r[2]}");
+        return 1;
+    }
+    0
+}
+
+fn test_mixed_constraints() -> Int {
+    let mut cs: List<Constraint> = [];
+    cs.push(Length(10));
+    cs.push(Percentage(50));
+    cs.push(Fill(1));
+    let r = resolve_constraints(cs, 100);
+    // Length(10) = 10, remaining = 90
+    // Percentage(50) = 50% of 100 = 50, but min(50, 90) = 50, remaining = 40
+    // Fill(1) = 40
+    if r[0] != 10 {
+        print(f"FAIL mixed[0]: {r[0]}");
+        return 1;
+    }
+    if r[1] != 50 {
+        print(f"FAIL mixed[1]: {r[1]}");
+        return 1;
+    }
+    if r[2] != 40 {
+        print(f"FAIL mixed[2]: {r[2]}");
+        return 1;
+    }
+    0
+}
+
+fn test_overflow_clamp() -> Int {
+    let mut cs: List<Constraint> = [];
+    cs.push(Length(60));
+    cs.push(Length(60));
+    let r = resolve_constraints(cs, 80);
+    // First gets 60, remaining=20, second gets 20 (clamped)
+    if r[0] != 60 {
+        print(f"FAIL overflow[0]: {r[0]}");
+        return 1;
+    }
+    if r[1] != 20 {
+        print(f"FAIL overflow[1]: {r[1]}");
+        return 1;
+    }
+    0
+}
+
+fn test_min_max() -> Int {
+    let mut cs: List<Constraint> = [];
+    cs.push(Min(20));
+    cs.push(Max(30));
+    cs.push(Fill(1));
+    let r = resolve_constraints(cs, 100);
+    // Min(20) = 20, remaining=80
+    // Max(30) = 30, remaining=50
+    // Fill(1) = 50
+    if r[0] != 20 {
+        print(f"FAIL min_max[0]: {r[0]}");
+        return 1;
+    }
+    if r[1] != 30 {
+        print(f"FAIL min_max[1]: {r[1]}");
+        return 1;
+    }
+    if r[2] != 50 {
+        print(f"FAIL min_max[2]: {r[2]}");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_fixed_lengths();
+    if r1 != 0 { return r1; }
+    let r2 = test_fill_distribution();
+    if r2 != 0 { return r2; }
+    let r3 = test_mixed_constraints();
+    if r3 != 0 { return r3; }
+    let r4 = test_overflow_clamp();
+    if r4 != 0 { return r4; }
+    let r5 = test_min_max();
+    if r5 != 0 { return r5; }
+    print("PASS: term_constraint_solver");
+    0
+}

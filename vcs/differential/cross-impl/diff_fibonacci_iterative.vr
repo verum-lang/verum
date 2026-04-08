@@ -1,0 +1,57 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, algorithm, fibonacci
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Fibonacci: iterative computation, verifying exact values across tiers
+
+fn fib(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    b
+}
+
+fn main() -> Int {
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(2), 1);
+    assert_eq(fib(3), 2);
+    assert_eq(fib(4), 3);
+    assert_eq(fib(5), 5);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(20), 6765);
+    assert_eq(fib(30), 832040);
+    assert_eq(fib(40), 102334155);
+
+    // Sum of first 20 fibonacci numbers
+    let mut total = 0;
+    let mut i = 0;
+    while i <= 20 {
+        total = total + fib(i);
+        i = i + 1;
+    }
+    assert_eq(total, 17710);
+
+    // Verify ratio approaches golden ratio (check integer property)
+    // fib(n+1)^2 - fib(n)*fib(n+2) = (-1)^n (Cassini identity)
+    let f19 = fib(19);
+    let f20 = fib(20);
+    let f21 = fib(21);
+    let cassini = f20 * f20 - f19 * f21;
+    assert_eq(cassini, -1);  // n=20 is even, so (-1)^20 = 1... wait, identity is (-1)^n
+    // Actually fib(20)^2 - fib(19)*fib(21) = (-1)^19 = -1
+
+    print("diff_fibonacci_iterative: ok");
+    0
+}

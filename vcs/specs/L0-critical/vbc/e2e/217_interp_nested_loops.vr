@@ -1,0 +1,217 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, nested-loops, control-flow
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: triple-nested loops, loop+conditional combinations,
+// matrix traversal patterns
+
+// =============================================================================
+// Double-nested loops
+// =============================================================================
+
+fn test_multiplication_table_sum() {
+    // Sum of i*j for i in 1..5, j in 1..5
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 5 {
+        let mut j = 1;
+        while j <= 5 {
+            total = total + i * j;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // (1+2+3+4+5)^2 = 225
+    assert_eq(total, 225);
+}
+
+fn test_triangular_loop() {
+    // Sum where j goes from 0 to i: sum of (i+j) for all valid pairs
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let mut j = 0;
+        while j <= i {
+            total = total + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // 1+2+3+4+5 = 15 (triangular number)
+    assert_eq(total, 15);
+}
+
+// =============================================================================
+// Triple-nested loops
+// =============================================================================
+
+fn test_triple_nested_count() {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 4 {
+        let mut j = 0;
+        while j < 3 {
+            let mut k = 0;
+            while k < 2 {
+                count = count + 1;
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // 4 * 3 * 2 = 24
+    assert_eq(count, 24);
+}
+
+fn test_triple_nested_sum() {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 3 {
+        let mut j = 1;
+        while j <= 3 {
+            let mut k = 1;
+            while k <= 3 {
+                total = total + i * j * k;
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // (1+2+3)^3 = 216
+    assert_eq(total, 216);
+}
+
+// =============================================================================
+// Loop + conditional combinations
+// =============================================================================
+
+fn test_nested_loop_with_condition() {
+    // Count pairs (i,j) where i+j is even, i in 0..10, j in 0..10
+    let mut count = 0;
+    let mut i = 0;
+    while i < 10 {
+        let mut j = 0;
+        while j < 10 {
+            if (i + j) % 2 == 0 {
+                count = count + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Half of 100 = 50
+    assert_eq(count, 50);
+}
+
+fn test_prime_sieve_small() {
+    // Count primes up to 30 using trial division
+    let mut prime_count = 0;
+    let mut n = 2;
+    while n <= 30 {
+        let mut is_prime = 1;
+        let mut d = 2;
+        while d * d <= n {
+            if n % d == 0 {
+                is_prime = 0;
+            }
+            d = d + 1;
+        }
+        if is_prime == 1 {
+            prime_count = prime_count + 1;
+        }
+        n = n + 1;
+    }
+    // Primes up to 30: 2,3,5,7,11,13,17,19,23,29 = 10
+    assert_eq(prime_count, 10);
+}
+
+// =============================================================================
+// Matrix traversal patterns
+// =============================================================================
+
+fn test_row_major_sum() {
+    // Simulate 4x4 matrix where element (i,j) = i*4+j
+    // Sum all elements
+    let mut total = 0;
+    let mut row = 0;
+    while row < 4 {
+        let mut col = 0;
+        while col < 4 {
+            total = total + row * 4 + col;
+            col = col + 1;
+        }
+        row = row + 1;
+    }
+    // Sum of 0..15 = 120
+    assert_eq(total, 120);
+}
+
+fn test_diagonal_sum() {
+    // Sum of diagonal elements where element (i,j) = (i+1)*(j+1)
+    // Diagonal: i==j, so elements are 1*1, 2*2, 3*3, 4*4, 5*5
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let val = (i + 1) * (i + 1);
+        total = total + val;
+        i = i + 1;
+    }
+    // 1+4+9+16+25 = 55
+    assert_eq(total, 55);
+}
+
+fn test_upper_triangle() {
+    // Count elements in upper triangle of 5x5 matrix (i <= j)
+    let mut count = 0;
+    let mut i = 0;
+    while i < 5 {
+        let mut j = i;
+        while j < 5 {
+            count = count + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // 5+4+3+2+1 = 15
+    assert_eq(count, 15);
+}
+
+// =============================================================================
+// Loop with dependent iteration bounds
+// =============================================================================
+
+fn test_dependent_bounds() {
+    // Outer loop sets inner loop bound
+    let mut total = 0;
+    let mut n = 1;
+    while n <= 4 {
+        let mut i = 0;
+        while i < n * n {
+            total = total + 1;
+            i = i + 1;
+        }
+        n = n + 1;
+    }
+    // 1 + 4 + 9 + 16 = 30
+    assert_eq(total, 30);
+}
+
+fn main() -> Int {
+    test_multiplication_table_sum();
+    test_triangular_loop();
+    test_triple_nested_count();
+    test_triple_nested_sum();
+    test_nested_loop_with_condition();
+    test_prime_sieve_small();
+    test_row_major_sum();
+    test_diagonal_sum();
+    test_upper_triangle();
+    test_dependent_bounds();
+    print("[OK] 217_interp_nested_loops");
+    0
+}

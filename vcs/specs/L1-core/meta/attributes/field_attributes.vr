@@ -1,0 +1,52 @@
+// @test: parse
+// @level: L1
+// @tags: meta, attributes, fields, validation
+// @timeout: 5000
+
+/// Field-level attributes for validation, serialization hints, etc.
+/// Grammar: field = { attribute } [visibility] identifier ':' type_expr [field_default]
+
+type UserProfile is {
+    @validate(min_length = 1, max_length = 100)
+    name: Text,
+
+    @validate(min = 0, max = 150)
+    age: Int,
+
+    @serialize(rename = "email_address")
+    @validate(format = "email")
+    email: Text,
+
+    @serialize(skip)
+    internal_score: Float = 0.0,
+
+    @serialize(flatten)
+    address: Address,
+};
+
+type Address is {
+    @validate(min_length = 1)
+    street: Text,
+    @validate(min_length = 1)
+    city: Text,
+    @validate(pattern = "^[0-9]{5}$")
+    zip_code: Text,
+};
+
+// Variant-level attributes
+type ApiError is
+    | @deprecated NotFound
+    | @serialize(rename = "bad_request") BadRequest(Text)
+    | @serialize(rename = "server_error") InternalError { message: Text, code: Int };
+
+fn main() {
+    let addr = Address { street: "123 Main St", city: "Springfield", zip_code: "12345" };
+    let user = UserProfile {
+        name: "Alice",
+        age: 30,
+        email: "alice@example.com",
+        internal_score: 0.0,
+        address: addr,
+    };
+    print("Field attribute tests parsed");
+}

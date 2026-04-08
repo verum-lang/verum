@@ -1,0 +1,19 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M502
+// @timeout: 100
+// @description: Tests M502 NormalizationDiverged error code
+// @tags: meta-system, type-level, normalization, error-codes
+
+// M502 is triggered when type normalization doesn't terminate.
+// This test uses trigger_normalization_diverged to validate the error code.
+
+meta fn cause_normalization_divergence() -> Int {
+    // Trigger M502 NormalizationDiverged error
+    trigger_normalization_diverged("Expand<Int>", 10000)
+}
+
+fn main() {
+    // This will fail at compile time with M502
+    @const assert(cause_normalization_divergence() == 0);
+}

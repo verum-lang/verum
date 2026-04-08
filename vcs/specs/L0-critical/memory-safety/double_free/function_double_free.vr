@@ -1,0 +1,19 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, double-free, cbgr, function
+// @description: Tests CBGR detection of double-free across function calls
+
+fn free_data(data: Heap<Int>) {
+    drop(data);
+}
+
+fn main() {
+    let data = Heap.new(42);
+
+    // First free in function
+    free_data(data);
+
+    // Second free attempt - data already freed
+    drop(data);  // CBGR detects double free
+}

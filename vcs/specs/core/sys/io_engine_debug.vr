@@ -1,0 +1,37 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: debug
+
+module test.debug.io_engine_narrow6;
+
+mount core.sys.io_engine.{Duration};
+
+fn main() {
+    // Test 1: simple sat_add
+    let d1 = Duration.from_secs(10);
+    let d2 = Duration.from_secs(5);
+    let sum = d1.saturating_add(d2);
+    print(f"sum nanos = {sum.as_nanos()}");
+    assert(sum.as_secs() == 15);
+    print("Test 1 passed");
+
+    // Test 2: sat_add with zero
+    let sum_zero = d1.saturating_add(Duration.ZERO);
+    print(f"sum_zero nanos = {sum_zero.as_nanos()}");
+    assert(sum_zero.as_secs() == 10);
+    print("Test 2 passed");
+
+    // Test 3: sat_add overflow
+    let max_val = Duration.MAX;
+    print(f"max_val nanos = {max_val.as_nanos()}");
+    let one_sec = Duration.from_secs(1);
+    print(f"one_sec nanos = {one_sec.as_nanos()}");
+    let sum_max = max_val.saturating_add(one_sec);
+    print(f"sum_max nanos = {sum_max.as_nanos()}");
+    print(f"UInt64.MAX = {UInt64.MAX}");
+    assert(sum_max.as_nanos() == UInt64.MAX);
+    print("Test 3 passed");
+
+    print("All done!");
+}

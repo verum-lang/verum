@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, method, call, error
+// @description: Method call with missing method name
+// @expected-error: E018
+
+fn test() {
+    let x = obj.();  // Missing method name between . and ()
+}

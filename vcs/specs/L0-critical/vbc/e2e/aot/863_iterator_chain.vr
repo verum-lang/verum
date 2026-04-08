@@ -1,0 +1,116 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, iterator, chain, higher-order
+// @expected-exit: 0
+
+// Test: iterator-style chains via manual implementation
+// Validates map/filter/fold patterns with functions.
+
+fn square(x: Int) -> Int {
+    x * x
+}
+
+fn is_even(x: Int) -> Bool {
+    x % 2 == 0
+}
+
+fn sum_list(arr: List<Int>) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while (i < arr.len()) {
+        total = total + arr[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn map_list(arr: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while (i < arr.len()) {
+        result.push(f(arr[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(arr: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while (i < arr.len()) {
+        if (pred(arr[i])) {
+            result.push(arr[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_list(arr: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while (i < arr.len()) {
+        acc = f(acc, arr[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn mul(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn main() -> Int {
+    // Build a list
+    let mut nums: List<Int> = [];
+    let mut i = 1;
+    while (i <= 10) {
+        nums.push(i);
+        i = i + 1;
+    }
+    assert_eq(nums.len(), 10);
+
+    // Sum
+    let total = sum_list(nums);
+    assert_eq(total, 55);
+
+    // Map: square all
+    let squared = map_list(nums, square);
+    assert_eq(squared[0], 1);
+    assert_eq(squared[1], 4);
+    assert_eq(squared[2], 9);
+    assert_eq(squared[9], 100);
+
+    // Filter: even only
+    let evens = filter_list(nums, is_even);
+    assert_eq(evens.len(), 5);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[4], 10);
+
+    // Fold: sum via fold
+    let fold_sum = fold_list(nums, 0, add);
+    assert_eq(fold_sum, 55);
+
+    // Fold: product of 1..5
+    let mut small: List<Int> = [];
+    i = 1;
+    while (i <= 5) {
+        small.push(i);
+        i = i + 1;
+    }
+    let product = fold_list(small, 1, mul);
+    assert_eq(product, 120);
+
+    // Chain: filter evens, then square, then sum
+    let chain_result = sum_list(map_list(filter_list(nums, is_even), square));
+    // evens: 2,4,6,8,10 → squares: 4,16,36,64,100 → sum: 220
+    assert_eq(chain_result, 220);
+
+    print("iterator_chain: PASS");
+    0
+}

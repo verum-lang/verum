@@ -1,0 +1,166 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, bidirectional
+// @description: Bidirectional type inference - type info flows both up and down
+
+/// Test for bidirectional type inference.
+/// Type information flows both up (synthesis) and down (checking).
+
+// ============================================================================
+// Basic bidirectional inference
+// ============================================================================
+
+/// Bidirectional: T inferred from argument, U from return context
+fn transform<T, U>(value: T, f: fn(T) -> U) -> U {
+    f(value)
+}
+
+/// Downward inference: expected type flows into expression
+fn make_list_of_type<T: Clone>(item: T, count: Int) -> List<T> {
+    let mut result: List<T> = [];
+    let mut i = 0;
+    while i < count {
+        result.push(item.clone());
+        i = i + 1;
+    }
+    result
+}
+
+/// Generic accumulate: infers types from accumulator function
+fn accumulate<T, A>(items: List<T>, init: A, f: fn(A, T) -> A) -> A {
+    let mut acc = init;
+    for item in items {
+        acc = f(acc, item);
+    }
+    acc
+}
+
+/// Generic map
+fn map_list<A, B>(items: List<A>, f: fn(A) -> B) -> List<B> {
+    let mut result: List<B> = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+/// Generic filter
+fn filter_list<T: Clone>(items: List<T>, pred: fn(T) -> Bool) -> List<T> {
+    let mut result: List<T> = [];
+    for item in items {
+        if pred(item.clone()) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+/// zip_with: A, B, C all inferred bidirectionally
+fn zip_with<A, B, C>(a: List<A>, b: List<B>, f: fn(A, B) -> C) -> List<C> {
+    let mut result: List<C> = [];
+    let min_len = if a.len() < b.len() { a.len() } else { b.len() };
+    let mut i = 0;
+    while i < min_len {
+        result.push(f(a[i], b[i]));
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Type aliases
+// ============================================================================
+
+type IntList is List<Int>;
+type TextList is List<Text>;
+
+// ============================================================================
+// Record types
+// ============================================================================
+
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Upward inference: List<Int> flows up to items
+    let items = [1, 2, 3];
+
+    // Bidirectional in transform: T = Int inferred from arg, U = Int from return context
+    let doubled: Int = transform(21, |x: Int| x * 2);
+    assert(doubled == 42);
+
+    // T = Text inferred
+    let greeting: Text = transform("world", |s: Text| f"hello, {s}");
+    assert(greeting == "hello, world");
+
+    // Downward inference: List<Int> expected type flows down
+    let zeros: List<Int> = make_list_of_type(0, 3);
+    assert(zeros == [0, 0, 0]);
+
+    // Accumulate: T=Int, A=Int inferred
+    let sum = accumulate([1, 2, 3, 4, 5], 0, |acc: Int, x: Int| acc + x);
+    assert(sum == 15);
+
+    // Accumulate: T=Int, A=Text (count evens as text)
+    let count_text = accumulate(
+        [1, 2, 3, 4, 5],
+        "evens:",
+        |acc: Text, x: Int| if x % 2 == 0 { f"{acc}{x}" } else { acc }
+    );
+    assert(count_text == "evens:24");
+
+    // map_list: A=Int, B=Int
+    let doubled_list = map_list([1, 2, 3], |x: Int| x * 2);
+    assert(doubled_list == [2, 4, 6]);
+
+    // map_list: A=Int, B=Text - type flows both ways
+    let text_list: List<Text> = map_list([1, 2, 3], |x: Int| f"n{x}");
+    assert(text_list[0] == "n1");
+    assert(text_list[2] == "n3");
+
+    // filter_list: T=Int
+    let evens = filter_list([1, 2, 3, 4, 5], |x: Int| x % 2 == 0);
+    assert(evens == [2, 4]);
+
+    // zip_with: A=Int, B=Int, C=Int all inferred bidirectionally
+    let sums = zip_with([1, 2, 3], [4, 5, 6], |a: Int, b: Int| a + b);
+    assert(sums == [5, 7, 9]);
+
+    // zip_with: C=Text
+    let combined: List<Text> = zip_with(
+        [1, 2, 3],
+        ["a", "b", "c"],
+        |n: Int, s: Text| f"{n}:{s}"
+    );
+    assert(combined[0] == "1:a");
+    assert(combined[2] == "3:c");
+
+    // Bidirectional in match expressions
+    let maybe_num: Maybe<Int> = Some(42);
+    let description: Text = match maybe_num {
+        Some(n) if n > 0 => f"positive: {n}",
+        Some(n) => f"non-positive: {n}",
+        None => "none",
+    };
+    assert(description == "positive: 42");
+
+    // Type alias downward inference
+    let from_alias: IntList = [1, 2, 3];
+    assert(from_alias.len() == 3);
+
+    // People inference
+    let people: List<Person> = [
+        Person { name: "Alice", age: 30 },
+        Person { name: "Bob", age: 25 },
+    ];
+    let names: List<Text> = map_list(people, |p: Person| p.name);
+    assert(names[0] == "Alice");
+    assert(names[1] == "Bob");
+}

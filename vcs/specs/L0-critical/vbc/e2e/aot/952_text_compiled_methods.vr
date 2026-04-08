@@ -1,0 +1,104 @@
+// Test: All text methods routed through compiled text.vr
+// This test verifies methods that were migrated from C stubs
+// to compiled core/text/text.vr via VBC→LLVM.
+
+fn main() -> Int {
+    let mut fail = 0;
+
+    // --- starts_with / ends_with ---
+    let s = "hello world";
+    if !s.starts_with("hello") { fail = fail + 1; print("FAIL: starts_with hello\n"); }
+    if !s.starts_with("") { fail = fail + 1; print("FAIL: starts_with empty\n"); }
+    if s.starts_with("world") { fail = fail + 1; print("FAIL: starts_with world\n"); }
+    if !s.ends_with("world") { fail = fail + 1; print("FAIL: ends_with world\n"); }
+    if !s.ends_with("") { fail = fail + 1; print("FAIL: ends_with empty\n"); }
+    if s.ends_with("hello") { fail = fail + 1; print("FAIL: ends_with hello\n"); }
+
+    // --- contains ---
+    if !s.contains("lo wo") { fail = fail + 1; print("FAIL: contains lo wo\n"); }
+    if !s.contains("hello") { fail = fail + 1; print("FAIL: contains hello\n"); }
+    if s.contains("xyz") { fail = fail + 1; print("FAIL: contains xyz\n"); }
+    if !s.contains("") { fail = fail + 1; print("FAIL: contains empty\n"); }
+
+    // --- to_int ---
+    let n1 = "42".to_int();
+    if n1 != 42 { fail = fail + 1; print("FAIL: to_int 42\n"); }
+    let n2 = "-17".to_int();
+    if n2 != -17 { fail = fail + 1; print("FAIL: to_int -17\n"); }
+    let n3 = "  +100".to_int();
+    if n3 != 100 { fail = fail + 1; print("FAIL: to_int +100\n"); }
+    let n4 = "0".to_int();
+    if n4 != 0 { fail = fail + 1; print("FAIL: to_int 0\n"); }
+    let n5 = "123abc".to_int();
+    if n5 != 123 { fail = fail + 1; print("FAIL: to_int 123abc\n"); }
+
+    // --- repeat ---
+    let r1 = "ab".repeat(3);
+    if r1 != "ababab" { fail = fail + 1; print("FAIL: repeat 3\n"); }
+    let r2 = "x".repeat(0);
+    if r2 != "" { fail = fail + 1; print("FAIL: repeat 0\n"); }
+    let r3 = "hi".repeat(1);
+    if r3 != "hi" { fail = fail + 1; print("FAIL: repeat 1\n"); }
+
+    // --- find / rfind — returns Maybe<Int> ---
+    let f1_ok = match "abcabc".find("bc") { Some(i) => i == 1, None => false, };
+    if !f1_ok { fail = fail + 1; print("FAIL: find bc\n"); }
+    let f2_ok = match "abcabc".find("xyz") { Some(_) => false, None => true, };
+    if !f2_ok { fail = fail + 1; print("FAIL: find xyz\n"); }
+    let f3_ok = match "abcabc".rfind("bc") { Some(i) => i == 4, None => false, };
+    if !f3_ok { fail = fail + 1; print("FAIL: rfind bc\n"); }
+    let f4_ok = match "abcabc".rfind("xyz") { Some(_) => false, None => true, };
+    if !f4_ok { fail = fail + 1; print("FAIL: rfind xyz\n"); }
+
+    // --- replace ---
+    let rp1 = "hello world".replace("world", "verum");
+    if rp1 != "hello verum" { fail = fail + 1; print("FAIL: replace\n"); }
+    let rp2 = "aaa".replace("a", "bb");
+    if rp2 != "bbbbbb" { fail = fail + 1; print("FAIL: replace all\n"); }
+    let rp3 = "hello".replace("xyz", "abc");
+    if rp3 != "hello" { fail = fail + 1; print("FAIL: replace no match\n"); }
+
+    // --- split ---
+    let sp1 = "a,b,c".split(",");
+    if sp1.len() != 3 { fail = fail + 1; print("FAIL: split len\n"); }
+    if sp1[0] != "a" { fail = fail + 1; print("FAIL: split[0]\n"); }
+    if sp1[1] != "b" { fail = fail + 1; print("FAIL: split[1]\n"); }
+    if sp1[2] != "c" { fail = fail + 1; print("FAIL: split[2]\n"); }
+
+    let sp2 = "hello".split(",");
+    if sp2.len() != 1 { fail = fail + 1; print("FAIL: split no match\n"); }
+    if sp2[0] != "hello" { fail = fail + 1; print("FAIL: split no match[0]\n"); }
+
+    // --- trim / trim_start / trim_end ---
+    let t1 = "  hello  ".trim();
+    if t1 != "hello" { fail = fail + 1; print("FAIL: trim\n"); }
+    let t2 = "  hello  ".trim_start();
+    if t2 != "hello  " { fail = fail + 1; print("FAIL: trim_start\n"); }
+    let t3 = "  hello  ".trim_end();
+    if t3 != "  hello" { fail = fail + 1; print("FAIL: trim_end\n"); }
+
+    // --- to_uppercase / to_lowercase ---
+    let u1 = "hello".to_uppercase();
+    if u1 != "HELLO" { fail = fail + 1; print("FAIL: to_uppercase\n"); }
+    let l1 = "WORLD".to_lowercase();
+    if l1 != "world" { fail = fail + 1; print("FAIL: to_lowercase\n"); }
+
+    // --- from_int (via f-string) ---
+    let fi = f"{42}";
+    if fi != "42" { fail = fail + 1; print("FAIL: from_int 42\n"); }
+    let fi2 = f"{-7}";
+    if fi2 != "-7" { fail = fail + 1; print("FAIL: from_int -7\n"); }
+
+    // --- slice ---
+    let sl1 = "hello world".slice(6, 11);
+    if sl1 != "world" { fail = fail + 1; print("FAIL: slice\n"); }
+    let sl2 = "hello".slice(0, 5);
+    if sl2 != "hello" { fail = fail + 1; print("FAIL: slice full\n"); }
+
+    if fail == 0 {
+        print("952_text_compiled_methods: PASS\n");
+    } else {
+        print(f"952_text_compiled_methods: {fail} FAILURES\n");
+    }
+    fail
+}

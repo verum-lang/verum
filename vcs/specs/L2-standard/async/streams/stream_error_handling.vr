@@ -1,0 +1,146 @@
+// @test: run
+// @expected-stdout: Got: 1\nGot: 2\nStream error at item 3\nRecovered with: 0
+// @tier: 0
+// @level: L2
+// @tags: async, streams, errors
+// @description: Error handling in async streams
+
+type AsyncStream<T> is protocol {
+    async fn next(&mut self) -> Maybe<T>
+};
+
+// Fallible async stream
+type FallibleStream<T, E> is protocol {
+    async fn try_next(&mut self) -> Result<Maybe<T>, E>
+};
+
+// Stream that can fail
+type FailingStream is {
+    current: Int,
+    fail_at: Int,
+};
+
+type StreamError is
+    | ItemFailed(Int)
+    | EndOfStream;
+
+implement FallibleStream<Int, StreamError> for FailingStream {
+    async fn try_next(&mut self) -> Result<Maybe<Int>, StreamError> {
+        if self.current >= 5 {
+            return Ok(None);
+        }
+
+        if self.current == self.fail_at {
+            self.current += 1;
+            return Err(StreamError.ItemFailed(self.fail_at));
+        }
+
+        let v = self.current;
+        self.current += 1;
+        Ok(Some(v))
+    }
+}
+
+// Error recovery adapter
+type RecoverStream<S, T, E> is {
+    source: S,
+    recover: fn(E) -> T,
+};
+
+implement<S: FallibleStream<T, E>, T, E> AsyncStream<T> for RecoverStream<S, T, E> {
+    async fn next(&mut self) -> Maybe<T> {
+        match self.source.try_next().await {
+            Ok(Some(item)) => Some(item),
+            Ok(None) => None,
+            Err(e) => Some((self.recover)(e)),
+        }
+    }
+}
+
+// Retry adapter
+type RetryStream<S, T, E> is {
+    source: S,
+    max_retries: Int,
+    current_retries: Int,
+};
+
+implement<S: FallibleStream<T, E>, T, E> FallibleStream<T, E> for RetryStream<S, T, E> {
+    async fn try_next(&mut self) -> Result<Maybe<T>, E> {
+        loop {
+            match self.source.try_next().await {
+                Ok(item) => {
+                    self.current_retries = 0;
+                    return Ok(item);
+                }
+                Err(e) if self.current_retries < self.max_retries => {
+                    self.current_retries += 1;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+}
+
+// Filter errors adapter
+type FilterErrorsStream<S, T, E> is {
+    source: S,
+    on_error: fn(E),
+};
+
+implement<S: FallibleStream<T, E>, T, E> AsyncStream<T> for FilterErrorsStream<S, T, E> {
+    async fn next(&mut self) -> Maybe<T> {
+        loop {
+            match self.source.try_next().await {
+                Ok(Some(item)) => return Some(item),
+                Ok(None) => return None,
+                Err(e) => {
+                    (self.on_error)(e);
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+// Collect with errors
+async fn collect_results<S: FallibleStream<T, E>, T, E>(
+    stream: &mut S
+) -> (List<T>, List<E>) {
+    let mut items = [];
+    let mut errors = [];
+
+    loop {
+        match stream.try_next().await {
+            Ok(Some(item)) => items.push(item),
+            Ok(None) => break,
+            Err(e) => errors.push(e),
+        }
+    }
+
+    (items, errors)
+}
+
+async fn main() {
+    let source = FailingStream { current: 1, fail_at: 3 };
+
+    let recovery_fn = |e: StreamError| -> Int {
+        match e {
+            StreamError.ItemFailed(n) => {
+                println(f"Stream error at item {n}");
+                0  // Default value
+            }
+            StreamError.EndOfStream => 0,
+        }
+    };
+
+    let mut recovered = RecoverStream { source, recover: recovery_fn };
+
+    while let Some(item) = recovered.next().await {
+        if item == 0 {
+            println(f"Recovered with: {item}");
+        } else {
+            println(f"Got: {item}");
+        }
+    }
+}

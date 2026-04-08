@@ -1,0 +1,300 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, integration, simpson
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Numerical integration via Simpson's rule, trapezoidal
+// rule, and midpoint rule. Uses integer-scaled arithmetic (scale 1000).
+// Tests: integrating x, x^2, x^3, constant, and comparing methods.
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn assert_near(actual: Int, expected: Int, tolerance: Int) {
+    let diff = abs_val(actual - expected);
+    assert(diff <= tolerance);
+}
+
+// =============================================================================
+// Function evaluators (return f(x) * 1000 for x given as integer)
+// We integrate over [a, b] with integer endpoints
+// =============================================================================
+
+// f(x) = x => returns x * 1000
+fn f_identity(x: Int) -> Int {
+    x * 1000
+}
+
+// f(x) = x^2 => returns x^2 * 1000
+fn f_square(x: Int) -> Int {
+    x * x * 1000
+}
+
+// f(x) = x^3 => returns x^3 * 1000
+fn f_cube(x: Int) -> Int {
+    x * x * x * 1000
+}
+
+// f(x) = 5 (constant) => returns 5000
+fn f_const5(x: Int) -> Int {
+    5000
+}
+
+// =============================================================================
+// Trapezoidal rule: integral ~ h/2 * [f(a) + 2*f(a+h) + 2*f(a+2h) + ... + f(b)]
+// Here h = 1 (integer step), integrate from a to b
+// Returns integral * 1000
+// =============================================================================
+
+fn trapezoid_identity(a: Int, b: Int) -> Int {
+    // Integrate f(x) = x from a to b with h=1
+    let n = b - a;
+    if n <= 0 { return 0; }
+    let mut sum = f_identity(a) + f_identity(b);
+    let mut i = 1;
+    while i < n {
+        sum = sum + 2 * f_identity(a + i);
+        i = i + 1;
+    }
+    // h/2 * sum = 1/2 * sum
+    sum / 2
+}
+
+fn trapezoid_square(a: Int, b: Int) -> Int {
+    let n = b - a;
+    if n <= 0 { return 0; }
+    let mut sum = f_square(a) + f_square(b);
+    let mut i = 1;
+    while i < n {
+        sum = sum + 2 * f_square(a + i);
+        i = i + 1;
+    }
+    sum / 2
+}
+
+fn trapezoid_cube(a: Int, b: Int) -> Int {
+    let n = b - a;
+    if n <= 0 { return 0; }
+    let mut sum = f_cube(a) + f_cube(b);
+    let mut i = 1;
+    while i < n {
+        sum = sum + 2 * f_cube(a + i);
+        i = i + 1;
+    }
+    sum / 2
+}
+
+fn test_trapezoidal() {
+    // integral of x from 0 to 10 = 50
+    // Exact: 50 * 1000 = 50000
+    let t1 = trapezoid_identity(0, 10);
+    assert_eq(t1, 50000);
+
+    // integral of x^2 from 0 to 3 = 9
+    // Trapezoidal with h=1: (0 + 2*1 + 2*4 + 9) / 2 = (0+2+8+9)/2 = 19/2 = 9.5
+    // In our scaled: (0 + 2000 + 8000 + 9000) / 2 = 19000/2 = 9500
+    let t2 = trapezoid_square(0, 3);
+    assert_eq(t2, 9500); // Slight overestimate (exact = 9000)
+
+    // integral of 5 from 2 to 7 = 25
+    // Trapezoidal with h=1: 5*(7-2) = 25
+    let n = 7 - 2;
+    let mut sum = f_const5(2) + f_const5(7);
+    let mut i = 1;
+    while i < n {
+        sum = sum + 2 * f_const5(2 + i);
+        i = i + 1;
+    }
+    let t3 = sum / 2;
+    assert_eq(t3, 25000);
+}
+
+// =============================================================================
+// Simpson's 1/3 rule: integral ~ h/3 * [f(a) + 4*f(a+h) + 2*f(a+2h) + 4*f(a+3h) + ... + f(b)]
+// Requires even number of intervals (n must be even)
+// h = (b-a)/n, here using integer steps
+// =============================================================================
+
+fn simpson_square(a: Int, b: Int) -> Int {
+    // Integrate f(x) = x^2 from a to b using Simpson's rule with h=1
+    // n = b - a must be even
+    let n = b - a;
+    if n <= 0 { return 0; }
+    // Simpson: h/3 * [f(a) + 4*f(a+1) + 2*f(a+2) + 4*f(a+3) + ... + f(b)]
+    let mut sum = f_square(a) + f_square(b);
+    let mut i = 1;
+    while i < n {
+        if i % 2 == 1 {
+            sum = sum + 4 * f_square(a + i);
+        } else {
+            sum = sum + 2 * f_square(a + i);
+        }
+        i = i + 1;
+    }
+    // h/3 * sum = 1/3 * sum
+    sum / 3
+}
+
+fn simpson_cube(a: Int, b: Int) -> Int {
+    let n = b - a;
+    if n <= 0 { return 0; }
+    let mut sum = f_cube(a) + f_cube(b);
+    let mut i = 1;
+    while i < n {
+        if i % 2 == 1 {
+            sum = sum + 4 * f_cube(a + i);
+        } else {
+            sum = sum + 2 * f_cube(a + i);
+        }
+        i = i + 1;
+    }
+    sum / 3
+}
+
+fn simpson_identity(a: Int, b: Int) -> Int {
+    let n = b - a;
+    if n <= 0 { return 0; }
+    let mut sum = f_identity(a) + f_identity(b);
+    let mut i = 1;
+    while i < n {
+        if i % 2 == 1 {
+            sum = sum + 4 * f_identity(a + i);
+        } else {
+            sum = sum + 2 * f_identity(a + i);
+        }
+        i = i + 1;
+    }
+    sum / 3
+}
+
+fn test_simpson_rule() {
+    // Simpson's rule is exact for polynomials up to degree 3
+
+    // integral of x from 0 to 10 = 50 (exact: 50000 scaled)
+    let s1 = simpson_identity(0, 10);
+    assert_near(s1, 50000, 100);
+
+    // integral of x^2 from 0 to 6 = 72
+    // Simpson with h=1 over 6 intervals (even) should be very accurate
+    let s2 = simpson_square(0, 6);
+    assert_near(s2, 72000, 100);
+
+    // integral of x^2 from 0 to 4 = 64/3 ~ 21333
+    let s3 = simpson_square(0, 4);
+    assert_near(s3, 21333, 200);
+
+    // integral of x^2 from 1 to 5 = (125-1)/3 = 124/3 ~ 41333
+    let s4 = simpson_square(1, 5);
+    assert_near(s4, 41333, 200);
+}
+
+fn test_simpson_cube() {
+    // integral of x^3 from 0 to 4 = 64
+    // Simpson is exact for cubics (degree 3)
+    let s1 = simpson_cube(0, 4);
+    assert_near(s1, 64000, 200);
+
+    // integral of x^3 from 0 to 2 = 4
+    let s2 = simpson_cube(0, 2);
+    assert_near(s2, 4000, 100);
+
+    // integral of x^3 from 1 to 3 = (81-1)/4 = 20
+    let s3 = simpson_cube(1, 3);
+    assert_near(s3, 20000, 200);
+}
+
+// =============================================================================
+// Midpoint rule: integral ~ h * sum(f(a + (i+0.5)*h))
+// Using integer steps, midpoint of [i, i+1] is not an integer
+// So we approximate: midpoint value ~ (f(i) + f(i+1)) / 2
+// =============================================================================
+
+fn midpoint_square(a: Int, b: Int) -> Int {
+    let n = b - a;
+    if n <= 0 { return 0; }
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        // Midpoint approximation: average of endpoints
+        let fmid = (f_square(a + i) + f_square(a + i + 1)) / 2;
+        sum = sum + fmid;
+        i = i + 1;
+    }
+    // h * sum = 1 * sum
+    sum
+}
+
+fn test_midpoint_rule() {
+    // integral of x^2 from 0 to 3 = 9
+    let m1 = midpoint_square(0, 3);
+    // Midpoints: (f(0)+f(1))/2 + (f(1)+f(2))/2 + (f(2)+f(3))/2
+    // = (0+1000)/2 + (1000+4000)/2 + (4000+9000)/2
+    // = 500 + 2500 + 6500 = 9500
+    assert_eq(m1, 9500);
+}
+
+// =============================================================================
+// Compare accuracy of methods on integral of x^2 from 0 to 10 = 10000/3 ~ 333.33
+// Scaled: 333333
+// =============================================================================
+
+fn test_compare_methods() {
+    // Exact: integral of x^2 from 0 to 10 = 1000/3 * 1000 = 333333
+
+    // Trapezoidal
+    let trap = trapezoid_square(0, 10);
+    // Simpson
+    let spsn = simpson_square(0, 10);
+
+    // Simpson should be more accurate than trapezoidal for this case
+    let exact = 333333;
+    let trap_err = abs_val(trap - exact);
+    let spsn_err = abs_val(spsn - exact);
+
+    // Both should be reasonably close
+    assert(trap_err < 5000); // Trapezoidal error < 5
+    assert(spsn_err < 2000); // Simpson error < 2
+
+    // Simpson typically more accurate
+    assert(spsn_err <= trap_err);
+}
+
+// =============================================================================
+// Integration of known integrals for verification
+// =============================================================================
+
+fn test_known_integrals() {
+    // integral of x from 0 to n = n^2/2
+    let i5 = trapezoid_identity(0, 5);
+    assert_eq(i5, 12500); // 25/2 * 1000
+
+    let i10 = trapezoid_identity(0, 10);
+    assert_eq(i10, 50000); // 100/2 * 1000
+
+    // integral of x from a to b = (b^2 - a^2)/2
+    let i37 = trapezoid_identity(3, 7);
+    // (49 - 9)/2 = 20 => 20000
+    assert_eq(i37, 20000);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_trapezoidal();
+    test_simpson_rule();
+    test_simpson_cube();
+    test_midpoint_rule();
+    test_compare_methods();
+    test_known_integrals();
+    print("[OK] 303_interp_simpson_rule");
+    0
+}

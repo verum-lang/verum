@@ -1,0 +1,36 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L0
+// @tags: modules, visibility, errors, negative
+// @expect-error: E601
+// @description: Test that private items cannot be accessed from outside
+
+/// Visibility violation tests.
+/// These should fail type checking due to visibility errors.
+
+module secret {
+    // Private function
+    fn private_fn() -> Int {
+        42
+    }
+
+    // Private constant
+    const PRIVATE: Int = 100;
+
+    // Private type
+    type Hidden is {
+        value: Int
+    };
+
+    // Public function that uses private items internally
+    pub fn public_fn() -> Int {
+        private_fn() + PRIVATE
+    }
+}
+
+fn main() -> Int {
+    // ERROR: Cannot access private function
+    let x = secret.private_fn();  // E601: visibility error
+
+    0
+}

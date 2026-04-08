@@ -1,0 +1,47 @@
+// @test: parse
+// @level: L0
+// @tags: parser, types, capability
+// @description: Test capability-restricted type parsing
+
+// Basic capability types
+type ReadOnlyDb is Database with [Read];
+
+type ReadWriteDb is Database with [Read, Write];
+
+type AdminDb is Database with [Read, Write, Admin];
+
+// Function with capability-restricted parameter
+fn analyze_data(db: Database with [Read]) -> Stats {
+    db.query("SELECT * FROM data")
+}
+
+fn modify_data(db: Database with [Read, Write]) {
+    db.execute("UPDATE data SET ...");
+}
+
+fn admin_operation(db: Database with [Admin]) {
+    db.execute("DROP TABLE old_data");
+}
+
+// Capability subtyping
+fn use_restricted() {
+    let full_db: Database with [Read, Write, Admin] = get_admin_db();
+
+    // Can pass to function expecting fewer capabilities
+    analyze_data(full_db);  // Works: [Read, Write, Admin] >: [Read]
+    modify_data(full_db);   // Works: [Read, Write, Admin] >: [Read, Write]
+}
+
+// Multiple capability groups
+type SecureFs is FileSystem with [Read, Write, Execute];
+
+// Multiple capabilities (comma-separated)
+type FlexibleAccess is Resource with [Read, Write];
+
+// Custom capabilities - must use "type X is Y" syntax
+type NetworkClient is Client with [Connect, Send, Receive];
+
+// Capability attenuation in functions
+fn attenuate(db: Database with [Read, Write, Admin]) -> Database with [Read] {
+    db  // Implicit capability attenuation
+}

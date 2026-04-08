@@ -1,0 +1,75 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: vbc, differential, records, structs
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential test: record creation and field access must match across tiers
+
+type Point is { x: Int, y: Int };
+type Rect is { x1: Int, y1: Int, x2: Int, y2: Int };
+
+fn point_add(a: Point, b: Point) -> Point {
+    Point { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn point_dot(a: Point, b: Point) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+fn rect_area(r: Rect) -> Int {
+    let w = r.x2 - r.x1;
+    let h = r.y2 - r.y1;
+    if w < 0 { return 0; }
+    if h < 0 { return 0; }
+    w * h
+}
+
+fn rect_contains(r: Rect, px: Int, py: Int) -> Bool {
+    px >= r.x1 && px <= r.x2 && py >= r.y1 && py <= r.y2
+}
+
+fn test_point() {
+    let a = Point { x: 3, y: 4 };
+    let b = Point { x: 1, y: 2 };
+
+    let sum = point_add(a, b);
+    assert_eq(sum.x, 4);
+    assert_eq(sum.y, 6);
+    assert_eq(point_dot(a, b), 11);
+
+    // Nested operation
+    let c = point_add(point_add(a, b), a);
+    assert_eq(c.x, 7);
+    assert_eq(c.y, 10);
+}
+
+fn test_rect() {
+    let r = Rect { x1: 0, y1: 0, x2: 10, y2: 5 };
+    assert_eq(rect_area(r), 50);
+    assert_eq(rect_contains(r, 5, 3), true);
+    assert_eq(rect_contains(r, 11, 3), false);
+    assert_eq(rect_contains(r, 5, -1), false);
+
+    // Zero-area rect
+    let z = Rect { x1: 5, y1: 5, x2: 5, y2: 10 };
+    assert_eq(rect_area(z), 0);
+}
+
+fn test_record_mutation() {
+    let mut p = Point { x: 1, y: 2 };
+    assert_eq(p.x, 1);
+    p = Point { x: p.x + 10, y: p.y + 20 };
+    assert_eq(p.x, 11);
+    assert_eq(p.y, 22);
+}
+
+fn main() -> Int {
+    test_point();
+    test_rect();
+    test_record_mutation();
+    print("differential records ok");
+    0
+}

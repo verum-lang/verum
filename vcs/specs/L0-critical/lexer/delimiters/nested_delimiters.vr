@@ -1,0 +1,204 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, delimiters, nesting, brackets
+
+// Nested delimiter tests
+
+// Simple nesting
+fn test_simple_nesting() {
+    let nested_parens = ((1 + 2));
+    let nested_brackets = [[1, 2], [3, 4]];
+    let nested_braces = { { let x = 1; x } };
+}
+
+// Mixed nesting
+fn test_mixed_nesting() {
+    let mixed1 = [(1, 2), (3, 4)];
+    let mixed2 = ({a: 1}, {b: 2});
+    let mixed3 = [{ x: [1, 2] }];
+    let mixed4 = ({ inner: (1, 2) });
+}
+
+// Deep nesting - parentheses
+fn test_deep_parens() {
+    let deep_paren = (((((1)))));
+    let deep_paren_expr = ((((1 + 2) * 3) - 4) / 5);
+}
+
+// Deep nesting - brackets
+fn test_deep_brackets() {
+    let deep_bracket = [[[[[1]]]]];
+    let deep_bracket_array = [[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]];
+}
+
+// Deep nesting - braces
+fn test_deep_braces() {
+    let deep_brace = { { { { 42 } } } };
+}
+
+// Complex mixed nesting
+fn test_complex_nesting() {
+    let complex1 = [
+        (1, [2, 3]),
+        (4, [5, 6]),
+    ];
+
+    let complex2 = {
+        data: [(1, 2), (3, 4)],
+        nested: {
+            inner: [[1], [2]],
+        },
+    };
+}
+
+// Type parameters with nesting
+type NestedGeneric<T> is {
+    value: List<List<T>>,
+    pairs: List<(T, T)>,
+};
+
+fn test_nested_generics() {
+    let nested_generic: NestedGeneric<Int> = NestedGeneric {
+        value: [[1, 2], [3, 4]],
+        pairs: [(1, 2), (3, 4)],
+    };
+}
+
+// Function with nested types
+fn process_nested(data: List<List<Maybe<Int>>>) -> List<Int> {
+    data.flatten().filter_map(|x| x).collect()
+}
+
+// Note: Inline anonymous struct types in type definitions need their own types
+type Level3 is { value: Int };
+type Level2 is { level3: Level3 };
+type Level1 is { level2: Level2 };
+type DeepStruct is { level1: Level1 };
+
+// Array and tuple combinations
+fn test_array_tuple_combos() {
+    // Array of tuples of arrays
+    let arr_tup_arr = [([1, 2], [3, 4]), ([5, 6], [7, 8])];
+
+    // Tuple of arrays of tuples
+    let tup_arr_tup = ([(1, 2), (3, 4)], [(5, 6), (7, 8)]);
+}
+
+// Map with complex keys and values
+fn test_complex_maps() {
+    let complex_map: Map<(Int, Int), List<Text>> = {
+        (0, 0): ["origin"],
+        (1, 0): ["east"],
+        (0, 1): ["north"],
+    };
+}
+
+// Nested match expressions
+fn test_nested_match() {
+    let outer: Maybe<Maybe<Int>> = Some(Some(42));
+    let nested_match = match outer {
+        Some(inner) => match inner {
+            Some(value) => value,
+            None => 0,
+        },
+        None => -1,
+    };
+}
+
+// Nested if expressions
+fn test_nested_if() {
+    let a = 1;
+    let b = 2;
+    let nested_if = if a > 0 {
+        if b > 0 { "both positive" }
+        else { "a positive" }
+    } else {
+        if b > 0 { "b positive" }
+        else { "both non-positive" }
+    };
+}
+
+// Closure with nested structures
+fn test_nested_closures() {
+    let closure = |data: List<(Int, List<Int>)>| {
+        data.map(|(key, values)| {
+            (key, values.sum())
+        })
+    };
+}
+
+// Method chains with nested calls
+type DataItem is { inner: Maybe<Int> };
+
+fn test_method_chains() {
+    let data: List<DataItem> = [];
+    let chain = data
+        .iter()
+        .map(|x| x.inner.map(|y| y * 2))
+        .filter(|opt| opt.is_some())
+        .collect();
+}
+
+// Generic function with nested bounds
+fn transform<T, U, V>(
+    input: List<(T, List<U>)>,
+    f: fn(U) -> V
+) -> List<(T, List<V>)> {
+    input.map(|(t, us)| (t, us.map(f)))
+}
+
+// Nested type aliases
+type Matrix<T> is List<List<T>>;
+type Tensor3D<T> is List<Matrix<T>>;
+type DeepList<T> is List<List<List<List<T>>>>;
+
+// Complex expression with all delimiters - simplified to avoid ambiguous syntax
+fn test_complex_expression() {
+    // Array of records
+    let arr_of_records = [
+        { key: (1, [2, 3]), value: 10 },
+        { key: (7, [8, 9]), value: 20 },
+    ];
+
+    // Nested tuples and arrays
+    let nested = (
+        [(1, 2), (3, 4)],
+        [[5, 6], [7, 8]]
+    );
+}
+
+// Nested with comments
+fn test_nested_with_comments() {
+    let commented = [
+        // First element
+        (1, /* nested */ [2, 3]),
+        // Second element
+        (4, [/* inside */ 5, 6 /* also inside */]),
+    ];
+}
+
+// Empty nested structures
+fn test_empty_nested() {
+    let empty_nested = [[], [], []];
+    let empty_deep = [[[]]];
+    let empty_tuple = ((), (), ());
+    let empty_struct = { a: {}, b: {} };
+}
+
+// Single-element nested
+fn test_single_nested() {
+    let single_nested = [[1]];
+    let single_tuple = ((1,),);
+    let single_brace = { { 1 } };
+}
+
+// Asymmetric nesting
+fn test_asymmetric() {
+    let asymmetric = [
+        [1],
+        [2, 3],
+        [4, 5, 6],
+        [7, 8, 9, 10],
+    ];
+}

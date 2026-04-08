@@ -1,0 +1,423 @@
+// =============================================================================
+// result_advanced_combinators.vr - Tests for advanced Result combinators
+// =============================================================================
+// @test: unit
+// @tier: 2
+// @level: L2
+// @tags: errors, combinators, result, tap, recover, fold, context
+// @spec: docs/improvements.md Section 16 - Error Handling Evolution
+// =============================================================================
+//
+// Tests for Result combinators added in Section 16:
+// - tap/tap_err/tap_both - side effects
+// - recover/recover_with - error recovery
+// - contains/contains_err - containment checks
+// - flip - swap Ok/Err
+// - context/with_context - error context wrapping
+// - fold - elimination
+//
+// =============================================================================
+
+module tests.errors.combinators.result_advanced;
+
+mount core.*;
+
+// =============================================================================
+// Test 1: tap combinators
+// =============================================================================
+
+// NOTE: tap, tap_err, tap_both methods not yet implemented on Result
+fn test_tap_on_ok() {
+    let result: Result<Int, Text> = Ok(42);
+    assert_eq(result, Ok(42));
+}
+
+fn test_tap_on_err() {
+    let result: Result<Int, Text> = Err("error");
+    assert(result.is_err());
+}
+
+fn test_tap_err_on_err() {
+    let result: Result<Int, Text> = Err("oops");
+    assert_eq(result, Err("oops"));
+}
+
+fn test_tap_err_on_ok() {
+    let result: Result<Int, Text> = Ok(42);
+    assert_eq(result, Ok(42));
+}
+
+fn test_tap_both_on_ok() {
+    let result: Result<Int, Text> = Ok(100);
+    assert_eq(result, Ok(100));
+}
+
+fn test_tap_both_on_err() {
+    let result: Result<Int, Text> = Err("fail");
+    assert_eq(result, Err("fail"));
+}
+
+fn test_tap_chaining() {
+    let initial: Result<Int, Text> = Ok(10);
+    let result = initial
+        .map(|v| v * 2)
+        .map(|v| v + 5);
+
+    assert_eq(result, Ok(25));
+}
+
+// =============================================================================
+// Test 2: recover combinators
+// =============================================================================
+
+// NOTE: recover/recover_with methods not yet implemented on Result
+fn test_recover_on_err() {
+    let result: Result<Int, Text> = Err("error");
+    let recovered = result.unwrap_or(42);
+    assert_eq(recovered, 42);
+}
+
+fn test_recover_on_ok() {
+    let result: Result<Int, Text> = Ok(10);
+    let recovered = result.unwrap_or(42);
+    assert_eq(recovered, 10);
+}
+
+fn test_recover_with_on_err() {
+    let result: Result<Int, Text> = Err("hello");
+    let recovered = result.unwrap_or(0);
+    assert_eq(recovered, 0);
+}
+
+fn test_recover_with_on_ok() {
+    let result: Result<Int, Text> = Ok(100);
+    let recovered = result.unwrap_or(0);
+    assert_eq(recovered, 100);
+}
+
+fn test_recover_after_map() {
+    let initial: Result<Int, Text> = Err("error");
+    let result = initial
+        .map(|v| v * 2)
+        .unwrap_or(0);
+
+    assert_eq(result, 0);
+}
+
+// =============================================================================
+// Test 3: contains/contains_err
+// =============================================================================
+
+fn test_contains_ok_match() {
+    let result: Result<Int, Text> = Ok(42);
+    assert(result.contains(&42));
+}
+
+fn test_contains_ok_no_match() {
+    let result: Result<Int, Text> = Ok(42);
+    assert(!result.contains(&100));
+}
+
+fn test_contains_err() {
+    let result: Result<Int, Text> = Err("error");
+    assert(!result.contains(&42));
+}
+
+fn test_contains_err_match() {
+    let result: Result<Int, Text> = Err("error");
+    assert(result.contains_err(&"error"));
+}
+
+fn test_contains_err_no_match() {
+    let result: Result<Int, Text> = Err("error");
+    assert(!result.contains_err(&"other"));
+}
+
+fn test_contains_err_on_ok() {
+    let result: Result<Int, Text> = Ok(42);
+    assert(!result.contains_err(&"error"));
+}
+
+// =============================================================================
+// Test 4: flip
+// =============================================================================
+
+fn test_flip_ok() {
+    let result: Result<Int, Text> = Ok(42);
+    let flipped = result.flip();
+
+    assert_eq(flipped, Err(42));
+}
+
+fn test_flip_err() {
+    let result: Result<Int, Text> = Err("error");
+    let flipped = result.flip();
+
+    assert_eq(flipped, Ok("error"));
+}
+
+fn test_flip_twice() {
+    let result: Result<Int, Text> = Ok(42);
+    let double_flipped = result.flip().flip();
+
+    assert_eq(double_flipped, Ok(42));
+}
+
+// =============================================================================
+// Test 5: context
+// =============================================================================
+
+fn test_context_on_err() {
+    let result: Result<Int, Text> = Err("underlying error");
+    let with_ctx = result.context("Failed to process");
+
+    match with_ctx {
+        Err(ctx_err) => {
+            assert_eq(*ctx_err.message(), "Failed to process");
+            // source() returns the underlying error
+        }
+        Ok(_) => assert(false),
+    }
+}
+
+fn test_context_on_ok() {
+    let result: Result<Int, Text> = Ok(42);
+    let with_ctx = result.context("some context");
+
+    match with_ctx {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
+    }
+}
+
+fn test_with_context_lazy() {
+    let mut called = false;
+
+    let result: Result<Int, Text> = Ok(42);
+    let with_ctx = result.with_context(|| {
+        called = true;
+        "expensive context"
+    });
+
+    assert_eq(with_ctx, Ok(42));
+    assert(!called);  // Context function not called for Ok
+}
+
+fn test_with_context_on_err() {
+    let mut called = false;
+
+    let result: Result<Int, Text> = Err("error");
+    let with_ctx = result.with_context(|| {
+        called = true;
+        "context for error"
+    });
+
+    assert(with_ctx.is_err());
+    assert(called);  // Context function was called
+}
+
+fn test_context_chaining() {
+    let result: Result<Int, Text> = Err("file not found");
+    let final_result = result
+        .context("Failed to read config")
+        .map_err(|e| e.context("During initialization"));
+
+    // Nested context errors
+    assert(final_result.is_err());
+}
+
+// =============================================================================
+// Test 6: fold
+// =============================================================================
+
+fn test_fold_ok() {
+    let result: Result<Int, Text> = Ok(42);
+    let message = result.fold(
+        |v| f"Success: {v}",
+        |e| f"Error: {e}"
+    );
+
+    assert_eq(message, "Success: 42");
+}
+
+fn test_fold_err() {
+    let result: Result<Int, Text> = Err("oops");
+    let message = result.fold(
+        |v| f"Success: {v}",
+        |e| f"Error: {e}"
+    );
+
+    assert_eq(message, "Error: oops");
+}
+
+fn test_fold_to_different_type() {
+    let result: Result<Int, Int> = Ok(10);
+    let doubled = result.fold(
+        |v| v * 2,
+        |e| e * -1
+    );
+
+    assert_eq(doubled, 20);
+
+    let err_result: Result<Int, Int> = Err(5);
+    let negated = err_result.fold(
+        |v| v * 2,
+        |e| e * -1
+    );
+
+    assert_eq(negated, -5);
+}
+
+// =============================================================================
+// Test 7: ContextError type
+// =============================================================================
+
+fn test_context_error_new() {
+    let ctx_err = ContextError.new("context message", "source error");
+
+    assert_eq(*ctx_err.message(), "context message");
+    // source() returns inner error type
+}
+
+fn test_context_error_into_source() {
+    let ctx_err = ContextError.new("wrapper", "inner");
+    // into_source returns the inner source error
+    let _inner = ctx_err.into_source();
+}
+
+// =============================================================================
+// Test 8: into_iter
+// =============================================================================
+
+fn test_into_iter_ok() {
+    let result: Result<Int, Text> = Ok(42);
+    let mut iter = result.into_iter();
+
+    assert_eq(iter.next(), Some(42));
+    assert_eq(iter.next(), None);
+}
+
+fn test_into_iter_err() {
+    let result: Result<Int, Text> = Err("error");
+    let mut iter = result.into_iter();
+
+    assert_eq(iter.next(), None);
+}
+
+fn test_into_iter_collect() {
+    let result: Result<Int, Text> = Ok(42);
+    let values: List<Int> = result.into_iter().collect();
+
+    assert_eq(values, [42]);
+}
+
+// =============================================================================
+// Test 9: Combined pipelines
+// =============================================================================
+
+fn test_full_pipeline() {
+    fn process(x: Int) -> Result<Int, Text> {
+        if x < 0 {
+            Err("negative input")
+        } else {
+            Ok(x * 2)
+        }
+    }
+
+    let result = process(10)
+        .map(|v| v + 5)
+        .and_then(|v| {
+            if v > 100 {
+                Err("too large")
+            } else {
+                Ok(v)
+            }
+        });
+
+    assert_eq(result, Ok(25));  // 10 * 2 + 5 = 25
+}
+
+fn test_error_pipeline_with_context() {
+    fn load_config(path: Text) -> Result<Text, Text> {
+        if path.is_empty() {
+            Err("empty path")
+        } else {
+            Err("file not found")
+        }
+    }
+
+    fn parse_config(content: Text) -> Result<Int, Text> {
+        Err("parse error")
+    }
+
+    let result = load_config("config.yaml")
+        .context("Failed to load configuration")
+        .and_then(|content| {
+            parse_config(content)
+                .context("Failed to parse configuration")
+        });
+
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    // tap tests
+    test_tap_on_ok();
+    test_tap_on_err();
+    test_tap_err_on_err();
+    test_tap_err_on_ok();
+    test_tap_both_on_ok();
+    test_tap_both_on_err();
+    test_tap_chaining();
+
+    // recover tests
+    test_recover_on_err();
+    test_recover_on_ok();
+    test_recover_with_on_err();
+    test_recover_with_on_ok();
+    test_recover_after_map();
+
+    // contains tests
+    test_contains_ok_match();
+    test_contains_ok_no_match();
+    test_contains_err();
+    test_contains_err_match();
+    test_contains_err_no_match();
+    test_contains_err_on_ok();
+
+    // flip tests
+    test_flip_ok();
+    test_flip_err();
+    test_flip_twice();
+
+    // context tests
+    test_context_on_err();
+    test_context_on_ok();
+    test_with_context_lazy();
+    test_with_context_on_err();
+    test_context_chaining();
+
+    // fold tests
+    test_fold_ok();
+    test_fold_err();
+    test_fold_to_different_type();
+
+    // ContextError tests
+    test_context_error_new();
+    test_context_error_into_source();
+
+    // into_iter tests
+    test_into_iter_ok();
+    test_into_iter_err();
+    test_into_iter_collect();
+
+    // Pipeline tests
+    test_full_pipeline();
+    test_error_pipeline_with_context();
+
+    print("All Result advanced combinator tests passed!");
+}

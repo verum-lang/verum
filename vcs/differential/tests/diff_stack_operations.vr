@@ -1,0 +1,106 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, stack, data-structure
+// @timeout: 10000
+
+type Stack8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int, top: Int };
+
+fn stack_new() -> Stack8 {
+    Stack8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, top: 0 }
+}
+
+fn stack_get(s: Stack8, i: Int) -> Int {
+    if i == 0 { s.d0 } else if i == 1 { s.d1 } else if i == 2 { s.d2 }
+    else if i == 3 { s.d3 } else if i == 4 { s.d4 } else if i == 5 { s.d5 }
+    else if i == 6 { s.d6 } else { s.d7 }
+}
+
+fn stack_set(s: Stack8, i: Int, v: Int) -> Stack8 {
+    Stack8 {
+        d0: if i == 0 { v } else { s.d0 },
+        d1: if i == 1 { v } else { s.d1 },
+        d2: if i == 2 { v } else { s.d2 },
+        d3: if i == 3 { v } else { s.d3 },
+        d4: if i == 4 { v } else { s.d4 },
+        d5: if i == 5 { v } else { s.d5 },
+        d6: if i == 6 { v } else { s.d6 },
+        d7: if i == 7 { v } else { s.d7 },
+        top: s.top
+    }
+}
+
+fn stack_push(s: Stack8, v: Int) -> Stack8 {
+    let mut s2 = stack_set(s, s.top, v);
+    s2 = Stack8 { d0: s2.d0, d1: s2.d1, d2: s2.d2, d3: s2.d3, d4: s2.d4, d5: s2.d5, d6: s2.d6, d7: s2.d7, top: s.top + 1 };
+    s2
+}
+
+fn stack_pop(s: Stack8) -> Stack8 {
+    Stack8 { d0: s.d0, d1: s.d1, d2: s.d2, d3: s.d3, d4: s.d4, d5: s.d5, d6: s.d6, d7: s.d7, top: s.top - 1 }
+}
+
+fn stack_peek(s: Stack8) -> Int {
+    stack_get(s, s.top - 1)
+}
+
+fn stack_is_empty(s: Stack8) -> Int {
+    if s.top == 0 { 1 } else { 0 }
+}
+
+// Evaluate postfix: 3 4 + 2 * = (3+4)*2 = 14
+fn eval_postfix() -> Int {
+    let mut s = stack_new();
+    // Push 3
+    s = stack_push(s, 3);
+    // Push 4
+    s = stack_push(s, 4);
+    // Add
+    let a = stack_peek(s); s = stack_pop(s);
+    let b = stack_peek(s); s = stack_pop(s);
+    s = stack_push(s, b + a);
+    // Push 2
+    s = stack_push(s, 2);
+    // Multiply
+    let c = stack_peek(s); s = stack_pop(s);
+    let d = stack_peek(s); s = stack_pop(s);
+    s = stack_push(s, d * c);
+    stack_peek(s)
+}
+
+fn main() -> Int {
+    // Basic push/pop
+    let mut s = stack_new();
+    assert_eq(stack_is_empty(s), 1);
+    s = stack_push(s, 10);
+    s = stack_push(s, 20);
+    s = stack_push(s, 30);
+    assert_eq(s.top, 3);
+    assert_eq(stack_peek(s), 30);
+    s = stack_pop(s);
+    assert_eq(stack_peek(s), 20);
+    s = stack_pop(s);
+    assert_eq(stack_peek(s), 10);
+    s = stack_pop(s);
+    assert_eq(stack_is_empty(s), 1);
+
+    // Postfix evaluation
+    assert_eq(eval_postfix(), 14);
+
+    // Fill and drain
+    let mut s2 = stack_new();
+    let mut i = 0;
+    while i < 8 {
+        s2 = stack_push(s2, i * i);
+        i = i + 1;
+    }
+    assert_eq(s2.top, 8);
+    // Pop should come in reverse order
+    assert_eq(stack_peek(s2), 49); s2 = stack_pop(s2);
+    assert_eq(stack_peek(s2), 36); s2 = stack_pop(s2);
+    assert_eq(stack_peek(s2), 25); s2 = stack_pop(s2);
+
+    print("DIFF_OK: stack_operations");
+    0
+}

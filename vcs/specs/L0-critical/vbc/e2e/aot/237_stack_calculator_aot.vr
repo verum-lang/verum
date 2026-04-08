@@ -1,0 +1,183 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, stack, calculator, rpn
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for reverse-polish notation calculator with variables
+
+type Stack16 is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    s8: Int, s9: Int, s10: Int, s11: Int,
+    s12: Int, s13: Int, s14: Int, s15: Int,
+    top: Int
+};
+
+fn stack_new() -> Stack16 {
+    Stack16 {
+        s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0, s7: 0,
+        s8: 0, s9: 0, s10: 0, s11: 0, s12: 0, s13: 0, s14: 0, s15: 0,
+        top: 0
+    }
+}
+
+fn stack_peek(s: Stack16) -> Int {
+    let i = s.top - 1;
+    if i == 0 { s.s0 } else if i == 1 { s.s1 }
+    else if i == 2 { s.s2 } else if i == 3 { s.s3 }
+    else if i == 4 { s.s4 } else if i == 5 { s.s5 }
+    else if i == 6 { s.s6 } else if i == 7 { s.s7 }
+    else { 0 }
+}
+
+fn stack_push(s: Stack16, v: Int) -> Stack16 {
+    let i = s.top;
+    Stack16 {
+        s0: if i == 0 { v } else { s.s0 }, s1: if i == 1 { v } else { s.s1 },
+        s2: if i == 2 { v } else { s.s2 }, s3: if i == 3 { v } else { s.s3 },
+        s4: if i == 4 { v } else { s.s4 }, s5: if i == 5 { v } else { s.s5 },
+        s6: if i == 6 { v } else { s.s6 }, s7: if i == 7 { v } else { s.s7 },
+        s8: s.s8, s9: s.s9, s10: s.s10, s11: s.s11,
+        s12: s.s12, s13: s.s13, s14: s.s14, s15: s.s15,
+        top: s.top + 1
+    }
+}
+
+fn stack_pop_val(s: Stack16) -> Int { stack_peek(s) }
+fn stack_pop(s: Stack16) -> Stack16 {
+    Stack16 {
+        s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3,
+        s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7,
+        s8: s.s8, s9: s.s9, s10: s.s10, s11: s.s11,
+        s12: s.s12, s13: s.s13, s14: s.s14, s15: s.s15,
+        top: s.top - 1
+    }
+}
+
+// ops: 0=push, 1=add, 2=sub, 3=mul, 4=div, 5=neg, 6=dup, 7=swap
+fn calc_op(s: Stack16, op: Int, val: Int) -> Stack16 {
+    if op == 0 {
+        stack_push(s, val)
+    } else if op == 1 {
+        let b = stack_pop_val(s);
+        let s2 = stack_pop(s);
+        let a = stack_pop_val(s2);
+        let s3 = stack_pop(s2);
+        stack_push(s3, a + b)
+    } else if op == 2 {
+        let b = stack_pop_val(s);
+        let s2 = stack_pop(s);
+        let a = stack_pop_val(s2);
+        let s3 = stack_pop(s2);
+        stack_push(s3, a - b)
+    } else if op == 3 {
+        let b = stack_pop_val(s);
+        let s2 = stack_pop(s);
+        let a = stack_pop_val(s2);
+        let s3 = stack_pop(s2);
+        stack_push(s3, a * b)
+    } else if op == 4 {
+        let b = stack_pop_val(s);
+        let s2 = stack_pop(s);
+        let a = stack_pop_val(s2);
+        let s3 = stack_pop(s2);
+        if b == 0 { stack_push(s3, 0) }
+        else { stack_push(s3, a / b) }
+    } else if op == 5 {
+        let v = stack_pop_val(s);
+        let s2 = stack_pop(s);
+        stack_push(s2, -v)
+    } else if op == 6 {
+        // dup
+        let v = stack_pop_val(s);
+        stack_push(s, v)
+    } else {
+        // swap
+        let b = stack_pop_val(s);
+        let s2 = stack_pop(s);
+        let a = stack_pop_val(s2);
+        let s3 = stack_pop(s2);
+        let s4 = stack_push(s3, b);
+        stack_push(s4, a)
+    }
+}
+
+fn test_basic_arithmetic() {
+    // 3 + 4 = 7
+    let mut s = stack_new();
+    s = calc_op(s, 0, 3);    // push 3
+    s = calc_op(s, 0, 4);    // push 4
+    s = calc_op(s, 1, 0);    // add
+    assert_eq(stack_peek(s), 7);
+}
+
+fn test_complex_expression() {
+    // (5 + 3) * 2 = 16
+    let mut s = stack_new();
+    s = calc_op(s, 0, 5);    // push 5
+    s = calc_op(s, 0, 3);    // push 3
+    s = calc_op(s, 1, 0);    // add -> 8
+    s = calc_op(s, 0, 2);    // push 2
+    s = calc_op(s, 3, 0);    // mul -> 16
+    assert_eq(stack_peek(s), 16);
+}
+
+fn test_negate_and_sub() {
+    // -(5 - 3) = -2
+    let mut s = stack_new();
+    s = calc_op(s, 0, 5);
+    s = calc_op(s, 0, 3);
+    s = calc_op(s, 2, 0);    // sub -> 2
+    s = calc_op(s, 5, 0);    // neg -> -2
+    assert_eq(stack_peek(s), -2);
+}
+
+fn test_dup_and_mul() {
+    // 5^2 using dup + mul
+    let mut s = stack_new();
+    s = calc_op(s, 0, 5);    // push 5
+    s = calc_op(s, 6, 0);    // dup -> [5, 5]
+    s = calc_op(s, 3, 0);    // mul -> 25
+    assert_eq(stack_peek(s), 25);
+}
+
+fn test_swap() {
+    // 10 - 3 using swap: push 3, push 10, swap, sub
+    let mut s = stack_new();
+    s = calc_op(s, 0, 3);
+    s = calc_op(s, 0, 10);
+    s = calc_op(s, 7, 0);    // swap -> [10, 3]
+    s = calc_op(s, 2, 0);    // sub -> 10-3 = 7
+    assert_eq(stack_peek(s), 7);
+}
+
+fn test_quadratic() {
+    // x^2 + 2x + 1 where x = 3 -> 16
+    let mut s = stack_new();
+    // x^2
+    s = calc_op(s, 0, 3);
+    s = calc_op(s, 6, 0);    // dup
+    s = calc_op(s, 3, 0);    // mul -> 9
+    // + 2x
+    s = calc_op(s, 0, 2);
+    s = calc_op(s, 0, 3);
+    s = calc_op(s, 3, 0);    // 2*3 = 6
+    s = calc_op(s, 1, 0);    // 9+6 = 15
+    // + 1
+    s = calc_op(s, 0, 1);
+    s = calc_op(s, 1, 0);    // 15+1 = 16
+    assert_eq(stack_peek(s), 16);
+}
+
+fn main() -> Int {
+    test_basic_arithmetic();
+    test_complex_expression();
+    test_negate_and_sub();
+    test_dup_and_mul();
+    test_swap();
+    test_quadratic();
+    print("[OK] 237_stack_calculator_aot");
+    0
+}

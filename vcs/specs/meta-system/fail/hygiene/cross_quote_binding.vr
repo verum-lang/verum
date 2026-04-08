@@ -1,0 +1,33 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, marks, binding, error
+// @expected-error: M408
+// @description: Cannot reference binding from different quote expansion
+
+// Bindings from one quote cannot be accessed in another quote
+// unless explicitly spliced
+meta fn test_cross_quote_access() -> TokenStream {
+    // Create a binding in one quote
+    let q1 = quote {
+        let private_x = 42;
+    };
+
+    // Try to access that binding in a different quote
+    // This should fail because private_x has different hygiene marks
+    let q2 = quote {
+        // ERROR: private_x is not in scope here
+        // It was introduced in q1, which has different marks
+        let y = private_x;  // M404: Cannot resolve identifier
+    };
+
+    // Try to combine them - should fail on reference resolution
+    quote {
+        $q1
+        $q2
+    }
+}
+
+fn main() {
+    @test_cross_quote_access();  // Fails - cross-quote binding reference
+}

@@ -1,0 +1,111 @@
+// @test: run
+// Struct methods — implement blocks, self access, builder pattern
+
+type Point is { x: Int, y: Int };
+
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn manhattan(&self) -> Int {
+        let mut ax = self.x;
+        let mut ay = self.y;
+        if (ax < 0) { ax = 0 - ax; }
+        if (ay < 0) { ay = 0 - ay; }
+        ax + ay
+    }
+
+    fn add(&self, other: Point) -> Point {
+        Point { x: self.x + other.x, y: self.y + other.y }
+    }
+
+    fn scale(&self, factor: Int) -> Point {
+        Point { x: self.x * factor, y: self.y * factor }
+    }
+
+    fn eq(&self, other: Point) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+type Counter is { value: Int };
+
+implement Counter {
+    fn new() -> Counter {
+        Counter { value: 0 }
+    }
+
+    fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+
+    fn add(&mut self, n: Int) {
+        self.value = self.value + n;
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Constructor and field access
+    let p = Point.new(3, 4);
+    if (p.x != 3 || p.y != 4) {
+        print(f"FAIL test1: p=({p.x}, {p.y})");
+        return 1;
+    }
+    print("test1 constructor: OK");
+
+    // Test 2: Manhattan distance
+    let p2 = Point.new(-3, 4);
+    let d = p2.manhattan();
+    if (d != 7) {
+        print(f"FAIL test2: manhattan = {d}");
+        return 1;
+    }
+    print("test2 manhattan: OK");
+
+    // Test 3: Point addition
+    let a = Point.new(1, 2);
+    let b = Point.new(3, 4);
+    let c = a.add(b);
+    if (c.x != 4 || c.y != 6) {
+        print(f"FAIL test3: sum=({c.x}, {c.y})");
+        return 1;
+    }
+    print("test3 add: OK");
+
+    // Test 4: Point scaling
+    let s = a.scale(3);
+    if (s.x != 3 || s.y != 6) {
+        print(f"FAIL test4: scaled=({s.x}, {s.y})");
+        return 1;
+    }
+    print("test4 scale: OK");
+
+    // Test 5: Mutable methods
+    let mut ctr = Counter.new();
+    ctr.increment();
+    ctr.increment();
+    ctr.add(8);
+    let v = ctr.get();
+    if (v != 10) {
+        print(f"FAIL test5: counter = {v}");
+        return 1;
+    }
+    print("test5 mut methods: OK");
+
+    // Test 6: Method chaining results
+    let origin = Point.new(0, 0);
+    let moved = origin.add(Point.new(5, 5)).scale(2);
+    if (moved.x != 10 || moved.y != 10) {
+        print(f"FAIL test6: chained=({moved.x}, {moved.y})");
+        return 1;
+    }
+    print("test6 chaining: OK");
+
+    print("1028_struct_methods: PASS");
+    0
+}

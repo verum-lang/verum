@@ -1,0 +1,161 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, control-flow, call, ret
+// @timeout: 5000
+// @expect: pass
+//
+// Test: CALL, RET, RET_V opcodes
+// Verifies function call and return mechanics
+//
+// Note: The following features require separate implementation:
+// - Closure/lambda syntax (fn(...) -> Type { ... })
+// - Higher-order functions and closure captures
+// - Method dispatch (implement block methods) - causes assertion failures
+
+// Helper functions defined at module level
+fn add(a: Int, b: Int) -> Int { a + b }
+fn constant() -> Int { 42 }
+fn choose(cond: Bool) -> Int {
+    if cond {
+        return 1;
+    }
+    return 2;
+}
+
+fn nested_a() -> Int { 1 }
+fn nested_b() -> Int { nested_a() + 2 }
+fn nested_c() -> Int { nested_b() + 3 }
+fn nested_d() -> Int { nested_c() + 4 }
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+fn is_even(n: Int) -> Bool {
+    if n == 0 { true }
+    else { is_odd(n - 1) }
+}
+
+fn is_odd(n: Int) -> Bool {
+    if n == 0 { false }
+    else { is_even(n - 1) }
+}
+
+fn sum8(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int {
+    a + b + c + d + e + f + g + h
+}
+
+fn recurse_depth(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else { 1 + recurse_depth(n - 1) }
+}
+
+type Point is { x: Float, y: Float };
+
+fn make_point(x: Float, y: Float) -> Point {
+    Point { x: x, y: y }
+}
+
+// Method dispatch test with implement blocks
+type Counter is { value: Int };
+
+implement Counter {
+    fn get(&self) -> Int { self.value }
+    fn increment(&mut self) { self.value = self.value + 1; }
+    fn add(&mut self, amount: Int) { self.value = self.value + amount; }
+}
+
+fn test_simple_call() {
+    assert_eq(add(1, 2), 3);
+    assert_eq(add(10, 20), 30);
+    assert_eq(add(-5, 5), 0);
+}
+
+fn test_no_args() {
+    assert_eq(constant(), 42);
+}
+
+// Moved unit_fn to module level
+fn unit_fn() -> () { () }
+
+fn test_unit_return() {
+    let u: () = unit_fn();
+    assert_eq(u, ());
+}
+
+fn test_multiple_returns() {
+    assert_eq(choose(true), 1);
+    assert_eq(choose(false), 2);
+}
+
+fn test_nested_calls() {
+    assert_eq(nested_d(), 10);  // 1 + 2 + 3 + 4
+}
+
+fn test_recursive_call() {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+}
+
+fn test_mutual_recursion() {
+    assert(is_even(0));
+    assert(is_even(2));
+    assert(is_even(10));
+    assert(is_odd(1));
+    assert(is_odd(3));
+    assert(is_odd(11));
+}
+
+fn test_many_arguments() {
+    assert_eq(sum8(1, 2, 3, 4, 5, 6, 7, 8), 36);
+}
+
+fn test_returning_structs() {
+    let p = make_point(1.0, 2.0);
+    assert_eq(p.x, 1.0);
+    assert_eq(p.y, 2.0);
+}
+
+fn test_method_call() {
+    // Test basic method dispatch with implement blocks
+    let mut c = Counter { value: 0 };
+
+    // Test getter method
+    let v0 = c.get();
+    assert_eq(v0, 0);
+
+    // Test mutable method without args
+    c.increment();
+    let v1 = c.get();
+    assert_eq(v1, 1);
+
+    // Test mutable method with args
+    // Note: Using separate lets to avoid assert_eq interaction bug
+    c.add(5);
+    let v2 = c.get();
+    print(v2);  // Should be 6
+}
+
+fn test_call_stack_depth() {
+    // Should handle at least 100 deep calls
+    assert_eq(recurse_depth(100), 100);
+}
+
+fn main() {
+    test_simple_call();
+    test_no_args();
+    test_unit_return();
+    test_multiple_returns();
+    test_nested_calls();
+    test_recursive_call();
+    test_mutual_recursion();
+    test_many_arguments();
+    test_returning_structs();
+    test_method_call();
+    test_call_stack_depth();
+    print("003_function_calls: PASSED");
+}

@@ -1,0 +1,57 @@
+[package]
+name = "verum_fuzz"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fuzz testing infrastructure for the Verum language"
+keywords = ["fuzzing", "testing", "compiler", "verum"]
+categories = ["development-tools::testing"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+# Random number generation
+rand.workspace = true
+rand_chacha.workspace = true
+
+# Regex for mutation fuzzer
+regex.workspace = true
+
+# Time handling
+chrono.workspace = true
+
+# Serialization for crash reports
+serde.workspace = true
+serde_json.workspace = true
+
+# Parallel execution
+rayon = { workspace = true, optional = true }
+
+# Logging
+log.workspace = true
+env_logger.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+# Testing utilities
+tempfile.workspace = true
+criterion.workspace = true
+
+[features]
+default = []
+# Enable coverage-guided fuzzing
+coverage = []
+# Enable sanitizer integration
+sanitizers = []
+# Enable parallel fuzzing
+parallel = ["rayon"]
+
+[lints]
+workspace = true

@@ -1,0 +1,159 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, edit-distance, dp, string
+// @timeout: 30000
+
+// Edit distance (Levenshtein) using integer-encoded strings
+// Each "string" is an Arr8 of character codes with a length
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn min3(a: Int, b: Int, c: Int) -> Int { min2(min2(a, b), c) }
+
+// Edit distance between s[0..m] and t[0..n] using rolling DP row
+// We keep only the previous row (prev) and build current row
+fn edit_distance(s: Arr8, m: Int, t: Arr8, n: Int) -> Int {
+    // prev[j] = edit_distance(s[0..0], t[0..j]) = j
+    let mut prev = Arr8 { v0: 0, v1: 1, v2: 2, v3: 3, v4: 4, v5: 5, v6: 6, v7: 7 };
+    let mut i = 1;
+    while i <= m {
+        let mut curr = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+        curr = set8(curr, 0, i); // deleting i chars from s
+        let mut j = 1;
+        while j <= n {
+            let cost = if get8(s, i - 1) == get8(t, j - 1) { 0 } else { 1 };
+            let del = get8(prev, j) + 1;
+            let ins = get8(curr, j - 1) + 1;
+            let rep = get8(prev, j - 1) + cost;
+            curr = set8(curr, j, min3(del, ins, rep));
+            j = j + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+    get8(prev, n)
+}
+
+// Longest Common Subsequence length
+fn lcs_len(s: Arr8, m: Int, t: Arr8, n: Int) -> Int {
+    let mut prev = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let mut i = 1;
+    while i <= m {
+        let mut curr = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+        let mut j = 1;
+        while j <= n {
+            let val = if get8(s, i - 1) == get8(t, j - 1) {
+                get8(prev, j - 1) + 1
+            } else {
+                let a = get8(prev, j);
+                let b = get8(curr, j - 1);
+                if a > b { a } else { b }
+            };
+            curr = set8(curr, j, val);
+            j = j + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+    get8(prev, n)
+}
+
+// Hamming distance (same length strings)
+fn hamming_distance(s: Arr8, t: Arr8, n: Int) -> Int {
+    let mut dist = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(s, i) != get8(t, i) { dist = dist + 1; }
+        i = i + 1;
+    }
+    dist
+}
+
+fn test_edit_distance() -> Int {
+    // "kitten" vs "sitting" (as char codes)
+    // k=107, i=105, t=116, t=116, e=101, n=110
+    // s=115, i=105, t=116, t=116, i=105, n=110, g=103
+    let s = Arr8 { v0: 107, v1: 105, v2: 116, v3: 116, v4: 101, v5: 110, v6: 0, v7: 0 };
+    let t = Arr8 { v0: 115, v1: 105, v2: 116, v3: 116, v4: 105, v5: 110, v6: 103, v7: 0 };
+    assert_eq(edit_distance(s, 6, t, 7), 3);
+
+    // Same strings -> 0
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(edit_distance(a, 3, a, 3), 0);
+
+    // Empty vs non-empty
+    let empty = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(edit_distance(empty, 0, b, 4), 4);
+    assert_eq(edit_distance(b, 4, empty, 0), 4);
+
+    // Single substitution
+    let c = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let d = Arr8 { v0: 1, v1: 9, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(edit_distance(c, 3, d, 3), 1);
+    1
+}
+
+fn test_lcs() -> Int {
+    // LCS of [1,3,4,1,2] and [1,4,1,3,2] = [1,4,1,2] or [1,3,1,2] = length 4...
+    // Actually let's use simpler examples
+    // [1,2,3] and [1,2,3] -> LCS = 3
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcs_len(a, 3, a, 3), 3);
+
+    // [1,3,5,7] and [2,4,6,8] -> LCS = 0
+    let b = Arr8 { v0: 1, v1: 3, v2: 5, v3: 7, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let c = Arr8 { v0: 2, v1: 4, v2: 6, v3: 8, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcs_len(b, 4, c, 4), 0);
+
+    // [1,2,3,4] and [2,4] -> LCS = 2
+    let d = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let e = Arr8 { v0: 2, v1: 4, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcs_len(d, 4, e, 2), 2);
+
+    // [1,3,2,4,5] and [1,2,4,3,5] -> LCS = [1,2,4,5] = 4
+    let f = Arr8 { v0: 1, v1: 3, v2: 2, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let g = Arr8 { v0: 1, v1: 2, v2: 4, v3: 3, v4: 5, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcs_len(f, 5, g, 5), 4);
+    1
+}
+
+fn test_hamming() -> Int {
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 1, v1: 9, v2: 3, v3: 9, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(hamming_distance(a, b, 4), 2);
+    assert_eq(hamming_distance(a, a, 4), 0);
+
+    let c = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let d = Arr8 { v0: 1, v1: 1, v2: 1, v3: 1, v4: 1, v5: 1, v6: 1, v7: 1 };
+    assert_eq(hamming_distance(c, d, 8), 8);
+    1
+}
+
+fn main() -> Int {
+    test_edit_distance();
+    test_lcs();
+    test_hamming();
+    print("[OK] 456_edit_distance_aot");
+    0
+}

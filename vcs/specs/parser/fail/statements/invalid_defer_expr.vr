@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, defer, invalid, error
+// @description: Test defer statement with invalid expression (let is a statement, not expression)
+// @expected-error: E045
+
+fn test() {
+    defer let x = 5;
+}

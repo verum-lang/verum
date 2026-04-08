@@ -1,0 +1,239 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, compound, assignment
+
+// Compound assignment operator tests
+
+fn test_arithmetic_compound() {
+    // Arithmetic compound assignments
+    let mut a = 10;
+    a += 5;   // a = a + 5 = 15
+    a -= 3;   // a = a - 3 = 12
+    a *= 2;   // a = a * 2 = 24
+    a /= 4;   // a = a / 4 = 6
+    a %= 4;   // a = a % 4 = 2
+}
+
+fn test_bitwise_compound() {
+    // Bitwise compound assignments
+    let mut b = 0b1111_0000;
+    b &= 0b1010_1010;   // b = b & 0b1010_1010 = 0b1010_0000
+    b |= 0b0000_1111;   // b = b | 0b0000_1111 = 0b1010_1111
+    b ^= 0b1111_1111;   // b = b ^ 0b1111_1111 = 0b0101_0000
+}
+
+fn test_shift_compound() {
+    // Shift compound assignments
+    let mut c = 0b0001;
+    c <<= 4;   // c = c << 4 = 0b10000
+    c >>= 2;   // c = c >> 2 = 0b100
+}
+
+fn test_typed_compound() {
+    // With different integer types
+    let mut i8_val: i8 = 10;
+    i8_val += 5i8;
+
+    let mut u32_val: u32 = 100;
+    u32_val *= 2;
+
+    let mut i64_val: i64 = 1000;
+    i64_val /= 10;
+}
+
+fn test_float_compound() {
+    // Floating point compound assignments
+    let mut f = 10.0;
+    f += 5.5;
+    f -= 2.5;
+    f *= 2.0;
+    f /= 4.0;
+}
+
+fn test_expressions_rhs() {
+    // With expressions on right side
+    let mut x = 10;
+    let y = 5;
+    x += y * 2;
+    x -= y + 1;
+    x *= y - 2;
+}
+
+fn test_array_compound() {
+    // Array element compound assignment
+    let mut arr = [1, 2, 3, 4, 5];
+    arr[0] += 10;
+    arr[1] *= 2;
+    arr[2] -= 1;
+}
+
+// Struct field compound assignment
+type Counter is { value: Int };
+
+fn test_struct_compound() {
+    let mut counter = Counter { value: 0 };
+    counter.value += 1;
+    counter.value *= 10;
+    counter.value -= 5;
+}
+
+// Nested struct compound assignment
+type Stats is {
+    count: Int,
+    total: Float,
+};
+
+type Tracker is {
+    stats: Stats,
+};
+
+fn test_nested_struct_compound() {
+    let mut tracker = Tracker {
+        stats: Stats { count: 0, total: 0.0 },
+    };
+    tracker.stats.count += 1;
+    tracker.stats.total += 99.5;
+}
+
+fn test_loop_compound() {
+    // In loops
+    let mut sum = 0;
+    for i in 1..=10 {
+        sum += i;
+    }
+
+    let mut product = 1;
+    for i in 1..=5 {
+        product *= i;
+    }
+}
+
+fn test_accumulator() {
+    // Accumulator pattern
+    let mut accumulator = 0;
+    let values = [1, 2, 3, 4, 5];
+    for v in values {
+        accumulator += v;
+    }
+}
+
+fn test_bit_manipulation_loop() {
+    // Bit manipulation in loops
+    let mut flags = 0;
+    for i in 0..8 {
+        flags |= 1 << i;
+    }
+}
+
+// Compound assignment with function result
+fn compute() -> Int { 10 }
+
+fn test_function_compound() {
+    let mut result = 0;
+    result += compute();
+    result *= compute();
+}
+
+fn test_method_compound() {
+    // Compound with method calls
+    let mut text_len = 0;
+    let strings = ["hello", "world", "test"];
+    for s in strings {
+        text_len += s.len();
+    }
+}
+
+fn test_multiple_compound() {
+    // Multiple compound assignments in sequence
+    let mut n = 1;
+    n += 1;  // 2
+    n *= 2;  // 4
+    n += 1;  // 5
+    n *= 2;  // 10
+}
+
+fn test_precedence() {
+    // Compound assignment precedence
+    let mut p = 10;
+    p += 2 * 3;  // p = p + (2 * 3) = 16, not (p + 2) * 3
+
+    // With parenthesized expressions
+    let mut q = 100;
+    q /= (2 + 3);  // q = q / 5 = 20
+    q *= (10 - 5); // q = q * 5 = 100
+}
+
+fn test_casting_compound() {
+    // Compound assignment with casting
+    let mut casted: i64 = 100;
+    casted += 50i32 as i64;
+    casted *= 2i64;
+}
+
+fn test_conditional_compound() {
+    // In conditional blocks
+    let mut val = 0;
+    if true {
+        val += 10;
+    } else {
+        val -= 10;
+    }
+}
+
+fn test_match_compound() {
+    // In match arms (if mutable binding accessible)
+    let mut match_val = 10;
+    match match_val {
+        v if v > 5 => { match_val += 5; }
+        v if v > 0 => { match_val += 1; }
+        _ => { match_val = 0; }
+    }
+}
+
+fn test_edge_cases() {
+    // Edge cases
+    let mut zero = 0;
+    zero += 0;  // Still 0
+    zero *= 100;  // Still 0
+    zero |= 0xFF;  // Now 0xFF
+}
+
+fn test_large_numbers() {
+    // With large numbers
+    let mut large: u64 = 10_000_000_000;
+    large += 5_000_000_000;
+    large *= 2;
+    large /= 3;
+}
+
+fn test_hex_compound() {
+    // Hex compound assignments
+    let mut hex = 0xFF00;
+    hex |= 0x00FF;
+    hex &= 0xF0F0;
+    hex ^= 0x0F0F;
+}
+
+fn test_binary_compound() {
+    // Binary compound assignments
+    let mut bin = 0b1010_1010;
+    bin <<= 4;
+    bin >>= 2;
+    bin &= 0b0011_1111;
+}
+
+// All operators in one block
+fn all_compound_ops(mut val: Int, factor: Int) -> Int {
+    val += factor;
+    val -= 1;
+    val *= 2;
+    val /= 3;
+    val %= 7;
+    val &= 0xFF;
+    val |= 0x100;
+    val ^= 0x0F;
+    val <<= 1;
+    val >>= 2;
+    val
+}

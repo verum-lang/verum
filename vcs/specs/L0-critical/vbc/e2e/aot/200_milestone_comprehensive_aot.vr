@@ -1,0 +1,257 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, comprehensive
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test 200 milestone — comprehensive test exercising all major AOT features
+
+// === Types ===
+type Vec2 is { x: Int, y: Int };
+type RGB is { r: Int, g: Int, b: Int };
+
+// === Arithmetic helpers ===
+fn abs(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn clamp(val: Int, lo: Int, hi: Int) -> Int { max(lo, min(val, hi)) }
+
+// === Recursive functions ===
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+fn fibonacci(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        let t = a + b;
+        a = b;
+        b = t;
+        i = i + 1;
+    }
+    a
+}
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs(a);
+    let mut y = abs(b);
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+// === Record operations ===
+fn vec2_add(a: Vec2, b: Vec2) -> Vec2 {
+    Vec2 { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn vec2_dot(a: Vec2, b: Vec2) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+fn vec2_scale(v: Vec2, s: Int) -> Vec2 {
+    Vec2 { x: v.x * s, y: v.y * s }
+}
+
+fn rgb_mix(a: RGB, b: RGB) -> RGB {
+    RGB {
+        r: (a.r + b.r) / 2,
+        g: (a.g + b.g) / 2,
+        b: (a.b + b.b) / 2
+    }
+}
+
+fn rgb_brightness(c: RGB) -> Int {
+    (c.r + c.g + c.b) / 3
+}
+
+// === Higher-order functions ===
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int { f(g(x)) }
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+// === Bitwise operations ===
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x != 0 {
+        count = count + (x & 1);
+        x = x >> 1;
+    }
+    count
+}
+
+fn is_power_of_2(n: Int) -> Bool {
+    if n <= 0 { return false; }
+    (n & (n - 1)) == 0
+}
+
+// === Algorithm: Sieve of Eratosthenes (small, unrolled) ===
+// Check primes up to 30 using precomputed sieve
+fn count_primes_up_to_30() -> Int {
+    // Primes up to 30: 2,3,5,7,11,13,17,19,23,29 = 10 primes
+    let mut count = 0;
+    let mut n = 2;
+    while n <= 30 {
+        let mut is_p = true;
+        let mut d = 2;
+        while d * d <= n {
+            if n % d == 0 { is_p = false; }
+            d = d + 1;
+        }
+        if is_p { count = count + 1; }
+        n = n + 1;
+    }
+    count
+}
+
+// === Boolean logic ===
+fn bool_not(x: Bool) -> Bool { !x }
+
+fn test_boolean_and_or() {
+    assert_eq(true && true, true);
+    assert_eq(true && false, false);
+    assert_eq(false && true, false);
+    assert_eq(false && false, false);
+    assert_eq(true || true, true);
+    assert_eq(true || false, true);
+    assert_eq(false || true, true);
+    assert_eq(false || false, false);
+}
+
+fn test_boolean_not() {
+    assert_eq(bool_not(true), false);
+    assert_eq(bool_not(false), true);
+    let a = true;
+    let b = false;
+    assert_eq(a && bool_not(b), true);
+    assert_eq(bool_not(a) || b, false);
+}
+
+fn test_arithmetic() {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(10), 55);
+
+    assert_eq(gcd(48, 18), 6);
+    assert_eq(gcd(100, 75), 25);
+
+    assert_eq(abs(-42), 42);
+    assert_eq(max(3, 7), 7);
+    assert_eq(min(3, 7), 3);
+    assert_eq(clamp(15, 0, 10), 10);
+    assert_eq(clamp(-5, 0, 10), 0);
+    assert_eq(clamp(5, 0, 10), 5);
+}
+
+fn test_records() {
+    let a = Vec2 { x: 3, y: 4 };
+    let b = Vec2 { x: 1, y: 2 };
+
+    let sum = vec2_add(a, b);
+    assert_eq(sum.x, 4);
+    assert_eq(sum.y, 6);
+
+    assert_eq(vec2_dot(a, b), 11);  // 3*1 + 4*2
+
+    let scaled = vec2_scale(a, 3);
+    assert_eq(scaled.x, 9);
+    assert_eq(scaled.y, 12);
+
+    let red = RGB { r: 255, g: 0, b: 0 };
+    let blue = RGB { r: 0, g: 0, b: 255 };
+    let mixed = rgb_mix(red, blue);
+    assert_eq(mixed.r, 127);
+    assert_eq(mixed.g, 0);
+    assert_eq(mixed.b, 127);
+
+    assert_eq(rgb_brightness(red), 85);
+}
+
+fn test_closures() {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let add = |a: Int, b: Int| -> Int { a + b };
+
+    assert_eq(apply(double, 5), 10);
+    assert_eq(compose(double, inc, 5), 12);  // double(inc(5)) = double(6) = 12
+    assert_eq(fold_range(1, 6, 0, add), 15); // 1+2+3+4+5
+}
+
+fn test_bitwise() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(255), 8);
+}
+
+fn test_power_of_2() {
+    assert_eq(is_power_of_2(1), true);
+    assert_eq(is_power_of_2(2), true);
+    assert_eq(is_power_of_2(4), true);
+    assert_eq(is_power_of_2(16), true);
+    assert_eq(is_power_of_2(3), false);
+    assert_eq(is_power_of_2(6), false);
+    assert_eq(is_power_of_2(0), false);
+}
+
+fn test_loops() {
+    // Sum 1..100
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 100 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    assert_eq(sum, 5050);
+
+    // Nested loop: multiplication table checksum
+    let mut checksum = 0;
+    let mut r = 1;
+    while r <= 5 {
+        let mut c = 1;
+        while c <= 5 {
+            checksum = checksum + r * c;
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    // Sum of i*j for i,j in 1..5 = (1+2+3+4+5)^2 = 225
+    assert_eq(checksum, 225);
+}
+
+fn test_primes() {
+    assert_eq(count_primes_up_to_30(), 10);
+}
+
+fn main() -> Int {
+    test_boolean_and_or();
+    test_boolean_not();
+    test_arithmetic();
+    test_records();
+    test_closures();
+    test_bitwise();
+    test_power_of_2();
+    test_loops();
+    test_primes();
+    print("[OK] 200_milestone_comprehensive_aot - ALL FEATURES VERIFIED");
+    0
+}

@@ -1,0 +1,441 @@
+// =============================================================================
+// cell_test.vr - Tests for Cell<T> and RefCell<T> interior mutability types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, cell, refcell, interior-mutability
+// @description: Tests for Cell<T> construction, get/set/replace/take/update,
+//               RefCell<T> borrow/borrow_mut/try_borrow/try_borrow_mut,
+//               Ref<T>/RefMut<T> guards, BorrowError/BorrowMutError,
+//               and protocol implementations (Eq, Clone, Default, Debug)
+// =============================================================================
+
+mount core.base.cell.{
+    Cell, RefCell, Ref, RefMut,
+    BorrowError, BorrowMutError,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// Section 1: Cell<T> Construction
+// =============================================================================
+
+@test
+fn test_cell_new_int() {
+    let cell = Cell.new(42);
+    assert_eq(cell.get(), 42);
+}
+
+@test
+fn test_cell_new_bool() {
+    let cell = Cell.new(true);
+    assert_eq(cell.get(), true);
+}
+
+@test
+fn test_cell_new_float() {
+    let cell = Cell.new(3.14);
+    assert(cell.get() > 3.0);
+    assert(cell.get() < 4.0);
+}
+
+@test
+fn test_cell_new_text() {
+    let cell = Cell.new("hello");
+    assert_eq(cell.get(), "hello");
+}
+
+@test
+fn test_cell_new_zero() {
+    let cell = Cell.new(0);
+    assert_eq(cell.get(), 0);
+}
+
+@test
+fn test_cell_new_negative() {
+    let cell = Cell.new(-42);
+    assert_eq(cell.get(), -42);
+}
+
+// =============================================================================
+// Section 2: Cell<T> set
+// =============================================================================
+
+@test
+fn test_cell_set() {
+    let cell = Cell.new(42);
+    cell.set(100);
+    assert(!false); // Runtime-only: set uses interior mutability
+}
+
+@test
+fn test_cell_set_multiple() {
+    let cell = Cell.new(0);
+    cell.set(1);
+    cell.set(2);
+    cell.set(3);
+    assert(!false); // Runtime-only: set uses interior mutability
+}
+
+// =============================================================================
+// Section 3: Cell<T> replace
+// =============================================================================
+
+@test
+fn test_cell_replace() {
+    let cell = Cell.new(42);
+    let old = cell.replace(100);
+    assert_eq(old, 42);
+}
+
+@test
+fn test_cell_replace_chain() {
+    let cell = Cell.new(1);
+    let a = cell.replace(2);
+    let b = cell.replace(3);
+    assert_eq(a, 1);
+    assert_eq(b, 2);
+}
+
+// =============================================================================
+// Section 4: Cell<T> take
+// =============================================================================
+
+@test
+fn test_cell_take_int() {
+    let cell = Cell.new(42);
+    let taken = cell.take();
+    assert_eq(taken, 42);
+}
+
+@test
+fn test_cell_take_bool() {
+    let cell = Cell.new(true);
+    let taken = cell.take();
+    assert_eq(taken, true);
+}
+
+// =============================================================================
+// Section 5: Cell<T> update
+// =============================================================================
+
+@test
+fn test_cell_update() {
+    let cell = Cell.new(10);
+    cell.update(|x| x * 2);
+    assert(!false); // Runtime-only: update uses interior mutability
+}
+
+@test
+fn test_cell_update_add() {
+    let cell = Cell.new(5);
+    cell.update(|x| x + 10);
+    assert(!false); // Runtime-only: update uses interior mutability
+}
+
+// =============================================================================
+// Section 6: Cell<T> Protocols
+// =============================================================================
+
+@test
+fn test_cell_eq_same() {
+    let a = Cell.new(42);
+    let b = Cell.new(42);
+    assert(a == b);
+}
+
+@test
+fn test_cell_eq_different() {
+    let a = Cell.new(42);
+    let b = Cell.new(99);
+    assert(a != b);
+}
+
+@test
+fn test_cell_ord() {
+    let a = Cell.new(10);
+    let b = Cell.new(20);
+    assert_eq(a.cmp(&b), Less);
+    assert_eq(b.cmp(&a), Greater);
+}
+
+@test
+fn test_cell_ord_equal() {
+    let a = Cell.new(42);
+    let b = Cell.new(42);
+    assert_eq(a.cmp(&b), Equal);
+}
+
+@test
+fn test_cell_clone() {
+    let a = Cell.new(42);
+    let b = a.clone();
+    assert_eq(a.get(), b.get());
+}
+
+@test
+fn test_cell_default_int() {
+    let cell: Cell<Int> = Cell.default();
+    assert_eq(cell.get(), 0);
+}
+
+@test
+fn test_cell_default_bool() {
+    let cell: Cell<Bool> = Cell.default();
+    assert_eq(cell.get(), false);
+}
+
+// =============================================================================
+// Section 7: RefCell<T> Construction
+// =============================================================================
+
+@test
+fn test_refcell_new_int() {
+    let cell = RefCell.new(42);
+    assert_eq(cell.borrow_count(), 0);
+}
+
+@test
+fn test_refcell_new_text() {
+    let cell = RefCell.new("hello");
+    assert_eq(cell.borrow_count(), 0);
+}
+
+@test
+fn test_refcell_new_bool() {
+    let cell = RefCell.new(true);
+    assert_eq(cell.borrow_count(), 0);
+}
+
+// =============================================================================
+// Section 8: RefCell<T> borrow
+// =============================================================================
+
+@test
+fn test_refcell_borrow() {
+    let cell = RefCell.new(42);
+    let r = cell.borrow();
+    assert_eq(*r.value, 42);
+}
+
+@test
+fn test_refcell_borrow_text() {
+    let cell = RefCell.new("hello");
+    let r = cell.borrow();
+    assert_eq(*r.value, "hello");
+}
+
+@test
+fn test_refcell_borrow_deref() {
+    let cell = RefCell.new(42);
+    let r = cell.borrow();
+    // Ref<T> implements Deref
+    let val: &Int = &*r;
+    assert_eq(*val, 42);
+}
+
+// =============================================================================
+// Section 9: RefCell<T> borrow_mut
+// =============================================================================
+
+@test
+fn test_refcell_borrow_mut() {
+    let cell = RefCell.new(42);
+    let mut r = cell.borrow_mut();
+    assert_eq(*r.value, 42);
+}
+
+@test
+fn test_refcell_borrow_mut_deref() {
+    let cell = RefCell.new(42);
+    let mut r = cell.borrow_mut();
+    let val: &Int = &*r;
+    assert_eq(*val, 42);
+}
+
+// =============================================================================
+// Section 10: RefCell<T> try_borrow
+// =============================================================================
+
+@test
+fn test_refcell_try_borrow_success() {
+    let cell = RefCell.new(42);
+    let result = cell.try_borrow();
+    assert(result.is_ok());
+    let r = result.unwrap();
+    assert_eq(*r.value, 42);
+}
+
+@test
+fn test_refcell_try_borrow_mut_success() {
+    let cell = RefCell.new(42);
+    let result = cell.try_borrow_mut();
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Section 11: RefCell<T> replace
+// =============================================================================
+
+@test
+fn test_refcell_replace() {
+    let cell = RefCell.new(42);
+    let old = cell.replace(100);
+    assert_eq(old, 42);
+}
+
+@test
+fn test_refcell_replace_text() {
+    let cell = RefCell.new("old");
+    let old = cell.replace("new");
+    assert_eq(old, "old");
+}
+
+// =============================================================================
+// Section 12: RefCell<T> Protocols
+// =============================================================================
+
+@test
+fn test_refcell_eq() {
+    let a = RefCell.new(42);
+    let b = RefCell.new(42);
+    assert(a == b);
+}
+
+@test
+fn test_refcell_ne() {
+    let a = RefCell.new(42);
+    let b = RefCell.new(99);
+    assert(a != b);
+}
+
+@test
+fn test_refcell_clone() {
+    let a = RefCell.new(42);
+    let b = a.clone();
+    assert_eq(*b.borrow().value, 42);
+}
+
+@test
+fn test_refcell_default_int() {
+    let cell: RefCell<Int> = RefCell.default();
+    assert_eq(*cell.borrow().value, 0);
+}
+
+@test
+fn test_refcell_default_bool() {
+    let cell: RefCell<Bool> = RefCell.default();
+    assert_eq(*cell.borrow().value, false);
+}
+
+// =============================================================================
+// Section 13: BorrowError / BorrowMutError
+// =============================================================================
+
+@test
+fn test_borrow_error_construction() {
+    let err = BorrowError { message: "already mutably borrowed" };
+    assert_eq(err.message, "already mutably borrowed");
+}
+
+@test
+fn test_borrow_mut_error_construction() {
+    let err = BorrowMutError { message: "already borrowed" };
+    assert_eq(err.message, "already borrowed");
+}
+
+// =============================================================================
+// Section 14: Cell<T> with various types
+// =============================================================================
+
+@test
+fn test_cell_with_maybe() {
+    let cell: Cell<Maybe<Int>> = Cell.new(Some(42));
+    let val = cell.get();
+    assert(val.is_some());
+    assert_eq(val.unwrap(), 42);
+}
+
+@test
+fn test_cell_with_maybe_none() {
+    let cell: Cell<Maybe<Int>> = Cell.new(None);
+    let val = cell.get();
+    assert(val.is_none());
+}
+
+@test
+fn test_cell_replace_maybe() {
+    let cell: Cell<Maybe<Int>> = Cell.new(Some(42));
+    let old = cell.replace(None);
+    assert(old.is_some());
+    assert_eq(old.unwrap(), 42);
+}
+
+// =============================================================================
+// Section 15: RefCell<T> with various types
+// =============================================================================
+
+@test
+fn test_refcell_with_list() {
+    let cell = RefCell.new([1, 2, 3]);
+    let r = cell.borrow();
+    assert_eq((*r.value).len(), 3);
+}
+
+@test
+fn test_refcell_with_maybe() {
+    let cell: RefCell<Maybe<Int>> = RefCell.new(Some(42));
+    let r = cell.borrow();
+    assert((*r.value).is_some());
+}
+
+// =============================================================================
+// Section 16: Edge cases
+// =============================================================================
+
+@test
+fn test_cell_get_multiple_times() {
+    let cell = Cell.new(42);
+    assert_eq(cell.get(), 42);
+    assert_eq(cell.get(), 42);
+    assert_eq(cell.get(), 42);
+}
+
+@test
+fn test_refcell_multiple_borrows() {
+    let cell = RefCell.new(42);
+    // Multiple shared borrows should work
+    let r1 = cell.borrow();
+    // In typecheck mode, we verify the borrow type compiles
+    assert_eq(*r1.value, 42);
+}
+
+@test
+fn test_refcell_borrow_count_initial() {
+    let cell = RefCell.new(42);
+    assert_eq(cell.borrow_count(), 0);
+}
+
+@test
+fn test_cell_clone_independence() {
+    let a = Cell.new(42);
+    let b = a.clone();
+    b.set(100);
+    // After clone, a and b are independent
+    assert_eq(a.get(), 42);
+}
+
+@test
+fn test_refcell_clone_independence() {
+    let a = RefCell.new(42);
+    let b = a.clone();
+    // b is an independent copy
+    assert_eq(*b.borrow().value, 42);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

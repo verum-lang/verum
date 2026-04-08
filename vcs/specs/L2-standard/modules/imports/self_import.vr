@@ -1,0 +1,225 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, imports, self
+
+/// Self mount - importing the module itself along with items.
+/// The self form: `mount module.{self, Item1, Item2};`
+///
+/// Use cases:
+/// - Import module for qualified access AND specific items for direct use
+/// - Re-export module as a unit
+/// - Create module aliases
+
+// Import module and specific items
+mount core.collections.{self, List, Map, Set};
+mount core.io.{self as io, Read, Write};
+mount math.{self, sin, cos, PI};
+
+// Import module items directly
+mount data.models.{User, Product, Order, OrderItem};
+mount external.api.{Client, Request, Response};
+
+// Module definitions for the test
+module std {
+    pub module collections {
+        pub type List<T> is {
+            items: Heap<[T]>,
+            len: Int
+        };
+
+        implement<T> List<T> {
+            pub fn new() -> List<T> {
+                List { items: Heap.empty(), len: 0 }
+            }
+
+            pub fn with_capacity(cap: Int) -> List<T> {
+                List { items: Heap.with_capacity(cap), len: 0 }
+            }
+        }
+
+        pub type Map<K, V> is { /* ... */ };
+
+        pub type Set<T> is { /* ... */ };
+
+        pub type Queue<T> is { /* ... */ };
+
+        // Module-level function
+        pub fn empty_list<T>() -> List<T> {
+            List.new()
+        }
+
+        pub fn empty_map<K, V>() -> Map<K, V> {
+            Map.new()
+        }
+    }
+
+    pub module io {
+        pub type Read is protocol {
+            fn read(&mut self, buf: &mut [Byte]) -> Result<Int, Error>;
+        }
+
+        pub type Write is protocol {
+            fn write(&mut self, buf: &[Byte]) -> Result<Int, Error>;
+        }
+
+        pub type Error is
+            | NotFound
+            | PermissionDenied
+            | Other(Text);
+
+        pub type File is { /* ... */ };
+
+        pub fn open(path: &Text) -> Result<File, Error> {
+            // Open file
+            Err(Error.NotFound)
+        }
+
+        pub fn create(path: &Text) -> Result<File, Error> {
+            // Create file
+            Err(Error.PermissionDenied)
+        }
+
+        pub fn copy(from: &Text, to: &Text) -> Result<Int, Error> {
+            // Copy file
+            Ok(0)
+        }
+    }
+}
+
+module math {
+    pub const PI: Float = 3.14159265358979;
+    pub const E: Float = 2.71828182845904;
+    pub const TAU: Float = 6.28318530717958;
+
+    pub fn sin(x: Float) -> Float { /* ... */ 0.0 }
+    pub fn cos(x: Float) -> Float { /* ... */ 1.0 }
+    pub fn tan(x: Float) -> Float { /* ... */ 0.0 }
+    pub fn sqrt(x: Float) -> Float { /* ... */ 0.0 }
+    pub fn pow(base: Float, exp: Float) -> Float { /* ... */ 1.0 }
+    pub fn abs(x: Float) -> Float { if x < 0.0 { -x } else { x } }
+    pub fn floor(x: Float) -> Float { /* ... */ 0.0 }
+    pub fn ceil(x: Float) -> Float { /* ... */ 0.0 }
+    pub fn round(x: Float) -> Float { /* ... */ 0.0 }
+}
+
+module data {
+    pub module models {
+        pub type User is {
+            id: Int,
+            name: Text
+        };
+
+        pub type Product is {
+            id: Int,
+            name: Text,
+            price: Float
+        };
+
+        pub type Order is {
+            id: Int,
+            user_id: Int,
+            items: List<OrderItem>
+        };
+
+        pub type OrderItem is {
+            product_id: Int,
+            quantity: Int
+        };
+
+        pub fn create_user(id: Int, name: Text) -> User {
+            User { id, name }
+        }
+
+        pub fn create_product(id: Int, name: Text, price: Float) -> Product {
+            Product { id, name, price }
+        }
+    }
+}
+
+module external {
+    pub module api {
+        pub type Client is {
+            base_url: Text,
+            timeout: Int
+        };
+
+        pub type Request is {
+            method: Text,
+            path: Text,
+            body: Maybe<Bytes>
+        };
+
+        pub type Response is {
+            status: Int,
+            body: Bytes
+        };
+
+        implement Client {
+            pub fn new(base_url: Text) -> Client {
+                Client { base_url, timeout: 30000 }
+            }
+
+            pub fn send(&self, req: Request) -> Result<Response, Text> {
+                Ok(Response { status: 200, body: Bytes.empty() })
+            }
+        }
+
+        pub fn get(url: &Text) -> Result<Response, Text> {
+            let client = Client.new(url.clone());
+            client.send(Request { method: "GET", path: "/", body: None })
+        }
+
+        pub fn post(url: &Text, body: Bytes) -> Result<Response, Text> {
+            let client = Client.new(url.clone());
+            client.send(Request { method: "POST", path: "/", body: Some(body) })
+        }
+    }
+}
+
+fn main() {
+    // Use directly imported items
+    let list: List<Int> = List.new();
+    let map: Map<Text, Int> = Map.new();
+
+    // Use types from the module
+    let set: Set<Text> = Set.new();
+
+    // Use directly constructed types
+    let empty: List<Float> = List.new();
+
+    // io module items used directly
+    let _ = 0;  // io operations require runtime support
+
+    // Use directly imported sin, cos, PI
+    let angle = PI / 4.0;
+    let sine = sin(angle);
+    let cosine = cos(angle);
+
+    // Use module for qualified access to other math functions
+    let tangent = math.tan(angle);
+    let square_root = math.sqrt(2.0);
+    let power = math.pow(2.0, 10.0);
+    let absolute = math.abs(-5.0);
+    let e = math.E;
+
+    // Use directly imported types from models
+    let user = User { id: 1, name: "Alice" };
+    let product = Product { id: 100, name: "Widget", price: 29.99 };
+    let order = Order {
+        id: 1000,
+        user_id: user.id,
+        items: List.new()
+    };
+
+    // Use directly imported types from api
+    let client = Client.new("https://api.example.com");
+
+    // Self mount is useful for re-exports
+    // mount external.api;            // The module
+    // mount external.api.Client;     // Direct type
+    // mount external.api.Response;   // Direct type
+}
+
+// Self mount in re-export chains
+// (advanced re-export patterns tested separately)

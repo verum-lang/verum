@@ -1,0 +1,293 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, control-flow, jmp, jmp_if, jmp_not
+// @timeout: 5000
+// @expect: pass
+//
+// Test: JMP, JMP_IF, JMP_NOT
+// Verifies unconditional and conditional jump operations
+
+fn test_if_true_branch() {
+    let mut result: Int = 0;
+
+    if true {
+        result = 1;
+    } else {
+        result = 2;
+    }
+
+    assert_eq(result, 1);
+}
+
+fn test_if_false_branch() {
+    let mut result: Int = 0;
+
+    if false {
+        result = 1;
+    } else {
+        result = 2;
+    }
+
+    assert_eq(result, 2);
+}
+
+fn test_if_condition_expression() {
+    let x: Int = 5;
+    let mut result: Int = 0;
+
+    if x > 3 {
+        result = 1;
+    } else {
+        result = 2;
+    }
+
+    assert_eq(result, 1);
+}
+
+fn test_if_without_else() {
+    let mut result: Int = 0;
+
+    if true {
+        result = 1;
+    }
+
+    assert_eq(result, 1);
+
+    let mut result2: Int = 0;
+
+    if false {
+        result2 = 1;
+    }
+
+    assert_eq(result2, 0);  // Unchanged
+}
+
+fn test_nested_if() {
+    let x: Int = 5;
+    let y: Int = 10;
+    let mut result: Int = 0;
+
+    if x > 0 {
+        if y > 5 {
+            result = 1;
+        } else {
+            result = 2;
+        }
+    } else {
+        if y > 5 {
+            result = 3;
+        } else {
+            result = 4;
+        }
+    }
+
+    assert_eq(result, 1);
+}
+
+fn test_if_else_chain() {
+    fn classify(x: Int) -> Text {
+        if x < 0 {
+            "negative"
+        } else if x == 0 {
+            "zero"
+        } else if x < 10 {
+            "small"
+        } else if x < 100 {
+            "medium"
+        } else {
+            "large"
+        }
+    }
+
+    assert_eq(classify(-5), "negative");
+    assert_eq(classify(0), "zero");
+    assert_eq(classify(5), "small");
+    assert_eq(classify(50), "medium");
+    assert_eq(classify(500), "large");
+}
+
+fn test_while_loop() {
+    let mut i: Int = 0;
+    let mut sum: Int = 0;
+
+    while i < 10 {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    assert_eq(sum, 45);  // 0+1+2+...+9
+    assert_eq(i, 10);
+}
+
+fn test_while_never_enters() {
+    let mut entered: Bool = false;
+
+    while false {
+        entered = true;
+    }
+
+    assert(!entered);
+}
+
+fn test_while_single_iteration() {
+    let mut count: Int = 0;
+    let mut done: Bool = false;
+
+    while !done {
+        count = count + 1;
+        done = true;
+    }
+
+    assert_eq(count, 1);
+}
+
+fn test_nested_while() {
+    let mut outer: Int = 0;
+    let mut total: Int = 0;
+
+    while outer < 3 {
+        let mut inner: Int = 0;
+        while inner < 4 {
+            total = total + 1;
+            inner = inner + 1;
+        }
+        outer = outer + 1;
+    }
+
+    assert_eq(total, 12);  // 3 * 4
+}
+
+fn test_loop_break() {
+    let mut i: Int = 0;
+
+    loop {
+        i = i + 1;
+        if i >= 5 {
+            break;
+        }
+    }
+
+    assert_eq(i, 5);
+}
+
+fn test_loop_continue() {
+    let mut i: Int = 0;
+    let mut sum: Int = 0;
+
+    while i < 10 {
+        i = i + 1;
+        if i % 2 == 0 {
+            continue;  // Skip even numbers
+        }
+        sum = sum + i;
+    }
+
+    assert_eq(sum, 25);  // 1+3+5+7+9
+}
+
+fn test_nested_break() {
+    let mut outer: Int = 0;
+    let mut inner_total: Int = 0;
+
+    while outer < 5 {
+        let mut inner: Int = 0;
+        while inner < 10 {
+            if inner >= 3 {
+                break;  // Break inner loop
+            }
+            inner_total = inner_total + 1;
+            inner = inner + 1;
+        }
+        outer = outer + 1;
+    }
+
+    assert_eq(inner_total, 15);  // 5 * 3
+}
+
+fn test_labeled_break() {
+    let mut result: Int = 0;
+
+    'outer: while true {
+        let mut i: Int = 0;
+        while i < 10 {
+            if i == 5 {
+                result = i;
+                break 'outer;
+            }
+            i = i + 1;
+        }
+    }
+
+    assert_eq(result, 5);
+}
+
+fn test_labeled_continue() {
+    let mut outer: Int = 0;
+    let mut skip_count: Int = 0;
+
+    'outer: while outer < 5 {
+        outer = outer + 1;
+        if outer == 3 {
+            skip_count = skip_count + 1;
+            continue 'outer;
+        }
+        // Normal iteration
+    }
+
+    assert_eq(outer, 5);
+    assert_eq(skip_count, 1);
+}
+
+fn test_for_range() {
+    let mut sum: Int = 0;
+
+    for i in 0..10 {
+        sum = sum + i;
+    }
+
+    assert_eq(sum, 45);
+}
+
+fn test_for_range_inclusive() {
+    let mut sum: Int = 0;
+
+    for i in 0..=10 {
+        sum = sum + i;
+    }
+
+    assert_eq(sum, 55);
+}
+
+fn test_for_array() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut sum: Int = 0;
+
+    for item in arr {
+        sum = sum + item;
+    }
+
+    assert_eq(sum, 15);
+}
+
+fn main() {
+    test_if_true_branch();
+    test_if_false_branch();
+    test_if_condition_expression();
+    test_if_without_else();
+    test_nested_if();
+    test_if_else_chain();
+    test_while_loop();
+    test_while_never_enters();
+    test_while_single_iteration();
+    test_nested_while();
+    test_loop_break();
+    test_loop_continue();
+    test_nested_break();
+    test_labeled_break();
+    test_labeled_continue();
+    test_for_range();
+    test_for_range_inclusive();
+    test_for_array();
+    print("001_jumps: PASSED");
+}

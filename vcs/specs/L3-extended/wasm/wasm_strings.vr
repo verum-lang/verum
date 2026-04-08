@@ -1,0 +1,70 @@
+// @test: run
+// @level: L3
+// @tier: 2
+// @tags: wasm, strings, text, cross-compilation
+// @expected-exit: 0
+// @description: String/Text operations under WASM target
+
+fn test_text_creation() {
+    let s = "hello";
+    assert(s.len() == 5);
+}
+
+fn test_text_concat() {
+    let a = "hello";
+    let b = " world";
+    let c = a + b;
+    assert(c == "hello world");
+}
+
+fn test_text_slice() {
+    let s = "abcdef";
+    let sub = s[1..4];
+    assert(sub == "bcd");
+}
+
+fn test_text_contains() {
+    let s = "hello world";
+    assert(s.contains("world"));
+    assert(!s.contains("xyz"));
+}
+
+fn test_text_split() {
+    let s = "a,b,c";
+    let parts = s.split(",");
+    assert(parts.len() == 3);
+    assert(parts[0] == "a");
+    assert(parts[1] == "b");
+    assert(parts[2] == "c");
+}
+
+fn test_format_string() {
+    let name = "WASM";
+    let version = 1;
+    let msg = f"Hello {name} v{version}";
+    assert(msg.contains("WASM"));
+}
+
+fn test_text_comparison() {
+    assert("abc" < "abd");
+    assert("abc" == "abc");
+    assert("abd" > "abc");
+}
+
+fn test_text_empty() {
+    let empty = "";
+    assert(empty.len() == 0);
+    assert(empty.is_empty());
+}
+
+fn main() {
+    test_text_creation();
+    test_text_concat();
+    test_text_slice();
+    test_text_contains();
+    test_text_split();
+    test_format_string();
+    test_text_comparison();
+    test_text_empty();
+    print("WASM string tests: all passed");
+}

@@ -1,0 +1,45 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, integer-overflow, checked, safe
+// @description: Tests explicit checked arithmetic operations
+
+fn main() {
+    // Use a large value that will overflow when +1 is added
+    let max_int = 9223372036854775807;
+
+    // Checked addition returns Maybe<Int>
+    let result1 = max_int.checked_add(1);
+    assert(result1.is_none());  // Expected: overflow detected
+
+    // Checked subtraction with min value
+    let min_int = -9223372036854775807 - 1;  // Int.MIN
+    let result2 = min_int.checked_sub(1);
+    assert(result2.is_none());
+
+    // Checked multiplication
+    let large = 9223372036854775807;
+    let result3 = large.checked_mul(2);
+    assert(result3.is_none());
+
+    // Checked division (handles division by zero)
+    let result4 = 10.checked_div(0);
+    assert(result4.is_none());
+
+    // Valid operations succeed
+    let result5 = 100.checked_add(200);
+    assert(result5.is_some());
+    match result5 {
+        Maybe.Some(v) => assert(v == 300),
+        Maybe.None => assert(false),
+    }
+
+    let result6 = 100.checked_mul(3);
+    assert(result6.is_some());
+    match result6 {
+        Maybe.Some(v) => assert(v == 300),
+        Maybe.None => assert(false),
+    }
+
+    println("Overflow handled safely");
+}

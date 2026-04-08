@@ -1,0 +1,14 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, protocol, error
+// @description: Test missing protocol brace detection
+// @expected-error: E051
+
+type Display is protocol fn show(&self) -> Text; ;
+
+type Iterator is protocol
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+;
+
+type Combine is protocol extends Clone fn combine(&self, other: &Self) -> Self; ;

@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, sandbox, forbidden, file_system
+// @description: Test that file system operations are forbidden in meta functions
+// @expected-error: E103
+
+// File system operations should be blocked in meta context
+meta fn test_file_read() -> Text {
+    // Attempting to read a file should fail with M301 ForbiddenOperation
+    // The `std.fs.read` function is in the filesystem_functions allowlist
+    std.fs.read("/etc/passwd")
+}
+
+fn main() {
+    // Call meta function at compile time
+    @const assert(text_len(test_file_read()) > 0);
+}

@@ -1,0 +1,166 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, reservoir_sampling, sampling, distribution, deterministic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Deterministic tests for reservoir sampling correctness properties.
+// We use a deterministic linear congruential generator (LCG) as the random source
+// so results are reproducible. The LCG: state = (state * 1103515245 + 12345) mod 2^31.
+// For reservoir sampling of size k from stream of n items:
+//   - First k items fill the reservoir.
+//   - For item i (i >= k): generate random j in [0, i]; if j < k, replace reservoir[j].
+// We verify:
+//   - All k reservoir slots contain valid stream indices.
+//   - No duplicate indices in reservoir.
+//   - All items are eventually seen when k == n.
+//   - k=1 always keeps exactly one item from the stream.
+
+// LCG step: returns next pseudo-random value in [0, mod).
+fn lcg_next(state: [Int; 1], mod_val: Int) -> Int {
+    let s = ((state[0] * 1103515245) + 12345) % 2147483647;
+    state[0] = s;
+    s % mod_val
+}
+
+// Reservoir sampling: sample k items from stream 0..n-1.
+// Result stored in reservoir[0..k), containing stream indices.
+fn reservoir_sample(reservoir: [Int; 8], k: Int, n: Int, seed: Int) {
+    let mut state = [seed];
+    // Fill reservoir with first k items.
+    let mut i = 0;
+    while i < k {
+        reservoir[i] = i;
+        i = i + 1;
+    }
+    // Process rest of stream.
+    while i < n {
+        let j = lcg_next(state, i + 1);
+        if j < k {
+            reservoir[j] = i;
+        }
+        i = i + 1;
+    }
+}
+
+// Check that all values in reservoir[0..k) are in [0, n).
+fn all_valid(reservoir: [Int; 8], k: Int, n: Int) -> Int {
+    let mut i = 0;
+    while i < k {
+        if reservoir[i] < 0  { return 0; }
+        if reservoir[i] >= n { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Check that there are no duplicate values in reservoir[0..k).
+fn no_duplicates(reservoir: [Int; 8], k: Int) -> Int {
+    let mut i = 0;
+    while i < k {
+        let mut j = i + 1;
+        while j < k {
+            if reservoir[i] == reservoir[j] { return 0; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_k_equals_n() {
+    // When k == n, reservoir must contain all indices 0..n-1.
+    let mut res = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(res, 5, 5, 42);
+    // All 5 indices [0,1,2,3,4] must be in reservoir (in some order).
+    assert_eq(all_valid(res, 5, 5), 1);
+    assert_eq(no_duplicates(res, 5), 1);
+    // Count all distinct indices 0-4 present.
+    let mut seen = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 5 {
+        seen[res[i]] = 1;
+        i = i + 1;
+    }
+    assert_eq(seen[0] + seen[1] + seen[2] + seen[3] + seen[4], 5);
+    print("k_equals_n: ok");
+}
+
+fn test_k1_always_valid() {
+    // k=1: reservoir holds exactly one index from 0..n-1.
+    let mut res1 = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(res1, 1, 10, 7);
+    assert_eq(all_valid(res1, 1, 10), 1);
+    assert(res1[0] >= 0);
+    assert(res1[0] < 10);
+
+    let mut res2 = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(res2, 1, 100, 13);
+    assert(res2[0] >= 0);
+    assert(res2[0] < 100);
+
+    let mut res3 = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(res3, 1, 3, 99);
+    assert(res3[0] >= 0);
+    assert(res3[0] < 3);
+
+    print("k1_always_valid: ok");
+}
+
+fn test_no_duplicates_property() {
+    // Multiple seeds — each sample must be dup-free.
+    let mut r1 = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(r1, 4, 10, 1);
+    assert_eq(no_duplicates(r1, 4), 1);
+    assert_eq(all_valid(r1, 4, 10), 1);
+
+    let mut r2 = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(r2, 4, 10, 2);
+    assert_eq(no_duplicates(r2, 4), 1);
+    assert_eq(all_valid(r2, 4, 10), 1);
+
+    let mut r3 = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(r3, 6, 8, 55);
+    assert_eq(no_duplicates(r3, 6), 1);
+    assert_eq(all_valid(r3, 6, 8), 1);
+
+    print("no_duplicates_property: ok");
+}
+
+fn test_k_equals_one_stream_of_two() {
+    // Stream of 2: k=1 must return 0 or 1.
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(r, 1, 2, 5);
+    assert(r[0] == 0 || r[0] == 1);
+    print("k_equals_one_stream_of_two: ok");
+}
+
+fn test_determinism() {
+    // Same seed must produce same result every time.
+    let mut r1 = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut r2 = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(r1, 3, 8, 123);
+    reservoir_sample(r2, 3, 8, 123);
+    assert_eq(r1[0], r2[0]);
+    assert_eq(r1[1], r2[1]);
+    assert_eq(r1[2], r2[2]);
+
+    // Different seeds should generally differ (not guaranteed, but check validity).
+    let mut r3 = [0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(r3, 3, 8, 456);
+    assert_eq(all_valid(r3, 3, 8), 1);
+    assert_eq(no_duplicates(r3, 3), 1);
+
+    print("determinism: ok");
+}
+
+fn main() -> Int {
+    test_k_equals_n();
+    test_k1_always_valid();
+    test_no_duplicates_property();
+    test_k_equals_one_stream_of_two();
+    test_determinism();
+    print("[OK] 549_interp_reservoir_sampling");
+    0
+}

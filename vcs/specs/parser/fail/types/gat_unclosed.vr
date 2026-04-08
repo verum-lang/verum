@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, gat, brackets, error
+// @description: Test detection of unclosed GAT type parameters
+// @expected-error: E041
+
+// GAT type parameters missing closing angle bracket
+type Container is protocol {
+    type Item<T;
+    fn get<T>(&self) -> Self.Item<T>;
+};

@@ -1,0 +1,172 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, floyd_warshall, shortest_paths, all_pairs, graph
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Floyd-Warshall all-pairs shortest paths algorithm.
+// Uses adjacency matrix encoded in a flat 16-element array (4x4 graph).
+// INF = 9999 represents no direct edge.
+
+// Flat 4x4 distance matrix stored as 16-element record.
+type Mat4 is {
+    m00: Int, m01: Int, m02: Int, m03: Int,
+    m10: Int, m11: Int, m12: Int, m13: Int,
+    m20: Int, m21: Int, m22: Int, m23: Int,
+    m30: Int, m31: Int, m32: Int, m33: Int
+};
+
+fn mat4_get(m: Mat4, r: Int, c: Int) -> Int {
+    let idx = r * 4 + c;
+    if idx == 0  { m.m00 } else if idx == 1  { m.m01 }
+    else if idx == 2  { m.m02 } else if idx == 3  { m.m03 }
+    else if idx == 4  { m.m10 } else if idx == 5  { m.m11 }
+    else if idx == 6  { m.m12 } else if idx == 7  { m.m13 }
+    else if idx == 8  { m.m20 } else if idx == 9  { m.m21 }
+    else if idx == 10 { m.m22 } else if idx == 11 { m.m23 }
+    else if idx == 12 { m.m30 } else if idx == 13 { m.m31 }
+    else if idx == 14 { m.m32 } else { m.m33 }
+}
+
+fn mat4_set(m: Mat4, r: Int, c: Int, v: Int) -> Mat4 {
+    let idx = r * 4 + c;
+    Mat4 {
+        m00: if idx == 0  { v } else { m.m00 },
+        m01: if idx == 1  { v } else { m.m01 },
+        m02: if idx == 2  { v } else { m.m02 },
+        m03: if idx == 3  { v } else { m.m03 },
+        m10: if idx == 4  { v } else { m.m10 },
+        m11: if idx == 5  { v } else { m.m11 },
+        m12: if idx == 6  { v } else { m.m12 },
+        m13: if idx == 7  { v } else { m.m13 },
+        m20: if idx == 8  { v } else { m.m20 },
+        m21: if idx == 9  { v } else { m.m21 },
+        m22: if idx == 10 { v } else { m.m22 },
+        m23: if idx == 11 { v } else { m.m23 },
+        m30: if idx == 12 { v } else { m.m30 },
+        m31: if idx == 13 { v } else { m.m31 },
+        m32: if idx == 14 { v } else { m.m32 },
+        m33: if idx == 15 { v } else { m.m33 }
+    }
+}
+
+// Floyd-Warshall: update dist matrix in-place using 4x4 iteration.
+fn floyd_warshall(dist: Mat4) -> Mat4 {
+    let mut d = dist;
+    let mut k = 0;
+    while k < 4 {
+        let mut i = 0;
+        while i < 4 {
+            let mut j = 0;
+            while j < 4 {
+                let dij = mat4_get(d, i, j);
+                let dik = mat4_get(d, i, k);
+                let dkj = mat4_get(d, k, j);
+                if dik + dkj < dij {
+                    d = mat4_set(d, i, j, dik + dkj);
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        k = k + 1;
+    }
+    d
+}
+
+fn test_basic_paths() {
+    let inf = 9999;
+    // Graph: 0->1(3), 0->3(7), 1->0(8), 1->2(2), 2->0(5), 2->3(1), 3->0(2)
+    let dist = Mat4 {
+        m00: 0,   m01: 3,   m02: inf, m03: 7,
+        m10: 8,   m11: 0,   m12: 2,   m13: inf,
+        m20: 5,   m21: inf, m22: 0,   m23: 1,
+        m30: 2,   m31: inf, m32: inf, m33: 0
+    };
+    let d = floyd_warshall(dist);
+    // 0->0 = 0
+    assert_eq(mat4_get(d, 0, 0), 0);
+    // 0->1 = 3 (direct)
+    assert_eq(mat4_get(d, 0, 1), 3);
+    // 0->2 = 0->1->2 = 3+2 = 5
+    assert_eq(mat4_get(d, 0, 2), 5);
+    // 0->3 = 0->1->2->3 = 3+2+1 = 6 (better than direct 7)
+    assert_eq(mat4_get(d, 0, 3), 6);
+    // 3->0 = 2 (direct)
+    assert_eq(mat4_get(d, 3, 0), 2);
+    // 2->3 = 1 (direct)
+    assert_eq(mat4_get(d, 2, 3), 1);
+    print("basic_paths: ok");
+}
+
+fn test_symmetric_graph() {
+    let inf = 9999;
+    // Undirected graph: 0-1(1), 1-2(2), 2-3(3), 0-3(10)
+    let dist = Mat4 {
+        m00: 0,   m01: 1,   m02: inf, m03: 10,
+        m10: 1,   m11: 0,   m12: 2,   m13: inf,
+        m20: inf, m21: 2,   m22: 0,   m23: 3,
+        m30: 10,  m31: inf, m32: 3,   m33: 0
+    };
+    let d = floyd_warshall(dist);
+    // 0->2 = 0->1->2 = 1+2 = 3
+    assert_eq(mat4_get(d, 0, 2), 3);
+    // 0->3 = 0->1->2->3 = 1+2+3 = 6 (better than direct 10)
+    assert_eq(mat4_get(d, 0, 3), 6);
+    // Symmetric
+    assert_eq(mat4_get(d, 1, 3), mat4_get(d, 3, 1));
+    assert_eq(mat4_get(d, 0, 3), mat4_get(d, 3, 0));
+    print("symmetric_graph: ok");
+}
+
+fn test_diagonal_zeros() {
+    let inf = 9999;
+    // Any connected graph should have zeros on diagonal after Floyd-Warshall.
+    let dist = Mat4 {
+        m00: 0,   m01: 5,   m02: inf, m03: 10,
+        m10: inf, m11: 0,   m12: 3,   m13: inf,
+        m20: inf, m21: inf, m22: 0,   m23: 1,
+        m30: inf, m31: inf, m32: inf, m33: 0
+    };
+    let d = floyd_warshall(dist);
+    assert_eq(mat4_get(d, 0, 0), 0);
+    assert_eq(mat4_get(d, 1, 1), 0);
+    assert_eq(mat4_get(d, 2, 2), 0);
+    assert_eq(mat4_get(d, 3, 3), 0);
+    // 0->3 = 0->1->2->3 = 5+3+1 = 9 (better than direct 10)
+    assert_eq(mat4_get(d, 0, 3), 9);
+    print("diagonal_zeros: ok");
+}
+
+fn test_path_transitivity() {
+    let inf = 9999;
+    // Linear chain: 0->1->2->3 with weights 2,3,4
+    let dist = Mat4 {
+        m00: 0,   m01: 2,   m02: inf, m03: inf,
+        m10: inf, m11: 0,   m12: 3,   m13: inf,
+        m20: inf, m21: inf, m22: 0,   m23: 4,
+        m30: inf, m31: inf, m32: inf, m33: 0
+    };
+    let d = floyd_warshall(dist);
+    // 0->1 = 2
+    assert_eq(mat4_get(d, 0, 1), 2);
+    // 0->2 = 2+3 = 5
+    assert_eq(mat4_get(d, 0, 2), 5);
+    // 0->3 = 2+3+4 = 9
+    assert_eq(mat4_get(d, 0, 3), 9);
+    // 1->3 = 3+4 = 7
+    assert_eq(mat4_get(d, 1, 3), 7);
+    // 2->0 should remain inf (no back edges)
+    assert_eq(mat4_get(d, 2, 0), inf);
+    print("path_transitivity: ok");
+}
+
+fn main() -> Int {
+    test_basic_paths();
+    test_symmetric_graph();
+    test_diagonal_zeros();
+    test_path_transitivity();
+    print("[OK] 511_interp_floyd_warshall");
+    0
+}

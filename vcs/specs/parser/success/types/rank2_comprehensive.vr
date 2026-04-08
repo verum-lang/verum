@@ -1,0 +1,501 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @level: L0
+// @tags: parser, types, rank2, polymorphism, comprehensive
+// @description: Comprehensive parser tests for rank-2 polymorphic function types
+
+// =============================================================================
+// Section 1: Basic Rank-2 Function Types
+// Grammar: rank2_function_type = [ 'async' ] , 'fn' , generics , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ]
+// =============================================================================
+
+fn test_basic_rank2_types() {
+    // Simplest rank-2: identity
+    let f1: fn<A>(A) -> A = polymorphic_identity();
+
+    // Single type parameter with multiple uses
+    let f2: fn<T>(T, T) -> T = polymorphic_first();
+
+    // Multiple distinct type parameters
+    let f3: fn<A, B>(A, B) -> (A, B) = polymorphic_pair();
+    let f4: fn<X, Y, Z>(X, Y, Z) -> (X, Y, Z) = polymorphic_triple();
+
+    // Rank-2 with no return (unit return)
+    let f5: fn<T>(T) = polymorphic_consume();
+
+    // Rank-2 with explicit unit return
+    let f6: fn<T>(T) -> () = polymorphic_consume_explicit();
+}
+
+fn polymorphic_identity() -> fn<A>(A) -> A { |x| x }
+fn polymorphic_first() -> fn<T>(T, T) -> T { |a, b| a }
+fn polymorphic_pair() -> fn<A, B>(A, B) -> (A, B) { |a, b| (a, b) }
+fn polymorphic_triple() -> fn<X, Y, Z>(X, Y, Z) -> (X, Y, Z) { |x, y, z| (x, y, z) }
+fn polymorphic_consume() -> fn<T>(T) { |x| {} }
+fn polymorphic_consume_explicit() -> fn<T>(T) -> () { |x| () }
+
+// =============================================================================
+// Section 2: Rank-2 with Single Bounds
+// =============================================================================
+
+type Clone is protocol { fn clone(&self) -> Self; };
+type Debug is protocol { fn debug(&self) -> Text; };
+type Display is protocol { fn fmt(&self) -> Text; };
+type Default is protocol { fn default() -> Self; };
+type Eq is protocol { fn eq(&self, other: &Self) -> Bool; };
+type Ord is protocol { fn cmp(&self, other: &Self) -> Ordering; };
+type Hash is protocol { fn hash(&self) -> Int; };
+
+fn test_single_bound_rank2() {
+    // Clone bound
+    let f1: fn<T: Clone>(T) -> (T, T) = bounded_duplicate();
+
+    // Debug bound
+    let f2: fn<T: Debug>(T) -> Text = bounded_debug();
+
+    // Display bound
+    let f3: fn<T: Display>(T) -> Text = bounded_display();
+
+    // Eq bound
+    let f4: fn<T: Eq>(T, T) -> Bool = bounded_eq();
+
+    // Ord bound
+    let f5: fn<T: Ord>(T, T) -> T = bounded_min();
+}
+
+fn bounded_duplicate() -> fn<T: Clone>(T) -> (T, T) { |x| (x.clone(), x) }
+fn bounded_debug() -> fn<T: Debug>(T) -> Text { |x| x.debug() }
+fn bounded_display() -> fn<T: Display>(T) -> Text { |x| x.fmt() }
+fn bounded_eq() -> fn<T: Eq>(T, T) -> Bool { |a, b| a.eq(&b) }
+fn bounded_min() -> fn<T: Ord>(T, T) -> T { |a, b| if a.cmp(&b) == Ordering.Less { a } else { b } }
+
+// =============================================================================
+// Section 3: Rank-2 with Multiple Bounds
+// =============================================================================
+
+fn test_multi_bound_rank2() {
+    // Clone + Debug
+    let f1: fn<T: Clone + Debug>(T) -> Text = clone_and_debug();
+
+    // Clone + Eq
+    let f2: fn<T: Clone + Eq>(T, T) -> Bool = clone_and_compare();
+
+    // Clone + Debug + Display
+    let f3: fn<T: Clone + Debug + Display>(T) -> Text = triple_bound();
+
+    // Ord + Clone + Default
+    let f4: fn<T: Ord + Clone + Default>(T) -> T = complex_bound();
+
+    // Hash + Eq (common combination)
+    let f5: fn<T: Hash + Eq>(T, T) -> Bool = hash_eq();
+}
+
+fn clone_and_debug() -> fn<T: Clone + Debug>(T) -> Text { |x| x.clone().debug() }
+fn clone_and_compare() -> fn<T: Clone + Eq>(T, T) -> Bool { |a, b| a.clone().eq(&b) }
+fn triple_bound() -> fn<T: Clone + Debug + Display>(T) -> Text { |x| x.fmt() }
+fn complex_bound() -> fn<T: Ord + Clone + Default>(T) -> T { |x| x.clone() }
+fn hash_eq() -> fn<T: Hash + Eq>(T, T) -> Bool { |a, b| a.eq(&b) }
+
+// =============================================================================
+// Section 4: Rank-2 with Where Clauses
+// =============================================================================
+
+fn test_rank2_where_clauses() {
+    // Where clause form
+    let f1: fn<T>(T) -> Text where type T: Debug = where_debug();
+
+    // Multiple bounds in where
+    let f2: fn<T>(T) -> T where type T: Clone + Ord = where_clone_ord();
+
+    // Multiple type params with where
+    let f3: fn<A, B>(A, B) -> A where type A: Clone, type B: Debug = where_multi();
+}
+
+fn where_debug() -> fn<T>(T) -> Text where type T: Debug { |x| x.debug() }
+fn where_clone_ord() -> fn<T>(T) -> T where type T: Clone + Ord { |x| x.clone() }
+fn where_multi() -> fn<A, B>(A, B) -> A where type A: Clone, type B: Debug { |a, b| a.clone() }
+
+// =============================================================================
+// Section 5: Async Rank-2 Function Types
+// =============================================================================
+
+fn test_async_rank2() {
+    // Basic async rank-2
+    let f1: async fn<T>(T) -> T = async_identity();
+
+    // Async with bounds
+    let f2: async fn<T: Clone>(T) -> (T, T) = async_duplicate();
+
+    // Async with multiple params
+    let f3: async fn<A, B>(A, B) -> (B, A) = async_swap();
+
+    // Async with multiple bounds
+    let f4: async fn<T: Clone + Debug>(T) -> Text = async_clone_debug();
+}
+
+fn async_identity() -> async fn<T>(T) -> T { async |x| x }
+fn async_duplicate() -> async fn<T: Clone>(T) -> (T, T) { async |x| (x.clone(), x) }
+fn async_swap() -> async fn<A, B>(A, B) -> (B, A) { async |a, b| (b, a) }
+fn async_clone_debug() -> async fn<T: Clone + Debug>(T) -> Text { async |x| x.debug() }
+
+// =============================================================================
+// Section 6: Rank-2 with Context Clauses
+// =============================================================================
+
+context Database {
+    fn query(&self, sql: Text) -> Result<Data, Error>;
+}
+
+context Logger {
+    fn log(&self, message: Text);
+}
+
+type Data is { value: Text };
+type Error is { message: Text };
+
+fn test_rank2_with_contexts() {
+    // Rank-2 with single context
+    let f1: fn<T>(T) -> Text using [Logger] = rank2_logging();
+
+    // Rank-2 with multiple contexts
+    let f2: fn<T>(T) -> Int using [Database, Logger] = rank2_multi_ctx();
+
+    // Async rank-2 with contexts
+    let f3: async fn<T>(T) -> Int using [Database] = async_rank2_ctx();
+
+    // Rank-2 with bounds and contexts
+    let f4: fn<T: Debug>(T) using [Logger] = rank2_bound_ctx();
+}
+
+fn rank2_logging() -> fn<T>(T) -> Text using [Logger] { |x| "" }
+fn rank2_multi_ctx() -> fn<T>(T) -> Int using [Database, Logger] { |x| 0 }
+fn async_rank2_ctx() -> async fn<T>(T) -> Int using [Database] { async |x| 0 }
+fn rank2_bound_ctx() -> fn<T: Debug>(T) using [Logger] { |x| {} }
+
+// =============================================================================
+// Section 7: Transducer Pattern (Classic Rank-2 Use Case)
+// =============================================================================
+
+// Reducer: fn(Accumulator, Element) -> Accumulator
+type Reducer<A, R> is fn(R, A) -> R;
+
+// Transducer: transforms one reducer into another, polymorphic in accumulator
+type Transducer<A, B> is {
+    transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>,
+};
+
+// Stateful transducer with state type
+type StatefulTransducer<A, B, S> is {
+    initial_state: S,
+    transform: fn<R>(Reducer<B, R>, &mut S) -> Reducer<A, R>,
+};
+
+fn test_transducer_types() {
+    // Map transducer
+    let map_t: Transducer<Int, Text> = make_map_transducer();
+
+    // Filter transducer
+    let filter_t: Transducer<Int, Int> = make_filter_transducer();
+
+    // Take transducer (stateful)
+    let take_t: StatefulTransducer<Int, Int, Int> = make_take_transducer();
+
+    // Compose transducers
+    let composed: Transducer<Int, Bool> = compose_transducers(map_t, filter_t);
+}
+
+fn make_map_transducer() -> Transducer<Int, Text> {
+    Transducer { transform: |reducer| |r, n| reducer(r, f"{n}") }
+}
+
+fn make_filter_transducer() -> Transducer<Int, Int> {
+    Transducer { transform: |reducer| |r, n| if n > 0 { reducer(r, n) } else { r } }
+}
+
+fn make_take_transducer() -> StatefulTransducer<Int, Int, Int> {
+    StatefulTransducer {
+        initial_state: 0,
+        transform: |reducer, count| |r, n| {
+            if *count < 5 {
+                *count = *count + 1;
+                reducer(r, n)
+            } else {
+                r
+            }
+        }
+    }
+}
+
+fn compose_transducers<A, B, C>(t1: Transducer<A, B>, t2: Transducer<B, C>) -> Transducer<A, C> {
+    Transducer { transform: |reducer| t1.transform(t2.transform(reducer)) }
+}
+
+// =============================================================================
+// Section 8: Continuation and CPS Patterns
+// =============================================================================
+
+// Continuation type: fn(fn(A) -> R) -> R
+type Cont<R, A> is fn(fn(A) -> R) -> R;
+
+// CPS-transformed function type
+type CpsTransform<A, B, R> is fn(A, fn(B) -> R) -> R;
+
+// Church encoding of natural numbers
+type ChurchNat is fn<A>(fn(A) -> A, A) -> A;
+
+// Church encoding of booleans
+type ChurchBool is fn<A>(A, A) -> A;
+
+fn test_continuation_types() {
+    // Basic continuation
+    let cont: Cont<Int, Text> = make_cont();
+
+    // Church numerals
+    let zero: ChurchNat = church_zero();
+    let one: ChurchNat = church_one();
+    let succ: fn(ChurchNat) -> ChurchNat = church_succ();
+
+    // Church booleans
+    let true_val: ChurchBool = church_true();
+    let false_val: ChurchBool = church_false();
+}
+
+fn make_cont() -> Cont<Int, Text> { |k| k("hello") }
+fn church_zero() -> ChurchNat { |f, x| x }
+fn church_one() -> ChurchNat { |f, x| f(x) }
+fn church_succ() -> fn(ChurchNat) -> ChurchNat { |n| |f, x| f(n(f, x)) }
+fn church_true() -> ChurchBool { |a, b| a }
+fn church_false() -> ChurchBool { |a, b| b }
+
+// =============================================================================
+// Section 9: Optics (Lens, Prism, Traversal) Patterns
+// =============================================================================
+
+// Functor protocol for optics
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+type Applicative<F<_>> is protocol extends Functor<F> {
+    fn pure<A>(a: A) -> F<A>;
+    fn ap<A, B>(self: F<fn(A) -> B>, fa: F<A>) -> F<B>;
+};
+
+// Lens type with rank-2 modify
+type Lens<S, A> is {
+    get: fn(&S) -> A,
+    set: fn(A, S) -> S,
+    // Rank-2: modify works for any Functor F
+    modify: fn<F: Functor>(f: fn(A) -> F<A>, s: S) -> F<S>,
+};
+
+// Prism type with rank-2
+type Prism<S, A> is {
+    preview: fn(&S) -> Maybe<A>,
+    review: fn(A) -> S,
+    // Rank-2: matching works for any F
+    matching: fn<F: Applicative>(f: fn(A) -> F<A>, s: S) -> F<S>,
+};
+
+// Traversal: rank-2 for any Applicative
+type Traversal<S, A> is {
+    traverse: fn<F: Applicative>(f: fn(A) -> F<A>, s: S) -> F<S>,
+};
+
+fn test_optics_types() {
+    // Create a lens for a record field
+    let name_lens: Lens<Person, Text> = make_name_lens();
+
+    // Create a prism for a variant
+    let some_prism: Prism<Maybe<Int>, Int> = make_some_prism();
+
+    // Create a traversal for a list
+    let list_traversal: Traversal<List<Int>, Int> = make_list_traversal();
+}
+
+type Person is { name: Text, age: Int };
+
+fn make_name_lens() -> Lens<Person, Text> {
+    Lens {
+        get: |p| p.name,
+        set: |n, p| Person { name: n, age: p.age },
+        modify: |f, p| f(p.name).map(|n| Person { name: n, age: p.age }),
+    }
+}
+
+fn make_some_prism() -> Prism<Maybe<Int>, Int> {
+    Prism {
+        preview: |m| m,
+        review: |a| Some(a),
+        matching: |f, m| match m {
+            Some(a) => f(a).map(|x| Some(x)),
+            None => Applicative.pure(None),
+        },
+    }
+}
+
+fn make_list_traversal() -> Traversal<List<Int>, Int> {
+    Traversal {
+        traverse: |f, list| list.map(f).sequence(),
+    }
+}
+
+// =============================================================================
+// Section 10: Natural Transformations and Functors
+// =============================================================================
+
+// Natural transformation: polymorphic in the element type
+type NaturalTransformation<F<_>, G<_>> is {
+    transform: fn<A>(F<A>) -> G<A>,
+};
+
+// Bifunctor: two type parameters
+type Bifunctor<F<_, _>> is protocol {
+    fn bimap<A, B, C, D>(self: F<A, B>, f: fn(A) -> C, g: fn(B) -> D) -> F<C, D>;
+};
+
+// Profunctor: contravariant in first, covariant in second
+type Profunctor<P<_, _>> is protocol {
+    fn dimap<A, B, C, D>(self: P<B, C>, f: fn(A) -> B, g: fn(C) -> D) -> P<A, D>;
+};
+
+fn test_natural_transformations() {
+    // List to Maybe
+    let head: NaturalTransformation<List, Maybe> = list_head_nat();
+
+    // Maybe to List
+    let to_list: NaturalTransformation<Maybe, List> = maybe_to_list_nat();
+}
+
+fn list_head_nat() -> NaturalTransformation<List, Maybe> {
+    NaturalTransformation { transform: |list| list.first() }
+}
+
+fn maybe_to_list_nat() -> NaturalTransformation<Maybe, List> {
+    NaturalTransformation { transform: |maybe| match maybe {
+        Some(a) => List.of(a),
+        None => List.new(),
+    }}
+}
+
+// =============================================================================
+// Section 11: Free Structures with Rank-2
+// =============================================================================
+
+// Free monad (recursive type with rank-2 fold)
+type Free<F<_>, A> is
+    | Pure(A)
+    | Suspend(F<Free<F, A>>);
+
+// Free applicative
+type FreeAp<F<_>, A> is
+    | PureAp(A)
+    | Ap(Exists<X>, F<X>, FreeAp<F, fn(X) -> A>);
+
+// Freer monad (more efficient)
+type Freer<F<_>, A> is
+    | Return(A)
+    | Bind(Exists<X>, F<X>, fn(X) -> Freer<F, A>);
+
+// =============================================================================
+// Section 12: Higher-Order Rank-2 (Taking/Returning Rank-2)
+// =============================================================================
+
+fn test_higher_order_rank2() {
+    // Function taking a rank-2 function
+    let apply_both: fn(fn<X>(X) -> X, Int, Text) -> (Int, Text) = ho_apply_both();
+
+    // Function returning a rank-2 function
+    let make_id: fn() -> fn<X>(X) -> X = ho_make_identity();
+
+    // Rank-2 function taking rank-2 function
+    let compose_polymorphic: fn(fn<A>(A) -> A, fn<B>(B) -> B) -> fn<C>(C) -> C = ho_compose();
+}
+
+fn ho_apply_both() -> fn(fn<X>(X) -> X, Int, Text) -> (Int, Text) {
+    |f, i, t| (f(i), f(t))
+}
+
+fn ho_make_identity() -> fn() -> fn<X>(X) -> X {
+    || |x| x
+}
+
+fn ho_compose() -> fn(fn<A>(A) -> A, fn<B>(B) -> B) -> fn<C>(C) -> C {
+    |f, g| |x| f(g(x))
+}
+
+// =============================================================================
+// Section 13: Rank-2 in Record Fields
+// =============================================================================
+
+// Record with rank-2 field
+type Runner is {
+    run: fn<A>(fn() -> A) -> A,
+};
+
+// Record with multiple rank-2 fields
+type Monad<M<_>> is {
+    pure: fn<A>(A) -> M<A>,
+    bind: fn<A, B>(M<A>, fn(A) -> M<B>) -> M<B>,
+};
+
+// Record with bounded rank-2 field
+type Showable is {
+    show: fn<T: Display>(T) -> Text,
+};
+
+fn test_rank2_in_records() {
+    // Create runner
+    let runner: Runner = Runner { run: |f| f() };
+
+    // Create monad instance for Maybe
+    let maybe_monad: Monad<Maybe> = Monad {
+        pure: |a| Some(a),
+        bind: |ma, f| match ma {
+            Some(a) => f(a),
+            None => None,
+        },
+    };
+}
+
+// =============================================================================
+// Section 14: Edge Cases and Complex Combinations
+// =============================================================================
+
+fn test_rank2_edge_cases() {
+    // Many type parameters
+    let f1: fn<A, B, C, D, E>(A, B, C, D, E) -> (E, D, C, B, A) = many_params();
+
+    // Complex bounds
+    let f2: fn<T: Clone + Debug + Display + Eq + Ord>(T, T) -> T = all_bounds();
+
+    // Async with bounds and context
+    let f3: async fn<T: Clone>(T) -> T using [Logger] = async_bound_ctx();
+
+    // Rank-2 returning rank-2
+    let f4: fn<A>() -> fn<B>(B) -> A = rank2_returns_rank2();
+
+    // Deeply nested
+    let f5: fn<X>(fn<Y>(Y) -> X) -> X = nested_rank2();
+}
+
+fn many_params() -> fn<A, B, C, D, E>(A, B, C, D, E) -> (E, D, C, B, A) {
+    |a, b, c, d, e| (e, d, c, b, a)
+}
+
+fn all_bounds() -> fn<T: Clone + Debug + Display + Eq + Ord>(T, T) -> T {
+    |a, b| if a.cmp(&b) == Ordering.Less { a } else { b }
+}
+
+fn async_bound_ctx() -> async fn<T: Clone>(T) -> T using [Logger] {
+    async |x| x.clone()
+}
+
+fn rank2_returns_rank2() -> fn<A>() -> fn<B>(B) -> A {
+    || |_| panic("cannot create A from B")
+}
+
+fn nested_rank2() -> fn<X>(fn<Y>(Y) -> X) -> X {
+    |f| f(())
+}

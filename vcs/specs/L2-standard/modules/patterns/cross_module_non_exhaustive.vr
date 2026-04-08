@@ -1,0 +1,65 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: modules, patterns, exhaustiveness, non-exhaustive
+// @expected-error: non-exhaustive
+// @description: Non-exhaustive pattern errors with imported types
+
+// Module defining types
+module types {
+    pub type Color is Red | Green | Blue | Yellow | Cyan | Magenta;
+
+    pub type Shape is
+        | Circle { radius: Float }
+        | Square { side: Float }
+        | Rectangle { width: Float, height: Float }
+        | Triangle { base: Float, height: Float };
+
+    pub type Result<T, E> is Ok(T) | Err(E);
+
+    pub type TrafficLight is Red | Yellow | Green;
+}
+
+// Module with non-exhaustive matches on imported types
+module consumer {
+    mount super.types.{Color, Shape, Result, TrafficLight};
+
+    // ERROR: Missing Yellow, Cyan, Magenta
+    pub fn color_name(c: Color) -> Text =
+        match c {
+            Red => "red",
+            Green => "green",
+            Blue => "blue"
+            // ERROR: Non-exhaustive - missing: Yellow, Cyan, Magenta
+        }
+
+    // ERROR: Missing Triangle
+    pub fn area(s: Shape) -> Float =
+        match s {
+            Circle { radius } => 3.14159 * radius * radius,
+            Square { side } => side * side,
+            Rectangle { width, height } => width * height
+            // ERROR: Non-exhaustive - missing: Triangle { base: _, height: _ }
+        }
+
+    // ERROR: Missing Err case
+    pub fn unwrap<T, E>(r: Result<T, E>) -> T =
+        match r {
+            Ok(x) => x
+            // ERROR: Non-exhaustive - missing: Err(_)
+        }
+
+    // ERROR: Color vs TrafficLight confusion (Yellow in both)
+    // This tests that the checker correctly distinguishes same-named variants
+    // from different types
+    pub fn traffic_to_color(t: TrafficLight) -> Color =
+        match t {
+            TrafficLight.Red => Color.Red,
+            TrafficLight.Green => Color.Green
+            // ERROR: Non-exhaustive - missing: TrafficLight.Yellow
+        }
+}
+
+fn main() {
+    // Tests just verify the non-exhaustive errors are caught
+}

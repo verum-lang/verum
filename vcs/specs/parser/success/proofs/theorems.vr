@@ -1,0 +1,369 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, theorem, verification
+// @description: Comprehensive test for theorem declaration parsing
+
+// ============================================================================
+// Basic Theorem Declarations
+// ============================================================================
+
+// Simple theorem with proposition
+theorem reflexivity(x: Int): x == x {
+    trivial
+}
+
+// Theorem without explicit proof body (just tactic name)
+theorem identity(a: Int): a == a {
+    trivial
+}
+
+// Theorem with arithmetic proposition
+theorem addition_commutative(a: Int, b: Int): a + b == b + a {
+    ring
+}
+
+// Theorem with multiple operations
+theorem distributive_law(a: Int, b: Int, c: Int): a * (b + c) == a * b + a * c {
+    ring
+}
+
+// ============================================================================
+// Theorems with Generic Parameters
+// ============================================================================
+
+// Generic theorem with equality constraint
+theorem generic_reflexivity<T: Eq>(x: T): x == x {
+    trivial
+}
+
+// Generic theorem with multiple constraints
+theorem generic_ordering<T: Ord + Eq>(x: T, y: T): (x <= y && y <= x) == (x == y) {
+    trivial
+}
+
+// Multiple generic parameters
+theorem generic_symmetry<T: Eq, U: Eq>(a: (T, U), b: (T, U)): a == b == (b == a) {
+    trivial
+}
+
+// Generic with higher-kinded constraint
+// Note: Higher-kinded type application F<T> is not currently supported by parser
+// Using concrete List type instead
+theorem functor_identity<T>(x: List<T>): x.map(|a| a) == x {
+    trivial
+}
+
+// ============================================================================
+// Theorems with Return Types
+// ============================================================================
+
+// Theorem with explicit return type
+theorem produce_proof(x: Int) -> Bool: x >= 0 || x < 0 {
+    trivial
+}
+
+// Theorem returning proof term
+// Note: Simplified to use proposition syntax
+theorem construct_witness(n: Int): n == n {
+    trivial
+}
+
+// Generic return type
+// Note: Simplified to use proposition syntax
+theorem identity_proof<T: Eq>(x: T): x == x {
+    trivial
+}
+
+// ============================================================================
+// Theorems with Requires Clause
+// ============================================================================
+
+// Single requires clause
+theorem positive_implies_non_negative(x: Int)
+    requires x > 0
+    ensures x >= 0
+{
+    proof by omega
+}
+
+// Multiple requires conditions
+theorem bounded_add(a: Int, b: Int)
+    requires a >= 0, a <= 100, b >= 0, b <= 100
+    ensures a + b <= 200
+{
+    proof by omega
+}
+
+// Requires with complex expressions
+theorem safe_division(a: Int, b: Int)
+    requires b != 0, a >= 0
+    ensures a / b * b <= a
+{
+    proof by omega
+}
+
+// ============================================================================
+// Theorems with Ensures Clause
+// ============================================================================
+
+// Simple ensures
+theorem sum_bounds(a: Int, b: Int)
+    requires a >= 0, b >= 0
+    ensures a + b >= a, a + b >= b
+{
+    proof by omega
+}
+
+// Ensures with result keyword
+theorem compute_abs(x: Int) -> Int
+    ensures result >= 0
+{
+    proof by auto
+}
+
+// Multiple ensures clauses
+theorem array_bounds(arr: List<Int>, i: Int)
+    requires i >= 0, i < arr.len()
+    ensures arr.get(i) is Some
+{
+    proof by auto
+}
+
+// ============================================================================
+// Theorems with Full Contract (Requires + Ensures)
+// ============================================================================
+
+// Complete contract specification
+theorem factorial_positive(n: Int) -> Int
+    requires n >= 0
+    ensures result > 0
+{
+    proof by induction n
+}
+
+// Complex contract
+theorem sort_preserves_length<T: Ord>(list: List<T>) -> List<T>
+    requires list.len() >= 0
+    ensures result.len() == list.len()
+{
+    proof by auto
+}
+
+// Contract with quantified properties
+// Note: Using logical pattern instead of => in ensures (=> only valid in match arms)
+theorem sorted_result<T: Ord>(list: List<T>) -> List<T>
+    requires list.len() > 0
+    ensures forall i: Int . forall j: Int . !(i < j) || result[i] <= result[j]
+{
+    proof by auto
+}
+
+// ============================================================================
+// Theorems with Proof Body Variations
+// ============================================================================
+
+// Proof by auto
+theorem auto_example(x: Int): x + 0 == x {
+    auto
+}
+
+// Proof by simp
+theorem simp_example(a: Int, b: Int): a + b == b + a {
+    simp
+}
+
+// Proof by ring
+theorem ring_example(x: Int): (x + 1) * (x - 1) == x * x - 1 {
+    ring
+}
+
+// Proof by omega (linear arithmetic)
+theorem omega_example(a: Int, b: Int)
+    requires a > 0, b > 0
+    ensures a + b > 0
+{
+    proof by omega
+}
+
+// Proof by smt
+theorem smt_example(x: Int, y: Int, z: Int)
+    requires x <= y, y <= z
+    ensures x <= z
+{
+    proof by smt
+}
+
+// Proof by induction
+theorem induction_example(n: Int)
+    requires n >= 0
+    ensures sum(0..n) == n * (n + 1) / 2
+{
+    proof by induction n
+}
+
+// Proof by cases
+theorem cases_example(x: Int): abs(x) >= 0 {
+    proof by cases x
+}
+
+// Proof by contradiction
+theorem contradiction_example(p: Bool, q: Bool)
+    requires p && !p
+    ensures q
+{
+    proof by contradiction
+}
+
+// ============================================================================
+// Structured Proof Bodies
+// ============================================================================
+
+// Proof with have step
+theorem structured_have(n: Int)
+    requires n >= 0
+    ensures n * 2 >= 0
+{
+    proof {
+        have h1: n >= 0 by assumption;
+        have h2: 2 > 0 by trivial;
+        show n * 2 >= 0 by omega;
+    }
+}
+
+// Proof with multiple have steps
+theorem multi_have(a: Int, b: Int, c: Int)
+    requires a > 0, b > 0, c > 0
+    ensures a + b + c > 0
+{
+    proof {
+        have h1: a > 0 by assumption;
+        have h2: b > 0 by assumption;
+        have h3: c > 0 by assumption;
+        have h4: a + b > 0 by omega;
+        show a + b + c > 0 by omega;
+    }
+}
+
+// Proof with obtain step
+theorem obtain_example()
+    requires exists x: Int . x > 0
+    ensures true
+{
+    proof {
+        obtain x from (exists x: Int . x > 0);
+        show true by trivial;
+    }
+}
+
+// Proof with show step
+theorem show_example(x: Int)
+    ensures x == x
+{
+    proof {
+        show x == x by trivial;
+    }
+}
+
+// ============================================================================
+// Theorems with Tactic Applications
+// ============================================================================
+
+// Tactic with arguments
+theorem tactic_args(x: Int, y: Int)
+    ensures x + y == y + x
+{
+    proof by rewrite(comm_add)
+}
+
+// Tactic sequence (chained)
+theorem tactic_chain(a: Int, b: Int)
+    requires a >= 0, b >= 0
+    ensures a + b >= 0
+{
+    proof by simp; omega
+}
+
+// Grouped tactic
+theorem tactic_grouped(x: Int)
+    ensures x * 1 == x
+{
+    proof by { simp; ring }
+}
+
+// Nested tactic expressions
+theorem tactic_nested(a: Int, b: Int, c: Int)
+    ensures a + (b + c) == (a + b) + c
+{
+    proof by { simp; { ring; auto } }
+}
+
+// ============================================================================
+// Theorem Without Proof Body
+// ============================================================================
+
+// Declared but not proven (axiom-like, leaves proof obligation)
+theorem declared_only(x: Int): x >= 0 || x < 0;
+
+// Generic theorem without proof
+theorem generic_declared<T: Eq>(a: T, b: T): a == b == (b == a);
+
+// With contract but no proof
+theorem contract_declared(n: Int)
+    requires n > 0
+    ensures n * n > 0;
+
+// ============================================================================
+// Complex Theorem Examples
+// ============================================================================
+
+// Theorem about data structure invariants
+// Note: Using logical pattern instead of => (=> only valid in match arms)
+theorem list_invariant<T>(list: List<T>)
+    requires list.len() >= 0
+    ensures forall i: Int . !(0 <= i && i < list.len()) || list.get(i) is Some
+{
+    proof by auto
+}
+
+// Theorem with nested quantifiers
+theorem nested_quantifiers(f: fn(Int) -> Int)
+    requires forall x: Int . f(x) >= 0
+    ensures exists y: Int . f(y) >= 0
+{
+    proof {
+        show exists y: Int . f(y) >= 0 by trivial;
+    }
+}
+
+// Theorem about function properties
+theorem function_composition<A, B, C>(
+    f: fn(A) -> B,
+    g: fn(B) -> C,
+    x: A
+): (g . f)(x) == g(f(x)) {
+    trivial
+}
+
+// Theorem with type refinement in signature
+theorem refined_input(x: Int{x > 0})
+    ensures x >= 1
+{
+    proof by omega
+}
+
+// Theorem combining multiple features
+theorem comprehensive_example<T: Eq + Ord>(
+    list: List<T>,
+    pred: fn(T) -> Bool
+)
+    requires list.len() > 0, (forall (x: T) . pred(x) == pred(x))
+    ensures (exists (y: T) . list.contains(y))
+{
+    proof {
+        have h1: list.len() > 0 by assumption;
+        obtain elem from list.first();
+        show (exists (y: T) . list.contains(y)) by auto;
+    }
+}

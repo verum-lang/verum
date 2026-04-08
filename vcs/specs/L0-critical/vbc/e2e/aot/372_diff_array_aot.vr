@@ -1,0 +1,310 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, difference-array, range-update, prefix-sum
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for range update with difference array technique.
+// A difference array D[i] = A[i] - A[i-1] allows O(1) range updates:
+//   To add val to A[l..r]: D[l] += val, D[r+1] -= val
+//   Then reconstruct A via prefix sum of D.
+// Tests: single updates, multiple overlapping updates, and 2D extension.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Build difference array from original array
+fn build_diff(arr: Arr8, n: Int) -> Arr8 {
+    let mut diff = a8_zero();
+    diff = a8_set(diff, 0, a8_get(arr, 0));
+    let mut i = 1;
+    while i < n {
+        diff = a8_set(diff, i, a8_get(arr, i) - a8_get(arr, i - 1));
+        i = i + 1;
+    }
+    diff
+}
+
+// Reconstruct original array from difference array (prefix sum)
+fn reconstruct(diff: Arr8, n: Int) -> Arr8 {
+    let mut arr = a8_zero();
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + a8_get(diff, i);
+        arr = a8_set(arr, i, sum);
+        i = i + 1;
+    }
+    arr
+}
+
+// Range update: add val to all elements in [lo, hi] (inclusive)
+// Uses difference array technique: D[lo] += val, D[hi+1] -= val
+fn range_update(diff: Arr8, n: Int, lo: Int, hi: Int, val: Int) -> Arr8 {
+    let mut d = diff;
+    d = a8_set(d, lo, a8_get(d, lo) + val);
+    if hi + 1 < n {
+        d = a8_set(d, hi + 1, a8_get(d, hi + 1) - val);
+    }
+    d
+}
+
+// Naive range update for verification (directly modify each element)
+fn naive_range_update(arr: Arr8, n: Int, lo: Int, hi: Int, val: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = lo;
+    while i <= hi {
+        a = a8_set(a, i, a8_get(a, i) + val);
+        i = i + 1;
+    }
+    a
+}
+
+// Point query after all updates: get value at index i
+fn point_query(diff: Arr8, idx: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i <= idx {
+        sum = sum + a8_get(diff, i);
+        i = i + 1;
+    }
+    sum
+}
+
+// --- Tests ---
+
+fn test_build_and_reconstruct() {
+    let arr = Arr8 { a0: 3, a1: 5, a2: 8, a3: 2, a4: 7, a5: 1, a6: 4, a7: 6 };
+    let diff = build_diff(arr, 8);
+    let rebuilt = reconstruct(diff, 8);
+    // Should be identical to original
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(a8_get(rebuilt, i), a8_get(arr, i));
+        i = i + 1;
+    }
+}
+
+fn test_single_range_update() {
+    // Start with all zeros, add 5 to indices [2, 5]
+    let mut diff = a8_zero();
+    diff = range_update(diff, 8, 2, 5, 5);
+    let arr = reconstruct(diff, 8);
+    // Expected: [0, 0, 5, 5, 5, 5, 0, 0]
+    assert_eq(a8_get(arr, 0), 0);
+    assert_eq(a8_get(arr, 1), 0);
+    assert_eq(a8_get(arr, 2), 5);
+    assert_eq(a8_get(arr, 3), 5);
+    assert_eq(a8_get(arr, 4), 5);
+    assert_eq(a8_get(arr, 5), 5);
+    assert_eq(a8_get(arr, 6), 0);
+    assert_eq(a8_get(arr, 7), 0);
+}
+
+fn test_multiple_updates() {
+    // Start with zeros, apply overlapping updates
+    let mut diff = a8_zero();
+    diff = range_update(diff, 8, 1, 4, 3); // +3 to [1,4]
+    diff = range_update(diff, 8, 2, 6, 2); // +2 to [2,6]
+    diff = range_update(diff, 8, 0, 3, 1); // +1 to [0,3]
+    let arr = reconstruct(diff, 8);
+    // Expected: [1, 4, 6, 6, 5, 2, 2, 0]
+    // idx 0: 0+1 = 1
+    // idx 1: 0+3+1 = 4
+    // idx 2: 0+3+2+1 = 6
+    // idx 3: 0+3+2+1 = 6
+    // idx 4: 0+3+2 = 5
+    // idx 5: 0+2 = 2
+    // idx 6: 0+2 = 2
+    // idx 7: 0
+    assert_eq(a8_get(arr, 0), 1);
+    assert_eq(a8_get(arr, 1), 4);
+    assert_eq(a8_get(arr, 2), 6);
+    assert_eq(a8_get(arr, 3), 6);
+    assert_eq(a8_get(arr, 4), 5);
+    assert_eq(a8_get(arr, 5), 2);
+    assert_eq(a8_get(arr, 6), 2);
+    assert_eq(a8_get(arr, 7), 0);
+}
+
+fn test_matches_naive() {
+    // Apply same updates naively and compare
+    let mut arr = a8_zero();
+    arr = naive_range_update(arr, 8, 1, 4, 3);
+    arr = naive_range_update(arr, 8, 2, 6, 2);
+    arr = naive_range_update(arr, 8, 0, 3, 1);
+
+    let mut diff = a8_zero();
+    diff = range_update(diff, 8, 1, 4, 3);
+    diff = range_update(diff, 8, 2, 6, 2);
+    diff = range_update(diff, 8, 0, 3, 1);
+    let arr2 = reconstruct(diff, 8);
+
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(a8_get(arr, i), a8_get(arr2, i));
+        i = i + 1;
+    }
+}
+
+fn test_full_range_update() {
+    // Add 10 to entire array
+    let mut diff = a8_zero();
+    diff = range_update(diff, 8, 0, 7, 10);
+    let arr = reconstruct(diff, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(a8_get(arr, i), 10);
+        i = i + 1;
+    }
+}
+
+fn test_single_element_update() {
+    // Add 7 to just index 3
+    let mut diff = a8_zero();
+    diff = range_update(diff, 8, 3, 3, 7);
+    let arr = reconstruct(diff, 8);
+    let mut i = 0;
+    while i < 8 {
+        if i == 3 {
+            assert_eq(a8_get(arr, i), 7);
+        } else {
+            assert_eq(a8_get(arr, i), 0);
+        }
+        i = i + 1;
+    }
+}
+
+fn test_negative_updates() {
+    // Start with all 10s (via diff array), then subtract
+    let mut diff = a8_zero();
+    diff = range_update(diff, 8, 0, 7, 10);
+    diff = range_update(diff, 8, 2, 5, -3);
+    let arr = reconstruct(diff, 8);
+    // Expected: [10, 10, 7, 7, 7, 7, 10, 10]
+    assert_eq(a8_get(arr, 0), 10);
+    assert_eq(a8_get(arr, 1), 10);
+    assert_eq(a8_get(arr, 2), 7);
+    assert_eq(a8_get(arr, 3), 7);
+    assert_eq(a8_get(arr, 4), 7);
+    assert_eq(a8_get(arr, 5), 7);
+    assert_eq(a8_get(arr, 6), 10);
+    assert_eq(a8_get(arr, 7), 10);
+}
+
+fn test_point_query() {
+    let mut diff = a8_zero();
+    diff = range_update(diff, 8, 1, 4, 3);
+    diff = range_update(diff, 8, 2, 6, 2);
+
+    // Point query without full reconstruction
+    assert_eq(point_query(diff, 0), 0);
+    assert_eq(point_query(diff, 1), 3);
+    assert_eq(point_query(diff, 2), 5);
+    assert_eq(point_query(diff, 3), 5);
+    assert_eq(point_query(diff, 4), 5);
+    assert_eq(point_query(diff, 5), 2);
+    assert_eq(point_query(diff, 6), 2);
+    assert_eq(point_query(diff, 7), 0);
+}
+
+fn test_diff_array_property() {
+    // Key property: D[i] = A[i] - A[i-1] for i > 0
+    let arr = Arr8 { a0: 2, a1: 5, a2: 3, a3: 8, a4: 1, a5: 4, a6: 7, a7: 6 };
+    let diff = build_diff(arr, 8);
+    assert_eq(a8_get(diff, 0), 2);
+    assert_eq(a8_get(diff, 1), 3);  // 5 - 2
+    assert_eq(a8_get(diff, 2), -2); // 3 - 5
+    assert_eq(a8_get(diff, 3), 5);  // 8 - 3
+    assert_eq(a8_get(diff, 4), -7); // 1 - 8
+    assert_eq(a8_get(diff, 5), 3);  // 4 - 1
+    assert_eq(a8_get(diff, 6), 3);  // 7 - 4
+    assert_eq(a8_get(diff, 7), -1); // 6 - 7
+}
+
+fn test_sum_preservation() {
+    // Range update preserves sum outside the range
+    // Sum of difference array = last element of reconstructed array
+    let mut diff = a8_zero();
+    diff = range_update(diff, 8, 2, 4, 5);
+    let arr = reconstruct(diff, 8);
+    // Sum of arr = 0+0+5+5+5+0+0+0 = 15
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 8 {
+        sum = sum + a8_get(arr, i);
+        i = i + 1;
+    }
+    assert_eq(sum, 15);
+}
+
+fn test_stacking_updates() {
+    // Apply the same update 4 times
+    let mut diff = a8_zero();
+    let mut k = 0;
+    while k < 4 {
+        diff = range_update(diff, 8, 1, 3, 2);
+        k = k + 1;
+    }
+    let arr = reconstruct(diff, 8);
+    // [0, 8, 8, 8, 0, 0, 0, 0]
+    assert_eq(a8_get(arr, 0), 0);
+    assert_eq(a8_get(arr, 1), 8);
+    assert_eq(a8_get(arr, 2), 8);
+    assert_eq(a8_get(arr, 3), 8);
+    assert_eq(a8_get(arr, 4), 0);
+}
+
+fn test_from_nonzero_base() {
+    // Start with existing array, convert to diff, update, reconstruct
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let mut diff = build_diff(arr, 8);
+    diff = range_update(diff, 8, 2, 5, 10);
+    let result = reconstruct(diff, 8);
+    // Expected: [1, 2, 13, 14, 15, 16, 7, 8]
+    assert_eq(a8_get(result, 0), 1);
+    assert_eq(a8_get(result, 1), 2);
+    assert_eq(a8_get(result, 2), 13);
+    assert_eq(a8_get(result, 3), 14);
+    assert_eq(a8_get(result, 4), 15);
+    assert_eq(a8_get(result, 5), 16);
+    assert_eq(a8_get(result, 6), 7);
+    assert_eq(a8_get(result, 7), 8);
+}
+
+fn main() -> Int {
+    test_build_and_reconstruct();
+    test_single_range_update();
+    test_multiple_updates();
+    test_matches_naive();
+    test_full_range_update();
+    test_single_element_update();
+    test_negative_updates();
+    test_point_query();
+    test_diff_array_property();
+    test_sum_preservation();
+    test_stacking_updates();
+    test_from_nonzero_base();
+    print("[OK] 372_diff_array_aot");
+    0
+}

@@ -1,0 +1,92 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, linker, init-priority, initialization
+// @description: Initialization order control via @init_priority
+
+/// Global state for tracking initialization order
+static mut INIT_ORDER: List<Int> = List.new();
+
+/// High priority initializer (runs first)
+/// Priority 101-65535, lower = earlier
+@init_priority(101)
+fn init_memory_subsystem() {
+    INIT_ORDER.push(1);
+}
+
+/// Medium priority initializer
+@init_priority(500)
+fn init_logging_subsystem() {
+    INIT_ORDER.push(2);
+}
+
+/// Lower priority (runs later)
+@init_priority(1000)
+fn init_application_state() {
+    INIT_ORDER.push(3);
+}
+
+/// Even lower priority
+@init_priority(2000)
+fn init_user_modules() {
+    INIT_ORDER.push(4);
+}
+
+/// Default priority (no attribute) - platform dependent order
+fn init_default() {
+    INIT_ORDER.push(5);
+}
+
+/// Global constructors for types
+type Logger is {
+    level: Int,
+};
+
+/// Logger with init priority
+@init_priority(200)
+let GLOBAL_LOGGER: Logger = Logger { level: 3 };
+
+/// Configuration with later init
+@init_priority(300)
+let CONFIG: Map<Text, Text> = Map::new();
+
+/// Constants don't need init_priority (compile-time)
+let VERSION: Int = 1;
+
+/// Static initialization with complex expression
+@init_priority(150)
+let COMPUTED_VALUE: Int = compute_initial_value();
+
+fn compute_initial_value() -> Int {
+    42 * 2 + 1
+}
+
+/// Multiple globals with same priority (order undefined within priority)
+@init_priority(1000)
+let GLOBAL_A: Int = 1;
+
+@init_priority(1000)
+let GLOBAL_B: Int = 2;
+
+/// Init priority with section placement
+@init_priority(500)
+@section(".data.early")
+let EARLY_DATA: Int = 100;
+
+/// Destructor priority (cleanup in reverse order)
+@init_priority(101)
+fn cleanup_memory_subsystem() {
+    // Runs last during cleanup
+}
+
+fn main() {
+    // After all initializers run, verify order
+    // Note: actual verification depends on runtime support
+
+    // Access initialized globals
+    assert(GLOBAL_LOGGER.level == 3);
+    assert(COMPUTED_VALUE == 85);
+    assert(GLOBAL_A == 1);
+    assert(GLOBAL_B == 2);
+    assert(EARLY_DATA == 100);
+}

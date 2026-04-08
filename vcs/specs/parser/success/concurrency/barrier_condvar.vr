@@ -1,0 +1,27 @@
+// @test: parse-pass
+// @tier: 0
+// @category: concurrency
+
+fn test_sync_primitives() {
+    // Barrier
+    let barrier = Barrier.new(4);
+    barrier.wait();
+
+    // Condition variable
+    let cond = CondVar.new();
+    let mutex = Mutex.new(false);
+
+    let guard = mutex.lock();
+    while !*guard {
+        cond.wait(&guard);
+    }
+
+    // Notify
+    cond.notify_one();
+    cond.notify_all();
+
+    // Semaphore
+    let sem = Semaphore.new(5);
+    sem.acquire();
+    sem.release();
+}

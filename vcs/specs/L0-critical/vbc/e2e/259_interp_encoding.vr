@@ -1,0 +1,462 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, encoding, cipher, rle
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: encoding/decoding (Caesar cipher, RLE, parity)
+
+// =============================================================================
+// Arr16 — storage for integer sequences
+// =============================================================================
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr16_new() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else if i == 15 { a.a15 }
+    else { 0 }
+}
+
+fn arr16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { val } else { a.a0 },
+        a1: if i == 1 { val } else { a.a1 },
+        a2: if i == 2 { val } else { a.a2 },
+        a3: if i == 3 { val } else { a.a3 },
+        a4: if i == 4 { val } else { a.a4 },
+        a5: if i == 5 { val } else { a.a5 },
+        a6: if i == 6 { val } else { a.a6 },
+        a7: if i == 7 { val } else { a.a7 },
+        a8: if i == 8 { val } else { a.a8 },
+        a9: if i == 9 { val } else { a.a9 },
+        a10: if i == 10 { val } else { a.a10 },
+        a11: if i == 11 { val } else { a.a11 },
+        a12: if i == 12 { val } else { a.a12 },
+        a13: if i == 13 { val } else { a.a13 },
+        a14: if i == 14 { val } else { a.a14 },
+        a15: if i == 15 { val } else { a.a15 }
+    }
+}
+
+// Result with array and length
+type ArrResult is { data: Arr16, length: Int };
+
+// =============================================================================
+// Caesar cipher: shift each integer by `shift` mod `alphabet_size`
+// Treats values as integers in [0, alphabet_size)
+// =============================================================================
+
+fn caesar_encode(data: Arr16, length: Int, shift: Int, alpha_size: Int) -> Arr16 {
+    let mut result = arr16_new();
+    let mut i = 0;
+    while i < length {
+        let v = arr16_get(data, i);
+        let mut encoded = (v + shift) % alpha_size;
+        if encoded < 0 {
+            encoded = encoded + alpha_size;
+        }
+        result = arr16_set(result, i, encoded);
+        i = i + 1;
+    }
+    result
+}
+
+fn caesar_decode(data: Arr16, length: Int, shift: Int, alpha_size: Int) -> Arr16 {
+    // Decoding is encoding with negative shift
+    caesar_encode(data, length, -shift, alpha_size)
+}
+
+// =============================================================================
+// Run-Length Encoding on integer array
+// Stores pairs: [value, count, value, count, ...]
+// Returns ArrResult with encoded data and its length
+// =============================================================================
+
+fn rle_encode(data: Arr16, length: Int) -> ArrResult {
+    if length == 0 {
+        return ArrResult { data: arr16_new(), length: 0 };
+    }
+    let mut result = arr16_new();
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i < length {
+        let val = arr16_get(data, i);
+        let mut count = 1;
+        while i + count < length && arr16_get(data, i + count) == val {
+            count = count + 1;
+        }
+        result = arr16_set(result, out_idx, val);
+        result = arr16_set(result, out_idx + 1, count);
+        out_idx = out_idx + 2;
+        i = i + count;
+    }
+    ArrResult { data: result, length: out_idx }
+}
+
+// =============================================================================
+// Run-Length Decoding
+// Input: pairs [value, count, value, count, ...]
+// =============================================================================
+
+fn rle_decode(encoded: Arr16, enc_length: Int) -> ArrResult {
+    let mut result = arr16_new();
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i < enc_length {
+        let val = arr16_get(encoded, i);
+        let count = arr16_get(encoded, i + 1);
+        let mut j = 0;
+        while j < count {
+            result = arr16_set(result, out_idx, val);
+            out_idx = out_idx + 1;
+            j = j + 1;
+        }
+        i = i + 2;
+    }
+    ArrResult { data: result, length: out_idx }
+}
+
+// =============================================================================
+// Parity bit encoding: for each 7-bit value, add an 8th parity bit
+// Even parity: set bit 7 so total number of 1-bits is even
+// =============================================================================
+
+fn count_bits(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x != 0 {
+        count = count + (x & 1);
+        x = x >> 1;
+    }
+    count
+}
+
+fn parity_encode(data: Arr16, length: Int) -> Arr16 {
+    let mut result = arr16_new();
+    let mut i = 0;
+    while i < length {
+        let val = arr16_get(data, i) & 0x7F; // mask to 7 bits
+        let bits = count_bits(val);
+        let parity_bit = bits % 2; // 1 if odd number of bits, making total even
+        let encoded = val | (parity_bit << 7);
+        result = arr16_set(result, i, encoded);
+        i = i + 1;
+    }
+    result
+}
+
+fn parity_decode(data: Arr16, length: Int) -> Arr16 {
+    // Strip parity bit, return original 7-bit values
+    let mut result = arr16_new();
+    let mut i = 0;
+    while i < length {
+        let val = arr16_get(data, i) & 0x7F;
+        result = arr16_set(result, i, val);
+        i = i + 1;
+    }
+    result
+}
+
+fn parity_check(data: Arr16, length: Int) -> Bool {
+    // Check that all values have even parity (total bits including parity bit)
+    let mut i = 0;
+    while i < length {
+        let val = arr16_get(data, i);
+        let bits = count_bits(val & 0xFF);
+        if bits % 2 != 0 {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// XOR cipher: encode/decode with a key (same operation for both)
+// =============================================================================
+
+fn xor_cipher(data: Arr16, length: Int, key: Arr16, key_len: Int) -> Arr16 {
+    let mut result = arr16_new();
+    let mut i = 0;
+    while i < length {
+        let d = arr16_get(data, i);
+        let k = arr16_get(key, i % key_len);
+        result = arr16_set(result, i, d ^ k);
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Helper: check two arrays are equal
+// =============================================================================
+
+fn arrays_equal(a: Arr16, b: Arr16, length: Int) -> Bool {
+    let mut i = 0;
+    while i < length {
+        if arr16_get(a, i) != arr16_get(b, i) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Helper: build small arrays
+// =============================================================================
+
+fn make_arr(v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int) -> Arr16 {
+    let mut a = arr16_new();
+    a = arr16_set(a, 0, v0);
+    a = arr16_set(a, 1, v1);
+    a = arr16_set(a, 2, v2);
+    a = arr16_set(a, 3, v3);
+    a = arr16_set(a, 4, v4);
+    a = arr16_set(a, 5, v5);
+    a
+}
+
+// =============================================================================
+// Tests — Caesar cipher
+// =============================================================================
+
+fn test_caesar_basic() {
+    // Alphabet 0-25, shift 3: [0,1,2,3] -> [3,4,5,6]
+    let data = make_arr(0, 1, 2, 3, 0, 0);
+    let enc = caesar_encode(data, 4, 3, 26);
+    assert_eq(arr16_get(enc, 0), 3);
+    assert_eq(arr16_get(enc, 1), 4);
+    assert_eq(arr16_get(enc, 2), 5);
+    assert_eq(arr16_get(enc, 3), 6);
+}
+
+fn test_caesar_wrap() {
+    // Wrap around: [24, 25] with shift 3 => [1, 2]
+    let data = make_arr(24, 25, 0, 0, 0, 0);
+    let enc = caesar_encode(data, 2, 3, 26);
+    assert_eq(arr16_get(enc, 0), 1);
+    assert_eq(arr16_get(enc, 1), 2);
+}
+
+fn test_caesar_roundtrip() {
+    let data = make_arr(7, 4, 11, 11, 14, 0);
+    let enc = caesar_encode(data, 5, 13, 26);
+    let dec = caesar_decode(enc, 5, 13, 26);
+    assert(arrays_equal(data, dec, 5));
+}
+
+fn test_caesar_zero_shift() {
+    let data = make_arr(1, 2, 3, 4, 5, 0);
+    let enc = caesar_encode(data, 5, 0, 26);
+    assert(arrays_equal(data, enc, 5));
+}
+
+fn test_caesar_full_rotation() {
+    // Shift by alphabet size = identity
+    let data = make_arr(5, 10, 15, 20, 25, 0);
+    let enc = caesar_encode(data, 5, 26, 26);
+    assert(arrays_equal(data, enc, 5));
+}
+
+fn test_caesar_small_alphabet() {
+    // Binary alphabet (0, 1), shift 1 = NOT
+    let data = make_arr(0, 1, 0, 1, 1, 0);
+    let enc = caesar_encode(data, 6, 1, 2);
+    assert_eq(arr16_get(enc, 0), 1);
+    assert_eq(arr16_get(enc, 1), 0);
+    assert_eq(arr16_get(enc, 2), 1);
+    assert_eq(arr16_get(enc, 3), 0);
+    assert_eq(arr16_get(enc, 4), 0);
+    assert_eq(arr16_get(enc, 5), 1);
+}
+
+// =============================================================================
+// Tests — Run-Length Encoding
+// =============================================================================
+
+fn test_rle_basic() {
+    // [1, 1, 1, 2, 2, 3] => [1,3, 2,2, 3,1]
+    let data = make_arr(1, 1, 1, 2, 2, 3);
+    let enc = rle_encode(data, 6);
+    assert_eq(enc.length, 6); // 3 pairs = 6 values
+    assert_eq(arr16_get(enc.data, 0), 1);
+    assert_eq(arr16_get(enc.data, 1), 3);
+    assert_eq(arr16_get(enc.data, 2), 2);
+    assert_eq(arr16_get(enc.data, 3), 2);
+    assert_eq(arr16_get(enc.data, 4), 3);
+    assert_eq(arr16_get(enc.data, 5), 1);
+}
+
+fn test_rle_no_runs() {
+    // [1, 2, 3, 4] => [1,1, 2,1, 3,1, 4,1]
+    let data = make_arr(1, 2, 3, 4, 0, 0);
+    let enc = rle_encode(data, 4);
+    assert_eq(enc.length, 8); // 4 pairs
+    assert_eq(arr16_get(enc.data, 0), 1);
+    assert_eq(arr16_get(enc.data, 1), 1);
+    assert_eq(arr16_get(enc.data, 2), 2);
+    assert_eq(arr16_get(enc.data, 3), 1);
+}
+
+fn test_rle_all_same() {
+    // [5, 5, 5, 5, 5] => [5, 5]
+    let mut data = arr16_new();
+    data = arr16_set(data, 0, 5);
+    data = arr16_set(data, 1, 5);
+    data = arr16_set(data, 2, 5);
+    data = arr16_set(data, 3, 5);
+    data = arr16_set(data, 4, 5);
+    let enc = rle_encode(data, 5);
+    assert_eq(enc.length, 2);
+    assert_eq(arr16_get(enc.data, 0), 5);
+    assert_eq(arr16_get(enc.data, 1), 5);
+}
+
+fn test_rle_roundtrip() {
+    let data = make_arr(1, 1, 2, 2, 2, 3);
+    let enc = rle_encode(data, 6);
+    let dec = rle_decode(enc.data, enc.length);
+    assert_eq(dec.length, 6);
+    assert(arrays_equal(data, dec.data, 6));
+}
+
+fn test_rle_single() {
+    let data = make_arr(42, 0, 0, 0, 0, 0);
+    let enc = rle_encode(data, 1);
+    assert_eq(enc.length, 2);
+    assert_eq(arr16_get(enc.data, 0), 42);
+    assert_eq(arr16_get(enc.data, 1), 1);
+    let dec = rle_decode(enc.data, enc.length);
+    assert_eq(dec.length, 1);
+    assert_eq(arr16_get(dec.data, 0), 42);
+}
+
+fn test_rle_empty() {
+    let data = arr16_new();
+    let enc = rle_encode(data, 0);
+    assert_eq(enc.length, 0);
+}
+
+// =============================================================================
+// Tests — Parity encoding
+// =============================================================================
+
+fn test_parity_basic() {
+    // Value 5 = 0b101 (2 set bits, even) => parity bit = 0 => encoded = 5
+    let data = make_arr(5, 0, 0, 0, 0, 0);
+    let enc = parity_encode(data, 1);
+    assert_eq(arr16_get(enc, 0), 5);
+    // Value 3 = 0b11 (2 set bits, even) => parity bit = 0 => encoded = 3
+    let data2 = make_arr(3, 0, 0, 0, 0, 0);
+    let enc2 = parity_encode(data2, 1);
+    assert_eq(arr16_get(enc2, 0), 3);
+    // Value 7 = 0b111 (3 set bits, odd) => parity bit = 1 => encoded = 7 | 128 = 135
+    let data3 = make_arr(7, 0, 0, 0, 0, 0);
+    let enc3 = parity_encode(data3, 1);
+    assert_eq(arr16_get(enc3, 0), 135);
+}
+
+fn test_parity_check_valid() {
+    let data = make_arr(5, 7, 3, 0, 0, 0);
+    let enc = parity_encode(data, 3);
+    assert(parity_check(enc, 3));
+}
+
+fn test_parity_check_corrupted() {
+    let data = make_arr(5, 7, 3, 0, 0, 0);
+    let mut enc = parity_encode(data, 3);
+    // Flip a bit to corrupt
+    let corrupted = arr16_get(enc, 1) ^ 1;
+    enc = arr16_set(enc, 1, corrupted);
+    assert(!parity_check(enc, 3));
+}
+
+fn test_parity_roundtrip() {
+    let data = make_arr(10, 20, 30, 40, 50, 60);
+    let enc = parity_encode(data, 6);
+    let dec = parity_decode(enc, 6);
+    assert(arrays_equal(data, dec, 6));
+}
+
+// =============================================================================
+// Tests — XOR cipher
+// =============================================================================
+
+fn test_xor_roundtrip() {
+    let data = make_arr(72, 101, 108, 108, 111, 0);
+    let key = make_arr(42, 17, 0, 0, 0, 0);
+    let enc = xor_cipher(data, 5, key, 2);
+    // XOR cipher is its own inverse
+    let dec = xor_cipher(enc, 5, key, 2);
+    assert(arrays_equal(data, dec, 5));
+}
+
+fn test_xor_zero_key() {
+    // XOR with 0 = identity
+    let data = make_arr(1, 2, 3, 4, 5, 6);
+    let key = make_arr(0, 0, 0, 0, 0, 0);
+    let enc = xor_cipher(data, 6, key, 1);
+    assert(arrays_equal(data, enc, 6));
+}
+
+fn test_xor_self() {
+    // XOR with itself = all zeros
+    let data = make_arr(5, 10, 15, 20, 25, 30);
+    let enc = xor_cipher(data, 6, data, 6);
+    let mut i = 0;
+    while i < 6 {
+        assert_eq(arr16_get(enc, i), 0);
+        i = i + 1;
+    }
+}
+
+fn main() -> Int {
+    test_caesar_basic();
+    test_caesar_wrap();
+    test_caesar_roundtrip();
+    test_caesar_zero_shift();
+    test_caesar_full_rotation();
+    test_caesar_small_alphabet();
+    test_rle_basic();
+    test_rle_no_runs();
+    test_rle_all_same();
+    test_rle_roundtrip();
+    test_rle_single();
+    test_rle_empty();
+    test_parity_basic();
+    test_parity_check_valid();
+    test_parity_check_corrupted();
+    test_parity_roundtrip();
+    test_xor_roundtrip();
+    test_xor_zero_key();
+    test_xor_self();
+    print("[OK] 259_interp_encoding");
+    0
+}

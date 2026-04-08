@@ -1,0 +1,165 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: state-machine, enum, implement, transitions
+// @description: Test state machine patterns with sum types
+
+type ConnectionState is
+    Disconnected
+  | Connecting(Text)
+  | Connected(Text, Int)
+  | Disconnecting;
+
+fn state_name(s: ConnectionState) -> Text {
+    match s {
+        Disconnected => "disconnected",
+        Connecting(_) => "connecting",
+        Connected(_, _) => "connected",
+        Disconnecting => "disconnecting",
+    }
+}
+
+fn test_connection_states() -> Int {
+    let s1 = Disconnected;
+    if state_name(s1) != "disconnected" {
+        print("FAIL s1");
+        return 1;
+    }
+
+    let s2 = Connecting("server.local");
+    if state_name(s2) != "connecting" {
+        print("FAIL s2");
+        return 1;
+    }
+
+    let s3 = Connected("server.local", 8080);
+    match s3 {
+        Connected(host, port) => {
+            if host != "server.local" {
+                print(f"FAIL host: {host}");
+                return 1;
+            }
+            if port != 8080 {
+                print(f"FAIL port: {port}");
+                return 1;
+            }
+        },
+        _ => {
+            print("FAIL: should be Connected");
+            return 1;
+        },
+    }
+    print("  connection_states: OK");
+    0
+}
+
+// Simple game entity state
+type EntityState is
+    Idle2
+  | Moving(Int, Int)
+  | Attacking(Int)
+  | Dead2;
+
+type Entity is { name: Text, hp: Int, state: EntityState };
+
+fn update_entity(e: Entity) -> Entity {
+    match e.state {
+        Idle2 => e,
+        Moving(dx, dy) => Entity { name: e.name, hp: e.hp, state: Idle2 },
+        Attacking(dmg) => Entity { name: e.name, hp: e.hp, state: Idle2 },
+        Dead2 => e,
+    }
+}
+
+fn damage_entity(e: Entity, dmg: Int) -> Entity {
+    let new_hp = e.hp - dmg;
+    if new_hp <= 0 {
+        Entity { name: e.name, hp: 0, state: Dead2 }
+    } else {
+        Entity { name: e.name, hp: new_hp, state: e.state }
+    }
+}
+
+fn test_entity_state() -> Int {
+    let hero = Entity { name: "Hero", hp: 100, state: Idle2 };
+
+    let moving = Entity { name: hero.name, hp: hero.hp, state: Moving(5, 3) };
+    let after_move = update_entity(moving);
+    match after_move.state {
+        Idle2 => {},
+        _ => { print("FAIL: should be idle after move"); return 1; },
+    }
+
+    let damaged = damage_entity(hero, 30);
+    if damaged.hp != 70 {
+        print(f"FAIL damage: hp={damaged.hp}");
+        return 1;
+    }
+
+    let killed = damage_entity(hero, 150);
+    if killed.hp != 0 {
+        print(f"FAIL kill: hp={killed.hp}");
+        return 1;
+    }
+    match killed.state {
+        Dead2 => {},
+        _ => { print("FAIL: should be dead"); return 1; },
+    }
+    print("  entity_state: OK");
+    0
+}
+
+// Tokenizer state machine
+type LexState is ReadingNormal | ReadingString | ReadingNumber | LexDone;
+
+fn classify_char(c: Int) -> Text {
+    if c >= 48 && c <= 57 {
+        "digit"
+    } else if c == 34 {
+        "quote"
+    } else if c == 32 {
+        "space"
+    } else {
+        "other"
+    }
+}
+
+fn test_lex_classify() -> Int {
+    if classify_char(48) != "digit" {
+        print("FAIL: '0' is digit");
+        return 1;
+    }
+    if classify_char(57) != "digit" {
+        print("FAIL: '9' is digit");
+        return 1;
+    }
+    if classify_char(34) != "quote" {
+        print("FAIL: '\"' is quote");
+        return 1;
+    }
+    if classify_char(32) != "space" {
+        print("FAIL: ' ' is space");
+        return 1;
+    }
+    if classify_char(65) != "other" {
+        print("FAIL: 'A' is other");
+        return 1;
+    }
+    print("  lex_classify: OK");
+    0
+}
+
+fn main() -> Int {
+    print("State Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_connection_states();
+    failures = failures + test_entity_state();
+    failures = failures + test_lex_classify();
+
+    if failures == 0 {
+        print("All state pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

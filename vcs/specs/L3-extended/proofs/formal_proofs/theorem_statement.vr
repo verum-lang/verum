@@ -1,0 +1,241 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-proofs, theorem
+// @timeout: 20000
+// @description: Tests theorem statement syntax and structures
+
+/// ============================================================
+/// THEOREM STATEMENTS
+/// ============================================================
+
+// ============================================================
+// BASIC THEOREMS
+// ============================================================
+
+/// Simple proposition
+theorem true_is_true(): true {
+    proof by trivial
+}
+
+/// Equality theorem
+theorem eq_refl_int(x: Int): x == x {
+    proof by trivial
+}
+
+/// Inequality theorem
+theorem positive_successor(n: Nat): succ(n) > 0 {
+    proof by arithmetic
+}
+
+// ============================================================
+// THEOREMS WITH PRE/POST CONDITIONS
+// ============================================================
+
+/// Precondition (requires)
+theorem div_positive(n: Int, d: Int)
+    requires d > 0
+    requires n >= 0
+    ensures n / d >= 0
+{
+    proof by arithmetic
+}
+
+/// Multiple preconditions
+theorem triangle_inequality(a: Float, b: Float, c: Float)
+    requires a + b > c
+    requires b + c > a
+    requires c + a > b
+    ensures a > 0 || b > 0 || c > 0
+{
+    proof by smt
+}
+
+/// Postcondition (ensures)
+theorem abs_nonneg(x: Int): abs(x) >= 0 {
+    proof by cases on x {
+        case x >= 0 => {
+            have: abs(x) == x by definition;
+            conclude by assumption
+        }
+        case x < 0 => {
+            have: abs(x) == -x by definition;
+            conclude by arithmetic
+        }
+    }
+}
+
+/// Multiple postconditions
+theorem sorted_preserves_length<T: Ord>(xs: List<T>)
+    ensures sort(xs).len() == xs.len()
+{
+    proof by sort_correctness
+}
+
+fn sort<T: Ord>(xs: List<T>) -> List<T>;
+
+// ============================================================
+// QUANTIFIED THEOREMS
+// ============================================================
+
+/// For all natural numbers
+theorem all_nat_nonneg(): forall n: Nat. n >= 0 {
+    proof by auto
+}
+
+/// Nested universal quantifiers
+theorem add_assoc_all(): forall a: Nat. forall b: Nat. forall c: Nat. (a + b) + c == a + (b + c) {
+    proof by auto
+}
+
+/// Universal with implication
+theorem zero_mult(): forall n: Nat. 0 * n == 0 {
+    proof by auto
+}
+
+/// Basic existence
+theorem successor_exists(n: Nat): exists m: Nat. m == n + 1 {
+    proof {
+        witness n + 1;
+        conclude by reflexivity
+    }
+}
+
+/// Existence with property
+theorem sqrt_exists(x: Float)
+    requires x >= 0
+    ensures exists y: Float. y >= 0 && y * y == x
+{
+    proof by auto
+}
+
+fn sqrt_val(x: Float) -> Float;
+
+// ============================================================
+// COMPOUND PROPOSITIONS
+// ============================================================
+
+/// Conjunction
+theorem and_comm<P: Prop, Q: Prop>: (P && Q) -> (Q && P) {
+    proof by auto
+}
+
+/// Disjunction
+theorem or_comm<P: Prop, Q: Prop>: (P || Q) -> (Q || P) {
+    proof by auto
+}
+
+/// Implication
+theorem modus_ponens<P: Prop, Q: Prop>: P -> (P -> Q) -> Q {
+    proof by auto
+}
+
+/// Biconditional
+theorem iff_refl<P: Prop>: P <-> P {
+    proof by auto
+}
+
+/// Negation
+theorem contra<P: Prop, Q: Prop>: (P -> Q) -> (!Q -> !P) {
+    proof by auto
+}
+
+// ============================================================
+// GENERIC THEOREMS
+// ============================================================
+
+/// Type-parameterized theorem
+theorem list_append_nil<T>(xs: List<T>): xs ++ [] == xs {
+    proof by induction on xs
+}
+
+/// Multiple type parameters
+theorem map_compose<A, B, C>(xs: List<A>, f: fn(A) -> B, g: fn(B) -> C):
+    xs.map(f).map(g) == xs.map(|x| g(f(x)))
+{
+    proof by induction on xs
+}
+
+/// Bounded type parameters
+theorem sort_preserves<T: Ord>(xs: List<T>):
+    sort(xs).len() == xs.len()
+{
+    proof by sort_correctness
+}
+
+// ============================================================
+// ALGEBRAIC THEOREMS
+// ============================================================
+
+/// Ring theorems
+theorem ring_add_comm<T: Ring>(a: T, b: T): a + b == b + a {
+    proof by ring
+}
+
+theorem ring_mul_assoc<T: Ring>(a: T, b: T, c: T): (a * b) * c == a * (b * c) {
+    proof by ring
+}
+
+theorem ring_distributive<T: Ring>(a: T, b: T, c: T): a * (b + c) == a * b + a * c {
+    proof by ring
+}
+
+// ============================================================
+// THEOREMS WITH PROOFS
+// ============================================================
+
+/// Proof by calculation
+theorem square_expansion(a: Int, b: Int): (a + b) * (a + b) == a*a + 2*a*b + b*b {
+    proof by ring
+}
+
+/// Proof by induction
+theorem sum_formula(n: Nat): sum_to(n) == n * (n + 1) / 2 {
+    proof by induction on n {
+        case 0 => trivial
+        case succ(k) => {
+            have ih: sum_to(k) == k * (k + 1) / 2;
+            conclude by auto
+        }
+    }
+}
+
+fn sum_to(n: Nat) -> Nat;
+
+/// Proof by contradiction
+theorem infinite_primes(): !exists n: Nat. forall p: Nat. is_prime(p) implies p <= n {
+    proof by contradiction {
+        assume h: exists n: Nat. forall p: Nat. is_prime(p) implies p <= n;
+        have: false by euclid_argument;
+        contradiction
+    }
+}
+
+fn is_prime(n: Nat) -> Bool;
+
+/// Proof by cases
+theorem abs_def(x: Int): abs(x) == x || abs(x) == -x {
+    proof by cases on x {
+        case x >= 0 => {
+            left;
+            trivial
+        }
+        case x < 0 => {
+            right;
+            trivial
+        }
+    }
+}
+
+/// Proof by SMT
+theorem smt_example(x: Int, y: Int)
+    requires x > 0
+    requires y > 0
+    ensures x + y > 1
+{
+    proof by smt
+}
+
+fn main() {
+    // Theorem statement tests
+}

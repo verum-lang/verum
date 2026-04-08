@@ -1,0 +1,115 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: try, question-mark, error-handling, e2e
+// @description: Test try blocks with ? operator for error capture and propagation
+
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: try block success path
+    let r1: Result<Int, Text> = try {
+        let a = divide(20, 4)?;
+        a
+    };
+    match r1 {
+        Ok(v) => {
+            if v != 5 {
+                print(f"FAIL 1: got {v}");
+                f = f + 1;
+            }
+        },
+        Err(e) => {
+            print(f"FAIL 1: unexpected error {e}");
+            f = f + 1;
+        },
+    }
+
+    // Test 2: try block error path
+    let r2: Result<Int, Text> = try {
+        let a = divide(20, 0)?;
+        a
+    };
+    match r2 {
+        Ok(v) => {
+            print(f"FAIL 2: should error, got {v}");
+            f = f + 1;
+        },
+        Err(e) => {
+            if e != "division by zero" {
+                print(f"FAIL 2: wrong error: {e}");
+                f = f + 1;
+            }
+        },
+    }
+
+    // Test 3: chained ? with all success
+    let r3: Result<Int, Text> = try {
+        let a = divide(100, 5)?;
+        let b = divide(a, 4)?;
+        b
+    };
+    match r3 {
+        Ok(v) => {
+            if v != 5 {
+                print(f"FAIL 3: got {v}");
+                f = f + 1;
+            }
+        },
+        Err(e) => {
+            print(f"FAIL 3: error {e}");
+            f = f + 1;
+        },
+    }
+
+    // Test 4: chained ? with second call failing
+    let r4: Result<Int, Text> = try {
+        let a = divide(20, 4)?;
+        let b = divide(a, 0)?;
+        b
+    };
+    match r4 {
+        Ok(v) => {
+            print(f"FAIL 4: should error, got {v}");
+            f = f + 1;
+        },
+        Err(e) => {
+            if e != "division by zero" {
+                print(f"FAIL 4: wrong error: {e}");
+                f = f + 1;
+            }
+        },
+    }
+
+    // Test 5: try block with expression (not just variable)
+    let r5: Result<Int, Text> = try {
+        let a = divide(30, 3)?;
+        let b = divide(40, 4)?;
+        a + b
+    };
+    match r5 {
+        Ok(v) => {
+            if v != 20 {
+                print(f"FAIL 5: got {v}");
+                f = f + 1;
+            }
+        },
+        Err(e) => {
+            print(f"FAIL 5: error {e}");
+            f = f + 1;
+        },
+    }
+
+    if f == 0 {
+        print("All try block tests passed");
+    }
+    f
+}

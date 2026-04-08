@@ -1,0 +1,177 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, kernel
+
+// Basic matrix multiplication kernel
+@kernel(block_size = (16, 16), grid_size = auto)
+fn matrix_mul(
+    a: &Tensor<f32, [M, K]>,
+    b: &Tensor<f32, [K, N]>,
+    c: &mut Tensor<f32, [M, N]>
+) {
+    let row = global_id().y;
+    let col = global_id().x;
+
+    if row < M && col < N {
+        let mut sum = 0.0f32;
+        for k in 0..K {
+            sum += a[row, k] * b[k, col];
+        }
+        c[row, col] = sum;
+    }
+}
+
+// Vector addition kernel
+@kernel(block_size = 256)
+fn vector_add(
+    a: &Tensor<f32, [N]>,
+    b: &Tensor<f32, [N]>,
+    c: &mut Tensor<f32, [N]>
+) {
+    let idx = global_id().x;
+
+    if idx < N {
+        c[idx] = a[idx] + b[idx];
+    }
+}
+
+// Element-wise operations kernel
+@kernel(block_size = 256)
+fn element_wise_mul(
+    a: &Tensor<f32, [N]>,
+    b: &Tensor<f32, [N]>,
+    c: &mut Tensor<f32, [N]>
+) {
+    let idx = global_id().x;
+
+    if idx < N {
+        c[idx] = a[idx] * b[idx];
+    }
+}
+
+// Scalar multiplication kernel
+@kernel(block_size = 256)
+fn scalar_mul(
+    a: &Tensor<f32, [N]>,
+    scalar: f32,
+    out: &mut Tensor<f32, [N]>
+) {
+    let idx = global_id().x;
+
+    if idx < N {
+        out[idx] = a[idx] * scalar;
+    }
+}
+
+// ReLU activation kernel
+@kernel(block_size = 256)
+fn relu(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [N]>
+) {
+    let idx = global_id().x;
+
+    if idx < N {
+        output[idx] = if input[idx] > 0.0 { input[idx] } else { 0.0 };
+    }
+}
+
+// Sigmoid activation kernel
+@kernel(block_size = 256)
+fn sigmoid(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [N]>
+) {
+    let idx = global_id().x;
+
+    if idx < N {
+        output[idx] = 1.0 / (1.0 + (-input[idx]).exp());
+    }
+}
+
+// 2D convolution kernel (simplified)
+@kernel(block_size = (16, 16), grid_size = auto)
+fn conv2d_simple(
+    input: &Tensor<f32, [H, W]>,
+    kernel: &Tensor<f32, [KH, KW]>,
+    output: &mut Tensor<f32, [OH, OW]>
+) where OH = H - KH + 1, OW = W - KW + 1 {
+    let row = global_id().y;
+    let col = global_id().x;
+
+    if row < OH && col < OW {
+        let mut sum = 0.0f32;
+        for kh in 0..KH {
+            for kw in 0..KW {
+                sum += input[row + kh, col + kw] * kernel[kh, kw];
+            }
+        }
+        output[row, col] = sum;
+    }
+}
+
+// Batch matrix multiplication
+@kernel(block_size = (16, 16), grid_size = auto)
+fn batch_matmul(
+    a: &Tensor<f32, [B, M, K]>,
+    b: &Tensor<f32, [B, K, N]>,
+    c: &mut Tensor<f32, [B, M, N]>
+) {
+    let batch = global_id().z;
+    let row = global_id().y;
+    let col = global_id().x;
+
+    if batch < B && row < M && col < N {
+        let mut sum = 0.0f32;
+        for k in 0..K {
+            sum += a[batch, row, k] * b[batch, k, col];
+        }
+        c[batch, row, col] = sum;
+    }
+}
+
+// Softmax kernel (row-wise)
+@kernel(block_size = 256)
+fn softmax_row(
+    input: &Tensor<f32, [M, N]>,
+    output: &mut Tensor<f32, [M, N]>
+) {
+    let row = global_id().x;
+
+    if row < M {
+        // Find max for numerical stability
+        let mut max_val = input[row, 0];
+        for col in 1..N {
+            if input[row, col] > max_val {
+                max_val = input[row, col];
+            }
+        }
+
+        // Compute exp and sum
+        let mut sum = 0.0f32;
+        for col in 0..N {
+            sum += (input[row, col] - max_val).exp();
+        }
+
+        // Normalize
+        for col in 0..N {
+            output[row, col] = (input[row, col] - max_val).exp() / sum;
+        }
+    }
+}
+
+// Transpose kernel
+@kernel(block_size = (16, 16), grid_size = auto)
+fn transpose(
+    input: &Tensor<f32, [M, N]>,
+    output: &mut Tensor<f32, [N, M]>
+) {
+    let row = global_id().y;
+    let col = global_id().x;
+
+    if row < M && col < N {
+        output[col, row] = input[row, col];
+    }
+}

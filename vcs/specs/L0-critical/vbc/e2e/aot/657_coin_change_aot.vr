@@ -1,0 +1,194 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, coin-change, dp, greedy
+// @timeout: 30000
+
+// Coin change problem variants
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// Greedy coin change (for canonical coin systems like US coins)
+// Coins must be sorted descending
+fn greedy_change(amount: Int, coins: Arr8, n_coins: Int) -> Int {
+    let mut remaining = amount;
+    let mut total_coins = 0;
+    let mut i = 0;
+    while i < n_coins {
+        let coin = get8(coins, i);
+        while remaining >= coin {
+            remaining = remaining - coin;
+            total_coins = total_coins + 1;
+        }
+        i = i + 1;
+    }
+    if remaining == 0 { total_coins } else { 0 - 1 }
+}
+
+// Count coins used of each denomination (greedy)
+fn greedy_count_denom(amount: Int, coins: Arr8, n_coins: Int, denom_idx: Int) -> Int {
+    let mut remaining = amount;
+    let mut count = 0;
+    let mut i = 0;
+    while i < n_coins {
+        let coin = get8(coins, i);
+        while remaining >= coin {
+            remaining = remaining - coin;
+            if i == denom_idx { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// DP minimum coins: dp[j] = min coins to make amount j
+// Amount must be <= 7 (fits in Arr8 as dp table)
+fn dp_min_coins(amount: Int, coins: Arr8, n_coins: Int) -> Int {
+    let inf = 9999;
+    let mut dp = zeros();
+    // dp[0] = 0, dp[1..amount] = inf
+    let mut j = 1;
+    while j <= amount {
+        dp = set8(dp, j, inf);
+        j = j + 1;
+    }
+    let mut i = 0;
+    while i < n_coins {
+        let coin = get8(coins, i);
+        let mut jj = coin;
+        while jj <= amount {
+            let prev = get8(dp, jj - coin);
+            if prev + 1 < get8(dp, jj) {
+                dp = set8(dp, jj, prev + 1);
+            }
+            jj = jj + 1;
+        }
+        i = i + 1;
+    }
+    let result = get8(dp, amount);
+    if result >= inf { 0 - 1 } else { result }
+}
+
+// Count number of ways to make change (DP)
+// Amount must be <= 7
+fn count_ways(amount: Int, coins: Arr8, n_coins: Int) -> Int {
+    let mut dp = zeros();
+    dp = set8(dp, 0, 1); // one way to make 0
+    let mut i = 0;
+    while i < n_coins {
+        let coin = get8(coins, i);
+        let mut jj = coin;
+        while jj <= amount {
+            dp = set8(dp, jj, get8(dp, jj) + get8(dp, jj - coin));
+            jj = jj + 1;
+        }
+        i = i + 1;
+    }
+    get8(dp, amount)
+}
+
+fn test_greedy_us_coins() -> Int {
+    // US coins: 25, 10, 5, 1 (sorted descending)
+    let coins = Arr8 { v0: 25, v1: 10, v2: 5, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // 41 cents: 25+10+5+1 = 4 coins
+    assert_eq(greedy_change(41, coins, 4), 4);
+    // 30 cents: 25+5 = 2 coins
+    assert_eq(greedy_change(30, coins, 4), 2);
+    // 1 cent: 1 coin
+    assert_eq(greedy_change(1, coins, 4), 1);
+    // 0 cents: 0 coins
+    assert_eq(greedy_change(0, coins, 4), 0);
+    1
+}
+
+fn test_greedy_denomination() -> Int {
+    let coins = Arr8 { v0: 25, v1: 10, v2: 5, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // 41 cents: 1 quarter, 1 dime, 1 nickel, 1 penny
+    assert_eq(greedy_count_denom(41, coins, 4, 0), 1); // quarters
+    assert_eq(greedy_count_denom(41, coins, 4, 1), 1); // dimes
+    assert_eq(greedy_count_denom(41, coins, 4, 2), 1); // nickels
+    assert_eq(greedy_count_denom(41, coins, 4, 3), 1); // pennies
+    // 75 cents: 3 quarters
+    assert_eq(greedy_count_denom(75, coins, 4, 0), 3);
+    1
+}
+
+fn test_dp_min_coins() -> Int {
+    // Coins: 1, 3, 4
+    let coins = Arr8 { v0: 1, v1: 3, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dp_min_coins(0, coins, 3), 0);
+    assert_eq(dp_min_coins(1, coins, 3), 1); // 1
+    assert_eq(dp_min_coins(3, coins, 3), 1); // 3
+    assert_eq(dp_min_coins(4, coins, 3), 1); // 4
+    assert_eq(dp_min_coins(6, coins, 3), 2); // 3+3
+    assert_eq(dp_min_coins(7, coins, 3), 2); // 3+4
+    1
+}
+
+fn test_dp_vs_greedy() -> Int {
+    // For coins {1, 3, 4}, greedy might not be optimal
+    // Amount 6: greedy would try 4+1+1 = 3 coins, DP finds 3+3 = 2 coins
+    let coins_desc = Arr8 { v0: 4, v1: 3, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let greedy_result = greedy_change(6, coins_desc, 3);
+    let coins_asc = Arr8 { v0: 1, v1: 3, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let dp_result = dp_min_coins(6, coins_asc, 3);
+    // DP is optimal, greedy may not be
+    assert_eq(dp_result, 2);
+    assert_eq(greedy_result, 3); // suboptimal!
+    1
+}
+
+fn test_count_ways() -> Int {
+    // Coins: 1, 2, 3
+    let coins = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_ways(0, coins, 3), 1); // empty set
+    assert_eq(count_ways(1, coins, 3), 1); // {1}
+    assert_eq(count_ways(2, coins, 3), 2); // {1+1, 2}
+    assert_eq(count_ways(3, coins, 3), 3); // {1+1+1, 1+2, 3}
+    assert_eq(count_ways(4, coins, 3), 4); // {1+1+1+1, 1+1+2, 2+2, 1+3}
+    assert_eq(count_ways(5, coins, 3), 5); // {1*5, 1+2+2, 1+1+3, 2+3, 1+1+1+2}
+    1
+}
+
+fn test_impossible() -> Int {
+    // Coins: 3, 5 — can't make 1
+    let coins = Arr8 { v0: 3, v1: 5, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dp_min_coins(1, coins, 2), 0 - 1);
+    assert_eq(dp_min_coins(2, coins, 2), 0 - 1);
+    assert_eq(dp_min_coins(3, coins, 2), 1);
+    assert_eq(dp_min_coins(5, coins, 2), 1);
+    assert_eq(dp_min_coins(6, coins, 2), 2);
+    1
+}
+
+fn main() -> Int {
+    test_greedy_us_coins();
+    test_greedy_denomination();
+    test_dp_min_coins();
+    test_dp_vs_greedy();
+    test_count_ways();
+    test_impossible();
+    print("[OK] 657_coin_change_aot");
+    0
+}

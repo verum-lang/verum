@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, select, timeout, error
+// @description: Test invalid timeout in select without proper duration
+// @expected-error: E018
+
+async fn test() {
+    select {
+        result = task.await => result,
+        // Invalid timeout syntax - missing duration
+        timeout => panic("timed out"),
+    }
+}

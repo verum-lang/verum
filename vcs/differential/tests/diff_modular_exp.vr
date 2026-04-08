@@ -1,0 +1,80 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, modular, exponentiation, crypto
+// @timeout: 10000
+
+fn mod_exp(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % modulus;
+        }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+fn mod_mult(a: Int, b: Int, m: Int) -> Int {
+    ((a % m) * (b % m)) % m
+}
+
+fn mod_add(a: Int, b: Int, m: Int) -> Int {
+    ((a % m) + (b % m)) % m
+}
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+// Fermat's little theorem: a^(p-1) ≡ 1 (mod p) for prime p
+fn fermat_test(a: Int, p: Int) -> Int {
+    mod_exp(a, p - 1, p)
+}
+
+fn main() -> Int {
+    // Basic modular exponentiation
+    assert_eq(mod_exp(2, 10, 1000), 24);   // 1024 % 1000
+    assert_eq(mod_exp(3, 5, 100), 43);     // 243 % 100
+    assert_eq(mod_exp(2, 0, 7), 1);
+    assert_eq(mod_exp(5, 1, 13), 5);
+    assert_eq(mod_exp(7, 2, 10), 9);       // 49 % 10
+
+    // Fermat's little theorem for prime 13
+    assert_eq(fermat_test(2, 13), 1);
+    assert_eq(fermat_test(3, 13), 1);
+    assert_eq(fermat_test(5, 13), 1);
+    assert_eq(fermat_test(7, 13), 1);
+
+    // Fermat's little theorem for prime 17
+    assert_eq(fermat_test(2, 17), 1);
+    assert_eq(fermat_test(10, 17), 1);
+
+    // Modular arithmetic properties
+    let m = 97;
+    let a = 42;
+    let b = 58;
+    // (a*b) mod m = ((a mod m) * (b mod m)) mod m
+    assert_eq((a * b) % m, mod_mult(a, b, m));
+    // (a+b) mod m = ((a mod m) + (b mod m)) mod m
+    assert_eq((a + b) % m, mod_add(a, b, m));
+
+    // a^(p-1) mod p = 1 for various primes
+    assert_eq(mod_exp(2, 6, 7), 1);    // p=7
+    assert_eq(mod_exp(3, 10, 11), 1);  // p=11
+    assert_eq(mod_exp(5, 22, 23), 1);  // p=23
+
+    print("DIFF_OK: modular_exp");
+    0
+}

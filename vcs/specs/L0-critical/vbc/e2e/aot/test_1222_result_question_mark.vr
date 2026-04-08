@@ -1,0 +1,100 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: result, error-handling, question-mark, e2e
+// @description: Test Result type, pattern matching, and ? operator for error propagation
+
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn compute() -> Result<Int, Text> {
+    let a = divide(20, 4)?;
+    let b = divide(a, 2)?;
+    Ok(b)
+}
+
+fn compute_fail() -> Result<Int, Text> {
+    let a = divide(20, 4)?;
+    let b = divide(a, 0)?;
+    Ok(b)
+}
+
+fn parse_and_add(s1: Text, s2: Text) -> Result<Int, Text> {
+    // Simulate parsing (just return constant results)
+    if s1 == "bad" {
+        return Err("parse error: bad input");
+    }
+    Ok(10 + 20)
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Successful computation chain
+    match compute() {
+        Ok(v) => {
+            if v != 2 {
+                print(f"FAIL 1: got {v}");
+                f = f + 1;
+            }
+        },
+        Err(e) => {
+            print(f"FAIL 1: error {e}");
+            f = f + 1;
+        },
+    }
+
+    // Test 2: Error propagation with ?
+    match compute_fail() {
+        Ok(v) => {
+            print(f"FAIL 2: should fail, got {v}");
+            f = f + 1;
+        },
+        Err(e) => {
+            if e != "division by zero" {
+                print(f"FAIL 2: wrong error: {e}");
+                f = f + 1;
+            }
+        },
+    }
+
+    // Test 3: Direct pattern matching on Result
+    let r = divide(100, 7);
+    match r {
+        Ok(v) => {
+            if v != 14 {
+                print(f"FAIL 3: 100/7 = {v}");
+                f = f + 1;
+            }
+        },
+        Err(_) => {
+            print("FAIL 3: unexpected error");
+            f = f + 1;
+        },
+    }
+
+    // Test 4: Error case
+    let r2 = divide(5, 0);
+    match r2 {
+        Ok(_) => {
+            print("FAIL 4: should be error");
+            f = f + 1;
+        },
+        Err(msg) => {
+            if msg != "division by zero" {
+                print(f"FAIL 4: wrong msg: {msg}");
+                f = f + 1;
+            }
+        },
+    }
+
+    if f == 0 {
+        print("All Result/? tests passed");
+    }
+    f
+}

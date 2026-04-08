@@ -1,0 +1,70 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, bit-operations, xor, popcount
+// @timeout: 10000
+
+// XOR via bit-by-bit computation
+fn bitxor(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut bit = 1;
+    let mut va = a;
+    let mut vb = b;
+    let mut i = 0;
+    while i < 16 {
+        let ba = va % 2;
+        let bb = vb % 2;
+        if ba != bb { result = result + bit; }
+        va = va / 2;
+        vb = vb / 2;
+        bit = bit * 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn popcount(n: Int) -> Int {
+    let mut count = 0;
+    let mut v = n;
+    while v > 0 { count = count + v % 2; v = v / 2; }
+    count
+}
+
+fn get_bit(n: Int, k: Int) -> Int {
+    let mut v = n;
+    let mut i = 0;
+    while i < k { v = v / 2; i = i + 1; }
+    v % 2
+}
+
+fn test_xor() -> Int {
+    assert_eq(bitxor(0, 0), 0);
+    assert_eq(bitxor(5, 0), 5);
+    assert_eq(bitxor(5, 5), 0);
+    assert_eq(bitxor(255, 255), 0);
+    assert_eq(bitxor(42, 77), bitxor(77, 42));
+    assert_eq(bitxor(bitxor(10, 20), 30), bitxor(10, bitxor(20, 30)));
+    1
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(bitxor(7, 0)), 3);
+    assert_eq(popcount(bitxor(15, 12)), 2);
+    assert_eq(get_bit(5, 0), 1);
+    assert_eq(get_bit(5, 1), 0);
+    assert_eq(get_bit(5, 2), 1);
+    1
+}
+
+fn main() -> Int {
+    test_xor();
+    test_popcount();
+
+    print("DIFF_OK: bit_trie");
+    0
+}

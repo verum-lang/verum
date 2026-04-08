@@ -1,0 +1,135 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, memory, allocation
+
+fn main() {
+    // Get default GPU device
+    let device = Device.gpu(0);
+
+    // Basic tensor allocation on device
+    let tensor_a: Tensor<f32, [1024]> = Tensor.zeros().to(device);
+    assert(tensor_a.device() == device);
+    assert(tensor_a.is_on_device());
+
+    // Allocate with initial values
+    let tensor_b: Tensor<f32, [4]> = tensor<4>f32{1.0, 2.0, 3.0, 4.0}.to(device);
+
+    // Query memory usage
+    let bytes_used = tensor_a.byte_size();
+    assert(bytes_used == 1024 * 4);  // 1024 f32 values
+
+    // Different data types
+    let int_tensor: Tensor<i32, [512]> = Tensor.zeros().to(device);
+    let double_tensor: Tensor<f64, [256]> = Tensor.zeros().to(device);
+    let half_tensor: Tensor<f16, [2048]> = Tensor.zeros().to(device);
+
+    assert(int_tensor.byte_size() == 512 * 4);
+    assert(double_tensor.byte_size() == 256 * 8);
+    assert(half_tensor.byte_size() == 2048 * 2);
+
+    // Multi-dimensional allocation
+    let matrix: Tensor<f32, [64, 128]> = Tensor.zeros().to(device);
+    let cube: Tensor<f32, [32, 64, 16]> = Tensor.zeros().to(device);
+
+    assert(matrix.byte_size() == 64 * 128 * 4);
+    assert(cube.byte_size() == 32 * 64 * 16 * 4);
+
+    // Raw memory allocation
+    let raw_buffer: DeviceBuffer<u8> = DeviceBuffer.allocate(device, 4096);
+    assert(raw_buffer.size() == 4096);
+
+    // Aligned allocation
+    let aligned_buffer: DeviceBuffer<f32> = DeviceBuffer.allocate_aligned(
+        device,
+        1024,
+        alignment: 256  // 256-byte alignment
+    );
+    assert(aligned_buffer.ptr() as usize % 256 == 0);
+
+    // Pinned (page-locked) host memory for fast transfers
+    let pinned: PinnedBuffer<f32> = PinnedBuffer.allocate(1024);
+    pinned[0] = 42.0;
+
+    // Transfer pinned to device
+    let device_copy = pinned.to_device(device);
+    assert(device_copy[0] == 42.0);
+
+    // Memory pool for efficient allocation/deallocation
+    let pool = MemoryPool.new(device, capacity: 1024 * 1024 * 1024);  // 1GB pool
+
+    let pooled_a: Tensor<f32, [1000000]> = pool.allocate();
+    let pooled_b: Tensor<f32, [500000]> = pool.allocate();
+
+    // Release back to pool (not to OS)
+    pool.release(pooled_a);
+    pool.release(pooled_b);
+
+    // Reuse from pool
+    let pooled_c: Tensor<f32, [1000000]> = pool.allocate();
+    // May reuse memory from pooled_a
+
+    // Query device memory info
+    let mem_info = device.memory_info();
+    let total_memory = mem_info.total;
+    let free_memory = mem_info.free;
+    let used_memory = mem_info.used;
+
+    assert(total_memory > 0);
+    assert(free_memory <= total_memory);
+
+    // Async allocation
+    let stream = Stream.new(device);
+
+    let async_tensor: Tensor<f32, [2048]> = Tensor.zeros_async(stream);
+    // Can continue with other work while allocation happens
+
+    stream.synchronize();
+    assert(async_tensor.is_ready());
+
+    // Memory-mapped allocation (zero-copy with host)
+    let mapped: MappedBuffer<f32> = MappedBuffer.allocate(device, 1024);
+
+    // Can access from both host and device
+    mapped.host_ptr()[0] = 100.0;
+    // Device sees the same data (may need explicit sync on some architectures)
+
+    // Explicit deallocation (normally automatic via RAII)
+    drop(tensor_a);
+    drop(tensor_b);
+
+    // Allocate on specific memory region (for multi-GPU)
+    let numa_tensor: Tensor<f32, [1024]> = Tensor.zeros().to_numa(device, numa_node: 0);
+
+    // Reserve memory without allocation
+    let reserved = device.reserve_memory(1024 * 1024 * 512);  // Reserve 512MB
+    // Use reserved memory
+    let from_reserved: Tensor<f32, [1000000]> = reserved.allocate();
+    reserved.release();
+
+    // Query allocation capabilities
+    let max_alloc = device.max_allocation_size();
+    let granularity = device.allocation_granularity();
+
+    // Out of memory handling
+    let oom_result = Tensor.zeros_with_size(1000000000000).to(device);
+    match oom_result {
+        Ok(huge_tensor) => {
+            // Unlikely to succeed
+        },
+        Err(e) => {
+            // Handle gracefully
+            assert(e.requested > e.available);
+        }
+    }
+
+    // Garbage collection / defragmentation
+    device.garbage_collect();
+
+    // Memory debugging
+    if cfg(debug) {
+        let leaks = device.check_memory_leaks();
+        assert(leaks.is_empty());
+    }
+}

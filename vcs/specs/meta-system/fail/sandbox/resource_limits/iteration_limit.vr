@@ -1,0 +1,20 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, sandbox, resource, iteration, loop
+// @description: Test that iteration limit is enforced in meta functions
+// @expected-error: M304
+
+// Infinite loop should be caught
+meta fn infinite_loop() -> Int {
+    let mut i = 0;
+    while true {
+        i = i + 1;
+    }
+    i
+}
+
+fn main() {
+    // Call meta function at compile time - should fail
+    @const assert(infinite_loop() >= 0);
+}

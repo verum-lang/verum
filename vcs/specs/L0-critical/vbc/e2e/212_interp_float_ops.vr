@@ -1,0 +1,141 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, float, arithmetic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: float arithmetic — add, sub, mul, div, comparison,
+// small/large values, precision
+
+// =============================================================================
+// Basic float arithmetic
+// =============================================================================
+
+fn test_float_addition() {
+    assert_eq(1.0 + 2.0, 3.0);
+    assert_eq(0.0 + 0.0, 0.0);
+    assert_eq(-1.5 + 1.5, 0.0);
+    assert_eq(0.25 + 0.75, 1.0);
+    assert_eq(100.5 + 200.5, 301.0);
+}
+
+fn test_float_subtraction() {
+    assert_eq(5.0 - 3.0, 2.0);
+    assert_eq(3.0 - 5.0, -2.0);
+    assert_eq(1.0 - 1.0, 0.0);
+    assert_eq(10.5 - 0.5, 10.0);
+    assert_eq(-2.5 - -2.5, 0.0);
+}
+
+fn test_float_multiplication() {
+    assert_eq(2.0 * 3.0, 6.0);
+    assert_eq(0.5 * 2.0, 1.0);
+    assert_eq(-2.0 * 3.0, -6.0);
+    assert_eq(-3.0 * -4.0, 12.0);
+    assert_eq(0.0 * 999.0, 0.0);
+    assert_eq(0.1 * 10.0, 1.0);
+}
+
+fn test_float_division() {
+    assert_eq(10.0 / 2.0, 5.0);
+    assert_eq(7.0 / 2.0, 3.5);
+    assert_eq(1.0 / 4.0, 0.25);
+    assert_eq(3.0 / 4.0, 0.75);
+    assert_eq(-6.0 / -2.0, 3.0);
+    assert_eq(100.0 / 10.0, 10.0);
+}
+
+// =============================================================================
+// Float comparisons
+// =============================================================================
+
+fn test_float_comparisons() {
+    assert(1.5 < 2.5);
+    assert(3.14 > 2.71);
+    assert(1.0 == 1.0);
+    assert(0.0 == 0.0);
+    assert(1.0 != 2.0);
+    assert(-1.0 < 0.0);
+    assert(0.0 > -1.0);
+}
+
+fn test_float_comparison_edge() {
+    assert(0.1 + 0.2 > 0.29);
+    assert(0.1 + 0.2 < 0.31);
+    let x: Float = 1.0;
+    let y: Float = 1.0;
+    assert(x == y);
+    assert(x <= y);
+    assert(x >= y);
+}
+
+// =============================================================================
+// Small and large float values
+// =============================================================================
+
+fn test_float_small_values() {
+    let tiny: Float = 0.001;
+    let also_tiny: Float = 0.002;
+    assert(tiny < also_tiny);
+    assert(tiny + also_tiny > 0.002);
+    assert(tiny * 1000.0 == 1.0);
+}
+
+fn test_float_large_values() {
+    let big: Float = 1000000.0;
+    assert_eq(big * 1000.0, 1000000000.0);
+    assert_eq(big / 1000000.0, 1.0);
+    assert_eq(big + big, 2000000.0);
+}
+
+// =============================================================================
+// Float with variables
+// =============================================================================
+
+fn test_float_variable_ops() {
+    let pi: Float = 3.14;
+    let e: Float = 2.71;
+    let sum: Float = pi + e;
+    assert(sum > 5.8);
+    assert(sum < 5.9);
+    let product: Float = pi * e;
+    assert(product > 8.5);
+    assert(product < 8.6);
+}
+
+fn test_float_accumulation() {
+    let mut total: Float = 0.0;
+    let mut i = 0;
+    while i < 10 {
+        total = total + 1.0;
+        i = i + 1;
+    }
+    assert_eq(total, 10.0);
+}
+
+fn test_float_mixed_expr() {
+    let a: Float = 2.0;
+    let b: Float = 3.0;
+    let c: Float = 4.0;
+    // (2 + 3) * 4 = 20
+    assert_eq((a + b) * c, 20.0);
+    // 2 * 3 + 4 = 10
+    assert_eq(a * b + c, 10.0);
+}
+
+fn main() -> Int {
+    test_float_addition();
+    test_float_subtraction();
+    test_float_multiplication();
+    test_float_division();
+    test_float_comparisons();
+    test_float_comparison_edge();
+    test_float_small_values();
+    test_float_large_values();
+    test_float_variable_ops();
+    test_float_accumulation();
+    test_float_mixed_expr();
+    print("[OK] 212_interp_float_ops");
+    0
+}

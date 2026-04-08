@@ -1,0 +1,25 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, arity, error
+// @description: Test that arithmetic builtins fail with wrong argument count
+// @expected-error: arguments
+
+// =============================================================================
+// ARITY MISMATCH TESTS
+// =============================================================================
+
+// Test abs with too many arguments
+meta fn test_abs_too_many() -> Int {
+    abs(1, 2)  // ERROR: abs takes 1 argument, got 2
+}
+
+// Test min with too few arguments
+meta fn test_min_too_few() -> Int {
+    min(1)  // ERROR: min takes 2 arguments, got 1
+}
+
+// Test max with too many arguments
+meta fn test_max_too_many() -> Int {
+    max(1, 2, 3)  // ERROR: max takes 2 arguments, got 3
+}

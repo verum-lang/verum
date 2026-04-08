@@ -1,0 +1,250 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, blocks, control_flow
+
+// Control flow within blocks
+
+// Helper functions
+fn compute() -> Int { 42 }
+fn positive_path(x: Int) -> Int { x }
+fn negative_path(x: Int) -> Int { -x }
+fn both_true() -> Int { 1 }
+fn only_a() -> Int { 2 }
+fn only_b() -> Int { 3 }
+fn neither() -> Int { 4 }
+fn handle_a(x: Int) -> Int { x }
+fn handle_b(y: Int) -> Int { y }
+fn complex_operation() -> Int { 100 }
+fn finalize(x: Int) -> Int { x }
+fn default_handler() -> Int { 0 }
+fn get_next() -> Maybe<Int> { None }
+fn transform(x: Int) -> Int { x * 2 }
+fn do_work() { }
+fn should_skip(i: Int) -> Bool { i % 2 == 0 }
+fn process(i: Int) { }
+fn condition(i: Int, j: Int) -> Bool { i == j }
+fn operation1() -> Result<Int, Text> { Ok(1) }
+fn operation2(a: Int) -> Result<Int, Text> { Ok(a + 1) }
+fn operation3(b: Int) -> Result<Int, Text> { Ok(b + 1) }
+fn risky_operation() -> Result<Int, Text> { Ok(42) }
+fn handle_error(e: Text) -> Int { 0 }
+fn acquire() -> Resource { Resource { id: 0 } }
+fn use_resource(r: Resource) -> Int { r.id }
+fn acquire1() -> Resource { Resource { id: 1 } }
+fn acquire2() -> Resource { Resource { id: 2 } }
+fn use_both(r1: Resource, r2: Resource) -> Int { r1.id + r2.id }
+fn risky() -> Int { 42 }
+fn cleanup() { }
+fn fetch_a() -> Int { 1 }
+fn fetch_b() -> Int { 2 }
+fn expensive_computation() -> Int { 1000 }
+fn get_input() -> Pattern { Pattern.A(1) }
+
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Pattern is A(Int) | B(Int) | C;
+type Resource is { id: Int };
+
+implement Resource {
+    fn release(&self) { }
+}
+
+// Block with if expression
+fn test_branching_block() {
+    let branching = {
+        let x = compute();
+        if x > 0 {
+            positive_path(x)
+        } else {
+            negative_path(x)
+        }
+    };
+}
+
+// Block with nested conditionals
+fn test_nested_if_block() {
+    let a = true;
+    let b = false;
+    let nested_if = {
+        if a {
+            if b {
+                both_true()
+            } else {
+                only_a()
+            }
+        } else {
+            if b {
+                only_b()
+            } else {
+                neither()
+            }
+        }
+    };
+}
+
+// Block with match expression
+fn test_matching_block() {
+    let matching = {
+        let input = get_input();
+        match input {
+            Pattern.A(x) => handle_a(x),
+            Pattern.B(y) => handle_b(y),
+            Pattern.C => {
+                let computed = complex_operation();
+                finalize(computed)
+            }
+            _ => default_handler(),
+        }
+    };
+}
+
+// Block with loop and break
+fn test_loop_block() {
+    let loop_block = {
+        let mut sum = 0;
+        loop {
+            let next = get_next();
+            match next {
+                None => break sum,
+                Some(v) => sum += v,
+            }
+        }
+    };
+}
+
+// Block with for loop
+fn test_for_block() {
+    let collection = [1, 2, 3, 4, 5];
+    let for_block = {
+        let mut results: List<Int> = List.new();
+        for item in collection {
+            let processed = transform(item);
+            results.push(processed)
+        }
+        results
+    };
+}
+
+// Block with while loop
+fn test_while_block() {
+    let while_block = {
+        let mut count = 0;
+        while count < 10 {
+            do_work();
+            count += 1
+        }
+        count
+    };
+}
+
+// Block with continue
+fn test_continue_block() {
+    let with_continue = {
+        for i in 0..100 {
+            if should_skip(i) {
+                continue
+            }
+            process(i)
+        }
+    };
+}
+
+// Block with labeled breaks
+fn test_labeled_block() {
+    let labeled = {
+        'outer: for i in 0..10 {
+            for j in 0..10 {
+                if condition(i, j) {
+                    break 'outer
+                }
+            }
+        }
+    };
+}
+
+// Block with early return
+fn with_early_return(x: Int) -> Result<Int, Text> {
+    let validated = {
+        if x < 0 {
+            return Err("negative")
+        }
+        x * 2
+    };
+    Ok(validated)
+}
+
+// Block with question mark operator
+fn test_question_mark_block() -> Result<Int, Text> {
+    let with_question = {
+        let a = operation1()?;
+        let b = operation2(a)?;
+        let c = operation3(b)?;
+        Ok(c)
+    };
+    with_question
+}
+
+// Block with try-recover
+fn test_recover_block() {
+    let with_recover = {
+        try {
+            risky_operation()
+        } recover |error| {
+            handle_error(error)
+        }
+    };
+}
+
+// Block with defer
+fn test_defer_block() {
+    let with_defer = {
+        let resource = acquire();
+        defer { resource.release() }
+
+        use_resource(resource)
+    };
+}
+
+// Multiple defers in block
+fn test_multi_defer_block() {
+    let multi_defer = {
+        let r1 = acquire1();
+        defer { r1.release() }
+
+        let r2 = acquire2();
+        defer { r2.release() }
+
+        use_both(r1, r2)
+    };
+}
+
+// Block with finally
+fn test_finally_block() {
+    let with_finally = {
+        try {
+            risky()
+        } finally {
+            cleanup()
+        }
+    };
+}
+
+// Async block
+async fn test_async_block() {
+    let async_block = async {
+        let a = fetch_a().await;
+        let b = fetch_b().await;
+        a + b
+    };
+}
+
+// Block with spawn
+fn test_spawn_block() {
+    let spawned = {
+        let handle = spawn {
+            expensive_computation()
+        };
+        handle
+    };
+}

@@ -1,0 +1,243 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, destructuring
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int };
+type Config is { host: Text, port: Int, timeout: Int };
+type Inner is { value: Int };
+type Outer is { inner: Inner };
+type Container is { items: List<Int> };
+type Data is { status: Status, value: Int };
+type Status is Ready | Pending;
+type Error is { code: Int, message: Text };
+type Response is { status: Int, headers: Headers, body: Maybe<Text> };
+type Headers is { content_type: Text };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+
+// Helper functions
+fn use_both<A, B>(a: A, b: B) { }
+fn process_ready<T>(x: T) { }
+fn handle_triple<A, B, C>(a: A, b: B, c: C) { }
+fn log_error(code: Int, message: Text) { }
+fn get_coords() -> (Int, Int) { (0, 0) }
+fn get_point() -> Point { Point { x: 0, y: 0 } }
+fn get_range() -> (Int, Int) { (0, 100) }
+fn calculate_center() -> Point { Point { x: 0, y: 0 } }
+fn partition_results() -> (Int, Int) { (0, 0) }
+fn println<T>(x: T) { }
+
+fn test_tuple_destructuring_in_let() {
+    // Tuple destructuring in let
+    let (a, b) = (1, 2);
+    let (x, y, z) = (10, 20, 30);
+    let (first, ..) = (1, 2, 3, 4, 5);
+    let (.., last) = (1, 2, 3, 4, 5);
+    let (head, .., tail) = (1, 2, 3, 4, 5);
+}
+
+fn test_struct_destructuring_in_let() {
+    let point = Point { x: 10, y: 20 };
+    let person = Person { name: "Alice", age: 30 };
+    let config = Config { host: "localhost", port: 8080, timeout: 30 };
+
+    // Struct destructuring in let
+    let Point { x, y } = point;
+    let Point { x: px, y: py } = point;
+    let Person { name, .. } = person;
+    let Config { host, port: p, .. } = config;
+}
+
+fn test_nested_destructuring() {
+    let nested_tuple = ((1, 2), (3, 4));
+    let nested = Outer { inner: Inner { value: 42 } };
+    let container = Container { items: Cons(1, Heap(Cons(2, Heap(Nil)))) };
+
+    // Nested destructuring
+    let ((a, b), (c, d)) = nested_tuple;
+    let Outer { inner: Inner { value } } = nested;
+    let Container { items: items_list } = container;
+}
+
+// Destructuring in function parameters
+fn process_tuple((x, y): (Int, Int)) -> Int {
+    x + y
+}
+
+fn handle(Point { x, y }: Point) -> Float {
+    (x * x + y * y) as Float
+}
+
+fn unpack(Config { host, port, .. }: Config) -> Text {
+    host
+}
+
+fn test_destructuring_in_closure_parameters() {
+    // Destructuring in closure parameters
+    let add = |(a, b)| a + b;
+    let distance = |Point { x, y }| (x * x + y * y);
+    let format_kv = |(key, value)| key + value;
+}
+
+fn test_destructuring_in_for_loops() {
+    let items: List<(Int, Int)> = Nil;
+    let map_entries: List<(Int, Int)> = Nil;
+    let points: List<Point> = Nil;
+
+    // Destructuring in for loops
+    for (index, value) in items {
+        println((index, value));
+    }
+
+    for (key, value) in map_entries {
+        use_both(key, value);
+    }
+
+    for Point { x, y } in points {
+        use_both(x, y);
+    }
+}
+
+fn test_destructuring_in_if_let() {
+    let maybe_a: Maybe<Int> = Some(1);
+    let maybe_b: Maybe<Int> = Some(2);
+    let data = Data { status: Status.Ready, value: 42 };
+
+    // Destructuring in if let
+    if let (Some(a), Some(b)) = (maybe_a, maybe_b) {
+        use_both(a, b);
+    }
+
+    if let Data { status: Status.Ready, value } = data {
+        process_ready(value);
+    }
+}
+
+fn test_destructuring_in_while_let() {
+    let list: Maybe<(Int, List<Int>)> = Some((1, Nil));
+    let input: (Result<Int, Text>, List<Int>) = (Ok(1), Nil);
+
+    // Destructuring in while let
+    while let Some((head, tail)) = list {
+        use_both(head, tail);
+    }
+}
+
+fn test_destructuring_in_match_arms() {
+    let result: Result<(Int, Int, Int), Error> = Ok((1, 2, 3));
+
+    // Destructuring in match arms
+    match result {
+        Ok((a, b, c)) => handle_triple(a, b, c),
+        Err(Error { code, message }) => log_error(code, message),
+    };
+}
+
+fn test_destructuring_with_type_annotations() {
+    // Destructuring with type annotations
+    let (x, y): (Int, Int) = get_coords();
+    let Point { x: px, y: py }: Point = get_point();
+}
+
+fn test_mutable_destructuring() {
+    // Mutable destructuring
+    let (mut a, mut b) = (1, 2);
+    a += 1;
+    b += 1;
+
+    let point = Point { x: 10, y: 20 };
+    let Point { x: mut px, y: mut py } = point;
+    px *= 2;
+    py *= 2;
+}
+
+fn test_ref_destructuring() {
+    let pair = (1, 2);
+    let point = Point { x: 10, y: 20 };
+
+    // Ref destructuring
+    // Note: ref patterns in tuples/structs use field: ref pattern syntax
+    let (ref a, ref b) = pair;
+    let Point { x: ref px, y: ref py } = point;
+}
+
+fn test_ignore_with_destructuring() {
+    let triple = (1, 2, 3);
+    let point = Point { x: 10, y: 20 };
+    let quadruple = (1, 2, 3, 4);
+
+    // Ignore with destructuring
+    let (_, important, _) = triple;
+    let Point { x, y: _ } = point;
+    let (head, _, _, tail) = quadruple;
+}
+
+fn test_destructure_from_function_call() {
+    // Destructure from function call
+    let (min, max) = get_range();
+    let Point { x, y } = calculate_center();
+    let (ok_count, err_count) = partition_results();
+}
+
+fn test_destructuring_option_result() {
+    let maybe: Maybe<Int> = Some(42);
+    let result: Result<Int, Text> = Ok(42);
+
+    // Destructuring Option/Result
+    let Some(value) = maybe else { return; };
+    let Ok(data) = result else { return; };
+}
+
+fn test_destructuring_with_default() {
+    let point: Maybe<Point> = Some(Point { x: 10, y: 20 });
+    let default_point = Point { x: 0, y: 0 };
+
+    // Destructuring with default
+    let pt = match point {
+        Some(p) => p,
+        None => default_point,
+    };
+    let Point { x, y } = pt;
+}
+
+fn test_nested_with_mixed_patterns() {
+    let response = Response {
+        status: 200,
+        headers: Headers { content_type: "application/json" },
+        body: Some("data")
+    };
+
+    // Nested with mixed patterns using match
+    match response {
+        Response { status: s @ 200..=299, headers: Headers { content_type }, body: Some(data) } => {
+            use_both(content_type, data);
+        },
+        _ => { },
+    };
+}
+
+fn test_array_destructuring() {
+    let array = [1, 2, 3];
+    let list = [1, 2, 3, 4, 5];
+    let items = [10, 20, 30, 40, 50];
+
+    // Array destructuring
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    let [first, second, third] = array;
+    let [head, tail @ ..] = list;
+    let [.., second_last, last] = items;
+}
+
+fn test_destructuring_in_struct_initialization() {
+    let x = 10;
+    let y = 20;
+
+    // Destructuring in struct initialization
+    let point1 = Point { x, y };
+    let Point { x: px, y: py } = point1;
+    let point2 = Point { x: px + 1, y: py + 1 };
+}

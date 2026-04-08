@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, propagation
+
+/// Refinement propagation through operations -- the type checker
+/// should track how arithmetic and logical operations preserve,
+/// strengthen, or weaken refinements.
+
+type Positive is Int{> 0};
+type Natural is Int{>= 0};
+type NonZero is Int{!= 0};
+
+// Addition of positives yields positive
+fn add_pos(a: Positive, b: Positive) -> Positive {
+    a + b  // > 0 + > 0 = > 0
+}
+
+// Multiplication of positives yields positive
+fn mul_pos(a: Positive, b: Positive) -> Positive {
+    a * b  // > 0 * > 0 = > 0
+}
+
+// Addition of naturals yields natural
+fn add_nat(a: Natural, b: Natural) -> Natural {
+    a + b  // >= 0 + >= 0 = >= 0
+}
+
+// Absolute value of any int is natural
+fn to_natural(x: Int) -> Natural {
+    if x >= 0 { x } else { -x }
+}
+
+// Squaring any int yields natural
+fn square(x: Int) -> Natural {
+    x * x  // n^2 >= 0 for all n
+}
+
+// NonZero * NonZero = NonZero
+fn mul_nonzero(a: NonZero, b: NonZero) -> NonZero {
+    a * b
+}
+
+// Conditional propagation: refinement depends on branch
+fn safe_subtract(a: Natural, b: Natural) -> Natural {
+    if a >= b {
+        a - b  // a >= b >= 0 => a - b >= 0
+    } else {
+        0
+    }
+}
+
+// Division propagation: positive / positive is natural
+fn div_pos(a: Positive, b: Positive) -> Natural {
+    a / b  // > 0 / > 0 >= 0
+}
+
+// Chained refinement propagation
+fn fibonacci(n: Natural) -> Natural {
+    if n <= 1 { n }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+// Refinement widening: Positive is subtype of Natural
+fn pos_to_nat(p: Positive) -> Natural {
+    p  // Positive <: Natural (widening)
+}
+
+// Refinement through let bindings
+fn process(x: Positive) -> Positive {
+    let doubled = x * 2;      // doubled: Positive (propagated)
+    let incremented = doubled + 1;  // incremented: Positive (still > 0)
+    incremented
+}
+
+fn main() {
+    assert(add_pos(3, 4) == 7);
+    assert(mul_pos(3, 4) == 12);
+    assert(add_nat(0, 5) == 5);
+    assert(to_natural(-7) == 7);
+    assert(square(-3) == 9);
+    assert(mul_nonzero(3, -2) == -6);
+    assert(safe_subtract(10, 3) == 7);
+    assert(safe_subtract(3, 10) == 0);
+    assert(div_pos(10, 3) == 3);
+    assert(fibonacci(7) == 13);
+    assert(pos_to_nat(5) == 5);
+    assert(process(3) == 7);
+}

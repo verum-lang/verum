@@ -1,0 +1,160 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, contracts, ghost, specification
+// @description: Ghost variables for specification-only state
+
+/// Ghost variables exist only for specification purposes.
+/// They are erased during compilation and have zero runtime cost.
+
+type SortedList<T: Ord> is {
+    items: List<T>,
+
+    // Ghost field - not stored at runtime
+    ghost sorted: Bool,
+
+    invariant sorted implies items.windows(2).all(|w| w[0] <= w[1]),
+};
+
+implement SortedList<T> {
+    @verify(runtime)
+    fn new() -> Self {
+        contract#"
+            ensures result.items.is_empty();
+            ensures result.sorted == true;
+        ";
+        Self {
+            items: List.new(),
+            ghost sorted: true,
+        }
+    }
+
+    @verify(runtime)
+    fn insert(mut self, value: T) {
+        contract#"
+            modifies self.items, ghost self.sorted;
+            ensures self.items.contains(&value);
+            ensures self.sorted == true;
+        ";
+        let pos = self.items.iter()
+            .position(|x| *x >= value)
+            .unwrap_or(self.items.len());
+        self.items.insert(pos, value);
+        // Ghost update - not executed at runtime
+        { self.sorted = true; }
+    }
+}
+
+/// Ghost counter for verification
+type UniqueIdGenerator is {
+    next_id: Int,
+
+    // Ghost: set of all generated IDs for uniqueness proof
+    ghost generated_ids: Set<Int>,
+
+    invariant next_id > 0,
+    invariant forall id in generated_ids => id < next_id,
+};
+
+implement UniqueIdGenerator {
+    @verify(proof)
+    fn new() -> Self {
+        contract#"
+            ensures result.next_id == 1;
+            ensures result.generated_ids.is_empty();
+        ";
+        Self {
+            next_id: 1,
+            ghost generated_ids: Set.new(),
+        }
+    }
+
+    @verify(proof)
+    fn generate(mut self) -> Int {
+        contract#"
+            modifies self.next_id, ghost self.generated_ids;
+            ensures result == old(self.next_id);
+            ensures self.next_id == old(self.next_id) + 1;
+            // Ghost postcondition: result is unique
+            ensures !old(self.generated_ids).contains(&result);
+            ensures self.generated_ids == old(self.generated_ids).insert(result);
+        ";
+        let id = self.next_id;
+        { self.generated_ids.insert(id); }
+        self.next_id += 1;
+        id
+    }
+}
+
+/// Ghost function - exists only in specs
+ghost fn is_permutation<T: Eq>(a: List<T>, b: List<T>) -> Bool {
+    a.len() == b.len() &&
+    forall x in a => a.count(&x) == b.count(&x)
+}
+
+@verify(proof)
+fn sort<T: Ord>(mut list: List<T>) -> List<T> {
+    contract#"
+        ensures result.windows(2).all(|w| w[0] <= w[1]);
+        // Ghost postcondition: result is permutation of input
+        ensures is_permutation(result, old(list));
+    ";
+    list.sort();
+    list
+}
+
+/// Binary search with sorted precondition
+@verify(proof)
+fn binary_search<T: Ord>(
+    arr: List<T>,
+    target: T,
+) -> Maybe<Int> {
+    contract#"
+        requires arr.windows(2).all(|w| w[0] <= w[1]);
+        ensures result.is_some() implies arr[result.unwrap()] == target;
+        ensures result.is_none() implies !arr.contains(&target);
+    ";
+    let mut low = 0;
+    let mut high = arr.len();
+
+    while low < high {
+        let mid = low + (high - low) / 2;
+        match arr[mid].cmp(&target) {
+            Ordering.Less => low = mid + 1,
+            Ordering.Greater => high = mid,
+            Ordering.Equal => return Some(mid),
+        }
+    }
+    None
+}
+
+/// Ghost loop invariants
+@verify(proof)
+fn sum_positive(list: List<Int{> 0}>) -> Int{>= 0} {
+    contract#"
+        ensures result == list.iter().sum();
+    ";
+    let mut total = 0;
+    let mut i = 0;
+
+    while i < list.len() {
+        ghost invariant {
+            // Ghost: partial sum property
+            total == list[..i].iter().sum();
+            // Ghost: index in bounds
+            i <= list.len();
+        }
+        total += list[i];
+        i += 1;
+    }
+
+    total
+}
+
+fn main() {
+    let mut sorted_list = SortedList.new();
+    sorted_list.insert(3);
+    sorted_list.insert(1);
+    sorted_list.insert(2);
+    assert(sorted_list.items == [1, 2, 3]);
+}

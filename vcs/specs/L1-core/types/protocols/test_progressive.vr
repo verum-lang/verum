@@ -1,0 +1,104 @@
+type Default is protocol {
+    fn default() -> Self;
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+type Temperature is {
+    celsius: Float,
+};
+
+type Wrapper<T> is {
+    value: T,
+};
+
+type Box<T> is {
+    content: T,
+};
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+type Container<T> is {
+    item: T,
+    count: Int,
+};
+
+implement Default for Person {
+    fn default() -> Person {
+        Person { name: "", age: 0 }
+    }
+}
+
+implement Default for Temperature {
+    fn default() -> Temperature {
+        Temperature { celsius: 0.0 }
+    }
+}
+
+implement<T: Default> Default for Wrapper<T> {
+    fn default() -> Wrapper<T> {
+        Wrapper { value: T.default() }
+    }
+}
+
+implement<T: Default> Default for Box<T> {
+    fn default() -> Box<T> {
+        Box { content: T.default() }
+    }
+}
+
+implement<A: Default, B: Default> Default for Pair<A, B> {
+    fn default() -> Pair<A, B> {
+        Pair { first: A.default(), second: B.default() }
+    }
+}
+
+implement<T: Default> Default for Container<T> {
+    fn default() -> Container<T> {
+        Container { item: T.default(), count: 0 }
+    }
+}
+
+fn get_default<T: Default>() -> T {
+    T.default()
+}
+
+fn main() {
+    // Test 1
+    let p = Person.default();
+    print(f"Test 1: {p.name}");
+
+    // Test 2
+    let w = Wrapper<Person>.default();
+    print(f"Test 2: {w.value.name}");
+
+    // Test 3 
+    let b = Box<Person>.default();
+    print(f"Test 3: {b.content.name}");
+
+    // Test 4
+    let pair = Pair<Person, Temperature>.default();
+    print(f"Test 4a: {pair.first.name}");
+    print(f"Test 4b: {pair.second.celsius}");
+
+    // Test 5
+    let container = Container<Person>.default();
+    print(f"Test 5a: {container.item.name}");
+    print(f"Test 5b: {container.count}");
+
+    // Test 6 - Nested
+    let nested = Container<Box<Person>>.default();
+    print(f"Test 6: {nested.item.content.name}");
+
+    // Test 7 - Generic func
+    let default_person = get_default<Person>();
+    print(f"Test 7: {default_person.name}");
+
+    print("All tests passed!");
+}

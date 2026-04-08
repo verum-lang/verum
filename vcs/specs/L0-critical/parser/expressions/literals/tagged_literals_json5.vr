@@ -1,0 +1,294 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, json, json5
+
+// JSON5 Relaxed Syntax Tests
+// Tests for json# and json5# with relaxed JSON5-style syntax
+// Spec: grammar/verum.ebnf Section 1.5.2.1 - Format Relaxation
+// Spec: docs/detailed/05-syntax-grammar.md - Format-Specific Relaxation
+
+// ============================================================================
+// SECTION 1: Unquoted Keys
+// ============================================================================
+
+fn test_json5_unquoted_keys() {
+    // JSON5 allows unquoted identifier keys
+    let obj = json#"""
+    {
+        name: "Alice",
+        age: 30,
+        isActive: true
+    }
+    """;
+}
+
+fn test_json5_mixed_keys() {
+    // Can mix quoted and unquoted keys
+    let obj = json#"""
+    {
+        name: "Bob",
+        "full-name": "Bob Smith",
+        address: {
+            street: "123 Main St",
+            "zip-code": "12345"
+        }
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 2: Trailing Commas
+// ============================================================================
+
+fn test_json5_trailing_comma_object() {
+    let obj = json#"""
+    {
+        name: "Alice",
+        age: 30,
+        city: "New York",
+    }
+    """;
+}
+
+fn test_json5_trailing_comma_array() {
+    let arr = json#"""
+    [
+        "apple",
+        "banana",
+        "cherry",
+    ]
+    """;
+}
+
+fn test_json5_nested_trailing_commas() {
+    let nested = json#"""
+    {
+        users: [
+            { name: "Alice", },
+            { name: "Bob", },
+        ],
+        settings: {
+            theme: "dark",
+            notifications: true,
+        },
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 3: Comments
+// ============================================================================
+
+fn test_json5_single_line_comments() {
+    let obj = json#"""
+    {
+        // User information
+        name: "Alice",
+        // Age in years
+        age: 30
+    }
+    """;
+}
+
+fn test_json5_block_comments() {
+    let obj = json#"""
+    {
+        /* This is a block comment
+           spanning multiple lines */
+        name: "Alice",
+        /* inline comment */ age: 30
+    }
+    """;
+}
+
+fn test_json5_mixed_comments() {
+    let config = json#"""
+    {
+        // Server configuration
+        server: {
+            host: "localhost",  // Default host
+            port: 8080,         /* HTTP port */
+        },
+        /*
+         * Database settings
+         * Connection pooling enabled
+         */
+        database: {
+            url: "postgres://localhost/app"
+        }
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 4: Single-Quoted Strings
+// ============================================================================
+
+fn test_json5_single_quoted_strings() {
+    let obj = json#"""
+    {
+        name: 'Alice',
+        greeting: 'Hello, world!'
+    }
+    """;
+}
+
+fn test_json5_mixed_quotes() {
+    let obj = json#"""
+    {
+        name: "Alice",
+        nickname: 'Ali',
+        message: "She said, 'Hello!'"
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 5: Multiline Strings (JSON5 style)
+// ============================================================================
+
+fn test_json5_multiline_string_backslash() {
+    // JSON5 allows line continuation with backslash
+    let obj = json#"""
+    {
+        description: "This is a very long \
+            description that spans \
+            multiple lines"
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 6: Numeric Enhancements
+// ============================================================================
+
+fn test_json5_hex_numbers() {
+    let obj = json#"""
+    {
+        color: 0xFF0000,
+        mask: 0x1F
+    }
+    """;
+}
+
+fn test_json5_infinity_nan() {
+    let obj = json#"""
+    {
+        max: Infinity,
+        min: -Infinity,
+        invalid: NaN
+    }
+    """;
+}
+
+fn test_json5_leading_decimal() {
+    let obj = json#"""
+    {
+        small: .5,
+        tiny: .001
+    }
+    """;
+}
+
+fn test_json5_trailing_decimal() {
+    let obj = json#"""
+    {
+        value: 5.,
+        count: 10.
+    }
+    """;
+}
+
+fn test_json5_positive_sign() {
+    let obj = json#"""
+    {
+        positive: +5,
+        also_positive: +3.14
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 7: Combined Features
+// ============================================================================
+
+fn test_json5_all_features() {
+    let config = json5#"""
+    {
+        // Application configuration
+        app: {
+            name: 'MyApp',
+            version: "1.0.0",
+            port: 0x1F90,  // 8080 in hex
+        },
+
+        /* Database settings */
+        database: {
+            host: "localhost",
+            maxConnections: +100,
+            timeout: .5,  // seconds
+        },
+
+        features: [
+            'authentication',
+            'logging',
+            'caching',
+        ],  // trailing comma allowed
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 8: json# vs json5# Tags
+// ============================================================================
+
+fn test_json_tag() {
+    // json# supports JSON5 relaxation by default
+    let obj = json#"{ name: 'Alice' }";
+}
+
+fn test_json5_tag() {
+    // json5# is explicitly JSON5
+    let obj = json5#"{ name: 'Alice', }";
+}
+
+// ============================================================================
+// SECTION 9: Single-line JSON5
+// ============================================================================
+
+fn test_single_line_unquoted() {
+    let obj = json#"{ name: 'Alice', age: 30 }";
+}
+
+fn test_single_line_trailing_comma() {
+    let arr = json#"[1, 2, 3,]";
+}
+
+// ============================================================================
+// SECTION 10: Edge Cases
+// ============================================================================
+
+fn test_json5_empty_objects() {
+    let empty_obj = json#"{}";
+    let empty_arr = json#"[]";
+}
+
+fn test_json5_unicode_keys() {
+    let obj = json#"""
+    {
+        日本語: "Japanese",
+        emoji: "🎉"
+    }
+    """;
+}
+
+fn test_json5_nested_arrays() {
+    let matrix = json#"""
+    [
+        [1, 2, 3,],
+        [4, 5, 6,],
+    ]
+    """;
+}
+

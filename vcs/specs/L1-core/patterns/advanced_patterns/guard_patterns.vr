@@ -1,0 +1,376 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, guards, if, advanced
+//
+// Tests pattern guards (if conditions) that add additional constraints
+// beyond structural pattern matching.
+
+//------------------------------------------------------------------------------
+// Basic Guard Conditions
+//------------------------------------------------------------------------------
+
+/// Simple guard with integer comparison.
+fn classify_int(n: Int) -> Text {
+    match n {
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        0 => "zero",
+    }
+}
+
+/// Guard with multiple conditions.
+fn classify_detailed(n: Int) -> Text {
+    match n {
+        x if x > 100 => "large positive",
+        x if x > 10 => "medium positive",
+        x if x > 0 => "small positive",
+        0 => "zero",
+        x if x > -10 => "small negative",
+        x if x > -100 => "medium negative",
+        _ => "large negative",
+    }
+}
+
+/// Guard with boolean operators.
+fn in_range(n: Int) -> Bool {
+    match n {
+        x if x >= 0 && x <= 100 => true,
+        _ => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guards with Pattern Bindings
+//------------------------------------------------------------------------------
+
+/// Guard using bound variable.
+fn match_with_binding(pair: (Int, Int)) -> Text {
+    match pair {
+        (x, y) if x == y => "equal",
+        (x, y) if x > y => "first larger",
+        (x, y) if x < y => "second larger",
+        _ => "unreachable",
+    }
+}
+
+/// Guard using multiple bindings.
+fn analyze_triple(triple: (Int, Int, Int)) -> Text {
+    match triple {
+        (a, b, c) if a + b + c == 0 => "sum is zero",
+        (a, b, c) if a + b + c > 0 => "positive sum",
+        (a, b, c) if a * b * c == 0 => "has zero factor",
+        _ => "negative sum, no zeros",
+    }
+}
+
+/// Shadowing in guard.
+fn guard_shadowing(n: Int) -> Int {
+    let threshold = 10;
+    match n {
+        x if x > threshold => x * 2,
+        x => x,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guards with Complex Expressions
+//------------------------------------------------------------------------------
+
+/// Guard with function call.
+fn is_even(n: Int) -> Bool {
+    n % 2 == 0
+}
+
+fn filter_even(n: Int) -> Maybe<Int> {
+    match n {
+        x if is_even(x) => Some(x),
+        _ => None,
+    }
+}
+
+/// Guard with method call.
+fn check_length(s: Text) -> Text {
+    match s {
+        s if s.len() == 0 => "empty",
+        s if s.len() <= 5 => "short",
+        s if s.len() <= 20 => "medium",
+        _ => "long",
+    }
+}
+
+/// Guard with arithmetic expression.
+fn classify_pythagorean(point: (Int, Int)) -> Text {
+    match point {
+        (x, y) if x * x + y * y < 100 => "inside circle",
+        (x, y) if x * x + y * y == 100 => "on circle",
+        (x, y) if x * x + y * y > 100 => "outside circle",
+        _ => "error",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guards with Enum Variants
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+/// Guard on enum payload.
+fn filter_maybe(m: Maybe<Int>) -> Maybe<Int> {
+    match m {
+        Some(x) if x > 0 => Some(x),
+        Some(x) if x == 0 => None,
+        Some(x) if x < 0 => Some(-x),
+        None => None,
+    }
+}
+
+/// Guard distinguishing within variant.
+fn categorize_result(r: Result<Int, Int>) -> Text {
+    match r {
+        Ok(x) if x >= 0 => "ok positive",
+        Ok(x) if x < 0 => "ok negative",
+        Err(code) if code == 0 => "success error code",
+        Err(code) if code < 100 => "minor error",
+        Err(_) => "major error",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guards with Struct Fields
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Rectangle is {
+    width: Int,
+    height: Int,
+};
+
+/// Guard on destructured fields.
+fn quadrant(p: Point) -> Text {
+    match p {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x, y } if x > 0 && y > 0 => "quadrant 1",
+        Point { x, y } if x < 0 && y > 0 => "quadrant 2",
+        Point { x, y } if x < 0 && y < 0 => "quadrant 3",
+        Point { x, y } if x > 0 && y < 0 => "quadrant 4",
+        Point { x: 0, .. } => "on y-axis",
+        Point { y: 0, .. } => "on x-axis",
+        _ => "error",
+    }
+}
+
+/// Guard comparing struct fields.
+fn rect_type(r: Rectangle) -> Text {
+    match r {
+        Rectangle { width, height } if width == height => "square",
+        Rectangle { width, height } if width > height => "landscape",
+        Rectangle { width, height } if width < height => "portrait",
+        _ => "error",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guards with Or-Patterns
+//------------------------------------------------------------------------------
+
+type Weekday is
+    | Monday
+    | Tuesday
+    | Wednesday
+    | Thursday
+    | Friday
+    | Saturday
+    | Sunday;
+
+/// Guard applying to entire or-pattern.
+fn workday_with_guard(day: Weekday, holiday: Bool) -> Text {
+    match day {
+        Monday | Tuesday | Wednesday | Thursday | Friday if !holiday => "work",
+        Monday | Tuesday | Wednesday | Thursday | Friday if holiday => "holiday",
+        Saturday | Sunday => "weekend",
+    }
+}
+
+/// Or-pattern with value guard.
+fn special_numbers(n: Int) -> Text {
+    match n {
+        1 | 2 | 3 if n % 2 == 1 => "odd small",
+        1 | 2 | 3 if n % 2 == 0 => "even small",
+        x if x > 0 => "other positive",
+        _ => "non-positive",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guards with @ Bindings
+//------------------------------------------------------------------------------
+
+/// Guard with @ binding.
+fn at_with_guard(m: Maybe<Int>) -> Text {
+    match m {
+        opt @ Some(x) if x > 0 => f"positive: {x}",
+        opt @ Some(x) if x < 0 => f"negative: {x}",
+        Some(0) => "zero",
+        None => "none",
+    }
+}
+
+/// Range with @ binding and guard.
+fn range_guard(n: Int) -> Text {
+    match n {
+        x @ 1..=100 if x % 2 == 0 => "even in range",
+        x @ 1..=100 if x % 2 == 1 => "odd in range",
+        _ => "out of range",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guards with List Patterns
+//------------------------------------------------------------------------------
+
+/// Guard on list elements.
+fn list_guard(lst: List<Int>) -> Text {
+    match lst {
+        [] => "empty",
+        [x] if x == 0 => "single zero",
+        [x] if x > 0 => "single positive",
+        [x] if x < 0 => "single negative",
+        [a, b] if a == b => "equal pair",
+        [a, b] if a < b => "ascending pair",
+        [a, b] if a > b => "descending pair",
+        [first, .., last] if first == last => "palindrome-ish",
+        _ => "other",
+    }
+}
+
+/// Guard on list of three elements.
+fn list_3_guard(arr: List<Int>) -> Text {
+    match arr {
+        [a, b, c] if a + b + c == 0 => "zero sum",
+        [a, b, c] if a <= b && b <= c => "sorted",
+        [a, b, c] if a >= b && b >= c => "reverse sorted",
+        _ => "unsorted",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Multiple Independent Guards
+//------------------------------------------------------------------------------
+
+/// Chained independent conditions.
+fn multi_guard(pair: (Int, Int)) -> Int {
+    match pair {
+        (x, y) if x > 0 => 1,
+        (x, y) if y > 0 => 2,
+        (x, y) if x == 0 && y == 0 => 0,
+        _ => -1,
+    }
+}
+
+/// Overlapping guards (first match wins).
+fn overlapping_guards(n: Int) -> Text {
+    match n {
+        x if x % 2 == 0 => "even",
+        x if x == 0 => "zero",
+        x if x % 2 == 1 => "odd",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guards with External State
+//------------------------------------------------------------------------------
+
+/// Guard checking external condition.
+fn context_guard(n: Int, threshold: Int) -> Bool {
+    match n {
+        x if x >= threshold => true,
+        _ => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Basic guards
+    assert(classify_int(5) == "positive");
+    assert(classify_int(-5) == "negative");
+    assert(classify_int(0) == "zero");
+
+    // Detailed classification
+    assert(classify_detailed(500) == "large positive");
+    assert(classify_detailed(50) == "medium positive");
+    assert(classify_detailed(5) == "small positive");
+    assert(classify_detailed(0) == "zero");
+
+    // Range check
+    assert(in_range(50) == true);
+    assert(in_range(-5) == false);
+    assert(in_range(150) == false);
+
+    // Pair comparison
+    assert(match_with_binding((5, 5)) == "equal");
+    assert(match_with_binding((10, 5)) == "first larger");
+    assert(match_with_binding((5, 10)) == "second larger");
+
+    // Even filter
+    assert(filter_even(4) == Some(4));
+    assert(filter_even(5) == None);
+
+    // Length check
+    assert(check_length("") == "empty");
+    assert(check_length("hi") == "short");
+    assert(check_length("hello world") == "medium");
+
+    // Pythagorean
+    assert(classify_pythagorean((6, 8)) == "on circle");
+    assert(classify_pythagorean((3, 4)) == "inside circle");
+
+    // Maybe filter
+    assert(filter_maybe(Some(5)) == Some(5));
+    assert(filter_maybe(Some(0)) == None);
+    assert(filter_maybe(Some(-5)) == Some(5));
+
+    // Quadrant
+    assert(quadrant(Point { x: 0, y: 0 }) == "origin");
+    assert(quadrant(Point { x: 1, y: 1 }) == "quadrant 1");
+    assert(quadrant(Point { x: -1, y: 1 }) == "quadrant 2");
+
+    // Rectangle
+    assert(rect_type(Rectangle { width: 5, height: 5 }) == "square");
+    assert(rect_type(Rectangle { width: 10, height: 5 }) == "landscape");
+
+    // Or-pattern with guard
+    assert(special_numbers(1) == "odd small");
+    assert(special_numbers(2) == "even small");
+    assert(special_numbers(3) == "odd small");
+
+    // @ with guard
+    assert(at_with_guard(Some(5)) == "positive: 5");
+    assert(at_with_guard(Some(-5)) == "negative: -5");
+
+    // List guard
+    assert(list_guard([]) == "empty");
+    assert(list_guard([0]) == "single zero");
+    assert(list_guard([5, 5]) == "equal pair");
+    assert(list_guard([1, 2]) == "ascending pair");
+
+    // List 3 guard
+    assert(list_3_guard([1, -1, 0]) == "zero sum");
+    assert(list_3_guard([1, 2, 3]) == "sorted");
+}
+
+// Note: Failure test cases for guard errors (E310-E317) are in separate typecheck-fail files.

@@ -1,0 +1,45 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: modules, imports, cross-file
+
+mount module_utils.{add, multiply, square, factorial, abs_val};
+
+fn main() -> Int {
+    // Test basic imported functions
+    let s = add(10, 20);
+    if (s != 30) {
+        print(f"FAIL: add(10,20)={s}");
+        return 1;
+    }
+
+    let p = multiply(7, 8);
+    if (p != 56) {
+        print(f"FAIL: multiply(7,8)={p}");
+        return 1;
+    }
+
+    // Test function that calls another imported function internally
+    let sq = square(9);
+    if (sq != 81) {
+        print(f"FAIL: square(9)={sq}");
+        return 1;
+    }
+
+    // Test recursive imported function
+    let f = factorial(6);
+    if (f != 720) {
+        print(f"FAIL: factorial(6)={f}");
+        return 1;
+    }
+
+    // Test conditional logic in imported function
+    let a = abs_val(0 - 42);
+    if (a != 42) {
+        print(f"FAIL: abs_val(-42)={a}");
+        return 1;
+    }
+
+    print("cross_file_modules: PASS");
+    0
+}

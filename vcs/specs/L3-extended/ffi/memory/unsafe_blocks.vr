@@ -1,0 +1,481 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, memory, unsafe, safety
+// @timeout: 10000
+// @description: Tests unsafe block syntax, requirements, and patterns
+
+/// ============================================================
+/// UNSAFE BLOCKS
+/// ============================================================
+///
+/// Unsafe blocks allow operations that bypass Verumps safety
+/// guarantees. They must be carefully documented and minimized.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_void is ();
+type size_t is usize;
+
+// ============================================================
+// BASIC UNSAFE BLOCKS
+// ============================================================
+
+// ------------------------------------------------------------
+// Minimal Unsafe Scope
+// ------------------------------------------------------------
+
+/// Dereference raw pointer
+fn read_ptr(ptr: *const i32) -> i32 {
+    // SAFETY: Caller guarantees ptr is valid and aligned
+    unsafe { *ptr }
+}
+
+/// Write through raw pointer
+fn write_ptr(ptr: *mut i32, value: i32) {
+    // SAFETY: Caller guarantees ptr is valid, aligned, and not aliased
+    unsafe { *ptr = value; }
+}
+
+/// Multiple operations in one block
+fn swap_values(a: *mut i32, b: *mut i32) {
+    // SAFETY: Both pointers are valid, aligned, and non-overlapping
+    unsafe {
+        let temp = *a;
+        *a = *b;
+        *b = temp;
+    }
+}
+
+// ------------------------------------------------------------
+// Unsafe with Control Flow
+// ------------------------------------------------------------
+
+/// Conditional unsafe operation
+fn conditional_read(ptr: *const i32, default: i32) -> i32 {
+    if ptr.is_null() {
+        default
+    } else {
+        // SAFETY: Already checked for null
+        unsafe { *ptr }
+    }
+}
+
+/// Unsafe in loop
+fn sum_array(ptr: *const i32, len: size_t) -> i32 {
+    let mut sum = 0;
+    for i in 0..len {
+        // SAFETY: i < len, so ptr.add(i) is within bounds
+        sum += unsafe { *ptr.add(i) };
+    }
+    sum
+}
+
+/// Unsafe in match
+fn read_or_default(maybe_ptr: Maybe<*const i32>) -> i32 {
+    maybe_ptr.match {
+        Some(ptr) if !ptr.is_null() => {
+            // SAFETY: Pointer is Some and not null
+            unsafe { *ptr }
+        }
+        _ => 0,
+    }
+}
+
+// ============================================================
+// UNSAFE FUNCTIONS
+// ============================================================
+
+// ------------------------------------------------------------
+// Unsafe Function Declaration
+// ------------------------------------------------------------
+
+/// Unsafe function - caller must uphold invariants
+unsafe fn dangerous_copy(src: *const u8, dst: *mut u8, len: size_t) {
+    // No unsafe block needed inside unsafe function
+    for i in 0..len {
+        *dst.add(i) = *src.add(i);
+    }
+}
+
+/// Calling unsafe function
+fn safe_copy_wrapper(src: &[u8], dst: &mut [u8]) {
+    let len = src.len().min(dst.len());
+    // SAFETY: src and dst don't overlap, lengths are checked
+    unsafe {
+        dangerous_copy(src.as_ptr(), dst.as_mut_ptr(), len);
+    }
+}
+
+// ------------------------------------------------------------
+// Unsafe Methods
+// ------------------------------------------------------------
+
+type RawBuffer is {
+    ptr: *mut u8,
+    len: size_t,
+};
+
+implement RawBuffer {
+    /// SAFETY: Caller must ensure index < self.len
+    unsafe fn get_unchecked(&self, index: size_t) -> u8 {
+        *self.ptr.add(index)
+    }
+
+    /// Safe wrapper with bounds check
+    fn get(&self, index: size_t) -> Maybe<u8> {
+        if index < self.len {
+            // SAFETY: We just checked bounds
+            Some(unsafe { self.get_unchecked(index) })
+        } else {
+            None
+        }
+    }
+
+    /// SAFETY: Caller must ensure index < self.len
+    unsafe fn set_unchecked(&mut self, index: size_t, value: u8) {
+        *self.ptr.add(index) = value;
+    }
+
+    /// Safe wrapper
+    fn set(&mut self, index: size_t, value: u8) -> Bool {
+        if index < self.len {
+            // SAFETY: We just checked bounds
+            unsafe { self.set_unchecked(index, value); }
+            true
+        } else {
+            false
+        }
+    }
+}
+
+// ============================================================
+// UNSAFE TRAITS
+// ============================================================
+
+// ------------------------------------------------------------
+// Unsafe Trait Declaration
+// ------------------------------------------------------------
+
+/// Trait that requires implementors to uphold invariants
+unsafe type Send is protocol {
+    // Type can be sent between threads
+}
+
+unsafe type Sync is protocol {
+    // Type can be shared between threads
+}
+
+/// Marker trait for types with valid zero representation
+unsafe type Zeroable is protocol {}
+
+/// Trait for types with exact iterator length
+unsafe type TrustedLen is protocol {
+    /// SAFETY: Must return exact remaining length
+    fn trusted_len(&self) -> size_t;
+}
+
+// ------------------------------------------------------------
+// Unsafe Trait Implementation
+// ------------------------------------------------------------
+
+/// Unsafe impl for built-in types
+unsafe implement Send for i32 {}
+unsafe implement Sync for i32 {}
+unsafe implement Zeroable for i32 {}
+
+/// Unsafe impl for custom types
+type ThreadSafeData is {
+    value: i32,
+};
+
+// SAFETY: ThreadSafeData contains only Send+Sync types
+unsafe implement Send for ThreadSafeData {}
+unsafe implement Sync for ThreadSafeData {}
+
+// ============================================================
+// UNSAFE OPERATIONS CATALOG
+// ============================================================
+
+// ------------------------------------------------------------
+// Raw Pointer Dereference
+// ------------------------------------------------------------
+
+fn example_deref() {
+    let x = 42;
+    let ptr = &x as *const i32;
+
+    // SAFETY: ptr points to valid, initialized, aligned i32
+    let value = unsafe { *ptr };
+    assert(value == 42);
+}
+
+// ------------------------------------------------------------
+// Mutable Static Access
+// ------------------------------------------------------------
+
+static mut GLOBAL_COUNTER: i32 = 0;
+
+fn increment_counter() -> i32 {
+    // SAFETY: Single-threaded context, no concurrent access
+    unsafe {
+        GLOBAL_COUNTER += 1;
+        GLOBAL_COUNTER
+    }
+}
+
+// Note: Mutable statics should generally be avoided
+// Use atomics or synchronization primitives instead
+
+// ------------------------------------------------------------
+// Calling Unsafe Functions
+// ------------------------------------------------------------
+
+ffi libc {
+    @extern("C")
+    fn strlen(s: *const c_char) -> size_t;
+}
+
+type c_char is i8;
+
+fn call_strlen(s: &Text) -> size_t {
+    let c_str = s.to_c_string();
+    // SAFETY: c_str is null-terminated
+    unsafe { libc.strlen(c_str.as_ptr()) }
+}
+
+// ------------------------------------------------------------
+// Union Field Access
+// ------------------------------------------------------------
+
+/// Union type for reinterpretation
+@repr(C)
+type IntFloat is { raw: i32 };
+
+fn read_as_int(u: &IntFloat) -> i32 {
+    u.raw
+}
+
+fn read_as_float(u: &IntFloat) -> f32 {
+    // SAFETY: Reinterpret bits as float
+    unsafe { *((&u.raw) as *const i32 as *const f32) }
+}
+
+// Reinterpret i32 as f32 bits
+fn bits_to_float(bits: i32) -> f32 {
+    let u = IntFloat { raw: bits };
+    read_as_float(&u)
+}
+
+// ============================================================
+// SAFETY DOCUMENTATION PATTERNS
+// ============================================================
+
+// ------------------------------------------------------------
+// SAFETY Comments
+// ------------------------------------------------------------
+
+/// Comprehensive safety documentation
+fn well_documented_unsafe(ptr: *const i32, len: size_t) -> &[i32] {
+    // SAFETY:
+    // 1. ptr is non-null (enforced by callerps contract)
+    // 2. ptr is properly aligned for i32 (4-byte alignment)
+    // 3. ptr points to len consecutive initialized i32 values
+    // 4. The memory is not being mutated during this call
+    // 5. The returned slice lifetime is bounded by the input lifetime
+    unsafe {
+        std.slice.from_raw_parts(ptr, len)
+    }
+}
+
+/// Multi-step safety reasoning
+fn complex_safety_reasoning(data: *mut Data, callback: fn(*mut Data)) {
+    // Pre-operation check
+    assert(!data.is_null(), "data must not be null");
+
+    // SAFETY for the lock:
+    // - data points to a valid Data struct (caller invariant)
+    // - Data.mutex is properly initialized (struct invariant)
+    unsafe { (*data).mutex.lock(); }
+
+    // SAFETY for the callback:
+    // - We hold the lock, so exclusive access is guaranteed
+    // - data is valid for the duration of the callback
+    callback(data);
+
+    // SAFETY for the unlock:
+    // - Lock was acquired successfully above
+    // - No panic can occur between lock and here
+    unsafe { (*data).mutex.unlock(); }
+}
+
+type Data is {
+    value: i32,
+    mutex: Mutex,
+};
+
+@opaque
+type Mutex is ();
+
+implement Mutex {
+    unsafe fn lock(&self) {}
+    unsafe fn unlock(&self) {}
+}
+
+// ============================================================
+// ENCAPSULATING UNSAFE
+// ============================================================
+
+// ------------------------------------------------------------
+// Safe API over Unsafe Implementation
+// ------------------------------------------------------------
+
+/// Safe Vec-like type with unsafe internals
+type SafeVect<T> is {
+    ptr: *mut T,
+    len: size_t,
+    cap: size_t,
+};
+
+implement<T> SafeVect<T> {
+    /// Safe constructor
+    fn new() -> SafeVect<T> {
+        SafeVect {
+            ptr: 0 as *mut T,
+            len: 0,
+            cap: 0,
+        }
+    }
+
+    /// Safe push operation
+    fn push(&mut self, value: T) {
+        if self.len == self.cap {
+            self.grow();
+        }
+
+        // SAFETY: We just ensured len < cap
+        // ptr + len is within our allocation
+        unsafe {
+            self.ptr.add(self.len).write(value);
+        }
+        self.len += 1;
+    }
+
+    /// Safe pop operation
+    fn pop(&mut self) -> Maybe<T> {
+        if self.len == 0 {
+            None
+        } else {
+            self.len -= 1;
+            // SAFETY: len was > 0, so ptr + len is valid
+            // and contains an initialized value
+            Some(unsafe { self.ptr.add(self.len).read() })
+        }
+    }
+
+    /// Safe index operation
+    fn get(&self, index: size_t) -> Maybe<&T> {
+        if index < self.len {
+            // SAFETY: index < len, so within initialized region
+            Some(unsafe { &*self.ptr.add(index) })
+        } else {
+            None
+        }
+    }
+
+    /// Internal growth (unsafe)
+    fn grow(&mut self) {
+        let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
+
+        // SAFETY: Wepre reallocating our own memory
+        let new_ptr = unsafe {
+            if self.cap == 0 {
+                std.alloc.alloc(std.alloc.Layout.array.<T>(new_cap).unwrap())
+            } else {
+                std.alloc.realloc(
+                    self.ptr as *mut u8,
+                    std.alloc.Layout.array.<T>(self.cap).unwrap(),
+                    new_cap * T.size
+                )
+            }
+        } as *mut T;
+
+        self.ptr = new_ptr;
+        self.cap = new_cap;
+    }
+}
+
+implement<T> Drop for SafeVect<T> {
+    fn drop(&mut self) {
+        if self.cap > 0 {
+            // SAFETY: We own this memory and all elements are initialized
+            unsafe {
+                for i in 0..self.len {
+                    std.ptr.drop_in_place(self.ptr.add(i));
+                }
+                std.alloc.dealloc(
+                    self.ptr as *mut u8,
+                    std.alloc.Layout.array.<T>(self.cap).unwrap()
+                );
+            }
+        }
+    }
+}
+
+// ============================================================
+// MINIMIZE UNSAFE SCOPE
+// ============================================================
+
+// Bad: Overly broad unsafe scope
+fn bad_example(ptr: *const i32, len: size_t) -> i32 {
+    unsafe {
+        // All of this is in unsafe, even the safe parts
+        let mut sum = 0;
+        for i in 0..len {
+            sum += *ptr.add(i);
+        }
+        sum
+    }
+}
+
+// Good: Minimal unsafe scope
+fn good_example(ptr: *const i32, len: size_t) -> i32 {
+    // Safe: bounds checking
+    assert(len > 0, "length must be positive");
+
+    // Safe: create slice (unsafe inside)
+    // SAFETY: caller guarantees ptr is valid for len elements
+    let slice = unsafe { std.slice.from_raw_parts(ptr, len) };
+
+    // Safe: iteration and summing
+    let mut total = 0;
+    for i in 0..len {
+        total += slice[i];
+    }
+    total
+}
+
+fn main() {
+    // Test basic unsafe operations
+    let mut value = 42;
+    write_ptr(&mut value, 100);
+    assert(read_ptr(&value) == 100);
+
+    // Test unsafe function call
+    let src = [1u8, 2, 3];
+    let mut dst = [0u8, 0, 0];
+    safe_copy_wrapper(&src, &mut dst);
+    assert(dst[0] == 1);
+
+    // Test buffer operations
+    let mut buffer = [0u8; 10];
+    let raw_buf = RawBuffer {
+        ptr: buffer.as_mut_ptr(),
+        len: buffer.len(),
+    };
+    assert(raw_buf.get(0) == Some(0));
+    assert(raw_buf.get(100) == None);
+}

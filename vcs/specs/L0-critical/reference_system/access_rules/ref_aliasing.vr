@@ -1,0 +1,23 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, aliasing, negative-test
+
+/// Test that mutable referencing while immutably referenced causes compile-time error.
+/// This prevents data races and ensures memory safety.
+/// Only one mutable reference OR multiple immutable references are allowed.
+/// Verum detects this at COMPILE-TIME via borrow checking.
+/// Spec: 04-memory-model.md#aliasing-rules
+/// Aliasing XOR Mutability: You cannot have both simultaneously.
+
+fn main() {
+    let mut data = Text.from("shared data");
+
+    let ref1 = &data;          // Immutable reference - acquires read epoch capability
+    let ref2 = &mut data;      // Mutable reference attempt - requires exclusive write capability
+    // CBGR detects epoch violation at runtime
+
+    print(*ref1);            // Using immutable reference
+    ref2.push_str(" modified"); // PANIC: epoch violation when attempting mutation
+}

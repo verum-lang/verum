@@ -1,0 +1,56 @@
+// @test: parse
+// @level: L0
+// @tags: parser, statements, let
+// @description: Test let statement parsing
+
+fn test_let_statements() {
+    // Basic let
+    let x = 42;
+
+    // With type annotation
+    let y: Int = 42;
+
+    // Mutable
+    let mut z = 0;
+    let mut w: Int = 0;
+
+    // Without initializer (declaration)
+    let a: Int;
+
+    // Pattern destructuring
+    let (x, y) = pair;
+    let (a, b, c) = triple;
+
+    // Record destructuring
+    let Point { x, y } = point;
+    let Person { name, age, .. } = person;
+
+    // Nested patterns
+    let ((a, b), c) = nested;
+    let Some((x, y)) = maybe_pair;
+
+    // Let else
+    let Some(value) = maybe else {
+        return;
+    };
+
+    let Ok(data) = result else {
+        return default();
+    };
+
+    // Complex let else
+    let Some(Point { x, y }) = maybe_point else {
+        panic("Expected point");
+    };
+
+    // Shadowing
+    let x = 1;
+    let x = x + 1;
+    let x: Text = x.to_text();
+
+    // With complex expressions
+    let computed = {
+        let temp = expensive();
+        process(temp)
+    };
+}

@@ -1,0 +1,284 @@
+#!/bin/bash
+# VCS Pre-commit Hook
+# Validates Verum syntax and runs critical tests before commit
+#
+# Install: ln -sf ../../vcs/scripts/hooks/pre-commit .git/hooks/pre-commit
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+ERRORS=0
+WARNINGS=0
+
+print_header() {
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  VCS Pre-commit Validation${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+}
+
+# Check 1: Validate .vr file syntax
+check_vr_syntax() {
+    echo -e "  Checking .vr file syntax..."
+
+    local staged_vr
+    staged_vr=$(git diff --cached --name-only --diff-filter=ACM -- '*.vr' 2>/dev/null || true)
+
+    if [ -z "$staged_vr" ]; then
+        echo -e "  ${GREEN}No .vr files staged${NC}"
+        return 0
+    fi
+
+    local count
+    count=$(echo "$staged_vr" | wc -l | tr -d ' ')
+    echo "  Found $count staged .vr file(s)"
+
+    if [ -x "$PROJECT_ROOT/vcs/scripts/validate-syntax.sh" ]; then
+        if ! "$PROJECT_ROOT/vcs/scripts/validate-syntax.sh" --staged --verbose; then
+            echo -e "  ${RED}Syntax validation failed${NC}"
+            ERRORS=$((ERRORS + 1))
+            return 1
+        fi
+    else
+        # Fallback: use parser directly if available
+        local parser_bin="$PROJECT_ROOT/target/release/verum-parse"
+        if [ -x "$parser_bin" ]; then
+            local failed=0
+            for file in $staged_vr; do
+                if [ -f "$file" ]; then
+                    if ! "$parser_bin" --check "$file" >/dev/null 2>&1; then
+                        echo -e "  ${RED}FAIL${NC}: $file"
+                        failed=$((failed + 1))
+                    fi
+                fi
+            done
+            if [ "$failed" -gt 0 ]; then
+                ERRORS=$((ERRORS + 1))
+                return 1
+            fi
+        else
+            echo -e "  ${YELLOW}Parser not built, skipping syntax validation${NC}"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+    fi
+
+    echo -e "  ${GREEN}Syntax validation passed${NC}"
+    return 0
+}
+
+# Check 2: Verify VCS test file annotations
+check_vr_annotations() {
+    echo ""
+    echo -e "  Checking .vr file annotations..."
+
+    local staged_vr
+    staged_vr=$(git diff --cached --name-only --diff-filter=ACM -- 'vcs/specs/**/*.vr' 2>/dev/null || true)
+
+    if [ -z "$staged_vr" ]; then
+        echo -e "  ${GREEN}No VCS spec files staged${NC}"
+        return 0
+    fi
+
+    local missing_annotations=0
+
+    for file in $staged_vr; do
+        if [ -f "$file" ]; then
+            # Check for required annotations
+            if ! grep -q "// @test:" "$file"; then
+                echo -e "  ${YELLOW}Missing @test annotation: $file${NC}"
+                missing_annotations=$((missing_annotations + 1))
+            fi
+            if ! grep -q "// @level:" "$file"; then
+                echo -e "  ${YELLOW}Missing @level annotation: $file${NC}"
+                missing_annotations=$((missing_annotations + 1))
+            fi
+            if ! grep -q "// @expect:" "$file"; then
+                echo -e "  ${YELLOW}Missing @expect annotation: $file${NC}"
+                missing_annotations=$((missing_annotations + 1))
+            fi
+        fi
+    done
+
+    if [ "$missing_annotations" -gt 0 ]; then
+        echo -e "  ${YELLOW}$missing_annotations annotation warning(s)${NC}"
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo -e "  ${GREEN}All annotations present${NC}"
+    fi
+
+    return 0
+}
+
+# Check 3: Run L0 critical tests for affected areas
+check_affected_tests() {
+    echo ""
+    echo -e "  Checking affected tests..."
+
+    local staged_rs
+    staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs' 2>/dev/null || true)
+
+    if [ -z "$staged_rs" ]; then
+        echo -e "  ${GREEN}No Rust files staged, skipping L0 tests${NC}"
+        return 0
+    fi
+
+    # Determine which L0 tests to run based on changed files
+    local run_lexer=0
+    local run_parser=0
+    local run_memory=0
+
+    for file in $staged_rs; do
+        case "$file" in
+            *verum_lexer*) run_lexer=1 ;;
+            *verum_parser*) run_parser=1 ;;
+            *verum_cbgr*) run_memory=1 ;;
+        esac
+    done
+
+    # Run affected tests (quick subset)
+    local vtest_bin="$PROJECT_ROOT/vcs/runner/vtest/target/release/vtest"
+    if [ -x "$vtest_bin" ]; then
+        local tags=""
+        [ "$run_lexer" -eq 1 ] && tags="lexer"
+        [ "$run_parser" -eq 1 ] && tags="${tags:+$tags,}parser"
+        [ "$run_memory" -eq 1 ] && tags="${tags:+$tags,}memory-safety"
+
+        if [ -n "$tags" ]; then
+            echo "  Running L0 tests with tags: $tags"
+            if ! timeout 60 "$vtest_bin" run \
+                --level L0 \
+                --tags "$tags" \
+                --parallel 4 \
+                --timeout 5000 \
+                2>&1 | tail -n 5; then
+                echo -e "  ${RED}L0 tests failed${NC}"
+                ERRORS=$((ERRORS + 1))
+                return 1
+            fi
+        else
+            echo -e "  ${GREEN}No affected L0 tests to run${NC}"
+        fi
+    else
+        echo -e "  ${YELLOW}vtest not built, skipping L0 tests${NC}"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+
+    echo -e "  ${GREEN}Affected tests passed${NC}"
+    return 0
+}
+
+# Check 4: Verify no EBNF grammar violations
+check_grammar_consistency() {
+    echo ""
+    echo -e "  Checking grammar consistency..."
+
+    local staged_ebnf
+    staged_ebnf=$(git diff --cached --name-only --diff-filter=ACM -- 'grammar/*.ebnf' 2>/dev/null || true)
+
+    if [ -z "$staged_ebnf" ]; then
+        echo -e "  ${GREEN}No grammar changes${NC}"
+        return 0
+    fi
+
+    echo -e "  ${YELLOW}Grammar changed - full L0 tests recommended${NC}"
+    WARNINGS=$((WARNINGS + 1))
+
+    return 0
+}
+
+# Check 5: Verify Rust code compiles
+check_rust_compile() {
+    echo ""
+    echo -e "  Checking Rust compilation..."
+
+    local staged_rs
+    staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs' 2>/dev/null || true)
+
+    if [ -z "$staged_rs" ]; then
+        echo -e "  ${GREEN}No Rust files staged${NC}"
+        return 0
+    fi
+
+    # Quick check - just run cargo check on affected crates
+    local affected_crates=""
+    for file in $staged_rs; do
+        local crate_dir
+        crate_dir=$(echo "$file" | sed -n 's#\(crates/[^/]*\)/.*#\1#p')
+        if [ -n "$crate_dir" ] && [ -d "$PROJECT_ROOT/$crate_dir" ]; then
+            if [[ ! "$affected_crates" =~ "$crate_dir" ]]; then
+                affected_crates="$affected_crates $crate_dir"
+            fi
+        fi
+    done
+
+    if [ -n "$affected_crates" ]; then
+        echo "  Running cargo check on affected crates..."
+        for crate in $affected_crates; do
+            local crate_name
+            crate_name=$(basename "$crate")
+            if ! timeout 120 cargo check -p "$crate_name" --quiet 2>/dev/null; then
+                echo -e "  ${RED}Cargo check failed for $crate_name${NC}"
+                ERRORS=$((ERRORS + 1))
+                return 1
+            fi
+        done
+        echo -e "  ${GREEN}Cargo check passed${NC}"
+    else
+        echo -e "  ${GREEN}No crates affected${NC}"
+    fi
+
+    return 0
+}
+
+# Main
+main() {
+    print_header
+
+    check_vr_syntax
+    check_vr_annotations
+    check_grammar_consistency
+
+    # Only run heavier checks if no errors so far
+    if [ $ERRORS -eq 0 ]; then
+        check_affected_tests
+    fi
+
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "  Pre-commit Summary"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+    if [ $ERRORS -gt 0 ]; then
+        echo -e "  ${RED}Errors:   $ERRORS${NC}"
+        echo -e "  ${YELLOW}Warnings: $WARNINGS${NC}"
+        echo ""
+        echo -e "  ${RED}Commit blocked due to VCS validation errors${NC}"
+        echo ""
+        echo "  To bypass: git commit --no-verify"
+        echo ""
+        exit 1
+    fi
+
+    if [ $WARNINGS -gt 0 ]; then
+        echo -e "  ${YELLOW}Warnings: $WARNINGS${NC}"
+        echo ""
+        echo -e "  ${GREEN}Commit allowed with warnings${NC}"
+    else
+        echo -e "  ${GREEN}All checks passed${NC}"
+    fi
+
+    echo ""
+    exit 0
+}
+
+main "$@"

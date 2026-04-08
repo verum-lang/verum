@@ -1,0 +1,111 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, induction
+// @timeout: 15000
+
+/// Induction proof demonstration
+/// Shows mathematical induction over natural numbers
+
+/// Sum formula: 0 + 1 + 2 + ... + n = n * (n + 1) / 2
+theorem sum_formula(n: Nat): sum(0..=n) == n * (n + 1) / 2 {
+    proof by induction on n {
+        case 0 => trivial
+        case succ(k) => {
+            have ih: sum(0..=k) == k * (k + 1) / 2;
+            calc {
+                sum(0..=succ(k))
+                == { by definition } sum(0..=k) + succ(k)
+                == { by ih } k * (k + 1) / 2 + succ(k)
+                == { by ring } succ(k) * (succ(k) + 1) / 2
+            }
+        }
+    }
+}
+
+/// Sum of squares formula
+theorem sum_squares(n: Nat): sum_sq(0..=n) == n * (n + 1) * (2 * n + 1) / 6 {
+    proof by induction on n {
+        case 0 => {
+            // sum_sq(0..=0) = 0 = 0 * 1 * 1 / 6
+            trivial
+        }
+        case succ(k) => {
+            have ih: sum_sq(0..=k) == k * (k + 1) * (2 * k + 1) / 6;
+            calc {
+                sum_sq(0..=succ(k))
+                == { by definition } sum_sq(0..=k) + succ(k) * succ(k)
+                == { by ih } k * (k + 1) * (2 * k + 1) / 6 + succ(k) * succ(k)
+                == { by ring } succ(k) * (succ(k) + 1) * (2 * succ(k) + 1) / 6
+            }
+        }
+    }
+}
+
+/// Fibonacci property: fib(n+2) = fib(n+1) + fib(n)
+theorem fib_property(n: Nat): fib(n + 2) == fib(n + 1) + fib(n) {
+    proof by definition
+}
+
+/// Strong induction example: every natural number >= 2 has a prime divisor
+theorem prime_divisor(n: Nat)
+    requires n >= 2
+    ensures exists p: Nat. is_prime(p) && divides(p, n)
+{
+    proof by strong_induction on n {
+        case n => {
+            // Either n is prime or composite
+            // In either case we can find a prime divisor
+            // By strong induction hypothesis applied to smaller divisors
+            conclude by auto
+        }
+    }
+}
+
+/// List length induction
+theorem list_append_length<T>(xs: List<T>, ys: List<T>):
+    len(xs ++ ys) == len(xs) + len(ys)
+{
+    proof by induction on xs {
+        case [] => {
+            calc {
+                len([] ++ ys)
+                == { by definition } len(ys)
+                == { by ring } 0 + len(ys)
+                == { by definition } len([]) + len(ys)
+            }
+        }
+        case Cons(x, rest) => {
+            have ih: len(rest ++ ys) == len(rest) + len(ys);
+            calc {
+                len(Cons(x, rest) ++ ys)
+                == { by definition } 1 + len(rest ++ ys)
+                == { by ih } 1 + len(rest) + len(ys)
+                == { by definition } len(Cons(x, rest)) + len(ys)
+            }
+        }
+    }
+}
+
+/// Mutual induction for even/odd
+theorem even_odd_mutual(n: Nat): is_even(n) || is_odd(n) {
+    proof by induction on n {
+        case 0 => {
+            left;
+            trivial // 0 is even
+        }
+        case succ(k) => {
+            have ih: is_even(k) || is_odd(k);
+            cases ih {
+                case is_even(k) => {
+                    right;
+                    conclude by definition // succ of even is odd
+                }
+                case is_odd(k) => {
+                    left;
+                    conclude by definition // succ of odd is even
+                }
+            }
+        }
+    }
+}

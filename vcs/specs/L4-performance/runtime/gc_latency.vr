@@ -1,0 +1,506 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: runtime, gc, latency, pause, collection
+// @description: Garbage collection latency benchmark (target: p99 pause < 1ms)
+
+/// Garbage Collection Latency Benchmark
+///
+/// This benchmark measures GC pause times and collection performance.
+/// Verum uses CBGR (Capability-Based Generation References) which enables
+/// deterministic memory management, but may still use GC for cycles.
+///
+/// Target:
+/// - p99 GC pause < 1ms
+/// - p999 GC pause < 10ms
+/// - No GC pause > 100ms
+///
+/// GC characteristics:
+/// - Reference counting as primary mechanism
+/// - Cycle collector for reference cycles
+/// - Generational collection
+/// - Concurrent marking (when possible)
+///
+/// Spec reference: docs/detailed/04-memory-model.md
+
+const ALLOCATION_RATE: Int = 100_000;  // Allocations per iteration
+const MEASUREMENT_ITERATIONS: Int = 100;
+const PAUSE_SAMPLE_SIZE: Int = 10_000;
+
+fn main() {
+    let results = BenchmarkResults.new("GC Latency Performance");
+
+    // Pause time benchmarks
+    results.add(benchmark_gc_pause_distribution());
+    results.add(benchmark_gc_pause_under_load());
+    results.add(benchmark_gc_pause_with_cycles());
+
+    // Collection performance
+    results.add(benchmark_collection_throughput());
+    results.add(benchmark_incremental_collection());
+    results.add(benchmark_generational_collection());
+
+    // Application impact
+    results.add(benchmark_latency_during_gc());
+    results.add(benchmark_throughput_during_gc());
+
+    // Stress tests
+    results.add(benchmark_gc_under_memory_pressure());
+    results.add(benchmark_gc_with_large_objects());
+
+    results.report();
+    assert(results.all_pass(), "GC latency exceeds target");
+}
+
+/// Measure GC pause distribution
+fn benchmark_gc_pause_distribution() -> BenchmarkResult {
+    let mut pause_times: List<Int> = List.with_capacity(PAUSE_SAMPLE_SIZE);
+
+    // Generate garbage and measure collection pauses
+    for _ in 0..PAUSE_SAMPLE_SIZE {
+        // Create garbage
+        for _ in 0..1000 {
+            let garbage = Heap.new([0; 64]);
+            black_box(&*garbage);
+        }
+
+        // Force GC and measure pause
+        let timer = Timer.high_precision();
+        timer.start();
+        gc.collect();
+        let pause_us = timer.elapsed_us();
+
+        pause_times.push(pause_us);
+    }
+
+    // Calculate statistics
+    pause_times.sort();
+
+    let p50 = pause_times[PAUSE_SAMPLE_SIZE / 2];
+    let p99 = pause_times[(PAUSE_SAMPLE_SIZE * 99) / 100];
+    let p999 = pause_times[(PAUSE_SAMPLE_SIZE * 999) / 1000];
+    let max = pause_times[PAUSE_SAMPLE_SIZE - 1];
+
+    // Report all percentiles
+    println("GC Pause Distribution:");
+    println("  p50:  {}us", p50);
+    println("  p99:  {}us", p99);
+    println("  p999: {}us", p999);
+    println("  max:  {}us", max);
+
+    // Target: p99 < 1000us (1ms)
+    let p99_ms = p99 as Float / 1000.0;
+
+    BenchmarkResult {
+        name: "gc_pause_p99",
+        metric: "ms",
+        value: p99_ms,
+        target: 1.0,
+        passed: p99_ms < 1.0,
+    }
+}
+
+/// Measure GC pause during high allocation rate
+fn benchmark_gc_pause_under_load() -> BenchmarkResult {
+    let mut max_pause_us = 0;
+    let iterations = 100;
+
+    for _ in 0..iterations {
+        // High allocation rate
+        let objects: List<Heap<[Int; 16]> > = (0..10_000)
+            .map(|_| Heap.new([0; 16]))
+            .collect();
+
+        // Measure GC pause
+        let timer = Timer.high_precision();
+        timer.start();
+        gc.collect();
+        let pause_us = timer.elapsed_us();
+
+        max_pause_us = max_pause_us.max(pause_us);
+
+        // Keep some objects alive
+        black_box(&objects[0..1000]);
+    }
+
+    let max_pause_ms = max_pause_us as Float / 1000.0;
+
+    BenchmarkResult {
+        name: "gc_pause_under_load",
+        metric: "ms",
+        value: max_pause_ms,
+        target: 5.0,
+        passed: max_pause_ms < 5.0,
+    }
+}
+
+/// Create cyclic structures for cycle collector testing
+fn create_cycle() -> Heap<CycleNode> {
+    let node_a = Heap.new(CycleNode { value: 1, next: None });
+    let node_b = Heap.new(CycleNode { value: 2, next: None });
+    let node_c = Heap.new(CycleNode { value: 3, next: None });
+
+    // Create cycle: a -> b -> c -> a
+    node_a.next = Some(node_b.clone());
+    node_b.next = Some(node_c.clone());
+    node_c.next = Some(node_a.clone());
+
+    node_a
+}
+
+type CycleNode is {
+    value: Int,
+    next: Maybe<Heap<CycleNode>>,
+};
+
+/// Benchmark GC with reference cycles
+fn benchmark_gc_pause_with_cycles() -> BenchmarkResult {
+    let mut max_pause_us = 0;
+    let iterations = 100;
+
+    for _ in 0..iterations {
+        // Create many cycles
+        let cycles: List<Heap<CycleNode>> = (0..1000)
+            .map(|_| create_cycle())
+            .collect();
+
+        // Drop cycles (creates garbage with cycles)
+        drop(cycles);
+
+        // Measure cycle collection
+        let timer = Timer.high_precision();
+        timer.start();
+        gc.collect_cycles();
+        let pause_us = timer.elapsed_us();
+
+        max_pause_us = max_pause_us.max(pause_us);
+    }
+
+    let max_pause_ms = max_pause_us as Float / 1000.0;
+
+    // Cycle collection can be more expensive
+    BenchmarkResult {
+        name: "gc_pause_with_cycles",
+        metric: "ms",
+        value: max_pause_ms,
+        target: 10.0,
+        passed: max_pause_ms < 10.0,
+    }
+}
+
+/// Benchmark collection throughput (bytes/sec)
+fn benchmark_collection_throughput() -> BenchmarkResult {
+    let object_size = 1024;  // 1KB objects
+    let object_count = 100_000;
+    let total_bytes = object_size * object_count;
+
+    // Allocate objects
+    let mut objects: List<Heap<[u8; 1024]> > = List.new();
+    for _ in 0..object_count {
+        objects.push(Heap.new([0u8; 1024]));
+    }
+
+    // Drop all objects
+    let timer = Timer.new();
+    timer.start();
+
+    drop(objects);
+    gc.collect();
+
+    let elapsed_ms = timer.elapsed_ms();
+    let throughput_mb_s = (total_bytes as Float / 1024.0 / 1024.0) /
+                          (elapsed_ms as Float / 1000.0);
+
+    // Target: > 1GB/s collection throughput
+    BenchmarkResult {
+        name: "collection_throughput",
+        metric: "MB/s",
+        value: throughput_mb_s,
+        target: 1000.0,
+        passed: throughput_mb_s > 1000.0,
+    }
+}
+
+/// Benchmark incremental collection
+fn benchmark_incremental_collection() -> BenchmarkResult {
+    gc.set_mode(GcMode.Incremental);
+
+    let mut max_slice_us = 0;
+    let slices_measured = 100;
+
+    // Create garbage
+    for _ in 0..10_000 {
+        let garbage = Heap.new([0; 256]);
+        black_box(&*garbage);
+    }
+
+    // Measure incremental collection slices
+    for _ in 0..slices_measured {
+        let timer = Timer.high_precision();
+        timer.start();
+
+        // Run one slice of incremental GC
+        gc.collect_slice();
+
+        let slice_us = timer.elapsed_us();
+        max_slice_us = max_slice_us.max(slice_us);
+    }
+
+    gc.set_mode(GcMode.Default);
+
+    // Incremental slices should be very short
+    let max_slice_us_f = max_slice_us as Float;
+
+    BenchmarkResult {
+        name: "incremental_slice_max",
+        metric: "us",
+        value: max_slice_us_f,
+        target: 100.0,  // 100 microseconds
+        passed: max_slice_us_f < 100.0,
+    }
+}
+
+/// Benchmark generational collection
+fn benchmark_generational_collection() -> BenchmarkResult {
+    gc.set_mode(GcMode.Generational);
+
+    let mut young_gen_times: List<Int> = List.new();
+    let mut old_gen_times: List<Int> = List.new();
+
+    for _ in 0..100 {
+        // Create young generation garbage
+        for _ in 0..10_000 {
+            let garbage = Heap.new(42);
+            black_box(&*garbage);
+        }
+
+        // Minor collection (young gen only)
+        let timer = Timer.high_precision();
+        timer.start();
+        gc.collect_young();
+        young_gen_times.push(timer.elapsed_us());
+
+        // Every 10th iteration, do major collection
+        if young_gen_times.len() % 10 == 0 {
+            let timer = Timer.high_precision();
+            timer.start();
+            gc.collect_full();
+            old_gen_times.push(timer.elapsed_us());
+        }
+    }
+
+    gc.set_mode(GcMode.Default);
+
+    young_gen_times.sort();
+    let young_p99 = young_gen_times[(young_gen_times.len() * 99) / 100];
+
+    // Young gen collection should be very fast
+    let young_p99_us = young_p99 as Float;
+
+    BenchmarkResult {
+        name: "young_gen_p99",
+        metric: "us",
+        value: young_p99_us,
+        target: 500.0,  // 500 microseconds
+        passed: young_p99_us < 500.0,
+    }
+}
+
+/// Benchmark application latency during GC
+fn benchmark_latency_during_gc() -> BenchmarkResult {
+    let mut latencies: List<Int> = List.new();
+
+    // Concurrent workload during GC
+    let gc_thread = spawn(|| {
+        for _ in 0..100 {
+            gc.collect();
+            sleep(Duration.from_millis(10));
+        }
+    });
+
+    // Measure operation latencies during GC
+    for _ in 0..10_000 {
+        let timer = Timer.high_precision();
+        timer.start();
+
+        // Simulate application operation
+        let x = Heap.new([0; 64]);
+        let y = &*x;
+        black_box(*y);
+
+        latencies.push(timer.elapsed_ns());
+    }
+
+    gc_thread.join();
+
+    latencies.sort();
+    let p99 = latencies[(latencies.len() * 99) / 100];
+    let p99_us = p99 as Float / 1000.0;
+
+    // Operations should not be significantly impacted during GC
+    BenchmarkResult {
+        name: "latency_during_gc_p99",
+        metric: "us",
+        value: p99_us,
+        target: 10.0,
+        passed: p99_us < 10.0,
+    }
+}
+
+/// Benchmark throughput during GC
+fn benchmark_throughput_during_gc() -> BenchmarkResult {
+    let duration_ms = 1000;
+    let mut ops_with_gc = 0;
+    let mut ops_without_gc = 0;
+
+    // Measure throughput without GC
+    gc.disable();
+    let timer = Timer.new();
+    timer.start();
+
+    while timer.elapsed_ms() < duration_ms {
+        let x = Heap.new(42);
+        black_box(&*x);
+        ops_without_gc += 1;
+    }
+
+    gc.enable();
+
+    // Measure throughput with GC
+    let gc_thread = spawn(|| {
+        for _ in 0..100 {
+            gc.collect();
+            sleep(Duration.from_millis(10));
+        }
+    });
+
+    let timer = Timer.new();
+    timer.start();
+
+    while timer.elapsed_ms() < duration_ms {
+        let x = Heap.new(42);
+        black_box(&*x);
+        ops_with_gc += 1;
+    }
+
+    gc_thread.join();
+
+    let throughput_ratio = ops_with_gc as Float / ops_without_gc as Float;
+
+    // Throughput should not drop below 80% during GC
+    BenchmarkResult {
+        name: "throughput_during_gc",
+        metric: "ratio",
+        value: throughput_ratio,
+        target: 0.8,
+        passed: throughput_ratio > 0.8,
+    }
+}
+
+/// Benchmark GC under memory pressure
+fn benchmark_gc_under_memory_pressure() -> BenchmarkResult {
+    // Fill 80% of available memory
+    let available_mb = memory.available_mb();
+    let target_mb = (available_mb * 80) / 100;
+    let objects_needed = (target_mb * 1024) / 64;  // 64 byte objects
+
+    let mut objects: List<Maybe<Heap<[Int; 8]> >> = List.new();
+    for _ in 0..objects_needed {
+        objects.push(Some(Heap.new([0; 8])));
+    }
+
+    // Free half randomly
+    for i in 0..objects_needed {
+        if i % 2 == 0 {
+            objects[i] = None;
+        }
+    }
+
+    // Measure GC under pressure
+    let timer = Timer.high_precision();
+    timer.start();
+    gc.collect();
+    let pause_ms = timer.elapsed_ms();
+
+    BenchmarkResult {
+        name: "gc_under_pressure",
+        metric: "ms",
+        value: pause_ms as Float,
+        target: 50.0,
+        passed: pause_ms < 50,
+    }
+}
+
+/// Benchmark GC with large objects
+fn benchmark_gc_with_large_objects() -> BenchmarkResult {
+    let large_object_mb = 10;
+    let large_object_count = 50;
+
+    let mut objects: List<Heap<List<u8> >> = List.new();
+    for _ in 0..large_object_count {
+        objects.push(Heap.new([0u8; large_object_mb * 1024 * 1024]));
+    }
+
+    // Drop all
+    let timer = Timer.high_precision();
+    timer.start();
+
+    drop(objects);
+    gc.collect();
+
+    let pause_ms = timer.elapsed_ms();
+
+    // Large object collection should still be fast
+    BenchmarkResult {
+        name: "gc_large_objects",
+        metric: "ms",
+        value: pause_ms as Float,
+        target: 100.0,
+        passed: pause_ms < 100,
+    }
+}
+
+type GcMode is Default | Incremental | Generational;
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

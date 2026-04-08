@@ -1,0 +1,68 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @expected-exit: 0
+
+fn* count_up(n: Int) -> Int {
+    let mut i = 0;
+    while (i < n) {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn* fibonacci() -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    yield a;
+    yield b;
+    let mut i = 0;
+    while (i < 8) {
+        let c = a + b;
+        yield c;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+}
+
+fn main() -> Int {
+    // Test 1: count_up generator with has_next/next loop
+    let gen = count_up(5);
+    let mut sum = 0;
+    while (gen.has_next()) {
+        match gen.next() {
+            Some(v) => { sum = sum + v; }
+            None => {}
+        }
+    }
+    print(f"sum={sum}");
+    if (sum != 10) {
+        return 1;
+    }
+
+    // Test 2: fibonacci generator
+    let fib = fibonacci();
+    let mut last = 0;
+    let mut count = 0;
+    while (fib.has_next()) {
+        match fib.next() {
+            Some(v) => {
+                last = v;
+                count = count + 1;
+            }
+            None => {}
+        }
+    }
+    print(f"fib_count={count} last={last}");
+    // 10 values: 0,1,1,2,3,5,8,13,21,34
+    if (count != 10) {
+        return 2;
+    }
+    if (last != 34) {
+        return 3;
+    }
+
+    print("generators: PASS");
+    0
+}

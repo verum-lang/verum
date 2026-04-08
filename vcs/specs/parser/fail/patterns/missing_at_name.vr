@@ -1,0 +1,58 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, binding, at, name, error
+// @description: Test missing identifier before @ in binding pattern
+// @expected-error: E071
+
+type Option<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+
+fn test_wildcard_before_at() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: wildcard cannot be used before @
+    match opt {
+        _ @ Some(x) => print("wildcard at"),
+        None => print("none"),
+    }
+}
+
+fn test_number_before_at() {
+    let value = 42;
+
+    // Invalid: number cannot have @ binding
+    match value {
+        42 @ bound => print("number at"),
+        _ => print("other"),
+    }
+}
+
+fn test_pattern_before_at() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: complex pattern before @ (should be simple identifier)
+    match opt {
+        Some(y) @ whole => print("pattern at"),
+        None => print("none"),
+    }
+}
+
+fn test_ref_at_missing_name() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: ref without identifier before @
+    match opt {
+        ref @ Some(x) => print("ref at"),
+        None => print("none"),
+    }
+}
+
+fn test_mut_at_missing_name() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: mut without identifier before @
+    match opt {
+        mut @ Some(x) => print("mut at"),
+        None => print("none"),
+    }
+}

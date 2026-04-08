@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @tier: 0
+// @category: meta
+// @description: @ followed by non-identifier (parenthesis) is invalid
+// @expected-error: E013
+
+// @ must be followed by identifier, not parenthesis
+@(Debug)
+fn invalid_bare_at() {
+    let x = 1;
+}

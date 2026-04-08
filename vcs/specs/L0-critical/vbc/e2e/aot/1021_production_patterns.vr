@@ -1,0 +1,26 @@
+// @test: run
+// Production-ready patterns — type tracking across common idioms
+
+type Node is { value: Int, children: List<Int> };
+
+fn make_graph() -> Map<Int, Node> {
+    let mut graph = Map.new();
+    let children1 = List.new();
+    children1.push(2); children1.push(3);
+    graph.insert(1, Node { value: 100, children: children1 });
+    graph
+}
+
+fn main() -> Int {
+    // Test 1: Map<Int, Node> — get struct from map, access value field
+    let graph = make_graph();
+    let node1 = graph.get(1);
+    print(f"node1.value={node1.value}");
+    if (node1.value == 100) {
+        print("PASS");
+        0
+    } else {
+        print("FAIL");
+        1
+    }
+}

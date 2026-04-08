@@ -1,0 +1,66 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: for-in, custom-iterator, has_next, next, e2e
+// @description: Test for-in loop on custom struct types with has_next/next methods
+
+type Counter is {
+    current: Int,
+    max_val: Int,
+};
+
+implement Counter {
+    fn new(max_val: Int) -> Counter {
+        Counter { current: 0, max_val: max_val }
+    }
+
+    fn has_next(&self) -> Bool {
+        self.current < self.max_val
+    }
+
+    fn next(&mut self) -> Int {
+        let val = self.current;
+        self.current = self.current + 1;
+        val
+    }
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: for-in on custom Counter
+    let mut sum = 0;
+    for val in Counter.new(5) {
+        sum = sum + val;
+    }
+    // 0+1+2+3+4 = 10
+    if sum != 10 {
+        print(f"FAIL: counter sum expected 10, got {sum}");
+        failures = failures + 1;
+    } else {
+        print("  forin_counter: OK");
+    }
+
+    // Test 2: for-in collecting values
+    let mut values = List.new();
+    for val in Counter.new(4) {
+        values.push(val * val);
+    }
+    // [0, 1, 4, 9]
+    if values.len() != 4 {
+        print(f"FAIL: values len expected 4, got {values.len()}");
+        failures = failures + 1;
+    }
+    if values[3] != 9 {
+        print(f"FAIL: values[3] expected 9, got {values[3]}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  forin_collect: OK");
+    }
+
+    if failures == 0 {
+        print("All for-in custom iterator tests passed");
+    }
+    failures
+}

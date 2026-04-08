@@ -1,0 +1,219 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, verification, arithmetic
+// @timeout: 5000
+
+/// Simple arithmetic verification: basic proofs about numeric operations.
+/// Demonstrates refinement types enabling compile-time arithmetic reasoning.
+
+// ============================================================================
+// Basic type definitions
+// ============================================================================
+
+type Positive is Int{> 0};
+type NonNegative is Int{>= 0};
+type NonZero is Int{!= 0};
+
+// ============================================================================
+// Addition preserves positivity
+// ============================================================================
+
+@verify(proof)
+fn add_positives(x: Positive, y: Positive) -> Positive {
+    x + y  // Proven: pos + pos = pos
+}
+
+@verify(proof)
+fn add_non_negatives(x: NonNegative, y: NonNegative) -> NonNegative {
+    x + y  // Proven: nn + nn = nn
+}
+
+@verify(proof)
+fn add_positive_to_non_negative(x: Positive, y: NonNegative) -> Positive {
+    x + y  // Proven: pos + nn = pos
+}
+
+// ============================================================================
+// Multiplication preserves sign
+// ============================================================================
+
+@verify(proof)
+fn multiply_positives(x: Positive, y: Positive) -> Positive {
+    x * y  // Proven: pos * pos = pos
+}
+
+@verify(proof)
+fn multiply_non_negatives(x: NonNegative, y: NonNegative) -> NonNegative {
+    x * y  // Proven: nn * nn = nn
+}
+
+@verify(proof)
+fn multiply_non_zeros(x: NonZero, y: NonZero) -> NonZero {
+    x * y  // Proven: nz * nz = nz
+}
+
+// ============================================================================
+// Squaring produces non-negative
+// ============================================================================
+
+@verify(proof)
+fn square(x: Int) -> NonNegative {
+    x * x  // Proven: x^2 >= 0 for all x
+}
+
+@verify(proof)
+fn square_positive(x: Positive) -> Positive {
+    x * x  // Proven: pos^2 = pos
+}
+
+// ============================================================================
+// Absolute value
+// ============================================================================
+
+@verify(proof)
+fn absolute(x: Int) -> NonNegative {
+    if x >= 0 { x } else { -x }
+}
+
+@verify(proof)
+fn absolute_non_zero(x: NonZero) -> Positive {
+    if x > 0 { x } else { -x }
+}
+
+// ============================================================================
+// Maximum and minimum
+// ============================================================================
+
+@verify(proof)
+fn max(x: Int, y: Int) -> Int
+    ensures result >= x && result >= y
+{
+    if x >= y { x } else { y }
+}
+
+@verify(proof)
+fn min(x: Int, y: Int) -> Int
+    ensures result <= x && result <= y
+{
+    if x <= y { x } else { y }
+}
+
+@verify(proof)
+fn max_positive(x: Positive, y: Positive) -> Positive {
+    if x >= y { x } else { y }
+}
+
+@verify(proof)
+fn max_with_zero(x: Int) -> NonNegative {
+    if x >= 0 { x } else { 0 }
+}
+
+// ============================================================================
+// Increment and decrement
+// ============================================================================
+
+@verify(proof)
+fn increment(x: NonNegative) -> Positive {
+    x + 1  // Proven: nn + 1 > 0
+}
+
+@verify(proof)
+fn decrement_positive(x: Positive) -> NonNegative
+    requires x >= 1
+{
+    x - 1  // Proven: pos - 1 >= 0 when pos >= 1
+}
+
+// ============================================================================
+// Division results
+// ============================================================================
+
+@verify(proof)
+fn half_even(x: Int{it % 2 == 0}) -> Int
+    ensures result * 2 == x
+{
+    x / 2
+}
+
+@verify(proof)
+fn divide_positive_by_positive(x: Positive, y: Positive) -> NonNegative {
+    x / y  // Proven: pos / pos >= 0 (integer division)
+}
+
+// ============================================================================
+// Modular arithmetic
+// ============================================================================
+
+@verify(proof)
+fn mod_bound(x: NonNegative, y: Positive) -> NonNegative
+    ensures result < y
+{
+    x % y  // Proven: x % y < y and x % y >= 0
+}
+
+@verify(proof)
+fn mod_preserves_bound(x: Int{>= 0 && < 100}, y: Positive{<= 100}) -> Int{>= 0 && < 100} {
+    x % y
+}
+
+// ============================================================================
+// Combined operations
+// ============================================================================
+
+@verify(proof)
+fn sum_of_squares(x: Int, y: Int) -> NonNegative {
+    x * x + y * y  // Proven: x^2 + y^2 >= 0
+}
+
+@verify(proof)
+fn product_plus_one(x: NonNegative, y: NonNegative) -> Positive {
+    x * y + 1  // Proven: nn * nn + 1 > 0
+}
+
+@verify(proof)
+fn average_in_range(x: NonNegative, y: NonNegative) -> NonNegative {
+    (x + y) / 2  // Proven: (nn + nn) / 2 >= 0
+}
+
+// ============================================================================
+// Bounds propagation
+// ============================================================================
+
+type Percentage is Int{>= 0 && <= 100};
+type Byte is Int{>= 0 && < 256};
+
+@verify(proof)
+fn percentage_to_byte_approx(p: Percentage) -> Byte {
+    p * 255 / 100  // Proven: stays in byte range
+}
+
+@verify(proof)
+fn clamp_to_byte(x: Int) -> Byte {
+    if x < 0 { 0 }
+    else if x > 255 { 255 }
+    else { x }
+}
+
+fn main() {
+    // Test all functions
+    let a = add_positives(3, 5);
+    let b = multiply_positives(4, 6);
+    let c = square(-7);
+    let d = absolute(-10);
+    let e = max(5, 3);
+    let f = increment(0);
+    let g = mod_bound(17, 5);
+    let h = sum_of_squares(3, 4);
+    let i = clamp_to_byte(300);
+
+    assert(a == 8);
+    assert(b == 24);
+    assert(c == 49);
+    assert(d == 10);
+    assert(e == 5);
+    assert(f == 1);
+    assert(g == 2);
+    assert(h == 25);
+    assert(i == 255);
+}

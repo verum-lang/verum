@@ -1,0 +1,160 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, build_assets, load_text, include_str, include_bytes
+// @description: Test build assets file loading functions with BuildAssets context
+// @contexts: BuildAssets
+
+// =============================================================================
+// LOAD_TEXT TESTS
+// =============================================================================
+
+// Test load_text with simple file
+meta fn test_load_text_basic(path: Text) -> Text using [BuildAssets] {
+    load_text(path)
+}
+
+// Test load_text and process content
+meta fn test_load_and_process(path: Text) -> Int using [BuildAssets] {
+    let content = load_text(path);
+    text_len(content)
+}
+
+// Test load_text for config files
+meta fn load_config(config_name: Text) -> Text using [BuildAssets] {
+    let path = text_concat("config/", config_name, ".toml");
+    load_text(path)
+}
+
+// Test load_text with relative paths
+meta fn test_load_relative(dir: Text, file: Text) -> Text using [BuildAssets] {
+    let path = text_concat(dir, "/", file);
+    load_text(path)
+}
+
+// =============================================================================
+// INCLUDE_STR TESTS
+// =============================================================================
+
+// Test include_str (alias for load_text)
+meta fn test_include_str_basic(path: Text) -> Text using [BuildAssets] {
+    include_str(path)
+}
+
+// Test include_str for embedding text resources
+meta fn embed_sql_query(name: Text) -> Text using [BuildAssets] {
+    let path = text_concat("sql/", name, ".sql");
+    include_str(path)
+}
+
+// Test include_str for template files
+meta fn load_template(template_name: Text) -> Text using [BuildAssets] {
+    let path = text_concat("templates/", template_name, ".html");
+    include_str(path)
+}
+
+// =============================================================================
+// INCLUDE_BYTES TESTS
+// =============================================================================
+
+// Test include_bytes basic
+meta fn test_include_bytes_basic(path: Text) -> Bytes using [BuildAssets] {
+    include_bytes(path)
+}
+
+// Test include_bytes for binary resources
+meta fn load_binary_asset(asset_name: Text) -> Bytes using [BuildAssets] {
+    let path = text_concat("assets/", asset_name);
+    include_bytes(path)
+}
+
+// Test include_bytes for images
+meta fn embed_icon(icon_name: Text) -> Bytes using [BuildAssets] {
+    let path = text_concat("icons/", icon_name, ".png");
+    include_bytes(path)
+}
+
+// =============================================================================
+// COMBINED LOADING PATTERNS
+// =============================================================================
+
+// Test loading multiple files (requires config_dir parameter to avoid auto-execution)
+meta fn load_multiple_configs(config_dir: Text) -> (Text, Text) using [BuildAssets] {
+    let config1 = load_text(text_concat(config_dir, "/app.toml"));
+    let config2 = load_text(text_concat(config_dir, "/db.toml"));
+    (config1, config2)
+}
+
+// Test load and transform
+meta fn load_and_uppercase(path: Text) -> Text using [BuildAssets] {
+    let content = load_text(path);
+    text_to_upper(content)
+}
+
+// Test load and split into lines
+meta fn load_lines(path: Text) -> [Text] using [BuildAssets] {
+    let content = load_text(path);
+    text_split(content, "\n")
+}
+
+// Test conditional loading
+meta fn load_if_exists(path: Text, default: Text) -> Text using [BuildAssets] {
+    if asset_exists(path) {
+        load_text(path)
+    } else {
+        default
+    }
+}
+
+// =============================================================================
+// PRACTICAL USE CASES
+// =============================================================================
+
+// Load shader source code
+meta fn load_shader(shader_name: Text, shader_type: Text) -> Text using [BuildAssets] {
+    let ext = if text_eq(shader_type, "vertex") { ".vert" }
+              else if text_eq(shader_type, "fragment") { ".frag" }
+              else { ".glsl" };
+    let path = text_concat("shaders/", shader_name, ext);
+    load_text(path)
+}
+
+// Load localization strings
+meta fn load_i18n(locale: Text) -> Text using [BuildAssets] {
+    let path = text_concat("i18n/", locale, ".json");
+    load_text(path)
+}
+
+// Load schema definition
+meta fn load_schema(schema_name: Text) -> Text using [BuildAssets] {
+    let path = text_concat("schemas/", schema_name, ".json");
+    include_str(path)
+}
+
+// Embed version info (requires path parameter to avoid auto-execution)
+meta fn embed_version(version_file: Text) -> Text using [BuildAssets] {
+    load_text(version_file)
+}
+
+// =============================================================================
+// TEXT HELPER FOR EQUALITY
+// =============================================================================
+
+meta fn text_eq(a: Text, b: Text) -> Bool {
+    text_len(a) == text_len(b) && text_starts_with(a, b)
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Test text operations that don't need real files
+    @const assert(text_len("test") == 4);
+    @const assert(text_starts_with("hello", "hel"));
+    @const assert(text_contains("hello world", "llo"));
+    @const assert(text_len(text_concat("a", "b", "c")) == 3);
+
+    // Functions with required file dependencies are tested
+    // at integration level with real files
+}

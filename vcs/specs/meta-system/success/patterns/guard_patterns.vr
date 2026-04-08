@@ -1,0 +1,131 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, guard, if, conditional
+// @description: Test pattern guards (if conditions on match arms) in meta functions
+
+// =============================================================================
+// BASIC GUARDS
+// =============================================================================
+
+meta fn test_guard_simple() -> Text {
+    match 10 {
+        n if n > 0 => "positive",
+        n if n < 0 => "negative",
+        _ => "zero",
+    }
+}
+
+meta fn test_guard_equality() -> Text {
+    match 42 {
+        n if n == 42 => "the answer",
+        _ => "not the answer",
+    }
+}
+
+meta fn test_guard_arithmetic() -> Text {
+    match 15 {
+        n if n % 2 == 0 => "even",
+        n if n % 2 == 1 => "odd",
+        _ => "impossible",
+    }
+}
+
+// =============================================================================
+// GUARDS WITH BOUND VARIABLES
+// =============================================================================
+
+meta fn test_guard_bound_var() -> Int {
+    match (10, 20) {
+        (a, b) if a < b => b - a,
+        (a, b) if a > b => a - b,
+        (a, _) => a,
+    }
+}
+
+meta fn test_guard_multiple_vars() -> Bool {
+    match (5, 10, 15) {
+        (a, b, c) if a + b == c => true,
+        (a, b, c) if a * b == c => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// GUARDS WITH COMPLEX CONDITIONS
+// =============================================================================
+
+meta fn test_guard_and() -> Bool {
+    match 50 {
+        n if n > 0 && n < 100 => true,
+        _ => false,
+    }
+}
+
+meta fn test_guard_or() -> Bool {
+    match 150 {
+        n if n < 0 || n > 100 => true,
+        _ => false,
+    }
+}
+
+meta fn test_guard_not() -> Text {
+    match 0 {
+        n if !(n > 0) => "not positive",
+        _ => "positive",
+    }
+}
+
+// =============================================================================
+// GUARDS WITH FUNCTION CALLS
+// =============================================================================
+
+meta fn is_even(n: Int) -> Bool {
+    n % 2 == 0
+}
+
+meta fn test_guard_with_fn() -> Text {
+    match 4 {
+        n if is_even(n) => "even",
+        _ => "odd",
+    }
+}
+
+// =============================================================================
+// GUARDS WITH VARIANTS
+// =============================================================================
+
+meta fn test_guard_maybe() -> Int {
+    match Some(42) {
+        Some(n) if n > 0 => n,
+        Some(n) if n < 0 => 0 - n,
+        Some(0) => 0,
+        None => -1,
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Basic guards
+    @const assert_eq(test_guard_simple(), "positive");
+    @const assert_eq(test_guard_equality(), "the answer");
+    @const assert_eq(test_guard_arithmetic(), "odd");
+
+    // Bound variables
+    @const assert_eq(test_guard_bound_var(), 10);
+    @const assert(test_guard_multiple_vars());
+
+    // Complex conditions
+    @const assert(test_guard_and());
+    @const assert(test_guard_or());
+    @const assert_eq(test_guard_not(), "not positive");
+
+    // Function calls in guards
+    @const assert_eq(test_guard_with_fn(), "even");
+
+    // Variants with guards
+    @const assert_eq(test_guard_maybe(), 42);
+}

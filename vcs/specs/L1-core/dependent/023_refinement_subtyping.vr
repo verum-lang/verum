@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, subtyping
+
+/// Refinement subtyping -- narrower refinements are subtypes of
+/// wider refinements. The type checker should accept assignments
+/// and function calls where a more refined type is used in place
+/// of a less refined one.
+
+type Positive is Int{> 0};
+type Natural is Int{>= 0};
+type NonZero is Int{!= 0};
+type SmallPositive is Int{> 0, <= 100};
+type Byte is Int{>= 0, < 256};
+
+// Positive <: Natural (> 0 implies >= 0)
+fn pos_as_nat(p: Positive) -> Natural {
+    p
+}
+
+// SmallPositive <: Positive (> 0 && <= 100 implies > 0)
+fn small_as_pos(s: SmallPositive) -> Positive {
+    s
+}
+
+// SmallPositive <: Natural (transitive)
+fn small_as_nat(s: SmallPositive) -> Natural {
+    s
+}
+
+// Positive <: NonZero (> 0 implies != 0)
+fn pos_as_nonzero(p: Positive) -> NonZero {
+    p
+}
+
+// Byte <: Natural (>= 0 && < 256 implies >= 0)
+fn byte_as_nat(b: Byte) -> Natural {
+    b
+}
+
+// All refined Int types are subtypes of Int
+fn any_as_int(p: Positive) -> Int {
+    p
+}
+
+// Subtyping in function parameter position (contravariant)
+fn needs_natural(x: Natural) -> Bool {
+    x >= 0
+}
+
+fn pass_positive() -> Bool {
+    let p: Positive = 42;
+    needs_natural(p)  // Positive <: Natural, so this is valid
+}
+
+// Subtyping with collections
+fn sum_naturals(xs: List<Natural>) -> Natural {
+    let mut total: Natural = 0;
+    for x in xs {
+        total = total + x;
+    }
+    total
+}
+
+fn sum_positives_as_naturals(xs: List<Positive>) -> Natural {
+    // List<Positive> should be usable where List<Natural> expected
+    // because Positive <: Natural
+    sum_naturals(xs)
+}
+
+// Subtyping through intermediate variables
+fn chain_subtype() -> Int {
+    let small: SmallPositive = 50;
+    let pos: Positive = small;        // SmallPositive <: Positive
+    let nat: Natural = pos;            // Positive <: Natural
+    let nonzero: NonZero = small;      // SmallPositive <: NonZero
+    let plain: Int = nat;              // Natural <: Int
+    plain
+}
+
+fn main() {
+    assert(pos_as_nat(5) == 5);
+    assert(small_as_pos(50) == 50);
+    assert(small_as_nat(50) == 50);
+    assert(pos_as_nonzero(1) == 1);
+    assert(byte_as_nat(200) == 200);
+    assert(any_as_int(42) == 42);
+    assert(pass_positive() == true);
+    assert(chain_subtype() == 50);
+}

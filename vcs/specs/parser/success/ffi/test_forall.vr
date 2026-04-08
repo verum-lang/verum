@@ -1,0 +1,14 @@
+// @test: parse-pass
+// @tier: 0
+// @category: ffi
+// @level: L0
+
+type c_int is i32;
+type size_t is usize;
+
+ffi RequiresForall {
+    @extern("C")
+    fn all_positive(arr: *const c_int, len: size_t) -> bool;
+
+    requires forall i: size_t . (i >= len || arr[i] >= 0);
+}

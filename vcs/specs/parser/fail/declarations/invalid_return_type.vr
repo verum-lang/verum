@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, return-type, error
+// @description: Test invalid return type syntax detection
+// @expected-error: E037
+
+fn missing_type_after_arrow() -> {}
+
+fn double_arrow() -> -> Int {}
+
+fn invalid_type() -> 123 {}
+
+fn incomplete_generic() -> List< {}

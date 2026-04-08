@@ -1,0 +1,111 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, thread-pool, stress, concurrency
+// @timeout: 30000
+// @expected-exit: 0
+// @description: Thread pool stress test — high contention, many tasks, pool saturation
+
+fn compute_fib(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    b
+}
+
+fn test_many_tasks() -> Int {
+    // Spawn 20 tasks computing fibonacci, collect results via channels
+    let results = Channel.new(20);
+
+    let t1 = spawn { results.send(compute_fib(10)); 0 };
+    let t2 = spawn { results.send(compute_fib(11)); 0 };
+    let t3 = spawn { results.send(compute_fib(12)); 0 };
+    let t4 = spawn { results.send(compute_fib(13)); 0 };
+    let t5 = spawn { results.send(compute_fib(14)); 0 };
+    let t6 = spawn { results.send(compute_fib(15)); 0 };
+    let t7 = spawn { results.send(compute_fib(16)); 0 };
+    let t8 = spawn { results.send(compute_fib(17)); 0 };
+    let t9 = spawn { results.send(compute_fib(18)); 0 };
+    let t10 = spawn { results.send(compute_fib(19)); 0 };
+
+    t1.await; t2.await; t3.await; t4.await; t5.await;
+    t6.await; t7.await; t8.await; t9.await; t10.await;
+
+    let mut sum = 0;
+    let mut count = 0;
+    while count < 10 {
+        match results.recv() {
+            Some(v) => { sum = sum + v; }
+            None => {}
+        }
+        count = count + 1;
+    }
+
+    // fib(10)=55, fib(11)=89, fib(12)=144, fib(13)=233, fib(14)=377,
+    // fib(15)=610, fib(16)=987, fib(17)=1597, fib(18)=2584, fib(19)=4181
+    // total = 10857
+    if sum != 10857 { return 1; }
+    0
+}
+
+fn test_pool_contention() -> Int {
+    // High contention: 8 tasks all incrementing shared counter via channel
+    let counter = Channel.new(1);
+    counter.send(0);
+
+    fn __mutex_new_raw() -> Int { 0 }
+    fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
+    fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
+
+    let mtx = __mutex_new_raw();
+
+    let w1 = spawn { let mut i = 0; while i < 25 { __mutex_lock_raw(mtx); match counter.recv() { Some(v) => { counter.send(v + 1); } None => {} } __mutex_unlock_raw(mtx); i = i + 1; } 0 };
+    let w2 = spawn { let mut i = 0; while i < 25 { __mutex_lock_raw(mtx); match counter.recv() { Some(v) => { counter.send(v + 1); } None => {} } __mutex_unlock_raw(mtx); i = i + 1; } 0 };
+    let w3 = spawn { let mut i = 0; while i < 25 { __mutex_lock_raw(mtx); match counter.recv() { Some(v) => { counter.send(v + 1); } None => {} } __mutex_unlock_raw(mtx); i = i + 1; } 0 };
+    let w4 = spawn { let mut i = 0; while i < 25 { __mutex_lock_raw(mtx); match counter.recv() { Some(v) => { counter.send(v + 1); } None => {} } __mutex_unlock_raw(mtx); i = i + 1; } 0 };
+
+    w1.await; w2.await; w3.await; w4.await;
+
+    let mut final_val = 0;
+    match counter.recv() { Some(v) => { final_val = v; } None => {} }
+    // 4 threads * 25 = 100
+    if final_val != 100 { return 1; }
+    0
+}
+
+fn test_rapid_spawn_await() -> Int {
+    // Rapid sequential spawn+await — tests pool task recycling
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 20 {
+        let h = spawn { i * i };
+        let result = h.await;
+        sum = sum + result;
+        i = i + 1;
+    }
+    // 0+1+4+9+16+25+36+49+64+81+100+121+144+169+196+225+256+289+324+361 = 2470
+    if sum != 2470 { return 1; }
+    0
+}
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    if test_many_tasks() == 0 { pass = pass + 1; } else { print("FAIL1: many tasks"); }
+    if test_pool_contention() == 0 { pass = pass + 1; } else { print("FAIL2: contention"); }
+    if test_rapid_spawn_await() == 0 { pass = pass + 1; } else { print("FAIL3: rapid spawn"); }
+
+    print(f"pass = {pass}/3");
+    if pass == 3 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

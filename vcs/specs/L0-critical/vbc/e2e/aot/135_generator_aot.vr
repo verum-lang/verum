@@ -1,0 +1,524 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, generator
+// @timeout: 30000
+// @expected-exit: 0
+// @description: AOT generator state machine simulation. Range generator, Fibonacci generator, filter (skip evens), take (limit count), chain two generators.
+
+// ============================================================================
+// Generator state machine representation
+//
+// Generators are simulated as structs with explicit state fields.
+// Each "next" call returns a GenOutput with the value and whether
+// there are more values. The generator struct is returned updated.
+// ============================================================================
+
+// ============================================================================
+// Range generator: yields integers from start to end-1
+// ============================================================================
+
+type RangeGen is {
+    current: Int,
+    end_val: Int
+};
+
+type GenOutput is {
+    value: Int,
+    has_value: Int
+};
+
+fn range_gen_new(start: Int, end_val: Int) -> RangeGen {
+    RangeGen { current: start, end_val: end_val }
+}
+
+fn range_gen_has_next(g: RangeGen) -> Int {
+    if g.current < g.end_val { 1 } else { 0 }
+}
+
+fn range_gen_next(g: RangeGen) -> GenOutput {
+    if g.current < g.end_val {
+        GenOutput { value: g.current, has_value: 1 }
+    } else {
+        GenOutput { value: 0, has_value: 0 }
+    }
+}
+
+fn range_gen_advance(g: RangeGen) -> RangeGen {
+    RangeGen { current: g.current + 1, end_val: g.end_val }
+}
+
+// ============================================================================
+// Fibonacci generator: yields fib(0), fib(1), fib(2), ...
+// ============================================================================
+
+type FibGen is {
+    a: Int,
+    b: Int,
+    count: Int,
+    limit: Int
+};
+
+fn fib_gen_new(limit: Int) -> FibGen {
+    FibGen { a: 0, b: 1, count: 0, limit: limit }
+}
+
+fn fib_gen_has_next(g: FibGen) -> Int {
+    if g.count < g.limit { 1 } else { 0 }
+}
+
+fn fib_gen_next(g: FibGen) -> GenOutput {
+    if g.count < g.limit {
+        GenOutput { value: g.a, has_value: 1 }
+    } else {
+        GenOutput { value: 0, has_value: 0 }
+    }
+}
+
+fn fib_gen_advance(g: FibGen) -> FibGen {
+    let next_a = g.b;
+    let next_b = g.a + g.b;
+    FibGen { a: next_a, b: next_b, count: g.count + 1, limit: g.limit }
+}
+
+// ============================================================================
+// Result buffer: collect up to 16 generated values
+// ============================================================================
+
+type Buf16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int,
+    len: Int
+};
+
+fn buf16_new() -> Buf16 {
+    Buf16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0,
+        len: 0
+    }
+}
+
+fn buf16_get(b: Buf16, i: Int) -> Int {
+    if i == 0 { b.e0 } else if i == 1 { b.e1 } else if i == 2 { b.e2 }
+    else if i == 3 { b.e3 } else if i == 4 { b.e4 } else if i == 5 { b.e5 }
+    else if i == 6 { b.e6 } else if i == 7 { b.e7 } else if i == 8 { b.e8 }
+    else if i == 9 { b.e9 } else if i == 10 { b.e10 } else if i == 11 { b.e11 }
+    else if i == 12 { b.e12 } else if i == 13 { b.e13 } else if i == 14 { b.e14 }
+    else { b.e15 }
+}
+
+fn buf16_push(b: Buf16, v: Int) -> Buf16 {
+    let idx = b.len;
+    Buf16 {
+        e0: if idx == 0 { v } else { b.e0 },
+        e1: if idx == 1 { v } else { b.e1 },
+        e2: if idx == 2 { v } else { b.e2 },
+        e3: if idx == 3 { v } else { b.e3 },
+        e4: if idx == 4 { v } else { b.e4 },
+        e5: if idx == 5 { v } else { b.e5 },
+        e6: if idx == 6 { v } else { b.e6 },
+        e7: if idx == 7 { v } else { b.e7 },
+        e8: if idx == 8 { v } else { b.e8 },
+        e9: if idx == 9 { v } else { b.e9 },
+        e10: if idx == 10 { v } else { b.e10 },
+        e11: if idx == 11 { v } else { b.e11 },
+        e12: if idx == 12 { v } else { b.e12 },
+        e13: if idx == 13 { v } else { b.e13 },
+        e14: if idx == 14 { v } else { b.e14 },
+        e15: if idx == 15 { v } else { b.e15 },
+        len: b.len + 1
+    }
+}
+
+// ============================================================================
+// Collect range generator into buffer
+// ============================================================================
+
+fn collect_range(start: Int, end_val: Int) -> Buf16 {
+    let mut gen = range_gen_new(start, end_val);
+    let mut buf = buf16_new();
+    while range_gen_has_next(gen) == 1 {
+        let out = range_gen_next(gen);
+        buf = buf16_push(buf, out.value);
+        gen = range_gen_advance(gen);
+    }
+    buf
+}
+
+// ============================================================================
+// Collect fibonacci generator into buffer
+// ============================================================================
+
+fn collect_fib(limit: Int) -> Buf16 {
+    let mut gen = fib_gen_new(limit);
+    let mut buf = buf16_new();
+    while fib_gen_has_next(gen) == 1 {
+        let out = fib_gen_next(gen);
+        buf = buf16_push(buf, out.value);
+        gen = fib_gen_advance(gen);
+    }
+    buf
+}
+
+// ============================================================================
+// Filter generator: skip even values from range
+// ============================================================================
+
+fn collect_range_odds(start: Int, end_val: Int) -> Buf16 {
+    let mut gen = range_gen_new(start, end_val);
+    let mut buf = buf16_new();
+    while range_gen_has_next(gen) == 1 {
+        let out = range_gen_next(gen);
+        if out.value % 2 != 0 {
+            buf = buf16_push(buf, out.value);
+        }
+        gen = range_gen_advance(gen);
+    }
+    buf
+}
+
+// ============================================================================
+// Take generator: take at most N values from range
+// ============================================================================
+
+fn collect_range_take(start: Int, end_val: Int, take_count: Int) -> Buf16 {
+    let mut gen = range_gen_new(start, end_val);
+    let mut buf = buf16_new();
+    let mut taken = 0;
+    while range_gen_has_next(gen) == 1 {
+        if taken >= take_count {
+            gen = RangeGen { current: gen.end_val, end_val: gen.end_val };
+        } else {
+            let out = range_gen_next(gen);
+            buf = buf16_push(buf, out.value);
+            gen = range_gen_advance(gen);
+            taken = taken + 1;
+        }
+    }
+    buf
+}
+
+// ============================================================================
+// Chain: range1 then range2
+// ============================================================================
+
+fn collect_chain_ranges(s1: Int, e1: Int, s2: Int, e2: Int) -> Buf16 {
+    let mut buf = buf16_new();
+
+    // First range
+    let mut g1 = range_gen_new(s1, e1);
+    while range_gen_has_next(g1) == 1 {
+        let out = range_gen_next(g1);
+        buf = buf16_push(buf, out.value);
+        g1 = range_gen_advance(g1);
+    }
+
+    // Second range
+    let mut g2 = range_gen_new(s2, e2);
+    while range_gen_has_next(g2) == 1 {
+        let out = range_gen_next(g2);
+        buf = buf16_push(buf, out.value);
+        g2 = range_gen_advance(g2);
+    }
+
+    buf
+}
+
+// ============================================================================
+// Tests: Range generator
+// ============================================================================
+
+fn test_range_basic() {
+    let buf = collect_range(0, 5);
+    assert_eq(buf.len, 5);
+    assert_eq(buf16_get(buf, 0), 0);
+    assert_eq(buf16_get(buf, 1), 1);
+    assert_eq(buf16_get(buf, 2), 2);
+    assert_eq(buf16_get(buf, 3), 3);
+    assert_eq(buf16_get(buf, 4), 4);
+}
+
+fn test_range_offset() {
+    let buf = collect_range(10, 15);
+    assert_eq(buf.len, 5);
+    assert_eq(buf16_get(buf, 0), 10);
+    assert_eq(buf16_get(buf, 1), 11);
+    assert_eq(buf16_get(buf, 2), 12);
+    assert_eq(buf16_get(buf, 3), 13);
+    assert_eq(buf16_get(buf, 4), 14);
+}
+
+fn test_range_empty() {
+    let buf = collect_range(5, 5);
+    assert_eq(buf.len, 0);
+
+    let buf2 = collect_range(10, 3);
+    assert_eq(buf2.len, 0);
+}
+
+fn test_range_single() {
+    let buf = collect_range(42, 43);
+    assert_eq(buf.len, 1);
+    assert_eq(buf16_get(buf, 0), 42);
+}
+
+fn test_range_negative() {
+    let buf = collect_range(-3, 3);
+    assert_eq(buf.len, 6);
+    assert_eq(buf16_get(buf, 0), -3);
+    assert_eq(buf16_get(buf, 1), -2);
+    assert_eq(buf16_get(buf, 2), -1);
+    assert_eq(buf16_get(buf, 3), 0);
+    assert_eq(buf16_get(buf, 4), 1);
+    assert_eq(buf16_get(buf, 5), 2);
+}
+
+// ============================================================================
+// Tests: Fibonacci generator
+// ============================================================================
+
+fn test_fib_basic() {
+    let buf = collect_fib(8);
+    assert_eq(buf.len, 8);
+    assert_eq(buf16_get(buf, 0), 0);
+    assert_eq(buf16_get(buf, 1), 1);
+    assert_eq(buf16_get(buf, 2), 1);
+    assert_eq(buf16_get(buf, 3), 2);
+    assert_eq(buf16_get(buf, 4), 3);
+    assert_eq(buf16_get(buf, 5), 5);
+    assert_eq(buf16_get(buf, 6), 8);
+    assert_eq(buf16_get(buf, 7), 13);
+}
+
+fn test_fib_twelve() {
+    let buf = collect_fib(12);
+    assert_eq(buf.len, 12);
+    assert_eq(buf16_get(buf, 8), 21);
+    assert_eq(buf16_get(buf, 9), 34);
+    assert_eq(buf16_get(buf, 10), 55);
+    assert_eq(buf16_get(buf, 11), 89);
+}
+
+fn test_fib_zero() {
+    let buf = collect_fib(0);
+    assert_eq(buf.len, 0);
+}
+
+fn test_fib_one() {
+    let buf = collect_fib(1);
+    assert_eq(buf.len, 1);
+    assert_eq(buf16_get(buf, 0), 0);
+}
+
+fn test_fib_sum_property() {
+    // fib(n) = fib(n-1) + fib(n-2) for n >= 2
+    let buf = collect_fib(10);
+    let mut i = 2;
+    while i < 10 {
+        assert_eq(buf16_get(buf, i), buf16_get(buf, i - 1) + buf16_get(buf, i - 2));
+        i = i + 1;
+    }
+}
+
+// ============================================================================
+// Tests: Filter generator (skip evens)
+// ============================================================================
+
+fn test_filter_odds() {
+    let buf = collect_range_odds(0, 10);
+    // Odd values in [0,10): 1, 3, 5, 7, 9
+    assert_eq(buf.len, 5);
+    assert_eq(buf16_get(buf, 0), 1);
+    assert_eq(buf16_get(buf, 1), 3);
+    assert_eq(buf16_get(buf, 2), 5);
+    assert_eq(buf16_get(buf, 3), 7);
+    assert_eq(buf16_get(buf, 4), 9);
+}
+
+fn test_filter_odds_offset() {
+    let buf = collect_range_odds(1, 8);
+    // Odd in [1,8): 1, 3, 5, 7
+    assert_eq(buf.len, 4);
+    assert_eq(buf16_get(buf, 0), 1);
+    assert_eq(buf16_get(buf, 1), 3);
+    assert_eq(buf16_get(buf, 2), 5);
+    assert_eq(buf16_get(buf, 3), 7);
+}
+
+fn test_filter_all_even() {
+    // Range with only even values
+    let buf = collect_range_odds(0, 2);
+    // In [0,2): only 1 is odd
+    assert_eq(buf.len, 1);
+    assert_eq(buf16_get(buf, 0), 1);
+}
+
+fn test_filter_negative_odds() {
+    let buf = collect_range_odds(-5, 1);
+    // Odd in [-5, 1): -5, -3, -1
+    assert_eq(buf.len, 3);
+    assert_eq(buf16_get(buf, 0), -5);
+    assert_eq(buf16_get(buf, 1), -3);
+    assert_eq(buf16_get(buf, 2), -1);
+}
+
+// ============================================================================
+// Tests: Take generator
+// ============================================================================
+
+fn test_take_fewer() {
+    let buf = collect_range_take(0, 100, 5);
+    assert_eq(buf.len, 5);
+    assert_eq(buf16_get(buf, 0), 0);
+    assert_eq(buf16_get(buf, 1), 1);
+    assert_eq(buf16_get(buf, 2), 2);
+    assert_eq(buf16_get(buf, 3), 3);
+    assert_eq(buf16_get(buf, 4), 4);
+}
+
+fn test_take_exact() {
+    let buf = collect_range_take(0, 5, 5);
+    assert_eq(buf.len, 5);
+    assert_eq(buf16_get(buf, 4), 4);
+}
+
+fn test_take_more_than_available() {
+    let buf = collect_range_take(0, 3, 10);
+    assert_eq(buf.len, 3);
+    assert_eq(buf16_get(buf, 0), 0);
+    assert_eq(buf16_get(buf, 1), 1);
+    assert_eq(buf16_get(buf, 2), 2);
+}
+
+fn test_take_zero() {
+    let buf = collect_range_take(0, 10, 0);
+    assert_eq(buf.len, 0);
+}
+
+fn test_take_one() {
+    let buf = collect_range_take(42, 100, 1);
+    assert_eq(buf.len, 1);
+    assert_eq(buf16_get(buf, 0), 42);
+}
+
+// ============================================================================
+// Tests: Chain generator
+// ============================================================================
+
+fn test_chain_basic() {
+    let buf = collect_chain_ranges(0, 3, 10, 13);
+    assert_eq(buf.len, 6);
+    assert_eq(buf16_get(buf, 0), 0);
+    assert_eq(buf16_get(buf, 1), 1);
+    assert_eq(buf16_get(buf, 2), 2);
+    assert_eq(buf16_get(buf, 3), 10);
+    assert_eq(buf16_get(buf, 4), 11);
+    assert_eq(buf16_get(buf, 5), 12);
+}
+
+fn test_chain_first_empty() {
+    let buf = collect_chain_ranges(5, 5, 0, 3);
+    assert_eq(buf.len, 3);
+    assert_eq(buf16_get(buf, 0), 0);
+    assert_eq(buf16_get(buf, 1), 1);
+    assert_eq(buf16_get(buf, 2), 2);
+}
+
+fn test_chain_second_empty() {
+    let buf = collect_chain_ranges(0, 3, 10, 10);
+    assert_eq(buf.len, 3);
+    assert_eq(buf16_get(buf, 0), 0);
+    assert_eq(buf16_get(buf, 1), 1);
+    assert_eq(buf16_get(buf, 2), 2);
+}
+
+fn test_chain_both_empty() {
+    let buf = collect_chain_ranges(0, 0, 0, 0);
+    assert_eq(buf.len, 0);
+}
+
+fn test_chain_adjacent() {
+    // Chain [0,4) and [4,8) should give [0,1,2,3,4,5,6,7]
+    let buf = collect_chain_ranges(0, 4, 4, 8);
+    assert_eq(buf.len, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(buf16_get(buf, i), i);
+        i = i + 1;
+    }
+}
+
+fn test_chain_large() {
+    // Chain [0,8) and [100,108) for total 16 elements
+    let buf = collect_chain_ranges(0, 8, 100, 108);
+    assert_eq(buf.len, 16);
+    assert_eq(buf16_get(buf, 0), 0);
+    assert_eq(buf16_get(buf, 7), 7);
+    assert_eq(buf16_get(buf, 8), 100);
+    assert_eq(buf16_get(buf, 15), 107);
+}
+
+// ============================================================================
+// Tests: generator sum (verify correctness via summation)
+// ============================================================================
+
+fn test_range_sum() {
+    // Sum of range [0,10) = 0+1+...+9 = 45
+    let buf = collect_range(0, 10);
+    let mut s = 0;
+    let mut i = 0;
+    while i < buf.len {
+        s = s + buf16_get(buf, i);
+        i = i + 1;
+    }
+    assert_eq(s, 45);
+}
+
+fn test_fib_sum() {
+    // Sum of first 10 fib numbers: 0+1+1+2+3+5+8+13+21+34 = 88
+    let buf = collect_fib(10);
+    let mut s = 0;
+    let mut i = 0;
+    while i < buf.len {
+        s = s + buf16_get(buf, i);
+        i = i + 1;
+    }
+    assert_eq(s, 88);
+}
+
+fn main() -> Int {
+    test_range_basic();
+    test_range_offset();
+    test_range_empty();
+    test_range_single();
+    test_range_negative();
+    test_fib_basic();
+    test_fib_twelve();
+    test_fib_zero();
+    test_fib_one();
+    test_fib_sum_property();
+    test_filter_odds();
+    test_filter_odds_offset();
+    test_filter_all_even();
+    test_filter_negative_odds();
+    test_take_fewer();
+    test_take_exact();
+    test_take_more_than_available();
+    test_take_zero();
+    test_take_one();
+    test_chain_basic();
+    test_chain_first_empty();
+    test_chain_second_empty();
+    test_chain_both_empty();
+    test_chain_adjacent();
+    test_chain_large();
+    test_range_sum();
+    test_fib_sum();
+    print("[OK] 135_generator_aot");
+    0
+}

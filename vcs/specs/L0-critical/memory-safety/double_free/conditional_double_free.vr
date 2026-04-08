@@ -1,0 +1,21 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, double-free, cbgr, conditional
+// @description: Tests that CBGR detects double-free through conditional paths
+
+fn maybe_drop<T>(data: Heap<T>, should_drop: Bool) {
+    if should_drop {
+        drop(data);
+    }
+}
+
+fn main() {
+    let data = Heap.new([1, 2, 3]);
+
+    // First conditional drop - happens
+    maybe_drop(data, true);
+
+    // Second conditional drop - double free
+    maybe_drop(data, true);  // CBGR detects double free
+}

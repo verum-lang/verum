@@ -1,0 +1,138 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: match, patterns, sum-types, destructuring
+// @description: Test pattern matching with various destructuring patterns
+
+type Color is Red | Green | Blue | Custom(Int, Int, Int);
+
+fn color_code(c: Color) -> Int {
+    match c {
+        Red => 1,
+        Green => 2,
+        Blue => 3,
+        Custom(r, g, b) => r * 10000 + g * 100 + b,
+    }
+}
+
+fn test_basic_match() -> Int {
+    if color_code(Red) != 1 {
+        print("FAIL basic_match: Red");
+        return 1;
+    }
+    if color_code(Custom(25, 50, 75)) != 255075 {
+        print("FAIL basic_match: Custom");
+        return 1;
+    }
+    print("  basic_match: OK");
+    0
+}
+
+type Expr is Num(Int) | Add(Int, Int) | Mul(Int, Int) | Neg(Int);
+
+fn eval(e: Expr) -> Int {
+    match e {
+        Num(n) => n,
+        Add(a, b) => a + b,
+        Mul(a, b) => a * b,
+        Neg(n) => 0 - n,
+    }
+}
+
+fn test_expr_eval() -> Int {
+    if eval(Num(42)) != 42 {
+        print("FAIL expr: Num");
+        return 1;
+    }
+    if eval(Add(10, 20)) != 30 {
+        print("FAIL expr: Add");
+        return 1;
+    }
+    if eval(Mul(6, 7)) != 42 {
+        print("FAIL expr: Mul");
+        return 1;
+    }
+    if eval(Neg(5)) != -5 {
+        print("FAIL expr: Neg");
+        return 1;
+    }
+    print("  expr_eval: OK");
+    0
+}
+
+type Maybe2 is Nothing2 | Just2(Int);
+
+fn safe_div(a: Int, b: Int) -> Maybe2 {
+    if b == 0 { Nothing2 } else { Just2(a / b) }
+}
+
+fn test_maybe_match() -> Int {
+    let r1 = safe_div(10, 2);
+    let v1 = match r1 { Just2(v) => v, Nothing2 => -1 };
+    if v1 != 5 {
+        print(f"FAIL maybe: v1={v1}, expected 5");
+        return 1;
+    }
+    let r2 = safe_div(10, 0);
+    let v2 = match r2 { Just2(v) => v, Nothing2 => -1 };
+    if v2 != -1 {
+        print(f"FAIL maybe: v2={v2}, expected -1");
+        return 1;
+    }
+    print("  maybe_match: OK");
+    0
+}
+
+fn test_match_in_loop() -> Int {
+    let items = [Just2(1), Nothing2, Just2(3), Just2(4), Nothing2];
+    let mut sum = 0;
+    let mut i = 0;
+    while i < items.len() {
+        match items[i] {
+            Just2(v) => { sum = sum + v; }
+            Nothing2 => {}
+        }
+        i = i + 1;
+    }
+    // 1+3+4 = 8
+    if sum != 8 {
+        print(f"FAIL match_loop: sum={sum}, expected 8");
+        return 1;
+    }
+    print("  match_in_loop: OK");
+    0
+}
+
+fn test_nested_match() -> Int {
+    let x = 42;
+    let result = if x > 100 {
+        match Red { Red => 1, Green => 2, Blue => 3, Custom(_, _, _) => 4 }
+    } else if x > 0 {
+        match Green { Red => 1, Green => 2, Blue => 3, Custom(_, _, _) => 4 }
+    } else {
+        match Blue { Red => 1, Green => 2, Blue => 3, Custom(_, _, _) => 4 }
+    };
+    if result != 2 {
+        print(f"FAIL nested: result={result}, expected 2");
+        return 1;
+    }
+    print("  nested_match: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Pattern Matching Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_match();
+    failures = failures + test_expr_eval();
+    failures = failures + test_maybe_match();
+    failures = failures + test_match_in_loop();
+    failures = failures + test_nested_match();
+
+    if failures == 0 {
+        print("All pattern matching tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

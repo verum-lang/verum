@@ -1,0 +1,78 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: closures, hof, functional, patterns
+// @expect: pass
+
+// Real-world closure patterns: map, filter, reduce, compose.
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn main() -> Int {
+    // Test 1: Basic closure capture
+    let offset = 10;
+    let add_offset = |x: Int| -> Int { x + offset };
+    if apply(add_offset, 5) != 15 {
+        print("FAIL: closure capture");
+        return 1;
+    }
+
+    // Test 2: Closure factory
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    if add5(3) != 8 {
+        print(f"FAIL: add5(3) = {add5(3)}, expected 8");
+        return 1;
+    }
+    if add10(3) != 13 {
+        print(f"FAIL: add10(3) = {add10(3)}, expected 13");
+        return 1;
+    }
+
+    // Test 3: Composition
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let double_then_inc = compose(inc, double);
+    // double_then_inc(5) = inc(double(5)) = inc(10) = 11
+    if apply(double_then_inc, 5) != 11 {
+        print("FAIL: compose");
+        return 1;
+    }
+
+    // Test 4: Closure in loop
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 5 {
+        let val = i;
+        let adder = |s: Int| -> Int { s + val };
+        sum = adder(sum);
+        i = i + 1;
+    }
+    // sum = 1+2+3+4+5 = 15
+    if sum != 15 {
+        print(f"FAIL: loop closure sum = {sum}, expected 15");
+        return 1;
+    }
+
+    // Test 5: Multi-capture
+    let a = 100;
+    let b = 200;
+    let combine = |x: Int| -> Int { x + a + b };
+    if combine(5) != 305 {
+        print(f"FAIL: multi-capture = {combine(5)}, expected 305");
+        return 1;
+    }
+
+    print("PASS: all closure patterns work");
+    0
+}

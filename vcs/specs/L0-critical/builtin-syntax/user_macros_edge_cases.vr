@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: builtin-syntax, macros, meta, edge-cases
+// @description: Tests edge cases for user-defined macros with @ prefix
+
+/// Edge cases for user-defined macros:
+/// 1. Macro calls in different contexts
+/// 2. Nested macro calls
+/// 3. Macros with complex arguments
+/// 4. Macros returning different types
+
+// Declare test macros
+meta assert_eq(left: tt, right: tt) {
+    // Compares left and right
+}
+
+meta log(level: tt, msg: tt) {
+    // Logs at specified level
+}
+
+meta timing(block: tt) {
+    // Measures execution time
+}
+
+fn main() {
+    test_basic_macro_call();
+    test_macro_in_expression();
+    test_nested_macros();
+    test_macro_with_closure();
+}
+
+/// Test basic macro calls
+fn test_basic_macro_call() {
+    // Simple macro call
+    @log("info", "Application started");
+
+    // Macro with expression arguments
+    let x = 10;
+    let y = 20;
+    @assert_eq(x + y, 30);
+
+    // Macro returning unit
+    @log("debug", "Check passed");
+}
+
+/// Test macro in expression context
+fn test_macro_in_expression() {
+    // Macro result used in expression (macro returns Unit by default)
+    @timing({
+        let mut sum = 0;
+        for i in 0..1000 {
+            sum = sum + i;
+        }
+        sum
+    });
+
+    // Just verify the macro was called without checking return value
+}
+
+/// Test nested macro calls
+fn test_nested_macros() {
+    // Macro inside macro argument
+    @log("debug", @stringify(test_value));
+
+    // Multiple macro calls in sequence
+    @log("info", "Step 1");
+    @log("info", "Step 2");
+    @log("info", "Step 3");
+}
+
+/// Test macro with closure argument
+fn test_macro_with_closure() {
+    // Macro with closure - closure is passed as argument
+    let compute = || {
+        let mut x = 0;
+        while x < 100 {
+            x = x + 1;
+        }
+        x
+    };
+
+    @timing(compute);
+}
+
+/// Test that macro calls are distinguishable from attributes
+@derive(Clone)
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+fn test_macro_vs_attribute() {
+    // @derive above is an attribute (before type declaration)
+    // @log below is a macro call (standalone statement)
+    @log("info", "Point type defined");
+
+    let p = Point { x: 1.0, y: 2.0 };
+    @assert_eq(p.x, 1.0);
+}

@@ -1,0 +1,201 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, trie, prefix-tree, data-structure
+// @timeout: 30000
+
+// Simplified trie (prefix tree) for integer sequences
+// Using a flat array representation with branching factor 4 (symbols 0-3)
+// Node at index i has children at 4*i+1, 4*i+2, 4*i+3, 4*i+4
+// End-of-word marker stored as value at node
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(val: Int, pos: Int) -> Int { (val / pow2(pos)) % 2 }
+
+// Simplified trie using bitset: we track which sequences of length 1-3 (symbols 0,1) are present
+// Encode sequence as: len * 100 + digit_0 * 10 + digit_1 (for 2 symbols)
+// Actually simplest: use a bitset where each bit represents a "word"
+// We have 8 possible 3-bit words (000 through 111)
+
+// Insert 3-bit word into bitset
+fn trie_insert(set: Int, word: Int) -> Int {
+    if get_bit(set, word) == 0 { set + pow2(word) }
+    else { set }
+}
+
+// Check if word is in set
+fn trie_contains(set: Int, word: Int) -> Int {
+    get_bit(set, word)
+}
+
+// Check if any word with given prefix exists
+// For 3-bit words, prefix of length 1 means bits [prefix*4 .. prefix*4+3]
+fn has_prefix_1(set: Int, prefix: Int) -> Int {
+    // prefix 0: words 000,001,010,011 (0-3)
+    // prefix 1: words 100,101,110,111 (4-7)
+    let base_val = prefix * 4;
+    let mut found = 0;
+    let mut i = 0;
+    while i < 4 {
+        if get_bit(set, base_val + i) == 1 { found = 1; }
+        i = i + 1;
+    }
+    found
+}
+
+// Count words in trie
+fn trie_count(set: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        if get_bit(set, i) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Delete word from trie
+fn trie_delete(set: Int, word: Int) -> Int {
+    if get_bit(set, word) == 1 { set - pow2(word) }
+    else { set }
+}
+
+// Count words with given prefix (1-bit prefix)
+fn count_prefix_1(set: Int, prefix: Int) -> Int {
+    let base_val = prefix * 4;
+    let mut count = 0;
+    let mut i = 0;
+    while i < 4 {
+        if get_bit(set, base_val + i) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Longest common prefix of two words (3-bit)
+fn word_lcp(a: Int, b: Int) -> Int {
+    let mut len = 0;
+    // Compare bit 2 (MSB), then bit 1, then bit 0
+    if get_bit(a, 2) == get_bit(b, 2) {
+        len = 1;
+        if get_bit(a, 1) == get_bit(b, 1) {
+            len = 2;
+            if get_bit(a, 0) == get_bit(b, 0) { len = 3; }
+        }
+    }
+    len
+}
+
+fn test_basic_ops() -> Int {
+    let mut t = 0;
+    assert_eq(trie_count(t), 0);
+    t = trie_insert(t, 3); // word 011
+    t = trie_insert(t, 5); // word 101
+    t = trie_insert(t, 7); // word 111
+    assert_eq(trie_count(t), 3);
+    assert_eq(trie_contains(t, 3), 1);
+    assert_eq(trie_contains(t, 5), 1);
+    assert_eq(trie_contains(t, 0), 0);
+    assert_eq(trie_contains(t, 4), 0);
+    // Idempotent insert
+    t = trie_insert(t, 3);
+    assert_eq(trie_count(t), 3);
+    1
+}
+
+fn test_delete() -> Int {
+    let mut t = 0;
+    t = trie_insert(t, 1);
+    t = trie_insert(t, 3);
+    t = trie_insert(t, 5);
+    assert_eq(trie_count(t), 3);
+    t = trie_delete(t, 3);
+    assert_eq(trie_count(t), 2);
+    assert_eq(trie_contains(t, 3), 0);
+    assert_eq(trie_contains(t, 1), 1);
+    // Delete non-existent: no effect
+    t = trie_delete(t, 7);
+    assert_eq(trie_count(t), 2);
+    1
+}
+
+fn test_prefix() -> Int {
+    let mut t = 0;
+    // Insert words with prefix 0 (000, 001, 010)
+    t = trie_insert(t, 0);
+    t = trie_insert(t, 1);
+    t = trie_insert(t, 2);
+    // Insert words with prefix 1 (100)
+    t = trie_insert(t, 4);
+    assert_eq(has_prefix_1(t, 0), 1);
+    assert_eq(has_prefix_1(t, 1), 1);
+    assert_eq(count_prefix_1(t, 0), 3);
+    assert_eq(count_prefix_1(t, 1), 1);
+    1
+}
+
+fn test_lcp() -> Int {
+    // word_lcp compares from MSB
+    assert_eq(word_lcp(0, 0), 3); // 000 vs 000: all same
+    assert_eq(word_lcp(7, 7), 3); // 111 vs 111: all same
+    assert_eq(word_lcp(0, 7), 0); // 000 vs 111: differ at MSB
+    assert_eq(word_lcp(4, 5), 2); // 100 vs 101: share "10"
+    assert_eq(word_lcp(6, 7), 2); // 110 vs 111: share "11"
+    assert_eq(word_lcp(0, 1), 2); // 000 vs 001: share "00"
+    1
+}
+
+fn test_all_words() -> Int {
+    let mut t = 0;
+    let mut i = 0;
+    while i < 8 {
+        t = trie_insert(t, i);
+        i = i + 1;
+    }
+    assert_eq(trie_count(t), 8);
+    assert_eq(t, 255); // all 8 bits set
+    // All prefix queries should succeed
+    assert_eq(has_prefix_1(t, 0), 1);
+    assert_eq(has_prefix_1(t, 1), 1);
+    assert_eq(count_prefix_1(t, 0), 4);
+    assert_eq(count_prefix_1(t, 1), 4);
+    1
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_delete();
+    test_prefix();
+    test_lcp();
+    test_all_words();
+    print("[OK] 668_trie_aot");
+    0
+}

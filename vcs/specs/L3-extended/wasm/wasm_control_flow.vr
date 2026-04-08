@@ -1,0 +1,118 @@
+// @test: run
+// @level: L3
+// @tier: 2
+// @tags: wasm, control-flow, cross-compilation
+// @expected-exit: 0
+// @description: Control flow — if/else, match, while, for-in under WASM
+
+fn classify(n: Int) -> Int {
+    if n > 0 {
+        1
+    } else if n < 0 {
+        -1
+    } else {
+        0
+    }
+}
+
+fn collatz_steps(n: Int) -> Int {
+    let mut current = n;
+    let mut steps = 0;
+    while current != 1 {
+        if current % 2 == 0 {
+            current = current / 2;
+        } else {
+            current = current * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn sum_range(start: Int, end: Int) -> Int {
+    let mut total = 0;
+    let mut i = start;
+    while i < end {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn count_digits(n: Int) -> Int {
+    if n == 0 {
+        return 1;
+    }
+    let mut count = 0;
+    let mut val = n;
+    if val < 0 {
+        val = -val;
+    }
+    while val > 0 {
+        count = count + 1;
+        val = val / 10;
+    }
+    count
+}
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 {
+        return false;
+    }
+    if n < 4 {
+        return true;
+    }
+    if n % 2 == 0 {
+        return false;
+    }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 {
+            return false;
+        }
+        i = i + 2;
+    }
+    true
+}
+
+fn main() -> Int {
+    // If/else
+    assert_eq(classify(42), 1);
+    assert_eq(classify(-7), -1);
+    assert_eq(classify(0), 0);
+
+    // While loops
+    assert_eq(collatz_steps(27), 111);
+    assert_eq(collatz_steps(1), 0);
+
+    // Range sum
+    assert_eq(sum_range(1, 11), 55);
+    assert_eq(sum_range(0, 0), 0);
+
+    // Digit counting
+    assert_eq(count_digits(0), 1);
+    assert_eq(count_digits(42), 2);
+    assert_eq(count_digits(12345), 5);
+    assert_eq(count_digits(-999), 3);
+
+    // Prime checking
+    assert(is_prime(2));
+    assert(is_prime(17));
+    assert(is_prime(97));
+    assert(!is_prime(1));
+    assert(!is_prime(4));
+    assert(!is_prime(100));
+
+    // Early return
+    let mut prime_count = 0;
+    let mut n = 2;
+    while n <= 50 {
+        if is_prime(n) {
+            prime_count = prime_count + 1;
+        }
+        n = n + 1;
+    }
+    assert_eq(prime_count, 15);
+
+    0
+}

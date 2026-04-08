@@ -1,0 +1,91 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, dynamic-programming, algorithms
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential test: dynamic programming (interpreter vs AOT)
+
+fn fib(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b
+}
+
+fn staircase(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut a = 1;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b
+}
+
+// Max subarray (Kadane's)
+type Arr5 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int };
+
+fn arr5_get(a: Arr5, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 } else if i == 3 { a.v3 }
+    else { a.v4 }
+}
+
+fn kadane5(a: Arr5) -> Int {
+    let mut max_sum = arr5_get(a, 0);
+    let mut cur_sum = arr5_get(a, 0);
+    let mut i = 1;
+    while i < 5 {
+        let v = arr5_get(a, i);
+        if cur_sum + v > v {
+            cur_sum = cur_sum + v;
+        } else {
+            cur_sum = v;
+        }
+        if cur_sum > max_sum {
+            max_sum = cur_sum;
+        }
+        i = i + 1;
+    }
+    max_sum
+}
+
+fn main() -> Int {
+    // Fibonacci
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(20), 6765);
+
+    // Staircase
+    assert_eq(staircase(1), 1);
+    assert_eq(staircase(5), 8);
+    assert_eq(staircase(10), 89);
+
+    // Kadane's
+    let a = Arr5 { v0: -2, v1: 1, v2: -3, v3: 4, v4: -1 };
+    assert_eq(kadane5(a), 4);
+
+    let b = Arr5 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5 };
+    assert_eq(kadane5(b), 15);
+
+    let c = Arr5 { v0: -1, v1: -2, v2: -3, v3: -4, v4: -5 };
+    assert_eq(kadane5(c), -1);
+
+    print("DIFF_OK: dynamic_programming");
+    0
+}

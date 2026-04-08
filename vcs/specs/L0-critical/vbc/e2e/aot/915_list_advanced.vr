@@ -1,0 +1,140 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, clone, extend, stress
+// @expected-exit: 0
+
+// Test: List clone, extend, and stress operations
+
+fn main() -> Int {
+    // Build list
+    let mut original = List.new();
+    let mut i = 0;
+    while (i < 20) {
+        original.push(i * 3);
+        i = i + 1;
+    }
+
+    // Test 1: clone
+    let mut copy = List.new();
+    // Manual clone: copy elements
+    let mut j = 0;
+    while (j < original.len()) {
+        copy.push(original[j]);
+        j = j + 1;
+    }
+    if (copy.len() != 20) {
+        print(f"FAIL t1a: clone len={copy.len()}");
+        return 1;
+    }
+    if (copy[5] != 15) {
+        print(f"FAIL t1b: clone[5]={copy[5]}");
+        return 1;
+    }
+
+    // Test 2: extend
+    let mut base = List.new();
+    base.push(1);
+    base.push(2);
+    base.push(3);
+    let mut extra = List.new();
+    extra.push(4);
+    extra.push(5);
+    extra.push(6);
+    base.extend(extra);
+    if (base.len() != 6) {
+        print(f"FAIL t2a: extend len={base.len()}");
+        return 1;
+    }
+    if (base[3] != 4) {
+        print(f"FAIL t2b: base[3]={base[3]}");
+        return 1;
+    }
+    if (base[5] != 6) {
+        print(f"FAIL t2c: base[5]={base[5]}");
+        return 1;
+    }
+
+    // Test 3: sort descending via sort + reverse
+    let mut nums = List.new();
+    nums.push(42);
+    nums.push(7);
+    nums.push(99);
+    nums.push(1);
+    nums.push(55);
+    nums.sort();
+    nums.reverse();
+    // Should be [99, 55, 42, 7, 1]
+    if (nums[0] != 99) {
+        print(f"FAIL t3a: nums[0]={nums[0]}");
+        return 1;
+    }
+    if (nums[4] != 1) {
+        print(f"FAIL t3b: nums[4]={nums[4]}");
+        return 1;
+    }
+
+    // Test 4: stress — push 1000 elements, verify sum
+    let mut big = List.new();
+    let mut k = 0;
+    while (k < 1000) {
+        big.push(k);
+        k = k + 1;
+    }
+    if (big.len() != 1000) {
+        print(f"FAIL t4a: big len={big.len()}");
+        return 1;
+    }
+    let mut total = 0;
+    let mut m = 0;
+    while (m < big.len()) {
+        total = total + big[m];
+        m = m + 1;
+    }
+    // Sum 0..999 = 999*1000/2 = 499500
+    if (total != 499500) {
+        print(f"FAIL t4b: sum={total}");
+        return 1;
+    }
+
+    // Test 5: insert at beginning and end
+    let mut edges = List.new();
+    edges.push(5);
+    edges.insert(0, 1);
+    edges.insert(2, 9);
+    // [1, 5, 9]
+    if (edges[0] != 1) {
+        print(f"FAIL t5a: edges[0]={edges[0]}");
+        return 1;
+    }
+    if (edges[2] != 9) {
+        print(f"FAIL t5b: edges[2]={edges[2]}");
+        return 1;
+    }
+
+    // Test 6: remove from beginning, middle, end
+    let mut rm_test = List.new();
+    rm_test.push(10);
+    rm_test.push(20);
+    rm_test.push(30);
+    rm_test.push(40);
+    rm_test.push(50);
+    rm_test.remove(0);   // remove 10 → [20, 30, 40, 50]
+    rm_test.remove(2);   // remove 40 → [20, 30, 50]
+    rm_test.remove(2);   // remove 50 → [20, 30]
+    if (rm_test.len() != 2) {
+        print(f"FAIL t6a: rm len={rm_test.len()}");
+        return 1;
+    }
+    if (rm_test[0] != 20) {
+        print(f"FAIL t6b: rm[0]={rm_test[0]}");
+        return 1;
+    }
+    if (rm_test[1] != 30) {
+        print(f"FAIL t6c: rm[1]={rm_test[1]}");
+        return 1;
+    }
+
+    print("915_list_advanced: PASS");
+    0
+}

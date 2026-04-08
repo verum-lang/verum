@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, context, error
+// @description: Test missing context name detection
+// @expected-error: E058
+
+context {
+    fn get_connection() -> Connection;
+}
+
+context async {
+    fn query(&self, sql: Text) -> Result<Rows>;
+}

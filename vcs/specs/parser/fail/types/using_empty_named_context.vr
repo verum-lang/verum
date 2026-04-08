@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, context, named, error
+// @description: Test detection of invalid empty named context (colon without name)
+// @expected-error: E018
+
+// Named context requires name before colon
+type Callback is fn() using [: Database];

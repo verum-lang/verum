@@ -1,0 +1,162 @@
+// =============================================================================
+// tcp_protocols_test.vr - Tests for TcpStream/TcpListener Display protocol
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: net, tcp, display, debug, protocols, core
+// @description: Tests Display implementations for TcpStream and TcpListener
+// =============================================================================
+
+mount core.net.{TcpStream, TcpListener, Incoming, SocketAddr, SocketAddrV4, Ipv4Addr};
+mount core.base.protocols.{Display, Debug, Eq, Clone};
+mount core.text.format.{Formatter, FormatSpec, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.io.protocols.StreamError;
+
+// =============================================================================
+// Helper: Display-constrained function proves Display is implemented
+// =============================================================================
+
+fn display_tcp_stream(val: &TcpStream) -> Text {
+    format_display(val)
+}
+
+fn debug_tcp_stream(val: &TcpStream) -> Text {
+    format_debug(val)
+}
+
+fn display_tcp_listener(val: &TcpListener) -> Text {
+    format_display(val)
+}
+
+fn debug_tcp_listener(val: &TcpListener) -> Text {
+    format_debug(val)
+}
+
+// =============================================================================
+// Section 1: TcpStream Display Protocol Existence
+// =============================================================================
+
+@test
+fn test_tcp_stream_display_fn_exists() {
+    // If TcpStream implements Display, this function compiles
+    let _ = display_tcp_stream;
+}
+
+@test
+fn test_tcp_stream_debug_fn_exists() {
+    let _ = debug_tcp_stream;
+}
+
+@test
+fn test_tcp_stream_type_exists() {
+    let opt: Maybe<TcpStream> = None;
+    assert(opt is Maybe.None);
+}
+
+// =============================================================================
+// Section 2: TcpListener Display Protocol Existence
+// =============================================================================
+
+@test
+fn test_tcp_listener_display_fn_exists() {
+    let _ = display_tcp_listener;
+}
+
+@test
+fn test_tcp_listener_debug_fn_exists() {
+    let _ = debug_tcp_listener;
+}
+
+@test
+fn test_tcp_listener_type_exists() {
+    let opt: Maybe<TcpListener> = None;
+    assert(opt is Maybe.None);
+}
+
+// =============================================================================
+// Section 3: SocketAddr Display (used by TcpStream/TcpListener Display)
+// =============================================================================
+
+@test
+fn test_socket_addr_v4_display() {
+    let ip = Ipv4Addr.new(127, 0, 0, 1);
+    let addr = SocketAddrV4.new(ip, 8080);
+    let text = format_display(&addr);
+    assert(text.contains("127.0.0.1"));
+    assert(text.contains("8080"));
+}
+
+@test
+fn test_socket_addr_v4_debug() {
+    let ip = Ipv4Addr.new(10, 0, 0, 1);
+    let addr = SocketAddrV4.new(ip, 443);
+    let text = format_debug(&addr);
+    assert(text.contains("10.0.0.1"));
+    assert(text.contains("443"));
+}
+
+@test
+fn test_socket_addr_display() {
+    let ip = Ipv4Addr.new(192, 168, 1, 1);
+    let v4 = SocketAddrV4.new(ip, 3000);
+    let addr = SocketAddr.V4(v4);
+    let text = format_display(&addr);
+    assert(text.contains("192.168.1.1"));
+    assert(text.contains("3000"));
+}
+
+@test
+fn test_socket_addr_display_loopback() {
+    let ip = Ipv4Addr.new(127, 0, 0, 1);
+    let v4 = SocketAddrV4.new(ip, 0);
+    let addr = SocketAddr.V4(v4);
+    let text = format_display(&addr);
+    assert(text.contains("127.0.0.1"));
+}
+
+// =============================================================================
+// Section 4: Display Format Consistency
+// =============================================================================
+
+@test
+fn test_socket_addr_display_format() {
+    let ip = Ipv4Addr.new(0, 0, 0, 0);
+    let v4 = SocketAddrV4.new(ip, 80);
+    let addr = SocketAddr.V4(v4);
+    let text = format_display(&addr);
+    assert_eq(text, "0.0.0.0:80");
+}
+
+@test
+fn test_socket_addr_debug_format() {
+    let ip = Ipv4Addr.new(0, 0, 0, 0);
+    let v4 = SocketAddrV4.new(ip, 80);
+    let addr = SocketAddr.V4(v4);
+    let text = format_debug(&addr);
+    assert_eq(text, "0.0.0.0:80");
+}
+
+@test
+fn test_multiple_addrs_display() {
+    let ip1 = Ipv4Addr.new(127, 0, 0, 1);
+    let ip2 = Ipv4Addr.new(10, 0, 0, 1);
+    let addr1 = SocketAddr.V4(SocketAddrV4.new(ip1, 8080));
+    let addr2 = SocketAddr.V4(SocketAddrV4.new(ip2, 9090));
+    assert(format_display(&addr1) != format_display(&addr2));
+}
+
+// =============================================================================
+// Section 5: Incoming Iterator Type
+// =============================================================================
+
+@test
+fn test_incoming_type_exists() {
+    let _: Maybe<Incoming> = None;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

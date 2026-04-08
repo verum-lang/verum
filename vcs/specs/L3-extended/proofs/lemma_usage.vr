@@ -1,0 +1,85 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, lemma
+// @timeout: 10000
+
+/// Lemma usage demonstration
+/// Shows how lemmas can be defined and used in proofs
+
+/// Helper lemma: double is same as adding to itself
+lemma double_is_add<T: Ring>(x: T): 2 * x == x + x {
+    proof by ring
+}
+
+/// Helper lemma: square difference factorization
+lemma square_diff<T: Ring>(a: T, b: T): a * a - b * b == (a + b) * (a - b) {
+    proof by ring
+}
+
+/// Helper lemma: square of sum
+lemma square_sum<T: Ring>(a: T, b: T): (a + b) * (a + b) == a * a + 2 * a * b + b * b {
+    proof by ring
+}
+
+/// Helper lemma: square of difference
+lemma square_diff_expand<T: Ring>(a: T, b: T): (a - b) * (a - b) == a * a - 2 * a * b + b * b {
+    proof by ring
+}
+
+/// Theorem using lemmas: sum of cubes factorization hint
+theorem sum_squares_identity<T: Ring>(a: T, b: T):
+    (a + b) * (a + b) + (a - b) * (a - b) == 2 * (a * a + b * b)
+{
+    proof {
+        apply square_sum(a, b);
+        apply square_diff_expand(a, b);
+        // After expansion:
+        // (a*a + 2*a*b + b*b) + (a*a - 2*a*b + b*b)
+        // = 2*a*a + 2*b*b
+        // = 2*(a*a + b*b)
+        conclude by ring
+    }
+}
+
+/// Lemma for transitivity of equality
+lemma eq_trans<T: Eq>(a: T, b: T, c: T)
+    requires a == b
+    requires b == c
+    ensures a == c
+{
+    proof by trivial
+}
+
+/// Lemma for symmetry of equality
+lemma eq_sym<T: Eq>(a: T, b: T)
+    requires a == b
+    ensures b == a
+{
+    proof by trivial
+}
+
+/// Using multiple lemmas in a single proof
+theorem complex_identity<T: Ring>(x: T, y: T):
+    4 * x * y == (x + y) * (x + y) - (x - y) * (x - y)
+{
+    proof {
+        apply square_sum(x, y);
+        apply square_diff_expand(x, y);
+        // LHS: 4*x*y
+        // RHS: (x*x + 2*x*y + y*y) - (x*x - 2*x*y + y*y)
+        //    = 4*x*y
+        conclude by ring
+    }
+}
+
+/// Named lemma with explicit quantification
+lemma add_cancel_right<T: Ring>(a: T, b: T, c: T)
+    requires a + c == b + c
+    ensures a == b
+{
+    proof {
+        have h: a + c - c == b + c - c by assumption;
+        conclude by ring
+    }
+}

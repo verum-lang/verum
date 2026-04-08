@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, exists, quantifier, unclosed, error
+// @description: Test unclosed exists quantifier expression
+// @expected-error: E018
+
+fn test() {
+    let valid = exists x:
+}

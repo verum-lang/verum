@@ -1,0 +1,313 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, buffer-overflow, bounds-checking, comprehensive
+
+/// Comprehensive buffer overflow protection tests.
+/// Verum prevents all buffer overflows through:
+/// 1. Bounds-checked array/slice access
+/// 2. Safe string operations
+/// 3. FatRef (24-byte refs) for slices with length
+/// Spec: 04-memory-model.md#bounds-checking
+
+fn main() {
+    test_array_bounds_checking();
+    test_slice_bounds_checking();
+    test_string_bounds_checking();
+    test_list_bounds_checking();
+    test_safe_iteration();
+    test_safe_copy_operations();
+    test_fatref_bounds();
+    test_safe_buffer_apis();
+
+    print("All buffer overflow protection tests passed!");
+}
+
+/// Test array bounds checking
+fn test_array_bounds_checking() {
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    // Valid indices work
+    assert(arr[0] == 1);
+    assert(arr[4] == 5);
+
+    // Safe get returns Maybe
+    assert(arr.get(0) == Maybe.Some(&1));
+    assert(arr.get(4) == Maybe.Some(&5));
+    assert(arr.get(5) == Maybe.None);  // Out of bounds
+    assert(arr.get(100) == Maybe.None);
+
+    // Negative indices (as usize) also caught
+    // let neg: usize = (-1) as usize;  // Would be very large
+    // assert(arr.get(neg) == None);
+}
+
+/// Test slice bounds checking
+fn test_slice_bounds_checking() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let slice: &[Int] = &arr[2..7];  // [3, 4, 5, 6, 7]
+
+    // Slice has its own bounds
+    assert(slice.len() == 5);
+    assert(slice[0] == 3);
+    assert(slice[4] == 7);
+
+    // Safe access
+    assert(slice.get(0) == Maybe.Some(&3));
+    assert(slice.get(5) == Maybe.None);  // Out of slice bounds
+
+    // Subslicing is bounds-checked
+    let subslice = slice.get(1..4);
+    assert(subslice == Maybe.Some(&[4, 5, 6]));
+
+    let invalid_subslice = slice.get(0..10);
+    assert(invalid_subslice == Maybe.None);
+}
+
+/// Test string bounds checking
+fn test_string_bounds_checking() {
+    let text = Text.from("Hello, World!");
+
+    // Length in bytes
+    assert(text.len() == 13);
+
+    // Character access is bounds-checked
+    assert(text.char_at(0) == Maybe.Some('H'));
+    assert(text.char_at(12) == Maybe.Some('!'));
+    assert(text.char_at(13) == Maybe.None);
+    assert(text.char_at(100) == Maybe.None);
+
+    // Substring is bounds-checked
+    assert(text.substring(0, 5) == Maybe.Some(Text.from("Hello")));
+    assert(text.substring(7, 12) == Maybe.Some(Text.from("World")));
+    assert(text.substring(0, 100) == Maybe.None);  // End out of bounds
+    assert(text.substring(10, 5) == Maybe.None);   // Invalid range
+
+    // UTF-8 boundary checking
+    let unicode = Text.from("Hello, 世界!");
+    assert(unicode.char_at(7) == Maybe.Some('世'));
+    // Byte indexing must be on character boundaries
+}
+
+/// Test List bounds checking
+fn test_list_bounds_checking() {
+    let list = [10, 20, 30, 40, 50];
+
+    // Valid access
+    assert(list[0] == 10);
+    assert(list[4] == 50);
+
+    // Safe get
+    assert(list.get(0) == Maybe.Some(&10));
+    assert(list.get(5) == Maybe.None);
+
+    // Mutation with bounds check
+    let mut mutable_list = [1, 2, 3];
+    mutable_list[0] = 100;
+    assert(mutable_list[0] == 100);
+
+    // Safe set
+    assert(mutable_list.set(0, 200).is_ok());
+    assert(mutable_list.set(10, 300).is_err());
+
+    // Remove with bounds check
+    assert(mutable_list.remove(0).is_ok());
+    assert(mutable_list.remove(100).is_err());
+}
+
+/// Test safe iteration (no index manipulation)
+fn test_safe_iteration() {
+    let data = [1, 2, 3, 4, 5];
+
+    // Iterator-based - no bounds issues possible
+    let mut sum = 0;
+    for item in &data {
+        sum += *item;
+    }
+    assert(sum == 15);
+
+    // Enumerated iteration - indices always valid
+    for (index, item) in data.iter().enumerate() {
+        assert(data[index] == *item);
+    }
+
+    // Range-based with length
+    for i in 0..data.len() {
+        let _ = data[i];  // Always valid
+    }
+
+    // Mutable iteration - safe
+    let mut nums = [1, 2, 3];
+    for num in &mut nums {
+        *num *= 2;
+    }
+    assert(nums == [2, 4, 6]);
+}
+
+/// Test safe copy operations
+fn test_safe_copy_operations() {
+    let src = [1, 2, 3, 4, 5];
+    let mut dst = [0; 5];
+
+    // Safe copy - checks bounds
+    src.copy_to(&mut dst);
+    assert(dst == [1, 2, 3, 4, 5]);
+
+    // Partial copy with range
+    let mut partial_dst = [0; 10];
+    src.copy_to_range(&mut partial_dst, 2..7);
+    assert(partial_dst == [0, 0, 1, 2, 3, 4, 5, 0, 0, 0]);
+
+    // Copy fails if destination too small
+    let mut small_dst = [0; 3];
+    let result = src.try_copy_to(&mut small_dst);
+    assert(result.is_err());
+}
+
+/// Test FatRef bounds for slices
+fn test_fatref_bounds() {
+    // FatRef is 24 bytes: ptr (8) + len (8) + gen+epoch (8)
+    assert((&[Int]).size == 24);  // Type Property
+
+    let data = [1, 2, 3, 4, 5];
+    let slice_ref: &[Int] = &data[1..4];  // [2, 3, 4]
+
+    // FatRef carries length
+    assert(slice_ref.len() == 3);
+
+    // Bounds checked against embedded length
+    assert(slice_ref.get(0) == Maybe.Some(&2));
+    assert(slice_ref.get(2) == Maybe.Some(&4));
+    assert(slice_ref.get(3) == Maybe.None);  // Out of FatRef bounds
+
+    // Cannot access original array through slice
+    // slice_ref[-1] would be &data[0] in C, but not in Verum
+}
+
+/// Test safe buffer APIs
+fn test_safe_buffer_apis() {
+    // Buffer with fixed capacity
+    let mut buffer: Buffer<1024> = Buffer.new();
+
+    // Write within capacity
+    assert(buffer.write("Hello".as_bytes()).is_ok());
+    assert(buffer.len() == 5);
+
+    // Write would exceed capacity
+    let large_data: [Byte; 2000] = [0; 2000];
+    assert(buffer.write(&large_data).is_err());
+
+    // Clear and verify
+    buffer.clear();
+    assert(buffer.len() == 0);
+
+    // Read with bounds checking
+    buffer.write("Test data".as_bytes()).unwrap();
+    let read_result = buffer.read(0, 4);
+    assert(read_result == Maybe.Some("Test".as_bytes()));
+
+    let invalid_read = buffer.read(5, 100);
+    assert(invalid_read == Maybe.None);
+}
+
+/// Test split operations are safe
+fn test_safe_split() {
+    let mut arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // split_at_mut is bounds-checked
+    let result = arr.try_split_at_mut(5);
+    assert(result.is_ok());
+
+    let (left, right) = result.unwrap();
+    assert(left.len() == 5);
+    assert(right.len() == 5);
+
+    // Invalid split point
+    let invalid = arr.try_split_at_mut(20);
+    assert(invalid.is_err());
+}
+
+/// Test windows/chunks are safe
+fn test_safe_windows_chunks() {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    // Windows of size 3
+    let windows: List<&[Int]> = data.windows(3).collect();
+    assert(windows.len() == 6);
+    for window in &windows {
+        assert(window.len() == 3);
+    }
+
+    // Chunks of size 3
+    let chunks: List<&[Int]> = data.chunks(3).collect();
+    assert(chunks.len() == 3);
+    assert(chunks[0].len() == 3);
+    assert(chunks[1].len() == 3);
+    assert(chunks[2].len() == 2);  // Remainder
+
+    // Exact chunks (returns None if not divisible)
+    let exact = data.chunks_exact(3);
+    assert(exact.remainder().len() == 2);
+}
+
+/// Test binary search is safe
+fn test_safe_binary_search() {
+    let sorted = [1, 3, 5, 7, 9, 11, 13, 15];
+
+    // Binary search returns valid index or insertion point
+    match sorted.binary_search(&7) {
+        Ok(idx) => {
+            assert(idx == 3);
+            assert(sorted[idx] == 7);
+        },
+        Err(_) => panic("should find 7"),
+    }
+
+    match sorted.binary_search(&8) {
+        Ok(_) => panic("should not find 8"),
+        Err(idx) => {
+            // idx is where 8 would be inserted
+            assert(idx == 4);
+            assert(idx <= sorted.len());  // Valid insertion point
+        },
+    }
+}
+
+// Buffer type for testing
+type Buffer<const N: usize> is {
+    data: [u8; N],
+    len: usize,
+};
+
+implement<const N: usize> Buffer<N> {
+    fn new() -> Self {
+        Buffer { data: [0; N], len: 0 }
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> Result<(), BufferError> {
+        if self.len + bytes.len() > N {
+            return Err(BufferError.Overflow);
+        }
+        self.data[self.len..self.len + bytes.len()].copy_from_slice(bytes);
+        self.len += bytes.len();
+        Ok(())
+    }
+
+    fn read(&self, start: usize, end: usize) -> Maybe<&[u8]> {
+        if end > self.len || start > end {
+            Maybe.None
+        } else {
+            Maybe.Some(&self.data[start..end])
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn clear(&mut self) {
+        self.len = 0;
+    }
+}
+
+type BufferError is Overflow | Underflow;

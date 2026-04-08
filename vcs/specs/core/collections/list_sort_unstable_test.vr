@@ -1,0 +1,317 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, list, sort, unstable
+// @description: Tests for List<T> unstable sort variants and binary_search_by_key
+
+mount core.collections.list.{List, list};
+mount core.base.ordering.Ordering;
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// sort_unstable — basic ascending sort (not guaranteed stable)
+// =============================================================================
+
+@test
+fn test_sort_unstable_empty() {
+    let mut v: List<Int> = [];
+    v.sort_unstable();
+    assert_eq(v.len(), 0);
+}
+
+@test
+fn test_sort_unstable_single() {
+    let mut v = list([42]);
+    v.sort_unstable();
+    assert_eq(v[0], 42);
+}
+
+@test
+fn test_sort_unstable_already_sorted() {
+    let mut v = list([1, 2, 3, 4, 5]);
+    v.sort_unstable();
+    assert_eq(v, list([1, 2, 3, 4, 5]));
+}
+
+@test
+fn test_sort_unstable_reverse() {
+    let mut v = list([5, 4, 3, 2, 1]);
+    v.sort_unstable();
+    assert_eq(v, list([1, 2, 3, 4, 5]));
+}
+
+@test
+fn test_sort_unstable_duplicates() {
+    let mut v = list([3, 1, 4, 1, 5, 9, 2, 6, 5, 3]);
+    v.sort_unstable();
+    assert_eq(v, list([1, 1, 2, 3, 3, 4, 5, 5, 6, 9]));
+}
+
+@test
+fn test_sort_unstable_all_same() {
+    let mut v = list([7, 7, 7, 7, 7]);
+    v.sort_unstable();
+    assert_eq(v, list([7, 7, 7, 7, 7]));
+}
+
+@test
+fn test_sort_unstable_negative() {
+    let mut v = list([-3, -1, -4, -1, -5]);
+    v.sort_unstable();
+    assert_eq(v, list([-5, -4, -3, -1, -1]));
+}
+
+@test
+fn test_sort_unstable_two_elements() {
+    let mut v = list([2, 1]);
+    v.sort_unstable();
+    assert_eq(v, list([1, 2]));
+}
+
+// =============================================================================
+// sort_unstable_by — unstable sort with custom comparator
+// =============================================================================
+
+@test
+fn test_sort_unstable_by_descending() {
+    let mut v = list([3, 1, 4, 1, 5]);
+    v.sort_unstable_by(|a, b| b.cmp(a));
+    assert_eq(v, list([5, 4, 3, 1, 1]));
+}
+
+@test
+fn test_sort_unstable_by_empty() {
+    let mut v: List<Int> = [];
+    v.sort_unstable_by(|a, b| a.cmp(b));
+    assert_eq(v.len(), 0);
+}
+
+@test
+fn test_sort_unstable_by_abs_value() {
+    let mut v = list([-5, 3, -1, 4, -2]);
+    v.sort_unstable_by(|a, b| {
+        let abs_a = if *a < 0 { 0 - *a } else { *a };
+        let abs_b = if *b < 0 { 0 - *b } else { *b };
+        abs_a.cmp(&abs_b)
+    });
+    // Sorted by absolute value: 1, 2, 3, 4, 5
+    assert_eq(v[0], -1);
+    assert_eq(v[1], -2);
+    assert_eq(v[2], 3);
+    assert_eq(v[3], 4);
+    assert_eq(v[4], -5);
+}
+
+// =============================================================================
+// sort_unstable_by_key — unstable sort by key extraction
+// =============================================================================
+
+@test
+fn test_sort_unstable_by_key_basic() {
+    let mut v = list([-5, 3, -1, 4, -2]);
+    v.sort_unstable_by_key(|x| {
+        if *x < 0 { 0 - *x } else { *x }
+    });
+    // Sorted by absolute value
+    assert_eq(v[0], -1);
+    assert_eq(v[1], -2);
+    assert_eq(v[2], 3);
+    assert_eq(v[3], 4);
+    assert_eq(v[4], -5);
+}
+
+@test
+fn test_sort_unstable_by_key_empty() {
+    let mut v: List<Int> = [];
+    v.sort_unstable_by_key(|x| *x);
+    assert_eq(v.len(), 0);
+}
+
+@test
+fn test_sort_unstable_by_key_negation() {
+    let mut v = list([1, 2, 3, 4, 5]);
+    v.sort_unstable_by_key(|x| 0 - *x);
+    assert_eq(v, list([5, 4, 3, 2, 1]));
+}
+
+// =============================================================================
+// binary_search_by_key — search by key extraction
+// =============================================================================
+
+@test
+fn test_binary_search_by_key_found() {
+    // List of (id, name) pairs sorted by id
+    let pairs = list([(1, 10), (3, 30), (5, 50), (7, 70), (9, 90)]);
+    let result = pairs.binary_search_by_key(&5, |p| p.0);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 2);
+}
+
+@test
+fn test_binary_search_by_key_not_found() {
+    let pairs = list([(1, 10), (3, 30), (5, 50), (7, 70), (9, 90)]);
+    let result = pairs.binary_search_by_key(&4, |p| p.0);
+    assert(result.is_err());
+    // Insertion point should be 2 (between index 1 and 2)
+    match result {
+        Err(idx) => assert_eq(idx, 2),
+        Ok(_) => assert(false),
+    }
+}
+
+@test
+fn test_binary_search_by_key_first() {
+    let pairs = list([(1, 10), (3, 30), (5, 50)]);
+    let result = pairs.binary_search_by_key(&1, |p| p.0);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 0);
+}
+
+@test
+fn test_binary_search_by_key_last() {
+    let pairs = list([(1, 10), (3, 30), (5, 50)]);
+    let result = pairs.binary_search_by_key(&5, |p| p.0);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 2);
+}
+
+@test
+fn test_binary_search_by_key_empty() {
+    let pairs: List<(Int, Int)> = [];
+    let result = pairs.binary_search_by_key(&5, |p| p.0);
+    assert(result.is_err());
+    match result {
+        Err(idx) => assert_eq(idx, 0),
+        Ok(_) => assert(false),
+    }
+}
+
+@test
+fn test_binary_search_by_key_before_all() {
+    let pairs = list([(3, 30), (5, 50), (7, 70)]);
+    let result = pairs.binary_search_by_key(&1, |p| p.0);
+    assert(result.is_err());
+    match result {
+        Err(idx) => assert_eq(idx, 0),
+        Ok(_) => assert(false),
+    }
+}
+
+@test
+fn test_binary_search_by_key_after_all() {
+    let pairs = list([(3, 30), (5, 50), (7, 70)]);
+    let result = pairs.binary_search_by_key(&10, |p| p.0);
+    assert(result.is_err());
+    match result {
+        Err(idx) => assert_eq(idx, 3),
+        Ok(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// retain_mut — retain with mutable access to elements
+// =============================================================================
+
+@test
+fn test_retain_mut_double_evens() {
+    let mut v = list([1, 2, 3, 4, 5, 6]);
+    v.retain_mut(|x| {
+        if *x % 2 == 0 {
+            *x = *x * 2;
+            true
+        } else {
+            false
+        }
+    });
+    assert_eq(v, list([4, 8, 12]));
+}
+
+@test
+fn test_retain_mut_keep_all() {
+    let mut v = list([1, 2, 3]);
+    v.retain_mut(|_x| true);
+    assert_eq(v, list([1, 2, 3]));
+}
+
+@test
+fn test_retain_mut_remove_all() {
+    let mut v = list([1, 2, 3]);
+    v.retain_mut(|_x| false);
+    assert_eq(v.len(), 0);
+}
+
+@test
+fn test_retain_mut_empty() {
+    let mut v: List<Int> = [];
+    v.retain_mut(|_x| true);
+    assert_eq(v.len(), 0);
+}
+
+@test
+fn test_retain_mut_increment_and_filter() {
+    let mut v = list([10, 20, 30, 40, 50]);
+    v.retain_mut(|x| {
+        *x = *x + 1;
+        *x > 25
+    });
+    assert_eq(v, list([31, 41, 51]));
+}
+
+// =============================================================================
+// splice — replace a range with elements from an iterator
+// =============================================================================
+
+@test
+fn test_splice_replace_middle() {
+    let mut v = list([1, 2, 3, 4, 5]);
+    let removed = v.splice(1, 4, list([20, 30]));
+    assert_eq(v, list([1, 20, 30, 5]));
+    assert_eq(removed, list([2, 3, 4]));
+}
+
+@test
+fn test_splice_insert_at_beginning() {
+    let mut v = list([3, 4, 5]);
+    let removed = v.splice(0, 0, list([1, 2]));
+    assert_eq(v, list([1, 2, 3, 4, 5]));
+    assert_eq(removed.len(), 0);
+}
+
+@test
+fn test_splice_insert_at_end() {
+    let mut v = list([1, 2, 3]);
+    let removed = v.splice(3, 3, list([4, 5]));
+    assert_eq(v, list([1, 2, 3, 4, 5]));
+    assert_eq(removed.len(), 0);
+}
+
+@test
+fn test_splice_remove_all() {
+    let mut v = list([1, 2, 3]);
+    let removed: List<Int> = v.splice(0, 3, []);
+    assert_eq(v.len(), 0);
+    assert_eq(removed, list([1, 2, 3]));
+}
+
+@test
+fn test_splice_replace_with_more() {
+    let mut v = list([1, 5]);
+    let removed = v.splice(1, 1, list([2, 3, 4]));
+    assert_eq(v, list([1, 2, 3, 4, 5]));
+    assert_eq(removed.len(), 0);
+}
+
+@test
+fn test_splice_replace_with_fewer() {
+    let mut v = list([1, 2, 3, 4, 5]);
+    let removed = v.splice(1, 4, list([10]));
+    assert_eq(v, list([1, 10, 5]));
+    assert_eq(removed, list([2, 3, 4]));
+}
+
+@test
+fn test_splice_empty_list() {
+    let mut v: List<Int> = [];
+    let removed: List<Int> = v.splice(0, 0, list([1, 2, 3]));
+    assert_eq(v, list([1, 2, 3]));
+    assert_eq(removed.len(), 0);
+}

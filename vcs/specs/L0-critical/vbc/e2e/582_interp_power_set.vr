@@ -1,0 +1,140 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, power_set, bitmask, combinatorics, subsets
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Power set generation via iterative bitmask approach.
+//
+// For a set of n elements, there are 2^n subsets.
+// Each integer mask in [0, 2^n) represents a subset:
+//   bit k is set -> element k is included.
+//
+// We enumerate all masks and, for each, compute properties:
+//   - subset size (popcount of mask)
+//   - subset sum (sum of selected elements)
+//
+// We store results in arrays indexed by mask.
+//
+// For n=4, elements=[1,2,3,4], 2^4=16 subsets.
+// Total subset sizes: each of the 4 elements appears in 2^3=8 subsets.
+// Sum of all subset sizes = 4 * 8 = 16. Actually = n * 2^(n-1) = 4*8 = 32.
+// Wait: for n=4, C(4,0)*0+C(4,1)*1+C(4,2)*2+C(4,3)*3+C(4,4)*4 = 0+4+12+12+4 = 32.
+// Sum of all subset sums: each element e appears in 2^(n-1)=8 subsets.
+// Elements=[1,2,3,4]: total = (1+2+3+4)*8 = 10*8 = 80.
+
+// Count set bits (popcount) of a non-negative integer.
+fn popcount(x: Int) -> Int {
+    let mut n = x;
+    let mut cnt = 0;
+    while n > 0 {
+        cnt = cnt + (n - (n / 2) * 2);
+        n = n / 2;
+    }
+    cnt
+}
+
+// Compute the sum of elements selected by mask from elems[0..n-1].
+fn subset_sum(mask: Int, elems: [Int; 8], n: Int) -> Int {
+    let mut s = 0;
+    let mut k = 0;
+    let mut m = mask;
+    while k < n {
+        if m - (m / 2) * 2 == 1 { s = s + elems[k]; }
+        m = m / 2;
+        k = k + 1;
+    }
+    s
+}
+
+// Count subsets of size exactly sz among all 2^n masks.
+fn count_subsets_of_size(sz: Int, n_elems: Int) -> Int {
+    let total = 1;
+    // 2^n_elems
+    let mut pow2 = 1;
+    let mut i = 0;
+    while i < n_elems { pow2 = pow2 * 2; i = i + 1; }
+    let mut cnt = 0;
+    let mut mask = 0;
+    while mask < pow2 {
+        if popcount(mask) == sz { cnt = cnt + 1; }
+        mask = mask + 1;
+    }
+    cnt
+}
+
+fn test_popcount() {
+    // 0->0, 1->1, 3->2, 7->3, 15->4, 6(110)->2, 10(1010)->2.
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(15), 4);
+    assert_eq(popcount(6), 2);
+    assert_eq(popcount(10), 2);
+    print("popcount: ok");
+}
+
+fn test_subset_sum_n3() {
+    // Elements=[10,20,30], n=3.
+    // mask=0(000)->0, mask=1(001)->10, mask=2(010)->20, mask=3(011)->30,
+    // mask=4(100)->30, mask=5(101)->40, mask=6(110)->50, mask=7(111)->60.
+    let mut elems = [10,20,30,0,0,0,0,0];
+    assert_eq(subset_sum(0, elems, 3), 0);
+    assert_eq(subset_sum(1, elems, 3), 10);
+    assert_eq(subset_sum(3, elems, 3), 30);
+    assert_eq(subset_sum(7, elems, 3), 60);
+    assert_eq(subset_sum(5, elems, 3), 40);
+    print("subset_sum_n3: ok");
+}
+
+fn test_total_subset_sum_n4() {
+    // Elements=[1,2,3,4], n=4. 16 subsets.
+    // Each element appears in 8 subsets. Total sum = (1+2+3+4)*8 = 80.
+    let mut elems = [1,2,3,4,0,0,0,0];
+    let mut total = 0;
+    let mut mask = 0;
+    while mask < 16 {
+        total = total + subset_sum(mask, elems, 4);
+        mask = mask + 1;
+    }
+    assert_eq(total, 80);
+    // Total subset count = 16.
+    assert_eq(mask, 16);
+    print("total_subset_sum_n4: ok");
+}
+
+fn test_count_subsets_by_size() {
+    // For n=4: C(4,0)=1, C(4,1)=4, C(4,2)=6, C(4,3)=4, C(4,4)=1.
+    assert_eq(count_subsets_of_size(0, 4), 1);
+    assert_eq(count_subsets_of_size(1, 4), 4);
+    assert_eq(count_subsets_of_size(2, 4), 6);
+    assert_eq(count_subsets_of_size(3, 4), 4);
+    assert_eq(count_subsets_of_size(4, 4), 1);
+    print("count_subsets_by_size: ok");
+}
+
+fn test_power_set_n2() {
+    // Elements=[5,7], n=2. Masks 0..3.
+    // Subsets: {}, {5}, {7}, {5,7}. Sums: 0, 5, 7, 12.
+    let mut elems = [5,7,0,0,0,0,0,0];
+    assert_eq(subset_sum(0, elems, 2), 0);
+    assert_eq(subset_sum(1, elems, 2), 5);
+    assert_eq(subset_sum(2, elems, 2), 7);
+    assert_eq(subset_sum(3, elems, 2), 12);
+    // Total = 0+5+7+12 = 24 = (5+7)*2^1 = 12*2.
+    let total = subset_sum(0, elems, 2) + subset_sum(1, elems, 2) +
+                subset_sum(2, elems, 2) + subset_sum(3, elems, 2);
+    assert_eq(total, 24);
+    print("power_set_n2: ok");
+}
+
+fn main() -> Int {
+    test_popcount();
+    test_subset_sum_n3();
+    test_total_subset_sum_n4();
+    test_count_subsets_by_size();
+    test_power_set_n2();
+    print("[OK] 582_interp_power_set");
+    0
+}

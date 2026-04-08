@@ -1,0 +1,184 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, buffer-overflow, heap, bounds-checking
+// @description: Tests that heap operations are bounds-checked
+
+/// Heap allocations in Verum are protected by:
+/// - Bounds checking on all access
+/// - Capacity tracking in collections
+/// - Safe growth operations
+/// - No raw pointer arithmetic in safe code
+///
+/// Heap overflow exploits are prevented by design.
+
+fn main() {
+    test_list_growth();
+    test_list_bounds();
+    test_heap_allocation();
+    test_text_operations();
+    test_map_operations();
+
+    print("All heap safety tests passed!");
+}
+
+fn test_list_growth() {
+    let mut list: List<Int> = List.new();
+
+    // Safe growth - list handles reallocation internally
+    for i in 0..1000 {
+        list.push(i);  // Automatically grows capacity
+    }
+
+    assert(list.len() == 1000);
+
+    // Capacity is always >= length
+    assert(list.capacity() >= list.len());
+
+    // Reserve additional capacity
+    list.reserve(500);
+    assert(list.capacity() >= 1500);
+
+    // Shrink to fit
+    list.shrink_to_fit();
+    assert(list.capacity() >= list.len());
+}
+
+fn test_list_bounds() {
+    let mut list = [10, 20, 30, 40, 50];
+
+    // Safe access with get() - returns Maybe<T> (value, not reference)
+    // Verum semantics: get() returns a copy for value types
+    match list.get(0) {
+        Some(v) => assert(v == 10),
+        None => panic("index 0 should exist"),
+    }
+    match list.get(4) {
+        Some(v) => assert(v == 50),
+        None => panic("index 4 should exist"),
+    }
+    match list.get(100) {
+        Some(_) => panic("index 100 should not exist"),
+        None => {}, // Out of bounds returns None - correct
+    }
+
+    // Direct index mutation (safe because list is mut)
+    list[2] = 300;
+    assert(list[2] == 300);
+
+    // Safe removal - pop returns Maybe<T>
+    let removed = list.pop();
+    match removed {
+        Some(v) => assert(v == 50),
+        None => panic("pop should return Some"),
+    }
+    assert(list.len() == 4);
+
+    // Safe insert
+    list.insert(0, 5);  // Inserts at index 0
+    assert(list[0] == 5);
+    assert(list.len() == 5);
+
+    // Empty list handling
+    let empty: List<Int> = List.new();
+    match empty.pop() {
+        Some(_) => panic("empty pop should be None"),
+        None => {},
+    }
+    match empty.first() {
+        Some(_) => panic("empty first should be None"),
+        None => {},
+    }
+    match empty.last() {
+        Some(_) => panic("empty last should be None"),
+        None => {},
+    }
+}
+
+fn test_heap_allocation() {
+    // Heap allocates on the heap with CBGR protection
+    let boxed: Heap<Int> = Heap.new(42);
+    assert(*boxed == 42);
+
+    // Heap with array type
+    let boxed_array: Heap<[Int; 5]> = Heap.new([1, 2, 3, 4, 5]);
+    assert((*boxed_array)[0] == 1);
+    assert((*boxed_array)[4] == 5);
+
+    // No buffer overflow possible - all access is bounds checked
+    // Attempting to access (*boxed_array)[100] would panic, not corrupt memory
+}
+
+fn test_text_operations() {
+    let mut text = Text.from("Hello");
+
+    // Safe concatenation - text grows automatically
+    text.push_str(", World!");
+    assert(text == "Hello, World!");
+
+    // Safe character access through chars().nth()
+    match text.chars().nth(0) {
+        Some(c) => assert(c == 'H'),
+        None => panic("first char should exist"),
+    }
+    match text.chars().nth(100) {
+        Some(_) => panic("index 100 should be None"),
+        None => {}, // Out of bounds returns None - correct
+    }
+
+    // Safe slicing with bounds check
+    let hello = text[0..5];
+    assert(hello == "Hello");
+
+    // Byte-level access is bounds checked
+    let bytes = text.as_bytes();
+    assert(bytes[0] == 72);  // 'H' = 72 ASCII
+
+    // No buffer overflow on string operations
+    let repeated = "x".repeat(1000);
+    assert(repeated.len() == 1000);
+}
+
+fn test_map_operations() {
+    let mut map: Map<Text, Int> = Map.new();
+
+    // Safe insertion - map grows automatically
+    for i in 0..100 {
+        let key = f"key{i}";
+        map.insert(Text.from(key), i);
+    }
+    assert(map.len() == 100);
+
+    // Safe lookup - returns Maybe<V>
+    match map.get(Text.from("key50")) {
+        Some(v) => assert(v == 50),
+        None => panic("key50 should exist"),
+    }
+    match map.get(Text.from("missing")) {
+        Some(_) => panic("missing key should not exist"),
+        None => {}, // Missing key returns None - correct
+    }
+
+    // Safe removal - returns Maybe<V>
+    let key_to_remove = Text.from("key0");
+    match map.remove(key_to_remove) {
+        Some(v) => assert(v == 0),
+        None => panic("key0 should have existed"),
+    }
+    assert(map.len() == 99);
+
+    // Contains key check
+    assert(map.contains_key(Text.from("key50")));
+    assert(!map.contains_key(Text.from("key0"))); // Was removed
+}
+
+// Demonstrate that raw memory operations are NOT available in safe Verum
+// fn unsafe_example() {
+//     // These operations do not exist in safe Verum:
+//     // - malloc/free
+//     // - pointer arithmetic
+//     // - memcpy without bounds
+//     // - buffer overwrite
+//
+//     // Instead, use collections and Heap<T>
+// }

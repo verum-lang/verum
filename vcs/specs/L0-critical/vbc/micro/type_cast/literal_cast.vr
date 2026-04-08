@@ -1,0 +1,19 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Cast literal directly
+    let f: Float = 100 as Float;
+    assert_eq(f, 100.0);
+
+    // Cast in expression
+    let x = 5 as Float + 3.0;
+    assert_eq(x, 8.0);
+
+    // Bool literal cast
+    let t = true as Int;
+    let f = false as Int;
+    assert_eq(t, 1);
+    assert_eq(f, 0);
+}

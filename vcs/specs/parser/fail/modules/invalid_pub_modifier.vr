@@ -1,0 +1,7 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, modules, visibility, pub, error
+// @description: Test invalid pub modifier with invalid restriction
+// @expected-error: E018
+
+pub(invalid) fn test() {}

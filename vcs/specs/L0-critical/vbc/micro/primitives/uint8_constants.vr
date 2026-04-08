@@ -1,0 +1,25 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test UInt8 type constants (MIN, MAX, BITS)
+
+fn main() {
+    // Test UInt8.MIN
+    assert_eq(UInt8.MIN(), 0);
+
+    // Test UInt8.MAX (2^8 - 1 = 255)
+    assert_eq(UInt8.MAX(), 255);
+
+    // Test UInt8.BITS
+    assert_eq(UInt8.BITS(), 8);
+
+    // Test u8 alias (FFI compatibility)
+    assert_eq(u8.MIN(), 0);
+    assert_eq(u8.MAX(), 255);
+    assert_eq(u8.BITS(), 8);
+
+    // Test Byte (which is UInt8 semantically)
+    assert_eq(Byte.min_value(), 0);
+    assert_eq(Byte.max_value(), 255);
+}

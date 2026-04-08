@@ -1,0 +1,516 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for or patterns (A | B | C)
+
+// Grammar Reference:
+// or_pattern = and_pattern , { '|' , and_pattern } ;
+
+// ============================================================================
+// SECTION 1: Basic Or Patterns with Literals
+// ============================================================================
+
+fn test_basic_or_literals() {
+    // Two alternatives
+    match n {
+        0 | 1 => binary(),
+        _ => other()
+    }
+
+    // Three alternatives
+    match n {
+        0 | 1 | 2 => small(),
+        _ => other()
+    }
+
+    // Many alternatives
+    match n {
+        0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 => digit(),
+        _ => other()
+    }
+
+    // With binding afterward
+    match n {
+        0 | 1 | 2 => low(),
+        x => high(x)
+    }
+}
+
+// ============================================================================
+// SECTION 2: Or Patterns with Characters
+// ============================================================================
+
+fn test_or_chars() {
+    // Vowels
+    match c {
+        'a' | 'e' | 'i' | 'o' | 'u' => vowel(),
+        _ => consonant()
+    }
+
+    // Case-insensitive
+    match c {
+        'a' | 'A' => letter_a(),
+        'b' | 'B' => letter_b(),
+        _ => other()
+    }
+
+    // Whitespace
+    match c {
+        ' ' | '\t' | '\n' | '\r' => whitespace(),
+        _ => not_whitespace()
+    }
+
+    // Brackets
+    match c {
+        '(' | '[' | '{' => open_bracket(),
+        ')' | ']' | '}' => close_bracket(),
+        _ => not_bracket()
+    }
+}
+
+// ============================================================================
+// SECTION 3: Or Patterns with Strings
+// ============================================================================
+
+fn test_or_strings() {
+    // Commands
+    match cmd {
+        "start" | "begin" | "run" => start_action(),
+        "stop" | "end" | "halt" => stop_action(),
+        _ => handle_other()
+    }
+
+    // HTTP methods
+    match method {
+        "GET" | "HEAD" | "OPTIONS" => safe_method(),
+        "POST" | "PUT" | "PATCH" | "DELETE" => modifying_method(),
+        _ => unknown_method()
+    }
+
+    // Boolean strings
+    match s {
+        "true" | "yes" | "on" | "1" => truthy(),
+        "false" | "no" | "off" | "0" => falsy(),
+        _ => handle_other()
+    }
+}
+
+// ============================================================================
+// SECTION 4: Or Patterns with Booleans
+// ============================================================================
+
+fn test_or_booleans() {
+    // Boolean patterns (trivial but valid)
+    match flag {
+        true | false => always_matches()
+    }
+
+    // In tuples
+    match pair {
+        (true, _) | (_, true) => at_least_one_true(),
+        (false, false) => both_false()
+    }
+}
+
+// ============================================================================
+// SECTION 5: Or Patterns with Unit Variants
+// ============================================================================
+
+fn test_or_unit_variants() {
+    // Direction alternatives
+    match direction {
+        North | South => vertical(),
+        East | West => horizontal()
+    }
+
+    // Status alternatives
+    match status {
+        Pending | InProgress => not_done(),
+        Complete | Failed => done()
+    }
+
+    // Many variants
+    match day {
+        Monday | Tuesday | Wednesday | Thursday | Friday => weekday(),
+        Saturday | Sunday => weekend()
+    }
+}
+
+// ============================================================================
+// SECTION 6: Or Patterns with Tuple Variants
+// ============================================================================
+
+fn test_or_tuple_variants() {
+    // Same variant with different values
+    match option {
+        Some(0) | Some(1) => special(),
+        Some(n) => other(n),
+        None => none()
+    }
+
+    // Different variants
+    match result {
+        Ok(_) | Err(_) => has_value()
+    }
+
+    // With wildcards
+    match token {
+        Number(_) | Float(_) => numeric(),
+        String(_) | Char(_) => textual(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 7: Or Patterns with Record Variants
+// ============================================================================
+
+fn test_or_record_variants() {
+    // Different record variants
+    match shape {
+        Circle { .. } | Ellipse { .. } => rounded(),
+        Rectangle { .. } | Square { .. } => angular()
+    }
+
+    // Same variant, different field values
+    match point {
+        Point { x: 0, .. } | Point { y: 0, .. } => on_axis(),
+        Point { x, y } => off_axis(x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 8: Or Patterns with Ranges
+// ============================================================================
+
+fn test_or_ranges() {
+    // Multiple ranges
+    match n {
+        0..10 | 20..30 | 40..50 => specific_ranges(),
+        _ => other()
+    }
+
+    // Ranges and literals
+    match n {
+        0 | 10..20 | 30 => specific(),
+        _ => other()
+    }
+
+    // Character ranges
+    match c {
+        'a'..='z' | 'A'..='Z' => letter(),
+        '0'..='9' => digit(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 9: Or Patterns in Tuples
+// ============================================================================
+
+fn test_or_in_tuples() {
+    // Or in first element
+    let (0 | 1, y) = pair;
+
+    // Or in second element
+    let (x, 0 | 1) = pair;
+
+    // Or in both
+    let (0 | 1, 0 | 1) = pair;
+
+    // In match
+    match pair {
+        (0 | 1, 0 | 1) => corner(),
+        (x, y) => general(x, y)
+    }
+
+    // Nested
+    match nested {
+        ((0 | 1, _), _) | (_, (0 | 1, _)) => has_binary(),
+        _ => no_binary()
+    }
+}
+
+// ============================================================================
+// SECTION 10: Or Patterns in Arrays
+// ============================================================================
+
+fn test_or_in_arrays() {
+    // Or in element
+    let [0 | 1, rest] = array;
+
+    // Multiple or patterns
+    let [0 | 1, 0 | 1] = binary_pair;
+
+    // In match
+    match arr {
+        [0 | 1, ..] => starts_binary(),
+        [.., 0 | 1] => ends_binary(),
+        _ => no_binary()
+    }
+}
+
+// ============================================================================
+// SECTION 11: Or Patterns in Records
+// ============================================================================
+
+fn test_or_in_records() {
+    // Or in field
+    let Point { x: 0 | 1, y } = point;
+
+    // Multiple fields
+    let Point { x: 0 | 1, y: 0 | 1 } = point;
+
+    // In match
+    match point {
+        Point { x: 0 | 1, y: 0 | 1 } => near_origin(),
+        Point { x, y } => far(x, y)
+    }
+
+    // With strings
+    match config {
+        Config { mode: "debug" | "test", .. } => development(),
+        Config { mode: "release", .. } => production(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 12: Or Patterns in Variants
+// ============================================================================
+
+fn test_or_in_variants() {
+    // Or inside variant payload
+    match option {
+        Some(0 | 1) => binary_value(),
+        Some(n) => other_value(n),
+        None => no_value()
+    }
+
+    // Nested variants with or
+    match result {
+        Ok(Some(0 | 1)) => ok_binary(),
+        Ok(Some(n)) => ok_other(n),
+        Ok(None) => ok_none(),
+        Err(_) => err()
+    }
+}
+
+// ============================================================================
+// SECTION 13: Or Patterns with @ Bindings
+// ============================================================================
+
+fn test_or_with_at() {
+    // Bind or pattern
+    match n {
+        x @ (0 | 1) => binary(x),
+        x => other(x)
+    }
+
+    // Bind range alternatives
+    match n {
+        small @ (0..10 | 20..30) => small_ranges(small),
+        n => other(n)
+    }
+
+    // Bind variant alternatives
+    match option {
+        bound @ (Some(0) | Some(1)) => special(bound),
+        other => general(other)
+    }
+
+    // With nested binding
+    match data {
+        outer @ (Some(inner @ (0 | 1)) | Some(inner @ (10 | 11))) => nested(outer, inner),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 14: Or Patterns with Guards
+// ============================================================================
+
+fn test_or_with_guards() {
+    // Guard on or pattern
+    match n {
+        x @ (0 | 1) if condition => conditional_binary(x),
+        0 | 1 => unconditional_binary(),
+        _ => other()
+    }
+
+    // Complex guard
+    match pair {
+        (x, y) if x == y => equal(),
+        (0 | 1, _) if some_condition => first_binary(),
+        (_, 0 | 1) if other_condition => second_binary(),
+        _ => general()
+    }
+}
+
+// ============================================================================
+// SECTION 15: Parenthesized Or Patterns
+// ============================================================================
+
+fn test_parenthesized_or() {
+    // Explicit parentheses
+    let (0 | 1) = value;
+
+    // In tuple
+    let ((0 | 1), x) = pair;
+
+    // Nested parentheses
+    let ((0 | 1) | (10 | 11)) = value;
+
+    // In match
+    match n {
+        (0 | 1) => binary(),
+        (2 | 3) => small(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 16: Or Patterns in Let Bindings
+// ============================================================================
+
+fn test_or_in_let() {
+    // Simple or in let
+    let 0 | 1 = binary_value;
+
+    // With else
+    let 0 | 1 = value else { return };
+
+    // In tuple destructure
+    let (0 | 1, y) = pair else { return };
+
+    // Complex
+    let Some(0 | 1) = option else { return };
+}
+
+// ============================================================================
+// SECTION 17: Or Patterns in If-Let
+// ============================================================================
+
+fn test_or_in_if_let() {
+    // Basic if-let with or
+    if let 0 | 1 = value {
+        binary()
+    }
+
+    // With variant
+    if let Some(0 | 1) = option {
+        binary_option()
+    }
+
+    // Multiple alternatives
+    if let "yes" | "y" | "true" | "1" = answer {
+        affirmative()
+    }
+}
+
+// ============================================================================
+// SECTION 18: Or Patterns in While-Let
+// ============================================================================
+
+fn test_or_in_while_let() {
+    // While-let with or
+    while let Some(0 | 1) = get_next() {
+        process_binary()
+    }
+
+    // With variants
+    while let Ok(_) | Err(_) = try_operation() {
+        continue_loop()
+    }
+}
+
+// ============================================================================
+// SECTION 19: Or Patterns in For Loops
+// ============================================================================
+
+fn test_or_in_for() {
+    // Or in loop pattern
+    for 0 | 1 in binary_iterator {
+        process()
+    }
+
+    // In destructure
+    for (0 | 1, value) in pairs {
+        process(value)
+    }
+}
+
+// ============================================================================
+// SECTION 20: Complex Or Patterns
+// ============================================================================
+
+fn test_complex_or() {
+    // Many levels
+    match data {
+        Some((0 | 1, 0 | 1)) | Some((10 | 11, 10 | 11)) => corner_cases(),
+        Some((x, y)) => general(x, y),
+        None => none()
+    }
+
+    // With all pattern types
+    match value {
+        0 | 1 | 2..10 | Some(_) | Point { x: 0, .. } => matched(),
+        _ => other()
+    }
+
+    // Deeply nested
+    match nested {
+        Some(Some(Some(0 | 1))) | Some(Some(None)) | Some(None) | None => collapsed(),
+        Some(Some(Some(n))) => deep(n)
+    }
+}
+
+// ============================================================================
+// SECTION 21: Or Patterns with References
+// ============================================================================
+
+fn test_or_with_refs() {
+    // Reference to or pattern
+    match ref_value {
+        &(0 | 1) => binary_ref(),
+        &n => other_ref(n)
+    }
+
+    // Mutable reference
+    match mut_ref {
+        &mut (0 | 1) => binary_mut(),
+        &mut n => other_mut(n)
+    }
+}
+
+// ============================================================================
+// SECTION 22: Practical Examples
+// ============================================================================
+
+fn test_practical_or() {
+    // HTTP success codes
+    match status {
+        200 | 201 | 202 | 204 => success(),
+        301 | 302 | 307 | 308 => redirect(),
+        400 | 401 | 403 | 404 => client_error(),
+        500 | 502 | 503 | 504 => server_error(),
+        _ => handle_other()
+    }
+
+    // Exit codes
+    match exit_code {
+        0 | 1 => normal_exit(),
+        2..128 => error_exit(),
+        128..256 => signal_exit(),
+        _ => unknown_exit()
+    }
+
+    // Operator tokens
+    match op {
+        '+' | '-' => additive(),
+        '*' | '/' | '%' => multiplicative(),
+        '&' | '|' | '^' => bitwise(),
+        '<' | '>' | '=' => comparison(),
+        _ => other()
+    }
+}

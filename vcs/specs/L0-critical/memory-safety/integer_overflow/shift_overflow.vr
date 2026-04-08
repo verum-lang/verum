@@ -1,0 +1,12 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, integer-overflow, shift
+// @description: Tests that bit shift overflow is detected
+
+fn main() {
+    let value = 1;
+
+    // Shift by more bits than the type has
+    let _ = value << 64;  // Panic: Shift overflow (shifting by 64 bits on 64-bit type)
+}

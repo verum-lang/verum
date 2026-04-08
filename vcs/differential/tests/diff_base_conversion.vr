@@ -1,0 +1,131 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, base-conversion, number-system
+// @timeout: 10000
+
+type Digits8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int, len: Int };
+
+fn digits_new() -> Digits8 {
+    Digits8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 0 }
+}
+
+fn digits_get(d: Digits8, i: Int) -> Int {
+    if i == 0 { d.d0 } else if i == 1 { d.d1 } else if i == 2 { d.d2 }
+    else if i == 3 { d.d3 } else if i == 4 { d.d4 } else if i == 5 { d.d5 }
+    else if i == 6 { d.d6 } else { d.d7 }
+}
+
+fn digits_set(d: Digits8, i: Int, v: Int) -> Digits8 {
+    Digits8 {
+        d0: if i == 0 { v } else { d.d0 }, d1: if i == 1 { v } else { d.d1 },
+        d2: if i == 2 { v } else { d.d2 }, d3: if i == 3 { v } else { d.d3 },
+        d4: if i == 4 { v } else { d.d4 }, d5: if i == 5 { v } else { d.d5 },
+        d6: if i == 6 { v } else { d.d6 }, d7: if i == 7 { v } else { d.d7 },
+        len: d.len
+    }
+}
+
+// Convert number to base, return digits (least significant first)
+fn to_base(n: Int, base: Int) -> Digits8 {
+    if n == 0 {
+        let mut d = digits_new();
+        d = digits_set(d, 0, 0);
+        return Digits8 { d0: d.d0, d1: d.d1, d2: d.d2, d3: d.d3, d4: d.d4, d5: d.d5, d6: d.d6, d7: d.d7, len: 1 };
+    }
+    let mut d = digits_new();
+    let mut x = n;
+    let mut i = 0;
+    while x > 0 {
+        d = digits_set(d, i, x % base);
+        x = x / base;
+        i = i + 1;
+    }
+    Digits8 { d0: d.d0, d1: d.d1, d2: d.d2, d3: d.d3, d4: d.d4, d5: d.d5, d6: d.d6, d7: d.d7, len: i }
+}
+
+// Convert digits back to number
+fn from_base(d: Digits8, base: Int) -> Int {
+    let mut result = 0;
+    let mut multiplier = 1;
+    let mut i = 0;
+    while i < d.len {
+        result = result + digits_get(d, i) * multiplier;
+        multiplier = multiplier * base;
+        i = i + 1;
+    }
+    result
+}
+
+fn count_digits_in_base(n: Int, base: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 {
+        x = x / base;
+        count = count + 1;
+    }
+    count
+}
+
+fn digit_sum_in_base(n: Int, base: Int) -> Int {
+    let mut x = n;
+    let mut total = 0;
+    while x > 0 {
+        total = total + x % base;
+        x = x / base;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Binary representation of 42 = 101010
+    let b42 = to_base(42, 2);
+    assert_eq(b42.len, 6);
+    assert_eq(digits_get(b42, 0), 0); // LSB
+    assert_eq(digits_get(b42, 1), 1);
+    assert_eq(digits_get(b42, 2), 0);
+    assert_eq(digits_get(b42, 3), 1);
+    assert_eq(digits_get(b42, 4), 0);
+    assert_eq(digits_get(b42, 5), 1); // MSB
+
+    // Round trip
+    assert_eq(from_base(b42, 2), 42);
+
+    // Octal: 42 = 52 in octal
+    let o42 = to_base(42, 8);
+    assert_eq(o42.len, 2);
+    assert_eq(digits_get(o42, 0), 2);
+    assert_eq(digits_get(o42, 1), 5);
+    assert_eq(from_base(o42, 8), 42);
+
+    // Hex: 255 = FF
+    let h255 = to_base(255, 16);
+    assert_eq(h255.len, 2);
+    assert_eq(digits_get(h255, 0), 15);
+    assert_eq(digits_get(h255, 1), 15);
+    assert_eq(from_base(h255, 16), 255);
+
+    // Round-trip for various bases
+    let mut base = 2;
+    while base <= 10 {
+        assert_eq(from_base(to_base(100, base), base), 100);
+        assert_eq(from_base(to_base(255, base), base), 255);
+        base = base + 1;
+    }
+
+    // Digit count
+    assert_eq(count_digits_in_base(0, 10), 1);
+    assert_eq(count_digits_in_base(9, 10), 1);
+    assert_eq(count_digits_in_base(10, 10), 2);
+    assert_eq(count_digits_in_base(255, 2), 8);
+    assert_eq(count_digits_in_base(255, 16), 2);
+
+    // Digit sum: 123 in base 10 = 1+2+3 = 6
+    assert_eq(digit_sum_in_base(123, 10), 6);
+    assert_eq(digit_sum_in_base(255, 16), 30);  // F+F = 15+15
+
+    print("DIFF_OK: base_conversion");
+    0
+}

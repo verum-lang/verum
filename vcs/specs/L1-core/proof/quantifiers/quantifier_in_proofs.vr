@@ -1,0 +1,28 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, quantifiers, theorem
+// @timeout: 5000
+
+/// Quantifiers used within theorem and lemma declarations.
+
+// Theorem stating a universal property
+theorem all_squares_nonneg: forall x: Int . x * x >= 0;
+
+// Theorem with existential
+theorem has_sqrt_of_four: exists x: Int . x * x == 4;
+
+// Theorem with mixed quantifiers
+theorem density_of_integers: forall x: Int . exists y: Int . y == x + 1;
+
+// Lemma with quantifier in body
+lemma bounded_sum(lst: List<Int>)
+    requires forall x in lst . x <= 100
+    proof by auto;
+
+// Theorem about sorted lists
+theorem sorted_transitivity: forall a: Int, b: Int, c: Int .
+    !(a <= b && b <= c) || a <= c;
+
+fn main() {
+    print("Quantifiers in proofs tests parsed");
+}

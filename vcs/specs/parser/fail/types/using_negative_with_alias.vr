@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, context, negative, alias, error
+// @description: Test detection of invalid negative context with alias (semantically invalid)
+// @expected-error: E018
+
+// Negative contexts cannot have aliases (what would you alias?)
+type Callback is fn() using [!Database as db];

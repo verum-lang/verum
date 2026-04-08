@@ -1,0 +1,110 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, ecs, entity, simulation
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Entity-Component-System pattern simulation (simplified)
+
+// 4 entities with positions, velocities, health, alive status
+// Using flat arrays for each component
+type Positions is { x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int, x3: Int, y3: Int };
+type Velocities is { vx0: Int, vy0: Int, vx1: Int, vy1: Int, vx2: Int, vy2: Int, vx3: Int, vy3: Int };
+type Health is { hp0: Int, hp1: Int, hp2: Int, hp3: Int };
+type Alive is { a0: Int, a1: Int, a2: Int, a3: Int };
+
+fn get_x(p: Positions, i: Int) -> Int {
+    if i == 0 { p.x0 } else if i == 1 { p.x1 }
+    else if i == 2 { p.x2 } else { p.x3 }
+}
+
+fn get_y(p: Positions, i: Int) -> Int {
+    if i == 0 { p.y0 } else if i == 1 { p.y1 }
+    else if i == 2 { p.y2 } else { p.y3 }
+}
+
+fn move_entity(px: Int, py: Int, vx: Int, vy: Int, alive: Int) -> Int {
+    // Returns new x. Use separate call for y.
+    if alive == 1 { px + vx } else { px }
+}
+
+fn count_alive(a: Alive) -> Int {
+    a.a0 + a.a1 + a.a2 + a.a3
+}
+
+fn test_initial_state() {
+    let a = Alive { a0: 1, a1: 1, a2: 1, a3: 1 };
+    assert_eq(count_alive(a), 4);
+
+    let h = Health { hp0: 100, hp1: 80, hp2: 60, hp3: 40 };
+    let total = h.hp0 + h.hp1 + h.hp2 + h.hp3;
+    assert_eq(total, 280);
+}
+
+fn test_movement() {
+    // Entity 0: pos (0,0), vel (1,0), alive
+    assert_eq(move_entity(0, 0, 1, 0, 1), 1);   // new x = 1
+    assert_eq(move_entity(1, 0, 1, 0, 1), 2);    // tick 2: x = 2
+    assert_eq(move_entity(2, 0, 1, 0, 1), 3);    // tick 3: x = 3
+
+    // Dead entity doesn't move
+    assert_eq(move_entity(5, 3, 1, 0, 0), 5);    // stays at 5
+}
+
+fn test_damage() {
+    let h = Health { hp0: 100, hp1: 80, hp2: 60, hp3: 40 };
+
+    // Entity 3 takes 50 damage (kills it)
+    let new_hp3 = h.hp3 - 50;
+    assert_eq(new_hp3, -10);
+    let alive3 = if new_hp3 <= 0 { 0 } else { 1 };
+    assert_eq(alive3, 0);
+
+    // Entity 2 takes 30 damage (survives)
+    let new_hp2 = h.hp2 - 30;
+    assert_eq(new_hp2, 30);
+    let alive2 = if new_hp2 <= 0 { 0 } else { 1 };
+    assert_eq(alive2, 1);
+
+    // Entity 2 takes another 30 damage (dies)
+    let final_hp2 = new_hp2 - 30;
+    assert_eq(final_hp2, 0);
+    let final_alive2 = if final_hp2 <= 0 { 0 } else { 1 };
+    assert_eq(final_alive2, 0);
+}
+
+fn test_simulation() {
+    // Simulate 3 ticks with 4 entities
+    // Entity 0: pos(0,0) vel(1,2)
+    // Entity 1: pos(10,5) vel(-1,0)
+    let mut x0 = 0; let mut y0 = 0;
+    let mut x1 = 10; let mut y1 = 5;
+
+    // Tick 1
+    x0 = x0 + 1; y0 = y0 + 2;
+    x1 = x1 - 1; y1 = y1 + 0;
+    assert_eq(x0, 1); assert_eq(y0, 2);
+    assert_eq(x1, 9); assert_eq(y1, 5);
+
+    // Tick 2
+    x0 = x0 + 1; y0 = y0 + 2;
+    x1 = x1 - 1;
+    assert_eq(x0, 2); assert_eq(y0, 4);
+    assert_eq(x1, 8);
+
+    // Tick 3
+    x0 = x0 + 1; y0 = y0 + 2;
+    x1 = x1 - 1;
+    assert_eq(x0, 3); assert_eq(y0, 6);
+    assert_eq(x1, 7);
+}
+
+fn main() -> Int {
+    test_initial_state();
+    test_movement();
+    test_damage();
+    test_simulation();
+    print("[OK] 207_ecs_simulation_aot");
+    0
+}

@@ -1,0 +1,72 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, return, type
+
+// Return primitive types
+fn return_int() -> Int { 42 }
+fn return_float() -> Float { 3.14 }
+fn return_bool() -> Bool { true }
+fn return_text() -> Text { "hello" }
+
+// Return unit type
+fn return_unit() -> () { }
+
+// Return generic type
+fn return_list() -> List<Int> { [1, 2, 3] }
+fn return_map() -> Map<Text, Int> { {} }
+fn return_maybe() -> Maybe<Int> { Some(42) }
+
+// Return Result type
+fn return_result() -> Result<Int, Text> {
+    Ok(42)
+}
+
+// Return tuple type
+fn return_tuple() -> (Int, Int) { (1, 2) }
+fn return_triple() -> (Int, Text, Bool) { (1, "two", true) }
+
+// Return nested generic type
+fn return_nested() -> List<Maybe<Int>> {
+    [Some(1), None, Some(3)]
+}
+
+// Return function type
+fn return_fn() -> fn(Int) -> Int {
+    |x| x * 2
+}
+
+// Return reference type
+fn return_ref(x: &Int) -> &Int { x }
+
+// Return with complex expression
+fn return_complex() -> Int {
+    let a = 1;
+    let b = 2;
+    a + b
+}
+
+// Return with explicit return statement
+fn explicit_return() -> Int {
+    if condition {
+        return 0;
+    }
+    42
+}
+
+// Return with early return
+fn early_return(x: Int) -> Int {
+    if x < 0 {
+        return -1;
+    }
+    if x == 0 {
+        return 0;
+    }
+    1
+}
+
+// Never return type (diverging function)
+// Note: Verum uses 'Never' type instead of Rust's '!'
+fn diverges() -> Never {
+    panic("This function never returns")
+}

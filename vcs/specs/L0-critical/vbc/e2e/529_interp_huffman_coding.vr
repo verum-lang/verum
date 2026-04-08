@@ -1,0 +1,210 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, huffman_coding, frequency, greedy, prefix_code, compression
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Huffman coding: given symbol frequencies, compute optimal prefix code lengths.
+// The tree is built by repeatedly merging the two lowest-frequency nodes.
+// A sorted array (min at index 0) serves as a priority queue.
+// Tree nodes: leaves 0..n-1, internal nodes n..2n-2.
+// Flat arrays store node_freq[], parent[], left[], right[].
+
+// Sort heap array by node_freq (insertion sort, ascending).
+fn sort_by_freq(heap: [Int; 32], sz: Int, node_freq: [Int; 32]) {
+    let mut j = 1;
+    while j < sz {
+        let key = heap[j];
+        let key_f = node_freq[key];
+        let mut k = j - 1;
+        while k >= 0 && node_freq[heap[k]] > key_f {
+            heap[k + 1] = heap[k];
+            k = k - 1;
+        }
+        heap[k + 1] = key;
+        j = j + 1;
+    }
+}
+
+fn huff_build(freq: [Int; 16], n: Int,
+              node_freq: [Int; 32], parent: [Int; 32],
+              left: [Int; 32], right: [Int; 32]) {
+    // Initialize leaf nodes.
+    let mut i = 0;
+    while i < n {
+        node_freq[i] = freq[i];
+        parent[i] = -1;
+        left[i] = -1;
+        right[i] = -1;
+        i = i + 1;
+    }
+    let mut num_nodes = n;
+
+    // Priority queue as sorted array of node indices (smallest freq first).
+    let mut heap = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut heap_size = n;
+    i = 0;
+    while i < n {
+        heap[i] = i;
+        i = i + 1;
+    }
+    sort_by_freq(heap, heap_size, node_freq);
+
+    while heap_size > 1 {
+        // Extract two nodes with smallest frequency.
+        let a = heap[0];
+        let b = heap[1];
+
+        // Create new internal node.
+        let new_node = num_nodes;
+        node_freq[new_node] = node_freq[a] + node_freq[b];
+        left[new_node] = a;
+        right[new_node] = b;
+        parent[a] = new_node;
+        parent[b] = new_node;
+        parent[new_node] = -1;
+        num_nodes = num_nodes + 1;
+
+        // Shift remaining heap elements left by 2, then append new_node.
+        let mut idx = 0;
+        while idx < heap_size - 2 {
+            heap[idx] = heap[idx + 2];
+            idx = idx + 1;
+        }
+        heap_size = heap_size - 1;
+        heap[heap_size - 1] = new_node;
+
+        // Re-sort to restore min-priority order.
+        sort_by_freq(heap, heap_size, node_freq);
+    }
+}
+
+// Compute code depth (length) for each leaf by walking to root.
+fn compute_depths(n: Int, parent: [Int; 32], depth: [Int; 32]) {
+    let mut i = 0;
+    while i < n {
+        let mut d = 0;
+        let mut node = i;
+        while parent[node] != -1 {
+            d = d + 1;
+            node = parent[node];
+        }
+        depth[i] = d;
+        i = i + 1;
+    }
+}
+
+// Total encoding cost: sum of freq[i] * depth[i].
+fn total_bits(freq: [Int; 16], depth: [Int; 32], n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        total = total + freq[i] * depth[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn test_two_symbols() {
+    // 2 symbols: both must have depth 1.
+    let mut freq = [3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nf  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut par = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lft = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut rgt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dep = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    huff_build(freq, 2, nf, par, lft, rgt);
+    compute_depths(2, par, dep);
+    assert_eq(dep[0], 1);
+    assert_eq(dep[1], 1);
+    // Total bits = 3*1 + 5*1 = 8
+    assert_eq(total_bits(freq, dep, 2), 8);
+    print("two_symbols: ok");
+}
+
+fn test_four_symbols_equal() {
+    // 4 symbols with equal frequency: all depths must be 2.
+    let mut freq = [4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nf  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut par = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lft = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut rgt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dep = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    huff_build(freq, 4, nf, par, lft, rgt);
+    compute_depths(4, par, dep);
+    assert_eq(dep[0], 2);
+    assert_eq(dep[1], 2);
+    assert_eq(dep[2], 2);
+    assert_eq(dep[3], 2);
+    assert_eq(total_bits(freq, dep, 4), 32);
+    print("four_symbols_equal: ok");
+}
+
+fn test_skewed_frequencies() {
+    // a:8, b:4, c:2, d:1 -> optimal: depth(a)=1, depth(b)=2, depth(c)=depth(d)=3.
+    // Total bits = 8*1 + 4*2 + 2*3 + 1*3 = 8+8+6+3 = 25.
+    let mut freq = [8, 4, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nf  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut par = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lft = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut rgt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dep = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    huff_build(freq, 4, nf, par, lft, rgt);
+    compute_depths(4, par, dep);
+    // Most frequent symbol gets shortest code.
+    assert(dep[0] <= dep[1]);
+    assert(dep[1] <= dep[2]);
+    let bits = total_bits(freq, dep, 4);
+    assert_eq(bits, 25);
+    print("skewed_frequencies: ok");
+}
+
+fn test_three_symbols() {
+    // Frequencies: 5, 3, 2. Total = 10.
+    // Optimal: merge 2+3=5 -> root has 5 and 5 at depth 1, then sub-tree at depth 2.
+    // depths: 5->1, 3->2, 2->2. Total bits = 5*1+3*2+2*2 = 5+6+4 = 15.
+    let mut freq = [5, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nf  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut par = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lft = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut rgt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dep = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    huff_build(freq, 3, nf, par, lft, rgt);
+    compute_depths(3, par, dep);
+    assert_eq(total_bits(freq, dep, 3), 15);
+    // Most frequent symbol has smallest depth.
+    assert(dep[0] <= dep[1]);
+    assert(dep[0] <= dep[2]);
+    print("three_symbols: ok");
+}
+
+fn main() -> Int {
+    test_two_symbols();
+    test_four_symbols_equal();
+    test_skewed_frequencies();
+    test_three_symbols();
+    print("[OK] 529_interp_huffman_coding");
+    0
+}

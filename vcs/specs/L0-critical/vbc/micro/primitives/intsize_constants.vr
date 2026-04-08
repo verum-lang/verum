@@ -1,0 +1,23 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test IntSize and UIntSize type constants (platform-dependent, 64-bit)
+
+fn main() {
+    // Test IntSize.BITS (64 on 64-bit platforms)
+    assert_eq(IntSize.BITS(), 64);
+
+    // Test isize alias (FFI compatibility)
+    assert_eq(isize.BITS(), 64);
+    assert_eq(isize.MIN(), -9223372036854775808);
+    assert_eq(isize.MAX(), 9223372036854775807);
+
+    // Test UIntSize.BITS (64 on 64-bit platforms)
+    assert_eq(UIntSize.BITS(), 64);
+
+    // Test usize alias
+    assert_eq(usize.BITS(), 64);
+    assert_eq(usize.MIN(), 0);
+    assert_eq(usize.MAX(), 18446744073709551615);
+}

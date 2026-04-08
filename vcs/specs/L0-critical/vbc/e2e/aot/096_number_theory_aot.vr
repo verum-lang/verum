@@ -1,0 +1,333 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, number-theory, modular-arithmetic, gcd, totient
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT number theory: modular exponentiation, extended GCD, modular inverse, Euler totient
+
+fn abs_val(n: Int) -> Int {
+    if n < 0 { 0 - n } else { n }
+}
+
+// GCD using Euclidean algorithm (iterative)
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// LCM
+fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 || b == 0 { 0 }
+    else { abs_val(a) / gcd(a, b) * abs_val(b) }
+}
+
+// Modular exponentiation: (base^exp) % modulus, iterative binary method
+fn modpow(base: Int, exp: Int, modulus: Int) -> Int {
+    if modulus == 1 { 0 }
+    else {
+        let mut result = 1;
+        let mut b = base % modulus;
+        if b < 0 { b = b + modulus; }
+        let mut e = exp;
+        while e > 0 {
+            if e % 2 == 1 {
+                result = (result * b) % modulus;
+            }
+            e = e / 2;
+            b = (b * b) % modulus;
+        }
+        result
+    }
+}
+
+// Extended Euclidean algorithm (iterative)
+// Returns (gcd, x, y) such that a*x + b*y = gcd(a,b)
+type GcdResult is { g: Int, x: Int, y: Int };
+
+fn gcd_ext(a: Int, b: Int) -> GcdResult {
+    let mut old_r = a;
+    let mut r = b;
+    let mut old_s = 1;
+    let mut s = 0;
+    let mut old_t = 0;
+    let mut t = 1;
+
+    while r != 0 {
+        let q = old_r / r;
+        let tmp_r = r;
+        r = old_r - q * r;
+        old_r = tmp_r;
+
+        let tmp_s = s;
+        s = old_s - q * s;
+        old_s = tmp_s;
+
+        let tmp_t = t;
+        t = old_t - q * t;
+        old_t = tmp_t;
+    }
+
+    GcdResult { g: old_r, x: old_s, y: old_t }
+}
+
+// Modular inverse: a^(-1) mod m, exists iff gcd(a,m) = 1
+// Returns the inverse, or -1 if it doesn't exist
+fn mod_inverse(a: Int, m: Int) -> Int {
+    let res = gcd_ext(a, m);
+    if res.g != 1 { -1 }
+    else {
+        let inv = res.x % m;
+        if inv < 0 { inv + m } else { inv }
+    }
+}
+
+// Euler's totient function: count of integers 1..n coprime to n
+fn euler_totient(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else {
+        let mut count = 0;
+        let mut i = 1;
+        while i <= n {
+            if gcd(i, n) == 1 { count = count + 1; }
+            i = i + 1;
+        }
+        count
+    }
+}
+
+// Check if n is prime (trial division)
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { false }
+    else {
+        let mut divisor_found = false;
+        let mut d = 2;
+        while d * d <= n {
+            if n % d == 0 { divisor_found = true; }
+            d = d + 1;
+        }
+        !divisor_found
+    }
+}
+
+// Count prime factors (with multiplicity)
+fn count_prime_factors(n: Int) -> Int {
+    let mut count = 0;
+    let mut x = n;
+    let mut d = 2;
+    while d * d <= x {
+        while x % d == 0 {
+            count = count + 1;
+            x = x / d;
+        }
+        d = d + 1;
+    }
+    if x > 1 { count = count + 1; }
+    count
+}
+
+// Sum of divisors
+fn sum_of_divisors(n: Int) -> Int {
+    let mut s = 0;
+    let mut d = 1;
+    while d * d <= n {
+        if n % d == 0 {
+            s = s + d;
+            if d != n / d { s = s + n / d; }
+        }
+        d = d + 1;
+    }
+    s
+}
+
+fn main() -> Int {
+    // === Test 1: GCD ===
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(35, 15), 5);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(0, 5), 5);
+    assert_eq(gcd(7, 0), 7);
+    assert_eq(gcd(0, 0), 0);
+    assert_eq(gcd(48, 18), 6);
+
+    // === Test 2: LCM ===
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(3, 5), 15);
+    assert_eq(lcm(12, 8), 24);
+    assert_eq(lcm(7, 7), 7);
+    assert_eq(lcm(0, 5), 0);
+
+    // === Test 3: Modular exponentiation ===
+    // 2^10 = 1024; 1024 % 1000 = 24
+    assert_eq(modpow(2, 10, 1000), 24);
+    // 3^5 = 243; 243 % 100 = 43
+    assert_eq(modpow(3, 5, 100), 43);
+    // 7^3 = 343; 343 % 50 = 43
+    assert_eq(modpow(7, 3, 50), 43);
+    // 2^16 = 65536; 65536 % 1000 = 536
+    assert_eq(modpow(2, 16, 1000), 536);
+    // Any base^0 = 1 (mod m, m > 1)
+    assert_eq(modpow(99, 0, 7), 1);
+    // base^1 = base % m
+    assert_eq(modpow(13, 1, 10), 3);
+    // Modulus 1 always gives 0
+    assert_eq(modpow(5, 3, 1), 0);
+    // Large exponent: 2^20 = 1048576; % 1000 = 576
+    assert_eq(modpow(2, 20, 1000), 576);
+    // 10^6 = 1000000; % 997 = 1000000 - 1003*997 = 1000000 - 999991 = 9
+    assert_eq(modpow(10, 6, 997), 9);
+
+    // === Test 4: Extended GCD ===
+    // gcd(35, 15) = 5, 35*x + 15*y = 5
+    let r1 = gcd_ext(35, 15);
+    assert_eq(r1.g, 5);
+    assert_eq(35 * r1.x + 15 * r1.y, 5);
+
+    // gcd(12, 8) = 4, 12*x + 8*y = 4
+    let r2 = gcd_ext(12, 8);
+    assert_eq(r2.g, 4);
+    assert_eq(12 * r2.x + 8 * r2.y, 4);
+
+    // gcd(99, 78) = 3
+    let r3 = gcd_ext(99, 78);
+    assert_eq(r3.g, 3);
+    assert_eq(99 * r3.x + 78 * r3.y, 3);
+
+    // Coprime: gcd(17, 13) = 1
+    let r4 = gcd_ext(17, 13);
+    assert_eq(r4.g, 1);
+    assert_eq(17 * r4.x + 13 * r4.y, 1);
+
+    // === Test 5: Modular inverse ===
+    // 3^(-1) mod 7: 3*5=15, 15%7=1, so inverse is 5
+    let inv1 = mod_inverse(3, 7);
+    assert_eq(inv1, 5);
+    assert_eq((3 * inv1) % 7, 1);
+
+    // 7^(-1) mod 11: 7*8=56, 56%11=1, so inverse is 8
+    let inv2 = mod_inverse(7, 11);
+    assert_eq(inv2, 8);
+    assert_eq((7 * inv2) % 11, 1);
+
+    // 2^(-1) mod 5: 2*3=6, 6%5=1, so inverse is 3
+    let inv3 = mod_inverse(2, 5);
+    assert_eq(inv3, 3);
+
+    // No inverse: gcd(6, 9) = 3 != 1
+    assert_eq(mod_inverse(6, 9), -1);
+
+    // 1^(-1) mod anything = 1
+    assert_eq(mod_inverse(1, 100), 1);
+
+    // === Test 6: Euler's totient ===
+    assert_eq(euler_totient(1), 1);
+    assert_eq(euler_totient(2), 1);
+    assert_eq(euler_totient(3), 2);
+    assert_eq(euler_totient(4), 2);
+    assert_eq(euler_totient(5), 4);
+    assert_eq(euler_totient(6), 2);
+    assert_eq(euler_totient(7), 6);
+    assert_eq(euler_totient(8), 4);
+    assert_eq(euler_totient(9), 6);
+    assert_eq(euler_totient(10), 4);
+    assert_eq(euler_totient(12), 4);
+
+    // For prime p, totient(p) = p-1
+    assert_eq(euler_totient(13), 12);
+    assert_eq(euler_totient(17), 16);
+
+    // For prime power p^k, totient = p^k - p^(k-1)
+    // totient(16) = 16 - 8 = 8
+    assert_eq(euler_totient(16), 8);
+
+    // === Test 7: Euler's theorem: a^totient(m) = 1 (mod m) when gcd(a,m) = 1 ===
+    assert_eq(modpow(3, euler_totient(7), 7), 1);
+    assert_eq(modpow(2, euler_totient(9), 9), 1);
+    assert_eq(modpow(5, euler_totient(12), 12), 1);
+
+    // === Test 8: Fermat's little theorem: a^p = a (mod p) for prime p ===
+    assert_eq(modpow(2, 7, 7), 2);
+    assert_eq(modpow(3, 11, 11), 3);
+    assert_eq(modpow(5, 13, 13), 5);
+
+    // === Test 9: Primality ===
+    assert(!is_prime(0));
+    assert(!is_prime(1));
+    assert(is_prime(2));
+    assert(is_prime(3));
+    assert(!is_prime(4));
+    assert(is_prime(5));
+    assert(!is_prime(6));
+    assert(is_prime(7));
+    assert(!is_prime(9));
+    assert(is_prime(11));
+    assert(is_prime(13));
+    assert(!is_prime(15));
+    assert(is_prime(17));
+    assert(is_prime(19));
+    assert(!is_prime(21));
+    assert(is_prime(23));
+    assert(!is_prime(25));
+    assert(is_prime(29));
+    assert(is_prime(31));
+    assert(!is_prime(49));
+    assert(is_prime(97));
+
+    // === Test 10: Prime factorization count ===
+    // 12 = 2^2 * 3 -> 3 prime factors with multiplicity
+    assert_eq(count_prime_factors(12), 3);
+    // 8 = 2^3 -> 3
+    assert_eq(count_prime_factors(8), 3);
+    // 30 = 2*3*5 -> 3
+    assert_eq(count_prime_factors(30), 3);
+    // 17 is prime -> 1
+    assert_eq(count_prime_factors(17), 1);
+    // 64 = 2^6 -> 6
+    assert_eq(count_prime_factors(64), 6);
+
+    // === Test 11: Sum of divisors ===
+    assert_eq(sum_of_divisors(1), 1);
+    // sigma(6) = 1+2+3+6 = 12 (6 is perfect)
+    assert_eq(sum_of_divisors(6), 12);
+    // sigma(28) = 1+2+4+7+14+28 = 56 (28 is perfect)
+    assert_eq(sum_of_divisors(28), 56);
+    // sigma(12) = 1+2+3+4+6+12 = 28
+    assert_eq(sum_of_divisors(12), 28);
+    // sigma(p) = p+1 for prime p
+    assert_eq(sum_of_divisors(7), 8);
+    assert_eq(sum_of_divisors(13), 14);
+
+    // === Test 12: Relationships ===
+    // gcd(a,b) * lcm(a,b) = a * b (for positive a,b)
+    assert_eq(gcd(12, 8) * lcm(12, 8), 12 * 8);
+    assert_eq(gcd(15, 35) * lcm(15, 35), 15 * 35);
+
+    // Totient is multiplicative for coprime: totient(m*n) = totient(m)*totient(n)
+    assert_eq(euler_totient(12), euler_totient(3) * euler_totient(4));
+    assert_eq(euler_totient(35), euler_totient(5) * euler_totient(7));
+
+    // Sum of totients of divisors of n equals n
+    // For n=12: divisors are 1,2,3,4,6,12
+    let tot_sum = euler_totient(1) + euler_totient(2) + euler_totient(3)
+                + euler_totient(4) + euler_totient(6) + euler_totient(12);
+    assert_eq(tot_sum, 12);
+
+    // === Test 13: Modular inverse chain ===
+    // Verify (a * a^-1) mod 13 = 1 for all a in 1..12
+    let mut test_a = 1;
+    while test_a < 13 {
+        let inv_a = mod_inverse(test_a, 13);
+        assert(inv_a >= 0);
+        assert_eq((test_a * inv_a) % 13, 1);
+        test_a = test_a + 1;
+    }
+
+    0
+}

@@ -1,0 +1,170 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, closures, higher-order
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: basic closures — |x| x * 2, closure capture of outer
+// variables, closure as function argument
+
+// =============================================================================
+// Basic closures
+// =============================================================================
+
+fn test_identity_closure() {
+    let id = |x: Int| -> Int { x };
+    assert_eq(id(0), 0);
+    assert_eq(id(42), 42);
+    assert_eq(id(-7), -7);
+}
+
+fn test_arithmetic_closures() {
+    let double = |x: Int| -> Int { x * 2 };
+    let negate = |x: Int| -> Int { -x };
+    let inc = |x: Int| -> Int { x + 1 };
+    assert_eq(double(5), 10);
+    assert_eq(double(0), 0);
+    assert_eq(double(-3), -6);
+    assert_eq(negate(5), -5);
+    assert_eq(negate(-3), 3);
+    assert_eq(inc(41), 42);
+}
+
+fn test_multi_arg_closure() {
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let mul = |a: Int, b: Int| -> Int { a * b };
+    assert_eq(add(3, 4), 7);
+    assert_eq(add(-5, 5), 0);
+    assert_eq(mul(6, 7), 42);
+    assert_eq(mul(0, 100), 0);
+}
+
+fn test_zero_arg_closure() {
+    let get_value = || 42;
+    assert_eq(get_value(), 42);
+}
+
+// =============================================================================
+// Closure capture of outer variables
+// =============================================================================
+
+fn test_capture_single() {
+    let offset = 100;
+    let add_offset = |x: Int| -> Int { x + offset };
+    assert_eq(add_offset(0), 100);
+    assert_eq(add_offset(42), 142);
+    assert_eq(add_offset(-100), 0);
+}
+
+fn test_capture_multiple() {
+    let a = 2;
+    let b = 3;
+    let c = 5;
+    let polynomial = |x: Int| -> Int { a * x * x + b * x + c };
+    // f(0) = 5
+    assert_eq(polynomial(0), 5);
+    // f(1) = 2+3+5 = 10
+    assert_eq(polynomial(1), 10);
+    // f(3) = 18+9+5 = 32
+    assert_eq(polynomial(3), 32);
+}
+
+fn test_capture_in_loop() {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        let adder = |x: Int| -> Int { x + i };
+        sum = sum + adder(0);
+        i = i + 1;
+    }
+    // 0+1+2+3+4 = 10
+    assert_eq(sum, 10);
+}
+
+// =============================================================================
+// Closure as function argument
+// =============================================================================
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn test_closure_as_arg() {
+    let double = |x: Int| -> Int { x * 2 };
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(double, 0), 0);
+    assert_eq(apply_twice(double, 3), 12);
+}
+
+fn test_inline_closure_as_arg() {
+    assert_eq(apply(|x: Int| -> Int { x + 10 }, 5), 15);
+    assert_eq(apply(|x: Int| -> Int { x * x }, 4), 16);
+}
+
+// =============================================================================
+// Closure factories
+// =============================================================================
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * n }
+}
+
+fn test_closure_factory() {
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    assert_eq(add5(0), 5);
+    assert_eq(add5(100), 105);
+    assert_eq(add10(0), 10);
+    assert_eq(add10(90), 100);
+
+    let times3 = make_multiplier(3);
+    assert_eq(times3(7), 21);
+    assert_eq(times3(0), 0);
+}
+
+// =============================================================================
+// Closure in conditional
+// =============================================================================
+
+fn test_closure_in_conditional() {
+    let x = 10;
+    let f = if x > 5 {
+        |n: Int| -> Int { n * 2 }
+    } else {
+        |n: Int| -> Int { n * 3 }
+    };
+    assert_eq(f(4), 8);
+
+    let y = 2;
+    let g = if y > 5 {
+        |n: Int| -> Int { n * 2 }
+    } else {
+        |n: Int| -> Int { n * 3 }
+    };
+    assert_eq(g(4), 12);
+}
+
+fn main() -> Int {
+    test_identity_closure();
+    test_arithmetic_closures();
+    test_multi_arg_closure();
+    test_zero_arg_closure();
+    test_capture_single();
+    test_capture_multiple();
+    test_capture_in_loop();
+    test_closure_as_arg();
+    test_inline_closure_as_arg();
+    test_closure_factory();
+    test_closure_in_conditional();
+    print("[OK] 224_interp_closures_basic");
+    0
+}

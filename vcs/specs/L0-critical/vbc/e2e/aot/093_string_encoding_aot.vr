@@ -1,0 +1,279 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, encoding, run-length, arrays
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT run-length encoding/decoding of integer sequences using fixed-size array records
+
+// Array of 16 ints for storing sequences
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int,
+    len: Int
+};
+
+fn arr_new() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0,
+        len: 0,
+    }
+}
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 } else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 } else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 } else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 } else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 } else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn arr_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 },
+        len: a.len,
+    }
+}
+
+fn arr_push(a: Arr16, v: Int) -> Arr16 {
+    let idx = a.len;
+    let a2 = arr_set(a, idx, v);
+    Arr16 {
+        a0: a2.a0, a1: a2.a1, a2: a2.a2, a3: a2.a3,
+        a4: a2.a4, a5: a2.a5, a6: a2.a6, a7: a2.a7,
+        a8: a2.a8, a9: a2.a9, a10: a2.a10, a11: a2.a11,
+        a12: a2.a12, a13: a2.a13, a14: a2.a14, a15: a2.a15,
+        len: idx + 1,
+    }
+}
+
+// RLE encode: input is an Arr16 of values, output is Arr16 of (value, count) pairs
+// Encoded as: [value1, count1, value2, count2, ...]
+fn rle_encode(input: Arr16) -> Arr16 {
+    if input.len == 0 { arr_new() }
+    else {
+        let mut out = arr_new();
+        let mut i = 0;
+        let mut cur_val = arr_get(input, 0);
+        let mut cur_count = 1;
+        i = 1;
+        while i < input.len {
+            let v = arr_get(input, i);
+            if v == cur_val {
+                cur_count = cur_count + 1;
+            } else {
+                out = arr_push(out, cur_val);
+                out = arr_push(out, cur_count);
+                cur_val = v;
+                cur_count = 1;
+            }
+            i = i + 1;
+        }
+        // Push last run
+        out = arr_push(out, cur_val);
+        out = arr_push(out, cur_count);
+        out
+    }
+}
+
+// RLE decode: input is Arr16 of (value, count) pairs, output is Arr16 of values
+fn rle_decode(encoded: Arr16) -> Arr16 {
+    let mut out = arr_new();
+    let mut i = 0;
+    while i < encoded.len {
+        let val = arr_get(encoded, i);
+        let count = arr_get(encoded, i + 1);
+        let mut j = 0;
+        while j < count {
+            out = arr_push(out, val);
+            j = j + 1;
+        }
+        i = i + 2;
+    }
+    out
+}
+
+// Check if two arrays are equal
+fn arr_eq(a: Arr16, b: Arr16) -> Bool {
+    if a.len != b.len { false }
+    else {
+        let mut i = 0;
+        let mut equal = true;
+        while i < a.len {
+            if arr_get(a, i) != arr_get(b, i) { equal = false; }
+            i = i + 1;
+        }
+        equal
+    }
+}
+
+// Sum all elements
+fn arr_sum(a: Arr16) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < a.len {
+        s = s + arr_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn main() -> Int {
+    // === Test 1: Empty sequence ===
+    let empty = arr_new();
+    let enc_empty = rle_encode(empty);
+    assert_eq(enc_empty.len, 0);
+    let dec_empty = rle_decode(enc_empty);
+    assert_eq(dec_empty.len, 0);
+
+    // === Test 2: Single element ===
+    let single = arr_push(arr_new(), 5);
+    let enc_single = rle_encode(single);
+    assert_eq(enc_single.len, 2);  // (5, 1)
+    assert_eq(arr_get(enc_single, 0), 5);
+    assert_eq(arr_get(enc_single, 1), 1);
+    let dec_single = rle_decode(enc_single);
+    assert(arr_eq(dec_single, single));
+
+    // === Test 3: All same values [3,3,3,3,3] ===
+    let mut all_same = arr_new();
+    let mut i = 0;
+    while i < 5 {
+        all_same = arr_push(all_same, 3);
+        i = i + 1;
+    }
+    let enc_same = rle_encode(all_same);
+    assert_eq(enc_same.len, 2);  // (3, 5)
+    assert_eq(arr_get(enc_same, 0), 3);
+    assert_eq(arr_get(enc_same, 1), 5);
+    let dec_same = rle_decode(enc_same);
+    assert(arr_eq(dec_same, all_same));
+
+    // === Test 4: All different [1,2,3,4] ===
+    let mut all_diff = arr_new();
+    all_diff = arr_push(all_diff, 1);
+    all_diff = arr_push(all_diff, 2);
+    all_diff = arr_push(all_diff, 3);
+    all_diff = arr_push(all_diff, 4);
+    let enc_diff = rle_encode(all_diff);
+    assert_eq(enc_diff.len, 8);  // (1,1,2,1,3,1,4,1)
+    let dec_diff = rle_decode(enc_diff);
+    assert(arr_eq(dec_diff, all_diff));
+
+    // === Test 5: Pattern [1,1,2,2,2,3] ===
+    let mut pat = arr_new();
+    pat = arr_push(pat, 1);
+    pat = arr_push(pat, 1);
+    pat = arr_push(pat, 2);
+    pat = arr_push(pat, 2);
+    pat = arr_push(pat, 2);
+    pat = arr_push(pat, 3);
+    let enc_pat = rle_encode(pat);
+    assert_eq(enc_pat.len, 6);  // (1,2, 2,3, 3,1)
+    assert_eq(arr_get(enc_pat, 0), 1);
+    assert_eq(arr_get(enc_pat, 1), 2);
+    assert_eq(arr_get(enc_pat, 2), 2);
+    assert_eq(arr_get(enc_pat, 3), 3);
+    assert_eq(arr_get(enc_pat, 4), 3);
+    assert_eq(arr_get(enc_pat, 5), 1);
+    let dec_pat = rle_decode(enc_pat);
+    assert(arr_eq(dec_pat, pat));
+
+    // === Test 6: Alternating [7,8,7,8,7,8] ===
+    let mut alt = arr_new();
+    let mut k = 0;
+    while k < 6 {
+        if k % 2 == 0 { alt = arr_push(alt, 7); }
+        else { alt = arr_push(alt, 8); }
+        k = k + 1;
+    }
+    let enc_alt = rle_encode(alt);
+    assert_eq(enc_alt.len, 12);  // 6 runs of length 1
+    let dec_alt = rle_decode(enc_alt);
+    assert(arr_eq(dec_alt, alt));
+
+    // === Test 7: Compression ratio ===
+    // [5,5,5,5,5,5,5,5] = 8 elements, encoded as (5,8) = 2 elements
+    let mut rep8 = arr_new();
+    let mut m = 0;
+    while m < 8 {
+        rep8 = arr_push(rep8, 5);
+        m = m + 1;
+    }
+    let enc_rep8 = rle_encode(rep8);
+    assert_eq(enc_rep8.len, 2);
+    assert(enc_rep8.len < rep8.len);  // Compression achieved
+
+    // No compression for all-different
+    assert(enc_diff.len >= all_diff.len);
+
+    // === Test 8: Roundtrip preserves sum ===
+    assert_eq(arr_sum(dec_pat), arr_sum(pat));
+    assert_eq(arr_sum(dec_alt), arr_sum(alt));
+    assert_eq(arr_sum(dec_same), arr_sum(all_same));
+
+    // === Test 9: Large sequence [0,0,0,1,1,2,2,2,2,3,3,3] (12 elements) ===
+    let mut big = arr_new();
+    // 3 zeros
+    big = arr_push(big, 0);
+    big = arr_push(big, 0);
+    big = arr_push(big, 0);
+    // 2 ones
+    big = arr_push(big, 1);
+    big = arr_push(big, 1);
+    // 4 twos
+    big = arr_push(big, 2);
+    big = arr_push(big, 2);
+    big = arr_push(big, 2);
+    big = arr_push(big, 2);
+    // 3 threes
+    big = arr_push(big, 3);
+    big = arr_push(big, 3);
+    big = arr_push(big, 3);
+    assert_eq(big.len, 12);
+    let enc_big = rle_encode(big);
+    assert_eq(enc_big.len, 8);  // 4 runs * 2
+    assert_eq(arr_get(enc_big, 0), 0);
+    assert_eq(arr_get(enc_big, 1), 3);
+    assert_eq(arr_get(enc_big, 2), 1);
+    assert_eq(arr_get(enc_big, 3), 2);
+    assert_eq(arr_get(enc_big, 4), 2);
+    assert_eq(arr_get(enc_big, 5), 4);
+    assert_eq(arr_get(enc_big, 6), 3);
+    assert_eq(arr_get(enc_big, 7), 3);
+    let dec_big = rle_decode(enc_big);
+    assert(arr_eq(dec_big, big));
+
+    // === Test 10: Total count from encoded equals original length ===
+    // Sum of all counts in encoded = original length
+    let mut count_sum = 0;
+    let mut ci = 1;
+    while ci < enc_big.len {
+        count_sum = count_sum + arr_get(enc_big, ci);
+        ci = ci + 2;
+    }
+    assert_eq(count_sum, big.len);
+
+    0
+}

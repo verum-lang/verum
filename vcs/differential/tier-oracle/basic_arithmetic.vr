@@ -1,0 +1,345 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, arithmetic, tier-oracle
+// @timeout: 10000
+
+/// Comprehensive arithmetic tests for Tier 0 vs Tier 3 equivalence.
+/// Tests fundamental arithmetic operations that must produce identical
+/// results in the interpreter and AOT-compiled code.
+
+fn main() {
+    test_integer_basics();
+    test_integer_edge_cases();
+    test_float_basics();
+    test_float_edge_cases();
+    test_bitwise_operations();
+    test_mixed_operations();
+    test_operator_precedence();
+    test_big_integers();
+}
+
+/// Basic integer arithmetic
+fn test_integer_basics() {
+    println("=== Integer Basics ===");
+
+    // Addition
+    let a = 42 + 17;
+    let b = 0 + 100;
+    let c = -50 + 30;
+    let d = -25 + (-25);
+    println(f"add: {a} {b} {c} {d}");
+
+    // Subtraction
+    let e = 100 - 42;
+    let f = 0 - 50;
+    let g = -10 - (-30);
+    let h = -50 - 50;
+    println(f"sub: {e} {f} {g} {h}");
+
+    // Multiplication
+    let i = 6 * 7;
+    let j = -3 * 4;
+    let k = -5 * (-6);
+    let l = 0 * 999999;
+    println(f"mul: {i} {j} {k} {l}");
+
+    // Division
+    let m = 100 / 5;
+    let n = 99 / 10;
+    let o = -100 / 7;
+    let p = 100 / (-7);
+    let q = -100 / (-7);
+    println(f"div: {m} {n} {o} {p} {q}");
+
+    // Modulo
+    let r = 100 % 7;
+    let s = 49 % 7;
+    let t = -10 % 3;
+    let u = 10 % (-3);
+    let v = -10 % (-3);
+    println(f"mod: {r} {s} {t} {u} {v}");
+
+    // Power
+    let w = 2 ** 10;
+    let x = 3 ** 4;
+    let y = (-2) ** 3;
+    let z = (-2) ** 4;
+    let zero_pow = 0 ** 5;
+    let one_pow = 1 ** 1000;
+    println(f"pow: {w} {x} {y} {z} {zero_pow} {one_pow}");
+}
+
+/// Integer edge cases
+fn test_integer_edge_cases() {
+    println("\n=== Integer Edge Cases ===");
+
+    // Identity operations
+    let a = 0 + 42;
+    let b = 42 - 0;
+    let c = 1 * 42;
+    let d = 42 / 1;
+    println(f"identity: {a} {b} {c} {d}");
+
+    // Zero handling
+    let e = 0 * 999999999;
+    let f = 0 / 42;
+    let g = 0 % 42;
+    let h = 0 ** 10;
+    println(f"zero: {e} {f} {g} {h}");
+
+    // One handling
+    let i = 1 ** 0;
+    let j = 1 ** 100;
+    let k = 42 ** 0;
+    let l = 42 ** 1;
+    println(f"one: {i} {j} {k} {l}");
+
+    // Negative results
+    let m = 5 - 10;
+    let n = -1 * 100;
+    let o = 100 / (-1);
+    println(f"negative: {m} {n} {o}");
+
+    // Larger numbers (within I64)
+    let large1 = 1000000 * 1000;
+    let large2 = 9223372036854775807 / 2;  // Max I64 / 2
+    let large3 = 1000000000 + 999999999;
+    println(f"large: {large1} {large2} {large3}");
+
+    // Fixed-width integer operations
+    let i8_val: I8 = 127;
+    let i16_val: I16 = 32767;
+    let i32_val: I32 = 2147483647;
+    let i64_val: I64 = 9223372036854775807;
+    println(f"fixed max: {i8_val} {i16_val} {i32_val} {i64_val}");
+
+    let u8_val: U8 = 255;
+    let u16_val: U16 = 65535;
+    let u32_val: U32 = 4294967295;
+    let u64_val: U64 = 18446744073709551615;
+    println(f"unsigned max: {u8_val} {u16_val} {u32_val} {u64_val}");
+}
+
+/// Basic float arithmetic
+fn test_float_basics() {
+    println("\n=== Float Basics ===");
+
+    // Addition
+    let a = 3.14 + 2.86;
+    let b = 0.1 + 0.2;  // Classic floating-point test
+    let c = -1.5 + 2.5;
+    println(f"add: {a} {b} {c}");
+
+    // Subtraction
+    let d = 10.0 - 3.5;
+    let e = 0.3 - 0.1;
+    let f = -5.5 - 2.5;
+    println(f"sub: {d} {e} {f}");
+
+    // Multiplication
+    let g = 2.5 * 4.0;
+    let h = 0.5 * 0.5;
+    let i = -2.0 * 3.0;
+    println(f"mul: {g} {h} {i}");
+
+    // Division
+    let j = 10.0 / 4.0;
+    let k = 1.0 / 3.0;
+    let l = -9.0 / 2.0;
+    println(f"div: {j} {k} {l}");
+
+    // Power
+    let m = 2.0 ** 0.5;    // Square root of 2
+    let n = 10.0 ** 2.0;
+    let o = 2.0 ** 10.0;
+    println(f"pow: {m} {n} {o}");
+
+    // Float32 vs Float64
+    let f32_val: F32 = 3.14159;
+    let f64_val: F64 = 3.14159265358979323846;
+    println(f"precision: {f32_val} {f64_val}");
+}
+
+/// Float edge cases
+fn test_float_edge_cases() {
+    println("\n=== Float Edge Cases ===");
+
+    // Special values
+    let inf = 1.0 / 0.0;
+    let neg_inf = -1.0 / 0.0;
+    let nan = 0.0 / 0.0;
+    println(f"special: inf={inf.is_infinite()} neg_inf={neg_inf.is_infinite()} nan={nan.is_nan()}");
+
+    // Zero handling
+    let pos_zero = 0.0;
+    let neg_zero = -0.0;
+    println(f"zeros equal: {pos_zero == neg_zero}");
+    println(f"zeros bits differ: {pos_zero.to_bits() != neg_zero.to_bits()}");
+
+    // Subnormal numbers
+    let subnormal = 1.0e-308 / 10.0;
+    println(f"subnormal: {subnormal.is_subnormal()}");
+
+    // Precision boundaries
+    let eps = 2.220446049250313e-16;  // Machine epsilon for F64
+    let near_one = 1.0 + eps;
+    let near_one2 = 1.0 + eps / 2.0;
+    println(f"epsilon: 1+eps={near_one} 1+eps/2={near_one2}");
+    println(f"epsilon test: {near_one > 1.0} {near_one2 == 1.0}");
+
+    // Large/small multiplication
+    let huge = 1.0e200 * 1.0e100;
+    let tiny = 1.0e-200 * 1.0e-100;
+    println(f"extreme: huge_inf={huge.is_infinite()} tiny_zero={tiny == 0.0}");
+
+    // Rounding
+    let round1 = 2.5.round();
+    let round2 = 3.5.round();
+    let round3 = (-2.5).round();
+    let floor1 = 2.7.floor();
+    let ceil1 = 2.3.ceil();
+    let trunc1 = (-2.7).trunc();
+    println(f"round: {round1} {round2} {round3} floor={floor1} ceil={ceil1} trunc={trunc1}");
+}
+
+/// Bitwise operations
+fn test_bitwise_operations() {
+    println("\n=== Bitwise Operations ===");
+
+    // AND
+    let and1 = 0b1010 & 0b1100;
+    let and2 = 0xFF & 0x0F;
+    let and3 = 0xFFFFFFFF & 0x0;
+    println(f"and: {and1} {and2} {and3}");
+
+    // OR
+    let or1 = 0b1010 | 0b0101;
+    let or2 = 0xFF | 0xF00;
+    let or3 = 0x0 | 0xFFFF;
+    println(f"or: {or1} {or2} {or3}");
+
+    // XOR
+    let xor1 = 0b1010 ^ 0b1100;
+    let xor2 = 0xFF ^ 0xFF;
+    let xor3 = 0xABCD ^ 0x0;
+    println(f"xor: {xor1} {xor2} {xor3}");
+
+    // NOT
+    let not1: I8 = ~0b0;
+    let not2: I8 = ~0b1111;
+    let not3: U8 = ~0x0;
+    println(f"not: {not1} {not2} {not3}");
+
+    // Left shift
+    let shl1 = 1 << 4;
+    let shl2 = 0b0001 << 3;
+    let shl3 = 0xFF << 8;
+    println(f"shl: {shl1} {shl2} {shl3}");
+
+    // Right shift (arithmetic for signed)
+    let shr1 = 16 >> 2;
+    let shr2 = 0xFF00 >> 8;
+    let shr3: I32 = -16 >> 2;  // Arithmetic shift preserves sign
+    println(f"shr: {shr1} {shr2} {shr3}");
+
+    // Unsigned right shift
+    let ushr: U32 = 0x80000000 >> 1;
+    println(f"ushr: {ushr}");
+
+    // Combined bitwise
+    let combined = (0b1010 | 0b0100) & ~0b0010;
+    println(f"combined: {combined}");
+}
+
+/// Mixed type operations
+fn test_mixed_operations() {
+    println("\n=== Mixed Operations ===");
+
+    // Int to float promotion
+    let a = 5 + 2.5;
+    let b = 10.0 - 3;
+    let c = 4 * 2.5;
+    let d = 10 / 4.0;
+    println(f"int+float: {a} {b} {c} {d}");
+
+    // Type coercion in expressions
+    let e: Float = 7 / 2;      // Integer division, then convert
+    let f: Float = 7.0 / 2;    // Float division
+    let g: Float = 7 / 2.0;    // Float division
+    println(f"coercion: {e} {f} {g}");
+
+    // Comparing across types
+    let h = 5 == 5.0;
+    let i = 10 < 10.5;
+    let j = 10.0 > 9;
+    println(f"compare: {h} {i} {j}");
+}
+
+/// Operator precedence
+fn test_operator_precedence() {
+    println("\n=== Operator Precedence ===");
+
+    // Arithmetic precedence
+    let a = 2 + 3 * 4;
+    let b = (2 + 3) * 4;
+    let c = 10 - 2 - 3;  // Left associative
+    let d = 2 ** 3 ** 2; // Right associative
+    println(f"arith: {a} {b} {c} {d}");
+
+    // Mixed precedence
+    let e = 10 + 20 / 5 - 2 * 3;
+    let f = 100 / 10 / 2;
+    let g = 100 / (10 / 2);
+    println(f"mixed: {e} {f} {g}");
+
+    // Bitwise precedence
+    let h = 1 | 2 & 3;    // & binds tighter than |
+    let i = (1 | 2) & 3;
+    let j = 1 << 2 + 1;   // + binds tighter than <<
+    let k = (1 << 2) + 1;
+    println(f"bitwise: {h} {i} {j} {k}");
+
+    // Comparison chains
+    let l = 5 > 3 && 3 > 1;
+    let m = 1 < 2 && 2 < 3 && 3 < 4;
+    println(f"compare: {l} {m}");
+
+    // Complex expression
+    let complex = ((2 + 3) * 4 - 5) / 3 + 2 ** 3;
+    println(f"complex: {complex}");
+}
+
+/// Big integer operations (arbitrary precision)
+fn test_big_integers() {
+    println("\n=== Big Integers ===");
+
+    // Beyond I64 range
+    let big1: Int = 9999999999999999999999999999999999999999;
+    let big2: Int = 1;
+    let big_sum = big1 + big2;
+    println(f"big_sum: {big_sum}");
+
+    // Big multiplication
+    let big_product: Int = 10 ** 50;
+    println(f"10^50: {big_product}");
+
+    // Big factorial (20!)
+    let mut factorial: Int = 1;
+    for i in 1..=20 {
+        factorial = factorial * i;
+    }
+    println(f"20!: {factorial}");
+
+    // Negative big integers
+    let neg_big: Int = -10 ** 40;
+    println(f"neg_big: {neg_big}");
+
+    // Big division
+    let big_div = (10 ** 100) / (10 ** 50);
+    println(f"10^100/10^50: {big_div}");
+
+    // Big modulo
+    let big_mod = (10 ** 100) % (10 ** 50 + 1);
+    println(f"10^100 mod (10^50+1): {big_mod}");
+}

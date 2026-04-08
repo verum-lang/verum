@@ -1,0 +1,67 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, guard, expression, error
+// @description: Test missing guard expression after 'if' or 'where'
+// @expected-error: E085
+
+type Option<T> is None | Some(T);
+
+fn test_if_guard_missing_expr() {
+    let value = 42;
+
+    // Invalid: 'if' guard without expression
+    match value {
+        x if => print("missing guard"),
+        _ => print("other"),
+    }
+}
+
+fn test_where_guard_missing_expr() {
+    let value = 42;
+
+    // Invalid: 'where' guard without expression
+    match value {
+        x where => print("missing guard"),
+        _ => print("other"),
+    }
+}
+
+fn test_guard_with_arrow_only() {
+    let value = 42;
+
+    // Invalid: guard immediately followed by arrow
+    match value {
+        x if => print("x"),
+        _ => print("other"),
+    }
+}
+
+fn test_guard_empty_block() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: guard with empty block instead of expression
+    match opt {
+        Some(x) if {} => print("empty block guard"),
+        None => print("none"),
+    }
+}
+
+fn test_double_guard() {
+    let value = 42;
+
+    // Invalid: two guard keywords
+    match value {
+        x if if x > 0 => print("double if"),
+        _ => print("other"),
+    }
+}
+
+fn test_guard_missing_condition_with_comma() {
+    let value = 42;
+
+    // Invalid: guard followed by comma (parser confusion)
+    match value {
+        x if, => print("comma after if"),
+        _ => print("other"),
+    }
+}

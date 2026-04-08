@@ -1,0 +1,82 @@
+// @test: run-panic
+// @expected-panic: Context Database not provided
+// @tier: 0
+// @level: L2
+// @tags: contexts, error, panic, runtime
+// @description: Tests runtime panic when accessing an unprovided context
+//
+// This is the canonical test for the "Context X not provided" runtime error.
+// The error occurs when a function with `using [X]` is called, but X was
+// never provided in any enclosing scope.
+
+context async Database {
+    async fn query(sql: Text) -> List<Row>;
+    async fn execute(sql: Text) -> Int;
+}
+
+context Logger {
+    fn info(message: Text);
+    fn error(message: Text);
+}
+
+type Row is Map<Text, Text>;
+
+// Logger implementation (we'll provide this one)
+type ConsoleLogger is {};
+
+implement Logger for ConsoleLogger {
+    fn info(message: Text) {
+        println("[INFO] " + message);
+    }
+
+    fn error(message: Text) {
+        println("[ERROR] " + message);
+    }
+}
+
+// Database implementation (we WON'T provide this)
+type PostgresDatabase is {
+    connection_string: Text,
+};
+
+implement Database for PostgresDatabase {
+    async fn query(sql: Text) -> List<Row> {
+        List.new()
+    }
+
+    async fn execute(sql: Text) -> Int {
+        0
+    }
+}
+
+// Function that requires Database context
+async fn fetch_users() -> List<Row> using [Database] {
+    // When this line executes, if Database context is not provided,
+    // runtime will panic with: "Context Database not provided"
+    Database.query("SELECT * FROM users").await
+}
+
+// Function that requires both contexts
+async fn log_and_fetch() using [Logger, Database] {
+    Logger.info("About to fetch users");
+    // Logger works fine because it's provided
+    // But Database access will panic
+    let users = fetch_users().await;
+    Logger.info("Fetched " + users.len().to_text() + " users");
+}
+
+async fn main() {
+    // Only provide Logger, deliberately forget Database
+    provide Logger = ConsoleLogger {};
+
+    // This will work - Logger is provided
+    Logger.info("Application starting");
+    Logger.info("Attempting database operation...");
+
+    // This will panic with: "Context Database not provided"
+    // because we never did: provide Database = ...
+    log_and_fetch().await;
+
+    // This line is never reached
+    Logger.info("Operation completed");
+}

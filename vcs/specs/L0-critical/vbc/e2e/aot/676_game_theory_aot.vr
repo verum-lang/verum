@@ -1,0 +1,193 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, game-theory, minimax, payoff
+// @timeout: 30000
+
+// Game theory: minimax, Nash equilibrium for 2x2 games, payoff matrices
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+// 2x2 payoff matrix stored in Arr8: matrix[r][c] = get8(m, r*2+c)
+// Indices: (0,0)=v0, (0,1)=v1, (1,0)=v2, (1,1)=v3
+
+// Row player's minimum payoff for each row (security level)
+fn row_min(m: Arr8, row: Int) -> Int {
+    min2(get8(m, row * 2), get8(m, row * 2 + 1))
+}
+
+// Column player's maximum loss for each column (from row player's perspective)
+fn col_max(m: Arr8, col: Int) -> Int {
+    max2(get8(m, col), get8(m, 2 + col))
+}
+
+// Maximin: max of row minimums (row player's guaranteed payoff)
+fn maximin(m: Arr8) -> Int {
+    max2(row_min(m, 0), row_min(m, 1))
+}
+
+// Minimax: min of column maximums (column player's best guarantee)
+fn minimax(m: Arr8) -> Int {
+    min2(col_max(m, 0), col_max(m, 1))
+}
+
+// Saddle point exists if maximin == minimax
+fn has_saddle_point(m: Arr8) -> Int {
+    if maximin(m) == minimax(m) { 1 } else { 0 }
+}
+
+// Find saddle point value (returns it if exists, -999 otherwise)
+fn saddle_value(m: Arr8) -> Int {
+    if has_saddle_point(m) == 1 { maximin(m) }
+    else { 0 - 999 }
+}
+
+// Check if (r, c) is a Nash equilibrium in a 2x2 game
+// It is if row r is best response to column c, and column c is best response to row r
+fn is_nash_eq(m: Arr8, r: Int, c: Int) -> Int {
+    let cur = get8(m, r * 2 + c);
+    // Row player: given col c, is row r the best?
+    let other_row = if r == 0 { 1 } else { 0 };
+    let row_best = if cur >= get8(m, other_row * 2 + c) { 1 } else { 0 };
+    // Column player wants to MINIMIZE row player's payoff
+    // Given row r, column c should give minimum payoff to row player
+    let other_col = if c == 0 { 1 } else { 0 };
+    let col_best = if cur <= get8(m, r * 2 + other_col) { 1 } else { 0 };
+    if row_best == 1 {
+        if col_best == 1 { 1 } else { 0 }
+    } else { 0 }
+}
+
+// Count Nash equilibria in 2x2 game
+fn count_nash(m: Arr8) -> Int {
+    is_nash_eq(m, 0, 0) + is_nash_eq(m, 0, 1) + is_nash_eq(m, 1, 0) + is_nash_eq(m, 1, 1)
+}
+
+// Dominant strategy for row player: row that's always >= other
+// Returns 0 or 1, or -1 if no dominant
+fn row_dominant(m: Arr8) -> Int {
+    // Row 0 dominates if m[0][0]>=m[1][0] and m[0][1]>=m[1][1]
+    if get8(m, 0) >= get8(m, 2) {
+        if get8(m, 1) >= get8(m, 3) { 0 }
+        else { 0 - 1 }
+    } else if get8(m, 2) >= get8(m, 0) {
+        if get8(m, 3) >= get8(m, 1) { 1 }
+        else { 0 - 1 }
+    } else { 0 - 1 }
+}
+
+// Prisoner's dilemma check: T>R>P>S where
+// matrix = R, S, T, P for (C,C), (C,D), (D,C), (D,D)
+fn is_prisoners_dilemma(r: Int, s: Int, t: Int, p: Int) -> Int {
+    if t > r {
+        if r > p {
+            if p > s { 1 } else { 0 }
+        } else { 0 }
+    } else { 0 }
+}
+
+fn test_saddle() -> Int {
+    // Matrix with saddle point:
+    // [3, 1]
+    // [2, 4]
+    // Row mins: 1, 2; maximin=2
+    // Col maxs: 3, 4; minimax=3
+    // No saddle point (2 != 3)
+    let m1 = Arr8 { v0: 3, v1: 1, v2: 2, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(maximin(m1), 2);
+    assert_eq(minimax(m1), 3);
+    assert_eq(has_saddle_point(m1), 0);
+
+    // Matrix with saddle point:
+    // [3, 5]
+    // [1, 2]
+    // Row mins: 3, 1; maximin=3
+    // Col maxs: 3, 5; minimax=3
+    // Saddle at (0,0) = 3
+    let m2 = Arr8 { v0: 3, v1: 5, v2: 1, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(maximin(m2), 3);
+    assert_eq(minimax(m2), 3);
+    assert_eq(has_saddle_point(m2), 1);
+    assert_eq(saddle_value(m2), 3);
+    1
+}
+
+fn test_nash() -> Int {
+    // Matrix:
+    // [3, 5]
+    // [1, 2]
+    let m = Arr8 { v0: 3, v1: 5, v2: 1, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // (0,0): row best response to col 0: 3>1 yes. col best response to row 0: 3<5 yes. Nash!
+    assert_eq(is_nash_eq(m, 0, 0), 1);
+    assert_eq(count_nash(m), 1);
+    1
+}
+
+fn test_dominant() -> Int {
+    // Row 0 dominant:
+    // [5, 3]
+    // [2, 1]
+    let m = Arr8 { v0: 5, v1: 3, v2: 2, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(row_dominant(m), 0);
+    // Row 1 dominant:
+    // [1, 2]
+    // [3, 4]
+    let m2 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(row_dominant(m2), 1);
+    // No dominant:
+    // [3, 1]
+    // [2, 4]
+    let m3 = Arr8 { v0: 3, v1: 1, v2: 2, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(row_dominant(m3), 0 - 1);
+    1
+}
+
+fn test_prisoners_dilemma() -> Int {
+    // Classic PD: T=5, R=3, P=1, S=0 → T>R>P>S
+    assert_eq(is_prisoners_dilemma(3, 0, 5, 1), 1);
+    // Not PD if R>T
+    assert_eq(is_prisoners_dilemma(5, 0, 3, 1), 0);
+
+    // PD matrix: (C,C)=3, (C,D)=0, (D,C)=5, (D,D)=1
+    // Row player payoff matrix
+    let pd = Arr8 { v0: 3, v1: 0, v2: 5, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Dominant strategy: D (row 1) dominates C (row 0): 5>3 and 1>0
+    assert_eq(row_dominant(pd), 1);
+    // Nash eq at (D,D) = (1,1)
+    assert_eq(is_nash_eq(pd, 1, 1), 1);
+    1
+}
+
+fn test_zero_sum() -> Int {
+    // In zero-sum game, minimax theorem holds
+    // Matrix:
+    // [2, -1]
+    // [-1, 1]
+    // Note: using positive encoding: add 10 to all
+    // [12, 9]
+    // [9, 11]
+    let m = Arr8 { v0: 12, v1: 9, v2: 9, v3: 11, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let mmi = maximin(m);
+    let mmx = minimax(m);
+    // maximin <= minimax always
+    assert_eq(mmi <= mmx, 1);
+    1
+}
+
+fn main() -> Int {
+    test_saddle();
+    test_nash();
+    test_dominant();
+    test_prisoners_dilemma();
+    test_zero_sum();
+    print("[OK] 676_game_theory_aot");
+    0
+}

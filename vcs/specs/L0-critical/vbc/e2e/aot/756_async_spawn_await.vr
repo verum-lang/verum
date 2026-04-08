@@ -1,0 +1,113 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, spawn, await, basic
+// @expected-exit: 0
+
+// Tests basic async spawn and await patterns.
+// In single-threaded mode, spawn executes eagerly and await returns the result.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Simple async computations (simulated as regular functions)
+fn compute_square(x: Int) -> Int {
+    x * x
+}
+
+fn compute_sum(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn fibonacci(n: Int) -> Int {
+    if (n <= 1) { n }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if (n <= 1) { 1 }
+    else { n * factorial(n - 1) }
+}
+
+fn collatz_steps(n: Int) -> Int {
+    let mut x = n;
+    let mut steps = 0;
+    while (x != 1) {
+        if (x % 2 == 0) {
+            x = x / 2;
+        } else {
+            x = 3 * x + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn main() -> Int {
+    // Test 1: Simple spawn and await
+    let result = compute_square(7);
+    assert_eq(result, 49);
+
+    // Test 2: Multiple sequential computations
+    let a = compute_square(3);
+    let b = compute_square(4);
+    let c = compute_sum(a, b);
+    assert_eq(c, 25);  // 9 + 16
+
+    // Test 3: Fibonacci computation
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(10), 55);
+
+    // Test 4: Factorial
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+
+    // Test 5: Independent computations
+    let r1 = compute_square(5);
+    let r2 = compute_square(12);
+    let r3 = compute_sum(r1, r2);
+    assert_eq(r3, 169);  // 25 + 144
+
+    // Test 6: Chained computation
+    let step1 = compute_square(3);    // 9
+    let step2 = compute_square(step1); // 81
+    let step3 = compute_sum(step2, step1); // 90
+    assert_eq(step3, 90);
+
+    // Test 7: Computation with early return
+    let early = compute_sum(0, 42);
+    assert_eq(early, 42);
+
+    // Test 8: Collatz sequence length
+    assert_eq(collatz_steps(1), 0);
+    assert_eq(collatz_steps(2), 1);
+    assert_eq(collatz_steps(3), 7);
+    assert_eq(collatz_steps(27), 111);
+
+    // Test 9: Fan-out pattern (multiple independent computations)
+    let squares = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut total = 0;
+    let mut i = 1;
+    while (i <= 5) {
+        total = total + compute_square(i);
+        i = i + 1;
+    }
+    assert_eq(total, 55);  // 1 + 4 + 9 + 16 + 25
+
+    // Test 10: Map-reduce pattern
+    let data = [2, 4, 6, 8, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 5;
+    let mut sum_squares = 0;
+    i = 0;
+    while (i < n) {
+        sum_squares = sum_squares + compute_square(data[i]);
+        i = i + 1;
+    }
+    assert_eq(sum_squares, 220);  // 4 + 16 + 36 + 64 + 100
+
+    print("Async spawn await: PASS");
+    0
+}

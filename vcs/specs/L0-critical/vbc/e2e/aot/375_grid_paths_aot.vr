@@ -1,0 +1,302 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, grid-paths, dynamic-programming, combinatorics
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for counting paths in a grid using dynamic programming.
+// Count unique paths from top-left to bottom-right (can only move right or down).
+// Also handles grids with blocked cells (obstacles).
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Grid stored as rows x cols. An 8x8 grid: 8 rows of Arr8.
+type Grid8 is { r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8, r4: Arr8, r5: Arr8, r6: Arr8, r7: Arr8 };
+
+fn grid_get_row(g: Grid8, r: Int) -> Arr8 {
+    if r == 0 { g.r0 } else if r == 1 { g.r1 }
+    else if r == 2 { g.r2 } else if r == 3 { g.r3 }
+    else if r == 4 { g.r4 } else if r == 5 { g.r5 }
+    else if r == 6 { g.r6 } else { g.r7 }
+}
+
+fn grid_set_row(g: Grid8, r: Int, row: Arr8) -> Grid8 {
+    Grid8 {
+        r0: if r == 0 { row } else { g.r0 },
+        r1: if r == 1 { row } else { g.r1 },
+        r2: if r == 2 { row } else { g.r2 },
+        r3: if r == 3 { row } else { g.r3 },
+        r4: if r == 4 { row } else { g.r4 },
+        r5: if r == 5 { row } else { g.r5 },
+        r6: if r == 6 { row } else { g.r6 },
+        r7: if r == 7 { row } else { g.r7 }
+    }
+}
+
+fn grid_get(g: Grid8, r: Int, c: Int) -> Int {
+    a8_get(grid_get_row(g, r), c)
+}
+
+fn grid_set(g: Grid8, r: Int, c: Int, v: Int) -> Grid8 {
+    let row = grid_get_row(g, r);
+    let new_row = a8_set(row, c, v);
+    grid_set_row(g, r, new_row)
+}
+
+fn grid_zero() -> Grid8 {
+    let z = a8_zero();
+    Grid8 { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z }
+}
+
+// Count unique paths from (0,0) to (rows-1, cols-1) in an open grid
+// Can only move right or down
+fn count_paths(rows: Int, cols: Int) -> Int {
+    let mut dp = grid_zero();
+    // First row: all 1s
+    let mut c = 0;
+    while c < cols {
+        dp = grid_set(dp, 0, c, 1);
+        c = c + 1;
+    }
+    // First column: all 1s
+    let mut r = 0;
+    while r < rows {
+        dp = grid_set(dp, r, 0, 1);
+        r = r + 1;
+    }
+    // Fill rest: dp[r][c] = dp[r-1][c] + dp[r][c-1]
+    r = 1;
+    while r < rows {
+        c = 1;
+        while c < cols {
+            let val = grid_get(dp, r - 1, c) + grid_get(dp, r, c - 1);
+            dp = grid_set(dp, r, c, val);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    grid_get(dp, rows - 1, cols - 1)
+}
+
+// Count paths with obstacles. obstacle grid: 1 = blocked, 0 = open.
+fn count_paths_obstacles(obstacles: Grid8, rows: Int, cols: Int) -> Int {
+    let mut dp = grid_zero();
+
+    // If start or end is blocked, no paths
+    if grid_get(obstacles, 0, 0) == 1 {
+        return 0;
+    }
+    if grid_get(obstacles, rows - 1, cols - 1) == 1 {
+        return 0;
+    }
+
+    dp = grid_set(dp, 0, 0, 1);
+
+    // First row
+    let mut c = 1;
+    while c < cols {
+        if grid_get(obstacles, 0, c) == 1 {
+            dp = grid_set(dp, 0, c, 0);
+        } else {
+            dp = grid_set(dp, 0, c, grid_get(dp, 0, c - 1));
+        }
+        c = c + 1;
+    }
+
+    // First column
+    let mut r = 1;
+    while r < rows {
+        if grid_get(obstacles, r, 0) == 1 {
+            dp = grid_set(dp, r, 0, 0);
+        } else {
+            dp = grid_set(dp, r, 0, grid_get(dp, r - 1, 0));
+        }
+        r = r + 1;
+    }
+
+    // Fill rest
+    r = 1;
+    while r < rows {
+        c = 1;
+        while c < cols {
+            if grid_get(obstacles, r, c) == 1 {
+                dp = grid_set(dp, r, c, 0);
+            } else {
+                let val = grid_get(dp, r - 1, c) + grid_get(dp, r, c - 1);
+                dp = grid_set(dp, r, c, val);
+            }
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+
+    grid_get(dp, rows - 1, cols - 1)
+}
+
+// C(n, k) for verification using Pascal's triangle relation
+// C(m+n-2, n-1) = number of paths in m x n grid
+@allow(unbounded_recursion)
+fn binomial(n: Int, k: Int) -> Int {
+    if k == 0 { return 1; }
+    if k > n { return 0; }
+    if k > n - k {
+        return binomial(n, n - k);
+    }
+    let mut result = 1;
+    let mut i = 0;
+    while i < k {
+        result = result * (n - i);
+        result = result / (i + 1);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_1x1_grid() {
+    assert_eq(count_paths(1, 1), 1);
+}
+
+fn test_1xn_grid() {
+    // Only one path: all right moves
+    assert_eq(count_paths(1, 5), 1);
+}
+
+fn test_mx1_grid() {
+    // Only one path: all down moves
+    assert_eq(count_paths(5, 1), 1);
+}
+
+fn test_2x2_grid() {
+    // 2 paths: right-down or down-right
+    assert_eq(count_paths(2, 2), 2);
+}
+
+fn test_3x3_grid() {
+    // C(4,2) = 6
+    assert_eq(count_paths(3, 3), 6);
+}
+
+fn test_3x7_grid() {
+    // C(8,2) = 28
+    assert_eq(count_paths(3, 7), 28);
+}
+
+fn test_4x4_grid() {
+    // C(6,3) = 20
+    assert_eq(count_paths(4, 4), 20);
+}
+
+fn test_5x5_grid() {
+    // C(8,4) = 70
+    assert_eq(count_paths(5, 5), 70);
+}
+
+fn test_matches_binomial() {
+    // paths(m, n) == C(m+n-2, m-1)
+    let mut m = 1;
+    while m <= 6 {
+        let mut n = 1;
+        while n <= 6 {
+            let paths = count_paths(m, n);
+            let binom = binomial(m + n - 2, m - 1);
+            assert_eq(paths, binom);
+            n = n + 1;
+        }
+        m = m + 1;
+    }
+}
+
+fn test_symmetry() {
+    // paths(m, n) == paths(n, m)
+    assert_eq(count_paths(3, 5), count_paths(5, 3));
+    assert_eq(count_paths(2, 7), count_paths(7, 2));
+    assert_eq(count_paths(4, 6), count_paths(6, 4));
+}
+
+fn test_obstacles_no_obstacles() {
+    let obs = grid_zero();
+    assert_eq(count_paths_obstacles(obs, 3, 3), 6);
+}
+
+fn test_obstacles_blocked_start() {
+    let mut obs = grid_zero();
+    obs = grid_set(obs, 0, 0, 1);
+    assert_eq(count_paths_obstacles(obs, 3, 3), 0);
+}
+
+fn test_obstacles_blocked_end() {
+    let mut obs = grid_zero();
+    obs = grid_set(obs, 2, 2, 1);
+    assert_eq(count_paths_obstacles(obs, 3, 3), 0);
+}
+
+fn test_obstacles_center_blocked() {
+    // 3x3 grid with center blocked
+    let mut obs = grid_zero();
+    obs = grid_set(obs, 1, 1, 1);
+    // Without obstacle: 6 paths. With center blocked: 2 paths
+    assert_eq(count_paths_obstacles(obs, 3, 3), 2);
+}
+
+fn test_obstacles_corridor() {
+    // 3x3 grid: block (0,1) and (1,0) -> only path if start still accessible
+    // Actually, (0,0) -> can't go right (0,1 blocked), can't go down (1,0 blocked) -> 0 paths
+    let mut obs = grid_zero();
+    obs = grid_set(obs, 0, 1, 1);
+    obs = grid_set(obs, 1, 0, 1);
+    assert_eq(count_paths_obstacles(obs, 3, 3), 0);
+}
+
+fn test_obstacles_one_path() {
+    // 3x3 grid: block most paths, leave exactly one
+    // Block (1,1) and (0,2) -> path: down,down,right,right
+    let mut obs = grid_zero();
+    obs = grid_set(obs, 1, 1, 1);
+    obs = grid_set(obs, 0, 2, 1);
+    // (0,0)->(1,0)->(2,0)->(2,1)->(2,2) is one path
+    // (0,0)->(0,1)->can't go to (0,2), must go down to (1,1) which is blocked
+    // So: (0,0)->(1,0)->(2,0)->(2,1)->(2,2) = 1 path
+    assert_eq(count_paths_obstacles(obs, 3, 3), 1);
+}
+
+fn main() -> Int {
+    test_1x1_grid();
+    test_1xn_grid();
+    test_mx1_grid();
+    test_2x2_grid();
+    test_3x3_grid();
+    test_3x7_grid();
+    test_4x4_grid();
+    test_5x5_grid();
+    test_matches_binomial();
+    test_symmetry();
+    test_obstacles_no_obstacles();
+    test_obstacles_blocked_start();
+    test_obstacles_blocked_end();
+    test_obstacles_center_blocked();
+    test_obstacles_corridor();
+    test_obstacles_one_path();
+    print("[OK] 375_grid_paths_aot");
+    0
+}

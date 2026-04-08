@@ -1,0 +1,250 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: ownership, borrows, references
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// Borrowing - Ownership Borrow Test Seed
+// Tests borrow semantics and reference handling
+// =============================================================================
+
+// Shared borrow (immutable reference)
+fn shared_borrow() {
+    let value = 42;
+    let ref1 = &value;
+    let ref2 = &value;  // Multiple shared borrows OK
+
+    // Can read through both
+    let sum = *ref1 + *ref2;
+
+    // Original still readable
+    let original = value;
+}
+
+// Mutable borrow (exclusive reference)
+fn mutable_borrow() {
+    let mut value = 42;
+    let ref_mut = &mut value;
+
+    // Can modify through reference
+    *ref_mut = 100;
+
+    // Only one mutable borrow at a time
+    // let ref2 = &mut value;  // Error!
+}
+
+// Borrow scope rules
+fn borrow_scopes() {
+    let mut value = 42;
+
+    {
+        let ref1 = &value;
+        println(*ref1);
+    }  // ref1 ends here
+
+    // Now we can mutably borrow
+    let ref_mut = &mut value;
+    *ref_mut = 100;
+}
+
+// Non-lexical lifetimes
+fn non_lexical_lifetimes() {
+    let mut value = 42;
+
+    let r1 = &value;
+    println(*r1);
+    // r1 no longer used after this point
+
+    let r2 = &mut value;  // OK: r1's lifetime ended
+    *r2 = 100;
+}
+
+// Borrowing through functions
+fn borrow_through_functions() {
+    let data = create_data();
+
+    // Borrow for reading
+    read_only(&data);
+    read_only(&data);  // Can borrow multiple times
+
+    // Borrow mutably
+    let mut mutable_data = data;
+    modify(&mut mutable_data);
+}
+
+fn read_only(data: &Data) {
+    // Can only read
+    println(data.value);
+}
+
+fn modify(data: &mut Data) {
+    data.value = 100;
+}
+
+// Borrow in struct fields
+type Container<T> is {
+    value: T,
+};
+
+fn borrow_fields() {
+    let container = Container { value: 42 };
+
+    // Borrow a field
+    let field_ref = &container.value;
+    println(*field_ref);
+
+    // Borrow whole struct
+    let container_ref = &container;
+    println(container_ref.value);
+}
+
+// Mutable borrow of fields
+fn mutable_field_borrows() {
+    let mut container = Container { value: 42 };
+
+    // Mutably borrow field
+    let field_ref = &mut container.value;
+    *field_ref = 100;
+
+    // Can borrow different fields simultaneously
+    let mut pair = Pair { first: 1, second: 2 };
+    let first = &mut pair.first;
+    let second = &mut pair.second;
+    *first = 10;
+    *second = 20;
+}
+
+// Borrow in patterns
+fn borrow_in_patterns() {
+    let tuple = (1, 2, 3);
+
+    let (ref a, ref b, ref c) = tuple;
+    // a, b, c are references
+
+    let mut data = (1, 2);
+    let (ref mut x, ref mut y) = data;
+    *x = 10;
+    *y = 20;
+}
+
+// Borrow in match arms
+fn borrow_in_match() {
+    let option = Some(42);
+
+    match &option {
+        Some(ref value) => println(*value),
+        None => println("nothing"),
+    }
+    // option still valid
+
+    let mut opt = Some(42);
+    match &mut opt {
+        Some(ref mut value) => *value = 100,
+        None => (),
+    }
+}
+
+// Borrow through containers
+fn borrow_through_containers() {
+    let list = List.from([1, 2, 3]);
+
+    // Borrow element
+    let first = &list[0];
+
+    // Iterate with borrows
+    for item in &list {
+        println(*item);
+    }
+    // list still owned
+
+    // Mutable iteration
+    let mut mut_list = list;
+    for item in &mut mut_list {
+        *item *= 2;
+    }
+}
+
+// Checked references (Tier 1)
+fn checked_borrows() {
+    let value = 42;
+
+    // Compiler proves this is safe
+    let checked_ref: &checked Int = &checked value;
+
+    // Zero overhead, same semantics
+    println(*checked_ref);
+}
+
+// Reborrowing
+fn reborrowing() {
+    let mut value = 42;
+    let r1 = &mut value;
+
+    // Reborrow: creates shorter-lived reference
+    let r2 = &*r1;
+    println(*r2);
+
+    // r1 can be used again after r2 ends
+    *r1 = 100;
+}
+
+// Borrow splitting
+fn borrow_splitting() {
+    let mut array = [1, 2, 3, 4, 5];
+
+    // Split borrow into non-overlapping parts
+    let (left, right) = array.split_at_mut(2);
+
+    left[0] = 10;
+    right[0] = 30;
+}
+
+// Method receiver borrows
+type Counter is {
+    count: Int,
+};
+
+implement Counter {
+    // Shared borrow of self
+    fn get(&self) -> Int {
+        self.count
+    }
+
+    // Mutable borrow of self
+    fn increment(&mut self) {
+        self.count += 1;
+    }
+
+    // Takes ownership of self
+    fn into_count(self) -> Int {
+        self.count
+    }
+}
+
+// Interior mutability patterns
+fn interior_mutability() {
+    let cell = Cell.new(42);
+
+    // Get/set through shared reference
+    let value = cell.get();
+    cell.set(100);
+
+    let ref_cell = RefCell.new(42);
+
+    // Borrow checking at runtime
+    let borrowed = ref_cell.borrow();
+    println(*borrowed);
+}
+
+// Dangling reference prevention
+fn no_dangling() {
+    // This would be an error:
+    // let r: &Int;
+    // {
+    //     let x = 42;
+    //     r = &x;  // Error: x doesn't live long enough
+    // }
+    // println(*r);  // Would be dangling
+}

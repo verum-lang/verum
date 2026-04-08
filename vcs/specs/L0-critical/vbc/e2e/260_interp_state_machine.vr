@@ -1,0 +1,507 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, fsm, state-machine, automata
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: finite state machine with transition table
+
+// =============================================================================
+// States and inputs represented as integers
+// State 0 = initial, State -1 = dead/reject state
+// =============================================================================
+
+// =============================================================================
+// Arr16 for input sequences
+// =============================================================================
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr16_new() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else if i == 15 { a.a15 }
+    else { 0 }
+}
+
+fn arr16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { val } else { a.a0 },
+        a1: if i == 1 { val } else { a.a1 },
+        a2: if i == 2 { val } else { a.a2 },
+        a3: if i == 3 { val } else { a.a3 },
+        a4: if i == 4 { val } else { a.a4 },
+        a5: if i == 5 { val } else { a.a5 },
+        a6: if i == 6 { val } else { a.a6 },
+        a7: if i == 7 { val } else { a.a7 },
+        a8: if i == 8 { val } else { a.a8 },
+        a9: if i == 9 { val } else { a.a9 },
+        a10: if i == 10 { val } else { a.a10 },
+        a11: if i == 11 { val } else { a.a11 },
+        a12: if i == 12 { val } else { a.a12 },
+        a13: if i == 13 { val } else { a.a13 },
+        a14: if i == 14 { val } else { a.a14 },
+        a15: if i == 15 { val } else { a.a15 }
+    }
+}
+
+// =============================================================================
+// FSM 1: Matches pattern "ab*c" (regex)
+// Alphabet: a=1, b=2, c=3, other=0
+// States: 0=start, 1=seen 'a', 2=seen 'ab*' (still expecting b or c), 3=accept
+// Dead state: -1
+//
+// Transition table:
+//   State 0 + a => 1
+//   State 0 + other => -1
+//   State 1 + b => 1  (stay in state 1, consuming b's)
+//   State 1 + c => 2  (accept after c)
+//   State 1 + other => -1
+//   State 2 + anything => -1  (no more input expected)
+//
+// Accept states: {2}
+// =============================================================================
+
+fn fsm1_transition(cur_state: Int, input: Int) -> Int {
+    if cur_state == 0 {
+        if input == 1 { 1 }       // 'a'
+        else { -1 }
+    } else if cur_state == 1 {
+        if input == 2 { 1 }       // 'b' -> stay
+        else if input == 3 { 2 }  // 'c' -> accept
+        else { -1 }
+    } else if cur_state == 2 {
+        -1  // no more input after accept
+    } else {
+        -1  // dead state stays dead
+    }
+}
+
+fn fsm1_accepts(final_state: Int) -> Bool {
+    final_state == 2
+}
+
+// =============================================================================
+// FSM 2: Even number of 1s (parity checker)
+// Alphabet: 0, 1
+// States: 0=even count (start, accept), 1=odd count
+//
+// Transition:
+//   State 0 + 0 => 0
+//   State 0 + 1 => 1
+//   State 1 + 0 => 1
+//   State 1 + 1 => 0
+//
+// Accept states: {0}
+// =============================================================================
+
+fn fsm2_transition(cur_state: Int, input: Int) -> Int {
+    if cur_state == 0 {
+        if input == 1 { 1 } else { 0 }
+    } else if cur_state == 1 {
+        if input == 1 { 0 } else { 1 }
+    } else {
+        -1
+    }
+}
+
+fn fsm2_accepts(final_state: Int) -> Bool {
+    final_state == 0
+}
+
+// =============================================================================
+// FSM 3: Divisibility by 3 (binary input)
+// States: 0, 1, 2 (remainder mod 3)
+// Input: binary digits 0, 1
+//
+// Process MSB first: new_state = (cur_state * 2 + digit) % 3
+// Accept states: {0}
+// =============================================================================
+
+fn fsm3_transition(cur_state: Int, input: Int) -> Int {
+    (cur_state * 2 + input) % 3
+}
+
+fn fsm3_accepts(final_state: Int) -> Bool {
+    final_state == 0
+}
+
+// =============================================================================
+// FSM 4: Matches strings containing "aba" as substring
+// States: 0=start, 1=seen 'a', 2=seen 'ab', 3=seen 'aba' (accept, stay)
+// Alphabet: a=1, b=2
+//
+// Transition:
+//   State 0 + a => 1, + b => 0
+//   State 1 + a => 1, + b => 2
+//   State 2 + a => 3, + b => 0
+//   State 3 + a => 3, + b => 3 (once matched, stay accepting)
+// =============================================================================
+
+fn fsm4_transition(cur_state: Int, input: Int) -> Int {
+    if cur_state == 0 {
+        if input == 1 { 1 } else { 0 }
+    } else if cur_state == 1 {
+        if input == 1 { 1 } else if input == 2 { 2 } else { 0 }
+    } else if cur_state == 2 {
+        if input == 1 { 3 } else { 0 }
+    } else if cur_state == 3 {
+        3 // accepting sink
+    } else {
+        -1
+    }
+}
+
+fn fsm4_accepts(final_state: Int) -> Bool {
+    final_state == 3
+}
+
+// =============================================================================
+// Generic FSM runner: process input sequence, return final state
+// =============================================================================
+
+type FsmId is { id: Int };
+
+fn run_fsm(fsm_id: Int, inputs: Arr16, length: Int) -> Int {
+    let mut cur_state = 0;
+    let mut i = 0;
+    while i < length {
+        let inp = arr16_get(inputs, i);
+        if fsm_id == 1 {
+            cur_state = fsm1_transition(cur_state, inp);
+        } else if fsm_id == 2 {
+            cur_state = fsm2_transition(cur_state, inp);
+        } else if fsm_id == 3 {
+            cur_state = fsm3_transition(cur_state, inp);
+        } else if fsm_id == 4 {
+            cur_state = fsm4_transition(cur_state, inp);
+        }
+        i = i + 1;
+    }
+    cur_state
+}
+
+fn accepts(fsm_id: Int, final_state: Int) -> Bool {
+    if fsm_id == 1 { fsm1_accepts(final_state) }
+    else if fsm_id == 2 { fsm2_accepts(final_state) }
+    else if fsm_id == 3 { fsm3_accepts(final_state) }
+    else if fsm_id == 4 { fsm4_accepts(final_state) }
+    else { false }
+}
+
+fn run_and_check(fsm_id: Int, inputs: Arr16, length: Int) -> Bool {
+    let final_state = run_fsm(fsm_id, inputs, length);
+    accepts(fsm_id, final_state)
+}
+
+// =============================================================================
+// Helper: build input arrays
+// =============================================================================
+
+fn make_input(v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int) -> Arr16 {
+    let mut a = arr16_new();
+    a = arr16_set(a, 0, v0);
+    a = arr16_set(a, 1, v1);
+    a = arr16_set(a, 2, v2);
+    a = arr16_set(a, 3, v3);
+    a = arr16_set(a, 4, v4);
+    a = arr16_set(a, 5, v5);
+    a
+}
+
+// =============================================================================
+// Tests — FSM 1: ab*c
+// =============================================================================
+
+fn test_fsm1_ac() {
+    // "ac" = [1, 3] — matches ab*c with 0 b's
+    let inp = make_input(1, 3, 0, 0, 0, 0);
+    assert(run_and_check(1, inp, 2));
+}
+
+fn test_fsm1_abc() {
+    // "abc" = [1, 2, 3]
+    let inp = make_input(1, 2, 3, 0, 0, 0);
+    assert(run_and_check(1, inp, 3));
+}
+
+fn test_fsm1_abbc() {
+    // "abbc" = [1, 2, 2, 3]
+    let inp = make_input(1, 2, 2, 3, 0, 0);
+    assert(run_and_check(1, inp, 4));
+}
+
+fn test_fsm1_abbbc() {
+    // "abbbc" = [1, 2, 2, 2, 3]
+    let inp = make_input(1, 2, 2, 2, 3, 0);
+    assert(run_and_check(1, inp, 5));
+}
+
+fn test_fsm1_reject_bc() {
+    // "bc" = [2, 3] — no 'a' at start
+    let inp = make_input(2, 3, 0, 0, 0, 0);
+    assert(!run_and_check(1, inp, 2));
+}
+
+fn test_fsm1_reject_ab() {
+    // "ab" = [1, 2] — no 'c' at end
+    let inp = make_input(1, 2, 0, 0, 0, 0);
+    assert(!run_and_check(1, inp, 2));
+}
+
+fn test_fsm1_reject_a() {
+    // "a" alone
+    let inp = make_input(1, 0, 0, 0, 0, 0);
+    assert(!run_and_check(1, inp, 1));
+}
+
+fn test_fsm1_reject_empty() {
+    // empty string
+    let inp = arr16_new();
+    assert(!run_and_check(1, inp, 0));
+}
+
+fn test_fsm1_reject_abca() {
+    // "abca" = [1, 2, 3, 1] — extra after c
+    let inp = make_input(1, 2, 3, 1, 0, 0);
+    assert(!run_and_check(1, inp, 4));
+}
+
+// =============================================================================
+// Tests — FSM 2: Even number of 1s
+// =============================================================================
+
+fn test_fsm2_empty() {
+    // Empty = 0 ones = even
+    let inp = arr16_new();
+    assert(run_and_check(2, inp, 0));
+}
+
+fn test_fsm2_zero_only() {
+    // [0, 0, 0] = 0 ones = even
+    let inp = make_input(0, 0, 0, 0, 0, 0);
+    assert(run_and_check(2, inp, 3));
+}
+
+fn test_fsm2_one_one() {
+    // [1] = 1 one = odd => reject
+    let inp = make_input(1, 0, 0, 0, 0, 0);
+    assert(!run_and_check(2, inp, 1));
+}
+
+fn test_fsm2_two_ones() {
+    // [1, 1] = 2 ones = even => accept
+    let inp = make_input(1, 1, 0, 0, 0, 0);
+    assert(run_and_check(2, inp, 2));
+}
+
+fn test_fsm2_mixed() {
+    // [1, 0, 1, 0] = 2 ones = even => accept
+    let inp = make_input(1, 0, 1, 0, 0, 0);
+    assert(run_and_check(2, inp, 4));
+    // [1, 0, 1, 1] = 3 ones = odd => reject
+    let inp2 = make_input(1, 0, 1, 1, 0, 0);
+    assert(!run_and_check(2, inp2, 4));
+    // [1, 1, 1, 1] = 4 ones = even => accept
+    let inp3 = make_input(1, 1, 1, 1, 0, 0);
+    assert(run_and_check(2, inp3, 4));
+}
+
+// =============================================================================
+// Tests — FSM 3: Divisibility by 3 (binary MSB first)
+// =============================================================================
+
+fn test_fsm3_zero() {
+    // 0 in binary = [0] => 0 % 3 = 0 => accept
+    let inp = make_input(0, 0, 0, 0, 0, 0);
+    assert(run_and_check(3, inp, 1));
+}
+
+fn test_fsm3_three() {
+    // 3 in binary = [1, 1] => accept
+    let inp = make_input(1, 1, 0, 0, 0, 0);
+    assert(run_and_check(3, inp, 2));
+}
+
+fn test_fsm3_six() {
+    // 6 in binary = [1, 1, 0] => accept
+    let inp = make_input(1, 1, 0, 0, 0, 0);
+    assert(run_and_check(3, inp, 3));
+}
+
+fn test_fsm3_nine() {
+    // 9 in binary = [1, 0, 0, 1] => accept
+    let inp = make_input(1, 0, 0, 1, 0, 0);
+    assert(run_and_check(3, inp, 4));
+}
+
+fn test_fsm3_reject_one() {
+    // 1 in binary = [1] => 1 % 3 = 1 => reject
+    let inp = make_input(1, 0, 0, 0, 0, 0);
+    assert(!run_and_check(3, inp, 1));
+}
+
+fn test_fsm3_reject_two() {
+    // 2 in binary = [1, 0] => 2 % 3 = 2 => reject
+    let inp = make_input(1, 0, 0, 0, 0, 0);
+    assert(!run_and_check(3, inp, 2));
+}
+
+fn test_fsm3_reject_four() {
+    // 4 in binary = [1, 0, 0] => 4 % 3 = 1 => reject
+    let inp = make_input(1, 0, 0, 0, 0, 0);
+    assert(!run_and_check(3, inp, 3));
+}
+
+fn test_fsm3_reject_five() {
+    // 5 in binary = [1, 0, 1] => 5 % 3 = 2 => reject
+    let inp = make_input(1, 0, 1, 0, 0, 0);
+    assert(!run_and_check(3, inp, 3));
+}
+
+fn test_fsm3_twelve() {
+    // 12 in binary = [1, 1, 0, 0] => 12 % 3 = 0 => accept
+    let inp = make_input(1, 1, 0, 0, 0, 0);
+    assert(run_and_check(3, inp, 4));
+}
+
+// =============================================================================
+// Tests — FSM 4: Contains "aba" substring
+// =============================================================================
+
+fn test_fsm4_aba() {
+    // "aba" = [1, 2, 1]
+    let inp = make_input(1, 2, 1, 0, 0, 0);
+    assert(run_and_check(4, inp, 3));
+}
+
+fn test_fsm4_baba() {
+    // "baba" = [2, 1, 2, 1]
+    let inp = make_input(2, 1, 2, 1, 0, 0);
+    assert(run_and_check(4, inp, 4));
+}
+
+fn test_fsm4_aaba() {
+    // "aaba" = [1, 1, 2, 1]
+    let inp = make_input(1, 1, 2, 1, 0, 0);
+    assert(run_and_check(4, inp, 4));
+}
+
+fn test_fsm4_abab() {
+    // "abab" = [1, 2, 1, 2] — contains "aba" at positions 0-2
+    let inp = make_input(1, 2, 1, 2, 0, 0);
+    assert(run_and_check(4, inp, 4));
+}
+
+fn test_fsm4_reject_ab() {
+    // "ab" = [1, 2] — not enough for "aba"
+    let inp = make_input(1, 2, 0, 0, 0, 0);
+    assert(!run_and_check(4, inp, 2));
+}
+
+fn test_fsm4_reject_bbb() {
+    // "bbb" = [2, 2, 2]
+    let inp = make_input(2, 2, 2, 0, 0, 0);
+    assert(!run_and_check(4, inp, 3));
+}
+
+fn test_fsm4_reject_aab() {
+    // "aab" = [1, 1, 2] — no "aba"
+    let inp = make_input(1, 1, 2, 0, 0, 0);
+    assert(!run_and_check(4, inp, 3));
+}
+
+fn test_fsm4_reject_bba() {
+    // "bba" = [2, 2, 1] — no "aba"
+    let inp = make_input(2, 2, 1, 0, 0, 0);
+    assert(!run_and_check(4, inp, 3));
+}
+
+// =============================================================================
+// Tests — FSM state tracing
+// =============================================================================
+
+fn test_state_trace() {
+    // FSM 1 with "abc" = [1,2,3]: states should be 0 -> 1 -> 1 -> 2
+    let inp = make_input(1, 2, 3, 0, 0, 0);
+    let s0 = 0;
+    let s1 = fsm1_transition(s0, 1);
+    assert_eq(s1, 1);
+    let s2 = fsm1_transition(s1, 2);
+    assert_eq(s2, 1); // stay in state 1 for 'b'
+    let s3 = fsm1_transition(s2, 3);
+    assert_eq(s3, 2); // accept on 'c'
+    assert(fsm1_accepts(s3));
+}
+
+fn test_dead_state_absorbs() {
+    // Once in dead state, stays dead
+    let s = fsm1_transition(-1, 1);
+    assert_eq(s, -1);
+    let s2 = fsm1_transition(-1, 2);
+    assert_eq(s2, -1);
+    let s3 = fsm1_transition(-1, 3);
+    assert_eq(s3, -1);
+}
+
+fn main() -> Int {
+    test_fsm1_ac();
+    test_fsm1_abc();
+    test_fsm1_abbc();
+    test_fsm1_abbbc();
+    test_fsm1_reject_bc();
+    test_fsm1_reject_ab();
+    test_fsm1_reject_a();
+    test_fsm1_reject_empty();
+    test_fsm1_reject_abca();
+    test_fsm2_empty();
+    test_fsm2_zero_only();
+    test_fsm2_one_one();
+    test_fsm2_two_ones();
+    test_fsm2_mixed();
+    test_fsm3_zero();
+    test_fsm3_three();
+    test_fsm3_six();
+    test_fsm3_nine();
+    test_fsm3_reject_one();
+    test_fsm3_reject_two();
+    test_fsm3_reject_four();
+    test_fsm3_reject_five();
+    test_fsm3_twelve();
+    test_fsm4_aba();
+    test_fsm4_baba();
+    test_fsm4_aaba();
+    test_fsm4_abab();
+    test_fsm4_reject_ab();
+    test_fsm4_reject_bbb();
+    test_fsm4_reject_aab();
+    test_fsm4_reject_bba();
+    test_state_trace();
+    test_dead_state_absorbs();
+    print("[OK] 260_interp_state_machine");
+    0
+}

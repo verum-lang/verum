@@ -1,0 +1,35 @@
+// @test: parse
+// @level: L1
+// @tags: meta, derive, ord, comparison
+// @timeout: 5000
+
+/// @derive(Ord) for automatic ordering implementation.
+
+@derive(Eq, Ord)
+type Priority is Low | Medium | High | Critical;
+
+@derive(Eq, Ord)
+type Version is {
+    major: Int,
+    minor: Int,
+    patch: Int,
+};
+
+@derive(Eq, Ord, Hash)
+type SortKey is {
+    primary: Int,
+    secondary: Text,
+};
+
+// Derive on generic type
+@derive(Eq, Ord)
+type Scored<T> is {
+    score: Int,
+    value: T,
+};
+
+fn main() {
+    let v1 = Version { major: 1, minor: 0, patch: 0 };
+    let v2 = Version { major: 2, minor: 0, patch: 0 };
+    print("Derive Ord tests parsed");
+}

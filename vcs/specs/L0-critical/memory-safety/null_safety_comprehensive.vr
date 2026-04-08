@@ -1,0 +1,316 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @expected-stdout: All null safety tests passed!
+// @tags: memory-safety, null-safety, maybe, comprehensive
+
+/// Comprehensive null safety tests.
+/// Verum has no null value - use Maybe<T> instead.
+/// This eliminates null pointer dereferences entirely.
+/// Spec: 03-type-system.md#null-safety
+
+fn main() {
+    test_maybe_basic();
+    test_maybe_chaining();
+    test_maybe_unwrap_patterns();
+    test_null_free_references();
+    test_optional_chaining();
+    test_null_coalescing();
+    test_result_for_errors();
+    test_collection_safe_access();
+    test_iterator_null_safety();
+
+    print("All null safety tests passed!");
+}
+
+/// Test Maybe<T> basic operations
+fn test_maybe_basic() {
+    // Create optional values
+    let some_value: Maybe<Int> = Maybe.Some(42);
+    let no_value: Maybe<Int> = Maybe.None;
+
+    // Pattern matching - safe extraction
+    match some_value {
+        Some(v) => assert(v == 42),
+        None => panic("unexpected None"),
+    }
+
+    match no_value {
+        Some(_) => panic("unexpected Some"),
+        None => {}  // Expected
+    }
+
+    // is_some / is_none
+    assert(some_value.is_some());
+    assert(!some_value.is_none());
+    assert(no_value.is_none());
+    assert(!no_value.is_some());
+}
+
+/// Test Maybe<T> chaining operations
+fn test_maybe_chaining() {
+    let value: Maybe<Int> = Maybe.Some(5);
+    let empty: Maybe<Int> = Maybe.None;
+
+    // map - transform inner value
+    let doubled = value.map(|x| x * 2);
+    assert(doubled == Maybe.Some(10));
+
+    let doubled_empty = empty.map(|x| x * 2);
+    assert(doubled_empty == Maybe.None);
+
+    // and_then (flatMap) - chain computations with nested function
+    fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+        if b == 0 { Maybe.None } else { Maybe.Some(a / b) }
+    }
+
+    let result = value.and_then(|x| safe_divide(100, x));
+    assert(result == Maybe.Some(20));  // 100 / 5 = 20
+
+    let zero_divide = Maybe.Some(0).and_then(|x| safe_divide(100, x));
+    assert(zero_divide == Maybe.None);  // Division by zero
+
+    // filter - conditional None
+    let filtered = value.filter(|x| x > 3);
+    assert(filtered == Maybe.Some(5));
+
+    let filtered_out = value.filter(|x| x > 10);
+    assert(filtered_out == Maybe.None);
+}
+
+fn expensive_default() -> Int {
+    // Expensive computation only if needed
+    9999
+}
+
+/// Test safe unwrap patterns
+fn test_maybe_unwrap_patterns() {
+    let value: Maybe<Int> = Maybe.Some(42);
+    let empty: Maybe<Int> = Maybe.None;
+
+    // unwrap_or - provide default
+    assert(value.unwrap_or(0) == 42);
+    assert(empty.unwrap_or(0) == 0);
+
+    // unwrap_or_else - lazy default
+    assert(value.unwrap_or_else(|| expensive_default()) == 42);
+    assert(empty.unwrap_or_else(|| 99) == 99);
+
+    // expect - with message (only use when None is a bug)
+    let expected = value.expect("value should exist");
+    assert(expected == 42);
+
+    // if let - conditional extraction
+    if let Some(v) = value {
+        assert(v == 42);
+    }
+
+    // let else - early return on None (nested function)
+    fn require_value(opt: Maybe<Int>) -> Int {
+        let Some(v) = opt else {
+            return 0;
+        };
+        v * 2
+    }
+
+    assert(require_value(Maybe.Some(21)) == 42);
+    assert(require_value(Maybe.None) == 0);
+}
+
+/// Test that references cannot be null
+fn test_null_free_references() {
+    // References in Verum are NEVER null
+    let value = 42;
+    let ref_value: &Int = &value;
+
+    // No null check needed - ref_value is guaranteed valid
+    let doubled = *ref_value * 2;
+    assert(doubled == 84);
+
+    // Cannot create null reference
+    // let null_ref: &Int = null;  // Compile error: 'null' doesn't exist
+
+    // Optional references use Maybe<&T>
+    let maybe_ref: Maybe<&Int> = Maybe.Some(&value);
+    if let Some(r) = maybe_ref {
+        assert(*r == 42);
+    }
+}
+
+/// Test optional chaining (?.)
+fn test_optional_chaining() {
+    // Nested type definitions
+    type Address is {
+        city: Text,
+        zip: Maybe<Text>,
+    };
+
+    type User is {
+        name: Text,
+        address: Maybe<Address>,
+    };
+
+    let user_with_full_address = User {
+        name: "Alice",
+        address: Maybe.Some(Address {
+            city: "Seattle",
+            zip: Maybe.Some("98101"),
+        }),
+    };
+
+    let user_no_zip = User {
+        name: "Bob",
+        address: Maybe.Some(Address {
+            city: "Portland",
+            zip: Maybe.None,
+        }),
+    };
+
+    let user_no_address = User {
+        name: "Charlie",
+        address: Maybe.None,
+    };
+
+    // Optional chaining with ?.
+    // address?.zip flattens to Maybe<Text>
+    let zip1 = user_with_full_address.address?.zip;
+    // zip1 is Some("98101")
+    match zip1 {
+        Some(z) => assert(z == "98101"),
+        None => panic("expected zip"),
+    }
+
+    let zip2 = user_no_zip.address?.zip;
+    // zip2 is None because zip is None
+    assert(zip2 == Maybe.None);
+
+    let zip3 = user_no_address.address?.zip;
+    // zip3 is None because address is None
+    assert(zip3 == Maybe.None);
+}
+
+/// Test null coalescing (??)
+fn test_null_coalescing() {
+    let value: Maybe<Int> = Maybe.Some(42);
+    let empty: Maybe<Int> = Maybe.None;
+
+    // ?? returns left if Some, right if None
+    let result1 = value ?? 0;
+    assert(result1 == 42);
+
+    let result2 = empty ?? 0;
+    assert(result2 == 0);
+
+    // Chain multiple ??
+    let a: Maybe<Int> = Maybe.None;
+    let b: Maybe<Int> = Maybe.None;
+    let c: Maybe<Int> = Maybe.Some(100);
+
+    let result3 = a ?? b ?? c ?? 0;
+    assert(result3 == 100);
+
+    // With nested function calls
+    fn get_cached() -> Maybe<Int> { Maybe.None }
+    fn get_computed() -> Maybe<Int> { Maybe.Some(42) }
+    fn get_default() -> Int { 0 }
+
+    let result4 = get_cached() ?? get_computed() ?? get_default();
+    assert(result4 == 42);
+}
+
+// Custom error type for Result tests
+type ParseError is InvalidFormat | Overflow | Empty;
+
+/// Test Result<T, E> for error handling
+fn test_result_for_errors() {
+    // Result replaces null/exception patterns
+    // Manual parsing function without turbofish
+    fn try_parse_int(s: Text) -> Result<Int, ParseError> {
+        // Simple validation - check for digit characters
+        if s == "" {
+            Err(ParseError.Empty)
+        } else if s == "42" {
+            Ok(42)
+        } else if s == "100" {
+            Ok(100)
+        } else if s == "10" {
+            Ok(10)
+        } else if s == "20" {
+            Ok(20)
+        } else {
+            Err(ParseError.InvalidFormat)
+        }
+    }
+
+    // Success case
+    let good = try_parse_int("42");
+    match good {
+        Ok(n) => assert(n == 42),
+        Err(_) => panic("expected Ok"),
+    }
+
+    // Error case
+    let bad = try_parse_int("not a number");
+    match bad {
+        Ok(_) => panic("expected Err"),
+        Err(_) => {}  // Expected
+    }
+
+    // ? operator for propagation (nested function)
+    fn add_parsed(a: Text, b: Text) -> Result<Int, ParseError> {
+        let x = try_parse_int(a)?;  // Early return on error
+        let y = try_parse_int(b)?;
+        Ok(x + y)
+    }
+
+    match add_parsed("10", "20") {
+        Ok(n) => assert(n == 30),
+        Err(_) => panic("expected Ok"),
+    }
+
+    match add_parsed("10", "bad") {
+        Ok(_) => panic("expected Err"),
+        Err(_) => {}  // Expected
+    }
+}
+
+/// Test collection safe access - arrays with bounds checking
+fn test_collection_safe_access() {
+    let list = [1, 2, 3, 4, 5];
+
+    // Direct indexing is bounds-checked at compile time for literals
+    assert(list[0] == 1);
+    assert(list[4] == 5);
+
+    // Safe iteration without null
+    let mut sum = 0;
+    for item in list {
+        sum = sum + item;
+    }
+    assert(sum == 15);  // 1+2+3+4+5
+
+    // Array length is always known
+    assert(list.len() == 5);
+}
+
+/// Test that iterators handle empty gracefully
+fn test_iterator_null_safety() {
+    let list = [1, 2, 3, 4, 5];
+
+    // Iteration over list never produces null
+    let mut found = false;
+    for item in list {
+        if item == 3 {
+            found = true;
+        }
+    }
+    assert(found);
+
+    // Empty list iteration is safe
+    let empty: [Int; 0] = [];
+    let mut count = 0;
+    for _ in empty {
+        count = count + 1;
+    }
+    assert(count == 0);
+}

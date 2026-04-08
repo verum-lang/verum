@@ -1,0 +1,277 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, dft, fourier
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Integer-based DFT (Discrete Fourier Transform) for N=4.
+// Since we don't have complex numbers, we compute real and imaginary parts
+// directly. Tests: DFT of known signals, Parseval's theorem, inverse DFT,
+// and linearity property.
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn assert_near(actual: Int, expected: Int, tolerance: Int) {
+    let diff = abs_val(actual - expected);
+    assert(diff <= tolerance);
+}
+
+// =============================================================================
+// DFT for N=4 (hardcoded, no trig tables needed)
+// X[k] = sum_{n=0}^{3} x[n] * e^{-j*2*pi*k*n/4}
+// Twiddle factors for N=4:
+//   W^0 = 1,  W^1 = -j,  W^2 = -1,  W^3 = j
+// Store real and imaginary parts separately (scaled by 1000).
+// =============================================================================
+
+// DFT returns 8 values: re0, im0, re1, im1, re2, im2, re3, im3
+// To keep it simple, compute each component as a separate function
+
+fn dft4_re0(x0: Int, x1: Int, x2: Int, x3: Int) -> Int {
+    (x0 + x1 + x2 + x3) * 1000
+}
+
+fn dft4_im0(x0: Int, x1: Int, x2: Int, x3: Int) -> Int {
+    0
+}
+
+fn dft4_re1(x0: Int, x1: Int, x2: Int, x3: Int) -> Int {
+    (x0 - x2) * 1000
+}
+
+fn dft4_im1(x0: Int, x1: Int, x2: Int, x3: Int) -> Int {
+    -(x1 - x3) * 1000
+}
+
+fn dft4_re2(x0: Int, x1: Int, x2: Int, x3: Int) -> Int {
+    (x0 - x1 + x2 - x3) * 1000
+}
+
+fn dft4_im2(x0: Int, x1: Int, x2: Int, x3: Int) -> Int {
+    0
+}
+
+fn dft4_re3(x0: Int, x1: Int, x2: Int, x3: Int) -> Int {
+    (x0 - x2) * 1000
+}
+
+fn dft4_im3(x0: Int, x1: Int, x2: Int, x3: Int) -> Int {
+    (x1 - x3) * 1000
+}
+
+fn test_dft4_dc() {
+    // All same value: x = [3, 3, 3, 3]
+    // X[0] = 12, rest = 0
+    assert_eq(dft4_re0(3, 3, 3, 3), 12000);
+    assert_eq(dft4_im0(3, 3, 3, 3), 0);
+    assert_eq(dft4_re1(3, 3, 3, 3), 0);
+    assert_eq(dft4_im1(3, 3, 3, 3), 0);
+    assert_eq(dft4_re2(3, 3, 3, 3), 0);
+    assert_eq(dft4_im2(3, 3, 3, 3), 0);
+}
+
+fn test_dft4_impulse() {
+    // Impulse: x = [1, 0, 0, 0]
+    // All X[k] = 1 (flat spectrum)
+    assert_eq(dft4_re0(1, 0, 0, 0), 1000);
+    assert_eq(dft4_re1(1, 0, 0, 0), 1000);
+    assert_eq(dft4_re2(1, 0, 0, 0), 1000);
+    assert_eq(dft4_re3(1, 0, 0, 0), 1000);
+    assert_eq(dft4_im0(1, 0, 0, 0), 0);
+    assert_eq(dft4_im1(1, 0, 0, 0), 0);
+    assert_eq(dft4_im2(1, 0, 0, 0), 0);
+    assert_eq(dft4_im3(1, 0, 0, 0), 0);
+}
+
+fn test_dft4_alternating() {
+    // x = [1, -1, 1, -1]
+    // X[0] = 0, X[2] = 4, rest 0
+    assert_eq(dft4_re0(1, -1, 1, -1), 0);
+    assert_eq(dft4_re2(1, -1, 1, -1), 4000);
+    assert_eq(dft4_re1(1, -1, 1, -1), 0);
+    assert_eq(dft4_im1(1, -1, 1, -1), 0);
+}
+
+fn test_dft4_ramp() {
+    // x = [0, 1, 2, 3]
+    // X[0] = 6, X[1] = -2 + 2j, X[2] = -2, X[3] = -2 - 2j
+    assert_eq(dft4_re0(0, 1, 2, 3), 6000);
+    assert_eq(dft4_im0(0, 1, 2, 3), 0);
+    assert_eq(dft4_re1(0, 1, 2, 3), -2000);
+    assert_eq(dft4_im1(0, 1, 2, 3), 2000);
+    assert_eq(dft4_re2(0, 1, 2, 3), -2000);
+    assert_eq(dft4_im2(0, 1, 2, 3), 0);
+    assert_eq(dft4_re3(0, 1, 2, 3), -2000);
+    assert_eq(dft4_im3(0, 1, 2, 3), -2000);
+}
+
+// =============================================================================
+// Parseval's theorem: sum|x[n]|^2 = (1/N) * sum|X[k]|^2
+// =============================================================================
+
+fn test_parseval() {
+    // x = [1, 2, 3, 4]
+    let time_energy = 1 + 4 + 9 + 16; // = 30
+
+    let r0 = dft4_re0(1, 2, 3, 4);
+    let i0 = dft4_im0(1, 2, 3, 4);
+    let r1 = dft4_re1(1, 2, 3, 4);
+    let i1 = dft4_im1(1, 2, 3, 4);
+    let r2 = dft4_re2(1, 2, 3, 4);
+    let i2 = dft4_im2(1, 2, 3, 4);
+    let r3 = dft4_re3(1, 2, 3, 4);
+    let i3 = dft4_im3(1, 2, 3, 4);
+
+    // Frequency energy (each component is *1000, so |X|^2 is *1000000)
+    let freq_energy = (r0 * r0 + i0 * i0
+                     + r1 * r1 + i1 * i1
+                     + r2 * r2 + i2 * i2
+                     + r3 * r3 + i3 * i3) / 1000000;
+
+    // freq_energy / N = time_energy
+    assert_eq(freq_energy / 4, time_energy);
+}
+
+// =============================================================================
+// Inverse DFT for N=4
+// x[n] = (1/4) * sum_k X[k] * e^{j*2*pi*k*n/4}
+// =============================================================================
+
+// cos(2*pi*k/4) for k mod 4: 1, 0, -1, 0
+fn cos4(k: Int) -> Int {
+    let km = k % 4;
+    let kp = if km < 0 { km + 4 } else { km };
+    if kp == 0 { 1000 }
+    else if kp == 1 { 0 }
+    else if kp == 2 { -1000 }
+    else { 0 }
+}
+
+// sin(2*pi*k/4) for k mod 4: 0, 1, 0, -1
+fn sin4(k: Int) -> Int {
+    let km = k % 4;
+    let kp = if km < 0 { km + 4 } else { km };
+    if kp == 0 { 0 }
+    else if kp == 1 { 1000 }
+    else if kp == 2 { 0 }
+    else { -1000 }
+}
+
+fn idft4_n(r0: Int, i0: Int, r1: Int, i1: Int,
+           r2: Int, i2: Int, r3: Int, i3: Int, n: Int) -> Int {
+    // x[n] = (1/4) * sum_k (Re[k]*cos(2pi*k*n/4) - Im[k]*sin(2pi*k*n/4))
+    // Each term needs dividing by 1000 (cos/sin scale) and 1000 (DFT scale)
+    let mut val = 0;
+    val = val + r0 * cos4(0) - i0 * sin4(0);
+    val = val + r1 * cos4(n) - i1 * sin4(n);
+    val = val + r2 * cos4(2 * n) - i2 * sin4(2 * n);
+    val = val + r3 * cos4(3 * n) - i3 * sin4(3 * n);
+    val / (4 * 1000 * 1000)
+}
+
+fn test_inverse_dft4() {
+    // Forward then inverse should recover original
+    let r0 = dft4_re0(1, 2, 3, 4);
+    let i0 = dft4_im0(1, 2, 3, 4);
+    let r1 = dft4_re1(1, 2, 3, 4);
+    let i1 = dft4_im1(1, 2, 3, 4);
+    let r2 = dft4_re2(1, 2, 3, 4);
+    let i2 = dft4_im2(1, 2, 3, 4);
+    let r3 = dft4_re3(1, 2, 3, 4);
+    let i3 = dft4_im3(1, 2, 3, 4);
+
+    assert_eq(idft4_n(r0, i0, r1, i1, r2, i2, r3, i3, 0), 1);
+    assert_eq(idft4_n(r0, i0, r1, i1, r2, i2, r3, i3, 1), 2);
+    assert_eq(idft4_n(r0, i0, r1, i1, r2, i2, r3, i3, 2), 3);
+    assert_eq(idft4_n(r0, i0, r1, i1, r2, i2, r3, i3, 3), 4);
+}
+
+fn test_inverse_dft4_signal2() {
+    // Another signal: [5, -3, 7, 0]
+    let r0 = dft4_re0(5, -3, 7, 0);
+    let i0 = dft4_im0(5, -3, 7, 0);
+    let r1 = dft4_re1(5, -3, 7, 0);
+    let i1 = dft4_im1(5, -3, 7, 0);
+    let r2 = dft4_re2(5, -3, 7, 0);
+    let i2 = dft4_im2(5, -3, 7, 0);
+    let r3 = dft4_re3(5, -3, 7, 0);
+    let i3 = dft4_im3(5, -3, 7, 0);
+
+    assert_eq(idft4_n(r0, i0, r1, i1, r2, i2, r3, i3, 0), 5);
+    assert_eq(idft4_n(r0, i0, r1, i1, r2, i2, r3, i3, 1), -3);
+    assert_eq(idft4_n(r0, i0, r1, i1, r2, i2, r3, i3, 2), 7);
+    assert_eq(idft4_n(r0, i0, r1, i1, r2, i2, r3, i3, 3), 0);
+}
+
+// =============================================================================
+// Linearity: DFT(a*x + b*y) = a*DFT(x) + b*DFT(y)
+// =============================================================================
+
+fn test_dft_linearity() {
+    // x = [1, 0, 1, 0], y = [0, 1, 0, 1]
+    // 2*x + 3*y = [2, 3, 2, 3]
+    let rx0 = dft4_re0(1, 0, 1, 0);
+    let ry0 = dft4_re0(0, 1, 0, 1);
+    let rxy0 = dft4_re0(2, 3, 2, 3);
+    assert_eq(2 * rx0 + 3 * ry0, rxy0);
+
+    let rx1 = dft4_re1(1, 0, 1, 0);
+    let ry1 = dft4_re1(0, 1, 0, 1);
+    let rxy1 = dft4_re1(2, 3, 2, 3);
+    assert_eq(2 * rx1 + 3 * ry1, rxy1);
+
+    let rx2 = dft4_re2(1, 0, 1, 0);
+    let ry2 = dft4_re2(0, 1, 0, 1);
+    let rxy2 = dft4_re2(2, 3, 2, 3);
+    assert_eq(2 * rx2 + 3 * ry2, rxy2);
+}
+
+// =============================================================================
+// Magnitude squared of frequency components
+// =============================================================================
+
+fn test_magnitude() {
+    // x = [1, 0, 0, 0]: |X[k]| = 1 for all k
+    // |X[0]|^2 = re0^2 + im0^2 = 1000000
+    let mag0 = dft4_re0(1, 0, 0, 0) * dft4_re0(1, 0, 0, 0)
+             + dft4_im0(1, 0, 0, 0) * dft4_im0(1, 0, 0, 0);
+    assert_eq(mag0, 1000000);
+
+    let mag1 = dft4_re1(1, 0, 0, 0) * dft4_re1(1, 0, 0, 0)
+             + dft4_im1(1, 0, 0, 0) * dft4_im1(1, 0, 0, 0);
+    assert_eq(mag1, 1000000);
+
+    // x = [1, -1, 1, -1]: only X[2] is nonzero
+    // |X[0]|^2 = 0
+    let m0 = dft4_re0(1, -1, 1, -1) * dft4_re0(1, -1, 1, -1);
+    assert_eq(m0, 0);
+
+    // |X[2]|^2 = 16000000
+    let m2 = dft4_re2(1, -1, 1, -1) * dft4_re2(1, -1, 1, -1);
+    assert_eq(m2, 16000000);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_dft4_dc();
+    test_dft4_impulse();
+    test_dft4_alternating();
+    test_dft4_ramp();
+    test_parseval();
+    test_inverse_dft4();
+    test_inverse_dft4_signal2();
+    test_dft_linearity();
+    test_magnitude();
+    print("[OK] 306_interp_fft_integer");
+    0
+}

@@ -1,0 +1,554 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @description: Comprehensive parser tests for reference type productions (three-tier CBGR model)
+// Grammar: managed_reference_type = '&' , [ 'mut' ] , type_expr ;
+//          checked_reference_type = '&' , 'checked' , [ 'mut' ] , type_expr ;
+//          unsafe_reference_type = '&' , 'unsafe' , [ 'mut' ] , type_expr ;
+//          pointer_type = '*' , ( 'const' | 'mut' ) , type_expr ;
+//          genref_type = 'GenRef' , '<' , type_expr , '>' ;
+
+// =============================================================================
+// Section 1: Tier 0 - Managed References (CBGR Protected)
+// =============================================================================
+
+// Grammar: managed_reference_type = '&' , [ 'mut' ] , type_expr ;
+// These references have full CBGR (Capability-Based Generational References) protection
+// Overhead: ~15ns for check, uses ThinRef (16 bytes) or FatRef (24 bytes)
+
+fn test_immutable_managed_refs() {
+    // Basic immutable references
+    let int_ref: &Int = &42;
+    let text_ref: &Text = &"hello";
+    let bool_ref: &Bool = &true;
+    let float_ref: &Float = &3.14;
+    let char_ref: &Char = &'x';
+}
+
+fn test_mutable_managed_refs() {
+    // Basic mutable references
+    let mut x = 42;
+    let int_mut_ref: &mut Int = &mut x;
+
+    let mut s = "hello";
+    let text_mut_ref: &mut Text = &mut s;
+
+    let mut b = true;
+    let bool_mut_ref: &mut Bool = &mut b;
+}
+
+fn test_managed_refs_to_complex_types() {
+    // References to generic types
+    let list_ref: &List<Int> = &List.of(1, 2, 3);
+    let map_ref: &Map<Text, Int> = &Map.new();
+    let set_ref: &Set<Int> = &Set.new();
+
+    // References to compound types
+    let tuple_ref: &(Int, Text) = &(42, "hello");
+    let array_ref: &[Int; 5] = &[1, 2, 3, 4, 5];
+
+    // Mutable references to complex types
+    let mut list = List.of(1, 2, 3);
+    let list_mut_ref: &mut List<Int> = &mut list;
+
+    let mut map = Map.new();
+    let map_mut_ref: &mut Map<Text, Int> = &mut map;
+}
+
+// =============================================================================
+// Section 2: Tier 1 - Checked References (Compiler-Verified)
+// =============================================================================
+
+// Grammar: checked_reference_type = '&' , 'checked' , [ 'mut' ] , type_expr ;
+// Zero overhead - compiler proves safety via escape analysis
+// Only available when compiler can statically verify safety
+
+fn test_immutable_checked_refs() {
+    // Immutable checked references
+    let int_checked: &checked Int = &checked 42;
+    let text_checked: &checked Text = &checked "hello";
+    let bool_checked: &checked Bool = &checked true;
+}
+
+fn test_mutable_checked_refs() {
+    // Mutable checked references
+    let mut x = 42;
+    let int_checked_mut: &checked mut Int = &checked mut x;
+
+    let mut s = "hello";
+    let text_checked_mut: &checked mut Text = &checked mut s;
+}
+
+fn test_checked_refs_to_complex_types() {
+    // Checked references to generic types
+    let list_checked: &checked List<Int> = &checked List.of(1, 2, 3);
+
+    // Mutable checked to complex types
+    let mut map = Map.new();
+    let map_checked_mut: &checked mut Map<Text, Int> = &checked mut map;
+
+    // Checked reference to tuple
+    let tuple_checked: &checked (Int, Text) = &checked (42, "hello");
+
+    // Checked reference to array
+    let array_checked: &checked [Int; 3] = &checked [1, 2, 3];
+}
+
+// =============================================================================
+// Section 3: Tier 2 - Unsafe References (Manual Proof Required)
+// =============================================================================
+
+// Grammar: unsafe_reference_type = '&' , 'unsafe' , [ 'mut' ] , type_expr ;
+// Zero overhead - bypasses all safety checks
+// Requires SAFETY: comment documenting why it's safe
+
+fn test_immutable_unsafe_refs() {
+    // SAFETY: Demonstrating parser syntax only
+    let int_unsafe: &unsafe Int = &unsafe 42;
+    let text_unsafe: &unsafe Text = &unsafe "hello";
+    let byte_unsafe: &unsafe Byte = &unsafe 0xFF;
+}
+
+fn test_mutable_unsafe_refs() {
+    let mut x = 42;
+    // SAFETY: Demonstrating parser syntax only
+    let int_unsafe_mut: &unsafe mut Int = &unsafe mut x;
+
+    let mut s = "hello";
+    // SAFETY: Demonstrating parser syntax only
+    let text_unsafe_mut: &unsafe mut Text = &unsafe mut s;
+}
+
+fn test_unsafe_refs_ffi_patterns() {
+    // Common FFI patterns with unsafe references
+    // SAFETY: Pointer from FFI, lifetime managed externally
+    let raw_bytes: &unsafe [Byte] = get_ffi_buffer();
+    let raw_byte_mut: &unsafe mut Byte = get_ffi_byte_ptr();
+
+    // Unsafe reference to opaque type
+    let opaque: &unsafe OpaqueHandle = get_handle();
+}
+
+type OpaqueHandle is ();
+fn get_ffi_buffer() -> &unsafe [Byte] { &unsafe [] }
+fn get_ffi_byte_ptr() -> &unsafe mut Byte { &unsafe mut 0 }
+fn get_handle() -> &unsafe OpaqueHandle { &unsafe () }
+
+// =============================================================================
+// Section 4: Raw Pointer Types
+// =============================================================================
+
+// Grammar: pointer_type = '*' , ( 'const' | 'mut' ) , type_expr ;
+// Used for FFI and low-level operations
+
+fn test_const_pointers() {
+    // Immutable raw pointers
+    let int_ptr: *const Int = get_int_ptr();
+    let text_ptr: *const Text = get_text_ptr();
+    let byte_ptr: *const Byte = get_byte_ptr();
+    let u8_ptr: *const u8 = get_u8_ptr();
+}
+
+fn get_int_ptr() -> *const Int { 0 as *const Int }
+fn get_text_ptr() -> *const Text { 0 as *const Text }
+fn get_byte_ptr() -> *const Byte { 0 as *const Byte }
+fn get_u8_ptr() -> *const u8 { 0 as *const u8 }
+
+fn test_mut_pointers() {
+    // Mutable raw pointers
+    let int_ptr_mut: *mut Int = get_int_ptr_mut();
+    let byte_ptr_mut: *mut Byte = get_byte_ptr_mut();
+    let u8_ptr_mut: *mut u8 = get_u8_ptr_mut();
+}
+
+fn get_int_ptr_mut() -> *mut Int { 0 as *mut Int }
+fn get_byte_ptr_mut() -> *mut Byte { 0 as *mut Byte }
+fn get_u8_ptr_mut() -> *mut u8 { 0 as *mut u8 }
+
+fn test_pointers_to_complex_types() {
+    // Pointers to arrays (common in FFI)
+    let arr_ptr: *const [Int; 10] = get_array_ptr();
+    let arr_ptr_mut: *mut [Byte; 256] = get_buffer_ptr();
+
+    // Pointers to structs
+    let struct_ptr: *const Point = get_point_ptr();
+    let struct_ptr_mut: *mut Point = get_point_ptr_mut();
+
+    // Double pointers (pointer to pointer)
+    let double_ptr: *const *const Int = get_double_ptr();
+    let double_ptr_mut: *mut *mut Byte = get_double_ptr_mut();
+}
+
+type Point is { x: Float, y: Float };
+fn get_array_ptr() -> *const [Int; 10] { 0 as *const [Int; 10] }
+fn get_buffer_ptr() -> *mut [Byte; 256] { 0 as *mut [Byte; 256] }
+fn get_point_ptr() -> *const Point { 0 as *const Point }
+fn get_point_ptr_mut() -> *mut Point { 0 as *mut Point }
+fn get_double_ptr() -> *const *const Int { 0 as *const *const Int }
+fn get_double_ptr_mut() -> *mut *mut Byte { 0 as *mut *mut Byte }
+
+// =============================================================================
+// Section 5: GenRef Type (Explicit Generation Tracking)
+// =============================================================================
+
+// Grammar: genref_type = 'GenRef' , '<' , type_expr , '>' ;
+// Used for lending iterators and explicit CBGR generation tracking
+
+fn test_genref_basic() {
+    // GenRef for explicit generation tracking
+    let genref_int: GenRef<Int> = GenRef.new(42);
+    let genref_text: GenRef<Text> = GenRef.new("hello");
+}
+
+fn test_genref_complex_types() {
+    // GenRef with generic types
+    let genref_list: GenRef<List<Int>> = GenRef.new(List.of(1, 2, 3));
+    let genref_map: GenRef<Map<Text, Int>> = GenRef.new(Map.new());
+
+    // GenRef with compound types
+    let genref_tuple: GenRef<(Int, Text)> = GenRef.new((42, "hello"));
+    let genref_array: GenRef<[Int; 5]> = GenRef.new([1, 2, 3, 4, 5]);
+}
+
+// GenRef in iterator pattern
+type WindowIterator<T> is {
+    data: GenRef<List<T>>,
+    window_size: Int,
+    position: Int
+};
+
+type LendingIterator<T> is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<GenRef<Self.Item>>;
+};
+
+// =============================================================================
+// Section 6: Nested Reference Types
+// =============================================================================
+
+fn test_nested_refs() {
+    // Reference to reference
+    let ref_ref: &&Int = &&42;
+
+    // Mutable reference to immutable reference
+    let mut r = &42;
+    let mut_ref_ref: &mut &Int = &mut r;
+
+    // Reference to mutable reference
+    let mut x = 42;
+    let ref_mut_ref: &&mut Int = &&mut x;
+
+    // Triple nesting
+    let triple: &&&Int = &&&42;
+}
+
+fn test_mixed_tier_refs() {
+    // Managed ref to checked
+    let managed_checked: &(&checked Int) = &(&checked 42);
+
+    // Checked ref to managed
+    let checked_managed: &checked (&Int) = &checked (&42);
+
+    // Note: unsafe to managed is valid but requires careful handling
+}
+
+// =============================================================================
+// Section 7: Reference Types in Function Signatures
+// =============================================================================
+
+fn takes_immutable_ref(x: &Int) -> Int {
+    *x
+}
+
+fn takes_mutable_ref(x: &mut Int) {
+    *x = *x + 1;
+}
+
+fn takes_checked_ref(x: &checked Int) -> Int {
+    *x
+}
+
+fn takes_unsafe_ref(x: &unsafe Int) -> Int {
+    // SAFETY: Caller guarantees validity
+    unsafe { *x }
+}
+
+fn returns_ref(x: &Int) -> &Int {
+    x
+}
+
+fn returns_mut_ref(x: &mut Int) -> &mut Int {
+    x
+}
+
+fn takes_slice_ref(s: &[Int]) -> Int {
+    s.len()
+}
+
+fn takes_mut_slice_ref(s: &mut [Int]) {
+    s[0] = 42;
+}
+
+fn takes_pointer(p: *const Int) -> Int {
+    unsafe { *p }
+}
+
+fn takes_mut_pointer(p: *mut Int) {
+    unsafe { *p = 42 }
+}
+
+// =============================================================================
+// Section 8: Reference Types in Type Definitions
+// =============================================================================
+
+// Type alias for references
+type IntRef is &Int;
+type MutIntRef is &mut Int;
+type CheckedIntRef is &checked Int;
+type UnsafeBytePtr is &unsafe Byte;
+type RawIntPtr is *const Int;
+type RawMutIntPtr is *mut Int;
+
+// Record with reference fields
+type RefContainer<'a> is {
+    immutable: &Int,
+    mutable: &mut Text,
+    data: &[Byte]
+};
+
+// Reference in variant
+type RefOrOwned<T> is
+    Ref(&T)
+  | Owned(T);
+
+fn test_type_aliases() {
+    let r: IntRef = &42;
+    let p: RawIntPtr = 0 as *const Int;
+}
+
+// =============================================================================
+// Section 9: Reference Types in Generic Contexts
+// =============================================================================
+
+fn test_refs_in_generics() {
+    // List of references
+    let ref_list: List<&Int> = List.new();
+
+    // Map with reference values
+    let ref_map: Map<Text, &Int> = Map.new();
+
+    // Maybe containing reference
+    let maybe_ref: Maybe<&Int> = Some(&42);
+
+    // Result with reference
+    let result_ref: Result<&Int, Error> = Ok(&42);
+
+    // GenRef in generic
+    let genref_list: List<GenRef<Int>> = List.new();
+}
+
+type Error is { message: Text };
+
+// Generic function with reference bounds
+fn borrow<T>(value: &T) -> &T {
+    value
+}
+
+fn borrow_mut<T>(value: &mut T) -> &mut T {
+    value
+}
+
+// =============================================================================
+// Section 10: Reference Types with Self
+// =============================================================================
+
+type Container is {
+    data: List<Int>
+};
+
+implement Container {
+    fn get_ref(&self) -> &List<Int> {
+        &self.data
+    }
+
+    fn get_mut_ref(&mut self) -> &mut List<Int> {
+        &mut self.data
+    }
+
+    fn borrow_checked(&self) -> &checked List<Int> {
+        &checked self.data
+    }
+}
+
+// Self parameter variations
+type RefMethods is protocol {
+    fn by_ref(&self) -> Int;
+    fn by_mut_ref(&mut self);
+    fn by_checked(&checked self) -> Int;
+    fn by_unsafe(&unsafe self) -> Int;
+};
+
+// =============================================================================
+// Section 11: Reference Expressions (Creating References)
+// =============================================================================
+
+fn test_reference_expressions() {
+    let x = 42;
+
+    // Immutable reference expression
+    let r1 = &x;
+
+    // Mutable reference expression
+    let mut y = 42;
+    let r2 = &mut y;
+
+    // Checked reference expression
+    let r3 = &checked x;
+    let r4 = &checked mut y;
+
+    // Unsafe reference expression
+    let r5 = &unsafe x;
+    let r6 = &unsafe mut y;
+
+    // Dereference expression
+    let val = *r1;
+    *r2 = 100;
+}
+
+// =============================================================================
+// Section 12: Reference Types with Refinements
+// =============================================================================
+
+// Refined reference types
+type NonNullRef<T> is &T { self != null };
+type ValidPtr<T> is *const T { self != 0 as *const T };
+
+// =============================================================================
+// Section 13: Reference Types in Pattern Matching
+// =============================================================================
+
+fn test_ref_patterns() {
+    let x = 42;
+    let r = &x;
+
+    // Matching on reference
+    match r {
+        &0 => print("zero"),
+        &n => print(f"value: {n}")
+    }
+
+    // Reference pattern with binding
+    let pair = (1, 2);
+    match &pair {
+        &(a, b) => print(f"{a}, {b}")
+    }
+}
+
+fn test_ref_pattern_in_function() {
+    // ref modifier in pattern
+    let values = [1, 2, 3];
+    for ref v in values.iter() {
+        print(f"borrowed: {v}");
+    }
+
+    // ref mut in pattern
+    let mut values = [1, 2, 3];
+    for ref mut v in values.iter_mut() {
+        *v = *v * 2;
+    }
+}
+
+// =============================================================================
+// Section 14: Slice References (Common Pattern)
+// =============================================================================
+
+fn test_slice_references() {
+    // Immutable slice reference
+    let arr = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &arr;
+    let slice_part: &[Int] = &arr[1..4];
+
+    // Mutable slice reference
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice_mut: &mut [Int] = &mut arr;
+
+    // Checked slice reference
+    let slice_checked: &checked [Int] = &checked [1, 2, 3];
+
+    // Byte slice (common in FFI)
+    let bytes: &[Byte] = &[0x00, 0x01, 0x02];
+    let byte_ptr: *const Byte = bytes.as_ptr();
+}
+
+// =============================================================================
+// Section 15: Edge Cases and Complex Combinations
+// =============================================================================
+
+fn test_edge_cases() {
+    // Reference to never type (diverging)
+    fn get_never_ref() -> &! {
+        loop {}
+    }
+
+    // Reference to unit
+    let unit_ref: &() = &();
+
+    // Very nested references
+    let deep: &&&&Int = &&&&42;
+
+    // Mixed pointer and reference
+    let mixed: *const &Int = 0 as *const &Int;
+
+    // Function pointer vs function type
+    let fn_ptr: fn(Int) -> Int = |x| x;
+    let fn_ref: &fn(Int) -> Int = &fn_ptr;
+
+    // GenRef to reference
+    let genref_ref: GenRef<&Int> = GenRef.new(&42);
+}
+
+// =============================================================================
+// Section 16: FFI Reference Patterns
+// =============================================================================
+
+extern "C" {
+    fn c_function(ptr: *const Int) -> Int;
+    fn c_function_mut(ptr: *mut Int);
+    fn c_buffer_read(buf: *const Byte, len: usize) -> Int;
+    fn c_buffer_write(buf: *mut Byte, len: usize);
+}
+
+fn test_ffi_patterns() {
+    // Converting reference to pointer for FFI
+    let x = 42;
+    let ptr: *const Int = &x as *const Int;
+
+    // Mutable pointer for FFI
+    let mut y = 42;
+    let ptr_mut: *mut Int = &mut y as *mut Int;
+
+    // Slice to pointer + len for FFI
+    let data = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &data;
+    let ptr = slice.as_ptr();
+    let len = slice.len();
+}
+
+// =============================================================================
+// Section 17: Reference Coercions
+// =============================================================================
+
+fn test_reference_coercions() {
+    // &mut T -> &T (implicit coercion)
+    let mut x = 42;
+    let r: &mut Int = &mut x;
+    let r2: &Int = r;  // Coerces &mut to &
+
+    // &[T; N] -> &[T] (array to slice coercion)
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &arr;  // Coerces array ref to slice ref
+
+    // Deref coercion through Heap
+    let boxed: Heap<Int> = Heap.new(42);
+    let r: &Int = &*boxed;  // Deref then borrow
+}

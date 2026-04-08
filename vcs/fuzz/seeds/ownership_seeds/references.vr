@@ -1,0 +1,237 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: ownership, references, cbgr
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// References - Three-Tier Reference System Test Seed
+// Tests CBGR references and reference semantics
+// =============================================================================
+
+// Tier 0: Managed references (CBGR protected)
+fn managed_references() {
+    let value = 42;
+
+    // Managed shared reference (~15ns overhead)
+    let ref_shared: &Int = &value;
+
+    // Managed mutable reference
+    let mut mutable = 42;
+    let ref_mut: &mut Int = &mut mutable;
+
+    *ref_mut = 100;
+
+    // CBGR ensures generation tracking
+    // Reference invalidation is detected at runtime
+}
+
+// Tier 1: Checked references (zero overhead, compile-time proven)
+fn checked_references() {
+    let value = 42;
+
+    // Compiler proves safety - no runtime check
+    let ref_checked: &checked Int = &checked value;
+
+    // Same semantics, zero overhead
+    println(*ref_checked);
+
+    let mut mutable = 42;
+    let ref_checked_mut: &checked mut Int = &checked mut mutable;
+    *ref_checked_mut = 100;
+}
+
+// Tier 2: Unsafe references (manual safety proof)
+fn unsafe_references() {
+    let value = 42;
+
+    // Programmer assumes responsibility
+    let ref_unsafe: &unsafe Int = &unsafe value;
+
+    // No checks at all
+    let raw = *ref_unsafe;
+}
+
+// CBGR generation tracking
+fn cbgr_generations() {
+    let mut container = Container.new();
+
+    // Reference carries generation counter
+    let ref1 = &container.data;
+
+    // Modification increments generation
+    container.modify();
+
+    // Using ref1 would detect stale generation
+    // at ~15ns overhead
+}
+
+// ThinRef vs FatRef
+fn ref_layouts() {
+    let value = 42;
+    let slice = [1, 2, 3, 4, 5];
+
+    // ThinRef: 16 bytes (ptr + generation + epoch_caps)
+    let thin: &Int = &value;
+
+    // FatRef: 24 bytes (ptr + generation + epoch_caps + len)
+    let fat: &[Int] = &slice[..];
+}
+
+// Reference coercion
+fn ref_coercion() {
+    let heap = Heap(42);
+
+    // Heap<T> coerces to &T
+    let ref1: &Int = &*heap;
+
+    // Array to slice
+    let arr = [1, 2, 3];
+    let slice: &[Int] = &arr;
+
+    // String to str slice
+    let text: Text = "hello";
+    let str_ref: &str = &text;
+}
+
+// Reference patterns
+fn ref_patterns() {
+    let value = 42;
+    let ref_val = &value;
+
+    // Dereference in pattern
+    match ref_val {
+        &x => println(x),
+    }
+
+    // Ref binding
+    let tuple = (1, 2);
+    let (ref a, ref b) = tuple;
+}
+
+// Nested references
+fn nested_refs() {
+    let value = 42;
+    let ref1 = &value;
+    let ref2 = &&value;
+    let ref3 = &&&value;
+
+    // Auto-deref
+    let v: Int = ***ref3;
+}
+
+// Reference to reference
+fn ref_to_ref() {
+    let mut value = 42;
+    let mut ref1 = &value;
+    let ref_to_ref: &&Int = &ref1;
+
+    // Modify what ref1 points to
+    ref1 = &100;
+}
+
+// GenRef for explicit generation tracking
+fn genref_usage() {
+    let text = Text.from("hello");
+
+    // Explicit generation counter
+    let gen_ref: GenRef<Text> = GenRef.new(&text);
+
+    // Can check validity
+    if gen_ref.is_valid() {
+        println(gen_ref.get());
+    }
+}
+
+// Reference in containers
+type RefContainer<T> is {
+    reference: &T,
+};
+
+fn ref_in_container() {
+    let value = 42;
+    let container = RefContainer { reference: &value };
+
+    println(*container.reference);
+}
+
+// Reference return from function
+fn return_reference(container: &Container) -> &Int {
+    &container.value
+}
+
+// Mutable reference return
+fn return_mut_reference(container: &mut Container) -> &mut Int {
+    &mut container.value
+}
+
+// Reference in protocols
+type AsRef is protocol {
+    type Target;
+    fn as_ref(&self) -> &Self.Target;
+};
+
+type AsMut is protocol {
+    type Target;
+    fn as_mut(&mut self) -> &mut Self.Target;
+};
+
+// Multiple references in struct
+type MultiRef<A, B> is {
+    first: &A,
+    second: &B,
+};
+
+fn multi_ref_usage() {
+    let a = 1;
+    let b = 2;
+    let multi = MultiRef { first: &a, second: &b };
+}
+
+// Reference with where clauses
+fn bounded_ref<T>(value: &T) -> &T
+where type T: Clone
+{
+    value
+}
+
+// Reference in async context
+async fn async_with_refs(data: &Data) -> Result<(), Error> {
+    // Reference must remain valid across await points
+    let result = process(data).await;
+    Ok(result)
+}
+
+// Downcasting references
+fn downcast_ref(any_ref: &Any) -> Maybe<&Int> {
+    any_ref.downcast_ref<Int>()
+}
+
+// Pointer to reference conversion
+fn ptr_to_ref() {
+    let value = 42;
+    let ptr: *const Int = &value as *const Int;
+
+    unsafe {
+        let ref_from_ptr: &Int = &*ptr;
+        println(*ref_from_ptr);
+    }
+}
+
+// Reference comparison
+fn ref_comparison() {
+    let a = 42;
+    let b = 42;
+
+    let ref_a = &a;
+    let ref_b = &b;
+    let ref_a2 = &a;
+
+    // Value comparison
+    let eq_val = *ref_a == *ref_b;  // true
+
+    // Pointer comparison
+    let eq_ptr = ptr.eq(ref_a, ref_a2);  // true
+    let ne_ptr = ptr.eq(ref_a, ref_b);   // false (different addresses)
+}

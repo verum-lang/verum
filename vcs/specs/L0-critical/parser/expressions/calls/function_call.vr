@@ -1,0 +1,110 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, calls, function
+
+fn test_simple_function_calls() {
+    // Simple function call with no arguments
+    func();
+    do_something();
+    init();
+}
+
+fn test_single_argument_calls() {
+    // Function call with single argument
+    print("hello");
+    sqrt(16);
+    process(data);
+}
+
+fn test_multiple_argument_calls() {
+    // Function call with multiple arguments
+    add(1, 2);
+    create_point(x, y, z);
+    send_message(recipient, subject, body);
+}
+
+fn test_trailing_comma() {
+    // Function call with trailing comma
+    format(
+        template,
+        arg1,
+        arg2,
+    );
+}
+
+fn test_expression_arguments() {
+    // Function call with expression arguments
+    compute(a + b, c * d);
+    combine(get_first(), get_second());
+    nested(outer(inner()));
+}
+
+// NOTE: Named arguments (name: value) are not currently in the grammar
+// fn test_named_arguments() {
+//     create_user(name: "Alice", age: 30, active: true);
+//     configure(timeout: 1000, retries: 3);
+// }
+
+// NOTE: Spread operator (...) is not currently in the grammar
+// fn test_spread_operator() {
+//     merge(...arrays);
+//     apply(func, ...args);
+// }
+
+fn test_type_arguments() {
+    // Function call with type arguments (single type param)
+    parse<Int>("42");
+    collect<List>(iter);
+    default<MyType>();
+}
+
+fn test_function_call_in_let() {
+    // Function call as expression
+    let result = compute(x);
+    let sum = add(a, b);
+}
+
+fn test_function_call_in_expressions() {
+    // Function call in expressions
+    let total = base + compute(modifier);
+    let valid = check(a) && check(b);
+}
+
+fn test_nested_function_calls() {
+    // Nested function calls
+    let deep = a(b(c(d(e()))));
+    let complex = outer(inner1(), inner2(nested()));
+}
+
+fn test_block_argument() {
+    // Function call with block argument
+    with_context({
+        do_work();
+        complete();
+    });
+}
+
+fn test_closure_argument() {
+    // Function call with closure argument
+    list.map(|x| x * 2);
+    filter(items, |item| item.valid);
+}
+
+fn test_generic_closure() {
+    // Function call with generic closure (single type param)
+    transform<Text>(value, |n| n.to_string());
+}
+
+fn test_method_on_result() {
+    // Function call on returned value
+    get_list().len();
+    create_map().insert(key, value);
+}
+
+fn test_void_function_calls() {
+    // Void function calls as statements
+    log("message");
+    cleanup();
+    notify_observers();
+}

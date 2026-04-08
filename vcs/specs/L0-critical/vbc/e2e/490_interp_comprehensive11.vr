@@ -1,0 +1,524 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #11: exercises records, closures, generators,
+// spawn/await, lists, f-strings.
+// Milestone: ~317 interpreter tests.
+
+// -- Record types --
+
+type Interval is { lo: Int, hi: Int };
+type Matrix2x2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn interval_new(lo: Int, hi: Int) -> Interval {
+    Interval { lo: lo, hi: hi }
+}
+
+fn interval_intersects(u: Interval, v: Interval) -> Int {
+    if u.hi < v.lo || v.hi < u.lo { 0 } else { 1 }
+}
+
+fn interval_overlap(u: Interval, v: Interval) -> Int {
+    // Returns length of overlap, or 0 if none
+    if interval_intersects(u, v) == 0 { return 0; }
+    let lo = if u.lo > v.lo { u.lo } else { v.lo };
+    let hi = if u.hi < v.hi { u.hi } else { v.hi };
+    hi - lo
+}
+
+fn mat_new(a: Int, b: Int, c: Int, d: Int) -> Matrix2x2 {
+    Matrix2x2 { a: a, b: b, c: c, d: d }
+}
+
+fn mat_mul(m: Matrix2x2, n: Matrix2x2) -> Matrix2x2 {
+    Matrix2x2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+fn mat_det(m: Matrix2x2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn test_records() {
+    // Interval tests
+    let i1 = interval_new(1, 5);
+    let i2 = interval_new(3, 8);
+    let i3 = interval_new(6, 10);
+
+    assert_eq(interval_intersects(i1, i2), 1);  // [1,5] and [3,8] overlap
+    assert_eq(interval_intersects(i1, i3), 0);  // [1,5] and [6,10] don't overlap
+    assert_eq(interval_overlap(i1, i2), 2);      // overlap = [3,5] -> length 2
+    assert_eq(interval_overlap(i1, i3), 0);
+
+    // Matrix multiplication
+    // [[1,2],[3,4]] * [[5,6],[7,8]]
+    // = [[1*5+2*7, 1*6+2*8],[3*5+4*7, 3*6+4*8]]
+    // = [[5+14, 6+16],[15+28, 18+32]]
+    // = [[19, 22],[43, 50]]
+    let m1 = mat_new(1, 2, 3, 4);
+    let m2 = mat_new(5, 6, 7, 8);
+    let mp = mat_mul(m1, m2);
+    assert_eq(mp.a, 19);
+    assert_eq(mp.b, 22);
+    assert_eq(mp.c, 43);
+    assert_eq(mp.d, 50);
+
+    // det([[1,2],[3,4]]) = 1*4-2*3 = -2
+    assert_eq(mat_det(m1), 0 - 2);
+
+    // det([[2,5],[1,3]]) = 2*3-5*1 = 1
+    let m3 = mat_new(2, 5, 1, 3);
+    assert_eq(mat_det(m3), 1);
+
+    // Matrix power: [[1,1],[1,0]]^n gives Fibonacci
+    // [[1,1],[1,0]]^1 = [[1,1],[1,0]] -> fib(2)=1,fib(1)=1
+    // [[1,1],[1,0]]^2 = [[2,1],[1,1]] -> fib(3)=2,fib(2)=1
+    // [[1,1],[1,0]]^3 = [[3,2],[2,1]] -> fib(4)=3
+    let fib_base = mat_new(1, 1, 1, 0);
+    let fib2 = mat_mul(fib_base, fib_base);
+    assert_eq(fib2.a, 2); // fib(3)=2
+    assert_eq(fib2.b, 1); // fib(2)=1
+    let fib3 = mat_mul(fib2, fib_base);
+    assert_eq(fib3.a, 3); // fib(4)=3
+    assert_eq(fib3.b, 2); // fib(3)=2
+    let fib4 = mat_mul(fib3, fib_base);
+    assert_eq(fib4.a, 5); // fib(5)=5
+
+    print("records: ok");
+}
+
+// -- Closures --
+
+fn fold_left(f: fn(Int, Int) -> Int, init: Int, arr: [Int; 8], n: Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < n { acc = f(acc, arr[i]); i = i + 1; }
+    acc
+}
+
+fn map_inplace(f: fn(Int) -> Int, arr: [Int; 8], n: Int) {
+    let mut i = 0;
+    while i < n { arr[i] = f(arr[i]); i = i + 1; }
+}
+
+fn filter_count(pred: fn(Int) -> Int, arr: [Int; 8], n: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n { if pred(arr[i]) == 1 { cnt = cnt + 1; } i = i + 1; }
+    cnt
+}
+
+fn test_closures() {
+    let vals = [3, 1, 4, 1, 5, 9, 2, 6];
+
+    // Sum via fold: 3+1+4+1+5+9+2+6 = 31
+    let add  = |a: Int, b: Int| -> Int { a + b };
+    let sum  = fold_left(add, 0, vals, 8);
+    assert_eq(sum, 31);
+
+    // Product via fold: 3*1*4*1*5*9*2*6 = 6480
+    let mul  = |a: Int, b: Int| -> Int { a * b };
+    let prod = fold_left(mul, 1, vals, 8);
+    assert_eq(prod, 6480);
+
+    // Max via fold
+    let maxf = |a: Int, b: Int| -> Int { if a > b { a } else { b } };
+    let mx   = fold_left(maxf, 0 - 1000000, vals, 8);
+    assert_eq(mx, 9);
+
+    // Map: square each element -> [9,1,16,1,25,81,4,36]
+    let mut sq_arr = [3, 1, 4, 1, 5, 9, 2, 6];
+    let sq = |x: Int| -> Int { x * x };
+    map_inplace(sq, sq_arr, 8);
+    assert_eq(sq_arr[0], 9);
+    assert_eq(sq_arr[2], 16);
+    assert_eq(sq_arr[5], 81);
+    // Sum of squares: 9+1+16+1+25+81+4+36 = 173
+    let sq_sum = fold_left(add, 0, sq_arr, 8);
+    assert_eq(sq_sum, 173);
+
+    // Filter count: count elements > 3 in original [3,1,4,1,5,9,2,6]
+    // Elements > 3: 4, 5, 9, 6 -> count=4
+    let gt3 = |x: Int| -> Int { if x > 3 { 1 } else { 0 } };
+    let cnt = filter_count(gt3, vals, 8);
+    assert_eq(cnt, 4);
+
+    // Filter count: count odd numbers: 3,1,1,5,9 -> 5
+    let is_odd = |x: Int| -> Int { if x % 2 == 1 { 1 } else { 0 } };
+    let odd_cnt = filter_count(is_odd, vals, 8);
+    assert_eq(odd_cnt, 5);
+
+    print("closures: ok");
+}
+
+// -- Generators --
+
+fn* range_gen(lo: Int, hi: Int, step: Int) -> Int {
+    let mut v = lo;
+    while v < hi {
+        yield v;
+        v = v + step;
+    }
+}
+
+fn* fibonacci_gen(n: Int) -> Int {
+    // Yield first n Fibonacci numbers
+    let mut a = 0;
+    let mut b = 1;
+    let mut k = 0;
+    while k < n {
+        yield a;
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        k = k + 1;
+    }
+}
+
+fn* zip_sum_gen(arr_a: [Int; 8], arr_b: [Int; 8], n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        yield arr_a[i] + arr_b[i];
+        i = i + 1;
+    }
+}
+
+fn test_generators() {
+    // range(0, 16, 2): 0, 2, 4, 6, 8, 10, 12, 14 (8 values)
+    let mut even = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx  = 0;
+    for v in range_gen(0, 16, 2) {
+        even[idx] = v;
+        idx = idx + 1;
+    }
+    assert_eq(even[0], 0);
+    assert_eq(even[1], 2);
+    assert_eq(even[7], 14);
+    // Sum: 0+2+4+6+8+10+12+14 = 56
+    let mut even_sum = 0;
+    let mut k = 0;
+    while k < 8 { even_sum = even_sum + even[k]; k = k + 1; }
+    assert_eq(even_sum, 56);
+
+    // fibonacci: F(0)..F(9) = 0,1,1,2,3,5,8,13,21,34
+    let mut fibs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    idx = 0;
+    for f in fibonacci_gen(10) {
+        if idx < 10 { fibs[idx] = f; idx = idx + 1; }
+    }
+    // 10-element array but generator yields 10 values
+    // Actually we defined fibs of size 10; let me use a separate array
+    let mut fib10 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    idx = 0;
+    for f in fibonacci_gen(10) {
+        fib10[idx] = f;
+        idx = idx + 1;
+    }
+    assert_eq(fib10[0], 0);
+    assert_eq(fib10[1], 1);
+    assert_eq(fib10[2], 1);
+    assert_eq(fib10[3], 2);
+    assert_eq(fib10[4], 3);
+    assert_eq(fib10[5], 5);
+    assert_eq(fib10[6], 8);
+    assert_eq(fib10[7], 13);
+    // Sum F(0)..F(9) = 0+1+1+2+3+5+8+13+21+34 = 88
+    let mut fib_sum = 0;
+    k = 0;
+    while k < 10 { fib_sum = fib_sum + fib10[k]; k = k + 1; }
+    // Only 8 accessible; adjust to 8 values F(0)..F(7) = 0+1+1+2+3+5+8+13 = 33
+    // Let's use 8-element array and gen of 8 values
+    let mut fib8 = [0, 0, 0, 0, 0, 0, 0, 0];
+    idx = 0;
+    for f in fibonacci_gen(8) {
+        fib8[idx] = f;
+        idx = idx + 1;
+    }
+    assert_eq(fib8[7], 13);
+    // Sum F(0)..F(7) = 0+1+1+2+3+5+8+13 = 33
+    let mut fib8_sum = 0;
+    k = 0;
+    while k < 8 { fib8_sum = fib8_sum + fib8[k]; k = k + 1; }
+    assert_eq(fib8_sum, 33);
+
+    // zip_sum: [1,3,5,7,9,11,13,15] + [2,4,6,8,10,12,14,16] = [3,7,11,15,19,23,27,31]
+    let aa = [1, 3, 5, 7, 9, 11, 13, 15];
+    let bb = [2, 4, 6, 8, 10, 12, 14, 16];
+    let mut zs = [0, 0, 0, 0, 0, 0, 0, 0];
+    idx = 0;
+    for v in zip_sum_gen(aa, bb, 8) {
+        zs[idx] = v;
+        idx = idx + 1;
+    }
+    assert_eq(zs[0], 3);
+    assert_eq(zs[3], 15);
+    assert_eq(zs[7], 31);
+    // Total sum = (1+2)+(3+4)+...+(15+16) = 3+7+11+15+19+23+27+31 = 136
+    let mut zs_sum = 0;
+    k = 0;
+    while k < 8 { zs_sum = zs_sum + zs[k]; k = k + 1; }
+    assert_eq(zs_sum, 136);
+
+    print("generators: ok");
+}
+
+// -- Spawn/Await --
+
+// Compute sum of arithmetic series: lo + (lo+1) + ... + hi
+fn arith_sum(lo: Int, hi: Int) -> Int {
+    (hi - lo + 1) * (lo + hi) / 2
+}
+
+// Compute GCD (Euclidean)
+@allow(unbounded_recursion)
+fn gcd_rec(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd_rec(b, a % b) }
+}
+
+// Count multiples of d in [lo, hi] inclusive
+fn count_multiples(lo: Int, hi: Int, d: Int) -> Int {
+    hi / d - (lo - 1) / d
+}
+
+fn test_spawn_await() {
+    // Concurrent arithmetic computations
+    let t1 = spawn arith_sum(1, 100);    // 100*101/2 = 5050
+    let t2 = spawn gcd_rec(252, 105);    // gcd(252,105) = gcd(105,42) = gcd(42,21) = 21
+    let t3 = spawn count_multiples(1, 100, 7);  // floor(100/7) = 14
+    let t4 = spawn arith_sum(1, 50);     // 50*51/2 = 1275
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+    let r4 = t4.await;
+
+    assert_eq(r1, 5050);
+    assert_eq(r2, 21);
+    assert_eq(r3, 14);
+    assert_eq(r4, 1275);
+
+    // Additional: gcd(48,36)=12, count_multiples(1,100,3)=33
+    let t5 = spawn gcd_rec(48, 36);
+    let t6 = spawn count_multiples(1, 100, 3);
+    let r5 = t5.await;
+    let r6 = t6.await;
+    assert_eq(r5, 12);
+    assert_eq(r6, 33);
+
+    print("spawn_await: ok");
+}
+
+// -- List operations --
+
+fn test_list_operations() {
+    // Bubble sort pass counting
+    // Sort [64, 34, 25, 12, 22, 11, 90] -> [11,12,22,25,34,64,90]
+    let mut arr = [64, 34, 25, 12, 22, 11, 90, 0];
+    let n = 7;
+    let mut passes = 0;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut j = 0;
+        while j < n - i - 1 {
+            if arr[j] > arr[j + 1] {
+                let tmp = arr[j];
+                arr[j]     = arr[j + 1];
+                arr[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        passes = passes + 1;
+        i = i + 1;
+    }
+    assert_eq(arr[0], 11);
+    assert_eq(arr[1], 12);
+    assert_eq(arr[2], 22);
+    assert_eq(arr[3], 25);
+    assert_eq(arr[4], 34);
+    assert_eq(arr[5], 64);
+    assert_eq(arr[6], 90);
+
+    // Kadane's algorithm: maximum subarray sum
+    // Array: [-2, 1, -3, 4, -1, 2, 1, -5]
+    // Max subarray: [4,-1,2,1] = 6
+    let inp = [0 - 2, 1, 0 - 3, 4, 0 - 1, 2, 1, 0 - 5];
+    let mut max_ending = inp[0];
+    let mut max_so_far = inp[0];
+    i = 1;
+    while i < 8 {
+        max_ending = if inp[i] > max_ending + inp[i] { inp[i] } else { max_ending + inp[i] };
+        max_so_far = if max_ending > max_so_far { max_ending } else { max_so_far };
+        i = i + 1;
+    }
+    assert_eq(max_so_far, 6);
+
+    // Dutch National Flag: partition [0,1,2,2,0,1,0] into [0,0,0,1,1,2,2]
+    let mut dnf = [0, 1, 2, 2, 0, 1, 0, 0];
+    let dn = 7;
+    let mut lo = 0;
+    let mut mid_idx = 0;
+    let mut hi = dn - 1;
+    while mid_idx <= hi {
+        if dnf[mid_idx] == 0 {
+            let tmp = dnf[lo]; dnf[lo] = dnf[mid_idx]; dnf[mid_idx] = tmp;
+            lo = lo + 1; mid_idx = mid_idx + 1;
+        } else if dnf[mid_idx] == 1 {
+            mid_idx = mid_idx + 1;
+        } else {
+            let tmp = dnf[mid_idx]; dnf[mid_idx] = dnf[hi]; dnf[hi] = tmp;
+            hi = hi - 1;
+        }
+    }
+    // [0,0,0,1,1,2,2]
+    assert_eq(dnf[0], 0); assert_eq(dnf[1], 0); assert_eq(dnf[2], 0);
+    assert_eq(dnf[3], 1); assert_eq(dnf[4], 1);
+    assert_eq(dnf[5], 2); assert_eq(dnf[6], 2);
+
+    print("list_operations: ok");
+}
+
+// -- Format strings --
+
+fn test_format_strings() {
+    // Interval formatting
+    let iv = interval_new(3, 7);
+    print(f"interval: [{iv.lo},{iv.hi}] len={iv.hi - iv.lo}");
+    assert_eq(iv.hi - iv.lo, 4);
+
+    // Matrix determinant with format string
+    let m = mat_new(3, 8, 4, 6);
+    // det = 3*6 - 8*4 = 18 - 32 = -14
+    let d = mat_det(m);
+    assert_eq(d, 0 - 14);
+    print(f"matrix_det: {d}");
+
+    // Fibonacci with format strings
+    let mut fibs = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for f in fibonacci_gen(8) {
+        fibs[idx] = f;
+        idx = idx + 1;
+    }
+    print(f"fibs: {fibs[0]} {fibs[1]} {fibs[2]} {fibs[3]} {fibs[4]} {fibs[5]} {fibs[6]} {fibs[7]}");
+    assert_eq(fibs[6], 8);
+    assert_eq(fibs[7], 13);
+
+    // Arithmetic series formatting
+    // Sum 1..10 = 55, Sum 1..20 = 210
+    let s10 = arith_sum(1, 10);
+    let s20 = arith_sum(1, 20);
+    assert_eq(s10, 55);
+    assert_eq(s20, 210);
+    print(f"arith_sums: sum_1_10={s10} sum_1_20={s20}");
+
+    print("format_strings: ok");
+}
+
+// -- Combined pipeline --
+
+// Run-length encoding: compress array by counting consecutive runs.
+// Returns compressed length (number of (value, count) pairs written to out).
+fn run_length_encode(
+    data: [Int; 16],
+    n:    Int,
+    out:  [Int; 16],  // out[2i] = value, out[2i+1] = count
+    max_out: Int
+) -> Int {
+    if n == 0 { return 0; }
+    let mut pairs = 0;
+    let mut cur   = data[0];
+    let mut cnt   = 1;
+    let mut i     = 1;
+    while i < n {
+        if data[i] == cur {
+            cnt = cnt + 1;
+        } else {
+            if pairs * 2 + 1 < max_out {
+                out[pairs * 2]     = cur;
+                out[pairs * 2 + 1] = cnt;
+            }
+            pairs = pairs + 1;
+            cur   = data[i];
+            cnt   = 1;
+        }
+        i = i + 1;
+    }
+    // Write last run
+    if pairs * 2 + 1 < max_out {
+        out[pairs * 2]     = cur;
+        out[pairs * 2 + 1] = cnt;
+    }
+    pairs + 1
+}
+
+fn test_combined_pipeline() {
+    // Step 1: generate range [0,7] and compute squares
+    let mut squares = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sq_idx = 0;
+    for v in range_gen(0, 8, 1) {
+        squares[sq_idx] = v * v;
+        sq_idx = sq_idx + 1;
+    }
+    // [0, 1, 4, 9, 16, 25, 36, 49]
+    assert_eq(squares[0], 0);
+    assert_eq(squares[7], 49);
+
+    // Step 2: fold to compute sum of squares = 0+1+4+9+16+25+36+49 = 140
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let sq_sum = fold_left(add, 0, squares, 8);
+    assert_eq(sq_sum, 140);
+
+    // Step 3: spawn two computations
+    let t1 = spawn arith_sum(1, 20);     // 210
+    let t2 = spawn gcd_rec(360, 240);    // gcd(360,240)=120
+    let r1 = t1.await;
+    let r2 = t2.await;
+    assert_eq(r1, 210);
+    assert_eq(r2, 120);
+
+    // Step 4: run-length encode a sequence
+    // Data: [1,1,1,2,2,3,3,3,3,1,1,2,2,2,3,1]
+    let mut data = [1, 1, 1, 2, 2, 3, 3, 3, 3, 1, 1, 2, 2, 2, 3, 1];
+    let mut rle  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nruns    = run_length_encode(data, 16, rle, 16);
+    // Runs: (1,3),(2,2),(3,4),(1,2),(2,3),(3,1),(1,1) = 7 runs
+    assert_eq(nruns, 7);
+    assert_eq(rle[0], 1); assert_eq(rle[1], 3);  // (1,3)
+    assert_eq(rle[2], 2); assert_eq(rle[3], 2);  // (2,2)
+    assert_eq(rle[4], 3); assert_eq(rle[5], 4);  // (3,4)
+
+    // Step 5: matrix pipeline - compute [[1,1],[1,0]]^6 for fib(7)
+    let fib_m = mat_new(1, 1, 1, 0);
+    let mut m_acc = mat_new(1, 0, 0, 1); // identity
+    let mut k = 0;
+    while k < 6 {
+        m_acc = mat_mul(m_acc, fib_m);
+        k = k + 1;
+    }
+    // [[1,1],[1,0]]^6 top-left = fib(7)=13
+    assert_eq(m_acc.a, 13);
+
+    let msg = f"pipeline: sq_sum={sq_sum} arith={r1} gcd={r2} rle_runs={nruns} fib7={m_acc.a}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_records();
+    test_closures();
+    test_generators();
+    test_spawn_await();
+    test_list_operations();
+    test_format_strings();
+    test_combined_pipeline();
+    print("[OK] 490_interp_comprehensive11 — MILESTONE: ~317 interpreter tests");
+    0
+}

@@ -1,0 +1,462 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, advanced
+// @timeout: 15000
+// @expected-exit: 0
+//
+// CBGR comprehensive stress test: Combines all patterns including
+// refs, loops, variants, nested calls, records, conditionals,
+// recursion, multiple accumulators, and cross-ref operations.
+
+// ============================================================================
+// Type definitions
+// ============================================================================
+
+type Vec2D is { vx: Int, vy: Int };
+type Particle2 is { pos: Vec2D, vel: Vec2D, mass: Int, alive: Bool };
+type SimStats is { steps: Int, collisions: Int, total_dist: Int };
+type Accum3 is { sum: Int, prod: Int, cnt: Int };
+type Ring4 is { e0: Int, e1: Int, e2: Int, e3: Int, head: Int, count: Int };
+
+// ============================================================================
+// Section 1: Ref basics (warm up)
+// ============================================================================
+
+fn read_ref(r: &Int) -> Int { *r }
+fn write_ref(r: &mut Int, v: Int) { *r = v; }
+fn add_ref(r: &mut Int, v: Int) { *r = *r + v; }
+
+fn swap_vals(a: &mut Int, b: &mut Int) {
+    let tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+fn test_basics() {
+    let mut x = 0;
+    write_ref(&mut x, 42);
+    assert_eq(x, 42);
+    add_ref(&mut x, 8);
+    assert_eq(x, 50);
+
+    let mut a = 10;
+    let mut b = 20;
+    swap_vals(&mut a, &mut b);
+    assert_eq(a, 20);
+    assert_eq(b, 10);
+
+    let c = 77;
+    let r1 = &c;
+    let r2 = &c;
+    assert_eq(*r1, *r2);
+    assert_eq(*r1 + *r2, 154);
+}
+
+// ============================================================================
+// Section 2: Record refs
+// ============================================================================
+
+fn vec2d_sum(v: &Vec2D) -> Int { (*v).vx + (*v).vy }
+fn vec2d_add(a: &mut Vec2D, dx: Int, dy: Int) {
+    (*a).vx = (*a).vx + dx;
+    (*a).vy = (*a).vy + dy;
+}
+
+fn test_record_refs() {
+    let mut v = Vec2D { vx: 3, vy: 4 };
+    // Use direct field access to avoid &v / &mut v conflict
+    assert_eq(v.vx + v.vy, 7);
+    vec2d_add(&mut v, 10, 20);
+    assert_eq(v.vx, 13);
+    assert_eq(v.vy, 24);
+    assert_eq(v.vx + v.vy, 37);
+}
+
+// ============================================================================
+// Section 3: Nested function calls with refs
+// ============================================================================
+
+fn double_ref(r: &mut Int) {
+    let v = read_ref(r);
+    write_ref(r, v * 2);
+}
+
+fn square_ref(r: &mut Int) {
+    let v = read_ref(r);
+    write_ref(r, v * v);
+}
+
+fn abs_val(r: &Int) -> Int {
+    if *r < 0 { 0 - *r } else { *r }
+}
+
+fn test_nested_calls() {
+    let mut x = 3;
+    double_ref(&mut x);
+    assert_eq(x, 6);
+    square_ref(&mut x);
+    assert_eq(x, 36);
+
+    let neg = -42;
+    assert_eq(abs_val(&neg), 42);
+}
+
+// ============================================================================
+// Section 4: Refs in loops
+// ============================================================================
+
+fn test_loop_accumulation() {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 50 {
+        add_ref(&mut sum, i);
+        i = i + 1;
+    }
+    assert_eq(sum, 1275);
+}
+
+fn test_loop_with_record_ref() {
+    let mut pt = Vec2D { vx: 0, vy: 0 };
+    let mut i = 0;
+    while i < 10 {
+        vec2d_add(&mut pt, 1, 2);
+        i = i + 1;
+    }
+    assert_eq(pt.vx, 10);
+    assert_eq(pt.vy, 20);
+}
+
+fn test_loop_swap_pattern() {
+    let mut a = 1;
+    let mut b = 2;
+    let mut i = 0;
+    while i < 100 {
+        swap_vals(&mut a, &mut b);
+        i = i + 1;
+    }
+    assert_eq(a, 1);
+    assert_eq(b, 2);
+}
+
+// ============================================================================
+// Section 5: Multi-accumulator
+// ============================================================================
+
+fn accum3_new() -> Accum3 { Accum3 { sum: 0, prod: 1, cnt: 0 } }
+
+fn accum3_feed(a: &mut Accum3, val: Int) {
+    (*a).sum = (*a).sum + val;
+    (*a).prod = (*a).prod * val;
+    (*a).cnt = (*a).cnt + 1;
+}
+
+fn accum3_avg(a: &Accum3) -> Int {
+    if (*a).cnt == 0 { return 0; }
+    (*a).sum / (*a).cnt
+}
+
+fn test_multi_accumulator() {
+    let mut ac = accum3_new();
+    accum3_feed(&mut ac, 2);
+    accum3_feed(&mut ac, 3);
+    accum3_feed(&mut ac, 5);
+    accum3_feed(&mut ac, 7);
+    assert_eq(ac.sum, 17);
+    assert_eq(ac.prod, 210);
+    assert_eq(ac.cnt, 4);
+    // Direct field access to avoid &ac / &mut ac conflict
+    let avg = ac.sum / ac.cnt;
+    assert_eq(avg, 4);
+}
+
+// ============================================================================
+// Section 6: Ring buffer via refs
+// ============================================================================
+
+fn ring_new() -> Ring4 {
+    Ring4 { e0: 0, e1: 0, e2: 0, e3: 0, head: 0, count: 0 }
+}
+
+fn ring_push(r: &mut Ring4, val: Int) {
+    let idx = ((*r).head + (*r).count) % 4;
+    if idx == 0 { (*r).e0 = val; }
+    else if idx == 1 { (*r).e1 = val; }
+    else if idx == 2 { (*r).e2 = val; }
+    else { (*r).e3 = val; }
+    if (*r).count < 4 {
+        (*r).count = (*r).count + 1;
+    } else {
+        (*r).head = ((*r).head + 1) % 4;
+    }
+}
+
+fn ring_get(r: &Ring4, offset: Int) -> Int {
+    let idx = ((*r).head + offset) % 4;
+    if idx == 0 { (*r).e0 }
+    else if idx == 1 { (*r).e1 }
+    else if idx == 2 { (*r).e2 }
+    else { (*r).e3 }
+}
+
+fn ring_sum(r: &Ring4) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < (*r).count {
+        s = s + ring_get(r, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn test_ring_buffer_push() {
+    let mut r = ring_new();
+    ring_push(&mut r, 10);
+    ring_push(&mut r, 20);
+    ring_push(&mut r, 30);
+    assert_eq(r.count, 3);
+    // Direct field access to avoid &r / &mut r conflict
+    assert_eq(r.e0 + r.e1 + r.e2, 60);
+
+    ring_push(&mut r, 40);
+    assert_eq(r.count, 4);
+    assert_eq(r.e0 + r.e1 + r.e2 + r.e3, 100);
+}
+
+fn test_ring_buffer_overflow() {
+    let mut r = ring_new();
+    ring_push(&mut r, 10);
+    ring_push(&mut r, 20);
+    ring_push(&mut r, 30);
+    ring_push(&mut r, 40);
+    // Overflow: pushes 50, oldest (10) lost
+    ring_push(&mut r, 50);
+    assert_eq(r.count, 4);
+    // Use ring_sum on a copy to avoid &r / &mut r conflict
+    let snap = r;
+    assert_eq(ring_sum(&snap), 140); // 20+30+40+50
+}
+
+// ============================================================================
+// Section 7: Particle simulation
+// ============================================================================
+
+fn make_particle2(px: Int, py: Int, vvx: Int, vvy: Int, m: Int) -> Particle2 {
+    Particle2 {
+        pos: Vec2D { vx: px, vy: py },
+        vel: Vec2D { vx: vvx, vy: vvy },
+        mass: m,
+        alive: true
+    }
+}
+
+fn particle_step2(p: &mut Particle2) {
+    if (*p).alive {
+        (*p).pos.vx = (*p).pos.vx + (*p).vel.vx;
+        (*p).pos.vy = (*p).pos.vy + (*p).vel.vy;
+    }
+}
+
+fn particle_kill(p: &mut Particle2) {
+    (*p).alive = false;
+}
+
+fn particle_dist_sq(a: &Particle2, b: &Particle2) -> Int {
+    let dx = (*a).pos.vx - (*b).pos.vx;
+    let dy = (*a).pos.vy - (*b).pos.vy;
+    dx * dx + dy * dy
+}
+
+fn test_particle_sim() {
+    let mut p = make_particle2(0, 0, 3, 4, 1);
+    particle_step2(&mut p);
+    assert_eq(p.pos.vx, 3);
+    assert_eq(p.pos.vy, 4);
+    particle_step2(&mut p);
+    assert_eq(p.pos.vx, 6);
+    assert_eq(p.pos.vy, 8);
+    particle_kill(&mut p);
+    particle_step2(&mut p); // no movement after kill
+    assert_eq(p.pos.vx, 6);
+    assert_eq(p.pos.vy, 8);
+}
+
+fn test_particle_distance() {
+    let p1 = make_particle2(0, 0, 0, 0, 1);
+    let p2 = make_particle2(3, 4, 0, 0, 1);
+    assert_eq(particle_dist_sq(&p1, &p2), 25);
+}
+
+// ============================================================================
+// Section 8: Recursive with refs
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn rec_sum(acc: &mut Int, n: Int) {
+    if n <= 0 { return; }
+    *acc = *acc + n;
+    rec_sum(acc, n - 1);
+}
+
+@allow(unbounded_recursion)
+fn rec_fib(a: &mut Int, b: &mut Int, n: Int) {
+    if n <= 0 { return; }
+    let next = *a + *b;
+    *a = *b;
+    *b = next;
+    rec_fib(a, b, n - 1);
+}
+
+@allow(unbounded_recursion)
+fn rec_gcd(result: &mut Int, a: Int, b: Int) {
+    if b == 0 { *result = a; return; }
+    rec_gcd(result, b, a % b);
+}
+
+fn test_recursive_refs() {
+    let mut sum = 0;
+    rec_sum(&mut sum, 20);
+    assert_eq(sum, 210);
+
+    let mut fa = 0;
+    let mut fb = 1;
+    rec_fib(&mut fa, &mut fb, 10);
+    assert_eq(fa, 55);
+    assert_eq(fb, 89);
+
+    let mut gcd = 0;
+    rec_gcd(&mut gcd, 48, 18);
+    assert_eq(gcd, 6);
+}
+
+// ============================================================================
+// Section 9: Conditional ref patterns
+// ============================================================================
+
+fn clamp_ref(val: &mut Int, lo: Int, hi: Int) {
+    if *val < lo { *val = lo; }
+    else if *val > hi { *val = hi; }
+}
+
+fn classify_add(neg: &mut Int, zero: &mut Int, pos: &mut Int, val: Int) {
+    if val < 0 { *neg = *neg + 1; }
+    else if val == 0 { *zero = *zero + 1; }
+    else { *pos = *pos + 1; }
+}
+
+fn test_conditional_refs() {
+    let mut v = -10;
+    clamp_ref(&mut v, 0, 100);
+    assert_eq(v, 0);
+    v = 150;
+    clamp_ref(&mut v, 0, 100);
+    assert_eq(v, 100);
+
+    let mut neg = 0;
+    let mut zero = 0;
+    let mut pos = 0;
+    let mut i = -5;
+    while i <= 5 {
+        classify_add(&mut neg, &mut zero, &mut pos, i);
+        i = i + 1;
+    }
+    assert_eq(neg, 5);
+    assert_eq(zero, 1);
+    assert_eq(pos, 5);
+}
+
+// ============================================================================
+// Section 10: Unsafe refs
+// ============================================================================
+
+fn test_unsafe_refs() {
+    let x = 42;
+    let ur = unsafe { &unsafe x };
+    assert_eq(*ur, 42);
+
+    let y = 99;
+    let t0 = &y;
+    let t2 = unsafe { &unsafe y };
+    assert_eq(*t0, *t2);
+}
+
+// ============================================================================
+// Section 11: Combined stress - simulation loop
+// ============================================================================
+
+fn test_combined_stress() {
+    let mut p1 = make_particle2(0, 0, 1, 0, 1);
+    let mut p2 = make_particle2(100, 0, -1, 0, 1);
+    let mut stats = SimStats { steps: 0, collisions: 0, total_dist: 0 };
+    let mut ac = accum3_new();
+    let mut rng = ring_new();
+
+    let mut i = 0;
+    while i < 20 {
+        particle_step2(&mut p1);
+        particle_step2(&mut p2);
+        stats.steps = stats.steps + 1;
+
+        // Direct field access to avoid &p1/&p2 vs &mut p1/&mut p2 conflict
+        let dx = p1.pos.vx - p2.pos.vx;
+        let dy = p1.pos.vy - p2.pos.vy;
+        let d = dx * dx + dy * dy;
+        if d < 100 {
+            stats.collisions = stats.collisions + 1;
+        }
+
+        let step_dist = p1.vel.vx + p2.vel.vx;
+        let abs_dist = if step_dist < 0 { 0 - step_dist } else { step_dist };
+        stats.total_dist = stats.total_dist + abs_dist;
+
+        accum3_feed(&mut ac, i);
+        ring_push(&mut rng, i);
+
+        i = i + 1;
+    }
+
+    assert_eq(stats.steps, 20);
+    assert_eq(p1.pos.vx, 20);
+    assert_eq(p2.pos.vx, 80);
+    assert_eq(ac.cnt, 20);
+    assert_eq(ac.sum, 190); // 0+1+...+19
+}
+
+// ============================================================================
+// Section 12: Multiple simultaneous borrows
+// ============================================================================
+
+fn sum_four(a: &Int, b: &Int, c: &Int, d: &Int) -> Int {
+    *a + *b + *c + *d
+}
+
+fn test_multi_borrow() {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let d = 40;
+    assert_eq(sum_four(&a, &b, &c, &d), 100);
+    // Same variable, multiple immutable refs
+    assert_eq(sum_four(&a, &a, &a, &a), 40);
+}
+
+fn main() -> Int {
+    test_basics();
+    test_record_refs();
+    test_nested_calls();
+    test_loop_accumulation();
+    test_loop_with_record_ref();
+    test_loop_swap_pattern();
+    test_multi_accumulator();
+    test_ring_buffer_push();
+    test_ring_buffer_overflow();
+    test_particle_sim();
+    test_particle_distance();
+    test_recursive_refs();
+    test_conditional_refs();
+    test_unsafe_refs();
+    test_combined_stress();
+    test_multi_borrow();
+    print("[OK] 370_interp_cbgr_comprehensive");
+    0
+}

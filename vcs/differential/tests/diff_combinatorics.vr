@@ -1,0 +1,132 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, combinatorics, factorial, binomial
+// @timeout: 10000
+
+fn factorial(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 2;
+    while i <= n { r = r * i; i = i + 1; }
+    r
+}
+
+fn binomial(n: Int, k: Int) -> Int {
+    if k > n { return 0; }
+    if k == 0 { return 1; }
+    if k == n { return 1; }
+    // C(n,k) = C(n-1,k-1) + C(n-1,k) computed iteratively
+    // Use factorial for small values
+    factorial(n) / (factorial(k) * factorial(n - k))
+}
+
+fn catalan(n: Int) -> Int {
+    binomial(2 * n, n) / (n + 1)
+}
+
+fn derangements(n: Int) -> Int {
+    // D(0)=1, D(1)=0, D(n) = (n-1)*(D(n-1)+D(n-2))
+    if n == 0 { return 1; }
+    if n == 1 { return 0; }
+    let mut prev2 = 1;
+    let mut prev1 = 0;
+    let mut i = 2;
+    while i <= n {
+        let cur = (i - 1) * (prev1 + prev2);
+        prev2 = prev1;
+        prev1 = cur;
+        i = i + 1;
+    }
+    prev1
+}
+
+fn stirling2(n: Int, k: Int) -> Int {
+    // S(n,k) = k*S(n-1,k) + S(n-1,k-1), S(0,0)=1, S(n,0)=0, S(0,k)=0
+    if n == 0 { if k == 0 { return 1; } else { return 0; } }
+    if k == 0 { return 0; }
+    if k > n { return 0; }
+    if k == 1 { return 1; }
+    if k == n { return 1; }
+    // Build table iteratively using just two rows
+    // For simplicity with small values, use recursive definition unrolled
+    // S(n,2) = 2^(n-1) - 1
+    if k == 2 {
+        let mut p = 1;
+        let mut i = 0;
+        while i < n - 1 { p = p * 2; i = i + 1; }
+        return p - 1;
+    }
+    // For general case, use inclusion-exclusion (small values only)
+    // S(n,k) = (1/k!) * sum_{j=0}^{k} (-1)^j * C(k,j) * (k-j)^n
+    // This works for small n,k
+    let mut total = 0;
+    let mut j = 0;
+    while j <= k {
+        let mut pw = 1;
+        let mut ii = 0;
+        while ii < n { pw = pw * (k - j); ii = ii + 1; }
+        let term = binomial(k, j) * pw;
+        if j % 2 == 0 { total = total + term; }
+        else { total = total - term; }
+        j = j + 1;
+    }
+    total / factorial(k)
+}
+
+fn test_factorial() -> Int {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(6), 720);
+    assert_eq(factorial(7), 5040);
+    1
+}
+
+fn test_binomial() -> Int {
+    assert_eq(binomial(5, 0), 1);
+    assert_eq(binomial(5, 5), 1);
+    assert_eq(binomial(5, 2), 10);
+    assert_eq(binomial(6, 3), 20);
+    assert_eq(binomial(10, 5), 252);
+    1
+}
+
+fn test_catalan() -> Int {
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+    1
+}
+
+fn test_derangements() -> Int {
+    assert_eq(derangements(0), 1);
+    assert_eq(derangements(1), 0);
+    assert_eq(derangements(2), 1);
+    assert_eq(derangements(3), 2);
+    assert_eq(derangements(4), 9);
+    assert_eq(derangements(5), 44);
+    1
+}
+
+fn test_stirling() -> Int {
+    assert_eq(stirling2(0, 0), 1);
+    assert_eq(stirling2(3, 1), 1);
+    assert_eq(stirling2(3, 2), 3);
+    assert_eq(stirling2(3, 3), 1);
+    assert_eq(stirling2(4, 2), 7);
+    1
+}
+
+fn main() -> Int {
+    test_factorial();
+    test_binomial();
+    test_catalan();
+    test_derangements();
+    test_stirling();
+    print("DIFF_OK: combinatorics");
+    0
+}

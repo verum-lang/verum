@@ -1,0 +1,132 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, unicode, i18n
+
+// Helper functions
+fn format(template: Text, name: Text) -> Text { template }
+
+fn test_unicode_identifiers() {
+    // Unicode identifiers (if supported)
+    let nombre = 42;
+    let name_var = "name";
+    let name_jp = "namae";
+    let name_gr = "onoma";
+    let name_ar = "ism";
+    let name_he = "shem";
+}
+
+fn test_unicode_in_string_literals() {
+    // Unicode in string literals
+    let greeting = "Hello, World!";
+    let russian = "Privet, mir!";
+    let japanese = "Konnichiwa sekai";
+    let chinese = "Nihao shijie";
+    let arabic = "Marhaba";
+    let hebrew = "Shalom";
+    let korean = "Annyeonghaseyo";
+    let thai = "Sawasdee";
+    let hindi = "Namaste";
+    let greek = "Geia sou kosme";
+}
+
+fn test_emoji_in_strings() {
+    // Emoji in strings
+    let emoji = "Hello! wave earth";
+    let faces = "smiling faces";
+    let symbols = "star fire 100 sparkles";
+    let flags = "flags";
+    let complex = "Family: family";
+}
+
+fn test_unicode_escape_sequences() {
+    // Unicode escape sequences
+    let escaped_unicode = "\u{0048}\u{0065}\u{006C}\u{006C}\u{006F}";
+    let escaped_emoji = "\u{1F600}";
+    let escaped_chinese = "\u{4F60}\u{597D}";
+}
+
+fn test_mixed_scripts() {
+    // Mixed scripts
+    let mixed = "English Russian Japanese Arabic";
+}
+
+fn test_unicode_operators_in_strings() {
+    // Unicode operators/symbols in strings
+    let math = "sum product integral partial sqrt infinity approx neq le ge";
+    let arrows = "left right up down bidir double arrows";
+    let sets = "element not element contains subset superset union intersection empty";
+    let logic = "and or not forall exists turnstile models";
+}
+
+fn test_unicode_whitespace() {
+    // Unicode line separators and special whitespace
+    let with_nbsp = "word\u{00A0}word";  // Non-breaking space
+    let with_zwsp = "word\u{200B}word";  // Zero-width space
+}
+
+fn test_rtl_text() {
+    // RTL text
+    let rtl_arabic = "marhaba";
+    let rtl_hebrew = "shalom";
+}
+
+fn test_combining_characters() {
+    // Combining characters
+    let combining = "e\u{0301}";  // e with combining acute
+    let complex_combining = "a\u{0308}\u{0304}";  // a with diaeresis and macron
+}
+
+fn test_unicode_normalization() {
+    // Unicode normalization forms
+    let nfc = "e with acute";  // Pre-composed
+    let nfd = "e\u{0301}";  // Decomposed
+}
+
+fn test_fullwidth_characters() {
+    // Full-width characters
+    let fullwidth = "ABC123";
+}
+
+// Unicode in comments
+// Comment in Russian
+// Comment in Japanese
+// Comment in Arabic
+
+fn test_unicode_character_literals() {
+    // Unicode character literals
+    let heart = 'H';  // Using ASCII since Verum may not support emoji chars
+    let star = 'S';
+    let check = 'C';
+    let cross = 'X';
+}
+
+fn test_surrogate_pairs() {
+    // Surrogate pairs (for languages that need them)
+    let astral = "mathematical script";  // Mathematical script
+    let gothic = "gothic letters";
+}
+
+fn test_zwj_sequences() {
+    // Zero-width joiner sequences
+    let zwj_family = "family";
+    let zwj_profession = "woman technologist";
+}
+
+fn test_regional_indicators() {
+    // Regional indicator symbols
+    let flag_us = "US";
+    let flag_jp = "JP";
+}
+
+fn test_skin_tone_modifiers() {
+    // Skin tone modifiers
+    let wave_light = "wave light";
+    let wave_dark = "wave dark";
+}
+
+fn test_string_interpolation_with_unicode() {
+    // String interpolation with unicode (if supported)
+    let name = "World";
+    let message = format("Hello, {}!", name);
+}

@@ -1,0 +1,468 @@
+// @test: run
+// @expected-stdout: All Deadline context tests passed!
+// @tier: 0
+// @level: L2
+// @tags: errors, deadline, context, timeout, propagation
+// @description: Tests for Context-Based Deadline Propagation
+//
+// Spec: docs/detailed/20-error-handling.md Section 2.5.9 - Context-Based Deadline Propagation
+// Automatic deadline propagation through call chains.
+
+// ============================================================================
+// Duration and Instant Types (simplified)
+// ============================================================================
+
+type Duration is {
+    millis: Int,
+};
+
+implement Duration {
+    fn from_millis(ms: Int) -> Self {
+        Duration { millis: ms }
+    }
+
+    fn from_seconds(s: Int) -> Self {
+        Duration { millis: s * 1000 }
+    }
+
+    fn zero() -> Self {
+        Duration { millis: 0 }
+    }
+
+    fn is_zero(&self) -> Bool {
+        self.millis <= 0
+    }
+
+    fn as_millis(&self) -> Int {
+        self.millis
+    }
+
+    fn min(self, other: Duration) -> Duration {
+        if self.millis < other.millis {
+            self
+        } else {
+            other
+        }
+    }
+}
+
+static mut MOCK_TIME_MS: Int = 0;
+
+fn advance_time(ms: Int) {
+    MOCK_TIME_MS += ms;
+}
+
+fn reset_time() {
+    MOCK_TIME_MS = 0;
+}
+
+type Instant is {
+    timestamp_ms: Int,
+};
+
+implement Instant {
+    fn now() -> Self {
+        Instant { timestamp_ms: MOCK_TIME_MS }
+    }
+
+    fn checked_add(&self, duration: Duration) -> Instant {
+        Instant { timestamp_ms: self.timestamp_ms + duration.millis }
+    }
+
+    fn min(self, other: Instant) -> Instant {
+        if self.timestamp_ms < other.timestamp_ms {
+            self
+        } else {
+            other
+        }
+    }
+}
+
+// ============================================================================
+// DeadlineExceeded Error
+// ============================================================================
+
+type DeadlineExceeded is {
+    deadline: Instant,
+    actual: Instant,
+};
+
+implement DeadlineExceeded {
+    fn new(deadline: Instant, actual: Instant) -> Self {
+        DeadlineExceeded { deadline, actual }
+    }
+
+    fn exceeded_by(&self) -> Duration {
+        Duration {
+            millis: self.actual.timestamp_ms - self.deadline.timestamp_ms
+        }
+    }
+}
+
+// ============================================================================
+// Deadline Context
+// ============================================================================
+
+/// Deadline context for automatic propagation
+/// Spec: docs/detailed/16-context-system.md Section - Deadline Context
+type Deadline is {
+    expires_at: Instant,
+};
+
+implement Deadline {
+    fn new(expires_at: Instant) -> Self {
+        Deadline { expires_at }
+    }
+
+    /// Create deadline from duration
+    fn from_timeout(timeout: Duration) -> Self {
+        Deadline {
+            expires_at: Instant.now().checked_add(timeout),
+        }
+    }
+
+    /// Check if deadline is exceeded
+    fn check(&self) -> Result<(), DeadlineExceeded> {
+        let now = Instant.now();
+        if now.timestamp_ms > self.expires_at.timestamp_ms {
+            Err(DeadlineExceeded.new(self.expires_at, now))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Check if deadline is exceeded (non-Result version)
+    fn is_exceeded(&self) -> Bool {
+        Instant.now().timestamp_ms > self.expires_at.timestamp_ms
+    }
+
+    /// Get remaining time
+    fn remaining(&self) -> Duration {
+        let now = Instant.now();
+        if now.timestamp_ms > self.expires_at.timestamp_ms {
+            Duration.zero()
+        } else {
+            Duration {
+                millis: self.expires_at.timestamp_ms - now.timestamp_ms
+            }
+        }
+    }
+
+    /// Create a sub-deadline (can only be shorter)
+    fn with_timeout(&self, timeout: Duration) -> Deadline {
+        let new_expires = Instant.now().checked_add(timeout);
+        Deadline {
+            expires_at: new_expires.min(self.expires_at),
+        }
+    }
+
+    /// Extend deadline (used carefully, mainly for testing)
+    fn extend(&self, duration: Duration) -> Deadline {
+        Deadline {
+            expires_at: self.expires_at.checked_add(duration),
+        }
+    }
+}
+
+// ============================================================================
+// Simulated async operations with deadline
+// ============================================================================
+
+type OperationError is
+    | DeadlineExceeded(DeadlineExceeded)
+    | OperationFailed(Text);
+
+/// Simulated database query that respects deadline
+fn fetch_user_with_deadline(deadline: &Deadline, user_id: Int, operation_time: Int) -> Result<Text, OperationError> {
+    // Check deadline first
+    deadline.check().map_err(OperationError.DeadlineExceeded)?;
+
+    // Simulate operation taking time
+    advance_time(operation_time);
+
+    // Check deadline after operation
+    if deadline.is_exceeded() {
+        Err(OperationError.DeadlineExceeded(DeadlineExceeded.new(
+            deadline.expires_at,
+            Instant.now(),
+        )))
+    } else {
+        Ok(f"User {user_id}")
+    }
+}
+
+/// Simulated network call with deadline
+fn fetch_orders_with_deadline(deadline: &Deadline, user_id: Int, operation_time: Int) -> Result<List<Text>, OperationError> {
+    deadline.check().map_err(OperationError.DeadlineExceeded)?;
+
+    advance_time(operation_time);
+
+    if deadline.is_exceeded() {
+        Err(OperationError.DeadlineExceeded(DeadlineExceeded.new(
+            deadline.expires_at,
+            Instant.now(),
+        )))
+    } else {
+        Ok(["Order 1", "Order 2"])
+    }
+}
+
+/// Composite operation that propagates deadline
+fn handle_request(deadline: &Deadline) -> Result<Text, OperationError> {
+    deadline.check().map_err(OperationError.DeadlineExceeded)?;
+
+    // First operation
+    let user = fetch_user_with_deadline(deadline, 42, 100)?;
+
+    // Second operation with sub-deadline
+    let sub_deadline = deadline.with_timeout(Duration.from_millis(500));
+    let orders = fetch_orders_with_deadline(&sub_deadline, 42, 100)?;
+
+    Ok(f"{user} has {orders.len()} orders")
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_deadline_check_success() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.from_seconds(10));
+
+    // Check should pass
+    let result = deadline.check();
+    assert(result.is_ok());
+
+    // Advance time but stay under deadline
+    advance_time(5000);
+    assert(deadline.check().is_ok());
+}
+
+fn test_deadline_check_failure() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.from_seconds(10));
+
+    // Advance past deadline
+    advance_time(15000);
+
+    let result = deadline.check();
+    assert(result.is_err());
+
+    match result {
+        Err(exceeded) => {
+            assert(exceeded.exceeded_by().as_millis() == 5000);
+        }
+        _ => panic("Expected Err"),
+    }
+}
+
+fn test_deadline_remaining() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.from_seconds(10));
+
+    // Initial remaining
+    assert_eq(deadline.remaining().as_millis(), 10000);
+
+    // After some time
+    advance_time(3000);
+    assert_eq(deadline.remaining().as_millis(), 7000);
+
+    // After deadline
+    advance_time(10000);
+    assert(deadline.remaining().is_zero());
+}
+
+fn test_deadline_is_exceeded() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.from_seconds(5));
+
+    assert(!deadline.is_exceeded());
+
+    advance_time(3000);
+    assert(!deadline.is_exceeded());
+
+    advance_time(3000);
+    assert(deadline.is_exceeded());
+}
+
+fn test_sub_deadline_shorter() {
+    reset_time();
+
+    let parent = Deadline.from_timeout(Duration.from_seconds(10));
+    let child = parent.with_timeout(Duration.from_seconds(5));
+
+    // Child should have shorter deadline
+    assert_eq(child.remaining().as_millis(), 5000);
+    assert_eq(parent.remaining().as_millis(), 10000);
+}
+
+fn test_sub_deadline_capped_by_parent() {
+    reset_time();
+
+    let parent = Deadline.from_timeout(Duration.from_seconds(5));
+    // Requesting more than parent has
+    let child = parent.with_timeout(Duration.from_seconds(10));
+
+    // Child should be capped to parent
+    assert_eq(child.remaining().as_millis(), 5000);
+}
+
+fn test_sub_deadline_propagation() {
+    reset_time();
+
+    let parent = Deadline.from_timeout(Duration.from_seconds(10));
+
+    advance_time(3000);  // 7 seconds remaining
+
+    let child = parent.with_timeout(Duration.from_seconds(5));
+    // Child should have 5 seconds (within parent's 7)
+    assert_eq(child.remaining().as_millis(), 5000);
+
+    advance_time(4000);  // 3 seconds remaining on parent, child would exceed
+
+    let child2 = parent.with_timeout(Duration.from_seconds(5));
+    // Child2 capped to parent's remaining 3 seconds
+    assert_eq(child2.remaining().as_millis(), 3000);
+}
+
+fn test_operation_with_deadline_success() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.from_seconds(10));
+
+    // Operation takes 100ms, well under deadline
+    let result = fetch_user_with_deadline(&deadline, 1, 100);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), "User 1");
+}
+
+fn test_operation_with_deadline_exceeded() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.from_millis(500));
+
+    // Operation takes 1000ms, exceeds deadline
+    let result = fetch_user_with_deadline(&deadline, 1, 1000);
+    assert(result.is_err());
+
+    match result {
+        Err(OperationError.DeadlineExceeded(_)) => { /* Expected */ }
+        _ => panic("Expected DeadlineExceeded"),
+    }
+}
+
+fn test_composite_operation_success() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.from_seconds(10));
+
+    let result = handle_request(&deadline);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), "User 42 has 2 orders");
+}
+
+fn test_composite_operation_deadline_exceeded() {
+    reset_time();
+
+    // Very short deadline
+    let deadline = Deadline.from_timeout(Duration.from_millis(150));
+
+    let result = handle_request(&deadline);
+    // First operation takes 100ms, second 100ms = 200ms total > 150ms
+    assert(result.is_err());
+}
+
+fn test_already_exceeded_deadline() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.from_seconds(5));
+
+    // Time passes
+    advance_time(10000);
+
+    // Deadline already exceeded before operation
+    let result = deadline.check();
+    assert(result.is_err());
+
+    // Operation should fail immediately
+    let op_result = fetch_user_with_deadline(&deadline, 1, 0);
+    assert(op_result.is_err());
+}
+
+fn test_deadline_chain() {
+    reset_time();
+
+    // HTTP request with 30s timeout
+    let http_deadline = Deadline.from_timeout(Duration.from_seconds(30));
+
+    // Database layer gets 10s
+    let db_deadline = http_deadline.with_timeout(Duration.from_seconds(10));
+
+    // Cache layer gets 1s within database deadline
+    let cache_deadline = db_deadline.with_timeout(Duration.from_seconds(1));
+
+    assert_eq(http_deadline.remaining().as_millis(), 30000);
+    assert_eq(db_deadline.remaining().as_millis(), 10000);
+    assert_eq(cache_deadline.remaining().as_millis(), 1000);
+
+    // After cache timeout, db still has time
+    advance_time(1500);
+    assert(cache_deadline.is_exceeded());
+    assert(!db_deadline.is_exceeded());
+    assert(!http_deadline.is_exceeded());
+
+    // After db timeout, http still has time
+    advance_time(9000);
+    assert(db_deadline.is_exceeded());
+    assert(!http_deadline.is_exceeded());
+}
+
+fn test_zero_duration_deadline() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.zero());
+
+    // Should already be exceeded (or at the edge)
+    advance_time(1);  // Any time passes
+    assert(deadline.is_exceeded());
+}
+
+fn test_deadline_extend() {
+    reset_time();
+
+    let deadline = Deadline.from_timeout(Duration.from_seconds(5));
+
+    advance_time(3000);
+    assert_eq(deadline.remaining().as_millis(), 2000);
+
+    let extended = deadline.extend(Duration.from_seconds(10));
+    assert_eq(extended.remaining().as_millis(), 12000);  // 2s remaining + 10s extension
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    test_deadline_check_success();
+    test_deadline_check_failure();
+    test_deadline_remaining();
+    test_deadline_is_exceeded();
+    test_sub_deadline_shorter();
+    test_sub_deadline_capped_by_parent();
+    test_sub_deadline_propagation();
+    test_operation_with_deadline_success();
+    test_operation_with_deadline_exceeded();
+    test_composite_operation_success();
+    test_composite_operation_deadline_exceeded();
+    test_already_exceeded_deadline();
+    test_deadline_chain();
+    test_zero_duration_deadline();
+    test_deadline_extend();
+
+    print("All Deadline context tests passed!");
+}

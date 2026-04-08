@@ -1,0 +1,116 @@
+// @test: run
+// Production error handling — variant types, match, early return patterns
+
+type AppError is
+    NotFound(Text)
+  | InvalidInput(Text)
+  | Overflow;
+
+fn validate_age(age: Int) -> Int {
+    if (age < 0) {
+        return -1;
+    }
+    if (age > 150) {
+        return -2;
+    }
+    age
+}
+
+type Entry is { name: Text, score: Int };
+
+fn find_score(entries: List<Entry>, target: Text) -> Int {
+    let mut i = 0;
+    while i < entries.len() {
+        if (entries[i].name == target) {
+            return entries[i].score;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn classify_error(e: AppError) -> Text {
+    match e {
+        NotFound(_) => "not_found",
+        InvalidInput(_) => "invalid",
+        Overflow => "overflow",
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Successful validation
+    let age = validate_age(42);
+    if (age != 42) {
+        print(f"FAIL test1: expected 42, got {age}");
+        return 1;
+    }
+    print("test1 validate: OK");
+
+    // Test 2: Invalid input
+    let bad = validate_age(-5);
+    if (bad != -1) {
+        print(f"FAIL test2: expected -1, got {bad}");
+        return 1;
+    }
+    print("test2 invalid: OK");
+
+    // Test 3: Overflow
+    let over = validate_age(200);
+    if (over != -2) {
+        print(f"FAIL test3: expected -2, got {over}");
+        return 1;
+    }
+    print("test3 overflow: OK");
+
+    // Test 4: Variant matching for error types
+    let e1 = NotFound("user123");
+    let e2 = InvalidInput("bad data");
+    let e3 = Overflow;
+
+    let c1 = classify_error(e1);
+    let c2 = classify_error(e2);
+    let c3 = classify_error(e3);
+    if (c1 != "not_found") {
+        print(f"FAIL test4a: got {c1}");
+        return 1;
+    }
+    if (c2 != "invalid") {
+        print(f"FAIL test4b: got {c2}");
+        return 1;
+    }
+    if (c3 != "overflow") {
+        print(f"FAIL test4c: got {c3}");
+        return 1;
+    }
+    print("test4 classify: OK");
+
+    // Test 5: Is-pattern checks
+    if (!(e1 is NotFound)) {
+        print("FAIL test5a");
+        return 1;
+    }
+    if (!(e3 is Overflow)) {
+        print("FAIL test5b");
+        return 1;
+    }
+    print("test5 is-pattern: OK");
+
+    // Test 6: Match with payload extraction
+    let err = NotFound("missing_key");
+    match err {
+        NotFound(msg) => {
+            if (msg != "missing_key") {
+                print(f"FAIL test6: msg={msg}");
+                return 1;
+            }
+        },
+        _ => {
+            print("FAIL test6: wrong variant");
+            return 1;
+        },
+    }
+    print("test6 extract: OK");
+
+    print("1022_result_error_handling: PASS");
+    0
+}

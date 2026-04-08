@@ -1,0 +1,225 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: pattern-matching, variants, nested, match
+// @description: Complex pattern matching with nested variant types
+
+type Color is Red | Green | Blue | Custom(Int, Int, Int);
+
+type Shape is
+    Circle(Int)
+    | Rectangle(Int, Int)
+    | Triangle(Int, Int, Int);
+
+implement Shape {
+    fn area(&self) -> Int {
+        match self {
+            Circle(r) => r * r * 3,
+            Rectangle(w, h) => w * h,
+            Triangle(a, b, c) => {
+                // Simplified area using semi-perimeter approximation
+                let s = (a + b + c) / 2;
+                s * s / 2
+            }
+        }
+    }
+
+    fn perimeter(&self) -> Int {
+        match self {
+            Circle(r) => r * 6,
+            Rectangle(w, h) => 2 * (w + h),
+            Triangle(a, b, c) => a + b + c,
+        }
+    }
+
+    fn name(&self) -> Text {
+        match self {
+            Circle(_) => "circle",
+            Rectangle(_, _) => "rectangle",
+            Triangle(_, _, _) => "triangle",
+        }
+    }
+}
+
+// Test 1: Basic variant creation and matching
+fn test_basic_variant() -> Int {
+    let s = Circle(5);
+    let a = s.area();
+    if a != 75 {
+        print(f"FAIL basic_variant: expected 75, got {a}");
+        return 1;
+    }
+    print("  basic_variant: OK");
+    0
+}
+
+// Test 2: Multiple variant types
+fn test_multi_variants() -> Int {
+    let shapes = [Circle(10), Rectangle(4, 5), Triangle(3, 4, 5)];
+    let mut total_area = 0;
+    let mut i = 0;
+    while i < 3 {
+        total_area = total_area + shapes[i].area();
+        i = i + 1;
+    }
+    // 300 + 20 + 18 = 338
+    if total_area != 338 {
+        print(f"FAIL multi_variants: expected 338, got {total_area}");
+        return 1;
+    }
+    print("  multi_variants: OK");
+    0
+}
+
+// Test 3: Match with bindings
+fn describe_shape(s: Shape) -> Int {
+    match s {
+        Circle(r) => r,
+        Rectangle(w, h) => w + h,
+        Triangle(a, b, c) => a + b + c,
+    }
+}
+
+fn test_match_bindings() -> Int {
+    let r = describe_shape(Circle(7));
+    if r != 7 {
+        print(f"FAIL match_bindings circle: expected 7, got {r}");
+        return 1;
+    }
+    let r2 = describe_shape(Rectangle(3, 4));
+    if r2 != 7 {
+        print(f"FAIL match_bindings rect: expected 7, got {r2}");
+        return 1;
+    }
+    print("  match_bindings: OK");
+    0
+}
+
+// Maybe type operations
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+// Test 4: Maybe type matching
+fn test_maybe_match() -> Int {
+    let r1 = safe_divide(10, 2);
+    let v1 = match r1 {
+        Some(x) => x,
+        None => -1,
+    };
+    if v1 != 5 {
+        print(f"FAIL maybe_match some: expected 5, got {v1}");
+        return 1;
+    }
+
+    let r2 = safe_divide(10, 0);
+    let v2 = match r2 {
+        Some(x) => x,
+        None => -1,
+    };
+    if v2 != -1 {
+        print(f"FAIL maybe_match none: expected -1, got {v2}");
+        return 1;
+    }
+    print("  maybe_match: OK");
+    0
+}
+
+// Result-like type
+type Outcome is Success(Int) | Failure(Int);
+
+fn process(x: Int) -> Outcome {
+    if x > 0 {
+        Success(x * 10)
+    } else {
+        Failure(-1)
+    }
+}
+
+// Test 5: Custom result type
+fn test_outcome() -> Int {
+    let r1 = process(5);
+    let v1 = match r1 {
+        Success(v) => v,
+        Failure(e) => e,
+    };
+    if v1 != 50 {
+        print(f"FAIL outcome success: expected 50, got {v1}");
+        return 1;
+    }
+
+    let r2 = process(-3);
+    let v2 = match r2 {
+        Success(v) => v,
+        Failure(e) => e,
+    };
+    if v2 != -1 {
+        print(f"FAIL outcome failure: expected -1, got {v2}");
+        return 1;
+    }
+    print("  outcome: OK");
+    0
+}
+
+// Test 6: Variant in list
+fn test_variant_list() -> Int {
+    let mut shapes = List.new();
+    shapes.push(Circle(1));
+    shapes.push(Rectangle(2, 3));
+    shapes.push(Circle(4));
+
+    let mut total_perim = 0;
+    let mut i = 0;
+    while i < shapes.len() {
+        total_perim = total_perim + shapes[i].perimeter();
+        i = i + 1;
+    }
+    // 6 + 10 + 24 = 40
+    if total_perim != 40 {
+        print(f"FAIL variant_list: expected 40, got {total_perim}");
+        return 1;
+    }
+    print("  variant_list: OK");
+    0
+}
+
+// Test 7: Variant method returning text
+fn test_variant_name() -> Int {
+    let s1 = Circle(5);
+    let s2 = Rectangle(3, 4);
+    let n1 = s1.name();
+    let n2 = s2.name();
+    if n1 != "circle" {
+        print(f"FAIL variant_name: expected circle, got {n1}");
+        return 1;
+    }
+    if n2 != "rectangle" {
+        print(f"FAIL variant_name: expected rectangle, got {n2}");
+        return 1;
+    }
+    print("  variant_name: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Nested Variant Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_variant();
+    failures = failures + test_multi_variants();
+    failures = failures + test_match_bindings();
+    failures = failures + test_maybe_match();
+    failures = failures + test_outcome();
+    failures = failures + test_variant_list();
+    failures = failures + test_variant_name();
+
+    if failures == 0 {
+        print("All nested variant tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

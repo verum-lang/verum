@@ -1,0 +1,196 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, state-machine, coroutine, generator
+// @expected-exit: 0
+
+// Tests async state machine patterns (coroutine/generator semantics).
+// Verifies state transitions, resumption, and cooperative multitasking.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// State machine states
+fn state_idle() -> Int { 0 }
+fn state_running() -> Int { 1 }
+fn state_waiting() -> Int { 2 }
+fn state_done() -> Int { 3 }
+fn state_error() -> Int { 4 }
+
+// State machine transition: returns new state
+fn transition(current: Int, event: Int) -> Int {
+    // event: 0=start, 1=pause, 2=resume, 3=finish, 4=fail, 5=reset
+    if (current == 0) {  // idle
+        if (event == 0) { 1 }      // start → running
+        else { current }
+    } else if (current == 1) {  // running
+        if (event == 1) { 2 }      // pause → waiting
+        else if (event == 3) { 3 } // finish → done
+        else if (event == 4) { 4 } // fail → error
+        else { current }
+    } else if (current == 2) {  // waiting
+        if (event == 2) { 1 }      // resume → running
+        else if (event == 4) { 4 } // fail → error
+        else { current }
+    } else if (current == 3) {  // done
+        if (event == 5) { 0 }      // reset → idle
+        else { current }
+    } else if (current == 4) {  // error
+        if (event == 5) { 0 }      // reset → idle
+        else { current }
+    } else { current }
+}
+
+// Generator: produces values from sequence
+fn generator_next(state: Int, step: Int) -> Int {
+    state + step
+}
+
+fn main() -> Int {
+    // Test 1: State machine lifecycle
+    let mut state = state_idle();
+    assert_eq(state, 0);
+
+    state = transition(state, 0);  // start
+    assert_eq(state, state_running());
+
+    state = transition(state, 3);  // finish
+    assert_eq(state, state_done());
+
+    state = transition(state, 5);  // reset
+    assert_eq(state, state_idle());
+
+    // Test 2: State machine with suspend/resume
+    state = state_idle();
+    state = transition(state, 0);  // idle → running
+    assert_eq(state, 1);
+    state = transition(state, 1);  // running → waiting
+    assert_eq(state, 2);
+    state = transition(state, 2);  // waiting → running
+    assert_eq(state, 1);
+    state = transition(state, 3);  // running → done
+    assert_eq(state, 3);
+
+    // Test 3: Invalid transitions are no-ops
+    state = state_idle();
+    state = transition(state, 1);  // idle + pause = still idle
+    assert_eq(state, 0);
+    state = transition(state, 3);  // idle + finish = still idle
+    assert_eq(state, 0);
+
+    // Test 4: Error recovery
+    state = state_idle();
+    state = transition(state, 0);  // start
+    state = transition(state, 4);  // fail
+    assert_eq(state, state_error());
+    state = transition(state, 5);  // reset
+    assert_eq(state, state_idle());
+
+    // Test 5: Generator pattern
+    let mut gen_state = 0;
+    let gen_step = 7;
+    let mut gen_outputs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < 10) {
+        gen_state = generator_next(gen_state, gen_step);
+        gen_outputs[i] = gen_state;
+        i = i + 1;
+    }
+    assert_eq(gen_outputs[0], 7);
+    assert_eq(gen_outputs[4], 35);
+    assert_eq(gen_outputs[9], 70);
+
+    // Test 6: Fibonacci generator
+    let mut fib_a = 0;
+    let mut fib_b = 1;
+    let mut fib_gen = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 12) {
+        fib_gen[i] = fib_a;
+        let temp = fib_a + fib_b;
+        fib_a = fib_b;
+        fib_b = temp;
+        i = i + 1;
+    }
+    assert_eq(fib_gen[0], 0);
+    assert_eq(fib_gen[1], 1);
+    assert_eq(fib_gen[6], 8);
+    assert_eq(fib_gen[10], 55);
+
+    // Test 7: Interleaved state machines (cooperative multitasking)
+    let mut sm1 = state_idle();
+    let mut sm2 = state_idle();
+    let mut sm3 = state_idle();
+
+    // Round-robin scheduling
+    sm1 = transition(sm1, 0);  // SM1 starts
+    sm2 = transition(sm2, 0);  // SM2 starts
+    sm3 = transition(sm3, 0);  // SM3 starts
+    assert_eq(sm1, 1);
+    assert_eq(sm2, 1);
+    assert_eq(sm3, 1);
+
+    sm1 = transition(sm1, 1);  // SM1 suspends
+    sm2 = transition(sm2, 3);  // SM2 finishes
+    sm3 = transition(sm3, 1);  // SM3 suspends
+    assert_eq(sm1, 2);
+    assert_eq(sm2, 3);
+    assert_eq(sm3, 2);
+
+    sm1 = transition(sm1, 2);  // SM1 resumes
+    sm3 = transition(sm3, 2);  // SM3 resumes
+    sm1 = transition(sm1, 3);  // SM1 finishes
+    sm3 = transition(sm3, 3);  // SM3 finishes
+    assert_eq(sm1, 3);
+    assert_eq(sm3, 3);
+
+    // Test 8: Range generator
+    let range_start = 10;
+    let range_end = 20;
+    let mut range_vals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut range_count = 0;
+    let mut current = range_start;
+    while (current < range_end) {
+        range_vals[range_count] = current;
+        range_count = range_count + 1;
+        current = current + 1;
+    }
+    assert_eq(range_count, 10);
+    assert_eq(range_vals[0], 10);
+    assert_eq(range_vals[9], 19);
+
+    // Test 9: Stateful transformation (accumulator generator)
+    let mut acc = 0;
+    let inputs = [5, 3, 8, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut running_sums = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 5) {
+        acc = acc + inputs[i];
+        running_sums[i] = acc;
+        i = i + 1;
+    }
+    assert_eq(running_sums[0], 5);
+    assert_eq(running_sums[2], 16);  // 5+3+8
+    assert_eq(running_sums[4], 21);  // 5+3+8+1+4
+
+    // Test 10: Coroutine ping-pong (two coroutines passing control)
+    let mut ping_count = 0;
+    let mut pong_count = 0;
+    let total_exchanges = 10;
+    i = 0;
+    while (i < total_exchanges) {
+        if (i % 2 == 0) {
+            ping_count = ping_count + 1;
+        } else {
+            pong_count = pong_count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(ping_count, 5);
+    assert_eq(pong_count, 5);
+    assert_eq(ping_count + pong_count, total_exchanges);
+
+    print("Async state machine: PASS");
+    0
+}

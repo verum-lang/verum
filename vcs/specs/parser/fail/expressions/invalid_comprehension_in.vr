@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, comprehension, in, error
+// @description: Comprehension missing 'in' keyword
+// @expected-error: E018
+
+fn test() {
+    let x = [x * 2 for x items];  // Missing 'in' keyword
+}

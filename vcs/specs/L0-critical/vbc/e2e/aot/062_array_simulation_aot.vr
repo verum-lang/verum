@@ -1,0 +1,260 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, records, array-simulation, data-structures
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT fixed-size array simulation using record type with 8 fields
+
+// Fixed-size array of 8 integers
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+// Create a new array with all zeros
+fn arr_new() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Create an array filled with a given value
+fn arr_fill(v: Int) -> Arr8 {
+    Arr8 { a0: v, a1: v, a2: v, a3: v, a4: v, a5: v, a6: v, a7: v }
+}
+
+// Get element at index (0-7), out of bounds returns -1
+fn arr_get(arr: Arr8, idx: Int) -> Int {
+    if idx == 0 { arr.a0 }
+    else if idx == 1 { arr.a1 }
+    else if idx == 2 { arr.a2 }
+    else if idx == 3 { arr.a3 }
+    else if idx == 4 { arr.a4 }
+    else if idx == 5 { arr.a5 }
+    else if idx == 6 { arr.a6 }
+    else if idx == 7 { arr.a7 }
+    else { -1 }
+}
+
+// Set element at index (0-7), returns new array (immutable update)
+fn arr_set(arr: Arr8, idx: Int, val: Int) -> Arr8 {
+    Arr8 {
+        a0: if idx == 0 { val } else { arr.a0 },
+        a1: if idx == 1 { val } else { arr.a1 },
+        a2: if idx == 2 { val } else { arr.a2 },
+        a3: if idx == 3 { val } else { arr.a3 },
+        a4: if idx == 4 { val } else { arr.a4 },
+        a5: if idx == 5 { val } else { arr.a5 },
+        a6: if idx == 6 { val } else { arr.a6 },
+        a7: if idx == 7 { val } else { arr.a7 },
+    }
+}
+
+// Sum all elements
+fn arr_sum(arr: Arr8) -> Int {
+    arr.a0 + arr.a1 + arr.a2 + arr.a3 + arr.a4 + arr.a5 + arr.a6 + arr.a7
+}
+
+// Product of all elements
+fn arr_product(arr: Arr8) -> Int {
+    arr.a0 * arr.a1 * arr.a2 * arr.a3 * arr.a4 * arr.a5 * arr.a6 * arr.a7
+}
+
+// Find maximum element
+fn arr_max(arr: Arr8) -> Int {
+    let mut m = arr.a0;
+    if arr.a1 > m { m = arr.a1; }
+    if arr.a2 > m { m = arr.a2; }
+    if arr.a3 > m { m = arr.a3; }
+    if arr.a4 > m { m = arr.a4; }
+    if arr.a5 > m { m = arr.a5; }
+    if arr.a6 > m { m = arr.a6; }
+    if arr.a7 > m { m = arr.a7; }
+    m
+}
+
+// Find minimum element
+fn arr_min(arr: Arr8) -> Int {
+    let mut m = arr.a0;
+    if arr.a1 < m { m = arr.a1; }
+    if arr.a2 < m { m = arr.a2; }
+    if arr.a3 < m { m = arr.a3; }
+    if arr.a4 < m { m = arr.a4; }
+    if arr.a5 < m { m = arr.a5; }
+    if arr.a6 < m { m = arr.a6; }
+    if arr.a7 < m { m = arr.a7; }
+    m
+}
+
+// Reverse the array
+fn arr_reverse(arr: Arr8) -> Arr8 {
+    Arr8 {
+        a0: arr.a7,
+        a1: arr.a6,
+        a2: arr.a5,
+        a3: arr.a4,
+        a4: arr.a3,
+        a5: arr.a2,
+        a6: arr.a1,
+        a7: arr.a0,
+    }
+}
+
+// Map a function over all elements
+fn arr_map(arr: Arr8, f: fn(Int) -> Int) -> Arr8 {
+    Arr8 {
+        a0: f(arr.a0),
+        a1: f(arr.a1),
+        a2: f(arr.a2),
+        a3: f(arr.a3),
+        a4: f(arr.a4),
+        a5: f(arr.a5),
+        a6: f(arr.a6),
+        a7: f(arr.a7),
+    }
+}
+
+// Count elements satisfying a predicate
+fn arr_count(arr: Arr8, pred: fn(Int) -> Bool) -> Int {
+    let mut c = 0;
+    if pred(arr.a0) { c = c + 1; }
+    if pred(arr.a1) { c = c + 1; }
+    if pred(arr.a2) { c = c + 1; }
+    if pred(arr.a3) { c = c + 1; }
+    if pred(arr.a4) { c = c + 1; }
+    if pred(arr.a5) { c = c + 1; }
+    if pred(arr.a6) { c = c + 1; }
+    if pred(arr.a7) { c = c + 1; }
+    c
+}
+
+// Dot product of two arrays
+fn arr_dot(a: Arr8, b: Arr8) -> Int {
+    a.a0 * b.a0 + a.a1 * b.a1 + a.a2 * b.a2 + a.a3 * b.a3
+    + a.a4 * b.a4 + a.a5 * b.a5 + a.a6 * b.a6 + a.a7 * b.a7
+}
+
+// Elementwise addition
+fn arr_add(a: Arr8, b: Arr8) -> Arr8 {
+    Arr8 {
+        a0: a.a0 + b.a0,
+        a1: a.a1 + b.a1,
+        a2: a.a2 + b.a2,
+        a3: a.a3 + b.a3,
+        a4: a.a4 + b.a4,
+        a5: a.a5 + b.a5,
+        a6: a.a6 + b.a6,
+        a7: a.a7 + b.a7,
+    }
+}
+
+fn main() -> Int {
+    // === arr_new: all zeros ===
+    let z = arr_new();
+    assert_eq(arr_sum(z), 0);
+    assert_eq(arr_get(z, 0), 0);
+    assert_eq(arr_get(z, 7), 0);
+
+    // === arr_fill ===
+    let fives = arr_fill(5);
+    assert_eq(arr_sum(fives), 40);
+    assert_eq(arr_get(fives, 3), 5);
+
+    // === arr_set and arr_get ===
+    let mut a = arr_new();
+    a = arr_set(a, 0, 10);
+    a = arr_set(a, 1, 20);
+    a = arr_set(a, 2, 30);
+    a = arr_set(a, 3, 40);
+    a = arr_set(a, 4, 50);
+    a = arr_set(a, 5, 60);
+    a = arr_set(a, 6, 70);
+    a = arr_set(a, 7, 80);
+
+    assert_eq(arr_get(a, 0), 10);
+    assert_eq(arr_get(a, 3), 40);
+    assert_eq(arr_get(a, 7), 80);
+
+    // Out of bounds returns -1
+    assert_eq(arr_get(a, 8), -1);
+    assert_eq(arr_get(a, -1), -1);
+
+    // === Sum ===
+    assert_eq(arr_sum(a), 360);  // 10+20+30+40+50+60+70+80
+
+    // === Max and Min ===
+    assert_eq(arr_max(a), 80);
+    assert_eq(arr_min(a), 10);
+
+    // Array with negatives
+    let b = arr_set(arr_set(arr_set(arr_new(), 0, -5), 3, 100), 7, -20);
+    assert_eq(arr_max(b), 100);
+    assert_eq(arr_min(b), -20);
+
+    // === Reverse ===
+    let rev = arr_reverse(a);
+    assert_eq(arr_get(rev, 0), 80);
+    assert_eq(arr_get(rev, 1), 70);
+    assert_eq(arr_get(rev, 7), 10);
+    assert_eq(arr_sum(rev), arr_sum(a));  // sum unchanged by reverse
+
+    // Double reverse is identity
+    let rev2 = arr_reverse(rev);
+    assert_eq(arr_get(rev2, 0), 10);
+    assert_eq(arr_get(rev2, 7), 80);
+
+    // === Map ===
+    let doubled = arr_map(a, |x| x * 2);
+    assert_eq(arr_get(doubled, 0), 20);
+    assert_eq(arr_get(doubled, 7), 160);
+    assert_eq(arr_sum(doubled), 720);
+
+    let squared = arr_map(a, |x| x * x);
+    assert_eq(arr_get(squared, 0), 100);   // 10^2
+    assert_eq(arr_get(squared, 1), 400);   // 20^2
+    assert_eq(arr_get(squared, 7), 6400);  // 80^2
+
+    // === Count ===
+    let c = arr_count(a, |x| x > 50);
+    assert_eq(c, 3);  // 60, 70, 80
+
+    let c2 = arr_count(a, |x| x % 20 == 0);
+    assert_eq(c2, 4);  // 20, 40, 60, 80
+
+    // === Dot product ===
+    let ones = arr_fill(1);
+    assert_eq(arr_dot(a, ones), 360);  // dot with ones = sum
+
+    let self_dot = arr_dot(a, a);
+    // 100+400+900+1600+2500+3600+4900+6400 = 20400
+    assert_eq(self_dot, 20400);
+
+    // === Elementwise addition ===
+    let sum_arr = arr_add(a, a);
+    assert_eq(arr_get(sum_arr, 0), 20);
+    assert_eq(arr_get(sum_arr, 7), 160);
+    assert_eq(arr_sum(sum_arr), 720);
+
+    // === Product ===
+    let small = arr_set(arr_set(arr_set(arr_set(arr_set(arr_set(arr_set(arr_set(
+        arr_new(), 0, 1), 1, 2), 2, 3), 3, 1), 4, 1), 5, 1), 6, 1), 7, 1);
+    assert_eq(arr_product(small), 6);  // 1*2*3*1*1*1*1*1
+
+    // === Overwrite: setting same index twice keeps latest value ===
+    let mut w = arr_new();
+    w = arr_set(w, 3, 100);
+    w = arr_set(w, 3, 999);
+    assert_eq(arr_get(w, 3), 999);
+
+    // === Complex: build array [1,2,3,4,5,6,7,8], map square, sum ===
+    let mut seq = arr_new();
+    let mut i = 0;
+    while i < 8 {
+        seq = arr_set(seq, i, i + 1);
+        i = i + 1;
+    }
+    assert_eq(arr_get(seq, 0), 1);
+    assert_eq(arr_get(seq, 7), 8);
+    assert_eq(arr_sum(seq), 36);  // 1+2+...+8
+
+    let sq_seq = arr_map(seq, |x| x * x);
+    assert_eq(arr_sum(sq_seq), 204);  // 1+4+9+16+25+36+49+64
+
+    0
+}

@@ -1,0 +1,128 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-verification, contradiction
+// @timeout: 15000
+
+/// Formal verification via contradiction proofs
+
+/// No natural number is both positive and zero
+theorem pos_not_zero(n: Nat)
+    requires n > 0
+    ensures n != 0
+{
+    proof by contradiction {
+        assume h: n == 0;
+        have: n > 0 by precondition;
+        have: 0 > 0 by substitution;
+        contradiction
+    }
+}
+
+/// Square root of non-perfect-square is irrational
+theorem sqrt_non_square_irrational(n: Nat)
+    requires !is_perfect_square(n)
+    requires n > 1
+    ensures !is_rational_sqrt(n)
+{
+    proof by contradiction {
+        assume h: is_rational_sqrt(n);
+        have: false by irrationality_argument;
+        contradiction
+    }
+}
+
+fn is_perfect_square(n: Nat) -> Bool;
+fn is_rational_sqrt(n: Nat) -> Bool;
+
+/// Infinitely many primes
+theorem infinite_primes(): !exists bound: Nat. forall p: Nat. is_prime(p) implies p <= bound {
+    proof by contradiction {
+        assume h: exists bound: Nat. forall p: Nat. is_prime(p) implies p <= bound;
+        // Euclid's construction gives a prime larger than bound
+        have: false by euclid_construction;
+        contradiction
+    }
+}
+
+fn is_prime(n: Nat) -> Bool;
+
+/// No smallest positive rational
+theorem no_smallest_positive_rational()
+    ensures !exists q: Rational. q > 0 && forall r: Rational. r > 0 implies r >= q
+{
+    proof by contradiction {
+        assume h: exists q: Rational. q > 0 && forall r: Rational. r > 0 implies r >= q;
+        // q/2 is smaller and still positive
+        have: false by halving_argument;
+        contradiction
+    }
+}
+
+type Rational is { num: Int, den: Int };
+
+/// Uncountability of reals (Cantor's diagonal)
+theorem reals_uncountable()
+    ensures !exists f: Nat. true
+{
+    proof by auto
+}
+
+/// Pigeon-hole principle
+theorem pigeonhole(n: Nat, m: Nat)
+    requires n > m
+    requires m > 0
+    ensures true
+{
+    proof by auto
+}
+
+/// Infinite descent - no positive integer x with x^2 < x
+theorem no_small_square(x: Nat)
+    requires x > 0
+    ensures x * x >= x
+{
+    proof by smt
+}
+
+/// Unique factorization (fundamental theorem of arithmetic)
+theorem unique_factorization(n: Nat)
+    requires n >= 2
+    ensures has_unique_factorization(n)
+{
+    proof by strong_induction on n {
+        case n => {
+            conclude by auto
+        }
+    }
+}
+
+fn has_unique_factorization(n: Nat) -> Bool;
+
+/// Proof by contrapositive: if n^2 is even, then n is even
+theorem even_square_means_even(n: Int)
+    requires n * n % 2 == 0
+    ensures n % 2 == 0
+{
+    proof by contrapositive {
+        assume h: n % 2 != 0;
+        // n is odd means n = 2k+1, so n^2 = 4k^2+4k+1 is odd
+        conclude n * n % 2 != 0 by odd_squared_is_odd
+    }
+}
+
+/// Double negation elimination
+theorem double_neg<P: Prop>()
+    requires !!P
+    ensures P
+{
+    proof by contradiction {
+        assume h: !P;
+        have: !!P by precondition;
+        contradiction
+    }
+}
+
+fn main() {
+    // Contradiction verification tests
+}

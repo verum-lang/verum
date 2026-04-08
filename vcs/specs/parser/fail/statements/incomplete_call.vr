@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, expression, call, incomplete, error
+// @description: Test incomplete function call expression
+// @expected-error: E012
+
+fn test() {
+    foo(;
+}

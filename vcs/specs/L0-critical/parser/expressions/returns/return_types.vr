@@ -1,0 +1,190 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, returns, types
+
+// Return types and type annotations
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Map<K, V> is { entries: List<(K, V)> };
+type Data is { value: Int };
+type Error is IOError | ParseError;
+type IOError is {};
+type ParseError is {};
+
+// Helper functions
+fn do_something() { }
+fn do_work() { }
+fn fetch() -> Data { Data { value: 0 } }
+fn condition() -> Bool { true }
+fn valid() -> Bool { true }
+
+// Basic return types
+fn returns_int() -> Int {
+    42
+}
+
+fn returns_text() -> Text {
+    "hello"
+}
+
+fn returns_bool() -> Bool {
+    true
+}
+
+fn returns_float() -> Float {
+    3.14
+}
+
+// Unit return (explicit)
+fn returns_unit() -> () {
+    do_something()
+}
+
+// Unit return (implicit)
+fn implicit_unit() {
+    do_something()
+}
+
+// Tuple return types
+fn returns_pair() -> (Int, Int) {
+    (1, 2)
+}
+
+fn returns_triple() -> (Int, Text, Bool) {
+    (42, "hello", true)
+}
+
+// Option/Maybe return
+fn returns_maybe() -> Maybe<Int> {
+    if condition() {
+        Maybe.Some(42)
+    } else {
+        Maybe.None
+    }
+}
+
+// Result return
+fn returns_result() -> Result<Int, Text> {
+    if valid() {
+        Result.Ok(42)
+    } else {
+        Result.Err("invalid")
+    }
+}
+
+// List/Array return
+fn returns_list() -> List<Int> {
+    [1, 2, 3, 4, 5]
+}
+
+// Map return
+fn returns_map() -> Map<Text, Int> {
+    Map { entries: [("a", 1), ("b", 2)] }
+}
+
+// Struct return
+type Point is { x: Int, y: Int };
+
+fn returns_struct() -> Point {
+    Point { x: 10, y: 20 }
+}
+
+// Generic return
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn wrap<T>(value: T) -> Maybe<T> {
+    Maybe.Some(value)
+}
+
+// Constrained generic return
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+fn clone_it<T: Clone>(x: T) -> T {
+    x.clone()
+}
+
+// Reference return
+fn first_ref<T>(arr: &List<T>) -> &T {
+    &arr[0]
+}
+
+fn first_mut<T>(arr: &mut List<T>) -> &mut T {
+    &mut arr[0]
+}
+
+// Self return (for chaining)
+type Builder is { value: Int };
+
+implement Builder {
+    fn set_value(mut self, v: Int) -> Self {
+        self.value = v;
+        self
+    }
+}
+
+// Async return
+async fn async_returns_int() -> Int {
+    42
+}
+
+async fn async_returns_result() -> Result<Data, Error> {
+    let data = fetch().await;
+    Result.Ok(data)
+}
+
+// Never type (diverging function) - Verum uses 'Never' instead of '!'
+type Never is protocol { };
+
+fn diverges() -> Never {
+    panic("this function never returns")
+}
+
+fn infinite_loop() -> Never {
+    loop {
+        do_work()
+    }
+}
+
+// Closure return types
+fn returns_closure() -> fn(Int) -> Int {
+    |x| x * 2
+}
+
+fn returns_boxed_closure() -> Heap<fn(Int) -> Int> {
+    Heap(|x| x * 2)
+}
+
+// Associated type return
+type Container is protocol {
+    type Item;
+    fn get_item(&self) -> Self.Item;
+};
+
+// Multiple generic parameters
+fn combine<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+// Where clause constraints
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+fn process<T>(x: T) -> T
+where
+    T: Clone + Display
+{
+    x.clone()
+}
+
+// Complex nested return type
+fn complex_return() -> Result<List<(Text, Map<Int, Bool>)>, Error> {
+    Result.Ok([])
+}

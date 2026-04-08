@@ -1,0 +1,240 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, list, pipeline, compiler-pass, iteration
+// @description: List processing patterns — critical for compiler passes over AST nodes
+
+type NodeKind is
+    | FuncDecl(Text)
+    | VarDecl(Text, Int)
+    | Return(Int)
+    | Assign(Text, Int)
+    | NoOp;
+
+fn node_kind_tag(n: NodeKind) -> Int {
+    match n {
+        FuncDecl(_) => 0,
+        VarDecl(_, _) => 1,
+        Return(_) => 2,
+        Assign(_, _) => 3,
+        NoOp => 4,
+    }
+}
+
+fn test_list_create_push_len() -> Int {
+    let mut items = List.new();
+    if items.len() != 0 {
+        print(f"FAIL create: expected len 0, got {items.len()}");
+        return 1;
+    }
+
+    items.push(10);
+    items.push(20);
+    items.push(30);
+    if items.len() != 3 {
+        print(f"FAIL push: expected len 3, got {items.len()}");
+        return 1;
+    }
+
+    if items[0] != 10 {
+        print(f"FAIL index: items[0] expected 10, got {items[0]}");
+        return 1;
+    }
+    if items[2] != 30 {
+        print(f"FAIL index: items[2] expected 30, got {items[2]}");
+        return 1;
+    }
+    print("  list_create_push_len: OK");
+    0
+}
+
+fn test_list_pop() -> Int {
+    let mut items = List.new();
+    items.push(1);
+    items.push(2);
+    items.push(3);
+
+    // Get last element by index and verify
+    let last_idx = items.len() - 1;
+    let last = items[last_idx];
+    if last != 3 {
+        print(f"FAIL last: expected 3, got {last}");
+        return 1;
+    }
+    if items.len() != 3 {
+        print(f"FAIL len: expected 3, got {items.len()}");
+        return 1;
+    }
+    print("  list_pop: OK");
+    0
+}
+
+fn test_for_in_iteration() -> Int {
+    let items = [10, 20, 30, 40, 50];
+    let mut sum = 0;
+    for item in items {
+        sum = sum + item;
+    }
+    if sum != 150 {
+        print(f"FAIL for_in: expected sum 150, got {sum}");
+        return 1;
+    }
+    print("  for_in_iteration: OK");
+    0
+}
+
+fn test_list_of_sum_types() -> Int {
+    let mut nodes = List.new();
+    nodes.push(NodeKind.FuncDecl("main"));
+    nodes.push(NodeKind.VarDecl("x", 42));
+    nodes.push(NodeKind.Assign("x", 100));
+    nodes.push(NodeKind.Return(0));
+
+    if nodes.len() != 4 {
+        print(f"FAIL sum_list: expected 4 nodes, got {nodes.len()}");
+        return 1;
+    }
+
+    // Count each kind via loop
+    let mut func_count = 0;
+    let mut var_count = 0;
+    let mut ret_count = 0;
+    let mut assign_count = 0;
+
+    let mut i = 0;
+    while i < nodes.len() {
+        let tag = node_kind_tag(nodes[i]);
+        if tag == 0 { func_count = func_count + 1; }
+        if tag == 1 { var_count = var_count + 1; }
+        if tag == 2 { ret_count = ret_count + 1; }
+        if tag == 3 { assign_count = assign_count + 1; }
+        i = i + 1;
+    }
+
+    if func_count != 1 || var_count != 1 || ret_count != 1 || assign_count != 1 {
+        print(f"FAIL sum_list: wrong counts f={func_count} v={var_count} r={ret_count} a={assign_count}");
+        return 1;
+    }
+    print("  list_of_sum_types: OK");
+    0
+}
+
+fn test_filter_pattern() -> Int {
+    // Filter: keep only even numbers
+    let source = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut evens = List.new();
+    let mut i = 0;
+    while i < source.len() {
+        if source[i] % 2 == 0 {
+            evens.push(source[i]);
+        }
+        i = i + 1;
+    }
+
+    if evens.len() != 5 {
+        print(f"FAIL filter: expected 5 evens, got {evens.len()}");
+        return 1;
+    }
+    if evens[0] != 2 || evens[4] != 10 {
+        print(f"FAIL filter: first={evens[0]}, last={evens[4]}");
+        return 1;
+    }
+    print("  filter_pattern: OK");
+    0
+}
+
+fn test_map_transform_pattern() -> Int {
+    // Map: double each value
+    let source = [1, 2, 3, 4, 5];
+    let mut doubled = List.new();
+    let mut i = 0;
+    while i < source.len() {
+        doubled.push(source[i] * 2);
+        i = i + 1;
+    }
+
+    if doubled.len() != 5 {
+        print(f"FAIL map: expected 5, got {doubled.len()}");
+        return 1;
+    }
+    if doubled[0] != 2 || doubled[4] != 10 {
+        print(f"FAIL map: first={doubled[0]}, last={doubled[4]}");
+        return 1;
+    }
+    print("  map_transform_pattern: OK");
+    0
+}
+
+fn test_accumulate_pattern() -> Int {
+    // Accumulate: build a result string from a list of names
+    let names = ["alpha", "beta", "gamma"];
+    let mut result = "";
+    let mut i = 0;
+    while i < names.len() {
+        if i > 0 {
+            result = result + ", ";
+        }
+        result = result + names[i];
+        i = i + 1;
+    }
+
+    if result != "alpha, beta, gamma" {
+        print(f"FAIL accumulate: got '{result}'");
+        return 1;
+    }
+    print("  accumulate_pattern: OK");
+    0
+}
+
+fn test_partition_pattern() -> Int {
+    // Partition nodes into declarations vs statements
+    let nodes = [
+        NodeKind.FuncDecl("f1"),
+        NodeKind.VarDecl("x", 1),
+        NodeKind.Assign("x", 2),
+        NodeKind.FuncDecl("f2"),
+        NodeKind.Return(0),
+        NodeKind.VarDecl("y", 3),
+    ];
+
+    let mut decl_count = 0;
+    let mut stmt_count = 0;
+    let mut i = 0;
+    while i < nodes.len() {
+        let tag = node_kind_tag(nodes[i]);
+        if tag == 0 || tag == 1 {
+            decl_count = decl_count + 1;
+        } else {
+            stmt_count = stmt_count + 1;
+        }
+        i = i + 1;
+    }
+
+    if decl_count != 4 {
+        print(f"FAIL partition: expected 4 decls, got {decl_count}");
+        return 1;
+    }
+    if stmt_count != 2 {
+        print(f"FAIL partition: expected 2 stmts, got {stmt_count}");
+        return 1;
+    }
+    print("  partition_pattern: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_list_create_push_len();
+    failures = failures + test_list_pop();
+    failures = failures + test_for_in_iteration();
+    failures = failures + test_list_of_sum_types();
+    failures = failures + test_filter_pattern();
+    failures = failures + test_map_transform_pattern();
+    failures = failures + test_accumulate_pattern();
+    failures = failures + test_partition_pattern();
+
+    if failures == 0 {
+        print("All list processing pipeline tests passed");
+    }
+    failures
+}

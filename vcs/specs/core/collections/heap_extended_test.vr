@@ -1,0 +1,252 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, heap, contains, remove, search
+// @description: Tests for extended Heap APIs: contains, remove_value
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: BinaryHeap.contains
+// =============================================================================
+
+@test
+fn test_heap_contains_found() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+    assert(h.contains(&10));
+    assert(h.contains(&20));
+    assert(h.contains(&30));
+}
+
+@test
+fn test_heap_contains_not_found() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+    assert(!h.contains(&5));
+    assert(!h.contains(&15));
+    assert(!h.contains(&99));
+}
+
+@test
+fn test_heap_contains_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    assert(!h.contains(&1));
+}
+
+@test
+fn test_heap_contains_single() {
+    let mut h = BinaryHeap.new();
+    h.push(42);
+    assert(h.contains(&42));
+    assert(!h.contains(&0));
+}
+
+@test
+fn test_heap_contains_duplicates() {
+    let mut h = BinaryHeap.new();
+    h.push(5);
+    h.push(5);
+    h.push(5);
+    assert(h.contains(&5));
+    assert(!h.contains(&4));
+}
+
+@test
+fn test_heap_contains_after_pop() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+    h.pop(); // removes 30 (max)
+    assert(!h.contains(&30));
+    assert(h.contains(&10));
+    assert(h.contains(&20));
+}
+
+@test
+fn test_heap_contains_negative() {
+    let mut h = BinaryHeap.new();
+    h.push(-5);
+    h.push(0);
+    h.push(5);
+    assert(h.contains(&-5));
+    assert(h.contains(&0));
+    assert(!h.contains(&-1));
+}
+
+// =============================================================================
+// Section 2: BinaryHeap.remove_value
+// =============================================================================
+
+@test
+fn test_heap_remove_value_found() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+    assert(h.remove_value(&20));
+    assert_eq(h.len(), 2);
+    assert(!h.contains(&20));
+}
+
+@test
+fn test_heap_remove_value_not_found() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    assert(!h.remove_value(&99));
+    assert_eq(h.len(), 2);
+}
+
+@test
+fn test_heap_remove_value_empty() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    assert(!h.remove_value(&1));
+}
+
+@test
+fn test_heap_remove_value_single() {
+    let mut h = BinaryHeap.new();
+    h.push(42);
+    assert(h.remove_value(&42));
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_remove_value_max() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+    assert(h.remove_value(&30));
+    assert_eq(h.len(), 2);
+    // Max should now be 20
+    assert_eq(*h.peek().unwrap(), 20);
+}
+
+@test
+fn test_heap_remove_value_min() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+    assert(h.remove_value(&10));
+    assert_eq(h.len(), 2);
+    // Max is still 30
+    assert_eq(*h.peek().unwrap(), 30);
+}
+
+@test
+fn test_heap_remove_value_duplicate() {
+    let mut h = BinaryHeap.new();
+    h.push(5);
+    h.push(5);
+    h.push(5);
+    assert(h.remove_value(&5));
+    assert_eq(h.len(), 2);
+    // Still contains 5 (two copies left)
+    assert(h.contains(&5));
+}
+
+@test
+fn test_heap_remove_value_preserves_heap() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(5);
+    h.push(3);
+    h.push(7);
+    h.push(2);
+    h.push(4);
+    h.push(6);
+    h.remove_value(&5);
+    // Verify heap property: max should still be correct
+    assert_eq(*h.peek().unwrap(), 7);
+    assert_eq(h.len(), 6);
+    // Pop all in order to verify heap property holds
+    let mut prev = *h.peek().unwrap();
+    while let Some(val) = h.pop() {
+        assert(val <= prev);
+        prev = val;
+    }
+}
+
+@test
+fn test_heap_remove_value_all_elements() {
+    let mut h = BinaryHeap.new();
+    h.push(3);
+    h.push(1);
+    h.push(2);
+    assert(h.remove_value(&3));
+    assert(h.remove_value(&1));
+    assert(h.remove_value(&2));
+    assert(h.is_empty());
+}
+
+// =============================================================================
+// Section 3: Integration
+// =============================================================================
+
+@test
+fn test_heap_contains_remove_push_cycle() {
+    let mut h = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+    // Remove middle, check, re-push
+    assert(h.contains(&20));
+    h.remove_value(&20);
+    assert(!h.contains(&20));
+    h.push(20);
+    assert(h.contains(&20));
+    assert_eq(h.len(), 3);
+}
+
+@test
+fn test_heap_remove_then_pop() {
+    let mut h = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.push(4);
+    h.push(5);
+    h.remove_value(&3);
+    h.remove_value(&1);
+    // Remaining: 2, 4, 5
+    assert_eq(h.len(), 3);
+    assert_eq(h.pop().unwrap(), 5);
+    assert_eq(h.pop().unwrap(), 4);
+    assert_eq(h.pop().unwrap(), 2);
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_large_remove() {
+    let mut h = BinaryHeap.new();
+    let mut i = 0;
+    while i < 20 {
+        h.push(i);
+        i = i + 1;
+    }
+    assert_eq(h.len(), 20);
+    // Remove all even numbers
+    let mut j = 0;
+    while j < 20 {
+        let val = j;
+        h.remove_value(&val);
+        j = j + 2;
+    }
+    assert_eq(h.len(), 10);
+    // Verify remaining are odd and heap property holds
+    let mut prev = *h.peek().unwrap();
+    while let Some(val) = h.pop() {
+        assert(val % 2 != 0);
+        assert(val <= prev);
+        prev = val;
+    }
+}

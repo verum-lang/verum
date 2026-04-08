@@ -1,0 +1,215 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: lint, patterns, code-quality, idioms
+// @description: Code patterns exercising correct Verum idioms — semantic types, proper error handling, small copies
+
+// --- Correct Verum idioms (NOT Rust syntax) ---
+
+// Semantic type definitions using `type ... is`
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Custom(Int, Int, Int);
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Shape is
+    | Circle(Int)
+    | Rectangle(Int, Int)
+    | Triangle(Point, Point, Point);
+
+// Implement block (NOT `impl`)
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn distance_sq(&self, other: Point) -> Int {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        dx * dx + dy * dy
+    }
+}
+
+// Using List<T> (NOT Vec<T>), Text (NOT String), Map (NOT HashMap)
+fn collect_names() -> List<Text> {
+    let mut names = List.new();
+    names.push("alpha");
+    names.push("beta");
+    names.push("gamma");
+    names
+}
+
+fn build_index(items: List<Text>) -> Map<Text, Int> {
+    let mut index = Map.new();
+    let mut i = 0;
+    while i < items.len() {
+        index.insert(items[i], i);
+        i = i + 1;
+    }
+    index
+}
+
+// Error handling with Result (proper pattern)
+type ParseError is
+    | InvalidFormat(Text)
+    | OutOfRange(Int);
+
+fn parse_bounded_int(s: Text, min_val: Int, max_val: Int) -> Result<Int, ParseError> {
+    // Simulate parsing: just check if it's a digit string
+    let val = text_to_int(s);
+    if val < min_val || val > max_val {
+        Err(ParseError.OutOfRange(val))
+    } else {
+        Ok(val)
+    }
+}
+
+fn text_to_int(s: Text) -> Int {
+    let mut result = 0;
+    let mut negative = false;
+    let mut i = 0;
+    let slen = s.len();
+
+    while i < slen {
+        let b = match s.byte_at(i) { Some(v) => v, None => -1, };
+        if i == 0 && b == 45 {
+            negative = true;
+        } else if b >= 48 && b <= 57 {
+            result = result * 10 + (b - 48);
+        }
+        i = i + 1;
+    }
+    if negative { -result } else { result }
+}
+
+// Small value types passed by value (correct pattern)
+fn add_points(a: Point, b: Point) -> Point {
+    Point { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn scale_point(p: Point, factor: Int) -> Point {
+    Point { x: p.x * factor, y: p.y * factor }
+}
+
+// f-string formatting (NOT format! macro)
+fn describe_shape(s: Shape) -> Text {
+    match s {
+        Circle(r) => f"circle with radius {r}",
+        Rectangle(w, h) => f"rectangle {w}x{h}",
+        Triangle(a, b, c) => f"triangle at ({a.x},{a.y}),({b.x},{b.y}),({c.x},{c.y})",
+    }
+}
+
+fn test_semantic_types() -> Int {
+    let names = collect_names();
+    if names.len() != 3 {
+        print(f"FAIL: expected 3 names, got {names.len()}");
+        return 1;
+    }
+
+    let index = build_index(names);
+    if index.len() != 3 {
+        print(f"FAIL: expected 3 index entries, got {index.len()}");
+        return 1;
+    }
+
+    print("  semantic_types: OK");
+    0
+}
+
+fn test_type_definitions() -> Int {
+    let c = Color.Red;
+    let custom = Color.Custom(255, 128, 0);
+
+    let p = Point.new(3, 4);
+    let dist = p.distance_sq(Point.new(0, 0));
+    if dist != 25 {
+        print(f"FAIL: distance_sq expected 25, got {dist}");
+        return 1;
+    }
+
+    print("  type_definitions: OK");
+    0
+}
+
+fn test_value_operations() -> Int {
+    let a = Point { x: 1, y: 2 };
+    let b = Point { x: 3, y: 4 };
+    let sum = add_points(a, b);
+    if sum.x != 4 || sum.y != 6 {
+        print(f"FAIL: add_points expected (4,6), got ({sum.x},{sum.y})");
+        return 1;
+    }
+
+    let scaled = scale_point(a, 3);
+    if scaled.x != 3 || scaled.y != 6 {
+        print(f"FAIL: scale_point expected (3,6), got ({scaled.x},{scaled.y})");
+        return 1;
+    }
+
+    print("  value_operations: OK");
+    0
+}
+
+fn test_shape_description() -> Int {
+    let s1 = describe_shape(Shape.Circle(5));
+    if s1 != "circle with radius 5" {
+        print(f"FAIL: circle desc: '{s1}'");
+        return 1;
+    }
+
+    let s2 = describe_shape(Shape.Rectangle(10, 20));
+    if s2 != "rectangle 10x20" {
+        print(f"FAIL: rect desc: '{s2}'");
+        return 1;
+    }
+
+    print("  shape_description: OK");
+    0
+}
+
+fn test_error_patterns() -> Int {
+    match parse_bounded_int("42", 0, 100) {
+        Ok(v) => {
+            if v != 42 {
+                print(f"FAIL: expected 42, got {v}");
+                return 1;
+            }
+        }
+        Err(_) => {
+            print("FAIL: unexpected error for 42");
+            return 1;
+        }
+    }
+
+    match parse_bounded_int("200", 0, 100) {
+        Ok(_) => {
+            print("FAIL: expected OutOfRange for 200");
+            return 1;
+        }
+        Err(_) => {} // Expected
+    }
+
+    print("  error_patterns: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_semantic_types();
+    failures = failures + test_type_definitions();
+    failures = failures + test_value_operations();
+    failures = failures + test_shape_description();
+    failures = failures + test_error_patterns();
+
+    if failures == 0 {
+        print("All lint pattern tests passed");
+    }
+    failures
+}

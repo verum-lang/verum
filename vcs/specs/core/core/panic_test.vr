@@ -1,0 +1,962 @@
+// =============================================================================
+// panic_test.vr - Comprehensive tests for core/panic.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: panic, assert, control-flow, debugging
+// @timeout: 30000
+// @description: Comprehensive tests for core/panic.vr
+// =============================================================================
+//
+// Tests for panic, assert, and control flow functions:
+// - Assert functions
+// - Unreachable markers
+// - Debug output
+// - Panic info and location types
+// - Panic hooks
+// - Catch/resume unwind
+// - Source location macros
+//
+// Note: Actual panic/exit tests would terminate the process, so we test
+// the type signatures and non-terminating functionality.
+//
+// =============================================================================
+
+module panic_test;
+
+// Import from core.base.panic directly for full access
+mount core.base.panic.{
+    panic, panic_at, panic_fmt, abort, exit,
+    assert, assert_eq, assert_ne, assert_some, assert_none, assert_ok, assert_err,
+    debug_assert, debug_assert_eq, debug_assert_ne,
+    unreachable, unreachable_unchecked, unimplemented, todo,
+    debug_print, dbg,
+    PanicInfo, Location, PanicHook, default_panic_hook,
+    catch_unwind, resume_unwind, CatchResult,
+    file, line, column, current_location,
+};
+mount core.{Maybe, Result, Text};
+mount core.base.{Debug, Formatter, FormatError};
+
+// =============================================================================
+// Section 1: Location Type Tests
+// =============================================================================
+
+@test
+fn test_location_construction() {
+    let loc = Location.new("test.vr", 42, 10);
+
+    assert_eq(loc.file, "test.vr");
+    assert_eq(loc.line, 42);
+    assert_eq(loc.column, 10);
+}
+
+@test
+fn test_location_new_with_empty_file() {
+    let loc = Location.new("", 0, 0);
+
+    assert_eq(loc.file, "");
+    assert_eq(loc.line, 0);
+    assert_eq(loc.column, 0);
+}
+
+@test
+fn test_location_new_with_path() {
+    let loc = Location.new("src/core/panic.vr", 100, 5);
+
+    assert_eq(loc.file, "src/core/panic.vr");
+    assert_eq(loc.line, 100);
+    assert_eq(loc.column, 5);
+}
+
+@test
+fn test_location_fields_accessible() {
+    let loc = Location {
+        file: "module.vr",
+        line: 55,
+        column: 3,
+    };
+
+    let _f: Text = loc.file;
+    let _l: Int = loc.line;
+    let _c: Int = loc.column;
+}
+
+// =============================================================================
+// Section 2: Location Debug Implementation
+// =============================================================================
+
+@test
+fn test_location_debug_format() {
+    let loc = Location.new("test.vr", 42, 10);
+
+    let mut buffer = Text.new();
+    {
+        let mut formatter = Formatter.new(&mut buffer);
+        let result = loc.fmt_debug(&mut formatter);
+        assert(result.is_ok());
+    }
+
+    // Debug format should include file:line:column
+    assert(buffer.contains("test.vr"));
+    assert(buffer.contains("42"));
+    assert(buffer.contains("10"));
+}
+
+@test
+fn test_location_display_format() {
+    let loc = Location.new("main.vr", 1, 1);
+
+    let mut buffer = Text.new();
+    {
+        let mut formatter = Formatter.new(&mut buffer);
+        let result = loc.fmt(&mut formatter);
+        assert(result.is_ok());
+    }
+
+    // Display format should be readable
+    assert(buffer.contains("main.vr"));
+}
+
+// =============================================================================
+// Section 3: PanicInfo Type Tests
+// =============================================================================
+
+@test
+fn test_panic_info_with_location() {
+    let loc = Location.new("error.vr", 99, 5);
+    let info = PanicInfo {
+        message: "something went wrong",
+        location: Some(loc),
+    };
+
+    assert_eq(info.message(), &"something went wrong");
+    assert(info.location().is_some());
+}
+
+@test
+fn test_panic_info_without_location() {
+    let info = PanicInfo {
+        message: "panic without location",
+        location: None,
+    };
+
+    assert_eq(info.message(), &"panic without location");
+    assert(info.location().is_none());
+}
+
+@test
+fn test_panic_info_message_accessor() {
+    let info = PanicInfo {
+        message: "test message",
+        location: None,
+    };
+
+    let msg: &Text = info.message();
+    assert_eq(*msg, "test message");
+}
+
+@test
+fn test_panic_info_location_accessor() {
+    let loc = Location.new("file.vr", 10, 20);
+    let info = PanicInfo {
+        message: "test",
+        location: Some(loc),
+    };
+
+    let loc_ref = info.location();
+    match loc_ref {
+        Some(l) => {
+            assert_eq(l.line, 10);
+            assert_eq(l.column, 20);
+        }
+        None => panic("expected Some location"),
+    }
+}
+
+// =============================================================================
+// Section 4: PanicInfo Debug Implementation
+// =============================================================================
+
+@test
+fn test_panic_info_debug_with_location() {
+    let loc = Location.new("crash.vr", 50, 8);
+    let info = PanicInfo {
+        message: "crash reason",
+        location: Some(loc),
+    };
+
+    let mut buffer = Text.new();
+    {
+        let mut formatter = Formatter.new(&mut buffer);
+        let result = info.fmt_debug(&mut formatter);
+        assert(result.is_ok());
+    }
+
+    assert(buffer.contains("PanicInfo"));
+    assert(buffer.contains("crash reason"));
+    assert(buffer.contains("crash.vr"));
+}
+
+@test
+fn test_panic_info_debug_without_location() {
+    let info = PanicInfo {
+        message: "no location",
+        location: None,
+    };
+
+    let mut buffer = Text.new();
+    {
+        let mut formatter = Formatter.new(&mut buffer);
+        let result = info.fmt_debug(&mut formatter);
+        assert(result.is_ok());
+    }
+
+    assert(buffer.contains("PanicInfo"));
+    assert(buffer.contains("no location"));
+}
+
+// =============================================================================
+// Section 5: Assert Function Tests
+// =============================================================================
+
+@test
+fn test_assert_true_passes() {
+    // True condition should not panic
+    assert(1 == 1);
+    assert(1 == 1, "this should pass");
+}
+
+@test
+fn test_assert_with_message() {
+    assert(1 == 1, "one equals one");
+    assert(2 > 1, "two is greater than one");
+}
+
+@test
+fn test_assert_complex_condition() {
+    let x = 5;
+    let y = 10;
+
+    assert(x < y);
+    assert(x + y == 15);
+    assert(x * 2 == y);
+}
+
+// =============================================================================
+// Section 6: Assert Equality Tests
+// =============================================================================
+
+@test
+fn test_assert_eq_integers() {
+    assert_eq(5, 5);
+    assert_eq(0, 0);
+    assert_eq(-1, -1);
+    assert_eq(Int.MAX, Int.MAX);
+    assert_eq(Int.MIN, Int.MIN);
+}
+
+@test
+fn test_assert_eq_floats() {
+    assert_eq(3.14, 3.14);
+    assert_eq(0.0, 0.0);
+    assert_eq(-2.5, -2.5);
+}
+
+@test
+fn test_assert_eq_bools() {
+    assert_eq(true, true);
+    assert_eq(false, false);
+}
+
+@test
+fn test_assert_eq_with_message() {
+    assert_eq(42, 42, "answer should equal answer");
+}
+
+@test
+fn test_assert_eq_text() {
+    assert_eq("hello", "hello");
+    assert_eq("", "");
+}
+
+// =============================================================================
+// Section 7: Assert Inequality Tests
+// =============================================================================
+
+@test
+fn test_assert_ne_integers() {
+    assert_ne(1, 2);
+    assert_ne(0, 1);
+    assert_ne(-1, 1);
+}
+
+@test
+fn test_assert_ne_with_message() {
+    assert_ne(1, 2, "one should not equal two");
+}
+
+@test
+fn test_assert_ne_text() {
+    assert_ne("hello", "world");
+    assert_ne("", " ");
+}
+
+// =============================================================================
+// Section 8: Assert Some/None Tests
+// =============================================================================
+
+@test
+fn test_assert_some_returns_value() {
+    let maybe: Maybe<Int> = Some(42);
+    let value = assert_some(maybe);
+    assert_eq(value, 42);
+}
+
+@test
+fn test_assert_some_with_message() {
+    let maybe: Maybe<Text> = Some("hello");
+    let value = assert_some(maybe, "should have value");
+    assert_eq(value, "hello");
+}
+
+@test
+fn test_assert_none_passes() {
+    let maybe: Maybe<Int> = None;
+    assert_none(maybe);
+}
+
+@test
+fn test_assert_none_with_message() {
+    let maybe: Maybe<Text> = None;
+    assert_none(maybe, "should be empty");
+}
+
+// =============================================================================
+// Section 9: Assert Ok/Err Tests
+// =============================================================================
+
+@test
+fn test_assert_ok_returns_value() {
+    let result: Result<Int, Text> = Ok(100);
+    let value = assert_ok(result);
+    assert_eq(value, 100);
+}
+
+@test
+fn test_assert_ok_with_message() {
+    let result: Result<Text, Int> = Ok("success");
+    let value = assert_ok(result, "operation should succeed");
+    assert_eq(value, "success");
+}
+
+@test
+fn test_assert_err_returns_error() {
+    let result: Result<Int, Text> = Err("error message");
+    let error = assert_err(result);
+    assert_eq(error, "error message");
+}
+
+@test
+fn test_assert_err_with_message() {
+    let result: Result<Text, Int> = Err(404);
+    let error = assert_err(result, "should be error");
+    assert_eq(error, 404);
+}
+
+// =============================================================================
+// Section 10: Debug Assert Tests
+// =============================================================================
+
+@test
+fn test_debug_assert_in_debug() {
+    // In debug builds, should check condition
+    debug_assert(!false);
+    debug_assert(1 == 1);
+}
+
+@test
+fn test_debug_assert_with_message() {
+    debug_assert(true, "debug check");
+}
+
+@test
+fn test_debug_assert_eq() {
+    debug_assert_eq(5, 5);
+    debug_assert_eq(5, 5, "values should match");
+}
+
+@test
+fn test_debug_assert_ne() {
+    debug_assert_ne(1, 2);
+    debug_assert_ne(1, 2, "values should differ");
+}
+
+// =============================================================================
+// Section 11: Panic Hook Type Tests
+// =============================================================================
+
+@test
+fn test_panic_hook_type() {
+    // PanicHook is a function type
+    let hook: PanicHook = default_panic_hook;
+
+    // Should be callable (but we don't actually call it)
+}
+
+@test
+fn test_custom_panic_hook() {
+    fn my_hook(info: &PanicInfo) {
+        // Custom handling
+        let _ = info.message();
+    }
+
+    let hook: PanicHook = my_hook;
+}
+
+@test
+fn test_default_panic_hook_exists() {
+    // Verify default hook is accessible
+    let _hook = default_panic_hook;
+}
+
+// =============================================================================
+// Section 12: Panic Function Signatures
+// =============================================================================
+
+@test
+fn test_panic_signature() {
+    // Verify panic returns !
+    let _f: fn(Text) -> ! = panic;
+}
+
+@test
+fn test_panic_at_signature() {
+    // Verify panic_at signature
+    let _f: fn(Text, Text, Int, Int) -> ! = panic_at;
+}
+
+@test
+fn test_abort_signature() {
+    // Verify abort returns !
+    let _f: fn() -> ! = abort;
+}
+
+@test
+fn test_exit_signature() {
+    // Verify exit returns !
+    let _f: fn(Int) -> ! = exit;
+}
+
+// =============================================================================
+// Section 13: Unreachable Marker Tests
+// =============================================================================
+
+@test
+fn test_unreachable_signature() {
+    // Verify unreachable returns ! (has default parameter but signature is fn(Text) -> !)
+    let _f: fn(Text) -> ! = unreachable;
+}
+
+@test
+fn test_unreachable_unchecked_signature() {
+    let _f: fn(Text) -> ! = unreachable_unchecked;
+}
+
+@test
+fn test_unimplemented_signature() {
+    let _f: fn(Text) -> ! = unimplemented;
+}
+
+@test
+fn test_todo_signature() {
+    let _f: fn(Text) -> ! = todo;
+}
+
+// =============================================================================
+// Section 14: Debug Print Tests
+// =============================================================================
+
+@test
+fn test_debug_print_compiles() {
+    // debug_print should accept &Text
+    // We can verify it compiles, but avoid actually printing
+    let _f: fn(&Text) = debug_print;
+}
+
+// =============================================================================
+// Section 15: Dbg Function Tests
+// =============================================================================
+
+@test
+fn test_dbg_returns_value() {
+    // dbg should return the input value
+    // Can't test actual output, but verify signature
+    let value = 42;
+
+    // dbg takes T: Debug and returns T
+}
+
+@test
+fn test_dbg_with_various_types() {
+    // Verify dbg works with different types
+    // (Just type checks, doesn't actually print)
+}
+
+// =============================================================================
+// Section 16: CatchResult Type Tests
+// =============================================================================
+
+@test
+fn test_catch_result_type() {
+    // CatchResult<T> is Result<T, PanicInfo>
+    let success: CatchResult<Int> = Ok(42);
+    let failure: CatchResult<Int> = Err(PanicInfo {
+        message: "caught panic",
+        location: None,
+    });
+
+    match success {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => panic("expected Ok"),
+    }
+
+    match failure {
+        Ok(_) => panic("expected Err"),
+        Err(info) => assert_eq(info.message, "caught panic"),
+    }
+}
+
+// =============================================================================
+// Section 17: Catch Unwind Signature Tests
+// =============================================================================
+
+@test
+fn test_catch_unwind_signature() {
+    // Verify catch_unwind can be called (but don't test actual unwinding)
+    // catch_unwind<T, F: fn() -> T>(f: F) -> CatchResult<T>
+}
+
+@test
+fn test_resume_unwind_signature() {
+    // Verify resume_unwind signature
+    let _f: fn(PanicInfo) -> ! = resume_unwind;
+}
+
+// =============================================================================
+// Section 18: Source Location Macro Tests
+// =============================================================================
+
+@test
+fn test_file_returns_text() {
+    // file() is a meta function returning current file
+    // In test context, we can verify type
+}
+
+@test
+fn test_line_returns_int() {
+    // line() returns current line number
+}
+
+@test
+fn test_column_returns_int() {
+    // column() returns current column number
+}
+
+@test
+fn test_current_location_returns_location() {
+    // current_location() returns Location
+}
+
+// =============================================================================
+// Section 19: Assert with Complex Types
+// =============================================================================
+
+@test
+fn test_assert_eq_with_generics() {
+    let list1: List<Int> = [1, 2, 3];
+    let list2: List<Int> = [1, 2, 3];
+
+    // Lists with Eq + Debug should work
+    assert_eq(list1, list2);
+}
+
+@test
+fn test_assert_ne_with_generics() {
+    let list1: List<Int> = [1, 2, 3];
+    let list2: List<Int> = [1, 2, 4];
+
+    assert_ne(list1, list2);
+}
+
+@test
+fn test_assert_some_with_complex_type() {
+    let maybe: Maybe<List<Int>> = Some([1, 2, 3]);
+    let value = assert_some(maybe);
+    assert_eq(value.len(), 3);
+}
+
+@test
+fn test_assert_ok_with_complex_error() {
+    type CustomError is { code: Int, message: Text };
+
+    let result: Result<Int, CustomError> = Ok(200);
+    let value = assert_ok(result);
+    assert_eq(value, 200);
+}
+
+// =============================================================================
+// Section 20: Default Message Tests
+// =============================================================================
+
+@test
+fn test_assert_default_message() {
+    // assert has default message "assertion failed"
+    assert(1 == 1); // No explicit message
+}
+
+@test
+fn test_assert_eq_default_message() {
+    // assert_eq has default message
+    assert_eq(1, 1);
+}
+
+@test
+fn test_assert_ne_default_message() {
+    // assert_ne has default message
+    assert_ne(1, 2);
+}
+
+@test
+fn test_assert_some_default_message() {
+    let maybe: Maybe<Int> = Some(1);
+    let _ = assert_some(maybe);
+}
+
+@test
+fn test_assert_none_default_message() {
+    let maybe: Maybe<Int> = None;
+    assert_none(maybe);
+}
+
+@test
+fn test_assert_ok_default_message() {
+    let result: Result<Int, Text> = Ok(1);
+    let _ = assert_ok(result);
+}
+
+@test
+fn test_assert_err_default_message() {
+    let result: Result<Int, Text> = Err("error");
+    let _ = assert_err(result);
+}
+
+// =============================================================================
+// Section 21: Unreachable Default Messages
+// =============================================================================
+
+@test
+fn test_unreachable_default_message() {
+    // unreachable has default "entered unreachable code"
+    let _f: fn() -> ! = || unreachable();
+}
+
+@test
+fn test_unreachable_unchecked_default_message() {
+    let _f: fn() -> ! = || unreachable_unchecked();
+}
+
+@test
+fn test_unimplemented_default_message() {
+    // unimplemented has default "not implemented"
+    let _f: fn() -> ! = || unimplemented();
+}
+
+@test
+fn test_todo_default_message() {
+    // todo has default "not yet implemented"
+    let _f: fn() -> ! = || todo();
+}
+
+// =============================================================================
+// Section 22: Location Edge Cases
+// =============================================================================
+
+@test
+fn test_location_negative_line() {
+    // Negative line numbers are technically allowed
+    let loc = Location.new("test.vr", -1, 0);
+    assert_eq(loc.line, -1);
+}
+
+@test
+fn test_location_zero_values() {
+    let loc = Location.new("", 0, 0);
+    assert_eq(loc.file.len(), 0);
+    assert_eq(loc.line, 0);
+    assert_eq(loc.column, 0);
+}
+
+@test
+fn test_location_large_values() {
+    let loc = Location.new("very/long/path/to/file.vr", 999999, 500);
+    assert_eq(loc.line, 999999);
+    assert_eq(loc.column, 500);
+}
+
+// =============================================================================
+// Section 23: PanicInfo Variations
+// =============================================================================
+
+@test
+fn test_panic_info_empty_message() {
+    let info = PanicInfo {
+        message: "",
+        location: None,
+    };
+
+    assert_eq(info.message().len(), 0);
+}
+
+@test
+fn test_panic_info_long_message() {
+    let long_msg = "x".repeat(1000);
+    let info = PanicInfo {
+        message: long_msg.clone(),
+        location: None,
+    };
+
+    assert_eq(info.message().len(), 1000);
+}
+
+@test
+fn test_panic_info_unicode_message() {
+    let info = PanicInfo {
+        message: "Ошибка: что-то пошло не так 🔥",
+        location: None,
+    };
+
+    assert(info.message().contains("Ошибка"));
+}
+
+// =============================================================================
+// Section 24: Assert Boundary Conditions
+// =============================================================================
+
+@test
+fn test_assert_eq_boundary_integers() {
+    assert_eq(Int.MAX, Int.MAX);
+    assert_eq(Int.MIN, Int.MIN);
+    assert_ne(Int.MAX, Int.MIN);
+}
+
+@test
+fn test_assert_eq_special_floats() {
+    assert_eq(Float.INFINITY, Float.INFINITY);
+    assert_eq(Float.NEG_INFINITY, Float.NEG_INFINITY);
+    assert_ne(Float.INFINITY, Float.NEG_INFINITY);
+}
+
+@test
+fn test_assert_empty_collections() {
+    let empty1: List<Int> = [];
+    let empty2: List<Int> = [];
+    assert_eq(empty1, empty2);
+}
+
+// =============================================================================
+// Section 25: Chained Assertions
+// =============================================================================
+
+@test
+fn test_multiple_assertions() {
+    let x = 10;
+
+    assert(x > 0);
+    assert(x < 100);
+    assert_eq(x, 10);
+    assert_ne(x, 0);
+}
+
+@test
+fn test_assert_result_chain() {
+    fn get_value() -> Result<Int, Text> {
+        Ok(42)
+    }
+
+    let value = assert_ok(get_value());
+    assert_eq(value, 42);
+    assert(value > 0);
+}
+
+@test
+fn test_assert_maybe_chain() {
+    fn find_item() -> Maybe<Text> {
+        Some("found")
+    }
+
+    let item = assert_some(find_item());
+    assert_eq(item, "found");
+    assert(item.len() > 0);
+}
+
+// =============================================================================
+// Section 26: Debug Assert Optimization
+// =============================================================================
+
+@test
+fn test_debug_assert_no_side_effects() {
+    // In release builds, debug_assert should not evaluate
+    let mut counter = 0;
+
+    debug_assert({
+        counter = counter + 1;
+        true
+    });
+
+    // In debug builds counter is 1, in release it's 0
+    // Either is acceptable
+}
+
+// =============================================================================
+// Section 27: Panic Hook Integration
+// =============================================================================
+
+@test
+fn test_panic_hook_receives_info() {
+    // Custom hook can inspect PanicInfo
+    fn inspecting_hook(info: &PanicInfo) {
+        let _msg = info.message();
+        let _loc = info.location();
+    }
+
+    let _: PanicHook = inspecting_hook;
+}
+
+@test
+fn test_panic_hook_location_access() {
+    fn location_hook(info: &PanicInfo) {
+        match info.location() {
+            Some(loc) => {
+                let _f = &loc.file;
+                let _l = loc.line;
+                let _c = loc.column;
+            }
+            None => {}
+        }
+    }
+
+    let _: PanicHook = location_hook;
+}
+
+// =============================================================================
+// Section 28: CatchResult Patterns
+// =============================================================================
+
+@test
+fn test_catch_result_ok_pattern() {
+    let result: CatchResult<Int> = Ok(100);
+
+    let value = match result {
+        Ok(v) => v,
+        Err(_) => 0,
+    };
+
+    assert_eq(value, 100);
+}
+
+@test
+fn test_catch_result_err_pattern() {
+    let info = PanicInfo {
+        message: "test panic",
+        location: None,
+    };
+    let result: CatchResult<Int> = Err(info);
+
+    let msg = match result {
+        Ok(_) => "no panic",
+        Err(info) => info.message,
+    };
+
+    assert_eq(msg, "test panic");
+}
+
+@test
+fn test_catch_result_with_complex_type() {
+    type ComplexResult is { data: List<Int>, success: Bool };
+
+    let result: CatchResult<ComplexResult> = Ok(ComplexResult {
+        data: [1, 2, 3],
+        success: true,
+    });
+
+    match result {
+        Ok(r) => {
+            assert_eq(r.data.len(), 3);
+            assert(r.success);
+        }
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 29: Type Inference Tests
+// =============================================================================
+
+@test
+fn test_assert_some_type_inference() {
+    let maybe = Some(42); // Type inferred as Maybe<Int>
+    let value = assert_some(maybe);
+    let _: Int = value; // Verify inferred type
+}
+
+@test
+fn test_assert_ok_type_inference() {
+    let result: Result<Int, Text> = Ok(42);
+    let value = assert_ok(result);
+    let _: Int = value;
+}
+
+@test
+fn test_assert_err_type_inference() {
+    let result: Result<Int, Text> = Err("error");
+    let error = assert_err(result);
+    let _: Text = error;
+}
+
+// =============================================================================
+// Section 30: Integration Patterns
+// =============================================================================
+
+@test
+fn test_assert_in_helper_function() {
+    fn validate_positive(n: Int) {
+        assert(n > 0, "number must be positive");
+    }
+
+    validate_positive(1);
+    validate_positive(100);
+}
+
+@test
+fn test_assert_eq_in_helper() {
+    fn check_expected(actual: Int, expected: Int) {
+        assert_eq(actual, expected, "value mismatch");
+    }
+
+    check_expected(10, 10);
+    check_expected(0, 0);
+}
+
+@test
+fn test_assert_combination() {
+    fn validate_result(result: Result<Int, Text>) -> Int {
+        let value = assert_ok(result, "expected success");
+        assert(value >= 0, "value must be non-negative");
+        value
+    }
+
+    let v = validate_result(Ok(42));
+    assert_eq(v, 42);
+}

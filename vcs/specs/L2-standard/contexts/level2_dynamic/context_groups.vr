@@ -1,0 +1,148 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: contexts, groups
+// @description: Tests context groups for bundling related contexts together
+//
+// Context groups allow defining aliases for common context combinations,
+// reducing boilerplate in function signatures.
+
+// Individual context declarations
+context async Database {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+context Logger {
+    fn info(message: Text);
+    fn error(message: Text);
+    fn debug(message: Text);
+}
+
+context async Cache {
+    async fn get(key: Text) -> Maybe<Text>;
+    async fn set(key: Text, value: Text, ttl: Duration);
+}
+
+context Config {
+    fn get(key: Text) -> Maybe<Text>;
+    fn require(key: Text) -> Text;
+}
+
+context async Metrics {
+    fn increment(counter: Text);
+    fn gauge(name: Text, value: Float);
+    async fn flush();
+}
+
+context async EventBus {
+    async fn publish(topic: Text, payload: Text);
+}
+
+// Type definitions
+type Row is Map<Text, Text>;
+type DbError is Failed(Text);
+type Duration is Int;
+
+// Context group: bundles multiple contexts into a single name
+using WebRequest = [Database, Logger, Cache, Config, Metrics];
+
+// Another using for event processing
+using EventProcessor = [Database, Logger, EventBus, Metrics];
+
+// Minimal using for simple services
+using BasicService = [Logger, Config];
+
+// Using a using in function signature
+async fn handle_web_request(path: Text) -> Result<Text, Text> using WebRequest {
+    Logger.info("Handling request: " + path);
+    Metrics.increment("requests");
+
+    let cache_key = "route:" + path;
+    if let Some(cached) = Cache.get(cache_key).await {
+        Metrics.increment("cache.hits");
+        return Ok(cached);
+    }
+
+    match Database.query("SELECT * FROM routes WHERE path = '" + path + "'").await {
+        Ok(rows) => {
+            let response = rows.to_text();
+            let ttl = match Config.get("cache.ttl") {
+                Some(s) => 3600,  // Simplified: would parse s.parse_int()
+                None => 3600,
+            };
+            Cache.set(cache_key, response, ttl).await;
+            Ok(response)
+        }
+        Err(e) => {
+            Logger.error("Query failed: " + e.to_text());
+            Err(e.to_text())
+        }
+    }
+}
+
+// Using another context group
+async fn process_event(event_id: Text) using EventProcessor {
+    Logger.info("Processing event: " + event_id);
+
+    match Database.query("SELECT * FROM events WHERE id = '" + event_id + "'").await {
+        Ok(rows) => {
+            for row in rows {
+                let topic = row.get("topic").unwrap_or("default");
+                let payload = row.get("payload").unwrap_or("{}");
+                EventBus.publish(topic, payload).await;
+            }
+            Metrics.increment("events.processed");
+        }
+        Err(e) => {
+            Logger.error("Failed to load event: " + e.to_text());
+            Metrics.increment("events.errors");
+        }
+    }
+}
+
+// Using minimal context group
+fn validate_config() -> Bool using BasicService {
+    let required_keys = ["app.name", "app.env", "db.url"];
+
+    for key in required_keys {
+        let val = Config.get(key);
+        match val {
+            None => {
+                Logger.error("Missing required config: " + key);
+                return false;
+            }
+            Some(_) => {}
+        }
+    }
+
+    Logger.info("Configuration validated successfully");
+    true
+}
+
+// Combining using with additional contexts
+// Note: To combine a group with additional contexts, list all individually
+async fn advanced_handler() using [Database, Logger, Cache, Config, Metrics, EventBus] {
+    // Has all WebRequest contexts plus EventBus
+    Logger.info("Advanced handler with events");
+    EventBus.publish("handler.started", "{}").await;
+
+    let _ = handle_web_request("/api/data").await;
+
+    EventBus.publish("handler.completed", "{}").await;
+}
+
+// Full application using (all contexts)
+using FullApplication = [Database, Logger, Cache, Config, Metrics, EventBus];
+
+async fn app_main() using FullApplication {
+    Logger.info("Application starting");
+    Metrics.increment("app.starts");
+
+    let _ = handle_web_request("/health").await;
+    EventBus.publish("app.ready", "{}").await;
+}
+
+fn main() {
+    // This file tests using type checking only
+}

@@ -1,0 +1,202 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, variants, linked-list, functional, higher-order
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT higher-order linked list operations (map, filter, fold, zip)
+
+type IList is INil | ICons { head: Int, tail: IList };
+
+fn len(xs: IList) -> Int {
+    match xs {
+        INil => 0,
+        ICons { head: _, tail } => 1 + len(tail),
+    }
+}
+
+fn sum(xs: IList) -> Int {
+    match xs {
+        INil => 0,
+        ICons { head, tail } => head + sum(tail),
+    }
+}
+
+fn head_or(xs: IList, default: Int) -> Int {
+    match xs {
+        INil => default,
+        ICons { head, tail: _ } => head,
+    }
+}
+
+fn map_list(xs: IList, f: fn(Int) -> Int) -> IList {
+    match xs {
+        INil => INil,
+        ICons { head, tail } => ICons { head: f(head), tail: map_list(tail, f) },
+    }
+}
+
+fn filter_list(xs: IList, pred: fn(Int) -> Bool) -> IList {
+    match xs {
+        INil => INil,
+        ICons { head, tail } => {
+            let rest = filter_list(tail, pred);
+            if pred(head) {
+                ICons { head: head, tail: rest }
+            } else {
+                rest
+            }
+        },
+    }
+}
+
+fn fold_list(xs: IList, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    match xs {
+        INil => init,
+        ICons { head, tail } => fold_list(tail, f(init, head), f),
+    }
+}
+
+fn take(xs: IList, n: Int) -> IList {
+    if n <= 0 { INil }
+    else {
+        match xs {
+            INil => INil,
+            ICons { head, tail } => ICons { head: head, tail: take(tail, n - 1) },
+        }
+    }
+}
+
+fn drop_list(xs: IList, n: Int) -> IList {
+    if n <= 0 { xs }
+    else {
+        match xs {
+            INil => INil,
+            ICons { head: _, tail } => drop_list(tail, n - 1),
+        }
+    }
+}
+
+fn nth(xs: IList, n: Int) -> Int {
+    match xs {
+        INil => -1,
+        ICons { head, tail } => {
+            if n == 0 { head }
+            else { nth(tail, n - 1) }
+        },
+    }
+}
+
+fn append(xs: IList, ys: IList) -> IList {
+    match xs {
+        INil => ys,
+        ICons { head, tail } => ICons { head: head, tail: append(tail, ys) },
+    }
+}
+
+fn reverse_acc(xs: IList, acc: IList) -> IList {
+    match xs {
+        INil => acc,
+        ICons { head, tail } => reverse_acc(tail, ICons { head: head, tail: acc }),
+    }
+}
+
+fn reverse(xs: IList) -> IList {
+    reverse_acc(xs, INil)
+}
+
+fn range_list(start: Int, end_val: Int) -> IList {
+    // Build in reverse then reverse to get ascending order
+    let mut result = INil;
+    let mut i = end_val - 1;
+    while i >= start {
+        result = ICons { head: i, tail: result };
+        i = i - 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Build list [1, 2, 3, 4, 5]
+    let xs = range_list(1, 6);
+    assert_eq(len(xs), 5);
+    assert_eq(sum(xs), 15);
+    assert_eq(head_or(xs, 0), 1);
+    assert_eq(nth(xs, 0), 1);
+    assert_eq(nth(xs, 4), 5);
+
+    // Map: double each element
+    let doubled = map_list(xs, |x| x * 2);
+    assert_eq(sum(doubled), 30);  // 2+4+6+8+10
+    assert_eq(head_or(doubled, 0), 2);
+
+    // Map: square each element
+    let squared = map_list(xs, |x| x * x);
+    assert_eq(sum(squared), 55);  // 1+4+9+16+25
+
+    // Filter: keep evens
+    let evens = filter_list(xs, |x| x % 2 == 0);
+    assert_eq(len(evens), 2);
+    assert_eq(sum(evens), 6);  // 2+4
+
+    // Filter: keep odds
+    let odds = filter_list(xs, |x| x % 2 != 0);
+    assert_eq(len(odds), 3);
+    assert_eq(sum(odds), 9);  // 1+3+5
+
+    // Fold: sum (explicit)
+    let fold_sum = fold_list(xs, 0, |acc, x| acc + x);
+    assert_eq(fold_sum, 15);
+
+    // Fold: product
+    let fold_prod = fold_list(xs, 1, |acc, x| acc * x);
+    assert_eq(fold_prod, 120);  // 5!
+
+    // Fold: max
+    let fold_max = fold_list(xs, 0, |acc, x| if x > acc { x } else { acc });
+    assert_eq(fold_max, 5);
+
+    // Take
+    let first3 = take(xs, 3);
+    assert_eq(len(first3), 3);
+    assert_eq(sum(first3), 6);  // 1+2+3
+
+    // Drop
+    let last2 = drop_list(xs, 3);
+    assert_eq(len(last2), 2);
+    assert_eq(sum(last2), 9);  // 4+5
+
+    // Append
+    let ab = append(range_list(1, 4), range_list(4, 6));
+    assert_eq(len(ab), 5);
+    assert_eq(sum(ab), 15);
+
+    // Reverse
+    let rev = reverse(xs);
+    assert_eq(len(rev), 5);
+    assert_eq(sum(rev), 15);  // same sum
+    assert_eq(head_or(rev, 0), 5);
+    assert_eq(nth(rev, 0), 5);
+    assert_eq(nth(rev, 4), 1);
+
+    // Chained operations: map then filter then fold
+    // [1..5] -> double -> filter > 5 -> sum
+    let chain = fold_list(
+        filter_list(
+            map_list(xs, |x| x * 2),
+            |x| x > 5
+        ),
+        0,
+        |acc, x| acc + x
+    );
+    assert_eq(chain, 24);  // 6+8+10
+
+    // Empty list operations
+    assert_eq(len(INil), 0);
+    assert_eq(sum(INil), 0);
+    assert_eq(head_or(INil, -1), -1);
+    assert_eq(len(filter_list(INil, |x| x > 0)), 0);
+    assert_eq(len(map_list(INil, |x| x * 2)), 0);
+
+    0
+}

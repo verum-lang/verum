@@ -1,0 +1,1368 @@
+// =============================================================================
+// sized_integers_test.vr - Comprehensive tests for sized integer types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, base, primitives, sized, integers
+// @description: Tests for Int8, Int16, Int32, Int64, Int128,
+//               UInt8, UInt16, UInt32, UInt64, UInt128
+// =============================================================================
+
+module test.sized_integers;
+
+// =============================================================================
+// Int8 Tests
+// =============================================================================
+
+@test
+fn test_int8_constants() {
+    assert(Int8.MIN == -128);
+    assert(Int8.MAX == 127);
+    assert(Int8.BITS == 8);
+}
+
+@test
+fn test_int8_abs_signum() {
+    let x: Int8 = -42;
+    assert(x.abs() == 42);
+    assert(x.signum() == -1);
+
+    let y: Int8 = 42;
+    assert(y.signum() == 1);
+
+    let z: Int8 = 0;
+    assert(z.signum() == 0);
+}
+
+@test
+fn test_int8_min_max_clamp() {
+    let a: Int8 = 10;
+    let b: Int8 = 20;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: Int8 = 50;
+    let lo: Int8 = 10;
+    let hi: Int8 = 40;
+    assert(x.clamp(lo, hi) == hi);
+
+    let y: Int8 = 5;
+    assert(y.clamp(lo, hi) == lo);
+
+    let z: Int8 = 25;
+    assert(z.clamp(lo, hi) == z);
+}
+
+@test
+fn test_int8_checked_add() {
+    let a: Int8 = 100;
+    let b: Int8 = 50;
+
+    // Overflow case
+    match a.checked_add(b) {
+        Some(_) => panic("Expected None for overflow"),
+        None => {} // Expected: 100 + 50 > 127
+    }
+
+    // No overflow
+    let c: Int8 = 30;
+    let expected: Int8 = 80;
+    match c.checked_add(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int8_checked_sub() {
+    let a: Int8 = -100;
+    let b: Int8 = 50;
+    match a.checked_sub(b) {
+        Some(_) => panic("Expected None for underflow"),
+        None => {} // Expected: -100 - 50 < -128
+    }
+
+    let c: Int8 = 100;
+    let d: Int8 = 30;
+    let expected: Int8 = 70;
+    match c.checked_sub(d) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int8_wrapping_saturating() {
+    let a: Int8 = 100;
+    let b: Int8 = 50;
+
+    // Wrapping wraps around
+    let wrapped = a.wrapping_add(b);
+    assert(wrapped < 0);  // Wrapped around to negative
+
+    // Saturating clamps at bounds
+    let saturated = a.saturating_add(b);
+    assert(saturated == 127);
+}
+
+@test
+fn test_int8_boundary_values() {
+    let min: Int8 = -128;
+    let max: Int8 = 127;
+    assert(min.abs() == min); // abs of MIN wraps (INT_MIN has no positive equivalent in 8 bits)
+    assert(max.signum() == 1);
+    assert(min.signum() == -1);
+}
+
+@test
+fn test_int8_to_int() {
+    let x: Int8 = -42;
+    assert(x.to_int() == -42);
+
+    let y: Int8 = 127;
+    assert(y.to_int() == 127);
+
+    let z: Int8 = -128;
+    assert(z.to_int() == -128);
+}
+
+// =============================================================================
+// Int16 Tests
+// =============================================================================
+
+@test
+fn test_int16_constants() {
+    assert(Int16.MIN == -32768);
+    assert(Int16.MAX == 32767);
+    assert(Int16.BITS == 16);
+}
+
+@test
+fn test_int16_abs_signum() {
+    let x: Int16 = -1000;
+    assert(x.abs() == 1000);
+    assert(x.signum() == -1);
+
+    let y: Int16 = 0;
+    assert(y.signum() == 0);
+
+    let z: Int16 = 500;
+    assert(z.signum() == 1);
+}
+
+@test
+fn test_int16_min_max_clamp() {
+    let a: Int16 = -100;
+    let b: Int16 = 100;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: Int16 = 500;
+    let lo: Int16 = -200;
+    let hi: Int16 = 200;
+    assert(x.clamp(lo, hi) == hi);
+
+    let y: Int16 = -500;
+    assert(y.clamp(lo, hi) == lo);
+}
+
+@test
+fn test_int16_bytes() {
+    let x: Int16 = 0x0102;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x02);
+    assert(le[1] == 0x01);
+    assert(be[0] == 0x01);
+    assert(be[1] == 0x02);
+
+    assert(Int16.from_le_bytes(le) == x);
+    assert(Int16.from_be_bytes(be) == x);
+}
+
+@test
+fn test_int16_swap_bytes() {
+    let x: Int16 = 0x0102;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x0201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_int16_checked_ops() {
+    let a: Int16 = 30000;
+    let b: Int16 = 10000;
+
+    match a.checked_add(b) {
+        Some(_) => panic("Expected None for overflow"),
+        None => {} // 30000 + 10000 > 32767
+    }
+
+    let c: Int16 = 5000;
+    let expected: Int16 = -5000;
+    match c.checked_sub(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int16_wrapping_saturating() {
+    let max: Int16 = Int16.MAX;
+    let one: Int16 = 1;
+    assert(max.wrapping_add(one) == Int16.MIN);
+    assert(max.saturating_add(one) == Int16.MAX);
+}
+
+@test
+fn test_int16_to_int() {
+    let x: Int16 = -12345;
+    assert(x.to_int() == -12345);
+
+    let y: Int16 = 32767;
+    assert(y.to_int() == 32767);
+}
+
+// =============================================================================
+// Int32 Tests
+// =============================================================================
+
+@test
+fn test_int32_constants() {
+    assert(Int32.MIN == -2147483648);
+    assert(Int32.MAX == 2147483647);
+    assert(Int32.BITS == 32);
+}
+
+@test
+fn test_int32_abs_signum() {
+    let x: Int32 = -42;
+    assert(x.abs() == 42);
+    assert(x.signum() == -1);
+
+    let y: Int32 = 42;
+    assert(y.signum() == 1);
+
+    let z: Int32 = 0;
+    assert(z.signum() == 0);
+}
+
+@test
+fn test_int32_min_max_clamp() {
+    let a: Int32 = -500;
+    let b: Int32 = 500;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: Int32 = 1000;
+    let lo: Int32 = -100;
+    let hi: Int32 = 100;
+    assert(x.clamp(lo, hi) == hi);
+
+    let y: Int32 = -1000;
+    assert(y.clamp(lo, hi) == lo);
+
+    let z: Int32 = 50;
+    assert(z.clamp(lo, hi) == z);
+}
+
+@test
+fn test_int32_bytes() {
+    let x: Int32 = 0x01020304;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x04);
+    assert(le[1] == 0x03);
+    assert(le[2] == 0x02);
+    assert(le[3] == 0x01);
+
+    assert(be[0] == 0x01);
+    assert(be[1] == 0x02);
+    assert(be[2] == 0x03);
+    assert(be[3] == 0x04);
+
+    assert(Int32.from_le_bytes(le) == x);
+    assert(Int32.from_be_bytes(be) == x);
+}
+
+@test
+fn test_int32_swap_bytes() {
+    let x: Int32 = 0x01020304;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x04030201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_int32_checked_add() {
+    let max: Int32 = Int32.MAX;
+    let one: Int32 = 1;
+    match max.checked_add(one) {
+        None => {} // Expected overflow
+        Some(_) => panic("Expected None"),
+    }
+
+    let a: Int32 = 100;
+    let b: Int32 = 200;
+    let expected: Int32 = 300;
+    match a.checked_add(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int32_checked_sub() {
+    let min: Int32 = Int32.MIN;
+    let one: Int32 = 1;
+    match min.checked_sub(one) {
+        None => {} // Expected underflow
+        Some(_) => panic("Expected None"),
+    }
+
+    let a: Int32 = 500;
+    let b: Int32 = 200;
+    let expected: Int32 = 300;
+    match a.checked_sub(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int32_checked_mul() {
+    let max: Int32 = Int32.MAX;
+    let two: Int32 = 2;
+    match max.checked_mul(two) {
+        None => {} // Expected overflow
+        Some(_) => panic("Expected None"),
+    }
+
+    let a: Int32 = 100;
+    let b: Int32 = 50;
+    let expected: Int32 = 5000;
+    match a.checked_mul(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int32_wrapping_ops() {
+    let max: Int32 = Int32.MAX;
+    let one: Int32 = 1;
+    assert(max.wrapping_add(one) == Int32.MIN);
+
+    let min: Int32 = Int32.MIN;
+    assert(min.wrapping_sub(one) == Int32.MAX);
+}
+
+@test
+fn test_int32_saturating_ops() {
+    let max: Int32 = Int32.MAX;
+    let one: Int32 = 1;
+    assert(max.saturating_add(one) == Int32.MAX);
+
+    let min: Int32 = Int32.MIN;
+    assert(min.saturating_sub(one) == Int32.MIN);
+}
+
+@test
+fn test_int32_bit_ops() {
+    let x: Int32 = 0b1010;
+    assert(x.count_ones() == 2);
+    assert(x.trailing_zeros() == 1);
+    assert(x.leading_zeros() == 28);
+
+    let y: Int32 = 1;
+    assert(y.trailing_zeros() == 0);
+    assert(y.leading_zeros() == 31);
+}
+
+@test
+fn test_int32_rotate() {
+    let x: Int32 = 1;
+    let rotated = x.rotate_left(8);
+    let expected: Int32 = 256;
+    assert(rotated == expected);
+
+    let y: Int32 = 256;
+    let rotated2 = y.rotate_right(8);
+    let one: Int32 = 1;
+    assert(rotated2 == one);
+}
+
+@test
+fn test_int32_to_int() {
+    let x: Int32 = -2147483648;  // Int32.MIN
+    assert(x.to_int() == -2147483648);
+
+    let y: Int32 = 2147483647;   // Int32.MAX
+    assert(y.to_int() == 2147483647);
+}
+
+// =============================================================================
+// Int64 Tests
+// =============================================================================
+
+@test
+fn test_int64_constants() {
+    assert(Int64.MIN == -9223372036854775808);
+    assert(Int64.MAX == 9223372036854775807);
+    assert(Int64.BITS == 64);
+}
+
+@test
+fn test_int64_abs_signum() {
+    let x: Int64 = -42;
+    assert(x.abs() == 42);
+    assert(x.signum() == -1);
+
+    let y: Int64 = 0;
+    assert(y.signum() == 0);
+}
+
+@test
+fn test_int64_min_max_clamp() {
+    let a: Int64 = -1000;
+    let b: Int64 = 1000;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: Int64 = 5000;
+    let lo: Int64 = -100;
+    let hi: Int64 = 100;
+    assert(x.clamp(lo, hi) == hi);
+}
+
+@test
+fn test_int64_bytes() {
+    let x: Int64 = 0x0102030405060708;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x08);
+    assert(be[0] == 0x01);
+
+    assert(Int64.from_le_bytes(le) == x);
+    assert(Int64.from_be_bytes(be) == x);
+}
+
+@test
+fn test_int64_swap_bytes() {
+    let x: Int64 = 0x0102030405060708;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x0807060504030201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_int64_bit_ops() {
+    let x: Int64 = 0b1010;
+    assert(x.count_ones() == 2);
+    assert(x.trailing_zeros() == 1);
+    assert(x.leading_zeros() == 60);
+}
+
+@test
+fn test_int64_checked_ops() {
+    let max: Int64 = Int64.MAX;
+    let one: Int64 = 1;
+    let two: Int64 = 2;
+    match max.checked_add(one) {
+        None => {} // Expected overflow
+        Some(_) => panic("Expected None"),
+    }
+
+    match max.checked_mul(two) {
+        None => {} // Expected overflow
+        Some(_) => panic("Expected None"),
+    }
+
+    let a: Int64 = 1000;
+    let b: Int64 = 500;
+    let expected: Int64 = 500;
+    match a.checked_sub(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int64_wrapping_saturating() {
+    let max: Int64 = Int64.MAX;
+    let one: Int64 = 1;
+    assert(max.wrapping_add(one) == Int64.MIN);
+    assert(max.saturating_add(one) == Int64.MAX);
+
+    let min: Int64 = Int64.MIN;
+    assert(min.wrapping_sub(one) == Int64.MAX);
+    assert(min.saturating_sub(one) == Int64.MIN);
+}
+
+@test
+fn test_int64_rotate() {
+    let x: Int64 = 1;
+    let rotated = x.rotate_left(16);
+    let expected: Int64 = 65536;
+    assert(rotated == expected);
+
+    let y: Int64 = 65536;
+    let rotated2 = y.rotate_right(16);
+    let one: Int64 = 1;
+    assert(rotated2 == one);
+}
+
+// =============================================================================
+// Int128 Tests
+// =============================================================================
+
+@test
+fn test_int128_constants() {
+    assert(Int128.BITS == 128);
+}
+
+@test
+fn test_int128_literal_assignment() {
+    let x: Int128 = 42;
+    let y: Int128 = -100;
+    let z: Int128 = 0;
+    assert(x.to_int() == 42);
+    assert(y.to_int() == -100);
+    assert(z.to_int() == 0);
+}
+
+@test
+fn test_int128_abs_signum() {
+    let x: Int128 = -42;
+    assert(x.abs().to_int() == 42);
+    assert(x.signum().to_int() == -1);
+
+    let y: Int128 = 42;
+    assert(y.signum().to_int() == 1);
+
+    let z: Int128 = 0;
+    assert(z.signum().to_int() == 0);
+}
+
+@test
+fn test_int128_min_max_clamp() {
+    let a: Int128 = 10;
+    let b: Int128 = 20;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: Int128 = 50;
+    let lo: Int128 = 10;
+    let hi: Int128 = 40;
+    assert(x.clamp(lo, hi) == hi);
+
+    let y: Int128 = 5;
+    assert(y.clamp(lo, hi) == lo);
+}
+
+@test
+fn test_int128_checked_add() {
+    let a: Int128 = 100;
+    let b: Int128 = 50;
+    let expected: Int128 = 150;
+    match a.checked_add(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int128_checked_sub() {
+    let a: Int128 = 100;
+    let b: Int128 = 50;
+    let expected: Int128 = 50;
+    match a.checked_sub(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int128_checked_mul() {
+    let a: Int128 = 100;
+    let b: Int128 = 50;
+    let expected: Int128 = 5000;
+    match a.checked_mul(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_int128_wrapping_add_sub() {
+    let a: Int128 = 100;
+    let b: Int128 = 50;
+
+    let expected_add: Int128 = 150;
+    assert(a.wrapping_add(b) == expected_add);
+
+    let expected_sub: Int128 = 50;
+    assert(a.wrapping_sub(b) == expected_sub);
+}
+
+@test
+fn test_int128_saturating_add_sub() {
+    let a: Int128 = 100;
+    let b: Int128 = 50;
+
+    let expected_add: Int128 = 150;
+    assert(a.saturating_add(b) == expected_add);
+
+    let expected_sub: Int128 = 50;
+    assert(a.saturating_sub(b) == expected_sub);
+}
+
+@test
+fn test_int128_bytes() {
+    let x: Int128 = 1;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    // Little endian: least significant byte first
+    assert(le[0] == 1);
+    assert(le[15] == 0);
+
+    // Big endian: most significant byte first
+    assert(be[15] == 1);
+    assert(be[0] == 0);
+
+    assert(Int128.from_le_bytes(le) == x);
+    assert(Int128.from_be_bytes(be) == x);
+}
+
+@test
+fn test_int128_bit_ops() {
+    let x: Int128 = 0b1010;
+    assert(x.count_ones() == 2);
+    assert(x.trailing_zeros() == 1);
+    assert(x.leading_zeros() > 0);
+
+    let one: Int128 = 1;
+    assert(one.trailing_zeros() == 0);
+    assert(one.count_ones() == 1);
+}
+
+@test
+fn test_int128_swap_bytes() {
+    let x: Int128 = 1;
+    let swapped = x.swap_bytes();
+    // After swap_bytes, LSB moves to MSB position
+    let roundtrip = swapped.swap_bytes();
+    assert(roundtrip == x);
+}
+
+@test
+fn test_int128_to_int() {
+    let x: Int128 = 42;
+    assert(x.to_int() == 42);
+
+    let y: Int128 = -42;
+    assert(y.to_int() == -42);
+
+    let z: Int128 = 0;
+    assert(z.to_int() == 0);
+}
+
+// =============================================================================
+// UInt8 Tests
+// =============================================================================
+
+@test
+fn test_uint8_constants() {
+    assert(UInt8.MIN == 0);
+    assert(UInt8.MAX == 255);
+    assert(UInt8.BITS == 8);
+}
+
+@test
+fn test_uint8_min_max_clamp() {
+    let a: UInt8 = 10;
+    let b: UInt8 = 200;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: UInt8 = 250;
+    let lo: UInt8 = 10;
+    let hi: UInt8 = 100;
+    assert(x.clamp(lo, hi) == hi);
+
+    let y: UInt8 = 5;
+    assert(y.clamp(lo, hi) == lo);
+
+    let z: UInt8 = 50;
+    assert(z.clamp(lo, hi) == z);
+}
+
+@test
+fn test_uint8_to_int() {
+    let x: UInt8 = 255;
+    assert(x.to_int() == 255);
+
+    let y: UInt8 = 0;
+    assert(y.to_int() == 0);
+}
+
+// =============================================================================
+// UInt16 Tests
+// =============================================================================
+
+@test
+fn test_uint16_constants() {
+    assert(UInt16.MIN == 0);
+    assert(UInt16.MAX == 65535);
+    assert(UInt16.BITS == 16);
+}
+
+@test
+fn test_uint16_min_max_clamp() {
+    let a: UInt16 = 100;
+    let b: UInt16 = 60000;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: UInt16 = 0;
+    let lo: UInt16 = 10;
+    let hi: UInt16 = 1000;
+    assert(x.clamp(lo, hi) == lo);
+}
+
+@test
+fn test_uint16_bytes() {
+    let x: UInt16 = 0x0102;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x02);
+    assert(be[0] == 0x01);
+
+    assert(UInt16.from_le_bytes(le) == x);
+    assert(UInt16.from_be_bytes(be) == x);
+}
+
+@test
+fn test_uint16_swap_bytes() {
+    let x: UInt16 = 0x0102;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x0201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_uint16_checked_ops() {
+    let a: UInt16 = 60000;
+    let b: UInt16 = 10000;
+
+    match a.checked_add(b) {
+        Some(_) => panic("Expected None for overflow"),
+        None => {} // 60000 + 10000 > 65535
+    }
+
+    let c: UInt16 = 1000;
+    match c.checked_sub(b) {
+        Some(_) => panic("Expected None for underflow"),
+        None => {} // 1000 - 10000 < 0
+    }
+
+    // Success cases
+    let d: UInt16 = 100;
+    let e: UInt16 = 200;
+    let expected_sum: UInt16 = 300;
+    match d.checked_add(e) {
+        Some(v) => assert(v == expected_sum),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_uint16_wrapping_saturating() {
+    let max: UInt16 = UInt16.MAX;
+    let one: UInt16 = 1;
+    assert(max.wrapping_add(one) == 0);
+    assert(max.saturating_add(one) == UInt16.MAX);
+}
+
+@test
+fn test_uint16_to_int() {
+    let x: UInt16 = 65535;
+    assert(x.to_int() == 65535);
+}
+
+// =============================================================================
+// UInt32 Tests
+// =============================================================================
+
+@test
+fn test_uint32_constants() {
+    assert(UInt32.MIN == 0);
+    assert(UInt32.MAX == 4294967295);
+    assert(UInt32.BITS == 32);
+}
+
+@test
+fn test_uint32_min_max_clamp() {
+    let a: UInt32 = 100;
+    let b: UInt32 = 1000000;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: UInt32 = 0;
+    let lo: UInt32 = 10;
+    let hi: UInt32 = 100;
+    assert(x.clamp(lo, hi) == lo);
+}
+
+@test
+fn test_uint32_bytes() {
+    let x: UInt32 = 0x01020304;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x04);
+    assert(le[3] == 0x01);
+    assert(be[0] == 0x01);
+    assert(be[3] == 0x04);
+
+    assert(UInt32.from_le_bytes(le) == x);
+    assert(UInt32.from_be_bytes(be) == x);
+}
+
+@test
+fn test_uint32_swap_bytes() {
+    let x: UInt32 = 0x01020304;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x04030201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_uint32_checked_ops() {
+    let max: UInt32 = UInt32.MAX;
+    let one: UInt32 = 1;
+    match max.checked_add(one) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    let a: UInt32 = 100;
+    let b: UInt32 = 50;
+    let expected_diff: UInt32 = 50;
+    let expected_prod: UInt32 = 5000;
+    match a.checked_sub(b) {
+        Some(v) => assert(v == expected_diff),
+        None => panic("Expected Some"),
+    }
+
+    match a.checked_mul(b) {
+        Some(v) => assert(v == expected_prod),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_uint32_bit_ops() {
+    let x: UInt32 = 0b1010;
+    assert(x.count_ones() == 2);
+    assert(x.trailing_zeros() == 1);
+    assert(x.leading_zeros() == 28);
+
+    let zero: UInt32 = 0;
+    assert(zero.count_ones() == 0);
+}
+
+@test
+fn test_uint32_wrapping_saturating() {
+    let max: UInt32 = UInt32.MAX;
+    let one: UInt32 = 1;
+    let zero: UInt32 = 0;
+    assert(max.wrapping_add(one) == zero);
+    assert(max.saturating_add(one) == UInt32.MAX);
+
+    assert(zero.wrapping_sub(one) == UInt32.MAX);
+    assert(zero.saturating_sub(one) == zero);
+}
+
+@test
+fn test_uint32_rotate() {
+    let x: UInt32 = 1;
+    let rotated = x.rotate_left(8);
+    let expected: UInt32 = 256;
+    assert(rotated == expected);
+
+    let y: UInt32 = 256;
+    let rotated2 = y.rotate_right(8);
+    let one: UInt32 = 1;
+    assert(rotated2 == one);
+}
+
+@test
+fn test_uint32_to_int() {
+    let x: UInt32 = 4294967295;
+    assert(x.to_int() == 4294967295);
+
+    let y: UInt32 = 0;
+    assert(y.to_int() == 0);
+}
+
+// =============================================================================
+// UInt64 Tests
+// =============================================================================
+
+@test
+fn test_uint64_constants() {
+    assert(UInt64.MIN == 0);
+    assert(UInt64.BITS == 64);
+}
+
+@test
+fn test_uint64_min_max_clamp() {
+    let a: UInt64 = 100;
+    let b: UInt64 = 1000000;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: UInt64 = 0;
+    let lo: UInt64 = 10;
+    let hi: UInt64 = 100;
+    assert(x.clamp(lo, hi) == lo);
+}
+
+@test
+fn test_uint64_bytes() {
+    let x: UInt64 = 0x0102030405060708;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x08);
+    assert(le[7] == 0x01);
+    assert(be[0] == 0x01);
+    assert(be[7] == 0x08);
+
+    assert(UInt64.from_le_bytes(le) == x);
+    assert(UInt64.from_be_bytes(be) == x);
+}
+
+@test
+fn test_uint64_swap_bytes() {
+    let x: UInt64 = 0x0102030405060708;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x0807060504030201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_uint64_checked_ops() {
+    let max: UInt64 = UInt64.MAX;
+    let one: UInt64 = 1;
+    match max.checked_add(one) {
+        None => {} // Expected overflow
+        Some(_) => panic("Expected None"),
+    }
+
+    let zero: UInt64 = 0;
+    match zero.checked_sub(one) {
+        None => {} // Expected underflow
+        Some(_) => panic("Expected None"),
+    }
+
+    let a: UInt64 = 100;
+    let b: UInt64 = 50;
+    let expected_prod: UInt64 = 5000;
+    match a.checked_mul(b) {
+        Some(v) => assert(v == expected_prod),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_uint64_wrapping_saturating() {
+    let max: UInt64 = UInt64.MAX;
+    let one: UInt64 = 1;
+    let zero: UInt64 = 0;
+    assert(max.wrapping_add(one) == zero);
+    assert(max.saturating_add(one) == UInt64.MAX);
+
+    assert(zero.wrapping_sub(one) == UInt64.MAX);
+    assert(zero.saturating_sub(one) == zero);
+}
+
+@test
+fn test_uint64_bit_ops() {
+    let x: UInt64 = 0b10000;
+    assert(x.trailing_zeros() == 4);
+    assert(x.leading_zeros() == 59);
+    assert(x.count_ones() == 1);
+
+    let y: UInt64 = 0xFF;
+    assert(y.count_ones() == 8);
+}
+
+@test
+fn test_uint64_rotate() {
+    let x: UInt64 = 1;
+    let rotated = x.rotate_left(8);
+    let expected: UInt64 = 256;
+    assert(rotated == expected);
+
+    let y: UInt64 = 256;
+    let rotated2 = y.rotate_right(8);
+    let one: UInt64 = 1;
+    assert(rotated2 == one);
+}
+
+@test
+fn test_uint64_to_int() {
+    let x: UInt64 = 42;
+    assert(x.to_int() == 42);
+
+    let y: UInt64 = 0;
+    assert(y.to_int() == 0);
+}
+
+// =============================================================================
+// UInt128 Tests
+// =============================================================================
+
+@test
+fn test_uint128_constants() {
+    assert(UInt128.BITS == 128);
+    assert(UInt128.MIN == 0);
+}
+
+@test
+fn test_uint128_literal_assignment() {
+    let x: UInt128 = 42;
+    let y: UInt128 = 0;
+    let z: UInt128 = 1000000;
+    assert(x.to_int() == 42);
+    assert(y.to_int() == 0);
+    assert(z.to_int() == 1000000);
+}
+
+@test
+fn test_uint128_min_max_clamp() {
+    let a: UInt128 = 10;
+    let b: UInt128 = 20;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: UInt128 = 50;
+    let lo: UInt128 = 10;
+    let hi: UInt128 = 40;
+    assert(x.clamp(lo, hi) == hi);
+
+    let y: UInt128 = 5;
+    assert(y.clamp(lo, hi) == lo);
+}
+
+@test
+fn test_uint128_checked_add() {
+    let a: UInt128 = 100;
+    let b: UInt128 = 50;
+    let expected: UInt128 = 150;
+    match a.checked_add(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_uint128_checked_sub() {
+    let a: UInt128 = 100;
+    let b: UInt128 = 50;
+    let expected: UInt128 = 50;
+    match a.checked_sub(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+
+    // Underflow case
+    let c: UInt128 = 10;
+    let d: UInt128 = 20;
+    match c.checked_sub(d) {
+        Some(_) => panic("Expected None for underflow"),
+        None => {} // Expected: 10 - 20 < 0
+    }
+}
+
+@test
+fn test_uint128_checked_mul() {
+    let a: UInt128 = 100;
+    let b: UInt128 = 50;
+    let expected: UInt128 = 5000;
+    match a.checked_mul(b) {
+        Some(v) => assert(v == expected),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_uint128_wrapping_add_sub() {
+    let a: UInt128 = 100;
+    let b: UInt128 = 50;
+
+    let expected_add: UInt128 = 150;
+    assert(a.wrapping_add(b) == expected_add);
+
+    let expected_sub: UInt128 = 50;
+    assert(a.wrapping_sub(b) == expected_sub);
+}
+
+@test
+fn test_uint128_saturating_add_sub() {
+    let a: UInt128 = 100;
+    let b: UInt128 = 50;
+
+    let expected_add: UInt128 = 150;
+    assert(a.saturating_add(b) == expected_add);
+
+    let expected_sub: UInt128 = 50;
+    assert(a.saturating_sub(b) == expected_sub);
+
+    let zero: UInt128 = 0;
+    let one: UInt128 = 1;
+    assert(zero.saturating_sub(one) == zero);
+}
+
+@test
+fn test_uint128_bytes() {
+    let x: UInt128 = 1;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 1);
+    assert(le[15] == 0);
+
+    assert(be[15] == 1);
+    assert(be[0] == 0);
+
+    assert(UInt128.from_le_bytes(le) == x);
+    assert(UInt128.from_be_bytes(be) == x);
+}
+
+@test
+fn test_uint128_bit_ops() {
+    let x: UInt128 = 0b1010;
+    assert(x.count_ones() == 2);
+    assert(x.trailing_zeros() == 1);
+    assert(x.leading_zeros() > 0);
+
+    let one: UInt128 = 1;
+    assert(one.count_ones() == 1);
+    assert(one.trailing_zeros() == 0);
+}
+
+@test
+fn test_uint128_swap_bytes() {
+    let x: UInt128 = 1;
+    let roundtrip = x.swap_bytes().swap_bytes();
+    assert(roundtrip == x);
+
+    let y: UInt128 = 42;
+    assert(y.swap_bytes().swap_bytes() == y);
+}
+
+@test
+fn test_uint128_to_int() {
+    let x: UInt128 = 42;
+    assert(x.to_int() == 42);
+
+    let y: UInt128 = 0;
+    assert(y.to_int() == 0);
+}
+
+// =============================================================================
+// Cross-Type Conversion Tests
+// =============================================================================
+
+@test
+fn test_int8_to_int_roundtrip() {
+    let x: Int8 = -42;
+    let as_int: Int = x.to_int();
+    assert(as_int == -42);
+}
+
+@test
+fn test_int16_to_int_roundtrip() {
+    let x: Int16 = -12345;
+    assert(x.to_int() == -12345);
+}
+
+@test
+fn test_int32_to_int_preserves_sign() {
+    let x: Int32 = -2147483648;  // Int32.MIN
+    assert(x.to_int() == -2147483648);
+}
+
+@test
+fn test_int64_to_int_identity() {
+    let x: Int64 = 9223372036854775807;  // Int64.MAX
+    assert(x.to_int() == 9223372036854775807);
+}
+
+@test
+fn test_int128_to_int_small_values() {
+    let x: Int128 = 999;
+    assert(x.to_int() == 999);
+
+    let y: Int128 = -999;
+    assert(y.to_int() == -999);
+}
+
+@test
+fn test_uint8_to_int_max() {
+    let x: UInt8 = 255;
+    assert(x.to_int() == 255);
+}
+
+@test
+fn test_uint16_to_int_max() {
+    let x: UInt16 = 65535;
+    assert(x.to_int() == 65535);
+}
+
+@test
+fn test_uint32_to_int_max() {
+    let x: UInt32 = 4294967295;
+    assert(x.to_int() == 4294967295);
+}
+
+@test
+fn test_uint64_from_int() {
+    let x: UInt64 = 42;
+    assert(x.to_int() == 42);
+}
+
+@test
+fn test_uint128_to_int_small_values() {
+    let x: UInt128 = 12345;
+    assert(x.to_int() == 12345);
+}
+
+// =============================================================================
+// Boundary Value Tests
+// =============================================================================
+
+@test
+fn test_int8_boundary() {
+    let min: Int8 = -128;
+    let max: Int8 = 127;
+    let zero: Int8 = 0;
+
+    assert(min.to_int() == -128);
+    assert(max.to_int() == 127);
+    assert(zero.to_int() == 0);
+
+    // Saturating at boundaries
+    let one: Int8 = 1;
+    assert(max.saturating_add(one) == max);
+}
+
+@test
+fn test_int16_boundary() {
+    let min: Int16 = -32768;
+    let max: Int16 = 32767;
+
+    assert(min.to_int() == -32768);
+    assert(max.to_int() == 32767);
+
+    let one: Int16 = 1;
+    assert(max.saturating_add(one) == max);
+    assert(max.wrapping_add(one) == min);
+}
+
+@test
+fn test_int32_boundary() {
+    let min: Int32 = -2147483648;
+    let max: Int32 = 2147483647;
+
+    assert(min.to_int() == -2147483648);
+    assert(max.to_int() == 2147483647);
+
+    let one: Int32 = 1;
+    assert(max.saturating_add(one) == max);
+    assert(max.wrapping_add(one) == min);
+    assert(min.saturating_sub(one) == min);
+    assert(min.wrapping_sub(one) == max);
+}
+
+@test
+fn test_int64_boundary() {
+    let min: Int64 = Int64.MIN;
+    let max: Int64 = Int64.MAX;
+
+    let one: Int64 = 1;
+    assert(max.saturating_add(one) == max);
+    assert(max.wrapping_add(one) == min);
+    assert(min.saturating_sub(one) == min);
+    assert(min.wrapping_sub(one) == max);
+}
+
+@test
+fn test_uint8_boundary() {
+    let min: UInt8 = 0;
+    let max: UInt8 = 255;
+
+    assert(min.to_int() == 0);
+    assert(max.to_int() == 255);
+    assert(min.min(max) == min);
+    assert(min.max(max) == max);
+}
+
+@test
+fn test_uint16_boundary() {
+    let min: UInt16 = 0;
+    let max: UInt16 = 65535;
+
+    assert(min.to_int() == 0);
+    assert(max.to_int() == 65535);
+
+    let one: UInt16 = 1;
+    assert(max.saturating_add(one) == max);
+    assert(max.wrapping_add(one) == 0);
+}
+
+@test
+fn test_uint32_boundary() {
+    let min: UInt32 = 0;
+    let max: UInt32 = UInt32.MAX;
+
+    let one: UInt32 = 1;
+    assert(max.wrapping_add(one) == min);
+    assert(max.saturating_add(one) == max);
+    assert(min.wrapping_sub(one) == max);
+    assert(min.saturating_sub(one) == min);
+}
+
+@test
+fn test_uint64_boundary() {
+    let min: UInt64 = 0;
+    let max: UInt64 = UInt64.MAX;
+
+    let one: UInt64 = 1;
+    assert(max.wrapping_add(one) == min);
+    assert(max.saturating_add(one) == max);
+    assert(min.wrapping_sub(one) == max);
+    assert(min.saturating_sub(one) == min);
+}
+
+@test
+fn test_uint128_boundary() {
+    let zero: UInt128 = 0;
+    let one: UInt128 = 1;
+
+    assert(zero.saturating_sub(one) == zero);
+    assert(zero.to_int() == 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

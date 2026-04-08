@@ -1,0 +1,371 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L2
+// @tags: lsp, hover, tooltips, documentation
+// @expect: pass
+// @description: Tests hover information/tooltips for various language constructs.
+//              Verifies correct type information, documentation, and signatures.
+
+// ============================================================================
+// This file tests hover information generation for all symbol types.
+// Each symbol should produce appropriate hover content when hovered.
+// ============================================================================
+
+// Test 1: Hover on function name shows signature and documentation
+/// Adds two integers together.
+///
+/// # Arguments
+/// * `a` - The first operand
+/// * `b` - The second operand
+///
+/// # Returns
+/// The sum of a and b
+fn documented_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Hover on 'documented_add' should show:
+// - Function signature: fn documented_add(a: Int, b: Int) -> Int
+// - Documentation from doc comments above
+fn test_hover_function_call() -> Int {
+    documented_add(1, 2)  // Hover here shows signature + docs
+}
+
+// Test 2: Hover on type name shows type definition
+/// A 2D point with x and y coordinates.
+type Point is {
+    /// The x coordinate.
+    x: Float,
+    /// The y coordinate.
+    y: Float,
+};
+
+fn test_hover_type() {
+    let p: Point = Point { x: 1.0, y: 2.0 };  // Hover on Point shows type def
+    p
+}
+
+// Test 3: Hover on field access shows field type
+fn test_hover_field(p: Point) -> Float {
+    p.x  // Hover on 'x' shows: x: Float (The x coordinate)
+}
+
+// Test 4: Hover on variable shows inferred type
+fn test_hover_variable_inference() {
+    let inferred = 42;           // Hover shows: let inferred: Int
+    let also_inferred = "text";  // Hover shows: let also_inferred: Text
+    let explicit: Bool = true;   // Hover shows: let explicit: Bool
+    inferred
+}
+
+// Test 5: Hover on parameter shows type and position
+fn test_hover_parameter(
+    first_param: Int,   // Hover shows: first_param: Int (parameter 1 of 3)
+    second_param: Text, // Hover shows: second_param: Text (parameter 2 of 3)
+    third_param: Bool,  // Hover shows: third_param: Bool (parameter 3 of 3)
+) {
+    first_param
+}
+
+// Test 6: Hover on generic type parameter
+/// A container that holds a single value.
+type Container<T> is {
+    value: T,  // Hover on T shows: type parameter T
+};
+
+fn generic_hover<T>(value: T) -> T {  // Hover on T shows type param info
+    value  // Hover on value shows: value: T
+}
+
+// Test 7: Hover on protocol shows methods
+/// A protocol for types that can be displayed as text.
+type Displayable is protocol {
+    /// Converts the value to a text representation.
+    fn to_text(self) -> Text;
+};
+
+fn test_hover_protocol(d: &dyn Displayable) -> Text {
+    d.to_text()  // Hover on Displayable shows protocol definition
+}
+
+// Test 8: Hover on method shows impl context
+type Counter is {
+    count: Int,
+};
+
+implement Counter {
+    /// Creates a new counter starting at zero.
+    fn new() -> Self {
+        Self { count: 0 }
+    }
+
+    /// Increments the counter by one.
+    fn increment(&mut self) {
+        self.count = self.count + 1;
+    }
+
+    /// Returns the current count.
+    fn get(&self) -> Int {
+        self.count
+    }
+}
+
+fn test_hover_method() {
+    let mut c = Counter.new();    // Hover: fn new() -> Counter
+    c.increment();                // Hover: fn increment(&mut self)
+    c.get()                       // Hover: fn get(&self) -> Int
+}
+
+// Test 9: Hover on pattern binding shows type
+fn test_hover_pattern(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(value) => value * 2,  // Hover on 'value' shows: value: Int
+        None => 0,
+    }
+}
+
+// Test 10: Hover on closure shows inferred signature
+fn test_hover_closure() {
+    let add = |a, b| a + b;        // Hover shows: |a: Int, b: Int| -> Int
+    let square = |x: Int| x * x;   // Hover shows: |x: Int| -> Int
+    add(1, 2) + square(3)
+}
+
+// Test 11: Hover on keyword shows language reference
+fn test_hover_keywords() {
+    let x = 42;          // Hover on 'let' shows: keyword for variable binding
+    if x > 0 {           // Hover on 'if' shows: conditional expression
+        return x;        // Hover on 'return' shows: early return
+    } else {
+        return -x;
+    }
+}
+
+// Test 12: Hover on literal shows type
+fn test_hover_literals() {
+    let a = 42;              // Hover on 42 shows: Int literal
+    let b = 3.14;            // Hover on 3.14 shows: Float literal
+    let c = "hello";         // Hover on "hello" shows: Text literal
+    let d = true;            // Hover on true shows: Bool literal
+    let e = 'x';             // Hover on 'x' shows: Char literal
+    a
+}
+
+// Test 13: Hover on operator shows operation info
+fn test_hover_operators(a: Int, b: Int) -> Int {
+    let sum = a + b;         // Hover on '+' shows: addition operator
+    let product = a * b;     // Hover on '*' shows: multiplication operator
+    let equal = a == b;      // Hover on '==' shows: equality comparison
+    let and = true && false; // Hover on '&&' shows: logical and
+    sum
+}
+
+// Test 14: Hover on link shows module info
+mount core.collections.List;  // Hover shows: module std.collections.List
+
+fn test_hover_import() {
+    let list: List<Int> = [];  // Hover on List shows imported type info
+    list
+}
+
+// Test 15: Hover on context shows context definition
+/// Database access context.
+context Database {
+    fn query(self, sql: Text) -> List<Int>;
+    fn execute(self, sql: Text) -> Bool;
+}
+
+fn with_database() -> Int using [Database] {
+    42  // Hover on Database in using clause shows context def
+}
+
+// Test 16: Hover on attribute shows attribute documentation
+@derive(Clone, Debug)  // Hover shows: derive attribute for automatic impl
+type Derived is {
+    value: Int,
+};
+
+@verify(runtime)       // Hover shows: verification mode attribute
+fn verified_function(x: Int{> 0}) -> Int {
+    x
+}
+
+// Test 17: Hover on variant shows sum type info
+/// Represents either success or failure.
+type Result<T, E> is
+    | Ok(T)      // Hover shows: Ok variant of Result<T, E>
+    | Err(E);    // Hover shows: Err variant of Result<T, E>
+
+fn test_hover_variant() -> Result<Int, Text> {
+    Ok(42)  // Hover on Ok shows variant info
+}
+
+// Test 18: Hover on async constructs
+async fn async_task() -> Int {
+    42
+}
+
+async fn test_hover_async() -> Int {
+    let result = async_task().await;  // Hover on await shows async info
+    let spawned = spawn async_task(); // Hover on spawn shows spawn info
+    result
+}
+
+// Test 19: Hover on refinement type shows constraint
+fn test_hover_refinement(
+    positive: Int{> 0},        // Hover shows: Int where value > 0
+    non_empty: Text{len > 0},  // Hover shows: Text where len > 0
+) -> Int {
+    positive
+}
+
+type PositiveInt is Int{> 0};  // Hover shows refined type definition;
+
+fn uses_positive(n: PositiveInt) -> PositiveInt {
+    n
+}
+
+// Test 20: Hover on associated type
+type Iterator is protocol {
+    type Item;                    // Hover on Item shows: associated type
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+implement Iterator for Counter {
+    type Item is Int;             // Hover shows: associated type binding;
+    fn next(&mut self) -> Maybe<Self.Item> {  // Hover on Self.Item
+        None
+    }
+}
+
+// Test 21: Hover on self parameter shows receiver type
+implement Point {
+    fn distance(&self) -> Float {     // Hover on &self shows: &Point
+        (self.x * self.x + self.y * self.y)
+    }
+
+    fn scale(&mut self, factor: Float) {  // Hover on &mut self shows: &mut Point
+        self.x = self.x * factor;
+        self.y = self.y * factor;
+    }
+}
+
+// Test 22: Hover on reference type shows tier
+fn test_hover_references() {
+    let managed: &Int = &42;               // Hover: managed reference (CBGR)
+    let checked: &checked Int = &checked 42;  // Hover: checked reference
+    managed
+}
+
+// Test 23: Hover on try/recover shows error handling info
+fn test_hover_error_handling() -> Maybe<Int> {
+    try {                    // Hover on try shows: error boundary
+        let x = risky_op()?; // Hover on ? shows: propagation operator
+        Some(x)
+    } recover |e| {          // Hover on recover shows: error handler
+        None
+    }
+}
+
+fn risky_op() -> Result<Int, Text> {
+    Ok(42)
+}
+
+// Test 24: Hover on loop constructs shows iteration info
+fn test_hover_loops() {
+    for i in 0..10 {         // Hover on for shows: iterator loop
+        continue;            // Hover on continue shows: skip to next iteration
+    }
+
+    while true {             // Hover on while shows: conditional loop
+        break;               // Hover on break shows: exit loop
+    }
+
+    loop {                   // Hover on loop shows: infinite loop
+        break;
+    }
+}
+
+// Test 25: Hover on tuple shows element types
+fn test_hover_tuple() {
+    let tuple = (1, "hello", true);  // Hover shows: (Int, Text, Bool)
+    let first = tuple.0;             // Hover shows: Int (element 0)
+    let second = tuple.1;            // Hover shows: Text (element 1)
+    first
+}
+
+// Test 26: Hover in nested expressions shows context
+fn test_hover_nested() {
+    let result = if true {
+        let inner = 42;      // Hover shows full context: inner: Int in if branch
+        inner + 1
+    } else {
+        let other = 0;       // Hover shows: other: Int in else branch
+        other
+    };
+    result
+}
+
+// Test 27: Hover shows scope-specific information for shadowed variables
+fn test_hover_shadow() {
+    let x = 1;               // Hover shows: x: Int (outer scope)
+    {
+        let x = "hello";     // Hover shows: x: Text (shadows outer x)
+        x
+    };
+    x                        // Hover shows: x: Int (outer scope)
+}
+
+// Test 28: Hover on generic constraint shows bounds
+fn constrained_generic<T>(value: T) -> T
+where T: Clone + Debug       // Hover on Clone shows protocol info
+{
+    value.clone()            // Hover on clone shows: from Clone protocol
+}
+
+// Test 29: Hover on provide statement shows context binding
+fn test_hover_provide() {
+    provide Database = MockDatabase;  // Hover shows context binding info
+    42
+}
+
+context MockDatabase {
+    fn query(self, sql: Text) -> List<Int> { [] }
+    fn execute(self, sql: Text) -> Bool { true }
+}
+
+// Test 30: Hover shows nothing useful on whitespace/punctuation
+fn test_no_hover() {
+    let x = 42;
+    //    ^-- Hover on spaces shows nothing
+    //       ^-- Hover on semicolon shows nothing or basic punctuation info
+    x
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Test 31: Hover on incomplete code still provides partial info
+fn test_hover_incomplete() {
+    let partial =
+    // Even with incomplete code, hovering on 'partial' might show
+    // inferred type information if available
+}
+
+// Test 32: Hover on recursive type definition
+type TreeNode<T> is {
+    value: T,
+    children: List<TreeNode<T>>,  // Hover shows recursive type
+};
+
+// Test 33: Hover on deeply nested type
+type DeepType is {
+    field: List<Maybe<Result<Map<Text, Int>, Text>>>,  // Hover shows full type
+};
+
+// Test 34: Hover timeout for complex expressions
+fn complex_hover() -> Int {
+    // Hover should respond quickly even on complex expressions
+    (1 + 2) * (3 + 4) / (5 - 6) + ((7 * 8) - (9 / 10))
+}

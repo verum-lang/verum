@@ -1,0 +1,267 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, recursive, tree, heap, ast, pattern-matching
+// @description: Recursive data structures with Heap<T> — critical for AST handling
+
+type Expr is
+    | IntLit(Int)
+    | BoolLit(Bool)
+    | Add(Heap<Expr>, Heap<Expr>)
+    | Mul(Heap<Expr>, Heap<Expr>)
+    | Neg(Heap<Expr>)
+    | If(Heap<Expr>, Heap<Expr>, Heap<Expr>);
+
+@allow(unbounded_recursion)
+fn eval(e: Expr) -> Int {
+    match e {
+        IntLit(n) => n,
+        BoolLit(b) => if b { 1 } else { 0 },
+        Add(left, right) => eval(*left) + eval(*right),
+        Mul(left, right) => eval(*left) * eval(*right),
+        Neg(inner) => -eval(*inner),
+        If(cond, then_br, else_br) => {
+            if eval(*cond) != 0 {
+                eval(*then_br)
+            } else {
+                eval(*else_br)
+            }
+        }
+    }
+}
+
+@allow(unbounded_recursion)
+fn depth(e: Expr) -> Int {
+    match e {
+        IntLit(_) => 1,
+        BoolLit(_) => 1,
+        Add(l, r) => {
+            let dl = depth(*l);
+            let dr = depth(*r);
+            1 + if dl > dr { dl } else { dr }
+        }
+        Mul(l, r) => {
+            let dl = depth(*l);
+            let dr = depth(*r);
+            1 + if dl > dr { dl } else { dr }
+        }
+        Neg(inner) => 1 + depth(*inner),
+        If(c, t, e) => {
+            let dc = depth(*c);
+            let dt = depth(*t);
+            let de = depth(*e);
+            let max_te = if dt > de { dt } else { de };
+            1 + if dc > max_te { dc } else { max_te }
+        }
+    }
+}
+
+@allow(unbounded_recursion)
+fn count_nodes(e: Expr) -> Int {
+    match e {
+        IntLit(_) => 1,
+        BoolLit(_) => 1,
+        Add(l, r) => 1 + count_nodes(*l) + count_nodes(*r),
+        Mul(l, r) => 1 + count_nodes(*l) + count_nodes(*r),
+        Neg(inner) => 1 + count_nodes(*inner),
+        If(c, t, e) => 1 + count_nodes(*c) + count_nodes(*t) + count_nodes(*e),
+    }
+}
+
+@allow(unbounded_recursion)
+fn constant_fold(e: Expr) -> Expr {
+    match e {
+        IntLit(n) => Expr.IntLit(n),
+        BoolLit(b) => Expr.BoolLit(b),
+        Add(l, r) => {
+            let fl = constant_fold(*l);
+            let fr = constant_fold(*r);
+            match fl {
+                IntLit(a) => match fr {
+                    IntLit(b) => Expr.IntLit(a + b),
+                    _ => Expr.Add(Heap(fl), Heap(fr)),
+                },
+                _ => Expr.Add(Heap(fl), Heap(fr)),
+            }
+        }
+        Mul(l, r) => {
+            let fl = constant_fold(*l);
+            let fr = constant_fold(*r);
+            match fl {
+                IntLit(a) => match fr {
+                    IntLit(b) => Expr.IntLit(a * b),
+                    _ => Expr.Mul(Heap(fl), Heap(fr)),
+                },
+                _ => Expr.Mul(Heap(fl), Heap(fr)),
+            }
+        }
+        Neg(inner) => {
+            let fi = constant_fold(*inner);
+            match fi {
+                IntLit(n) => Expr.IntLit(-n),
+                _ => Expr.Neg(Heap(fi)),
+            }
+        }
+        If(c, t, e) => {
+            Expr.If(
+                Heap(constant_fold(*c)),
+                Heap(constant_fold(*t)),
+                Heap(constant_fold(*e)),
+            )
+        }
+    }
+}
+
+fn test_basic_eval() -> Int {
+    // 3 + 4 * 2 = 3 + 8 = 11
+    let expr = Expr.Add(
+        Heap(Expr.IntLit(3)),
+        Heap(Expr.Mul(
+            Heap(Expr.IntLit(4)),
+            Heap(Expr.IntLit(2)),
+        )),
+    );
+
+    let result = eval(expr);
+    if result != 11 {
+        print(f"FAIL basic_eval: expected 11, got {result}");
+        return 1;
+    }
+    print("  basic_eval: OK");
+    0
+}
+
+fn test_negation() -> Int {
+    // -(3 + 4) = -7
+    let expr = Expr.Neg(
+        Heap(Expr.Add(
+            Heap(Expr.IntLit(3)),
+            Heap(Expr.IntLit(4)),
+        )),
+    );
+
+    let result = eval(expr);
+    if result != -7 {
+        print(f"FAIL negation: expected -7, got {result}");
+        return 1;
+    }
+    print("  negation: OK");
+    0
+}
+
+fn test_if_expr() -> Int {
+    // if true { 10 } else { 20 }
+    let expr = Expr.If(
+        Heap(Expr.BoolLit(true)),
+        Heap(Expr.IntLit(10)),
+        Heap(Expr.IntLit(20)),
+    );
+
+    let result = eval(expr);
+    if result != 10 {
+        print(f"FAIL if_expr: expected 10, got {result}");
+        return 1;
+    }
+
+    // if false { 10 } else { 20 }
+    let expr2 = Expr.If(
+        Heap(Expr.BoolLit(false)),
+        Heap(Expr.IntLit(10)),
+        Heap(Expr.IntLit(20)),
+    );
+    let result2 = eval(expr2);
+    if result2 != 20 {
+        print(f"FAIL if_expr false: expected 20, got {result2}");
+        return 1;
+    }
+    print("  if_expr: OK");
+    0
+}
+
+fn test_tree_depth() -> Int {
+    // depth of: Add(IntLit, Mul(IntLit, IntLit)) = 3
+    let expr = Expr.Add(
+        Heap(Expr.IntLit(1)),
+        Heap(Expr.Mul(
+            Heap(Expr.IntLit(2)),
+            Heap(Expr.IntLit(3)),
+        )),
+    );
+    let d = depth(expr);
+    if d != 3 {
+        print(f"FAIL tree_depth: expected 3, got {d}");
+        return 1;
+    }
+    print("  tree_depth: OK");
+    0
+}
+
+fn test_node_count() -> Int {
+    // Add(IntLit(1), Mul(IntLit(2), IntLit(3))) = 5 nodes
+    let expr = Expr.Add(
+        Heap(Expr.IntLit(1)),
+        Heap(Expr.Mul(
+            Heap(Expr.IntLit(2)),
+            Heap(Expr.IntLit(3)),
+        )),
+    );
+    let n = count_nodes(expr);
+    if n != 5 {
+        print(f"FAIL node_count: expected 5, got {n}");
+        return 1;
+    }
+    print("  node_count: OK");
+    0
+}
+
+fn test_constant_fold() -> Int {
+    // Fold: Add(IntLit(3), IntLit(4)) -> IntLit(7)
+    let expr = Expr.Add(
+        Heap(Expr.IntLit(3)),
+        Heap(Expr.IntLit(4)),
+    );
+    let folded = constant_fold(expr);
+    let result = eval(folded);
+    if result != 7 {
+        print(f"FAIL constant_fold: expected 7, got {result}");
+        return 1;
+    }
+
+    // Fold: Mul(IntLit(3), IntLit(4)) -> IntLit(12)
+    let expr2 = Expr.Mul(
+        Heap(Expr.IntLit(3)),
+        Heap(Expr.IntLit(4)),
+    );
+    let folded2 = constant_fold(expr2);
+    let result2 = eval(folded2);
+    if result2 != 12 {
+        print(f"FAIL constant_fold mul: expected 12, got {result2}");
+        return 1;
+    }
+
+    // Fold: Neg(IntLit(5)) -> IntLit(-5)
+    let expr3 = Expr.Neg(Heap(Expr.IntLit(5)));
+    let folded3 = constant_fold(expr3);
+    let result3 = eval(folded3);
+    if result3 != -5 {
+        print(f"FAIL constant_fold neg: expected -5, got {result3}");
+        return 1;
+    }
+    print("  constant_fold: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_basic_eval();
+    failures = failures + test_negation();
+    failures = failures + test_if_expr();
+    failures = failures + test_tree_depth();
+    failures = failures + test_node_count();
+    failures = failures + test_constant_fold();
+
+    if failures == 0 {
+        print("All recursive tree processing tests passed");
+    }
+    failures
+}

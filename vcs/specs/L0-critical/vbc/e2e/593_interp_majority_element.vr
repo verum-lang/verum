@@ -1,0 +1,117 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, majority_element, boyer_moore, voting, linear_scan
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Majority element — Boyer-Moore Voting Algorithm.
+//
+// The majority element is the element that appears more than n/2 times.
+// Boyer-Moore voting algorithm runs in O(n) time and O(1) space:
+//   1. Maintain a candidate and a counter.
+//   2. For each element:
+//      - If counter == 0, set candidate = element, counter = 1.
+//      - Else if element == candidate, counter++.
+//      - Else counter--.
+//   3. The candidate is the majority element (if one exists).
+//
+// We also implement verification (count candidate occurrences).
+// Arrays of size 16 hold input sequences.
+
+fn bm_vote(arr: [Int; 16], n: Int) -> Int {
+    let mut candidate = 0;
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if count == 0 {
+            candidate = arr[i];
+            count = 1;
+        } else {
+            if arr[i] == candidate {
+                count = count + 1;
+            } else {
+                count = count - 1;
+            }
+        }
+        i = i + 1;
+    }
+    candidate
+}
+
+// Verify: count occurrences of val in arr[0..n-1].
+fn count_occ(arr: [Int; 16], n: Int, val: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < n { if arr[i] == val { c = c + 1; } i = i + 1; }
+    c
+}
+
+// Find majority element and return it, or -1 if none exists.
+fn majority(arr: [Int; 16], n: Int) -> Int {
+    let cand = bm_vote(arr, n);
+    let occ = count_occ(arr, n, cand);
+    // majority means more than n/2 occurrences
+    if occ * 2 > n { cand } else { -1 }
+}
+
+fn test_simple_majority() {
+    // [3,3,4,2,3,3,3]: n=7, 3 appears 5 times > 3 (7/2).
+    let mut arr = [3,3,4,2,3,3,3,0,0,0,0,0,0,0,0,0];
+    let cand = bm_vote(arr, 7);
+    assert_eq(cand, 3);
+    assert_eq(count_occ(arr, 7, 3), 5);
+    assert_eq(majority(arr, 7), 3);
+    print("simple_majority: ok");
+}
+
+fn test_all_same() {
+    // [7,7,7,7,7]: n=5, 7 appears 5 times (all).
+    let mut arr = [7,7,7,7,7,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(majority(arr, 5), 7);
+    assert_eq(count_occ(arr, 5, 7), 5);
+    print("all_same: ok");
+}
+
+fn test_two_element_array() {
+    // [1,2]: n=2, neither appears > 1 time (1/2 = 0, need > 1 occurrence).
+    // 1 appears 1 time, 1*2=2 not > 2. -1.
+    let mut arr = [1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(majority(arr, 2), -1);
+    // [1,1]: n=2, 1 appears 2 times, 2*2=4>2. majority=1.
+    let mut arr2 = [1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(majority(arr2, 2), 1);
+    print("two_element_array: ok");
+}
+
+fn test_no_majority() {
+    // [1,2,3,4]: n=4, no element appears > 2 times.
+    let mut arr = [1,2,3,4,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(majority(arr, 4), -1);
+    // [1,2,1,2]: n=4, each appears 2 times, 2*2=4 not > 4. -1.
+    let mut arr2 = [1,2,1,2,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(majority(arr2, 4), -1);
+    print("no_majority: ok");
+}
+
+fn test_large_majority() {
+    // [5,5,5,5,5,5,5,5,5,2,2,2,2,2,2,2]: n=16.
+    // 5 appears 9 times, 2 appears 7 times. 9*2=18>16 → majority=5.
+    let mut arr = [5,5,5,5,5,5,5,5,5,2,2,2,2,2,2,2];
+    assert_eq(count_occ(arr, 16, 5), 9);
+    assert_eq(count_occ(arr, 16, 2), 7);
+    assert_eq(majority(arr, 16), 5);
+    // Verify the candidate from bm_vote is 5.
+    assert_eq(bm_vote(arr, 16), 5);
+    print("large_majority: ok");
+}
+
+fn main() -> Int {
+    test_simple_majority();
+    test_all_same();
+    test_two_element_array();
+    test_no_majority();
+    test_large_majority();
+    print("[OK] 593_interp_majority_element");
+    0
+}

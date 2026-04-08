@@ -1,0 +1,125 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, primitives, integers, fixed-width
+
+/// Test for fixed-width integer types.
+/// Verum supports both signed (Int8, Int16, Int32, Int64) and
+/// unsigned (UInt8, UInt16, UInt32, UInt64) integers.
+
+fn main() {
+    // Signed integer types
+    let a: Int8 = 127;
+    let b: Int16 = 32767;
+    let c: Int32 = 2147483647;
+    let d: Int64 = 100;
+
+    // Signed zero values
+    let za: Int8 = 0;
+    let zb: Int16 = 0;
+    let zc: Int32 = 0;
+    let zd: Int64 = 0;
+
+    // Negative signed integers
+    let neg_a: Int8 = -1;
+    let neg_b: Int16 = -100;
+    let neg_c: Int32 = -1000;
+    let neg_d: Int64 = -10000;
+
+    // Unsigned integer types
+    let e: UInt8 = 255;
+    let f: UInt16 = 1000;
+    let g: UInt32 = 4000000;
+    let h: UInt64 = 1000000000;
+
+    // Unsigned zero values
+    let ze: UInt8 = 0;
+    let zf: UInt16 = 0;
+    let zg: UInt32 = 0;
+    let zh: UInt64 = 0;
+
+    // Basic arithmetic on Int8
+    let i8a: Int8 = 10;
+    let i8b: Int8 = 20;
+    let i8c: Int8 = 100;
+    let i8d: Int8 = 50;
+    let i8e: Int8 = 5;
+    let i8f: Int8 = 6;
+    let sum8: Int8 = i8a + i8b;
+    let diff8: Int8 = i8c - i8d;
+    let prod8: Int8 = i8e * i8f;
+
+    // Basic arithmetic on UInt8
+    let u8a: UInt8 = 10;
+    let u8b: UInt8 = 20;
+    let u8c: UInt8 = 3;
+    let u8d: UInt8 = 7;
+    let usum8: UInt8 = u8a + u8b;
+    let uprod8: UInt8 = u8c * u8d;
+
+    // Basic arithmetic on Int32
+    let i32a: Int32 = 1000;
+    let i32b: Int32 = 2000;
+    let i32c: Int32 = 100;
+    let i32d: Int32 = 200;
+    let sum32: Int32 = i32a + i32b;
+    let prod32: Int32 = i32c * i32d;
+
+    // Basic arithmetic on UInt32
+    let u32a: UInt32 = 1000;
+    let u32b: UInt32 = 2000;
+    let u32c: UInt32 = 100;
+    let u32d: UInt32 = 200;
+    let usum32: UInt32 = u32a + u32b;
+    let uprod32: UInt32 = u32c * u32d;
+
+    // Int64 arithmetic
+    let i64a: Int64 = 100;
+    let i64b: Int64 = 200;
+    let i64c: Int64 = 10;
+    let i64d: Int64 = 20;
+    let sum64: Int64 = i64a + i64b;
+    let prod64: Int64 = i64c * i64d;
+
+    // UInt64 arithmetic
+    let u64a: UInt64 = 100;
+    let u64b: UInt64 = 200;
+    let u64c: UInt64 = 10;
+    let u64d: UInt64 = 20;
+    let usum64: UInt64 = u64a + u64b;
+    let uprod64: UInt64 = u64c * u64d;
+
+    // Comparison
+    let gt8: Bool = a > za;
+    let eq16: Bool = zb == 0;
+    let lt32: Bool = neg_c < 0;
+
+    // Assertions
+    assert(a == 127);
+    assert(b == 32767);
+    assert(c == 2147483647);
+    assert(za == 0);
+    assert(neg_a == -1);
+    assert(e == 255);
+    assert(ze == 0);
+
+    assert(sum8 == 30);
+    assert(diff8 == 50);
+    assert(prod8 == 30);
+    assert(usum8 == 30);
+    assert(uprod8 == 21);
+    assert(sum32 == 3000);
+    assert(prod32 == 20000);
+    assert(usum32 == 3000);
+    assert(uprod32 == 20000);
+    assert(sum64 == 300);
+    assert(prod64 == 200);
+    assert(usum64 == 300);
+    assert(uprod64 == 200);
+
+    assert(gt8);
+    assert(eq16);
+    assert(lt32);
+
+    print("Fixed-width integer type tests passed!");
+}

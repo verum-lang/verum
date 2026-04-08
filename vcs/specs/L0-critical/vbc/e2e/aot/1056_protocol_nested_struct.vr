@@ -1,0 +1,57 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: protocol, nested_struct, impl_for
+// @expect: pass
+
+// Protocol implementation with nested struct field access.
+
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+type Point is { x: Int, y: Int };
+type Circle is { center: Point, radius: Int };
+
+implement Describable for Point {
+    fn describe(&self) -> Text {
+        f"Point({self.x},{self.y})"
+    }
+}
+
+implement Describable for Circle {
+    fn describe(&self) -> Text {
+        // Use local variables to work around potential issue
+        let cx = self.center.x;
+        let cy = self.center.y;
+        let r = self.radius;
+        f"Circle(({cx},{cy}), r={r})"
+    }
+}
+
+fn print_desc<T: Describable>(thing: &T) {
+    print(thing.describe());
+}
+
+fn main() -> Int {
+    let p = Point { x: 3, y: 4 };
+    let c = Circle { center: Point { x: 10, y: 20 }, radius: 5 };
+
+    let pd = p.describe();
+    print(f"Point: {pd}");
+
+    let cd = c.describe();
+    print(f"Circle: {cd}");
+
+    if p.x != 3 {
+        print("FAIL: p.x != 3");
+        return 1;
+    }
+    if c.radius != 5 {
+        print("FAIL: c.radius != 5");
+        return 1;
+    }
+
+    print("PASS: protocol nested struct access works");
+    0
+}

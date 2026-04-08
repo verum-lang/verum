@@ -1,0 +1,309 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, karatsuba, multiplication, big-integer, digits
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Karatsuba-style multiplication for numbers stored as digit arrays.
+// Each digit is base 10. Numbers stored in Arr8 (up to 8 digits, little-endian).
+// Supports: add with carry, single-digit multiply, comparison,
+// and schoolbook multiply (Karatsuba concept with base-case).
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// BigNum: digits in Arr8, little-endian (a0 = ones digit), len = number of significant digits
+type BigNum is { digits: Arr8, len: Int };
+
+fn bn_zero() -> BigNum {
+    BigNum { digits: a8_zero(), len: 0 }
+}
+
+// Create BigNum from integer (up to 8 digits)
+fn bn_from_int(val: Int) -> BigNum {
+    if val == 0 { return BigNum { digits: a8_zero(), len: 1 }; }
+    let mut d = a8_zero();
+    let mut v = val;
+    let mut i = 0;
+    while v > 0 {
+        d = a8_set(d, i, v % 10);
+        v = v / 10;
+        i = i + 1;
+    }
+    BigNum { digits: d, len: i }
+}
+
+// Convert BigNum back to integer
+fn bn_to_int(bn: BigNum) -> Int {
+    let mut result = 0;
+    let mut place = 1;
+    let mut i = 0;
+    while i < bn.len {
+        result = result + a8_get(bn.digits, i) * place;
+        place = place * 10;
+        i = i + 1;
+    }
+    result
+}
+
+// Normalize: remove leading zeros
+fn bn_normalize(bn: BigNum) -> BigNum {
+    let mut l = bn.len;
+    while l > 1 {
+        if a8_get(bn.digits, l - 1) == 0 {
+            l = l - 1;
+        } else {
+            return BigNum { digits: bn.digits, len: l };
+        }
+    }
+    BigNum { digits: bn.digits, len: if l == 0 { 1 } else { l } }
+}
+
+// Add two BigNums
+fn bn_add(a: BigNum, bnum: BigNum) -> BigNum {
+    let max_len = if a.len > bnum.len { a.len } else { bnum.len };
+    let mut result = a8_zero();
+    let mut carry = 0;
+    let mut i = 0;
+    while i < max_len {
+        let da = if i < a.len { a8_get(a.digits, i) } else { 0 };
+        let db = if i < bnum.len { a8_get(bnum.digits, i) } else { 0 };
+        let sum = da + db + carry;
+        result = a8_set(result, i, sum % 10);
+        carry = sum / 10;
+        i = i + 1;
+    }
+    let final_len = if carry > 0 {
+        result = a8_set(result, i, carry);
+        max_len + 1
+    } else {
+        max_len
+    };
+    bn_normalize(BigNum { digits: result, len: final_len })
+}
+
+// Multiply BigNum by single digit
+fn bn_mul_digit(a: BigNum, d: Int) -> BigNum {
+    if d == 0 { return bn_from_int(0); }
+    let mut result = a8_zero();
+    let mut carry = 0;
+    let mut i = 0;
+    while i < a.len {
+        let prod = a8_get(a.digits, i) * d + carry;
+        result = a8_set(result, i, prod % 10);
+        carry = prod / 10;
+        i = i + 1;
+    }
+    let final_len = if carry > 0 {
+        result = a8_set(result, i, carry);
+        a.len + 1
+    } else {
+        a.len
+    };
+    bn_normalize(BigNum { digits: result, len: final_len })
+}
+
+// Shift left by k digits (multiply by 10^k)
+fn bn_shift(a: BigNum, k: Int) -> BigNum {
+    if a.len == 1 {
+        if a8_get(a.digits, 0) == 0 { return a; }
+    }
+    let mut result = a8_zero();
+    let mut i = 0;
+    while i < a.len {
+        if i + k < 8 {
+            result = a8_set(result, i + k, a8_get(a.digits, i));
+        }
+        i = i + 1;
+    }
+    bn_normalize(BigNum { digits: result, len: if a.len + k > 8 { 8 } else { a.len + k } })
+}
+
+// Schoolbook multiplication: a * b
+fn bn_multiply(a: BigNum, bnum: BigNum) -> BigNum {
+    let mut result = bn_from_int(0);
+    let mut i = 0;
+    while i < bnum.len {
+        let digit = a8_get(bnum.digits, i);
+        if digit > 0 {
+            let partial = bn_mul_digit(a, digit);
+            let shifted = bn_shift(partial, i);
+            result = bn_add(result, shifted);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Compare: return 1 if a > b, -1 if a < b, 0 if equal
+fn bn_compare(a: BigNum, bnum: BigNum) -> Int {
+    let na = bn_normalize(a);
+    let nb = bn_normalize(bnum);
+    if na.len > nb.len { return 1; }
+    if na.len < nb.len { return 0 - 1; }
+    let mut i = na.len - 1;
+    let mut done = 0;
+    let mut res = 0;
+    while done == 0 {
+        let da = a8_get(na.digits, i);
+        let db = a8_get(nb.digits, i);
+        if da > db { res = 1; done = 1; }
+        else if da < db { res = 0 - 1; done = 1; }
+        else if i == 0 { done = 1; }
+        else { i = i - 1; }
+    }
+    res
+}
+
+// ========== Tests ==========
+
+fn test_from_int() -> Int {
+    let n = bn_from_int(12345);
+    assert_eq(n.len, 5);
+    assert_eq(a8_get(n.digits, 0), 5);  // ones
+    assert_eq(a8_get(n.digits, 1), 4);  // tens
+    assert_eq(a8_get(n.digits, 4), 1);  // ten-thousands
+    assert_eq(bn_to_int(n), 12345);
+    0
+}
+
+fn test_from_zero() -> Int {
+    let n = bn_from_int(0);
+    assert_eq(n.len, 1);
+    assert_eq(a8_get(n.digits, 0), 0);
+    assert_eq(bn_to_int(n), 0);
+    0
+}
+
+fn test_add_simple() -> Int {
+    let a = bn_from_int(123);
+    let bnum = bn_from_int(456);
+    let sum = bn_add(a, bnum);
+    assert_eq(bn_to_int(sum), 579);
+    0
+}
+
+fn test_add_carry() -> Int {
+    let a = bn_from_int(999);
+    let bnum = bn_from_int(1);
+    let sum = bn_add(a, bnum);
+    assert_eq(bn_to_int(sum), 1000);
+    assert_eq(sum.len, 4);
+    0
+}
+
+fn test_mul_digit() -> Int {
+    let a = bn_from_int(123);
+    let r = bn_mul_digit(a, 4);
+    assert_eq(bn_to_int(r), 492);
+    let r2 = bn_mul_digit(a, 0);
+    assert_eq(bn_to_int(r2), 0);
+    0
+}
+
+fn test_mul_digit_carry() -> Int {
+    let a = bn_from_int(999);
+    let r = bn_mul_digit(a, 9);
+    assert_eq(bn_to_int(r), 8991);
+    0
+}
+
+fn test_shift() -> Int {
+    let a = bn_from_int(42);
+    let s1 = bn_shift(a, 1);
+    assert_eq(bn_to_int(s1), 420);
+    let s2 = bn_shift(a, 3);
+    assert_eq(bn_to_int(s2), 42000);
+    0
+}
+
+fn test_multiply_small() -> Int {
+    let a = bn_from_int(12);
+    let bnum = bn_from_int(34);
+    let prod = bn_multiply(a, bnum);
+    assert_eq(bn_to_int(prod), 408);
+    0
+}
+
+fn test_multiply_medium() -> Int {
+    // 123 * 456 = 56088
+    let a = bn_from_int(123);
+    let bnum = bn_from_int(456);
+    let prod = bn_multiply(a, bnum);
+    assert_eq(bn_to_int(prod), 56088);
+    0
+}
+
+fn test_multiply_by_one() -> Int {
+    let a = bn_from_int(9999);
+    let bnum = bn_from_int(1);
+    let prod = bn_multiply(a, bnum);
+    assert_eq(bn_to_int(prod), 9999);
+    0
+}
+
+fn test_multiply_by_zero() -> Int {
+    let a = bn_from_int(12345);
+    let bnum = bn_from_int(0);
+    let prod = bn_multiply(a, bnum);
+    assert_eq(bn_to_int(prod), 0);
+    0
+}
+
+fn test_compare() -> Int {
+    let a = bn_from_int(100);
+    let bnum = bn_from_int(99);
+    assert_eq(bn_compare(a, bnum), 1);
+    assert_eq(bn_compare(bnum, a), 0 - 1);
+    assert_eq(bn_compare(a, a), 0);
+    0
+}
+
+fn test_roundtrip() -> Int {
+    // Verify a * b as integers matches BigNum multiplication
+    let av = 37;
+    let bv = 89;
+    let a = bn_from_int(av);
+    let bnum = bn_from_int(bv);
+    let prod = bn_multiply(a, bnum);
+    assert_eq(bn_to_int(prod), av * bv);
+    0
+}
+
+fn main() -> Int {
+    test_from_int();
+    test_from_zero();
+    test_add_simple();
+    test_add_carry();
+    test_mul_digit();
+    test_mul_digit_carry();
+    test_shift();
+    test_multiply_small();
+    test_multiply_medium();
+    test_multiply_by_one();
+    test_multiply_by_zero();
+    test_compare();
+    test_roundtrip();
+    print("[OK] 405_karatsuba_aot");
+    0
+}

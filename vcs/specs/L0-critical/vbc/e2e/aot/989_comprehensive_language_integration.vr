@@ -1,0 +1,179 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: integration, comprehensive, closures, generics, patterns, f-string
+// @description: Comprehensive language integration — all major features in one test
+
+type Result<T, E> is Ok(T) | Err(E);
+type Maybe<T> is None | Some(T);
+
+type Point is { x: Int, y: Int };
+type Shape is Circle(Int) | Rectangle(Int, Int) | Triangle { base: Int, height: Int };
+
+implement Point {
+    fn distance_sq(&self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+
+    fn add(&self, other: &Point) -> Point {
+        Point { x: self.x + other.x, y: self.y + other.y }
+    }
+}
+
+fn area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Rectangle(w, h) => w * h,
+        Triangle { base, height } => base * height / 2,
+    }
+}
+
+fn apply<T>(f: fn(T) -> T, x: T) -> T {
+    f(x)
+}
+
+fn map_list(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = [];
+    let len = items.len();
+    let mut i = 0;
+    while i < len {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn fold(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let len = items.len();
+    let mut i = 0;
+    while i < len {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn safe_get(items: List<Int>, idx: Int) -> Maybe<Int> {
+    if idx >= 0 && idx < items.len() {
+        Some(items[idx])
+    } else {
+        None
+    }
+}
+
+fn main() -> Int {
+    let mut passed = 0;
+
+    // Test 1: struct methods + method chaining
+    let p1 = Point { x: 3, y: 4 };
+    let p2 = Point { x: 1, y: 2 };
+    let p3 = p1.add(&p2);
+    assert_eq(p3.x, 4);
+    assert_eq(p3.y, 6);
+    assert_eq(p1.distance_sq(), 25);
+    passed = passed + 1;
+
+    // Test 2: pattern matching on variants
+    assert_eq(area(Circle(5)), 75);
+    assert_eq(area(Rectangle(4, 6)), 24);
+    assert_eq(area(Triangle { base: 10, height: 5 }), 25);
+    passed = passed + 1;
+
+    // Test 3: closures
+    let double = |x: Int| -> Int { x * 2 };
+    let add_ten = |x: Int| -> Int { x + 10 };
+    assert_eq(double(5), 10);
+    assert_eq(add_ten(5), 15);
+    passed = passed + 1;
+
+    // Test 4: generic function
+    let r = apply(double, 7);
+    assert_eq(r, 14);
+    passed = passed + 1;
+
+    // Test 5: higher-order functions on lists
+    let nums = [1, 2, 3, 4, 5];
+    let doubled = map_list(nums, double);
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[4], 10);
+    passed = passed + 1;
+
+    // Test 6: fold
+    let sum = fold(nums, 0, |acc: Int, x: Int| -> Int { acc + x });
+    assert_eq(sum, 15);
+    passed = passed + 1;
+
+    // Test 7: Maybe type + pattern matching
+    let found = safe_get(nums, 2);
+    match found {
+        Some(v) => assert_eq(v, 3),
+        None => panic("should find"),
+    };
+    let not_found = safe_get(nums, 10);
+    match not_found {
+        Some(v) => panic("should not find"),
+        None => {},
+    };
+    passed = passed + 1;
+
+    // Test 8: f-string formatting
+    let name = "Verum";
+    let version = 1;
+    let msg = f"Hello from {name} v{version}!";
+    assert_eq(msg, "Hello from Verum v1!");
+    passed = passed + 1;
+
+    // Test 9: mutable closures with capture
+    let mut counter = 0;
+    let increment = || { counter = counter + 1; };
+    increment();
+    increment();
+    increment();
+    assert_eq(counter, 3);
+    passed = passed + 1;
+
+    // Test 10: nested pattern matching
+    let items = [Some(1), None, Some(3)];
+    let mut sum2 = 0;
+    let mut j = 0;
+    while j < items.len() {
+        match items[j] {
+            Some(v) => { sum2 = sum2 + v; },
+            None => {},
+        };
+        j = j + 1;
+    }
+    assert_eq(sum2, 4);
+    passed = passed + 1;
+
+    // Test 11: for-in with range
+    let mut range_sum = 0;
+    for i in 1..=10 {
+        range_sum = range_sum + i;
+    }
+    assert_eq(range_sum, 55);
+    passed = passed + 1;
+
+    // Test 12: for-in with list
+    let list_items = [10, 20, 30];
+    let mut list_sum = 0;
+    for item in list_items {
+        list_sum = list_sum + item;
+    }
+    assert_eq(list_sum, 60);
+    passed = passed + 1;
+
+    // Test 13: map operations
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+    assert_eq(m.len(), 3);
+    assert_eq(m.get("b"), 2);
+    passed = passed + 1;
+
+    assert_eq(passed, 13);
+    print(f"989_comprehensive_language: ALL {passed} TESTS PASSED");
+    0
+}

@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, attribute, unclosed, error
+// @description: Test unclosed attribute parenthesis
+// @expected-error: E018
+
+fn test() {
+    @attr( let x = 5;
+}

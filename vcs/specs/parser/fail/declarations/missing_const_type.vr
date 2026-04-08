@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, const, error
+// @description: Test missing const type annotation detection
+// @expected-error: E018
+
+const X = 5;
+
+const PI = 3.14159;
+
+const NAME = "hello";
+
+public const MAX = 100;

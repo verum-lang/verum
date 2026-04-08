@@ -1,0 +1,49 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/linux/mod.vr - Linux Platform Tests Module
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, linux, platform
+// @description: Root test module for Linux-specific V-LLSI implementation.
+//
+// Test Categories:
+// - syscall_test.vr : Raw syscall intrinsics and basic wrappers
+// - errno_test.vr   : Error constants and categorization
+// - tls_test.vr     : Thread-local storage bootstrap
+// - io_test.vr      : io_uring and epoll I/O drivers
+// - thread_test.vr  : Thread creation and synchronization
+// - mem_test.vr     : Memory management (mmap, mprotect, madvise)
+// - time_test.vr    : Clock operations (clock_gettime, RDTSC)
+//
+// Platform: Linux x86_64
+// Layer: 0 (V-LLSI Kernel)
+// =============================================================================
+
+@cfg(target_os = "linux")
+module test.stdlib.sys.linux;
+
+// =============================================================================
+// Test Module Exports
+// =============================================================================
+
+/// Raw syscall tests
+public module syscall_test;
+
+/// Errno constants tests
+public module errno_test;
+
+/// TLS bootstrap tests
+public module tls_test;
+
+/// I/O driver tests (io_uring + epoll)
+public module io_test;
+
+/// Thread creation tests
+public module thread_test;
+
+/// Memory management tests
+public module mem_test;
+
+/// Time and clock tests
+public module time_test;

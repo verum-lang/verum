@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, refinement-types, pattern-matching
+// @description: Refinement-aware exhaustiveness checking
+
+type Maybe<T> is None | Some(T);
+
+// Refined integer types
+type PositiveInt is Int { x: x > 0 };
+type NegativeInt is Int { x: x < 0 };
+type ZeroInt is Int { x: x == 0 };
+type NonNegativeInt is Int { x: x >= 0 };
+type NonPositiveInt is Int { x: x <= 0 };
+
+// Exhaustive match on refined types
+// For NonNegativeInt, only need >= 0 cases
+fn classify_nonneg(n: NonNegativeInt) -> Text =
+    match n {
+        0 => "zero",
+        x if x > 0 => "positive"
+    };
+
+// For bounded ranges, exhaustiveness is provable
+type Byte is Int { x: 0 <= x && x <= 255 };
+
+fn byte_category(b: Byte) -> Text =
+    match b {
+        0..=31 => "control",
+        32..=126 => "printable",
+        127..=255 => "extended"
+    };
+
+// Disjoint union via refinement
+fn sign_to_text(n: Int) -> Text =
+    match n {
+        x if x < 0 => "negative",
+        0 => "zero",
+        x if x > 0 => "positive"
+    };
+
+// Refinement-aware exhaustiveness with Maybe
+type NonEmptyList<T> is List<T> { xs: length(xs) > 0 };
+
+fn nonempty_head<T>(xs: NonEmptyList<T>) -> T =
+    match xs {
+        Cons(x, _) => x
+        // Nil is unreachable for NonEmptyList
+    };
+
+// Composite refinements
+type ValidPercentage is Int { p: 0 <= p && p <= 100 };
+
+fn percentage_grade(p: ValidPercentage) -> Text =
+    match p {
+        90..=100 => "A",
+        80..=89 => "B",
+        70..=79 => "C",
+        60..=69 => "D",
+        0..=59 => "F"
+    };
+
+// Multiple refined parameters
+fn safe_divide(
+    dividend: Int,
+    divisor: Int { d: d != 0 }
+) -> Int =
+    dividend / divisor;
+
+// Pattern matching with refinement witness
+fn abs_value(n: Int) -> PositiveInt =
+    match n {
+        x if x >= 0 => x,
+        x if x < 0 => -x
+    };
+
+// Exhaustiveness with array length refinement
+type Array3<T> is [T; 3];
+
+fn array3_first<T>(arr: Array3<T>) -> T =
+    match arr {
+        [x, _, _] => x
+    };
+
+// Bounded enum via refinement
+type DayOfWeek is Int { d: 1 <= d && d <= 7 };
+
+fn day_name(d: DayOfWeek) -> Text =
+    match d {
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        6 => "Saturday",
+        7 => "Sunday"
+    };
+
+fn main() {
+    let zero: NonNegativeInt = 0;
+    let five: NonNegativeInt = 5;
+    assert(classify_nonneg(zero) == "zero");
+    assert(classify_nonneg(five) == "positive");
+
+    let b65: Byte = 65;
+    let b200: Byte = 200;
+    assert(byte_category(b65) == "printable");
+    assert(byte_category(b200) == "extended");
+
+    assert(sign_to_text(-5) == "negative");
+    assert(sign_to_text(0) == "zero");
+    assert(sign_to_text(5) == "positive");
+
+    let p95: ValidPercentage = 95;
+    let p45: ValidPercentage = 45;
+    assert(percentage_grade(p95) == "A");
+    assert(percentage_grade(p45) == "F");
+
+    let d1: DayOfWeek = 1;
+    let d7: DayOfWeek = 7;
+    assert(day_name(d1) == "Monday");
+    assert(day_name(d7) == "Sunday");
+}

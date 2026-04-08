@@ -1,0 +1,110 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: smt, verification, basic, cli-integration
+// @timeout: 50000
+// @description: Basic verification patterns — simple assertions, arithmetic invariants, function contracts
+
+/// Simple non-negative assertion
+fn absolute_value(x: Int) -> Int {
+    if x >= 0 { x } else { -x }
+}
+
+/// Addition preserves ordering
+fn add_positive(a: Int, b: Int) -> Int {
+    a + b
+}
+
+/// Maximum of two integers
+fn max_of(a: Int, b: Int) -> Int {
+    if a >= b { a } else { b }
+}
+
+/// Minimum of two integers
+fn min_of(a: Int, b: Int) -> Int {
+    if a <= b { a } else { b }
+}
+
+/// Clamping preserves bounds
+fn clamp(value: Int, low: Int, high: Int) -> Int {
+    if value < low {
+        low
+    } else if value > high {
+        high
+    } else {
+        value
+    }
+}
+
+/// Double is always even
+fn double(n: Int) -> Int {
+    n + n
+}
+
+/// Identity holds for negate-negate
+fn negate_negate(x: Int) -> Int {
+    -(-x)
+}
+
+fn test_absolute_value() -> Int {
+    let r1 = absolute_value(-5);
+    let r2 = absolute_value(5);
+    let r3 = absolute_value(0);
+    if r1 != 5 { print(f"FAIL abs(-5)={r1}"); return 1; }
+    if r2 != 5 { print(f"FAIL abs(5)={r2}"); return 1; }
+    if r3 != 0 { print(f"FAIL abs(0)={r3}"); return 1; }
+    print("  absolute_value: OK");
+    0
+}
+
+fn test_add_positive() -> Int {
+    let r = add_positive(10, 3);
+    if r != 13 { print(f"FAIL add_positive={r}"); return 1; }
+    print("  add_positive: OK");
+    0
+}
+
+fn test_max_min() -> Int {
+    if max_of(3, 7) != 7 { print("FAIL max"); return 1; }
+    if min_of(3, 7) != 3 { print("FAIL min"); return 1; }
+    if max_of(5, 5) != 5 { print("FAIL max eq"); return 1; }
+    if min_of(5, 5) != 5 { print("FAIL min eq"); return 1; }
+    print("  max_min: OK");
+    0
+}
+
+fn test_clamp() -> Int {
+    if clamp(5, 0, 10) != 5 { print("FAIL clamp mid"); return 1; }
+    if clamp(-5, 0, 10) != 0 { print("FAIL clamp low"); return 1; }
+    if clamp(15, 0, 10) != 10 { print("FAIL clamp high"); return 1; }
+    print("  clamp: OK");
+    0
+}
+
+fn test_double() -> Int {
+    if double(21) != 42 { print("FAIL double"); return 1; }
+    if double(0) != 0 { print("FAIL double 0"); return 1; }
+    print("  double: OK");
+    0
+}
+
+fn test_negate_negate() -> Int {
+    if negate_negate(42) != 42 { print("FAIL negate_negate"); return 1; }
+    if negate_negate(-7) != -7 { print("FAIL negate_negate neg"); return 1; }
+    print("  negate_negate: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_absolute_value();
+    failures = failures + test_add_positive();
+    failures = failures + test_max_min();
+    failures = failures + test_clamp();
+    failures = failures + test_double();
+    failures = failures + test_negate_negate();
+    if failures == 0 {
+        print("All verify_basic tests passed");
+    }
+    failures
+}

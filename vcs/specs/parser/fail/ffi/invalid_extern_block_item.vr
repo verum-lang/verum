@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, ffi, extern, block, error
+// @description: Test invalid item inside extern block
+// @expected-error: E018
+
+extern "C" {
+    // Type definitions not allowed in extern blocks
+    type InvalidInExtern is Int;
+}

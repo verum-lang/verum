@@ -1,0 +1,159 @@
+// @test: run
+// @expected-stdout: Squared evens: [4, 16, 36]\nFirst 3: [1, 2, 3]\nCollected: [10, 20, 30, 40, 50]
+// @tier: 0
+// @level: L2
+// @tags: async, streams, combinators
+// @description: Async stream combinator methods
+
+type AsyncStream<T> is protocol {
+    async fn next(&mut self) -> Maybe<T>
+};
+
+// Extension methods for async streams
+type AsyncStreamExt<T> is protocol extends AsyncStream<T> {
+    // Collect all items into a list
+    async fn collect(self) -> List<T> {
+        let mut result = [];
+        while let Some(item) = self.next().await {
+            result.push(item);
+        }
+        result
+    }
+
+    // Map transformation
+    fn map<U>(self, f: fn(T) -> U) -> MapStream<Self, T, U> {
+        MapStream { source: self, mapper: f }
+    }
+
+    // Filter items
+    fn filter(self, pred: fn(&T) -> Bool) -> FilterStream<Self, T> {
+        FilterStream { source: self, predicate: pred }
+    }
+
+    // Take first n items
+    fn take(self, n: Int) -> TakeStream<Self, T> {
+        TakeStream { source: self, remaining: n }
+    }
+
+    // Skip first n items
+    fn skip(self, n: Int) -> SkipStream<Self, T> {
+        SkipStream { source: self, remaining: n }
+    }
+
+    // Chain two streams
+    fn chain<S: AsyncStream<T>>(self, other: S) -> ChainStream<Self, S, T> {
+        ChainStream { first: Some(self), second: other }
+    }
+
+    // Zip with another stream
+    fn zip<S: AsyncStream<U>, U>(self, other: S) -> ZipStream<Self, S, T, U> {
+        ZipStream { first: self, second: other }
+    }
+
+    // Enumerate items
+    fn enumerate(self) -> EnumerateStream<Self, T> {
+        EnumerateStream { source: self, index: 0 }
+    }
+
+    // Fold/reduce
+    async fn fold<A>(self, init: A, f: fn(A, T) -> A) -> A {
+        let mut acc = init;
+        while let Some(item) = self.next().await {
+            acc = f(acc, item);
+        }
+        acc
+    }
+
+    // Any predicate
+    async fn any(self, pred: fn(&T) -> Bool) -> Bool {
+        while let Some(item) = self.next().await {
+            if pred(&item) {
+                return true;
+            }
+        }
+        false
+    }
+
+    // All predicate
+    async fn all(self, pred: fn(&T) -> Bool) -> Bool {
+        while let Some(item) = self.next().await {
+            if !pred(&item) {
+                return false;
+            }
+        }
+        true
+    }
+
+    // Find first matching
+    async fn find(self, pred: fn(&T) -> Bool) -> Maybe<T> {
+        while let Some(item) = self.next().await {
+            if pred(&item) {
+                return Some(item);
+            }
+        }
+        None
+    }
+
+    // Count items
+    async fn count(self) -> Int {
+        let mut n = 0;
+        while let Some(_) = self.next().await {
+            n += 1;
+        }
+        n
+    }
+};
+
+// Stream adapter types
+type MapStream<S, T, U> is { source: S, mapper: fn(T) -> U };
+type FilterStream<S, T> is { source: S, predicate: fn(&T) -> Bool };
+type TakeStream<S, T> is { source: S, remaining: Int };
+type SkipStream<S, T> is { source: S, remaining: Int };
+type ChainStream<S1, S2, T> is { first: Maybe<S1>, second: S2 };
+type ZipStream<S1, S2, T, U> is { first: S1, second: S2 };
+type EnumerateStream<S, T> is { source: S, index: Int };
+
+// Range stream for testing
+type RangeStream is { current: Int, end: Int };
+
+implement RangeStream {
+    fn new(start: Int, end: Int) -> Self {
+        Self { current: start, end }
+    }
+}
+
+implement AsyncStream<Int> for RangeStream {
+    async fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end {
+            let value = self.current;
+            self.current += 1;
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+async fn main() {
+    // Map and filter example
+    let result = RangeStream.new(1, 10)
+        .filter(|x| x % 2 == 0)
+        .map(|x| x * x)
+        .collect()
+        .await;
+    println(f"Squared evens: {result}");
+
+    // Take example
+    let first_three = RangeStream.new(1, 100)
+        .take(3)
+        .collect()
+        .await;
+    println(f"First 3: {first_three}");
+
+    // Complex chain
+    let collected = RangeStream.new(1, 6)
+        .map(|x| x * 10)
+        .collect()
+        .await;
+    println(f"Collected: {collected}");
+}

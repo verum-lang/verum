@@ -1,0 +1,144 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, chinese_remainder_theorem, crt, modular_arithmetic, number_theory
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Chinese Remainder Theorem (CRT): given a system of congruences
+//   x ≡ r[0] (mod m[0])
+//   x ≡ r[1] (mod m[1])
+//   ...
+// Find the unique solution x in [0, M) where M = product of all moduli (pairwise coprime).
+
+// Extended Euclidean Algorithm: returns gcd and sets s, t such that a*s + b*t = gcd.
+// Returns gcd via function, s and t via out array (out[0]=s, out[1]=t).
+@allow(unbounded_recursion)
+fn extended_gcd(a: Int, b: Int, out: [Int; 2]) -> Int {
+    if b == 0 {
+        out[0] = 1;
+        out[1] = 0;
+        return a;
+    }
+    let mut st = [0, 0];
+    let g = extended_gcd(b, a % b, st);
+    out[0] = st[1];
+    out[1] = st[0] - (a / b) * st[1];
+    g
+}
+
+// Modular inverse of a modulo m (m must be prime or coprime with a).
+fn mod_inverse(a: Int, m: Int) -> Int {
+    let mut out = [0, 0];
+    extended_gcd(a, m, out);
+    let s = out[0];
+    // Ensure positive result.
+    ((s % m) + m) % m
+}
+
+// Solve system of 2 congruences: x ≡ r0 (mod m0), x ≡ r1 (mod m1).
+// Returns solution in [0, m0*m1).
+fn crt2(r0: Int, m0: Int, r1: Int, m1: Int) -> Int {
+    let m = m0 * m1;
+    let inv = mod_inverse(m0, m1);
+    let diff = ((r1 - r0) % m1 + m1) % m1;
+    let x = r0 + m0 * ((diff * inv) % m1);
+    ((x % m) + m) % m
+}
+
+// Solve system of 3 congruences by combining pairwise.
+fn crt3(r0: Int, m0: Int, r1: Int, m1: Int, r2: Int, m2: Int) -> Int {
+    // Combine first two.
+    let x01 = crt2(r0, m0, r1, m1);
+    let m01 = m0 * m1;
+    // Combine result with third.
+    crt2(x01, m01, r2, m2)
+}
+
+fn test_basic_crt2() {
+    // x ≡ 2 (mod 3), x ≡ 3 (mod 5) -> x = 8 (since 8 mod 3=2, 8 mod 5=3)
+    let x = crt2(2, 3, 3, 5);
+    assert_eq(x % 3, 2);
+    assert_eq(x % 5, 3);
+    assert_eq(x, 8);
+
+    // x ≡ 1 (mod 3), x ≡ 1 (mod 5) -> x = 1
+    let y = crt2(1, 3, 1, 5);
+    assert_eq(y % 3, 1);
+    assert_eq(y % 5, 1);
+    assert_eq(y, 1);
+
+    // x ≡ 0 (mod 4), x ≡ 3 (mod 7) -> x = 24
+    let z = crt2(0, 4, 3, 7);
+    assert_eq(z % 4, 0);
+    assert_eq(z % 7, 3);
+    print("basic_crt2: ok");
+}
+
+fn test_crt3_system() {
+    // Classic: x ≡ 2 (mod 3), x ≡ 3 (mod 5), x ≡ 2 (mod 7) -> x = 23
+    let x = crt3(2, 3, 3, 5, 2, 7);
+    assert_eq(x % 3, 2);
+    assert_eq(x % 5, 3);
+    assert_eq(x % 7, 2);
+    assert_eq(x, 23);
+    print("crt3_system: ok");
+}
+
+fn test_mod_inverse() {
+    // mod_inverse(3, 7) = 5 since 3*5=15≡1 (mod 7)
+    assert_eq(mod_inverse(3, 7), 5);
+    // mod_inverse(2, 5) = 3 since 2*3=6≡1 (mod 5)
+    assert_eq(mod_inverse(2, 5), 3);
+    // mod_inverse(4, 9) = 7 since 4*7=28≡1 (mod 9)
+    assert_eq(mod_inverse(4, 9), 7);
+    // Self-check: a * inv(a) ≡ 1 (mod m)
+    let inv = mod_inverse(11, 13);
+    assert_eq((11 * inv) % 13, 1);
+    print("mod_inverse: ok");
+}
+
+fn test_extended_gcd() {
+    // gcd(35, 15) = 5; 35*1 + 15*(-2) = 5
+    let mut out = [0, 0];
+    let g = extended_gcd(35, 15, out);
+    assert_eq(g, 5);
+    assert_eq(35 * out[0] + 15 * out[1], 5);
+
+    // gcd(12, 8) = 4
+    let mut out2 = [0, 0];
+    let g2 = extended_gcd(12, 8, out2);
+    assert_eq(g2, 4);
+    assert_eq(12 * out2[0] + 8 * out2[1], 4);
+
+    // gcd(7, 3) = 1
+    let mut out3 = [0, 0];
+    let g3 = extended_gcd(7, 3, out3);
+    assert_eq(g3, 1);
+    assert_eq(7 * out3[0] + 3 * out3[1], 1);
+    print("extended_gcd: ok");
+}
+
+fn test_crt_uniqueness() {
+    // Verify uniqueness: adding modulus to solution still satisfies congruences.
+    let x = crt2(3, 5, 2, 7);
+    assert_eq(x % 5, 3);
+    assert_eq(x % 7, 2);
+    // Check x+35 also satisfies (another period).
+    assert_eq((x + 35) % 5, 3);
+    assert_eq((x + 35) % 7, 2);
+    // x ≡ 0 (mod 3), x ≡ 0 (mod 5): solution is 0 in [0,15).
+    let z = crt2(0, 3, 0, 5);
+    assert_eq(z, 0);
+    print("crt_uniqueness: ok");
+}
+
+fn main() -> Int {
+    test_basic_crt2();
+    test_crt3_system();
+    test_mod_inverse();
+    test_extended_gcd();
+    test_crt_uniqueness();
+    print("[OK] 527_interp_chinese_remainder");
+    0
+}

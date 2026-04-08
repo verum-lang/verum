@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: all
+// @tags: errors, recovery, try, finally, cleanup, resource
+// @description: Tests try/finally for resource cleanup guarantees.
+
+type Handle is { id: Int };
+
+fn open_resource(name: Text) -> Result<Handle, Text> {
+    Ok(Handle { id: 1 })
+}
+
+fn close_resource(h: Handle) {
+    print(f"Closing resource {h.id}");
+}
+
+fn process_resource(h: &Handle) -> Result<Int, Text> {
+    if h.id == 0 {
+        return Err("invalid handle");
+    }
+    Ok(h.id * 10)
+}
+
+fn use_resource() -> Result<Int, Text> {
+    let handle = open_resource("data")?;
+    let result = try {
+        process_resource(&handle)?
+    } finally {
+        close_resource(handle);
+    };
+    result
+}
+
+fn multi_resource() -> Result<Int, Text> {
+    let h1 = open_resource("first")?;
+    let h2 = open_resource("second")?;
+    let result = try {
+        let r1 = process_resource(&h1)?;
+        let r2 = process_resource(&h2)?;
+        r1 + r2
+    } finally {
+        close_resource(h2);
+        close_resource(h1);
+    };
+    result
+}
+
+fn main() {
+    match use_resource() {
+        Ok(val) => print(f"Got: {val}"),
+        Err(e) => print(f"Error: {e}"),
+    }
+}

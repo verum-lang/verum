@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, lift, error
+// @expected-error: M401
+// @description: Lift expression used outside of a quote context should fail
+
+// Lift can only be used within quote expressions
+meta fn test_bad_lift() -> Int {
+    let val = 42;
+    // ERROR: Cannot use lift outside of quote
+    lift(val)  // M401: Unquote/lift outside quote
+}
+
+fn main() {
+    let x = @test_bad_lift();
+}

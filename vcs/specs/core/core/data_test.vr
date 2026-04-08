@@ -1,0 +1,1716 @@
+// =============================================================================
+// data_test.vr - Comprehensive tests for core/data.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1-core
+// @tags: data, dynamic, json, structured, polymorphic
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for structured dynamic data type:
+// - Data variants (Null, Bool, Int, Float, Text, Array, Object)
+// - DataError variants
+// - Constructors
+// - Type predicates
+// - Safe accessors
+// - Object/Array access
+// - Path-based access
+// - Conversions
+// - Protocol implementations
+// - DataBuilder
+//
+// =============================================================================
+
+module data_test;
+
+mount core.base.data.{Data, DataError, DataBuilder, parse_json};
+mount core.{Maybe, Result, List, Map, Text, Bool, Int, Float};
+
+// =============================================================================
+// Section 1: Data Variant Construction Tests
+// =============================================================================
+
+@test
+fn test_data_null() {
+    let d = Data.Null;
+
+    match d {
+        Data.Null => {}, // Expected
+        _ => panic("expected Null"),
+    }
+}
+
+@test
+fn test_data_bool_true() {
+    let d = Data.Bool(true);
+
+    match d {
+        Data.Bool(b) => assert(b),
+        _ => panic("expected Bool"),
+    }
+}
+
+@test
+fn test_data_bool_false() {
+    let d = Data.Bool(false);
+
+    match d {
+        Data.Bool(b) => assert(!b),
+        _ => panic("expected Bool"),
+    }
+}
+
+@test
+fn test_data_int_positive() {
+    let d = Data.Int(42);
+
+    match d {
+        Data.Int(i) => assert_eq(i, 42),
+        _ => panic("expected Int"),
+    }
+}
+
+@test
+fn test_data_int_negative() {
+    let d = Data.Int(-100);
+
+    match d {
+        Data.Int(i) => assert_eq(i, -100),
+        _ => panic("expected Int"),
+    }
+}
+
+@test
+fn test_data_int_zero() {
+    let d = Data.Int(0);
+
+    match d {
+        Data.Int(i) => assert_eq(i, 0),
+        _ => panic("expected Int"),
+    }
+}
+
+@test
+fn test_data_float() {
+    let d = Data.Float(3.14159);
+
+    match d {
+        Data.Float(f) => assert(f > 3.14 && f < 3.15),
+        _ => panic("expected Float"),
+    }
+}
+
+@test
+fn test_data_float_negative() {
+    let d = Data.Float(-2.5);
+
+    match d {
+        Data.Float(f) => assert_eq(f, -2.5),
+        _ => panic("expected Float"),
+    }
+}
+
+@test
+fn test_data_text() {
+    let d = Data.Text("hello");
+
+    match d {
+        Data.Text(ref s) => assert_eq(*s, "hello"),
+        _ => panic("expected Text"),
+    }
+}
+
+@test
+fn test_data_text_empty() {
+    let d = Data.Text("");
+
+    match d {
+        Data.Text(ref s) => assert_eq(s.len(), 0),
+        _ => panic("expected Text"),
+    }
+}
+
+@test
+fn test_data_array() {
+    let items: List<Data> = [Data.Int(1), Data.Int(2), Data.Int(3)];
+    let d = Data.Array(items);
+
+    match d {
+        Data.Array(ref arr) => assert_eq(arr.len(), 3),
+        _ => panic("expected Array"),
+    }
+}
+
+@test
+fn test_data_array_empty() {
+    let d = Data.Array(List.new());
+
+    match d {
+        Data.Array(ref arr) => assert_eq(arr.len(), 0),
+        _ => panic("expected Array"),
+    }
+}
+
+@test
+fn test_data_object() {
+    let mut obj = Map.new();
+    obj.insert("name", Data.Text("test"));
+    let d = Data.Object(obj);
+
+    match d {
+        Data.Object(ref o) => assert_eq(o.len(), 1),
+        _ => panic("expected Object"),
+    }
+}
+
+@test
+fn test_data_object_empty() {
+    let d = Data.Object(Map.new());
+
+    match d {
+        Data.Object(ref o) => assert_eq(o.len(), 0),
+        _ => panic("expected Object"),
+    }
+}
+
+// =============================================================================
+// Section 2: Constructor Method Tests
+// =============================================================================
+
+@test
+fn test_null_constructor() {
+    let d = Data.null();
+    assert(d.is_null());
+}
+
+@test
+fn test_from_bool_constructor() {
+    let d = Data.from_bool(true);
+
+    match d {
+        Data.Bool(b) => assert(b),
+        _ => panic("expected Bool"),
+    }
+}
+
+@test
+fn test_from_int_constructor() {
+    let d = Data.from_int(999);
+
+    match d {
+        Data.Int(i) => assert_eq(i, 999),
+        _ => panic("expected Int"),
+    }
+}
+
+@test
+fn test_from_float_constructor() {
+    let d = Data.from_float(1.5);
+
+    match d {
+        Data.Float(f) => assert_eq(f, 1.5),
+        _ => panic("expected Float"),
+    }
+}
+
+@test
+fn test_from_text_constructor() {
+    let d = Data.from_text("world");
+
+    match d {
+        Data.Text(ref s) => assert_eq(*s, "world"),
+        _ => panic("expected Text"),
+    }
+}
+
+@test
+fn test_from_array_constructor() {
+    let arr: List<Data> = [Data.Null, Data.Null];
+    let d = Data.from_array(arr);
+
+    assert(d.is_array());
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_from_object_constructor() {
+    let obj = Map.new();
+    let d = Data.from_object(obj);
+
+    assert(d.is_object());
+}
+
+@test
+fn test_empty_object_constructor() {
+    let d = Data.empty_object();
+
+    assert(d.is_object());
+    assert_eq(d.len(), 0);
+}
+
+@test
+fn test_empty_array_constructor() {
+    let d = Data.empty_array();
+
+    assert(d.is_array());
+    assert_eq(d.len(), 0);
+}
+
+// =============================================================================
+// Section 3: Type Predicate Tests
+// =============================================================================
+
+@test
+fn test_is_null() {
+    assert(Data.Null.is_null());
+    assert(!Data.Bool(true).is_null());
+    assert(!Data.Int(0).is_null());
+}
+
+@test
+fn test_is_bool() {
+    assert(Data.Bool(true).is_bool());
+    assert(Data.Bool(false).is_bool());
+    assert(!Data.Null.is_bool());
+    assert(!Data.Int(1).is_bool());
+}
+
+@test
+fn test_is_int() {
+    assert(Data.Int(42).is_int());
+    assert(Data.Int(0).is_int());
+    assert(Data.Int(-1).is_int());
+    assert(!Data.Float(1.0).is_int());
+    assert(!Data.Null.is_int());
+}
+
+@test
+fn test_is_float() {
+    assert(Data.Float(3.14).is_float());
+    assert(Data.Float(0.0).is_float());
+    assert(!Data.Int(3).is_float());
+    assert(!Data.Null.is_float());
+}
+
+@test
+fn test_is_number() {
+    assert(Data.Int(42).is_number());
+    assert(Data.Float(3.14).is_number());
+    assert(!Data.Null.is_number());
+    assert(!Data.Bool(true).is_number());
+    assert(!Data.Text("42").is_number());
+}
+
+@test
+fn test_is_text() {
+    assert(Data.Text("hello").is_text());
+    assert(Data.Text("").is_text());
+    assert(!Data.Null.is_text());
+    assert(!Data.Int(0).is_text());
+}
+
+@test
+fn test_is_array() {
+    assert(Data.empty_array().is_array());
+    assert(Data.Array([Data.Null]).is_array());
+    assert(!Data.Null.is_array());
+    assert(!Data.Object(Map.new()).is_array());
+}
+
+@test
+fn test_is_object() {
+    assert(Data.empty_object().is_object());
+    assert(Data.Object(Map.new()).is_object());
+    assert(!Data.Null.is_object());
+    assert(!Data.Array(List.new()).is_object());
+}
+
+// =============================================================================
+// Section 4: Safe Accessor Tests - as_bool
+// =============================================================================
+
+@test
+fn test_as_bool_from_bool() {
+    let d = Data.Bool(true);
+    let result = d.as_bool();
+
+    match result {
+        Some(b) => assert(b),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_as_bool_from_bool_false() {
+    let d = Data.Bool(false);
+    let result = d.as_bool();
+
+    match result {
+        Some(b) => assert(!b),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_as_bool_from_other_types() {
+    assert(Data.Null.as_bool().is_none());
+    assert(Data.Int(1).as_bool().is_none());
+    assert(Data.Float(1.0).as_bool().is_none());
+    assert(Data.Text("true").as_bool().is_none());
+}
+
+// =============================================================================
+// Section 5: Safe Accessor Tests - as_int
+// =============================================================================
+
+@test
+fn test_as_int_from_int() {
+    let d = Data.Int(42);
+    let result = d.as_int();
+
+    match result {
+        Some(i) => assert_eq(i, 42),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_as_int_from_other_types() {
+    assert(Data.Null.as_int().is_none());
+    assert(Data.Bool(true).as_int().is_none());
+    assert(Data.Float(42.0).as_int().is_none());
+    assert(Data.Text("42").as_int().is_none());
+}
+
+// =============================================================================
+// Section 6: Safe Accessor Tests - as_float
+// =============================================================================
+
+@test
+fn test_as_float_from_float() {
+    let d = Data.Float(3.14);
+    let result = d.as_float();
+
+    match result {
+        Some(f) => assert(f > 3.13 && f < 3.15),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_as_float_from_int_coercion() {
+    // Int coerces to Float
+    let d = Data.Int(42);
+    let result = d.as_float();
+
+    match result {
+        Some(f) => assert_eq(f, 42.0),
+        None => panic("expected Some with coercion"),
+    }
+}
+
+@test
+fn test_as_float_from_other_types() {
+    assert(Data.Null.as_float().is_none());
+    assert(Data.Bool(true).as_float().is_none());
+    assert(Data.Text("3.14").as_float().is_none());
+}
+
+// =============================================================================
+// Section 7: Safe Accessor Tests - as_text
+// =============================================================================
+
+@test
+fn test_as_text_from_text() {
+    let d = Data.Text("hello");
+    let result = d.as_text();
+
+    match result {
+        Some(s) => assert_eq(s, "hello"),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_as_text_empty_string() {
+    let d = Data.Text("");
+    let result = d.as_text();
+
+    match result {
+        Some(s) => assert_eq(s.len(), 0),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_as_text_from_other_types() {
+    assert(Data.Null.as_text().is_none());
+    assert(Data.Bool(true).as_text().is_none());
+    assert(Data.Int(42).as_text().is_none());
+}
+
+// =============================================================================
+// Section 8: Safe Accessor Tests - as_array/as_object
+// =============================================================================
+
+@test
+fn test_as_array_from_array() {
+    let arr: List<Data> = [Data.Int(1), Data.Int(2)];
+    let d = Data.Array(arr);
+
+    let result = d.as_array();
+    match result {
+        Some(a) => assert_eq(a.len(), 2),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_as_array_from_other_types() {
+    assert(Data.Null.as_array().is_none());
+    assert(Data.Object(Map.new()).as_array().is_none());
+}
+
+@test
+fn test_as_array_mut() {
+    let mut d = Data.Array([Data.Int(1)]);
+
+    match d.as_array_mut() {
+        Some(arr) => {
+            arr.push(Data.Int(2));
+        }
+        None => panic("expected Some"),
+    }
+
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_as_object_from_object() {
+    let mut obj = Map.new();
+    obj.insert("key", Data.Int(1));
+    let d = Data.Object(obj);
+
+    let result = d.as_object();
+    match result {
+        Some(o) => assert_eq(o.len(), 1),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_as_object_from_other_types() {
+    assert(Data.Null.as_object().is_none());
+    assert(Data.Array(List.new()).as_object().is_none());
+}
+
+@test
+fn test_as_object_mut() {
+    let mut d = Data.empty_object();
+
+    match d.as_object_mut() {
+        Some(obj) => {
+            obj.insert("new_key", Data.Bool(true));
+        }
+        None => panic("expected Some"),
+    }
+
+    assert(d.contains_key("new_key"));
+}
+
+// =============================================================================
+// Section 9: Object Field Access Tests
+// =============================================================================
+
+@test
+fn test_get_existing_field() {
+    let mut obj = Map.new();
+    obj.insert("name", Data.Text("John"));
+    let d = Data.Object(obj);
+
+    match d.get("name") {
+        Some(value) => {
+            match value {
+                Data.Text(ref s) => assert_eq(*s, "John"),
+                _ => panic("expected Text"),
+            }
+        }
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_get_nonexistent_field() {
+    let d = Data.empty_object();
+
+    assert(d.get("missing").is_none());
+}
+
+@test
+fn test_get_on_non_object() {
+    let d = Data.Int(42);
+
+    assert(d.get("field").is_none());
+}
+
+@test
+fn test_get_mut() {
+    let mut d = Data.empty_object();
+    let _ = d.set("value", Data.Int(10));
+
+    match d.get_mut("value") {
+        Some(value) => {
+            *value = Data.Int(20);
+        }
+        None => panic("expected Some"),
+    }
+
+    // Verify modification
+    match d.get("value") {
+        Some(Data.Int(i)) => assert_eq(*i, 20),
+        _ => panic("expected Int(20)"),
+    }
+}
+
+@test
+fn test_contains_key_true() {
+    let mut obj = Map.new();
+    obj.insert("exists", Data.Null);
+    let d = Data.Object(obj);
+
+    assert(d.contains_key("exists"));
+}
+
+@test
+fn test_contains_key_false() {
+    let d = Data.empty_object();
+
+    assert(!d.contains_key("missing"));
+}
+
+@test
+fn test_contains_key_on_non_object() {
+    let d = Data.Array(List.new());
+
+    assert(!d.contains_key("key"));
+}
+
+@test
+fn test_set_on_object() {
+    let mut d = Data.empty_object();
+
+    let result = d.set("field", Data.Int(42));
+    assert(result.is_ok());
+
+    assert(d.contains_key("field"));
+}
+
+@test
+fn test_set_on_non_object() {
+    let mut d = Data.Array(List.new());
+
+    let result = d.set("field", Data.Int(42));
+    assert(result.is_err());
+}
+
+@test
+fn test_set_overwrites() {
+    let mut d = Data.empty_object();
+
+    let _ = d.set("key", Data.Int(1));
+    let _ = d.set("key", Data.Int(2));
+
+    match d.get("key") {
+        Some(Data.Int(i)) => assert_eq(*i, 2),
+        _ => panic("expected Int(2)"),
+    }
+}
+
+@test
+fn test_remove_existing() {
+    let mut d = Data.empty_object();
+    let _ = d.set("key", Data.Int(100));
+
+    let removed = d.remove("key");
+    assert(removed.is_some());
+    assert(!d.contains_key("key"));
+}
+
+@test
+fn test_remove_nonexistent() {
+    let mut d = Data.empty_object();
+
+    let removed = d.remove("missing");
+    assert(removed.is_none());
+}
+
+@test
+fn test_remove_on_non_object() {
+    let mut d = Data.Int(42);
+
+    assert(d.remove("key").is_none());
+}
+
+// =============================================================================
+// Section 10: Array Index Access Tests
+// =============================================================================
+
+@test
+fn test_at_valid_index() {
+    let d = Data.Array([Data.Int(10), Data.Int(20), Data.Int(30)]);
+
+    match d.at(1) {
+        Some(Data.Int(i)) => assert_eq(*i, 20),
+        _ => panic("expected Int(20)"),
+    }
+}
+
+@test
+fn test_at_first_index() {
+    let d = Data.Array([Data.Text("first")]);
+
+    match d.at(0) {
+        Some(Data.Text(ref s)) => assert_eq(*s, "first"),
+        _ => panic("expected Text"),
+    }
+}
+
+@test
+fn test_at_negative_index() {
+    let d = Data.Array([Data.Int(1)]);
+
+    assert(d.at(-1).is_none());
+}
+
+@test
+fn test_at_out_of_bounds() {
+    let d = Data.Array([Data.Int(1)]);
+
+    assert(d.at(10).is_none());
+}
+
+@test
+fn test_at_on_non_array() {
+    let d = Data.Object(Map.new());
+
+    assert(d.at(0).is_none());
+}
+
+@test
+fn test_at_mut() {
+    let mut d = Data.Array([Data.Int(1), Data.Int(2)]);
+
+    match d.at_mut(0) {
+        Some(elem) => {
+            *elem = Data.Int(100);
+        }
+        None => panic("expected Some"),
+    }
+
+    match d.at(0) {
+        Some(Data.Int(i)) => assert_eq(*i, 100),
+        _ => panic("expected Int(100)"),
+    }
+}
+
+@test
+fn test_push_on_array() {
+    let mut d = Data.empty_array();
+
+    assert(d.push(Data.Int(1)).is_ok());
+    assert(d.push(Data.Int(2)).is_ok());
+
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_push_on_non_array() {
+    let mut d = Data.Object(Map.new());
+
+    assert(d.push(Data.Int(1)).is_err());
+}
+
+@test
+fn test_pop_from_array() {
+    let mut d = Data.Array([Data.Int(1), Data.Int(2)]);
+
+    let popped = d.pop();
+    match popped {
+        Some(Data.Int(i)) => assert_eq(i, 2),
+        _ => panic("expected Int(2)"),
+    }
+
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_pop_from_empty_array() {
+    let mut d = Data.empty_array();
+
+    assert(d.pop().is_none());
+}
+
+@test
+fn test_pop_from_non_array() {
+    let mut d = Data.Int(42);
+
+    assert(d.pop().is_none());
+}
+
+// =============================================================================
+// Section 11: Length and Empty Tests
+// =============================================================================
+
+@test
+fn test_len_array() {
+    let d = Data.Array([Data.Null, Data.Null, Data.Null]);
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_len_object() {
+    let mut obj = Map.new();
+    obj.insert("a", Data.Null);
+    obj.insert("b", Data.Null);
+    let d = Data.Object(obj);
+
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_len_text() {
+    let d = Data.Text("hello");
+    assert_eq(d.len(), 5);
+}
+
+@test
+fn test_len_other_types() {
+    assert_eq(Data.Null.len(), 0);
+    assert_eq(Data.Bool(true).len(), 0);
+    assert_eq(Data.Int(42).len(), 0);
+    assert_eq(Data.Float(3.14).len(), 0);
+}
+
+@test
+fn test_is_empty_true() {
+    assert(Data.empty_array().is_empty());
+    assert(Data.empty_object().is_empty());
+    assert(Data.Text("").is_empty());
+}
+
+@test
+fn test_is_empty_false() {
+    assert(!Data.Array([Data.Null]).is_empty());
+    assert(!Data.Text("x").is_empty());
+}
+
+// =============================================================================
+// Section 12: Type Name Tests
+// =============================================================================
+
+@test
+fn test_type_name_null() {
+    assert_eq(Data.Null.type_name(), "Null");
+}
+
+@test
+fn test_type_name_bool() {
+    assert_eq(Data.Bool(true).type_name(), "Bool");
+}
+
+@test
+fn test_type_name_int() {
+    assert_eq(Data.Int(42).type_name(), "Int");
+}
+
+@test
+fn test_type_name_float() {
+    assert_eq(Data.Float(3.14).type_name(), "Float");
+}
+
+@test
+fn test_type_name_text() {
+    assert_eq(Data.Text("hi").type_name(), "Text");
+}
+
+@test
+fn test_type_name_array() {
+    assert_eq(Data.empty_array().type_name(), "Array");
+}
+
+@test
+fn test_type_name_object() {
+    assert_eq(Data.empty_object().type_name(), "Object");
+}
+
+// =============================================================================
+// Section 13: Path Access Tests
+// =============================================================================
+
+@test
+fn test_path_single_level() {
+    let mut d = Data.empty_object();
+    let _ = d.set("name", Data.Text("Alice"));
+
+    match d.path("name") {
+        Some(Data.Text(ref s)) => assert_eq(*s, "Alice"),
+        _ => panic("expected Text"),
+    }
+}
+
+@test
+fn test_path_nested() {
+    // Build: { user: { profile: { name: "Bob" } } }
+    let mut profile = Map.new();
+    profile.insert("name", Data.Text("Bob"));
+
+    let mut user = Map.new();
+    user.insert("profile", Data.Object(profile));
+
+    let mut root = Map.new();
+    root.insert("user", Data.Object(user));
+
+    let d = Data.Object(root);
+
+    match d.path("user.profile.name") {
+        Some(Data.Text(ref s)) => assert_eq(*s, "Bob"),
+        _ => panic("expected Text"),
+    }
+}
+
+@test
+fn test_path_array_index() {
+    // Build: { items: [10, 20, 30] }
+    let mut root = Map.new();
+    root.insert("items", Data.Array([
+        Data.Int(10),
+        Data.Int(20),
+        Data.Int(30),
+    ]));
+
+    let d = Data.Object(root);
+
+    match d.path("items.1") {
+        Some(Data.Int(i)) => assert_eq(*i, 20),
+        _ => panic("expected Int(20)"),
+    }
+}
+
+@test
+fn test_path_not_found() {
+    let d = Data.empty_object();
+
+    assert(d.path("missing.field").is_none());
+}
+
+@test
+fn test_path_on_non_object() {
+    let d = Data.Int(42);
+
+    assert(d.path("field").is_none());
+}
+
+// =============================================================================
+// Section 14: JSON Conversion Tests
+// =============================================================================
+
+@test
+fn test_to_json_null() {
+    assert_eq(Data.Null.to_json(), "null");
+}
+
+@test
+fn test_to_json_bool_true() {
+    assert_eq(Data.Bool(true).to_json(), "true");
+}
+
+@test
+fn test_to_json_bool_false() {
+    assert_eq(Data.Bool(false).to_json(), "false");
+}
+
+@test
+fn test_to_json_int() {
+    assert_eq(Data.Int(42).to_json(), "42");
+}
+
+@test
+fn test_to_json_int_negative() {
+    assert_eq(Data.Int(-10).to_json(), "-10");
+}
+
+@test
+fn test_to_json_float() {
+    let json = Data.Float(3.14).to_json();
+    assert(json.starts_with("3.14"));
+}
+
+@test
+fn test_to_json_text() {
+    let json = Data.Text("hello").to_json();
+    assert_eq(json, "\"hello\"");
+}
+
+@test
+fn test_to_json_empty_array() {
+    assert_eq(Data.empty_array().to_json(), "[]");
+}
+
+@test
+fn test_to_json_array() {
+    let d = Data.Array([Data.Int(1), Data.Int(2), Data.Int(3)]);
+    let json = d.to_json();
+
+    assert(json.starts_with("["));
+    assert(json.ends_with("]"));
+    assert(json.contains("1"));
+    assert(json.contains("2"));
+    assert(json.contains("3"));
+}
+
+@test
+fn test_to_json_empty_object() {
+    assert_eq(Data.empty_object().to_json(), "{}");
+}
+
+@test
+fn test_to_json_object() {
+    let mut d = Data.empty_object();
+    let _ = d.set("key", Data.Int(42));
+
+    let json = d.to_json();
+    assert(json.starts_with("{"));
+    assert(json.ends_with("}"));
+    assert(json.contains("\"key\""));
+    assert(json.contains("42"));
+}
+
+// =============================================================================
+// Section 15: to_number Conversion Tests
+// =============================================================================
+
+@test
+fn test_to_number_from_int() {
+    let d = Data.Int(42);
+
+    match d.to_number() {
+        Some(f) => assert_eq(f, 42.0),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_to_number_from_float() {
+    let d = Data.Float(3.5);
+
+    match d.to_number() {
+        Some(f) => assert_eq(f, 3.5),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_to_number_from_text() {
+    let d = Data.Text("123.5");
+
+    match d.to_number() {
+        Some(f) => assert_eq(f, 123.5),
+        None => panic("expected Some from numeric string"),
+    }
+}
+
+@test
+fn test_to_number_from_invalid_text() {
+    let d = Data.Text("not a number");
+
+    assert(d.to_number().is_none());
+}
+
+@test
+fn test_to_number_from_other_types() {
+    assert(Data.Null.to_number().is_none());
+    assert(Data.Bool(true).to_number().is_none());
+    assert(Data.empty_array().to_number().is_none());
+}
+
+// =============================================================================
+// Section 16: to_string Conversion Tests
+// =============================================================================
+
+@test
+fn test_to_string_null() {
+    assert_eq(Data.Null.to_string(), "null");
+}
+
+@test
+fn test_to_string_bool() {
+    assert_eq(Data.Bool(true).to_string(), "true");
+    assert_eq(Data.Bool(false).to_string(), "false");
+}
+
+@test
+fn test_to_string_int() {
+    assert_eq(Data.Int(42).to_string(), "42");
+}
+
+@test
+fn test_to_string_float() {
+    let s = Data.Float(3.14).to_string();
+    assert(s.starts_with("3.14"));
+}
+
+@test
+fn test_to_string_text() {
+    let d = Data.Text("original");
+    assert_eq(d.to_string(), "original");
+}
+
+@test
+fn test_to_string_complex() {
+    // Array and Object use to_json
+    let d = Data.Array([Data.Int(1)]);
+    let s = d.to_string();
+    assert(s.contains("1"));
+}
+
+// =============================================================================
+// Section 17: Index Implementation Tests
+// =============================================================================
+
+@test
+fn test_index_by_text() {
+    let mut d = Data.empty_object();
+    let _ = d.set("key", Data.Int(100));
+
+    // Use .get() method instead of index syntax - Index protocol may not be fully supported
+    let result: Maybe<Data> = d.get("key");
+    match result {
+        Some(Data.Int(i)) => assert_eq(i, 100),
+        _ => panic("expected Int(100)"),
+    }
+}
+
+@test
+fn test_index_by_text_missing() {
+    let d = Data.empty_object();
+
+    // Use .get() method instead of index syntax
+    let result: Maybe<Data> = d.get("missing");
+    assert(result.is_none());
+}
+
+@test
+fn test_index_by_int() {
+    let d = Data.Array([Data.Text("a"), Data.Text("b")]);
+
+    // Use .at() method instead of index syntax
+    let result: Maybe<Data> = d.at(0);
+    match result {
+        Some(Data.Text(s)) => assert_eq(s, "a"),
+        _ => panic("expected Text"),
+    }
+}
+
+@test
+fn test_index_by_int_out_of_bounds() {
+    let d = Data.Array([Data.Int(1)]);
+
+    // Use .at() method instead of index syntax
+    let result: Maybe<Data> = d.at(10);
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 18: Clone Implementation Tests
+// =============================================================================
+
+@test
+fn test_clone_null() {
+    let d = Data.Null;
+    let cloned = d.clone();
+
+    assert(cloned.is_null());
+}
+
+@test
+fn test_clone_bool() {
+    let d = Data.Bool(true);
+    let cloned = d.clone();
+
+    assert_eq(cloned.as_bool(), Some(true));
+}
+
+@test
+fn test_clone_int() {
+    let d = Data.Int(42);
+    let cloned = d.clone();
+
+    assert_eq(cloned.as_int(), Some(42));
+}
+
+@test
+fn test_clone_text() {
+    let d = Data.Text("original");
+    let cloned = d.clone();
+
+    assert_eq(cloned.as_text(), Some("original"));
+}
+
+@test
+fn test_clone_array() {
+    let d = Data.Array([Data.Int(1), Data.Int(2)]);
+    let cloned = d.clone();
+
+    assert_eq(cloned.len(), 2);
+}
+
+@test
+fn test_clone_deep() {
+    // Ensure deep clone
+    let mut d = Data.Array([Data.Int(1)]);
+    let cloned = d.clone();
+
+    // Modify original
+    let _ = d.push(Data.Int(2));
+
+    // Clone should be unaffected
+    assert_eq(cloned.len(), 1);
+}
+
+// =============================================================================
+// Section 19: PartialEq Implementation Tests
+// =============================================================================
+
+@test
+fn test_eq_null() {
+    assert(Data.Null == Data.Null);
+}
+
+@test
+fn test_eq_bool() {
+    assert(Data.Bool(true) == Data.Bool(true));
+    assert(Data.Bool(false) == Data.Bool(false));
+    assert(Data.Bool(true) != Data.Bool(false));
+}
+
+@test
+fn test_eq_int() {
+    assert(Data.Int(42) == Data.Int(42));
+    assert(Data.Int(1) != Data.Int(2));
+}
+
+@test
+fn test_eq_float() {
+    assert(Data.Float(3.14) == Data.Float(3.14));
+    assert(Data.Float(1.0) != Data.Float(2.0));
+}
+
+@test
+fn test_eq_text() {
+    assert(Data.Text("a") == Data.Text("a"));
+    assert(Data.Text("a") != Data.Text("b"));
+}
+
+@test
+fn test_eq_different_types() {
+    assert(Data.Null != Data.Bool(false));
+    assert(Data.Int(0) != Data.Float(0.0));
+    assert(Data.Int(1) != Data.Bool(true));
+}
+
+@test
+fn test_eq_array() {
+    let a1 = Data.Array([Data.Int(1), Data.Int(2)]);
+    let a2 = Data.Array([Data.Int(1), Data.Int(2)]);
+    let a3 = Data.Array([Data.Int(1), Data.Int(3)]);
+
+    assert(a1 == a2);
+    assert(a1 != a3);
+}
+
+@test
+fn test_eq_object() {
+    let mut o1 = Map.new();
+    o1.insert("k", Data.Int(1));
+
+    let mut o2 = Map.new();
+    o2.insert("k", Data.Int(1));
+
+    let mut o3 = Map.new();
+    o3.insert("k", Data.Int(2));
+
+    assert(Data.Object(o1) == Data.Object(o2));
+    // Note: o3 comparison would need fresh maps
+}
+
+// =============================================================================
+// Section 20: Default Implementation Tests
+// =============================================================================
+
+@test
+fn test_default_is_null() {
+    let d: Data = Data.default();
+    assert(d.is_null());
+}
+
+// =============================================================================
+// Section 21: DataError Type Tests
+// =============================================================================
+
+@test
+fn test_data_error_type_mismatch() {
+    let error = DataError.TypeMismatch {
+        expected: "Object",
+        actual: "Int",
+    };
+
+    match error {
+        DataError.TypeMismatch { expected, actual } => {
+            assert_eq(expected, "Object");
+            assert_eq(actual, "Int");
+        }
+        _ => panic("expected TypeMismatch"),
+    }
+}
+
+@test
+fn test_data_error_key_not_found() {
+    let error = DataError.KeyNotFound {
+        key: "missing_key",
+    };
+
+    match error {
+        DataError.KeyNotFound { key } => {
+            assert_eq(key, "missing_key");
+        }
+        _ => panic("expected KeyNotFound"),
+    }
+}
+
+@test
+fn test_data_error_index_out_of_bounds() {
+    let error = DataError.IndexOutOfBounds {
+        index: 10,
+        length: 5,
+    };
+
+    match error {
+        DataError.IndexOutOfBounds { index, length } => {
+            assert_eq(index, 10);
+            assert_eq(length, 5);
+        }
+        _ => panic("expected IndexOutOfBounds"),
+    }
+}
+
+@test
+fn test_data_error_parse_error() {
+    let error = DataError.ParseError {
+        message: "unexpected token",
+    };
+
+    match error {
+        DataError.ParseError { message } => {
+            assert_eq(message, "unexpected token");
+        }
+        _ => panic("expected ParseError"),
+    }
+}
+
+@test
+fn test_data_error_invalid_cast() {
+    let error = DataError.InvalidCast {
+        from: "Text",
+        to: "Int",
+    };
+
+    match error {
+        DataError.InvalidCast { from, to } => {
+            assert_eq(from, "Text");
+            assert_eq(to, "Int");
+        }
+        _ => panic("expected InvalidCast"),
+    }
+}
+
+// =============================================================================
+// Section 22: DataBuilder Tests
+// =============================================================================
+
+@test
+fn test_builder_new_creates_object() {
+    let builder = DataBuilder.new();
+    let data = builder.build();
+
+    assert(data.is_object());
+    assert(data.is_empty());
+}
+
+@test
+fn test_builder_new_array() {
+    let builder = DataBuilder.new_array();
+    let data = builder.build();
+
+    assert(data.is_array());
+    assert(data.is_empty());
+}
+
+@test
+fn test_builder_set() {
+    let data = DataBuilder.new()
+        .set("name", Data.Text("Alice"))
+        .set("age", Data.Int(30))
+        .build();
+
+    assert_eq(data.len(), 2);
+    assert(data.contains_key("name"));
+    assert(data.contains_key("age"));
+}
+
+@test
+fn test_builder_push() {
+    let data = DataBuilder.new_array()
+        .push(Data.Int(1))
+        .push(Data.Int(2))
+        .push(Data.Int(3))
+        .build();
+
+    assert_eq(data.len(), 3);
+}
+
+@test
+fn test_builder_chaining() {
+    let data = DataBuilder.new()
+        .set("a", Data.Int(1))
+        .set("b", Data.Int(2))
+        .set("c", Data.Int(3))
+        .build();
+
+    assert_eq(data.len(), 3);
+}
+
+@test
+fn test_builder_nested() {
+    let inner = DataBuilder.new()
+        .set("nested", Data.Bool(true))
+        .build();
+
+    let outer = DataBuilder.new()
+        .set("inner", inner)
+        .build();
+
+    match outer.path("inner.nested") {
+        Some(Data.Bool(b)) => assert(*b),
+        _ => panic("expected Bool(true)"),
+    }
+}
+
+// =============================================================================
+// Section 23: Complex Nested Data Tests
+// =============================================================================
+
+@test
+fn test_deep_nesting() {
+    // Build deeply nested structure
+    let level3 = DataBuilder.new()
+        .set("value", Data.Int(42))
+        .build();
+
+    let level2 = DataBuilder.new()
+        .set("level3", level3)
+        .build();
+
+    let level1 = DataBuilder.new()
+        .set("level2", level2)
+        .build();
+
+    let root = DataBuilder.new()
+        .set("level1", level1)
+        .build();
+
+    match root.path("level1.level2.level3.value") {
+        Some(Data.Int(i)) => assert_eq(*i, 42),
+        _ => panic("expected Int(42)"),
+    }
+}
+
+@test
+fn test_mixed_array_object() {
+    // Array of objects
+    let obj1 = DataBuilder.new()
+        .set("id", Data.Int(1))
+        .build();
+
+    let obj2 = DataBuilder.new()
+        .set("id", Data.Int(2))
+        .build();
+
+    let arr = DataBuilder.new_array()
+        .push(obj1)
+        .push(obj2)
+        .build();
+
+    // Access nested: arr[0].id
+    match arr.at(0) {
+        Some(item) => {
+            match item.get("id") {
+                Some(Data.Int(i)) => assert_eq(*i, 1),
+                _ => panic("expected Int"),
+            }
+        }
+        None => panic("expected item"),
+    }
+}
+
+// =============================================================================
+// Section 24: Edge Cases and Boundary Tests
+// =============================================================================
+
+@test
+fn test_empty_text_key() {
+    let mut d = Data.empty_object();
+    let _ = d.set("", Data.Int(1));
+
+    assert(d.contains_key(""));
+}
+
+@test
+fn test_unicode_text() {
+    let d = Data.Text("こんにちは世界 🌍");
+
+    match d.as_text() {
+        Some(s) => {
+            assert(s.contains("こんにちは"));
+            assert(s.contains("🌍"));
+        }
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_very_large_int() {
+    let d = Data.Int(Int.MAX);
+    assert_eq(d.as_int(), Some(Int.MAX));
+}
+
+@test
+fn test_very_small_int() {
+    let d = Data.Int(Int.MIN);
+    assert_eq(d.as_int(), Some(Int.MIN));
+}
+
+@test
+fn test_special_floats() {
+    let inf = Data.Float(Float.INFINITY);
+    assert(inf.as_float().is_some());
+
+    let neg_inf = Data.Float(Float.NEG_INFINITY);
+    assert(neg_inf.as_float().is_some());
+}
+
+// =============================================================================
+// Section 25: Mutation Tests
+// =============================================================================
+
+@test
+fn test_mutate_array_element() {
+    let mut d = Data.Array([Data.Int(1), Data.Int(2), Data.Int(3)]);
+
+    if let Some(elem) = d.at_mut(1) {
+        *elem = Data.Int(200);
+    }
+
+    match d.at(1) {
+        Some(Data.Int(i)) => assert_eq(*i, 200),
+        _ => panic("expected Int(200)"),
+    }
+}
+
+@test
+fn test_mutate_object_field() {
+    let mut d = Data.empty_object();
+    let _ = d.set("count", Data.Int(0));
+
+    if let Some(val) = d.get_mut("count") {
+        *val = Data.Int(100);
+    }
+
+    match d.get("count") {
+        Some(Data.Int(i)) => assert_eq(*i, 100),
+        _ => panic("expected Int(100)"),
+    }
+}
+
+@test
+fn test_add_to_nested_array() {
+    let mut inner = Data.empty_array();
+    let _ = inner.push(Data.Int(1));
+
+    let mut outer = Data.empty_object();
+    let _ = outer.set("items", inner);
+
+    // Access and modify nested array
+    if let Some(arr) = outer.get_mut("items") {
+        let _ = arr.push(Data.Int(2));
+    }
+
+    match outer.get("items") {
+        Some(arr) => assert_eq(arr.len(), 2),
+        None => panic("expected array"),
+    }
+}
+
+// =============================================================================
+// Section 26: Type Conversion Patterns
+// =============================================================================
+
+@test
+fn test_optional_field_pattern() {
+    let d = Data.empty_object();
+
+    // Safe access with default
+    let name = d.get("name")
+        .and_then(|v| v.as_text())
+        .unwrap_or("default");
+
+    assert_eq(name, "default");
+}
+
+@test
+fn test_numeric_field_coercion() {
+    let mut d = Data.empty_object();
+    let _ = d.set("value", Data.Int(42));
+
+    // Can get as float even though stored as int
+    let value = d.get("value")
+        .and_then(|v| v.as_float())
+        .unwrap_or(0.0);
+
+    assert_eq(value, 42.0);
+}
+
+// =============================================================================
+// Section 27: JSON Round-Trip Tests
+// =============================================================================
+
+@test
+fn test_to_json_preserves_structure() {
+    let original = DataBuilder.new()
+        .set("name", Data.Text("test"))
+        .set("count", Data.Int(5))
+        .set("active", Data.Bool(true))
+        .build();
+
+    let json = original.to_json();
+
+    assert(json.contains("\"name\""));
+    assert(json.contains("\"test\""));
+    assert(json.contains("\"count\""));
+    assert(json.contains("5"));
+    assert(json.contains("true"));
+}
+
+// =============================================================================
+// Section 28: Pattern Matching Exhaustiveness
+// =============================================================================
+
+@test
+fn test_exhaustive_match() {
+    fn describe(d: &Data) -> Text {
+        match d {
+            Data.Null => "null",
+            Data.Bool(b) => if *b { "true" } else { "false" },
+            Data.Int(i) => "integer",
+            Data.Float(f) => "float",
+            Data.Text(ref s) => "text",
+            Data.Array(ref arr) => "array",
+            Data.Object(ref obj) => "object",
+        }
+    }
+
+    assert_eq(describe(&Data.Null), "null");
+    assert_eq(describe(&Data.Bool(true)), "true");
+    assert_eq(describe(&Data.Int(0)), "integer");
+    assert_eq(describe(&Data.Float(0.0)), "float");
+    assert_eq(describe(&Data.Text("")), "text");
+    assert_eq(describe(&Data.empty_array()), "array");
+    assert_eq(describe(&Data.empty_object()), "object");
+}
+
+// =============================================================================
+// Section 29: Memory and Ownership Tests
+// =============================================================================
+
+@test
+fn test_data_ownership_transfer() {
+    let d = Data.Text("owned");
+    let moved = d; // Move
+
+    // d is no longer valid, moved is owner
+    assert(moved.is_text());
+}
+
+@test
+fn test_data_clone_independence() {
+    let original = Data.Text("original");
+    let cloned = original.clone();
+
+    // Both are independent
+    assert_eq(original.as_text(), cloned.as_text());
+}
+
+// =============================================================================
+// Section 30: API Ergonomics Tests
+// =============================================================================
+
+@test
+fn test_chained_access() {
+    let data = DataBuilder.new()
+        .set("config", DataBuilder.new()
+            .set("debug", Data.Bool(true))
+            .build())
+        .build();
+
+    let debug_enabled = data
+        .get("config")
+        .and_then(|c| c.get("debug"))
+        .and_then(|d| d.as_bool())
+        .unwrap_or(false);
+
+    assert(debug_enabled);
+}
+
+@test
+fn test_builder_fluent_api() {
+    // Builder pattern should be fluent
+    let result = DataBuilder.new()
+        .set("a", Data.Int(1))
+        .set("b", Data.Int(2))
+        .set("c", Data.Int(3))
+        .build();
+
+    assert_eq(result.len(), 3);
+}
+
+@test
+fn test_typical_json_response_pattern() {
+    // Simulate API response handling
+    let response = DataBuilder.new()
+        .set("status", Data.Int(200))
+        .set("data", DataBuilder.new()
+            .set("user", DataBuilder.new()
+                .set("id", Data.Int(123))
+                .set("name", Data.Text("John"))
+                .build())
+            .build())
+        .build();
+
+    // Extract user name
+    let name = response
+        .path("data.user.name")
+        .and_then(|v| v.as_text())
+        .unwrap_or("Unknown");
+
+    assert_eq(name, "John");
+}

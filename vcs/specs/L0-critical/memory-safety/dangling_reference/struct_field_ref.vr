@@ -1,0 +1,24 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, dangling-reference, struct, cbgr
+// @description: Tests that struct fields holding dangling references are detected at runtime via CBGR
+
+type Container is {
+    data_ref: &Int,
+};
+
+fn create_container() -> Container {
+    let value = 42;
+    // Reference to local - CBGR tracks generation
+    Container {
+        data_ref: &value,
+    }
+    // When function returns, 'value' is deallocated and generation is bumped
+}
+
+fn main() {
+    let c = create_container();
+    // Attempting to dereference causes CBGR generation check
+    print(*c.data_ref);  // PANIC: generation mismatch (value no longer exists)
+}

@@ -1,0 +1,656 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, matrix, linear-algebra, basic
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT basic tensor/matrix operations — mirror of interpreter test 023
+
+// ============================================================================
+// 2x2 matrix (row-major: [a b; c d])
+// ============================================================================
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2_new(a: Int, b: Int, c: Int, d: Int) -> Mat2 {
+    Mat2 { a: a, b: b, c: c, d: d }
+}
+
+fn mat2_identity() -> Mat2 {
+    Mat2 { a: 1, b: 0, c: 0, d: 1 }
+}
+
+fn mat2_zero() -> Mat2 {
+    Mat2 { a: 0, b: 0, c: 0, d: 0 }
+}
+
+fn mat2_add(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 { a: m.a + n.a, b: m.b + n.b, c: m.c + n.c, d: m.d + n.d }
+}
+
+fn mat2_sub(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 { a: m.a - n.a, b: m.b - n.b, c: m.c - n.c, d: m.d - n.d }
+}
+
+fn mat2_mul(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+fn mat2_scale(m: Mat2, s: Int) -> Mat2 {
+    Mat2 { a: m.a * s, b: m.b * s, c: m.c * s, d: m.d * s }
+}
+
+fn mat2_transpose(m: Mat2) -> Mat2 {
+    Mat2 { a: m.a, b: m.c, c: m.b, d: m.d }
+}
+
+fn mat2_det(m: Mat2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn mat2_trace(m: Mat2) -> Int {
+    m.a + m.d
+}
+
+// ============================================================================
+// 3x3 matrix (row-major: 9 elements)
+// ============================================================================
+
+type Mat3 is {
+    e00: Int, e01: Int, e02: Int,
+    e10: Int, e11: Int, e12: Int,
+    e20: Int, e21: Int, e22: Int
+};
+
+fn mat3_identity() -> Mat3 {
+    Mat3 {
+        e00: 1, e01: 0, e02: 0,
+        e10: 0, e11: 1, e12: 0,
+        e20: 0, e21: 0, e22: 1
+    }
+}
+
+fn mat3_zero() -> Mat3 {
+    Mat3 {
+        e00: 0, e01: 0, e02: 0,
+        e10: 0, e11: 0, e12: 0,
+        e20: 0, e21: 0, e22: 0
+    }
+}
+
+fn mat3_add(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        e00: a.e00 + b.e00, e01: a.e01 + b.e01, e02: a.e02 + b.e02,
+        e10: a.e10 + b.e10, e11: a.e11 + b.e11, e12: a.e12 + b.e12,
+        e20: a.e20 + b.e20, e21: a.e21 + b.e21, e22: a.e22 + b.e22
+    }
+}
+
+fn mat3_scale(m: Mat3, s: Int) -> Mat3 {
+    Mat3 {
+        e00: m.e00 * s, e01: m.e01 * s, e02: m.e02 * s,
+        e10: m.e10 * s, e11: m.e11 * s, e12: m.e12 * s,
+        e20: m.e20 * s, e21: m.e21 * s, e22: m.e22 * s
+    }
+}
+
+fn mat3_mul(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        e00: a.e00 * b.e00 + a.e01 * b.e10 + a.e02 * b.e20,
+        e01: a.e00 * b.e01 + a.e01 * b.e11 + a.e02 * b.e21,
+        e02: a.e00 * b.e02 + a.e01 * b.e12 + a.e02 * b.e22,
+        e10: a.e10 * b.e00 + a.e11 * b.e10 + a.e12 * b.e20,
+        e11: a.e10 * b.e01 + a.e11 * b.e11 + a.e12 * b.e21,
+        e12: a.e10 * b.e02 + a.e11 * b.e12 + a.e12 * b.e22,
+        e20: a.e20 * b.e00 + a.e21 * b.e10 + a.e22 * b.e20,
+        e21: a.e20 * b.e01 + a.e21 * b.e11 + a.e22 * b.e21,
+        e22: a.e20 * b.e02 + a.e21 * b.e12 + a.e22 * b.e22
+    }
+}
+
+fn mat3_transpose(m: Mat3) -> Mat3 {
+    Mat3 {
+        e00: m.e00, e01: m.e10, e02: m.e20,
+        e10: m.e01, e11: m.e11, e12: m.e21,
+        e20: m.e02, e21: m.e12, e22: m.e22
+    }
+}
+
+fn mat3_det(m: Mat3) -> Int {
+    m.e00 * (m.e11 * m.e22 - m.e12 * m.e21)
+    - m.e01 * (m.e10 * m.e22 - m.e12 * m.e20)
+    + m.e02 * (m.e10 * m.e21 - m.e11 * m.e20)
+}
+
+fn mat3_trace(m: Mat3) -> Int {
+    m.e00 + m.e11 + m.e22
+}
+
+// ============================================================================
+// Vector / dot product helpers
+// ============================================================================
+
+type Vec3 is { x: Int, y: Int, z: Int };
+
+fn vec3_dot(a: Vec3, b: Vec3) -> Int {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn vec3_add(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+}
+
+fn vec3_scale(v: Vec3, s: Int) -> Vec3 {
+    Vec3 { x: v.x * s, y: v.y * s, z: v.z * s }
+}
+
+fn vec3_cross(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x
+    }
+}
+
+// Matrix-vector multiply
+fn mat3_vec_mul(m: Mat3, v: Vec3) -> Vec3 {
+    Vec3 {
+        x: m.e00 * v.x + m.e01 * v.y + m.e02 * v.z,
+        y: m.e10 * v.x + m.e11 * v.y + m.e12 * v.z,
+        z: m.e20 * v.x + m.e21 * v.y + m.e22 * v.z
+    }
+}
+
+// ============================================================================
+// 4x4 matrix (row-major: 16 elements)
+// ============================================================================
+
+type Mat4 is {
+    e00: Int, e01: Int, e02: Int, e03: Int,
+    e10: Int, e11: Int, e12: Int, e13: Int,
+    e20: Int, e21: Int, e22: Int, e23: Int,
+    e30: Int, e31: Int, e32: Int, e33: Int
+};
+
+fn mat4_identity() -> Mat4 {
+    Mat4 {
+        e00: 1, e01: 0, e02: 0, e03: 0,
+        e10: 0, e11: 1, e12: 0, e13: 0,
+        e20: 0, e21: 0, e22: 1, e23: 0,
+        e30: 0, e31: 0, e32: 0, e33: 1
+    }
+}
+
+fn mat4_mul(a: Mat4, b: Mat4) -> Mat4 {
+    Mat4 {
+        e00: a.e00*b.e00 + a.e01*b.e10 + a.e02*b.e20 + a.e03*b.e30,
+        e01: a.e00*b.e01 + a.e01*b.e11 + a.e02*b.e21 + a.e03*b.e31,
+        e02: a.e00*b.e02 + a.e01*b.e12 + a.e02*b.e22 + a.e03*b.e32,
+        e03: a.e00*b.e03 + a.e01*b.e13 + a.e02*b.e23 + a.e03*b.e33,
+        e10: a.e10*b.e00 + a.e11*b.e10 + a.e12*b.e20 + a.e13*b.e30,
+        e11: a.e10*b.e01 + a.e11*b.e11 + a.e12*b.e21 + a.e13*b.e31,
+        e12: a.e10*b.e02 + a.e11*b.e12 + a.e12*b.e22 + a.e13*b.e32,
+        e13: a.e10*b.e03 + a.e11*b.e13 + a.e12*b.e23 + a.e13*b.e33,
+        e20: a.e20*b.e00 + a.e21*b.e10 + a.e22*b.e20 + a.e23*b.e30,
+        e21: a.e20*b.e01 + a.e21*b.e11 + a.e22*b.e21 + a.e23*b.e31,
+        e22: a.e20*b.e02 + a.e21*b.e12 + a.e22*b.e22 + a.e23*b.e32,
+        e23: a.e20*b.e03 + a.e21*b.e13 + a.e22*b.e23 + a.e23*b.e33,
+        e30: a.e30*b.e00 + a.e31*b.e10 + a.e32*b.e20 + a.e33*b.e30,
+        e31: a.e30*b.e01 + a.e31*b.e11 + a.e32*b.e21 + a.e33*b.e31,
+        e32: a.e30*b.e02 + a.e31*b.e12 + a.e32*b.e22 + a.e33*b.e32,
+        e33: a.e30*b.e03 + a.e31*b.e13 + a.e32*b.e23 + a.e33*b.e33
+    }
+}
+
+// ============================================================================
+// Element-wise operations on flat array (tensor-like)
+// ============================================================================
+
+type Arr9 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int, e8: Int };
+
+fn arr9_get(a: Arr9, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else { a.e8 }
+}
+
+fn arr9_add_scalar(a: Arr9, s: Int) -> Arr9 {
+    Arr9 {
+        e0: a.e0 + s, e1: a.e1 + s, e2: a.e2 + s,
+        e3: a.e3 + s, e4: a.e4 + s, e5: a.e5 + s,
+        e6: a.e6 + s, e7: a.e7 + s, e8: a.e8 + s
+    }
+}
+
+fn arr9_scale(a: Arr9, s: Int) -> Arr9 {
+    Arr9 {
+        e0: a.e0 * s, e1: a.e1 * s, e2: a.e2 * s,
+        e3: a.e3 * s, e4: a.e4 * s, e5: a.e5 * s,
+        e6: a.e6 * s, e7: a.e7 * s, e8: a.e8 * s
+    }
+}
+
+fn arr9_sum(a: Arr9) -> Int {
+    a.e0 + a.e1 + a.e2 + a.e3 + a.e4 + a.e5 + a.e6 + a.e7 + a.e8
+}
+
+// ============================================================================
+// Tests: 2x2 matrices
+// ============================================================================
+
+fn test_mat2_identity() {
+    let id = mat2_identity();
+    assert_eq(id.a, 1);
+    assert_eq(id.b, 0);
+    assert_eq(id.c, 0);
+    assert_eq(id.d, 1);
+    assert_eq(mat2_det(id), 1);
+    assert_eq(mat2_trace(id), 2);
+}
+
+fn test_mat2_add() {
+    let m = mat2_new(1, 2, 3, 4);
+    let n = mat2_new(5, 6, 7, 8);
+    let s = mat2_add(m, n);
+    assert_eq(s.a, 6);
+    assert_eq(s.b, 8);
+    assert_eq(s.c, 10);
+    assert_eq(s.d, 12);
+}
+
+fn test_mat2_sub() {
+    let m = mat2_new(10, 20, 30, 40);
+    let n = mat2_new(1, 2, 3, 4);
+    let d = mat2_sub(m, n);
+    assert_eq(d.a, 9);
+    assert_eq(d.b, 18);
+    assert_eq(d.c, 27);
+    assert_eq(d.d, 36);
+}
+
+fn test_mat2_mul() {
+    // [1 2; 3 4] * [5 6; 7 8] = [19 22; 43 50]
+    let m = mat2_new(1, 2, 3, 4);
+    let n = mat2_new(5, 6, 7, 8);
+    let p = mat2_mul(m, n);
+    assert_eq(p.a, 19);
+    assert_eq(p.b, 22);
+    assert_eq(p.c, 43);
+    assert_eq(p.d, 50);
+}
+
+fn test_mat2_mul_identity() {
+    // M * I = M
+    let m = mat2_new(3, 7, 2, 5);
+    let id = mat2_identity();
+    let p = mat2_mul(m, id);
+    assert_eq(p.a, 3);
+    assert_eq(p.b, 7);
+    assert_eq(p.c, 2);
+    assert_eq(p.d, 5);
+
+    // I * M = M
+    let q = mat2_mul(id, m);
+    assert_eq(q.a, 3);
+    assert_eq(q.b, 7);
+    assert_eq(q.c, 2);
+    assert_eq(q.d, 5);
+}
+
+fn test_mat2_scale() {
+    let m = mat2_new(1, 2, 3, 4);
+    let s = mat2_scale(m, 3);
+    assert_eq(s.a, 3);
+    assert_eq(s.b, 6);
+    assert_eq(s.c, 9);
+    assert_eq(s.d, 12);
+}
+
+fn test_mat2_transpose() {
+    let m = mat2_new(1, 2, 3, 4);
+    let t = mat2_transpose(m);
+    assert_eq(t.a, 1);
+    assert_eq(t.b, 3);
+    assert_eq(t.c, 2);
+    assert_eq(t.d, 4);
+
+    // Double transpose = original
+    let tt = mat2_transpose(t);
+    assert_eq(tt.a, 1);
+    assert_eq(tt.b, 2);
+    assert_eq(tt.c, 3);
+    assert_eq(tt.d, 4);
+}
+
+fn test_mat2_det() {
+    // det([1 2; 3 4]) = 1*4 - 2*3 = -2
+    let m = mat2_new(1, 2, 3, 4);
+    assert_eq(mat2_det(m), -2);
+
+    // det([3 7; 2 5]) = 15 - 14 = 1
+    let n = mat2_new(3, 7, 2, 5);
+    assert_eq(mat2_det(n), 1);
+
+    // Singular matrix
+    let s = mat2_new(2, 4, 1, 2);
+    assert_eq(mat2_det(s), 0);
+}
+
+fn test_mat2_power() {
+    // M^2 by multiplying M * M
+    let m = mat2_new(1, 1, 1, 0); // Fibonacci matrix
+    let m2 = mat2_mul(m, m);
+    // [1 1; 1 0]^2 = [2 1; 1 1]
+    assert_eq(m2.a, 2);
+    assert_eq(m2.b, 1);
+    assert_eq(m2.c, 1);
+    assert_eq(m2.d, 1);
+
+    let m3 = mat2_mul(m2, m);
+    // [2 1; 1 1] * [1 1; 1 0] = [3 2; 2 1]
+    assert_eq(m3.a, 3);
+    assert_eq(m3.b, 2);
+    assert_eq(m3.c, 2);
+    assert_eq(m3.d, 1);
+
+    // m^n: top-left element gives Fibonacci(n+1)
+    let m4 = mat2_mul(m3, m);
+    assert_eq(m4.a, 5); // Fib(5) = 5
+    let m5 = mat2_mul(m4, m);
+    assert_eq(m5.a, 8); // Fib(6) = 8
+}
+
+// ============================================================================
+// Tests: 3x3 matrices
+// ============================================================================
+
+fn test_mat3_identity() {
+    let id = mat3_identity();
+    assert_eq(id.e00, 1); assert_eq(id.e01, 0); assert_eq(id.e02, 0);
+    assert_eq(id.e10, 0); assert_eq(id.e11, 1); assert_eq(id.e12, 0);
+    assert_eq(id.e20, 0); assert_eq(id.e21, 0); assert_eq(id.e22, 1);
+    assert_eq(mat3_det(id), 1);
+    assert_eq(mat3_trace(id), 3);
+}
+
+fn test_mat3_add() {
+    let a = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let b = Mat3 {
+        e00: 9, e01: 8, e02: 7,
+        e10: 6, e11: 5, e12: 4,
+        e20: 3, e21: 2, e22: 1
+    };
+    let s = mat3_add(a, b);
+    // Each element should be 10
+    assert_eq(s.e00, 10); assert_eq(s.e01, 10); assert_eq(s.e02, 10);
+    assert_eq(s.e10, 10); assert_eq(s.e11, 10); assert_eq(s.e12, 10);
+    assert_eq(s.e20, 10); assert_eq(s.e21, 10); assert_eq(s.e22, 10);
+}
+
+fn test_mat3_mul() {
+    // Identity * A = A
+    let id = mat3_identity();
+    let a = Mat3 {
+        e00: 2, e01: 3, e02: 5,
+        e10: 7, e11: 11, e12: 13,
+        e20: 17, e21: 19, e22: 23
+    };
+    let p = mat3_mul(id, a);
+    assert_eq(p.e00, 2); assert_eq(p.e01, 3); assert_eq(p.e02, 5);
+    assert_eq(p.e10, 7); assert_eq(p.e11, 11); assert_eq(p.e12, 13);
+    assert_eq(p.e20, 17); assert_eq(p.e21, 19); assert_eq(p.e22, 23);
+
+    // Specific 3x3 multiply
+    // [1 2 3; 4 5 6; 7 8 9] * [9 8 7; 6 5 4; 3 2 1]
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let n = Mat3 {
+        e00: 9, e01: 8, e02: 7,
+        e10: 6, e11: 5, e12: 4,
+        e20: 3, e21: 2, e22: 1
+    };
+    let r = mat3_mul(m, n);
+    // Row 0: [30, 24, 18]
+    assert_eq(r.e00, 30); assert_eq(r.e01, 24); assert_eq(r.e02, 18);
+    // Row 1: [84, 69, 54]
+    assert_eq(r.e10, 84); assert_eq(r.e11, 69); assert_eq(r.e12, 54);
+    // Row 2: [138, 114, 90]
+    assert_eq(r.e20, 138); assert_eq(r.e21, 114); assert_eq(r.e22, 90);
+}
+
+fn test_mat3_transpose() {
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let t = mat3_transpose(m);
+    assert_eq(t.e00, 1); assert_eq(t.e01, 4); assert_eq(t.e02, 7);
+    assert_eq(t.e10, 2); assert_eq(t.e11, 5); assert_eq(t.e12, 8);
+    assert_eq(t.e20, 3); assert_eq(t.e21, 6); assert_eq(t.e22, 9);
+}
+
+fn test_mat3_det() {
+    // det([1 2 3; 4 5 6; 7 8 9]) = 0 (singular)
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    assert_eq(mat3_det(m), 0);
+
+    // det([2 3 5; 7 11 13; 17 19 23]) = -78
+    let n = Mat3 {
+        e00: 2, e01: 3, e02: 5,
+        e10: 7, e11: 11, e12: 13,
+        e20: 17, e21: 19, e22: 23
+    };
+    assert_eq(mat3_det(n), -78);
+}
+
+// ============================================================================
+// Tests: vector operations
+// ============================================================================
+
+fn test_dot_product() {
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+    // 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
+    assert_eq(vec3_dot(a, b), 32);
+
+    // Perpendicular vectors: dot = 0
+    let c = Vec3 { x: 1, y: 0, z: 0 };
+    let d = Vec3 { x: 0, y: 1, z: 0 };
+    assert_eq(vec3_dot(c, d), 0);
+}
+
+fn test_cross_product() {
+    // i x j = k
+    let i = Vec3 { x: 1, y: 0, z: 0 };
+    let j = Vec3 { x: 0, y: 1, z: 0 };
+    let k = vec3_cross(i, j);
+    assert_eq(k.x, 0);
+    assert_eq(k.y, 0);
+    assert_eq(k.z, 1);
+
+    // j x i = -k
+    let nk = vec3_cross(j, i);
+    assert_eq(nk.x, 0);
+    assert_eq(nk.y, 0);
+    assert_eq(nk.z, -1);
+
+    // (1,2,3) x (4,5,6) = (-3, 6, -3)
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+    let c = vec3_cross(a, b);
+    assert_eq(c.x, -3);
+    assert_eq(c.y, 6);
+    assert_eq(c.z, -3);
+}
+
+fn test_mat_vec_mul() {
+    // Identity * v = v
+    let id = mat3_identity();
+    let v = Vec3 { x: 3, y: 5, z: 7 };
+    let r = mat3_vec_mul(id, v);
+    assert_eq(r.x, 3);
+    assert_eq(r.y, 5);
+    assert_eq(r.z, 7);
+
+    // Scale matrix * v
+    let scale = Mat3 {
+        e00: 2, e01: 0, e02: 0,
+        e10: 0, e11: 3, e12: 0,
+        e20: 0, e21: 0, e22: 4
+    };
+    let s = mat3_vec_mul(scale, v);
+    assert_eq(s.x, 6);
+    assert_eq(s.y, 15);
+    assert_eq(s.z, 28);
+}
+
+// ============================================================================
+// Tests: 4x4 matrix
+// ============================================================================
+
+fn test_mat4_identity() {
+    let id = mat4_identity();
+    assert_eq(id.e00, 1); assert_eq(id.e11, 1);
+    assert_eq(id.e22, 1); assert_eq(id.e33, 1);
+    assert_eq(id.e01, 0); assert_eq(id.e10, 0);
+    assert_eq(id.e23, 0); assert_eq(id.e32, 0);
+}
+
+fn test_mat4_mul_identity() {
+    let id = mat4_identity();
+    let a = Mat4 {
+        e00: 1, e01: 2, e02: 3, e03: 4,
+        e10: 5, e11: 6, e12: 7, e13: 8,
+        e20: 9, e21: 10, e22: 11, e23: 12,
+        e30: 13, e31: 14, e32: 15, e33: 16
+    };
+    let p = mat4_mul(id, a);
+    assert_eq(p.e00, 1); assert_eq(p.e01, 2); assert_eq(p.e02, 3); assert_eq(p.e03, 4);
+    assert_eq(p.e10, 5); assert_eq(p.e11, 6); assert_eq(p.e12, 7); assert_eq(p.e13, 8);
+    assert_eq(p.e20, 9); assert_eq(p.e21, 10); assert_eq(p.e22, 11); assert_eq(p.e23, 12);
+    assert_eq(p.e30, 13); assert_eq(p.e31, 14); assert_eq(p.e32, 15); assert_eq(p.e33, 16);
+}
+
+fn test_mat4_mul() {
+    // Diagonal * Diagonal = element-wise product on diagonal
+    let d1 = Mat4 {
+        e00: 2, e01: 0, e02: 0, e03: 0,
+        e10: 0, e11: 3, e12: 0, e13: 0,
+        e20: 0, e21: 0, e22: 5, e23: 0,
+        e30: 0, e31: 0, e32: 0, e33: 7
+    };
+    let d2 = Mat4 {
+        e00: 11, e01: 0, e02: 0, e03: 0,
+        e10: 0, e11: 13, e12: 0, e13: 0,
+        e20: 0, e21: 0, e22: 17, e23: 0,
+        e30: 0, e31: 0, e32: 0, e33: 19
+    };
+    let p = mat4_mul(d1, d2);
+    assert_eq(p.e00, 22);
+    assert_eq(p.e11, 39);
+    assert_eq(p.e22, 85);
+    assert_eq(p.e33, 133);
+    // Off-diagonals should be 0
+    assert_eq(p.e01, 0);
+    assert_eq(p.e10, 0);
+    assert_eq(p.e23, 0);
+    assert_eq(p.e32, 0);
+}
+
+// ============================================================================
+// Fibonacci via matrix exponentiation
+// ============================================================================
+
+fn fibonacci_mat(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        let mut result = mat2_new(1, 1, 1, 0);
+        let base = mat2_new(1, 1, 1, 0);
+        let mut i = 2;
+        while i <= n {
+            result = mat2_mul(result, base);
+            i = i + 1;
+        }
+        result.b // Fib(n) is in position (0,1) after n multiplications
+    }
+}
+
+fn test_fibonacci_matrix() {
+    assert_eq(fibonacci_mat(0), 0);
+    assert_eq(fibonacci_mat(1), 1);
+    assert_eq(fibonacci_mat(2), 1);
+    assert_eq(fibonacci_mat(3), 2);
+    assert_eq(fibonacci_mat(4), 3);
+    assert_eq(fibonacci_mat(5), 5);
+    assert_eq(fibonacci_mat(6), 8);
+    assert_eq(fibonacci_mat(7), 13);
+    assert_eq(fibonacci_mat(10), 55);
+}
+
+// ============================================================================
+// Tests: element-wise operations
+// ============================================================================
+
+fn test_element_wise_ops() {
+    let a = Arr9 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8, e8: 9 };
+
+    // Add constant
+    let b = arr9_add_scalar(a, 10);
+    assert_eq(arr9_get(b, 0), 11);
+    assert_eq(arr9_get(b, 4), 15);
+    assert_eq(arr9_get(b, 8), 19);
+
+    // Scale
+    let c = arr9_scale(a, 3);
+    assert_eq(arr9_get(c, 0), 3);
+    assert_eq(arr9_get(c, 4), 15);
+    assert_eq(arr9_get(c, 8), 27);
+
+    // Sum = 1+2+...+9 = 45
+    assert_eq(arr9_sum(a), 45);
+}
+
+fn main() -> Int {
+    test_mat2_identity();
+    test_mat2_add();
+    test_mat2_sub();
+    test_mat2_mul();
+    test_mat2_mul_identity();
+    test_mat2_scale();
+    test_mat2_transpose();
+    test_mat2_det();
+    test_mat2_power();
+    test_mat3_identity();
+    test_mat3_add();
+    test_mat3_mul();
+    test_mat3_transpose();
+    test_mat3_det();
+    test_dot_product();
+    test_cross_product();
+    test_mat_vec_mul();
+    test_mat4_identity();
+    test_mat4_mul_identity();
+    test_mat4_mul();
+    test_fibonacci_matrix();
+    test_element_wise_ops();
+    print("[OK] 130_tensor_basic_aot");
+    0
+}

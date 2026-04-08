@@ -1,0 +1,387 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: patterns, exhaustiveness, non-exhaustive, error
+//
+// Tests non-exhaustive pattern matching errors.
+// The compiler must reject matches that don't cover all possible values.
+
+//------------------------------------------------------------------------------
+// Type Definitions
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+type Weekday is
+    | Monday
+    | Tuesday
+    | Wednesday
+    | Thursday
+    | Friday
+    | Saturday
+    | Sunday;
+
+type Direction is
+    | North
+    | South
+    | East
+    | West;
+
+//------------------------------------------------------------------------------
+// Missing Boolean Case
+//------------------------------------------------------------------------------
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'false'"
+/// ERROR: Missing false case.
+fn missing_false(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        // ERROR: Missing false
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'true'"
+/// ERROR: Missing true case.
+fn missing_true(b: Bool) -> Text {
+    match b {
+        false => "no",
+        // ERROR: Missing true
+    }
+}
+
+//------------------------------------------------------------------------------
+// Missing Enum Variants
+//------------------------------------------------------------------------------
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Blue'"
+/// ERROR: Missing Blue variant.
+fn missing_blue(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        // ERROR: Missing Blue
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Red', 'Green'"
+/// ERROR: Missing multiple variants.
+fn missing_multiple_colors(c: Color) -> Text {
+    match c {
+        Blue => "blue",
+        // ERROR: Missing Red and Green
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'West'"
+/// ERROR: Missing one Direction.
+fn missing_west(d: Direction) -> Text {
+    match d {
+        North => "up",
+        South => "down",
+        East => "right",
+        // ERROR: Missing West
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Thursday', 'Friday', 'Saturday', 'Sunday'"
+/// ERROR: Missing several Weekday variants.
+fn missing_weekdays(day: Weekday) -> Text {
+    match day {
+        Monday => "monday",
+        Tuesday => "tuesday",
+        Wednesday => "wednesday",
+        // ERROR: Missing Thursday through Sunday
+    }
+}
+
+//------------------------------------------------------------------------------
+// Missing Maybe/Result Variants
+//------------------------------------------------------------------------------
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'None'"
+/// ERROR: Missing None variant.
+fn missing_none(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        // ERROR: Missing None
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Some(_)'"
+/// ERROR: Missing Some variant.
+fn missing_some(m: Maybe<Int>) -> Int {
+    match m {
+        None => 0,
+        // ERROR: Missing Some(_)
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Err(_)'"
+/// ERROR: Missing Err variant.
+fn missing_err(r: Result<Int, Text>) -> Int {
+    match r {
+        Ok(x) => x,
+        // ERROR: Missing Err(_)
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Ok(_)'"
+/// ERROR: Missing Ok variant.
+fn missing_ok(r: Result<Int, Text>) -> Int {
+    match r {
+        Err(_) => -1,
+        // ERROR: Missing Ok(_)
+    }
+}
+
+//------------------------------------------------------------------------------
+// Missing Tuple Combinations
+//------------------------------------------------------------------------------
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing '(false, false)'"
+/// ERROR: Missing one boolean tuple combination.
+fn missing_bool_combo(pair: (Bool, Bool)) -> Int {
+    match pair {
+        (true, true) => 3,
+        (true, false) => 2,
+        (false, true) => 1,
+        // ERROR: Missing (false, false)
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing '(Red, Green)', '(Red, Blue)', ..."
+/// ERROR: Missing most color pair combinations.
+fn missing_color_combos(pair: (Color, Color)) -> Int {
+    match pair {
+        (Red, Red) => 0,
+        (Green, Green) => 1,
+        (Blue, Blue) => 2,
+        // ERROR: Missing off-diagonal combinations
+    }
+}
+
+//------------------------------------------------------------------------------
+// Missing Nested Cases
+//------------------------------------------------------------------------------
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Some(None)'"
+/// ERROR: Missing Some(None) in nested Maybe.
+fn missing_nested_case(mm: Maybe<Maybe<Int>>) -> Int {
+    match mm {
+        Some(Some(x)) => x,
+        None => 0,
+        // ERROR: Missing Some(None)
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Ok(None)'"
+/// ERROR: Missing Ok(None) in Result<Maybe>.
+fn missing_result_maybe_case(r: Result<Maybe<Int>, Text>) -> Int {
+    match r {
+        Ok(Some(x)) => x,
+        Err(_) => -1,
+        // ERROR: Missing Ok(None)
+    }
+}
+
+//------------------------------------------------------------------------------
+// Missing Range Cases
+//------------------------------------------------------------------------------
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing integer values"
+/// ERROR: Integer match without wildcard or complete ranges.
+fn missing_int_wildcard(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        // ERROR: Missing all other integers
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing char values"
+/// ERROR: Char match without complete coverage.
+fn missing_char_wildcard(c: Char) -> Text {
+    match c {
+        'a' => "a",
+        'b' => "b",
+        'c' => "c",
+        // ERROR: Missing all other chars
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing range '..0'"
+/// ERROR: Ranges don't cover all integers.
+fn missing_negative_range(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1..=100 => "small positive",
+        101.. => "large positive",
+        // ERROR: Missing negative numbers (..0)
+    }
+}
+
+//------------------------------------------------------------------------------
+// Missing with Or-Patterns
+//------------------------------------------------------------------------------
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Thursday'"
+/// ERROR: Or-pattern doesn't cover all variants.
+fn or_pattern_incomplete(day: Weekday) -> Text {
+    match day {
+        Monday | Tuesday | Wednesday => "early week",
+        Friday => "TGIF",
+        Saturday | Sunday => "weekend",
+        // ERROR: Missing Thursday
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Green'"
+/// ERROR: Or-pattern missing one variant.
+fn or_pattern_missing_color(c: Color) -> Text {
+    match c {
+        Red | Blue => "primary",
+        // ERROR: Missing Green
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guards Don't Help Exhaustiveness
+//------------------------------------------------------------------------------
+
+// @test: typecheck-fail
+// @expected-error: E401 "Guard patterns may not be exhaustive"
+/// ERROR: Guards can't prove exhaustiveness.
+fn guard_not_exhaustive(n: Int) -> Text {
+    match n {
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        // ERROR: Compiler can't prove x == 0 is covered
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E401 "Guard patterns may not be exhaustive"
+/// ERROR: Even with complete-looking guards.
+fn guard_seemingly_complete(n: Int) -> Text {
+    match n {
+        x if x >= 0 => "non-negative",
+        x if x <= 0 => "non-positive",
+        // ERROR: Guards overlap but compiler can't prove coverage
+    }
+}
+
+//------------------------------------------------------------------------------
+// Missing in Expression Position
+//------------------------------------------------------------------------------
+
+// @test: typecheck-fail
+// @expected-error: E402 "Non-exhaustive match in expression position"
+/// ERROR: Non-exhaustive match used as expression value.
+fn non_exhaustive_expression(c: Color) -> Int {
+    let value = match c {
+        Red => 1,
+        Green => 2,
+        // ERROR: What value for Blue?
+    };
+    value
+}
+
+// @test: typecheck-fail
+// @expected-error: E402 "Non-exhaustive match in expression position"
+/// ERROR: Return value depends on incomplete match.
+fn non_exhaustive_return(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        // ERROR: No value for None case
+    }
+}
+
+//------------------------------------------------------------------------------
+// Missing Recursive Cases
+//------------------------------------------------------------------------------
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Cons(_, _)'"
+/// ERROR: Missing Cons variant in list.
+fn list_missing_cons(list: ConsList<Int>) -> Int {
+    match list {
+        Nil => 0,
+        // ERROR: Missing Cons(_, _)
+    }
+}
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: missing 'Nil'"
+/// ERROR: Missing Nil variant in list.
+fn list_missing_nil(list: ConsList<Int>) -> Int {
+    match list {
+        Cons(x, _) => x,
+        // ERROR: Missing Nil
+    }
+}
+
+//------------------------------------------------------------------------------
+// Struct Pattern Without Wildcard
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// @test: typecheck-fail
+// @expected-error: E400 "Non-exhaustive patterns: Point can have any values"
+/// ERROR: Specific struct literals don't cover all points.
+fn point_specific_values(p: Point) -> Text {
+    match p {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x: 0, y: _ } => "y-axis",
+        Point { x: _, y: 0 } => "x-axis",
+        // ERROR: Missing points not on axes
+    }
+}
+
+//------------------------------------------------------------------------------
+// Note About Pattern Usefulness
+//------------------------------------------------------------------------------
+
+// These tests verify that the compiler correctly rejects non-exhaustive patterns.
+// Each error should include:
+// 1. The missing pattern(s)
+// 2. The location of the match expression
+// 3. A suggestion to add wildcard if exhaustive list would be too long

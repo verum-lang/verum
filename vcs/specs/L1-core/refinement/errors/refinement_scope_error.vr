@@ -1,0 +1,188 @@
+// @test: typecheck-fail
+// no specific error code expected — scope errors may appear as various E-codes
+// @tier: 0
+// @level: L1
+// @tags: refinement, errors, scope, visibility
+// @description: Scope and visibility errors in refinement predicates
+
+/// Error E0505: Refinement scope error
+/// Occurs when a refinement predicate references undefined, out-of-scope,
+/// or inaccessible identifiers.
+
+// ============================================================================
+// Undefined identifiers in refinements
+// ============================================================================
+
+/// ERROR: 'undefined_var' is not defined
+type UndefinedRef is Int{> undefined_var};
+
+/// ERROR: 'nonexistent' function doesn't exist
+type UndefinedFn is Int{nonexistent(it)};
+
+/// ERROR: Unknown type in refinement
+type UndefinedType is Int{it is UndefinedTypeName};
+
+// ============================================================================
+// Out of scope variable references
+// ============================================================================
+
+fn outer_scope() {
+    let local_var = 10;
+
+    // ERROR: local_var is not accessible in type definition scope
+    type UsesLocal is Int{> local_var};  // Error: local_var not in scope
+}
+
+fn parameter_scope(param: Int) {
+    // ERROR: Function parameters not in refinement scope of type alias
+    type UsesParam is Int{> param};  // Error: param not in scope
+}
+
+// ============================================================================
+// Self-reference before definition
+// ============================================================================
+
+/// ERROR: Type references itself in refinement before fully defined
+type SelfRef is Int{it > SelfRef.default()};
+
+/// ERROR: Mutual recursion in refinement
+type MutualA is Int{> MutualB.min};
+type MutualB is Int{< MutualA.max};
+
+// ============================================================================
+// Private field access in refinements
+// ============================================================================
+
+module inner {
+    type PrivateFields is {
+        public_field: Int,
+        private_field: Int,  // Assume private by default
+    };
+}
+
+/// ERROR: Cannot access private field in refinement
+type AccessPrivate is inner.PrivateFields{it.private_field > 0};
+
+// ============================================================================
+// Generic parameter scope errors
+// ============================================================================
+
+/// ERROR: T is not in scope in this refinement
+type UsesUnboundGeneric is Int{it > T.size};
+
+fn generic_scope<T>() {
+    // ERROR: T is not a value, cannot use in value comparison
+    type UsesGenericAsValue is Int{it > T};
+}
+
+/// ERROR: Generic bound references unknown type
+fn bad_generic_bound<T: UnknownProtocol>() -> T {
+    panic("unreachable")
+}
+
+// ============================================================================
+// Closure capture scope errors
+// ============================================================================
+
+fn closure_scope() {
+    let captured = 10;
+
+    // ERROR: Cannot capture local in type-level refinement
+    type CapturesLocal is Int where |x| x > captured;
+}
+
+// ============================================================================
+// Import scope errors
+// ============================================================================
+
+// Assume std.math.PI exists
+// link std.math;  // Commented out - not imported
+
+/// ERROR: PI not imported/in scope
+type UsesPi is Float{it < PI};
+
+/// ERROR: Qualified path to non-imported module
+type UsesQualified is Float{it < std.math.PI};  // std.math not imported
+
+// ============================================================================
+// Shadowing errors in refinements
+// ============================================================================
+
+const MAX_SIZE: Int = 100;
+
+fn shadowing_error() {
+    let MAX_SIZE = "not a number";  // Shadows const
+
+    // ERROR: MAX_SIZE is now Text in this scope, not Int
+    type UsesShadowed is Int{it < MAX_SIZE};  // Type error or scope confusion
+}
+
+// ============================================================================
+// Associated type scope errors
+// ============================================================================
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+/// ERROR: Item is not in scope outside protocol/impl context
+type UsesAssociated is Int{it > Item};
+
+/// ERROR: Self not valid outside impl/protocol context
+type UsesSelf is Int{it > Self.default()};
+
+// ============================================================================
+// Lifetime/region scope errors (if applicable)
+// ============================================================================
+
+/// ERROR: Lifetime parameter 'a not in scope
+type UsesLifetime<'a> is &'a Int{*it > 0};  // 'a might not be valid here
+
+// ============================================================================
+// Meta-level scope errors
+// ============================================================================
+
+meta fn compile_time_const() -> Int {
+    42
+}
+
+/// ERROR: Cannot use meta function result in runtime refinement directly
+type UsesMeta is Int{it > compile_time_const()};
+
+// ============================================================================
+// Nested scope visibility
+// ============================================================================
+
+module outer_mod {
+    const OUTER_CONST: Int = 100;
+
+    module inner_mod {
+        const INNER_CONST: Int = 50;
+
+        // ERROR: parent module const not automatically visible
+        type UsesOuter is Int{it < OUTER_CONST};  // May need super.OUTER_CONST
+    }
+}
+
+/// ERROR: Cannot access nested module private const
+type UsesNested is Int{it < outer_mod.inner_mod.INNER_CONST};
+
+// ============================================================================
+// Expected diagnostics
+// ============================================================================
+
+// Expected error message format:
+// error[E0505]: refinement scope error
+//   --> refinement_scope_error.vr:12:25
+//    |
+// 12 | type UndefinedRef is Int{> undefined_var};
+//    |                         ^^^^^^^^^^^^^^^^
+//    |
+//    = note: identifier `undefined_var` is not defined in this scope
+//    = help: check that the identifier is defined and accessible
+//    = help: if referencing a constant, ensure it is imported
+
+fn main() {
+    // This file should not compile - all refinements have scope errors
+}

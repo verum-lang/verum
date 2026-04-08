@@ -1,0 +1,185 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, z_algorithm, z_array, string_matching, pattern_search
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Z-algorithm: compute the Z-array of a string, then use it for pattern matching.
+//
+// Z[i] = length of the longest substring starting at s[i] that is also a prefix of s.
+// Z[0] is defined as 0 (or len(s), depending on convention; we use 0 here).
+//
+// Algorithm (O(n)):
+//   Maintain [l, r] = rightmost Z-box (substring [l..r] matches prefix).
+//   For each i: if i < r, Z[i] = min(r-i+1, Z[i-l]) as a starting point,
+//   then extend naively.
+//
+// Strings encoded as [Int; 32]. A sentinel value (-1) terminates the string.
+// Pattern matching: build Z-array of (pat + sentinel + text), then all
+// positions i in text portion where Z[i] == plen are matches.
+
+fn z_length(s: [Int; 32]) -> Int {
+    let mut n = 0;
+    while n < 32 && s[n] != -1 { n = n + 1; }
+    n
+}
+
+fn z_build(s: [Int; 32], n: Int, zarr: [Int; 32]) {
+    let mut i = 0;
+    while i < n { zarr[i] = 0; i = i + 1; }
+    // zarr[0] = 0 by convention
+    let mut l = 0;
+    let mut r = 0;
+    i = 1;
+    while i < n {
+        if i < r {
+            let start = zarr[i - l];
+            let rem   = r - i + 1;
+            zarr[i] = if start < rem { start } else { rem };
+        }
+        // Try to extend
+        while i + zarr[i] < n && s[zarr[i]] == s[i + zarr[i]] {
+            zarr[i] = zarr[i] + 1;
+        }
+        // Update Z-box
+        if i + zarr[i] - 1 > r {
+            l = i;
+            r = i + zarr[i] - 1;
+        }
+        i = i + 1;
+    }
+}
+
+// Z-based pattern matching.
+// Builds combined string: pat[0..plen] + sentinel(-2) + text[0..tlen].
+// Finds all positions in text where match occurs.
+// Stores match start indices (in text) in matches[]; count in nm[0].
+fn z_search(pat: [Int; 32], plen: Int,
+            text: [Int; 32], tlen: Int,
+            combined: [Int; 32], zarr: [Int; 32],
+            matches: [Int; 16], nm: [Int; 8]) {
+    nm[0] = 0;
+    // Build combined: pat + (-2) + text
+    let mut i = 0;
+    while i < plen { combined[i] = pat[i]; i = i + 1; }
+    combined[plen] = -2;  // separator (won't match any element)
+    i = 0;
+    while i < tlen { combined[plen + 1 + i] = text[i]; i = i + 1; }
+    let total = plen + 1 + tlen;
+    // Mark the end
+    if total < 32 { combined[total] = -1; }
+    z_build(combined, total, zarr);
+    // Find positions where zarr[i] == plen (i in text portion)
+    i = plen + 1;
+    while i < total {
+        if zarr[i] == plen {
+            matches[nm[0]] = i - plen - 1;
+            nm[0] = nm[0] + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn test_z_array_aabxaa() {
+    // s = "aabxaa" encoded as [1,1,2,3,1,1].
+    // Z[0]=0 (convention), Z[1]: s[1..)="abxaa" prefix match with s: s[0]=1,s[1]=1 -> Z[1]=1.
+    // Wait: s[1]=1=s[0]=1, s[2]=2!=s[1]=1. Z[1]=1.
+    // Z[2]: s[2]=2!=s[0]=1. Z[2]=0.
+    // Z[3]: s[3]=3!=s[0]=1. Z[3]=0.
+    // Z[4]: s[4]=1=s[0], s[5]=1=s[1], s[6] out of bounds. Z[4]=2.
+    // Z[5]: s[5]=1=s[0], s[6] OOB. Z[5]=1.
+    let mut s = [1,1,2,3,1,1,-1,0,0,0,0,0,0,0,0,0,
+                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut z = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    z_build(s, 6, z);
+    assert_eq(z[0], 0);
+    assert_eq(z[1], 1);
+    assert_eq(z[2], 0);
+    assert_eq(z[3], 0);
+    assert_eq(z[4], 2);
+    assert_eq(z[5], 1);
+    print("z_aabxaa: ok");
+}
+
+fn test_z_all_same() {
+    // s = [1,1,1,1] (aaaa).
+    // Z[0]=0, Z[1]=3, Z[2]=2, Z[3]=1.
+    let mut s = [1,1,1,1,-1,0,0,0,0,0,0,0,0,0,0,0,
+                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut z = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    z_build(s, 4, z);
+    assert_eq(z[0], 0);
+    assert_eq(z[1], 3);
+    assert_eq(z[2], 2);
+    assert_eq(z[3], 1);
+    print("z_all_same: ok");
+}
+
+fn test_z_search_single() {
+    // text=[1,2,3,1,2,5], pat=[1,2]. Matches at 0 and 3.
+    let mut pat  = [1,2,-1,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut text = [1,2,3,1,2,5,-1,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut combined = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut zarr     = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut matches  = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nm       = [0,0,0,0,0,0,0,0];
+    z_search(pat, 2, text, 6, combined, zarr, matches, nm);
+    assert_eq(nm[0], 2);
+    assert_eq(matches[0], 0);
+    assert_eq(matches[1], 3);
+    print("z_search_single: ok");
+}
+
+fn test_z_no_match() {
+    // pat=[5,6], text=[1,2,3,4]. No match.
+    let mut pat  = [5,6,-1,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut text = [1,2,3,4,-1,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut combined = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut zarr     = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut matches  = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nm       = [0,0,0,0,0,0,0,0];
+    z_search(pat, 2, text, 4, combined, zarr, matches, nm);
+    assert_eq(nm[0], 0);
+    print("z_no_match: ok");
+}
+
+fn test_z_single_char_pattern() {
+    // pat=[7], text=[7,1,7,2,7]. Matches at 0,2,4.
+    let mut pat  = [7,-1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut text = [7,1,7,2,7,-1,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut combined = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut zarr     = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut matches  = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nm       = [0,0,0,0,0,0,0,0];
+    z_search(pat, 1, text, 5, combined, zarr, matches, nm);
+    assert_eq(nm[0], 3);
+    assert_eq(matches[0], 0);
+    assert_eq(matches[1], 2);
+    assert_eq(matches[2], 4);
+    print("z_single_char: ok");
+}
+
+fn main() -> Int {
+    test_z_array_aabxaa();
+    test_z_all_same();
+    test_z_search_single();
+    test_z_no_match();
+    test_z_single_char_pattern();
+    print("[OK] 576_interp_z_algorithm");
+    0
+}

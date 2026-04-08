@@ -1,0 +1,61 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, types, generics, phantom
+// @description: Test parsing of phantom type patterns (unused type parameters)
+
+// Phantom data marker
+type PhantomData<T> is ();
+
+// State marker types
+type Open is ();
+type Closed is ();
+type Pending is ();
+
+// Phantom state in record type
+type Connection<State> is {
+    host: Text,
+    port: Int,
+    _state: PhantomData<State>,
+};
+
+// Phantom type with multiple unused params
+type Tagged<Tag, T> is {
+    value: T,
+    _tag: PhantomData<Tag>,
+};
+
+// Phantom type in function signatures
+fn connect(host: Text) -> Connection<Pending> {
+    Connection {
+        host: host,
+        port: 80,
+        _state: PhantomData,
+    }
+}
+
+// Implement for specific phantom instantiation
+implement Connection<Open> {
+    fn send(&self, data: Text) -> Int {
+        0
+    }
+}
+
+implement Connection<Closed> {
+    fn reconnect(self) -> Connection<Pending> {
+        Connection {
+            host: self.host,
+            port: self.port,
+            _state: PhantomData,
+        }
+    }
+}
+
+// Phantom type in generic function
+fn tag_value<Tag, T>(value: T) -> Tagged<Tag, T> {
+    Tagged { value: value, _tag: PhantomData }
+}
+
+fn main() -> Int {
+    0
+}

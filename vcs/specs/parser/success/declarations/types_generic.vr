@@ -1,0 +1,50 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, types, generics
+// @description: Test generic type definition parsing
+
+// Single type parameter
+type Container<T> is {
+    value: T
+};
+
+// Multiple type parameters
+type Pair<A, B> is {
+    first: A,
+    second: B
+};
+
+// With bounds
+type Displayable<T: Display> is {
+    value: T
+};
+
+// Multiple bounds
+type Bounded<T: Clone + Debug + Display> is {
+    data: T
+};
+
+// Higher-kinded type parameter
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+// With where clause
+type Constrained<A, B> is {
+    a: A,
+    b: B
+};
+where type A: Into<B>;
+
+// Const generics
+type FixedArray<T, const N: Int> is {
+    data: [T; N]
+};
+
+// Combined
+type Complex<T: Clone, U: Debug, const N: Int> is {
+    items: [T; N],
+    metadata: U
+};
+where type T: Default,
+      meta N > 0;

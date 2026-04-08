@@ -1,0 +1,72 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, threading, spawn, join
+// @expected-exit: 0
+
+// Test: basic thread spawn and join pattern
+// Defines a compute function, calls it synchronously, verifies result.
+
+fn compute(arg: Int) -> Int {
+    arg * arg
+}
+
+fn compute_sum(n: Int) -> Int {
+    let mut acc = 0;
+    let mut i = 0;
+    while (i < n) {
+        acc = acc + compute(i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Basic compute test
+    let r1 = compute(5);
+    if (r1 != 25) {
+        print(f"FAIL: compute(5)={r1}, expected=25");
+        return 1;
+    }
+
+    let r2 = compute(0);
+    if (r2 != 0) {
+        print(f"FAIL: compute(0)={r2}, expected=0");
+        return 1;
+    }
+
+    let r3 = compute(12);
+    if (r3 != 144) {
+        print(f"FAIL: compute(12)={r3}, expected=144");
+        return 1;
+    }
+
+    // Simulate spawn-join: call compute for multiple values, collect results
+    let a = compute(3);
+    let b = compute(4);
+    let c = compute(5);
+    let total = a + b + c;
+    // 9 + 16 + 25 = 50
+    if (total != 50) {
+        print(f"FAIL: total={total}, expected=50");
+        return 1;
+    }
+
+    // Verify compute_sum: sum of squares 0..10 = 0+1+4+9+16+25+36+49+64+81 = 285
+    let s = compute_sum(10);
+    if (s != 285) {
+        print(f"FAIL: compute_sum(10)={s}, expected=285");
+        return 1;
+    }
+
+    // Larger test: sum of squares 0..50
+    let s2 = compute_sum(50);
+    // sum of i^2 for i=0..49 = 49*50*99/6 = 40425
+    if (s2 != 40425) {
+        print(f"FAIL: compute_sum(50)={s2}, expected=40425");
+        return 1;
+    }
+
+    print("851_thread_spawn_join: PASS");
+    0
+}

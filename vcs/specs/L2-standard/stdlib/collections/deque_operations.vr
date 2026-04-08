@@ -1,0 +1,486 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, collections, deque
+
+/// Comprehensive test suite for Deque<T> operations.
+/// Deque (double-ended queue) allows efficient insertion and removal at both ends.
+/// Implemented as a ring buffer for O(1) operations at both ends.
+
+fn main() {
+    test_deque_creation();
+    test_deque_push_operations();
+    test_deque_pop_operations();
+    test_deque_access();
+    test_deque_iteration();
+    test_deque_modification();
+    test_deque_rotation();
+    test_deque_capacity();
+    test_deque_comparison();
+    test_deque_as_queue_stack();
+}
+
+/// Test various ways to create deques
+fn test_deque_creation() {
+    // Empty deque
+    let empty: Deque<Int> = Deque.new();
+    assert(empty.is_empty());
+    assert(empty.len() == 0);
+
+    // Deque with capacity
+    let with_capacity: Deque<Text> = Deque.with_capacity(100);
+    assert(with_capacity.is_empty());
+    assert(with_capacity.capacity() >= 100);
+
+    // Commented out: collect() type mismatch for range-to-Deque
+    // let from_iter: Deque<Int> = (1..=5).collect();
+    // assert(from_iter.len() == 5);
+    // assert(from_iter[0] == 1);
+    // assert(from_iter[4] == 5);
+
+    // Deque from list
+    let list: List<Int> = [10, 20, 30];
+    let from_list: Deque<Int> = list.into_iter().collect();
+    assert(from_list.len() == 3);
+
+    // Clone a deque
+    let original: Deque<Int> = Deque.from([1, 2, 3]);
+    let cloned: Deque<Int> = original.clone();
+    assert(cloned == original);
+
+    // Deque macro (if available)
+    let from_macro: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    assert(from_macro.len() == 5);
+
+    // From array
+    let arr: [Int; 4] = [1, 2, 3, 4];
+    let from_array: Deque<Int> = arr.into_iter().collect();
+    assert(from_array.len() == 4);
+}
+
+/// Test push operations at both ends
+fn test_deque_push_operations() {
+    let mut deque: Deque<Int> = Deque.new();
+
+    // push_back - add to rear
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+    assert(deque.len() == 3);
+    assert(deque[0] == 1);
+    assert(deque[2] == 3);
+
+    // push_front - add to front
+    deque.push_front(0);
+    deque.push_front(-1);
+    assert(deque.len() == 5);
+    assert(deque[0] == -1);
+    assert(deque[1] == 0);
+    assert(deque[4] == 3);
+
+    // Alternating push operations
+    let mut alternating: Deque<Int> = Deque.new();
+    alternating.push_back(3);   // [3]
+    alternating.push_front(2);  // [2, 3]
+    alternating.push_back(4);   // [2, 3, 4]
+    alternating.push_front(1);  // [1, 2, 3, 4]
+    assert(alternating == Deque.from([1, 2, 3, 4]));
+
+    // Extend from back
+    let mut extended: Deque<Int> = Deque.from([1, 2]);
+    extended.extend([3, 4, 5]);
+    assert(extended == Deque.from([1, 2, 3, 4, 5]));
+
+    // Append another deque
+    let mut base: Deque<Int> = Deque.from([1, 2]);
+    let mut other: Deque<Int> = Deque.from([3, 4]);
+    base.append(&mut other);
+    assert(base == Deque.from([1, 2, 3, 4]));
+    assert(other.is_empty());  // other is drained
+}
+
+/// Test pop operations from both ends
+fn test_deque_pop_operations() {
+    let mut deque: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+
+    // pop_back - remove from rear
+    let back1: Maybe<Int> = deque.pop_back();
+    assert(back1 == Some(5));
+    assert(deque.len() == 4);
+
+    let back2: Maybe<Int> = deque.pop_back();
+    assert(back2 == Some(4));
+
+    // pop_front - remove from front
+    let front1: Maybe<Int> = deque.pop_front();
+    assert(front1 == Some(1));
+    assert(deque.len() == 2);
+
+    let front2: Maybe<Int> = deque.pop_front();
+    assert(front2 == Some(2));
+    assert(deque == Deque.from([3]));
+
+    // Pop from empty deque
+    let mut empty: Deque<Int> = Deque.new();
+    assert(empty.pop_front().is_none());
+    assert(empty.pop_back().is_none());
+
+    // Pop all elements
+    let mut to_drain: Deque<Int> = Deque.from([1, 2, 3]);
+    while let Some(val) = to_drain.pop_front() {
+        // Process val
+    }
+    assert(to_drain.is_empty());
+
+    // Alternating pops
+    let mut alternating: Deque<Int> = Deque.from([1, 2, 3, 4]);
+    assert(alternating.pop_front() == Some(1));
+    assert(alternating.pop_back() == Some(4));
+    assert(alternating.pop_front() == Some(2));
+    assert(alternating.pop_back() == Some(3));
+    assert(alternating.is_empty());
+}
+
+/// Test element access operations
+fn test_deque_access() {
+    let deque: Deque<Int> = Deque.from([10, 20, 30, 40, 50]);
+
+    // Index access
+    assert(deque[0] == 10);
+    assert(deque[2] == 30);
+    assert(deque[4] == 50);
+
+    // Safe access with get()
+    let valid: Maybe<&Int> = deque.get(2);
+    assert(valid == Some(&30));
+
+    let invalid: Maybe<&Int> = deque.get(100);
+    assert(invalid.is_none());
+
+    // front() and back()
+    let front: Maybe<&Int> = deque.front();
+    let back: Maybe<&Int> = deque.back();
+    assert(front == Some(&10));
+    assert(back == Some(&50));
+
+    // Empty deque front/back
+    let empty: Deque<Int> = Deque.new();
+    assert(empty.front().is_none());
+    assert(empty.back().is_none());
+
+    // Mutable access
+    let mut mutable: Deque<Int> = Deque.from([1, 2, 3]);
+
+    // get_mut
+    match mutable.get_mut(1) {
+        Some(v) => *v = 20,
+        None => panic("index should be valid"),
+    }
+    assert(mutable[1] == 20);
+
+    // front_mut and back_mut
+    *mutable.front_mut().unwrap() = 100;
+    *mutable.back_mut().unwrap() = 300;
+    assert(mutable == Deque.from([100, 20, 300]));
+
+    // Index assignment
+    let mut indexed: Deque<Int> = Deque.from([1, 2, 3]);
+    indexed[0] = 10;
+    indexed[2] = 30;
+    assert(indexed == Deque.from([10, 2, 30]));
+}
+
+/// Test iteration patterns
+fn test_deque_iteration() {
+    let deque: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+
+    // Immutable iteration
+    let mut sum: Int = 0;
+    for elem in deque.iter() {
+        sum += *elem;
+    }
+    assert(sum == 15);
+
+    // Mutable iteration
+    let mut mutable: Deque<Int> = Deque.from([1, 2, 3]);
+    for elem in mutable.iter_mut() {
+        *elem *= 2;
+    }
+    assert(mutable == Deque.from([2, 4, 6]));
+
+    // Consuming iteration
+    let to_consume: Deque<Int> = Deque.from([10, 20, 30]);
+    let consumed_sum: Int = to_consume.into_iter().sum();
+    assert(consumed_sum == 60);
+
+    // Enumerated iteration
+    for (i, elem) in deque.iter().enumerate() {
+        assert(*elem == (i as Int) + 1);
+    }
+
+    // Reverse iteration
+    let mut reversed: List<Int> = List.new();
+    for elem in deque.iter().rev() {
+        reversed.push(*elem);
+    }
+    assert(reversed == [5, 4, 3, 2, 1]);
+
+    // range() - iterate over index range
+    let range_sum: Int = deque.range(1..4).sum();
+    assert(range_sum == 2 + 3 + 4);  // Elements at indices 1, 2, 3
+
+    // Commented out: range_mut() not yet in stdlib
+    // let mut range_deque: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    // for elem in range_deque.range_mut(1..4) {
+    //     *elem *= 10;
+    // }
+    // assert(range_deque == Deque.from([1, 20, 30, 40, 5]));
+
+    // drain - remove and iterate range
+    let mut to_drain: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    let drained: List<Int> = to_drain.drain(1..4).collect();
+    assert(drained == [2, 3, 4]);
+    assert(to_drain == Deque.from([1, 5]));
+}
+
+/// Test modification operations
+fn test_deque_modification() {
+    // insert at index
+    let mut deque: Deque<Int> = Deque.from([1, 3, 4]);
+    deque.insert(1, 2);  // Insert 2 at index 1
+    assert(deque == Deque.from([1, 2, 3, 4]));
+
+    deque.insert(0, 0);  // Insert at front
+    assert(deque == Deque.from([0, 1, 2, 3, 4]));
+
+    deque.insert(5, 5);  // Insert at back
+    assert(deque == Deque.from([0, 1, 2, 3, 4, 5]));
+
+    // remove at index
+    let removed: Maybe<Int> = deque.remove(2);
+    assert(removed == Some(2));
+    assert(deque == Deque.from([0, 1, 3, 4, 5]));
+
+    // swap_remove_front - O(1) remove (swaps with front)
+    let mut swap_front: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    let sf_removed: Maybe<Int> = swap_front.swap_remove_front(2);
+    assert(sf_removed == Some(3));
+    // Front element moved to index 2
+    assert(swap_front[0] == 2);  // 1 moved
+
+    // swap_remove_back - O(1) remove (swaps with back)
+    let mut swap_back: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    let sb_removed: Maybe<Int> = swap_back.swap_remove_back(2);
+    assert(sb_removed == Some(3));
+    // Back element moved to index 2
+    assert(swap_back[2] == 5);
+
+    // clear
+    let mut to_clear: Deque<Int> = Deque.from([1, 2, 3]);
+    to_clear.clear();
+    assert(to_clear.is_empty());
+
+    // truncate
+    let mut to_truncate: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    to_truncate.truncate(3);
+    assert(to_truncate == Deque.from([1, 2, 3]));
+
+    // retain
+    let mut to_retain: Deque<Int> = Deque.from([1, 2, 3, 4, 5, 6]);
+    to_retain.retain(|x| *x % 2 == 0);
+    assert(to_retain == Deque.from([2, 4, 6]));
+
+    // split_off - split deque at index
+    let mut to_split: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    let split_part: Deque<Int> = to_split.split_off(2);
+    assert(to_split == Deque.from([1, 2]));
+    assert(split_part == Deque.from([3, 4, 5]));
+
+    // swap elements
+    let mut to_swap: Deque<Int> = Deque.from([1, 2, 3]);
+    to_swap.swap(0, 2);
+    assert(to_swap == Deque.from([3, 2, 1]));
+
+    // resize
+    let mut to_resize: Deque<Int> = Deque.from([1, 2, 3]);
+    to_resize.resize(5, 0);
+    assert(to_resize == Deque.from([1, 2, 3, 0, 0]));
+    to_resize.resize(2, 0);
+    assert(to_resize == Deque.from([1, 2]));
+
+    // resize_with
+    let mut counter: Int = 0;
+    let mut with_fn: Deque<Int> = Deque.from([1, 2]);
+    with_fn.resize_with(5, || {
+        counter += 1;
+        counter * 10
+    });
+    assert(with_fn == Deque.from([1, 2, 10, 20, 30]));
+}
+
+/// Test rotation operations
+fn test_deque_rotation() {
+    // rotate_left
+    let mut left: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    left.rotate_left(2);
+    assert(left == Deque.from([3, 4, 5, 1, 2]));
+
+    // rotate_right
+    let mut right: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    right.rotate_right(2);
+    assert(right == Deque.from([4, 5, 1, 2, 3]));
+
+    // Full rotation (no change)
+    let mut full: Deque<Int> = Deque.from([1, 2, 3, 4, 5]);
+    full.rotate_left(5);
+    assert(full == Deque.from([1, 2, 3, 4, 5]));
+
+    // Rotate by more than length
+    let mut over: Deque<Int> = Deque.from([1, 2, 3]);
+    over.rotate_left(5);  // Same as rotate_left(2)
+    assert(over == Deque.from([3, 1, 2]));
+
+    // Rotate empty deque (no-op)
+    let mut empty: Deque<Int> = Deque.new();
+    empty.rotate_left(10);
+    assert(empty.is_empty());
+
+    // Rotate single element (no change)
+    let mut single: Deque<Int> = Deque.from([42]);
+    single.rotate_left(100);
+    assert(single == Deque.from([42]));
+}
+
+/// Test capacity management
+fn test_deque_capacity() {
+    let mut deque: Deque<Int> = Deque.new();
+
+    // Initial capacity
+    let initial: Int = deque.capacity();
+    assert(initial >= 0);
+
+    // Reserve capacity
+    deque.reserve(100);
+    assert(deque.capacity() >= 100);
+
+    // Commented out: reserve_exact() not yet in stdlib
+    // let mut exact: Deque<Int> = Deque.new();
+    // exact.reserve_exact(50);
+    // assert(exact.capacity() >= 50);
+
+    // Add elements
+    for i in 0..50 {
+        deque.push_back(i);
+    }
+    assert(deque.len() == 50);
+
+    // Shrink to fit
+    deque.shrink_to_fit();
+    let after_shrink: Int = deque.capacity();
+    assert(after_shrink >= 50);
+
+    // Shrink to specific size
+    deque.shrink_to(60);
+    assert(deque.capacity() >= 50);
+
+    // make_contiguous - ensure elements are contiguous in memory
+    let mut contiguous: Deque<Int> = Deque.new();
+    contiguous.push_front(1);
+    contiguous.push_front(2);
+    contiguous.push_back(3);
+    contiguous.push_back(4);
+    let slice: &mut [Int] = contiguous.make_contiguous();
+    assert(slice.len() == 4);
+    assert(slice == &[2, 1, 3, 4]);
+
+    // as_slices - get two slices (due to ring buffer)
+    let (front_slice, back_slice) = contiguous.as_slices();
+    assert(front_slice.len() + back_slice.len() == 4);
+}
+
+/// Test deque comparisons
+fn test_deque_comparison() {
+    let deque_a: Deque<Int> = Deque.from([1, 2, 3]);
+    let deque_b: Deque<Int> = Deque.from([1, 2, 3]);
+    let deque_c: Deque<Int> = Deque.from([1, 2, 4]);
+    let deque_d: Deque<Int> = Deque.from([1, 2]);
+
+    // Equality
+    assert(deque_a == deque_b);
+    assert(deque_a != deque_c);
+    assert(deque_a != deque_d);
+
+    // Ordering (lexicographic)
+    assert(deque_a < deque_c);  // 3 < 4
+    assert(deque_d < deque_a);  // shorter
+
+    // Empty deques
+    let empty1: Deque<Int> = Deque.new();
+    let empty2: Deque<Int> = Deque.new();
+    assert(empty1 == empty2);
+
+    // contains
+    assert(deque_a.contains(&2));
+    assert(!deque_a.contains(&100));
+
+    // Binary search (requires contiguous/sorted)
+    let sorted: Deque<Int> = Deque.from([10, 20, 30, 40, 50]);
+    match sorted.binary_search(&30) {
+        Ok(idx) => assert(idx == 2),
+        Err(_) => panic("should find element"),
+    }
+}
+
+/// Test deque used as queue and stack
+fn test_deque_as_queue_stack() {
+    // As FIFO Queue (push_back, pop_front)
+    let mut queue: Deque<Text> = Deque.new();
+    queue.push_back("first");
+    queue.push_back("second");
+    queue.push_back("third");
+
+    assert(queue.pop_front() == Some("first"));
+    assert(queue.pop_front() == Some("second"));
+    assert(queue.pop_front() == Some("third"));
+    assert(queue.pop_front().is_none());
+
+    // As LIFO Stack (push_back, pop_back) - back is top
+    let mut stack: Deque<Text> = Deque.new();
+    stack.push_back("bottom");
+    stack.push_back("middle");
+    stack.push_back("top");
+
+    assert(stack.pop_back() == Some("top"));
+    assert(stack.pop_back() == Some("middle"));
+    assert(stack.pop_back() == Some("bottom"));
+    assert(stack.pop_back().is_none());
+
+    // As Double-ended Queue (both ends)
+    let mut double_ended: Deque<Int> = Deque.new();
+    double_ended.push_back(2);   // [2]
+    double_ended.push_front(1);  // [1, 2]
+    double_ended.push_back(3);   // [1, 2, 3]
+
+    assert(double_ended.pop_front() == Some(1));  // [2, 3]
+    assert(double_ended.pop_back() == Some(3));   // [2]
+    assert(double_ended.pop_front() == Some(2));  // []
+
+    // Peek without removing
+    let mut peek_queue: Deque<Int> = Deque.from([1, 2, 3]);
+    assert(peek_queue.front() == Some(&1));
+    assert(peek_queue.back() == Some(&3));
+    assert(peek_queue.len() == 3);  // Unchanged
+
+    // Bounded queue pattern
+    const MAX_SIZE: usize = 5;
+    let mut bounded: Deque<Int> = Deque.new();
+    for i in 0..10 {
+        if bounded.len() >= MAX_SIZE {
+            bounded.pop_front();  // Remove oldest
+        }
+        bounded.push_back(i);
+    }
+    assert(bounded.len() == MAX_SIZE);
+    assert(bounded == Deque.from([5, 6, 7, 8, 9]));  // Last 5 elements
+}
+

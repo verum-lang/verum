@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, turbofish, error
+// @description: Turbofish syntax with missing type
+// @expected-error: E010
+
+fn test() {
+    let x = foo::<>(arg);  // Empty type args
+}

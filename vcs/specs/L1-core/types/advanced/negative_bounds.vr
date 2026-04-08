@@ -1,0 +1,113 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: negative-bounds, exclusion, specialization, advanced-type-syntax
+// @expect: pass
+// @description: Negative bounds syntax tests
+// @spec: 03-type-system.md Section 13. 3.5
+
+// Stub protocols and types
+type Send is protocol {};
+type Sync is protocol {};
+type Copy is protocol {};
+type Clone is protocol { fn clone(&self) -> Self; };
+type Debug is protocol { fn debug(&self) -> Text; };
+type Default is protocol { fn default() -> Self; };
+type Display is protocol { fn display(&self) -> Text; };
+type DeepClone is protocol { fn deep_clone(&self) -> Self; };
+type CustomClone is protocol { fn custom_clone(&self) -> Self; };
+type UnsafeMarker is protocol {};
+type Exists is protocol {};
+type Wrapper<T> is { inner: T };
+type Container<T> is { items: List<T> };
+
+// Test 1: Mutual exclusion - Send but NOT Sync
+fn spawn_local<T: Send + !Sync>(value: T) {
+    // Value can be sent between threads but not shared
+    // ...
+}
+
+// Test 2: Exclude certain implementations
+implement<T: Clone + !Copy> DeepClone for T {
+    // Only for types that need deep cloning (not Copy types)
+    fn deep_clone(&self) -> Self {
+        self.clone()
+    }
+}
+
+// Test 3: Negative bounds on associated types
+fn no_error_iterator<I>(iter: I)
+    where type I: Iterator,
+          type I.Error: !Exists  // Iterator cannot produce errors
+{
+    // Guaranteed infallible iteration
+    for item in iter {
+        process(item);
+    }
+}
+
+// Test 4: Protocol with negative bound requirement
+type SingleThreaded is protocol
+    where type Self: !Sync
+{
+    fn process(&mut self);
+};
+
+// Test 5: Specialization with negative bounds
+implement<T> Display for Wrapper<T>
+    where type T: !Display
+{
+    fn display(&self) -> Text {
+        "<opaque>"
+    }
+}
+
+@specialize
+implement<T: Display> Display for Wrapper<T> {
+    fn display(&self) -> Text {
+        self.inner.display()
+    }
+}
+
+// Test 6: Multiple negative bounds
+fn local_only<T: !Send + !Sync>(value: T) {
+    // Value cannot be sent or shared between threads
+    process_locally(value);
+}
+
+// Test 7: Negative bound with positive bounds
+implement<T: Clone + Debug + !Copy + !Default> CustomClone for T {
+    fn custom_clone(&self) -> Self {
+        debug_print(f"Cloning: {self}");
+        self.clone()
+    }
+}
+
+// Test 8: Protocol implementation exclusion
+type SafeContainer is protocol {
+    fn safe_access(&self);
+};
+
+// Only implement for non-unsafe types
+implement<T: !UnsafeMarker> SafeContainer for Container<T> {
+    fn safe_access(&self) {
+        // Safe implementation
+    }
+}
+
+fn process<T>(item: T) {
+    // placeholder
+}
+
+fn process_locally<T>(value: T) {
+    // placeholder
+}
+
+fn debug_print(msg: Text) {
+    print(msg);
+}
+
+fn main() {
+    // Negative bounds are primarily compile-time constraints
+    assert(true);
+}

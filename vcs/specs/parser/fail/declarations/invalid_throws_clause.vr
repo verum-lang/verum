@@ -1,0 +1,15 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, throws-clause, error
+// @description: Test invalid throws clause syntax detection
+// @expected-error: E040
+
+fn missing_paren() throws Error {}
+
+fn empty_throws() throws() {}
+
+fn invalid_error_type() throws(123) {}
+
+fn unclosed_throws() throws(Error {}
+
+fn double_throws() throws(Error) throws(AnotherError) {}

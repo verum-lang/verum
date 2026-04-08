@@ -1,0 +1,25 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let mut sum = 0;
+    let mut i = 0;
+
+    while true {
+        i = i + 1;
+
+        if i > 10 {
+            break;  // Exit when i > 10
+        }
+
+        if i % 3 == 0 {
+            continue;  // Skip multiples of 3
+        }
+
+        sum = sum + i;
+    }
+
+    // Sum of 1-10 excluding 3,6,9: 1+2+4+5+7+8+10 = 37
+    assert_eq(sum, 37);
+}

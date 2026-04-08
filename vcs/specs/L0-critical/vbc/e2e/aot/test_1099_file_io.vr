@@ -1,0 +1,66 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: file, io, read, write
+// @description: Test file I/O operations - write, read, append
+
+fn test_write_read() -> Int {
+    let path = "/tmp/verum_test_1099.txt";
+    let content = "Hello from Verum!\nLine 2\nLine 3";
+
+    let wrote = file_write(path, content);
+    if wrote < 0 {
+        print("FAIL write_read: write failed");
+        return 1;
+    }
+
+    let read_content = file_read(path);
+    if read_content != content {
+        print("FAIL write_read: content mismatch");
+        return 1;
+    }
+    print("  write_read: OK");
+    0
+}
+
+fn test_append() -> Int {
+    let path = "/tmp/verum_test_1099_append.txt";
+    file_write(path, "line1\n");
+    file_append(path, "line2\n");
+    file_append(path, "line3\n");
+    let content = file_read(path);
+    if !content.contains("line1") || !content.contains("line3") {
+        print("FAIL append: missing content");
+        return 1;
+    }
+    print("  append: OK");
+    0
+}
+
+fn test_overwrite() -> Int {
+    let path = "/tmp/verum_test_1099_overwrite.txt";
+    file_write(path, "original");
+    file_write(path, "replaced");
+    let content = file_read(path);
+    if content != "replaced" {
+        print(f"FAIL overwrite: got '{content}'");
+        return 1;
+    }
+    print("  overwrite: OK");
+    0
+}
+
+fn main() -> Int {
+    print("File I/O Tests:");
+    let mut failures = 0;
+    failures = failures + test_write_read();
+    failures = failures + test_append();
+    failures = failures + test_overwrite();
+
+    if failures == 0 {
+        print("All file I/O tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

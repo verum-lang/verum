@@ -1,0 +1,58 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, bitwise, integer
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Bitwise operations: and, or, xor, shift left, shift right
+
+fn main() -> Int {
+    // AND
+    assert_eq(0xFF & 0x0F, 15);
+    assert_eq(0b1100 & 0b1010, 0b1000);
+    assert_eq(255 & 0, 0);
+
+    // OR
+    assert_eq(0xF0 | 0x0F, 0xFF);
+    assert_eq(0b1100 | 0b0011, 0b1111);
+
+    // XOR
+    assert_eq(0xFF ^ 0xFF, 0);
+    assert_eq(0xFF ^ 0x00, 0xFF);
+    assert_eq(42 ^ 42, 0);
+
+    // Left shift
+    assert_eq(1 << 0, 1);
+    assert_eq(1 << 1, 2);
+    assert_eq(1 << 10, 1024);
+    assert_eq(3 << 4, 48);
+
+    // Right shift
+    assert_eq(1024 >> 10, 1);
+    assert_eq(255 >> 4, 15);
+    assert_eq(48 >> 4, 3);
+
+    // Bit counting via loop
+    let mut val = 0b10110101;
+    let mut count = 0;
+    while val > 0 {
+        if val & 1 == 1 {
+            count = count + 1;
+        }
+        val = val >> 1;
+    }
+    assert_eq(count, 5);
+
+    // XOR swap
+    let mut x = 42;
+    let mut y = 99;
+    x = x ^ y;
+    y = x ^ y;
+    x = x ^ y;
+    assert_eq(x, 99);
+    assert_eq(y, 42);
+
+    print("diff_bitwise_operations: ok");
+    0
+}

@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, extern-fn, function-pointers
+// @description: Tests extern "C" function pointer types for FFI callbacks
+
+/// ============================================================
+/// EXTERN FUNCTION POINTER TYPES
+/// ============================================================
+///
+/// Extern function pointer types allow defining C-compatible
+/// function pointers that can be passed across the FFI boundary.
+///
+/// Syntax:
+/// - `extern "C" fn(A, B) -> C` - C calling convention
+/// - `extern "stdcall" fn(A, B) -> C` - Windows stdcall
+/// - `extern "fastcall" fn(A, B) -> C` - Fast calling convention
+/// - `extern "sysv64" fn(A, B) -> C` - System V AMD64 ABI
+
+// ------------------------------------------------------------
+// Type Definitions for FFI
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_int is i32;
+type c_size is usize;
+
+// ------------------------------------------------------------
+// Basic Extern Function Types
+// ------------------------------------------------------------
+
+/// C-compatible callback that takes an int and returns an int
+type CCallback is extern "C" fn(c_int) -> c_int;
+
+/// C-compatible callback with no return value
+type CVoidCallback is extern "C" fn(c_int);
+
+/// C-compatible callback with multiple parameters
+type CMultiCallback is extern "C" fn(c_int, c_int, *const c_void) -> c_int;
+
+// ------------------------------------------------------------
+// Common C Library Callbacks
+// ------------------------------------------------------------
+
+/// qsort comparator function type
+type CompareFn is extern "C" fn(*const c_void, *const c_void) -> c_int;
+
+/// pthread cleanup handler
+type CleanupHandler is extern "C" fn(*mut c_void);
+
+/// Signal handler type
+type SignalHandler is extern "C" fn(c_int);
+
+/// atexit callback type
+type AtExitFn is extern "C" fn();
+
+// ------------------------------------------------------------
+// Nested Function Pointer Types
+// ------------------------------------------------------------
+
+/// Factory function that returns a callback
+type CallbackFactory is extern "C" fn(c_int) -> *const c_void;
+
+// ------------------------------------------------------------
+// Type Aliases with Extern Functions
+// ------------------------------------------------------------
+
+/// Wrapped callback with context
+@repr(C)
+type CallbackContext is {
+    callback: extern "C" fn(c_int, *mut c_void) -> c_int,
+    user_data: *mut c_void,
+};
+
+/// Vtable-like structure with function pointers
+@repr(C)
+type Operations is {
+    init: extern "C" fn(*mut c_void) -> c_int,
+    process: extern "C" fn(*mut c_void, c_int) -> c_int,
+    cleanup: extern "C" fn(*mut c_void),
+};
+
+// ------------------------------------------------------------
+// FFI Declarations Using Extern Function Types
+// ------------------------------------------------------------
+
+ffi qsort_ffi {
+    @extern("C")
+    fn qsort(
+        base: *mut c_void,
+        nmemb: c_size,
+        size: c_size,
+        compar: extern "C" fn(*const c_void, *const c_void) -> c_int
+    );
+}
+
+ffi atexit_ffi {
+    @extern("C")
+    fn atexit(func: extern "C" fn()) -> c_int;
+}
+
+ffi signal_ffi {
+    @extern("C")
+    fn signal(sig: c_int, handler: extern "C" fn(c_int)) -> extern "C" fn(c_int);
+}
+
+// ------------------------------------------------------------
+// Regular Verum Function Type (for comparison)
+// ------------------------------------------------------------
+
+/// Regular Verum function type (not for FFI)
+type VerumCallback is fn(Int) -> Int;
+
+/// Mixed: Verum function taking extern fn as parameter
+type MixedCallback is fn(extern "C" fn(c_int) -> c_int) -> Int;
+
+// ------------------------------------------------------------
+// Main
+// ------------------------------------------------------------
+
+fn main() {
+    // Test that extern function types parse correctly
+    print("Extern function pointer types passed");
+}

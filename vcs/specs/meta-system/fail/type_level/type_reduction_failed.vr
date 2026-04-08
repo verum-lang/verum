@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M501
+// @description: Tests M501 TypeReductionFailed error code
+// @tags: meta-system, type-level, error-codes
+
+// M501 is triggered when type-level computation fails to reduce.
+// This test uses trigger_type_reduction_failed to validate the error code.
+
+meta fn cause_type_reduction_failure() -> Int {
+    // Trigger M501 TypeReductionFailed error
+    trigger_type_reduction_failed("TypeFamily<Float>", "no matching case for type Float")
+}
+
+fn main() {
+    // This will fail at compile time with M501
+    @const assert(cause_type_reduction_failure() == 0);
+}

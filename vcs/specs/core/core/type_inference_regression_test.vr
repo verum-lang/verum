@@ -1,0 +1,223 @@
+// =============================================================================
+// type_inference_regression_test.vr - Regression tests for type inference
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, inference, regression, generic, variant
+// @description: Regression tests for type inference issues found in development
+// =============================================================================
+
+mount core.base.result.{Validated, Valid, Invalid, Result, Ok, Err};
+mount core.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Regression 1: Generic<->Variant type parameter ordering
+// Issue: Type parameters were extracted in Map iteration order, not declaration order
+// For Validated<E, A> = Valid(A) | Invalid(List<E>):
+// - Declaration order: E, A
+// - But payloads Valid(A) and Invalid(List<E>) were extracted in wrong order
+// =============================================================================
+
+@test
+fn test_validated_type_param_order() {
+    // Error type is Text, Success type is Int
+    let v1: Validated<Text, Int> = Valid(42);
+    let v2: Validated<Text, Int> = Invalid(List.from(["error"]));
+
+    // zip_with should maintain correct type ordering
+    let v3: Validated<Text, Int> = Valid(10);
+
+    let combined: Validated<Text, Int> = v1.zip_with(v3, |a, b| a + b);
+
+    match combined {
+        Valid(sum) => assert_eq(sum, 52),
+        Invalid(_) => panic("Expected Valid"),
+    }
+}
+
+// =============================================================================
+// Regression 2: Result type parameter inference
+// Verify Result<T, E> maintains correct ordering
+// =============================================================================
+
+@test
+fn test_result_type_param_order() {
+    let r1: Result<Int, Text> = Ok(42);
+    let r2: Result<Int, Text> = Err("error");
+
+    // map should preserve types
+    let mapped: Result<Int, Text> = r1.map(|x| x * 2);
+
+    match mapped {
+        Ok(v) => assert_eq(v, 84),
+        Err(_) => panic("Expected Ok"),
+    }
+
+    // map_err should transform error type
+    let transformed: Result<Int, Int> = r2.map_err(|e| e.len());
+
+    match transformed {
+        Ok(_) => panic("Expected Err"),
+        Err(len) => assert_eq(len, 5),
+    }
+}
+
+// =============================================================================
+// Regression 3: Maybe<T> inference in chained operations
+// =============================================================================
+
+@test
+fn test_maybe_chained_inference() {
+    let m1: Maybe<Int> = Some(5);
+
+    // Chained operations should infer correctly
+    let result: Maybe<Text> = m1
+        .map(|x| x * 2)
+        .filter(|x| *x > 5)
+        .map(|x| f"value: {x}");
+
+    match result {
+        Some(s) => assert(s.contains("10")),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Regression 4: Nested generic types
+// =============================================================================
+
+@test
+fn test_nested_generics() {
+    let nested: Maybe<Result<Int, Text>> = Some(Ok(42));
+
+    match nested {
+        Some(result) => {
+            match result {
+                Ok(v) => assert_eq(v, 42),
+                Err(_) => panic("Expected Ok"),
+            }
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Regression 5: List operations preserve type
+// =============================================================================
+
+@test
+fn test_list_type_preservation() {
+    let nums: List<Int> = List.from([1, 2, 3, 4, 5]);
+
+    // Use list method that works without protocol resolution issues
+    assert_eq(nums.len(), 5);
+    assert_eq(nums[0], 1);
+    assert_eq(nums[4], 5);
+}
+
+// =============================================================================
+// Regression 6: Validated.validate_all type inference
+// This was a key failure case
+// =============================================================================
+
+@test
+fn test_validated_validate_all() {
+    let items: List<Validated<Text, Int>> = List.from([
+        Valid(1),
+        Valid(2),
+        Valid(3),
+    ]);
+
+    // validate_all: List<Validated<E, A>> -> Validated<E, List<A>>
+    let result: Validated<Text, List<Int>> = Validated.validate_all(items);
+
+    match result {
+        Valid(values) => {
+            assert_eq(values.len(), 3);
+            assert_eq(values[0], 1);
+            assert_eq(values[1], 2);
+            assert_eq(values[2], 3);
+        }
+        Invalid(_) => panic("Expected Valid"),
+    }
+}
+
+// =============================================================================
+// Regression 7: Validated.zip_with with error accumulation
+// =============================================================================
+
+@test
+fn test_validated_zip_with_errors() {
+    let v1: Validated<Text, Int> = Invalid(List.from(["error1"]));
+    let v2: Validated<Text, Int> = Invalid(List.from(["error2"]));
+
+    let combined: Validated<Text, Int> = v1.zip_with(v2, |a, b| a + b);
+
+    match combined {
+        Valid(_) => panic("Expected Invalid"),
+        Invalid(errors) => {
+            // Should accumulate both errors
+            assert_eq(errors.len(), 2);
+        }
+    }
+}
+
+// =============================================================================
+// Regression 8: Generic function return type inference
+// =============================================================================
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+@test
+fn test_generic_function_inference() {
+    let i: Int = identity(42);
+    let s: Text = identity("hello");
+    let b: Bool = identity(true);
+
+    assert_eq(i, 42);
+    assert_eq(s, "hello");
+    assert(b);
+}
+
+// =============================================================================
+// Regression 9: Closure type inference in higher-order functions
+// =============================================================================
+
+@test
+fn test_closure_inference() {
+    let m: Maybe<Int> = Some(10);
+
+    // Closure parameter type should be inferred
+    let doubled = m.map(|x| x * 2);
+
+    match doubled {
+        Some(v) => assert_eq(v, 20),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Regression 10: and_then chains with type transformation
+// =============================================================================
+
+@test
+fn test_and_then_chain() {
+    let result: Result<Int, Text> = Ok(42);
+
+    let final_result: Result<Text, Text> = result
+        .and_then(|x| if x > 0 { Ok(x * 2) } else { Err("negative") })
+        .and_then(|x| Ok(f"result: {x}"));
+
+    match final_result {
+        Ok(s) => assert_eq(s, "result: 84"),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,452 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, text, creation
+
+/// Comprehensive test suite for Text creation and initialization.
+/// Text represents UTF-8 encoded strings with full Unicode support.
+/// Tests all methods of creating and initializing Text values.
+
+fn main() {
+    test_text_literals();
+    test_text_constructors();
+    test_text_from_parts();
+    test_text_escape_sequences();
+    test_text_raw_strings();
+    test_text_multiline();
+    test_text_interpolation();
+    test_text_capacity();
+    test_text_cloning();
+    test_text_from_other_types();
+}
+
+/// Test basic text literals
+fn test_text_literals() {
+    // Simple string literal
+    let simple: Text = "hello";
+    assert(simple == "hello");
+    assert(simple.len() == 5);
+
+    // Empty string
+    let empty: Text = "";
+    assert(empty.is_empty());
+    assert(empty.len() == 0);
+
+    // Single character
+    let single: Text = "x";
+    assert(single.len() == 1);
+
+    // String with spaces
+    let with_spaces: Text = "hello world";
+    assert(with_spaces == "hello world");
+
+    // String with numbers
+    let with_numbers: Text = "abc123xyz";
+    assert(with_numbers == "abc123xyz");
+
+    // String with special characters
+    let special: Text = "hello!@#$%^&*()";
+    assert(special.contains("!"));
+    assert(special.contains("*"));
+
+    // Very long string
+    let long: Text = "a".repeat(10000);
+    assert(long.len() == 10000);
+
+    // Whitespace-only string
+    let whitespace: Text = "   ";
+    assert(whitespace.len() == 3);
+    assert(!whitespace.is_empty());
+}
+
+/// Test Text constructors
+fn test_text_constructors() {
+    // Text.new() - empty string
+    let new_text: Text = Text.new();
+    assert(new_text.is_empty());
+
+    // Text.with_capacity() - preallocated
+    let with_capacity: Text = Text.with_capacity(100);
+    assert(with_capacity.is_empty());
+    assert(with_capacity.capacity() >= 100);
+
+    // From string slice
+    let from_slice: Text = Text.from("hello");
+    assert(from_slice == "hello");
+
+    // From static str
+    const STATIC: &str = "static string";
+    let from_static: Text = Text.from(STATIC);
+    assert(from_static == "static string");
+
+    // Default (empty string)
+    let default_text: Text = Text.default();
+    assert(default_text.is_empty());
+
+    // Clone from reference
+    let original: Text = "original";
+    let cloned: Text = original.clone();
+    assert(cloned == original);
+
+    // From iterator of chars
+    let chars: List<Char> = ['h', 'e', 'l', 'l', 'o'];
+    let from_chars: Text = chars.into_iter().collect();
+    assert(from_chars == "hello");
+
+    // From iterator of strings
+    let parts: List<Text> = ["hello", " ", "world"];
+    let joined: Text = parts.into_iter().collect();
+    assert(joined == "hello world");
+}
+
+/// Test Text creation from parts
+fn test_text_from_parts() {
+    // repeat - create by repeating
+    let repeated: Text = "ab".repeat(3);
+    assert(repeated == "ababab");
+
+    let single_repeat: Text = "x".repeat(5);
+    assert(single_repeat == "xxxxx");
+
+    let zero_repeat: Text = "abc".repeat(0);
+    assert(zero_repeat.is_empty());
+
+    // From character repeated
+    let char_repeated: Text = Text.from_char('*', 10);
+    assert(char_repeated == "**********");
+    assert(char_repeated.len() == 10);
+
+    // Join strings with separator
+    let words: List<Text> = ["apple", "banana", "cherry"];
+    let comma_joined: Text = words.join(", ");
+    assert(comma_joined == "apple, banana, cherry");
+
+    let empty_joined: Text = words.join("");
+    assert(empty_joined == "applebananacherry");
+
+    let newline_joined: Text = words.join("\n");
+    assert(newline_joined == "apple\nbanana\ncherry");
+
+    // concat - append another string
+    let base: Text = "hello";
+    let concatenated: Text = base.concat(" world");
+    assert(concatenated == "hello world");
+
+    // + operator
+    let added: Text = "hello" + " " + "world";
+    assert(added == "hello world");
+
+    // format! macro
+    let formatted: Text = format("Value: {}", 42);
+    assert(formatted == "Value: 42");
+
+    // Multiple values
+    let multi: Text = format("{} + {} = {}", 1, 2, 3);
+    assert(multi == "1 + 2 = 3");
+}
+
+/// Test escape sequences in strings
+fn test_text_escape_sequences() {
+    // Newline
+    let newline: Text = "line1\nline2";
+    assert(newline.contains("\n"));
+    assert(newline.lines().count() == 2);
+
+    // Tab
+    let tab: Text = "col1\tcol2";
+    assert(tab.contains("\t"));
+
+    // Carriage return
+    let cr: Text = "windows\r\nline";
+    assert(cr.contains("\r"));
+
+    // Double quote
+    let dquote: Text = "He said \"hello\"";
+    assert(dquote.contains("\""));
+
+    // Single quote (no escape needed)
+    let single_quote: Text = "it's fine";
+    assert(single_quote.contains("'"));
+
+    // Backslash
+    let backslash: Text = "path\\to\\file";
+    assert(backslash.contains("\\"));
+
+    // Null character
+    let null_char: Text = "before\0after";
+    assert(null_char.len() == 12);
+
+    // Unicode escape (braced format)
+    let unicode4: Text = "\u{0041}\u{0042}\u{0043}";  // ABC
+    assert(unicode4 == "ABC");
+
+    // Unicode escape (up to 6 hex digits in braces)
+    let unicode6: Text = "\u{1F600}";  // Emoji
+    assert(unicode6.chars().count() == 1);
+
+    // Mixed escapes
+    let mixed: Text = "Line1\n\tIndented \"quoted\" \\slash";
+    assert(mixed.contains("\n"));
+    assert(mixed.contains("\t"));
+    assert(mixed.contains("\""));
+    assert(mixed.contains("\\"));
+}
+
+/// Test raw strings (no escape processing)
+fn test_text_raw_strings() {
+    // Basic raw string
+    let raw: Text = """C:\Users\name\file.txt""";
+    assert(raw.contains("\\"));
+    assert(raw.len() == 22);
+
+    // Raw string with quotes (use triple-quote)
+    let raw_quotes: Text = """Say "hello" to me""";
+    assert(raw_quotes.contains("\""));
+
+    // Raw string with special chars
+    let raw_hash: Text = """Contains # and "#" inside""";
+    assert(raw_hash.contains("#"));
+
+    // Raw string with newlines (literal)
+    let raw_newline: Text = """no \n escape""";
+    assert(raw_newline.contains("\\n"));  // Literal \n, not newline
+
+    // Raw string preserves all characters
+    let raw_all: Text = """\t\r\n\0\\\"""";
+    assert(raw_all.len() == 12);  // All characters literal
+
+    // Compare raw vs escaped
+    let escaped: Text = "C:\\Users";
+    let raw_path: Text = """C:\Users""";
+    assert(escaped == raw_path);
+}
+
+/// Test multiline strings
+fn test_text_multiline() {
+    // Basic multiline
+    let multiline: Text = "line1
+line2
+line3";
+    assert(multiline.lines().count() == 3);
+
+    // Multiline with indentation
+    let indented: Text = "
+        This is
+        indented text
+    ";
+    assert(indented.contains("indented"));
+
+    // Raw multiline
+    let raw_multi: Text = r#"
+        {
+            "key": "value"
+        }
+    "#;
+    assert(raw_multi.contains("{"));
+    assert(raw_multi.contains("\"key\""));
+
+    // Heredoc-style (if supported)
+    let heredoc: Text = """
+        This is a
+        heredoc-style
+        multiline string
+    """;
+    assert(heredoc.lines().count() >= 3);
+
+    // Trim multiline
+    let trimmed: Text = multiline.trim();
+    assert(!trimmed.starts_with("\n"));
+    assert(!trimmed.ends_with("\n"));
+
+    // Commented out: split_terminator() not yet in stdlib
+    // let with_trailing: Text = "a\nb\nc\n";
+    // let lines: List<&str> = with_trailing.split_terminator('\n').collect();
+    // assert(lines.len() == 3);  // No empty trailing element
+}
+
+/// Test string interpolation (f-strings)
+fn test_text_interpolation() {
+    // Basic interpolation
+    let name: Text = "Alice";
+    let greeting: Text = f"Hello, {name}!";
+    assert(greeting == "Hello, Alice!");
+
+    // Numeric interpolation
+    let age: Int = 30;
+    let info: Text = f"Age: {age}";
+    assert(info == "Age: 30");
+
+    // Expression interpolation
+    let x: Int = 5;
+    let y: Int = 3;
+    let expr: Text = f"{x} + {y} = {x + y}";
+    assert(expr == "5 + 3 = 8");
+
+    // Method call interpolation
+    let text: Text = "hello";
+    let upper: Text = f"Upper: {text.to_uppercase()}";
+    assert(upper == "Upper: HELLO");
+
+    // Nested braces (escaped)
+    let json: Text = f"{{\"name\": \"{name}\"}}";
+    assert(json == "{\"name\": \"Alice\"}");
+
+    // Multiple values
+    let a: Int = 1;
+    let b: Int = 2;
+    let c: Int = 3;
+    let multi: Text = f"Values: {a}, {b}, {c}";
+    assert(multi == "Values: 1, 2, 3");
+
+    // Floating point
+    let pi: Float = 3.14159;
+    let formatted_pi: Text = f"Pi is approximately {pi:.2}";
+    assert(formatted_pi == "Pi is approximately 3.14");
+
+    // Boolean
+    let flag: Bool = true;
+    let bool_str: Text = f"Flag is {flag}";
+    assert(bool_str == "Flag is true");
+
+    // Conditional expression
+    let score: Int = 85;
+    let grade: Text = f"Grade: {if score >= 90 { 'A' } else { 'B' }}";
+    assert(grade == "Grade: B");
+
+    // Index expression
+    let items: List<Text> = ["first", "second", "third"];
+    let item_str: Text = f"Item: {items[1]}";
+    assert(item_str == "Item: second");
+}
+
+/// Test capacity management
+fn test_text_capacity() {
+    // With capacity
+    let mut with_cap: Text = Text.with_capacity(100);
+    assert(with_cap.capacity() >= 100);
+
+    // Reserve additional
+    let mut to_reserve: Text = "hello";
+    let old_cap: Int = to_reserve.capacity();
+    to_reserve.reserve(100);
+    assert(to_reserve.capacity() >= old_cap + 100);
+
+    // Commented out: reserve_exact() not yet in stdlib
+    // let mut exact: Text = Text.new();
+    // exact.reserve_exact(50);
+    // assert(exact.capacity() >= 50);
+
+    // Shrink to fit
+    let mut to_shrink: Text = Text.with_capacity(1000);
+    to_shrink.push_str("hello");
+    to_shrink.shrink_to_fit();
+    assert(to_shrink.capacity() < 1000);
+
+    // Shrink to specific size
+    let mut shrink_to: Text = Text.with_capacity(100);
+    shrink_to.push_str("hello");
+    shrink_to.shrink_to(10);
+    assert(to_shrink.capacity() >= 5);
+
+    // Capacity grows automatically
+    let mut growing: Text = Text.new();
+    for i in 0..1000 {
+        growing.push('x');
+    }
+    assert(growing.len() == 1000);
+    assert(growing.capacity() >= 1000);
+
+    // Commented out: into_boxed_str() not yet in stdlib
+    // let text: Text = "hello";
+    // let boxed: Heap<str> = text.into_boxed_str();
+    // assert(&*boxed == "hello");
+}
+
+/// Test text cloning and copying
+fn test_text_cloning() {
+    // Clone
+    let original: Text = "original";
+    let cloned: Text = original.clone();
+    assert(cloned == original);
+    assert(&cloned as *const Text != &original as *const Text);  // Different allocations
+
+    // Clone from
+    let source: Text = "source";
+    let mut dest: Text = "destination";
+    dest.clone_from(&source);
+    assert(dest == "source");
+
+    // Into owned
+    let slice: &str = "slice";
+    let owned: Text = slice.to_owned();
+    assert(owned == "slice");
+
+    // To string
+    let converted: Text = "hello".to_text();
+    assert(converted == "hello");
+
+    // Deep clone of complex structure
+    let list_of_text: List<Text> = ["a", "b", "c"];
+    let cloned_list: List<Text> = list_of_text.clone();
+    assert(cloned_list == list_of_text);
+
+    // Clone is independent
+    let mut mutable_clone: Text = original.clone();
+    mutable_clone.push_str(" modified");
+    assert(original == "original");  // Unchanged
+    assert(mutable_clone == "original modified");
+}
+
+/// Test creating Text from other types
+fn test_text_from_other_types() {
+    // From integer
+    let from_int: Text = 42.to_text();
+    assert(from_int == "42");
+
+    let from_negative: Text = (-123).to_text();
+    assert(from_negative == "-123");
+
+    // From float
+    let from_float: Text = 3.14.to_text();
+    assert(from_float.starts_with("3.14"));
+
+    // From boolean
+    let from_true: Text = true.to_text();
+    let from_false: Text = false.to_text();
+    assert(from_true == "true");
+    assert(from_false == "false");
+
+    // From char
+    let from_char: Text = 'x'.to_text();
+    assert(from_char == "x");
+
+    // From Option/Maybe
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+    assert(format("{:?}", some_val) == "Some(42)");
+    assert(format("{:?}", none_val) == "None");
+
+    // From bytes (UTF-8)
+    let bytes: List<u8> = [104, 101, 108, 108, 111];  // "hello"
+    let from_bytes: Text = Text.from_utf8(bytes).unwrap();
+    assert(from_bytes == "hello");
+
+    // From bytes lossy (replaces invalid UTF-8)
+    let invalid_bytes: List<u8> = [104, 101, 255, 108, 111];  // Invalid UTF-8
+    let lossy: Text = Text.from_utf8_lossy(&invalid_bytes);
+    assert(lossy.contains("he"));
+
+    // From code points (chars)
+    let code_points: List<u32> = [72, 101, 108, 108, 111];  // "Hello"
+    let from_codepoints: Text = code_points.iter()
+        .map(|cp| char.from_u32(*cp).unwrap())
+        .collect();
+    assert(from_codepoints == "Hello");
+
+    // Parse from string (reverse)
+    let parsed_int: Int = "42".parse().unwrap();
+    assert(parsed_int == 42);
+
+    let parsed_float: Float = "3.14".parse().unwrap();
+    assert((parsed_float - 3.14).abs() < 0.001);
+}

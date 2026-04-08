@@ -1,0 +1,144 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, counting, sort, radix
+// @timeout: 30000
+
+// Counting sort and radix sort concepts
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Counting sort for values in [0, 7]
+fn counting_sort(arr: Arr8, n: Int) -> Arr8 {
+    // Count occurrences
+    let mut counts = new_arr8();
+    let mut i = 0;
+    while i < n {
+        let v = get8(arr, i);
+        counts = set8(counts, v, get8(counts, v) + 1);
+        i = i + 1;
+    }
+
+    // Build sorted array
+    let mut result = new_arr8();
+    let mut pos = 0;
+    let mut val = 0;
+    while val < 8 {
+        let mut c = get8(counts, val);
+        while c > 0 {
+            result = set8(result, pos, val);
+            pos = pos + 1;
+            c = c - 1;
+        }
+        val = val + 1;
+    }
+    result
+}
+
+// Frequency histogram
+fn histogram(arr: Arr8, n: Int) -> Arr8 {
+    let mut counts = new_arr8();
+    let mut i = 0;
+    while i < n {
+        let v = get8(arr, i);
+        counts = set8(counts, v, get8(counts, v) + 1);
+        i = i + 1;
+    }
+    counts
+}
+
+// Mode (most frequent value)
+fn mode_val(arr: Arr8, n: Int) -> Int {
+    let h = histogram(arr, n);
+    let mut best = 0;
+    let mut best_count = 0;
+    let mut i = 0;
+    while i < 8 {
+        if get8(h, i) > best_count {
+            best_count = get8(h, i);
+            best = i;
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// kth smallest element (0-indexed)
+fn kth_smallest(arr: Arr8, n: Int, k: Int) -> Int {
+    let sorted = counting_sort(arr, n);
+    get8(sorted, k)
+}
+
+fn test_counting_sort() -> Int {
+    let arr = Arr8 { v0: 3, v1: 1, v2: 4, v3: 1, v4: 5, v5: 2, v6: 6, v7: 3 };
+    let sorted = counting_sort(arr, 8);
+    assert_eq(get8(sorted, 0), 1);
+    assert_eq(get8(sorted, 1), 1);
+    assert_eq(get8(sorted, 2), 2);
+    assert_eq(get8(sorted, 3), 3);
+    assert_eq(get8(sorted, 4), 3);
+    assert_eq(get8(sorted, 5), 4);
+    assert_eq(get8(sorted, 6), 5);
+    assert_eq(get8(sorted, 7), 6);
+    1
+}
+
+fn test_histogram() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 1, v3: 3, v4: 2, v5: 1, v6: 0, v7: 0 };
+    let h = histogram(arr, 8);
+    assert_eq(get8(h, 0), 2); // two 0s
+    assert_eq(get8(h, 1), 3); // three 1s
+    assert_eq(get8(h, 2), 2); // two 2s
+    assert_eq(get8(h, 3), 1); // one 3
+    1
+}
+
+fn test_mode() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 1, v3: 3, v4: 2, v5: 1, v6: 4, v7: 5 };
+    assert_eq(mode_val(arr, 8), 1); // 1 appears 3 times
+    1
+}
+
+fn test_kth() -> Int {
+    let arr = Arr8 { v0: 7, v1: 2, v2: 5, v3: 1, v4: 4, v5: 3, v6: 6, v7: 0 };
+    assert_eq(kth_smallest(arr, 8, 0), 0); // smallest
+    assert_eq(kth_smallest(arr, 8, 3), 3); // 4th smallest
+    assert_eq(kth_smallest(arr, 8, 7), 7); // largest
+    1
+}
+
+fn main() -> Int {
+    test_counting_sort();
+    test_histogram();
+    test_mode();
+    test_kth();
+    print("[OK] 434_counting_sort_aot");
+    0
+}

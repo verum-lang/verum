@@ -1,0 +1,51 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, semaphore, sync
+// @timeout: 50000
+// @expected-exit: 0
+
+mount core.sync.atomic.MemoryOrdering;
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    let sem = Semaphore.new(3);
+    let a1 = sem.available_permits();
+    print(f"avail after new: {a1}");
+    if a1 == 3 { pass = pass + 1; }
+
+    let r1 = sem.try_acquire();
+    print(f"try_acquire 1: {r1}");
+    if r1 { pass = pass + 1; }
+
+    let a2 = sem.available_permits();
+    print(f"avail after 1 acquire: {a2}");
+    if a2 == 2 { pass = pass + 1; }
+
+    let r2 = sem.try_acquire();
+    let r3 = sem.try_acquire();
+    print(f"try_acquire 2,3: {r2}, {r3}");
+    if r2 { pass = pass + 1; }
+    if r3 { pass = pass + 1; }
+
+    let r4 = sem.try_acquire();
+    print(f"try_acquire 4 (should fail): {r4}");
+    if !r4 { pass = pass + 1; }
+
+    let a3 = sem.available_permits();
+    print(f"avail (should be 0): {a3}");
+    if a3 == 0 { pass = pass + 1; }
+
+    sem.release();
+    let a4 = sem.available_permits();
+    print(f"avail after release: {a4}");
+    if a4 == 1 { pass = pass + 1; }
+
+    print(f"pass = {pass}/8");
+    if pass == 8 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

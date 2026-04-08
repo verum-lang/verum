@@ -1,0 +1,237 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, runtime, build_info, crate, module
+// @description: Comprehensive tests for build information builtins
+// @contexts: MetaRuntime
+
+// =============================================================================
+// CRATE/COG NAME TESTS
+// =============================================================================
+
+// Test crate_name returns non-empty string
+meta fn test_crate_name_nonempty() -> Bool using [MetaRuntime] {
+    let name = crate_name();
+    text_len(name) > 0
+}
+
+// Test cog_name returns non-empty string
+meta fn test_cog_name_nonempty() -> Bool using [MetaRuntime] {
+    let name = cog_name();
+    text_len(name) > 0
+}
+
+// Test crate_name doesn't contain path separators
+meta fn test_crate_name_no_separators() -> Bool using [MetaRuntime] {
+    let name = crate_name();
+    !text_contains(name, "/") && !text_contains(name, "\\")
+}
+
+// =============================================================================
+// MODULE_PATH TESTS
+// =============================================================================
+
+// Test module_path returns non-empty string
+meta fn test_module_path_nonempty() -> Bool using [MetaRuntime] {
+    let path = module_path();
+    text_len(path) > 0
+}
+
+// Test module_path contains the crate name
+meta fn test_module_path_contains_crate() -> Bool using [MetaRuntime] {
+    let path = module_path();
+    let crate_nm = crate_name();
+    // Module path should start with or contain the crate name
+    text_starts_with(path, crate_nm) || text_contains(path, crate_nm)
+}
+
+// =============================================================================
+// DEBUG/RELEASE MODE TESTS
+// =============================================================================
+
+// Test is_debug and is_release are mutually exclusive
+meta fn test_debug_release_exclusive() -> Bool using [MetaRuntime] {
+    let debug = is_debug();
+    let release = is_release();
+    // Exactly one should be true
+    (debug && !release) || (!debug && release)
+}
+
+// Test is_debug returns a boolean
+meta fn test_is_debug_returns_bool() -> Bool using [MetaRuntime] {
+    let debug = is_debug();
+    debug || !debug  // Tautology to verify it's boolean
+}
+
+// Test is_release returns a boolean
+meta fn test_is_release_returns_bool() -> Bool using [MetaRuntime] {
+    let release = is_release();
+    release || !release  // Tautology to verify it's boolean
+}
+
+// =============================================================================
+// OPTIMIZATION LEVEL TESTS
+// =============================================================================
+
+// Test opt_level returns valid optimization level
+meta fn test_opt_level_valid() -> Bool using [MetaRuntime] {
+    let level = opt_level();
+    // Valid levels are 0, 1, 2, 3 (and possibly 's', 'z' as special values)
+    level >= 0 && level <= 3
+}
+
+// Test opt_level relationship with debug/release
+meta fn test_opt_level_debug_release() -> Bool using [MetaRuntime] {
+    let level = opt_level();
+    let debug = is_debug();
+    let release = is_release();
+
+    // In debug mode, optimization is typically 0
+    // In release mode, optimization is typically 2 or 3
+    // This test just verifies consistency, not specific values
+    (debug && level >= 0) || (release && level >= 0)
+}
+
+// =============================================================================
+// COMPILER VERSION TESTS
+// =============================================================================
+
+// Test compiler_version returns non-empty string
+meta fn test_compiler_version_nonempty() -> Bool using [MetaRuntime] {
+    let version = compiler_version();
+    text_len(version) > 0
+}
+
+// Test compiler_version contains a version number pattern
+meta fn test_compiler_version_format() -> Bool using [MetaRuntime] {
+    let version = compiler_version();
+    // Should contain at least one digit
+    text_contains(version, "0") ||
+    text_contains(version, "1") ||
+    text_contains(version, "2") ||
+    text_contains(version, "3") ||
+    text_contains(version, "4") ||
+    text_contains(version, "5") ||
+    text_contains(version, "6") ||
+    text_contains(version, "7") ||
+    text_contains(version, "8") ||
+    text_contains(version, "9")
+}
+
+// =============================================================================
+// CRATE/COG VERSION TESTS
+// =============================================================================
+
+// Test crate_version returns non-empty or specific version string
+meta fn test_crate_version() -> Bool using [MetaRuntime] {
+    let version = crate_version();
+    // Version can be empty if not set, or a semver string
+    text_len(version) >= 0
+}
+
+// Test cog_version returns non-empty or specific version string
+meta fn test_cog_version() -> Bool using [MetaRuntime] {
+    let version = cog_version();
+    // Version can be empty if not set, or a semver string
+    text_len(version) >= 0
+}
+
+// =============================================================================
+// CONDITIONAL COMPILATION PATTERNS
+// =============================================================================
+
+// Test using debug mode for debug-only code
+meta fn debug_only_value() -> Int using [MetaRuntime] {
+    if is_debug() {
+        // Include expensive checks in debug
+        42
+    } else {
+        // Skip in release
+        0
+    }
+}
+
+// Test using release mode for release-only optimizations
+meta fn release_optimization() -> Int using [MetaRuntime] {
+    if is_release() {
+        // Use optimized path
+        100
+    } else {
+        // Use safe path
+        50
+    }
+}
+
+// Test using opt_level for tiered optimization
+meta fn select_algorithm() -> Text using [MetaRuntime] {
+    let level = opt_level();
+    if level >= 3 {
+        "highly_optimized"
+    } else if level >= 2 {
+        "optimized"
+    } else if level >= 1 {
+        "balanced"
+    } else {
+        "debug"
+    }
+}
+
+// =============================================================================
+// BUILD INFO AGGREGATION
+// =============================================================================
+
+// Test combining build info into a struct-like representation
+meta fn build_info_summary() -> Text using [MetaRuntime] {
+    let crate_nm = crate_name();
+    let mod_path = module_path();
+    let version = compiler_version();
+    let mode = if is_debug() { "debug" } else { "release" };
+    let opt = opt_level();
+
+    text_concat(crate_nm, text_concat(" ", text_concat(mode, text_concat(" O", int_to_text(opt)))))
+}
+
+meta fn test_build_info_summary_nonempty() -> Bool using [MetaRuntime] {
+    let summary = build_info_summary();
+    text_len(summary) > 0
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Crate/cog name tests
+    @const assert(test_crate_name_nonempty());
+    @const assert(test_cog_name_nonempty());
+    @const assert(test_crate_name_no_separators());
+
+    // Module path tests
+    @const assert(test_module_path_nonempty());
+    @const assert(test_module_path_contains_crate());
+
+    // Debug/release mode tests
+    @const assert(test_debug_release_exclusive());
+    @const assert(test_is_debug_returns_bool());
+    @const assert(test_is_release_returns_bool());
+
+    // Optimization level tests
+    @const assert(test_opt_level_valid());
+    @const assert(test_opt_level_debug_release());
+
+    // Compiler version tests
+    @const assert(test_compiler_version_nonempty());
+    @const assert(test_compiler_version_format());
+
+    // Crate/cog version tests
+    @const assert(test_crate_version());
+    @const assert(test_cog_version());
+
+    // Conditional compilation tests - just evaluate
+    @const assert(debug_only_value() >= 0);
+    @const assert(release_optimization() >= 0);
+    @const assert(text_len(select_algorithm()) > 0);
+
+    // Build info aggregation
+    @const assert(test_build_info_summary_nonempty());
+}

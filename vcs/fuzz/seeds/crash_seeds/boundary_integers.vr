@@ -1,0 +1,9 @@
+// Crash seed: Boundary integer values
+fn main() {
+    let max_i64 = 9223372036854775807;
+    let min_i64 = -9223372036854775808;
+    let zero = 0;
+    let neg_zero = -0;
+    let one = 1;
+    let neg_one = -1;
+}

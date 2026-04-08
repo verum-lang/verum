@@ -1,0 +1,46 @@
+// @test: parse
+// @level: L0
+// @tags: parser, comprehensions, stream
+// @description: Test stream comprehension and literal parsing
+
+fn test_stream_comprehensions() {
+    // Basic stream comprehension
+    let a = stream[x * 2 for x in source];
+
+    // With filter
+    let b = stream[x for x in source if x > 0];
+
+    // Multiple generators
+    let c = stream[(x, y) for x in xs for y in ys];
+
+    // With let
+    let d = stream[y for x in items let y = transform(x)];
+
+    // Complex stream processing
+    let e = stream[result for x in input
+                   let processed = process(x)
+                   if is_valid(processed)
+                   for y in expand(processed)];
+
+    // Nested streams
+    let f = stream[stream[y for y in row] for row in source];
+}
+
+fn test_stream_literals() {
+    // Element-based streams
+    let a = stream[1, 2, 3];
+    let b = stream[1, 2, 3, ...];
+
+    // Range-based streams
+    let c = stream[0..100];
+    let d = stream[0..=100];
+    let e = stream[0..];
+
+    // Infinite streams
+    let f = stream[0, 1, 2, ...];
+    let g = stream[1..];
+
+    // With expressions
+    let h = stream[start..end];
+    let i = stream[0..(n * 2)];
+}

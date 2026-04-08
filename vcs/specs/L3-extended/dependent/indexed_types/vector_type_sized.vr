@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, vector-type, length-indexed
+// @timeout: 5000
+
+/// Sized vector operations
+///
+/// Operations on length-indexed vectors that track sizes.
+
+/// Length-indexed vector
+type Vect<T, N: meta Int> is
+    | VNil where N == 0
+    | VCons { head: T, tail: Vect<T, N - 1> } where N > 0;
+
+/// Fixed-size array type
+type SizedArr<T, N: meta Int> is { data: [T; N] };
+
+/// Replicate value N times
+fn vreplicate<T, N: meta Int>(val: T) -> SizedArr<T, N> {
+    SizedArr { data: [val; N] }
+}
+
+/// Safe head for sized arrays
+fn shead<T, N: meta Int{> 0}>(arr: SizedArr<T, N>) -> T {
+    arr.data[0]
+}
+
+/// Safe last for sized arrays
+fn slast<T, N: meta Int{> 0}>(arr: SizedArr<T, N>) -> T {
+    arr.data[N - 1]
+}
+
+/// Map over sized array
+fn smap<T, U, N: meta Int>(arr: SizedArr<T, N>, f: fn(T) -> U) -> SizedArr<U, N> {
+    SizedArr { data: arr.data.map(f) }
+}
+
+/// Zip two sized arrays of same length
+fn szip<A, B, N: meta Int>(
+    a: SizedArr<A, N>,
+    b: SizedArr<B, N>
+) -> SizedArr<(A, B), N> {
+    SizedArr { data: a.data.zip(b.data) }
+}
+
+/// Fold over sized array
+fn sfold<T, Acc, N: meta Int>(arr: SizedArr<T, N>, init: Acc, f: fn(Acc, T) -> Acc) -> Acc {
+    let mut acc = init;
+    for x in arr.data {
+        acc = f(acc, x);
+    }
+    acc
+}
+
+/// Safe index with bounds check
+fn sat<T, N: meta Int{> 0}>(arr: SizedArr<T, N>, i: Int) -> T
+where i >= 0, i < N {
+    arr.data[i]
+}
+
+/// Reverse a sized array
+fn sreverse<T, N: meta Int>(arr: SizedArr<T, N>) -> SizedArr<T, N> {
+    let mut d = arr.data;
+    d.reverse();
+    SizedArr { data: d }
+}
+
+/// Sort a sized array (preserves size)
+fn ssort<T, N: meta Int>(arr: SizedArr<T, N>) -> SizedArr<T, N> {
+    let mut d = arr.data;
+    d.sort();
+    SizedArr { data: d }
+}
+
+fn main() {
+    // Create sized arrays
+    let arr: SizedArr<Int, 5> = vreplicate(42);
+    assert(arr.data.len() == 5);
+
+    // Head and last
+    let h = shead(arr);
+    assert(h == 42);
+
+    let l = slast(arr);
+    assert(l == 42);
+
+    // Map
+    let doubled: SizedArr<Int, 5> = smap(arr, |x| x * 2);
+    assert(shead(doubled) == 84);
+
+    // Zip
+    let a: SizedArr<Int, 3> = SizedArr { data: [1, 2, 3] };
+    let b: SizedArr<Text, 3> = SizedArr { data: ["a", "b", "c"] };
+    let pairs: SizedArr<(Int, Text), 3> = szip(a, b);
+    assert(pairs.data.len() == 3);
+
+    // Fold
+    let sum = sfold(a, 0, |acc, x| acc + x);
+    assert(sum == 6);
+
+    // Reverse
+    let rev: SizedArr<Int, 3> = sreverse(a);
+    assert(shead(rev) == 3);
+    assert(slast(rev) == 1);
+}

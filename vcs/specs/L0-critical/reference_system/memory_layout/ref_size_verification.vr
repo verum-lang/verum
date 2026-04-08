@@ -1,0 +1,129 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, size, verification
+
+/// Verify the exact memory sizes of reference types.
+/// ThinRef: 16 bytes, FatRef: 24 bytes
+/// Spec: 26-cbgr-implementation.md#memory-layout
+
+fn main() {
+    test_thin_ref_size();
+    test_fat_ref_size();
+    test_reference_alignment();
+    test_size_by_type();
+}
+
+/// Verify ThinRef is exactly 16 bytes
+fn test_thin_ref_size() {
+    // ThinRef<T>: ptr(8) + generation(4) + epoch_caps(4) = 16 bytes
+    assert((&Int).size == 16);
+    assert((&Bool).size == 16);
+    assert((&Char).size == 16);
+    assert((&Float).size == 16);
+
+    // Works for any sized type
+    assert((&Text).size == 16);
+    assert((&Point).size == 16);
+    assert((&LargeStruct).size == 16);
+
+    print("ThinRef size verification: PASS");
+}
+
+/// Verify FatRef is exactly 24 bytes
+fn test_fat_ref_size() {
+    // FatRef<T>: ptr(8) + generation(4) + epoch_caps(4) + len(8) = 24 bytes
+
+    // Slice references are FatRef
+    assert((&[Int]).size == 24);
+    assert((&[Bool]).size == 24);
+    assert((&[Text]).size == 24);
+
+    // Note: &Text is a ThinRef (16 bytes) because Text is an owned type.
+    // Text slices (&[Char]) would be FatRef, but &Text is just a reference to owned text.
+
+    print("FatRef size verification: PASS");
+}
+
+/// Verify proper alignment of references
+fn test_reference_alignment() {
+    // References should be pointer-aligned (8 bytes on 64-bit)
+    assert((&Int).alignment == 8);
+    assert((&[Int]).alignment == 8);
+
+    // This ensures efficient access on modern CPUs
+    print("Reference alignment verification: PASS");
+}
+
+/// Test sizes for different reference types
+fn test_size_by_type() {
+    // Mutable refs have same size as immutable
+    assert((&Int).size == (&mut Int).size);
+    assert((&[Int]).size == (&mut [Int]).size);
+
+    // Checked refs may have different internal representation
+    // but should be comparable size
+    assert((&checked Int).size <= 16);
+
+    // Unsafe refs are raw pointers (8 bytes)
+    unsafe {
+        assert((&unsafe Int).size == 8);
+    }
+
+    print("Size by type verification: PASS");
+}
+
+/// Demonstrate the ThinRef layout
+fn show_thin_ref_layout() {
+    // Layout:
+    // bytes 0-7:   pointer to T
+    // bytes 8-11:  generation counter (u32)
+    // bytes 12-15: epoch + capabilities (u32)
+
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Access components (implementation-specific)
+    let ptr = ref_val.raw_ptr();
+    let generation = ref_val.stored_generation();
+    let epoch_caps = ref_val.epoch_caps();
+
+    print("ThinRef layout:");
+    print("  Pointer:    " + ptr.to_string());
+    print("  Generation: " + generation.to_string());
+    print("  Epoch/Caps: " + epoch_caps.to_string());
+}
+
+/// Demonstrate the FatRef layout
+fn show_fat_ref_layout() {
+    // Layout:
+    // bytes 0-7:   pointer to first element
+    // bytes 8-11:  generation counter (u32)
+    // bytes 12-15: epoch + capabilities (u32)
+    // bytes 16-23: length (Int)
+
+    let array = [1, 2, 3, 4, 5];
+    let slice_ref: &[Int] = &array;
+
+    // Access components
+    let ptr = slice_ref.raw_ptr();
+    let generation = slice_ref.stored_generation();
+    let len = slice_ref.len();
+
+    print("FatRef layout:");
+    print("  Pointer: " + ptr.to_string());
+    print("  Generation: " + generation.to_string());
+    print("  Length: " + len.to_string());
+}
+
+// Type definitions
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type LargeStruct is {
+    data: [u8; 1024],
+    name: Text,
+};

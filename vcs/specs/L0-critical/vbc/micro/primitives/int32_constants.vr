@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Int32 type constants (MIN, MAX, BITS)
+
+fn main() {
+    // Test Int32.MIN (-2^31)
+    assert_eq(Int32.MIN(), -2147483648);
+
+    // Test Int32.MAX (2^31 - 1)
+    assert_eq(Int32.MAX(), 2147483647);
+
+    // Test Int32.BITS
+    assert_eq(Int32.BITS(), 32);
+
+    // Test i32 alias (FFI compatibility)
+    assert_eq(i32.MIN(), -2147483648);
+    assert_eq(i32.MAX(), 2147483647);
+    assert_eq(i32.BITS(), 32);
+}

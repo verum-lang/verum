@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, equality, propositional
+
+/// Propositional equality - identity types
+///
+/// Propositional equality witnesses that two values of the same type
+/// are provably equal. This is the foundation of type-theoretic reasoning.
+
+/// Propositional equality witness
+type PropEq<T> is | PropRefl;
+
+/// Reflexivity: every value equals itself
+fn prop_refl<T>() -> PropEq<T> { PropRefl }
+
+/// Symmetry: equality is symmetric
+fn prop_symm<T>(p: PropEq<T>) -> PropEq<T> {
+    match p { PropRefl => PropRefl }
+}
+
+/// Transitivity: equality is transitive
+fn prop_trans<T>(p: PropEq<T>, q: PropEq<T>) -> PropEq<T> {
+    match (p, q) { (PropRefl, PropRefl) => PropRefl }
+}
+
+/// Congruence: f(a) = f(b) when a = b
+fn prop_cong<A, B>(f: fn(A) -> B, p: PropEq<A>) -> PropEq<B> {
+    match p { PropRefl => PropRefl }
+}
+
+/// Substitution: if a = b and P(a) then P(b)
+fn prop_subst<T>(p: PropEq<T>, witness: T) -> T {
+    match p { PropRefl => witness }
+}
+
+/// UIP: uniqueness of identity proofs
+fn uip<T>(p: PropEq<T>, q: PropEq<T>) -> PropEq<PropEq<T>> {
+    match (p, q) { (PropRefl, PropRefl) => PropRefl }
+}
+
+/// Leibniz equality: a = b iff for all P, P(a) implies P(b)
+type LeibnizEq<A, B> is {
+    forward: fn(A) -> B,
+    backward: fn(B) -> A,
+};
+
+fn leibniz_refl<T>() -> LeibnizEq<T, T> {
+    LeibnizEq { forward: |x| x, backward: |x| x }
+}
+
+/// Heterogeneous equality (John Major equality)
+type HetEq<A, B> is {
+    cast_ab: fn(A) -> B,
+    cast_ba: fn(B) -> A,
+};
+
+fn het_refl<T>() -> HetEq<T, T> {
+    HetEq { cast_ab: |x| x, cast_ba: |x| x }
+}
+
+/// Decidable equality
+type DecEq<T> is | Yes | No;
+
+fn dec_eq_int(a: Int, b: Int) -> DecEq<Int> {
+    if a == b { Yes } else { No }
+}
+
+fn dec_eq_text(a: Text, b: Text) -> DecEq<Text> {
+    if a == b { Yes } else { No }
+}
+
+fn dec_eq_bool(a: Bool, b: Bool) -> DecEq<Bool> {
+    if a == b { Yes } else { No }
+}
+
+/// Setoid: type with custom equality
+type Setoid<T> is {
+    eq: fn(T, T) -> Bool,
+};
+
+fn int_setoid() -> Setoid<Int> {
+    Setoid { eq: |a, b| a == b }
+}
+
+fn mod_setoid(n: Int) -> Setoid<Int> {
+    Setoid { eq: |a, b| (a - b) % n == 0 }
+}
+
+fn main() {
+    // Basic equality proofs
+    let r: PropEq<Int> = prop_refl();
+    let s = prop_symm(r);
+    let t = prop_trans(r, s);
+
+    // Congruence
+    let c = prop_cong(|x: Int| x * 2, r);
+
+    // UIP
+    let u = uip(r, r);
+
+    // Leibniz equality
+    let le = leibniz_refl.<Int>();
+
+    // Heterogeneous equality
+    let he = het_refl.<Int>();
+
+    // Decidable equality
+    assert(dec_eq_int(42, 42) is Yes);
+    assert(dec_eq_int(1, 2) is No);
+    assert(dec_eq_text("hello", "hello") is Yes);
+
+    // Setoid
+    let modular = mod_setoid(3);
+    assert((modular.eq)(7, 4));  // 7 - 4 = 3, divisible by 3
+}

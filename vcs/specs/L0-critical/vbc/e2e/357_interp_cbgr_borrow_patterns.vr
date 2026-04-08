@@ -1,0 +1,287 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, borrow-patterns
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Real CBGR borrow patterns.
+// Tests immutable borrows, mutable borrows, reborrowing, borrow scoping,
+// and exclusive vs shared reference semantics using real & and &mut.
+
+// =============================================================================
+// Types
+// =============================================================================
+
+type Stats is { count: Int, total: Int, min_val: Int, max_val: Int };
+type Matrix2 is { a: Int, b: Int, c: Int, d: Int };
+type Triple is { x: Int, y: Int, z: Int };
+
+// =============================================================================
+// Functions operating on immutable borrows
+// =============================================================================
+
+fn stats_avg(s: &Stats) -> Int {
+    if (*s).count == 0 { 0 } else { (*s).total / (*s).count }
+}
+
+fn stats_range(s: &Stats) -> Int {
+    (*s).max_val - (*s).min_val
+}
+
+fn mat2_det(m: &Matrix2) -> Int {
+    (*m).a * (*m).d - (*m).b * (*m).c
+}
+
+fn mat2_trace(m: &Matrix2) -> Int {
+    (*m).a + (*m).d
+}
+
+fn triple_norm_sq(t: &Triple) -> Int {
+    (*t).x * (*t).x + (*t).y * (*t).y + (*t).z * (*t).z
+}
+
+fn triple_dot(a: &Triple, b: &Triple) -> Int {
+    (*a).x * (*b).x + (*a).y * (*b).y + (*a).z * (*b).z
+}
+
+// =============================================================================
+// Functions operating on mutable borrows
+// =============================================================================
+
+fn stats_add(s: &mut Stats, val: Int) {
+    (*s).count = (*s).count + 1;
+    (*s).total = (*s).total + val;
+    if val < (*s).min_val {
+        (*s).min_val = val;
+    }
+    if val > (*s).max_val {
+        (*s).max_val = val;
+    }
+}
+
+fn stats_reset(s: &mut Stats) {
+    (*s).count = 0;
+    (*s).total = 0;
+    (*s).min_val = 999999;
+    (*s).max_val = -999999;
+}
+
+fn mat2_scale(m: &mut Matrix2, factor: Int) {
+    (*m).a = (*m).a * factor;
+    (*m).b = (*m).b * factor;
+    (*m).c = (*m).c * factor;
+    (*m).d = (*m).d * factor;
+}
+
+fn mat2_add_identity(m: &mut Matrix2) {
+    (*m).a = (*m).a + 1;
+    (*m).d = (*m).d + 1;
+}
+
+fn triple_negate(t: &mut Triple) {
+    (*t).x = -(*t).x;
+    (*t).y = -(*t).y;
+    (*t).z = -(*t).z;
+}
+
+fn triple_add_to(dst: &mut Triple, src: &Triple) {
+    (*dst).x = (*dst).x + (*src).x;
+    (*dst).y = (*dst).y + (*src).y;
+    (*dst).z = (*dst).z + (*src).z;
+}
+
+// =============================================================================
+// Test: Shared (immutable) borrows
+// =============================================================================
+
+fn test_shared_borrows() {
+    let m = Matrix2 { a: 1, b: 2, c: 3, d: 4 };
+    let r1 = &m;
+    let r2 = &m;
+
+    assert_eq(mat2_det(r1), -2);
+    assert_eq(mat2_det(r2), -2);
+    assert_eq(mat2_trace(r1), 5);
+    assert_eq(mat2_trace(r2), 5);
+    assert_eq(mat2_det(&m), -2);
+}
+
+// =============================================================================
+// Test: Exclusive (mutable) borrows
+// =============================================================================
+
+fn test_exclusive_borrows() {
+    let mut m = Matrix2 { a: 2, b: 0, c: 0, d: 3 };
+    // Scope-based borrow checker: can't mix &m and &mut m in same scope
+    // Verify initial state via direct field access
+    assert_eq(m.a * m.d - m.b * m.c, 6);
+
+    mat2_scale(&mut m, 2);
+    assert_eq(m.a, 4);
+    assert_eq(m.d, 6);
+    assert_eq(m.a * m.d - m.b * m.c, 24);
+
+    mat2_add_identity(&mut m);
+    assert_eq(m.a, 5);
+    assert_eq(m.d, 7);
+    assert_eq(m.a * m.d - m.b * m.c, 35);
+}
+
+// =============================================================================
+// Test: Borrow then mutate sequentially
+// =============================================================================
+
+fn test_borrow_then_mutate() {
+    let mut s = Stats { count: 0, total: 0, min_val: 999999, max_val: -999999 };
+    // Scope-based borrow checker: can't mix &s and &mut s in same scope
+    // Verify initial state via direct field access
+    assert_eq(s.count, 0);
+    assert_eq(s.total, 0);
+
+    stats_add(&mut s, 10);
+    stats_add(&mut s, 20);
+    stats_add(&mut s, 30);
+
+    assert_eq(s.count, 3);
+    assert_eq(s.total, 60);
+    // Inline avg: total / count
+    assert_eq(s.total / s.count, 20);
+    // Inline range: max - min
+    assert_eq(s.max_val - s.min_val, 20);
+
+    stats_add(&mut s, 5);
+    stats_add(&mut s, 50);
+
+    assert_eq(s.count, 5);
+    assert_eq(s.total, 115);
+    assert_eq(s.total / s.count, 23);
+    assert_eq(s.min_val, 5);
+    assert_eq(s.max_val, 50);
+    assert_eq(s.max_val - s.min_val, 45);
+
+    stats_reset(&mut s);
+    assert_eq(s.count, 0);
+    assert_eq(s.total, 0);
+}
+
+// =============================================================================
+// Test: Mixed immutable ref and mutable ref on different values
+// =============================================================================
+
+fn test_mixed_borrows() {
+    let src = Triple { x: 1, y: 2, z: 3 };
+    let mut dst = Triple { x: 10, y: 20, z: 30 };
+
+    // Use inline refs — src is immutable, dst is mutable, different variables
+    triple_add_to(&mut dst, &src);
+    assert_eq(dst.x, 11);
+    assert_eq(dst.y, 22);
+    assert_eq(dst.z, 33);
+
+    triple_add_to(&mut dst, &src);
+    assert_eq(dst.x, 12);
+    assert_eq(dst.y, 24);
+    assert_eq(dst.z, 36);
+
+    assert_eq(triple_dot(&src, &dst), 168);
+}
+
+// =============================================================================
+// Test: Negate through mutable ref
+// =============================================================================
+
+fn test_negate_pattern() {
+    let mut v = Triple { x: 5, y: -10, z: 15 };
+    triple_negate(&mut v);
+    assert_eq(v.x, -5);
+    assert_eq(v.y, 10);
+    assert_eq(v.z, -15);
+
+    triple_negate(&mut v);
+    assert_eq(v.x, 5);
+    assert_eq(v.y, -10);
+    assert_eq(v.z, 15);
+}
+
+// =============================================================================
+// Test: Accumulation loop with mutable ref
+// =============================================================================
+
+fn test_accumulation_loop() {
+    let mut acc = Stats { count: 0, total: 0, min_val: 999999, max_val: -999999 };
+
+    let mut i = 1;
+    while i <= 100 {
+        stats_add(&mut acc, i);
+        i = i + 1;
+    }
+
+    assert_eq(acc.count, 100);
+    assert_eq(acc.total, 5050);
+    assert_eq(acc.min_val, 1);
+    assert_eq(acc.max_val, 100);
+    assert_eq(stats_avg(&acc), 50);
+}
+
+// =============================================================================
+// Test: Scalar ref mutation
+// =============================================================================
+
+fn double_via_ref(r: &mut Int) {
+    *r = *r * 2;
+}
+
+fn test_scalar_ref_mutation() {
+    let mut x = 1;
+    let r = &mut x;
+    double_via_ref(r);
+    assert_eq(x, 2);
+    double_via_ref(r);
+    assert_eq(x, 4);
+    double_via_ref(r);
+    assert_eq(x, 8);
+    double_via_ref(r);
+    assert_eq(x, 16);
+
+    let mut n = 1;
+    let nr = &mut n;
+    let mut i = 0;
+    while i < 10 {
+        double_via_ref(nr);
+        i = i + 1;
+    }
+    assert_eq(n, 1024);
+}
+
+// =============================================================================
+// Test: Norm squared via immutable ref
+// =============================================================================
+
+fn test_norm_squared() {
+    let v1 = Triple { x: 3, y: 4, z: 0 };
+    assert_eq(triple_norm_sq(&v1), 25);
+
+    let v2 = Triple { x: 1, y: 2, z: 3 };
+    assert_eq(triple_norm_sq(&v2), 14);
+
+    let v3 = Triple { x: 0, y: 0, z: 0 };
+    assert_eq(triple_norm_sq(&v3), 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_shared_borrows();
+    test_exclusive_borrows();
+    test_borrow_then_mutate();
+    test_mixed_borrows();
+    test_negate_pattern();
+    test_accumulation_loop();
+    test_scalar_ref_mutation();
+    test_norm_squared();
+    print("borrow_patterns_ok");
+    0
+}

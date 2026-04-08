@@ -1,0 +1,27 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, record, field-access
+// @expected-exit: 0
+
+type Point is { x: Int, y: Int };
+
+fn dist_sq(p: Point) -> Int {
+    p.x * p.x + p.y * p.y
+}
+
+fn main() -> Int {
+    let p = Point { x: 3, y: 4 };
+    let d = dist_sq(p);
+    print(d);
+    assert_eq(d, 25);
+
+    // Direct field access
+    let q = Point { x: 10, y: 20 };
+    print(q.x);
+    print(q.y);
+    assert_eq(q.x, 10);
+    assert_eq(q.y, 20);
+
+    0
+}

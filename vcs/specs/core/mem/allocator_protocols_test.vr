@@ -1,0 +1,109 @@
+// =============================================================================
+// allocator_protocols_test.vr - Tests for AllocError Display implementation
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: mem, allocator, error, display, protocols, core
+// @description: Tests Display for AllocError variants
+// =============================================================================
+
+mount core.mem.allocator.{AllocError};
+mount core.base.protocols.{Display, Debug};
+mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// =============================================================================
+// Section 1: AllocError Display
+// =============================================================================
+
+@test
+fn test_alloc_error_out_of_memory_display() {
+    let err = AllocError.OutOfMemory { requested: 1024 };
+    let text = format_display(&err);
+    assert(text.contains("out of memory"));
+    assert(text.contains("1024"));
+}
+
+@test
+fn test_alloc_error_invalid_size_display() {
+    let err = AllocError.InvalidSize { size: 0 };
+    let text = format_display(&err);
+    assert(text.contains("invalid") && text.contains("size"));
+}
+
+@test
+fn test_alloc_error_invalid_alignment_display() {
+    let err = AllocError.InvalidAlignment { alignment: 3 };
+    let text = format_display(&err);
+    assert(text.contains("alignment"));
+}
+
+@test
+fn test_alloc_error_mmap_failed_display() {
+    let err = AllocError.MmapFailed { code: 12 };
+    let text = format_display(&err);
+    assert(text.contains("mmap"));
+}
+
+@test
+fn test_alloc_error_munmap_failed_display() {
+    let err = AllocError.MunmapFailed { code: 22 };
+    let text = format_display(&err);
+    assert(text.contains("munmap"));
+}
+
+@test
+fn test_alloc_error_page_exhausted_display() {
+    let err = AllocError.PageExhausted;
+    let text = format_display(&err);
+    assert(text.contains("page") || text.contains("exhausted"));
+}
+
+@test
+fn test_alloc_error_invalid_pointer_display() {
+    let err = AllocError.InvalidPointer;
+    let text = format_display(&err);
+    assert(text.contains("invalid") || text.contains("pointer"));
+}
+
+// =============================================================================
+// Section 2: Display matches Debug (both use message())
+// =============================================================================
+
+@test
+fn test_alloc_error_display_matches_debug() {
+    let err = AllocError.OutOfMemory { requested: 512 };
+    assert_eq(format_display(&err), format_debug(&err));
+}
+
+@test
+fn test_alloc_error_display_differs_by_variant() {
+    let err1 = AllocError.OutOfMemory { requested: 1024 };
+    let err2 = AllocError.InvalidPointer;
+    assert(format_display(&err1) != format_display(&err2));
+}
+
+// =============================================================================
+// Section 3: Display function existence proof
+// =============================================================================
+
+@test
+fn test_alloc_error_display_fn_exists() {
+    fn display_alloc_error(e: &AllocError) -> Text {
+        format_display(e)
+    }
+    let _ = display_alloc_error;
+}
+
+@test
+fn test_alloc_error_message_actionable() {
+    let err = AllocError.OutOfMemory { requested: 4096 };
+    let msg = format_display(&err);
+    assert(msg.len() > 10);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,48 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, sigma-types, basic
+
+/// Basic sigma type bindings -- single dependent bindings with where clauses.
+/// Grammar: sigma_binding = identifier ':' type_expr [ 'where' expression ] ;
+
+// Single sigma binding: value with constraint
+type Natural is n: Int where n >= 0;
+
+// Multiple sigma bindings: dependent pair
+type Interval is lo: Int, hi: Int where hi >= lo;
+
+// Three-field sigma binding
+type Triangle is a: Float, b: Float, c: Float
+    where a > 0.0 && b > 0.0 && c > 0.0;
+
+// Sigma binding where later field depends on earlier
+type SizedArray is n: Int where n > 0, data: List<Int>;
+
+// Boolean sigma: constraint is a boolean expression
+type ValidBit is b: Int where b == 0 || b == 1;
+
+fn make_natural(x: Int) -> Maybe<Natural> {
+    if x >= 0 {
+        Some(x)
+    } else {
+        None
+    }
+}
+
+fn interval_length(iv: Interval) -> Int {
+    iv.hi - iv.lo
+}
+
+fn main() {
+    let n: Natural = 42;
+    assert(n >= 0);
+
+    let iv: Interval = Interval { lo: 10, hi: 20 };
+    assert(interval_length(iv) == 10);
+
+    let tri: Triangle = Triangle { a: 3.0, b: 4.0, c: 5.0 };
+    assert(tri.a > 0.0);
+
+    let bit: ValidBit = 1;
+    assert(bit == 0 || bit == 1);
+}

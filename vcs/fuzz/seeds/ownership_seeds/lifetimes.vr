@@ -1,0 +1,224 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: ownership, lifetimes, memory-safety
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// Lifetimes - Ownership Lifetime Test Seed
+// Tests lifetime semantics and CBGR epoch tracking
+// =============================================================================
+
+// Basic lifetime inference
+fn basic_lifetimes() {
+    let x = 42;
+    let r = &x;  // Lifetime of r tied to x
+
+    println(*r);
+}  // x and r both end here
+
+// Lifetime in function parameters
+fn lifetime_params(x: &Int) -> &Int {
+    x  // Return lifetime tied to input
+}
+
+// Multiple input lifetimes
+fn min_lifetime(x: &Int, y: &Int) -> Int {
+    // Can use both references
+    *x + *y
+}
+
+// Returning one of multiple inputs
+fn select_first(x: &Int, y: &Int) -> &Int {
+    x  // Explicit: returns reference with x's lifetime
+}
+
+// Struct with references
+type BorrowedPair<T, U> is {
+    first: &T,
+    second: &U,
+};
+
+fn struct_lifetimes() {
+    let a = 42;
+    let b = "hello";
+
+    let pair = BorrowedPair { first: &a, second: &b };
+    // pair's lifetime is min(a's lifetime, b's lifetime)
+
+    println(*pair.first);
+    println(*pair.second);
+}
+
+// Lifetime bounds in generics
+fn bounded_lifetime<T>(container: &Container<T>) -> &T
+where type T: Clone
+{
+    &container.value
+}
+
+// Nested lifetime relationships
+type Wrapper<T> is {
+    inner: &T,
+};
+
+fn nested_lifetimes(wrapper: &Wrapper<Int>) -> &Int {
+    wrapper.inner
+}
+
+// CBGR epoch capabilities
+fn epoch_caps() {
+    let value = 42;
+
+    // Reference carries epoch capability
+    let r: &Int = &value;
+
+    // Epoch tracks valid access window
+    // CBGR ensures reference doesn't outlive value
+}
+
+// Static lifetime
+const STATIC_VALUE: Int = 42;
+
+fn static_lifetime() -> &Int {
+    // Static values live forever
+    &STATIC_VALUE
+}
+
+fn returns_static() -> &Text {
+    "hello"  // String literals have static lifetime
+}
+
+// Lifetime in closures
+fn closure_lifetimes() {
+    let value = 42;
+
+    let closure = || {
+        // Captures reference to value
+        &value
+    };
+
+    let r = closure();
+    println(*r);
+}
+
+// Move closure lifetime extension
+fn move_closure() {
+    let value = 42;
+
+    let closure = move || {
+        // Value is moved, closure owns it
+        value
+    };
+
+    let v = closure();
+}
+
+// Lifetime elision rules
+implement Container<Int> {
+    // Elided: &self -> &Int means output lifetime = self lifetime
+    fn get(&self) -> &Int {
+        &self.value
+    }
+
+    // Elided: &mut self -> &mut Int
+    fn get_mut(&mut self) -> &mut Int {
+        &mut self.value
+    }
+}
+
+// Complex lifetime relationships
+type NestedBorrow<A, B> is {
+    outer: &A,
+    inner: &B,
+};
+
+fn complex_lifetimes(
+    data: &Data,
+    nested: &NestedBorrow<Int, Text>,
+) -> &Int {
+    nested.outer
+}
+
+// Lifetime and mutability
+fn mutable_lifetime(data: &mut Data) -> &mut Int {
+    &mut data.value
+}
+
+// Covariance in lifetimes
+fn covariant_lifetime(long: &Int) -> &Int {
+    // Can return shorter-lived reference from longer-lived
+    long
+}
+
+// Invariance with mutable references
+fn invariant_mutable(r: &mut Int) -> &mut Int {
+    // Mutable references are invariant in their lifetime
+    r
+}
+
+// Higher-rank lifetimes (for-all lifetimes)
+fn higher_rank<F>(f: F)
+where type F: for fn(&Int) -> &Int
+{
+    let x = 42;
+    let y = f(&x);
+    println(*y);
+}
+
+// Lifetime in async contexts
+async fn async_lifetime(data: &Data) -> &Int {
+    // Reference must remain valid across await
+    let result = compute(data).await;
+    &data.value
+}
+
+// Self-referential prevention
+type Node is {
+    value: Int,
+    // Cannot have: next: &Node  -- would be self-referential
+    next: Maybe<Heap<Node>>,  // Use Heap instead
+};
+
+// Lifetime in iterators
+type Iter<T> is {
+    current: &T,
+    remaining: &[T],
+};
+
+implement<T> Iterator for Iter<T> {
+    type Item = &T;
+
+    fn next(&mut self) -> Maybe<&T> {
+        if self.remaining.is_empty() {
+            None
+        } else {
+            let item = &self.remaining[0];
+            self.remaining = &self.remaining[1..];
+            Some(item)
+        }
+    }
+}
+
+// Generation-based invalidation
+fn generation_tracking() {
+    let mut container = Container.new();
+
+    let ref1 = &container.data;
+
+    // This would invalidate ref1
+    container.reallocate();
+
+    // CBGR detects stale generation
+    // Runtime error if ref1 used here
+}
+
+// Pinned lifetimes
+fn pinned_data() {
+    let pinned = Pin.new(Data.new());
+
+    // Pinned data cannot be moved
+    // Lifetime is extended to pin's lifetime
+    let ref_to_pinned: &Data = &*pinned;
+}

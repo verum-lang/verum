@@ -1,0 +1,11 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    assert_eq(0.1 + 0.2, 0.30000000000000004);
+    assert(1.0 < 1.0000001);
+    assert(1.0 <= 1.0);
+    assert(2.0 > 1.9999999);
+    assert(2.0 >= 2.0);
+}

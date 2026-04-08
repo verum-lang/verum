@@ -1,0 +1,41 @@
+// @test: verify-fail
+// @timeout: 5000
+// @tier: 0
+// @level: L2
+// @tags: verification, proof, smt, error
+// @expected-error: E501 "SMT verification failed: postcondition cannot be proven"
+
+/// Proof verification failure tests
+/// @verify(proof) - errors are caught by SMT solver (Z3)
+
+/// Incorrect postcondition that SMT solver will reject
+@verify(proof)
+fn bad_abs(x: Int) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result == x;  // ERROR: fails for negative x
+    ";
+    // SMT counterexample: x = -1
+    // result would be 1 (from abs), but ensures claims result == x == -1
+    if x >= 0 { x } else { -x }
+}
+
+/// Missing precondition detected by SMT
+@verify(proof)
+fn incomplete_sqrt(x: Float) -> Float {
+    contract#"
+        // Missing: requires x >= 0.0;
+        ensures result * result == x;  // ERROR: undefined for negative x
+    ";
+    x.sqrt()
+}
+
+/// Impossible postcondition
+@verify(proof)
+fn impossible_contract(x: Int) -> Int {
+    contract#"
+        ensures result > x;      // Claims result > x
+        ensures result < x;      // AND result < x - impossible!
+    ";
+    x + 1
+}

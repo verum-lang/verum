@@ -1,0 +1,198 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, tagged, bytes, binary
+
+// Byte and binary literal syntax
+
+fn test_basic_byte_array_literals() {
+    // Basic byte array literals
+    let empty_bytes = b"";
+    let single_byte = b"\x00";
+    let hello_bytes = b"hello";
+    let ascii_bytes = b"ASCII text";
+}
+
+fn test_hex_escape_sequences() {
+    // Hex escape sequences in bytes
+    let hex_bytes = b"\x00\x01\x02\x03";
+    let all_hex = b"\xFF\xFE\xFD\xFC";
+    let mixed_hex = b"A\x42C";
+}
+
+fn test_common_byte_patterns() {
+    // Common byte patterns
+    let null_terminated = b"string\x00";
+    let crlf = b"\r\n";
+    let lf_only = b"\n";
+}
+
+fn test_file_signatures() {
+    // File signatures / magic bytes
+    let png_header = b"\x89PNG\r\n\x1a\n";
+    let gif_header = b"GIF89a";
+    let jpeg_header = b"\xFF\xD8\xFF";
+    let pdf_header = b"%PDF-";
+    let zip_header = b"PK\x03\x04";
+    let gzip_header = b"\x1f\x8b";
+}
+
+fn test_unicode_byte_sequences() {
+    // Unicode byte sequences (UTF-8)
+    let utf8_euro = b"\xE2\x82\xAC";  // Euro sign
+    let utf8_smiley = b"\xF0\x9F\x98\x80";  // Emoji
+}
+
+fn test_raw_binary_data() {
+    // Raw binary data
+    let binary_data = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
+    let pattern = b"\xAA\x55\xAA\x55";
+    let zeros = b"\x00\x00\x00\x00";
+    let ones = b"\xFF\xFF\xFF\xFF";
+}
+
+fn test_escape_sequences_in_bytes() {
+    // Escape sequences in bytes
+    let backslash = b"\\";
+    let dquote = b"\"";
+    let tab = b"\t";
+    let newline = b"\n";
+    let carriage = b"\r";
+}
+
+// Byte arrays in function parameters
+fn hash(data: Bytes) -> Bytes {
+    sha256(data)
+}
+
+fn test_byte_function_call() {
+    let hash_result = hash(b"input data");
+}
+
+fn test_byte_array_concatenation() {
+    // Byte array concatenation
+    let prefix = b"HEADER";
+    let suffix = b"FOOTER";
+    let combined = prefix + b"DATA" + suffix;
+}
+
+fn test_byte_array_comparison() {
+    // Byte array comparison
+    let a = b"\x01\x02\x03";
+    let b_bytes = b"\x01\x02\x03";
+    let c = b"\x01\x02\x04";
+    let is_equal = a == b_bytes;
+    let is_less = a < c;
+}
+
+// Byte array in structs
+type Packet is {
+    header: Bytes,
+    payload: Bytes,
+    checksum: Bytes,
+};
+
+fn test_byte_in_structs() {
+    let packet = Packet {
+        header: b"\x01\x00\x00\x10",
+        payload: b"Hello World",
+        checksum: b"\xAB\xCD",
+    };
+}
+
+fn test_byte_in_arrays() {
+    // Byte array in arrays
+    let frames = [
+        b"\x01Frame1",
+        b"\x02Frame2",
+        b"\x03Frame3",
+    ];
+}
+
+fn test_byte_length_and_indexing() {
+    // Byte length and indexing
+    let data = b"Hello";
+    let length = data.len();  // 5
+    let first_byte = data[0];  // 72 (H)
+    let last_byte = data[4];   // 111 (o)
+}
+
+fn test_byte_slicing() {
+    let data = b"Hello";
+    // Byte slicing
+    let slice = data[0..3];  // b"Hel"
+    let tail = data[2..];    // b"llo"
+    let head = data[..3];    // b"Hel"
+}
+
+fn test_base64_encoding() {
+    // Base64 encoding/decoding
+    let original = b"Hello World";
+    let encoded = original.to_base64();  // "SGVsbG8gV29ybGQ="
+    let decoded = Bytes.from_base64("SGVsbG8gV29ybGQ=");
+}
+
+fn test_hex_string_conversion() {
+    // Hex string conversion
+    let hex_str = b"\xDE\xAD\xBE\xEF".to_hex();  // "deadbeef"
+    let from_hex = Bytes.from_hex("deadbeef");
+}
+
+fn test_byte_iteration() {
+    // Byte iteration
+    let hello_bytes = b"Hello";
+    for byte in hello_bytes {
+        process_byte(byte)
+    }
+}
+
+fn test_finding_patterns() {
+    // Finding patterns
+    let haystack = b"Hello World";
+    let needle = b"World";
+    let found = haystack.contains(needle);
+    let position = haystack.find(needle);  // Maybe<usize>
+}
+
+fn test_byte_replacement() {
+    // Byte replacement
+    let original_bytes = b"Hello World";
+    let replaced = original_bytes.replace(b"World", b"Verum");
+}
+
+fn test_network_byte_order() {
+    // Network byte order
+    let be16 = b"\x00\x01".read_u16_be();  // 1
+    let le16 = b"\x01\x00".read_u16_le();  // 1
+    let be32 = b"\x00\x00\x00\x01".read_u32_be();  // 1
+}
+
+fn test_crypto_related_bytes() {
+    // Crypto-related bytes
+    let key = b"0123456789abcdef";
+    let iv = b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+    let nonce = b"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c";
+}
+
+// Constants
+const MAGIC_BYTES: Bytes = b"\xDE\xAD\xBE\xEF";
+const PROTOCOL_VERSION: Bytes = b"\x01\x00";
+const EMPTY: Bytes = b"";
+
+// Match on byte patterns
+fn file_type(header: Bytes) -> Text {
+    let four_bytes = header[0..4];
+    if four_bytes == b"\x89PNG" {
+        "PNG image"
+    } else if four_bytes == b"GIF8" {
+        "GIF image"
+    } else if four_bytes == b"\xFF\xD8\xFF\xE0" {
+        "JPEG image"
+    } else if four_bytes == b"%PDF" {
+        "PDF document"
+    } else if four_bytes == b"PK\x03\x04" {
+        "ZIP archive"
+    } else {
+        "Unknown"
+    }
+}

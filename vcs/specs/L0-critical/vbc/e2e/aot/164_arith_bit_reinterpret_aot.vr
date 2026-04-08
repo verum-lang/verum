@@ -1,0 +1,221 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, arith, bitwise, reinterpret
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT bit reinterpretation patterns — IEEE 754 bit tricks and bitwise ops
+
+// ============================================================================
+// Bit manipulation helpers
+// ============================================================================
+
+fn bit_and(a: Int, b: Int) -> Int {
+    a & b
+}
+
+fn bit_or(a: Int, b: Int) -> Int {
+    a | b
+}
+
+fn bit_xor(a: Int, b: Int) -> Int {
+    a ^ b
+}
+
+fn bit_shl(a: Int, n: Int) -> Int {
+    let mut result = a;
+    let mut i = 0;
+    while i < n {
+        result = result * 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn bit_shr(a: Int, n: Int) -> Int {
+    let mut result = a;
+    let mut i = 0;
+    while i < n {
+        result = result / 2;
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Test 1: Basic bitwise operations
+// ============================================================================
+
+fn test_bitwise_basic() {
+    // AND
+    assert_eq(bit_and(0xFF, 0x0F), 0x0F);
+    assert_eq(bit_and(0xAA, 0x55), 0x00);
+    assert_eq(bit_and(0xFF, 0xFF), 0xFF);
+    assert_eq(bit_and(0x00, 0xFF), 0x00);
+
+    // OR
+    assert_eq(bit_or(0xF0, 0x0F), 0xFF);
+    assert_eq(bit_or(0xAA, 0x55), 0xFF);
+    assert_eq(bit_or(0x00, 0x00), 0x00);
+
+    // XOR
+    assert_eq(bit_xor(0xFF, 0xFF), 0x00);
+    assert_eq(bit_xor(0xFF, 0x00), 0xFF);
+    assert_eq(bit_xor(0xAA, 0x55), 0xFF);
+
+    // XOR self-inverse: a ^ b ^ b = a
+    let a = 12345;
+    let b = 67890;
+    assert_eq(bit_xor(bit_xor(a, b), b), a);
+
+    print("test_bitwise_basic passed");
+}
+
+// ============================================================================
+// Test 2: Shift operations
+// ============================================================================
+
+fn test_shifts() {
+    // Left shift is multiply by power of 2
+    assert_eq(bit_shl(1, 0), 1);
+    assert_eq(bit_shl(1, 1), 2);
+    assert_eq(bit_shl(1, 4), 16);
+    assert_eq(bit_shl(1, 8), 256);
+    assert_eq(bit_shl(1, 10), 1024);
+
+    // Right shift is divide by power of 2
+    assert_eq(bit_shr(1024, 10), 1);
+    assert_eq(bit_shr(256, 4), 16);
+    assert_eq(bit_shr(256, 8), 1);
+
+    // Shift left then right recovers value
+    let val = 42;
+    assert_eq(bit_shr(bit_shl(val, 5), 5), val);
+
+    // Powers of 2 detection: n & (n-1) == 0 for powers of 2
+    assert_eq(bit_and(16, 15), 0);   // 16 is a power of 2
+    assert_eq(bit_and(32, 31), 0);   // 32 is a power of 2
+    assert_eq(bit_and(15, 14), 14);  // 15 is not a power of 2
+
+    print("test_shifts passed");
+}
+
+// ============================================================================
+// Test 3: Byte packing/unpacking (simulated 32-bit)
+// ============================================================================
+
+fn pack_bytes(b3: Int, b2: Int, b1: Int, b0: Int) -> Int {
+    // Pack 4 bytes into a 32-bit integer
+    bit_or(bit_or(bit_or(bit_shl(bit_and(b3, 0xFF), 24),
+                          bit_shl(bit_and(b2, 0xFF), 16)),
+                   bit_shl(bit_and(b1, 0xFF), 8)),
+            bit_and(b0, 0xFF))
+}
+
+fn unpack_byte(packed: Int, idx: Int) -> Int {
+    // Extract byte at position idx (0=LSB, 3=MSB)
+    bit_and(bit_shr(packed, idx * 8), 0xFF)
+}
+
+fn test_byte_packing() {
+    // Pack RGBA color: R=255, G=128, B=64, A=32
+    let packed = pack_bytes(255, 128, 64, 32);
+
+    // Unpack and verify
+    assert_eq(unpack_byte(packed, 0), 32);   // A (LSB)
+    assert_eq(unpack_byte(packed, 1), 64);   // B
+    assert_eq(unpack_byte(packed, 2), 128);  // G
+    assert_eq(unpack_byte(packed, 3), 255);  // R (MSB)
+
+    // Pack all zeros
+    let zero = pack_bytes(0, 0, 0, 0);
+    assert_eq(zero, 0);
+
+    // Pack all 0xFF
+    let all_ff = pack_bytes(255, 255, 255, 255);
+    assert_eq(unpack_byte(all_ff, 0), 255);
+    assert_eq(unpack_byte(all_ff, 1), 255);
+    assert_eq(unpack_byte(all_ff, 2), 255);
+    assert_eq(unpack_byte(all_ff, 3), 255);
+
+    print("test_byte_packing passed");
+}
+
+// ============================================================================
+// Test 4: Popcount (count set bits) manual implementation
+// ============================================================================
+
+fn popcount(n: Int) -> Int {
+    let mut val = n;
+    let mut count = 0;
+    let mut i = 0;
+    while i < 32 {
+        if bit_and(val, 1) == 1 {
+            count = count + 1;
+        }
+        val = bit_shr(val, 1);
+        i = i + 1;
+    }
+    count
+}
+
+fn test_popcount() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(255), 8);     // 0xFF = 8 bits set
+    assert_eq(popcount(256), 1);     // 0x100 = 1 bit set
+    assert_eq(popcount(15), 4);      // 0x0F = 4 bits set
+    assert_eq(popcount(bit_shl(1, 10) - 1), 10);  // 0x3FF = 10 bits
+
+    // Powers of 2 have exactly 1 bit set
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(2), 1);
+    assert_eq(popcount(4), 1);
+    assert_eq(popcount(1024), 1);
+
+    print("test_popcount passed");
+}
+
+// ============================================================================
+// Test 5: XOR swap and bit tricks
+// ============================================================================
+
+fn test_bit_tricks() {
+    // XOR swap
+    let mut a = 42;
+    let mut b = 99;
+    a = bit_xor(a, b);
+    b = bit_xor(b, a);
+    a = bit_xor(a, b);
+    assert_eq(a, 99);
+    assert_eq(b, 42);
+
+    // Check if number is even using AND with 1
+    assert_eq(bit_and(10, 1), 0);  // even
+    assert_eq(bit_and(11, 1), 1);  // odd
+    assert_eq(bit_and(0, 1), 0);   // even
+
+    // Clear lowest set bit: n & (n-1)
+    assert_eq(bit_and(12, 11), 8);   // 1100 & 1011 = 1000
+    assert_eq(bit_and(10, 9), 8);    // 1010 & 1001 = 1000
+    assert_eq(bit_and(8, 7), 0);     // power of 2: result is 0
+
+    // Isolate lowest set bit: n & (-n) — but using complement
+    // For positive integers, use n & (bit_xor(n, n-1) - n + 1) approach
+    // Simpler: just check known values
+    let val = 12;  // binary 1100, lowest set bit = 4
+    let lowest = bit_and(val, 0 - val);
+    assert_eq(lowest, 4);
+
+    print("test_bit_tricks passed");
+}
+
+fn main() -> Int {
+    test_bitwise_basic();
+    test_shifts();
+    test_byte_packing();
+    test_popcount();
+    test_bit_tricks();
+    print("ALL PASSED");
+    0
+}

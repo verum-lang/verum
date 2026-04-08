@@ -1,0 +1,139 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: default, parameters, functions, arguments
+// @timeout: 5000
+// @expect: pass
+
+// Default Parameter Values Test Suite
+// Tests the complete implementation of default parameter values for functions.
+// Spec: Grammar default_value in function_param
+
+// ============================================================
+// Basic Default Parameter Tests
+// ============================================================
+
+// Simple function with one default parameter
+fn greet(name: Text, greeting: Text = "Hello") -> Text {
+    f"{greeting}, {name}!"
+}
+
+// Function with multiple default parameters
+fn create_point(x: Float = 0.0, y: Float = 0.0, z: Float = 0.0) -> (Float, Float, Float) {
+    (x, y, z)
+}
+
+// Function with mix of required and default parameters
+fn log_message(message: Text, level: Int = 0, prefix: Text = "[LOG]") -> Text {
+    f"{prefix} [{level}] {message}"
+}
+
+// Default parameter using expression
+fn increment(x: Int, step: Int = 1) -> Int {
+    x + step
+}
+
+// Default parameter using complex expression
+fn scale(value: Float, factor: Float = 2.0 * 3.14159) -> Float {
+    value * factor
+}
+
+// ============================================================
+// Type-Specific Default Values
+// ============================================================
+
+// Integer defaults
+fn int_default(a: Int, b: Int = 42) -> Int { a + b }
+
+// Float defaults
+fn float_default(a: Float, b: Float = 3.14) -> Float { a + b }
+
+// Boolean defaults
+fn bool_default(a: Bool, b: Bool = true) -> Bool { a && b }
+
+// Text defaults
+fn text_default(a: Text, b: Text = "default") -> Text { a + b }
+
+// ============================================================
+// Default Parameters in Generic Functions
+// ============================================================
+
+fn generic_with_default<T>(value: T, count: Int = 1) -> List<T> {
+    let mut result = [];
+    let mut i = 0;
+    while i < count {
+        result.push(value);
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================
+// Default Parameters Referencing Earlier Parameters
+// ============================================================
+
+// Default that references an earlier parameter
+fn double_or_custom(x: Int, y: Int = x * 2) -> Int {
+    x + y
+}
+
+// Multiple defaults referencing each other
+fn chain_defaults(a: Int, b: Int = a + 1, c: Int = b + 1) -> Int {
+    a + b + c
+}
+
+// ============================================================
+// Main Test Function
+// ============================================================
+
+fn main() {
+    // Test basic default parameter
+    assert_eq(greet("World"), "Hello, World!");
+    assert_eq(greet("World", "Hi"), "Hi, World!");
+
+    // Test all default parameters
+    assert_eq(create_point(), (0.0, 0.0, 0.0));
+    assert_eq(create_point(1.0), (1.0, 0.0, 0.0));
+    assert_eq(create_point(1.0, 2.0), (1.0, 2.0, 0.0));
+    assert_eq(create_point(1.0, 2.0, 3.0), (1.0, 2.0, 3.0));
+
+    // Test mixed required/default
+    assert_eq(log_message("test"), "[LOG] [0] test");
+    assert_eq(log_message("test", 1), "[LOG] [1] test");
+    assert_eq(log_message("test", 2, "[ERR]"), "[ERR] [2] test");
+
+    // Test simple expressions in defaults
+    assert_eq(increment(5), 6);
+    assert_eq(increment(5, 10), 15);
+
+    // Test type-specific defaults
+    assert_eq(int_default(10), 52);
+    assert_eq(int_default(10, 5), 15);
+
+    // Float tests use approximate comparison due to floating point precision
+    let f1 = float_default(1.0);
+    assert(f1 > 4.13 && f1 < 4.15);  // 1.0 + 3.14 ≈ 4.14
+    assert_eq(float_default(1.0, 2.0), 3.0);
+
+    assert_eq(bool_default(true), true);
+    assert_eq(bool_default(true, false), false);
+    assert_eq(bool_default(false), false);
+
+    assert_eq(text_default("hello"), "hellodefault");
+    assert_eq(text_default("hello", "world"), "helloworld");
+
+    // Test generic with default
+    assert_eq(generic_with_default(42), [42]);
+    assert_eq(generic_with_default(42, 3), [42, 42, 42]);
+
+    // Test defaults referencing earlier params
+    assert_eq(double_or_custom(5), 15);      // 5 + (5*2) = 15
+    assert_eq(double_or_custom(5, 3), 8);    // 5 + 3 = 8
+
+    // Test chain of defaults
+    assert_eq(chain_defaults(1), 6);         // 1 + 2 + 3 = 6
+    assert_eq(chain_defaults(1, 10), 22);    // 1 + 10 + 11 = 22
+    assert_eq(chain_defaults(1, 10, 100), 111); // 1 + 10 + 100 = 111
+
+    print("All default parameter tests passed!");
+}

@@ -1,0 +1,68 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/runtime/cbgr_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, intrinsics, runtime, cbgr, memory-safety, generation, epoch
+// @description: Tests for CBGR (Capability-Based Generational References)
+//               memory safety intrinsics.
+//
+// Coverage:
+// - Reference validation: cbgr_validate
+// - Epoch management: cbgr_current_epoch, cbgr_advance_epoch
+// - Generation access: cbgr_get_generation
+//
+// Test Strategy:
+// - Verify function imports resolve
+// - Verify function type signatures
+// =============================================================================
+
+module specs.core.intrinsics.runtime.cbgr_test;
+
+mount core.intrinsics.runtime.cbgr.{
+    cbgr_validate,
+    cbgr_current_epoch,
+    cbgr_advance_epoch,
+    cbgr_get_generation,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Reference Validation Tests
+// =============================================================================
+
+@test
+fn test_cbgr_validate_exists() {
+    let _ = cbgr_validate;
+}
+
+// =============================================================================
+// Epoch Management Tests
+// =============================================================================
+
+@test
+fn test_cbgr_current_epoch_exists() {
+    let _ = cbgr_current_epoch;
+}
+
+@test
+fn test_cbgr_advance_epoch_exists() {
+    let _ = cbgr_advance_epoch;
+}
+
+// =============================================================================
+// Generation Access Tests
+// =============================================================================
+
+@test
+fn test_cbgr_get_generation_exists() {
+    let _ = cbgr_get_generation;
+}

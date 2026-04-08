@@ -1,0 +1,463 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, lemma, verification
+// @description: Comprehensive test for lemma declaration parsing
+
+// ============================================================================
+// Basic Lemma Declarations
+// ============================================================================
+
+// Simple lemma with arithmetic
+lemma add_zero(x: Int): x + 0 == x {
+    trivial
+}
+
+// Lemma with multiple parameters
+lemma add_commutes(a: Int, b: Int): a + b == b + a {
+    ring
+}
+
+// Lemma establishing basic property
+lemma mul_identity(x: Int): x * 1 == x {
+    ring
+}
+
+// Lemma with negation
+lemma double_negation(p: Bool): !!p == p {
+    trivial
+}
+
+// ============================================================================
+// Generic Lemmas
+// ============================================================================
+
+// Generic lemma with equality
+lemma generic_eq<T: Eq>(x: T): x == x {
+    trivial
+}
+
+// Generic lemma with ordering
+lemma reflexive_le<T: Ord>(x: T): x <= x {
+    trivial
+}
+
+// Multiple generic parameters
+lemma swap_eq<A: Eq, B: Eq>(pair: (A, B)): pair == pair {
+    trivial
+}
+
+// Generic with function constraint
+// Note: Higher-kinded type application F<T> is not currently supported by parser
+// Using concrete List type instead
+lemma map_preserves<T, U>(container: List<T>, f: fn(T) -> U): container.map(f).len() == container.len() {
+    auto
+}
+
+// Higher-kinded generic lemma
+// Note: Higher-kinded type application M<U> is not currently supported by parser
+// Using concrete Maybe type instead
+lemma monad_left_identity<T, U>(x: T, f: fn(T) -> Maybe<U>): Maybe.pure(x).bind(f) == f(x) {
+    trivial
+}
+
+// ============================================================================
+// Lemmas with Return Types
+// ============================================================================
+
+// Lemma with explicit return
+// Note: Return types with proof terms use different syntax
+lemma construct_equality_proof(x: Int): x == x {
+    trivial
+}
+
+// Generic return type lemma
+// Note: Return types with proof terms use different syntax
+lemma produce_ord_proof<T: Ord>(x: T): x <= x {
+    trivial
+}
+
+// Lemma returning boolean
+lemma check_property(n: Int) -> Bool: n >= 0 || n < 0 {
+    trivial
+}
+
+// ============================================================================
+// Lemmas with Requires Clause
+// ============================================================================
+
+// Single precondition
+lemma positive_square(x: Int)
+    requires x > 0
+    ensures x * x > 0
+{
+    proof by omega
+}
+
+// Multiple preconditions
+lemma bounded_product(a: Int, b: Int)
+    requires a >= 0, a <= 10, b >= 0, b <= 10
+    ensures a * b <= 100
+{
+    proof by omega
+}
+
+// Complex precondition expression
+lemma divisibility_helper(a: Int, b: Int, c: Int)
+    requires b != 0, a % b == 0
+    ensures (a + c * b) % b == 0
+{
+    proof by omega
+}
+
+// Precondition with quantifier
+// Note: Using !(A) || B pattern instead of A => B (=> only valid in match arms)
+lemma list_all_positive(list: List<Int>)
+    requires (forall (i: Int) . !(0 <= i && i < list.len()) || list[i] > 0)
+    ensures list.sum() > 0 || list.len() == 0
+{
+    proof by auto
+}
+
+// ============================================================================
+// Lemmas with Ensures Clause
+// ============================================================================
+
+// Simple ensures
+lemma abs_positive(x: Int) -> Int
+    ensures result >= 0
+{
+    proof by auto
+}
+
+// Multiple ensures
+lemma clamp_bounds(x: Int, lo: Int, hi: Int) -> Int
+    requires lo <= hi
+    ensures result >= lo, result <= hi
+{
+    proof by omega
+}
+
+// Ensures with result
+lemma increment_positive(x: Int) -> Int
+    requires x >= 0
+    ensures result > x
+{
+    proof by omega
+}
+
+// ============================================================================
+// Lemmas with Full Contracts
+// ============================================================================
+
+// Complete specification
+// Note: Using !(A) || B pattern instead of A => B (=> only valid in match arms)
+lemma safe_get<T>(list: List<T>, i: Int) -> Maybe<T>
+    requires i >= 0
+    ensures !(i < list.len()) || result is Some
+{
+    proof by auto
+}
+
+// Contract with invariant preservation
+lemma insert_preserves_sorted<T: Ord>(list: List<T>, elem: T) -> List<T>
+    requires is_sorted(list)
+    ensures is_sorted(result)
+{
+    proof by induction list
+}
+
+// Contract with size relationship
+lemma filter_reduces<T>(list: List<T>, pred: fn(T) -> Bool) -> List<T>
+    ensures result.len() <= list.len()
+{
+    proof by induction list
+}
+
+// ============================================================================
+// Lemmas with Various Proof Tactics
+// ============================================================================
+
+// Proof by auto
+lemma auto_lemma(x: Int): x == x {
+    auto
+}
+
+// Proof by simp (simplification)
+lemma simp_lemma(a: Int, b: Int): (a + b) * 1 == a + b {
+    simp
+}
+
+// Proof by ring (polynomial arithmetic)
+lemma ring_lemma(x: Int, y: Int): (x + y) * (x + y) == x*x + 2*x*y + y*y {
+    ring
+}
+
+// Proof by field (field arithmetic)
+lemma field_lemma(x: Float, y: Float)
+    requires y != 0.0
+    ensures x / y * y == x
+{
+    proof by field
+}
+
+// Proof by omega (Presburger arithmetic)
+lemma omega_lemma(a: Int, b: Int, c: Int)
+    requires a <= b, b <= c
+    ensures a <= c
+{
+    proof by omega
+}
+
+// Proof by blast (tableau prover)
+lemma blast_lemma(p: Bool, q: Bool, r: Bool)
+    requires p || q, !p || r
+    ensures q || r
+{
+    proof by blast
+}
+
+// Proof by smt (SMT solver)
+lemma smt_lemma(arr: List<Int>, i: Int, j: Int)
+    requires 0 <= i, i < j, j < arr.len()
+    ensures arr[i] == arr[i]
+{
+    proof by smt
+}
+
+// Proof by induction
+lemma induction_lemma(n: Int)
+    requires n >= 0
+    ensures fib(n) >= 0
+{
+    proof by induction n
+}
+
+// Proof by cases
+lemma cases_lemma(b: Bool)
+    ensures b || !b
+{
+    proof by cases b
+}
+
+// Proof by assumption
+lemma assumption_lemma(x: Int)
+    requires x > 0
+    ensures x > 0
+{
+    proof by assumption
+}
+
+// Proof by exact
+lemma exact_lemma(x: Int)
+    ensures x == x
+{
+    proof by exact refl(x)
+}
+
+// Proof by apply
+lemma apply_lemma(x: Int, y: Int)
+    requires x == y
+    ensures y == x
+{
+    proof by apply sym
+}
+
+// Proof by intro/intros
+lemma intro_lemma(p: Bool, q: Bool)
+    ensures !p || p
+{
+    proof by intro
+}
+
+// Proof by rewrite
+lemma rewrite_lemma(a: Int, b: Int)
+    requires a == b
+    ensures a + 1 == b + 1
+{
+    proof by rewrite a == b
+}
+
+// Proof by unfold
+lemma unfold_lemma(x: Int)
+    ensures double(x) == x + x
+{
+    proof by unfold double
+}
+
+// ============================================================================
+// Structured Proof Lemmas
+// ============================================================================
+
+// Lemma with have steps
+lemma have_chain(a: Int, b: Int, c: Int)
+    requires a < b, b < c
+    ensures a < c
+{
+    proof {
+        have h1: a < b by assumption;
+        have h2: b < c by assumption;
+        have h3: a < c by omega;
+        show a < c by exact h3;
+    }
+}
+
+// Lemma with obtain step
+lemma exists_witness()
+    requires exists x: Int . x > 0 && x < 10
+    ensures exists y: Int . y > 0
+{
+    proof {
+        obtain x from (exists x: Int . x > 0 && x < 10);
+        show exists y: Int . y > 0 by auto;
+    }
+}
+
+// Lemma with show step
+lemma show_direct(x: Int)
+    requires x > 0
+    ensures x >= 1
+{
+    proof {
+        show x >= 1 by omega;
+    }
+}
+
+// Complex structured proof
+// Note: Using !(A) || B pattern instead of A => B (=> only valid in match arms)
+lemma complex_structure(list: List<Int>)
+    requires list.len() > 0, (forall (i: Int) . !(0 <= i && i < list.len()) || list[i] >= 0)
+    ensures list.sum() >= 0
+{
+    proof {
+        have h1: list.len() > 0 by assumption;
+        have h2: (forall (i: Int) . !(0 <= i && i < list.len()) || list[i] >= 0) by assumption;
+        have h3: list.head() is Some by auto;
+        show list.sum() >= 0 by induction list;
+    }
+}
+
+// ============================================================================
+// Tactic Combinations
+// ============================================================================
+
+// Chained tactics
+lemma chain_tactics(x: Int)
+    ensures (x + 1) - 1 == x
+{
+    proof by simp; ring
+}
+
+// Grouped tactics
+lemma grouped_tactics(a: Int, b: Int)
+    ensures a * b == b * a
+{
+    proof by { simp; ring }
+}
+
+// Nested tactic groups
+lemma nested_tactics(x: Int, y: Int, z: Int)
+    ensures x + (y + z) == (x + y) + z
+{
+    proof by { simp; { ring; auto } }
+}
+
+// Tactics with arguments
+lemma tactic_with_args(a: Int, b: Int)
+    requires a == b
+    ensures b == a
+{
+    proof by rewrite(sym, a == b)
+}
+
+// ============================================================================
+// Lemmas Without Proof Bodies
+// ============================================================================
+
+// Declaration only
+lemma declared_lemma(x: Int): x * 0 == 0;
+
+// Generic declaration
+lemma generic_declared<T: Default>(x: T): x == x || x != x;
+
+// Declaration with contract
+lemma contract_declared(n: Int)
+    requires n >= 0
+    ensures factorial(n) >= 1;
+
+// ============================================================================
+// Helper Lemmas for Theorems
+// ============================================================================
+
+// Auxiliary lemma for main theorem
+lemma aux_positive_sum(a: Int, b: Int)
+    requires a >= 0, b >= 0
+    ensures a + b >= 0
+{
+    proof by omega
+}
+
+// Step lemma in proof chain
+lemma step_lemma(x: Int, y: Int, z: Int)
+    requires x <= y, y <= z
+    ensures x <= z
+{
+    proof by omega
+}
+
+// Base case lemma
+lemma base_case(n: Int)
+    requires n == 0
+    ensures sum_to(n) == 0
+{
+    proof by simp
+}
+
+// Inductive step lemma
+lemma inductive_step(n: Int)
+    requires n >= 0, sum_to(n) == n * (n + 1) / 2
+    ensures sum_to(n + 1) == (n + 1) * (n + 2) / 2
+{
+    proof {
+        have h1: sum_to(n + 1) == sum_to(n) + (n + 1) by unfold sum_to;
+        have h2: sum_to(n) == n * (n + 1) / 2 by assumption;
+        show sum_to(n + 1) == (n + 1) * (n + 2) / 2 by ring;
+    }
+}
+
+// ============================================================================
+// Lemmas with Complex Types
+// ============================================================================
+
+// Lemma about tuples
+lemma tuple_eq<A: Eq, B: Eq>(t1: (A, B), t2: (A, B))
+    requires t1.0 == t2.0, t1.1 == t2.1
+    ensures t1 == t2
+{
+    proof by trivial
+}
+
+// Lemma about Maybe type
+lemma maybe_some<T>(x: T): Some(x) != None {
+    trivial
+}
+
+// Lemma about Result type
+lemma result_ok<T, E>(x: T): Ok(x) is Ok {
+    trivial
+}
+
+// Lemma about collections
+lemma list_append_len<T>(a: List<T>, b: List<T>)
+    ensures a.concat(b).len() == a.len() + b.len()
+{
+    proof by induction a
+}
+
+// Lemma with refinement types
+lemma refined_lemma(x: Int{x > 0})
+    ensures x >= 1
+{
+    proof by omega
+}

@@ -1,0 +1,175 @@
+// =============================================================================
+// eq_protocol_dispatch_test.vr - Eq protocol dispatch for all types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: eq, protocol, dispatch, sized-integer
+// @description: Verifies == and != work for all types via Eq protocol dispatch
+//   rather than hardcoded is_numeric_type() checks.
+// =============================================================================
+
+mount core.base.primitives;
+
+// =============================================================================
+// Section 1: Built-in primitive equality
+// =============================================================================
+
+@test
+fn test_int_eq() {
+    let a = 42;
+    let b = 42;
+    assert(a == b);
+    assert(!(a != b));
+}
+
+@test
+fn test_float_eq() {
+    let a = 3.14;
+    let b = 3.14;
+    assert(a == b);
+}
+
+@test
+fn test_bool_eq() {
+    assert(true == true);
+    assert(false == false);
+    assert(true != false);
+}
+
+@test
+fn test_text_eq() {
+    let a = "hello";
+    let b = "hello";
+    assert(a == b);
+}
+
+@test
+fn test_char_eq() {
+    let a = 'x';
+    let b = 'x';
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 2: Sized integer equality (protocol dispatch required)
+// =============================================================================
+
+@test
+fn test_int8_eq() {
+    let a: Int8 = 42;
+    let b: Int8 = 42;
+    assert(a == b);
+    assert(!(a != b));
+}
+
+@test
+fn test_int16_eq() {
+    let a: Int16 = 1000;
+    let b: Int16 = 1000;
+    assert(a == b);
+}
+
+@test
+fn test_int32_eq() {
+    let a: Int32 = 100_000;
+    let b: Int32 = 100_000;
+    assert(a == b);
+}
+
+@test
+fn test_int64_eq() {
+    let a: Int64 = 1_000_000;
+    let b: Int64 = 1_000_000;
+    assert(a == b);
+}
+
+@test
+fn test_uint8_eq() {
+    let a: UInt8 = 200;
+    let b: UInt8 = 200;
+    assert(a == b);
+}
+
+@test
+fn test_uint16_eq() {
+    let a: UInt16 = 50000;
+    let b: UInt16 = 50000;
+    assert(a == b);
+}
+
+@test
+fn test_uint32_eq() {
+    let a: UInt32 = 100_000;
+    let b: UInt32 = 100_000;
+    assert(a == b);
+}
+
+@test
+fn test_uint64_eq() {
+    let a: UInt64 = 1_000_000;
+    let b: UInt64 = 1_000_000;
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 3: Literal coercion with equality
+// =============================================================================
+
+@test
+fn test_int32_eq_literal() {
+    let a: Int32 = 42;
+    // Literal 42 should coerce to Int32
+    assert(a == 42);
+    assert(42 == a);
+}
+
+@test
+fn test_uint64_eq_literal() {
+    let a: UInt64 = 100;
+    assert(a == 100);
+    assert(100 == a);
+}
+
+@test
+fn test_int8_ne_literal() {
+    let a: Int8 = 10;
+    assert(a != 20);
+}
+
+// =============================================================================
+// Section 4: Float equality
+// =============================================================================
+
+@test
+fn test_float32_eq() {
+    let a: Float32 = 1.5;
+    let b: Float32 = 1.5;
+    assert(a == b);
+}
+
+@test
+fn test_float64_eq() {
+    let a: Float64 = 2.5;
+    let b: Float64 = 2.5;
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 5: Non-numeric type equality (via Eq protocol)
+// =============================================================================
+
+@test
+fn test_duration_eq() {
+    mount core.time.Duration;
+    let a = Duration.secs(5);
+    let b = Duration.millis(5_000);
+    assert_eq(a, b);
+}
+
+@test
+fn test_maybe_eq() {
+    let a: Maybe<Int> = Some(42);
+    let b: Maybe<Int> = Some(42);
+    assert(a == b);
+}

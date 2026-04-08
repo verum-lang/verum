@@ -1,0 +1,306 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: self-hosting, type-checker, unification, inference
+// @timeout: 60000
+// @description: Type unification and inference patterns for self-hosting type checker
+
+// Simplified type representation
+type TypeId is
+    | TInt
+    | TBool
+    | TText
+    | TUnit
+    | TFunc(Heap<TypeId>, Heap<TypeId>)
+    | TList(Heap<TypeId>)
+    | TVar(Int)
+    | TError;
+
+fn type_tag(t: TypeId) -> Int {
+    match t {
+        TInt => 0, TBool => 1, TText => 2, TUnit => 3,
+        TFunc(_, _) => 4, TList(_) => 5, TVar(_) => 6, TError => 7,
+    }
+}
+
+fn type_name(t: TypeId) -> Text {
+    match t {
+        TInt => "Int",
+        TBool => "Bool",
+        TText => "Text",
+        TUnit => "()",
+        TFunc(_, _) => "fn",
+        TList(_) => "List",
+        TVar(n) => f"T{n}",
+        TError => "Error",
+    }
+}
+
+// Substitution: map from type variable id to resolved type
+type TypeEnv is {
+    bindings: Map<Text, TypeId>,
+    next_var: Int,
+};
+
+fn new_env() -> TypeEnv {
+    TypeEnv { bindings: Map.new(), next_var: 0 }
+}
+
+fn fresh_var(env: &mut TypeEnv) -> TypeId {
+    let id = env.next_var;
+    env.next_var = env.next_var + 1;
+    TypeId.TVar(id)
+}
+
+fn bind_var(env: &mut TypeEnv, name: Text, ty: TypeId) {
+    env.bindings.insert(name, ty);
+}
+
+fn lookup_var(env: TypeEnv, name: Text) -> TypeId {
+    if env.bindings.contains_key(name) {
+        env.bindings.get(name)
+    } else {
+        TypeId.TError
+    }
+}
+
+// Simplified unification
+fn types_equal(a: TypeId, b: TypeId) -> Bool {
+    let ta = type_tag(a);
+    let tb = type_tag(b);
+    ta == tb
+}
+
+fn check_assignment(target: TypeId, value: TypeId) -> Bool {
+    // TVar matches anything
+    if type_tag(target) == 6 || type_tag(value) == 6 {
+        return true;
+    }
+    types_equal(target, value)
+}
+
+// Expression type inference
+type SimpleExpr is
+    | EInt(Int)
+    | EBool(Bool)
+    | EText(Text)
+    | EVar(Text)
+    | EBinOp(Text, Heap<SimpleExpr>, Heap<SimpleExpr>)
+    | ECall(Text, List<SimpleExpr>)
+    | EIf(Heap<SimpleExpr>, Heap<SimpleExpr>, Heap<SimpleExpr>);
+
+@allow(unbounded_recursion)
+fn infer_type(expr: SimpleExpr, env: TypeEnv) -> TypeId {
+    match expr {
+        EInt(_) => TypeId.TInt,
+        EBool(_) => TypeId.TBool,
+        EText(_) => TypeId.TText,
+        EVar(name) => lookup_var(env, name),
+        EBinOp(op, _, _) => {
+            if op == "+" || op == "-" || op == "*" || op == "/" {
+                TypeId.TInt
+            } else if op == "==" || op == "!=" || op == "<" || op == ">" {
+                TypeId.TBool
+            } else if op == "++" {
+                TypeId.TText
+            } else {
+                TypeId.TError
+            }
+        }
+        ECall(name, _) => {
+            let func_type = lookup_var(env, name);
+            match func_type {
+                TFunc(_, ret) => *ret,
+                _ => TypeId.TError,
+            }
+        }
+        EIf(_, then_br, _) => {
+            infer_type(*then_br, env)
+        }
+    }
+}
+
+fn test_basic_type_inference() -> Int {
+    let env = new_env();
+    let int_expr = SimpleExpr.EInt(42);
+    let ty = infer_type(int_expr, env);
+    if type_tag(ty) != 0 {
+        print(f"FAIL basic: int literal should be TInt, got {type_name(ty)}");
+        return 1;
+    }
+
+    let bool_expr = SimpleExpr.EBool(true);
+    let ty2 = infer_type(bool_expr, env);
+    if type_tag(ty2) != 1 {
+        print(f"FAIL basic: bool literal should be TBool, got {type_name(ty2)}");
+        return 1;
+    }
+
+    let text_expr = SimpleExpr.EText("hello");
+    let ty3 = infer_type(text_expr, env);
+    if type_tag(ty3) != 2 {
+        print(f"FAIL basic: text literal should be TText, got {type_name(ty3)}");
+        return 1;
+    }
+    print("  basic_type_inference: OK");
+    0
+}
+
+fn test_binop_inference() -> Int {
+    let env = new_env();
+
+    let add_expr = SimpleExpr.EBinOp("+",
+        Heap(SimpleExpr.EInt(1)),
+        Heap(SimpleExpr.EInt(2)),
+    );
+    let ty = infer_type(add_expr, env);
+    if type_tag(ty) != 0 {
+        print(f"FAIL binop: + should be TInt, got {type_name(ty)}");
+        return 1;
+    }
+
+    let cmp_expr = SimpleExpr.EBinOp("==",
+        Heap(SimpleExpr.EInt(1)),
+        Heap(SimpleExpr.EInt(2)),
+    );
+    let ty2 = infer_type(cmp_expr, env);
+    if type_tag(ty2) != 1 {
+        print(f"FAIL binop: == should be TBool, got {type_name(ty2)}");
+        return 1;
+    }
+    print("  binop_inference: OK");
+    0
+}
+
+fn test_variable_lookup() -> Int {
+    let mut env = new_env();
+    bind_var(&mut env, "x", TypeId.TInt);
+    bind_var(&mut env, "name", TypeId.TText);
+
+    let var_expr = SimpleExpr.EVar("x");
+    let ty = infer_type(var_expr, env);
+    if type_tag(ty) != 0 {
+        print(f"FAIL var: x should be TInt, got {type_name(ty)}");
+        return 1;
+    }
+
+    let var_expr2 = SimpleExpr.EVar("name");
+    let ty2 = infer_type(var_expr2, env);
+    if type_tag(ty2) != 2 {
+        print(f"FAIL var: name should be TText, got {type_name(ty2)}");
+        return 1;
+    }
+
+    let var_expr3 = SimpleExpr.EVar("unknown");
+    let ty3 = infer_type(var_expr3, env);
+    if type_tag(ty3) != 7 {
+        print(f"FAIL var: unknown should be TError, got {type_name(ty3)}");
+        return 1;
+    }
+    print("  variable_lookup: OK");
+    0
+}
+
+fn test_function_call_inference() -> Int {
+    let mut env = new_env();
+    // Register: fn add(Int, Int) -> Int
+    bind_var(&mut env, "add", TypeId.TFunc(Heap(TypeId.TInt), Heap(TypeId.TInt)));
+    // Register: fn to_text(Int) -> Text
+    bind_var(&mut env, "to_text", TypeId.TFunc(Heap(TypeId.TInt), Heap(TypeId.TText)));
+
+    let call_add = SimpleExpr.ECall("add", [SimpleExpr.EInt(1), SimpleExpr.EInt(2)]);
+    let ty = infer_type(call_add, env);
+    if type_tag(ty) != 0 {
+        print(f"FAIL call: add should return TInt, got {type_name(ty)}");
+        return 1;
+    }
+
+    let call_text = SimpleExpr.ECall("to_text", [SimpleExpr.EInt(42)]);
+    let ty2 = infer_type(call_text, env);
+    if type_tag(ty2) != 2 {
+        print(f"FAIL call: to_text should return TText, got {type_name(ty2)}");
+        return 1;
+    }
+    print("  function_call_inference: OK");
+    0
+}
+
+fn test_type_assignment_check() -> Int {
+    if !check_assignment(TypeId.TInt, TypeId.TInt) {
+        print("FAIL assign: Int = Int should be ok");
+        return 1;
+    }
+    if check_assignment(TypeId.TInt, TypeId.TText) {
+        print("FAIL assign: Int = Text should fail");
+        return 1;
+    }
+    // Type variable matches anything
+    if !check_assignment(TypeId.TVar(0), TypeId.TInt) {
+        print("FAIL assign: TVar = Int should be ok");
+        return 1;
+    }
+    if !check_assignment(TypeId.TInt, TypeId.TVar(0)) {
+        print("FAIL assign: Int = TVar should be ok");
+        return 1;
+    }
+    print("  type_assignment_check: OK");
+    0
+}
+
+fn test_fresh_type_vars() -> Int {
+    let mut env = new_env();
+    let v0 = fresh_var(&mut env);
+    let v1 = fresh_var(&mut env);
+    let v2 = fresh_var(&mut env);
+
+    if type_name(v0) != "T0" {
+        print(f"FAIL fresh: v0 expected T0, got {type_name(v0)}");
+        return 1;
+    }
+    if type_name(v1) != "T1" {
+        print(f"FAIL fresh: v1 expected T1, got {type_name(v1)}");
+        return 1;
+    }
+    if type_name(v2) != "T2" {
+        print(f"FAIL fresh: v2 expected T2, got {type_name(v2)}");
+        return 1;
+    }
+    if env.next_var != 3 {
+        print(f"FAIL fresh: next_var expected 3, got {env.next_var}");
+        return 1;
+    }
+    print("  fresh_type_vars: OK");
+    0
+}
+
+fn test_if_expr_inference() -> Int {
+    let env = new_env();
+    let if_expr = SimpleExpr.EIf(
+        Heap(SimpleExpr.EBool(true)),
+        Heap(SimpleExpr.EInt(1)),
+        Heap(SimpleExpr.EInt(2)),
+    );
+    let ty = infer_type(if_expr, env);
+    if type_tag(ty) != 0 {
+        print(f"FAIL if: should be TInt, got {type_name(ty)}");
+        return 1;
+    }
+    print("  if_expr_inference: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_basic_type_inference();
+    failures = failures + test_binop_inference();
+    failures = failures + test_variable_lookup();
+    failures = failures + test_function_call_inference();
+    failures = failures + test_type_assignment_check();
+    failures = failures + test_fresh_type_vars();
+    failures = failures + test_if_expr_inference();
+
+    if failures == 0 {
+        print("All type checker pattern tests passed");
+    }
+    failures
+}

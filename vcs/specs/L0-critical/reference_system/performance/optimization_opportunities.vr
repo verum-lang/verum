@@ -1,0 +1,119 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, optimization, verification
+
+/// Test that optimization opportunities are correctly identified.
+/// The compiler should detect and apply these optimizations:
+/// - Check elimination for repeated accesses
+/// - Loop hoisting for invariant checks
+/// - Tier promotion via escape analysis
+/// Spec: 26-cbgr-implementation.md#optimizations
+
+fn main() {
+    test_repeated_access_optimization();
+    test_loop_hoisting_optimization();
+    test_escape_analysis_promotion();
+    test_branch_prediction_optimization();
+}
+
+/// Test: Repeated accesses should only check once
+/// @verify: check-elimination applied
+fn test_repeated_access_optimization() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // All these accesses should share one check
+    // Compiler should eliminate redundant checks
+    let a = *ref_val;  // Check here
+    let b = *ref_val;  // No check (eliminated)
+    let c = *ref_val;  // No check (eliminated)
+    let d = *ref_val;  // No check (eliminated)
+
+    // Result depends on all values to prevent dead code elimination
+    assert(a + b + c + d == 168);
+}
+
+/// Test: Loop-invariant checks should be hoisted
+/// @verify: loop-hoisting applied
+fn test_loop_hoisting_optimization() {
+    let value = Heap.new(100);
+    let ref_val: &Int = &*value;
+
+    let mut sum = 0;
+
+    // Check should be hoisted before loop
+    // Not repeated inside loop
+    for _ in 0..1000 {
+        sum += *ref_val;  // No check inside loop
+    }
+
+    assert(sum == 100_000);
+}
+
+/// Test: Stack references should be promoted to checked
+/// @verify: escape-analysis promotion to checked tier
+fn test_escape_analysis_promotion() {
+    // Stack values with non-escaping refs should use checked tier
+    let x = 42;
+    let y = 100;
+
+    let ref_x = &x;  // Promoted to &checked Int
+    let ref_y = &y;  // Promoted to &checked Int
+
+    // These accesses have zero overhead
+    let sum = *ref_x + *ref_y;
+
+    assert(sum == 142);
+}
+
+/// Test: Branch prediction hints for CBGR checks
+/// @verify: branch-prediction hints applied
+fn test_branch_prediction_optimization() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // CBGR check is: if gen != current_gen { panic }
+    // This branch is almost never taken (99.99%+ success)
+    // Compiler should mark panic branch as unlikely
+
+    let mut sum = 0;
+    for _ in 0..10_000 {
+        // Success path is predicted
+        sum += *ref_val;
+    }
+
+    assert(sum == 420_000);
+}
+
+/// Document optimization verification annotations
+module verification_annotations {
+    // @verify: check-elimination applied
+    // Asserts that redundant checks are removed
+
+    // @verify: loop-hoisting applied
+    // Asserts that loop-invariant checks are hoisted
+
+    // @verify: escape-analysis promotion to checked tier
+    // Asserts that non-escaping refs use checked tier
+
+    // @verify: branch-prediction hints applied
+    // Asserts that CBGR failure branch marked unlikely
+
+    // @verify: inlining applied
+    // Asserts that function was inlined for optimization
+
+    // @verify: zero-cbgr-checks
+    // Asserts that no runtime CBGR checks in function
+}
+
+/// Example of fully optimized function
+/// @verify: zero-cbgr-checks
+fn fully_optimized_sum(data: &checked [Int]) -> Int {
+    // All references are checked tier (no runtime checks)
+    let mut sum = 0;
+    for item in data {
+        sum += *item;
+    }
+    sum
+}

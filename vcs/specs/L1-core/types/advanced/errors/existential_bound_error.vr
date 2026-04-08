@@ -1,0 +1,16 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: error, existential, bound, advanced-type-syntax
+// @expect: error(BoundNotSatisfied)
+// @description: Error test for existential type bound violation
+// @spec: 03-type-system.md Section 13. 3.7
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+// Return type must satisfy Display bound
+fn return_not_display() -> some T: Display {
+    42  // ERROR: Int does not implement Display (in this test context)
+}

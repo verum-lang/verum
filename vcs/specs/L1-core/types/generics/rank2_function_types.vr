@@ -1,0 +1,190 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, rank-2, polymorphism, transducers
+// @description: Tests for rank-2 polymorphic function types (fn<R>(...))
+
+/// Rank-2 Polymorphic Function Types
+///
+/// Rank-2 types allow functions with universally quantified type parameters
+/// inside the function type itself. The quantifier scopes over the function,
+/// not the enclosing context.
+///
+/// Key difference from rank-1:
+/// - Rank-1: fn foo<R>(...) -> R  -- caller chooses R
+/// - Rank-2: fn<R>(...) -> R      -- function works for ALL R
+
+// =============================================================================
+// Basic Rank-2 Types
+// =============================================================================
+
+/// A simple rank-2 function type - a function that works for any result type R.
+type Reducer<A, R> is fn(R, A) -> R;
+
+/// The core rank-2 type: a transformation that works for any accumulator.
+type Transducer<A, B> is {
+    /// For any accumulator type R, transform a downstream reducer to an upstream reducer.
+    transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>,
+};
+
+/// Alternative: standalone rank-2 function type alias
+type TransformFn<A, B> is fn<R>(Reducer<B, R>) -> Reducer<A, R>;
+
+// =============================================================================
+// Rank-2 Types with Bounds
+// =============================================================================
+
+/// Rank-2 with bounded type parameter
+type BoundedRank2<A> is fn<R: Clone>(A) -> R;
+
+/// Rank-2 with multiple bounds
+type MultiBoundRank2<A> is fn<R: Clone + Default>(A) -> R;
+
+/// Rank-2 with multiple type parameters
+type MultiParamRank2<A, B> is fn<R, S>(A, B) -> (R, S);
+
+// =============================================================================
+// Simple Transducer Functions
+// =============================================================================
+
+/// Create a mapping transducer - transforms elements with a function.
+fn make_map_transducer<A, B, F: fn(A) -> B>(f: F) -> Transducer<A, B> {
+    Transducer {
+        transform: |downstream| {
+            |acc, x| downstream(acc, f(x))
+        }
+    }
+}
+
+/// Create a filtering transducer - keeps elements matching a predicate.
+fn make_filter_transducer<A: Clone, P: fn(&A) -> Bool>(pred: P) -> Transducer<A, A> {
+    Transducer {
+        transform: |downstream| {
+            |acc, x| {
+                if pred(&x) {
+                    downstream(acc, x)
+                } else {
+                    acc
+                }
+            }
+        }
+    }
+}
+
+/// Identity transducer - passes all elements unchanged.
+fn identity_transducer<A>() -> Transducer<A, A> {
+    Transducer {
+        transform: |downstream| downstream
+    }
+}
+
+// =============================================================================
+// Higher-Order Functions with Rank-2 Parameters
+// =============================================================================
+
+/// Function that takes a rank-2 function as parameter.
+fn accept_rank2<A, B>(
+    f: fn<R>(A, R) -> R,
+    a: A,
+    init: Int
+) -> Int {
+    // When calling f, the type system instantiates R=Int
+    f(a, init)
+}
+
+/// Function returning a rank-2 function.
+fn make_double_transform<N: Numeric>() -> fn<R>(Reducer<N, R>) -> Reducer<N, R> {
+    |downstream| {
+        |acc, x| downstream(acc, x * 2)
+    }
+}
+
+// =============================================================================
+// Records with Rank-2 Fields
+// =============================================================================
+
+/// Record containing rank-2 function fields
+type TransducerPair<A, B, C> is {
+    first: fn<R>(Reducer<B, R>) -> Reducer<A, R>,
+    second: fn<R>(Reducer<C, R>) -> Reducer<B, R>,
+};
+
+// =============================================================================
+// Type Aliases and Nested Rank-2 Types
+// =============================================================================
+
+/// Type alias for common transducer pattern
+type MapTransducer<A, B> is Transducer<A, B>;
+
+/// Nested rank-2: transducer that produces transducers
+type TransducerFactory<A, B, C> is fn(C) -> Transducer<A, B>;
+
+// =============================================================================
+// Stateful Rank-2 Types
+// =============================================================================
+
+/// Stateful transducer with rank-2 polymorphism.
+type StatefulTransducer<A, B, S> is {
+    initial_state: S,
+    transform: fn<R>(Reducer<B, R>, &mut S) -> Reducer<A, R>,
+};
+
+/// Create a take transducer (stateful).
+fn make_take_transducer<A>(n: Int) -> StatefulTransducer<A, A, Int> {
+    StatefulTransducer {
+        initial_state: n,
+        transform: |downstream, remaining| {
+            |acc, x| {
+                if *remaining > 0 {
+                    *remaining = *remaining - 1;
+                    downstream(acc, x)
+                } else {
+                    acc
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Test Cases
+// =============================================================================
+
+fn main() {
+    // Test 1: Basic transducer creation with map
+    let double_xform: Transducer<Int, Int> = make_map_transducer(|x| x * 2);
+
+    // Test 2: Filter transducer creation
+    let even_xform: Transducer<Int, Int> = make_filter_transducer(|x: &Int| *x % 2 == 0);
+
+    // Test 3: Identity transducer
+    let id_xform: Transducer<Int, Int> = identity_transducer();
+
+    // Test 4: Verify rank-2 type can be stored
+    let transform_fn: fn<R>(Reducer<Int, R>) -> Reducer<Int, R> = double_xform.transform;
+
+    // Test 5: TransducerPair creation with pass-through closures
+    let pair: TransducerPair<Int, Int, Int> = TransducerPair {
+        first: |downstream| |acc, x| downstream(acc, x),
+        second: |downstream| |acc, x| downstream(acc, x),
+    };
+
+    // Test 6: Call function accepting rank-2 parameter
+    let result = accept_rank2(|a, acc| acc + a, 10, 0);
+    assert(result == 10);
+
+    // Test 7: Type alias usage (pass-through) - using explicit rank-2 type
+    let transform_alias: fn<R>(Reducer<Int, R>) -> Reducer<Int, R> = |downstream| downstream;
+
+    // Test 8: Stateful transducer
+    let take_5: StatefulTransducer<Int, Int, Int> = make_take_transducer(5);
+
+    // Test 9: Make double transform
+    let double_trans: fn<R>(Reducer<Int, R>) -> Reducer<Int, R> = make_double_transform();
+
+    // Test 10: Using direct Transducer type
+    let map_xform: Transducer<Int, Int> = make_map_transducer(|x| x + 1);
+
+    // Basic success indicator
+    assert(true);
+}

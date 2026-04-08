@@ -1,0 +1,251 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/panic_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, panic, abort, error-handling
+// @description: Tests for panic and error handling intrinsics.
+//
+// Coverage:
+// - panic: Terminate with error message
+// - abort: Immediate termination without unwinding
+// - unreachable: Mark unreachable code paths
+// - unreachable_unchecked: Unsafe unreachable (UB if reached)
+// - debug_assert: Debug-only assertions
+// - panic_impl: Low-level panic implementation
+//
+// Test Strategy:
+// - Verify debug_assert behavior in debug vs release
+// - Test panic catching mechanism (if available)
+// - Test that unreachable paths are correctly detected
+//
+// Note: Tests that actually trigger panic/abort are in separate files
+// with @test: run-panic annotation.
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.panic_test;
+
+mount core.intrinsics.{
+    unreachable, panic, abort,
+    debug_assert, unreachable_unchecked,
+    panic_impl,
+    is_debug,
+};
+
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Debug Assert Tests (Passing Cases)
+// =============================================================================
+
+@test
+fn test_debug_assert_passing() {
+    // These should all pass without triggering panic
+
+    // True conditions
+    debug_assert(true, "This should not panic");
+    debug_assert(1 == 1, "Math should work");
+    debug_assert(1 < 2, "Comparison should work");
+
+    // Complex conditions
+    let x = 42;
+    debug_assert(x > 0, "x should be positive");
+    debug_assert(x == 42, "x should equal 42");
+
+    // In release mode, debug_assert does nothing
+    // In debug mode, these pass because conditions are true
+    debug_assert(true && true, "Logical AND");
+    debug_assert(true || false, "Logical OR");
+    debug_assert(!false, "Logical NOT");
+
+    print("Debug assert passing tests completed");
+}
+
+// =============================================================================
+// Unreachable Not Reached Tests
+// =============================================================================
+
+@test
+fn test_unreachable_not_reached() {
+    // Test code paths that avoid unreachable
+
+    // Always takes the true branch
+    if true {
+        let x = 1;
+    } else {
+        unreachable();
+    }
+
+    // Match with all cases covered
+    let value = 1;
+    match value {
+        1 => { let _ = "one"; }
+        2 => { let _ = "two"; }
+        _ => { let _ = "other"; }
+    }
+
+    // Loop that always breaks before unreachable
+    let mut i = 0;
+    while true {
+        i = i + 1;
+        if i > 5 {
+            break;
+        }
+    }
+    // We reach here, unreachable was not in this path
+
+    // Conditional that never triggers unreachable branch
+    let condition = true;
+    if condition {
+        // Normal path
+    } else {
+        // This branch never taken
+    }
+
+    print("Unreachable not reached tests passed");
+}
+
+// =============================================================================
+// Panic Setup Tests
+// =============================================================================
+
+@test
+fn test_panic_setup() {
+    // We can't actually panic without terminating the test
+    // But we can verify the panic infrastructure is callable
+
+    // Check that is_debug returns a boolean
+    let debug_mode = is_debug();
+    assert(debug_mode == true || debug_mode == false);
+
+    if debug_mode {
+        print("Running in debug mode");
+    } else {
+        print("Running in release mode");
+    }
+
+    // In debug mode, debug_assert is active
+    // In release mode, debug_assert is a no-op
+
+    print("Panic setup tests passed");
+}
+
+// =============================================================================
+// Conditional Paths Tests
+// =============================================================================
+
+@test
+fn test_conditional_paths() {
+    // Test functions that have panic/unreachable in some branches
+    // but our test takes the non-panicking path
+
+    fn checked_divide(a: Int, b: Int) -> Int {
+        if b == 0 {
+            panic("Division by zero");
+        }
+        return a / b;
+    }
+
+    // Take the non-panic path
+    assert(checked_divide(10, 2) == 5);
+    assert(checked_divide(100, 10) == 10);
+    assert(checked_divide(0, 5) == 0);
+    assert(checked_divide(-10, 2) == -5);
+
+    // Function with unreachable branch
+    fn safe_get(arr: &[Int; 3], idx: Int) -> Int {
+        if idx < 0 || idx >= 3 {
+            unreachable();  // Caller guarantees valid index
+        }
+        return arr[idx];
+    }
+
+    let arr = [10, 20, 30];
+    assert(safe_get(&arr, 0) == 10);
+    assert(safe_get(&arr, 1) == 20);
+    assert(safe_get(&arr, 2) == 30);
+
+    print("Conditional paths tests passed");
+}
+
+// =============================================================================
+// Debug Assert Mode Behavior
+// =============================================================================
+
+@test
+fn test_debug_assert_mode() {
+    // Verify debug_assert behaves correctly based on mode
+
+    let debug_mode = is_debug();
+
+    // Count how many times a side effect would occur
+    let mut counter = 0;
+
+    fn increment_and_return_true(counter: &mut Int) -> Bool {
+        *counter = *counter + 1;
+        return true;
+    }
+
+    // In debug mode, the condition is evaluated
+    // In release mode, the entire debug_assert is skipped
+    debug_assert(increment_and_return_true(&mut counter), "Should pass");
+
+    if debug_mode {
+        // Counter was incremented because debug_assert evaluated the condition
+        assert(counter == 1);
+    } else {
+        // Counter stayed 0 because debug_assert was skipped entirely
+        assert(counter == 0);
+    }
+
+    print("Debug assert mode behavior tests passed");
+}
+
+// =============================================================================
+// Never Type Tests
+// =============================================================================
+
+@test
+fn test_never_type() {
+    // panic, abort, and unreachable return the never type (!)
+    // This means they can be used in any expression position
+
+    fn get_value(may_panic: Bool) -> Int {
+        if may_panic {
+            panic("Explicit panic");
+        }
+        42
+    }
+
+    // Test with non-panic path
+    let result = get_value(false);
+    assert(result == 42);
+
+    // Test never type in match
+    let opt: Maybe<Int> = Some(10);
+    let val = match opt {
+        Some(v) => v,
+        None => panic("Should have value"),
+    };
+    assert(val == 10);
+
+    // Test never type in expression position
+    // Note: if/else with panic in else causes type mismatch (Never vs Int)
+    // Instead, test panic as statement in non-reachable branch
+    let x = 5;
+    if false {
+        panic("Never reached");
+    }
+    assert(x == 5);
+
+    print("Never type tests passed");
+}

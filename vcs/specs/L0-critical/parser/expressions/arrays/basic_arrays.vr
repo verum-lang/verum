@@ -1,0 +1,157 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arrays, basic
+
+// Basic array/list expressions
+
+// Array of tuples
+type Point is { x: Int, y: Int };
+
+// Array in struct field
+type Container is {
+    items: List<Int>,
+};
+
+fn test_empty_arrays() {
+    // Empty array
+    let empty: List<Int> = [];
+    let empty_explicit = List.new();
+}
+
+fn test_single_element() {
+    // Single element
+    let single = [42];
+    let one_str = ["hello"];
+    let one_bool = [true];
+}
+
+fn test_multiple_elements() {
+    // Multiple elements
+    let numbers = [1, 2, 3, 4, 5];
+    let strings = ["a", "b", "c"];
+    let bools = [true, false, true];
+}
+
+fn test_computed_elements() {
+    // Mixed expressions in array
+    let computed = [1 + 1, 2 * 2, 3 * 3];
+    let calls = [foo(), bar(), baz()];
+    let mixed = [x, y + 1, z * 2];
+}
+
+fn test_nested_arrays() {
+    // Nested arrays
+    let matrix = [[1, 2], [3, 4], [5, 6]];
+    let nested = [[[1]], [[2]], [[3]]];
+    let jagged = [[1], [2, 3], [4, 5, 6]];
+}
+
+fn test_trailing_comma() {
+    // Array with trailing comma
+    let trailing = [
+        1,
+        2,
+        3,
+    ];
+}
+
+fn test_multiline_array() {
+    // Array spread across lines
+    let multiline = [
+        "first",
+        "second",
+        "third",
+        "fourth",
+    ];
+}
+
+fn test_typed_arrays() {
+    // Array with type annotation
+    let typed: List<Int> = [1, 2, 3];
+    let typed_str: List<Text> = ["a", "b"];
+}
+
+fn test_tuple_arrays() {
+    // Array of tuples
+    let pairs = [(1, 2), (3, 4), (5, 6)];
+    let named = [("a", 1), ("b", 2)];
+}
+
+fn test_struct_arrays() {
+    // Array of structs
+    let points = [
+        Point { x: 0, y: 0 },
+        Point { x: 1, y: 1 },
+        Point { x: 2, y: 2 },
+    ];
+}
+
+fn test_repeat_syntax() {
+    // Array repeat syntax
+    let zeros = [0; 10];        // [0, 0, 0, ..., 0] (10 times)
+    let filled = ["x"; 5];      // ["x", "x", "x", "x", "x"]
+}
+
+fn test_range_arrays() {
+    // Array from range
+    let range_arr = (0..10).collect();
+    let inclusive = (0..=10).collect();
+}
+
+fn test_array_concat() {
+    // Array concatenation
+    let first = [1, 2, 3];
+    let second = [4, 5, 6];
+    let combined = first + second;
+}
+
+fn sum_array(arr: List<Int>) -> Int {
+    // Array in function parameters
+    let mut total = 0;
+    for x in arr {
+        total += x;
+    }
+    total
+}
+
+fn test_array_as_param() {
+    let result = sum_array([1, 2, 3, 4, 5]);
+}
+
+fn make_array() -> List<Int> {
+    // Array returned from function
+    [1, 2, 3]
+}
+
+fn test_struct_with_array() {
+    let container = Container {
+        items: [10, 20, 30],
+    };
+}
+
+fn test_optional_arrays() {
+    // Array of optionals
+    let maybes: List<Maybe<Int>> = [Some(1), None, Some(3)];
+}
+
+fn test_result_arrays() {
+    // Array of results
+    let results: List<Result<Int, Text>> = [Ok(1), Err("failed"), Ok(3)];
+}
+
+fn test_mutable_array() {
+    // Mutable array
+    let mut mutable = [1, 2, 3];
+    mutable.push(4);
+    mutable.pop();
+}
+
+fn test_closure_arrays() {
+    // Array with closures
+    let fns: List<fn(Int) -> Int> = [
+        |x| x + 1,
+        |x| x * 2,
+        |x| x - 1,
+    ];
+}

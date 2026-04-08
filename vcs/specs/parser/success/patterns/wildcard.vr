@@ -1,0 +1,237 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for wildcard pattern (_)
+
+// Grammar Reference:
+// wildcard_pattern = '_' ;
+
+// ============================================================================
+// SECTION 1: Basic Wildcard in Let Bindings
+// ============================================================================
+
+fn test_wildcard_in_let() {
+    // Simple wildcard - ignore value completely
+    let _ = compute_value();
+
+    // Multiple wildcards in same scope
+    let _ = first();
+    let _ = second();
+    let _ = third();
+
+    // Wildcard for expression result (discard)
+    let _ = expensive_operation();
+}
+
+// ============================================================================
+// SECTION 2: Wildcard in Tuple Destructuring
+// ============================================================================
+
+fn test_wildcard_in_tuples() {
+    // Ignore first element
+    let (_, second) = get_pair();
+
+    // Ignore second element
+    let (first, _) = get_pair();
+
+    // Ignore middle element
+    let (a, _, c) = get_triple();
+
+    // Multiple wildcards
+    let (_, _, third) = get_triple();
+    let (first, _, _) = get_triple();
+    let (_, second, _) = get_triple();
+
+    // All wildcards (unusual but valid)
+    let (_, _) = get_pair();
+    let (_, _, _) = get_triple();
+}
+
+// ============================================================================
+// SECTION 3: Wildcard in Array Patterns
+// ============================================================================
+
+fn test_wildcard_in_arrays() {
+    // Ignore single element
+    let [_, b, c] = array;
+    let [a, _, c] = array;
+    let [a, b, _] = array;
+
+    // Multiple wildcards
+    let [_, _, c] = array;
+    let [a, _, _] = array;
+    let [_, b, _] = array;
+
+    // All wildcards
+    let [_, _, _] = array;
+}
+
+// ============================================================================
+// SECTION 4: Wildcard in Record Patterns
+// ============================================================================
+
+fn test_wildcard_in_records() {
+    // Wildcard as field value
+    let Point { x: _, y } = point;
+    let Point { x, y: _ } = point;
+    let Point { x: _, y: _ } = point;
+
+    // Wildcard in nested patterns
+    let Line { start: Point { x, y: _ }, end } = line;
+}
+
+// ============================================================================
+// SECTION 5: Wildcard in Variant Patterns
+// ============================================================================
+
+fn test_wildcard_in_variants() {
+    // Ignore variant payload
+    match option {
+        Some(_) => has_value(),
+        None => no_value()
+    }
+
+    // Multiple ignored payloads
+    match result {
+        Ok(_) => success(),
+        Err(_) => failure()
+    }
+
+    // Ignore some fields in tuple variant
+    match color {
+        RGB(r, _, _) => just_red(r),
+        RGB(_, g, _) => just_green(g),
+        RGB(_, _, b) => just_blue(b),
+        RGB(_, _, _) => ignore_all()
+    }
+
+    // Ignore in record variant
+    match shape {
+        Circle { radius: _ } => is_circle(),
+        Rectangle { width: _, height: _ } => is_rectangle()
+    }
+}
+
+// ============================================================================
+// SECTION 6: Wildcard as Catch-All in Match
+// ============================================================================
+
+fn test_wildcard_catchall() {
+    // Simple catch-all
+    match x {
+        0 => zero(),
+        1 => one(),
+        _ => other()
+    }
+
+    // Catch-all after specific patterns
+    match option {
+        Some(0) => some_zero(),
+        Some(1) => some_one(),
+        Some(_) => some_other(),
+        None => none()
+    }
+
+    // Catch-all at top level
+    match value {
+        _ => always_matches()
+    }
+}
+
+// ============================================================================
+// SECTION 7: Wildcard in Nested Patterns
+// ============================================================================
+
+fn test_wildcard_nested() {
+    // Nested in tuples
+    let ((_, b), (c, _)) = nested;
+
+    // Nested in arrays
+    let [[_, b], [c, _]] = matrix;
+
+    // Mixed nesting
+    let ((_, _), [_, _]) = complex;
+
+    // Deep nesting
+    let (_, (_, (_, value))) = deep;
+    let [_, [_, [_, element]]] = deep_array;
+}
+
+// ============================================================================
+// SECTION 8: Wildcard with Type Annotations
+// ============================================================================
+
+fn test_wildcard_with_types() {
+    // Wildcard with explicit type
+    let _: Int = get_int();
+    let _: Text = get_text();
+    let _: List<Int> = get_list();
+
+    // In destructuring with type annotation
+    let (_, _): (Int, Text) = pair;
+}
+
+// ============================================================================
+// SECTION 9: Wildcard in Function Parameters (for demonstration)
+// ============================================================================
+
+fn ignore_first(_: Int, second: Text) -> Text {
+    second
+}
+
+fn ignore_second(first: Int, _: Text) -> Int {
+    first
+}
+
+fn ignore_all(_: Int, _: Text) -> () {
+    ()
+}
+
+// ============================================================================
+// SECTION 10: Wildcard in For Loops
+// ============================================================================
+
+fn test_wildcard_in_loops() {
+    // Ignore index
+    for _ in 0..10 {
+        do_something()
+    }
+
+    // Ignore value in enumeration (conceptual - destructuring)
+    for (_, value) in indexed_list {
+        process(value)
+    }
+
+    for (index, _) in indexed_list {
+        process_index(index)
+    }
+}
+
+// ============================================================================
+// SECTION 11: Wildcard in If-Let
+// ============================================================================
+
+fn test_wildcard_in_if_let() {
+    // Check existence without binding
+    if let Some(_) = maybe_value {
+        has_value()
+    }
+
+    // With else
+    if let Ok(_) = result {
+        success()
+    } else {
+        failure()
+    }
+}
+
+// ============================================================================
+// SECTION 12: Wildcard in While-Let
+// ============================================================================
+
+fn test_wildcard_in_while_let() {
+    // Check existence in loop
+    while let Some(_) = iterator.next() {
+        continue_loop()
+    }
+}

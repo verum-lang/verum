@@ -1,0 +1,158 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, hanoi, tower, simulation
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Tower of Hanoi simulation (iterative)
+
+// Stack-based peg (8 disks max)
+type Peg is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    top: Int
+};
+
+fn peg_new() -> Peg {
+    Peg { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, top: 0 }
+}
+
+fn peg_push(p: Peg, v: Int) -> Peg {
+    let i = p.top;
+    Peg {
+        d0: if i == 0 { v } else { p.d0 }, d1: if i == 1 { v } else { p.d1 },
+        d2: if i == 2 { v } else { p.d2 }, d3: if i == 3 { v } else { p.d3 },
+        d4: if i == 4 { v } else { p.d4 }, d5: if i == 5 { v } else { p.d5 },
+        d6: if i == 6 { v } else { p.d6 }, d7: if i == 7 { v } else { p.d7 },
+        top: p.top + 1
+    }
+}
+
+fn peg_peek(p: Peg) -> Int {
+    let i = p.top - 1;
+    if i == 0 { p.d0 } else if i == 1 { p.d1 }
+    else if i == 2 { p.d2 } else if i == 3 { p.d3 }
+    else if i == 4 { p.d4 } else if i == 5 { p.d5 }
+    else if i == 6 { p.d6 } else { p.d7 }
+}
+
+fn peg_pop(p: Peg) -> Peg {
+    Peg {
+        d0: p.d0, d1: p.d1, d2: p.d2, d3: p.d3,
+        d4: p.d4, d5: p.d5, d6: p.d6, d7: p.d7,
+        top: p.top - 1
+    }
+}
+
+fn peg_size(p: Peg) -> Int { p.top }
+
+// Three pegs
+type Hanoi is { peg_a: Peg, peg_b: Peg, peg_c: Peg, moves: Int };
+
+fn hanoi_get_peg(h: Hanoi, p: Int) -> Peg {
+    if p == 0 { h.peg_a } else if p == 1 { h.peg_b } else { h.peg_c }
+}
+
+fn hanoi_set_peg(h: Hanoi, p: Int, peg: Peg) -> Hanoi {
+    Hanoi {
+        peg_a: if p == 0 { peg } else { h.peg_a },
+        peg_b: if p == 1 { peg } else { h.peg_b },
+        peg_c: if p == 2 { peg } else { h.peg_c },
+        moves: h.moves
+    }
+}
+
+// Move top disk from peg `from` to peg `to`
+fn move_disk(h: Hanoi, from_peg: Int, to_peg: Int) -> Hanoi {
+    let src = hanoi_get_peg(h, from_peg);
+    let dst = hanoi_get_peg(h, to_peg);
+    let disk = peg_peek(src);
+    let src2 = peg_pop(src);
+    let dst2 = peg_push(dst, disk);
+    let h2 = hanoi_set_peg(h, from_peg, src2);
+    let h3 = hanoi_set_peg(h2, to_peg, dst2);
+    Hanoi { peg_a: h3.peg_a, peg_b: h3.peg_b, peg_c: h3.peg_c, moves: h.moves + 1 }
+}
+
+// Make legal move between two pegs (smaller disk moves)
+fn make_legal_move(h: Hanoi, p1: Int, p2: Int) -> Hanoi {
+    let peg1 = hanoi_get_peg(h, p1);
+    let peg2 = hanoi_get_peg(h, p2);
+    if peg1.top == 0 && peg2.top == 0 { return h; }
+    if peg1.top == 0 { return move_disk(h, p2, p1); }
+    if peg2.top == 0 { return move_disk(h, p1, p2); }
+    let v1 = peg_peek(peg1);
+    let v2 = peg_peek(peg2);
+    if v1 < v2 { move_disk(h, p1, p2) } else { move_disk(h, p2, p1) }
+}
+
+// Iterative Hanoi solution for n disks
+fn solve_hanoi(n: Int) -> Hanoi {
+    // Setup: stack disks n..1 on peg A
+    let mut peg_a = peg_new();
+    let mut i = n;
+    while i >= 1 {
+        peg_a = peg_push(peg_a, i);
+        i = i - 1;
+    }
+    let mut h = Hanoi { peg_a: peg_a, peg_b: peg_new(), peg_c: peg_new(), moves: 0 };
+
+    let total_moves = (1 << n) - 1;
+    let mut step = 1;
+
+    // For odd n: cycle is A->C->B->A
+    // For even n: cycle is A->B->C->A
+    while step <= total_moves {
+        if step % 3 == 1 {
+            if n % 2 == 1 { h = make_legal_move(h, 0, 2); }
+            else { h = make_legal_move(h, 0, 1); }
+        } else if step % 3 == 2 {
+            if n % 2 == 1 { h = make_legal_move(h, 0, 1); }
+            else { h = make_legal_move(h, 0, 2); }
+        } else {
+            h = make_legal_move(h, 1, 2);
+        }
+        step = step + 1;
+    }
+    h
+}
+
+fn test_one_disk() {
+    let h = solve_hanoi(1);
+    assert_eq(h.moves, 1);
+    assert_eq(peg_size(h.peg_a), 0);
+    // For n=1 (odd), moves to C
+    assert_eq(peg_size(h.peg_c), 1);
+}
+
+fn test_two_disks() {
+    let h = solve_hanoi(2);
+    assert_eq(h.moves, 3);  // 2^2 - 1
+    assert_eq(peg_size(h.peg_a), 0);
+}
+
+fn test_three_disks() {
+    let h = solve_hanoi(3);
+    assert_eq(h.moves, 7);  // 2^3 - 1
+    assert_eq(peg_size(h.peg_a), 0);
+    // For n=3 (odd), all disks end on C
+    assert_eq(peg_size(h.peg_c), 3);
+    // Bottom disk should be 3 (largest)
+    assert_eq(h.peg_c.d0, 3);
+}
+
+fn test_four_disks() {
+    let h = solve_hanoi(4);
+    assert_eq(h.moves, 15);  // 2^4 - 1
+    assert_eq(peg_size(h.peg_a), 0);
+}
+
+fn main() -> Int {
+    test_one_disk();
+    test_two_disks();
+    test_three_disks();
+    test_four_disks();
+    print("[OK] 262_tower_of_hanoi_aot");
+    0
+}

@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, capability
+// @expected-error: E310
+// @description: Tests that mutable borrow is rejected when immutable borrow exists
+
+fn main() {
+    let mut x = 42;
+    let r = &x;  // Immutable reference - READ capability only
+
+    // Attempting to take mutable ref while immutable exists should fail
+    let r_mut = &mut x;  // ERROR E310: cannot borrow as mutable while immutably borrowed
+
+    // Use the references to prevent early drop
+    let _ = *r;
+    let _ = *r_mut;
+}

@@ -1,0 +1,541 @@
+// =============================================================================
+// poll_test.vr - Tests for Poll<T> type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, poll, ready, pending, core
+// @description: Comprehensive tests for Poll<T> type used in async futures
+// =============================================================================
+
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Poll Variant Construction
+// =============================================================================
+
+@test
+fn test_poll_ready_construction() {
+    let poll: Poll<Int> = Ready(42);
+    assert(poll.is_ready());
+    assert(!poll.is_pending());
+}
+
+@test
+fn test_poll_pending_construction() {
+    let poll: Poll<Int> = Pending;
+    assert(poll.is_pending());
+    assert(!poll.is_ready());
+}
+
+@test
+fn test_poll_ready_with_different_types() {
+    // Int
+    let poll_int: Poll<Int> = Ready(100);
+    assert(poll_int.is_ready());
+
+    // Bool
+    let poll_bool: Poll<Bool> = Ready(true);
+    assert(poll_bool.is_ready());
+
+    // Float
+    let poll_float: Poll<Float> = Ready(3.14);
+    assert(poll_float.is_ready());
+
+    // Text
+    let poll_text: Poll<Text> = Ready("hello");
+    assert(poll_text.is_ready());
+}
+
+// =============================================================================
+// Section 2: is_ready() and is_pending() Methods
+// =============================================================================
+
+@test
+fn test_is_ready_true() {
+    let poll: Poll<Int> = Ready(10);
+    assert(poll.is_ready());
+}
+
+@test
+fn test_is_ready_false() {
+    let poll: Poll<Int> = Pending;
+    assert(!poll.is_ready());
+}
+
+@test
+fn test_is_pending_true() {
+    let poll: Poll<Int> = Pending;
+    assert(poll.is_pending());
+}
+
+@test
+fn test_is_pending_false() {
+    let poll: Poll<Int> = Ready(10);
+    assert(!poll.is_pending());
+}
+
+// =============================================================================
+// Section 3: map() Method
+// =============================================================================
+
+@test
+fn test_poll_map_ready() {
+    let poll: Poll<Int> = Ready(5);
+    let mapped: Poll<Int> = poll.map(|x| x * 2);
+    assert(mapped.is_ready());
+    assert_eq(mapped.unwrap(), 10);
+}
+
+@test
+fn test_poll_map_pending() {
+    let poll: Poll<Int> = Pending;
+    let mapped: Poll<Int> = poll.map(|x| x * 2);
+    assert(mapped.is_pending());
+}
+
+@test
+fn test_poll_map_type_change() {
+    let poll: Poll<Int> = Ready(42);
+    let mapped: Poll<Text> = poll.map(|_| "converted");
+    assert(mapped.is_ready());
+}
+
+@test
+fn test_poll_map_chain() {
+    let poll: Poll<Int> = Ready(2);
+    let result: Poll<Int> = poll.map(|x| x + 1).map(|x| x * 2);
+    assert_eq(result.unwrap(), 6);  // (2 + 1) * 2 = 6
+}
+
+// =============================================================================
+// Section 4: unwrap() Method
+// =============================================================================
+
+@test
+fn test_poll_unwrap_ready() {
+    let poll: Poll<Int> = Ready(42);
+    let value: Int = poll.unwrap();
+    assert_eq(value, 42);
+}
+
+@test
+fn test_poll_unwrap_ready_different_types() {
+    // Bool
+    let poll_bool: Poll<Bool> = Ready(true);
+    assert(poll_bool.unwrap());
+
+    // Text
+    let poll_text: Poll<Text> = Ready("test");
+    assert_eq(poll_text.unwrap(), "test");
+}
+
+// Note: unwrap() on Pending panics - tested via run-panic test type
+
+// =============================================================================
+// Section 5: unwrap_or() Method
+// =============================================================================
+
+@test
+fn test_poll_unwrap_or_ready() {
+    let poll: Poll<Int> = Ready(42);
+    let value: Int = poll.unwrap_or(100);
+    assert_eq(value, 42);  // Uses ready value, not default
+}
+
+@test
+fn test_poll_unwrap_or_pending() {
+    let poll: Poll<Int> = Pending;
+    let value: Int = poll.unwrap_or(100);
+    assert_eq(value, 100);  // Uses default
+}
+
+@test
+fn test_poll_unwrap_or_with_zero_default() {
+    let poll: Poll<Int> = Pending;
+    let value: Int = poll.unwrap_or(0);
+    assert_eq(value, 0);
+}
+
+// =============================================================================
+// Section 6: ready() Method - Convert to Maybe
+// =============================================================================
+
+@test
+fn test_poll_ready_to_maybe_some() {
+    let poll: Poll<Int> = Ready(42);
+    let maybe: Maybe<Int> = poll.ready();
+    match maybe {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_poll_ready_to_maybe_none() {
+    let poll: Poll<Int> = Pending;
+    let maybe: Maybe<Int> = poll.ready();
+    match maybe {
+        Some(_) => panic("Expected None"),
+        None => {} // Expected
+    }
+}
+
+// =============================================================================
+// Section 7: Default Implementation
+// =============================================================================
+
+@test
+fn test_poll_default_is_pending() {
+    let poll: Poll<Int> = Poll.default();
+    assert(poll.is_pending());
+}
+
+// =============================================================================
+// Section 8: Pattern Matching
+// =============================================================================
+
+@test
+fn test_poll_match_ready() {
+    let poll: Poll<Int> = Ready(42);
+    let result: Int = match poll {
+        Ready(v) => v,
+        Pending => 0,
+    };
+    assert_eq(result, 42);
+}
+
+@test
+fn test_poll_match_pending() {
+    let poll: Poll<Int> = Pending;
+    let result: Int = match poll {
+        Ready(v) => v,
+        Pending => -1,
+    };
+    assert_eq(result, -1);
+}
+
+@test
+fn test_poll_is_pattern() {
+    let ready_poll: Poll<Int> = Ready(10);
+    let pending_poll: Poll<Int> = Pending;
+
+    assert(ready_poll is Ready);
+    assert(!(ready_poll is Pending));
+    assert(pending_poll is Pending);
+    assert(!(pending_poll is Ready));
+}
+
+// =============================================================================
+// Section 9: Edge Cases
+// =============================================================================
+
+@test
+fn test_poll_ready_with_zero() {
+    let poll: Poll<Int> = Ready(0);
+    assert(poll.is_ready());
+    assert_eq(poll.unwrap(), 0);
+}
+
+@test
+fn test_poll_ready_with_negative() {
+    let poll: Poll<Int> = Ready(-42);
+    assert(poll.is_ready());
+    assert_eq(poll.unwrap(), -42);
+}
+
+@test
+fn test_poll_ready_with_empty_text() {
+    let poll: Poll<Text> = Ready("");
+    assert(poll.is_ready());
+    assert_eq(poll.unwrap(), "");
+}
+
+// =============================================================================
+// Section 10: Nested Poll
+// =============================================================================
+
+@test
+fn test_nested_poll_ready_ready() {
+    let inner: Poll<Int> = Ready(42);
+    let outer: Poll<Poll<Int>> = Ready(inner);
+    assert(outer.is_ready());
+    let inner_poll: Poll<Int> = outer.unwrap();
+    assert(inner_poll.is_ready());
+    assert_eq(inner_poll.unwrap(), 42);
+}
+
+@test
+fn test_nested_poll_ready_pending() {
+    let inner: Poll<Int> = Pending;
+    let outer: Poll<Poll<Int>> = Ready(inner);
+    assert(outer.is_ready());
+    let inner_poll: Poll<Int> = outer.unwrap();
+    assert(inner_poll.is_pending());
+}
+
+// =============================================================================
+// Section 11: Poll<Result<T, E>> Shorthand Constructors
+// =============================================================================
+
+@test
+fn test_poll_ready_ok_int() {
+    let poll: Poll<Result<Int, Text>> = Poll.ready_ok(42);
+    assert(poll.is_ready());
+    let result: Result<Int, Text> = poll.unwrap();
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_poll_ready_ok_text() {
+    let poll: Poll<Result<Text, Int>> = Poll.ready_ok("hello");
+    assert(poll.is_ready());
+    assert_eq(poll.unwrap().unwrap(), "hello");
+}
+
+@test
+fn test_poll_ready_err_text() {
+    let poll: Poll<Result<Int, Text>> = Poll.ready_err("error");
+    assert(poll.is_ready());
+    let result: Result<Int, Text> = poll.unwrap();
+    assert(result.is_err());
+}
+
+@test
+fn test_poll_ready_err_int() {
+    let poll: Poll<Result<Text, Int>> = Poll.ready_err(404);
+    assert(poll.is_ready());
+    let result: Result<Text, Int> = poll.unwrap();
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 12: Poll<Result<T, E>> Construction and Matching
+// =============================================================================
+
+@test
+fn test_poll_ready_result_ok() {
+    let poll: Poll<Result<Int, Text>> = Ready(Ok(42));
+    assert(poll.is_ready());
+    assert(poll.unwrap().is_ok());
+}
+
+@test
+fn test_poll_ready_result_err() {
+    let poll: Poll<Result<Int, Text>> = Ready(Err("oops"));
+    assert(poll.is_ready());
+    assert(poll.unwrap().is_err());
+}
+
+@test
+fn test_poll_pending_result() {
+    let poll: Poll<Result<Int, Text>> = Pending;
+    assert(poll.is_pending());
+}
+
+@test
+fn test_poll_map_result_ok() {
+    let poll: Poll<Result<Int, Text>> = Ready(Ok(5));
+    let mapped: Poll<Bool> = poll.map(|r| r.is_ok());
+    assert(mapped.is_ready());
+    assert(mapped.unwrap());
+}
+
+@test
+fn test_poll_map_result_err() {
+    let poll: Poll<Result<Int, Text>> = Ready(Err("oops"));
+    let mapped: Poll<Bool> = poll.map(|r| r.is_err());
+    assert(mapped.is_ready());
+    assert(mapped.unwrap());
+}
+
+@test
+fn test_poll_result_unwrap_chain() {
+    let poll: Poll<Result<Int, Text>> = Ready(Ok(99));
+    let val: Int = poll.unwrap().unwrap();
+    assert_eq(val, 99);
+}
+
+// =============================================================================
+// Section 13: Clone
+// =============================================================================
+
+@test
+fn test_poll_clone_ready() {
+    let poll: Poll<Int> = Ready(42);
+    let cloned: Poll<Int> = poll.clone();
+    assert(cloned.is_ready());
+    assert_eq(cloned.unwrap(), 42);
+}
+
+@test
+fn test_poll_clone_pending() {
+    let poll: Poll<Int> = Pending;
+    let cloned: Poll<Int> = poll.clone();
+    assert(cloned.is_pending());
+}
+
+@test
+fn test_poll_clone_independence() {
+    let poll: Poll<Int> = Ready(10);
+    let cloned: Poll<Int> = poll.clone();
+    // Both are independently usable
+    assert_eq(poll.unwrap(), 10);
+    assert_eq(cloned.unwrap(), 10);
+}
+
+// =============================================================================
+// Section 14: Eq
+// =============================================================================
+
+@test
+fn test_poll_eq_ready_same() {
+    let a: Poll<Int> = Ready(42);
+    let b: Poll<Int> = Ready(42);
+    assert(a == b);
+}
+
+@test
+fn test_poll_eq_ready_different() {
+    let a: Poll<Int> = Ready(42);
+    let b: Poll<Int> = Ready(99);
+    assert(a != b);
+}
+
+@test
+fn test_poll_eq_pending_pending() {
+    let a: Poll<Int> = Pending;
+    let b: Poll<Int> = Pending;
+    assert(a == b);
+}
+
+@test
+fn test_poll_eq_ready_vs_pending() {
+    let a: Poll<Int> = Ready(42);
+    let b: Poll<Int> = Pending;
+    assert(a != b);
+}
+
+@test
+fn test_poll_eq_pending_vs_ready() {
+    let a: Poll<Int> = Pending;
+    let b: Poll<Int> = Ready(42);
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 15: Poll with Maybe Type
+// =============================================================================
+
+@test
+fn test_poll_ready_maybe_some() {
+    let poll: Poll<Maybe<Int>> = Ready(Some(42));
+    assert(poll.is_ready());
+    let maybe: Maybe<Int> = poll.unwrap();
+    assert(maybe.is_some());
+}
+
+@test
+fn test_poll_ready_maybe_none() {
+    let poll: Poll<Maybe<Int>> = Ready(None);
+    assert(poll.is_ready());
+    let maybe: Maybe<Int> = poll.unwrap();
+    assert(maybe.is_none());
+}
+
+@test
+fn test_poll_map_maybe_to_bool() {
+    let poll: Poll<Maybe<Int>> = Ready(Some(10));
+    let mapped: Poll<Bool> = poll.map(|m| m.is_some());
+    assert(mapped.unwrap());
+}
+
+@test
+fn test_poll_pending_maybe() {
+    let poll: Poll<Maybe<Int>> = Pending;
+    assert(poll.is_pending());
+}
+
+// =============================================================================
+// Section 16: Map with Type Conversions
+// =============================================================================
+
+@test
+fn test_poll_map_to_bool() {
+    let poll: Poll<Int> = Ready(42);
+    let mapped: Poll<Bool> = poll.map(|x| x > 0);
+    assert(mapped.is_ready());
+    assert(mapped.unwrap());
+}
+
+@test
+fn test_poll_map_to_bool_false() {
+    let poll: Poll<Int> = Ready(-1);
+    let mapped: Poll<Bool> = poll.map(|x| x > 0);
+    assert(mapped.is_ready());
+    assert(!mapped.unwrap());
+}
+
+@test
+fn test_poll_map_triple_chain() {
+    let poll: Poll<Int> = Ready(3);
+    let result: Poll<Int> = poll
+        .map(|x| x * 2)       // 6
+        .map(|x| x + 1)       // 7
+        .map(|x| x * 10);     // 70
+    assert_eq(result.unwrap(), 70);
+}
+
+// =============================================================================
+// Section 17: Poll<Result<T, E>> Edge Cases
+// =============================================================================
+
+@test
+fn test_poll_ready_ok_zero() {
+    let poll: Poll<Result<Int, Text>> = Poll.ready_ok(0);
+    assert_eq(poll.unwrap().unwrap(), 0);
+}
+
+@test
+fn test_poll_ready_ok_bool() {
+    let poll: Poll<Result<Bool, Int>> = Poll.ready_ok(false);
+    assert_eq(poll.unwrap().unwrap(), false);
+}
+
+@test
+fn test_poll_ready_err_empty_text() {
+    let poll: Poll<Result<Int, Text>> = Poll.ready_err("");
+    assert(poll.unwrap().is_err());
+}
+
+// =============================================================================
+// Section 18: Unwrap_or Edge Cases
+// =============================================================================
+
+@test
+fn test_poll_unwrap_or_ready_ignores_default() {
+    let poll: Poll<Text> = Ready("actual");
+    assert_eq(poll.unwrap_or("default"), "actual");
+}
+
+@test
+fn test_poll_unwrap_or_pending_uses_default() {
+    let poll: Poll<Text> = Pending;
+    assert_eq(poll.unwrap_or("default"), "default");
+}
+
+@test
+fn test_poll_unwrap_or_ready_negative() {
+    let poll: Poll<Int> = Ready(-42);
+    assert_eq(poll.unwrap_or(0), -42);
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

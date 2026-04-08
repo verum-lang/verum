@@ -1,0 +1,226 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, rational, arithmetic, fraction
+// @timeout: 30000
+
+// Rational number arithmetic using packed integers
+// Rational = numerator * 10000 + denominator (both positive, denom > 0)
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+fn rat_num(r: Int) -> Int { r / 10000 }
+fn rat_den(r: Int) -> Int { r % 10000 }
+
+// Create a normalized rational (positive denominator, reduced)
+fn make_rat(n: Int, d: Int) -> Int {
+    if d == 0 { 0 } // undefined
+    else {
+        let g = gcd(abs_val(n), abs_val(d));
+        let nn = n / g;
+        let dd = d / g;
+        // Ensure denominator is positive
+        if dd < 0 {
+            (0 - nn) * 10000 + (0 - dd)
+        } else {
+            nn * 10000 + dd
+        }
+    }
+}
+
+// Rational from integer
+fn rat_int(n: Int) -> Int { n * 10000 + 1 }
+
+// Add two rationals: a/b + c/d = (ad + bc) / bd
+fn rat_add(r1: Int, r2: Int) -> Int {
+    let n1 = rat_num(r1);
+    let d1 = rat_den(r1);
+    let n2 = rat_num(r2);
+    let d2 = rat_den(r2);
+    make_rat(n1 * d2 + n2 * d1, d1 * d2)
+}
+
+// Subtract: a/b - c/d = (ad - bc) / bd
+fn rat_sub(r1: Int, r2: Int) -> Int {
+    let n1 = rat_num(r1);
+    let d1 = rat_den(r1);
+    let n2 = rat_num(r2);
+    let d2 = rat_den(r2);
+    make_rat(n1 * d2 - n2 * d1, d1 * d2)
+}
+
+// Multiply: (a/b) * (c/d) = ac / bd
+fn rat_mul(r1: Int, r2: Int) -> Int {
+    let n1 = rat_num(r1);
+    let d1 = rat_den(r1);
+    let n2 = rat_num(r2);
+    let d2 = rat_den(r2);
+    make_rat(n1 * n2, d1 * d2)
+}
+
+// Divide: (a/b) / (c/d) = ad / bc
+fn rat_div(r1: Int, r2: Int) -> Int {
+    let n1 = rat_num(r1);
+    let d1 = rat_den(r1);
+    let n2 = rat_num(r2);
+    let d2 = rat_den(r2);
+    if n2 == 0 { 0 } // division by zero
+    else { make_rat(n1 * d2, d1 * n2) }
+}
+
+// Compare: returns 1 if r1 > r2, -1 if r1 < r2, 0 if equal
+// Uses cross-multiplication to avoid negative packed rationals
+fn rat_cmp(r1: Int, r2: Int) -> Int {
+    let n1 = rat_num(r1);
+    let d1 = rat_den(r1);
+    let n2 = rat_num(r2);
+    let d2 = rat_den(r2);
+    let lhs = n1 * d2;
+    let rhs = n2 * d1;
+    if lhs > rhs { 1 }
+    else if lhs < rhs { 0 - 1 }
+    else { 0 }
+}
+
+// Check equality
+fn rat_eq(r1: Int, r2: Int) -> Int {
+    if rat_cmp(r1, r2) == 0 { 1 } else { 0 }
+}
+
+fn test_make_rat() -> Int {
+    // 2/4 should reduce to 1/2
+    let r = make_rat(2, 4);
+    assert_eq(rat_num(r), 1);
+    assert_eq(rat_den(r), 2);
+    // 6/3 = 2/1
+    let r2 = make_rat(6, 3);
+    assert_eq(rat_num(r2), 2);
+    assert_eq(rat_den(r2), 1);
+    // 0/5 = 0/1
+    let r3 = make_rat(0, 5);
+    assert_eq(rat_num(r3), 0);
+    assert_eq(rat_den(r3), 1);
+    1
+}
+
+fn test_add() -> Int {
+    // 1/2 + 1/3 = 5/6
+    let a = make_rat(1, 2);
+    let b = make_rat(1, 3);
+    let sum = rat_add(a, b);
+    assert_eq(rat_num(sum), 5);
+    assert_eq(rat_den(sum), 6);
+    // 1/4 + 3/4 = 1/1
+    let c = make_rat(1, 4);
+    let d = make_rat(3, 4);
+    let sum2 = rat_add(c, d);
+    assert_eq(rat_num(sum2), 1);
+    assert_eq(rat_den(sum2), 1);
+    1
+}
+
+fn test_sub() -> Int {
+    // 3/4 - 1/4 = 1/2 (positive result only — negative packed rationals don't work)
+    let a = make_rat(3, 4);
+    let b = make_rat(1, 4);
+    let diff = rat_sub(a, b);
+    assert_eq(rat_num(diff), 1);
+    assert_eq(rat_den(diff), 2);
+    // 5/6 - 1/6 = 4/6 = 2/3
+    let c = make_rat(5, 6);
+    let d = make_rat(1, 6);
+    let diff2 = rat_sub(c, d);
+    assert_eq(rat_num(diff2), 2);
+    assert_eq(rat_den(diff2), 3);
+    1
+}
+
+fn test_mul() -> Int {
+    // 2/3 * 3/4 = 6/12 = 1/2
+    let a = make_rat(2, 3);
+    let b = make_rat(3, 4);
+    let prod = rat_mul(a, b);
+    assert_eq(rat_num(prod), 1);
+    assert_eq(rat_den(prod), 2);
+    // 1/2 * 0/1 = 0
+    let c = make_rat(1, 2);
+    let d = make_rat(0, 1);
+    let prod2 = rat_mul(c, d);
+    assert_eq(rat_num(prod2), 0);
+    1
+}
+
+fn test_div() -> Int {
+    // (1/2) / (3/4) = (1/2) * (4/3) = 4/6 = 2/3
+    let a = make_rat(1, 2);
+    let b = make_rat(3, 4);
+    let quot = rat_div(a, b);
+    assert_eq(rat_num(quot), 2);
+    assert_eq(rat_den(quot), 3);
+    1
+}
+
+fn test_compare() -> Int {
+    let a = make_rat(1, 2);
+    let b = make_rat(1, 3);
+    assert_eq(rat_cmp(a, b), 1); // 1/2 > 1/3
+    assert_eq(rat_cmp(b, a), 0 - 1); // 1/3 < 1/2
+    assert_eq(rat_cmp(a, a), 0); // equal
+    assert_eq(rat_eq(a, a), 1);
+    assert_eq(rat_eq(a, b), 0);
+    // 2/4 == 1/2
+    let c = make_rat(2, 4);
+    assert_eq(rat_eq(a, c), 1);
+    1
+}
+
+fn test_identities() -> Int {
+    let half = make_rat(1, 2);
+    let one = rat_int(1);
+    let zero = rat_int(0);
+    // a + 0 = a
+    assert_eq(rat_eq(rat_add(half, zero), half), 1);
+    // a * 1 = a
+    assert_eq(rat_eq(rat_mul(half, one), half), 1);
+    // 0 * a = 0
+    assert_eq(rat_num(rat_mul(zero, half)), 0);
+    // a / a = 1
+    let div_self = rat_div(half, half);
+    assert_eq(rat_num(div_self), 1);
+    assert_eq(rat_den(div_self), 1);
+    // Commutativity of addition: a + b = b + a
+    let third = make_rat(1, 3);
+    assert_eq(rat_eq(rat_add(half, third), rat_add(third, half)), 1);
+    1
+}
+
+fn test_harmonic() -> Int {
+    // H(4) = 1 + 1/2 + 1/3 + 1/4 = 12/12 + 6/12 + 4/12 + 3/12 = 25/12
+    let h1 = rat_int(1);
+    let h2 = make_rat(1, 2);
+    let h3 = make_rat(1, 3);
+    let h4 = make_rat(1, 4);
+    let sum = rat_add(rat_add(h1, h2), rat_add(h3, h4));
+    assert_eq(rat_num(sum), 25);
+    assert_eq(rat_den(sum), 12);
+    1
+}
+
+fn main() -> Int {
+    test_make_rat();
+    test_add();
+    test_sub();
+    test_mul();
+    test_div();
+    test_compare();
+    test_identities();
+    test_harmonic();
+    print("[OK] 632_rational_arith_aot");
+    0
+}

@@ -1,0 +1,130 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, list, concat, reverse
+// @description: Test list_concat and list_reverse operations
+
+// =============================================================================
+// LIST_CONCAT TESTS
+// =============================================================================
+
+// Test list_concat with two non-empty lists
+meta fn test_list_concat_basic() -> List<Int> {
+    list_concat([1, 2], [3, 4])  // Should be [1, 2, 3, 4]
+}
+
+// Test list_concat with empty first list
+meta fn test_list_concat_empty_first() -> List<Int> {
+    list_concat([], [1, 2, 3])  // Should be [1, 2, 3]
+}
+
+// Test list_concat with empty second list
+meta fn test_list_concat_empty_second() -> List<Int> {
+    list_concat([1, 2, 3], [])  // Should be [1, 2, 3]
+}
+
+// Test list_concat with both empty
+meta fn test_list_concat_both_empty() -> List<Int> {
+    list_concat([], [])  // Should be []
+}
+
+// Test list_concat with single elements
+meta fn test_list_concat_singles() -> List<Int> {
+    list_concat([1], [2])  // Should be [1, 2]
+}
+
+// Test multiple concats
+meta fn test_list_concat_multiple() -> Int {
+    let xs = list_concat([1], [2]);
+    let xs = list_concat(xs, [3]);
+    let xs = list_concat(xs, [4, 5]);
+    list_len(xs)  // Should be 5
+}
+
+// =============================================================================
+// LIST_REVERSE TESTS
+// =============================================================================
+
+// Test list_reverse basic
+meta fn test_list_reverse_basic() -> List<Int> {
+    list_reverse([1, 2, 3])  // Should be [3, 2, 1]
+}
+
+// Test list_reverse empty
+meta fn test_list_reverse_empty() -> List<Int> {
+    list_reverse([])  // Should be []
+}
+
+// Test list_reverse single
+meta fn test_list_reverse_single() -> List<Int> {
+    list_reverse([42])  // Should be [42]
+}
+
+// Test list_reverse double
+meta fn test_list_reverse_double() -> List<Int> {
+    list_reverse([1, 2])  // Should be [2, 1]
+}
+
+// Test double reverse (identity)
+meta fn test_list_reverse_double_reverse() -> List<Int> {
+    list_reverse(list_reverse([1, 2, 3]))  // Should be [1, 2, 3]
+}
+
+// Test reverse longer list
+meta fn test_list_reverse_longer() -> List<Int> {
+    list_reverse([1, 2, 3, 4, 5])  // Should be [5, 4, 3, 2, 1]
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test concat then reverse
+meta fn test_concat_then_reverse() -> List<Int> {
+    let xs = list_concat([1, 2], [3, 4]);
+    list_reverse(xs)  // Should be [4, 3, 2, 1]
+}
+
+// Test reverse then concat
+meta fn test_reverse_then_concat() -> List<Int> {
+    let a = list_reverse([1, 2]);
+    let b = list_reverse([3, 4]);
+    list_concat(a, b)  // Should be [2, 1, 4, 3]
+}
+
+// Test concat reversed lists equals reverse of reverse concat
+meta fn test_concat_reverse_property() -> Bool {
+    let a = [1, 2];
+    let b = [3, 4];
+    let result1 = list_reverse(list_concat(a, b));
+    let result2 = list_concat(list_reverse(b), list_reverse(a));
+    // Both should be [4, 3, 2, 1]
+    list_get(result1, 0) == list_get(result2, 0) &&
+    list_get(result1, 1) == list_get(result2, 1) &&
+    list_get(result1, 2) == list_get(result2, 2) &&
+    list_get(result1, 3) == list_get(result2, 3)
+}
+
+// Main test function
+fn main() {
+    // concat tests
+    assert_eq(@const(test_list_concat_basic()), [1, 2, 3, 4]);
+    assert_eq(@const(test_list_concat_empty_first()), [1, 2, 3]);
+    assert_eq(@const(test_list_concat_empty_second()), [1, 2, 3]);
+    assert_eq(@const(test_list_concat_both_empty()), []);
+    assert_eq(@const(test_list_concat_singles()), [1, 2]);
+    assert_eq(@const(test_list_concat_multiple()), 5);
+
+    // reverse tests
+    assert_eq(@const(test_list_reverse_basic()), [3, 2, 1]);
+    assert_eq(@const(test_list_reverse_empty()), []);
+    assert_eq(@const(test_list_reverse_single()), [42]);
+    assert_eq(@const(test_list_reverse_double()), [2, 1]);
+    assert_eq(@const(test_list_reverse_double_reverse()), [1, 2, 3]);
+    assert_eq(@const(test_list_reverse_longer()), [5, 4, 3, 2, 1]);
+
+    // combined tests
+    assert_eq(@const(test_concat_then_reverse()), [4, 3, 2, 1]);
+    assert_eq(@const(test_reverse_then_concat()), [2, 1, 4, 3]);
+    assert(@const(test_concat_reverse_property()));
+}

@@ -1,0 +1,37 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, vector, indexed-types, error
+// @expected-error: E400 "Type mismatch"
+
+/// Vector type - failure cases
+
+/// Length-indexed vector
+type Vect<T, N: meta Int> is
+    | VNil where N == 0
+    | VCons { head: T, tail: Vect<T, N - 1> } where N > 0;
+
+/// Sized array
+type SizedArr<T, N: meta Int> is { data: [T; N] };
+
+/// ERROR: Wrong return type from head
+fn head_wrong<T, N: meta Int{> 0}>(v: Vect<T, N>) -> Text {
+    match v {
+        VCons { head, tail } => head,  // ERROR: T != Text (when T=Int)
+    }
+}
+
+/// ERROR: Wrong element type in sized array
+fn arr_wrong() -> SizedArr<Int, 3> {
+    SizedArr { data: ["a", "b", "c"] }  // ERROR: Text != Int
+}
+
+/// ERROR: Sized array with wrong field type
+fn field_wrong() -> SizedArr<Int, 3> {
+    SizedArr { data: "not an array" }  // ERROR: Text != [Int; 3]
+}
+
+fn main() {
+    let _ = arr_wrong();
+    let _ = field_wrong();
+}

@@ -1,0 +1,94 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, while-loops, records, mutation
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT while loops with records and mutable state
+
+type Counter is { value: Int, step: Int };
+
+implement Counter {
+    fn new(start: Int, step: Int) -> Counter {
+        Counter { value: start, step: step }
+    }
+
+    fn tick(self) -> Counter {
+        Counter { value: self.value + self.step, step: self.step }
+    }
+
+    fn get(self) -> Int {
+        self.value
+    }
+}
+
+type Accum is { total: Int, count: Int };
+
+implement Accum {
+    fn new() -> Accum {
+        Accum { total: 0, count: 0 }
+    }
+
+    fn feed(self, value: Int) -> Accum {
+        Accum { total: self.total + value, count: self.count + 1 }
+    }
+
+    fn average_x10(self) -> Int {
+        if self.count == 0 {
+            0
+        } else {
+            (self.total * 10) / self.count
+        }
+    }
+}
+
+fn main() -> Int {
+    // Counter with while loop
+    let mut c = Counter.new(0, 3);
+    let mut i = 0;
+    while i < 5 {
+        c = c.tick();
+        i = i + 1;
+    }
+    assert_eq(c.get(), 15);  // 0 + 3*5
+
+    // Accumulator pattern
+    let mut acc = Accum.new();
+    let mut j = 1;
+    while j <= 10 {
+        acc = acc.feed(j);
+        j = j + 1;
+    }
+    assert_eq(acc.total, 55);
+    assert_eq(acc.count, 10);
+    assert_eq(acc.average_x10(), 55);  // 55*10/10 = 55
+
+    // Nested while with record
+    let mut sum = 0;
+    let mut outer = 0;
+    while outer < 5 {
+        let mut inner = 0;
+        while inner < 5 {
+            sum = sum + 1;
+            inner = inner + 1;
+        }
+        outer = outer + 1;
+    }
+    assert_eq(sum, 25);
+
+    // While with early break condition (simulated with flag)
+    let mut n = 100;
+    let mut steps = 0;
+    while n > 1 {
+        if n - (n / 2) * 2 == 0 {
+            n = n / 2;
+        } else {
+            n = n * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    assert(steps > 0);
+    assert_eq(n, 1);
+
+    0
+}

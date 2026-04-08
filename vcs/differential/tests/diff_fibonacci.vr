@@ -1,0 +1,75 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, fibonacci, recursion, memoization
+// @timeout: 10000
+
+fn fib_iter(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b
+}
+
+fn fib_matrix(n: Int) -> Int {
+    // Matrix exponentiation: [[1,1],[1,0]]^n
+    if n <= 1 { return n; }
+    let mut a00 = 1; let mut a01 = 1;
+    let mut a10 = 1; let mut a11 = 0;
+    let mut p = n - 1;
+    // Result matrix starts as identity
+    let mut r00 = 1; let mut r01 = 0;
+    let mut r10 = 0; let mut r11 = 1;
+    while p > 0 {
+        if p % 2 == 1 {
+            let t00 = r00 * a00 + r01 * a10;
+            let t01 = r00 * a01 + r01 * a11;
+            let t10 = r10 * a00 + r11 * a10;
+            let t11 = r10 * a01 + r11 * a11;
+            r00 = t00; r01 = t01;
+            r10 = t10; r11 = t11;
+        }
+        let t00 = a00 * a00 + a01 * a10;
+        let t01 = a00 * a01 + a01 * a11;
+        let t10 = a10 * a00 + a11 * a10;
+        let t11 = a10 * a01 + a11 * a11;
+        a00 = t00; a01 = t01;
+        a10 = t10; a11 = t11;
+        p = p / 2;
+    }
+    r00
+}
+
+fn main() -> Int {
+    // Basic values
+    assert_eq(fib_iter(0), 0);
+    assert_eq(fib_iter(1), 1);
+    assert_eq(fib_iter(2), 1);
+    assert_eq(fib_iter(10), 55);
+    assert_eq(fib_iter(20), 6765);
+
+    // Cross-check iterative vs matrix
+    let mut i = 0;
+    while i <= 20 {
+        assert_eq(fib_iter(i), fib_matrix(i));
+        i = i + 1;
+    }
+
+    // Fibonacci identity: F(m+n) = F(m-1)*F(n) + F(m)*F(n+1)
+    let m = 8;
+    let n = 7;
+    let lhs = fib_iter(m + n);
+    let rhs = fib_iter(m - 1) * fib_iter(n) + fib_iter(m) * fib_iter(n + 1);
+    assert_eq(lhs, rhs);
+
+    print("DIFF_OK: fibonacci");
+    0
+}

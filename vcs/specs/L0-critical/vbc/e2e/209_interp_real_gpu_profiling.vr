@@ -1,0 +1,44 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, gpu, real-opcode, profiling
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL GPU profiling marker intrinsics through VBC interpreter.
+// Exercises gpu_marker_push, gpu_marker_pop.
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Push a profiling marker
+    let p1 = gpu_marker_push(1);
+    if p1 != 0 { errors = errors + 1; }
+
+    // Test 2: Pop profiling marker
+    let pop1 = gpu_marker_pop();
+    if pop1 != 0 { errors = errors + 1; }
+
+    // Test 3: Nested markers
+    let p2 = gpu_marker_push(2);
+    let p3 = gpu_marker_push(3);
+    let pop3 = gpu_marker_pop();
+    let pop2 = gpu_marker_pop();
+    if p2 != 0 { errors = errors + 1; }
+    if p3 != 0 { errors = errors + 1; }
+    if pop3 != 0 { errors = errors + 1; }
+    if pop2 != 0 { errors = errors + 1; }
+
+    // Test 4: Multiple sequential markers
+    let m1 = gpu_marker_push(10);
+    let m1p = gpu_marker_pop();
+    let m2 = gpu_marker_push(20);
+    let m2p = gpu_marker_pop();
+    let m3 = gpu_marker_push(30);
+    let m3p = gpu_marker_pop();
+    if m1 != 0 { errors = errors + 1; }
+    if m2 != 0 { errors = errors + 1; }
+    if m3 != 0 { errors = errors + 1; }
+
+    errors
+}

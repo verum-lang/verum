@@ -1,0 +1,22 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let list = [10, 20, 30];
+    print("step 1: list created");
+
+    let m = list.get(1);
+    print("step 2: list.get(1) done");
+
+    if m.is_some() {
+        print("step 3: is_some = true");
+        let v = m.unwrap();
+        print(f"step 4: unwrap = {v}");
+    } else {
+        print("step 3: is_some = false (unexpected)");
+    }
+
+    0
+}

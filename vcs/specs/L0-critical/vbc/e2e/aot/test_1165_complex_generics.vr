@@ -1,0 +1,128 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, implement, method, complex
+// @description: Test complex generic patterns - generic methods on generic types
+
+type Stack2<T> is { items: List<T> };
+
+implement Stack2<T> {
+    fn empty() -> Stack2<T> {
+        Stack2 { items: List.new() }
+    }
+
+    fn push_val(&mut self, val: T) {
+        self.items.push(val);
+    }
+
+    fn pop_val(&mut self) -> Maybe<T> {
+        self.items.pop()
+    }
+
+    fn peek_size(&self) -> Int {
+        self.items.len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.items.len() == 0
+    }
+}
+
+fn test_generic_stack() -> Int {
+    let mut stack = Stack2.empty();
+    stack.push_val(10);
+    stack.push_val(20);
+    stack.push_val(30);
+
+    if stack.peek_size() != 3 {
+        print(f"FAIL stack_size: {stack.peek_size()}");
+        return 1;
+    }
+
+    let top = match stack.pop_val() {
+        Some(v) => v,
+        None => -1,
+    };
+    if top != 30 {
+        print(f"FAIL stack_pop: {top}");
+        return 1;
+    }
+
+    if stack.peek_size() != 2 {
+        print(f"FAIL stack_after_pop: {stack.peek_size()}");
+        return 1;
+    }
+    print("  generic_stack: OK");
+    0
+}
+
+type Result2<T, E> is Ok2(T) | Err2(E);
+
+fn safe_div(a: Int, b: Int) -> Result2<Int, Text> {
+    if b == 0 {
+        Err2("division by zero")
+    } else {
+        Ok2(a / b)
+    }
+}
+
+fn test_result_type() -> Int {
+    let r1 = safe_div(10, 2);
+    let v1 = match r1 {
+        Ok2(v) => v,
+        Err2(e) => -1,
+    };
+    if v1 != 5 {
+        print(f"FAIL result_ok: {v1}");
+        return 1;
+    }
+
+    let r2 = safe_div(10, 0);
+    let v2 = match r2 {
+        Ok2(v) => "ok",
+        Err2(e) => e,
+    };
+    if v2 != "division by zero" {
+        print(f"FAIL result_err: {v2}");
+        return 1;
+    }
+    print("  result_type: OK");
+    0
+}
+
+fn map_result(r: Result2<Int, Text>, f: fn(Int) -> Int) -> Result2<Int, Text> {
+    match r {
+        Ok2(v) => Ok2(f(v)),
+        Err2(e) => Err2(e),
+    }
+}
+
+fn test_map_result() -> Int {
+    let r = safe_div(20, 4);
+    let mapped = map_result(r, |x: Int| -> Int { x * 10 });
+    let val = match mapped {
+        Ok2(v) => v,
+        Err2(e) => -1,
+    };
+    if val != 50 {
+        print(f"FAIL map_result: {val}, expected 50");
+        return 1;
+    }
+    print("  map_result: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Complex Generics Tests:");
+    let mut failures = 0;
+    failures = failures + test_generic_stack();
+    failures = failures + test_result_type();
+    failures = failures + test_map_result();
+
+    if failures == 0 {
+        print("All complex generics tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,279 @@
+// =============================================================================
+// map_set_new_methods_test.vr - Tests for new Map/Set methods
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, map, set, core
+// @description: Tests for Map.update, Map.pop_entry, Set.pop, Set.update
+// =============================================================================
+
+mount core.collections.map.{Map, map};
+mount core.collections.set.{Set};
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Map.update Tests
+// =============================================================================
+
+@test
+fn test_map_update_basic() {
+    let mut m: Map<Int, Int> = map([(1, 10), (2, 20)]);
+    let other: Map<Int, Int> = map([(2, 200), (3, 300)]);
+    m.update(&other);
+
+    assert_eq(m.len(), 3);
+    // Key 1 unchanged
+    match m.get(&1) {
+        Some(v) => assert_eq(*v, 10),
+        None => panic("Expected key 1"),
+    }
+    // Key 2 overwritten
+    match m.get(&2) {
+        Some(v) => assert_eq(*v, 200),
+        None => panic("Expected key 2"),
+    }
+    // Key 3 added
+    match m.get(&3) {
+        Some(v) => assert_eq(*v, 300),
+        None => panic("Expected key 3"),
+    }
+}
+
+@test
+fn test_map_update_empty_source() {
+    let mut m: Map<Int, Int> = map([(1, 10)]);
+    let other: Map<Int, Int> = Map.new();
+    m.update(&other);
+    assert_eq(m.len(), 1);
+    match m.get(&1) {
+        Some(v) => assert_eq(*v, 10),
+        None => panic("Expected key 1"),
+    }
+}
+
+@test
+fn test_map_update_empty_target() {
+    let mut m: Map<Int, Int> = Map.new();
+    let other: Map<Int, Int> = map([(1, 10), (2, 20)]);
+    m.update(&other);
+    assert_eq(m.len(), 2);
+}
+
+@test
+fn test_map_update_complete_overwrite() {
+    let mut m: Map<Int, Int> = map([(1, 10), (2, 20)]);
+    let other: Map<Int, Int> = map([(1, 100), (2, 200)]);
+    m.update(&other);
+    assert_eq(m.len(), 2);
+    match m.get(&1) {
+        Some(v) => assert_eq(*v, 100),
+        None => panic("Expected key 1"),
+    }
+    match m.get(&2) {
+        Some(v) => assert_eq(*v, 200),
+        None => panic("Expected key 2"),
+    }
+}
+
+@test
+fn test_map_update_no_overlap() {
+    let mut m: Map<Int, Int> = map([(1, 10)]);
+    let other: Map<Int, Int> = map([(2, 20)]);
+    m.update(&other);
+    assert_eq(m.len(), 2);
+}
+
+// =============================================================================
+// Section 2: Map.pop_entry Tests
+// =============================================================================
+
+@test
+fn test_map_pop_entry_basic() {
+    let mut m: Map<Int, Int> = map([(1, 10), (2, 20), (3, 30)]);
+    let original_len = m.len();
+
+    let entry = m.pop_entry();
+    assert(entry is Some);
+    assert_eq(m.len(), original_len - 1);
+}
+
+@test
+fn test_map_pop_entry_empty() {
+    let mut m: Map<Int, Int> = Map.new();
+    let entry = m.pop_entry();
+    assert(entry is None);
+    assert_eq(m.len(), 0);
+}
+
+@test
+fn test_map_pop_entry_removes_all() {
+    let mut m: Map<Int, Int> = map([(1, 10), (2, 20)]);
+    let e1 = m.pop_entry();
+    assert(e1 is Some);
+    assert_eq(m.len(), 1);
+
+    let e2 = m.pop_entry();
+    assert(e2 is Some);
+    assert_eq(m.len(), 0);
+
+    let e3 = m.pop_entry();
+    assert(e3 is None);
+}
+
+@test
+fn test_map_pop_entry_single() {
+    let mut m: Map<Int, Int> = map([(42, 100)]);
+    let entry = m.pop_entry();
+    match entry {
+        Some(pair) => {
+            let k = pair.0;
+            let v = pair.1;
+            assert_eq(k, 42);
+            assert_eq(v, 100);
+        },
+        None => panic("Expected entry"),
+    }
+    assert(m.is_empty());
+}
+
+// =============================================================================
+// Section 3: Set.pop Tests
+// =============================================================================
+
+@test
+fn test_set_pop_basic() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+
+    let val = s.pop();
+    assert(val is Some);
+    assert_eq(s.len(), 2);
+}
+
+@test
+fn test_set_pop_empty() {
+    let mut s: Set<Int> = Set.new();
+    let val = s.pop();
+    assert(val is None);
+}
+
+@test
+fn test_set_pop_removes_all() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(10);
+    s.insert(20);
+
+    let v1 = s.pop();
+    assert(v1 is Some);
+    assert_eq(s.len(), 1);
+
+    let v2 = s.pop();
+    assert(v2 is Some);
+    assert_eq(s.len(), 0);
+
+    let v3 = s.pop();
+    assert(v3 is None);
+}
+
+@test
+fn test_set_pop_single() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(42);
+
+    let val = s.pop();
+    match val {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected value"),
+    }
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_pop_element_removed() {
+    // After popping, the element should no longer be in the set
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+
+    let val = s.pop();
+    match val {
+        Some(v) => assert(!s.contains(&v)),
+        None => panic("Expected value"),
+    }
+}
+
+// =============================================================================
+// Section 4: Set.update Tests
+// =============================================================================
+
+@test
+fn test_set_update_basic() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+
+    let mut other: Set<Int> = Set.new();
+    other.insert(2);
+    other.insert(3);
+    other.insert(4);
+
+    s.update(&other);
+    assert_eq(s.len(), 4);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+    assert(s.contains(&4));
+}
+
+@test
+fn test_set_update_empty_source() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    let other: Set<Int> = Set.new();
+    s.update(&other);
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_set_update_empty_target() {
+    let mut s: Set<Int> = Set.new();
+    let mut other: Set<Int> = Set.new();
+    other.insert(1);
+    other.insert(2);
+    s.update(&other);
+    assert_eq(s.len(), 2);
+}
+
+// =============================================================================
+// Section 5: Integration Tests
+// =============================================================================
+
+@test
+fn test_map_pop_entry_then_contains() {
+    let mut m: Map<Int, Int> = map([(1, 10), (2, 20)]);
+    let entry = m.pop_entry();
+    match entry {
+        Some(pair) => {
+            let k = pair.0;
+            assert(!m.contains_key(&k));
+        },
+        None => panic("Expected entry"),
+    }
+}
+
+@test
+fn test_map_update_preserves_existing() {
+    let mut m: Map<Int, Int> = map([(1, 10), (2, 20), (3, 30)]);
+    let other: Map<Int, Int> = map([(4, 40)]);
+    m.update(&other);
+    // All original keys should still be present
+    assert(m.contains_key(&1));
+    assert(m.contains_key(&2));
+    assert(m.contains_key(&3));
+    assert(m.contains_key(&4));
+    assert_eq(m.len(), 4);
+}

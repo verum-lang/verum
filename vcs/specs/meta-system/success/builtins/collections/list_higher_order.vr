@@ -1,0 +1,187 @@
+// @test: meta-pass
+// @level: L1
+// @description: Tests list higher-order function builtins (map, filter, fold)
+// @tags: meta-system, builtins, collections, list, higher-order
+
+// Test list_map - transform each element using a helper function
+meta fn double(x: Int) -> Int {
+    x * 2
+}
+
+meta fn square(x: Int) -> Int {
+    x * x
+}
+
+meta fn test_list_map_double(ctx: Text) -> Bool {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Double each element
+    let doubled = list_map(numbers, double);
+    let check1 = list_len(doubled) == 5;
+    let check2 = list_get(doubled, 0) == Some(2);
+    let check3 = list_get(doubled, 1) == Some(4);
+    let check4 = list_get(doubled, 2) == Some(6);
+    let check5 = list_get(doubled, 3) == Some(8);
+    let check6 = list_get(doubled, 4) == Some(10);
+
+    check1 && check2 && check3 && check4 && check5 && check6
+}
+
+meta fn test_list_map_square(ctx: Text) -> Bool {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Square each element
+    let squared = list_map(numbers, square);
+    let check1 = list_get(squared, 0) == Some(1);
+    let check2 = list_get(squared, 1) == Some(4);
+    let check3 = list_get(squared, 2) == Some(9);
+    let check4 = list_get(squared, 3) == Some(16);
+    let check5 = list_get(squared, 4) == Some(25);
+
+    check1 && check2 && check3 && check4 && check5
+}
+
+// Test list_map on empty list
+meta fn test_list_map_empty(ctx: Text) -> Bool {
+    let empty: [Int] = [];
+    let result = list_map(empty, double);
+    list_len(result) == 0
+}
+
+// Filter helper functions
+meta fn is_even(x: Int) -> Bool {
+    x % 2 == 0
+}
+
+meta fn is_greater_than_five(x: Int) -> Bool {
+    x > 5
+}
+
+meta fn is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+meta fn is_greater_than_hundred(x: Int) -> Bool {
+    x > 100
+}
+
+// Test list_filter - keep elements matching predicate
+meta fn test_list_filter_evens(ctx: Text) -> Bool {
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Keep only even numbers
+    let evens = list_filter(numbers, is_even);
+    let check1 = list_len(evens) == 5;
+    let check2 = list_get(evens, 0) == Some(2);
+    let check3 = list_get(evens, 1) == Some(4);
+    let check4 = list_get(evens, 2) == Some(6);
+    let check5 = list_get(evens, 3) == Some(8);
+    let check6 = list_get(evens, 4) == Some(10);
+
+    check1 && check2 && check3 && check4 && check5 && check6
+}
+
+meta fn test_list_filter_greater(ctx: Text) -> Bool {
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Keep only numbers greater than 5
+    let greater = list_filter(numbers, is_greater_than_five);
+    let check1 = list_len(greater) == 5;
+    let check2 = list_get(greater, 0) == Some(6);
+    let check3 = list_get(greater, 4) == Some(10);
+
+    check1 && check2 && check3
+}
+
+// Test list_filter that matches all or none
+meta fn test_list_filter_extremes(ctx: Text) -> Bool {
+    let numbers = [1, 2, 3];
+
+    // Match all
+    let all_matched = list_filter(numbers, is_positive);
+    let check1 = list_len(all_matched) == 3;
+
+    // Match none
+    let none_matched = list_filter(numbers, is_greater_than_hundred);
+    let check2 = list_len(none_matched) == 0;
+
+    check1 && check2
+}
+
+// Test list_filter on empty list
+meta fn test_list_filter_empty(ctx: Text) -> Bool {
+    let empty: [Int] = [];
+    let result = list_filter(empty, is_positive);
+    list_len(result) == 0
+}
+
+// Fold helper functions
+meta fn sum_acc(acc: Int, x: Int) -> Int {
+    acc + x
+}
+
+meta fn product_acc(acc: Int, x: Int) -> Int {
+    acc * x
+}
+
+meta fn max_acc(acc: Int, x: Int) -> Int {
+    if x > acc { x } else { acc }
+}
+
+// Test list_fold - reduce list to single value
+meta fn test_list_fold_sum(ctx: Text) -> Bool {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Sum all elements
+    let sum_result = list_fold(numbers, 0, sum_acc);
+    sum_result == 15
+}
+
+meta fn test_list_fold_product(ctx: Text) -> Bool {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Product of all elements
+    let product = list_fold(numbers, 1, product_acc);
+    product == 120
+}
+
+// Test list_fold with different initial value
+meta fn test_list_fold_with_initial(ctx: Text) -> Bool {
+    let numbers = [1, 2, 3];
+
+    // Start sum at 100
+    let sum_result = list_fold(numbers, 100, sum_acc);
+    sum_result == 106
+}
+
+// Test list_fold to find max
+meta fn test_list_fold_max(ctx: Text) -> Bool {
+    let numbers = [3, 7, 2, 9, 4, 1];
+
+    let max_val = list_fold(numbers, 0, max_acc);
+    max_val == 9
+}
+
+// Test list_fold on empty list
+meta fn test_list_fold_empty(ctx: Text) -> Bool {
+    let empty: [Int] = [];
+
+    // Fold on empty returns initial value
+    let result = list_fold(empty, 42, sum_acc);
+    result == 42
+}
+
+fn main() {
+    @const assert(test_list_map_double("ctx"));
+    @const assert(test_list_map_square("ctx"));
+    @const assert(test_list_map_empty("ctx"));
+    @const assert(test_list_filter_evens("ctx"));
+    @const assert(test_list_filter_greater("ctx"));
+    @const assert(test_list_filter_extremes("ctx"));
+    @const assert(test_list_filter_empty("ctx"));
+    @const assert(test_list_fold_sum("ctx"));
+    @const assert(test_list_fold_product("ctx"));
+    @const assert(test_list_fold_with_initial("ctx"));
+    @const assert(test_list_fold_max("ctx"));
+    @const assert(test_list_fold_empty("ctx"));
+}

@@ -1,0 +1,171 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, array, slice, rest
+// @description: Test array and slice pattern matching in meta functions
+
+// =============================================================================
+// BASIC ARRAY PATTERNS
+// =============================================================================
+
+meta fn test_array_exact() -> Int {
+    match [1, 2, 3] {
+        [a, b, c] => a + b + c,
+    }
+}
+
+meta fn test_array_single() -> Int {
+    match [42] {
+        [x] => x,
+    }
+}
+
+meta fn test_array_pair() -> Int {
+    match [10, 20] {
+        [first, second] => first * second,
+    }
+}
+
+// =============================================================================
+// ARRAY PATTERNS WITH LITERALS
+// =============================================================================
+
+meta fn test_array_with_literal_match() -> Bool {
+    match [1, 2, 3] {
+        [1, 2, 3] => true,
+        _ => false,
+    }
+}
+
+meta fn test_array_with_partial_literal() -> Int {
+    match [1, 2, 3] {
+        [1, x, 3] => x,
+        _ => 0,
+    }
+}
+
+meta fn test_array_literal_discriminant() -> Text {
+    match [0, 0] {
+        [0, 0] => "origin",
+        [0, _] => "y-axis",
+        [_, 0] => "x-axis",
+        _ => "elsewhere",
+    }
+}
+
+// =============================================================================
+// SLICE PATTERNS WITH REST
+// =============================================================================
+
+meta fn test_slice_head_rest() -> Int {
+    match [1, 2, 3, 4, 5] {
+        [head, ..] => head,
+    }
+}
+
+meta fn test_slice_tail_rest() -> Int {
+    match [1, 2, 3, 4, 5] {
+        [.., tail] => tail,
+    }
+}
+
+meta fn test_slice_head_tail() -> Int {
+    match [1, 2, 3, 4, 5] {
+        [head, .., tail] => head + tail,
+    }
+}
+
+meta fn test_slice_with_middle() -> Int {
+    match [1, 2, 3, 4, 5] {
+        [first, second, .., last] => first + second + last,
+    }
+}
+
+// =============================================================================
+// SLICE PATTERNS WITH REST BINDING
+// =============================================================================
+
+meta fn test_slice_rest_binding() -> Int {
+    match [1, 2, 3, 4, 5] {
+        [head, ..rest] => head + list_len(rest),
+    }
+}
+
+meta fn test_slice_rest_binding_tail() -> Int {
+    match [1, 2, 3, 4, 5] {
+        [..rest, tail] => list_len(rest) + tail,
+    }
+}
+
+meta fn test_slice_rest_binding_middle() -> Int {
+    match [1, 2, 3, 4, 5] {
+        [head, ..middle, tail] => head + list_len(middle) + tail,
+    }
+}
+
+// =============================================================================
+// NESTED ARRAY PATTERNS
+// =============================================================================
+
+meta fn test_nested_array() -> Int {
+    match [[1, 2], [3, 4]] {
+        [[a, b], [c, d]] => a + b + c + d,
+    }
+}
+
+meta fn test_array_of_tuples() -> Int {
+    match [(1, 2), (3, 4)] {
+        [(a, b), (c, d)] => a * b + c * d,
+    }
+}
+
+// =============================================================================
+// ARRAY PATTERNS WITH WILDCARDS
+// =============================================================================
+
+meta fn test_array_with_wildcard() -> Int {
+    match [1, 2, 3, 4] {
+        [first, _, _, last] => first + last,
+    }
+}
+
+meta fn test_array_all_wildcards() -> Text {
+    match [1, 2, 3] {
+        [_, _, _] => "three elements",
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Basic array tests
+    @const assert_eq(test_array_exact(), 6);
+    @const assert_eq(test_array_single(), 42);
+    @const assert_eq(test_array_pair(), 200);
+
+    // Array with literals
+    @const assert(test_array_with_literal_match());
+    @const assert_eq(test_array_with_partial_literal(), 2);
+    @const assert_eq(test_array_literal_discriminant(), "origin");
+
+    // Slice patterns
+    @const assert_eq(test_slice_head_rest(), 1);
+    @const assert_eq(test_slice_tail_rest(), 5);
+    @const assert_eq(test_slice_head_tail(), 6);
+    @const assert_eq(test_slice_with_middle(), 8);
+
+    // Slice with rest binding
+    @const assert_eq(test_slice_rest_binding(), 5);
+    @const assert_eq(test_slice_rest_binding_tail(), 9);
+    @const assert_eq(test_slice_rest_binding_middle(), 9);
+
+    // Nested arrays
+    @const assert_eq(test_nested_array(), 10);
+    @const assert_eq(test_array_of_tuples(), 14);
+
+    // Wildcards in arrays
+    @const assert_eq(test_array_with_wildcard(), 5);
+    @const assert_eq(test_array_all_wildcards(), "three elements");
+}

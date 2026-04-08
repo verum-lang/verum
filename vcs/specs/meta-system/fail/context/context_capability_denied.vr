@@ -1,0 +1,16 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: requires
+// @description: Tests context capability denial when operation exceeds permitted capabilities
+// @tags: meta-system, context, capability
+
+// Request MetaTypes context but try to use MetaRuntime capabilities
+meta fn restricted_meta() -> Int using [MetaTypes] {
+    // MetaTypes context only allows type introspection
+    // Target info requires MetaRuntime context
+    target_arch()  // ERROR: requires MetaRuntime context
+}
+
+fn main() {
+    @const x = restricted_meta();
+}

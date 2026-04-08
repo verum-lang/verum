@@ -1,0 +1,504 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L2
+// @tags: lsp, completion, autocomplete, intellisense
+// @expect: pass
+// @description: Tests code completion/autocomplete for various contexts.
+//              Verifies correct suggestions, ordering, and filtering.
+
+// ============================================================================
+// This file tests code completion in all relevant contexts.
+// Each test case documents expected completion suggestions.
+// ============================================================================
+
+// Test 1: Complete variable names in scope
+fn test_variable_completion() {
+    let first_variable = 1;
+    let second_variable = 2;
+    let other_name = 3;
+
+    // Typing 'fi' should suggest: first_variable
+    // Typing 'sec' should suggest: second_variable
+    // Typing 'var' should suggest: first_variable, second_variable
+
+    let result = first_variable + second_variable;
+    result
+}
+
+// Test 2: Complete function names
+fn helper_one() -> Int { 1 }
+fn helper_two() -> Int { 2 }
+fn other_helper() -> Int { 3 }
+
+fn test_function_completion() -> Int {
+    // Typing 'hel' should suggest: helper_one, helper_two
+    // Typing 'helper_' should suggest: helper_one, helper_two
+    helper_one()
+}
+
+// Test 3: Complete type names
+type TypeOne is { value: Int };
+type TypeTwo is { data: Text };
+type OtherType is { flag: Bool };
+
+fn test_type_completion() {
+    // Typing 'Type' should suggest: TypeOne, TypeTwo
+    let x: TypeOne = TypeOne { value: 42 };
+    x
+}
+
+// Test 4: Complete field names in record construction
+type PersonRecord is {
+    first_name: Text,
+    last_name: Text,
+    age: Int,
+    email: Text,
+};
+
+fn test_field_completion() {
+    // Inside PersonRecord { }, typing:
+    // - 'fir' should suggest: first_name
+    // - 'last' should suggest: last_name
+    // - 'a' should suggest: age
+    // - 'e' should suggest: email
+    let person = PersonRecord {
+        first_name: "John",
+        last_name: "Doe",
+        age: 30,
+        email: "john@example.com",
+    };
+    person
+}
+
+// Test 5: Complete field access after dot
+fn test_dot_completion(p: PersonRecord) -> Text {
+    // Typing 'p.' should suggest all fields:
+    // - first_name, last_name, age, email
+    p.first_name
+}
+
+// Test 6: Complete method names after dot
+type Calculator is {
+    value: Float,
+};
+
+implement Calculator {
+    fn add(&self, n: Float) -> Float { self.value + n }
+    fn subtract(&self, n: Float) -> Float { self.value - n }
+    fn multiply(&self, n: Float) -> Float { self.value * n }
+    fn divide(&self, n: Float) -> Float { self.value / n }
+    fn get_value(&self) -> Float { self.value }
+}
+
+fn test_method_completion(calc: Calculator) -> Float {
+    // Typing 'calc.' should suggest methods:
+    // - add, subtract, multiply, divide, get_value
+    // Typing 'calc.a' should suggest: add
+    // Typing 'calc.get' should suggest: get_value
+    calc.add(1.0)
+}
+
+// Test 7: Complete protocol methods
+type Printable is protocol {
+    fn print_value(self) -> Text;
+    fn print_debug(self) -> Text;
+};
+
+implement Printable for Calculator {
+    fn print_value(self) -> Text { "value" }
+    fn print_debug(self) -> Text { "debug" }
+}
+
+fn test_protocol_method_completion(p: &dyn Printable) -> Text {
+    // Typing 'p.' should suggest protocol methods:
+    // - print_value, print_debug
+    p.print_value()
+}
+
+// Test 8: Complete keyword starters
+fn test_keyword_completion() {
+    // Typing 'le' should suggest: let
+    // Typing 'fo' should suggest: for
+    // Typing 'whi' should suggest: while
+    // Typing 'mat' should suggest: match
+    // Typing 'ret' should suggest: return
+    let x = 1;
+    x
+}
+
+// Test 9: Complete type keywords
+// Typing 'ty' at top level should suggest: type
+// Typing 'fn' should suggest: fn
+// Typing 'impl' should suggest: implement
+// Typing 'con' should suggest: context, const
+
+type CompletionTestType is {
+    field: Int,
+};
+
+// Test 10: Complete link paths
+mount core.collections.List;
+mount core.collections.Map;
+mount core.io.print;
+
+fn test_import_completion() {
+    // In link statement:
+    // - Typing 'std.' should suggest: collections, io, etc.
+    // - Typing 'std.collections.' should suggest: List, Map, Set, etc.
+    let list: List<Int> = [];
+    list
+}
+
+// Test 11: Complete generic type arguments
+fn generic_container<T>(value: T) -> Container<T> {
+    Container { value: value }
+}
+
+type Container<T> is {
+    value: T,
+};
+
+fn test_generic_completion() {
+    // Inside angle brackets Container<>, should suggest types:
+    // - Int, Float, Text, Bool, etc.
+    // - User-defined types: PersonRecord, Calculator, etc.
+    let c: Container<Int> = Container { value: 42 };
+    c
+}
+
+// Test 12: Complete enum variants
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Custom { r: Int, g: Int, b: Int };
+
+fn test_variant_completion(c: Color) -> Int {
+    // Typing 'Color.' should suggest: Red, Green, Blue, Custom
+    // In match expression, should suggest all variants
+    match c {
+        Color.Red => 1,
+        Color.Green => 2,
+        Color.Blue => 3,
+        Color.Custom { r, g, b } => r + g + b,
+    }
+}
+
+// Test 13: Complete pattern names in match
+fn test_pattern_completion(opt: Maybe<Int>) -> Int {
+    // In match on Maybe<T>, should suggest: Some, None
+    match opt {
+        Some(value) => value,
+        None => 0,
+    }
+}
+
+// Test 14: Complete context names in using clause
+context DatabaseCtx {
+    fn query(self, sql: Text) -> List<Int>;
+}
+
+context LoggerCtx {
+    fn log(self, msg: Text);
+}
+
+context CacheCtx {
+    fn get(self, key: Text) -> Maybe<Text>;
+}
+
+fn test_context_completion() -> Int using [DatabaseCtx, LoggerCtx] {
+    // In using clause, typing:
+    // - 'Data' should suggest: DatabaseCtx
+    // - 'Log' should suggest: LoggerCtx
+    // - 'Cach' should suggest: CacheCtx
+    42
+}
+
+// Test 15: Complete attribute names
+@derive(Clone, Debug)  // Typing '@der' should suggest: derive
+@verify(runtime)       // Typing '@ver' should suggest: verify
+type AttributedType is {
+    value: Int,
+};
+
+fn test_attribute_completion() {
+    // Typing '@' should suggest common attributes:
+    // - derive, verify, inline, cold, hot, etc.
+    42
+}
+
+// Test 16: Complete closure parameter types
+fn test_closure_completion() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Inside closure |x|, when typing type annotation:
+    // |x: Int| should autocomplete type
+    let doubled = numbers.map(|x: Int| x * 2);
+    doubled
+}
+
+// Test 17: Complete struct update syntax
+fn test_struct_update(p: PersonRecord) -> PersonRecord {
+    // Typing '..' should suggest: p (for struct update)
+    PersonRecord {
+        first_name: "Jane",
+        ..p
+    }
+}
+
+// Test 18: Complete chained method calls
+fn test_chained_completion() {
+    let list = [1, 2, 3, 4, 5];
+
+    // Each dot should provide new completions:
+    // - list. suggests: map, filter, fold, etc.
+    // - list.map(|x| x).  suggests: filter, fold, etc.
+    let result = list
+        .map(|x| x * 2)
+        .filter(|x| x > 2)
+        .fold(0, |acc, x| acc + x);
+    result
+}
+
+// Test 19: Complete async/await keywords
+async fn async_operation() -> Int {
+    42
+}
+
+async fn test_async_completion() -> Int {
+    // Typing 'awa' should suggest: await
+    // Typing 'spa' should suggest: spawn
+    let result = async_operation().await;
+    result
+}
+
+// Test 20: Complete in provide statement
+fn test_provide_completion() {
+    // Typing 'provi' should suggest: provide
+    // After 'provide', should suggest available contexts
+    provide DatabaseCtx = MockDb;
+    42
+}
+
+context MockDb {
+    fn query(self, sql: Text) -> List<Int>;
+}
+
+// Test 21: Complete in try/recover blocks
+fn test_try_completion() -> Maybe<Int> {
+    // Typing 'tr' should suggest: try, true
+    // After try block, typing 'rec' should suggest: recover
+    // Typing 'fin' should suggest: finally
+    try {
+        Some(42)
+    } recover |e| {
+        None
+    }
+}
+
+// Test 22: Complete loop constructs
+fn test_loop_completion() {
+    // Typing 'fo' suggests: for
+    // Typing 'wh' suggests: while
+    // Typing 'lo' suggests: loop
+    // Inside loop, typing 'br' suggests: break
+    // Inside loop, typing 'co' suggests: continue
+
+    for i in 0..10 {
+        if i == 5 {
+            break;
+        }
+        continue;
+    }
+}
+
+// Test 23: Complete range operators
+fn test_range_completion() {
+    // After a number, typing '.' should suggest: .. (exclusive), ..= (inclusive)
+    let exclusive = 0..10;
+    let inclusive = 0..=10;
+    exclusive
+}
+
+// Test 24: Complete conditional operators
+fn test_conditional_completion(x: Int) -> Int {
+    // Typing '?' should suggest: ? (propagation), ?. (optional chain), ?? (null coalesce)
+    if x > 0 { x } else { 0 }
+}
+
+// Test 25: Completion ordering by relevance
+fn test_completion_ordering() {
+    let very_common_var = 1;
+    let somewhat_common = 2;
+    let rarely_used = 3;
+
+    // Completion should order by:
+    // 1. Exact prefix match
+    // 2. Fuzzy match quality
+    // 3. Usage frequency/recency
+    // 4. Alphabetical as tiebreaker
+    very_common_var
+}
+
+// Test 26: Completion filtering by type context
+fn expects_int(x: Int) -> Int { x }
+fn expects_text(x: Text) -> Text { x }
+
+fn test_type_filtered_completion() {
+    let my_int = 42;
+    let my_text = "hello";
+    let my_bool = true;
+
+    // When calling expects_int(), should prefer my_int in suggestions
+    // When calling expects_text(), should prefer my_text in suggestions
+    expects_int(my_int);
+    expects_text(my_text)
+}
+
+// Test 27: Completion in nested scopes
+fn test_nested_scope_completion() {
+    let outer_var = 1;
+    {
+        let inner_var = 2;
+        // Should suggest both outer_var and inner_var
+        outer_var + inner_var
+    };
+    // Should only suggest outer_var (inner_var out of scope)
+    outer_var
+}
+
+// Test 28: Completion handles shadowing correctly
+fn test_shadow_completion() {
+    let name = 42;          // Int
+    {
+        let name = "text";  // Text - shadows outer
+        // Completion for 'name' should show Text type
+        name
+    };
+    // Completion for 'name' should show Int type
+    name
+}
+
+// Test 29: Completion for Self type in impl block
+implement PersonRecord {
+    fn create(name: Text) -> Self {
+        // Typing 'Se' should suggest: Self
+        // Self should complete to PersonRecord
+        Self {
+            first_name: name,
+            last_name: "Unknown",
+            age: 0,
+            email: "",
+        }
+    }
+}
+
+// Test 30: Snippet completions
+fn test_snippet_completion() {
+    // Typing 'fn' might offer snippet:
+    //   fn ${1:name}(${2:params}) -> ${3:ReturnType} {
+    //       ${0}
+    //   }
+
+    // Typing 'for' might offer snippet:
+    //   for ${1:item} in ${2:iterator} {
+    //       ${0}
+    //   }
+
+    // Typing 'match' might offer snippet:
+    //   match ${1:expr} {
+    //       ${2:pattern} => ${3:expr},
+    //   }
+    42
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Test 31: Completion at beginning of file
+// Cursor at very start should suggest top-level items: fn, type, link, etc.
+
+// Test 32: Completion in empty file
+// Should suggest: fn, type, link, context, module, etc.
+
+// Test 33: Completion after syntax error
+fn test_completion_after_error() {
+    let x = ;  // Syntax error
+    // Completion should still work after error
+    42
+}
+
+// Test 34: Completion with very long identifiers
+fn this_is_a_very_long_function_name_that_tests_completion_with_long_identifiers() -> Int {
+    42
+}
+
+fn test_long_completion() {
+    // Typing 'this_is_a' should suggest the long function name
+    this_is_a_very_long_function_name_that_tests_completion_with_long_identifiers()
+}
+
+// Test 35: Completion with unicode identifiers
+fn greet_user(name: Text) -> Text {
+    name
+}
+
+fn test_unicode_completion() {
+    // Should handle unicode in suggestions properly
+    let greeting = "Hello";
+    greeting
+}
+
+// Test 36: No completion for numeric literals
+fn test_no_literal_completion() {
+    let x = 42;  // Typing numbers shouldn't trigger completion
+    x
+}
+
+// Test 37: Completion dedupe
+fn dedupe_test() {
+    let same_name = 1;
+    // Should not show duplicate suggestions
+    same_name
+}
+
+// Test 38: Completion with generics preserves type params
+fn test_generic_preserves_params() {
+    let container: Container<Int> = Container { value: 42 };
+    // After 'container.', methods should show resolved types
+    // e.g., value: Int (not T)
+    container.value
+}
+
+// Test 39: Complete associated types
+type IteratorProtocol is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+fn test_associated_type_completion<I>(iter: &mut I) -> Maybe<I.Item>
+where I: IteratorProtocol
+{
+    // After I., should suggest: Item
+    iter.next()
+}
+
+// Test 40: Completion performance with many symbols
+// This file intentionally has many symbols to test completion performance
+type PerfTest1 is { f: Int };
+type PerfTest2 is { f: Int };
+type PerfTest3 is { f: Int };
+type PerfTest4 is { f: Int };
+type PerfTest5 is { f: Int };
+
+fn perf_func_1() -> Int { 1 }
+fn perf_func_2() -> Int { 2 }
+fn perf_func_3() -> Int { 3 }
+fn perf_func_4() -> Int { 4 }
+fn perf_func_5() -> Int { 5 }
+
+fn test_completion_performance() -> Int {
+    // Completion should remain fast with many symbols in scope
+    perf_func_1()
+}

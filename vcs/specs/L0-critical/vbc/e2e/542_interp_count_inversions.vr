@@ -1,0 +1,164 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, inversions, merge_sort, counting_inversions, divide_and_conquer
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Count inversions in an array using a merge-sort based approach.
+// An inversion is a pair (i,j) where i < j but a[i] > a[j].
+// The merge step counts cross-inversions when merging two sorted halves.
+// Arrays have max size 16; temp buffer also size 16.
+
+// Merge two sorted halves a[lo..mid] and a[mid+1..hi].
+// Returns the number of inversions across the boundary.
+fn merge_count(a: [Int; 16], tmp: [Int; 16], lo: Int, mid: Int, hi: Int) -> Int {
+    // Copy into tmp
+    let mut i = lo;
+    while i <= hi {
+        tmp[i] = a[i];
+        i = i + 1;
+    }
+
+    let mut left  = lo;
+    let mut right = mid + 1;
+    let mut idx   = lo;
+    let mut inv   = 0;
+
+    while left <= mid && right <= hi {
+        if tmp[left] <= tmp[right] {
+            a[idx] = tmp[left];
+            left = left + 1;
+        } else {
+            // tmp[left..mid] are all > tmp[right] (sorted half)
+            inv = inv + (mid - left + 1);
+            a[idx] = tmp[right];
+            right = right + 1;
+        }
+        idx = idx + 1;
+    }
+    while left <= mid {
+        a[idx] = tmp[left];
+        left = left + 1;
+        idx = idx + 1;
+    }
+    while right <= hi {
+        a[idx] = tmp[right];
+        right = right + 1;
+        idx = idx + 1;
+    }
+    inv
+}
+
+// Recursive merge-sort inversion count on a[lo..hi].
+@allow(unbounded_recursion)
+fn sort_count(a: [Int; 16], tmp: [Int; 16], lo: Int, hi: Int) -> Int {
+    if lo >= hi { return 0; }
+    let mid = (lo + hi) / 2;
+    let left_inv  = sort_count(a, tmp, lo, mid);
+    let right_inv = sort_count(a, tmp, mid + 1, hi);
+    let cross_inv = merge_count(a, tmp, lo, mid, hi);
+    left_inv + right_inv + cross_inv
+}
+
+fn count_inversions(a: [Int; 16], tmp: [Int; 16], n: Int) -> Int {
+    sort_count(a, tmp, 0, n - 1)
+}
+
+fn test_sorted_no_inversions() {
+    // Already sorted: 0 inversions.
+    let mut a   = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(a, tmp, 5), 0);
+
+    // Single element: 0 inversions.
+    let mut b   = [42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(b, tmp2, 1), 0);
+
+    print("sorted_no_inversions: ok");
+}
+
+fn test_reverse_max_inversions() {
+    // Reversed array [4,3,2,1]: inversions = n*(n-1)/2 = 4*3/2 = 6.
+    let mut a   = [4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(a, tmp, 4), 6);
+
+    // [3,2,1]: 3 inversions.
+    let mut b   = [3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(b, tmp2, 3), 3);
+
+    // [5,4,3,2,1]: 10 inversions.
+    let mut c   = [5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(c, tmp3, 5), 10);
+
+    print("reverse_max_inversions: ok");
+}
+
+fn test_known_inversions() {
+    // [2,4,1,3,5]: inversions are (2,1),(4,1),(4,3) = 3.
+    let mut a   = [2, 4, 1, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(a, tmp, 5), 3);
+
+    // [1,3,2,4]: inversions = (3,2) = 1.
+    let mut b   = [1, 3, 2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(b, tmp2, 4), 1);
+
+    // [6,5,4,3,2,1]: 15 inversions.
+    let mut c   = [6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(c, tmp3, 6), 15);
+
+    print("known_inversions: ok");
+}
+
+fn test_two_elements() {
+    // [2, 1]: 1 inversion.
+    let mut a   = [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(a, tmp, 2), 1);
+
+    // [1, 2]: 0 inversions.
+    let mut b   = [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(b, tmp2, 2), 0);
+
+    // [5, 5]: equal elements are not inversions -> 0.
+    let mut c   = [5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_inversions(c, tmp3, 2), 0);
+
+    print("two_elements: ok");
+}
+
+fn test_array_sorted_after_count() {
+    // After counting, the array should be sorted.
+    let mut a   = [5, 2, 8, 1, 9, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let inv = count_inversions(a, tmp, 6);
+    // Sorted result: [1,2,3,5,8,9]
+    assert_eq(a[0], 1);
+    assert_eq(a[1], 2);
+    assert_eq(a[2], 3);
+    assert_eq(a[3], 5);
+    assert_eq(a[4], 8);
+    assert_eq(a[5], 9);
+    // Inversions: count manually — (5,2),(5,1),(5,3),(2,1),(8,1),(8,3),(9,3) = 7.
+    assert_eq(inv, 7);
+    print("array_sorted_after_count: ok");
+}
+
+fn main() -> Int {
+    test_sorted_no_inversions();
+    test_reverse_max_inversions();
+    test_known_inversions();
+    test_two_elements();
+    test_array_sorted_after_count();
+    print("[OK] 542_interp_count_inversions");
+    0
+}

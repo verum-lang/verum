@@ -1,0 +1,211 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, paths, absolute
+
+/// Absolute paths - fully qualified paths from the crate root.
+/// The form: `crate.module.submodule.Item`
+///
+/// Absolute paths provide unambiguous access to items regardless of
+/// the current module context. They start from the crate root.
+
+module database {
+    pub module connection {
+        pub type Pool is {
+            url: Text,
+            max_connections: Int
+        };
+
+        pub type Connection is {
+            id: Int,
+            pool: &Pool
+        };
+
+        implement Pool {
+            pub fn new(url: Text) -> Pool {
+                Pool { url, max_connections: 10 }
+            }
+
+            pub fn get_connection(&self) -> Connection {
+                Connection { id: 1, pool: self }
+            }
+        }
+
+        pub module tls {
+            pub type TlsConfig is {
+                cert_path: Text,
+                key_path: Text
+            };
+
+            pub fn create_tls_connection(config: TlsConfig) -> super.Connection {
+                // Use absolute path to reference sibling module's parent type
+                let pool = crate.database.connection.Pool.new("secure://localhost");
+                crate.database.connection.Connection { id: 2, pool: &pool }
+            }
+        }
+    }
+
+    pub module query {
+        pub type Query is {
+            sql: Text,
+            params: List<Any>
+        };
+
+        pub type Result is {
+            rows: List<Row>,
+            affected: Int
+        };
+
+        pub type Row is {
+            columns: Map<Text, Any>
+        };
+
+        implement Query {
+            pub fn execute(&self, conn: &crate.database.connection.Connection) -> Result {
+                // Using absolute path to reference connection type
+                Result { rows: List.new(), affected: 0 }
+            }
+        }
+    }
+
+    pub module transaction {
+        // Use absolute paths for clarity and avoiding ambiguity
+        pub type Transaction is {
+            connection: crate.database.connection.Connection,
+            queries: List<crate.database.query.Query>
+        };
+
+        implement Transaction {
+            pub fn begin(conn: crate.database.connection.Connection) -> Transaction {
+                Transaction {
+                    connection: conn,
+                    queries: List.new()
+                }
+            }
+
+            pub fn add_query(&mut self, query: crate.database.query.Query) {
+                self.queries.push(query);
+            }
+
+            pub fn commit(&self) -> crate.database.query.Result {
+                // Execute all queries
+                crate.database.query.Result { rows: List.new(), affected: 0 }
+            }
+        }
+    }
+}
+
+module services {
+    pub module user_service {
+        // Absolute paths to database types
+        type Pool = crate.database.connection.Pool;
+        type Query = crate.database.query.Query;
+        type Result = crate.database.query.Result;
+        type Transaction = crate.database.transaction.Transaction;
+
+        pub type UserService is {
+            pool: Pool
+        };
+
+        implement UserService {
+            pub fn new(db_url: Text) -> UserService {
+                UserService {
+                    pool: crate.database.connection.Pool.new(db_url)
+                }
+            }
+
+            pub fn get_user(&self, id: Int) -> Maybe<User> {
+                let conn = self.pool.get_connection();
+                let query = crate.database.query.Query {
+                    sql: "SELECT * FROM users WHERE id = $1",
+                    params: List.from([id])
+                };
+                let result = query.execute(&conn);
+                if result.rows.len() > 0 {
+                    Some(from_row(&result.rows[0]))
+                } else {
+                    None
+                }
+            }
+        }
+
+        pub type User is {
+            id: Int,
+            name: Text
+        };
+
+        fn from_row(row: &crate.database.query.Row) -> User {
+            User {
+                id: row.columns.get("id").unwrap().as_int(),
+                name: row.columns.get("name").unwrap().as_text()
+            }
+        }
+    }
+}
+
+module utils {
+    pub module helpers {
+        // Demonstrate absolute path in type annotations
+        pub fn create_pool(url: Text) -> crate.database.connection.Pool {
+            crate.database.connection.Pool.new(url)
+        }
+
+        pub fn execute_query(
+            conn: &crate.database.connection.Connection,
+            sql: Text
+        ) -> crate.database.query.Result {
+            let query = crate.database.query.Query {
+                sql,
+                params: List.new()
+            };
+            query.execute(conn)
+        }
+    }
+}
+
+fn main() {
+    // Using absolute paths directly
+    let pool = crate.database.connection.Pool.new("postgres://localhost/mydb");
+    let conn = pool.get_connection();
+
+    // Create query using absolute path
+    let query = crate.database.query.Query {
+        sql: "SELECT 1",
+        params: List.new()
+    };
+
+    // Execute using absolute path method
+    let result = query.execute(&conn);
+
+    // Create transaction
+    let mut tx = crate.database.transaction.Transaction.begin(conn);
+    tx.add_query(query);
+    let tx_result = tx.commit();
+
+    // Use service with absolute paths internally
+    let service = crate.services.user_service.UserService.new("postgres://localhost/users");
+    let user = service.get_user(1);
+
+    // Use helper functions
+    let helper_pool = crate.utils.helpers.create_pool("postgres://localhost/helper");
+    let helper_conn = helper_pool.get_connection();
+    let helper_result = crate.utils.helpers.execute_query(&helper_conn, "SELECT 2");
+}
+
+// Absolute paths in trait implementations
+module traits_example {
+    pub type Connectable is protocol {
+        fn connect(&self) -> crate.database.connection.Connection;
+    }
+
+    pub type Queryable is protocol {
+        fn query(&self, sql: Text) -> crate.database.query.Result;
+    }
+
+    // Implement for types using absolute paths
+    implement Connectable for crate.database.connection.Pool {
+        fn connect(&self) -> crate.database.connection.Connection {
+            self.get_connection()
+        }
+    }
+}

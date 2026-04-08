@@ -1,0 +1,238 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, context-polymorphism, context-system, cbgr
+// @description: Context polymorphism enables higher-order functions to propagate contexts from callbacks
+
+/// Context Polymorphism Tests
+///
+/// These tests validate that context parameters in generics work correctly
+/// as specified in docs/improvements.md Section 17.2.
+///
+/// Key behavior:
+/// - `using C` in generic parameters creates a context variable
+/// - Context variable can be used in `using` clauses
+/// - Context is unified with actual callback contexts during type checking
+///
+/// Spec: docs/improvements.md Section 17.2 (Context Polymorphism)
+/// Spec: docs/detailed/16-context-system.md
+/// Impl: crates/verum_ast/src/ty.rs:GenericParamKind::Context
+/// Impl: crates/verum_parser/src/ty.rs:parse_generic_param
+
+// ============================================================================
+// TEST 1: Basic context parameter parsing
+// ============================================================================
+
+// Context-polymorphic function with single context parameter
+fn identity_with_context<T, using C>(value: T) -> T using C {
+    value
+}
+
+fn test_basic_context_param() {
+    let x = 42;
+    let result = identity_with_context(x);
+    assert(result == 42);
+}
+
+// ============================================================================
+// TEST 2: Context polymorphism with callbacks
+// ============================================================================
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// Context-polymorphic map function
+// The context C is propagated from the callback f
+fn map_with_context<T, U, using C>(
+    value: T,
+    f: fn(T) -> U using C
+) -> U using C {
+    f(value)
+}
+
+context Logger {
+    fn log(msg: Text);
+}
+
+// Simple logger implementation for testing
+type ConsoleLogger is {};
+
+implement Logger for ConsoleLogger {
+    fn log(msg: Text) {
+        // Log implementation - print to console
+        print(msg);
+    }
+}
+
+fn process_with_logging(x: Int) -> Int using [Logger] {
+    Logger.log(f"Processing {x}");
+    x * 2
+}
+
+fn test_context_polymorphism_callback() {
+    // Provide a Logger implementation for this scope
+    provide Logger = ConsoleLogger {} in {
+        let result = map_with_context(21, process_with_logging);
+        assert(result == 42);
+    }
+}
+
+// ============================================================================
+// TEST 3: Multiple type parameters with context
+// ============================================================================
+
+fn transform<A, B, C, using Ctx>(
+    a: A,
+    b: B,
+    f: fn(A, B) -> C using Ctx
+) -> C using Ctx {
+    f(a, b)
+}
+
+fn test_multiple_type_params_with_context() {
+    let combine = |x: Int, y: Int| -> Int { x + y };
+    let result = transform(10, 32, combine);
+    assert(result == 42);
+}
+
+// ============================================================================
+// TEST 4: Context parameter in generic struct
+// ============================================================================
+
+// Note: Context parameters in types would require special handling
+// For now, context polymorphism is primarily for functions
+
+type Wrapper<T> is {
+    value: T,
+};
+
+fn wrap_with_context<T, using C>(value: T) -> Wrapper<T> using C {
+    Wrapper { value }
+}
+
+fn test_context_param_with_generic_return() {
+    let wrapped = wrap_with_context(42);
+    assert(wrapped.value == 42);
+}
+
+// ============================================================================
+// TEST 5: Nested context polymorphism
+// ============================================================================
+
+fn outer<T, using OuterCtx>(
+    value: T,
+    f: fn(T) -> T using OuterCtx
+) -> T using OuterCtx {
+    f(value)
+}
+
+fn inner<T, using InnerCtx>(
+    value: T,
+    g: fn(T) -> T using InnerCtx
+) -> T using InnerCtx {
+    g(value)
+}
+
+fn test_nested_context_polymorphism() {
+    let double = |x: Int| -> Int { x * 2 };
+    let result = outer(21, |x| inner(x, double));
+    assert(result == 42);
+}
+
+// ============================================================================
+// TEST 6: Context polymorphism with Maybe
+// ============================================================================
+
+type Maybe<T> is None | Some(T);
+
+fn map_maybe<T, U, using C>(
+    opt: Maybe<T>,
+    f: fn(T) -> U using C
+) -> Maybe<U> using C {
+    match opt {
+        Maybe.Some(v) => Maybe.Some(f(v)),
+        Maybe.None => Maybe.None,
+    }
+}
+
+fn test_context_poly_with_maybe() {
+    let opt = Maybe.Some(21);
+    let result = map_maybe(opt, |x| x * 2);
+
+    match result {
+        Maybe.Some(v) => assert(v == 42),
+        Maybe.None => assert(false),
+    }
+}
+
+// ============================================================================
+// TEST 7: Context polymorphism in method position
+// ============================================================================
+
+type Container<T> is {
+    items: List<T>,
+};
+
+implement<T> Container<T> {
+    fn map_items<U, using C>(
+        &self,
+        f: fn(T) -> U using C
+    ) -> Container<U> using C {
+        let mut result = List.new();
+        for item in self.items.iter() {
+            result.push(f(item));
+        }
+        Container { items: result }
+    }
+}
+
+fn test_context_poly_method() {
+    let container = Container { items: [1, 2, 3] };
+    let doubled = container.map_items(|x| x * 2);
+    assert(doubled.items[0] == 2);
+    assert(doubled.items[1] == 4);
+    assert(doubled.items[2] == 6);
+}
+
+// ============================================================================
+// TEST 8: Context polymorphism with Result
+// ============================================================================
+
+type Result<T, E> is Ok(T) | Err(E);
+
+fn and_then<T, U, E, using C>(
+    result: Result<T, E>,
+    f: fn(T) -> Result<U, E> using C
+) -> Result<U, E> using C {
+    match result {
+        Result.Ok(v) => f(v),
+        Result.Err(e) => Result.Err(e),
+    }
+}
+
+fn test_context_poly_with_result() {
+    let ok: Result<Int, Text> = Result.Ok(21);
+    let result = and_then(ok, |x| Result.Ok(x * 2));
+
+    match result {
+        Result.Ok(v) => assert(v == 42),
+        Result.Err(_) => assert(false),
+    }
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    test_basic_context_param();
+    test_context_polymorphism_callback();
+    test_multiple_type_params_with_context();
+    test_context_param_with_generic_return();
+    test_nested_context_polymorphism();
+    test_context_poly_with_maybe();
+    test_context_poly_method();
+    test_context_poly_with_result();
+}

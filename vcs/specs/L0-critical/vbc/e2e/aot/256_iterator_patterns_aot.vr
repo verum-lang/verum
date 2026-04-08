@@ -1,0 +1,174 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, iterator, patterns, functional
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for iterator-like patterns using closures and HOFs
+
+// Apply function to range [start, end)
+fn for_range(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while i < end {
+        acc = acc + f(i);
+        i = i + 1;
+    }
+    acc
+}
+
+// Map-reduce pattern
+fn map_reduce(start: Int, end: Int, map_fn: fn(Int) -> Int, reduce_fn: fn(Int, Int) -> Int, init: Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = reduce_fn(acc, map_fn(i));
+        i = i + 1;
+    }
+    acc
+}
+
+// Filter-count: count elements in range matching predicate
+fn count_where(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Find first in range matching predicate, or -1
+fn find_first(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut i = start;
+    while i < end {
+        if pred(i) { return i; }
+        i = i + 1;
+    }
+    -1
+}
+
+// All/any
+fn all_match(start: Int, end: Int, pred: fn(Int) -> Bool) -> Bool {
+    let mut i = start;
+    while i < end {
+        if pred(i) == false { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn any_match(start: Int, end: Int, pred: fn(Int) -> Bool) -> Bool {
+    let mut i = start;
+    while i < end {
+        if pred(i) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// Generate fibonacci-like sequence using step function
+fn generate(n: Int, init1: Int, init2: Int, step_fn: fn(Int, Int) -> Int) -> Int {
+    let mut a = init1;
+    let mut b = init2;
+    let mut i = 0;
+    while i < n {
+        let next = step_fn(a, b);
+        a = b;
+        b = next;
+        i = i + 1;
+    }
+    a
+}
+
+fn test_for_range() {
+    let identity = |x: Int| -> Int { x };
+    // Sum 0..10 = 45
+    assert_eq(for_range(0, 10, identity), 45);
+
+    let square = |x: Int| -> Int { x * x };
+    // Sum of squares 1..5 = 1+4+9+16 = 30
+    assert_eq(for_range(1, 5, square), 30);
+}
+
+fn test_map_reduce() {
+    let double = |x: Int| -> Int { x * 2 };
+    let add = |a: Int, b: Int| -> Int { a + b };
+    // Sum of doubled [1,5) = 2+4+6+8 = 20
+    assert_eq(map_reduce(1, 5, double, add, 0), 20);
+
+    let square = |x: Int| -> Int { x * x };
+    let mul = |a: Int, b: Int| -> Int { a * b };
+    // Product of squares [1,4) = 1*4*9 = 36
+    assert_eq(map_reduce(1, 4, square, mul, 1), 36);
+}
+
+fn test_count_where() {
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    assert_eq(count_where(1, 11, is_even), 5);  // 2,4,6,8,10
+
+    let gt5 = |x: Int| -> Bool { x > 5 };
+    assert_eq(count_where(1, 11, gt5), 5);  // 6,7,8,9,10
+}
+
+fn test_find_first() {
+    let gt5 = |x: Int| -> Bool { x > 5 };
+    assert_eq(find_first(1, 11, gt5), 6);
+
+    let gt100 = |x: Int| -> Bool { x > 100 };
+    assert_eq(find_first(1, 11, gt100), -1);
+
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    assert_eq(find_first(1, 11, is_even), 2);
+}
+
+fn test_all_any() {
+    let positive = |x: Int| -> Bool { x > 0 };
+    assert_eq(all_match(1, 10, positive), true);
+    assert_eq(all_match(0, 10, positive), false);
+
+    let gt5 = |x: Int| -> Bool { x > 5 };
+    assert_eq(any_match(1, 10, gt5), true);
+    assert_eq(any_match(1, 5, gt5), false);
+}
+
+fn test_generate() {
+    let fib_step = |a: Int, b: Int| -> Int { a + b };
+    // Fibonacci: 0, 1, 1, 2, 3, 5, 8, 13, ...
+    assert_eq(generate(0, 0, 1, fib_step), 0);
+    assert_eq(generate(1, 0, 1, fib_step), 1);
+    assert_eq(generate(10, 0, 1, fib_step), 55);
+
+    let powers = |a: Int, b: Int| -> Int { b * 2 };
+    // 1, 2, 4, 8, 16, ...
+    assert_eq(generate(0, 1, 2, powers), 1);
+    assert_eq(generate(5, 1, 2, powers), 32);
+}
+
+fn test_chained() {
+    // Sum of squares of even numbers in [1,10)
+    // Even: 2,4,6,8 -> squares: 4,16,36,64 -> sum: 120
+    let mut sum = 0;
+    let mut i = 1;
+    while i < 10 {
+        if i % 2 == 0 {
+            sum = sum + i * i;
+        }
+        i = i + 1;
+    }
+    assert_eq(sum, 120);
+}
+
+fn main() -> Int {
+    test_for_range();
+    test_map_reduce();
+    test_count_where();
+    test_find_first();
+    test_all_any();
+    test_generate();
+    test_chained();
+    print("[OK] 256_iterator_patterns_aot");
+    0
+}

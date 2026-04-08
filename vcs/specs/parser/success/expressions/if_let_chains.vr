@@ -1,0 +1,745 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, if-let, chains, conditionals, rfc2497
+// @description: Comprehensive if-let chains parser tests following RFC 2497 semantics
+//
+// Grammar reference (grammar/verum.ebnf):
+//   if_condition    = let_condition , { '&&' , let_condition } ;
+//   let_condition   = 'let' , pattern , '=' , expression | expression ;
+//
+// Key semantics:
+// - Conditions are evaluated left-to-right with short-circuit AND
+// - Let bindings scope to the then-branch only
+// - Each let pattern must match for execution to continue
+// - Expression conditions are standard boolean tests
+//
+// Design decision: Verum does NOT support chained comparisons (a < b < c)
+// Use explicit && instead: a < b && b < c
+
+// =============================================================================
+// SECTION 1: SINGLE LET CONDITION (Basic if-let)
+// =============================================================================
+
+fn test_single_let_simple() {
+    if let Some(x) = maybe_value {
+        use(x);
+    }
+
+    if let None = maybe_value {
+        handle_none();
+    }
+
+    let result = if let Some(v) = option {
+        v
+    } else {
+        default
+    };
+}
+
+fn test_single_let_with_else_if() {
+    if let Some(x) = first {
+        use_first(x);
+    } else if let Some(y) = second {
+        use_second(y);
+    } else {
+        neither();
+    }
+}
+
+fn test_single_let_result_patterns() {
+    if let Ok(value) = result {
+        process(value);
+    }
+
+    if let Err(error) = result {
+        handle_error(error);
+    }
+
+    if let Ok(inner) = outer_result {
+        if let Some(v) = inner {
+            use(v);
+        }
+    }
+}
+
+// =============================================================================
+// SECTION 2: TWO-ELEMENT LET CHAINS
+// =============================================================================
+
+fn test_two_let_conditions() {
+    // Both must match for body to execute
+    if let Some(x) = opt1 && let Some(y) = opt2 {
+        combine(x, y);
+    }
+
+    if let Ok(a) = res1 && let Ok(b) = res2 {
+        merge(a, b);
+    }
+
+    // Mixed variant patterns
+    if let Some(data) = option && let Ok(parsed) = parse(data) {
+        use_parsed(parsed);
+    }
+}
+
+fn test_let_then_expression() {
+    // Let followed by boolean expression
+    if let Some(x) = opt && x > 0 {
+        use_positive(x);
+    }
+
+    if let Some(len) = get_length() && len <= max_allowed {
+        process_valid_length(len);
+    }
+
+    if let Ok(value) = compute() && is_valid(value) {
+        accept(value);
+    }
+}
+
+fn test_expression_then_let() {
+    // Expression followed by let (valid per grammar)
+    if condition && let Some(x) = opt {
+        use_conditional(x);
+    }
+
+    if is_ready() && let Some(data) = fetch() {
+        process_ready_data(data);
+    }
+
+    if index < len && let Some(elem) = get(index) {
+        handle(elem);
+    }
+}
+
+fn test_two_expressions() {
+    // Two expression conditions (no let)
+    if a > 0 && b > 0 {
+        both_positive();
+    }
+
+    if is_valid(x) && is_valid(y) {
+        both_valid();
+    }
+}
+
+// =============================================================================
+// SECTION 3: THREE-ELEMENT CHAINS
+// =============================================================================
+
+fn test_three_let_conditions() {
+    if let Some(a) = opt1 && let Some(b) = opt2 && let Some(c) = opt3 {
+        triple(a, b, c);
+    }
+
+    if let Ok(x) = r1 && let Ok(y) = r2 && let Ok(z) = r3 {
+        combine_results(x, y, z);
+    }
+}
+
+fn test_two_let_one_expr() {
+    // Let, let, expr
+    if let Some(a) = opt1 && let Some(b) = opt2 && a + b > threshold {
+        use_sum(a, b);
+    }
+
+    // Let, expr, let
+    if let Some(a) = opt1 && a > 0 && let Some(b) = opt2 {
+        use_positive_a_with_b(a, b);
+    }
+
+    // Expr, let, let
+    if is_enabled() && let Some(a) = opt1 && let Some(b) = opt2 {
+        enabled_with_values(a, b);
+    }
+}
+
+fn test_one_let_two_expr() {
+    // Let, expr, expr
+    if let Some(x) = opt && x > 0 && x < 100 {
+        in_range(x);
+    }
+
+    // Expr, let, expr
+    if is_valid && let Some(x) = opt && x > threshold {
+        valid_above_threshold(x);
+    }
+
+    // Expr, expr, let
+    if a > 0 && b > 0 && let Some(sum) = try_add(a, b) {
+        use_sum(sum);
+    }
+}
+
+fn test_three_expressions() {
+    if a > 0 && b > 0 && c > 0 {
+        all_positive();
+    }
+
+    if is_a() && is_b() && is_c() {
+        all_true();
+    }
+}
+
+// =============================================================================
+// SECTION 4: LONG CHAINS (4+ elements)
+// =============================================================================
+
+fn test_four_element_chains() {
+    if let Some(a) = o1 && let Some(b) = o2 && let Some(c) = o3 && let Some(d) = o4 {
+        quadruple(a, b, c, d);
+    }
+
+    if let Some(x) = opt && x > 0 && x < 100 && is_prime(x) {
+        prime_in_range(x);
+    }
+
+    if cond1 && cond2 && cond3 && cond4 {
+        all_four();
+    }
+}
+
+fn test_five_element_chains() {
+    if let A = a && let B = b && let C = c && let D = d && let E = e {
+        quintuple();
+    }
+
+    if a && b && c && d && e {
+        five_conditions();
+    }
+}
+
+fn test_mixed_long_chains() {
+    // Complex real-world pattern
+    if let Some(user) = get_user(id)
+        && user.is_active
+        && let Some(session) = user.current_session
+        && session.is_valid()
+        && let Some(perms) = session.get_permissions()
+    {
+        authorize(user, session, perms);
+    }
+}
+
+// =============================================================================
+// SECTION 5: COMPLEX PATTERN MATCHING IN LET
+// =============================================================================
+
+fn test_tuple_patterns_in_chain() {
+    if let (a, b) = pair && let (c, d) = other_pair {
+        use_all(a, b, c, d);
+    }
+
+    if let (Some(x), Some(y)) = (opt1, opt2) && x + y > 0 {
+        positive_sum(x, y);
+    }
+}
+
+fn test_struct_patterns_in_chain() {
+    if let Point { x, y } = point && x >= 0 && y >= 0 {
+        first_quadrant(x, y);
+    }
+
+    if let User { name, age, .. } = user && age >= 18 {
+        adult_user(name, age);
+    }
+
+    if let Config { enabled: true, threshold } = config && threshold > 0 {
+        use_config(threshold);
+    }
+}
+
+fn test_nested_patterns_in_chain() {
+    if let Some(Some(x)) = nested_option && x > 0 {
+        use_nested(x);
+    }
+
+    if let Ok(Some(Inner { value })) = complex && value > threshold {
+        use_complex(value);
+    }
+
+    if let Container { data: Some(arr @ [first, ..]) } = container && first > 0 {
+        process_container(first, arr);
+    }
+}
+
+fn test_slice_patterns_in_chain() {
+    if let [first, second, ..rest] = slice && first > second {
+        descending_start(first, second, rest);
+    }
+
+    if let [a, b, c] = arr && a + b == c {
+        pythagorean_like(a, b, c);
+    }
+}
+
+fn test_or_patterns_in_chain() {
+    if let (Some(x) | None) = opt && condition {
+        handle_either(x);
+    }
+
+    if let (Ok(v) | Err(v)) = result && is_valid(v) {
+        use_value(v);
+    }
+}
+
+fn test_binding_patterns_in_chain() {
+    if let x @ Some(_) = opt && is_interesting(x) {
+        use_interesting(x);
+    }
+
+    if let Some(inner @ Point { .. }) = opt && inner.x > 0 {
+        use_positive_x(inner);
+    }
+}
+
+fn test_range_patterns_in_chain() {
+    if let n @ 1..=10 = value && is_prime(n) {
+        small_prime(n);
+    }
+
+    if let ch @ 'a'..='z' = c && ch != 'x' {
+        lowercase_not_x(ch);
+    }
+}
+
+// =============================================================================
+// SECTION 6: ELSE BRANCHES WITH CHAINS
+// =============================================================================
+
+fn test_chain_with_else() {
+    let result = if let Some(x) = opt1 && let Some(y) = opt2 {
+        x + y
+    } else {
+        default_value
+    };
+}
+
+fn test_chain_with_else_if_chain() {
+    let result = if let Some(x) = opt1 && x > 100 {
+        "large"
+    } else if let Some(x) = opt1 && x > 10 {
+        "medium"
+    } else if let Some(_) = opt1 {
+        "small"
+    } else {
+        "none"
+    };
+}
+
+fn test_nested_chains_in_else_branches() {
+    if let Some(a) = opt1 && a > 0 {
+        positive_a(a);
+    } else if let Some(b) = opt2 && let Some(c) = opt3 && b > c {
+        b_greater_than_c(b, c);
+    } else if condition1 && condition2 {
+        both_conditions();
+    } else {
+        fallback();
+    }
+}
+
+// =============================================================================
+// SECTION 7: EXPRESSION TYPES IN CONDITIONS
+// =============================================================================
+
+fn test_comparison_expressions() {
+    if let Some(x) = opt && x > 0 {
+        positive();
+    }
+
+    if let Some(x) = opt && x >= min && x <= max {
+        in_range();
+    }
+
+    if let Some(a) = opt1 && let Some(b) = opt2 && a < b {
+        ascending();
+    }
+}
+
+fn test_method_call_expressions() {
+    if let Some(s) = opt && s.is_empty() {
+        empty_string();
+    }
+
+    if let Some(v) = opt && v.len() > 0 && v.contains(target) {
+        has_target();
+    }
+
+    if let Ok(data) = fetch() && data.validate() && data.is_complete() {
+        complete_valid_data(data);
+    }
+}
+
+fn test_function_call_expressions() {
+    if let Some(x) = opt && is_valid(x) {
+        valid_value();
+    }
+
+    if check_precondition() && let Some(x) = compute() && verify(x) {
+        verified_computation(x);
+    }
+}
+
+fn test_logical_expressions() {
+    // Note: These are full boolean expressions, not chained conditions
+    if let Some(x) = opt && (x > 0 || x == special_value) {
+        special_or_positive();
+    }
+
+    if let Some(flags) = opt && (flags & MASK) != 0 {
+        has_flag();
+    }
+}
+
+fn test_field_access_expressions() {
+    if let Some(obj) = opt && obj.field > threshold {
+        above_threshold();
+    }
+
+    if let Some(user) = get_user() && user.is_admin && user.permissions.can_edit {
+        admin_can_edit(user);
+    }
+}
+
+// =============================================================================
+// SECTION 8: SCOPE AND SHADOWING
+// =============================================================================
+
+fn test_bindings_scope_to_then_branch() {
+    let x = 10;
+
+    if let Some(x) = opt {
+        // x here is the bound value from opt
+        use_inner(x);
+    }
+
+    // x here is still 10
+    use_outer(x);
+}
+
+fn test_multiple_bindings_all_in_scope() {
+    if let Some(a) = opt1 && let Some(b) = opt2 && let Some(c) = opt3 {
+        // All three bindings are in scope
+        use_all(a, b, c);
+    }
+    // None are in scope here
+}
+
+fn test_shadowing_in_chains() {
+    let x = 10;
+
+    if let Some(x) = opt1 && let Some(y) = opt2 {
+        // x shadows outer x
+        use(x, y);
+    }
+
+    if let Some(x) = opt1 && x > 0 && let Some(x) = opt2 {
+        // Second x shadows first x from chain
+        use_second(x);
+    }
+}
+
+fn test_bindings_used_in_later_conditions() {
+    // Binding from first let used in second condition
+    if let Some(len) = get_length() && len > 0 && len < max {
+        valid_length(len);
+    }
+
+    // Binding from first let used in second let
+    if let Some(key) = get_key() && let Some(value) = lookup(key) {
+        found(key, value);
+    }
+}
+
+// =============================================================================
+// SECTION 9: RETURN VALUES AND EXPRESSIONS
+// =============================================================================
+
+fn test_if_let_chain_as_expression() {
+    let result = if let Some(x) = opt && x > 0 {
+        x * 2
+    } else {
+        0
+    };
+}
+
+fn test_if_let_chain_unit_return() {
+    if let Some(x) = opt && x > 0 {
+        log(x);
+        process(x);
+    }
+}
+
+fn test_early_return_in_then_branch() {
+    if let Some(error) = check_error() && error.is_fatal {
+        return Err(error);
+    }
+}
+
+fn test_nested_if_let_chains() {
+    let result = if let Some(outer) = opt1 {
+        if let Some(inner) = outer.nested && inner.is_valid {
+            inner.value
+        } else {
+            outer.default_value
+        }
+    } else {
+        global_default
+    };
+}
+
+// =============================================================================
+// SECTION 10: EDGE CASES AND CORNER CASES
+// =============================================================================
+
+fn test_single_expression_condition() {
+    // Just an expression, no let
+    if condition {
+        simple();
+    }
+
+    if a > b {
+        a_greater();
+    }
+}
+
+fn test_parenthesized_conditions() {
+    // Parentheses around sub-expressions
+    if let Some(x) = opt && (x > 0) {
+        parens_around_expr();
+    }
+
+    if (is_ready()) && let Some(x) = opt {
+        parens_around_call();
+    }
+}
+
+fn test_complex_expressions_in_let() {
+    // Complex expression as the value being matched
+    if let Some(x) = compute_option(a, b, c) && x > 0 {
+        complex_source();
+    }
+
+    if let Ok(result) = try_parse(input.trim().to_lowercase()) && result.is_valid() {
+        chained_methods_source();
+    }
+
+    if let Some(x) = map.get(key)?.cloned() && x > threshold {
+        optional_chained_source();
+    }
+}
+
+fn test_multiline_chains() {
+    if let Some(first) = get_first()
+        && first.is_valid()
+        && let Some(second) = first.get_related()
+        && second.is_compatible(first)
+        && let Some(result) = combine(first, second)
+    {
+        use_result(result);
+    }
+}
+
+fn test_chains_in_closures() {
+    let closure = |opt1, opt2| {
+        if let Some(x) = opt1 && let Some(y) = opt2 && x > y {
+            x - y
+        } else {
+            0
+        }
+    };
+
+    let predicate = |item| {
+        if let Some(x) = item.value && x > 0 {
+            true
+        } else {
+            false
+        }
+    };
+}
+
+fn test_chains_in_match_guards() {
+    // Note: Match guards use 'if' or 'where' keyword
+    let result = match value {
+        Some(x) if let Ok(y) = parse(x) && y > 0 => y,
+        Some(x) if x > threshold => x,
+        _ => default
+    };
+}
+
+fn test_chains_with_blocks() {
+    if let Some(x) = opt && { let temp = compute(); temp > 0 } {
+        use_with_block();
+    }
+}
+
+fn test_never_type_in_else() {
+    let x = if let Some(v) = critical_value && v.is_valid() {
+        v
+    } else {
+        panic("critical value missing or invalid");
+    };
+}
+
+// =============================================================================
+// SECTION 11: ASYNC CONTEXT
+// =============================================================================
+
+fn test_if_let_chains_with_await() {
+    async fn async_chains() {
+        if let Some(future) = get_future() && let Ok(result) = future.await {
+            process_async(result);
+        }
+
+        if is_ready().await && let Some(data) = fetch().await {
+            handle_async_data(data);
+        }
+    }
+}
+
+// =============================================================================
+// SECTION 12: WHILE-LET CHAINS (Analogous Syntax)
+// =============================================================================
+
+fn test_while_let_single() {
+    while let Some(item) = iterator.next() {
+        process(item);
+    }
+}
+
+fn test_while_let_with_condition() {
+    while let Some(item) = iterator.next() && item.is_valid() {
+        process_valid(item);
+    }
+
+    while let Some(a) = iter1.next() && let Some(b) = iter2.next() {
+        combine(a, b);
+    }
+}
+
+// =============================================================================
+// SECTION 13: LET-ELSE (Separate but Related)
+// =============================================================================
+
+fn test_let_else_basic() {
+    let Some(x) = opt else {
+        return;
+    };
+    use(x);
+}
+
+fn test_let_else_diverges() {
+    let Ok(data) = fetch() else {
+        panic("fetch failed");
+    };
+
+    let Some(value) = compute() else {
+        return Err(Error::NotFound);
+    };
+}
+
+// =============================================================================
+// SECTION 14: INTEGRATION PATTERNS
+// =============================================================================
+
+fn test_option_chaining_pattern() {
+    // Mimics optional chaining with explicit conditions
+    if let Some(obj) = get_object()
+        && let Some(field) = obj.field
+        && let Some(nested) = field.nested
+        && nested.is_valid()
+    {
+        use_nested(nested);
+    }
+}
+
+fn test_validation_chain_pattern() {
+    if let Some(input) = get_input()
+        && validate_format(input)
+        && let Some(parsed) = parse(input)
+        && validate_content(parsed)
+        && let Some(result) = transform(parsed)
+    {
+        accept(result);
+    }
+}
+
+fn test_resource_acquisition_pattern() {
+    if let Some(handle) = acquire_resource()
+        && handle.is_ready()
+        && let Some(lock) = handle.try_lock()
+    {
+        // Use resource with lock
+        use_locked(lock);
+    }
+    // Resources automatically released
+}
+
+fn test_state_machine_pattern() {
+    if let State::Ready { data } = machine.state()
+        && data.is_complete()
+        && let Some(result) = machine.execute(data)
+        && result.is_success()
+    {
+        machine.transition(State::Complete(result));
+    }
+}
+
+fn test_error_recovery_pattern() {
+    if let Err(e) = operation()
+        && e.is_recoverable()
+        && let Ok(alternative) = fallback()
+    {
+        log_recovery(e);
+        use_alternative(alternative);
+    }
+}
+
+fn test_concurrent_option_pattern() {
+    // Multiple optional values that must all be present
+    if let Some(a) = cache.get("a")
+        && let Some(b) = cache.get("b")
+        && let Some(c) = cache.get("c")
+        && a.version == b.version
+        && b.version == c.version
+    {
+        combine_cached(a, b, c);
+    }
+}
+
+// =============================================================================
+// SECTION 15: WHITESPACE AND FORMATTING VARIATIONS
+// =============================================================================
+
+fn test_single_line_chain() {
+    if let Some(x) = opt && x > 0 { use(x); }
+}
+
+fn test_multi_line_chain_standard() {
+    if let Some(x) = opt
+        && x > 0
+        && x < 100
+    {
+        use(x);
+    }
+}
+
+fn test_multi_line_chain_aligned() {
+    if let Some(x) = opt &&
+       let Some(y) = opt2 &&
+       let Some(z) = opt3
+    {
+        use(x, y, z);
+    }
+}
+
+fn test_chain_with_comments() {
+    if let Some(x) = opt1  // First binding
+        && x > 0           // Positive check
+        && let Some(y) = opt2  // Second binding
+        && x + y < max     // Sum check
+    {
+        use(x, y);
+    }
+}

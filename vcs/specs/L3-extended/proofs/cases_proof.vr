@@ -1,0 +1,177 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, cases
+// @timeout: 10000
+
+/// Proof by cases demonstration
+/// Shows how to prove statements by exhaustive case analysis
+
+/// Absolute value is non-negative
+theorem abs_nonneg(x: Int): abs(x) >= 0 {
+    proof by cases on x {
+        case x >= 0 => {
+            have: abs(x) == x by definition;
+            conclude by assumption
+        }
+        case x < 0 => {
+            have: abs(x) == -x by definition;
+            have: -x > 0 by arithmetic;
+            conclude by transitivity
+        }
+    }
+}
+
+/// Maximum of two values equals one of them
+theorem max_is_one_of<T: Ord>(a: T, b: T): max(a, b) == a || max(a, b) == b {
+    proof by cases {
+        case a >= b => {
+            have: max(a, b) == a by definition;
+            left;
+            trivial
+        }
+        case a < b => {
+            have: max(a, b) == b by definition;
+            right;
+            trivial
+        }
+    }
+}
+
+/// Minimum of two values is <= both
+theorem min_le_both<T: Ord>(a: T, b: T): min(a, b) <= a && min(a, b) <= b {
+    proof by cases {
+        case a <= b => {
+            have: min(a, b) == a by definition;
+            have: a <= b by assumption;
+            conclude by transitivity
+        }
+        case a > b => {
+            have: min(a, b) == b by definition;
+            have: b < a by assumption;
+            conclude by lt_implies_le
+        }
+    }
+}
+
+/// Pattern matching on Option
+theorem option_cases<T>(opt: Maybe<T>): opt == None || exists v: T. opt == Some(v) {
+    proof by cases on opt {
+        case None => {
+            left;
+            trivial
+        }
+        case Some(v) => {
+            right;
+            witness v;
+            trivial
+        }
+    }
+}
+
+/// Pattern matching on Result
+theorem result_cases<T, E>(res: Result<T, E>):
+    (exists v: T. res == Ok(v)) || (exists e: E. res == Err(e))
+{
+    proof by cases on res {
+        case Ok(v) => {
+            left;
+            witness v;
+            trivial
+        }
+        case Err(e) => {
+            right;
+            witness e;
+            trivial
+        }
+    }
+}
+
+/// List is either empty or has head and tail
+theorem list_cases<T>(xs: List<T>): xs == [] || exists h: T, t: List<T>. xs == h . t {
+    proof by cases on xs {
+        case [] => {
+            left;
+            trivial
+        }
+        case h . t => {
+            right;
+            witness (h, t);
+            trivial
+        }
+    }
+}
+
+/// Trichotomy for ordered types
+theorem trichotomy<T: Ord>(a: T, b: T): a < b || a == b || a > b {
+    proof by cases {
+        case a < b => {
+            left;
+            trivial
+        }
+        case a == b => {
+            right;
+            left;
+            trivial
+        }
+        case a > b => {
+            right;
+            right;
+            trivial
+        }
+    }
+}
+
+/// Division by cases: even or odd
+theorem nat_even_or_odd(n: Nat): is_even(n) || is_odd(n) {
+    proof by cases on n % 2 {
+        case 0 => {
+            left;
+            have: n % 2 == 0 by assumption;
+            conclude by definition_of_even
+        }
+        case 1 => {
+            right;
+            have: n % 2 == 1 by assumption;
+            conclude by definition_of_odd
+        }
+    }
+}
+
+/// Nested case analysis
+theorem sign_product(x: Int, y: Int):
+    (x > 0 && y > 0 implies x * y > 0) &&
+    (x > 0 && y < 0 implies x * y < 0) &&
+    (x < 0 && y > 0 implies x * y < 0) &&
+    (x < 0 && y < 0 implies x * y > 0) &&
+    (x == 0 || y == 0 implies x * y == 0)
+{
+    proof by cases {
+        case sign(x) == Positive && sign(y) == Positive => {
+            conclude by arithmetic
+        }
+        case sign(x) == Positive && sign(y) == Negative => {
+            conclude by arithmetic
+        }
+        case sign(x) == Negative && sign(y) == Positive => {
+            conclude by arithmetic
+        }
+        case sign(x) == Negative && sign(y) == Negative => {
+            conclude by arithmetic
+        }
+        case x == 0 => {
+            conclude by arithmetic
+        }
+        case y == 0 => {
+            conclude by arithmetic
+        }
+    }
+}
+
+/// Boolean cases
+theorem bool_exhaustive(b: Bool): b == true || b == false {
+    proof by cases on b {
+        case true => left; trivial
+        case false => right; trivial
+    }
+}

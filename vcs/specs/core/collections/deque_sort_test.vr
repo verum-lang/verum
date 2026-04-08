@@ -1,0 +1,488 @@
+// =============================================================================
+// deque_sort_test.vr - Tests for Deque sorting operations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, sort, core
+// @description: Comprehensive tests for Deque<T> sort methods:
+//               sort, sort_by, sort_by_key, sort_unstable variants, is_sorted
+// =============================================================================
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.ordering.{Ordering};
+mount core.collections.deque.{Deque, deque};
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
+fn cmp_descending(a: &Int, b: &Int) -> Ordering {
+    if *a > *b { Ordering.Less }
+    else if *a < *b { Ordering.Greater }
+    else { Ordering.Equal }
+}
+
+fn abs_value(x: &Int) -> Int {
+    if *x < 0 { 0 - *x } else { *x }
+}
+
+fn negate(x: &Int) -> Int {
+    0 - *x
+}
+
+// =============================================================================
+// Section 1: sort() Tests
+// =============================================================================
+
+@test
+fn test_sort_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.sort();
+    assert(d.is_empty());
+}
+
+@test
+fn test_sort_single() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+    d.sort();
+    assert_eq(d.len(), 1);
+    assert_eq(*d.get(0).unwrap(), 42);
+}
+
+@test
+fn test_sort_already_sorted() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    d.sort();
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(4).unwrap(), 5);
+}
+
+@test
+fn test_sort_reverse_sorted() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(5);
+    d.push_back(4);
+    d.push_back(3);
+    d.push_back(2);
+    d.push_back(1);
+    d.sort();
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 4);
+    assert_eq(*d.get(4).unwrap(), 5);
+}
+
+@test
+fn test_sort_unsorted() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(4);
+    d.push_back(1);
+    d.push_back(5);
+    d.push_back(9);
+    d.push_back(2);
+    d.push_back(6);
+    d.sort();
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 1);
+    assert_eq(*d.get(2).unwrap(), 2);
+    assert_eq(*d.get(3).unwrap(), 3);
+    assert_eq(*d.get(4).unwrap(), 4);
+    assert_eq(*d.get(5).unwrap(), 5);
+    assert_eq(*d.get(6).unwrap(), 6);
+    assert_eq(*d.get(7).unwrap(), 9);
+}
+
+@test
+fn test_sort_with_duplicates() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(3);
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(2);
+    d.sort();
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 1);
+    assert_eq(*d.get(2).unwrap(), 2);
+    assert_eq(*d.get(3).unwrap(), 2);
+    assert_eq(*d.get(4).unwrap(), 3);
+    assert_eq(*d.get(5).unwrap(), 3);
+}
+
+@test
+fn test_sort_all_same() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(7);
+    d.push_back(7);
+    d.push_back(7);
+    d.push_back(7);
+    d.sort();
+    assert_eq(*d.get(0).unwrap(), 7);
+    assert_eq(*d.get(3).unwrap(), 7);
+}
+
+@test
+fn test_sort_two_elements() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(2);
+    d.push_back(1);
+    d.sort();
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+}
+
+@test
+fn test_sort_negative_numbers() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(-3);
+    d.push_back(1);
+    d.push_back(-1);
+    d.push_back(0);
+    d.push_back(2);
+    d.sort();
+    assert_eq(*d.get(0).unwrap(), -3);
+    assert_eq(*d.get(1).unwrap(), -1);
+    assert_eq(*d.get(2).unwrap(), 0);
+    assert_eq(*d.get(3).unwrap(), 1);
+    assert_eq(*d.get(4).unwrap(), 2);
+}
+
+// =============================================================================
+// Section 2: sort() with mixed push_front/push_back
+// =============================================================================
+
+@test
+fn test_sort_after_push_front() {
+    let mut d: Deque<Int> = Deque.new();
+    // Build with push_front to create wrapped ring buffer
+    d.push_front(3);
+    d.push_front(1);
+    d.push_front(4);
+    d.push_front(1);
+    d.push_front(5);
+    d.sort();
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 1);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 4);
+    assert_eq(*d.get(4).unwrap(), 5);
+}
+
+@test
+fn test_sort_mixed_push() {
+    let mut d: Deque<Int> = Deque.new();
+    // Mix push_front and push_back to maximize ring buffer wrapping
+    d.push_back(5);
+    d.push_front(1);
+    d.push_back(3);
+    d.push_front(4);
+    d.push_back(2);
+    d.push_front(6);
+    d.sort();
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 4);
+    assert_eq(*d.get(4).unwrap(), 5);
+    assert_eq(*d.get(5).unwrap(), 6);
+}
+
+@test
+fn test_sort_after_pop_and_push() {
+    let mut d: Deque<Int> = Deque.new();
+    // Create wrapped state via pop/push
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    d.pop_front();  // Head moves forward
+    d.push_back(5);
+    d.push_back(15);
+    d.push_back(25);
+    d.sort();
+    // Should be: 5, 15, 20, 25, 30
+    assert_eq(*d.get(0).unwrap(), 5);
+    assert_eq(*d.get(1).unwrap(), 15);
+    assert_eq(*d.get(2).unwrap(), 20);
+    assert_eq(*d.get(3).unwrap(), 25);
+    assert_eq(*d.get(4).unwrap(), 30);
+}
+
+// =============================================================================
+// Section 3: sort_by() Tests
+// =============================================================================
+
+@test
+fn test_sort_by_descending() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(5);
+    d.push_back(3);
+    d.push_back(2);
+    d.push_back(4);
+    d.sort_by(cmp_descending);
+    assert_eq(*d.get(0).unwrap(), 5);
+    assert_eq(*d.get(1).unwrap(), 4);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 2);
+    assert_eq(*d.get(4).unwrap(), 1);
+}
+
+@test
+fn test_sort_by_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.sort_by(cmp_descending);
+    assert(d.is_empty());
+}
+
+@test
+fn test_sort_by_single() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+    d.sort_by(cmp_descending);
+    assert_eq(*d.get(0).unwrap(), 42);
+}
+
+// =============================================================================
+// Section 4: sort_by_key() Tests
+// =============================================================================
+
+@test
+fn test_sort_by_key_abs() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(-5);
+    d.push_back(2);
+    d.push_back(-1);
+    d.push_back(4);
+    d.push_back(-3);
+    d.sort_by_key(abs_value);
+    // Sorted by absolute value: -1, 2, -3, 4, -5
+    assert_eq(abs_value(d.get(0).unwrap()), 1);
+    assert_eq(abs_value(d.get(1).unwrap()), 2);
+    assert_eq(abs_value(d.get(2).unwrap()), 3);
+    assert_eq(abs_value(d.get(3).unwrap()), 4);
+    assert_eq(abs_value(d.get(4).unwrap()), 5);
+}
+
+@test
+fn test_sort_by_key_negate() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(5);
+    d.push_back(3);
+    d.push_back(2);
+    d.push_back(4);
+    d.sort_by_key(negate);
+    // Negated sort = descending
+    assert_eq(*d.get(0).unwrap(), 5);
+    assert_eq(*d.get(1).unwrap(), 4);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 2);
+    assert_eq(*d.get(4).unwrap(), 1);
+}
+
+@test
+fn test_sort_by_key_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.sort_by_key(abs_value);
+    assert(d.is_empty());
+}
+
+// =============================================================================
+// Section 5: sort_unstable() Tests
+// =============================================================================
+
+@test
+fn test_sort_unstable_basic() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(4);
+    d.push_back(1);
+    d.push_back(5);
+    d.sort_unstable();
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 1);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 4);
+    assert_eq(*d.get(4).unwrap(), 5);
+}
+
+@test
+fn test_sort_unstable_by() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(5);
+    d.push_back(3);
+    d.sort_unstable_by(cmp_descending);
+    assert_eq(*d.get(0).unwrap(), 5);
+    assert_eq(*d.get(1).unwrap(), 3);
+    assert_eq(*d.get(2).unwrap(), 1);
+}
+
+@test
+fn test_sort_unstable_by_key() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(-3);
+    d.push_back(1);
+    d.push_back(-2);
+    d.sort_unstable_by_key(abs_value);
+    assert_eq(abs_value(d.get(0).unwrap()), 1);
+    assert_eq(abs_value(d.get(1).unwrap()), 2);
+    assert_eq(abs_value(d.get(2).unwrap()), 3);
+}
+
+// =============================================================================
+// Section 6: is_sorted() Tests
+// =============================================================================
+
+@test
+fn test_is_sorted_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert(d.is_sorted());
+}
+
+@test
+fn test_is_sorted_single() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+    assert(d.is_sorted());
+}
+
+@test
+fn test_is_sorted_true() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    assert(d.is_sorted());
+}
+
+@test
+fn test_is_sorted_false() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(2);
+    assert(!d.is_sorted());
+}
+
+@test
+fn test_is_sorted_with_duplicates() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(2);
+    d.push_back(3);
+    assert(d.is_sorted());
+}
+
+@test
+fn test_is_sorted_after_sort() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(5);
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(4);
+    d.push_back(2);
+    assert(!d.is_sorted());
+    d.sort();
+    assert(d.is_sorted());
+}
+
+@test
+fn test_is_sorted_descending() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(5);
+    d.push_back(4);
+    d.push_back(3);
+    d.push_back(2);
+    d.push_back(1);
+    assert(!d.is_sorted());
+}
+
+// =============================================================================
+// Section 7: Sort preserves length
+// =============================================================================
+
+@test
+fn test_sort_preserves_length() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(5);
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(4);
+    d.push_back(2);
+    assert_eq(d.len(), 5);
+    d.sort();
+    assert_eq(d.len(), 5);
+}
+
+@test
+fn test_sort_by_preserves_length() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(5);
+    d.push_back(3);
+    d.push_back(1);
+    assert_eq(d.len(), 3);
+    d.sort_by(cmp_descending);
+    assert_eq(d.len(), 3);
+}
+
+// =============================================================================
+// Section 8: Sort with larger datasets
+// =============================================================================
+
+@test
+fn test_sort_larger() {
+    let mut d: Deque<Int> = Deque.new();
+    // Push 20 elements in reverse
+    let mut i = 20;
+    while i > 0 {
+        d.push_back(i);
+        i = i - 1;
+    }
+    d.sort();
+    // Verify ascending
+    for j in range(0, 19) {
+        let a = *d.get(j).unwrap();
+        let b = *d.get(j + 1).unwrap();
+        assert(a <= b);
+    }
+}
+
+@test
+fn test_sort_mixed_push_larger() {
+    let mut d: Deque<Int> = Deque.new();
+    // Alternate push_front/push_back to maximize wrap
+    let mut i = 0;
+    while i < 16 {
+        if i % 2 == 0 {
+            d.push_back(16 - i);
+        } else {
+            d.push_front(i);
+        }
+        i = i + 1;
+    }
+    d.sort();
+    // Just verify it's sorted
+    for j in range(0, d.len() - 1) {
+        let a = *d.get(j).unwrap();
+        let b = *d.get(j + 1).unwrap();
+        assert(a <= b);
+    }
+}

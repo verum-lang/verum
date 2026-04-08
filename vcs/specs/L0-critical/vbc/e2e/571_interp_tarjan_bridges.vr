@@ -1,0 +1,194 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tarjan, bridges, graph, dfs, undirected
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tarjan's bridge-finding algorithm on undirected graphs.
+// A bridge is an edge whose removal disconnects the graph.
+// Uses DFS discovery times (disc[]) and low-link values (low[]).
+// Low[u] = min disc reachable from u's DFS subtree via back edges.
+// Edge (u,v) is a bridge iff low[v] > disc[u].
+//
+// Graph stored as 8x8 adjacency matrix, flat [Int; 64].
+// Bridges stored in bridge_u[] / bridge_v[], count in nb[0].
+
+fn adj_get(adj: [Int; 64], u: Int, v: Int) -> Int { adj[u * 8 + v] }
+fn adj_set(adj: [Int; 64], u: Int, v: Int, val: Int) { adj[u * 8 + v] = val; }
+
+fn make_adj() -> [Int; 64] {
+    [0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0]
+}
+
+// DFS for bridge finding.
+// timer[0] = current timestamp counter.
+// nb[0]    = number of bridges found so far.
+@allow(unbounded_recursion)
+fn bridge_dfs(adj: [Int; 64], n: Int, u: Int, parent: Int,
+              disc: [Int; 8], low: [Int; 8], vis: [Int; 8],
+              timer: [Int; 8],
+              bridge_u: [Int; 16], bridge_v: [Int; 16], nb: [Int; 8]) {
+    vis[u] = 1;
+    disc[u] = timer[0];
+    low[u]  = timer[0];
+    timer[0] = timer[0] + 1;
+    let mut v = 0;
+    while v < n {
+        if adj_get(adj, u, v) == 1 {
+            if vis[v] == 0 {
+                bridge_dfs(adj, n, v, u, disc, low, vis, timer, bridge_u, bridge_v, nb);
+                // low[u] = min(low[u], low[v])
+                if low[v] < low[u] { low[u] = low[v]; }
+                // Check bridge
+                if low[v] > disc[u] {
+                    let idx = nb[0];
+                    bridge_u[idx] = u;
+                    bridge_v[idx] = v;
+                    nb[0] = nb[0] + 1;
+                }
+            } else {
+                if v != parent {
+                    // Back edge: update low[u] = min(low[u], disc[v])
+                    if disc[v] < low[u] { low[u] = disc[v]; }
+                }
+            }
+        }
+        v = v + 1;
+    }
+}
+
+fn find_bridges(adj: [Int; 64], n: Int,
+                disc: [Int; 8], low: [Int; 8], vis: [Int; 8],
+                timer: [Int; 8],
+                bridge_u: [Int; 16], bridge_v: [Int; 16], nb: [Int; 8]) {
+    let mut i = 0;
+    while i < n { vis[i] = 0; disc[i] = -1; low[i] = -1; i = i + 1; }
+    timer[0] = 0;
+    nb[0] = 0;
+    i = 0;
+    while i < n {
+        if vis[i] == 0 {
+            bridge_dfs(adj, n, i, -1, disc, low, vis, timer, bridge_u, bridge_v, nb);
+        }
+        i = i + 1;
+    }
+}
+
+fn test_single_bridge() {
+    // Graph: 0-1-2-3 (path). Every edge is a bridge. 3 bridges total.
+    let mut adj = make_adj();
+    adj_set(adj, 0, 1, 1); adj_set(adj, 1, 0, 1);
+    adj_set(adj, 1, 2, 1); adj_set(adj, 2, 1, 1);
+    adj_set(adj, 2, 3, 1); adj_set(adj, 3, 2, 1);
+    let mut disc = [0,0,0,0,0,0,0,0];
+    let mut low  = [0,0,0,0,0,0,0,0];
+    let mut vis  = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut bu = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut bv = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nb = [0,0,0,0,0,0,0,0];
+    find_bridges(adj, 4, disc, low, vis, timer, bu, bv, nb);
+    assert_eq(nb[0], 3);
+    print("single_bridge_path: ok");
+}
+
+fn test_no_bridge_cycle() {
+    // Graph: 0-1-2-0 (triangle). No bridges (every edge is on a cycle).
+    let mut adj = make_adj();
+    adj_set(adj, 0, 1, 1); adj_set(adj, 1, 0, 1);
+    adj_set(adj, 1, 2, 1); adj_set(adj, 2, 1, 1);
+    adj_set(adj, 2, 0, 1); adj_set(adj, 0, 2, 1);
+    let mut disc = [0,0,0,0,0,0,0,0];
+    let mut low  = [0,0,0,0,0,0,0,0];
+    let mut vis  = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut bu = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut bv = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nb = [0,0,0,0,0,0,0,0];
+    find_bridges(adj, 3, disc, low, vis, timer, bu, bv, nb);
+    assert_eq(nb[0], 0);
+    print("no_bridge_cycle: ok");
+}
+
+fn test_two_triangles_bridge() {
+    // Two triangles connected by a bridge: 0-1-2-0 and 3-4-5-3, bridge at (2,3).
+    // Only 1 bridge: (2,3).
+    let mut adj = make_adj();
+    adj_set(adj, 0, 1, 1); adj_set(adj, 1, 0, 1);
+    adj_set(adj, 1, 2, 1); adj_set(adj, 2, 1, 1);
+    adj_set(adj, 2, 0, 1); adj_set(adj, 0, 2, 1);
+    adj_set(adj, 3, 4, 1); adj_set(adj, 4, 3, 1);
+    adj_set(adj, 4, 5, 1); adj_set(adj, 5, 4, 1);
+    adj_set(adj, 5, 3, 1); adj_set(adj, 3, 5, 1);
+    adj_set(adj, 2, 3, 1); adj_set(adj, 3, 2, 1);
+    let mut disc = [0,0,0,0,0,0,0,0];
+    let mut low  = [0,0,0,0,0,0,0,0];
+    let mut vis  = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut bu = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut bv = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nb = [0,0,0,0,0,0,0,0];
+    find_bridges(adj, 6, disc, low, vis, timer, bu, bv, nb);
+    assert_eq(nb[0], 1);
+    // The bridge connects 2 and 3 (in some direction)
+    let ok = if (bu[0] == 2 && bv[0] == 3) || (bu[0] == 3 && bv[0] == 2) { 1 } else { 0 };
+    assert_eq(ok, 1);
+    print("two_triangles_bridge: ok");
+}
+
+fn test_star_graph_bridges() {
+    // Star: center=0, leaves=1,2,3. Each edge is a bridge. 3 bridges.
+    let mut adj = make_adj();
+    adj_set(adj, 0, 1, 1); adj_set(adj, 1, 0, 1);
+    adj_set(adj, 0, 2, 1); adj_set(adj, 2, 0, 1);
+    adj_set(adj, 0, 3, 1); adj_set(adj, 3, 0, 1);
+    let mut disc = [0,0,0,0,0,0,0,0];
+    let mut low  = [0,0,0,0,0,0,0,0];
+    let mut vis  = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut bu = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut bv = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nb = [0,0,0,0,0,0,0,0];
+    find_bridges(adj, 4, disc, low, vis, timer, bu, bv, nb);
+    assert_eq(nb[0], 3);
+    print("star_bridges: ok");
+}
+
+fn test_disc_low_values() {
+    // Simple path 0-1-2. Verify disc/low correctness.
+    // DFS from 0: disc[0]=0,disc[1]=1,disc[2]=2.
+    // low[2]=2 (leaf), low[1]=min(1,low[2])=1, low[0]=min(0,low[1])=0.
+    // Bridges: low[1]=1>disc[0]=0 -> (0,1) is bridge; low[2]=2>disc[1]=1 -> (1,2) is bridge.
+    let mut adj = make_adj();
+    adj_set(adj, 0, 1, 1); adj_set(adj, 1, 0, 1);
+    adj_set(adj, 1, 2, 1); adj_set(adj, 2, 1, 1);
+    let mut disc = [0,0,0,0,0,0,0,0];
+    let mut low  = [0,0,0,0,0,0,0,0];
+    let mut vis  = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut bu = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut bv = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nb = [0,0,0,0,0,0,0,0];
+    find_bridges(adj, 3, disc, low, vis, timer, bu, bv, nb);
+    assert_eq(nb[0], 2);
+    assert_eq(disc[0], 0);
+    assert_eq(disc[1], 1);
+    assert_eq(disc[2], 2);
+    assert_eq(low[0], 0);
+    assert_eq(low[2], 2);
+    print("disc_low_values: ok");
+}
+
+fn main() -> Int {
+    test_single_bridge();
+    test_no_bridge_cycle();
+    test_two_triangles_bridge();
+    test_star_graph_bridges();
+    test_disc_low_values();
+    print("[OK] 571_interp_tarjan_bridges");
+    0
+}

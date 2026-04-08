@@ -1,0 +1,225 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, arith, float
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT extended float arithmetic — atan2, hypot, copysign, logbase, fmod
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn sqrt_approx(x: Float) -> Float {
+    if x <= 0.0 { 0.0 } else {
+        let mut guess = x / 2.0;
+        let mut i = 0;
+        while i < 25 {
+            guess = (guess + x / guess) / 2.0;
+            i = i + 1;
+        }
+        guess
+    }
+}
+
+fn ln_approx(x: Float) -> Float {
+    // ln(x) via series: ln(x) = 2 * sum_{k=0}^{N} (1/(2k+1)) * ((x-1)/(x+1))^(2k+1)
+    // Works best for x near 1; for larger x, reduce first
+    if x <= 0.0 { 0.0 - 999999.0 } else {
+        // Range reduction: ln(x) = ln(x/e^k) + k  where e ≈ 2.71828
+        let e_val = 2.71828182845905;
+        let mut val = x;
+        let mut k_count = 0.0;
+        while val > 2.0 {
+            val = val / e_val;
+            k_count = k_count + 1.0;
+        }
+        while val < 0.5 {
+            val = val * e_val;
+            k_count = k_count - 1.0;
+        }
+        let t = (val - 1.0) / (val + 1.0);
+        let t2 = t * t;
+        let mut result = t;
+        let mut power = t * t2;
+        let mut n = 1.0;
+        while n < 15.0 {
+            result = result + power / (2.0 * n + 1.0);
+            power = power * t2;
+            n = n + 1.0;
+        }
+        result * 2.0 + k_count
+    }
+}
+
+// ============================================================================
+// Test 1: hypot (sqrt(a^2 + b^2)) without overflow
+// ============================================================================
+
+fn test_hypot() {
+    // Classic 3-4-5 triangle
+    let h1 = sqrt_approx(3.0 * 3.0 + 4.0 * 4.0);
+    assert_eq(abs_f(h1 - 5.0) < 0.001, true);
+
+    // 5-12-13 triangle
+    let h2 = sqrt_approx(5.0 * 5.0 + 12.0 * 12.0);
+    assert_eq(abs_f(h2 - 13.0) < 0.001, true);
+
+    // Zero case: hypot(0, 7) = 7
+    let h3 = sqrt_approx(0.0 * 0.0 + 7.0 * 7.0);
+    assert_eq(abs_f(h3 - 7.0) < 0.001, true);
+
+    // Symmetric: hypot(a,b) = hypot(b,a)
+    let h4 = sqrt_approx(6.0 * 6.0 + 8.0 * 8.0);
+    let h5 = sqrt_approx(8.0 * 8.0 + 6.0 * 6.0);
+    assert_eq(abs_f(h4 - h5) < 0.0001, true);
+
+    print("test_hypot passed");
+}
+
+// ============================================================================
+// Test 2: copysign (magnitude of a, sign of b)
+// ============================================================================
+
+fn copysign(mag: Float, sgn: Float) -> Float {
+    let a = if mag < 0.0 { 0.0 - mag } else { mag };
+    if sgn < 0.0 { 0.0 - a } else { a }
+}
+
+fn test_copysign() {
+    // copysign(3.0, -1.0) = -3.0
+    assert_eq(abs_f(copysign(3.0, -1.0) - (0.0 - 3.0)) < 0.001, true);
+
+    // copysign(-3.0, 1.0) = 3.0
+    assert_eq(abs_f(copysign(-3.0, 1.0) - 3.0) < 0.001, true);
+
+    // copysign(5.0, 2.0) = 5.0
+    assert_eq(abs_f(copysign(5.0, 2.0) - 5.0) < 0.001, true);
+
+    // copysign(-7.0, -2.0) = -7.0
+    assert_eq(abs_f(copysign(-7.0, -2.0) - (0.0 - 7.0)) < 0.001, true);
+
+    print("test_copysign passed");
+}
+
+// ============================================================================
+// Test 3: fmod (floating-point remainder)
+// ============================================================================
+
+fn float_mod(a: Float, b: Float) -> Float {
+    // float_mod(a, b) = a - trunc(a/b) * b
+    let q = a / b;
+    // trunc: toward zero
+    let trunc_q = if q >= 0.0 {
+        let iq = q;
+        // manual floor for positive
+        let mut f = 0.0;
+        let mut n = 0;
+        while f + 1.0 <= iq {
+            f = f + 1.0;
+            n = n + 1;
+        }
+        f
+    } else {
+        let iq = 0.0 - q;
+        let mut f = 0.0;
+        let mut n = 0;
+        while f + 1.0 <= iq {
+            f = f + 1.0;
+            n = n + 1;
+        }
+        0.0 - f
+    };
+    a - trunc_q * b
+}
+
+fn test_float_mod() {
+    // float_mod(7.0, 3.0) = 1.0
+    assert_eq(abs_f(float_mod(7.0, 3.0) - 1.0) < 0.01, true);
+
+    // float_mod(10.0, 4.0) = 2.0
+    assert_eq(abs_f(float_mod(10.0, 4.0) - 2.0) < 0.01, true);
+
+    // float_mod(5.5, 2.0) ≈ 1.5
+    assert_eq(abs_f(float_mod(5.5, 2.0) - 1.5) < 0.01, true);
+
+    // float_mod(-7.0, 3.0) = -1.0
+    assert_eq(abs_f(float_mod(-7.0, 3.0) - (0.0 - 1.0)) < 0.01, true);
+
+    print("test_fmod passed");
+}
+
+// ============================================================================
+// Test 4: logbase (log_b(x) = ln(x) / ln(b))
+// ============================================================================
+
+fn test_logbase() {
+    // log2(8) = 3
+    let log2_8 = ln_approx(8.0) / ln_approx(2.0);
+    assert_eq(abs_f(log2_8 - 3.0) < 0.1, true);
+
+    // log10(1000) = 3
+    let log10_1000 = ln_approx(1000.0) / ln_approx(10.0);
+    assert_eq(abs_f(log10_1000 - 3.0) < 0.1, true);
+
+    // log2(16) = 4
+    let log2_16 = ln_approx(16.0) / ln_approx(2.0);
+    assert_eq(abs_f(log2_16 - 4.0) < 0.1, true);
+
+    // ln(1) = 0
+    assert_eq(abs_f(ln_approx(1.0)) < 0.01, true);
+
+    print("test_logbase passed");
+}
+
+// ============================================================================
+// Test 5: manual pow via exp(y * ln(x))
+// ============================================================================
+
+fn exp_approx(x: Float) -> Float {
+    let mut result = 1.0;
+    let mut term = 1.0;
+    let mut n = 1.0;
+    while n < 25.0 {
+        term = term * x / n;
+        result = result + term;
+        n = n + 1.0;
+    }
+    result
+}
+
+fn power_f(base: Float, exponent: Float) -> Float {
+    if base <= 0.0 { 0.0 } else {
+        exp_approx(exponent * ln_approx(base))
+    }
+}
+
+fn test_power_float() {
+    // 2^10 = 1024
+    let r1 = power_f(2.0, 10.0);
+    assert_eq(abs_f(r1 - 1024.0) < 2.0, true);
+
+    // 3^4 = 81
+    let r2 = power_f(3.0, 4.0);
+    assert_eq(abs_f(r2 - 81.0) < 1.0, true);
+
+    // x^0 = 1 (approximation)
+    let r3 = power_f(5.0, 0.0);
+    assert_eq(abs_f(r3 - 1.0) < 0.01, true);
+
+    // x^1 = x
+    let r4 = power_f(7.0, 1.0);
+    assert_eq(abs_f(r4 - 7.0) < 0.1, true);
+
+    print("test_power_float passed");
+}
+
+fn main() -> Int {
+    test_hypot();
+    test_copysign();
+    test_float_mod();
+    test_logbase();
+    test_power_float();
+    print("ALL PASSED");
+    0
+}

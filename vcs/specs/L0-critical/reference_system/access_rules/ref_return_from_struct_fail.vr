@@ -1,0 +1,32 @@
+// @test: typecheck-fail
+// @expected-error: E312
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, escaping, negative-test
+
+/// Test that references cannot outlive their source.
+/// Even when returned from struct methods, lifetime must be valid.
+/// Verum detects this at COMPILE-TIME via lifetime analysis.
+/// Spec: 04-memory-model.md#lifetime-rules
+
+type Container is {
+    value: Int,
+};
+
+implement Container {
+    fn get_ref(&self) -> &Int {
+        &self.value  // Valid: tied to &self lifetime
+    }
+}
+
+fn escape_from_temporary() -> &Int {
+    let container = Container { value: 42 };
+    container.get_ref()  // Reference returned - CBGR tracks generation
+}
+// When function returns, container is dropped, generation bumped
+
+fn main() {
+    let escaped = escape_from_temporary();
+    // Dereferencing triggers CBGR check
+    print(*escaped);  // PANIC: generation mismatch (container no longer exists)
+}

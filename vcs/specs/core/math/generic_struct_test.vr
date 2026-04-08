@@ -1,0 +1,42 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, struct, generic
+// @description: Generic struct field access test
+
+module specs.core.math.generic_struct_test;
+
+type Pair<T> is {
+    first: T,
+    second: Int,
+};
+
+implement<T> Pair<T> {
+    public fn new(first: T, second: Int) -> Pair<T> {
+        Pair { first, second }
+    }
+
+    public fn get_first(&self) -> T {
+        self.first
+    }
+
+    public fn get_second(&self) -> Int {
+        self.second
+    }
+}
+
+fn main() {
+    print("Creating Pair<Float>(3.14, 42)...");
+    let p: Pair<Float> = Pair.new(3.14, 42);
+    print("Pair created!");
+
+    print("Getting first...");
+    let f = p.get_first();
+    print(f"first = {f}");
+
+    print("Getting second...");
+    let s = p.get_second();
+    print(f"second = {s}");
+
+    print("Test done!");
+}

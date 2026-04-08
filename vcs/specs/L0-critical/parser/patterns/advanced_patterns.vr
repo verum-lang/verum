@@ -1,0 +1,278 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, advanced
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Data is { inner: Inner, extra: Int, valid: Bool };
+type Inner is { value: Int };
+type Point is { x: Int, y: Int };
+type Error is Network { code: Int } | Timeout { duration: Int } | Other;
+
+// Helper functions
+fn use_small<T>(x: T) { }
+fn use_medium<T>(x: T) { }
+fn use_large<T>(x: T) { }
+fn process<T>(a: T, b: T, c: Int) { }
+fn quadrant1_near_origin() { }
+fn near_origin() { }
+fn general_case(x: Int, y: Int) { }
+fn positive() { }
+fn negative() { }
+fn zero() { }
+fn special_case() { }
+fn normal_small() { }
+fn other() { }
+fn use_ref<T>(x: T) { }
+fn modify<T>(x: T) { }
+fn empty() { }
+fn one_element<T>(x: T) { }
+fn two_elements<A, B>(a: A, b: B) { }
+fn first_and_last<A, B>(a: A, b: B) { }
+fn first_and_rest<A, B>(a: A, b: B) { }
+fn init_and_last<A, B>(a: A, b: B) { }
+fn three_elements<A, B, C>(a: A, b: B, c: C) { }
+fn five_elements<A, B, C, D, E>(a: A, b: B, c: C, d: D, e: E) { }
+fn found_magic() { }
+fn process_inner<T>(x: T) { }
+fn process_shared<T>(x: T) { }
+fn small_some<T>(x: T) { }
+fn large_some<T>(x: T) { }
+fn regular_some<T>(x: T) { }
+fn handle_none() { }
+fn process_valid<T>(x: T) { }
+fn process_invalid<T>(x: T) { }
+fn handle_network_error<E>(e: E) { }
+fn handle_timeout<E>(e: E) { }
+fn handle_other_error<E>(e: E) { }
+fn nothing() { }
+fn use_owned<T>(x: T) { }
+fn use_data(x: Int, y: Int) { }
+fn special_condition() -> Bool { true }
+fn epsilon() -> Int { 1 }
+
+fn test_at_bindings() {
+    let value = 5;
+
+    // @ bindings
+    match value {
+        x @ 1..=10 => use_small(x),
+        x @ 11..=100 => use_medium(x),
+        x @ _ => use_large(x),
+    };
+}
+
+fn test_nested_at_bindings() {
+    let data = Data { inner: Inner { value: 42 }, extra: 10, valid: true };
+
+    // Nested @ bindings
+    match data {
+        outer @ Data { inner: inner @ Inner { value }, .. } => {
+            process(outer, inner, value)
+        }
+    };
+}
+
+fn test_pattern_guards_with_complex_conditions() {
+    let point = (5, 5);
+    let epsilon_val = 1;
+
+    // Pattern guards with complex conditions
+    match point {
+        (x, y) if x > 0 && y > 0 && x * x + y * y < 100 => quadrant1_near_origin(),
+        (x, y) if x < epsilon_val && y < epsilon_val => near_origin(),
+        (x, y) => general_case(x, y),
+    };
+}
+
+fn test_multiple_guards() {
+    let value = 5;
+
+    // Multiple guards
+    match value {
+        x if x > 0 => positive(),
+        x if x < 0 => negative(),
+        0 => zero(),
+    };
+}
+
+fn test_or_patterns_with_guards() {
+    let number = 2;
+
+    // Or patterns with guards
+    match number {
+        1 | 2 | 3 if special_condition() => special_case(),
+        1 | 2 | 3 => normal_small(),
+        _ => other(),
+    };
+}
+
+fn test_ref_patterns() {
+    let value = 42;
+
+    // Ref patterns
+    match &value {
+        ref x => use_ref(x),
+    };
+}
+
+fn test_ref_mut_patterns() {
+    let mut value = 42;
+
+    // Ref mut patterns
+    match &mut value {
+        ref mut x => modify(x),
+    };
+}
+
+fn test_slice_patterns() {
+    let slice = [1, 2, 3, 4, 5];
+
+    // Slice patterns
+    match slice {
+        [] => empty(),
+        [single] => one_element(single),
+        [first, second] => two_elements(first, second),
+        [first, .., last] => first_and_last(first, last),
+        [first, rest @ ..] => first_and_rest(first, rest),
+        [init @ .., last] => init_and_last(init, last),
+    };
+}
+
+fn test_array_patterns_with_exact_length() {
+    let arr = [1, 2, 3];
+
+    // Array patterns with exact length
+    match arr {
+        [a, b, c] => three_elements(a, b, c),
+    };
+}
+
+fn test_const_patterns() {
+    let MAGIC: Int = 42;
+    let PI_APPROX: Float = 3.14;
+    let value = 42;
+
+    // Const patterns
+    match value {
+        42 => found_magic(),
+        0 => zero(),
+        _ => other(),
+    };
+}
+
+fn test_heap_patterns() {
+    let heap_val = Heap(42);
+
+    // Heap patterns - Verum uses Heap<T> instead of Rust's Box<T>
+    match heap_val {
+        Heap(inner) => process_inner(inner),
+    };
+}
+
+fn test_shared_patterns() {
+    let shared = Shared(42);
+
+    // Shared patterns - Verum uses Shared<T> instead of Rust's Arc<T>
+    match shared {
+        Shared(data) => process_shared(data),
+    };
+}
+
+fn test_option_patterns_with_binding() {
+    let maybe: Maybe<Int> = Some(5);
+
+    // Option patterns with binding
+    match maybe {
+        Some(x @ 1..=10) => small_some(x),
+        Some(x) if x > 100 => large_some(x),
+        Some(x) => regular_some(x),
+        None => handle_none(),
+    };
+}
+
+fn test_result_patterns() {
+    let result: Result<Data, Error> = Ok(Data { inner: Inner { value: 42 }, extra: 10, valid: true });
+
+    // Result patterns
+    match result {
+        Ok(value @ Data { valid: true, .. }) => process_valid(value),
+        Ok(value) => process_invalid(value),
+        Err(e @ Error.Network { .. }) => handle_network_error(e),
+        Err(e @ Error.Timeout { .. }) => handle_timeout(e),
+        Err(e) => handle_other_error(e),
+    };
+}
+
+// Exhaustiveness with never type - use Never type name
+fn never_returns() -> Never {
+    panic("never")
+}
+
+fn test_binding_modes() {
+    let option: Maybe<Int> = Some(42);
+
+    // Binding modes
+    match &option {
+        Some(x) => use_ref(x),      // x is &T
+        None => nothing(),
+    };
+
+    match option {
+        Some(x) => use_owned(x),    // x is T (moved)
+        None => nothing(),
+    };
+}
+
+fn test_destructure_with_type_ascription() {
+    let value = Data { inner: Inner { value: 42 }, extra: 10, valid: true };
+
+    // Destructure with type ascription
+    match value {
+        Data { inner: Inner { value: x_val }, extra: y_val, .. } => use_data(x_val, y_val),
+    };
+}
+
+fn test_match_ergonomics() {
+    // Match ergonomics
+    match &Some(5) {
+        Some(n) => use_ref(n),  // n is &i32
+        None => nothing(),
+    };
+}
+
+fn test_pattern_in_if_let() {
+    let maybe: Maybe<Int> = Some(5);
+    let other: Maybe<Int> = Some(10);
+
+    // Pattern in if let - split into separate if statements
+    if let Some(x) = maybe {
+        if x > 0 {
+            if let Some(y) = other {
+                if y > x {
+                    process(x, y, 0)
+                }
+            }
+        }
+    }
+}
+
+fn test_let_else_with_simple_pattern() {
+    type MaybeInt is None | Some(Int);
+    let data = MaybeInt.Some(50);
+
+    // Use if-let with else instead of let-else for complex patterns
+    if let MaybeInt.Some(x) = data {
+        // Use x here
+        let _ = x;
+    } else {
+        return;
+    }
+}
+
+// Helper function for panic - use () return type with infinite loop
+fn panic(msg: Text) {
+    loop { }
+}

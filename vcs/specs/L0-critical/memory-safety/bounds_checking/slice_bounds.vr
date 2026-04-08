@@ -1,0 +1,80 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-checking, slices, runtime
+// @description: Tests slice creation and access bounds checking
+
+/// Slices in Verum are fat pointers that include bounds information:
+/// - Pointer to data
+/// - Length (number of elements)
+/// - Generation (for CBGR safety)
+///
+/// All slice operations are bounds-checked both at creation and access.
+
+fn main() {
+    test_slice_creation();
+    test_slice_access();
+    test_slice_of_slice();
+    test_empty_slice();
+
+    print("All slice bounds tests passed!");
+}
+
+fn test_slice_creation() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Valid slice creations using range syntax
+    let slice1 = arr[0..5];   // Elements 0-4
+    assert(slice1.len() == 5);
+
+    let slice2 = arr[5..10];  // Elements 5-9
+    assert(slice2.len() == 5);
+
+    // Empty slice is valid
+    let slice6 = arr[5..5];
+    assert(slice6.len() == 0);
+}
+
+fn test_slice_access() {
+    let arr = [10, 20, 30, 40, 50];
+    let slice = arr[1..4];  // [20, 30, 40]
+
+    // Valid access within slice bounds
+    assert(slice[0] == 20);
+    assert(slice[1] == 30);
+    assert(slice[2] == 40);
+
+    // Length is slice length, not original array
+    assert(slice.len() == 3);
+
+    // Safe iteration
+    let mut sum = 0;
+    for elem in slice {
+        sum = sum + elem;
+    }
+    assert(sum == 90);
+}
+
+fn test_slice_of_slice() {
+    let arr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let slice1 = arr[2..8];    // [2, 3, 4, 5, 6, 7]
+    let slice2 = slice1[1..4]; // [3, 4, 5]
+
+    assert(slice2.len() == 3);
+    assert(slice2[0] == 3);
+    assert(slice2[2] == 5);
+}
+
+fn test_empty_slice() {
+    let empty: List<Int> = [];
+
+    assert(empty.len() == 0);
+    assert(empty.is_empty());
+
+    // Iteration produces nothing
+    let mut count = 0;
+    for _ in empty {
+        count = count + 1;
+    }
+    assert(count == 0);
+}

@@ -1,0 +1,38 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, coinductive, streams
+// @description: Test parsing of coinductive type definitions
+
+// Simple coinductive type: infinite stream
+type Stream<T> is coinductive {
+    fn head(&self) -> T;
+    fn tail(&self) -> Stream<T>;
+};
+
+// Coinductive type with multiple observations
+type Process<I, O> is coinductive {
+    fn step(&self, input: I) -> (O, Process<I, O>);
+};
+
+// Coinductive colist (potentially infinite list)
+type Colist<T> is coinductive {
+    fn uncons(&self) -> Maybe<(T, Colist<T>)>;
+};
+
+// Coinductive type with associated type
+type EventStream<E> is coinductive {
+    fn next_event(&self) -> E;
+    fn rest(&self) -> EventStream<E>;
+    fn timestamp(&self) -> Int;
+};
+
+// Coinductive type with generic bounds
+type MappedStream<A, B> is coinductive {
+    fn current(&self) -> B;
+    fn advance(&self) -> MappedStream<A, B>;
+};
+
+fn main() -> Int {
+    0
+}

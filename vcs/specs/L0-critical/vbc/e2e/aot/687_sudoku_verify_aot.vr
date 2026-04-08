@@ -1,0 +1,175 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, sudoku, verification, constraint
+// @timeout: 30000
+
+// Sudoku constraint verification on a 4x4 mini-sudoku (values 1-4)
+// Grid stored as two Arr8s (16 cells), but we'll use one Arr8 for a single row/column
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// 4x4 grid: row r, col c → position r*4+c
+// Rows 0-1 in grid_a (positions 0-7), rows 2-3 in grid_b (positions 0-7)
+fn grid_get(ga: Arr8, gb: Arr8, r: Int, c: Int) -> Int {
+    if r < 2 { get8(ga, r * 4 + c) }
+    else { get8(gb, (r - 2) * 4 + c) }
+}
+
+// Check if a group of 4 cells contains 1-4 exactly once
+fn has_all_4(v0: Int, v1: Int, v2: Int, v3: Int) -> Int {
+    // Sum should be 10 (1+2+3+4), and product should be 24 (1*2*3*4)
+    let s = v0 + v1 + v2 + v3;
+    let p = v0 * v1 * v2 * v3;
+    if s == 10 { if p == 24 { 1 } else { 0 } }
+    else { 0 }
+}
+
+// Check row r
+fn check_row(ga: Arr8, gb: Arr8, r: Int) -> Int {
+    has_all_4(grid_get(ga, gb, r, 0), grid_get(ga, gb, r, 1),
+              grid_get(ga, gb, r, 2), grid_get(ga, gb, r, 3))
+}
+
+// Check column c
+fn check_col(ga: Arr8, gb: Arr8, c: Int) -> Int {
+    has_all_4(grid_get(ga, gb, 0, c), grid_get(ga, gb, 1, c),
+              grid_get(ga, gb, 2, c), grid_get(ga, gb, 3, c))
+}
+
+// Check 2x2 box starting at (r, c)
+fn check_box(ga: Arr8, gb: Arr8, r: Int, c: Int) -> Int {
+    has_all_4(grid_get(ga, gb, r, c), grid_get(ga, gb, r, c + 1),
+              grid_get(ga, gb, r + 1, c), grid_get(ga, gb, r + 1, c + 1))
+}
+
+// Full validation
+fn is_valid_sudoku(ga: Arr8, gb: Arr8) -> Int {
+    let mut valid = 1;
+    // Check 4 rows
+    let mut r = 0;
+    while r < 4 {
+        if check_row(ga, gb, r) == 0 { valid = 0; }
+        r = r + 1;
+    }
+    // Check 4 columns
+    let mut c = 0;
+    while c < 4 {
+        if check_col(ga, gb, c) == 0 { valid = 0; }
+        c = c + 1;
+    }
+    // Check 4 boxes
+    if check_box(ga, gb, 0, 0) == 0 { valid = 0; }
+    if check_box(ga, gb, 0, 2) == 0 { valid = 0; }
+    if check_box(ga, gb, 2, 0) == 0 { valid = 0; }
+    if check_box(ga, gb, 2, 2) == 0 { valid = 0; }
+    valid
+}
+
+fn test_valid_solution() -> Int {
+    // Valid 4x4 sudoku:
+    // 1 2 | 3 4
+    // 3 4 | 1 2
+    // ----+----
+    // 2 1 | 4 3
+    // 4 3 | 2 1
+    let ga = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 3, v5: 4, v6: 1, v7: 2 };
+    let gb = Arr8 { v0: 2, v1: 1, v2: 4, v3: 3, v4: 4, v5: 3, v6: 2, v7: 1 };
+    assert_eq(is_valid_sudoku(ga, gb), 1);
+    1
+}
+
+fn test_another_valid() -> Int {
+    // Another valid solution:
+    // 1 3 | 2 4
+    // 2 4 | 1 3
+    // ----+----
+    // 3 1 | 4 2
+    // 4 2 | 3 1
+    let ga = Arr8 { v0: 1, v1: 3, v2: 2, v3: 4, v4: 2, v5: 4, v6: 1, v7: 3 };
+    let gb = Arr8 { v0: 3, v1: 1, v2: 4, v3: 2, v4: 4, v5: 2, v6: 3, v7: 1 };
+    assert_eq(is_valid_sudoku(ga, gb), 1);
+    1
+}
+
+fn test_invalid_row() -> Int {
+    // Row 0 has duplicate 1:
+    // 1 1 | 3 4  ← invalid row
+    // 3 4 | 1 2
+    // 2 1 | 4 3
+    // 4 3 | 2 1
+    let ga = Arr8 { v0: 1, v1: 1, v2: 3, v3: 4, v4: 3, v5: 4, v6: 1, v7: 2 };
+    let gb = Arr8 { v0: 2, v1: 1, v2: 4, v3: 3, v4: 4, v5: 3, v6: 2, v7: 1 };
+    assert_eq(is_valid_sudoku(ga, gb), 0);
+    1
+}
+
+fn test_invalid_col() -> Int {
+    // Column 0 has duplicate:
+    // 1 2 | 3 4
+    // 1 4 | 2 3  ← col 0 duplicate
+    // 3 1 | 4 2
+    // 4 3 | 1 2 -- but we need to check full validity
+    let ga = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 1, v5: 4, v6: 2, v7: 3 };
+    let gb = Arr8 { v0: 3, v1: 1, v2: 4, v3: 2, v4: 4, v5: 3, v6: 1, v7: 2 };
+    // Col 0: 1,1,3,4 → sum=9, not 10
+    assert_eq(check_col(ga, gb, 0), 0);
+    assert_eq(is_valid_sudoku(ga, gb), 0);
+    1
+}
+
+fn test_has_all_4() -> Int {
+    assert_eq(has_all_4(1, 2, 3, 4), 1);
+    assert_eq(has_all_4(4, 3, 2, 1), 1);
+    assert_eq(has_all_4(2, 4, 1, 3), 1);
+    assert_eq(has_all_4(1, 1, 3, 4), 0); // duplicate
+    assert_eq(has_all_4(1, 2, 3, 5), 0); // wrong value
+    assert_eq(has_all_4(0, 2, 3, 4), 0); // wrong value
+    1
+}
+
+fn test_box_check() -> Int {
+    // Valid solution
+    let ga = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 3, v5: 4, v6: 1, v7: 2 };
+    let gb = Arr8 { v0: 2, v1: 1, v2: 4, v3: 3, v4: 4, v5: 3, v6: 2, v7: 1 };
+    // Box (0,0): 1,2,3,4 ✓
+    assert_eq(check_box(ga, gb, 0, 0), 1);
+    // Box (0,2): 3,4,1,2 ✓
+    assert_eq(check_box(ga, gb, 0, 2), 1);
+    // Box (2,0): 2,1,4,3 ✓
+    assert_eq(check_box(ga, gb, 2, 0), 1);
+    // Box (2,2): 4,3,2,1 ✓
+    assert_eq(check_box(ga, gb, 2, 2), 1);
+    1
+}
+
+fn main() -> Int {
+    test_valid_solution();
+    test_another_valid();
+    test_invalid_row();
+    test_invalid_col();
+    test_has_all_4();
+    test_box_check();
+    print("[OK] 687_sudoku_verify_aot");
+    0
+}

@@ -1,0 +1,36 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, math, minimal
+// @description: Minimal vector test
+
+module specs.core.math.minimal_vector_test;
+
+type SimpleVec is {
+    data: List<Float>,
+    len: Int,
+};
+
+implement SimpleVec {
+    public fn new(n: Int) -> SimpleVec {
+        let data = List.with_capacity(n);
+        // Don't push anything, just create empty list with capacity
+        SimpleVec { data, len: n }
+    }
+
+    public fn len(&self) -> Int {
+        self.len
+    }
+}
+
+fn main() {
+    print("Creating SimpleVec.new(3)...");
+    let v = SimpleVec.new(3);
+    print("Vector created!");
+
+    print("Getting length...");
+    let l = v.len();
+    print(f"Length = {l}");
+
+    print("Test done!");
+}

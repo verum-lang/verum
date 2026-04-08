@@ -1,0 +1,467 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, accumulator, loops
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: accumulator patterns — tail-recursive-style loops
+// using accumulators, building results through accumulation, digit sum,
+// reverse number, reduce-like patterns
+
+// =============================================================================
+// Basic accumulator: sum range
+// =============================================================================
+
+fn sum_range(start: Int, end: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while i < end {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_sum_range() {
+    assert_eq(sum_range(0, 0), 0);
+    assert_eq(sum_range(0, 1), 0);
+    assert_eq(sum_range(1, 6), 15);
+    assert_eq(sum_range(1, 11), 55);
+    assert_eq(sum_range(1, 101), 5050);
+}
+
+// =============================================================================
+// Factorial via accumulator
+// =============================================================================
+
+fn factorial_acc(n: Int) -> Int {
+    let mut acc = 1;
+    let mut i = 2;
+    while i <= n {
+        acc = acc * i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_factorial() {
+    assert_eq(factorial_acc(0), 1);
+    assert_eq(factorial_acc(1), 1);
+    assert_eq(factorial_acc(5), 120);
+    assert_eq(factorial_acc(10), 3628800);
+    assert_eq(factorial_acc(12), 479001600);
+}
+
+// =============================================================================
+// Tail-recursive style: factorial with accumulator parameter
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn fact_tail(n: Int, acc: Int) -> Int {
+    if n <= 1 {
+        acc
+    } else {
+        fact_tail(n - 1, acc * n)
+    }
+}
+
+fn test_factorial_tail() {
+    assert_eq(fact_tail(1, 1), 1);
+    assert_eq(fact_tail(5, 1), 120);
+    assert_eq(fact_tail(10, 1), 3628800);
+}
+
+// =============================================================================
+// Digit sum
+// =============================================================================
+
+fn digit_sum(n: Int) -> Int {
+    let mut val = n;
+    if val < 0 {
+        val = -val;
+    }
+    let mut acc = 0;
+    if val == 0 {
+        return 0;
+    }
+    while val > 0 {
+        acc = acc + val % 10;
+        val = val / 10;
+    }
+    acc
+}
+
+fn test_digit_sum() {
+    assert_eq(digit_sum(0), 0);
+    assert_eq(digit_sum(5), 5);
+    assert_eq(digit_sum(123), 6);
+    assert_eq(digit_sum(999), 27);
+    assert_eq(digit_sum(12345), 15);
+    assert_eq(digit_sum(100), 1);
+    assert_eq(digit_sum(-123), 6);
+}
+
+// =============================================================================
+// Recursive digit sum (digital root)
+// =============================================================================
+
+fn digital_root(n: Int) -> Int {
+    let mut val = n;
+    if val < 0 {
+        val = -val;
+    }
+    while val >= 10 {
+        val = digit_sum(val);
+    }
+    val
+}
+
+fn test_digital_root() {
+    assert_eq(digital_root(0), 0);
+    assert_eq(digital_root(5), 5);
+    assert_eq(digital_root(9), 9);
+    assert_eq(digital_root(10), 1);
+    assert_eq(digital_root(99), 9);
+    assert_eq(digital_root(123), 6);
+    assert_eq(digital_root(9999), 9);
+    // 493 -> 4+9+3=16 -> 1+6=7
+    assert_eq(digital_root(493), 7);
+}
+
+// =============================================================================
+// Reverse number
+// =============================================================================
+
+fn reverse_number(n: Int) -> Int {
+    let mut val = n;
+    let is_neg = val < 0;
+    if is_neg {
+        val = -val;
+    }
+    let mut acc = 0;
+    while val > 0 {
+        acc = acc * 10 + val % 10;
+        val = val / 10;
+    }
+    if is_neg { -acc } else { acc }
+}
+
+fn test_reverse_number() {
+    assert_eq(reverse_number(0), 0);
+    assert_eq(reverse_number(1), 1);
+    assert_eq(reverse_number(123), 321);
+    assert_eq(reverse_number(1000), 1);
+    assert_eq(reverse_number(12345), 54321);
+    assert_eq(reverse_number(-123), -321);
+}
+
+// =============================================================================
+// Is palindrome number
+// =============================================================================
+
+fn is_palindrome_num(n: Int) -> Int {
+    if n < 0 {
+        return 0;
+    }
+    if n == reverse_number(n) { 1 } else { 0 }
+}
+
+fn test_is_palindrome() {
+    assert_eq(is_palindrome_num(0), 1);
+    assert_eq(is_palindrome_num(1), 1);
+    assert_eq(is_palindrome_num(11), 1);
+    assert_eq(is_palindrome_num(121), 1);
+    assert_eq(is_palindrome_num(12321), 1);
+    assert_eq(is_palindrome_num(123), 0);
+    assert_eq(is_palindrome_num(10), 0);
+    assert_eq(is_palindrome_num(-121), 0);
+}
+
+// =============================================================================
+// Count digits
+// =============================================================================
+
+fn count_digits(n: Int) -> Int {
+    let mut val = n;
+    if val < 0 {
+        val = -val;
+    }
+    if val == 0 {
+        return 1;
+    }
+    let mut count = 0;
+    while val > 0 {
+        count = count + 1;
+        val = val / 10;
+    }
+    count
+}
+
+fn test_count_digits() {
+    assert_eq(count_digits(0), 1);
+    assert_eq(count_digits(5), 1);
+    assert_eq(count_digits(42), 2);
+    assert_eq(count_digits(123), 3);
+    assert_eq(count_digits(10000), 5);
+    assert_eq(count_digits(-99), 2);
+}
+
+// =============================================================================
+// Power via accumulator
+// =============================================================================
+
+fn power_acc(base: Int, exp: Int) -> Int {
+    let mut acc = 1;
+    let mut i = 0;
+    while i < exp {
+        acc = acc * base;
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_power() {
+    assert_eq(power_acc(2, 0), 1);
+    assert_eq(power_acc(2, 1), 2);
+    assert_eq(power_acc(2, 10), 1024);
+    assert_eq(power_acc(3, 5), 243);
+    assert_eq(power_acc(10, 3), 1000);
+    assert_eq(power_acc(1, 100), 1);
+}
+
+// =============================================================================
+// GCD via Euclidean algorithm with accumulator-style loop
+// =============================================================================
+
+fn gcd_loop(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    if x < 0 { x = -x; }
+    if y < 0 { y = -y; }
+    while y != 0 {
+        let temp = y;
+        y = x % y;
+        x = temp;
+    }
+    x
+}
+
+fn lcm_loop(a: Int, b: Int) -> Int {
+    if a == 0 || b == 0 {
+        return 0;
+    }
+    let mut x = a;
+    let mut y = b;
+    if x < 0 { x = -x; }
+    if y < 0 { y = -y; }
+    (x / gcd_loop(x, y)) * y
+}
+
+fn test_gcd() {
+    assert_eq(gcd_loop(12, 8), 4);
+    assert_eq(gcd_loop(100, 75), 25);
+    assert_eq(gcd_loop(17, 13), 1);
+    assert_eq(gcd_loop(0, 5), 5);
+    assert_eq(gcd_loop(48, 18), 6);
+}
+
+fn test_lcm() {
+    assert_eq(lcm_loop(4, 6), 12);
+    assert_eq(lcm_loop(3, 5), 15);
+    assert_eq(lcm_loop(12, 8), 24);
+    assert_eq(lcm_loop(7, 7), 7);
+    assert_eq(lcm_loop(0, 5), 0);
+}
+
+// =============================================================================
+// Reduce pattern: apply binary operation across range
+// =============================================================================
+
+fn reduce_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_reduce() {
+    // Sum 1..11
+    let sum = reduce_range(1, 11, 0, |a: Int, b: Int| -> Int { a + b });
+    assert_eq(sum, 55);
+
+    // Product 1..7
+    let prod = reduce_range(1, 7, 1, |a: Int, b: Int| -> Int { a * b });
+    assert_eq(prod, 720);
+
+    // Max in 0..10
+    let max_val = reduce_range(0, 10, -1, |a: Int, b: Int| -> Int { if b > a { b } else { a } });
+    assert_eq(max_val, 9);
+}
+
+// =============================================================================
+// Fibonacci via accumulator
+// =============================================================================
+
+fn fibonacci_acc(n: Int) -> Int {
+    if n <= 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    let mut prev2 = 0;
+    let mut prev1 = 1;
+    let mut i = 2;
+    while i <= n {
+        let next = prev1 + prev2;
+        prev2 = prev1;
+        prev1 = next;
+        i = i + 1;
+    }
+    prev1
+}
+
+fn test_fibonacci() {
+    assert_eq(fibonacci_acc(0), 0);
+    assert_eq(fibonacci_acc(1), 1);
+    assert_eq(fibonacci_acc(2), 1);
+    assert_eq(fibonacci_acc(5), 5);
+    assert_eq(fibonacci_acc(10), 55);
+    assert_eq(fibonacci_acc(20), 6765);
+}
+
+// =============================================================================
+// Running sum / prefix sum pattern
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(arr: Arr8, idx: Int) -> Int {
+    if idx == 0 { arr.e0 }
+    else if idx == 1 { arr.e1 }
+    else if idx == 2 { arr.e2 }
+    else if idx == 3 { arr.e3 }
+    else if idx == 4 { arr.e4 }
+    else if idx == 5 { arr.e5 }
+    else if idx == 6 { arr.e6 }
+    else { arr.e7 }
+}
+
+fn arr8_set(arr: Arr8, idx: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if idx == 0 { val } else { arr.e0 },
+        e1: if idx == 1 { val } else { arr.e1 },
+        e2: if idx == 2 { val } else { arr.e2 },
+        e3: if idx == 3 { val } else { arr.e3 },
+        e4: if idx == 4 { val } else { arr.e4 },
+        e5: if idx == 5 { val } else { arr.e5 },
+        e6: if idx == 6 { val } else { arr.e6 },
+        e7: if idx == 7 { val } else { arr.e7 }
+    }
+}
+
+fn prefix_sum(arr: Arr8, len: Int) -> Arr8 {
+    let mut result = arr;
+    let mut i = 1;
+    while i < len {
+        let prev = arr8_get(result, i - 1);
+        let cur = arr8_get(result, i);
+        result = arr8_set(result, i, prev + cur);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_prefix_sum() {
+    let arr = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let ps = prefix_sum(arr, 5);
+    // prefix sum: [1, 3, 6, 10, 15, ...]
+    assert_eq(arr8_get(ps, 0), 1);
+    assert_eq(arr8_get(ps, 1), 3);
+    assert_eq(arr8_get(ps, 2), 6);
+    assert_eq(arr8_get(ps, 3), 10);
+    assert_eq(arr8_get(ps, 4), 15);
+}
+
+// =============================================================================
+// Build result by accumulation: integer to binary string count
+// =============================================================================
+
+fn count_ones(n: Int) -> Int {
+    let mut val = n;
+    let mut count = 0;
+    while val > 0 {
+        if val % 2 == 1 {
+            count = count + 1;
+        }
+        val = val / 2;
+    }
+    count
+}
+
+fn test_count_ones() {
+    assert_eq(count_ones(0), 0);
+    assert_eq(count_ones(1), 1);
+    assert_eq(count_ones(2), 1);
+    assert_eq(count_ones(3), 2);
+    assert_eq(count_ones(7), 3);
+    assert_eq(count_ones(255), 8);
+    assert_eq(count_ones(1023), 10);
+}
+
+// =============================================================================
+// Accumulate with condition: sum only elements meeting criteria
+// =============================================================================
+
+fn sum_even_digits(n: Int) -> Int {
+    let mut val = n;
+    if val < 0 { val = -val; }
+    let mut acc = 0;
+    if val == 0 {
+        return 0;
+    }
+    while val > 0 {
+        let d = val % 10;
+        if d % 2 == 0 {
+            acc = acc + d;
+        }
+        val = val / 10;
+    }
+    acc
+}
+
+fn test_sum_even_digits() {
+    assert_eq(sum_even_digits(0), 0);
+    assert_eq(sum_even_digits(2468), 20);
+    assert_eq(sum_even_digits(13579), 0);
+    assert_eq(sum_even_digits(123456), 12);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_sum_range();
+    test_factorial();
+    test_factorial_tail();
+    test_digit_sum();
+    test_digital_root();
+    test_reverse_number();
+    test_is_palindrome();
+    test_count_digits();
+    test_power();
+    test_gcd();
+    test_lcm();
+    test_reduce();
+    test_fibonacci();
+    test_prefix_sum();
+    test_count_ones();
+    test_sum_even_digits();
+    print("[OK] 270_interp_accumulator");
+    0
+}

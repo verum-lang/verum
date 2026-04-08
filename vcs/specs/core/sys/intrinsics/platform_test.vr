@@ -1,0 +1,317 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/platform_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, platform, detection, compile-time
+// @description: Tests for platform detection intrinsics that provide compile-time
+//               and runtime information about the execution environment.
+//
+// Coverage:
+// - is_debug(): Debug mode detection
+// - target_os(): Operating system detection (linux=1, macos=2, windows=3, wasm=4)
+// - target_arch(): Architecture detection (x86_64=1, aarch64=2, riscv64=3, wasm32=4)
+// - num_cpus(): CPU core count
+// - is_interpreted(): VBC interpreter detection
+// - get_tier(): Execution tier detection (0=VBC, 1=JIT baseline, 2=JIT opt, 3=AOT)
+//
+// Test Strategy:
+// - Validate return value ranges
+// - Cross-check with @cfg attributes
+// - Verify consistency between related intrinsics
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.platform_test;
+
+mount core.intrinsics.{
+    is_debug, target_os, target_arch, num_cpus,
+    is_interpreted, get_tier, tier_promote,
+};
+
+// Platform constants for readable tests
+const OS_UNKNOWN: UInt8 = 0;
+const OS_LINUX: UInt8 = 1;
+const OS_MACOS: UInt8 = 2;
+const OS_WINDOWS: UInt8 = 3;
+const OS_WASM: UInt8 = 4;
+
+const ARCH_UNKNOWN: UInt8 = 0;
+const ARCH_X86_64: UInt8 = 1;
+const ARCH_AARCH64: UInt8 = 2;
+const ARCH_RISCV64: UInt8 = 3;
+const ARCH_WASM32: UInt8 = 4;
+
+const TIER_INTERPRETER: UInt8 = 0;
+const TIER_JIT_BASELINE: UInt8 = 1;
+const TIER_JIT_OPTIMIZED: UInt8 = 2;
+const TIER_AOT: UInt8 = 3;
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Debug Mode Detection Tests
+// =============================================================================
+
+@test
+fn test_debug_mode_detection() {
+    let debug = is_debug();
+
+    // is_debug() returns a boolean
+    assert(debug == true || debug == false);
+
+    // In test runs, we're typically in debug mode
+    // but this test should pass in both modes
+
+    // Cross-check with @cfg if possible
+    @cfg(debug_assertions) {
+        assert(debug == true);
+    }
+
+    @cfg(not(debug_assertions)) {
+        assert(debug == false);
+    }
+}
+
+// =============================================================================
+// Target OS Detection Tests
+// =============================================================================
+
+@test
+fn test_target_os_detection() {
+    let os = target_os();
+
+    // OS value must be in valid range
+    assert(os >= OS_UNKNOWN && os <= OS_WASM);
+
+    // Must not be unknown on supported platforms
+    assert(os != OS_UNKNOWN);
+
+    // Cross-check with @cfg
+    @cfg(target_os = "linux") {
+        assert(os == OS_LINUX);
+    }
+
+    @cfg(target_os = "macos") {
+        assert(os == OS_MACOS);
+    }
+
+    @cfg(target_os = "windows") {
+        assert(os == OS_WINDOWS);
+    }
+
+    // Verify OS-specific features are available
+    if os == OS_LINUX {
+        test_linux_specific();
+    } else if os == OS_MACOS {
+        test_macos_specific();
+    } else if os == OS_WINDOWS {
+        test_windows_specific();
+    }
+}
+
+@test
+fn test_linux_specific() {
+    // Linux should support direct syscalls
+    // Verify by checking that syscall intrinsics are available
+    // (actual syscall tests in syscall_test.vr)
+    print("Running on Linux");
+}
+
+@test
+fn test_macos_specific() {
+    // macOS uses libSystem for most operations
+    print("Running on macOS");
+}
+
+@test
+fn test_windows_specific() {
+    // Windows uses kernel32/ntdll
+    print("Running on Windows");
+}
+
+// =============================================================================
+// Target Architecture Detection Tests
+// =============================================================================
+
+@test
+fn test_target_arch_detection() {
+    let arch = target_arch();
+
+    // Architecture value must be in valid range
+    assert(arch >= ARCH_UNKNOWN && arch <= ARCH_WASM32);
+
+    // Must not be unknown on supported platforms
+    assert(arch != ARCH_UNKNOWN);
+
+    // Cross-check with @cfg
+    @cfg(target_arch = "x86_64") {
+        assert(arch == ARCH_X86_64);
+    }
+
+    @cfg(target_arch = "aarch64") {
+        assert(arch == ARCH_AARCH64);
+    }
+
+    @cfg(target_arch = "riscv64") {
+        assert(arch == ARCH_RISCV64);
+    }
+
+    @cfg(target_arch = "wasm32") {
+        assert(arch == ARCH_WASM32);
+    }
+
+    // Verify architecture-specific features
+    if arch == ARCH_X86_64 {
+        test_x86_64_specific();
+    } else if arch == ARCH_AARCH64 {
+        test_aarch64_specific();
+    }
+}
+
+@test
+fn test_x86_64_specific() {
+    // x86_64 should support RDTSC
+    // (actual RDTSC tests in time_test.vr)
+    print("Running on x86_64");
+}
+
+@test
+fn test_aarch64_specific() {
+    // ARM64 uses different timing mechanisms
+    print("Running on aarch64");
+}
+
+// =============================================================================
+// CPU Count Tests
+// =============================================================================
+
+@test
+fn test_num_cpus() {
+    let cpus = num_cpus();
+
+    // Must have at least 1 CPU
+    assert(cpus >= 1);
+
+    // Sanity check: no system has more than 10,000 CPUs (for now)
+    assert(cpus <= 10000);
+
+    // Common CPU counts should be powers of 2 or common configurations
+    // This is not a hard requirement, just a sanity check
+    print(f"Detected {cpus} CPU cores");
+
+    // Multiple calls should return the same value (cached)
+    let cpus2 = num_cpus();
+    assert(cpus == cpus2);
+}
+
+// =============================================================================
+// Execution Tier Tests
+// =============================================================================
+
+@test
+fn test_execution_tier() {
+    let tier = get_tier();
+    let interpreted = is_interpreted();
+
+    // Tier must be in valid range
+    assert(tier >= TIER_INTERPRETER && tier <= TIER_AOT);
+
+    // Consistency check: is_interpreted() should match tier == 0
+    if interpreted {
+        assert(tier == TIER_INTERPRETER);
+    } else {
+        assert(tier > TIER_INTERPRETER);
+    }
+
+    // Report the tier for debugging
+    if tier == TIER_INTERPRETER {
+        print("Running in VBC interpreter (Tier 0)");
+    } else if tier == TIER_JIT_BASELINE {
+        print("Running in JIT baseline (Tier 1)");
+    } else if tier == TIER_JIT_OPTIMIZED {
+        print("Running in JIT optimized (Tier 2)");
+    } else if tier == TIER_AOT {
+        print("Running in AOT compiled (Tier 3)");
+    }
+
+    // When running tests via vtest at tier 0, we should be interpreted
+    // This may change as we implement JIT/AOT
+    @cfg(test_tier = "0") {
+        assert(interpreted);
+        assert(tier == TIER_INTERPRETER);
+    }
+}
+
+// =============================================================================
+// Platform Consistency Tests
+// =============================================================================
+
+@test
+fn test_platform_consistency() {
+    let os = target_os();
+    let arch = target_arch();
+
+    // Valid combinations check
+    // WASM32 should only appear with WASM OS (or potentially any OS in browser)
+    if arch == ARCH_WASM32 {
+        // WASM can run on any OS in browser context
+        // but standalone WASM should report OS_WASM
+        print("Running as WebAssembly");
+    }
+
+    // x86_64 and aarch64 are common on Linux, macOS, Windows
+    if os == OS_LINUX || os == OS_MACOS || os == OS_WINDOWS {
+        assert(arch == ARCH_X86_64 || arch == ARCH_AARCH64 || arch == ARCH_RISCV64);
+    }
+
+    // CPU count should be reasonable for the platform
+    let cpus = num_cpus();
+
+    // Embedded/WASM might report 1 CPU
+    if arch == ARCH_WASM32 {
+        assert(cpus >= 1);
+    } else {
+        // Desktop/server platforms typically have 2+ cores now
+        // but 1 is still valid for VMs
+        assert(cpus >= 1);
+    }
+
+    // Debug mode consistency
+    let debug = is_debug();
+    let tier = get_tier();
+
+    // In debug mode, we're more likely to be interpreted
+    // but this is not a hard requirement
+    if debug && tier == TIER_INTERPRETER {
+        print("Debug mode with interpreter - expected for development");
+    }
+}
+
+// =============================================================================
+// Tier Promotion Test (Informational)
+// =============================================================================
+
+@test
+fn test_tier_promotion() {
+    // tier_promote is a hint, not a guarantee
+    // This test just verifies it doesn't crash
+
+    // Get a function ID (typically 0 for main)
+    let func_id: UInt32 = 0;
+
+    // Request promotion (should be no-op in interpreter)
+    tier_promote(func_id);
+
+    // Tier may or may not have changed
+    let tier = get_tier();
+    print(f"Tier after promotion hint: {tier}");
+
+    // No assertion - promotion is advisory
+}

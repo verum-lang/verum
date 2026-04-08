@@ -1,0 +1,310 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, topological-sort, kahn, dag, graph
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for topological sort using Kahn's algorithm.
+// Works on directed acyclic graphs (DAGs) with up to 6 nodes.
+// Validates: correct ordering, all nodes visited, cycle detection.
+
+type Arr6 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int };
+
+fn a6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 }
+    else if i == 2 { a.d2 } else if i == 3 { a.d3 }
+    else if i == 4 { a.d4 } else { a.d5 }
+}
+
+fn a6_set(a: Arr6, i: Int, v: Int) -> Arr6 {
+    Arr6 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 }
+    }
+}
+
+fn a6_zero() -> Arr6 {
+    Arr6 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0 }
+}
+
+// 6x6 adjacency matrix
+type Mat6 is { r0: Arr6, r1: Arr6, r2: Arr6, r3: Arr6, r4: Arr6, r5: Arr6 };
+
+fn mat_get_row(m: Mat6, r: Int) -> Arr6 {
+    if r == 0 { m.r0 } else if r == 1 { m.r1 }
+    else if r == 2 { m.r2 } else if r == 3 { m.r3 }
+    else if r == 4 { m.r4 } else { m.r5 }
+}
+
+fn mat_set_row(m: Mat6, r: Int, row: Arr6) -> Mat6 {
+    Mat6 {
+        r0: if r == 0 { row } else { m.r0 },
+        r1: if r == 1 { row } else { m.r1 },
+        r2: if r == 2 { row } else { m.r2 },
+        r3: if r == 3 { row } else { m.r3 },
+        r4: if r == 4 { row } else { m.r4 },
+        r5: if r == 5 { row } else { m.r5 }
+    }
+}
+
+fn mat_get(m: Mat6, r: Int, c: Int) -> Int {
+    a6_get(mat_get_row(m, r), c)
+}
+
+fn mat_set(m: Mat6, r: Int, c: Int, v: Int) -> Mat6 {
+    let row = mat_get_row(m, r);
+    let new_row = a6_set(row, c, v);
+    mat_set_row(m, r, new_row)
+}
+
+fn mat_zero() -> Mat6 {
+    let z = a6_zero();
+    Mat6 { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z }
+}
+
+// Kahn's algorithm result: order array, count of sorted nodes, cycle flag
+type KahnResult is { order: Arr6, count: Int, has_cycle: Int };
+
+fn kahn_sort(adj: Mat6, n: Int) -> KahnResult {
+    // Compute in-degrees
+    let mut indeg = a6_zero();
+    let mut j = 0;
+    while j < n {
+        let mut deg = 0;
+        let mut i = 0;
+        while i < n {
+            deg = deg + mat_get(adj, i, j);
+            i = i + 1;
+        }
+        indeg = a6_set(indeg, j, deg);
+        j = j + 1;
+    }
+
+    // BFS queue
+    let mut queue = a6_zero();
+    let mut q_front = 0;
+    let mut q_back = 0;
+
+    // Enqueue nodes with in-degree 0
+    let mut i = 0;
+    while i < n {
+        if a6_get(indeg, i) == 0 {
+            queue = a6_set(queue, q_back, i);
+            q_back = q_back + 1;
+        }
+        i = i + 1;
+    }
+
+    let mut result = a6_zero();
+    let mut count = 0;
+
+    while q_front < q_back {
+        let node = a6_get(queue, q_front);
+        q_front = q_front + 1;
+
+        result = a6_set(result, count, node);
+        count = count + 1;
+
+        let mut nb = 0;
+        while nb < n {
+            if mat_get(adj, node, nb) == 1 {
+                let new_deg = a6_get(indeg, nb) - 1;
+                indeg = a6_set(indeg, nb, new_deg);
+                if new_deg == 0 {
+                    queue = a6_set(queue, q_back, nb);
+                    q_back = q_back + 1;
+                }
+            }
+            nb = nb + 1;
+        }
+    }
+
+    let cycle = if count < n { 1 } else { 0 };
+    KahnResult { order: result, count: count, has_cycle: cycle }
+}
+
+// Verify topological ordering: for every edge u->v, u appears before v
+fn verify_order(adj: Mat6, n: Int, order: Arr6, count: Int) -> Int {
+    if count != n { return 0; }
+    let mut pos = a6_zero();
+    let mut i = 0;
+    while i < n {
+        let node = a6_get(order, i);
+        pos = a6_set(pos, node, i);
+        i = i + 1;
+    }
+    let mut u = 0;
+    while u < n {
+        let mut v = 0;
+        while v < n {
+            if mat_get(adj, u, v) == 1 {
+                if a6_get(pos, u) >= a6_get(pos, v) {
+                    return 0;
+                }
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    1
+}
+
+fn count_edges(adj: Mat6, n: Int) -> Int {
+    let mut edges = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            edges = edges + mat_get(adj, i, j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    edges
+}
+
+fn test_linear_chain() {
+    // 0 -> 1 -> 2 -> 3 -> 4
+    let mut adj = mat_zero();
+    adj = mat_set(adj, 0, 1, 1);
+    adj = mat_set(adj, 1, 2, 1);
+    adj = mat_set(adj, 2, 3, 1);
+    adj = mat_set(adj, 3, 4, 1);
+
+    let r = kahn_sort(adj, 5);
+    assert_eq(r.count, 5);
+    assert_eq(r.has_cycle, 0);
+    assert_eq(a6_get(r.order, 0), 0);
+    assert_eq(a6_get(r.order, 1), 1);
+    assert_eq(a6_get(r.order, 2), 2);
+    assert_eq(a6_get(r.order, 3), 3);
+    assert_eq(a6_get(r.order, 4), 4);
+    assert_eq(verify_order(adj, 5, r.order, r.count), 1);
+}
+
+fn test_diamond_dag() {
+    //   0
+    //  / \
+    // 1   2
+    //  \ /
+    //   3
+    let mut adj = mat_zero();
+    adj = mat_set(adj, 0, 1, 1);
+    adj = mat_set(adj, 0, 2, 1);
+    adj = mat_set(adj, 1, 3, 1);
+    adj = mat_set(adj, 2, 3, 1);
+
+    let r = kahn_sort(adj, 4);
+    assert_eq(r.count, 4);
+    assert_eq(r.has_cycle, 0);
+    assert_eq(verify_order(adj, 4, r.order, r.count), 1);
+    assert_eq(a6_get(r.order, 0), 0);
+    assert_eq(a6_get(r.order, 3), 3);
+}
+
+fn test_two_sources() {
+    // 0 -> 2, 1 -> 2, 2 -> 3
+    let mut adj = mat_zero();
+    adj = mat_set(adj, 0, 2, 1);
+    adj = mat_set(adj, 1, 2, 1);
+    adj = mat_set(adj, 2, 3, 1);
+
+    let r = kahn_sort(adj, 4);
+    assert_eq(r.count, 4);
+    assert_eq(r.has_cycle, 0);
+    assert_eq(verify_order(adj, 4, r.order, r.count), 1);
+    assert_eq(a6_get(r.order, 3), 3);
+}
+
+fn test_cycle_detection() {
+    // 0 -> 1 -> 2 -> 0 (cycle)
+    let mut adj = mat_zero();
+    adj = mat_set(adj, 0, 1, 1);
+    adj = mat_set(adj, 1, 2, 1);
+    adj = mat_set(adj, 2, 0, 1);
+
+    let r = kahn_sort(adj, 3);
+    assert_eq(r.has_cycle, 1);
+    assert_eq(r.count, 0);
+}
+
+fn test_self_loop() {
+    let mut adj = mat_zero();
+    adj = mat_set(adj, 0, 0, 1);
+    let r = kahn_sort(adj, 1);
+    assert_eq(r.has_cycle, 1);
+    assert_eq(r.count, 0);
+}
+
+fn test_disconnected() {
+    let adj = mat_zero();
+    let r = kahn_sort(adj, 5);
+    assert_eq(r.count, 5);
+    assert_eq(r.has_cycle, 0);
+    assert_eq(verify_order(adj, 5, r.order, r.count), 1);
+}
+
+fn test_complex_dag() {
+    // 0 -> 2, 0 -> 3, 1 -> 3, 2 -> 4, 3 -> 4, 4 -> 5
+    let mut adj = mat_zero();
+    adj = mat_set(adj, 0, 2, 1);
+    adj = mat_set(adj, 0, 3, 1);
+    adj = mat_set(adj, 1, 3, 1);
+    adj = mat_set(adj, 2, 4, 1);
+    adj = mat_set(adj, 3, 4, 1);
+    adj = mat_set(adj, 4, 5, 1);
+
+    let r = kahn_sort(adj, 6);
+    assert_eq(r.count, 6);
+    assert_eq(r.has_cycle, 0);
+    assert_eq(verify_order(adj, 6, r.order, r.count), 1);
+    assert_eq(count_edges(adj, 6), 6);
+}
+
+fn test_partial_cycle() {
+    // 0 -> 1 -> 2, 3 -> 4 -> 3 (partial cycle in 5-node graph)
+    let mut adj = mat_zero();
+    adj = mat_set(adj, 0, 1, 1);
+    adj = mat_set(adj, 1, 2, 1);
+    adj = mat_set(adj, 3, 4, 1);
+    adj = mat_set(adj, 4, 3, 1);
+
+    let r = kahn_sort(adj, 5);
+    assert_eq(r.has_cycle, 1);
+    assert_eq(r.count, 3);
+}
+
+fn test_single_node() {
+    let adj = mat_zero();
+    let r = kahn_sort(adj, 1);
+    assert_eq(r.count, 1);
+    assert_eq(r.has_cycle, 0);
+    assert_eq(a6_get(r.order, 0), 0);
+}
+
+fn test_two_nodes() {
+    let mut adj = mat_zero();
+    adj = mat_set(adj, 0, 1, 1);
+    let r = kahn_sort(adj, 2);
+    assert_eq(r.count, 2);
+    assert_eq(r.has_cycle, 0);
+    assert_eq(a6_get(r.order, 0), 0);
+    assert_eq(a6_get(r.order, 1), 1);
+}
+
+fn main() -> Int {
+    test_linear_chain();
+    test_diamond_dag();
+    test_two_sources();
+    test_cycle_detection();
+    test_self_loop();
+    test_disconnected();
+    test_complex_dag();
+    test_partial_cycle();
+    test_single_node();
+    test_two_nodes();
+    print("[OK] 357_topo_sort_aot");
+    0
+}

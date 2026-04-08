@@ -1,0 +1,555 @@
+# =============================================================================
+# Verum Compliance Suite - GitLab CI Configuration
+# =============================================================================
+#
+# Production-grade CI/CD configuration for GitLab CI/CD
+#
+# Pipeline Stages:
+#   1. build     - Build VCS tools and compiler
+#   2. test      - Run test suite (L0-L4)
+#   3. verify    - Differential and integration tests
+#   4. analyze   - Fuzzing, benchmarks, coverage
+#   5. report    - Generate reports and notifications
+#
+# Usage:
+#   Include this file in your .gitlab-ci.yml:
+#   include:
+#     - local: 'vcs/config/ci/gitlab_ci.yml'
+#
+# Reference: VCS Spec Section 23 - CI/CD Integration
+# =============================================================================
+
+stages:
+  - build
+  - test
+  - verify
+  - analyze
+  - report
+
+# =============================================================================
+# Global Configuration
+# =============================================================================
+
+variables:
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+  VCS_PARALLEL: "8"
+  VCS_TIMEOUT_DEFAULT: "30000"
+  VCS_TIMEOUT_EXTENDED: "600000"
+  VCS_CONFIG: "config/vcs.toml"
+
+# Cache configuration
+.cache-cargo: &cache-cargo
+  cache:
+    key:
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo/
+      - target/
+      - vcs/runner/vtest/target/
+      - vcs/runner/vfuzz/target/
+      - vcs/runner/vbench/target/
+    policy: pull-push
+
+# Base job template
+.base-job:
+  image: rust:latest
+  <<: *cache-cargo
+  before_script:
+    - rustc --version
+    - cargo --version
+  tags:
+    - docker
+
+# =============================================================================
+# Build Stage
+# =============================================================================
+
+build:vtest:
+  extends: .base-job
+  stage: build
+  script:
+    - cd vcs/runner/vtest
+    - cargo build --release
+  artifacts:
+    paths:
+      - vcs/runner/vtest/target/release/vtest
+    expire_in: 1 day
+
+build:vfuzz:
+  extends: .base-job
+  stage: build
+  script:
+    - cd vcs/runner/vfuzz
+    - cargo build --release --features parallel
+  artifacts:
+    paths:
+      - vcs/runner/vfuzz/target/release/vfuzz
+    expire_in: 1 day
+
+build:vbench:
+  extends: .base-job
+  stage: build
+  script:
+    - cd vcs/runner/vbench
+    - cargo build --release
+  artifacts:
+    paths:
+      - vcs/runner/vbench/target/release/vbench
+    expire_in: 1 day
+
+build:compiler:
+  extends: .base-job
+  stage: build
+  script:
+    - cargo build --release -p verum_compiler -p verum_cli
+  artifacts:
+    paths:
+      - target/release/verum
+    expire_in: 1 day
+  only:
+    - main
+    - develop
+    - merge_requests
+    - schedules
+
+# =============================================================================
+# Test Stage
+# =============================================================================
+
+test:l0-critical:
+  extends: .base-job
+  stage: test
+  needs:
+    - build:vtest
+  script:
+    - cd vcs
+    - ../runner/vtest/target/release/vtest run
+        --level L0
+        --parallel $VCS_PARALLEL
+        --timeout $VCS_TIMEOUT_DEFAULT
+        --format junit
+        --output reports/l0-results.xml
+        --config $VCS_CONFIG
+        --threshold 100.0
+  artifacts:
+    when: always
+    paths:
+      - vcs/reports/l0-results.xml
+    reports:
+      junit: vcs/reports/l0-results.xml
+    expire_in: 30 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+test:l1-core:
+  extends: .base-job
+  stage: test
+  needs:
+    - build:vtest
+    - test:l0-critical
+  script:
+    - cd vcs
+    - ../runner/vtest/target/release/vtest run
+        --level L1
+        --parallel $VCS_PARALLEL
+        --timeout $VCS_TIMEOUT_DEFAULT
+        --format junit
+        --output reports/l1-results.xml
+        --config $VCS_CONFIG
+        --threshold 100.0
+  artifacts:
+    when: always
+    paths:
+      - vcs/reports/l1-results.xml
+    reports:
+      junit: vcs/reports/l1-results.xml
+    expire_in: 30 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+test:l2-standard:
+  extends: .base-job
+  stage: test
+  needs:
+    - build:vtest
+    - test:l1-core
+  script:
+    - cd vcs
+    - ../runner/vtest/target/release/vtest run
+        --level L2
+        --parallel $VCS_PARALLEL
+        --timeout $VCS_TIMEOUT_DEFAULT
+        --format json
+        --output reports/l2-results.json
+        --config $VCS_CONFIG
+        --threshold 95.0
+    - |
+      PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l2-results.json)
+      echo "L2 Pass Rate: ${PASS_RATE}%"
+      if [ $(echo "$PASS_RATE < 95.0" | bc -l) -eq 1 ]; then
+        echo "ERROR: L2 tests below 95% threshold"
+        exit 1
+      fi
+  artifacts:
+    when: always
+    paths:
+      - vcs/reports/l2-results.json
+    expire_in: 30 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+test:l3-extended:
+  extends: .base-job
+  stage: test
+  needs:
+    - build:vtest
+    - test:l2-standard
+  script:
+    - cd vcs
+    - ../runner/vtest/target/release/vtest run
+        --level L3
+        --parallel $VCS_PARALLEL
+        --timeout $VCS_TIMEOUT_EXTENDED
+        --format json
+        --output reports/l3-results.json
+        --config $VCS_CONFIG
+        --threshold 90.0 || true
+    - |
+      if [ -f reports/l3-results.json ]; then
+        PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l3-results.json)
+        echo "L3 Pass Rate: ${PASS_RATE}%"
+        if [ $(echo "$PASS_RATE < 90.0" | bc -l) -eq 1 ]; then
+          echo "WARNING: L3 tests below 90% threshold"
+        fi
+      fi
+  artifacts:
+    when: always
+    paths:
+      - vcs/reports/l3-results.json
+    expire_in: 30 days
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_COMMIT_MESSAGE =~ /\[full-test\]/'
+    - when: manual
+
+test:l4-performance:
+  extends: .base-job
+  stage: test
+  needs:
+    - build:vtest
+  script:
+    - cd vcs
+    - ../runner/vtest/target/release/vtest run
+        --level L4
+        --parallel 4
+        --timeout $VCS_TIMEOUT_EXTENDED
+        --format json
+        --output reports/l4-results.json
+        --config $VCS_CONFIG || true
+    - |
+      if [ -f reports/l4-results.json ]; then
+        echo "L4 Performance Results:"
+        jq '.summary' reports/l4-results.json
+      fi
+  artifacts:
+    when: always
+    paths:
+      - vcs/reports/l4-results.json
+    expire_in: 30 days
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: manual
+
+# =============================================================================
+# Verify Stage
+# =============================================================================
+
+verify:differential:
+  extends: .base-job
+  stage: verify
+  needs:
+    - build:vtest
+    - test:l0-critical
+  script:
+    - cd vcs
+    - ../runner/vtest/target/release/vtest run
+        differential/
+        --tier 0,3
+        --parallel $VCS_PARALLEL
+        --format junit
+        --output reports/differential-results.xml
+        --config $VCS_CONFIG
+    - |
+      if ! grep -q 'failures="0"' reports/differential-results.xml 2>/dev/null; then
+        echo "ERROR: Differential tests failed"
+        exit 1
+      fi
+  artifacts:
+    when: always
+    paths:
+      - vcs/reports/differential-results.xml
+    reports:
+      junit: vcs/reports/differential-results.xml
+    expire_in: 30 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+verify:cross-tier:
+  extends: .base-job
+  stage: verify
+  needs:
+    - build:vtest
+    - verify:differential
+  script:
+    - cd vcs
+    - mkdir -p reports/cross-tier
+    - |
+      for combo in "0,1" "1,2" "2,3" "0,2"; do
+        echo "Testing Tier ${combo%,*} vs Tier ${combo#*,}..."
+        ../runner/vtest/target/release/vtest run \
+          differential/ \
+          --tier $combo \
+          --parallel $VCS_PARALLEL \
+          --format json \
+          --output reports/cross-tier/tier-${combo%,*}-vs-${combo#*,}.json \
+          --config $VCS_CONFIG || true
+      done
+  artifacts:
+    when: always
+    paths:
+      - vcs/reports/cross-tier/
+    expire_in: 30 days
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: manual
+
+# =============================================================================
+# Analyze Stage
+# =============================================================================
+
+analyze:fuzzing:
+  extends: .base-job
+  stage: analyze
+  needs:
+    - build:vfuzz
+    - test:l0-critical
+  variables:
+    FUZZ_DURATION: "1h"
+  script:
+    - cd vcs
+    - mkdir -p fuzz/crashes fuzz/artifacts
+    - ../runner/vfuzz/target/release/vfuzz run
+        --targets all
+        --duration $FUZZ_DURATION
+        --parallel 4
+        --corpus fuzz/seeds/
+        --crashes fuzz/crashes/
+        --config $VCS_CONFIG || true
+    - |
+      CRASH_COUNT=$(find fuzz/crashes -type f 2>/dev/null | wc -l)
+      if [ "$CRASH_COUNT" -gt 0 ]; then
+        echo "WARNING: Fuzzing found $CRASH_COUNT crashes"
+        ls -la fuzz/crashes/
+      else
+        echo "No crashes found during fuzzing"
+      fi
+  artifacts:
+    when: always
+    paths:
+      - vcs/fuzz/crashes/
+      - vcs/fuzz/artifacts/
+    expire_in: 90 days
+  timeout: 3 hours
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: manual
+
+analyze:benchmarks:
+  extends: .base-job
+  stage: analyze
+  needs:
+    - build:vbench
+    - test:l0-critical
+  script:
+    - cd vcs
+    - mkdir -p reports baselines
+    # Download previous baseline if exists
+    - |
+      if [ -n "$CI_JOB_TOKEN" ]; then
+        curl --silent --fail --location \
+          --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/artifacts/main/raw/vcs/reports/benchmark-results.json?job=analyze:benchmarks" \
+          -o baselines/benchmark-baseline.json 2>/dev/null || echo "No baseline found"
+      fi
+    # Run benchmarks
+    - ../runner/vbench/target/release/vbench run
+        --suite all
+        --iterations 1000
+        --warmup 100
+        --config $VCS_CONFIG
+        --format json
+        --output reports/benchmark-results.json
+    # Compare to baseline
+    - |
+      if [ -f baselines/benchmark-baseline.json ]; then
+        ../runner/vbench/target/release/vbench compare \
+          --current reports/benchmark-results.json \
+          --baseline baselines/benchmark-baseline.json \
+          --threshold 10.0 \
+          --format markdown \
+          --output reports/benchmark-comparison.md || true
+
+        if grep -q "REGRESSION" reports/benchmark-comparison.md 2>/dev/null; then
+          echo "WARNING: Performance regression detected"
+          cat reports/benchmark-comparison.md
+        fi
+      fi
+    # Validate thresholds
+    - ../runner/vbench/target/release/vbench validate
+        --thresholds config/thresholds.toml
+        --results reports/benchmark-results.json || true
+  artifacts:
+    when: always
+    paths:
+      - vcs/reports/benchmark-results.json
+      - vcs/reports/benchmark-comparison.md
+    expire_in: 90 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: manual
+
+analyze:coverage:
+  extends: .base-job
+  stage: analyze
+  image: xd009642/tarpaulin:develop-nightly
+  needs:
+    - test:l1-core
+    - test:l2-standard
+  script:
+    - cargo tarpaulin --all-features --workspace
+        --out Xml --out Html
+        --output-dir coverage/
+        --skip-clean
+        --timeout 600
+  artifacts:
+    when: always
+    paths:
+      - coverage/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura.xml
+    expire_in: 30 days
+  coverage: '/^\d+.\d+% coverage/'
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: manual
+
+# =============================================================================
+# Report Stage
+# =============================================================================
+
+report:generate:
+  extends: .base-job
+  stage: report
+  needs:
+    - test:l0-critical
+    - test:l1-core
+    - test:l2-standard
+    - verify:differential
+  script:
+    - cd vcs
+    - chmod +x scripts/generate-report.sh
+    - ./scripts/generate-report.sh
+        --input reports/
+        --output reports/vcs-report.html
+        --title "VCS CI Report - ${CI_COMMIT_SHORT_SHA}"
+        --format html
+  artifacts:
+    when: always
+    paths:
+      - vcs/reports/vcs-report.html
+    expire_in: 30 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+report:notify:
+  stage: report
+  image: alpine:latest
+  needs:
+    - test:l0-critical
+    - test:l1-core
+    - test:l2-standard
+    - verify:differential
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      # Check for failures
+      if [ "$CI_JOB_STATUS" = "failed" ]; then
+        MESSAGE="VCS CI Pipeline FAILED for ${CI_COMMIT_BRANCH}"
+        COLOR="danger"
+      else
+        MESSAGE="VCS CI Pipeline PASSED for ${CI_COMMIT_BRANCH}"
+        COLOR="good"
+      fi
+
+      # Send Slack notification if webhook configured
+      if [ -n "$SLACK_WEBHOOK_URL" ]; then
+        curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\": \"$MESSAGE\", \"attachments\": [{\"color\": \"$COLOR\", \"text\": \"Pipeline: $CI_PIPELINE_URL\"}]}" \
+          "$SLACK_WEBHOOK_URL" || true
+      fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: always
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_failure
+
+# =============================================================================
+# Pipeline Gate
+# =============================================================================
+
+gate:
+  stage: report
+  image: alpine:latest
+  needs:
+    - test:l0-critical
+    - test:l1-core
+    - test:l2-standard
+    - verify:differential
+  script:
+    - echo "VCS Gate Check"
+    - echo "L0 Critical - PASSED"
+    - echo "L1 Core - PASSED"
+    - echo "L2 Standard - PASSED"
+    - echo "Differential - PASSED"
+    - echo ""
+    - echo "VCS Gate PASSED - Ready for merge"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'

@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, reflection, context, error
+// @description: Test that reflection builtins fail without proper context
+// @contexts:
+// @expected-error: M201
+
+// =============================================================================
+// MISSING CONTEXT TESTS
+// =============================================================================
+
+// Test type_name without MetaTypes context
+// This should fail because type_name requires MetaTypes context
+meta fn test_type_name_no_context() -> Text {
+    type_name(Int)  // ERROR: Requires MetaTypes context
+}

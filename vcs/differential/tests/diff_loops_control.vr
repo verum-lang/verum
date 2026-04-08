@@ -1,0 +1,102 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: vbc, differential, loops, control-flow, while, return
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential test: loops and control flow must match across tiers
+
+fn sum_range(a: Int, b: Int) -> Int {
+    let mut sum = 0;
+    let mut i = a;
+    while i <= b {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn collatz_steps(n: Int) -> Int {
+    let mut x = n;
+    let mut steps = 0;
+    while x != 1 {
+        if x % 2 == 0 {
+            x = x / 2;
+        } else {
+            x = x * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn binary_search(target: Int) -> Int {
+    // Search for target in implicit sorted array [0, 10, 20, ..., 90]
+    let mut lo = 0;
+    let mut hi = 9;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        let val = mid * 10;
+        if val == target { return mid; }
+        if val < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    -1
+}
+
+fn nested_loop_sum(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j <= i {
+            sum = sum + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+fn early_return_test(x: Int) -> Int {
+    if x < 0 { return -1; }
+    if x == 0 { return 0; }
+    if x > 100 { return 100; }
+    x
+}
+
+fn main() -> Int {
+    // sum_range
+    assert_eq(sum_range(1, 100), 5050);
+    assert_eq(sum_range(1, 10), 55);
+    assert_eq(sum_range(5, 5), 5);
+
+    // collatz
+    assert_eq(collatz_steps(1), 0);
+    assert_eq(collatz_steps(2), 1);
+    assert_eq(collatz_steps(27), 111);
+
+    // binary search
+    assert_eq(binary_search(0), 0);
+    assert_eq(binary_search(50), 5);
+    assert_eq(binary_search(90), 9);
+    assert_eq(binary_search(55), -1);
+
+    // nested loops: triangle numbers T(n) = n*(n+1)/2
+    assert_eq(nested_loop_sum(5), 15);
+    assert_eq(nested_loop_sum(10), 55);
+
+    // early return
+    assert_eq(early_return_test(-5), -1);
+    assert_eq(early_return_test(0), 0);
+    assert_eq(early_return_test(42), 42);
+    assert_eq(early_return_test(200), 100);
+
+    print("differential loops control ok");
+    0
+}

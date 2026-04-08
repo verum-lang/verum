@@ -1,0 +1,21 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, math, linalg, vector, simple
+// @description: Simple test for Vector without assertions
+
+module specs.core.math.vector_simple_test;
+
+mount core.math.{Vector};
+
+fn main() {
+    print("Creating Vector.zeros(3)...");
+    let v0: Vector<Float> = Vector.zeros(3);
+    print("Vector created!");
+
+    print("Getting length...");
+    let len = v0.len();
+    print(f"Length = {len}");
+
+    print("Test done!");
+}

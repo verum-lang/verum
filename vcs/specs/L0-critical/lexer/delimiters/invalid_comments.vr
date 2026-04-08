@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, delimiters, comments, invalid, negative
+
+// Invalid comment syntax that causes parse errors
+
+// A misplaced block comment close operator should cause an error
+fn test_orphan_close() {
+    let x = */ orphan close;
+}

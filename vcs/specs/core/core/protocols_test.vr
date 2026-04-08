@@ -1,0 +1,1685 @@
+// =============================================================================
+// protocols_test.vr - Comprehensive tests for core protocols
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: protocols, eq, ord, hash, clone, default, display, operators, core
+// @description: Tests for core protocols: Eq, Ord, PartialOrd, Hash, Clone, etc.
+// =============================================================================
+
+mount core.base.protocols.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Eq Protocol
+// =============================================================================
+
+/// Test Eq implementation for custom type
+@test
+fn test_eq_custom_type() {
+    type Point is { x: Int, y: Int };
+
+    implement Eq for Point {
+        fn eq(&self, other: &Point) -> Bool {
+            self.x == other.x && self.y == other.y
+        }
+    }
+
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 1, y: 2 };
+    let p3 = Point { x: 3, y: 4 };
+
+    assert(p1.eq(&p2));
+    assert(!p1.eq(&p3));
+}
+
+/// Test Eq default ne implementation
+@test
+fn test_eq_default_ne() {
+    type EqVal is { n: Int };
+
+    implement Eq for EqVal {
+        fn eq(&self, other: &EqVal) -> Bool {
+            self.n == other.n
+        }
+    }
+
+    let v1 = EqVal { n: 42 };
+    let v2 = EqVal { n: 42 };
+    let v3 = EqVal { n: 99 };
+
+    // ne should be the negation of eq
+    assert(!v1.ne(&v2));  // v1 == v2, so ne is false
+    assert(v1.ne(&v3));   // v1 != v3, so ne is true
+}
+
+/// Test Eq reflexivity property
+@test
+fn test_eq_reflexivity() {
+    type Item is { id: Int };
+
+    implement Eq for Item {
+        fn eq(&self, other: &Item) -> Bool {
+            self.id == other.id
+        }
+    }
+
+    let item = Item { id: 100 };
+    assert(item.eq(&item));  // x == x
+}
+
+/// Test Eq symmetry property
+@test
+fn test_eq_symmetry() {
+    type SymData is { value: Int };
+
+    implement Eq for SymData {
+        fn eq(&self, other: &SymData) -> Bool {
+            self.value == other.value
+        }
+    }
+
+    let a = SymData { value: 5 };
+    let b = SymData { value: 5 };
+
+    assert(a.eq(&b) == b.eq(&a));  // If a == b then b == a
+}
+
+/// Test Eq transitivity property
+@test
+fn test_eq_transitivity() {
+    type Num is { n: Int };
+
+    implement Eq for Num {
+        fn eq(&self, other: &Num) -> Bool {
+            self.n == other.n
+        }
+    }
+
+    let a = Num { n: 7 };
+    let b = Num { n: 7 };
+    let c = Num { n: 7 };
+
+    // If a == b and b == c then a == c
+    if a.eq(&b) && b.eq(&c) {
+        assert(a.eq(&c));
+    }
+}
+
+// =============================================================================
+// Section 2: Ord Protocol
+// =============================================================================
+
+/// Test Ord implementation for custom type
+@test
+fn test_ord_custom_type() {
+    type Score is { points: Int };
+
+    implement Eq for Score {
+        fn eq(&self, other: &Score) -> Bool {
+            self.points == other.points
+        }
+    }
+
+    implement Ord for Score {
+        fn cmp(&self, other: &Score) -> Ordering {
+            if self.points < other.points { Less }
+            else if self.points > other.points { Greater }
+            else { Equal }
+        }
+    }
+
+    let s1 = Score { points: 100 };
+    let s2 = Score { points: 200 };
+    let s3 = Score { points: 100 };
+
+    assert(s1.cmp(&s2) is Less);
+    assert(s2.cmp(&s1) is Greater);
+    assert(s1.cmp(&s3) is Equal);
+}
+
+/// Test Ord default lt implementation
+@test
+fn test_ord_default_lt() {
+    type Level is { n: Int };
+
+    implement Eq for Level {
+        fn eq(&self, other: &Level) -> Bool {
+            self.n == other.n
+        }
+    }
+
+    implement Ord for Level {
+        fn cmp(&self, other: &Level) -> Ordering {
+            Ordering.from_int(self.n - other.n)
+        }
+    }
+
+    let l1 = Level { n: 5 };
+    let l2 = Level { n: 10 };
+
+    assert(l1.lt(&l2));
+    assert(!l2.lt(&l1));
+    assert(!l1.lt(&l1));  // Not less than itself
+}
+
+/// Test Ord default le implementation
+@test
+fn test_ord_default_le() {
+    type Rank is { value: Int };
+
+    implement Eq for Rank {
+        fn eq(&self, other: &Rank) -> Bool {
+            self.value == other.value
+        }
+    }
+
+    implement Ord for Rank {
+        fn cmp(&self, other: &Rank) -> Ordering {
+            Ordering.from_int(self.value - other.value)
+        }
+    }
+
+    let r1 = Rank { value: 3 };
+    let r2 = Rank { value: 5 };
+    let r3 = Rank { value: 3 };
+
+    assert(r1.le(&r2));
+    assert(r1.le(&r3));  // Equal values
+    assert(!r2.le(&r1));
+}
+
+/// Test Ord default gt implementation
+@test
+fn test_ord_default_gt() {
+    type Height is { cm: Int };
+
+    implement Eq for Height {
+        fn eq(&self, other: &Height) -> Bool {
+            self.cm == other.cm
+        }
+    }
+
+    implement Ord for Height {
+        fn cmp(&self, other: &Height) -> Ordering {
+            Ordering.from_int(self.cm - other.cm)
+        }
+    }
+
+    let h1 = Height { cm: 180 };
+    let h2 = Height { cm: 170 };
+
+    assert(h1.gt(&h2));
+    assert(!h2.gt(&h1));
+}
+
+/// Test Ord default ge implementation
+@test
+fn test_ord_default_ge() {
+    type Weight is { kg: Int };
+
+    implement Eq for Weight {
+        fn eq(&self, other: &Weight) -> Bool {
+            self.kg == other.kg
+        }
+    }
+
+    implement Ord for Weight {
+        fn cmp(&self, other: &Weight) -> Ordering {
+            Ordering.from_int(self.kg - other.kg)
+        }
+    }
+
+    let w1 = Weight { kg: 70 };
+    let w2 = Weight { kg: 60 };
+    let w3 = Weight { kg: 70 };
+
+    assert(w1.ge(&w2));
+    assert(w1.ge(&w3));  // Equal
+    assert(!w2.ge(&w1));
+}
+
+/// Test Ord max method
+@test
+fn test_ord_max() {
+    type Amount is { value: Int };
+
+    implement Eq for Amount {
+        fn eq(&self, other: &Amount) -> Bool {
+            self.value == other.value
+        }
+    }
+
+    implement Ord for Amount {
+        fn cmp(&self, other: &Amount) -> Ordering {
+            Ordering.from_int(self.value - other.value)
+        }
+    }
+
+    let a1 = Amount { value: 100 };
+    let a2 = Amount { value: 200 };
+
+    let max_val = a1.max(a2);
+    assert_eq(max_val.value, 200);
+}
+
+/// Test Ord min method
+@test
+fn test_ord_min() {
+    type Price is { cents: Int };
+
+    implement Eq for Price {
+        fn eq(&self, other: &Price) -> Bool {
+            self.cents == other.cents
+        }
+    }
+
+    implement Ord for Price {
+        fn cmp(&self, other: &Price) -> Ordering {
+            Ordering.from_int(self.cents - other.cents)
+        }
+    }
+
+    let p1 = Price { cents: 999 };
+    let p2 = Price { cents: 599 };
+
+    let min_val = p1.min(p2);
+    assert_eq(min_val.cents, 599);
+}
+
+/// Test Ord clamp method
+@test
+fn test_ord_clamp() {
+    type Temperature is { degrees: Int };
+
+    implement Eq for Temperature {
+        fn eq(&self, other: &Temperature) -> Bool {
+            self.degrees == other.degrees
+        }
+    }
+
+    implement Ord for Temperature {
+        fn cmp(&self, other: &Temperature) -> Ordering {
+            Ordering.from_int(self.degrees - other.degrees)
+        }
+    }
+
+    let low = Temperature { degrees: 0 };
+    let high = Temperature { degrees: 100 };
+
+    // Value within range
+    let t1 = Temperature { degrees: 50 };
+    assert_eq(t1.clamp(low, high).degrees, 50);
+
+    // Value below range
+    let t2 = Temperature { degrees: -10 };
+    assert_eq(t2.clamp(low, high).degrees, 0);
+
+    // Value above range
+    let t3 = Temperature { degrees: 150 };
+    assert_eq(t3.clamp(low, high).degrees, 100);
+}
+
+// =============================================================================
+// Section 3: PartialOrd Protocol
+// =============================================================================
+
+/// Test PartialOrd for type with incomparable values
+@test
+fn test_partial_ord_incomparable() {
+    // Floating point NaN example simulation
+    type MaybeFloat is Valid(Float) | Invalid;
+
+    implement Eq for MaybeFloat {
+        fn eq(&self, other: &MaybeFloat) -> Bool {
+            match (self, other) {
+                (Valid(a), Valid(b)) => *a == *b,
+                _ => false,  // Invalid never equals anything
+            }
+        }
+    }
+
+    implement PartialOrd for MaybeFloat {
+        fn partial_cmp(&self, other: &MaybeFloat) -> Maybe<Ordering> {
+            match (self, other) {
+                (Valid(a), Valid(b)) => {
+                    if *a < *b { Some(Less) }
+                    else if *a > *b { Some(Greater) }
+                    else { Some(Equal) }
+                }
+                _ => None,  // Invalid is incomparable
+            }
+        }
+    }
+
+    let v1 = Valid(1.0);
+    let v2 = Valid(2.0);
+    let inv = Invalid;
+
+    assert_eq(v1.partial_cmp(&v2), Some(Less));
+    assert_eq(v2.partial_cmp(&v1), Some(Greater));
+    assert_eq(v1.partial_cmp(&inv), None);
+    assert_eq(inv.partial_cmp(&v1), None);
+}
+
+/// Test PartialOrd default lt handles None
+@test
+fn test_partial_ord_lt_with_none() {
+    type MaybeVal is Val(Int) | NoVal;
+
+    implement Eq for MaybeVal {
+        fn eq(&self, other: &MaybeVal) -> Bool {
+            match (self, other) {
+                (Val(a), Val(b)) => *a == *b,
+                (NoVal, NoVal) => true,
+                _ => false,
+            }
+        }
+    }
+
+    implement PartialOrd for MaybeVal {
+        fn partial_cmp(&self, other: &MaybeVal) -> Maybe<Ordering> {
+            match (self, other) {
+                (Val(a), Val(b)) => Some(Ordering.from_int(*a - *b)),
+                _ => None,
+            }
+        }
+    }
+
+    let v1 = Val(1);
+    let v2 = Val(2);
+    let no = NoVal;
+
+    assert(v1.lt(&v2));
+    assert(!v1.lt(&no));  // Returns false when not comparable
+}
+
+// =============================================================================
+// Section 4: Hash Protocol
+// =============================================================================
+
+/// Test Hash implementation for custom type
+@test
+fn test_hash_custom_type() {
+    type UserId is { id: Int };
+
+    implement Hash for UserId {
+        fn hash(&self, hasher: &mut Hasher) {
+            hasher.write_int(self.id);
+        }
+    }
+
+    let user = UserId { id: 12345 };
+    let hash1 = user.hash_value();
+    let hash2 = user.hash_value();
+
+    // Same value should produce same hash
+    assert_eq(hash1, hash2);
+}
+
+/// Test Hash produces different values for different inputs
+@test
+fn test_hash_different_values() {
+    type Key is { value: Int };
+
+    implement Hash for Key {
+        fn hash(&self, hasher: &mut Hasher) {
+            hasher.write_int(self.value);
+        }
+    }
+
+    let k1 = Key { value: 1 };
+    let k2 = Key { value: 2 };
+
+    // Different values should (usually) produce different hashes
+    // Note: This is not guaranteed but highly probable
+    assert(k1.hash_value() != k2.hash_value());
+}
+
+/// Test DefaultHasher
+@test
+fn test_default_hasher() {
+    let mut hasher = DefaultHasher.new();
+    hasher.write(&[1u8, 2u8, 3u8]);
+    let h1 = hasher.finish();
+
+    let mut hasher2 = DefaultHasher.new();
+    hasher2.write(&[1u8, 2u8, 3u8]);
+    let h2 = hasher2.finish();
+
+    assert_eq(h1, h2);
+}
+
+/// Test Hasher write_int
+@test
+fn test_hasher_write_int() {
+    let mut hasher = DefaultHasher.new();
+    hasher.write_int(42);
+    let h1 = hasher.finish();
+
+    let mut hasher2 = DefaultHasher.new();
+    hasher2.write_int(42);
+    let h2 = hasher2.finish();
+
+    assert_eq(h1, h2);
+}
+
+/// Test Hasher write_byte
+@test
+fn test_hasher_write_byte() {
+    let mut hasher = DefaultHasher.new();
+    hasher.write_byte(0xAB as Byte);
+    let h1 = hasher.finish();
+
+    let mut hasher2 = DefaultHasher.new();
+    hasher2.write_byte(0xAB as Byte);
+    let h2 = hasher2.finish();
+
+    assert_eq(h1, h2);
+}
+
+// =============================================================================
+// Section 5: Clone Protocol
+// =============================================================================
+
+/// Test Clone implementation
+@test
+fn test_clone_custom_type() {
+    type Config is { name: Text, value: Int };
+
+    implement Clone for Config {
+        fn clone(&self) -> Config {
+            Config { name: self.name.clone(), value: self.value }
+        }
+    }
+
+    let original = Config { name: "test", value: 42 };
+    let cloned = original.clone();
+
+    assert_eq(cloned.name, "test");
+    assert_eq(cloned.value, 42);
+}
+
+/// Test Clone produces independent copy
+@test
+fn test_clone_independence() {
+    type Counter is { count: Int };
+
+    implement Clone for Counter {
+        fn clone(&self) -> Counter {
+            Counter { count: self.count }
+        }
+    }
+
+    let mut original = Counter { count: 0 };
+    let cloned = original.clone();
+
+    original.count = 100;
+
+    // Clone should not be affected
+    assert_eq(cloned.count, 0);
+}
+
+/// Test clone_from method
+@test
+fn test_clone_from() {
+    type Buffer is { data: List<Int> };
+
+    implement Clone for Buffer {
+        fn clone(&self) -> Buffer {
+            Buffer { data: self.data.clone() }
+        }
+    }
+
+    let source = Buffer { data: [1, 2, 3] };
+    let mut target = Buffer { data: [] };
+
+    target.clone_from(&source);
+
+    assert_eq(target.data, [1, 2, 3]);
+}
+
+// =============================================================================
+// Section 6: Copy Protocol
+// =============================================================================
+
+/// Test Copy marker for trivially copyable type
+@test
+fn test_copy_marker() {
+    type Coordinate is { x: Int, y: Int };
+
+    implement Clone for Coordinate {
+        fn clone(&self) -> Coordinate {
+            Coordinate { x: self.x, y: self.y }
+        }
+    }
+
+    implement Copy for Coordinate {}
+
+    fn takes_copy<T: Copy>(val: T) -> T {
+        val
+    }
+
+    let coord = Coordinate { x: 10, y: 20 };
+    let copied = takes_copy(coord);
+
+    // Original is still usable (not moved)
+    assert_eq(coord.x, 10);
+    assert_eq(copied.x, 10);
+}
+
+// =============================================================================
+// Section 7: Default Protocol
+// =============================================================================
+
+/// Test Default implementation
+@test
+fn test_default_custom_type() {
+    type Settings is { enabled: Bool, timeout: Int, name: Text };
+
+    implement Default for Settings {
+        fn default() -> Settings {
+            Settings { enabled: true, timeout: 30, name: "" }
+        }
+    }
+
+    let settings = Settings.default();
+
+    assert_eq(settings.enabled, true);
+    assert_eq(settings.timeout, 30);
+    assert_eq(settings.name, "");
+}
+
+/// Test Default in generic context
+@test
+fn test_default_generic() {
+    fn create_default<T: Default>() -> T {
+        T.default()
+    }
+
+    type Wrapper is { value: Int };
+
+    implement Default for Wrapper {
+        fn default() -> Wrapper {
+            Wrapper { value: 0 }
+        }
+    }
+
+    let w: Wrapper = create_default();
+    assert_eq(w.value, 0);
+}
+
+// =============================================================================
+// Section 8: Debug Protocol
+// =============================================================================
+
+/// Test Debug implementation
+@test
+fn test_debug_custom_type() {
+    type Person is { name: Text, age: Int };
+
+    implement Debug for Person {
+        fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+            f.write_str(&f"Person {{ name: {self.name}, age: {self.age} }}")
+        }
+    }
+
+    let person = Person { name: "Alice", age: 30 };
+    let debug_str = f"{person:?}";
+
+    assert(debug_str.contains("Person"));
+    assert(debug_str.contains("Alice"));
+    assert(debug_str.contains("30"));
+}
+
+// =============================================================================
+// Section 9: Display Protocol
+// =============================================================================
+
+/// Test Display implementation
+@test
+fn test_display_custom_type() {
+    type Currency is { amount: Int, symbol: Text };
+
+    implement Display for Currency {
+        fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+            f.write_str(&f"{self.symbol}{self.amount}")
+        }
+    }
+
+    let price = Currency { amount: 100, symbol: "$" };
+    let display_str = f"{price}";
+
+    assert_eq(display_str, "$100");
+}
+
+// =============================================================================
+// Section 10: Drop Protocol
+// =============================================================================
+
+/// Test Drop protocol concept
+@test
+fn test_drop_protocol() {
+    type Resource is { id: Int, released: Bool };
+
+    implement Drop for Resource {
+        fn drop(&mut self) {
+            // Mark as released (in real code, would release resources)
+            self.released = true;
+        }
+    }
+
+    // Note: Drop is called automatically when value goes out of scope
+    let resource = Resource { id: 1, released: false };
+    // When resource goes out of scope, drop() is called
+}
+
+// =============================================================================
+// Section 11: Deref/DerefMut Protocols
+// =============================================================================
+
+/// Test Deref implementation
+@test
+fn test_deref_protocol() {
+    type SmartPtr<T> is { value: T };
+
+    implement<T> Deref for SmartPtr<T> {
+        type Target = T;
+
+        fn deref(&self) -> &T {
+            &self.value
+        }
+    }
+
+    let ptr = SmartPtr { value: 42 };
+    let ref_val: &Int = ptr.deref();
+
+    assert_eq(*ref_val, 42);
+}
+
+/// Test DerefMut implementation
+@test
+fn test_deref_mut_protocol() {
+    type MutBox<T> is { value: T };
+
+    implement<T> Deref for MutBox<T> {
+        type Target = T;
+
+        fn deref(&self) -> &T {
+            &self.value
+        }
+    }
+
+    implement<T> DerefMut for MutBox<T> {
+        fn deref_mut(&mut self) -> &mut T {
+            &mut self.value
+        }
+    }
+
+    let mut box_val = MutBox { value: 10 };
+    let ref_mut = box_val.deref_mut();
+    *ref_mut = 20;
+
+    assert_eq(*box_val.deref(), 20);
+}
+
+// =============================================================================
+// Section 12: AsRef/AsMut Protocols
+// =============================================================================
+
+/// Test AsRef implementation
+@test
+fn test_as_ref_protocol() {
+    type Wrapper is { inner: Text };
+
+    implement AsRef<Text> for Wrapper {
+        fn as_ref(&self) -> &Text {
+            &self.inner
+        }
+    }
+
+    let w = Wrapper { inner: "hello" };
+    let text_ref: &Text = w.as_ref();
+
+    assert_eq(*text_ref, "hello");
+}
+
+/// Test AsMut implementation
+@test
+fn test_as_mut_protocol() {
+    type MutWrapper is { inner: Int };
+
+    implement AsMut<Int> for MutWrapper {
+        fn as_mut(&mut self) -> &mut Int {
+            &mut self.inner
+        }
+    }
+
+    let mut w = MutWrapper { inner: 5 };
+    let int_ref: &mut Int = w.as_mut();
+    *int_ref = 10;
+
+    assert_eq(w.inner, 10);
+}
+
+// =============================================================================
+// Section 13: From/Into Protocols
+// =============================================================================
+
+/// Test From implementation
+@test
+fn test_from_protocol() {
+    type Meters is { value: Float };
+    type Feet is { value: Float };
+
+    implement From<Feet> for Meters {
+        fn from(feet: Feet) -> Meters {
+            Meters { value: feet.value * 0.3048 }
+        }
+    }
+
+    let feet = Feet { value: 10.0 };
+    let meters = Meters.from(feet);
+
+    assert(meters.value > 3.0 && meters.value < 3.1);
+}
+
+/// Test Into via From blanket implementation
+@test
+fn test_into_via_from() {
+    type Celsius is { temp: Float };
+    type Fahrenheit is { temp: Float };
+
+    implement From<Celsius> for Fahrenheit {
+        fn from(c: Celsius) -> Fahrenheit {
+            Fahrenheit { temp: c.temp * 9.0 / 5.0 + 32.0 }
+        }
+    }
+
+    let celsius = Celsius { temp: 0.0 };
+    let fahrenheit: Fahrenheit = celsius.into();
+
+    assert_eq(fahrenheit.temp, 32.0);
+}
+
+// =============================================================================
+// Section 14: TryFrom Protocol
+// =============================================================================
+
+/// Test TryFrom implementation
+@test
+fn test_try_from_protocol() {
+    type Percentage is { value: Int };
+
+    implement TryFrom<Int> for Percentage {
+        type Error = Text;
+
+        fn try_from(value: Int) -> Result<Percentage, Text> {
+            if value >= 0 && value <= 100 {
+                Ok(Percentage { value: value })
+            } else {
+                Err(f"Value {value} is not a valid percentage")
+            }
+        }
+    }
+
+    let valid = Percentage.try_from(50);
+    assert(valid.is_ok());
+    assert_eq(valid.unwrap().value, 50);
+
+    let invalid = Percentage.try_from(150);
+    assert(invalid.is_err());
+}
+
+// =============================================================================
+// Section 15: Formatter
+// =============================================================================
+
+/// Test Formatter write_str
+@test
+fn test_formatter_write_str() {
+    let mut buffer = Text.new();
+    let mut formatter = Formatter { buffer: &mut buffer };
+
+    formatter.write_str(&"hello").unwrap();
+    formatter.write_str(&" world").unwrap();
+
+    assert_eq(buffer, "hello world");
+}
+
+/// Test Formatter write_char
+@test
+fn test_formatter_write_char() {
+    let mut buffer = Text.new();
+    let mut formatter = Formatter { buffer: &mut buffer };
+
+    formatter.write_char('a').unwrap();
+    formatter.write_char('b').unwrap();
+    formatter.write_char('c').unwrap();
+
+    assert_eq(buffer, "abc");
+}
+
+// =============================================================================
+// Section 16: Operator Protocols - Arithmetic
+// =============================================================================
+
+/// Test Add protocol
+@test
+fn test_add_protocol() {
+    type Vector2 is { x: Int, y: Int };
+
+    implement Add<Vector2> for Vector2 {
+        type Output = Vector2;
+
+        fn add(self, rhs: Vector2) -> Vector2 {
+            Vector2 { x: self.x + rhs.x, y: self.y + rhs.y }
+        }
+    }
+
+    let v1 = Vector2 { x: 1, y: 2 };
+    let v2 = Vector2 { x: 3, y: 4 };
+    let sum = v1.add(v2);
+
+    assert_eq(sum.x, 4);
+    assert_eq(sum.y, 6);
+}
+
+/// Test Sub protocol
+@test
+fn test_sub_protocol() {
+    type Vector2 is { x: Int, y: Int };
+
+    implement Sub<Vector2> for Vector2 {
+        type Output = Vector2;
+
+        fn sub(self, rhs: Vector2) -> Vector2 {
+            Vector2 { x: self.x - rhs.x, y: self.y - rhs.y }
+        }
+    }
+
+    let v1 = Vector2 { x: 5, y: 7 };
+    let v2 = Vector2 { x: 2, y: 3 };
+    let diff = v1.sub(v2);
+
+    assert_eq(diff.x, 3);
+    assert_eq(diff.y, 4);
+}
+
+/// Test Mul protocol
+@test
+fn test_mul_protocol() {
+    type Scalar is { value: Int };
+
+    implement Mul<Int> for Scalar {
+        type Output = Scalar;
+
+        fn mul(self, rhs: Int) -> Scalar {
+            Scalar { value: self.value * rhs }
+        }
+    }
+
+    let s = Scalar { value: 5 };
+    let product = s.mul(3);
+
+    assert_eq(product.value, 15);
+}
+
+/// Test Div protocol
+@test
+fn test_div_protocol() {
+    type Fraction is { numerator: Int, denominator: Int };
+
+    implement Div<Int> for Fraction {
+        type Output = Fraction;
+
+        fn div(self, rhs: Int) -> Fraction {
+            Fraction { numerator: self.numerator, denominator: self.denominator * rhs }
+        }
+    }
+
+    let f = Fraction { numerator: 1, denominator: 2 };
+    let divided = f.div(3);
+
+    assert_eq(divided.numerator, 1);
+    assert_eq(divided.denominator, 6);
+}
+
+/// Test Rem protocol
+@test
+fn test_rem_protocol() {
+    type ModInt is { value: Int };
+
+    implement Rem<Int> for ModInt {
+        type Output = ModInt;
+
+        fn rem(self, rhs: Int) -> ModInt {
+            ModInt { value: self.value % rhs }
+        }
+    }
+
+    let m = ModInt { value: 17 };
+    let remainder = m.rem(5);
+
+    assert_eq(remainder.value, 2);
+}
+
+/// Test Neg protocol
+@test
+fn test_neg_protocol() {
+    type Signed is { value: Int };
+
+    implement Neg for Signed {
+        type Output = Signed;
+
+        fn neg(self) -> Signed {
+            Signed { value: -self.value }
+        }
+    }
+
+    let s = Signed { value: 42 };
+    let negated = s.neg();
+
+    assert_eq(negated.value, -42);
+}
+
+// =============================================================================
+// Section 17: Operator Protocols - Bitwise
+// =============================================================================
+
+/// Test BitAnd protocol
+@test
+fn test_bit_and_protocol() {
+    type Flags is { bits: Int };
+
+    implement BitAnd<Flags> for Flags {
+        type Output = Flags;
+
+        fn bitand(self, rhs: Flags) -> Flags {
+            Flags { bits: self.bits & rhs.bits }
+        }
+    }
+
+    let f1 = Flags { bits: 0b1100 };
+    let f2 = Flags { bits: 0b1010 };
+    let result = f1.bitand(f2);
+
+    assert_eq(result.bits, 0b1000);
+}
+
+/// Test BitOr protocol
+@test
+fn test_bit_or_protocol() {
+    type Flags is { bits: Int };
+
+    implement BitOr<Flags> for Flags {
+        type Output = Flags;
+
+        fn bitor(self, rhs: Flags) -> Flags {
+            Flags { bits: self.bits | rhs.bits }
+        }
+    }
+
+    let f1 = Flags { bits: 0b1100 };
+    let f2 = Flags { bits: 0b0011 };
+    let result = f1.bitor(f2);
+
+    assert_eq(result.bits, 0b1111);
+}
+
+/// Test BitXor protocol
+@test
+fn test_bit_xor_protocol() {
+    type Bits is { value: Int };
+
+    implement BitXor<Bits> for Bits {
+        type Output = Bits;
+
+        fn bitxor(self, rhs: Bits) -> Bits {
+            Bits { value: self.value ^ rhs.value }
+        }
+    }
+
+    let b1 = Bits { value: 0b1100 };
+    let b2 = Bits { value: 0b1010 };
+    let result = b1.bitxor(b2);
+
+    assert_eq(result.value, 0b0110);
+}
+
+/// Test Not protocol
+@test
+fn test_not_protocol() {
+    type Toggle is { on: Bool };
+
+    implement Not for Toggle {
+        type Output = Toggle;
+
+        fn not(self) -> Toggle {
+            Toggle { on: !self.on }
+        }
+    }
+
+    let t = Toggle { on: true };
+    let toggled = t.not();
+
+    assert_eq(toggled.on, false);
+}
+
+/// Test Shl protocol
+@test
+fn test_shl_protocol() {
+    type BitValue is { bits: Int };
+
+    implement Shl<Int> for BitValue {
+        type Output = BitValue;
+
+        fn shl(self, rhs: Int) -> BitValue {
+            BitValue { bits: self.bits << rhs }
+        }
+    }
+
+    let b = BitValue { bits: 1 };
+    let shifted = b.shl(4);
+
+    assert_eq(shifted.bits, 16);
+}
+
+/// Test Shr protocol
+@test
+fn test_shr_protocol() {
+    type BitValue is { bits: Int };
+
+    implement Shr<Int> for BitValue {
+        type Output = BitValue;
+
+        fn shr(self, rhs: Int) -> BitValue {
+            BitValue { bits: self.bits >> rhs }
+        }
+    }
+
+    let b = BitValue { bits: 16 };
+    let shifted = b.shr(2);
+
+    assert_eq(shifted.bits, 4);
+}
+
+// =============================================================================
+// Section 18: Index Protocols
+// =============================================================================
+
+/// Test Index protocol
+@test
+fn test_index_protocol() {
+    type Array3 is { elements: (Int, Int, Int) };
+
+    implement Index<Int> for Array3 {
+        type Output = Int;
+
+        fn index(&self, idx: Int) -> &Int {
+            match idx {
+                0 => &self.elements.0,
+                1 => &self.elements.1,
+                2 => &self.elements.2,
+                _ => panic("Index out of bounds"),
+            }
+        }
+    }
+
+    let arr = Array3 { elements: (10, 20, 30) };
+
+    assert_eq(*arr.index(0), 10);
+    assert_eq(*arr.index(1), 20);
+    assert_eq(*arr.index(2), 30);
+}
+
+/// Test IndexMut protocol
+@test
+fn test_index_mut_protocol() {
+    type MutArray is { data: List<Int> };
+
+    implement Index<Int> for MutArray {
+        type Output = Int;
+
+        fn index(&self, idx: Int) -> &Int {
+            &self.data[idx]
+        }
+    }
+
+    implement IndexMut<Int> for MutArray {
+        fn index_mut(&mut self, idx: Int) -> &mut Int {
+            &mut self.data[idx]
+        }
+    }
+
+    let mut arr = MutArray { data: [1, 2, 3] };
+    *arr.index_mut(1) = 100;
+
+    assert_eq(*arr.index(1), 100);
+}
+
+// =============================================================================
+// Section 19: Zero/One Protocols
+// =============================================================================
+
+/// Test Zero protocol
+@test
+fn test_zero_protocol() {
+    type Natural is { value: Int };
+
+    implement Zero for Natural {
+        fn zero() -> Natural {
+            Natural { value: 0 }
+        }
+
+        fn is_zero(&self) -> Bool {
+            self.value == 0
+        }
+    }
+
+    let zero = Natural.zero();
+    assert(zero.is_zero());
+    assert_eq(zero.value, 0);
+
+    let nonzero = Natural { value: 5 };
+    assert(!nonzero.is_zero());
+}
+
+/// Test One protocol
+@test
+fn test_one_protocol() {
+    type Natural is { value: Int };
+
+    implement One for Natural {
+        fn one() -> Natural {
+            Natural { value: 1 }
+        }
+
+        fn is_one(&self) -> Bool {
+            self.value == 1
+        }
+    }
+
+    let one = Natural.one();
+    assert(one.is_one());
+    assert_eq(one.value, 1);
+
+    let other = Natural { value: 2 };
+    assert(!other.is_one());
+}
+
+// =============================================================================
+// Section 20: Marker Protocols
+// =============================================================================
+
+/// Test Sized marker (most types are Sized)
+@test
+fn test_sized_marker() {
+    fn requires_sized<T: Sized>(val: T) -> T {
+        val
+    }
+
+    let x = 42;
+    let y = requires_sized(x);
+    assert_eq(y, 42);
+}
+
+/// Test Send marker
+@test
+fn test_send_marker() {
+    type SafeData is { value: Int };
+
+    implement Send for SafeData {}
+
+    fn requires_send<T: Send>(_val: &T) {}
+
+    let data = SafeData { value: 100 };
+    requires_send(&data);  // Compiles because SafeData: Send
+}
+
+/// Test Sync marker
+@test
+fn test_sync_marker() {
+    type ThreadSafe is { counter: Int };
+
+    implement Sync for ThreadSafe {}
+
+    fn requires_sync<T: Sync>(_val: &T) {}
+
+    let ts = ThreadSafe { counter: 0 };
+    requires_sync(&ts);  // Compiles because ThreadSafe: Sync
+}
+
+/// Test Unpin marker
+@test
+fn test_unpin_marker() {
+    type Movable is { data: Int };
+
+    implement Unpin for Movable {}
+
+    fn requires_unpin<T: Unpin>(val: T) -> T {
+        val
+    }
+
+    let m = Movable { data: 42 };
+    let moved = requires_unpin(m);
+    assert_eq(moved.data, 42);
+}
+
+// =============================================================================
+// Section 21: Atomic Protocol
+// =============================================================================
+
+/// Test Atomic marker for primitive types
+@test
+fn test_atomic_marker_primitives() {
+    fn requires_atomic<T: Atomic>() {}
+
+    requires_atomic<UInt8>();
+    requires_atomic<UInt16>();
+    requires_atomic<UInt32>();
+    requires_atomic<UInt64>();
+    requires_atomic<Int8>();
+    requires_atomic<Int16>();
+    requires_atomic<Int32>();
+    requires_atomic<Int64>();
+    requires_atomic<Int>();
+    requires_atomic<ISize>();
+    requires_atomic<USize>();
+    requires_atomic<Bool>();
+}
+
+// =============================================================================
+// Section 22: Integer Protocol
+// =============================================================================
+
+/// Test Integer marker
+@test
+fn test_integer_marker() {
+    fn requires_integer<T: Integer>() {}
+
+    requires_integer<UInt8>();
+    requires_integer<UInt16>();
+    requires_integer<UInt32>();
+    requires_integer<UInt64>();
+    requires_integer<USize>();
+    requires_integer<Int8>();
+    requires_integer<Int16>();
+    requires_integer<Int32>();
+    requires_integer<Int64>();
+    requires_integer<Int>();
+    requires_integer<ISize>();
+}
+
+// =============================================================================
+// Section 23: SignedInteger Protocol
+// =============================================================================
+
+/// Test SignedInteger marker
+@test
+fn test_signed_integer_marker() {
+    fn requires_signed<T: SignedInteger>() {}
+
+    requires_signed<Int8>();
+    requires_signed<Int16>();
+    requires_signed<Int32>();
+    requires_signed<Int64>();
+    requires_signed<Int>();
+    requires_signed<ISize>();
+}
+
+// =============================================================================
+// Section 24: Numeric Protocol
+// =============================================================================
+
+/// Test Numeric marker for all numeric types
+@test
+fn test_numeric_marker() {
+    fn requires_numeric<T: Numeric>() {}
+
+    // Integer types
+    requires_numeric<UInt8>();
+    requires_numeric<UInt16>();
+    requires_numeric<UInt32>();
+    requires_numeric<UInt64>();
+    requires_numeric<USize>();
+    requires_numeric<Int8>();
+    requires_numeric<Int16>();
+    requires_numeric<Int32>();
+    requires_numeric<Int64>();
+    requires_numeric<Int>();
+    requires_numeric<ISize>();
+
+    // Floating-point types
+    requires_numeric<Float>();
+    requires_numeric<Float32>();
+    requires_numeric<Float64>();
+}
+
+// =============================================================================
+// Section 25: SignedNumeric Protocol
+// =============================================================================
+
+/// Test SignedNumeric marker
+@test
+fn test_signed_numeric_marker() {
+    fn requires_signed_numeric<T: SignedNumeric>() {}
+
+    // Signed integers
+    requires_signed_numeric<Int8>();
+    requires_signed_numeric<Int16>();
+    requires_signed_numeric<Int32>();
+    requires_signed_numeric<Int64>();
+    requires_signed_numeric<Int>();
+    requires_signed_numeric<ISize>();
+
+    // Floats
+    requires_signed_numeric<Float>();
+    requires_signed_numeric<Float32>();
+    requires_signed_numeric<Float64>();
+}
+
+// =============================================================================
+// Section 26: Protocol Inheritance
+// =============================================================================
+
+/// Test Ord extends Eq
+@test
+fn test_ord_extends_eq() {
+    type Ranked is { rank: Int };
+
+    implement Eq for Ranked {
+        fn eq(&self, other: &Ranked) -> Bool {
+            self.rank == other.rank
+        }
+    }
+
+    implement Ord for Ranked {
+        fn cmp(&self, other: &Ranked) -> Ordering {
+            Ordering.from_int(self.rank - other.rank)
+        }
+    }
+
+    // Ord type can use Eq methods
+    let r1 = Ranked { rank: 1 };
+    let r2 = Ranked { rank: 1 };
+
+    assert(r1.eq(&r2));  // From Eq
+    assert(r1.cmp(&r2) is Equal);  // From Ord
+}
+
+/// Test Copy extends Clone
+@test
+fn test_copy_extends_clone() {
+    type Simple is { n: Int };
+
+    implement Clone for Simple {
+        fn clone(&self) -> Simple {
+            Simple { n: self.n }
+        }
+    }
+
+    implement Copy for Simple {}
+
+    let s1 = Simple { n: 42 };
+    let s2 = s1.clone();  // Can use clone() because Copy extends Clone
+
+    assert_eq(s2.n, 42);
+}
+
+/// Test DerefMut extends Deref
+@test
+fn test_deref_mut_extends_deref() {
+    type Cell<T> is { value: T };
+
+    implement<T> Deref for Cell<T> {
+        type Target = T;
+        fn deref(&self) -> &T { &self.value }
+    }
+
+    implement<T> DerefMut for Cell<T> {
+        fn deref_mut(&mut self) -> &mut T { &mut self.value }
+    }
+
+    let mut cell = Cell { value: 10 };
+
+    // Can use deref (from Deref)
+    let ref_val = cell.deref();
+    assert_eq(*ref_val, 10);
+
+    // Can use deref_mut (from DerefMut)
+    *cell.deref_mut() = 20;
+    assert_eq(*cell.deref(), 20);
+}
+
+// =============================================================================
+// Section 27: Generic Protocol Constraints
+// =============================================================================
+
+/// Test function with multiple protocol bounds
+@test
+fn test_multiple_bounds() {
+    fn compare_and_hash<T: Eq + Hash>(a: &T, b: &T) -> (Bool, Int, Int) {
+        // Use == operator instead of eq method due to method resolution issue
+        (*a == *b, a.hash_value(), b.hash_value())
+    }
+
+    type Hashable is { id: Int };
+
+    implement Eq for Hashable {
+        fn eq(&self, other: &Hashable) -> Bool {
+            self.id == other.id
+        }
+    }
+
+    implement Hash for Hashable {
+        fn hash(&self, hasher: &mut Hasher) {
+            hasher.write_int(self.id);
+        }
+    }
+
+    let h1 = Hashable { id: 42 };
+    let h2 = Hashable { id: 42 };
+
+    let (eq, hash1, hash2) = compare_and_hash(&h1, &h2);
+
+    assert(eq);
+    assert_eq(hash1, hash2);
+}
+
+/// Test generic struct with protocol constraint
+@test
+fn test_generic_struct_with_bound() {
+    type SortedPair<T: Ord> is { min: T, max: T };
+
+    implement<T: Ord> SortedPair<T> {
+        fn new(a: T, b: T) -> SortedPair<T> {
+            if a.le(&b) {
+                SortedPair { min: a, max: b }
+            } else {
+                SortedPair { min: b, max: a }
+            }
+        }
+    }
+
+    let pair = SortedPair.new(5, 3);
+    assert_eq(pair.min, 3);
+    assert_eq(pair.max, 5);
+}
+
+// =============================================================================
+// Section 28: Protocol with Associated Types
+// =============================================================================
+
+/// Test protocol with associated type
+@test
+fn test_associated_type_usage() {
+    type IntContainer is { values: List<Int> };
+
+    implement Index<Int> for IntContainer {
+        type Output = Int;
+
+        fn index(&self, idx: Int) -> &Int {
+            &self.values[idx]
+        }
+    }
+
+    let container = IntContainer { values: [10, 20, 30] };
+
+    // Access via Index, Output type is Int
+    let val: &Int = container.index(1);
+    assert_eq(*val, 20);
+}
+
+// =============================================================================
+// Section 29: Any Protocol
+// =============================================================================
+
+/// Test Any protocol concept
+@test
+fn test_any_protocol_concept() {
+    // Any allows runtime type identification
+    // Types implementing Any can be downcast
+
+    type Anything is { data: Int };
+
+    // In real usage, Any would be automatically implemented
+    // and provide type_id() for runtime type checking
+
+    let a = Anything { data: 42 };
+    // a.type_id() would return the TypeId of Anything
+}
+
+// =============================================================================
+// Section 30: Integration - Combined Protocol Usage
+// =============================================================================
+
+/// Test real-world example: Sortable collection item
+@test
+fn test_sortable_collection_item() {
+    type Item is { priority: Int, name: Text };
+
+    implement Eq for Item {
+        fn eq(&self, other: &Item) -> Bool {
+            self.priority == other.priority && self.name == other.name
+        }
+    }
+
+    implement Ord for Item {
+        fn cmp(&self, other: &Item) -> Ordering {
+            // Sort by priority first, then by name
+            Ordering.from_int(self.priority - other.priority)
+                .then(if self.name < other.name { Less }
+                      else if self.name > other.name { Greater }
+                      else { Equal })
+        }
+    }
+
+    implement Clone for Item {
+        fn clone(&self) -> Item {
+            Item { priority: self.priority, name: self.name.clone() }
+        }
+    }
+
+    implement Hash for Item {
+        fn hash(&self, hasher: &mut Hasher) {
+            hasher.write_int(self.priority);
+            hasher.write(self.name.as_bytes());
+        }
+    }
+
+    implement Default for Item {
+        fn default() -> Item {
+            Item { priority: 0, name: "" }
+        }
+    }
+
+    implement Debug for Item {
+        fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+            f.write_str(&f"Item {{ priority: {self.priority}, name: {self.name} }}")
+        }
+    }
+
+    // Use the item with various protocols
+    let item1 = Item { priority: 1, name: "first" };
+    let item2 = Item { priority: 2, name: "second" };
+    let item3 = item1.clone();
+
+    assert(item1.lt(&item2));  // Ord
+    assert(item1.eq(&item3));  // Eq
+    assert_eq(item1.hash_value(), item3.hash_value());  // Hash
+
+    let default_item = Item.default();
+    assert_eq(default_item.priority, 0);  // Default
+}
+
+/// Test numeric operations example
+@test
+fn test_numeric_operations_example() {
+    type Complex is { real: Float, imag: Float };
+
+    implement Eq for Complex {
+        fn eq(&self, other: &Complex) -> Bool {
+            self.real == other.real && self.imag == other.imag
+        }
+    }
+
+    implement Add<Complex> for Complex {
+        type Output = Complex;
+        fn add(self, rhs: Complex) -> Complex {
+            Complex { real: self.real + rhs.real, imag: self.imag + rhs.imag }
+        }
+    }
+
+    implement Sub<Complex> for Complex {
+        type Output = Complex;
+        fn sub(self, rhs: Complex) -> Complex {
+            Complex { real: self.real - rhs.real, imag: self.imag - rhs.imag }
+        }
+    }
+
+    implement Mul<Complex> for Complex {
+        type Output = Complex;
+        fn mul(self, rhs: Complex) -> Complex {
+            Complex {
+                real: self.real * rhs.real - self.imag * rhs.imag,
+                imag: self.real * rhs.imag + self.imag * rhs.real,
+            }
+        }
+    }
+
+    implement Zero for Complex {
+        fn zero() -> Complex { Complex { real: 0.0, imag: 0.0 } }
+        fn is_zero(&self) -> Bool { self.real == 0.0 && self.imag == 0.0 }
+    }
+
+    implement One for Complex {
+        fn one() -> Complex { Complex { real: 1.0, imag: 0.0 } }
+        fn is_one(&self) -> Bool { self.real == 1.0 && self.imag == 0.0 }
+    }
+
+    let c1 = Complex { real: 3.0, imag: 4.0 };
+    let c2 = Complex { real: 1.0, imag: 2.0 };
+
+    let sum = c1.add(c2);
+    assert_eq(sum.real, 4.0);
+    assert_eq(sum.imag, 6.0);
+
+    let zero = Complex.zero();
+    assert(zero.is_zero());
+
+    let one = Complex.one();
+    assert(one.is_one());
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

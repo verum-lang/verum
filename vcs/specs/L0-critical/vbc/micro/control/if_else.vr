@@ -1,0 +1,4 @@
+// @test: typecheck-pass
+// @level: L0
+// @expect: pass
+fn main() { let x: Int = if true { 1 } else { 2 }; assert_eq(x, 1); }

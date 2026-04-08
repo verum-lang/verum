@@ -1,0 +1,551 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, memory, cbgr, tier-oracle
+// @timeout: 15000
+
+/// Comprehensive memory operation tests for Tier 0 vs Tier 3 equivalence.
+/// Tests memory allocation, references, CBGR semantics, move/copy behavior,
+/// and drop ordering to ensure identical behavior across execution tiers.
+
+fn main() {
+    test_stack_allocation();
+    test_heap_allocation();
+    test_references();
+    test_mutable_references();
+    test_cbgr_basics();
+    test_move_semantics();
+    test_copy_types();
+    test_drop_order();
+    test_reference_lifetimes();
+    test_collections_memory();
+    test_nested_structures();
+}
+
+/// Stack allocation and deallocation
+fn test_stack_allocation() {
+    println("=== Stack Allocation ===");
+
+    // Simple stack values
+    let a: Int = 42;
+    let b: Float = 3.14;
+    let c: Bool = true;
+    let d: Text = "hello";
+    println(f"primitives: {a}, {b}, {c}, {d}");
+
+    // Tuple on stack
+    let tuple = (1, 2, 3, 4, 5);
+    println(f"tuple: {tuple}");
+
+    // Array on stack (small, fixed size)
+    let arr = [1, 2, 3, 4, 5];
+    println(f"array: {arr}");
+
+    // Type on stack
+    type Point is { x: Int, y: Int };
+    let point = Point { x: 10, y: 20 };
+    println(f"point: ({point.x}, {point.y})");
+
+    // Nested scope - inner values dropped on scope exit
+    {
+        let inner = 100;
+        println(f"inner scope: {inner}");
+    }
+    println("after inner scope");
+
+    // Multiple nested scopes
+    {
+        let level1 = "L1";
+        {
+            let level2 = "L2";
+            {
+                let level3 = "L3";
+                println(f"deepest: {level1}, {level2}, {level3}");
+            }
+            println(f"after L3: {level1}, {level2}");
+        }
+        println(f"after L2: {level1}");
+    }
+    println("after L1");
+}
+
+/// Heap allocation
+fn test_heap_allocation() {
+    println("\n=== Heap Allocation ===");
+
+    // Heap (single heap allocation)
+    let boxed = Heap(42);
+    println(f"boxed value: {*boxed}");
+
+    // Heap-allocated type
+    type LargeStruct is {
+        data: [Int; 100],
+        name: Text,
+    };
+    let large = Heap(LargeStruct {
+        data: [0; 100],
+        name: "large".to_text(),
+    });
+    println(f"large struct name: {large.name}");
+
+    // Multiple heap allocations
+    let boxes = (0..5).map(|i| Heap(i * 10)).collect<List<_>>();
+    for (idx, b) in boxes.enumerate() {
+        println(f"box[{idx}] = {*b}");
+    }
+
+    // Heap-allocated collections
+    let heap_list = Heap(List.from([1, 2, 3, 4, 5]));
+    println(f"heap list: {*heap_list}");
+
+    // Nested heap allocations
+    let nested = Heap(Heap(Heap(42)));
+    println(f"nested box: {***nested}");
+}
+
+/// Immutable references
+fn test_references() {
+    println("\n=== References ===");
+
+    // Basic reference
+    let value = 42;
+    let ref_value = &value;
+    println(f"value: {value}, ref: {*ref_value}");
+
+    // Multiple references to same value
+    let data = "shared data";
+    let ref1 = &data;
+    let ref2 = &data;
+    let ref3 = &data;
+    println(f"refs: {*ref1}, {*ref2}, {*ref3}");
+
+    // Reference to type field
+    type Container is { inner: Int };
+    let container = Container { inner: 100 };
+    let field_ref = &container.inner;
+    println(f"field ref: {*field_ref}");
+
+    // Reference to array element
+    let arr = [10, 20, 30, 40, 50];
+    let elem_ref = &arr[2];
+    println(f"element ref: {*elem_ref}");
+
+    // Reference in function
+    fn print_ref(r: &Int) {
+        println(f"from fn: {*r}");
+    }
+    print_ref(&value);
+
+    // Reference as return value
+    fn get_first(arr: &[Int]) -> &Int {
+        &arr[0]
+    }
+    let first = get_first(&arr);
+    println(f"first: {*first}");
+}
+
+/// Mutable references
+fn test_mutable_references() {
+    println("\n=== Mutable References ===");
+
+    // Basic mutable reference
+    let mut value = 42;
+    let mut_ref = &mut value;
+    *mut_ref = 100;
+    println(f"after mutation: {value}");
+
+    // Mutable reference to type field
+    type Counter is { count: Int };
+    let mut counter = Counter { count: 0 };
+    {
+        let count_ref = &mut counter.count;
+        *count_ref += 10;
+    }
+    println(f"counter: {counter.count}");
+
+    // Mutable reference to array element
+    let mut arr = [1, 2, 3, 4, 5];
+    {
+        let elem = &mut arr[2];
+        *elem = 100;
+    }
+    println(f"array after mutation: {arr}");
+
+    // Mutable reference through function
+    fn double_in_place(x: &mut Int) {
+        *x = *x * 2;
+    }
+    let mut n = 21;
+    double_in_place(&mut n);
+    println(f"doubled: {n}");
+
+    // Reborrow
+    let mut data = 50;
+    let ref1 = &mut data;
+    {
+        let ref2 = &mut *ref1;  // Reborrow
+        *ref2 += 10;
+    }
+    *ref1 += 5;
+    println(f"after reborrows: {data}");
+}
+
+/// CBGR (Compile-time Borrow checking with Generation-based Runtime checks)
+fn test_cbgr_basics() {
+    println("\n=== CBGR Basics ===");
+
+    // Reference with generation tracking
+    let value = 42;
+    let ref_val: &Int = &value;
+
+    // CBGR ensures ref_val is valid here
+    println(f"CBGR ref: {*ref_val}");
+
+    // Generation is checked on access
+    type Tracked is {
+        data: Int,
+    };
+    let tracked = Tracked { data: 100 };
+    let tracked_ref = &tracked.data;
+    println(f"tracked ref: {*tracked_ref}");
+
+    // Demonstrate that references remain valid within scope
+    fn use_reference(r: &Int) -> Int {
+        // CBGR validates generation matches
+        *r * 2
+    }
+    let result = use_reference(&value);
+    println(f"use_reference result: {result}");
+
+    // Three-tier reference demonstration
+    // Tier 0: Full CBGR protection (~15ns overhead)
+    let tier0_ref: &Int = &value;
+    println(f"Tier 0 ref: {*tier0_ref}");
+
+    // Tier 1: Checked by compiler, zero runtime overhead
+    // (escape analysis proves safety)
+    fn local_only(x: Int) -> Int {
+        let local = x * 2;
+        let checked_ref: &checked Int = &local;
+        *checked_ref + 1
+    }
+    println(f"checked ref result: {local_only(21)}");
+
+    // Tier 2: Unsafe, programmer proves safety
+    unsafe {
+        let unsafe_ref: &unsafe Int = &value;
+        println(f"unsafe ref: {*unsafe_ref}");
+    }
+}
+
+/// Move semantics
+fn test_move_semantics() {
+    println("\n=== Move Semantics ===");
+
+    // Move of heap-allocated data
+    let data = Heap([1, 2, 3, 4, 5]);
+    let moved = data;  // data moved to moved
+    // data is no longer valid here
+    println(f"moved data: {*moved}");
+
+    // Move in function call
+    fn take_ownership(b: Heap<Int>) -> Int {
+        *b
+    }
+    let boxed = Heap(42);
+    let result = take_ownership(boxed);
+    // boxed is no longer valid
+    println(f"taken ownership: {result}");
+
+    // Move in pattern matching
+    type Container is Value(Heap<Int>) | Empty;
+    let cont = Container.Value(Heap(100));
+    match cont {
+        Container.Value(b) => println(f"matched value: {*b}"),
+        Container.Empty => println("matched empty"),
+    }
+    // cont is consumed
+
+    // Move in type initialization
+    type Holder is {
+        data: List<Int>,
+    };
+    let list = List.from([1, 2, 3]);
+    let holder = Holder { data: list };
+    // list is moved into holder
+    println(f"holder data: {holder.data}");
+
+    // Partial move
+    type Pair is {
+        first: Heap<Int>,
+        second: Heap<Int>,
+    };
+    let pair = Pair {
+        first: Heap(1),
+        second: Heap(2),
+    };
+    let first = pair.first;  // Partial move
+    // pair.first is invalid, but pair.second is still valid
+    println(f"partial move first: {*first}");
+}
+
+/// Copy types
+fn test_copy_types() {
+    println("\n=== Copy Types ===");
+
+    // Primitive types are Copy
+    let a: Int = 42;
+    let b = a;  // Copy, not move
+    println(f"after copy: a={a}, b={b}");
+
+    let x: Float = 3.14;
+    let y = x;
+    println(f"float copy: x={x}, y={y}");
+
+    let flag = true;
+    let flag2 = flag;
+    println(f"bool copy: {flag}, {flag2}");
+
+    // Tuple of Copy types is Copy
+    let tuple = (1, 2, 3);
+    let tuple2 = tuple;
+    println(f"tuple copy: {tuple}, {tuple2}");
+
+    // Array of Copy types is Copy
+    let arr = [1, 2, 3, 4, 5];
+    let arr2 = arr;
+    println(f"array copy: {arr}, {arr2}");
+
+    // Type can be Copy if all fields are Copy
+    @derive(Copy)
+    type Point is { x: Int, y: Int };
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = p1;
+    println(f"struct copy: ({p1.x}, {p1.y}), ({p2.x}, {p2.y})");
+
+    // References are Copy
+    let value = 100;
+    let ref1 = &value;
+    let ref2 = ref1;  // Copy the reference
+    println(f"ref copy: {*ref1}, {*ref2}");
+}
+
+/// Drop ordering
+fn test_drop_order() {
+    println("\n=== Drop Order ===");
+
+    // Demonstrate drop order with tracking type
+    type Dropable is {
+        id: Int,
+    };
+
+    implement Drop for Dropable {
+        fn drop(&mut self) {
+            println(f"dropping: {self.id}");
+        }
+    }
+
+    // Local variables dropped in reverse order of declaration
+    {
+        let a = Dropable { id: 1 };
+        let b = Dropable { id: 2 };
+        let c = Dropable { id: 3 };
+        println("before scope end");
+    }
+    println("after scope");
+
+    // Nested scopes
+    {
+        let outer = Dropable { id: 10 };
+        {
+            let inner = Dropable { id: 20 };
+            println("in inner scope");
+        }
+        println("after inner, before outer ends");
+    }
+    println("after outer");
+
+    // Type fields dropped after type
+    type DropContainer is {
+        first: Dropable,
+        second: Dropable,
+    };
+    {
+        let container = DropContainer {
+            first: Dropable { id: 100 },
+            second: Dropable { id: 200 },
+        };
+        println("before container drop");
+    }
+    println("after container drop");
+
+    // Tuple elements dropped in order
+    {
+        let tuple = (Dropable { id: 1 }, Dropable { id: 2 }, Dropable { id: 3 });
+        println("before tuple drop");
+    }
+    println("after tuple drop");
+
+    // Early drop with explicit drop()
+    {
+        let early = Dropable { id: 999 };
+        drop(early);
+        println("after explicit drop");
+    }
+}
+
+/// Reference lifetimes
+fn test_reference_lifetimes() {
+    println("\n=== Reference Lifetimes ===");
+
+    // Reference must not outlive referent
+    fn get_ref<'a>(list: &'a List<Int>) -> &'a Int {
+        &list[0]
+    }
+
+    let list = List.from([10, 20, 30]);
+    let first_ref = get_ref(&list);
+    println(f"lifetime ref: {*first_ref}");
+
+    // Multiple references with same lifetime
+    fn max_ref<'a>(a: &'a Int, b: &'a Int) -> &'a Int {
+        if *a > *b { a } else { b }
+    }
+    let x = 100;
+    let y = 200;
+    let max_r = max_ref(&x, &y);
+    println(f"max ref: {*max_r}");
+
+    // Type with reference field
+    type RefHolder<'a> is {
+        reference: &'a Int,
+    };
+
+    let value = 42;
+    let holder = RefHolder { reference: &value };
+    println(f"holder ref: {*holder.reference}");
+
+    // Reference in closure
+    let data = List.from([1, 2, 3]);
+    let closure = || {
+        let ref_to_data = &data[0];
+        *ref_to_data
+    };
+    println(f"closure ref: {closure()}");
+}
+
+/// Collections and memory
+fn test_collections_memory() {
+    println("\n=== Collections Memory ===");
+
+    // List growth and reallocation
+    let mut list = List.with_capacity(4);
+    println(f"initial capacity: {list.capacity()}");
+
+    for i in 0..10 {
+        list.push(i);
+        if i % 3 == 0 {
+            println(f"after push {i}: len={list.len()}, cap={list.capacity()}");
+        }
+    }
+
+    // Map allocation
+    let mut map = Map.new();
+    for i in 0..10 {
+        map.insert(f"key{i}", i * 10);
+    }
+    println(f"map size: {map.len()}");
+
+    // Collection clear vs drop
+    let mut to_clear = List.from([1, 2, 3, 4, 5]);
+    println(f"before clear: {to_clear}");
+    to_clear.clear();
+    println(f"after clear: {to_clear}, cap={to_clear.capacity()}");
+
+    // Shrinking collections
+    let mut shrinkable = List.with_capacity(100);
+    shrinkable.extend([1, 2, 3]);
+    println(f"before shrink: len={shrinkable.len()}, cap={shrinkable.capacity()}");
+    shrinkable.shrink_to_fit();
+    println(f"after shrink: len={shrinkable.len()}, cap={shrinkable.capacity()}");
+
+    // Iterator ownership
+    let list = List.from([1, 2, 3, 4, 5]);
+    let iter = list.iter();  // Borrows list
+    let sum: Int = iter.sum();
+    println(f"iter sum: {sum}");
+    println(f"list still valid: {list}");
+
+    // Into iterator (consumes)
+    let to_consume = List.from([10, 20, 30]);
+    let collected: List<Int> = to_consume.into_iter().map(|x| x * 2).collect();
+    println(f"into_iter result: {collected}");
+    // to_consume is consumed
+}
+
+/// Nested structures
+fn test_nested_structures() {
+    println("\n=== Nested Structures ===");
+
+    // Nested types
+    type Inner is {
+        value: Int,
+    };
+
+    type Outer is {
+        inner: Inner,
+        name: Text,
+    };
+
+    let nested = Outer {
+        inner: Inner { value: 42 },
+        name: "outer".to_text(),
+    };
+    println(f"nested: {nested.name}, {nested.inner.value}");
+
+    // Deep nesting
+    type Level1 is { level2: Level2 };
+    type Level2 is { level3: Level3 };
+    type Level3 is { value: Int };
+
+    let deep = Level1 {
+        level2: Level2 {
+            level3: Level3 { value: 999 },
+        },
+    };
+    println(f"deep value: {deep.level2.level3.value}");
+
+    // Recursive structure (via Heap)
+    type Tree is Leaf(Int) | Node { left: Heap<Tree>, right: Heap<Tree> };
+
+    let tree = Tree.Node {
+        left: Heap(Tree.Leaf(1)),
+        right: Heap(Tree.Node {
+            left: Heap(Tree.Leaf(2)),
+            right: Heap(Tree.Leaf(3)),
+        }),
+    };
+
+    fn sum_tree(t: &Tree) -> Int {
+        match t {
+            Tree.Leaf(v) => *v,
+            Tree.Node { left, right } => sum_tree(left) + sum_tree(right),
+        }
+    }
+    println(f"tree sum: {sum_tree(&tree)}");
+
+    // Self-referential via indices
+    type Graph is {
+        nodes: List<Text>,
+        edges: List<(Int, Int)>,
+    };
+
+    let graph = Graph {
+        nodes: List.from(["A", "B", "C", "D"]),
+        edges: List.from([(0, 1), (1, 2), (2, 3), (3, 0)]),
+    };
+
+    for (from, to) in &graph.edges {
+        println(f"edge: {graph.nodes[*from]} -> {graph.nodes[*to]}");
+    }
+}

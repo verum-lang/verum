@@ -1,0 +1,552 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, edge, functional, pipes
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Functional patterns with references.
+// Tests map-like, filter-like, reduce-like functions using refs,
+// pipe/chain of functions, and composition of reference-passing functions.
+
+// =============================================================================
+// Array infrastructure (Arr8)
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// Collection with length
+type Collection is { data: Arr8, len: Int };
+
+fn coll_new() -> Collection {
+    Collection { data: arr8_zeros(), len: 0 }
+}
+
+fn coll_push(c: Collection, v: Int) -> Collection {
+    Collection { data: arr8_set(c.data, c.len, v), len: c.len + 1 }
+}
+
+fn coll_get(c: Collection, i: Int) -> Int {
+    arr8_get(c.data, i)
+}
+
+fn coll_set(c: Collection, i: Int, v: Int) -> Collection {
+    Collection { data: arr8_set(c.data, i, v), len: c.len }
+}
+
+// =============================================================================
+// Map-like: transform each element, reading source via ref
+// =============================================================================
+
+fn map_double(src: &Collection) -> Collection {
+    let mut result = coll_new();
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        let val = coll_get(*src, i);
+        result = coll_push(result, val * 2);
+        i = i + 1;
+    }
+    result
+}
+
+fn map_square(src: &Collection) -> Collection {
+    let mut result = coll_new();
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        let val = coll_get(*src, i);
+        result = coll_push(result, val * val);
+        i = i + 1;
+    }
+    result
+}
+
+fn map_add_const(src: &Collection, k: Int) -> Collection {
+    let mut result = coll_new();
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        let val = coll_get(*src, i);
+        result = coll_push(result, val + k);
+        i = i + 1;
+    }
+    result
+}
+
+fn map_negate(src: &Collection) -> Collection {
+    let mut result = coll_new();
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        let val = coll_get(*src, i);
+        result = coll_push(result, 0 - val);
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Filter-like: test ref values, keep matching
+// =============================================================================
+
+fn filter_positive(src: &Collection) -> Collection {
+    let mut result = coll_new();
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        let val = coll_get(*src, i);
+        if val > 0 {
+            result = coll_push(result, val);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_even(src: &Collection) -> Collection {
+    let mut result = coll_new();
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        let val = coll_get(*src, i);
+        if val % 2 == 0 {
+            result = coll_push(result, val);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_greater_than(src: &Collection, threshold: Int) -> Collection {
+    let mut result = coll_new();
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        let val = coll_get(*src, i);
+        if val > threshold {
+            result = coll_push(result, val);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Reduce-like: accumulate with ref
+// =============================================================================
+
+fn reduce_sum(src: &Collection) -> Int {
+    let mut acc = 0;
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        acc = acc + coll_get(*src, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn reduce_product(src: &Collection) -> Int {
+    let mut acc = 1;
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        acc = acc * coll_get(*src, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn reduce_max(src: &Collection) -> Int {
+    if (*src).len == 0 { return 0; }
+    let mut mx = coll_get(*src, 0);
+    let mut i = 1;
+    let n = (*src).len;
+    while i < n {
+        let val = coll_get(*src, i);
+        if val > mx { mx = val; }
+        i = i + 1;
+    }
+    mx
+}
+
+fn reduce_min(src: &Collection) -> Int {
+    if (*src).len == 0 { return 0; }
+    let mut mn = coll_get(*src, 0);
+    let mut i = 1;
+    let n = (*src).len;
+    while i < n {
+        let val = coll_get(*src, i);
+        if val < mn { mn = val; }
+        i = i + 1;
+    }
+    mn
+}
+
+// Reduce with mutable accumulator ref
+fn reduce_sum_ref(src: &Collection, acc: &mut Int) {
+    let mut i = 0;
+    let n = (*src).len;
+    while i < n {
+        *acc = *acc + coll_get(*src, i);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Test 1: Map operations
+// =============================================================================
+
+fn test_map_double() {
+    let mut c = coll_new();
+    c = coll_push(c, 1);
+    c = coll_push(c, 2);
+    c = coll_push(c, 3);
+    c = coll_push(c, 4);
+    c = coll_push(c, 5);
+
+    let doubled = map_double(&c);
+    assert_eq(doubled.len, 5);
+    assert_eq(coll_get(doubled, 0), 2);
+    assert_eq(coll_get(doubled, 1), 4);
+    assert_eq(coll_get(doubled, 2), 6);
+    assert_eq(coll_get(doubled, 3), 8);
+    assert_eq(coll_get(doubled, 4), 10);
+}
+
+fn test_map_square() {
+    let mut c = coll_new();
+    c = coll_push(c, 1);
+    c = coll_push(c, 2);
+    c = coll_push(c, 3);
+
+    let squared = map_square(&c);
+    assert_eq(coll_get(squared, 0), 1);
+    assert_eq(coll_get(squared, 1), 4);
+    assert_eq(coll_get(squared, 2), 9);
+}
+
+// =============================================================================
+// Test 2: Filter operations
+// =============================================================================
+
+fn test_filter_positive() {
+    let mut c = coll_new();
+    c = coll_push(c, -3);
+    c = coll_push(c, -1);
+    c = coll_push(c, 0);
+    c = coll_push(c, 2);
+    c = coll_push(c, 5);
+    c = coll_push(c, -2);
+    c = coll_push(c, 7);
+
+    let pos = filter_positive(&c);
+    assert_eq(pos.len, 3);
+    assert_eq(coll_get(pos, 0), 2);
+    assert_eq(coll_get(pos, 1), 5);
+    assert_eq(coll_get(pos, 2), 7);
+}
+
+fn test_filter_even() {
+    let mut c = coll_new();
+    c = coll_push(c, 1);
+    c = coll_push(c, 2);
+    c = coll_push(c, 3);
+    c = coll_push(c, 4);
+    c = coll_push(c, 5);
+    c = coll_push(c, 6);
+
+    let evens = filter_even(&c);
+    assert_eq(evens.len, 3);
+    assert_eq(coll_get(evens, 0), 2);
+    assert_eq(coll_get(evens, 1), 4);
+    assert_eq(coll_get(evens, 2), 6);
+}
+
+// =============================================================================
+// Test 3: Reduce operations
+// =============================================================================
+
+fn test_reduce_sum() {
+    let mut c = coll_new();
+    c = coll_push(c, 10);
+    c = coll_push(c, 20);
+    c = coll_push(c, 30);
+    c = coll_push(c, 40);
+
+    assert_eq(reduce_sum(&c), 100);
+}
+
+fn test_reduce_product() {
+    let mut c = coll_new();
+    c = coll_push(c, 1);
+    c = coll_push(c, 2);
+    c = coll_push(c, 3);
+    c = coll_push(c, 4);
+    c = coll_push(c, 5);
+
+    assert_eq(reduce_product(&c), 120);
+}
+
+fn test_reduce_max_min() {
+    let mut c = coll_new();
+    c = coll_push(c, 5);
+    c = coll_push(c, 2);
+    c = coll_push(c, 8);
+    c = coll_push(c, 1);
+    c = coll_push(c, 9);
+    c = coll_push(c, 3);
+
+    assert_eq(reduce_max(&c), 9);
+    assert_eq(reduce_min(&c), 1);
+}
+
+// =============================================================================
+// Test 4: Reduce with mutable accumulator ref
+// =============================================================================
+
+fn test_reduce_sum_ref() {
+    let mut c1 = coll_new();
+    c1 = coll_push(c1, 1);
+    c1 = coll_push(c1, 2);
+    c1 = coll_push(c1, 3);
+
+    let mut c2 = coll_new();
+    c2 = coll_push(c2, 10);
+    c2 = coll_push(c2, 20);
+
+    // Accumulate both collections into same ref
+    let mut total = 0;
+    reduce_sum_ref(&c1, &mut total);
+    reduce_sum_ref(&c2, &mut total);
+    assert_eq(total, 36);  // 1+2+3+10+20
+}
+
+// =============================================================================
+// Test 5: Pipe/chain — map then reduce
+// =============================================================================
+
+fn test_map_then_reduce() {
+    let mut c = coll_new();
+    c = coll_push(c, 1);
+    c = coll_push(c, 2);
+    c = coll_push(c, 3);
+    c = coll_push(c, 4);
+
+    // Double all, then sum
+    let doubled = map_double(&c);
+    let sum = reduce_sum(&doubled);
+    assert_eq(sum, 20);  // 2+4+6+8
+
+    // Square all, then sum
+    let squared = map_square(&c);
+    let sum2 = reduce_sum(&squared);
+    assert_eq(sum2, 30);  // 1+4+9+16
+}
+
+// =============================================================================
+// Test 6: Filter then reduce
+// =============================================================================
+
+fn test_filter_then_reduce() {
+    let mut c = coll_new();
+    c = coll_push(c, -5);
+    c = coll_push(c, 3);
+    c = coll_push(c, -2);
+    c = coll_push(c, 7);
+    c = coll_push(c, -1);
+    c = coll_push(c, 4);
+
+    // Filter positive, then sum
+    let pos = filter_positive(&c);
+    assert_eq(reduce_sum(&pos), 14);  // 3+7+4
+
+    // Filter > 3, then product
+    let big = filter_greater_than(&c, 3);
+    assert_eq(big.len, 2);  // 7, 4
+    assert_eq(reduce_product(&big), 28);  // 7*4
+}
+
+// =============================================================================
+// Test 7: Map -> filter -> reduce chain
+// =============================================================================
+
+fn test_map_filter_reduce_chain() {
+    let mut c = coll_new();
+    c = coll_push(c, 1);
+    c = coll_push(c, 2);
+    c = coll_push(c, 3);
+    c = coll_push(c, 4);
+    c = coll_push(c, 5);
+
+    // Double -> filter even -> sum
+    let step1 = map_double(&c);      // [2, 4, 6, 8, 10]
+    let step2 = filter_even(&step1); // [2, 4, 6, 8, 10] (all even)
+    let result = reduce_sum(&step2);
+    assert_eq(result, 30);
+
+    // Add 1 -> filter even -> sum
+    let step1b = map_add_const(&c, 1);    // [2, 3, 4, 5, 6]
+    let step2b = filter_even(&step1b);    // [2, 4, 6]
+    let result2 = reduce_sum(&step2b);
+    assert_eq(result2, 12);
+}
+
+// =============================================================================
+// Test 8: Multiple transforms via ref composition
+// =============================================================================
+
+fn test_transform_composition() {
+    let mut c = coll_new();
+    c = coll_push(c, 1);
+    c = coll_push(c, 2);
+    c = coll_push(c, 3);
+
+    // Chain: double -> add 10 -> negate
+    let r1 = map_double(&c);           // [2, 4, 6]
+    let r2 = map_add_const(&r1, 10);   // [12, 14, 16]
+    let r3 = map_negate(&r2);          // [-12, -14, -16]
+
+    assert_eq(coll_get(r3, 0), -12);
+    assert_eq(coll_get(r3, 1), -14);
+    assert_eq(coll_get(r3, 2), -16);
+    assert_eq(reduce_sum(&r3), -42);
+}
+
+// =============================================================================
+// Test 9: Simultaneous ref reads from same source
+// =============================================================================
+
+fn test_simultaneous_refs() {
+    let mut c = coll_new();
+    c = coll_push(c, 5);
+    c = coll_push(c, 10);
+    c = coll_push(c, 15);
+    c = coll_push(c, 20);
+
+    // Both read from same source via immutable ref
+    let s = reduce_sum(&c);
+    let mx = reduce_max(&c);
+    let mn = reduce_min(&c);
+    let p = reduce_product(&c);
+
+    assert_eq(s, 50);
+    assert_eq(mx, 20);
+    assert_eq(mn, 5);
+    assert_eq(p, 15000);
+}
+
+// =============================================================================
+// Test 10: Count-where via filter + length
+// =============================================================================
+
+fn count_where_gt(src: &Collection, threshold: Int) -> Int {
+    let filtered = filter_greater_than(src, threshold);
+    filtered.len
+}
+
+fn test_count_where() {
+    let mut c = coll_new();
+    c = coll_push(c, 1);
+    c = coll_push(c, 5);
+    c = coll_push(c, 3);
+    c = coll_push(c, 7);
+    c = coll_push(c, 2);
+    c = coll_push(c, 8);
+
+    assert_eq(count_where_gt(&c, 4), 3);   // 5, 7, 8
+    assert_eq(count_where_gt(&c, 0), 6);   // all > 0
+    assert_eq(count_where_gt(&c, 7), 1);   // only 8
+    assert_eq(count_where_gt(&c, 10), 0);  // none
+}
+
+// =============================================================================
+// Test 11: Accumulate multiple passes
+// =============================================================================
+
+fn test_multi_pass_accumulate() {
+    let mut c = coll_new();
+    c = coll_push(c, 1);
+    c = coll_push(c, 2);
+    c = coll_push(c, 3);
+
+    let mut total = 0;
+
+    // Pass 1: sum original
+    reduce_sum_ref(&c, &mut total);
+    assert_eq(total, 6);
+
+    // Pass 2: sum doubled
+    let doubled = map_double(&c);
+    reduce_sum_ref(&doubled, &mut total);
+    assert_eq(total, 18);  // 6 + 12
+
+    // Pass 3: sum squared
+    let squared = map_square(&c);
+    reduce_sum_ref(&squared, &mut total);
+    assert_eq(total, 32);  // 18 + 14
+}
+
+// =============================================================================
+// Test 12: Empty collection edge cases
+// =============================================================================
+
+fn test_empty_collection() {
+    let c = coll_new();
+    assert_eq(c.len, 0);
+    assert_eq(reduce_sum(&c), 0);
+    assert_eq(reduce_max(&c), 0);
+    assert_eq(reduce_min(&c), 0);
+
+    let doubled = map_double(&c);
+    assert_eq(doubled.len, 0);
+
+    let pos = filter_positive(&c);
+    assert_eq(pos.len, 0);
+}
+
+fn main() -> Int {
+    test_map_double();
+    test_map_square();
+    test_filter_positive();
+    test_filter_even();
+    test_reduce_sum();
+    test_reduce_product();
+    test_reduce_max_min();
+    test_reduce_sum_ref();
+    test_map_then_reduce();
+    test_filter_then_reduce();
+    test_map_filter_reduce_chain();
+    test_transform_composition();
+    test_simultaneous_refs();
+    test_count_where();
+    test_multi_pass_accumulate();
+    test_empty_collection();
+    print("[OK] 373_interp_cbgr_ref_functional");
+    0
+}

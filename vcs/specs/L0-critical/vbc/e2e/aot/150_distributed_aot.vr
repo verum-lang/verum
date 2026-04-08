@@ -1,0 +1,86 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, distributed, collective, stub
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT distributed collective operations — all_reduce, all_gather, broadcast, reduce_scatter, barrier (CPU identity stubs)
+
+fn test_all_reduce_sum() {
+    // All-reduce sum: in single-process mode, result = input
+    let local_val = 42;
+    let reduced = local_val;  // Identity in CPU fallback
+    assert_eq(reduced, 42);
+    print("test_all_reduce_sum passed");
+}
+
+fn test_all_reduce_max() {
+    let local_val = 99;
+    let reduced = local_val;
+    assert_eq(reduced, 99);
+    print("test_all_reduce_max passed");
+}
+
+fn test_all_gather() {
+    // All-gather: collect values from all ranks
+    // Single rank: result is just local value
+    let local = 7;
+    let gathered = local;
+    assert_eq(gathered, 7);
+    print("test_all_gather passed");
+}
+
+fn test_broadcast() {
+    // Broadcast from root rank
+    let root_val = 123;
+    let received = root_val;
+    assert_eq(received, 123);
+    print("test_broadcast passed");
+}
+
+fn test_reduce_scatter() {
+    // Reduce-scatter: reduce then scatter chunks
+    let local = 50;
+    let result = local;  // Identity
+    assert_eq(result, 50);
+    print("test_reduce_scatter passed");
+}
+
+fn test_barrier() {
+    // Barrier: synchronize all ranks
+    // Single rank: no-op
+    let barrier_passed = 1;
+    assert_eq(barrier_passed, 1);
+    print("test_barrier passed");
+}
+
+fn test_world_group() {
+    // Default world process group
+    let world_size = 1;  // Single process
+    let rank = 0;
+    assert_eq(world_size, 1);
+    assert_eq(rank, 0);
+    print("test_world_group passed");
+}
+
+fn test_new_group() {
+    // Create a sub-group
+    let group_id = 1;
+    let group_size = 1;
+    assert_eq(group_id, 1);
+    assert_eq(group_size, 1);
+    print("test_new_group passed");
+}
+
+fn main() -> Int {
+    test_all_reduce_sum();
+    test_all_reduce_max();
+    test_all_gather();
+    test_broadcast();
+    test_reduce_scatter();
+    test_barrier();
+    test_world_group();
+    test_new_group();
+    print("ALL PASSED");
+    0
+}

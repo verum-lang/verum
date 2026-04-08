@@ -1,0 +1,159 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, hash
+// @expected-exit: 0
+
+// Integer hash functions and hash table simulation
+
+// --- Division method hash ---
+fn div_hash(key: Int, table_size: Int) -> Int {
+    let mut k = key;
+    if k < 0 {
+        k = 0 - k;
+    }
+    k % table_size
+}
+
+// --- Universal hashing: h(k) = ((a*k + b) mod p) mod m ---
+fn universal_hash(key: Int, a: Int, b_val: Int, prime: Int, table_size: Int) -> Int {
+    let mut h = ((a * key + b_val) % prime);
+    if h < 0 {
+        h = h + prime;
+    }
+    h % table_size
+}
+
+// --- FNV-1a style hash (simplified for integers) ---
+fn fnv1a_hash(key: Int, table_size: Int) -> Int {
+    let fnv_offset = 2166136261;
+    let fnv_prime = 16777619;
+
+    let b0 = key % 256;
+    let mut tmp = key / 256;
+    let b1 = tmp % 256;
+    tmp = tmp / 256;
+    let b2 = tmp % 256;
+    tmp = tmp / 256;
+    let b3 = tmp % 256;
+
+    let mut hash_val = fnv_offset;
+    hash_val = hash_val ^ b0;
+    hash_val = (hash_val * fnv_prime) % 1000000007;
+    hash_val = hash_val ^ b1;
+    hash_val = (hash_val * fnv_prime) % 1000000007;
+    hash_val = hash_val ^ b2;
+    hash_val = (hash_val * fnv_prime) % 1000000007;
+    hash_val = hash_val ^ b3;
+    hash_val = (hash_val * fnv_prime) % 1000000007;
+
+    if hash_val < 0 {
+        hash_val = 0 - hash_val;
+    }
+    hash_val % table_size
+}
+
+// --- Hash collision counting ---
+fn count_collisions(keys: List<Int>, num_keys: Int, table_size: Int) -> Int {
+    let mut table = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut collisions = 0;
+    let mut i = 0;
+    while i < num_keys {
+        let h = div_hash(keys[i], table_size);
+        if table[h] > 0 {
+            collisions = collisions + 1;
+        }
+        table[h] = table[h] + 1;
+        i = i + 1;
+    }
+    collisions
+}
+
+// --- Hash table with linear probing ---
+fn linear_probe_insert(keys: List<Int>, num_keys: Int, table_size: Int) -> Int {
+    let mut table = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut total_probes = 0;
+    let mut i = 0;
+    while i < num_keys {
+        let key = keys[i];
+        let mut h = div_hash(key, table_size);
+        let mut probes = 1;
+        while table[h] != 0 {
+            h = (h + 1) % table_size;
+            probes = probes + 1;
+        }
+        table[h] = key;
+        total_probes = total_probes + probes;
+        i = i + 1;
+    }
+    total_probes
+}
+
+// Linear probe lookup: returns 1 if found, 0 if not
+fn linear_probe_lookup(table: List<Int>, table_size: Int, key: Int) -> Int {
+    let mut h = div_hash(key, table_size);
+    let mut probes = 0;
+    let mut found = 0;
+    while probes < table_size {
+        if table[h] == key {
+            found = 1;
+            probes = table_size; // break
+        } else if table[h] == 0 {
+            probes = table_size; // break
+        } else {
+            h = (h + 1) % table_size;
+            probes = probes + 1;
+        }
+    }
+    found
+}
+
+fn main() -> Int {
+    // Test 1: Division hash
+    let h1 = div_hash(42, 16);
+    assert_eq(h1, 10); // 42 % 16 = 10
+
+    // Test 2: Division hash another key
+    let h2 = div_hash(100, 16);
+    assert_eq(h2, 4); // 100 % 16 = 4
+
+    // Test 3: Universal hash h(10) = ((3*10 + 7) mod 31) mod 16 = (37 mod 31) mod 16 = 6 mod 16 = 6
+    let h3 = universal_hash(10, 3, 7, 31, 16);
+    assert_eq(h3, 6);
+
+    // Test 4: Universal hash h(25) = ((75 + 7) mod 31) mod 16 = (82 mod 31) mod 16 = 20 mod 16 = 4
+    let h4 = universal_hash(25, 3, 7, 31, 16);
+    assert_eq(h4, 4);
+
+    // Test 5: Collision counting - keys 3,19,35,51 all mod 16 = 3
+    let col_keys = [3, 19, 35, 51, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let col = count_collisions(col_keys, 4, 16);
+    assert_eq(col, 3);
+
+    // Test 6: No collisions with well-distributed keys
+    let good_keys = [0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let col2 = count_collisions(good_keys, 5, 16);
+    assert_eq(col2, 0);
+
+    // Test 7: Linear probing no collisions - 1 probe each = 5 total
+    let lp_keys = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let probes = linear_probe_insert(lp_keys, 5, 16);
+    assert_eq(probes, 5);
+
+    // Test 8: Linear probing with collision - 3,19 both hash to slot 3
+    let lp_keys2 = [3, 19, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let probes2 = linear_probe_insert(lp_keys2, 2, 16);
+    assert_eq(probes2, 3); // 1 + 2 = 3
+
+    // Test 9: Linear probe lookup - found
+    let lookup_table = [0, 0, 0, 3, 19, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let found = linear_probe_lookup(lookup_table, 16, 19);
+    assert_eq(found, 1);
+
+    // Test 10: Linear probe lookup - not found
+    let not_found = linear_probe_lookup(lookup_table, 16, 99);
+    assert_eq(not_found, 0);
+
+    print("782_hash_functions: PASS");
+    0
+}

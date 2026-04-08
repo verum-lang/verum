@@ -1,0 +1,2019 @@
+// =============================================================================
+// iterator_test.vr - Comprehensive tests for Iterator protocol
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, iterator, protocols
+// @description: Tests for Iterator protocol operations including adapters,
+//               terminal operations, and construction functions.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.iterator.{repeat};
+
+// =============================================================================
+// SECTION 1: Basic Iterator Operations (next, count, last, nth)
+// =============================================================================
+
+@test
+fn test_iterator_next() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter();
+
+    let one = 1;
+    let two = 2;
+    let three = 3;
+
+    assert_eq(iter.next(), Some(&one));
+    assert_eq(iter.next(), Some(&two));
+    assert_eq(iter.next(), Some(&three));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_iterator_next_empty() {
+    let arr: [Int; 0] = [];
+    let mut iter = arr.iter();
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_iterator_count() {
+    let arr = [1, 2, 3, 4, 5];
+    assert_eq(arr.iter().count(), 5);
+}
+
+@test
+fn test_iterator_count_empty() {
+    let arr: [Int; 0] = [];
+    assert_eq(arr.iter().count(), 0);
+}
+
+@test
+fn test_iterator_last() {
+    let arr = [1, 2, 3, 4, 5];
+    let five = 5;
+    assert_eq(arr.iter().last(), Some(&five));
+}
+
+@test
+fn test_iterator_last_empty() {
+    let arr: [Int; 0] = [];
+    assert_eq(arr.iter().last(), None);
+}
+
+@test
+fn test_iterator_last_single() {
+    let arr = [42];
+    let val = 42;
+    assert_eq(arr.iter().last(), Some(&val));
+}
+
+@test
+fn test_iterator_nth() {
+    let arr = [10, 20, 30, 40, 50];
+    let mut iter = arr.iter();
+
+    let thirty = 30;
+    assert_eq(iter.nth(2), Some(&thirty));
+
+    // nth consumes elements before it, so next returns element after nth
+    let forty = 40;
+    assert_eq(iter.next(), Some(&forty));
+}
+
+@test
+fn test_iterator_nth_out_of_bounds() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter();
+    assert_eq(iter.nth(10), None);
+}
+
+// =============================================================================
+// SECTION 2: Transforming Adapters (map, filter, filter_map)
+// =============================================================================
+
+@test
+fn test_map_basic() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter().map(|x| *x * 2);
+
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next(), Some(6));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_map_count() {
+    let arr = [1, 2, 3, 4, 5];
+    assert_eq(arr.iter().map(|x| *x * 10).count(), 5);
+}
+
+@test
+fn test_filter_basic() {
+    let arr = [1, 2, 3, 4, 5, 6];
+    let mut iter = arr.iter().filter(|x| *x % 2 == 0);
+
+    let two = 2;
+    let four = 4;
+    let six = 6;
+    assert_eq(iter.next(), Some(&two));
+    assert_eq(iter.next(), Some(&four));
+    assert_eq(iter.next(), Some(&six));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_filter_none_match() {
+    let arr = [1, 3, 5, 7, 9];
+    let mut iter = arr.iter().filter(|x| *x % 2 == 0);
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_filter_all_match() {
+    let arr = [2, 4, 6];
+    assert_eq(arr.iter().filter(|x| *x % 2 == 0).count(), 3);
+}
+
+@test
+fn test_filter_map_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    // filter_map: return Some to keep, None to skip
+    let mut iter = arr.iter().filter_map(|x| {
+        if *x % 2 == 0 {
+            Some(*x * 10)
+        } else {
+            None
+        }
+    });
+
+    assert_eq(iter.next(), Some(20));
+    assert_eq(iter.next(), Some(40));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_map_then_filter() {
+    let arr = [1, 2, 3, 4, 5];
+    let count = arr.iter()
+        .map(|x| *x * 2)     // 2, 4, 6, 8, 10
+        .filter(|x| *x > 5)  // 6, 8, 10
+        .count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_filter_then_map() {
+    let arr = [1, 2, 3, 4, 5, 6];
+    let mut iter = arr.iter()
+        .filter(|x| *x > 3)   // 4, 5, 6
+        .map(|x| *x * 100);   // 400, 500, 600
+
+    assert_eq(iter.next(), Some(400));
+    assert_eq(iter.next(), Some(500));
+    assert_eq(iter.next(), Some(600));
+    assert_eq(iter.next(), None);
+}
+
+// =============================================================================
+// SECTION 3: Limiting Adapters (take, skip, take_while, skip_while)
+// =============================================================================
+
+@test
+fn test_take_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut iter = arr.iter().take(3);
+
+    let one = 1;
+    let two = 2;
+    let three = 3;
+    assert_eq(iter.next(), Some(&one));
+    assert_eq(iter.next(), Some(&two));
+    assert_eq(iter.next(), Some(&three));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_take_more_than_available() {
+    let arr = [1, 2];
+    assert_eq(arr.iter().take(10).count(), 2);
+}
+
+@test
+fn test_take_zero() {
+    let arr = [1, 2, 3];
+    assert_eq(arr.iter().take(0).count(), 0);
+}
+
+@test
+fn test_skip_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut iter = arr.iter().skip(3);
+
+    let four = 4;
+    let five = 5;
+    assert_eq(iter.next(), Some(&four));
+    assert_eq(iter.next(), Some(&five));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_skip_all() {
+    let arr = [1, 2, 3];
+    assert_eq(arr.iter().skip(10).count(), 0);
+}
+
+@test
+fn test_skip_zero() {
+    let arr = [1, 2, 3];
+    assert_eq(arr.iter().skip(0).count(), 3);
+}
+
+@test
+fn test_take_while_basic() {
+    let arr = [1, 2, 3, 4, 5, 1, 2];
+    let mut iter = arr.iter().take_while(|x| *x < 4);
+
+    let one = 1;
+    let two = 2;
+    let three = 3;
+    assert_eq(iter.next(), Some(&one));
+    assert_eq(iter.next(), Some(&two));
+    assert_eq(iter.next(), Some(&three));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_take_while_none() {
+    let arr = [5, 6, 7];
+    assert_eq(arr.iter().take_while(|x| *x < 5).count(), 0);
+}
+
+@test
+fn test_skip_while_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut iter = arr.iter().skip_while(|x| *x < 3);
+
+    let three = 3;
+    let four = 4;
+    let five = 5;
+    assert_eq(iter.next(), Some(&three));
+    assert_eq(iter.next(), Some(&four));
+    assert_eq(iter.next(), Some(&five));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_skip_while_all() {
+    let arr = [1, 2, 3];
+    assert_eq(arr.iter().skip_while(|x| *x < 100).count(), 0);
+}
+
+// =============================================================================
+// SECTION 4: Combining Adapters (chain, zip, enumerate)
+// =============================================================================
+
+@test
+fn test_chain_basic() {
+    let arr1 = [1, 2, 3];
+    let arr2 = [4, 5, 6];
+    let count = arr1.iter().chain(arr2.iter()).count();
+    assert_eq(count, 6);
+}
+
+@test
+fn test_chain_fold() {
+    let arr1 = [1, 2, 3];
+    let arr2 = [4, 5, 6];
+    let sum = arr1.iter().chain(arr2.iter()).fold(0, |acc, x| acc + *x);
+    assert_eq(sum, 21);
+}
+
+@test
+fn test_chain_empty_left() {
+    let arr1: [Int; 0] = [];
+    let arr2 = [1, 2, 3];
+    assert_eq(arr1.iter().chain(arr2.iter()).count(), 3);
+}
+
+@test
+fn test_chain_empty_right() {
+    let arr1 = [1, 2, 3];
+    let arr2: [Int; 0] = [];
+    assert_eq(arr1.iter().chain(arr2.iter()).count(), 3);
+}
+
+@test
+fn test_zip_count() {
+    let keys = [1, 2, 3];
+    let vals = [10, 20, 30];
+    assert_eq(keys.iter().zip(vals.iter()).count(), 3);
+}
+
+@test
+fn test_zip_unequal_lengths() {
+    let short = [1, 2];
+    let long = [10, 20, 30, 40];
+    // zip stops at the shorter iterator
+    assert_eq(short.iter().zip(long.iter()).count(), 2);
+}
+
+@test
+fn test_enumerate_count() {
+    let arr = [1, 2, 3, 4, 5];
+    assert_eq(arr.iter().enumerate().count(), 5);
+}
+
+@test
+fn test_enumerate_fold() {
+    let arr = [10, 20, 30];
+    // Use fold to verify enumerate produces correct indices
+    let index_sum = arr.iter().enumerate().fold(0, |acc, _item| acc + 1);
+    assert_eq(index_sum, 3);
+}
+
+// =============================================================================
+// SECTION 5: Search Operations (find, position)
+// =============================================================================
+
+@test
+fn test_find_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    let result = arr.iter().find(|x| *x == 3);
+    let three = 3;
+    assert_eq(result, Some(&three));
+}
+
+@test
+fn test_find_not_found() {
+    let arr = [1, 2, 3, 4, 5];
+    let result = arr.iter().find(|x| *x == 99);
+    assert_eq(result, None);
+}
+
+@test
+fn test_find_returns_first_match() {
+    let arr = [1, 2, 3, 2, 1];
+    let result = arr.iter().find(|x| *x == 2);
+    let two = 2;
+    assert_eq(result, Some(&two));
+}
+
+@test
+fn test_position_basic() {
+    let arr = [10, 20, 30, 40, 50];
+    let result = arr.iter().position(|x| *x == 30);
+    assert_eq(result, Some(2));
+}
+
+@test
+fn test_position_not_found() {
+    let arr = [1, 2, 3];
+    let result = arr.iter().position(|x| *x == 99);
+    assert_eq(result, None);
+}
+
+@test
+fn test_position_first_element() {
+    let arr = [1, 2, 3];
+    let result = arr.iter().position(|x| *x == 1);
+    assert_eq(result, Some(0));
+}
+
+@test
+fn test_position_last_element() {
+    let arr = [1, 2, 3];
+    let result = arr.iter().position(|x| *x == 3);
+    assert_eq(result, Some(2));
+}
+
+// =============================================================================
+// SECTION 6: Fold Operations (fold, reduce)
+// =============================================================================
+
+@test
+fn test_fold_sum() {
+    let arr = [1, 2, 3, 4, 5];
+    let sum = arr.iter().fold(0, |acc, x| acc + *x);
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_fold_product() {
+    let arr = [1, 2, 3, 4, 5];
+    let product = arr.iter().fold(1, |acc, x| acc * *x);
+    assert_eq(product, 120);
+}
+
+@test
+fn test_fold_empty() {
+    let arr: [Int; 0] = [];
+    let sum = arr.iter().fold(42, |acc, x| acc + *x);
+    assert_eq(sum, 42); // Returns initial value
+}
+
+@test
+fn test_fold_max() {
+    let arr = [3, 7, 1, 9, 4];
+    let max = arr.iter().fold(0, |acc, x| if *x > acc { *x } else { acc });
+    assert_eq(max, 9);
+}
+
+@test
+fn test_reduce_sum() {
+    let arr = [1, 2, 3, 4, 5];
+    let result = arr.iter().map(|x| *x).reduce(|a, b| a + b);
+    assert_eq(result, Some(15));
+}
+
+@test
+fn test_reduce_empty() {
+    let arr: [Int; 0] = [];
+    let result = arr.iter().map(|x| *x).reduce(|a, b| a + b);
+    assert_eq(result, None);
+}
+
+@test
+fn test_reduce_single() {
+    let arr = [42];
+    let result = arr.iter().map(|x| *x).reduce(|a, b| a + b);
+    assert_eq(result, Some(42));
+}
+
+// =============================================================================
+// SECTION 7: Boolean Predicates (all, any)
+// =============================================================================
+
+@test
+fn test_all_true() {
+    let arr = [2, 4, 6, 8, 10];
+    assert(arr.iter().all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_all_false() {
+    let arr = [2, 4, 5, 8, 10];
+    assert(!arr.iter().all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_all_empty() {
+    let arr: [Int; 0] = [];
+    assert(arr.iter().all(|x| *x % 2 == 0)); // Vacuously true
+}
+
+@test
+fn test_any_true() {
+    let arr = [1, 3, 5, 6, 9];
+    assert(arr.iter().any(|x| *x % 2 == 0));
+}
+
+@test
+fn test_any_false() {
+    let arr = [1, 3, 5, 7, 9];
+    assert(!arr.iter().any(|x| *x % 2 == 0));
+}
+
+@test
+fn test_any_empty() {
+    let arr: [Int; 0] = [];
+    assert(!arr.iter().any(|x| *x % 2 == 0));
+}
+
+// =============================================================================
+// SECTION 8: Min/Max Operations
+// =============================================================================
+
+@test
+fn test_min_basic() {
+    let arr = [5, 3, 8, 1, 7];
+    let result = arr.iter().map(|x| *x).min();
+    assert_eq(result, Some(1));
+}
+
+@test
+fn test_min_empty() {
+    let arr: [Int; 0] = [];
+    let result = arr.iter().map(|x| *x).min();
+    assert_eq(result, None);
+}
+
+@test
+fn test_max_basic() {
+    let arr = [5, 3, 8, 1, 7];
+    let result = arr.iter().map(|x| *x).max();
+    assert_eq(result, Some(8));
+}
+
+@test
+fn test_max_empty() {
+    let arr: [Int; 0] = [];
+    let result = arr.iter().map(|x| *x).max();
+    assert_eq(result, None);
+}
+
+@test
+fn test_min_single() {
+    let arr = [42];
+    assert_eq(arr.iter().map(|x| *x).min(), Some(42));
+}
+
+@test
+fn test_max_single() {
+    let arr = [42];
+    assert_eq(arr.iter().map(|x| *x).max(), Some(42));
+}
+
+// =============================================================================
+// SECTION 9: for_each
+// =============================================================================
+
+@test
+fn test_for_each_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    arr.iter().for_each(|x| {
+        sum = sum + *x;
+    });
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_for_each_empty() {
+    let arr: [Int; 0] = [];
+    let mut called = false;
+    arr.iter().for_each(|_x| {
+        called = true;
+    });
+    assert(!called);
+}
+
+// =============================================================================
+// SECTION 10: DoubleEndedIterator (next_back, rev)
+// =============================================================================
+
+@test
+fn test_next_back_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut iter = arr.iter();
+
+    let one = 1;
+    let four = 4;
+    let five = 5;
+    let three = 3;
+    let two = 2;
+
+    assert_eq(iter.next_back(), Some(&five));
+    assert_eq(iter.next_back(), Some(&four));
+    assert_eq(iter.next(), Some(&one));
+    assert_eq(iter.next_back(), Some(&three));
+    assert_eq(iter.next(), Some(&two));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_next_back_reversal() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut iter = arr.iter();
+
+    let mut reversed: [Int; 5] = [0, 0, 0, 0, 0];
+    let mut i = 0;
+
+    loop {
+        match iter.next_back() {
+            Some(x) => {
+                reversed[i] = *x;
+                i = i + 1;
+            },
+            None => break,
+        }
+    }
+
+    assert_eq(i, 5);
+    assert_eq(reversed[0], 5);
+    assert_eq(reversed[4], 1);
+}
+
+@test
+fn test_double_ended_single() {
+    let arr = [42];
+    let mut iter = arr.iter();
+    let val = 42;
+    assert_eq(iter.next_back(), Some(&val));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_double_ended_two_elements() {
+    let arr = [1, 2];
+    let mut iter = arr.iter();
+    let one = 1;
+    let two = 2;
+    assert_eq(iter.next(), Some(&one));
+    assert_eq(iter.next_back(), Some(&two));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+// =============================================================================
+// SECTION 11: Complex Adapter Chains
+// =============================================================================
+
+@test
+fn test_filter_map_take() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    // Even numbers * 10, take first 3
+    let count = arr.iter()
+        .filter(|x| *x % 2 == 0)  // 2, 4, 6, 8, 10
+        .take(3)                    // 2, 4, 6
+        .count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_skip_then_take() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let count = arr.iter().skip(3).take(4).count();
+    assert_eq(count, 4);
+}
+
+@test
+fn test_map_filter_fold() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8];
+    let sum = arr.iter()
+        .map(|x| *x * *x)           // 1, 4, 9, 16, 25, 36, 49, 64
+        .filter(|x| *x > 10)        // 16, 25, 36, 49, 64
+        .fold(0, |acc, x| acc + *x);
+    assert_eq(sum, 190);  // 16+25+36+49+64
+}
+
+@test
+fn test_chain_filter_count() {
+    let arr1 = [1, 2, 3, 4, 5];
+    let arr2 = [6, 7, 8, 9, 10];
+    let even_count = arr1.iter().chain(arr2.iter())
+        .filter(|x| *x % 2 == 0)
+        .count();
+    assert_eq(even_count, 5);  // 2, 4, 6, 8, 10
+}
+
+@test
+fn test_take_while_then_count() {
+    let arr = [1, 2, 3, 10, 20, 30];
+    let count = arr.iter()
+        .take_while(|x| *x < 10)
+        .count();
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// SECTION 12: While-loop Iteration Patterns
+// =============================================================================
+
+@test
+fn test_while_loop_iteration() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut iter = arr.iter();
+    let mut sum = 0;
+
+    loop {
+        match iter.next() {
+            Some(x) => { sum = sum + *x; },
+            None => break,
+        }
+    }
+
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_while_loop_with_index() {
+    let arr = [10, 20, 30];
+    let mut iter = arr.iter();
+    let mut indices: [Int; 3] = [0, 0, 0];
+    let mut values: [Int; 3] = [0, 0, 0];
+    let mut i = 0;
+
+    loop {
+        match iter.next() {
+            Some(x) => {
+                indices[i] = i;
+                values[i] = *x;
+                i = i + 1;
+            },
+            None => break,
+        }
+    }
+
+    assert_eq(i, 3);
+    assert_eq(values[0], 10);
+    assert_eq(values[2], 30);
+}
+
+@test
+fn test_nested_while_loops() {
+    let arr1 = [1, 2, 3];
+    let arr2 = [10, 20];
+    let mut sum = 0;
+
+    let mut iter1 = arr1.iter();
+    loop {
+        match iter1.next() {
+            Some(x) => {
+                let mut iter2 = arr2.iter();
+                loop {
+                    match iter2.next() {
+                        Some(y) => { sum = sum + *x * *y; },
+                        None => break,
+                    }
+                }
+            },
+            None => break,
+        }
+    }
+
+    // (1*10 + 1*20) + (2*10 + 2*20) + (3*10 + 3*20) = 30 + 60 + 90 = 180
+    assert_eq(sum, 180);
+}
+
+// =============================================================================
+// SECTION 13: Edge Cases
+// =============================================================================
+
+@test
+fn test_single_element_iterator() {
+    let arr = [42];
+    let mut iter = arr.iter();
+    let forty_two = 42;
+    assert_eq(iter.next(), Some(&forty_two));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_iterator_consumed() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter();
+
+    loop {
+        match iter.next() {
+            Some(_) => {},
+            None => break,
+        }
+    }
+
+    // Should be exhausted
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_chain_with_adapters() {
+    let arr1 = [1, 2, 3];
+    let arr2 = [4, 5, 6];
+    // chain then filter
+    let count = arr1.iter().chain(arr2.iter())
+        .filter(|x| *x % 2 == 0)
+        .count();
+    assert_eq(count, 3);  // 2, 4, 6
+}
+
+@test
+fn test_zip_fold_count() {
+    let a = [1, 2, 3];
+    let b = [10, 20, 30];
+    // Verify zip produces correct number of pairs
+    let pair_count = a.iter().zip(b.iter()).fold(0, |acc, _pair| acc + 1);
+    assert_eq(pair_count, 3);
+}
+
+// =============================================================================
+// SECTION: Tuple Field Access Tests
+// =============================================================================
+// These tests verify that .0, .1 tuple field access works correctly,
+// including inside closures and with iterator adapters.
+
+@test
+fn test_tuple_field_access_basic() {
+    let pair = (1, "hello");
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, "hello");
+}
+
+@test
+fn test_tuple_field_access_triple() {
+    let triple = (10, 20, 30);
+    assert_eq(triple.0, 10);
+    assert_eq(triple.1, 20);
+    assert_eq(triple.2, 30);
+}
+
+@test
+fn test_tuple_field_access_in_let() {
+    // Bind tuple elements to verify access works
+    let pair = (42, 99);
+    let first = pair.0;
+    let second = pair.1;
+    assert_eq(first, 42);
+    assert_eq(second, 99);
+}
+
+@test
+fn test_enumerate_count() {
+    let arr = [10, 20, 30, 40, 50];
+    // enumerate produces (index, &value) pairs
+    // Count enumerated items
+    let count = arr.iter().enumerate().count();
+    assert_eq(count, 5);
+}
+
+@test
+fn test_enumerate_fold() {
+    let arr = [10, 20, 30];
+    // Sum the indices using fold
+    let index_sum = arr.iter().enumerate().fold(0, |acc, _pair| acc + 1);
+    assert_eq(index_sum, 3);
+}
+
+@test
+fn test_zip_count() {
+    let a = [1, 2, 3, 4, 5];
+    let b = [10, 20, 30];
+    // zip stops at shorter iterator
+    let count = a.iter().zip(b.iter()).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_zip_all_pairs_exist() {
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    // All pairs should satisfy predicate (both > 0)
+    let all_positive = a.iter().zip(b.iter()).all(|_pair| true);
+    assert(all_positive);
+}
+
+// =============================================================================
+// Section 14: Intersperse
+// =============================================================================
+
+@test
+fn test_intersperse_basic() {
+    let items = [1, 2, 3];
+    let result: List<Int> = items.iter().map(|x| *x).intersperse(0).collect();
+    assert_eq(result.len(), 5);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 0);
+    assert_eq(result[2], 2);
+    assert_eq(result[3], 0);
+    assert_eq(result[4], 3);
+}
+
+@test
+fn test_intersperse_single() {
+    let items = [42];
+    let result: List<Int> = items.iter().map(|x| *x).intersperse(0).collect();
+    assert_eq(result.len(), 1);
+    assert_eq(result[0], 42);
+}
+
+@test
+fn test_intersperse_empty() {
+    let items: List<Int> = [];
+    let result: List<Int> = items.iter().map(|x| *x).intersperse(0).collect();
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_intersperse_count() {
+    let items = [1, 2, 3, 4, 5];
+    let count = items.iter().map(|x| *x).intersperse(0).count();
+    assert_eq(count, 9);
+}
+
+// =============================================================================
+// Section 15: Chunks
+// =============================================================================
+
+@test
+fn test_chunks_count() {
+    let items = [1, 2, 3, 4, 5];
+    let count = items.iter().chunks(2).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_chunks_exact() {
+    let items = [1, 2, 3, 4];
+    let count = items.iter().chunks(2).count();
+    assert_eq(count, 2);
+}
+
+@test
+fn test_chunks_single() {
+    let items = [1, 2, 3];
+    let count = items.iter().chunks(1).count();
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// Section 16: Windows
+// =============================================================================
+
+@test
+fn test_windows_count() {
+    let items = [1, 2, 3, 4, 5];
+    let count = items.iter().windows(3).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_windows_size_one() {
+    let items = [1, 2, 3];
+    let count = items.iter().windows(1).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_windows_full_size() {
+    let items = [1, 2, 3];
+    let count = items.iter().windows(3).count();
+    assert_eq(count, 1);
+}
+
+@test
+fn test_windows_too_large() {
+    let items = [1, 2];
+    let count = items.iter().windows(5).count();
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section 17: Flatten
+// =============================================================================
+
+@test
+fn test_flatten_nested_lists() {
+    let nested: List<List<Int>> = [];
+    let mut a: List<Int> = [1, 2];
+    let mut b: List<Int> = [3, 4];
+    let mut outer: List<List<Int>> = [];
+    outer.push(a);
+    outer.push(b);
+    let count = outer.into_iter().flatten().count();
+    assert_eq(count, 4);
+}
+
+@test
+fn test_flatten_empty_outer() {
+    let outer: List<List<Int>> = [];
+    let count = outer.into_iter().flatten().count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_flatten_single_inner() {
+    let mut outer: List<List<Int>> = [];
+    let inner: List<Int> = [1, 2, 3];
+    outer.push(inner);
+    let count = outer.into_iter().flatten().count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_flatten_with_empty_inners() {
+    let mut outer: List<List<Int>> = [];
+    let a: List<Int> = [1, 2];
+    let b: List<Int> = [];
+    let c: List<Int> = [3];
+    outer.push(a);
+    outer.push(b);
+    outer.push(c);
+    let count = outer.into_iter().flatten().count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_flatten_fold() {
+    let mut outer: List<List<Int>> = [];
+    let a: List<Int> = [1, 2];
+    let b: List<Int> = [3, 4];
+    outer.push(a);
+    outer.push(b);
+    let sum = outer.into_iter().flatten().fold(0, |acc, x| acc + x);
+    assert_eq(sum, 10);
+}
+
+// =============================================================================
+// Section 18: Advanced Iterator Tests
+// =============================================================================
+
+@test
+fn test_step_by() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let count = arr.iter().step_by(3).count();
+    assert_eq(count, 4); // 1, 4, 7, 10
+}
+
+@test
+fn test_dedup_iterator() {
+    let arr = [1, 1, 2, 3, 3, 3, 4, 4, 5];
+    let count = arr.iter().map(|x| *x).dedup().count();
+    assert_eq(count, 5); // 1, 2, 3, 4, 5
+}
+
+@test
+fn test_dedup_no_duplicates() {
+    let arr = [1, 2, 3, 4, 5];
+    let count = arr.iter().map(|x| *x).dedup().count();
+    assert_eq(count, 5);
+}
+
+@test
+fn test_dedup_all_same() {
+    let arr = [7, 7, 7, 7, 7];
+    let count = arr.iter().map(|x| *x).dedup().count();
+    assert_eq(count, 1);
+}
+
+@test
+fn test_interleave() {
+    let a = [1, 3, 5];
+    let b = [2, 4, 6];
+    let count = a.iter().interleave(b.iter()).count();
+    assert_eq(count, 6);
+}
+
+@test
+fn test_interleave_unequal() {
+    let a = [1, 3];
+    let b = [2, 4, 6, 8];
+    let count = a.iter().interleave(b.iter()).count();
+    assert_eq(count, 6);
+}
+
+@test
+fn test_fuse_iterator() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter().fuse();
+    assert(iter.next().is_some());
+    assert(iter.next().is_some());
+    assert(iter.next().is_some());
+    assert(iter.next().is_none());
+    assert(iter.next().is_none()); // Stays None forever
+}
+
+@test
+fn test_scan_running_sum() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut iter = arr.iter().scan(0, |state, x| {
+        *state = *state + *x;
+        Some(*state)
+    });
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), Some(6));
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next(), Some(15));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_advance_by() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut iter = arr.iter();
+    let result = iter.advance_by(3);
+    assert(result.is_ok());
+    let four = 4;
+    assert_eq(iter.next(), Some(&four));
+}
+
+@test
+fn test_advance_by_too_far() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter();
+    let result = iter.advance_by(5);
+    assert(result.is_err());
+}
+
+@test
+fn test_find_map() {
+    let arr = [1, 2, 3, 4, 5];
+    let result = arr.iter().find_map(|x| {
+        if *x > 3 { Some(*x * 10) } else { None }
+    });
+    assert_eq(result, Some(40));
+}
+
+@test
+fn test_find_map_none() {
+    let arr = [1, 2, 3];
+    let result = arr.iter().find_map(|x| {
+        if *x > 10 { Some(*x) } else { None }
+    });
+    assert_eq(result, None);
+}
+
+@test
+fn test_range_inclusive() {
+    let count = range_inclusive(1, 5).count();
+    assert_eq(count, 5); // 1, 2, 3, 4, 5
+}
+
+@test
+fn test_range_inclusive_single() {
+    let count = range_inclusive(5, 5).count();
+    assert_eq(count, 1);
+}
+
+@test
+fn test_range_inclusive_empty() {
+    let count = range_inclusive(5, 3).count();
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section 19: Standalone Iterator Construction Functions
+// =============================================================================
+
+@test
+fn test_once() {
+    let mut iter = once(42);
+    assert_eq(iter.next(), Some(42));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_once_with_text() {
+    let mut iter = once("hello");
+    assert_eq(iter.next(), Some("hello"));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_repeat_n() {
+    let mut iter = repeat_n(7, 3);
+    assert_eq(iter.next(), Some(7));
+    assert_eq(iter.next(), Some(7));
+    assert_eq(iter.next(), Some(7));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_repeat_n_zero() {
+    let mut iter = repeat_n(42, 0);
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_repeat_n_count() {
+    let count = repeat_n(1, 5).count();
+    assert_eq(count, 5);
+}
+
+@test
+fn test_count_from() {
+    let mut iter = count_from(10);
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next(), Some(11));
+    assert_eq(iter.next(), Some(12));
+}
+
+@test
+fn test_count_from_fold() {
+    let sum = count_from(1).take(5).fold(0, |acc, x| acc + x);
+    assert_eq(sum, 15); // 1+2+3+4+5
+}
+
+@test
+fn test_from_fn() {
+    let mut n = 0;
+    let mut iter = from_fn(|| {
+        if n < 3 {
+            n = n + 1;
+            Some(n * 10)
+        } else {
+            None
+        }
+    });
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next(), Some(20));
+    assert_eq(iter.next(), Some(30));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_from_fn_count() {
+    let mut n = 0;
+    let count = from_fn(|| {
+        if n < 4 {
+            n = n + 1;
+            Some(n)
+        } else {
+            None
+        }
+    }).count();
+    assert_eq(count, 4);
+}
+
+// =============================================================================
+// Section 20: Additional Iterator Tests
+// =============================================================================
+
+@test
+fn test_max_by_key() {
+    let arr = [-3, 1, -5, 4, 2];
+    let result = arr.iter().map(|x| *x).max_by_key(|x| {
+        if *x >= 0 { *x } else { 0 - *x }
+    });
+    assert_eq(result, Some(-5)); // |-5| = 5 is largest
+}
+
+@test
+fn test_min_by_key() {
+    let arr = [-3, 1, -5, 4, 2];
+    let result = arr.iter().map(|x| *x).min_by_key(|x| {
+        if *x >= 0 { *x } else { 0 - *x }
+    });
+    assert_eq(result, Some(1)); // |1| = 1 is smallest
+}
+
+@test
+fn test_try_fold_success() {
+    let arr = [1, 2, 3, 4, 5];
+    let result = arr.iter().try_fold(0, |acc, x| Ok(acc + *x));
+    assert_eq(result, Ok(15));
+}
+
+@test
+fn test_try_fold_early_error() {
+    let arr = [1, 2, 3, 4, 5];
+    let result: Result<Int, Text> = arr.iter().try_fold(0, |acc, x| {
+        if *x == 3 { Err("found 3") } else { Ok(acc + *x) }
+    });
+    assert(result.is_err());
+}
+
+@test
+fn test_iterator_eq() {
+    let a = [1, 2, 3];
+    let b = [1, 2, 3];
+    assert(a.iter().map(|x| *x).eq(b.iter().map(|x| *x)));
+}
+
+@test
+fn test_iterator_eq_different() {
+    let a = [1, 2, 3];
+    let b = [1, 2, 4];
+    assert(!a.iter().map(|x| *x).eq(b.iter().map(|x| *x)));
+}
+
+@test
+fn test_iterator_eq_different_lengths() {
+    let a = [1, 2, 3];
+    let b = [1, 2];
+    assert(!a.iter().map(|x| *x).eq(b.iter().map(|x| *x)));
+}
+
+// =============================================================================
+// Section 21: Collect Tests
+// =============================================================================
+
+@test
+fn test_collect_to_list() {
+    let arr = [1, 2, 3, 4, 5];
+    let list: List<Int> = arr.iter().map(|x| *x * 2).collect();
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 2);
+    assert_eq(list[1], 4);
+    assert_eq(list[2], 6);
+    assert_eq(list[3], 8);
+    assert_eq(list[4], 10);
+}
+
+@test
+fn test_collect_filtered() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8];
+    let evens: List<Int> = arr.iter().filter(|x| *x % 2 == 0).map(|x| *x).collect();
+    assert_eq(evens.len(), 4);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[3], 8);
+}
+
+@test
+fn test_collect_empty() {
+    let arr: [Int; 0] = [];
+    let list: List<Int> = arr.iter().map(|x| *x).collect();
+    assert_eq(list.len(), 0);
+}
+
+@test
+fn test_collect_chained() {
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let combined: List<Int> = a.iter().chain(b.iter()).map(|x| *x).collect();
+    assert_eq(combined.len(), 6);
+    assert_eq(combined[0], 1);
+    assert_eq(combined[5], 6);
+}
+
+// =============================================================================
+// Section 22: Partition Tests
+// =============================================================================
+
+@test
+fn test_partition_basic() {
+    let arr = [1, 2, 3, 4, 5, 6];
+    let (evens, odds): (List<Int>, List<Int>) = arr.iter().map(|x| *x).partition(|x| *x % 2 == 0);
+    assert_eq(evens.len(), 3);
+    assert_eq(odds.len(), 3);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[1], 4);
+    assert_eq(evens[2], 6);
+    assert_eq(odds[0], 1);
+    assert_eq(odds[1], 3);
+    assert_eq(odds[2], 5);
+}
+
+@test
+fn test_partition_all_match() {
+    let arr = [2, 4, 6, 8];
+    let (matched, rest): (List<Int>, List<Int>) = arr.iter().map(|x| *x).partition(|x| *x % 2 == 0);
+    assert_eq(matched.len(), 4);
+    assert_eq(rest.len(), 0);
+}
+
+@test
+fn test_partition_none_match() {
+    let arr = [1, 3, 5, 7];
+    let (matched, rest): (List<Int>, List<Int>) = arr.iter().map(|x| *x).partition(|x| *x % 2 == 0);
+    assert_eq(matched.len(), 0);
+    assert_eq(rest.len(), 4);
+}
+
+@test
+fn test_partition_empty() {
+    let arr: [Int; 0] = [];
+    let (a, b): (List<Int>, List<Int>) = arr.iter().map(|x| *x).partition(|x| *x > 0);
+    assert_eq(a.len(), 0);
+    assert_eq(b.len(), 0);
+}
+
+// =============================================================================
+// Section 23: DoubleEndedIterator — rfold, rfind, rev
+// =============================================================================
+
+@test
+fn test_rfold_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    let sum = arr.iter().rfold(0, |acc, x| acc + *x);
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_rfold_order() {
+    // rfold processes right-to-left, so building a number should show reversed order
+    let arr = [1, 2, 3];
+    let result = arr.iter().rfold(0, |acc, x| acc * 10 + *x);
+    // Right-to-left: start=0, process 3: 0*10+3=3, process 2: 3*10+2=32, process 1: 32*10+1=321
+    assert_eq(result, 321);
+}
+
+@test
+fn test_rfold_empty() {
+    let arr: [Int; 0] = [];
+    let result = arr.iter().rfold(42, |acc, x| acc + *x);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_rfind_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    // rfind finds the LAST element matching predicate (from right)
+    let result = arr.iter().rfind(|x| *x % 2 == 0);
+    let four = 4;
+    assert_eq(result, Some(&four));
+}
+
+@test
+fn test_rfind_not_found() {
+    let arr = [1, 3, 5, 7];
+    let result = arr.iter().rfind(|x| *x % 2 == 0);
+    assert_eq(result, None);
+}
+
+@test
+fn test_rfind_single() {
+    let arr = [42];
+    let result = arr.iter().rfind(|x| *x == 42);
+    let val = 42;
+    assert_eq(result, Some(&val));
+}
+
+@test
+fn test_rev_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut iter = arr.iter().rev();
+    let five = 5;
+    let four = 4;
+    let three = 3;
+    assert_eq(iter.next(), Some(&five));
+    assert_eq(iter.next(), Some(&four));
+    assert_eq(iter.next(), Some(&three));
+}
+
+@test
+fn test_rev_count() {
+    let arr = [1, 2, 3, 4, 5];
+    assert_eq(arr.iter().rev().count(), 5);
+}
+
+@test
+fn test_rev_fold() {
+    let arr = [1, 2, 3];
+    // rev().fold is equivalent to rfold
+    let result = arr.iter().rev().fold(0, |acc, x| acc * 10 + *x);
+    // Reversed iteration: 3, 2, 1 → 0*10+3=3, 3*10+2=32, 32*10+1=321
+    assert_eq(result, 321);
+}
+
+@test
+fn test_rev_empty() {
+    let arr: [Int; 0] = [];
+    assert_eq(arr.iter().rev().count(), 0);
+}
+
+// =============================================================================
+// Section 24: Peekable
+// =============================================================================
+
+@test
+fn test_peekable_doesnt_consume() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter().peekable();
+    // peek should not consume the element
+    let peeked = iter.peek();
+    assert(peeked.is_some());
+    // next should return the same element that was peeked
+    let next_val = iter.next();
+    assert(next_val.is_some());
+}
+
+@test
+fn test_peekable_exhausted() {
+    let arr = [1];
+    let mut iter = arr.iter().peekable();
+    let _ = iter.next(); // consume the only element
+    let peeked = iter.peek();
+    assert(peeked.is_none());
+}
+
+@test
+fn test_peekable_iteration() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter().peekable();
+    // Use peekable as regular iterator
+    let mut count = 0;
+    loop {
+        match iter.next() {
+            Some(_) => { count = count + 1; },
+            None => break,
+        }
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_peekable_peek_multiple_times() {
+    let arr = [10, 20, 30];
+    let mut iter = arr.iter().peekable();
+    // Peeking multiple times should return same value
+    let p1 = iter.peek();
+    let p2 = iter.peek();
+    assert(p1.is_some());
+    assert(p2.is_some());
+    // Now consume it
+    let next_val = iter.next();
+    assert(next_val.is_some());
+    // Next peek should be different
+    let p3 = iter.peek();
+    assert(p3.is_some());
+}
+
+// =============================================================================
+// Section 25: Cycle
+// =============================================================================
+
+@test
+fn test_cycle_take() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter().cycle().take(7);
+    let one = 1;
+    let two = 2;
+    let three = 3;
+    assert_eq(iter.next(), Some(&one));
+    assert_eq(iter.next(), Some(&two));
+    assert_eq(iter.next(), Some(&three));
+    assert_eq(iter.next(), Some(&one));
+    assert_eq(iter.next(), Some(&two));
+    assert_eq(iter.next(), Some(&three));
+    assert_eq(iter.next(), Some(&one));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_cycle_count() {
+    let arr = [1, 2, 3];
+    let count = arr.iter().cycle().take(10).count();
+    assert_eq(count, 10);
+}
+
+@test
+fn test_cycle_fold() {
+    let arr = [1, 2, 3];
+    // cycle [1,2,3] take 7: 1,2,3,1,2,3,1 → sum = 13
+    let sum = arr.iter().cycle().take(7).fold(0, |acc, x| acc + *x);
+    assert_eq(sum, 13);
+}
+
+// =============================================================================
+// Section 26: Cloned
+// =============================================================================
+
+@test
+fn test_cloned_basic() {
+    let arr = [1, 2, 3];
+    // arr.iter() gives &Int, cloned() converts to Int
+    let mut iter = arr.iter().cloned();
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_cloned_count() {
+    let arr = [10, 20, 30, 40, 50];
+    assert_eq(arr.iter().cloned().count(), 5);
+}
+
+@test
+fn test_cloned_fold() {
+    let arr = [1, 2, 3, 4, 5];
+    let sum = arr.iter().cloned().fold(0, |acc, x| acc + x);
+    assert_eq(sum, 15);
+}
+
+// =============================================================================
+// Section 27: Additional Construction Functions
+// =============================================================================
+
+@test
+fn test_range_basic() {
+    let mut iter = range(0, 5);
+    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_range_count() {
+    assert_eq(range(0, 10).count(), 10);
+}
+
+@test
+fn test_range_empty() {
+    assert_eq(range(5, 5).count(), 0);
+    assert_eq(range(5, 3).count(), 0);
+}
+
+@test
+fn test_range_fold() {
+    let sum = range(1, 6).fold(0, |acc, x| acc + x);
+    assert_eq(sum, 15); // 1+2+3+4+5
+}
+
+@test
+fn test_repeat_take() {
+    let arr: List<Int> = repeat(42).take(5).collect();
+    assert_eq(arr.len(), 5);
+    assert_eq(arr[0], 42);
+    assert_eq(arr[4], 42);
+}
+
+@test
+fn test_empty_iterator() {
+    let arr: [Int; 0] = [];
+    let mut iter = arr.iter().take(0);
+    assert_eq(iter.next(), None);
+    assert_eq(iter.count(), 0);
+}
+
+@test
+fn test_unfold_basic() {
+    // Generate counting sequence using unfold
+    let mut iter = unfold(0, |state| {
+        let val = *state;
+        if val < 5 {
+            *state = val + 1;
+            Some(val)
+        } else {
+            None
+        }
+    });
+    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_successors_basic() {
+    let mut iter = successors(Some(1), |x| {
+        if *x < 16 { Some(*x * 2) } else { None }
+    });
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next(), Some(8));
+    assert_eq(iter.next(), Some(16));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_successors_empty() {
+    let first: Maybe<Int> = None;
+    let mut iter = successors(first, |x| Some(*x + 1));
+    assert_eq(iter.next(), None);
+}
+
+// =============================================================================
+// Section 28: flat_map, inspect, cmp
+// =============================================================================
+
+@test
+fn test_flat_map_basic() {
+    let arr = [1, 2, 3];
+    // flat_map each element to [x, x*10]
+    let mut items: List<Int> = [];
+    arr.iter().flat_map(|x| {
+        let v = *x;
+        let pair: List<Int> = [v, v * 10];
+        pair.into_iter()
+    }).for_each(|item| {
+        items.push(item);
+    });
+    assert_eq(items.len(), 6);
+    assert_eq(items[0], 1);
+    assert_eq(items[1], 10);
+    assert_eq(items[2], 2);
+    assert_eq(items[3], 20);
+}
+
+@test
+fn test_flat_map_count() {
+    let arr = [1, 2, 3];
+    let count = arr.iter().flat_map(|x| {
+        let pair: List<Int> = [*x, *x * 10];
+        pair.into_iter()
+    }).count();
+    assert_eq(count, 6);
+}
+
+@test
+fn test_inspect_basic() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut inspected_count = 0;
+    let sum = arr.iter().inspect(|_x| {
+        inspected_count = inspected_count + 1;
+    }).fold(0, |acc, x| acc + *x);
+    assert_eq(sum, 15);
+    assert_eq(inspected_count, 5);
+}
+
+@test
+fn test_inspect_with_filter() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut pre_filter_count = 0;
+    let mut post_filter_count = 0;
+    let _ = arr.iter()
+        .inspect(|_| { pre_filter_count = pre_filter_count + 1; })
+        .filter(|x| *x % 2 == 0)
+        .inspect(|_| { post_filter_count = post_filter_count + 1; })
+        .count();
+    assert_eq(pre_filter_count, 5);
+    assert_eq(post_filter_count, 2);
+}
+
+@test
+fn test_cmp_equal() {
+    let a = [1, 2, 3];
+    let b = [1, 2, 3];
+    assert(a.iter().map(|x| *x).cmp(b.iter().map(|x| *x)) == Equal);
+}
+
+@test
+fn test_cmp_less() {
+    let a = [1, 2, 3];
+    let b = [1, 2, 4];
+    assert(a.iter().map(|x| *x).cmp(b.iter().map(|x| *x)) == Less);
+}
+
+@test
+fn test_cmp_greater() {
+    let a = [1, 2, 4];
+    let b = [1, 2, 3];
+    assert(a.iter().map(|x| *x).cmp(b.iter().map(|x| *x)) == Greater);
+}
+
+@test
+fn test_cmp_shorter_is_less() {
+    let a = [1, 2];
+    let b = [1, 2, 3];
+    assert(a.iter().map(|x| *x).cmp(b.iter().map(|x| *x)) == Less);
+}
+
+@test
+fn test_cmp_longer_is_greater() {
+    let a = [1, 2, 3];
+    let b = [1, 2];
+    assert(a.iter().map(|x| *x).cmp(b.iter().map(|x| *x)) == Greater);
+}
+
+@test
+fn test_cmp_empty() {
+    let a: [Int; 0] = [];
+    let b: [Int; 0] = [];
+    assert(a.iter().map(|x| *x).cmp(b.iter().map(|x| *x)) == Equal);
+}
+
+// =============================================================================
+// Section 29: max_by, min_by
+// =============================================================================
+
+@test
+fn test_max_by_basic() {
+    let arr = [1, -5, 3, -2, 4];
+    // max by absolute value
+    let result = arr.iter().map(|x| *x).max_by(|a, b| {
+        let abs_a = if *a >= 0 { *a } else { 0 - *a };
+        let abs_b = if *b >= 0 { *b } else { 0 - *b };
+        abs_a.cmp(&abs_b)
+    });
+    assert_eq(result, Some(-5)); // |-5| = 5 is largest
+}
+
+@test
+fn test_min_by_basic() {
+    let arr = [1, -5, 3, -2, 4];
+    // min by absolute value
+    let result = arr.iter().map(|x| *x).min_by(|a, b| {
+        let abs_a = if *a >= 0 { *a } else { 0 - *a };
+        let abs_b = if *b >= 0 { *b } else { 0 - *b };
+        abs_a.cmp(&abs_b)
+    });
+    assert_eq(result, Some(1)); // |1| = 1 is smallest
+}
+
+// =============================================================================
+// Section 30: Edge Cases and Exhaustion
+// =============================================================================
+
+@test
+fn test_empty_iterator_operations() {
+    let arr: [Int; 0] = [];
+    // Verify all operations on empty iterators
+    assert_eq(arr.iter().count(), 0);
+    assert_eq(arr.iter().last(), None);
+    assert_eq(arr.iter().find(|_| true), None);
+    assert_eq(arr.iter().position(|_| true), None);
+    assert_eq(arr.iter().map(|x| *x).min(), None);
+    assert_eq(arr.iter().map(|x| *x).max(), None);
+    assert_eq(arr.iter().map(|x| *x).reduce(|a, b| a + b), None);
+    assert(arr.iter().all(|_| false)); // vacuously true
+    assert(!arr.iter().any(|_| true)); // vacuously false
+}
+
+@test
+fn test_single_element_all_operations() {
+    let arr = [42];
+    let val = 42;
+    assert_eq(arr.iter().count(), 1);
+    assert_eq(arr.iter().last(), Some(&val));
+    assert_eq(arr.iter().find(|x| *x == 42), Some(&val));
+    assert_eq(arr.iter().position(|x| *x == 42), Some(0));
+    assert_eq(arr.iter().map(|x| *x).min(), Some(42));
+    assert_eq(arr.iter().map(|x| *x).max(), Some(42));
+    assert_eq(arr.iter().map(|x| *x).reduce(|a, b| a + b), Some(42));
+}
+
+@test
+fn test_double_exhaustion() {
+    let arr = [1, 2, 3];
+    let mut iter = arr.iter();
+    // Exhaust iterator
+    while iter.next().is_some() {}
+    // Calling next again should keep returning None
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_range_double_ended() {
+    let mut iter = range(1, 6);
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next_back(), Some(5));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_range_inclusive_double_ended() {
+    let mut iter = range_inclusive(1, 5);
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next_back(), Some(5));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), None);
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+// =============================================================================
+// SECTION: Iterator.sum() / Iterator.product()
+// =============================================================================
+
+@test
+fn test_iterator_sum() {
+    let total: Int = range(1, 6).sum();
+    assert_eq(total, 15); // 1+2+3+4+5
+}
+
+@test
+fn test_iterator_sum_empty() {
+    let total: Int = range(0, 0).sum();
+    assert_eq(total, 0);
+}
+
+@test
+fn test_iterator_product() {
+    let result: Int = range(1, 6).product();
+    assert_eq(result, 120); // 1*2*3*4*5
+}
+
+@test
+fn test_iterator_product_empty() {
+    let result: Int = range(0, 0).product();
+    assert_eq(result, 1); // Multiplicative identity
+}
+
+@test
+fn test_iterator_sum_mapped() {
+    let total: Int = range(1, 4).map(|x| x * 10).sum();
+    assert_eq(total, 60); // 10+20+30
+}
+
+// =============================================================================
+// SECTION: DoubleEndedIterator.advance_back_by() / .nth_back()
+// =============================================================================
+
+@test
+fn test_advance_back_by_basic() {
+    let mut iter = range(0, 10);
+    let result = iter.advance_back_by(3);
+    assert(result.is_ok());
+    assert_eq(iter.next_back(), Some(6)); // Skipped 7,8,9
+}
+
+@test
+fn test_advance_back_by_too_far() {
+    let mut iter = range(0, 3);
+    let result = iter.advance_back_by(5);
+    assert(result.is_err());
+}
+
+@test
+fn test_advance_back_by_zero() {
+    let mut iter = range(0, 5);
+    let result = iter.advance_back_by(0);
+    assert(result.is_ok());
+    assert_eq(iter.next_back(), Some(4));
+}
+
+@test
+fn test_nth_back_basic() {
+    let mut iter = range(0, 10);
+    // nth_back(0) = last element = 9
+    assert_eq(iter.nth_back(0), Some(9));
+    // nth_back(0) again = next from back = 8
+    assert_eq(iter.nth_back(0), Some(8));
+}
+
+@test
+fn test_nth_back_skip() {
+    let mut iter = range(0, 10);
+    // nth_back(2) = skip 2 from back, return 3rd = 7
+    assert_eq(iter.nth_back(2), Some(7));
+}
+
+@test
+fn test_nth_back_out_of_range() {
+    let mut iter = range(0, 3);
+    assert_eq(iter.nth_back(10), None);
+}
+
+// =============================================================================
+// SECTION: unzip()
+// =============================================================================
+
+@test
+fn test_unzip_basic() {
+    let pairs = [(1, "a"), (2, "b"), (3, "c")];
+    let (nums, strs) = unzip(pairs.iter().map(|p| (p.0, p.1)));
+    assert_eq(nums.len(), 3);
+    assert_eq(strs.len(), 3);
+    assert_eq(nums[0], 1);
+    assert_eq(nums[2], 3);
+    assert_eq(strs[0], "a");
+    assert_eq(strs[2], "c");
+}
+
+@test
+fn test_unzip_empty() {
+    let empty: [(Int, Int); 0] = [];
+    let (a, b) = unzip(empty.iter().map(|p| (p.0, p.1)));
+    assert(a.is_empty());
+    assert(b.is_empty());
+}
+
+@test
+fn test_unzip_single() {
+    let pairs = [(42, true)];
+    let (nums, bools) = unzip(pairs.iter().map(|p| (p.0, p.1)));
+    assert_eq(nums.len(), 1);
+    assert_eq(nums[0], 42);
+    assert_eq(bools[0], true);
+}
+
+// =============================================================================
+// SECTION: ReduceResult / reduce_with (early termination fold)
+// =============================================================================
+// LIMITATION: reduce_with is defined in an extension block
+// `implement<I: Iterator> I { ... }` (line 1753 of iterator.vr)
+// which the type checker cannot resolve as methods on concrete types
+// like Range<Int>. Tests commented out until extension method resolution
+// is implemented.
+//
+// Tests to enable when fixed:
+// - test_reduce_with_no_termination: sum 1..6 without early exit => 15
+// - test_reduce_with_early_termination: sum until > 10 => 15
+// - test_reduce_with_empty: empty range returns initial value 42
+
+// =============================================================================
+// SECTION: rfold
+// =============================================================================
+
+@test
+fn test_rfold_concat() {
+    let mut iter = range(1, 4);
+    let result = iter.rfold("", |acc: Text, x: Int| f"{acc}{x}");
+    assert_eq(result, "321"); // Reverse order
+}
+
+// =============================================================================
+// SECTION: Iterator comparison with cmp and eq
+// =============================================================================
+
+@test
+fn test_iterator_cmp_prefix() {
+    // [1, 2] < [1, 2, 3] (shorter sequence is "less")
+    let a = [1, 2];
+    let b = [1, 2, 3];
+    let ord = a.iter().cmp(b.iter());
+    assert(ord is Less);
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

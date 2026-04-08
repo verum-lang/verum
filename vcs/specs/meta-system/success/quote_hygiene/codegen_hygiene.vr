@@ -1,0 +1,251 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, quote, hygiene, codegen, generation
+// @description: Tests hygienic behavior in code generation scenarios
+
+// =============================================================================
+// BASIC CODE GENERATION
+// =============================================================================
+
+// Generate a simple function with hygiene
+meta fn gen_incrementer(name: Ident) -> TokenStream {
+    quote {
+        fn $name(x: Int) -> Int {
+            let result = x + 1;  // 'result' is hygienic
+            result
+        }
+    }
+}
+
+// Generate multiple functions without name collision
+meta fn gen_helpers() -> TokenStream {
+    let temp = gensym("temp");  // Hygienic temporary
+    quote {
+        fn helper_a(x: Int) -> Int {
+            let $temp = x * 2;
+            $temp + 1
+        }
+
+        fn helper_b(x: Int) -> Int {
+            let $temp = x * 3;  // Same gensym pattern, different binding
+            $temp - 1
+        }
+    }
+}
+
+// =============================================================================
+// STRUCT AND METHOD GENERATION
+// =============================================================================
+
+// Generate a builder pattern hygienically
+meta fn gen_builder(type_name: Ident, fields: List<FieldInfo>) -> TokenStream {
+    let builder_name = ident(f"{type_name}Builder");
+
+    quote {
+        type $builder_name is {
+            $[for f in fields {
+                $f.name: Maybe<${f.ty}>,
+            }]
+        };
+
+        implement $builder_name {
+            fn new() -> Self {
+                Self {
+                    $[for f in fields {
+                        $f.name: None,
+                    }]
+                }
+            }
+
+            $[for f in fields {
+                fn $f.name(mut self, value: ${f.ty}) -> Self {
+                    self.$f.name = Some(value);
+                    self
+                }
+            }]
+
+            fn build(self) -> Result<$type_name, Text> {
+                Ok($type_name {
+                    $[for f in fields {
+                        $f.name: self.$f.name.ok_or(${f"Missing field: {f.name}"})?,
+                    }]
+                })
+            }
+        }
+    }
+}
+
+// =============================================================================
+// LOOP AND ITERATION GENERATION
+// =============================================================================
+
+// Generate loop with hygienically scoped iterator
+meta fn gen_sum_fn(name: Ident) -> TokenStream {
+    let iter = gensym("iter");
+    let acc = gensym("acc");
+    let item = gensym("item");
+
+    quote {
+        fn $name(list: &List<Int>) -> Int {
+            let mut $acc = 0;
+            for $item in list {
+                $acc = $acc + $item;
+            }
+            $acc
+        }
+    }
+}
+
+// Generate unrolled loop
+meta fn gen_unrolled_sum(count: Int) -> TokenStream {
+    let acc = gensym("acc");
+    let items = (0..count).map(|i| gensym(f"item_{i}")).collect();
+
+    quote {
+        fn unrolled_sum($[for (i, item) in items.enumerate() { $item: Int }],) -> Int {
+            let mut $acc = 0;
+            $[for item in items {
+                $acc = $acc + $item;
+            }]
+            $acc
+        }
+    }
+}
+
+// =============================================================================
+// MATCH EXPRESSION GENERATION
+// =============================================================================
+
+// Generate match arms hygienically
+meta fn gen_variant_handler(variant_info: VariantInfo) -> TokenStream {
+    let variants = variant_info.variants;
+    let handler = gensym("handler");
+
+    quote {
+        fn process(value: ${variant_info.name}) -> Text {
+            let $handler = |s: &Text| s.to_uppercase();
+            match value {
+                $[for v in variants {
+                    ${variant_info.name}::$v.name(inner) => {
+                        let result = $handler(&inner.to_text());
+                        result
+                    },
+                }]
+            }
+        }
+    }
+}
+
+// =============================================================================
+// CLOSURE GENERATION
+// =============================================================================
+
+// Generate closures without capturing unintended bindings
+meta fn gen_closure_factory() -> TokenStream {
+    let factory_internal = gensym("internal");
+    let closure_param = gensym("param");
+
+    quote {
+        fn create_adder(base: Int) -> fn(Int) -> Int {
+            let $factory_internal = base;
+            |$closure_param| $factory_internal + $closure_param
+        }
+    }
+}
+
+// =============================================================================
+// ASYNC CODE GENERATION
+// =============================================================================
+
+// Generate async function with hygiene
+meta fn gen_async_processor(name: Ident) -> TokenStream {
+    let task = gensym("task");
+    let result = gensym("result");
+
+    quote {
+        async fn $name(items: List<Work>) -> List<Output> {
+            let mut results = [];
+            for item in items {
+                let $task = spawn async { item.process().await };
+                let $result = $task.await?;
+                results.push($result);
+            }
+            results
+        }
+    }
+}
+
+// =============================================================================
+// MACRO COMPOSITION
+// =============================================================================
+
+// Compose macros hygienically
+meta fn gen_traced_fn(name: Ident, body: TokenStream) -> TokenStream {
+    let trace_id = gensym("trace_id");
+    let start = gensym("start");
+    let result = gensym("result");
+
+    quote {
+        fn $name() {
+            let $trace_id = trace::new_id();
+            let $start = time::now();
+            trace::enter($trace_id, ${name.as_str()});
+
+            let $result = { $body };
+
+            trace::exit($trace_id, time::now() - $start);
+            $result
+        }
+    }
+}
+
+// =============================================================================
+// ERROR HANDLING GENERATION
+// =============================================================================
+
+// Generate try-catch with hygiene
+meta fn gen_safe_call(call: TokenStream) -> TokenStream {
+    let error = gensym("error");
+    let value = gensym("value");
+
+    quote {
+        match $call {
+            Ok($value) => $value,
+            Err($error) => {
+                log::error(f"Call failed: {$error}");
+                return Err($error);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+@gen_incrementer(my_inc)
+@gen_helpers()
+@gen_closure_factory()
+
+fn test_gen_incrementer() {
+    assert(my_inc(5) == 6);
+}
+
+fn test_gen_helpers() {
+    assert(helper_a(5) == 11);  // 5*2 + 1
+    assert(helper_b(5) == 14);  // 5*3 - 1
+}
+
+fn test_gen_closure() {
+    let add5 = create_adder(5);
+    let add10 = create_adder(10);
+    assert(add5(3) == 8);
+    assert(add10(3) == 13);
+}
+
+fn main() {
+    test_gen_incrementer();
+    test_gen_helpers();
+    test_gen_closure();
+}

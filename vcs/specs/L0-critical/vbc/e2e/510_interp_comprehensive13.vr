@@ -1,0 +1,398 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone, convex_hull, determinant, josephus, deque, radix_sort
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #13: combines records, closures, generators, spawn/await,
+// lists, format strings, and algorithms from tests 501-509.
+// MAJOR MILESTONE: 510 test files, ~337 interpreter tests.
+
+// ============================================================
+// Records: 2D bounding box + convex-hull area
+// ============================================================
+
+type BBox is { min_x: Int, min_y: Int, max_x: Int, max_y: Int };
+type Vec2 is { x: Int, y: Int };
+
+fn bbox_new(mnx: Int, mny: Int, mxx: Int, mxy: Int) -> BBox {
+    BBox { min_x: mnx, min_y: mny, max_x: mxx, max_y: mxy }
+}
+
+fn bbox_area(b: BBox) -> Int {
+    (b.max_x - b.min_x) * (b.max_y - b.min_y)
+}
+
+fn bbox_contains(b: BBox, v: Vec2) -> Int {
+    if v.x >= b.min_x && v.x <= b.max_x && v.y >= b.min_y && v.y <= b.max_y { 1 } else { 0 }
+}
+
+fn bbox_union(a: BBox, b: BBox) -> BBox {
+    let mnx = if a.min_x < b.min_x { a.min_x } else { b.min_x };
+    let mny = if a.min_y < b.min_y { a.min_y } else { b.min_y };
+    let mxx = if a.max_x > b.max_x { a.max_x } else { b.max_x };
+    let mxy = if a.max_y > b.max_y { a.max_y } else { b.max_y };
+    BBox { min_x: mnx, min_y: mny, max_x: mxx, max_y: mxy }
+}
+
+fn test_records() {
+    let b1 = bbox_new(0, 0, 5, 5);
+    let b2 = bbox_new(3, 3, 8, 8);
+
+    assert_eq(bbox_area(b1), 25);   // 5*5=25
+    assert_eq(bbox_area(b2), 25);   // 5*5=25
+
+    let p1 = Vec2 { x: 4, y: 4 };
+    let p2 = Vec2 { x: 2, y: 2 };
+    let p3 = Vec2 { x: 9, y: 9 };
+
+    assert_eq(bbox_contains(b1, p1), 1);  // (4,4) in [0..5]x[0..5]
+    assert_eq(bbox_contains(b1, p2), 1);  // (2,2) in b1
+    assert_eq(bbox_contains(b1, p3), 0);  // (9,9) not in b1
+    assert_eq(bbox_contains(b2, p1), 1);  // (4,4) in b2 (3..8)
+    assert_eq(bbox_contains(b2, p3), 0);  // (9,9) not in b2
+
+    let bu = bbox_union(b1, b2);
+    assert_eq(bu.min_x, 0); assert_eq(bu.min_y, 0);
+    assert_eq(bu.max_x, 8); assert_eq(bu.max_y, 8);
+    assert_eq(bbox_area(bu), 64); // 8*8=64
+
+    print("records: ok");
+}
+
+// ============================================================
+// Closures: higher-order numeric operations
+// ============================================================
+
+fn fold_arr(f: fn(Int, Int) -> Int, init: Int, arr: [Int; 8], n: Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < n { acc = f(acc, arr[i]); i = i + 1; }
+    acc
+}
+
+fn map_arr(f: fn(Int) -> Int, arr: [Int; 8], n: Int, out: [Int; 8]) {
+    let mut i = 0;
+    while i < n { out[i] = f(arr[i]); i = i + 1; }
+}
+
+fn test_closures() {
+    let sum_fn = |a: Int, b: Int| -> Int { a + b };
+    let mul_fn = |a: Int, b: Int| -> Int { a * b };
+    let max_fn = |a: Int, b: Int| -> Int { if a > b { a } else { b } };
+
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6];
+
+    // Sum: 3+1+4+1+5+9+2+6 = 31
+    assert_eq(fold_arr(sum_fn, 0, arr, 8), 31);
+
+    // Product: 3*1*4*1*5*9*2*6 = 6480
+    assert_eq(fold_arr(mul_fn, 1, arr, 8), 6480);
+
+    // Max: 9
+    assert_eq(fold_arr(max_fn, 0 - 1000000, arr, 8), 9);
+
+    // Map: square each element [9,1,16,1,25,81,4,36]
+    let sq = |x: Int| -> Int { x * x };
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0];
+    map_arr(sq, arr, 8, out);
+    assert_eq(out[0], 9);
+    assert_eq(out[1], 1);
+    assert_eq(out[2], 16);
+    assert_eq(out[5], 81);
+    assert_eq(out[7], 36);
+
+    // Sum of squares: fold over sq array
+    let sq_sum = fold_arr(sum_fn, 0, out, 8);
+    // 9+1+16+1+25+81+4+36 = 173
+    assert_eq(sq_sum, 173);
+
+    print("closures: ok");
+}
+
+// ============================================================
+// Generators: Collatz sequence and Fibonacci
+// ============================================================
+
+// Generate Collatz sequence starting at n, stopping when reaching 1.
+// Yields each term including n and 1.
+fn* collatz_gen(n: Int) -> Int {
+    let mut x = n;
+    while x != 1 {
+        yield x;
+        if x % 2 == 0 { x = x / 2; } else { x = x * 3 + 1; }
+    }
+    yield 1;
+}
+
+// Generate Fibonacci numbers: F(0), F(1), ..., F(n-1)
+fn* fib_gen(count: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut k = 0;
+    while k < count {
+        yield a;
+        let t = a + b;
+        a = b;
+        b = t;
+        k = k + 1;
+    }
+}
+
+fn test_generators() {
+    // Collatz(6): 6,3,10,5,16,8,4,2,1 -> 9 steps
+    let mut seq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for v in collatz_gen(6) {
+        seq[idx] = v;
+        idx = idx + 1;
+    }
+    assert_eq(seq[0], 6);
+    assert_eq(seq[1], 3);
+    assert_eq(seq[2], 10);
+    assert_eq(seq[3], 5);
+    assert_eq(seq[4], 16);
+    assert_eq(seq[5], 8);
+    assert_eq(seq[6], 4);
+    assert_eq(seq[7], 2);
+    assert_eq(seq[8], 1);
+    assert_eq(idx, 9);
+
+    // Fibonacci: F(0)..F(9) = [0,1,1,2,3,5,8,13,21,34]
+    let mut fibs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    idx = 0;
+    for f in fib_gen(10) {
+        fibs[idx] = f;
+        idx = idx + 1;
+    }
+    assert_eq(fibs[0], 0);
+    assert_eq(fibs[1], 1);
+    assert_eq(fibs[2], 1);
+    assert_eq(fibs[5], 5);
+    assert_eq(fibs[9], 34);
+
+    print("generators: ok");
+}
+
+// ============================================================
+// Spawn/Await: parallel computations
+// ============================================================
+
+// Josephus position (iterative, 0-indexed)
+fn josephus_pos(n: Int, k: Int) -> Int {
+    let mut pos = 0;
+    let mut i = 2;
+    while i <= n { pos = (pos + k) % i; i = i + 1; }
+    pos
+}
+
+// 2x2 determinant
+fn det2x2(a: Int, b: Int, c: Int, d: Int) -> Int {
+    a * d - b * c
+}
+
+// Count set bits (popcount) in n
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut cnt = 0;
+    while x > 0 { cnt = cnt + (x % 2); x = x / 2; }
+    cnt
+}
+
+// Sum of first n triangular numbers: T(1)+T(2)+...+T(n) = n*(n+1)*(n+2)/6
+fn sum_triangular(n: Int) -> Int {
+    n * (n + 1) * (n + 2) / 6
+}
+
+fn test_spawn_await() {
+    // J(100,2) = 73 (well-known Josephus result)
+    let t1 = spawn josephus_pos(100, 2);
+
+    // det([[3,7],[2,5]]) = 15-14 = 1
+    let t2 = spawn det2x2(3, 7, 2, 5);
+
+    // popcount(255) = 8
+    let t3 = spawn popcount(255);
+
+    // sum_triangular(10) = 10*11*12/6 = 220
+    let t4 = spawn sum_triangular(10);
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+    let r4 = t4.await;
+
+    assert_eq(r1, 72);
+    assert_eq(r2, 1);
+    assert_eq(r3, 8);
+    assert_eq(r4, 220);
+
+    // More spawns
+    let t5 = spawn josephus_pos(16, 2);  // J(16,2) = 0
+    let t6 = spawn popcount(170);        // 170=10101010 -> 4 bits
+    let r5 = t5.await;
+    let r6 = t6.await;
+    assert_eq(r5, 0);
+    assert_eq(r6, 4);
+
+    print("spawn_await: ok");
+}
+
+// ============================================================
+// Array/list operations: sorting and searching
+// ============================================================
+
+// Insertion sort on arr[0..n-1]
+fn isort(arr: [Int; 12], n: Int) {
+    let mut i = 1;
+    while i < n {
+        let key = arr[i];
+        let mut j = i - 1;
+        while j >= 0 && arr[j] > key {
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = key;
+        i = i + 1;
+    }
+}
+
+// Binary search in sorted arr[0..n-1], returns index or -1
+fn bsearch(arr: [Int; 12], n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if arr[mid] == target { return mid; }
+        if arr[mid] < target { lo = mid + 1; } else { hi = mid - 1; }
+    }
+    0 - 1
+}
+
+fn test_list_operations() {
+    // Sort then search
+    let mut arr = [15, 3, 9, 1, 7, 12, 5, 11, 4, 8, 0, 0];
+    let n = 10;
+    isort(arr, n);
+    // Sorted: [1,3,4,5,7,8,9,11,12,15]
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 3);
+    assert_eq(arr[2], 4);
+    assert_eq(arr[9], 15);
+
+    assert_eq(bsearch(arr, n, 7),  4);
+    assert_eq(bsearch(arr, n, 1),  0);
+    assert_eq(bsearch(arr, n, 15), 9);
+    assert_eq(bsearch(arr, n, 6),  0 - 1); // not found
+
+    // Digit extraction (from radix sort test): digit_at style
+    // (x / 10^d) % 10
+    let v = 4321;
+    let d0 = v % 10;           // 1
+    let d1 = (v / 10) % 10;   // 2
+    let d2 = (v / 100) % 10;  // 3
+    let d3 = (v / 1000) % 10; // 4
+    assert_eq(d0, 1);
+    assert_eq(d1, 2);
+    assert_eq(d2, 3);
+    assert_eq(d3, 4);
+
+    // Linear interpolation check (from Bezier test)
+    // lerp(a, b, t) = (a*(1000-t) + b*t) / 1000
+    let lerp = |a: Int, b: Int, t: Int| -> Int { (a * (1000 - t) + b * t) / 1000 };
+    assert_eq(lerp(0, 1000, 0),   0);
+    assert_eq(lerp(0, 1000, 500), 500);
+    assert_eq(lerp(0, 1000, 1000),1000);
+    assert_eq(lerp(200, 600, 250), 300); // 200*750/1000 + 600*250/1000 = 150+150=300
+
+    print("list_operations: ok");
+}
+
+// ============================================================
+// Format strings
+// ============================================================
+
+fn test_format_strings() {
+    // BBox format: bbox_new(1, 2, 9, 8) -> (9-1)*(8-2) = 8*6 = 48
+    let b = bbox_new(1, 2, 9, 8);
+    let area = bbox_area(b);
+    assert_eq(area, 48);
+    print(f"bbox_area={area}");
+
+    // Josephus f-string
+    let j5 = josephus_pos(5, 2);
+    assert_eq(j5, 2);
+    print(f"josephus_5_2={j5}");
+
+    // Fibonacci sum
+    let mut fsum = 0;
+    for f in fib_gen(8) { fsum = fsum + f; }
+    // F(0)+...+F(7) = 0+1+1+2+3+5+8+13 = 33
+    assert_eq(fsum, 33);
+    print(f"fib_sum_8={fsum}");
+
+    // Popcount summary
+    let pc7  = popcount(7);    // 3
+    let pc15 = popcount(15);   // 4
+    let pc31 = popcount(31);   // 5
+    assert_eq(pc7, 3);
+    assert_eq(pc15, 4);
+    assert_eq(pc31, 5);
+    print(f"popcounts: {pc7} {pc15} {pc31}");
+
+    print("format_strings: ok");
+}
+
+// ============================================================
+// Combined pipeline: determinant + sort + Josephus
+// ============================================================
+
+fn test_combined_pipeline() {
+    // Step 1: 3x3 determinant
+    // [[2,1,3],[0,5,1],[1,2,4]]: det = 22 (computed in test 502)
+    // det3: expand along row 0
+    let c00 = 5 * 4 - 1 * 2;  // 20-2=18
+    let c01 = 0 * 4 - 1 * 1;  // 0-1=-1
+    let c02 = 0 * 2 - 5 * 1;  // 0-5=-5
+    let det = 2 * c00 - 1 * c01 + 3 * c02;
+    // = 2*18 - 1*(-1) + 3*(-5) = 36 + 1 - 15 = 22
+    assert_eq(det, 22);
+
+    // Step 2: Sort and search
+    let mut data = [64, 34, 25, 12, 22, 11, 90, 0, 0, 0, 0, 0];
+    isort(data, 7);
+    // Sorted: [11, 12, 22, 25, 34, 64, 90]
+    assert_eq(data[0], 11);
+    assert_eq(data[6], 90);
+    assert_eq(bsearch(data, 7, 25), 3);
+    assert_eq(bsearch(data, 7, 50), 0 - 1);
+
+    // Step 3: Josephus for n=7,k=3 = 3
+    let jpos = josephus_pos(7, 3);
+    assert_eq(jpos, 3);
+
+    // Step 4: Cross-verify with spawn
+    let ta = spawn det2x2(5, 3, 2, 4); // 5*4-3*2 = 20-6 = 14
+    let tb = spawn sum_triangular(5);   // 5*6*7/6 = 35
+    let ra = ta.await;
+    let rb = tb.await;
+    assert_eq(ra, 14);
+    assert_eq(rb, 35);
+
+    let msg = f"pipeline: det={det} jpos={jpos} det2={ra} tri5={rb}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_records();
+    test_closures();
+    test_generators();
+    test_spawn_await();
+    test_list_operations();
+    test_format_strings();
+    test_combined_pipeline();
+    print("[OK] 510_interp_comprehensive13 — MILESTONE: 510 test files, ~337 interpreter tests");
+    0
+}

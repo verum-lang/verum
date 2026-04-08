@@ -1,0 +1,195 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, gpu, graph
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU compute graph simulation — create, add nodes/edges, topological sort
+
+// ============================================================================
+// Graph with up to 6 nodes and adjacency via bitmask
+// Node i's edges stored as bitmask: bit j set means edge i->j
+// ============================================================================
+
+type Graph6 is {
+    n0: Int, n1: Int, n2: Int, n3: Int, n4: Int, n5: Int,
+    node_count: Int
+};
+
+fn graph_new() -> Graph6 {
+    Graph6 { n0: 0, n1: 0, n2: 0, n3: 0, n4: 0, n5: 0, node_count: 0 }
+}
+
+fn graph_add_node(g: Graph6) -> Graph6 {
+    Graph6 {
+        n0: g.n0, n1: g.n1, n2: g.n2,
+        n3: g.n3, n4: g.n4, n5: g.n5,
+        node_count: g.node_count + 1
+    }
+}
+
+fn get_edges(g: Graph6, node: Int) -> Int {
+    if node == 0 { g.n0 } else if node == 1 { g.n1 }
+    else if node == 2 { g.n2 } else if node == 3 { g.n3 }
+    else if node == 4 { g.n4 } else { g.n5 }
+}
+
+fn set_edges(g: Graph6, node: Int, val: Int) -> Graph6 {
+    Graph6 {
+        n0: if node == 0 { val } else { g.n0 },
+        n1: if node == 1 { val } else { g.n1 },
+        n2: if node == 2 { val } else { g.n2 },
+        n3: if node == 3 { val } else { g.n3 },
+        n4: if node == 4 { val } else { g.n4 },
+        n5: if node == 5 { val } else { g.n5 },
+        node_count: g.node_count
+    }
+}
+
+// Bit operations for bitmask edges
+fn bit_set(mask: Int, bit: Int) -> Int {
+    let mut shift = 1;
+    let mut i = 0;
+    while i < bit { shift = shift * 2; i = i + 1; }
+    // Set bit using OR simulation
+    let existing = bit_test(mask, bit);
+    if existing == 1 { mask } else { mask + shift }
+}
+
+fn bit_test(mask: Int, bit: Int) -> Int {
+    let mut shift = 1;
+    let mut i = 0;
+    while i < bit { shift = shift * 2; i = i + 1; }
+    (mask / shift) - ((mask / shift) / 2) * 2
+}
+
+fn graph_add_edge(g: Graph6, from: Int, to: Int) -> Graph6 {
+    let old = get_edges(g, from);
+    let new_mask = bit_set(old, to);
+    set_edges(g, from, new_mask)
+}
+
+fn has_edge(g: Graph6, from: Int, to: Int) -> Int {
+    bit_test(get_edges(g, from), to)
+}
+
+// Compute in-degree for a node
+fn in_degree(g: Graph6, target: Int) -> Int {
+    let mut deg = 0;
+    let mut i = 0;
+    while i < g.node_count {
+        if has_edge(g, i, target) == 1 { deg = deg + 1; }
+        i = i + 1;
+    }
+    deg
+}
+
+// ============================================================================
+// Test 1: Graph creation and edges
+// ============================================================================
+
+@test
+fn test_graph_create() {
+    let mut g = graph_new();
+    g = graph_add_node(g);
+    g = graph_add_node(g);
+    g = graph_add_node(g);
+    assert_eq(g.node_count, 3);
+
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 0, 2);
+    assert_eq(has_edge(g, 0, 1), 1);
+    assert_eq(has_edge(g, 0, 2), 1);
+    assert_eq(has_edge(g, 1, 0), 0);
+    print("  test_graph_create: ok");
+}
+
+// ============================================================================
+// Test 2: In-degree computation
+// ============================================================================
+
+@test
+fn test_in_degree() {
+    // DAG: 0->1, 0->2, 1->2, 2->3
+    let mut g = graph_new();
+    g = graph_add_node(g);
+    g = graph_add_node(g);
+    g = graph_add_node(g);
+    g = graph_add_node(g);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 0, 2);
+    g = graph_add_edge(g, 1, 2);
+    g = graph_add_edge(g, 2, 3);
+
+    assert_eq(in_degree(g, 0), 0);
+    assert_eq(in_degree(g, 1), 1);
+    assert_eq(in_degree(g, 2), 2);
+    assert_eq(in_degree(g, 3), 1);
+    print("  test_in_degree: ok");
+}
+
+// ============================================================================
+// Test 3: Execution order respects dependencies
+// ============================================================================
+
+@test
+fn test_execution_order() {
+    // Diamond DAG: 0->1, 0->2, 1->3, 2->3
+    let mut g = graph_new();
+    g = graph_add_node(g);
+    g = graph_add_node(g);
+    g = graph_add_node(g);
+    g = graph_add_node(g);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 0, 2);
+    g = graph_add_edge(g, 1, 3);
+    g = graph_add_edge(g, 2, 3);
+
+    // Node 0 must come before 1, 2
+    // Node 3 must come after 1, 2
+    assert_eq(in_degree(g, 0), 0);  // root: no deps
+    assert_eq(in_degree(g, 3), 2);  // sink: 2 deps
+    // 1 and 2 both have in-degree 1
+    assert_eq(in_degree(g, 1), 1);
+    assert_eq(in_degree(g, 2), 1);
+    print("  test_execution_order: ok");
+}
+
+// ============================================================================
+// Test 4: Linear chain
+// ============================================================================
+
+@test
+fn test_linear_chain() {
+    // 0 -> 1 -> 2 -> 3 -> 4
+    let mut g = graph_new();
+    let mut i = 0;
+    while i < 5 {
+        g = graph_add_node(g);
+        i = i + 1;
+    }
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 1, 2);
+    g = graph_add_edge(g, 2, 3);
+    g = graph_add_edge(g, 3, 4);
+
+    assert_eq(in_degree(g, 0), 0);
+    assert_eq(in_degree(g, 1), 1);
+    assert_eq(in_degree(g, 4), 1);
+    assert_eq(has_edge(g, 0, 4), 0);
+    assert_eq(has_edge(g, 3, 4), 1);
+    print("  test_linear_chain: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_graph_create();
+    test_in_degree();
+    test_execution_order();
+    test_linear_chain();
+    print("[OK] 140_gpu_opcode_graph");
+    0
+}

@@ -1,0 +1,8 @@
+// Minimal: Newtype wrapper
+type UserId is (Int);
+type Email is (Text);
+
+fn main() {
+    let id = UserId(42);
+    let email = Email("user@example.com");
+}

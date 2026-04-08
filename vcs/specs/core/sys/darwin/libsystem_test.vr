@@ -1,0 +1,399 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/darwin/libsystem_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, darwin, libsystem, ffi
+// @description: Tests for macOS libSystem FFI functions.
+//
+// Coverage:
+// - File I/O: read, write, close, mmap, munmap, madvise
+// - Process info: getpid, gettid
+// - Random: getentropy
+// - Time: clock_gettime, nanosleep
+// - kqueue: kqueue, kevent
+// - Types: Timespec, Timeval, KEvent, Stat, etc.
+// - Constants: O_*, PROT_*, MAP_*, etc.
+//
+// CRITICAL: macOS requires all syscalls go through libSystem.
+// Direct syscalls are forbidden and will break between OS versions.
+//
+// Test Strategy:
+// - Test type construction and field access
+// - Verify constants match BSD/Darwin definitions
+// - Test safe wrappers for I/O operations
+//
+// Platform: macOS (x86_64, arm64)
+// =============================================================================
+
+@cfg(target_os = "macos")
+module test.stdlib.sys.darwin.libsystem_test;
+
+mount core.sys.darwin.{
+    read, write, close, mmap, munmap, madvise,
+    madvise_willneed, madvise_dontneed, madvise_free,
+    getpid, gettid, kqueue, nanosleep, clock_gettime,
+    monotonic_nanos, monotonic_micros, monotonic_millis,
+};
+
+// Import safe_getentropy directly (the mod.vr re-export as 'getentropy' conflicts
+// with the raw FFI function name during module resolution)
+// Also import safe_munmap directly to avoid ambiguity
+mount core.sys.darwin.libsystem.{safe_getentropy, safe_munmap};
+
+mount core.sys.darwin.{
+    Timespec, Timeval, KEvent, KEvent64, Stat,
+    Sockaddr, SockaddrIn, SockaddrIn6,
+    PthreadT, PthreadKey, PthreadMutex, PthreadCond,
+    MachTimebaseInfo,
+};
+
+mount core.sys.darwin.{
+    O_RDONLY, O_WRONLY, O_RDWR, O_NONBLOCK, O_APPEND,
+    O_CREAT, O_TRUNC, O_EXCL, O_CLOEXEC,
+    SEEK_SET, SEEK_CUR, SEEK_END,
+    PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC,
+    MAP_SHARED, MAP_PRIVATE, MAP_FIXED, MAP_ANON, MAP_ANONYMOUS, MAP_JIT,
+    MADV_NORMAL, MADV_RANDOM, MADV_SEQUENTIAL, MADV_WILLNEED, MADV_DONTNEED,
+    MADV_FREE, MADV_FREE_REUSABLE, MADV_FREE_REUSE,
+    CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW, CLOCK_UPTIME_RAW,
+};
+
+mount core.sys.common.{PAGE_SIZE, MemProt, MapFlags, FileDesc};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Open Flag Constants Tests
+// =============================================================================
+
+@test
+fn test_open_constants() {
+    // Standard open flags
+    assert(O_RDONLY == 0x0000);
+    assert(O_WRONLY == 0x0001);
+    assert(O_RDWR == 0x0002);
+    assert(O_NONBLOCK == 0x0004);
+    assert(O_APPEND == 0x0008);
+    assert(O_CREAT == 0x0200);
+    assert(O_TRUNC == 0x0400);
+    assert(O_EXCL == 0x0800);
+    assert(O_CLOEXEC == 0x1000000);
+
+    // Seek whence values
+    assert(SEEK_SET == 0);
+    assert(SEEK_CUR == 1);
+    assert(SEEK_END == 2);
+
+    // Flags are combinable
+    let read_create = O_RDWR | O_CREAT;
+    assert((read_create & O_RDWR) != 0);
+    assert((read_create & O_CREAT) != 0);
+
+    print("Open constants tests passed");
+}
+
+// =============================================================================
+// Protection Constants Tests
+// =============================================================================
+
+@test
+fn test_protection_constants() {
+    // Memory protection flags
+    assert(PROT_NONE == 0x00);
+    assert(PROT_READ == 0x01);
+    assert(PROT_WRITE == 0x02);
+    assert(PROT_EXEC == 0x04);
+
+    // Common combinations
+    assert((PROT_READ | PROT_WRITE) == 0x03);
+    assert((PROT_READ | PROT_EXEC) == 0x05);
+    assert((PROT_READ | PROT_WRITE | PROT_EXEC) == 0x07);
+
+    print("Protection constants tests passed");
+}
+
+// =============================================================================
+// Map Constants Tests
+// =============================================================================
+
+@test
+fn test_map_constants() {
+    // Map sharing flags
+    assert(MAP_SHARED == 0x0001);
+    assert(MAP_PRIVATE == 0x0002);
+    assert(MAP_FIXED == 0x0010);
+
+    // Anonymous mapping
+    assert(MAP_ANON == 0x1000);
+    assert(MAP_ANONYMOUS == MAP_ANON);
+
+    // macOS-specific: JIT support
+    assert(MAP_JIT == 0x0800);
+
+    // Flags are combinable
+    let private_anon = MAP_PRIVATE | MAP_ANON;
+    assert((private_anon & MAP_PRIVATE) != 0);
+    assert((private_anon & MAP_ANON) != 0);
+
+    print("Map constants tests passed");
+}
+
+// =============================================================================
+// Madvise Constants Tests
+// =============================================================================
+
+@test
+fn test_madvise_constants() {
+    // Standard madvise values
+    assert(MADV_NORMAL == 0);
+    assert(MADV_RANDOM == 1);
+    assert(MADV_SEQUENTIAL == 2);
+    assert(MADV_WILLNEED == 3);
+    assert(MADV_DONTNEED == 4);
+    assert(MADV_FREE == 5);
+
+    // macOS-specific: reusable memory
+    assert(MADV_FREE_REUSABLE == 7);
+    assert(MADV_FREE_REUSE == 8);
+
+    print("Madvise constants tests passed");
+}
+
+// =============================================================================
+// Clock Constants Tests
+// =============================================================================
+
+@test
+fn test_clock_constants() {
+    // Clock IDs (may differ from Linux)
+    assert(CLOCK_REALTIME == 0);
+    assert(CLOCK_MONOTONIC >= 0);
+    assert(CLOCK_MONOTONIC_RAW >= 0);
+    assert(CLOCK_UPTIME_RAW >= 0);
+
+    // All clock IDs should be distinct
+    assert(CLOCK_REALTIME != CLOCK_MONOTONIC);
+
+    print("Clock constants tests passed");
+}
+
+// =============================================================================
+// Timespec Tests
+// =============================================================================
+
+@test
+fn test_timespec() {
+    // Create timespec
+    let ts = Timespec {
+        tv_sec: 5,
+        tv_nsec: 500_000_000,
+    };
+
+    assert(ts.tv_sec == 5);
+    assert(ts.tv_nsec == 500_000_000);
+
+    // Zero timespec
+    let zero = Timespec { tv_sec: 0, tv_nsec: 0 };
+    assert(zero.tv_sec == 0);
+    assert(zero.tv_nsec == 0);
+
+    // Total nanoseconds
+    let total = ts.tv_sec * 1_000_000_000 + ts.tv_nsec;
+    assert(total == 5_500_000_000);
+
+    print("Timespec tests passed");
+}
+
+// =============================================================================
+// Process ID Tests
+// =============================================================================
+
+@test
+fn test_getpid_gettid() {
+    // Get process ID
+    let pid = getpid();
+    assert(pid > 0);
+
+    // Multiple calls return same PID
+    let pid2 = getpid();
+    assert(pid == pid2);
+
+    // Get thread ID (may be different implementation than Linux)
+    let tid = gettid();
+    assert(tid > 0);
+
+    // Multiple calls return same TID
+    let tid2 = gettid();
+    assert(tid == tid2);
+
+    // PIDs should be in reasonable range
+    assert(pid < 100000);  // macOS PID limit is typically 99999
+
+    print(f"PID: {pid}, TID: {tid}");
+}
+
+// =============================================================================
+// Memory Mapping Tests
+// =============================================================================
+
+@test
+fn test_mmap_munmap() {
+    // Map anonymous private memory using typed safe wrappers
+    let prot = MemProt { read: true, write: true, exec: false };
+    let flags = MapFlags { shared: false, is_private: true, anonymous: true, fixed: false };
+    let result = mmap(
+        0,
+        PAGE_SIZE as Int,
+        prot,
+        flags,
+        FileDesc(-1),
+        0
+    );
+
+    assert(result is Ok);
+    let ptr = result.unwrap();
+
+    // Verify alignment
+    let addr = ptr as Int;
+    assert(addr != 0);
+    assert((addr as USize) % PAGE_SIZE == 0);
+
+    // Write and read through unsafe reference (go through Int for reinterpret cast)
+    unsafe {
+        let int_ptr = addr as &unsafe Int;
+        *int_ptr = 0xCAFEBABE;
+        assert(*int_ptr == 0xCAFEBABE);
+    }
+
+    // madvise_willneed should succeed
+    let willneed_result = madvise_willneed(ptr, PAGE_SIZE as Int);
+    assert(willneed_result is Ok);
+
+    // madvise_dontneed should succeed
+    let dontneed_result = madvise_dontneed(ptr, PAGE_SIZE as Int);
+    assert(dontneed_result is Ok);
+
+    // Unmap (using addr we already computed above, use safe_munmap explicitly)
+    let unmap_result = safe_munmap(addr, PAGE_SIZE as Int);
+    assert(unmap_result is Ok);
+
+    print("mmap/munmap tests passed");
+}
+
+// =============================================================================
+// Random Tests
+// =============================================================================
+
+@test
+fn test_getentropy() {
+    // Get 16 random bytes
+    let mut buffer: [Byte; 16] = [0; 16];
+    let buf_ptr = buffer.as_mut_ptr() as Int as &unsafe Byte;
+    let result = safe_getentropy(buf_ptr, 16);
+
+    assert(result is Ok);
+
+    // Buffer should be modified (extremely unlikely all zeros)
+    let mut all_zero = true;
+    for i in 0..16 {
+        if buffer[i] != 0 {
+            all_zero = false;
+            break;
+        }
+    }
+    // Could theoretically fail with probability 1/2^128
+
+    // Get more random bytes
+    let mut buffer2: [Byte; 16] = [0; 16];
+    let buf2_ptr = buffer2.as_mut_ptr() as Int as &unsafe Byte;
+    let _ = safe_getentropy(buf2_ptr, 16);
+
+    // Two calls should produce different results
+    let mut same = true;
+    for i in 0..16 {
+        if buffer[i] != buffer2[i] {
+            same = false;
+            break;
+        }
+    }
+    assert(!same);  // Probability 1/2^128
+
+    print("getentropy tests passed");
+}
+
+// =============================================================================
+// Monotonic Time Tests
+// =============================================================================
+
+@test
+fn test_monotonic_time() {
+    // Get monotonic nanoseconds
+    let t1 = monotonic_nanos();
+    let t2 = monotonic_nanos();
+    let t3 = monotonic_nanos();
+
+    // Time should never go backward
+    assert(t2 >= t1);
+    assert(t3 >= t2);
+
+    // Different resolutions
+    let millis = monotonic_millis();
+    let micros = monotonic_micros();
+    let nanos = monotonic_nanos();
+
+    // Verify consistency (with tolerance)
+    assert(nanos >= millis * 1_000_000 - 10_000_000);  // 10ms tolerance
+    assert(micros >= millis * 1000 - 10_000);
+
+    // Test monotonicity with many samples
+    let mut prev = monotonic_nanos();
+    for _ in 0..100 {
+        let curr = monotonic_nanos();
+        assert(curr >= prev);
+        prev = curr;
+    }
+
+    print("Monotonic time tests passed");
+}
+
+// =============================================================================
+// Socket Address Tests
+// =============================================================================
+
+@test
+fn test_sockaddr_types() {
+    // SockaddrIn (IPv4)
+    let addr_v4 = SockaddrIn {
+        sin_len: 16,
+        sin_family: 2,  // AF_INET
+        sin_port: 8080,
+        sin_addr: 0x7F000001,  // 127.0.0.1
+        sin_zero: [0; 8],
+    };
+
+    assert(addr_v4.sin_family == 2);
+    assert(addr_v4.sin_port == 8080);
+
+    // SockaddrIn6 (IPv6)
+    let addr_v6 = SockaddrIn6 {
+        sin6_len: 28,
+        sin6_family: 30,  // AF_INET6
+        sin6_port: 443,
+        sin6_flowinfo: 0,
+        sin6_addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],  // ::1
+        sin6_scope_id: 0,
+    };
+
+    assert(addr_v6.sin6_family == 30);
+    assert(addr_v6.sin6_port == 443);
+
+    print("Socket address type tests passed");
+}

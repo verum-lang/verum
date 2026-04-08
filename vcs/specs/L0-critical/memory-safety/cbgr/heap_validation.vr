@@ -1,0 +1,102 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, heap, validation
+// @description: Tests CBGR heap validation with generation and epoch tracking
+
+/// Tests basic heap allocation with CBGR tracking
+fn test_heap_alloc_basic() {
+    // Allocate on heap with CBGR tracking
+    let x = Heap.new(42);
+
+    // Should be accessible through reference
+    let r = &x;
+    assert_eq(*r, 42);
+}
+
+/// Tests that heap objects track generations properly
+fn test_heap_generation_tracking() {
+    let mut h1 = Heap.new(100);
+    let r1 = &h1;
+
+    // Reading should work
+    assert_eq(*r1, 100);
+
+    // Create another heap object - should have different generation
+    let h2 = Heap.new(200);
+    let r2 = &h2;
+
+    // Both should be independently valid
+    assert_eq(*r1, 100);
+    assert_eq(*r2, 200);
+}
+
+/// Tests heap object with mutable references
+fn test_heap_mutable_ref() {
+    let mut h = Heap.new(50);
+
+    // Take mutable reference
+    let r = &mut h;
+    *r = 75;
+
+    // Verify mutation
+    assert_eq(*r, 75);
+}
+
+/// Tests that CBGR capabilities are checked
+fn test_heap_capabilities() {
+    let x = Heap.new(10);
+    let r = &x;  // Immutable reference - READ only
+
+    // Reading should work
+    let val = *r;
+    assert_eq(val, 10);
+}
+
+/// Tests nested heap allocations
+fn test_nested_heap_alloc() {
+    type Pair is { a: Heap<Int>, b: Heap<Int> };
+
+    let inner1 = Heap.new(1);
+    let inner2 = Heap.new(2);
+    let outer = Pair { a: inner1, b: inner2 };
+
+    // Access nested heap values
+    assert_eq(*outer.a, 1);
+    assert_eq(*outer.b, 2);
+}
+
+/// Tests heap allocation in loop (generation increment test)
+fn test_heap_loop_alloc() {
+    let mut sum = 0;
+
+    // Allocate in loop - each should get unique generation
+    for i in 0..5 {
+        let h = Heap.new(i);
+        sum = sum + *h;
+    }
+
+    // 0 + 1 + 2 + 3 + 4 = 10
+    assert_eq(sum, 10);
+}
+
+/// Tests heap validation across function boundaries
+fn make_heap_value(x: Int) -> Heap<Int> {
+    Heap.new(x)
+}
+
+fn test_heap_across_functions() {
+    let h = make_heap_value(999);
+    assert_eq(*h, 999);
+}
+
+fn main() {
+    test_heap_alloc_basic();
+    test_heap_generation_tracking();
+    test_heap_mutable_ref();
+    test_heap_capabilities();
+    test_nested_heap_alloc();
+    test_heap_loop_alloc();
+    test_heap_across_functions();
+    print("All heap validation tests passed");
+}

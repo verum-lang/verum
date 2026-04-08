@@ -1,0 +1,316 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, string, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+// @description: String processing algorithms using int arrays (ASCII values)
+
+// ============================================================================
+// Str16: Fixed-size "string" of up to 16 ASCII int values
+// ============================================================================
+
+type Str16 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int,
+    c12: Int, c13: Int, c14: Int, c15: Int,
+    len: Int
+};
+
+fn str_empty() -> Str16 {
+    Str16 {
+        c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 0
+    }
+}
+
+fn str_get(s: Str16, i: Int) -> Int {
+    if i == 0 { s.c0 } else if i == 1 { s.c1 } else if i == 2 { s.c2 }
+    else if i == 3 { s.c3 } else if i == 4 { s.c4 } else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 } else if i == 7 { s.c7 } else if i == 8 { s.c8 }
+    else if i == 9 { s.c9 } else if i == 10 { s.c10 } else if i == 11 { s.c11 }
+    else if i == 12 { s.c12 } else if i == 13 { s.c13 } else if i == 14 { s.c14 }
+    else { s.c15 }
+}
+
+fn str_set(s: Str16, i: Int, v: Int) -> Str16 {
+    Str16 {
+        c0: if i == 0 { v } else { s.c0 },
+        c1: if i == 1 { v } else { s.c1 },
+        c2: if i == 2 { v } else { s.c2 },
+        c3: if i == 3 { v } else { s.c3 },
+        c4: if i == 4 { v } else { s.c4 },
+        c5: if i == 5 { v } else { s.c5 },
+        c6: if i == 6 { v } else { s.c6 },
+        c7: if i == 7 { v } else { s.c7 },
+        c8: if i == 8 { v } else { s.c8 },
+        c9: if i == 9 { v } else { s.c9 },
+        c10: if i == 10 { v } else { s.c10 },
+        c11: if i == 11 { v } else { s.c11 },
+        c12: if i == 12 { v } else { s.c12 },
+        c13: if i == 13 { v } else { s.c13 },
+        c14: if i == 14 { v } else { s.c14 },
+        c15: if i == 15 { v } else { s.c15 },
+        len: s.len
+    }
+}
+
+fn str_push(s: Str16, v: Int) -> Str16 {
+    let idx = s.len;
+    let updated = str_set(s, idx, v);
+    Str16 {
+        c0: updated.c0, c1: updated.c1, c2: updated.c2, c3: updated.c3,
+        c4: updated.c4, c5: updated.c5, c6: updated.c6, c7: updated.c7,
+        c8: updated.c8, c9: updated.c9, c10: updated.c10, c11: updated.c11,
+        c12: updated.c12, c13: updated.c13, c14: updated.c14, c15: updated.c15,
+        len: idx + 1
+    }
+}
+
+// Build strings from ASCII codes: a=97, b=98, c=99, ...
+fn make_abcba() -> Str16 {
+    let mut s = str_empty();
+    s = str_push(s, 97);   // a
+    s = str_push(s, 98);   // b
+    s = str_push(s, 99);   // c
+    s = str_push(s, 98);   // b
+    s = str_push(s, 97);   // a
+    s
+}
+
+fn make_abc() -> Str16 {
+    let mut s = str_empty();
+    s = str_push(s, 97);   // a
+    s = str_push(s, 98);   // b
+    s = str_push(s, 99);   // c
+    s
+}
+
+fn make_xabcx() -> Str16 {
+    let mut s = str_empty();
+    s = str_push(s, 120);  // x
+    s = str_push(s, 97);   // a
+    s = str_push(s, 98);   // b
+    s = str_push(s, 99);   // c
+    s = str_push(s, 120);  // x
+    s
+}
+
+fn make_aaaa() -> Str16 {
+    let mut s = str_empty();
+    s = str_push(s, 97);   // a
+    s = str_push(s, 97);   // a
+    s = str_push(s, 97);   // a
+    s = str_push(s, 97);   // a
+    s
+}
+
+fn make_aa() -> Str16 {
+    let mut s = str_empty();
+    s = str_push(s, 97);   // a
+    s = str_push(s, 97);   // a
+    s
+}
+
+// ============================================================================
+// String equality
+// ============================================================================
+
+fn str_equal(a: Str16, b: Str16) -> Int {
+    if a.len != b.len { 0 }
+    else {
+        let mut i = 0;
+        let mut eq = 1;
+        while i < a.len {
+            if str_get(a, i) != str_get(b, i) {
+                eq = 0;
+            }
+            i = i + 1;
+        }
+        eq
+    }
+}
+
+// ============================================================================
+// Palindrome check
+// ============================================================================
+
+fn is_palindrome(s: Str16) -> Int {
+    let mut left = 0;
+    let mut right = s.len - 1;
+    let mut result = 1;
+    while left < right {
+        if str_get(s, left) != str_get(s, right) {
+            result = 0;
+        }
+        left = left + 1;
+        right = right - 1;
+    }
+    result
+}
+
+// ============================================================================
+// Pattern match (brute force) — returns first index or -1
+// ============================================================================
+
+fn str_find(haystack: Str16, needle: Str16) -> Int {
+    if needle.len == 0 { 0 }
+    else {
+        let limit = haystack.len - needle.len + 1;
+        let mut pos = 0;
+        let mut found = -1;
+        while pos < limit {
+            let mut j = 0;
+            let mut matches = 1;
+            while j < needle.len {
+                if str_get(haystack, pos + j) != str_get(needle, j) {
+                    matches = 0;
+                    j = needle.len;  // break inner
+                }
+                j = j + 1;
+            }
+            if matches == 1 {
+                if found == -1 {
+                    found = pos;
+                }
+            }
+            pos = pos + 1;
+        }
+        found
+    }
+}
+
+// ============================================================================
+// Count occurrences (overlapping)
+// ============================================================================
+
+fn str_count(haystack: Str16, needle: Str16) -> Int {
+    if needle.len == 0 { 0 }
+    else {
+        let limit = haystack.len - needle.len + 1;
+        let mut pos = 0;
+        let mut count = 0;
+        while pos < limit {
+            let mut j = 0;
+            let mut matches = 1;
+            while j < needle.len {
+                if str_get(haystack, pos + j) != str_get(needle, j) {
+                    matches = 0;
+                    j = needle.len;  // break inner
+                }
+                j = j + 1;
+            }
+            if matches == 1 {
+                count = count + 1;
+            }
+            pos = pos + 1;
+        }
+        count
+    }
+}
+
+// ============================================================================
+// Test 1: String equality
+// ============================================================================
+
+@test
+fn test_str_equal() {
+    let a = make_abc();
+    let b = make_abc();
+    assert_eq(str_equal(a, b), 1);
+
+    let c = make_abcba();
+    assert_eq(str_equal(a, c), 0);
+
+    // Empty strings are equal
+    let e1 = str_empty();
+    let e2 = str_empty();
+    assert_eq(str_equal(e1, e2), 1);
+
+    print("  test_str_equal: ok");
+}
+
+// ============================================================================
+// Test 2: Palindrome detection
+// ============================================================================
+
+@test
+fn test_palindrome() {
+    // "abcba" is a palindrome
+    let p = make_abcba();
+    assert_eq(is_palindrome(p), 1);
+
+    // "abc" is NOT a palindrome
+    let np = make_abc();
+    assert_eq(is_palindrome(np), 0);
+
+    // "aaaa" is a palindrome
+    let aa = make_aaaa();
+    assert_eq(is_palindrome(aa), 1);
+
+    // Single char is a palindrome
+    let mut single = str_empty();
+    single = str_push(single, 97);
+    assert_eq(is_palindrome(single), 1);
+
+    print("  test_palindrome: ok");
+}
+
+// ============================================================================
+// Test 3: Pattern matching (find)
+// ============================================================================
+
+@test
+fn test_str_find() {
+    // "abc" in "xabcx" at position 1
+    let haystack = make_xabcx();
+    let needle = make_abc();
+    assert_eq(str_find(haystack, needle), 1);
+
+    // "abc" in "abc" at position 0
+    let same = make_abc();
+    assert_eq(str_find(same, needle), 0);
+
+    // "xabcx" not found in "abc" => -1
+    assert_eq(str_find(needle, haystack), -1);
+
+    print("  test_str_find: ok");
+}
+
+// ============================================================================
+// Test 4: Count overlapping occurrences
+// ============================================================================
+
+@test
+fn test_str_count() {
+    // "aa" in "aaaa" = 3 (overlapping: pos 0,1,2)
+    let haystack = make_aaaa();
+    let pattern = make_aa();
+    assert_eq(str_count(haystack, pattern), 3);
+
+    // "abc" in "xabcx" = 1
+    let h2 = make_xabcx();
+    let p2 = make_abc();
+    assert_eq(str_count(h2, p2), 1);
+
+    // "abc" in "abc" = 1
+    let h3 = make_abc();
+    assert_eq(str_count(h3, p2), 1);
+
+    print("  test_str_count: ok");
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_str_equal();
+    test_palindrome();
+    test_str_find();
+    test_str_count();
+    print("[OK] 116_string_algo");
+    0
+}

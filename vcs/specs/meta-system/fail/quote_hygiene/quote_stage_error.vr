@@ -1,0 +1,21 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M405
+// @description: Tests quote stage errors - using meta binding without splice
+// @tags: meta-system, quote, hygiene, staging
+
+// M405 is triggered when a meta-level binding is referenced in a quote
+// without using splice ($) or lift() to cross the stage boundary
+
+meta fn stage_mismatch() -> TokenStream {
+    let meta_binding = 42;  // This is a meta-level (stage 1) binding
+    quote {
+        // ERROR M405: referencing stage 1 binding from stage 0 code
+        // Should use $meta_binding or ${meta_binding} to splice
+        meta_binding
+    }
+}
+
+fn main() {
+    @const assert(true);
+}

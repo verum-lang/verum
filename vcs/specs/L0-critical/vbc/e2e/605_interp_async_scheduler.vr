@@ -1,0 +1,127 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, async, spawn, await, cooperative
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Test cooperative async scheduler: spawn defers execution,
+// .await triggers execution of pending tasks.
+
+async fn compute_square(x: Int) -> Int {
+    x * x
+}
+
+async fn compute_sum(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn test_basic_spawn_await() {
+    // Spawn defers execution — task is NOT run yet
+    let t1 = spawn compute_square(5);
+    let t2 = spawn compute_square(7);
+
+    // .await triggers execution of the target task
+    let r1 = t1.await;
+    let r2 = t2.await;
+
+    assert_eq(r1, 25);
+    assert_eq(r2, 49);
+
+    print("basic_spawn_await: ok");
+}
+
+fn test_multiple_spawns_then_awaits() {
+    // Spawn 5 tasks — none execute yet
+    let t1 = spawn compute_square(2);
+    let t2 = spawn compute_square(3);
+    let t3 = spawn compute_square(4);
+    let t4 = spawn compute_square(5);
+    let t5 = spawn compute_square(6);
+
+    // Await them in reverse order
+    let r5 = t5.await;
+    let r4 = t4.await;
+    let r3 = t3.await;
+    let r2 = t2.await;
+    let r1 = t1.await;
+
+    assert_eq(r1, 4);
+    assert_eq(r2, 9);
+    assert_eq(r3, 16);
+    assert_eq(r4, 25);
+    assert_eq(r5, 36);
+
+    print("multiple_spawns: ok");
+}
+
+fn test_spawn_with_multiple_args() {
+    let t1 = spawn compute_sum(10, 20);
+    let t2 = spawn compute_sum(100, 200);
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+
+    assert_eq(r1, 30);
+    assert_eq(r2, 300);
+
+    print("spawn_multi_args: ok");
+}
+
+@allow(unbounded_recursion)
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+async fn async_fibonacci(n: Int) -> Int {
+    fibonacci(n)
+}
+
+fn test_spawn_recursive() {
+    // Spawn tasks that call recursive functions
+    let t1 = spawn async_fibonacci(10);
+    let t2 = spawn async_fibonacci(8);
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+
+    assert_eq(r1, 55);
+    assert_eq(r2, 21);
+
+    print("spawn_recursive: ok");
+}
+
+fn test_spawn_sequential_vs_concurrent() {
+    // Sequential: call and await immediately
+    let v1 = compute_square(3).await;
+    assert_eq(v1, 9);
+
+    // Concurrent: spawn multiple, then await
+    let t1 = spawn compute_square(4);
+    let t2 = spawn compute_square(5);
+    let t3 = spawn compute_square(6);
+
+    let r3 = t3.await;
+    let r1 = t1.await;
+    let r2 = t2.await;
+
+    assert_eq(r1, 16);
+    assert_eq(r2, 25);
+    assert_eq(r3, 36);
+
+    print("spawn_sequential_vs_concurrent: ok");
+}
+
+fn main() -> Int {
+    test_basic_spawn_await();
+    test_multiple_spawns_then_awaits();
+    test_spawn_with_multiple_args();
+    test_spawn_recursive();
+    test_spawn_sequential_vs_concurrent();
+    print("[OK] 605_interp_async_scheduler");
+    0
+}

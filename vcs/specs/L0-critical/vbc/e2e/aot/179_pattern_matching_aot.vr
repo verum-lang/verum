@@ -1,0 +1,111 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, pattern-matching, variants, match
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for pattern matching: match expressions, tuple variant destructuring
+// NOTE: Record variant destructuring (e.g., Triangle { base: b }) is not
+// supported in AOT — use only tuple variants.
+
+type Shape is Circle(Int) | Square(Int) | Triangle(Int, Int);
+
+fn shape_area(s: Shape) -> Int {
+    match s {
+        Circle(r) => 314 * r * r / 100,
+        Square(side) => side * side,
+        Triangle(base, height) => base * height / 2
+    }
+}
+
+fn shape_id(s: Shape) -> Int {
+    match s {
+        Circle(_) => 1,
+        Square(_) => 2,
+        Triangle(_, _) => 3
+    }
+}
+
+type Expr is Lit(Int) | Add(Int, Int) | Mul(Int, Int) | Neg(Int);
+
+fn eval_expr(e: Expr) -> Int {
+    match e {
+        Lit(n) => n,
+        Add(a, b) => a + b,
+        Mul(a, b) => a * b,
+        Neg(n) => -n
+    }
+}
+
+fn classify_int(n: Int) -> Int {
+    // Return code: 0=negative, 1=zero, 2=small, 3=medium, 4=large
+    if n < 0 { 0 }
+    else if n == 0 { 1 }
+    else if n < 10 { 2 }
+    else if n < 100 { 3 }
+    else { 4 }
+}
+
+fn main() -> Int {
+    // Shape variants (tuple only)
+    let c = Circle(10);
+    let s = Square(5);
+    let t = Triangle(6, 4);
+
+    assert_eq(shape_area(c), 314);
+    assert_eq(shape_area(s), 25);
+    assert_eq(shape_area(t), 12);
+
+    assert_eq(shape_id(c), 1);
+    assert_eq(shape_id(s), 2);
+    assert_eq(shape_id(t), 3);
+
+    // Expression evaluation
+    assert_eq(eval_expr(Lit(42)), 42);
+    assert_eq(eval_expr(Add(10, 20)), 30);
+    assert_eq(eval_expr(Mul(3, 7)), 21);
+    assert_eq(eval_expr(Neg(5)), -5);
+
+    // Integer classification
+    assert_eq(classify_int(-10), 0);
+    assert_eq(classify_int(0), 1);
+    assert_eq(classify_int(5), 2);
+    assert_eq(classify_int(50), 3);
+    assert_eq(classify_int(500), 4);
+
+    // Maybe matching
+    let m1: Maybe<Int> = Some(42);
+    let v1 = match m1 { Some(v) => v, None => -1 };
+    assert_eq(v1, 42);
+
+    let m2: Maybe<Int> = None;
+    let v2 = match m2 { Some(v) => v, None => -1 };
+    assert_eq(v2, -1);
+
+    // Result matching
+    let r1: Result<Int, Text> = Ok(100);
+    let v3 = match r1 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v3, 100);
+
+    let r2: Result<Int, Text> = Err("fail");
+    let v4 = match r2 { Ok(_) => 0, Err(_) => -1 };
+    assert_eq(v4, -1);
+
+    // Nested match with computation
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let shape = if i % 3 == 0 { Circle(i + 1) }
+                    else if i % 3 == 1 { Square(i + 1) }
+                    else { Triangle(i + 1, i + 1) };
+        total = total + shape_area(shape);
+        i = i + 1;
+    }
+    // i=0: Circle(1) → 3, i=1: Square(2) → 4, i=2: Triangle(3,3) → 4
+    // i=3: Circle(4) → 50, i=4: Square(5) → 25
+    assert_eq(total, 86);
+
+    print("[OK] 179_pattern_matching_aot");
+    0
+}

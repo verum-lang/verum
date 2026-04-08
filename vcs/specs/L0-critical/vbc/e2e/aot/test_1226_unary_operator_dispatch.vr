@@ -1,0 +1,72 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: operator, unary, method-dispatch, neg, not, e2e
+// @description: Test unary operator dispatch to user-defined methods (-x -> neg, !x -> not)
+
+type Vec2 is { x: Float, y: Float };
+
+implement Vec2 {
+    fn neg(&self) -> Vec2 {
+        Vec2 { x: 0.0 - self.x, y: 0.0 - self.y }
+    }
+}
+
+type Flags is { a: Bool, b: Bool };
+
+implement Flags {
+    fn not(&self) -> Flags {
+        Flags { a: !self.a, b: !self.b }
+    }
+}
+
+fn approx(a: Float, b: Float) -> Bool {
+    let d = a - b;
+    let abs = if d < 0.0 { 0.0 - d } else { d };
+    abs < 0.01
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: unary - dispatches to neg method
+    let v = Vec2 { x: 3.0, y: 4.0 };
+    let n = -v;
+    if !approx(n.x, -3.0) || !approx(n.y, -4.0) {
+        print(f"FAIL 1: neg = ({n.x}, {n.y})");
+        f = f + 1;
+    }
+
+    // Test 2: unary ! dispatches to not method
+    let flags = Flags { a: true, b: false };
+    let inv = !flags;
+    if inv.a != false || inv.b != true {
+        print("FAIL 2: not didn't invert");
+        f = f + 1;
+    }
+
+    // Test 3: method call still works directly
+    let v2 = v.neg();
+    if !approx(v2.x, -3.0) || !approx(v2.y, -4.0) {
+        print(f"FAIL 3: direct neg = ({v2.x}, {v2.y})");
+        f = f + 1;
+    }
+
+    // Test 4: primitives still work
+    let x = -42;
+    if x != -42 {
+        print(f"FAIL 4: -42 = {x}");
+        f = f + 1;
+    }
+
+    let b = !true;
+    if b != false {
+        print("FAIL 5: !true != false");
+        f = f + 1;
+    }
+
+    if f == 0 {
+        print("All unary operator dispatch tests passed");
+    }
+    f
+}

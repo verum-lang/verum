@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: micro, map, hash, performance, throughput
+// @description: Map insert/lookup/remove throughput benchmarks
+
+/// Map Operations Throughput Benchmark
+
+fn bench_insert(count: Int) -> Int {
+    let mut map = Map.new();
+    let mut i = 0;
+    while i < count {
+        map.insert(i, i * 10);
+        i = i + 1;
+    }
+    map.len()
+}
+
+fn bench_lookup_hit(count: Int) -> Int {
+    let mut map = Map.new();
+    let mut i = 0;
+    while i < count {
+        map.insert(i, i * 10);
+        i = i + 1;
+    }
+
+    let mut sum = 0;
+    i = 0;
+    while i < count {
+        if map.contains_key(i) {
+            sum = sum + map.get(i);
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_lookup_miss(count: Int) -> Int {
+    let mut map = Map.new();
+    let mut i = 0;
+    while i < count {
+        map.insert(i, i * 10);
+        i = i + 1;
+    }
+
+    let mut miss_count = 0;
+    i = 0;
+    while i < count {
+        if !map.contains_key(i + count) {
+            miss_count = miss_count + 1;
+        }
+        i = i + 1;
+    }
+    miss_count
+}
+
+fn bench_contains_key(count: Int) -> Int {
+    let mut map = Map.new();
+    let mut i = 0;
+    while i < count {
+        map.insert(i, i * 10);
+        i = i + 1;
+    }
+
+    let mut found = 0;
+    i = 0;
+    while i < count {
+        if map.contains_key(i) {
+            found = found + 1;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+fn main() -> Int {
+    let count = 10000;
+    print("=== Map Operations Benchmarks ===");
+    print(f"Entry count: {count}");
+
+    let r1 = bench_insert(count);
+    print(f"  insert: done (size={r1})");
+
+    let r2 = bench_lookup_hit(count);
+    print(f"  lookup_hit: done (sum={r2})");
+
+    let r3 = bench_lookup_miss(count);
+    print(f"  lookup_miss: done (misses={r3})");
+
+    let r4 = bench_contains_key(count);
+    print(f"  contains_key: done (found={r4})");
+
+    // Verify basic properties
+    if r1 != count {
+        print("FAIL: insert count wrong");
+        return 1;
+    }
+    if r3 != count {
+        print("FAIL: miss count wrong");
+        return 1;
+    }
+
+    print("All map operation benchmarks completed");
+    0
+}

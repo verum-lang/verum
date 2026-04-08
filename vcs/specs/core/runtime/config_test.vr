@@ -1,0 +1,612 @@
+// =============================================================================
+// config_test.vr - Tests for runtime configuration types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, config, io, error, core
+// FIXED: Re-exported types now work after fixing parse error in core/runtime/config.vr (duplicate field names)
+// @description: Tests for runtime configuration types: InitError, IoOp, IoHandle,
+//               IoCompletion, RuntimeIoError, NoopExecutor, NoopDriver
+// =============================================================================
+
+// Import from core.runtime (re-exports from .config)
+mount core.runtime.{
+    InitError,
+    IoOp,
+    IoHandle,
+    IoCompletion,
+    RuntimeIoError,
+    NoopExecutor,
+    NoopDriver,
+};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: InitError Variants
+// =============================================================================
+
+@test
+fn test_init_error_tls_init_failed() {
+    let err: InitError = InitError.TlsInitFailed;
+    assert(err is InitError.TlsInitFailed);
+}
+
+@test
+fn test_init_error_platform_not_supported() {
+    let err: InitError = InitError.PlatformNotSupported;
+    assert(err is InitError.PlatformNotSupported);
+}
+
+@test
+fn test_init_error_already_initialized() {
+    let err: InitError = InitError.AlreadyInitialized;
+    assert(err is InitError.AlreadyInitialized);
+}
+
+@test
+fn test_init_error_message_tls() {
+    let err: InitError = InitError.TlsInitFailed;
+    let msg = err.message();
+    assert(msg.len() > 0);
+    assert(msg.contains("TLS") || msg.contains("thread-local"));
+}
+
+@test
+fn test_init_error_message_platform() {
+    let err: InitError = InitError.PlatformNotSupported;
+    let msg = err.message();
+    assert(msg.len() > 0);
+    assert(msg.contains("Platform") || msg.contains("platform"));
+}
+
+@test
+fn test_init_error_message_already() {
+    let err: InitError = InitError.AlreadyInitialized;
+    let msg = err.message();
+    assert(msg.len() > 0);
+    assert(msg.contains("already") || msg.contains("Already"));
+}
+
+// =============================================================================
+// Section 2: RuntimeIoError Variants
+// =============================================================================
+
+@test
+fn test_runtime_io_error_would_block() {
+    let err: RuntimeIoError = RuntimeIoError.WouldBlock;
+    assert(err is RuntimeIoError.WouldBlock);
+}
+
+@test
+fn test_runtime_io_error_interrupted() {
+    let err: RuntimeIoError = RuntimeIoError.Interrupted;
+    assert(err is RuntimeIoError.Interrupted);
+}
+
+@test
+fn test_runtime_io_error_invalid_fd() {
+    let err: RuntimeIoError = RuntimeIoError.InvalidFd;
+    assert(err is RuntimeIoError.InvalidFd);
+}
+
+@test
+fn test_runtime_io_error_permission_denied() {
+    let err: RuntimeIoError = RuntimeIoError.PermissionDenied;
+    assert(err is RuntimeIoError.PermissionDenied);
+}
+
+@test
+fn test_runtime_io_error_connection_refused() {
+    let err: RuntimeIoError = RuntimeIoError.ConnectionRefused;
+    assert(err is RuntimeIoError.ConnectionRefused);
+}
+
+@test
+fn test_runtime_io_error_connection_reset() {
+    let err: RuntimeIoError = RuntimeIoError.ConnectionReset;
+    assert(err is RuntimeIoError.ConnectionReset);
+}
+
+@test
+fn test_runtime_io_error_not_connected() {
+    let err: RuntimeIoError = RuntimeIoError.NotConnected;
+    assert(err is RuntimeIoError.NotConnected);
+}
+
+@test
+fn test_runtime_io_error_timed_out() {
+    let err: RuntimeIoError = RuntimeIoError.TimedOut;
+    assert(err is RuntimeIoError.TimedOut);
+}
+
+@test
+fn test_runtime_io_error_other() {
+    let err: RuntimeIoError = RuntimeIoError.Other(-1);
+    match err {
+        RuntimeIoError.Other(code) => assert_eq(code, -1),
+        _ => assert(false),
+    }
+}
+
+@test
+fn test_runtime_io_error_other_errno() {
+    let err: RuntimeIoError = RuntimeIoError.Other(13); // EACCES
+    match err {
+        RuntimeIoError.Other(code) => assert_eq(code, 13),
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 3: IoHandle Tests
+// =============================================================================
+
+@test
+fn test_io_handle_construction() {
+    let handle = IoHandle { id: 42 };
+    assert_eq(handle.id, 42);
+}
+
+@test
+fn test_io_handle_zero() {
+    let handle = IoHandle { id: 0 };
+    assert_eq(handle.id, 0);
+}
+
+@test
+fn test_io_handle_max() {
+    let handle = IoHandle { id: 0xFFFFFFFFFFFFFFFF };
+    assert_eq(handle.id, 0xFFFFFFFFFFFFFFFF);
+}
+
+// =============================================================================
+// Section 4: IoOp Variants
+// =============================================================================
+
+@test
+fn test_io_op_close() {
+    let op = IoOp.Close { fd: 3 };
+    match op {
+        IoOp.Close { fd } => assert_eq(fd, 3),
+        _ => assert(false),
+    }
+}
+
+@test
+fn test_io_op_accept() {
+    let op = IoOp.Accept { fd: 5 };
+    match op {
+        IoOp.Accept { fd } => assert_eq(fd, 5),
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 5: IoCompletion Tests
+// =============================================================================
+
+@test
+fn test_io_completion_success() {
+    let handle = IoHandle { id: 1 };
+    let completion = IoCompletion {
+        handle: handle,
+        result: Ok(100),
+    };
+    assert_eq(completion.handle.id, 1);
+    assert(completion.result.is_ok());
+}
+
+@test
+fn test_io_completion_error() {
+    let handle = IoHandle { id: 2 };
+    let completion = IoCompletion {
+        handle: handle,
+        result: Err(RuntimeIoError.WouldBlock),
+    };
+    assert_eq(completion.handle.id, 2);
+    assert(completion.result.is_err());
+}
+
+@test
+fn test_io_completion_with_bytes_read() {
+    let handle = IoHandle { id: 3 };
+    let completion = IoCompletion {
+        handle: handle,
+        result: Ok(1024), // Bytes read
+    };
+    match completion.result {
+        Ok(bytes) => assert_eq(bytes, 1024),
+        Err(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 6: NoopExecutor Tests
+// =============================================================================
+
+@test
+fn test_noop_executor_construction() {
+    let executor: NoopExecutor = NoopExecutor;
+    // Unit type always has 0 active tasks
+    assert_eq(executor.active_tasks(), 0);
+}
+
+@test
+fn test_noop_executor_active_tasks() {
+    let executor: NoopExecutor = NoopExecutor;
+    assert_eq(executor.active_tasks(), 0);
+}
+
+@test
+fn test_noop_executor_shutdown() {
+    let executor: NoopExecutor = NoopExecutor;
+    executor.shutdown();
+    // After shutdown, still 0 active tasks
+    assert_eq(executor.active_tasks(), 0);
+}
+
+// =============================================================================
+// Section 7: NoopDriver Tests
+// =============================================================================
+
+@test
+fn test_noop_driver_construction() {
+    let driver: NoopDriver = NoopDriver;
+    // Unit type driver always returns 0 completions
+    let mut completions: [IoCompletion; 0] = [];
+    assert_eq(driver.poll(&mut completions), 0);
+}
+
+@test
+fn test_noop_driver_shutdown() {
+    let driver: NoopDriver = NoopDriver;
+    driver.shutdown();
+    // After shutdown, poll still returns 0
+    let mut completions: [IoCompletion; 0] = [];
+    assert_eq(driver.poll(&mut completions), 0);
+}
+
+@test
+fn test_noop_driver_poll() {
+    let driver: NoopDriver = NoopDriver;
+    let mut completions: [IoCompletion; 0] = [];
+    let count = driver.poll(&mut completions);
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section 8: Error Pattern Matching
+// =============================================================================
+
+@test
+fn test_init_error_match_all() {
+    // Test that all variants can be matched
+    let errors = [
+        InitError.TlsInitFailed,
+        InitError.PlatformNotSupported,
+        InitError.AlreadyInitialized,
+    ];
+
+    for err in errors {
+        let matched = match err {
+            InitError.TlsInitFailed => true,
+            InitError.AllocatorInitFailed(_) => true,
+            InitError.IoDriverInitFailed(_) => true,
+            InitError.ExecutorInitFailed(_) => true,
+            InitError.PlatformNotSupported => true,
+            InitError.AlreadyInitialized => true,
+        };
+        assert(matched);
+    }
+}
+
+@test
+fn test_runtime_io_error_match_all() {
+    // Test that all variants can be matched
+    let errors = [
+        RuntimeIoError.WouldBlock,
+        RuntimeIoError.Interrupted,
+        RuntimeIoError.InvalidFd,
+        RuntimeIoError.PermissionDenied,
+        RuntimeIoError.ConnectionRefused,
+        RuntimeIoError.ConnectionReset,
+        RuntimeIoError.NotConnected,
+        RuntimeIoError.TimedOut,
+        RuntimeIoError.Other(0),
+    ];
+
+    for err in errors {
+        let matched = match err {
+            RuntimeIoError.WouldBlock => true,
+            RuntimeIoError.Interrupted => true,
+            RuntimeIoError.InvalidFd => true,
+            RuntimeIoError.PermissionDenied => true,
+            RuntimeIoError.ConnectionRefused => true,
+            RuntimeIoError.ConnectionReset => true,
+            RuntimeIoError.NotConnected => true,
+            RuntimeIoError.TimedOut => true,
+            RuntimeIoError.Other(_) => true,
+        };
+        assert(matched);
+    }
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+// =============================================================================
+// Section 9: InitError Variants with Payloads
+// =============================================================================
+
+@test
+fn test_init_error_io_driver_failed() {
+    let err: InitError = InitError.IoDriverInitFailed("kqueue init failed");
+    assert(err is InitError.IoDriverInitFailed);
+    let msg = err.message();
+    assert(msg.contains("I/O driver") || msg.contains("kqueue"));
+}
+
+@test
+fn test_init_error_executor_failed() {
+    let err: InitError = InitError.ExecutorInitFailed("thread pool creation failed");
+    assert(err is InitError.ExecutorInitFailed);
+    let msg = err.message();
+    assert(msg.contains("executor") || msg.contains("thread pool"));
+}
+
+@test
+fn test_init_error_io_driver_match() {
+    let err: InitError = InitError.IoDriverInitFailed("io_uring not available");
+    match err {
+        InitError.IoDriverInitFailed(msg) => {
+            assert(msg.contains("io_uring"));
+        }
+        _ => panic("Expected IoDriverInitFailed"),
+    }
+}
+
+@test
+fn test_init_error_executor_match() {
+    let err: InitError = InitError.ExecutorInitFailed("cannot create worker threads");
+    match err {
+        InitError.ExecutorInitFailed(msg) => {
+            assert(msg.contains("worker threads"));
+        }
+        _ => panic("Expected ExecutorInitFailed"),
+    }
+}
+
+// =============================================================================
+// Section 10: IoOp Extended Variants
+// =============================================================================
+
+@test
+fn test_io_op_close_zero_fd() {
+    let op = IoOp.Close { fd: 0 };
+    match op {
+        IoOp.Close { fd } => assert_eq(fd, 0),
+        _ => panic("Expected Close"),
+    }
+}
+
+@test
+fn test_io_op_accept_high_fd() {
+    let op = IoOp.Accept { fd: 1024 };
+    match op {
+        IoOp.Accept { fd } => assert_eq(fd, 1024),
+        _ => panic("Expected Accept"),
+    }
+}
+
+@test
+fn test_io_op_match_all_variants() {
+    let close = IoOp.Close { fd: 1 };
+    let accept = IoOp.Accept { fd: 2 };
+
+    assert(close is IoOp.Close);
+    assert(accept is IoOp.Accept);
+    assert(!(close is IoOp.Accept));
+    assert(!(accept is IoOp.Close));
+}
+
+// =============================================================================
+// Section 11: RuntimeIoError Extended
+// =============================================================================
+
+@test
+fn test_runtime_io_error_other_zero() {
+    let err = RuntimeIoError.Other(0);
+    match err {
+        RuntimeIoError.Other(code) => assert_eq(code, 0),
+        _ => panic("Expected Other"),
+    }
+}
+
+@test
+fn test_runtime_io_error_other_negative() {
+    let err = RuntimeIoError.Other(-42);
+    match err {
+        RuntimeIoError.Other(code) => assert_eq(code, -42),
+        _ => panic("Expected Other"),
+    }
+}
+
+@test
+fn test_runtime_io_error_other_eacces() {
+    // EACCES = 13
+    let err = RuntimeIoError.Other(13);
+    match err {
+        RuntimeIoError.Other(code) => assert_eq(code, 13),
+        _ => panic("Expected Other"),
+    }
+}
+
+@test
+fn test_runtime_io_error_uniqueness() {
+    // Each variant is distinct
+    let would_block = RuntimeIoError.WouldBlock;
+    let interrupted = RuntimeIoError.Interrupted;
+    assert(would_block is RuntimeIoError.WouldBlock);
+    assert(!(would_block is RuntimeIoError.Interrupted));
+    assert(interrupted is RuntimeIoError.Interrupted);
+    assert(!(interrupted is RuntimeIoError.WouldBlock));
+}
+
+// =============================================================================
+// Section 12: IoCompletion Extended
+// =============================================================================
+
+@test
+fn test_io_completion_large_bytes() {
+    let handle = IoHandle { id: 10 };
+    let completion = IoCompletion {
+        handle: handle,
+        result: Ok(1048576), // 1MB
+    };
+    match completion.result {
+        Ok(bytes) => assert_eq(bytes, 1048576),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_io_completion_zero_bytes() {
+    let handle = IoHandle { id: 11 };
+    let completion = IoCompletion {
+        handle: handle,
+        result: Ok(0),
+    };
+    match completion.result {
+        Ok(bytes) => assert_eq(bytes, 0),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_io_completion_error_timed_out() {
+    let handle = IoHandle { id: 12 };
+    let completion = IoCompletion {
+        handle: handle,
+        result: Err(RuntimeIoError.TimedOut),
+    };
+    match completion.result {
+        Ok(_) => panic("Expected Err"),
+        Err(e) => assert(e is RuntimeIoError.TimedOut),
+    }
+}
+
+@test
+fn test_io_completion_error_connection_refused() {
+    let handle = IoHandle { id: 13 };
+    let completion = IoCompletion {
+        handle: handle,
+        result: Err(RuntimeIoError.ConnectionRefused),
+    };
+    match completion.result {
+        Ok(_) => panic("Expected Err"),
+        Err(e) => assert(e is RuntimeIoError.ConnectionRefused),
+    }
+}
+
+// =============================================================================
+// Section 13: NoopExecutor Extended
+// =============================================================================
+
+@test
+fn test_noop_executor_double_shutdown() {
+    let executor = NoopExecutor;
+    executor.shutdown();
+    executor.shutdown();
+    assert_eq(executor.active_tasks(), 0);
+}
+
+@test
+fn test_noop_executor_type_annotation() {
+    let executor: NoopExecutor = NoopExecutor;
+    let tasks: Int = executor.active_tasks();
+    assert_eq(tasks, 0);
+}
+
+// =============================================================================
+// Section 14: NoopDriver Extended
+// =============================================================================
+
+@test
+fn test_noop_driver_double_shutdown() {
+    let driver = NoopDriver;
+    driver.shutdown();
+    driver.shutdown();
+    let mut completions: [IoCompletion; 0] = [];
+    assert_eq(driver.poll(&mut completions), 0);
+}
+
+@test
+fn test_noop_driver_type_annotation() {
+    let driver: NoopDriver = NoopDriver;
+    let count: Int = driver.poll(&mut []);
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section 15: Additional Config Tests
+// =============================================================================
+
+@test
+fn test_init_error_already_initialized() {
+    let err = InitError.AlreadyInitialized;
+    assert(err is InitError.AlreadyInitialized);
+}
+
+@test
+fn test_init_error_platform_not_supported() {
+    let err = InitError.PlatformNotSupported;
+    assert(err is InitError.PlatformNotSupported);
+    assert(!(err is InitError.AlreadyInitialized));
+}
+
+@test
+fn test_io_handle_distinct_ids() {
+    let h1 = IoHandle { id: 1 };
+    let h2 = IoHandle { id: 2 };
+    assert(h1.id != h2.id);
+}
+
+@test
+fn test_io_handle_zero_id() {
+    let h = IoHandle { id: 0 };
+    assert_eq(h.id, 0);
+}
+
+@test
+fn test_runtime_io_error_would_block() {
+    let e = RuntimeIoError.WouldBlock;
+    assert(e is RuntimeIoError.WouldBlock);
+    assert(!(e is RuntimeIoError.TimedOut));
+}
+
+@test
+fn test_runtime_io_error_interrupted() {
+    let e = RuntimeIoError.Interrupted;
+    assert(e is RuntimeIoError.Interrupted);
+    assert(!(e is RuntimeIoError.WouldBlock));
+}
+
+@test
+fn test_runtime_io_error_invalid_fd() {
+    let e = RuntimeIoError.InvalidFd;
+    assert(e is RuntimeIoError.InvalidFd);
+}
+
+@test
+fn test_noop_executor_active_tasks_always_zero() {
+    let executor = NoopExecutor;
+    assert_eq(executor.active_tasks(), 0);
+    executor.shutdown();
+    assert_eq(executor.active_tasks(), 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

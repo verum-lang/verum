@@ -1,0 +1,214 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, async
+
+/// Basic async operations must behave identically across
+/// interpreter (Tier 0) and AOT (Tier 3)
+
+/// Simple async function
+async fn simple_async() -> Int {
+    42
+}
+
+/// Async function with computation
+async fn compute_async(n: Int) -> Int {
+    let mut result = 0;
+    for i in 0..n {
+        result = result + i;
+    }
+    result
+}
+
+/// Async function that awaits another
+async fn chained_async() -> Int {
+    let a = simple_async().await;
+    let b = compute_async(10).await;
+    a + b
+}
+
+/// Async function with delay
+async fn delayed_value(delay_ms: Int, value: Int) -> Int {
+    sleep(Duration.from_millis(delay_ms)).await;
+    value
+}
+
+/// Concurrent execution with join
+async fn concurrent_tasks() -> (Int, Int, Int) {
+    let (a, b, c) = join(
+        delayed_value(10, 1),
+        delayed_value(20, 2),
+        delayed_value(30, 3),
+    ).await;
+    (a, b, c)
+}
+
+/// Race between tasks
+async fn race_tasks() -> Int {
+    select {
+        a = delayed_value(50, 1) => a,
+        b = delayed_value(10, 2) => b,
+        c = delayed_value(30, 3) => c,
+    }.await
+}
+
+/// Async function with error handling
+async fn fallible_async(succeed: Bool) -> Result<Int, Text> {
+    sleep(Duration.from_millis(10)).await;
+    if succeed {
+        Ok(42)
+    } else {
+        Err("operation failed")
+    }
+}
+
+/// Sequential async operations
+async fn sequential_operations() -> List<Int> {
+    let mut results = [];
+
+    for i in 1..=5 {
+        let value = delayed_value(5, i * 10).await;
+        results.push(value);
+    }
+
+    results
+}
+
+/// Parallel map over collection
+async fn parallel_map(items: List<Int>) -> List<Int> {
+    items.map_async(|n| async {
+        delayed_value(10, n * 2).await
+    }).await
+}
+
+/// Async closure
+async fn with_async_closure() -> Int {
+    let async_fn = async |x| {
+        sleep(Duration.from_millis(10)).await;
+        x * 2
+    };
+
+    async_fn(21).await
+}
+
+/// Async with channels
+async fn channel_communication() -> Int {
+    let (tx, rx) = channel<Int>();
+
+    // Spawn producer
+    spawn async {
+        for i in 1..=5 {
+            tx.send(i).await;
+        }
+        tx.close();
+    };
+
+    // Consume values
+    let mut sum = 0;
+    while let Some(value) = rx.recv().await {
+        sum = sum + value;
+    }
+
+    sum
+}
+
+/// Async mutex
+async fn shared_state() -> Int {
+    let counter = Arc.new(Mutex.new(0));
+
+    let tasks = (0..10).map(|_| {
+        let counter = counter.clone();
+        spawn async {
+            let mut guard = counter.lock().await;
+            *guard = *guard + 1;
+        }
+    }).collect<List<_>>();
+
+    join_all(tasks).await;
+
+    let guard = counter.lock().await;
+    *guard
+}
+
+/// Timeout handling
+async fn with_timeout() -> Result<Int, Text> {
+    match timeout(Duration.from_millis(100), delayed_value(50, 42)).await {
+        Ok(value) => Ok(value),
+        Err(_) => Err("timeout"),
+    }
+}
+
+/// Retry logic
+async fn with_retry(attempts: Int) -> Result<Int, Text> {
+    let mut last_error = "no attempts";
+
+    for i in 0..attempts {
+        match fallible_async(i == attempts - 1).await {
+            Ok(value) => return Ok(value),
+            Err(e) => last_error = e,
+        }
+    }
+
+    Err(last_error)
+}
+
+async fn main() {
+    println("=== Simple Async ===");
+    let result = simple_async().await;
+    println(f"simple_async() = {result}");
+
+    println("\n=== Compute Async ===");
+    let computed = compute_async(100).await;
+    println(f"compute_async(100) = {computed}");
+
+    println("\n=== Chained Async ===");
+    let chained = chained_async().await;
+    println(f"chained_async() = {chained}");
+
+    println("\n=== Delayed Values ===");
+    let delayed = delayed_value(10, 99).await;
+    println(f"delayed_value(10, 99) = {delayed}");
+
+    println("\n=== Concurrent Tasks ===");
+    let (a, b, c) = concurrent_tasks().await;
+    println(f"concurrent_tasks() = ({a}, {b}, {c})");
+
+    println("\n=== Race Tasks ===");
+    let winner = race_tasks().await;
+    println(f"race_tasks() = {winner}");
+
+    println("\n=== Fallible Async ===");
+    let success = fallible_async(true).await;
+    let failure = fallible_async(false).await;
+    println(f"fallible_async(true) = {success}");
+    println(f"fallible_async(false) = {failure}");
+
+    println("\n=== Sequential Operations ===");
+    let seq = sequential_operations().await;
+    println(f"sequential_operations() = {seq}");
+
+    println("\n=== Parallel Map ===");
+    let items = [1, 2, 3, 4, 5];
+    let mapped = parallel_map(items).await;
+    println(f"parallel_map({items}) = {mapped}");
+
+    println("\n=== Async Closure ===");
+    let closure_result = with_async_closure().await;
+    println(f"with_async_closure() = {closure_result}");
+
+    println("\n=== Channel Communication ===");
+    let channel_sum = channel_communication().await;
+    println(f"channel_communication() = {channel_sum}");
+
+    println("\n=== Shared State ===");
+    let counter = shared_state().await;
+    println(f"shared_state() = {counter}");
+
+    println("\n=== Timeout ===");
+    let timeout_result = with_timeout().await;
+    println(f"with_timeout() = {timeout_result}");
+
+    println("\n=== Retry ===");
+    let retry_result = with_retry(3).await;
+    println(f"with_retry(3) = {retry_result}");
+}

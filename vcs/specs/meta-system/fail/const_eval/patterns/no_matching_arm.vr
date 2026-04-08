@@ -1,0 +1,22 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, const_eval, patterns
+// @description: Tests pattern match failure at compile time - no matching arm
+// @expected-error: match
+
+// Match with guards that exclude all possibilities
+meta fn exclusive_guards() -> Int {
+    let input = 5;
+    match input {
+        n if n > 10 => n,
+        n if n < 0 => 0 - n,
+        // 5 doesn't match any guard - ERROR: no matching arm
+    }
+}
+
+fn main() {
+    @const {
+        let _ = exclusive_guards();
+    };
+}

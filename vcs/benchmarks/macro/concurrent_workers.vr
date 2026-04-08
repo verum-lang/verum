@@ -1,0 +1,363 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: Linear scaling up to core count
+// @tags: concurrency, workers, parallel, performance
+
+/// Concurrent Workers Benchmark
+///
+/// Tests parallel workloads with multiple workers:
+/// - Thread pool patterns
+/// - Work stealing
+/// - Fan-out/fan-in
+/// - Producer-consumer
+/// - Load balancing
+
+module benchmarks.macro.concurrent_workers
+
+using [Benchmark, Async, Sync, Channels]
+
+/// Simple thread pool - CPU bound work
+fn benchmark_workers_cpu_bound() {
+    let pool = ThreadPool.new(num_cpus());
+    let iterations = 100_000;
+
+    let results: List<_> = (0..iterations).map(|i| {
+        pool.spawn(move || {
+            // CPU-bound work
+            let mut sum: Float = 0.0;
+            for j in 0..1000 {
+                sum += (j as Float).sin() * (i as Float).cos();
+            }
+            sum
+        })
+    }).collect();
+
+    let total: Float = results.iter().map(|r| r.join()).sum();
+    let _ = total;
+}
+
+/// Thread pool - I/O bound work (simulated)
+fn benchmark_workers_io_bound() async {
+    let pool = ThreadPool.new(num_cpus() * 4);  // More workers for I/O
+    let iterations = 10_000;
+
+    let results: List<_> = (0..iterations).map(|i| {
+        pool.spawn(move || {
+            // Simulate I/O wait
+            std.thread.sleep(Duration.from_micros(10));
+            i * 2
+        })
+    }).collect();
+
+    let total: Int = results.iter().map(|r| r.join()).sum();
+    let _ = total;
+}
+
+/// Work stealing scheduler
+fn benchmark_workers_work_stealing() {
+    let scheduler = WorkStealingScheduler.new(num_cpus());
+
+    // Submit imbalanced workload
+    for i in 0..1000 {
+        let work_amount = if i < 100 { 10000 } else { 100 };
+        scheduler.submit(move || {
+            let mut sum = 0;
+            for j in 0..work_amount {
+                sum += j;
+            }
+            sum
+        });
+    }
+
+    scheduler.wait_all();
+}
+
+/// Fan-out / Fan-in pattern
+fn benchmark_workers_fan_out_in() async {
+    let num_workers = num_cpus();
+    let items_per_worker = 10_000;
+
+    // Fan-out: distribute work
+    let handles: List<_> = (0..num_workers).map(|worker_id| {
+        spawn async move {
+            let mut results = list![];
+            for i in 0..items_per_worker {
+                let value = (worker_id * items_per_worker + i) * 2;
+                results.push(value);
+            }
+            results
+        }
+    }).collect();
+
+    // Fan-in: collect results
+    let mut all_results = list![];
+    for h in handles {
+        let worker_results = h.await;
+        all_results.extend(worker_results);
+    }
+
+    assert(all_results.len() == num_workers * items_per_worker);
+}
+
+/// Producer-consumer with channel
+fn benchmark_workers_producer_consumer() async {
+    let (tx, rx) = channel<Int>.bounded(1000);
+    let num_producers = 4;
+    let num_consumers = 4;
+    let items_per_producer = 10_000;
+
+    // Producers
+    let producers: List<_> = (0..num_producers).map(|p| {
+        let tx = tx.clone();
+        spawn async move {
+            for i in 0..items_per_producer {
+                tx.send(p * items_per_producer + i).await;
+            }
+        }
+    }).collect();
+
+    drop(tx);  // Close send side
+
+    // Consumers
+    let consumer_results = Shared.new(Mutex.new(list![]));
+    let consumers: List<_> = (0..num_consumers).map(|_| {
+        let rx = rx.clone();
+        let results = consumer_results.clone();
+        spawn async move {
+            while let Some(item) = rx.recv().await {
+                // Process item
+                let processed = item * 2;
+                results.lock().push(processed);
+            }
+        }
+    }).collect();
+
+    for p in producers { p.await; }
+    for c in consumers { c.await; }
+
+    assert(consumer_results.lock().len() == num_producers * items_per_producer);
+}
+
+/// Pipeline pattern (multi-stage)
+fn benchmark_workers_pipeline() async {
+    let (tx1, rx1) = channel<Int>.bounded(100);
+    let (tx2, rx2) = channel<Int>.bounded(100);
+    let (tx3, rx3) = channel<Int>.bounded(100);
+
+    // Stage 1: Generate
+    let stage1 = spawn async {
+        for i in 0..100_000 {
+            tx1.send(i).await;
+        }
+    };
+
+    // Stage 2: Transform (x2)
+    let stage2 = spawn async {
+        while let Some(item) = rx1.recv().await {
+            tx2.send(item * 2).await;
+        }
+    };
+
+    // Stage 3: Transform (x3)
+    let stage3 = spawn async {
+        while let Some(item) = rx2.recv().await {
+            tx3.send(item * 3).await;
+        }
+    };
+
+    // Collect
+    let collector = spawn async {
+        let mut count = 0;
+        while let Some(_) = rx3.recv().await {
+            count += 1;
+        }
+        count
+    };
+
+    drop(tx1);
+    stage1.await;
+    drop(tx2);
+    stage2.await;
+    drop(tx3);
+    stage3.await;
+
+    let count = collector.await;
+    assert(count == 100_000);
+}
+
+/// Map-reduce pattern
+fn benchmark_workers_map_reduce() {
+    let data: List<Int> = (0..1_000_000).collect();
+    let chunk_size = data.len() / num_cpus();
+
+    // Map phase
+    let map_results: List<_> = data.chunks(chunk_size).map(|chunk| {
+        spawn_thread(move || {
+            chunk.iter().map(|x| x * 2).sum<Int>()
+        })
+    }).collect();
+
+    // Reduce phase
+    let total: Int = map_results.iter().map(|r| r.join()).sum();
+    let _ = total;
+}
+
+/// Parallel for_each
+fn benchmark_workers_parallel_foreach() {
+    let data: List<Int> = (0..1_000_000).collect();
+    let results = Shared.new(Mutex.new(list![]));
+
+    data.par_for_each(|item| {
+        let processed = item * 2;
+        results.lock().push(processed);
+    });
+
+    assert(results.lock().len() == 1_000_000);
+}
+
+/// Barrier synchronization
+fn benchmark_workers_barrier() {
+    let num_workers = num_cpus();
+    let barrier = Shared.new(Barrier.new(num_workers));
+    let iterations = 100;
+
+    let handles: List<_> = (0..num_workers).map(|worker_id| {
+        let barrier = barrier.clone();
+        spawn_thread(move || {
+            for iter in 0..iterations {
+                // Phase 1: compute
+                let mut sum = 0;
+                for i in 0..10_000 {
+                    sum += i * worker_id;
+                }
+
+                // Sync point
+                barrier.wait();
+
+                // Phase 2: more compute
+                sum *= 2;
+
+                barrier.wait();
+            }
+        })
+    }).collect();
+
+    for h in handles { h.join(); }
+}
+
+/// Reader-writer workload
+fn benchmark_workers_reader_writer() {
+    let data = Shared.new(RwLock.new(map!{}));
+
+    // Initialize data
+    {
+        let mut guard = data.write();
+        for i in 0..1000 {
+            guard.insert(i, i * 10);
+        }
+    }
+
+    // 80% readers, 20% writers
+    let handles: List<_> = (0..100).map(|i| {
+        let data = data.clone();
+        spawn_thread(move || {
+            for j in 0..1000 {
+                if i < 80 {
+                    // Reader
+                    let guard = data.read();
+                    let _ = guard.get(&(j % 1000));
+                } else {
+                    // Writer
+                    let mut guard = data.write();
+                    guard.insert(j % 1000, j);
+                }
+            }
+        })
+    }).collect();
+
+    for h in handles { h.join(); }
+}
+
+/// Semaphore-based rate limiting
+fn benchmark_workers_rate_limited() async {
+    let semaphore = Semaphore.new(10);  // Max 10 concurrent
+
+    let handles: List<_> = (0..1000).map(|i| {
+        let permit = semaphore.acquire();
+        spawn async move {
+            // Simulate work
+            yield_now().await;
+            drop(permit);
+            i
+        }
+    }).collect();
+
+    for h in handles { h.await; }
+}
+
+/// Actor model
+fn benchmark_workers_actors() async {
+    type Counter is {
+        count: Int,
+    };
+
+    type CounterMsg is
+        Increment
+        | Decrement
+        | Get(oneshot.Sender<Int>);
+
+    let (tx, rx) = channel<CounterMsg>.unbounded();
+
+    // Actor
+    let actor = spawn async move {
+        let mut counter = Counter { count: 0 };
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                CounterMsg.Increment => counter.count += 1,
+                CounterMsg.Decrement => counter.count -= 1,
+                CounterMsg.Get(reply) => { reply.send(counter.count); },
+            }
+        }
+    };
+
+    // Send messages
+    for _ in 0..100_000 {
+        tx.send(CounterMsg.Increment).await;
+    }
+
+    for _ in 0..50_000 {
+        tx.send(CounterMsg.Decrement).await;
+    }
+
+    // Get final count
+    let (reply_tx, reply_rx) = oneshot.channel();
+    tx.send(CounterMsg.Get(reply_tx)).await;
+    drop(tx);
+
+    let count = reply_rx.await;
+    assert(count == 50_000);
+
+    actor.await;
+}
+
+/// Scoped threads
+fn benchmark_workers_scoped() {
+    let data = list![1, 2, 3, 4, 5, 6, 7, 8];
+    let results = Mutex.new(list![]);
+
+    thread.scope(|s| {
+        for chunk in data.chunks(2) {
+            s.spawn(|| {
+                let sum: Int = chunk.iter().sum();
+                results.lock().push(sum);
+            });
+        }
+    });
+
+    assert(results.lock().len() == 4);
+}
+
+fn num_cpus() -> Int {
+    std.thread.available_parallelism().unwrap().get()
+}

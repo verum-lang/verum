@@ -1,0 +1,199 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, phantom-types
+
+/// Test for phantom types.
+/// Phantom types carry type information at compile-time without runtime cost.
+
+// Phantom type marker (unit type with generic parameter)
+type PhantomData<T> is ();
+
+// Unit types for state markers
+type Locked is ();
+type Unlocked is ();
+
+// Door with phantom state type
+type Door<State> is {
+    name: Text,
+    _state: PhantomData<State>,
+};
+
+implement Door<Unlocked> {
+    fn new(name: Text) -> Door<Unlocked> {
+        Door {
+            name,
+            _state: PhantomData,
+        }
+    }
+
+    fn lock(self) -> Door<Locked> {
+        print(f"Locking door: {self.name}");
+        Door {
+            name: self.name,
+            _state: PhantomData,
+        }
+    }
+
+    fn open(&self) {
+        print(f"Opening door: {self.name}");
+    }
+}
+
+implement Door<Locked> {
+    fn unlock(self) -> Door<Unlocked> {
+        print(f"Unlocking door: {self.name}");
+        Door {
+            name: self.name,
+            _state: PhantomData,
+        }
+    }
+
+    // Cannot open a locked door - method not implemented for Door<Locked>
+}
+
+// Units of measurement with phantom types
+type Meters is ();
+type Kilometers is ();
+type Miles is ();
+
+type Distance<Unit> is {
+    value: Float,
+    _unit: PhantomData<Unit>,
+};
+
+implement<U> Distance<U> {
+    fn new(value: Float) -> Distance<U> {
+        Distance { value, _unit: PhantomData }
+    }
+
+    fn value(&self) -> Float {
+        self.value
+    }
+}
+
+// Type-safe conversion functions
+fn meters_to_km(d: Distance<Meters>) -> Distance<Kilometers> {
+    Distance { value: d.value / 1000.0, _unit: PhantomData }
+}
+
+fn km_to_meters(d: Distance<Kilometers>) -> Distance<Meters> {
+    Distance { value: d.value * 1000.0, _unit: PhantomData }
+}
+
+fn miles_to_km(d: Distance<Miles>) -> Distance<Kilometers> {
+    Distance { value: d.value * 1.60934, _unit: PhantomData }
+}
+
+// Cannot add distances of different units without conversion:
+// fn add<U>(a: Distance<U>, b: Distance<U>) -> Distance<U>
+
+implement<U> Distance<U> {
+    fn add(self, other: Distance<U>) -> Distance<U> {
+        Distance { value: self.value + other.value, _unit: PhantomData }
+    }
+}
+
+// Phantom types for currency
+type USD is ();
+type EUR is ();
+type GBP is ();
+
+type Money<Currency> is {
+    cents: Int,
+    _currency: PhantomData<Currency>,
+};
+
+implement<C> Money<C> {
+    fn new(cents: Int) -> Money<C> {
+        Money { cents, _currency: PhantomData }
+    }
+
+    fn dollars(&self) -> Float {
+        self.cents as Float / 100.0
+    }
+
+    // Only same-currency arithmetic allowed
+    fn add(self, other: Money<C>) -> Money<C> {
+        Money { cents: self.cents + other.cents, _currency: PhantomData }
+    }
+}
+
+// Phantom types for permissions
+type ReadOnly is ();
+type ReadWrite is ();
+
+type File<Permission> is {
+    path: Text,
+    _permission: PhantomData<Permission>,
+};
+
+implement File<ReadOnly> {
+    fn open_readonly(path: Text) -> File<ReadOnly> {
+        File { path, _permission: PhantomData }
+    }
+
+    fn contents(&self) -> Text {
+        f"Contents of {self.path}"
+    }
+}
+
+implement File<ReadWrite> {
+    fn open_readwrite(path: Text) -> File<ReadWrite> {
+        File { path, _permission: PhantomData }
+    }
+
+    fn contents(&self) -> Text {
+        f"Contents of {self.path}"
+    }
+
+    fn write_data(&mut self, content: Text) {
+        print(f"Writing to {self.path}: {content}");
+    }
+}
+
+fn main() {
+    // Door state machine
+    let door: Door<Unlocked> = Door.new("Front");
+    door.open();  // OK: can open unlocked door
+    let locked_door: Door<Locked> = door.lock();
+    // locked_door.open();  // ERROR: cannot open locked door
+    let unlocked_again: Door<Unlocked> = locked_door.unlock();
+    unlocked_again.open();  // OK again
+
+    // Distance with units
+    let d1: Distance<Meters> = Distance.new(5000.0);
+    let d2: Distance<Meters> = Distance.new(3000.0);
+    let total_m: Distance<Meters> = d1.add(d2);
+
+    let km: Distance<Kilometers> = meters_to_km(Distance.new(1500.0));
+    // let bad = d1.add(km);  // ERROR: cannot add Meters and Kilometers
+
+    // Miles to km conversion
+    let miles: Distance<Miles> = Distance.new(10.0);
+    let km_from_miles: Distance<Kilometers> = miles_to_km(miles);
+
+    // Money operations
+    let usd1: Money<USD> = Money.new(1000);  // $10.00
+    let usd2: Money<USD> = Money.new(500);   // $5.00
+    let total_usd: Money<USD> = usd1.add(usd2);
+
+    let eur: Money<EUR> = Money.new(800);
+    // let bad_add = usd1.add(eur);  // ERROR: cannot add USD and EUR
+
+    // File permissions
+    let ro_file: File<ReadOnly> = File.open_readonly("/etc/passwd");
+    let content = ro_file.contents();  // OK
+    // ro_file.write_data("hack");  // ERROR: no write_data method on ReadOnly
+
+    let mut rw_file: File<ReadWrite> = File.open_readwrite("/tmp/data.txt");
+    let content2 = rw_file.contents();  // OK
+    rw_file.write_data("new content");  // OK
+
+    // Assertions
+    assert(total_m.value() == 8000.0);
+    assert(km.value() == 1.5);
+    assert((km_from_miles.value() - 16.0934).abs() < 0.001);
+    assert(total_usd.cents == 1500);
+    assert(total_usd.dollars() == 15.0);
+}

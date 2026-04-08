@@ -1,0 +1,163 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, display
+
+/// Автоматическое derive для Display trait
+///
+/// `@derive(Display)` генерирует реализацию Display trait,
+/// которая выводит структуру в читаемом для пользователя формате.
+/// Тест использует только базовые возможности языка без stdlib.
+
+// ============================================================
+// ПРОСТОЙ STRUCT С @derive(Display)
+// ============================================================
+
+@derive(Display)
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+@derive(Display)
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// ============================================================
+// ENUM С КАСТОМНЫМИ DISPLAY СООБЩЕНИЯМИ
+// ============================================================
+
+@derive(Display)
+type Status is
+    | @display("Active")
+      Active
+    | @display("Inactive: {reason}")
+      Inactive { reason: Text }
+    | @display("Pending with code {code}")
+      Pending { code: Int };
+
+// ============================================================
+// ENUM БЕЗ КАСТОМНЫХ СООБЩЕНИЙ (HUMANIZE)
+// ============================================================
+
+@derive(Display)
+type Color is
+    | Red
+    | Green
+    | Blue
+    | DarkGreen;
+// Выведет: "Red", "Green", "Blue", "Dark green"
+
+// ============================================================
+// ERROR ТИП С DISPLAY
+// ============================================================
+
+@derive(Display)
+type ValidationError is
+    | @display("Field '{field}' cannot be empty")
+      EmptyField { field: Text }
+    | @display("Value {value} out of range [{min}, {max}]")
+      OutOfRange { value: Int, min: Int, max: Int }
+    | @display("Invalid format: {message}")
+      InvalidFormat { message: Text };
+
+// ============================================================
+// GENERIC ТИП С DISPLAY
+// ============================================================
+
+@derive(Display)
+type Maybe<T> is
+    | @display("Some({value})")
+      Some { value: T }
+    | @display("None")
+      None;
+
+@derive(Display)
+type Either<L, R> is
+    | @display("Left({value})")
+      Left { value: L }
+    | @display("Right({value})")
+      Right { value: R };
+
+// ============================================================
+// NEWTYPE - ДЕЛЕГИРУЕТ DISPLAY ВНУТРЕННЕМУ ТИПУ
+// ============================================================
+
+@derive(Display)
+type UserId is (Int);
+
+@derive(Display)
+type Score is (Int);
+
+// ============================================================
+// STRUCT С ПОЛЯМИ
+// ============================================================
+
+@derive(Display)
+type Rectangle is {
+    width: Int,
+    height: Int,
+};
+// Display: "Rectangle { width: 10, height: 20 }"
+
+@derive(Display)
+type Circle is {
+    radius: Int,
+};
+
+// ============================================================
+// ВЛОЖЕННЫЕ ТИПЫ
+// ============================================================
+
+@derive(Display)
+type Config is {
+    name: Text,
+    value: Int,
+};
+
+@derive(Display)
+type Settings is {
+    main: Config,
+    debug: Bool,
+};
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ DISPLAY
+// ============================================================
+
+fn test_display() {
+    let p = Person { name: "Alice", age: 30 };
+    // "Alice (30 years old)" или "Person { name: Alice, age: 30 }"
+
+    // Enum с кастомным display
+    let status_active = Status.Active;
+    // "Active"
+
+    let status_inactive = Status.Inactive { reason: "vacation" };
+    // "Inactive: vacation"
+
+    // Enum без кастомного display (humanize)
+    let color = Color.DarkGreen;
+    // "Dark green"
+
+    // Error с Display
+    let err = ValidationError.EmptyField { field: "email" };
+    // "Field 'emailp cannot be empty"
+
+    // Generic Maybe
+    let some: Maybe<Int> = Maybe.Some { value: 42 };
+    // "Some(42)"
+
+    let none: Maybe<Int> = Maybe.None;
+    // "None"
+
+    // Newtype делегирует Display
+    let user_id = UserId(12345);
+    // "12345"
+}
+
+fn main() {
+    test_display();
+}

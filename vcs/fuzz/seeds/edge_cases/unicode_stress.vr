@@ -1,0 +1,84 @@
+// Unicode stress test
+// Tests unicode handling in identifiers, strings, and comments
+
+use verum_core.base.{Text, List}
+
+fn main() {
+    // ASCII strings
+    let ascii = "Hello, World!";
+
+    // Unicode strings - various scripts
+    let chinese = "Hello, World!";
+    let japanese = "Hello, World!";
+    let korean = "Hello, World!";
+    let arabic = "Hello, World!";
+    let hebrew = "Hello, World!";
+    let russian = "Hello, World!";
+    let greek = "Hello, World!";
+
+    // Emoji
+    let emoji_simple = "Hello";
+    let emoji_complex = "Test";
+    let emoji_zwj = "Family";
+
+    // Special Unicode characters
+    let zero_width_space = "ab";
+    let zero_width_joiner = "a\u{200D}b";
+    let zero_width_non_joiner = "a\u{200C}b";
+    let bom = "\u{FEFF}text";
+    let replacement = "\u{FFFD}";
+
+    // Bidirectional text
+    let rtl_override = "\u{202E}reversed";
+    let ltr_override = "\u{202D}normal";
+
+    // Combining characters
+    let combining_acute = "e\u{0301}";
+    let combining_multiple = "e\u{0301}\u{0302}\u{0303}";
+
+    // Surrogates and edge cases
+    let max_bmp = "\u{FFFF}";
+    let first_supplementary = "\u{10000}";
+    let max_unicode = "\u{10FFFF}";
+
+    // Normalization forms
+    let nfc = "Cafe";
+    let nfd = "Cafe\u{0301}";
+
+    // Long strings
+    let repeated = "a".repeat(10000);
+    let unicode_repeated = "Unicode repeated";
+
+    // Empty and whitespace
+    let empty = "";
+    let space = " ";
+    let tab = "\t";
+    let newline = "\n";
+    let crlf = "\r\n";
+
+    // Null character
+    let with_null = "before\u{0000}after";
+
+    // Control characters
+    let bell = "\u{0007}";
+    let backspace = "\u{0008}";
+    let escape = "\u{001B}";
+
+    // Test string operations
+    let concat = chinese + " " + japanese;
+    let len_ascii = len(ascii);
+    let len_emoji = len(emoji_simple);
+
+    assert !empty.is_empty() == false;
+}
+
+// Unicode in comments
+// Chinese, Japanese, Korean
+// Emoji
+// Math
+
+// Function with unicode in doc comment
+/// This function does something
+fn unicode_documented() -> Text {
+    "result"
+}

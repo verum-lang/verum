@@ -1,0 +1,159 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, floats, suffixes, typed
+
+// Floating-point literals with type suffixes
+
+fn test_f32_suffix() {
+    // f32 (single precision) suffix
+    let f32_zero = 0.0f32;
+    let f32_one = 1.0f32;
+    let f32_pi = 3.14159f32;
+    let f32_half = 0.5f32;
+    let f32_negative = -1.5f32;
+}
+
+fn test_f64_suffix() {
+    // f64 (double precision) suffix
+    let f64_zero = 0.0f64;
+    let f64_one = 1.0f64;
+    let f64_pi = 3.14159265358979f64;
+    let f64_half = 0.5f64;
+    let f64_negative = -1.5f64;
+}
+
+fn test_f32_limits() {
+    // f32 limits
+    let f32_max = 3.40282347e+38f32;
+    let f32_min_positive = 1.17549435e-38f32;
+    let f32_epsilon = 1.19209290e-7f32;
+}
+
+fn test_f64_limits() {
+    // f64 limits
+    let f64_max = 1.7976931348623157e+308f64;
+    let f64_min_positive = 2.2250738585072014e-308f64;
+    let f64_epsilon = 2.2204460492503131e-16f64;
+}
+
+fn test_scientific_suffix() {
+    // Scientific notation with suffixes
+    let sci_f32 = 1.0e10f32;
+    let sci_f64 = 1.0e100f64;
+    let sci_neg_f32 = 1.0e-10f32;
+    let sci_neg_f64 = 1.0e-100f64;
+}
+
+fn test_underscores_suffix() {
+    // With underscores and suffixes
+    let formatted_f32 = 1_000.123_456f32;
+    let formatted_f64 = 1_000_000.123_456_789f64;
+    let sci_formatted = 6.022_140_76e23f64;
+}
+
+fn test_expressions() {
+    // In expressions with explicit types
+    let sum_f32: f32 = 1.5f32 + 2.5f32;
+    let product_f64: f64 = 3.0f64 * 4.0f64;
+}
+
+fn test_casting() {
+    // Casting between float types
+    let to_f64 = 3.14f32 as f64;
+    let to_f32 = 3.14159265358979f64 as f32;
+}
+
+// In function parameters
+fn area_f32(radius: f32) -> f32 {
+    3.14159f32 * radius * radius
+}
+
+fn area_f64(radius: f64) -> f64 {
+    3.14159265358979f64 * radius * radius
+}
+
+fn test_arrays() {
+    // In arrays with explicit types
+    let f32_array: List<f32> = [1.0f32, 2.0f32, 3.0f32];
+    let f64_array: List<f64> = [1.0f64, 2.0f64, 3.0f64];
+}
+
+// In struct fields
+type Point2D_f32 is {
+    x: f32,
+    y: f32,
+};
+
+type Point2D_f64 is {
+    x: f64,
+    y: f64,
+};
+
+fn test_struct_fields() {
+    let point_f32 = Point2D_f32 { x: 1.5f32, y: 2.5f32 };
+    let point_f64 = Point2D_f64 { x: 1.5f64, y: 2.5f64 };
+}
+
+fn test_graphics() {
+    // Graphics/game development (usually f32)
+    let position_x = 100.5f32;
+    let position_y = 200.5f32;
+    let velocity = 5.0f32;
+    let rotation = 0.785398f32;
+}
+
+fn test_scientific_computing() {
+    // Scientific computing (usually f64)
+    let precision_value = 1.234567890123456f64;
+    let integration_step = 0.00001f64;
+    let tolerance = 1.0e-12f64;
+}
+
+// Mixed precision calculations
+fn compute_approx() -> f32 {
+    let precise = 1.234567890123456f64;
+    let approx = precise as f32;
+    approx
+}
+
+// Constants with explicit precision
+const PI_F32: f32 = 3.14159265f32;
+const PI_F64: f64 = 3.14159265358979323846f64;
+const E_F32: f32 = 2.71828182f32;
+const E_F64: f64 = 2.71828182845904523536f64;
+
+fn test_special_values() {
+    // Special values (if supported)
+    let inf_f32 = f32.INFINITY;
+    let inf_f64 = f64.INFINITY;
+    let neg_inf_f32 = f32.NEG_INFINITY;
+    let neg_inf_f64 = f64.NEG_INFINITY;
+    let nan_f32 = f32.NAN;
+    let nan_f64 = f64.NAN;
+}
+
+// In generics
+fn identity_f32(x: f32) -> f32 { x }
+fn identity_f64(x: f64) -> f64 { x }
+
+fn test_generics() {
+    let result_f32 = identity_f32(42.0f32);
+    let result_f64 = identity_f64(42.0f64);
+}
+
+fn test_comparisons() {
+    let value_f32 = 0.0001f32;
+    let a = 1.0f64;
+    let b = 1.0f64;
+
+    // Comparisons with typed literals
+    let is_small_f32 = value_f32 < 0.001f32;
+    let is_close_f64 = (a - b).abs() < 1e-10f64;
+}
+
+fn test_from_int() {
+    // Integer to float with suffix
+    let from_int_f32 = 42.0f32;
+    let from_int_f64 = 42.0f64;
+}

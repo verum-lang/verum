@@ -1,0 +1,70 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, sum-types, variant, enum
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Sum types (variants): construction, pattern matching, dispatch
+
+type Shape is Circle(Int) | Rectangle(Int, Int) | Square(Int);
+
+fn shape_area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Rectangle(w, h) => w * h,
+        Square(side) => side * side
+    }
+}
+
+fn shape_name(s: Shape) -> Text {
+    match s {
+        Circle(_) => "circle",
+        Rectangle(_, _) => "rectangle",
+        Square(_) => "square"
+    }
+}
+
+type Expr is Num(Int) | Add(Int, Int) | Mul(Int, Int) | Neg(Int);
+
+fn eval_expr(e: Expr) -> Int {
+    match e {
+        Num(n) => n,
+        Add(a, b) => a + b,
+        Mul(a, b) => a * b,
+        Neg(n) => -n
+    }
+}
+
+fn main() -> Int {
+    let c = Circle(5);
+    let r = Rectangle(3, 4);
+    let sq = Square(6);
+
+    assert_eq(shape_area(c), 75);
+    assert_eq(shape_area(r), 12);
+    assert_eq(shape_area(sq), 36);
+
+    assert_eq(shape_name(c), "circle");
+    assert_eq(shape_name(r), "rectangle");
+    assert_eq(shape_name(sq), "square");
+
+    // Expr evaluation
+    assert_eq(eval_expr(Num(42)), 42);
+    assert_eq(eval_expr(Add(10, 20)), 30);
+    assert_eq(eval_expr(Mul(6, 7)), 42);
+    assert_eq(eval_expr(Neg(5)), -5);
+
+    // List of shapes
+    let shapes = [Circle(1), Rectangle(2, 3), Square(4), Circle(10)];
+    let mut total_area = 0;
+    let mut i = 0;
+    while i < 4 {
+        total_area = total_area + shape_area(shapes[i]);
+        i = i + 1;
+    }
+    assert_eq(total_area, 3 + 6 + 16 + 300);
+
+    print("diff_sum_types: ok");
+    0
+}

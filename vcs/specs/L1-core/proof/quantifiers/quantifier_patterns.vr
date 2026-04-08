@@ -1,0 +1,47 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, quantifiers, patterns
+// @timeout: 5000
+
+/// Quantifier bindings with pattern destructuring.
+/// Grammar: quantifier_binding = pattern [':' type_expr] ['in' expression] ['where' expression]
+
+type Pair is { first: Int, second: Int };
+
+type Maybe<T> is None | Some(T);
+
+// Forall with pattern binding
+fn test_forall_pattern() {
+    let pairs = List.of(
+        Pair { first: 1, second: 2 },
+        Pair { first: 3, second: 4 },
+    );
+    let ordered = forall p in pairs . p.first < p.second;
+}
+
+// Forall over Maybe values with pattern
+fn test_forall_maybe() {
+    let values: List<Maybe<Int>> = List.of(Some(1), Some(2), None);
+    let all_some_positive = forall Some(x) in values . x > 0;
+}
+
+// Exists with tuple pattern
+fn test_exists_tuple() {
+    let items = List.of((1, 2), (3, 4), (5, 6));
+    let has_equal_pair = exists (a, b) in items . a == b;
+}
+
+// Multiple bindings in quantifier
+fn test_multi_binding() {
+    let xs = List.of(1, 2, 3);
+    let ys = List.of(4, 5, 6);
+    let all_less = forall x in xs, y in ys . x < y;
+}
+
+fn main() {
+    test_forall_pattern();
+    test_forall_maybe();
+    test_exists_tuple();
+    test_multi_binding();
+    print("Quantifier pattern tests parsed");
+}

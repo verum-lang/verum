@@ -1,0 +1,37 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, type-function, syntax, advanced-type-syntax
+// @description: Parser tests for type-level function syntax
+// @spec: 03-type-system.md Section 13. 2.4.5
+
+// Type-level function: Apply type constructor to type
+// Uses correct Verum 'is' syntax (not '=')
+type Apply<F<_>, A> is F<A>;
+
+// Usage of type-level function
+type MaybeInt is Apply<Maybe, Int>;
+type ListText is Apply<List, Text>;
+
+// Type-level conditionals - using opaque protocol pattern
+type If<Cond, Then, Else> is protocol {};
+
+// Type-level list operations - opaque types
+type Head<L> is protocol {};
+type Tail<L> is protocol {};
+
+// Tuple operations - opaque type
+type Flatten<T> is protocol {};
+
+// Practical: Type-level function with multiple parameters
+type Pair<A, B> is (A, B);
+type Triple<A, B, C> is (A, B, C);
+
+// Compose type constructors
+type Compose<F<_>, G<_>, A> is F<G<A>>;
+
+// Type function with constraints
+type Numeric<T: Num> is T;
+
+// Type function returning HKT (using phantom type pattern)
+type DoubleWrap<F<_>, G<_>, A> is Compose<F, G, A>;

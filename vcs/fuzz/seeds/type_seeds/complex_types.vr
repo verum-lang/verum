@@ -1,0 +1,200 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, complex, advanced
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// Complex Types - Type System Advanced Types Test Seed
+// Tests complex and advanced type constructs
+// =============================================================================
+
+// Semantic collection types
+fn semantic_collections() {
+    let list: List<Int> = [1, 2, 3];
+    let map: Map<Text, Int> = { "one": 1, "two": 2 };
+    let set: Set<Int> = { 1, 2, 3 };
+    let maybe: Maybe<Int> = Some(42);
+    let result: Result<Int, Error> = Ok(42);
+}
+
+// Heap-allocated types
+fn heap_types() {
+    let boxed: Heap<Int> = Heap(42);
+    let shared: Shared<Int> = Shared(42);
+    let unique: Unique<Int> = Unique(42);
+}
+
+// Array types
+fn array_types() {
+    let fixed: [Int; 5] = [1, 2, 3, 4, 5];
+    let inferred = [0; 100];
+    let nested: [[Int; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
+}
+
+// Slice types
+fn slice_types() {
+    let slice: [Int] = arr[1..4];
+    let full: [Int] = arr[..];
+}
+
+// Tuple types
+fn tuple_types() {
+    let unit: () = ();
+    let single: (Int,) = (42,);
+    let pair: (Int, Text) = (42, "hello");
+    let triple: (Int, Text, Bool) = (42, "hello", true);
+    let nested: ((Int, Int), (Text, Text)) = ((1, 2), ("a", "b"));
+}
+
+// Function types
+fn function_types() {
+    let nullary: fn() -> Int = || 42;
+    let unary: fn(Int) -> Int = |x| x * 2;
+    let binary: fn(Int, Int) -> Int = |x, y| x + y;
+    let higher: fn(fn(Int) -> Int, Int) -> Int = |f, x| f(x);
+    let curried: fn(Int) -> fn(Int) -> Int = |x| |y| x + y;
+}
+
+// Reference types (three-tier system)
+fn reference_types() {
+    let val = 42;
+
+    // Tier 0: Managed references (CBGR)
+    let managed: &Int = &val;
+    let managed_mut: &mut Int = &mut val;
+
+    // Tier 1: Checked references (compile-time proven)
+    let checked: &checked Int = &checked val;
+    let checked_mut: &checked mut Int = &checked mut val;
+
+    // Tier 2: Unsafe references (manual proof required)
+    let unsafe_ref: &unsafe Int = &unsafe val;
+    let unsafe_mut: &unsafe mut Int = &unsafe mut val;
+}
+
+// Pointer types
+fn pointer_types() {
+    let const_ptr: *const Int = &val as *const Int;
+    let mut_ptr: *mut Int = &mut val as *mut Int;
+}
+
+// GenRef type for generation tracking
+fn genref_types() {
+    let gen_ref: GenRef<Text> = GenRef.new("hello");
+}
+
+// Dynamic types
+fn dynamic_types() {
+    let display_ref: &Display = &val;
+    let multi_ref: &Display + Debug = &val;
+    let associated_ref: &Iterator<Item = Int> = &iter;
+}
+
+// Complex generic types
+type ComplexContainer<T, U, V> is {
+    primary: T,
+    secondary: Map<U, List<V>>,
+    optional: Maybe<Result<T, U>>,
+};
+
+type NestedGenerics<A, B> is Map<A, List<Set<Maybe<B>>>>;
+
+type FunctionContainer<T, R> is {
+    transform: fn(T) -> R,
+    combine: fn(R, R) -> R,
+    identity: R,
+};
+
+// Recursive types
+type LinkedList<T> is Nil | Cons(T, Heap<LinkedList<T>>);
+
+type BinaryTree<T> is
+    | Leaf(T)
+    | Node {
+        value: T,
+        left: Heap<BinaryTree<T>>,
+        right: Heap<BinaryTree<T>>,
+    };
+
+type Expression is
+    | Literal(Int)
+    | Variable(Text)
+    | Binary {
+        op: BinaryOp,
+        left: Heap<Expression>,
+        right: Heap<Expression>,
+    }
+    | Unary {
+        op: UnaryOp,
+        operand: Heap<Expression>,
+    }
+    | Call {
+        func: Text,
+        args: List<Heap<Expression>>,
+    };
+
+// Affine types (linear resources)
+type affine FileHandle is {
+    fd: Int,
+};
+
+type affine Socket is {
+    handle: Int,
+    connected: Bool,
+};
+
+// Meta types (compile-time)
+fn meta_types<N: meta Int, S: meta Text>() {
+    let arr: [Int; N] = [0; N];
+    const MSG: Text = S;
+}
+
+// Type-level computation
+type If<Cond: meta Bool, Then, Else> is
+    True => Then
+    | False => Else;
+
+type IsZero<N: meta Int> is
+    0 => True
+    | _ => False;
+
+// Existential types
+type Exists<P> is protocol {
+    type Hidden;
+    fn value(&self) -> Self.Hidden where type Self.Hidden: P;
+};
+
+// GADT-like patterns
+type TypedExpr<T> is
+    | IntLit(Int) where type T = Int
+    | BoolLit(Bool) where type T = Bool
+    | Add(Heap<TypedExpr<Int>>, Heap<TypedExpr<Int>>) where type T = Int
+    | Eq(Heap<TypedExpr<Int>>, Heap<TypedExpr<Int>>) where type T = Bool
+    | If(Heap<TypedExpr<Bool>>, Heap<TypedExpr<T>>, Heap<TypedExpr<T>>);
+
+// Type aliases with bounds
+type CloneableList<T> is List<T> where type T: Clone;
+type ComparableMap<K, V> is Map<K, V> where type K: Ord + Hash;
+type SendableResult<T, E> is Result<T, E> where type T: Send where type E: Send;
+
+// Intersection and union-like patterns
+type ReadWrite is protocol extends Read + Write {};
+type SendSync is protocol extends Send + Sync {};
+
+// Complex variant types
+type Json is
+    | Null
+    | Bool(Bool)
+    | Number(Float)
+    | String(Text)
+    | Array(List<Heap<Json>>)
+    | Object(Map<Text, Heap<Json>>);
+
+type Ast is
+    | Module { name: Text, items: List<Heap<Ast>> }
+    | Function { name: Text, params: List<Param>, body: Heap<Ast> }
+    | Type { name: Text, def: TypeDef }
+    | Expr(Expression)
+    | Stmt(Statement);

@@ -1,0 +1,19 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: exhaustiveness, stream-pattern, error
+// @expected-error: non-exhaustive
+// @description: Non-exhaustive stream pattern matching should fail
+
+type Stream<T> is Nil | Cons(T, Heap<Stream<T>>);
+
+// ERROR: Missing Nil case
+fn bad_stream_head<T>(s: Stream<T>) -> T =
+    match s {
+        Cons(x, _) => x
+        // ERROR: Non-exhaustive - missing Nil case
+    };
+
+fn main() {
+    let s: Stream<Int> = Nil;
+    let _ = bad_stream_head(s);  // Would fail at runtime
+}

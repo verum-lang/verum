@@ -1,0 +1,112 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: reference, tier, coercion, ffi
+// @description: Tests reference tier coercion rules
+
+module specs.stdlib.core.ref_tier_coercion_test;
+
+mount core.primitives.*;
+
+// =============================================================================
+// REFERENCE TIER COERCION TEST SUITE
+// =============================================================================
+//
+// Tests that reference tiers can be correctly coerced according to subtyping rules:
+// - &unsafe T <: &checked T <: &T (safety subtyping)
+// - Mutable -> immutable (forgetting write capability)
+// - FFI coercion: &mut T -> &unsafe T
+
+// -----------------------------------------------------------------------------
+// Basic Reference Operations
+// -----------------------------------------------------------------------------
+
+@test
+fn test_basic_ref_operations() {
+    let value = 500;
+    let ref_value: &Int = &value;
+
+    assert_eq(*ref_value, 500);
+}
+
+@test
+fn test_mutable_ref_operations() {
+    let mut value = 600;
+    {
+        let mut_ref: &mut Int = &mut value;
+        *mut_ref = 700;
+    }
+    assert_eq(value, 700);
+}
+
+// -----------------------------------------------------------------------------
+// Same Tier Coercion (Mutable to Immutable)
+// -----------------------------------------------------------------------------
+
+@test
+fn test_managed_mut_to_immut() {
+    let mut value = 42;
+    let mut_ref: &mut Int = &mut value;
+
+    // Should be able to use mutable ref where immutable is expected
+    fn takes_immut(r: &Int) -> Int { *r }
+
+    // This uses the mutable ref as immutable
+    let result = takes_immut(mut_ref);
+    assert_eq(result, 42);
+}
+
+// -----------------------------------------------------------------------------
+// Checked Reference Conversion
+// -----------------------------------------------------------------------------
+
+@test
+fn test_checked_to_managed() {
+    let value = 100;
+    let checked_ref: &checked Int = &checked value;
+
+    // Checked ref should coerce to managed ref via method
+    fn takes_managed(r: &Int) -> Int { *r }
+
+    // Use explicit conversion method
+    let result = takes_managed(checked_ref.to_managed());
+    assert_eq(result, 100);
+}
+
+@test
+fn test_checked_to_unsafe() {
+    let value = 150;
+    let checked_ref: &checked Int = &checked value;
+
+    // Checked ref can convert to unsafe via method
+    let unsafe_ref = checked_ref.to_unsafe();
+    assert_eq(*unsafe_ref, 150);
+}
+
+// -----------------------------------------------------------------------------
+// Managed to Unsafe Conversion
+// -----------------------------------------------------------------------------
+
+@test
+fn test_managed_to_unsafe() {
+    let value = 200;
+    let managed_ref: &Int = &value;
+
+    // Managed ref can convert to unsafe via method
+    let unsafe_ref = managed_ref.to_unsafe();
+    assert_eq(*unsafe_ref, 200);
+}
+
+// -----------------------------------------------------------------------------
+// Managed to Checked Conversion
+// -----------------------------------------------------------------------------
+
+@test
+fn test_managed_to_checked() {
+    let value = 250;
+    let managed_ref: &Int = &value;
+
+    // Managed ref can convert to checked via method
+    let checked_ref = managed_ref.to_checked();
+    assert_eq(*checked_ref, 250);
+}

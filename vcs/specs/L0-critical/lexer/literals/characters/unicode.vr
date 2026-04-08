@@ -1,0 +1,180 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, characters, unicode
+
+// Unicode character literals
+
+fn test_latin_extended() {
+    // Latin Extended
+    let ae = '\u{00E6}';           // Latin small ligature ae
+    let eth = '\u{00F0}';          // Latin small eth
+    let thorn = '\u{00FE}';        // Latin small thorn
+}
+
+fn test_greek_letters() {
+    // Greek letters (direct input via unicode escapes)
+    let alpha_direct = '\u{03B1}';   // Greek small alpha
+    let beta_direct = '\u{03B2}';    // Greek small beta
+    let gamma_direct = '\u{03B3}';   // Greek small gamma
+    let delta_direct = '\u{03B4}';   // Greek small delta
+    let epsilon_direct = '\u{03B5}'; // Greek small epsilon
+    let pi_direct = '\u{03C0}';      // Greek small pi
+    let sigma_direct = '\u{03C3}';   // Greek small sigma
+    let omega_direct = '\u{03C9}';   // Greek small omega
+}
+
+fn test_cyrillic_letters() {
+    // Cyrillic letters
+    let a_cyrillic = '\u{0410}';  // Cyrillic A
+    let b_cyrillic = '\u{0411}';  // Cyrillic Be
+    let v_cyrillic = '\u{0412}';  // Cyrillic Ve
+    let ya_cyrillic = '\u{042F}'; // Cyrillic Ya
+}
+
+fn test_cjk_characters() {
+    // CJK characters
+    let ren = '\u{4EBA}';    // Chinese "person"
+    let ri = '\u{65E5}';     // Chinese "sun/day"
+    let yue = '\u{6708}';    // Chinese "moon/month"
+    let shan = '\u{5C71}';   // Chinese "mountain"
+}
+
+fn test_japanese_hiragana() {
+    // Japanese Hiragana
+    let a_hira = '\u{3042}';  // Hiragana A
+    let i_hira = '\u{3044}';  // Hiragana I
+    let u_hira = '\u{3046}';  // Hiragana U
+}
+
+fn test_japanese_katakana() {
+    // Japanese Katakana
+    let a_kata = '\u{30A2}';  // Katakana A
+    let i_kata = '\u{30A4}';  // Katakana I
+    let u_kata = '\u{30A6}';  // Katakana U
+}
+
+fn test_korean_hangul() {
+    // Korean Hangul
+    let ga = '\u{AC00}';      // Hangul Ga
+    let na = '\u{B098}';      // Hangul Na
+    let da = '\u{B2E4}';      // Hangul Da
+}
+
+fn test_arabic_letters() {
+    // Arabic letters
+    let alef = '\u{0627}';
+    let ba = '\u{0628}';
+    let ta = '\u{062A}';
+}
+
+fn test_hebrew_letters() {
+    // Hebrew letters
+    let aleph = '\u{05D0}';
+    let bet = '\u{05D1}';
+    let gimel = '\u{05D2}';
+}
+
+fn test_mathematical_operators() {
+    // Mathematical operators
+    let plus_minus = '\u{00B1}';
+    let times = '\u{00D7}';
+    let divide = '\u{00F7}';
+    let not_equal = '\u{2260}';
+    let less_equal = '\u{2264}';
+    let greater_equal = '\u{2265}';
+    let approx = '\u{2248}';
+    let equivalent = '\u{2261}';
+}
+
+fn test_currency_symbols() {
+    // Currency symbols
+    let euro = '\u{20AC}';
+    let pound = '\u{00A3}';
+    let yen = '\u{00A5}';
+    let rupee = '\u{20B9}';
+    let bitcoin = '\u{20BF}';
+}
+
+fn test_special_symbols() {
+    // Special symbols
+    let copyright = '\u{00A9}';
+    let registered = '\u{00AE}';
+    let trademark = '\u{2122}';
+    let degree = '\u{00B0}';
+    let bullet = '\u{2022}';
+    let ellipsis = '\u{2026}';
+}
+
+fn test_box_drawing_and_block() {
+    // Box drawing and block elements
+    let full_block = '\u{2588}';
+    let light_shade = '\u{2591}';
+    let medium_shade = '\u{2592}';
+    let dark_shade = '\u{2593}';
+}
+
+fn test_braille_patterns() {
+    // Braille patterns
+    let braille_a = '\u{2801}';
+    let braille_b = '\u{2803}';
+    let braille_c = '\u{2809}';
+}
+
+fn test_playing_card_suits() {
+    // Playing card suits
+    let spade = '\u{2660}';
+    let club = '\u{2663}';
+    let heart_suit = '\u{2665}';
+    let diamond = '\u{2666}';
+}
+
+fn test_music_symbols() {
+    // Music symbols
+    let eighth_note = '\u{266A}';
+    let beamed_notes = '\u{266B}';
+    let flat = '\u{266D}';
+    let natural = '\u{266E}';
+    let sharp = '\u{266F}';
+}
+
+fn test_weather_symbols() {
+    // Weather symbols
+    let sun = '\u{2600}';
+    let cloud = '\u{2601}';
+    let umbrella = '\u{2602}';
+    let snowman = '\u{2603}';
+}
+
+fn test_zodiac_signs() {
+    // Zodiac signs
+    let aries = '\u{2648}';
+    let taurus = '\u{2649}';
+    let gemini = '\u{264A}';
+    let cancer = '\u{264B}';
+}
+
+fn test_supplementary_characters() {
+    // Supplementary characters (outside BMP)
+    let musical_symbol_g_clef = '\u{1D11E}';
+    let emoji_grinning = '\u{1F600}';
+    let emoji_thinking = '\u{1F914}';
+    let emoji_rocket = '\u{1F680}';
+}
+
+// Character classification
+fn is_greek(c: Char) -> Bool {
+    c >= '\u{0370}' && c <= '\u{03FF}'
+}
+
+fn is_cyrillic(c: Char) -> Bool {
+    c >= '\u{0400}' && c <= '\u{04FF}'
+}
+
+fn is_cjk(c: Char) -> Bool {
+    c >= '\u{4E00}' && c <= '\u{9FFF}'
+}
+
+fn is_emoji(c: Char) -> Bool {
+    c >= '\u{1F600}' && c <= '\u{1F64F}'
+}

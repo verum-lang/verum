@@ -1,0 +1,48 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, loops, for-in, lists
+// @expected-exit: 0
+
+// Test: for-in loop over lists.
+
+fn main() -> Int {
+    // Test 1: for-in over list literal
+    let nums = [10, 20, 30, 40, 50];
+    let mut sum = 0;
+    for x in nums {
+        sum = sum + x;
+    }
+    if (sum != 150) {
+        print(f"FAIL test1: sum={sum}");
+        return 1;
+    }
+
+    // Test 2: for-in over list with indexing pattern
+    let items = [1, 2, 3, 4, 5];
+    let mut product = 1;
+    for v in items {
+        product = product * v;
+    }
+    if (product != 120) {
+        print(f"FAIL test2: product={product}");
+        return 1;
+    }
+
+    // Test 3: nested for-in with range and list
+    let vals = [100, 200, 300];
+    let mut total = 0;
+    for i in 0..3 {
+        for v in vals {
+            total = total + v;
+        }
+    }
+    // 3 * (100+200+300) = 1800
+    if (total != 1800) {
+        print(f"FAIL test3: total={total}");
+        return 1;
+    }
+
+    print("896_for_in_list: PASS");
+    0
+}

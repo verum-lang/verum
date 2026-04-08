@@ -1,0 +1,183 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, maze, pathfinding, bfs
+// @timeout: 30000
+
+// Maze solver using BFS on small grids (3x3 max for queue size constraint)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn neg_ones() -> Arr8 { Arr8 { v0: 0-1, v1: 0-1, v2: 0-1, v3: 0-1, v4: 0-1, v5: 0-1, v6: 0-1, v7: 0-1 } }
+
+// 3x3 maze: use direct flat indexing, cells 0-8 stored in Arr8 (0=open, 1=wall)
+fn maze_cell(maze: Arr8, r: Int, c: Int, cols: Int) -> Int {
+    get8(maze, r * cols + c)
+}
+
+fn on_grid(r: Int, c: Int, rows: Int, cols: Int) -> Int {
+    if r >= 0 {
+        if r < rows {
+            if c >= 0 {
+                if c < cols { 1 } else { 0 }
+            } else { 0 }
+        } else { 0 }
+    } else { 0 }
+}
+
+// BFS on 3x3 grid (9 cells fits in Arr8 for distances, queue up to 8)
+fn bfs_3x3(maze: Arr8, sr: Int, sc: Int, er: Int, ec: Int) -> Int {
+    let cols = 3;
+    let rows = 3;
+    let mut dist = neg_ones(); // 9 cells, use first 8 + handle cell 8 separately
+    let mut dist8 = 0 - 1; // distance for cell index 8
+
+    let si = sr * cols + sc;
+    if si < 8 { dist = set8(dist, si, 0); }
+    else { dist8 = 0; }
+
+    let ei = er * cols + ec;
+
+    // BFS queue
+    let mut queue = zeros();
+    let mut front = 0;
+    let mut back = 0;
+    queue = set8(queue, 0, si);
+    back = 1;
+
+    let mut result = 0 - 1;
+    let mut iters = 0;
+
+    while front < back {
+        let idx = get8(queue, front % 8);
+        front = front + 1;
+        let r = idx / cols;
+        let c = idx % cols;
+        let cd = if idx < 8 { get8(dist, idx) } else { dist8 };
+
+        if idx == ei {
+            result = cd;
+            front = back; // done
+        } else {
+            // 4 neighbors
+            let mut d = 0;
+            while d < 4 {
+                let nr = if d == 0 { r - 1 } else if d == 1 { r + 1 } else { r };
+                let nc = if d == 2 { c - 1 } else if d == 3 { c + 1 } else { c };
+                if on_grid(nr, nc, rows, cols) == 1 {
+                    let ni = nr * cols + nc;
+                    if maze_cell(maze, nr, nc, cols) == 0 {
+                        let nd = if ni < 8 { get8(dist, ni) } else { dist8 };
+                        if nd < 0 {
+                            if ni < 8 { dist = set8(dist, ni, cd + 1); }
+                            else { dist8 = cd + 1; }
+                            if back - front < 8 {
+                                queue = set8(queue, back % 8, ni);
+                                back = back + 1;
+                            }
+                        }
+                    }
+                }
+                d = d + 1;
+            }
+        }
+        iters = iters + 1;
+        if iters > 20 { front = back; }
+    }
+    result
+}
+
+fn test_open_3x3() -> Int {
+    // 3x3, no walls
+    let maze = zeros(); // all open (cells 0-8 = 0)
+    // (0,0) to (2,2): Manhattan = 4
+    assert_eq(bfs_3x3(maze, 0, 0, 2, 2), 4);
+    // (0,0) to (0,0): distance 0
+    assert_eq(bfs_3x3(maze, 0, 0, 0, 0), 0);
+    // (0,0) to (0,2): distance 2
+    assert_eq(bfs_3x3(maze, 0, 0, 0, 2), 2);
+    // (0,0) to (2,0): distance 2
+    assert_eq(bfs_3x3(maze, 0, 0, 2, 0), 2);
+    1
+}
+
+fn test_wall_3x3() -> Int {
+    // 3x3 with center wall:
+    // . . .   cell 0-2 = 0,0,0
+    // . # .   cell 3-5 = 0,1,0
+    // . . .   cell 6-8 = 0,0,0
+    let maze = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 1, v5: 0, v6: 0, v7: 0 };
+    // (0,0) to (2,2): must go around center, distance = 4 (same as open since path exists)
+    assert_eq(bfs_3x3(maze, 0, 0, 2, 2), 4);
+    1
+}
+
+fn test_blocked_path() -> Int {
+    // . # .   cell 0-2 = 0,1,0
+    // . # .   cell 3-5 = 0,1,0
+    // . . .   cell 6-8 = 0,0,0
+    let maze = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 1, v5: 0, v6: 0, v7: 0 };
+    // (0,0) to (0,2): must go down row 0, across bottom, up row 2
+    // Path: (0,0)->(1,0)->(2,0)->(2,1)->(2,2)->(1,2)->(0,2) = 6 steps
+    // Wait that doesn't seem right. Let me recount:
+    // (0,0) → (1,0) → (2,0) → (2,1) → (2,2) → (1,2) → (0,2)  = 6
+    assert_eq(bfs_3x3(maze, 0, 0, 0, 2), 6);
+    1
+}
+
+fn test_unreachable() -> Int {
+    // Wall surrounds target at (1,1):
+    // . # .   cell 0-2 = 0,1,0
+    // # # .   cell 3-5 = 1,1,0
+    // . . .   cell 6-8 = 0,0,0
+    let maze = Arr8 { v0: 0, v1: 1, v2: 0, v3: 1, v4: 1, v5: 0, v6: 0, v7: 0 };
+    // (0,0) to (1,1) which is a wall - unreachable
+    assert_eq(bfs_3x3(maze, 0, 0, 1, 1), 0 - 1);
+    1
+}
+
+fn test_adjacent() -> Int {
+    let maze = zeros();
+    // Adjacent cells
+    assert_eq(bfs_3x3(maze, 0, 0, 0, 1), 1);
+    assert_eq(bfs_3x3(maze, 0, 0, 1, 0), 1);
+    assert_eq(bfs_3x3(maze, 1, 1, 1, 2), 1);
+    1
+}
+
+fn test_2x2() -> Int {
+    // 2x2 subset: just test (0,0) to (1,1) in open 3x3
+    let maze = zeros();
+    assert_eq(bfs_3x3(maze, 0, 0, 1, 1), 2);
+    1
+}
+
+fn main() -> Int {
+    test_open_3x3();
+    test_wall_3x3();
+    test_blocked_path();
+    test_unreachable();
+    test_adjacent();
+    test_2x2();
+    print("[OK] 599_maze_solver_aot");
+    0
+}

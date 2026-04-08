@@ -1,0 +1,63 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, algorithm, sieve, primes
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Sieve of Eratosthenes: deterministic prime counting
+
+fn main() -> Int {
+    let limit = 200;
+
+    // Sieve of Eratosthenes using list of booleans (1=prime, 0=not)
+    let mut is_prime = List.new();
+    let mut i = 0;
+    while i <= limit {
+        is_prime.push(1);
+        i = i + 1;
+    }
+    is_prime[0] = 0;
+    is_prime[1] = 0;
+
+    let mut p = 2;
+    while p * p <= limit {
+        if is_prime[p] == 1 {
+            let mut j = p * p;
+            while j <= limit {
+                is_prime[j] = 0;
+                j = j + p;
+            }
+        }
+        p = p + 1;
+    }
+
+    // Count primes
+    let mut count = 0;
+    let mut sum = 0;
+    let mut k = 2;
+    while k <= limit {
+        if is_prime[k] == 1 {
+            count = count + 1;
+            sum = sum + k;
+        }
+        k = k + 1;
+    }
+
+    // There are 46 primes up to 200
+    assert_eq(count, 46);
+    // Sum of primes up to 200 = 4227
+    assert_eq(sum, 4227);
+
+    // Verify specific primes
+    assert_eq(is_prime[2], 1);
+    assert_eq(is_prime[3], 1);
+    assert_eq(is_prime[4], 0);
+    assert_eq(is_prime[97], 1);
+    assert_eq(is_prime[100], 0);
+    assert_eq(is_prime[197], 1);
+    assert_eq(is_prime[199], 1);
+    assert_eq(is_prime[200], 0);
+
+    print("diff_sieve_primes: ok");
+    0
+}

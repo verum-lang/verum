@@ -1,0 +1,178 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, minimax, game-tree, ai
+// @timeout: 30000
+
+// Minimax algorithm for simple games
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Complete game tree stored as array (like a binary heap)
+// Node i has children 2i+1 and 2i+2
+// Leaf values are in positions 3-6 (for depth-2 tree)
+
+// Minimax on a complete binary tree of depth 2
+// tree[3..6] = leaf values, tree[1..2] intermediate, tree[0] = root
+fn minimax_depth2(leaves: Arr8) -> Int {
+    // Leaves are at indices 0-3
+    // Level 1 (max nodes): max of pairs
+    let l1_0 = if get8(leaves, 0) > get8(leaves, 1) { get8(leaves, 0) } else { get8(leaves, 1) };
+    let l1_1 = if get8(leaves, 2) > get8(leaves, 3) { get8(leaves, 2) } else { get8(leaves, 3) };
+    // Level 0 (min node): min of level 1
+    if l1_0 < l1_1 { l1_0 } else { l1_1 }
+}
+
+// Alpha-beta pruning for depth-2 tree
+fn alphabeta_depth2(leaves: Arr8) -> Int {
+    let mut alpha = -999999;
+    let mut beta = 999999;
+
+    // Left subtree (max): max(leaves[0], leaves[1])
+    let l1_0 = if get8(leaves, 0) > get8(leaves, 1) { get8(leaves, 0) } else { get8(leaves, 1) };
+    // Update beta (minimizer)
+    if l1_0 < beta { beta = l1_0; }
+
+    // Right subtree (max): max(leaves[2], leaves[3])
+    // But we can prune if alpha >= beta
+    let r0 = get8(leaves, 2);
+    if r0 >= beta {
+        return beta; // Prune: right subtree can't improve
+    }
+    let r1 = get8(leaves, 3);
+    let l1_1 = if r0 > r1 { r0 } else { r1 };
+
+    if l1_1 < beta { l1_1 } else { beta }
+}
+
+// Nim game: given piles, compute Nim-value (XOR of all piles)
+fn nim_value(piles: Arr8, n: Int) -> Int {
+    // XOR via bit-by-bit computation
+    let mut result = 0;
+    let mut bit = 1;
+    let mut k = 0;
+    while k < 16 {
+        let mut count = 0;
+        let mut i = 0;
+        while i < n {
+            if (get8(piles, i) / bit) % 2 == 1 { count = count + 1; }
+            i = i + 1;
+        }
+        if count % 2 == 1 { result = result + bit; }
+        bit = bit * 2;
+        k = k + 1;
+    }
+    result
+}
+
+// Nim: is position a winning position for current player?
+fn nim_is_winning(piles: Arr8, n: Int) -> Int {
+    if nim_value(piles, n) != 0 { 1 } else { 0 }
+}
+
+// Simple evaluation: static board score
+fn evaluate_board(board: Arr8, n: Int) -> Int {
+    let mut score = 0;
+    let mut i = 0;
+    while i < n {
+        score = score + get8(board, i);
+        i = i + 1;
+    }
+    score
+}
+
+fn test_minimax_basic() -> Int {
+    // Tree with leaves [3, 5, 6, 9]
+    // Max level: max(3,5)=5, max(6,9)=9
+    // Min level: min(5,9)=5
+    let leaves = Arr8 { v0: 3, v1: 5, v2: 6, v3: 9, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(minimax_depth2(leaves), 5);
+    1
+}
+
+fn test_minimax_equal() -> Int {
+    // All leaves equal
+    let leaves = Arr8 { v0: 7, v1: 7, v2: 7, v3: 7, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(minimax_depth2(leaves), 7);
+    1
+}
+
+fn test_alphabeta() -> Int {
+    // Same tree as minimax — should give same result
+    let leaves = Arr8 { v0: 3, v1: 5, v2: 6, v3: 9, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(alphabeta_depth2(leaves), minimax_depth2(leaves));
+
+    // Tree where pruning helps: [3, 12, 8, 2]
+    // Max: max(3,12)=12, max(8,2)=8
+    // Min: min(12,8)=8
+    let leaves2 = Arr8 { v0: 3, v1: 12, v2: 8, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(minimax_depth2(leaves2), 8);
+    assert_eq(alphabeta_depth2(leaves2), 8);
+    1
+}
+
+fn test_nim_basic() -> Int {
+    // Nim with piles [1]: current player takes 1, wins. Nim-value = 1 (winning)
+    let p1 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nim_is_winning(p1, 1), 1);
+
+    // Nim with piles [0]: no moves, current player loses. Nim-value = 0
+    let p0 = zeros();
+    assert_eq(nim_is_winning(p0, 1), 0);
+    1
+}
+
+fn test_nim_two_piles() -> Int {
+    // Piles [3, 3]: Nim-value = 3 XOR 3 = 0 (losing for current player)
+    let p = Arr8 { v0: 3, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nim_value(p, 2), 0);
+    assert_eq(nim_is_winning(p, 2), 0);
+
+    // Piles [3, 5]: Nim-value = 3 XOR 5 = 6 (winning)
+    let p2 = Arr8 { v0: 3, v1: 5, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nim_value(p2, 2), 6);
+    assert_eq(nim_is_winning(p2, 2), 1);
+    1
+}
+
+fn test_nim_three_piles() -> Int {
+    // Classic: [1, 2, 3]: Nim-value = 1 XOR 2 XOR 3 = 0 (losing)
+    let p = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nim_value(p, 3), 0);
+
+    // [1, 2, 4]: 1 XOR 2 XOR 4 = 7 (winning)
+    let p2 = Arr8 { v0: 1, v1: 2, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(nim_value(p2, 3), 7);
+    1
+}
+
+fn main() -> Int {
+    test_minimax_basic();
+    test_minimax_equal();
+    test_alphabeta();
+    test_nim_basic();
+    test_nim_two_piles();
+    test_nim_three_piles();
+    print("[OK] 536_minimax_aot");
+    0
+}

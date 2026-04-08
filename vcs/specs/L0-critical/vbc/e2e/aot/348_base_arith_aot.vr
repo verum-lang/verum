@@ -1,0 +1,365 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, base-arithmetic, radix, add-multiply, number-bases
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for arbitrary base arithmetic:
+// 1. Convert between base-10 and arbitrary bases (2-16)
+// 2. Add two numbers represented in arbitrary base
+// 3. Multiply two numbers in arbitrary base
+// 4. Compare results against decimal arithmetic
+// Numbers stored as digit arrays (least-significant digit first).
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// A number in base B, stored as digits (LSB first) with length
+type BaseNum is { digits: Arr8, len: Int };
+
+fn bn_zero() -> BaseNum {
+    BaseNum { digits: a8_zero(), len: 0 }
+}
+
+// Convert decimal integer to base B representation
+fn to_base(val: Int, base: Int) -> BaseNum {
+    if val == 0 {
+        let d = a8_set(a8_zero(), 0, 0);
+        return BaseNum { digits: d, len: 1 };
+    }
+    let mut digits = a8_zero();
+    let mut n = val;
+    let mut i = 0;
+    while n > 0 {
+        let rem = n % base;
+        digits = a8_set(digits, i, rem);
+        n = n / base;
+        i = i + 1;
+    }
+    BaseNum { digits: digits, len: i }
+}
+
+// Convert from base B representation to decimal integer
+fn from_base(num: BaseNum, base: Int) -> Int {
+    let mut val = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < num.len {
+        val = val + a8_get(num.digits, i) * power;
+        power = power * base;
+        i = i + 1;
+    }
+    val
+}
+
+// Add two base-B numbers, result in base B
+fn base_add(a: BaseNum, b: BaseNum, base: Int) -> BaseNum {
+    let max_len = if a.len > b.len { a.len } else { b.len };
+    let mut result = a8_zero();
+    let mut carry = 0;
+    let mut i = 0;
+
+    while i < max_len {
+        let da = if i < a.len { a8_get(a.digits, i) } else { 0 };
+        let db = if i < b.len { a8_get(b.digits, i) } else { 0 };
+        let total = da + db + carry;
+        result = a8_set(result, i, total % base);
+        carry = total / base;
+        i = i + 1;
+    }
+
+    let mut result_len = max_len;
+    if carry > 0 {
+        result = a8_set(result, result_len, carry);
+        result_len = result_len + 1;
+    }
+
+    BaseNum { digits: result, len: result_len }
+}
+
+// Multiply base-B number by a single digit, result in base B
+fn base_mul_digit(a: BaseNum, d: Int, base: Int) -> BaseNum {
+    if d == 0 {
+        let dg = a8_set(a8_zero(), 0, 0);
+        return BaseNum { digits: dg, len: 1 };
+    }
+    let mut result = a8_zero();
+    let mut carry = 0;
+    let mut i = 0;
+
+    while i < a.len {
+        let total = a8_get(a.digits, i) * d + carry;
+        result = a8_set(result, i, total % base);
+        carry = total / base;
+        i = i + 1;
+    }
+
+    let mut result_len = a.len;
+    if carry > 0 {
+        result = a8_set(result, result_len, carry);
+        result_len = result_len + 1;
+    }
+
+    BaseNum { digits: result, len: result_len }
+}
+
+// Shift left by k positions (multiply by base^k)
+fn base_shift(a: BaseNum, k: Int) -> BaseNum {
+    if a.len == 1 {
+        if a8_get(a.digits, 0) == 0 { return a; }
+    }
+    let mut result = a8_zero();
+    let mut i = 0;
+    while i < k {
+        result = a8_set(result, i, 0);
+        i = i + 1;
+    }
+    i = 0;
+    while i < a.len {
+        result = a8_set(result, i + k, a8_get(a.digits, i));
+        i = i + 1;
+    }
+    BaseNum { digits: result, len: a.len + k }
+}
+
+// Multiply two base-B numbers using long multiplication
+fn base_mul(a: BaseNum, b: BaseNum, base: Int) -> BaseNum {
+    let mut result = bn_zero();
+    let rd = a8_set(a8_zero(), 0, 0);
+    result = BaseNum { digits: rd, len: 1 };
+
+    let mut i = 0;
+    while i < b.len {
+        let d = a8_get(b.digits, i);
+        if d > 0 {
+            let partial = base_mul_digit(a, d, base);
+            let shifted = base_shift(partial, i);
+            result = base_add(result, shifted, base);
+        }
+        i = i + 1;
+    }
+
+    result
+}
+
+// Check if all digits are valid for given base
+fn valid_digits(num: BaseNum, base: Int) -> Int {
+    let mut ok = 1;
+    let mut i = 0;
+    while i < num.len {
+        let d = a8_get(num.digits, i);
+        if d < 0 { ok = 0; }
+        if d >= base { ok = 0; }
+        i = i + 1;
+    }
+    ok
+}
+
+fn test_to_from_base2() {
+    // 13 in binary = 1101 -> digits LSB first: [1, 0, 1, 1]
+    let b = to_base(13, 2);
+    assert_eq(b.len, 4);
+    assert_eq(a8_get(b.digits, 0), 1); // 2^0
+    assert_eq(a8_get(b.digits, 1), 0); // 2^1
+    assert_eq(a8_get(b.digits, 2), 1); // 2^2
+    assert_eq(a8_get(b.digits, 3), 1); // 2^3
+    assert_eq(from_base(b, 2), 13);
+    assert_eq(valid_digits(b, 2), 1);
+}
+
+fn test_to_from_base8() {
+    // 255 in octal = 377
+    let b = to_base(255, 8);
+    assert_eq(a8_get(b.digits, 0), 7);
+    assert_eq(a8_get(b.digits, 1), 7);
+    assert_eq(a8_get(b.digits, 2), 3);
+    assert_eq(from_base(b, 8), 255);
+}
+
+fn test_to_from_base16() {
+    // 255 in hex = FF
+    let b = to_base(255, 16);
+    assert_eq(b.len, 2);
+    assert_eq(a8_get(b.digits, 0), 15); // F
+    assert_eq(a8_get(b.digits, 1), 15); // F
+    assert_eq(from_base(b, 16), 255);
+}
+
+fn test_to_from_base10() {
+    // 12345 in base 10
+    let b = to_base(12345, 10);
+    assert_eq(b.len, 5);
+    assert_eq(a8_get(b.digits, 0), 5);
+    assert_eq(a8_get(b.digits, 1), 4);
+    assert_eq(a8_get(b.digits, 2), 3);
+    assert_eq(a8_get(b.digits, 3), 2);
+    assert_eq(a8_get(b.digits, 4), 1);
+    assert_eq(from_base(b, 10), 12345);
+}
+
+fn test_zero_conversion() {
+    let b2 = to_base(0, 2);
+    assert_eq(from_base(b2, 2), 0);
+    let b16 = to_base(0, 16);
+    assert_eq(from_base(b16, 16), 0);
+}
+
+fn test_add_base2() {
+    // 5 + 3 = 8 in binary
+    // 5 = 101, 3 = 011
+    let a = to_base(5, 2);
+    let b = to_base(3, 2);
+    let sum = base_add(a, b, 2);
+    assert_eq(from_base(sum, 2), 8);
+    assert_eq(valid_digits(sum, 2), 1);
+}
+
+fn test_add_base10() {
+    // 999 + 1 = 1000
+    let a = to_base(999, 10);
+    let b = to_base(1, 10);
+    let sum = base_add(a, b, 10);
+    assert_eq(from_base(sum, 10), 1000);
+    assert_eq(sum.len, 4); // 4 digits
+}
+
+fn test_add_base16() {
+    // 0xFF + 0x01 = 0x100 = 256
+    let a = to_base(255, 16);
+    let b = to_base(1, 16);
+    let sum = base_add(a, b, 16);
+    assert_eq(from_base(sum, 16), 256);
+}
+
+fn test_add_large() {
+    // 12345 + 6789 = 19134 in base 7
+    let a = to_base(12345, 7);
+    let b = to_base(6789, 7);
+    let sum = base_add(a, b, 7);
+    assert_eq(from_base(sum, 7), 19134);
+}
+
+fn test_mul_base2() {
+    // 5 * 3 = 15 in binary
+    let a = to_base(5, 2);
+    let b = to_base(3, 2);
+    let prod = base_mul(a, b, 2);
+    assert_eq(from_base(prod, 2), 15);
+    assert_eq(valid_digits(prod, 2), 1);
+}
+
+fn test_mul_base10() {
+    // 123 * 45 = 5535
+    let a = to_base(123, 10);
+    let b = to_base(45, 10);
+    let prod = base_mul(a, b, 10);
+    assert_eq(from_base(prod, 10), 5535);
+}
+
+fn test_mul_base8() {
+    // 64 * 8 = 512 in octal
+    let a = to_base(64, 8);
+    let b = to_base(8, 8);
+    let prod = base_mul(a, b, 8);
+    assert_eq(from_base(prod, 8), 512);
+}
+
+fn test_mul_by_zero() {
+    let a = to_base(42, 5);
+    let b = to_base(0, 5);
+    let prod = base_mul(a, b, 5);
+    assert_eq(from_base(prod, 5), 0);
+}
+
+fn test_mul_by_one() {
+    let a = to_base(42, 5);
+    let b = to_base(1, 5);
+    let prod = base_mul(a, b, 5);
+    assert_eq(from_base(prod, 5), 42);
+}
+
+fn test_roundtrip_multiple_bases() {
+    // Convert 100 to various bases and back
+    let val = 100;
+    assert_eq(from_base(to_base(val, 2), 2), val);
+    assert_eq(from_base(to_base(val, 3), 3), val);
+    assert_eq(from_base(to_base(val, 5), 5), val);
+    assert_eq(from_base(to_base(val, 7), 7), val);
+    assert_eq(from_base(to_base(val, 10), 10), val);
+    assert_eq(from_base(to_base(val, 16), 16), val);
+}
+
+fn test_add_commutative() {
+    let a = to_base(37, 5);
+    let b = to_base(48, 5);
+    let sum1 = base_add(a, b, 5);
+    let sum2 = base_add(b, a, 5);
+    assert_eq(from_base(sum1, 5), from_base(sum2, 5));
+    assert_eq(from_base(sum1, 5), 85);
+}
+
+fn test_mul_commutative() {
+    let a = to_base(7, 3);
+    let b = to_base(11, 3);
+    let prod1 = base_mul(a, b, 3);
+    let prod2 = base_mul(b, a, 3);
+    assert_eq(from_base(prod1, 3), from_base(prod2, 3));
+    assert_eq(from_base(prod1, 3), 77);
+}
+
+fn test_distributive() {
+    // a * (b + c) == a*b + a*c  in base 7
+    let a = to_base(5, 7);
+    let b = to_base(3, 7);
+    let c = to_base(4, 7);
+    let bc_sum = base_add(b, c, 7);
+    let lhs = base_mul(a, bc_sum, 7);
+    let ab = base_mul(a, b, 7);
+    let ac = base_mul(a, c, 7);
+    let rhs = base_add(ab, ac, 7);
+    assert_eq(from_base(lhs, 7), from_base(rhs, 7));
+    assert_eq(from_base(lhs, 7), 35);
+}
+
+fn main() -> Int {
+    test_to_from_base2();
+    test_to_from_base8();
+    test_to_from_base16();
+    test_to_from_base10();
+    test_zero_conversion();
+    test_add_base2();
+    test_add_base10();
+    test_add_base16();
+    test_add_large();
+    test_mul_base2();
+    test_mul_base10();
+    test_mul_base8();
+    test_mul_by_zero();
+    test_mul_by_one();
+    test_roundtrip_multiple_bases();
+    test_add_commutative();
+    test_mul_commutative();
+    test_distributive();
+    print("[OK] 348_base_arith_aot");
+    0
+}

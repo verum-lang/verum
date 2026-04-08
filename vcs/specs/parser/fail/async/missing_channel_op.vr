@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, select, channel, error
+// @description: Test invalid select arm with missing await expression
+// @expected-error: E018
+
+async fn test() {
+    select {
+        <- =>
+    }
+}

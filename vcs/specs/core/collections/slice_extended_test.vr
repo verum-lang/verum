@@ -1,0 +1,662 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, slice, extended, is_sorted, dedup, sort, select
+// @description: Tests for extended slice APIs: is_sorted, split_first/last,
+//               partition_point, dedup, sort_unstable, stable sort, select_nth,
+//               rfind, to_list
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// Helper comparators (closures can't resolve .cmp())
+// =============================================================================
+
+fn cmp_asc(a: &Int, b: &Int) -> Ordering {
+    if *a < *b { Ordering.Less }
+    else if *a > *b { Ordering.Greater }
+    else { Ordering.Equal }
+}
+
+fn cmp_desc(a: &Int, b: &Int) -> Ordering {
+    if *b < *a { Ordering.Less }
+    else if *b > *a { Ordering.Greater }
+    else { Ordering.Equal }
+}
+
+// =============================================================================
+// Section 1: is_sorted / is_sorted_by / is_sorted_by_key
+// =============================================================================
+
+@test
+fn test_is_sorted_empty() {
+    let s: &[Int] = &[];
+    assert(s.is_sorted());
+}
+
+@test
+fn test_is_sorted_single() {
+    let s = &[42];
+    assert(s.is_sorted());
+}
+
+@test
+fn test_is_sorted_ascending() {
+    let s = &[1, 2, 3, 4, 5];
+    assert(s.is_sorted());
+}
+
+@test
+fn test_is_sorted_descending() {
+    let s = &[5, 4, 3, 2, 1];
+    assert(!s.is_sorted());
+}
+
+@test
+fn test_is_sorted_with_duplicates() {
+    let s = &[1, 1, 2, 3, 3, 3, 4];
+    assert(s.is_sorted());
+}
+
+@test
+fn test_is_sorted_unsorted() {
+    let s = &[1, 3, 2, 4];
+    assert(!s.is_sorted());
+}
+
+@test
+fn test_is_sorted_two_equal() {
+    let s = &[5, 5];
+    assert(s.is_sorted());
+}
+
+@test
+fn test_is_sorted_by_descending() {
+    let s = &[5, 4, 3, 2, 1];
+    assert(s.is_sorted_by(cmp_desc));
+}
+
+@test
+fn test_is_sorted_by_empty() {
+    let s: &[Int] = &[];
+    assert(s.is_sorted_by(cmp_asc));
+}
+
+@test
+fn test_is_sorted_by_custom() {
+    // Sort by absolute value (all positive, already sorted by abs)
+    let s = &[1, 2, 3, 10];
+    assert(s.is_sorted_by(cmp_asc));
+}
+
+@test
+fn test_is_sorted_by_key_abs() {
+    // Sorted by absolute value
+    let s = &[1, -2, 3, -4];
+    fn abs_val(x: &Int) -> Int {
+        if *x < 0 { 0 - *x } else { *x }
+    }
+    assert(s.is_sorted_by_key(abs_val));
+}
+
+@test
+fn test_is_sorted_by_key_empty() {
+    let s: &[Int] = &[];
+    fn identity(x: &Int) -> Int { *x }
+    assert(s.is_sorted_by_key(identity));
+}
+
+@test
+fn test_is_sorted_by_key_not_sorted() {
+    let s = &[3, 1, 2];
+    fn identity(x: &Int) -> Int { *x }
+    assert(!s.is_sorted_by_key(identity));
+}
+
+// =============================================================================
+// Section 2: split_first / split_last
+// =============================================================================
+
+@test
+fn test_split_first_nonempty() {
+    let s = &[10, 20, 30];
+    let result = s.split_first();
+    assert(result.is_some());
+    // split_first returns (first_element, rest_of_slice)
+    let pair = result.unwrap();
+    assert_eq(*pair.0, 10);
+    assert_eq(pair.1.len(), 2);
+    assert_eq(pair.1[0], 20);
+    assert_eq(pair.1[1], 30);
+}
+
+@test
+fn test_split_first_single() {
+    let s = &[42];
+    let result = s.split_first();
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert_eq(*pair.0, 42);
+    assert_eq(pair.1.len(), 0);
+}
+
+@test
+fn test_split_first_empty() {
+    let s: &[Int] = &[];
+    assert(s.split_first().is_none());
+}
+
+@test
+fn test_split_last_nonempty() {
+    let s = &[10, 20, 30];
+    let result = s.split_last();
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert_eq(*pair.0, 30);
+    assert_eq(pair.1.len(), 2);
+    assert_eq(pair.1[0], 10);
+    assert_eq(pair.1[1], 20);
+}
+
+@test
+fn test_split_last_single() {
+    let s = &[42];
+    let result = s.split_last();
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert_eq(*pair.0, 42);
+    assert_eq(pair.1.len(), 0);
+}
+
+@test
+fn test_split_last_empty() {
+    let s: &[Int] = &[];
+    assert(s.split_last().is_none());
+}
+
+// =============================================================================
+// Section 3: partition_point
+// =============================================================================
+
+@test
+fn test_partition_point_basic() {
+    // [1, 2, 3, 4, 5] partitioned at value > 3
+    let s = &[1, 2, 3, 4, 5];
+    // predicate: value < 4 → true for first 3 elements
+    let idx = s.partition_point(|x| *x < 4);
+    assert_eq(idx, 3);
+}
+
+@test
+fn test_partition_point_all_true() {
+    let s = &[1, 2, 3, 4, 5];
+    let idx = s.partition_point(|x| *x < 100);
+    assert_eq(idx, 5);
+}
+
+@test
+fn test_partition_point_all_false() {
+    let s = &[1, 2, 3, 4, 5];
+    let idx = s.partition_point(|x| *x < 0);
+    assert_eq(idx, 0);
+}
+
+@test
+fn test_partition_point_empty() {
+    let s: &[Int] = &[];
+    let idx = s.partition_point(|_| true);
+    assert_eq(idx, 0);
+}
+
+@test
+fn test_partition_point_single_true() {
+    let s = &[1];
+    let idx = s.partition_point(|x| *x < 5);
+    assert_eq(idx, 1);
+}
+
+@test
+fn test_partition_point_single_false() {
+    let s = &[10];
+    let idx = s.partition_point(|x| *x < 5);
+    assert_eq(idx, 0);
+}
+
+@test
+fn test_partition_point_for_insertion() {
+    // Use partition_point to find insertion position in sorted slice
+    let s = &[1, 3, 5, 7, 9];
+    let insert_pos = s.partition_point(|x| *x < 6);
+    assert_eq(insert_pos, 3); // Insert 6 at index 3
+}
+
+// =============================================================================
+// Section 4: dedup (remove consecutive duplicates in-place)
+// =============================================================================
+
+@test
+fn test_dedup_basic() {
+    let mut data = [1, 1, 2, 3, 3, 3, 4, 4, 5];
+    let new_len = data.as_mut_slice().dedup();
+    assert_eq(new_len, 5);
+    assert_eq(data[0], 1);
+    assert_eq(data[1], 2);
+    assert_eq(data[2], 3);
+    assert_eq(data[3], 4);
+    assert_eq(data[4], 5);
+}
+
+@test
+fn test_dedup_no_dups() {
+    let mut data = [1, 2, 3, 4, 5];
+    let new_len = data.as_mut_slice().dedup();
+    assert_eq(new_len, 5);
+}
+
+@test
+fn test_dedup_all_same() {
+    let mut data = [7, 7, 7, 7, 7];
+    let new_len = data.as_mut_slice().dedup();
+    assert_eq(new_len, 1);
+    assert_eq(data[0], 7);
+}
+
+@test
+fn test_dedup_empty() {
+    let mut data: List<Int> = [];
+    let new_len = data.as_mut_slice().dedup();
+    assert_eq(new_len, 0);
+}
+
+@test
+fn test_dedup_single() {
+    let mut data = [42];
+    let new_len = data.as_mut_slice().dedup();
+    assert_eq(new_len, 1);
+    assert_eq(data[0], 42);
+}
+
+@test
+fn test_dedup_non_consecutive() {
+    // Non-consecutive duplicates should NOT be removed
+    let mut data = [1, 2, 1, 2, 1];
+    let new_len = data.as_mut_slice().dedup();
+    assert_eq(new_len, 5); // All kept since no consecutive dups
+}
+
+@test
+fn test_dedup_by_basic() {
+    // Dedup by custom equality: treat negative as equal to positive
+    let mut data = [1, -1, 2, -2, 3];
+    fn same_abs(a: &Int, b: &Int) -> Bool {
+        let abs_a = if *a < 0 { 0 - *a } else { *a };
+        let abs_b = if *b < 0 { 0 - *b } else { *b };
+        abs_a == abs_b
+    }
+    let new_len = data.as_mut_slice().dedup_by(same_abs);
+    assert_eq(new_len, 3);
+    assert_eq(data[0], 1);
+    assert_eq(data[1], 2);
+    assert_eq(data[2], 3);
+}
+
+@test
+fn test_dedup_by_empty() {
+    let mut data: List<Int> = [];
+    let new_len = data.as_mut_slice().dedup_by(|a, b| a == b);
+    assert_eq(new_len, 0);
+}
+
+// =============================================================================
+// Section 5: sort_unstable / sort_unstable_by / sort_unstable_by_key
+// =============================================================================
+
+@test
+fn test_sort_unstable_basic() {
+    let mut data = [5, 3, 1, 4, 2];
+    data.as_mut_slice().sort_unstable();
+    assert_eq(data[0], 1);
+    assert_eq(data[1], 2);
+    assert_eq(data[2], 3);
+    assert_eq(data[3], 4);
+    assert_eq(data[4], 5);
+}
+
+@test
+fn test_sort_unstable_empty() {
+    let mut data: List<Int> = [];
+    data.as_mut_slice().sort_unstable();
+    assert_eq(data.len(), 0);
+}
+
+@test
+fn test_sort_unstable_single() {
+    let mut data = [42];
+    data.as_mut_slice().sort_unstable();
+    assert_eq(data[0], 42);
+}
+
+@test
+fn test_sort_unstable_already_sorted() {
+    let mut data = [1, 2, 3, 4, 5];
+    data.as_mut_slice().sort_unstable();
+    assert_eq(data[0], 1);
+    assert_eq(data[4], 5);
+}
+
+@test
+fn test_sort_unstable_reverse() {
+    let mut data = [5, 4, 3, 2, 1];
+    data.as_mut_slice().sort_unstable();
+    assert_eq(data[0], 1);
+    assert_eq(data[4], 5);
+}
+
+@test
+fn test_sort_unstable_duplicates() {
+    let mut data = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3];
+    data.as_mut_slice().sort_unstable();
+    assert(data.as_slice().is_sorted());
+}
+
+@test
+fn test_sort_unstable_by_descending() {
+    let mut data = [1, 2, 3, 4, 5];
+    data.as_mut_slice().sort_unstable_by(cmp_desc);
+    assert_eq(data[0], 5);
+    assert_eq(data[4], 1);
+}
+
+@test
+fn test_sort_unstable_by_key_abs() {
+    let mut data = [3, -1, -4, 2, -5];
+    fn abs_val(x: &Int) -> Int {
+        if *x < 0 { 0 - *x } else { *x }
+    }
+    data.as_mut_slice().sort_unstable_by_key(abs_val);
+    // Should be sorted by absolute value: -1, 2, 3, -4, -5
+    fn abs(x: Int) -> Int {
+        if x < 0 { 0 - x } else { x }
+    }
+    assert(abs(data[0]) <= abs(data[1]));
+    assert(abs(data[1]) <= abs(data[2]));
+    assert(abs(data[2]) <= abs(data[3]));
+    assert(abs(data[3]) <= abs(data[4]));
+}
+
+// =============================================================================
+// Section 6: Stable sort correctness
+// =============================================================================
+
+@test
+fn test_sort_stable_basic() {
+    let mut data = [5, 3, 1, 4, 2];
+    data.as_mut_slice().sort();
+    assert_eq(data[0], 1);
+    assert_eq(data[1], 2);
+    assert_eq(data[2], 3);
+    assert_eq(data[3], 4);
+    assert_eq(data[4], 5);
+}
+
+@test
+fn test_sort_stable_empty() {
+    let mut data: List<Int> = [];
+    data.as_mut_slice().sort();
+    assert_eq(data.len(), 0);
+}
+
+@test
+fn test_sort_stable_single() {
+    let mut data = [42];
+    data.as_mut_slice().sort();
+    assert_eq(data[0], 42);
+}
+
+@test
+fn test_sort_stable_already_sorted() {
+    let mut data = [1, 2, 3, 4, 5];
+    data.as_mut_slice().sort();
+    for i in range(0, 5) {
+        assert_eq(data[i], i + 1);
+    }
+}
+
+@test
+fn test_sort_stable_reverse_sorted() {
+    let mut data = [5, 4, 3, 2, 1];
+    data.as_mut_slice().sort();
+    for i in range(0, 5) {
+        assert_eq(data[i], i + 1);
+    }
+}
+
+@test
+fn test_sort_stable_duplicates() {
+    let mut data = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+    data.as_mut_slice().sort();
+    assert(data.as_slice().is_sorted());
+}
+
+@test
+fn test_sort_stable_large() {
+    // Test with larger dataset to exercise merge sort
+    let mut data: List<Int> = [];
+    for i in range(0, 100) {
+        data.push(100 - i);
+    }
+    data.as_mut_slice().sort();
+    for i in range(0, 100) {
+        assert_eq(data[i], i + 1);
+    }
+}
+
+@test
+fn test_sort_stable_negative_numbers() {
+    let mut data = [-3, -1, -4, -1, -5, -9];
+    data.as_mut_slice().sort();
+    assert(data.as_slice().is_sorted());
+    assert_eq(data[0], -9);
+}
+
+@test
+fn test_sort_by_custom() {
+    let mut data = [1, 2, 3, 4, 5];
+    data.as_mut_slice().sort_by(cmp_desc); // descending
+    assert_eq(data[0], 5);
+    assert_eq(data[4], 1);
+}
+
+@test
+fn test_sort_by_key_basic() {
+    let mut data = [-3, 1, -2, 4, -5];
+    fn abs_val(x: &Int) -> Int {
+        if *x < 0 { 0 - *x } else { *x }
+    }
+    data.as_mut_slice().sort_by_key(abs_val);
+    fn abs(x: Int) -> Int {
+        if x < 0 { 0 - x } else { x }
+    }
+    assert(abs(data[0]) <= abs(data[1]));
+    assert(abs(data[1]) <= abs(data[2]));
+}
+
+// =============================================================================
+// Section 7: select_nth_unstable (quickselect)
+// =============================================================================
+
+@test
+fn test_select_nth_unstable_median() {
+    let mut data = [5, 3, 1, 4, 2];
+    // After select_nth_unstable(2), data[2] should be the median (3)
+    data.as_mut_slice().select_nth_unstable(2);
+    assert_eq(data[2], 3);
+    // All elements before index 2 should be <= 3
+    assert(data[0] <= 3);
+    assert(data[1] <= 3);
+    // All elements after index 2 should be >= 3
+    assert(data[3] >= 3);
+    assert(data[4] >= 3);
+}
+
+@test
+fn test_select_nth_unstable_first() {
+    let mut data = [5, 3, 1, 4, 2];
+    data.as_mut_slice().select_nth_unstable(0);
+    assert_eq(data[0], 1);
+}
+
+@test
+fn test_select_nth_unstable_last() {
+    let mut data = [5, 3, 1, 4, 2];
+    data.as_mut_slice().select_nth_unstable(4);
+    assert_eq(data[4], 5);
+}
+
+@test
+fn test_select_nth_unstable_single() {
+    let mut data = [42];
+    data.as_mut_slice().select_nth_unstable(0);
+    assert_eq(data[0], 42);
+}
+
+@test
+fn test_select_nth_unstable_duplicates() {
+    let mut data = [3, 1, 3, 1, 3];
+    data.as_mut_slice().select_nth_unstable(2);
+    assert_eq(data[2], 3);
+}
+
+@test
+fn test_select_nth_unstable_by_descending() {
+    let mut data = [1, 2, 3, 4, 5];
+    data.as_mut_slice().select_nth_unstable_by(2, cmp_desc);
+    assert_eq(data[2], 3); // Median in descending order
+}
+
+// =============================================================================
+// Section 8: rfind (reverse find by predicate)
+// =============================================================================
+
+@test
+fn test_rfind_basic() {
+    let s = &[1, 2, 3, 4, 5, 3, 6];
+    let result = s.rfind(|x| *x == 3);
+    assert(result.is_some());
+    // rfind returns the last matching element
+    // Element at index 5 is 3, which is the last occurrence
+}
+
+@test
+fn test_rfind_not_found() {
+    let s = &[1, 2, 3];
+    let result = s.rfind(|x| *x == 99);
+    assert(result.is_none());
+}
+
+@test
+fn test_rfind_empty() {
+    let s: &[Int] = &[];
+    let result = s.rfind(|x| *x == 1);
+    assert(result.is_none());
+}
+
+@test
+fn test_rfind_position_basic() {
+    let s = &[1, 2, 3, 4, 3, 5];
+    let result = s.rfind_position(|x| *x == 3);
+    assert(result.is_some());
+    assert_eq(result.unwrap(), 4); // Last 3 is at index 4
+}
+
+@test
+fn test_rfind_position_not_found() {
+    let s = &[1, 2, 3];
+    let result = s.rfind_position(|x| *x == 99);
+    assert(result.is_none());
+}
+
+@test
+fn test_rfind_position_first_element() {
+    let s = &[10, 20, 30];
+    let result = s.rfind_position(|x| *x == 10);
+    assert_eq(result.unwrap(), 0);
+}
+
+@test
+fn test_rfind_position_last_element() {
+    let s = &[10, 20, 30];
+    let result = s.rfind_position(|x| *x == 30);
+    assert_eq(result.unwrap(), 2);
+}
+
+// =============================================================================
+// Section 9: to_list (materialize slice to owned List)
+// =============================================================================
+
+@test
+fn test_to_list_basic() {
+    let s = &[1, 2, 3, 4, 5];
+    let list = s.to_list();
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 1);
+    assert_eq(list[4], 5);
+}
+
+@test
+fn test_to_list_empty() {
+    let s: &[Int] = &[];
+    let list = s.to_list();
+    assert_eq(list.len(), 0);
+}
+
+@test
+fn test_to_list_single() {
+    let s = &[42];
+    let list = s.to_list();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+// =============================================================================
+// Section 10: Integration — sorted dedup pipeline
+// =============================================================================
+
+@test
+fn test_sort_then_dedup() {
+    let mut data = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+    data.as_mut_slice().sort();
+    assert(data.as_slice().is_sorted());
+    let new_len = data.as_mut_slice().dedup();
+    assert_eq(new_len, 7); // 1, 2, 3, 4, 5, 6, 9
+    assert_eq(data[0], 1);
+    assert_eq(data[6], 9);
+}
+
+@test
+fn test_partition_point_on_sorted() {
+    let mut data = [5, 3, 1, 4, 2, 8, 6, 7];
+    data.as_mut_slice().sort();
+    // After sort: [1, 2, 3, 4, 5, 6, 7, 8]
+    let pp = data.as_slice().partition_point(|x| *x <= 5);
+    assert_eq(pp, 5); // First 5 elements satisfy x <= 5
+}
+
+@test
+fn test_select_then_check_partition() {
+    let mut data = [9, 1, 8, 2, 7, 3, 6, 4, 5];
+    data.as_mut_slice().select_nth_unstable(4);
+    let pivot = data[4];
+    assert_eq(pivot, 5);
+    // Everything left of index 4 should be <= 5
+    for i in range(0, 4) {
+        assert(data[i] <= pivot);
+    }
+    // Everything right of index 4 should be >= 5
+    for i in range(5, 9) {
+        assert(data[i] >= pivot);
+    }
+}

@@ -1,0 +1,57 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, performance, sieve
+// @expected-exit: 0
+
+// Performance: Sieve of Eratosthenes to 100K
+// Uses array of flags, counts primes
+
+fn count_primes(limit: Int) -> Int {
+    // Use a flat array: 0 = prime candidate, 1 = composite
+    let mut sieve: List<Int> = [];
+    let mut i = 0;
+    while (i < limit) {
+        sieve.push(0);
+        i = i + 1;
+    }
+
+    // Mark 0 and 1 as non-prime
+    sieve[0] = 1;
+    sieve[1] = 1;
+
+    let mut p = 2;
+    while (p * p < limit) {
+        if (sieve[p] == 0) {
+            let mut j = p * p;
+            while (j < limit) {
+                sieve[j] = 1;
+                j = j + p;
+            }
+        }
+        p = p + 1;
+    }
+
+    // Count primes
+    let mut count = 0;
+    let mut k = 0;
+    while (k < limit) {
+        if (sieve[k] == 0) {
+            count = count + 1;
+        }
+        k = k + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    let result = count_primes(100000);
+    // There are 9592 primes below 100,000
+    let expected = 9592;
+    if (result != expected) {
+        print(f"FAIL: primes_below_100K={result}, expected={expected}");
+        return 1;
+    }
+    print(f"OK: primes_below_100K={result}");
+    0
+}

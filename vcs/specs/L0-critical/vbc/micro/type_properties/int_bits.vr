@@ -1,0 +1,31 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test type bits properties for integer types
+
+fn main() {
+    // Test Int bit widths
+    assert_eq(Int8.bits, 8);
+    assert_eq(Int16.bits, 16);
+    assert_eq(Int32.bits, 32);
+    assert_eq(Int64.bits, 64);
+    assert_eq(Int128.bits, 128);
+
+    // Test UInt bit widths
+    assert_eq(UInt8.bits, 8);
+    assert_eq(UInt16.bits, 16);
+    assert_eq(UInt32.bits, 32);
+    assert_eq(UInt64.bits, 64);
+    assert_eq(UInt128.bits, 128);
+
+    // Test size types (64 on 64-bit platform)
+    assert_eq(IntSize.bits, 64);
+    assert_eq(UIntSize.bits, 64);
+
+    // Test compatibility aliases
+    assert_eq(i8.bits, 8);
+    assert_eq(u64.bits, 64);
+    assert_eq(isize.bits, 64);
+    assert_eq(usize.bits, 64);
+}

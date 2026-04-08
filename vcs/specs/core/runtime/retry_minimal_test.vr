@@ -1,0 +1,45 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, retry, minimal
+// @description: Minimal test to isolate RetryConfig phantom type parameter
+
+mount core.runtime.recovery.{
+    BackoffStrategy,
+    JitterConfig,
+    RetryConfig,
+    RetryPredicate,
+};
+
+@test
+fn test_backoff_fixed() {
+    let backoff: BackoffStrategy = BackoffStrategy.Fixed { delay_ms: 100 };
+    assert(backoff is BackoffStrategy.Fixed);
+}
+
+@test
+fn test_jitter_none() {
+    let jitter: JitterConfig = JitterConfig.None;
+    assert(jitter is JitterConfig.None);
+}
+
+@test
+fn test_retry_predicate_all() {
+    let pred: RetryPredicate = RetryPredicate.AllErrors;
+    assert(pred is RetryPredicate.AllErrors);
+}
+
+@test
+fn test_retry_config() {
+    let config: RetryConfig = RetryConfig {
+        max_attempts: 3,
+        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    assert_eq(config.max_attempts, 3);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

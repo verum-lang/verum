@@ -1,0 +1,210 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, mutual-recursion, co-recursion
+// @description: Type inference across mutually recursive functions
+
+/// Test for type inference across mutually recursive functions.
+/// When functions call each other, their types must be inferred together,
+/// allowing bidirectional type flow between mutually recursive definitions.
+
+// ============================================================================
+// Basic mutual recursion: even/odd
+// ============================================================================
+
+fn is_even(n: Int) -> Bool {
+    if n == 0 {
+        true
+    } else {
+        is_odd(n - 1)
+    }
+}
+
+fn is_odd(n: Int) -> Bool {
+    if n == 0 {
+        false
+    } else {
+        is_even(n - 1)
+    }
+}
+
+// ============================================================================
+// Mutual recursion with different return types
+// ============================================================================
+
+// Ping-pong between Int accumulation
+fn sum_evens_up_to(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if is_even(n) {
+        n + sum_evens_up_to(n - 1)
+    } else {
+        sum_odds_minus_one(n - 1)
+    }
+}
+
+fn sum_odds_minus_one(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if is_odd(n) {
+        0 + sum_evens_up_to(n - 1)
+    } else {
+        sum_odds_minus_one(n - 1)
+    }
+}
+
+// ============================================================================
+// Mutual recursion with Text accumulation
+// ============================================================================
+
+fn encode_even(n: Int) -> Text {
+    if n <= 0 {
+        ""
+    } else if is_even(n) {
+        f"E{n}{encode_odd(n - 1)}"
+    } else {
+        encode_odd(n)
+    }
+}
+
+fn encode_odd(n: Int) -> Text {
+    if n <= 0 {
+        ""
+    } else if is_odd(n) {
+        f"O{n}{encode_even(n - 1)}"
+    } else {
+        encode_even(n)
+    }
+}
+
+// ============================================================================
+// Mutual recursion with Maybe
+// ============================================================================
+
+fn find_even_less_than(n: Int) -> Maybe<Int> {
+    if n <= 0 {
+        None
+    } else if is_even(n) {
+        Some(n)
+    } else {
+        find_even_less_than(n - 1)
+    }
+}
+
+fn find_odd_less_than(n: Int) -> Maybe<Int> {
+    if n <= 0 {
+        None
+    } else if is_odd(n) {
+        Some(n)
+    } else {
+        find_odd_less_than(n - 1)
+    }
+}
+
+// ============================================================================
+// Three-way mutual recursion
+// ============================================================================
+
+fn triple_mod_0(n: Int) -> Text {
+    if n <= 0 { "done" } else { triple_mod_1(n - 1) }
+}
+
+fn triple_mod_1(n: Int) -> Text {
+    if n <= 0 { "done" } else { triple_mod_2(n - 1) }
+}
+
+fn triple_mod_2(n: Int) -> Text {
+    if n <= 0 { "done" } else { triple_mod_0(n - 1) }
+}
+
+// ============================================================================
+// Mutual recursion with sum type (generic)
+// ============================================================================
+
+type ExprTree is
+    | Num(Int)
+    | Add(Heap<ExprTree>, Heap<ExprTree>)
+    | Mul(Heap<ExprTree>, Heap<ExprTree>)
+    | Neg(Heap<ExprTree>);
+
+fn eval_expr(e: ExprTree) -> Int {
+    match e {
+        Num(n) => n,
+        Add(a, b) => eval_expr(*a) + eval_expr(*b),
+        Mul(a, b) => eval_expr(*a) * eval_expr(*b),
+        Neg(a) => -eval_expr(*a),
+    }
+}
+
+fn count_ops(e: ExprTree) -> Int {
+    match e {
+        Num(_) => 0,
+        Add(a, b) => 1 + count_ops(*a) + count_ops(*b),
+        Mul(a, b) => 1 + count_ops(*a) + count_ops(*b),
+        Neg(a) => 1 + count_ops(*a),
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Basic even/odd
+    assert(is_even(0) == true);
+    assert(is_even(1) == false);
+    assert(is_even(2) == true);
+    assert(is_even(7) == false);
+    assert(is_even(100) == true);
+
+    assert(is_odd(0) == false);
+    assert(is_odd(1) == true);
+    assert(is_odd(3) == true);
+    assert(is_odd(8) == false);
+
+    // Sum functions
+    let s_e = sum_evens_up_to(10);
+    // sum of evens 2,4,6,8,10 = 30
+    assert(s_e == 30);
+
+    // Encode
+    let enc = encode_even(4);
+    // 4 is even: f"E4{encode_odd(3)}" -> "E4O3E2O1"
+    assert(enc == "E4O3E2O1");
+
+    // find_even
+    assert(find_even_less_than(5) == Some(4));
+    assert(find_even_less_than(4) == Some(4));
+    assert(find_even_less_than(1) == None);
+    assert(find_even_less_than(0) == None);
+
+    // find_odd
+    assert(find_odd_less_than(6) == Some(5));
+    assert(find_odd_less_than(1) == Some(1));
+    assert(find_odd_less_than(0) == None);
+
+    // Three-way mutual recursion
+    let t0 = triple_mod_0(6);  // 6 steps: 0->1->2->0->1->2->0 -> "done"
+    assert(t0 == "done");
+
+    // Expression tree
+    // (2 + 3) * -(4)  = 5 * -4 = -20
+    let expr: ExprTree = Mul(
+        Heap(Add(Heap(Num(2)), Heap(Num(3)))),
+        Heap(Neg(Heap(Num(4))))
+    );
+    assert(eval_expr(expr) == -20);
+
+    // count_ops: Mul + Add + Neg = 3
+    let expr2: ExprTree = Mul(
+        Heap(Add(Heap(Num(2)), Heap(Num(3)))),
+        Heap(Neg(Heap(Num(4))))
+    );
+    assert(count_ops(expr2) == 3);
+
+    // Simple num
+    assert(eval_expr(Num(42)) == 42);
+    assert(count_ops(Num(42)) == 0);
+
+    print("Mutual inference tests passed!");
+}

@@ -1,0 +1,170 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: lsp, semantic-tokens, syntax-highlighting
+// @description: Tests semantic token generation from syntax tree for LSP.
+//              Verifies correct token types, modifiers, and ranges.
+
+// ============================================================================
+// This file tests semantic token generation for IDE syntax highlighting.
+// Each element should produce the correct semantic token type.
+// ============================================================================
+
+// Test 1: Function definition tokens
+// Expected tokens: 'fn' (keyword), 'function_name' (function), 'x' (parameter)
+fn function_name(x: Int, y: Int) -> Int {
+    x + y
+}
+
+// Test 2: Type definition tokens
+// Expected tokens: 'type' (keyword), 'TypeName' (type), field identifiers
+type TypeName is {
+    field_one: Int,
+    field_two: Text,
+    field_three: Bool,
+};
+
+// Test 3: Variable declaration tokens
+// Expected tokens: 'let' (keyword), 'variable' (variable), type annotation
+fn test_variables() {
+    let immutable_var: Int = 42;
+    let mut mutable_var: Int = 0;
+    let inferred = "text";
+    mutable_var
+}
+
+// Test 4: Literal tokens
+// Expected: different token types for different literal kinds
+fn test_literals() {
+    let int_lit = 42;
+    let float_lit = 3.14;
+    let string_lit = "hello";
+    let bool_lit = true;
+    let char_lit = 'c';
+    int_lit
+}
+
+// Test 5: Operator tokens
+// Expected: operators get appropriate token type
+fn test_operators(a: Int, b: Int) -> Int {
+    let add = a + b;
+    let sub = a - b;
+    let mul = a * b;
+    let div = a / b;
+    let eq = a == b;
+    let ne = a != b;
+    let lt = a < b;
+    let and = true && false;
+    let or = true || false;
+    add
+}
+
+// Test 6: Control flow keyword tokens
+// Expected: if, else, match, for, while, loop, return as keywords
+fn test_control_flow(x: Int) -> Int {
+    if x > 0 {
+        return 1;
+    } else {
+        return -1;
+    }
+}
+
+fn test_loops() {
+    for i in 0..10 {
+        continue;
+    }
+
+    let mut j = 0;
+    while j < 5 {
+        j = j + 1;
+        break;
+    }
+
+    loop {
+        break;
+    }
+}
+
+// Test 7: Match expression tokens
+fn test_match(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(value) => value,
+        None => 0,
+    }
+}
+
+// Test 8: Protocol and implement tokens
+// Expected: 'protocol', 'implement' as keywords, protocol name as type
+type Computable is protocol {
+    fn compute(self) -> Int;
+};
+
+implement Computable for TypeName {
+    fn compute(self) -> Int {
+        self.field_one
+    }
+}
+
+// Test 9: Generic type tokens
+// Expected: type parameters highlighted differently
+fn generic_function<T, U>(x: T, y: U) -> T {
+    x
+}
+
+type GenericType<T> is {
+    value: T,
+};
+
+// Test 10: Async tokens
+// Expected: 'async', 'await', 'spawn' as keywords
+async fn async_function() -> Int {
+    42
+}
+
+async fn uses_await() -> Int {
+    let result = async_function().await;
+    result
+}
+
+// Test 11: Context system tokens
+// Expected: 'using', 'provide', 'context' as keywords
+context Database {
+    fn query(self, sql: Text) -> List<Int>;
+}
+
+fn with_context() -> Int using [Database] {
+    42
+}
+
+// Test 12: Attribute tokens
+// Expected: '@' and attribute name with special styling
+@derive(Clone, Debug)
+type DerivedType is {
+    value: Int,
+};
+
+// Test 13: Comment tokens (should be excluded or marked as comments)
+// This is a line comment
+
+/*
+ * This is a block comment
+ */
+
+fn after_comments() -> Int {
+    42
+}
+
+// Test 14: Method call tokens
+// Expected: method names as method tokens
+fn test_method_calls() {
+    let list = [1, 2, 3];
+    let len = list.len();
+    let mapped = list.map(|x| x * 2);
+    let filtered = list.filter(|x| x > 1);
+    len
+}
+
+// Test 15: Import tokens
+// Expected: 'link' as keyword, module path segments
+mount core.collections.List;
+mount core.io.print;

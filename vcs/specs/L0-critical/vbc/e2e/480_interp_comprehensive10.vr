@@ -1,0 +1,528 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #10: exercises records, closures, generators,
+// spawn/await, lists, f-strings.
+// Milestone: ~307 interpreter tests.
+
+// -- Record types --
+
+type Fraction is { num: Int, den: Int };
+type RunStats is { count: Int, total: Int, sq_total: Int, min_val: Int, max_val: Int };
+
+fn frac_new(n: Int, d: Int) -> Fraction {
+    Fraction { num: n, den: d }
+}
+
+// GCD (used for simplifying fractions)
+@allow(unbounded_recursion)
+fn gcd_frac(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd_frac(b, a % b) }
+}
+
+fn frac_simplify(f: Fraction) -> Fraction {
+    let g = gcd_frac(if f.num < 0 { 0 - f.num } else { f.num },
+                     if f.den < 0 { 0 - f.den } else { f.den });
+    if g == 0 {
+        f
+    } else {
+        Fraction { num: f.num / g, den: f.den / g }
+    }
+}
+
+fn frac_add(a: Fraction, b: Fraction) -> Fraction {
+    frac_simplify(Fraction { num: a.num * b.den + b.num * a.den, den: a.den * b.den })
+}
+
+fn frac_mul(a: Fraction, b: Fraction) -> Fraction {
+    frac_simplify(Fraction { num: a.num * b.num, den: a.den * b.den })
+}
+
+fn frac_eq(a: Fraction, b: Fraction) -> Int {
+    let sa = frac_simplify(a);
+    let sb = frac_simplify(b);
+    if sa.num == sb.num && sa.den == sb.den { 1 } else { 0 }
+}
+
+fn stats_new() -> RunStats {
+    RunStats { count: 0, total: 0, sq_total: 0, min_val: 1000000, max_val: -1000000 }
+}
+
+fn stats_add(s: RunStats, v: Int) -> RunStats {
+    let new_min = if v < s.min_val { v } else { s.min_val };
+    let new_max = if v > s.max_val { v } else { s.max_val };
+    RunStats {
+        count:    s.count + 1,
+        total:    s.total + v,
+        sq_total: s.sq_total + v * v,
+        min_val:  new_min,
+        max_val:  new_max
+    }
+}
+
+fn test_records() {
+    // Fraction arithmetic: 1/2 + 1/3 = 5/6
+    let a = frac_new(1, 2);
+    let b = frac_new(1, 3);
+    let c = frac_add(a, b);
+    assert_eq(c.num, 5);
+    assert_eq(c.den, 6);
+
+    // 2/3 * 3/4 = 6/12 = 1/2
+    let d = frac_mul(frac_new(2, 3), frac_new(3, 4));
+    assert_eq(d.num, 1);
+    assert_eq(d.den, 2);
+
+    // Sum 1/1 + 1/2 + 1/3 + 1/4 = 12/12 + 6/12 + 4/12 + 3/12 = 25/12
+    let mut acc = frac_new(0, 1);
+    acc = frac_add(acc, frac_new(1, 1));
+    acc = frac_add(acc, frac_new(1, 2));
+    acc = frac_add(acc, frac_new(1, 3));
+    acc = frac_add(acc, frac_new(1, 4));
+    assert_eq(acc.num, 25);
+    assert_eq(acc.den, 12);
+
+    // RunStats: add values 4, 7, 2, 9, 5
+    // total=27, count=5, sq_total=16+49+4+81+25=175, min=2, max=9
+    let mut st = stats_new();
+    st = stats_add(st, 4);
+    st = stats_add(st, 7);
+    st = stats_add(st, 2);
+    st = stats_add(st, 9);
+    st = stats_add(st, 5);
+    assert_eq(st.count,    5);
+    assert_eq(st.total,    27);
+    assert_eq(st.sq_total, 175);
+    assert_eq(st.min_val,  2);
+    assert_eq(st.max_val,  9);
+
+    print("records: ok");
+}
+
+// -- Closures --
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn compose_add(arr: [Int; 8], n: Int, f: fn(Int) -> Int, g: fn(Int) -> Int, out: [Int; 8]) {
+    let mut i = 0;
+    while i < n {
+        out[i] = f(arr[i]) + g(arr[i]);
+        i = i + 1;
+    }
+}
+
+fn scan_left(f: fn(Int, Int) -> Int, init: Int, arr: [Int; 8], n: Int, out: [Int; 8]) {
+    let mut acc = init;
+    let mut i = 0;
+    while i < n {
+        acc = f(acc, arr[i]);
+        out[i] = acc;
+        i = i + 1;
+    }
+}
+
+fn test_closures() {
+    // apply_twice: double(double(3)) = 12
+    let double = |x: Int| -> Int { x * 2 };
+    assert_eq(apply_twice(double, 3), 12);
+
+    // apply_twice: increment(increment(10)) = 12
+    let inc = |x: Int| -> Int { x + 1 };
+    assert_eq(apply_twice(inc, 10), 12);
+
+    // compose_add: f(x)+g(x) where f=square, g=double
+    // [1,2,3,4,5] -> [1+2, 4+4, 9+6, 16+8, 25+10] = [3, 8, 15, 24, 35]
+    let arr = [1, 2, 3, 4, 5, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0];
+    let sq  = |x: Int| -> Int { x * x };
+    let dbl = |x: Int| -> Int { x * 2 };
+    compose_add(arr, 5, sq, dbl, out);
+    assert_eq(out[0], 3);
+    assert_eq(out[1], 8);
+    assert_eq(out[2], 15);
+    assert_eq(out[3], 24);
+    assert_eq(out[4], 35);
+
+    // scan_left (running sum): [1,2,3,4,5] -> [1,3,6,10,15]
+    let mut scan_out = [0, 0, 0, 0, 0, 0, 0, 0];
+    let add = |a: Int, b: Int| -> Int { a + b };
+    scan_left(add, 0, arr, 5, scan_out);
+    assert_eq(scan_out[0], 1);
+    assert_eq(scan_out[1], 3);
+    assert_eq(scan_out[2], 6);
+    assert_eq(scan_out[3], 10);
+    assert_eq(scan_out[4], 15);
+
+    // scan_left (running product): [1,2,3,4,5] -> [1,2,6,24,120]
+    let mut prod_out = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mul = |a: Int, b: Int| -> Int { a * b };
+    scan_left(mul, 1, arr, 5, prod_out);
+    assert_eq(prod_out[0], 1);
+    assert_eq(prod_out[1], 2);
+    assert_eq(prod_out[2], 6);
+    assert_eq(prod_out[3], 24);
+    assert_eq(prod_out[4], 120);
+
+    print("closures: ok");
+}
+
+// -- Generators --
+
+fn* triangular_numbers(n: Int) -> Int {
+    // Yield T(k) = k*(k+1)/2 for k=1..n
+    let mut k = 1;
+    while k <= n {
+        yield k * (k + 1) / 2;
+        k = k + 1;
+    }
+}
+
+fn* powers_of(base: Int, n: Int) -> Int {
+    let mut p = 1;
+    let mut k = 0;
+    while k < n {
+        yield p;
+        p = p * base;
+        k = k + 1;
+    }
+}
+
+fn* interleave_gen(a_arr: [Int; 8], b_arr: [Int; 8], n: Int) -> Int {
+    // Yield a[0], b[0], a[1], b[1], ..., a[n-1], b[n-1]
+    let mut i = 0;
+    while i < n {
+        yield a_arr[i];
+        yield b_arr[i];
+        i = i + 1;
+    }
+}
+
+fn test_generators() {
+    // Triangular numbers T(1)..T(8) = 1,3,6,10,15,21,28,36
+    let mut tri = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for t in triangular_numbers(8) {
+        tri[idx] = t;
+        idx = idx + 1;
+    }
+    assert_eq(tri[0], 1);
+    assert_eq(tri[1], 3);
+    assert_eq(tri[2], 6);
+    assert_eq(tri[3], 10);
+    assert_eq(tri[4], 15);
+    assert_eq(tri[5], 21);
+    assert_eq(tri[6], 28);
+    assert_eq(tri[7], 36);
+    // Sum = 1+3+6+10+15+21+28+36 = 120
+    let mut tri_sum = 0;
+    let mut k = 0;
+    while k < 8 { tri_sum = tri_sum + tri[k]; k = k + 1; }
+    assert_eq(tri_sum, 120);
+
+    // Powers of 2: 1,2,4,8,16,32,64,128
+    let mut pw2 = [0, 0, 0, 0, 0, 0, 0, 0];
+    idx = 0;
+    for p in powers_of(2, 8) {
+        pw2[idx] = p;
+        idx = idx + 1;
+    }
+    assert_eq(pw2[0], 1);
+    assert_eq(pw2[7], 128);
+    // Sum = 2^8 - 1 = 255
+    let mut pw2_sum = 0;
+    k = 0;
+    while k < 8 { pw2_sum = pw2_sum + pw2[k]; k = k + 1; }
+    assert_eq(pw2_sum, 255);
+
+    // Interleave [1,3,5,7] and [2,4,6,8] -> [1,2,3,4,5,6,7,8]
+    let aa = [1, 3, 5, 7, 0, 0, 0, 0];
+    let bb = [2, 4, 6, 8, 0, 0, 0, 0];
+    let mut il = [0, 0, 0, 0, 0, 0, 0, 0];
+    idx = 0;
+    for v in interleave_gen(aa, bb, 4) {
+        il[idx] = v;
+        idx = idx + 1;
+    }
+    assert_eq(il[0], 1); assert_eq(il[1], 2);
+    assert_eq(il[2], 3); assert_eq(il[3], 4);
+    assert_eq(il[4], 5); assert_eq(il[5], 6);
+    assert_eq(il[6], 7); assert_eq(il[7], 8);
+
+    print("generators: ok");
+}
+
+// -- Spawn/Await --
+
+fn sum_of_squares(lo: Int, hi: Int) -> Int {
+    // Sum of i^2 for i=lo..hi (inclusive)
+    let mut s = 0;
+    let mut i = lo;
+    while i <= hi { s = s + i * i; i = i + 1; }
+    s
+}
+
+fn count_primes(n: Int) -> Int {
+    // Count primes <= n (trial division)
+    let mut cnt = 0;
+    let mut candidate = 2;
+    while candidate <= n {
+        let mut is_prime = 1;
+        let mut d = 2;
+        while d * d <= candidate {
+            if candidate % d == 0 { is_prime = 0; }
+            d = d + 1;
+        }
+        if is_prime == 1 { cnt = cnt + 1; }
+        candidate = candidate + 1;
+    }
+    cnt
+}
+
+fn collatz_steps(n: Int) -> Int {
+    // Number of steps to reach 1 in Collatz sequence
+    let mut v = n;
+    let mut steps = 0;
+    while v != 1 {
+        if v % 2 == 0 { v = v / 2; } else { v = 3 * v + 1; }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn test_spawn_await() {
+    // sum_of_squares(1, 10) = 1+4+9+16+25+36+49+64+81+100 = 385
+    let t1 = spawn sum_of_squares(1, 10);
+
+    // count_primes(20) = 2,3,5,7,11,13,17,19 = 8 primes
+    let t2 = spawn count_primes(20);
+
+    // collatz_steps(27) = 111 steps
+    let t3 = spawn collatz_steps(27);
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+
+    assert_eq(r1, 385);
+    assert_eq(r2, 8);
+    assert_eq(r3, 111);
+
+    // Additional: sum_of_squares(1,5) = 1+4+9+16+25 = 55
+    // count_primes(50) = 2,3,5,7,11,13,17,19,23,29,31,37,41,43,47 = 15
+    let t4 = spawn sum_of_squares(1, 5);
+    let t5 = spawn count_primes(50);
+
+    let r4 = t4.await;
+    let r5 = t5.await;
+    assert_eq(r4, 55);
+    assert_eq(r5, 15);
+
+    print("spawn_await: ok");
+}
+
+// -- List operations --
+
+fn test_list_operations() {
+    // Insertion sort on [5,2,8,1,9,3,7,4]
+    let mut arr = [5, 2, 8, 1, 9, 3, 7, 4];
+    let n = 8;
+    let mut i = 1;
+    while i < n {
+        let key = arr[i];
+        let mut j = i - 1;
+        while j >= 0 && arr[j] > key {
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = key;
+        i = i + 1;
+    }
+    // Sorted: [1,2,3,4,5,7,8,9]
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[3], 4);
+    assert_eq(arr[4], 5);
+    assert_eq(arr[5], 7);
+    assert_eq(arr[6], 8);
+    assert_eq(arr[7], 9);
+
+    // Prefix maximum: running max of [3,1,4,1,5,9,2,6]
+    let inp = [3, 1, 4, 1, 5, 9, 2, 6];
+    let mut pmax = [0, 0, 0, 0, 0, 0, 0, 0];
+    pmax[0] = inp[0];
+    i = 1;
+    while i < n {
+        pmax[i] = if inp[i] > pmax[i - 1] { inp[i] } else { pmax[i - 1] };
+        i = i + 1;
+    }
+    // Expected: [3,3,4,4,5,9,9,9]
+    assert_eq(pmax[0], 3);
+    assert_eq(pmax[1], 3);
+    assert_eq(pmax[2], 4);
+    assert_eq(pmax[3], 4);
+    assert_eq(pmax[4], 5);
+    assert_eq(pmax[5], 9);
+    assert_eq(pmax[6], 9);
+    assert_eq(pmax[7], 9);
+
+    // Two-pointer: count pairs (i,j) with i<j and arr_sorted[i]+arr_sorted[j]==10
+    // sorted arr = [1,2,3,4,5,7,8,9], target = 10
+    // pairs: (1,9),(2,8),(3,7) = 3 pairs
+    let mut pair_cnt = 0;
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo < hi {
+        let s = arr[lo] + arr[hi];
+        if s == 10 { pair_cnt = pair_cnt + 1; lo = lo + 1; hi = hi - 1; }
+        else if s < 10 { lo = lo + 1; }
+        else { hi = hi - 1; }
+    }
+    assert_eq(pair_cnt, 3);
+
+    print("list_operations: ok");
+}
+
+// -- Format strings --
+
+fn test_format_strings() {
+    // Fraction formatting
+    let f1 = frac_simplify(frac_new(6, 8));
+    print(f"fraction: {f1.num}/{f1.den}");  // 3/4
+    assert_eq(f1.num, 3);
+    assert_eq(f1.den, 4);
+
+    // Stats formatting
+    let mut st = stats_new();
+    let vals = [10, 20, 30, 40, 50, 0, 0, 0];
+    let mut i = 0;
+    while i < 5 {
+        st = stats_add(st, vals[i]);
+        print(f"  i={i} val={vals[i]} running_total={st.total}");
+        i = i + 1;
+    }
+    // total=150, count=5, sq_total=100+400+900+1600+2500=5500, min=10, max=50
+    assert_eq(st.total,    150);
+    assert_eq(st.count,    5);
+    assert_eq(st.sq_total, 5500);
+    assert_eq(st.min_val,  10);
+    assert_eq(st.max_val,  50);
+
+    // Generator output with f-string
+    let mut pw3 = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for p in powers_of(3, 6) {
+        pw3[idx] = p;
+        idx = idx + 1;
+    }
+    // 3^0=1, 3^1=3, 3^2=9, 3^3=27, 3^4=81, 3^5=243
+    print(f"powers_of_3: {pw3[0]} {pw3[1]} {pw3[2]} {pw3[3]} {pw3[4]} {pw3[5]}");
+    assert_eq(pw3[0], 1);
+    assert_eq(pw3[5], 243);
+
+    // Sum of first 6 powers of 3 = (3^6 - 1) / (3 - 1) = (729-1)/2 = 364
+    let mut pw3_sum = 0;
+    i = 0;
+    while i < 6 { pw3_sum = pw3_sum + pw3[i]; i = i + 1; }
+    assert_eq(pw3_sum, 364);
+    print(f"pow3_sum={pw3_sum}");
+
+    print("format_strings: ok");
+}
+
+// -- Combined pipeline --
+
+@allow(unbounded_recursion)
+fn gcd_pipe(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd_pipe(b, a % b) }
+}
+
+fn is_prime_check(n: Int) -> Int {
+    if n < 2 { return 0; }
+    let mut d = 2;
+    while d * d <= n {
+        if n % d == 0 { return 0; }
+        d = d + 1;
+    }
+    1
+}
+
+fn test_combined_pipeline() {
+    // Generator: triangular numbers 1..10 = 1,3,6,10,15,21,28,36,45,55
+    let mut tri10 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for t in triangular_numbers(10) {
+        tri10[idx] = t;
+        idx = idx + 1;
+    }
+    // Sum = T(10) contributions: 1+3+6+10+15+21+28+36+45+55 = 220
+    let mut tri_sum = 0;
+    let mut k = 0;
+    while k < 10 { tri_sum = tri_sum + tri10[k]; k = k + 1; }
+    assert_eq(tri_sum, 220);
+
+    // Closure: filter triangular numbers that are also perfect squares
+    // T(1)=1=1^2, T(8)=36=6^2, (T(49)=1225=35^2 too big for our range)
+    // Among 1,3,6,10,15,21,28,36,45,55: squares are 1 and 36.
+    let is_sq = |n: Int| -> Int {
+        let mut r = 0;
+        while r * r <= n { if r * r == n { return 1; } r = r + 1; }
+        0
+    };
+    let mut sq_tri = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sq_cnt = 0;
+    k = 0;
+    while k < 10 {
+        if is_sq(tri10[k]) == 1 { sq_tri[sq_cnt] = tri10[k]; sq_cnt = sq_cnt + 1; }
+        k = k + 1;
+    }
+    assert_eq(sq_cnt, 2);
+    assert_eq(sq_tri[0], 1);
+    assert_eq(sq_tri[1], 36);
+
+    // Spawn: compute GCD pairs and prime checks concurrently
+    let t1 = spawn gcd_pipe(48, 36);    // gcd(48,36) = 12
+    let t2 = spawn count_primes(30);    // primes <= 30: 2,3,5,7,11,13,17,19,23,29 = 10
+    let t3 = spawn collatz_steps(6);    // 6->3->10->5->16->8->4->2->1 = 8 steps
+    let g1 = t1.await;
+    let g2 = t2.await;
+    let g3 = t3.await;
+    assert_eq(g1, 12);
+    assert_eq(g2, 10);
+    assert_eq(g3, 8);
+
+    // Fraction pipeline: compute sum of 1/T(k) for T(k) in tri10
+    // = 1/1 + 1/3 + 1/6 + 1/10 + 1/15 + 1/21 + 1/28 + 1/36 + 1/45 + 1/55
+    // This telescopes to 2*(1 - 1/(n+1)) for n=10: = 2*(1 - 1/11) = 20/11
+    let mut frac_sum = frac_new(0, 1);
+    k = 0;
+    while k < 10 {
+        frac_sum = frac_add(frac_sum, frac_new(1, tri10[k]));
+        k = k + 1;
+    }
+    // 1/T(k) = 2/(k*(k+1)), sum k=1..10 = 2*sum(1/k - 1/(k+1)) = 2*(1 - 1/11) = 20/11
+    assert_eq(frac_sum.num, 20);
+    assert_eq(frac_sum.den, 11);
+
+    let msg = f"pipeline: tri_sum={tri_sum} sq_cnt={sq_cnt} gcd={g1} primes30={g2} collatz6={g3}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_records();
+    test_closures();
+    test_generators();
+    test_spawn_await();
+    test_list_operations();
+    test_format_strings();
+    test_combined_pipeline();
+    print("[OK] 480_interp_comprehensive10 — MILESTONE: ~307 interpreter tests");
+    0
+}

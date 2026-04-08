@@ -1,0 +1,152 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, error, result, option
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests error handling patterns: Result-like types, Option-like types,
+// error propagation via if/else, and recovery patterns.
+
+type Maybe<T> is None | Some(T);
+
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+fn safe_sqrt_int(n: Int) -> Maybe<Int> {
+    if n < 0 {
+        None
+    } else {
+        // Integer square root via Newton's method
+        if n == 0 {
+            Some(0)
+        } else {
+            let mut x = n;
+            let mut y = (x + 1) / 2;
+            while y < x {
+                x = y;
+                y = (x + n / x) / 2;
+            }
+            Some(x)
+        }
+    }
+}
+
+fn unwrap_or(val: Maybe<Int>, default_val: Int) -> Int {
+    match val {
+        Some(x) => x,
+        None => default_val,
+    }
+}
+
+fn test_safe_divide() {
+    let r1 = safe_divide(10, 3);
+    let v1 = unwrap_or(r1, -1);
+    assert_eq(v1, 3);
+
+    let r2 = safe_divide(10, 0);
+    let v2 = unwrap_or(r2, -1);
+    assert_eq(v2, -1);
+
+    let r3 = safe_divide(100, 5);
+    let v3 = unwrap_or(r3, -1);
+    assert_eq(v3, 20);
+
+    print("safe_divide: ok");
+}
+
+fn test_safe_sqrt() {
+    let r1 = safe_sqrt_int(16);
+    assert_eq(unwrap_or(r1, -1), 4);
+
+    let r2 = safe_sqrt_int(0);
+    assert_eq(unwrap_or(r2, -1), 0);
+
+    let r3 = safe_sqrt_int(-5);
+    assert_eq(unwrap_or(r3, -1), -1);
+
+    let r4 = safe_sqrt_int(100);
+    assert_eq(unwrap_or(r4, -1), 10);
+
+    print("safe_sqrt: ok");
+}
+
+fn test_chained_operations() {
+    // Chain multiple fallible operations
+    let a = safe_divide(100, 4);   // Some(25)
+    let b = match a {
+        Some(x) => safe_sqrt_int(x),  // Some(5)
+        None => None,
+    };
+    let c = match b {
+        Some(x) => safe_divide(x * 10, 3),  // Some(16)
+        None => None,
+    };
+    assert_eq(unwrap_or(c, -1), 16);
+
+    // Chain that fails at step 1
+    let d = safe_divide(100, 0);  // None
+    let e = match d {
+        Some(x) => safe_sqrt_int(x),
+        None => None,
+    };
+    assert_eq(unwrap_or(e, -1), -1);
+
+    print("chained_operations: ok");
+}
+
+fn test_accumulate_results() {
+    // Try to divide by each of 1..5, accumulate successful results
+    let mut total = 0;
+    let mut successes = 0;
+    let mut i = 0;
+    while i < 6 {
+        let r = safe_divide(100, i);
+        match r {
+            Some(x) => {
+                total = total + x;
+                successes = successes + 1;
+            },
+            None => {},
+        }
+        i = i + 1;
+    }
+    // i=0: None, i=1: 100, i=2: 50, i=3: 33, i=4: 25, i=5: 20
+    assert_eq(successes, 5);
+    assert_eq(total, 228);
+    print("accumulate_results: ok");
+}
+
+fn test_nested_maybe() {
+    // Test deeply nested error handling
+    let val = 144;
+    let step1 = safe_sqrt_int(val);
+    let step2 = match step1 {
+        Some(x) => {
+            // sqrt(144) = 12
+            if x > 10 {
+                safe_divide(x, 4)  // 12 / 4 = 3
+            } else {
+                safe_divide(x, 2)
+            }
+        },
+        None => None,
+    };
+    assert_eq(unwrap_or(step2, -1), 3);
+    print("nested_maybe: ok");
+}
+
+fn main() -> Int {
+    test_safe_divide();
+    test_safe_sqrt();
+    test_chained_operations();
+    test_accumulate_results();
+    test_nested_maybe();
+    print("[OK] 393_interp_error_handling");
+    0
+}

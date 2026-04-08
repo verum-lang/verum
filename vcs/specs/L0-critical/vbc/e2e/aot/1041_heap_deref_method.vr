@@ -1,0 +1,75 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: heap, deref, method, recursive, sum_type
+// @expect: pass
+
+// Tests (*l).method() dispatch on Heap<T> wrapped recursive sum types
+// Verifies type inference through Paren(Deref(x)) receiver expressions
+
+type Expr is
+    Lit(Int)
+    | Add(Heap<Expr>, Heap<Expr>)
+    | Mul(Heap<Expr>, Heap<Expr>)
+    | Neg(Heap<Expr>);
+
+implement Expr {
+    @allow(unbounded_recursion)
+    fn eval(&self) -> Int {
+        match self {
+            Expr.Lit(v) => v,
+            Expr.Add(l, r) => (*l).eval() + (*r).eval(),
+            Expr.Mul(l, r) => (*l).eval() * (*r).eval(),
+            Expr.Neg(inner) => 0 - (*inner).eval(),
+        }
+    }
+
+    @allow(unbounded_recursion)
+    fn depth(&self) -> Int {
+        match self {
+            Expr.Lit(_) => 0,
+            Expr.Add(l, r) => {
+                let ld = (*l).depth();
+                let rd = (*r).depth();
+                if ld > rd { ld + 1 } else { rd + 1 }
+            },
+            Expr.Mul(l, r) => {
+                let ld = (*l).depth();
+                let rd = (*r).depth();
+                if ld > rd { ld + 1 } else { rd + 1 }
+            },
+            Expr.Neg(inner) => (*inner).depth() + 1,
+        }
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Literal
+    let e1 = Expr.Lit(42);
+    if e1.eval() != 42 { return 1; }
+
+    // Test 2: Simple add: 3 + 4 = 7
+    let e2 = Expr.Add(Heap(Expr.Lit(3)), Heap(Expr.Lit(4)));
+    if e2.eval() != 7 { return 2; }
+
+    // Test 3: Negate: -(5) = -5
+    let e3 = Expr.Neg(Heap(Expr.Lit(5)));
+    if e3.eval() != -5 { return 3; }
+
+    // Test 4: Nested: (3 + 4) * (5 + -(2)) = 7 * 3 = 21
+    let sum1 = Expr.Add(Heap(Expr.Lit(3)), Heap(Expr.Lit(4)));
+    let neg2 = Expr.Neg(Heap(Expr.Lit(2)));
+    let sum2 = Expr.Add(Heap(Expr.Lit(5)), Heap(neg2));
+    let prod = Expr.Mul(Heap(sum1), Heap(sum2));
+    if prod.eval() != 21 { return 4; }
+
+    // Test 5: Depth check
+    if prod.depth() != 3 { return 5; }
+
+    // Test 6: Deep nesting: ---3 = -3
+    let deep = Expr.Neg(Heap(Expr.Neg(Heap(Expr.Neg(Heap(Expr.Lit(3)))))));
+    if deep.eval() != -3 { return 6; }
+    if deep.depth() != 3 { return 7; }
+
+    0
+}

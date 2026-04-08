@@ -1,0 +1,444 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, ml, autodiff, gradient
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Basic autodiff — manual chain rule, gradient computation, dual numbers
+
+// ============================================================================
+// Float helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn round_milli(x: Float) -> Int {
+    let scaled = x * 1000.0;
+    if scaled >= 0.0 {
+        (scaled + 0.5) as Int
+    } else {
+        (scaled - 0.5) as Int
+    }
+}
+
+// ============================================================================
+// Dual number type: (value, derivative)
+// ============================================================================
+
+type Dual is { val: Float, deriv: Float };
+
+// ============================================================================
+// Dual number core operations — extract fields with type annotations
+// ============================================================================
+
+fn dual_get_val(d: Dual) -> Float {
+    d.val
+}
+
+fn dual_get_deriv(d: Dual) -> Float {
+    d.deriv
+}
+
+fn dual_var(x: Float) -> Dual {
+    Dual { val: x, deriv: 1.0 }
+}
+
+fn dual_const(c: Float) -> Dual {
+    Dual { val: c, deriv: 0.0 }
+}
+
+fn dual_add(a: Dual, b: Dual) -> Dual {
+    let av = dual_get_val(a);
+    let bv = dual_get_val(b);
+    let ad = dual_get_deriv(a);
+    let bd = dual_get_deriv(b);
+    Dual { val: av + bv, deriv: ad + bd }
+}
+
+fn dual_sub(a: Dual, b: Dual) -> Dual {
+    let av = dual_get_val(a);
+    let bv = dual_get_val(b);
+    let ad = dual_get_deriv(a);
+    let bd = dual_get_deriv(b);
+    Dual { val: av - bv, deriv: ad - bd }
+}
+
+fn dual_mul(a: Dual, b: Dual) -> Dual {
+    // Product rule: (a*b)' = a*b' + a'*b
+    let av = dual_get_val(a);
+    let bv = dual_get_val(b);
+    let ad = dual_get_deriv(a);
+    let bd = dual_get_deriv(b);
+    Dual { val: av * bv, deriv: av * bd + ad * bv }
+}
+
+fn dual_div(a: Dual, b: Dual) -> Dual {
+    // Quotient rule: (a/b)' = (a'*b - a*b') / b^2
+    let av = dual_get_val(a);
+    let bv = dual_get_val(b);
+    let ad = dual_get_deriv(a);
+    let bd = dual_get_deriv(b);
+    let val = av / bv;
+    let deriv = (ad * bv - av * bd) / (bv * bv);
+    Dual { val: val, deriv: deriv }
+}
+
+// ============================================================================
+// Test 1: Dual number addition
+// (a,a') + (b,b') = (a+b, a'+b')
+// ============================================================================
+
+fn test_dual_number_add() {
+    // x = 3.0 as variable (deriv=1)
+    let x = dual_var(3.0);
+    // c = 5.0 as constant (deriv=0)
+    let c = dual_const(5.0);
+
+    // f(x) = x + 5
+    let result = dual_add(x, c);
+    let rv = dual_get_val(result);
+    let rd = dual_get_deriv(result);
+    assert_eq(round_milli(rv), 8000);   // 3+5 = 8
+    assert_eq(round_milli(rd), 1000);   // d/dx(x+5) = 1
+
+    // f(x) = x + x = 2x
+    let result2 = dual_add(x, x);
+    let rv2 = dual_get_val(result2);
+    let rd2 = dual_get_deriv(result2);
+    assert_eq(round_milli(rv2), 6000);   // 3+3 = 6
+    assert_eq(round_milli(rd2), 2000);   // d/dx(2x) = 2
+
+    // f(x) = x + 0
+    let zero = dual_const(0.0);
+    let result3 = dual_add(x, zero);
+    let rv3 = dual_get_val(result3);
+    let rd3 = dual_get_deriv(result3);
+    assert_eq(round_milli(rv3), 3000);
+    assert_eq(round_milli(rd3), 1000);
+
+    print("  test_dual_number_add: ok");
+}
+
+// ============================================================================
+// Test 2: Dual number multiplication (product rule)
+// (a,a') * (b,b') = (a*b, a*b' + a'*b)
+// ============================================================================
+
+fn test_dual_number_mul() {
+    let x = dual_var(4.0);
+
+    // f(x) = x * 3 => f'(x) = 3
+    let c3 = dual_const(3.0);
+    let result = dual_mul(x, c3);
+    let rv = dual_get_val(result);
+    let rd = dual_get_deriv(result);
+    assert_eq(round_milli(rv), 12000);   // 4*3 = 12
+    assert_eq(round_milli(rd), 3000);    // d/dx(3x) = 3
+
+    // f(x) = x * x = x^2 => f'(x) = 2x
+    let result2 = dual_mul(x, x);
+    let rv2 = dual_get_val(result2);
+    let rd2 = dual_get_deriv(result2);
+    assert_eq(round_milli(rv2), 16000);   // 4^2 = 16
+    assert_eq(round_milli(rd2), 8000);    // 2*4 = 8
+
+    // f(x) = x * 0 => f'(x) = 0
+    let zero = dual_const(0.0);
+    let result3 = dual_mul(x, zero);
+    let rv3 = dual_get_val(result3);
+    let rd3 = dual_get_deriv(result3);
+    assert_eq(round_milli(rv3), 0);
+    assert_eq(round_milli(rd3), 0);
+
+    // f(x) = x * 1 => f'(x) = 1
+    let one = dual_const(1.0);
+    let result4 = dual_mul(x, one);
+    let rv4 = dual_get_val(result4);
+    let rd4 = dual_get_deriv(result4);
+    assert_eq(round_milli(rv4), 4000);
+    assert_eq(round_milli(rd4), 1000);
+
+    print("  test_dual_number_mul: ok");
+}
+
+// ============================================================================
+// Test 3: Gradient of polynomial f(x) = 3x^2 + 2x + 1
+// f'(x) = 6x + 2
+// At x=2: f(2) = 12+4+1 = 17, f'(2) = 12+2 = 14
+// ============================================================================
+
+fn eval_poly(x: Dual) -> Dual {
+    let c3 = dual_const(3.0);
+    let c2 = dual_const(2.0);
+    let c1 = dual_const(1.0);
+    let x_sq = dual_mul(x, x);
+    let term1 = dual_mul(c3, x_sq);
+    let term2 = dual_mul(c2, x);
+    let sum12 = dual_add(term1, term2);
+    dual_add(sum12, c1)
+}
+
+fn test_gradient_polynomial() {
+    let x = dual_var(2.0);
+    let result = eval_poly(x);
+    let rv = dual_get_val(result);
+    let rd = dual_get_deriv(result);
+    assert_eq(round_milli(rv), 17000);    // f(2) = 17
+    assert_eq(round_milli(rd), 14000);    // f'(2) = 14
+
+    // At x=0: f(0) = 1, f'(0) = 2
+    let x0 = dual_var(0.0);
+    let r0 = eval_poly(x0);
+    let rv0 = dual_get_val(r0);
+    let rd0 = dual_get_deriv(r0);
+    assert_eq(round_milli(rv0), 1000);
+    assert_eq(round_milli(rd0), 2000);
+
+    // At x=-1: f(-1) = 3-2+1 = 2, f'(-1) = -6+2 = -4
+    let xn = dual_var(0.0 - 1.0);
+    let rn = eval_poly(xn);
+    let rvn = dual_get_val(rn);
+    let rdn = dual_get_deriv(rn);
+    assert_eq(round_milli(rvn), 2000);
+    assert_eq(round_milli(rdn), 0 - 4000);
+
+    print("  test_gradient_polynomial: ok");
+}
+
+// ============================================================================
+// Test 4: Chain rule: f(x) = (2x+1)^2
+// f'(x) = 2 * 2 * (2x+1) = 4*(2x+1)
+// At x=1: f(1) = 9, f'(1) = 12
+// ============================================================================
+
+fn eval_chain(x: Dual) -> Dual {
+    let c2 = dual_const(2.0);
+    let c1 = dual_const(1.0);
+    let inner = dual_add(dual_mul(c2, x), c1);
+    dual_mul(inner, inner)
+}
+
+fn test_gradient_chain_rule() {
+    let x = dual_var(1.0);
+    let result = eval_chain(x);
+    let rv = dual_get_val(result);
+    let rd = dual_get_deriv(result);
+    assert_eq(round_milli(rv), 9000);      // (2*1+1)^2 = 9
+    assert_eq(round_milli(rd), 12000);     // 4*(2*1+1) = 12
+
+    // At x=0: f(0) = 1, f'(0) = 4
+    let x0 = dual_var(0.0);
+    let r0 = eval_chain(x0);
+    let rv0 = dual_get_val(r0);
+    let rd0 = dual_get_deriv(r0);
+    assert_eq(round_milli(rv0), 1000);
+    assert_eq(round_milli(rd0), 4000);
+
+    // At x=2: f(2) = (5)^2 = 25, f'(2) = 4*5 = 20
+    let x2 = dual_var(2.0);
+    let r2 = eval_chain(x2);
+    let rv2 = dual_get_val(r2);
+    let rd2 = dual_get_deriv(r2);
+    assert_eq(round_milli(rv2), 25000);
+    assert_eq(round_milli(rd2), 20000);
+
+    print("  test_gradient_chain_rule: ok");
+}
+
+// ============================================================================
+// Test 5: Quotient rule: f(x) = x / (x+1)
+// f'(x) = 1/(x+1)^2
+// At x=1: f(1) = 0.5, f'(1) = 0.25
+// ============================================================================
+
+fn eval_quotient(x: Dual) -> Dual {
+    let c1 = dual_const(1.0);
+    let denom = dual_add(x, c1);
+    dual_div(x, denom)
+}
+
+fn test_gradient_quotient() {
+    let x = dual_var(1.0);
+    let result = eval_quotient(x);
+    let rv = dual_get_val(result);
+    let rd = dual_get_deriv(result);
+    assert_eq(round_milli(rv), 500);        // 1/2 = 0.5
+    assert_eq(round_milli(rd), 250);        // 1/4 = 0.25
+
+    // At x=0: f(0) = 0, f'(0) = 1
+    let x0 = dual_var(0.0);
+    let r0 = eval_quotient(x0);
+    let rv0 = dual_get_val(r0);
+    let rd0 = dual_get_deriv(r0);
+    assert_eq(round_milli(rv0), 0);
+    assert_eq(round_milli(rd0), 1000);
+
+    // At x=3: f(3) = 3/4 = 0.75, f'(3) = 1/16 = 0.0625
+    let x3 = dual_var(3.0);
+    let r3 = eval_quotient(x3);
+    let rv3 = dual_get_val(r3);
+    let rd3 = dual_get_deriv(r3);
+    assert_eq(round_milli(rv3), 750);
+    let deriv_milli = round_milli(rd3);
+    assert(deriv_milli >= 62);
+    assert(deriv_milli <= 63);
+
+    print("  test_gradient_quotient: ok");
+}
+
+// ============================================================================
+// Test 6: Finite difference verification
+// Compare dual number derivative with (f(x+h) - f(x)) / h
+// ============================================================================
+
+fn eval_poly_float(x: Float) -> Float {
+    3.0 * x * x + 2.0 * x + 1.0
+}
+
+fn test_finite_difference() {
+    let x_val = 2.0;
+    let h = 0.0001;
+
+    // Dual number derivative
+    let x = dual_var(x_val);
+    let dual_result = eval_poly(x);
+    let dual_deriv = dual_get_deriv(dual_result);
+
+    // Finite difference approximation
+    let f_x = eval_poly_float(x_val);
+    let f_xh = eval_poly_float(x_val + h);
+    let fd_deriv = (f_xh - f_x) / h;
+
+    // Both should be close to 14.0
+    let diff = abs_f(dual_deriv - fd_deriv);
+    assert(diff < 0.01);
+
+    // Also check at x=5: f'(5) = 32
+    let x5 = dual_var(5.0);
+    let dual5 = eval_poly(x5);
+    let dual5_d = dual_get_deriv(dual5);
+    let f5 = eval_poly_float(5.0);
+    let f5h = eval_poly_float(5.0 + h);
+    let fd5 = (f5h - f5) / h;
+    let diff5 = abs_f(dual5_d - fd5);
+    assert(diff5 < 0.01);
+
+    print("  test_finite_difference: ok");
+}
+
+// ============================================================================
+// Test 7: Function composition: g(f(x))
+// f(x) = x^2, g(y) = 2y + 1
+// g(f(x)) = 2x^2 + 1, d/dx = 4x
+// ============================================================================
+
+fn eval_f_inner(x: Dual) -> Dual {
+    dual_mul(x, x)
+}
+
+fn eval_g_outer(y: Dual) -> Dual {
+    let c2 = dual_const(2.0);
+    let c1 = dual_const(1.0);
+    dual_add(dual_mul(c2, y), c1)
+}
+
+fn test_gradient_composition() {
+    // g(f(x)) at x=3: g(f(3)) = g(9) = 19, d/dx = 4*3 = 12
+    let x = dual_var(3.0);
+    let fx = eval_f_inner(x);
+    let gfx = eval_g_outer(fx);
+    let gv = dual_get_val(gfx);
+    let gd = dual_get_deriv(gfx);
+    assert_eq(round_milli(gv), 19000);
+    assert_eq(round_milli(gd), 12000);
+
+    // At x=1: g(f(1)) = g(1) = 3, d/dx = 4*1 = 4
+    let x1 = dual_var(1.0);
+    let fx1 = eval_f_inner(x1);
+    let gfx1 = eval_g_outer(fx1);
+    let gv1 = dual_get_val(gfx1);
+    let gd1 = dual_get_deriv(gfx1);
+    assert_eq(round_milli(gv1), 3000);
+    assert_eq(round_milli(gd1), 4000);
+
+    // At x=0: g(f(0)) = g(0) = 1, d/dx = 0
+    let x0 = dual_var(0.0);
+    let fx0 = eval_f_inner(x0);
+    let gfx0 = eval_g_outer(fx0);
+    let gv0 = dual_get_val(gfx0);
+    let gd0 = dual_get_deriv(gfx0);
+    assert_eq(round_milli(gv0), 1000);
+    assert_eq(round_milli(gd0), 0);
+
+    // At x=-2: g(f(-2)) = g(4) = 9, d/dx = 4*(-2) = -8
+    let xn = dual_var(0.0 - 2.0);
+    let fxn = eval_f_inner(xn);
+    let gfxn = eval_g_outer(fxn);
+    let gvn = dual_get_val(gfxn);
+    let gdn = dual_get_deriv(gfxn);
+    assert_eq(round_milli(gvn), 9000);
+    assert_eq(round_milli(gdn), 0 - 8000);
+
+    print("  test_gradient_composition: ok");
+}
+
+// ============================================================================
+// Test 8: Zero gradient (constant function)
+// f(x) = 42. f'(x) = 0 for all x
+// ============================================================================
+
+fn test_zero_gradient() {
+    // f(x) = 42 (constant)
+    let c42 = dual_const(42.0);
+    let cv = dual_get_val(c42);
+    let cd = dual_get_deriv(c42);
+    assert_eq(round_milli(cv), 42000);
+    assert_eq(round_milli(cd), 0);
+
+    // Even if we build it from operations: f(x) = 5 + 37
+    let c5 = dual_const(5.0);
+    let c37 = dual_const(37.0);
+    let result = dual_add(c5, c37);
+    let rv = dual_get_val(result);
+    let rd = dual_get_deriv(result);
+    assert_eq(round_milli(rv), 42000);
+    assert_eq(round_milli(rd), 0);
+
+    // Constant * constant = constant (0 gradient)
+    let c6 = dual_const(6.0);
+    let c7 = dual_const(7.0);
+    let prod = dual_mul(c6, c7);
+    let pv = dual_get_val(prod);
+    let pd = dual_get_deriv(prod);
+    assert_eq(round_milli(pv), 42000);
+    assert_eq(round_milli(pd), 0);
+
+    // x - x = 0, and derivative of (x - x) should also be 0
+    let x = dual_var(10.0);
+    let zero_f = dual_sub(x, x);
+    let zv = dual_get_val(zero_f);
+    let zd = dual_get_deriv(zero_f);
+    assert_eq(round_milli(zv), 0);
+    assert_eq(round_milli(zd), 0);
+
+    print("  test_zero_gradient: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_dual_number_add();
+    test_dual_number_mul();
+    test_gradient_polynomial();
+    test_gradient_chain_rule();
+    test_gradient_quotient();
+    test_finite_difference();
+    test_gradient_composition();
+    test_zero_gradient();
+    print("[OK] 070_autodiff_basic");
+    0
+}

@@ -1,0 +1,307 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L1
+// @tags: types, properties, throws, fallible, inference
+// @description: Test throws clause implies Fallible property inference
+
+/// Tests for throws clause and Fallible property correlation.
+/// Per audit1.md Section 4.3.1: throws clause should automatically imply Fallible property.
+/// Spec: grammar/verum.ebnf Section 2.4 - throws_clause
+/// Spec: docs/audit1.md - Fallible + throws correlation
+
+// === Error Types for Testing ===
+
+type ParseError is
+    | SyntaxError { line: Int, message: Text }
+    | UnexpectedToken(Text)
+    | UnexpectedEof;
+
+type ValidationError is
+    | InvalidInput(Text)
+    | OutOfRange { min: Int, max: Int, actual: Int };
+
+type IoError is
+    | NotFound(Text)
+    | PermissionDenied(Text);
+
+// === Test 1: Basic throws implies Fallible ===
+
+/// A function with throws clause should have Fallible property inferred
+fn parse_number(input: &Text) throws(ParseError) -> Int {
+    if input.is_empty() {
+        throw ParseError.UnexpectedEof;
+    }
+    match input.parse<Int>() {
+        Some(n) => n,
+        None => throw ParseError.SyntaxError {
+            line: 1,
+            message: f"Invalid number: {input}"
+        }
+    }
+}
+
+// Property inference: parse_number has {Fallible}
+
+/// Non-throwing function should NOT have Fallible property
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Property inference: add has {} (empty set, Pure)
+
+// === Test 2: throws propagation implies Fallible ===
+
+/// Calling a throws function with ? propagates Fallible
+fn validate_number(input: &Text) throws(ParseError | ValidationError) -> Int {
+    // This call propagates ParseError and implies Fallible
+    let n = parse_number(input)?;
+
+    if n < 0 || n > 100 {
+        throw ValidationError.OutOfRange { min: 0, max: 100, actual: n };
+    }
+    n
+}
+
+// Property inference: validate_number has {Fallible}
+
+// === Test 3: try expression changes Fallible inference ===
+
+/// Function that catches all errors - removes Fallible from signature
+fn safe_parse(input: &Text) -> Int {
+    try {
+        parse_number(input)?
+    } recover {
+        _ => 0  // Default value on any error
+    }
+}
+
+// Property inference: safe_parse has {} (no Fallible - all errors handled)
+
+/// Function that partially catches errors - still Fallible
+fn partial_catch(input: &Text) throws(ValidationError) -> Int {
+    try {
+        validate_number(input)?
+    } recover {
+        // Catch all errors - simplified to avoid cross-type recover limitation
+        _ => -1
+    }
+}
+
+// Property inference: partial_catch has {Fallible}
+
+// === Test 4: throws with union types ===
+
+/// Multiple error types in throws - still single Fallible property
+fn read_and_parse(path: &Text) throws(IoError | ParseError) -> Int {
+    let content = read_file(path)?;  // IoError
+    parse_number(&content)?          // ParseError
+}
+
+fn read_file(path: &Text) throws(IoError) -> Text {
+    if path.starts_with("/") {
+        "42"
+    } else {
+        throw IoError.NotFound(path.clone());
+    }
+}
+
+// Property inference: read_and_parse has {Fallible}
+// (single Fallible property, not Fallible<IoError> + Fallible<ParseError>)
+
+// === Test 5: Generic throws and Fallible ===
+
+/// Generic function with throws - Fallible applies to all instantiations
+fn map_fallible<T, U, E>(
+    value: T,
+    f: fn(T) -> Result<U, E>
+) throws(E) -> U {
+    f(value)?
+}
+
+// Property inference: map_fallible<T, U, E> has {Fallible}
+
+/// Non-throwing higher-order function
+fn map_pure<T, U>(
+    value: T,
+    f: fn(T) -> U
+) -> U {
+    f(value)
+}
+
+// Property inference: map_pure<T, U> has {}
+
+// === Test 6: async + throws = {Async, Fallible} ===
+
+/// Async throwing function has both properties
+async fn fetch_and_parse(url: &Text) throws(IoError | ParseError) -> Int {
+    let response = fetch(url).await?;
+    parse_number(&response)?
+}
+
+async fn fetch(url: &Text) throws(IoError) -> Text {
+    // Simulated async fetch
+    if url.starts_with("http") {
+        "100"
+    } else {
+        throw IoError.NotFound(url.clone());
+    }
+}
+
+// Property inference: fetch_and_parse has {Async, Fallible}
+// Both properties are independent and orthogonal
+
+// === Test 7: Fallible property transitivity ===
+
+/// Calling a Fallible function makes caller Fallible (when not caught)
+fn level_1() throws(ParseError) -> Int {
+    throw ParseError.UnexpectedEof;
+}
+
+fn level_2() throws(ParseError) -> Int {
+    level_1()?  // Propagates Fallible
+}
+
+fn level_3() throws(ParseError) -> Int {
+    level_2()?  // Still Fallible
+}
+
+fn level_4_catches() -> Int {
+    try {
+        level_3()?
+    } recover {
+        _ => -1
+    }
+}
+
+// Property inference:
+// level_1: {Fallible}
+// level_2: {Fallible}
+// level_3: {Fallible}
+// level_4_catches: {} (no Fallible - fully caught)
+
+// === Test 8: Computational properties vs throws types ===
+
+/// Fallible is boolean, throws specifies error TYPE
+/// These are orthogonal concerns:
+/// - Fallible: "Can this fail?" (yes/no, compile-time)
+/// - throws: "What errors can it throw?" (error types, runtime)
+
+type ComplexError is
+    | Parse(ParseError)
+    | Validation(ValidationError)
+    | Io(IoError);
+
+fn complex_operation(input: &Text, path: &Text) throws(ComplexError) -> Int {
+    let n = parse_number(input)
+        .map_err(|e| ComplexError.Parse(e))?;
+
+    let content = read_file(path)
+        .map_err(|e| ComplexError.Io(e))?;
+
+    let validated = validate_number(&content)
+        .map_err(|e| ComplexError.Validation(e))?;
+
+    n + validated
+}
+
+// Property inference: complex_operation has {Fallible}
+// (single property, regardless of how many error types)
+
+// === Test 9: throws clause in protocol methods ===
+
+type Fallible is protocol {
+    type Error;
+    fn try_value(&self) throws(Self.Error) -> Int;
+}
+
+type FallibleInt is {
+    value: Result<Int, Text>
+};
+
+implement Fallible for FallibleInt {
+    type Error is Text;
+
+    fn try_value(&self) throws(Text) -> Int {
+        match &self.value {
+            Ok(v) => *v,
+            Err(e) => throw e.clone()
+        }
+    }
+}
+
+// Property inference: try_value has {Fallible}
+
+// === Test 10: Verification - Compiler should infer Fallible ===
+
+/// Meta-test: Assert property inference works correctly
+/// Note: properties_of is monomorphic per call site, so we group same-signature fns
+@verify(static)
+fn verify_fallible_inference() {
+    // Same-signature group: fn(&Text) throws(...) -> Int
+    static_assert(properties_of(parse_number).contains(Fallible));
+    static_assert(properties_of(validate_number).contains(Fallible));
+}
+
+// === Verification tests ===
+
+fn main() {
+    // Test basic throws implies Fallible
+    let result1 = try {
+        parse_number("42")?
+    } recover {
+        _ => -1
+    };
+    assert(result1 == 42);
+
+    // Test error case
+    let result2 = try {
+        parse_number("")?
+    } recover {
+        ParseError.UnexpectedEof => -1,
+        _ => -2
+    };
+    assert(result2 == -1);
+
+    // Test propagation
+    let result3 = try {
+        validate_number("50")?
+    } recover {
+        _ => -1
+    };
+    assert(result3 == 50);
+
+    // Test out of range
+    let result4 = try {
+        validate_number("200")?
+    } recover {
+        ValidationError.OutOfRange { .. } => -1,
+        _ => -2
+    };
+    assert(result4 == -1);
+
+    // Test safe_parse (catches all)
+    let result5 = safe_parse("invalid");
+    assert(result5 == 0);
+
+    let result6 = safe_parse("42");
+    assert(result6 == 42);
+
+    // Test generic fallible
+    let result7 = try {
+        map_fallible(10, |x| {
+            if x > 5 {
+                throw "too large";
+            }
+            x * 2
+        })?
+    } recover {
+        _ => -1
+    };
+    assert(result7 == -1);
+
+    // Test level transitivity
+    let result8 = level_4_catches();
+    assert(result8 == -1);
+
+    print("All throws_fallible tests passed");
+}

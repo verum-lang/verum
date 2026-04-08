@@ -1,0 +1,409 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, exhaustiveness, complete
+//
+// Tests exhaustive pattern matching where all possible values are covered.
+// Exhaustiveness checking ensures no values fall through without a match.
+
+//------------------------------------------------------------------------------
+// Basic Type Definitions
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+type Weekday is
+    | Monday
+    | Tuesday
+    | Wednesday
+    | Thursday
+    | Friday
+    | Saturday
+    | Sunday;
+
+type Direction is
+    | North
+    | South
+    | East
+    | West;
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+//------------------------------------------------------------------------------
+// Exhaustive Boolean Patterns
+//------------------------------------------------------------------------------
+
+/// Both boolean values covered explicitly.
+fn bool_explicit(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        false => "no",
+    }
+}
+
+/// Boolean with wildcard (trivially exhaustive).
+fn bool_wildcard(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        _ => "no",  // Covers false
+    }
+}
+
+/// All boolean combinations in tuple.
+fn bool_pair_exhaustive(pair: (Bool, Bool)) -> Int {
+    match pair {
+        (true, true) => 3,
+        (true, false) => 2,
+        (false, true) => 1,
+        (false, false) => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive Enum Patterns
+//------------------------------------------------------------------------------
+
+/// All Color variants explicitly listed.
+fn color_explicit(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+    }
+}
+
+/// All Direction variants.
+fn direction_explicit(d: Direction) -> Int {
+    match d {
+        North => 0,
+        South => 180,
+        East => 90,
+        West => 270,
+    }
+}
+
+/// All Weekday variants.
+fn weekday_explicit(day: Weekday) -> Bool {
+    match day {
+        Monday => true,
+        Tuesday => true,
+        Wednesday => true,
+        Thursday => true,
+        Friday => true,
+        Saturday => false,
+        Sunday => false,
+    }
+}
+
+/// Maybe with both variants.
+fn maybe_explicit<T>(m: Maybe<T>) -> Bool {
+    match m {
+        Some(_) => true,
+        None => false,
+    }
+}
+
+/// Result with both variants.
+fn result_explicit<T, E>(r: Result<T, E>) -> Bool {
+    match r {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive with Or-Patterns
+//------------------------------------------------------------------------------
+
+/// Or-pattern covering all enum variants.
+fn color_or(c: Color) -> Text {
+    match c {
+        Red | Blue => "primary",
+        Green => "not primary (but is in additive)",
+    }
+}
+
+/// Or-pattern with all weekdays grouped.
+fn weekday_or(day: Weekday) -> Text {
+    match day {
+        Saturday | Sunday => "weekend",
+        Monday | Tuesday | Wednesday | Thursday | Friday => "weekday",
+    }
+}
+
+/// Direction grouped by axis.
+fn direction_axis(d: Direction) -> Text {
+    match d {
+        North | South => "vertical",
+        East | West => "horizontal",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive with Wildcards
+//------------------------------------------------------------------------------
+
+/// Wildcard catching remaining variants.
+fn color_with_wildcard(c: Color) -> Text {
+    match c {
+        Red => "red",
+        _ => "not red",  // Covers Green and Blue
+    }
+}
+
+/// Some explicit, rest with wildcard.
+fn weekday_partial_wildcard(day: Weekday) -> Text {
+    match day {
+        Monday => "start of week",
+        Friday => "end of work week",
+        Saturday | Sunday => "weekend",
+        _ => "mid-week",  // Covers Tuesday, Wednesday, Thursday
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive Tuple Patterns
+//------------------------------------------------------------------------------
+
+/// All combinations of 2-variant enum pairs.
+fn color_pair_exhaustive(pair: (Color, Color)) -> Int {
+    match pair {
+        (Red, Red) => 0,
+        (Red, Green) => 1,
+        (Red, Blue) => 2,
+        (Green, Red) => 3,
+        (Green, Green) => 4,
+        (Green, Blue) => 5,
+        (Blue, Red) => 6,
+        (Blue, Green) => 7,
+        (Blue, Blue) => 8,
+    }
+}
+
+/// Mixed explicit and wildcard for tuple.
+fn direction_pair_mixed(pair: (Direction, Direction)) -> Text {
+    match pair {
+        (North, South) | (South, North) => "opposite vertical",
+        (East, West) | (West, East) => "opposite horizontal",
+        (d1, d2) if d1 == d2 => "same direction",
+        _ => "other combination",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive Nested Enum Patterns
+//------------------------------------------------------------------------------
+
+/// Nested Maybe exhaustive.
+fn nested_maybe<T>(mm: Maybe<Maybe<T>>) -> Text {
+    match mm {
+        Some(Some(_)) => "double some",
+        Some(None) => "outer some, inner none",
+        None => "outer none",
+    }
+}
+
+/// Result containing Maybe.
+fn result_maybe<T, E>(r: Result<Maybe<T>, E>) -> Text {
+    match r {
+        Ok(Some(_)) => "success with value",
+        Ok(None) => "success without value",
+        Err(_) => "error",
+    }
+}
+
+/// Maybe containing Result.
+fn maybe_result<T, E>(m: Maybe<Result<T, E>>) -> Text {
+    match m {
+        Some(Ok(_)) => "some ok",
+        Some(Err(_)) => "some err",
+        None => "none",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive with Ranges
+//------------------------------------------------------------------------------
+
+/// Integer with ranges covering all values.
+fn int_ranges_exhaustive(n: Int) -> Text {
+    match n {
+        ..0 => "negative",        // All negative
+        0 => "zero",              // Zero
+        1.. => "positive",        // All positive
+    }
+}
+
+/// Char with ranges covering categories.
+fn char_ranges_exhaustive(c: Char) -> Text {
+    match c {
+        'a'..='z' => "lowercase",
+        'A'..='Z' => "uppercase",
+        '0'..='9' => "digit",
+        _ => "other",  // All remaining chars
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive Struct Patterns
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+/// Struct with wildcard (always exhaustive).
+fn struct_wildcard(p: Point) -> Int {
+    match p {
+        Point { x, y } => x + y,
+    }
+}
+
+/// Struct with rest pattern.
+fn struct_rest(p: Point) -> Int {
+    match p {
+        Point { x, .. } => x,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive List Patterns
+//------------------------------------------------------------------------------
+
+/// Recursive list with base and recursive cases.
+@allow(unbounded_recursion)
+fn list_exhaustive<T>(list: ConsList<T>) -> Int {
+    match list {
+        Nil => 0,
+        Cons(_, tail) => 1 + list_exhaustive(tail),
+    }
+}
+
+/// List with more specific patterns first.
+fn list_specific<T>(list: ConsList<T>) -> Text {
+    match list {
+        Nil => "empty",
+        Cons(_, Nil) => "single",
+        Cons(_, Cons(_, Nil)) => "pair",
+        Cons(_, Cons(_, Cons(_, _))) => "three or more",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive with Guards (Requires Wildcard Fallback)
+//------------------------------------------------------------------------------
+
+/// Guards don't guarantee exhaustiveness, wildcard needed.
+fn guarded_exhaustive(n: Int) -> Text {
+    match n {
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        _ => "zero",  // Wildcard for safety
+    }
+}
+
+/// Guard with explicit zero case.
+fn guarded_zero(n: Int) -> Text {
+    match n {
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        0 => "zero",
+        _ => unreachable(),  // Mathematically unreachable
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exhaustive with Never Type
+//------------------------------------------------------------------------------
+
+/// Function returning never makes outer match exhaustive.
+fn with_diverging(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        None => panic("no value"),  // ! makes this arm "cover" the None
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+@test
+fn main() {
+    // Boolean
+    assert(bool_explicit(true) == "yes");
+    assert(bool_explicit(false) == "no");
+
+    // Bool pair
+    assert(bool_pair_exhaustive((true, true)) == 3);
+    assert(bool_pair_exhaustive((false, false)) == 0);
+
+    // Colors
+    assert(color_explicit(Red) == "red");
+    assert(color_explicit(Green) == "green");
+    assert(color_explicit(Blue) == "blue");
+
+    // Direction
+    assert(direction_explicit(North) == 0);
+    assert(direction_explicit(East) == 90);
+
+    // Weekday
+    assert(weekday_explicit(Monday) == true);
+    assert(weekday_explicit(Saturday) == false);
+
+    // Or-patterns
+    assert(color_or(Red) == "primary");
+    assert(color_or(Blue) == "primary");
+    assert(color_or(Green) == "not primary (but is in additive)");
+
+    // Weekday or
+    assert(weekday_or(Saturday) == "weekend");
+    assert(weekday_or(Wednesday) == "weekday");
+
+    // Maybe
+    assert(maybe_explicit(Some(42)) == true);
+    assert(maybe_explicit(None) == false);
+
+    // Result
+    assert(result_explicit(Ok(42)) == true);
+    assert(result_explicit(Err("error")) == false);
+
+    // Nested
+    assert(nested_maybe(Some(Some(42))) == "double some");
+    assert(nested_maybe(Some(None)) == "outer some, inner none");
+    assert(nested_maybe(None) == "outer none");
+
+    // Ranges
+    assert(int_ranges_exhaustive(-5) == "negative");
+    assert(int_ranges_exhaustive(0) == "zero");
+    assert(int_ranges_exhaustive(5) == "positive");
+
+    // Char ranges
+    assert(char_ranges_exhaustive('a') == "lowercase");
+    assert(char_ranges_exhaustive('Z') == "uppercase");
+    assert(char_ranges_exhaustive('5') == "digit");
+    assert(char_ranges_exhaustive('!') == "other");
+
+    // Struct
+    assert(struct_wildcard(Point { x: 3, y: 4 }) == 7);
+
+    // List
+    assert(list_exhaustive(Nil) == 0);
+    assert(list_exhaustive(Cons(1, Cons(2, Nil))) == 2);
+    assert(list_specific(Nil) == "empty");
+    assert(list_specific(Cons(1, Nil)) == "single");
+}

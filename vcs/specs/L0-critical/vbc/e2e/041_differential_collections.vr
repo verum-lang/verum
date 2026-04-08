@@ -1,0 +1,465 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, interpreter-vs-aot, collections, stack, hashmap, set
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential collections test: verifies interpreter and AOT produce identical
+// results for stack operations, simple hash map (linear probing), and set operations.
+
+// ============================================================================
+// Fixed-size array of 8 elements (reusable foundation)
+// ============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+    }
+}
+
+fn arr8_zero() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// Stack (LIFO) using flat array + top pointer
+// ============================================================================
+
+type Stack is { data: Arr8, top: Int };
+
+fn stack_new() -> Stack {
+    Stack { data: arr8_zero(), top: 0 }
+}
+
+fn stack_push(s: Stack, val: Int) -> Stack {
+    let new_data = arr8_set(s.data, s.top, val);
+    Stack { data: new_data, top: s.top + 1 }
+}
+
+fn stack_pop(s: Stack) -> Stack {
+    // Returns stack with top decremented; caller reads peek first
+    Stack { data: s.data, top: s.top - 1 }
+}
+
+fn stack_peek(s: Stack) -> Int {
+    arr8_get(s.data, s.top - 1)
+}
+
+fn stack_size(s: Stack) -> Int {
+    s.top
+}
+
+fn stack_is_empty(s: Stack) -> Bool {
+    s.top == 0
+}
+
+fn test_stack() {
+    let mut s = stack_new();
+    assert(stack_is_empty(s));
+    assert_eq(stack_size(s), 0);
+
+    // Push 10, 20, 30
+    s = stack_push(s, 10);
+    s = stack_push(s, 20);
+    s = stack_push(s, 30);
+    assert_eq(stack_size(s), 3);
+    assert(!stack_is_empty(s));
+
+    // Peek should return 30 (LIFO)
+    assert_eq(stack_peek(s), 30);
+
+    // Pop and check
+    s = stack_pop(s);
+    assert_eq(stack_size(s), 2);
+    assert_eq(stack_peek(s), 20);
+
+    s = stack_pop(s);
+    assert_eq(stack_size(s), 1);
+    assert_eq(stack_peek(s), 10);
+
+    s = stack_pop(s);
+    assert_eq(stack_size(s), 0);
+    assert(stack_is_empty(s));
+
+    // Push after empty
+    s = stack_push(s, 99);
+    assert_eq(stack_peek(s), 99);
+    assert_eq(stack_size(s), 1);
+
+    print("stack_basic: ok");
+}
+
+fn test_stack_fill() {
+    // Fill stack to capacity (8 elements)
+    let mut s = stack_new();
+    let mut i = 0;
+    while i < 8 {
+        s = stack_push(s, (i + 1) * 10);
+        i = i + 1;
+    }
+    assert_eq(stack_size(s), 8);
+
+    // Pop all in reverse order
+    let mut expected = 80;
+    while !stack_is_empty(s) {
+        assert_eq(stack_peek(s), expected);
+        s = stack_pop(s);
+        expected = expected - 10;
+    }
+    assert_eq(expected, 0);
+
+    print("stack_fill: ok");
+}
+
+// ============================================================================
+// Simple Hash Map: fixed-size (capacity 8), linear probing, keys and values
+// stored in parallel arrays. Empty slots indicated by key = -1 (sentinel).
+// ============================================================================
+
+type HMap is { keys: Arr8, vals: Arr8, count: Int };
+
+fn hmap_new() -> HMap {
+    // Initialize all keys to -1 (empty sentinel)
+    let empty_keys = Arr8 {
+        e0: 0 - 1, e1: 0 - 1, e2: 0 - 1, e3: 0 - 1,
+        e4: 0 - 1, e5: 0 - 1, e6: 0 - 1, e7: 0 - 1
+    };
+    HMap { keys: empty_keys, vals: arr8_zero(), count: 0 }
+}
+
+fn hmap_hash(key: Int) -> Int {
+    // Simple hash: absolute value mod 8
+    let k = if key < 0 { 0 - key } else { key };
+    k % 8
+}
+
+// Put key-value pair; overwrites if key exists. Returns updated map.
+fn hmap_put(m: HMap, key: Int, val: Int) -> HMap {
+    let mut idx = hmap_hash(key);
+    let mut probes = 0;
+    let mut found = false;
+    let mut result = m;
+    while probes < 8 && !found {
+        let k = arr8_get(result.keys, idx);
+        if k == 0 - 1 {
+            // Empty slot: insert here
+            result = HMap {
+                keys: arr8_set(result.keys, idx, key),
+                vals: arr8_set(result.vals, idx, val),
+                count: result.count + 1
+            };
+            found = true;
+        } else if k == key {
+            // Key exists: update value
+            result = HMap {
+                keys: result.keys,
+                vals: arr8_set(result.vals, idx, val),
+                count: result.count
+            };
+            found = true;
+        } else {
+            idx = (idx + 1) % 8;
+            probes = probes + 1;
+        }
+    }
+    result
+}
+
+// Get value for key; returns -1 if not found
+fn hmap_get(m: HMap, key: Int) -> Int {
+    let mut idx = hmap_hash(key);
+    let mut probes = 0;
+    let mut result = 0 - 1;
+    let mut found = false;
+    while probes < 8 && !found {
+        let k = arr8_get(m.keys, idx);
+        if k == 0 - 1 {
+            found = true; // empty slot means key not present
+        } else if k == key {
+            result = arr8_get(m.vals, idx);
+            found = true;
+        } else {
+            idx = (idx + 1) % 8;
+            probes = probes + 1;
+        }
+    }
+    result
+}
+
+fn hmap_contains(m: HMap, key: Int) -> Bool {
+    let mut idx = hmap_hash(key);
+    let mut probes = 0;
+    let mut found = false;
+    while probes < 8 && !found {
+        let k = arr8_get(m.keys, idx);
+        if k == 0 - 1 {
+            probes = 8; // break
+        } else if k == key {
+            found = true;
+        } else {
+            idx = (idx + 1) % 8;
+            probes = probes + 1;
+        }
+    }
+    found
+}
+
+fn test_hashmap_basic() {
+    let mut m = hmap_new();
+    assert_eq(m.count, 0);
+
+    // Insert key=5 val=50
+    m = hmap_put(m, 5, 50);
+    assert_eq(m.count, 1);
+    assert_eq(hmap_get(m, 5), 50);
+    assert(hmap_contains(m, 5));
+    assert(!hmap_contains(m, 6));
+
+    // Insert more
+    m = hmap_put(m, 10, 100);
+    m = hmap_put(m, 3, 30);
+    assert_eq(m.count, 3);
+    assert_eq(hmap_get(m, 10), 100);
+    assert_eq(hmap_get(m, 3), 30);
+    assert_eq(hmap_get(m, 5), 50);
+
+    // Overwrite existing key
+    m = hmap_put(m, 5, 55);
+    assert_eq(m.count, 3); // count unchanged
+    assert_eq(hmap_get(m, 5), 55);
+
+    // Not found
+    assert_eq(hmap_get(m, 99), 0 - 1);
+    assert(!hmap_contains(m, 99));
+
+    print("hashmap_basic: ok");
+}
+
+fn test_hashmap_collision() {
+    // Keys that hash to same slot (both % 8 == 0)
+    let mut m = hmap_new();
+    m = hmap_put(m, 0, 100);
+    m = hmap_put(m, 8, 200);
+    m = hmap_put(m, 16, 300);
+
+    assert_eq(m.count, 3);
+    assert_eq(hmap_get(m, 0), 100);
+    assert_eq(hmap_get(m, 8), 200);
+    assert_eq(hmap_get(m, 16), 300);
+
+    // Keys that hash to slot 1 (1 % 8, 9 % 8)
+    m = hmap_put(m, 1, 10);
+    m = hmap_put(m, 9, 90);
+    assert_eq(m.count, 5);
+    assert_eq(hmap_get(m, 1), 10);
+    assert_eq(hmap_get(m, 9), 90);
+
+    print("hashmap_collision: ok");
+}
+
+// ============================================================================
+// Fixed-size Set (capacity 8, membership via linear scan)
+// ============================================================================
+
+type FSet is { data: Arr8, size: Int };
+
+fn fset_new() -> FSet {
+    FSet { data: arr8_zero(), size: 0 }
+}
+
+fn fset_contains(s: FSet, val: Int) -> Bool {
+    let mut i = 0;
+    let mut found = false;
+    while i < s.size {
+        if arr8_get(s.data, i) == val {
+            found = true;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+fn fset_add(s: FSet, val: Int) -> FSet {
+    if fset_contains(s, val) {
+        s // already present
+    } else {
+        FSet {
+            data: arr8_set(s.data, s.size, val),
+            size: s.size + 1
+        }
+    }
+}
+
+fn fset_size(s: FSet) -> Int {
+    s.size
+}
+
+// Union: add all elements of b into a
+fn fset_union(a: FSet, b: FSet) -> FSet {
+    let mut result = a;
+    let mut i = 0;
+    while i < b.size {
+        result = fset_add(result, arr8_get(b.data, i));
+        i = i + 1;
+    }
+    result
+}
+
+// Intersection: elements in both a and b
+fn fset_intersect(a: FSet, b: FSet) -> FSet {
+    let mut result = fset_new();
+    let mut i = 0;
+    while i < a.size {
+        let v = arr8_get(a.data, i);
+        if fset_contains(b, v) {
+            result = fset_add(result, v);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Difference: elements in a but not in b
+fn fset_diff(a: FSet, b: FSet) -> FSet {
+    let mut result = fset_new();
+    let mut i = 0;
+    while i < a.size {
+        let v = arr8_get(a.data, i);
+        if !fset_contains(b, v) {
+            result = fset_add(result, v);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_set_basic() {
+    let mut s = fset_new();
+    assert_eq(fset_size(s), 0);
+    assert(!fset_contains(s, 5));
+
+    s = fset_add(s, 5);
+    assert_eq(fset_size(s), 1);
+    assert(fset_contains(s, 5));
+
+    // Adding duplicate does not increase size
+    s = fset_add(s, 5);
+    assert_eq(fset_size(s), 1);
+
+    s = fset_add(s, 10);
+    s = fset_add(s, 3);
+    assert_eq(fset_size(s), 3);
+    assert(fset_contains(s, 3));
+    assert(fset_contains(s, 10));
+    assert(!fset_contains(s, 7));
+
+    print("set_basic: ok");
+}
+
+fn test_set_operations() {
+    // Set A = {1, 2, 3, 4}
+    let mut a = fset_new();
+    a = fset_add(a, 1);
+    a = fset_add(a, 2);
+    a = fset_add(a, 3);
+    a = fset_add(a, 4);
+
+    // Set B = {3, 4, 5, 6}
+    let mut b = fset_new();
+    b = fset_add(b, 3);
+    b = fset_add(b, 4);
+    b = fset_add(b, 5);
+    b = fset_add(b, 6);
+
+    // Union = {1, 2, 3, 4, 5, 6}
+    let u = fset_union(a, b);
+    assert_eq(fset_size(u), 6);
+    assert(fset_contains(u, 1));
+    assert(fset_contains(u, 2));
+    assert(fset_contains(u, 5));
+    assert(fset_contains(u, 6));
+
+    // Intersection = {3, 4}
+    let inter = fset_intersect(a, b);
+    assert_eq(fset_size(inter), 2);
+    assert(fset_contains(inter, 3));
+    assert(fset_contains(inter, 4));
+    assert(!fset_contains(inter, 1));
+    assert(!fset_contains(inter, 5));
+
+    // Difference A - B = {1, 2}
+    let diff_ab = fset_diff(a, b);
+    assert_eq(fset_size(diff_ab), 2);
+    assert(fset_contains(diff_ab, 1));
+    assert(fset_contains(diff_ab, 2));
+    assert(!fset_contains(diff_ab, 3));
+
+    // Difference B - A = {5, 6}
+    let diff_ba = fset_diff(b, a);
+    assert_eq(fset_size(diff_ba), 2);
+    assert(fset_contains(diff_ba, 5));
+    assert(fset_contains(diff_ba, 6));
+
+    // |A union B| = |A| + |B| - |A intersect B|
+    assert_eq(fset_size(u), fset_size(a) + fset_size(b) - fset_size(inter));
+
+    print("set_operations: ok");
+}
+
+fn test_set_empty_ops() {
+    let empty = fset_new();
+    let mut s = fset_new();
+    s = fset_add(s, 1);
+    s = fset_add(s, 2);
+
+    // Union with empty = self
+    let u = fset_union(s, empty);
+    assert_eq(fset_size(u), 2);
+
+    // Intersection with empty = empty
+    let inter = fset_intersect(s, empty);
+    assert_eq(fset_size(inter), 0);
+
+    // Diff with empty = self
+    let d = fset_diff(s, empty);
+    assert_eq(fset_size(d), 2);
+
+    // Empty diff s = empty
+    let d2 = fset_diff(empty, s);
+    assert_eq(fset_size(d2), 0);
+
+    print("set_empty: ok");
+}
+
+fn main() -> Int {
+    test_stack();
+    test_stack_fill();
+    test_hashmap_basic();
+    test_hashmap_collision();
+    test_set_basic();
+    test_set_operations();
+    test_set_empty_ops();
+    print("[OK] 041_differential_collections");
+    0
+}

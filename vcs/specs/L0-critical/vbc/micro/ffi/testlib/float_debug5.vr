@@ -1,0 +1,56 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, float, debug
+// @description: Debug function call chain
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_sqrt_f64(x: Float) -> Float;
+}
+
+fn approx_eq(a: Float, b: Float, epsilon: Float) -> Bool {
+    let diff = a - b;
+    if diff < 0.0 {
+        -diff < epsilon
+    } else {
+        diff < epsilon
+    }
+}
+
+fn main() {
+    print(1); print("\n");
+    let epsilon = 0.0001;
+
+    print(2); print("\n");
+    let sqrt4 = ffi_sqrt_f64(4.0);
+
+    print(3); print("\n");
+    print(sqrt4); print("\n");
+
+    print(4); print("\n");
+    // Directly inline the approx_eq logic
+    let a = sqrt4;
+    let b = 2.0;
+    let diff = a - b;
+    print(5); print("\n");
+    print(diff); print("\n");
+
+    let result = if diff < 0.0 {
+        -diff < epsilon
+    } else {
+        diff < epsilon
+    };
+    print(6); print("\n");
+    print(result); print("\n");
+
+    // Now try the function call
+    print(7); print("\n");
+    let eq1 = approx_eq(sqrt4, 2.0, epsilon);
+    print(8); print("\n");
+    print(eq1); print("\n");
+
+    print(9); print("\n");
+}

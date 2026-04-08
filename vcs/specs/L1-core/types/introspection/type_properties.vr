@@ -1,0 +1,242 @@
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1
+// @tags: types, introspection, type-properties, compile-time
+// @timeout: 5000
+
+/// Type Properties - Compile-time type introspection
+///
+/// Verum v2.6 introduces type properties as first-class compile-time values.
+/// Types can be queried for their metadata using the T.property syntax.
+///
+/// Spec: grammar/verum.ebnf Section 2.17 - Type Properties
+/// Spec: docs/detailed/05-syntax-grammar.md Section 2.17
+
+// ============================================================================
+// Type Property Definitions
+// ============================================================================
+//
+// type_property_name = 'size' | 'alignment' | 'stride'
+//                    | 'min' | 'max' | 'bits' | 'name' ;
+//
+// type_property_expr = type_expr , '.' , type_property_name ;
+
+// ============================================================================
+// Test 1: Primitive Type Properties
+// ============================================================================
+
+fn test_primitive_type_properties() {
+    // Size properties for primitive types
+    let int_size: Int = Int.size;
+    assert(int_size == 8, "Int should be 8 bytes");
+
+    let float_size: Int = Float.size;
+    assert(float_size == 8, "Float should be 8 bytes");
+
+    let bool_size: Int = Bool.size;
+    assert(bool_size == 1, "Bool should be 1 byte");
+
+    let char_size: Int = Char.size;
+    assert(char_size == 4, "Char (Unicode) should be 4 bytes");
+
+    // Alignment properties
+    let int_align: Int = Int.alignment;
+    assert(int_align == 8, "Int alignment should be 8");
+
+    let float_align: Int = Float.alignment;
+    assert(float_align == 8, "Float alignment should be 8");
+
+    // Bits property for numeric types
+    let int_bits: Int = Int.bits;
+    assert(int_bits == 64, "Int should be 64 bits");
+
+    let i8_bits: Int = i8.bits;
+    assert(i8_bits == 8, "i8 should be 8 bits");
+
+    let i32_bits: Int = i32.bits;
+    assert(i32_bits == 32, "i32 should be 32 bits");
+
+    // Min/Max for numeric types
+    let i8_min: i8 = i8.min;
+    let i8_max: i8 = i8.max;
+    assert(i8_min == -128, "i8.min should be -128");
+    assert(i8_max == 127, "i8.max should be 127");
+
+    let u8_min: u8 = u8.min;
+    let u8_max: u8 = u8.max;
+    assert(u8_min == 0, "u8.min should be 0");
+    assert(u8_max == 255, "u8.max should be 255");
+
+    // Name property
+    let int_name: Text = Int.name;
+    assert(int_name == "Int", "Int.name should be 'Int'");
+}
+
+// ============================================================================
+// Test 2: Reference Type Properties
+// ============================================================================
+
+fn test_reference_type_properties() {
+    // ThinRef size (managed reference)
+    let thin_ref_size: Int = (&Int).size;
+    assert(thin_ref_size == 16, "&Int (ThinRef) should be 16 bytes");
+
+    // FatRef size (slice reference)
+    let fat_ref_size: Int = (&[Int]).size;
+    assert(fat_ref_size == 24, "&[Int] (FatRef) should be 24 bytes");
+
+    // Checked reference (same size as managed)
+    let checked_ref_size: Int = (&checked Int).size;
+    assert(checked_ref_size == 16, "&checked Int should be 16 bytes");
+
+    // Unsafe reference (raw pointer, smaller)
+    let unsafe_ref_size: Int = (&unsafe Int).size;
+    assert(unsafe_ref_size == 8, "&unsafe Int should be 8 bytes");
+}
+
+// ============================================================================
+// Test 3: Compound Type Properties
+// ============================================================================
+
+type Point is { x: Float, y: Float };
+
+type Vector3 is { x: Float, y: Float, z: Float };
+
+type Color is { r: u8, g: u8, b: u8, a: u8 };
+
+fn test_compound_type_properties() {
+    // Record type size
+    let point_size: Int = Point.size;
+    assert(point_size == 16, "Point should be 16 bytes (2 x Float)");
+
+    let vector_size: Int = Vector3.size;
+    assert(vector_size == 24, "Vector3 should be 24 bytes (3 x Float)");
+
+    let color_size: Int = Color.size;
+    assert(color_size == 4, "Color should be 4 bytes (4 x u8)");
+
+    // Stride property for arrays
+    let point_stride: Int = Point.stride;
+    assert(point_stride == 16, "Point stride should be 16");
+
+    // Type names
+    let point_name: Text = Point.name;
+    assert(point_name == "Point", "Point.name should be 'Point'");
+}
+
+// ============================================================================
+// Test 4: Array Type Properties
+// ============================================================================
+
+fn test_array_type_properties() {
+    // Fixed-size array
+    let arr_size: Int = [Int; 10].size;
+    assert(arr_size == 80, "[Int; 10] should be 80 bytes");
+
+    // Array of smaller types
+    let byte_arr_size: Int = [u8; 16].size;
+    assert(byte_arr_size == 16, "[u8; 16] should be 16 bytes");
+
+    // Array alignment inherits from element type
+    let arr_align: Int = [Int; 10].alignment;
+    assert(arr_align == 8, "[Int; 10] alignment should be 8");
+
+    // Array stride equals element size (for contiguous layout)
+    let arr_stride: Int = [Int; 10].stride;
+    assert(arr_stride == 8, "[Int; 10] stride should be 8");
+}
+
+// ============================================================================
+// Test 5: Generic Type Properties
+// ============================================================================
+
+type Container<T> is { data: T, count: Int };
+
+fn generic_size<T>() -> Int {
+    T.size
+}
+
+fn generic_alignment<T>() -> Int {
+    T.alignment
+}
+
+fn test_generic_type_properties() {
+    // Generic function using type properties
+    let int_size = generic_size.<Int>();
+    assert(int_size == 8, "generic_size.<Int>() should be 8");
+
+    let float_size = generic_size.<Float>();
+    assert(float_size == 8, "generic_size.<Float>() should be 8");
+
+    // Container size includes element type
+    let int_container_size: Int = @size_of(Container<Int>);
+    assert(int_container_size == 16, "Container<Int> should be 16 bytes");
+
+    let point_container_size: Int = @size_of(Container<Point>);
+    assert(point_container_size == 24, "Container<Point> should be 24 bytes");
+}
+
+// ============================================================================
+// Test 6: Compile-time Constant Evaluation
+// ============================================================================
+
+// Type properties can be used in const contexts
+const INT_SIZE: Int = Int.size;
+const INT_ALIGN: Int = Int.alignment;
+const INT_BITS: Int = Int.bits;
+const INT_MIN: Int = Int.min;
+const INT_MAX: Int = Int.max;
+
+// Static assertions using type properties
+const _: () = {
+    assert(Int.size == 8);
+    assert(Int.alignment == 8);
+    assert(Bool.size == 1);
+    assert((&Int).size == 16);  // ThinRef
+};
+
+fn test_compile_time_constants() {
+    assert(INT_SIZE == 8, "Const INT_SIZE should be 8");
+    assert(INT_ALIGN == 8, "Const INT_ALIGN should be 8");
+    assert(INT_BITS == 64, "Const INT_BITS should be 64");
+}
+
+// ============================================================================
+// Test 7: Type Properties in Where Clauses
+// ============================================================================
+
+fn process_small_types<T>(value: T) -> T
+    where meta T.size <= 16
+{
+    value
+}
+
+fn process_aligned<T>(value: T) -> T
+    where meta T.alignment >= 4
+{
+    value
+}
+
+fn test_type_properties_in_where_clauses() {
+    // These should compile successfully
+    let x = process_small_types(42);
+    let y = process_small_types(3.14);
+    let p = process_small_types(Point { x: 1.0, y: 2.0 });
+
+    let a = process_aligned(42);
+    let b = process_aligned(3.14);
+}
+
+// ============================================================================
+// Main entry point
+// ============================================================================
+
+fn main() {
+    test_primitive_type_properties();
+    test_reference_type_properties();
+    test_compound_type_properties();
+    test_array_type_properties();
+    test_generic_type_properties();
+    test_compile_time_constants();
+    test_type_properties_in_where_clauses();
+}

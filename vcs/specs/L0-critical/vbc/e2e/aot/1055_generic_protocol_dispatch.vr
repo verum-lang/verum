@@ -1,0 +1,43 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: nested_struct, impl, fstring
+// @expect: pass
+
+// Test: nested struct field access in impl method f-strings.
+
+type Point is { x: Int, y: Int };
+type Circle is { center: Point, radius: Int };
+
+implement Circle {
+    fn describe(&self) -> Text {
+        // Nested field access: self.center.x, self.center.y
+        let cx = self.center.x;
+        let cy = self.center.y;
+        f"Circle(({cx},{cy}), r={self.radius})"
+    }
+
+    fn describe_direct(&self) -> Text {
+        // Direct nested: self.center.x without intermediate variable
+        f"Circle(({self.center.x},{self.center.y}), r={self.radius})"
+    }
+}
+
+fn main() -> Int {
+    let c = Circle { center: Point { x: 10, y: 20 }, radius: 5 };
+
+    let desc = c.describe();
+    print(f"via local: {desc}");
+
+    let desc2 = c.describe_direct();
+    print(f"direct: {desc2}");
+
+    // Verify values accessible
+    if c.center.x != 10 {
+        print(f"FAIL: center.x = {c.center.x}");
+        return 1;
+    }
+
+    print("PASS: nested struct in impl f-strings");
+    0
+}

@@ -1,0 +1,39 @@
+#!/bin/bash
+# Wrapper script for running Verum programs in JIT mode (Tier 1/2)
+# Used by vtest for VCS testing
+#
+# Tier 1: JIT baseline - balanced startup vs execution (80-90% native)
+# Tier 2: JIT optimized - production quality (85-95% native)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VERUM_CLI="${VERUM_CLI:-$SCRIPT_DIR/../../target/release/verum}"
+
+if [ ! -x "$VERUM_CLI" ]; then
+    VERUM_CLI="$SCRIPT_DIR/../../target/debug/verum"
+fi
+
+if [ ! -x "$VERUM_CLI" ]; then
+    echo "Error: verum CLI not found. Run 'cargo build --release -p verum_cli'" >&2
+    exit 1
+fi
+
+# Parse tier option (default to aot/tier 1)
+TIER_FLAG="--aot"
+for arg in "$@"; do
+    case "$arg" in
+        --baseline) TIER_FLAG="--aot" ;;      # Tier 1 (uses AOT path)
+        --optimize) TIER_FLAG="--aot" ;;      # Tier 2 (uses AOT path)
+    esac
+done
+
+# Filter out our options
+ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --baseline|--optimize) ;;
+        *) ARGS+=("$arg") ;;
+    esac
+done
+
+# Run with JIT tier
+exec "$VERUM_CLI" run $TIER_FLAG "${ARGS[@]}"

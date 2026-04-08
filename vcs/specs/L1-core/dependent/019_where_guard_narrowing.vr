@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, where, guard, narrowing
+
+/// Where-clause guards in pattern matching -- Verum supports
+/// `where` as an alternative to `if` in match guards.
+/// Grammar: guard = 'if' expression | 'where' expression ;
+
+type Command is
+    Move { dx: Int, dy: Int }
+  | Scale(Float)
+  | Rotate(Float)
+  | Noop;
+
+// Where-clause guard in match
+fn describe_move(cmd: Command) -> Text {
+    match cmd {
+        Move { dx, dy } where dx == 0 && dy == 0 => "no movement",
+        Move { dx, dy } where dx == 0 => f"vertical: {dy}",
+        Move { dx, dy } where dy == 0 => f"horizontal: {dx}",
+        Move { dx, dy } => f"diagonal: ({dx}, {dy})",
+        Scale(f) where f == 1.0 => "identity scale",
+        Scale(f) where f > 1.0 => "zoom in",
+        Scale(f) => "zoom out",
+        Rotate(angle) where angle == 0.0 => "no rotation",
+        Rotate(angle) => f"rotate {angle}",
+        Noop => "noop",
+    }
+}
+
+// Where guard narrows refinement
+fn classify_int(x: Int) -> Text {
+    match x {
+        n where n > 100 => "large positive",
+        n where n > 0 => "small positive",
+        n where n == 0 => "zero",
+        n where n > -100 => "small negative",
+        _ => "large negative",
+    }
+}
+
+// Where guard with compound condition
+fn find_special(xs: List<Int>) -> Maybe<Int> {
+    for x in xs {
+        match x {
+            n where n > 0 && n % 2 == 0 && n < 100 => {
+                return Some(n);
+            },
+            _ => {},
+        }
+    }
+    None
+}
+
+// Nested where guards
+fn categorize(x: Int, y: Int) -> Text {
+    match (x, y) {
+        (a, b) where a > 0 && b > 0 => "first quadrant",
+        (a, b) where a < 0 && b > 0 => "second quadrant",
+        (a, b) where a < 0 && b < 0 => "third quadrant",
+        (a, b) where a > 0 && b < 0 => "fourth quadrant",
+        _ => "on axis",
+    }
+}
+
+fn main() {
+    assert(describe_move(Move { dx: 0, dy: 0 }) == "no movement");
+    assert(describe_move(Move { dx: 5, dy: 0 }) == "horizontal: 5");
+    assert(describe_move(Scale(2.0)) == "zoom in");
+    assert(describe_move(Scale(0.5)) == "zoom out");
+
+    assert(classify_int(200) == "large positive");
+    assert(classify_int(50) == "small positive");
+    assert(classify_int(0) == "zero");
+    assert(classify_int(-50) == "small negative");
+
+    assert(find_special([1, 3, 5, 8, 101]) == Some(8));
+    assert(find_special([1, 3, 5]) == None);
+
+    assert(categorize(1, 1) == "first quadrant");
+    assert(categorize(-1, -1) == "third quadrant");
+    assert(categorize(0, 5) == "on axis");
+}

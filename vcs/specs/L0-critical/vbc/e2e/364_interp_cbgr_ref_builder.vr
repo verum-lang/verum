@@ -1,0 +1,299 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, advanced
+// @timeout: 15000
+// @expected-exit: 0
+//
+// CBGR advanced reference test: Nested function calls with refs.
+// Functions that take ref results from other functions, chained ref
+// operations, nested read-then-write patterns, and multi-level
+// ref-passing through call chains.
+
+// ============================================================================
+// Type definitions
+// ============================================================================
+
+type Coord3D is { cx: Int, cy: Int, cz: Int };
+type Interval is { lo: Int, hi: Int };
+type Bucket is { val: Int, weight: Int };
+
+// ============================================================================
+// Primitive ref helpers
+// ============================================================================
+
+fn read_val(r: &Int) -> Int { *r }
+fn write_val(r: &mut Int, v: Int) { *r = v; }
+fn add_val(r: &mut Int, v: Int) { *r = *r + v; }
+fn mul_val(r: &mut Int, v: Int) { *r = *r * v; }
+
+fn abs_val(r: &Int) -> Int {
+    if *r < 0 { 0 - *r } else { *r }
+}
+
+fn sign_val(r: &Int) -> Int {
+    if *r > 0 { 1 }
+    else if *r < 0 { -1 }
+    else { 0 }
+}
+
+// ============================================================================
+// Functions that call other ref functions
+// ============================================================================
+
+fn double_via_ref(r: &mut Int) {
+    let cur = read_val(r);
+    write_val(r, cur * 2);
+}
+
+fn square_via_ref(r: &mut Int) {
+    let cur = read_val(r);
+    write_val(r, cur * cur);
+}
+
+fn add_abs_of(target: &mut Int, source: &Int) {
+    let a = abs_val(source);
+    add_val(target, a);
+}
+
+fn clamp_via_ref(val: &mut Int, lo: Int, hi: Int) {
+    let v = read_val(val);
+    if v < lo { write_val(val, lo); }
+    else if v > hi { write_val(val, hi); }
+}
+
+fn normalize_to_range(val: &mut Int, lo: Int, hi: Int) {
+    clamp_via_ref(val, lo, hi);
+    let v = read_val(val);
+    write_val(val, v - lo);
+}
+
+// ============================================================================
+// Record ref chains
+// ============================================================================
+
+fn coord_sum(c: &Coord3D) -> Int {
+    (*c).cx + (*c).cy + (*c).cz
+}
+
+fn coord_scale(c: &mut Coord3D, factor: Int) {
+    (*c).cx = (*c).cx * factor;
+    (*c).cy = (*c).cy * factor;
+    (*c).cz = (*c).cz * factor;
+}
+
+fn coord_translate(c: &mut Coord3D, dx: Int, dy: Int, dz: Int) {
+    (*c).cx = (*c).cx + dx;
+    (*c).cy = (*c).cy + dy;
+    (*c).cz = (*c).cz + dz;
+}
+
+fn coord_scale_then_translate(c: &mut Coord3D, s: Int, dx: Int, dy: Int, dz: Int) {
+    coord_scale(c, s);
+    coord_translate(c, dx, dy, dz);
+}
+
+fn coord_magnitude_sq(c: &Coord3D) -> Int {
+    (*c).cx * (*c).cx + (*c).cy * (*c).cy + (*c).cz * (*c).cz
+}
+
+fn coord_dot(a: &Coord3D, b: &Coord3D) -> Int {
+    (*a).cx * (*b).cx + (*a).cy * (*b).cy + (*a).cz * (*b).cz
+}
+
+// ============================================================================
+// Interval operations
+// ============================================================================
+
+fn interval_width(iv: &Interval) -> Int {
+    (*iv).hi - (*iv).lo
+}
+
+fn interval_contains(iv: &Interval, val: Int) -> Bool {
+    val >= (*iv).lo && val <= (*iv).hi
+}
+
+fn interval_clamp(iv: &Interval, val: &mut Int) {
+    clamp_via_ref(val, (*iv).lo, (*iv).hi);
+}
+
+fn interval_expand(iv: &mut Interval, amount: Int) {
+    (*iv).lo = (*iv).lo - amount;
+    (*iv).hi = (*iv).hi + amount;
+}
+
+// ============================================================================
+// Multi-level chain: bucket weighted sum
+// ============================================================================
+
+fn bucket_weighted_val(b: &Bucket) -> Int {
+    (*b).val * (*b).weight
+}
+
+fn accumulate_bucket(total: &mut Int, b: &Bucket) {
+    let wv = bucket_weighted_val(b);
+    add_val(total, wv);
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_nested_read_write() {
+    let mut x = 5;
+    double_via_ref(&mut x);
+    assert_eq(x, 10);
+    double_via_ref(&mut x);
+    assert_eq(x, 20);
+}
+
+fn test_square_via_ref() {
+    let mut x = 7;
+    square_via_ref(&mut x);
+    assert_eq(x, 49);
+}
+
+fn test_add_abs() {
+    let mut total = 0;
+    let a = -5;
+    let b = 3;
+    let c = -8;
+    add_abs_of(&mut total, &a);
+    add_abs_of(&mut total, &b);
+    add_abs_of(&mut total, &c);
+    assert_eq(total, 16);
+}
+
+fn test_clamp_via_ref() {
+    let mut v1 = -10;
+    clamp_via_ref(&mut v1, 0, 100);
+    assert_eq(v1, 0);
+
+    let mut v2 = 150;
+    clamp_via_ref(&mut v2, 0, 100);
+    assert_eq(v2, 100);
+
+    let mut v3 = 50;
+    clamp_via_ref(&mut v3, 0, 100);
+    assert_eq(v3, 50);
+}
+
+fn test_normalize_to_range() {
+    let mut v = 75;
+    normalize_to_range(&mut v, 50, 100);
+    assert_eq(v, 25); // 75 - 50
+}
+
+fn test_normalize_clamped() {
+    let mut v = 200;
+    normalize_to_range(&mut v, 0, 100);
+    assert_eq(v, 100); // clamped to 100, minus 0 = 100
+}
+
+fn test_sign_val() {
+    let pos = 42;
+    let neg = -7;
+    let zero = 0;
+    assert_eq(sign_val(&pos), 1);
+    assert_eq(sign_val(&neg), -1);
+    assert_eq(sign_val(&zero), 0);
+}
+
+fn test_coord_chain() {
+    let mut c = Coord3D { cx: 1, cy: 2, cz: 3 };
+    coord_scale_then_translate(&mut c, 10, 5, 5, 5);
+    // Scale: (10, 20, 30), translate: (15, 25, 35)
+    assert_eq(c.cx, 15);
+    assert_eq(c.cy, 25);
+    assert_eq(c.cz, 35);
+    // Use direct field access to avoid &c / &mut c conflict
+    assert_eq(c.cx + c.cy + c.cz, 75);
+}
+
+fn test_coord_dot() {
+    let a = Coord3D { cx: 1, cy: 2, cz: 3 };
+    let b = Coord3D { cx: 4, cy: 5, cz: 6 };
+    assert_eq(coord_dot(&a, &b), 32); // 4+10+18
+}
+
+fn test_coord_magnitude() {
+    let c = Coord3D { cx: 3, cy: 4, cz: 0 };
+    assert_eq(coord_magnitude_sq(&c), 25);
+}
+
+fn test_interval_read_only() {
+    let iv = Interval { lo: 10, hi: 20 };
+    assert_eq(interval_width(&iv), 10);
+    assert_eq(interval_contains(&iv, 15), true);
+    assert_eq(interval_contains(&iv, 5), false);
+}
+
+fn test_interval_clamp() {
+    let iv = Interval { lo: 10, hi: 20 };
+    let mut val = 25;
+    interval_clamp(&iv, &mut val);
+    assert_eq(val, 20);
+}
+
+fn test_interval_expand() {
+    let mut iv = Interval { lo: 10, hi: 20 };
+    interval_expand(&mut iv, 5);
+    assert_eq(iv.lo, 5);
+    assert_eq(iv.hi, 25);
+    let w = iv.hi - iv.lo;
+    assert_eq(w, 20);
+}
+
+fn test_bucket_chain() {
+    let mut total = 0;
+    let b1 = Bucket { val: 10, weight: 3 };
+    let b2 = Bucket { val: 5, weight: 2 };
+    let b3 = Bucket { val: 8, weight: 4 };
+    accumulate_bucket(&mut total, &b1);
+    accumulate_bucket(&mut total, &b2);
+    accumulate_bucket(&mut total, &b3);
+    assert_eq(total, 72); // 30 + 10 + 32
+}
+
+fn test_chained_transformations() {
+    let mut x = 3;
+    square_via_ref(&mut x);   // 9
+    double_via_ref(&mut x);   // 18
+    add_val(&mut x, 2);       // 20
+    square_via_ref(&mut x);   // 400
+    assert_eq(x, 400);
+}
+
+fn test_multi_ref_loop() {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 10 {
+        let mut temp = i;
+        square_via_ref(&mut temp);
+        add_val(&mut total, temp);
+        i = i + 1;
+    }
+    // sum of i^2, 1..10 = 385
+    assert_eq(total, 385);
+}
+
+fn main() -> Int {
+    test_nested_read_write();
+    test_square_via_ref();
+    test_add_abs();
+    test_clamp_via_ref();
+    test_normalize_to_range();
+    test_normalize_clamped();
+    test_sign_val();
+    test_coord_chain();
+    test_coord_dot();
+    test_coord_magnitude();
+    test_interval_read_only();
+    test_interval_clamp();
+    test_interval_expand();
+    test_bucket_chain();
+    test_chained_transformations();
+    test_multi_ref_loop();
+    print("[OK] 364_interp_cbgr_ref_builder");
+    0
+}

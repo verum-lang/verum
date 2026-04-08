@@ -1,0 +1,116 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, manual, tactics
+// @timeout: 15000
+
+/// Manual proof steps demonstration
+/// Shows low-level proof tactics and step-by-step reasoning
+
+/// Manual proof with explicit steps
+theorem manual_transitivity<T: Ord>(a: T, b: T, c: T)
+    requires a <= b
+    requires b <= c
+    ensures a <= c
+{
+    proof {
+        have h1: a <= b by precondition;
+        have h2: b <= c by precondition;
+        have h3: a <= c by transitivity(h1, h2);
+        qed
+    }
+}
+
+/// Using `have` to establish intermediate facts
+theorem manual_have_example(x: Int, y: Int)
+    requires x > 0
+    requires y == x + 1
+    ensures y > 1
+{
+    proof {
+        have h1: x > 0 by precondition;
+        have h2: y == x + 1 by precondition;
+        have h3: x + 1 > 1 by arithmetic;
+        have h4: y > 1 by substitution(h2, h3);
+        qed
+    }
+}
+
+/// Using `show` to prove sub-goals
+theorem manual_show_example(n: Nat)
+    requires n > 2
+    ensures n * n > n + n
+{
+    proof {
+        have h1: n > 2 by precondition;
+        have h2: n > 1 by weakening(h1);
+        have h3: n * n > 2 * n by arithmetic;
+        have h4: 2 * n == n + n by ring;
+        conclude by substitution(h3, h4)
+    }
+}
+
+/// Using `let` to introduce witnesses
+theorem manual_let_example(): exists n: Nat. n * n == 4 {
+    proof {
+        let witness_n = 2;
+        show witness_n * witness_n == 4 by arithmetic;
+        witness witness_n;
+        qed
+    }
+}
+
+/// Calculation chains with `calc`
+theorem manual_calc_example(a: Int, b: Int): (a + b) * (a + b) == a*a + 2*a*b + b*b {
+    proof {
+        calc {
+            (a + b) * (a + b)
+            == { by distributivity } (a + b) * a + (a + b) * b
+            == { by distributivity } a*a + b*a + a*b + b*b
+            == { by commutativity } a*a + a*b + a*b + b*b
+            == { by arithmetic } a*a + 2*a*b + b*b
+        }
+    }
+}
+
+/// Using `apply` for modus ponens
+theorem manual_apply_example(p: Proposition, q: Proposition)
+    requires p
+    requires p implies q
+    ensures q
+{
+    proof {
+        have h1: p by precondition;
+        have h2: p implies q by precondition;
+        apply h2 to h1;
+        qed
+    }
+}
+
+/// Using `rewrite` for equality substitution
+theorem manual_rewrite_example(x: Int, y: Int, z: Int)
+    requires x == y
+    requires y + z == 10
+    ensures x + z == 10
+{
+    proof {
+        have h1: x == y by precondition;
+        have h2: y + z == 10 by precondition;
+        rewrite h1 in goal;
+        exact h2
+    }
+}
+
+/// Combining multiple tactics
+theorem manual_combined(xs: List<Int>, ys: List<Int>)
+    requires len(xs) == len(ys)
+    requires forall i. 0 <= i && i < len(xs) implies xs[i] <= ys[i]
+    ensures sum(xs) <= sum(ys)
+{
+    proof {
+        have h1: len(xs) == len(ys) by precondition;
+        have h2: forall i. 0 <= i && i < len(xs) implies xs[i] <= ys[i] by precondition;
+        apply sum_le_pointwise(xs, ys, h1);
+        exact h2
+    }
+}

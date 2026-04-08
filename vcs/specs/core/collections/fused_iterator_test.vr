@@ -1,0 +1,351 @@
+// =============================================================================
+// fused_iterator_test.vr - FusedIterator for all collection iterator types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, collections, iterator, fused
+// @description: Tests that all collection iterator types implement FusedIterator.
+//               Verifies that after exhaustion, iterators continue to return None.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.collections.set.{Set};
+mount core.collections.deque.{Deque};
+mount core.collections.heap.{BinaryHeap};
+mount core.collections.btree.{BTreeMap, BTreeSet};
+
+// =============================================================================
+// SECTION 1: List iterators are FusedIterator
+// =============================================================================
+
+@test
+fn test_list_iter_fused() {
+    let list: List<Int> = [1, 2, 3];
+    let mut iter = list.iter();
+    // Exhaust
+    while iter.next().is_some() {}
+    // Must continue returning None
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_list_iter_mut_fused() {
+    let mut list: List<Int> = [1, 2, 3];
+    let mut iter = list.iter_mut();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_list_drain_fused() {
+    let mut list: List<Int> = [1, 2, 3];
+    let mut drain = list.drain(0, 3);
+    while drain.next().is_some() {}
+    assert(drain.next() is None);
+    assert(drain.next() is None);
+}
+
+// =============================================================================
+// SECTION 2: Map iterators are FusedIterator
+// =============================================================================
+
+@test
+fn test_map_iter_fused() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut iter = map.iter();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_map_keys_fused() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut iter = map.keys();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_map_values_fused() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut iter = map.values();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_map_values_mut_fused() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut iter = map.values_mut();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_map_iter_mut_fused() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut iter = map.iter_mut();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+// =============================================================================
+// SECTION 3: Set iterators are FusedIterator
+// =============================================================================
+
+@test
+fn test_set_iter_fused() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    let mut iter = set.iter();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+// =============================================================================
+// SECTION 4: Deque iterators are FusedIterator
+// =============================================================================
+
+@test
+fn test_deque_iter_fused() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+    let mut iter = deque.iter();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_deque_iter_mut_fused() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    let mut iter = deque.iter_mut();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+// =============================================================================
+// SECTION 5: BinaryHeap iterators are FusedIterator
+// =============================================================================
+
+@test
+fn test_heap_iter_fused() {
+    let mut heap = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(2);
+    let mut iter = heap.iter();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+// =============================================================================
+// SECTION 6: BTreeMap iterators are FusedIterator
+// =============================================================================
+
+@test
+fn test_btreemap_iter_fused() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    map.insert(3, "c");
+    let mut iter = map.iter();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_btreemap_keys_fused() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    let mut iter = map.keys();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_btreemap_values_fused() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    let mut iter = map.values();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+// =============================================================================
+// SECTION 7: BTreeSet iterators are FusedIterator
+// =============================================================================
+
+@test
+fn test_btreeset_iter_fused() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    let mut iter = set.iter();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+// =============================================================================
+// SECTION 8: Fused iterator with fuse() adapter on collections
+// =============================================================================
+
+@test
+fn test_list_iter_fuse_adapter() {
+    let list: List<Int> = [1, 2];
+    let mut iter = list.iter().fuse();
+    assert(iter.next().is_some());
+    assert(iter.next().is_some());
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_map_iter_fuse_adapter() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    let mut iter = map.iter().fuse();
+    assert(iter.next().is_some());
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+// =============================================================================
+// SECTION 9: Empty collection iterators are fused (edge case)
+// =============================================================================
+
+@test
+fn test_empty_list_iter_fused() {
+    let list: List<Int> = [];
+    let mut iter = list.iter();
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_empty_map_iter_fused() {
+    let map: Map<Int, Int> = Map.new();
+    let mut iter = map.iter();
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_empty_set_iter_fused() {
+    let set: Set<Int> = Set.new();
+    let mut iter = set.iter();
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_empty_deque_iter_fused() {
+    let deque: Deque<Int> = Deque.new();
+    let mut iter = deque.iter();
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_empty_heap_iter_fused() {
+    let heap: BinaryHeap<Int> = BinaryHeap.new();
+    let mut iter = heap.iter();
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_empty_btreemap_iter_fused() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut iter = map.iter();
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_empty_btreeset_iter_fused() {
+    let set: BTreeSet<Int> = BTreeSet.new();
+    let mut iter = set.iter();
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+// =============================================================================
+// SECTION 10: Slice iterators are FusedIterator
+// =============================================================================
+
+@test
+fn test_slice_iter_fused() {
+    let data: List<Int> = [1, 2, 3];
+    let slice = data.as_slice();
+    let mut iter = slice.iter();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_slice_iter_mut_fused() {
+    let mut data: List<Int> = [1, 2, 3];
+    let slice = data.as_mut_slice();
+    let mut iter = slice.iter_mut();
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_slice_chunks_fused() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let slice = data.as_slice();
+    let mut iter = slice.chunks(2);
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_slice_windows_fused() {
+    let data: List<Int> = [1, 2, 3, 4];
+    let slice = data.as_slice();
+    let mut iter = slice.windows(2);
+    while iter.next().is_some() {}
+    assert(iter.next() is None);
+    assert(iter.next() is None);
+}

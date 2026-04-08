@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, const_eval, error, evaluation
+// @description: Test const evaluation error handling - division by zero
+// @expected-error: division by zero
+
+// ERROR: Integer division by zero
+meta fn test_div_by_zero_int() -> Int {
+    42 / 0  // ERROR: division by zero
+}
+
+fn main() {
+    @const {
+        let _ = test_div_by_zero_int();
+    };
+}

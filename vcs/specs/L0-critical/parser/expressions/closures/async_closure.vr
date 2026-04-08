@@ -1,0 +1,125 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, closures, lambda, async, await
+
+// Test simple async closure
+fn test_simple_async_closure() {
+    let fetch = async |url| {
+        http_get(url).await
+    };
+}
+
+// Test async closure with type annotations
+fn test_typed_async_closure() {
+    let fetch_typed = async |url: Text| -> Response {
+        http_get(url).await
+    };
+}
+
+// Test async closure with await expression
+fn test_async_closure_await() {
+    let process = async |data| {
+        let result = transform(data).await;
+        save(result).await
+    };
+}
+
+// Test async closure used in map
+fn test_async_closure_in_map() {
+    let futures = get_futures();
+    let results = futures
+        .map(async |item| {
+            process(item).await
+        })
+        .collect()
+        .await;
+}
+
+// Test async closure with multiple awaits
+fn test_async_closure_multiple_awaits() {
+    let pipeline = async |input| {
+        let step1 = fetch(input).await;
+        let step2 = parse(step1).await;
+        let step3 = validate(step2).await;
+        step3
+    };
+}
+
+// Test async closure with error handling
+fn test_async_closure_error_handling() {
+    let safe_fetch = async |url| {
+        try {
+            http_get(url).await?
+        } recover {
+            _ => default_response()
+        }
+    };
+}
+
+// Test async closure passed to async function
+fn test_async_closure_spawn() {
+    spawn(async || {
+        long_running_task().await
+    });
+}
+
+// Test async closure with captured variables
+fn test_async_closure_capture() {
+    let base_url = "https://api.example.com";
+    let fetch_endpoint = async |endpoint| {
+        http_get(base_url + endpoint).await
+    };
+}
+
+// Test async closure returning Result
+fn test_async_closure_result() {
+    let try_fetch = async |url: Text| -> Result<Data, Error> {
+        let response = http_get(url).await?;
+        let data = response.json().await?;
+        Ok(data)
+    };
+}
+
+// Test async closure with timeout
+fn test_async_closure_timeout() {
+    // NOTE: select expression is not part of Verum grammar
+    // Use runtime timeout() function instead
+    let with_timeout = async |duration, operation| {
+        timeout(duration, operation).await
+    };
+}
+
+// Test async closure in parallel execution
+fn test_async_closure_parallel() {
+    let parallel = async |items| {
+        join_all(items.map(async |item| {
+            process(item).await
+        })).await
+    };
+}
+
+// Test nested async closures
+fn test_nested_async_closures() {
+    let nested = async |x| {
+        let inner = async |y| {
+            compute(x, y).await
+        };
+        inner(x * 2).await
+    };
+}
+
+// Test async closure with move semantics
+fn test_async_closure_move() {
+    let owned_data = create_data();
+    let moved = async move || {
+        process(owned_data).await
+    };
+}
+
+// Test async closure returning future
+fn test_async_closure_returning_future() {
+    let create_future = |x| async move {
+        compute(x).await
+    };
+}

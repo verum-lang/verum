@@ -1,0 +1,380 @@
+// @test: run
+// @expected-stdout: Task 0 acquired permit\nTask 1 acquired permit\nTask 2 acquired permit\nTask 0 released permit\nTask 3 acquired permit\nTask 1 released permit\nTask 4 acquired permit\nAll tasks completed\nConnection pool: 5 connections used\nTry acquire: Some(permit)\nMultiple permits: acquired 3\nWeighted: heavy acquired\nFair semaphore: all acquired
+// @tier: 0
+// @level: L2
+// @tags: async, synchronization, semaphore
+// @description: Comprehensive async semaphore patterns for concurrency limiting
+
+// Forward-declare async sleep to avoid ambiguous resolution
+async fn sleep(duration: Duration) {}
+
+// Basic semaphore for limiting concurrent tasks
+async fn test_basic_semaphore() {
+    let semaphore = Semaphore.new(3);
+
+    let handles: List<_> = (0..5).map(|i| {
+        spawn {
+            let permit = semaphore.acquire().await;
+            println(f"Task {i} acquired permit");
+
+            sleep(Duration.from_millis(10)).await;
+
+            println(f"Task {i} released permit");
+            // Permit automatically released on drop
+        }
+    }).collect();
+
+    for handle in handles {
+        handle.await;
+    }
+
+    println("All tasks completed");
+}
+
+// Connection pool pattern
+async fn test_connection_pool() -> Int {
+    type ConnectionPool is {
+        semaphore: Semaphore,
+        connections: Mutex<List<Connection>>,
+    };
+
+    type Connection is {
+        id: Int,
+    };
+
+    let pool = Shared.new(ConnectionPool {
+        semaphore: Semaphore.new(5), // Max 5 connections
+        connections: Mutex.new((0..5).map(|i| Connection { id: i }).collect()),
+    });
+
+    let mut handles = [];
+
+    for _ in 0..10 {
+        let p = pool.clone();
+        handles.push(spawn {
+            // Acquire permit to get connection
+            let permit = p.semaphore.acquire().await;
+
+            let conn = {
+                let mut conns = p.connections.lock().await;
+                conns.pop().unwrap()
+            };
+
+            // Use connection
+            sleep(Duration.from_millis(10)).await;
+
+            // Return connection
+            {
+                let mut conns = p.connections.lock().await;
+                conns.push(conn);
+            }
+
+            // Permit released, another task can acquire
+            1
+        });
+    }
+
+    let results = join_all(handles).await;
+    results.iter().sum()
+}
+
+// Try acquire (non-blocking)
+async fn test_try_acquire() -> Text {
+    let semaphore = Semaphore.new(1);
+
+    if semaphore.try_acquire() {
+        "acquired"
+    } else {
+        "not available"
+    }
+}
+
+// Acquire multiple permits
+async fn test_acquire_many() -> Int {
+    let semaphore = Semaphore.new(10);
+
+    // Acquire 3 permits at once
+    let permits = semaphore.acquire_many(3).await;
+
+    println(f"Multiple permits: acquired {permits.count()}");
+    permits.count()
+}
+
+// Weighted semaphore (different operations cost different permits)
+async fn test_weighted_semaphore() {
+    let semaphore = Semaphore.new(10);
+
+    // Light operation costs 1 permit
+    let light = spawn {
+        let permit = semaphore.acquire_many(1).await;
+        sleep(Duration.from_millis(10)).await;
+        println("Weighted: light acquired");
+    };
+
+    // Heavy operation costs 5 permits
+    let heavy = spawn {
+        let permit = semaphore.acquire_many(5).await;
+        sleep(Duration.from_millis(10)).await;
+        println("Weighted: heavy acquired");
+    };
+
+    light.await;
+    heavy.await;
+}
+
+// Semaphore with timeout
+async fn test_acquire_timeout() -> Result<(), TimeoutError> {
+    let semaphore = Semaphore.new(1);
+
+    // Take the only permit
+    let _permit = semaphore.acquire().await;
+
+    // Try to acquire with timeout (will fail)
+    // Timeout acquire not yet available
+    Ok(())
+}
+
+// Owned permit (can be moved across await points)
+async fn test_owned_permit() {
+    let semaphore = Shared.new(Semaphore.new(3));
+
+    let s = semaphore.clone();
+    let permit = s.acquire_owned().await;
+
+    // Can hold permit across await points
+    sleep(Duration.from_millis(10)).await;
+
+    // Permit released on drop
+    drop(permit);
+}
+
+// Rate limiting with semaphore
+async fn test_rate_limiter() {
+    type RateLimiter is {
+        semaphore: Semaphore,
+        replenish_rate: Duration,
+    };
+
+    implement RateLimiter {
+        fn new(permits: Int, replenish_rate: Duration) -> Self {
+            let limiter = Self {
+                semaphore: Semaphore.new(permits),
+                replenish_rate,
+            };
+
+            // Background task to replenish permits
+            spawn {
+                loop {
+                    sleep(limiter.replenish_rate).await;
+                    limiter.semaphore.add_permits(1);
+                }
+            };
+
+            limiter
+        }
+
+        async fn acquire(self) {
+            self.semaphore.acquire().await;
+        }
+    }
+
+    let limiter = RateLimiter.new(10, Duration.from_millis(100));
+
+    for _ in 0..15 {
+        limiter.acquire().await;
+        // Do rate-limited work
+    }
+}
+
+// Semaphore for reader/writer (like RwLock)
+async fn test_rwlock_semaphore() {
+    // Max 10 concurrent readers, writer needs all 10
+    let semaphore = Semaphore.new(10);
+
+    // Reader acquires 1 permit
+    let read = || async {
+        let permit = semaphore.acquire_many(1).await;
+        // Read data
+        drop(permit);
+    };
+
+    // Writer acquires all permits
+    let write = || async {
+        let permit = semaphore.acquire_many(10).await;
+        // Write data (exclusive)
+        drop(permit);
+    };
+
+    // Many readers can run concurrently
+    let readers: List<_> = (0..5).map(|_| spawn(read())).collect();
+    join_all(readers).await;
+
+    // Writer blocks until all readers done
+    write().await;
+}
+
+// Semaphore close (reject new acquires)
+async fn test_semaphore_close() {
+    let semaphore = Semaphore.new(3);
+
+    // Take permits
+    let permit = semaphore.acquire().await;
+
+    // Close semaphore
+    semaphore.close();
+
+    // New acquires fail immediately
+    match semaphore.acquire().await {
+        Ok(permit) => println("Acquired after close"),
+        Err(ClosedError) => println("Semaphore closed"),
+    }
+}
+
+// Fair semaphore (FIFO ordering)
+async fn test_fair_semaphore() {
+    // Ensures waiters are served in order
+    let semaphore = Semaphore.new(1); // FairSemaphore not yet available
+    let order = Shared.new(Mutex.new([]));
+
+    let handles: List<_> = (0..5).map(|i| {
+        let s = &semaphore;
+        let o = order.clone();
+        spawn {
+            let permit = s.acquire().await;
+            {
+                let mut ord = o.lock().await;
+                ord.push(i);
+            }
+            drop(permit);
+        }
+    }).collect();
+
+    join_all(handles).await;
+
+    // Order should be 0, 1, 2, 3, 4
+    println("Fair semaphore: all acquired");
+}
+
+// Add permits dynamically
+async fn test_add_permits() {
+    let semaphore = Semaphore.new(0); // Start with 0
+
+    // Task waiting for permits
+    let waiter = spawn {
+        semaphore.acquire().await;
+        println("Acquired dynamically added permit");
+    };
+
+    // Add permit later
+    sleep(Duration.from_millis(50)).await;
+    semaphore.add_permits(1);
+
+    waiter.await;
+}
+
+// Forget permit (don't return to semaphore)
+async fn test_forget_permit() {
+    let semaphore = Semaphore.new(3);
+
+    let permit = semaphore.acquire().await;
+
+    // Forget instead of returning
+    permit.forget();
+
+    // Now only 2 permits available
+    assert_eq(semaphore.available_permits(), 2);
+}
+
+// Semaphore stats
+async fn test_semaphore_stats() {
+    let semaphore = Semaphore.new(5);
+
+    let p1 = semaphore.acquire().await;
+    let p2 = semaphore.acquire().await;
+
+    println(f"Available: {semaphore.available_permits()}");
+    println(f"Total: {semaphore.total_permits()}");
+    println(f"Waiters: {semaphore.waiter_count()}");
+}
+
+// Batch acquire/release
+async fn test_batch_operations() {
+    let semaphore = Semaphore.new(10);
+
+    // Batch acquire
+    let permits = semaphore.acquire_batch([2, 3, 5]).await;
+
+    // Use all 10 permits
+    sleep(Duration.from_millis(10)).await;
+
+    // Batch release (implicit on drop)
+}
+
+// Semaphore guard pattern
+async fn test_semaphore_guard() {
+    let semaphore = Semaphore.new(3);
+
+    async fn with_permit<F, R>(sem: &Semaphore, f: F) -> R
+    where type F: Future<Output = R>
+    {
+        let permit = sem.acquire().await;
+        let result = f.await;
+        drop(permit);
+        result
+    }
+
+    let result = with_permit(&semaphore, async {
+        // Work with permit
+        42
+    }).await;
+}
+
+// Prioritized semaphore
+async fn test_priority_semaphore() {
+    let semaphore = Semaphore.new(1); // PrioritySemaphore not yet available
+
+    // Low priority task
+    let low = spawn {
+        semaphore.acquire().await; // Priority not yet supported
+        println("Low priority acquired");
+    };
+
+    // High priority task (gets permit first even if queued later)
+    let high = spawn {
+        sleep(Duration.from_millis(5)).await;
+        semaphore.acquire().await; // Priority not yet supported
+        println("High priority acquired");
+    };
+
+    low.await;
+    high.await;
+}
+
+type Priority is
+    | Low
+    | Normal
+    | High;
+
+type ClosedError is {};
+
+async fn main() {
+    // Basic
+    test_basic_semaphore().await;
+
+    // Connection pool
+    let conns = test_connection_pool().await;
+    println(f"Connection pool: {conns} connections used");
+
+    // Try acquire
+    let try_result = test_try_acquire().await;
+    println(f"Try acquire: {try_result}");
+
+    // Multiple permits
+    test_acquire_many().await;
+
+    // Weighted
+    test_weighted_semaphore().await;
+
+    // Fair
+    test_fair_semaphore().await;
+}

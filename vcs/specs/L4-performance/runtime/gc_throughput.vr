@@ -1,0 +1,298 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: runtime, gc, memory, throughput
+// @description: GC throughput benchmark (target: < 5% overhead, < 1ms pause)
+
+/// GC Throughput and Latency Benchmark
+///
+/// Verum uses generational garbage collection with CBGR integration.
+/// These benchmarks measure:
+/// - Allocation throughput
+/// - GC pause times (P50, P99, max)
+/// - Memory overhead
+/// - Collection efficiency
+
+const SMALL_ALLOC_SIZE: Int = 64;      // 64 bytes
+const MEDIUM_ALLOC_SIZE: Int = 1024;   // 1 KB
+const LARGE_ALLOC_SIZE: Int = 65536;   // 64 KB
+
+const ITERATIONS: Int = 1_000_000;
+
+/// Benchmark: Small object allocation rate
+fn benchmark_small_alloc() -> AllocBenchmarkResult {
+    let mut allocated: List<Heap<[u8; SMALL_ALLOC_SIZE]> > = List.new();
+
+    let start = Instant.now();
+    let start_mem = memory_used();
+
+    for i in 0..ITERATIONS {
+        let obj = Heap([0u8; SMALL_ALLOC_SIZE]);
+        allocated.push(obj);
+
+        // Periodically drop some objects to trigger GC
+        if i % 1000 == 0 && allocated.len() > 500 {
+            allocated.truncate(250);
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let end_mem = memory_used();
+
+    AllocBenchmarkResult {
+        name: "small_alloc_64b",
+        allocations: ITERATIONS,
+        bytes_allocated: ITERATIONS * SMALL_ALLOC_SIZE,
+        allocs_per_sec: ITERATIONS as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (ITERATIONS * SMALL_ALLOC_SIZE) as f64 / elapsed.as_secs_f64(),
+        memory_overhead: (end_mem - start_mem) as f64 / (ITERATIONS * SMALL_ALLOC_SIZE / 4) as f64,
+    }
+}
+
+/// Benchmark: Medium object allocation rate
+fn benchmark_medium_alloc() -> AllocBenchmarkResult {
+    let mut allocated: List<Heap<[u8; MEDIUM_ALLOC_SIZE]> > = List.new();
+
+    let start = Instant.now();
+    let start_mem = memory_used();
+
+    for i in 0..ITERATIONS / 10 {
+        let obj = Heap([0u8; MEDIUM_ALLOC_SIZE]);
+        allocated.push(obj);
+
+        if i % 100 == 0 && allocated.len() > 50 {
+            allocated.truncate(25);
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let end_mem = memory_used();
+
+    AllocBenchmarkResult {
+        name: "medium_alloc_1kb",
+        allocations: ITERATIONS / 10,
+        bytes_allocated: ITERATIONS / 10 * MEDIUM_ALLOC_SIZE,
+        allocs_per_sec: (ITERATIONS / 10) as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (ITERATIONS / 10 * MEDIUM_ALLOC_SIZE) as f64 / elapsed.as_secs_f64(),
+        memory_overhead: (end_mem - start_mem) as f64 / (ITERATIONS / 10 * MEDIUM_ALLOC_SIZE / 4) as f64,
+    }
+}
+
+/// Benchmark: Large object allocation (different GC path)
+fn benchmark_large_alloc() -> AllocBenchmarkResult {
+    let mut allocated: List<Heap<[u8; LARGE_ALLOC_SIZE]> > = List.new();
+
+    let start = Instant.now();
+    let start_mem = memory_used();
+
+    for i in 0..ITERATIONS / 100 {
+        let obj = Heap([0u8; LARGE_ALLOC_SIZE]);
+        allocated.push(obj);
+
+        if i % 10 == 0 && allocated.len() > 5 {
+            allocated.truncate(2);
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let end_mem = memory_used();
+
+    AllocBenchmarkResult {
+        name: "large_alloc_64kb",
+        allocations: ITERATIONS / 100,
+        bytes_allocated: ITERATIONS / 100 * LARGE_ALLOC_SIZE,
+        allocs_per_sec: (ITERATIONS / 100) as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (ITERATIONS / 100 * LARGE_ALLOC_SIZE) as f64 / elapsed.as_secs_f64(),
+        memory_overhead: (end_mem - start_mem) as f64 / (ITERATIONS / 100 * LARGE_ALLOC_SIZE / 4) as f64,
+    }
+}
+
+/// Benchmark: GC pause times
+fn benchmark_gc_pauses() -> GCPauseResult {
+    let mut pause_times: List<Duration> = List.new();
+
+    // Allocate and deallocate to trigger many GCs
+    for _ in 0..100 {
+        let mut objects: List<Heap<[u8; 1024]> > = List.new();
+
+        // Allocate 10MB
+        for _ in 0..10_000 {
+            objects.push(Heap([0u8; 1024]));
+        }
+
+        // Force GC and measure pause
+        let gc_start = Instant.now();
+        gc.collect();
+        let gc_time = gc_start.elapsed();
+
+        pause_times.push(gc_time);
+
+        // Drop all objects
+        objects.clear();
+    }
+
+    pause_times.sort();
+
+    GCPauseResult {
+        collections: 100,
+        p50_pause_us: pause_times[50].as_micros(),
+        p99_pause_us: pause_times[99].as_micros(),
+        max_pause_us: pause_times.last().unwrap().as_micros(),
+        mean_pause_us: pause_times.iter().map(|d| d.as_micros()).sum.<Int>() / 100,
+    }
+}
+
+/// Benchmark: Generational behavior
+fn benchmark_generational() -> GenerationalResult {
+    // Track object survival across generations
+
+    let mut young_collected = 0;
+    let mut old_promoted = 0;
+
+    for _ in 0..1000 {
+        // Short-lived objects (should be collected young)
+        for _ in 0..100 {
+            let _temp = Heap([0u8; 128]);
+        }
+        young_collected += 100;
+
+        // Long-lived objects (should be promoted to old gen)
+        static mut LONG_LIVED: List<Heap<[u8; 128]> > = List.new();
+        unsafe {
+            LONG_LIVED.push(Heap([0u8; 128]));
+            if LONG_LIVED.len() > 100 {
+                LONG_LIVED.truncate(50);
+                old_promoted += 50;
+            }
+        }
+    }
+
+    let stats = gc.stats();
+
+    GenerationalResult {
+        young_collections: stats.young_collections,
+        old_collections: stats.old_collections,
+        objects_promoted: old_promoted,
+        promotion_rate: old_promoted as f64 / young_collected as f64,
+    }
+}
+
+/// Benchmark: Concurrent GC (if supported)
+fn benchmark_concurrent_gc() -> ConcurrentGCResult {
+    mount std.thread;
+    mount std.sync.atomic.{AtomicInt, Ordering};
+
+    let total_allocated = AtomicInt.new(0);
+    let gc_happened = AtomicInt.new(0);
+
+    let start = Instant.now();
+
+    // Spawn multiple threads allocating concurrently
+    let handles: List<_> = (0..4).map(|_| {
+        thread.spawn(|| {
+            let mut local_allocs = 0;
+            for _ in 0..ITERATIONS / 4 {
+                let _obj = Heap([0u8; 256]);
+                local_allocs += 1;
+            }
+            local_allocs
+        })
+    }).collect();
+
+    let total: Int = handles.into_iter().map(|h| h.join().unwrap()).sum();
+
+    let elapsed = start.elapsed();
+
+    ConcurrentGCResult {
+        threads: 4,
+        total_allocations: total,
+        elapsed_ms: elapsed.as_millis(),
+        allocs_per_sec: total as f64 / elapsed.as_secs_f64(),
+        gc_work_stolen: gc.stats().work_stolen,
+    }
+}
+
+fn main() {
+    println("=== GC Throughput and Latency Benchmark ===\n");
+
+    println("Allocation Throughput:");
+    let small = benchmark_small_alloc();
+    println("  Small (64B):  {:.2}M allocs/sec, {:.2} GB/sec, {:.1}% overhead",
+            small.allocs_per_sec / 1e6,
+            small.bytes_per_sec / 1e9,
+            small.memory_overhead * 100.0);
+
+    let medium = benchmark_medium_alloc();
+    println("  Medium (1KB): {:.2}M allocs/sec, {:.2} GB/sec, {:.1}% overhead",
+            medium.allocs_per_sec / 1e6,
+            medium.bytes_per_sec / 1e9,
+            medium.memory_overhead * 100.0);
+
+    let large = benchmark_large_alloc();
+    println("  Large (64KB): {:.2}K allocs/sec, {:.2} GB/sec, {:.1}% overhead",
+            large.allocs_per_sec / 1e3,
+            large.bytes_per_sec / 1e9,
+            large.memory_overhead * 100.0);
+
+    println("\nGC Pause Times:");
+    let pauses = benchmark_gc_pauses();
+    println("  P50:  {}us", pauses.p50_pause_us);
+    println("  P99:  {}us", pauses.p99_pause_us);
+    println("  Max:  {}us", pauses.max_pause_us);
+    println("  Mean: {}us", pauses.mean_pause_us);
+
+    println("\nGenerational Behavior:");
+    let gen = benchmark_generational();
+    println("  Young collections: {}", gen.young_collections);
+    println("  Old collections:   {}", gen.old_collections);
+    println("  Promotion rate:    {:.2}%", gen.promotion_rate * 100.0);
+}
+
+type AllocBenchmarkResult is {
+    name: Text,
+    allocations: Int,
+    bytes_allocated: Int,
+    allocs_per_sec: f64,
+    bytes_per_sec: f64,
+    memory_overhead: f64,
+};
+
+type GCPauseResult is {
+    collections: Int,
+    p50_pause_us: Int,
+    p99_pause_us: Int,
+    max_pause_us: Int,
+    mean_pause_us: Int,
+};
+
+type GenerationalResult is {
+    young_collections: Int,
+    old_collections: Int,
+    objects_promoted: Int,
+    promotion_rate: f64,
+};
+
+type ConcurrentGCResult is {
+    threads: Int,
+    total_allocations: Int,
+    elapsed_ms: Int,
+    allocs_per_sec: f64,
+    gc_work_stolen: Int,
+};
+
+type Instant is { nanos: Int };
+type Duration is { nanos: Int };
+
+module gc {
+    pub fn collect() {}
+    pub fn stats() -> GCStats { GCStats.default() }
+
+    pub type GCStats is {
+        young_collections: Int,
+        old_collections: Int,
+        work_stolen: Int,
+    };
+}
+
+fn memory_used() -> Int { 0 }

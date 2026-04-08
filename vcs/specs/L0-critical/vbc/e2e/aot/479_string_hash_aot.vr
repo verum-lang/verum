@@ -1,0 +1,221 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, string-hash, rolling-hash, rabin-karp
+// @timeout: 30000
+
+// String hashing and rolling hash (Rabin-Karp style) on integer arrays
+// Characters represented as integers
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Simple polynomial hash: hash = sum(arr[i] * base^i) mod modulus
+fn poly_hash(arr: Arr8, len: Int, base: Int, modulus: Int) -> Int {
+    let mut h = 0;
+    let mut pow = 1;
+    let mut i = 0;
+    while i < len {
+        h = (h + get8(arr, i) * pow) % modulus;
+        pow = pow * base % modulus;
+        i = i + 1;
+    }
+    h
+}
+
+// Rolling hash: compute hash of window [start..start+wlen) in arr
+fn window_hash(arr: Arr8, start: Int, wlen: Int, base: Int, modulus: Int) -> Int {
+    let mut h = 0;
+    let mut pow = 1;
+    let mut i = 0;
+    while i < wlen {
+        h = (h + get8(arr, start + i) * pow) % modulus;
+        pow = pow * base % modulus;
+        i = i + 1;
+    }
+    h
+}
+
+// Count how many windows of size wlen in arr (of length n) match the pattern hash
+fn count_hash_matches(arr: Arr8, n: Int, pat: Arr8, plen: Int, base: Int, modulus: Int) -> Int {
+    let pat_hash = poly_hash(pat, plen, base, modulus);
+    let mut count = 0;
+    let mut i = 0;
+    while i + plen <= n {
+        let wh = window_hash(arr, i, plen, base, modulus);
+        if wh == pat_hash {
+            // Verify actual match
+            let mut match_ok = 1;
+            let mut j = 0;
+            while j < plen {
+                if get8(arr, i + j) != get8(pat, j) {
+                    match_ok = 0;
+                }
+                j = j + 1;
+            }
+            if match_ok == 1 { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// DJB2-style hash (adapted for integer arrays)
+fn djb2_hash(arr: Arr8, len: Int) -> Int {
+    let mut h = 5381;
+    let mut i = 0;
+    while i < len {
+        h = h * 33 + get8(arr, i);
+        // Keep in reasonable range
+        h = h % 1000000007;
+        i = i + 1;
+    }
+    h
+}
+
+// Check if two arrays are equal
+fn arrays_equal(a: Arr8, b: Arr8, len: Int) -> Int {
+    let mut i = 0;
+    while i < len {
+        if get8(a, i) != get8(b, i) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Find first occurrence of pattern in text, return index or -1
+fn find_pattern(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let base = 31;
+    let modulus = 1000000007;
+    let pat_hash = poly_hash(pat, plen, base, modulus);
+    let mut i = 0;
+    while i + plen <= tlen {
+        let wh = window_hash(text, i, plen, base, modulus);
+        if wh == pat_hash {
+            let mut ok = 1;
+            let mut j = 0;
+            while j < plen {
+                if get8(text, i + j) != get8(pat, j) { ok = 0; }
+                j = j + 1;
+            }
+            if ok == 1 { return i; }
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn test_basic_hash() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let h1 = poly_hash(arr, 3, 31, 1000000007);
+
+    // Same data, same hash
+    let h2 = poly_hash(arr, 3, 31, 1000000007);
+    assert_eq(h1, h2);
+
+    // Different data, (very likely) different hash
+    let arr2 = Arr8 { v0: 3, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let h3 = poly_hash(arr2, 3, 31, 1000000007);
+    assert(h1 != h3);
+    1
+}
+
+fn test_djb2() -> Int {
+    let arr = Arr8 { v0: 72, v1: 101, v2: 108, v3: 108, v4: 111, v5: 0, v6: 0, v7: 0 };
+    let h1 = djb2_hash(arr, 5);
+
+    // Deterministic
+    let h2 = djb2_hash(arr, 5);
+    assert_eq(h1, h2);
+
+    // Different input
+    let arr2 = Arr8 { v0: 87, v1: 111, v2: 114, v3: 108, v4: 100, v5: 0, v6: 0, v7: 0 };
+    let h3 = djb2_hash(arr2, 5);
+    assert(h1 != h3);
+    1
+}
+
+fn test_pattern_find() -> Int {
+    // text = [1, 2, 3, 4, 2, 3, 5, 6], pattern = [2, 3]
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 2, v5: 3, v6: 5, v7: 6 };
+    let pat = Arr8 { v0: 2, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+
+    // First occurrence at index 1
+    assert_eq(find_pattern(text, 8, pat, 2), 1);
+
+    // Count: appears at index 1 and 4
+    assert_eq(count_hash_matches(text, 8, pat, 2, 31, 1000000007), 2);
+    1
+}
+
+fn test_pattern_not_found() -> Int {
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let pat = Arr8 { v0: 9, v1: 10, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_pattern(text, 8, pat, 2), -1);
+    assert_eq(count_hash_matches(text, 8, pat, 2, 31, 1000000007), 0);
+    1
+}
+
+fn test_full_match() -> Int {
+    // Pattern is the entire text
+    let arr = Arr8 { v0: 5, v1: 10, v2: 15, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_pattern(arr, 3, arr, 3), 0);
+    assert_eq(count_hash_matches(arr, 3, arr, 3, 31, 1000000007), 1);
+    1
+}
+
+fn test_single_element_pattern() -> Int {
+    let text = Arr8 { v0: 1, v1: 2, v2: 1, v3: 3, v4: 1, v5: 4, v6: 1, v7: 5 };
+    let pat = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // 1 appears at indices 0, 2, 4, 6
+    assert_eq(count_hash_matches(text, 8, pat, 1, 31, 1000000007), 4);
+    assert_eq(find_pattern(text, 8, pat, 1), 0);
+    1
+}
+
+fn test_window_hash_consistency() -> Int {
+    let arr = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 0, v6: 0, v7: 0 };
+    // Hash of entire array of length 3
+    let sub = Arr8 { v0: 10, v1: 20, v2: 30, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let h1 = poly_hash(sub, 3, 31, 1000000007);
+    let h2 = window_hash(arr, 0, 3, 31, 1000000007);
+    assert_eq(h1, h2);
+
+    // Window starting at index 2
+    let sub2 = Arr8 { v0: 30, v1: 40, v2: 50, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let h3 = poly_hash(sub2, 3, 31, 1000000007);
+    let h4 = window_hash(arr, 2, 3, 31, 1000000007);
+    assert_eq(h3, h4);
+    1
+}
+
+fn main() -> Int {
+    test_basic_hash();
+    test_djb2();
+    test_pattern_find();
+    test_pattern_not_found();
+    test_full_match();
+    test_single_element_pattern();
+    test_window_hash_consistency();
+    print("[OK] 479_string_hash_aot");
+    0
+}

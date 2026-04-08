@@ -1,0 +1,360 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, windows, chunks, chunks_exact
+// @description: Tests for Deque windowing methods: windows, chunks, chunks_exact, chunks_exact_remainder
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Deque.windows
+// =============================================================================
+
+@test
+fn test_deque_windows_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let wins = d.windows(3);
+    assert_eq(wins.len(), 3);
+    assert_eq(wins[0], [1, 2, 3]);
+    assert_eq(wins[1], [2, 3, 4]);
+    assert_eq(wins[2], [3, 4, 5]);
+}
+
+@test
+fn test_deque_windows_size_one() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    let wins = d.windows(1);
+    assert_eq(wins.len(), 3);
+    assert_eq(wins[0], [10]);
+    assert_eq(wins[1], [20]);
+    assert_eq(wins[2], [30]);
+}
+
+@test
+fn test_deque_windows_full_size() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let wins = d.windows(3);
+    assert_eq(wins.len(), 1);
+    assert_eq(wins[0], [1, 2, 3]);
+}
+
+@test
+fn test_deque_windows_larger_than_deque() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let wins = d.windows(5);
+    assert(wins.is_empty());
+}
+
+@test
+fn test_deque_windows_empty_deque() {
+    let d: Deque<Int> = Deque.new();
+    let wins = d.windows(2);
+    assert(wins.is_empty());
+}
+
+@test
+fn test_deque_windows_size_two() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    let wins = d.windows(2);
+    assert_eq(wins.len(), 3);
+    assert_eq(wins[0], [1, 2]);
+    assert_eq(wins[1], [2, 3]);
+    assert_eq(wins[2], [3, 4]);
+}
+
+@test
+fn test_deque_windows_wrap_around() {
+    // Deque with wrap-around
+    let mut d: Deque<Int> = Deque.with_capacity(4);
+    d.push_front(2);
+    d.push_front(1);
+    d.push_back(3);
+    d.push_back(4);
+    // Logical: [1, 2, 3, 4]
+    let wins = d.windows(2);
+    assert_eq(wins.len(), 3);
+    assert_eq(wins[0], [1, 2]);
+    assert_eq(wins[1], [2, 3]);
+    assert_eq(wins[2], [3, 4]);
+}
+
+// =============================================================================
+// Section 2: Deque.chunks
+// =============================================================================
+
+@test
+fn test_deque_chunks_even() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    d.push_back(6);
+    let ch = d.chunks(2);
+    assert_eq(ch.len(), 3);
+    assert_eq(ch[0], [1, 2]);
+    assert_eq(ch[1], [3, 4]);
+    assert_eq(ch[2], [5, 6]);
+}
+
+@test
+fn test_deque_chunks_uneven() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let ch = d.chunks(2);
+    assert_eq(ch.len(), 3);
+    assert_eq(ch[0], [1, 2]);
+    assert_eq(ch[1], [3, 4]);
+    assert_eq(ch[2], [5]); // remainder
+}
+
+@test
+fn test_deque_chunks_size_one() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    let ch = d.chunks(1);
+    assert_eq(ch.len(), 3);
+    assert_eq(ch[0], [10]);
+    assert_eq(ch[1], [20]);
+    assert_eq(ch[2], [30]);
+}
+
+@test
+fn test_deque_chunks_larger_than_deque() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let ch = d.chunks(5);
+    assert_eq(ch.len(), 1);
+    assert_eq(ch[0], [1, 2]);
+}
+
+@test
+fn test_deque_chunks_empty_deque() {
+    let d: Deque<Int> = Deque.new();
+    let ch = d.chunks(3);
+    assert(ch.is_empty());
+}
+
+@test
+fn test_deque_chunks_exact_size() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    let ch = d.chunks(4);
+    assert_eq(ch.len(), 1);
+    assert_eq(ch[0], [1, 2, 3, 4]);
+}
+
+@test
+fn test_deque_chunks_wrap_around() {
+    let mut d: Deque<Int> = Deque.with_capacity(4);
+    d.push_front(2);
+    d.push_front(1);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    d.push_back(6);
+    // Logical: [1, 2, 3, 4, 5, 6]
+    let ch = d.chunks(3);
+    assert_eq(ch.len(), 2);
+    assert_eq(ch[0], [1, 2, 3]);
+    assert_eq(ch[1], [4, 5, 6]);
+}
+
+// =============================================================================
+// Section 3: Deque.chunks_exact
+// =============================================================================
+
+@test
+fn test_deque_chunks_exact_even() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    d.push_back(6);
+    let ch = d.chunks_exact(2);
+    assert_eq(ch.len(), 3);
+    assert_eq(ch[0], [1, 2]);
+    assert_eq(ch[1], [3, 4]);
+    assert_eq(ch[2], [5, 6]);
+}
+
+@test
+fn test_deque_chunks_exact_uneven() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let ch = d.chunks_exact(2);
+    assert_eq(ch.len(), 2); // drops remainder
+    assert_eq(ch[0], [1, 2]);
+    assert_eq(ch[1], [3, 4]);
+}
+
+@test
+fn test_deque_chunks_exact_size_one() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    let ch = d.chunks_exact(1);
+    assert_eq(ch.len(), 3);
+}
+
+@test
+fn test_deque_chunks_exact_larger_than_deque() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let ch = d.chunks_exact(5);
+    assert(ch.is_empty());
+}
+
+@test
+fn test_deque_chunks_exact_empty_deque() {
+    let d: Deque<Int> = Deque.new();
+    let ch = d.chunks_exact(3);
+    assert(ch.is_empty());
+}
+
+// =============================================================================
+// Section 4: Deque.chunks_exact_remainder
+// =============================================================================
+
+@test
+fn test_deque_chunks_exact_remainder_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let rem = d.chunks_exact_remainder(2);
+    assert_eq(rem.len(), 1);
+    assert_eq(rem[0], 5);
+}
+
+@test
+fn test_deque_chunks_exact_remainder_none() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    let rem = d.chunks_exact_remainder(2);
+    assert(rem.is_empty());
+}
+
+@test
+fn test_deque_chunks_exact_remainder_all() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let rem = d.chunks_exact_remainder(5);
+    assert_eq(rem.len(), 2);
+    assert_eq(rem[0], 1);
+    assert_eq(rem[1], 2);
+}
+
+@test
+fn test_deque_chunks_exact_remainder_empty() {
+    let d: Deque<Int> = Deque.new();
+    let rem = d.chunks_exact_remainder(3);
+    assert(rem.is_empty());
+}
+
+// =============================================================================
+// Section 5: Integration and consistency
+// =============================================================================
+
+@test
+fn test_deque_chunks_plus_remainder_equals_original() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    d.push_back(6);
+    d.push_back(7);
+    let ch = d.chunks_exact(3);
+    let rem = d.chunks_exact_remainder(3);
+    // chunks_exact gives [1,2,3] and [4,5,6], remainder is [7]
+    let total = ch.len() * 3 + rem.len();
+    assert_eq(total, d.len());
+}
+
+@test
+fn test_deque_windows_count() {
+    let mut d = Deque.new();
+    let mut i = 0;
+    while i < 10 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    // n-element deque has n-k+1 windows of size k
+    let wins = d.windows(3);
+    assert_eq(wins.len(), 8);
+}
+
+@test
+fn test_deque_large_windows() {
+    let mut d: Deque<Int> = Deque.with_capacity(20);
+    let mut i = 0;
+    while i < 20 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    let wins = d.windows(5);
+    assert_eq(wins.len(), 16);
+    // First window
+    assert_eq(wins[0], [0, 1, 2, 3, 4]);
+    // Last window
+    assert_eq(wins[15], [15, 16, 17, 18, 19]);
+}
+
+@test
+fn test_deque_large_chunks() {
+    let mut d: Deque<Int> = Deque.with_capacity(20);
+    let mut i = 0;
+    while i < 20 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    let ch = d.chunks(5);
+    assert_eq(ch.len(), 4);
+    assert_eq(ch[0], [0, 1, 2, 3, 4]);
+    assert_eq(ch[3], [15, 16, 17, 18, 19]);
+}

@@ -1,0 +1,124 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, reflection, variants_of, enum, sum_type
+// @description: Test variants_of builtin for sum type introspection
+// @contexts: MetaTypes
+
+// =============================================================================
+// TEST TYPES
+// =============================================================================
+
+type Color is Red | Green | Blue;
+
+type Maybe<T> is None | Some(T);
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Point;
+
+type Single is Only;
+
+// =============================================================================
+// VARIANTS_OF TESTS
+// =============================================================================
+
+// Test variants_of with simple enum
+meta fn test_variants_of_simple() -> Int using [MetaTypes] {
+    let variants = variants_of(Color);
+    list_len(variants)  // Should be 3
+}
+
+// Test variants_of variant names
+meta fn test_variants_of_names() -> List<Text> using [MetaTypes] {
+    let variants = variants_of(Color);
+    list_map(variants, |v| v.name)  // Should be ["Red", "Green", "Blue"]
+}
+
+// Test variants_of with generic type
+meta fn test_variants_of_maybe() -> Int using [MetaTypes] {
+    let variants = variants_of(Maybe<Int>);
+    list_len(variants)  // Should be 2
+}
+
+// Test variants_of with tuple variant
+meta fn test_variants_of_tuple_variant() -> Bool using [MetaTypes] {
+    let variants = variants_of(Maybe<Int>);
+    let some_variant = maybe_unwrap(list_get(variants, 1));  // Some(T)
+    some_variant.has_payload  // Should be true
+}
+
+// Test variants_of with struct variant
+meta fn test_variants_of_struct_variant() -> Int using [MetaTypes] {
+    let variants = variants_of(Shape);
+    let rect_variant = list_filter(variants, |v| v.name == "Rectangle");
+    let rect = maybe_unwrap(list_get(rect_variant, 0));
+    list_len(rect.fields)  // Should be 2
+}
+
+// Test variants_of with single variant
+meta fn test_variants_of_single() -> Int using [MetaTypes] {
+    let variants = variants_of(Single);
+    list_len(variants)  // Should be 1
+}
+
+// Test variants_of for pattern generation
+meta fn generate_match_arms<T>() -> Text using [MetaTypes] {
+    let variants = variants_of(T);
+    let arm_strs = list_map(variants, |v| {
+        text_concat(text_concat(v.name, " => "), text_concat("\"", text_concat(v.name, "\"")))
+    });
+    text_join(arm_strs, ", ")
+}
+
+// Test checking variant presence
+meta fn has_variant<T>(variant_name: Text) -> Bool using [MetaTypes] {
+    let variants = variants_of(T);
+    let matching = list_filter(variants, |v| v.name == variant_name);
+    list_len(matching) > 0
+}
+
+// Test variant payload detection
+meta fn variant_has_payload<T>(variant_name: Text) -> Bool using [MetaTypes] {
+    let variants = variants_of(T);
+    let matching = list_filter(variants, |v| v.name == variant_name);
+    if list_len(matching) > 0 {
+        let variant = maybe_unwrap(list_get(matching, 0));
+        variant.has_payload
+    } else {
+        false
+    }
+}
+
+// Main test function
+fn main() {
+    // Test variant counts
+    @const assert_eq(test_variants_of_simple(), 3);
+    @const assert_eq(test_variants_of_maybe(), 2);
+    @const assert_eq(test_variants_of_single(), 1);
+
+    // Test variant names
+    @const assert_eq(test_variants_of_names(), ["Red", "Green", "Blue"]);
+
+    // Test tuple variant detection
+    @const assert(test_variants_of_tuple_variant());
+
+    // Test struct variant fields
+    @const assert_eq(test_variants_of_struct_variant(), 2);
+
+    // Test has_variant helper
+    @const assert(has_variant<Color>("Red"));
+    @const assert(has_variant<Color>("Green"));
+    @const assert(has_variant<Color>("Blue"));
+    @const assert(!has_variant<Color>("Purple"));
+
+    // Test payload detection
+    @const assert(!variant_has_payload<Color>("Red"));  // Unit variant
+    @const assert(variant_has_payload<Maybe<Int>>("Some"));  // Tuple variant
+    @const assert(!variant_has_payload<Maybe<Int>>("None"));  // Unit variant
+    @const assert(variant_has_payload<Shape>("Circle"));  // Struct variant
+    @const assert(!variant_has_payload<Shape>("Point"));  // Unit variant
+}

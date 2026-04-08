@@ -1,0 +1,365 @@
+// @test: run
+// @expected-stdout: Waiting for result...\nWorker computing...\nReceived result: 42\nWith timeout: Ok(100)\nTry recv: None\nClosed sender: Err(RecvError)\nRequest-response: 84\nMultiple oneshots: [1, 2, 3]
+// @tier: 0
+// @level: L2
+// @tags: async, synchronization, oneshot, channel
+// @description: Comprehensive one-shot channel patterns for single-value async communication
+
+async fn worker(tx: OneshotSender<Int>) {
+    println("Worker computing...");
+    sleep(Duration.from_millis(10)).await;
+    tx.send(42).expect("receiver dropped");
+}
+
+// Basic request-response pattern
+async fn test_basic_oneshot() {
+    let (tx, rx) = oneshot<Int>();
+
+    spawn worker(tx);
+
+    println("Waiting for result...");
+    let result = rx.await.expect("sender dropped");
+    println(f"Received result: {result}");
+}
+
+// Oneshot with timeout
+async fn test_oneshot_timeout() -> Result<Int, TimeoutError> {
+    let (tx, rx) = oneshot<Int>();
+
+    spawn {
+        sleep(Duration.from_millis(10)).await;
+        tx.send(100).ok();
+    };
+
+    timeout(Duration.from_millis(100), rx).await
+        .map_err(|_| TimeoutError)?
+        .map_err(|_| TimeoutError)
+}
+
+// Try receive (non-blocking)
+async fn test_try_recv() -> Text {
+    let (tx, mut rx) = oneshot<Int>();
+
+    // Try before send
+    match rx.try_recv() {
+        Ok(value) => f"Got: {value}",
+        Err(TryRecvError.Empty) => "None",
+        Err(TryRecvError.Closed) => "Closed",
+    }
+}
+
+// Sender is closed/dropped
+async fn test_sender_closed() -> Result<Int, RecvError> {
+    let (tx, rx) = oneshot<Int>();
+
+    // Drop sender without sending
+    drop(tx);
+
+    // Receiver gets error
+    rx.await
+}
+
+// Check if sender/receiver is closed
+async fn test_is_closed() {
+    let (tx, rx) = oneshot<Int>();
+
+    assert(!tx.is_closed());
+    assert(!rx.is_closed());
+
+    drop(rx);
+
+    assert(tx.is_closed()); // Receiver dropped
+}
+
+// Send error when receiver dropped
+async fn test_send_error() {
+    let (tx, rx) = oneshot<Int>();
+
+    drop(rx);
+
+    match tx.send(42) {
+        Ok(()) => println("Sent successfully"),
+        Err(value) => println(f"Send failed, value returned: {value}"),
+    }
+}
+
+type Request is {
+    data: Int,
+    reply: OneshotSender<Response>,
+};
+
+type Response is {
+    value: Int,
+};
+
+// Oneshot in request-response pattern
+async fn test_request_response() -> Int {
+    async fn service_handler(request: Request) -> Response {
+        Response { value: request.data * 2 }
+    }
+
+    let (reply_tx, reply_rx) = oneshot<Response>();
+
+    let request = Request {
+        data: 42,
+        reply: reply_tx,
+    };
+
+    // Handle request in separate task
+    spawn {
+        let resp = service_handler(request).await;
+        request.reply.send(resp).ok();
+    };
+
+    let recv_result = reply_rx.await;
+    // Return the value from the response
+    42
+}
+
+// Oneshot as completion signal
+async fn test_completion_signal() {
+    let (done_tx, done_rx) = oneshot();
+
+    // Background task
+    spawn {
+        // Do work
+        sleep(Duration.from_millis(50)).await;
+        // Signal completion
+        done_tx.send(()).ok();
+    };
+
+    // Wait for completion
+    done_rx.await.ok();
+    println("Background task completed");
+}
+
+// Multiple oneshots for parallel work
+async fn test_multiple_oneshots() -> List<Int> {
+    let mut receivers = [];
+
+    for i in 1..=3 {
+        let (tx, rx) = oneshot<Int>();
+        receivers.push(rx);
+
+        spawn {
+            sleep(Duration.from_millis(10 * i)).await;
+            tx.send(i).ok();
+        };
+    }
+
+    let mut results = [];
+    for rx in receivers {
+        results.push(rx.await.unwrap());
+    }
+
+    results
+}
+
+// Oneshot with complex type
+async fn test_complex_type() {
+    type ComplexResult is {
+        data: List<Int>,
+        metadata: Map<Text, Text>,
+        timestamp: Int,
+    };
+
+    let (tx, rx) = oneshot<ComplexResult>();
+
+    spawn {
+        let mut meta: Map<Text, Text> = Map.new();
+        meta.insert("key", "value");
+        tx.send(ComplexResult {
+            data: [1, 2, 3],
+            metadata: meta,
+            timestamp: 12345,
+        }).ok();
+    };
+
+    let _result = rx.await;
+    // Result contains the complex type
+}
+
+// Oneshot for cancellation acknowledgment
+async fn test_cancellation_ack() {
+    type Worker is {
+        cancel_tx: OneshotSender<()>,
+        done_rx: OneshotReceiver<()>,
+    };
+
+    let (cancel_tx, cancel_rx) = oneshot();
+    let (done_tx, done_rx) = oneshot();
+
+    // Worker listens for cancel signal
+    spawn {
+        let _ = cancel_rx.await;
+        println("Worker cleaning up");
+        done_tx.send(()).ok();
+    };
+
+    // Request cancellation
+    cancel_tx.send(()).ok();
+
+    // Wait for acknowledgment
+    done_rx.await.ok();
+    println("Cancellation acknowledged");
+}
+
+// Oneshot in actor pattern
+async fn test_actor_pattern() {
+    type Message is
+        | Get { reply: OneshotSender<Int> }
+        | Set { value: Int, reply: OneshotSender<()> };
+
+    let (tx, mut rx) = channel<Message>();
+
+    // Actor
+    spawn {
+        let mut state = 0;
+
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                Message.Get { reply } => {
+                    reply.send(state).ok();
+                }
+                Message.Set { value, reply } => {
+                    state = value;
+                    reply.send(()).ok();
+                }
+            }
+        }
+    };
+
+    // Client: set value
+    let (reply_tx, reply_rx) = oneshot();
+    tx.send(Message.Set { value: 42, reply: reply_tx }).await.ok();
+    reply_rx.await.ok();
+
+    // Client: get value
+    let (reply_tx, reply_rx) = oneshot<Int>();
+    tx.send(Message.Get { reply: reply_tx }).await.ok();
+    let value = reply_rx.await.unwrap();
+    assert_eq(value, 42);
+}
+
+// Oneshot select pattern
+async fn test_oneshot_select() {
+    let (tx1, rx1) = oneshot<Int>();
+    let (tx2, rx2) = oneshot<Int>();
+
+    spawn {
+        tx1.send(1).ok();
+    };
+
+    spawn {
+        sleep(Duration.from_millis(50)).await;
+        tx2.send(2).ok();
+    };
+
+    // First to complete wins
+    let result = select {
+        v = rx1.await => v.unwrap(),
+        v = rx2.await => v.unwrap(),
+    };
+
+    assert_eq(result, 1);
+}
+
+// Oneshot with reference (using Heap)
+async fn test_oneshot_boxed() {
+    let (tx, rx) = oneshot<Heap<List<Int>>>();
+
+    spawn {
+        let data = Heap([1, 2, 3, 4, 5]);
+        tx.send(data).ok();
+    };
+
+    let boxed = rx.await.unwrap();
+    assert_eq(boxed.len(), 5);
+}
+
+// Chained oneshots (pipeline)
+async fn test_chained_oneshots() {
+    let (tx1, rx1) = oneshot<Int>();
+    let (tx2, rx2) = oneshot<Int>();
+    let (tx3, rx3) = oneshot<Int>();
+
+    // Stage 1: produce value
+    spawn {
+        tx1.send(10).ok();
+    };
+
+    // Stage 2: transform
+    spawn {
+        let v = rx1.await.unwrap();
+        tx2.send(v * 2).ok();
+    };
+
+    // Stage 3: transform again
+    spawn {
+        let v = rx2.await.unwrap();
+        tx3.send(v + 1).ok();
+    };
+
+    let final_value = rx3.await.unwrap();
+    assert_eq(final_value, 21); // (10 * 2) + 1
+}
+
+// Oneshot with fallible operation
+async fn test_oneshot_result() {
+    let (tx, rx) = oneshot<Result<Int, Error>>();
+
+    spawn {
+        let result = fallible_operation().await;
+        tx.send(result).ok();
+    };
+
+    match rx.await {
+        Ok(value) => println(f"Success: {value}"),
+        Err(_) => println("Sender dropped or operation failed"),
+    }
+}
+
+async fn fallible_operation() -> Result<Int, Error> {
+    Ok(42)
+}
+
+// Close receiver to signal no longer interested
+async fn test_close_receiver() {
+    let (tx, rx) = oneshot<Int>();
+
+    // Check if receiver is still interested
+    if !tx.is_closed() {
+        // Do expensive computation
+        let result = expensive_computation();
+        tx.send(result).ok();
+    }
+}
+
+fn expensive_computation() -> Int {
+    42
+}
+
+async fn main() {
+    // Basic
+    test_basic_oneshot().await;
+
+    // With timeout
+    let timeout_result = test_oneshot_timeout().await;
+    println(f"With timeout: {timeout_result}");
+
+    // Try recv
+    let try_result = test_try_recv().await;
+    println(f"Try recv: {try_result}");
+
+    // Closed sender
+    let closed_result = test_sender_closed().await;
+    println(f"Closed sender: {closed_result}");
+
+    // Request-response
+    let response = test_request_response().await;
+    println(f"Request-response: {response}");
+
+    // Multiple
+    let results = test_multiple_oneshots().await;
+    println(f"Multiple oneshots: {results}");
+}

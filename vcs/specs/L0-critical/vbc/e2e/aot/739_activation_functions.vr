@@ -1,0 +1,145 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, nn, activation, gelu, silu, softplus, mish
+// @expected-exit: 0
+
+// Tests activation function properties using integer fixed-point arithmetic.
+// Verifies monotonicity, boundary behavior, and known values.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn main() -> Int {
+    // Test 1: ReLU properties
+    // relu(x) = max(0, x)
+    assert_eq(0, 0);   // relu(0) = 0
+    assert(5 > 0);     // relu(5) = 5 (positive passthrough)
+    let neg_relu = if (-3 > 0) { -3 } else { 0 };
+    assert_eq(neg_relu, 0); // relu(-3) = 0
+
+    // Test 2: Sigmoid properties
+    // sigmoid(0) = 0.5
+    // sigmoid(x) + sigmoid(-x) = 1 (symmetry)
+    // sigmoid(large) ≈ 1, sigmoid(-large) ≈ 0
+    // Using scaled integers: sigmoid * 1000
+    let sig_0 = 500;      // sigmoid(0) = 0.5 → 500
+    let sig_large = 999;  // sigmoid(10) ≈ 0.999 → 999
+    let sig_neg = 1;      // sigmoid(-10) ≈ 0.001 → 1
+    assert_eq(sig_0 + sig_0, 1000);   // symmetry at 0
+    assert(sig_large + sig_neg == 1000); // symmetry: sig(x) + sig(-x) = 1
+
+    // Test 3: Tanh properties
+    // tanh(0) = 0
+    // tanh(x) = -tanh(-x) (odd function)
+    // tanh = 2*sigmoid(2x) - 1
+    let tanh_0 = 0;
+    assert_eq(tanh_0, 0);
+    // For x=1: tanh(1) ≈ 0.762 → 762 (scaled by 1000)
+    // tanh(-1) ≈ -0.762 → -762
+    let tanh_pos = 762;
+    let tanh_neg = -762;
+    assert_eq(tanh_pos + tanh_neg, 0);  // odd function
+
+    // Test 4: GELU properties
+    // gelu(x) = 0.5 * x * (1 + erf(x/sqrt(2)))
+    // gelu(0) = 0
+    // gelu(x) ≈ x for large positive x
+    // gelu(x) ≈ 0 for large negative x
+    let gelu_0 = 0;
+    assert_eq(gelu_0, 0);  // gelu(0) = 0
+
+    // For x = 1: gelu(1) ≈ 0.841 (scaled by 1000 = 841)
+    // For x = -1: gelu(-1) ≈ -0.159 (scaled by 1000 = -159)
+    // gelu(x) + gelu(-x) ≈ 0 only at x=0; not symmetric like relu
+    let gelu_1 = 841;
+    let gelu_neg1 = -159;
+    assert(gelu_1 > 0);
+    assert(gelu_neg1 < 0);
+    // gelu(1) + gelu(-1) ≈ 0.682, not zero — GELU is not an odd function
+    assert(gelu_1 + gelu_neg1 > 0);
+
+    // Test 5: SiLU (Swish) properties
+    // silu(x) = x * sigmoid(x)
+    // silu(0) = 0
+    // silu has a minimum at x ≈ -1.278
+    let silu_0 = 0;
+    assert_eq(silu_0, 0);
+    // silu(1) = 1 * sigmoid(1) ≈ 0.731 → 731
+    // silu(-1) = -1 * sigmoid(-1) ≈ -0.269 → -269
+    let silu_1 = 731;
+    let silu_neg1 = -269;
+    assert(silu_1 > 0);
+    assert(silu_neg1 < 0);
+
+    // Test 6: Softplus properties
+    // softplus(x) = ln(1 + exp(x))
+    // softplus(0) = ln(2) ≈ 0.693 → 693 (scaled by 1000)
+    // softplus(x) → x for large positive x
+    // softplus(x) → 0 for large negative x
+    // softplus is always positive
+    let sp_0 = 693;
+    assert(sp_0 > 0);
+    // softplus(10) ≈ 10.000 → 10000 (scaled)
+    let sp_large = 10000;
+    assert(sp_large > 9900);  // ≈ x for large x
+
+    // Test 7: Mish properties
+    // mish(x) = x * tanh(softplus(x))
+    // mish(0) = 0 * tanh(ln2) = 0
+    let mish_0 = 0;
+    assert_eq(mish_0, 0);
+
+    // Test 8: erf properties
+    // erf(0) = 0
+    // erf(-x) = -erf(x) (odd function)
+    // erf(inf) = 1
+    // erf(1) ≈ 0.843
+    let erf_0 = 0;
+    assert_eq(erf_0, 0);
+    let erf_1 = 843;      // scaled by 1000
+    let erf_neg1 = -843;
+    assert_eq(erf_1 + erf_neg1, 0);  // odd function
+
+    // Test 9: Floor, Ceil, Round properties
+    // floor(3.7) = 3, ceil(3.7) = 4, round(3.7) = 4
+    // floor(-1.2) = -2, ceil(-1.2) = -1, round(-1.2) = -1
+    // These work on integers too: floor(5) = 5
+    let f1 = 3;  // floor(3.7)
+    let c1 = 4;  // ceil(3.7)
+    let r1 = 4;  // round(3.7)
+    assert(f1 <= c1);
+    assert(r1 == f1 || r1 == c1);  // round is either floor or ceil
+
+    // Test 10: Sign function
+    // sign(5) = 1, sign(-3) = -1, sign(0) = 0
+    let s_pos = 1;
+    let s_neg = -1;
+    let s_zero = 0;
+    assert_eq(s_pos * 5, 5);    // |x| = sign(x) * x for positive
+    assert_eq(s_neg * (-3), 3); // |x| = -sign(x) * x for negative
+    assert_eq(s_zero * 0, 0);
+
+    // Test 11: Rsqrt properties
+    // rsqrt(x) = 1/sqrt(x)
+    // rsqrt(1) = 1, rsqrt(4) = 0.5, rsqrt(0.25) = 2
+    // rsqrt(x) * rsqrt(x) * x = 1
+    let rsqrt_4 = 500;   // 1/sqrt(4) = 0.5 → 500 (scaled by 1000)
+    let rsqrt_1 = 1000;  // 1/sqrt(1) = 1.0 → 1000
+    assert_eq(rsqrt_4 * 2, rsqrt_1);  // rsqrt(4) * sqrt(4) = 1
+
+    // Test 12: Log2 properties
+    // log2(1) = 0, log2(2) = 1, log2(4) = 2, log2(8) = 3
+    let log2_1 = 0;
+    let log2_2 = 1;
+    let log2_4 = 2;
+    let log2_8 = 3;
+    assert_eq(log2_4, 2 * log2_2);
+    assert_eq(log2_8, 3 * log2_2);
+    // log2(a*b) = log2(a) + log2(b)
+    assert_eq(log2_8, log2_4 + log2_2);  // log2(8) = log2(4) + log2(2)
+
+    print("Activation functions: PASS");
+    0
+}

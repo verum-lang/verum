@@ -1,0 +1,88 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Self-reference (current module)
+module my_module {
+    type MyType is { value: Int };
+
+    // Mount to self (explicit)
+    mount self.MyType;
+
+    fn use_type() -> MyType {
+        MyType { value: 42 }
+    }
+}
+
+// Self in nested module
+module outer {
+    type OuterType is { data: Text };
+
+    module inner {
+        type InnerType is { value: Int };
+
+        // Self refers to inner module
+        mount self.InnerType;
+
+        fn make_inner() -> InnerType {
+            InnerType { value: 1 }
+        }
+    }
+}
+
+// Relative path starting with dot (same as self)
+module dotted {
+    type LocalType is { x: Int };
+
+    // Relative import (starts with .)
+    mount .LocalType;
+}
+
+// Self with nested path
+module complex {
+    module sub1 {
+        type Type1 is { a: Int };
+    }
+
+    module sub2 {
+        // Import from sibling via self
+        mount self.sub1.Type1;
+    }
+}
+
+// Self glob import
+module glob_self {
+    type A is { a: Int };
+    type B is { b: Int };
+
+    module inner {
+        // Import all from self
+        mount self.*;
+    }
+}
+
+// Multiple self imports
+module multi_self {
+    type X is { x: Int };
+    type Y is { y: Int };
+    type Z is { z: Int };
+
+    module nested {
+        mount self.X;
+        mount self.Y;
+        mount self.Z;
+    }
+}
+
+// Self with alias
+module aliased_self {
+    type VeryLongTypeName is { value: Int };
+
+    module user {
+        mount self.VeryLongTypeName as Short;
+
+        fn make() -> Short {
+            Short { value: 1 }
+        }
+    }
+}

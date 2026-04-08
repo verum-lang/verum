@@ -1,0 +1,217 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, context, tier0
+// @description: Test that Tier 0 builtins work without any context declaration
+
+// =============================================================================
+// TIER 0 ARITHMETIC - NO CONTEXT REQUIRED
+// =============================================================================
+
+// abs works without context
+meta fn test_abs_no_context() -> Int {
+    abs(-42)
+}
+
+// min works without context
+meta fn test_min_no_context() -> Int {
+    min(10, 20)
+}
+
+// max works without context
+meta fn test_max_no_context() -> Int {
+    max(10, 20)
+}
+
+// clamp works without context
+meta fn test_clamp_no_context() -> Int {
+    clamp(5, 0, 10)
+}
+
+// pow works without context
+meta fn test_pow_no_context() -> Int {
+    pow(2, 8)
+}
+
+// bitwise_and works without context
+meta fn test_bitwise_and_no_context() -> Int {
+    bitwise_and(0xFF, 0x0F)
+}
+
+// bitwise_or works without context
+meta fn test_bitwise_or_no_context() -> Int {
+    bitwise_or(0xF0, 0x0F)
+}
+
+// bitwise_xor works without context
+meta fn test_bitwise_xor_no_context() -> Int {
+    bitwise_xor(0xFF, 0xF0)
+}
+
+// shift_left works without context
+meta fn test_shift_left_no_context() -> Int {
+    shift_left(1, 4)
+}
+
+// shift_right works without context
+meta fn test_shift_right_no_context() -> Int {
+    shift_right(16, 2)
+}
+
+// int_to_text works without context
+meta fn test_int_to_text_no_context() -> Text {
+    int_to_text(42)
+}
+
+// text_to_int works without context
+meta fn test_text_to_int_no_context() -> Int {
+    text_to_int("42")
+}
+
+// =============================================================================
+// TIER 0 COLLECTIONS - NO CONTEXT REQUIRED
+// =============================================================================
+
+// list_len works without context
+meta fn test_list_len_no_context() -> Int {
+    let arr = [1, 2, 3, 4, 5];
+    list_len(arr)
+}
+
+// list_push works without context
+meta fn test_list_push_no_context() -> List<Int> {
+    let arr = [1, 2];
+    list_push(arr, 3)
+}
+
+// list_get works without context
+meta fn test_list_get_no_context() -> Maybe<Int> {
+    let arr = [10, 20, 30];
+    list_get(arr, 1)
+}
+
+// list_map works without context
+meta fn test_list_map_no_context() -> List<Int> {
+    let arr = [1, 2, 3];
+    list_map(arr, |x: Int| -> Int { x * 2 })
+}
+
+// list_filter works without context
+meta fn test_list_filter_no_context() -> List<Int> {
+    let arr = [1, 2, 3, 4, 5];
+    list_filter(arr, |x: Int| -> Bool { x > 2 })
+}
+
+// list_fold works without context
+meta fn test_list_fold_no_context() -> Int {
+    let arr = [1, 2, 3];
+    list_fold(arr, 0, |acc: Int, x: Int| -> Int { acc + x })
+}
+
+// list_concat works without context
+meta fn test_list_concat_no_context() -> List<Int> {
+    let a = [1, 2];
+    let b = [3, 4];
+    list_concat(a, b)
+}
+
+// list_reverse works without context
+meta fn test_list_reverse_no_context() -> List<Int> {
+    let arr = [1, 2, 3];
+    list_reverse(arr)
+}
+
+// =============================================================================
+// TIER 0 TEXT - NO CONTEXT REQUIRED
+// =============================================================================
+
+// text_len works without context
+meta fn test_text_len_no_context() -> Int {
+    text_len("hello")
+}
+
+// text_concat works without context
+meta fn test_text_concat_no_context() -> Text {
+    text_concat("hello", " world")
+}
+
+// text_split works without context
+meta fn test_text_split_no_context() -> List<Text> {
+    text_split("a,b,c", ",")
+}
+
+// text_join works without context
+meta fn test_text_join_no_context() -> Text {
+    let parts = ["a", "b", "c"];
+    text_join(parts, "-")
+}
+
+// text_to_upper works without context
+meta fn test_text_to_upper_no_context() -> Text {
+    text_to_upper("hello")
+}
+
+// text_to_lower works without context
+meta fn test_text_to_lower_no_context() -> Text {
+    text_to_lower("HELLO")
+}
+
+// text_trim works without context
+meta fn test_text_trim_no_context() -> Text {
+    text_trim("  hello  ")
+}
+
+// text_replace works without context
+meta fn test_text_replace_no_context() -> Text {
+    text_replace("hello", "l", "L")
+}
+
+// text_starts_with works without context
+meta fn test_text_starts_with_no_context() -> Bool {
+    text_starts_with("hello world", "hello")
+}
+
+// text_ends_with works without context
+meta fn test_text_ends_with_no_context() -> Bool {
+    text_ends_with("hello world", "world")
+}
+
+// text_contains works without context
+meta fn test_text_contains_no_context() -> Bool {
+    text_contains("hello world", "lo wo")
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Arithmetic tests
+    @const assert(test_abs_no_context() == 42);
+    @const assert(test_min_no_context() == 10);
+    @const assert(test_max_no_context() == 20);
+    @const assert(test_clamp_no_context() == 5);
+    @const assert(test_pow_no_context() == 256);
+    @const assert(test_bitwise_and_no_context() == 0x0F);
+    @const assert(test_bitwise_or_no_context() == 0xFF);
+    @const assert(test_bitwise_xor_no_context() == 0x0F);
+    @const assert(test_shift_left_no_context() == 16);
+    @const assert(test_shift_right_no_context() == 4);
+    @const assert(test_int_to_text_no_context() == "42");
+
+    // Collections tests
+    @const assert(test_list_len_no_context() == 5);
+    @const assert(list_len(test_list_push_no_context()) == 3);
+    @const assert(test_list_get_no_context() == Some(20));
+    @const assert(test_list_fold_no_context() == 6);
+
+    // Text tests
+    @const assert(test_text_len_no_context() == 5);
+    @const assert(test_text_concat_no_context() == "hello world");
+    @const assert(test_text_to_upper_no_context() == "HELLO");
+    @const assert(test_text_to_lower_no_context() == "hello");
+    @const assert(test_text_trim_no_context() == "hello");
+    @const assert(test_text_starts_with_no_context());
+    @const assert(test_text_ends_with_no_context());
+    @const assert(test_text_contains_no_context());
+}

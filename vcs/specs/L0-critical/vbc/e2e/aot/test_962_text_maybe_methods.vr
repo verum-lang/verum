@@ -1,0 +1,107 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: text, strip, split, pop, maybe
+// @description: Test Text methods returning Maybe variants
+
+fn test_strip_prefix() -> Int {
+    let s = "hello world";
+    let result = s.strip_prefix("hello ");
+    match result {
+        Some(r) => {
+            if r != "world" {
+                print(f"FAIL strip_prefix: expected 'world', got '{r}'");
+                return 1;
+            }
+        }
+        None => {
+            print("FAIL strip_prefix: got None, expected Some");
+            return 1;
+        }
+    }
+    // Test no match
+    let result2 = s.strip_prefix("xyz");
+    match result2 {
+        None => {}
+        Some(_) => {
+            print("FAIL strip_prefix no match: expected None");
+            return 1;
+        }
+    }
+    print("  strip_prefix: OK");
+    0
+}
+
+fn test_strip_suffix() -> Int {
+    let s = "hello world";
+    let result = s.strip_suffix(" world");
+    match result {
+        Some(r) => {
+            if r != "hello" {
+                print(f"FAIL strip_suffix: expected 'hello', got '{r}'");
+                return 1;
+            }
+        }
+        None => {
+            print("FAIL strip_suffix: got None, expected Some");
+            return 1;
+        }
+    }
+    let result2 = s.strip_suffix("xyz");
+    match result2 {
+        None => {}
+        Some(_) => {
+            print("FAIL strip_suffix no match: expected None");
+            return 1;
+        }
+    }
+    print("  strip_suffix: OK");
+    0
+}
+
+fn test_split_once() -> Int {
+    let s = "key=value=extra";
+    let result = s.split_once("=");
+    match result {
+        Some((k, v)) => {
+            if k != "key" {
+                print(f"FAIL split_once key: expected 'key', got '{k}'");
+                return 1;
+            }
+            if v != "value=extra" {
+                print(f"FAIL split_once value: expected 'value=extra', got '{v}'");
+                return 1;
+            }
+        }
+        None => {
+            print("FAIL split_once: got None");
+            return 1;
+        }
+    }
+    let result2 = "no-equals".split_once("=");
+    match result2 {
+        None => {}
+        Some(_) => {
+            print("FAIL split_once no match: expected None");
+            return 1;
+        }
+    }
+    print("  split_once: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Text Maybe Methods Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_strip_prefix();
+    failures = failures + test_strip_suffix();
+    failures = failures + test_split_once();
+
+    if failures == 0 {
+        print("All text maybe method tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

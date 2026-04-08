@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, clone
+
+/// Автоматическое derive для Clone trait
+///
+/// `@derive(Clone)` генерирует реализацию Clone trait,
+/// позволяющую создавать глубокие копии значений.
+/// Тест использует только базовые возможности языка без stdlib.
+
+// ============================================================
+// БАЗОВЫЕ STRUCT TYPES С CLONE
+// ============================================================
+
+@derive(Clone)
+type Config is {
+    value: Int,
+    enabled: Bool,
+};
+
+@derive(Clone)
+type Point is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+// ============================================================
+// SUM TYPES С CLONE
+// ============================================================
+
+@derive(Clone)
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+@derive(Clone)
+type Either<L, R> is
+    | Left(L)
+    | Right(R);
+
+@derive(Clone)
+type Status is
+    | Active
+    | Inactive
+    | Pending { code: Int };
+
+// ============================================================
+// ВЛОЖЕННЫЕ СТРУКТУРЫ
+// ============================================================
+
+@derive(Clone)
+type Inner is {
+    value: Int,
+};
+
+@derive(Clone)
+type Outer is {
+    inner: Inner,
+    count: Int,
+};
+
+// ============================================================
+// GENERIC TYPES С CLONE
+// ============================================================
+
+@derive(Clone)
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+@derive(Clone)
+type Triple<T> is {
+    a: T,
+    b: T,
+    c: T,
+};
+
+// ============================================================
+// NEWTYPE С CLONE
+// ============================================================
+
+@derive(Clone)
+type Wrapper<T> is (T);
+
+@derive(Clone)
+type Id is (Int);
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ ТИПОВ (без вызова .clone())
+// ============================================================
+
+fn test_clone_types() {
+    // Создание экземпляров типов с @derive(Clone)
+    let config = Config { value: 42, enabled: true };
+
+    // Enum вариант
+    let maybe_val: Maybe<Int> = Maybe.Some(100);
+
+    // Вложенные структуры
+    let outer = Outer {
+        inner: Inner { value: 10 },
+        count: 5,
+    };
+
+    // Generic типы
+    let pair = Pair { first: 1, second: 2 };
+}
+
+fn main() {
+    test_clone_types();
+}

@@ -1,0 +1,457 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: compilation, lexer, throughput, performance
+// @description: Lexer tokenization throughput benchmark (target: > 5M tokens/sec)
+
+/// Lexer Throughput Benchmark
+///
+/// Measures the tokenization speed of the Verum lexer (logos-based).
+/// The lexer is the first stage of compilation and must be extremely fast.
+///
+/// Performance targets:
+/// - Simple tokens:   > 10M tokens/sec
+/// - Mixed content:   > 5M tokens/sec
+/// - Unicode heavy:   > 3M tokens/sec
+/// - Comment heavy:   > 8M tokens/sec
+///
+/// Spec reference: docs/detailed/05-syntax-grammar.md
+
+const WARMUP_ITERATIONS: Int = 10;
+const BENCHMARK_ITERATIONS: Int = 100;
+
+/// Generate synthetic source code for benchmarking
+fn generate_simple_source(lines: Int) -> Text {
+    let mut source = Text.with_capacity(lines * 50);
+
+    for i in 0..lines {
+        source.push_str(&format("let x{} = {};\n", i, i * 42));
+    }
+
+    source
+}
+
+fn generate_function_heavy_source(functions: Int) -> Text {
+    let mut source = Text.with_capacity(functions * 200);
+
+    for i in 0..functions {
+        source.push_str(&format(
+            "fn function_{}(a: Int, b: Int) -> Int {{\n    a + b * {}\n}}\n\n",
+            i, i
+        ));
+    }
+
+    source
+}
+
+fn generate_expression_heavy_source(expressions: Int) -> Text {
+    let mut source = Text.with_capacity(expressions * 100);
+
+    source.push_str("fn main() {\n");
+    for i in 0..expressions {
+        source.push_str(&format(
+            "    let result_{} = (a + b) * (c - d) / (e % f) + {};\n",
+            i, i
+        ));
+    }
+    source.push_str("}\n");
+
+    source
+}
+
+fn generate_string_heavy_source(strings: Int) -> Text {
+    let mut source = Text.with_capacity(strings * 80);
+
+    for i in 0..strings {
+        source.push_str(&format(
+            "let s{} = \"This is a sample string number {}\";\n",
+            i, i
+        ));
+    }
+
+    source
+}
+
+fn generate_comment_heavy_source(lines: Int) -> Text {
+    let mut source = Text.with_capacity(lines * 60);
+
+    for i in 0..lines {
+        if i % 3 == 0 {
+            source.push_str(&format("// Comment line number {}\n", i));
+        } else if i % 5 == 0 {
+            source.push_str("/* Block comment */\n");
+        } else {
+            source.push_str(&format("let x{} = {};\n", i, i));
+        }
+    }
+
+    source
+}
+
+fn generate_unicode_heavy_source(lines: Int) -> Text {
+    let mut source = Text.with_capacity(lines * 100);
+
+    for i in 0..lines {
+        source.push_str(&format(
+            "let identifier_{} = \"UTF-8 string\";\n",
+            i
+        ));
+    }
+
+    source
+}
+
+fn generate_complex_mixed_source(lines: Int) -> Text {
+    let mut source = Text.with_capacity(lines * 150);
+
+    source.push_str("// Module header\n");
+    source.push_str("module benchmark;\n\n");
+
+    for i in 0..(lines / 10) {
+        source.push_str(&format(
+            r#"
+/// Documentation for function {}
+fn complex_function_{}(
+    arg1: Int,
+    arg2: Text,
+    arg3: List<Int>,
+) -> Result<Int, Error> {{
+    // Local binding
+    let local = arg1 + {};
+
+    // Pattern matching
+    match arg3.len() {{
+        0 => Err(Error.Empty),
+        1 => Ok(arg3[0]),
+        n => {{
+            let sum: Int = arg3.iter().sum();
+            Ok(sum / n)
+        }}
+    }}
+}}
+
+"#,
+            i, i, i * 10
+        ));
+    }
+
+    source
+}
+
+/// Benchmark: Simple token stream (keywords, identifiers, numbers)
+fn benchmark_simple_tokens() -> LexerBenchmarkResult {
+    let source = generate_simple_source(10_000);
+    let source_bytes = source.len();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        black_box(tokens.len());
+    }
+
+    let start = Instant.now();
+    let mut total_tokens = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        total_tokens += tokens.len();
+    }
+
+    let elapsed = start.elapsed();
+
+    LexerBenchmarkResult {
+        name: "simple_tokens",
+        source_bytes: source_bytes * BENCHMARK_ITERATIONS,
+        total_tokens,
+        elapsed_ms: elapsed.as_millis(),
+        tokens_per_sec: total_tokens as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (source_bytes * BENCHMARK_ITERATIONS) as f64 / elapsed.as_secs_f64(),
+        target_tokens_per_sec: 10_000_000.0,
+    }
+}
+
+/// Benchmark: Function definitions
+fn benchmark_function_tokens() -> LexerBenchmarkResult {
+    let source = generate_function_heavy_source(2_000);
+    let source_bytes = source.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        black_box(tokens.len());
+    }
+
+    let start = Instant.now();
+    let mut total_tokens = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        total_tokens += tokens.len();
+    }
+
+    let elapsed = start.elapsed();
+
+    LexerBenchmarkResult {
+        name: "function_definitions",
+        source_bytes: source_bytes * BENCHMARK_ITERATIONS,
+        total_tokens,
+        elapsed_ms: elapsed.as_millis(),
+        tokens_per_sec: total_tokens as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (source_bytes * BENCHMARK_ITERATIONS) as f64 / elapsed.as_secs_f64(),
+        target_tokens_per_sec: 8_000_000.0,
+    }
+}
+
+/// Benchmark: Complex expressions
+fn benchmark_expression_tokens() -> LexerBenchmarkResult {
+    let source = generate_expression_heavy_source(5_000);
+    let source_bytes = source.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        black_box(tokens.len());
+    }
+
+    let start = Instant.now();
+    let mut total_tokens = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        total_tokens += tokens.len();
+    }
+
+    let elapsed = start.elapsed();
+
+    LexerBenchmarkResult {
+        name: "complex_expressions",
+        source_bytes: source_bytes * BENCHMARK_ITERATIONS,
+        total_tokens,
+        elapsed_ms: elapsed.as_millis(),
+        tokens_per_sec: total_tokens as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (source_bytes * BENCHMARK_ITERATIONS) as f64 / elapsed.as_secs_f64(),
+        target_tokens_per_sec: 7_000_000.0,
+    }
+}
+
+/// Benchmark: String literals
+fn benchmark_string_tokens() -> LexerBenchmarkResult {
+    let source = generate_string_heavy_source(5_000);
+    let source_bytes = source.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        black_box(tokens.len());
+    }
+
+    let start = Instant.now();
+    let mut total_tokens = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        total_tokens += tokens.len();
+    }
+
+    let elapsed = start.elapsed();
+
+    LexerBenchmarkResult {
+        name: "string_literals",
+        source_bytes: source_bytes * BENCHMARK_ITERATIONS,
+        total_tokens,
+        elapsed_ms: elapsed.as_millis(),
+        tokens_per_sec: total_tokens as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (source_bytes * BENCHMARK_ITERATIONS) as f64 / elapsed.as_secs_f64(),
+        target_tokens_per_sec: 6_000_000.0,
+    }
+}
+
+/// Benchmark: Comments
+fn benchmark_comment_tokens() -> LexerBenchmarkResult {
+    let source = generate_comment_heavy_source(10_000);
+    let source_bytes = source.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        black_box(tokens.len());
+    }
+
+    let start = Instant.now();
+    let mut total_tokens = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        total_tokens += tokens.len();
+    }
+
+    let elapsed = start.elapsed();
+
+    LexerBenchmarkResult {
+        name: "comment_heavy",
+        source_bytes: source_bytes * BENCHMARK_ITERATIONS,
+        total_tokens,
+        elapsed_ms: elapsed.as_millis(),
+        tokens_per_sec: total_tokens as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (source_bytes * BENCHMARK_ITERATIONS) as f64 / elapsed.as_secs_f64(),
+        target_tokens_per_sec: 8_000_000.0,
+    }
+}
+
+/// Benchmark: Unicode identifiers and strings
+fn benchmark_unicode_tokens() -> LexerBenchmarkResult {
+    let source = generate_unicode_heavy_source(5_000);
+    let source_bytes = source.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        black_box(tokens.len());
+    }
+
+    let start = Instant.now();
+    let mut total_tokens = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        total_tokens += tokens.len();
+    }
+
+    let elapsed = start.elapsed();
+
+    LexerBenchmarkResult {
+        name: "unicode_content",
+        source_bytes: source_bytes * BENCHMARK_ITERATIONS,
+        total_tokens,
+        elapsed_ms: elapsed.as_millis(),
+        tokens_per_sec: total_tokens as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (source_bytes * BENCHMARK_ITERATIONS) as f64 / elapsed.as_secs_f64(),
+        target_tokens_per_sec: 3_000_000.0,
+    }
+}
+
+/// Benchmark: Mixed realistic source
+fn benchmark_mixed_tokens() -> LexerBenchmarkResult {
+    let source = generate_complex_mixed_source(1_000);
+    let source_bytes = source.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        black_box(tokens.len());
+    }
+
+    let start = Instant.now();
+    let mut total_tokens = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let tokens = Lexer.tokenize(&source);
+        total_tokens += tokens.len();
+    }
+
+    let elapsed = start.elapsed();
+
+    LexerBenchmarkResult {
+        name: "mixed_realistic",
+        source_bytes: source_bytes * BENCHMARK_ITERATIONS,
+        total_tokens,
+        elapsed_ms: elapsed.as_millis(),
+        tokens_per_sec: total_tokens as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (source_bytes * BENCHMARK_ITERATIONS) as f64 / elapsed.as_secs_f64(),
+        target_tokens_per_sec: 5_000_000.0,
+    }
+}
+
+/// Benchmark: Large file (stress test)
+fn benchmark_large_file() -> LexerBenchmarkResult {
+    let source = generate_complex_mixed_source(10_000);
+    let source_bytes = source.len();
+
+    for _ in 0..WARMUP_ITERATIONS / 5 {
+        let tokens = Lexer.tokenize(&source);
+        black_box(tokens.len());
+    }
+
+    let start = Instant.now();
+    let mut total_tokens = 0;
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 10) {
+        let tokens = Lexer.tokenize(&source);
+        total_tokens += tokens.len();
+    }
+
+    let elapsed = start.elapsed();
+
+    LexerBenchmarkResult {
+        name: "large_file_stress",
+        source_bytes: source_bytes * BENCHMARK_ITERATIONS / 10,
+        total_tokens,
+        elapsed_ms: elapsed.as_millis(),
+        tokens_per_sec: total_tokens as f64 / elapsed.as_secs_f64(),
+        bytes_per_sec: (source_bytes * BENCHMARK_ITERATIONS / 10) as f64 / elapsed.as_secs_f64(),
+        target_tokens_per_sec: 5_000_000.0,
+    }
+}
+
+fn main() {
+    println("=== Lexer Throughput Benchmark ===\n");
+
+    let results = [
+        benchmark_simple_tokens(),
+        benchmark_function_tokens(),
+        benchmark_expression_tokens(),
+        benchmark_string_tokens(),
+        benchmark_comment_tokens(),
+        benchmark_unicode_tokens(),
+        benchmark_mixed_tokens(),
+        benchmark_large_file(),
+    ];
+
+    println("{:<25} {:>12} {:>12} {:>12} {:>8}",
+            "Benchmark", "Tokens/sec", "MB/sec", "Target", "Status");
+    println("{}", "-".repeat(75));
+
+    for result in results {
+        let passed = result.tokens_per_sec >= result.target_tokens_per_sec;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<25} {:>12.2}M {:>12.2} {:>12.2}M {:>8}",
+                result.name,
+                result.tokens_per_sec / 1_000_000.0,
+                result.bytes_per_sec / 1_000_000.0,
+                result.target_tokens_per_sec / 1_000_000.0,
+                status);
+    }
+
+    println("");
+    println("Overall target: > 5M tokens/sec for mixed content");
+}
+
+type LexerBenchmarkResult is {
+    name: Text,
+    source_bytes: Int,
+    total_tokens: Int,
+    elapsed_ms: Int,
+    tokens_per_sec: f64,
+    bytes_per_sec: f64,
+    target_tokens_per_sec: f64,
+};
+
+// Mock Lexer for benchmark specification
+module Lexer {
+    pub fn tokenize(source: &Text) -> List<Token> {
+        List.new()
+    }
+}
+
+type Token is Ident | Number | String | Keyword | Operator | Punctuation;
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+    fn as_secs_f64(&self) -> f64 { self.nanos as f64 / 1e9 }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn format(fmt: &Text, args: List<Text>) -> Text { Text.new() }

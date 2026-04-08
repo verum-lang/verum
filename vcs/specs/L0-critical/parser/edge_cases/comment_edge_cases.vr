@@ -1,0 +1,320 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, comments, documentation
+
+// Helper types
+type Point is { x: Int, y: Int };
+type CommentedType is {
+    // Field comment
+    field1: Int, // Inline comment
+    /* Block comment */ field2: Text,
+};
+type MyType is { value: Int };
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Error is { message: Text };
+
+// Helper functions
+fn compute() -> Int { 42 }
+fn a() -> Int { 1 }
+fn b() -> Int { 2 }
+
+// Single line comment at start of file
+fn test_single_line_comment() {
+    let x = 1;
+}
+
+fn test_inline_comment() {
+    // Line comment at end of statement
+    let y = 2; // inline comment
+}
+
+fn test_multiple_consecutive_comments() {
+    // Multiple consecutive line comments
+    // Comment line 1
+    // Comment line 2
+    // Comment line 3
+    let z = 3;
+}
+
+fn test_empty_line_comment() {
+    // Empty line comment
+    //
+    let a = 4;
+}
+
+fn test_line_comment_with_spaces() {
+    // Line comment with only spaces
+    //
+    let b = 5;
+}
+
+fn test_block_comment_basic() {
+    // Block comment basic
+    /* This is a block comment */
+    let c = 6;
+}
+
+fn test_block_comment_multiline() {
+    // Block comment multiline
+    /*
+     * This is a multiline
+     * block comment
+     */
+    let d = 7;
+}
+
+fn test_block_comment_inline() {
+    // Block comment inline
+    let e = /* inline block */ 8;
+}
+
+fn test_block_comment_between_tokens() {
+    // Block comment between tokens
+    let /* comment */ f /* another */ = /* yet another */ 9;
+}
+
+fn test_nested_block_comments() {
+    // Nested block comments
+    /* outer /* nested */ outer continues */
+    let g = 10;
+
+    /*
+     * outer
+     * /*
+     *  * nested
+     *  */
+     * outer continues
+     */
+    let h = 11;
+}
+
+fn test_deeply_nested_block_comments() {
+    // Deeply nested block comments
+    /* level 1 /* level 2 /* level 3 */ level 2 */ level 1 */
+    let i = 12;
+}
+
+fn test_block_comment_with_asterisks() {
+    // Block comment with asterisks
+    /***
+     *** Lots of asterisks
+     ***/
+    let j = 13;
+}
+
+fn test_block_comment_with_slashes() {
+    // Block comment with slashes
+    /* /// slashes inside /// */
+    let k = 14;
+}
+
+fn test_line_comment_inside_block() {
+    // Line comment inside block comment
+    /* // this line comment is inside block
+       still in block
+    */
+    let l = 15;
+}
+
+fn test_block_syntax_in_line_comment() {
+    // Block comment syntax in line comment (not nested)
+    // /* this is not a block comment start
+    let m = 16;
+    // */ this is not a block comment end
+    let n = 17;
+}
+
+// Doc comments (triple slash)
+/// This is a doc comment
+/// for the following item
+fn documented() { }
+
+/// Single line doc
+fn single_doc() { }
+
+// Doc comment with markdown
+/// # Header
+///
+/// - List item 1
+/// - List item 2
+///
+/// ```verum
+/// let example = 1;
+/// ```
+fn markdown_doc() { }
+
+// Block doc comment
+/**
+ * Block documentation comment
+ * Can span multiple lines
+ */
+fn block_documented() { }
+
+fn test_comment_at_end() {
+    // Comment at end of file (no newline after)
+    let final_var = 18;
+    // Comment at very end
+}
+
+// Comment separating items
+fn first() { }
+// Separator comment
+fn second() { }
+
+fn test_comment_in_statements() {
+    // Comment in various statement positions
+    let in_let = /* before expr */ compute() /* after expr */;
+    let compound = a() /* + */ + /* b */ b();
+}
+
+fn test_comment_in_match_arms() {
+    let value: Maybe<Int> = Some(42);
+
+    // Comment in match arms
+    match value {
+        // Comment before pattern
+        Some(x) => x,
+        // Comment in pattern area
+        None => /* inline */ 0, // trailing
+    };
+}
+
+// Comment in function signature
+fn commented_fn(
+    // Comment before param
+    x: Int, // Comment after param
+    // Another comment
+    y: Int,
+) -> Int // Return type comment
+{
+    x + y
+}
+
+// Comment in implement block
+implement Display for MyType {
+    // Method comment
+    fn display(&self) -> Text {
+        // Body comment
+        "output"
+    }
+}
+
+fn test_comment_with_special_characters() {
+    // Comment with special characters
+    // Comment with "quotes" and 'apostrophes'
+    // Comment with <angle> and {braces}
+    // Comment with @symbols and #hashes
+}
+
+fn test_comment_with_unicode() {
+    // Comment with unicode
+    // Comment with unicode: Hello World in Japanese, emoji support
+}
+
+fn test_comment_with_code_content() {
+    // Comment with code-like content
+    // let x = 1; fn f() { } type T is { };
+}
+
+fn test_long_comment() {
+    // Long comment line
+    // This is a very long comment line that goes on and on and on and contains a lot of text
+}
+
+fn test_comment_in_control_flow() {
+    // Comment between control flow keywords
+    if /* condition comment */ true /* more */ {
+        // Body comment
+    } /* between */ else /* before block */ {
+        // Else body
+    }
+}
+
+fn test_comment_in_for_loop() {
+    // Comment in for loop
+    for /* iterator */ i /* in keyword */ in /* range */ 0..10 /* block */ {
+        // Loop body
+    }
+}
+
+fn test_comment_in_while_loop() {
+    let running = false;
+
+    // Comment in while loop
+    while /* condition */ running /* block */ {
+        // Loop body
+    }
+}
+
+fn test_comment_in_closure() {
+    // Comment in closure
+    let closure = |/* param */ x /* colon */ : /* type */ Int /* arrow */ | /* body */ x * 2;
+}
+
+fn test_comment_in_pipeline() {
+    fn transform(x: Int) -> Int { x }
+    fn filter(x: Int) -> Int { x }
+    fn collect(x: Int) -> Int { x }
+    let data = 42;
+
+    // Comment in pipeline
+    let result = data
+        /* step 1 */ |> transform
+        // step 2
+        |> filter
+        /* step 3 */ |> collect;
+}
+
+fn test_comment_in_array_literal() {
+    // Comment in array literal
+    let arr = [
+        1, // first
+        /* second */ 2,
+        3, // third
+    ];
+}
+
+fn test_comment_in_struct_literal() {
+    // Comment in struct literal
+    let point = Point {
+        x: 1, // x coordinate
+        /* y field */ y: 2,
+    };
+}
+
+// Comment preserving code structure
+fn complex_commented(
+    a: Int,  // parameter a
+    b: Int,  // parameter b
+    c: Int,  // parameter c
+) -> Result<Int, Error> {  // returns result
+    // Validation
+    if a < 0 {
+        return Err(Error { message: "a negative" });
+    }
+
+    // Computation
+    let sum = a + b;  // intermediate
+    let result = sum * c;  // final
+
+    // Return
+    Ok(result)
+}
+
+fn test_empty_block_comments() {
+    // Empty block comments
+    /**/
+    let after_empty = 19;
+
+    /* */
+    let after_space = 20;
+
+    /*
+    */
+    let after_newline = 21;
+}

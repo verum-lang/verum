@@ -1,0 +1,42 @@
+// @test: meta-pass
+// @level: L1
+// @description: Tests that gensym generates unique symbols (no collisions)
+// @tags: meta-system, quote, hygiene, gensym
+
+// Test that gensym generates truly unique identifiers
+meta fn test_gensym_uniqueness() -> Bool {
+    let a = gensym("test");
+    let b = gensym("test");
+    // These should be different strings like "test_0" and "test_1"
+    a != b
+}
+
+// Multiple gensyms in sequence should all be unique
+meta fn test_gensym_sequence() -> Bool {
+    let syms = [
+        gensym("var"),
+        gensym("var"),
+        gensym("var"),
+        gensym("var"),
+    ];
+    // All should be unique
+    syms[0] != syms[1] &&
+    syms[1] != syms[2] &&
+    syms[2] != syms[3] &&
+    syms[0] != syms[2] &&
+    syms[0] != syms[3] &&
+    syms[1] != syms[3]
+}
+
+// Gensym with different prefixes should be unique
+meta fn test_gensym_prefixes() -> Bool {
+    let a = gensym("foo");
+    let b = gensym("bar");
+    a != b
+}
+
+fn main() {
+    @const assert(test_gensym_uniqueness());
+    @const assert(test_gensym_sequence());
+    @const assert(test_gensym_prefixes());
+}

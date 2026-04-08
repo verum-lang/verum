@@ -1,0 +1,472 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, simulation, records
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: simple simulations — bank account (deposit, withdraw,
+// balance), particle motion (position + velocity updates), population growth
+// (discrete steps).
+
+// =============================================================================
+// Bank account simulation
+// =============================================================================
+
+type Account is { balance: Int, transactions: Int };
+
+fn account_new(initial: Int) -> Account {
+    Account { balance: initial, transactions: 0 }
+}
+
+fn account_deposit(acc: Account, amount: Int) -> Account {
+    Account {
+        balance: acc.balance + amount,
+        transactions: acc.transactions + 1
+    }
+}
+
+fn account_withdraw(acc: Account, amount: Int) -> Account {
+    // Don't allow negative balance
+    if amount > acc.balance {
+        // Withdrawal denied, still counts as attempted transaction
+        Account { balance: acc.balance, transactions: acc.transactions + 1 }
+    } else {
+        Account {
+            balance: acc.balance - amount,
+            transactions: acc.transactions + 1
+        }
+    }
+}
+
+fn test_basic_account() {
+    let acc = account_new(1000);
+    assert_eq(acc.balance, 1000);
+    assert_eq(acc.transactions, 0);
+
+    let acc2 = account_deposit(acc, 500);
+    assert_eq(acc2.balance, 1500);
+    assert_eq(acc2.transactions, 1);
+
+    let acc3 = account_withdraw(acc2, 200);
+    assert_eq(acc3.balance, 1300);
+    assert_eq(acc3.transactions, 2);
+}
+
+fn test_overdraft_protection() {
+    let acc = account_new(100);
+    let acc2 = account_withdraw(acc, 150);
+    // Withdrawal denied
+    assert_eq(acc2.balance, 100);
+    assert_eq(acc2.transactions, 1);
+}
+
+fn test_account_series() {
+    let mut acc = account_new(0);
+    // Series of deposits
+    let mut i = 1;
+    while i <= 10 {
+        acc = account_deposit(acc, i * 100);
+        i = i + 1;
+    }
+    // Total: 100+200+...+1000 = 5500
+    assert_eq(acc.balance, 5500);
+    assert_eq(acc.transactions, 10);
+
+    // Withdraw half
+    acc = account_withdraw(acc, 2750);
+    assert_eq(acc.balance, 2750);
+    assert_eq(acc.transactions, 11);
+}
+
+// Interest calculation (integer percentage: rate=5 means 5%)
+fn apply_interest(acc: Account, rate_percent: Int) -> Account {
+    let interest = (acc.balance * rate_percent) / 100;
+    Account {
+        balance: acc.balance + interest,
+        transactions: acc.transactions + 1
+    }
+}
+
+fn test_compound_interest() {
+    let mut acc = account_new(10000);
+    // Apply 10% interest 5 times
+    let mut i = 0;
+    while i < 5 {
+        acc = apply_interest(acc, 10);
+        i = i + 1;
+    }
+    // 10000 * 1.1^5 ~ 16105 (integer truncation)
+    // 10000 -> 11000 -> 12100 -> 13310 -> 14641 -> 16105
+    assert_eq(acc.balance, 16105);
+    assert_eq(acc.transactions, 5);
+}
+
+// =============================================================================
+// Multi-account transfer
+// =============================================================================
+
+fn transfer(from: Account, to: Account, amount: Int) -> Account {
+    // Returns the 'from' account after withdrawal
+    // Caller must handle 'to' separately
+    account_withdraw(from, amount)
+}
+
+fn test_transfer() {
+    let mut checking = account_new(5000);
+    let mut savings = account_new(10000);
+
+    // Transfer 2000 from checking to savings
+    checking = account_withdraw(checking, 2000);
+    savings = account_deposit(savings, 2000);
+
+    assert_eq(checking.balance, 3000);
+    assert_eq(savings.balance, 12000);
+}
+
+// =============================================================================
+// Particle motion simulation (2D)
+// =============================================================================
+
+type Particle2D is { x: Int, y: Int, vx: Int, vy: Int };
+
+fn particle_new(x: Int, y: Int, vx: Int, vy: Int) -> Particle2D {
+    Particle2D { x: x, y: y, vx: vx, vy: vy }
+}
+
+fn particle_step(p: Particle2D) -> Particle2D {
+    Particle2D {
+        x: p.x + p.vx,
+        y: p.y + p.vy,
+        vx: p.vx,
+        vy: p.vy
+    }
+}
+
+fn particle_accel(p: Particle2D, ax: Int, ay: Int) -> Particle2D {
+    Particle2D {
+        x: p.x,
+        y: p.y,
+        vx: p.vx + ax,
+        vy: p.vy + ay
+    }
+}
+
+fn test_particle_linear_motion() {
+    let mut p = particle_new(0, 0, 3, 4);
+    let mut i = 0;
+    while i < 10 {
+        p = particle_step(p);
+        i = i + 1;
+    }
+    assert_eq(p.x, 30);
+    assert_eq(p.y, 40);
+    assert_eq(p.vx, 3);
+    assert_eq(p.vy, 4);
+}
+
+fn test_particle_with_gravity() {
+    // Simulate projectile: initial velocity (10, 20), gravity (0, -2) per step
+    let mut p = particle_new(0, 0, 10, 20);
+    let mut i = 0;
+    while i < 10 {
+        p = particle_step(p);
+        p = particle_accel(p, 0, -2);
+        i = i + 1;
+    }
+    // x: 10 per step for 10 steps = 100
+    assert_eq(p.x, 100);
+    // y: positions = 20, 38, 54, 68, 80, 90, 98, 104, 108, 110
+    // vy: 20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 0
+    // After 10 steps: vy = 20 - 2*10 = 0
+    assert_eq(p.vy, 0);
+    // y = sum of velocities: 20+18+16+14+12+10+8+6+4+2 = 110
+    assert_eq(p.y, 110);
+}
+
+fn test_particle_bounce() {
+    // Simulate bouncing in a box [0, 100]
+    let mut p = particle_new(50, 0, 7, 0);
+    let mut i = 0;
+    while i < 20 {
+        p = particle_step(p);
+        // Bounce off right wall
+        if p.x > 100 {
+            p = Particle2D { x: 200 - p.x, y: p.y, vx: -p.vx, vy: p.vy };
+        }
+        // Bounce off left wall
+        if p.x < 0 {
+            p = Particle2D { x: -p.x, y: p.y, vx: -p.vx, vy: p.vy };
+        }
+        i = i + 1;
+    }
+    // After tracing: p.x should be 10 at the end
+    assert_eq(p.x, 10);
+    assert_eq(p.vx, -7);
+}
+
+// =============================================================================
+// Multi-particle system
+// =============================================================================
+
+type ThreeParticles is { p0: Particle2D, p1: Particle2D, p2: Particle2D };
+
+fn tp_get(tp: ThreeParticles, i: Int) -> Particle2D {
+    if i == 0 { tp.p0 }
+    else if i == 1 { tp.p1 }
+    else { tp.p2 }
+}
+
+fn test_multi_particle() {
+    let mut sys = ThreeParticles {
+        p0: particle_new(0, 0, 1, 0),
+        p1: particle_new(50, 0, -1, 0),
+        p2: particle_new(25, 0, 0, 1)
+    };
+
+    // Step all particles 10 times
+    let mut i = 0;
+    while i < 10 {
+        sys = ThreeParticles {
+            p0: particle_step(sys.p0),
+            p1: particle_step(sys.p1),
+            p2: particle_step(sys.p2)
+        };
+        i = i + 1;
+    }
+
+    assert_eq(sys.p0.x, 10);
+    assert_eq(sys.p1.x, 40);
+    assert_eq(sys.p2.y, 10);
+}
+
+// =============================================================================
+// Population growth (discrete logistic model)
+// =============================================================================
+
+// Discrete growth: pop_new = pop + growth_rate * pop / 100
+fn grow_population(pop: Int, rate_percent: Int) -> Int {
+    pop + (pop * rate_percent) / 100
+}
+
+fn test_exponential_growth() {
+    let mut pop = 1000;
+    // 10% growth for 10 generations
+    let mut i = 0;
+    while i < 10 {
+        pop = grow_population(pop, 10);
+        i = i + 1;
+    }
+    // 1000 * 1.1^10 ~ 2593 (with integer truncation)
+    // 1000 -> 1100 -> 1210 -> 1331 -> 1464 -> 1610 -> 1771 -> 1948 -> 2142 -> 2356 -> 2591
+    assert_eq(pop, 2591);
+}
+
+// Logistic growth: pop_new = pop + rate * pop * (1 - pop/capacity) / 100
+// Using integer arithmetic: pop + rate * pop * (capacity - pop) / (capacity * 100)
+fn grow_logistic(pop: Int, rate_percent: Int, capacity: Int) -> Int {
+    let growth = (rate_percent * pop * (capacity - pop)) / (capacity * 100);
+    pop + growth
+}
+
+fn test_logistic_growth() {
+    let mut pop = 100;
+    let capacity = 10000;
+    let rate = 50;  // 50% growth rate
+
+    // Grow for 20 generations
+    let mut i = 0;
+    while i < 20 {
+        pop = grow_logistic(pop, rate, capacity);
+        i = i + 1;
+    }
+    // Should approach but not exceed capacity
+    assert(pop > 0);
+    assert(pop <= capacity);
+}
+
+fn test_logistic_near_capacity() {
+    let mut pop = 9500;
+    let capacity = 10000;
+    let rate = 50;
+
+    // Near capacity, growth should slow
+    let mut i = 0;
+    while i < 10 {
+        pop = grow_logistic(pop, rate, capacity);
+        i = i + 1;
+    }
+    // Should be close to but not exceeding capacity
+    assert(pop >= 9500);
+    assert(pop <= capacity);
+}
+
+// =============================================================================
+// Predator-prey simulation (simplified Lotka-Volterra)
+// =============================================================================
+
+type Ecosystem is { prey: Int, predators: Int };
+
+fn eco_step(eco: Ecosystem, prey_growth: Int, pred_rate: Int, pred_death: Int) -> Ecosystem {
+    // All rates in percent (divided by 100)
+    // prey_new = prey + prey_growth% * prey - pred_rate% * prey * predators / 1000
+    // pred_new = predators - pred_death% * predators + pred_rate% * prey * predators / 10000
+    let prey_born = (eco.prey * prey_growth) / 100;
+    let prey_eaten = (pred_rate * eco.prey * eco.predators) / 10000;
+    let pred_died = (eco.predators * pred_death) / 100;
+    let pred_born = (pred_rate * eco.prey * eco.predators) / 100000;
+
+    let new_prey = eco.prey + prey_born - prey_eaten;
+    let new_pred = eco.predators - pred_died + pred_born;
+
+    // Clamp to non-negative
+    Ecosystem {
+        prey: if new_prey < 0 { 0 } else { new_prey },
+        predators: if new_pred < 0 { 0 } else { new_pred }
+    }
+}
+
+fn test_predator_prey() {
+    let mut eco = Ecosystem { prey: 1000, predators: 50 };
+
+    // Run 10 steps
+    let mut i = 0;
+    while i < 10 {
+        eco = eco_step(eco, 10, 5, 10);
+        i = i + 1;
+    }
+
+    // Both populations should remain positive
+    assert(eco.prey > 0);
+    assert(eco.predators > 0);
+}
+
+// =============================================================================
+// Simple queue simulation (customers arriving and being served)
+// =============================================================================
+
+type QueueState is {
+    queue_length: Int,
+    total_served: Int,
+    total_waited: Int,
+    max_queue: Int
+};
+
+fn queue_new() -> QueueState {
+    QueueState { queue_length: 0, total_served: 0, total_waited: 0, max_queue: 0 }
+}
+
+fn queue_arrive(qs: QueueState, count: Int) -> QueueState {
+    let new_len = qs.queue_length + count;
+    let new_max = if new_len > qs.max_queue { new_len } else { qs.max_queue };
+    QueueState {
+        queue_length: new_len,
+        total_served: qs.total_served,
+        total_waited: qs.total_waited + qs.queue_length,
+        max_queue: new_max
+    }
+}
+
+fn queue_serve(qs: QueueState, capacity: Int) -> QueueState {
+    let served = if capacity > qs.queue_length { qs.queue_length } else { capacity };
+    QueueState {
+        queue_length: qs.queue_length - served,
+        total_served: qs.total_served + served,
+        total_waited: qs.total_waited,
+        max_queue: qs.max_queue
+    }
+}
+
+fn test_queue_simulation() {
+    let mut qs = queue_new();
+
+    // Time step 1: 5 arrive, serve 2
+    qs = queue_arrive(qs, 5);
+    qs = queue_serve(qs, 2);
+    assert_eq(qs.queue_length, 3);
+    assert_eq(qs.total_served, 2);
+
+    // Time step 2: 3 arrive, serve 2
+    qs = queue_arrive(qs, 3);
+    qs = queue_serve(qs, 2);
+    assert_eq(qs.queue_length, 4);
+    assert_eq(qs.total_served, 4);
+
+    // Time step 3: 0 arrive, serve 2
+    qs = queue_arrive(qs, 0);
+    qs = queue_serve(qs, 2);
+    assert_eq(qs.queue_length, 2);
+    assert_eq(qs.total_served, 6);
+}
+
+fn test_queue_extended() {
+    let mut qs = queue_new();
+    // Simulate 20 time steps
+    // Arrivals follow a pattern: 3, 2, 4, 1, 5 repeating
+    let mut i = 0;
+    while i < 20 {
+        let arrivals = if i % 5 == 0 { 3 }
+            else if i % 5 == 1 { 2 }
+            else if i % 5 == 2 { 4 }
+            else if i % 5 == 3 { 1 }
+            else { 5 };
+        qs = queue_arrive(qs, arrivals);
+        qs = queue_serve(qs, 3);
+        i = i + 1;
+    }
+    // Total arrivals = (3+2+4+1+5)*4 = 60
+    // total_served <= 60, and depends on queue dynamics
+    // total_served + final queue_length = total arrivals = 60
+    assert_eq(qs.total_served + qs.queue_length, 60);
+    assert(qs.max_queue > 0);
+}
+
+// =============================================================================
+// Temperature simulation (heating/cooling)
+// =============================================================================
+
+fn test_temperature_simulation() {
+    // Newton's law of cooling (integer approximation)
+    // temp_new = temp + cooling_rate * (ambient - temp) / 100
+    let ambient = 20;
+    let cooling_rate = 10;  // 10% per step
+    let mut temp = 100;
+
+    let mut i = 0;
+    while i < 50 {
+        let delta = (cooling_rate * (ambient - temp)) / 100;
+        temp = temp + delta;
+        i = i + 1;
+    }
+    // Should approach ambient temperature, but integer truncation means
+    // it stabilizes at 29 (when |delta| < 1, integer division gives 0).
+    // With 10% cooling rate and integer arithmetic:
+    // temp converges once (10 * |ambient - temp|) / 100 == 0, i.e. |ambient - temp| < 10.
+    assert(temp >= 20);
+    assert(temp <= 30);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_basic_account();
+    test_overdraft_protection();
+    test_account_series();
+    test_compound_interest();
+    test_transfer();
+    test_particle_linear_motion();
+    test_particle_with_gravity();
+    test_particle_bounce();
+    test_multi_particle();
+    test_exponential_growth();
+    test_logistic_growth();
+    test_logistic_near_capacity();
+    test_predator_prey();
+    test_queue_simulation();
+    test_queue_extended();
+    test_temperature_simulation();
+    print("[OK] 286_interp_simulation");
+    0
+}

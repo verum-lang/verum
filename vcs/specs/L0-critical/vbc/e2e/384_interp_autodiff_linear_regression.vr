@@ -1,0 +1,238 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, linear-regression, gradient-descent, mse
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Linear regression via gradient descent
+// Model: y = w*x + b
+// Loss: MSE = (1/n) * sum((y_pred - y_true)^2)
+// Uses integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn sdiv(a: Int, b: Int) -> Int {
+    (a * scale()) / b
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Fixed-size data arrays (8 points max)
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+// =============================================================================
+// Linear regression model
+// =============================================================================
+
+type LinModel is { w: Int, b: Int };
+
+fn predict(m: LinModel, x: Int) -> Int {
+    smul(m.w, x) + m.b
+}
+
+// MSE loss: (1/n)*sum((w*x_i + b - y_i)^2)
+fn mse_loss(m: LinModel, xs: Arr8, ys: Arr8, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let pred = predict(m, a8_get(xs, i));
+        let diff = pred - a8_get(ys, i);
+        total = total + smul(diff, diff);
+        i = i + 1;
+    }
+    sdiv(total, n * scale())
+}
+
+// Gradients of MSE w.r.t. w and b
+// dL/dw = (2/n) * sum((w*x_i + b - y_i) * x_i)
+// dL/db = (2/n) * sum(w*x_i + b - y_i)
+type Gradients is { dw: Int, db: Int };
+
+fn mse_gradients(m: LinModel, xs: Arr8, ys: Arr8, n: Int) -> Gradients {
+    let mut sum_dw = 0;
+    let mut sum_db = 0;
+    let mut i = 0;
+    while i < n {
+        let xi = a8_get(xs, i);
+        let yi = a8_get(ys, i);
+        let diff = predict(m, xi) - yi;
+        sum_dw = sum_dw + smul(diff, xi);
+        sum_db = sum_db + diff;
+        i = i + 1;
+    }
+    // Multiply by 2/n
+    let factor = sdiv(2 * scale(), n * scale());
+    Gradients {
+        dw: smul(factor, sum_dw),
+        db: smul(factor, sum_db)
+    }
+}
+
+// One step of gradient descent
+fn gd_step(m: LinModel, xs: Arr8, ys: Arr8, n: Int, lr: Int) -> LinModel {
+    let g = mse_gradients(m, xs, ys, n);
+    LinModel {
+        w: m.w - smul(lr, g.dw),
+        b: m.b - smul(lr, g.db)
+    }
+}
+
+// Train for n_steps
+fn train(m: LinModel, xs: Arr8, ys: Arr8, n: Int, lr: Int, n_steps: Int) -> LinModel {
+    let mut model = m;
+    let mut i = 0;
+    while i < n_steps {
+        model = gd_step(model, xs, ys, n, lr);
+        i = i + 1;
+    }
+    model
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_perfect_linear() {
+    // Data: y = 2x + 0 => (1,2), (2,4), (3,6), (4,8)
+    let xs = Arr8 { e0: 1*scale(), e1: 2*scale(), e2: 3*scale(), e3: 4*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let ys = Arr8 { e0: 2*scale(), e1: 4*scale(), e2: 6*scale(), e3: 8*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let n = 4;
+
+    // Start with w=0, b=0
+    let init = LinModel { w: 0, b: 0 };
+    let trained = train(init, xs, ys, n, 50, 500); // lr=0.05, 500 steps
+
+    // Should converge to w≈2, b≈0
+    assert_eq(within_tol(trained.w, 2 * scale(), 100), 1);
+    assert_eq(within_tol(trained.b, 0, 200), 1);
+}
+
+fn test_with_intercept() {
+    // Data: y = x + 3 => (0,3), (1,4), (2,5), (3,6)
+    let xs = Arr8 { e0: 0, e1: scale(), e2: 2*scale(), e3: 3*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let ys = Arr8 { e0: 3*scale(), e1: 4*scale(), e2: 5*scale(), e3: 6*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let n = 4;
+
+    let init = LinModel { w: 0, b: 0 };
+    let trained = train(init, xs, ys, n, 50, 500);
+
+    assert_eq(within_tol(trained.w, scale(), 200), 1);
+    assert_eq(within_tol(trained.b, 3 * scale(), 200), 1);
+}
+
+fn test_negative_slope() {
+    // Data: y = -x + 10 => (1,9), (2,8), (3,7), (4,6)
+    let xs = Arr8 { e0: scale(), e1: 2*scale(), e2: 3*scale(), e3: 4*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let ys = Arr8 { e0: 9*scale(), e1: 8*scale(), e2: 7*scale(), e3: 6*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let n = 4;
+
+    let init = LinModel { w: 0, b: 0 };
+    let trained = train(init, xs, ys, n, 30, 1000); // smaller lr for stability
+
+    assert_eq(within_tol(trained.w, -1 * scale(), 200), 1);
+    assert_eq(within_tol(trained.b, 10 * scale(), 300), 1);
+}
+
+fn test_loss_decreases() {
+    let xs = Arr8 { e0: scale(), e1: 2*scale(), e2: 3*scale(), e3: 4*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let ys = Arr8 { e0: 2*scale(), e1: 4*scale(), e2: 6*scale(), e3: 8*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let n = 4;
+
+    let m0 = LinModel { w: 0, b: 0 };
+    let loss0 = mse_loss(m0, xs, ys, n);
+
+    let m1 = train(m0, xs, ys, n, 50, 10);
+    let loss1 = mse_loss(m1, xs, ys, n);
+
+    let m2 = train(m1, xs, ys, n, 50, 10);
+    let loss2 = mse_loss(m2, xs, ys, n);
+
+    // Loss should decrease monotonically
+    assert(loss1 < loss0);
+    assert(loss2 < loss1);
+}
+
+fn test_prediction_accuracy() {
+    let xs = Arr8 { e0: scale(), e1: 2*scale(), e2: 3*scale(), e3: 4*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let ys = Arr8 { e0: 2*scale(), e1: 4*scale(), e2: 6*scale(), e3: 8*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let n = 4;
+
+    let m = LinModel { w: 0, b: 0 };
+    let trained = train(m, xs, ys, n, 50, 500);
+
+    // Predict at x=5 (unseen): should be close to 10
+    let pred = predict(trained, 5 * scale());
+    assert_eq(within_tol(pred, 10 * scale(), 300), 1);
+}
+
+fn test_gradient_at_solution() {
+    // At the correct solution, gradients should be near zero
+    let xs = Arr8 { e0: scale(), e1: 2*scale(), e2: 3*scale(), e3: 4*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let ys = Arr8 { e0: 2*scale(), e1: 4*scale(), e2: 6*scale(), e3: 8*scale(),
+                    e4: 0, e5: 0, e6: 0, e7: 0 };
+    let n = 4;
+
+    // Perfect model
+    let perfect = LinModel { w: 2 * scale(), b: 0 };
+    let g = mse_gradients(perfect, xs, ys, n);
+    assert_eq(within_tol(g.dw, 0, 5), 1);
+    assert_eq(within_tol(g.db, 0, 5), 1);
+}
+
+fn test_more_data_points() {
+    // y = 3x + 1 with 6 data points
+    let xs = Arr8 { e0: 0, e1: scale(), e2: 2*scale(), e3: 3*scale(),
+                    e4: 4*scale(), e5: 5*scale(), e6: 0, e7: 0 };
+    let ys = Arr8 { e0: scale(), e1: 4*scale(), e2: 7*scale(), e3: 10*scale(),
+                    e4: 13*scale(), e5: 16*scale(), e6: 0, e7: 0 };
+    let n = 6;
+
+    let init = LinModel { w: 0, b: 0 };
+    let trained = train(init, xs, ys, n, 20, 1000);
+
+    assert_eq(within_tol(trained.w, 3 * scale(), 200), 1);
+    assert_eq(within_tol(trained.b, scale(), 300), 1);
+}
+
+fn main() -> Int {
+    test_perfect_linear();
+    test_with_intercept();
+    test_negative_slope();
+    test_loss_decreases();
+    test_prediction_accuracy();
+    test_gradient_at_solution();
+    test_more_data_points();
+    print("[OK] 384_interp_autodiff_linear_regression");
+    0
+}

@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, fin-type, bounded-indexing
+// @timeout: 5000
+
+/// Fin type with bounded indexing
+///
+/// Extended Fin operations for safe bounded access.
+
+/// Bounded index type
+type Fin<N: meta Int> is { value: Int };
+
+/// Safe array access with bounded index
+fn bounded_get<T, N: meta Int>(arr: [T; N], idx: Fin<N>) -> T {
+    arr[idx.value]
+}
+
+/// Safe array update with bounded index
+fn bounded_set<T, N: meta Int>(arr: &mut [T; N], idx: Fin<N>, val: T) {
+    arr[idx.value] = val;
+}
+
+/// Create Fin with bounds check
+fn checked_fin<N: meta Int>(i: Int) -> Maybe<Fin<N>> {
+    if i >= 0 && i < N {
+        Some(Fin { value: i })
+    } else {
+        None
+    }
+}
+
+/// Create Fin from modular arithmetic (always succeeds)
+fn mod_fin<N: meta Int>(i: Int) -> Fin<N> {
+    let v = ((i % N) + N) % N;  // Handle negatives
+    Fin { value: v }
+}
+
+/// Iterate over all valid indices
+fn for_each_index<T, N: meta Int>(arr: [T; N], f: fn(Fin<N>, T)) {
+    let mut i = 0;
+    while i < N {
+        f(Fin { value: i }, arr[i]);
+        i = i + 1;
+    }
+}
+
+/// Swap two elements using bounded indices
+fn swap<T, N: meta Int>(arr: &mut [T; N], i: Fin<N>, j: Fin<N>) {
+    let tmp = arr[i.value];
+    arr[i.value] = arr[j.value];
+    arr[j.value] = tmp;
+}
+
+/// Binary search returning Fin index
+fn binary_search_fin<N: meta Int>(
+    arr: [Int; N],
+    target: Int
+) -> Maybe<Fin<N>> {
+    let mut lo = 0;
+    let mut hi = N - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if arr[mid] == target {
+            return Some(Fin { value: mid });
+        } else if arr[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    None
+}
+
+fn main() {
+    // Safe array access
+    let arr: [Int; 5] = [10, 20, 30, 40, 50];
+    let idx = Fin { value: 2 };
+    let val = bounded_get(arr, idx);
+    assert(val == 30);
+
+    // Checked Fin creation
+    let valid = checked_fin.<5>(3);
+    assert(valid.is_some());
+
+    let invalid = checked_fin.<5>(10);
+    assert(invalid.is_none());
+
+    // Modular Fin
+    let modular = mod_fin.<5>(7);  // 7 % 5 = 2
+    assert(modular.value == 2);
+
+    // Binary search
+    let sorted: [Int; 5] = [10, 20, 30, 40, 50];
+    let found = binary_search_fin(sorted, 30);
+    assert(found.is_some());
+    assert(found.unwrap().value == 2);
+
+    let not_found = binary_search_fin(sorted, 25);
+    assert(not_found.is_none());
+}

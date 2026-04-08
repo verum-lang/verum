@@ -1,0 +1,38 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: contracts, requires, ensures, verification
+// @expect: pass
+
+// Test @requires/@ensures contract annotations.
+
+@requires(n >= 0)
+@ensures(result >= 0)
+fn factorial(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    n * factorial(n - 1)
+}
+
+@requires(x > 0)
+fn safe_div(a: Int, x: Int) -> Int {
+    a / x
+}
+
+fn main() -> Int {
+    let f5 = factorial(5);
+    if f5 != 120 {
+        print(f"FAIL: factorial(5) = {f5}");
+        return 1;
+    }
+
+    let d = safe_div(100, 5);
+    if d != 20 {
+        print(f"FAIL: safe_div(100, 5) = {d}");
+        return 1;
+    }
+
+    print(f"factorial(5) = {f5}");
+    print(f"safe_div(100, 5) = {d}");
+    print("PASS: contracts work");
+    0
+}

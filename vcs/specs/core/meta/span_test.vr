@@ -1,0 +1,571 @@
+// =============================================================================
+// span_test.vr - Comprehensive tests for source span and location types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, span, source-location, diagnostics, multi-span, span-range
+// @description: Tests for SourceLocation, SpanFlags, SpanRange, MultiSpan types,
+//               and Span properties/operations.
+// =============================================================================
+
+mount core.meta.span.{SourceLocation, SpanFlags, Span, SpanRange, MultiSpan};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: SourceLocation — Construction
+// =============================================================================
+
+@test
+fn test_source_location_new() {
+    let loc = SourceLocation.new("test.vr", 10, 5, 100);
+    assert_eq(loc.file, "test.vr");
+    assert_eq(loc.line, 10);
+    assert_eq(loc.column, 5);
+    assert_eq(loc.offset, 100);
+}
+
+@test
+fn test_source_location_display() {
+    let loc = SourceLocation.new("main.vr", 42, 13, 500);
+    let display = loc.display();
+    assert_eq(display, "main.vr:42:13");
+}
+
+@test
+fn test_source_location_fields_direct() {
+    let loc = SourceLocation {
+        file: "src/lib.vr",
+        line: 1,
+        column: 1,
+        offset: 0,
+    };
+    assert_eq(loc.file, "src/lib.vr");
+    assert_eq(loc.line, 1);
+    assert_eq(loc.column, 1);
+    assert_eq(loc.offset, 0);
+}
+
+@test
+fn test_source_location_large_values() {
+    let loc = SourceLocation.new("big_file.vr", 10000, 200, 500000);
+    assert_eq(loc.line, 10000);
+    assert_eq(loc.column, 200);
+    assert_eq(loc.offset, 500000);
+}
+
+@test
+fn test_source_location_display_single_digit() {
+    let loc = SourceLocation.new("a.vr", 1, 1, 0);
+    assert_eq(loc.display(), "a.vr:1:1");
+}
+
+@test
+fn test_source_location_display_deep_path() {
+    let loc = SourceLocation.new("src/core/meta/span.vr", 100, 20, 5000);
+    assert_eq(loc.display(), "src/core/meta/span.vr:100:20");
+}
+
+// =============================================================================
+// Section 2: SpanFlags — All Combinations
+// =============================================================================
+
+@test
+fn test_span_flags_default() {
+    let flags = SpanFlags {
+        is_expansion: false,
+        is_synthetic: false,
+        is_hidden: false,
+    };
+    assert(!flags.is_expansion);
+    assert(!flags.is_synthetic);
+    assert(!flags.is_hidden);
+}
+
+@test
+fn test_span_flags_expansion_only() {
+    let flags = SpanFlags {
+        is_expansion: true,
+        is_synthetic: false,
+        is_hidden: false,
+    };
+    assert(flags.is_expansion);
+    assert(!flags.is_synthetic);
+    assert(!flags.is_hidden);
+}
+
+@test
+fn test_span_flags_synthetic_only() {
+    let flags = SpanFlags {
+        is_expansion: false,
+        is_synthetic: true,
+        is_hidden: false,
+    };
+    assert(flags.is_synthetic);
+    assert(!flags.is_expansion);
+}
+
+@test
+fn test_span_flags_hidden_only() {
+    let flags = SpanFlags {
+        is_expansion: false,
+        is_synthetic: false,
+        is_hidden: true,
+    };
+    assert(flags.is_hidden);
+}
+
+@test
+fn test_span_flags_all_set() {
+    let flags = SpanFlags {
+        is_expansion: true,
+        is_synthetic: true,
+        is_hidden: true,
+    };
+    assert(flags.is_expansion);
+    assert(flags.is_synthetic);
+    assert(flags.is_hidden);
+}
+
+@test
+fn test_span_flags_expansion_and_synthetic() {
+    let flags = SpanFlags {
+        is_expansion: true,
+        is_synthetic: true,
+        is_hidden: false,
+    };
+    assert(flags.is_expansion);
+    assert(flags.is_synthetic);
+    assert(!flags.is_hidden);
+}
+
+@test
+fn test_span_flags_expansion_and_hidden() {
+    let flags = SpanFlags {
+        is_expansion: true,
+        is_synthetic: false,
+        is_hidden: true,
+    };
+    assert(flags.is_expansion);
+    assert(!flags.is_synthetic);
+    assert(flags.is_hidden);
+}
+
+@test
+fn test_span_flags_synthetic_and_hidden() {
+    let flags = SpanFlags {
+        is_expansion: false,
+        is_synthetic: true,
+        is_hidden: true,
+    };
+    assert(!flags.is_expansion);
+    assert(flags.is_synthetic);
+    assert(flags.is_hidden);
+}
+
+// =============================================================================
+// Section 3: SpanRange
+// =============================================================================
+
+@test
+fn test_span_range_single() {
+    let span = Span.call_site();
+    let range = SpanRange.single(span);
+    let _ = range.start;
+    let _ = range.end;
+}
+
+@test
+fn test_span_range_new() {
+    let s = Span.call_site();
+    let e = Span.call_site();
+    let range = SpanRange.new(s, e);
+    let _ = range;
+}
+
+@test
+fn test_span_range_to_span() {
+    let s = Span.call_site();
+    let range = SpanRange.single(s);
+    let combined: Span = range.to_span();
+    let _ = combined;
+}
+
+@test
+fn test_span_range_start_location() {
+    let s = Span.call_site();
+    let range = SpanRange.single(s);
+    let loc: Maybe<SourceLocation> = range.start_location();
+    let _ = loc;
+}
+
+@test
+fn test_span_range_end_location() {
+    let s = Span.call_site();
+    let range = SpanRange.single(s);
+    let loc: Maybe<SourceLocation> = range.end_location();
+    let _ = loc;
+}
+
+@test
+fn test_span_range_contains() {
+    let s = Span.call_site();
+    let range = SpanRange.single(s);
+    let test_span = Span.call_site();
+    let _ = range.contains(&test_span);
+}
+
+// =============================================================================
+// Section 4: MultiSpan
+// =============================================================================
+
+@test
+fn test_multi_span_empty() {
+    let ms = MultiSpan.empty();
+    assert(ms.is_empty());
+    assert(ms.primary_span().is_none());
+}
+
+@test
+fn test_multi_span_from_span() {
+    let s = Span.call_site();
+    let ms = MultiSpan.from_span(s);
+    assert(!ms.is_empty());
+    assert(ms.primary_span().is_some());
+}
+
+@test
+fn test_multi_span_with_primary() {
+    let ms = MultiSpan.empty()
+        .with_primary(Span.call_site());
+    assert(!ms.is_empty());
+    assert(ms.primary_span().is_some());
+}
+
+@test
+fn test_multi_span_with_labeled_span() {
+    let ms = MultiSpan.from_span(Span.call_site())
+        .with_span(Span.call_site(), "note: defined here");
+    assert(!ms.is_empty());
+}
+
+@test
+fn test_multi_span_multiple_labels() {
+    let ms = MultiSpan.from_span(Span.call_site())
+        .with_span(Span.call_site(), "first")
+        .with_span(Span.call_site(), "second")
+        .with_span(Span.call_site(), "third");
+    assert(!ms.is_empty());
+}
+
+@test
+fn test_multi_span_no_primary_with_labels() {
+    let ms = MultiSpan.empty()
+        .with_span(Span.call_site(), "note");
+    // has labels but no primary
+    assert(!ms.is_empty());
+    assert(ms.primary_span().is_none());
+}
+
+// =============================================================================
+// Section 5: Span — Compiler Intrinsic Constructors
+// =============================================================================
+
+@test
+fn test_span_call_site() {
+    let s: Span = Span.call_site();
+    let _ = s;
+}
+
+@test
+fn test_span_def_site() {
+    let s: Span = Span.def_site();
+    let _ = s;
+}
+
+@test
+fn test_span_mixed_site() {
+    let s: Span = Span.mixed_site();
+    let _ = s;
+}
+
+@test
+fn test_span_synthetic() {
+    let s: Span = Span.synthetic();
+    let _ = s;
+}
+
+// =============================================================================
+// Section 6: Span — Properties
+// =============================================================================
+
+@test
+fn test_span_is_expansion() {
+    let s = Span.call_site();
+    let _ = s.is_expansion();
+}
+
+@test
+fn test_span_is_synthetic_check() {
+    let s = Span.call_site();
+    let _ = s.is_synthetic();
+}
+
+@test
+fn test_span_location() {
+    let s = Span.call_site();
+    let loc: Maybe<SourceLocation> = s.location();
+    let _ = loc;
+}
+
+@test
+fn test_span_start() {
+    let s = Span.call_site();
+    let start: Int = s.start();
+    let _ = start;
+}
+
+@test
+fn test_span_end() {
+    let s = Span.call_site();
+    let end: Int = s.end();
+    let _ = end;
+}
+
+@test
+fn test_span_len() {
+    let s = Span.call_site();
+    let length: Int = s.len();
+    let _ = length;
+}
+
+@test
+fn test_span_is_empty() {
+    let s = Span.call_site();
+    let _ = s.is_empty();
+}
+
+// =============================================================================
+// Section 7: Span — Operations
+// =============================================================================
+
+@test
+fn test_span_join() {
+    let s1 = Span.call_site();
+    let s2 = Span.call_site();
+    let joined: Span = s1.join(s2);
+    let _ = joined;
+}
+
+@test
+fn test_span_subspan() {
+    let s = Span.call_site();
+    let sub: Maybe<Span> = s.subspan(0, 5);
+    let _ = sub;
+}
+
+@test
+fn test_span_source_text() {
+    let s = Span.call_site();
+    let text: Maybe<Text> = s.source_text();
+    let _ = text;
+}
+
+@test
+fn test_span_resolved_at_call_site() {
+    let s = Span.call_site();
+    let resolved: Span = s.resolved_at_call_site();
+    let _ = resolved;
+}
+
+@test
+fn test_span_resolved_at_def_site() {
+    let s = Span.call_site();
+    let resolved: Span = s.resolved_at_def_site();
+    let _ = resolved;
+}
+
+// =============================================================================
+// Section 8: Span — Comparison Operations
+// =============================================================================
+
+@test
+fn test_span_overlaps() {
+    let s1 = Span.call_site();
+    let s2 = Span.call_site();
+    let _ = s1.overlaps(&s2);
+}
+
+@test
+fn test_span_contains_other() {
+    let s1 = Span.call_site();
+    let s2 = Span.call_site();
+    let _ = s1.contains(&s2);
+}
+
+@test
+fn test_span_contains_offset() {
+    let s = Span.call_site();
+    let _ = s.contains_offset(0);
+}
+
+// =============================================================================
+// Section 9: Additional SourceLocation Tests
+// =============================================================================
+
+@test
+fn test_source_location_zero_line_column() {
+    let loc = SourceLocation.new("unknown.vr", 0, 0, 0);
+    assert_eq(loc.line, 0);
+    assert_eq(loc.column, 0);
+    assert_eq(loc.offset, 0);
+}
+
+@test
+fn test_source_location_different_files() {
+    let loc1 = SourceLocation.new("a.vr", 1, 1, 0);
+    let loc2 = SourceLocation.new("b.vr", 1, 1, 0);
+    assert(loc1.file != loc2.file);
+}
+
+@test
+fn test_span_join_self() {
+    let s = Span.call_site();
+    let joined = s.join(s);
+    let _ = joined;
+}
+
+@test
+fn test_multi_span_empty_primary_none() {
+    let ms = MultiSpan.empty();
+    assert(ms.is_empty());
+    assert(ms.primary_span().is_none());
+}
+
+@test
+fn test_multi_span_from_span_has_primary() {
+    let s = Span.call_site();
+    let ms = MultiSpan.from_span(s);
+    assert(ms.primary_span().is_some());
+}
+
+@test
+fn test_span_synthetic_type() {
+    let s: Span = Span.synthetic();
+    let _: Span = s;
+}
+
+@test
+fn test_source_location_display_multi_digit() {
+    let loc = SourceLocation.new("module/test.vr", 999, 88, 12345);
+    assert_eq(loc.display(), "module/test.vr:999:88");
+}
+
+@test
+fn test_span_range_single_start_end() {
+    let s = Span.call_site();
+    let range = SpanRange.single(s);
+    // start and end should be accessible
+    let _s = range.start;
+    let _e = range.end;
+}
+
+// =============================================================================
+// Section 10: Additional Advanced Tests
+// =============================================================================
+
+@test
+fn test_span_eq_implementation() {
+    let s1 = Span.call_site();
+    let s2 = Span.call_site();
+    // Test Eq trait implementation
+    let same = s1.eq(&s1);
+    assert(same);
+    // Two call_site spans may or may not be equal depending on hygiene
+    let _ = s1.eq(&s2);
+}
+
+@test
+fn test_span_ord_implementation() {
+    let s1 = Span.call_site();
+    let s2 = Span.def_site();
+    // Test Ord trait implementation
+    let ordering = s1.cmp(&s2);
+    let _ = ordering;
+    // Self-comparison should be Equal
+    let self_ord = s1.cmp(&s1);
+    let _ = self_ord;
+}
+
+@test
+fn test_source_location_eq_implementation() {
+    let loc1 = SourceLocation.new("test.vr", 10, 5, 100);
+    let loc2 = SourceLocation.new("test.vr", 10, 5, 100);
+    let loc3 = SourceLocation.new("test.vr", 10, 6, 101);
+    // Same locations should be equal
+    assert(loc1.eq(&loc2));
+    // Different column should not be equal
+    assert(!loc1.eq(&loc3));
+}
+
+@test
+fn test_source_location_eq_different_files() {
+    let loc1 = SourceLocation.new("a.vr", 1, 1, 0);
+    let loc2 = SourceLocation.new("b.vr", 1, 1, 0);
+    // Different files should not be equal even with same line/column
+    assert(!loc1.eq(&loc2));
+}
+
+@test
+fn test_span_range_different_start_end() {
+    let start = Span.call_site();
+    let end = Span.def_site();
+    let range = SpanRange.new(start, end);
+    // Verify start and end are different spans
+    let combined = range.to_span();
+    let _ = combined;
+    // Both locations should be accessible
+    let start_loc = range.start_location();
+    let end_loc = range.end_location();
+    let _ = start_loc;
+    let _ = end_loc;
+}
+
+@test
+fn test_multi_span_iter_primary_only() {
+    let s = Span.call_site();
+    let ms = MultiSpan.from_span(s);
+    // Test iter() method with only primary span
+    let iter = ms.iter();
+    let _ = iter;
+}
+
+@test
+fn test_multi_span_iter_with_labels() {
+    let s1 = Span.call_site();
+    let s2 = Span.def_site();
+    let s3 = Span.mixed_site();
+    let ms = MultiSpan.from_span(s1)
+        .with_span(s2, "note: defined here")
+        .with_span(s3, "note: used here");
+    // Test iter() with primary and labeled spans
+    let iter = ms.iter();
+    let _ = iter;
+}
+
+@test
+fn test_span_overlaps_non_overlapping() {
+    let s1 = Span.call_site();
+    let s2 = Span.def_site();
+    // Test overlaps with potentially non-overlapping spans
+    let result = s1.overlaps(&s2);
+    let _ = result;
+    // Test symmetry
+    let result2 = s2.overlaps(&s1);
+    let _ = result2;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

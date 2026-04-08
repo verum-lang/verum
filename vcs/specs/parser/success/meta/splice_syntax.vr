@@ -1,0 +1,69 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @description: Test splice syntax in quote blocks per grammar/verum.ebnf quote_interpolation production
+
+// Valid splice with identifier
+fn test_splice_identifier() {
+    let name = "foo";
+    let tokens = quote { let $name = 1; };
+}
+
+// Valid splice with expression in braces
+fn test_splice_expression() {
+    let tokens = quote { let x = ${compute_value()}; };
+    let complex = quote { let y = ${a + b * c}; };
+}
+
+// Valid splice with function call
+fn test_splice_call() {
+    let tokens = quote { let z = ${get_default()}; };
+}
+
+// Valid splice with method call
+fn test_splice_method() {
+    let tokens = quote { let w = ${obj.method()}; };
+}
+
+// Valid splice with field access
+fn test_splice_field() {
+    let tokens = quote { let v = ${data.field}; };
+}
+
+// Valid splice with conditional
+fn test_splice_conditional() {
+    let tokens = quote {
+        let result = ${if cond { a } else { b }};
+    };
+}
+
+// Valid splice with block
+fn test_splice_block() {
+    let tokens = quote {
+        let computed = ${{
+            let temp = preprocess();
+            transform(temp)
+        }};
+    };
+}
+
+// Multiple splices
+fn test_multiple_splices() {
+    let name = "x";
+    let value = 42;
+    let tokens = quote {
+        let $name = $value;
+        let ${name}_squared = ${value * value};
+    };
+}
+
+// Nested splices
+fn test_nested_splices() {
+    let outer = "a";
+    let inner = "b";
+    let tokens = quote {
+        fn $outer() {
+            let $inner = 1;
+        }
+    };
+}

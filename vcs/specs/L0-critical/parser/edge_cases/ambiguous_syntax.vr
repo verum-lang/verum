@@ -1,0 +1,218 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, ambiguous, disambiguation
+
+// Helper types
+type Struct is { x: Int };
+type Point is { x: Int, y: Int };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Container is { data: Int };
+type Map<K, V> is { entries: List<(K, V)> };
+type Error is { message: Text };
+type Trait is protocol { };
+type Type is { value: Int };
+type T is Int;
+
+// Helper functions
+fn x() -> Int { 0 }
+fn y() -> Int { 0 }
+fn z() -> Int { 0 }
+fn use<A, B, C>(a: A, b: B, c: C) { }
+fn takes_closure(f: fn() -> Int) -> Int { f() }
+fn compute() -> Int { 42 }
+fn f<T>(x: T) -> T { x }
+fn get<T>() -> T { panic("") }
+fn func<A, B>(x: A, y: B) { }
+fn start() -> Int { 0 }
+fn end() -> Int { 10 }
+fn obj_field() -> Int { 0 }
+fn other() -> Int { 0 }
+fn use_val<T>(x: T) { }
+// panic is a built-in, no need to define it
+
+fn test_generic_vs_comparison_ambiguity() {
+    let x_val = 5;
+    let y_val = 10;
+    let z_val = 15;
+
+    // Generic vs comparison ambiguity
+    let a = x_val < y_val;        // Comparison
+    let b: List<Int> = Nil;       // Generic type
+    let c = x_val < y_val;        // Comparison
+    let d = f<Int>(x_val);        // Generic call
+    let e = x_val < y_val;        // Comparison (y_val > z_val would need parens)
+}
+
+fn test_closure_vs_block_ambiguity() {
+    // Closure vs block ambiguity
+    let f_closure = || 42;        // Closure with no params
+    let g_block = { 42 };         // Block expression
+    let h_closure = |x| { x };    // Closure with block
+}
+
+fn test_struct_literal_vs_block() {
+    let cond = true;
+    let v = true;
+
+    // Struct literal vs block in expression position
+    let i = if cond { Struct { x: 1 } } else { Struct { x: 2 } };
+    let j = match v {
+        true => Point { x: 0, y: 0 },
+        false => Point { x: 1, y: 1 },
+    };
+}
+
+fn test_turbofish_disambiguation() {
+    let x_val = 1;
+    let y_val = 2;
+    let container = Container { data: 42 };
+
+    // Turbofish disambiguation
+    let k: List<Int> = Nil;
+    let l = container.data;
+    // Generic function call with explicit type
+    let m = f<Int>(x_val);
+}
+
+fn test_range_vs_method_call() {
+    let start_val = 0;
+    let end_val = 10;
+
+    // Range vs method call
+    let n = 0..10;
+    let o = start_val..end_val;
+    let p = start_val..end_val;
+}
+
+fn test_negative_number_vs_subtraction() {
+    let x_val = 10;
+
+    // Negative number vs subtraction
+    let q = -5;           // Negative literal
+    let r = x_val - 5;    // Subtraction
+    let s = x_val - 5;    // Also subtraction (no space)
+    let t = -x_val;       // Negation of x
+    let u = x_val - -5;   // Subtraction of negative
+}
+
+fn test_dereference_vs_multiplication() {
+    let a = 5;
+    let b = 10;
+    let ptr = &42;
+    let ptr2 = &10;
+
+    // Dereference vs multiplication
+    let v = *ptr;         // Dereference
+    let w = a * b;        // Multiplication
+    let x = **&ptr;       // Double reference/dereference
+    let y_val = *ptr * *ptr2; // Deref and multiply
+}
+
+fn test_reference_vs_bitwise_and() {
+    let a = 5;
+    let b = 10;
+    let value = 42;
+
+    // Reference vs bitwise and
+    let z = &value;       // Reference
+    let aa = a & b;       // Bitwise and
+    let ab = &&value;     // Reference to reference
+    let ac = a > 0 && b > 0;  // Logical and
+}
+
+// Labeled loop (NOT Rust-style lifetimes - Verum uses CBGR for memory safety)
+fn with_label() {
+    'outer: loop {
+        break 'outer;
+    }
+}
+
+// Attribute vs array index
+@repr(C)
+fn attributed() { }
+
+fn test_array_index() {
+    let array = [1, 2, 3];
+    let arr_elem = array[0];
+}
+
+fn test_path_vs_comparison_chain() {
+    let a = 5;
+    let b = 10;
+    let c = 15;
+
+    // Path vs comparison chain
+    let ae = a + b + c;
+    let af = a < b && b > c;
+}
+
+// Trailing closure syntax (if supported)
+fn test_trailing_closure() {
+    let result = takes_closure(|| 42);
+}
+
+// Expression statement vs expression with semicolon
+fn statements() {
+    compute();    // Expression statement
+    compute()     // Expression (if last in block)
+}
+
+fn test_type_ascription_vs_struct_literal() {
+    let value = Point { x: 10, y: 20 };
+    let x_val = 10;
+    let y_val = 20;
+
+    // Type ascription vs struct literal
+    let ag: Point = value;
+    let ah = Point { x: x_val, y: y_val };
+}
+
+fn test_async_block_vs_async_closure() {
+    // Async block vs async closure
+    let async_block = async { 42 };
+    let async_closure = async || 42;
+    let async_closure2 = async |x| x + 1;
+}
+
+// If-let vs if with let statement
+fn test_if_let() {
+    let opt: Maybe<Int> = Some(42);
+
+    if let Some(x) = opt {
+        use_val(x);
+    }  // If-let pattern
+}
+
+fn normal_if() {
+    let condition = true;
+    if condition {
+        let x = 5;  // Normal let inside if
+    }
+}
+
+fn test_method_call_vs_ufcs() {
+    let obj = Point { x: 10, y: 20 };
+
+    // Method call vs UFCS
+    let ai = obj.x;
+}
+
+fn test_slice_vs_array_pattern() {
+    let arr = [1, 2, 3];
+
+    // Slice vs array pattern
+    match arr {
+        [a, b, c] => use(a, b, c),     // Array pattern
+        [first, ..] => use_val(first),  // Rest pattern (use .. not ..rest in Verum)
+        _ => {},
+    };
+}
+
+fn test_nested_angle_brackets() {
+    // Nested angle brackets
+    let ao: Result<Maybe<List<Int>>, Error> = Ok(Some(Nil));
+    let ap: Map<Text, Map<Text, Int>> = Map { entries: Nil };
+}

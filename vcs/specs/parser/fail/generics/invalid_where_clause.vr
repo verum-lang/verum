@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, generics, where, empty, error
+// @description: Test invalid where clause with empty curly braces
+// @expected-error: E038
+
+fn foo<T>() where {} {
+    let x: T;
+}

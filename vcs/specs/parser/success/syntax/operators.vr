@@ -1,0 +1,43 @@
+// @test: parse-pass
+// @tier: 0
+// @category: syntax
+
+fn test_operators() {
+    // Arithmetic
+    let a = 1 + 2;
+    let b = 3 - 1;
+    let c = 2 * 3;
+    let d = 10 / 2;
+    let e = 7 % 3;
+
+    // Comparison
+    let eq = a == b;
+    let ne = a != b;
+    let lt = a < b;
+    let le = a <= b;
+    let gt = a > b;
+    let ge = a >= b;
+
+    // Logical
+    let and = true && false;
+    let or = true || false;
+    let not = !true;
+
+    // Bitwise
+    let band = 0xFF & 0x0F;
+    let bor = 0xF0 | 0x0F;
+    let xor = 0xFF ^ 0xAA;
+    let shl = 1 << 4;
+    let shr = 16 >> 2;
+
+    // Assignment operators
+    a += 1;
+    b -= 1;
+    c *= 2;
+    d /= 2;
+    e %= 2;
+
+    // Range operators
+    let range = 0..10;
+    let range_incl = 0..=10;
+}

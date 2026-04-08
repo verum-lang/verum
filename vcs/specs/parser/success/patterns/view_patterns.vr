@@ -1,0 +1,121 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @category: patterns
+// @description: View patterns — match through a transformation function
+// Grammar: view_pattern = ( identifier | qualified_path ) , '->' , primary_pattern ;
+
+// =============================================================================
+// BASIC VIEW PATTERNS
+// =============================================================================
+
+fn parity(n: Int) -> Parity {
+    if n % 2 == 0 { Parity.Even(n / 2) } else { Parity.Odd(n) }
+}
+
+fn test_basic_view_pattern() {
+    let x = 42;
+    match x {
+        parity -> Even(k) => print(f"Even, half is {k}"),
+        parity -> Odd(n)  => print(f"Odd: {n}"),
+    };
+}
+
+// =============================================================================
+// VIEW PATTERN WITH QUALIFIED PATH
+// =============================================================================
+
+fn test_qualified_view_pattern() {
+    let data = get_data();
+    match data {
+        json.parse -> Ok(value) => process(value),
+        json.parse -> Err(e)    => report_error(e),
+    };
+}
+
+// =============================================================================
+// NESTED VIEW PATTERNS
+// =============================================================================
+
+fn test_nested_view_pattern() {
+    let input = "123";
+    match input {
+        parse_int -> Some(n) => {
+            match n {
+                parity -> Even(k) => print(f"Even number: {k * 2}"),
+                parity -> Odd(n)  => print(f"Odd number: {n}"),
+            };
+        },
+        parse_int -> None => print("Not a number"),
+    };
+}
+
+// =============================================================================
+// VIEW PATTERN WITH CHAINING (f -> g -> pat)
+// =============================================================================
+
+fn test_chained_view_pattern() {
+    let raw = get_input();
+    match raw {
+        normalize -> classify -> Category.A(data) => handle_a(data),
+        normalize -> classify -> Category.B(data) => handle_b(data),
+        _ => handle_unknown(),
+    };
+}
+
+// =============================================================================
+// VIEW PATTERN IN LET BINDING
+// =============================================================================
+
+fn test_view_pattern_in_let() {
+    let parity -> Even(half) = 42;
+    assert_eq(half, 21);
+}
+
+// =============================================================================
+// VIEW PATTERN WITH WILDCARD
+// =============================================================================
+
+fn test_view_pattern_with_wildcard() {
+    let val = 100;
+    match val {
+        classify -> _ => print("classified"),
+    };
+}
+
+// =============================================================================
+// VIEW PATTERN WITH GUARD
+// =============================================================================
+
+fn test_view_pattern_with_guard() {
+    let x = 10;
+    match x {
+        abs_value -> n if n > 5 => print("large"),
+        abs_value -> n           => print("small"),
+    };
+}
+
+// =============================================================================
+// VIEW PATTERN WITH LITERAL
+// =============================================================================
+
+fn test_view_pattern_with_literal() {
+    let s = "hello";
+    match s {
+        len -> 0     => print("empty"),
+        len -> 1     => print("single char"),
+        len -> _     => print("multi char"),
+    };
+}
+
+// =============================================================================
+// VIEW PATTERN IN FUNCTION PARAMETER (if supported)
+// =============================================================================
+
+fn test_view_pattern_with_tuple() {
+    let pair = (3, 4);
+    match pair {
+        magnitude -> n if n > 4.0 => print("far"),
+        magnitude -> _             => print("near"),
+    };
+}

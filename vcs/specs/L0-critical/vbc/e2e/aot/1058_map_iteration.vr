@@ -1,0 +1,62 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: map, iteration, keys, values
+// @expect: pass
+
+// Map iteration: insert, get, len, keys, values.
+
+fn main() -> Int {
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+
+    // Test len
+    if m.len() != 3 {
+        print(f"FAIL: len = {m.len()}, expected 3");
+        return 1;
+    }
+
+    // Test get
+    let a_val = m.get("a");
+    if a_val != 1 {
+        print(f"FAIL: get(a) = {a_val}, expected 1");
+        return 1;
+    }
+
+    let b_val = m.get("b");
+    if b_val != 2 {
+        print(f"FAIL: get(b) = {b_val}, expected 2");
+        return 1;
+    }
+
+    // Test contains_key
+    if !m.contains_key("c") {
+        print("FAIL: contains_key(c) = false");
+        return 1;
+    }
+
+    if m.contains_key("z") {
+        print("FAIL: contains_key(z) = true");
+        return 1;
+    }
+
+    // Test remove
+    let removed = m.remove("b");
+    if m.len() != 2 {
+        print(f"FAIL: len after remove = {m.len()}, expected 2");
+        return 1;
+    }
+
+    // Test overwrite
+    m.insert("a", 42);
+    let a_new = m.get("a");
+    if a_new != 42 {
+        print(f"FAIL: get(a) after overwrite = {a_new}, expected 42");
+        return 1;
+    }
+
+    print("PASS: map operations work correctly");
+    0
+}

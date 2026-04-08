@@ -1,0 +1,547 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, extended, search, sort, conversion
+// @description: Tests for extended Deque APIs: binary_search_by, is_sorted_by,
+//               find/position, any/all, min/max, to_list/from_list
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// Helper comparators
+// =============================================================================
+
+fn cmp_asc(a: &Int, b: &Int) -> Ordering {
+    if *a < *b { Ordering.Less }
+    else if *a > *b { Ordering.Greater }
+    else { Ordering.Equal }
+}
+
+fn cmp_desc(a: &Int, b: &Int) -> Ordering {
+    if *b < *a { Ordering.Less }
+    else if *b > *a { Ordering.Greater }
+    else { Ordering.Equal }
+}
+
+// =============================================================================
+// Section 1: binary_search_by / binary_search_by_key
+// =============================================================================
+
+@test
+fn test_binary_search_by_found() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(5);
+    d.push_back(7);
+    d.push_back(9);
+    let result = d.binary_search_by(|x| cmp_asc(x, &5));
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 2);
+}
+
+@test
+fn test_binary_search_by_not_found() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(5);
+    d.push_back(7);
+    let result = d.binary_search_by(|x| cmp_asc(x, &4));
+    assert(result.is_err());
+    assert_eq(result.unwrap_err(), 2); // insertion point
+}
+
+@test
+fn test_binary_search_by_empty() {
+    let d: Deque<Int> = Deque.new();
+    let result = d.binary_search_by(|x| cmp_asc(x, &1));
+    assert(result.is_err());
+    assert_eq(result.unwrap_err(), 0);
+}
+
+@test
+fn test_binary_search_by_key_found() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    d.push_back(40);
+    fn div10(x: &Int) -> Int { *x / 10 }
+    let result = d.binary_search_by_key(&3, div10);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 2);
+}
+
+@test
+fn test_binary_search_by_key_not_found() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(40);
+    fn div10(x: &Int) -> Int { *x / 10 }
+    let result = d.binary_search_by_key(&3, div10);
+    assert(result.is_err());
+    assert_eq(result.unwrap_err(), 2);
+}
+
+// =============================================================================
+// Section 2: is_sorted_by / is_sorted_by_key
+// =============================================================================
+
+@test
+fn test_is_sorted_by_ascending() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    assert(d.is_sorted_by(cmp_asc));
+}
+
+@test
+fn test_is_sorted_by_descending() {
+    let mut d = Deque.new();
+    d.push_back(3);
+    d.push_back(2);
+    d.push_back(1);
+    assert(d.is_sorted_by(cmp_desc));
+}
+
+@test
+fn test_is_sorted_by_not_sorted() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(2);
+    assert(!d.is_sorted_by(cmp_asc));
+}
+
+@test
+fn test_is_sorted_by_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert(d.is_sorted_by(cmp_asc));
+}
+
+@test
+fn test_is_sorted_by_key_basic() {
+    let mut d = Deque.new();
+    d.push_back(-1);
+    d.push_back(2);
+    d.push_back(-3);
+    fn abs_val(x: &Int) -> Int {
+        if *x < 0 { 0 - *x } else { *x }
+    }
+    assert(d.is_sorted_by_key(abs_val));
+}
+
+@test
+fn test_is_sorted_by_key_not_sorted() {
+    let mut d = Deque.new();
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(2);
+    fn identity(x: &Int) -> Int { *x }
+    assert(!d.is_sorted_by_key(identity));
+}
+
+// =============================================================================
+// Section 3: find / find_position / any / all
+// =============================================================================
+
+@test
+fn test_find_basic() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    let result = d.find(|x| *x > 15);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 20);
+}
+
+@test
+fn test_find_not_found() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let result = d.find(|x| *x > 100);
+    assert(result.is_none());
+}
+
+@test
+fn test_find_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert(d.find(|x| *x == 1).is_none());
+}
+
+@test
+fn test_find_position_basic() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    let result = d.find_position(|x| *x == 20);
+    assert_eq(result.unwrap(), 1);
+}
+
+@test
+fn test_find_position_not_found() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    assert(d.find_position(|x| *x == 99).is_none());
+}
+
+@test
+fn test_any_true() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    assert(d.any(|x| *x == 2));
+}
+
+@test
+fn test_any_false() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    assert(!d.any(|x| *x == 99));
+}
+
+@test
+fn test_any_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert(!d.any(|x| *x == 1));
+}
+
+@test
+fn test_all_true() {
+    let mut d = Deque.new();
+    d.push_back(2);
+    d.push_back(4);
+    d.push_back(6);
+    assert(d.all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_all_false() {
+    let mut d = Deque.new();
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    assert(!d.all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_all_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert(d.all(|x| *x > 0)); // vacuously true
+}
+
+// =============================================================================
+// Section 4: min / max
+// =============================================================================
+
+@test
+fn test_min_element_basic() {
+    let mut d = Deque.new();
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(4);
+    d.push_back(1);
+    d.push_back(5);
+    let m = d.min_element();
+    assert(m.is_some());
+    assert_eq(*m.unwrap(), 1);
+}
+
+@test
+fn test_min_element_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert(d.min_element().is_none());
+}
+
+@test
+fn test_min_element_single() {
+    let mut d = Deque.new();
+    d.push_back(42);
+    assert_eq(*d.min_element().unwrap(), 42);
+}
+
+@test
+fn test_max_element_basic() {
+    let mut d = Deque.new();
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(4);
+    d.push_back(1);
+    d.push_back(5);
+    let m = d.max_element();
+    assert(m.is_some());
+    assert_eq(*m.unwrap(), 5);
+}
+
+@test
+fn test_max_element_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert(d.max_element().is_none());
+}
+
+@test
+fn test_max_element_single() {
+    let mut d = Deque.new();
+    d.push_back(42);
+    assert_eq(*d.max_element().unwrap(), 42);
+}
+
+@test
+fn test_min_element_negative() {
+    let mut d = Deque.new();
+    d.push_back(-5);
+    d.push_back(-1);
+    d.push_back(-10);
+    assert_eq(*d.min_element().unwrap(), -10);
+}
+
+@test
+fn test_max_element_negative() {
+    let mut d = Deque.new();
+    d.push_back(-5);
+    d.push_back(-1);
+    d.push_back(-10);
+    assert_eq(*d.max_element().unwrap(), -1);
+}
+
+// =============================================================================
+// Section 5: to_list / from_list
+// =============================================================================
+
+@test
+fn test_to_list_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let list = d.to_list();
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_to_list_empty() {
+    let d: Deque<Int> = Deque.new();
+    let list = d.to_list();
+    assert_eq(list.len(), 0);
+}
+
+@test
+fn test_to_list_after_push_front() {
+    let mut d = Deque.new();
+    d.push_front(3);
+    d.push_front(2);
+    d.push_front(1);
+    let list = d.to_list();
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_from_list_basic() {
+    let list = [1, 2, 3, 4, 5];
+    let d = Deque.from_list(&list);
+    assert_eq(d.len(), 5);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(4).unwrap(), 5);
+}
+
+@test
+fn test_from_list_empty() {
+    let list: List<Int> = [];
+    let d = Deque.from_list(&list);
+    assert_eq(d.len(), 0);
+}
+
+// =============================================================================
+// Section 6: sort_unstable delegates to quicksort
+// =============================================================================
+
+@test
+fn test_sort_unstable_delegates() {
+    let mut d = Deque.new();
+    d.push_back(5);
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(4);
+    d.push_back(2);
+    d.sort_unstable();
+    assert(d.is_sorted());
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(4).unwrap(), 5);
+}
+
+@test
+fn test_sort_unstable_by_descending() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.sort_unstable_by(cmp_desc);
+    assert_eq(*d.get(0).unwrap(), 3);
+    assert_eq(*d.get(2).unwrap(), 1);
+}
+
+// =============================================================================
+// Section 7: Integration
+// =============================================================================
+
+@test
+fn test_sort_then_binary_search() {
+    let mut d = Deque.new();
+    d.push_front(5);
+    d.push_back(3);
+    d.push_front(1);
+    d.push_back(4);
+    d.push_front(2);
+    d.sort();
+    assert(d.is_sorted());
+    let result = d.binary_search(&3);
+    assert(result.is_ok());
+}
+
+@test
+fn test_find_after_push_front_back() {
+    let mut d = Deque.new();
+    d.push_front(10);
+    d.push_back(20);
+    d.push_front(5);
+    d.push_back(30);
+    // Logical order: [5, 10, 20, 30]
+    assert_eq(d.find_position(|x| *x == 20).unwrap(), 2);
+    assert(d.any(|x| *x == 5));
+    assert(d.all(|x| *x > 0));
+}
+
+@test
+fn test_to_list_roundtrip() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let list = d.to_list();
+    let d2 = Deque.from_list(&list);
+    assert_eq(d2.len(), 3);
+    assert_eq(*d2.get(0).unwrap(), 1);
+    assert_eq(*d2.get(2).unwrap(), 3);
+}
+
+// =============================================================================
+// Deque.shrink_to() Tests
+// =============================================================================
+
+@test
+fn test_deque_shrink_to_basic() {
+    let mut d = Deque.with_capacity(128);
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    // Capacity is >= 128 (power of two)
+    assert(d.capacity() >= 128);
+
+    d.shrink_to(10);
+    // Capacity should be >= 10 but much less than 128
+    assert(d.capacity() >= 10);
+    assert(d.capacity() < 128);
+    // Data preserved
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+}
+
+@test
+fn test_deque_shrink_to_below_length() {
+    let mut d = Deque.with_capacity(64);
+    for i in 0..10 {
+        d.push_back(i);
+    }
+    // shrink_to with min < len should ensure capacity >= len
+    d.shrink_to(3);
+    assert(d.capacity() >= 10);  // Must still fit 10 elements
+    assert_eq(d.len(), 10);
+}
+
+@test
+fn test_deque_shrink_to_zero_empty() {
+    let mut d: Deque<Int> = Deque.with_capacity(32);
+    d.shrink_to(0);
+    // Empty deque shrunk to 0 — capacity may be 0
+    assert_eq(d.len(), 0);
+}
+
+@test
+fn test_deque_shrink_to_noop_when_smaller() {
+    let mut d = Deque.with_capacity(8);
+    d.push_back(1);
+    d.push_back(2);
+    let cap_before = d.capacity();
+
+    // Requesting larger than current capacity is a no-op
+    d.shrink_to(1000);
+    assert_eq(d.capacity(), cap_before);
+}
+
+@test
+fn test_deque_shrink_to_preserves_data_with_wrap() {
+    let mut d = Deque.with_capacity(64);
+    // Create a wrapped ring buffer state
+    for i in 0..10 {
+        d.push_back(i);
+    }
+    for _ in 0..5 {
+        d.pop_front();
+    }
+    // Now have elements [5, 6, 7, 8, 9] with head != 0
+    assert_eq(d.len(), 5);
+
+    d.shrink_to(8);
+    assert(d.capacity() >= 8);
+    assert(d.capacity() < 64);
+    assert_eq(d.len(), 5);
+    assert_eq(*d.get(0).unwrap(), 5);
+    assert_eq(*d.get(4).unwrap(), 9);
+}
+
+@test
+fn test_deque_shrink_to_then_push() {
+    let mut d = Deque.with_capacity(64);
+    d.push_back(1);
+    d.push_back(2);
+    d.shrink_to(4);
+
+    // Should still be able to push more elements
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    assert_eq(d.len(), 5);
+    assert_eq(*d.get(4).unwrap(), 5);
+}
+
+@test
+fn test_deque_shrink_to_vs_shrink_to_fit() {
+    // shrink_to(0) and shrink_to_fit() should behave similarly for empty deques
+    let mut d1: Deque<Int> = Deque.with_capacity(64);
+    let mut d2: Deque<Int> = Deque.with_capacity(64);
+    d1.shrink_to_fit();
+    d2.shrink_to(0);
+    assert_eq(d1.len(), 0);
+    assert_eq(d2.len(), 0);
+}

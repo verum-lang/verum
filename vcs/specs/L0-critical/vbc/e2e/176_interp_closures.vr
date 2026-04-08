@@ -1,0 +1,241 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, closures
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Interpreter e2e test: closures, captures, higher-order functions, closure factories
+
+// =============================================================================
+// Helper: higher-order function that applies a function to a value
+// =============================================================================
+
+fn apply_int(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn apply_both(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+// =============================================================================
+// Closure factories
+// =============================================================================
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * n }
+}
+
+fn make_constant(val: Int) -> fn() -> Int {
+    || val
+}
+
+// =============================================================================
+// Two-argument higher-order function
+// =============================================================================
+
+fn combine(f: fn(Int, Int) -> Int, a: Int, b: Int) -> Int {
+    f(a, b)
+}
+
+// =============================================================================
+// Fold-like operation using a function parameter
+// =============================================================================
+
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+// =============================================================================
+// Test functions
+// =============================================================================
+
+fn test_basic_closure() {
+    let double = |x: Int| -> Int { x * 2 };
+    assert_eq(double(0), 0);
+    assert_eq(double(5), 10);
+    assert_eq(double(-3), -6);
+}
+
+fn test_closure_with_capture() {
+    let offset = 100;
+    let add_offset = |x: Int| -> Int { x + offset };
+    assert_eq(add_offset(0), 100);
+    assert_eq(add_offset(42), 142);
+    assert_eq(add_offset(-100), 0);
+}
+
+fn test_closure_captures_multiple() {
+    let a = 2;
+    let b = 3;
+    let c = 5;
+    let expr = |x: Int| -> Int { a * x * x + b * x + c };
+    // f(0) = 0 + 0 + 5 = 5
+    assert_eq(expr(0), 5);
+    // f(1) = 2 + 3 + 5 = 10
+    assert_eq(expr(1), 10);
+    // f(3) = 18 + 9 + 5 = 32
+    assert_eq(expr(3), 32);
+}
+
+fn test_multi_arg_closure() {
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let mul = |a: Int, b: Int| -> Int { a * b };
+    let sub = |a: Int, b: Int| -> Int { a - b };
+    assert_eq(add(3, 4), 7);
+    assert_eq(mul(3, 4), 12);
+    assert_eq(sub(10, 3), 7);
+}
+
+fn test_higher_order_apply() {
+    let inc = |x: Int| -> Int { x + 1 };
+    let triple = |x: Int| -> Int { x * 3 };
+    assert_eq(apply_int(inc, 10), 11);
+    assert_eq(apply_int(triple, 10), 30);
+}
+
+fn test_apply_twice() {
+    let double = |x: Int| -> Int { x * 2 };
+    // apply_twice(double, 3) = double(double(3)) = double(6) = 12
+    assert_eq(apply_twice(double, 3), 12);
+    // apply_twice(double, 1) = double(double(1)) = double(2) = 4
+    assert_eq(apply_twice(double, 1), 4);
+}
+
+fn test_compose_closures() {
+    let inc = |x: Int| -> Int { x + 1 };
+    let double = |x: Int| -> Int { x * 2 };
+    let inc_then_double = compose(double, inc);
+    // inc_then_double(3) = double(inc(3)) = double(4) = 8
+    assert_eq(inc_then_double(3), 8);
+    let double_then_inc = compose(inc, double);
+    // double_then_inc(3) = inc(double(3)) = inc(6) = 7
+    assert_eq(double_then_inc(3), 7);
+}
+
+fn test_closure_factory_adder() {
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    let add0 = make_adder(0);
+    assert_eq(add5(0), 5);
+    assert_eq(add5(100), 105);
+    assert_eq(add10(0), 10);
+    assert_eq(add10(90), 100);
+    assert_eq(add0(42), 42);
+}
+
+fn test_closure_factory_multiplier() {
+    let times2 = make_multiplier(2);
+    let times7 = make_multiplier(7);
+    assert_eq(times2(5), 10);
+    assert_eq(times2(0), 0);
+    assert_eq(times7(3), 21);
+    assert_eq(times7(0), 0);
+}
+
+fn test_constant_closure() {
+    let get42 = make_constant(42);
+    let get0 = make_constant(0);
+    assert_eq(get42(), 42);
+    assert_eq(get42(), 42);
+    assert_eq(get0(), 0);
+}
+
+fn test_combine_two_args() {
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let mul = |a: Int, b: Int| -> Int { a * b };
+    assert_eq(combine(add, 3, 4), 7);
+    assert_eq(combine(mul, 3, 4), 12);
+    assert_eq(combine(add, 0, 0), 0);
+}
+
+fn test_fold_range_sum() {
+    // sum of 0..5 = 0+1+2+3+4 = 10
+    let sum = fold_range(0, 5, 0, |acc: Int, x: Int| -> Int { acc + x });
+    assert_eq(sum, 10);
+}
+
+fn test_fold_range_product() {
+    // product of 1..6 = 1*2*3*4*5 = 120 (factorial 5)
+    let product = fold_range(1, 6, 1, |acc: Int, x: Int| -> Int { acc * x });
+    assert_eq(product, 120);
+}
+
+fn test_closure_in_conditional() {
+    let x = 10;
+    let f = if x > 5 {
+        |n: Int| -> Int { n * 2 }
+    } else {
+        |n: Int| -> Int { n * 3 }
+    };
+    assert_eq(f(4), 8);
+
+    let y = 2;
+    let g = if y > 5 {
+        |n: Int| -> Int { n * 2 }
+    } else {
+        |n: Int| -> Int { n * 3 }
+    };
+    assert_eq(g(4), 12);
+}
+
+fn test_closure_in_loop() {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        let adder = |x: Int| -> Int { x + i };
+        sum = sum + adder(0);
+        i = i + 1;
+    }
+    // 0 + 1 + 2 + 3 + 4 = 10
+    assert_eq(sum, 10);
+}
+
+fn test_apply_both_composed() {
+    let inc = |x: Int| -> Int { x + 1 };
+    let double = |x: Int| -> Int { x * 2 };
+    // apply_both(inc, double, 3) = inc(double(3)) = inc(6) = 7
+    assert_eq(apply_both(inc, double, 3), 7);
+    // apply_both(double, inc, 3) = double(inc(3)) = double(4) = 8
+    assert_eq(apply_both(double, inc, 3), 8);
+}
+
+fn main() -> Int {
+    test_basic_closure();
+    test_closure_with_capture();
+    test_closure_captures_multiple();
+    test_multi_arg_closure();
+    test_higher_order_apply();
+    test_apply_twice();
+    test_compose_closures();
+    test_closure_factory_adder();
+    test_closure_factory_multiplier();
+    test_constant_closure();
+    test_combine_two_args();
+    test_fold_range_sum();
+    test_fold_range_product();
+    test_closure_in_conditional();
+    test_closure_in_loop();
+    test_apply_both_composed();
+    print("[OK] 176_interp_closures");
+    0
+}

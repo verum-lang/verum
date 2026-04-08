@@ -1,0 +1,90 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, smt
+// @timeout: 25000
+
+/// SMT tactic tests
+
+/// Simple arithmetic
+theorem smt_add(x: Int, y: Int) requires x > 0 requires y > 0 ensures x + y > x { proof by smt }
+theorem smt_sub(x: Int, y: Int) requires x > y ensures x - y > 0 { proof by smt }
+
+/// Linear arithmetic
+theorem smt_linear(a: Int, b: Int, c: Int)
+    requires a + b > c
+    requires b + c > a
+    requires c + a > b
+    ensures a > 0 || b > 0 || c > 0
+{ proof by smt }
+
+/// Nonlinear arithmetic
+theorem smt_nonlinear(x: Int) requires x > 2 ensures x * x > 2 * x {
+    proof by smt using nonlinear_arith
+}
+
+/// Array theory
+theorem smt_array<T>(arr: Array<T>, i: Index, v: T)
+    ensures arr.update(i, v).at(i) == v
+{ proof by smt using array_theory }
+
+/// Quantifier handling
+theorem smt_quantifier<T: Ord>(xs: List<T>)
+    requires is_sorted(xs)
+    ensures forall i: Index. forall j: Index. i < j && i < len(xs) && j < len(xs) implies xs.at(i) <= xs.at(j)
+{ proof by smt using quantifiers }
+
+fn is_sorted<T: Ord>(xs: List<T>) -> Bool;
+
+/// Combined theories
+theorem smt_combined(arr: Array<Int>, i: Index, j: Index)
+    requires i < len(arr)
+    requires j < len(arr)
+    requires arr.at(i) > 0
+    requires arr.at(j) > 0
+    ensures arr.at(i) + arr.at(j) > 0
+{ proof by smt using [array_theory, linear_arith] }
+
+/// Timeout control
+theorem smt_timeout(x: Int, y: Int, z: Int)
+    requires x * x + y * y == z * z
+    requires x > 0 && y > 0 && z > 0
+    ensures z >= x && z >= y
+{ proof by smt }
+
+/// Incremental solving
+theorem smt_incremental(a: Int, b: Int, c: Int, d: Int)
+    requires a < b
+    requires b < c
+    requires c < d
+    ensures a < d
+{ proof by smt }
+
+/// Bit-vector reasoning
+theorem smt_bitvector(x: u32, y: u32)
+    requires x & y == 0
+    ensures x | y == x + y
+{ proof by smt using bv }
+
+/// Model-based quantifier instantiation
+theorem smt_mbqi<T: Eq>(m: Map<Int, T>, k: Int, v: T)
+    ensures m.insert(k, v).get(k) == Some(v)
+{ proof by smt using mbqi }
+
+/// Unsat core
+theorem smt_unsat_core(x: Int, y: Int)
+    requires x > 0
+    requires y < 0
+    requires x + y == 0
+    ensures x == -y
+{ proof by smt }
+
+/// Proof with logs
+theorem smt_with_log(n: Nat) requires n > 0 ensures n * n > 0 { proof by smt }
+
+/// Theory-specific lemmas
+theorem smt_with_lemmas<T>(xs: List<T>, ys: List<T>)
+    ensures len(xs ++ ys) == len(xs) + len(ys)
+{ proof by smt }
+
+fn main() {}

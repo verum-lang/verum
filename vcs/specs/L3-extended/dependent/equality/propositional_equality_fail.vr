@@ -1,0 +1,39 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, equality, propositional, error
+// @expected-error: E400 "Type mismatch"
+
+/// Propositional equality - failure cases
+
+/// Equality witness type
+type PropEq<T> is | PropRefl;
+
+/// ERROR: Return wrong type from equality function
+fn refl_wrong() -> PropEq<Int> {
+    42  // ERROR: Int != PropEq<Int>
+}
+
+/// ERROR: Use equality proof as wrong type
+fn use_proof_wrong(p: PropEq<Int>) -> Int {
+    p  // ERROR: PropEq<Int> != Int
+}
+
+/// ERROR: Construct wrong variant
+fn construct_wrong() -> PropEq<Text> {
+    123  // ERROR: Int != PropEq<Text>
+}
+
+/// Decidable equality
+type DecEq<T> is | Yes | No;
+
+/// ERROR: Return wrong decidable type
+fn decide_wrong(a: Int, b: Int) -> DecEq<Text> {
+    if a == b { 42 } else { "no" }  // ERROR: wrong types
+}
+
+fn main() {
+    let _ = refl_wrong();
+    let _ = use_proof_wrong(PropRefl);
+    let _ = construct_wrong();
+}

@@ -1,0 +1,176 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, subtyping, smt
+// @timeout: 5000
+
+/// SMT-based subsumption: subtyping that requires theorem prover.
+/// These cases cannot be determined syntactically - requires Z3/SMT solver.
+
+// ============================================================================
+// Arithmetic reasoning
+// ============================================================================
+
+type Positive is Int{> 0};
+type DoubledPositive is Int{> 0 && it % 2 == 0};  // Even positive
+
+/// SMT must prove: x > 0 => x + x > 0
+fn double_positive(x: Positive) -> Positive {
+    x + x  // Requires SMT: sum of positives is positive
+}
+
+/// SMT must prove: x > 0 && y > 0 => x * y > 0
+fn multiply_positives(x: Positive, y: Positive) -> Positive {
+    x * y  // Requires SMT: product of positives is positive
+}
+
+// ============================================================================
+// Non-linear arithmetic
+// ============================================================================
+
+type NonNegative is Int{>= 0};
+
+/// SMT must prove: x * x >= 0 for all x
+fn square(x: Int) -> NonNegative {
+    x * x  // Requires SMT: squares are non-negative
+}
+
+/// SMT must prove: |x| >= 0
+fn absolute(x: Int) -> NonNegative {
+    if x >= 0 { x } else { -x }
+}
+
+// ============================================================================
+// Modular arithmetic reasoning
+// ============================================================================
+
+type Even is Int{it % 2 == 0};
+type Odd is Int{it % 2 == 1 || it % 2 == -1};
+
+/// SMT must prove: even + even = even
+fn add_evens(x: Even, y: Even) -> Even {
+    x + y
+}
+
+/// SMT must prove: odd + odd = even
+fn add_odds(x: Odd, y: Odd) -> Even {
+    x + y
+}
+
+/// SMT must prove: even * any = even
+fn multiply_by_even(x: Even, y: Int) -> Even {
+    x * y
+}
+
+// ============================================================================
+// Interval arithmetic
+// ============================================================================
+
+type InRange0to100 is Int{>= 0 && <= 100};
+type InRange0to50 is Int{>= 0 && <= 50};
+
+/// SMT must prove: (0..50) + (0..50) ⊆ (0..100)
+fn add_ranges(x: InRange0to50, y: InRange0to50) -> InRange0to100 {
+    x + y
+}
+
+/// SMT must prove: average of two values in range stays in range
+fn average(x: InRange0to100, y: InRange0to100) -> InRange0to100 {
+    (x + y) / 2
+}
+
+// ============================================================================
+// Logical implication chains
+// ============================================================================
+
+type DivisibleBy6 is Int{it % 6 == 0};
+type DivisibleBy2 is Int{it % 2 == 0};
+type DivisibleBy3 is Int{it % 3 == 0};
+
+/// SMT must prove: x % 6 == 0 => x % 2 == 0
+fn div6_implies_div2(x: DivisibleBy6) -> DivisibleBy2 {
+    x
+}
+
+/// SMT must prove: x % 6 == 0 => x % 3 == 0
+fn div6_implies_div3(x: DivisibleBy6) -> DivisibleBy3 {
+    x
+}
+
+// ============================================================================
+// Conditional refinement propagation
+// ============================================================================
+
+type NonZero is Int{!= 0};
+
+/// SMT reasons through conditional branches
+fn conditional_refinement(x: Int, flag: Bool) -> NonZero {
+    if flag {
+        if x != 0 { x } else { 1 }
+    } else {
+        if x > 0 { x } else { -1 }
+    }
+}
+
+// ============================================================================
+// Array length reasoning
+// ============================================================================
+
+type NonEmptyList<T> is List<T>{len(it) > 0};
+type ValidIndex is Int{>= 0};
+
+/// SMT must prove: len(a) > 0 => len(a) - 1 >= 0
+fn last_index<T>(a: NonEmptyList<T>) -> ValidIndex {
+    a.len() - 1
+}
+
+// ============================================================================
+// Quantified subsumption
+// ============================================================================
+
+type SortedList is List<Int> where forall i in 0..(len(it) - 1) => it[i] <= it[i + 1];
+
+// ============================================================================
+// Complex constraint propagation
+// ============================================================================
+
+type Percentage is Float{>= 0.0 && <= 100.0};
+type UnitInterval is Float{>= 0.0 && <= 1.0};
+
+/// SMT must prove: 0 <= x <= 100 => 0 <= x/100 <= 1
+fn percentage_to_unit(p: Percentage) -> UnitInterval {
+    p / 100.0
+}
+
+/// SMT must prove: 0 <= x <= 1 => 0 <= x*100 <= 100
+fn unit_to_percentage(u: UnitInterval) -> Percentage {
+    u * 100.0
+}
+
+fn main() {
+    // Arithmetic reasoning
+    let doubled = double_positive(5);
+    let product = multiply_positives(3, 4);
+    let squared = square(-5);
+    let abs_val = absolute(-10);
+
+    // Modular arithmetic
+    let even_sum = add_evens(2, 4);
+    let odd_sum = add_odds(1, 3);
+    let even_prod = multiply_by_even(4, 7);
+
+    // Interval arithmetic
+    let range_sum = add_ranges(25, 30);
+    let avg = average(40, 60);
+
+    // Divisibility
+    let div2 = div6_implies_div2(12);
+    let div3 = div6_implies_div3(18);
+
+    // Conditional
+    let non_zero = conditional_refinement(5, true);
+
+    // Conversions
+    let unit = percentage_to_unit(50.0);
+    let pct = unit_to_percentage(0.5);
+}

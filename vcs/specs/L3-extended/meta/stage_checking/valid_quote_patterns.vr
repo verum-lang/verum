@@ -1,0 +1,270 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, staged, stage-checking, quote, valid
+
+/// Valid Quote Patterns for Cross-Stage Code Generation
+///
+/// Demonstrates the correct way to interact across stages using quote.
+/// Stage N can generate Stage N-1 code via quote(N-1).
+/// Spec: 17-meta-system.md Section 2.4 - Stage Coherence Rule
+
+// ============================================================
+// BASIC QUOTE: STAGE 1 -> STAGE 0
+// ============================================================
+
+/// Meta function (stage 1) generating runtime code (stage 0)
+meta fn gen_simple_fn() -> @Expr {
+    // quote (or quote(0)) generates stage 0 code
+    quote {
+        fn simple_runtime(x: Int) -> Int {
+            x + 1
+        }
+    }
+}
+
+/// Generate a runtime function with captured compile-time value
+meta fn gen_with_const(n: Int) -> @Expr {
+    quote {
+        fn add_n(x: Int) -> Int {
+            x + $(n)
+        }
+    }
+}
+
+/// Generate multiple related functions
+meta fn gen_math_ops() -> @Expr {
+    quote {
+        fn my_add(a: Int, b: Int) -> Int { a + b }
+        fn my_sub(a: Int, b: Int) -> Int { a - b }
+        fn my_mul(a: Int, b: Int) -> Int { a * b }
+    }
+}
+
+// ============================================================
+// QUOTE WITH TYPE GENERATION
+// ============================================================
+
+/// Generate a type and associated functions
+meta fn gen_wrapper_type(type_name: @Ident) -> @Expr {
+    quote {
+        type $(type_name) is { value: Int };
+
+        fn new_$(type_name)(v: Int) -> $(type_name) {
+            $(type_name) { value: v }
+        }
+
+        fn get_$(type_name)(w: &$(type_name)) -> Int {
+            w.value
+        }
+    }
+}
+
+/// Generate a generic wrapper
+meta fn gen_generic_wrapper<T>() -> @Expr {
+    quote {
+        type Wrapper<T> is { inner: T };
+
+        fn wrap<T>(value: T) -> Wrapper<T> {
+            Wrapper { inner: value }
+        }
+
+        fn unwrap<T>(w: Wrapper<T>) -> T {
+            w.inner
+        }
+    }
+}
+
+// ============================================================
+// MULTI-LEVEL QUOTE: STAGE 2 -> STAGE 1
+// ============================================================
+
+/// Stage 2 function generating stage 1 (meta) code
+meta(2) fn gen_meta_fn() -> @Expr {
+    // quote(1) generates stage 1 code
+    quote(1) {
+        meta fn generated_meta(x: Int) -> Int {
+            x * 2
+        }
+    }
+}
+
+/// Stage 2 generating stage 1 code that generates stage 0 code
+meta(2) fn gen_code_generator() -> @Expr {
+    quote(1) {
+        meta fn inner_generator(multiplier: Int) -> @Expr {
+            quote {
+                fn multiply(x: Int) -> Int {
+                    x * $(multiplier)
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// STAGE 2 -> STAGE 1 -> STAGE 0
+// ============================================================
+
+/// 3-level staged pipeline (stage 2 generates stage 1 generates stage 0)
+meta(2) fn gen_pipeline() -> @Expr {
+    quote(1) {
+        meta fn stage_1_gen(factor1: Int) -> @Expr {
+            quote {
+                fn runtime_compute(x: Int) -> Int {
+                    x * $(factor1)
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// QUOTE WITH CONDITIONALS
+// ============================================================
+
+/// Generate different code based on compile-time condition
+meta fn gen_conditional(optimize: Bool) -> @Expr {
+    if optimize {
+        quote {
+            fn compute(x: Int) -> Int {
+                // Optimized path: inline multiplication
+                x << 1  // x * 2
+            }
+        }
+    } else {
+        quote {
+            fn compute(x: Int) -> Int {
+                // Standard path
+                x * 2
+            }
+        }
+    }
+}
+
+/// Generate code with compile-time loop unrolling
+meta fn gen_unrolled_sum(count: Int) -> @Expr {
+    if count == 1 {
+        quote { fn sum_arr(arr: &[Int; 1]) -> Int { arr[0] } }
+    } else if count == 2 {
+        quote { fn sum_arr(arr: &[Int; 2]) -> Int { arr[0] + arr[1] } }
+    } else if count == 3 {
+        quote { fn sum_arr(arr: &[Int; 3]) -> Int { arr[0] + arr[1] + arr[2] } }
+    } else {
+        quote { fn sum_arr(arr: &[Int; 4]) -> Int { arr[0] + arr[1] + arr[2] + arr[3] } }
+    }
+}
+
+// ============================================================
+// QUOTE WITH LOOPS (generating code in loop)
+// ============================================================
+
+/// Generate multiple functions via loop
+meta fn gen_multiple_fns() -> List<@Expr> {
+    let mut result: List<@Expr> = List.new();
+
+    for i in 1..=5 {
+        let expr = quote {
+            fn fn_$(i)(x: Int) -> Int {
+                x + $(i)
+            }
+        };
+        result.push(expr);
+    }
+
+    result
+}
+
+// ============================================================
+// QUOTE WITH PATTERN MATCHING
+// ============================================================
+
+type Operation is Add | Sub | Mul | Div;
+
+/// Generate function based on operation type
+meta fn gen_op_fn(op: Operation, fn_name: @Ident) -> @Expr {
+    match op {
+        Add => quote {
+            fn $(fn_name)(a: Int, b: Int) -> Int { a + b }
+        },
+        Sub => quote {
+            fn $(fn_name)(a: Int, b: Int) -> Int { a - b }
+        },
+        Mul => quote {
+            fn $(fn_name)(a: Int, b: Int) -> Int { a * b }
+        },
+        Div => quote {
+            fn $(fn_name)(a: Int, b: Int) -> Int { a / b }
+        },
+    }
+}
+
+// ============================================================
+// NESTED SPLICES
+// ============================================================
+
+/// Stage 2 with nested splices at different levels
+meta(2) fn gen_nested_splices(outer: Int) -> @Expr {
+    quote(1) {
+        meta fn with_inner(inner: Int) -> @Expr {
+            quote {
+                fn combined(x: Int) -> Int {
+                    // $(outer) is from stage 2, spliced into stage 1
+                    // $(inner) will be from stage 1, spliced into stage 0
+                    x + $(outer) + $(inner)
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// QUOTE PRESERVING TYPE INFORMATION
+// ============================================================
+
+/// Generate type-safe wrapper functions
+meta fn gen_typed_accessor<T>(field: @Ident) -> @Expr {
+    quote {
+        fn get_$(field)<T>(obj: &{ $(field): T }) -> &T {
+            &obj.$(field)
+        }
+
+        fn set_$(field)<T>(obj: &mut { $(field): T }, value: T) {
+            obj.$(field) = value;
+        }
+    }
+}
+
+// ============================================================
+// QUOTE WITH ATTRIBUTES
+// ============================================================
+
+/// Generate function with attributes
+meta fn gen_with_attrs(inline: Bool) -> @Expr {
+    if inline {
+        quote {
+            @inline
+            fn fast_add(a: Int, b: Int) -> Int { a + b }
+        }
+    } else {
+        quote {
+            @noinline
+            fn normal_add(a: Int, b: Int) -> Int { a + b }
+        }
+    }
+}
+
+fn main() {
+    // Test that generated code works
+    // (In practice, these would be spliced into the module)
+
+    // Verify the meta functions compile and can be called
+    let simple = gen_simple_fn();
+    let with_const = gen_with_const(42);
+    let conditional = gen_conditional(true);
+
+    // Stage 2 generators
+    let meta_gen = gen_meta_fn();
+    let code_gen = gen_code_generator();
+    let pipeline = gen_pipeline();
+}

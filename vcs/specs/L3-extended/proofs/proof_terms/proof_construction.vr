@@ -1,0 +1,90 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, proof-terms, construction
+// @timeout: 15000
+
+/// Proof construction: building proof terms
+
+/// Reflexivity
+theorem refl_proof(x: Int): x == x { proof by trivial }
+
+/// Symmetry
+theorem sym_proof(x: Int, y: Int) requires x == y ensures y == x { proof by auto }
+
+/// Transitivity
+theorem trans_proof(x: Int, y: Int, z: Int) requires x == y requires y == z ensures x == z { proof by auto }
+
+/// Congruence
+theorem congr_proof(f: fn(Int) -> Int, x: Int, y: Int) requires x == y ensures f(x) == f(y) { proof by auto }
+
+/// Lambda abstraction
+theorem lambda_proof<P: Prop, Q: Prop>(): (P -> P) {
+    proof by auto
+}
+
+/// Application
+theorem app_proof<P: Prop, Q: Prop>()
+    requires P
+    requires P -> Q
+    ensures Q
+{
+    proof by auto
+}
+
+/// Pair construction
+theorem pair_proof<P: Prop, Q: Prop>()
+    requires P
+    requires Q
+    ensures P && Q
+{
+    proof by auto
+}
+
+/// Projection
+theorem fst_proof<P: Prop, Q: Prop>()
+    requires P && Q
+    ensures P
+{
+    proof by auto
+}
+
+theorem snd_proof<P: Prop, Q: Prop>()
+    requires P && Q
+    ensures Q
+{
+    proof by auto
+}
+
+/// Injection
+theorem inl_proof<P: Prop, Q: Prop>()
+    requires P
+    ensures P || Q
+{
+    proof by auto
+}
+
+/// Case analysis
+theorem case_proof<P: Prop, Q: Prop, R: Prop>()
+    requires P || Q
+    requires P -> R
+    requires Q -> R
+    ensures R
+{
+    proof by auto
+}
+
+/// Witness construction
+theorem witness_proof(): exists n: Nat. n > 0 {
+    proof { witness 1; trivial }
+}
+
+/// Inductive construction
+theorem ind_proof(n: Nat): n + 0 == n {
+    proof by induction on n {
+        case 0 => { trivial }
+        case succ(k) => { have ih: k + 0 == k; conclude by auto }
+    }
+}
+
+fn main() {}

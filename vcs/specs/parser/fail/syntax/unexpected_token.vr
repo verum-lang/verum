@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, token, error
+// @description: Test unexpected token detection
+// @expected-error: E018
+
+fn test_unexpected() {
+    let x = 42 42;
+    let y = if if;
+}

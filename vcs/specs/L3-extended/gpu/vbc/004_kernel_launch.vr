@@ -1,0 +1,30 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L3
+// @tags: vbc, gpu, kernel
+// @description: GPU kernel launch type checking (Metal GPU not required for typecheck)
+
+@test
+fn test_kernel_launch_cpu_fallback() {
+    // When no GPU available, kernel launch falls back to CPU execution
+    let a = DynTensor.new([1.0; 10]);
+    let b = DynTensor.new([1.0; 10]);
+    let c = a + b;
+    assert_eq(c.shape(), [10]);
+}
+
+@test
+fn test_kernel_launch_elementwise() {
+    let a = DynTensor.new([2.0; 100]);
+    let b = DynTensor.new([3.0; 100]);
+    let c = a + b;
+    assert_eq(c.shape(), [100]);
+}
+
+@test
+fn test_kernel_dispatch_matmul() {
+    let a = DynTensor.new([1.0; 16]);
+    let b = DynTensor.new([1.0; 16]);
+    let c = a.matmul(b);
+    assert_eq(c.shape(), [4, 4]);
+}

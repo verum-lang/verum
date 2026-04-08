@@ -1,0 +1,294 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: capability, types, comprehensive, attenuation
+// @timeout: 10000
+// @expect: pass
+//
+// Comprehensive Capability Attenuation Tests
+// ==========================================
+// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+//
+// This test file provides comprehensive coverage of the capability attenuation
+// feature, including syntax, subtyping, method filtering, and automatic coercion.
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
+// Database abstraction with capabilities
+type Database is {
+    connection_string: Text,
+    is_connected: Bool,
+};
+
+// User repository with capability-based access control
+type UserRepository is {
+    db: Database,
+    table_name: Text,
+};
+
+// Configuration store
+type ConfigStore is {
+    settings: Map<Text, Text>,
+};
+
+// ============================================================================
+// DATABASE IMPLEMENTATION
+// ============================================================================
+
+implement Database {
+    // Constructor
+    fn new(conn: Text) -> Database {
+        Database {
+            connection_string: conn,
+            is_connected: false,
+        }
+    }
+
+    // Read operations (require Read capability)
+    fn query(&self, sql: Text) -> List<Map<Text, Text>> {
+        List.new()
+    }
+
+    fn get_connection_string(&self) -> Text {
+        self.connection_string.clone()
+    }
+
+    fn is_alive(&self) -> Bool {
+        self.is_connected
+    }
+
+    fn count(&self, table: Text) -> Int {
+        0
+    }
+
+    fn find_one(&self, table: Text, id: Int) -> Maybe<Map<Text, Text>> {
+        Maybe.None
+    }
+
+    fn select_all(&self, table: Text) -> List<Map<Text, Text>> {
+        List.new()
+    }
+
+    // Write operations (require Write capability)
+    fn insert(&mut self, table: Text, data: Map<Text, Text>) -> Int {
+        1
+    }
+
+    fn update(&mut self, table: Text, id: Int, data: Map<Text, Text>) -> Bool {
+        true
+    }
+
+    fn delete(&mut self, table: Text, id: Int) -> Bool {
+        true
+    }
+
+    fn create_table(&mut self, name: Text, schema: Text) -> Bool {
+        true
+    }
+
+    fn drop_table(&mut self, name: Text) -> Bool {
+        true
+    }
+
+    fn truncate(&mut self, table: Text) -> () {}
+
+    // Admin operations (require Admin capability)
+    fn admin_shutdown(&mut self) -> () {}
+
+    fn grant_access(&mut self, user: Text, permission: Text) -> () {}
+
+    fn revoke_access(&mut self, user: Text, permission: Text) -> () {}
+
+    // Transaction operations (require Transaction capability)
+    fn begin(&mut self) -> () {}
+    fn commit(&mut self) -> () {}
+    fn rollback(&mut self) -> () {}
+}
+
+// ============================================================================
+// USER REPOSITORY - CAPABILITY-BASED ACCESS PATTERNS
+// ============================================================================
+
+implement UserRepository {
+    // Read-only view of users
+    fn get_user(db: Database with [Read], id: Int) -> Maybe<Map<Text, Text>> {
+        db.find_one("users".to_text(), id)
+    }
+
+    fn get_all_users(db: Database with [Read]) -> List<Map<Text, Text>> {
+        db.select_all("users".to_text())
+    }
+
+    fn count_users(db: Database with [Read]) -> Int {
+        db.count("users".to_text())
+    }
+
+    // Write operations - require [Read, Write]
+    fn create_user(db: &mut Database with [Read, Write], data: Map<Text, Text>) -> Int {
+        db.insert("users".to_text(), data)
+    }
+
+    fn update_user(db: &mut Database with [Read, Write], id: Int, data: Map<Text, Text>) -> Bool {
+        db.update("users".to_text(), id, data)
+    }
+
+    fn delete_user(db: &mut Database with [Read, Write], id: Int) -> Bool {
+        db.delete("users".to_text(), id)
+    }
+
+    // Admin operations - require [Admin]
+    fn reset_users(db: &mut Database with [Admin]) -> () {
+        db.admin_shutdown();
+    }
+}
+
+// ============================================================================
+// SERVICE LAYER - DEMONSTRATING CAPABILITY ATTENUATION
+// ============================================================================
+
+// Service that only needs read access
+fn analyze_users(db: Database with [Read]) -> Map<Text, Int> {
+    let users = db.select_all("users".to_text());
+    let mut stats = Map.new();
+    stats.insert("total".to_text(), users.len() as Int);
+    stats
+}
+
+// Service that needs read-write access
+fn sync_users(db: &mut Database with [Read, Write]) -> Int {
+    let count = db.count("users".to_text());
+    // ... sync logic ...
+    count
+}
+
+// Service that needs admin access
+fn maintenance(db: &mut Database with [Read, Write, Admin]) -> () {
+    // Admin can do everything
+    db.admin_shutdown();
+}
+
+// ============================================================================
+// TESTS: AUTOMATIC CAPABILITY ATTENUATION
+// ============================================================================
+
+// Test 1: Full database can be used where read-only is expected
+fn test_attenuation_full_to_readonly() -> () {
+    let full_db = Database.new("postgres://localhost/app".to_text());
+
+    // analyze_users expects Database with [Read]
+    // We pass Database (full capabilities)
+    // Automatic attenuation: full -> read-only
+    let stats = analyze_users(full_db);
+    assert(stats.len() >= 0);
+}
+
+// Test 2: Read-write can be attenuated to read-only
+fn test_attenuation_readwrite_to_readonly() -> () {
+    let rw_db: Database with [Read, Write] = Database.new("postgres://localhost/app".to_text());
+
+    // Automatic attenuation: [Read, Write] -> [Read]
+    let stats = analyze_users(rw_db);
+    assert(stats.len() >= 0);
+}
+
+// Test 3: Admin database attenuated for regular operations
+fn test_attenuation_admin_to_readwrite() -> () {
+    let mut admin_db: Database with [Read, Write, Admin] = Database.new("postgres://localhost/app".to_text());
+
+    // Admin can be used for read-write operations
+    let _ = sync_users(&mut admin_db);
+}
+
+// Test 4: Chain of attenuation
+fn test_attenuation_chain() -> () {
+    let admin: Database with [Read, Write, Admin, Transaction] = Database.new("conn".to_text());
+
+    // Admin -> ReadWrite -> Read (chain of attenuation)
+    let rw: Database with [Read, Write] = admin;
+    let readonly: Database with [Read] = rw;
+
+    let stats = analyze_users(readonly);
+    assert(stats.len() >= 0);
+}
+
+// ============================================================================
+// TESTS: CAPABILITY PRESERVATION IN GENERICS
+// ============================================================================
+
+// Generic function that preserves capability restrictions
+fn map_db<T, U>(db: T with [Read], f: fn(T with [Read]) -> U) -> U {
+    f(db)
+}
+
+fn test_generic_capability_preservation() -> () {
+    let db: Database with [Read, Write] = Database.new("conn".to_text());
+
+    // Generic preserves capability type
+    let result = map_db(db, |d| d.count("users".to_text()));
+    assert(result >= 0);
+}
+
+// ============================================================================
+// TESTS: CAPABILITY IN COLLECTIONS
+// ============================================================================
+
+fn test_capability_in_list() -> () {
+    let mut dbs: List<Database with [Read]> = List.new();
+
+    // Can add read-only databases
+    let readonly: Database with [Read] = Database.new("conn1".to_text());
+    dbs.push(readonly);
+
+    // Can add read-write databases (attenuated to read-only)
+    let readwrite: Database with [Read, Write] = Database.new("conn2".to_text());
+    dbs.push(readwrite);
+
+    // All databases in list have at most Read capability
+    for db in dbs.iter() {
+        let _ = db.query("SELECT 1".to_text());
+        // db.delete(...) would fail - only Read available
+    }
+}
+
+// ============================================================================
+// TESTS: RECORD FIELDS WITH CAPABILITIES
+// ============================================================================
+
+type AppContext is {
+    readonly_db: Database with [Read],
+    writable_db: Database with [Read, Write],
+    admin_db: Database with [Admin],
+};
+
+fn test_record_capability_fields() -> () {
+    let full_db = Database.new("conn".to_text());
+
+    let ctx = AppContext {
+        readonly_db: full_db,  // Attenuated to [Read]
+        writable_db: full_db,  // Attenuated to [Read, Write]
+        admin_db: full_db,     // Would fail if full_db doesn't have Admin
+    };
+
+    // Each field has its own capability restrictions
+    let _ = ctx.readonly_db.query("SELECT 1".to_text());
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    print("Starting comprehensive capability attenuation tests...");
+
+    test_attenuation_full_to_readonly();
+    test_attenuation_readwrite_to_readonly();
+    test_attenuation_admin_to_readwrite();
+    test_attenuation_chain();
+    test_generic_capability_preservation();
+    test_capability_in_list();
+    test_record_capability_fields();
+
+    print("All comprehensive capability attenuation tests passed!");
+}

@@ -1,0 +1,264 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, ring-buffer, circular-buffer, data-structure
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: circular ring buffer with fixed capacity 8.
+// Push_back, pop_front, full/empty detection, wraparound behavior.
+
+// =============================================================================
+// Fixed-size array of 8 elements
+// =============================================================================
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int,
+               v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn arr_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 } else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn arr_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { val } else { a.v0 },
+        v1: if i == 1 { val } else { a.v1 },
+        v2: if i == 2 { val } else { a.v2 },
+        v3: if i == 3 { val } else { a.v3 },
+        v4: if i == 4 { val } else { a.v4 },
+        v5: if i == 5 { val } else { a.v5 },
+        v6: if i == 6 { val } else { a.v6 },
+        v7: if i == 7 { val } else { a.v7 }
+    }
+}
+
+// =============================================================================
+// Ring buffer: head = read index, tail = write index, count = num elements
+// Capacity is always 8
+// =============================================================================
+
+type RingBuf is {
+    data: Arr8,
+    head: Int,
+    tail: Int,
+    count: Int
+};
+
+fn rb_new() -> RingBuf {
+    let z = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    RingBuf { data: z, head: 0, tail: 0, count: 0 }
+}
+
+fn rb_capacity() -> Int { 8 }
+
+fn rb_is_empty(rb: RingBuf) -> Bool {
+    rb.count == 0
+}
+
+fn rb_is_full(rb: RingBuf) -> Bool {
+    rb.count == 8
+}
+
+fn rb_size(rb: RingBuf) -> Int {
+    rb.count
+}
+
+// Push to back (returns updated buffer, does nothing if full)
+fn rb_push_back(rb: RingBuf, val: Int) -> RingBuf {
+    if rb.count >= 8 {
+        return rb;  // Full, cannot push
+    }
+    let new_data = arr_set(rb.data, rb.tail, val);
+    let new_tail = (rb.tail + 1) % 8;
+    RingBuf { data: new_data, head: rb.head, tail: new_tail, count: rb.count + 1 }
+}
+
+// Peek at front element
+fn rb_front(rb: RingBuf) -> Int {
+    arr_get(rb.data, rb.head)
+}
+
+// Peek at back element (last pushed)
+fn rb_back(rb: RingBuf) -> Int {
+    let back_idx = (rb.tail + 7) % 8;  // tail - 1 mod 8
+    arr_get(rb.data, back_idx)
+}
+
+// Pop from front (returns updated buffer)
+fn rb_pop_front(rb: RingBuf) -> RingBuf {
+    if rb.count <= 0 {
+        return rb;  // Empty, cannot pop
+    }
+    let new_head = (rb.head + 1) % 8;
+    RingBuf { data: rb.data, head: new_head, tail: rb.tail, count: rb.count - 1 }
+}
+
+// Get element at logical index (0 = front)
+fn rb_at(rb: RingBuf, idx: Int) -> Int {
+    let phys = (rb.head + idx) % 8;
+    arr_get(rb.data, phys)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_empty_buffer() {
+    let rb = rb_new();
+    assert_eq(rb_is_empty(rb), true);
+    assert_eq(rb_is_full(rb), false);
+    assert_eq(rb_size(rb), 0);
+}
+
+fn test_push_and_peek() {
+    let mut rb = rb_new();
+    rb = rb_push_back(rb, 10);
+    assert_eq(rb_is_empty(rb), false);
+    assert_eq(rb_size(rb), 1);
+    assert_eq(rb_front(rb), 10);
+    assert_eq(rb_back(rb), 10);
+
+    rb = rb_push_back(rb, 20);
+    assert_eq(rb_size(rb), 2);
+    assert_eq(rb_front(rb), 10);  // First in
+    assert_eq(rb_back(rb), 20);   // Last in
+}
+
+fn test_push_pop_fifo() {
+    let mut rb = rb_new();
+    rb = rb_push_back(rb, 1);
+    rb = rb_push_back(rb, 2);
+    rb = rb_push_back(rb, 3);
+
+    // Pop should return in FIFO order
+    assert_eq(rb_front(rb), 1);
+    rb = rb_pop_front(rb);
+    assert_eq(rb_front(rb), 2);
+    rb = rb_pop_front(rb);
+    assert_eq(rb_front(rb), 3);
+    rb = rb_pop_front(rb);
+    assert_eq(rb_is_empty(rb), true);
+}
+
+fn test_full_buffer() {
+    let mut rb = rb_new();
+    let mut i = 0;
+    while i < 8 {
+        rb = rb_push_back(rb, i * 10);
+        i = i + 1;
+    }
+    assert_eq(rb_is_full(rb), true);
+    assert_eq(rb_size(rb), 8);
+    assert_eq(rb_front(rb), 0);
+    assert_eq(rb_back(rb), 70);
+
+    // Check all elements via logical index
+    assert_eq(rb_at(rb, 0), 0);
+    assert_eq(rb_at(rb, 1), 10);
+    assert_eq(rb_at(rb, 7), 70);
+}
+
+fn test_wraparound() {
+    let mut rb = rb_new();
+    // Fill 5 elements
+    let mut i = 0;
+    while i < 5 {
+        rb = rb_push_back(rb, i + 1);
+        i = i + 1;
+    }
+    // Pop 3 from front: removes 1, 2, 3
+    rb = rb_pop_front(rb);
+    rb = rb_pop_front(rb);
+    rb = rb_pop_front(rb);
+    // Now head=3, tail=5, count=2, containing [4, 5]
+    assert_eq(rb_size(rb), 2);
+    assert_eq(rb_front(rb), 4);
+
+    // Push 5 more to force wraparound
+    rb = rb_push_back(rb, 6);
+    rb = rb_push_back(rb, 7);
+    rb = rb_push_back(rb, 8);
+    rb = rb_push_back(rb, 9);
+    rb = rb_push_back(rb, 10);
+    // head=3, count=7, data wraps around
+    assert_eq(rb_size(rb), 7);
+    assert_eq(rb_front(rb), 4);
+    assert_eq(rb_at(rb, 0), 4);
+    assert_eq(rb_at(rb, 1), 5);
+    assert_eq(rb_at(rb, 2), 6);
+    assert_eq(rb_at(rb, 6), 10);
+}
+
+fn test_push_pop_interleaved() {
+    let mut rb = rb_new();
+    // Interleave push and pop operations
+    rb = rb_push_back(rb, 100);
+    rb = rb_push_back(rb, 200);
+    assert_eq(rb_front(rb), 100);
+    rb = rb_pop_front(rb);
+    assert_eq(rb_front(rb), 200);
+    rb = rb_push_back(rb, 300);
+    rb = rb_push_back(rb, 400);
+    assert_eq(rb_size(rb), 3);
+    assert_eq(rb_front(rb), 200);
+    rb = rb_pop_front(rb);
+    assert_eq(rb_front(rb), 300);
+    rb = rb_pop_front(rb);
+    assert_eq(rb_front(rb), 400);
+    rb = rb_pop_front(rb);
+    assert_eq(rb_is_empty(rb), true);
+}
+
+fn test_push_full_does_nothing() {
+    let mut rb = rb_new();
+    let mut i = 0;
+    while i < 8 {
+        rb = rb_push_back(rb, i);
+        i = i + 1;
+    }
+    assert_eq(rb_size(rb), 8);
+    // Push when full should not change anything
+    rb = rb_push_back(rb, 999);
+    assert_eq(rb_size(rb), 8);
+    assert_eq(rb_front(rb), 0);
+}
+
+fn test_extensive_wraparound() {
+    // Push and pop many times to stress wraparound
+    let mut rb = rb_new();
+    let mut total_pushed = 0;
+    let mut total_popped = 0;
+    let mut round = 0;
+    while round < 5 {
+        // Push 3 elements
+        rb = rb_push_back(rb, round * 10 + 1);
+        rb = rb_push_back(rb, round * 10 + 2);
+        rb = rb_push_back(rb, round * 10 + 3);
+        total_pushed = total_pushed + 3;
+        // Pop 2 elements
+        rb = rb_pop_front(rb);
+        rb = rb_pop_front(rb);
+        total_popped = total_popped + 2;
+        round = round + 1;
+    }
+    // Should have 15 pushed - 10 popped = 5 remaining
+    assert_eq(rb_size(rb), 5);
+    assert_eq(total_pushed, 15);
+    assert_eq(total_popped, 10);
+}
+
+fn main() -> Int {
+    test_empty_buffer();
+    test_push_and_peek();
+    test_push_pop_fifo();
+    test_full_buffer();
+    test_wraparound();
+    test_push_pop_interleaved();
+    test_push_full_does_nothing();
+    test_extensive_wraparound();
+    print("[OK] 235_interp_ring_buffer");
+    0
+}

@@ -1,0 +1,276 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, multivariate, partial-derivatives, gradient
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Partial derivatives and gradient computation
+// f(x,y) = x^2 + xy + y^2
+// df/dx = 2x + y, df/dy = x + 2y
+// Uses integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn sdiv(a: Int, b: Int) -> Int {
+    (a * scale()) / b
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Multivariate functions
+// =============================================================================
+
+// f(x,y) = x^2 + xy + y^2
+fn f1(x: Int, y: Int) -> Int {
+    smul(x, x) + smul(x, y) + smul(y, y)
+}
+
+// Analytical partial derivatives of f1
+fn f1_dx(x: Int, y: Int) -> Int { 2 * x + y }   // df/dx = 2x + y
+fn f1_dy(x: Int, y: Int) -> Int { x + 2 * y }   // df/dy = x + 2y
+
+// g(x,y) = 3x^2 - 2xy + y^2
+fn f2(x: Int, y: Int) -> Int {
+    3 * smul(x, x) - 2 * smul(x, y) + smul(y, y)
+}
+
+// dg/dx = 6x - 2y, dg/dy = -2x + 2y
+fn f2_dx(x: Int, y: Int) -> Int { 6 * x - 2 * y }
+fn f2_dy(x: Int, y: Int) -> Int { 0 - 2 * x + 2 * y }
+
+// h(x,y) = x^3 + x*y^2
+fn f3(x: Int, y: Int) -> Int {
+    smul(smul(x, x), x) + smul(x, smul(y, y))
+}
+
+// dh/dx = 3x^2 + y^2, dh/dy = 2xy
+fn f3_dx(x: Int, y: Int) -> Int { 3 * smul(x, x) + smul(y, y) }
+fn f3_dy(x: Int, y: Int) -> Int { 2 * smul(x, y) }
+
+// =============================================================================
+// Numerical partial derivatives
+// =============================================================================
+
+fn num_partial_x_f1(x: Int, y: Int, h: Int) -> Int {
+    sdiv(f1(x + h, y) - f1(x - h, y), 2 * h)
+}
+
+fn num_partial_y_f1(x: Int, y: Int, h: Int) -> Int {
+    sdiv(f1(x, y + h) - f1(x, y - h), 2 * h)
+}
+
+// =============================================================================
+// Gradient type (2D)
+// =============================================================================
+
+type Grad2 is { dx: Int, dy: Int };
+
+fn gradient_f1(x: Int, y: Int) -> Grad2 {
+    Grad2 { dx: f1_dx(x, y), dy: f1_dy(x, y) }
+}
+
+fn gradient_f2(x: Int, y: Int) -> Grad2 {
+    Grad2 { dx: f2_dx(x, y), dy: f2_dy(x, y) }
+}
+
+// Gradient magnitude squared: |grad|^2 = dx^2 + dy^2
+fn grad_mag_sq(g: Grad2) -> Int {
+    smul(g.dx, g.dx) + smul(g.dy, g.dy)
+}
+
+// Dot product of two gradients
+fn grad_dot(a: Grad2, b: Grad2) -> Int {
+    smul(a.dx, b.dx) + smul(a.dy, b.dy)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_f1_partial_dx() {
+    // f(x,y) = x^2 + xy + y^2, df/dx = 2x + y
+    // At (1,2): df/dx = 2+2 = 4 => 4000
+    let x = scale();
+    let y = 2 * scale();
+    assert_eq(f1_dx(x, y), 4 * scale());
+
+    // At (3,1): df/dx = 6+1 = 7 => 7000
+    let x2 = 3 * scale();
+    let y2 = scale();
+    assert_eq(f1_dx(x2, y2), 7 * scale());
+}
+
+fn test_f1_partial_dy() {
+    // df/dy = x + 2y
+    // At (1,2): df/dy = 1+4 = 5 => 5000
+    let x = scale();
+    let y = 2 * scale();
+    assert_eq(f1_dy(x, y), 5 * scale());
+}
+
+fn test_f1_numerical_vs_analytical() {
+    let x = 2 * scale();
+    let y = 3 * scale();
+    let h = 1;
+
+    let num_dx = num_partial_x_f1(x, y, h);
+    let ana_dx = f1_dx(x, y); // 2*2+3 = 7 => 7000
+    assert_eq(within_tol(num_dx, ana_dx, 10), 1);
+
+    let num_dy = num_partial_y_f1(x, y, h);
+    let ana_dy = f1_dy(x, y); // 2+2*3 = 8 => 8000
+    assert_eq(within_tol(num_dy, ana_dy, 10), 1);
+}
+
+fn test_f2_partials() {
+    // g(x,y) = 3x^2 - 2xy + y^2
+    // dg/dx = 6x - 2y, dg/dy = -2x + 2y
+    let x = 2 * scale();
+    let y = 1 * scale();
+
+    // dg/dx at (2,1) = 12-2 = 10 => 10000
+    assert_eq(f2_dx(x, y), 10 * scale());
+
+    // dg/dy at (2,1) = -4+2 = -2 => -2000
+    assert_eq(f2_dy(x, y), -2 * scale());
+}
+
+fn test_f3_partials() {
+    // h(x,y) = x^3 + xy^2
+    // dh/dx = 3x^2 + y^2, dh/dy = 2xy
+    let x = 2 * scale();
+    let y = 3 * scale();
+
+    // dh/dx at (2,3) = 12+9 = 21 => 21000
+    assert_eq(f3_dx(x, y), 21 * scale());
+
+    // dh/dy at (2,3) = 12 => 12000
+    assert_eq(f3_dy(x, y), 12 * scale());
+}
+
+fn test_gradient_vector() {
+    // Gradient of f1 at (1,1): (2+1, 1+2) = (3, 3)
+    let g = gradient_f1(scale(), scale());
+    assert_eq(g.dx, 3 * scale());
+    assert_eq(g.dy, 3 * scale());
+
+    // Gradient of f1 at (2,3): (4+3, 2+6) = (7, 8)
+    let g2 = gradient_f1(2 * scale(), 3 * scale());
+    assert_eq(g2.dx, 7 * scale());
+    assert_eq(g2.dy, 8 * scale());
+}
+
+fn test_gradient_magnitude() {
+    // At (1,1): grad=(3,3), |grad|^2 = 9+9 = 18 => 18000
+    let g = gradient_f1(scale(), scale());
+    let mag = grad_mag_sq(g);
+    assert_eq(mag, 18 * scale());
+}
+
+fn test_gradient_at_origin() {
+    // f1 at (0,0): df/dx=0, df/dy=0 (saddle/minimum)
+    let g = gradient_f1(0, 0);
+    assert_eq(g.dx, 0);
+    assert_eq(g.dy, 0);
+}
+
+fn test_gradient_dot_product() {
+    // Grad f1 at (1,0) = (2, 1), Grad f2 at (1,0) = (6, -2)
+    let g1 = gradient_f1(scale(), 0);
+    let g2 = gradient_f2(scale(), 0);
+    assert_eq(g1.dx, 2 * scale());
+    assert_eq(g1.dy, scale());
+    assert_eq(g2.dx, 6 * scale());
+    assert_eq(g2.dy, -2 * scale());
+
+    // Dot product: 2*6 + 1*(-2) = 10 => 10000
+    let d = grad_dot(g1, g2);
+    assert_eq(d, 10 * scale());
+}
+
+fn test_directional_derivative() {
+    // Directional derivative of f1 in direction (1,0) is just df/dx
+    // In direction (0,1) is just df/dy
+    // In direction (d1,d2) = grad . direction
+    let x = 2 * scale();
+    let y = 1 * scale();
+    let g = gradient_f1(x, y);
+
+    // Direction (1,0) scaled: (1000, 0)
+    let dir_x = Grad2 { dx: scale(), dy: 0 };
+    let dd_x = grad_dot(g, dir_x);
+    assert_eq(dd_x, f1_dx(x, y)); // 5000
+
+    // Direction (0,1)
+    let dir_y = Grad2 { dx: 0, dy: scale() };
+    let dd_y = grad_dot(g, dir_y);
+    assert_eq(dd_y, f1_dy(x, y)); // 4000
+}
+
+fn test_multiple_point_evaluation() {
+    // Evaluate gradient of f1 at a grid of points
+    // Points: (0,0), (1,0), (0,1), (1,1), (2,2)
+    let g00 = gradient_f1(0, 0);
+    assert_eq(g00.dx, 0);
+    assert_eq(g00.dy, 0);
+
+    let g10 = gradient_f1(scale(), 0);
+    assert_eq(g10.dx, 2 * scale()); // 2*1+0
+    assert_eq(g10.dy, scale());     // 1+0
+
+    let g01 = gradient_f1(0, scale());
+    assert_eq(g01.dx, scale());     // 0+1
+    assert_eq(g01.dy, 2 * scale()); // 0+2
+
+    let g11 = gradient_f1(scale(), scale());
+    assert_eq(g11.dx, 3 * scale());
+    assert_eq(g11.dy, 3 * scale());
+
+    let g22 = gradient_f1(2 * scale(), 2 * scale());
+    assert_eq(g22.dx, 6 * scale()); // 4+2
+    assert_eq(g22.dy, 6 * scale()); // 2+4
+}
+
+fn test_mixed_partial() {
+    // f(x,y) = x^2 + xy + y^2
+    // d^2f/dxdy = 1 (the coefficient of xy)
+    // Verify numerically: d/dy[df/dx] = d/dy[2x+y] = 1
+    let h = 1;
+    let x = 2 * scale();
+    let y = 3 * scale();
+
+    // Mixed partial: (df/dx(x,y+h) - df/dx(x,y-h)) / 2h
+    let dfdx_yp = f1_dx(x, y + h);
+    let dfdx_ym = f1_dx(x, y - h);
+    let mixed = sdiv(dfdx_yp - dfdx_ym, 2 * h);
+    assert_eq(within_tol(mixed, scale(), 10), 1);
+}
+
+fn main() -> Int {
+    test_f1_partial_dx();
+    test_f1_partial_dy();
+    test_f1_numerical_vs_analytical();
+    test_f2_partials();
+    test_f3_partials();
+    test_gradient_vector();
+    test_gradient_magnitude();
+    test_gradient_at_origin();
+    test_gradient_dot_product();
+    test_directional_derivative();
+    test_multiple_point_evaluation();
+    test_mixed_partial();
+    print("[OK] 379_interp_autodiff_multivariate");
+    0
+}

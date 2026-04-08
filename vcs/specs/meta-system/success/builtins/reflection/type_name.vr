@@ -1,0 +1,79 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, reflection, type_name
+// @description: Test type_name builtin for type introspection
+// @contexts: MetaTypes
+
+// =============================================================================
+// TYPE_NAME TESTS
+// =============================================================================
+
+// Test type_name with primitive types
+meta fn test_type_name_int() -> Text using [MetaTypes] {
+    type_name(Int)  // Should be "Int"
+}
+
+meta fn test_type_name_bool() -> Text using [MetaTypes] {
+    type_name(Bool)  // Should be "Bool"
+}
+
+meta fn test_type_name_text() -> Text using [MetaTypes] {
+    type_name(Text)  // Should be "Text"
+}
+
+meta fn test_type_name_float() -> Text using [MetaTypes] {
+    type_name(Float)  // Should be "Float"
+}
+
+// Test type_name with generic types
+meta fn test_type_name_list() -> Text using [MetaTypes] {
+    type_name(List<Int>)  // Should be "List<Int>"
+}
+
+meta fn test_type_name_maybe() -> Text using [MetaTypes] {
+    type_name(Maybe<Text>)  // Should be "Maybe<Text>"
+}
+
+// Test type_name with tuple types
+meta fn test_type_name_tuple() -> Text using [MetaTypes] {
+    type_name((Int, Text))  // Should be "(Int, Text)"
+}
+
+// Test type_name with custom type
+type Point is { x: Float, y: Float };
+
+meta fn test_type_name_custom() -> Text using [MetaTypes] {
+    type_name(Point)  // Should be "Point"
+}
+
+// Test type_name in conditional
+meta fn test_type_name_conditional<T>() -> Text using [MetaTypes] {
+    let name = type_name(T);
+    if text_starts_with(name, "List") {
+        "collection"
+    } else {
+        "scalar"
+    }
+}
+
+// Main test function
+fn main() {
+    // Test primitive types
+    @const assert_eq(test_type_name_int(), "Int");
+    @const assert_eq(test_type_name_bool(), "Bool");
+    @const assert_eq(test_type_name_text(), "Text");
+    @const assert_eq(test_type_name_float(), "Float");
+
+    // Test generic types
+    @const assert_eq(test_type_name_list(), "List<Int>");
+    @const assert_eq(test_type_name_maybe(), "Maybe<Text>");
+    @const assert_eq(test_type_name_tuple(), "(Int, Text)");
+
+    // Test custom types
+    @const assert_eq(test_type_name_custom(), "Point");
+
+    // Test conditional usage
+    @const assert_eq(test_type_name_conditional<List<Int>>(), "collection");
+    @const assert_eq(test_type_name_conditional<Int>(), "scalar");
+}

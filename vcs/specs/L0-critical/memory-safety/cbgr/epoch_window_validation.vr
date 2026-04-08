@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, epoch
+// @description: Tests CBGR epoch window validation for 16-bit truncation handling
+
+/// Tests that references remain valid within the epoch window
+fn test_epoch_window_valid() {
+    let x = Heap.new(42);
+    let r = &x;
+
+    // Reference created in current epoch should be valid
+    assert_eq(*r, 42);
+
+    // After some operations, reference should still be valid
+    // (epoch may have advanced but within window)
+    let temp = Heap.new(100);
+    let _ = *r;  // Still valid
+    assert_eq(*r, 42);
+}
+
+/// Tests that FatRef (slice references) properly track epochs
+fn test_fatref_epoch_tracking() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = &arr[1..4];  // FatRef with length metadata
+
+    // Epoch should be captured at creation time
+    assert_eq(slice.len(), 3);
+    assert_eq(slice[0], 2);
+    assert_eq(slice[1], 3);
+    assert_eq(slice[2], 4);
+}
+
+/// Tests ThinRef epoch tracking for sized types
+fn test_thinref_epoch_tracking() {
+    type Point is { x: Int, y: Int };
+    let p = Point { x: 10, y: 20 };
+    let r = &p;  // ThinRef to Point
+
+    // Reference should be valid for reading
+    assert_eq(r.x, 10);
+    assert_eq(r.y, 20);
+}
+
+/// Tests that epoch validation catches expired references
+fn test_epoch_basic_validation() {
+    let x = 42;
+    let r = &x;
+
+    // Basic validation - reference should be valid
+    let valid = r.is_valid();
+    assert(valid);
+}
+
+fn main() {
+    test_epoch_window_valid();
+    test_fatref_epoch_tracking();
+    test_thinref_epoch_tracking();
+    test_epoch_basic_validation();
+    print("All epoch window tests passed");
+}

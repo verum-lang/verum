@@ -1,0 +1,606 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, error_handling, tier-oracle
+// @timeout: 15000
+
+/// Comprehensive error handling tests for Tier 0 vs Tier 3 equivalence.
+/// Tests Result<T, E>, Maybe<T>, error propagation, try blocks, panic
+/// handling, and error conversion to ensure identical behavior across
+/// execution tiers.
+
+// Custom error type
+type ParseError is
+    InvalidFormat(Text) |
+    OutOfRange { value: Int, min: Int, max: Int } |
+    Empty;
+
+implement Display for ParseError {
+    fn fmt(&self) -> Text {
+        match self {
+            ParseError.InvalidFormat(s) => f"invalid format: {s}",
+            ParseError.OutOfRange { value, min, max } =>
+                f"value {value} out of range [{min}, {max}]",
+            ParseError.Empty => "empty input",
+        }
+    }
+}
+
+/// Parse integer from string
+fn parse_int(s: Text) -> Result<Int, ParseError> {
+    if s.is_empty() {
+        return Err(ParseError.Empty);
+    }
+
+    match s.parse<Int>() {
+        Some(n) => Ok(n),
+        None => Err(ParseError.InvalidFormat(s)),
+    }
+}
+
+/// Parse integer within range
+fn parse_int_range(s: Text, min: Int, max: Int) -> Result<Int, ParseError> {
+    let n = parse_int(s)?;  // ? operator propagates error
+
+    if n < min || n > max {
+        Err(ParseError.OutOfRange { value: n, min, max })
+    } else {
+        Ok(n)
+    }
+}
+
+/// Division with error handling
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+/// Maybe/Option operations
+fn find_in_list<T: Eq>(list: List<T>, target: T) -> Maybe<Int> {
+    for (i, item) in list.enumerate() {
+        if item == target {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn get_nested(data: Map<Text, Map<Text, Int>>, outer: Text, inner: Text) -> Maybe<Int> {
+    data.get(outer)?.get(inner)
+}
+
+fn main() {
+    // ===== Result basics =====
+    println("=== Result Basics ===");
+
+    let ok_result: Result<Int, Text> = Ok(42);
+    let err_result: Result<Int, Text> = Err("something went wrong");
+
+    println(f"ok_result = {ok_result}");
+    println(f"err_result = {err_result}");
+
+    println(f"ok_result.is_ok() = {ok_result.is_ok()}");
+    println(f"err_result.is_err() = {err_result.is_err()}");
+
+    // ===== Result unwrapping =====
+    println("\n=== Result Unwrapping ===");
+
+    let val = ok_result.unwrap();
+    println(f"unwrap ok = {val}");
+
+    let with_default = err_result.unwrap_or(0);
+    println(f"unwrap_or = {with_default}");
+
+    let with_else = err_result.unwrap_or_else(|e| {
+        println(f"error: {e}");
+        -1
+    });
+    println(f"unwrap_or_else = {with_else}");
+
+    // ===== Match on Result =====
+    println("\n=== Match on Result ===");
+
+    match safe_divide(10, 2) {
+        Ok(result) => println(f"10 / 2 = {result}"),
+        Err(e) => println(f"error: {e}"),
+    }
+
+    match safe_divide(10, 0) {
+        Ok(result) => println(f"10 / 0 = {result}"),
+        Err(e) => println(f"error: {e}"),
+    }
+
+    // ===== Result combinators =====
+    println("\n=== Result Combinators ===");
+
+    let mapped = Ok(5).map(|n| n * 2);
+    println(f"map Ok(5) * 2 = {mapped}");
+
+    let mapped_err: Result<Int, Text> = Err("oops").map(|n: Int| n * 2);
+    println(f"map Err = {mapped_err}");
+
+    let chained = Ok(10)
+        .and_then(|n| safe_divide(n, 2))
+        .and_then(|n| safe_divide(n, 2));
+    println(f"chained division = {chained}");
+
+    let failed_chain = Ok(10)
+        .and_then(|n| safe_divide(n, 0))
+        .and_then(|n| safe_divide(n, 2));
+    println(f"failed chain = {failed_chain}");
+
+    // ===== Custom error types =====
+    println("\n=== Custom Errors ===");
+
+    println(f"parse_int(\"42\") = {parse_int(\"42\")}");
+    println(f"parse_int(\"\") = {parse_int(\"\")}");
+    println(f"parse_int(\"abc\") = {parse_int(\"abc\")}");
+
+    println(f"parse_int_range(\"50\", 1, 100) = {parse_int_range(\"50\", 1, 100)}");
+    println(f"parse_int_range(\"150\", 1, 100) = {parse_int_range(\"150\", 1, 100)}");
+
+    // ===== Maybe/Option basics =====
+    println("\n=== Maybe Basics ===");
+
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    println(f"some_val = {some_val}");
+    println(f"none_val = {none_val}");
+
+    println(f"some_val.is_some() = {some_val.is_some()}");
+    println(f"none_val.is_none() = {none_val.is_none()}");
+
+    // ===== Maybe unwrapping =====
+    println("\n=== Maybe Unwrapping ===");
+
+    let unwrapped = some_val.unwrap();
+    println(f"unwrap Some = {unwrapped}");
+
+    let with_default = none_val.unwrap_or(0);
+    println(f"unwrap_or None = {with_default}");
+
+    // ===== Maybe combinators =====
+    println("\n=== Maybe Combinators ===");
+
+    let mapped = Some(5).map(|n| n * 2);
+    println(f"map Some(5) * 2 = {mapped}");
+
+    let mapped_none: Maybe<Int> = None.map(|n: Int| n * 2);
+    println(f"map None = {mapped_none}");
+
+    let list = [1, 2, 3, 4, 5];
+    println(f"find 3 in list = {find_in_list(list, 3)}");
+    println(f"find 10 in list = {find_in_list(list, 10)}");
+
+    // ===== Optional chaining =====
+    println("\n=== Optional Chaining ===");
+
+    let data = {
+        "users": {"alice": 30, "bob": 25},
+        "config": {"timeout": 60},
+    };
+
+    println(f"get users.alice = {get_nested(data, \"users\", \"alice\")}");
+    println(f"get users.charlie = {get_nested(data, \"users\", \"charlie\")}");
+    println(f"get missing.key = {get_nested(data, \"missing\", \"key\")}");
+
+    // ===== Error propagation with ? =====
+    println("\n=== Error Propagation ===");
+
+    fn chain_operations(input: Text) -> Result<Int, ParseError> {
+        let a = parse_int(input)?;
+        let b = parse_int_range(f"{a * 2}", 0, 200)?;
+        Ok(b + 10)
+    }
+
+    println(f"chain_operations(\"50\") = {chain_operations(\"50\")}");
+    println(f"chain_operations(\"abc\") = {chain_operations(\"abc\")}");
+    println(f"chain_operations(\"150\") = {chain_operations(\"150\")}");
+
+    // ===== Converting between Result and Maybe =====
+    println("\n=== Conversions ===");
+
+    let result_to_maybe = Ok(42).ok();
+    println(f"Ok(42).ok() = {result_to_maybe}");
+
+    let err_to_maybe: Maybe<Int> = Err("oops").ok();
+    println(f"Err.ok() = {err_to_maybe}");
+
+    let maybe_to_result = Some(42).ok_or("no value");
+    println(f"Some(42).ok_or() = {maybe_to_result}");
+
+    let none_to_result: Result<Int, Text> = None.ok_or("no value");
+    println(f"None.ok_or() = {none_to_result}");
+
+    // ===== try! macro equivalent =====
+    println("\n=== Try Block ===");
+
+    let result = try {
+        let a = parse_int("10")?;
+        let b = parse_int("20")?;
+        a + b
+    };
+    println(f"try block success = {result}");
+
+    let failed = try {
+        let a = parse_int("10")?;
+        let b = parse_int("invalid")?;
+        a + b
+    };
+    println(f"try block failure = {failed}");
+
+    // Additional comprehensive tests
+    test_error_hierarchy();
+    test_panic_behavior();
+    test_error_context();
+    test_early_return();
+    test_nested_error_handling();
+    test_collection_error_handling();
+}
+
+/// Error hierarchy and downcasting
+fn test_error_hierarchy() {
+    println("\n=== Error Hierarchy ===");
+
+    // Base error protocol
+    type ErrorProtocol is protocol {
+        fn source(&self) -> Maybe<&ErrorProtocol> { None }
+    };
+
+    // IO error
+    type IoError is
+        NotFound(Text) |
+        PermissionDenied(Text) |
+        ConnectionFailed { host: Text, port: Int };
+
+    implement Display for IoError {
+        fn fmt(&self) -> Text {
+            match self {
+                IoError.NotFound(path) => f"file not found: {path}",
+                IoError.PermissionDenied(path) => f"permission denied: {path}",
+                IoError.ConnectionFailed { host, port } => f"connection failed: {host}:{port}",
+            }
+        }
+    }
+
+    implement ErrorProtocol for IoError {}
+
+    // Application error wrapping IoError
+    type AppError is
+        Io(IoError) |
+        Parse(ParseError) |
+        Custom(Text);
+
+    implement Display for AppError {
+        fn fmt(&self) -> Text {
+            match self {
+                AppError.Io(e) => f"IO error: {e}",
+                AppError.Parse(e) => f"Parse error: {e}",
+                AppError.Custom(msg) => f"Error: {msg}",
+            }
+        }
+    }
+
+    implement ErrorProtocol for AppError {
+        fn source(&self) -> Maybe<&ErrorProtocol> {
+            match self {
+                AppError.Io(e) => Some(e),
+                AppError.Parse(e) => Some(e),
+                AppError.Custom(_) => None,
+            }
+        }
+    }
+
+    // From implementations for error conversion
+    implement From<IoError> for AppError {
+        fn from(e: IoError) -> AppError {
+            AppError.Io(e)
+        }
+    }
+
+    implement From<ParseError> for AppError {
+        fn from(e: ParseError) -> AppError {
+            AppError.Parse(e)
+        }
+    }
+
+    // Function using ? with conversion
+    fn read_config(path: Text) -> Result<Int, AppError> {
+        // Simulated file read
+        if path == "missing.conf" {
+            return Err(IoError.NotFound(path).into());
+        }
+        let content = "42";
+        let value = parse_int(content)?;  // ParseError -> AppError
+        Ok(value)
+    }
+
+    println(f"read_config(\"app.conf\") = {read_config("app.conf")}");
+    println(f"read_config(\"missing.conf\") = {read_config("missing.conf")}");
+
+    // Error chain printing
+    fn print_error_chain(e: &ErrorProtocol) {
+        println(f"Error: {e}");
+        let mut source = e.source();
+        while let Some(s) = source {
+            println(f"  Caused by: {s}");
+            source = s.source();
+        }
+    }
+
+    let nested_err = AppError.Io(IoError.NotFound("/etc/app.conf".to_text()));
+    print_error_chain(&nested_err);
+}
+
+/// Panic behavior (should be consistent across tiers)
+fn test_panic_behavior() {
+    println("\n=== Panic Behavior ===");
+
+    // Catch panic
+    fn may_panic(should_panic: Bool) -> Int {
+        if should_panic {
+            panic("intentional panic");
+        }
+        42
+    }
+
+    // Using catch_unwind
+    let result = catch_unwind(|| may_panic(false));
+    println(f"catch_unwind(ok) = {result}");
+
+    let result = catch_unwind(|| may_panic(true));
+    match result {
+        Ok(v) => println(f"catch_unwind(panic) = Ok({v})"),
+        Err(e) => println(f"catch_unwind(panic) = Err(caught panic)"),
+    }
+
+    // unwrap on None panics
+    let result = catch_unwind(|| {
+        let x: Maybe<Int> = None;
+        x.unwrap()
+    });
+    println(f"unwrap None = {if result.is_err() { "panic caught" } else { "no panic" }}");
+
+    // expect with message
+    let result = catch_unwind(|| {
+        let x: Result<Int, Text> = Err("failure");
+        x.expect("should have value")
+    });
+    println(f"expect Err = {if result.is_err() { "panic caught" } else { "no panic" }}");
+
+    // Index out of bounds
+    let result = catch_unwind(|| {
+        let arr = [1, 2, 3];
+        arr[10]
+    });
+    println(f"index out of bounds = {if result.is_err() { "panic caught" } else { "no panic" }}");
+
+    // Division by zero for integers
+    let result = catch_unwind(|| {
+        let a = 10;
+        let b = 0;
+        a / b
+    });
+    println(f"div by zero = {if result.is_err() { "panic caught" } else { "no panic" }}");
+}
+
+/// Error context and annotations
+fn test_error_context() {
+    println("\n=== Error Context ===");
+
+    // Add context to errors
+    fn read_file(path: Text) -> Result<Text, Text> {
+        if path.starts_with("/missing") {
+            Err(f"file not found: {path}")
+        } else {
+            Ok(f"contents of {path}")
+        }
+    }
+
+    fn parse_config(path: Text) -> Result<Int, Text> {
+        let content = read_file(path)
+            .map_err(|e| f"failed to read config: {e}")?;
+
+        parse_int(&content)
+            .map_err(|e| f"failed to parse config: {e}")
+    }
+
+    println(f"parse_config(\"/app/conf\") = {parse_config("/app/conf")}");
+    println(f"parse_config(\"/missing/conf\") = {parse_config("/missing/conf")}");
+
+    // Context protocol pattern
+    type ContextProtocol<T, E> is protocol {
+        fn context(self, msg: Text) -> Result<T, Text>;
+        fn with_context<F: Fn() -> Text>(self, f: F) -> Result<T, Text>;
+    };
+
+    implement<T, E: Display> ContextProtocol<T, E> for Result<T, E> {
+        fn context(self, msg: Text) -> Result<T, Text> {
+            self.map_err(|e| f"{msg}: {e}")
+        }
+
+        fn with_context<F: Fn() -> Text>(self, f: F) -> Result<T, Text> {
+            self.map_err(|e| f"{f()}: {e}")
+        }
+    }
+
+    fn load_settings(path: Text) -> Result<Int, Text> {
+        read_file(path)
+            .context(f"loading settings from {path}")
+            .and_then(|s| parse_int(&s).context("parsing settings"))
+    }
+
+    println(f"load_settings result = {load_settings("/config")}");
+}
+
+/// Early return patterns
+fn test_early_return() {
+    println("\n=== Early Return ===");
+
+    // Using ? for early return
+    fn process_data(data: Maybe<Text>) -> Result<Int, Text> {
+        let text = data.ok_or("no data provided")?;
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Err("empty data".to_text());
+        }
+        parse_int(&trimmed).map_err(|e| f"parse failed: {e}")
+    }
+
+    println(f"process(None) = {process_data(None)}");
+    println(f"process(Some(\"\")) = {process_data(Some(""))}");
+    println(f"process(Some(\"42\")) = {process_data(Some("42"))}");
+    println(f"process(Some(\"abc\")) = {process_data(Some("abc"))}");
+
+    // Guard clauses
+    fn validate_user(name: Text, age: Int) -> Result<Text, Text> {
+        if name.is_empty() {
+            return Err("name cannot be empty".to_text());
+        }
+        if age < 0 {
+            return Err("age cannot be negative".to_text());
+        }
+        if age > 150 {
+            return Err("age seems unrealistic".to_text());
+        }
+        Ok(f"User {name} is {age} years old")
+    }
+
+    println(f"validate(\"\", 25) = {validate_user("", 25)}");
+    println(f"validate(\"Alice\", -5) = {validate_user("Alice", -5)}");
+    println(f"validate(\"Bob\", 200) = {validate_user("Bob", 200)}");
+    println(f"validate(\"Charlie\", 30) = {validate_user("Charlie", 30)}");
+
+    // Let-else for early return
+    fn extract_value(data: Map<Text, Int>, key: Text) -> Result<Int, Text> {
+        let Some(value) = data.get(&key) else {
+            return Err(f"key not found: {key}");
+        };
+        Ok(*value)
+    }
+
+    let data = Map.from([("x", 10), ("y", 20)]);
+    println(f"extract x = {extract_value(data, "x")}");
+    println(f"extract z = {extract_value(data, "z")}");
+}
+
+/// Nested error handling
+fn test_nested_error_handling() {
+    println("\n=== Nested Error Handling ===");
+
+    // Nested Result
+    fn inner_operation(x: Int) -> Result<Int, Text> {
+        if x < 0 { Err("negative input".to_text()) }
+        else { Ok(x * 2) }
+    }
+
+    fn outer_operation(x: Int) -> Result<Result<Int, Text>, Text> {
+        if x > 100 {
+            return Err("input too large".to_text());
+        }
+        Ok(inner_operation(x))
+    }
+
+    // Flatten nested results
+    fn flatten_result(x: Int) -> Result<Int, Text> {
+        outer_operation(x)?
+    }
+
+    println(f"flatten(-5) = {flatten_result(-5)}");
+    println(f"flatten(50) = {flatten_result(50)}");
+    println(f"flatten(150) = {flatten_result(150)}");
+
+    // Multiple error types in match
+    fn multi_error(choice: Int) -> Result<Int, Text> {
+        match choice {
+            0 => Ok(0),
+            1 => Err("error one".to_text()),
+            2 => Err("error two".to_text()),
+            _ => Err("unknown error".to_text()),
+        }
+    }
+
+    for i in 0..4 {
+        match multi_error(i) {
+            Ok(v) => println(f"choice {i}: success = {v}"),
+            Err(e) => println(f"choice {i}: error = {e}"),
+        }
+    }
+
+    // Collect results
+    let operations: List<Result<Int, Text>> = (0..5)
+        .map(|i| if i % 2 == 0 { Ok(i) } else { Err(f"odd: {i}") })
+        .collect();
+
+    // Partition successes and failures
+    let (successes, failures): (List<Int>, List<Text>) =
+        operations.into_iter().partition_result();
+    println(f"successes: {successes}");
+    println(f"failures: {failures}");
+}
+
+/// Collection error handling
+fn test_collection_error_handling() {
+    println("\n=== Collection Error Handling ===");
+
+    // Collect into Result
+    fn parse_all(items: List<Text>) -> Result<List<Int>, ParseError> {
+        items.into_iter()
+            .map(|s| parse_int(&s))
+            .collect()
+    }
+
+    let valid = List.from(["1", "2", "3", "4", "5"]);
+    let invalid = List.from(["1", "2", "abc", "4", "5"]);
+
+    println(f"parse_all valid = {parse_all(valid)}");
+    println(f"parse_all invalid = {parse_all(invalid)}");
+
+    // Filter map (skip errors)
+    fn parse_valid(items: List<Text>) -> List<Int> {
+        items.into_iter()
+            .filter_map(|s| parse_int(&s).ok())
+            .collect()
+    }
+
+    let mixed = List.from(["1", "abc", "3", "def", "5"]);
+    println(f"parse_valid = {parse_valid(mixed)}");
+
+    // Find first error
+    fn find_first_error(items: List<Text>) -> Maybe<ParseError> {
+        items.into_iter()
+            .find_map(|s| parse_int(&s).err())
+    }
+
+    let items = List.from(["1", "2", "bad", "3"]);
+    println(f"first error = {find_first_error(items)}");
+
+    // Try fold
+    fn sum_parsed(items: List<Text>) -> Result<Int, ParseError> {
+        items.into_iter()
+            .try_fold(0, |acc, s| {
+                let n = parse_int(&s)?;
+                Ok(acc + n)
+            })
+    }
+
+    println(f"sum_parsed valid = {sum_parsed(List.from(["1", "2", "3"]))}");
+    println(f"sum_parsed invalid = {sum_parsed(List.from(["1", "bad", "3"]))}");
+
+    // Process with index on error
+    fn parse_with_location(items: List<Text>) -> Result<List<Int>, Text> {
+        items.into_iter()
+            .enumerate()
+            .map(|(i, s)| {
+                parse_int(&s)
+                    .map_err(|e| f"at index {i}: {e}")
+            })
+            .collect()
+    }
+
+    println(f"parse_with_location = {parse_with_location(List.from(["1", "bad", "3"]))}");
+}

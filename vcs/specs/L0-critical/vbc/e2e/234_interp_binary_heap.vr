@@ -1,0 +1,303 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, binary-heap, min-heap, data-structure
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: min-heap using array-based storage.
+// Parent of i = (i-1)/2, left child = 2*i+1, right child = 2*i+2.
+
+// =============================================================================
+// Array storage (16 elements max)
+// =============================================================================
+
+type Arr16 is { v0: Int, v1: Int, v2: Int, v3: Int,
+                v4: Int, v5: Int, v6: Int, v7: Int,
+                v8: Int, v9: Int, v10: Int, v11: Int,
+                v12: Int, v13: Int, v14: Int, v15: Int };
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 } else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else if i == 7 { a.v7 }
+    else if i == 8 { a.v8 } else if i == 9 { a.v9 }
+    else if i == 10 { a.v10 } else if i == 11 { a.v11 }
+    else if i == 12 { a.v12 } else if i == 13 { a.v13 }
+    else if i == 14 { a.v14 } else { a.v15 }
+}
+
+fn arr_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        v0: if i == 0 { val } else { a.v0 },
+        v1: if i == 1 { val } else { a.v1 },
+        v2: if i == 2 { val } else { a.v2 },
+        v3: if i == 3 { val } else { a.v3 },
+        v4: if i == 4 { val } else { a.v4 },
+        v5: if i == 5 { val } else { a.v5 },
+        v6: if i == 6 { val } else { a.v6 },
+        v7: if i == 7 { val } else { a.v7 },
+        v8: if i == 8 { val } else { a.v8 },
+        v9: if i == 9 { val } else { a.v9 },
+        v10: if i == 10 { val } else { a.v10 },
+        v11: if i == 11 { val } else { a.v11 },
+        v12: if i == 12 { val } else { a.v12 },
+        v13: if i == 13 { val } else { a.v13 },
+        v14: if i == 14 { val } else { a.v14 },
+        v15: if i == 15 { val } else { a.v15 }
+    }
+}
+
+fn arr_swap(a: Arr16, i: Int, j: Int) -> Arr16 {
+    let vi = arr_get(a, i);
+    let vj = arr_get(a, j);
+    let a2 = arr_set(a, i, vj);
+    arr_set(a2, j, vi)
+}
+
+// =============================================================================
+// Min-Heap
+// =============================================================================
+
+type MHeap is {
+    data: Arr16,
+    sz: Int
+};
+
+fn mheap_new() -> MHeap {
+    let z = Arr16 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+                    v8: 0, v9: 0, v10: 0, v11: 0, v12: 0, v13: 0, v14: 0, v15: 0 };
+    MHeap { data: z, sz: 0 }
+}
+
+fn heap_parent(i: Int) -> Int { (i - 1) / 2 }
+fn heap_left(i: Int) -> Int { 2 * i + 1 }
+fn heap_right(i: Int) -> Int { 2 * i + 2 }
+
+// Sift up: move element at index i up to restore heap property
+fn sift_up(d: Arr16, i: Int) -> Arr16 {
+    let mut res = d;
+    let mut idx = i;
+    while idx > 0 {
+        let p = heap_parent(idx);
+        if arr_get(res, idx) < arr_get(res, p) {
+            res = arr_swap(res, idx, p);
+            idx = p;
+        } else {
+            // Heap property satisfied, stop
+            idx = 0;  // Force exit
+            idx = idx - 1;  // idx = -1, loop exits
+        }
+    }
+    res
+}
+
+// Sift down: move element at index i down to restore heap property
+fn sift_down(d: Arr16, i: Int, sz: Int) -> Arr16 {
+    let mut res = d;
+    let mut idx = i;
+    let mut cont = true;
+    while cont {
+        let left = heap_left(idx);
+        let right = heap_right(idx);
+        let mut smallest = idx;
+
+        if left < sz {
+            if arr_get(res, left) < arr_get(res, smallest) {
+                smallest = left;
+            }
+        }
+        if right < sz {
+            if arr_get(res, right) < arr_get(res, smallest) {
+                smallest = right;
+            }
+        }
+
+        if smallest != idx {
+            res = arr_swap(res, idx, smallest);
+            idx = smallest;
+        } else {
+            cont = false;
+        }
+    }
+    res
+}
+
+// Insert value into heap
+fn mheap_push(h: MHeap, val: Int) -> MHeap {
+    let new_data = arr_set(h.data, h.sz, val);
+    let sifted = sift_up(new_data, h.sz);
+    MHeap { data: sifted, sz: h.sz + 1 }
+}
+
+// Peek at minimum (root)
+fn mheap_peek(h: MHeap) -> Int {
+    arr_get(h.data, 0)
+}
+
+// Extract minimum (remove root, restore heap)
+fn mheap_pop(h: MHeap) -> MHeap {
+    if h.sz <= 1 {
+        return mheap_new();
+    }
+    let new_sz = h.sz - 1;
+    // Move last element to root
+    let last = arr_get(h.data, new_sz);
+    let new_data = arr_set(h.data, 0, last);
+    // Sift down from root
+    let sifted = sift_down(new_data, 0, new_sz);
+    MHeap { data: sifted, sz: new_sz }
+}
+
+// Check if heap property holds
+fn is_valid_mheap(h: MHeap) -> Bool {
+    let mut i = 0;
+    while i < h.sz {
+        let left = heap_left(i);
+        let right = heap_right(i);
+        if left < h.sz {
+            if arr_get(h.data, left) < arr_get(h.data, i) {
+                return false;
+            }
+        }
+        if right < h.sz {
+            if arr_get(h.data, right) < arr_get(h.data, i) {
+                return false;
+            }
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_empty_heap() {
+    let h = mheap_new();
+    assert_eq(h.sz, 0);
+}
+
+fn test_single_push() {
+    let h = mheap_push(mheap_new(), 42);
+    assert_eq(h.sz, 1);
+    assert_eq(mheap_peek(h), 42);
+    assert_eq(is_valid_mheap(h), true);
+}
+
+fn test_push_ascending() {
+    let mut h = mheap_new();
+    h = mheap_push(h, 1);
+    h = mheap_push(h, 2);
+    h = mheap_push(h, 3);
+    assert_eq(h.sz, 3);
+    assert_eq(mheap_peek(h), 1);
+    assert_eq(is_valid_mheap(h), true);
+}
+
+fn test_push_descending() {
+    let mut h = mheap_new();
+    h = mheap_push(h, 9);
+    h = mheap_push(h, 5);
+    h = mheap_push(h, 1);
+    assert_eq(h.sz, 3);
+    assert_eq(mheap_peek(h), 1);  // Min should be at root
+    assert_eq(is_valid_mheap(h), true);
+}
+
+fn test_push_random() {
+    let mut h = mheap_new();
+    h = mheap_push(h, 7);
+    h = mheap_push(h, 3);
+    h = mheap_push(h, 9);
+    h = mheap_push(h, 1);
+    h = mheap_push(h, 5);
+    assert_eq(h.sz, 5);
+    assert_eq(mheap_peek(h), 1);
+    assert_eq(is_valid_mheap(h), true);
+}
+
+fn test_pop_order() {
+    // Build heap with 5 elements and extract them all — should come out sorted
+    let mut h = mheap_new();
+    h = mheap_push(h, 7);
+    h = mheap_push(h, 3);
+    h = mheap_push(h, 9);
+    h = mheap_push(h, 1);
+    h = mheap_push(h, 5);
+
+    // Extract min repeatedly
+    assert_eq(mheap_peek(h), 1);
+    h = mheap_pop(h);
+    assert_eq(h.sz, 4);
+    assert_eq(is_valid_mheap(h), true);
+
+    assert_eq(mheap_peek(h), 3);
+    h = mheap_pop(h);
+    assert_eq(h.sz, 3);
+    assert_eq(is_valid_mheap(h), true);
+
+    assert_eq(mheap_peek(h), 5);
+    h = mheap_pop(h);
+
+    assert_eq(mheap_peek(h), 7);
+    h = mheap_pop(h);
+
+    assert_eq(mheap_peek(h), 9);
+    h = mheap_pop(h);
+    assert_eq(h.sz, 0);
+}
+
+fn test_heapsort() {
+    // Use heap to sort: 8, 2, 6, 4, 10
+    let mut h = mheap_new();
+    h = mheap_push(h, 8);
+    h = mheap_push(h, 2);
+    h = mheap_push(h, 6);
+    h = mheap_push(h, 4);
+    h = mheap_push(h, 10);
+
+    // Extract all in order
+    let v0 = mheap_peek(h); h = mheap_pop(h);
+    let v1 = mheap_peek(h); h = mheap_pop(h);
+    let v2 = mheap_peek(h); h = mheap_pop(h);
+    let v3 = mheap_peek(h); h = mheap_pop(h);
+    let v4 = mheap_peek(h); h = mheap_pop(h);
+
+    assert_eq(v0, 2);
+    assert_eq(v1, 4);
+    assert_eq(v2, 6);
+    assert_eq(v3, 8);
+    assert_eq(v4, 10);
+}
+
+fn test_duplicate_values() {
+    let mut h = mheap_new();
+    h = mheap_push(h, 5);
+    h = mheap_push(h, 5);
+    h = mheap_push(h, 3);
+    h = mheap_push(h, 3);
+    assert_eq(h.sz, 4);
+    assert_eq(mheap_peek(h), 3);
+    assert_eq(is_valid_mheap(h), true);
+
+    h = mheap_pop(h);
+    assert_eq(mheap_peek(h), 3);
+    h = mheap_pop(h);
+    assert_eq(mheap_peek(h), 5);
+}
+
+fn main() -> Int {
+    test_empty_heap();
+    test_single_push();
+    test_push_ascending();
+    test_push_descending();
+    test_push_random();
+    test_pop_order();
+    test_heapsort();
+    test_duplicate_values();
+    print("[OK] 234_interp_binary_heap");
+    0
+}

@@ -1,0 +1,156 @@
+// @test: run
+// Multi-function programs — function calls, recursion, mutual recursion
+
+@allow(unbounded_recursion)
+fn fibonacci(n: Int) -> Int {
+    if (n <= 1) { return n; }
+    fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+@allow(unbounded_recursion)
+fn ackermann(m: Int, n: Int) -> Int {
+    if (m == 0) { return n + 1; }
+    if (n == 0) { return ackermann(m - 1, 1); }
+    ackermann(m - 1, ackermann(m, n - 1))
+}
+
+fn collatz_steps(n: Int) -> Int {
+    let mut steps = 0;
+    let mut x = n;
+    while x != 1 {
+        if (x % 2 == 0) {
+            x = x / 2;
+        } else {
+            x = 3 * x + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn is_sorted(xs: List<Int>) -> Bool {
+    let mut i = 1;
+    while i < xs.len() {
+        if (xs[i] < xs[i - 1]) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn bubble_sort(xs: List<Int>) -> List<Int> {
+    let result = List.new();
+    let mut i = 0;
+    while i < xs.len() {
+        result.push(xs[i]);
+        i = i + 1;
+    }
+    let mut swapped = true;
+    while swapped {
+        swapped = false;
+        let mut j = 0;
+        while j < result.len() - 1 {
+            if (result[j] > result[j + 1]) {
+                let temp = result[j];
+                result[j] = result[j + 1];
+                result[j + 1] = temp;
+                swapped = true;
+            }
+            j = j + 1;
+        }
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: Fibonacci
+    if (fibonacci(0) != 0) {
+        print("FAIL test1a");
+        return 1;
+    }
+    if (fibonacci(10) != 55) {
+        print(f"FAIL test1b: fib(10) = {fibonacci(10)}");
+        return 1;
+    }
+    print("test1 fibonacci: OK");
+
+    // Test 2: Ackermann (small values)
+    if (ackermann(0, 0) != 1) {
+        print("FAIL test2a");
+        return 1;
+    }
+    if (ackermann(1, 1) != 3) {
+        print("FAIL test2b");
+        return 1;
+    }
+    if (ackermann(2, 2) != 7) {
+        print(f"FAIL test2c: ack(2,2) = {ackermann(2, 2)}");
+        return 1;
+    }
+    if (ackermann(3, 3) != 61) {
+        print(f"FAIL test2d: ack(3,3) = {ackermann(3, 3)}");
+        return 1;
+    }
+    print("test2 ackermann: OK");
+
+    // Test 3: Collatz
+    // 27 takes 111 steps
+    let steps = collatz_steps(27);
+    if (steps != 111) {
+        print(f"FAIL test3: collatz(27) = {steps} steps");
+        return 1;
+    }
+    print("test3 collatz: OK");
+
+    // Test 4: Bubble sort
+    let unsorted = [64, 34, 25, 12, 22, 11, 90];
+    let sorted = bubble_sort(unsorted);
+    if (!is_sorted(sorted)) {
+        print("FAIL test4: not sorted");
+        return 1;
+    }
+    if (sorted[0] != 11 || sorted[6] != 90) {
+        print(f"FAIL test4: sorted[0]={sorted[0]}, sorted[6]={sorted[6]}");
+        return 1;
+    }
+    print("test4 bubble_sort: OK");
+
+    // Test 5: Is sorted
+    if (!is_sorted([1, 2, 3, 4, 5])) {
+        print("FAIL test5a");
+        return 1;
+    }
+    if (is_sorted([1, 3, 2, 4, 5])) {
+        print("FAIL test5b");
+        return 1;
+    }
+    print("test5 is_sorted: OK");
+
+    // Test 6: Function composition chain
+    let data = [9, 7, 5, 3, 1, 8, 6, 4, 2, 0];
+    let sorted_data = bubble_sort(data);
+    if (!is_sorted(sorted_data)) {
+        print("FAIL test6");
+        return 1;
+    }
+    let total = sum(sorted_data);
+    if (total != 45) {
+        print(f"FAIL test6: sum = {total}");
+        return 1;
+    }
+    print("test6 chain: OK");
+
+    print("1039_multi_function: PASS");
+    0
+}
+
+fn sum(xs: List<Int>) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < xs.len() {
+        total = total + xs[i];
+        i = i + 1;
+    }
+    total
+}

@@ -1,0 +1,143 @@
+// @test: run
+// @level: L0
+// @description: Test Result/Maybe error handling: unwrap, map, and_then, ? operator
+// @expected-exit: 0
+
+type ParseError is { message: Text };
+
+fn parse_int(s: Text) -> Result<Int, ParseError> {
+    if (s == "42") {
+        Ok(42)
+    } else if (s == "0") {
+        Ok(0)
+    } else if (s == "100") {
+        Ok(100)
+    } else {
+        Err(ParseError { message: f"cannot parse '{s}'" })
+    }
+}
+
+fn double_parsed(s: Text) -> Result<Int, ParseError> {
+    let val = parse_int(s)?;
+    Ok(val * 2)
+}
+
+fn chain_parse(a: Text, b: Text) -> Result<Int, ParseError> {
+    let x = parse_int(a)?;
+    let y = parse_int(b)?;
+    Ok(x + y)
+}
+
+fn find_positive(nums: List<Int>) -> Maybe<Int> {
+    for n in nums {
+        if (n > 0) {
+            return Some(n);
+        }
+    }
+    None
+}
+
+fn main() -> Int {
+    // Test 1: Result Ok path
+    let r1 = parse_int("42");
+    match r1 {
+        Ok(v) => {
+            if (v != 42) {
+                print(f"FAIL test1: expected 42, got {v}");
+                return 1;
+            }
+        }
+        Err(e) => {
+            print(f"FAIL test1: unexpected error: {e.message}");
+            return 1;
+        }
+    }
+    print("Test 1 PASS: Result Ok");
+
+    // Test 2: Result Err path
+    let r2 = parse_int("abc");
+    match r2 {
+        Ok(v) => {
+            print(f"FAIL test2: should have errored, got {v}");
+            return 1;
+        }
+        Err(e) => {
+            print(f"Test 2 PASS: Result Err: {e.message}");
+        }
+    }
+
+    // Test 3: ? operator propagation
+    let r3 = double_parsed("42");
+    match r3 {
+        Ok(v) => {
+            if (v != 84) {
+                print(f"FAIL test3: expected 84, got {v}");
+                return 1;
+            }
+            print("Test 3 PASS: ? operator doubles = 84");
+        }
+        Err(e) => {
+            print(f"FAIL test3: {e.message}");
+            return 1;
+        }
+    }
+
+    // Test 4: ? operator error propagation
+    let r4 = double_parsed("bad");
+    match r4 {
+        Ok(v) => {
+            print(f"FAIL test4: should have errored, got {v}");
+            return 1;
+        }
+        Err(e) => {
+            print(f"Test 4 PASS: ? propagated error: {e.message}");
+        }
+    }
+
+    // Test 5: Chain ? calls
+    let r5 = chain_parse("42", "100");
+    match r5 {
+        Ok(v) => {
+            if (v != 142) {
+                print(f"FAIL test5: expected 142, got {v}");
+                return 1;
+            }
+            print("Test 5 PASS: chained ? = 142");
+        }
+        Err(e) => {
+            print(f"FAIL test5: {e.message}");
+            return 1;
+        }
+    }
+
+    // Test 6: Maybe Some/None
+    let m1 = find_positive([-1, -2, 5, 3]);
+    match m1 {
+        Some(v) => {
+            if (v != 5) {
+                print(f"FAIL test6: expected 5, got {v}");
+                return 1;
+            }
+            print("Test 6 PASS: Maybe Some(5)");
+        }
+        None => {
+            print("FAIL test6: expected Some, got None");
+            return 1;
+        }
+    }
+
+    // Test 7: Maybe None
+    let m2 = find_positive([-1, -2, -3]);
+    match m2 {
+        Some(v) => {
+            print(f"FAIL test7: expected None, got Some({v})");
+            return 1;
+        }
+        None => {
+            print("Test 7 PASS: Maybe None");
+        }
+    }
+
+    print("All error handling tests passed");
+    0
+}

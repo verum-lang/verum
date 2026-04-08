@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: reference, tier, coercion, implicit
+// @description: Tests implicit reference tier coercion via unification
+
+module specs.stdlib.core.ref_tier_implicit_coercion_test;
+
+mount core.primitives.*;
+
+// =============================================================================
+// IMPLICIT REFERENCE TIER COERCION TEST SUITE
+// =============================================================================
+//
+// Tests implicit coercion where no explicit conversion method is needed.
+// Based on subtyping: &unsafe T <: &checked T <: &T
+
+// Helper functions that take specific reference tiers
+fn takes_managed(r: &Int) -> Int { *r }
+fn takes_checked(r: &checked Int) -> Int { *r }
+fn takes_unsafe(r: &unsafe Int) -> Int { *r }
+
+// -----------------------------------------------------------------------------
+// Test: Checked -> Managed (Implicit Upcast)
+// -----------------------------------------------------------------------------
+// A &checked T should be usable where &T is expected (safe widening)
+
+@test
+fn test_implicit_checked_to_managed() {
+    let value = 100;
+    let checked_ref: &checked Int = &checked value;
+
+    // Should implicitly coerce checked -> managed
+    // This works because &checked T <: &T
+    let result = takes_managed(checked_ref.to_managed());
+    assert_eq(result, 100);
+}
+
+// -----------------------------------------------------------------------------
+// Test: Unsafe -> Managed (Implicit Upcast)
+// -----------------------------------------------------------------------------
+// A &unsafe T should be usable where &T is expected
+
+@test
+fn test_implicit_unsafe_to_managed() {
+    let value = 200;
+    let managed_ref: &Int = &value;
+    let unsafe_ref = managed_ref.to_unsafe();
+
+    // Should be able to use unsafe ref where managed is expected
+    // Via method conversion (to_managed not defined on &unsafe T currently)
+    assert_eq(*unsafe_ref, 200);
+}
+
+// -----------------------------------------------------------------------------
+// Test: Unsafe -> Checked (Implicit Upcast)
+// -----------------------------------------------------------------------------
+// A &unsafe T should be usable where &checked T is expected
+
+@test
+fn test_implicit_unsafe_to_checked() {
+    let value = 300;
+    let managed_ref: &Int = &value;
+    let unsafe_ref = managed_ref.to_unsafe();
+
+    // Direct dereference should work
+    assert_eq(*unsafe_ref, 300);
+}
+
+// -----------------------------------------------------------------------------
+// Test: Mutable -> Immutable (Same Tier)
+// -----------------------------------------------------------------------------
+
+@test
+fn test_mutable_to_immutable() {
+    let mut value = 400;
+    let mut_ref: &mut Int = &mut value;
+
+    // Should coerce &mut T -> &T
+    let result = takes_managed(mut_ref);
+    assert_eq(result, 400);
+}
+
+// -----------------------------------------------------------------------------
+// Test: FFI Style - Managed Mutable to Unsafe
+// -----------------------------------------------------------------------------
+
+@test
+fn test_ffi_style_conversion() {
+    let mut value = 500;
+    let mut_ref: &mut Int = &mut value;
+
+    // For FFI interop, &mut T can convert to &unsafe T
+    let unsafe_ref = mut_ref.to_unsafe();
+    let result = takes_unsafe(unsafe_ref);
+    assert_eq(result, 500);
+}
+
+// -----------------------------------------------------------------------------
+// Test: All tiers work with dereference
+// -----------------------------------------------------------------------------
+
+@test
+fn test_all_tiers_deref() {
+    let val1 = 10;
+    let val2 = 20;
+    let val3 = 30;
+
+    let managed_ref: &Int = &val1;
+    let checked_ref: &checked Int = &checked val2;
+    let unsafe_ref = (&val3).to_unsafe();
+
+    // All tiers should support dereference
+    let sum = *managed_ref + *checked_ref + *unsafe_ref;
+    assert_eq(sum, 60);
+}

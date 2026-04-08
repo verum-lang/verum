@@ -1,0 +1,135 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, linked-list, data-structure
+// @timeout: 10000
+
+// Pool-based singly linked list using flat Int arrays to avoid nested record returns
+type Pool is {
+    v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int,
+    n0: Int, n1: Int, n2: Int, n3: Int, n4: Int, n5: Int, n6: Int, n7: Int,
+    alloc: Int, head: Int
+};
+
+fn pool_new() -> Pool {
+    Pool {
+        v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        n0: -1, n1: -1, n2: -1, n3: -1, n4: -1, n5: -1, n6: -1, n7: -1,
+        alloc: 0, head: -1
+    }
+}
+
+fn get_val(p: Pool, i: Int) -> Int {
+    if i == 0 { p.v0 } else if i == 1 { p.v1 } else if i == 2 { p.v2 }
+    else if i == 3 { p.v3 } else if i == 4 { p.v4 } else if i == 5 { p.v5 }
+    else if i == 6 { p.v6 } else { p.v7 }
+}
+
+fn get_next(p: Pool, i: Int) -> Int {
+    if i == 0 { p.n0 } else if i == 1 { p.n1 } else if i == 2 { p.n2 }
+    else if i == 3 { p.n3 } else if i == 4 { p.n4 } else if i == 5 { p.n5 }
+    else if i == 6 { p.n6 } else { p.n7 }
+}
+
+fn set_val(p: Pool, i: Int, v: Int) -> Pool {
+    Pool {
+        v0: if i == 0 { v } else { p.v0 }, v1: if i == 1 { v } else { p.v1 },
+        v2: if i == 2 { v } else { p.v2 }, v3: if i == 3 { v } else { p.v3 },
+        v4: if i == 4 { v } else { p.v4 }, v5: if i == 5 { v } else { p.v5 },
+        v6: if i == 6 { v } else { p.v6 }, v7: if i == 7 { v } else { p.v7 },
+        n0: p.n0, n1: p.n1, n2: p.n2, n3: p.n3, n4: p.n4, n5: p.n5, n6: p.n6, n7: p.n7,
+        alloc: p.alloc, head: p.head
+    }
+}
+
+fn set_next(p: Pool, i: Int, nx: Int) -> Pool {
+    Pool {
+        v0: p.v0, v1: p.v1, v2: p.v2, v3: p.v3, v4: p.v4, v5: p.v5, v6: p.v6, v7: p.v7,
+        n0: if i == 0 { nx } else { p.n0 }, n1: if i == 1 { nx } else { p.n1 },
+        n2: if i == 2 { nx } else { p.n2 }, n3: if i == 3 { nx } else { p.n3 },
+        n4: if i == 4 { nx } else { p.n4 }, n5: if i == 5 { nx } else { p.n5 },
+        n6: if i == 6 { nx } else { p.n6 }, n7: if i == 7 { nx } else { p.n7 },
+        alloc: p.alloc, head: p.head
+    }
+}
+
+fn push_front(p: Pool, val: Int) -> Pool {
+    let idx = p.alloc;
+    let mut p2 = set_val(p, idx, val);
+    p2 = set_next(p2, idx, p.head);
+    Pool {
+        v0: p2.v0, v1: p2.v1, v2: p2.v2, v3: p2.v3, v4: p2.v4, v5: p2.v5, v6: p2.v6, v7: p2.v7,
+        n0: p2.n0, n1: p2.n1, n2: p2.n2, n3: p2.n3, n4: p2.n4, n5: p2.n5, n6: p2.n6, n7: p2.n7,
+        alloc: idx + 1, head: idx
+    }
+}
+
+fn list_length(p: Pool) -> Int {
+    let mut count = 0;
+    let mut cur = p.head;
+    while cur != -1 {
+        count = count + 1;
+        cur = get_next(p, cur);
+    }
+    count
+}
+
+fn list_sum(p: Pool) -> Int {
+    let mut total = 0;
+    let mut cur = p.head;
+    while cur != -1 {
+        total = total + get_val(p, cur);
+        cur = get_next(p, cur);
+    }
+    total
+}
+
+fn list_contains(p: Pool, val: Int) -> Int {
+    let mut cur = p.head;
+    while cur != -1 {
+        if get_val(p, cur) == val { return 1; }
+        cur = get_next(p, cur);
+    }
+    0
+}
+
+fn list_nth(p: Pool, n: Int) -> Int {
+    let mut cur = p.head;
+    let mut i = 0;
+    while cur != -1 {
+        if i == n { return get_val(p, cur); }
+        cur = get_next(p, cur);
+        i = i + 1;
+    }
+    -1
+}
+
+fn main() -> Int {
+    let mut lst = pool_new();
+    assert_eq(list_length(lst), 0);
+
+    // Push 1, 2, 3 (front -> [3, 2, 1])
+    lst = push_front(lst, 1);
+    lst = push_front(lst, 2);
+    lst = push_front(lst, 3);
+
+    assert_eq(list_length(lst), 3);
+    assert_eq(list_nth(lst, 0), 3);
+    assert_eq(list_nth(lst, 1), 2);
+    assert_eq(list_nth(lst, 2), 1);
+    assert_eq(list_sum(lst), 6);
+
+    assert_eq(list_contains(lst, 2), 1);
+    assert_eq(list_contains(lst, 5), 0);
+
+    // Push more
+    lst = push_front(lst, 10);
+    lst = push_front(lst, 20);
+    assert_eq(list_length(lst), 5);
+    assert_eq(list_nth(lst, 0), 20);
+    assert_eq(list_sum(lst), 36);  // 20+10+3+2+1
+
+    print("DIFF_OK: linked_list");
+    0
+}

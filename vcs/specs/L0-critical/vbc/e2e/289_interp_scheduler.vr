@@ -1,0 +1,560 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, scheduler, priority-queue
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: simple task scheduler — priority queue (min-heap),
+// round-robin simulation, earliest-deadline-first scheduling.
+
+// =============================================================================
+// Task record
+// =============================================================================
+
+type SchedTask is {
+    task_id: Int,
+    priority: Int,
+    deadline: Int,
+    duration: Int,
+    remaining: Int
+};
+
+fn make_task(tid: Int, prio: Int, dl: Int, dur: Int) -> SchedTask {
+    SchedTask { task_id: tid, priority: prio, deadline: dl, duration: dur, remaining: dur }
+}
+
+// =============================================================================
+// Min-heap (priority queue) using array record
+// Heap property: parent <= children (min at root)
+// =============================================================================
+
+type Heap8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn heap_get(h: Heap8, i: Int) -> Int {
+    if i == 0 { h.e0 }
+    else if i == 1 { h.e1 }
+    else if i == 2 { h.e2 }
+    else if i == 3 { h.e3 }
+    else if i == 4 { h.e4 }
+    else if i == 5 { h.e5 }
+    else if i == 6 { h.e6 }
+    else { h.e7 }
+}
+
+fn heap_set(h: Heap8, i: Int, v: Int) -> Heap8 {
+    Heap8 {
+        e0: if i == 0 { v } else { h.e0 },
+        e1: if i == 1 { v } else { h.e1 },
+        e2: if i == 2 { v } else { h.e2 },
+        e3: if i == 3 { v } else { h.e3 },
+        e4: if i == 4 { v } else { h.e4 },
+        e5: if i == 5 { v } else { h.e5 },
+        e6: if i == 6 { v } else { h.e6 },
+        e7: if i == 7 { v } else { h.e7 }
+    }
+}
+
+fn heap_empty() -> Heap8 {
+    Heap8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+type HeapState is { data: Heap8, size: Int };
+
+fn heap_swap(h: Heap8, i: Int, j: Int) -> Heap8 {
+    let vi = heap_get(h, i);
+    let vj = heap_get(h, j);
+    let h2 = heap_set(h, i, vj);
+    heap_set(h2, j, vi)
+}
+
+fn heap_sift_up(h: Heap8, idx: Int) -> Heap8 {
+    let mut data = h;
+    let mut i = idx;
+    while i > 0 {
+        let parent = (i - 1) / 2;
+        if heap_get(data, i) < heap_get(data, parent) {
+            data = heap_swap(data, i, parent);
+            i = parent;
+        } else {
+            i = 0; // break (set to 0 which fails while condition)
+            i = -1;
+        }
+    }
+    data
+}
+
+fn heap_sift_down(h: Heap8, idx: Int, sz: Int) -> Heap8 {
+    let mut data = h;
+    let mut i = idx;
+    let mut cont = 1;
+    while cont != 0 {
+        let left = 2 * i + 1;
+        let right = 2 * i + 2;
+        let mut smallest = i;
+        if left < sz && heap_get(data, left) < heap_get(data, smallest) {
+            smallest = left;
+        }
+        if right < sz && heap_get(data, right) < heap_get(data, smallest) {
+            smallest = right;
+        }
+        if smallest != i {
+            data = heap_swap(data, i, smallest);
+            i = smallest;
+        } else {
+            cont = 0;
+        }
+    }
+    data
+}
+
+fn heap_push(hs: HeapState, val: Int) -> HeapState {
+    let new_data = heap_set(hs.data, hs.size, val);
+    let sifted = heap_sift_up(new_data, hs.size);
+    HeapState { data: sifted, size: hs.size + 1 }
+}
+
+type HeapPopResult is { state: HeapState, value: Int };
+
+fn heap_pop(hs: HeapState) -> HeapPopResult {
+    if hs.size <= 0 {
+        return HeapPopResult { state: hs, value: -1 };
+    }
+    let min_val = heap_get(hs.data, 0);
+    let last_val = heap_get(hs.data, hs.size - 1);
+    let new_data = heap_set(hs.data, 0, last_val);
+    let new_size = hs.size - 1;
+    let sifted = heap_sift_down(new_data, 0, new_size);
+    HeapPopResult {
+        state: HeapState { data: sifted, size: new_size },
+        value: min_val
+    }
+}
+
+fn test_heap_basic() {
+    let mut hs = HeapState { data: heap_empty(), size: 0 };
+
+    // Push elements
+    hs = heap_push(hs, 5);
+    hs = heap_push(hs, 3);
+    hs = heap_push(hs, 7);
+    hs = heap_push(hs, 1);
+    hs = heap_push(hs, 4);
+
+    assert_eq(hs.size, 5);
+    // Min should be 1
+    assert_eq(heap_get(hs.data, 0), 1);
+}
+
+fn test_heap_pop_order() {
+    let mut hs = HeapState { data: heap_empty(), size: 0 };
+
+    hs = heap_push(hs, 5);
+    hs = heap_push(hs, 3);
+    hs = heap_push(hs, 7);
+    hs = heap_push(hs, 1);
+    hs = heap_push(hs, 4);
+    hs = heap_push(hs, 2);
+    hs = heap_push(hs, 6);
+
+    // Pop in sorted order
+    let r1 = heap_pop(hs);
+    assert_eq(r1.value, 1);
+    let r2 = heap_pop(r1.state);
+    assert_eq(r2.value, 2);
+    let r3 = heap_pop(r2.state);
+    assert_eq(r3.value, 3);
+    let r4 = heap_pop(r3.state);
+    assert_eq(r4.value, 4);
+    let r5 = heap_pop(r4.state);
+    assert_eq(r5.value, 5);
+    let r6 = heap_pop(r5.state);
+    assert_eq(r6.value, 6);
+    let r7 = heap_pop(r6.state);
+    assert_eq(r7.value, 7);
+    assert_eq(r7.state.size, 0);
+}
+
+fn test_heap_sorted_input() {
+    let mut hs = HeapState { data: heap_empty(), size: 0 };
+    hs = heap_push(hs, 1);
+    hs = heap_push(hs, 2);
+    hs = heap_push(hs, 3);
+    hs = heap_push(hs, 4);
+    hs = heap_push(hs, 5);
+
+    let r1 = heap_pop(hs);
+    assert_eq(r1.value, 1);
+    let r2 = heap_pop(r1.state);
+    assert_eq(r2.value, 2);
+    let r3 = heap_pop(r2.state);
+    assert_eq(r3.value, 3);
+}
+
+fn test_heap_reverse_input() {
+    let mut hs = HeapState { data: heap_empty(), size: 0 };
+    hs = heap_push(hs, 5);
+    hs = heap_push(hs, 4);
+    hs = heap_push(hs, 3);
+    hs = heap_push(hs, 2);
+    hs = heap_push(hs, 1);
+
+    let r1 = heap_pop(hs);
+    assert_eq(r1.value, 1);
+    let r2 = heap_pop(r1.state);
+    assert_eq(r2.value, 2);
+}
+
+// =============================================================================
+// Priority-based task scheduling using heap
+// =============================================================================
+
+// Store task priorities in heap, task IDs in parallel array
+type SchedQueue is {
+    prio_heap: HeapState,
+    ids: Heap8,
+    task_count: Int
+};
+
+fn test_priority_scheduling() {
+    // Simulate priority scheduling with the heap
+    // Tasks: (id, priority)
+    // Lower priority number = higher priority
+    let mut hs = HeapState { data: heap_empty(), size: 0 };
+
+    // Encode as priority*100 + id to sort by priority, break ties by id
+    hs = heap_push(hs, 3 * 100 + 1);   // Task 1, priority 3
+    hs = heap_push(hs, 1 * 100 + 2);   // Task 2, priority 1
+    hs = heap_push(hs, 2 * 100 + 3);   // Task 3, priority 2
+    hs = heap_push(hs, 1 * 100 + 4);   // Task 4, priority 1
+    hs = heap_push(hs, 5 * 100 + 5);   // Task 5, priority 5
+
+    // Pop order should be by priority
+    let r1 = heap_pop(hs);
+    assert_eq(r1.value / 100, 1);  // Priority 1
+
+    let r2 = heap_pop(r1.state);
+    assert_eq(r2.value / 100, 1);  // Priority 1
+
+    let r3 = heap_pop(r2.state);
+    assert_eq(r3.value / 100, 2);  // Priority 2
+
+    let r4 = heap_pop(r3.state);
+    assert_eq(r4.value / 100, 3);  // Priority 3
+
+    let r5 = heap_pop(r4.state);
+    assert_eq(r5.value / 100, 5);  // Priority 5
+}
+
+// =============================================================================
+// Round-robin simulation
+// =============================================================================
+
+type RRState is {
+    t0_rem: Int, t1_rem: Int, t2_rem: Int, t3_rem: Int,
+    time_elapsed: Int,
+    completed: Int
+};
+
+fn test_round_robin() {
+    // 4 tasks with different durations
+    // Task 0: 3, Task 1: 5, Task 2: 2, Task 3: 4
+    // Time quantum: 2
+    let quantum = 2;
+    let mut state = RRState {
+        t0_rem: 3, t1_rem: 5, t2_rem: 2, t3_rem: 4,
+        time_elapsed: 0,
+        completed: 0
+    };
+
+    let mut rounds = 0;
+    while state.completed < 4 && rounds < 20 {
+        // Task 0
+        if state.t0_rem > 0 {
+            let work = if state.t0_rem < quantum { state.t0_rem } else { quantum };
+            state = RRState {
+                t0_rem: state.t0_rem - work, t1_rem: state.t1_rem,
+                t2_rem: state.t2_rem, t3_rem: state.t3_rem,
+                time_elapsed: state.time_elapsed + work,
+                completed: if state.t0_rem - work == 0 { state.completed + 1 } else { state.completed }
+            };
+        }
+        // Task 1
+        if state.t1_rem > 0 {
+            let work = if state.t1_rem < quantum { state.t1_rem } else { quantum };
+            state = RRState {
+                t0_rem: state.t0_rem, t1_rem: state.t1_rem - work,
+                t2_rem: state.t2_rem, t3_rem: state.t3_rem,
+                time_elapsed: state.time_elapsed + work,
+                completed: if state.t1_rem - work == 0 { state.completed + 1 } else { state.completed }
+            };
+        }
+        // Task 2
+        if state.t2_rem > 0 {
+            let work = if state.t2_rem < quantum { state.t2_rem } else { quantum };
+            state = RRState {
+                t0_rem: state.t0_rem, t1_rem: state.t1_rem,
+                t2_rem: state.t2_rem - work, t3_rem: state.t3_rem,
+                time_elapsed: state.time_elapsed + work,
+                completed: if state.t2_rem - work == 0 { state.completed + 1 } else { state.completed }
+            };
+        }
+        // Task 3
+        if state.t3_rem > 0 {
+            let work = if state.t3_rem < quantum { state.t3_rem } else { quantum };
+            state = RRState {
+                t0_rem: state.t0_rem, t1_rem: state.t1_rem,
+                t2_rem: state.t2_rem, t3_rem: state.t3_rem - work,
+                time_elapsed: state.time_elapsed + work,
+                completed: if state.t3_rem - work == 0 { state.completed + 1 } else { state.completed }
+            };
+        }
+        rounds = rounds + 1;
+    }
+
+    assert_eq(state.completed, 4);
+    // Total time = sum of all durations = 3+5+2+4 = 14
+    assert_eq(state.time_elapsed, 14);
+    // All tasks should be complete
+    assert_eq(state.t0_rem, 0);
+    assert_eq(state.t1_rem, 0);
+    assert_eq(state.t2_rem, 0);
+    assert_eq(state.t3_rem, 0);
+}
+
+// =============================================================================
+// Earliest-deadline-first scheduling
+// =============================================================================
+
+type EDFTask is { task_id: Int, deadline: Int, duration: Int };
+
+type Arr4Tasks is { t0: EDFTask, t1: EDFTask, t2: EDFTask, t3: EDFTask };
+
+fn task_get(tasks: Arr4Tasks, i: Int) -> EDFTask {
+    if i == 0 { tasks.t0 }
+    else if i == 1 { tasks.t1 }
+    else if i == 2 { tasks.t2 }
+    else { tasks.t3 }
+}
+
+fn find_earliest_deadline(tasks: Arr4Tasks, done: Int) -> Int {
+    // done is a bitmask of completed tasks
+    let mut best_idx = -1;
+    let mut best_dl = 999999;
+    let mut i = 0;
+    while i < 4 {
+        let bit = 1;
+        let mut mask = bit;
+        let mut k = 0;
+        while k < i {
+            mask = mask * 2;
+            k = k + 1;
+        }
+        if (done & mask) == 0 {
+            let t = task_get(tasks, i);
+            if t.deadline < best_dl {
+                best_dl = t.deadline;
+                best_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn test_edf_scheduling() {
+    let tasks = Arr4Tasks {
+        t0: EDFTask { task_id: 0, deadline: 10, duration: 3 },
+        t1: EDFTask { task_id: 1, deadline: 5, duration: 2 },
+        t2: EDFTask { task_id: 2, deadline: 8, duration: 4 },
+        t3: EDFTask { task_id: 3, deadline: 3, duration: 1 }
+    };
+
+    // Schedule order should be: task3 (dl=3), task1 (dl=5), task2 (dl=8), task0 (dl=10)
+    let mut done = 0;
+    let mut current_time = 0;
+    let mut order_correct = 1;
+
+    // Round 1: earliest deadline is task 3
+    let idx1 = find_earliest_deadline(tasks, done);
+    assert_eq(idx1, 3);
+    let t1 = task_get(tasks, idx1);
+    current_time = current_time + t1.duration;
+    assert_eq(current_time, 1);
+    // Mark as done
+    done = done | 8; // bit 3
+
+    // Round 2: earliest remaining deadline is task 1
+    let idx2 = find_earliest_deadline(tasks, done);
+    assert_eq(idx2, 1);
+    let t2 = task_get(tasks, idx2);
+    current_time = current_time + t2.duration;
+    assert_eq(current_time, 3);
+    done = done | 2; // bit 1
+
+    // Round 3: task 2
+    let idx3 = find_earliest_deadline(tasks, done);
+    assert_eq(idx3, 2);
+    let t3 = task_get(tasks, idx3);
+    current_time = current_time + t3.duration;
+    assert_eq(current_time, 7);
+    done = done | 4; // bit 2
+
+    // Round 4: task 0
+    let idx4 = find_earliest_deadline(tasks, done);
+    assert_eq(idx4, 0);
+    let t4 = task_get(tasks, idx4);
+    current_time = current_time + t4.duration;
+    assert_eq(current_time, 10);
+    done = done | 1; // bit 0
+
+    // All done
+    assert_eq(done, 15); // all 4 bits set
+
+    // Verify all tasks met deadlines
+    // Task 3 finished at 1, deadline 3: OK
+    // Task 1 finished at 3, deadline 5: OK
+    // Task 2 finished at 7, deadline 8: OK
+    // Task 0 finished at 10, deadline 10: OK
+}
+
+// =============================================================================
+// Shortest-job-first scheduling
+// =============================================================================
+
+fn find_shortest_job(tasks: Arr4Tasks, done: Int) -> Int {
+    let mut best_idx = -1;
+    let mut best_dur = 999999;
+    let mut i = 0;
+    while i < 4 {
+        let mut mask = 1;
+        let mut k = 0;
+        while k < i {
+            mask = mask * 2;
+            k = k + 1;
+        }
+        if (done & mask) == 0 {
+            let t = task_get(tasks, i);
+            if t.duration < best_dur {
+                best_dur = t.duration;
+                best_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn test_sjf_scheduling() {
+    let tasks = Arr4Tasks {
+        t0: EDFTask { task_id: 0, deadline: 100, duration: 6 },
+        t1: EDFTask { task_id: 1, deadline: 100, duration: 2 },
+        t2: EDFTask { task_id: 2, deadline: 100, duration: 8 },
+        t3: EDFTask { task_id: 3, deadline: 100, duration: 3 }
+    };
+
+    // SJF order: task1 (2), task3 (3), task0 (6), task2 (8)
+    let mut done = 0;
+
+    let idx1 = find_shortest_job(tasks, done);
+    assert_eq(idx1, 1);
+    done = done | 2;
+
+    let idx2 = find_shortest_job(tasks, done);
+    assert_eq(idx2, 3);
+    done = done | 8;
+
+    let idx3 = find_shortest_job(tasks, done);
+    assert_eq(idx3, 0);
+    done = done | 1;
+
+    let idx4 = find_shortest_job(tasks, done);
+    assert_eq(idx4, 2);
+    done = done | 4;
+
+    assert_eq(done, 15);
+}
+
+fn test_sjf_avg_wait_time() {
+    // Calculate average waiting time for SJF
+    let tasks = Arr4Tasks {
+        t0: EDFTask { task_id: 0, deadline: 100, duration: 6 },
+        t1: EDFTask { task_id: 1, deadline: 100, duration: 2 },
+        t2: EDFTask { task_id: 2, deadline: 100, duration: 8 },
+        t3: EDFTask { task_id: 3, deadline: 100, duration: 3 }
+    };
+
+    // SJF order: 2, 3, 6, 8
+    // Wait times: 0, 2, 5, 11
+    // Total wait = 18, average = 18/4 = 4
+    let mut done = 0;
+    let mut total_wait = 0;
+    let mut current_time = 0;
+    let mut step = 0;
+    while step < 4 {
+        let idx = find_shortest_job(tasks, done);
+        total_wait = total_wait + current_time;
+        let t = task_get(tasks, idx);
+        current_time = current_time + t.duration;
+        let mut mask = 1;
+        let mut k = 0;
+        while k < idx {
+            mask = mask * 2;
+            k = k + 1;
+        }
+        done = done | mask;
+        step = step + 1;
+    }
+    assert_eq(total_wait, 18);
+    // Average wait = 18 / 4 = 4 (integer)
+    assert_eq(total_wait / 4, 4);
+}
+
+// =============================================================================
+// Heapsort using the min-heap
+// =============================================================================
+
+fn test_heapsort() {
+    let mut hs = HeapState { data: heap_empty(), size: 0 };
+
+    // Push unsorted values
+    hs = heap_push(hs, 42);
+    hs = heap_push(hs, 17);
+    hs = heap_push(hs, 93);
+    hs = heap_push(hs, 5);
+    hs = heap_push(hs, 28);
+    hs = heap_push(hs, 61);
+
+    // Pop all to get sorted order
+    let r1 = heap_pop(hs);
+    assert_eq(r1.value, 5);
+    let r2 = heap_pop(r1.state);
+    assert_eq(r2.value, 17);
+    let r3 = heap_pop(r2.state);
+    assert_eq(r3.value, 28);
+    let r4 = heap_pop(r3.state);
+    assert_eq(r4.value, 42);
+    let r5 = heap_pop(r4.state);
+    assert_eq(r5.value, 61);
+    let r6 = heap_pop(r5.state);
+    assert_eq(r6.value, 93);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_heap_basic();
+    test_heap_pop_order();
+    test_heap_sorted_input();
+    test_heap_reverse_input();
+    test_priority_scheduling();
+    test_round_robin();
+    test_edf_scheduling();
+    test_sjf_scheduling();
+    test_sjf_avg_wait_time();
+    test_heapsort();
+    print("[OK] 289_interp_scheduler");
+    0
+}

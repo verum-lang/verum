@@ -1,0 +1,499 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: cbgr, latency, epoch, update, benchmark
+// @description: Epoch update frequency and overhead (target: < 50ns update, < 2ns check)
+
+/// Epoch Update Performance Benchmark
+///
+/// CBGR uses epochs to track temporal validity of references across
+/// different phases of computation. Epoch updates happen at specific
+/// program points (e.g., function calls, scope exits).
+///
+/// Epoch capabilities (4 bytes):
+/// - current_epoch: 16 bits (current epoch number)
+/// - capabilities:  16 bits (read/write/share permissions)
+///
+/// Expected overhead:
+/// - Epoch check:  ~1-2ns (compare current epoch)
+/// - Epoch update: ~30-50ns (synchronization overhead)
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 1_000_000;
+
+/// Epoch manager for benchmarking
+type EpochManager is {
+    current_epoch: AtomicU32,
+    epoch_stack: List<u32>,
+};
+
+implement EpochManager {
+    fn new() -> Self {
+        Self {
+            current_epoch: AtomicU32.new(0),
+            epoch_stack: List.new(),
+        }
+    }
+
+    fn advance(&self) -> u32 {
+        self.current_epoch.fetch_add(1, Ordering.AcqRel)
+    }
+
+    fn get(&self) -> u32 {
+        self.current_epoch.load(Ordering.Acquire)
+    }
+
+    fn push_epoch(&mut self) {
+        self.epoch_stack.push(self.advance());
+    }
+
+    fn pop_epoch(&mut self) -> Maybe<u32> {
+        self.epoch_stack.pop()
+    }
+}
+
+/// Baseline: No epoch checking
+fn benchmark_no_epoch() -> BenchmarkResult {
+    let data = 42i64;
+    let ptr = &data as *const i64;
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "no_epoch_check",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "baseline",
+    }
+}
+
+/// Epoch check: Read current epoch value
+fn benchmark_epoch_read() -> BenchmarkResult {
+    let epoch = EpochManager.new();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(epoch.get());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(epoch.get());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_read",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "check",
+    }
+}
+
+/// Epoch comparison check
+fn benchmark_epoch_compare() -> BenchmarkResult {
+    let epoch = EpochManager.new();
+    let expected_epoch = epoch.get();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let current = epoch.get();
+        black_box(current == expected_epoch);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let current = epoch.get();
+        black_box(current == expected_epoch);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_compare",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "check",
+    }
+}
+
+/// Epoch advance (increment)
+fn benchmark_epoch_advance() -> BenchmarkResult {
+    let epoch = EpochManager.new();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        epoch.advance();
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        epoch.advance();
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_advance",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "update",
+    }
+}
+
+/// Epoch push/pop (scope enter/exit pattern)
+fn benchmark_epoch_push_pop() -> BenchmarkResult {
+    let mut epoch = EpochManager.new();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        epoch.push_epoch();
+        epoch.pop_epoch();
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        epoch.push_epoch();
+        epoch.pop_epoch();
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_push_pop",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "update",
+    }
+}
+
+/// Nested epoch scopes
+fn benchmark_nested_epochs() -> BenchmarkResult {
+    let mut epoch = EpochManager.new();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS / 5 {
+        epoch.push_epoch();
+        epoch.push_epoch();
+        epoch.push_epoch();
+        epoch.push_epoch();
+        epoch.push_epoch();
+        epoch.pop_epoch();
+        epoch.pop_epoch();
+        epoch.pop_epoch();
+        epoch.pop_epoch();
+        epoch.pop_epoch();
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 10) {
+        // 5 push + 5 pop = 10 operations
+        epoch.push_epoch();
+        epoch.push_epoch();
+        epoch.push_epoch();
+        epoch.push_epoch();
+        epoch.push_epoch();
+        epoch.pop_epoch();
+        epoch.pop_epoch();
+        epoch.pop_epoch();
+        epoch.pop_epoch();
+        epoch.pop_epoch();
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "nested_epochs_5_deep",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "update",
+    }
+}
+
+/// Reference access with epoch check (full CBGR path)
+fn benchmark_ref_with_epoch() -> BenchmarkResult {
+    let epoch = EpochManager.new();
+    let data = Heap(42i64);
+    let ref_epoch = epoch.get();
+    let managed_ref: &i64 = &*data;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let current = epoch.get();
+        if current >= ref_epoch {
+            black_box(*managed_ref);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Check epoch validity before access
+        let current = epoch.get();
+        if current >= ref_epoch {
+            black_box(*managed_ref);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "ref_access_with_epoch",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "combined",
+    }
+}
+
+/// Multi-threaded epoch update contention
+fn benchmark_epoch_contention() -> BenchmarkResult {
+    mount std.thread;
+    mount std.sync.Arc;
+
+    let epoch = Arc.new(EpochManager.new());
+    const THREADS: Int = 4;
+    const OPS_PER_THREAD: Int = BENCHMARK_ITERATIONS / THREADS;
+
+    let start = Instant.now();
+
+    let handles: List<_> = (0..THREADS).map(|_| {
+        let epoch_clone = Arc.clone(&epoch);
+        thread.spawn(move || {
+            for _ in 0..OPS_PER_THREAD {
+                epoch_clone.advance();
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_contention_4_threads",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "contention",
+    }
+}
+
+/// Epoch check under contention
+fn benchmark_epoch_read_contention() -> BenchmarkResult {
+    mount std.thread;
+    mount std.sync.Arc;
+
+    let epoch = Arc.new(EpochManager.new());
+    const THREADS: Int = 4;
+    const OPS_PER_THREAD: Int = BENCHMARK_ITERATIONS / THREADS;
+
+    // One writer thread, multiple readers
+    let epoch_writer = Arc.clone(&epoch);
+    let writer_handle = thread.spawn(move || {
+        for _ in 0..OPS_PER_THREAD {
+            epoch_writer.advance();
+        }
+    });
+
+    let start = Instant.now();
+
+    let reader_handles: List<_> = (0..THREADS-1).map(|_| {
+        let epoch_reader = Arc.clone(&epoch);
+        thread.spawn(move || {
+            for _ in 0..OPS_PER_THREAD {
+                black_box(epoch_reader.get());
+            }
+        })
+    }).collect();
+
+    for handle in reader_handles {
+        handle.join().unwrap();
+    }
+    writer_handle.join().unwrap();
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_read_under_contention",
+        iterations: BENCHMARK_ITERATIONS * (THREADS - 1) / THREADS,
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS * (THREADS - 1) / THREADS) as f64,
+        category: "contention",
+    }
+}
+
+/// Function call epoch boundary
+fn benchmark_function_epoch_boundary() -> BenchmarkResult {
+    let mut epoch = EpochManager.new();
+
+    @inline(never)
+    fn simulate_function_call(epoch: &mut EpochManager, value: i64) -> i64 {
+        epoch.push_epoch();
+        let result = value + 1;
+        epoch.pop_epoch();
+        result
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(simulate_function_call(&mut epoch, 42));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(simulate_function_call(&mut epoch, 42));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "function_epoch_boundary",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "update",
+    }
+}
+
+/// Epoch-based reference invalidation
+fn benchmark_epoch_invalidation() -> BenchmarkResult {
+    let epoch = EpochManager.new();
+
+    // Simulate reference with captured epoch
+    type EpochRef<T> is {
+        data: *const T,
+        valid_until: u32,
+    };
+
+    implement<T> EpochRef<T> {
+        fn is_valid(&self, current_epoch: u32) -> Bool {
+            current_epoch <= self.valid_until
+        }
+
+        fn try_deref(&self, current_epoch: u32) -> Maybe<&T> {
+            if self.is_valid(current_epoch) {
+                unsafe { Some(&*self.data) }
+            } else {
+                None
+            }
+        }
+    }
+
+    let data = 42i64;
+    let epoch_ref = EpochRef {
+        data: &data as *const i64,
+        valid_until: epoch.get() + 1000000,
+    };
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        if let Some(v) = epoch_ref.try_deref(epoch.get()) {
+            black_box(*v);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        if let Some(v) = epoch_ref.try_deref(epoch.get()) {
+            black_box(*v);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "epoch_ref_invalidation_check",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        category: "combined",
+    }
+}
+
+fn main() {
+    println("=== CBGR Epoch Update Performance ===\n");
+
+    let results = [
+        benchmark_no_epoch(),
+        benchmark_epoch_read(),
+        benchmark_epoch_compare(),
+        benchmark_epoch_advance(),
+        benchmark_epoch_push_pop(),
+        benchmark_nested_epochs(),
+        benchmark_ref_with_epoch(),
+        benchmark_epoch_contention(),
+        benchmark_epoch_read_contention(),
+        benchmark_function_epoch_boundary(),
+        benchmark_epoch_invalidation(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>8}", "Benchmark", "Time (ns)", "Category", "Status");
+    println("{}", "-".repeat(66));
+
+    for result in results {
+        let target = match result.category {
+            "baseline" => 1.0,
+            "check" => 2.0,
+            "update" => 50.0,
+            "combined" => 10.0,
+            "contention" => 200.0,
+            _ => 100.0,
+        };
+
+        let status = if result.per_op_ns <= target { "PASS" } else { "WARN" };
+
+        println("{:<30} {:>12.2} {:>12} {:>8}",
+                result.name, result.per_op_ns, result.category, status);
+    }
+
+    println("");
+    println("Targets:");
+    println("  - Epoch check:    < 2ns");
+    println("  - Epoch update:   < 50ns");
+    println("  - Combined:       < 10ns");
+    println("  - Contention:     < 200ns");
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    per_op_ns: f64,
+    category: Text,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+type AtomicU32 is { value: u32 };
+implement AtomicU32 {
+    fn new(v: u32) -> Self { Self { value: v } }
+    fn load(&self, _: Ordering) -> u32 { self.value }
+    fn fetch_add(&self, _: u32, _: Ordering) -> u32 { self.value }
+}
+
+type Ordering is Relaxed | Acquire | Release | AcqRel | SeqCst;
+
+fn black_box<T>(x: T) -> T { x }

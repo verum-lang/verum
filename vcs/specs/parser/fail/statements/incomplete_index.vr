@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, expression, index, incomplete, error
+// @description: Test incomplete index expression
+// @expected-error: E013
+
+fn test() {
+    let arr = [1, 2, 3];
+    arr[;
+}

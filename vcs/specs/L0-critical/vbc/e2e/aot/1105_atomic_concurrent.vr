@@ -1,0 +1,166 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, atomic, concurrent, stress
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Atomic operations under concurrent load — fetch_add from N threads, CAS loop pattern
+
+mount core.sync.atomic.MemoryOrdering;
+
+fn __mutex_new_raw() -> Int { 0 }
+fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
+fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    // Test 1: AtomicInt fetch_add from 4 threads (50 increments each)
+    let counter = AtomicInt.new(0);
+    let done1 = Channel.new(4);
+
+    let t1 = spawn {
+        let mut i = 0;
+        while i < 50 {
+            counter.fetch_add(1, Ordering.SeqCst);
+            i = i + 1;
+        }
+        done1.send(1);
+        0
+    };
+    let t2 = spawn {
+        let mut i = 0;
+        while i < 50 {
+            counter.fetch_add(1, Ordering.SeqCst);
+            i = i + 1;
+        }
+        done1.send(1);
+        0
+    };
+    let t3 = spawn {
+        let mut i = 0;
+        while i < 50 {
+            counter.fetch_add(1, Ordering.SeqCst);
+            i = i + 1;
+        }
+        done1.send(1);
+        0
+    };
+    let t4 = spawn {
+        let mut i = 0;
+        while i < 50 {
+            counter.fetch_add(1, Ordering.SeqCst);
+            i = i + 1;
+        }
+        done1.send(1);
+        0
+    };
+
+    t1.await;
+    t2.await;
+    t3.await;
+    t4.await;
+
+    let final_val = counter.load(Ordering.SeqCst);
+    // 4 threads * 50 = 200
+    if final_val == 200 { pass = pass + 1; } else { print(f"FAIL1: expected 200, got {final_val}"); }
+
+    // Test 2: CAS loop — bounded counter (max 100)
+    let bounded_counter = AtomicInt.new(0);
+    let done2 = Channel.new(4);
+
+    let w1 = spawn {
+        let mut successes = 0;
+        let mut attempts = 0;
+        while successes < 30 {
+            let current = bounded_counter.load(Ordering.SeqCst);
+            if current < 100 {
+                match bounded_counter.compare_exchange(current, current + 1, Ordering.SeqCst, Ordering.SeqCst) {
+                    Ok(_) => { successes = successes + 1; }
+                    Err(_) => {}
+                }
+            } else {
+                successes = 30;  // stop if at limit
+            }
+            attempts = attempts + 1;
+            if attempts > 1000 { successes = 30; }  // safety limit
+        }
+        done2.send(1);
+        0
+    };
+    let w2 = spawn {
+        let mut successes = 0;
+        let mut attempts = 0;
+        while successes < 30 {
+            let current = bounded_counter.load(Ordering.SeqCst);
+            if current < 100 {
+                match bounded_counter.compare_exchange(current, current + 1, Ordering.SeqCst, Ordering.SeqCst) {
+                    Ok(_) => { successes = successes + 1; }
+                    Err(_) => {}
+                }
+            } else {
+                successes = 30;
+            }
+            attempts = attempts + 1;
+            if attempts > 1000 { successes = 30; }
+        }
+        done2.send(1);
+        0
+    };
+
+    w1.await;
+    w2.await;
+
+    let bounded_val = bounded_counter.load(Ordering.SeqCst);
+    // Should be exactly 60 (2 threads * 30 successful CAS each) unless capped at 100
+    if bounded_val == 60 { pass = pass + 1; } else { print(f"FAIL2: expected 60, got {bounded_val}"); }
+
+    // Test 3: Atomic swap pattern — transfer ownership
+    let slot = AtomicInt.new(0);
+
+    let writer = spawn {
+        slot.store(42, Ordering.SeqCst);
+        0
+    };
+    writer.await;
+
+    let old = slot.swap(99, Ordering.SeqCst);
+    if old == 42 { pass = pass + 1; } else { print(f"FAIL3a: expected 42, got {old}"); }
+
+    let current = slot.load(Ordering.SeqCst);
+    if current == 99 { pass = pass + 1; } else { print(f"FAIL3b: expected 99, got {current}"); }
+
+    // Test 4: Atomic increment/decrement from threads
+    let inc_dec = AtomicInt.new(1000);
+
+    let inc_t = spawn {
+        let mut i = 0;
+        while i < 100 {
+            inc_dec.increment(Ordering.SeqCst);
+            i = i + 1;
+        }
+        0
+    };
+    let dec_t = spawn {
+        let mut i = 0;
+        while i < 50 {
+            inc_dec.decrement(Ordering.SeqCst);
+            i = i + 1;
+        }
+        0
+    };
+
+    inc_t.await;
+    dec_t.await;
+
+    let result = inc_dec.load(Ordering.SeqCst);
+    // 1000 + 100 - 50 = 1050
+    if result == 1050 { pass = pass + 1; } else { print(f"FAIL4: expected 1050, got {result}"); }
+
+    print(f"pass = {pass}/5");
+    if pass == 5 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

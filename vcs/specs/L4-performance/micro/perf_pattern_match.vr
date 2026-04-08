@@ -1,0 +1,128 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: micro, pattern-match, dispatch, sum-type, performance
+// @description: Pattern match dispatch speed on sum types (1M iterations)
+
+/// Pattern Match Dispatch Benchmark
+
+type TwoWay is
+    | Left(Int)
+    | Right(Int);
+
+type FiveWay is
+    | V1(Int)
+    | V2(Int)
+    | V3(Int)
+    | V4(Int)
+    | V5(Int);
+
+type TenWay is
+    | T1(Int)
+    | T2(Int)
+    | T3(Int)
+    | T4(Int)
+    | T5(Int)
+    | T6(Int)
+    | T7(Int)
+    | T8(Int)
+    | T9(Int)
+    | T10(Int);
+
+fn match_two(v: TwoWay) -> Int {
+    match v {
+        Left(x) => x,
+        Right(x) => x + 1,
+    }
+}
+
+fn match_five(v: FiveWay) -> Int {
+    match v {
+        V1(x) => x,
+        V2(x) => x + 1,
+        V3(x) => x + 2,
+        V4(x) => x + 3,
+        V5(x) => x + 4,
+    }
+}
+
+fn match_ten(v: TenWay) -> Int {
+    match v {
+        T1(x) => x,
+        T2(x) => x + 1,
+        T3(x) => x + 2,
+        T4(x) => x + 3,
+        T5(x) => x + 4,
+        T6(x) => x + 5,
+        T7(x) => x + 6,
+        T8(x) => x + 7,
+        T9(x) => x + 8,
+        T10(x) => x + 9,
+    }
+}
+
+fn bench_two_way(iters: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        let v = if i % 2 == 0 { TwoWay.Left(i) } else { TwoWay.Right(i) };
+        sum = sum + match_two(v);
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_five_way(iters: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        let r = i % 5;
+        let v = if r == 0 { FiveWay.V1(i) }
+                else if r == 1 { FiveWay.V2(i) }
+                else if r == 2 { FiveWay.V3(i) }
+                else if r == 3 { FiveWay.V4(i) }
+                else { FiveWay.V5(i) };
+        sum = sum + match_five(v);
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_ten_way(iters: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        let r = i % 10;
+        let v = if r == 0 { TenWay.T1(i) }
+                else if r == 1 { TenWay.T2(i) }
+                else if r == 2 { TenWay.T3(i) }
+                else if r == 3 { TenWay.T4(i) }
+                else if r == 4 { TenWay.T5(i) }
+                else if r == 5 { TenWay.T6(i) }
+                else if r == 6 { TenWay.T7(i) }
+                else if r == 7 { TenWay.T8(i) }
+                else if r == 8 { TenWay.T9(i) }
+                else { TenWay.T10(i) };
+        sum = sum + match_ten(v);
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    let iters = 1000000;
+    print("=== Pattern Match Dispatch Benchmarks ===");
+    print(f"Iterations: {iters}");
+
+    let r1 = bench_two_way(iters);
+    print(f"  two_way: done (sum={r1})");
+
+    let r2 = bench_five_way(iters);
+    print(f"  five_way: done (sum={r2})");
+
+    let r3 = bench_ten_way(iters);
+    print(f"  ten_way: done (sum={r3})");
+
+    print("All pattern match benchmarks completed");
+    0
+}

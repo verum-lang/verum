@@ -1,0 +1,42 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let mut m = BTreeMap.new();
+    m.insert(42, 100);
+    print("after first insert");
+
+    let k = 42;
+    if m.contains_key(&k) {
+        print("contains 42: true");
+    } else {
+        print("contains 42: false");
+    }
+
+    // Now insert same key with different value
+    m.insert(42, 200);
+    print("after dup insert");
+
+    if m.len() == 1 {
+        print("len correct: 1");
+    } else {
+        print("len wrong");
+    }
+
+    match m.get(&k) {
+        Some(v) => {
+            if v == 200 {
+                print("value updated to 200");
+            } else {
+                print("value NOT updated");
+            }
+        },
+        None => {
+            print("key not found after insert");
+        },
+    }
+
+    0
+}

@@ -1,0 +1,313 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/darwin/thread_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, darwin, thread, sync
+// @description: Tests for macOS thread creation and synchronization.
+//
+// Coverage:
+// - Thread, ThreadFn, ThreadError: Thread types
+// - spawn, current_thread, current_tid: Thread operations
+// - Mutex, Condvar, SpinLock, Once: Synchronization primitives
+// - Constants (ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE)
+//
+// Test Strategy:
+// - Test type construction and constants
+// - Test synchronization primitives (single-threaded)
+// - Test Once initialization
+//
+// Note: Multi-threaded tests limited in single-threaded environment.
+//
+// Platform: macOS (pthread-based)
+// =============================================================================
+
+@cfg(target_os = "macos")
+module test.stdlib.sys.darwin.thread_test;
+
+mount core.sys.darwin.thread.{
+    ThreadError,
+    Thread,
+    ThreadFn,
+    Mutex,
+    Condvar,
+    SpinLock,
+    Once,
+
+    spawn,
+    current_thread,
+    current_tid,
+
+    ONCE_INIT,
+    ONCE_RUNNING,
+    ONCE_COMPLETE,
+};
+
+// Timespec import removed - condvar.wait_timeout takes Int ms directly
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// Note: test_current_thread() omitted from main - PthreadT is opaque
+
+// =============================================================================
+// Once Constants Tests
+// =============================================================================
+
+@test
+fn test_once_constants() {
+    // Once states
+    assert(ONCE_INIT == 0);
+    assert(ONCE_RUNNING == 1);
+    assert(ONCE_COMPLETE == 2);
+
+    // States should be distinct
+    assert(ONCE_INIT != ONCE_RUNNING);
+    assert(ONCE_RUNNING != ONCE_COMPLETE);
+    assert(ONCE_INIT != ONCE_COMPLETE);
+
+    print("Once constants tests passed");
+}
+
+// =============================================================================
+// Current Thread ID Tests
+// =============================================================================
+
+@test
+fn test_current_tid() {
+    // Get current thread ID
+    let tid = current_tid();
+
+    // TID should be positive
+    assert(tid > 0);
+
+    // Multiple calls return same TID
+    let tid2 = current_tid();
+    let tid3 = current_tid();
+    assert(tid == tid2);
+    assert(tid == tid3);
+
+    print(f"Current TID: {tid}");
+}
+
+// =============================================================================
+// SpinLock Tests
+// =============================================================================
+
+@test
+fn test_spinlock() {
+    // Create spinlock
+    let mut lock = SpinLock.new();
+
+    // Initially unlocked
+    assert(!lock.is_locked());
+
+    // Lock
+    lock.lock();
+    assert(lock.is_locked());
+
+    // Try lock should fail (already locked)
+    let try_result = lock.try_lock();
+    assert(!try_result);
+
+    // Unlock
+    lock.unlock();
+    assert(!lock.is_locked());
+
+    // Try lock should succeed now
+    let try_result2 = lock.try_lock();
+    assert(try_result2);
+    assert(lock.is_locked());
+
+    lock.unlock();
+
+    // Multiple lock/unlock cycles
+    for _ in 0..10 {
+        lock.lock();
+        assert(lock.is_locked());
+        lock.unlock();
+        assert(!lock.is_locked());
+    }
+
+    print("SpinLock tests passed");
+}
+
+// =============================================================================
+// Mutex Tests
+// =============================================================================
+
+@test
+fn test_mutex() {
+    // Create mutex (returns Result)
+    let mutex_result = Mutex.new();
+    assert(mutex_result is Ok);
+    let mut mutex = mutex_result.unwrap();
+
+    // Lock should succeed
+    let lock_result = mutex.lock();
+    assert(lock_result is Ok);
+
+    // Unlock
+    mutex.unlock();
+
+    // Try lock should succeed
+    let try_result = mutex.try_lock();
+    assert(try_result);
+
+    mutex.unlock();
+
+    // Lock again to verify cycle
+    let lock_result2 = mutex.lock();
+    assert(lock_result2 is Ok);
+
+    mutex.unlock();
+
+    print("Mutex tests passed");
+}
+
+// =============================================================================
+// Condvar Type Tests
+// =============================================================================
+
+@test
+fn test_condvar_type() {
+    // Create condvar (returns Result)
+    let condvar_result = Condvar.new();
+    assert(condvar_result is Ok);
+    let mut condvar = condvar_result.unwrap();
+
+    // Create associated mutex (returns Result)
+    let mutex_result = Mutex.new();
+    assert(mutex_result is Ok);
+    let mut mutex = mutex_result.unwrap();
+
+    // Signal with no waiters is safe
+    condvar.signal();
+    condvar.broadcast();
+
+    // Wait with timeout (takes timeout_ms: Int)
+    let _ = mutex.lock();
+
+    let wait_result = condvar.wait_timeout(&mut mutex, 1);  // 1ms timeout
+
+    // Should timeout or spurious wakeup
+    match wait_result {
+        Ok(signaled) => {
+            // Ok(true) = signaled, Ok(false) = timed out
+        }
+        Err(e) => {
+            // Error condition
+        }
+    }
+
+    mutex.unlock();
+
+    print("Condvar type tests passed");
+}
+
+// =============================================================================
+// Once Tests
+// =============================================================================
+
+@test
+fn test_once() {
+    // Create Once
+    let mut once = Once.new();
+
+    // Initially not complete
+    assert(!once.is_complete());
+
+    // Track calls
+    let mut call_count = 0;
+
+    // Call once
+    once.call_once(|| {
+        call_count += 1;
+    });
+
+    assert(once.is_complete());
+    assert(call_count == 1);
+
+    // Second call should not execute closure
+    once.call_once(|| {
+        call_count += 1;
+    });
+
+    assert(call_count == 1);  // Still 1
+
+    // Third call also should not execute
+    once.call_once(|| {
+        call_count += 1;
+    });
+
+    assert(call_count == 1);  // Still 1
+
+    print("Once tests passed");
+}
+
+// =============================================================================
+// ThreadError Type Tests
+// =============================================================================
+
+@test
+fn test_thread_error_types() {
+    // Create ThreadError variants matching actual API
+    let create_err = ThreadError.CreateFailed { code: 35 };
+    let join_err = ThreadError.JoinFailed { code: 22 };
+    let detach_err = ThreadError.DetachFailed { code: 22 };
+    let tls_err = ThreadError.TlsInitFailed;
+    let joined_err = ThreadError.AlreadyJoined;
+    let detached_err = ThreadError.AlreadyDetached;
+
+    // Pattern matching
+    match create_err {
+        ThreadError.CreateFailed { code } => {
+            assert(code == 35);
+        }
+        _ => assert(false),
+    }
+
+    match join_err {
+        ThreadError.JoinFailed { code } => {
+            assert(code == 22);
+        }
+        _ => assert(false),
+    }
+
+    match detach_err {
+        ThreadError.DetachFailed { code } => {
+            assert(code == 22);
+        }
+        _ => assert(false),
+    }
+
+    match tls_err {
+        ThreadError.TlsInitFailed => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match joined_err {
+        ThreadError.AlreadyJoined => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match detached_err {
+        ThreadError.AlreadyDetached => { /* ok */ }
+        _ => assert(false),
+    }
+
+    print("ThreadError type tests passed");
+}
+
+// =============================================================================
+// Current Thread Tests
+// =============================================================================
+
+// test_current_thread omitted: current_thread() returns PthreadT (opaque)
+// PthreadT does not expose is_valid() or raw() methods

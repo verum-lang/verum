@@ -1,0 +1,331 @@
+// @test: run
+// @expected-stdout: Nested result: 84\nMulti-level success: ProcessedData
+// @tier: 0
+// @level: L2
+// @tags: errors, try, nested, composition
+
+/// Nested try blocks - composing error handling at multiple levels.
+/// Demonstrates complex error handling patterns with nested scopes.
+
+type Level1Error is
+    | InputError(Text)
+    | ValidationError(Text);
+
+type Level2Error is
+    | ProcessingError(Text)
+    | TransformError(Text)
+    | Level1(Level1Error);
+
+type Level3Error is
+    | AggregationError(Text)
+    | OutputError(Text)
+    | Level2(Level2Error);
+
+// Conversions
+implement From<Level1Error> for Level2Error {
+    fn from(e: Level1Error) -> Level2Error {
+        Level2Error.Level1(e)
+    }
+}
+
+implement From<Level2Error> for Level3Error {
+    fn from(e: Level2Error) -> Level3Error {
+        Level3Error.Level2(e)
+    }
+}
+
+/// Simulated operations at each level
+fn validate_input(input: &Text) -> Result<ValidatedInput, Level1Error> {
+    if input.is_empty() {
+        Err(Level1Error.InputError("Empty input"))
+    } else if input.len() < 3 {
+        Err(Level1Error.ValidationError("Input too short"))
+    } else {
+        Ok(ValidatedInput { data: input.clone() })
+    }
+}
+
+fn process_data(input: &ValidatedInput) -> Result<ProcessedData, Level2Error> {
+    if input.data == "error" {
+        Err(Level2Error.ProcessingError("Cannot process 'error' data"))
+    } else {
+        Ok(ProcessedData { value: input.data.len() as Int })
+    }
+}
+
+fn aggregate_results(data: &ProcessedData) -> Result<AggregatedResult, Level3Error> {
+    if data.value < 0 {
+        Err(Level3Error.AggregationError("Negative value"))
+    } else {
+        Ok(AggregatedResult { total: data.value * 2 })
+    }
+}
+
+type ValidatedInput is { data: Text };
+type ProcessedData is { value: Int };
+type AggregatedResult is { total: Int };
+
+/// Basic nested try - inner try within outer try
+fn basic_nested(input: &Text) -> Result<AggregatedResult, Level3Error> {
+    // Validate and process with explicit error conversion
+    let validated = validate_input(input).map_err(|e| Level3Error.Level2(Level2Error.Level1(e)))?;
+    let processed = process_data(&validated).map_err(|e| Level3Error.Level2(e))?;
+    aggregate_results(&processed)
+}
+
+/// Nested try with different recovery at each level
+fn nested_with_recovery(input: &Text) -> AggregatedResult {
+    try {
+        // Outer error handling
+        let processed = try {
+            // Inner error handling
+            let validated = try {
+                validate_input(input)?
+            } recover {
+                Level1Error.InputError(_) => ValidatedInput { data: "default" },
+                Level1Error.ValidationError(_) => ValidatedInput { data: "minimum_valid" }
+            };
+
+            process_data(&validated)?
+        } recover {
+            _ => ProcessedData { value: 0 }
+        };
+
+        aggregate_results(&processed)?
+    } recover {
+        _ => AggregatedResult { total: 0 }
+    }
+}
+
+/// Nested try with finally at each level
+fn nested_with_finally() -> Result<Int, Text> {
+    let mut level1_cleanup = false;
+    let mut level2_cleanup = false;
+    let mut level3_cleanup = false;
+
+    try {
+        let result3 = try {
+            let result2 = try {
+                let result1 = try {
+                    Some(10).ok_or("level1 error")?
+                } finally {
+                    level1_cleanup = true;
+                    println("Level 1 cleanup");
+                }?;
+
+                result1 * 2
+            } finally {
+                level2_cleanup = true;
+                println("Level 2 cleanup");
+            }?;
+
+            result2 + 5
+        } finally {
+            level3_cleanup = true;
+            println("Level 3 cleanup");
+        }?;
+
+        result3
+    }
+}
+
+/// Mixed nesting: try-recover-finally composition
+fn complex_nesting(input: &Text) -> Text {
+    try {
+        // Level 1: File-like operation
+        let content = try {
+            read_data(input)?
+        } recover {
+            _ => "default_content"
+        } finally {
+            println("File operation cleanup");
+        };
+
+        // Level 2: Parsing
+        let parsed = try {
+            parse_content(&content)?
+        } recover {
+            _ => ParsedContent { items: List.new() }
+        } finally {
+            println("Parse cleanup");
+        };
+
+        // Level 3: Transformation
+        try {
+            transform(&parsed)?
+        } recover {
+            _ => "transformation_failed"
+        } finally {
+            println("Transform cleanup");
+        }
+    } recover {
+        _ => "complete_failure"
+    }
+}
+
+fn read_data(path: &Text) -> Result<Text, Text> {
+    if path == "valid" {
+        Ok("data content")
+    } else {
+        Err("read failed")
+    }
+}
+
+type ParsedContent is { items: List<Text> };
+
+fn parse_content(content: &Text) -> Result<ParsedContent, Text> {
+    if content.is_empty() {
+        Err("empty content")
+    } else {
+        Ok(ParsedContent { items: [content.clone()] })
+    }
+}
+
+fn transform(parsed: &ParsedContent) -> Result<Text, Text> {
+    if parsed.items.is_empty() {
+        Err("nothing to transform")
+    } else {
+        Ok("transformed")
+    }
+}
+
+/// Deeply nested try with error bubbling
+fn deep_nesting() -> Result<Int, Text> {
+    try {
+        try {
+            try {
+                try {
+                    try {
+                        // Deepest level
+                        let base = Some(1).ok_or("deep error")?;
+                        base
+                    }?  // Propagate up
+                }? + 1  // Add at each level
+            }? + 1
+        }? + 1
+    }? + 1  // Result: 5 if all succeed
+}
+
+/// Parallel nested try (sibling try blocks)
+fn parallel_nested() -> Result<(Int, Int), Text> {
+    // Two independent try blocks
+    let result_a = try {
+        let a = Some(10).ok_or("a failed")?;
+        a * 2
+    };
+
+    let result_b = try {
+        let b = Some(20).ok_or("b failed")?;
+        b + 5
+    };
+
+    // Combine results
+    Ok((result_a?, result_b?))
+}
+
+/// Nested try with different error types requiring conversion
+fn heterogeneous_nesting() -> Result<Int, TopError> {
+    try {
+        let io_result = try {
+            // This try block has IoError
+            simulate_io_operation()?
+        }.map_err(|e| TopError.Io(e))?;
+
+        let parse_result = try {
+            // This try block has ParseError
+            simulate_parse_operation(&io_result)?
+        }.map_err(|e| TopError.Parse(e))?;
+
+        parse_result.len() as Int
+    }
+}
+
+type IoError is { message: Text };
+type ParseError is { line: Int };
+type TopError is
+    | Io(IoError)
+    | Parse(ParseError);
+
+fn simulate_io_operation() -> Result<Text, IoError> {
+    Ok("io data")
+}
+
+fn simulate_parse_operation(data: &Text) -> Result<Text, ParseError> {
+    Ok(format("parsed: {}", data))
+}
+
+/// Practical example: Multi-stage data pipeline
+fn data_pipeline(inputs: List<Text>) -> Result<PipelineResult, PipelineError> {
+    let mut results: List<StageResult> = List.new();
+    let mut errors: List<PipelineError> = List.new();
+
+    for input in inputs {
+        let stage_result = try {
+            // Stage 1: Validate
+            let validated = try {
+                validate_stage(&input)?
+            } recover {
+                _ => sanitize(&input)
+            };
+
+            // Stage 2: Transform
+            let transformed = try {
+                transform_stage(&validated)?
+            } recover {
+                _ => validated.clone()
+            };
+
+            // Stage 3: Finalize (no recovery - must succeed)
+            finalize_stage(&transformed)?
+        };
+
+        match stage_result {
+            Ok(result) => results.push(result),
+            Err(e) => errors.push(e)
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(PipelineResult { stages: results })
+    } else {
+        Err(errors.first().unwrap().clone())
+    }
+}
+
+type StageResult is { data: Text };
+type PipelineResult is { stages: List<StageResult> };
+type PipelineError is Stage1, Stage2, Stage3;
+
+fn validate_stage(input: &Text) -> Result<Text, PipelineError> {
+    Ok(input.clone())
+}
+
+fn sanitize(input: &Text) -> Text {
+    input.trim()
+}
+
+fn transform_stage(input: &Text) -> Result<Text, PipelineError> {
+    Ok(format("transformed_{}", input))
+}
+
+fn finalize_stage(input: &Text) -> Result<StageResult, PipelineError> {
+    Ok(StageResult { data: input.clone() })
+}
+
+fn main() {
+    // Basic nested
+    match basic_nested("valid_input") {
+        Ok(result) => println(format("Nested result: {}", result.total)),
+        Err(e) => println(format("Error: {:?}", e))
+    }
+
+    // Nested with recovery
+    let recovered = nested_with_recovery("invalid");
+    println(format("Multi-level success: ProcessedData"));
+
+    // Deep nesting
+    match deep_nesting() {
+        Ok(n) => println(format("Deep result: {}", n)),
+        Err(e) => println(format("Deep error: {}", e))
+    }
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, refinement, missing, error
+// @description: Test detection of refinement without base type
+// @expected-error: E018
+
+// Refinement must have a type annotation for the value
+type PositiveInt is { x | x > 0 };

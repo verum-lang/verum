@@ -1,0 +1,241 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, segment-tree, range-minimum-query, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for segment tree — range minimum query with point updates
+// Tree stored as flat array: node i has children 2*i and 2*i+1
+// Supports up to 8 leaf elements (tree size = 32 nodes)
+
+type SegTree is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int, d12: Int, d13: Int, d14: Int, d15: Int,
+    d16: Int, d17: Int, d18: Int, d19: Int, d20: Int, d21: Int, d22: Int, d23: Int,
+    d24: Int, d25: Int, d26: Int, d27: Int, d28: Int, d29: Int, d30: Int, d31: Int,
+    leaf_count: Int
+};
+
+fn st_get(st: SegTree, i: Int) -> Int {
+    if i == 0 { st.d0 } else if i == 1 { st.d1 } else if i == 2 { st.d2 }
+    else if i == 3 { st.d3 } else if i == 4 { st.d4 } else if i == 5 { st.d5 }
+    else if i == 6 { st.d6 } else if i == 7 { st.d7 } else if i == 8 { st.d8 }
+    else if i == 9 { st.d9 } else if i == 10 { st.d10 } else if i == 11 { st.d11 }
+    else if i == 12 { st.d12 } else if i == 13 { st.d13 } else if i == 14 { st.d14 }
+    else if i == 15 { st.d15 } else if i == 16 { st.d16 } else if i == 17 { st.d17 }
+    else if i == 18 { st.d18 } else if i == 19 { st.d19 } else if i == 20 { st.d20 }
+    else if i == 21 { st.d21 } else if i == 22 { st.d22 } else if i == 23 { st.d23 }
+    else if i == 24 { st.d24 } else if i == 25 { st.d25 } else if i == 26 { st.d26 }
+    else if i == 27 { st.d27 } else if i == 28 { st.d28 } else if i == 29 { st.d29 }
+    else if i == 30 { st.d30 } else { st.d31 }
+}
+
+fn st_set(st: SegTree, i: Int, v: Int) -> SegTree {
+    SegTree {
+        d0: if i == 0 { v } else { st.d0 }, d1: if i == 1 { v } else { st.d1 },
+        d2: if i == 2 { v } else { st.d2 }, d3: if i == 3 { v } else { st.d3 },
+        d4: if i == 4 { v } else { st.d4 }, d5: if i == 5 { v } else { st.d5 },
+        d6: if i == 6 { v } else { st.d6 }, d7: if i == 7 { v } else { st.d7 },
+        d8: if i == 8 { v } else { st.d8 }, d9: if i == 9 { v } else { st.d9 },
+        d10: if i == 10 { v } else { st.d10 }, d11: if i == 11 { v } else { st.d11 },
+        d12: if i == 12 { v } else { st.d12 }, d13: if i == 13 { v } else { st.d13 },
+        d14: if i == 14 { v } else { st.d14 }, d15: if i == 15 { v } else { st.d15 },
+        d16: if i == 16 { v } else { st.d16 }, d17: if i == 17 { v } else { st.d17 },
+        d18: if i == 18 { v } else { st.d18 }, d19: if i == 19 { v } else { st.d19 },
+        d20: if i == 20 { v } else { st.d20 }, d21: if i == 21 { v } else { st.d21 },
+        d22: if i == 22 { v } else { st.d22 }, d23: if i == 23 { v } else { st.d23 },
+        d24: if i == 24 { v } else { st.d24 }, d25: if i == 25 { v } else { st.d25 },
+        d26: if i == 26 { v } else { st.d26 }, d27: if i == 27 { v } else { st.d27 },
+        d28: if i == 28 { v } else { st.d28 }, d29: if i == 29 { v } else { st.d29 },
+        d30: if i == 30 { v } else { st.d30 }, d31: if i == 31 { v } else { st.d31 },
+        leaf_count: st.leaf_count
+    }
+}
+
+fn min2(a: Int, b_val: Int) -> Int {
+    if a < b_val { a } else { b_val }
+}
+
+fn max2(a: Int, b_val: Int) -> Int {
+    if a > b_val { a } else { b_val }
+}
+
+// Large sentinel value
+fn inf_val() -> Int { 999999999 }
+
+fn st_new(n: Int) -> SegTree {
+    let big = inf_val();
+    SegTree {
+        d0: big, d1: big, d2: big, d3: big, d4: big, d5: big, d6: big, d7: big,
+        d8: big, d9: big, d10: big, d11: big, d12: big, d13: big, d14: big, d15: big,
+        d16: big, d17: big, d18: big, d19: big, d20: big, d21: big, d22: big, d23: big,
+        d24: big, d25: big, d26: big, d27: big, d28: big, d29: big, d30: big, d31: big,
+        leaf_count: n
+    }
+}
+
+// Build: leaves at positions [n..2n-1] (for n being a power of 2, we use n=8)
+// Internal nodes at [1..n-1], root at 1, node 0 unused
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn st_build(arr: Arr8, n: Int) -> SegTree {
+    let mut st = st_new(n);
+    // Place leaves at positions n..2n-1
+    let mut i = 0;
+    while i < n {
+        st = st_set(st, n + i, a8_get(arr, i));
+        i = i + 1;
+    }
+    // Build internal nodes bottom-up
+    let mut j = n - 1;
+    while j >= 1 {
+        st = st_set(st, j, min2(st_get(st, 2 * j), st_get(st, 2 * j + 1)));
+        j = j - 1;
+    }
+    st
+}
+
+// Point update: set position pos (0-indexed) to value v
+fn st_update(st: SegTree, pos: Int, v: Int) -> SegTree {
+    let n = st.leaf_count;
+    let mut idx = n + pos;
+    let mut result = st_set(st, idx, v);
+    idx = idx / 2;
+    while idx >= 1 {
+        result = st_set(result, idx, min2(st_get(result, 2 * idx), st_get(result, 2 * idx + 1)));
+        idx = idx / 2;
+    }
+    result
+}
+
+// Range minimum query: min of elements in [left, right] (0-indexed, inclusive)
+fn st_query(st: SegTree, left: Int, right: Int) -> Int {
+    let n = st.leaf_count;
+    let mut lo = n + left;
+    let mut hi = n + right + 1;  // exclusive right
+    let mut result = inf_val();
+    while lo < hi {
+        if lo % 2 == 1 {
+            result = min2(result, st_get(st, lo));
+            lo = lo + 1;
+        }
+        if hi % 2 == 1 {
+            hi = hi - 1;
+            result = min2(result, st_get(st, hi));
+        }
+        lo = lo / 2;
+        hi = hi / 2;
+    }
+    result
+}
+
+fn test_build_and_query() {
+    // Array: [5, 3, 7, 1, 4, 2, 8, 6]
+    let arr = Arr8 { d0: 5, d1: 3, d2: 7, d3: 1, d4: 4, d5: 2, d6: 8, d7: 6 };
+    let st = st_build(arr, 8);
+
+    // Full range min
+    assert_eq(st_query(st, 0, 7), 1);
+
+    // Single elements
+    assert_eq(st_query(st, 0, 0), 5);
+    assert_eq(st_query(st, 3, 3), 1);
+    assert_eq(st_query(st, 6, 6), 8);
+
+    // Sub-ranges
+    assert_eq(st_query(st, 0, 1), 3);  // min(5, 3)
+    assert_eq(st_query(st, 0, 3), 1);  // min(5, 3, 7, 1)
+    assert_eq(st_query(st, 4, 7), 2);  // min(4, 2, 8, 6)
+    assert_eq(st_query(st, 2, 5), 1);  // min(7, 1, 4, 2)
+    assert_eq(st_query(st, 1, 6), 1);  // min(3, 7, 1, 4, 2, 8)
+}
+
+fn test_point_update() {
+    let arr = Arr8 { d0: 5, d1: 3, d2: 7, d3: 1, d4: 4, d5: 2, d6: 8, d7: 6 };
+    let mut st = st_build(arr, 8);
+
+    // Update position 3 from 1 to 10
+    st = st_update(st, 3, 10);
+    assert_eq(st_query(st, 3, 3), 10);
+    assert_eq(st_query(st, 0, 7), 2);   // new min is 2 (pos 5)
+    assert_eq(st_query(st, 0, 3), 3);   // min(5, 3, 7, 10)
+
+    // Update position 5 from 2 to 0
+    st = st_update(st, 5, 0);
+    assert_eq(st_query(st, 0, 7), 0);   // new global min
+    assert_eq(st_query(st, 4, 5), 0);   // min(4, 0)
+}
+
+fn test_all_same() {
+    let arr = Arr8 { d0: 5, d1: 5, d2: 5, d3: 5, d4: 5, d5: 5, d6: 5, d7: 5 };
+    let st = st_build(arr, 8);
+    assert_eq(st_query(st, 0, 7), 5);
+    assert_eq(st_query(st, 2, 4), 5);
+}
+
+fn test_descending() {
+    let arr = Arr8 { d0: 8, d1: 7, d2: 6, d3: 5, d4: 4, d5: 3, d6: 2, d7: 1 };
+    let st = st_build(arr, 8);
+    assert_eq(st_query(st, 0, 7), 1);
+    assert_eq(st_query(st, 0, 0), 8);
+    assert_eq(st_query(st, 0, 3), 5);
+    assert_eq(st_query(st, 4, 7), 1);
+    assert_eq(st_query(st, 6, 7), 1);
+}
+
+fn test_ascending() {
+    let arr = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 6, d6: 7, d7: 8 };
+    let st = st_build(arr, 8);
+    assert_eq(st_query(st, 0, 7), 1);
+    assert_eq(st_query(st, 4, 7), 5);
+    assert_eq(st_query(st, 3, 5), 4);
+}
+
+fn test_multiple_updates() {
+    let arr = Arr8 { d0: 10, d1: 20, d2: 30, d3: 40, d4: 50, d5: 60, d6: 70, d7: 80 };
+    let mut st = st_build(arr, 8);
+    assert_eq(st_query(st, 0, 7), 10);
+
+    // Set all to decreasing
+    st = st_update(st, 0, 80);
+    st = st_update(st, 7, 10);
+    assert_eq(st_query(st, 0, 0), 80);
+    assert_eq(st_query(st, 7, 7), 10);
+    assert_eq(st_query(st, 0, 7), 10);
+
+    // Set position 4 to minimum
+    st = st_update(st, 4, -5);
+    assert_eq(st_query(st, 0, 7), -5);
+    assert_eq(st_query(st, 0, 3), 20);  // -5 is at pos 4
+    assert_eq(st_query(st, 4, 4), -5);
+}
+
+fn test_range_max_via_negation() {
+    // We can do range max by storing negated values
+    let arr = Arr8 { d0: -5, d1: -3, d2: -7, d3: -1, d4: -4, d5: -2, d6: -8, d7: -6 };
+    let st = st_build(arr, 8);
+    // Min of negated = negated max
+    // max(5,3,7,1,4,2,8,6) = 8, so min of negated = -8
+    assert_eq(st_query(st, 0, 7), -8);
+    // max(5,3) = 7 -> negate: min(-5,-3,-7) for indices 0-2 = -7
+    assert_eq(st_query(st, 0, 2), -7);
+}
+
+fn main() -> Int {
+    test_build_and_query();
+    test_point_update();
+    test_all_same();
+    test_descending();
+    test_ascending();
+    test_multiple_updates();
+    test_range_max_via_negation();
+    print("[OK] 304_segment_tree_aot");
+    0
+}

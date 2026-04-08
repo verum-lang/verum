@@ -1,0 +1,452 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for yield expressions in generator functions
+
+// ============================================================================
+// Basic Yield Expressions
+// ============================================================================
+
+// Sync generator - simple yield
+fn* basic_generator() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+// Sync generator with variable
+fn* yield_variable() -> Int {
+    let x = 10;
+    yield x;
+    let y = 20;
+    yield y;
+}
+
+// Sync generator with expression
+fn* yield_expression() -> Int {
+    let a = 5;
+    let b = 10;
+    yield a + b;
+    yield a * b;
+    yield a - b;
+}
+
+// ============================================================================
+// Async Generator Yield
+// ============================================================================
+
+// Async generator - basic
+async fn* async_basic() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+// Async generator with await before yield
+async fn* async_with_await() -> Data {
+    let data = fetch().await;
+    yield data;
+
+    let more_data = fetch_more().await;
+    yield more_data;
+}
+
+// Async generator with await in yield expression
+async fn* async_yield_await() -> Text {
+    yield fetch_text().await;
+    yield transform_text().await;
+}
+
+// ============================================================================
+// Yield in Control Flow
+// ============================================================================
+
+// Yield in loop
+fn* yield_in_loop() -> Int {
+    for i in 0..10 {
+        yield i;
+    }
+}
+
+// Yield in while loop
+fn* yield_in_while() -> Int {
+    let mut i = 0;
+    while i < 5 {
+        yield i;
+        i += 1;
+    }
+}
+
+// Yield in infinite loop with break
+fn* yield_until_done() -> Int {
+    let mut i = 0;
+    loop {
+        if i >= 100 {
+            break;
+        }
+        yield i;
+        i += 1;
+    }
+}
+
+// Yield in conditional
+fn* yield_conditional() -> Int {
+    for i in 0..20 {
+        if i % 2 == 0 {
+            yield i;
+        }
+    }
+}
+
+// Yield in match
+fn* yield_in_match() -> Text {
+    for item in items {
+        match item.kind {
+            A => yield "a",
+            B => yield "b",
+            C => {
+                yield "c1";
+                yield "c2";
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Yield with Parameters
+// ============================================================================
+
+// Generator with parameters
+fn* range_generator(start: Int, end: Int) -> Int {
+    for i in start..end {
+        yield i;
+    }
+}
+
+// Generator with step
+fn* step_generator(start: Int, end: Int, step: Int) -> Int {
+    let mut i = start;
+    while i < end {
+        yield i;
+        i += step;
+    }
+}
+
+// Generator with filter predicate
+fn* filtered_generator<T>(items: List<T>, predicate: fn(&T) -> Bool) -> T {
+    for item in items {
+        if predicate(&item) {
+            yield item;
+        }
+    }
+}
+
+// Generator with transformation
+fn* map_generator<T, U>(items: List<T>, mapper: fn(T) -> U) -> U {
+    for item in items {
+        yield mapper(item);
+    }
+}
+
+// ============================================================================
+// Yield Complex Values
+// ============================================================================
+
+// Yield tuples
+fn* tuple_generator() -> (Int, Text) {
+    yield (1, "one");
+    yield (2, "two");
+    yield (3, "three");
+}
+
+// Yield structs
+fn* struct_generator() -> Point {
+    yield Point { x: 0, y: 0 };
+    yield Point { x: 1, y: 1 };
+    yield Point { x: 2, y: 2 };
+}
+
+// Yield from computation
+fn* computed_generator() -> Record {
+    for i in 0..10 {
+        let record = Record {
+            id: i,
+            data: compute_data(i),
+            timestamp: now()
+        };
+        yield record;
+    }
+}
+
+// Yield options
+fn* optional_generator() -> Maybe<Int> {
+    yield Some(1);
+    yield None;
+    yield Some(3);
+}
+
+// Yield results
+fn* result_generator() -> Result<Int, Error> {
+    yield Ok(1);
+    yield Err(make_error("oops"));
+    yield Ok(3);
+}
+
+// ============================================================================
+// Async Generator with Context
+// ============================================================================
+
+// Async generator with context
+async fn* fetch_pages(urls: List<Text>) -> Page using [Network, Logger] {
+    for url in urls {
+        log(f"Fetching: {url}");
+        let page = fetch(url).await;
+        log(f"Fetched: {url}");
+        yield page;
+    }
+}
+
+// Async generator with database context
+async fn* stream_records(query: Query) -> Record using [Database] {
+    let cursor = database.execute(query).await;
+    while let Some(row) = cursor.next().await {
+        yield from_row(row);
+    }
+}
+
+// Async generator with multiple contexts
+async fn* process_stream(input: AsyncStream<Data>) -> Output using [Database, Cache, Logger] {
+    for await data in input {
+        log(f"Processing: {data.id}");
+        let cached = cache.get(data.id).await;
+        let processed = if let Some(c) = cached {
+            c
+        } else {
+            let res = database.process(data).await;
+            cache.set(data.id, res.clone()).await;
+            res
+        };
+        yield processed;
+    }
+}
+
+// ============================================================================
+// Generator with Error Handling
+// ============================================================================
+
+// Generator with throws
+fn* risky_generator(items: List<Item>) throws(ProcessError) -> Result {
+    for item in items {
+        if item.is_invalid() {
+            throw InvalidItem(item);
+        }
+        yield process(item);
+    }
+}
+
+// Async generator with throws
+async fn* async_risky(urls: List<Text>) throws(NetworkError) -> Page using [Network] {
+    for url in urls {
+        let page = fetch(url).await?;
+        yield page;
+    }
+}
+
+// Generator with conditional yield
+fn* safe_generator(items: List<Item>) -> Maybe<Result> {
+    for item in items {
+        let res = if is_valid(item) {
+            Some(process(item))
+        } else {
+            None
+        };
+        yield res;
+    }
+}
+
+// ============================================================================
+// Nested Generators
+// ============================================================================
+
+// Generator that yields from another generator
+fn* outer_generator() -> Int {
+    // Yield from inner (conceptually - actual syntax may vary)
+    for item in inner_generator() {
+        yield item * 2;
+    }
+}
+
+fn* inner_generator() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+// Flatten nested generators
+fn* flatten_generator<T>(nested: List<Iterator<T>>) -> T {
+    for inner in nested {
+        for item in inner {
+            yield item;
+        }
+    }
+}
+
+// ============================================================================
+// Generator Expressions and Inline
+// ============================================================================
+
+fn test_generator_expressions() {
+    // Call generator and iterate
+    for value in range_generator(0, 10) {
+        process(value);
+    }
+
+    // Collect generator results
+    let results: List<Int> = basic_generator().collect();
+
+    // Take from generator
+    let first_five: List<Int> = infinite_generator().take(5).collect();
+
+    // Filter generator output
+    let evens = range_generator(0, 100)
+        .filter(|x| x % 2 == 0)
+        .collect();
+
+    // Map generator output
+    let doubled = basic_generator()
+        .map(|x| x * 2)
+        .collect();
+
+    // Chain generators
+    let combined = gen_a()
+        .chain(gen_b())
+        .chain(gen_c())
+        .collect();
+}
+
+// ============================================================================
+// Async Generator Consumption
+// ============================================================================
+
+async fn test_async_generator_consumption() {
+    // For await over async generator
+    for await page in fetch_pages(urls) {
+        display(page);
+    }
+
+    // Collect async generator
+    let all_pages: List<Page> = fetch_pages(urls).collect().await;
+
+    // Take from async generator
+    let first_ten = stream_records(query)
+        .take(10)
+        .collect()
+        .await;
+
+    // Filter async generator
+    for await record in stream_records(query).filter(is_valid) {
+        process(record);
+    }
+}
+
+// ============================================================================
+// Yield with Early Return
+// ============================================================================
+
+// Generator can early return (stops generation)
+fn* early_return_generator(items: List<Item>) -> Item {
+    for item in items {
+        if item.is_terminal() {
+            return;  // Stop generating
+        }
+        yield item;
+    }
+}
+
+// Conditional early return
+fn* conditional_return(limit: Int) -> Int {
+    let mut i = 0;
+    while i < limit {
+        yield i;
+        i += 1;
+    }
+}
+
+// ============================================================================
+// Complex Yield Patterns
+// ============================================================================
+
+// Interleaved yields
+fn* interleave<T>(items_a: List<T>, items_b: List<T>) -> T {
+    let mut i = 0;
+    let max_len = max(items_a.len(), items_b.len());
+    while i < max_len {
+        if i < items_a.len() {
+            yield items_a[i];
+        }
+        if i < items_b.len() {
+            yield items_b[i];
+        }
+        i += 1;
+    }
+}
+
+// Batched yield
+fn* batched<T>(source: Iterator<T>, batch_size: Int) -> List<T> {
+    let mut batch = new_list();
+    for item in source {
+        batch.push(item);
+        if batch.len() >= batch_size {
+            yield batch;
+            batch = new_list();
+        }
+    }
+    if !batch.is_empty() {
+        yield batch;
+    }
+}
+
+// Windowed yield
+fn* sliding_window<T: Clone>(source: Iterator<T>, window_size: Int) -> List<T> {
+    let mut window = new_list();
+    for item in source {
+        window.push(item);
+        if window.len() >= window_size {
+            yield window.clone();
+            window.remove(0);
+        }
+    }
+}
+
+// ============================================================================
+// Generator Type Annotations
+// ============================================================================
+
+// Explicit return type
+fn* typed_generator() -> Int {
+    yield 1;
+    yield 2;
+}
+
+// Generic generator
+fn* generic_gen<T: Clone>(item: T, count: Int) -> T {
+    for _ in 0..count {
+        yield item.clone();
+    }
+}
+
+// Generator returning iterator type (conceptual)
+fn* returns_iterator() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+// Async generator with complex return
+async fn* complex_async<T: Send>(sources: List<AsyncStream<T>>) -> T {
+    for source in sources {
+        for await item in source {
+            yield item;
+        }
+    }
+}

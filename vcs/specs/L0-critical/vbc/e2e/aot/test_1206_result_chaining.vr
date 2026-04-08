@@ -1,0 +1,117 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: result, error, chaining, try, e2e
+// @description: Test Result type chaining and error propagation
+
+type AppError is NotFound | InvalidInput(Text) | Overflow;
+
+fn parse_positive(s: Text) -> Result<Int, AppError> {
+    // Simulate parsing: only handle "42", "100", "0"
+    if s == "42" {
+        Ok(42)
+    } else if s == "100" {
+        Ok(100)
+    } else if s == "0" {
+        Ok(0)
+    } else {
+        Err(AppError.InvalidInput(s))
+    }
+}
+
+fn checked_add(a: Int, b: Int) -> Result<Int, AppError> {
+    let sum = a + b;
+    if sum > 1000 {
+        Err(AppError.Overflow)
+    } else {
+        Ok(sum)
+    }
+}
+
+fn process(input1: Text, input2: Text) -> Result<Int, AppError> {
+    let a = match parse_positive(input1) {
+        Ok(v) => v,
+        Err(e) => { return Err(e); }
+    };
+    let b = match parse_positive(input2) {
+        Ok(v) => v,
+        Err(e) => { return Err(e); }
+    };
+    checked_add(a, b)
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Happy path
+    match process("42", "100") {
+        Ok(v) => {
+            if v != 142 {
+                print(f"FAIL 1: result = {v}");
+                f = f + 1;
+            } else {
+                print("  happy_path: OK");
+            }
+        }
+        Err(_) => {
+            print("FAIL 1: unexpected error");
+            f = f + 1;
+        }
+    }
+
+    // Test 2: First input invalid
+    match process("bad", "42") {
+        Ok(_) => {
+            print("FAIL 2: expected error");
+            f = f + 1;
+        }
+        Err(e) => {
+            match e {
+                AppError.InvalidInput(_) => print("  invalid_first: OK"),
+                _ => {
+                    print("FAIL 2: wrong error type");
+                    f = f + 1;
+                }
+            }
+        }
+    }
+
+    // Test 3: Second input invalid
+    match process("42", "xyz") {
+        Ok(_) => {
+            print("FAIL 3: expected error");
+            f = f + 1;
+        }
+        Err(e) => {
+            match e {
+                AppError.InvalidInput(_) => print("  invalid_second: OK"),
+                _ => {
+                    print("FAIL 3: wrong error type");
+                    f = f + 1;
+                }
+            }
+        }
+    }
+
+    // Test 4: Overflow
+    match checked_add(900, 200) {
+        Ok(_) => {
+            print("FAIL 4: expected overflow");
+            f = f + 1;
+        }
+        Err(e) => {
+            match e {
+                AppError.Overflow => print("  overflow: OK"),
+                _ => {
+                    print("FAIL 4: wrong error");
+                    f = f + 1;
+                }
+            }
+        }
+    }
+
+    if f == 0 {
+        print("All result chaining tests passed");
+    }
+    f
+}

@@ -1,0 +1,66 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, linalg
+// @expected-exit: 0
+
+// Tests tensor linear algebra via AOT pipeline.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_binop(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_BINOP", a, b, op) }
+fn tensor_unop(t: Int, op: Int) -> Int { @intrinsic("TENSOR_UNOP", t, op) }
+fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_REDUCE", t, op, axis) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    if a != b { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    let a = tensor_new(3, 1);
+    let a = tensor_set_scalar(a, 0, 1);
+    let a = tensor_set_scalar(a, 1, 2);
+    let a = tensor_set_scalar(a, 2, 3);
+
+    let b = tensor_new(3, 1);
+    let b = tensor_set_scalar(b, 0, 4);
+    let b = tensor_set_scalar(b, 1, 5);
+    let b = tensor_set_scalar(b, 2, 6);
+
+    let prod = tensor_binop(a, b, 2);
+    let dot = tensor_reduce(prod, 0, 0);
+    errors = errors + check_val(dot, 0, 32);
+
+    let v = tensor_new(2, 1);
+    let v = tensor_set_scalar(v, 0, 3);
+    let v = tensor_set_scalar(v, 1, 4);
+    let vv = tensor_binop(v, v, 2);
+    let norm_sq = tensor_reduce(vv, 0, 0);
+    errors = errors + check_val(norm_sq, 0, 25);
+
+    let norm = tensor_unop(norm_sq, 2);
+    errors = errors + check_val(norm, 0, 5);
+
+    let e1 = tensor_new(2, 1);
+    let e1 = tensor_set_scalar(e1, 0, 1);
+    let e2 = tensor_new(2, 1);
+    let e2 = tensor_set_scalar(e2, 1, 1);
+    let e1e2 = tensor_binop(e1, e2, 2);
+    let ortho = tensor_reduce(e1e2, 0, 0);
+    errors = errors + check_val(ortho, 0, 0);
+
+    let ones = tensor_fill(3, 1, 1);
+    let had = tensor_binop(a, ones, 2);
+    errors = errors + check_val(had, 0, 1);
+    errors = errors + check_val(had, 2, 3);
+
+    errors
+}

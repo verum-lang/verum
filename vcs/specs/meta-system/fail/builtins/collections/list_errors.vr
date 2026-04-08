@@ -1,0 +1,155 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, list, error
+// @description: Test list builtin error handling
+// @expected-error: None
+
+// =============================================================================
+// INDEX OUT OF BOUNDS
+// =============================================================================
+
+meta fn test_list_get_out_of_bounds() -> Int {
+    let arr = [1, 2, 3];
+    maybe_unwrap(list_get(arr, 5))  // ERROR: unwrap of None (index 5 out of bounds, len=3)
+}
+
+meta fn test_list_get_negative() -> Int {
+    let arr = [1, 2, 3];
+    maybe_unwrap(list_get(arr, -1))  // ERROR: unwrap of None (negative index)
+}
+
+meta fn test_list_get_empty() -> Int {
+    let arr: [Int; 0] = [];
+    maybe_unwrap(list_get(arr, 0))  // ERROR: unwrap of None (index 0 out of bounds, len=0)
+}
+
+// =============================================================================
+// ARITY ERRORS
+// =============================================================================
+
+// ERROR: list_len with no arguments
+meta fn test_list_len_no_args() -> Int {
+    list_len()  // ERROR: expected 1 argument
+}
+
+// ERROR: list_len with too many arguments
+meta fn test_list_len_too_many() -> Int {
+    list_len([1, 2], [3, 4])  // ERROR: expected 1 argument
+}
+
+// ERROR: list_get with no arguments
+meta fn test_list_get_no_args() -> Int {
+    list_get()  // ERROR: expected 2 arguments
+}
+
+// ERROR: list_get with one argument
+meta fn test_list_get_one_arg() -> Int {
+    list_get([1, 2, 3])  // ERROR: expected 2 arguments
+}
+
+// ERROR: list_push with no arguments
+meta fn test_list_push_no_args() -> [Int] {
+    list_push()  // ERROR: expected 2 arguments
+}
+
+// ERROR: list_push with one argument
+meta fn test_list_push_one_arg() -> [Int] {
+    list_push([1, 2, 3])  // ERROR: expected 2 arguments
+}
+
+// ERROR: list_concat with no arguments
+meta fn test_list_concat_no_args() -> [Int] {
+    list_concat()  // ERROR: expected 2 arguments
+}
+
+// ERROR: list_concat with one argument
+meta fn test_list_concat_one_arg() -> [Int] {
+    list_concat([1, 2])  // ERROR: expected 2 arguments
+}
+
+// =============================================================================
+// TYPE MISMATCH ERRORS
+// =============================================================================
+
+// ERROR: list_len on non-list
+meta fn test_list_len_non_list() -> Int {
+    list_len(42)  // ERROR: expected Array, got Int
+}
+
+// ERROR: list_len on text (not array)
+meta fn test_list_len_on_text() -> Int {
+    list_len("hello")  // ERROR: expected Array, got Text
+}
+
+// ERROR: list_get with non-int index
+meta fn test_list_get_text_index() -> Int {
+    list_get([1, 2, 3], "one")  // ERROR: expected Int index, got Text
+}
+
+// ERROR: list_get on non-list
+meta fn test_list_get_non_list() -> Int {
+    list_get(42, 0)  // ERROR: expected Array, got Int
+}
+
+// ERROR: list_push to non-list
+meta fn test_list_push_non_list() -> [Int] {
+    list_push(42, 1)  // ERROR: expected Array, got Int
+}
+
+// ERROR: list_concat non-lists
+meta fn test_list_concat_non_lists() -> [Int] {
+    list_concat("hello", "world")  // ERROR: expected Array, got Text
+}
+
+// ERROR: list_reverse on non-list
+meta fn test_list_reverse_non_list() -> [Int] {
+    list_reverse(42)  // ERROR: expected Array, got Int
+}
+
+// =============================================================================
+// FOLD/MAP/FILTER ERRORS
+// =============================================================================
+
+// ERROR: list_fold with wrong number of args
+meta fn test_list_fold_wrong_arity() -> Int {
+    list_fold([1, 2, 3])  // ERROR: expected 3 arguments
+}
+
+// ERROR: list_map with wrong number of args
+meta fn test_list_map_wrong_arity() -> [Int] {
+    list_map([1, 2, 3])  // ERROR: expected 2 arguments
+}
+
+// ERROR: list_filter with wrong number of args
+meta fn test_list_filter_wrong_arity() -> [Int] {
+    list_filter([1, 2, 3])  // ERROR: expected 2 arguments
+}
+
+// ERROR: list_fold on non-list
+meta fn test_list_fold_non_list() -> Int {
+    list_fold(42, 0, |acc, x| acc + x)  // ERROR: expected Array
+}
+
+// ERROR: list_map on non-list
+meta fn test_list_map_non_list() -> [Int] {
+    list_map(42, |x| x * 2)  // ERROR: expected Array
+}
+
+// =============================================================================
+// HETEROGENEOUS ARRAY ERRORS
+// =============================================================================
+
+// ERROR: list_push with mismatched type
+meta fn test_list_push_type_mismatch() -> [Int] {
+    list_push([1, 2, 3], "four")  // ERROR: expected Int, got Text
+}
+
+// ERROR: list_concat with mismatched element types
+meta fn test_list_concat_type_mismatch() -> [Int] {
+    list_concat([1, 2], ["a", "b"])  // ERROR: type mismatch
+}
+
+fn main() {
+    @const test_list_get_out_of_bounds();
+}

@@ -1,0 +1,546 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for guard patterns (pattern if condition, pattern where condition)
+
+// Grammar Reference:
+// match_arm = { attribute } , pattern , [ guard ] , '=>' , expression ;
+// guard     = 'if' , expression
+//           | 'where' , expression ;
+
+// ============================================================================
+// SECTION 1: Basic If Guards
+// ============================================================================
+
+fn test_basic_if_guards() {
+    // Simple condition
+    match n {
+        x if x > 0 => positive(x),
+        x if x < 0 => negative(x),
+        _ => zero()
+    }
+
+    // Equality check
+    match pair {
+        (x, y) if x == y => equal(x),
+        (x, y) => different(x, y)
+    }
+
+    // Boolean variable
+    match value {
+        x if condition => conditional(x),
+        x => unconditional(x)
+    }
+}
+
+// ============================================================================
+// SECTION 2: Basic Where Guards
+// ============================================================================
+
+fn test_basic_where_guards() {
+    // Simple condition
+    match n {
+        x where x > 0 => positive(x),
+        x where x < 0 => negative(x),
+        _ => zero()
+    }
+
+    // Equality check
+    match pair {
+        (x, y) where x == y => equal(x),
+        (x, y) => different(x, y)
+    }
+
+    // Boolean variable
+    match value {
+        x where condition => conditional(x),
+        x => unconditional(x)
+    }
+}
+
+// ============================================================================
+// SECTION 3: Guards with Comparison Operators
+// ============================================================================
+
+fn test_comparison_guards() {
+    // All comparison operators
+    match n {
+        x if x > 100 => very_large(x),
+        x if x >= 50 => large(x),
+        x if x == 25 => exactly_25(x),
+        x if x != 0 => nonzero(x),
+        x if x <= -50 => very_small(x),
+        x if x < 0 => small(x),
+        _ => zero()
+    }
+
+    // With where
+    match n {
+        x where x > threshold => above(x),
+        x where x < threshold => below(x),
+        x where x == threshold => at_threshold(x)
+    }
+}
+
+// ============================================================================
+// SECTION 4: Guards with Logical Operators
+// ============================================================================
+
+fn test_logical_guards() {
+    // AND
+    match point {
+        Point { x, y } if x > 0 && y > 0 => first_quadrant(x, y),
+        Point { x, y } if x < 0 && y > 0 => second_quadrant(x, y),
+        Point { x, y } if x < 0 && y < 0 => third_quadrant(x, y),
+        Point { x, y } if x > 0 && y < 0 => fourth_quadrant(x, y),
+        Point { x, y } => on_axis(x, y)
+    }
+
+    // OR
+    match n {
+        x if x < 0 || x > 100 => out_of_range(x),
+        x => in_range(x)
+    }
+
+    // NOT
+    match option {
+        Some(x) if !x.is_empty() => non_empty(x),
+        Some(_) => empty(),
+        None => none()
+    }
+
+    // Complex combinations
+    match data {
+        x if (a && b) || (c && d) => complex(x),
+        x if !(a || b) && c => another(x),
+        x => fallback(x)
+    }
+}
+
+// ============================================================================
+// SECTION 5: Guards with Arithmetic Expressions
+// ============================================================================
+
+fn test_arithmetic_guards() {
+    // Basic arithmetic
+    match n {
+        x if x + 1 > 100 => large(x),
+        x if x * 2 < 10 => small(x),
+        x if x - offset == 0 => at_offset(x),
+        x if x / 2 > threshold => above_half(x),
+        x if x % 2 == 0 => even(x),
+        x => odd(x)
+    }
+
+    // Complex arithmetic
+    match point {
+        Point { x, y } if x * x + y * y < radius * radius => inside(),
+        Point { x, y } if x * x + y * y == radius * radius => on_circle(),
+        _ => outside()
+    }
+}
+
+// ============================================================================
+// SECTION 6: Guards with Method Calls
+// ============================================================================
+
+fn test_method_call_guards() {
+    // Simple method call
+    match text {
+        s if s.is_empty() => empty(),
+        s if s.len() > 100 => long(s),
+        s if s.starts_with("http") => url(s),
+        s if s.contains("@") => email(s),
+        s => other(s)
+    }
+
+    // Chained methods
+    match data {
+        x if x.first().is_some() => has_first(x),
+        x if x.iter().count() > 10 => many(x),
+        x => few(x)
+    }
+
+    // With where
+    match text {
+        s where s.is_ascii() => ascii(s),
+        s where s.chars().all(|c| c.is_alphabetic()) => alpha(s),
+        s => mixed(s)
+    }
+}
+
+// ============================================================================
+// SECTION 7: Guards with Function Calls
+// ============================================================================
+
+fn test_function_call_guards() {
+    // Simple function call
+    match value {
+        x if is_valid(x) => valid(x),
+        x if needs_processing(x) => process(x),
+        x => skip(x)
+    }
+
+    // With arguments
+    match data {
+        x if compare(x, expected) => matched(x),
+        x if within_range(x, min, max) => in_range(x),
+        x => out_of_range(x)
+    }
+
+    // Multiple function calls
+    match item {
+        x if check_a(x) && check_b(x) => both(x),
+        x if check_a(x) || check_b(x) => either(x),
+        x => neither(x)
+    }
+}
+
+// ============================================================================
+// SECTION 8: Guards with Field Access
+// ============================================================================
+
+fn test_field_access_guards() {
+    // Simple field access
+    match person {
+        p if p.age >= 18 => adult(p),
+        p if p.age >= 13 => teenager(p),
+        p => child(p)
+    }
+
+    // Nested field access
+    match data {
+        d if d.config.enabled => enabled(d),
+        d if d.metadata.version > 2 => new_version(d),
+        d => old_version(d)
+    }
+
+    // With destructuring
+    match point {
+        Point { x, y } if x > y => upper_triangle(x, y),
+        Point { x, y } if x < y => lower_triangle(x, y),
+        Point { x, y } => diagonal(x)
+    }
+}
+
+// ============================================================================
+// SECTION 9: Guards with Variants
+// ============================================================================
+
+fn test_guards_with_variants() {
+    // Guard on variant payload
+    match option {
+        Some(x) if x > 0 => positive_some(x),
+        Some(x) if x < 0 => negative_some(x),
+        Some(_) => zero_some(),
+        None => none()
+    }
+
+    // Guard on result
+    match result {
+        Ok(v) if v.is_valid() => valid_ok(v),
+        Ok(v) => invalid_ok(v),
+        Err(e) if e.is_fatal() => fatal_err(e),
+        Err(e) => recoverable_err(e)
+    }
+
+    // Nested variants
+    match nested {
+        Some(Some(x)) if x > threshold => deep_above(x),
+        Some(Some(x)) => deep_below(x),
+        Some(None) => shallow_none(),
+        None => outer_none()
+    }
+}
+
+// ============================================================================
+// SECTION 10: Guards with Records
+// ============================================================================
+
+fn test_guards_with_records() {
+    // Guard on extracted fields
+    match point {
+        Point { x: 0, y } if y > 0 => positive_y_axis(y),
+        Point { x: 0, y } if y < 0 => negative_y_axis(y),
+        Point { x: 0, y: 0 } => origin(),
+        Point { x, y: 0 } if x > 0 => positive_x_axis(x),
+        Point { x, y: 0 } if x < 0 => negative_x_axis(x),
+        Point { x, y } => general(x, y)
+    }
+
+    // Guard using rest
+    match person {
+        Person { name, .. } if name.len() > 50 => long_name(name),
+        Person { age, .. } if age > 100 => centenarian(age),
+        Person { name, age, .. } => normal(name, age)
+    }
+}
+
+// ============================================================================
+// SECTION 11: Guards with Tuples
+// ============================================================================
+
+fn test_guards_with_tuples() {
+    // Guard on tuple elements
+    match pair {
+        (a, b) if a > b => first_larger(a, b),
+        (a, b) if a < b => second_larger(a, b),
+        (a, b) => equal(a)
+    }
+
+    // Nested tuples
+    match nested {
+        ((a, b), (c, d)) if a + b > c + d => first_larger(),
+        ((a, b), (c, d)) if a + b < c + d => second_larger(),
+        _ => equal()
+    }
+
+    // With destructuring and wildcards
+    match triple {
+        (a, _, c) if a == c => first_equals_third(a),
+        (_, b, c) if b == c => second_equals_third(b),
+        (a, b, _) if a == b => first_equals_second(a),
+        (a, b, c) => all_different(a, b, c)
+    }
+}
+
+// ============================================================================
+// SECTION 12: Guards with Arrays
+// ============================================================================
+
+fn test_guards_with_arrays() {
+    // Guard on array elements
+    match arr {
+        [first, ..] if first > 0 => positive_start(first),
+        [first, ..] if first < 0 => negative_start(first),
+        [_, ..] => zero_start(),
+        [] => empty()
+    }
+
+    // Guard on array properties
+    match arr {
+        [first, .., last] if first == last => palindrome_ends(first),
+        [first, .., last] if first < last => ascending_ends(),
+        [first, .., last] => descending_ends(),
+        [single] => single_element(single),
+        [] => empty()
+    }
+
+    // With rest binding
+    match arr {
+        [head, ..tail] if tail.len() > 10 => long_tail(head, tail),
+        [head, ..tail] => short_tail(head, tail),
+        [] => empty()
+    }
+}
+
+// ============================================================================
+// SECTION 13: Guards with Ranges
+// ============================================================================
+
+fn test_guards_with_ranges() {
+    // Guard after range
+    match n {
+        x @ 0..100 if x % 10 == 0 => decade(x),
+        x @ 0..100 => non_decade(x),
+        x => out_of_range(x)
+    }
+
+    // Complex range guards
+    match score {
+        x @ 90..=100 if extra_credit => a_plus(x),
+        x @ 90..=100 => a_grade(x),
+        x @ 80..90 if extra_credit => a_grade(x),
+        x @ 80..90 => b_grade(x),
+        x => other_grade(x)
+    }
+}
+
+// ============================================================================
+// SECTION 14: Guards with Or Patterns
+// ============================================================================
+
+fn test_guards_with_or() {
+    // Guard on or pattern
+    match n {
+        0 | 1 | 2 if special_mode => special_small(),
+        0 | 1 | 2 => normal_small(),
+        x if x < 0 => negative(x),
+        x => positive(x)
+    }
+
+    // With binding
+    match n {
+        x @ (0 | 1 | 2) if x == threshold => at_threshold(),
+        x @ (0 | 1 | 2) => small(x),
+        x => other(x)
+    }
+}
+
+// ============================================================================
+// SECTION 15: Guards with References
+// ============================================================================
+
+fn test_guards_with_refs() {
+    // Guard on reference pattern
+    match ref_value {
+        &x if x > 0 => positive_ref(x),
+        &x if x < 0 => negative_ref(x),
+        &_ => zero_ref()
+    }
+
+    // Mutable reference
+    match mut_ref {
+        &mut x if x.is_valid() => valid_mut(x),
+        &mut x => invalid_mut(x)
+    }
+}
+
+// ============================================================================
+// SECTION 16: Guards with @ Bindings
+// ============================================================================
+
+fn test_guards_with_at() {
+    // @ binding with guard
+    match option {
+        whole @ Some(x) if x > 0 => positive_whole(whole, x),
+        whole @ Some(_) => other_whole(whole),
+        None => none()
+    }
+
+    // Multiple @ with guard
+    match nested {
+        outer @ Some(inner @ Some(x)) if x > threshold => deep(outer, inner, x),
+        outer @ Some(_) => shallow(outer),
+        None => none()
+    }
+}
+
+// ============================================================================
+// SECTION 17: Complex Guard Expressions
+// ============================================================================
+
+fn test_complex_guards() {
+    // Very complex condition
+    match data {
+        Data { value, timestamp, .. }
+            if value > min
+            && value < max
+            && timestamp > cutoff
+            && is_valid(value)
+            => process(value, timestamp),
+
+        Data { value, .. } if value != 0 => nonzero(value),
+
+        _ => skip()
+    }
+
+    // Nested method calls
+    match container {
+        c if c.items().iter().filter(|i| i.is_active()).count() > 10
+            => many_active(c),
+        c if c.items().is_empty()
+            => empty(c),
+        c => some_items(c)
+    }
+}
+
+// ============================================================================
+// SECTION 18: Guards in Different Contexts
+// ============================================================================
+
+fn test_guards_in_contexts() {
+    // In if-let (no explicit guard, but combined with &&)
+    if let Some(x) = option && x > 0 {
+        positive(x)
+    }
+
+    // Multiple conditions in if-let chain
+    if let Some(a) = first && let Some(b) = second && a == b {
+        equal_pair(a)
+    }
+}
+
+// ============================================================================
+// SECTION 19: Guards with Built-in Functions
+// ============================================================================
+
+fn test_guards_with_builtins() {
+    // With type checks
+    match value {
+        x if x is Int => integer(x),
+        x if x is Text => text(x),
+        x => other(x)
+    }
+
+    // With assertions (conceptual)
+    match data {
+        x if assert(x.is_valid()) => valid(x),
+        x => invalid(x)
+    }
+}
+
+// ============================================================================
+// SECTION 20: Practical Guard Examples
+// ============================================================================
+
+fn test_practical_guards() {
+    // HTTP routing
+    match request {
+        Request { path, method: "GET", .. } if path.starts_with("/api/")
+            => api_get(path),
+        Request { path, method: "POST", .. } if path.starts_with("/api/")
+            => api_post(path),
+        Request { path, method: "GET", .. }
+            => static_file(path),
+        _ => not_found()
+    }
+
+    // Validation
+    match user_input {
+        Input { email, .. } if !email.contains("@")
+            => invalid_email(),
+        Input { age, .. } if age < 0 || age > 150
+            => invalid_age(),
+        Input { password, .. } if password.len() < 8
+            => weak_password(),
+        input => valid_input(input)
+    }
+
+    // Rate limiting
+    match request {
+        r if rate_limiter.check(r.ip()) > limit => rate_limited(r),
+        r if blacklist.contains(r.ip()) => blocked(r),
+        r => process(r)
+    }
+}
+
+// ============================================================================
+// SECTION 21: Edge Cases
+// ============================================================================
+
+fn test_edge_cases() {
+    // Empty guard body (just true)
+    match n {
+        x if true => always(x),
+        _ => never()
+    }
+
+    // False guard (unreachable but valid)
+    match n {
+        x if false => never(),
+        x => always(x)
+    }
+
+    // Guard with only boolean literal
+    match data {
+        x if condition => conditional(x),
+        x if !condition => negated(x)
+    }
+
+    // Very long guard
+    match data {
+        x if a && b && c && d && e && f && g && h && i && j => many_conditions(x),
+        x => few_conditions(x)
+    }
+}

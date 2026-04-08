@@ -1,0 +1,13 @@
+// @test: run-interpreter-panic
+// @expected-panic: Index out of bounds
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-checking, list, panic
+// @description: Tests that list indexing with invalid index causes a controlled panic
+
+fn main() {
+    let items = [10, 20, 30];
+    let bad_idx = 100;
+    let val = items[bad_idx];
+    print(f"{val}");
+}

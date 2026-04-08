@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, capability, with, error
+// @description: Test detection of capability syntax without 'with' keyword
+// @expected-error: E077
+
+// Capability types require 'with' keyword
+fn test(db: Database [Read, Write]) {}

@@ -1,0 +1,16 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, set, errors
+// @expected-error: Type mismatch
+// @description: Test set_insert with non-text element produces type error
+
+// set_insert with non-text element
+meta fn test_set_insert_type_error() {
+    let s = set_new();
+    set_insert(s, 42)  // ERROR: Element must be Text, got Int
+}
+
+fn main() {
+    let _ = @const(test_set_insert_type_error());
+}

@@ -1,0 +1,85 @@
+// Boundary value edge cases
+// Tests numeric boundary conditions and overflow behavior
+
+fn main() {
+    // Integer boundaries
+    let i8_max: Int = 127;
+    let i8_min: Int = -128;
+    let i16_max: Int = 32767;
+    let i16_min: Int = -32768;
+    let i32_max: Int = 2147483647;
+    let i32_min: Int = -2147483648;
+    let i64_max: Int = 9223372036854775807;
+    let i64_min: Int = -9223372036854775808;
+
+    // Unsigned boundaries
+    let u8_max: Int = 255;
+    let u16_max: Int = 65535;
+    let u32_max: Int = 4294967295;
+
+    // Float boundaries
+    let float_max: Float = 1.7976931348623157e308;
+    let float_min: Float = -1.7976931348623157e308;
+    let float_tiny: Float = 2.2250738585072014e-308;
+    let float_epsilon: Float = 2.220446049250313e-16;
+
+    // Special floats
+    let zero: Float = 0.0;
+    let neg_zero: Float = -0.0;
+    let one: Float = 1.0;
+    let neg_one: Float = -1.0;
+
+    // Power of two boundaries
+    let pow2_7: Int = 128;
+    let pow2_8: Int = 256;
+    let pow2_15: Int = 32768;
+    let pow2_16: Int = 65536;
+    let pow2_31: Int = 2147483648;
+    let pow2_32: Int = 4294967296;
+
+    // Off-by-one values
+    let boundary_minus_1 = i32_max - 1;
+    let boundary_plus_1 = i32_min + 1;
+
+    // Arithmetic near boundaries
+    let near_overflow = i64_max - 100;
+    let near_underflow = i64_min + 100;
+
+    // Float comparisons near zero
+    let almost_zero_pos: Float = 0.0000000001;
+    let almost_zero_neg: Float = -0.0000000001;
+
+    // Large exponents
+    let large_exp: Float = 1.0e100;
+    let small_exp: Float = 1.0e-100;
+
+    // Verify some values
+    assert i8_max == 127;
+    assert i8_min == -128;
+    assert u8_max == 255;
+}
+
+// Functions testing boundary arithmetic
+fn add_near_max(x: Int) -> Int {
+    // This should be careful about overflow
+    x + 1
+}
+
+fn subtract_near_min(x: Int) -> Int {
+    // This should be careful about underflow
+    x - 1
+}
+
+fn multiply_boundary(a: Int, b: Int) -> Int {
+    // This could overflow
+    a * b
+}
+
+// Float edge cases
+fn float_divide_small(x: Float) -> Float {
+    x / 1.0e-308
+}
+
+fn float_multiply_large(x: Float) -> Float {
+    x * 1.0e308
+}

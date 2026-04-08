@@ -1,0 +1,303 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, btree, map_values, filter_map, partition, merge, count_where
+// @description: Tests for BTreeMap utility methods: map_values, filter_map, partition, merge, count_where
+
+mount core.collections.btree.{BTreeMap};
+
+// =============================================================================
+// map_values tests
+// =============================================================================
+
+@test
+fn test_map_values_basic() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let doubled = m.map_values(|_k, v| *v * 2);
+    assert_eq(doubled.len(), 3);
+    assert_eq(*doubled.get(&1).unwrap(), 20);
+    assert_eq(*doubled.get(&2).unwrap(), 40);
+    assert_eq(*doubled.get(&3).unwrap(), 60);
+}
+
+@test
+fn test_map_values_uses_key() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+
+    // value = key * 10 + original_value
+    let result = m.map_values(|k, v| *k * 10 + *v);
+    assert_eq(*result.get(&1).unwrap(), 110);
+    assert_eq(*result.get(&2).unwrap(), 220);
+    assert_eq(*result.get(&3).unwrap(), 330);
+}
+
+@test
+fn test_map_values_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let result = m.map_values(|_k, v| *v + 1);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_map_values_preserves_ordering() {
+    let mut m = BTreeMap.new();
+    m.insert(5, 50);
+    m.insert(1, 10);
+    m.insert(3, 30);
+
+    let result = m.map_values(|_k, v| *v);
+    // Keys should be in sorted order
+    let keys = result.keys_list();
+    assert_eq(keys[0], 1);
+    assert_eq(keys[1], 3);
+    assert_eq(keys[2], 5);
+}
+
+// =============================================================================
+// filter_map tests
+// =============================================================================
+
+@test
+fn test_filter_map_basic() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    // Keep only even keys, double their values
+    let result = m.filter_map(|k, v| {
+        if *k % 2 == 0 {
+            Some(*v * 2)
+        } else {
+            None
+        }
+    });
+    assert_eq(result.len(), 2);
+    assert_eq(*result.get(&2).unwrap(), 40);
+    assert_eq(*result.get(&4).unwrap(), 80);
+}
+
+@test
+fn test_filter_map_none_for_all() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let result: BTreeMap<Int, Int> = m.filter_map(|_k, _v| None);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_filter_map_some_for_all() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let result = m.filter_map(|_k, v| Some(*v));
+    assert_eq(result.len(), 2);
+}
+
+@test
+fn test_filter_map_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let result: BTreeMap<Int, Int> = m.filter_map(|_k, v| Some(*v));
+    assert_eq(result.len(), 0);
+}
+
+// =============================================================================
+// partition tests
+// =============================================================================
+
+@test
+fn test_partition_basic() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    let (evens, odds) = m.partition(|k, _v| *k % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert_eq(odds.len(), 2);
+    assert(evens.contains_key(&2));
+    assert(evens.contains_key(&4));
+    assert(odds.contains_key(&1));
+    assert(odds.contains_key(&3));
+}
+
+@test
+fn test_partition_all_match() {
+    let mut m = BTreeMap.new();
+    m.insert(2, 20);
+    m.insert(4, 40);
+
+    let (matching, rest) = m.partition(|k, _v| *k % 2 == 0);
+    assert_eq(matching.len(), 2);
+    assert_eq(rest.len(), 0);
+}
+
+@test
+fn test_partition_none_match() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(3, 30);
+
+    let (matching, rest) = m.partition(|k, _v| *k % 2 == 0);
+    assert_eq(matching.len(), 0);
+    assert_eq(rest.len(), 2);
+}
+
+@test
+fn test_partition_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let (a, b) = m.partition(|_k, _v| true);
+    assert_eq(a.len(), 0);
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn test_partition_by_value() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 100);
+    m.insert(2, 5);
+    m.insert(3, 200);
+    m.insert(4, 3);
+
+    let (large, small) = m.partition(|_k, v| *v >= 100);
+    assert_eq(large.len(), 2);
+    assert_eq(small.len(), 2);
+    assert(large.contains_key(&1));
+    assert(large.contains_key(&3));
+}
+
+// =============================================================================
+// merge tests
+// =============================================================================
+
+@test
+fn test_merge_no_overlap() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(3, 30);
+    m2.insert(4, 40);
+
+    m1.merge(m2, |a, _b| a);
+    assert_eq(m1.len(), 4);
+    assert_eq(*m1.get(&1).unwrap(), 10);
+    assert_eq(*m1.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_merge_with_overlap_sum() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(2, 200);
+    m2.insert(3, 300);
+
+    m1.merge(m2, |a, b| a + b);
+    assert_eq(m1.len(), 3);
+    assert_eq(*m1.get(&1).unwrap(), 10);
+    assert_eq(*m1.get(&2).unwrap(), 220);  // 20 + 200
+    assert_eq(*m1.get(&3).unwrap(), 300);
+}
+
+@test
+fn test_merge_with_overlap_keep_new() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(1, 100);
+
+    m1.merge(m2, |_old, new| new);
+    assert_eq(*m1.get(&1).unwrap(), 100);
+}
+
+@test
+fn test_merge_empty_into_existing() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+
+    let m2: BTreeMap<Int, Int> = BTreeMap.new();
+    m1.merge(m2, |a, _b| a);
+    assert_eq(m1.len(), 1);
+}
+
+@test
+fn test_merge_into_empty() {
+    let mut m1: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut m2 = BTreeMap.new();
+    m2.insert(1, 10);
+    m2.insert(2, 20);
+
+    m1.merge(m2, |a, _b| a);
+    assert_eq(m1.len(), 2);
+}
+
+// =============================================================================
+// count_where tests
+// =============================================================================
+
+@test
+fn test_count_where_basic() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    let count = m.count_where(|k, _v| *k > 2);
+    assert_eq(count, 2);
+}
+
+@test
+fn test_count_where_all() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let count = m.count_where(|_k, _v| true);
+    assert_eq(count, 2);
+}
+
+@test
+fn test_count_where_none() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let count = m.count_where(|_k, _v| false);
+    assert_eq(count, 0);
+}
+
+@test
+fn test_count_where_by_value() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 5);
+    m.insert(2, 15);
+    m.insert(3, 25);
+    m.insert(4, 35);
+
+    let count = m.count_where(|_k, v| *v >= 20);
+    assert_eq(count, 2);
+}
+
+@test
+fn test_count_where_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let count = m.count_where(|_k, _v| true);
+    assert_eq(count, 0);
+}

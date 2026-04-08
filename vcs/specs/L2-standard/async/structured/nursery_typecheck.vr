@@ -1,0 +1,265 @@
+// @test: typecheck-pass
+// @level: L2
+// @tags: async, structured-concurrency, nursery, typecheck
+// @description: Type checking tests for nursery expressions
+
+mount async.Nursery;
+mount async.NurseryError;
+mount async.NurseryOptions;
+mount async.JoinHandle;
+mount core.Duration;
+mount core.Result;
+mount core.List;
+mount core.Maybe;
+mount core.Error;
+
+// =============================================================================
+// Basic Type Checking
+// =============================================================================
+
+// Nursery returns the body's type
+fn test_nursery_return_type() {
+    let result: Int = nursery {
+        42
+    };
+    assert_eq(result, 42);
+}
+
+// Nursery with unit return
+fn test_nursery_unit() {
+    let result: () = nursery {
+        spawn {};
+    };
+}
+
+// Nursery return type inference
+fn test_nursery_inference() {
+    let result = nursery {
+        "hello"
+    };
+    // result should be inferred as Text
+    let _: Text = result;
+}
+
+// =============================================================================
+// Option Type Checking
+// =============================================================================
+
+// Timeout must be Duration or Int
+fn test_timeout_duration() {
+    let duration = Duration.from_millis(5000);
+    nursery(timeout: duration) {
+        spawn {};
+    }
+}
+
+fn test_timeout_int() {
+    nursery(timeout: 5000) {
+        spawn {};
+    }
+}
+
+// max_tasks must be Int
+fn test_max_tasks_type() {
+    nursery(max_tasks: 10) {
+        spawn {};
+    }
+}
+
+// =============================================================================
+// Spawn Type Checking
+// =============================================================================
+
+// Spawn returns JoinHandle<T>
+async fn test_spawn_handle() {
+    let result = nursery {
+        let handle: JoinHandle<Int> = spawn { 42 };
+        handle.await?
+    };
+    assert_eq(result, 42);
+}
+
+// Multiple spawns with different types
+async fn test_multi_type_spawn() {
+    nursery {
+        let h1: JoinHandle<Int> = spawn { 42 };
+        let h2: JoinHandle<Text> = spawn { "hello" };
+        let h3: JoinHandle<Bool> = spawn { true };
+
+        assert_eq(h1.await?, 42);
+        assert_eq(h2.await?, "hello");
+        assert_eq(h3.await?, true);
+    }
+}
+
+// =============================================================================
+// Recover Type Checking
+// =============================================================================
+
+// Recover must match body type
+fn test_recover_type_match() {
+    let result: Int = nursery {
+        spawn { risky_compute()? };
+        42
+    } recover |_err| {
+        -1  // Must be Int to match body
+    };
+}
+
+// Recover closure receives NurseryError
+fn test_recover_error_type() {
+    nursery {
+        spawn {};
+    } recover |err: NurseryError| {
+        match err {
+            NurseryError.Timeout { pending_count, completed_count } => {
+                print(f"Timed out: {pending_count} pending");
+            },
+            NurseryError.Cancelled => {
+                print("Cancelled");
+            },
+            _ => {},
+        }
+    };
+}
+
+// Recover match arms with pattern matching
+fn test_recover_patterns() {
+    let result = nursery {
+        spawn { may_fail()? };
+        "success"
+    } recover {
+        NurseryError.Single(e) => f"single error: {e}",
+        NurseryError.Multiple(errors) => f"multiple errors: {errors.len()}",
+        NurseryError.Timeout { .. } => "timeout",
+        NurseryError.Cancelled => "cancelled",
+        _ => "unknown error",
+    };
+}
+
+// =============================================================================
+// Context Type Checking
+// =============================================================================
+
+// Nursery inherits async context
+async fn test_async_context() {
+    // Inside async function, nursery can use await
+    let result = nursery {
+        let h = spawn { fetch_data().await };
+        h.await?
+    };
+}
+
+// Nursery spawned tasks can capture variables
+async fn test_capture_types() {
+    let x: Int = 42;
+    let s: Text = "hello";
+
+    nursery {
+        spawn {
+            // Captured variables maintain their types
+            let _a: Int = x;
+            let _b: Text = s.clone();
+        };
+    }
+}
+
+// =============================================================================
+// Generic Nursery
+// =============================================================================
+
+// Generic function with nursery
+async fn process_items<T: Clone + Send>(items: List<T>) -> List<T> {
+    // Nursery with generic types - simplified
+    nursery(max_tasks: 10) {
+        // Process items within nursery scope
+        items.clone()
+    }
+}
+
+// =============================================================================
+// Error Propagation
+// =============================================================================
+
+// Nursery errors propagate with ?
+async fn test_error_propagation() -> Result<Int, NurseryError> {
+    let result = nursery {
+        spawn { 42 };
+        100
+    };
+    Ok(result)
+}
+
+// Nursery with fallible body
+async fn test_fallible_body() -> Result<Int, Error> {
+    let result = nursery {
+        let h = spawn {
+            risky_compute()?
+        };
+        (h.await?)?
+    };
+    Ok(result)
+}
+
+// =============================================================================
+// JoinHandle Methods
+// =============================================================================
+
+async fn test_task_handle_methods() {
+    nursery {
+        let h = spawn { 42 };
+
+        // task_id not yet available on JoinHandle
+        // let _id: Int = h.task_id();
+
+        // Check if finished
+        let _finished: Bool = h.is_finished();
+
+        // Await result
+        let result: Result<Int, NurseryError> = h.await;
+        assert(result.is_ok());
+    }
+}
+
+// =============================================================================
+// Nursery Methods
+// =============================================================================
+
+fn test_nursery_direct_api() {
+    let mut n = Nursery.new();
+
+    let h1 = n.spawn(async { 1 });
+    let h2 = n.spawn(async { 2 });
+
+    // Check counts
+    let _spawned: Int = n.spawned_count();
+    let _pending: Int = n.pending_count();
+    let _completed: Int = n.completed_count();
+
+    // Check cancellation
+    let _is_cancelled: Bool = n.is_cancelled();
+
+    // Cancel
+    n.cancel();
+    assert(n.is_cancelled());
+}
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
+async fn risky_compute() -> Result<Int, Error> {
+    Ok(42)
+}
+
+async fn may_fail() -> Result<Text, Error> {
+    Ok("ok")
+}
+
+async fn fetch_data() -> Int {
+    42
+}
+
+fn main() {
+    // Type checking only
+}

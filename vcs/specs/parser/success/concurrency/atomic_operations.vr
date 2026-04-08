@@ -1,0 +1,21 @@
+// @test: parse-pass
+// @tier: 0
+// @category: concurrency
+
+fn test_atomics() {
+    // Atomic types
+    let counter: Atomic<Int> = Atomic.new(0);
+
+    // Atomic operations
+    let old = counter.fetch_add(1, Ordering.SeqCst);
+    let current = counter.load(Ordering.Acquire);
+    counter.store(42, Ordering.Release);
+
+    // Compare and swap
+    let result = counter.compare_exchange(
+        expected,
+        new_value,
+        Ordering.SeqCst,
+        Ordering.Relaxed
+    );
+}

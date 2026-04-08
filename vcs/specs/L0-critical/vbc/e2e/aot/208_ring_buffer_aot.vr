@@ -1,0 +1,152 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, ring-buffer, circular, data-structures
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for ring buffer (circular buffer) implementation
+
+type Ring8 is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    read_idx: Int,
+    write_idx: Int,
+    count: Int
+};
+
+fn ring_new() -> Ring8 {
+    Ring8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0,
+            read_idx: 0, write_idx: 0, count: 0 }
+}
+
+fn ring_get(r: Ring8, i: Int) -> Int {
+    if i == 0 { r.d0 } else if i == 1 { r.d1 }
+    else if i == 2 { r.d2 } else if i == 3 { r.d3 }
+    else if i == 4 { r.d4 } else if i == 5 { r.d5 }
+    else if i == 6 { r.d6 } else { r.d7 }
+}
+
+fn ring_set(r: Ring8, i: Int, val: Int) -> Ring8 {
+    Ring8 {
+        d0: if i == 0 { val } else { r.d0 },
+        d1: if i == 1 { val } else { r.d1 },
+        d2: if i == 2 { val } else { r.d2 },
+        d3: if i == 3 { val } else { r.d3 },
+        d4: if i == 4 { val } else { r.d4 },
+        d5: if i == 5 { val } else { r.d5 },
+        d6: if i == 6 { val } else { r.d6 },
+        d7: if i == 7 { val } else { r.d7 },
+        read_idx: r.read_idx, write_idx: r.write_idx, count: r.count
+    }
+}
+
+fn ring_write(r: Ring8, val: Int) -> Ring8 {
+    let nr = ring_set(r, r.write_idx, val);
+    Ring8 {
+        d0: nr.d0, d1: nr.d1, d2: nr.d2, d3: nr.d3,
+        d4: nr.d4, d5: nr.d5, d6: nr.d6, d7: nr.d7,
+        read_idx: r.read_idx,
+        write_idx: (r.write_idx + 1) % 8,
+        count: if r.count < 8 { r.count + 1 } else { r.count }
+    }
+}
+
+fn ring_read_val(r: Ring8) -> Int {
+    ring_get(r, r.read_idx)
+}
+
+fn ring_read(r: Ring8) -> Ring8 {
+    Ring8 {
+        d0: r.d0, d1: r.d1, d2: r.d2, d3: r.d3,
+        d4: r.d4, d5: r.d5, d6: r.d6, d7: r.d7,
+        read_idx: (r.read_idx + 1) % 8,
+        write_idx: r.write_idx,
+        count: r.count - 1
+    }
+}
+
+fn ring_is_empty(r: Ring8) -> Bool { r.count == 0 }
+fn ring_is_full(r: Ring8) -> Bool { r.count == 8 }
+
+fn test_basic() {
+    let mut r = ring_new();
+    assert_eq(ring_is_empty(r), true);
+    assert_eq(r.count, 0);
+
+    r = ring_write(r, 10);
+    assert_eq(ring_is_empty(r), false);
+    assert_eq(r.count, 1);
+    assert_eq(ring_read_val(r), 10);
+
+    r = ring_write(r, 20);
+    r = ring_write(r, 30);
+    assert_eq(r.count, 3);
+    assert_eq(ring_read_val(r), 10);  // FIFO: first in
+
+    r = ring_read(r);
+    assert_eq(ring_read_val(r), 20);
+    assert_eq(r.count, 2);
+}
+
+fn test_wraparound() {
+    let mut r = ring_new();
+    // Write 8 values
+    let mut i = 0;
+    while i < 8 {
+        r = ring_write(r, (i + 1) * 10);
+        i = i + 1;
+    }
+    assert_eq(ring_is_full(r), true);
+    assert_eq(r.count, 8);
+
+    // Read first 3
+    assert_eq(ring_read_val(r), 10); r = ring_read(r);
+    assert_eq(ring_read_val(r), 20); r = ring_read(r);
+    assert_eq(ring_read_val(r), 30); r = ring_read(r);
+    assert_eq(r.count, 5);
+
+    // Write 3 more (wraps around)
+    r = ring_write(r, 90);
+    r = ring_write(r, 100);
+    r = ring_write(r, 110);
+    assert_eq(ring_is_full(r), true);
+
+    // Read should give: 40, 50, 60, 70, 80, 90, 100, 110
+    assert_eq(ring_read_val(r), 40); r = ring_read(r);
+    assert_eq(ring_read_val(r), 50); r = ring_read(r);
+    assert_eq(ring_read_val(r), 60); r = ring_read(r);
+    assert_eq(ring_read_val(r), 70); r = ring_read(r);
+    assert_eq(ring_read_val(r), 80); r = ring_read(r);
+    assert_eq(ring_read_val(r), 90); r = ring_read(r);
+    assert_eq(ring_read_val(r), 100); r = ring_read(r);
+    assert_eq(ring_read_val(r), 110); r = ring_read(r);
+    assert_eq(ring_is_empty(r), true);
+}
+
+fn test_sum_of_buffer() {
+    let mut r = ring_new();
+    r = ring_write(r, 1);
+    r = ring_write(r, 2);
+    r = ring_write(r, 3);
+    r = ring_write(r, 4);
+    r = ring_write(r, 5);
+
+    // Sum all elements
+    let mut sum = 0;
+    let mut i = 0;
+    while i < r.count {
+        let idx = (r.read_idx + i) % 8;
+        sum = sum + ring_get(r, idx);
+        i = i + 1;
+    }
+    assert_eq(sum, 15);
+}
+
+fn main() -> Int {
+    test_basic();
+    test_wraparound();
+    test_sum_of_buffer();
+    print("[OK] 208_ring_buffer_aot");
+    0
+}

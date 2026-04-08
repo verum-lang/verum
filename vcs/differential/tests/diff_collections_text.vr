@@ -1,0 +1,78 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, text, format, string, concatenation
+// @timeout: 30000
+// @description: Differential test: verify text operations, format strings, string equality match across tiers
+
+fn main() -> Int {
+    // ---- Text literal comparison ----
+    let hello: Text = "Hello";
+    let world: Text = "World";
+    assert_eq(hello, "Hello");
+    assert_eq(world, "World");
+
+    // ---- String concatenation ----
+    let combined = hello + ", " + world + "!";
+    assert_eq(combined, "Hello, World!");
+
+    let ab = "AB" + "CD";
+    assert_eq(ab, "ABCD");
+
+    // Multiple concats
+    let greeting = "Hi" + " " + "there" + " " + "friend";
+    assert_eq(greeting, "Hi there friend");
+
+    // ---- Format strings with integers ----
+    let x = 42;
+    let msg = f"value={x}";
+    assert_eq(msg, "value=42");
+
+    let a = 10;
+    let b_val = 20;
+    let expr_msg = f"{a}+{b_val}={a+b_val}";
+    assert_eq(expr_msg, "10+20=30");
+
+    // Negative format
+    let neg = -7;
+    assert_eq(f"neg={neg}", "neg=-7");
+
+    // Zero
+    let zero = 0;
+    assert_eq(f"z={zero}", "z=0");
+
+    // Large number
+    let big = 1000000;
+    assert_eq(f"big={big}", "big=1000000");
+
+    // ---- Text concatenation in loop ----
+    let mut built: Text = "";
+    let mut k = 0;
+    while k < 5 {
+        built = built + f"{k}";
+        k = k + 1;
+    }
+    assert_eq(built, "01234");
+
+    // ---- String equality edge cases ----
+    let empty: Text = "";
+    let also_empty: Text = "";
+    assert_eq(empty, also_empty);
+    assert_eq(empty, "");
+
+    // Concat with empty
+    let with_empty = "abc" + "" + "def";
+    assert_eq(with_empty, "abcdef");
+
+    // ---- Multiple format concats ----
+    let p = 3;
+    let q = 4;
+    let sum = p + q;
+    let product = p * q;
+    let result = f"{p}+{q}={sum}, {p}*{q}={product}";
+    assert_eq(result, "3+4=7, 3*4=12");
+
+    print("differential collections ok");
+    0
+}

@@ -1,0 +1,115 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, shadowing, binding
+// @description: Test binding shadowing behavior in hygienic macro expansion
+
+// =============================================================================
+// SHADOW PRESERVATION IN QUOTES
+// =============================================================================
+// When a quote introduces a binding with the same name as an outer binding,
+// the inner binding should shadow the outer one within the quote's scope,
+// but not affect the outer binding.
+
+meta fn shadow_in_quote() -> TokenStream {
+    let x = 100;  // Outer x at meta level
+
+    quote {
+        let x = 200;  // Inner x, shadows for this scope
+        let result = x;  // Should be 200
+        result
+    }
+}
+
+// =============================================================================
+// MULTI-LEVEL SHADOWING
+// =============================================================================
+
+meta fn multi_level_shadow() -> TokenStream {
+    let value = 1;
+
+    quote {
+        let value = 2;  // First shadow
+        let inner = {
+            let value = 3;  // Second shadow
+            value
+        };
+        let outer = value;  // Should be 2
+        inner + outer  // 3 + 2 = 5
+    }
+}
+
+// =============================================================================
+// SHADOW DOESN'T AFFECT OUTER SCOPE
+// =============================================================================
+
+meta fn shadow_isolation() -> Int {
+    let x = 42;
+
+    // This quote introduces its own x
+    let _ts = quote {
+        let x = 0;
+        x
+    };
+
+    // Outer x should still be 42
+    x
+}
+
+// =============================================================================
+// PARAMETER SHADOWING IN GENERATED CODE
+// =============================================================================
+
+meta fn gen_shadow_param(name: Ident) -> TokenStream {
+    quote {
+        fn inner($name: Int) -> Int {
+            let $name = $name * 2;  // Shadow parameter
+            $name
+        }
+    }
+}
+
+// =============================================================================
+// SHADOWING WITH SPLICE PRESERVES HYGIENE
+// =============================================================================
+
+meta fn splice_with_shadow() -> TokenStream {
+    let multiplier = 10;
+
+    quote {
+        let multiplier = 5;  // This shadows, but splice uses outer
+        let a = multiplier;  // 5 (local binding)
+        let b = ${multiplier};  // 10 (spliced from outer meta scope)
+        a + b  // 5 + 10 = 15
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_shadow_in_quote() {
+    let result = @shadow_in_quote();
+    assert(result == 200);
+}
+
+fn test_multi_level_shadow() {
+    let result = @multi_level_shadow();
+    assert(result == 5);
+}
+
+fn test_shadow_isolation() {
+    @const assert_eq(shadow_isolation(), 42);
+}
+
+fn test_splice_with_shadow() {
+    let result = @splice_with_shadow();
+    assert(result == 15);
+}
+
+fn main() {
+    test_shadow_in_quote();
+    test_multi_level_shadow();
+    test_shadow_isolation();
+    test_splice_with_shadow();
+}

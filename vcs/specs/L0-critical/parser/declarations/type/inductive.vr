@@ -1,0 +1,40 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, inductive, algebraic
+// @description: Test parsing of inductive type definitions
+
+// Simple inductive type: natural numbers
+type Nat is inductive {
+    | Zero
+    | Succ(Nat)
+};
+
+// Binary tree
+type Tree<T> is inductive {
+    | Leaf(T)
+    | Node(Tree<T>, T, Tree<T>)
+};
+
+// Linked list
+type LinkedList<T> is inductive {
+    | Nil
+    | Cons(T, LinkedList<T>)
+};
+
+// Expression AST
+type Expr is inductive {
+    | Lit(Int)
+    | Add(Heap<Expr>, Heap<Expr>)
+    | Mul(Heap<Expr>, Heap<Expr>)
+    | Neg(Heap<Expr>)
+};
+
+// Rose tree (multi-way tree)
+type Rose<T> is inductive {
+    | RoseNode(T, List<Rose<T>>)
+};
+
+fn main() -> Int {
+    0
+}

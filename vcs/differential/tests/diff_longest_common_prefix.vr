@@ -1,0 +1,127 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, lcp, string, algorithm
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+fn min2(a: Int, b_val: Int) -> Int { if a < b_val { a } else { b_val } }
+
+// LCP between two arrays
+fn lcp_two(a: Arr8, alen: Int, b_arr: Arr8, blen: Int) -> Int {
+    let n = min2(alen, blen);
+    let mut i = 0;
+    while i < n {
+        if get(a, i) != get(b_arr, i) { return i; }
+        i = i + 1;
+    }
+    n
+}
+
+// LCP among multiple "strings" (stored as rows)
+type Strings4 is { s0: Arr8, l0: Int, s1: Arr8, l1: Int, s2: Arr8, l2: Int, s3: Arr8, l3: Int, n: Int };
+
+fn get_str(ss: Strings4, i: Int) -> Arr8 {
+    if i == 0 { ss.s0 } else if i == 1 { ss.s1 } else if i == 2 { ss.s2 } else { ss.s3 }
+}
+
+fn get_len(ss: Strings4, i: Int) -> Int {
+    if i == 0 { ss.l0 } else if i == 1 { ss.l1 } else if i == 2 { ss.l2 } else { ss.l3 }
+}
+
+// LCP of all strings
+fn lcp_all(ss: Strings4) -> Int {
+    if ss.n <= 0 { return 0; }
+    if ss.n == 1 { return get_len(ss, 0); }
+    let mut result = get_len(ss, 0);
+    let mut i = 1;
+    while i < ss.n {
+        result = lcp_two(get_str(ss, 0), result, get_str(ss, i), get_len(ss, i));
+        if result == 0 { return 0; }
+        i = i + 1;
+    }
+    result
+}
+
+// Longest common suffix
+fn lcs_two(a: Arr8, alen: Int, b_arr: Arr8, blen: Int) -> Int {
+    let mut i = 0;
+    let n = min2(alen, blen);
+    while i < n {
+        if get(a, alen - 1 - i) != get(b_arr, blen - 1 - i) { return i; }
+        i = i + 1;
+    }
+    n
+}
+
+// Is a prefix of b?
+fn is_prefix(a: Arr8, alen: Int, b_arr: Arr8, blen: Int) -> Int {
+    if alen > blen { return 0; }
+    if lcp_two(a, alen, b_arr, blen) == alen { 1 } else { 0 }
+}
+
+// Is a suffix of b?
+fn is_suffix(a: Arr8, alen: Int, b_arr: Arr8, blen: Int) -> Int {
+    if alen > blen { return 0; }
+    if lcs_two(a, alen, b_arr, blen) == alen { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let s1 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let s2 = Arr8 { d0: 1, d1: 2, d2: 5, d3: 6, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let s3 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+
+    // LCP of two
+    assert_eq(lcp_two(s1, 4, s2, 4), 2); // [1,2] common
+    assert_eq(lcp_two(s1, 4, s3, 3), 3); // [1,2,3]
+    assert_eq(lcp_two(s1, 4, s1, 4), 4); // identical
+
+    // No common prefix
+    let s4 = Arr8 { d0: 5, d1: 6, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(lcp_two(s1, 4, s4, 2), 0);
+
+    // Empty string
+    assert_eq(lcp_two(s1, 4, s1, 0), 0);
+
+    // LCP of all
+    let ss = Strings4 {
+        s0: s1, l0: 4, s1: s2, l1: 4, s2: s3, l2: 3, s3: zeros(), l3: 0, n: 3
+    };
+    assert_eq(lcp_all(ss), 2); // [1,2] is common to all 3
+
+    // All identical
+    let ss2 = Strings4 { s0: s1, l0: 4, s1: s1, l1: 4, s2: s1, l2: 4, s3: s1, l3: 4, n: 4 };
+    assert_eq(lcp_all(ss2), 4);
+
+    // One differs at start
+    let ss3 = Strings4 { s0: s1, l0: 4, s1: s4, l1: 2, s2: s1, l2: 4, s3: zeros(), l3: 0, n: 2 };
+    assert_eq(lcp_all(ss3), 0);
+
+    // Suffix tests
+    let a = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 0, d6: 0, d7: 0 };
+    let b_arr = Arr8 { d0: 3, d1: 4, d2: 5, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(lcs_two(a, 5, b_arr, 3), 3); // common suffix [3,4,5]
+
+    // Prefix/suffix checks
+    let pre = Arr8 { d0: 1, d1: 2, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(is_prefix(pre, 2, s1, 4), 1); // [1,2] is prefix of [1,2,3,4]
+    assert_eq(is_prefix(s1, 4, pre, 2), 0); // longer can't be prefix of shorter
+    assert_eq(is_suffix(b_arr, 3, a, 5), 1); // [3,4,5] is suffix of [1,2,3,4,5]
+    assert_eq(is_suffix(pre, 2, a, 5), 0); // [1,2] is NOT suffix of [1,2,3,4,5]
+
+    // Identity properties
+    assert_eq(is_prefix(s1, 4, s1, 4), 1); // string is prefix of itself
+    assert_eq(is_suffix(s1, 4, s1, 4), 1); // string is suffix of itself
+
+    print("DIFF_OK: longest_common_prefix");
+    0
+}

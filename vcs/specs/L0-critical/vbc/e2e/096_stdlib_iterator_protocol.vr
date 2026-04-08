@@ -1,0 +1,422 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, iterator
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Stdlib iterator protocol — manual map, filter, fold, zip over fixed arrays
+
+// ============================================================================
+// Arr8: Fixed-size array of 8 Ints with length
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn arr_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn arr_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        len: a.len
+    }
+}
+
+fn arr_push(a: Arr8, val: Int) -> Arr8 {
+    let idx = a.len;
+    let updated = arr_set(a, idx, val);
+    Arr8 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        len: idx + 1
+    }
+}
+
+fn arr_from5(a: Int, b: Int, c: Int, d: Int, e: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: 0, e6: 0, e7: 0, len: 5 }
+}
+
+fn arr_from6(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: 0, e7: 0, len: 6 }
+}
+
+// ============================================================================
+// Iterator operations (manual implementations)
+// ============================================================================
+
+// Map: apply fn to each element.
+// Since we cannot pass closures, we define specific map functions.
+
+fn map_double(a: Arr8) -> Arr8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < a.len {
+        result = arr_push(result, arr_get(a, i) * 2);
+        i = i + 1;
+    }
+    result
+}
+
+fn map_square(a: Arr8) -> Arr8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < a.len {
+        let v = arr_get(a, i);
+        result = arr_push(result, v * v);
+        i = i + 1;
+    }
+    result
+}
+
+fn map_add_offset(a: Arr8, offset: Int) -> Arr8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < a.len {
+        result = arr_push(result, arr_get(a, i) + offset);
+        i = i + 1;
+    }
+    result
+}
+
+// Filter: keep elements satisfying a predicate
+
+fn filter_positive(a: Arr8) -> Arr8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < a.len {
+        let v = arr_get(a, i);
+        if v > 0 { result = arr_push(result, v); }
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_even(a: Arr8) -> Arr8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < a.len {
+        let v = arr_get(a, i);
+        if v - (v / 2) * 2 == 0 { result = arr_push(result, v); }
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_greater_than(a: Arr8, threshold: Int) -> Arr8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < a.len {
+        let v = arr_get(a, i);
+        if v > threshold { result = arr_push(result, v); }
+        i = i + 1;
+    }
+    result
+}
+
+// Fold: reduce array to single value
+
+fn fold_sum(a: Arr8) -> Int {
+    let mut acc = 0;
+    let mut i = 0;
+    while i < a.len {
+        acc = acc + arr_get(a, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn fold_product(a: Arr8) -> Int {
+    let mut acc = 1;
+    let mut i = 0;
+    while i < a.len {
+        acc = acc * arr_get(a, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn fold_max(a: Arr8) -> Int {
+    if a.len == 0 { return 0; }
+    let mut m = arr_get(a, 0);
+    let mut i = 1;
+    while i < a.len {
+        let v = arr_get(a, i);
+        if v > m { m = v; }
+        i = i + 1;
+    }
+    m
+}
+
+fn fold_min(a: Arr8) -> Int {
+    if a.len == 0 { return 0; }
+    let mut m = arr_get(a, 0);
+    let mut i = 1;
+    while i < a.len {
+        let v = arr_get(a, i);
+        if v < m { m = v; }
+        i = i + 1;
+    }
+    m
+}
+
+// Zip: combine two arrays element-wise (sum)
+
+fn zip_add(a: Arr8, b: Arr8) -> Arr8 {
+    let min_len = if a.len < b.len { a.len } else { b.len };
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < min_len {
+        result = arr_push(result, arr_get(a, i) + arr_get(b, i));
+        i = i + 1;
+    }
+    result
+}
+
+fn zip_mul(a: Arr8, b: Arr8) -> Arr8 {
+    let min_len = if a.len < b.len { a.len } else { b.len };
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < min_len {
+        result = arr_push(result, arr_get(a, i) * arr_get(b, i));
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Test 1: Map operations
+// ============================================================================
+
+@test
+fn test_map_operations() {
+    let data = arr_from5(1, 2, 3, 4, 5);
+
+    // Double each element
+    let doubled = map_double(data);
+    assert_eq(doubled.len, 5);
+    assert_eq(arr_get(doubled, 0), 2);
+    assert_eq(arr_get(doubled, 1), 4);
+    assert_eq(arr_get(doubled, 2), 6);
+    assert_eq(arr_get(doubled, 3), 8);
+    assert_eq(arr_get(doubled, 4), 10);
+
+    // Square each element
+    let squared = map_square(data);
+    assert_eq(arr_get(squared, 0), 1);
+    assert_eq(arr_get(squared, 1), 4);
+    assert_eq(arr_get(squared, 2), 9);
+    assert_eq(arr_get(squared, 3), 16);
+    assert_eq(arr_get(squared, 4), 25);
+
+    // Add offset
+    let offset = map_add_offset(data, 10);
+    assert_eq(arr_get(offset, 0), 11);
+    assert_eq(arr_get(offset, 4), 15);
+
+    // Chain: double then add offset
+    let chained = map_add_offset(map_double(data), 1);
+    assert_eq(arr_get(chained, 0), 3);   // 1*2+1
+    assert_eq(arr_get(chained, 2), 7);   // 3*2+1
+    assert_eq(arr_get(chained, 4), 11);  // 5*2+1
+
+    print("  test_map_operations: ok");
+}
+
+// ============================================================================
+// Test 2: Filter operations
+// ============================================================================
+
+@test
+fn test_filter_operations() {
+    // Mixed positive/negative
+    let mixed = arr_from6(3, -1, 4, -2, 5, 0);
+
+    // Filter positive (> 0)
+    let pos = filter_positive(mixed);
+    assert_eq(pos.len, 3);
+    assert_eq(arr_get(pos, 0), 3);
+    assert_eq(arr_get(pos, 1), 4);
+    assert_eq(arr_get(pos, 2), 5);
+
+    // Filter even
+    let data = arr_from5(1, 2, 3, 4, 5);
+    let evens = filter_even(data);
+    assert_eq(evens.len, 2);
+    assert_eq(arr_get(evens, 0), 2);
+    assert_eq(arr_get(evens, 1), 4);
+
+    // Filter greater than 3
+    let gt3 = filter_greater_than(data, 3);
+    assert_eq(gt3.len, 2);
+    assert_eq(arr_get(gt3, 0), 4);
+    assert_eq(arr_get(gt3, 1), 5);
+
+    // Filter all (nothing passes)
+    let all_neg = filter_positive(arr_from5(-1, -2, -3, -4, -5));
+    assert_eq(all_neg.len, 0);
+
+    // Filter none (everything passes)
+    let all_pos = filter_positive(data);
+    assert_eq(all_pos.len, 5);
+
+    print("  test_filter_operations: ok");
+}
+
+// ============================================================================
+// Test 3: Fold/reduce operations
+// ============================================================================
+
+@test
+fn test_fold_operations() {
+    let data = arr_from5(1, 2, 3, 4, 5);
+
+    // Sum
+    assert_eq(fold_sum(data), 15);
+
+    // Product
+    assert_eq(fold_product(data), 120);
+
+    // Max
+    assert_eq(fold_max(data), 5);
+
+    // Min
+    assert_eq(fold_min(data), 1);
+
+    // Sum of empty array
+    let empty = arr_new();
+    assert_eq(fold_sum(empty), 0);
+    assert_eq(fold_product(empty), 1);
+
+    // Fold with single element
+    let single = arr_from5(42, 0, 0, 0, 0);
+    let s = Arr8 { e0: 42, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 1 };
+    assert_eq(fold_sum(s), 42);
+    assert_eq(fold_max(s), 42);
+    assert_eq(fold_min(s), 42);
+
+    // Chain: map then fold — sum of squares
+    let sum_sq = fold_sum(map_square(data));
+    // 1 + 4 + 9 + 16 + 25 = 55
+    assert_eq(sum_sq, 55);
+
+    // Filter then fold — sum of evens
+    let sum_evens = fold_sum(filter_even(data));
+    assert_eq(sum_evens, 6);  // 2 + 4
+
+    print("  test_fold_operations: ok");
+}
+
+// ============================================================================
+// Test 4: Zip operations
+// ============================================================================
+
+@test
+fn test_zip_operations() {
+    let a = arr_from5(1, 2, 3, 4, 5);
+    let b = arr_from5(10, 20, 30, 40, 50);
+
+    // Zip add
+    let added = zip_add(a, b);
+    assert_eq(added.len, 5);
+    assert_eq(arr_get(added, 0), 11);
+    assert_eq(arr_get(added, 1), 22);
+    assert_eq(arr_get(added, 2), 33);
+    assert_eq(arr_get(added, 3), 44);
+    assert_eq(arr_get(added, 4), 55);
+
+    // Zip multiply
+    let multed = zip_mul(a, b);
+    assert_eq(arr_get(multed, 0), 10);
+    assert_eq(arr_get(multed, 1), 40);
+    assert_eq(arr_get(multed, 2), 90);
+    assert_eq(arr_get(multed, 3), 160);
+    assert_eq(arr_get(multed, 4), 250);
+
+    // Dot product: sum of element-wise multiplication
+    let dot = fold_sum(zip_mul(a, b));
+    // 10 + 40 + 90 + 160 + 250 = 550
+    assert_eq(dot, 550);
+
+    // Zip with different lengths (takes min length)
+    let short = Arr8 { e0: 100, e1: 200, e2: 300, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 3 };
+    let zipped = zip_add(a, short);
+    assert_eq(zipped.len, 3);
+    assert_eq(arr_get(zipped, 0), 101);
+    assert_eq(arr_get(zipped, 1), 202);
+    assert_eq(arr_get(zipped, 2), 303);
+
+    // Self-zip (doubling)
+    let self_add = zip_add(a, a);
+    assert_eq(arr_get(self_add, 0), 2);
+    assert_eq(arr_get(self_add, 4), 10);
+
+    print("  test_zip_operations: ok");
+}
+
+// ============================================================================
+// Test 5: Chained iterator pipelines
+// ============================================================================
+
+@test
+fn test_chained_pipelines() {
+    let data = arr_from6(1, 2, 3, 4, 5, 6);
+
+    // Pipeline 1: filter even -> double -> sum
+    // Even: [2, 4, 6] -> double: [4, 8, 12] -> sum: 24
+    let p1 = fold_sum(map_double(filter_even(data)));
+    assert_eq(p1, 24);
+
+    // Pipeline 2: filter > 2 -> square -> max
+    // >2: [3, 4, 5, 6] -> square: [9, 16, 25, 36] -> max: 36
+    let p2 = fold_max(map_square(filter_greater_than(data, 2)));
+    assert_eq(p2, 36);
+
+    // Pipeline 3: double -> filter > 5 -> sum
+    // double: [2, 4, 6, 8, 10, 12] -> >5: [6, 8, 10, 12] -> sum: 36
+    let p3 = fold_sum(filter_greater_than(map_double(data), 5));
+    assert_eq(p3, 36);
+
+    // Pipeline 4: square -> filter even -> product
+    // square: [1, 4, 9, 16, 25, 36] -> even: [4, 16, 36] -> product: 2304
+    let p4 = fold_product(filter_even(map_square(data)));
+    assert_eq(p4, 2304);
+
+    // Pipeline 5: zip_add with itself then fold_min
+    let self_added = zip_add(data, data);
+    assert_eq(fold_min(self_added), 2);
+    assert_eq(fold_max(self_added), 12);
+
+    print("  test_chained_pipelines: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_map_operations();
+    test_filter_operations();
+    test_fold_operations();
+    test_zip_operations();
+    test_chained_pipelines();
+    print("[OK] 096_stdlib_iterator_protocol");
+    0
+}

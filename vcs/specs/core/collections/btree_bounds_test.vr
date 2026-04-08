@@ -1,0 +1,346 @@
+// =============================================================================
+// btree_bounds_test.vr - Tests for BTreeMap lower_bound/upper_bound
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, btree, bounds, range, core
+// @description: Tests for BTreeMap lower_bound() and upper_bound() methods
+//               for efficient O(log n) bound queries
+// =============================================================================
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.ordering.{Ordering};
+mount core.collections.btree.{BTreeMap};
+
+// =============================================================================
+// Section 1: lower_bound() Tests
+// =============================================================================
+
+@test
+fn test_lower_bound_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(map.lower_bound(&5).is_none());
+}
+
+@test
+fn test_lower_bound_exact_match() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    match map.lower_bound(&3) {
+        Some(pair) => {
+            assert_eq(*pair.0, 3);
+            assert_eq(*pair.1, 30);
+        }
+        None => panic("Expected Some for exact match"),
+    }
+}
+
+@test
+fn test_lower_bound_between_keys() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    // Key 2 doesn't exist, lower_bound should return (3, 30)
+    match map.lower_bound(&2) {
+        Some(pair) => {
+            assert_eq(*pair.0, 3);
+            assert_eq(*pair.1, 30);
+        }
+        None => panic("Expected Some for between keys"),
+    }
+}
+
+@test
+fn test_lower_bound_before_all() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(5, 50);
+    map.insert(10, 100);
+    map.insert(15, 150);
+
+    // Key 1 is before all keys, should return first entry (5, 50)
+    match map.lower_bound(&1) {
+        Some(pair) => {
+            assert_eq(*pair.0, 5);
+            assert_eq(*pair.1, 50);
+        }
+        None => panic("Expected Some for before all"),
+    }
+}
+
+@test
+fn test_lower_bound_after_all() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    // Key 10 is after all keys
+    assert(map.lower_bound(&10).is_none());
+}
+
+@test
+fn test_lower_bound_first_key() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    match map.lower_bound(&1) {
+        Some(pair) => {
+            assert_eq(*pair.0, 1);
+            assert_eq(*pair.1, 10);
+        }
+        None => panic("Expected Some for first key"),
+    }
+}
+
+@test
+fn test_lower_bound_last_key() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    match map.lower_bound(&5) {
+        Some(pair) => {
+            assert_eq(*pair.0, 5);
+            assert_eq(*pair.1, 50);
+        }
+        None => panic("Expected Some for last key"),
+    }
+}
+
+@test
+fn test_lower_bound_just_past_last() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    assert(map.lower_bound(&6).is_none());
+}
+
+@test
+fn test_lower_bound_single_element() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(5, 50);
+
+    match map.lower_bound(&5) {
+        Some(pair) => assert_eq(*pair.0, 5),
+        None => panic("Expected Some"),
+    }
+    match map.lower_bound(&3) {
+        Some(pair) => assert_eq(*pair.0, 5),
+        None => panic("Expected Some for below"),
+    }
+    assert(map.lower_bound(&6).is_none());
+}
+
+// =============================================================================
+// Section 2: upper_bound() Tests
+// =============================================================================
+
+@test
+fn test_upper_bound_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(map.upper_bound(&5).is_none());
+}
+
+@test
+fn test_upper_bound_exact_match() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    // upper_bound is strictly greater than, so key=3 should return (5, 50)
+    match map.upper_bound(&3) {
+        Some(pair) => {
+            assert_eq(*pair.0, 5);
+            assert_eq(*pair.1, 50);
+        }
+        None => panic("Expected Some for upper bound of 3"),
+    }
+}
+
+@test
+fn test_upper_bound_between_keys() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    // Key 2 doesn't exist, upper_bound should return (3, 30)
+    match map.upper_bound(&2) {
+        Some(pair) => {
+            assert_eq(*pair.0, 3);
+            assert_eq(*pair.1, 30);
+        }
+        None => panic("Expected Some for between keys"),
+    }
+}
+
+@test
+fn test_upper_bound_before_all() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(5, 50);
+    map.insert(10, 100);
+
+    match map.upper_bound(&1) {
+        Some(pair) => {
+            assert_eq(*pair.0, 5);
+            assert_eq(*pair.1, 50);
+        }
+        None => panic("Expected Some for before all"),
+    }
+}
+
+@test
+fn test_upper_bound_at_last_key() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    // upper_bound(5) is strictly > 5, nothing exists
+    assert(map.upper_bound(&5).is_none());
+}
+
+@test
+fn test_upper_bound_after_all() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+
+    assert(map.upper_bound(&10).is_none());
+}
+
+@test
+fn test_upper_bound_first_key() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(5, 50);
+
+    // upper_bound(1) should return (3, 30) — strictly greater
+    match map.upper_bound(&1) {
+        Some(pair) => {
+            assert_eq(*pair.0, 3);
+            assert_eq(*pair.1, 30);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_upper_bound_single_element() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(5, 50);
+
+    // upper_bound(5) — nothing > 5
+    assert(map.upper_bound(&5).is_none());
+    // upper_bound(3) — 5 > 3
+    match map.upper_bound(&3) {
+        Some(pair) => assert_eq(*pair.0, 5),
+        None => panic("Expected Some"),
+    }
+    // upper_bound(6) — nothing > 6
+    assert(map.upper_bound(&6).is_none());
+}
+
+// =============================================================================
+// Section 3: Combined lower_bound/upper_bound Tests
+// =============================================================================
+
+@test
+fn test_bounds_consistency() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(10, 100);
+    map.insert(20, 200);
+    map.insert(30, 300);
+    map.insert(40, 400);
+    map.insert(50, 500);
+
+    // lower_bound(25) should be (30, 300), same as upper_bound(25) since 25 not in map
+    match map.lower_bound(&25) {
+        Some(pair) => assert_eq(*pair.0, 30),
+        None => panic("Expected lower_bound"),
+    }
+    match map.upper_bound(&25) {
+        Some(pair) => assert_eq(*pair.0, 30),
+        None => panic("Expected upper_bound"),
+    }
+}
+
+@test
+fn test_bounds_for_existing_key() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(10, 100);
+    map.insert(20, 200);
+    map.insert(30, 300);
+
+    // lower_bound(20) = (20, 200), upper_bound(20) = (30, 300)
+    match map.lower_bound(&20) {
+        Some(pair) => assert_eq(*pair.0, 20),
+        None => panic("Expected lower"),
+    }
+    match map.upper_bound(&20) {
+        Some(pair) => assert_eq(*pair.0, 30),
+        None => panic("Expected upper"),
+    }
+}
+
+@test
+fn test_bounds_larger_tree() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    // Insert enough to force B-tree splits (B=6, MAX_KEYS=11)
+    let mut i = 0;
+    while i < 50 {
+        map.insert(i * 2, i * 20);  // Even keys: 0, 2, 4, ..., 98
+        i = i + 1;
+    }
+
+    // lower_bound(15) should be (16, 160) — first even >= 15
+    match map.lower_bound(&15) {
+        Some(pair) => assert_eq(*pair.0, 16),
+        None => panic("Expected lower_bound for 15"),
+    }
+
+    // upper_bound(16) should be (18, 180) — first even > 16
+    match map.upper_bound(&16) {
+        Some(pair) => assert_eq(*pair.0, 18),
+        None => panic("Expected upper_bound for 16"),
+    }
+
+    // lower_bound(99) should be None — no keys >= 99
+    assert(map.lower_bound(&99).is_none());
+
+    // upper_bound(98) should be None — 98 is last key
+    assert(map.upper_bound(&98).is_none());
+}
+
+@test
+fn test_bounds_negative_keys() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(-10, 1);
+    map.insert(-5, 2);
+    map.insert(0, 3);
+    map.insert(5, 4);
+    map.insert(10, 5);
+
+    match map.lower_bound(&-7) {
+        Some(pair) => assert_eq(*pair.0, -5),
+        None => panic("Expected lower_bound"),
+    }
+    match map.upper_bound(&-5) {
+        Some(pair) => assert_eq(*pair.0, 0),
+        None => panic("Expected upper_bound"),
+    }
+}

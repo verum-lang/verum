@@ -1,0 +1,8 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, if, condition
+// @description: Unsafe block in if condition
+fn main() {
+    let result: Int = if unsafe { true } { 1 } else { 2 };
+    assert_eq(result, 1);
+}

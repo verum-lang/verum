@@ -1,0 +1,763 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, extended, fft, scatter, gather
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Interpreter tensor extended — scatter, gather, einsum, FFT, masked ops, nonzero, cast, lerp
+
+// ============================================================================
+// 4-element array and mask types
+// ============================================================================
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+fn arr4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+// Mask: 1 = true, 0 = false
+type Mask4 is { m0: Int, m1: Int, m2: Int, m3: Int };
+
+fn mask4_get(m: Mask4, i: Int) -> Int {
+    if i == 0 { m.m0 } else if i == 1 { m.m1 }
+    else if i == 2 { m.m2 } else { m.m3 }
+}
+
+// ============================================================================
+// 8-element array for larger operations
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// 16-element array for 4x4 matrix / outer product
+// ============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// ============================================================================
+// Complex number type
+// ============================================================================
+
+type Complex is { re: Int, im: Int };
+
+fn complex_new(re: Int, im: Int) -> Complex {
+    Complex { re: re, im: im }
+}
+
+fn complex_mul(a: Complex, b: Complex) -> Complex {
+    // (a+bi)(c+di) = (ac-bd) + (ad+bc)i
+    Complex {
+        re: a.re * b.re - a.im * b.im,
+        im: a.re * b.im + a.im * b.re
+    }
+}
+
+fn complex_add(a: Complex, b: Complex) -> Complex {
+    Complex { re: a.re + b.re, im: a.im + b.im }
+}
+
+// ============================================================================
+// Utility helpers
+// ============================================================================
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// ============================================================================
+// Scatter: write values into destination at specified indices
+// scatter(dst, indices, values, count)
+// For each k in [0, count): dst[indices[k]] = values[k]
+// ============================================================================
+
+fn scatter(dst: Arr8, indices: Arr4, values: Arr4, count: Int) -> Arr8 {
+    let mut out = dst;
+    let mut k = 0;
+    while k < count {
+        let idx = arr4_get(indices, k);
+        let val = arr4_get(values, k);
+        out = arr8_set(out, idx, val);
+        k = k + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Gather: read values from source at specified indices
+// gather(src, indices, count) -> Arr4
+// For each k in [0, count): result[k] = src[indices[k]]
+// ============================================================================
+
+fn gather(src: Arr8, indices: Arr4, count: Int) -> Arr4 {
+    let mut out = arr4_zeros();
+    let mut k = 0;
+    while k < count {
+        let idx = arr4_get(indices, k);
+        let val = arr8_get(src, idx);
+        out = arr4_set(out, k, val);
+        k = k + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Index select: select a subset of elements by index array
+// index_select(src, src_len, indices, index_count) -> Arr8
+// ============================================================================
+
+fn index_select(src: Arr8, indices: Arr4, index_count: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut k = 0;
+    while k < index_count {
+        let idx = arr4_get(indices, k);
+        out = arr8_set(out, k, arr8_get(src, idx));
+        k = k + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Masked fill: fill positions where mask is 1 with fill_value
+// ============================================================================
+
+fn masked_fill(src: Arr4, mask: Mask4, fill_val: Int, len: Int) -> Arr4 {
+    let mut out = src;
+    let mut i = 0;
+    while i < len {
+        if mask4_get(mask, i) == 1 {
+            out = arr4_set(out, i, fill_val);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Masked select: extract elements where mask is 1 into a compact array
+// Returns (result_array, count)
+// ============================================================================
+
+type SelectOutcome is { arr: Arr4, count: Int };
+
+fn masked_select(src: Arr4, mask: Mask4, len: Int) -> SelectOutcome {
+    let mut out = arr4_zeros();
+    let mut j = 0;
+    let mut i = 0;
+    while i < len {
+        if mask4_get(mask, i) == 1 {
+            out = arr4_set(out, j, arr4_get(src, i));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    SelectOutcome { arr: out, count: j }
+}
+
+// ============================================================================
+// Nonzero: find indices of nonzero elements
+// Returns (index_array, count)
+// ============================================================================
+
+type NonzeroOutcome is { indices: Arr4, count: Int };
+
+fn nonzero(src: Arr4, len: Int) -> NonzeroOutcome {
+    let mut out = arr4_zeros();
+    let mut j = 0;
+    let mut i = 0;
+    while i < len {
+        if arr4_get(src, i) != 0 {
+            out = arr4_set(out, j, i);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    NonzeroOutcome { indices: out, count: j }
+}
+
+// ============================================================================
+// Cast (simulated): convert from one "type" to another via scale factor
+// Simulates float<->int conversion: cast(val, from_scale, to_scale)
+// e.g., a fixed-point value scaled by 1000 cast to scale 100
+// result = val * to_scale / from_scale
+// ============================================================================
+
+fn cast_scaled(val: Int, from_scale: Int, to_scale: Int) -> Int {
+    val * to_scale / from_scale
+}
+
+fn arr4_cast(src: Arr4, len: Int, from_scale: Int, to_scale: Int) -> Arr4 {
+    let mut out = arr4_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr4_set(out, i, cast_scaled(arr4_get(src, i), from_scale, to_scale));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Lerp: linear interpolation a + t*(b-a)/scale
+// All values are integers; t ranges [0, scale] representing [0.0, 1.0]
+// ============================================================================
+
+fn lerp(a: Int, b: Int, t: Int, scale: Int) -> Int {
+    a + t * (b - a) / scale
+}
+
+fn arr4_lerp(src_a: Arr4, src_b: Arr4, t: Int, scale: Int, len: Int) -> Arr4 {
+    let mut out = arr4_zeros();
+    let mut i = 0;
+    while i < len {
+        let va = arr4_get(src_a, i);
+        let vb = arr4_get(src_b, i);
+        out = arr4_set(out, i, lerp(va, vb, t, scale));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Einsum dot product: "i,i->" (sum of element-wise product)
+// ============================================================================
+
+fn einsum_dot(a: Arr4, b: Arr4, len: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < len {
+        sum = sum + arr4_get(a, i) * arr4_get(b, i);
+        i = i + 1;
+    }
+    sum
+}
+
+// ============================================================================
+// Einsum outer product: "i,j->ij" (outer product, stored row-major in Arr16)
+// Result is a_len x b_len matrix
+// ============================================================================
+
+fn einsum_outer(a: Arr4, a_len: Int, b: Arr4, b_len: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < a_len {
+        let mut j = 0;
+        while j < b_len {
+            out = arr16_set(out, i * b_len + j, arr4_get(a, i) * arr4_get(b, j));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// DFT (Discrete Fourier Transform) — integer-scaled
+// For a signal of length N, the k-th frequency bin is:
+//   X_re[k] = sum_{n=0}^{N-1} x[n] * cos_table[n*k % N]
+//   X_im[k] = sum_{n=0}^{N-1} x[n] * (-sin_table[n*k % N])
+//
+// We use a 4-point DFT with integer-scaled trig tables (scale = 1000):
+//   cos(0)=1000, cos(pi/2)=0, cos(pi)=-1000, cos(3pi/2)=0
+//   sin(0)=0, sin(pi/2)=1000, sin(pi)=0, sin(3pi/2)=-1000
+// ============================================================================
+
+fn cos_table_4(phase: Int) -> Int {
+    // phase = (n*k) % 4, mapping to angles 0, pi/2, pi, 3pi/2
+    let p = phase % 4;
+    let pp = if p < 0 { p + 4 } else { p };
+    if pp == 0 { 1000 }
+    else if pp == 1 { 0 }
+    else if pp == 2 { -1000 }
+    else { 0 }
+}
+
+fn sin_table_4(phase: Int) -> Int {
+    let p = phase % 4;
+    let pp = if p < 0 { p + 4 } else { p };
+    if pp == 0 { 0 }
+    else if pp == 1 { 1000 }
+    else if pp == 2 { 0 }
+    else { -1000 }
+}
+
+// Compute DFT of 4-point signal, returning real and imaginary parts
+// Results are scaled by 1000 (the trig table scale)
+type DftBin is { re: Int, im: Int };
+
+fn dft4_bin(signal: Arr4, k: Int) -> DftBin {
+    let mut re_sum = 0;
+    let mut im_sum = 0;
+    let mut n = 0;
+    while n < 4 {
+        let phase = n * k;
+        let xn = arr4_get(signal, n);
+        re_sum = re_sum + xn * cos_table_4(phase);
+        im_sum = im_sum + xn * (0 - sin_table_4(phase));
+        n = n + 1;
+    }
+    DftBin { re: re_sum, im: im_sum }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_scatter() {
+    // Start with all zeros, scatter values [100, 200, 300] to indices [1, 5, 3]
+    let dst = arr8_zeros();
+    let indices = Arr4 { e0: 1, e1: 5, e2: 3, e3: 0 };
+    let values = Arr4 { e0: 100, e1: 200, e2: 300, e3: 0 };
+    let result = scatter(dst, indices, values, 3);
+
+    assert_eq(arr8_get(result, 0), 0);
+    assert_eq(arr8_get(result, 1), 100);
+    assert_eq(arr8_get(result, 2), 0);
+    assert_eq(arr8_get(result, 3), 300);
+    assert_eq(arr8_get(result, 4), 0);
+    assert_eq(arr8_get(result, 5), 200);
+
+    // Scatter with overwrite: two writes to same index, last wins
+    let dst2 = arr8_zeros();
+    let idx2 = Arr4 { e0: 2, e1: 2, e2: 0, e3: 0 };
+    let val2 = Arr4 { e0: 10, e1: 99, e2: 0, e3: 0 };
+    let result2 = scatter(dst2, idx2, val2, 2);
+    assert_eq(arr8_get(result2, 2), 99);
+
+    print("test_scatter passed");
+}
+
+fn test_gather() {
+    // Source: [10, 20, 30, 40, 50, 60, 70, 80]
+    let src = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+    // Gather from indices [3, 0, 7, 5]
+    let indices = Arr4 { e0: 3, e1: 0, e2: 7, e3: 5 };
+    let result = gather(src, indices, 4);
+
+    assert_eq(arr4_get(result, 0), 40);
+    assert_eq(arr4_get(result, 1), 10);
+    assert_eq(arr4_get(result, 2), 80);
+    assert_eq(arr4_get(result, 3), 60);
+
+    // Gather with repeated index
+    let idx2 = Arr4 { e0: 2, e1: 2, e2: 2, e3: 2 };
+    let result2 = gather(src, idx2, 4);
+    assert_eq(arr4_get(result2, 0), 30);
+    assert_eq(arr4_get(result2, 1), 30);
+    assert_eq(arr4_get(result2, 2), 30);
+    assert_eq(arr4_get(result2, 3), 30);
+
+    print("test_gather passed");
+}
+
+fn test_index_select() {
+    let src = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+    // Select elements at indices [7, 1, 4]
+    let indices = Arr4 { e0: 7, e1: 1, e2: 4, e3: 0 };
+    let result = index_select(src, indices, 3);
+
+    assert_eq(arr8_get(result, 0), 80);
+    assert_eq(arr8_get(result, 1), 20);
+    assert_eq(arr8_get(result, 2), 50);
+
+    // Select all from reverse
+    let rev_idx = Arr4 { e0: 3, e1: 2, e2: 1, e3: 0 };
+    let src4 = Arr8 { e0: 5, e1: 10, e2: 15, e3: 20, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let rev = index_select(src4, rev_idx, 4);
+    assert_eq(arr8_get(rev, 0), 20);
+    assert_eq(arr8_get(rev, 1), 15);
+    assert_eq(arr8_get(rev, 2), 10);
+    assert_eq(arr8_get(rev, 3), 5);
+
+    print("test_index_select passed");
+}
+
+fn test_masked_fill() {
+    let src = Arr4 { e0: 10, e1: 20, e2: 30, e3: 40 };
+    // Mask: fill positions 0 and 2 with -1
+    let mask = Mask4 { m0: 1, m1: 0, m2: 1, m3: 0 };
+    let result = masked_fill(src, mask, -1, 4);
+
+    assert_eq(arr4_get(result, 0), -1);
+    assert_eq(arr4_get(result, 1), 20);
+    assert_eq(arr4_get(result, 2), -1);
+    assert_eq(arr4_get(result, 3), 40);
+
+    // All-true mask
+    let all_mask = Mask4 { m0: 1, m1: 1, m2: 1, m3: 1 };
+    let result2 = masked_fill(src, all_mask, 0, 4);
+    assert_eq(arr4_get(result2, 0), 0);
+    assert_eq(arr4_get(result2, 1), 0);
+    assert_eq(arr4_get(result2, 2), 0);
+    assert_eq(arr4_get(result2, 3), 0);
+
+    // All-false mask: no change
+    let no_mask = Mask4 { m0: 0, m1: 0, m2: 0, m3: 0 };
+    let result3 = masked_fill(src, no_mask, 999, 4);
+    assert_eq(arr4_get(result3, 0), 10);
+    assert_eq(arr4_get(result3, 1), 20);
+    assert_eq(arr4_get(result3, 2), 30);
+    assert_eq(arr4_get(result3, 3), 40);
+
+    print("test_masked_fill passed");
+}
+
+fn test_masked_select() {
+    let src = Arr4 { e0: 10, e1: 20, e2: 30, e3: 40 };
+    // Select positions 1 and 3
+    let mask = Mask4 { m0: 0, m1: 1, m2: 0, m3: 1 };
+    let result = masked_select(src, mask, 4);
+
+    assert_eq(result.count, 2);
+    assert_eq(arr4_get(result.arr, 0), 20);
+    assert_eq(arr4_get(result.arr, 1), 40);
+
+    // Select all
+    let all_mask = Mask4 { m0: 1, m1: 1, m2: 1, m3: 1 };
+    let result2 = masked_select(src, all_mask, 4);
+    assert_eq(result2.count, 4);
+    assert_eq(arr4_get(result2.arr, 0), 10);
+    assert_eq(arr4_get(result2.arr, 3), 40);
+
+    // Select none
+    let no_mask = Mask4 { m0: 0, m1: 0, m2: 0, m3: 0 };
+    let result3 = masked_select(src, no_mask, 4);
+    assert_eq(result3.count, 0);
+
+    print("test_masked_select passed");
+}
+
+fn test_nonzero() {
+    // [0, 5, 0, 3]  ->  nonzero indices are [1, 3]
+    let src = Arr4 { e0: 0, e1: 5, e2: 0, e3: 3 };
+    let result = nonzero(src, 4);
+
+    assert_eq(result.count, 2);
+    assert_eq(arr4_get(result.indices, 0), 1);
+    assert_eq(arr4_get(result.indices, 1), 3);
+
+    // All nonzero
+    let all_nz = Arr4 { e0: 1, e1: -2, e2: 3, e3: -4 };
+    let result2 = nonzero(all_nz, 4);
+    assert_eq(result2.count, 4);
+    assert_eq(arr4_get(result2.indices, 0), 0);
+    assert_eq(arr4_get(result2.indices, 1), 1);
+    assert_eq(arr4_get(result2.indices, 2), 2);
+    assert_eq(arr4_get(result2.indices, 3), 3);
+
+    // All zero
+    let all_z = arr4_zeros();
+    let result3 = nonzero(all_z, 4);
+    assert_eq(result3.count, 0);
+
+    print("test_nonzero passed");
+}
+
+fn test_cast() {
+    // Simulate fixed-point conversion: values scaled by 1000, cast to scale 100
+    // e.g., 3141 (= 3.141 * 1000) -> 314 (= 3.14 * 100)
+    let src = Arr4 { e0: 1000, e1: 2500, e2: 3141, e3: 500 };
+    let result = arr4_cast(src, 4, 1000, 100);
+
+    assert_eq(arr4_get(result, 0), 100);   // 1000 * 100 / 1000 = 100
+    assert_eq(arr4_get(result, 1), 250);   // 2500 * 100 / 1000 = 250
+    assert_eq(arr4_get(result, 2), 314);   // 3141 * 100 / 1000 = 314
+    assert_eq(arr4_get(result, 3), 50);    // 500 * 100 / 1000 = 50
+
+    // Upscale: scale 10 -> scale 1000
+    let src2 = Arr4 { e0: 5, e1: 12, e2: 7, e3: 0 };
+    let result2 = arr4_cast(src2, 3, 10, 1000);
+    assert_eq(arr4_get(result2, 0), 500);  // 5 * 1000 / 10 = 500
+    assert_eq(arr4_get(result2, 1), 1200); // 12 * 1000 / 10 = 1200
+    assert_eq(arr4_get(result2, 2), 700);  // 7 * 1000 / 10 = 700
+
+    // Identity cast: same scale
+    let src3 = Arr4 { e0: 42, e1: 99, e2: 0, e3: 0 };
+    let result3 = arr4_cast(src3, 2, 100, 100);
+    assert_eq(arr4_get(result3, 0), 42);
+    assert_eq(arr4_get(result3, 1), 99);
+
+    print("test_cast passed");
+}
+
+fn test_lerp() {
+    // lerp(a, b, t, scale) = a + t*(b-a)/scale
+    // With scale=100: t=0 -> a, t=100 -> b, t=50 -> midpoint
+
+    // t=0: result = a
+    assert_eq(lerp(10, 30, 0, 100), 10);
+
+    // t=100: result = b
+    assert_eq(lerp(10, 30, 100, 100), 30);
+
+    // t=50: midpoint = 10 + 50*(30-10)/100 = 10 + 10 = 20
+    assert_eq(lerp(10, 30, 50, 100), 20);
+
+    // t=25: quarter = 10 + 25*20/100 = 10 + 5 = 15
+    assert_eq(lerp(10, 30, 25, 100), 15);
+
+    // Array lerp between [0, 100, 200, 300] and [100, 200, 300, 400] at t=50%
+    let a = Arr4 { e0: 0, e1: 100, e2: 200, e3: 300 };
+    let b = Arr4 { e0: 100, e1: 200, e2: 300, e3: 400 };
+    let result = arr4_lerp(a, b, 50, 100, 4);
+    assert_eq(arr4_get(result, 0), 50);
+    assert_eq(arr4_get(result, 1), 150);
+    assert_eq(arr4_get(result, 2), 250);
+    assert_eq(arr4_get(result, 3), 350);
+
+    // Lerp with negative values: [-100, 100] at t=50 -> 0
+    assert_eq(lerp(-100, 100, 50, 100), 0);
+
+    print("test_lerp passed");
+}
+
+fn test_einsum_dot() {
+    // Dot product: "i,i->" pattern
+    // [1, 2, 3, 4] . [5, 6, 7, 8] = 1*5 + 2*6 + 3*7 + 4*8 = 5+12+21+32 = 70
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let b = Arr4 { e0: 5, e1: 6, e2: 7, e3: 8 };
+    assert_eq(einsum_dot(a, b, 4), 70);
+
+    // Self dot product: ||v||^2
+    // [3, 4, 0, 0] -> 9 + 16 = 25
+    let v = Arr4 { e0: 3, e1: 4, e2: 0, e3: 0 };
+    assert_eq(einsum_dot(v, v, 2), 25);
+
+    // Orthogonal vectors: dot = 0
+    let x = Arr4 { e0: 1, e1: 0, e2: 0, e3: 0 };
+    let y = Arr4 { e0: 0, e1: 1, e2: 0, e3: 0 };
+    assert_eq(einsum_dot(x, y, 4), 0);
+
+    print("test_einsum_dot passed");
+}
+
+fn test_einsum_outer() {
+    // Outer product: "i,j->ij" pattern
+    // a = [1, 2, 3], b = [10, 20]
+    // Result 3x2:
+    //   [1*10, 1*20]   = [10, 20]
+    //   [2*10, 2*20]   = [20, 40]
+    //   [3*10, 3*20]   = [30, 60]
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 0 };
+    let b = Arr4 { e0: 10, e1: 20, e2: 0, e3: 0 };
+    let result = einsum_outer(a, 3, b, 2);
+
+    // Row 0: indices 0, 1
+    assert_eq(arr16_get(result, 0), 10);
+    assert_eq(arr16_get(result, 1), 20);
+    // Row 1: indices 2, 3
+    assert_eq(arr16_get(result, 2), 20);
+    assert_eq(arr16_get(result, 3), 40);
+    // Row 2: indices 4, 5
+    assert_eq(arr16_get(result, 4), 30);
+    assert_eq(arr16_get(result, 5), 60);
+
+    // Symmetric outer product: a x a
+    // a = [1, 2], result should be [[1,2],[2,4]]
+    let s = Arr4 { e0: 1, e1: 2, e2: 0, e3: 0 };
+    let sym = einsum_outer(s, 2, s, 2);
+    assert_eq(arr16_get(sym, 0), 1);
+    assert_eq(arr16_get(sym, 1), 2);
+    assert_eq(arr16_get(sym, 2), 2);
+    assert_eq(arr16_get(sym, 3), 4);
+
+    print("test_einsum_outer passed");
+}
+
+fn test_fft_dft() {
+    // 4-point DFT of constant signal [1, 1, 1, 1]
+    // X[0] = 4*1000 = 4000 (DC component), X[1]=X[2]=X[3]=0
+    let signal = Arr4 { e0: 1, e1: 1, e2: 1, e3: 1 };
+
+    let bin0 = dft4_bin(signal, 0);
+    assert_eq(bin0.re, 4000); // DC: 4 * cos(0)*1000 = 4000
+    assert_eq(bin0.im, 0);
+
+    let bin1 = dft4_bin(signal, 1);
+    // x[0]*cos(0) + x[1]*cos(pi/2) + x[2]*cos(pi) + x[3]*cos(3pi/2)
+    // = 1000 + 0 + (-1000) + 0 = 0
+    assert_eq(bin1.re, 0);
+    assert_eq(bin1.im, 0);
+
+    let bin2 = dft4_bin(signal, 2);
+    assert_eq(bin2.re, 0);
+    assert_eq(bin2.im, 0);
+
+    // DFT of impulse [1, 0, 0, 0]: all bins should be (1000, 0)
+    let impulse = Arr4 { e0: 1, e1: 0, e2: 0, e3: 0 };
+
+    let ib0 = dft4_bin(impulse, 0);
+    assert_eq(ib0.re, 1000);
+    assert_eq(ib0.im, 0);
+
+    let ib1 = dft4_bin(impulse, 1);
+    assert_eq(ib1.re, 1000);
+    assert_eq(ib1.im, 0);
+
+    let ib2 = dft4_bin(impulse, 2);
+    assert_eq(ib2.re, 1000);
+    assert_eq(ib2.im, 0);
+
+    let ib3 = dft4_bin(impulse, 3);
+    assert_eq(ib3.re, 1000);
+    assert_eq(ib3.im, 0);
+
+    // DFT of cosine at bin 1: [1, 0, -1, 0]
+    // X[0] = 1*1000 + 0*1000 + (-1)*1000 + 0*1000 = 0
+    // X[1] = 1*cos(0) + 0*cos(pi/2) + (-1)*cos(pi) + 0*cos(3pi/2)
+    //      = 1*1000 + 0 + (-1)*(-1000) + 0 = 2000
+    let cosine = Arr4 { e0: 1, e1: 0, e2: -1, e3: 0 };
+
+    let cb0 = dft4_bin(cosine, 0);
+    assert_eq(cb0.re, 0);
+
+    let cb1 = dft4_bin(cosine, 1);
+    assert_eq(cb1.re, 2000);
+    assert_eq(cb1.im, 0);
+
+    print("test_fft_dft passed");
+}
+
+fn test_complex_mul() {
+    // (3 + 4i) * (1 + 2i) = (3*1 - 4*2) + (3*2 + 4*1)i = -5 + 10i
+    let a = complex_new(3, 4);
+    let b = complex_new(1, 2);
+    let result = complex_mul(a, b);
+    assert_eq(result.re, -5);
+    assert_eq(result.im, 10);
+
+    // (1 + 0i) * (x + yi) = x + yi (multiplicative identity)
+    let one = complex_new(1, 0);
+    let c = complex_new(7, -3);
+    let result2 = complex_mul(one, c);
+    assert_eq(result2.re, 7);
+    assert_eq(result2.im, -3);
+
+    // i * i = -1
+    let i_unit = complex_new(0, 1);
+    let i_sq = complex_mul(i_unit, i_unit);
+    assert_eq(i_sq.re, -1);
+    assert_eq(i_sq.im, 0);
+
+    // (a + bi)(a - bi) = a^2 + b^2 (conjugate product)
+    let z = complex_new(3, 4);
+    let z_conj = complex_new(3, -4);
+    let mag_sq = complex_mul(z, z_conj);
+    assert_eq(mag_sq.re, 25); // 9 + 16
+    assert_eq(mag_sq.im, 0);
+
+    // Complex multiply with add: (2+3i) * (4+5i) + (1+1i)
+    let p = complex_mul(complex_new(2, 3), complex_new(4, 5));
+    // (2+3i)(4+5i) = 8+10i+12i+15i^2 = 8+22i-15 = -7+22i
+    let q = complex_add(p, complex_new(1, 1));
+    assert_eq(q.re, -6);
+    assert_eq(q.im, 23);
+
+    print("test_complex_mul passed");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_scatter();
+    test_gather();
+    test_index_select();
+    test_masked_fill();
+    test_masked_select();
+    test_nonzero();
+    test_cast();
+    test_lerp();
+    test_einsum_dot();
+    test_einsum_outer();
+    test_fft_dft();
+    test_complex_mul();
+    print("ALL PASSED");
+    0
+}

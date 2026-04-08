@@ -1,0 +1,8 @@
+// Crash seed: Empty match (edge case)
+fn main() {
+    let x = 42;
+    // Empty match arms can be edge case
+    match x {
+        _ => {},
+    }
+}

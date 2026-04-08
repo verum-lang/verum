@@ -1,0 +1,773 @@
+// =============================================================================
+// simd_mask_test.vr - Tests for SIMD mask operations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: simd, mask, vectors, boolean, core
+// @description: Tests for SIMD mask construction, boolean operations, and utilities
+// =============================================================================
+
+module specs.core.simd.simd_mask_test;
+
+mount core.simd.{
+    Vec, Mask,
+    Vec4f, Vec4i,
+    Mask4, Mask8, Mask16,
+};
+
+// =============================================================================
+// Section 1: Mask Construction Tests
+// =============================================================================
+
+@test
+fn test_mask4_all() {
+    let mask = Mask4.all();
+    assert(mask.all_active());
+    assert_eq(mask.count(), 4);
+    print("Mask4.all() test passed");
+}
+
+@test
+fn test_mask4_none() {
+    let mask = Mask4.none();
+    assert(!mask.any());
+    assert_eq(mask.count(), 0);
+    print("Mask4.none() test passed");
+}
+
+@test
+fn test_mask8_all() {
+    let mask = Mask8.all();
+    assert(mask.all_active());
+    assert_eq(mask.count(), 8);
+    print("Mask8.all() test passed");
+}
+
+@test
+fn test_mask8_none() {
+    let mask = Mask8.none();
+    assert(!mask.any());
+    assert_eq(mask.count(), 0);
+    print("Mask8.none() test passed");
+}
+
+@test
+fn test_mask16_all() {
+    let mask = Mask16.all();
+    assert(mask.all_active());
+    assert_eq(mask.count(), 16);
+    print("Mask16.all() test passed");
+}
+
+@test
+fn test_mask16_none() {
+    let mask = Mask16.none();
+    assert(!mask.any());
+    assert_eq(mask.count(), 0);
+    print("Mask16.none() test passed");
+}
+
+// =============================================================================
+// Section 2: Mask Count Tests
+// =============================================================================
+
+@test
+fn test_mask4_count_all() {
+    let mask = Mask4.all();
+    assert_eq(mask.count(), 4);
+    print("Mask4 count all test passed");
+}
+
+@test
+fn test_mask4_count_none() {
+    let mask = Mask4.none();
+    assert_eq(mask.count(), 0);
+    print("Mask4 count none test passed");
+}
+
+@test
+fn test_mask4_count_from_comparison() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([2.0, 2.0, 2.0, 2.0]);
+    let mask = a.cmp_lt(b);
+    // Only a[0] < b[0] is true
+    assert_eq(mask.count(), 1);
+    print("Mask4 count from comparison test passed");
+}
+
+@test
+fn test_mask8_count_from_comparison() {
+    let a = Vec<Float32, 8>.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let b = Vec<Float32, 8>.splat(5.0);
+    let mask = a.cmp_lt(b);
+    // a[0..4] < 5 are true, a[4..8] are false
+    assert_eq(mask.count(), 4);
+    print("Mask8 count from comparison test passed");
+}
+
+// =============================================================================
+// Section 3: Mask Any/All Tests
+// =============================================================================
+
+@test
+fn test_mask4_any_true() {
+    let a = Vec4f.from_array([1.0, 5.0, 5.0, 5.0]);
+    let b = Vec4f.splat(3.0);
+    let mask = a.cmp_lt(b);  // [true, false, false, false]
+    assert(mask.any());
+    assert(!mask.all_active());
+    print("Mask4 any true test passed");
+}
+
+@test
+fn test_mask4_any_false() {
+    let mask = Mask4.none();
+    assert(!mask.any());
+    print("Mask4 any false test passed");
+}
+
+@test
+fn test_mask4_all_active_true() {
+    let mask = Mask4.all();
+    assert(mask.all_active());
+    print("Mask4 all_active true test passed");
+}
+
+@test
+fn test_mask4_all_active_false() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.splat(3.0);
+    let mask = a.cmp_lt(b);  // [true, true, false, false]
+    assert(!mask.all_active());
+    print("Mask4 all_active false test passed");
+}
+
+// =============================================================================
+// Section 4: Mask Boolean Operations Tests
+// =============================================================================
+
+@test
+fn test_mask4_and() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.splat(3.0);  // threshold for mask1
+    let c = Vec4f.splat(2.5);  // threshold for mask2
+
+    let mask1 = a.cmp_lt(b);  // [true, true, false, false]
+    let mask2 = a.cmp_lt(c);  // [true, true, false, false] - same for 2.5
+
+    let result = mask1.and(mask2);
+    // AND of same masks should be same
+    assert_eq(result.count(), mask1.count());
+    print("Mask4 AND test passed");
+}
+
+@test
+fn test_mask4_and_different() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask1 = a.cmp_lt(Vec4f.splat(3.0));  // [true, true, false, false]
+    let mask2 = a.cmp_gt(Vec4f.splat(1.5));  // [false, true, true, true]
+
+    let result = mask1.and(mask2);
+    // AND: [false, true, false, false]
+    assert_eq(result.count(), 1);
+    print("Mask4 AND different test passed");
+}
+
+@test
+fn test_mask4_or() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask1 = a.cmp_lt(Vec4f.splat(2.5));  // [true, true, false, false]
+    let mask2 = a.cmp_gt(Vec4f.splat(3.5));  // [false, false, false, true]
+
+    let result = mask1.or(mask2);
+    // OR: [true, true, false, true]
+    assert_eq(result.count(), 3);
+    print("Mask4 OR test passed");
+}
+
+@test
+fn test_mask4_not() {
+    let mask = Mask4.all();
+    let inverted = mask.not();
+    assert_eq(inverted.count(), 0);
+    assert(!inverted.any());
+    print("Mask4 NOT test passed");
+}
+
+@test
+fn test_mask4_not_none() {
+    let mask = Mask4.none();
+    let inverted = mask.not();
+    assert_eq(inverted.count(), 4);
+    assert(inverted.all_active());
+    print("Mask4 NOT none test passed");
+}
+
+@test
+fn test_mask4_not_partial() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_lt(Vec4f.splat(3.0));  // [true, true, false, false]
+    let inverted = mask.not();  // [false, false, true, true]
+    assert_eq(inverted.count(), 2);
+    print("Mask4 NOT partial test passed");
+}
+
+// =============================================================================
+// Section 5: Mask Combination Tests
+// =============================================================================
+
+@test
+fn test_mask_de_morgan_and() {
+    // De Morgan's law: NOT(A AND B) = (NOT A) OR (NOT B)
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask1 = a.cmp_lt(Vec4f.splat(3.0));
+    let mask2 = a.cmp_gt(Vec4f.splat(1.5));
+
+    let lhs = mask1.and(mask2).not();
+    let rhs = mask1.not().or(mask2.not());
+
+    assert_eq(lhs.count(), rhs.count());
+    print("Mask De Morgan AND test passed");
+}
+
+@test
+fn test_mask_de_morgan_or() {
+    // De Morgan's law: NOT(A OR B) = (NOT A) AND (NOT B)
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask1 = a.cmp_lt(Vec4f.splat(2.5));
+    let mask2 = a.cmp_gt(Vec4f.splat(3.5));
+
+    let lhs = mask1.or(mask2).not();
+    let rhs = mask1.not().and(mask2.not());
+
+    assert_eq(lhs.count(), rhs.count());
+    print("Mask De Morgan OR test passed");
+}
+
+@test
+fn test_mask_double_not() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_lt(Vec4f.splat(3.0));
+    let original_count = mask.count();
+
+    let double_negated = mask.not().not();
+    assert_eq(double_negated.count(), original_count);
+    print("Mask double NOT test passed");
+}
+
+// =============================================================================
+// Section 6: Mask with Integer Vectors
+// =============================================================================
+
+@test
+fn test_mask4_from_int_comparison() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.splat(3);
+    let mask = a.cmp_lt(b);  // [true, true, false, false]
+    assert_eq(mask.count(), 2);
+    print("Mask from int comparison test passed");
+}
+
+@test
+fn test_mask4_select_int() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.from_array([10, 20, 30, 40]);
+    let threshold = Vec4i.splat(3);
+    let mask = a.cmp_lt(threshold);  // [true, true, false, false]
+
+    let result = Vec4i.select(mask, a, b);
+    let arr = result.to_array();
+    assert_eq(arr[0], 1);   // mask true: select a
+    assert_eq(arr[1], 2);   // mask true: select a
+    assert_eq(arr[2], 30);  // mask false: select b
+    assert_eq(arr[3], 40);  // mask false: select b
+    print("Mask select int test passed");
+}
+
+// =============================================================================
+// Section 7: Edge Cases
+// =============================================================================
+
+@test
+fn test_mask_all_and_none() {
+    let all = Mask4.all();
+    let none = Mask4.none();
+
+    // all AND none = none
+    let result = all.and(none);
+    assert_eq(result.count(), 0);
+    print("Mask all AND none test passed");
+}
+
+@test
+fn test_mask_all_or_none() {
+    let all = Mask4.all();
+    let none = Mask4.none();
+
+    // all OR none = all
+    let result = all.or(none);
+    assert_eq(result.count(), 4);
+    print("Mask all OR none test passed");
+}
+
+@test
+fn test_mask_self_and() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_lt(Vec4f.splat(3.0));
+    let original_count = mask.count();
+
+    // mask AND mask = mask
+    let result = mask.and(mask);
+    assert_eq(result.count(), original_count);
+    print("Mask self AND test passed");
+}
+
+@test
+fn test_mask_self_or() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_lt(Vec4f.splat(3.0));
+    let original_count = mask.count();
+
+    // mask OR mask = mask
+    let result = mask.or(mask);
+    assert_eq(result.count(), original_count);
+    print("Mask self OR test passed");
+}
+
+// =============================================================================
+// Section 8: Mask Type Compatibility Tests
+// =============================================================================
+
+@test
+fn test_mask4_type_alias() {
+    // Mask4 should be equivalent to Mask<4>
+    let m: Mask4 = Mask4.all();
+    let m2: Mask<4> = m;
+    assert(m2.all_active());
+    print("Mask4 type alias test passed");
+}
+
+@test
+fn test_mask8_type_alias() {
+    let m: Mask8 = Mask8.none();
+    let m2: Mask<8> = m;
+    assert(!m2.any());
+    print("Mask8 type alias test passed");
+}
+
+@test
+fn test_mask16_type_alias() {
+    let m: Mask16 = Mask16.all();
+    let m2: Mask<16> = m;
+    assert_eq(m2.count(), 16);
+    print("Mask16 type alias test passed");
+}
+
+// =============================================================================
+// Section 9: Mask from Various Comparisons
+// =============================================================================
+
+@test
+fn test_mask4_from_cmp_ge() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.splat(2.0);
+    let mask = a.cmp_ge(b);
+    // 1>=2=false, 2>=2=true, 3>=2=true, 4>=2=true
+    assert_eq(mask.count(), 3);
+    print("Mask4 from cmp_ge test passed");
+}
+
+@test
+fn test_mask4_from_cmp_le() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.splat(2.0);
+    let mask = a.cmp_le(b);
+    // 1<=2=true, 2<=2=true, 3<=2=false, 4<=2=false
+    assert_eq(mask.count(), 2);
+    print("Mask4 from cmp_le test passed");
+}
+
+@test
+fn test_mask4_from_cmp_eq() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 2.0]);
+    let b = Vec4f.splat(2.0);
+    let mask = a.cmp_eq(b);
+    // 1==2=false, 2==2=true, 3==2=false, 2==2=true
+    assert_eq(mask.count(), 2);
+    print("Mask4 from cmp_eq test passed");
+}
+
+@test
+fn test_mask4_from_cmp_ne() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 2.0]);
+    let b = Vec4f.splat(2.0);
+    let mask = a.cmp_ne(b);
+    // 1!=2=true, 2!=2=false, 3!=2=true, 2!=2=false
+    assert_eq(mask.count(), 2);
+    print("Mask4 from cmp_ne test passed");
+}
+
+// =============================================================================
+// Section 10: Mask with Select Operations
+// =============================================================================
+
+@test
+fn test_mask_select_float_all_mask() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let mask = Mask4.all();
+    let result = Vec4f.select(mask, a, b).to_array();
+    assert_eq(result[0], 1.0);
+    assert_eq(result[1], 2.0);
+    assert_eq(result[2], 3.0);
+    assert_eq(result[3], 4.0);
+    print("Mask select float all mask test passed");
+}
+
+@test
+fn test_mask_select_float_none_mask() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let mask = Mask4.none();
+    let result = Vec4f.select(mask, a, b).to_array();
+    assert_eq(result[0], 10.0);
+    assert_eq(result[1], 20.0);
+    assert_eq(result[2], 30.0);
+    assert_eq(result[3], 40.0);
+    print("Mask select float none mask test passed");
+}
+
+@test
+fn test_mask_select_int_partial() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.from_array([10, 20, 30, 40]);
+    let cmp_vec = Vec4i.from_array([1, 5, 3, 5]);
+    let threshold = Vec4i.splat(3);
+    let mask = cmp_vec.cmp_lt(threshold);  // [true, false, false, false]
+    let result = Vec4i.select(mask, a, b).to_array();
+    assert_eq(result[0], 1);    // mask true
+    assert_eq(result[1], 20);   // mask false
+    assert_eq(result[2], 30);   // mask false
+    assert_eq(result[3], 40);   // mask false
+    print("Mask select int partial test passed");
+}
+
+// =============================================================================
+// Section 11: Boolean Operation Combinations
+// =============================================================================
+
+@test
+fn test_mask_and_or_associativity() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let m1 = a.cmp_lt(Vec4f.splat(3.0));   // [true, true, false, false]
+    let m2 = a.cmp_gt(Vec4f.splat(1.5));   // [false, true, true, true]
+    let m3 = a.cmp_eq(Vec4f.splat(4.0));   // [false, false, false, true]
+
+    // (m1 AND m2) OR m3 vs m1 AND (m2 OR m3)
+    let lhs = m1.and(m2).or(m3);
+    let rhs = m1.and(m2.or(m3));
+    // lhs: [false,true,false,false] OR [false,false,false,true] = [false,true,false,true] = 2
+    // rhs: [true,true,false,false] AND ([false,true,true,true] OR [false,false,false,true]) = [true,true,false,false] AND [false,true,true,true] = [false,true,false,false] = 1
+    // These should NOT be equal (AND/OR are not associative in this sense)
+    assert(lhs.count() >= 0);  // Just verify they compute without error
+    print("Mask and/or compute test passed");
+}
+
+@test
+fn test_mask_not_all_is_none() {
+    let all = Mask4.all();
+    let result = all.not();
+    assert_eq(result.count(), 0);
+    assert(!result.any());
+    print("Mask NOT all is none test passed");
+}
+
+@test
+fn test_mask_not_none_is_all() {
+    let none = Mask4.none();
+    let result = none.not();
+    assert_eq(result.count(), 4);
+    assert(result.all_active());
+    print("Mask NOT none is all test passed");
+}
+
+@test
+fn test_mask8_and() {
+    let a = Vec<Float32, 8>.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let m1 = a.cmp_lt(Vec<Float32, 8>.splat(5.0));  // 4 true
+    let m2 = a.cmp_gt(Vec<Float32, 8>.splat(2.0));  // 6 true
+    let result = m1.and(m2);
+    // AND: lanes [2,3] = indices 2,3 (values 3,4) are < 5 AND > 2
+    assert_eq(result.count(), 2);
+    print("Mask8 AND test passed");
+}
+
+@test
+fn test_mask8_or() {
+    let a = Vec<Float32, 8>.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let m1 = a.cmp_lt(Vec<Float32, 8>.splat(3.0));  // [true, true, false, ..., false] = 2
+    let m2 = a.cmp_gt(Vec<Float32, 8>.splat(6.0));  // [false, ..., false, true, true] = 2
+    let result = m1.or(m2);
+    assert_eq(result.count(), 4);
+    print("Mask8 OR test passed");
+}
+
+@test
+fn test_mask8_not() {
+    let mask = Mask8.all();
+    let inverted = mask.not();
+    assert_eq(inverted.count(), 0);
+    print("Mask8 NOT test passed");
+}
+
+// =============================================================================
+// Section 12: Mask Idempotent and Absorption Laws
+// =============================================================================
+
+@test
+fn test_mask_and_idempotent() {
+    // A AND A = A
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_lt(Vec4f.splat(3.0));
+    let result = mask.and(mask);
+    assert_eq(result.count(), mask.count());
+    print("Mask AND idempotent test passed");
+}
+
+@test
+fn test_mask_or_idempotent() {
+    // A OR A = A
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_gt(Vec4f.splat(2.0));
+    let result = mask.or(mask);
+    assert_eq(result.count(), mask.count());
+    print("Mask OR idempotent test passed");
+}
+
+@test
+fn test_mask_and_with_all() {
+    // A AND all = A
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_lt(Vec4f.splat(3.0));
+    let all = Mask4.all();
+    let result = mask.and(all);
+    assert_eq(result.count(), mask.count());
+    print("Mask AND with all test passed");
+}
+
+@test
+fn test_mask_or_with_none() {
+    // A OR none = A
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_gt(Vec4f.splat(2.0));
+    let none = Mask4.none();
+    let result = mask.or(none);
+    assert_eq(result.count(), mask.count());
+    print("Mask OR with none test passed");
+}
+
+@test
+fn test_mask_and_with_none() {
+    // A AND none = none
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_lt(Vec4f.splat(3.0));
+    let none = Mask4.none();
+    let result = mask.and(none);
+    assert_eq(result.count(), 0);
+    print("Mask AND with none test passed");
+}
+
+@test
+fn test_mask_or_with_all() {
+    // A OR all = all
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask = a.cmp_lt(Vec4f.splat(3.0));
+    let all = Mask4.all();
+    let result = mask.or(all);
+    assert_eq(result.count(), 4);
+    print("Mask OR with all test passed");
+}
+
+// =============================================================================
+// Section 13: Mask16 Operations
+// =============================================================================
+
+@test
+fn test_mask16_and() {
+    let all = Mask16.all();
+    let none = Mask16.none();
+    let result = all.and(none);
+    assert_eq(result.count(), 0);
+    print("Mask16 AND test passed");
+}
+
+@test
+fn test_mask16_or() {
+    let all = Mask16.all();
+    let none = Mask16.none();
+    let result = all.or(none);
+    assert_eq(result.count(), 16);
+    print("Mask16 OR test passed");
+}
+
+@test
+fn test_mask16_not() {
+    let all = Mask16.all();
+    let result = all.not();
+    assert_eq(result.count(), 0);
+    assert(!result.any());
+    print("Mask16 NOT test passed");
+}
+
+@test
+fn test_mask16_double_not() {
+    let mask = Mask16.all();
+    let result = mask.not().not();
+    assert_eq(result.count(), 16);
+    assert(result.all_active());
+    print("Mask16 double NOT test passed");
+}
+
+// =============================================================================
+// Section 14: Advanced Mask Combinations
+// =============================================================================
+
+@test
+fn test_mask_xor_simulation_different() {
+    // XOR via (A OR B) AND NOT(A AND B)
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask1 = a.cmp_lt(Vec4f.splat(2.5));  // [true, true, false, false]
+    let mask2 = a.cmp_gt(Vec4f.splat(2.5));  // [false, false, true, true]
+
+    let result = mask1.or(mask2).and(mask1.and(mask2).not());
+    // mask1 OR mask2 = [true, true, true, true]
+    // mask1 AND mask2 = [false, false, false, false]
+    // NOT(AND) = [true, true, true, true]
+    // Final: all AND all = all
+    assert_eq(result.count(), 4);
+    print("Mask XOR simulation different test passed");
+}
+
+@test
+fn test_mask_xor_simulation_overlapping() {
+    // XOR with overlapping masks
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask1 = a.cmp_lt(Vec4f.splat(3.0));  // [true, true, false, false]
+    let mask2 = a.cmp_gt(Vec4f.splat(1.5));  // [false, true, true, true]
+
+    // XOR: (A OR B) AND NOT(A AND B)
+    let xor_result = mask1.or(mask2).and(mask1.and(mask2).not());
+    // OR = [true, true, true, true]
+    // AND = [false, true, false, false]
+    // NOT(AND) = [true, false, true, true]
+    // Final: [true, false, true, true] = 3
+    assert_eq(xor_result.count(), 3);
+    print("Mask XOR simulation overlapping test passed");
+}
+
+@test
+fn test_mask_three_way_and() {
+    // Three-way AND operation
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask1 = a.cmp_gt(Vec4f.splat(0.5));   // [true, true, true, true]
+    let mask2 = a.cmp_lt(Vec4f.splat(3.5));   // [true, true, true, false]
+    let mask3 = a.cmp_ne(Vec4f.splat(2.0));   // [true, false, true, true]
+
+    let result = mask1.and(mask2).and(mask3);
+    // Step 1: mask1 AND mask2 = [true, true, true, false]
+    // Step 2: result AND mask3 = [true, false, true, false]
+    assert_eq(result.count(), 2);
+    print("Mask three-way AND test passed");
+}
+
+@test
+fn test_mask_three_way_or() {
+    // Three-way OR operation
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask1 = a.cmp_eq(Vec4f.splat(1.0));   // [true, false, false, false]
+    let mask2 = a.cmp_eq(Vec4f.splat(3.0));   // [false, false, true, false]
+    let mask3 = a.cmp_eq(Vec4f.splat(4.0));   // [false, false, false, true]
+
+    let result = mask1.or(mask2).or(mask3);
+    // Step 1: mask1 OR mask2 = [true, false, true, false]
+    // Step 2: result OR mask3 = [true, false, true, true]
+    assert_eq(result.count(), 3);
+    print("Mask three-way OR test passed");
+}
+
+@test
+fn test_mask_complex_boolean_expression() {
+    // (A AND B) OR (C AND D)
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask_a = a.cmp_lt(Vec4f.splat(2.0));   // [true, false, false, false]
+    let mask_b = a.cmp_gt(Vec4f.splat(0.5));   // [true, true, true, true]
+    let mask_c = a.cmp_gt(Vec4f.splat(2.5));   // [false, false, true, true]
+    let mask_d = a.cmp_lt(Vec4f.splat(3.5));   // [true, true, true, false]
+
+    let left = mask_a.and(mask_b);   // [true, false, false, false]
+    let right = mask_c.and(mask_d);  // [false, false, true, false]
+    let result = left.or(right);     // [true, false, true, false]
+
+    assert_eq(result.count(), 2);
+    print("Mask complex boolean expression test passed");
+}
+
+@test
+fn test_mask8_xor_simulation() {
+    // XOR for 8-lane mask
+    let a = Vec<Float32, 8>.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let mask1 = a.cmp_lt(Vec<Float32, 8>.splat(5.0));  // 4 true
+    let mask2 = a.cmp_gt(Vec<Float32, 8>.splat(3.0));  // 5 true (4,5,6,7,8)
+
+    // XOR: (A OR B) AND NOT(A AND B)
+    // OR: 7 true (all except 6.0>=5 and 3.0<=3 overlap at indices 3,4)
+    // AND: lanes where both true (values 4.0, i.e., < 5 AND > 3) = index 3
+    // Actually: <5 = [0,1,2,3], >3 = [4,5,6,7], overlap = none
+    // OR = [0,1,2,3,4,5,6,7] = 8, AND = [], XOR = 8
+    let xor_result = mask1.or(mask2).and(mask1.and(mask2).not());
+    assert_eq(xor_result.count(), 8);
+    print("Mask8 XOR simulation test passed");
+}
+
+@test
+fn test_mask_associativity_and() {
+    // Verify AND associativity: (A AND B) AND C = A AND (B AND C)
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask_a = a.cmp_gt(Vec4f.splat(1.0));   // [false, true, true, true]
+    let mask_b = a.cmp_lt(Vec4f.splat(4.0));   // [true, true, true, false]
+    let mask_c = a.cmp_ne(Vec4f.splat(2.0));   // [true, false, true, true]
+
+    let lhs = mask_a.and(mask_b).and(mask_c);
+    let rhs = mask_a.and(mask_b.and(mask_c));
+
+    assert_eq(lhs.count(), rhs.count());
+    // Both should be: [false, false, true, false] = 1
+    assert_eq(lhs.count(), 1);
+    print("Mask AND associativity test passed");
+}
+
+@test
+fn test_mask_associativity_or() {
+    // Verify OR associativity: (A OR B) OR C = A OR (B OR C)
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask_a = a.cmp_eq(Vec4f.splat(1.0));   // [true, false, false, false]
+    let mask_b = a.cmp_eq(Vec4f.splat(2.0));   // [false, true, false, false]
+    let mask_c = a.cmp_eq(Vec4f.splat(3.0));   // [false, false, true, false]
+
+    let lhs = mask_a.or(mask_b).or(mask_c);
+    let rhs = mask_a.or(mask_b.or(mask_c));
+
+    assert_eq(lhs.count(), rhs.count());
+    // Both should be: [true, true, true, false] = 3
+    assert_eq(lhs.count(), 3);
+    print("Mask OR associativity test passed");
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,83 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+
+// @tags: reference_system, cbgr, generation, overflow, edge-case
+
+/// Test CBGR generation counter overflow handling.
+/// Generation counters are 32-bit; test behavior at boundaries.
+/// Spec: 26-cbgr-implementation.md#generation-tracking
+
+fn main() {
+    test_generation_monotonicity();
+    test_high_generation_values();
+    test_generation_wrap_safety();
+}
+
+/// Verify generations always increase
+fn test_generation_monotonicity() {
+    let mut prev_gen: u32 = 0;
+
+    for _ in 0..1000 {
+        let alloc = Heap.new(42);
+        let generation = alloc.generation();
+
+        assert(generation > prev_gen || prev_gen == 0);
+        prev_gen = generation;
+    }
+}
+
+/// Test with high generation values
+fn test_high_generation_values() {
+    // Simulate system with many prior allocations
+    let alloc = Heap.new(100);
+    let generation = alloc.generation();
+
+    // Generation should be valid regardless of absolute value
+    let ref_val = &*alloc;
+    assert(ref_val.stored_generation() == generation);
+    assert(*ref_val == 100);
+}
+
+/// Test safety when generation might wrap
+fn test_generation_wrap_safety() {
+    // CBGR implementations should handle generation exhaustion
+    // either by:
+    // 1. Using 64-bit generations
+    // 2. Pausing to reclaim generations
+    // 3. Panicking on exhaustion (fail-safe)
+
+    // This test verifies that normal operation is safe
+    let allocations: List<Heap<Int>> = List.new();
+
+    for i in 0..1000 {
+        let alloc = Heap.new(i);
+        allocations.push(alloc);
+    }
+
+    // All allocations should have unique, valid generations
+    let mut generations: Set<u32> = Set.new();
+    for alloc in &allocations {
+        let generation = alloc.generation();
+        assert(!generations.contains(&generation));
+        generations.insert(generation);
+    }
+
+    assert(generations.len() == 1000);
+}
+
+/// Verify reference stores correct generation
+fn test_reference_generation_storage() {
+    let value = Heap.new(Text.from("test"));
+    let expected_gen = value.generation();
+
+    // Create multiple references
+    let ref1 = &*value;
+    let ref2 = &*value;
+    let ref3 = &*value;
+
+    // All should store the same generation
+    assert(ref1.stored_generation() == expected_gen);
+    assert(ref2.stored_generation() == expected_gen);
+    assert(ref3.stored_generation() == expected_gen);
+}

@@ -1,0 +1,639 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, linalg
+// @timeout: 30000
+// @expected-exit: 0
+// @description: AOT linear algebra operations via struct simulation. Matrix multiply 2x2/3x3, dot product, reductions, softmax approximation, determinant.
+
+// ============================================================================
+// Utility helpers
+// ============================================================================
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// ============================================================================
+// 2x2 matrix (row-major: [a b; c d])
+// ============================================================================
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2_new(a: Int, b: Int, c: Int, d: Int) -> Mat2 {
+    Mat2 { a: a, b: b, c: c, d: d }
+}
+
+fn mat2_identity() -> Mat2 {
+    Mat2 { a: 1, b: 0, c: 0, d: 1 }
+}
+
+fn mat2_add(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 { a: m.a + n.a, b: m.b + n.b, c: m.c + n.c, d: m.d + n.d }
+}
+
+fn mat2_mul(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+fn mat2_scale(m: Mat2, s: Int) -> Mat2 {
+    Mat2 { a: m.a * s, b: m.b * s, c: m.c * s, d: m.d * s }
+}
+
+fn mat2_transpose(m: Mat2) -> Mat2 {
+    Mat2 { a: m.a, b: m.c, c: m.b, d: m.d }
+}
+
+fn mat2_det(m: Mat2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn mat2_trace(m: Mat2) -> Int {
+    m.a + m.d
+}
+
+// ============================================================================
+// 3x3 matrix (row-major: 9 elements)
+// ============================================================================
+
+type Mat3 is {
+    e00: Int, e01: Int, e02: Int,
+    e10: Int, e11: Int, e12: Int,
+    e20: Int, e21: Int, e22: Int
+};
+
+fn mat3_identity() -> Mat3 {
+    Mat3 {
+        e00: 1, e01: 0, e02: 0,
+        e10: 0, e11: 1, e12: 0,
+        e20: 0, e21: 0, e22: 1
+    }
+}
+
+fn mat3_mul(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        e00: a.e00 * b.e00 + a.e01 * b.e10 + a.e02 * b.e20,
+        e01: a.e00 * b.e01 + a.e01 * b.e11 + a.e02 * b.e21,
+        e02: a.e00 * b.e02 + a.e01 * b.e12 + a.e02 * b.e22,
+        e10: a.e10 * b.e00 + a.e11 * b.e10 + a.e12 * b.e20,
+        e11: a.e10 * b.e01 + a.e11 * b.e11 + a.e12 * b.e21,
+        e12: a.e10 * b.e02 + a.e11 * b.e12 + a.e12 * b.e22,
+        e20: a.e20 * b.e00 + a.e21 * b.e10 + a.e22 * b.e20,
+        e21: a.e20 * b.e01 + a.e21 * b.e11 + a.e22 * b.e21,
+        e22: a.e20 * b.e02 + a.e21 * b.e12 + a.e22 * b.e22
+    }
+}
+
+fn mat3_transpose(m: Mat3) -> Mat3 {
+    Mat3 {
+        e00: m.e00, e01: m.e10, e02: m.e20,
+        e10: m.e01, e11: m.e11, e12: m.e21,
+        e20: m.e02, e21: m.e12, e22: m.e22
+    }
+}
+
+fn mat3_det(m: Mat3) -> Int {
+    m.e00 * (m.e11 * m.e22 - m.e12 * m.e21)
+    - m.e01 * (m.e10 * m.e22 - m.e12 * m.e20)
+    + m.e02 * (m.e10 * m.e21 - m.e11 * m.e20)
+}
+
+fn mat3_trace(m: Mat3) -> Int {
+    m.e00 + m.e11 + m.e22
+}
+
+// ============================================================================
+// Vector types
+// ============================================================================
+
+type Vec3 is { x: Int, y: Int, z: Int };
+
+fn vec3_dot(a: Vec3, b: Vec3) -> Int {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn vec3_add(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+}
+
+fn vec3_scale(v: Vec3, s: Int) -> Vec3 {
+    Vec3 { x: v.x * s, y: v.y * s, z: v.z * s }
+}
+
+fn mat3_vec_mul(m: Mat3, v: Vec3) -> Vec3 {
+    Vec3 {
+        x: m.e00 * v.x + m.e01 * v.y + m.e02 * v.z,
+        y: m.e10 * v.x + m.e11 * v.y + m.e12 * v.z,
+        z: m.e20 * v.x + m.e21 * v.y + m.e22 * v.z
+    }
+}
+
+// ============================================================================
+// Flat array for reductions and softmax
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// Reduction operations
+// ============================================================================
+
+fn arr8_sum(a: Arr8, len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len {
+        s = s + arr8_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn arr8_max(a: Arr8, len: Int) -> Int {
+    let mut mx = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        mx = int_max(mx, arr8_get(a, i));
+        i = i + 1;
+    }
+    mx
+}
+
+fn arr8_min(a: Arr8, len: Int) -> Int {
+    let mut mn = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        mn = int_min(mn, arr8_get(a, i));
+        i = i + 1;
+    }
+    mn
+}
+
+// ============================================================================
+// Softmax approximation (integer arithmetic)
+// ============================================================================
+
+fn exp_approx(x: Int) -> Int {
+    let val = 1000 + x * 100;
+    if val < 1 { 1 } else { val }
+}
+
+fn softmax_int(input: Arr8, len: Int) -> Arr8 {
+    let mut exp_sum = 0;
+    let mut i = 0;
+    while i < len {
+        exp_sum = exp_sum + exp_approx(arr8_get(input, i));
+        i = i + 1;
+    }
+
+    let mut out = arr8_zeros();
+    i = 0;
+    while i < len {
+        let exp_val = exp_approx(arr8_get(input, i));
+        out = arr8_set(out, i, exp_val * 10000 / exp_sum);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Tests: 2x2 matrix multiply
+// ============================================================================
+
+fn test_mat2_mul_basic() {
+    // [1 2; 3 4] * [5 6; 7 8] = [19 22; 43 50]
+    let m = mat2_new(1, 2, 3, 4);
+    let n = mat2_new(5, 6, 7, 8);
+    let p = mat2_mul(m, n);
+    assert_eq(p.a, 19);
+    assert_eq(p.b, 22);
+    assert_eq(p.c, 43);
+    assert_eq(p.d, 50);
+}
+
+fn test_mat2_mul_identity() {
+    let m = mat2_new(3, 7, 2, 5);
+    let id = mat2_identity();
+    let p = mat2_mul(m, id);
+    assert_eq(p.a, 3);
+    assert_eq(p.b, 7);
+    assert_eq(p.c, 2);
+    assert_eq(p.d, 5);
+
+    let q = mat2_mul(id, m);
+    assert_eq(q.a, 3);
+    assert_eq(q.b, 7);
+    assert_eq(q.c, 2);
+    assert_eq(q.d, 5);
+}
+
+fn test_mat2_mul_chain() {
+    // Fibonacci via matrix: [1 1; 1 0]^n
+    let fib = mat2_new(1, 1, 1, 0);
+    let f2 = mat2_mul(fib, fib);
+    assert_eq(f2.a, 2); assert_eq(f2.b, 1);
+    assert_eq(f2.c, 1); assert_eq(f2.d, 1);
+
+    let f3 = mat2_mul(f2, fib);
+    assert_eq(f3.a, 3); assert_eq(f3.b, 2);
+
+    let f4 = mat2_mul(f3, fib);
+    assert_eq(f4.a, 5);
+
+    let f5 = mat2_mul(f4, fib);
+    assert_eq(f5.a, 8);
+}
+
+fn test_mat2_det_and_trace() {
+    let m = mat2_new(1, 2, 3, 4);
+    assert_eq(mat2_det(m), -2);
+    assert_eq(mat2_trace(m), 5);
+
+    let n = mat2_new(3, 7, 2, 5);
+    assert_eq(mat2_det(n), 1);
+    assert_eq(mat2_trace(n), 8);
+
+    // Singular matrix
+    let s = mat2_new(2, 4, 1, 2);
+    assert_eq(mat2_det(s), 0);
+
+    // Identity
+    let id = mat2_identity();
+    assert_eq(mat2_det(id), 1);
+    assert_eq(mat2_trace(id), 2);
+}
+
+fn test_mat2_transpose() {
+    let m = mat2_new(1, 2, 3, 4);
+    let t = mat2_transpose(m);
+    assert_eq(t.a, 1); assert_eq(t.b, 3);
+    assert_eq(t.c, 2); assert_eq(t.d, 4);
+
+    // Double transpose = original
+    let tt = mat2_transpose(t);
+    assert_eq(tt.a, 1); assert_eq(tt.b, 2);
+    assert_eq(tt.c, 3); assert_eq(tt.d, 4);
+}
+
+// ============================================================================
+// Tests: 3x3 matrix multiply
+// ============================================================================
+
+fn test_mat3_mul_identity() {
+    let id = mat3_identity();
+    let a = Mat3 {
+        e00: 2, e01: 3, e02: 5,
+        e10: 7, e11: 11, e12: 13,
+        e20: 17, e21: 19, e22: 23
+    };
+    let p = mat3_mul(id, a);
+    assert_eq(p.e00, 2); assert_eq(p.e01, 3); assert_eq(p.e02, 5);
+    assert_eq(p.e10, 7); assert_eq(p.e11, 11); assert_eq(p.e12, 13);
+    assert_eq(p.e20, 17); assert_eq(p.e21, 19); assert_eq(p.e22, 23);
+}
+
+fn test_mat3_mul_specific() {
+    // [1 2 3; 4 5 6; 7 8 9] * [9 8 7; 6 5 4; 3 2 1]
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let n = Mat3 {
+        e00: 9, e01: 8, e02: 7,
+        e10: 6, e11: 5, e12: 4,
+        e20: 3, e21: 2, e22: 1
+    };
+    let r = mat3_mul(m, n);
+    assert_eq(r.e00, 30); assert_eq(r.e01, 24); assert_eq(r.e02, 18);
+    assert_eq(r.e10, 84); assert_eq(r.e11, 69); assert_eq(r.e12, 54);
+    assert_eq(r.e20, 138); assert_eq(r.e21, 114); assert_eq(r.e22, 90);
+}
+
+fn test_mat3_det() {
+    // det([1 2 3; 4 5 6; 7 8 9]) = 0 (singular)
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    assert_eq(mat3_det(m), 0);
+
+    // det([2 3 5; 7 11 13; 17 19 23]) = -78
+    let n = Mat3 {
+        e00: 2, e01: 3, e02: 5,
+        e10: 7, e11: 11, e12: 13,
+        e20: 17, e21: 19, e22: 23
+    };
+    assert_eq(mat3_det(n), -78);
+
+    // det(I) = 1
+    assert_eq(mat3_det(mat3_identity()), 1);
+}
+
+fn test_mat3_transpose() {
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let t = mat3_transpose(m);
+    assert_eq(t.e00, 1); assert_eq(t.e01, 4); assert_eq(t.e02, 7);
+    assert_eq(t.e10, 2); assert_eq(t.e11, 5); assert_eq(t.e12, 8);
+    assert_eq(t.e20, 3); assert_eq(t.e21, 6); assert_eq(t.e22, 9);
+
+    // det(transpose(M)) == det(M)
+    assert_eq(mat3_det(t), mat3_det(m));
+}
+
+// ============================================================================
+// Tests: dot product
+// ============================================================================
+
+fn test_dot_product() {
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+    assert_eq(vec3_dot(a, b), 32);
+
+    // Orthogonal
+    let c = Vec3 { x: 1, y: 0, z: 0 };
+    let d = Vec3 { x: 0, y: 1, z: 0 };
+    assert_eq(vec3_dot(c, d), 0);
+
+    // Self-dot = sum of squares
+    let e = Vec3 { x: 3, y: 4, z: 0 };
+    assert_eq(vec3_dot(e, e), 25);
+}
+
+fn test_mat_vec_mul() {
+    let id = mat3_identity();
+    let v = Vec3 { x: 3, y: 5, z: 7 };
+    let r = mat3_vec_mul(id, v);
+    assert_eq(r.x, 3);
+    assert_eq(r.y, 5);
+    assert_eq(r.z, 7);
+
+    // Scale matrix
+    let scale = Mat3 {
+        e00: 2, e01: 0, e02: 0,
+        e10: 0, e11: 3, e12: 0,
+        e20: 0, e21: 0, e22: 4
+    };
+    let s = mat3_vec_mul(scale, v);
+    assert_eq(s.x, 6);
+    assert_eq(s.y, 15);
+    assert_eq(s.z, 28);
+
+    // Rotation-like matrix
+    let rot = Mat3 {
+        e00: 0, e01: -1, e02: 0,
+        e10: 1, e11: 0, e12: 0,
+        e20: 0, e21: 0, e22: 1
+    };
+    let u = Vec3 { x: 1, y: 0, z: 0 };
+    let ru = mat3_vec_mul(rot, u);
+    assert_eq(ru.x, 0);
+    assert_eq(ru.y, 1);
+    assert_eq(ru.z, 0);
+}
+
+// ============================================================================
+// Tests: reductions
+// ============================================================================
+
+fn test_reduction_sum() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    assert_eq(arr8_sum(a, 8), 36);
+    assert_eq(arr8_sum(a, 4), 10);
+    assert_eq(arr8_sum(a, 1), 1);
+
+    let b = Arr8 { e0: -10, e1: 20, e2: -30, e3: 40, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr8_sum(b, 4), 20);
+}
+
+fn test_reduction_max() {
+    let a = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    assert_eq(arr8_max(a, 8), 9);
+    assert_eq(arr8_max(a, 4), 4);
+
+    let b = Arr8 { e0: -5, e1: -3, e2: -8, e3: -1, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr8_max(b, 4), -1);
+}
+
+fn test_reduction_min() {
+    let a = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    assert_eq(arr8_min(a, 8), 1);
+    assert_eq(arr8_min(a, 4), 1);
+
+    let b = Arr8 { e0: 100, e1: 50, e2: 200, e3: 25, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr8_min(b, 4), 25);
+}
+
+// ============================================================================
+// Tests: softmax approximation
+// ============================================================================
+
+fn test_softmax_uniform() {
+    // Equal inputs: each gets equal share
+    let input = Arr8 { e0: 5, e1: 5, e2: 5, e3: 5, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = softmax_int(input, 4);
+    // Each exp_approx(5) = 1500, total = 6000
+    // Each normalized = 1500 * 10000 / 6000 = 2500
+    assert_eq(arr8_get(out, 0), 2500);
+    assert_eq(arr8_get(out, 1), 2500);
+    assert_eq(arr8_get(out, 2), 2500);
+    assert_eq(arr8_get(out, 3), 2500);
+}
+
+fn test_softmax_peaked() {
+    // One value much larger: should dominate
+    let input = Arr8 { e0: 0, e1: 0, e2: 9, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = softmax_int(input, 4);
+    // exp_approx(0) = 1000, exp_approx(9) = 1900
+    // total = 1000 + 1000 + 1900 + 1000 = 4900
+    let peak = arr8_get(out, 2);
+    let other = arr8_get(out, 0);
+    assert(peak > other);
+
+    // Sum of all normalized values should be approximately 10000
+    let total = arr8_get(out, 0) + arr8_get(out, 1) + arr8_get(out, 2) + arr8_get(out, 3);
+    assert(total >= 9900);
+    assert(total <= 10100);
+}
+
+fn test_softmax_gradient() {
+    // Monotonically increasing: [1, 2, 3, 4]
+    let input = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = softmax_int(input, 4);
+    // Monotonicity should be preserved
+    assert(arr8_get(out, 0) < arr8_get(out, 1));
+    assert(arr8_get(out, 1) < arr8_get(out, 2));
+    assert(arr8_get(out, 2) < arr8_get(out, 3));
+}
+
+// ============================================================================
+// Tests: 2x2 determinant properties
+// ============================================================================
+
+fn test_det_product_rule() {
+    // det(A * B) = det(A) * det(B)
+    let a = mat2_new(2, 3, 1, 4);
+    let b = mat2_new(5, 1, 2, 3);
+    let ab = mat2_mul(a, b);
+
+    let det_a = mat2_det(a);
+    let det_b = mat2_det(b);
+    let det_ab = mat2_det(ab);
+    assert_eq(det_ab, det_a * det_b);
+}
+
+fn test_det_transpose_invariant() {
+    // det(A^T) = det(A)
+    let m = mat2_new(3, 7, 2, 5);
+    assert_eq(mat2_det(m), mat2_det(mat2_transpose(m)));
+
+    let n = mat2_new(1, 2, 3, 4);
+    assert_eq(mat2_det(n), mat2_det(mat2_transpose(n)));
+}
+
+fn test_det_scale() {
+    // det(c*A) = c^2 * det(A) for 2x2
+    let m = mat2_new(1, 2, 3, 4);
+    let det_m = mat2_det(m);
+    let scaled = mat2_scale(m, 3);
+    let det_scaled = mat2_det(scaled);
+    // c^2 * det(A) = 9 * (-2) = -18
+    assert_eq(det_scaled, 9 * det_m);
+}
+
+// ============================================================================
+// Tests: combined linear algebra pipeline
+// ============================================================================
+
+fn test_linalg_pipeline() {
+    // Compute (A * B)^T and verify it equals B^T * A^T
+    let a = mat2_new(1, 2, 3, 4);
+    let b = mat2_new(5, 6, 7, 8);
+
+    let ab_t = mat2_transpose(mat2_mul(a, b));
+    let bt_at = mat2_mul(mat2_transpose(b), mat2_transpose(a));
+
+    assert_eq(ab_t.a, bt_at.a);
+    assert_eq(ab_t.b, bt_at.b);
+    assert_eq(ab_t.c, bt_at.c);
+    assert_eq(ab_t.d, bt_at.d);
+}
+
+fn test_mat3_linalg_pipeline() {
+    // (A * B)^T == B^T * A^T for 3x3
+    let a = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let b = Mat3 {
+        e00: 9, e01: 8, e02: 7,
+        e10: 6, e11: 5, e12: 4,
+        e20: 3, e21: 2, e22: 1
+    };
+
+    let ab_t = mat3_transpose(mat3_mul(a, b));
+    let bt_at = mat3_mul(mat3_transpose(b), mat3_transpose(a));
+
+    assert_eq(ab_t.e00, bt_at.e00);
+    assert_eq(ab_t.e01, bt_at.e01);
+    assert_eq(ab_t.e02, bt_at.e02);
+    assert_eq(ab_t.e10, bt_at.e10);
+    assert_eq(ab_t.e11, bt_at.e11);
+    assert_eq(ab_t.e12, bt_at.e12);
+    assert_eq(ab_t.e20, bt_at.e20);
+    assert_eq(ab_t.e21, bt_at.e21);
+    assert_eq(ab_t.e22, bt_at.e22);
+}
+
+fn test_vec_operations_combined() {
+    // Verify distributive property: M * (u + v) == M*u + M*v
+    let m = Mat3 {
+        e00: 2, e01: 0, e02: 1,
+        e10: 0, e11: 3, e12: 0,
+        e20: 1, e21: 0, e22: 2
+    };
+    let u = Vec3 { x: 1, y: 2, z: 3 };
+    let v = Vec3 { x: 4, y: 5, z: 6 };
+
+    let uv = vec3_add(u, v);
+    let m_uv = mat3_vec_mul(m, uv);
+    let mu = mat3_vec_mul(m, u);
+    let mv = mat3_vec_mul(m, v);
+    let mu_mv = vec3_add(mu, mv);
+
+    assert_eq(m_uv.x, mu_mv.x);
+    assert_eq(m_uv.y, mu_mv.y);
+    assert_eq(m_uv.z, mu_mv.z);
+}
+
+fn main() -> Int {
+    test_mat2_mul_basic();
+    test_mat2_mul_identity();
+    test_mat2_mul_chain();
+    test_mat2_det_and_trace();
+    test_mat2_transpose();
+    test_mat3_mul_identity();
+    test_mat3_mul_specific();
+    test_mat3_det();
+    test_mat3_transpose();
+    test_dot_product();
+    test_mat_vec_mul();
+    test_reduction_sum();
+    test_reduction_max();
+    test_reduction_min();
+    test_softmax_uniform();
+    test_softmax_peaked();
+    test_softmax_gradient();
+    test_det_product_rule();
+    test_det_transpose_invariant();
+    test_det_scale();
+    test_linalg_pipeline();
+    test_mat3_linalg_pipeline();
+    test_vec_operations_combined();
+    print("[OK] 133_tensor_linalg_aot");
+    0
+}

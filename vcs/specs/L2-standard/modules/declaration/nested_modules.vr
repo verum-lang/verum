@@ -1,0 +1,144 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, declaration, nested
+
+/// Nested module declarations - modules within modules, multiple levels deep.
+/// Demonstrates module hierarchy and path resolution.
+
+module core {
+    /// First level of nesting
+    pub type Error is {
+        code: Int,
+        message: Text
+    };
+
+    pub module collections {
+        /// Second level of nesting
+        pub type LinkedList<T> is {
+            head: Maybe<Node<T>>,
+            len: Int
+        };
+
+        type Node<T> is {
+            value: T,
+            next: Maybe<Heap<Node<T>>>
+        };
+
+        pub fn empty<T>() -> LinkedList<T> {
+            LinkedList { head: None, len: 0 }
+        }
+
+        pub module specialized {
+            /// Third level of nesting
+            mount super.LinkedList;
+
+            pub type IntList is LinkedList<Int>;
+            pub type TextList is LinkedList<Text>;
+
+            pub fn sum_list(list: &IntList) -> Int {
+                // Implementation
+                0
+            }
+        }
+    }
+
+    pub module io {
+        mount super.Error;
+
+        pub type FileHandle is {
+            fd: Int,
+            path: Text,
+            mode: FileMode
+        };
+
+        pub type FileMode is
+    | Read
+    | Write
+    | ReadWrite
+    | Append;
+
+        pub fn open(path: &Text, mode: FileMode) -> Result<FileHandle, Error> {
+            // Implementation
+            Ok(FileHandle { fd: 1, path: path.clone(), mode: mode })
+        }
+
+        pub module async_io {
+            /// Nested async IO operations
+            mount super.{FileHandle, FileMode, Error};
+            mount super.super.Error as CoreError;
+
+            pub type AsyncFile is {
+                handle: FileHandle,
+                buffer: List<Byte>
+            };
+
+            pub async fn read_all(path: &Text) -> Result<Bytes, Error> {
+                let handle = super.open(path, FileMode.Read)?;
+                // Async read implementation
+                Ok(Bytes.empty())
+            }
+        }
+    }
+
+    pub module net {
+        mount super.Error;
+        mount super.io.async_io;
+
+        pub type TcpListener is {
+            addr: Text,
+            backlog: Int
+        };
+
+        pub async fn serve(addr: &Text) -> Result<(), Error> {
+            let listener = TcpListener { addr: addr.clone(), backlog: 128 };
+            // Serve implementation using async io
+            Ok(())
+        }
+    }
+}
+
+fn main() {
+    // Access deeply nested modules using full paths
+    mount core.collections.LinkedList;
+    mount core.collections.specialized.{IntList, sum_list};
+    mount core.io.{open, FileMode};
+    mount core.io.async_io.read_all;
+
+    // Use imported items
+    let list: IntList = core.collections.empty();
+    let sum = sum_list(&list);
+
+    let file = open("config.txt", FileMode.Read);
+
+    // Async operation
+    async {
+        let contents = read_all("data.txt").await;
+        match contents {
+            Ok(data) => {
+                // Process data
+            },
+            Err(e) => {
+                // Handle error
+            }
+        }
+    }
+}
+
+/// Demonstrate super keyword for parent module access
+module outer {
+    pub const OUTER_CONST: Int = 100;
+
+    pub module middle {
+        pub const MIDDLE_CONST: Int = 50;
+
+        pub module inner {
+            mount super.MIDDLE_CONST;
+            mount super.super.OUTER_CONST;
+
+            pub fn combined() -> Int {
+                OUTER_CONST + MIDDLE_CONST
+            }
+        }
+    }
+}

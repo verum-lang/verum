@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, let-else, block, unclosed, error
+// @description: Test let-else statement with unclosed else block
+// @expected-error: E011
+
+fn test() {
+    let Some(x) = value else {
+        return;
+}

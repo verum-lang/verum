@@ -1,0 +1,93 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: if-let, maybe, pattern-matching
+// @description: Test if-let pattern matching on Maybe values
+
+fn find_positive(n: Int) -> Maybe<Int> {
+    if n > 0 {
+        Some(n)
+    } else {
+        None
+    }
+}
+
+fn test_if_let_some() -> Int {
+    let val = find_positive(42);
+    if let Some(x) = val {
+        if x != 42 {
+            print(f"FAIL if_let_some: {x}, expected 42");
+            return 1;
+        }
+    } else {
+        print("FAIL if_let_some: got None");
+        return 1;
+    }
+    print("  if_let_some: OK");
+    0
+}
+
+fn test_if_let_none() -> Int {
+    let val = find_positive(-5);
+    if let Some(x) = val {
+        print(f"FAIL if_let_none: got Some({x})");
+        return 1;
+    } else {
+        // Expected path
+    }
+    print("  if_let_none: OK");
+    0
+}
+
+fn test_if_let_nested() -> Int {
+    let a = find_positive(10);
+    let b = find_positive(20);
+    let mut sum = 0;
+    if let Some(x) = a {
+        sum = sum + x;
+    }
+    if let Some(y) = b {
+        sum = sum + y;
+    }
+    if sum != 30 {
+        print(f"FAIL if_let_nested: sum={sum}, expected 30");
+        return 1;
+    }
+    print("  if_let_nested: OK");
+    0
+}
+
+fn test_while_let() -> Int {
+    let mut items = List.new();
+    items.push(1);
+    items.push(2);
+    items.push(3);
+
+    let mut sum = 0;
+    while let Some(val) = items.pop() {
+        sum = sum + val;
+    }
+    // pop returns in LIFO: 3 + 2 + 1 = 6
+    if sum != 6 {
+        print(f"FAIL while_let: sum={sum}, expected 6");
+        return 1;
+    }
+    print("  while_let: OK");
+    0
+}
+
+fn main() -> Int {
+    print("If-Let Tests:");
+    let mut failures = 0;
+    failures = failures + test_if_let_some();
+    failures = failures + test_if_let_none();
+    failures = failures + test_if_let_nested();
+    failures = failures + test_while_let();
+
+    if failures == 0 {
+        print("All if-let tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

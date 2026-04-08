@@ -1,0 +1,68 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, binding, ref, error
+// @description: Test invalid ref modifier usage in patterns
+// @expected-error: E072
+
+type Option<T> is None | Some(T);
+type Point is { x: Int, y: Int };
+
+fn test_ref_alone() {
+    let value = 42;
+
+    // Invalid: 'ref' without identifier
+    match value {
+        ref => print("ref alone"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_with_literal() {
+    let value = 42;
+
+    // Invalid: ref cannot be used with literal
+    match value {
+        ref 42 => print("ref literal"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_with_underscore() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: ref with wildcard
+    match opt {
+        Some(ref _) => print("ref wildcard"),
+        None => print("none"),
+    }
+}
+
+fn test_double_ref() {
+    let value = 42;
+
+    // Invalid: double ref modifier
+    match value {
+        ref ref x => print("double ref"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_mut_mut() {
+    let value = 42;
+
+    // Invalid: ref with double mut
+    match value {
+        ref mut mut x => print("ref mut mut"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_in_wrong_position() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: ref after identifier
+    match p {
+        Point { x ref } => print("wrong ref position"),
+        _ => print("other"),
+    }
+}

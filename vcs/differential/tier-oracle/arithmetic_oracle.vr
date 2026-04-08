@@ -1,0 +1,219 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, arithmetic, oracle
+// @timeout: 10000
+
+/// Arithmetic Oracle Tests
+/// Compare arithmetic operations between Tier 0 (interpreter) and Tier 3 (AOT)
+/// to ensure semantic equivalence across all numeric operations.
+///
+/// These tests cover:
+/// - Integer arithmetic (add, sub, mul, div, mod, power)
+/// - Float arithmetic with precision validation
+/// - Bitwise operations
+/// - Mixed type operations
+/// - Edge cases (overflow, underflow, division by zero)
+
+fn test_integer_basic() {
+    // Basic integer operations
+    let a = 42;
+    let b = 17;
+
+    println(f"add: {a + b}");      // 59
+    println(f"sub: {a - b}");      // 25
+    println(f"mul: {a * b}");      // 714
+    println(f"div: {a / b}");      // 2
+    println(f"mod: {a % b}");      // 8
+}
+
+fn test_integer_negative() {
+    // Negative number operations
+    let a = -42;
+    let b = 17;
+    let c = -17;
+
+    println(f"neg + pos: {a + b}");    // -25
+    println(f"neg - pos: {a - b}");    // -59
+    println(f"neg * pos: {a * b}");    // -714
+    println(f"neg * neg: {a * c}");    // 714
+    println(f"neg / pos: {a / b}");    // -2 (truncated toward zero)
+    println(f"neg / neg: {a / c}");    // 2
+    println(f"neg % pos: {a % b}");    // -8 (sign follows dividend)
+    println(f"neg % neg: {a % c}");    // -8
+}
+
+fn test_integer_power() {
+    // Power operations
+    println(f"2**0: {2 ** 0}");      // 1
+    println(f"2**1: {2 ** 1}");      // 2
+    println(f"2**10: {2 ** 10}");    // 1024
+    println(f"2**20: {2 ** 20}");    // 1048576
+    println(f"3**5: {3 ** 5}");      // 243
+    println(f"(-2)**3: {(-2) ** 3}"); // -8
+    println(f"(-2)**4: {(-2) ** 4}"); // 16
+}
+
+fn test_float_basic() {
+    // Basic float operations
+    let a = 3.14159;
+    let b = 2.71828;
+
+    println(f"add: {a + b}");
+    println(f"sub: {a - b}");
+    println(f"mul: {a * b}");
+    println(f"div: {a / b}");
+}
+
+fn test_float_precision() {
+    // Float precision tests - known problematic cases
+    let result = 0.1 + 0.2;
+    println(f"0.1 + 0.2 = {result}");
+
+    // Should print 0.30000000000000004 due to IEEE 754
+    println(f"0.1 + 0.2 == 0.3: {result == 0.3}");
+
+    // More precision tests
+    println(f"1.0 / 3.0 = {1.0 / 3.0}");
+    println(f"(1.0/3.0) * 3.0 = {(1.0 / 3.0) * 3.0}");
+
+    // Very small differences
+    let epsilon = 1e-15;
+    println(f"1.0 + epsilon = {1.0 + epsilon}");
+    println(f"1.0 + epsilon == 1.0: {1.0 + epsilon == 1.0}");
+}
+
+fn test_float_special() {
+    // Special float values
+    let inf = 1.0 / 0.0;
+    let neg_inf = -1.0 / 0.0;
+    let nan = 0.0 / 0.0;
+
+    println(f"inf: {inf}");
+    println(f"-inf: {neg_inf}");
+    println(f"nan: {nan}");
+
+    // NaN comparisons (all should be false)
+    println(f"nan == nan: {nan == nan}");
+    println(f"nan < 0: {nan < 0.0}");
+    println(f"nan > 0: {nan > 0.0}");
+
+    // Infinity arithmetic
+    println(f"inf + 1: {inf + 1.0}");
+    println(f"inf * 2: {inf * 2.0}");
+    println(f"inf - inf: {inf - inf}");  // NaN
+    println(f"inf / inf: {inf / inf}");  // NaN
+    println(f"1 / inf: {1.0 / inf}");    // 0
+}
+
+fn test_bitwise() {
+    // Bitwise operations
+    let a = 0b10101010;  // 170
+    let b = 0b11001100;  // 204
+
+    println(f"a: {a}");
+    println(f"b: {b}");
+    println(f"a & b: {a & b}");   // 0b10001000 = 136
+    println(f"a | b: {a | b}");   // 0b11101110 = 238
+    println(f"a ^ b: {a ^ b}");   // 0b01100110 = 102
+    println(f"~a: {~a}");         // -171 (two's complement)
+
+    // Shift operations
+    println(f"a << 2: {a << 2}"); // 680
+    println(f"a >> 2: {a >> 2}"); // 42
+
+    // Negative shifts
+    let neg = -16;
+    println(f"neg >> 2: {neg >> 2}");  // Arithmetic shift: -4
+}
+
+fn test_mixed_operations() {
+    // Mixed operation precedence
+    println(f"2 + 3 * 4: {2 + 3 * 4}");           // 14
+    println(f"(2 + 3) * 4: {(2 + 3) * 4}");       // 20
+    println(f"10 / 3 * 3: {10 / 3 * 3}");         // 9 (integer division)
+    println(f"10 * 3 / 3: {10 * 3 / 3}");         // 10
+
+    // Complex expression
+    let result = (42 + 17) * 2 - 100 / 5 + 3 ** 2;
+    println(f"complex: {result}");  // 59 * 2 - 20 + 9 = 118 - 20 + 9 = 107
+}
+
+fn test_integer_limits() {
+    // Integer limits (assuming 64-bit integers)
+    let max = 9223372036854775807;
+    let min = -9223372036854775808;
+
+    println(f"max: {max}");
+    println(f"min: {min}");
+    println(f"max - 1: {max - 1}");
+    println(f"min + 1: {min + 1}");
+
+    // Near-limit operations (should not overflow)
+    println(f"max / 2: {max / 2}");
+    println(f"min / 2: {min / 2}");
+}
+
+fn fib(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fib(n - 1) + fib(n - 2) }
+}
+
+fn test_recursive_arithmetic() {
+    // Fibonacci - must be identical on both tiers
+    println(f"fib(0): {fib(0)}");   // 0
+    println(f"fib(1): {fib(1)}");   // 1
+    println(f"fib(5): {fib(5)}");   // 5
+    println(f"fib(10): {fib(10)}"); // 55
+    println(f"fib(15): {fib(15)}"); // 610
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+fn test_factorial() {
+    println(f"0!: {factorial(0)}");   // 1
+    println(f"1!: {factorial(1)}");   // 1
+    println(f"5!: {factorial(5)}");   // 120
+    println(f"10!: {factorial(10)}"); // 3628800
+    println(f"12!: {factorial(12)}"); // 479001600
+}
+
+fn main() {
+    println("=== Integer Basic ===");
+    test_integer_basic();
+
+    println("\n=== Integer Negative ===");
+    test_integer_negative();
+
+    println("\n=== Integer Power ===");
+    test_integer_power();
+
+    println("\n=== Float Basic ===");
+    test_float_basic();
+
+    println("\n=== Float Precision ===");
+    test_float_precision();
+
+    println("\n=== Float Special ===");
+    test_float_special();
+
+    println("\n=== Bitwise ===");
+    test_bitwise();
+
+    println("\n=== Mixed Operations ===");
+    test_mixed_operations();
+
+    println("\n=== Integer Limits ===");
+    test_integer_limits();
+
+    println("\n=== Recursive Arithmetic ===");
+    test_recursive_arithmetic();
+
+    println("\n=== Factorial ===");
+    test_factorial();
+
+    println("\n=== All arithmetic tests complete ===");
+}

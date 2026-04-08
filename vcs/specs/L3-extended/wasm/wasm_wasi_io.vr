@@ -1,0 +1,60 @@
+// @test: run
+// @level: L3
+// @tier: 2
+// @tags: wasm, wasi, io, cross-compilation
+// @expected-stdout: Hello from WASM
+// @expected-exit: 0
+// @description: WASI I/O — print and basic stdout under WASM-WASI target
+
+fn greet(name: Text) -> Text {
+    f"Hello from {name}"
+}
+
+fn repeat_char(ch: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < n {
+        result = f"{result}{ch}";
+        i = i + 1;
+    }
+    result
+}
+
+fn is_palindrome(s: Text) -> Bool {
+    let len = s.len();
+    if len <= 1 {
+        return true;
+    }
+    let mut i = 0;
+    while i < len / 2 {
+        if s.char_at(i) != s.char_at(len - 1 - i) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn main() -> Int {
+    // Basic string operations
+    let msg = greet("WASM");
+    print(msg);
+
+    // String building
+    let stars = repeat_char("*", 5);
+    assert_eq(stars.len(), 5);
+
+    // F-string interpolation
+    let x = 42;
+    let formatted = f"The answer is {x}";
+    assert_eq(formatted.len(), 17);
+
+    // String comparison
+    assert(is_palindrome("racecar"));
+    assert(is_palindrome("abba"));
+    assert(!is_palindrome("hello"));
+    assert(is_palindrome("a"));
+    assert(is_palindrome(""));
+
+    0
+}

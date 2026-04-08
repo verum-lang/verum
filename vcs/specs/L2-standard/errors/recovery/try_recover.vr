@@ -1,0 +1,199 @@
+// @test: run
+// @expected-stdout: Recovered value: 0\nSmart recovery: not_found_fallback\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, recovery, try, recover
+// @description: try { } recover { pattern => expr } error recovery pattern
+
+/// Try-recover pattern - expression-based error recovery.
+/// The recover clause handles errors and provides fallback values.
+
+type DataError is
+    | NotFound
+    | InvalidFormat(Text)
+    | Timeout
+    | NetworkError(Text)
+    | PermissionDenied;
+
+type Data is {
+    value: Int,
+    source: Text
+};
+
+/// Simulated data fetching
+fn fetch_data(source: &Text) -> Result<Data, DataError> {
+    match source {
+        "local" => Ok(Data { value: 42, source: "local" }),
+        "cache" => Ok(Data { value: 100, source: "cache" }),
+        "remote" => Ok(Data { value: 200, source: "remote" }),
+        "invalid" => Err(DataError.InvalidFormat("corrupted data")),
+        "slow" => Err(DataError.Timeout),
+        "forbidden" => Err(DataError.PermissionDenied),
+        _ => Err(DataError.NotFound)
+    }
+}
+
+/// Basic recover - provides fallback on any error
+fn fetch_with_fallback(source: &Text) -> Data {
+    try {
+        fetch_data(source)?
+    } recover {
+        _error => Data { value: 0, source: "default" }
+    }
+}
+
+/// Recover with error inspection - different handling per error type
+fn fetch_with_smart_recovery(source: &Text) -> Data {
+    try {
+        fetch_data(source)?
+    } recover {
+        DataError.NotFound => Data { value: -1, source: "not_found_fallback" },
+        DataError.Timeout => Data { value: 0, source: "timeout_cache" },
+        DataError.InvalidFormat(msg) => {
+            println(f"Invalid format: {msg}");
+            Data { value: 0, source: "format_error_default" }
+        },
+        DataError.NetworkError(msg) => Data { value: 0, source: "network_error_default" },
+        DataError.PermissionDenied => Data { value: -999, source: "access_denied" }
+    }
+}
+
+/// Recover with error binding - capture error in variable
+fn recover_with_binding(source: &Text) -> (Data, Maybe<DataError>) {
+    let mut captured_error: Maybe<DataError> = None;
+
+    let data = try {
+        fetch_data(source)?
+    } recover {
+        e => {
+            captured_error = Some(e);
+            Data { value: 0, source: "error_captured" }
+        }
+    };
+
+    (data, captured_error)
+}
+
+/// Recover block that itself can fail
+fn fetch_with_fallible_recovery(
+    primary: &Text,
+    backup: &Text
+) -> Result<Data, DataError> {
+    try {
+        fetch_data(primary)?
+    } recover {
+        DataError.Timeout | DataError.NetworkError(_) => fetch_data(backup)?,
+        error => return Err(error)
+    }
+}
+
+/// Chained recovery with multiple fallbacks
+fn fetch_with_chain(sources: &List<Text>) -> Data {
+    try {
+        for source in sources {
+            match fetch_data(source) {
+                Ok(data) => return data,
+                Err(_) => continue
+            }
+        }
+        Err(DataError.NotFound)?
+    } recover {
+        _ => Data { value: 0, source: "all_failed" }
+    }
+}
+
+/// Recovery with logging side effects
+fn fetch_with_logging(source: &Text) -> Data {
+    try {
+        fetch_data(source)?
+    } recover {
+        error => {
+            log_error(&error);
+            Data { value: 0, source: "logged_default" }
+        }
+    }
+}
+
+fn log_error(error: &DataError) {
+    match error {
+        DataError.NotFound =>
+            println("LOG: Data not found"),
+        DataError.InvalidFormat(msg) =>
+            println(f"LOG: Invalid format - {msg}"),
+        DataError.Timeout =>
+            println("LOG: Operation timed out"),
+        DataError.NetworkError(msg) =>
+            println(f"LOG: Network error - {msg}"),
+        DataError.PermissionDenied =>
+            println("LOG: Permission denied"),
+    }
+}
+
+/// Recovery with retry logic
+fn fetch_with_retry(source: &Text, max_retries: Int) -> Data {
+    let mut attempts = 0;
+
+    try {
+        loop {
+            match fetch_data(source) {
+                Ok(data) => return data,
+                Err(DataError.Timeout) if attempts < max_retries => {
+                    attempts += 1;
+                    continue
+                },
+                Err(e) => return Err(e)?
+            }
+        }
+    } recover {
+        _ => Data { value: 0, source: f"retry_exhausted_after_{attempts}" }
+    }
+}
+
+/// Recovery with partial success handling
+type BatchResult is {
+    successes: List<Data>,
+    failures: List<DataError>
+};
+
+fn fetch_batch(sources: &List<Text>) -> BatchResult {
+    let mut successes: List<Data> = List.new();
+    let mut failures: List<DataError> = List.new();
+
+    for source in sources {
+        let result = try {
+            fetch_data(source)?
+        } recover {
+            e => {
+                failures.push(e);
+                continue
+            }
+        };
+
+        successes.push(result);
+    }
+
+    BatchResult { successes, failures }
+}
+
+/// Conditional recovery - only recover from specific errors
+fn fetch_recoverable_only(source: &Text) -> Result<Data, DataError> {
+    try {
+        fetch_data(source)?
+    } recover {
+        DataError.Timeout | DataError.NetworkError(_) => Data { value: 0, source: "recovered" },
+        e @ (DataError.PermissionDenied | DataError.InvalidFormat(_)) => return Err(e),
+        DataError.NotFound => Data { value: -1, source: "not_found_handled" }
+    }
+}
+
+fn main() {
+    // Basic recovery
+    let data = fetch_with_fallback("missing");
+    println(f"Recovered value: {data.value}");
+
+    // Smart recovery with error inspection
+    let smart_data = fetch_with_smart_recovery("missing");
+    println(f"Smart recovery: {smart_data.source}");
+
+    println("Operation completed");
+}

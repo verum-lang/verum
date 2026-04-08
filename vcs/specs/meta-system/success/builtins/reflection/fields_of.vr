@@ -1,0 +1,116 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, reflection, fields_of, struct
+// @description: Test fields_of builtin for struct introspection
+// @contexts: MetaTypes
+
+// =============================================================================
+// TEST TYPES
+// =============================================================================
+
+type Point is { x: Float, y: Float };
+
+type Person is {
+    name: Text,
+    age: Int,
+    active: Bool
+};
+
+type Empty is { };
+
+type Nested is {
+    point: Point,
+    label: Text
+};
+
+type WithGeneric<T> is {
+    value: T,
+    count: Int
+};
+
+// =============================================================================
+// FIELDS_OF TESTS
+// =============================================================================
+
+// Test fields_of with simple struct
+meta fn test_fields_of_simple() -> Int using [MetaTypes] {
+    let fields = fields_of(Point);
+    list_len(fields)  // Should be 2
+}
+
+// Test fields_of field names
+meta fn test_fields_of_names() -> List<Text> using [MetaTypes] {
+    let fields = fields_of(Point);
+    list_map(fields, |f| f.name)  // Should be ["x", "y"]
+}
+
+// Test fields_of field types
+meta fn test_fields_of_types() -> List<Text> using [MetaTypes] {
+    let fields = fields_of(Point);
+    list_map(fields, |f| f.type_name)  // Should be ["Float", "Float"]
+}
+
+// Test fields_of with more fields
+meta fn test_fields_of_person() -> Int using [MetaTypes] {
+    let fields = fields_of(Person);
+    list_len(fields)  // Should be 3
+}
+
+// Test fields_of with empty struct
+meta fn test_fields_of_empty() -> Int using [MetaTypes] {
+    let fields = fields_of(Empty);
+    list_len(fields)  // Should be 0
+}
+
+// Test fields_of with nested type
+meta fn test_fields_of_nested() -> Text using [MetaTypes] {
+    let fields = fields_of(Nested);
+    let first_field = maybe_unwrap(list_get(fields, 0));
+    first_field.type_name  // Should be "Point"
+}
+
+// Test fields_of for generating code
+meta fn generate_debug_impl<T>() -> TokenStream using [MetaTypes] {
+    let fields = fields_of(T);
+    let field_strs = list_map(fields, |f| {
+        text_concat(f.name, ": ")
+    });
+    let joined = text_join(field_strs, ", ");
+    quote {
+        fn debug() -> Text {
+            $joined
+        }
+    }
+}
+
+// Test checking field presence
+meta fn has_field<T>(field_name: Text) -> Bool using [MetaTypes] {
+    let fields = fields_of(T);
+    let matching = list_filter(fields, |f| f.name == field_name);
+    list_len(matching) > 0
+}
+
+// Main test function
+fn main() {
+    // Test field counts
+    @const assert_eq(test_fields_of_simple(), 2);
+    @const assert_eq(test_fields_of_person(), 3);
+    @const assert_eq(test_fields_of_empty(), 0);
+
+    // Test field names
+    @const assert_eq(test_fields_of_names(), ["x", "y"]);
+
+    // Test field types
+    @const assert_eq(test_fields_of_types(), ["Float", "Float"]);
+
+    // Test nested types
+    @const assert_eq(test_fields_of_nested(), "Point");
+
+    // Test has_field helper
+    @const assert(has_field<Point>("x"));
+    @const assert(has_field<Point>("y"));
+    @const assert(!has_field<Point>("z"));
+    @const assert(has_field<Person>("name"));
+    @const assert(has_field<Person>("age"));
+}

@@ -1,0 +1,117 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: types, coercion, casting, conversion
+// @description: Test type system features - casting, conversions, bool ops
+
+fn test_int_bool() -> Int {
+    let t = true;
+    let f = false;
+    // Bool to int: true=1, false=0
+    let ti = if t { 1 } else { 0 };
+    let fi = if f { 1 } else { 0 };
+    if ti != 1 || fi != 0 {
+        print(f"FAIL int_bool: ti={ti}, fi={fi}");
+        return 1;
+    }
+    print("  int_bool: OK");
+    0
+}
+
+fn test_float_int_cast() -> Int {
+    let f = 3.7;
+    let i = f as Int;
+    // Truncation: 3.7 -> 3
+    if i != 3 {
+        print(f"FAIL float_int: i={i}, expected 3");
+        return 1;
+    }
+    let neg = -2.9;
+    let ni = neg as Int;
+    if ni != -2 {
+        print(f"FAIL float_int neg: ni={ni}, expected -2");
+        return 1;
+    }
+    print("  float_int_cast: OK");
+    0
+}
+
+fn test_int_float_cast() -> Int {
+    let i = 100;
+    let f = i as Float;
+    if f < 99.99 || f > 100.01 {
+        print(f"FAIL int_float: f={f}");
+        return 1;
+    }
+    print("  int_float_cast: OK");
+    0
+}
+
+fn test_compound_bool() -> Int {
+    let a = 5;
+    let b = 10;
+    let c = 15;
+
+    // Complex boolean expressions
+    let result1 = a < b && b < c;  // true
+    let result2 = a > b || b > c;  // false
+    let result3 = (a + b > c) || (b - a < c);  // false || true = true
+
+    if !result1 {
+        print("FAIL compound: a<b && b<c");
+        return 1;
+    }
+    if result2 {
+        print("FAIL compound: a>b || b>c should be false");
+        return 1;
+    }
+    if !result3 {
+        print("FAIL compound: result3 should be true");
+        return 1;
+    }
+    print("  compound_bool: OK");
+    0
+}
+
+fn test_let_type_annotation() -> Int {
+    let x: Int = 42;
+    let y: Float = 3.14;
+    let z: Bool = true;
+    let s: Text = "hello";
+
+    if x != 42 {
+        print("FAIL annotation: x");
+        return 1;
+    }
+    if y < 3.13 || y > 3.15 {
+        print("FAIL annotation: y");
+        return 1;
+    }
+    if !z {
+        print("FAIL annotation: z");
+        return 1;
+    }
+    if s != "hello" {
+        print("FAIL annotation: s");
+        return 1;
+    }
+    print("  let_type_annotation: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Type System Tests:");
+    let mut failures = 0;
+    failures = failures + test_int_bool();
+    failures = failures + test_float_int_cast();
+    failures = failures + test_int_float_cast();
+    failures = failures + test_compound_bool();
+    failures = failures + test_let_type_annotation();
+
+    if failures == 0 {
+        print("All type system tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

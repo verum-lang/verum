@@ -1,0 +1,96 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: try, recover, question-mark, error-handling, runtime
+// @description: Test ? operator inside try/recover blocks
+
+type MathError is
+    | DivByZero
+    | Overflow;
+
+fn divide(a: Int, b: Int) -> Result<Int, MathError> {
+    if b == 0 {
+        Err(MathError.DivByZero)
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn test_try_recover_basic() -> Int {
+    let result = try {
+        let val = divide(10, 0)?;
+        val
+    } recover |err| {
+        -1
+    };
+
+    if result != -1 {
+        print(f"FAIL basic: expected -1, got {result}");
+        return 1;
+    }
+    print("  try_recover_basic: OK");
+    0
+}
+
+fn test_try_recover_success() -> Int {
+    let result = try {
+        let val = divide(10, 2)?;
+        val
+    } recover |err| {
+        -1
+    };
+
+    if result != 5 {
+        print(f"FAIL success: expected 5, got {result}");
+        return 1;
+    }
+    print("  try_recover_success: OK");
+    0
+}
+
+fn test_try_recover_chain() -> Int {
+    let result = try {
+        let a = divide(100, 10)?;
+        let b = divide(a, 2)?;
+        b
+    } recover |err| {
+        0
+    };
+
+    if result != 5 {
+        print(f"FAIL chain: expected 5, got {result}");
+        return 1;
+    }
+    print("  try_recover_chain: OK");
+    0
+}
+
+fn test_try_recover_chain_fail() -> Int {
+    let result = try {
+        let a = divide(100, 10)?;
+        let b = divide(a, 0)?;
+        b
+    } recover |err| {
+        -99
+    };
+
+    if result != -99 {
+        print(f"FAIL chain_fail: expected -99, got {result}");
+        return 1;
+    }
+    print("  try_recover_chain_fail: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_try_recover_basic();
+    failures = failures + test_try_recover_success();
+    failures = failures + test_try_recover_chain();
+    failures = failures + test_try_recover_chain_fail();
+
+    if failures == 0 {
+        print("All try/recover tests passed");
+    }
+    failures
+}

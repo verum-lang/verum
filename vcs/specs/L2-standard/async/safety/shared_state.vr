@@ -1,0 +1,119 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, safety, shared, state
+// @description: Safe patterns for sharing state across async tasks
+
+// Pattern 1: Shared with atomic operations
+async fn atomic_counter() {
+    let counter = Shared.new(AtomicInt.new(0));
+
+    let handles: List<_> = (0..10).map(|_| {
+        let c = counter.clone();
+        spawn {
+            c.fetch_add(1);
+        }
+    }).collect();
+
+    join_all(handles).await;
+    // counter is safely incremented
+}
+
+// Pattern 2: Mutex for complex state
+type AppState is {
+    users: Map<Int, Text>,
+    counter: Int,
+};
+
+async fn mutex_state() {
+    let state = Shared.new(Mutex.new(AppState {
+        users: Map.new(),
+        counter: 0,
+    }));
+
+    let handles: List<_> = (0..5).map(|i| {
+        let s = state.clone();
+        spawn {
+            let mut guard = s.lock().await;
+            guard.users.insert(i, f"user_{i}");
+            guard.counter += 1;
+        }
+    }).collect();
+
+    join_all(handles).await;
+}
+
+// Pattern 3: RwLock for read-heavy workloads
+async fn rwlock_state() {
+    let data = Shared.new(RwLock.new(Map<Int, Text>.new()));
+
+    // Writers
+    let writers: List<_> = (0..3).map(|i| {
+        let d = data.clone();
+        spawn {
+            let mut guard = d.write().await;
+            guard.insert(i, f"value_{i}");
+        }
+    }).collect();
+
+    join_all(writers).await;
+
+    // Many readers
+    let readers: List<_> = (0..10).map(|_| {
+        let d = data.clone();
+        spawn {
+            let guard = d.read().await;
+            let _ = guard.len();
+        }
+    }).collect();
+
+    join_all(readers).await;
+}
+
+// Pattern 4: Channel-based state isolation
+async fn channel_state() {
+    let (tx, mut rx) = channel<Command>();
+
+    // State owner task
+    let state_task = spawn {
+        let mut state = Map<Int, Text>.new();
+
+        while let Some(cmd) = rx.recv().await {
+            match cmd {
+                Command.Insert { key, value, reply } => {
+                    state.insert(key, value);
+                    reply.send(()).ok();
+                }
+                Command.Get { key, reply } => {
+                    let lookup = state.get(&key);
+                    let val: Maybe<Text> = if lookup.is_some() {
+                        Some(lookup.unwrap().clone())
+                    } else {
+                        None
+                    };
+                    reply.send(val).ok();
+                }
+            }
+        }
+    };
+
+    // Clients send commands
+    let (reply_tx, reply_rx) = oneshot();
+    tx.send(Command.Insert {
+        key: 1,
+        value: "hello",
+        reply: reply_tx,
+    }).await;
+    reply_rx.await;
+}
+
+type Command is
+    | Insert {
+        key: Int,
+        value: Text,
+        reply: OneshotSender<()>,
+    }
+    | Get {
+        key: Int,
+        reply: OneshotSender<Maybe<Text>>,
+    };

@@ -1,0 +1,241 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, towers_of_hanoi, iterative, frame_simulation, combinatorics
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Towers of Hanoi — iterative simulation using an explicit call stack.
+//
+// The classic recursive algorithm (move n discs from src to dst via aux)
+// is unrolled into an explicit stack of frames:
+//   frame = [n, src, dst, aux, phase]
+//   phase 0: push recursive calls and execute first move
+//   phase 1: execute second move after sub-problem returns
+//
+// We count moves and verify the last move in a sequence.
+// For n discs the total number of moves is 2^n - 1.
+// Stack stores up to 80 frames; each frame occupies 5 slots.
+// Peg IDs: 0=A, 1=B, 2=C.
+
+// Compute 2^n for small n (n <= 20) without recursion.
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+// --------------------------------------------------------
+// Iterative Hanoi.
+// stk: flat array of frames, 5 slots each [n,src,dst,aux,phase].
+// count[0] = move counter.
+// last[0..2] = [last_n, last_src, last_dst] for last move executed.
+// --------------------------------------------------------
+fn hanoi_iter(discs: Int, stk: [Int; 400], count: [Int; 4], last: [Int; 4]) {
+    count[0] = 0;
+    last[0] = 0; last[1] = 0; last[2] = 0;
+
+    // Push initial frame: (discs, 0, 2, 1, phase=0)
+    stk[0] = discs; stk[1] = 0; stk[2] = 2; stk[3] = 1; stk[4] = 0;
+    let mut top = 5; // next free slot
+
+    while top > 0 {
+        top = top - 5;
+        let n   = stk[top + 0];
+        let src = stk[top + 1];
+        let dst = stk[top + 2];
+        let aux = stk[top + 3];
+        let ph  = stk[top + 4];
+
+        if n == 0 {
+            // nothing
+        } else {
+            if ph == 0 {
+                // Execute: move n discs src->dst via aux.
+                // Push phase-1 continuation first (runs after first sub-problem).
+                stk[top + 0] = n;
+                stk[top + 1] = src;
+                stk[top + 2] = dst;
+                stk[top + 3] = aux;
+                stk[top + 4] = 1;
+                top = top + 5;
+
+                // Push sub-problem: move n-1 discs src->aux via dst.
+                stk[top + 0] = n - 1;
+                stk[top + 1] = src;
+                stk[top + 2] = aux;
+                stk[top + 3] = dst;
+                stk[top + 4] = 0;
+                top = top + 5;
+            } else {
+                // ph == 1: first sub-problem done; move disc n from src to dst.
+                count[0] = count[0] + 1;
+                last[0] = n;
+                last[1] = src;
+                last[2] = dst;
+
+                // Push sub-problem: move n-1 discs aux->dst via src.
+                stk[top + 0] = n - 1;
+                stk[top + 1] = aux;
+                stk[top + 2] = dst;
+                stk[top + 3] = src;
+                stk[top + 4] = 0;
+                top = top + 5;
+            }
+        }
+    }
+}
+
+fn test_hanoi_n1() {
+    // 1 disc: A->C via B. Moves = 1.
+    let mut stk   = [0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0];
+    let mut count = [0,0,0,0];
+    let mut last  = [0,0,0,0];
+    hanoi_iter(1, stk, count, last);
+    assert_eq(count[0], 1);          // 2^1 - 1 = 1
+    assert_eq(last[0], 1);           // disc 1
+    assert_eq(last[1], 0);           // from A
+    assert_eq(last[2], 2);           // to C
+    print("hanoi_n1: ok");
+}
+
+fn test_hanoi_n2() {
+    // 2 discs: 3 moves.
+    let mut stk   = [0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0];
+    let mut count = [0,0,0,0];
+    let mut last  = [0,0,0,0];
+    hanoi_iter(2, stk, count, last);
+    // 2^2 - 1 = 3
+    assert_eq(count[0], 3);
+    // Last move: disc 1 from B(1) to C(2)
+    assert_eq(last[0], 1);
+    assert_eq(last[1], 1);
+    assert_eq(last[2], 2);
+    print("hanoi_n2: ok");
+}
+
+fn test_hanoi_n3() {
+    // 3 discs: 7 moves. Last move: disc 3 from A to C.
+    let mut stk   = [0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0];
+    let mut count = [0,0,0,0];
+    let mut last  = [0,0,0,0];
+    hanoi_iter(3, stk, count, last);
+    assert_eq(count[0], 7);
+    // Last move: disc 1 from A(0) to C(2)
+    assert_eq(last[0], 1);
+    assert_eq(last[1], 0);
+    assert_eq(last[2], 2);
+    print("hanoi_n3: ok");
+}
+
+fn test_hanoi_pow2() {
+    // Verify 2^n - 1 formula for n=1,2,3,4.
+    assert_eq(pow2(1) - 1, 1);
+    assert_eq(pow2(2) - 1, 3);
+    assert_eq(pow2(3) - 1, 7);
+    assert_eq(pow2(4) - 1, 15);
+    // 2^0 = 1.
+    assert_eq(pow2(0), 1);
+    print("hanoi_pow2: ok");
+}
+
+fn test_hanoi_n4_count() {
+    // 4 discs: 15 moves. Verify count only (no last-move check).
+    let mut stk   = [0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+                     0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0];
+    let mut count = [0,0,0,0];
+    let mut last  = [0,0,0,0];
+    hanoi_iter(4, stk, count, last);
+    assert_eq(count[0], 15);
+    // Last move: disc 1 from B(1) to C(2)
+    assert_eq(last[0], 1);
+    assert_eq(last[1], 1);
+    assert_eq(last[2], 2);
+    print("hanoi_n4_count: ok");
+}
+
+fn main() -> Int {
+    test_hanoi_n1();
+    test_hanoi_n2();
+    test_hanoi_n3();
+    test_hanoi_pow2();
+    test_hanoi_n4_count();
+    print("[OK] 591_interp_towers_of_hanoi");
+    0
+}

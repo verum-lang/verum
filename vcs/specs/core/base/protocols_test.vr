@@ -1,0 +1,1267 @@
+// =============================================================================
+// vcs/specs/core/base/protocols_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, base, protocols, eq, ord, hash, clone, default, operators
+// @description: Comprehensive tests for core protocols including Eq, Ord,
+//               PartialOrd, Hash, Clone, Copy, Default, and operator protocols.
+//
+// Coverage:
+// - Eq protocol: equality and inequality testing
+// - Ord protocol: total ordering, comparison operators, min/max/clamp
+// - PartialOrd protocol: partial ordering for floats
+// - Hash protocol: hashing with DefaultHasher
+// - Clone protocol: deep copying
+// - Default protocol: default value creation
+// - Operator protocols: Add, Sub, Mul, Div, Rem, Neg, bitwise ops
+// - Index protocols: indexing operations
+// - Zero/One protocols: identity elements
+// =============================================================================
+
+module specs.core.base.protocols_test;
+
+// Import necessary types
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.protocols.{
+    Eq, Ord, PartialOrd, Hash, Hasher, DefaultHasher, Clone, Default,
+    Add, Sub, Mul, Div, Neg, Zero, One,
+    Debug, Display, Formatter, FormatError,
+    From, Into, TryFrom,
+};
+
+// =============================================================================
+// Test Types with Protocol Implementations
+// =============================================================================
+
+/// Simple point type for testing protocols
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+implement Eq for Point {
+    fn eq(&self, other: &Self) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+implement Ord for Point {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Compare by x first, then y
+        match self.x.cmp(&other.x) {
+            Equal => self.y.cmp(&other.y),
+            ord => ord,
+        }
+    }
+}
+
+implement Hash for Point {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(self.x);
+        hasher.write_int(self.y);
+    }
+}
+
+implement Clone for Point {
+    fn clone(&self) -> Self {
+        Point { x: self.x, y: self.y }
+    }
+}
+
+implement Default for Point {
+    fn default() -> Self {
+        Point { x: 0, y: 0 }
+    }
+}
+
+implement Add<Point> for Point {
+    type Output = Point;
+    fn add(self, rhs: Point) -> Self.Output {
+        Point { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+implement Sub<Point> for Point {
+    type Output = Point;
+    fn sub(self, rhs: Point) -> Self.Output {
+        Point { x: self.x - rhs.x, y: self.y - rhs.y }
+    }
+}
+
+implement Neg for Point {
+    type Output = Point;
+    fn neg(self) -> Self.Output {
+        Point { x: -self.x, y: -self.y }
+    }
+}
+
+implement Zero for Point {
+    fn zero() -> Self {
+        Point { x: 0, y: 0 }
+    }
+    fn is_zero(&self) -> Bool {
+        self.x == 0 && self.y == 0
+    }
+}
+
+/// Vec2 type for testing Mul/Div protocols (scalar operations)
+type Vec2 is {
+    x: Float,
+    y: Float,
+};
+
+implement Eq for Vec2 {
+    fn eq(&self, other: &Self) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+implement Clone for Vec2 {
+    fn clone(&self) -> Self {
+        Vec2 { x: self.x, y: self.y }
+    }
+}
+
+implement Mul<Float> for Vec2 {
+    type Output = Vec2;
+    fn mul(self, rhs: Float) -> Self.Output {
+        Vec2 { x: self.x * rhs, y: self.y * rhs }
+    }
+}
+
+implement Div<Float> for Vec2 {
+    type Output = Vec2;
+    fn div(self, rhs: Float) -> Self.Output {
+        Vec2 { x: self.x / rhs, y: self.y / rhs }
+    }
+}
+
+/// One implementation for Point (multiplicative identity)
+implement One for Point {
+    fn one() -> Self {
+        Point { x: 1, y: 1 }
+    }
+    fn is_one(&self) -> Bool {
+        self.x == 1 && self.y == 1
+    }
+}
+
+/// Mul implementation for Point (component-wise)
+implement Mul<Point> for Point {
+    type Output = Point;
+    fn mul(self, rhs: Point) -> Self.Output {
+        Point { x: self.x * rhs.x, y: self.y * rhs.y }
+    }
+}
+
+/// Display implementation for Point
+implement Display for Point {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&f"({self.x}, {self.y})")
+    }
+}
+
+/// Debug implementation for Point
+implement Debug for Point {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&f"Point {{ x: {self.x}, y: {self.y} }}")
+    }
+}
+
+/// Temperature type for From/Into conversion tests
+type Celsius is (Float);
+
+implement Eq for Celsius {
+    fn eq(&self, other: &Self) -> Bool {
+        self.0 == other.0
+    }
+}
+
+type Fahrenheit is (Float);
+
+implement Eq for Fahrenheit {
+    fn eq(&self, other: &Self) -> Bool {
+        self.0 == other.0
+    }
+}
+
+implement From<Celsius> for Fahrenheit {
+    fn from(value: Celsius) -> Self {
+        Fahrenheit(value.0 * 1.8 + 32.0)
+    }
+}
+
+/// TryFrom for Celsius — reject temperatures below absolute zero
+type TempError is {
+    message: Text,
+};
+
+implement TryFrom<Float> for Celsius {
+    type Error = TempError;
+    fn try_from(value: Float) -> Result<Self, Self.Error> {
+        if value < -273.15 {
+            Err(TempError { message: "Below absolute zero" })
+        } else {
+            Ok(Celsius(value))
+        }
+    }
+}
+
+/// Counter type for testing Default
+type Counter is {
+    value: Int,
+};
+
+implement Default for Counter {
+    fn default() -> Self {
+        Counter { value: 0 }
+    }
+}
+
+implement Clone for Counter {
+    fn clone(&self) -> Self {
+        Counter { value: self.value }
+    }
+}
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Eq Protocol Tests
+// =============================================================================
+
+@test
+fn test_eq_protocol() {
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 10, y: 20 };
+    let p3 = Point { x: 10, y: 30 };
+
+    // Test equality
+    assert(p1.eq(&p2));
+    assert(p1 == p2);
+
+    // Test inequality
+    assert(p1.ne(&p3));
+    assert(p1 != p3);
+
+    // Test reflexivity: a == a
+    assert(p1 == p1);
+
+    // Test symmetry: a == b implies b == a
+    assert(p2 == p1);
+
+    // Test transitivity: a == b && b == c implies a == c
+    let p4 = Point { x: 10, y: 20 };
+    assert(p1 == p2);
+    assert(p2 == p4);
+    assert(p1 == p4);
+
+    // Test primitive Eq
+    assert(42 == 42);
+    assert(42 != 43);
+    assert("hello" == "hello");
+    assert("hello" != "world");
+    assert(true == true);
+    assert(true != false);
+
+    print("Eq protocol tests passed");
+}
+
+// =============================================================================
+// Ord Protocol Tests
+// =============================================================================
+
+@test
+fn test_ord_protocol() {
+    let p1 = Point { x: 1, y: 1 };
+    let p2 = Point { x: 2, y: 1 };
+    let p3 = Point { x: 2, y: 2 };
+
+    // Test cmp
+    assert(p1.cmp(&p2) is Less);
+    assert(p2.cmp(&p1) is Greater);
+    assert(p1.cmp(&p1) is Equal);
+
+    // Test comparison operators
+    assert(p1.lt(&p2));
+    assert(p1.le(&p2));
+    assert(p1.le(&p1));
+    assert(p2.gt(&p1));
+    assert(p2.ge(&p1));
+    assert(p2.ge(&p2));
+
+    // Test min/max
+    let min_p = p1.min(p2);
+    assert(min_p == p1);
+
+    let max_p = p1.max(p2);
+    assert(max_p == p2);
+
+    // Test clamp
+    let low = Point { x: 0, y: 0 };
+    let high = Point { x: 10, y: 10 };
+    let val = Point { x: 5, y: 5 };
+    let below = Point { x: -1, y: -1 };
+    let above = Point { x: 20, y: 20 };
+
+    assert(val.clamp(low, high) == val);
+    assert(below.clamp(low, high) == low);
+    assert(above.clamp(low, high) == high);
+
+    // Test Int Ord
+    assert(1 < 2);
+    assert(2 > 1);
+    assert(1 <= 1);
+    assert(1 >= 1);
+    assert(1.min(2) == 1);
+    assert(1.max(2) == 2);
+    assert(5.clamp(0, 10) == 5);
+    assert((-5).clamp(0, 10) == 0);
+    assert(15.clamp(0, 10) == 10);
+
+    print("Ord protocol tests passed");
+}
+
+// =============================================================================
+// PartialOrd Protocol Tests
+// =============================================================================
+// PartialOrd is now implemented for Float in primitives.vr:713
+
+@test
+fn test_partial_ord_protocol() {
+    // Float has partial ordering due to NaN
+    let a: Float = 1.0;
+    let b: Float = 2.0;
+
+    // Regular comparisons — unwrap first to avoid nested pattern resolution bug with Ordering
+    assert(a.partial_cmp(&b).is_some());
+    assert(a.partial_cmp(&b).unwrap() is Less);
+    assert(b.partial_cmp(&a).unwrap() is Greater);
+    assert(a.partial_cmp(&a).unwrap() is Equal);
+
+    print("PartialOrd protocol tests passed");
+}
+
+@test
+fn test_partial_ord_float_comparisons() {
+    // Float comparison operators
+    let x: Float = 3.14;
+    let y: Float = 2.71;
+
+    assert(y.partial_cmp(&x).unwrap() is Less);
+    assert(x.partial_cmp(&y).unwrap() is Greater);
+
+    // Negative floats
+    let neg: Float = -1.0;
+    let pos: Float = 1.0;
+    assert(neg.partial_cmp(&pos).unwrap() is Less);
+
+    print("PartialOrd float comparisons passed");
+}
+
+// =============================================================================
+// Hash Protocol Tests
+// =============================================================================
+
+@test
+fn test_hash_protocol() {
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 10, y: 20 };
+    let p3 = Point { x: 20, y: 10 };
+
+    // Equal points should have equal hashes
+    assert(p1.hash_value() == p2.hash_value());
+
+    // Different points should (likely) have different hashes
+    // Note: Not guaranteed, but highly likely for distinct values
+    assert(p1.hash_value() != p3.hash_value());
+
+    // Test DefaultHasher directly
+    let mut hasher1 = DefaultHasher.new();
+    hasher1.write_int(42);
+    let hash1 = hasher1.finish();
+
+    let mut hasher2 = DefaultHasher.new();
+    hasher2.write_int(42);
+    let hash2 = hasher2.finish();
+
+    assert(hash1 == hash2);
+
+    // Different values produce different hashes
+    let mut hasher3 = DefaultHasher.new();
+    hasher3.write_int(43);
+    let hash3 = hasher3.finish();
+
+    assert(hash1 != hash3);
+
+    // Test byte writing
+    let mut hasher4 = DefaultHasher.new();
+    hasher4.write_byte(0x41);  // 'A'
+    hasher4.write_byte(0x42);  // 'B'
+    let hash4 = hasher4.finish();
+
+    let mut hasher5 = DefaultHasher.new();
+    hasher5.write(&[0x41 as Byte, 0x42 as Byte]);
+    let hash5 = hasher5.finish();
+
+    assert(hash4 == hash5);
+
+    print("Hash protocol tests passed");
+}
+
+// =============================================================================
+// Clone Protocol Tests
+// =============================================================================
+
+@test
+fn test_clone_protocol() {
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = p1.clone();
+
+    // Clone produces equal value
+    assert(p1 == p2);
+
+    // Clone is independent copy (modify original doesn't affect clone)
+    let mut p3 = Point { x: 1, y: 2 };
+    let p4 = p3.clone();
+    p3.x = 100;
+    assert(p4.x == 1);
+
+    // Test clone_from
+    let mut target = Point { x: 0, y: 0 };
+    let source = Point { x: 5, y: 10 };
+    target.clone_from(&source);
+    assert(target == source);
+
+    // Primitive clone
+    let n1: Int = 42;
+    let n2 = n1.clone();
+    assert(n1 == n2);
+
+    print("Clone protocol tests passed");
+}
+
+// =============================================================================
+// Default Protocol Tests
+// =============================================================================
+
+@test
+fn test_default_protocol() {
+    // Custom type default
+    let p: Point = Point.default();
+    assert(p.x == 0);
+    assert(p.y == 0);
+
+    let c: Counter = Counter.default();
+    assert(c.value == 0);
+
+    // Primitive defaults
+    let i: Int = Int.default();
+    assert(i == 0);
+
+    let f: Float = Float.default();
+    assert(f == 0.0);
+
+    let b: Bool = Bool.default();
+    assert(b == false);
+
+    print("Default protocol tests passed");
+}
+
+// =============================================================================
+// Add Protocol Tests
+// =============================================================================
+
+@test
+fn test_add_protocol() {
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 3, y: 4 };
+    let sum = p1.add(p2);
+    assert(sum.x == 4);
+    assert(sum.y == 6);
+
+    // Using + operator (desugars to add)
+    let p3 = Point { x: 10, y: 20 };
+    let p4 = Point { x: 5, y: 5 };
+    let p5 = p3 + p4;
+    assert(p5.x == 15);
+    assert(p5.y == 25);
+
+    // Int addition
+    assert((10 + 20) == 30);
+    assert((-5 + 10) == 5);
+
+    // Float addition
+    assert((1.5 + 2.5) == 4.0);
+
+    print("Add protocol tests passed");
+}
+
+// =============================================================================
+// Sub Protocol Tests
+// =============================================================================
+
+@test
+fn test_sub_protocol() {
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 3, y: 5 };
+    let diff = p1.sub(p2);
+    assert(diff.x == 7);
+    assert(diff.y == 15);
+
+    // Using - operator
+    let p3 = p1 - p2;
+    assert(p3.x == 7);
+
+    // Int subtraction
+    assert((30 - 10) == 20);
+    assert((5 - 10) == -5);
+
+    print("Sub protocol tests passed");
+}
+
+// =============================================================================
+// Neg Protocol Tests
+// =============================================================================
+// NOTE: The unary - operator only works for numeric primitives (Int, Float),
+// not for custom types implementing Neg protocol. Custom types must call .neg() directly.
+
+@test
+fn test_neg_protocol_primitives() {
+    // Int negation
+    assert((-42) == -42);
+    assert(-(-42) == 42);
+    assert((-0) == 0);
+
+    // Float negation
+    assert((-1.5) == -1.5);
+    assert(-(-2.5) == 2.5);
+
+    print("Neg protocol tests passed");
+}
+
+@test
+fn test_neg_protocol_custom() {
+    // Custom type negation using .neg() method
+    let p1 = Point { x: 5, y: -3 };
+    let neg_p = p1.neg();
+    assert(neg_p.x == -5);
+    assert(neg_p.y == 3);
+
+    // Double negation
+    let p2 = neg_p.neg();
+    assert(p2.x == 5);
+    assert(p2.y == -3);
+
+    print("Neg protocol (custom) tests passed");
+}
+
+// =============================================================================
+// Zero/One Protocol Tests
+// =============================================================================
+// NOTE: Zero/One protocols are defined but primitives don't implement them
+// via method calls. Only custom types that implement these protocols work.
+
+@test
+fn test_zero_one_protocols_custom() {
+    // Point Zero
+    let zero_point = Point.zero();
+    assert(zero_point.is_zero());
+    assert(zero_point.x == 0);
+    assert(zero_point.y == 0);
+
+    let non_zero = Point { x: 1, y: 0 };
+    assert(!non_zero.is_zero());
+
+    // Point addition with zero (identity property)
+    let p = Point { x: 5, y: 10 };
+    let sum = p + Point.zero();
+    assert(sum.x == 5);
+    assert(sum.y == 10);
+
+    print("Zero/One protocol tests passed");
+}
+
+// =============================================================================
+// Int Operator Tests
+// =============================================================================
+
+@test
+fn test_int_operators() {
+    // Mul
+    assert((6 * 7) == 42);
+    assert(((-5) * 3) == -15);
+
+    // Div
+    assert((42 / 6) == 7);
+    assert((10 / 3) == 3);  // Integer division truncates
+
+    // Rem
+    assert((10 % 3) == 1);
+    assert((42 % 7) == 0);
+
+    print("Int operator tests passed");
+}
+
+// =============================================================================
+// Bitwise Operator Tests
+// =============================================================================
+
+@test
+fn test_bitwise_operators() {
+    // BitAnd
+    assert((0b1100 & 0b1010) == 0b1000);
+
+    // BitOr
+    assert((0b1100 | 0b1010) == 0b1110);
+
+    // BitXor
+    assert((0b1100 ^ 0b1010) == 0b0110);
+
+    // Not (on Int)
+    // Note: !0 = -1 in two's complement
+    assert((!0) == -1);
+
+    // Shl (left shift)
+    assert((1 << 4) == 16);
+    assert((5 << 2) == 20);
+
+    // Shr (right shift)
+    assert((16 >> 2) == 4);
+    assert((100 >> 3) == 12);
+
+    print("Bitwise operator tests passed");
+}
+
+// =============================================================================
+// Mul Protocol Tests (Custom Types)
+// =============================================================================
+
+@test
+fn test_mul_protocol_custom_scalar() {
+    // Vec2 * Float scalar multiplication
+    let v = Vec2 { x: 3.0, y: 4.0 };
+    let scaled = v.mul(2.0);
+    assert(scaled.x == 6.0);
+    assert(scaled.y == 8.0);
+
+    // Verify identity: v * 1.0 == v
+    let v2 = Vec2 { x: 5.0, y: 10.0 };
+    let same = v2.mul(1.0);
+    assert(same == v2);
+
+    // Zero: v * 0.0 == zero
+    let v3 = Vec2 { x: 7.0, y: 8.0 };
+    let zero = v3.mul(0.0);
+    assert(zero.x == 0.0);
+    assert(zero.y == 0.0);
+
+    print("Mul protocol (scalar) tests passed");
+}
+
+@test
+fn test_mul_protocol_custom_component() {
+    // Point * Point component-wise multiplication
+    let p1 = Point { x: 3, y: 4 };
+    let p2 = Point { x: 2, y: 5 };
+    let product = p1.mul(p2);
+    assert(product.x == 6);
+    assert(product.y == 20);
+
+    // Multiply by identity
+    let id = Point.one();
+    let p3 = Point { x: 7, y: 9 };
+    let same = p3.mul(id);
+    assert(same.x == 7);
+    assert(same.y == 9);
+
+    print("Mul protocol (component) tests passed");
+}
+
+@test
+fn test_mul_protocol_int() {
+    // Int multiplication via * operator
+    assert((3 * 4) == 12);
+    assert(((-3) * 4) == -12);
+    assert(((-3) * (-4)) == 12);
+    assert((0 * 100) == 0);
+
+    // Float multiplication
+    assert((2.5 * 4.0) == 10.0);
+
+    print("Mul protocol (Int/Float) tests passed");
+}
+
+// =============================================================================
+// Div Protocol Tests (Custom Types)
+// =============================================================================
+
+@test
+fn test_div_protocol_custom() {
+    // Vec2 / Float scalar division
+    let v = Vec2 { x: 6.0, y: 8.0 };
+    let halved = v.div(2.0);
+    assert(halved.x == 3.0);
+    assert(halved.y == 4.0);
+
+    // Divide by 1.0 = identity
+    let v2 = Vec2 { x: 5.0, y: 10.0 };
+    let same = v2.div(1.0);
+    assert(same == v2);
+
+    print("Div protocol (custom) tests passed");
+}
+
+@test
+fn test_div_protocol_int() {
+    // Int division
+    assert((10 / 2) == 5);
+    assert((10 / 3) == 3);  // Truncating division
+    assert(((-10) / 3) == -3);
+
+    // Float division
+    assert((10.0 / 4.0) == 2.5);
+
+    print("Div protocol (Int/Float) tests passed");
+}
+
+// =============================================================================
+// Rem Protocol Tests
+// =============================================================================
+
+@test
+fn test_rem_protocol() {
+    // Int remainder
+    assert((10 % 3) == 1);
+    assert((17 % 5) == 2);
+    assert((20 % 4) == 0);
+    assert(((-10) % 3) == -1);
+
+    // Remainder identity: (a / b) * b + (a % b) == a
+    let a = 17;
+    let b = 5;
+    assert((a / b) * b + (a % b) == a);
+
+    print("Rem protocol tests passed");
+}
+
+// =============================================================================
+// Bitwise Protocol Tests (Extended)
+// =============================================================================
+
+@test
+fn test_bitand_protocol() {
+    // BitAnd on various patterns
+    assert((0xFF & 0x0F) == 0x0F);
+    assert((0b11111111 & 0b10101010) == 0b10101010);
+    assert((0 & 0xFFFF) == 0);
+
+    // Idempotent: a & a == a
+    assert((42 & 42) == 42);
+
+    print("BitAnd protocol tests passed");
+}
+
+@test
+fn test_bitor_protocol() {
+    // BitOr on various patterns
+    assert((0xF0 | 0x0F) == 0xFF);
+    assert((0b00000000 | 0b10101010) == 0b10101010);
+    assert((0 | 42) == 42);
+
+    // Idempotent: a | a == a
+    assert((42 | 42) == 42);
+
+    print("BitOr protocol tests passed");
+}
+
+@test
+fn test_bitxor_protocol() {
+    // BitXor on various patterns
+    assert((0xFF ^ 0xFF) == 0);
+    assert((0xFF ^ 0x00) == 0xFF);
+    assert((0b11110000 ^ 0b10101010) == 0b01011010);
+
+    // Self-inverse: a ^ a == 0
+    assert((42 ^ 42) == 0);
+
+    // Identity: a ^ 0 == a
+    assert((42 ^ 0) == 42);
+
+    print("BitXor protocol tests passed");
+}
+
+@test
+fn test_not_protocol() {
+    // Bitwise NOT
+    assert((!0) == -1);  // Two's complement
+    assert((!(-1)) == 0);
+
+    // Double NOT is identity
+    assert((!(!42)) == 42);
+
+    print("Not protocol tests passed");
+}
+
+@test
+fn test_shl_shr_protocol() {
+    // Shift left
+    assert((1 << 0) == 1);
+    assert((1 << 1) == 2);
+    assert((1 << 8) == 256);
+    assert((3 << 4) == 48);
+
+    // Shift right
+    assert((256 >> 8) == 1);
+    assert((255 >> 4) == 15);
+    assert((1 >> 1) == 0);
+
+    // Shift left then right returns to original (for non-overflow)
+    assert(((7 << 3) >> 3) == 7);
+
+    print("Shl/Shr protocol tests passed");
+}
+
+// =============================================================================
+// One Protocol Tests
+// =============================================================================
+
+@test
+fn test_one_protocol_custom() {
+    // Point One
+    let one_point = Point.one();
+    assert(one_point.is_one());
+    assert(one_point.x == 1);
+    assert(one_point.y == 1);
+
+    let not_one = Point { x: 1, y: 2 };
+    assert(!not_one.is_one());
+
+    // Multiplication with one (identity property)
+    let p = Point { x: 5, y: 10 };
+    let product = p.mul(Point.one());
+    assert(product.x == 5);
+    assert(product.y == 10);
+
+    print("One protocol tests passed");
+}
+
+// =============================================================================
+// Display Protocol Tests
+// =============================================================================
+
+@test
+fn test_display_protocol_custom() {
+    // Point Display formatting
+    let p = Point { x: 3, y: 7 };
+    let mut buf = "";
+    let mut fmt = Formatter { buffer: &mut buf };
+    let result = p.fmt(&mut fmt);
+    assert(result is Ok(()));
+    assert(buf == "(3, 7)");
+
+    // Different point
+    let p2 = Point { x: -1, y: 0 };
+    let mut buf2 = "";
+    let mut fmt2 = Formatter { buffer: &mut buf2 };
+    let result2 = p2.fmt(&mut fmt2);
+    assert(result2 is Ok(()));
+    assert(buf2 == "(-1, 0)");
+
+    print("Display protocol tests passed");
+}
+
+// =============================================================================
+// Debug Protocol Tests
+// =============================================================================
+
+@test
+fn test_debug_protocol_custom() {
+    // Point Debug formatting
+    let p = Point { x: 10, y: 20 };
+    let mut buf = "";
+    let mut fmt = Formatter { buffer: &mut buf };
+    let result = p.fmt_debug(&mut fmt);
+    assert(result is Ok(()));
+    assert(buf == "Point { x: 10, y: 20 }");
+
+    print("Debug protocol tests passed");
+}
+
+// =============================================================================
+// From Protocol Tests
+// =============================================================================
+
+@test
+fn test_from_protocol_custom() {
+    // Celsius to Fahrenheit conversion
+    let boiling = Celsius(100.0);
+    let f: Fahrenheit = Fahrenheit.from(boiling);
+    assert(f.0 == 212.0);
+
+    // Freezing point
+    let freezing = Celsius(0.0);
+    let f2: Fahrenheit = Fahrenheit.from(freezing);
+    assert(f2.0 == 32.0);
+
+    print("From protocol tests passed");
+}
+
+// =============================================================================
+// TryFrom Protocol Tests
+// =============================================================================
+
+@test
+fn test_try_from_protocol_custom() {
+    // Valid temperature
+    let result: Result<Celsius, TempError> = Celsius.try_from(25.0);
+    assert(result is Ok(_));
+
+    // Absolute zero is valid
+    let result2: Result<Celsius, TempError> = Celsius.try_from(-273.15);
+    assert(result2 is Ok(_));
+
+    // Below absolute zero is invalid
+    let result3: Result<Celsius, TempError> = Celsius.try_from(-300.0);
+    assert(result3 is Err(_));
+
+    print("TryFrom protocol tests passed");
+}
+
+// =============================================================================
+// Float Operator Tests
+// =============================================================================
+
+@test
+fn test_float_operators() {
+    // Float Mul
+    assert((2.0 * 3.0) == 6.0);
+    assert((0.5 * 4.0) == 2.0);
+
+    // Float Div
+    assert((10.0 / 2.0) == 5.0);
+    assert((1.0 / 4.0) == 0.25);
+
+    // Float Add
+    assert((0.1 + 0.2) != 0.3);  // IEEE 754 precision
+    assert((1.0 + 1.0) == 2.0);
+
+    // Float Sub
+    assert((5.0 - 3.0) == 2.0);
+    assert((1.0 - 1.0) == 0.0);
+
+    print("Float operator tests passed");
+}
+
+// =============================================================================
+// Combined Protocol Properties
+// =============================================================================
+
+@test
+fn test_zero_additive_identity() {
+    // Zero is additive identity: a + Zero == a
+    let p = Point { x: 42, y: 99 };
+    let zero = Point.zero();
+    let sum = p + zero;
+    assert(sum == p);
+
+    // Zero + a == a (commutativity with zero)
+    let sum2 = zero + p;
+    assert(sum2 == p);
+
+    print("Zero additive identity tests passed");
+}
+
+@test
+fn test_one_multiplicative_identity() {
+    // One is multiplicative identity: a * One == a
+    let p = Point { x: 42, y: 99 };
+    let one = Point.one();
+    let product = p.mul(one);
+    assert(product == p);
+
+    print("One multiplicative identity tests passed");
+}
+
+@test
+fn test_eq_on_primitives_comprehensive() {
+    // Test equality on all primitive types
+    // Int
+    assert(0 == 0);
+    assert((-1) == (-1));
+    assert(100 != 200);
+
+    // Float
+    assert(0.0 == 0.0);
+    assert(1.5 == 1.5);
+    assert(1.0 != 2.0);
+
+    // Bool
+    assert(true == true);
+    assert(false == false);
+    assert(true != false);
+
+    // Text
+    assert("" == "");
+    assert("abc" == "abc");
+    assert("abc" != "def");
+
+    print("Primitive Eq comprehensive tests passed");
+}
+
+@test
+fn test_clone_independence() {
+    // Cloning creates independent copies
+    let mut p1 = Point { x: 1, y: 2 };
+    let p2 = p1.clone();
+
+    // Modify original
+    p1.x = 100;
+    p1.y = 200;
+
+    // Clone is unaffected
+    assert(p2.x == 1);
+    assert(p2.y == 2);
+
+    // Clone doesn't affect original
+    let p3 = Point { x: 5, y: 6 };
+    let p4 = p3.clone();
+    assert(p3 == p4);
+
+    print("Clone independence tests passed");
+}
+
+@test
+fn test_hash_consistency() {
+    // Same values always produce same hash
+    let p = Point { x: 42, y: 99 };
+    let h1 = p.hash_value();
+    let h2 = p.hash_value();
+    assert(h1 == h2);
+
+    // Equal values have equal hashes
+    let p2 = Point { x: 42, y: 99 };
+    assert(p.hash_value() == p2.hash_value());
+
+    print("Hash consistency tests passed");
+}
+
+@test
+fn test_ord_antisymmetry() {
+    // If a <= b and b <= a, then a == b
+    let p1 = Point { x: 5, y: 5 };
+    let p2 = Point { x: 5, y: 5 };
+    assert(p1.le(&p2));
+    assert(p2.le(&p1));
+    assert(p1 == p2);
+
+    // If a < b, then !(b < a)
+    let p3 = Point { x: 1, y: 1 };
+    let p4 = Point { x: 2, y: 2 };
+    assert(p3.lt(&p4));
+    assert(!p4.lt(&p3));
+
+    print("Ord antisymmetry tests passed");
+}
+
+@test
+fn test_default_values() {
+    // All default values should be "zero-like"
+    let p: Point = Point.default();
+    assert(p.x == 0);
+    assert(p.y == 0);
+    assert(p.is_zero());
+
+    let c: Counter = Counter.default();
+    assert(c.value == 0);
+
+    print("Default values tests passed");
+}
+
+@test
+fn test_neg_double_negation() {
+    // Double negation returns original
+    let p = Point { x: 7, y: -3 };
+    let p2 = p.neg().neg();
+    assert(p2.x == 7);
+    assert(p2.y == -3);
+
+    // Negation of zero is zero
+    let zero = Point.zero();
+    let neg_zero = zero.neg();
+    assert(neg_zero.is_zero());
+
+    print("Neg double negation tests passed");
+}
+
+// =============================================================================
+// Additional Protocol Tests
+// =============================================================================
+
+@test
+fn test_add_commutativity() {
+    let p1 = Point { x: 3, y: 7 };
+    let p2 = Point { x: 11, y: 5 };
+    let sum1 = p1 + p2;
+    let sum2 = p2 + p1;
+    assert(sum1 == sum2);
+}
+
+@test
+fn test_sub_with_zero() {
+    let p = Point { x: 42, y: 99 };
+    let zero = Point.zero();
+    let result = p - zero;
+    assert(result == p);
+}
+
+@test
+fn test_sub_self_is_zero() {
+    let p = Point { x: 42, y: 99 };
+    let result = p - p;
+    assert(result.is_zero());
+}
+
+@test
+fn test_vec2_mul_div_round_trip() {
+    let v = Vec2 { x: 6.0, y: 8.0 };
+    let scaled = v.mul(3.0);
+    let back = scaled.div(3.0);
+    assert(back.x == 6.0);
+    assert(back.y == 8.0);
+}
+
+@test
+fn test_hash_zero_point() {
+    let p1 = Point.zero();
+    let p2 = Point { x: 0, y: 0 };
+    assert(p1.hash_value() == p2.hash_value());
+}
+
+@test
+fn test_counter_clone_independence() {
+    let mut c1 = Counter { value: 10 };
+    let c2 = c1.clone();
+    c1.value = 999;
+    assert(c2.value == 10);
+}
+
+@test
+fn test_try_from_exact_boundary() {
+    // Exactly -273.15 should be valid (absolute zero)
+    let result: Result<Celsius, TempError> = Celsius.try_from(-273.15);
+    assert(result is Ok(_));
+}
+
+@test
+fn test_try_from_just_below_boundary() {
+    // Just below absolute zero should fail
+    let result: Result<Celsius, TempError> = Celsius.try_from(-273.16);
+    assert(result is Err(_));
+}
+
+@test
+fn test_zero_mul_anything_is_zero() {
+    let zero = Point.zero();
+    let p = Point { x: 100, y: 200 };
+    let result = zero.mul(p);
+    assert(result.is_zero());
+}
+
+@test
+fn test_one_is_one_vs_not_one() {
+    let one = Point.one();
+    assert(one.is_one());
+
+    let zero = Point.zero();
+    assert(!zero.is_one());
+
+    let other = Point { x: 2, y: 1 };
+    assert(!other.is_one());
+}
+
+// =============================================================================
+// Additional Protocol Property Tests
+// =============================================================================
+
+@test
+fn test_add_associativity() {
+    let a = Point { x: 1, y: 2 };
+    let b = Point { x: 3, y: 4 };
+    let c = Point { x: 5, y: 6 };
+    let left = (a + b) + c;
+    let right = a + (b + c);
+    assert(left == right);
+}
+
+@test
+fn test_mul_associativity() {
+    let a = Point { x: 2, y: 3 };
+    let b = Point { x: 4, y: 5 };
+    let c = Point { x: 1, y: 2 };
+    let left = a.mul(b).mul(c);
+    let right = a.mul(b.mul(c));
+    assert(left == right);
+}
+
+@test
+fn test_neg_add_is_sub() {
+    let a = Point { x: 10, y: 20 };
+    let b = Point { x: 3, y: 7 };
+    let via_sub = a - b;
+    let via_neg_add = a + b.neg();
+    assert(via_sub == via_neg_add);
+}
+
+@test
+fn test_display_default_point() {
+    let p = Point.default();
+    let mut buf = "";
+    let mut fmt = Formatter { buffer: &mut buf };
+    let result = p.fmt(&mut fmt);
+    assert(result is Ok(()));
+    assert(buf == "(0, 0)");
+}
+
+@test
+fn test_debug_negative_point() {
+    let p = Point { x: -1, y: -2 };
+    let mut buf = "";
+    let mut fmt = Formatter { buffer: &mut buf };
+    let result = p.fmt_debug(&mut fmt);
+    assert(result is Ok(()));
+    assert(buf == "Point { x: -1, y: -2 }");
+}
+
+@test
+fn test_try_from_large_positive() {
+    let result: Result<Celsius, TempError> = Celsius.try_from(1000.0);
+    assert(result is Ok(_));
+}
+
+@test
+fn test_hash_different_order() {
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 2, y: 1 };
+    // Swapping x,y should produce different hash
+    assert(p1.hash_value() != p2.hash_value());
+}
+
+@test
+fn test_eq_ne_mutually_exclusive() {
+    let a = Point { x: 1, y: 2 };
+    let b = Point { x: 3, y: 4 };
+    // For any two values, exactly one of eq/ne is true
+    assert(a.eq(&a) && !a.ne(&a));
+    assert(!a.eq(&b) && a.ne(&b));
+}

@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, closure, error
+// @description: Test invalid async closure syntax - missing body
+// @expected-error: E018
+
+fn test() {
+    // async closure syntax error - missing body
+    let f = async |x|;
+}

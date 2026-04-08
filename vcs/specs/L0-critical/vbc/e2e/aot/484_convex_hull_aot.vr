@@ -1,0 +1,200 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, convex-hull, geometry, cross-product
+// @timeout: 30000
+
+// Convex hull and computational geometry on integer coordinates
+// Points stored as packed: x + y * 1000 (with offset: (x+500) + (y+500)*1000)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Point encoding (positive coordinates only, max 499)
+fn pt(x: Int, y: Int) -> Int { x + y * 1000 }
+fn pt_x(p: Int) -> Int { p % 1000 }
+fn pt_y(p: Int) -> Int { p / 1000 }
+
+// Cross product of vectors (p1-p0) and (p2-p0)
+// Positive = counter-clockwise, Negative = clockwise, 0 = collinear
+fn cross(p0: Int, p1: Int, p2: Int) -> Int {
+    let dx1 = pt_x(p1) - pt_x(p0);
+    let dy1 = pt_y(p1) - pt_y(p0);
+    let dx2 = pt_x(p2) - pt_x(p0);
+    let dy2 = pt_y(p2) - pt_y(p0);
+    dx1 * dy2 - dy1 * dx2
+}
+
+// Distance squared between two points
+fn dist_sq(p1: Int, p2: Int) -> Int {
+    let dx = pt_x(p1) - pt_x(p2);
+    let dy = pt_y(p1) - pt_y(p2);
+    dx * dx + dy * dy
+}
+
+// Polygon area * 2 (using shoelace formula)
+fn polygon_area2(pts: Arr8, n: Int) -> Int {
+    let mut area = 0;
+    let mut i = 0;
+    while i < n {
+        let j = (i + 1) % n;
+        let pi = get8(pts, i);
+        let pj = get8(pts, j);
+        area = area + pt_x(pi) * pt_y(pj) - pt_x(pj) * pt_y(pi);
+        i = i + 1;
+    }
+    abs_val(area)
+}
+
+// Check if point is inside triangle using cross products
+fn point_in_triangle(p: Int, a: Int, b: Int, c: Int) -> Int {
+    let d1 = cross(a, b, p);
+    let d2 = cross(b, c, p);
+    let d3 = cross(c, a, p);
+    let has_neg = if d1 < 0 { 1 } else if d2 < 0 { 1 } else if d3 < 0 { 1 } else { 0 };
+    let has_pos = if d1 > 0 { 1 } else if d2 > 0 { 1 } else if d3 > 0 { 1 } else { 0 };
+    // Inside if all same sign (or zero)
+    if has_neg == 1 {
+        if has_pos == 1 { 0 } else { 1 }
+    } else { 1 }
+}
+
+// Convex hull using gift wrapping (Jarvis march) for small point sets
+// Returns number of hull points
+fn convex_hull_size(pts: Arr8, n: Int) -> Int {
+    if n < 3 { return n; }
+
+    // Find leftmost point
+    let mut leftmost = 0;
+    let mut i = 1;
+    while i < n {
+        if pt_x(get8(pts, i)) < pt_x(get8(pts, leftmost)) {
+            leftmost = i;
+        }
+        i = i + 1;
+    }
+
+    let mut hull_size = 0;
+    let mut p = leftmost;
+    let mut cont = 1;
+    while cont == 1 {
+        hull_size = hull_size + 1;
+        let mut q = (p + 1) % n;
+        i = 0;
+        while i < n {
+            let c = cross(get8(pts, p), get8(pts, i), get8(pts, q));
+            if c > 0 { q = i; }
+            i = i + 1;
+        }
+        p = q;
+        if p == leftmost { cont = 0; }
+        if hull_size > n { cont = 0; } // safety
+    }
+    hull_size
+}
+
+// Perimeter of convex hull (squared distances sum for simplicity)
+fn perimeter_sq(pts: Arr8, hull_idx: Arr8, hull_n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < hull_n {
+        let j = (i + 1) % hull_n;
+        let pi = get8(pts, get8(hull_idx, i));
+        let pj = get8(pts, get8(hull_idx, j));
+        total = total + dist_sq(pi, pj);
+        i = i + 1;
+    }
+    total
+}
+
+fn test_cross_product() -> Int {
+    let a = pt(0, 0);
+    let b = pt(1, 0);
+    let c = pt(0, 1);
+    // Cross (b-a) x (c-a) = (1,0) x (0,1) = 1*1 - 0*0 = 1 (CCW)
+    assert_eq(cross(a, b, c), 1);
+    // Reversed: CW
+    assert_eq(cross(a, c, b), -1);
+    // Collinear
+    let d = pt(2, 0);
+    assert_eq(cross(a, b, d), 0);
+    1
+}
+
+fn test_triangle_area() -> Int {
+    // Triangle (0,0), (4,0), (0,3): area = 6, area*2 = 12
+    let pts = Arr8 { v0: pt(0, 0), v1: pt(4, 0), v2: pt(0, 3), v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(polygon_area2(pts, 3), 12);
+
+    // Square (0,0), (2,0), (2,2), (0,2): area = 4, area*2 = 8
+    let sq = Arr8 { v0: pt(0, 0), v1: pt(2, 0), v2: pt(2, 2), v3: pt(0, 2), v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(polygon_area2(sq, 4), 8);
+    1
+}
+
+fn test_point_in_triangle() -> Int {
+    let a = pt(0, 0);
+    let b = pt(10, 0);
+    let c = pt(0, 10);
+
+    // Inside
+    assert_eq(point_in_triangle(pt(2, 2), a, b, c), 1);
+    assert_eq(point_in_triangle(pt(1, 1), a, b, c), 1);
+
+    // Outside
+    assert_eq(point_in_triangle(pt(10, 10), a, b, c), 0);
+    1
+}
+
+fn test_dist() -> Int {
+    assert_eq(dist_sq(pt(0, 0), pt(3, 4)), 25); // 3² + 4² = 25
+    assert_eq(dist_sq(pt(1, 1), pt(4, 5)), 25); // 3² + 4² = 25
+    assert_eq(dist_sq(pt(0, 0), pt(0, 0)), 0);
+    1
+}
+
+fn test_convex_hull() -> Int {
+    // Square with center point: 4 hull points
+    let pts = Arr8 { v0: pt(0, 0), v1: pt(4, 0), v2: pt(4, 4), v3: pt(0, 4), v4: pt(2, 2), v5: 0, v6: 0, v7: 0 };
+    assert_eq(convex_hull_size(pts, 5), 4);
+
+    // Triangle: 3 hull points
+    let tri = Arr8 { v0: pt(0, 0), v1: pt(5, 0), v2: pt(2, 4), v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(convex_hull_size(tri, 3), 3);
+
+    // Pentagon: 5 hull points
+    let pent = Arr8 { v0: pt(2, 0), v1: pt(4, 3), v2: pt(3, 6), v3: pt(1, 6), v4: pt(0, 3), v5: 0, v6: 0, v7: 0 };
+    assert_eq(convex_hull_size(pent, 5), 5);
+    1
+}
+
+fn main() -> Int {
+    test_cross_product();
+    test_triangle_area();
+    test_point_in_triangle();
+    test_dist();
+    test_convex_hull();
+    print("[OK] 484_convex_hull_aot");
+    0
+}

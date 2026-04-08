@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, operator, error
+// @description: Test leading binary operator detection
+// @expected-error: E018
+
+fn test_leading_operator() {
+    let a = * 5;
+    let b = / 10;
+    let c = && true;
+}

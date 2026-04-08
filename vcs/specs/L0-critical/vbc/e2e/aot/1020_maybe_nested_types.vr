@@ -1,0 +1,55 @@
+// @test: run
+// Maybe<List<List<Int>>> — nested generic types through match and unwrap
+
+fn make_maybe_matrix(include: Bool) -> Maybe<List<List<Int>>> {
+    if (!include) { return None; }
+    let matrix = List.new();
+    let row0 = List.new();
+    row0.push(10); row0.push(20);
+    let row1 = List.new();
+    row1.push(30); row1.push(40); row1.push(50);
+    matrix.push(row0);
+    matrix.push(row1);
+    Some(matrix)
+}
+
+fn main() -> Int {
+    let mut passed = 0;
+    let mut failed = 0;
+
+    // Test 1: unwrap + inner list len
+    let m1 = make_maybe_matrix(true);
+    let mat = m1.unwrap();
+    if (mat.len() == 2) { passed = passed + 1; }
+    else { print(f"FAIL 1: mat.len()={mat.len()}"); failed = failed + 1; }
+
+    // Test 2: unwrap + inner list element access
+    let row0 = mat[0];
+    if (row0.len() == 2 && row0[0] == 10) { passed = passed + 1; }
+    else { print(f"FAIL 2: row0.len()={row0.len()} row0[0]={row0[0]}"); failed = failed + 1; }
+
+    // Test 3: match Some + inner list access
+    let m2 = make_maybe_matrix(true);
+    match m2 {
+        None => { print("FAIL 3: got None"); failed = failed + 1; }
+        Some(mat2) => {
+            let r1 = mat2[1];
+            if (r1.len() == 3 && r1[2] == 50) { passed = passed + 1; }
+            else { print(f"FAIL 3: r1.len()={r1.len()} r1[2]={r1[2]}"); failed = failed + 1; }
+        }
+    }
+
+    // Test 4: match None
+    let m3 = make_maybe_matrix(false);
+    match m3 {
+        None => { passed = passed + 1; }
+        Some(mat3) => { print(f"FAIL 4: got Some len={mat3.len()}"); failed = failed + 1; }
+    }
+
+    if (failed > 0) {
+        print(f"maybe_nested_types: {passed}/{passed + failed} passed");
+        return 1;
+    }
+    print(f"maybe_nested_types: PASS ({passed}/{passed} tests)");
+    0
+}

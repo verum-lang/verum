@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, contexts, provide, unclosed, error
+// @description: Test unclosed provide statement
+// @expected-error: E011
+
+fn test() {
+    provide Database = {
+}

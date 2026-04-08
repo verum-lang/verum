@@ -1,0 +1,46 @@
+// @test: parse
+// @level: L1
+// @tags: meta, verify, attributes, verification
+// @timeout: 5000
+
+/// @verify attribute for controlling verification level.
+/// Grammar: verify_attribute = 'verify' '(' ('runtime' | 'static' | 'formal') ')'
+
+// Runtime verification — checks at runtime
+@verify(runtime)
+fn checked_divide(a: Int, b: Int) -> Int {
+    assert(b != 0, "Division by zero");
+    a / b
+}
+
+// Static verification — checked at compile time
+@verify(static)
+fn static_safe(x: Int { self > 0 }) -> Int {
+    x * 2
+}
+
+// Formal verification — full SMT proof required
+@verify(formal)
+fn formally_verified(a: Int, b: Int) -> Int
+    where ensures result == a + b
+{
+    a + b
+}
+
+// Verify on type
+@verify(static)
+type NonNegInt is Int { self >= 0 };
+
+// Verify on implement block
+@verify(runtime)
+implement NonNegInt {
+    fn add(self, other: NonNegInt) -> NonNegInt {
+        self + other
+    }
+}
+
+fn main() {
+    let r = checked_divide(10, 2);
+    assert_eq(r, 5);
+    print("Verify attribute tests parsed");
+}

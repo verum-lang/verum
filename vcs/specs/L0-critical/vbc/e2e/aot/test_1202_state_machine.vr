@@ -1,0 +1,119 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: state-machine, enum, transition, e2e
+// @description: Test state machine pattern with enum states and transitions
+
+type State is Idle | Running(Int) | Paused(Int) | Done(Int);
+
+type Event is Start | Pause | Resume | Tick | Stop;
+
+fn transition(state: State, event: Event) -> State {
+    match state {
+        State.Idle => {
+            match event {
+                Event.Start => State.Running(0),
+                _ => State.Idle,
+            }
+        }
+        State.Running(count) => {
+            match event {
+                Event.Tick => State.Running(count + 1),
+                Event.Pause => State.Paused(count),
+                Event.Stop => State.Done(count),
+                _ => State.Running(count),
+            }
+        }
+        State.Paused(count) => {
+            match event {
+                Event.Resume => State.Running(count),
+                Event.Stop => State.Done(count),
+                _ => State.Paused(count),
+            }
+        }
+        State.Done(count) => State.Done(count),
+    }
+}
+
+fn get_count(s: State) -> Int {
+    match s {
+        State.Idle => 0,
+        State.Running(c) => c,
+        State.Paused(c) => c,
+        State.Done(c) => c,
+    }
+}
+
+fn is_done(s: State) -> Bool {
+    match s {
+        State.Done(_) => true,
+        _ => false,
+    }
+}
+
+fn run_simulation() -> Int {
+    // Start from idle
+    let s1 = transition(State.Idle, Event.Start);
+    // Tick 3 times
+    let s2 = transition(s1, Event.Tick);
+    let s3 = transition(s2, Event.Tick);
+    let s4 = transition(s3, Event.Tick);
+    // Pause
+    let s5 = transition(s4, Event.Pause);
+    // Resume and tick
+    let s6 = transition(s5, Event.Resume);
+    let s7 = transition(s6, Event.Tick);
+    // Stop
+    let s8 = transition(s7, Event.Stop);
+    get_count(s8)
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Tick counting
+    let s1 = transition(State.Idle, Event.Start);
+    let s2 = transition(s1, Event.Tick);
+    let s3 = transition(s2, Event.Tick);
+    let s4 = transition(s3, Event.Tick);
+    if get_count(s4) != 3 {
+        print("FAIL 1: tick count");
+        f = f + 1;
+    } else {
+        print("  tick_3: OK");
+    }
+
+    // Test 2: Full simulation
+    let result = run_simulation();
+    if result != 4 {
+        print(f"FAIL 2: simulation result = {result}, expected 4");
+        f = f + 1;
+    } else {
+        print("  simulation: OK");
+    }
+
+    // Test 3: Done is terminal
+    let done = State.Done(42);
+    let still_done = transition(done, Event.Start);
+    if !is_done(still_done) {
+        print("FAIL 3: should stay done");
+        f = f + 1;
+    } else {
+        print("  terminal: OK");
+    }
+
+    // Test 4: Idle ignores non-start
+    let idle = State.Idle;
+    let still_idle = transition(idle, Event.Tick);
+    if get_count(still_idle) != 0 {
+        print("FAIL 4: idle should ignore tick");
+        f = f + 1;
+    } else {
+        print("  idle_ignore: OK");
+    }
+
+    if f == 0 {
+        print("All state machine tests passed");
+    }
+    f
+}

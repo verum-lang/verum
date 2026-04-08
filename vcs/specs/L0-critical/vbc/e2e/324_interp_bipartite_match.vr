@@ -1,0 +1,197 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, bipartite-matching, augmenting-path
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Bipartite matching using augmenting paths.
+// Left set L (up to 4 nodes), Right set R (up to 4 nodes).
+// 4x4 adjacency in Arr16. Find maximum matching.
+
+// =============================================================================
+// Arr16 for 4x4 adjacency, Arr4 for matching/visited
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn adj_get(m: Arr16, i: Int, j: Int) -> Int { a16_get(m, i * 4 + j) }
+fn adj_edge(m: Arr16, i: Int, j: Int) -> Arr16 { a16_set(m, i * 4 + j, 1) }
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+fn arr4_fill(v: Int) -> Arr4 { Arr4 { e0: v, e1: v, e2: v, e3: v } }
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+// =============================================================================
+// DFS-based augmenting path
+// =============================================================================
+
+type DFSState is { match_r: Arr4, visited: Arr4, found: Int };
+
+@allow(unbounded_recursion)
+fn try_augment(adj: Arr16, nr: Int, u: Int, state: DFSState) -> DFSState {
+    let mut st = state;
+    let mut j = 0;
+    while j < nr {
+        if adj_get(adj, u, j) == 1 && arr4_get(st.visited, j) == 0 {
+            st = DFSState { match_r: st.match_r, visited: arr4_set(st.visited, j, 1), found: st.found };
+            let matched_to = arr4_get(st.match_r, j);
+            if matched_to == -1 {
+                st = DFSState { match_r: arr4_set(st.match_r, j, u), visited: st.visited, found: 1 };
+                return st;
+            } else {
+                let sub = try_augment(adj, nr, matched_to, st);
+                if sub.found == 1 {
+                    st = DFSState { match_r: arr4_set(sub.match_r, j, u), visited: sub.visited, found: 1 };
+                    return st;
+                }
+                st = sub;
+            }
+        }
+        j = j + 1;
+    }
+    st
+}
+
+fn max_matching(adj: Arr16, nl: Int, nr: Int) -> Int {
+    let mut match_r = arr4_fill(-1);
+    let mut matching_size = 0;
+    let mut u = 0;
+    while u < nl {
+        let visited = arr4_fill(0);
+        let state = DFSState { match_r: match_r, visited: visited, found: 0 };
+        let outcome = try_augment(adj, nr, u, state);
+        if outcome.found == 1 {
+            matching_size = matching_size + 1;
+            match_r = outcome.match_r;
+        }
+        u = u + 1;
+    }
+    matching_size
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_perfect_matching() {
+    let mut adj = a16_zeros();
+    adj = adj_edge(adj, 0, 0);
+    adj = adj_edge(adj, 1, 1);
+    adj = adj_edge(adj, 2, 2);
+    assert_eq(max_matching(adj, 3, 3), 3);
+}
+
+fn test_augmenting_needed() {
+    let mut adj = a16_zeros();
+    adj = adj_edge(adj, 0, 0);
+    adj = adj_edge(adj, 0, 1);
+    adj = adj_edge(adj, 1, 0);
+    assert_eq(max_matching(adj, 2, 2), 2);
+}
+
+fn test_no_matching() {
+    let adj = a16_zeros();
+    assert_eq(max_matching(adj, 2, 2), 0);
+}
+
+fn test_partial_matching() {
+    let mut adj = a16_zeros();
+    adj = adj_edge(adj, 0, 0);
+    adj = adj_edge(adj, 1, 0);
+    adj = adj_edge(adj, 1, 1);
+    adj = adj_edge(adj, 2, 1);
+    assert_eq(max_matching(adj, 3, 2), 2);
+}
+
+fn test_complete_bipartite() {
+    let mut adj = a16_zeros();
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 3 {
+            adj = adj_edge(adj, i, j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(max_matching(adj, 3, 3), 3);
+}
+
+fn test_chain_augmentation() {
+    let mut adj = a16_zeros();
+    adj = adj_edge(adj, 0, 0);
+    adj = adj_edge(adj, 1, 0);
+    adj = adj_edge(adj, 1, 1);
+    adj = adj_edge(adj, 2, 1);
+    adj = adj_edge(adj, 2, 2);
+    adj = adj_edge(adj, 3, 2);
+    adj = adj_edge(adj, 3, 3);
+    assert_eq(max_matching(adj, 4, 4), 4);
+}
+
+fn test_contention() {
+    let mut adj = a16_zeros();
+    adj = adj_edge(adj, 0, 0);
+    adj = adj_edge(adj, 1, 0);
+    adj = adj_edge(adj, 2, 0);
+    assert_eq(max_matching(adj, 3, 1), 1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_perfect_matching();
+    test_augmenting_needed();
+    test_no_matching();
+    test_partial_matching();
+    test_complete_bipartite();
+    test_chain_augmentation();
+    test_contention();
+    print("[OK] 324_interp_bipartite_match");
+    0
+}

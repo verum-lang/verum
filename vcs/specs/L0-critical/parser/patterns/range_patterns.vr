@@ -1,0 +1,299 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, range, inclusive, exclusive
+
+// Helper types
+type Data is { value: Int, flag: Bool };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+
+// Helper functions
+fn single_digit() { }
+fn double_digit() { }
+fn many_digits() { }
+fn single() { }
+fn double() { }
+fn triple() { }
+fn more() { }
+fn freezing() { }
+fn cold() { }
+fn mild() { }
+fn warm() { }
+fn extreme() { }
+fn lowercase() { }
+fn uppercase() { }
+fn digit() { }
+fn other() { }
+fn negative() { }
+fn zero() { }
+fn positive() { }
+fn non_positive() { }
+fn in_range() { }
+fn above_range() { }
+fn success() { }
+fn informational() { }
+fn redirect() { }
+fn client_error() { }
+fn server_error() { }
+fn handle_unknown_code() { }
+fn fail<T>(x: T) { }
+fn pass<T>(x: T) { }
+fn good<T>(x: T) { }
+fn very_good<T>(x: T) { }
+fn excellent<T>(x: T) { }
+fn invalid() { }
+fn quadrant_1() { }
+fn quadrant_2() { }
+fn quadrant_3() { }
+fn quadrant_4() { }
+fn out_of_bounds() { }
+fn in_bounds() { }
+fn starts_with_single() { }
+fn specific_start() { }
+fn process<T>(x: T) { }
+fn inclusive_process<T>(x: T) { }
+fn in_range_n<T>(x: T) { }
+fn out_of_range_n<T>(x: T) { }
+fn case1() { }
+fn case2() { }
+fn case3() { }
+fn default() { }
+fn control() { }
+fn printable() { }
+fn delete() { }
+fn extended() { }
+fn low_nibble() { }
+fn high_nibble() { }
+fn process_in_range() { }
+fn handle_informational() { }
+fn handle_success() { }
+fn handle_redirect() { }
+fn handle_client_error() { }
+fn handle_server_error() { }
+fn handle_unknown() { }
+fn process_first() { }
+fn process_rest<T>(x: T) { }
+fn non_negative() { }
+fn valid() { }
+
+fn test_exclusive_range_pattern() {
+    let number = 50;
+
+    // Exclusive range pattern
+    match number {
+        0..10 => single_digit(),
+        10..100 => double_digit(),
+        _ => many_digits(),
+    };
+}
+
+fn test_inclusive_range_pattern() {
+    let value = 50;
+
+    // Inclusive range pattern
+    match value {
+        0..=9 => single(),
+        10..=99 => double(),
+        100..=999 => triple(),
+        _ => more(),
+    };
+}
+
+fn test_range_with_negative_numbers() {
+    let temperature = -10;
+
+    // Range with negative numbers (using guards since negative literal patterns need guards)
+    match temperature {
+        t if t >= -40 && t < -20 => freezing(),
+        t if t >= -20 && t <= 0 => cold(),
+        0..=20 => mild(),
+        21..=40 => warm(),
+        _ => extreme(),
+    };
+}
+
+fn test_character_range() {
+    let char_val = 'a';
+
+    // Character range
+    match char_val {
+        'a'..='z' => lowercase(),
+        'A'..='Z' => uppercase(),
+        '0'..='9' => digit(),
+        _ => other(),
+    };
+}
+
+fn test_open_ended_ranges() {
+    let index = 5;
+    let value = 50;
+
+    // Open-ended ranges
+    match index {
+        ..0 => negative(),
+        0 => zero(),
+        1.. => positive(),
+    };
+
+    match value {
+        v if v <= 0 => non_positive(),
+        1..=100 => in_range(),
+        101.. => above_range(),
+    };
+}
+
+fn test_range_in_or_pattern() {
+    let code = 200;
+
+    // Range in or-pattern
+    match code {
+        0..=99 | 200..=299 => success(),
+        100..=199 => informational(),
+        300..=399 => redirect(),
+        400..=499 => client_error(),
+        500..=599 => server_error(),
+        _ => handle_unknown_code(),
+    };
+}
+
+fn test_range_with_binding() {
+    let score = 85;
+
+    // Range with binding
+    match score {
+        s @ 0..=59 => fail(s),
+        s @ 60..=69 => pass(s),
+        s @ 70..=79 => good(s),
+        s @ 80..=89 => very_good(s),
+        s @ 90..=100 => excellent(s),
+        _ => invalid(),
+    };
+}
+
+fn test_range_in_tuple_pattern() {
+    let x = 5;
+    let y = 5;
+
+    // Range in tuple pattern
+    match (x, y) {
+        (0..=10, 0..=10) => quadrant_1(),
+        (x, y) if x >= -10 && x <= 0 && y >= 0 && y <= 10 => quadrant_2(),
+        (x, y) if x >= -10 && x <= 0 && y >= -10 && y <= 0 => quadrant_3(),
+        (x, y) if x >= 0 && x <= 10 && y >= -10 && y <= 0 => quadrant_4(),
+        _ => out_of_bounds(),
+    };
+}
+
+fn test_range_in_struct_pattern() {
+    let point = (50, 50);
+
+    // Range in struct pattern
+    match point {
+        (0..=100, 0..=100) => in_bounds(),
+        _ => out_of_bounds(),
+    };
+}
+
+fn test_range_in_for_loop() {
+    // Range in for loop (not pattern but related)
+    for i in 0..10 {
+        process(i);
+    }
+
+    for i in 0..=10 {
+        inclusive_process(i);
+    }
+}
+
+fn test_range_in_match_guard() {
+    let value = 50;
+
+    // Range in match guard
+    match value {
+        n if n >= 0 && n < 100 => in_range_n(n),
+        n => out_of_range_n(n),
+    };
+}
+
+fn test_complex_nested_range_patterns() {
+    let data = Data { value: 5, flag: true };
+
+    // Complex nested range patterns
+    match data {
+        Data { value: 0..=10, flag: true } => case1(),
+        Data { value: 11..=20, flag: false } => case2(),
+        Data { value: 21.., .. } => case3(),
+        _ => default(),
+    };
+}
+
+fn test_range_with_hex_literals() {
+    let byte = 0x20;
+
+    // Range with hex literals
+    match byte {
+        0x00..=0x1F => control(),
+        0x20..=0x7E => printable(),
+        0x7F => delete(),
+        0x80..=0xFF => extended(),
+        _ => other(),
+    };
+}
+
+fn test_range_with_binary_literals() {
+    let bits = 0b0101;
+
+    // Range with binary literals
+    match bits {
+        0b0000..=0b0111 => low_nibble(),
+        0b1000..=0b1111 => high_nibble(),
+        _ => other(),
+    };
+}
+
+fn test_multiple_ranges_in_single_match() {
+    let http_status = 200;
+
+    // Multiple ranges in single match
+    match http_status {
+        100..=199 => handle_informational(),
+        200..=299 => handle_success(),
+        300..=399 => handle_redirect(),
+        400..=499 => handle_client_error(),
+        500..=599 => handle_server_error(),
+        _ => handle_unknown(),
+    };
+}
+
+fn test_half_open_ranges_at_boundaries() {
+    let index = 5;
+
+    // Half-open ranges at boundaries
+    match index {
+        0.. => non_negative(),
+        _ => negative(),
+    };
+}
+
+fn test_range_in_constant_pattern_context() {
+    let MIN: Int = 0;
+    let MAX: Int = 100;
+    let value = 50;
+
+    // Range in constant pattern context
+    match value {
+        0..=100 => valid(),
+        _ => invalid(),
+    };
+}
+
+fn test_range_with_expression_bounds() {
+    let MAX = 100;
+    let value = 50;
+
+    // Range with expression bounds (if supported)
+    match value {
+        0..=99 => valid(),
+        _ => invalid(),
+    };
+}

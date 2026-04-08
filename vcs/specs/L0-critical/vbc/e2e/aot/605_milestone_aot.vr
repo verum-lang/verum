@@ -1,0 +1,202 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, geometry, vectors
+// @timeout: 30000
+
+// Milestone 605: 2D geometry and vector operations
+// Uses separate x,y components instead of encoded integers
+// to avoid negative-modulo bugs in pt encoding.
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// Encode 2D point as x * 10000 + y (both non-negative, < 10000)
+fn pt(x: Int, y: Int) -> Int { x * 10000 + y }
+fn pt_x(p: Int) -> Int { p / 10000 }
+fn pt_y(p: Int) -> Int { p % 10000 }
+
+// Vector operations (only on non-negative encoded points)
+fn vec_add(a: Int, b: Int) -> Int {
+    pt(pt_x(a) + pt_x(b), pt_y(a) + pt_y(b))
+}
+
+fn vec_scale(a: Int, s: Int) -> Int {
+    pt(pt_x(a) * s, pt_y(a) * s)
+}
+
+fn magnitude_sq(a: Int) -> Int {
+    pt_x(a) * pt_x(a) + pt_y(a) * pt_y(a)
+}
+
+// Dot product on non-negative encoded points
+fn dot(a: Int, b: Int) -> Int {
+    pt_x(a) * pt_x(b) + pt_y(a) * pt_y(b)
+}
+
+// Cross product using raw components (avoids negative encoding)
+// Note: 'by' is a reserved keyword, use 'b_y' instead
+fn cross_raw(ax: Int, ay: Int, bx: Int, b_y: Int) -> Int {
+    ax * b_y - ay * bx
+}
+
+// Cross product on non-negative encoded points (result may be negative, that's fine)
+fn cross(a: Int, b: Int) -> Int {
+    cross_raw(pt_x(a), pt_y(a), pt_x(b), pt_y(b))
+}
+
+// Orientation using raw coordinate subtraction (avoids encoding negative values)
+fn orientation(p: Int, q: Int, r: Int) -> Int {
+    let vqx = pt_x(q) - pt_x(p);
+    let vqy = pt_y(q) - pt_y(p);
+    let vrx = pt_x(r) - pt_x(p);
+    let vry = pt_y(r) - pt_y(p);
+    cross_raw(vqx, vqy, vrx, vry)
+}
+
+// Distance squared between two points (raw subtraction, no encoding)
+fn dist_sq(a: Int, b: Int) -> Int {
+    let dx = pt_x(a) - pt_x(b);
+    let dy = pt_y(a) - pt_y(b);
+    dx * dx + dy * dy
+}
+
+// Manhattan distance
+fn manhattan(a: Int, b: Int) -> Int {
+    abs_val(pt_x(a) - pt_x(b)) + abs_val(pt_y(a) - pt_y(b))
+}
+
+// Is point inside rectangle? (axis-aligned, given by two corners)
+fn in_rect(p: Int, r1: Int, r2: Int) -> Int {
+    let px = pt_x(p);
+    let py = pt_y(p);
+    let x1 = min_val(pt_x(r1), pt_x(r2));
+    let x2 = max_val(pt_x(r1), pt_x(r2));
+    let y1 = min_val(pt_y(r1), pt_y(r2));
+    let y2 = max_val(pt_y(r1), pt_y(r2));
+    if px >= x1 {
+        if px <= x2 {
+            if py >= y1 {
+                if py <= y2 { 1 } else { 0 }
+            } else { 0 }
+        } else { 0 }
+    } else { 0 }
+}
+
+// Triangle area * 2 (to stay integer)
+fn triangle_area2(a: Int, b: Int, c: Int) -> Int {
+    abs_val(orientation(a, b, c))
+}
+
+// Is point inside triangle? (using area method)
+fn in_triangle_check(p: Int, a: Int, b: Int, c: Int) -> Int {
+    let total = triangle_area2(a, b, c);
+    let a1 = triangle_area2(p, a, b);
+    let a2 = triangle_area2(p, b, c);
+    let a3 = triangle_area2(p, a, c);
+    if a1 + a2 + a3 == total { 1 } else { 0 }
+}
+
+fn test_basic_ops() -> Int {
+    let a = pt(3, 4);
+    let b = pt(1, 2);
+    assert_eq(pt_x(a), 3);
+    assert_eq(pt_y(a), 4);
+    let s = vec_add(a, b);
+    assert_eq(pt_x(s), 4);
+    assert_eq(pt_y(s), 6);
+    // vec_sub via raw components
+    let dx = pt_x(a) - pt_x(b);
+    let dy = pt_y(a) - pt_y(b);
+    assert_eq(dx, 2);
+    assert_eq(dy, 2);
+    1
+}
+
+fn test_dot_cross() -> Int {
+    let a = pt(3, 4);
+    let b = pt(1, 2);
+    // dot = 3*1 + 4*2 = 11
+    assert_eq(dot(a, b), 11);
+    // cross = 3*2 - 4*1 = 2
+    assert_eq(cross(a, b), 2);
+    // Perpendicular vectors: (1,0) . (0,1) = 0
+    assert_eq(dot(pt(1, 0), pt(0, 1)), 0);
+    // Parallel vectors: cross = 0
+    assert_eq(cross(pt(2, 4), pt(1, 2)), 0);
+    1
+}
+
+fn test_distances() -> Int {
+    let a = pt(0, 0);
+    let b = pt(3, 4);
+    assert_eq(dist_sq(a, b), 25);
+    assert_eq(manhattan(a, b), 7);
+    assert_eq(magnitude_sq(b), 25);
+    assert_eq(dist_sq(a, b), dist_sq(b, a));
+    assert_eq(manhattan(a, b), manhattan(b, a));
+    1
+}
+
+fn test_orientation() -> Int {
+    let p = pt(0, 0);
+    let q = pt(4, 0);
+    let r = pt(2, 3);
+    let o = orientation(p, q, r);
+    let ccw = if o > 0 { 1 } else { 0 };
+    assert_eq(ccw, 1);
+    let o2 = orientation(p, r, q);
+    let cw = if o2 < 0 { 1 } else { 0 };
+    assert_eq(cw, 1);
+    assert_eq(orientation(pt(0, 0), pt(2, 2), pt(4, 4)), 0);
+    1
+}
+
+fn test_rect() -> Int {
+    let r1 = pt(1, 1);
+    let r2 = pt(5, 5);
+    assert_eq(in_rect(pt(3, 3), r1, r2), 1);
+    assert_eq(in_rect(pt(1, 1), r1, r2), 1);
+    assert_eq(in_rect(pt(5, 5), r1, r2), 1);
+    assert_eq(in_rect(pt(0, 3), r1, r2), 0);
+    assert_eq(in_rect(pt(6, 3), r1, r2), 0);
+    1
+}
+
+fn test_triangle() -> Int {
+    let a = pt(0, 0);
+    let b = pt(6, 0);
+    let c = pt(3, 6);
+    assert_eq(triangle_area2(a, b, c), 36);
+    // Use 5-param workaround: compute parts separately
+    let p1 = pt(2, 2);
+    let r1 = in_triangle_check(p1, a, b, c);
+    assert_eq(r1, 1);
+    let r2 = in_triangle_check(a, a, b, c);
+    assert_eq(r2, 1);
+    let p2 = pt(0, 7);
+    let r3 = in_triangle_check(p2, a, b, c);
+    assert_eq(r3, 0);
+    1
+}
+
+fn test_scaling() -> Int {
+    let v = pt(2, 3);
+    let s = vec_scale(v, 3);
+    assert_eq(pt_x(s), 6);
+    assert_eq(pt_y(s), 9);
+    assert_eq(magnitude_sq(s), magnitude_sq(v) * 9);
+    1
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_dot_cross();
+    test_distances();
+    test_orientation();
+    test_rect();
+    test_triangle();
+    test_scaling();
+    print("[OK] 605_milestone_aot");
+    0
+}

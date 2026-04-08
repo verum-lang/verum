@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, array, element, error
+// @description: Test detection of array type missing element type
+// @expected-error: E074
+
+// Array type must have element type before semicolon
+fn test(x: [; 10]) {}

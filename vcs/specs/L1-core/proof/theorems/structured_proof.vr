@@ -1,0 +1,33 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, theorem, structured
+// @timeout: 5000
+
+/// Structured proof blocks with have/show/obtain steps.
+/// Grammar: proof_structured = '{' { proof_step } '}'
+///          proof_step = have_step | show_step | obtain_step | calc_chain | tactic_application
+
+// Theorem with structured proof
+theorem sum_bounds(a: Int, b: Int)
+    requires a > 0, b > 0
+    proof {
+        have h1: a > 0 by assumption;
+        have h2: b > 0 by assumption;
+        show a + b > 0 by omega;
+    };
+
+// Theorem with obtain step
+theorem exists_witness(n: Int)
+    requires n > 0
+    proof {
+        obtain m from n;
+        show m > 0 by auto;
+    };
+
+// Theorem with proof by term (direct expression)
+theorem identity(x: Int) -> Int
+    proof = x;
+
+fn main() {
+    print("Structured proof tests parsed");
+}

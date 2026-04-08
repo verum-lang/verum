@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, proof-block, error
+// @description: Test invalid proof keyword without body
+// @expected-error: E025
+
+theorem sum_positive(a: Int, b: Int)
+    requires a > 0, b > 0
+    ensures result > 0
+proof

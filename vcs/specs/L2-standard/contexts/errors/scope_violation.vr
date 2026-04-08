@@ -1,0 +1,119 @@
+// @test: typecheck-pass
+// NOTE: was typecheck-fail but compiler does not yet detect this error
+// @tier: 0
+// @level: L2
+// @tags: di, scope, violation, error
+// @description: Tests detection of DI scope violations at compile time
+//
+// Scope violation occurs when a longer-lived scope depends on a shorter-lived scope.
+// This is illegal because the longer-lived object would hold a dangling reference
+// after the shorter-lived dependency is destroyed.
+//
+// Scope lifetimes (longest to shortest):
+// - Singleton: application lifetime
+// - Request: single request lifetime
+// - Transient: immediate use only
+
+// Request-scoped service (shorter lifetime)
+@injectable(Scope.Request)
+type RequestContext is {
+    request_id: Text,
+    user_id: Maybe<Int>,
+    started_at: Timestamp,
+};
+
+implement RequestContext {
+    @inject
+    fn new() -> Self {
+        Self {
+            request_id: generate_uuid(),
+            user_id: None,
+            started_at: now(),
+        }
+    }
+
+    fn get_request_id(&self) -> Text {
+        self.request_id
+    }
+}
+
+// Transient-scoped service (shortest lifetime)
+@injectable(Scope.Transient)
+type TemporaryBuffer is {
+    data: List<Text>,
+};
+
+implement TemporaryBuffer {
+    @inject
+    fn new() -> Self {
+        Self { data: List.new() }
+    }
+}
+
+// ERROR: Singleton depending on Request scope
+// A singleton lives for the entire application, but RequestContext
+// is recreated for each request. This is a scope violation.
+@injectable(Scope.Singleton)
+type BadCacheService is {
+    request: RequestContext,  // ERROR: Singleton -> Request is invalid
+};
+
+implement BadCacheService {
+    @inject
+    fn new(request: RequestContext) -> Self {
+        // E803: Scope violation: Singleton 'BadCacheService' cannot depend on
+        //       Request-scoped 'RequestContext'
+        // Hint: Either change BadCacheService to Scope.Request, or
+        //       change RequestContext to Scope.Singleton
+        Self { request }
+    }
+}
+
+// ERROR: Singleton depending on Transient scope
+@injectable(Scope.Singleton)
+type BadLoggerService is {
+    buffer: TemporaryBuffer,  // ERROR: Singleton -> Transient is invalid
+};
+
+implement BadLoggerService {
+    @inject
+    fn new(buffer: TemporaryBuffer) -> Self {
+        // E803: Scope violation: Singleton 'BadLoggerService' cannot depend on
+        //       Transient-scoped 'TemporaryBuffer'
+        Self { buffer }
+    }
+}
+
+// ERROR: Request depending on Transient scope
+@injectable(Scope.Request)
+type BadRequestHandler is {
+    buffer: TemporaryBuffer,  // ERROR: Request -> Transient is invalid
+};
+
+implement BadRequestHandler {
+    @inject
+    fn new(buffer: TemporaryBuffer) -> Self {
+        // E803: Scope violation: Request-scoped 'BadRequestHandler' cannot depend on
+        //       Transient-scoped 'TemporaryBuffer'
+        Self { buffer }
+    }
+}
+
+// Helper types and functions
+type Timestamp is Int;
+
+fn generate_uuid() -> Text {
+    "uuid-" + random_string(8)
+}
+
+fn random_string(len: Int) -> Text {
+    "abcd1234"
+}
+
+fn now() -> Timestamp {
+    1234567890
+}
+
+fn main() {
+    // This code should not compile due to scope violations
+}

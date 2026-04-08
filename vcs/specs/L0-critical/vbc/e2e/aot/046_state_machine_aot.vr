@@ -1,0 +1,104 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, state-machine, variants, records
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT state machine using variant types
+
+type State is
+    Idle
+  | Running { ticks: Int }
+  | Paused { ticks: Int, reason: Int }
+  | Done { total: Int };
+
+fn step(s: State) -> State {
+    match s {
+        Idle => Running { ticks: 0 },
+        Running { ticks } => {
+            if ticks >= 10 {
+                Done { total: ticks }
+            } else {
+                Running { ticks: ticks + 1 }
+            }
+        },
+        Paused { ticks, reason: _ } => Running { ticks: ticks },
+        Done { total } => Done { total: total },
+    }
+}
+
+fn pause(s: State, reason: Int) -> State {
+    match s {
+        Running { ticks } => Paused { ticks: ticks, reason: reason },
+        _ => s,
+    }
+}
+
+fn is_done(s: State) -> Bool {
+    s is Done
+}
+
+fn get_ticks(s: State) -> Int {
+    match s {
+        Idle => 0,
+        Running { ticks } => ticks,
+        Paused { ticks, reason: _ } => ticks,
+        Done { total } => total,
+    }
+}
+
+fn run_to_completion(s: State) -> State {
+    let mut current = s;
+    while !is_done(current) {
+        current = step(current);
+    }
+    current
+}
+
+fn main() -> Int {
+    // Basic transitions
+    let s0 = Idle;
+    assert_eq(get_ticks(s0), 0);
+
+    let s1 = step(s0);
+    assert_eq(get_ticks(s1), 0);  // Running{ticks:0}
+
+    let s2 = step(s1);
+    assert_eq(get_ticks(s2), 1);  // Running{ticks:1}
+
+    // Pause and resume
+    let paused = pause(s2, 42);
+    assert_eq(get_ticks(paused), 1);  // Still ticks=1
+
+    let resumed = step(paused);
+    assert_eq(get_ticks(resumed), 1);  // Back to Running{ticks:1}
+
+    // Run N steps
+    let mut s = Idle;
+    let mut i = 0;
+    while i < 5 {
+        s = step(s);
+        i = i + 1;
+    }
+    assert_eq(get_ticks(s), 4);  // Idle->Running{0}->R{1}->R{2}->R{3}->R{4}
+
+    // Run to completion
+    let final_s = run_to_completion(Idle);
+    assert(is_done(final_s));
+    assert_eq(get_ticks(final_s), 10);
+
+    // Pause doesn't affect Idle or Done
+    let still_idle = pause(Idle, 1);
+    assert_eq(get_ticks(still_idle), 0);
+
+    let done = Done { total: 99 };
+    let still_done = pause(done, 1);
+    assert_eq(get_ticks(still_done), 99);
+
+    // Step Done stays Done
+    let done2 = step(Done { total: 50 });
+    assert(is_done(done2));
+    assert_eq(get_ticks(done2), 50);
+
+    0
+}

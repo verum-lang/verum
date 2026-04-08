@@ -1,0 +1,163 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, generator, yield, fn-star
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests the fn* generator/yield pipeline end-to-end in the interpreter.
+// Verifies: fn* declaration, yield suspension/resumption, for-loop consumption,
+// argument passing, multiple yields, nested state, and generator exhaustion.
+
+// Basic single-yield generator
+fn* single_value() -> Int {
+    yield 42;
+}
+
+// Multi-yield counter
+fn* counting(n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        yield i;
+        i = i + 1;
+    }
+}
+
+// Fibonacci generator (infinite, consumed via take pattern)
+@allow(unbounded_recursion)
+fn* fibonacci() -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    while a < 10000 {
+        yield a;
+        let temp = a + b;
+        a = b;
+        b = temp;
+    }
+}
+
+// Generator with multiple arguments
+fn* range_gen(start: Int, end_excl: Int, step: Int) -> Int {
+    let mut i = start;
+    while i < end_excl {
+        yield i;
+        i = i + step;
+    }
+}
+
+// Generator that yields computed values
+fn* squares(n: Int) -> Int {
+    let mut i = 1;
+    while i <= n {
+        yield i * i;
+        i = i + 1;
+    }
+}
+
+fn test_single_yield() {
+    let mut count = 0;
+    let mut val = 0;
+    for x in single_value() {
+        val = x;
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+    assert_eq(val, 42);
+    print("single_yield: ok");
+}
+
+fn test_counting() {
+    // Sum of 0..5 = 0+1+2+3+4 = 10
+    let mut total = 0;
+    for x in counting(5) {
+        total = total + x;
+    }
+    assert_eq(total, 10);
+
+    // Sum of 0..10 = 45
+    let mut total2 = 0;
+    for x in counting(10) {
+        total2 = total2 + x;
+    }
+    assert_eq(total2, 45);
+
+    // Empty generator
+    let mut count = 0;
+    for x in counting(0) {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+
+    print("counting: ok");
+}
+
+fn test_fibonacci() {
+    // First 10 Fibonacci numbers: 0 1 1 2 3 5 8 13 21 34
+    let mut vals = 0;
+    let mut count = 0;
+    for f in fibonacci() {
+        if count < 10 {
+            vals = vals + f;
+        }
+        count = count + 1;
+    }
+    // Sum of first 10: 0+1+1+2+3+5+8+13+21+34 = 88
+    assert_eq(vals, 88);
+    print("fibonacci: ok");
+}
+
+fn test_range_gen() {
+    // range(0, 10, 2) -> 0, 2, 4, 6, 8
+    let mut total = 0;
+    for x in range_gen(0, 10, 2) {
+        total = total + x;
+    }
+    assert_eq(total, 20);
+
+    // range(5, 8, 1) -> 5, 6, 7
+    let mut total2 = 0;
+    for x in range_gen(5, 8, 1) {
+        total2 = total2 + x;
+    }
+    assert_eq(total2, 18);
+
+    print("range_gen: ok");
+}
+
+fn test_squares() {
+    // squares(5) -> 1, 4, 9, 16, 25
+    let mut total = 0;
+    for s in squares(5) {
+        total = total + s;
+    }
+    assert_eq(total, 55);
+    print("squares: ok");
+}
+
+fn test_multiple_generators() {
+    // Use two generators in sequence
+    let mut sum1 = 0;
+    for x in counting(3) {
+        sum1 = sum1 + x;
+    }
+
+    let mut sum2 = 0;
+    for x in squares(3) {
+        sum2 = sum2 + x;
+    }
+
+    assert_eq(sum1, 3);   // 0+1+2
+    assert_eq(sum2, 14);  // 1+4+9
+    print("multiple_generators: ok");
+}
+
+fn main() -> Int {
+    test_single_yield();
+    test_counting();
+    test_fibonacci();
+    test_range_gen();
+    test_squares();
+    test_multiple_generators();
+    print("[OK] 377_interp_generator_yield");
+    0
+}

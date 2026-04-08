@@ -1,0 +1,90 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, text, format, concat
+// @expected-exit: 0
+
+// Test: comprehensive string/text operations in AOT
+// Validates string concat, format strings, comparison, and length.
+
+fn repeat_char(n: Int) -> Text {
+    // Build a string of n 'x' characters via concatenation
+    let mut result = "";
+    let mut i = 0;
+    while (i < n) {
+        result = f"{result}x";
+        i = i + 1;
+    }
+    result
+}
+
+fn int_to_text(n: Int) -> Text {
+    f"{n}"
+}
+
+fn main() -> Int {
+    // Basic string concat
+    let a = "hello";
+    let b = " world";
+    let c = f"{a}{b}";
+    if (c != "hello world") {
+        print(f"FAIL: concat='{c}', expected='hello world'");
+        return 1;
+    }
+
+    // Format string with integers
+    let x = 42;
+    let y = 100;
+    let msg = f"x={x}, y={y}";
+    if (msg != "x=42, y=100") {
+        print(f"FAIL: format='{msg}', expected='x=42, y=100'");
+        return 1;
+    }
+
+    // Format string with float
+    let pi = 3.14;
+    let fmsg = f"pi={pi}";
+    // Float formatting may vary — just check it's not empty
+    if (fmsg == "") {
+        print("FAIL: float format is empty");
+        return 1;
+    }
+
+    // String comparison
+    let s1 = "abc";
+    let s2 = "abc";
+    let s3 = "xyz";
+    if (s1 != s2) {
+        print("FAIL: 'abc' != 'abc'");
+        return 1;
+    }
+    if (s1 == s3) {
+        print("FAIL: 'abc' == 'xyz'");
+        return 1;
+    }
+
+    // Build a string iteratively
+    let repeated = repeat_char(5);
+    if (repeated != "xxxxx") {
+        print(f"FAIL: repeat_char(5)='{repeated}', expected='xxxxx'");
+        return 1;
+    }
+
+    // Number to string conversion
+    let n_str = int_to_text(12345);
+    if (n_str != "12345") {
+        print(f"FAIL: int_to_text(12345)='{n_str}', expected='12345'");
+        return 1;
+    }
+
+    // Nested format strings
+    let inner = f"({x})";
+    let outer = f"value={inner}";
+    if (outer != "value=(42)") {
+        print(f"FAIL: nested format='{outer}', expected='value=(42)'");
+        return 1;
+    }
+
+    print("857_string_operations: PASS");
+    0
+}

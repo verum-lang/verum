@@ -1,0 +1,18 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, result
+// @description: Tests that unwrapping Err causes a panic
+
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("Division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn main() {
+    let result = divide(10, 0);  // Returns Err("Division by zero")
+    let _ = result.unwrap();  // Panic: Unwrap on Err
+}

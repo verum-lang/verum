@@ -1,0 +1,242 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, arithmetic, integer
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for integer arithmetic.
+/// Tests all integer operations including edge cases, boundaries, and complex expressions.
+
+fn main() {
+    test_basic_operations();
+    test_unary_operations();
+    test_compound_expressions();
+    test_boundary_values();
+    test_division_modulo();
+    test_power_operations();
+    test_bitshift_in_expressions();
+    test_operator_chains();
+}
+
+/// Basic integer arithmetic operations
+fn test_basic_operations() {
+    println("=== Basic Integer Operations ===");
+
+    // Addition
+    println(f"100 + 50: {100 + 50}");
+    println(f"0 + 0: {0 + 0}");
+    println(f"-10 + 20: {-10 + 20}");
+    println(f"-10 + -20: {-10 + -20}");
+
+    // Subtraction
+    println(f"100 - 50: {100 - 50}");
+    println(f"50 - 100: {50 - 100}");
+    println(f"0 - 0: {0 - 0}");
+    println(f"-10 - 20: {-10 - 20}");
+    println(f"-10 - -20: {-10 - -20}");
+
+    // Multiplication
+    println(f"7 * 8: {7 * 8}");
+    println(f"0 * 1000: {0 * 1000}");
+    println(f"1 * 1000: {1 * 1000}");
+    println(f"-5 * 10: {-5 * 10}");
+    println(f"-5 * -10: {-5 * -10}");
+
+    // Combined with variables
+    let a = 42;
+    let b = 17;
+    println(f"a + b: {a + b}");
+    println(f"a - b: {a - b}");
+    println(f"a * b: {a * b}");
+}
+
+/// Unary operations
+fn test_unary_operations() {
+    println("\n=== Unary Operations ===");
+
+    let x = 42;
+    let y = -42;
+
+    println(f"-x where x = 42: {-x}");
+    println(f"-y where y = -42: {-y}");
+    println(f"--x: {- -x}");
+    println(f"---x: {- - -x}");
+
+    // Negation of zero
+    println(f"-0: {-0}");
+
+    // Negation in expressions
+    println(f"5 + -3: {5 + -3}");
+    println(f"5 - -3: {5 - -3}");
+    println(f"-5 * -3: {-5 * -3}");
+}
+
+/// Compound expressions with multiple operators
+fn test_compound_expressions() {
+    println("\n=== Compound Expressions ===");
+
+    // Operator precedence
+    println(f"2 + 3 * 4: {2 + 3 * 4}");
+    println(f"(2 + 3) * 4: {(2 + 3) * 4}");
+    println(f"10 - 4 + 2: {10 - 4 + 2}");
+    println(f"10 - (4 + 2): {10 - (4 + 2)}");
+    println(f"100 / 10 / 2: {100 / 10 / 2}");
+    println(f"100 / (10 / 2): {100 / (10 / 2)}");
+
+    // Complex nested expressions
+    let a = 5;
+    let b = 3;
+    let c = 2;
+    println(f"a * b + c: {a * b + c}");
+    println(f"a + b * c: {a + b * c}");
+    println(f"(a + b) * c: {(a + b) * c}");
+    println(f"a * (b + c): {a * (b + c)}");
+
+    // Deeply nested
+    println(f"((2 + 3) * (4 - 1)) / 3: {((2 + 3) * (4 - 1)) / 3}");
+    println(f"1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10: {1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10}");
+}
+
+/// Boundary and edge values
+fn test_boundary_values() {
+    println("\n=== Boundary Values ===");
+
+    // Zero operations
+    println(f"0 + 1: {0 + 1}");
+    println(f"0 - 1: {0 - 1}");
+    println(f"0 * 1000000: {0 * 1000000}");
+    println(f"0 / 1: {0 / 1}");
+
+    // One operations (identity)
+    println(f"1 * 999: {1 * 999}");
+    println(f"999 * 1: {999 * 1}");
+    println(f"999 / 1: {999 / 1}");
+
+    // Large numbers (but within safe range)
+    let large = 1000000000;
+    println(f"large: {large}");
+    println(f"large + 1: {large + 1}");
+    println(f"large - 1: {large - 1}");
+    println(f"large * 2: {large * 2}");
+    println(f"large / 2: {large / 2}");
+
+    // Negative large
+    let neg_large = -1000000000;
+    println(f"neg_large: {neg_large}");
+    println(f"neg_large + 1: {neg_large + 1}");
+    println(f"neg_large - 1: {neg_large - 1}");
+    println(f"neg_large * 2: {neg_large * 2}");
+}
+
+/// Division and modulo operations
+fn test_division_modulo() {
+    println("\n=== Division and Modulo ===");
+
+    // Basic division
+    println(f"100 / 10: {100 / 10}");
+    println(f"100 / 3: {100 / 3}");
+    println(f"7 / 2: {7 / 2}");
+    println(f"1 / 2: {1 / 2}");
+
+    // Negative division
+    println(f"-10 / 3: {-10 / 3}");
+    println(f"10 / -3: {10 / -3}");
+    println(f"-10 / -3: {-10 / -3}");
+
+    // Basic modulo
+    println(f"17 % 5: {17 % 5}");
+    println(f"20 % 5: {20 % 5}");
+    println(f"100 % 7: {100 % 7}");
+
+    // Negative modulo
+    println(f"-17 % 5: {-17 % 5}");
+    println(f"17 % -5: {17 % -5}");
+    println(f"-17 % -5: {-17 % -5}");
+
+    // Combined div and mod
+    let n = 47;
+    let d = 7;
+    println(f"n / d * d + n % d == n: {n / d * d + n % d == n}");
+}
+
+/// Power/exponentiation operations
+fn test_power_operations() {
+    println("\n=== Power Operations ===");
+
+    // Basic powers
+    println(f"2 ** 0: {2 ** 0}");
+    println(f"2 ** 1: {2 ** 1}");
+    println(f"2 ** 2: {2 ** 2}");
+    println(f"2 ** 10: {2 ** 10}");
+    println(f"2 ** 20: {2 ** 20}");
+
+    // Other bases
+    println(f"3 ** 5: {3 ** 5}");
+    println(f"10 ** 6: {10 ** 6}");
+
+    // Edge cases
+    println(f"0 ** 0: {0 ** 0}");
+    println(f"0 ** 1: {0 ** 1}");
+    println(f"0 ** 10: {0 ** 10}");
+    println(f"1 ** 0: {1 ** 0}");
+    println(f"1 ** 100: {1 ** 100}");
+    println(f"(-1) ** 0: {(-1) ** 0}");
+    println(f"(-1) ** 1: {(-1) ** 1}");
+    println(f"(-1) ** 2: {(-1) ** 2}");
+    println(f"(-1) ** 3: {(-1) ** 3}");
+
+    // Right associativity: 2 ** 3 ** 2 = 2 ** (3 ** 2) = 2 ** 9 = 512
+    println(f"2 ** 3 ** 2: {2 ** 3 ** 2}");
+}
+
+/// Bitshift usage in arithmetic expressions
+fn test_bitshift_in_expressions() {
+    println("\n=== Bitshift in Expressions ===");
+
+    // Left shift
+    println(f"1 << 0: {1 << 0}");
+    println(f"1 << 1: {1 << 1}");
+    println(f"1 << 4: {1 << 4}");
+    println(f"1 << 10: {1 << 10}");
+    println(f"5 << 3: {5 << 3}");
+
+    // Right shift
+    println(f"16 >> 0: {16 >> 0}");
+    println(f"16 >> 1: {16 >> 1}");
+    println(f"16 >> 4: {16 >> 4}");
+    println(f"1024 >> 5: {1024 >> 5}");
+
+    // Combined with arithmetic
+    println(f"(5 + 3) << 2: {(5 + 3) << 2}");
+    println(f"(100 >> 2) + 10: {(100 >> 2) + 10}");
+}
+
+/// Long chains of operators
+fn test_operator_chains() {
+    println("\n=== Operator Chains ===");
+
+    // Long addition chain
+    let sum = 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10;
+    println(f"sum 1-10: {sum}");
+
+    // Long multiplication chain
+    let product = 1 * 2 * 3 * 4 * 5 * 6;
+    println(f"product 1-6: {product}");
+
+    // Mixed operations
+    let mixed = 10 + 20 * 3 - 15 / 5 + 2 ** 3;
+    println(f"10 + 20 * 3 - 15 / 5 + 2 ** 3: {mixed}");
+
+    // Alternating signs
+    let alt = 100 - 10 + 20 - 30 + 40 - 50;
+    println(f"100 - 10 + 20 - 30 + 40 - 50: {alt}");
+
+    // Function results in expressions
+    fn double(x: Int) -> Int { x * 2 }
+    fn square(x: Int) -> Int { x * x }
+
+    println(f"double(5) + square(3): {double(5) + square(3)}");
+    println(f"double(square(4)): {double(square(4))}");
+    println(f"square(double(3)): {square(double(3))}");
+}

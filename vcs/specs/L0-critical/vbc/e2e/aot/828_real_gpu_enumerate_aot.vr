@@ -1,0 +1,41 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, gpu, real-opcode, enumerate
+// @expected-exit: 0
+
+// Tests REAL GPU device enumeration intrinsics through AOT (LLVM) pipeline.
+// Mirror of interpreter test 208. Exercises gpu_enumerate_cuda,
+// gpu_enumerate_metal, gpu_enumerate_vulkan.
+
+// GPU enumeration intrinsic declarations
+fn gpu_enumerate_cuda() -> Int { @intrinsic("GPU_ENUMERATE_CUDA") }
+fn gpu_enumerate_metal() -> Int { @intrinsic("GPU_ENUMERATE_METAL") }
+fn gpu_enumerate_vulkan() -> Int { @intrinsic("GPU_ENUMERATE_VULKAN") }
+fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Enumerate CUDA devices (may return empty list handle)
+    let cuda = gpu_enumerate_cuda();
+    // Just verify doesn't crash
+
+    // Test 2: Enumerate Metal devices (on macOS, may find real devices)
+    let metal = gpu_enumerate_metal();
+    // Just verify doesn't crash
+
+    // Test 3: Enumerate Vulkan devices
+    let vulkan = gpu_enumerate_vulkan();
+    // Just verify doesn't crash
+
+    // Test 4: Multiple enumerations are stable
+    let cuda2 = gpu_enumerate_cuda();
+    let metal2 = gpu_enumerate_metal();
+
+    // Test 5: Get device after enumeration still works
+    let dev = gpu_get_device();
+    if dev != 0 { errors = errors + 1; }
+
+    errors
+}

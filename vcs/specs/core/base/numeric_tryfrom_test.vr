@@ -1,0 +1,373 @@
+// =============================================================================
+// numeric_tryfrom_test.vr - TryFrom narrowing conversion tests
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, primitives, tryfrom, conversions, numeric
+// @description: Tests for TryFrom<Int> narrowing conversions to sized integer types.
+//               These are fundamental for production-quality numeric handling.
+//               Verifies bounds checking for Int → Int8/Int16/Int32/UInt8/UInt16/UInt32/UInt64
+//               and cross-sign conversions.
+// =============================================================================
+
+mount core.base.protocols.{TryFrom, Eq};
+mount core.base.primitives.TryFromIntError;
+
+// =============================================================================
+// Section 1: TryFrom<Int> for Int8
+// =============================================================================
+
+@test
+fn test_int_to_int8_valid_zero() {
+    let result = Int8.try_from(0);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int8_valid_positive() {
+    let result = Int8.try_from(42);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int8_valid_negative() {
+    let result = Int8.try_from(-42);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int8_max_boundary() {
+    let result = Int8.try_from(127);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int8_min_boundary() {
+    let result = Int8.try_from(-128);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int8_overflow_positive() {
+    let result = Int8.try_from(128);
+    assert(result.is_err());
+}
+
+@test
+fn test_int_to_int8_overflow_negative() {
+    let result = Int8.try_from(-129);
+    assert(result.is_err());
+}
+
+@test
+fn test_int_to_int8_large_overflow() {
+    let result = Int8.try_from(1000);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 2: TryFrom<Int> for Int16
+// =============================================================================
+
+@test
+fn test_int_to_int16_valid_zero() {
+    let result = Int16.try_from(0);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int16_valid() {
+    let result = Int16.try_from(1000);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int16_max_boundary() {
+    let result = Int16.try_from(32767);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int16_min_boundary() {
+    let result = Int16.try_from(-32768);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int16_overflow_positive() {
+    let result = Int16.try_from(32768);
+    assert(result.is_err());
+}
+
+@test
+fn test_int_to_int16_overflow_negative() {
+    let result = Int16.try_from(-32769);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 3: TryFrom<Int> for Int32
+// =============================================================================
+
+@test
+fn test_int_to_int32_valid_zero() {
+    let result = Int32.try_from(0);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int32_valid() {
+    let result = Int32.try_from(100000);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int32_max_boundary() {
+    let result = Int32.try_from(2147483647);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int32_min_boundary() {
+    let result = Int32.try_from(-2147483648);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int32_overflow_positive() {
+    let result = Int32.try_from(2147483648);
+    assert(result.is_err());
+}
+
+@test
+fn test_int_to_int32_overflow_negative() {
+    let result = Int32.try_from(-2147483649);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 4: TryFrom<Int> for UInt8
+// =============================================================================
+
+@test
+fn test_int_to_uint8_valid_zero() {
+    let result = UInt8.try_from(0);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint8_valid() {
+    let result = UInt8.try_from(200);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint8_max_boundary() {
+    let result = UInt8.try_from(255);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint8_overflow() {
+    let result = UInt8.try_from(256);
+    assert(result.is_err());
+}
+
+@test
+fn test_int_to_uint8_negative() {
+    let result = UInt8.try_from(-1);
+    assert(result.is_err());
+}
+
+@test
+fn test_int_to_uint8_large_negative() {
+    let result = UInt8.try_from(-1000);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 5: TryFrom<Int> for UInt16
+// =============================================================================
+
+@test
+fn test_int_to_uint16_valid_zero() {
+    let result = UInt16.try_from(0);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint16_valid() {
+    let result = UInt16.try_from(40000);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint16_max_boundary() {
+    let result = UInt16.try_from(65535);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint16_overflow() {
+    let result = UInt16.try_from(65536);
+    assert(result.is_err());
+}
+
+@test
+fn test_int_to_uint16_negative() {
+    let result = UInt16.try_from(-1);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 6: TryFrom<Int> for UInt32
+// =============================================================================
+
+@test
+fn test_int_to_uint32_valid_zero() {
+    let result = UInt32.try_from(0);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint32_valid() {
+    let result = UInt32.try_from(3000000000);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint32_max_boundary() {
+    let result = UInt32.try_from(4294967295);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint32_overflow() {
+    let result = UInt32.try_from(4294967296);
+    assert(result.is_err());
+}
+
+@test
+fn test_int_to_uint32_negative() {
+    let result = UInt32.try_from(-1);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 7: TryFrom<Int> for UInt64
+// =============================================================================
+
+@test
+fn test_int_to_uint64_valid_zero() {
+    let result = UInt64.try_from(0);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint64_valid() {
+    let result = UInt64.try_from(1000000);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint64_max_int() {
+    // Int.MAX is within UInt64 range
+    let result = UInt64.try_from(9223372036854775807);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint64_negative() {
+    let result = UInt64.try_from(-1);
+    assert(result.is_err());
+}
+
+@test
+fn test_int_to_uint64_large_negative() {
+    let result = UInt64.try_from(-9223372036854775808);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 8: Error type tests
+// =============================================================================
+
+@test
+fn test_tryfrom_error_is_descriptive() {
+    let result = Int8.try_from(200);
+    assert(result.is_err());
+    // Error should be TryFromIntError type
+}
+
+@test
+fn test_tryfrom_multiple_failures() {
+    let r1 = Int8.try_from(128);
+    let r2 = Int16.try_from(32768);
+    let r3 = UInt8.try_from(-1);
+    assert(r1.is_err());
+    assert(r2.is_err());
+    assert(r3.is_err());
+}
+
+@test
+fn test_tryfrom_multiple_successes() {
+    let r1 = Int8.try_from(0);
+    let r2 = Int16.try_from(0);
+    let r3 = Int32.try_from(0);
+    let r4 = UInt8.try_from(0);
+    let r5 = UInt16.try_from(0);
+    let r6 = UInt32.try_from(0);
+    let r7 = UInt64.try_from(0);
+    assert(r1.is_ok());
+    assert(r2.is_ok());
+    assert(r3.is_ok());
+    assert(r4.is_ok());
+    assert(r5.is_ok());
+    assert(r6.is_ok());
+    assert(r7.is_ok());
+}
+
+// =============================================================================
+// Section 9: Edge cases - boundary values
+// =============================================================================
+
+@test
+fn test_int_to_int8_one() {
+    let result = Int8.try_from(1);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int8_minus_one() {
+    let result = Int8.try_from(-1);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint8_one() {
+    let result = UInt8.try_from(1);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_uint16_one() {
+    let result = UInt16.try_from(1);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int32_large_negative() {
+    let result = Int32.try_from(-2000000000);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int_to_int32_large_positive() {
+    let result = Int32.try_from(2000000000);
+    assert(result.is_ok());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

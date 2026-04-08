@@ -1,0 +1,352 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, field
+// @timeout: 15000
+// @description: Tests the field tactic for field theory reasoning
+
+/// ============================================================
+/// FIELD TACTIC
+/// ============================================================
+///
+/// The field tactic extends ring to handle division in fields.
+/// It normalizes rational expressions by computing a common
+/// denominator and comparing numerators.
+
+// ------------------------------------------------------------
+// Basic Field Operations
+// ------------------------------------------------------------
+
+/// Division identities
+theorem field_div_one(a: Rational): a / 1 == a {
+    proof by field
+}
+
+theorem field_one_div(a: Rational)
+    requires a != 0
+    ensures 1 / a == a.inverse()
+{
+    proof by field
+}
+
+/// Self division
+theorem field_div_self(a: Rational)
+    requires a != 0
+    ensures a / a == 1
+{
+    proof by field
+}
+
+/// Zero divided by anything
+theorem field_zero_div(a: Rational)
+    requires a != 0
+    ensures 0 / a == 0
+{
+    proof by field
+}
+
+// ------------------------------------------------------------
+// Multiplicative Inverse
+// ------------------------------------------------------------
+
+/// Inverse properties
+theorem field_mul_inv(a: Rational)
+    requires a != 0
+    ensures a * (1/a) == 1
+{
+    proof by field
+}
+
+theorem field_inv_mul(a: Rational)
+    requires a != 0
+    ensures (1/a) * a == 1
+{
+    proof by field
+}
+
+/// Double inverse
+theorem field_inv_inv(a: Rational)
+    requires a != 0
+    ensures 1 / (1/a) == a
+{
+    proof by field
+}
+
+/// Inverse of product
+theorem field_inv_mul_distrib(a: Rational, b: Rational)
+    requires a != 0
+    requires b != 0
+    ensures 1 / (a * b) == (1/a) * (1/b)
+{
+    proof by field
+}
+
+// ------------------------------------------------------------
+// Division Properties
+// ------------------------------------------------------------
+
+/// Division as multiplication by inverse
+theorem field_div_mul_inv(a: Rational, b: Rational)
+    requires b != 0
+    ensures a / b == a * (1/b)
+{
+    proof by field
+}
+
+/// Division distributes over addition
+theorem field_div_add_distrib(a: Rational, b: Rational, c: Rational)
+    requires c != 0
+    ensures (a + b) / c == a/c + b/c
+{
+    proof by field
+}
+
+/// Multiplication of fractions
+theorem field_mul_fractions(a: Rational, b: Rational, c: Rational, d: Rational)
+    requires b != 0
+    requires d != 0
+    ensures (a/b) * (c/d) == (a*c) / (b*d)
+{
+    proof by field
+}
+
+/// Division of fractions
+theorem field_div_fractions(a: Rational, b: Rational, c: Rational, d: Rational)
+    requires b != 0
+    requires c != 0
+    requires d != 0
+    ensures (a/b) / (c/d) == (a*d) / (b*c)
+{
+    proof by field
+}
+
+/// Adding fractions
+theorem field_add_fractions(a: Rational, b: Rational, c: Rational, d: Rational)
+    requires b != 0
+    requires d != 0
+    ensures a/b + c/d == (a*d + b*c) / (b*d)
+{
+    proof by field
+}
+
+// ------------------------------------------------------------
+// Complex Rational Expressions
+// ------------------------------------------------------------
+
+/// Common denominator simplification
+theorem field_common_denom(a: Rational, b: Rational, c: Rational)
+    requires a != 0
+    requires b != 0
+    ensures c/a + c/b == c*(a + b)/(a*b)
+{
+    proof by field
+}
+
+/// Nested fractions
+theorem field_nested(a: Rational, b: Rational)
+    requires a != 0
+    requires b != 0
+    requires a + b != 0
+    ensures 1 / (1/a + 1/b) == (a*b) / (a + b)
+{
+    proof by field
+}
+
+/// Partial fractions pattern
+theorem field_partial_fractions(a: Rational, b: Rational, x: Rational)
+    requires a != b
+    requires x != a
+    requires x != b
+    ensures 1/((x - a)*(x - b)) == (1/(a - b)) * (1/(x - a) - 1/(x - b))
+{
+    proof by field
+}
+
+// ------------------------------------------------------------
+// Field Identities for Real Analysis
+// ------------------------------------------------------------
+
+/// Difference of reciprocals
+theorem field_diff_recip(a: Rational, b: Rational)
+    requires a != 0
+    requires b != 0
+    ensures 1/a - 1/b == (b - a)/(a*b)
+{
+    proof by field
+}
+
+/// Telescoping pattern
+theorem field_telescope(a: Rational, b: Rational)
+    requires a != 0
+    requires b != 0
+    requires a != b
+    ensures 1/(a*(a - b)) - 1/(b*(a - b)) == (b - a)/(a*b*(a - b))
+{
+    proof by field
+}
+
+/// Cross multiplication
+theorem field_cross_mul(a: Rational, b: Rational, c: Rational, d: Rational)
+    requires b != 0
+    requires d != 0
+    ensures (a/b == c/d) == (a*d == b*c)
+{
+    proof by field
+}
+
+// ------------------------------------------------------------
+// Field with Polynomials
+// ------------------------------------------------------------
+
+/// Polynomial over field
+theorem field_poly_frac(x: Rational)
+    requires x != 0
+    requires x != 1
+    ensures (x*x - 1)/(x - 1) == x + 1
+{
+    // (x^2 - 1) = (x-1)(x+1)
+    proof by field
+}
+
+/// Rational function simplification
+theorem field_rational_func(x: Rational)
+    requires x != 0
+    requires x != -1
+    ensures (x*x + x) / (x + 1) == x
+{
+    // x(x+1) / (x+1) = x
+    proof by field
+}
+
+/// Complex rational expression
+theorem field_complex_rational(x: Rational)
+    requires x != 0
+    requires x != 1
+    requires x != -1
+    ensures (x*x*x - 1)/((x - 1)*(x*x + x + 1)) == 1
+{
+    // x^3 - 1 = (x-1)(x^2 + x + 1)
+    proof by field
+}
+
+// ------------------------------------------------------------
+// Field with Multiple Variables
+// ------------------------------------------------------------
+
+/// Two variable simplification
+theorem field_two_var(x: Rational, y: Rational)
+    requires x != 0
+    requires y != 0
+    requires x != y
+    ensures x/y - y/x == (x*x - y*y)/(x*y)
+{
+    proof by field
+}
+
+/// Three variable expression
+theorem field_three_var(a: Rational, b: Rational, c: Rational)
+    requires a != 0
+    requires b != 0
+    requires c != 0
+    ensures 1/a + 1/b + 1/c == (b*c + a*c + a*b)/(a*b*c)
+{
+    proof by field
+}
+
+// ------------------------------------------------------------
+// Field vs Ring
+// ------------------------------------------------------------
+
+/// Field extends ring for division
+theorem field_extends_ring(a: Rational, b: Rational)
+    requires a != 0
+    ensures (a + b) / a == 1 + b/a
+{
+    // Ring can't handle this, field can
+    proof by field
+}
+
+/// Ring identities still work
+theorem field_ring_subset(a: Rational, b: Rational):
+    (a + b) * (a - b) == a*a - b*b
+{
+    proof by field  // Could also use ring
+}
+
+// ------------------------------------------------------------
+// Float Field (Approximate)
+// ------------------------------------------------------------
+
+/// Float field operations (with tolerance)
+theorem field_float_div(a: Float, b: Float)
+    requires b != 0.0
+    requires is_finite(a)
+    requires is_finite(b)
+    ensures approx_eq(a / b * b, a, 1e-10)
+{
+    proof by field
+}
+
+// ------------------------------------------------------------
+// Field Extensions
+// ------------------------------------------------------------
+
+/// Complex number field
+theorem field_complex(a: Complex, b: Complex)
+    requires b != Complex.zero()
+    ensures a / b * b == a
+{
+    proof by field
+
+/// Gaussian rationals
+theorem field_gaussian(a: GaussianRational, b: GaussianRational)
+    requires b.norm() != 0
+    ensures (a * b.conjugate()) / b.norm() * b == a * b.conjugate()
+{
+    proof by field
+
+// ------------------------------------------------------------
+// Field Tactic Configuration
+// ------------------------------------------------------------
+
+/// Field with explicit assumptions
+theorem field_with_assumptions(a: Rational, b: Rational, c: Rational)
+    requires a != 0
+    requires b != 0
+    requires c != 0
+    ensures a*b*c / (a*b) == c
+{
+    proof by field
+
+/// Field with simplification depth
+theorem field_deep_simplify(x: Rational)
+    requires x != 0
+    requires x != 1
+    ensures 1/(1 - 1/(1 + 1/x)) == (x + 1)/(x)
+{
+    proof by field
+
+// ------------------------------------------------------------
+// Field Failures
+// ------------------------------------------------------------
+
+/// Field cannot prove without nonzero condition
+// @test: verify-fail
+// @expected-error: cannot prove denominator nonzero
+theorem field_missing_nonzero_fail(a: Rational, b: Rational):
+    a / b == a * (1/b)
+{
+    // Missing requires b != 0
+    proof by field  // FAILS
+}
+
+/// Field cannot prove ordering
+// @test: verify-fail
+// @expected-error: field cannot prove inequalities
+theorem field_ordering_fail(a: Rational)
+    requires a > 0
+    ensures 1/a > 0
+{
+    // Field handles equalities, not inequalities
+    proof by field  // FAILS
+}

@@ -1,0 +1,140 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, equality, substitution, transport
+
+/// Substitution and transport - using equality proofs to
+/// move values between types and transform expressions.
+
+/// Equality witness
+type EqWitness<T> is | EqRefl;
+
+/// Basic substitution: if a = b and P(a), then P(b)
+fn subst<T>(proof: EqWitness<T>, value: T) -> T {
+    match proof { EqRefl => value }
+}
+
+/// Transport: move a value along an equality proof
+fn transport<A>(proof: EqWitness<A>, x: A) -> A {
+    match proof { EqRefl => x }
+}
+
+/// Coerce: use equality to convert between equal types
+fn coerce<A>(proof: EqWitness<A>, x: A) -> A {
+    match proof { EqRefl => x }
+}
+
+/// Substitution in context: f(a) can be replaced by f(b) when a = b
+fn subst_in_context<A, B>(
+    f: fn(A) -> B,
+    proof: EqWitness<A>,
+    value: A
+) -> B {
+    f(transport(proof, value))
+}
+
+/// Transport preserves identity
+fn transport_refl<T>(x: T) -> T {
+    transport(EqRefl, x)
+}
+
+/// Transport composes with transitivity
+fn transport_trans<T>(
+    p: EqWitness<T>,
+    q: EqWitness<T>,
+    x: T
+) -> T {
+    transport(q, transport(p, x))
+}
+
+/// Substitution in equality chains
+fn chain_subst<T>(
+    p: EqWitness<T>,
+    q: EqWitness<T>,
+    r: EqWitness<T>,
+    x: T
+) -> T {
+    transport(r, transport(q, transport(p, x)))
+}
+
+/// Example: substitution in arithmetic context
+fn arith_subst(proof: EqWitness<Int>, x: Int) -> Int {
+    let substituted = transport(proof, x);
+    substituted * 2 + 1
+}
+
+/// Example: substitution in list context
+fn list_subst<T>(proof: EqWitness<List<T>>, xs: List<T>) -> Int {
+    let substituted = transport(proof, xs);
+    substituted.len()
+}
+
+/// Dependent substitution: substitute in a dependent context
+fn dep_subst<A, B>(
+    proof: EqWitness<A>,
+    f: fn(A) -> B,
+    x: A
+) -> B {
+    f(transport(proof, x))
+}
+
+/// Inverse transport: go back along an equality
+fn inv_transport<T>(proof: EqWitness<T>, x: T) -> T {
+    // symm(proof) followed by transport
+    match proof { EqRefl => x }
+}
+
+/// Transport roundtrip: transport then inverse transport = identity
+fn transport_roundtrip<T>(proof: EqWitness<T>, x: T) -> T {
+    inv_transport(proof, transport(proof, x))
+}
+
+/// Substitution in pairs
+fn pair_subst<A, B>(
+    proof_a: EqWitness<A>,
+    proof_b: EqWitness<B>,
+    pair: (A, B)
+) -> (A, B) {
+    (transport(proof_a, pair.0), transport(proof_b, pair.1))
+}
+
+/// Substitution preserves structure
+fn map_subst<T>(
+    proof: EqWitness<T>,
+    xs: List<T>,
+    f: fn(T) -> T
+) -> List<T> {
+    xs.map(|x| transport(proof, f(x)))
+}
+
+fn main() {
+    // Basic substitution
+    let r: EqWitness<Int> = EqRefl;
+    let value = 42;
+    let result = subst(r, value);
+    assert(result == 42);
+
+    // Transport
+    let transported = transport(r, 100);
+    assert(transported == 100);
+
+    // Transport preserves identity
+    let preserved = transport_refl(55);
+    assert(preserved == 55);
+
+    // Roundtrip
+    let roundtrip = transport_roundtrip(r, 77);
+    assert(roundtrip == 77);
+
+    // Pair substitution
+    let pair = (10, "hello");
+    let r_int: EqWitness<Int> = EqRefl;
+    let r_text: EqWitness<Text> = EqRefl;
+    let subst_pair = pair_subst(r_int, r_text, pair);
+    assert(subst_pair.0 == 10);
+    assert(subst_pair.1 == "hello");
+
+    // Context substitution
+    let ctx_result = subst_in_context(|x: Int| x * 3, r, 7);
+    assert(ctx_result == 21);
+}

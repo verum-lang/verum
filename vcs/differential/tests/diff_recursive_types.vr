@@ -1,0 +1,271 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, recursive, tree, sum-type
+// @timeout: 10000
+// @description: Recursive type operations must produce identical results across tiers
+
+/// Recursive type differential test.
+/// Builds trees, traverses, counts nodes — must produce same output on both tiers.
+
+type Tree is Leaf(Int) | Node { left: Heap<Tree>, right: Heap<Tree>, value: Int };
+
+fn main() -> Int {
+    test_single_leaf();
+    test_simple_tree();
+    test_deep_tree();
+    test_tree_operations();
+    test_linked_list();
+    0
+}
+
+/// Single leaf node
+fn test_single_leaf() {
+    print("=== Single Leaf ===");
+    let t = Leaf(42);
+    print(f"count = {count_nodes(&t)}");
+    print(f"sum = {sum_tree(&t)}");
+    print(f"depth = {tree_depth(&t)}");
+}
+
+/// Simple 3-node tree
+fn test_simple_tree() {
+    print("\n=== Simple Tree ===");
+    let t = Node {
+        left: Heap(Leaf(1)),
+        right: Heap(Leaf(3)),
+        value: 2,
+    };
+    print(f"count = {count_nodes(&t)}");
+    print(f"sum = {sum_tree(&t)}");
+    print(f"depth = {tree_depth(&t)}");
+    print(f"min = {tree_min(&t)}");
+    print(f"max = {tree_max(&t)}");
+}
+
+/// Deeper unbalanced tree
+fn test_deep_tree() {
+    print("\n=== Deep Tree ===");
+    // Build:        10
+    //             /    \
+    //           5       15
+    //          / \     / \
+    //         2   7  12   20
+    //        /
+    //       1
+    let t = Node {
+        left: Heap(Node {
+            left: Heap(Node {
+                left: Heap(Leaf(1)),
+                right: Heap(Leaf(2)),
+                value: 2,
+            }),
+            right: Heap(Leaf(7)),
+            value: 5,
+        }),
+        right: Heap(Node {
+            left: Heap(Leaf(12)),
+            right: Heap(Leaf(20)),
+            value: 15,
+        }),
+        value: 10,
+    };
+    print(f"count = {count_nodes(&t)}");
+    print(f"sum = {sum_tree(&t)}");
+    print(f"depth = {tree_depth(&t)}");
+    print(f"min = {tree_min(&t)}");
+    print(f"max = {tree_max(&t)}");
+
+    // In-order traversal
+    let mut result: List<Int> = [];
+    inorder(&t, &mut result);
+    print(f"inorder = {result}");
+}
+
+/// Tree operations: map, fold, mirror
+fn test_tree_operations() {
+    print("\n=== Tree Operations ===");
+    let t = Node {
+        left: Heap(Leaf(1)),
+        right: Heap(Node {
+            left: Heap(Leaf(3)),
+            right: Heap(Leaf(5)),
+            value: 4,
+        }),
+        value: 2,
+    };
+
+    // Count leaves
+    print(f"leaves = {count_leaves(&t)}");
+
+    // Fold (sum using fold)
+    let fold_sum = fold_tree(&t, 0, fn(acc: Int, val: Int) -> Int { acc + val });
+    print(f"fold sum = {fold_sum}");
+
+    // Fold (product)
+    let fold_prod = fold_tree(&t, 1, fn(acc: Int, val: Int) -> Int { acc * val });
+    print(f"fold product = {fold_prod}");
+
+    // Check contains
+    print(f"contains 3 = {tree_contains(&t, 3)}");
+    print(f"contains 7 = {tree_contains(&t, 7)}");
+}
+
+/// Linked list as recursive type
+fn test_linked_list() {
+    print("\n=== Linked List ===");
+
+    type ListNode is Nil | Cons { head: Int, tail: Heap<ListNode> };
+
+    // Build list: 1 -> 2 -> 3 -> 4 -> 5
+    let list = Cons {
+        head: 1,
+        tail: Heap(Cons {
+            head: 2,
+            tail: Heap(Cons {
+                head: 3,
+                tail: Heap(Cons {
+                    head: 4,
+                    tail: Heap(Cons {
+                        head: 5,
+                        tail: Heap(Nil),
+                    }),
+                }),
+            }),
+        }),
+    };
+
+    print(f"length = {list_length(&list)}");
+    print(f"sum = {list_sum(&list)}");
+
+    let mut items: List<Int> = [];
+    list_to_vec(&list, &mut items);
+    print(f"items = {items}");
+}
+
+// --- Tree helper functions ---
+
+@allow(unbounded_recursion)
+fn count_nodes(t: &Tree) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node { left, right, .. } => 1 + count_nodes(left) + count_nodes(right),
+    }
+}
+
+@allow(unbounded_recursion)
+fn sum_tree(t: &Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Node { left, right, value } => value + sum_tree(left) + sum_tree(right),
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_depth(t: &Tree) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node { left, right, .. } => {
+            let ld = tree_depth(left);
+            let rd = tree_depth(right);
+            1 + if ld > rd { ld } else { rd }
+        },
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_min(t: &Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Node { left, right, value } => {
+            let lm = tree_min(left);
+            let rm = tree_min(right);
+            let m = if lm < rm { lm } else { rm };
+            if value < m { value } else { m }
+        },
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_max(t: &Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Node { left, right, value } => {
+            let lm = tree_max(left);
+            let rm = tree_max(right);
+            let m = if lm > rm { lm } else { rm };
+            if value > m { value } else { m }
+        },
+    }
+}
+
+@allow(unbounded_recursion)
+fn inorder(t: &Tree, result: &mut List<Int>) {
+    match t {
+        Leaf(v) => result.push(v),
+        Node { left, right, value } => {
+            inorder(left, result);
+            result.push(value);
+            inorder(right, result);
+        },
+    }
+}
+
+@allow(unbounded_recursion)
+fn count_leaves(t: &Tree) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node { left, right, .. } => count_leaves(left) + count_leaves(right),
+    }
+}
+
+@allow(unbounded_recursion)
+fn fold_tree(t: &Tree, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    match t {
+        Leaf(v) => f(init, v),
+        Node { left, right, value } => {
+            let acc = fold_tree(left, init, f);
+            let acc = f(acc, value);
+            fold_tree(right, acc, f)
+        },
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_contains(t: &Tree, target: Int) -> Bool {
+    match t {
+        Leaf(v) => v == target,
+        Node { left, right, value } => {
+            value == target || tree_contains(left, target) || tree_contains(right, target)
+        },
+    }
+}
+
+// --- Linked list helpers ---
+
+@allow(unbounded_recursion)
+fn list_length(node: &ListNode) -> Int {
+    match node {
+        Nil => 0,
+        Cons { tail, .. } => 1 + list_length(tail),
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_sum(node: &ListNode) -> Int {
+    match node {
+        Nil => 0,
+        Cons { head, tail } => head + list_sum(tail),
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_to_vec(node: &ListNode, result: &mut List<Int>) {
+    match node {
+        Nil => {},
+        Cons { head, tail } => {
+            result.push(head);
+            list_to_vec(tail, result);
+        },
+    }
+}

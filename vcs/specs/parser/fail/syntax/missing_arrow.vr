@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, arrow, error
+// @description: Test missing arrow in function return type
+// @expected-error: E032
+
+fn test_missing_arrow() Int {
+    42
+}

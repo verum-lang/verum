@@ -1,0 +1,99 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: mmio, parser, accessors, register
+// @timeout: 5000
+// @description: Test Register type accessor method parsing
+//
+// Spec: docs/architecture/low-level-features.md - Section 3.1 (Type-Safe Registers)
+
+/// Access mode protocol.
+public type AccessMode is protocol {};
+
+/// Read-only access mode.
+public type ReadOnly is ();
+implement AccessMode for ReadOnly {}
+
+/// Write-only access mode.
+public type WriteOnly is ();
+implement AccessMode for WriteOnly {}
+
+/// Read-write access mode.
+public type ReadWrite is ();
+implement AccessMode for ReadWrite {}
+
+/// Write-one-to-clear access mode (for interrupt flags).
+public type WriteOneToClear is ();
+implement AccessMode for WriteOneToClear {}
+
+/// Type-safe MMIO register with access mode guarantees.
+@repr(transparent)
+public type Register<T: Copy, Mode: AccessMode> is {
+    addr: *mut T,
+};
+
+/// Read-write register implementation.
+implement<T: Copy> Register<T, ReadWrite> {
+    @inline(always)
+    fn read(&self) -> T {
+        volatile_load(self.addr)
+    }
+
+    @inline(always)
+    fn write(&self, value: T) {
+        volatile_store(self.addr, value)
+    }
+
+    @inline(always)
+    fn modify<F: Fn(T) -> T>(&self, f: F) {
+        let val = self.read();
+        self.write(f(val));
+    }
+}
+
+/// Read-only register implementation.
+implement<T: Copy> Register<T, ReadOnly> {
+    @inline(always)
+    fn read(&self) -> T {
+        volatile_load(self.addr)
+    }
+}
+
+/// Write-only register implementation.
+implement<T: Copy> Register<T, WriteOnly> {
+    @inline(always)
+    fn write(&self, value: T) {
+        volatile_store(self.addr, value)
+    }
+}
+
+/// Write-one-to-clear register implementation.
+implement<T: Copy> Register<T, WriteOneToClear> {
+    @inline(always)
+    fn read(&self) -> T {
+        volatile_load(self.addr)
+    }
+
+    @inline(always)
+    fn clear_bits(&self, bits: T) {
+        volatile_store(self.addr, bits)
+    }
+}
+
+/// Volatile intrinsics (declared for parsing).
+@intrinsic("volatile_load")
+fn volatile_load<T>(ptr: *mut T) -> T;
+
+@intrinsic("volatile_store")
+fn volatile_store<T>(ptr: *mut T, value: T);
+
+/// Test using the register accessors.
+fn test_register_access() -> Int {
+    // Note: This is parsing test only - actual execution
+    // would require hardware or mock implementation
+    0
+}
+
+fn main() -> Int {
+    test_register_access()
+}

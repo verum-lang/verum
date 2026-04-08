@@ -1,0 +1,589 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, refinement, tier-oracle, types
+// @timeout: 20000
+
+/// Comprehensive refinement type tests for Tier 0 vs Tier 3 equivalence.
+/// Tests compile-time refinement verification, runtime validation,
+/// and SMT-backed invariant checking to ensure identical behavior
+/// across execution tiers.
+
+fn main() {
+    test_basic_refinements();
+    test_numeric_refinements();
+    test_collection_refinements();
+    test_compound_refinements();
+    test_function_refinements();
+    test_runtime_refinement_validation();
+    test_refinement_propagation();
+    test_refinement_subtyping();
+    test_assertions();
+    test_dependent_types();
+}
+
+/// Basic refinement types
+fn test_basic_refinements() {
+    println("=== Basic Refinements ===");
+
+    // Simple inline refinement with implicit 'it'
+    type Positive is Int{> 0};
+    type NonNegative is Int{>= 0};
+    type Negative is Int{< 0};
+
+    let pos: Positive = 42;
+    let non_neg: NonNegative = 0;
+    let neg: Negative = -10;
+
+    println(f"Positive: {pos}");
+    println(f"NonNegative: {non_neg}");
+    println(f"Negative: {neg}");
+
+    // Explicit 'it' variable
+    type Even is Int{it % 2 == 0};
+    type Odd is Int{it % 2 != 0};
+
+    let even: Even = 42;
+    let odd: Odd = 17;
+
+    println(f"Even: {even}");
+    println(f"Odd: {odd}");
+
+    // Boolean refinement
+    type IsTrue is Bool{== true};
+    type IsFalse is Bool{== false};
+
+    let t: IsTrue = true;
+    let f: IsFalse = false;
+
+    println(f"IsTrue: {t}");
+    println(f"IsFalse: {f}");
+
+    // Text refinements
+    type NonEmpty is Text{len(it) > 0};
+    type ShortText is Text{len(it) <= 10};
+
+    let non_empty: NonEmpty = "hello";
+    let short: ShortText = "brief";
+
+    println(f"NonEmpty: \"{non_empty}\"");
+    println(f"ShortText: \"{short}\"");
+}
+
+/// Numeric range refinements
+fn test_numeric_refinements() {
+    println("\n=== Numeric Refinements ===");
+
+    // Bounded integers
+    type Byte is Int{>= 0 && <= 255};
+    type Percentage is Int{>= 0 && <= 100};
+    type BoundedFloat is Float{>= 0.0 && <= 1.0};
+
+    let byte: Byte = 128;
+    let percent: Percentage = 75;
+    let prob: BoundedFloat = 0.5;
+
+    println(f"Byte: {byte}");
+    println(f"Percentage: {percent}");
+    println(f"BoundedFloat: {prob}");
+
+    // Array index type
+    fn get_element<const N: Int>(arr: [Int; N], idx: Int{>= 0 && < N}) -> Int {
+        arr[idx]  // Guaranteed safe by refinement
+    }
+
+    let arr = [10, 20, 30, 40, 50];
+    println(f"arr[2] = {get_element(arr, 2)}");
+
+    // Non-zero for division
+    type NonZero is Int{!= 0};
+
+    fn safe_div(a: Int, b: NonZero) -> Int {
+        a / b  // Cannot divide by zero
+    }
+
+    println(f"safe_div(100, 5) = {safe_div(100, 5)}");
+
+    // Power of two
+    type PowerOfTwo is Int{> 0 && (it & (it - 1)) == 0};
+
+    let pow2: PowerOfTwo = 16;
+    println(f"PowerOfTwo: {pow2}");
+
+    // Float special values
+    type Finite is Float{!it.is_nan() && !it.is_infinite()};
+
+    let finite: Finite = 3.14159;
+    println(f"Finite: {finite}");
+}
+
+/// Collection refinements
+fn test_collection_refinements() {
+    println("\n=== Collection Refinements ===");
+
+    // Non-empty list
+    type NonEmptyList<T> is List<T>{len(it) > 0};
+
+    fn head<T>(list: NonEmptyList<T>) -> T {
+        list[0]  // Safe: list guaranteed non-empty
+    }
+
+    let nums: NonEmptyList<Int> = List.from([1, 2, 3]);
+    println(f"head = {head(nums)}");
+
+    // Bounded list
+    type SmallList<T> is List<T>{len(it) <= 10};
+
+    let small: SmallList<Int> = List.from([1, 2, 3]);
+    println(f"SmallList len = {small.len()}");
+
+    // Sorted list
+    type SortedList is List<Int>{
+        forall i in 0..(len(it)-1): it[i] <= it[i+1]
+    };
+
+    let sorted: SortedList = List.from([1, 2, 3, 4, 5]);
+    println(f"SortedList: {sorted}");
+
+    // Unique elements
+    type UniqueList<T: Eq> is List<T>{
+        forall i, j in 0..len(it):
+            i != j implies it[i] != it[j]
+    };
+
+    let unique: UniqueList<Int> = List.from([1, 2, 3, 4, 5]);
+    println(f"UniqueList: {unique}");
+
+    // Map invariants
+    type NonEmptyMap<K, V> is Map<K, V>{len(it) > 0};
+
+    let map: NonEmptyMap<Text, Int> = Map.from([("a", 1), ("b", 2)]);
+    println(f"NonEmptyMap len = {map.len()}");
+}
+
+/// Compound refinements
+fn test_compound_refinements() {
+    println("\n=== Compound Refinements ===");
+
+    // Conjunction
+    type PositiveEven is Int{> 0 && it % 2 == 0};
+
+    let pos_even: PositiveEven = 42;
+    println(f"PositiveEven: {pos_even}");
+
+    // Disjunction
+    type SmallOrLarge is Int{< 10 || > 1000};
+
+    let small: SmallOrLarge = 5;
+    let large: SmallOrLarge = 5000;
+    println(f"SmallOrLarge: {small}, {large}");
+
+    // Implication
+    type ValidAge is Int{
+        >= 0 &&
+        (>= 18 implies true) &&  // No additional constraint
+        (<= 120)
+    };
+
+    let age: ValidAge = 25;
+    println(f"ValidAge: {age}");
+
+    // Type with field refinements
+    type Point is {
+        x: Int{>= -100 && <= 100},
+        y: Int{>= -100 && <= 100},
+    };
+
+    let point = Point { x: 50, y: -30 };
+    println(f"Point: ({point.x}, {point.y})");
+
+    // Type-level refinement
+    type Rectangle is {
+        width: Int{> 0},
+        height: Int{> 0},
+    } where {
+        width * height <= 10000  // Area constraint
+    };
+
+    let rect = Rectangle { width: 50, height: 100 };
+    println(f"Rectangle: {rect.width}x{rect.height}");
+
+    // Dependent type fields
+    type BoundedArray is {
+        max_size: Int{> 0},
+        data: List<Int>{len(it) <= max_size},
+    };
+
+    let bounded = BoundedArray {
+        max_size: 5,
+        data: List.from([1, 2, 3]),
+    };
+    println(f"BoundedArray: max={bounded.max_size}, len={bounded.data.len()}");
+}
+
+/// Function with refinement contracts
+fn test_function_refinements() {
+    println("\n=== Function Refinements ===");
+
+    // Pre-condition
+    fn sqrt(x: Float{>= 0.0}) -> Float {
+        x.sqrt()
+    }
+    println(f"sqrt(16.0) = {sqrt(16.0)}");
+
+    // Post-condition
+    fn abs(x: Int) -> Int{>= 0} {
+        if x < 0 { -x } else { x }
+    }
+    println(f"abs(-42) = {abs(-42)}");
+
+    // Pre and post conditions
+    fn increment(x: Int{>= 0}) -> Int{> x} {
+        x + 1
+    }
+    println(f"increment(5) = {increment(5)}");
+
+    // Relation between input and output
+    fn double(x: Int) -> Int{== x * 2} {
+        x + x
+    }
+    println(f"double(21) = {double(21)}");
+
+    // Multiple parameters with relationships
+    fn safe_substring(
+        s: Text,
+        start: Int{>= 0},
+        end: Int{>= start && <= len(s)}
+    ) -> Text {
+        s[start..end]
+    }
+
+    let text = "Hello, World!";
+    println(f"substring = \"{safe_substring(text, 0, 5)}\"");
+
+    // Ensuring invariants
+    fn sorted_insert(
+        list: List<Int>{forall i in 0..(len(it)-1): it[i] <= it[i+1]},
+        value: Int
+    ) -> List<Int>{forall i in 0..(len(it)-1): it[i] <= it[i+1]} {
+        let mut result = [];
+        let mut inserted = false;
+
+        for item in list {
+            if !inserted && value <= item {
+                result.push(value);
+                inserted = true;
+            }
+            result.push(item);
+        }
+
+        if !inserted {
+            result.push(value);
+        }
+
+        result
+    }
+
+    let sorted = List.from([1, 3, 5, 7, 9]);
+    let result = sorted_insert(sorted, 4);
+    println(f"sorted_insert: {result}");
+}
+
+/// Runtime refinement validation
+fn test_runtime_refinement_validation() {
+    println("\n=== Runtime Validation ===");
+
+    // Runtime check with refine!
+    fn validate_percentage(value: Int) -> Maybe<Int{>= 0 && <= 100}> {
+        refine(value, >= 0 && <= 100)
+    }
+
+    println(f"validate(50) = {validate_percentage(50)}");
+    println(f"validate(-10) = {validate_percentage(-10)}");
+    println(f"validate(150) = {validate_percentage(150)}");
+
+    // Assert refinement
+    fn checked_byte(value: Int) -> Int{>= 0 && <= 255} {
+        assert_refine(value, >= 0 && <= 255, "value must be a byte")
+    }
+
+    let byte = checked_byte(128);
+    println(f"checked_byte(128) = {byte}");
+
+    // Refine or else
+    fn to_positive(value: Int) -> Int{> 0} {
+        value.refine(> 0).unwrap_or(1)
+    }
+
+    println(f"to_positive(42) = {to_positive(42)}");
+    println(f"to_positive(-5) = {to_positive(-5)}");
+    println(f"to_positive(0) = {to_positive(0)}");
+
+    // Conditional refinement
+    fn process(value: Int) {
+        if value >= 0 {
+            // In this branch, compiler knows value: Int{>= 0}
+            let non_neg: Int{>= 0} = value;
+            println(f"non-negative: {non_neg}");
+        } else {
+            // In this branch, compiler knows value: Int{< 0}
+            let neg: Int{< 0} = value;
+            println(f"negative: {neg}");
+        }
+    }
+
+    process(10);
+    process(-5);
+}
+
+/// Refinement propagation
+fn test_refinement_propagation() {
+    println("\n=== Refinement Propagation ===");
+
+    // Propagation through assignment
+    type Positive is Int{> 0};
+
+    let x: Positive = 42;
+    let y = x;  // y: Positive (refinement propagates)
+    let z = y + 1;  // z: Int{> 1} (refinement refined)
+    println(f"propagated: x={x}, y={y}, z={z}");
+
+    // Propagation through match
+    fn categorize(n: Int) -> Text {
+        match n {
+            x if x < 0 => {
+                // x: Int{< 0}
+                let neg: Int{< 0} = x;
+                "negative"
+            },
+            0 => "zero",
+            x => {
+                // x: Int{> 0}
+                let pos: Int{> 0} = x;
+                "positive"
+            },
+        }
+    }
+
+    println(f"categorize(-5) = {categorize(-5)}");
+    println(f"categorize(0) = {categorize(0)}");
+    println(f"categorize(10) = {categorize(10)}");
+
+    // Propagation through loop invariants
+    fn sum_positive(items: List<Int{> 0}>) -> Int{> 0} {
+        let mut sum: Int{> 0} = items[0];  // Safe: items is non-empty per caller
+        for i in 1..items.len() {
+            sum = sum + items[i];  // sum stays positive
+        }
+        sum
+    }
+
+    let positives: List<Int{> 0}> = List.from([1, 2, 3, 4, 5]);
+    println(f"sum_positive = {sum_positive(positives)}");
+}
+
+/// Refinement subtyping
+fn test_refinement_subtyping() {
+    println("\n=== Refinement Subtyping ===");
+
+    // More specific is subtype of less specific
+    type Positive is Int{> 0};
+    type NonNegative is Int{>= 0};
+    type AnyInt is Int;
+
+    fn takes_non_negative(x: NonNegative) {
+        println(f"non_negative: {x}");
+    }
+
+    fn takes_any_int(x: AnyInt) {
+        println(f"any_int: {x}");
+    }
+
+    let pos: Positive = 42;
+
+    // Positive <: NonNegative <: Int
+    takes_non_negative(pos);  // OK: Positive <: NonNegative
+    takes_any_int(pos);       // OK: Positive <: Int
+
+    // Contravariance in function parameters
+    fn higher_order<F: Fn(NonNegative) -> Int>(f: F) {
+        let result = f(10);
+        println(f"higher_order result: {result}");
+    }
+
+    fn accepts_positive(x: Positive) -> Int { x * 2 }
+    fn accepts_any(x: Int) -> Int { x.abs() }
+
+    // Can pass Fn(Int) where Fn(NonNegative) expected
+    higher_order(accepts_any);
+
+    // Width subtyping for types
+    type Base is {
+        x: Int,
+    };
+
+    type Extended is {
+        x: Int{> 0},  // More refined
+        y: Int,       // Additional field
+    };
+
+    fn takes_base(b: Base) {
+        println(f"base.x = {b.x}");
+    }
+
+    let ext = Extended { x: 42, y: 100 };
+    // Extended can be used where Base expected (structural subtyping)
+    takes_base(ext.into());
+}
+
+/// Assertions and invariants
+fn test_assertions() {
+    println("\n=== Assertions ===");
+
+    // Basic assert
+    let x = 42;
+    assert(x > 0, "x must be positive");
+    println(f"after assert: x = {x}");
+
+    // Assert with computed message
+    let y = 10;
+    assert(y >= 0 && y <= 100, f"y={y} must be in range [0, 100]");
+    println(f"after assert: y = {y}");
+
+    // Debug assert (only in debug builds)
+    debug_assert(x + y == 52, "math still works");
+    println("debug_assert passed");
+
+    // Static assert (compile-time)
+    static_assert(Int.size >= 8, "Int must be at least 64 bits");
+    println("static_assert passed");
+
+    // Loop invariant
+    fn binary_search(arr: List<Int>, target: Int) -> Maybe<Int> {
+        let mut low = 0;
+        let mut high = arr.len() - 1;
+
+        while low <= high {
+            // Invariant: if target exists, it's in arr[low..=high]
+            invariant(low <= high && low >= 0 && high < arr.len());
+
+            let mid = low + (high - low) / 2;
+            let value = arr[mid];
+
+            if value == target {
+                return Some(mid);
+            } else if value < target {
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        None
+    }
+
+    let sorted = List.from([1, 3, 5, 7, 9, 11, 13, 15]);
+    println(f"binary_search(7) = {binary_search(sorted, 7)}");
+    println(f"binary_search(6) = {binary_search(sorted, 6)}");
+
+    // Class invariant
+    type BankAccount is {
+        balance: Int{>= 0},
+        overdraft_limit: Int{>= 0},
+    };
+
+    implement BankAccount {
+        @invariant(self.balance >= -self.overdraft_limit)
+        fn withdraw(&mut self, amount: Int{> 0}) -> Result<(), Text> {
+            if self.balance - amount < -self.overdraft_limit {
+                return Err("insufficient funds");
+            }
+            self.balance = self.balance - amount;
+            Ok(())
+        }
+    }
+
+    let mut account = BankAccount { balance: 100, overdraft_limit: 50 };
+    println(f"withdraw(30) = {account.withdraw(30)}");
+    println(f"balance = {account.balance}");
+}
+
+/// Dependent types
+fn test_dependent_types() {
+    println("\n=== Dependent Types ===");
+
+    // Length-indexed vector
+    type SizedArray<T, const N: Int> is {
+        data: [T; N],
+    };
+
+    implement<T, const N: Int> SizedArray<T, N> {
+        fn len(&self) -> Int{== N} {
+            N
+        }
+
+        fn get(&self, idx: Int{>= 0 && < N}) -> &T {
+            &self.data[idx]
+        }
+
+        fn append<const M: Int>(self, other: SizedArray<T, M>) -> SizedArray<T, N + M> {
+            let mut data = [T.default(); N + M];
+            for i in 0..N {
+                data[i] = self.data[i];
+            }
+            for i in 0..M {
+                data[N + i] = other.data[i];
+            }
+            SizedArray { data }
+        }
+    }
+
+    let v1: SizedArray<Int, 3> = SizedArray { data: [1, 2, 3] };
+    let v2: SizedArray<Int, 2> = SizedArray { data: [4, 5] };
+    let v3: SizedArray<Int, 5> = v1.append(v2);
+
+    println(f"v3.len() = {v3.len()}");
+    println(f"v3[2] = {v3.get(2)}");
+
+    // Matrix with dimension tracking
+    type Matrix<T, const R: Int, const C: Int> is {
+        data: [[T; C]; R],
+    };
+
+    implement<T: Num, const R: Int, const C: Int> Matrix<T, R, C> {
+        fn mul<const K: Int>(self, other: Matrix<T, C, K>) -> Matrix<T, R, K> {
+            let mut result = [[T.zero(); K]; R];
+            for i in 0..R {
+                for j in 0..K {
+                    for k in 0..C {
+                        result[i][j] = result[i][j] + self.data[i][k] * other.data[k][j];
+                    }
+                }
+            }
+            Matrix { data: result }
+        }
+    }
+
+    let m1: Matrix<Int, 2, 3> = Matrix { data: [[1, 2, 3], [4, 5, 6]] };
+    let m2: Matrix<Int, 3, 2> = Matrix { data: [[7, 8], [9, 10], [11, 12]] };
+    let m3: Matrix<Int, 2, 2> = m1.mul(m2);
+
+    println(f"Matrix multiplication result: {m3.data}");
+
+    // Proof terms
+    type Proof<P> is (){P};
+
+    fn prove_positive(x: Int{> 0}) -> Proof<x > 0> {
+        ()
+    }
+
+    fn use_proof(x: Int, proof: Proof<x > 0>) {
+        // Can safely use x as positive
+        let pos: Int{> 0} = x;
+        println(f"proven positive: {pos}");
+    }
+
+    let value: Int{> 0} = 42;
+    let proof = prove_positive(value);
+    use_proof(value, proof);
+}

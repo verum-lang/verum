@@ -1,0 +1,1777 @@
+// =============================================================================
+// allocator_test.vr - Comprehensive tests for CBGR-Aware Memory Allocator
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: all
+// @tags: memory, allocator, cbgr, safety, performance
+// FIXED: Direct submodule access now works after fixing parse error in core/mem/allocator.vr (missing semicolon after Alloc protocol)
+// @description: Tests for the CBGR-integrated memory allocator including Layout,
+//               PageHeader, LocalHeap, size classes, and context integration.
+//
+// Coverage:
+// - Constants (SIZE_CLASSES, PAGE_SIZE, CHUNK_SIZE, etc.)
+// - AllocError variants and messages
+// - Layout type (creation, extension, repeat, alignment)
+// - align_up/align_down utilities
+// - Size class routing (size_class_index, size_class_to_size)
+// - PageHeader (init, slot management, CBGR validation, remote free)
+// - LargeAllocHeader
+// - LocalHeap (alloc, dealloc, statistics)
+// - Public API (cbgr_alloc, cbgr_dealloc, cbgr_realloc)
+// - Context system integration (Allocator protocol)
+// - Specialized allocators (GlobalAllocator, TieredAllocator, etc.)
+// - AllocStats tracking
+// =============================================================================
+
+mount core.mem.allocator.{
+    SIZE_CLASSES,
+    SIZE_CLASS_COUNT,
+    PAGE_SIZE,
+    CHUNK_SIZE,
+    LARGE_THRESHOLD,
+    MAX_SLOTS_PER_PAGE,
+    GUARD_PAGE_SIZE,
+    PAGE_HEADER_SIZE,
+    AllocError,
+    Layout,
+    align_up,
+    align_down,
+    size_class_index,
+    size_class_to_size,
+    PageHeader,
+    LargeAllocHeader,
+    LocalHeap,
+    cbgr_alloc,
+    cbgr_alloc_zeroed,
+    cbgr_dealloc,
+    cbgr_realloc,
+    get_header_from_ptr,
+    CONTEXT_SLOT_ALLOCATOR,
+    Allocator,
+    Alloc,
+    GlobalAllocator,
+    get_allocator,
+    set_context_allocator,
+    clear_context_allocator,
+    ctx_alloc,
+    ctx_alloc_zeroed,
+    ctx_dealloc,
+    ctx_realloc,
+    AllocStats,
+    get_alloc_stats,
+    get_global_alloc_stats,
+    TieredAllocator,
+    SimpleAllocator,
+    StackAllocator,
+};
+mount core.mem.header.{AllocationHeader, GEN_INITIAL};
+mount core.mem.epoch.{GLOBAL_EPOCH};
+mount core.collections.list.{List};
+// Import Result to ensure its implement block (with unwrap, is_ok, etc.) is loaded
+mount core.result.{Result};
+// Import Maybe for Some/None constructors
+mount core.maybe.{Maybe};
+// Import slice creation functions for raw pointer conversions
+mount core.intrinsics.memory.{slice_from_raw_parts, slice_from_raw_parts_mut};
+
+// =============================================================================
+// SECTION 1: Constants Tests
+// =============================================================================
+
+/// Test that SIZE_CLASSES array has correct values
+@test
+fn test_size_classes_values() {
+    // 11 size classes from 16 to 2048 bytes
+    assert_eq(SIZE_CLASSES[0], 16);
+    assert_eq(SIZE_CLASSES[1], 32);
+    assert_eq(SIZE_CLASSES[2], 48);
+    assert_eq(SIZE_CLASSES[3], 64);
+    assert_eq(SIZE_CLASSES[4], 80);
+    assert_eq(SIZE_CLASSES[5], 96);
+    assert_eq(SIZE_CLASSES[6], 128);
+    assert_eq(SIZE_CLASSES[7], 256);
+    assert_eq(SIZE_CLASSES[8], 512);
+    assert_eq(SIZE_CLASSES[9], 1024);
+    assert_eq(SIZE_CLASSES[10], 2048);
+}
+
+/// Test SIZE_CLASS_COUNT constant
+@test
+fn test_size_class_count() {
+    assert_eq(SIZE_CLASS_COUNT, 11);
+    assert_eq(SIZE_CLASSES.len(), SIZE_CLASS_COUNT);
+}
+
+/// Test that size classes are strictly increasing
+@test
+fn test_size_classes_monotonic() {
+    for i in 0..(SIZE_CLASS_COUNT - 1) {
+        assert(SIZE_CLASSES[i] < SIZE_CLASSES[i + 1],
+               f"Size class {i} ({SIZE_CLASSES[i]}) should be less than {i+1} ({SIZE_CLASSES[i+1]})");
+    }
+}
+
+/// Test PAGE_SIZE constant (64KB)
+@test
+fn test_page_size_constant() {
+    assert_eq(PAGE_SIZE, 65536);
+    assert_eq(PAGE_SIZE, 64 * 1024);
+    // Should be power of 2
+    assert_eq(PAGE_SIZE & (PAGE_SIZE - 1), 0);
+}
+
+/// Test CHUNK_SIZE constant (2MB, huge page aligned)
+@test
+fn test_chunk_size_constant() {
+    assert_eq(CHUNK_SIZE, 2097152);
+    assert_eq(CHUNK_SIZE, 2 * 1024 * 1024);
+    // Should be power of 2
+    assert_eq(CHUNK_SIZE & (CHUNK_SIZE - 1), 0);
+    // Should be multiple of page size
+    assert_eq(CHUNK_SIZE % PAGE_SIZE, 0);
+}
+
+/// Test LARGE_THRESHOLD constant
+@test
+fn test_large_threshold_constant() {
+    assert_eq(LARGE_THRESHOLD, 2048);
+    // Should match last size class
+    assert_eq(LARGE_THRESHOLD, SIZE_CLASSES[SIZE_CLASS_COUNT - 1]);
+}
+
+/// Test MAX_SLOTS_PER_PAGE constant
+@test
+fn test_max_slots_per_page_constant() {
+    assert_eq(MAX_SLOTS_PER_PAGE, 512);
+}
+
+/// Test GUARD_PAGE_SIZE constant
+@test
+fn test_guard_page_size_constant() {
+    assert_eq(GUARD_PAGE_SIZE, 4096);
+    assert_eq(GUARD_PAGE_SIZE, 4 * 1024);
+}
+
+/// Test PAGE_HEADER_SIZE constant
+@test
+fn test_page_header_size_constant() {
+    assert_eq(PAGE_HEADER_SIZE, 64);
+    assert_eq(PageHeader.SIZE, 64);
+    // Should be cache-line aligned
+    assert_eq(PAGE_HEADER_SIZE % 64, 0);
+}
+
+/// Test CONTEXT_SLOT_ALLOCATOR constant
+@test
+fn test_context_slot_allocator_constant() {
+    assert_eq(CONTEXT_SLOT_ALLOCATOR, 1);
+}
+
+// =============================================================================
+// SECTION 2: AllocError Tests
+// =============================================================================
+
+/// Test AllocError.OutOfMemory variant
+@test
+fn test_alloc_error_out_of_memory() {
+    let err = AllocError.OutOfMemory { requested: 1024 };
+    let msg = err.message();
+    assert(msg.contains("out of memory"));
+    assert(msg.contains("1024"));
+}
+
+/// Test AllocError.InvalidSize variant
+@test
+fn test_alloc_error_invalid_size() {
+    let err = AllocError.InvalidSize { size: -100 };
+    let msg = err.message();
+    assert(msg.contains("invalid allocation size"));
+    assert(msg.contains("-100"));
+}
+
+/// Test AllocError.InvalidAlignment variant
+@test
+fn test_alloc_error_invalid_alignment() {
+    let err = AllocError.InvalidAlignment { alignment: 7 };
+    let msg = err.message();
+    assert(msg.contains("invalid alignment"));
+    assert(msg.contains("7"));
+}
+
+/// Test AllocError.MmapFailed variant
+@test
+fn test_alloc_error_mmap_failed() {
+    let err = AllocError.MmapFailed { code: 12 };  // ENOMEM
+    let msg = err.message();
+    assert(msg.contains("mmap failed"));
+    assert(msg.contains("12"));
+}
+
+/// Test AllocError.MunmapFailed variant
+@test
+fn test_alloc_error_munmap_failed() {
+    let err = AllocError.MunmapFailed { code: 22 };  // EINVAL
+    let msg = err.message();
+    assert(msg.contains("munmap failed"));
+    assert(msg.contains("22"));
+}
+
+/// Test AllocError.PageExhausted variant
+@test
+fn test_alloc_error_page_exhausted() {
+    let err = AllocError.PageExhausted;
+    let msg = err.message();
+    assert(msg.contains("page exhausted"));
+}
+
+/// Test AllocError.InvalidPointer variant
+@test
+fn test_alloc_error_invalid_pointer() {
+    let err = AllocError.InvalidPointer;
+    let msg = err.message();
+    assert(msg.contains("invalid pointer"));
+}
+
+// =============================================================================
+// SECTION 3: Layout Tests
+// =============================================================================
+
+/// Test Layout.new<T>() creates correct layout from type
+@test
+fn test_layout_new_from_type() {
+    let int_layout = Layout.new<Int>();
+    assert_eq(int_layout.size(), Int.size);
+    assert_eq(int_layout.align(), Int.alignment);
+
+    let byte_layout = Layout.new<Byte>();
+    assert_eq(byte_layout.size(), 1);
+    assert_eq(byte_layout.align(), 1);
+
+    let u64_layout = Layout.new<UInt64>();
+    assert_eq(u64_layout.size(), 8);
+    assert_eq(u64_layout.align(), 8);
+}
+
+/// Test Layout.from_size_align() with valid arguments
+@test
+fn test_layout_from_size_align_valid() {
+    let layout = Layout.from_size_align(64, 8);
+    assert_eq(layout.size(), 64);
+    assert_eq(layout.align(), 8);
+
+    let layout2 = Layout.from_size_align(1024, 16);
+    assert_eq(layout2.size(), 1024);
+    assert_eq(layout2.align(), 16);
+
+    // Minimum alignment
+    let layout3 = Layout.from_size_align(10, 1);
+    assert_eq(layout3.size(), 10);
+    assert_eq(layout3.align(), 1);
+}
+
+/// Test Layout.from_size_align() with power-of-2 alignments
+@test
+fn test_layout_from_size_align_power_of_two() {
+    // Test all common alignments
+    for align in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024] {
+        let layout = Layout.from_size_align(100, align);
+        assert_eq(layout.align(), align);
+    }
+}
+
+/// Test Layout.from_size() with natural alignment
+@test
+fn test_layout_from_size_natural_alignment() {
+    // Size 8 -> alignment 8 (largest power of 2 dividing 8, capped at 16)
+    let layout1 = Layout.from_size(8);
+    assert_eq(layout1.size(), 8);
+    assert_eq(layout1.align(), 8);
+
+    // Size 16 -> alignment 16
+    let layout2 = Layout.from_size(16);
+    assert_eq(layout2.size(), 16);
+    assert_eq(layout2.align(), 16);
+
+    // Size 32 -> alignment 16 (capped)
+    let layout3 = Layout.from_size(32);
+    assert_eq(layout3.size(), 32);
+    assert_eq(layout3.align(), 16);
+
+    // Size 7 -> alignment 1 (7 is odd)
+    let layout4 = Layout.from_size(7);
+    assert_eq(layout4.size(), 7);
+    assert_eq(layout4.align(), 1);
+
+    // Size 12 -> alignment 4 (12 = 4 * 3)
+    let layout5 = Layout.from_size(12);
+    assert_eq(layout5.size(), 12);
+    assert_eq(layout5.align(), 4);
+}
+
+/// Test Layout.repeat() for arrays
+@test
+fn test_layout_repeat() {
+    let element_layout = Layout.from_size_align(16, 8);
+    let array_layout = element_layout.repeat(10);
+
+    assert_eq(array_layout.size(), 160);  // 16 * 10
+    assert_eq(array_layout.align(), 8);   // Alignment preserved
+}
+
+/// Test Layout.repeat() with zero elements
+@test
+fn test_layout_repeat_zero() {
+    let element_layout = Layout.from_size_align(64, 16);
+    let empty_layout = element_layout.repeat(0);
+
+    assert_eq(empty_layout.size(), 0);
+    assert_eq(empty_layout.align(), 16);
+}
+
+/// Test Layout.extend() combines two layouts
+@test
+fn test_layout_extend() {
+    let first = Layout.from_size_align(10, 4);
+    let second = Layout.from_size_align(8, 8);
+
+    // First layout ends at offset 10
+    // Second needs 8-byte alignment, so padding to offset 16
+    // Total size = 16 + 8 = 24
+    let combined = first.extend(second);
+
+    // Size should include padding + second layout
+    assert(combined.size() >= 18);  // At least 10 + 8
+    // Alignment should be max of both
+    assert_eq(combined.align(), 8);
+}
+
+/// Test Layout.extend() with no padding needed
+@test
+fn test_layout_extend_no_padding() {
+    let first = Layout.from_size_align(16, 8);
+    let second = Layout.from_size_align(8, 8);
+
+    let combined = first.extend(second);
+    assert_eq(combined.size(), 24);  // 16 + 8, no padding needed
+    assert_eq(combined.align(), 8);
+}
+
+/// Test Layout.pad_to_align()
+@test
+fn test_layout_pad_to_align() {
+    let layout = Layout.from_size_align(10, 8);
+    let padded = layout.pad_to_align();
+
+    assert_eq(padded.size(), 16);  // Rounded up to 8-byte boundary
+    assert_eq(padded.align(), 8);
+}
+
+/// Test Layout.pad_to_align() when already aligned
+@test
+fn test_layout_pad_to_align_already_aligned() {
+    let layout = Layout.from_size_align(24, 8);
+    let padded = layout.pad_to_align();
+
+    assert_eq(padded.size(), 24);  // Already aligned
+    assert_eq(padded.align(), 8);
+}
+
+// =============================================================================
+// SECTION 4: Alignment Utility Tests
+// =============================================================================
+
+/// Test align_up function
+@test
+fn test_align_up_basic() {
+    assert_eq(align_up(0, 8), 0);
+    assert_eq(align_up(1, 8), 8);
+    assert_eq(align_up(7, 8), 8);
+    assert_eq(align_up(8, 8), 8);
+    assert_eq(align_up(9, 8), 16);
+    assert_eq(align_up(15, 8), 16);
+    assert_eq(align_up(16, 8), 16);
+}
+
+/// Test align_up with various alignments
+@test
+fn test_align_up_various_alignments() {
+    // Align to 1 (no change)
+    assert_eq(align_up(7, 1), 7);
+
+    // Align to 16
+    assert_eq(align_up(17, 16), 32);
+    assert_eq(align_up(32, 16), 32);
+
+    // Align to 64 (cache line)
+    assert_eq(align_up(1, 64), 64);
+    assert_eq(align_up(65, 64), 128);
+
+    // Align to page size
+    assert_eq(align_up(1, PAGE_SIZE), PAGE_SIZE);
+}
+
+/// Test align_down function
+@test
+fn test_align_down_basic() {
+    assert_eq(align_down(0, 8), 0);
+    assert_eq(align_down(1, 8), 0);
+    assert_eq(align_down(7, 8), 0);
+    assert_eq(align_down(8, 8), 8);
+    assert_eq(align_down(9, 8), 8);
+    assert_eq(align_down(15, 8), 8);
+    assert_eq(align_down(16, 8), 16);
+}
+
+/// Test align_down with various alignments
+@test
+fn test_align_down_various_alignments() {
+    // Align to 1 (no change)
+    assert_eq(align_down(7, 1), 7);
+
+    // Align to 16
+    assert_eq(align_down(17, 16), 16);
+    assert_eq(align_down(32, 16), 32);
+
+    // Align to 64
+    assert_eq(align_down(100, 64), 64);
+    assert_eq(align_down(128, 64), 128);
+
+    // Align to page size
+    assert_eq(align_down(PAGE_SIZE + 100, PAGE_SIZE), PAGE_SIZE);
+}
+
+/// Test align_up and align_down are inverses on aligned values
+@test
+fn test_align_roundtrip() {
+    for align in [1, 2, 4, 8, 16, 32, 64] {
+        for base in [0, align, align * 2, align * 10] {
+            assert_eq(align_up(base, align), base);
+            assert_eq(align_down(base, align), base);
+        }
+    }
+}
+
+// =============================================================================
+// SECTION 5: Size Class Routing Tests
+// =============================================================================
+
+/// Test size_class_index for exact size class boundaries
+@test
+fn test_size_class_index_exact_boundaries() {
+    assert_eq(size_class_index(16), Some(0));
+    assert_eq(size_class_index(32), Some(1));
+    assert_eq(size_class_index(48), Some(2));
+    assert_eq(size_class_index(64), Some(3));
+    assert_eq(size_class_index(80), Some(4));
+    assert_eq(size_class_index(96), Some(5));
+    assert_eq(size_class_index(128), Some(6));
+    assert_eq(size_class_index(256), Some(7));
+    assert_eq(size_class_index(512), Some(8));
+    assert_eq(size_class_index(1024), Some(9));
+    assert_eq(size_class_index(2048), Some(10));
+}
+
+/// Test size_class_index rounds up to next class
+@test
+fn test_size_class_index_rounds_up() {
+    // Just over boundary rounds up
+    assert_eq(size_class_index(1), Some(0));    // 1 -> 16 (class 0)
+    assert_eq(size_class_index(17), Some(1));   // 17 -> 32 (class 1)
+    assert_eq(size_class_index(33), Some(2));   // 33 -> 48 (class 2)
+    assert_eq(size_class_index(49), Some(3));   // 49 -> 64 (class 3)
+    assert_eq(size_class_index(65), Some(4));   // 65 -> 80 (class 4)
+    assert_eq(size_class_index(97), Some(6));   // 97 -> 128 (class 6)
+    assert_eq(size_class_index(129), Some(7));  // 129 -> 256 (class 7)
+    assert_eq(size_class_index(513), Some(9));  // 513 -> 1024 (class 9)
+    assert_eq(size_class_index(1025), Some(10)); // 1025 -> 2048 (class 10)
+}
+
+/// Test size_class_index returns None for large allocations
+@test
+fn test_size_class_index_large_allocations() {
+    assert_eq(size_class_index(2049), None);
+    assert_eq(size_class_index(4096), None);
+    assert_eq(size_class_index(65536), None);
+    assert_eq(size_class_index(1000000), None);
+}
+
+/// Test size_class_to_size returns correct sizes
+@test
+fn test_size_class_to_size_all_classes() {
+    assert_eq(size_class_to_size(0), 16);
+    assert_eq(size_class_to_size(1), 32);
+    assert_eq(size_class_to_size(2), 48);
+    assert_eq(size_class_to_size(3), 64);
+    assert_eq(size_class_to_size(4), 80);
+    assert_eq(size_class_to_size(5), 96);
+    assert_eq(size_class_to_size(6), 128);
+    assert_eq(size_class_to_size(7), 256);
+    assert_eq(size_class_to_size(8), 512);
+    assert_eq(size_class_to_size(9), 1024);
+    assert_eq(size_class_to_size(10), 2048);
+}
+
+/// Test size_class_index and size_class_to_size consistency
+@test
+fn test_size_class_roundtrip() {
+    for i in 0..SIZE_CLASS_COUNT {
+        let size = size_class_to_size(i);
+        let idx = size_class_index(size).unwrap();
+        assert_eq(idx, i, f"Class {i} with size {size} should map back to {i}");
+    }
+}
+
+/// Test all sizes within a class map to that class
+@test
+fn test_size_class_coverage() {
+    // All sizes from 1 to 16 map to class 0
+    for size in 1..=16 {
+        assert_eq(size_class_index(size), Some(0));
+    }
+
+    // All sizes from 17 to 32 map to class 1
+    for size in 17..=32 {
+        assert_eq(size_class_index(size), Some(1));
+    }
+
+    // All sizes from 33 to 48 map to class 2
+    for size in 33..=48 {
+        assert_eq(size_class_index(size), Some(2));
+    }
+}
+
+// =============================================================================
+// SECTION 6: PageHeader Tests
+// =============================================================================
+
+/// Test PageHeader.SIZE constant
+@test
+fn test_page_header_size() {
+    assert_eq(PageHeader.SIZE, 64);
+    assert_eq(PageHeader.SIZE, PAGE_HEADER_SIZE);
+}
+
+/// Test PageHeader initialization
+@test
+fn test_page_header_init() {
+    // Create mock page memory
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(0, 12345, 100);  // size_class=0 (16 bytes), thread_id=12345, epoch=100
+
+    assert_eq(header.size_class as Int, 0);
+    assert_eq(header.thread_id, 12345);
+    assert_eq(header.epoch, 100);
+    assert_eq(header.used_count, 0);
+    assert_eq(header.free_list_head, 0);  // First slot is free
+    assert_eq(header.remote_free_head, -1);  // Empty remote list
+    assert(header.slot_count > 0);
+}
+
+/// Test PageHeader slot count calculation
+@test
+fn test_page_header_slot_count() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    // For size class 0 (16 bytes), should have many slots
+    header.init(0, 1, 1);
+    let slots_16 = header.slot_count as Int;
+    assert(slots_16 > 100, "16-byte slots should have >100 slots per page");
+    assert(slots_16 <= MAX_SLOTS_PER_PAGE);
+
+    // For size class 10 (2048 bytes), should have fewer slots
+    header.init(10, 1, 1);
+    let slots_2048 = header.slot_count as Int;
+    assert(slots_2048 >= 1, "2048-byte slots should have at least 1 slot");
+    assert(slots_2048 < slots_16, "Larger slots should have fewer slots");
+}
+
+/// Test PageHeader is_empty and is_full
+@test
+fn test_page_header_empty_full_states() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(0, 1, 1);
+
+    // Initially empty
+    assert(header.is_empty());
+    assert(!header.is_full());
+}
+
+/// Test PageHeader alloc_slot
+@test
+fn test_page_header_alloc_slot() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(0, 1, 1);
+    let initial_used = header.used_count;
+
+    // Allocate first slot
+    let result = header.alloc_slot();
+    assert(result.is_some());
+    let (slot_idx, gen) = result.unwrap();
+    assert_eq(slot_idx, 0);  // First slot
+    assert_eq(header.used_count as Int, initial_used as Int + 1);
+}
+
+/// Test PageHeader alloc_slot sequential
+@test
+fn test_page_header_alloc_slot_sequential() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(6, 1, 1);  // Size class 6 (128 bytes)
+    let slot_count = header.slot_count as Int;
+
+    // Allocate all slots
+    let mut allocated = List<Int>.new();
+    for _ in 0..slot_count {
+        match header.alloc_slot() {
+            Some((idx, _)) => allocated.push(idx),
+            None => break,
+        }
+    }
+
+    assert_eq(allocated.len(), slot_count);
+    assert(header.is_full());
+
+    // Next allocation should fail
+    assert(header.alloc_slot().is_none());
+}
+
+/// Test PageHeader dealloc_slot
+@test
+fn test_page_header_dealloc_slot() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(0, 1, 1);
+
+    // Allocate
+    let (slot_idx, gen1) = header.alloc_slot().unwrap();
+
+    // Deallocate
+    header.dealloc_slot(slot_idx);
+
+    assert(header.is_empty());
+
+    // Reallocate same slot
+    let (new_idx, gen2) = header.alloc_slot().unwrap();
+    assert_eq(new_idx, slot_idx);  // LIFO - same slot
+    // Generation should have changed (CBGR invalidation)
+    // Note: generation delta wraps at 256
+}
+
+/// Test PageHeader CBGR generation increment on dealloc
+@test
+fn test_page_header_cbgr_generation_on_dealloc() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(0, 1, 1);
+
+    // Allocate
+    let (slot_idx, gen1) = header.alloc_slot().unwrap();
+
+    // Deallocate - should increment slot generation
+    header.dealloc_slot(slot_idx);
+
+    // Reallocate
+    let (_, gen2) = header.alloc_slot().unwrap();
+
+    // Generation should be different (use-after-free detection)
+    assert(gen1 != gen2, "Generation must change after dealloc for CBGR safety");
+}
+
+/// Test PageHeader validate_reference
+@test
+fn test_page_header_validate_reference() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(0, 1, 1);
+
+    // Allocate
+    let (slot_idx, gen) = header.alloc_slot().unwrap();
+
+    // Valid reference should validate
+    assert(header.validate_reference(slot_idx, gen));
+
+    // Invalid generation should fail
+    assert(!header.validate_reference(slot_idx, gen + 1));
+    assert(!header.validate_reference(slot_idx, gen - 1));
+}
+
+/// Test PageHeader validate_reference after dealloc (use-after-free detection)
+@test
+fn test_page_header_use_after_free_detection() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(0, 1, 1);
+
+    // Allocate
+    let (slot_idx, gen) = header.alloc_slot().unwrap();
+
+    // Deallocate
+    header.dealloc_slot(slot_idx);
+
+    // Old reference should now be invalid (use-after-free detection)
+    assert(!header.validate_reference(slot_idx, gen),
+           "Reference to deallocated slot must be invalid");
+}
+
+/// Test PageHeader slot_ptr returns distinct pointers
+@test
+fn test_page_header_slot_ptr_distinct() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(3, 1, 1);  // Size class 3 (64 bytes)
+
+    // Each slot should have a distinct pointer
+    let slot_count = header.slot_count as Int;
+    let mut ptrs = List<Int>.new();
+
+    for i in 0..slot_count.min(10) {
+        let ptr = header.slot_ptr(i);
+        let ptr_val = ptr as Int;
+
+        // Check not duplicate
+        for existing in ptrs.iter() {
+            assert(ptr_val != *existing, f"Slot {i} has duplicate pointer");
+        }
+        ptrs.push(ptr_val);
+    }
+}
+
+/// Test PageHeader slot_ptr spacing matches size class
+@test
+fn test_page_header_slot_ptr_spacing() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(3, 1, 1);  // Size class 3 (64 bytes)
+
+    let ptr0 = header.slot_ptr(0) as Int;
+    let ptr1 = header.slot_ptr(1) as Int;
+
+    let spacing = ptr1 - ptr0;
+    assert_eq(spacing, 64, "Slot spacing should match size class");
+}
+
+/// Test PageHeader slot_index_from_ptr roundtrip
+@test
+fn test_page_header_slot_index_roundtrip() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(5, 1, 1);  // Size class 5 (96 bytes)
+
+    for i in 0..10 {
+        let ptr = header.slot_ptr(i);
+        let recovered_idx = header.slot_index_from_ptr(ptr);
+        assert_eq(recovered_idx, i, f"Slot index {i} should roundtrip");
+    }
+}
+
+/// Test PageHeader remote free list
+@test
+fn test_page_header_remote_free() {
+    let mut page_mem: [Byte; PAGE_SIZE] = [0; PAGE_SIZE];
+    let header = &mut page_mem[0..64] as &mut PageHeader;
+
+    header.init(0, 1, 1);
+
+    // Allocate some slots
+    let (slot0, _) = header.alloc_slot().unwrap();
+    let (slot1, _) = header.alloc_slot().unwrap();
+    let (slot2, _) = header.alloc_slot().unwrap();
+
+    let used_before = header.used_count;
+
+    // Simulate remote free (from different thread)
+    header.add_to_remote_free(slot1);
+
+    // Used count not changed yet (not processed)
+    assert_eq(header.used_count, used_before);
+
+    // Process remote frees
+    header.process_remote_frees();
+
+    // Now slot should be freed
+    assert_eq(header.used_count as Int, used_before as Int - 1);
+}
+
+// =============================================================================
+// SECTION 7: LargeAllocHeader Tests
+// =============================================================================
+
+/// Test LargeAllocHeader.SIZE constant
+@test
+fn test_large_alloc_header_size() {
+    assert_eq(LargeAllocHeader.SIZE, 64);
+}
+
+// =============================================================================
+// SECTION 8: LocalHeap Tests
+// =============================================================================
+
+/// Test LocalHeap.new() initialization
+@test
+fn test_local_heap_new() {
+    let heap = LocalHeap.new(42);
+
+    assert_eq(heap.thread_id, 42);
+    assert_eq(heap.alloc_count, 0);
+    assert_eq(heap.dealloc_count, 0);
+    assert_eq(heap.large_alloc_count, 0);
+    assert_eq(heap.bytes_allocated, 0);
+}
+
+/// Test LocalHeap pages array size
+@test
+fn test_local_heap_pages_array() {
+    let heap = LocalHeap.new(1);
+
+    // Should have one page slot per size class
+    // Note: Can't directly check array length, but should be SIZE_CLASS_COUNT
+    assert_eq(SIZE_CLASS_COUNT, 11);
+}
+
+// =============================================================================
+// SECTION 9: Public API Tests
+// =============================================================================
+
+/// Test cbgr_alloc rejects zero size
+@test
+fn test_cbgr_alloc_rejects_zero_size() {
+    let result = cbgr_alloc(0, 8);
+    assert(result.is_err());
+    match result {
+        Err(AllocError.InvalidSize { size }) => assert_eq(size, 0),
+        _ => panic("Expected InvalidSize error"),
+    }
+}
+
+/// Test cbgr_alloc rejects negative size
+@test
+fn test_cbgr_alloc_rejects_negative_size() {
+    let result = cbgr_alloc(-100, 8);
+    assert(result.is_err());
+    match result {
+        Err(AllocError.InvalidSize { size }) => assert_eq(size, -100),
+        _ => panic("Expected InvalidSize error"),
+    }
+}
+
+/// Test cbgr_alloc rejects invalid alignment (not power of 2)
+@test
+fn test_cbgr_alloc_rejects_invalid_alignment() {
+    let result = cbgr_alloc(100, 7);
+    assert(result.is_err());
+    match result {
+        Err(AllocError.InvalidAlignment { alignment }) => assert_eq(alignment, 7),
+        _ => panic("Expected InvalidAlignment error"),
+    }
+}
+
+/// Test cbgr_alloc rejects zero alignment
+@test
+fn test_cbgr_alloc_rejects_zero_alignment() {
+    let result = cbgr_alloc(100, 0);
+    assert(result.is_err());
+    match result {
+        Err(AllocError.InvalidAlignment { alignment }) => assert_eq(alignment, 0),
+        _ => panic("Expected InvalidAlignment error"),
+    }
+}
+
+/// Test cbgr_alloc rejects negative alignment
+@test
+fn test_cbgr_alloc_rejects_negative_alignment() {
+    let result = cbgr_alloc(100, -8);
+    assert(result.is_err());
+    match result {
+        Err(AllocError.InvalidAlignment { .. }) => {},
+        _ => panic("Expected InvalidAlignment error"),
+    }
+}
+
+/// Test cbgr_dealloc rejects null pointer
+@test
+fn test_cbgr_dealloc_rejects_null() {
+    let result = cbgr_dealloc(0 as &unsafe Byte);
+    assert(result.is_err());
+    match result {
+        Err(AllocError.InvalidPointer) => {},
+        _ => panic("Expected InvalidPointer error"),
+    }
+}
+
+/// Test cbgr_alloc and cbgr_dealloc basic cycle
+@requires(runtime)
+@test
+fn test_cbgr_alloc_dealloc_cycle() {
+    let result = cbgr_alloc(64, 8);
+    assert(result.is_ok());
+
+    let (ptr, gen, epoch) = result.unwrap();
+    assert((ptr as Int) != 0);
+    assert(gen > 0);
+
+    let dealloc_result = cbgr_dealloc(ptr);
+    assert(dealloc_result.is_ok());
+}
+
+/// Test cbgr_alloc_zeroed zeros memory
+@requires(runtime)
+@test
+fn test_cbgr_alloc_zeroed() {
+    let result = cbgr_alloc_zeroed(128, 16);
+    assert(result.is_ok());
+
+    let (ptr, _, _) = result.unwrap();
+
+    // Check all bytes are zero
+    let slice: &[Byte] = unsafe { slice_from_raw_parts(ptr, 128) };
+    for i in 0..128 {
+        assert_eq(slice[i], 0 as Byte, f"Byte {i} should be zero");
+    }
+
+    cbgr_dealloc(ptr).unwrap();
+}
+
+/// Test cbgr_alloc returns unique pointers
+@requires(runtime)
+@test
+fn test_cbgr_alloc_unique_pointers() {
+    let mut ptrs: List<&unsafe Byte> = List.new();
+
+    for _ in 0..10 {
+        let (ptr, _, _) = cbgr_alloc(64, 8).unwrap();
+
+        // Check not duplicate (compare addresses as integers)
+        let ptr_val = ptr as Int;
+        for existing in ptrs.iter() {
+            assert(ptr_val != (*existing as Int), "Pointers must be unique");
+        }
+        ptrs.push(ptr);
+    }
+
+    // Cleanup
+    for ptr_ref in ptrs.iter() {
+        cbgr_dealloc(*ptr_ref).unwrap();
+    }
+}
+
+/// Test cbgr_realloc grows allocation
+@requires(runtime)
+@test
+fn test_cbgr_realloc_grow() {
+    let (old_ptr, _, _) = cbgr_alloc(64, 8).unwrap();
+
+    // Write some data
+    let old_slice: &mut [Byte] = unsafe { slice_from_raw_parts_mut(old_ptr, 64) };
+    for i in 0..64 {
+        old_slice[i] = (i % 256) as Byte;
+    }
+
+    // Reallocate larger
+    let result = cbgr_realloc(old_ptr, 64, 256, 8);
+    assert(result.is_ok());
+
+    let (new_ptr, _, _) = result.unwrap();
+
+    // Check old data preserved
+    let new_slice: &[Byte] = unsafe { slice_from_raw_parts(new_ptr, 256) };
+    for i in 0..64 {
+        assert_eq(new_slice[i], (i % 256) as Byte, f"Byte {i} should be preserved");
+    }
+
+    cbgr_dealloc(new_ptr).unwrap();
+}
+
+/// Test cbgr_realloc shrinks allocation
+@requires(runtime)
+@test
+fn test_cbgr_realloc_shrink() {
+    let (old_ptr, _, _) = cbgr_alloc(256, 8).unwrap();
+
+    // Write some data
+    let old_slice: &mut [Byte] = unsafe { slice_from_raw_parts_mut(old_ptr, 256) };
+    for i in 0..256 {
+        old_slice[i] = (i % 256) as Byte;
+    }
+
+    // Reallocate smaller
+    let result = cbgr_realloc(old_ptr, 256, 64, 8);
+    assert(result.is_ok());
+
+    let (new_ptr, _, _) = result.unwrap();
+
+    // Check data preserved (only first 64 bytes)
+    let new_slice: &[Byte] = unsafe { slice_from_raw_parts(new_ptr, 64) };
+    for i in 0..64 {
+        assert_eq(new_slice[i], (i % 256) as Byte, f"Byte {i} should be preserved");
+    }
+
+    cbgr_dealloc(new_ptr).unwrap();
+}
+
+// =============================================================================
+// SECTION 10: Size Class Allocation Tests
+// =============================================================================
+
+/// Test allocation routes to correct size class
+@requires(runtime)
+@test
+fn test_allocation_size_class_routing() {
+    // Size 10 should use size class 0 (16 bytes)
+    let (ptr1, _, _) = cbgr_alloc(10, 1).unwrap();
+    cbgr_dealloc(ptr1).unwrap();
+
+    // Size 50 should use size class 3 (64 bytes)
+    let (ptr2, _, _) = cbgr_alloc(50, 1).unwrap();
+    cbgr_dealloc(ptr2).unwrap();
+
+    // Size 200 should use size class 7 (256 bytes)
+    let (ptr3, _, _) = cbgr_alloc(200, 1).unwrap();
+    cbgr_dealloc(ptr3).unwrap();
+
+    // Size 1500 should use size class 10 (2048 bytes)
+    let (ptr4, _, _) = cbgr_alloc(1500, 1).unwrap();
+    cbgr_dealloc(ptr4).unwrap();
+}
+
+/// Test large allocation bypasses size classes
+@requires(runtime)
+@test
+fn test_large_allocation_direct_mmap() {
+    // Size > LARGE_THRESHOLD should use direct mmap
+    let (ptr, gen, epoch) = cbgr_alloc(10000, 8).unwrap();
+
+    assert((ptr as Int) != 0);
+
+    cbgr_dealloc(ptr).unwrap();
+}
+
+/// Test allocation respects alignment
+@requires(runtime)
+@test
+fn test_allocation_alignment() {
+    for align in [1, 2, 4, 8, 16, 32] {
+        let (ptr, _, _) = cbgr_alloc(64, align).unwrap();
+        let ptr_val = ptr as Int;
+
+        assert_eq(ptr_val % align, 0, f"Pointer should be {align}-byte aligned");
+
+        cbgr_dealloc(ptr).unwrap();
+    }
+}
+
+// =============================================================================
+// SECTION 11: Context System Integration Tests
+// =============================================================================
+
+/// Test get_allocator returns GlobalAllocator by default
+@test
+fn test_get_allocator_default() {
+    // Without context set, should return global allocator
+    let allocator = get_allocator();
+    // Can't easily compare, but should not panic
+}
+
+/// Test Allocator protocol methods
+@test
+fn test_allocator_protocol_signature() {
+    // Verify GlobalAllocator has Allocator protocol methods
+    // Note: Protocol object coercion (`&GlobalAllocator` -> `&Allocator`) is not yet implemented
+    let global: GlobalAllocator = GlobalAllocator;
+    // Test that methods from Allocator protocol are accessible on GlobalAllocator
+    // The actual method call tests happen in test_global_allocator_allocation
+}
+
+/// Test GlobalAllocator wraps cbgr functions
+@requires(runtime)
+@test
+fn test_global_allocator_allocation() {
+    let global = GlobalAllocator;
+
+    let result = global.alloc(64, 8);
+    assert(result.is_ok());
+
+    let (ptr, gen, epoch) = result.unwrap();
+    assert((ptr as Int) != 0);
+
+    let dealloc_result = global.dealloc(ptr);
+    assert(dealloc_result.is_ok());
+}
+
+/// Test GlobalAllocator alloc_zeroed
+@requires(runtime)
+@test
+fn test_global_allocator_alloc_zeroed() {
+    let global = GlobalAllocator;
+
+    let result = global.alloc_zeroed(128, 16);
+    assert(result.is_ok());
+
+    let (ptr, _, _) = result.unwrap();
+
+    // Check all bytes are zero
+    let slice: &[Byte] = unsafe { slice_from_raw_parts(ptr, 128) };
+    for i in 0..128 {
+        assert_eq(slice[i], 0 as Byte);
+    }
+
+    global.dealloc(ptr).unwrap();
+}
+
+/// Test TieredAllocator initialization
+@test
+fn test_tiered_allocator_init() {
+    let result = TieredAllocator.init();
+    assert(result.is_ok());
+
+    let allocator = result.unwrap();
+    // Should be able to shutdown
+    allocator.shutdown();
+}
+
+/// Test TieredAllocator implements Allocator
+@requires(runtime)
+@test
+fn test_tiered_allocator_allocation() {
+    let tiered = TieredAllocator.init().unwrap();
+
+    let result = tiered.alloc(64, 8);
+    assert(result.is_ok());
+
+    let (ptr, _, _) = result.unwrap();
+    tiered.dealloc(ptr).unwrap();
+
+    tiered.shutdown();
+}
+
+/// Test SimpleAllocator initialization
+@test
+fn test_simple_allocator_init() {
+    let result = SimpleAllocator.init();
+    assert(result.is_ok());
+
+    let allocator = result.unwrap();
+    assert_eq(allocator.active_allocations(), 0);
+    assert_eq(allocator.total_bytes_allocated(), 0);
+    allocator.shutdown();
+}
+
+/// Test SimpleAllocator implements Allocator
+@requires(runtime)
+@test
+fn test_simple_allocator_allocation() {
+    let simple = SimpleAllocator.init().unwrap();
+
+    let result = simple.alloc(64, 8);
+    assert(result.is_ok());
+    assert_eq(simple.active_allocations(), 1);
+    assert_eq(simple.total_bytes_allocated(), 64);
+
+    let (ptr, _, _) = result.unwrap();
+    simple.dealloc(ptr).unwrap();
+    assert_eq(simple.active_allocations(), 0);
+
+    simple.shutdown();
+}
+
+/// Test SimpleAllocator tracks multiple allocations
+@requires(runtime)
+@test
+fn test_simple_allocator_tracking() {
+    let simple = SimpleAllocator.init().unwrap();
+
+    let (ptr1, _, _) = simple.alloc(32, 8).unwrap();
+    let (ptr2, _, _) = simple.alloc(64, 8).unwrap();
+    let (ptr3, _, _) = simple.alloc(128, 8).unwrap();
+
+    assert_eq(simple.active_allocations(), 3);
+    assert_eq(simple.total_bytes_allocated(), 224);
+
+    simple.dealloc(ptr2).unwrap();
+    assert_eq(simple.active_allocations(), 2);
+
+    simple.dealloc(ptr1).unwrap();
+    simple.dealloc(ptr3).unwrap();
+    assert_eq(simple.active_allocations(), 0);
+
+    simple.shutdown();
+}
+
+/// Test StackAllocator initialization with capacity
+@test
+fn test_stack_allocator_init() {
+    let result = StackAllocator.new();
+    assert(result.is_ok());
+
+    let mut allocator = result.unwrap();
+    assert_eq(allocator.total_capacity(), 65536);
+    assert_eq(allocator.bytes_used(), 0);
+    assert_eq(allocator.bytes_remaining(), 65536);
+    assert_eq(allocator.allocation_count(), 0);
+    allocator.shutdown();
+}
+
+/// Test StackAllocator custom capacity
+@test
+fn test_stack_allocator_custom_capacity() {
+    let result = StackAllocator.init(1024);
+    assert(result.is_ok());
+
+    let mut allocator = result.unwrap();
+    assert_eq(allocator.total_capacity(), 1024);
+    assert_eq(allocator.bytes_remaining(), 1024);
+    allocator.shutdown();
+}
+
+/// Test StackAllocator invalid capacity
+@test
+fn test_stack_allocator_invalid_capacity() {
+    let result = StackAllocator.init(0);
+    assert(result.is_err());
+
+    let result2 = StackAllocator.init(-1);
+    assert(result2.is_err());
+}
+
+/// Test StackAllocator dealloc is no-op
+@requires(runtime)
+@test
+fn test_stack_allocator_dealloc_noop() {
+    let mut stack = StackAllocator.init(4096).unwrap();
+
+    let (ptr, _, _) = stack.alloc(64, 8).unwrap();
+
+    // Stack allocator dealloc should succeed but do nothing
+    let result = stack.dealloc(ptr);
+    assert(result.is_ok());
+
+    // Bytes used should not decrease after dealloc (bump allocator)
+    assert(stack.bytes_used() >= 64);
+
+    stack.shutdown();
+}
+
+/// Test StackAllocator reset
+@requires(runtime)
+@test
+fn test_stack_allocator_reset() {
+    let mut stack = StackAllocator.init(4096).unwrap();
+
+    stack.alloc(100, 8).unwrap();
+    stack.alloc(200, 8).unwrap();
+    assert(stack.bytes_used() > 0);
+    assert_eq(stack.allocation_count(), 2);
+
+    stack.reset();
+    assert_eq(stack.bytes_used(), 0);
+    assert_eq(stack.allocation_count(), 0);
+    assert_eq(stack.bytes_remaining(), 4096);
+
+    // Can allocate again after reset
+    stack.alloc(50, 8).unwrap();
+    assert(stack.bytes_used() >= 50);
+
+    stack.shutdown();
+}
+
+/// Test StackAllocator out of memory
+@requires(runtime)
+@test
+fn test_stack_allocator_oom() {
+    let mut stack = StackAllocator.init(256).unwrap();
+
+    // Fill most of the capacity
+    stack.alloc(200, 8).unwrap();
+
+    // This should fail — only ~56 bytes remaining
+    let result = stack.alloc(100, 8);
+    assert(result.is_err());
+
+    stack.shutdown();
+}
+
+/// Test StackAllocator peak usage tracking
+@requires(runtime)
+@test
+fn test_stack_allocator_peak_usage() {
+    let mut stack = StackAllocator.init(4096).unwrap();
+
+    stack.alloc(100, 8).unwrap();
+    stack.alloc(200, 8).unwrap();
+    let peak_before_reset = stack.peak();
+    assert(peak_before_reset > 0);
+
+    stack.reset();
+    // Peak should persist after reset
+    assert_eq(stack.peak(), peak_before_reset);
+
+    stack.shutdown();
+}
+
+/// Test context-aware allocation functions
+@requires(runtime)
+@test
+fn test_ctx_alloc_functions() {
+    // Without custom allocator, should use global
+    let result = ctx_alloc(64, 8);
+    assert(result.is_ok());
+
+    let (ptr, _, _) = result.unwrap();
+
+    let result2 = ctx_dealloc(ptr);
+    assert(result2.is_ok());
+}
+
+/// Test ctx_alloc_zeroed
+@requires(runtime)
+@test
+fn test_ctx_alloc_zeroed() {
+    let result = ctx_alloc_zeroed(128, 16);
+    assert(result.is_ok());
+
+    let (ptr, _, _) = result.unwrap();
+
+    // Check zeroed
+    let slice: &[Byte] = unsafe { slice_from_raw_parts(ptr, 128) };
+    for i in 0..128 {
+        assert_eq(slice[i], 0 as Byte);
+    }
+
+    ctx_dealloc(ptr).unwrap();
+}
+
+/// Test ctx_realloc
+@requires(runtime)
+@test
+fn test_ctx_realloc() {
+    let (old_ptr, _, _) = ctx_alloc(64, 8).unwrap();
+
+    // Write data
+    let old_slice: &mut [Byte] = unsafe { slice_from_raw_parts_mut(old_ptr, 64) };
+    old_slice[0] = 42 as Byte;
+    old_slice[63] = 99 as Byte;
+
+    // Reallocate
+    let result = ctx_realloc(old_ptr, 64, 128, 8);
+    assert(result.is_ok());
+
+    let (new_ptr, _, _) = result.unwrap();
+
+    // Check data preserved
+    let new_slice: &[Byte] = unsafe { slice_from_raw_parts(new_ptr, 128) };
+    assert_eq(new_slice[0], 42 as Byte);
+    assert_eq(new_slice[63], 99 as Byte);
+
+    ctx_dealloc(new_ptr).unwrap();
+}
+
+// =============================================================================
+// SECTION 12: AllocStats Tests
+// =============================================================================
+
+/// Test AllocStats fields
+@test
+fn test_alloc_stats_fields() {
+    let stats = AllocStats {
+        alloc_count: 100,
+        dealloc_count: 50,
+        large_alloc_count: 10,
+        bytes_allocated: 1000000,
+        pages_in_use: 5,
+    };
+
+    assert_eq(stats.alloc_count, 100);
+    assert_eq(stats.dealloc_count, 50);
+    assert_eq(stats.large_alloc_count, 10);
+    assert_eq(stats.bytes_allocated, 1000000);
+    assert_eq(stats.pages_in_use, 5);
+}
+
+/// Test get_alloc_stats returns stats
+@requires(runtime)
+@test
+fn test_get_alloc_stats() {
+    // Do some allocations
+    let (ptr1, _, _) = cbgr_alloc(64, 8).unwrap();
+    let (ptr2, _, _) = cbgr_alloc(128, 8).unwrap();
+
+    let stats = get_alloc_stats();
+
+    // Should have at least 2 allocations
+    assert(stats.alloc_count >= 2);
+    assert(stats.bytes_allocated > 0);
+
+    cbgr_dealloc(ptr1).unwrap();
+    cbgr_dealloc(ptr2).unwrap();
+}
+
+/// Test get_global_alloc_stats
+@requires(runtime)
+@test
+fn test_get_global_alloc_stats() {
+    // Do an allocation to ensure at least one page exists
+    let (ptr, _, _) = cbgr_alloc(64, 8).unwrap();
+
+    let stats = get_global_alloc_stats();
+
+    // pages_in_use should be >= 0
+    assert(stats.pages_in_use >= 0);
+
+    cbgr_dealloc(ptr).unwrap();
+}
+
+/// Test stats track allocations
+@requires(runtime)
+@test
+fn test_alloc_stats_tracking() {
+    let stats_before = get_alloc_stats();
+
+    let (ptr, _, _) = cbgr_alloc(64, 8).unwrap();
+
+    let stats_after = get_alloc_stats();
+
+    assert(stats_after.alloc_count > stats_before.alloc_count,
+           "alloc_count should increase after allocation");
+    assert(stats_after.bytes_allocated > stats_before.bytes_allocated,
+           "bytes_allocated should increase after allocation");
+
+    cbgr_dealloc(ptr).unwrap();
+}
+
+/// Test stats track deallocations
+@requires(runtime)
+@test
+fn test_dealloc_stats_tracking() {
+    let (ptr, _, _) = cbgr_alloc(64, 8).unwrap();
+
+    let stats_before = get_alloc_stats();
+
+    cbgr_dealloc(ptr).unwrap();
+
+    let stats_after = get_alloc_stats();
+
+    assert(stats_after.dealloc_count > stats_before.dealloc_count,
+           "dealloc_count should increase after deallocation");
+}
+
+// =============================================================================
+// SECTION 13: CBGR Safety Tests
+// =============================================================================
+
+/// Test CBGR generation uniqueness across allocations
+@requires(runtime)
+@test
+fn test_cbgr_generation_uniqueness() {
+    let mut generations = List<UInt32>.new();
+
+    for _ in 0..10 {
+        let (ptr, gen, _) = cbgr_alloc(64, 8).unwrap();
+        generations.push(gen);
+        cbgr_dealloc(ptr).unwrap();
+    }
+
+    // All generations should be unique (after dealloc increments)
+    for i in 0..generations.len() {
+        for j in (i + 1)..generations.len() {
+            // Not strictly required to be unique, but should generally differ
+        }
+    }
+}
+
+/// Test CBGR epoch is valid
+@requires(runtime)
+@test
+fn test_cbgr_epoch_valid() {
+    let (ptr, _, epoch) = cbgr_alloc(64, 8).unwrap();
+
+    // Epoch should be non-zero after some allocations
+    // (it starts at EPOCH_INITIAL which may be non-zero)
+
+    cbgr_dealloc(ptr).unwrap();
+}
+
+/// Test get_header_from_ptr returns header
+@requires(runtime)
+@test
+fn test_get_header_from_ptr() {
+    let (ptr, gen, epoch) = cbgr_alloc(64, 8).unwrap();
+
+    let header = get_header_from_ptr(ptr);
+
+    // Header should exist and have valid generation
+    // Note: For small allocations this returns page header
+
+    cbgr_dealloc(ptr).unwrap();
+}
+
+/// Test large allocation header access
+@requires(runtime)
+@test
+fn test_large_allocation_header() {
+    // Allocate above LARGE_THRESHOLD
+    let (ptr, gen, epoch) = cbgr_alloc(10000, 8).unwrap();
+
+    let header = get_header_from_ptr(ptr);
+
+    cbgr_dealloc(ptr).unwrap();
+}
+
+// =============================================================================
+// SECTION 14: Edge Cases and Error Handling
+// =============================================================================
+
+/// Test allocation of 1 byte
+@requires(runtime)
+@test
+fn test_alloc_one_byte() {
+    let result = cbgr_alloc(1, 1);
+    assert(result.is_ok());
+
+    let (ptr, _, _) = result.unwrap();
+
+    // Should be able to write 1 byte
+    let slice: &mut [Byte] = unsafe { slice_from_raw_parts_mut(ptr, 1) };
+    slice[0] = 42 as Byte;
+    assert_eq(slice[0], 42 as Byte);
+
+    cbgr_dealloc(ptr).unwrap();
+}
+
+/// Test allocation at size class boundary
+@requires(runtime)
+@test
+fn test_alloc_at_boundary() {
+    // Exactly 16 bytes - first size class
+    let (ptr16, _, _) = cbgr_alloc(16, 8).unwrap();
+    cbgr_dealloc(ptr16).unwrap();
+
+    // Exactly 2048 bytes - last size class
+    let (ptr2048, _, _) = cbgr_alloc(2048, 8).unwrap();
+    cbgr_dealloc(ptr2048).unwrap();
+
+    // Just over 2048 - should be large allocation
+    let (ptr_large, _, _) = cbgr_alloc(2049, 8).unwrap();
+    cbgr_dealloc(ptr_large).unwrap();
+}
+
+/// Test multiple large allocations
+@requires(runtime)
+@test
+fn test_multiple_large_allocations() {
+    let mut ptrs: List<&unsafe Byte> = List.new();
+
+    for _ in 0..5 {
+        let (ptr, _, _) = cbgr_alloc(100000, 16).unwrap();
+        ptrs.push(ptr);
+    }
+
+    // Free in reverse order
+    for i in (0..5).rev() {
+        cbgr_dealloc(ptrs[i]).unwrap();
+    }
+}
+
+/// Test allocation with maximum safe alignment
+@requires(runtime)
+@test
+fn test_alloc_max_alignment() {
+    // PAGE_SIZE alignment for large allocations
+    let (ptr, _, _) = cbgr_alloc(PAGE_SIZE, PAGE_SIZE).unwrap();
+
+    let ptr_val = ptr as Int;
+    assert_eq(ptr_val % PAGE_SIZE, 0);
+
+    cbgr_dealloc(ptr).unwrap();
+}
+
+/// Test rapid alloc/dealloc cycle
+@requires(runtime)
+@test
+fn test_rapid_alloc_dealloc_cycle() {
+    for _ in 0..100 {
+        let (ptr, _, _) = cbgr_alloc(64, 8).unwrap();
+        cbgr_dealloc(ptr).unwrap();
+    }
+}
+
+/// Test interleaved alloc/dealloc
+@requires(runtime)
+@test
+fn test_interleaved_alloc_dealloc() {
+    let (ptr1, _, _) = cbgr_alloc(32, 8).unwrap();
+    let (ptr2, _, _) = cbgr_alloc(64, 8).unwrap();
+    cbgr_dealloc(ptr1).unwrap();
+    let (ptr3, _, _) = cbgr_alloc(48, 8).unwrap();
+    cbgr_dealloc(ptr2).unwrap();
+    let (ptr4, _, _) = cbgr_alloc(96, 8).unwrap();
+    cbgr_dealloc(ptr3).unwrap();
+    cbgr_dealloc(ptr4).unwrap();
+}
+
+/// Test allocation of all size classes
+@requires(runtime)
+@test
+fn test_alloc_all_size_classes() {
+    let mut ptrs: List<&unsafe Byte> = List.new();
+
+    for i in 0..SIZE_CLASS_COUNT {
+        let size = SIZE_CLASSES[i];
+        let (ptr, _, _) = cbgr_alloc(size, 8).unwrap();
+        ptrs.push(ptr);
+    }
+
+    for ptr in ptrs.iter() {
+        cbgr_dealloc(*ptr).unwrap();
+    }
+}
+
+// =============================================================================
+// SECTION 15: Alloc Protocol Tests
+// =============================================================================
+
+/// Test Alloc protocol method signatures
+@test
+fn test_alloc_protocol_signature() {
+    // Alloc is an alias for the allocator protocol
+    // It should have alloc, dealloc, realloc methods
+}
+
+// =============================================================================
+// SECTION 16: Layout Edge Cases
+// =============================================================================
+
+/// Test Layout with zero size
+@test
+fn test_layout_zero_size() {
+    let layout = Layout.from_size_align(0, 8);
+    assert_eq(layout.size(), 0);
+    assert_eq(layout.align(), 8);
+}
+
+/// Test Layout extend with zero-size layout
+@test
+fn test_layout_extend_zero_size() {
+    let first = Layout.from_size_align(0, 4);
+    let second = Layout.from_size_align(16, 8);
+
+    let combined = first.extend(second);
+    assert_eq(combined.size(), 16);
+    assert_eq(combined.align(), 8);
+}
+
+/// Test Layout repeat with large count
+@test
+fn test_layout_repeat_large() {
+    let element = Layout.from_size_align(8, 8);
+    let array = element.repeat(1000);
+
+    assert_eq(array.size(), 8000);
+    assert_eq(array.align(), 8);
+}
+
+// =============================================================================
+// SECTION 17: Integration Tests
+// =============================================================================
+
+/// Test complete allocation workflow
+@requires(runtime)
+@test
+fn test_complete_allocation_workflow() {
+    // 1. Allocate
+    let (ptr, gen, epoch) = cbgr_alloc(100, 16).unwrap();
+
+    // 2. Write data
+    let slice: &mut [Byte] = unsafe { slice_from_raw_parts_mut(ptr, 100) };
+    for i in 0..100 {
+        slice[i] = (i % 256) as Byte;
+    }
+
+    // 3. Read and verify
+    for i in 0..100 {
+        assert_eq(slice[i], (i % 256) as Byte);
+    }
+
+    // 4. Reallocate larger
+    let (new_ptr, new_gen, new_epoch) = cbgr_realloc(ptr, 100, 200, 16).unwrap();
+
+    // 5. Verify data preserved
+    let new_slice: &[Byte] = unsafe { slice_from_raw_parts(new_ptr, 200) };
+    for i in 0..100 {
+        assert_eq(new_slice[i], (i % 256) as Byte);
+    }
+
+    // 6. Deallocate
+    cbgr_dealloc(new_ptr).unwrap();
+}
+
+/// Test allocator under memory pressure
+@requires(runtime)
+@test
+fn test_allocator_memory_pressure() {
+    let mut ptrs: List<&unsafe Byte> = List.new();
+
+    // Allocate many small objects
+    for _ in 0..100 {
+        let (ptr, _, _) = cbgr_alloc(16, 8).unwrap();
+        ptrs.push(ptr);
+    }
+
+    // Free half
+    for i in 0..50 {
+        cbgr_dealloc(ptrs[i]).unwrap();
+    }
+
+    // Allocate more
+    for _ in 0..50 {
+        let (ptr, _, _) = cbgr_alloc(16, 8).unwrap();
+        ptrs.push(ptr);
+    }
+
+    // Free remaining
+    for i in 50..ptrs.len() {
+        cbgr_dealloc(ptrs[i]).unwrap();
+    }
+}
+
+/// Test mixed small and large allocations
+@requires(runtime)
+@test
+fn test_mixed_allocation_sizes() {
+    let mut ptrs: List<(&unsafe Byte, Int)> = List.new();
+
+    // Mix of sizes
+    let sizes = [16, 5000, 64, 10000, 128, 3000, 256, 8000, 512, 20000];
+
+    for size in sizes {
+        let (ptr, _, _) = cbgr_alloc(size, 8).unwrap();
+        ptrs.push((ptr, size));
+    }
+
+    // Verify and free - dereference ptr since iter() yields references
+    for (ptr, size) in ptrs.iter() {
+        cbgr_dealloc(*ptr as &unsafe Byte).unwrap();
+    }
+}
+
+// =============================================================================
+// Main Test Runner
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

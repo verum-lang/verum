@@ -1,0 +1,36 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, error-handling
+// @description: Test FFI error handling through thread-local error codes
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_set_error(code: Int);
+    fn ffi_get_error() -> Int;
+    fn ffi_clear_error();
+}
+
+fn main() {
+    // Initial error should be 0
+    ffi_clear_error();
+    let e1 = ffi_get_error();
+    print("initial error="); print(e1); print("\n");
+    assert(e1 == 0);
+
+    // Test set/get error
+    ffi_set_error(42);
+    let e2 = ffi_get_error();
+    print("after set 42="); print(e2); print("\n");
+    assert(e2 == 42);
+
+    // Test clear
+    ffi_clear_error();
+    let e3 = ffi_get_error();
+    print("after clear="); print(e3); print("\n");
+    assert(e3 == 0);
+
+    print("All error handling tests passed!\n");
+}

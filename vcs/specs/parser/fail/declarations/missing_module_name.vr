@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, module, error
+// @description: Test missing module name detection
+// @expected-error: E061
+
+module {
+    fn foo() {}
+}
+
+public module {
+    type Point is { x: Int, y: Int };
+}

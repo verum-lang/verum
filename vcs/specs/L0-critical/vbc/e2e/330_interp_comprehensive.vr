@@ -1,0 +1,532 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, records, sum-types, closures, recursion, loops, pattern, format
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Comprehensive test combining records, sum types, closures,
+// recursion, loops, pattern matching, format strings, and arithmetic.
+
+// =============================================================================
+// Part 1: Record types and nested records
+// =============================================================================
+
+type Vec2 is { x: Int, y: Int };
+
+type Rect is { origin: Vec2, width: Int, height: Int };
+
+fn vec2_add(a: Vec2, b: Vec2) -> Vec2 {
+    Vec2 { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn vec2_dot(a: Vec2, b: Vec2) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+fn vec2_manhattan(a: Vec2, b: Vec2) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    let abs_dx = if dx < 0 { -dx } else { dx };
+    let abs_dy = if dy < 0 { -dy } else { dy };
+    abs_dx + abs_dy
+}
+
+fn rect_area(r: Rect) -> Int {
+    r.width * r.height
+}
+
+fn rect_contains(r: Rect, p: Vec2) -> Int {
+    if p.x >= r.origin.x && p.x < r.origin.x + r.width
+       && p.y >= r.origin.y && p.y < r.origin.y + r.height {
+        1
+    } else {
+        0
+    }
+}
+
+fn test_records() {
+    let a = Vec2 { x: 3, y: 4 };
+    let b = Vec2 { x: 1, y: 2 };
+    let c = vec2_add(a, b);
+    assert_eq(c.x, 4);
+    assert_eq(c.y, 6);
+    assert_eq(vec2_dot(a, b), 11);  // 3*1 + 4*2 = 11
+    assert_eq(vec2_manhattan(a, b), 4);  // |3-1| + |4-2| = 4
+
+    let r = Rect { origin: Vec2 { x: 0, y: 0 }, width: 10, height: 5 };
+    assert_eq(rect_area(r), 50);
+    assert_eq(rect_contains(r, Vec2 { x: 5, y: 3 }), 1);
+    assert_eq(rect_contains(r, Vec2 { x: 15, y: 3 }), 0);
+}
+
+// =============================================================================
+// Part 2: Sum types and pattern matching via if/else
+// =============================================================================
+
+type Shape is Circle(Int) | Square(Int) | Triangle(Int, Int);
+
+fn shape_tag(s: Shape) -> Int {
+    if s is Circle { 0 }
+    else if s is Square { 1 }
+    else { 2 }
+}
+
+fn shape_area_approx(s: Shape) -> Int {
+    // Approximate areas using integer arithmetic
+    if s is Circle {
+        let Circle(r) = s;
+        // pi*r^2 ~= 3*r*r
+        3 * r * r
+    } else if s is Square {
+        let Square(side) = s;
+        side * side
+    } else {
+        let Triangle(base, ht) = s;
+        base * ht / 2
+    }
+}
+
+fn test_sum_types() {
+    let c = Circle(5);
+    let sq = Square(4);
+    let t = Triangle(6, 3);
+
+    assert_eq(shape_tag(c), 0);
+    assert_eq(shape_tag(sq), 1);
+    assert_eq(shape_tag(t), 2);
+
+    assert_eq(shape_area_approx(c), 75);   // 3*25
+    assert_eq(shape_area_approx(sq), 16);   // 4*4
+    assert_eq(shape_area_approx(t), 9);     // 6*3/2
+}
+
+// =============================================================================
+// Part 3: Closures and higher-order functions
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn apply_to_array(arr: Arr8, n: Int, func: fn(Int) -> Int) -> Arr8 {
+    let mut out = arr;
+    let mut i = 0;
+    while i < n {
+        out = arr8_set(out, i, func(arr8_get(arr, i)));
+        i = i + 1;
+    }
+    out
+}
+
+fn fold_array(arr: Arr8, n: Int, init: Int, func: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < n {
+        acc = func(acc, arr8_get(arr, i));
+        i = i + 1;
+    }
+    acc
+}
+
+fn double_val(x: Int) -> Int { x * 2 }
+fn add_vals(a: Int, b: Int) -> Int { a + b }
+fn mul_vals(a: Int, b: Int) -> Int { a * b }
+
+fn test_closures_hof() {
+    let mut arr = arr8_new();
+    arr = arr8_set(arr, 0, 1);
+    arr = arr8_set(arr, 1, 2);
+    arr = arr8_set(arr, 2, 3);
+    arr = arr8_set(arr, 3, 4);
+    arr = arr8_set(arr, 4, 5);
+
+    // Map: double each element
+    let doubled = apply_to_array(arr, 5, double_val);
+    assert_eq(arr8_get(doubled, 0), 2);
+    assert_eq(arr8_get(doubled, 1), 4);
+    assert_eq(arr8_get(doubled, 2), 6);
+    assert_eq(arr8_get(doubled, 3), 8);
+    assert_eq(arr8_get(doubled, 4), 10);
+
+    // Fold: sum
+    let total = fold_array(arr, 5, 0, add_vals);
+    assert_eq(total, 15);
+
+    // Fold: product
+    let product = fold_array(arr, 5, 1, mul_vals);
+    assert_eq(product, 120);
+}
+
+// =============================================================================
+// Part 4: Recursion
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a }
+    else { gcd(b, a % b) }
+}
+
+@allow(unbounded_recursion)
+fn power(base: Int, exp: Int) -> Int {
+    if exp == 0 { 1 }
+    else if exp % 2 == 0 {
+        let half = power(base, exp / 2);
+        half * half
+    } else {
+        base * power(base, exp - 1)
+    }
+}
+
+fn test_recursion() {
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(10), 55);
+
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(17, 13), 1);
+
+    assert_eq(power(2, 10), 1024);
+    assert_eq(power(3, 5), 243);
+    assert_eq(power(5, 0), 1);
+}
+
+// =============================================================================
+// Part 5: Loops and iteration patterns
+// =============================================================================
+
+fn test_loops() {
+    // Sum 1..100
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 100 {
+        total = total + i;
+        i = i + 1;
+    }
+    assert_eq(total, 5050);
+
+    // Count primes up to 30
+    let mut prime_count = 0;
+    let mut n = 2;
+    while n <= 30 {
+        let mut is_prime = 1;
+        let mut d = 2;
+        while d * d <= n {
+            if n % d == 0 {
+                is_prime = 0;
+            }
+            d = d + 1;
+        }
+        prime_count = prime_count + is_prime;
+        n = n + 1;
+    }
+    assert_eq(prime_count, 10);  // 2,3,5,7,11,13,17,19,23,29
+
+    // Collatz sequence length for starting value 27
+    let mut val = 27;
+    let mut steps = 0;
+    while val != 1 {
+        if val % 2 == 0 {
+            val = val / 2;
+        } else {
+            val = val * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    assert_eq(steps, 111);  // Collatz(27) takes 111 steps
+}
+
+// =============================================================================
+// Part 6: Complex arithmetic and bit manipulation
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn min_val(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn clamp(val: Int, lo: Int, hi: Int) -> Int {
+    max_val(lo, min_val(val, hi))
+}
+
+fn test_arithmetic() {
+    assert_eq(abs_val(-42), 42);
+    assert_eq(abs_val(0), 0);
+    assert_eq(abs_val(17), 17);
+
+    assert_eq(max_val(3, 7), 7);
+    assert_eq(min_val(3, 7), 3);
+
+    assert_eq(clamp(-5, 0, 100), 0);
+    assert_eq(clamp(50, 0, 100), 50);
+    assert_eq(clamp(200, 0, 100), 100);
+
+    // Integer division and modulo
+    assert_eq(17 / 5, 3);
+    assert_eq(17 % 5, 2);
+    assert_eq(-17 / 5, -3);
+
+    // Large numbers
+    assert_eq(1000000 * 1000, 1000000000);
+}
+
+// =============================================================================
+// Part 7: Format strings
+// =============================================================================
+
+fn test_format_strings() {
+    let x = 42;
+    let msg = f"value={x}";
+    assert_eq(msg, "value=42");
+
+    let a = 10;
+    let b = 20;
+    let sum = a + b;
+    let msg2 = f"sum of {a} and {b} is {sum}";
+    assert_eq(msg2, "sum of 10 and 20 is 30");
+
+    // Nested expression in format string
+    let n = 7;
+    let sq = n * n;
+    let msg3 = f"{n} squared is {sq}";
+    assert_eq(msg3, "7 squared is 49");
+}
+
+// =============================================================================
+// Part 8: Combining everything — mini spreadsheet evaluator
+// =============================================================================
+
+// Cell can be a literal value or a formula referencing other cells
+// We'll use simple encoding: positive = literal, negative = reference to cell index
+
+type Spreadsheet is { cells: Arr8, num_cells: Int };
+
+fn make_spreadsheet() -> Spreadsheet {
+    Spreadsheet { cells: arr8_new(), num_cells: 0 }
+}
+
+fn ss_set_literal(ss: Spreadsheet, idx: Int, val: Int) -> Spreadsheet {
+    Spreadsheet {
+        cells: arr8_set(ss.cells, idx, val),
+        num_cells: max_val(ss.num_cells, idx + 1)
+    }
+}
+
+// Evaluate cell value (for this simple version, all values are literals)
+fn ss_eval(ss: Spreadsheet, idx: Int) -> Int {
+    arr8_get(ss.cells, idx)
+}
+
+fn test_spreadsheet() {
+    let mut ss = make_spreadsheet();
+    ss = ss_set_literal(ss, 0, 100);   // A1 = 100
+    ss = ss_set_literal(ss, 1, 200);   // A2 = 200
+    ss = ss_set_literal(ss, 2, 50);    // A3 = 50
+
+    // Compute sum manually
+    let total = ss_eval(ss, 0) + ss_eval(ss, 1) + ss_eval(ss, 2);
+    assert_eq(total, 350);
+
+    // Compute average
+    let avg = total / 3;
+    assert_eq(avg, 116);  // integer division
+
+    // Compute max
+    let mx = max_val(max_val(ss_eval(ss, 0), ss_eval(ss, 1)), ss_eval(ss, 2));
+    assert_eq(mx, 200);
+}
+
+// =============================================================================
+// Part 9: Sorting and searching combined
+// =============================================================================
+
+fn insertion_sort(arr: Arr8, n: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = 1;
+    while i < n {
+        let key = arr8_get(a, i);
+        let mut j = i - 1;
+        let mut done = 0;
+        while j >= 0 && done == 0 {
+            if arr8_get(a, j) > key {
+                a = arr8_set(a, j + 1, arr8_get(a, j));
+                j = j - 1;
+            } else {
+                done = 1;
+            }
+        }
+        a = arr8_set(a, j + 1, key);
+        i = i + 1;
+    }
+    a
+}
+
+fn binary_search(arr: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        let val = arr8_get(arr, mid);
+        if val == target {
+            return mid;
+        } else if val < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    -1
+}
+
+fn test_sort_search() {
+    let mut arr = arr8_new();
+    arr = arr8_set(arr, 0, 42);
+    arr = arr8_set(arr, 1, 17);
+    arr = arr8_set(arr, 2, 99);
+    arr = arr8_set(arr, 3, 3);
+    arr = arr8_set(arr, 4, 55);
+    arr = arr8_set(arr, 5, 8);
+
+    let sorted = insertion_sort(arr, 6);
+    // Should be: 3, 8, 17, 42, 55, 99
+    assert_eq(arr8_get(sorted, 0), 3);
+    assert_eq(arr8_get(sorted, 1), 8);
+    assert_eq(arr8_get(sorted, 2), 17);
+    assert_eq(arr8_get(sorted, 3), 42);
+    assert_eq(arr8_get(sorted, 4), 55);
+    assert_eq(arr8_get(sorted, 5), 99);
+
+    // Binary search
+    assert_eq(binary_search(sorted, 6, 42), 3);
+    assert_eq(binary_search(sorted, 6, 3), 0);
+    assert_eq(binary_search(sorted, 6, 99), 5);
+    assert_eq(binary_search(sorted, 6, 50), -1);
+}
+
+// =============================================================================
+// Part 10: State machine simulation
+// =============================================================================
+
+// States: 0=IDLE, 1=RUNNING, 2=PAUSED, 3=DONE
+// Events: 0=START, 1=PAUSE, 2=RESUME, 3=STOP, 4=TICK
+
+fn transition(state: Int, event: Int) -> Int {
+    if state == 0 {
+        // IDLE
+        if event == 0 { 1 }  // START -> RUNNING
+        else { 0 }           // Stay IDLE
+    } else if state == 1 {
+        // RUNNING
+        if event == 1 { 2 }      // PAUSE -> PAUSED
+        else if event == 3 { 3 } // STOP -> DONE
+        else if event == 4 { 1 } // TICK -> RUNNING
+        else { 1 }
+    } else if state == 2 {
+        // PAUSED
+        if event == 2 { 1 }      // RESUME -> RUNNING
+        else if event == 3 { 3 } // STOP -> DONE
+        else { 2 }
+    } else {
+        // DONE: absorbing state
+        3
+    }
+}
+
+fn run_state_machine(events: Arr8, num_events: Int) -> Int {
+    let mut state = 0;  // IDLE
+    let mut i = 0;
+    while i < num_events {
+        state = transition(state, arr8_get(events, i));
+        i = i + 1;
+    }
+    state
+}
+
+fn test_state_machine() {
+    let mut events = arr8_new();
+    // START, TICK, TICK, PAUSE, RESUME, TICK, STOP
+    events = arr8_set(events, 0, 0);  // START
+    events = arr8_set(events, 1, 4);  // TICK
+    events = arr8_set(events, 2, 4);  // TICK
+    events = arr8_set(events, 3, 1);  // PAUSE
+    events = arr8_set(events, 4, 2);  // RESUME
+    events = arr8_set(events, 5, 4);  // TICK
+    events = arr8_set(events, 6, 3);  // STOP
+
+    let final_state = run_state_machine(events, 7);
+    assert_eq(final_state, 3);  // DONE
+
+    // Test: START then immediately STOP
+    let mut events2 = arr8_new();
+    events2 = arr8_set(events2, 0, 0);  // START
+    events2 = arr8_set(events2, 1, 3);  // STOP
+    assert_eq(run_state_machine(events2, 2), 3);
+
+    // Test: No events (stay IDLE)
+    assert_eq(run_state_machine(arr8_new(), 0), 0);
+
+    // Test: STOP while IDLE (stay IDLE)
+    let mut events3 = arr8_new();
+    events3 = arr8_set(events3, 0, 3);
+    assert_eq(run_state_machine(events3, 1), 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_records();
+    test_sum_types();
+    test_closures_hof();
+    test_recursion();
+    test_loops();
+    test_arithmetic();
+    test_format_strings();
+    test_spreadsheet();
+    test_sort_search();
+    test_state_machine();
+    print("[OK] 330_interp_comprehensive");
+    0
+}

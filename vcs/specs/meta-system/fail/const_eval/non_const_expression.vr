@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, const_eval, validation
+// @description: Tests detection of undefined variables in const context
+// @expected-error: undefined
+
+// Using undefined variable
+meta fn test_undefined_var() -> Int {
+    x  // ERROR: undefined variable 'x'
+}
+
+fn main() {
+    @const {
+        let _ = test_undefined_var();
+    };
+}

@@ -1,0 +1,69 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: context, using, provide, dependency-injection
+// @description: Context system (dependency injection) e2e
+
+context AppConfig {
+    fn get_max_retries(&self) -> Int;
+}
+
+type MyConfig is { retries: Int };
+
+implement AppConfig for MyConfig {
+    fn get_max_retries(&self) -> Int { self.retries }
+}
+
+fn get_retries() -> Int using [AppConfig] {
+    AppConfig.get_max_retries()
+}
+
+fn compute_with_retries(base: Int) -> Int using [AppConfig] {
+    let r = get_retries();
+    base * r
+}
+
+fn test_config_3() -> Int {
+    let cfg = MyConfig { retries: 3 };
+    provide AppConfig = cfg;
+    compute_with_retries(10)
+}
+
+fn test_config_7() -> Int {
+    let cfg = MyConfig { retries: 7 };
+    provide AppConfig = cfg;
+    compute_with_retries(5)
+}
+
+fn main() -> Int {
+    // Test 1: config with retries=3
+    let result = test_config_3();
+    if (result != 30) {
+        print(f"FAIL test1: got {result}, expected 30");
+        return 1;
+    }
+
+    // Test 2: different config with retries=7
+    let result2 = test_config_7();
+    if (result2 != 35) {
+        print(f"FAIL test2: got {result2}, expected 35");
+        return 1;
+    }
+
+    // Test 3: context used in multiple function calls
+    let cfg3 = MyConfig { retries: 2 };
+    provide AppConfig = cfg3;
+    let a = get_retries();
+    let b = compute_with_retries(4);
+    if (a != 2) {
+        print(f"FAIL test3a: got {a}, expected 2");
+        return 1;
+    }
+    if (b != 8) {
+        print(f"FAIL test3b: got {b}, expected 8");
+        return 1;
+    }
+
+    print("987_context_system: PASS");
+    0
+}

@@ -1,0 +1,315 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, coherence, orphan-rule, type
+
+/// Orphan rule - external trait with local type.
+/// You CAN implement an EXTERNAL trait for a LOCAL type.
+///
+/// This is allowed because:
+/// - The type is defined in your crate
+/// - You control how the type behaves
+/// - No other crate can implement the same trait for your type
+/// - Coherence is maintained
+
+// Assume these traits come from external crates (standard library)
+module std_traits {
+    pub type Clone is protocol {
+        fn clone(&self) -> Self;
+    }
+
+    pub type Debug is protocol {
+        fn fmt_debug(&self) -> Text;
+    }
+
+    pub type Display is protocol {
+        fn fmt_display(&self) -> Text;
+    }
+
+    pub type Default is protocol {
+        fn default() -> Self;
+    }
+
+    pub type Eq is protocol {
+        fn eq(&self, other: &Self) -> Bool;
+    }
+
+    pub type Ord is protocol extends Eq {
+        fn cmp(&self, other: &Self) -> Ordering;
+    }
+
+    pub type Ordering is
+    | Less
+    | Equal
+    | Greater;
+
+    pub type Hash is protocol {
+        fn hash(&self) -> Int;
+    }
+
+    pub type Iterator is protocol {
+        type Item;
+        fn next(&mut self) -> Maybe<Self.Item>;
+    }
+
+    pub type FromStr is protocol {
+        type Err;
+        fn from_str(s: &Text) -> Result<Self, Self.Err>;
+    }
+
+    pub type Into<T> is protocol {
+        fn into(self) -> T;
+    }
+
+    pub type From<T> is protocol {
+        fn from(value: T) -> Self;
+    }
+}
+
+// External serialization traits
+module serde {
+    pub type Serialize is protocol {
+        fn serialize(&self) -> Bytes;
+    }
+
+    pub type Deserialize is protocol {
+        fn deserialize(data: &Bytes) -> Result<Self, DeserializeError>;
+    }
+
+    pub type DeserializeError is
+    | InvalidData
+    | UnexpectedEof
+    | TypeMismatch;
+}
+
+// Our local module with local types
+module local_types {
+    mount std_traits.{Clone, Debug, Display, Default, Eq, Ord, Ordering, Hash, FromStr, Into, From};
+    mount serde.{Serialize, Deserialize, DeserializeError};
+
+    /// Local type - Point2D
+    pub type Point2D is {
+        x: Float,
+        y: Float
+    };
+
+    /// Local type - Color
+    pub type Color is {
+        r: Byte,
+        g: Byte,
+        b: Byte,
+        a: Byte
+    };
+
+    /// Local type - UserId
+    pub type UserId is {
+        value: Int
+    };
+
+    /// Local type - Email
+    pub type Email is {
+        local_part: Text,
+        domain: Text
+    };
+
+    /// Local type - Temperature
+    pub type Temperature is
+    | Celsius(Float)
+    | Fahrenheit(Float)
+    | Kelvin(Float);
+
+    // =========================================================================
+    // VALID: Implement EXTERNAL trait for LOCAL type
+    // =========================================================================
+
+    // Implement standard traits for Point2D
+    implement Clone for Point2D {
+        fn clone(&self) -> Point2D {
+            Point2D { x: self.x, y: self.y }
+        }
+    }
+
+    implement Debug for Point2D {
+        fn fmt_debug(&self) -> Text {
+            format("Point2D {{ x: {}, y: {} }}", self.x, self.y)
+        }
+    }
+
+    implement Display for Point2D {
+        fn fmt_display(&self) -> Text {
+            format("({}, {})", self.x, self.y)
+        }
+    }
+
+    implement Default for Point2D {
+        fn default() -> Point2D {
+            Point2D { x: 0.0, y: 0.0 }
+        }
+    }
+
+    implement Eq for Point2D {
+        fn eq(&self, other: &Point2D) -> Bool {
+            self.x == other.x && self.y == other.y
+        }
+    }
+
+    // Implement standard traits for Color
+    implement Clone for Color {
+        fn clone(&self) -> Color {
+            Color { r: self.r, g: self.g, b: self.b, a: self.a }
+        }
+    }
+
+    implement Debug for Color {
+        fn fmt_debug(&self) -> Text {
+            format("Color {{ r: {}, g: {}, b: {}, a: {} }}", self.r, self.g, self.b, self.a)
+        }
+    }
+
+    implement Display for Color {
+        fn fmt_display(&self) -> Text {
+            format("#{:02X}{:02X}{:02X}{:02X}", self.r, self.g, self.b, self.a)
+        }
+    }
+
+    implement Default for Color {
+        fn default() -> Color {
+            Color { r: 0, g: 0, b: 0, a: 255 }  // Opaque black
+        }
+    }
+
+    implement Eq for Color {
+        fn eq(&self, other: &Color) -> Bool {
+            self.r == other.r && self.g == other.g && self.b == other.b && self.a == other.a
+        }
+    }
+
+    implement Hash for Color {
+        fn hash(&self) -> Int {
+            (self.r as Int) << 24 | (self.g as Int) << 16 | (self.b as Int) << 8 | (self.a as Int)
+        }
+    }
+
+    // Implement FromStr for UserId
+    implement FromStr for UserId {
+        type Err = Text;
+
+        fn from_str(s: &Text) -> Result<UserId, Text> {
+            match s.parse<Int>() {
+                Some(val) if val > 0 => Ok(UserId { value: val }),
+                Some(_) => Err("UserId must be positive"),
+                None => Err("Invalid integer format"),
+            }
+        }
+    }
+
+    // Implement FromStr for Email
+    implement FromStr for Email {
+        type Err = Text;
+
+        fn from_str(s: &Text) -> Result<Email, Text> {
+            let parts: List<&str> = s.split('@').collect();
+            if parts.len() != 2 {
+                return Err("Email must contain exactly one @");
+            }
+            if parts[0].is_empty() || parts[1].is_empty() {
+                return Err("Local part and domain cannot be empty");
+            }
+            Ok(Email {
+                local_part: parts[0].to_text(),
+                domain: parts[1].to_text()
+            })
+        }
+    }
+
+    // Implement serialization for local types
+    implement Serialize for Point2D {
+        fn serialize(&self) -> Bytes {
+            let mut buf = Bytes.with_capacity(16);
+            buf.extend_from_slice(&self.x.to_le_bytes());
+            buf.extend_from_slice(&self.y.to_le_bytes());
+            buf
+        }
+    }
+
+    implement Deserialize for Point2D {
+        fn deserialize(data: &Bytes) -> Result<Point2D, DeserializeError> {
+            if data.len() < 16 {
+                return Err(DeserializeError.UnexpectedEof);
+            }
+            let x = Float.from_le_bytes(data[0..8].try_into().unwrap());
+            let y = Float.from_le_bytes(data[8..16].try_into().unwrap());
+            Ok(Point2D { x, y })
+        }
+    }
+
+    implement Serialize for Color {
+        fn serialize(&self) -> Bytes {
+            Bytes.from([self.r, self.g, self.b, self.a])
+        }
+    }
+
+    implement Deserialize for Color {
+        fn deserialize(data: &Bytes) -> Result<Color, DeserializeError> {
+            if data.len() < 4 {
+                return Err(DeserializeError.UnexpectedEof);
+            }
+            // Extract bytes via get() instead of direct indexing
+            let r = data.get(0).unwrap_or(0);
+            let g = data.get(1).unwrap_or(0);
+            let b = data.get(2).unwrap_or(0);
+            let a = data.get(3).unwrap_or(0);
+            Ok(Color { r, g, b, a })
+        }
+    }
+
+    // Implement conversion traits
+    implement From<(Float, Float)> for Point2D {
+        fn from(value: (Float, Float)) -> Point2D {
+            Point2D { x: value.0, y: value.1 }
+        }
+    }
+
+    implement Into<(Float, Float)> for Point2D {
+        fn into(self) -> (Float, Float) {
+            (self.x, self.y)
+        }
+    }
+
+    implement From<Int> for UserId {
+        fn from(value: Int) -> UserId {
+            UserId { value }
+        }
+    }
+}
+
+fn main() {
+    mount std_traits.{Clone, Debug, Display, Default, FromStr};
+    mount serde.{Serialize, Deserialize};
+    mount local_types.{Point2D, Color, UserId, Email, Temperature};
+
+    // Use external traits on local types
+    let point = Point2D { x: 3.0, y: 4.0 };
+    let cloned = point.clone();
+    let debug_str = point.fmt_debug();
+    let display_str = point.fmt_display();
+
+    let default_point: Point2D = Default.default();
+
+    let color = Color { r: 255, g: 128, b: 0, a: 255 };
+    let color_str = color.fmt_display();  // "#FF8000FF"
+    let hash = color.hash();
+
+    // Parse from string
+    let user_id: Result<UserId, Text> = FromStr.from_str("12345");
+    let email: Result<Email, Text> = FromStr.from_str("user@example.com");
+
+    // Serialization
+    let serialized = point.serialize();
+    let deserialized = Point2D.deserialize(&serialized);
+
+    // All of these work because:
+    // 1. The types (Point2D, Color, etc.) are defined locally
+    // 2. The traits (Clone, Debug, etc.) are external
+    // 3. No coherence violation - we own the type
+}

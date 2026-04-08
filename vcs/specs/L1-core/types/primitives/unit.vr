@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, primitives, unit
+
+/// Test for Unit primitive type.
+/// Unit represents the absence of a meaningful value (like void in other languages).
+
+fn print_message() -> Unit {
+    print("Hello, world!");
+}
+
+fn do_nothing() {
+    // This function implicitly returns Unit
+}
+
+fn explicit_unit() -> Unit {
+    return ();
+}
+
+fn takes_unit(_x: Unit) -> Int {
+    42
+}
+
+fn side_effect_if(cond: Bool) -> Unit {
+    if cond {
+        print("true branch");
+    } else {
+        print("false branch");
+    }
+}
+
+type UnitBox is { value: Unit };
+
+type Nested is {
+    inner: Maybe<Unit>,
+};
+
+fn main() {
+    // Basic unit literal
+    let u: Unit = ();
+
+    // Explicit unit return
+    let _e: Unit = explicit_unit();
+
+    // Unit in expressions
+    let result: Unit = if true { () } else { () };
+
+    // Functions returning unit
+    let _pm: Unit = print_message();
+    let _nothing: Unit = do_nothing();
+
+    // Unit in match expressions - use wildcard since () is Unit, not tuple
+    let matched: Unit = match () {
+        _ => (),
+    };
+
+    // Unit in option types
+    let some_unit: Maybe<Unit> = Some(());
+    let none_unit: Maybe<Unit> = None;
+
+    // Unit in Result types
+    let ok_unit: Result<Unit, Text> = Ok(());
+    let err_result: Result<Unit, Text> = Err("error");
+
+    // Unit in collections
+    let unit_list: List<Unit> = [(), (), ()];
+
+    // Unit as function parameter
+    let from_unit: Int = takes_unit(());
+
+    // Unit in conditional
+    let cond_unit: Unit = if true { () } else { () };
+
+    // side_effect_if returns unit
+    let _sef: Unit = side_effect_if(true);
+
+    // Unit in block expressions
+    let block_unit: Unit = { let _x = 1; () };
+
+    // Unit as generic type parameter - defined at top level, use here
+    let unit_container = UnitBox { value: () };
+
+    // Unit in nested structures - defined at top level, use here
+    let nested = Nested { inner: Some(()) };
+
+    // Assertions
+    assert(some_unit == Some(()));
+    assert(none_unit == None);
+    assert(ok_unit.is_ok());
+    assert(err_result.is_err());
+    assert(unit_list.len() == 3);
+    assert(from_unit == 42);
+    assert(unit_container.value == ());
+
+    print("Unit type tests passed!");
+}

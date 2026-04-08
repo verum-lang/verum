@@ -1,0 +1,541 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: macro, http, server, request, real-world
+// @description: HTTP server benchmark (target: > 100K req/sec for simple endpoints)
+
+/// HTTP Server Performance Benchmark
+///
+/// Measures real-world HTTP request handling performance.
+/// HTTP servers are critical infrastructure for web applications.
+///
+/// Performance targets:
+/// - Hello world:       > 200K req/sec
+/// - JSON response:     > 100K req/sec
+/// - Route matching:    < 500ns
+/// - Header parsing:    < 1us
+/// - Body parsing:      > 500MB/sec
+///
+/// Test scenarios:
+/// - Simple text response
+/// - JSON API endpoints
+/// - Large body handling
+/// - Header-heavy requests
+///
+/// Spec reference: docs/detailed/20-standard-library.md
+
+const WARMUP_ITERATIONS: Int = 1000;
+const BENCHMARK_ITERATIONS: Int = 100_000;
+
+/// Mock request for benchmarking
+type Request is {
+    method: Method,
+    path: Text,
+    headers: Map<Text, Text>,
+    body: List<u8>,
+};
+
+type Method is Get | Post | Put | Delete | Patch | Head | Options;
+
+type Response is {
+    status: u16,
+    headers: Map<Text, Text>,
+    body: List<u8>,
+};
+
+implement Response {
+    fn text(status: u16, body: Text) -> Self {
+        let mut headers = Map.new();
+        headers.insert("content-type".into(), "text/plain".into());
+        Self {
+            status,
+            headers,
+            body: body.into_bytes(),
+        }
+    }
+
+    fn json<T: Serialize>(status: u16, value: &T) -> Self {
+        let mut headers = Map.new();
+        headers.insert("content-type".into(), "application/json".into());
+        Self {
+            status,
+            headers,
+            body: Json.to_string(value).into_bytes(),
+        }
+    }
+}
+
+/// Generate sample request
+fn create_simple_request() -> Request {
+    let mut headers = Map.new();
+    headers.insert("host".into(), "localhost:8080".into());
+    headers.insert("user-agent".into(), "benchmark/1.0".into());
+    headers.insert("accept".into(), "*/*".into());
+
+    Request {
+        method: Method.Get,
+        path: "/hello".into(),
+        headers,
+        body: List.new(),
+    }
+}
+
+fn create_json_request(body: Text) -> Request {
+    let mut headers = Map.new();
+    headers.insert("host".into(), "localhost:8080".into());
+    headers.insert("content-type".into(), "application/json".into());
+    headers.insert("accept".into(), "application/json".into());
+    headers.insert("content-length".into(), body.len().to_string());
+
+    Request {
+        method: Method.Post,
+        path: "/api/users".into(),
+        headers,
+        body: body.into_bytes(),
+    }
+}
+
+fn create_header_heavy_request() -> Request {
+    let mut headers = Map.new();
+    headers.insert("host".into(), "localhost:8080".into());
+    headers.insert("accept".into(), "application/json, text/html, */*".into());
+    headers.insert("accept-language".into(), "en-US,en;q=0.9,de;q=0.8".into());
+    headers.insert("accept-encoding".into(), "gzip, deflate, br".into());
+    headers.insert("cache-control".into(), "no-cache".into());
+    headers.insert("pragma".into(), "no-cache".into());
+    headers.insert("x-custom-header-1".into(), "value1".into());
+    headers.insert("x-custom-header-2".into(), "value2".into());
+    headers.insert("x-custom-header-3".into(), "value3".into());
+    headers.insert("x-request-id".into(), "abc-123-def-456".into());
+    headers.insert("authorization".into(), "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9".into());
+
+    Request {
+        method: Method.Get,
+        path: "/api/complex".into(),
+        headers,
+        body: List.new(),
+    }
+}
+
+/// Simple handler functions
+fn hello_handler(req: &Request) -> Response {
+    Response.text(200, "Hello, World!")
+}
+
+fn json_handler(req: &Request) -> Response {
+    type ResponseData is { message: Text, count: Int };
+    Response.json(200, &ResponseData {
+        message: "success".into(),
+        count: 42,
+    })
+}
+
+fn echo_handler(req: &Request) -> Response {
+    Response {
+        status: 200,
+        headers: req.headers.clone(),
+        body: req.body.clone(),
+    }
+}
+
+/// Router for benchmarking
+type Router is {
+    routes: Map<(Method, Text), fn(&Request) -> Response>,
+};
+
+implement Router {
+    fn new() -> Self {
+        Self { routes: Map.new() }
+    }
+
+    fn add(&mut self, method: Method, path: Text, handler: fn(&Request) -> Response) {
+        self.routes.insert((method, path), handler);
+    }
+
+    fn route(&self, req: &Request) -> Response {
+        if let Some(handler) = self.routes.get(&(req.method.clone(), req.path.clone())) {
+            handler(req)
+        } else {
+            Response.text(404, "Not Found")
+        }
+    }
+}
+
+/// Benchmark: Hello world response
+fn benchmark_hello_world() -> HttpBenchmarkResult {
+    let req = create_simple_request();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let resp = hello_handler(&req);
+        black_box(resp);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let resp = hello_handler(&req);
+        black_box(resp);
+    }
+
+    let elapsed = start.elapsed();
+
+    HttpBenchmarkResult {
+        name: "hello_world",
+        requests: BENCHMARK_ITERATIONS,
+        elapsed_ms: elapsed.as_millis(),
+        req_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        target_req_per_sec: 200_000.0,
+    }
+}
+
+/// Benchmark: JSON response
+fn benchmark_json_response() -> HttpBenchmarkResult {
+    let req = create_simple_request();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let resp = json_handler(&req);
+        black_box(resp);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let resp = json_handler(&req);
+        black_box(resp);
+    }
+
+    let elapsed = start.elapsed();
+
+    HttpBenchmarkResult {
+        name: "json_response",
+        requests: BENCHMARK_ITERATIONS,
+        elapsed_ms: elapsed.as_millis(),
+        req_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        target_req_per_sec: 100_000.0,
+    }
+}
+
+/// Benchmark: Route matching
+fn benchmark_route_matching() -> HttpBenchmarkResult {
+    let mut router = Router.new();
+    router.add(Method.Get, "/".into(), hello_handler);
+    router.add(Method.Get, "/hello".into(), hello_handler);
+    router.add(Method.Get, "/api/users".into(), json_handler);
+    router.add(Method.Post, "/api/users".into(), echo_handler);
+    router.add(Method.Get, "/api/posts".into(), json_handler);
+    router.add(Method.Get, "/api/comments".into(), json_handler);
+    router.add(Method.Get, "/health".into(), hello_handler);
+    router.add(Method.Get, "/metrics".into(), json_handler);
+
+    let req = create_simple_request();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let resp = router.route(&req);
+        black_box(resp);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let resp = router.route(&req);
+        black_box(resp);
+    }
+
+    let elapsed = start.elapsed();
+
+    HttpBenchmarkResult {
+        name: "route_matching_8_routes",
+        requests: BENCHMARK_ITERATIONS,
+        elapsed_ms: elapsed.as_millis(),
+        req_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        target_req_per_sec: 150_000.0,
+    }
+}
+
+/// Benchmark: Header parsing
+fn benchmark_header_parsing() -> HttpBenchmarkResult {
+    let req = create_header_heavy_request();
+
+    fn process_headers(req: &Request) -> Int {
+        let mut count = 0;
+        for (key, value) in req.headers.iter() {
+            if key.starts_with("x-") {
+                count += 1;
+            }
+            black_box((key, value));
+        }
+        count
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(process_headers(&req));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(process_headers(&req));
+    }
+
+    let elapsed = start.elapsed();
+
+    HttpBenchmarkResult {
+        name: "header_processing",
+        requests: BENCHMARK_ITERATIONS,
+        elapsed_ms: elapsed.as_millis(),
+        req_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        target_req_per_sec: 500_000.0,
+    }
+}
+
+/// Benchmark: JSON body parsing
+fn benchmark_body_parsing() -> HttpBenchmarkResult {
+    type UserRequest is { name: Text, email: Text, age: Int };
+
+    let json_body = r#"{"name": "John Doe", "email": "john@example.com", "age": 30}"#;
+    let req = create_json_request(json_body.into());
+
+    fn parse_body(req: &Request) -> Result<UserRequest, Error> {
+        let body_str = Text.from_utf8(&req.body)?;
+        Json.from_str(&body_str)
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let user = parse_body(&req);
+        black_box(user);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let user = parse_body(&req);
+        black_box(user);
+    }
+
+    let elapsed = start.elapsed();
+
+    HttpBenchmarkResult {
+        name: "json_body_parsing",
+        requests: BENCHMARK_ITERATIONS,
+        elapsed_ms: elapsed.as_millis(),
+        req_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        target_req_per_sec: 300_000.0,
+    }
+}
+
+/// Benchmark: Large body handling
+fn benchmark_large_body() -> HttpBenchmarkResult {
+    let large_body: List<u8> = (0..100_000).map(|i| (i % 256) as u8).collect();
+    let req = Request {
+        method: Method.Post,
+        path: "/upload".into(),
+        headers: Map.new(),
+        body: large_body.clone(),
+    };
+
+    fn process_large_body(req: &Request) -> Int {
+        let mut sum: Int = 0;
+        for byte in req.body.iter() {
+            sum += *byte as Int;
+        }
+        sum
+    }
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 10) {
+        black_box(process_large_body(&req));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 100) {
+        black_box(process_large_body(&req));
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = 100_000 * BENCHMARK_ITERATIONS / 100;
+
+    HttpBenchmarkResult {
+        name: "large_body_100kb",
+        requests: BENCHMARK_ITERATIONS / 100,
+        elapsed_ms: elapsed.as_millis(),
+        req_per_sec: (BENCHMARK_ITERATIONS / 100) as f64 / elapsed.as_secs_f64(),
+        target_req_per_sec: 10_000.0,  // Limited by body size
+    }
+}
+
+/// Benchmark: Response building
+fn benchmark_response_building() -> HttpBenchmarkResult {
+    type ApiResponse is {
+        success: Bool,
+        data: List<Item>,
+        pagination: Pagination,
+    };
+
+    type Item is { id: Int, name: Text };
+    type Pagination is { page: Int, total: Int };
+
+    fn build_response() -> Response {
+        let data: List<Item> = (0..10)
+            .map(|i| Item { id: i, name: format("item_{}", i) })
+            .collect();
+
+        let response = ApiResponse {
+            success: true,
+            data,
+            pagination: Pagination { page: 1, total: 100 },
+        };
+
+        Response.json(200, &response)
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let resp = build_response();
+        black_box(resp);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let resp = build_response();
+        black_box(resp);
+    }
+
+    let elapsed = start.elapsed();
+
+    HttpBenchmarkResult {
+        name: "response_building",
+        requests: BENCHMARK_ITERATIONS,
+        elapsed_ms: elapsed.as_millis(),
+        req_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        target_req_per_sec: 80_000.0,
+    }
+}
+
+/// Benchmark: Middleware chain
+fn benchmark_middleware() -> HttpBenchmarkResult {
+    type Middleware is fn(&Request, fn(&Request) -> Response) -> Response;
+
+    fn logging_middleware(req: &Request, next: fn(&Request) -> Response) -> Response {
+        black_box(&req.path);
+        next(req)
+    }
+
+    fn auth_middleware(req: &Request, next: fn(&Request) -> Response) -> Response {
+        if req.headers.get(&"authorization".into()).is_some() {
+            next(req)
+        } else {
+            Response.text(401, "Unauthorized")
+        }
+    }
+
+    fn timing_middleware(req: &Request, next: fn(&Request) -> Response) -> Response {
+        let start = Instant.now();
+        let resp = next(req);
+        black_box(start.elapsed());
+        resp
+    }
+
+    let req = create_header_heavy_request();
+
+    fn apply_middleware(req: &Request) -> Response {
+        timing_middleware(req, |req| {
+            logging_middleware(req, |req| {
+                auth_middleware(req, hello_handler)
+            })
+        })
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let resp = apply_middleware(&req);
+        black_box(resp);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let resp = apply_middleware(&req);
+        black_box(resp);
+    }
+
+    let elapsed = start.elapsed();
+
+    HttpBenchmarkResult {
+        name: "middleware_chain_3",
+        requests: BENCHMARK_ITERATIONS,
+        elapsed_ms: elapsed.as_millis(),
+        req_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        target_req_per_sec: 100_000.0,
+    }
+}
+
+fn main() {
+    println("=== HTTP Server Performance Benchmark ===\n");
+
+    let results = [
+        benchmark_hello_world(),
+        benchmark_json_response(),
+        benchmark_route_matching(),
+        benchmark_header_parsing(),
+        benchmark_body_parsing(),
+        benchmark_large_body(),
+        benchmark_response_building(),
+        benchmark_middleware(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>8}",
+            "Benchmark", "req/sec", "Target", "Status");
+    println("{}", "-".repeat(65));
+
+    for result in results {
+        let passed = result.req_per_sec >= result.target_req_per_sec;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.0} {:>12.0} {:>8}",
+                result.name, result.req_per_sec, result.target_req_per_sec, status);
+    }
+
+    println("");
+    println("HTTP Performance Targets:");
+    println("  - Hello world:     > 200K req/sec");
+    println("  - JSON response:   > 100K req/sec");
+    println("  - With middleware: > 100K req/sec");
+}
+
+type HttpBenchmarkResult is {
+    name: Text,
+    requests: Int,
+    elapsed_ms: Int,
+    req_per_sec: f64,
+    target_req_per_sec: f64,
+};
+
+type Serialize is protocol {};
+
+module Json {
+    pub fn to_string<T>(v: &T) -> Text { Text.new() }
+    pub fn from_str<T>(s: &Text) -> Result<T, Error> { todo() }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+    fn as_secs_f64(&self) -> f64 { self.nanos as f64 / 1e9 }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn format(fmt: &Text, args: List<Text>) -> Text { Text.new() }

@@ -1,0 +1,118 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arrays, comprehension
+
+// Array/list comprehensions - basic supported syntax
+
+type Point is { x: Int, y: Int };
+
+fn test_basic_comprehension() {
+    // Basic comprehension
+    let squares = [x * x for x in 0..10];
+    let doubled = [x * 2 for x in numbers];
+}
+
+fn test_comprehension_with_filter() {
+    // Comprehension with filter
+    let evens = [x for x in 0..20 if x % 2 == 0];
+    let positives = [x for x in values if x > 0];
+}
+
+fn test_transform_and_filter() {
+    // Comprehension with transform and filter
+    let even_squares = [x * x for x in 0..20 if x % 2 == 0];
+}
+
+fn test_nested_comprehension() {
+    // Nested comprehension
+    let matrix = [[i * j for j in 0..4] for i in 0..4];
+    let pairs = [(x, y) for x in 0..3 for y in 0..3];
+}
+
+fn test_multiple_filters() {
+    // Comprehension with multiple filters
+    let filtered = [x for x in items if x > 0 if x < 100 if x % 2 == 0];
+}
+
+fn test_complex_expression() {
+    // Comprehension with complex expression
+    let formatted = [f"Item {i}: {item}" for (i, item) in items.enumerate()];
+}
+
+fn test_function_calls() {
+    // Comprehension with function calls
+    let processed = [process(x) for x in inputs];
+    let validated = [validate(x) for x in data if is_valid(x)];
+}
+
+fn test_tuple_unpacking() {
+    // Comprehension with tuple unpacking
+    let sums = [a + b for (a, b) in pairs];
+    let products = [x * y * z for (x, y, z) in triples];
+}
+
+fn test_iteration_methods() {
+    // Comprehension over method results
+    let keys = [k for k in map.keys()];
+    let values = [v for v in map.values()];
+    let entries = [(k, v) for (k, v) in map.entries()];
+}
+
+fn test_string_operations() {
+    // Comprehension with string operations
+    let lengths = [s.len() for s in strings];
+    let upper = [s.to_uppercase() for s in strings];
+    let words = [word for line in lines for word in line.split_whitespace()];
+}
+
+fn test_conditional_expression() {
+    // Comprehension with conditional expression
+    let abs_values = [if x >= 0 { x } else { -x } for x in numbers];
+    let clamped = [clamp(x, 0, 100) for x in raw_values];
+}
+
+fn test_struct_creation() {
+    // Comprehension creating structs
+    let grid = [Point { x: x, y: y } for x in 0..10 for y in 0..10];
+}
+
+fn test_method_chain_before() {
+    // Comprehension with method chain on source
+    let until_zero = [x for x in sequence.take_while(|x| x != 0)];
+    let first_n = [x for x in items.take(n)];
+}
+
+fn test_range_variants() {
+    // Different range forms
+    let inclusive = [x for x in 1..=10];
+    let exclusive = [x for x in 0..100];
+}
+
+fn test_nested_with_filter() {
+    // Nested comprehension with filters
+    let pythagorean = [(a, b, c) for a in 1..20
+                                  for b in a..20
+                                  for c in b..20
+                                  if a*a + b*b == c*c];
+}
+
+fn test_enumeration() {
+    // Comprehension with enumerate
+    let indexed = [(i, x) for (i, x) in items.enumerate()];
+}
+
+fn test_zip() {
+    // Comprehension with zip
+    let first = [1, 2, 3];
+    let second = [4, 5, 6];
+    let zipped = [(a, b) for (a, b) in first.zip(second)];
+    let summed = [a + b for (a, b) in xs.zip(ys)];
+}
+
+fn test_flattening() {
+    // Flattening with nested for
+    let nested = [[1, 2], [3, 4]];
+    let flattened = [inner for outer in nested for inner in outer];
+    let flat_mapped = [y for x in items for y in x];
+}

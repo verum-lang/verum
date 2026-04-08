@@ -1,0 +1,281 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, arithmetic, overflow
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for overflow behavior.
+/// Tests checked, wrapping, saturating, and overflowing arithmetic operations.
+
+fn main() {
+    test_checked_arithmetic();
+    test_wrapping_arithmetic();
+    test_saturating_arithmetic();
+    test_overflowing_addition();
+    test_overflowing_subtraction();
+    test_overflowing_multiplication();
+    test_overflow_detection();
+    test_safe_patterns();
+}
+
+/// Checked arithmetic that returns Maybe
+fn test_checked_arithmetic() {
+    println("=== Checked Arithmetic ===");
+
+    // Addition - safe cases
+    let a: Int = 100;
+    let b: Int = 50;
+    println(f"checked_add(100, 50): {a.checked_add(b)}");
+    println(f"checked_add(0, 0): {0.checked_add(0)}");
+    println(f"checked_add(-10, 20): {(-10).checked_add(20)}");
+
+    // Subtraction - safe cases
+    println(f"checked_sub(100, 50): {a.checked_sub(b)}");
+    println(f"checked_sub(50, 100): {b.checked_sub(a)}");
+    println(f"checked_sub(0, 0): {0.checked_sub(0)}");
+
+    // Multiplication - safe cases
+    println(f"checked_mul(10, 5): {10.checked_mul(5)}");
+    println(f"checked_mul(0, 1000): {0.checked_mul(1000)}");
+    println(f"checked_mul(-3, 7): {(-3).checked_mul(7)}");
+
+    // Division - safe cases
+    println(f"checked_div(100, 10): {100.checked_div(10)}");
+    println(f"checked_div(100, 3): {100.checked_div(3)}");
+
+    // Division by zero
+    println(f"checked_div(100, 0): {100.checked_div(0)}");
+    println(f"checked_div(0, 0): {0.checked_div(0)}");
+
+    // Large numbers (potential overflow)
+    let large: Int = 1000000000000;
+    println(f"checked_mul(large, large): {large.checked_mul(large)}");
+    println(f"checked_add(large, large): {large.checked_add(large)}");
+}
+
+/// Wrapping arithmetic
+fn test_wrapping_arithmetic() {
+    println("\n=== Wrapping Arithmetic ===");
+
+    // Basic wrapping operations
+    let x: Int = 10;
+    let y: Int = 3;
+    println(f"wrapping_add(10, 3): {x.wrapping_add(y)}");
+    println(f"wrapping_sub(10, 3): {x.wrapping_sub(y)}");
+    println(f"wrapping_mul(10, 3): {x.wrapping_mul(y)}");
+
+    // Wrapping with negatives
+    println(f"wrapping_add(-5, 10): {(-5).wrapping_add(10)}");
+    println(f"wrapping_sub(5, 10): {5.wrapping_sub(10)}");
+    println(f"wrapping_mul(-5, -3): {(-5).wrapping_mul(-3)}");
+
+    // Wrapping negation
+    println(f"wrapping_neg(42): {42.wrapping_neg()}");
+    println(f"wrapping_neg(-42): {(-42).wrapping_neg()}");
+    println(f"wrapping_neg(0): {0.wrapping_neg()}");
+
+    // Wrapping shift
+    println(f"wrapping_shl(1, 4): {1.wrapping_shl(4)}");
+    println(f"wrapping_shr(16, 2): {16.wrapping_shr(2)}");
+}
+
+/// Saturating arithmetic
+fn test_saturating_arithmetic() {
+    println("\n=== Saturating Arithmetic ===");
+
+    // Basic saturating operations
+    let x: Int = 100;
+    let y: Int = 50;
+    println(f"saturating_add(100, 50): {x.saturating_add(y)}");
+    println(f"saturating_sub(100, 50): {x.saturating_sub(y)}");
+    println(f"saturating_mul(100, 50): {x.saturating_mul(y)}");
+
+    // Saturating at lower bound
+    println(f"saturating_sub(0, 100): {0.saturating_sub(100)}");
+    println(f"saturating_sub(-100, 100): {(-100).saturating_sub(100)}");
+
+    // Saturating negation
+    println(f"saturating_neg(42): {42.saturating_neg()}");
+    println(f"saturating_neg(-42): {(-42).saturating_neg()}");
+
+    // Saturating power
+    println(f"saturating_pow(2, 10): {2.saturating_pow(10)}");
+    println(f"saturating_pow(10, 3): {10.saturating_pow(3)}");
+
+    // Large value saturation
+    let large: Int = 1000000000;
+    println(f"saturating_mul(large, 10): {large.saturating_mul(10)}");
+    println(f"saturating_add(large, large): {large.saturating_add(large)}");
+}
+
+/// Overflowing addition patterns
+fn test_overflowing_addition() {
+    println("\n=== Overflowing Addition ===");
+
+    // Returns (result, did_overflow)
+    let a: Int = 100;
+    let b: Int = 200;
+    let (result, overflow) = a.overflowing_add(b);
+    println(f"overflowing_add(100, 200): ({result}, {overflow})");
+
+    // Zero cases
+    let (r1, o1) = 0.overflowing_add(0);
+    println(f"overflowing_add(0, 0): ({r1}, {o1})");
+
+    let (r2, o2) = 0.overflowing_add(100);
+    println(f"overflowing_add(0, 100): ({r2}, {o2})");
+
+    // Negative values
+    let (r3, o3) = (-50).overflowing_add(100);
+    println(f"overflowing_add(-50, 100): ({r3}, {o3})");
+
+    let (r4, o4) = (-50).overflowing_add(-100);
+    println(f"overflowing_add(-50, -100): ({r4}, {o4})");
+
+    // Safe large additions
+    let large: Int = 1000000;
+    let (r5, o5) = large.overflowing_add(large);
+    println(f"overflowing_add(1000000, 1000000): ({r5}, {o5})");
+}
+
+/// Overflowing subtraction patterns
+fn test_overflowing_subtraction() {
+    println("\n=== Overflowing Subtraction ===");
+
+    // Basic subtraction
+    let (r1, o1) = 100.overflowing_sub(50);
+    println(f"overflowing_sub(100, 50): ({r1}, {o1})");
+
+    let (r2, o2) = 50.overflowing_sub(100);
+    println(f"overflowing_sub(50, 100): ({r2}, {o2})");
+
+    // Zero cases
+    let (r3, o3) = 0.overflowing_sub(0);
+    println(f"overflowing_sub(0, 0): ({r3}, {o3})");
+
+    let (r4, o4) = 0.overflowing_sub(1);
+    println(f"overflowing_sub(0, 1): ({r4}, {o4})");
+
+    // Negative values
+    let (r5, o5) = (-10).overflowing_sub(5);
+    println(f"overflowing_sub(-10, 5): ({r5}, {o5})");
+
+    let (r6, o6) = (-10).overflowing_sub(-20);
+    println(f"overflowing_sub(-10, -20): ({r6}, {o6})");
+}
+
+/// Overflowing multiplication patterns
+fn test_overflowing_multiplication() {
+    println("\n=== Overflowing Multiplication ===");
+
+    // Basic multiplication
+    let (r1, o1) = 10.overflowing_mul(5);
+    println(f"overflowing_mul(10, 5): ({r1}, {o1})");
+
+    // Zero multiplication
+    let (r2, o2) = 0.overflowing_mul(1000000);
+    println(f"overflowing_mul(0, 1000000): ({r2}, {o2})");
+
+    // One multiplication
+    let (r3, o3) = 1.overflowing_mul(999);
+    println(f"overflowing_mul(1, 999): ({r3}, {o3})");
+
+    // Negative multiplication
+    let (r4, o4) = (-5).overflowing_mul(10);
+    println(f"overflowing_mul(-5, 10): ({r4}, {o4})");
+
+    let (r5, o5) = (-5).overflowing_mul(-10);
+    println(f"overflowing_mul(-5, -10): ({r5}, {o5})");
+
+    // Safe large multiplication
+    let (r6, o6) = 1000.overflowing_mul(1000);
+    println(f"overflowing_mul(1000, 1000): ({r6}, {o6})");
+}
+
+/// Overflow detection patterns
+fn test_overflow_detection() {
+    println("\n=== Overflow Detection ===");
+
+    // Using checked arithmetic to detect overflow
+    fn safe_add(a: Int, b: Int) -> Maybe<Int> {
+        a.checked_add(b)
+    }
+
+    fn safe_mul(a: Int, b: Int) -> Maybe<Int> {
+        a.checked_mul(b)
+    }
+
+    // Test safe patterns
+    match safe_add(100, 200) {
+        Some(result) => println(f"safe_add(100, 200) = {result}"),
+        None => println("safe_add(100, 200) overflowed"),
+    }
+
+    match safe_mul(100, 100) {
+        Some(result) => println(f"safe_mul(100, 100) = {result}"),
+        None => println("safe_mul(100, 100) overflowed"),
+    }
+
+    // Using overflowing to get both
+    let values = [(10, 20), (100, 200), (-50, 100), (0, 0)];
+    for (a, b) in values {
+        let (result, overflow) = a.overflowing_add(b);
+        if overflow {
+            println(f"add({a}, {b}) overflowed, wrapped to {result}");
+        } else {
+            println(f"add({a}, {b}) = {result}");
+        }
+    }
+}
+
+/// Safe arithmetic patterns
+fn test_safe_patterns() {
+    println("\n=== Safe Patterns ===");
+
+    // Clamped addition
+    fn clamped_add(a: Int, b: Int, max: Int) -> Int {
+        let result = a.saturating_add(b);
+        if result > max { max } else { result }
+    }
+
+    println(f"clamped_add(50, 30, 100): {clamped_add(50, 30, 100)}");
+    println(f"clamped_add(80, 30, 100): {clamped_add(80, 30, 100)}");
+    println(f"clamped_add(80, 50, 100): {clamped_add(80, 50, 100)}");
+
+    // Safe multiplication with fallback
+    fn safe_mul_or(a: Int, b: Int, default: Int) -> Int {
+        match a.checked_mul(b) {
+            Some(result) => result,
+            None => default,
+        }
+    }
+
+    println(f"safe_mul_or(10, 5, 0): {safe_mul_or(10, 5, 0)}");
+    println(f"safe_mul_or(0, 100, -1): {safe_mul_or(0, 100, -1)}");
+
+    // Accumulation with saturating
+    let mut sum = 0;
+    for i in 0..10 {
+        sum = sum.saturating_add(i * 100);
+        println(f"saturating sum after {i}: {sum}");
+    }
+
+    // Power with checked
+    fn safe_pow(base: Int, exp: Int) -> Maybe<Int> {
+        let mut result = 1;
+        for _ in 0..exp {
+            match result.checked_mul(base) {
+                Some(r) => result = r,
+                None => return None,
+            }
+        }
+        Some(result)
+    }
+
+    for exp in [2, 5, 10, 20] {
+        match safe_pow(2, exp) {
+            Some(result) => println(f"safe_pow(2, {exp}) = {result}"),
+            None => println(f"safe_pow(2, {exp}) overflowed"),
+        }
+    }
+}

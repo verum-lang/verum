@@ -1,0 +1,385 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, interpreter-vs-aot, tensor, matrix, linear-algebra
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential tensor/matrix test: verifies interpreter and AOT produce identical
+// results for 2x2 and 3x3 matrix operations using flat struct representation.
+// All results are integers for exact comparison.
+
+// ============================================================================
+// 2x2 matrix (row-major: [a b; c d])
+// ============================================================================
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2_add(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 { a: m.a + n.a, b: m.b + n.b, c: m.c + n.c, d: m.d + n.d }
+}
+
+fn mat2_sub(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 { a: m.a - n.a, b: m.b - n.b, c: m.c - n.c, d: m.d - n.d }
+}
+
+fn mat2_mul(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+fn mat2_scale(m: Mat2, s: Int) -> Mat2 {
+    Mat2 { a: m.a * s, b: m.b * s, c: m.c * s, d: m.d * s }
+}
+
+fn mat2_transpose(m: Mat2) -> Mat2 {
+    Mat2 { a: m.a, b: m.c, c: m.b, d: m.d }
+}
+
+fn mat2_det(m: Mat2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn mat2_trace(m: Mat2) -> Int {
+    m.a + m.d
+}
+
+fn mat2_identity() -> Mat2 {
+    Mat2 { a: 1, b: 0, c: 0, d: 1 }
+}
+
+fn mat2_zero() -> Mat2 {
+    Mat2 { a: 0, b: 0, c: 0, d: 0 }
+}
+
+fn mat2_eq(m: Mat2, n: Mat2) -> Bool {
+    m.a == n.a && m.b == n.b && m.c == n.c && m.d == n.d
+}
+
+// ============================================================================
+// 3x3 matrix (row-major: 9 elements)
+// ============================================================================
+
+type Mat3 is {
+    e00: Int, e01: Int, e02: Int,
+    e10: Int, e11: Int, e12: Int,
+    e20: Int, e21: Int, e22: Int
+};
+
+fn mat3_add(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        e00: a.e00 + b.e00, e01: a.e01 + b.e01, e02: a.e02 + b.e02,
+        e10: a.e10 + b.e10, e11: a.e11 + b.e11, e12: a.e12 + b.e12,
+        e20: a.e20 + b.e20, e21: a.e21 + b.e21, e22: a.e22 + b.e22
+    }
+}
+
+fn mat3_mul(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        e00: a.e00 * b.e00 + a.e01 * b.e10 + a.e02 * b.e20,
+        e01: a.e00 * b.e01 + a.e01 * b.e11 + a.e02 * b.e21,
+        e02: a.e00 * b.e02 + a.e01 * b.e12 + a.e02 * b.e22,
+        e10: a.e10 * b.e00 + a.e11 * b.e10 + a.e12 * b.e20,
+        e11: a.e10 * b.e01 + a.e11 * b.e11 + a.e12 * b.e21,
+        e12: a.e10 * b.e02 + a.e11 * b.e12 + a.e12 * b.e22,
+        e20: a.e20 * b.e00 + a.e21 * b.e10 + a.e22 * b.e20,
+        e21: a.e20 * b.e01 + a.e21 * b.e11 + a.e22 * b.e21,
+        e22: a.e20 * b.e02 + a.e21 * b.e12 + a.e22 * b.e22
+    }
+}
+
+fn mat3_transpose(m: Mat3) -> Mat3 {
+    Mat3 {
+        e00: m.e00, e01: m.e10, e02: m.e20,
+        e10: m.e01, e11: m.e11, e12: m.e21,
+        e20: m.e02, e21: m.e12, e22: m.e22
+    }
+}
+
+fn mat3_det(m: Mat3) -> Int {
+    m.e00 * (m.e11 * m.e22 - m.e12 * m.e21)
+    - m.e01 * (m.e10 * m.e22 - m.e12 * m.e20)
+    + m.e02 * (m.e10 * m.e21 - m.e11 * m.e20)
+}
+
+fn mat3_trace(m: Mat3) -> Int {
+    m.e00 + m.e11 + m.e22
+}
+
+fn mat3_scale(m: Mat3, s: Int) -> Mat3 {
+    Mat3 {
+        e00: m.e00 * s, e01: m.e01 * s, e02: m.e02 * s,
+        e10: m.e10 * s, e11: m.e11 * s, e12: m.e12 * s,
+        e20: m.e20 * s, e21: m.e21 * s, e22: m.e22 * s
+    }
+}
+
+fn mat3_identity() -> Mat3 {
+    Mat3 {
+        e00: 1, e01: 0, e02: 0,
+        e10: 0, e11: 1, e12: 0,
+        e20: 0, e21: 0, e22: 1
+    }
+}
+
+// ============================================================================
+// Tests: 2x2 basic operations
+// ============================================================================
+
+fn test_mat2_add_sub() {
+    let m = Mat2 { a: 1, b: 2, c: 3, d: 4 };
+    let n = Mat2 { a: 5, b: 6, c: 7, d: 8 };
+    let s = mat2_add(m, n);
+    assert_eq(s.a, 6);
+    assert_eq(s.b, 8);
+    assert_eq(s.c, 10);
+    assert_eq(s.d, 12);
+
+    let d = mat2_sub(n, m);
+    assert_eq(d.a, 4);
+    assert_eq(d.b, 4);
+
+    // a + b - b = a
+    assert(mat2_eq(mat2_sub(mat2_add(m, n), n), m));
+    // a + 0 = a
+    assert(mat2_eq(mat2_add(m, mat2_zero()), m));
+
+    print("mat2_add_sub: ok");
+}
+
+fn test_mat2_mul_cases() {
+    // [1 2; 3 4] * [5 6; 7 8] = [19 22; 43 50]
+    let m = Mat2 { a: 1, b: 2, c: 3, d: 4 };
+    let n = Mat2 { a: 5, b: 6, c: 7, d: 8 };
+    let p = mat2_mul(m, n);
+    assert_eq(p.a, 19);
+    assert_eq(p.b, 22);
+    assert_eq(p.c, 43);
+    assert_eq(p.d, 50);
+
+    // M * I = M, I * M = M, M * 0 = 0
+    let id = mat2_identity();
+    assert(mat2_eq(mat2_mul(m, id), m));
+    assert(mat2_eq(mat2_mul(id, m), m));
+    assert(mat2_eq(mat2_mul(m, mat2_zero()), mat2_zero()));
+
+    print("mat2_mul: ok");
+}
+
+fn test_mat2_transpose_det() {
+    let m = Mat2 { a: 1, b: 2, c: 3, d: 4 };
+    let t = mat2_transpose(m);
+    assert_eq(t.a, 1);
+    assert_eq(t.b, 3);
+    assert_eq(t.c, 2);
+    assert_eq(t.d, 4);
+
+    // Double transpose = original
+    assert(mat2_eq(mat2_transpose(t), m));
+
+    // Determinants
+    assert_eq(mat2_det(m), 0 - 2);
+    assert_eq(mat2_det(mat2_identity()), 1);
+    assert_eq(mat2_det(mat2_zero()), 0);
+    assert_eq(mat2_det(Mat2 { a: 2, b: 4, c: 1, d: 2 }), 0); // singular
+    assert_eq(mat2_det(t), mat2_det(m)); // det(transpose) = det
+
+    // Trace
+    assert_eq(mat2_trace(m), 5);
+    assert_eq(mat2_trace(mat2_identity()), 2);
+
+    print("mat2_transpose_det: ok");
+}
+
+fn test_mat2_scale_ops() {
+    let m = Mat2 { a: 3, b: 7, c: 2, d: 5 };
+    let s2 = mat2_scale(m, 2);
+    assert_eq(s2.a, 6);
+    assert_eq(s2.b, 14);
+
+    assert(mat2_eq(mat2_scale(m, 0), mat2_zero()));
+    assert(mat2_eq(mat2_scale(m, 1), m));
+
+    // det(kM) = k^2 * det(M) for 2x2; det(m) = 15-14 = 1
+    assert_eq(mat2_det(m), 1);
+    assert_eq(mat2_det(mat2_scale(m, 3)), 9);
+
+    print("mat2_scale: ok");
+}
+
+fn test_mat2_fibonacci() {
+    let fib = Mat2 { a: 1, b: 1, c: 1, d: 0 };
+    let f2 = mat2_mul(fib, fib);
+    assert_eq(f2.a, 2);
+    assert_eq(f2.b, 1);
+
+    let f3 = mat2_mul(f2, fib);
+    assert_eq(f3.a, 3);
+    assert_eq(f3.b, 2);
+
+    let f4 = mat2_mul(f3, fib);
+    let f5 = mat2_mul(f4, fib);
+    let f6 = mat2_mul(f5, fib);
+    let f7 = mat2_mul(f6, fib);
+    let f8 = mat2_mul(f7, fib);
+    assert_eq(f5.b, 5);
+    assert_eq(f6.b, 8);
+    assert_eq(f7.b, 13);
+    assert_eq(f8.b, 21);
+
+    // det alternates +/-1
+    assert_eq(mat2_det(fib), 0 - 1);
+    assert_eq(mat2_det(f2), 1);
+    assert_eq(mat2_det(f3), 0 - 1);
+
+    print("mat2_fibonacci: ok");
+}
+
+fn test_mat2_properties() {
+    let a = Mat2 { a: 1, b: 2, c: 3, d: 4 };
+    let b = Mat2 { a: 5, b: 6, c: 7, d: 8 };
+    let c = Mat2 { a: 9, b: 10, c: 11, d: 12 };
+
+    // Associativity: (A*B)*C = A*(B*C)
+    assert(mat2_eq(mat2_mul(mat2_mul(a, b), c), mat2_mul(a, mat2_mul(b, c))));
+
+    // Distributivity: A*(B+C) = A*B + A*C
+    assert(mat2_eq(mat2_mul(a, mat2_add(b, c)), mat2_add(mat2_mul(a, b), mat2_mul(a, c))));
+
+    // det(A*B) = det(A) * det(B)
+    assert_eq(mat2_det(mat2_mul(a, b)), mat2_det(a) * mat2_det(b));
+
+    // Rotation: [0 -1; 1 0]^4 = I
+    let r = Mat2 { a: 0, b: 0 - 1, c: 1, d: 0 };
+    let r2 = mat2_mul(r, r);
+    let r4 = mat2_mul(r2, r2);
+    assert(mat2_eq(r4, mat2_identity()));
+
+    print("mat2_properties: ok");
+}
+
+// ============================================================================
+// Tests: 3x3 operations
+// ============================================================================
+
+fn test_mat3_basic() {
+    let id = mat3_identity();
+    assert_eq(mat3_det(id), 1);
+    assert_eq(mat3_trace(id), 3);
+
+    // [1..9] is singular
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    assert_eq(mat3_det(m), 0);
+    assert_eq(mat3_trace(m), 15);
+
+    // Non-singular: det = -78
+    let n = Mat3 {
+        e00: 2, e01: 3, e02: 5,
+        e10: 7, e11: 11, e12: 13,
+        e20: 17, e21: 19, e22: 23
+    };
+    assert_eq(mat3_det(n), 0 - 78);
+    assert_eq(mat3_trace(n), 36);
+
+    print("mat3_basic: ok");
+}
+
+fn test_mat3_add_mul() {
+    let a = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let b = Mat3 {
+        e00: 9, e01: 8, e02: 7,
+        e10: 6, e11: 5, e12: 4,
+        e20: 3, e21: 2, e22: 1
+    };
+
+    // Add: each element = 10
+    let s = mat3_add(a, b);
+    assert_eq(s.e00, 10);
+    assert_eq(s.e11, 10);
+    assert_eq(s.e22, 10);
+
+    // Multiply: [30,24,18; 84,69,54; 138,114,90]
+    let p = mat3_mul(a, b);
+    assert_eq(p.e00, 30);
+    assert_eq(p.e01, 24);
+    assert_eq(p.e02, 18);
+    assert_eq(p.e10, 84);
+    assert_eq(p.e11, 69);
+    assert_eq(p.e12, 54);
+    assert_eq(p.e20, 138);
+    assert_eq(p.e21, 114);
+    assert_eq(p.e22, 90);
+
+    // I * A = A
+    let ia = mat3_mul(mat3_identity(), a);
+    assert_eq(ia.e00, 1);
+    assert_eq(ia.e11, 5);
+    assert_eq(ia.e22, 9);
+
+    print("mat3_add_mul: ok");
+}
+
+fn test_mat3_transpose_det() {
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let t = mat3_transpose(m);
+    assert_eq(t.e01, 4);
+    assert_eq(t.e10, 2);
+    assert_eq(t.e02, 7);
+    assert_eq(t.e20, 3);
+
+    // Double transpose = original
+    let tt = mat3_transpose(t);
+    assert_eq(tt.e01, 2);
+    assert_eq(tt.e10, 4);
+
+    // det(transpose(M)) = det(M)
+    let n = Mat3 {
+        e00: 2, e01: 3, e02: 5,
+        e10: 7, e11: 11, e12: 13,
+        e20: 17, e21: 19, e22: 23
+    };
+    assert_eq(mat3_det(mat3_transpose(n)), mat3_det(n));
+
+    // Scale: det(2M) = 2^3 * det(M)
+    let m2 = Mat3 {
+        e00: 1, e01: 0, e02: 2,
+        e10: 0, e11: 3, e12: 0,
+        e20: 4, e21: 0, e22: 5
+    };
+    assert_eq(mat3_det(m2), 0 - 9);
+    assert_eq(mat3_det(mat3_scale(m2, 2)), 0 - 72);
+    assert_eq(mat3_trace(m2), 9);
+    assert_eq(mat3_trace(mat3_scale(m2, 2)), 18);
+
+    print("mat3_transpose_det: ok");
+}
+
+fn main() -> Int {
+    test_mat2_add_sub();
+    test_mat2_mul_cases();
+    test_mat2_transpose_det();
+    test_mat2_scale_ops();
+    test_mat2_fibonacci();
+    test_mat2_properties();
+    test_mat3_basic();
+    test_mat3_add_mul();
+    test_mat3_transpose_det();
+    print("[OK] 048_differential_tensor");
+    0
+}

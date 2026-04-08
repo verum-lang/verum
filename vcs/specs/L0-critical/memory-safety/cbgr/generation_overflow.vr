@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, generation, epoch
+// @description: Tests CBGR generation overflow handling and epoch advancement
+
+/// Tests that generation tracking works for basic references
+fn test_generation_basic() {
+    let mut x = 42;
+
+    // Create reference - captures current generation
+    let r = &x;
+    assert_eq(*r, 42);
+
+    // Reference should track the generation of its target
+    let gen = r.generation();
+    assert(gen > 0);  // Generation should be non-zero after initialization
+}
+
+/// Tests that multiple references to different slots have independent generations
+fn test_independent_generations() {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+
+    let ra = &a;
+    let rb = &b;
+    let rc = &c;
+
+    // Each reference should be independently valid
+    assert_eq(*ra, 10);
+    assert_eq(*rb, 20);
+    assert_eq(*rc, 30);
+}
+
+/// Tests that reassignment changes the value (no conflicting borrows)
+fn test_generation_bump_on_reassignment() {
+    let mut slot = 100;
+    let old_value = slot;
+
+    // Reassignment should work
+    slot = 200;
+    assert_eq(slot, 200);
+    assert(slot != old_value);
+
+    // Now we can create a reference to the new value
+    let r = &slot;
+    assert_eq(*r, 200);
+}
+
+/// Tests that heap allocations get proper generation tracking
+fn test_heap_generation() {
+    let h = Heap.new(42);
+
+    // Heap values should have generation tracking
+    let r = &h;
+    assert_eq(*r, 42);
+}
+
+/// Tests generation validation in nested scopes
+fn test_nested_scope_generation() {
+    let outer = 100;
+    let ro = &outer;
+
+    {
+        let inner = 200;
+        let ri = &inner;
+
+        assert_eq(*ri, 200);
+        assert_eq(*ro, 100);  // Outer ref still valid
+    }
+
+    // Outer ref should still be valid after inner scope ends
+    assert_eq(*ro, 100);
+}
+
+fn main() {
+    test_generation_basic();
+    test_independent_generations();
+    test_generation_bump_on_reassignment();
+    test_heap_generation();
+    test_nested_scope_generation();
+    print("All generation overflow tests passed");
+}

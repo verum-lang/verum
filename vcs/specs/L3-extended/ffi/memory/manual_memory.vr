@@ -1,0 +1,619 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, memory, manual-allocation, unsafe
+// @timeout: 10000
+// @description: Tests manual memory allocation and deallocation for FFI
+
+/// ============================================================
+/// MANUAL MEMORY MANAGEMENT
+/// ============================================================
+///
+/// Manual memory management is required when interfacing with C
+/// libraries that expect caller-managed memory.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_int is i32;
+type size_t is usize;
+
+// ============================================================
+// LIBC MEMORY FUNCTIONS
+// ============================================================
+
+ffi libc {
+    /// Allocate memory
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+
+    /// Allocate and zero memory
+    @extern("C")
+    fn calloc(count: size_t, size: size_t) -> *mut c_void;
+
+    /// Reallocate memory
+    @extern("C")
+    fn realloc(ptr: *mut c_void, new_size: size_t) -> *mut c_void;
+
+    /// Free memory
+    @extern("C")
+    fn free(ptr: *mut c_void);
+
+    /// Aligned allocation
+    @extern("C")
+    fn aligned_alloc(alignment: size_t, size: size_t) -> *mut c_void;
+
+    /// POSIX aligned allocation
+    @extern("C")
+    fn posix_memalign(
+        memptr: *mut *mut c_void,
+        alignment: size_t,
+        size: size_t
+    ) -> c_int;
+}
+
+// ============================================================
+// ALLOCATION WRAPPERS
+// ============================================================
+
+// ------------------------------------------------------------
+// Basic Allocation
+// ------------------------------------------------------------
+
+/// Allocate memory for a single value
+fn allocate<T>() -> Result<*mut T, AllocError> {
+    let size = T.size;
+    let ptr = unsafe { libc.malloc(size) };
+
+    if ptr.is_null() {
+        Err(OutOfMemory)
+    } else {
+        Ok(ptr as *mut T)
+    }
+}
+
+/// Allocate zeroed memory for a single value
+fn allocate_zeroed<T>() -> Result<*mut T, AllocError> {
+    let ptr = unsafe { libc.calloc(1, T.size) };
+
+    if ptr.is_null() {
+        Err(OutOfMemory)
+    } else {
+        Ok(ptr as *mut T)
+    }
+}
+
+/// Allocate memory for an array
+fn allocate_array<T>(count: size_t) -> Result<*mut T, AllocError> {
+    let size = count * T.size
+        .ok_or(SizeOverflow)?;
+
+    let ptr = unsafe { libc.malloc(size) };
+
+    if ptr.is_null() {
+        Err(OutOfMemory)
+    } else {
+        Ok(ptr as *mut T)
+    }
+}
+
+/// Allocate zeroed array
+fn allocate_array_zeroed<T>(count: size_t) -> Result<*mut T, AllocError> {
+    let ptr = unsafe { libc.calloc(count, T.size) };
+
+    if ptr.is_null() {
+        Err(OutOfMemory)
+    } else {
+        Ok(ptr as *mut T)
+    }
+}
+
+// ------------------------------------------------------------
+// Aligned Allocation
+// ------------------------------------------------------------
+
+/// Allocate with specific alignment
+fn allocate_aligned<T>(align: size_t) -> Result<*mut T, AllocError>
+    // requires: align.is_power_of_two();
+    // requires: align >= T.alignment;
+{
+    let size = T.size;
+    let ptr = unsafe { libc.aligned_alloc(align, size) };
+
+    if ptr.is_null() {
+        Err(OutOfMemory)
+    } else {
+        Ok(ptr as *mut T)
+    }
+}
+
+/// Allocate aligned array
+fn allocate_aligned_array<T>(count: size_t, align: size_t) -> Result<*mut T, AllocError>
+    // requires: align.is_power_of_two();
+{
+    let size = count * T.size
+        .ok_or(SizeOverflow)?;
+
+    // Round up size to alignment
+    let aligned_size = (size + align - 1) & (0xFFFFFFFFFFFFFFFF ^ (align - 1));
+
+    let ptr = unsafe { libc.aligned_alloc(align, aligned_size) };
+
+    if ptr.is_null() {
+        Err(OutOfMemory)
+    } else {
+        Ok(ptr as *mut T)
+    }
+}
+
+// ------------------------------------------------------------
+// Reallocation
+// ------------------------------------------------------------
+
+/// Reallocate memory
+unsafe fn reallocate<T>(ptr: *mut T, new_count: size_t) -> Result<*mut T, AllocError> {
+    let new_size = new_count * T.size
+        .ok_or(SizeOverflow)?;
+
+    let new_ptr = libc.realloc(ptr as *mut c_void, new_size);
+
+    if new_ptr.is_null() && new_size > 0 {
+        Err(OutOfMemory)
+    } else {
+        Ok(new_ptr as *mut T)
+    }
+}
+
+// ------------------------------------------------------------
+// Deallocation
+// ------------------------------------------------------------
+
+/// Free allocated memory
+unsafe fn deallocate<T>(ptr: *mut T) {
+    libc.free(ptr as *mut c_void);
+}
+
+/// Free with null check
+unsafe fn deallocate_if_not_null<T>(ptr: *mut T) {
+    if !ptr.is_null() {
+        libc.free(ptr as *mut c_void);
+    }
+}
+
+// ============================================================
+// ALLOCATION ERROR TYPE
+// ============================================================
+
+type AllocError is
+    | OutOfMemory
+    | SizeOverflow
+    | InvalidAlignment
+    | InvalidLayout;
+
+implement AllocError {
+    fn description(&self) -> &Text {
+        self.match {
+            OutOfMemory => "out of memory",
+            SizeOverflow => "size calculation overflow",
+            InvalidAlignment => "invalid alignment",
+            InvalidLayout => "invalid memory layout",
+        }
+    }
+}
+
+// ============================================================
+// RAII WRAPPER
+// ============================================================
+
+/// Manual allocation with automatic cleanup
+type ManualHeap<T> is {
+    ptr: *mut T,
+};
+
+implement<T> ManualHeap<T> {
+    /// Create new manually allocated heap value
+    fn new(value: T) -> Result<ManualHeap<T>, AllocError> {
+        let ptr = allocate.<T>()?;
+
+        // Write value to allocated memory
+        unsafe {
+            ptr.write(value);
+        }
+
+        Ok(ManualHeap { ptr })
+    }
+
+    /// Create zeroed allocation
+    fn zeroed() -> Result<ManualHeap<T>, AllocError>
+    where
+        T: Zeroable,
+    {
+        let ptr = allocate_zeroed.<T>()?;
+        Ok(ManualHeap { ptr })
+    }
+
+    /// Get immutable reference
+    fn get(&self) -> &T {
+        unsafe { &*self.ptr }
+    }
+
+    /// Get mutable reference
+    fn get_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.ptr }
+    }
+
+    /// Get raw pointer
+    fn as_ptr(&self) -> *const T {
+        self.ptr
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut T {
+        self.ptr
+    }
+
+    /// Take ownership and return raw pointer (no cleanup)
+    fn into_raw(self) -> *mut T {
+        let ptr = self.ptr;
+        std.mem.forget(self);  // Donpt run destructor
+        ptr
+    }
+
+    /// Reconstruct from raw pointer
+    unsafe fn from_raw(ptr: *mut T) -> ManualHeap<T> {
+        ManualHeap { ptr }
+    }
+}
+
+implement<T> Drop for ManualHeap<T> {
+    fn drop(&mut self) {
+        unsafe {
+            // Drop the contained value
+            std.ptr.drop_in_place(self.ptr);
+            // Free the memory
+            deallocate(self.ptr);
+        }
+    }
+}
+
+// Marker trait for types that can be zero-initialized
+type Zeroable is protocol {};
+
+// ============================================================
+// MANUAL ARRAY
+// ============================================================
+
+/// Manually managed array
+type ManualArray<T> is {
+    ptr: *mut T,
+    len: size_t,
+    capacity: size_t,
+};
+
+implement<T> ManualArray<T> {
+    /// Create with capacity
+    fn with_capacity(capacity: size_t) -> Result<ManualArray<T>, AllocError> {
+        if capacity == 0 {
+            return Ok(ManualArray {
+                ptr: std.ptr.NonNull.dangling().as_ptr(),
+                len: 0,
+                capacity: 0,
+            });
+        }
+
+        let ptr = allocate_array.<T>(capacity)?;
+        Ok(ManualArray { ptr, len: 0, capacity })
+    }
+
+    /// Create zeroed array
+    fn zeroed(len: size_t) -> Result<ManualArray<T>, AllocError>
+    where
+        T: Zeroable,
+    {
+        if len == 0 {
+            return Ok(ManualArray {
+                ptr: std.ptr.NonNull.dangling().as_ptr(),
+                len: 0,
+                capacity: 0,
+            });
+        }
+
+        let ptr = allocate_array_zeroed.<T>(len)?;
+        Ok(ManualArray { ptr, len, capacity: len })
+    }
+
+    /// Get length
+    fn len(&self) -> size_t {
+        self.len
+    }
+
+    /// Check if empty
+    fn is_empty(&self) -> Bool {
+        self.len == 0
+    }
+
+    /// Get capacity
+    fn capacity(&self) -> size_t {
+        self.capacity
+    }
+
+    /// Get element at index
+    fn get(&self, index: size_t) -> Maybe<&T> {
+        if index < self.len {
+            unsafe { Some(&*self.ptr.add(index)) }
+        } else {
+            None
+        }
+    }
+
+    /// Get mutable element
+    fn get_mut(&mut self, index: size_t) -> Maybe<&mut T> {
+        if index < self.len {
+            unsafe { Some(&mut *self.ptr.add(index)) }
+        } else {
+            None
+        }
+    }
+
+    /// Push element (may reallocate)
+    fn push(&mut self, value: T) -> Result<(), AllocError> {
+        if self.len >= self.capacity {
+            self.grow()?;
+        }
+
+        unsafe {
+            self.ptr.add(self.len).write(value);
+        }
+        self.len += 1;
+        Ok(())
+    }
+
+    /// Pop element
+    fn pop(&mut self) -> Maybe<T> {
+        if self.len == 0 {
+            None
+        } else {
+            self.len -= 1;
+            unsafe {
+                Some(self.ptr.add(self.len).read())
+            }
+        }
+    }
+
+    /// Grow capacity
+    fn grow(&mut self) -> Result<(), AllocError> {
+        let new_capacity = if self.capacity == 0 {
+            4
+        } else {
+            self.capacity * 2
+        };
+
+        unsafe {
+            let new_ptr = if self.capacity == 0 {
+                allocate_array.<T>(new_capacity)?
+            } else {
+                reallocate(self.ptr, new_capacity)?
+            };
+            self.ptr = new_ptr;
+            self.capacity = new_capacity;
+        }
+        Ok(())
+    }
+
+    /// As slice
+    fn as_slice(&self) -> &[T] {
+        if self.len == 0 {
+            &[]
+        } else {
+            unsafe { std.slice.from_raw_parts(self.ptr, self.len) }
+        }
+    }
+
+    /// As mutable slice
+    fn as_mut_slice(&mut self) -> &mut [T] {
+        if self.len == 0 {
+            &mut []
+        } else {
+            unsafe { std.slice.from_raw_parts_mut(self.ptr, self.len) }
+        }
+    }
+}
+
+implement<T> Drop for ManualArray<T> {
+    fn drop(&mut self) {
+        if self.capacity > 0 {
+            unsafe {
+                // Drop all elements
+                for i in 0..self.len {
+                    std.ptr.drop_in_place(self.ptr.add(i));
+                }
+                // Free memory
+                deallocate(self.ptr);
+            }
+        }
+    }
+}
+
+// ============================================================
+// ARENA ALLOCATOR
+// ============================================================
+
+/// Simple arena allocator for FFI
+type Arena is {
+    chunks: List<ArenaChunk>,
+    current: *mut u8,
+    remaining: size_t,
+};
+
+type ArenaChunk is {
+    ptr: *mut u8,
+    size: size_t,
+};
+
+const ARENA_CHUNK_SIZE: size_t = 64 * 1024;  // 64KB
+
+implement Arena {
+    /// Create new arena
+    fn new() -> Arena {
+        Arena {
+            chunks: List.new(),
+            current: null as *mut u8,
+            remaining: 0,
+        }
+    }
+
+    /// Allocate from arena
+    fn alloc<T>(&mut self) -> Result<*mut T, AllocError> {
+        let size = T.size;
+        let align = T.alignment;
+
+        // Align current pointer (placeholder: real impl uses ptr-to-int)
+        let aligned: usize = 0;
+        let padding: usize = 0;
+
+        if padding + size > self.remaining {
+            self.new_chunk(size.max(ARENA_CHUNK_SIZE))?;
+        }
+
+        let ptr: *mut T = self.current as *mut T;
+        self.remaining -= padding + size;
+
+        Ok(ptr)
+    }
+
+    /// Allocate array from arena
+    fn alloc_array<T>(&mut self, count: size_t) -> Result<*mut T, AllocError> {
+        let size = count * T.size
+            .ok_or(SizeOverflow)?;
+        let align = T.alignment;
+
+        let aligned: usize = 0;  // Placeholder
+        let padding: usize = 0;  // Placeholder
+
+        if padding + size > self.remaining {
+            self.new_chunk((size + align).max(ARENA_CHUNK_SIZE))?;
+            return self.alloc_array.<T>(count);
+        }
+
+        let ptr: *mut T = self.current as *mut T;
+        self.remaining -= padding + size;
+
+        Ok(ptr)
+    }
+
+    /// Allocate new chunk
+    fn new_chunk(&mut self, min_size: size_t) -> Result<(), AllocError> {
+        let size = min_size.max(ARENA_CHUNK_SIZE);
+        let ptr = unsafe { libc.malloc(size) };
+
+        if ptr.is_null() {
+            return Err(OutOfMemory);
+        }
+
+        self.chunks.push(ArenaChunk {
+            ptr: ptr as *mut u8,
+            size,
+        });
+
+        self.current = ptr as *mut u8;
+        self.remaining = size;
+
+        Ok(())
+    }
+
+    /// Clear arena (reuse memory)
+    fn clear(&mut self) {
+        if !self.chunks.is_empty() {
+            let first = &self.chunks[0];
+            self.current = first.ptr;
+            self.remaining = first.size;
+
+            // Free all chunks except first
+            for chunk in self.chunks.drain(1..) {
+                unsafe { libc.free(chunk.ptr as *mut c_void); }
+            }
+        }
+    }
+}
+
+implement Drop for Arena {
+    fn drop(&mut self) {
+        for chunk in &self.chunks {
+            unsafe { libc.free(chunk.ptr as *mut c_void); }
+        }
+    }
+}
+
+fn align_up(addr: usize, align: usize) -> usize {
+    (addr + align - 1) & (0xFFFFFFFFFFFFFFFF ^ (align - 1))
+}
+
+// ============================================================
+// FFI EXAMPLE
+// ============================================================
+
+/// Example: Allocate buffer for C library
+fn allocate_c_buffer(size: size_t) -> Result<*mut u8, AllocError> {
+    let ptr = allocate_array.<u8>(size)?;
+    // Zero the buffer
+    unsafe {
+        std.ptr.write_bytes(ptr, 0, size);
+    }
+    Ok(ptr)
+}
+
+/// Example: Pass allocated buffer to C
+ffi example_lib {
+    @extern("C")
+    fn process_buffer(buf: *mut u8, len: size_t) -> c_int;
+}
+
+fn call_c_with_buffer(data: &[u8]) -> Result<c_int, AllocError> {
+    let buf = allocate_c_buffer(data.len())?;
+
+    // Copy data to buffer
+    unsafe {
+        std.ptr.copy_nonoverlapping(data.as_ptr(), buf, data.len());
+    }
+
+    // Call C function
+    let result = unsafe { example_lib.process_buffer(buf, data.len()) };
+
+    // Free buffer
+    unsafe { deallocate(buf); }
+
+    Ok(result)
+}
+
+fn main() {
+    // Test manual allocation
+    {
+        let boxed = ManualHeap.new(42).unwrap();
+        assert(*boxed.get() == 42);
+        // boxed dropped at end of scope
+    }
+
+    // Test manual array
+    {
+        let mut arr = ManualArray.with_capacity(10).unwrap();
+        arr.push(1).unwrap();
+        arr.push(2).unwrap();
+        arr.push(3).unwrap();
+        assert(arr.len() == 3);
+        assert(*arr.get(0).unwrap() == 1);
+        // arr dropped at end of scope
+    }
+
+    // Test arena
+    {
+        let mut arena = Arena.new();
+        let p1 = arena.alloc.<i32>().unwrap();
+        let p2 = arena.alloc.<i64>().unwrap();
+        unsafe {
+            *p1 = 42;
+            *p2 = 100;
+        }
+        // arena dropped at end of scope
+    }
+}

@@ -1,0 +1,50 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, data-movement, load, constant, pool
+// @timeout: 5000
+// @expect: pass
+//
+// Test: LOAD_K opcode - loading from constant pool
+// Verifies constant pool indexing and value retrieval
+
+fn test_string_constants() {
+    let s1: Text = "hello";
+    let s2: Text = "world";
+    let s3: Text = "hello";
+
+    assert_eq(s1, "hello");
+    assert_eq(s2, "world");
+    assert_eq(s1, s3);
+}
+
+fn test_small_string() {
+    let s1: Text = "a";
+    let s2: Text = "abc";
+    let s3: Text = "abcdef";
+
+    assert_eq(s1, "a");
+    assert_eq(s2, "abc");
+    assert_eq(s3, "abcdef");
+}
+
+fn test_empty_string() {
+    let empty: Text = "";
+    assert_eq(empty, "");
+}
+
+fn test_float_constants() {
+    let pi: Float = 3.14159;
+    let e: Float = 2.71828;
+
+    assert(pi > 3.14 && pi < 3.15);
+    assert(e > 2.71 && e < 2.72);
+}
+
+fn main() {
+    test_string_constants();
+    test_small_string();
+    test_empty_string();
+    test_float_constants();
+    print("003_load_constant: PASSED");
+}

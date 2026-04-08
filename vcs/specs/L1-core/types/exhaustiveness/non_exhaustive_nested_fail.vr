@@ -1,0 +1,20 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: exhaustiveness, nested-pattern, error
+// @expected-error: E0601
+// @description: Missing case in nested pattern should fail
+
+type Maybe<T> is None | Some(T);
+
+// ERROR: Missing Some(None) case
+fn incomplete_nested(x: Maybe<Maybe<Int>>) -> Int =
+    match x {
+        None => 0,
+        // Missing: Some(None)
+        Some(Some(n)) => n
+        // E0601: non-exhaustive patterns: `Some(None)` not covered
+    };
+
+fn main() {
+    let _ = incomplete_nested(None);
+}

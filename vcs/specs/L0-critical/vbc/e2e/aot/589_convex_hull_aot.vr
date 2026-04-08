@@ -1,0 +1,250 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, convex-hull, geometry, gift-wrapping
+// @timeout: 30000
+
+// Convex hull using gift wrapping (Jarvis march) algorithm
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Points packed as x*1000 + y (both non-negative, < 1000)
+fn pt_x(p: Int) -> Int { p / 1000 }
+fn pt_y(p: Int) -> Int { p % 1000 }
+fn make_pt(x: Int, y: Int) -> Int { x * 1000 + y }
+
+// Cross product of vectors (p1->p2) x (p1->p3)
+// Positive = counterclockwise, 0 = collinear, negative = clockwise
+fn cross(p1: Int, p2: Int, p3: Int) -> Int {
+    (pt_x(p2) - pt_x(p1)) * (pt_y(p3) - pt_y(p1)) -
+    (pt_y(p2) - pt_y(p1)) * (pt_x(p3) - pt_x(p1))
+}
+
+// Distance squared between two points
+fn dist_sq(a: Int, b: Int) -> Int {
+    let dx = pt_x(a) - pt_x(b);
+    let dy = pt_y(a) - pt_y(b);
+    dx * dx + dy * dy
+}
+
+// Find leftmost (smallest x, then smallest y) point index
+fn find_leftmost(pts: Arr8, n: Int) -> Int {
+    let mut best = 0;
+    let mut i = 1;
+    while i < n {
+        let pi = get8(pts, i);
+        let pb = get8(pts, best);
+        if pt_x(pi) < pt_x(pb) {
+            best = i;
+        } else if pt_x(pi) == pt_x(pb) {
+            if pt_y(pi) < pt_y(pb) { best = i; }
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// Gift wrapping (Jarvis march) convex hull
+// Returns hull size and hull points in result array
+fn convex_hull_size(pts: Arr8, n: Int) -> Int {
+    if n < 3 { n }
+    else { convex_hull_size_impl(pts, n) }
+}
+
+fn convex_hull_size_impl(pts: Arr8, n: Int) -> Int {
+    let start = find_leftmost(pts, n);
+    let mut hull_size = 0;
+    let mut current = start;
+    let mut iterations = 0;
+    let max_iter = n + 1; // safety limit
+    while iterations < max_iter {
+        hull_size = hull_size + 1;
+        let mut next = 0;
+        if next == current { next = 1; }
+        let mut i = 0;
+        while i < n {
+            if i != current {
+                let c = cross(get8(pts, current), get8(pts, next), get8(pts, i));
+                if c < 0 {
+                    next = i;
+                } else if c == 0 {
+                    // Collinear: pick farther point
+                    if dist_sq(get8(pts, current), get8(pts, i)) > dist_sq(get8(pts, current), get8(pts, next)) {
+                        next = i;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        current = next;
+        if current == start { iterations = max_iter; } // break
+        else { iterations = iterations + 1; }
+    }
+    hull_size
+}
+
+// Get hull points
+fn convex_hull_pts_small(pts: Arr8, n: Int) -> Arr8 {
+    let mut hull = zeros();
+    let mut i = 0;
+    while i < n { hull = set8(hull, i, get8(pts, i)); i = i + 1; }
+    hull
+}
+
+fn convex_hull_pts(pts: Arr8, n: Int) -> Arr8 {
+    if n < 3 { convex_hull_pts_small(pts, n) }
+    else { convex_hull_pts_impl(pts, n) }
+}
+
+fn convex_hull_pts_impl(pts: Arr8, n: Int) -> Arr8 {
+    let mut hull = zeros();
+    let start = find_leftmost(pts, n);
+    let mut hull_size = 0;
+    let mut current = start;
+    let mut iterations = 0;
+    let max_iter = n + 1;
+    while iterations < max_iter {
+        hull = set8(hull, hull_size, get8(pts, current));
+        hull_size = hull_size + 1;
+        let mut next = 0;
+        if next == current { next = 1; }
+        let mut i = 0;
+        while i < n {
+            if i != current {
+                let c = cross(get8(pts, current), get8(pts, next), get8(pts, i));
+                if c < 0 {
+                    next = i;
+                } else if c == 0 {
+                    if dist_sq(get8(pts, current), get8(pts, i)) > dist_sq(get8(pts, current), get8(pts, next)) {
+                        next = i;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        current = next;
+        if current == start { iterations = max_iter; }
+        else { iterations = iterations + 1; }
+    }
+    hull
+}
+
+// Polygon perimeter (sum of distances, returns sum of dist_sq for integer accuracy)
+fn hull_perimeter_sq(hull: Arr8, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let j = (i + 1) % n;
+        total = total + dist_sq(get8(hull, i), get8(hull, j));
+        i = i + 1;
+    }
+    total
+}
+
+fn test_triangle_pts() -> Int {
+    // 3 points forming a triangle: all on hull
+    let pts = Arr8 { v0: make_pt(0, 0), v1: make_pt(5, 0), v2: make_pt(0, 5),
+                     v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(convex_hull_size(pts, 3), 3);
+    1
+}
+
+fn test_square() -> Int {
+    // 4 corners of a square: all on hull
+    let pts = Arr8 { v0: make_pt(0, 0), v1: make_pt(4, 0), v2: make_pt(4, 4),
+                     v3: make_pt(0, 4), v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(convex_hull_size(pts, 4), 4);
+    1
+}
+
+fn test_interior_point() -> Int {
+    // Square with center point: hull should be 4 (center excluded)
+    let pts = Arr8 { v0: make_pt(0, 0), v1: make_pt(4, 0), v2: make_pt(4, 4),
+                     v3: make_pt(0, 4), v4: make_pt(2, 2), v5: 0, v6: 0, v7: 0 };
+    assert_eq(convex_hull_size(pts, 5), 4);
+    1
+}
+
+fn test_collinear() -> Int {
+    // 3 collinear points: hull size 2 (endpoints)
+    let pts = Arr8 { v0: make_pt(0, 0), v1: make_pt(2, 2), v2: make_pt(4, 4),
+                     v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // With collinear handling, all 3 may be on hull or just 2
+    // Our algorithm picks farther points, so endpoints are on hull
+    let sz = convex_hull_size(pts, 3);
+    // Collinear hull: either 2 or 3 depending on convention
+    let ok = if sz >= 2 { 1 } else { 0 };
+    assert_eq(ok, 1);
+    1
+}
+
+fn test_pentagon_with_interior() -> Int {
+    // Pentagon vertices + 2 interior points
+    let pts = Arr8 {
+        v0: make_pt(3, 0),  // bottom
+        v1: make_pt(6, 2),  // right
+        v2: make_pt(5, 5),  // top-right
+        v3: make_pt(1, 5),  // top-left
+        v4: make_pt(0, 2),  // left
+        v5: make_pt(3, 3),  // interior
+        v6: make_pt(3, 2),  // interior
+        v7: 0
+    };
+    assert_eq(convex_hull_size(pts, 7), 5);
+    1
+}
+
+fn test_hull_validity() -> Int {
+    // Verify all hull points are from original set
+    let pts = Arr8 { v0: make_pt(0, 0), v1: make_pt(5, 0), v2: make_pt(5, 5),
+                     v3: make_pt(0, 5), v4: make_pt(2, 3), v5: 0, v6: 0, v7: 0 };
+    let hull = convex_hull_pts(pts, 5);
+    let hsz = convex_hull_size(pts, 5);
+    assert_eq(hsz, 4);
+    // Each hull point should exist in original set
+    let mut all_found = 1;
+    let mut i = 0;
+    while i < hsz {
+        let hp = get8(hull, i);
+        let mut found = 0;
+        let mut j = 0;
+        while j < 5 {
+            if get8(pts, j) == hp { found = 1; }
+            j = j + 1;
+        }
+        if found == 0 { all_found = 0; }
+        i = i + 1;
+    }
+    assert_eq(all_found, 1);
+    1
+}
+
+fn main() -> Int {
+    test_triangle_pts();
+    test_square();
+    test_interior_point();
+    test_pentagon_with_interior();
+    test_hull_validity();
+    print("[OK] 589_convex_hull_aot");
+    0
+}

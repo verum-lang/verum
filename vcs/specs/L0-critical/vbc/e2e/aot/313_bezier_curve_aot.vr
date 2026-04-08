@@ -1,0 +1,281 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, bezier, curve, geometry, de-casteljau
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for quadratic and cubic Bezier curve evaluation using de Casteljau's algorithm
+// Uses scaled integers (x1000) for fixed-point arithmetic
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// 2D point (scaled x1000)
+type Pt is { x: Int, y: Int };
+
+fn pt_new(x: Int, y: Int) -> Pt { Pt { x: x, y: y } }
+
+// Linear interpolation: lerp(a, b, t) = a + (b - a) * t / 1000
+// where t is in [0, 1000] representing [0.0, 1.0]
+fn lerp(a: Int, b_val: Int, t: Int) -> Int {
+    a + (b_val - a) * t / 1000
+}
+
+fn pt_lerp(a: Pt, b_pt: Pt, t: Int) -> Pt {
+    Pt { x: lerp(a.x, b_pt.x, t), y: lerp(a.y, b_pt.y, t) }
+}
+
+// Distance squared between two points (avoid sqrt)
+fn dist_sq(a: Pt, b_pt: Pt) -> Int {
+    let dx = a.x - b_pt.x;
+    let dy = a.y - b_pt.y;
+    dx * dx + dy * dy
+}
+
+// === Quadratic Bezier (3 control points) ===
+// B(t) = (1-t)^2 * P0 + 2(1-t)t * P1 + t^2 * P2
+// Using de Casteljau: two rounds of lerp
+fn quad_bezier_x(p0: Pt, p1: Pt, p2: Pt, t: Int) -> Int {
+    let a = lerp(p0.x, p1.x, t);
+    let b_val = lerp(p1.x, p2.x, t);
+    lerp(a, b_val, t)
+}
+
+fn quad_bezier_y(p0: Pt, p1: Pt, p2: Pt, t: Int) -> Int {
+    let a = lerp(p0.y, p1.y, t);
+    let b_val = lerp(p1.y, p2.y, t);
+    lerp(a, b_val, t)
+}
+
+// === Cubic Bezier (4 control points) ===
+// B(t) = (1-t)^3*P0 + 3(1-t)^2*t*P1 + 3(1-t)*t^2*P2 + t^3*P3
+// Using de Casteljau: three rounds of lerp
+fn cubic_bezier_x(p0: Pt, p1: Pt, p2: Pt, p3: Pt, t: Int) -> Int {
+    // First level
+    let a = lerp(p0.x, p1.x, t);
+    let b_val = lerp(p1.x, p2.x, t);
+    let c = lerp(p2.x, p3.x, t);
+    // Second level
+    let d = lerp(a, b_val, t);
+    let e = lerp(b_val, c, t);
+    // Third level
+    lerp(d, e, t)
+}
+
+fn cubic_bezier_y(p0: Pt, p1: Pt, p2: Pt, p3: Pt, t: Int) -> Int {
+    let a = lerp(p0.y, p1.y, t);
+    let b_val = lerp(p1.y, p2.y, t);
+    let c = lerp(p2.y, p3.y, t);
+    let d = lerp(a, b_val, t);
+    let e = lerp(b_val, c, t);
+    lerp(d, e, t)
+}
+
+// === Approximate arc length by sampling N segments ===
+fn quad_arc_length_approx(p0: Pt, p1: Pt, p2: Pt, segments: Int) -> Int {
+    let mut length = 0;
+    let mut i = 0;
+    let mut prev_x = p0.x;
+    let mut prev_y = p0.y;
+    while i < segments {
+        let t = (i + 1) * 1000 / segments;
+        let nx = quad_bezier_x(p0, p1, p2, t);
+        let ny = quad_bezier_y(p0, p1, p2, t);
+        let dx = nx - prev_x;
+        let dy = ny - prev_y;
+        // Approximate distance: |dx| + |dy| (Manhattan, overestimates)
+        length = length + isqrt(dx * dx + dy * dy);
+        prev_x = nx;
+        prev_y = ny;
+        i = i + 1;
+    }
+    length
+}
+
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x { x = y; y = (x + n / x) / 2; }
+    x
+}
+
+// === Bezier subdivision: split at t=0.5 ===
+// For quadratic: returns left half control points
+fn quad_split_left_p0_x(p0: Pt, p1: Pt, p2: Pt) -> Int { p0.x }
+fn quad_split_left_p0_y(p0: Pt, p1: Pt, p2: Pt) -> Int { p0.y }
+fn quad_split_left_p1_x(p0: Pt, p1: Pt, p2: Pt) -> Int { lerp(p0.x, p1.x, 500) }
+fn quad_split_left_p1_y(p0: Pt, p1: Pt, p2: Pt) -> Int { lerp(p0.y, p1.y, 500) }
+fn quad_split_left_p2_x(p0: Pt, p1: Pt, p2: Pt) -> Int { quad_bezier_x(p0, p1, p2, 500) }
+fn quad_split_left_p2_y(p0: Pt, p1: Pt, p2: Pt) -> Int { quad_bezier_y(p0, p1, p2, 500) }
+
+fn test_lerp_basics() {
+    // lerp(0, 1000, 0) = 0
+    assert_eq(lerp(0, 1000, 0), 0);
+    // lerp(0, 1000, 1000) = 1000
+    assert_eq(lerp(0, 1000, 1000), 1000);
+    // lerp(0, 1000, 500) = 500
+    assert_eq(lerp(0, 1000, 500), 500);
+    // lerp(100, 200, 250) = 125
+    assert_eq(lerp(100, 200, 250), 125);
+    // lerp(a, a, t) = a for any t
+    assert_eq(lerp(42, 42, 333), 42);
+}
+
+fn test_quad_bezier_endpoints() {
+    let p0 = pt_new(0, 0);
+    let p1 = pt_new(500, 1000);
+    let p2 = pt_new(1000, 0);
+
+    // At t=0, curve is at P0
+    assert_eq(quad_bezier_x(p0, p1, p2, 0), 0);
+    assert_eq(quad_bezier_y(p0, p1, p2, 0), 0);
+
+    // At t=1000, curve is at P2
+    assert_eq(quad_bezier_x(p0, p1, p2, 1000), 1000);
+    assert_eq(quad_bezier_y(p0, p1, p2, 1000), 0);
+}
+
+fn test_quad_bezier_midpoint() {
+    // Symmetric arch: P0=(0,0), P1=(500,1000), P2=(1000,0)
+    let p0 = pt_new(0, 0);
+    let p1 = pt_new(500, 1000);
+    let p2 = pt_new(1000, 0);
+
+    // At t=0.5, x should be 500 (by symmetry)
+    let mx = quad_bezier_x(p0, p1, p2, 500);
+    assert_eq(mx, 500);
+
+    // At t=0.5, y = (1-0.5)^2 * 0 + 2*0.5*0.5 * 1000 + 0.5^2 * 0 = 500
+    let my = quad_bezier_y(p0, p1, p2, 500);
+    assert_eq(my, 500);
+}
+
+fn test_quad_bezier_straight_line() {
+    // If P1 is midpoint of P0-P2, curve degenerates to line
+    let p0 = pt_new(0, 0);
+    let p1 = pt_new(500, 500);
+    let p2 = pt_new(1000, 1000);
+
+    // At t=0.25, should be (250, 250)
+    let x25 = quad_bezier_x(p0, p1, p2, 250);
+    let y25 = quad_bezier_y(p0, p1, p2, 250);
+    assert_eq(x25, 250);
+    assert_eq(y25, 250);
+
+    // At t=0.75, should be (750, 750)
+    let x75 = quad_bezier_x(p0, p1, p2, 750);
+    let y75 = quad_bezier_y(p0, p1, p2, 750);
+    assert_eq(x75, 750);
+    assert_eq(y75, 750);
+}
+
+fn test_cubic_bezier_endpoints() {
+    let p0 = pt_new(0, 0);
+    let p1 = pt_new(333, 1000);
+    let p2 = pt_new(666, 1000);
+    let p3 = pt_new(1000, 0);
+
+    // At t=0, curve is at P0
+    assert_eq(cubic_bezier_x(p0, p1, p2, p3, 0), 0);
+    assert_eq(cubic_bezier_y(p0, p1, p2, p3, 0), 0);
+
+    // At t=1000, curve is at P3
+    assert_eq(cubic_bezier_x(p0, p1, p2, p3, 1000), 1000);
+    assert_eq(cubic_bezier_y(p0, p1, p2, p3, 1000), 0);
+}
+
+fn test_cubic_bezier_symmetric() {
+    // Symmetric S-curve
+    let p0 = pt_new(0, 0);
+    let p1 = pt_new(0, 1000);
+    let p2 = pt_new(1000, 0);
+    let p3 = pt_new(1000, 1000);
+
+    // At t=0.5, by symmetry x = 500, y = 500
+    let mx = cubic_bezier_x(p0, p1, p2, p3, 500);
+    let my = cubic_bezier_y(p0, p1, p2, p3, 500);
+    assert_eq(mx, 500);
+    assert_eq(my, 500);
+}
+
+fn test_cubic_bezier_line() {
+    // Collinear control points = straight line
+    let p0 = pt_new(0, 0);
+    let p1 = pt_new(333, 333);
+    let p2 = pt_new(666, 666);
+    let p3 = pt_new(1000, 1000);
+
+    let x50 = cubic_bezier_x(p0, p1, p2, p3, 500);
+    let y50 = cubic_bezier_y(p0, p1, p2, p3, 500);
+    // Should be approximately (500, 500) — may have small rounding
+    assert_eq(abs_val(x50 - 500) < 5, true);
+    assert_eq(abs_val(y50 - 500) < 5, true);
+}
+
+fn test_subdivision() {
+    let p0 = pt_new(0, 0);
+    let p1 = pt_new(500, 1000);
+    let p2 = pt_new(1000, 0);
+
+    // Left half of split: should start at P0 and end at B(0.5)
+    let lp0x = quad_split_left_p0_x(p0, p1, p2);
+    let lp0y = quad_split_left_p0_y(p0, p1, p2);
+    assert_eq(lp0x, 0);
+    assert_eq(lp0y, 0);
+
+    let lp2x = quad_split_left_p2_x(p0, p1, p2);
+    let lp2y = quad_split_left_p2_y(p0, p1, p2);
+    assert_eq(lp2x, quad_bezier_x(p0, p1, p2, 500));
+    assert_eq(lp2y, quad_bezier_y(p0, p1, p2, 500));
+}
+
+fn test_arc_length() {
+    // Straight line: P0=(0,0), P1=(500,0), P2=(1000,0)
+    let p0 = pt_new(0, 0);
+    let p1 = pt_new(500, 0);
+    let p2 = pt_new(1000, 0);
+    let len = quad_arc_length_approx(p0, p1, p2, 10);
+    // Should be approximately 1000
+    assert_eq(abs_val(len - 1000) < 10, true);
+
+    // Curved path should be longer than straight distance
+    let p1_high = pt_new(500, 2000);
+    let curved_len = quad_arc_length_approx(p0, p1_high, p2, 20);
+    assert_eq(curved_len > 1000, true);
+}
+
+fn test_monotone_parameter() {
+    // x coordinate should be monotonically increasing for
+    // control points with increasing x
+    let p0 = pt_new(0, 0);
+    let p1 = pt_new(500, 1000);
+    let p2 = pt_new(1000, 0);
+
+    let mut prev_x = 0;
+    let mut t = 0;
+    let mut monotone = 1;
+    while t <= 1000 {
+        let cur_x = quad_bezier_x(p0, p1, p2, t);
+        if cur_x < prev_x { monotone = 0; }
+        prev_x = cur_x;
+        t = t + 100;
+    }
+    assert_eq(monotone, 1);
+}
+
+fn main() -> Int {
+    test_lerp_basics();
+    test_quad_bezier_endpoints();
+    test_quad_bezier_midpoint();
+    test_quad_bezier_straight_line();
+    test_cubic_bezier_endpoints();
+    test_cubic_bezier_symmetric();
+    test_cubic_bezier_line();
+    test_subdivision();
+    test_arc_length();
+    test_monotone_parameter();
+    print("[OK] 313_bezier_curve_aot");
+    0
+}

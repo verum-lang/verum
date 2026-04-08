@@ -1,0 +1,401 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/slice_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, slice, memory, array
+// @description: Comprehensive tests for slice intrinsics that provide safe
+//               and unsafe slice operations.
+//
+// Coverage:
+// - slice_from_raw_parts, slice_from_raw_parts_mut: Unsafe slice creation
+// - slice_len: Get slice length
+// - slice_as_ptr, slice_as_mut_ptr: Get underlying pointer
+// - slice_get_unchecked, slice_get_unchecked_mut: Unchecked element access
+// - slice_subslice, slice_subslice_mut: Unchecked subslice extraction
+// - slice_split_at, slice_split_at_mut: Unchecked slice splitting
+//
+// Test Strategy:
+// - Basic operations on various slice sizes
+// - Edge cases (empty slices, single element, boundary access)
+// - Type coverage (Int, Byte, Float, etc.)
+// - Pointer/slice round-trip verification
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.slice_test;
+
+mount core.intrinsics.{
+    slice_from_raw_parts, slice_from_raw_parts_mut,
+    slice_len, slice_as_ptr, slice_as_mut_ptr,
+    slice_get_unchecked, slice_get_unchecked_mut,
+    slice_subslice, slice_subslice_mut,
+    slice_split_at, slice_split_at_mut,
+    ptr_read, ptr_offset,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Slice Length Tests
+// =============================================================================
+
+@test
+fn test_slice_len() {
+    // Empty slice
+    let empty: [Int; 0] = [];
+    assert(slice_len(&empty as &[Int]) == 0);
+
+    // Single element
+    let single: [Int; 1] = [42];
+    assert(slice_len(&single as &[Int]) == 1);
+
+    // Standard array
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+    assert(slice_len(&arr as &[Int]) == 5);
+
+    // Larger array
+    let large: [Int; 100] = [0; 100];
+    assert(slice_len(&large as &[Int]) == 100);
+
+    // Different types
+    let bytes: [Byte; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
+    assert(slice_len(&bytes as &[Byte]) == 8);
+
+    let floats: [Float; 3] = [1.0, 2.0, 3.0];
+    assert(slice_len(&floats as &[Float]) == 3);
+
+    print("slice_len tests passed");
+}
+
+// =============================================================================
+// Slice to Pointer Tests
+// =============================================================================
+
+@test
+fn test_slice_as_ptr() {
+    let arr: [Int; 5] = [10, 20, 30, 40, 50];
+    let slice: &[Int] = &arr as &[Int];
+
+    // Get pointer to first element
+    let ptr = slice_as_ptr(slice);
+
+    // Verify pointer points to first element
+    unsafe {
+        assert(ptr_read(ptr) == 10);
+        assert(ptr_read(ptr_offset(ptr, 1)) == 20);
+        assert(ptr_read(ptr_offset(ptr, 4)) == 50);
+    }
+
+    // Mutable version
+    let mut arr_mut: [Int; 3] = [100, 200, 300];
+    let slice_mut: &mut [Int] = &mut arr_mut as &mut [Int];
+
+    let ptr_mut = slice_as_mut_ptr(slice_mut);
+
+    unsafe {
+        // Verify and modify through pointer
+        assert(ptr_read(ptr_mut as *const Int) == 100);
+    }
+
+    // Pointer should be consistent
+    let ptr_again = slice_as_ptr(&arr as &[Int]);
+    assert(ptr == ptr_again);
+
+    print("slice_as_ptr tests passed");
+}
+
+// =============================================================================
+// Slice from Raw Parts Tests
+// =============================================================================
+
+@test
+fn test_slice_from_raw_parts() {
+    // Create slice from array pointer
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+    let ptr = &arr[0] as *const Int;
+
+    unsafe {
+        // Create slice from raw parts
+        let slice = slice_from_raw_parts(ptr, 5);
+
+        assert(slice_len(slice) == 5);
+        assert(slice[0] == 1);
+        assert(slice[4] == 5);
+
+        // Partial slice from middle
+        let mid_ptr = ptr_offset(ptr, 2);
+        let mid_slice = slice_from_raw_parts(mid_ptr, 3);
+
+        assert(slice_len(mid_slice) == 3);
+        assert(mid_slice[0] == 3);  // arr[2]
+        assert(mid_slice[2] == 5);  // arr[4]
+    }
+
+    // Mutable version
+    let mut arr_mut: [Int; 3] = [10, 20, 30];
+    let ptr_mut = &mut arr_mut[0] as *mut Int;
+
+    unsafe {
+        let slice_mut = slice_from_raw_parts_mut(ptr_mut, 3);
+        assert(slice_len(slice_mut) == 3);
+
+        // Modify through slice
+        slice_mut[1] = 25;
+    }
+
+    assert(arr_mut[1] == 25);
+
+    // Empty slice from null-ish pointer
+    unsafe {
+        let empty = slice_from_raw_parts(ptr, 0);
+        assert(slice_len(empty) == 0);
+    }
+
+    print("slice_from_raw_parts tests passed");
+}
+
+// =============================================================================
+// Unchecked Element Access Tests
+// =============================================================================
+
+@test
+fn test_slice_get_unchecked() {
+    let arr: [Int; 5] = [100, 200, 300, 400, 500];
+    let slice: &[Int] = &arr as &[Int];
+
+    unsafe {
+        // Access all elements
+        assert(*slice_get_unchecked(slice, 0) == 100);
+        assert(*slice_get_unchecked(slice, 1) == 200);
+        assert(*slice_get_unchecked(slice, 2) == 300);
+        assert(*slice_get_unchecked(slice, 3) == 400);
+        assert(*slice_get_unchecked(slice, 4) == 500);
+    }
+
+    // Mutable unchecked access
+    let mut arr_mut: [Int; 3] = [1, 2, 3];
+    let slice_mut: &mut [Int] = &mut arr_mut as &mut [Int];
+
+    unsafe {
+        let elem_ref = slice_get_unchecked_mut(slice_mut, 1);
+        *elem_ref = 42;
+    }
+
+    assert(arr_mut[1] == 42);
+
+    // Verify original elements unchanged
+    assert(arr_mut[0] == 1);
+    assert(arr_mut[2] == 3);
+
+    // Different types
+    let bytes: [Byte; 4] = [0xAA, 0xBB, 0xCC, 0xDD];
+    unsafe {
+        assert(*slice_get_unchecked(&bytes as &[Byte], 0) == 0xAA);
+        assert(*slice_get_unchecked(&bytes as &[Byte], 3) == 0xDD);
+    }
+
+    print("slice_get_unchecked tests passed");
+}
+
+// =============================================================================
+// Subslice Tests
+// =============================================================================
+
+@test
+fn test_slice_subslice() {
+    let arr: [Int; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let slice: &[Int] = &arr as &[Int];
+
+    unsafe {
+        // Full slice
+        let full = slice_subslice(slice, 0, 10);
+        assert(slice_len(full) == 10);
+        assert(full[0] == 0);
+        assert(full[9] == 9);
+
+        // Beginning
+        let begin = slice_subslice(slice, 0, 3);
+        assert(slice_len(begin) == 3);
+        assert(begin[0] == 0);
+        assert(begin[2] == 2);
+
+        // Middle
+        let mid = slice_subslice(slice, 3, 7);
+        assert(slice_len(mid) == 4);
+        assert(mid[0] == 3);
+        assert(mid[3] == 6);
+
+        // End
+        let end = slice_subslice(slice, 7, 10);
+        assert(slice_len(end) == 3);
+        assert(end[0] == 7);
+        assert(end[2] == 9);
+
+        // Empty subslice
+        let empty = slice_subslice(slice, 5, 5);
+        assert(slice_len(empty) == 0);
+
+        // Single element
+        let single = slice_subslice(slice, 4, 5);
+        assert(slice_len(single) == 1);
+        assert(single[0] == 4);
+    }
+
+    // Mutable subslice
+    let mut arr_mut: [Int; 5] = [10, 20, 30, 40, 50];
+    let slice_mut: &mut [Int] = &mut arr_mut as &mut [Int];
+
+    unsafe {
+        let sub_mut = slice_subslice_mut(slice_mut, 1, 4);
+        assert(slice_len(sub_mut) == 3);
+
+        // Modify through subslice
+        sub_mut[0] = 25;
+        sub_mut[2] = 45;
+    }
+
+    assert(arr_mut[0] == 10);  // Unchanged
+    assert(arr_mut[1] == 25);  // Modified
+    assert(arr_mut[2] == 30);  // Unchanged
+    assert(arr_mut[3] == 45);  // Modified
+    assert(arr_mut[4] == 50);  // Unchanged
+
+    print("slice_subslice tests passed");
+}
+
+// =============================================================================
+// Split At Tests
+// =============================================================================
+
+@test
+fn test_slice_split_at() {
+    let arr: [Int; 6] = [1, 2, 3, 4, 5, 6];
+    let slice: &[Int] = &arr as &[Int];
+
+    unsafe {
+        // Split at beginning
+        let (left, right) = slice_split_at(slice, 0);
+        assert(slice_len(left) == 0);
+        assert(slice_len(right) == 6);
+        assert(right[0] == 1);
+
+        // Split at end
+        let (left, right) = slice_split_at(slice, 6);
+        assert(slice_len(left) == 6);
+        assert(slice_len(right) == 0);
+        assert(left[5] == 6);
+
+        // Split in middle
+        let (left, right) = slice_split_at(slice, 3);
+        assert(slice_len(left) == 3);
+        assert(slice_len(right) == 3);
+        assert(left[0] == 1);
+        assert(left[2] == 3);
+        assert(right[0] == 4);
+        assert(right[2] == 6);
+
+        // Split at 1
+        let (left, right) = slice_split_at(slice, 1);
+        assert(slice_len(left) == 1);
+        assert(slice_len(right) == 5);
+        assert(left[0] == 1);
+        assert(right[0] == 2);
+    }
+
+    // Mutable split
+    let mut arr_mut: [Int; 4] = [10, 20, 30, 40];
+    let slice_mut: &mut [Int] = &mut arr_mut as &mut [Int];
+
+    unsafe {
+        let (left, right) = slice_split_at_mut(slice_mut, 2);
+
+        // Modify both halves
+        left[0] = 15;
+        right[1] = 45;
+    }
+
+    assert(arr_mut[0] == 15);
+    assert(arr_mut[1] == 20);
+    assert(arr_mut[2] == 30);
+    assert(arr_mut[3] == 45);
+
+    print("slice_split_at tests passed");
+}
+
+// =============================================================================
+// Type Coverage Tests
+// =============================================================================
+
+@test
+fn test_slice_types() {
+    // Byte slices
+    let bytes: [Byte; 4] = [0x01, 0x02, 0x03, 0x04];
+    assert(slice_len(&bytes as &[Byte]) == 4);
+    unsafe {
+        let sub = slice_subslice(&bytes as &[Byte], 1, 3);
+        assert(slice_len(sub) == 2);
+        assert(sub[0] == 0x02);
+    }
+
+    // Float slices
+    let floats: [Float; 3] = [1.5, 2.5, 3.5];
+    assert(slice_len(&floats as &[Float]) == 3);
+    unsafe {
+        assert(*slice_get_unchecked(&floats as &[Float], 1) > 2.4);
+        assert(*slice_get_unchecked(&floats as &[Float], 1) < 2.6);
+    }
+
+    // UInt64 slices
+    let u64s: [UInt64; 2] = [0xFFFFFFFFFFFFFFFF, 0x123456789ABCDEF0];
+    assert(slice_len(&u64s as &[UInt64]) == 2);
+    unsafe {
+        assert(*slice_get_unchecked(&u64s as &[UInt64], 0) == 0xFFFFFFFFFFFFFFFF);
+    }
+
+    // Int32 slices
+    let i32s: [Int32; 4] = [-1, 0, 1, 2147483647];
+    assert(slice_len(&i32s as &[Int32]) == 4);
+    unsafe {
+        assert(*slice_get_unchecked(&i32s as &[Int32], 0) == -1);
+        assert(*slice_get_unchecked(&i32s as &[Int32], 3) == 2147483647);
+    }
+
+    // Bool slices
+    let bools: [Bool; 3] = [true, false, true];
+    assert(slice_len(&bools as &[Bool]) == 3);
+
+    print("Slice type coverage tests passed");
+}
+
+// =============================================================================
+// Round-Trip Tests
+// =============================================================================
+
+@test
+fn test_slice_round_trip() {
+    // Array -> slice -> ptr -> slice -> verify
+    let arr: [Int; 5] = [11, 22, 33, 44, 55];
+
+    let slice1: &[Int] = &arr as &[Int];
+    let ptr = slice_as_ptr(slice1);
+    let len = slice_len(slice1);
+
+    unsafe {
+        let slice2 = slice_from_raw_parts(ptr, len);
+
+        // Verify all elements match
+        for i in 0..5 {
+            let idx = i as USize;
+            assert(*slice_get_unchecked(slice1, idx) == *slice_get_unchecked(slice2, idx));
+        }
+    }
+
+    print("Round-trip tests passed");
+}

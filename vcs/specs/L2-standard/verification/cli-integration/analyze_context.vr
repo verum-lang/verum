@@ -1,0 +1,269 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: self-hosting, context, dependency-injection, using, provide
+// @description: Context declaration and usage patterns for compiler infrastructure
+
+// Simulate context system with explicit parameter passing
+// (mirrors how the Verum context system works under the hood)
+
+type LogLevel is
+    | Debug
+    | Info
+    | Warn
+    | Error;
+
+fn log_level_tag(l: LogLevel) -> Int {
+    match l {
+        Debug => 0, Info => 1, Warn => 2, Error => 3,
+    }
+}
+
+fn log_level_name(l: LogLevel) -> Text {
+    match l {
+        Debug => "DEBUG", Info => "INFO", Warn => "WARN", Error => "ERROR",
+    }
+}
+
+type Logger is {
+    min_level: LogLevel,
+    messages: List<Text>,
+};
+
+fn new_logger(min_level: LogLevel) -> Logger {
+    Logger { min_level: min_level, messages: List.new() }
+}
+
+fn log_msg(logger: &mut Logger, level: LogLevel, msg: Text) {
+    if log_level_tag(level) >= log_level_tag(logger.min_level) {
+        let entry = f"[{log_level_name(level)}] {msg}";
+        logger.messages.push(entry);
+    }
+}
+
+// Configuration context
+type Config is {
+    verbose: Bool,
+    max_errors: Int,
+    opt_level: Int,
+};
+
+fn default_config() -> Config {
+    Config { verbose: false, max_errors: 10, opt_level: 0 }
+}
+
+fn debug_config() -> Config {
+    Config { verbose: true, max_errors: 100, opt_level: 0 }
+}
+
+// Diagnostic context
+type DiagCtx is {
+    error_count: Int,
+    warn_count: Int,
+    errors: List<Text>,
+};
+
+fn new_diag_ctx() -> DiagCtx {
+    DiagCtx { error_count: 0, warn_count: 0, errors: List.new() }
+}
+
+fn report_error(ctx: &mut DiagCtx, msg: Text) {
+    ctx.error_count = ctx.error_count + 1;
+    ctx.errors.push(msg);
+}
+
+fn report_warning(ctx: &mut DiagCtx, msg: Text) {
+    ctx.warn_count = ctx.warn_count + 1;
+}
+
+fn has_errors(ctx: DiagCtx) -> Bool {
+    ctx.error_count > 0
+}
+
+// Simulate a compilation pass using multiple contexts
+fn compile_pass(
+    source: Text,
+    config: Config,
+    logger: &mut Logger,
+    diag: &mut DiagCtx,
+) -> Bool {
+    log_msg(logger, LogLevel.Info, f"Starting compilation of source ({source.len()} chars)");
+
+    if source.len() == 0 {
+        report_error(diag, "Empty source file");
+        log_msg(logger, LogLevel.Error, "Empty source file");
+        return false;
+    }
+
+    if config.verbose {
+        log_msg(logger, LogLevel.Debug, f"Verbose mode enabled, opt_level={config.opt_level}");
+    }
+
+    // Simulate finding some issues
+    if source.contains("ERROR") {
+        report_error(diag, "Found ERROR marker in source");
+    }
+    if source.contains("WARN") {
+        report_warning(diag, "Found WARN marker in source");
+    }
+
+    if diag.error_count >= config.max_errors {
+        log_msg(logger, LogLevel.Error, "Max errors exceeded, aborting");
+        return false;
+    }
+
+    log_msg(logger, LogLevel.Info, "Compilation pass complete");
+    !has_errors(*diag)
+}
+
+fn test_logger_basic() -> Int {
+    let mut logger = new_logger(LogLevel.Info);
+    log_msg(&mut logger, LogLevel.Debug, "debug msg");
+    log_msg(&mut logger, LogLevel.Info, "info msg");
+    log_msg(&mut logger, LogLevel.Error, "error msg");
+
+    // Debug should be filtered out (min_level = Info)
+    if logger.messages.len() != 2 {
+        print(f"FAIL logger: expected 2 messages, got {logger.messages.len()}");
+        return 1;
+    }
+    print("  logger_basic: OK");
+    0
+}
+
+fn test_logger_debug_level() -> Int {
+    let mut logger = new_logger(LogLevel.Debug);
+    log_msg(&mut logger, LogLevel.Debug, "debug msg");
+    log_msg(&mut logger, LogLevel.Info, "info msg");
+
+    if logger.messages.len() != 2 {
+        print(f"FAIL logger_debug: expected 2, got {logger.messages.len()}");
+        return 1;
+    }
+    print("  logger_debug_level: OK");
+    0
+}
+
+fn test_diag_context() -> Int {
+    let mut diag = new_diag_ctx();
+    report_error(&mut diag, "type mismatch");
+    report_error(&mut diag, "undefined variable");
+    report_warning(&mut diag, "unused variable");
+
+    if diag.error_count != 2 {
+        print(f"FAIL diag: expected 2 errors, got {diag.error_count}");
+        return 1;
+    }
+    if diag.warn_count != 1 {
+        print(f"FAIL diag: expected 1 warning, got {diag.warn_count}");
+        return 1;
+    }
+    if !has_errors(diag) {
+        print("FAIL diag: should have errors");
+        return 1;
+    }
+    if diag.errors.len() != 2 {
+        print(f"FAIL diag: expected 2 error messages, got {diag.errors.len()}");
+        return 1;
+    }
+    print("  diag_context: OK");
+    0
+}
+
+fn test_compile_success() -> Int {
+    let config = default_config();
+    let mut logger = new_logger(LogLevel.Info);
+    let mut diag = new_diag_ctx();
+
+    let ok = compile_pass("fn main() { 0 }", config, &mut logger, &mut diag);
+    if !ok {
+        print("FAIL success: compilation should succeed");
+        return 1;
+    }
+    if diag.error_count != 0 {
+        print(f"FAIL success: expected 0 errors, got {diag.error_count}");
+        return 1;
+    }
+    if logger.messages.len() < 2 {
+        print(f"FAIL success: expected at least 2 log messages, got {logger.messages.len()}");
+        return 1;
+    }
+    print("  compile_success: OK");
+    0
+}
+
+fn test_compile_empty() -> Int {
+    let config = default_config();
+    let mut logger = new_logger(LogLevel.Info);
+    let mut diag = new_diag_ctx();
+
+    let ok = compile_pass("", config, &mut logger, &mut diag);
+    if ok {
+        print("FAIL empty: compilation should fail");
+        return 1;
+    }
+    if diag.error_count != 1 {
+        print(f"FAIL empty: expected 1 error, got {diag.error_count}");
+        return 1;
+    }
+    print("  compile_empty: OK");
+    0
+}
+
+fn test_compile_with_errors() -> Int {
+    let config = default_config();
+    let mut logger = new_logger(LogLevel.Info);
+    let mut diag = new_diag_ctx();
+
+    let ok = compile_pass("let x = ERROR;", config, &mut logger, &mut diag);
+    if ok {
+        print("FAIL errors: compilation with ERROR marker should fail");
+        return 1;
+    }
+    print("  compile_with_errors: OK");
+    0
+}
+
+fn test_verbose_config() -> Int {
+    let config = debug_config();
+    let mut logger = new_logger(LogLevel.Debug);
+    let mut diag = new_diag_ctx();
+
+    let ok = compile_pass("fn main() { 0 }", config, &mut logger, &mut diag);
+    if !ok {
+        print("FAIL verbose: compilation should succeed");
+        return 1;
+    }
+
+    // In verbose mode with debug logger, should have debug messages
+    let mut has_debug = false;
+    let mut i = 0;
+    while i < logger.messages.len() {
+        if logger.messages[i].contains("DEBUG") {
+            has_debug = true;
+        }
+        i = i + 1;
+    }
+    if !has_debug {
+        print("FAIL verbose: should have DEBUG messages");
+        return 1;
+    }
+    print("  verbose_config: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_logger_basic();
+    failures = failures + test_logger_debug_level();
+    failures = failures + test_diag_context();
+    failures = failures + test_compile_success();
+    failures = failures + test_compile_empty();
+    failures = failures + test_compile_with_errors();
+    failures = failures + test_verbose_config();
+
+    if failures == 0 {
+        print("All analyze context tests passed");
+    }
+    failures
+}

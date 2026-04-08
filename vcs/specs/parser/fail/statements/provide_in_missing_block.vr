@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, provide, in, block, error
+// @description: Test provide-in statement with missing block
+// @expected-error: E044
+
+fn test() {
+    provide Database = db in;
+}

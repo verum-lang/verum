@@ -1,0 +1,177 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, tagged, date
+
+// Date literal syntax using d#"..." tag
+
+fn test_iso_8601_dates() {
+    // ISO 8601 dates (YYYY-MM-DD)
+    let today = d#"2025-01-15";
+    let new_year = d#"2025-01-01";
+    let end_of_year = d#"2025-12-31";
+    let leap_day = d#"2024-02-29";
+}
+
+fn test_historical_dates() {
+    // Historical dates
+    let moon_landing = d#"1969-07-20";
+    let millennium = d#"2000-01-01";
+    let y2k38 = d#"2038-01-19";
+}
+
+fn test_various_months() {
+    // Various months
+    let jan = d#"2025-01-15";
+    let feb = d#"2025-02-15";
+    let mar = d#"2025-03-15";
+    let apr = d#"2025-04-15";
+    let may = d#"2025-05-15";
+    let jun = d#"2025-06-15";
+    let jul = d#"2025-07-15";
+    let aug = d#"2025-08-15";
+    let sep = d#"2025-09-15";
+    let oct = d#"2025-10-15";
+    let nov = d#"2025-11-15";
+    let dec = d#"2025-12-15";
+}
+
+fn test_edge_cases_for_days() {
+    // Edge cases for days
+    let first_day = d#"2025-01-01";
+    let last_jan = d#"2025-01-31";
+    let last_feb = d#"2025-02-28";
+    let last_feb_leap = d#"2024-02-29";
+    let last_apr = d#"2025-04-30";
+}
+
+fn test_date_with_time() {
+    // Date with time (datetime literals)
+    let datetime1 = d#"2025-01-15T10:30:00";
+    let datetime2 = d#"2025-01-15T23:59:59";
+    let midnight = d#"2025-01-15T00:00:00";
+    let noon = d#"2025-01-15T12:00:00";
+}
+
+fn test_with_milliseconds() {
+    // With milliseconds
+    let precise = d#"2025-01-15T10:30:00.123";
+    let more_precise = d#"2025-01-15T10:30:00.123456";
+}
+
+fn test_with_timezone() {
+    // With timezone
+    let utc = d#"2025-01-15T10:30:00Z";
+    let eastern = d#"2025-01-15T10:30:00-05:00";
+    let tokyo = d#"2025-01-15T10:30:00+09:00";
+    let india = d#"2025-01-15T10:30:00+05:30";
+}
+
+fn test_date_arithmetic() {
+    let today = d#"2025-01-15";
+    // Date arithmetic
+    let start_date = d#"2025-01-01";
+    let end_date = d#"2025-12-31";
+    let duration = end_date - start_date;  // Duration type
+}
+
+fn test_adding_durations() {
+    let today = d#"2025-01-15";
+    // Adding durations
+    let next_week = today + Duration.days(7);
+    let next_month = today + Duration.months(1);
+    let next_year = today + Duration.years(1);
+}
+
+fn test_date_comparisons() {
+    let today = d#"2025-01-15";
+    // Date comparisons
+    let is_past = d#"2024-01-01" < today;
+    let is_future = d#"2026-01-01" > today;
+    let is_same = d#"2025-01-15" == today;
+}
+
+// Date in function parameters
+fn is_weekend(date: Date) -> Bool {
+    let day = date.day_of_week();
+    day == DayOfWeek.Saturday || day == DayOfWeek.Sunday
+}
+
+fn test_function_with_dates() {
+    let check_weekend = is_weekend(d#"2025-01-18");  // Saturday
+}
+
+fn test_date_in_arrays() {
+    // Date in arrays
+    let holidays = [
+        d#"2025-01-01",  // New Year
+        d#"2025-07-04",  // Independence Day (US)
+        d#"2025-12-25",  // Christmas
+    ];
+}
+
+// Date in structs
+type Event is {
+    name: Text,
+    date: Date,
+};
+
+fn test_date_in_structs() {
+    let event = Event {
+        name: "Conference",
+        date: d#"2025-06-15",
+    };
+}
+
+fn test_date_ranges() {
+    // Date ranges
+    let q1_start = d#"2025-01-01";
+    let q1_end = d#"2025-03-31";
+    let q2_start = d#"2025-04-01";
+    let q2_end = d#"2025-06-30";
+}
+
+// Date in match
+fn quarter(date: Date) -> Int {
+    match date.month() {
+        1..=3 => 1
+        4..=6 => 2
+        7..=9 => 3
+        10..=12 => 4
+        _ => 0
+    }
+}
+
+fn test_date_formatting() {
+    let today = d#"2025-01-15";
+    // Date formatting
+    let formatted = today.format("MMMM d, yyyy");  // "January 15, 2025"
+    let short_format = today.format("MM/dd/yy");   // "01/15/25"
+    let iso_format = today.format("yyyy-MM-dd");   // "2025-01-15"
+}
+
+fn test_parsing_dates() {
+    // Parsing dates
+    let parsed = Date.parse("2025-01-15", "yyyy-MM-dd");
+    let parsed_us = Date.parse("01/15/2025", "MM/dd/yyyy");
+}
+
+fn test_special_date_values() {
+    // Special date values
+    let epoch = d#"1970-01-01";
+    let max_date = d#"9999-12-31";
+    let min_date = d#"0001-01-01";
+}
+
+fn test_weekday_checking() {
+    // Weekday checking
+    let monday = d#"2025-01-13";
+    let friday = d#"2025-01-17";
+    let saturday = d#"2025-01-18";
+}
+
+fn test_month_year_only() {
+    // Month/year only (if supported)
+    let jan_2025 = d#"2025-01";
+    let year_only = d#"2025";
+}

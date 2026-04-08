@@ -1,0 +1,310 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, async, concurrency, integration
+// @timeout: 5000
+
+/// Integration tests: Contracts in Async Code
+/// Demonstrates verification of asynchronous and concurrent code
+
+// Stub types
+type Data is { valid: Bool };
+implement Data { fn is_valid(&self) -> Bool { self.valid } }
+type FetchError is HttpError(Int) | ParseError(Text);
+type Response is { status: Int };
+implement Response {
+    fn is_success(&self) -> Bool { self.status >= 200 && self.status < 300 }
+    async fn parse<T>(&self) -> Result<T, FetchError> { Err(FetchError.ParseError("stub")) }
+}
+type ChannelError is Closed;
+type Sender<T> is {};
+type Receiver<T> is {};
+implement<T> Sender<T> { async fn send(&self, msg: T) -> Result<(), ChannelError> { Ok(()) } }
+implement<T> Receiver<T> { async fn recv(&self) -> Result<T, ChannelError> { Err(ChannelError.Closed) } }
+type AtomicBool is {};
+type AtomicInt is {};
+type MutexGuard<T> is { mutex: Int, _marker: Int };
+implement<T> MutexGuard<T> { fn is_locked(&self) -> Bool { true } fn mutex_id(&self) -> Int { self.mutex } }
+type Ordering is SeqCst | Relaxed | AcqRel;
+implement AtomicBool { fn compare_exchange(&self, current: Bool, new_val: Bool) -> Bool { true } }
+implement AtomicInt { fn fetch_add(&self, val: Int, ord: Ordering) -> Int { 0 } fn load(&self) -> Int { 0 } }
+type ConcurrencyError is Conflict | Stale;
+type TimeoutError is Timeout | Other;
+type CancelledError is Cancelled | Interrupted;
+type Resource<T> is { state: Int };
+implement<T> Resource<T> {
+    fn checkpoint(&self) -> Int { self.state }
+    fn commit(&mut self) {}
+    fn restore(&mut self, cp: Int) {}
+    fn is_committed(&self) -> Bool { true }
+    fn state(&self) -> Int { self.state }
+}
+type A is {};
+type B is {};
+type Transaction is {};
+type DbError is Failed(Text);
+
+context async HttpClient {
+    async fn get(url: Text) -> Result<Response, FetchError>;
+}
+
+context async Database {
+    async fn begin_transaction() -> Result<Transaction, DbError>;
+    fn transaction_committed() -> Bool;
+    fn transaction_rolled_back() -> Bool;
+}
+
+implement Transaction {
+    async fn commit(&self) -> Result<(), DbError> { Ok(()) }
+    async fn rollback(&self) -> Result<(), DbError> { Ok(()) }
+}
+
+async fn yield_now() {}
+async fn sleep(ms: Int) {}
+async fn do_operation<T>(resource: &mut Resource<T>) -> Result<T, CancelledError> { Err(CancelledError.Cancelled) }
+async fn join_all<T>(futures: List<T>) -> List<T> { futures }
+implement<T> Shared<T> {
+    fn version(&self) -> Int { 0 }
+    async fn get(&self) -> T { panic("stub") }
+    async fn compare_and_swap(&self, ver: Int, new_val: T) -> Result<T, ConcurrencyError> { Err(ConcurrencyError.Conflict) }
+}
+
+/// Basic async function with contract
+@verify(proof)
+async fn async_add(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result == a + b;
+    ";
+    a + b
+}
+
+/// Async with await and contracts preserved across suspension
+@verify(proof)
+async fn fetch_and_validate(url: Text) -> Result<Data, FetchError>
+    using [HttpClient]
+{
+    contract#"
+        ensures match result {
+            Ok(data) => data.is_valid(),
+            Err(_) => true
+        };
+    ";
+    let response = HttpClient.get(url).await?;
+
+    // Contract must hold even after await points
+    if !response.is_success() {
+        return Err(FetchError.HttpError(response.status));
+    }
+
+    let data = response.parse<Data>().await?;
+    Ok(data)
+}
+
+/// Channel contracts for message passing
+type Channel<T> is {
+    sender: Sender<T>,
+    receiver: Receiver<T>,
+    count: Int,
+};
+implement<T> Channel<T> {
+    fn message_count(&self) -> Int { self.count }
+    fn is_closed(&self) -> Bool { false }
+    fn is_empty(&self) -> Bool { self.count == 0 }
+}
+
+@verify(proof)
+async fn send_message<T>(channel: &Channel<T>, msg: T) -> Result<(), ChannelError> {
+    contract#"
+        ensures match result {
+            Ok(_) => channel.message_count() == old(channel.message_count()) + 1,
+            Err(_) => channel.is_closed()
+        };
+    ";
+    channel.sender.send(msg).await
+}
+
+@verify(proof)
+async fn receive_message<T>(channel: &Channel<T>) -> Result<T, ChannelError> {
+    contract#"
+        ensures match result {
+            Ok(msg) => channel.message_count() == old(channel.message_count()) - 1,
+            Err(_) => channel.is_empty() || channel.is_closed()
+        };
+    ";
+    channel.receiver.recv().await
+}
+
+/// Mutex with contract verification
+type AsyncMutex<T> is {
+    inner: T,
+    locked: AtomicBool,
+    mid: Int,
+};
+implement<T> AsyncMutex<T> {
+    fn id(&self) -> Int { self.mid }
+    async fn lock(&self) -> MutexGuard<T> { MutexGuard { mutex: 0, _marker: 0 } }
+}
+
+@verify(proof)
+async fn mutex_lock<T>(mutex: &AsyncMutex<T>) -> MutexGuard<T> {
+    contract#"
+        ensures result.is_locked();
+        ensures mutex.locked.load() == true;
+        // Exclusive access guaranteed
+        ensures forall other_guard: MutexGuard<T>.
+            other_guard.mutex_id() == mutex.id() implies other_guard == result;
+    ";
+    loop {
+        if mutex.locked.compare_exchange(false, true) {
+            return MutexGuard { mutex: 0, _marker: 0 };
+        }
+        yield_now().await;
+    }
+}
+
+/// Atomic operations with contracts
+@verify(proof)
+fn atomic_increment(counter: &AtomicInt) -> Int {
+    contract#"
+        ensures result == old(counter.load());
+        ensures counter.load() == old(counter.load()) + 1;
+        // Linearizable: appears atomic
+    ";
+    counter.fetch_add(1, SeqCst)
+}
+
+/// Race condition prevention via contracts
+@verify(proof)
+async fn safe_concurrent_update<T: Clone>(
+    shared: &Shared<T>,
+    update_fn: fn(&T) -> T
+) -> Result<T, ConcurrencyError> {
+    contract#"
+        ensures match result {
+            Ok(new_val) => shared.version() > old(shared.version()),
+            Err(Conflict) => shared.version() != old(shared.version())
+        };
+    ";
+    let old_version = shared.version();
+    let old_value = shared.get().await;
+    let new_value = update_fn(&old_value);
+
+    // Optimistic concurrency control
+    shared.compare_and_swap(old_version, new_value).await
+}
+
+/// Select/join with contracts
+@verify(proof)
+async fn race_with_timeout<T>(
+    future: impl Future<Output = T>,
+    timeout_ms: Int{> 0}
+) -> Result<T, TimeoutError> {
+    contract#"
+        ensures match result {
+            Ok(val) => elapsed_time() < timeout_ms,
+            Err(Timeout) => elapsed_time() >= timeout_ms
+        };
+    ";
+    // Simplified: just await the future (timeout would be runtime concern)
+    let result = future.await;
+    Ok(result)
+}
+
+/// Async iterators with invariants
+@verify(proof)
+async fn async_sum(stream: impl AsyncIterator<Item = Int>) -> Int {
+    contract#"
+        ensures result == stream.collected_items().iter().sum();
+    ";
+    let mut sum = 0;
+    while let Some(item) = stream.next().await {
+        contract#"invariant 
+            sum == stream.consumed_items().iter().sum();
+        ";
+        sum += item;
+    }
+    sum
+}
+
+/// Structured concurrency with contracts
+@verify(proof)
+async fn parallel_map<T, U>(
+    items: List<T>,
+    f: async fn(T) -> U
+) -> List<U> {
+    contract#"
+        ensures result.len() == items.len();
+        ensures forall i: Int. 0 <= i < items.len() implies result[i] == f(items[i]).await;
+    ";
+    let futures: List<_> = items.iter().map(|item| f(item.clone())).collect();
+    join_all(futures).await
+}
+
+/// Cancellation safety
+@verify(proof)
+async fn cancellation_safe_op<T>(
+    resource: &mut Resource<T>
+) -> Result<T, CancelledError> {
+    contract#"
+        // Either completes fully or resource is in original state
+        ensures match result {
+            Ok(_) => resource.is_committed(),
+            Err(Cancelled) => resource.state() == old(resource.state())
+        };
+    ";
+    let checkpoint = resource.checkpoint();
+
+    match do_operation(resource).await {
+        Ok(result) => {
+            resource.commit();
+            Ok(result)
+        }
+        Err(e) => {
+            resource.restore(checkpoint);
+            Err(e)
+        }
+    }
+}
+
+/// Deadlock freedom contract
+@verify(proof)
+async fn acquire_locks_ordered(
+    lock_a: &AsyncMutex<A>,
+    lock_b: &AsyncMutex<B>
+) -> (MutexGuard<A>, MutexGuard<B>) {
+    contract#"
+        requires lock_a.id() < lock_b.id();  // Ordered acquisition
+        ensures result.0.is_locked() && result.1.is_locked();
+        // Deadlock freedom: always acquire in consistent order
+    ";
+    let guard_a = lock_a.lock().await;
+    let guard_b = lock_b.lock().await;
+    (guard_a, guard_b)
+}
+
+/// Async context with contracts
+@verify(proof)
+async fn with_database_transaction<T>(
+    f: async fn(&Transaction) -> Result<T, DbError>
+) -> Result<T, DbError>
+    using [Database]
+{
+    contract#"
+        ensures match result {
+            Ok(_) => Database.transaction_committed(),
+            Err(_) => Database.transaction_rolled_back()
+        };
+    ";
+    let tx = Database.begin_transaction().await?;
+
+    match f(&tx).await {
+        Ok(result) => {
+            tx.commit().await?;
+            Ok(result)
+        }
+        Err(e) => {
+            tx.rollback().await?;
+            Err(e)
+        }
+    }
+}

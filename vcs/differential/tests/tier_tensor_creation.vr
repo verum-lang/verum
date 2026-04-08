@@ -1,0 +1,369 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, tensor, creation
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for tensor creation.
+/// Tests zeros, ones, arange, linspace, and identity matrix creation via struct simulation.
+
+// ============================================================================
+// Flat array representation (8 elements)
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_ones() -> Arr8 {
+    Arr8 { e0: 1, e1: 1, e2: 1, e3: 1, e4: 1, e5: 1, e6: 1, e7: 1 }
+}
+
+fn arr8_fill(v: Int) -> Arr8 {
+    Arr8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+
+/// Print first `len` elements of an Arr8
+fn arr8_print(label: Text, a: Arr8, len: Int) {
+    let mut i = 0;
+    while i < len {
+        println(f"  {label}[{i}]: {arr8_get(a, i)}");
+        i = i + 1;
+    }
+}
+
+// ============================================================================
+// 2D matrix with shape metadata (max 16 elements)
+// ============================================================================
+
+type Mat16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int,
+    rows: Int,
+    cols: Int
+};
+
+fn mat16_get(m: Mat16, i: Int) -> Int {
+    if i == 0 { m.e0 } else if i == 1 { m.e1 } else if i == 2 { m.e2 }
+    else if i == 3 { m.e3 } else if i == 4 { m.e4 } else if i == 5 { m.e5 }
+    else if i == 6 { m.e6 } else if i == 7 { m.e7 } else if i == 8 { m.e8 }
+    else if i == 9 { m.e9 } else if i == 10 { m.e10 } else if i == 11 { m.e11 }
+    else if i == 12 { m.e12 } else if i == 13 { m.e13 } else if i == 14 { m.e14 }
+    else { m.e15 }
+}
+
+fn mat16_get2d(m: Mat16, row: Int, col: Int) -> Int {
+    mat16_get(m, row * m.cols + col)
+}
+
+fn mat16_set(m: Mat16, i: Int, v: Int) -> Mat16 {
+    Mat16 {
+        e0: if i == 0 { v } else { m.e0 },
+        e1: if i == 1 { v } else { m.e1 },
+        e2: if i == 2 { v } else { m.e2 },
+        e3: if i == 3 { v } else { m.e3 },
+        e4: if i == 4 { v } else { m.e4 },
+        e5: if i == 5 { v } else { m.e5 },
+        e6: if i == 6 { v } else { m.e6 },
+        e7: if i == 7 { v } else { m.e7 },
+        e8: if i == 8 { v } else { m.e8 },
+        e9: if i == 9 { v } else { m.e9 },
+        e10: if i == 10 { v } else { m.e10 },
+        e11: if i == 11 { v } else { m.e11 },
+        e12: if i == 12 { v } else { m.e12 },
+        e13: if i == 13 { v } else { m.e13 },
+        e14: if i == 14 { v } else { m.e14 },
+        e15: if i == 15 { v } else { m.e15 },
+        rows: m.rows,
+        cols: m.cols
+    }
+}
+
+fn mat16_zeros(rows: Int, cols: Int) -> Mat16 {
+    Mat16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0,
+        rows: rows, cols: cols
+    }
+}
+
+// ============================================================================
+// Creation functions
+// ============================================================================
+
+/// Create an array with values [start, start+step, start+2*step, ...] while < end
+fn arange(start: Int, end_val: Int, step: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut val = start;
+    let mut idx = 0;
+    while val < end_val && idx < 8 {
+        out = arr8_set(out, idx, val);
+        val = val + step;
+        idx = idx + 1;
+    }
+    out
+}
+
+fn arange_len(start: Int, end_val: Int, step: Int) -> Int {
+    if step <= 0 { 0 }
+    else if end_val <= start { 0 }
+    else {
+        let diff = end_val - start;
+        let len = (diff + step - 1) / step;
+        if len > 8 { 8 } else { len }
+    }
+}
+
+/// Integer approximation of linspace: n equally spaced values from start to end (inclusive)
+fn linspace_int(start: Int, end_val: Int, n: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    if n <= 0 { out }
+    else if n == 1 {
+        out = arr8_set(out, 0, start);
+        out
+    } else {
+        let range = end_val - start;
+        let mut i = 0;
+        while i < n && i < 8 {
+            let val = start + range * i / (n - 1);
+            out = arr8_set(out, i, val);
+            i = i + 1;
+        }
+        out
+    }
+}
+
+/// Create NxN identity matrix
+fn identity_matrix(n: Int) -> Mat16 {
+    let mut out = mat16_zeros(n, n);
+    let mut i = 0;
+    while i < n {
+        out = mat16_set(out, i * n + i, 1);
+        i = i + 1;
+    }
+    out
+}
+
+/// Create one-hot vector: 1 at index idx, 0 elsewhere
+fn one_hot(idx: Int, size: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    if idx >= 0 && idx < size && idx < 8 {
+        out = arr8_set(out, idx, 1);
+        out
+    } else {
+        out
+    }
+}
+
+// ============================================================================
+// Test functions
+// ============================================================================
+
+/// Test zeros, ones, and fill creation
+fn test_zeros_ones_fill() {
+    println("=== Zeros, Ones, Fill ===");
+
+    let z = arr8_zeros();
+    println(f"zeros sum: {arr8_get(z, 0) + arr8_get(z, 1) + arr8_get(z, 2) + arr8_get(z, 3)}");
+    arr8_print("zeros", z, 4);
+
+    let o = arr8_ones();
+    let ones_sum = arr8_get(o, 0) + arr8_get(o, 1) + arr8_get(o, 2) + arr8_get(o, 3) + arr8_get(o, 4) + arr8_get(o, 5) + arr8_get(o, 6) + arr8_get(o, 7);
+    println(f"ones sum (8 elements): {ones_sum}");
+    arr8_print("ones", o, 4);
+
+    let f = arr8_fill(7);
+    println(f"fill(7)[0]: {arr8_get(f, 0)}");
+    println(f"fill(7)[3]: {arr8_get(f, 3)}");
+    println(f"fill(7)[7]: {arr8_get(f, 7)}");
+
+    let neg = arr8_fill(-3);
+    println(f"fill(-3)[0]: {arr8_get(neg, 0)}");
+    println(f"fill(-3)[4]: {arr8_get(neg, 4)}");
+}
+
+/// Test arange creation with various parameters
+fn test_arange_creation() {
+    println("\n=== Arange Creation ===");
+
+    // arange(0, 5, 1) = [0, 1, 2, 3, 4]
+    let a1 = arange(0, 5, 1);
+    let len1 = arange_len(0, 5, 1);
+    println(f"arange(0, 5, 1) len: {len1}");
+    arr8_print("a1", a1, len1);
+
+    // arange(0, 8, 2) = [0, 2, 4, 6]
+    let a2 = arange(0, 8, 2);
+    let len2 = arange_len(0, 8, 2);
+    println(f"arange(0, 8, 2) len: {len2}");
+    arr8_print("a2", a2, len2);
+
+    // arange(10, 15, 1) = [10, 11, 12, 13, 14]
+    let a3 = arange(10, 15, 1);
+    let len3 = arange_len(10, 15, 1);
+    println(f"arange(10, 15, 1) len: {len3}");
+    arr8_print("a3", a3, len3);
+
+    // arange(0, 24, 3) = [0, 3, 6, 9, 12, 15, 18, 21]
+    let a4 = arange(0, 24, 3);
+    let len4 = arange_len(0, 24, 3);
+    println(f"arange(0, 24, 3) len: {len4}");
+    arr8_print("a4", a4, len4);
+
+    // Empty range
+    let empty_len = arange_len(5, 5, 1);
+    println(f"arange(5, 5, 1) len: {empty_len}");
+
+    let backward_len = arange_len(10, 3, 1);
+    println(f"arange(10, 3, 1) len: {backward_len}");
+
+    // Sum of arange(0, 8, 1) = 0+1+2+3+4+5+6+7 = 28
+    let a5 = arange(0, 8, 1);
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 8 {
+        sum = sum + arr8_get(a5, i);
+        i = i + 1;
+    }
+    println(f"sum of arange(0, 8, 1): {sum}");
+}
+
+/// Test linspace creation
+fn test_linspace_creation() {
+    println("\n=== Linspace Creation ===");
+
+    // linspace(0, 100, 5) = [0, 25, 50, 75, 100]
+    let l1 = linspace_int(0, 100, 5);
+    println(f"linspace(0, 100, 5):");
+    arr8_print("l1", l1, 5);
+
+    // linspace(0, 10, 3) = [0, 5, 10]
+    let l2 = linspace_int(0, 10, 3);
+    println(f"linspace(0, 10, 3):");
+    arr8_print("l2", l2, 3);
+
+    // linspace(10, 20, 2) = [10, 20]
+    let l3 = linspace_int(10, 20, 2);
+    println(f"linspace(10, 20, 2):");
+    arr8_print("l3", l3, 2);
+
+    // Single point: linspace(42, 99, 1) = [42]
+    let l4 = linspace_int(42, 99, 1);
+    println(f"linspace(42, 99, 1):");
+    arr8_print("l4", l4, 1);
+
+    // Same endpoints: linspace(5, 5, 4) = [5, 5, 5, 5]
+    let l5 = linspace_int(5, 5, 4);
+    println(f"linspace(5, 5, 4):");
+    arr8_print("l5", l5, 4);
+
+    // Endpoints always exact
+    let l6 = linspace_int(0, 1000, 6);
+    println(f"linspace(0, 1000, 6) first: {arr8_get(l6, 0)}");
+    println(f"linspace(0, 1000, 6) last: {arr8_get(l6, 5)}");
+}
+
+/// Test identity matrix creation
+fn test_identity_creation() {
+    println("\n=== Identity Matrix Creation ===");
+
+    // 1x1 identity
+    let id1 = identity_matrix(1);
+    println(f"identity(1) shape: {id1.rows}x{id1.cols}");
+    println(f"identity(1)[0,0]: {mat16_get2d(id1, 0, 0)}");
+
+    // 2x2 identity
+    let id2 = identity_matrix(2);
+    println(f"identity(2) shape: {id2.rows}x{id2.cols}");
+    let mut r = 0;
+    while r < 2 {
+        let mut c = 0;
+        while c < 2 {
+            println(f"  id2[{r},{c}]: {mat16_get2d(id2, r, c)}");
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+
+    // 3x3 identity
+    let id3 = identity_matrix(3);
+    println(f"identity(3) shape: {id3.rows}x{id3.cols}");
+    let trace3 = mat16_get2d(id3, 0, 0) + mat16_get2d(id3, 1, 1) + mat16_get2d(id3, 2, 2);
+    println(f"identity(3) trace: {trace3}");
+    // Off-diagonal check
+    println(f"identity(3)[0,1]: {mat16_get2d(id3, 0, 1)}");
+    println(f"identity(3)[1,0]: {mat16_get2d(id3, 1, 0)}");
+    println(f"identity(3)[0,2]: {mat16_get2d(id3, 0, 2)}");
+    println(f"identity(3)[2,0]: {mat16_get2d(id3, 2, 0)}");
+
+    // 4x4 identity trace
+    let id4 = identity_matrix(4);
+    let trace4 = mat16_get2d(id4, 0, 0) + mat16_get2d(id4, 1, 1) + mat16_get2d(id4, 2, 2) + mat16_get2d(id4, 3, 3);
+    println(f"identity(4) trace: {trace4}");
+}
+
+/// Test one-hot vector creation
+fn test_one_hot_creation() {
+    println("\n=== One-Hot Creation ===");
+
+    // one_hot(0, 5) = [1, 0, 0, 0, 0]
+    let oh0 = one_hot(0, 5);
+    println(f"one_hot(0, 5):");
+    arr8_print("oh0", oh0, 5);
+
+    // one_hot(2, 5) = [0, 0, 1, 0, 0]
+    let oh2 = one_hot(2, 5);
+    println(f"one_hot(2, 5):");
+    arr8_print("oh2", oh2, 5);
+
+    // one_hot(4, 5) = [0, 0, 0, 0, 1]
+    let oh4 = one_hot(4, 5);
+    println(f"one_hot(4, 5):");
+    arr8_print("oh4", oh4, 5);
+
+    // Sum of one-hot should be 1
+    let oh_sum = arr8_get(oh2, 0) + arr8_get(oh2, 1) + arr8_get(oh2, 2) + arr8_get(oh2, 3) + arr8_get(oh2, 4);
+    println(f"one_hot(2, 5) sum: {oh_sum}");
+
+    // one_hot(3, 8) - larger size
+    let oh3 = one_hot(3, 8);
+    println(f"one_hot(3, 8):");
+    arr8_print("oh3", oh3, 8);
+}
+
+fn main() {
+    test_zeros_ones_fill();
+    test_arange_creation();
+    test_linspace_creation();
+    test_identity_creation();
+    test_one_hot_creation();
+}

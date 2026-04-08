@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1
+// @tags: type-inference, type-function, advanced-type-syntax
+// @description: Type inference tests for type aliases and type-level operations
+
+// Type aliases using direct type definitions
+type MaybeInt is Maybe<Int>;
+type ListText is List<Text>;
+
+// Verify type alias identity
+fn test_maybe_int(x: MaybeInt) -> Maybe<Int> {
+    x  // MaybeInt = Maybe<Int>
+}
+
+fn test_list_text(x: ListText) -> List<Text> {
+    x  // ListText = List<Text>
+}
+
+// Type-level conditional via specialization with unit types
+type TrueType is ();
+type FalseType is ();
+
+type BoolToType is protocol {
+    type Result;
+};
+
+implement BoolToType for TrueType {
+    type Result is Int;
+}
+
+implement BoolToType for FalseType {
+    type Result is Text;
+}
+
+// Type-level list cons
+type LCons<Head, Tail> is (Head, Tail);
+type LNil is ();
+
+// Head and Tail type functions via protocols
+type HeadProto is protocol {
+    type Result;
+};
+
+implement<H, T> HeadProto for LCons<H, T> {
+    type Result is H;
+}
+
+type TailProto is protocol {
+    type Result;
+};
+
+implement<H, T> TailProto for LCons<H, T> {
+    type Result is T;
+}
+
+// Flatten nested tuples via protocol
+type FlattenProto is protocol {
+    type Result;
+};
+
+implement<A, B> FlattenProto for (A, B) {
+    type Result is (A, B);
+}
+
+// Identity type function
+type Id<T> is T;
+
+fn test_id() {
+    let x: Id<Int> = 42;  // Id<Int> = Int
+    let y: Int = x;       // Should be compatible
+}
+
+fn main() {
+    // Test MaybeInt alias
+    let mi: MaybeInt = Some(42);
+    assert(test_maybe_int(mi) == Some(42));
+
+    // Test ListText alias
+    let lt: ListText = ["hello", "world"];
+    assert(test_list_text(lt).len() == 2);
+
+    // Test Id
+    test_id();
+
+    // Test tuple type alias
+    let pair: (Int, Text) = (42, "hello");
+    assert(pair.0 == 42);
+    assert(pair.1 == "hello");
+
+    // Test nested type alias usage
+    let nested: Maybe<ListText> = Some(["a", "b"]);
+    assert(nested.is_some());
+    assert(nested.unwrap().len() == 2);
+
+    // Type alias in function parameter
+    fn process_maybe(m: MaybeInt) -> Int {
+        match m {
+            Some(x) => x,
+            None => 0,
+        }
+    }
+
+    assert(process_maybe(Some(10)) == 10);
+    assert(process_maybe(None) == 0);
+
+    // Type alias with generic nesting
+    type ResultList<T> is Result<List<T>, Text>;
+    let rl: ResultList<Int> = Ok([1, 2, 3]);
+    assert(rl.is_ok());
+}

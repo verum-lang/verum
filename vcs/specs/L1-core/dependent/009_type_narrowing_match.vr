@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, narrowing, pattern-matching
+
+/// Type narrowing through pattern matching -- after matching on a
+/// variant or condition, the type system narrows refinements.
+
+type Shape is
+    Circle { radius: Float }
+  | Rect { width: Float, height: Float }
+  | Triangle { base: Float, height: Float };
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Natural is n: Int where n >= 0;
+type Positive is n: Int where n > 0;
+
+// Match narrows variant type
+fn area(s: Shape) -> Float {
+    match s {
+        Circle { radius } => 3.14159 * radius * radius,
+        Rect { width, height } => width * height,
+        Triangle { base, height } => 0.5 * base * height,
+    }
+}
+
+// Match on Maybe narrows to known-present value
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(v) => v,    // v: T, narrowed from Maybe<T>
+        None => default,
+    }
+}
+
+// Conditional narrowing: if-let pattern
+fn process_positive(x: Int) -> Text {
+    if x > 0 {
+        // Here x is narrowed to Int{> 0}
+        let p: Positive = x;
+        f"positive: {p}"
+    } else if x == 0 {
+        "zero"
+    } else {
+        "negative"
+    }
+}
+
+// Guard-based narrowing in match
+fn classify(x: Int) -> Text {
+    match x {
+        n if n > 100 => "large",
+        n if n > 0 => "small positive",
+        0 => "zero",
+        n if n > -100 => "small negative",
+        _ => "large negative",
+    }
+}
+
+// Nested pattern narrowing
+fn safe_head(xs: List<Int>) -> Maybe<Int> {
+    match xs.len() {
+        0 => None,
+        _ => Some(xs[0]),  // xs narrowed to non-empty
+    }
+}
+
+// Result narrowing
+fn parse_and_validate(s: Text) -> Result<Positive, Text> {
+    let parsed = s.parse_int();
+    match parsed {
+        Ok(n) if n > 0 => Ok(n),
+        Ok(n) => Err(f"not positive: {n}"),
+        Err(e) => Err(f"parse error: {e}"),
+    }
+}
+
+fn main() {
+    let c = Circle { radius: 5.0 };
+    assert(area(c) > 0.0);
+
+    let v = unwrap_or(Some(42), 0);
+    assert(v == 42);
+
+    let msg = process_positive(10);
+    assert(msg == "positive: 10");
+
+    let cls = classify(50);
+    assert(cls == "small positive");
+
+    let head = safe_head([1, 2, 3]);
+    assert(head == Some(1));
+}

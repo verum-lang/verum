@@ -1,0 +1,186 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, text, strings, format, pipeline
+// @timeout: 5000
+// @expected-exit: 0
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies Text operations and format strings through the full pipeline
+
+// =============================================================================
+// Text literals and equality
+// =============================================================================
+
+@test
+fn test_text_literal() {
+    let s = "hello";
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_text_empty() {
+    let s = "";
+    assert_eq(s, "");
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_text_equality() {
+    let a = "hello";
+    let b = "hello";
+    let c = "world";
+    assert(a == b);
+    assert(a != c);
+}
+
+// =============================================================================
+// Text length
+// =============================================================================
+
+@test
+fn test_text_len() {
+    assert_eq("".len(), 0);
+    assert_eq("a".len(), 1);
+    assert_eq("hello".len(), 5);
+    assert_eq("hello world".len(), 11);
+}
+
+@test
+fn test_text_is_empty() {
+    assert("".is_empty());
+    assert(!"hello".is_empty());
+}
+
+// =============================================================================
+// Format strings (f-strings)
+// =============================================================================
+
+@test
+fn test_format_string_int() {
+    let x = 42;
+    let s = f"value is {x}";
+    assert_eq(s, "value is 42");
+}
+
+@test
+fn test_format_string_multiple() {
+    let a = 1;
+    let b = 2;
+    let s = f"{a} + {b} = {a + b}";
+    assert_eq(s, "1 + 2 = 3");
+}
+
+@test
+fn test_format_string_text() {
+    let name = "Alice";
+    let s = f"Hello, {name}!";
+    assert_eq(s, "Hello, Alice!");
+}
+
+// =============================================================================
+// Text concatenation
+// =============================================================================
+
+@test
+fn test_text_concat() {
+    let a = "hello";
+    let b = " world";
+    let c = a + b;
+    assert_eq(c, "hello world");
+}
+
+@test
+fn test_text_concat_empty() {
+    let a = "hello";
+    let b = "";
+    assert_eq(a + b, "hello");
+    assert_eq(b + a, "hello");
+}
+
+// =============================================================================
+// Text methods
+// =============================================================================
+
+@test
+fn test_text_contains() {
+    let s = "hello world";
+    assert(s.contains("hello"));
+    assert(s.contains("world"));
+    assert(s.contains(" "));
+    assert(!s.contains("xyz"));
+}
+
+@test
+fn test_text_starts_with() {
+    let s = "hello world";
+    assert(s.starts_with("hello"));
+    assert(s.starts_with(""));
+    assert(!s.starts_with("world"));
+}
+
+@test
+fn test_text_ends_with() {
+    let s = "hello world";
+    assert(s.ends_with("world"));
+    assert(s.ends_with(""));
+    assert(!s.ends_with("hello"));
+}
+
+@test
+fn test_text_to_uppercase() {
+    assert_eq("hello".to_uppercase(), "HELLO");
+    assert_eq("Hello World".to_uppercase(), "HELLO WORLD");
+    assert_eq("".to_uppercase(), "");
+}
+
+@test
+fn test_text_to_lowercase() {
+    assert_eq("HELLO".to_lowercase(), "hello");
+    assert_eq("Hello World".to_lowercase(), "hello world");
+    assert_eq("".to_lowercase(), "");
+}
+
+@test
+fn test_text_trim() {
+    assert_eq("  hello  ".trim(), "hello");
+    assert_eq("hello".trim(), "hello");
+    assert_eq("  ".trim(), "");
+}
+
+// =============================================================================
+// Text equality comparisons
+// =============================================================================
+// NOTE: Text ordering (<, >, <=, >=) is a known codegen limitation —
+// string comparisons currently compile to integer comparison instructions.
+// Text == and != work via the equality path.
+
+@test
+fn test_text_equality_detailed() {
+    assert("abc" == "abc");
+    assert("abc" != "def");
+    assert("" == "");
+    assert("a" != "A");
+}
+
+fn main() -> Int {
+    test_text_literal();
+    test_text_empty();
+    test_text_equality();
+    test_text_len();
+    test_text_is_empty();
+    test_format_string_int();
+    test_format_string_multiple();
+    test_format_string_text();
+    test_text_concat();
+    test_text_concat_empty();
+    test_text_contains();
+    test_text_starts_with();
+    test_text_ends_with();
+    test_text_to_uppercase();
+    test_text_to_lowercase();
+    test_text_trim();
+    test_text_equality_detailed();
+    print("[OK] 010_text");
+    0
+}

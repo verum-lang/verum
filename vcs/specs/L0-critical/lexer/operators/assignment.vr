@@ -1,0 +1,213 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, assignment
+
+// Assignment operators
+
+fn test_simple_assignment() {
+    // Simple assignment (=)
+    let x = 42;
+    let y = 3.14;
+    let z = "hello";
+    let b = true;
+}
+
+fn compute_value() -> Int {
+    42
+}
+
+fn test_mutable_assignment() {
+    // Mutable variable assignment
+    let mut counter = 0;
+    counter = 1;
+    counter = 2;
+    counter = 100;
+
+    // Assignment from expression
+    let sum = 10 + 20;
+    let result = compute_value();
+    let cond = if true { 1 } else { 2 };
+}
+
+fn test_compound_assignments() {
+    // Compound addition assignment (+=)
+    let mut a = 10;
+    a += 5;      // a = a + 5 = 15
+    a += 10;     // a = 25
+    a += -5;     // a = 20
+
+    // Compound subtraction assignment (-=)
+    let mut b = 100;
+    b -= 25;     // b = 75
+    b -= 50;     // b = 25
+    b -= -10;    // b = 35
+
+    // Compound multiplication assignment (*=)
+    let mut c = 5;
+    c *= 2;      // c = 10
+    c *= 3;      // c = 30
+    c *= -1;     // c = -30
+
+    // Compound division assignment (/=)
+    let mut d = 100;
+    d /= 2;      // d = 50
+    d /= 5;      // d = 10
+    d /= 2;      // d = 5
+
+    // Compound modulo assignment (%=)
+    let mut e = 17;
+    e %= 10;     // e = 7
+    e %= 5;      // e = 2
+    e %= 3;      // e = 2
+
+    // Compound bitwise AND assignment (&=)
+    let mut f = 0xFF;
+    f &= 0x0F;   // f = 0x0F
+    f &= 0x07;   // f = 0x07
+
+    // Compound bitwise OR assignment (|=)
+    let mut g = 0x00;
+    g |= 0x01;   // g = 0x01
+    g |= 0x10;   // g = 0x11
+    g |= 0x20;   // g = 0x31
+
+    // Compound bitwise XOR assignment (^=)
+    let mut h = 0xFF;
+    h ^= 0x0F;   // h = 0xF0
+    h ^= 0xF0;   // h = 0x00
+    h ^= 0xAB;   // h = 0xAB
+
+    // Compound left shift assignment (<<=)
+    let mut i = 1;
+    i <<= 1;     // i = 2
+    i <<= 2;     // i = 8
+    i <<= 4;     // i = 128
+
+    // Compound right shift assignment (>>=)
+    let mut j = 128;
+    j >>= 1;     // j = 64
+    j >>= 2;     // j = 16
+    j >>= 4;     // j = 1
+}
+
+fn test_sequence() {
+    // Multiple assignments in sequence
+    let mut val = 0;
+    val = 10;
+    val += 5;
+    val *= 2;
+    val -= 10;
+    val /= 2;
+    // val = ((10 + 5) * 2 - 10) / 2 = 10
+}
+
+// Assignment in struct fields
+type Point is { x: Int, y: Int };
+
+fn test_struct_assignment() {
+    let mut point = Point { x: 0, y: 0 };
+    point.x = 10;
+    point.y = 20;
+    point.x += 5;
+    point.y -= 5;
+}
+
+fn test_array_assignment() {
+    // Assignment to array elements
+    let mut arr = [1, 2, 3, 4, 5];
+    arr[0] = 10;
+    arr[1] += 10;
+    arr[2] *= 2;
+    arr[3] -= 1;
+}
+
+fn test_map_assignment() {
+    // Assignment to map values
+    let mut map: Map<Text, Int> = {};
+    map["key1"] = 100;
+    map["key2"] = 200;
+    map["key1"] += 50;
+    map["key2"] -= 25;
+}
+
+fn test_chained_assignment() {
+    // Chained assignment (if supported)
+    let mut p = 0;
+    let mut q = 0;
+    let mut r = 0;
+    p = q = r = 42;
+}
+
+fn test_destructuring() {
+    // Destructuring assignment
+    let (mut first, mut second) = (1, 2);
+    first = 10;
+    second = 20;
+
+    // Swap using multiple assignment
+    let mut swap_a = 1;
+    let mut swap_b = 2;
+    let temp = swap_a;
+    swap_a = swap_b;
+    swap_b = temp;
+
+    // Note: Tuple destructuring assignment (swap_a, swap_b) = (swap_b, swap_a)
+    // is not yet supported in Verum's grammar. Use temp variable pattern above.
+}
+
+fn test_loop_assignment() {
+    // Assignment in loops
+    let mut sum_loop = 0;
+    for i in 1..=10 {
+        sum_loop += i;
+    }
+
+    let mut product_loop = 1;
+    for i in 1..=5 {
+        product_loop *= i;
+    }
+}
+
+fn test_typed_assignment() {
+    // Assignment with type annotation
+    let mut typed: Int = 0;
+    typed = 42;
+
+    let mut float_typed: Float = 0.0;
+    float_typed = 3.14;
+    float_typed += 0.01;
+}
+
+// Assignment from function results
+fn get_value() -> Int { 42 }
+
+fn test_function_assignment() {
+    let mut from_fn = 0;
+    from_fn = get_value();
+    from_fn += get_value();
+}
+
+fn expensive_compute() -> Int {
+    100
+}
+
+fn test_nullable_assignment() {
+    // Nullable assignment (if supported)
+    let mut maybe_val: Maybe<Int> = None;
+    maybe_val = Some(42);
+    maybe_val = None;
+
+    // Lazy assignment pattern
+    let mut lazy_computed: Maybe<Int> = None;
+    if lazy_computed.is_none() {
+        lazy_computed = Some(expensive_compute());
+    }
+}
+
+fn test_method_assignment() {
+    // Operator assignment with method calls
+    let mut text = "hello";
+    text = text.to_upper();
+    text += " world";
+}

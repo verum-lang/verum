@@ -1,0 +1,24 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let mut total = 0;
+    let mut i = 0;
+
+    while i < 3 {
+        i = i + 1;
+        let mut j = 0;
+
+        while j < 5 {
+            j = j + 1;
+            if j == 3 {
+                continue;  // Skip j=3 in inner loop
+            }
+            total = total + 1;
+        }
+    }
+
+    // 3 outer × (5 - 1 skipped) = 3 × 4 = 12
+    assert_eq(total, 12);
+}

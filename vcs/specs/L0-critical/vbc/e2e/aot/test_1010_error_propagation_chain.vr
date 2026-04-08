@@ -1,0 +1,215 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, error, result, propagation, diagnostics
+// @description: Error handling chains — critical for compiler diagnostics
+
+type CompileError is
+    | ParseError(Text)
+    | TypeError(Text)
+    | CodegenError(Text)
+    | InternalError(Text);
+
+fn error_tag(e: CompileError) -> Int {
+    match e {
+        ParseError(_) => 0,
+        TypeError(_) => 1,
+        CodegenError(_) => 2,
+        InternalError(_) => 3,
+    }
+}
+
+fn parse_int_literal(s: Text) -> Result<Int, CompileError> {
+    let slen = s.len();
+    if slen == 0 {
+        return Err(CompileError.ParseError("empty input"));
+    }
+    let mut result = 0;
+    let mut i = 0;
+    let mut negative = false;
+    let first_byte = match s.byte_at(0) { Some(v) => v, None => 0, };
+    if first_byte == 45 {
+        negative = true;
+        i = 1;
+    }
+    while i < slen {
+        let b = match s.byte_at(i) { Some(v) => v, None => 0, };
+        if b < 48 || b > 57 {
+            return Err(CompileError.ParseError(f"invalid digit at position {i}"));
+        }
+        result = result * 10 + (b - 48);
+        i = i + 1;
+    }
+    if negative { Ok(-result) } else { Ok(result) }
+}
+
+fn check_range(value: Int, min_val: Int, max_val: Int) -> Result<Int, CompileError> {
+    if value < min_val || value > max_val {
+        Err(CompileError.TypeError(f"value {value} out of range [{min_val}, {max_val}]"))
+    } else {
+        Ok(value)
+    }
+}
+
+fn generate_load(value: Int) -> Result<Text, CompileError> {
+    if value > 999999 {
+        return Err(CompileError.CodegenError("value too large for immediate"));
+    }
+    Ok(f"LOAD_IMM {value}")
+}
+
+fn compile_int_literal(source: Text) -> Result<Text, CompileError> {
+    let parsed = parse_int_literal(source);
+    let value = match parsed {
+        Ok(v) => v,
+        Err(e) => return Err(e),
+    };
+
+    let range_result = check_range(value, -32768, 32767);
+    let safe_value = match range_result {
+        Ok(v) => v,
+        Err(e) => return Err(e),
+    };
+
+    generate_load(safe_value)
+}
+
+fn test_success_chain() -> Int {
+    match compile_int_literal("42") {
+        Ok(code) => {
+            if code != "LOAD_IMM 42" {
+                print(f"FAIL success: expected 'LOAD_IMM 42', got '{code}'");
+                return 1;
+            }
+        }
+        Err(_) => {
+            print("FAIL success: unexpected error");
+            return 1;
+        }
+    }
+    print("  success_chain: OK");
+    0
+}
+
+fn test_parse_error() -> Int {
+    match compile_int_literal("abc") {
+        Ok(_) => {
+            print("FAIL parse_error: expected error");
+            return 1;
+        }
+        Err(e) => {
+            if error_tag(e) != 0 {
+                print(f"FAIL parse_error: expected ParseError, got tag {error_tag(e)}");
+                return 1;
+            }
+        }
+    }
+    print("  parse_error: OK");
+    0
+}
+
+fn test_type_error() -> Int {
+    match compile_int_literal("99999") {
+        Ok(_) => {
+            print("FAIL type_error: expected range error");
+            return 1;
+        }
+        Err(e) => {
+            if error_tag(e) != 1 {
+                print(f"FAIL type_error: expected TypeError, got tag {error_tag(e)}");
+                return 1;
+            }
+        }
+    }
+    print("  type_error: OK");
+    0
+}
+
+fn test_negative_value() -> Int {
+    match compile_int_literal("-100") {
+        Ok(code) => {
+            if code != "LOAD_IMM -100" {
+                print(f"FAIL negative: expected 'LOAD_IMM -100', got '{code}'");
+                return 1;
+            }
+        }
+        Err(_) => {
+            print("FAIL negative: unexpected error");
+            return 1;
+        }
+    }
+    print("  negative_value: OK");
+    0
+}
+
+fn test_empty_input() -> Int {
+    match compile_int_literal("") {
+        Ok(_) => {
+            print("FAIL empty: expected error");
+            return 1;
+        }
+        Err(e) => {
+            if error_tag(e) != 0 {
+                print("FAIL empty: expected ParseError");
+                return 1;
+            }
+        }
+    }
+    print("  empty_input: OK");
+    0
+}
+
+fn test_multiple_errors_collected() -> Int {
+    // Simulate collecting errors from multiple compilation units
+    let inputs = ["42", "abc", "99999", "7", "", "-5"];
+    let mut errors = List.new();
+    let mut successes = 0;
+
+    let mut i = 0;
+    while i < inputs.len() {
+        match compile_int_literal(inputs[i]) {
+            Ok(_) => { successes = successes + 1; }
+            Err(e) => { errors.push(error_tag(e)); }
+        }
+        i = i + 1;
+    }
+
+    if successes != 3 {
+        print(f"FAIL multi: expected 3 successes, got {successes}");
+        return 1;
+    }
+    if errors.len() != 3 {
+        print(f"FAIL multi: expected 3 errors, got {errors.len()}");
+        return 1;
+    }
+    // errors should be: ParseError(0), TypeError(1), ParseError(0)
+    if errors[0] != 0 {
+        print(f"FAIL multi: error[0] expected ParseError(0), got {errors[0]}");
+        return 1;
+    }
+    if errors[1] != 1 {
+        print(f"FAIL multi: error[1] expected TypeError(1), got {errors[1]}");
+        return 1;
+    }
+    if errors[2] != 0 {
+        print(f"FAIL multi: error[2] expected ParseError(0), got {errors[2]}");
+        return 1;
+    }
+    print("  multiple_errors_collected: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_success_chain();
+    failures = failures + test_parse_error();
+    failures = failures + test_type_error();
+    failures = failures + test_negative_value();
+    failures = failures + test_empty_input();
+    failures = failures + test_multiple_errors_collected();
+
+    if failures == 0 {
+        print("All error propagation chain tests passed");
+    }
+    failures
+}

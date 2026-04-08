@@ -1,0 +1,87 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, checked, escape, advanced, interprocedural
+// @description: Advanced escape analysis tests for &checked references
+
+/// Advanced Escape Analysis Test Suite
+///
+/// This test suite demonstrates Verum's sophisticated interprocedural escape
+/// analysis for &checked (Tier 1) references. The analysis prevents zero-cost
+/// references from escaping their safe scope, ensuring memory safety without
+/// runtime overhead.
+///
+/// Key capabilities demonstrated:
+/// 1. Interprocedural escape detection through function call chains
+/// 2. Detection of indirect escapes via returned references
+/// 3. Multiple escape path analysis
+///
+/// Spec: 26-cbgr-implementation.md#escape-analysis
+
+// ============================================================================
+// TEST 1: Direct function escape (single function)
+// ============================================================================
+// When a &checked reference is passed to a function that returns a reference,
+// the compiler detects that the checked reference could escape through the
+// function's return value.
+
+fn identity_ref(r: &Int) -> &Int {
+    r  // Returns input reference directly
+}
+
+fn test_direct_escape() {
+    let local = 42;
+    let checked_ref: &checked Int = &checked local;
+
+    // ERROR: &checked reference may escape through function call
+    // The compiler tracks that `checked_ref` holds a &checked reference to `local`,
+    // and that `identity_ref` could return this reference, causing an escape.
+    let escaped = identity_ref(checked_ref);
+}
+
+// ============================================================================
+// TEST 2: Chained function escape (multiple functions)
+// ============================================================================
+// Even when the escape happens through multiple function calls, the analysis
+// detects the potential escape path.
+
+fn forward_ref(r: &Int) -> &Int {
+    r  // Pass through
+}
+
+fn chain_ref(r: &Int) -> &Int {
+    forward_ref(r)  // Indirect return through another function
+}
+
+fn test_chained_escape() {
+    let value = 100;
+    let checked_value: &checked Int = &checked value;
+
+    // ERROR: Still detects escape through chain_ref -> forward_ref
+    let result = chain_ref(checked_value);
+}
+
+// ============================================================================
+// TEST 3: Multiple references scenario
+// ============================================================================
+// When multiple &checked references exist, each must be tracked independently.
+
+fn select_ref(a: &Int, b: &Int) -> &Int {
+    a  // Returns first reference
+}
+
+fn test_multiple_refs() {
+    let x = 10;
+    let y = 20;
+
+    let checked_x: &checked Int = &checked x;
+    let checked_y: &checked Int = &checked y;
+
+    // ERROR: Even with multiple checked refs, escape is detected
+    let selected = select_ref(checked_x, checked_y);
+}
+
+fn main() {
+    // This file is designed to fail type checking
+    // Each test function demonstrates a different escape scenario
+}

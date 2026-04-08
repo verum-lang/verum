@@ -1,0 +1,51 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L0
+// @tags: modules, imports, ambiguity, error
+// @expect-error: E602
+
+/// Import ambiguity detection.
+/// When the same name is imported from multiple modules,
+/// it must be detected as an error with helpful diagnostics.
+
+module module_a {
+    pub type Thing is {
+        id: Int
+    };
+
+    pub fn process() -> Int {
+        42
+    }
+}
+
+module module_b {
+    pub type Thing is {
+        name: Text
+    };
+
+    pub fn process() -> Text {
+        "hello"
+    }
+}
+
+module consumer {
+    // Both imports bring in 'Thing' - AMBIGUOUS
+    link cog.module_a.*;
+    link cog.module_b.*;
+
+    pub fn use_thing() {
+        // ERROR: 'Thing' is ambiguous
+        // Found in: module_a.Thing, module_b.Thing
+        let x = Thing { id: 1 };
+    }
+
+    pub fn call_process() {
+        // ERROR: 'process' is ambiguous
+        // Found in: module_a.process, module_b.process
+        let result = process();
+    }
+}
+
+fn main() -> Int {
+    0
+}

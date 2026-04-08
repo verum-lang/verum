@@ -1,0 +1,173 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, meta, compile-time
+
+// Simple meta function
+meta fn compile_time_compute() -> Int {
+    1 + 2 + 3
+}
+
+// Meta function with parameters
+meta fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+// Meta function with type parameters
+meta fn type_size<T>() -> Int {
+    T.size
+}
+
+// Meta function for type checking
+meta fn assert_clone<T: Clone>() {
+    // Compile-time assertion that T implements Clone
+}
+
+// Meta function for conditional compilation
+meta fn select_impl<T>() -> Type {
+    if is_numeric<T>() {
+        NumericImpl
+    } else {
+        GenericImpl
+    }
+}
+
+// Meta function with const generic
+meta fn array_type<T, const N: Int>() -> Type {
+    [T; N]
+}
+
+// Meta function with meta blocks
+meta fn compute_at_compile_time() -> Int {
+    meta {
+        let a = heavy_computation();
+        let b = another_computation();
+        a + b
+    }
+}
+
+// Meta function for reflection
+meta fn field_names<T>() -> List<Text> {
+    T.fields().map(|f| f.name()).collect()
+}
+
+// Meta function with where clause
+meta fn generic_meta<T>(x: T) -> T
+where type T: Clone + Default
+{
+    x
+}
+
+// NOTE: Multi-type generic expressions like `Foo<T, E>` in statement position
+// are parsed ambiguously because `<` is also a comparison operator.
+// The parser interprets `Result<T` as "Result less-than T", then `,` is unexpected.
+// Use type aliases or helper functions to work around this limitation.
+
+// Meta function for const evaluation
+meta fn const_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// Meta function with array operations
+meta fn make_array<T, const N: Int>(init: T) -> [T; N] {
+    [init; N]
+}
+
+// Meta function for attribute processing
+meta fn process_attributes(attrs: List<Attribute>) {
+    for attr in attrs {
+        match attr.name() {
+            "derive" => handle_derive(attr),
+            "repr" => handle_repr(attr),
+            _ => (),
+        }
+    }
+}
+
+// NOTE: `meta fn` inside implement blocks is NOT supported.
+// Use regular functions or const items instead.
+// implement<T> Container<T> {
+//     meta fn const_capacity() -> Int { 1024 }  // NOT SUPPORTED
+// }
+
+// Alternative: use const item in impl
+implement<T> Container<T> {
+    const CAPACITY: Int = 1024;
+}
+
+// Meta function with pattern matching
+meta fn type_category<T>() -> Category {
+    match type_info<T>() {
+        TypeInfo.Primitive => Category.Simple,
+        _ => Category.Other,
+    }
+}
+
+// Meta function for macro-like behavior
+meta fn stringify(expr: Expr) -> Text {
+    expr.to_string()
+}
+
+// Meta function with static assertions
+meta fn static_assert(condition: Bool, message: Text) {
+    if !condition {
+        compile_error(message);
+    }
+}
+
+// Meta function for layout computation
+meta fn compute_layout<T>() -> Layout {
+    Layout {
+        size: T.size,
+        align: T.alignment,
+    }
+}
+
+// Meta function combining with regular code
+fn runtime_fn() {
+    let meta_value = meta { compile_time_compute() };
+    use_value(meta_value);
+}
+
+// Meta function for generic bounds (single arg to avoid parse ambiguity)
+meta fn check_clone_bound<T>() -> Bool {
+    implements_clone<T>()
+}
+
+// Meta function with recursion limit
+meta fn fib(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
+}
+
+// Meta function for type manipulation
+meta fn unwrap_option<T: Option>() -> Type {
+    T.Inner
+}
+
+// Meta function with environment access
+meta fn env_var(name: Text) -> Maybe<Text> {
+    std.env.var(name)
+}
+
+// Meta function with async
+meta async fn async_meta_fn() {
+    compute().await
+}
+
+// Meta function with visibility
+pub meta fn public_meta() -> Int {
+    42
+}
+
+// NOTE: Implement blocks inside meta function bodies are NOT supported.
+// NOTE: Multi-type generic expressions (foo<A, B>()) in statement position
+// are parsed ambiguously. Use type aliases or restructure the code.
+// NOTE: meta fn is NOT supported inside implement blocks.

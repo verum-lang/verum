@@ -1,0 +1,25 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, exit-code
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Exit code consistency: main returns 0 on success
+
+fn compute() -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 1000 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    let result = compute();
+    assert_eq(result, 500500);
+    print("diff_exit_codes: ok");
+    0
+}

@@ -1,0 +1,79 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, select, channels, concurrency
+// @expected-exit: 0
+
+// Test: channel operations and multi-producer pattern.
+// Tests basic channel send/recv and thread coordination.
+
+fn sender(value: Int) -> Int {
+    // Each sender computes and returns a value
+    value * value
+}
+
+fn main() -> Int {
+    // Test 1: basic channel create and properties
+    let ch = Channel.new(8);
+    ch.send(42);
+    match ch.recv() {
+        Some(got) => {
+            if (got != 42) {
+                print(f"FAIL test1: got={got}, expected=42");
+                return 1;
+            }
+        }
+        None => { print("FAIL test1: None"); return 1; }
+    }
+
+    // Test 2: multiple sends and receives
+    ch.send(10);
+    ch.send(20);
+    ch.send(30);
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    match ch.recv() { Some(v) => { a = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { b = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { c = v; } None => { return 1; } }
+    if (a != 10) {
+        print(f"FAIL test2a: a={a}, expected=10");
+        return 1;
+    }
+    if (b != 20) {
+        print(f"FAIL test2b: b={b}, expected=20");
+        return 1;
+    }
+    if (c != 30) {
+        print(f"FAIL test2c: c={c}, expected=30");
+        return 1;
+    }
+
+    // Test 3: two producer threads, collect results
+    let p1 = spawn sender(5);
+    let p2 = spawn sender(7);
+    let r1 = p1.await;
+    let r2 = p2.await;
+    // 25 + 49 = 74
+    if (r1 + r2 != 74) {
+        print(f"FAIL test3: sum={r1 + r2}, expected=74");
+        return 1;
+    }
+
+    // Test 4: channel close
+    let ch2 = Channel.new(4);
+    ch2.send(100);
+    ch2.close();
+    match ch2.recv() {
+        Some(v) => {
+            if (v != 100) {
+                print(f"FAIL test4: v={v}, expected=100");
+                return 1;
+            }
+        }
+        None => { print("FAIL test4: None"); return 1; }
+    }
+
+    print("884_select: PASS");
+    0
+}

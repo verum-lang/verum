@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, strings, error
+// @description: Test unterminated string literal detection
+// @expected-error: E001
+
+fn test_unterminated() {
+    let s = "hello world;
+}

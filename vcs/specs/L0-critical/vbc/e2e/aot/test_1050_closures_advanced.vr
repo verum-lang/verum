@@ -1,0 +1,159 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: closures, higher-order, functional, capture
+// @description: Advanced closure patterns - returning closures, closures as struct fields
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * n }
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn test_make_adder() -> Int {
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    if add5(3) != 8 {
+        print(f"FAIL make_adder: add5(3) expected 8, got {add5(3)}");
+        return 1;
+    }
+    if add10(7) != 17 {
+        print(f"FAIL make_adder: add10(7) expected 17, got {add10(7)}");
+        return 1;
+    }
+    print("  make_adder: OK");
+    0
+}
+
+fn test_compose() -> Int {
+    let add3 = make_adder(3);
+    let times2 = make_multiplier(2);
+    let add3_then_times2 = compose(times2, add3);
+    // (5 + 3) * 2 = 16
+    let result = add3_then_times2(5);
+    if result != 16 {
+        print(f"FAIL compose: expected 16, got {result}");
+        return 1;
+    }
+    print("  compose: OK");
+    0
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn test_apply_twice() -> Int {
+    let double = make_multiplier(2);
+    let result = apply_twice(double, 3);
+    // 3 * 2 = 6, 6 * 2 = 12
+    if result != 12 {
+        print(f"FAIL apply_twice: expected 12, got {result}");
+        return 1;
+    }
+    print("  apply_twice: OK");
+    0
+}
+
+fn map_list(items: &List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(items: &List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            result.push(items[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_list(items: &List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_map_filter_fold() -> Int {
+    let mut data = List.new();
+    data.push(1);
+    data.push(2);
+    data.push(3);
+    data.push(4);
+    data.push(5);
+
+    // Map: square each
+    let squared = map_list(&data, |x: Int| -> Int { x * x });
+    // Filter: keep > 5
+    let big = filter_list(&squared, |x: Int| -> Bool { x > 5 });
+    // Fold: sum
+    let total = fold_list(&big, 0, |acc: Int, x: Int| -> Int { acc + x });
+    // 9 + 16 + 25 = 50
+    if total != 50 {
+        print(f"FAIL map_filter_fold: expected 50, got {total}");
+        return 1;
+    }
+    print("  map_filter_fold: OK");
+    0
+}
+
+fn test_closure_in_loop() -> Int {
+    let mut fns = List.new();
+    let mut i = 0;
+    while i < 5 {
+        let n = i;
+        fns.push(make_adder(n));
+        i = i + 1;
+    }
+
+    let mut sum = 0;
+    let mut j = 0;
+    while j < fns.len() {
+        let f = fns[j];
+        sum = sum + f(10);
+        j = j + 1;
+    }
+    // (10+0) + (10+1) + (10+2) + (10+3) + (10+4) = 60
+    if sum != 60 {
+        print(f"FAIL closure_in_loop: expected 60, got {sum}");
+        return 1;
+    }
+    print("  closure_in_loop: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Advanced Closure Tests:");
+    let mut failures = 0;
+    failures = failures + test_make_adder();
+    failures = failures + test_compose();
+    failures = failures + test_apply_twice();
+    failures = failures + test_map_filter_fold();
+    failures = failures + test_closure_in_loop();
+
+    if failures == 0 {
+        print("All advanced closure tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

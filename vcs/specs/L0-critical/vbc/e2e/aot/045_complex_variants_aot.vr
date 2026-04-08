@@ -1,0 +1,162 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, variants, nested, complex, type-system
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT complex nested variant types
+
+// JSON-like value type
+type Value is
+    VNull
+  | VBool(Bool)
+  | VInt(Int)
+  | VPair { first: Value, second: Value };
+
+fn value_is_null(v: Value) -> Bool {
+    v is VNull
+}
+
+fn value_to_int(v: Value, default: Int) -> Int {
+    match v {
+        VInt(n) => n,
+        VBool(b) => if b { 1 } else { 0 },
+        _ => default,
+    }
+}
+
+fn value_eq(a: Value, b: Value) -> Bool {
+    match a {
+        VNull => b is VNull,
+        VBool(ab) => {
+            match b {
+                VBool(bb) => ab == bb,
+                _ => false,
+            }
+        },
+        VInt(an) => {
+            match b {
+                VInt(bn) => an == bn,
+                _ => false,
+            }
+        },
+        VPair { first: af, second: as2 } => {
+            match b {
+                VPair { first: bf, second: bs } => value_eq(af, bf) && value_eq(as2, bs),
+                _ => false,
+            }
+        },
+    }
+}
+
+fn value_depth(v: Value) -> Int {
+    match v {
+        VNull => 0,
+        VBool(_) => 0,
+        VInt(_) => 0,
+        VPair { first, second } => {
+            let fd = value_depth(first);
+            let sd = value_depth(second);
+            if fd > sd { 1 + fd } else { 1 + sd }
+        },
+    }
+}
+
+// Count number of leaf values (non-pair nodes)
+fn value_count_leaves(v: Value) -> Int {
+    match v {
+        VNull => 1,
+        VBool(_) => 1,
+        VInt(_) => 1,
+        VPair { first, second } => value_count_leaves(first) + value_count_leaves(second),
+    }
+}
+
+// Sum all integers in the value tree
+fn value_sum_ints(v: Value) -> Int {
+    match v {
+        VNull => 0,
+        VBool(b) => if b { 1 } else { 0 },
+        VInt(n) => n,
+        VPair { first, second } => value_sum_ints(first) + value_sum_ints(second),
+    }
+}
+
+// Map function over all ints in value
+fn value_map_ints(v: Value, f: fn(Int) -> Int) -> Value {
+    match v {
+        VNull => VNull,
+        VBool(b) => VBool(b),
+        VInt(n) => VInt(f(n)),
+        VPair { first, second } => {
+            VPair {
+                first: value_map_ints(first, f),
+                second: value_map_ints(second, f),
+            }
+        },
+    }
+}
+
+fn main() -> Int {
+    // Basic values
+    assert(value_is_null(VNull));
+    assert(!value_is_null(VInt(5)));
+    assert_eq(value_to_int(VInt(42), 0), 42);
+    assert_eq(value_to_int(VBool(true), 0), 1);
+    assert_eq(value_to_int(VNull, -1), -1);
+
+    // Equality
+    assert(value_eq(VNull, VNull));
+    assert(value_eq(VInt(5), VInt(5)));
+    assert(!value_eq(VInt(5), VInt(6)));
+    assert(value_eq(VBool(true), VBool(true)));
+    assert(!value_eq(VBool(true), VBool(false)));
+    assert(!value_eq(VNull, VInt(0)));
+
+    // Pairs
+    let pair1 = VPair { first: VInt(1), second: VInt(2) };
+    let pair2 = VPair { first: VInt(1), second: VInt(2) };
+    let pair3 = VPair { first: VInt(1), second: VInt(3) };
+    assert(value_eq(pair1, pair2));
+    assert(!value_eq(pair1, pair3));
+
+    // Depth
+    assert_eq(value_depth(VNull), 0);
+    assert_eq(value_depth(VInt(5)), 0);
+    assert_eq(value_depth(pair1), 1);
+
+    let nested = VPair {
+        first: VPair { first: VInt(1), second: VInt(2) },
+        second: VInt(3),
+    };
+    assert_eq(value_depth(nested), 2);
+
+    let deep = VPair {
+        first: VPair {
+            first: VPair { first: VInt(1), second: VNull },
+            second: VBool(true),
+        },
+        second: VInt(10),
+    };
+    assert_eq(value_depth(deep), 3);
+
+    // Count leaves
+    assert_eq(value_count_leaves(VInt(5)), 1);
+    assert_eq(value_count_leaves(pair1), 2);
+    assert_eq(value_count_leaves(nested), 3);
+    assert_eq(value_count_leaves(deep), 4);
+
+    // Sum ints
+    assert_eq(value_sum_ints(pair1), 3);  // 1 + 2
+    assert_eq(value_sum_ints(nested), 6);  // 1 + 2 + 3
+    assert_eq(value_sum_ints(deep), 12);   // 1 + 0 + 1(true) + 10
+
+    // Map ints: double all integers
+    let doubled = value_map_ints(pair1, |x| x * 2);
+    assert(value_eq(doubled, VPair { first: VInt(2), second: VInt(4) }));
+
+    let inc_all = value_map_ints(nested, |x| x + 10);
+    assert_eq(value_sum_ints(inc_all), 36);  // (1+10)+(2+10)+(3+10) = 36
+
+    0
+}

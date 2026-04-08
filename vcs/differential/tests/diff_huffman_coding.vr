@@ -1,0 +1,140 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, huffman, coding, compression, greedy
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Huffman coding: compute optimal code lengths given frequencies
+// Simplified: simulate Huffman tree building with a priority queue
+// Returns total weighted path length (= compressed size in bits)
+
+// Find index of minimum value in freqs (among valid entries where valid[i] = 1)
+fn find_min(freqs: Arr8, valid: Arr8, n: Int) -> Int {
+    let mut min_idx = -1;
+    let mut min_val = 999999;
+    let mut i = 0;
+    while i < n {
+        if get(valid, i) == 1 {
+            if get(freqs, i) < min_val {
+                min_val = get(freqs, i);
+                min_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+    min_idx
+}
+
+// Compute total Huffman cost: weighted path length
+// Uses greedy merging: repeatedly merge two smallest frequencies
+fn huffman_cost(freqs: Arr8, n: Int) -> Int {
+    if n <= 1 { return 0; }
+
+    let mut f = freqs;
+    let mut valid = Arr8 { d0: 1, d1: 1, d2: 1, d3: 1, d4: 1, d5: 1, d6: 1, d7: 1 };
+    // Only first n are valid
+    let mut i = n;
+    while i < 8 { valid = set(valid, i, 0); i = i + 1; }
+
+    let mut total_cost = 0;
+    let mut remaining = n;
+
+    while remaining > 1 {
+        // Find two minimums
+        let m1 = find_min(f, valid, 8);
+        let v1 = get(f, m1);
+        valid = set(valid, m1, 0);
+
+        let m2 = find_min(f, valid, 8);
+        let v2 = get(f, m2);
+        valid = set(valid, m2, 0);
+
+        // Merge: combined frequency goes into m1's slot
+        let combined = v1 + v2;
+        total_cost = total_cost + combined;
+        f = set(f, m1, combined);
+        valid = set(valid, m1, 1);
+
+        remaining = remaining - 1;
+    }
+
+    total_cost
+}
+
+// Shannon entropy lower bound check: sum(freq) * log2 is a lower bound
+// We can't compute log2 easily, but we can verify properties
+
+// Compute total frequency
+fn total_freq(freqs: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n { sum = sum + get(freqs, i); i = i + 1; }
+    sum
+}
+
+fn main() -> Int {
+    // Example: frequencies [5, 9, 12, 13, 16, 45]
+    // Known Huffman cost: 5+9=14, 12+13=25, 14+16=30, 25+30=55, 45+55=100
+    // Total cost = 14+25+30+55+100 = 224
+    let f1 = Arr8 { d0: 5, d1: 9, d2: 12, d3: 13, d4: 16, d5: 45, d6: 0, d7: 0 };
+    assert_eq(huffman_cost(f1, 6), 224);
+
+    // Equal frequencies: [10, 10, 10, 10] → cost should be 10+10=20, 10+10=20, 20+20=40 → 80
+    let f2 = Arr8 { d0: 10, d1: 10, d2: 10, d3: 10, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(huffman_cost(f2, 4), 80);
+
+    // Two symbols: [1, 1] → cost = 1+1 = 2
+    let f3 = Arr8 { d0: 1, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(huffman_cost(f3, 2), 2);
+
+    // Three symbols: [1, 2, 3] → 1+2=3, 3+3=6 → cost = 3+6 = 9
+    let f4 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(huffman_cost(f4, 3), 9);
+
+    // Single symbol: cost = 0
+    let f5 = Arr8 { d0: 100, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(huffman_cost(f5, 1), 0);
+
+    // Fibonacci-like frequencies: [1, 1, 2, 3, 5]
+    // 1+1=2, 2+2=4, 3+4=7, 5+7=12 → cost = 2+4+7+12 = 25
+    let f6 = Arr8 { d0: 1, d1: 1, d2: 2, d3: 3, d4: 5, d5: 0, d6: 0, d7: 0 };
+    assert_eq(huffman_cost(f6, 5), 25);
+
+    // Property: cost >= total_freq for n >= 2
+    // (because every symbol needs at least 1 bit)
+    let tf1 = total_freq(f1, 6);
+    assert(huffman_cost(f1, 6) >= tf1);
+
+    let tf2 = total_freq(f2, 4);
+    assert(huffman_cost(f2, 4) >= tf2);
+
+    // Highly skewed: [1, 1, 1, 1, 1, 100]
+    // Optimal: group small ones first
+    let f7 = Arr8 { d0: 1, d1: 1, d2: 1, d3: 1, d4: 1, d5: 100, d6: 0, d7: 0 };
+    let c7 = huffman_cost(f7, 6);
+    // 1+1=2, 1+1=2, 1+2=3, 2+3=5, 5+100=105
+    // cost = 2+2+3+5+105 = 117
+    assert_eq(c7, 117);
+
+    print("DIFF_OK: huffman_coding");
+    0
+}

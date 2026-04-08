@@ -1,0 +1,205 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, error-handling, result, try-recover, pipeline
+// @timeout: 5000
+// @expect: pass
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies Result types, ? operator, and try/recover blocks through the full pipeline
+
+// =============================================================================
+// Result type construction
+// =============================================================================
+
+type AppError is NotFound(Text) | InvalidInput(Text) | Timeout;
+
+fn ok_value(n: Int) -> Result<Int, Text> {
+    Ok(n)
+}
+
+fn err_value(msg: Text) -> Result<Int, Text> {
+    Err(msg)
+}
+
+@test
+fn test_create_ok() {
+    let r = ok_value(42);
+    assert(r is Ok(_));
+    assert(!(r is Err(_)));
+}
+
+@test
+fn test_create_err() {
+    let r = err_value("fail");
+    assert(r is Err(_));
+    assert(!(r is Ok(_)));
+}
+
+// =============================================================================
+// Result matching
+// =============================================================================
+
+fn result_to_int(r: Result<Int, Text>) -> Int {
+    match r {
+        Ok(v) => v,
+        Err(_) => -1
+    }
+}
+
+fn result_message(r: Result<Int, Text>) -> Text {
+    match r {
+        Ok(v) => "success",
+        Err(e) => e
+    }
+}
+
+@test
+fn test_match_ok() {
+    assert_eq(result_to_int(Ok(42)), 42);
+    assert_eq(result_to_int(Ok(0)), 0);
+}
+
+@test
+fn test_match_err() {
+    assert_eq(result_to_int(Err("fail")), -1);
+    assert_eq(result_message(Err("not found")), "not found");
+}
+
+@test
+fn test_match_result_message() {
+    assert_eq(result_message(Ok(42)), "success");
+    assert_eq(result_message(Err("broken")), "broken");
+}
+
+// =============================================================================
+// Question mark operator propagation
+// =============================================================================
+
+fn parse_positive(n: Int) -> Result<Int, Text> {
+    if n < 0 {
+        Err("negative")
+    } else {
+        Ok(n)
+    }
+}
+
+fn double_positive(n: Int) -> Result<Int, Text> {
+    let val = parse_positive(n)?;
+    Ok(val * 2)
+}
+
+fn triple_positive(n: Int) -> Result<Int, Text> {
+    let val = parse_positive(n)?;
+    let doubled = double_positive(n)?;
+    Ok(val + doubled)
+}
+
+@test
+fn test_question_mark_ok_path() {
+    let r = double_positive(5);
+    assert_eq(result_to_int(r), 10);
+}
+
+@test
+fn test_question_mark_err_path() {
+    let r = double_positive(-3);
+    assert(r is Err(_));
+    assert_eq(result_message(r), "negative");
+}
+
+@test
+fn test_chained_question_mark() {
+    let r = triple_positive(4);
+    // val=4, doubled=8, result=12
+    assert_eq(result_to_int(r), 12);
+
+    let r2 = triple_positive(-1);
+    assert(r2 is Err(_));
+}
+
+// =============================================================================
+// Try/recover blocks
+// =============================================================================
+
+@test
+fn test_try_recover_ok() {
+    let result = try {
+        let x = parse_positive(10)?;
+        x * 3
+    } recover {
+        err => -1
+    };
+    assert_eq(result, 30);
+}
+
+@test
+fn test_try_recover_err() {
+    let result = try {
+        let x = parse_positive(-5)?;
+        x * 3
+    } recover {
+        err => -1
+    };
+    assert_eq(result, -1);
+}
+
+@test
+fn test_try_recover_multiple_steps() {
+    let result = try {
+        let a = parse_positive(5)?;
+        let b = parse_positive(3)?;
+        a + b
+    } recover {
+        err => 0
+    };
+    assert_eq(result, 8);
+}
+
+@test
+fn test_try_recover_first_fails() {
+    let result = try {
+        let a = parse_positive(-1)?;
+        let b = parse_positive(3)?;
+        a + b
+    } recover {
+        err => -99
+    };
+    assert_eq(result, -99);
+}
+
+// =============================================================================
+// Nested error handling
+// =============================================================================
+
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn compute_ratio(a: Int, b: Int, c: Int) -> Result<Int, Text> {
+    let ab = safe_divide(a, b)?;
+    let result = safe_divide(ab, c)?;
+    Ok(result)
+}
+
+@test
+fn test_nested_error_ok() {
+    let r = compute_ratio(100, 5, 2);
+    assert_eq(result_to_int(r), 10);
+}
+
+@test
+fn test_nested_error_first_fail() {
+    let r = compute_ratio(100, 0, 2);
+    assert(r is Err(_));
+}
+
+@test
+fn test_nested_error_second_fail() {
+    let r = compute_ratio(100, 5, 0);
+    assert(r is Err(_));
+}

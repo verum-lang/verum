@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, nested
+
+/// Nested refinements -- refinement types composed inside other types
+/// and refinement constraints that reference nested fields.
+
+type Positive is Int{> 0};
+type NonEmpty is Text{len(it) > 0};
+type Byte is Int{>= 0, < 256};
+
+// Record with refined fields
+type Color is {
+    r: Byte,
+    g: Byte,
+    b: Byte,
+    a: Byte,
+};
+
+// Record where one field depends on another
+type Page is {
+    items: List<Text>,
+    page_size: Positive,
+    page_num: Int{>= 0},
+};
+
+// Nested refinement: Maybe of refined type
+type MaybePositive is Maybe<Positive>;
+
+// Tuple of refined types
+type BoundedRange is (Int{>= 0}, Int{>= 0});
+
+// List of records with refined fields
+type Palette is List<Color>;
+
+// Nested sigma: struct containing sigma-typed field
+type NamedValue is {
+    name: NonEmpty,
+    value: v: Int where v >= 0 && v <= 1000,
+};
+
+// Double nesting: list of maybe-positive
+type SparsePositives is List<MaybePositive>;
+
+// Record containing a list of refined elements
+type Histogram is {
+    bins: List<Int{>= 0}>,
+    total: Int{>= 0},
+};
+
+// Variant with refined payloads
+type Measurement is
+    Temperature(Float{>= -273.15})
+  | Pressure(Float{> 0.0})
+  | Humidity(Float{>= 0.0, <= 100.0});
+
+fn make_color(r: Int, g: Int, b: Int) -> Maybe<Color> {
+    if r >= 0 && r < 256 && g >= 0 && g < 256 && b >= 0 && b < 256 {
+        Some(Color { r, g, b, a: 255 })
+    } else {
+        None
+    }
+}
+
+fn histogram_add(h: Histogram, value: Int{>= 0}) -> Histogram {
+    let mut bins = h.bins;
+    bins.push(value);
+    Histogram { bins, total: h.total + value }
+}
+
+fn describe(m: Measurement) -> Text {
+    match m {
+        Temperature(t) => f"{t} K",
+        Pressure(p) => f"{p} Pa",
+        Humidity(h) => f"{h}%",
+    }
+}
+
+fn main() {
+    let red = Color { r: 255, g: 0, b: 0, a: 255 };
+    assert(red.r == 255);
+
+    let page = Page { items: ["a", "b", "c"], page_size: 10, page_num: 0 };
+    assert(page.page_size > 0);
+
+    let mp: MaybePositive = Some(42);
+    assert(mp == Some(42));
+
+    let nv = NamedValue { name: "score", value: 100 };
+    assert(nv.value <= 1000);
+
+    let h = Histogram { bins: [], total: 0 };
+    let h2 = histogram_add(h, 5);
+    assert(h2.total == 5);
+
+    let temp = Temperature(300.0);
+    assert(describe(temp) == "300 K");
+}

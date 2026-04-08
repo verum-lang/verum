@@ -1,0 +1,206 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, huffman, encoding, compression
+// @timeout: 30000
+
+// Huffman encoding simulation: frequency counting and code length estimation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Count frequency of each symbol (symbols 0..7) in data of length n
+fn count_freq(data: Arr8, n: Int) -> Arr8 {
+    let mut freq = zeros();
+    let mut i = 0;
+    while i < n {
+        let sym = get8(data, i);
+        if sym >= 0 {
+            if sym < 8 {
+                freq = set8(freq, sym, get8(freq, sym) + 1);
+            }
+        }
+        i = i + 1;
+    }
+    freq
+}
+
+// Find index of minimum non-zero value in arr (ignoring already-merged entries marked -1)
+fn find_min_idx(arr: Arr8, n: Int) -> Int {
+    let mut min_idx = -1;
+    let mut min_val = 999999;
+    let mut i = 0;
+    while i < n {
+        let v = get8(arr, i);
+        if v > 0 {
+            if v < min_val {
+                min_val = v;
+                min_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+    min_idx
+}
+
+// Simulate Huffman tree building: iteratively merge two smallest frequencies
+// Returns the number of merge steps (= number of symbols - 1)
+fn huffman_merges(freq: Arr8, n_symbols: Int) -> Int {
+    let mut f = freq;
+    let mut merges = 0;
+    let mut remaining = n_symbols;
+
+    while remaining > 1 {
+        // Find two smallest
+        let i1 = find_min_idx(f, 8);
+        if i1 < 0 { return merges; }
+        let v1 = get8(f, i1);
+        f = set8(f, i1, 0); // remove
+
+        let i2 = find_min_idx(f, 8);
+        if i2 < 0 { return merges; }
+        let v2 = get8(f, i2);
+
+        // Merge: replace second with sum
+        f = set8(f, i2, v1 + v2);
+        merges = merges + 1;
+        remaining = remaining - 1;
+    }
+    merges
+}
+
+// Shannon entropy approximation (scaled by 100)
+// H = -sum(p_i * log2(p_i)) ≈ uses integer approximation
+// log2(n) approximation for small n
+fn log2_approx(n: Int) -> Int {
+    if n <= 1 { return 0; }
+    if n <= 2 { return 100; } // 1.0 * 100
+    if n <= 3 { return 158; } // 1.58 * 100
+    if n <= 4 { return 200; } // 2.0 * 100
+    if n <= 5 { return 232; }
+    if n <= 6 { return 258; }
+    if n <= 7 { return 280; }
+    if n <= 8 { return 300; }
+    if n <= 16 { return 400; }
+    500
+}
+
+// Compute weighted path length (total bits needed)
+// For a balanced code of n symbols, each symbol needs ceil(log2(n)) bits
+fn balanced_bits(freq: Arr8, n_symbols: Int, total: Int) -> Int {
+    let bits_per = log2_approx(n_symbols);
+    total * bits_per / 100
+}
+
+// Count non-zero frequencies
+fn count_symbols(freq: Arr8) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        if get8(freq, i) > 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Sum all frequencies
+fn total_freq(freq: Arr8) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < 8 {
+        s = s + get8(freq, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn test_frequency_count() -> Int {
+    // Data: [0, 1, 0, 2, 0, 1, 0, 0]
+    let data = Arr8 { v0: 0, v1: 1, v2: 0, v3: 2, v4: 0, v5: 1, v6: 0, v7: 0 };
+    let freq = count_freq(data, 8);
+    assert_eq(get8(freq, 0), 5); // symbol 0 appears 5 times
+    assert_eq(get8(freq, 1), 2); // symbol 1 appears 2 times
+    assert_eq(get8(freq, 2), 1); // symbol 2 appears 1 time
+    assert_eq(total_freq(freq), 8);
+    assert_eq(count_symbols(freq), 3);
+    1
+}
+
+fn test_uniform_freq() -> Int {
+    // All symbols have same frequency
+    let freq = Arr8 { v0: 4, v1: 4, v2: 4, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_symbols(freq), 4);
+    assert_eq(total_freq(freq), 16);
+    // 4 symbols → 3 merges
+    assert_eq(huffman_merges(freq, 4), 3);
+    1
+}
+
+fn test_skewed_freq() -> Int {
+    // Highly skewed: one dominant symbol
+    let freq = Arr8 { v0: 100, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_symbols(freq), 3);
+    assert_eq(huffman_merges(freq, 3), 2);
+    1
+}
+
+fn test_single_symbol() -> Int {
+    let freq = Arr8 { v0: 10, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_symbols(freq), 1);
+    assert_eq(huffman_merges(freq, 1), 0);
+    1
+}
+
+fn test_two_symbols() -> Int {
+    let freq = Arr8 { v0: 3, v1: 7, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(huffman_merges(freq, 2), 1);
+    // Balanced bits for 2 symbols: each needs 1 bit = 10 total bits
+    assert_eq(balanced_bits(freq, 2, 10), 10);
+    1
+}
+
+fn test_balanced_code_lengths() -> Int {
+    // 8 symbols, uniform → each needs 3 bits
+    let freq = Arr8 { v0: 1, v1: 1, v2: 1, v3: 1, v4: 1, v5: 1, v6: 1, v7: 1 };
+    assert_eq(balanced_bits(freq, 8, 8), 24); // 8 * 3 = 24
+    1
+}
+
+fn test_merge_order() -> Int {
+    // Frequencies: [1, 2, 3, 4] — known Huffman tree structure
+    // Merge 1+2=3, 3+3=6, 4+6=10 → 3 merges
+    let freq = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(huffman_merges(freq, 4), 3);
+    1
+}
+
+fn main() -> Int {
+    test_frequency_count();
+    test_uniform_freq();
+    test_skewed_freq();
+    test_single_symbol();
+    test_two_symbols();
+    test_balanced_code_lengths();
+    test_merge_order();
+    print("[OK] 512_huffman_aot");
+    0
+}

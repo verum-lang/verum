@@ -1,0 +1,52 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/darwin/mod.vr - macOS Platform Tests Module
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, darwin, macos, platform
+// @description: Root test module for macOS-specific V-LLSI implementation.
+//
+// Test Categories:
+// - libsystem_test.vr : BSD/POSIX functions via libSystem FFI
+// - mach_test.vr      : Mach kernel primitives
+// - errno_test.vr     : BSD errno constants
+// - tls_test.vr       : Thread-local storage and context system
+// - io_test.vr        : Completion-based I/O with kqueue
+// - thread_test.vr    : Thread creation and synchronization
+// - time_test.vr      : Time and duration utilities
+//
+// CRITICAL: macOS does NOT support stable syscall numbers.
+// All system calls MUST go through libSystem.B.dylib.
+//
+// Platform: macOS (x86_64, arm64)
+// Layer: 0 (V-LLSI Kernel)
+// =============================================================================
+
+@cfg(target_os = "macos")
+module test.stdlib.sys.darwin;
+
+// =============================================================================
+// Test Module Exports
+// =============================================================================
+
+/// libSystem FFI tests
+public module libsystem_test;
+
+/// Mach kernel tests
+public module mach_test;
+
+/// BSD errno tests
+public module errno_test;
+
+/// TLS and context tests
+public module tls_test;
+
+/// kqueue I/O tests
+public module io_test;
+
+/// Thread creation tests
+public module thread_test;
+
+/// Time and clock tests
+public module time_test;

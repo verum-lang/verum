@@ -1,0 +1,187 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, while, loops
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: while loops — counting, nested, early termination via condition
+
+// =============================================================================
+// Basic counting loops
+// =============================================================================
+
+fn test_count_up() {
+    let mut i = 0;
+    let mut sum = 0;
+    while i < 10 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    // 0+1+2+...+9 = 45
+    assert_eq(sum, 45);
+    assert_eq(i, 10);
+}
+
+fn test_count_down() {
+    let mut i = 10;
+    let mut count = 0;
+    while i > 0 {
+        count = count + 1;
+        i = i - 1;
+    }
+    assert_eq(count, 10);
+    assert_eq(i, 0);
+}
+
+fn test_count_by_twos() {
+    let mut i = 0;
+    let mut count = 0;
+    while i < 20 {
+        count = count + 1;
+        i = i + 2;
+    }
+    assert_eq(count, 10);
+    assert_eq(i, 20);
+}
+
+// =============================================================================
+// Loop with accumulation
+// =============================================================================
+
+fn test_factorial_loop() {
+    let mut n = 10;
+    let mut fact = 1;
+    while n > 1 {
+        fact = fact * n;
+        n = n - 1;
+    }
+    assert_eq(fact, 3628800);
+}
+
+fn test_power_loop() {
+    // 2^16 = 65536
+    let mut result = 1;
+    let mut i = 0;
+    while i < 16 {
+        result = result * 2;
+        i = i + 1;
+    }
+    assert_eq(result, 65536);
+}
+
+fn test_sum_of_squares() {
+    let mut i = 1;
+    let mut total = 0;
+    while i <= 10 {
+        total = total + i * i;
+        i = i + 1;
+    }
+    // 1+4+9+16+25+36+49+64+81+100 = 385
+    assert_eq(total, 385);
+}
+
+// =============================================================================
+// Conditional logic inside loops
+// =============================================================================
+
+fn test_even_sum() {
+    let mut i = 0;
+    let mut even_sum = 0;
+    while i < 20 {
+        if i % 2 == 0 {
+            even_sum = even_sum + i;
+        }
+        i = i + 1;
+    }
+    // 0+2+4+6+8+10+12+14+16+18 = 90
+    assert_eq(even_sum, 90);
+}
+
+fn test_count_divisible() {
+    // Count numbers 1..100 divisible by 7
+    let mut i = 1;
+    let mut count = 0;
+    while i <= 100 {
+        if i % 7 == 0 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    // 7,14,21,28,35,42,49,56,63,70,77,84,91,98 = 14
+    assert_eq(count, 14);
+}
+
+// =============================================================================
+// Early termination via condition
+// =============================================================================
+
+fn test_early_termination() {
+    // Find first power of 2 greater than 1000
+    let mut val = 1;
+    while val <= 1000 {
+        val = val * 2;
+    }
+    assert_eq(val, 1024);
+}
+
+fn test_search_loop() {
+    // Find first number whose square > 50
+    let mut n = 1;
+    while n * n <= 50 {
+        n = n + 1;
+    }
+    // 7*7=49<=50, 8*8=64>50
+    assert_eq(n, 8);
+}
+
+// =============================================================================
+// Zero-iteration and single-iteration loops
+// =============================================================================
+
+fn test_zero_iteration() {
+    let mut count = 0;
+    while false {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+fn test_single_iteration() {
+    let mut count = 0;
+    let mut done = false;
+    while !done {
+        count = count + 1;
+        done = true;
+    }
+    assert_eq(count, 1);
+}
+
+fn test_gcd_loop() {
+    let mut a = 48;
+    let mut b = 18;
+    while b != 0 {
+        let temp = b;
+        b = a % b;
+        a = temp;
+    }
+    assert_eq(a, 6);
+}
+
+fn main() -> Int {
+    test_count_up();
+    test_count_down();
+    test_count_by_twos();
+    test_factorial_loop();
+    test_power_loop();
+    test_sum_of_squares();
+    test_even_sum();
+    test_count_divisible();
+    test_early_termination();
+    test_search_loop();
+    test_zero_iteration();
+    test_single_iteration();
+    test_gcd_loop();
+    print("[OK] 216_interp_while_loops");
+    0
+}

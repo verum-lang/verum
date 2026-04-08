@@ -1,0 +1,187 @@
+// Generic type edge cases
+// Tests generic types, constraints, and inference
+
+use verum_core.base.{List, Maybe, Map, Set}
+
+// Basic generic function
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Multiple type parameters
+fn pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+// Generic with constraint
+fn compare<T: Ord>(a: T, b: T) -> Bool {
+    a < b
+}
+
+// Generic with multiple constraints
+fn process<T: Clone + Debug + Eq>(x: T) -> T {
+    let cloned = x.clone();
+    debug_print(cloned);
+    cloned
+}
+
+// Generic struct
+type Container<T> is {
+    value: T,
+};
+
+implement<T> Container<T> {
+    fn new(value: T) -> Self {
+        Container { value }
+    }
+
+    fn get(self) -> T {
+        self.value
+    }
+
+    fn map<U>(self, f: function(T) -> U) -> Container<U> {
+        Container { value: f(self.value) }
+    }
+}
+
+// Generic enum
+type Result<T, E> is
+    Ok(T) |
+    Err(E);
+
+implement<T, E> Result<T, E> {
+    fn map<U>(self, f: function(T) -> U) -> Result<U, E> {
+        match self {
+            Ok(x) => Ok(f(x)),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn and_then<U>(self, f: function(T) -> Result<U, E>) -> Result<U, E> {
+        match self {
+            Ok(x) => f(x),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+// Higher-kinded type simulation
+protocol Functor<F<_>> {
+    fn map<A, B>(self: F<A>, f: function(A) -> B) -> F<B>;
+}
+
+implement Functor<List<_>> for List {
+    fn map<A, B>(self: List<A>, f: function(A) -> B) -> List<B> {
+        let mut result = [];
+        for item in self {
+            result.push(f(item));
+        }
+        result
+    }
+}
+
+// Associated types
+protocol Iterator {
+    type Item;
+    fn next(self: &mut Self) -> Maybe<Self.Item>;
+}
+
+type Counter is {
+    current: Int,
+    max: Int,
+};
+
+implement Iterator for Counter {
+    type Item = Int;
+
+    fn next(self: &mut Self) -> Maybe<Int> {
+        if self.current < self.max {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+}
+
+// Generic with where clause
+fn complex_constraint<T, U>(x: T, y: U) -> Int
+where
+    type T: Clone + Into<Int>,
+    type U: Clone + Into<Int>
+{
+    x.into() + y.into()
+}
+
+// Phantom type
+type Phantom<T> is {
+    _marker: PhantomData<T>,
+    value: Int,
+};
+
+// Generic bounds propagation
+fn nested_generic<T: Clone>(x: List<T>) -> List<T> {
+    let mut result = [];
+    for item in x {
+        result.push(item.clone());
+    }
+    result
+}
+
+// Default type parameter
+type WithDefault<T = Int> is {
+    value: T,
+};
+
+// Const generics
+type FixedArray<T, N: meta usize> is {
+    data: [T; N],
+};
+
+implement<T, N: meta usize> FixedArray<T, N> {
+    fn len(self) -> Int {
+        N
+    }
+
+    fn get(self, idx: Int) -> Maybe<&T> {
+        if idx >= 0 && idx < N {
+            Some(&self.data[idx])
+        } else {
+            None
+        }
+    }
+}
+
+// Generic impl blocks
+implement<T: Eq> List<T> {
+    fn contains(self, item: T) -> Bool {
+        for x in self {
+            if x == item {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn main() {
+    // Basic generics
+    let x = identity(42);
+    let y = identity("hello");
+
+    // Pairs
+    let p = pair(1, "two");
+
+    // Container
+    let c = Container.new(10);
+    let doubled = c.map(|x| x * 2);
+
+    // Result
+    let r: Result<Int, Text> = Ok(42);
+    let mapped = r.map(|x| x + 1);
+
+    // Fixed array
+    let arr: FixedArray<Int, 3> = FixedArray { data: [1, 2, 3] };
+    assert arr.len() == 3;
+}

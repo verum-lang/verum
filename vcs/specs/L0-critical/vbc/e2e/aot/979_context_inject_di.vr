@@ -1,0 +1,42 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: context, inject, di
+// @description: Tests context provide + method call + constructor
+// @expected-exit: 0
+
+type AppConfig is { port: Int };
+
+implement AppConfig {
+    fn new() -> Self {
+        AppConfig { port: 8080 }
+    }
+}
+
+context Config {
+    fn get_port(&self) -> Int;
+}
+
+implement Config for AppConfig {
+    fn get_port(&self) -> Int { self.port }
+}
+
+fn read_port() -> Int using [Config] {
+    Config.get_port()
+}
+
+fn main() {
+    // Test 1: provide + context method
+    let cfg = AppConfig { port: 3000 };
+    provide Config = cfg;
+    let port = read_port();
+    assert(port == 3000);
+    print("Test 1 PASS: context provide + read");
+
+    // Test 2: Constructor (inherent impl)
+    let default_cfg = AppConfig.new();
+    assert(default_cfg.port == 8080);
+    print("Test 2 PASS: constructor");
+
+    print("All inject/DI tests passed");
+}

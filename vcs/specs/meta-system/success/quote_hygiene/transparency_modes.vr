@@ -1,0 +1,278 @@
+// @test: meta-pass
+// @level: L2
+// @tier: 0
+// @tags: meta, quote, hygiene, opaque, default
+// @description: Tests default opaque hygiene behavior in quotes
+
+// =============================================================================
+// DEFAULT OPAQUE MODE (All quotes are hygienic by default)
+// =============================================================================
+
+// Basic quote - fully hygienic by default
+meta fn opaque_default() -> TokenStream {
+    quote {
+        // All bindings here are isolated from caller
+        let x = 42;
+        let y = x + 1;
+        y
+    }
+}
+
+// Opaque prevents accidental capture
+meta fn opaque_no_capture() -> Bool {
+    let x = 100;  // Outer x
+
+    let ts = quote {
+        let x = 200;  // Inner x - completely separate binding
+        x
+    };
+
+    // Outer x unchanged - hygiene preserved
+    x == 100
+}
+
+// Multiple bindings remain isolated
+meta fn opaque_multiple_bindings() -> Bool {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    let ts = quote {
+        let a = 10;
+        let b = 20;
+        let c = 30;
+        a + b + c
+    };
+
+    // All outer bindings unchanged
+    a == 1 && b == 2 && c == 3
+}
+
+// =============================================================================
+// STAGED QUOTES (Using grammar-valid stage syntax)
+// =============================================================================
+
+// Quote with explicit stage 0 target
+meta fn stage_zero() -> TokenStream {
+    quote(0) {
+        // Runtime code
+        runtime_function()
+    }
+}
+
+// Quote with default stage (lowers by 1)
+meta fn stage_default() -> TokenStream {
+    quote {
+        // Also runtime if called from stage 1
+        another_function()
+    }
+}
+
+// Stage 2 generating stage 1 code
+meta(2) fn stage_two_to_one() -> TokenStream {
+    quote(1) {
+        meta fn generated_meta() -> TokenStream {
+            quote(0) {
+                final_runtime_code()
+            }
+        }
+    }
+}
+
+// =============================================================================
+// HYGIENE WITH INTERPOLATION
+// =============================================================================
+
+// Splice preserves hygiene
+meta fn splice_with_hygiene(name: Ident) -> TokenStream {
+    let x = 42;  // Meta-level x
+
+    quote {
+        // Spliced name is hygienic
+        let $name = 100;
+
+        // This 'x' is a new binding in generated code, not the meta x
+        let x = 200;
+        x + $name
+    }
+}
+
+// Expression splice computes at meta level
+meta fn expr_splice_hygiene() -> TokenStream {
+    let value = 10;
+
+    quote {
+        // ${value * 2} is computed at meta-time
+        let result = ${value * 2};  // Becomes: let result = 20;
+
+        // This 'value' is a new runtime binding
+        let value = 5;
+        result + value  // 20 + 5 = 25
+    }
+}
+
+// =============================================================================
+// HYGIENE WITH GENSYM
+// =============================================================================
+
+// Gensym ensures unique identifiers
+meta fn gensym_unique() -> TokenStream {
+    let temp1 = gensym("temp");
+    let temp2 = gensym("temp");
+
+    quote {
+        let $temp1 = compute1();
+        let $temp2 = compute2();
+        // temp1 and temp2 are guaranteed unique
+        $temp1 + $temp2
+    }
+}
+
+// Gensym in repetition
+meta fn gensym_in_repeat() -> TokenStream {
+    let fields = [ident("a"), ident("b"), ident("c")];
+
+    quote {
+        $[for field in fields {
+            let temp = gensym("local");
+            let $temp = self.$field;
+            validate($temp);
+        }]
+    }
+}
+
+// =============================================================================
+// HYGIENE WITH LIFT
+// =============================================================================
+
+// Lift embeds meta values into generated code
+meta fn lift_hygiene() -> TokenStream {
+    let config_value = 42;
+
+    quote {
+        // lift() embeds the value, not a reference
+        let x = lift(config_value);
+
+        // This 'config_value' is a different binding
+        let config_value = 100;
+
+        // x has value 42, config_value has 100
+        x + config_value  // 42 + 100 = 142
+    }
+}
+
+// Stage escape for cross-stage computation
+meta fn stage_escape_hygiene() -> TokenStream {
+    let multiplier = 3;
+
+    quote {
+        let base = 10;
+        // $(stage 1) evaluates at meta-time
+        let factor = $(stage 1){ multiplier * 2 };  // Becomes: let factor = 6;
+        base * factor  // 10 * 6 = 60
+    }
+}
+
+// =============================================================================
+// NESTED QUOTE HYGIENE
+// =============================================================================
+
+// Each nesting level has its own scope
+meta fn nested_hygiene() -> TokenStream {
+    let outer = 1;
+
+    quote {
+        let outer = 10;  // Different from meta 'outer'
+
+        let inner_quote = quote {
+            let outer = 100;  // Different from both above
+            outer
+        };
+
+        outer  // Refers to 10
+    }
+}
+
+// Variables don't leak between nesting levels
+meta fn nested_isolation() -> Bool {
+    let x = "meta";
+
+    let ts = quote {
+        let x = "outer_quote";
+
+        let inner = quote {
+            let x = "inner_quote";
+            x
+        };
+
+        x  // "outer_quote"
+    };
+
+    x == "meta"  // Meta x unchanged
+}
+
+// =============================================================================
+// PRACTICAL HYGIENE PATTERNS
+// =============================================================================
+
+// Library macro with complete isolation
+meta fn library_macro() -> TokenStream {
+    let internal = gensym("internal");
+
+    quote {
+        // All internal bindings are isolated
+        let $internal = initialize();
+        process($internal);
+        finalize($internal)
+    }
+}
+
+// Derive-like pattern
+meta fn derive_pattern(type_name: Ident, fields: List<Ident>) -> TokenStream {
+    quote {
+        implement Debug for $type_name {
+            fn fmt(&self, f: &mut Formatter) -> FmtResult {
+                let mut builder = f.debug_struct(stringify($type_name));
+                $[for field in fields {
+                    builder = builder.field(stringify($field), &self.$field);
+                }]
+                builder.finish()
+            }
+        }
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn main() {
+    // Default opaque behavior
+    @const assert(!opaque_default().is_empty());
+    @const assert(opaque_no_capture());
+    @const assert(opaque_multiple_bindings());
+
+    // Staged quotes
+    @const assert(!stage_zero().is_empty());
+    @const assert(!stage_default().is_empty());
+
+    // Hygiene with interpolation
+    @const assert(!splice_with_hygiene(ident("test")).is_empty());
+    @const assert(!expr_splice_hygiene().is_empty());
+
+    // Gensym hygiene
+    @const assert(!gensym_unique().is_empty());
+    @const assert(!gensym_in_repeat().is_empty());
+
+    // Lift hygiene
+    @const assert(!lift_hygiene().is_empty());
+    @const assert(!stage_escape_hygiene().is_empty());
+
+    // Nested hygiene
+    @const assert(!nested_hygiene().is_empty());
+    @const assert(nested_isolation());
+
+    // Practical patterns
+    @const assert(!library_macro().is_empty());
+    @const assert(!derive_pattern(ident("Point"), [ident("x"), ident("y")]).is_empty());
+}

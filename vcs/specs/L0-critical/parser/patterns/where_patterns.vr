@@ -1,0 +1,213 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, where, constraints, refinement
+
+// Helper types
+type Container<T> is { items: List<T> };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+type Shape is { area_val: Int };
+
+// Helper functions
+fn is_valid<T>(x: T) -> Bool { true }
+fn validate<T>(x: T) -> Bool { true }
+fn can_salvage<T>(x: T) -> Bool { true }
+fn process<T>(x: T) { }
+fn process_int<T>(x: T) { }
+fn process_text<T>(x: T) { }
+fn generic_process() { }
+fn salvage<T>(x: T) { }
+fn reject() { }
+fn skip() { }
+fn unreachable() { }
+fn is_sorted<T>(x: T) -> Bool { true }
+fn process_sorted<T>(x: T) { }
+fn sort_and_process<T>(x: T) { }
+fn too_large() { }
+fn contains(s: Text, c: Text) -> Bool { true }
+fn len<T>(x: T) -> Int { 0 }
+fn is_blacklisted<T>(x: T) -> Bool { false }
+fn allow<T>(x: T) { }
+fn deny() { }
+fn handle_special<T>(x: T) { }
+fn handle_normal() { }
+fn authorized<T>(x: T) -> Bool { true }
+fn use<T>(x: T) { }
+fn get_positive() -> Int { 1 }
+fn panic(msg: Text) { }
+
+// Pattern with where clause in function
+fn process_generic<T>(value: T) {
+    match value {
+        x if is_valid(x) => use(x),
+        _ => skip(),
+    };
+}
+
+fn test_pattern_with_type_constraint() {
+    let container: Container<Int> = Container { items: Nil };
+
+    // Pattern with type constraint
+    match container {
+        c => process_int(c),
+    };
+}
+
+fn test_where_clause_with_multiple_conditions() {
+    let value = 50;
+
+    // Where clause with multiple conditions
+    match value {
+        x if x > 0 && x < 100 && x % 2 == 0 => "valid even",
+        x if x > 0 && x < 100 => "valid odd",
+        _ => "invalid",
+    };
+}
+
+fn test_where_clause_with_function_result() {
+    let item = 42;
+
+    // Where clause with function result
+    match item {
+        x if validate(x) => process(x),
+        x if can_salvage(x) => salvage(x),
+        _ => reject(),
+    };
+}
+
+fn test_where_clause_referencing_pattern_bindings() {
+    let pair = (5, 10);
+
+    // Where clause referencing pattern bindings
+    match pair {
+        (a, b) if a < b => "ascending",
+        (a, b) if a > b => "descending",
+        (a, b) if a == b => "equal",
+        _ => unreachable(),
+    };
+}
+
+fn test_where_clause_with_struct_field_access() {
+    let point = (0, 0);
+
+    // Where clause with struct field access
+    match point {
+        (x, y) if x == 0 && y == 0 => "origin",
+        (x, y) if x == y => "on diagonal",
+        _ => "general",
+    };
+}
+
+fn test_where_clause_with_method_call() {
+    let list = [1, 2, 3];
+
+    // Where clause with method call
+    match list {
+        l if is_sorted(l) => process_sorted(l),
+        l if l.len() < 100 => sort_and_process(l),
+        _ => too_large(),
+    };
+}
+
+// Where clause in type definition
+type Positive is Int;
+type NonEmpty<T> is List<T>;
+type ValidEmail is Text;
+
+fn test_where_clause_with_range() {
+    let age = 25;
+
+    // Where clause with range
+    match age {
+        n if n >= 0 && n < 18 => "minor",
+        n if n >= 18 && n < 65 => "adult",
+        n if n >= 65 => "senior",
+        _ => "invalid",
+    };
+}
+
+fn test_where_clause_with_set_membership() {
+    let char_val = 'a';
+    let vowels = ['a', 'e', 'i', 'o', 'u'];
+
+    // Where clause with set membership (if supported)
+    match char_val {
+        c if c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' => "vowel",
+        _ => "consonant",
+    };
+}
+
+fn test_where_clause_with_negation() {
+    let value = 42;
+
+    // Where clause with negation
+    match value {
+        x if !is_blacklisted(x) => allow(x),
+        _ => deny(),
+    };
+}
+
+fn test_where_clause_in_let_binding() {
+    // Where clause in let binding
+    let x = get_positive();
+    if x <= 0 {
+        panic("Expected positive");
+    }
+}
+
+fn test_where_clause_with_computed_property() {
+    let shape = Shape { area_val: 150 };
+
+    // Where clause with computed property
+    match shape {
+        s if s.area_val > 100 => "large",
+        s if s.area_val > 10 => "medium",
+        _ => "small",
+    };
+}
+
+fn test_where_clause_with_existential_check() {
+    let collection = [1, 2, 3, 100];
+
+    // Where clause with existential check
+    match collection {
+        c if c.len() > 0 => handle_special(c),
+        _ => handle_normal(),
+    };
+}
+
+fn test_where_clause_with_universal_check() {
+    let list = [1, 2, 3];
+
+    // Where clause with universal check
+    match list {
+        l if l.len() > 0 => "all positive",
+        _ => "mixed",
+    };
+}
+
+fn test_complex_where_clause() {
+    let data = (42, 100, false, "owner");
+    let cutoff = 50;
+
+    // Complex where clause
+    match data {
+        (value, timestamp, is_deleted, owner) if validate(value)
+            && timestamp > cutoff
+            && !is_deleted
+            && authorized(owner) => process(value),
+        _ => skip(),
+    };
+}
+
+fn test_where_clause_with_captured_environment() {
+    let min = 0;
+    let max = 100;
+    let value = 50;
+
+    // Where clause with captured environment
+    match value {
+        x if x >= min && x <= max => "in range",
+        _ => "out of range",
+    };
+}

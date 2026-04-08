@@ -1,0 +1,103 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: sum-types, variants, pattern-matching, e2e
+// @description: Test advanced sum types with nested variants and methods
+
+type Shape is
+    | Circle(Int)
+    | Rectangle(Int, Int)
+    | Triangle(Int, Int, Int);
+
+fn area(s: Shape) -> Int {
+    match s {
+        Shape.Circle(r) => r * r * 3,
+        Shape.Rectangle(w, h) => w * h,
+        Shape.Triangle(a, b, c) => {
+            // Heron's formula approximation using integer math
+            let s = (a + b + c) / 2;
+            // Approximate sqrt(s*(s-a)*(s-b)*(s-c))
+            let prod = s * (s - a) * (s - b) * (s - c);
+            if prod <= 0 { 0 } else { prod / 4 }
+        }
+    }
+}
+
+type Expr is
+    | Num(Int)
+    | Add(Heap<Expr>, Heap<Expr>)
+    | Mul(Heap<Expr>, Heap<Expr>);
+
+fn eval(e: Expr) -> Int {
+    match e {
+        Expr.Num(n) => n,
+        Expr.Add(l, r) => eval(*l) + eval(*r),
+        Expr.Mul(l, r) => eval(*l) * eval(*r),
+    }
+}
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Custom(Int, Int, Int);
+
+fn color_value(c: Color) -> Int {
+    match c {
+        Color.Red => 0xFF0000,
+        Color.Green => 0x00FF00,
+        Color.Blue => 0x0000FF,
+        Color.Custom(r, g, b) => r * 65536 + g * 256 + b,
+    }
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Shape area
+    let circle = Shape.Circle(5);
+    if area(circle) != 75 {
+        print(f"FAIL: circle area expected 75, got {area(circle)}");
+        failures = failures + 1;
+    }
+    let rect = Shape.Rectangle(4, 6);
+    if area(rect) != 24 {
+        print(f"FAIL: rect area expected 24, got {area(rect)}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  shape_area: OK");
+    }
+
+    // Test 2: Expression tree
+    // (2 + 3) * 4 = 20
+    let expr = Expr.Mul(
+        Heap(Expr.Add(Heap(Expr.Num(2)), Heap(Expr.Num(3)))),
+        Heap(Expr.Num(4))
+    );
+    let result = eval(expr);
+    if result != 20 {
+        print(f"FAIL: eval expected 20, got {result}");
+        failures = failures + 1;
+    } else {
+        print("  expr_tree: OK");
+    }
+
+    // Test 3: Color values
+    if color_value(Color.Red) != 0xFF0000 {
+        print("FAIL: red color");
+        failures = failures + 1;
+    }
+    if color_value(Color.Custom(128, 64, 32)) != 128 * 65536 + 64 * 256 + 32 {
+        print("FAIL: custom color");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  color_values: OK");
+    }
+
+    if failures == 0 {
+        print("All sum type tests passed");
+    }
+    failures
+}

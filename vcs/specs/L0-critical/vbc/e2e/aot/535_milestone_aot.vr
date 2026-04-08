@@ -1,0 +1,199 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, type-checker, inference
+// @timeout: 30000
+
+// Milestone 535: Type checker simulation (simple Hindley-Milner)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Type representation:
+// 0 = unknown (type variable)
+// 1 = Int
+// 2 = Bool
+// 3 = String
+// 10+n = Function type (encoded as 10 + return_type)
+// 20+n = List type (encoded as 20 + element_type)
+// -1 = error
+
+// Simple unification
+fn unify(t1: Int, t2: Int) -> Int {
+    if t1 == t2 { return t1; }
+    if t1 == 0 { return t2; } // unknown unifies with anything
+    if t2 == 0 { return t1; }
+    // Function types: unify return types
+    if t1 >= 10 {
+        if t1 < 20 {
+            if t2 >= 10 {
+                if t2 < 20 {
+                    let ret = unify(t1 - 10, t2 - 10);
+                    if ret == -1 { return -1; }
+                    return 10 + ret;
+                }
+            }
+        }
+    }
+    // List types
+    if t1 >= 20 {
+        if t1 < 30 {
+            if t2 >= 20 {
+                if t2 < 30 {
+                    let elem = unify(t1 - 20, t2 - 20);
+                    if elem == -1 { return -1; }
+                    return 20 + elem;
+                }
+            }
+        }
+    }
+    -1 // Type error
+}
+
+// Type environment: var_id → type mapping (using Arr8)
+// Infer type of simple expressions
+// Expr encoding:
+// positive = literal (1=int_lit, 2=bool_lit, 3=str_lit)
+// -1 = var reference (followed by var_id)
+// -2 = binary op +/- (result is Int if both Int)
+// -3 = comparison (result is Bool)
+// -4 = if-then-else (result is type of branches)
+// -5 = list constructor (result is List<elem_type>)
+
+fn infer_literal(lit: Int) -> Int {
+    if lit == 1 { return 1; } // Int
+    if lit == 2 { return 2; } // Bool
+    if lit == 3 { return 3; } // String
+    0 // Unknown
+}
+
+// Check if type is compatible with expected
+fn type_check(actual: Int, expected: Int) -> Int {
+    let unified = unify(actual, expected);
+    if unified == -1 { 0 } else { 1 }
+}
+
+fn test_unification() -> Int {
+    // Same types unify
+    assert_eq(unify(1, 1), 1);
+    assert_eq(unify(2, 2), 2);
+
+    // Unknown unifies with anything
+    assert_eq(unify(0, 1), 1);
+    assert_eq(unify(2, 0), 2);
+    assert_eq(unify(0, 0), 0);
+
+    // Different concrete types don't unify
+    assert_eq(unify(1, 2), -1);
+    assert_eq(unify(1, 3), -1);
+    1
+}
+
+fn test_function_types() -> Int {
+    // fn() -> Int unifies with fn() -> Int
+    assert_eq(unify(11, 11), 11); // 10+1 = fn->Int
+
+    // fn() -> unknown unifies with fn() -> Int
+    assert_eq(unify(10, 11), 11); // 10+0=fn->unknown, 10+1=fn->Int → fn->Int
+
+    // fn() -> Int doesn't unify with fn() -> Bool
+    assert_eq(unify(11, 12), -1);
+    1
+}
+
+fn test_list_types() -> Int {
+    // List<Int> unifies with List<Int>
+    assert_eq(unify(21, 21), 21); // 20+1
+
+    // List<unknown> unifies with List<Int>
+    assert_eq(unify(20, 21), 21);
+
+    // List<Int> doesn't unify with List<Bool>
+    assert_eq(unify(21, 22), -1);
+    1
+}
+
+fn test_type_checking() -> Int {
+    // Int is compatible with Int
+    assert_eq(type_check(1, 1), 1);
+    // Unknown is compatible with anything
+    assert_eq(type_check(0, 1), 1);
+    // Int is not compatible with Bool
+    assert_eq(type_check(1, 2), 0);
+    // List<Int> is compatible with List<Int>
+    assert_eq(type_check(21, 21), 1);
+    // List<Int> is not compatible with List<Bool>
+    assert_eq(type_check(21, 22), 0);
+    1
+}
+
+fn test_infer_literals() -> Int {
+    assert_eq(infer_literal(1), 1); // Int literal → Int
+    assert_eq(infer_literal(2), 2); // Bool literal → Bool
+    assert_eq(infer_literal(3), 3); // String literal → String
+    1
+}
+
+fn test_substitution() -> Int {
+    // Simulate type variable substitution
+    // env: var0 = Int, var1 = unknown, var2 = Bool
+    let env = Arr8 { v0: 1, v1: 0, v2: 2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+
+    // Unify var1 with Int
+    let t1 = unify(get8(env, 1), 1);
+    assert_eq(t1, 1); // var1 becomes Int
+
+    // Check: var0 + var1 → both Int → result Int
+    let check = unify(get8(env, 0), t1);
+    assert_eq(check, 1);
+
+    // Type error: var2 (Bool) used as Int
+    assert_eq(unify(get8(env, 2), 1), -1);
+    1
+}
+
+fn test_transitivity() -> Int {
+    // If a = b and b = Int, then a = Int
+    let a = 0; // unknown
+    let b = 0; // unknown
+    let c = 1; // Int
+
+    let ab = unify(a, b);
+    assert_eq(ab, 0); // both unknown
+    let bc = unify(b, c);
+    assert_eq(bc, 1); // b = Int
+    let ac = unify(a, bc); // a unifies with Int
+    assert_eq(ac, 1);
+    1
+}
+
+fn main() -> Int {
+    test_unification();
+    test_function_types();
+    test_list_types();
+    test_type_checking();
+    test_infer_literals();
+    test_substitution();
+    test_transitivity();
+    print("[OK] 535_milestone_aot");
+    0
+}

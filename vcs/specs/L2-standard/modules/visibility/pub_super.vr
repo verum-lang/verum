@@ -1,0 +1,40 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, visibility, pub-super
+
+/// Parent module visibility - items accessible to the parent module.
+/// `pub(super)` makes items visible to the immediate parent module only.
+
+module parent {
+    pub module child {
+        // Visible only to parent module
+        pub(super) fn parent_only_helper() -> Int {
+            42
+        }
+
+        // Public function visible everywhere
+        pub fn public_function() -> Int {
+            // Can call pub(super) function from within the module
+            parent_only_helper() * 2
+        }
+
+        // Another pub(super) function
+        pub(super) fn secret_value() -> Int {
+            100
+        }
+    }
+}
+
+fn main() {
+    // Import public function from parent.child
+    mount parent.child.public_function;
+
+    // Can access public function from parent.child
+    let result = public_function();
+    print(f"parent.child.public_function() = {result}");
+
+    // The pub(super) items (parent_only_helper, secret_value) are
+    // NOT accessible from main (root), but ARE accessible from
+    // within parent module.
+}

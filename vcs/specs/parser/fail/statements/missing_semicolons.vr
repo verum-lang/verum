@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, semicolon, missing, error
+// @description: Test multiple statements without semicolons
+// @expected-error: E010
+
+fn test() {
+    let x = 5 let y = 6
+}

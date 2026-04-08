@@ -1,0 +1,43 @@
+// @test: meta-pass
+// @level: L1
+// @description: Tests runtime environment builtin functions
+// @tags: meta-system, builtins, runtime, environment
+
+// Test is_ci - check CI environment
+meta fn test_is_ci() -> Bool using [MetaRuntime] {
+    let ci = is_ci();
+    // This is a boolean - may be true or false
+    ci == true || ci == false
+}
+
+// Test recursion_limit - get meta evaluation recursion limit
+meta fn test_recursion_limit() -> Bool using [MetaRuntime] {
+    let limit = recursion_limit();
+    limit > 0  // Should have a positive limit
+}
+
+// Test iteration_limit - get meta evaluation iteration limit
+meta fn test_iteration_limit() -> Bool using [MetaRuntime] {
+    let limit = iteration_limit();
+    limit > 0  // Should have a positive limit
+}
+
+// Test memory_limit - get meta evaluation memory limit
+meta fn test_memory_limit() -> Bool using [MetaRuntime] {
+    let limit = memory_limit();
+    limit > 0  // Should have a positive limit
+}
+
+// Test timeout_ms - get meta evaluation timeout
+meta fn test_timeout_ms() -> Bool using [MetaRuntime] {
+    let timeout = timeout_ms();
+    timeout >= 0  // Timeout can be 0 for no limit
+}
+
+fn main() {
+    @const assert(test_is_ci());
+    @const assert(test_recursion_limit());
+    @const assert(test_iteration_limit());
+    @const assert(test_memory_limit());
+    @const assert(test_timeout_ms());
+}

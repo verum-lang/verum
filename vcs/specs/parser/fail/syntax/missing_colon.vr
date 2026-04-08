@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, colon, error
+// @description: Test missing colon in type annotations
+// @expected-error: E018
+
+fn test_missing_colon(x Int) -> Int {
+    x
+}

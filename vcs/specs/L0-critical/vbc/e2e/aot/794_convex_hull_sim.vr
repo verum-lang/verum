@@ -1,0 +1,143 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, computational_geometry
+// @expected-exit: 0
+
+// Computational geometry using scaled integers (multiply by 100 for precision)
+// Points stored as pairs in a 16-element list: [x0, y0, x1, y1, ...]
+
+fn cross_product(ox: Int, oy: Int, ax: Int, ay: Int, bx: Int, by_val: Int) -> Int {
+    // (A - O) x (B - O) = (ax-ox)*(by-oy) - (ay-oy)*(bx-ox)
+    (ax - ox) * (by_val - oy) - (ay - oy) * (bx - ox)
+}
+
+// Orientation test:
+// > 0: counterclockwise
+// = 0: collinear
+// < 0: clockwise
+fn orientation(px: Int, py: Int, qx: Int, qy: Int, rx: Int, ry: Int) -> Int {
+    let cp = cross_product(px, py, qx, qy, rx, ry);
+    if (cp > 0) { return 1; }
+    if (cp < 0) { return -1; }
+    0
+}
+
+// Polygon area using Shoelace formula (returns 2x area to avoid fractions)
+// Points in list: [x0, y0, x1, y1, ..., xn-1, yn-1, ...]
+// n = number of vertices
+fn polygon_area_2x(pts: List<Int>, n: Int) -> Int {
+    let mut area = 0;
+    let mut i = 0;
+    while (i < n) {
+        let j = (i + 1) % n;
+        let xi = pts[i * 2];
+        let yi = pts[i * 2 + 1];
+        let xj = pts[j * 2];
+        let yj = pts[j * 2 + 1];
+        area = area + (xi * yj - xj * yi);
+        i = i + 1;
+    }
+    if (area < 0) { return 0 - area; }
+    area
+}
+
+// Point in triangle test using barycentric coordinates (area method)
+fn point_in_triangle(px: Int, py: Int, ax: Int, ay: Int, bx: Int, by_val: Int, cx: Int, cy: Int) -> Int {
+    // Compute cross products for each edge
+    let d1 = cross_product(ax, ay, bx, by_val, px, py);
+    let d2 = cross_product(bx, by_val, cx, cy, px, py);
+    let d3 = cross_product(cx, cy, ax, ay, px, py);
+
+    let has_neg = (d1 < 0) + (d2 < 0) + (d3 < 0);
+    let has_pos = (d1 > 0) + (d2 > 0) + (d3 > 0);
+
+    // Point is inside if all same sign (or zero)
+    if (has_neg > 0) {
+        if (has_pos > 0) { return 0; }
+    }
+    1
+}
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { return 0 - x; }
+    x
+}
+
+fn main() -> Int {
+    // Triangle with vertices: A(0,0), B(4,0), C(0,3)
+    // This is a 3-4-5 right triangle
+
+    // Test 1: Cross product of vectors AB and AC
+    // AB = (4,0), AC = (0,3): cross = 4*3 - 0*0 = 12
+    assert_eq(cross_product(0, 0, 4, 0, 0, 3), 12);
+
+    // Test 2: Orientation of A(0,0), B(4,0), C(0,3) is CCW (positive)
+    assert_eq(orientation(0, 0, 4, 0, 0, 3), 1);
+
+    // Test 3: Orientation of A(0,0), C(0,3), B(4,0) is CW (negative)
+    assert_eq(orientation(0, 0, 0, 3, 4, 0), -1);
+
+    // Test 4: Collinear points: (0,0), (2,2), (4,4)
+    assert_eq(orientation(0, 0, 2, 2, 4, 4), 0);
+
+    // Test 5: Triangle area (Shoelace): A(0,0), B(4,0), C(0,3)
+    // 2*Area = |x0*(y1-y2) + x1*(y2-y0) + x2*(y0-y1)|
+    //        = |0*(0-3) + 4*(3-0) + 0*(0-0)| = |0 + 12 + 0| = 12
+    // Shoelace: sum of xi*yj - xj*yi:
+    //   i=0->1: 0*0 - 4*0 = 0
+    //   i=1->2: 4*3 - 0*0 = 12
+    //   i=2->0: 0*0 - 0*3 = 0
+    // |0 + 12 + 0| = 12
+    let tri_pts = [0, 0, 4, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(polygon_area_2x(tri_pts, 3), 12);
+
+    // Test 6: Rectangle area: (0,0), (4,0), (4,3), (0,3)
+    // Shoelace:
+    //   0*0 - 4*0 = 0
+    //   4*3 - 4*0 = 12
+    //   4*3 - 0*3 = 12
+    //   0*0 - 0*3 = 0
+    // |0 + 12 + 12 + 0| = 24
+    // 2*Area = 24, Area = 12
+    let rect_pts = [0, 0, 4, 0, 4, 3, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(polygon_area_2x(rect_pts, 4), 24);
+
+    // Test 7: Point (1, 1) is inside triangle A(0,0), B(4,0), C(0,3)
+    assert_eq(point_in_triangle(1, 1, 0, 0, 4, 0, 0, 3), 1);
+
+    // Test 8: Point (5, 5) is outside triangle A(0,0), B(4,0), C(0,3)
+    assert_eq(point_in_triangle(5, 5, 0, 0, 4, 0, 0, 3), 0);
+
+    // Test 9: Point on vertex (0, 0) is inside (on boundary)
+    assert_eq(point_in_triangle(0, 0, 0, 0, 4, 0, 0, 3), 1);
+
+    // Test 10: Pentagon area: (2,0), (4,1), (3,4), (0,3), (-1,1)
+    // Shoelace:
+    //   2*1 - 4*0 = 2
+    //   4*4 - 3*1 = 13
+    //   3*3 - 0*4 = 9
+    //   0*1 - (-1)*3 = 3
+    //   (-1)*0 - 2*1 = -2
+    // sum = 2 + 13 + 9 + 3 + (-2) = 25
+    // Actually let me redo: using formula xi*y(i+1) - x(i+1)*yi
+    // (2,0)->(4,1): 2*1 - 4*0 = 2
+    // (4,1)->(3,4): 4*4 - 3*1 = 13
+    // (3,4)->(0,3): 3*3 - 0*4 = 9
+    // (0,3)->(-1,1): 0*1 - (-1)*3 = 3
+    // (-1,1)->(2,0): (-1)*0 - 2*1 = -2
+    // sum = 2+13+9+3-2 = 25
+    // But we can't use negative coordinates easily in our list; let's shift everything by +2 in x:
+    // (4,0), (6,1), (5,4), (2,3), (1,1) — same shape, same area
+    // (4,0)->(6,1): 4*1 - 6*0 = 4
+    // (6,1)->(5,4): 6*4 - 5*1 = 19
+    // (5,4)->(2,3): 5*3 - 2*4 = 7
+    // (2,3)->(1,1): 2*1 - 1*3 = -1
+    // (1,1)->(4,0): 1*0 - 4*1 = -4
+    // sum = 4+19+7-1-4 = 25
+    let pent_pts = [4, 0, 6, 1, 5, 4, 2, 3, 1, 1, 0, 0, 0, 0, 0, 0];
+    assert_eq(polygon_area_2x(pent_pts, 5), 25);
+
+    print("794_convex_hull_sim: PASS");
+    0
+}

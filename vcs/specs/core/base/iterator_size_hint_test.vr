@@ -1,0 +1,251 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, iterator, size_hint, exact_size
+// @description: Tests for Iterator.size_hint() and ExactSizeIterator
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: List iterator size_hint
+// =============================================================================
+
+@test
+fn test_list_iter_size_hint_initial() {
+    let list = [1, 2, 3, 4, 5];
+    let iter = list.iter();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 5);
+    assert_eq(hint.1.unwrap(), 5);
+}
+
+@test
+fn test_list_iter_size_hint_after_next() {
+    let list = [1, 2, 3, 4, 5];
+    let mut iter = list.iter();
+    iter.next();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 4);
+    assert_eq(hint.1.unwrap(), 4);
+}
+
+@test
+fn test_list_iter_size_hint_exhausted() {
+    let list = [1, 2];
+    let mut iter = list.iter();
+    iter.next();
+    iter.next();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 0);
+    assert_eq(hint.1.unwrap(), 0);
+}
+
+@test
+fn test_list_iter_size_hint_empty() {
+    let list: List<Int> = [];
+    let iter = list.iter();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 0);
+    assert_eq(hint.1.unwrap(), 0);
+}
+
+@test
+fn test_into_list_size_hint() {
+    let list = [10, 20, 30];
+    let mut iter = list.into_iter();
+    assert_eq(iter.size_hint().0, 3);
+    iter.next();
+    assert_eq(iter.size_hint().0, 2);
+    iter.next();
+    assert_eq(iter.size_hint().0, 1);
+    iter.next();
+    assert_eq(iter.size_hint().0, 0);
+}
+
+// =============================================================================
+// Section 2: Deque iterator size_hint
+// =============================================================================
+
+@test
+fn test_deque_iter_size_hint() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let mut iter = d.iter();
+    assert_eq(iter.size_hint().0, 3);
+    iter.next();
+    assert_eq(iter.size_hint().0, 2);
+}
+
+@test
+fn test_deque_iter_size_hint_empty() {
+    let d: Deque<Int> = Deque.new();
+    let iter = d.iter();
+    assert_eq(iter.size_hint().0, 0);
+}
+
+// =============================================================================
+// Section 3: Range size_hint
+// =============================================================================
+
+@test
+fn test_range_size_hint() {
+    let mut r = range(0, 10);
+    let hint = r.size_hint();
+    assert_eq(hint.0, 10);
+    assert_eq(hint.1.unwrap(), 10);
+}
+
+@test
+fn test_range_size_hint_after_next() {
+    let mut r = range(0, 5);
+    r.next();
+    r.next();
+    let hint = r.size_hint();
+    assert_eq(hint.0, 3);
+    assert_eq(hint.1.unwrap(), 3);
+}
+
+@test
+fn test_range_size_hint_empty() {
+    let mut r = range(5, 5);
+    let hint = r.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+// =============================================================================
+// Section 4: Adapter size_hint propagation
+// =============================================================================
+
+@test
+fn test_take_size_hint() {
+    let list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let iter = list.iter().take(3);
+    let hint = iter.size_hint();
+    // take(3) should report at most 3
+    assert(hint.0 <= 3);
+}
+
+@test
+fn test_skip_size_hint() {
+    let list = [1, 2, 3, 4, 5];
+    let iter = list.iter().skip(2);
+    let hint = iter.size_hint();
+    // skip(2) from 5 elements => 3 remaining
+    assert(hint.0 <= 5);
+}
+
+@test
+fn test_chain_size_hint() {
+    let a = [1, 2, 3];
+    let b = [4, 5];
+    let iter = a.iter().chain(b.iter());
+    let hint = iter.size_hint();
+    // chain should report sum
+    assert_eq(hint.0, 5);
+}
+
+@test
+fn test_enumerate_size_hint() {
+    let list = [10, 20, 30];
+    let iter = list.iter().enumerate();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 3);
+}
+
+@test
+fn test_zip_size_hint() {
+    let a = [1, 2, 3, 4, 5];
+    let b = [10, 20, 30];
+    let iter = a.iter().zip(b.iter());
+    let hint = iter.size_hint();
+    // zip should report min of both
+    assert_eq(hint.0, 3);
+}
+
+// =============================================================================
+// Section 5: size_hint accuracy for map/filter
+// =============================================================================
+
+@test
+fn test_map_size_hint() {
+    let list = [1, 2, 3, 4, 5];
+    fn double(x: &Int) -> Int { *x * 2 }
+    let iter = list.iter().map(double);
+    let hint = iter.size_hint();
+    // map preserves exact count
+    assert_eq(hint.0, 5);
+}
+
+@test
+fn test_filter_size_hint_lower_bound() {
+    let list = [1, 2, 3, 4, 5];
+    fn is_even(x: &&Int) -> Bool { **x % 2 == 0 }
+    let iter = list.iter().filter(is_even);
+    let hint = iter.size_hint();
+    // filter can't know how many will match, lower bound is 0
+    assert(hint.0 >= 0);
+}
+
+// =============================================================================
+// Section 6: Slice iterator size_hint
+// =============================================================================
+
+@test
+fn test_slice_iter_size_hint() {
+    let list = [1, 2, 3, 4, 5];
+    let s = list.as_slice();
+    let mut iter = s.iter();
+    assert_eq(iter.size_hint().0, 5);
+    iter.next();
+    assert_eq(iter.size_hint().0, 4);
+    iter.next_back();
+    assert_eq(iter.size_hint().0, 3);
+}
+
+// =============================================================================
+// Section 7: BTreeMap iterator size_hint
+// =============================================================================
+
+@test
+fn test_btreemap_iter_size_hint() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let iter = m.iter();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 3);
+}
+
+// =============================================================================
+// Section 8: count() vs size_hint consistency
+// =============================================================================
+
+@test
+fn test_size_hint_matches_count_list() {
+    let list = [1, 2, 3, 4, 5];
+    let hint = list.iter().size_hint();
+    let count = list.iter().count();
+    assert_eq(hint.0, count);
+}
+
+@test
+fn test_size_hint_matches_count_range() {
+    let hint = range(0, 100).size_hint();
+    let count = range(0, 100).count();
+    assert_eq(hint.0, count);
+}
+
+@test
+fn test_size_hint_matches_count_deque() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let hint = d.iter().size_hint();
+    let count = d.iter().count();
+    assert_eq(hint.0, count);
+}

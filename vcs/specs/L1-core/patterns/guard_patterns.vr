@@ -1,0 +1,252 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, guards
+//
+// Tests pattern guards with `if` conditions for conditional matching.
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Tree<T> is
+    | Leaf(T)
+    | Node(Tree<T>, Tree<T>);
+
+// Basic guard pattern
+fn classify(n: Int) -> Text {
+    match n {
+        x if x < 0 => "negative",
+        0 => "zero",
+        x if x > 0 && x < 10 => "small positive",
+        x if x >= 10 && x < 100 => "medium positive",
+        _ => "large positive",
+    }
+}
+
+// Guard with multiple conditions
+fn describe_pair(a: Int, b: Int) -> Text {
+    match (a, b) {
+        (x, y) if x == y => "equal",
+        (x, y) if x > y => "first larger",
+        _ => "second larger",
+    }
+}
+
+// Guard accessing bound variables
+fn safe_divide(dividend: Int, divisor: Int) -> Maybe<Int> {
+    match divisor {
+        d if d == 0 => None,
+        d => Some(dividend / d),
+    }
+}
+
+// Simple primality check (no sqrt needed)
+fn is_probably_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    if n == 2 { return true; }
+    if n % 2 == 0 { return false; }
+    n % 3 != 0 && n % 5 != 0 && n % 7 != 0
+}
+
+fn classify_number(n: Int) -> Text {
+    match n {
+        x if x < 0 => "negative",
+        0 => "zero",
+        1 => "one",
+        x if is_probably_prime(x) => "prime",
+        x if x % 2 == 0 => "even composite",
+        _ => "odd composite",
+    }
+}
+
+// Guard with struct patterns
+fn classify_point(p: Point) -> Text {
+    match p {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x, y } if x == 0 => "on y-axis",
+        Point { x, y } if y == 0 => "on x-axis",
+        Point { x, y } if x == y => "on main diagonal",
+        Point { x, y } if x == -y => "on anti-diagonal",
+        Point { x, y } if x > 0 && y > 0 => "quadrant I",
+        Point { x, y } if x < 0 && y > 0 => "quadrant II",
+        Point { x, y } if x < 0 && y < 0 => "quadrant III",
+        _ => "quadrant IV",
+    }
+}
+
+// Guard with boolean operators
+fn complex_classification(n: Int) -> Text {
+    match n {
+        x if x < -100 || x > 100 => "extreme",
+        x if x >= -10 && x <= 10 => "near zero",
+        x if x > 0 && x % 2 == 0 && x % 3 == 0 => "positive divisible by 6",
+        x if x < 0 && (-x) % 5 == 0 => "negative multiple of 5",
+        _ => "other",
+    }
+}
+
+// Guard with nested patterns
+fn analyze_maybe_pair(mp: Maybe<(Int, Int)>) -> Text {
+    match mp {
+        None => "nothing",
+        Some((x, y)) if x == y => "equal pair",
+        Some((x, y)) if x > y => "decreasing pair",
+        Some(_) => "increasing pair",
+    }
+}
+
+// Guard with enum variants
+fn classify_maybe(m: Maybe<Int>) -> Text {
+    match m {
+        None => "empty",
+        Some(x) if x < 0 => "negative value",
+        Some(0) => "zero value",
+        Some(x) if x > 0 && x <= 10 => "small positive",
+        Some(_) => "large positive",
+    }
+}
+
+// Multiple guards on same pattern structure
+fn fizzbuzz(n: Int) -> Text {
+    match n {
+        x if x % 15 == 0 => "FizzBuzz",
+        x if x % 3 == 0 => "Fizz",
+        x if x % 5 == 0 => "Buzz",
+        x => f"{x}",
+    }
+}
+
+// Guard with captured variable from outer scope
+@allow(unbounded_recursion)
+fn find_match(items: List<Int>, target: Int) -> Maybe<Int> {
+    match items {
+        [] => None,
+        [x, ..rest] if x == target => Some(x),
+        [_, ..rest] => find_match(rest, target),
+    }
+}
+
+// Guard with complex expressions
+fn grade(score: Int) -> Text {
+    match score {
+        s if s < 0 || s > 100 => "invalid",
+        s if s >= 90 => "A",
+        s if s >= 80 => "B",
+        s if s >= 70 => "C",
+        s if s >= 60 => "D",
+        _ => "F",
+    }
+}
+
+// Guard combining literal and variable patterns
+fn classify_char(c: Char) -> Text {
+    match c {
+        '0' => "zero digit",
+        c if c >= '1' && c <= '9' => "non-zero digit",
+        c if c >= 'a' && c <= 'z' => "lowercase letter",
+        c if c >= 'A' && c <= 'Z' => "uppercase letter",
+        ' ' | '\t' | '\n' => "whitespace",
+        _ => "other",
+    }
+}
+
+// Guard with method call
+fn has_prefix(s: Text) -> Bool {
+    match s {
+        s if s.starts_with("http://") => true,
+        s if s.starts_with("https://") => true,
+        _ => false,
+    }
+}
+
+// Guard with complex boolean expression
+fn complex_guard(a: Int, b: Int, c: Int) -> Text {
+    match (a, b, c) {
+        (x, y, z) if x > 0 && y > 0 && z > 0 && x + y > z && y + z > x && x + z > y => "valid triangle",
+        (x, y, z) if x == 0 || y == 0 || z == 0 => "has zero side",
+        _ => "invalid",
+    }
+}
+
+fn main() {
+    // Basic classification
+    assert(classify(-5) == "negative");
+    assert(classify(0) == "zero");
+    assert(classify(5) == "small positive");
+    assert(classify(50) == "medium positive");
+    assert(classify(500) == "large positive");
+
+    // Pair comparison
+    assert(describe_pair(3, 3) == "equal");
+    assert(describe_pair(5, 3) == "first larger");
+    assert(describe_pair(3, 5) == "second larger");
+
+    // Safe divide
+    assert(safe_divide(10, 2) == Some(5));
+    assert(safe_divide(10, 0) == None);
+
+    // Prime classification
+    assert(classify_number(-5) == "negative");
+    assert(classify_number(0) == "zero");
+    assert(classify_number(7) == "prime");
+    assert(classify_number(6) == "even composite");
+    assert(classify_number(9) == "odd composite");
+
+    // Point classification
+    assert(classify_point(Point { x: 0, y: 0 }) == "origin");
+    assert(classify_point(Point { x: 0, y: 5 }) == "on y-axis");
+    assert(classify_point(Point { x: 5, y: 0 }) == "on x-axis");
+    assert(classify_point(Point { x: 3, y: 3 }) == "on main diagonal");
+    assert(classify_point(Point { x: 3, y: -3 }) == "on anti-diagonal");
+    assert(classify_point(Point { x: 1, y: 2 }) == "quadrant I");
+
+    // Complex classification
+    assert(complex_classification(-150) == "extreme");
+    assert(complex_classification(5) == "near zero");
+    assert(complex_classification(12) == "positive divisible by 6");
+    assert(complex_classification(-25) == "negative multiple of 5");
+
+    // Maybe pair analysis
+    assert(analyze_maybe_pair(None) == "nothing");
+    assert(analyze_maybe_pair(Some((3, 3))) == "equal pair");
+    assert(analyze_maybe_pair(Some((5, 3))) == "decreasing pair");
+    assert(analyze_maybe_pair(Some((3, 5))) == "increasing pair");
+
+    // FizzBuzz
+    assert(fizzbuzz(15) == "FizzBuzz");
+    assert(fizzbuzz(9) == "Fizz");
+    assert(fizzbuzz(10) == "Buzz");
+    assert(fizzbuzz(7) == "7");
+
+    // Grade
+    assert(grade(-1) == "invalid");
+    assert(grade(95) == "A");
+    assert(grade(85) == "B");
+    assert(grade(75) == "C");
+    assert(grade(65) == "D");
+    assert(grade(55) == "F");
+
+    // Character classification
+    assert(classify_char('0') == "zero digit");
+    assert(classify_char('5') == "non-zero digit");
+    assert(classify_char('a') == "lowercase letter");
+    assert(classify_char('Z') == "uppercase letter");
+    assert(classify_char(' ') == "whitespace");
+    assert(classify_char('!') == "other");
+
+    // Prefix check
+    assert(has_prefix("http://example.com") == true);
+    assert(has_prefix("https://secure.com") == true);
+    assert(has_prefix("ftp://files.com") == false);
+
+    // Complex guard
+    assert(complex_guard(3, 4, 5) == "valid triangle");
+    assert(complex_guard(0, 4, 5) == "has zero side");
+    assert(complex_guard(1, 2, 10) == "invalid");
+}

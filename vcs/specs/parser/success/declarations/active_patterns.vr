@@ -1,0 +1,208 @@
+// @test: parse-pass
+// @tier: 0
+// @category: declarations
+// @level: L0
+// @tags: parser, declarations, patterns, active-patterns, f-sharp-style
+// @description: Comprehensive tests for active pattern definitions
+
+// ============================================================================
+// Basic Active Patterns
+// Grammar: pattern_def = 'pattern' , identifier , [ pattern_type_params ] , '(' , pattern_params , ')' , '->' , type_expr , '=' , expression , ';'
+// ============================================================================
+
+// Simple boolean pattern
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+
+pattern Odd(n: Int) -> Bool = n % 2 == 1;
+
+pattern Zero(n: Int) -> Bool = n == 0;
+
+pattern Positive(n: Int) -> Bool = n > 0;
+
+pattern Negative(n: Int) -> Bool = n < 0;
+
+// ============================================================================
+// Parameterized Active Patterns
+// Grammar: pattern_type_params = '(' , param_list , ')'
+// ============================================================================
+
+// Pattern with parameters
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = n >= lo && n <= hi;
+
+pattern DivisibleBy(divisor: Int)(n: Int) -> Bool = n % divisor == 0;
+
+pattern GreaterThan(threshold: Int)(n: Int) -> Bool = n > threshold;
+
+pattern LessThan(threshold: Int)(n: Int) -> Bool = n < threshold;
+
+pattern Between(min: Float, max: Float)(x: Float) -> Bool = x >= min && x <= max;
+
+// ============================================================================
+// Partial Active Patterns (Extraction)
+// ============================================================================
+
+// Returns Maybe for extraction
+pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
+
+pattern ParseFloat(s: Text) -> Maybe<Float> = s.parse_float();
+
+pattern HeadTail(list: List<T>) -> Maybe<(T, List<T>)> = {
+    if list.is_empty() {
+        None
+    } else {
+        Some((list[0], list[1..]))
+    }
+};
+
+// ============================================================================
+// Text Patterns
+// ============================================================================
+
+pattern StartsWith(prefix: Text)(s: Text) -> Bool = s.starts_with(prefix);
+
+pattern EndsWith(suffix: Text)(s: Text) -> Bool = s.ends_with(suffix);
+
+pattern Contains(substring: Text)(s: Text) -> Bool = s.contains(substring);
+
+pattern Matches(regex: Text)(s: Text) -> Bool = rx#"$regex".matches(s);
+
+pattern NonEmpty(s: Text) -> Bool = !s.is_empty();
+
+pattern Trimmed(s: Text) -> Bool = s == s.trim();
+
+// ============================================================================
+// Collection Patterns
+// ============================================================================
+
+pattern Empty(list: List<T>) -> Bool = list.is_empty();
+
+pattern Single(list: List<T>) -> Bool = list.len() == 1;
+
+pattern Pair(list: List<T>) -> Bool = list.len() == 2;
+
+pattern HasLength(len: Int)(list: List<T>) -> Bool = list.len() == len;
+
+pattern AllPositive(list: List<Int>) -> Bool = list.all(|x| x > 0);
+
+pattern Sorted(list: List<T>) -> Bool = list == list.sorted();
+
+// ============================================================================
+// Generic Active Patterns
+// ============================================================================
+
+pattern Is<T>(value: unknown) -> Bool = value is T;
+
+pattern Equals<T: Eq>(expected: T)(actual: T) -> Bool = actual == expected;
+
+pattern SameType<T>(a: T, b: T) -> Bool = true;  // Type checking ensures same type
+
+// ============================================================================
+// Compound Numeric Patterns
+// ============================================================================
+
+pattern PowerOfTwo(n: Int) -> Bool = n > 0 && (n & (n - 1)) == 0;
+
+pattern Prime(n: Int) -> Bool = {
+    if n < 2 { false }
+    else if n == 2 { true }
+    else if n % 2 == 0 { false }
+    else {
+        let i = 3;
+        while i * i <= n {
+            if n % i == 0 { return false; }
+            i += 2;
+        }
+        true
+    }
+};
+
+pattern Perfect(n: Int) -> Bool = {
+    let sum = 0;
+    for i in 1..n {
+        if n % i == 0 { sum += i; }
+    }
+    sum == n
+};
+
+// ============================================================================
+// Date/Time Patterns
+// ============================================================================
+
+pattern Weekend(d: Date) -> Bool = d.day_of_week() >= 5;
+
+pattern Weekday(d: Date) -> Bool = d.day_of_week() < 5;
+
+pattern InFuture(d: DateTime) -> Bool = d > DateTime.now();
+
+pattern InPast(d: DateTime) -> Bool = d < DateTime.now();
+
+// ============================================================================
+// Pattern Usage in Match Expressions
+// ============================================================================
+
+fn demonstrate_active_patterns() {
+    let n = 42;
+
+    match n {
+        Even() & Positive() => print("positive even"),
+        Odd() & Negative() => print("negative odd"),
+        Zero() => print("zero"),
+        InRange(1, 10)() => print("between 1 and 10"),
+        _ => print("other"),
+    }
+}
+
+fn demonstrate_extraction() {
+    let s = "123";
+
+    match s {
+        ParseInt() => |n| print(f"Parsed: {n}"),
+        NonEmpty() => print("Non-empty but not a number"),
+        _ => print("Empty string"),
+    }
+}
+
+fn demonstrate_list_patterns() {
+    let list = [1, 2, 3];
+
+    match list {
+        Empty() => print("empty"),
+        Single() => print("single element"),
+        Sorted() & AllPositive() => print("sorted positive list"),
+        _ => print("other"),
+    }
+}
+
+// ============================================================================
+// Visibility
+// ============================================================================
+
+pub pattern PublicPattern(x: Int) -> Bool = x > 0;
+
+internal pattern InternalPattern(x: Int) -> Bool = x > 0;
+
+// ============================================================================
+// Complex Patterns
+// ============================================================================
+
+pattern ValidEmail(s: Text) -> Bool = {
+    let at_pos = s.find("@");
+    match at_pos {
+        Some(pos) => {
+            let local = s[..pos];
+            let domain = s[pos + 1..];
+            !local.is_empty() && !domain.is_empty() && domain.contains(".")
+        },
+        None => false,
+    }
+};
+
+pattern ValidPhoneNumber(s: Text) -> Bool = {
+    let digits = s.chars().filter(|c| c.is_digit()).count();
+    digits >= 10 && digits <= 15
+};
+
+pattern JsonObject(s: Text) -> Bool = {
+    let trimmed = s.trim();
+    trimmed.starts_with("{") && trimmed.ends_with("}")
+};

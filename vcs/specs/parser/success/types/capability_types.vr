@@ -1,0 +1,174 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @level: L0
+// @tags: parser, types, capability, attenuation, access-control
+// @description: Comprehensive tests for capability-restricted types
+
+// ============================================================================
+// Basic Capability Types
+// Grammar: capability_type = path_type , 'with' , capability_list
+// ============================================================================
+
+// Single capability
+type ReadOnlyDb is Database with [Read];
+
+type WriteOnlyDb is Database with [Write];
+
+type AdminDb is Database with [Admin];
+
+// ============================================================================
+// Multiple Capabilities
+// ============================================================================
+
+type ReadWriteDb is Database with [Read, Write];
+
+type FullAccessDb is Database with [Read, Write, Admin];
+
+type TransactionalDb is Database with [Read, Write, Transaction];
+
+// ============================================================================
+// Built-in Capability Names
+// ============================================================================
+
+type NetworkRead is Network with [Read];
+type NetworkWrite is Network with [Write];
+type NetworkReadWrite is Network with [ReadWrite];
+type NetworkAdmin is Network with [Admin];
+type NetworkTransaction is Network with [Transaction];
+type FileRead is FileSystem with [Read];
+type FileWrite is FileSystem with [Write];
+type FileQuery is FileSystem with [Query];
+type FileExecute is FileSystem with [Execute];
+type LoggingCap is Logger with [Logging];
+type MetricsCap is Metrics with [Metrics];
+type ConfigCap is Config with [Config];
+type CacheCap is Cache with [Cache];
+type AuthCap is Auth with [Auth];
+
+// ============================================================================
+// Custom Capabilities
+// ============================================================================
+
+type CustomCap is Service with [MyCustomCapability];
+
+type MultiCustom is Resource with [CapA, CapB, CapC];
+
+type MixedCaps is Database with [Read, CustomQuery, CustomUpdate];
+
+// ============================================================================
+// Multiple Related Capabilities
+// ============================================================================
+
+type FlexibleRead is Database with [Read, Query];
+
+type FlexibleWrite is Database with [Write, Update, Insert];
+
+type ComplexAccess is Resource with [Read, Query, Write, Update];
+
+// ============================================================================
+// Capabilities with Generic Types
+// ============================================================================
+
+type GenericResource<T> is Resource<T> with [Read];
+
+type CapContainer<T, C> is Container<T> with [C];
+
+type MultiGeneric<K, V> is Map<K, V> with [Read, Write];
+
+// ============================================================================
+// Capabilities in Function Signatures
+// ============================================================================
+
+fn read_only(db: Database with [Read]) -> List<User> {
+    db.query("SELECT * FROM users")
+}
+
+fn read_write(db: Database with [Read, Write]) -> () {
+    db.execute("INSERT INTO users VALUES ...")
+}
+
+fn admin_only(db: Database with [Admin]) -> () {
+    db.execute("DROP TABLE users")
+}
+
+fn flexible_access(db: Database with [Read, Query]) -> List<User> {
+    db.get_users()
+}
+
+// ============================================================================
+// Capability Subtyping Examples
+// ============================================================================
+
+fn demonstrate_subtyping() {
+    let full: Database with [Read, Write, Admin] = get_db();
+
+    // Full access can be used where less is required
+    let read_only: Database with [Read] = full;
+    let read_write: Database with [Read, Write] = full;
+}
+
+// ============================================================================
+// Capabilities in Type Definitions
+// ============================================================================
+
+type UserService is {
+    db: Database with [Read, Write],
+    cache: Cache with [Read, Write],
+    logger: Logger with [Logging],
+};
+
+type ReadOnlyService is {
+    db: Database with [Read],
+    cache: Cache with [Read],
+};
+
+// ============================================================================
+// Capabilities in Protocol Definitions
+// ============================================================================
+
+type Repository<T> is protocol {
+    fn get(&self, id: Int) -> Maybe<T>;
+    fn save(&mut self, item: T) -> ();
+    fn delete(&mut self, id: Int) -> ();
+};
+
+// Protocol with capability-restricted Self bound in where clause
+type CapRepository<T> is protocol
+    where type Self: Database with [Read, Write]
+{
+    fn get(&self, id: Int) -> Maybe<T>;
+    fn save(&mut self, item: T) -> ();
+};
+
+// ============================================================================
+// Capability Attenuation in Implementations
+// ============================================================================
+
+implement UserRepository for DbUserRepo {
+    fn get(&self, id: Int) -> Maybe<User> {
+        self.db.query_one(id)
+    }
+
+    fn save(&mut self, user: User) -> () {
+        self.db.insert(user)
+    }
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Single capability in list
+type SingleCap is Resource with [Read];
+
+// Many capabilities
+type ManyCaps is Resource with [A, B, C, D, E, F, G, H];
+
+// Simple path type with capabilities
+type NestedCap is SubResource with [Read, Write];
+
+// Generic with capability constraint
+fn constrained<T: Database with [Read]>(db: T) -> () {
+    db.read()
+}

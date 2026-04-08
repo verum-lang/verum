@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tags-extra: const-generic
+// @level: L1
+// @tags: dependent-types, compile-time, bounds-verification
+
+/// Compile-time type bounds verification -- the type checker should
+/// statically verify that type-level constraints are satisfied.
+
+// Fixed-size array with compile-time size
+type Vec2 is [Float; 2];
+type Vec3 is [Float; 3];
+type Vec4 is [Float; 4];
+
+// Compile-time known sizes
+type SmallBuffer<T> is [T; 64];
+type CacheLine<T> is [T; 8];
+
+// Meta parameter bounds checked at instantiation
+type FixedStack<T, N: meta Int{> 0}> is {
+    data: [T; N],
+    top: Int{>= 0},
+};
+
+// Compile-time arithmetic in type position
+type PaddedBuffer<T, N: meta Int, Align: meta Int{> 0}> is {
+    data: [T; N + (Align - N % Align) % Align],
+};
+
+// Type-level literals verified at compile time
+fn dot2(a: Vec2, b: Vec2) -> Float {
+    a[0] * b[0] + a[1] * b[1]
+}
+
+fn dot3(a: Vec3, b: Vec3) -> Float {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: Vec3, b: Vec3) -> Vec3 {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+// Stack operations with compile-time capacity
+fn push<T, N: meta Int{> 0}>(stack: &mut FixedStack<T, N>, value: T) -> Bool {
+    if stack.top < N {
+        stack.data[stack.top] = value;
+        stack.top = stack.top + 1;
+        true
+    } else {
+        false
+    }
+}
+
+fn pop<T, N: meta Int{> 0}>(stack: &mut FixedStack<T, N>) -> Maybe<T> {
+    if stack.top > 0 {
+        stack.top = stack.top - 1;
+        Some(stack.data[stack.top])
+    } else {
+        None
+    }
+}
+
+fn main() {
+    let a: Vec3 = [1.0, 0.0, 0.0];
+    let b: Vec3 = [0.0, 1.0, 0.0];
+    let c = cross(a, b);
+    assert(c[2] == 1.0);  // Cross of x,y is z
+
+    let d = dot3(a, b);
+    assert(d == 0.0);  // Orthogonal vectors
+
+    let mut stack: FixedStack<Int, 4> = FixedStack {
+        data: [0; 4],
+        top: 0,
+    };
+    assert(push(&mut stack, 10) == true);
+    assert(push(&mut stack, 20) == true);
+    let val = pop(&mut stack);
+    assert(val == Some(20));
+}

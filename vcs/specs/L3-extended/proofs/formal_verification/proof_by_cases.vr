@@ -1,0 +1,78 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-verification, cases
+// @timeout: 15000
+
+/// Proof by cases for formal verification
+
+theorem abs_nonneg(x: Int): abs(x) >= 0 {
+    proof by cases on x {
+        case x >= 0 => { have: abs(x) == x by definition; conclude by assumption }
+        case x < 0 => { have: abs(x) == -x by definition; conclude by arithmetic }
+    }
+}
+
+theorem max_ge_both(a: Int, b: Int): max(a, b) >= a && max(a, b) >= b {
+    proof by cases {
+        case a >= b => { have: max(a, b) == a by definition; conclude by arithmetic }
+        case a < b => { have: max(a, b) == b by definition; conclude by arithmetic }
+    }
+}
+
+theorem min_le_both(a: Int, b: Int): min(a, b) <= a && min(a, b) <= b {
+    proof by cases {
+        case a <= b => { conclude by auto }
+        case a > b => { conclude by auto }
+    }
+}
+
+theorem option_cases<T>(opt: Maybe<T>): opt == None || exists v: T. opt == Some(v) {
+    proof by cases on opt {
+        case None => { left; trivial }
+        case Some(v) => { right; witness v; trivial }
+    }
+}
+
+theorem trichotomy(a: Int, b: Int): a < b || a == b || a > b {
+    proof by cases {
+        case a < b => { left; trivial }
+        case a == b => { right; left; trivial }
+        case a > b => { right; right; trivial }
+    }
+}
+
+theorem bool_exhaustive(b: Bool): b == true || b == false {
+    proof by cases on b {
+        case true => { left; trivial }
+        case false => { right; trivial }
+    }
+}
+
+theorem nat_even_or_odd(n: Int): n % 2 == 0 || n % 2 == 1 { proof by auto }
+
+theorem sign_trichotomy(x: Int): x > 0 || x == 0 || x < 0 {
+    proof by cases {
+        case x > 0 => { left; trivial }
+        case x == 0 => { right; left; trivial }
+        case x < 0 => { right; right; trivial }
+    }
+}
+
+theorem list_cases<T>(xs: List<T>): xs == Nil || exists h: T. exists t: List<T>. xs == Cons(h, t) {
+    proof by cases on xs {
+        case Nil => { left; trivial }
+        case Cons(h, t) => { right; witness h; witness t; trivial }
+    }
+}
+
+theorem result_split<T, E>(r: Result<T, E>):
+    (exists v: T. r == Ok(v)) || (exists e: E. r == Err(e))
+{
+    proof by cases on r {
+        case Ok(v) => { left; witness v; trivial }
+        case Err(e) => { right; witness e; trivial }
+    }
+}
+
+fn main() {}

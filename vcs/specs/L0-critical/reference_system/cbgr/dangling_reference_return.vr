@@ -1,0 +1,23 @@
+// @test: typecheck-fail
+// @expected-error: E312
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, dangling, return, negative-test
+
+/// Test returning reference to local variable - detected at compile-time via lifetime analysis.
+/// When the function returns, the local is dropped.
+/// The returned reference would be invalid.
+/// Verum detects this at COMPILE-TIME.
+/// Spec: 26-cbgr-implementation.md#dangling-prevention
+
+fn return_local_ref() -> &Int {
+    let local = 42;
+    &local  // Reference returned - CBGR tracks generation
+}
+// local is dropped here, generation bumped
+
+fn main() {
+    let ref_val = return_local_ref();
+    // CBGR detects generation mismatch at runtime
+    print(*ref_val);  // PANIC: generation mismatch (local no longer exists)
+}

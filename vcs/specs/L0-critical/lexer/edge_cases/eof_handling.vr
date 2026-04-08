@@ -1,0 +1,29 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, edge-cases, eof
+
+// End-of-file handling edge cases
+
+// This file tests various EOF scenarios
+
+fn test_eof_handling() {
+    // Normal code before EOF tests
+    let normal_var = 42;
+    let another_var = "hello";
+}
+
+fn normal_function() -> Int {
+    42
+}
+
+// Case 6: File ends with closing brace
+fn function_at_eof() {
+    let x = 42;
+}
+
+// Case 10: File ends in block comment
+/* This block comment ends just before EOF */
+
+// Case 11: File ends in line comment (this is it)
+// Final line comment - no newline after

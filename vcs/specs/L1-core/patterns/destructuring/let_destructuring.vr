@@ -1,0 +1,275 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, destructuring, let
+//
+// Tests destructuring patterns in let bindings.
+// Let destructuring allows extracting values from compound types at declaration time.
+
+//------------------------------------------------------------------------------
+// Basic Tuple Destructuring
+//------------------------------------------------------------------------------
+
+/// Simple pair destructuring.
+fn let_pair() -> Int {
+    let (a, b) = (1, 2);
+    a + b
+}
+
+/// Triple destructuring.
+fn let_triple() -> Int {
+    let (x, y, z) = (10, 20, 30);
+    x + y + z
+}
+
+/// Nested tuple destructuring.
+fn let_nested_tuple() -> Int {
+    let ((a, b), (c, d)) = ((1, 2), (3, 4));
+    a + b + c + d
+}
+
+/// Deeply nested tuple.
+fn let_deep_tuple() -> Int {
+    let (((a, b), c), d) = (((1, 2), 3), 4);
+    a + b + c + d
+}
+
+//------------------------------------------------------------------------------
+// Tuple Destructuring with Wildcards
+//------------------------------------------------------------------------------
+
+/// Ignore first element.
+fn let_ignore_first() -> Int {
+    let (_, b) = (1, 2);
+    b
+}
+
+/// Ignore middle element.
+fn let_ignore_middle() -> Int {
+    let (a, _, c) = (1, 2, 3);
+    a + c
+}
+
+/// Ignore multiple elements.
+fn let_ignore_multiple() -> Int {
+    let (first, _, _, last) = (1, 2, 3, 4);
+    first + last
+}
+
+//------------------------------------------------------------------------------
+// Struct Destructuring
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Point3D is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    active: Bool,
+};
+
+/// Simple struct destructuring.
+fn let_struct() -> Int {
+    let p = Point { x: 3, y: 4 };
+    let Point { x, y } = p;
+    x + y
+}
+
+/// Struct with field renaming.
+fn let_struct_rename() -> Int {
+    let p = Point { x: 3, y: 4 };
+    let Point { x: px, y: py } = p;
+    px * py
+}
+
+/// Struct with rest pattern.
+fn let_struct_rest() -> Int {
+    let person = Person { name: "Alice", age: 30, active: true };
+    let Person { age, .. } = person;
+    age
+}
+
+/// Nested struct destructuring.
+fn let_nested_struct() -> Int {
+    type Nested is {
+        point: Point,
+        scale: Int,
+    };
+    let n = Nested { point: Point { x: 3, y: 4 }, scale: 2 };
+    let Nested { point: Point { x, y }, scale } = n;
+    (x + y) * scale
+}
+
+//------------------------------------------------------------------------------
+// Type-Annotated Destructuring
+//------------------------------------------------------------------------------
+
+/// Destructuring with type annotation.
+fn let_typed_tuple() -> Int {
+    let (x, y): (Int, Int) = (10, 20);
+    x + y
+}
+
+/// Struct with type annotation.
+fn let_typed_struct() -> Int {
+    let Point { x, y }: Point = Point { x: 5, y: 6 };
+    x + y
+}
+
+//------------------------------------------------------------------------------
+// Mutable Destructuring
+//------------------------------------------------------------------------------
+
+/// Mutable tuple bindings.
+fn let_mut_tuple() -> Int {
+    let (mut a, mut b) = (1, 2);
+    a = a + 10;
+    b = b + 20;
+    a + b
+}
+
+/// Mixed mutability.
+fn let_mixed_mut() -> Int {
+    let (a, mut b, c) = (1, 2, 3);
+    b = b * 10;
+    a + b + c
+}
+
+/// Mutable struct fields.
+fn let_mut_struct() -> Int {
+    let Point { mut x, mut y } = Point { x: 3, y: 4 };
+    x = x * 2;
+    y = y * 2;
+    x + y
+}
+
+//------------------------------------------------------------------------------
+// Destructuring from Expressions
+//------------------------------------------------------------------------------
+
+/// Destructure function return.
+fn let_from_function() -> Int {
+    fn get_pair() -> (Int, Int) {
+        (10, 20)
+    }
+    let (a, b) = get_pair();
+    a + b
+}
+
+/// Chained destructuring.
+fn let_chained() -> Int {
+    let pair = (1, 2);
+    let (a, b) = pair;
+    let sum = a + b;
+    sum
+}
+
+//------------------------------------------------------------------------------
+// Const Destructuring
+//------------------------------------------------------------------------------
+
+/// Const tuple destructuring.
+const ORIGIN: (Int, Int) = (0, 0);
+
+fn use_const_destruct() -> Int {
+    let (x, y) = ORIGIN;
+    x + y
+}
+
+//------------------------------------------------------------------------------
+// Destructuring in Blocks
+//------------------------------------------------------------------------------
+
+/// Destructure inside block.
+fn let_in_block() -> Int {
+    let result = {
+        let (a, b) = (10, 20);
+        a * b
+    };
+    result
+}
+
+/// Multiple destructures in block.
+fn let_multiple_block() -> Int {
+    let (x, y) = {
+        let a = 5;
+        let b = 10;
+        (a, b)
+    };
+    x + y
+}
+
+//------------------------------------------------------------------------------
+// Destructure with Conditional
+//------------------------------------------------------------------------------
+
+/// Destructure based on condition.
+fn let_conditional() -> Int {
+    let condition = true;
+    let (a, b) = if condition { (1, 2) } else { (3, 4) };
+    a + b
+}
+
+/// Destructure match result.
+fn let_from_match() -> Int {
+    let value = 42;
+    let (sign, magnitude) = match value {
+        n if n >= 0 => (1, n),
+        n => (-1, -n),
+    };
+    sign * magnitude
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+@test
+fn main() {
+    // Basic tuples
+    assert(let_pair() == 3);
+    assert(let_triple() == 60);
+    assert(let_nested_tuple() == 10);
+    assert(let_deep_tuple() == 10);
+
+    // Wildcards
+    assert(let_ignore_first() == 2);
+    assert(let_ignore_middle() == 4);
+    assert(let_ignore_multiple() == 5);
+
+    // Struct
+    assert(let_struct() == 7);
+    assert(let_struct_rename() == 12);
+    assert(let_struct_rest() == 30);
+    assert(let_nested_struct() == 14);
+
+    // Typed
+    assert(let_typed_tuple() == 30);
+    assert(let_typed_struct() == 11);
+
+    // Mutable
+    assert(let_mut_tuple() == 33);
+    assert(let_mixed_mut() == 24);
+    assert(let_mut_struct() == 14);
+
+    // From expressions
+    assert(let_from_function() == 30);
+    assert(let_chained() == 3);
+
+    // Block
+    assert(let_in_block() == 200);
+    assert(let_multiple_block() == 15);
+
+    // Conditional
+    assert(let_conditional() == 3);
+    assert(let_from_match() == 42);
+}

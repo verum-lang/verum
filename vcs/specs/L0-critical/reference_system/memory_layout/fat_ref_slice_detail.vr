@@ -1,0 +1,112 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, fat-ref, slices
+
+/// Test reference and array behavior with CBGR protection.
+/// References carry generation and epoch information for memory safety.
+/// Spec: 26-cbgr-implementation.md#fat-references
+
+fn main() {
+    test_array_basics();
+    print("  [OK] test_array_basics");
+    test_heap_reference_with_cbgr();
+    print("  [OK] test_heap_reference_with_cbgr");
+    test_multiple_heap_allocations();
+    print("  [OK] test_multiple_heap_allocations");
+    test_reference_metadata_preservation();
+    print("  [OK] test_reference_metadata_preservation");
+
+    print("All fat reference tests passed!");
+}
+
+/// Test basic array operations
+fn test_array_basics() {
+    let array = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    // Array length
+    assert(array.len() == 8);
+
+    // Element access
+    assert(array[0] == 1);
+    assert(array[7] == 8);
+
+    // Sum via iteration
+    let mut sum = 0;
+    for i in 0..array.len() {
+        sum = sum + array[i];
+    }
+    assert(sum == 36);
+}
+
+/// Test heap references carry CBGR information
+fn test_heap_reference_with_cbgr() {
+    let heap_val = Heap.new(42);
+    let ref_val: &Int = &*heap_val;
+
+    // CBGR generation tracking
+    let generation = heap_val.generation();
+    assert(generation > 0);
+
+    // Reference captures generation
+    assert(ref_val.stored_generation() == generation);
+
+    // Header inspection
+    assert(heap_val.is_allocated());
+    assert(!heap_val.is_freed());
+
+    // Epoch tracking
+    assert(ref_val.is_epoch_valid());
+}
+
+/// Test multiple heap allocations maintain layout integrity
+fn test_multiple_heap_allocations() {
+    let val1 = Heap.new(10);
+    let val2 = Heap.new(20);
+    let val3 = Heap.new(30);
+
+    // Different allocations have different, increasing generations
+    assert(val1.generation() < val2.generation());
+    assert(val2.generation() < val3.generation());
+
+    // All are valid allocations
+    assert(val1.is_allocated());
+    assert(val2.is_allocated());
+    assert(val3.is_allocated());
+
+    // Header epochs are all valid
+    assert(val1.header_epoch() > 0);
+    assert(val2.header_epoch() > 0);
+    assert(val3.header_epoch() > 0);
+
+    // Values are correct
+    let r1: &Int = &*val1;
+    let r2: &Int = &*val2;
+    let r3: &Int = &*val3;
+    assert(*r1 == 10);
+    assert(*r2 == 20);
+    assert(*r3 == 30);
+}
+
+/// Test that reference metadata is preserved across operations
+fn test_reference_metadata_preservation() {
+    let value = Heap.new(42);
+
+    // Create two references to same allocation
+    let ref1: &Int = &*value;
+    let ref2: &Int = &*value;
+
+    // Same generation (same allocation)
+    assert(ref1.stored_generation() == ref2.stored_generation());
+
+    // Same epoch (created at same time)
+    assert(ref1.epoch() == ref2.epoch());
+
+    // Both valid
+    assert(ref1.is_epoch_valid());
+    assert(ref2.is_epoch_valid());
+
+    // Both read same value
+    assert(*ref1 == 42);
+    assert(*ref2 == 42);
+}

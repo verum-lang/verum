@@ -1,0 +1,44 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, struct, simple
+// @description: Simple struct field access test
+
+module specs.core.math.struct_test;
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+implement Point {
+    public fn new(x: Int, y: Int) -> Point {
+        Point { x, y }
+    }
+
+    public fn get_x(&self) -> Int {
+        self.x
+    }
+
+    public fn get_y(&self) -> Int {
+        self.y
+    }
+}
+
+fn main() {
+    print("Creating Point(3, 5)...");
+    let p = Point.new(3, 5);
+    print("Point created!");
+
+    print("Getting x...");
+    let x = p.get_x();
+    print(f"x = {x}");
+
+    print("Getting y...");
+    let y = p.get_y();
+    print(f"y = {y}");
+
+    assert(x == 3);
+    assert(y == 5);
+    print("All assertions passed!");
+}

@@ -1,0 +1,271 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, gpu-unified-memory
+// @timeout: 10000
+
+/// Tests managed/unified memory patterns: page migration simulation,
+/// allocation lifecycle, access tracking, and eviction policies.
+/// All computation is pure integer arithmetic (no actual GPU needed).
+
+fn main() {
+    test_allocation_lifecycle();
+    test_page_migration();
+    test_access_tracking();
+    test_eviction_lru();
+}
+
+/// Simulated unified memory allocation lifecycle: alloc, prefetch, access, free
+fn test_allocation_lifecycle() {
+    println("=== Allocation Lifecycle ===");
+
+    // Allocation states: 0=free, 1=allocated, 2=prefetched, 3=accessed, 4=freed
+    let state_names = ["free", "allocated", "prefetched", "accessed", "freed"];
+
+    // Simulate 5 allocations with different sizes and state transitions
+    let alloc_sizes = [4096, 8192, 16384, 32768, 65536]; // bytes
+    let num_allocs = 5;
+
+    let mut total_allocated = 0;
+    let mut total_prefetched = 0;
+
+    let mut i = 0;
+    while i < num_allocs {
+        let size = alloc_sizes[i];
+        total_allocated = total_allocated + size;
+
+        // Each allocation goes through: alloc -> prefetch -> access -> free
+        let mut state = 1; // allocated
+        println(f"alloc[{i}]: size={size}, state={state_names[state]}");
+
+        state = 2; // prefetched
+        total_prefetched = total_prefetched + size;
+        println(f"alloc[{i}]: prefetch to device, state={state_names[state]}");
+
+        state = 3; // accessed
+        println(f"alloc[{i}]: device access, state={state_names[state]}");
+
+        state = 4; // freed
+        total_allocated = total_allocated - size;
+        println(f"alloc[{i}]: freed, state={state_names[state]}, remaining={total_allocated}");
+
+        i = i + 1;
+    }
+
+    println(f"total_prefetched: {total_prefetched}");
+    println(f"final_allocated: {total_allocated}");
+}
+
+/// Simulate page migration between host and device.
+/// Pages move based on access patterns: if accessed by device, migrate to device; vice versa.
+fn test_page_migration() {
+    println("\n=== Page Migration ===");
+
+    let page_size = 4096;
+    let num_pages = 8;
+
+    // Location: 0=host, 1=device
+    let mut locations = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Access sequence: (page_index, accessor) where accessor 0=host, 1=device
+    let access_pages = [0, 1, 2, 3, 0, 4, 5, 1, 6, 7, 0, 2];
+    let access_device = [1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0];
+    let num_accesses = 12;
+
+    let mut migrations = 0;
+    let mut migration_bytes = 0;
+
+    let mut a = 0;
+    while a < num_accesses {
+        let page = access_pages[a];
+        let device = access_device[a];
+        let accessor = if device == 1 { "device" } else { "host" };
+
+        if locations[page] != device {
+            // Need migration
+            let from = if locations[page] == 0 { "host" } else { "device" };
+            let to = if device == 0 { "host" } else { "device" };
+            println(f"migrate page {page}: {from} -> {to}");
+            locations[page] = device;
+            migrations = migrations + 1;
+            migration_bytes = migration_bytes + page_size;
+        } else {
+            println(f"page {page}: already on {accessor}");
+        }
+        a = a + 1;
+    }
+
+    println(f"total_migrations: {migrations}");
+    println(f"total_migration_bytes: {migration_bytes}");
+
+    // Final page distribution
+    let mut on_host = 0;
+    let mut on_device = 0;
+    let mut p = 0;
+    while p < num_pages {
+        if locations[p] == 0 {
+            on_host = on_host + 1;
+        } else {
+            on_device = on_device + 1;
+        }
+        p = p + 1;
+    }
+    println(f"final: host={on_host}, device={on_device}");
+}
+
+/// Track read/write access patterns for managed memory pages
+fn test_access_tracking() {
+    println("\n=== Access Tracking ===");
+
+    let num_pages = 6;
+
+    // Access counters per page: [read_count, write_count]
+    let mut read_counts = [0, 0, 0, 0, 0, 0];
+    let mut write_counts = [0, 0, 0, 0, 0, 0];
+
+    // Access log: (page, is_write)
+    let access_page = [0, 1, 0, 2, 3, 1, 0, 4, 5, 2, 0, 3, 1, 5, 0, 2];
+    let access_write = [0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0];
+    let num_accesses = 16;
+
+    let mut a = 0;
+    while a < num_accesses {
+        let page = access_page[a];
+        if access_write[a] == 1 {
+            write_counts[page] = write_counts[page] + 1;
+        } else {
+            read_counts[page] = read_counts[page] + 1;
+        }
+        a = a + 1;
+    }
+
+    println("access summary:");
+    let mut total_reads = 0;
+    let mut total_writes = 0;
+    let mut i = 0;
+    while i < num_pages {
+        println(f"  page {i}: reads={read_counts[i]}, writes={write_counts[i]}");
+        total_reads = total_reads + read_counts[i];
+        total_writes = total_writes + write_counts[i];
+        i = i + 1;
+    }
+    println(f"total: reads={total_reads}, writes={total_writes}");
+
+    // Find hottest page (most total accesses)
+    let mut hottest = 0;
+    let mut max_access = read_counts[0] + write_counts[0];
+    let mut j = 1;
+    while j < num_pages {
+        let total = read_counts[j] + write_counts[j];
+        if total > max_access {
+            max_access = total;
+            hottest = j;
+        }
+        j = j + 1;
+    }
+    println(f"hottest_page: {hottest} ({max_access} accesses)");
+
+    // Read/write ratio per page
+    println("read/write ratio:");
+    let mut k = 0;
+    while k < num_pages {
+        let total = read_counts[k] + write_counts[k];
+        if total > 0 {
+            let read_pct = read_counts[k] * 100 / total;
+            println(f"  page {k}: {read_pct}% reads");
+        } else {
+            println(f"  page {k}: no accesses");
+        }
+        k = k + 1;
+    }
+}
+
+/// LRU (Least Recently Used) eviction simulation for a limited device memory cache
+fn test_eviction_lru() {
+    println("\n=== LRU Eviction ===");
+
+    // Device can hold at most 4 pages
+    let cache_size = 4;
+
+    // Cache slots: -1 means empty
+    let mut cache = [-1, -1, -1, -1];
+    // Last access time for each slot
+    let mut last_access = [0, 0, 0, 0];
+    let mut cache_count = 0;
+
+    // Page access sequence
+    let accesses = [0, 1, 2, 3, 4, 0, 1, 5, 2, 6];
+    let num_accesses = 10;
+
+    let mut hits = 0;
+    let mut misses = 0;
+    let mut evictions = 0;
+
+    let mut t = 0;
+    while t < num_accesses {
+        let page = accesses[t];
+
+        // Check if page is in cache
+        let mut found = false;
+        let mut slot = 0;
+        while slot < cache_size {
+            if cache[slot] == page {
+                found = true;
+                last_access[slot] = t;
+                slot = cache_size; // break
+            } else {
+                slot = slot + 1;
+            }
+        }
+
+        if found {
+            hits = hits + 1;
+            println(f"t={t}: page {page} HIT");
+        } else {
+            misses = misses + 1;
+
+            if cache_count < cache_size {
+                // Cache not full, insert in empty slot
+                cache[cache_count] = page;
+                last_access[cache_count] = t;
+                cache_count = cache_count + 1;
+                println(f"t={t}: page {page} MISS (inserted, fill={cache_count}/{cache_size})");
+            } else {
+                // Evict LRU
+                let mut lru_slot = 0;
+                let mut lru_time = last_access[0];
+                let mut s = 1;
+                while s < cache_size {
+                    if last_access[s] < lru_time {
+                        lru_time = last_access[s];
+                        lru_slot = s;
+                    }
+                    s = s + 1;
+                }
+                let evicted = cache[lru_slot];
+                println(f"t={t}: page {page} MISS (evicted page {evicted} from slot {lru_slot})");
+                cache[lru_slot] = page;
+                last_access[lru_slot] = t;
+                evictions = evictions + 1;
+            }
+        }
+        t = t + 1;
+    }
+
+    println(f"hits: {hits}, misses: {misses}, evictions: {evictions}");
+    let hit_rate = hits * 100 / num_accesses;
+    println(f"hit_rate: {hit_rate}%");
+
+    // Final cache contents
+    println("final cache:");
+    let mut c = 0;
+    while c < cache_size {
+        if cache[c] >= 0 {
+            println(f"  slot {c}: page {cache[c]} (last_access={last_access[c]})");
+        } else {
+            println(f"  slot {c}: empty");
+        }
+        c = c + 1;
+    }
+}

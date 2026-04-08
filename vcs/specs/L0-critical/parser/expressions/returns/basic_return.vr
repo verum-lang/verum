@@ -1,0 +1,177 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, returns, basic
+
+// Basic return expressions
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Point is { x: Int, y: Int };
+type Data is { value: Int };
+type Output is { value: Int, timestamp: Int };
+type Error is ParseError | IOError;
+type ParseError is Empty | InvalidFormat;
+type IOError is {};
+
+// Helper functions
+fn println<T>(x: T) { }
+fn now() -> Int { 0 }
+
+// Simple return with value
+fn add(a: Int, b: Int) -> Int {
+    return a + b
+}
+
+// Return without value (Unit)
+fn log_message(msg: Text) {
+    println(msg);
+    return
+}
+
+// Implicit return (last expression)
+fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+// Return from block
+fn compute(x: Int) -> Int {
+    let res = {
+        let temp = x * 2;
+        temp + 1
+    };
+    return res
+}
+
+// Early return
+fn validate(x: Int) -> Result<Int, Text> {
+    if x < 0 {
+        return Result.Err("negative value")
+    }
+    if x > 100 {
+        return Result.Err("too large")
+    }
+    return Result.Ok(x)
+}
+
+// Multiple return paths
+fn classify(n: Int) -> Text {
+    if n < 0 {
+        return "negative"
+    } else if n == 0 {
+        return "zero"
+    } else {
+        return "positive"
+    }
+}
+
+// Return in match
+fn describe(opt: Maybe<Int>) -> Text {
+    match opt {
+        Maybe.Some(x) if x > 0 => return "positive",
+        Maybe.Some(x) if x < 0 => return "negative",
+        Maybe.Some(0) => return "zero",
+        Maybe.None => return "nothing",
+    }
+}
+
+// Return in loop
+fn find_index(arr: List<Int>, target: Int) -> Maybe<Int> {
+    for (i, val) in arr.enumerate() {
+        if val == target {
+            return Maybe.Some(i)
+        }
+    }
+    return Maybe.None
+}
+
+// Return with complex expression
+fn calculate(data: Data) -> Result<Output, Error> {
+    return Result.Ok(Output {
+        value: data.value * 2,
+        timestamp: now(),
+    })
+}
+
+// Return in nested blocks
+fn process(x: Int) -> Int {
+    let outer = {
+        let inner = {
+            if x < 0 {
+                return 0  // Returns from function, not block
+            }
+            x * 2
+        };
+        inner + 1
+    };
+    outer
+}
+
+// Return with method chain
+fn format_name(first: Text, last: Text) -> Text {
+    return first
+        .trim()
+        .to_uppercase()
+        .concat(" ")
+        .concat(last.trim().to_uppercase())
+}
+
+// Return tuple
+fn minmax(arr: List<Int>) -> (Int, Int) {
+    let min = arr.min().unwrap();
+    let max = arr.max().unwrap();
+    return (min, max)
+}
+
+// Return struct
+fn make_point(x: Int, y: Int) -> Point {
+    return Point { x, y }
+}
+
+// Return Option/Maybe
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        return Maybe.None
+    }
+    return Maybe.Some(a / b)
+}
+
+// Return Result
+fn parse_int(s: Text) -> Result<Int, ParseError> {
+    if s.is_empty() {
+        return Result.Err(ParseError.Empty)
+    }
+    // ... parsing logic
+    return Result.Ok(42)
+}
+
+// Async return
+async fn fetch_data(url: Text) -> Result<Data, Error> {
+    let response = get_response(url).await;
+    let data = response.json().await;
+    return Result.Ok(data)
+}
+
+fn get_response(url: Text) -> Response { Response {} }
+type Response is { };
+
+// Return in closure - must be inside a function
+fn test_return_in_closure() {
+    let finder = |arr: List<Int>, target: Int| -> Maybe<Int> {
+        for (i, x) in arr.enumerate() {
+            if x == target {
+                return Maybe.Some(i)
+            }
+        }
+        return Maybe.None
+    };
+}
+
+// Generic return
+fn first<T>(arr: List<T>) -> Maybe<T> {
+    if arr.is_empty() {
+        return Maybe.None
+    }
+    return Maybe.Some(arr[0])
+}

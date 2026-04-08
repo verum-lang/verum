@@ -1,0 +1,92 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, let, binding, typed
+
+fn test_primitive_types() {
+    // Typed let binding with primitive types
+    let x: Int = 5;
+    let y: Float = 3.14;
+    let z: Bool = true;
+    let s: Text = "hello";
+}
+
+fn test_generic_types() {
+    // Typed binding with generic types
+    let list: List<Int> = [1, 2, 3];
+    let map: Map<Text, Int> = Map.new();
+    let maybe: Maybe<Int> = Some(42);
+
+    // Typed binding with nested generic types
+    let nested: List<Maybe<Int>> = [Some(1), None, Some(3)];
+    let complex: Map<Text, List<Int>> = Map.new();
+}
+
+fn test_tuple_types() {
+    // Typed binding with tuple type
+    let pair: (Int, Int) = (1, 2);
+    let triple: (Int, Text, Bool) = (1, "two", true);
+}
+
+fn test_function_types() {
+    // Typed binding with function type
+    let f: fn(Int) -> Int = |x| x * 2;
+    let g: fn(Int, Int) -> Int = |a, b| a + b;
+}
+
+fn test_reference_types(value: Int, safe_value: Int, ptr: Int) {
+    // Typed binding with reference types
+    let r: &Int = &value;
+    let checked_ref: &checked Int = &checked safe_value;
+
+    // Typed binding with unsafe reference
+    let unsafe_ref: &unsafe Int = &unsafe ptr;
+}
+
+fn test_array_types() {
+    // Typed binding with array type
+    let fixed_array: [Int; 5] = [1, 2, 3, 4, 5];
+}
+
+fn test_result_types() {
+    // Typed binding with Result type
+    let res: Result<Int, Error> = Ok(42);
+}
+
+fn test_complex_types() {
+    // Typed binding with complex nested types
+    let deep: List<Map<Text, Maybe<Result<Int, Error>>>> = [];
+}
+
+fn test_refinement_types() {
+    // Typed binding with refinement type
+    let positive: Int{it > 0} = 42;
+    let percentage: Float{it >= 0.0 && it <= 1.0} = 0.5;
+}
+
+fn test_protocol_object_types(value: Display, boxed: Heap<Display>) {
+    // Typed binding with protocol object type
+    let display_val: Display = value;
+    let ordered: Heap<Display> = boxed;
+}
+
+fn test_cbgr_references(text: Text) {
+    // NOTE: Lifetime annotations ('a, 'static) are NOT supported in Verum.
+    // Verum uses CBGR (Compile-time Borrow-check with Generation-based References)
+    // instead of Rust-style lifetimes. References use generation counters.
+
+    // In Verum, just use regular reference types:
+    let borrowed: &Text = &text;
+    let static_text: Text = "hello";
+}
+
+fn test_async_types() {
+    // Typed binding with async function type
+    let async_fn: fn(Int) -> Future<Result<Text, Error>> = |x| async { Ok("result") };
+}
+
+fn test_unit_type() {
+    // Typed binding with unit type
+    let unit: () = ();
+    let unit_fn: fn() -> () = || ();
+}

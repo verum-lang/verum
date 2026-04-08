@@ -1,0 +1,184 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, compile-time, meta-functions
+
+/// Compile-time вычисления через meta функции
+///
+/// Meta функции выполняются во время компиляции,
+/// позволяя вычислять константы и генерировать код.
+/// Тесты используют только базовые возможности языка без stdlib.
+
+// ============================================================
+// БАЗОВЫЕ МАТЕМАТИЧЕСКИЕ ФУНКЦИИ
+// ============================================================
+
+@allow(unbounded_recursion)
+meta fn factorial(n: UInt64) -> UInt64 {
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+@allow(unbounded_recursion)
+meta fn fibonacci(n: UInt64) -> UInt64 {
+    if n <= 1 { n }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+// Использование в константах
+const FACT_5: UInt64 = factorial(5);   // 120
+const FACT_10: UInt64 = factorial(10); // 3628800
+const FIB_10: UInt64 = fibonacci(10);  // 55
+
+// ============================================================
+// БИТОВЫЕ ОПЕРАЦИИ
+// ============================================================
+
+meta fn is_power_of_two(n: UInt64) -> Bool {
+    n > 0 && (n & (n - 1)) == 0
+}
+
+meta fn next_power_of_two(n: UInt64) -> UInt64 {
+    if is_power_of_two(n) { n }
+    else {
+        let mut v = n;
+        v = v | (v >> 1);
+        v = v | (v >> 2);
+        v = v | (v >> 4);
+        v = v | (v >> 8);
+        v = v | (v >> 16);
+        v = v | (v >> 32);
+        v + 1
+    }
+}
+
+meta fn count_ones(n: UInt64) -> UInt64 {
+    let mut count: UInt64 = 0;
+    let mut x = n;
+    while x > 0 {
+        count = count + (x & 1);
+        x = x >> 1;
+    }
+    count
+}
+
+const BUFFER_SIZE: UInt64 = next_power_of_two(1000);  // 1024
+const IS_POW2_16: Bool = is_power_of_two(16);         // true
+const IS_POW2_15: Bool = is_power_of_two(15);         // false
+const ONES_255: UInt64 = count_ones(255);             // 8
+
+// ============================================================
+// COMPILE-TIME ХЭШИРОВАНИЕ
+// ============================================================
+
+meta fn fnv1a_hash_simple(a: UInt64, b: UInt64, c: UInt64) -> UInt64 {
+    // FNV-1a style hash без работы со строками
+    let fnv_offset: UInt64 = 14695981039346656037;
+    let fnv_prime: UInt64 = 1099511628211;
+
+    let mut hash = fnv_offset;
+    hash = (hash ^ a) * fnv_prime;
+    hash = (hash ^ b) * fnv_prime;
+    hash = (hash ^ c) * fnv_prime;
+    hash
+}
+
+const HASH_123: UInt64 = fnv1a_hash_simple(1, 2, 3);
+const HASH_456: UInt64 = fnv1a_hash_simple(4, 5, 6);
+
+// ============================================================
+// GCD И ДРУГИЕ АЛГОРИТМЫ
+// ============================================================
+
+@allow(unbounded_recursion)
+meta fn gcd(a: UInt64, b: UInt64) -> UInt64 {
+    if b == 0 { a }
+    else { gcd(b, a % b) }
+}
+
+meta fn lcm(a: UInt64, b: UInt64) -> UInt64 {
+    (a / gcd(a, b)) * b
+}
+
+meta fn is_prime(n: UInt64) -> Bool {
+    if n < 2 { return false; }
+    if n == 2 { return true; }
+    if n % 2 == 0 { return false; }
+
+    let mut i: UInt64 = 3;
+    while i * i <= n {
+        if n % i == 0 { return false; }
+        i = i + 2;
+    }
+    true
+}
+
+const GCD_48_18: UInt64 = gcd(48, 18);     // 6
+const LCM_4_6: UInt64 = lcm(4, 6);         // 12
+const IS_PRIME_17: Bool = is_prime(17);     // true
+const IS_PRIME_18: Bool = is_prime(18);     // false
+
+// ============================================================
+// COMPILE-TIME МАССИВЫ (фиксированного размера)
+// ============================================================
+
+meta fn generate_squares_4() -> [UInt64; 4] {
+    [0, 1, 4, 9]
+}
+
+meta fn generate_fibonacci_array() -> [UInt64; 8] {
+    [
+        fibonacci(0), fibonacci(1), fibonacci(2), fibonacci(3),
+        fibonacci(4), fibonacci(5), fibonacci(6), fibonacci(7)
+    ]
+}
+
+const SQUARES: [UInt64; 4] = generate_squares_4();
+const FIB_ARRAY: [UInt64; 8] = generate_fibonacci_array();
+
+// ============================================================
+// COMPILE-TIME УСЛОВНАЯ ЛОГИКА
+// ============================================================
+
+meta fn abs_diff(a: Int64, b: Int64) -> Int64 {
+    if a > b { a - b }
+    else { b - a }
+}
+
+meta fn max3(a: UInt64, b: UInt64, c: UInt64) -> UInt64 {
+    if a >= b && a >= c { a }
+    else if b >= c { b }
+    else { c }
+}
+
+meta fn min3(a: UInt64, b: UInt64, c: UInt64) -> UInt64 {
+    if a <= b && a <= c { a }
+    else if b <= c { b }
+    else { c }
+}
+
+const DIFF: Int64 = abs_diff(10, 25);      // 15
+const MAX_VAL: UInt64 = max3(5, 12, 8);    // 12
+const MIN_VAL: UInt64 = min3(5, 12, 8);    // 5
+
+// ============================================================
+// COMPILE-TIME TYPE PROPERTIES
+// ============================================================
+
+const INT_SIZE: Int = @size_of(Int);
+// Type alias for pointer type in @size_of
+type IntPtr is *const Int;
+const PTR_SIZE: Int = @size_of(IntPtr);
+const ARRAY_SIZE: Int = @size_of([Int; 10]);
+
+// ============================================================
+// META-ФУНКЦИИ С GENERIC ПАРАМЕТРАМИ
+// ============================================================
+
+meta fn identity<T>(x: T) -> T {
+    x
+}
+
+const ID_42: Int = identity(42);
+const ID_TRUE: Bool = identity(true);
+

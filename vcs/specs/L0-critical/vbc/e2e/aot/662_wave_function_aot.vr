@@ -1,0 +1,234 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, wave, signal-processing, math
+// @timeout: 30000
+
+// Integer-approximated wave functions and signal processing
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Square wave: period p, amplitude a
+// Returns +a for first half, -a for second half
+fn square_wave(t: Int, period: Int, amp: Int) -> Int {
+    let phase = t % period;
+    if phase < period / 2 { amp } else { 0 - amp }
+}
+
+// Triangle wave: period p, amplitude a
+// Linear rise from -a to +a, then fall back
+fn triangle_wave(t: Int, period: Int, amp: Int) -> Int {
+    let phase = t % period;
+    let half = period / 2;
+    if phase <= half {
+        // Rising: -a + 2a * phase / half
+        0 - amp + 2 * amp * phase / half
+    } else {
+        // Falling: a - 2a * (phase - half) / half
+        amp - 2 * amp * (phase - half) / half
+    }
+}
+
+// Sawtooth wave
+fn sawtooth_wave(t: Int, period: Int, amp: Int) -> Int {
+    let phase = t % period;
+    0 - amp + 2 * amp * phase / period
+}
+
+// Generate 8 samples of a wave
+fn gen_square(period: Int, amp: Int) -> Arr8 {
+    let mut r = zeros();
+    let mut i = 0;
+    while i < 8 {
+        r = set8(r, i, square_wave(i, period, amp));
+        i = i + 1;
+    }
+    r
+}
+
+fn gen_triangle(period: Int, amp: Int) -> Arr8 {
+    let mut r = zeros();
+    let mut i = 0;
+    while i < 8 {
+        r = set8(r, i, triangle_wave(i, period, amp));
+        i = i + 1;
+    }
+    r
+}
+
+// Sum two signal arrays
+fn signal_add(a: Arr8, b: Arr8, n: Int) -> Arr8 {
+    let mut r = zeros();
+    let mut i = 0;
+    while i < n {
+        r = set8(r, i, get8(a, i) + get8(b, i));
+        i = i + 1;
+    }
+    r
+}
+
+// Scale signal
+fn signal_scale(a: Arr8, n: Int, s: Int) -> Arr8 {
+    let mut r = zeros();
+    let mut i = 0;
+    while i < n {
+        r = set8(r, i, get8(a, i) * s);
+        i = i + 1;
+    }
+    r
+}
+
+// Mean of signal
+fn signal_mean(a: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n { sum = sum + get8(a, i); i = i + 1; }
+    sum / n
+}
+
+// Energy (sum of squares)
+fn signal_energy(a: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        let v = get8(a, i);
+        sum = sum + v * v;
+        i = i + 1;
+    }
+    sum
+}
+
+// Simple convolution of a[0..n] with kernel k[0..kn], output first n values
+fn convolve(a: Arr8, n: Int, k: Arr8, kn: Int) -> Arr8 {
+    let mut r = zeros();
+    let mut i = 0;
+    while i < n {
+        let mut sum = 0;
+        let mut j = 0;
+        while j < kn {
+            if i >= j {
+                sum = sum + get8(a, i - j) * get8(k, j);
+            }
+            j = j + 1;
+        }
+        r = set8(r, i, sum);
+        i = i + 1;
+    }
+    r
+}
+
+// Cross-correlation at lag 0
+fn cross_corr_0(a: Arr8, b: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n { sum = sum + get8(a, i) * get8(b, i); i = i + 1; }
+    sum
+}
+
+fn test_square_wave() -> Int {
+    // Period 4, amplitude 10
+    let w = gen_square(4, 10);
+    // Samples: t=0,1 → +10, t=2,3 → -10, t=4,5 → +10, t=6,7 → -10
+    assert_eq(get8(w, 0), 10);
+    assert_eq(get8(w, 1), 10);
+    assert_eq(get8(w, 2), 0 - 10);
+    assert_eq(get8(w, 3), 0 - 10);
+    assert_eq(get8(w, 4), 10); // period repeats
+    // Mean of full period should be ~0
+    assert_eq(signal_mean(w, 4), 0);
+    1
+}
+
+fn test_triangle_wave() -> Int {
+    // Period 8, amplitude 100
+    let w = gen_triangle(8, 100);
+    // t=0: -100 + 0 = -100
+    assert_eq(get8(w, 0), 0 - 100);
+    // t=4: -100 + 200*4/4 = 100
+    assert_eq(get8(w, 4), 100);
+    // Symmetric
+    assert_eq(get8(w, 1), get8(w, 7)); // approx symmetry
+    1
+}
+
+fn test_sawtooth() -> Int {
+    // Period 4, amplitude 100
+    // t=0: -100+0=-100, t=1: -100+50=-50, t=2: -100+100=0, t=3: -100+150=50
+    assert_eq(sawtooth_wave(0, 4, 100), 0 - 100);
+    assert_eq(sawtooth_wave(1, 4, 100), 0 - 50);
+    assert_eq(sawtooth_wave(2, 4, 100), 0);
+    assert_eq(sawtooth_wave(3, 4, 100), 50);
+    1
+}
+
+fn test_signal_ops() -> Int {
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let sum = signal_add(a, b, 4);
+    assert_eq(get8(sum, 0), 11);
+    assert_eq(get8(sum, 3), 44);
+    let scaled = signal_scale(a, 4, 3);
+    assert_eq(get8(scaled, 0), 3);
+    assert_eq(get8(scaled, 2), 9);
+    assert_eq(signal_mean(a, 4), 2); // (1+2+3+4)/4 = 2 (integer)
+    assert_eq(signal_energy(a, 4), 30); // 1+4+9+16
+    1
+}
+
+fn test_convolution() -> Int {
+    // Convolve [1,2,3,4] with kernel [1,1] (running sum)
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let k = Arr8 { v0: 1, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r = convolve(a, 4, k, 2);
+    // r[0] = a[0]*k[0] = 1
+    assert_eq(get8(r, 0), 1);
+    // r[1] = a[1]*k[0] + a[0]*k[1] = 2+1 = 3
+    assert_eq(get8(r, 1), 3);
+    // r[2] = a[2]*k[0] + a[1]*k[1] = 3+2 = 5
+    assert_eq(get8(r, 2), 5);
+    // r[3] = a[3]*k[0] + a[2]*k[1] = 4+3 = 7
+    assert_eq(get8(r, 3), 7);
+    1
+}
+
+fn test_cross_corr() -> Int {
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Auto-correlation at lag 0 = energy
+    assert_eq(cross_corr_0(a, a, 4), signal_energy(a, 4));
+    // Cross-correlation with scaled version
+    let b = signal_scale(a, 4, 2);
+    assert_eq(cross_corr_0(a, b, 4), 2 * signal_energy(a, 4));
+    1
+}
+
+fn main() -> Int {
+    test_square_wave();
+    test_triangle_wave();
+    test_sawtooth();
+    test_signal_ops();
+    test_convolution();
+    test_cross_corr();
+    print("[OK] 662_wave_function_aot");
+    0
+}

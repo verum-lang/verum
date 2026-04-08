@@ -1,0 +1,270 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, qed, termination, proof-scripts
+// @timeout: 5000
+
+/// QED - Proof Termination
+///
+/// QED (Quod Erat Demonstrandum) marks the end of a proof.
+/// It verifies all goals have been solved and the proof is complete.
+
+// ------------------------------------------------------------
+// Basic QED Usage
+// ------------------------------------------------------------
+
+/// Simple proof with QED
+theorem simple_refl(x: Int): x == x {
+    proof {
+        refl;
+        qed
+    }
+}
+
+/// QED after assumption
+theorem from_hyp<P: Prop>(h: P): P {
+    proof {
+        exact h;
+        qed
+    }
+}
+
+/// QED after multiple steps
+theorem transitivity_example(a: Int, b: Int, c: Int):
+    a == b -> b == c -> a == c
+{
+    proof {
+        assume hab: a == b;
+        assume hbc: b == c;
+        transitivity b;
+        exact hab;
+        exact hbc;
+        qed
+    }
+}
+
+// ------------------------------------------------------------
+// QED Checks All Goals
+// ------------------------------------------------------------
+
+/// QED fails if goals remain (this proof is complete)
+theorem complete_proof(a: Int, b: Int): a + b == b + a {
+    proof {
+        ring;
+        qed  // All goals solved
+    }
+}
+
+/// Multi-goal proof completed
+theorem and_intro<P: Prop, Q: Prop>(hp: P, hq: Q): P && Q {
+    proof {
+        split;
+        // Goal 1: P
+        exact hp;
+        // Goal 2: Q
+        exact hq;
+        qed  // Both goals solved
+    }
+}
+
+/// Or elimination with qed
+theorem or_elim<P: Prop, Q: Prop, R: Prop>:
+    (P || Q) -> (P -> R) -> (Q -> R) -> R
+{
+    proof {
+        assume hpq: P || Q;
+        assume hpr: P -> R;
+        assume hqr: Q -> R;
+
+        cases hpq {
+            inl hp => {
+                apply hpr;
+                exact hp;
+            }
+            inr hq => {
+                apply hqr;
+                exact hq;
+            }
+        };
+        qed
+    }
+}
+
+// ------------------------------------------------------------
+// QED in Inductive Proofs
+// ------------------------------------------------------------
+
+/// Induction with qed on each case
+theorem add_zero(n: Nat): n + 0 == n {
+    proof by induction on n {
+        case zero => {
+            simp;
+            qed
+        }
+        case succ(k) => {
+            simp;
+            rewrite IH;
+            qed
+        }
+    }
+}
+
+/// Strong induction with qed
+theorem strong_ind_example(n: Nat): n < n + 1 {
+    proof by strong_induction on n {
+        case 0 => {
+            simp;
+            qed
+        }
+        case succ(k) => {
+            simp;
+            trivial;
+            qed
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Structured Proofs with QED
+// ------------------------------------------------------------
+
+/// Have/show structure with qed
+theorem structured_proof(a: Int, b: Int, c: Int):
+    a == b -> b == c -> a == c
+{
+    proof {
+        assume h1: a == b;
+        assume h2: b == c;
+
+        have step1: a == b by assumption;
+        have step2: b == c by assumption;
+
+        show a == c by transitivity(step1, step2);
+
+        qed
+    }
+}
+
+/// Calc block with qed
+theorem calc_with_qed(x: Int): (x + 1) * 2 == 2 * x + 2 {
+    proof {
+        calc {
+            (x + 1) * 2
+            == { by mul_comm } 2 * (x + 1)
+            == { by distrib_left } 2 * x + 2 * 1
+            == { by simp } 2 * x + 2
+        };
+        qed
+    }
+}
+
+// ------------------------------------------------------------
+// QED with Tactics That Finish Proofs
+// ------------------------------------------------------------
+
+/// Auto followed by qed
+theorem auto_then_qed<P: Prop, Q: Prop>: P && Q -> P {
+    proof {
+        auto;
+        qed
+    }
+}
+
+/// Blast followed by qed
+theorem blast_then_qed<P: Prop, Q: Prop, R: Prop>:
+    (P -> Q) -> (Q -> R) -> P -> R
+{
+    proof {
+        blast;
+        qed
+    }
+}
+
+/// SMT followed by qed
+theorem smt_then_qed(x: Int, y: Int):
+    x > 0 -> y > 0 -> x + y > 0
+{
+    proof {
+        smt;
+        qed
+    }
+}
+
+// ------------------------------------------------------------
+// QED Placement
+// ------------------------------------------------------------
+
+/// QED at the very end
+theorem final_qed(n: Int): n * 0 == 0 {
+    proof {
+        ring;
+        // QED must be last
+        qed
+    }
+}
+
+/// Multiple branches all end with qed
+theorem branches_qed(b: Bool): b || !b {
+    proof {
+        cases b {
+            true => {
+                left;
+                trivial;
+                qed
+            }
+            false => {
+                right;
+                simp;
+                qed
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Implicit QED
+// ------------------------------------------------------------
+
+/// Proof can end without explicit qed if last tactic solves all goals
+theorem implicit_end(x: Int): x + 0 == x {
+    proof by simp  // Implicit qed
+}
+
+/// Block ends proof implicitly
+theorem block_end<P: Prop>(h: P): P {
+    proof {
+        exact h
+        // Implicit qed at end of block
+    }
+}
+
+// ------------------------------------------------------------
+// QED Error Cases (Documentation)
+// ------------------------------------------------------------
+
+// These would fail at qed:
+
+// theorem incomplete_proof(a: Int, b: Int): a == b {
+//     proof {
+//         // No justification for a == b
+//         qed  // ERROR: goal not solved
+//     }
+// }
+
+// theorem missing_case(b: Bool): b == true {
+//     proof {
+//         cases b {
+//             true => { trivial; qed }
+//             // missing false case!
+//         }
+//         qed  // ERROR: case not covered
+//     }
+// }
+
+fn main() {
+    // QED is a proof-level construct
+    // Runtime verification of proven properties
+    assert(5 == 5);
+    assert(3 + 0 == 3);
+    assert(2 * 3 == 3 * 2);
+}

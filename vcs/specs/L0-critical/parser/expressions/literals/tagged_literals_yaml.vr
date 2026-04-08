@@ -1,0 +1,350 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, yaml
+
+// YAML Tagged Literals
+// Tests for yaml#"""...""" syntax
+
+// ============================================================================
+// SECTION 1: Basic YAML Structures
+// ============================================================================
+
+fn test_yaml_simple_mapping() {
+    let config = yaml#"""
+name: MyApp
+version: 1.0.0
+enabled: true
+""";
+}
+
+fn test_yaml_nested_mapping() {
+    let config = yaml#"""
+server:
+  host: localhost
+  port: 8080
+  ssl:
+    enabled: true
+    cert: /path/to/cert.pem
+""";
+}
+
+fn test_yaml_sequences() {
+    let data = yaml#"""
+items:
+  - apple
+  - banana
+  - cherry
+""";
+}
+
+fn test_yaml_mixed() {
+    let config = yaml#"""
+server:
+  host: localhost
+  ports:
+    - 8080
+    - 8443
+  features:
+    - auth
+    - logging
+""";
+}
+
+// ============================================================================
+// SECTION 2: YAML Scalar Types
+// ============================================================================
+
+fn test_yaml_strings() {
+    let strings = yaml#"""
+plain: Hello World
+single: 'single quoted'
+double: "double quoted"
+""";
+}
+
+fn test_yaml_numbers() {
+    let numbers = yaml#"""
+integer: 42
+float: 3.14
+negative: -100
+scientific: 1.0e6
+hex: 0xFF
+octal: 0o755
+""";
+}
+
+fn test_yaml_booleans() {
+    let bools = yaml#"""
+enabled: true
+disabled: false
+yes_val: yes
+no_val: no
+""";
+}
+
+fn test_yaml_null() {
+    let nulls = yaml#"""
+empty: null
+tilde: ~
+blank:
+""";
+}
+
+// ============================================================================
+// SECTION 3: YAML Multiline Strings
+// ============================================================================
+
+fn test_yaml_literal_block() {
+    let literal = yaml#"""
+description: |
+  This is a literal block scalar.
+  Line breaks are preserved.
+  Indentation is stripped.
+""";
+}
+
+fn test_yaml_folded_block() {
+    let folded = yaml#"""
+summary: >
+  This is a folded block scalar.
+  Line breaks become spaces.
+  But blank lines create paragraphs.
+""";
+}
+
+fn test_yaml_block_chomping() {
+    let chomped = yaml#"""
+keep: |+
+  trailing newlines
+  are kept
+
+strip: |-
+  trailing newlines
+  are stripped
+""";
+}
+
+// ============================================================================
+// SECTION 4: YAML Anchors and Aliases
+// ============================================================================
+
+fn test_yaml_anchors() {
+    let config = yaml#"""
+defaults: &defaults
+  timeout: 30
+  retries: 3
+
+production:
+  <<: *defaults
+  host: prod.example.com
+
+development:
+  <<: *defaults
+  host: localhost
+  timeout: 60
+""";
+}
+
+fn test_yaml_anchor_array() {
+    let data = yaml#"""
+base: &base
+  - item1
+  - item2
+
+extended:
+  - *base
+  - item3
+""";
+}
+
+// ============================================================================
+// SECTION 5: YAML Comments
+// ============================================================================
+
+fn test_yaml_comments() {
+    let commented = yaml#"""
+# Top-level comment
+server:
+  host: localhost  # Inline comment
+  # Comment before port
+  port: 8080
+""";
+}
+
+// ============================================================================
+// SECTION 6: YAML Flow Style
+// ============================================================================
+
+fn test_yaml_flow_sequence() {
+    let inline = yaml#"""
+ports: [8080, 8443, 9000]
+names: ["alice", "bob", "charlie"]
+""";
+}
+
+fn test_yaml_flow_mapping() {
+    let inline = yaml#"""
+point: {x: 10, y: 20}
+config: {host: localhost, port: 8080}
+""";
+}
+
+fn test_yaml_mixed_flow() {
+    let mixed = yaml#"""
+users:
+  - {name: Alice, age: 30}
+  - {name: Bob, age: 25}
+endpoints: [{path: /api, method: GET}, {path: /data, method: POST}]
+""";
+}
+
+// ============================================================================
+// SECTION 7: YAML in Expressions
+// ============================================================================
+
+fn test_yaml_in_function() {
+    fn process_config(c: YamlValue) -> Int { 0 }
+
+    let result = process_config(yaml#"""
+key: value
+""");
+}
+
+fn test_yaml_in_conditional() {
+    let prod = true;
+
+    let config = if prod {
+        yaml#"""
+env: production
+debug: false
+"""
+    } else {
+        yaml#"""
+env: development
+debug: true
+"""
+    };
+}
+
+fn test_yaml_in_array() {
+    let configs = [
+        yaml#"""
+name: config1
+""",
+        yaml#"""
+name: config2
+""",
+    ];
+}
+
+fn test_yaml_in_struct() {
+    type AppConfig is {
+        settings: YamlValue,
+    };
+
+    let app = AppConfig {
+        settings: yaml#"""
+server:
+  port: 8080
+""",
+    };
+}
+
+// ============================================================================
+// SECTION 8: Complex YAML Documents
+// ============================================================================
+
+fn test_yaml_kubernetes() {
+    let deployment = yaml#"""
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  labels:
+    app: my-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app
+          image: my-app:latest
+          ports:
+            - containerPort: 8080
+""";
+}
+
+fn test_yaml_docker_compose() {
+    let compose = yaml#"""
+version: '3.8'
+services:
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+  db:
+    image: postgres:13
+    volumes:
+      - db-data:/var/lib/postgresql/data
+volumes:
+  db-data:
+""";
+}
+
+fn test_yaml_github_actions() {
+    let workflow = yaml#"""
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build
+        run: cargo build --release
+      - name: Test
+        run: cargo test
+""";
+}
+
+// ============================================================================
+// SECTION 9: Edge Cases
+// ============================================================================
+
+fn test_yaml_empty() {
+    let empty = yaml#"""
+""";
+}
+
+fn test_yaml_single_line() {
+    let single = yaml#"""key: value""";
+}
+
+fn test_yaml_unicode() {
+    let unicode = yaml#"""
+emoji: 🎉
+chinese: 中文
+arabic: مرحبا
+""";
+}
+
+fn test_yaml_special_chars() {
+    let special = yaml#"""
+colon: "value:with:colons"
+at: "@mentions"
+hash: "#hashtag"
+""";
+}

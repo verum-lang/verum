@@ -1,0 +1,96 @@
+// @test: run
+// @level: L0
+// @description: Producer-consumer pattern with channel between threads
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Single producer, single consumer via channel
+    let ch = Channel.new(20);
+
+    // Producer thread: sends 1..10
+    let producer = spawn {
+        let mut i = 1;
+        while (i <= 10) {
+            ch.send(i);
+            i = i + 1;
+        }
+        ch.send(-1);  // sentinel: done
+        10  // return count produced
+    };
+
+    // Consumer on main thread
+    let mut total = 0;
+    let mut items = 0;
+    let mut done = false;
+    while (!done) {
+        match ch.recv() {
+            Some(v) => {
+                if (v == -1) {
+                    done = true;
+                } else {
+                    total = total + v;
+                    items = items + 1;
+                }
+            }
+            None => { done = true; }
+        }
+    }
+
+    let produced = producer.await;
+
+    if (items != 10) {
+        print(f"FAIL test1: expected 10 items, got {items}");
+        return 1;
+    }
+    if (total != 55) {
+        print(f"FAIL test1: expected sum 55, got {total}");
+        return 1;
+    }
+    print(f"Test 1 PASS: producer-consumer {items} items, sum={total}");
+
+    // Test 2: Two producers, one consumer
+    let ch2 = Channel.new(30);
+
+    let p1 = spawn {
+        let mut i = 1;
+        while (i <= 5) {
+            ch2.send(i * 10);  // 10,20,30,40,50
+            i = i + 1;
+        }
+        5
+    };
+
+    let p2 = spawn {
+        let mut i = 1;
+        while (i <= 5) {
+            ch2.send(i * 100);  // 100,200,300,400,500
+            i = i + 1;
+        }
+        5
+    };
+
+    // Wait for both producers
+    let c1 = p1.await;
+    let c2 = p2.await;
+
+    // Consume all items
+    let mut total2 = 0;
+    let mut count2 = 0;
+    while (count2 < 10) {
+        match ch2.recv() {
+            Some(v) => { total2 = total2 + v; }
+            None => {}
+        }
+        count2 = count2 + 1;
+    }
+
+    // 10+20+30+40+50 + 100+200+300+400+500 = 150 + 1500 = 1650
+    if (total2 != 1650) {
+        print(f"FAIL test2: expected 1650, got {total2}");
+        return 1;
+    }
+    print(f"Test 2 PASS: dual producer sum={total2}");
+
+    print("All producer-consumer tests passed");
+    0
+}

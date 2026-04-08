@@ -1,0 +1,307 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, float, precision
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Float operations with careful precision handling,
+// epsilon comparison, large/small floats, Int-to-Float via multiplication
+
+// =============================================================================
+// Helper: approximate equality with epsilon
+// =============================================================================
+
+fn float_abs(x: Float) -> Float {
+    if x < 0.0 { -x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, eps: Float) -> Int {
+    if float_abs(a - b) < eps { 1 } else { 0 }
+}
+
+// =============================================================================
+// Basic float arithmetic
+// =============================================================================
+
+fn test_float_add() {
+    assert_eq(1.0 + 2.0, 3.0);
+    assert_eq(0.0 + 0.0, 0.0);
+    assert_eq(-1.0 + 1.0, 0.0);
+    assert_eq(0.5 + 0.5, 1.0);
+    assert_eq(100.25 + 200.75, 301.0);
+}
+
+fn test_float_sub() {
+    assert_eq(5.0 - 3.0, 2.0);
+    assert_eq(3.0 - 5.0, -2.0);
+    assert_eq(1.0 - 1.0, 0.0);
+    assert_eq(10.5 - 0.5, 10.0);
+}
+
+fn test_float_mul() {
+    assert_eq(2.0 * 3.0, 6.0);
+    assert_eq(0.5 * 2.0, 1.0);
+    assert_eq(-2.0 * 3.0, -6.0);
+    assert_eq(-3.0 * -4.0, 12.0);
+    assert_eq(0.0 * 999.0, 0.0);
+}
+
+fn test_float_div() {
+    assert_eq(10.0 / 2.0, 5.0);
+    assert_eq(7.0 / 2.0, 3.5);
+    assert_eq(1.0 / 4.0, 0.25);
+    assert_eq(-6.0 / 2.0, -3.0);
+}
+
+// =============================================================================
+// Float comparison
+// =============================================================================
+
+fn test_float_comparison() {
+    assert(1.0 < 2.0);
+    assert(2.0 > 1.0);
+    assert(1.0 == 1.0);
+    assert(1.0 != 2.0);
+    assert(1.0 <= 1.0);
+    assert(1.0 >= 1.0);
+    assert(0.0 <= 1.0);
+    assert(1.0 >= 0.0);
+    assert(-1.0 < 0.0);
+    assert(0.0 > -1.0);
+}
+
+// =============================================================================
+// Epsilon-based comparisons
+// =============================================================================
+
+fn test_epsilon_comparison() {
+    let eps = 0.0001;
+
+    // 0.1 + 0.2 is not exactly 0.3 in IEEE 754
+    let sum = 0.1 + 0.2;
+    assert_eq(approx_eq(sum, 0.3, eps), 1);
+
+    // But exact comparison might fail
+    // (we just verify our approx_eq works)
+    assert_eq(approx_eq(1.0, 1.0, eps), 1);
+    assert_eq(approx_eq(1.0, 2.0, eps), 0);
+    assert_eq(approx_eq(3.14, 3.14, eps), 1);
+}
+
+fn test_accumulated_error() {
+    // Adding 0.1 ten times
+    let mut sum: Float = 0.0;
+    let mut i = 0;
+    while i < 10 {
+        sum = sum + 0.1;
+        i = i + 1;
+    }
+    // Should be approximately 1.0
+    let eps = 0.0001;
+    assert_eq(approx_eq(sum, 1.0, eps), 1);
+}
+
+// =============================================================================
+// Float variables and reassignment
+// =============================================================================
+
+fn test_float_variables() {
+    let a: Float = 5.0;
+    let b: Float = -3.0;
+    let c: Float = 0.0;
+
+    assert_eq(a, 5.0);
+    assert_eq(b, -3.0);
+    assert_eq(c, 0.0);
+    assert_eq(a + b, 2.0);
+    assert_eq(a * b, -15.0);
+}
+
+fn test_float_accumulation_loop() {
+    let mut sum: Float = 0.0;
+    let mut val: Float = 1.0;
+    let mut i = 0;
+    while i < 5 {
+        sum = sum + val;
+        val = val + 1.0;
+        i = i + 1;
+    }
+    // 1+2+3+4+5 = 15
+    assert_eq(sum, 15.0);
+}
+
+// =============================================================================
+// Large float values
+// =============================================================================
+
+fn test_large_floats() {
+    let big: Float = 1000000.0;
+    assert_eq(big * 1000.0, 1000000000.0);
+    assert_eq(big / 1000000.0, 1.0);
+    assert_eq(big + big, 2000000.0);
+}
+
+fn test_very_large() {
+    let a: Float = 1000000000.0;
+    let b: Float = 1000000000.0;
+    let product = a * b;
+    // 1e18 — should be representable as f64
+    assert(product > 999999999000000000.0);
+    assert(product < 1000000001000000000.0);
+}
+
+// =============================================================================
+// Small float values
+// =============================================================================
+
+fn test_small_floats() {
+    let tiny: Float = 0.001;
+    assert(tiny > 0.0);
+    assert(tiny < 1.0);
+    assert_eq(tiny * 1000.0, 1.0);
+}
+
+fn test_very_small() {
+    let small: Float = 0.000001;
+    assert(small > 0.0);
+    assert(small < 0.001);
+    let product = small * 1000000.0;
+    let eps = 0.0001;
+    assert_eq(approx_eq(product, 1.0, eps), 1);
+}
+
+// =============================================================================
+// Negative float operations
+// =============================================================================
+
+fn test_negative_floats() {
+    let a: Float = -3.14;
+    let b: Float = -2.71;
+
+    assert(a < 0.0);
+    assert(b < 0.0);
+    assert(a < b);
+
+    let sum = a + b;
+    let eps = 0.01;
+    assert_eq(approx_eq(sum, -5.85, eps), 1);
+
+    let product = a * b;
+    assert(product > 0.0);
+
+    let neg_neg = -a;
+    assert(neg_neg > 0.0);
+}
+
+// =============================================================================
+// Float in functions
+// =============================================================================
+
+fn area_circle(radius: Float) -> Float {
+    3.14159 * radius * radius
+}
+
+fn test_circle_area() {
+    let eps = 0.01;
+    let a1 = area_circle(1.0);
+    assert_eq(approx_eq(a1, 3.14159, eps), 1);
+
+    let a2 = area_circle(2.0);
+    assert_eq(approx_eq(a2, 12.566, eps), 1);
+
+    let a0 = area_circle(0.0);
+    assert_eq(a0, 0.0);
+}
+
+fn lerp(a: Float, b: Float, t: Float) -> Float {
+    a + (b - a) * t
+}
+
+fn test_lerp() {
+    assert_eq(lerp(0.0, 10.0, 0.0), 0.0);
+    assert_eq(lerp(0.0, 10.0, 1.0), 10.0);
+    assert_eq(lerp(0.0, 10.0, 0.5), 5.0);
+    assert_eq(lerp(10.0, 20.0, 0.25), 12.5);
+}
+
+// =============================================================================
+// Float accumulation patterns
+// =============================================================================
+
+fn test_float_sum_sequence() {
+    // Sum 1.0 + 2.0 + ... + 100.0 = 5050.0
+    let mut sum: Float = 0.0;
+    let mut val: Float = 1.0;
+    let mut i = 0;
+    while i < 100 {
+        sum = sum + val;
+        val = val + 1.0;
+        i = i + 1;
+    }
+    assert_eq(sum, 5050.0);
+}
+
+fn test_geometric_series() {
+    // 1 + 0.5 + 0.25 + 0.125 + ... (8 terms)
+    let mut sum: Float = 0.0;
+    let mut term: Float = 1.0;
+    let mut i = 0;
+    while i < 8 {
+        sum = sum + term;
+        term = term * 0.5;
+        i = i + 1;
+    }
+    // Sum should approach 2.0: 1 + 0.5 + 0.25 + ... = 2 - 2^(-8) = 1.99609375
+    let eps = 0.01;
+    assert_eq(approx_eq(sum, 1.99609375, eps), 1);
+}
+
+// =============================================================================
+// Float edge cases
+// =============================================================================
+
+fn test_float_zero() {
+    let pos_zero: Float = 0.0;
+    let neg_zero: Float = -0.0;
+    // In IEEE 754, +0.0 == -0.0
+    assert(pos_zero == neg_zero);
+    assert_eq(pos_zero, 0.0);
+}
+
+fn test_float_identity_operations() {
+    let x: Float = 42.5;
+    assert_eq(x + 0.0, x);
+    assert_eq(x * 1.0, x);
+    assert_eq(x - 0.0, x);
+    assert_eq(x / 1.0, x);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_float_add();
+    test_float_sub();
+    test_float_mul();
+    test_float_div();
+    test_float_comparison();
+    test_epsilon_comparison();
+    test_accumulated_error();
+    test_float_variables();
+    test_float_accumulation_loop();
+    test_large_floats();
+    test_very_large();
+    test_small_floats();
+    test_very_small();
+    test_negative_floats();
+    test_circle_area();
+    test_lerp();
+    test_float_sum_sequence();
+    test_geometric_series();
+    test_float_zero();
+    test_float_identity_operations();
+    print("[OK] 267_interp_float_precision");
+    0
+}

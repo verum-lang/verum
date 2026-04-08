@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent, pi-types, extensionality
+// @description: Function extensionality with dependent types
+
+/// Function extensionality: two functions are equal if they produce
+/// equal outputs for all inputs.
+
+/// Equality proof type - a witness that two values of type T are equal
+type EqWitness<T> is | ProofRefl;
+
+/// Identity function
+fn id<A>(x: A) -> A { x }
+
+/// Double identity
+fn id_id<A>(x: A) -> A { id(id(x)) }
+
+/// Congruence: equal inputs give equal outputs
+fn cong<A, B>(f: fn(A) -> B, eq: EqWitness<A>) -> EqWitness<B> {
+    match eq {
+        ProofRefl => ProofRefl,
+    }
+}
+
+/// Composition of functions
+fn compose<A, B, C>(f: fn(B) -> C, g: fn(A) -> B) -> fn(A) -> C {
+    |x| f(g(x))
+}
+
+/// Length-indexed vector
+type Vect<T, N: meta Int> is
+    | VNil where N == 0
+    | VCons { head: T, tail: Vect<T, N - 1> } where N > 0;
+
+/// Map function on vectors
+fn vmap<A, B, N: meta Int>(f: fn(A) -> B, v: Vect<A, N>) -> Vect<B, N> {
+    match v {
+        VNil => VNil,
+        VCons { head, tail } => VCons { head: f(head), tail: vmap(f, tail) },
+    }
+}
+
+/// Map with identity is identity (proof sketch)
+fn map_id_proof<A, N: meta Int>(v: Vect<A, N>) -> EqWitness<Vect<A, N>> {
+    ProofRefl  // map(id, v) = v by definition
+}
+
+/// Map fusion proof
+fn map_fusion_proof<A, B, C, N: meta Int>(
+    f: fn(B) -> C,
+    g: fn(A) -> B,
+    v: Vect<A, N>
+) -> EqWitness<Vect<C, N>> {
+    ProofRefl  // By structural induction
+}
+
+/// Eta expansion: |x| f(x) = f
+fn eta_proof<A, B>(f: fn(A) -> B) -> EqWitness<fn(A) -> B> {
+    ProofRefl
+}
+
+/// Type for natural numbers
+type Nat is Int{>= 0};
+type Unit is ();
+
+/// Build a list of given length
+fn build_list(n: Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while i < n {
+        result.push(i);
+        i = i + 1;
+    }
+    result
+}
+
+fn main() {
+    // Verify identity
+    assert(id(42) == 42);
+    assert(id_id(42) == 42);
+
+    // Verify composition
+    let f = |x: Int| x + 1;
+    let g = |x: Int| x * 2;
+    let fg = compose(f, g);
+    assert(fg(3) == 7);  // g(3)=6, f(6)=7
+
+    // Build list
+    let items = build_list(5);
+    assert(items.len() == 5);
+}

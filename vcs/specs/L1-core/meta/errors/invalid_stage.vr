@@ -1,0 +1,23 @@
+// @test: parse-fail
+// @level: L1
+// @tags: meta, staged, errors
+// @timeout: 5000
+
+/// Tests that invalid stage usage is rejected.
+
+// Stage 0 is runtime — cannot use meta modifier with stage 0
+meta(0) fn invalid_stage_zero() {
+    print("This should not be allowed");
+}
+
+// Quote to a higher stage than current should fail
+meta fn invalid_quote_up() {
+    quote(2) {
+        // Stage 1 function trying to quote to stage 2 — invalid
+        let x = 42;
+    }
+}
+
+fn main() {
+    print("Invalid stage error tests");
+}

@@ -1,0 +1,333 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, from, conversion, protocols
+// @description: Tests for From<List<T>> protocol implementations for collection types
+//
+// Note: List.from(x) always resolves to the built-in array literal constructor,
+// so From<X> for List<T> is not possible. Use .into_list() / .to_list() methods instead.
+// Cross-collection From (e.g., Set↔BTreeSet) also doesn't work due to type checker
+// disambiguation limitations when a type has multiple From impls.
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: From<List<T>> for Deque<T>
+// =============================================================================
+
+@test
+fn test_deque_from_list_basic() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let deque: Deque<Int> = Deque.from(list);
+    assert_eq(deque.len(), 5);
+    assert_eq(*deque.front().unwrap(), 1);
+    assert_eq(*deque.back().unwrap(), 5);
+}
+
+@test
+fn test_deque_from_list_empty() {
+    let list: List<Int> = List.new();
+    let deque: Deque<Int> = Deque.from(list);
+    assert(deque.is_empty());
+}
+
+@test
+fn test_deque_from_list_single() {
+    let list = List.from([42]);
+    let deque: Deque<Int> = Deque.from(list);
+    assert_eq(deque.len(), 1);
+    assert_eq(*deque.front().unwrap(), 42);
+}
+
+@test
+fn test_deque_from_list_preserves_order() {
+    let list = List.from([10, 20, 30, 40, 50]);
+    let deque: Deque<Int> = Deque.from(list);
+    assert_eq(deque[0], 10);
+    assert_eq(deque[1], 20);
+    assert_eq(deque[2], 30);
+    assert_eq(deque[3], 40);
+    assert_eq(deque[4], 50);
+}
+
+@test
+fn test_deque_from_list_large() {
+    let mut list: List<Int> = List.new();
+    let mut i = 0;
+    while i < 100 {
+        list.push(i);
+        i = i + 1;
+    }
+    let deque: Deque<Int> = Deque.from(list);
+    assert_eq(deque.len(), 100);
+    assert_eq(deque[0], 0);
+    assert_eq(deque[99], 99);
+}
+
+// =============================================================================
+// Section 2: From<List<T>> for Set<T>
+// =============================================================================
+
+@test
+fn test_set_from_list_basic() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let s: Set<Int> = Set.from(list);
+    assert_eq(s.len(), 5);
+    assert(s.contains(&1));
+    assert(s.contains(&5));
+}
+
+@test
+fn test_set_from_list_dedup() {
+    let list = List.from([1, 2, 2, 3, 3, 3]);
+    let s: Set<Int> = Set.from(list);
+    assert_eq(s.len(), 3);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+}
+
+@test
+fn test_set_from_list_empty() {
+    let list: List<Int> = List.new();
+    let s: Set<Int> = Set.from(list);
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_from_list_single() {
+    let list = List.from([42]);
+    let s: Set<Int> = Set.from(list);
+    assert_eq(s.len(), 1);
+    assert(s.contains(&42));
+}
+
+@test
+fn test_set_from_list_all_duplicates() {
+    let list = List.from([7, 7, 7, 7, 7]);
+    let s: Set<Int> = Set.from(list);
+    assert_eq(s.len(), 1);
+    assert(s.contains(&7));
+}
+
+// =============================================================================
+// Section 3: From<List<T>> for BTreeSet<T>
+// =============================================================================
+
+@test
+fn test_btreeset_from_list_basic() {
+    let list = List.from([5, 3, 1, 4, 2]);
+    let bts: BTreeSet<Int> = BTreeSet.from(list);
+    assert_eq(bts.len(), 5);
+    assert(bts.contains(&1));
+    assert(bts.contains(&5));
+}
+
+@test
+fn test_btreeset_from_list_dedup() {
+    let list = List.from([1, 2, 2, 3, 3, 3]);
+    let bts: BTreeSet<Int> = BTreeSet.from(list);
+    assert_eq(bts.len(), 3);
+}
+
+@test
+fn test_btreeset_from_list_empty() {
+    let list: List<Int> = List.new();
+    let bts: BTreeSet<Int> = BTreeSet.from(list);
+    assert(bts.is_empty());
+}
+
+@test
+fn test_btreeset_from_list_ordered() {
+    let list = List.from([5, 1, 3, 2, 4]);
+    let bts: BTreeSet<Int> = BTreeSet.from(list);
+    // BTreeSet iterates in sorted order
+    let result: List<Int> = bts.iter().cloned().collect();
+    assert_eq(result, List.from([1, 2, 3, 4, 5]));
+}
+
+// =============================================================================
+// Section 4: From<List<T>> for BinaryHeap<T>
+// =============================================================================
+
+@test
+fn test_heap_from_list_basic() {
+    let list = List.from([3, 1, 4, 1, 5]);
+    let heap: BinaryHeap<Int> = BinaryHeap.from(list);
+    assert_eq(heap.len(), 5);
+    assert_eq(*heap.peek().unwrap(), 5);
+}
+
+@test
+fn test_heap_from_list_empty() {
+    let list: List<Int> = List.new();
+    let heap: BinaryHeap<Int> = BinaryHeap.from(list);
+    assert(heap.is_empty());
+}
+
+@test
+fn test_heap_from_list_single() {
+    let list = List.from([42]);
+    let heap: BinaryHeap<Int> = BinaryHeap.from(list);
+    assert_eq(heap.len(), 1);
+    assert_eq(*heap.peek().unwrap(), 42);
+}
+
+@test
+fn test_heap_from_list_sorted_desc() {
+    let list = List.from([5, 4, 3, 2, 1]);
+    let heap: BinaryHeap<Int> = BinaryHeap.from(list);
+    assert_eq(*heap.peek().unwrap(), 5);
+}
+
+@test
+fn test_heap_from_list_sorted_asc() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let heap: BinaryHeap<Int> = BinaryHeap.from(list);
+    assert_eq(*heap.peek().unwrap(), 5);
+}
+
+// =============================================================================
+// Section 5: From<List<(K,V)>> for Map<K,V>
+// =============================================================================
+
+@test
+fn test_map_from_list_of_pairs() {
+    let pairs: List<(Int, Int)> = List.from([(1, 10), (2, 20), (3, 30)]);
+    let m: Map<Int, Int> = Map.from(pairs);
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&1).unwrap(), 10);
+    assert_eq(*m.get(&2).unwrap(), 20);
+    assert_eq(*m.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_map_from_list_empty() {
+    let pairs: List<(Int, Int)> = List.new();
+    let m: Map<Int, Int> = Map.from(pairs);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_from_list_overwrites_duplicates() {
+    let pairs: List<(Int, Int)> = List.from([(1, 10), (2, 20), (1, 100)]);
+    let m: Map<Int, Int> = Map.from(pairs);
+    assert_eq(m.len(), 2);
+    // Last value wins
+    assert_eq(*m.get(&1).unwrap(), 100);
+}
+
+@test
+fn test_map_from_list_single() {
+    let pairs: List<(Int, Int)> = List.from([(42, 100)]);
+    let m: Map<Int, Int> = Map.from(pairs);
+    assert_eq(m.len(), 1);
+    assert_eq(*m.get(&42).unwrap(), 100);
+}
+
+// =============================================================================
+// Section 6: From<List<(K,V)>> for BTreeMap<K,V>
+// =============================================================================
+
+@test
+fn test_btreemap_from_list_of_pairs() {
+    let pairs: List<(Int, Int)> = List.from([(3, 30), (1, 10), (2, 20)]);
+    let m: BTreeMap<Int, Int> = BTreeMap.from(pairs);
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&1).unwrap(), 10);
+    assert_eq(*m.get(&2).unwrap(), 20);
+    assert_eq(*m.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_btreemap_from_list_empty() {
+    let pairs: List<(Int, Int)> = List.new();
+    let m: BTreeMap<Int, Int> = BTreeMap.from(pairs);
+    assert(m.is_empty());
+}
+
+@test
+fn test_btreemap_from_list_overwrites_duplicates() {
+    let pairs: List<(Int, Int)> = List.from([(1, 10), (2, 20), (1, 100)]);
+    let m: BTreeMap<Int, Int> = BTreeMap.from(pairs);
+    assert_eq(m.len(), 2);
+    assert_eq(*m.get(&1).unwrap(), 100);
+}
+
+@test
+fn test_btreemap_from_list_ordered_iteration() {
+    let pairs: List<(Int, Int)> = List.from([(3, 30), (1, 10), (2, 20)]);
+    let m: BTreeMap<Int, Int> = BTreeMap.from(pairs);
+    let entries = m.to_entries();
+    assert_eq(entries[0].0, 1);
+    assert_eq(entries[1].0, 2);
+    assert_eq(entries[2].0, 3);
+}
+
+// =============================================================================
+// Section 7: Roundtrip tests using From + existing methods
+// =============================================================================
+
+@test
+fn test_roundtrip_list_to_deque_to_list() {
+    let original = List.from([1, 2, 3, 4, 5]);
+    let deque: Deque<Int> = Deque.from(original.clone());
+    let result = deque.into_list();
+    assert_eq(original, result);
+}
+
+@test
+fn test_roundtrip_list_to_btreeset_to_list() {
+    let original = List.from([1, 2, 3, 4, 5]);
+    let bts: BTreeSet<Int> = BTreeSet.from(original.clone());
+    let result = bts.into_list();
+    // BTreeSet produces sorted order, original is already sorted
+    assert_eq(original, result);
+}
+
+@test
+fn test_roundtrip_list_to_set_to_list() {
+    let original = List.from([1, 2, 3, 4, 5]);
+    let s: Set<Int> = Set.from(original.clone());
+    let result = s.into_list();
+    // Set doesn't preserve order, check contents
+    assert_eq(result.len(), 5);
+    assert(result.contains(&1));
+    assert(result.contains(&2));
+    assert(result.contains(&3));
+    assert(result.contains(&4));
+    assert(result.contains(&5));
+}
+
+@test
+fn test_roundtrip_list_to_heap_to_list() {
+    let original = List.from([3, 1, 4, 1, 5]);
+    let heap: BinaryHeap<Int> = BinaryHeap.from(original.clone());
+    let result = heap.into_list();
+    assert_eq(result.len(), 5);
+    assert(result.contains(&1));
+    assert(result.contains(&3));
+    assert(result.contains(&4));
+    assert(result.contains(&5));
+}
+
+@test
+fn test_roundtrip_list_to_map_to_entries() {
+    let original: List<(Int, Int)> = List.from([(1, 10), (2, 20), (3, 30)]);
+    let m: Map<Int, Int> = Map.from(original.clone());
+    let result = m.to_entries();
+    assert_eq(result.len(), 3);
+}
+
+@test
+fn test_roundtrip_list_to_btreemap_to_entries() {
+    let original: List<(Int, Int)> = List.from([(1, 10), (2, 20), (3, 30)]);
+    let m: BTreeMap<Int, Int> = BTreeMap.from(original.clone());
+    let result = m.to_entries();
+    assert_eq(result.len(), 3);
+    // BTreeMap produces sorted entries
+    assert_eq(result[0], (1, 10));
+    assert_eq(result[1], (2, 20));
+    assert_eq(result[2], (3, 30));
+}

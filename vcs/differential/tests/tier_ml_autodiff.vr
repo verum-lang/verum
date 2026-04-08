@@ -1,0 +1,298 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, ml, autodiff
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for autodiff operations.
+/// Tests dual numbers for forward-mode AD, chain rule, product rule, and gradient computation
+/// for polynomials using pure Verum arithmetic.
+
+fn main() {
+    test_dual_number_arithmetic();
+    test_chain_rule();
+    test_product_quotient_rule();
+    test_polynomial_gradient();
+    test_multivariable_gradient();
+}
+
+/// Dual number arithmetic: (a + b*epsilon) where epsilon^2 = 0
+fn test_dual_number_arithmetic() {
+    println("=== Dual Number Arithmetic ===");
+
+    // Dual number: (real, dual) where dual tracks the derivative
+    let a_real = 3.0;
+    let a_dual = 1.0;
+    let b_real = 2.0;
+    let b_dual = 0.0;
+
+    // Addition: (a, a') + (b, b') = (a+b, a'+b')
+    let add_real = a_real + b_real;
+    let add_dual = a_dual + b_dual;
+    println(f"({a_real} + {a_dual}e) + ({b_real} + {b_dual}e) = ({add_real} + {add_dual}e)");
+
+    // Subtraction
+    let sub_real = a_real - b_real;
+    let sub_dual = a_dual - b_dual;
+    println(f"({a_real} + {a_dual}e) - ({b_real} + {b_dual}e) = ({sub_real} + {sub_dual}e)");
+
+    // Multiplication: (a, a') * (b, b') = (a*b, a*b' + a'*b)
+    let mul_real = a_real * b_real;
+    let mul_dual = a_real * b_dual + a_dual * b_real;
+    println(f"({a_real} + {a_dual}e) * ({b_real} + {b_dual}e) = ({mul_real} + {mul_dual}e)");
+
+    // Division: (a, a') / (b, b') = (a/b, (a'*b - a*b') / b^2)
+    let div_real = a_real / b_real;
+    let div_dual = (a_dual * b_real - a_real * b_dual) / (b_real * b_real);
+    println(f"({a_real} + {a_dual}e) / ({b_real} + {b_dual}e) = ({div_real} + {div_dual}e)");
+
+    // Power: x^n -> d/dx(x^n) = n*x^(n-1)
+    let x = 3.0;
+    let x_sq_real = x * x;
+    let x_sq_dual = 2.0 * x;
+    println(f"x^2 at x={x}: value={x_sq_real}, derivative={x_sq_dual}");
+
+    let x_cb_real = x * x * x;
+    let x_cb_dual = 3.0 * x * x;
+    println(f"x^3 at x={x}: value={x_cb_real}, derivative={x_cb_dual}");
+
+    let x_q_real = x * x * x * x;
+    let x_q_dual = 4.0 * x * x * x;
+    println(f"x^4 at x={x}: value={x_q_real}, derivative={x_q_dual}");
+}
+
+/// Chain rule: d/dx[f(g(x))] = f'(g(x)) * g'(x)
+fn test_chain_rule() {
+    println("\n=== Chain Rule ===");
+
+    // f(x) = (2x + 1)^2
+    // d/dx = 4*(2x+1)
+    println("f(x) = (2x + 1)^2:");
+    chain_f1(0.0);
+    chain_f1(1.0);
+    chain_f1(2.0);
+    chain_f1(3.0);
+    chain_f1(-1.0);
+
+    // f(x) = (x^2 + 3)^3
+    // d/dx = 6x*(x^2+3)^2
+    println("f(x) = (x^2 + 3)^3:");
+    chain_f2(0.0);
+    chain_f2(1.0);
+    chain_f2(2.0);
+    chain_f2(3.0);
+    chain_f2(-1.0);
+
+    // f(x) = ((x+1)^2 + 1)^2
+    // d/dx = 4*(x+1)*((x+1)^2+1)
+    println("f(x) = ((x+1)^2 + 1)^2:");
+    chain_f3(0.0);
+    chain_f3(1.0);
+    chain_f3(2.0);
+    chain_f3(3.0);
+    chain_f3(-1.0);
+}
+
+/// f(x) = (2x+1)^2, f'(x) = 4*(2x+1)
+fn chain_f1(x: Float) {
+    let gx = 2.0 * x + 1.0;
+    let f_val = gx * gx;
+    let chain = 4.0 * gx;
+    println(f"  x={x}: f(x)={f_val}, f'(x)={chain}");
+}
+
+/// f(x) = (x^2+3)^3, f'(x) = 6x*(x^2+3)^2
+fn chain_f2(x: Float) {
+    let gx = x * x + 3.0;
+    let f_val = gx * gx * gx;
+    let chain = 6.0 * x * gx * gx;
+    println(f"  x={x}: f(x)={f_val}, f'(x)={chain}");
+}
+
+/// f(x) = ((x+1)^2+1)^2, f'(x) = 4*(x+1)*((x+1)^2+1)
+fn chain_f3(x: Float) {
+    let hx = x + 1.0;
+    let gx = hx * hx + 1.0;
+    let f_val = gx * gx;
+    let chain = 4.0 * hx * gx;
+    println(f"  x={x}: f(x)={f_val}, f'(x)={chain}");
+}
+
+/// Product rule and quotient rule
+fn test_product_quotient_rule() {
+    println("\n=== Product and Quotient Rule ===");
+
+    // Product rule: d/dx[x^2*(x+1)] = 3x^2 + 2x
+    println("product rule: d/dx[x^2 * (x+1)]:");
+    product_rule_eval(0.0);
+    product_rule_eval(1.0);
+    product_rule_eval(2.0);
+    product_rule_eval(3.0);
+    product_rule_eval(-1.0);
+
+    // Quotient rule: d/dx[x^2/(x+1)] = (x^2+2x)/(x+1)^2
+    println("quotient rule: d/dx[x^2 / (x+1)]:");
+    quotient_rule_eval(0.0);
+    quotient_rule_eval(1.0);
+    quotient_rule_eval(2.0);
+    quotient_rule_eval(3.0);
+    quotient_rule_eval(-2.0);
+
+    // Triple product: d/dx[x*(x+1)*(x+2)] = (x+1)(x+2) + x(x+2) + x(x+1)
+    println("triple product: d/dx[x*(x+1)*(x+2)]:");
+    triple_product_eval(0.0);
+    triple_product_eval(1.0);
+    triple_product_eval(2.0);
+    triple_product_eval(3.0);
+    triple_product_eval(-1.0);
+}
+
+/// Evaluate product rule at x: d/dx[x^2*(x+1)] = 3x^2+2x
+fn product_rule_eval(x: Float) {
+    let fx = x * x;
+    let gx = x + 1.0;
+    let product_val = fx * gx;
+    let product_deriv = 2.0 * x * gx + fx * 1.0;
+    let simplified = 3.0 * x * x + 2.0 * x;
+    println(f"  x={x}: value={product_val}, derivative={product_deriv}, simplified={simplified}");
+}
+
+/// Evaluate quotient rule at x: d/dx[x^2/(x+1)]
+fn quotient_rule_eval(x: Float) {
+    let fx = x * x;
+    let gx = x + 1.0;
+    if gx != 0.0 {
+        let quotient_val = fx / gx;
+        let quotient_deriv = (2.0 * x * gx - fx * 1.0) / (gx * gx);
+        println(f"  x={x}: value={quotient_val}, derivative={quotient_deriv}");
+    } else {
+        println(f"  x={x}: undefined (division by zero)");
+    }
+}
+
+/// Evaluate triple product rule at x: d/dx[x*(x+1)*(x+2)]
+fn triple_product_eval(x: Float) {
+    let fx = x;
+    let gx = x + 1.0;
+    let hx = x + 2.0;
+    let val = fx * gx * hx;
+    let deriv = 1.0 * gx * hx + fx * 1.0 * hx + fx * gx * 1.0;
+    println(f"  x={x}: value={val}, derivative={deriv}");
+}
+
+/// Gradient computation for polynomials
+fn test_polynomial_gradient() {
+    println("\n=== Polynomial Gradient ===");
+
+    // p(x) = 3x^4 - 2x^3 + x^2 - 5x + 7
+    // p'(x) = 12x^3 - 6x^2 + 2x - 5
+    // p''(x) = 36x^2 - 12x + 2
+    println("p(x) = 3x^4 - 2x^3 + x^2 - 5x + 7:");
+    poly_eval(-2.0);
+    poly_eval(-1.0);
+    poly_eval(0.0);
+    poly_eval(1.0);
+    poly_eval(2.0);
+    poly_eval(3.0);
+
+    // Horner's method verification
+    println("Horner's method verification:");
+    horner_eval(-2.0);
+    horner_eval(-1.0);
+    horner_eval(0.0);
+    horner_eval(1.0);
+    horner_eval(2.0);
+    horner_eval(3.0);
+
+    // Derivative via Horner's
+    println("derivative via Horner's:");
+    horner_deriv_eval(-2.0);
+    horner_deriv_eval(-1.0);
+    horner_deriv_eval(0.0);
+    horner_deriv_eval(1.0);
+    horner_deriv_eval(2.0);
+    horner_deriv_eval(3.0);
+}
+
+/// Evaluate polynomial and its derivatives at x
+fn poly_eval(x: Float) {
+    let x2 = x * x;
+    let x3 = x2 * x;
+    let x4 = x3 * x;
+
+    let p_val = 3.0 * x4 - 2.0 * x3 + x2 - 5.0 * x + 7.0;
+    let p_prime = 12.0 * x3 - 6.0 * x2 + 2.0 * x - 5.0;
+    let p_double_prime = 36.0 * x2 - 12.0 * x + 2.0;
+
+    println(f"  x={x}: p={p_val}, p'={p_prime}, p''={p_double_prime}");
+}
+
+/// Horner's method: p(x) = ((3x - 2)x + 1)x - 5)x + 7
+fn horner_eval(x: Float) {
+    let result = ((3.0 * x - 2.0) * x + 1.0) * x - 5.0;
+    let result2 = result * x + 7.0;
+    println(f"  x={x}: p(x)={result2}");
+}
+
+/// Horner's for derivative: p'(x) = ((12x - 6)x + 2)x - 5
+fn horner_deriv_eval(x: Float) {
+    let result = ((12.0 * x - 6.0) * x + 2.0) * x - 5.0;
+    println(f"  x={x}: p'(x)={result}");
+}
+
+/// Multivariable gradient: partial derivatives
+fn test_multivariable_gradient() {
+    println("\n=== Multivariable Gradient ===");
+
+    // f(x, y) = x^2*y + x*y^2 + 3*x - 2*y + 1
+    // df/dx = 2*x*y + y^2 + 3
+    // df/dy = x^2 + 2*x*y - 2
+    println("f(x,y) = x^2*y + x*y^2 + 3x - 2y + 1:");
+    grad_eval(0.0, 0.0);
+    grad_eval(1.0, 1.0);
+    grad_eval(2.0, 1.0);
+    grad_eval(-1.0, 2.0);
+    grad_eval(1.0, -1.0);
+
+    // Gradient descent: 3 steps with lr=0.1
+    println("gradient descent (3 steps, lr=0.1):");
+    let lr = 0.1;
+    let mut gd_x = 2.0;
+    let mut gd_y = 2.0;
+
+    // Step 0
+    let f0 = gd_x * gd_x * gd_y + gd_x * gd_y * gd_y + 3.0 * gd_x - 2.0 * gd_y + 1.0;
+    let dx0 = 2.0 * gd_x * gd_y + gd_y * gd_y + 3.0;
+    let dy0 = gd_x * gd_x + 2.0 * gd_x * gd_y - 2.0;
+    println(f"  step 0: x={gd_x}, y={gd_y}, f={f0}, grad=({dx0}, {dy0})");
+    gd_x = gd_x - lr * dx0;
+    gd_y = gd_y - lr * dy0;
+
+    // Step 1
+    let f1 = gd_x * gd_x * gd_y + gd_x * gd_y * gd_y + 3.0 * gd_x - 2.0 * gd_y + 1.0;
+    let dx1 = 2.0 * gd_x * gd_y + gd_y * gd_y + 3.0;
+    let dy1 = gd_x * gd_x + 2.0 * gd_x * gd_y - 2.0;
+    println(f"  step 1: x={gd_x}, y={gd_y}, f={f1}, grad=({dx1}, {dy1})");
+    gd_x = gd_x - lr * dx1;
+    gd_y = gd_y - lr * dy1;
+
+    // Step 2
+    let f2 = gd_x * gd_x * gd_y + gd_x * gd_y * gd_y + 3.0 * gd_x - 2.0 * gd_y + 1.0;
+    let dx2 = 2.0 * gd_x * gd_y + gd_y * gd_y + 3.0;
+    let dy2 = gd_x * gd_x + 2.0 * gd_x * gd_y - 2.0;
+    println(f"  step 2: x={gd_x}, y={gd_y}, f={f2}, grad=({dx2}, {dy2})");
+    gd_x = gd_x - lr * dx2;
+    gd_y = gd_y - lr * dy2;
+
+    let final_f = gd_x * gd_x * gd_y + gd_x * gd_y * gd_y + 3.0 * gd_x - 2.0 * gd_y + 1.0;
+    println(f"  final: x={gd_x}, y={gd_y}, f={final_f}");
+}
+
+/// Evaluate f and gradient at (x, y)
+fn grad_eval(x: Float, y: Float) {
+    let f_val = x * x * y + x * y * y + 3.0 * x - 2.0 * y + 1.0;
+    let df_dx = 2.0 * x * y + y * y + 3.0;
+    let df_dy = x * x + 2.0 * x * y - 2.0;
+    let grad_sq = df_dx * df_dx + df_dy * df_dy;
+    println(f"  ({x}, {y}): f={f_val}, df/dx={df_dx}, df/dy={df_dy}, |grad|^2={grad_sq}");
+}

@@ -1,0 +1,372 @@
+// @test: benchmark
+// @tier: baseline
+// @level: L4
+// @expected-performance: within 10% of C
+// @tags: fibonacci, baseline, comparison, performance
+
+/// Fibonacci Benchmark - Verum Implementation
+///
+/// This benchmark measures Verum's performance on classic recursive
+/// and iterative algorithms, compared against equivalent implementations
+/// in C, Rust, and Go.
+///
+/// Targets:
+/// - Recursive fib(40): within 5% of C
+/// - Iterative fib(90): within 10% of C
+/// - Memoized fib(40): within 15% of C (due to Map overhead)
+
+module vcs.benchmarks.baselines.fib_comparison
+
+const WARMUP_ITERATIONS: Int = 10;
+
+fn main() {
+    let results = BenchmarkResults.new("Fibonacci - Verum vs Other Languages");
+
+    // Recursive benchmarks
+    results.add(benchmark_fib_recursive_small());
+    results.add(benchmark_fib_recursive_medium());
+
+    // Iterative benchmarks
+    results.add(benchmark_fib_iterative());
+    results.add(benchmark_fib_iterative_large());
+
+    // Memoized benchmarks
+    results.add(benchmark_fib_memoized());
+
+    // Matrix exponentiation (O(log n))
+    results.add(benchmark_fib_matrix());
+
+    results.report();
+    assert(results.all_pass(), "Fibonacci performance below target");
+}
+
+/// Classic recursive Fibonacci
+fn fib_recursive(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fib_recursive(n - 1) + fib_recursive(n - 2)
+    }
+}
+
+/// Iterative Fibonacci
+fn fib_iterative(n: Int) -> Int {
+    if n <= 1 {
+        return n;
+    }
+
+    let mut a = 0;
+    let mut b = 1;
+
+    for _ in 2..=n {
+        let temp = a + b;
+        a = b;
+        b = temp;
+    }
+
+    b
+}
+
+/// Memoized Fibonacci
+fn fib_memoized(n: Int, cache: &mut Map<Int, Int>) -> Int {
+    if n <= 1 {
+        return n;
+    }
+
+    if let Some(&result) = cache.get(&n) {
+        return result;
+    }
+
+    let result = fib_memoized(n - 1, cache) + fib_memoized(n - 2, cache);
+    cache.insert(n, result);
+    result
+}
+
+/// Matrix exponentiation Fibonacci (O(log n))
+fn fib_matrix(n: Int) -> Int {
+    if n <= 1 {
+        return n;
+    }
+
+    // [[1,1],[1,0]]^n gives [[F(n+1),F(n)],[F(n),F(n-1)]]
+    let mut result = [[1i64, 0i64], [0i64, 1i64]];  // Identity
+    let mut base = [[1i64, 1i64], [1i64, 0i64]];
+    let mut exp = n;
+
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = matrix_mult(&result, &base);
+        }
+        base = matrix_mult(&base, &base);
+        exp /= 2;
+    }
+
+    result[0][1] as Int
+}
+
+fn matrix_mult(a: &[[i64; 2]; 2], b: &[[i64; 2]; 2]) -> [[i64; 2]; 2] {
+    [
+        [
+            a[0][0] * b[0][0] + a[0][1] * b[1][0],
+            a[0][0] * b[0][1] + a[0][1] * b[1][1],
+        ],
+        [
+            a[1][0] * b[0][0] + a[1][1] * b[1][0],
+            a[1][0] * b[0][1] + a[1][1] * b[1][1],
+        ],
+    ]
+}
+
+/// Benchmark recursive Fibonacci (small n)
+fn benchmark_fib_recursive_small() -> BenchmarkResult {
+    let n = 30;
+    let expected = 832040;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let result = fib_recursive(n);
+        assert(result == expected);
+    }
+
+    let iterations = 100;
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let result = fib_recursive(n);
+        black_box(result);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    // Compare to expected C performance (~5ms for fib(30))
+    let c_baseline_ms = 5.0;
+    let ratio = per_call_ms / c_baseline_ms;
+
+    BenchmarkResult {
+        name: "fib_recursive_30",
+        metric: "ms (ratio to C)",
+        value: ratio,
+        target: 1.10,  // Within 10% of C
+        passed: ratio < 1.10,
+    }
+}
+
+/// Benchmark recursive Fibonacci (medium n)
+fn benchmark_fib_recursive_medium() -> BenchmarkResult {
+    let n = 40;
+    let expected = 102334155;
+
+    // Warmup
+    let result = fib_recursive(n);
+    assert(result == expected);
+
+    let iterations = 3;
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let result = fib_recursive(n);
+        black_box(result);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    // Compare to expected C performance (~600ms for fib(40))
+    let c_baseline_ms = 600.0;
+    let ratio = per_call_ms / c_baseline_ms;
+
+    BenchmarkResult {
+        name: "fib_recursive_40",
+        metric: "ms (ratio to C)",
+        value: ratio,
+        target: 1.05,  // Within 5% of C
+        passed: ratio < 1.05,
+    }
+}
+
+/// Benchmark iterative Fibonacci
+fn benchmark_fib_iterative() -> BenchmarkResult {
+    let iterations = 10_000_000;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = fib_iterative(45);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Int = 0;
+    for i in 0..iterations {
+        sum += fib_iterative(45);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / iterations as Float;
+
+    // Compare to expected C performance (~10ns for fib_iterative(45))
+    let c_baseline_ns = 10.0;
+    let ratio = per_call_ns / c_baseline_ns;
+
+    BenchmarkResult {
+        name: "fib_iterative_45",
+        metric: "ns (ratio to C)",
+        value: ratio,
+        target: 1.10,  // Within 10% of C
+        passed: ratio < 1.10,
+    }
+}
+
+/// Benchmark iterative Fibonacci (large n)
+fn benchmark_fib_iterative_large() -> BenchmarkResult {
+    let iterations = 1_000_000;
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Int = 0;
+    for _ in 0..iterations {
+        sum += fib_iterative(90);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / iterations as Float;
+
+    // Compare to expected C performance (~20ns for fib_iterative(90))
+    let c_baseline_ns = 20.0;
+    let ratio = per_call_ns / c_baseline_ns;
+
+    BenchmarkResult {
+        name: "fib_iterative_90",
+        metric: "ns (ratio to C)",
+        value: ratio,
+        target: 1.10,
+        passed: ratio < 1.10,
+    }
+}
+
+/// Benchmark memoized Fibonacci
+fn benchmark_fib_memoized() -> BenchmarkResult {
+    let iterations = 10_000;
+    let n = 40;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let mut cache: Map<Int, Int> = Map.new();
+        let _ = fib_memoized(n, &mut cache);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let mut cache: Map<Int, Int> = Map.new();
+        let result = fib_memoized(n, &mut cache);
+        black_box(result);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_us = (elapsed_ns as Float / 1000.0) / iterations as Float;
+
+    // Memoized should complete in microseconds, not milliseconds
+    BenchmarkResult {
+        name: "fib_memoized_40",
+        metric: "us/call",
+        value: per_call_us,
+        target: 10.0,  // Should complete in < 10us
+        passed: per_call_us < 10.0,
+    }
+}
+
+/// Benchmark matrix exponentiation Fibonacci
+fn benchmark_fib_matrix() -> BenchmarkResult {
+    let iterations = 1_000_000;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = fib_matrix(1000);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Int = 0;
+    for _ in 0..iterations {
+        sum += fib_matrix(1000);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / iterations as Float;
+
+    // Matrix method should be O(log n), very fast
+    BenchmarkResult {
+        name: "fib_matrix_1000",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 100.0,  // Should complete in < 100ns
+        passed: per_call_ns < 100.0,
+    }
+}
+
+// Benchmark infrastructure
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.3} {} (target: {:.3})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is { start_time: u64 };
+
+implement Timer {
+    fn new() -> Self { Self { start_time: 0 } }
+    fn start(&mut self) { self.start_time = clock_ns(); }
+    fn elapsed_ns(&self) -> u64 { clock_ns() - self.start_time }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

@@ -1,0 +1,126 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: iterator, lazy, map, filter, functional
+// @expect: pass
+
+// Lazy iterator chains: zero intermediate allocations.
+
+// Custom range with has_next/next protocol
+type MyRange is {
+    current: Int,
+    stop: Int,
+};
+
+fn my_range(start: Int, stop: Int) -> MyRange {
+    MyRange { current: start, stop: stop }
+}
+
+implement MyRange {
+    fn has_next(&self) -> Bool { self.current < self.stop }
+    fn next(&mut self) -> Int {
+        let v = self.current;
+        self.current = self.current + 1;
+        v
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Simple custom range iteration
+    let mut r = my_range(0, 5);
+    let mut sum = 0;
+    while r.has_next() {
+        sum = sum + r.next();
+    }
+    if sum != 10 {
+        print(f"FAIL: range sum = {sum}");
+        return 1;
+    }
+
+    // Test 2: for-in on custom iterator
+    let mut r2 = my_range(0, 5);
+    let mut count = 0;
+    for x in r2 {
+        count = count + 1;
+    }
+    if count != 5 {
+        print(f"FAIL: for-in count = {count}");
+        return 1;
+    }
+
+    // Test 3: Manual lazy map chain
+    let mut r3 = my_range(1, 6);
+    let mut doubled_sum = 0;
+    while r3.has_next() {
+        let x = r3.next();
+        let mapped = x * 2;  // Lazy: compute only for this element
+        doubled_sum = doubled_sum + mapped;
+    }
+    // 2+4+6+8+10 = 30
+    if doubled_sum != 30 {
+        print(f"FAIL: mapped sum = {doubled_sum}");
+        return 1;
+    }
+
+    // Test 4: Manual lazy filter chain
+    let mut r4 = my_range(1, 11);
+    let mut even_sum = 0;
+    while r4.has_next() {
+        let x = r4.next();
+        if x % 2 == 0 {  // Lazy filter: only process matching elements
+            even_sum = even_sum + x;
+        }
+    }
+    // 2+4+6+8+10 = 30
+    if even_sum != 30 {
+        print(f"FAIL: filter sum = {even_sum}");
+        return 1;
+    }
+
+    // Test 5: Composable lazy chain (map + filter + take)
+    let mut r5 = my_range(0, 100);
+    let mut result_sum = 0;
+    let mut taken = 0;
+    while r5.has_next() {
+        let x = r5.next();
+        let doubled = x * 2;       // map: x * 2
+        if doubled % 3 == 0 {      // filter: divisible by 3
+            result_sum = result_sum + doubled;
+            taken = taken + 1;
+            if taken >= 5 { break; }  // take: first 5
+        }
+    }
+    // Values: 0*2=0(÷3→yes), 3*2=6(÷3→yes), 6*2=12(÷3→yes), 9*2=18(÷3→yes), 12*2=24(÷3→yes)
+    // Sum: 0+6+12+18+24 = 60
+    if result_sum != 60 {
+        print(f"FAIL: composed chain = {result_sum}, expected 60");
+        return 1;
+    }
+
+    // Test 6: List iteration with for-in (uses built-in IterNew/IterNext)
+    let nums = [10, 20, 30, 40, 50];
+    let mut list_sum = 0;
+    for n in nums {
+        list_sum = list_sum + n;
+    }
+    if list_sum != 150 {
+        print(f"FAIL: list sum = {list_sum}");
+        return 1;
+    }
+
+    // Test 7: Lazy evaluation proof — only evaluate what's needed
+    let mut r6 = my_range(0, 1000000);  // Million elements
+    let first = r6.next();  // Only evaluates ONE element
+    if first != 0 {
+        print(f"FAIL: first = {first}");
+        return 1;
+    }
+    // r6.current is now 1, NOT 1000000 — proof of laziness
+    if r6.current != 1 {
+        print(f"FAIL: lazy proof, current = {r6.current}");
+        return 1;
+    }
+
+    print("PASS: lazy iterators work correctly");
+    0
+}

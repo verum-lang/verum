@@ -1,0 +1,192 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, parser, combinator, pattern
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for parser combinator pattern (integer token streams)
+
+// Token types: 0=NUMBER, 1=PLUS, 2=STAR, 3=LPAREN, 4=RPAREN, 5=EOF
+type TokenStream is {
+    t0: Int, t1: Int, t2: Int, t3: Int,
+    t4: Int, t5: Int, t6: Int, t7: Int,
+    v0: Int, v1: Int, v2: Int, v3: Int,
+    v4: Int, v5: Int, v6: Int, v7: Int,
+    len: Int
+};
+
+fn ts_type(s: TokenStream, i: Int) -> Int {
+    if i == 0 { s.t0 } else if i == 1 { s.t1 }
+    else if i == 2 { s.t2 } else if i == 3 { s.t3 }
+    else if i == 4 { s.t4 } else if i == 5 { s.t5 }
+    else if i == 6 { s.t6 } else { s.t7 }
+}
+
+fn ts_val(s: TokenStream, i: Int) -> Int {
+    if i == 0 { s.v0 } else if i == 1 { s.v1 }
+    else if i == 2 { s.v2 } else if i == 3 { s.v3 }
+    else if i == 4 { s.v4 } else if i == 5 { s.v5 }
+    else if i == 6 { s.v6 } else { s.v7 }
+}
+
+// Parse result: (value, next_position, success)
+type ParseResult is { value: Int, pos: Int, ok: Int };
+
+fn fail(pos: Int) -> ParseResult { ParseResult { value: 0, pos: pos, ok: 0 } }
+fn success(val: Int, pos: Int) -> ParseResult { ParseResult { value: val, pos: pos, ok: 1 } }
+
+// Parse a number token
+fn parse_number(s: TokenStream, pos: Int) -> ParseResult {
+    if pos >= s.len { return fail(pos); }
+    if ts_type(s, pos) == 0 {
+        success(ts_val(s, pos), pos + 1)
+    } else {
+        fail(pos)
+    }
+}
+
+// Parse a specific token type
+fn parse_token(s: TokenStream, pos: Int, expected: Int) -> ParseResult {
+    if pos >= s.len { return fail(pos); }
+    if ts_type(s, pos) == expected {
+        success(0, pos + 1)
+    } else {
+        fail(pos)
+    }
+}
+
+// Simple expression parser: number (PLUS number)*
+fn parse_sum_expr(s: TokenStream, pos: Int) -> ParseResult {
+    let first = parse_number(s, pos);
+    if first.ok == 0 { return fail(pos); }
+    let mut value = first.value;
+    let mut cur = first.pos;
+    let mut done = 0;
+    while done == 0 {
+        let op = parse_token(s, cur, 1);  // PLUS
+        if op.ok == 0 {
+            done = 1;
+        } else {
+            let next = parse_number(s, op.pos);
+            if next.ok == 0 {
+                done = 1;
+            } else {
+                value = value + next.value;
+                cur = next.pos;
+            }
+        }
+    }
+    success(value, cur)
+}
+
+// Product parser: number (STAR number)*
+fn parse_prod_expr(s: TokenStream, pos: Int) -> ParseResult {
+    let first = parse_number(s, pos);
+    if first.ok == 0 { return fail(pos); }
+    let mut value = first.value;
+    let mut cur = first.pos;
+    let mut done = 0;
+    while done == 0 {
+        let op = parse_token(s, cur, 2);  // STAR
+        if op.ok == 0 {
+            done = 1;
+        } else {
+            let next = parse_number(s, op.pos);
+            if next.ok == 0 {
+                done = 1;
+            } else {
+                value = value * next.value;
+                cur = next.pos;
+            }
+        }
+    }
+    success(value, cur)
+}
+
+fn make_empty() -> TokenStream {
+    TokenStream {
+        t0: 5, t1: 5, t2: 5, t3: 5, t4: 5, t5: 5, t6: 5, t7: 5,
+        v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        len: 0
+    }
+}
+
+fn test_single_number() {
+    // "42"
+    let s = TokenStream {
+        t0: 0, t1: 5, t2: 5, t3: 5, t4: 5, t5: 5, t6: 5, t7: 5,
+        v0: 42, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        len: 1
+    };
+    let r = parse_number(s, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 42);
+    assert_eq(r.pos, 1);
+}
+
+fn test_addition() {
+    // "3 + 4 + 5" -> tokens: NUM(3) PLUS NUM(4) PLUS NUM(5)
+    let s = TokenStream {
+        t0: 0, t1: 1, t2: 0, t3: 1, t4: 0, t5: 5, t6: 5, t7: 5,
+        v0: 3, v1: 0, v2: 4, v3: 0, v4: 5, v5: 0, v6: 0, v7: 0,
+        len: 5
+    };
+    let r = parse_sum_expr(s, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 12);
+    assert_eq(r.pos, 5);
+}
+
+fn test_multiplication() {
+    // "2 * 3 * 7" -> tokens: NUM(2) STAR NUM(3) STAR NUM(7)
+    let s = TokenStream {
+        t0: 0, t1: 2, t2: 0, t3: 2, t4: 0, t5: 5, t6: 5, t7: 5,
+        v0: 2, v1: 0, v2: 3, v3: 0, v4: 7, v5: 0, v6: 0, v7: 0,
+        len: 5
+    };
+    let r = parse_prod_expr(s, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 42);
+}
+
+fn test_parse_failure() {
+    // "+" -> not a number
+    let s = TokenStream {
+        t0: 1, t1: 5, t2: 5, t3: 5, t4: 5, t5: 5, t6: 5, t7: 5,
+        v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        len: 1
+    };
+    let r = parse_number(s, 0);
+    assert_eq(r.ok, 0);
+}
+
+fn test_partial_parse() {
+    // "3 + 4 * 5" parsed as sum: 3 + 4 = 7, stops at *
+    let s = TokenStream {
+        t0: 0, t1: 1, t2: 0, t3: 2, t4: 0, t5: 5, t6: 5, t7: 5,
+        v0: 3, v1: 0, v2: 4, v3: 0, v4: 5, v5: 0, v6: 0, v7: 0,
+        len: 5
+    };
+    let r = parse_sum_expr(s, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 7);
+    assert_eq(r.pos, 3);  // Stopped before STAR
+}
+
+fn test_empty() {
+    let s = make_empty();
+    let r = parse_number(s, 0);
+    assert_eq(r.ok, 0);
+}
+
+fn main() -> Int {
+    test_single_number();
+    test_addition();
+    test_multiplication();
+    test_parse_failure();
+    test_partial_parse();
+    test_empty();
+    print("[OK] 266_parser_combinator_aot");
+    0
+}

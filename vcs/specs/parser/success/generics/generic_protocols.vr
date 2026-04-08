@@ -1,0 +1,27 @@
+// @test: parse-pass
+// @tier: 0
+// @category: generics
+
+// Generic protocol
+type Functor<F> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+// Protocol with associated type
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// Protocol with generic method
+type Collection is protocol {
+    type Element;
+    fn push<T: Into<Self.Element>>(&mut self, item: T);
+    fn get<I: Index>(&self, index: I) -> Maybe<&Self.Element>;
+};
+
+// Protocol with multiple type parameters
+type BiMap<K, V> is protocol {
+    fn get_by_key(&self, key: &K) -> Maybe<&V>;
+    fn get_by_value(&self, value: &V) -> Maybe<&K>;
+};

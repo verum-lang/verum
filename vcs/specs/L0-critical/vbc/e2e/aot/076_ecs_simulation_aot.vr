@@ -1,0 +1,274 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, ecs, entity, simulation
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT Entity-Component-System simulation using flat int arrays
+
+// Each entity has 5 fields: id, x, y, health, alive
+// stored at indices base+0..base+4 in a flat array of 40 ints (8 entities × 5 fields)
+type World is {
+    f0: Int, f1: Int, f2: Int, f3: Int, f4: Int,
+    f5: Int, f6: Int, f7: Int, f8: Int, f9: Int,
+    f10: Int, f11: Int, f12: Int, f13: Int, f14: Int,
+    f15: Int, f16: Int, f17: Int, f18: Int, f19: Int,
+    f20: Int, f21: Int, f22: Int, f23: Int, f24: Int,
+    f25: Int, f26: Int, f27: Int, f28: Int, f29: Int,
+    f30: Int, f31: Int, f32: Int, f33: Int, f34: Int,
+    f35: Int, f36: Int, f37: Int, f38: Int, f39: Int,
+    entity_count: Int
+};
+
+fn world_new() -> World {
+    World {
+        f0: 0, f1: 0, f2: 0, f3: 0, f4: 0,
+        f5: 0, f6: 0, f7: 0, f8: 0, f9: 0,
+        f10: 0, f11: 0, f12: 0, f13: 0, f14: 0,
+        f15: 0, f16: 0, f17: 0, f18: 0, f19: 0,
+        f20: 0, f21: 0, f22: 0, f23: 0, f24: 0,
+        f25: 0, f26: 0, f27: 0, f28: 0, f29: 0,
+        f30: 0, f31: 0, f32: 0, f33: 0, f34: 0,
+        f35: 0, f36: 0, f37: 0, f38: 0, f39: 0,
+        entity_count: 0,
+    }
+}
+
+fn wget(w: World, idx: Int) -> Int {
+    if idx == 0 { w.f0 } else if idx == 1 { w.f1 } else if idx == 2 { w.f2 }
+    else if idx == 3 { w.f3 } else if idx == 4 { w.f4 } else if idx == 5 { w.f5 }
+    else if idx == 6 { w.f6 } else if idx == 7 { w.f7 } else if idx == 8 { w.f8 }
+    else if idx == 9 { w.f9 } else if idx == 10 { w.f10 } else if idx == 11 { w.f11 }
+    else if idx == 12 { w.f12 } else if idx == 13 { w.f13 } else if idx == 14 { w.f14 }
+    else if idx == 15 { w.f15 } else if idx == 16 { w.f16 } else if idx == 17 { w.f17 }
+    else if idx == 18 { w.f18 } else if idx == 19 { w.f19 } else if idx == 20 { w.f20 }
+    else if idx == 21 { w.f21 } else if idx == 22 { w.f22 } else if idx == 23 { w.f23 }
+    else if idx == 24 { w.f24 } else if idx == 25 { w.f25 } else if idx == 26 { w.f26 }
+    else if idx == 27 { w.f27 } else if idx == 28 { w.f28 } else if idx == 29 { w.f29 }
+    else if idx == 30 { w.f30 } else if idx == 31 { w.f31 } else if idx == 32 { w.f32 }
+    else if idx == 33 { w.f33 } else if idx == 34 { w.f34 } else if idx == 35 { w.f35 }
+    else if idx == 36 { w.f36 } else if idx == 37 { w.f37 } else if idx == 38 { w.f38 }
+    else { w.f39 }
+}
+
+fn wset(w: World, idx: Int, val: Int) -> World {
+    World {
+        f0: if idx == 0 { val } else { w.f0 }, f1: if idx == 1 { val } else { w.f1 },
+        f2: if idx == 2 { val } else { w.f2 }, f3: if idx == 3 { val } else { w.f3 },
+        f4: if idx == 4 { val } else { w.f4 }, f5: if idx == 5 { val } else { w.f5 },
+        f6: if idx == 6 { val } else { w.f6 }, f7: if idx == 7 { val } else { w.f7 },
+        f8: if idx == 8 { val } else { w.f8 }, f9: if idx == 9 { val } else { w.f9 },
+        f10: if idx == 10 { val } else { w.f10 }, f11: if idx == 11 { val } else { w.f11 },
+        f12: if idx == 12 { val } else { w.f12 }, f13: if idx == 13 { val } else { w.f13 },
+        f14: if idx == 14 { val } else { w.f14 }, f15: if idx == 15 { val } else { w.f15 },
+        f16: if idx == 16 { val } else { w.f16 }, f17: if idx == 17 { val } else { w.f17 },
+        f18: if idx == 18 { val } else { w.f18 }, f19: if idx == 19 { val } else { w.f19 },
+        f20: if idx == 20 { val } else { w.f20 }, f21: if idx == 21 { val } else { w.f21 },
+        f22: if idx == 22 { val } else { w.f22 }, f23: if idx == 23 { val } else { w.f23 },
+        f24: if idx == 24 { val } else { w.f24 }, f25: if idx == 25 { val } else { w.f25 },
+        f26: if idx == 26 { val } else { w.f26 }, f27: if idx == 27 { val } else { w.f27 },
+        f28: if idx == 28 { val } else { w.f28 }, f29: if idx == 29 { val } else { w.f29 },
+        f30: if idx == 30 { val } else { w.f30 }, f31: if idx == 31 { val } else { w.f31 },
+        f32: if idx == 32 { val } else { w.f32 }, f33: if idx == 33 { val } else { w.f33 },
+        f34: if idx == 34 { val } else { w.f34 }, f35: if idx == 35 { val } else { w.f35 },
+        f36: if idx == 36 { val } else { w.f36 }, f37: if idx == 37 { val } else { w.f37 },
+        f38: if idx == 38 { val } else { w.f38 }, f39: if idx == 39 { val } else { w.f39 },
+        entity_count: w.entity_count,
+    }
+}
+
+// Entity fields: base = eid * 5
+// +0: id, +1: x, +2: y, +3: health, +4: alive (1=alive, 0=dead)
+fn eid(w: World, n: Int) -> Int { wget(w, n * 5) }
+fn ex(w: World, n: Int) -> Int { wget(w, n * 5 + 1) }
+fn ey(w: World, n: Int) -> Int { wget(w, n * 5 + 2) }
+fn ehp(w: World, n: Int) -> Int { wget(w, n * 5 + 3) }
+fn ealive(w: World, n: Int) -> Int { wget(w, n * 5 + 4) }
+
+fn add_entity(w: World, id: Int, x: Int, y: Int, hp: Int) -> World {
+    let n = w.entity_count;
+    let base = n * 5;
+    let w2 = wset(wset(wset(wset(wset(w, base, id), base + 1, x), base + 2, y), base + 3, hp), base + 4, 1);
+    World {
+        f0: w2.f0, f1: w2.f1, f2: w2.f2, f3: w2.f3, f4: w2.f4,
+        f5: w2.f5, f6: w2.f6, f7: w2.f7, f8: w2.f8, f9: w2.f9,
+        f10: w2.f10, f11: w2.f11, f12: w2.f12, f13: w2.f13, f14: w2.f14,
+        f15: w2.f15, f16: w2.f16, f17: w2.f17, f18: w2.f18, f19: w2.f19,
+        f20: w2.f20, f21: w2.f21, f22: w2.f22, f23: w2.f23, f24: w2.f24,
+        f25: w2.f25, f26: w2.f26, f27: w2.f27, f28: w2.f28, f29: w2.f29,
+        f30: w2.f30, f31: w2.f31, f32: w2.f32, f33: w2.f33, f34: w2.f34,
+        f35: w2.f35, f36: w2.f36, f37: w2.f37, f38: w2.f38, f39: w2.f39,
+        entity_count: n + 1,
+    }
+}
+
+fn count_alive(w: World) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < w.entity_count {
+        if ealive(w, i) != 0 { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+fn sum_health(w: World) -> Int {
+    let mut t = 0;
+    let mut i = 0;
+    while i < w.entity_count {
+        if ealive(w, i) != 0 { t = t + ehp(w, i); }
+        i = i + 1;
+    }
+    t
+}
+
+fn max_health(w: World) -> Int {
+    let mut best = 0;
+    let mut i = 0;
+    while i < w.entity_count {
+        if ealive(w, i) != 0 && ehp(w, i) > best { best = ehp(w, i); }
+        i = i + 1;
+    }
+    best
+}
+
+fn get_hp_by_id(w: World, target: Int) -> Int {
+    let mut i = 0;
+    let mut found = -1;
+    while i < w.entity_count {
+        if eid(w, i) == target { found = ehp(w, i); }
+        i = i + 1;
+    }
+    found
+}
+
+fn get_x_by_id(w: World, target: Int) -> Int {
+    let mut i = 0;
+    let mut found = -1;
+    while i < w.entity_count {
+        if eid(w, i) == target { found = ex(w, i); }
+        i = i + 1;
+    }
+    found
+}
+
+fn move_entities(w: World, dx: Int) -> World {
+    let mut result = w;
+    let mut i = 0;
+    while i < w.entity_count {
+        if ealive(result, i) != 0 {
+            let base = i * 5;
+            result = wset(result, base + 1, wget(result, base + 1) + dx);
+            result = wset(result, base + 2, wget(result, base + 2) + dx / 2);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn apply_damage(w: World, dmg: Int) -> World {
+    let mut result = w;
+    let mut i = 0;
+    while i < w.entity_count {
+        if ealive(result, i) != 0 {
+            let base = i * 5;
+            let hp = wget(result, base + 3);
+            let new_hp = hp - dmg;
+            let clamped = if new_hp < 0 { 0 } else { new_hp };
+            result = wset(result, base + 3, clamped);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn cull_dead(w: World) -> World {
+    let mut result = w;
+    let mut i = 0;
+    while i < w.entity_count {
+        if ealive(result, i) != 0 && ehp(result, i) == 0 {
+            let base = i * 5;
+            result = wset(result, base + 4, 0);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn nearest_to_origin(w: World) -> Int {
+    let mut best_id = -1;
+    let mut best_dist = 999999;
+    let mut i = 0;
+    while i < w.entity_count {
+        if ealive(w, i) != 0 {
+            let px = ex(w, i);
+            let py = ey(w, i);
+            let d = px * px + py * py;
+            if d < best_dist { best_dist = d; best_id = eid(w, i); }
+        }
+        i = i + 1;
+    }
+    best_id
+}
+
+fn main() -> Int {
+    // === Create 8 entities ===
+    let mut w = world_new();
+    w = add_entity(w, 1, 0, 0, 100);
+    w = add_entity(w, 2, 5, 5, 80);
+    w = add_entity(w, 3, 10, 0, 60);
+    w = add_entity(w, 4, 0, 10, 40);
+    w = add_entity(w, 5, 3, 3, 120);
+    w = add_entity(w, 6, 7, 2, 30);
+    w = add_entity(w, 7, 1, 1, 90);
+    w = add_entity(w, 8, 4, 8, 50);
+
+    assert_eq(count_alive(w), 8);
+    assert_eq(sum_health(w), 570);
+    assert_eq(max_health(w), 120);
+
+    // === Move all by dx=3 ===
+    let w1 = move_entities(w, 3);
+    assert_eq(count_alive(w1), 8);
+    assert_eq(get_x_by_id(w1, 1), 3);    // 0+3
+    assert_eq(get_x_by_id(w1, 3), 13);   // 10+3
+    assert_eq(get_x_by_id(w1, 6), 10);   // 7+3
+    assert_eq(sum_health(w1), 570);
+
+    // === Apply 25 damage ===
+    let w2 = apply_damage(w1, 25);
+    assert_eq(get_hp_by_id(w2, 1), 75);
+    assert_eq(get_hp_by_id(w2, 6), 5);
+    assert_eq(get_hp_by_id(w2, 4), 15);
+    assert_eq(sum_health(w2), 370);
+
+    // === Apply 30 more, cull ===
+    let w3 = apply_damage(w2, 30);
+    assert_eq(get_hp_by_id(w3, 1), 45);
+    assert_eq(get_hp_by_id(w3, 4), 0);
+    assert_eq(get_hp_by_id(w3, 6), 0);
+    assert_eq(get_hp_by_id(w3, 8), 0);
+
+    let w4 = cull_dead(w3);
+    assert_eq(count_alive(w4), 5);
+    assert_eq(sum_health(w4), 175);
+    assert_eq(max_health(w4), 65);
+
+    // === Nearest to origin ===
+    // w1 positions: E1(3,1), E2(8,7), E3(13,1), E4(3,11), E5(6,4), E6(10,3), E7(4,2), E8(7,9)
+    // dist_sq: E1=10, E7=20, E5=52, E2=113, E4=130, E8=130, E6=109, E3=170
+    assert_eq(nearest_to_origin(w1), 1);
+
+    // === Obliterate ===
+    let ob = cull_dead(apply_damage(w, 200));
+    assert_eq(count_alive(ob), 0);
+    assert_eq(sum_health(ob), 0);
+    assert_eq(nearest_to_origin(ob), -1);
+
+    // === Zero damage ===
+    let zd = apply_damage(w, 0);
+    assert_eq(sum_health(zd), 570);
+    assert_eq(count_alive(zd), 8);
+
+    0
+}

@@ -1,0 +1,101 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, real-opcode, linalg
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL tensor linear algebra operations through VBC interpreter.
+// Since full linalg (QR, SVD, etc.) requires 2D tensors with list shapes,
+// this test focuses on operations that work with 1D tensors and validates
+// the algebraic properties of basic operations.
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let diff = tensor_binop(t, e, 1);
+    let val = tensor_get_scalar(diff, idx);
+    if val == 0 { 0 } else { 1 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // --- Test 1: Dot product via mul + reduce ---
+    // dot([1,2,3], [4,5,6]) = 4 + 10 + 18 = 32
+    let a = tensor_new(3, 1);
+    let a = tensor_set_scalar(a, 0, 1);
+    let a = tensor_set_scalar(a, 1, 2);
+    let a = tensor_set_scalar(a, 2, 3);
+
+    let b = tensor_new(3, 1);
+    let b = tensor_set_scalar(b, 0, 4);
+    let b = tensor_set_scalar(b, 1, 5);
+    let b = tensor_set_scalar(b, 2, 6);
+
+    let prod = tensor_binop(a, b, 2);
+    let dot = tensor_reduce(prod, 0, 0);
+    errors = errors + check_val(dot, 0, 32);
+
+    // --- Test 2: Vector norm squared: ||v||^2 = sum(v * v) ---
+    // ||[3, 4]||^2 = 9 + 16 = 25
+    let v = tensor_new(2, 1);
+    let v = tensor_set_scalar(v, 0, 3);
+    let v = tensor_set_scalar(v, 1, 4);
+    let vv = tensor_binop(v, v, 2);
+    let norm_sq = tensor_reduce(vv, 0, 0);
+    errors = errors + check_val(norm_sq, 0, 25);
+
+    // --- Test 3: ||v|| via sqrt(sum(v*v)) ---
+    let norm = tensor_unop(norm_sq, 4);
+    errors = errors + check_val(norm, 0, 5);
+
+    // --- Test 4: Linear combination: 2a + 3b ---
+    let two = tensor_fill(3, 2, 1);
+    let three = tensor_fill(3, 3, 1);
+    let two_a = tensor_binop(a, two, 2);
+    let three_b = tensor_binop(b, three, 2);
+    let lincomb = tensor_binop(two_a, three_b, 0);
+    // 2*[1,2,3] + 3*[4,5,6] = [2,4,6] + [12,15,18] = [14,19,24]
+    errors = errors + check_val(lincomb, 0, 14);
+    errors = errors + check_val(lincomb, 1, 19);
+    errors = errors + check_val(lincomb, 2, 24);
+
+    // --- Test 5: Orthogonality check: a . a_perp = 0 ---
+    // For [1, 0] and [0, 1]: sum(a*b) = 0
+    let e1 = tensor_new(2, 1);
+    let e1 = tensor_set_scalar(e1, 0, 1);
+
+    let e2 = tensor_new(2, 1);
+    let e2 = tensor_set_scalar(e2, 1, 1);
+
+    let e1e2 = tensor_binop(e1, e2, 2);
+    let ortho = tensor_reduce(e1e2, 0, 0);
+    errors = errors + check_val(ortho, 0, 0);
+
+    // --- Test 6: Cauchy-Schwarz check: |dot(a,b)|^2 <= ||a||^2 * ||b||^2 ---
+    // Already computed: dot(a,b) = 32, ||a||^2 = 14, ||b||^2 = 77
+    // 32^2 = 1024, 14*77 = 1078, 1024 <= 1078 ✓
+    let aa = tensor_binop(a, a, 2);
+    let bb = tensor_binop(b, b, 2);
+    let aa_sum = tensor_reduce(aa, 0, 0);
+    let bb_sum = tensor_reduce(bb, 0, 0);
+    errors = errors + check_val(aa_sum, 0, 14);
+    errors = errors + check_val(bb_sum, 0, 77);
+
+    // --- Test 7: Hadamard product properties ---
+    // a ∘ 1 = a (identity)
+    let ones = tensor_fill(3, 1, 1);
+    let had = tensor_binop(a, ones, 2);
+    errors = errors + check_val(had, 0, 1);
+    errors = errors + check_val(had, 1, 2);
+    errors = errors + check_val(had, 2, 3);
+
+    // a ∘ 0 = 0 (annihilation)
+    let zeros = tensor_new(3, 1);
+    let had0 = tensor_binop(a, zeros, 2);
+    errors = errors + check_val(had0, 0, 0);
+    errors = errors + check_val(had0, 1, 0);
+    errors = errors + check_val(had0, 2, 0);
+
+    errors
+}

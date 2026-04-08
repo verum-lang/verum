@@ -1,0 +1,258 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, escape-analysis, cbgr, closure-escape
+// @timeout: 5000
+// @description: Tests escape analysis for values captured by closures
+
+/// Closure capture analysis.
+/// Values captured by closures that escape their creation scope
+/// must be tracked for proper CBGR tier assignment.
+
+// =============================================================================
+// Closure captures value and escapes
+// =============================================================================
+
+fn create_adder(n: Int) -> fn(Int) -> Int {
+    // n captured by closure that escapes
+    |x| x + n
+}
+
+fn create_multiplier(factor: Int) -> fn(Int) -> Int {
+    |x| x * factor
+}
+
+fn create_constant(value: Int) -> fn() -> Int {
+    // Closure captures value
+    || value
+}
+
+// =============================================================================
+// Closure stored in structure
+// =============================================================================
+
+type IntTransform is { f: fn(Int) -> Int };
+
+fn make_transform(offset: Int) -> IntTransform {
+    // Closure escapes via struct field
+    IntTransform { f: |x| x + offset }
+}
+
+fn apply_transform(t: IntTransform, x: Int) -> Int {
+    (t.f)(x)
+}
+
+// =============================================================================
+// Multiple closures from same scope
+// =============================================================================
+
+fn create_pair_transforms(a: Int, b: Int) -> (fn(Int) -> Int, fn(Int) -> Int) {
+    // Both closures capture their respective values
+    (|x| x + a, |x| x + b)
+}
+
+fn create_ops(n: Int) -> (fn(Int) -> Int, fn(Int) -> Int, fn(Int) -> Int) {
+    // Multiple closures from same scope
+    let add = |x| x + n;
+    let sub = |x| x - n;
+    let mul = |x| x * n;
+    (add, sub, mul)
+}
+
+// =============================================================================
+// Closure capturing multiple values
+// =============================================================================
+
+fn create_linear_fn(slope: Int, intercept: Int) -> fn(Int) -> Int {
+    // Closure captures two values
+    |x| slope * x + intercept
+}
+
+fn create_quadratic_fn(a: Int, b: Int, c: Int) -> fn(Int) -> Int {
+    // Closure captures three values
+    |x| a * x * x + b * x + c
+}
+
+// =============================================================================
+// Closure capturing array
+// =============================================================================
+
+fn create_indexed_getter(arr: [Int; 5]) -> fn(Int) -> Int {
+    // Array captured by closure
+    |idx| arr[idx]
+}
+
+fn create_sum_closure(arr: [Int; 5]) -> fn() -> Int {
+    // Closure captures array and computes sum
+    || arr[0] + arr[1] + arr[2] + arr[3] + arr[4]
+}
+
+// =============================================================================
+// Closure in array
+// =============================================================================
+
+fn create_closure_array(a: Int, b: Int) -> [fn() -> Int; 2] {
+    // Array of escaping closures
+    [|| a, || b]
+}
+
+fn sum_closure_array(closures: [fn() -> Int; 2]) -> Int {
+    (closures[0])() + (closures[1])()
+}
+
+// =============================================================================
+// Conditional closure creation
+// =============================================================================
+
+fn conditional_closure(flag: Bool, x: Int, y: Int) -> fn() -> Int {
+    if flag {
+        || x
+    } else {
+        || y
+    }
+}
+
+fn select_closure(choice: Int, a: Int, b: Int, c: Int) -> fn() -> Int {
+    match choice {
+        0 => || a,
+        1 => || b,
+        _ => || c,
+    }
+}
+
+// =============================================================================
+// Higher-order function patterns
+// =============================================================================
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn compose_simple(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    // Apply g after f
+    g(f(x))
+}
+
+// =============================================================================
+// Closure escapes via struct field
+// =============================================================================
+
+type Processor is {
+    process: fn(Int) -> Int,
+    threshold: Int,
+};
+
+fn create_processor(multiplier: Int, threshold: Int) -> Processor {
+    Processor {
+        process: |x| x * multiplier,
+        threshold: threshold,
+    }
+}
+
+fn run_processor(p: Processor, value: Int) -> Int {
+    if value > p.threshold {
+        (p.process)(value)
+    } else {
+        value
+    }
+}
+
+// =============================================================================
+// Closure captures struct
+// =============================================================================
+
+type Point is { x: Int, y: Int };
+
+fn create_point_getter(p: Point) -> fn() -> Int {
+    // Closure captures struct
+    || p.x + p.y
+}
+
+fn create_point_transform(offset: Point) -> fn(Point) -> Point {
+    |p| Point { x: p.x + offset.x, y: p.y + offset.y }
+}
+
+// =============================================================================
+// Non-escaping closure usage
+// =============================================================================
+
+fn map_value(x: Int, f: fn(Int) -> Int) -> Int {
+    // Closure received but not stored - may not escape
+    f(x)
+}
+
+fn filter_value(x: Int, pred: fn(Int) -> Bool, default: Int) -> Int {
+    if pred(x) { x } else { default }
+}
+
+fn apply_all(x: Int, ops: [fn(Int) -> Int; 3]) -> Int {
+    let mut result = x;
+    let mut i: Int = 0;
+    while i < 3 {
+        result = (ops[i])(result);
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Main - validation
+// =============================================================================
+
+fn main() {
+    // Basic closure escape
+    let add5 = create_adder(5);
+    assert(add5(10) == 15);
+
+    let mul3 = create_multiplier(3);
+    assert(mul3(7) == 21);
+
+    let const42 = create_constant(42);
+    assert(const42() == 42);
+
+    // Transform struct
+    let t = make_transform(10);
+    assert(apply_transform(t, 5) == 15);
+
+    // Pair transforms
+    let (add2, add3) = create_pair_transforms(2, 3);
+    assert(add2(10) == 12);
+    assert(add3(10) == 13);
+
+    // Multiple captures
+    let linear_fn = create_linear_fn(2, 5);  // y = 2x + 5
+    assert(linear_fn(3) == 11);
+
+    // Array capture
+    let arr = [1, 2, 3, 4, 5];
+    let getter = create_indexed_getter(arr);
+    assert(getter(2) == 3);
+
+    let sum_fn = create_sum_closure(arr);
+    assert(sum_fn() == 15);
+
+    // Closure array
+    let closures = create_closure_array(10, 20);
+    assert(sum_closure_array(closures) == 30);
+
+    // Conditional
+    let cond_closure = conditional_closure(true, 100, 200);
+    assert(cond_closure() == 100);
+
+    // Higher-order
+    assert(apply_twice(|x| x * 2, 5) == 20);
+
+    // Processor
+    let proc = create_processor(2, 5);
+    assert(run_processor(proc, 10) == 20);
+    assert(run_processor(proc, 3) == 3);
+
+    // Point closure
+    let p = Point { x: 3, y: 4 };
+    let get_sum = create_point_getter(p);
+    assert(get_sum() == 7);
+
+    // Non-escaping
+    assert(map_value(5, |x| x * 2) == 10);
+    assert(filter_value(10, |x| x > 5, 0) == 10);
+}

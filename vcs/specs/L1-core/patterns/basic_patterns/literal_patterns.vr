@@ -1,0 +1,289 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, literals, basic
+//
+// Tests literal pattern matching on integers, characters, strings, booleans,
+// and floating-point values. Literals are the most fundamental patterns that
+// match exact values.
+
+//------------------------------------------------------------------------------
+// Integer Literal Patterns
+//------------------------------------------------------------------------------
+
+/// Match various integer literals including positive, negative, and zero.
+fn match_int(x: Int) -> Text {
+    match x {
+        0 => "zero",
+        1 => "one",
+        -1 => "minus one",
+        42 => "answer to everything",
+        100 => "hundred",
+        -100 => "negative hundred",
+        _ => "other",
+    }
+}
+
+/// Match integer literals in different bases (hex, binary, octal).
+fn match_int_bases(x: Int) -> Text {
+    match x {
+        0x00 => "zero",
+        0xFF => "max byte (255)",
+        0xDEAD => "dead (57005)",
+        0b0000 => "binary zero",
+        0b1010 => "binary ten",
+        0b11111111 => "binary 255",
+        0o777 => "octal max permissions",
+        0o644 => "octal file permissions",
+        _ => "other",
+    }
+}
+
+/// Match large integer literals including edge cases.
+fn match_large_int(x: Int) -> Text {
+    match x {
+        9223372036854775807 => "max i64",
+        -9223372036854775808 => "min i64",
+        1000000000 => "billion",
+        -1000000000 => "negative billion",
+        _ => "other",
+    }
+}
+
+/// Match integers with underscores for readability.
+fn match_int_with_underscores(x: Int) -> Text {
+    match x {
+        1_000 => "thousand",
+        1_000_000 => "million",
+        1_000_000_000 => "billion",
+        0xFF_FF => "max u16",
+        0b1111_0000 => "high nibble set",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Boolean Literal Patterns
+//------------------------------------------------------------------------------
+
+/// Match boolean literals - exhaustive matching.
+fn match_bool(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        false => "no",
+    }
+}
+
+/// Match boolean with wildcard.
+fn match_bool_with_wildcard(b: Bool) -> Text {
+    match b {
+        true => "affirmative",
+        _ => "negative",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Character Literal Patterns
+//------------------------------------------------------------------------------
+
+/// Match basic character literals.
+fn match_char(c: Char) -> Text {
+    match c {
+        'a' => "letter a",
+        'b' => "letter b",
+        'z' => "letter z",
+        'A' => "uppercase A",
+        '0' => "digit zero",
+        '9' => "digit nine",
+        _ => "other char",
+    }
+}
+
+/// Match escape sequence characters.
+fn match_escape_char(c: Char) -> Text {
+    match c {
+        '\n' => "newline",
+        '\r' => "carriage return",
+        '\t' => "tab",
+        '\\' => "backslash",
+        '\'' => "single quote",
+        '\"' => "double quote",
+        '\0' => "null character",
+        _ => "other",
+    }
+}
+
+/// Match Unicode escape sequences.
+fn match_unicode_char(c: Char) -> Text {
+    match c {
+        '\u{0041}' => "A (U+0041)",
+        '\u{03B1}' => "alpha (U+03B1)",
+        '\u{4E2D}' => "Chinese zhong (U+4E2D)",
+        '\u{1F600}' => "grinning face emoji",
+        '\u{2764}' => "heart symbol",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Text/Text Literal Patterns
+//------------------------------------------------------------------------------
+
+/// Match string literals.
+fn match_string(s: Text) -> Int {
+    match s {
+        "" => 0,
+        "hello" => 1,
+        "world" => 2,
+        "Hello, World!" => 3,
+        "verum" => 42,
+        _ => -1,
+    }
+}
+
+/// Match strings with escape sequences.
+fn match_string_escapes(s: Text) -> Text {
+    match s {
+        "hello\nworld" => "multiline",
+        "tab\there" => "tabbed",
+        "quote\"here" => "quoted",
+        "back\\slash" => "escaped",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Float Literal Patterns
+//------------------------------------------------------------------------------
+
+/// Match floating-point literals.
+fn match_float(f: Float) -> Text {
+    match f {
+        0.0 => "zero",
+        1.0 => "one",
+        -1.0 => "minus one",
+        3.14159 => "pi approximation",
+        2.71828 => "e approximation",
+        _ => "other",
+    }
+}
+
+/// Match float literals with scientific notation.
+fn match_float_scientific(f: Float) -> Text {
+    match f {
+        1.0e10 => "ten billion",
+        1.0e-10 => "very small",
+        6.022e23 => "avogadro approximation",
+        3.0e8 => "speed of light (m/s)",
+        _ => "other",
+    }
+}
+
+/// Match special float values.
+fn match_float_special(f: Float) -> Text {
+    match f {
+        -0.0 => "negative zero",
+        0.5 => "half",
+        0.25 => "quarter",
+        0.125 => "eighth",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Mixed Literal Patterns (in different contexts)
+//------------------------------------------------------------------------------
+
+/// HTTP status code matching.
+fn match_status_code(code: Int) -> Text {
+    match code {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        _ => "Unknown Status",
+    }
+}
+
+/// ASCII control character matching.
+fn match_control_char(c: Char) -> Text {
+    match c {
+        '\u{0000}' => "NUL",
+        '\u{0001}' => "SOH",
+        '\u{0002}' => "STX",
+        '\u{0003}' => "ETX",
+        '\u{0004}' => "EOT",
+        '\u{0007}' => "BEL",
+        '\u{0008}' => "BS",
+        '\u{001B}' => "ESC",
+        '\u{007F}' => "DEL",
+        _ => "not control",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Integer literals
+    assert(match_int(0) == "zero");
+    assert(match_int(1) == "one");
+    assert(match_int(-1) == "minus one");
+    assert(match_int(42) == "answer to everything");
+    assert(match_int(999) == "other");
+
+    // Integer bases
+    assert(match_int_bases(0xFF) == "max byte (255)");
+    assert(match_int_bases(0b1010) == "binary ten");
+    assert(match_int_bases(0o777) == "octal max permissions");
+
+    // Large integers
+    assert(match_large_int(9223372036854775807) == "max i64");
+    assert(match_large_int(-9223372036854775808) == "min i64");
+
+    // Underscores
+    assert(match_int_with_underscores(1_000) == "thousand");
+    assert(match_int_with_underscores(1000000) == "million");
+
+    // Booleans
+    assert(match_bool(true) == "yes");
+    assert(match_bool(false) == "no");
+
+    // Characters
+    assert(match_char('a') == "letter a");
+    assert(match_char('A') == "uppercase A");
+    assert(match_char('0') == "digit zero");
+
+    // Escape characters
+    assert(match_escape_char('\n') == "newline");
+    assert(match_escape_char('\t') == "tab");
+    assert(match_escape_char('\\') == "backslash");
+
+    // Unicode characters
+    assert(match_unicode_char('\u{0041}') == "A (U+0041)");
+    assert(match_unicode_char('\u{03B1}') == "alpha (U+03B1)");
+
+    // Strings
+    assert(match_string("") == 0);
+    assert(match_string("hello") == 1);
+    assert(match_string("verum") == 42);
+    assert(match_string("unknown") == -1);
+
+    // Floats
+    assert(match_float(0.0) == "zero");
+    assert(match_float(3.14159) == "pi approximation");
+
+    // Status codes
+    assert(match_status_code(200) == "OK");
+    assert(match_status_code(404) == "Not Found");
+    assert(match_status_code(999) == "Unknown Status");
+}

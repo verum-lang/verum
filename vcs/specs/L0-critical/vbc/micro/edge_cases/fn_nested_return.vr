@@ -1,0 +1,19 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn nested() -> Int {
+    if true {
+        if true {
+            42
+        } else {
+            0
+        }
+    } else {
+        -1
+    }
+}
+
+fn main() {
+    assert_eq(nested(), 42);
+}

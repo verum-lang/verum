@@ -1,0 +1,74 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, debugging, trace, error, arity, type
+// @description: Error tests for meta_trace_* debugging builtins
+// @expected-error: M102
+
+// =============================================================================
+// ARITY MISMATCH ERRORS
+// =============================================================================
+
+// Test meta_trace_on with args (expects 0)
+meta fn test_trace_on_arity() -> () {
+    meta_trace_on("extra_arg")  // ERROR: M101 - expected 0 args
+}
+
+// Test meta_trace_off with args (expects 0)
+meta fn test_trace_off_arity() -> () {
+    meta_trace_off(true)  // ERROR: M101 - expected 0 args
+}
+
+// Test meta_trace_dump with args (expects 0)
+meta fn test_trace_dump_arity() -> Text {
+    meta_trace_dump("arg")  // ERROR: M101 - expected 0 args
+}
+
+// Test meta_trace_clear with args (expects 0)
+meta fn test_trace_clear_arity() -> () {
+    meta_trace_clear(1, 2)  // ERROR: M101 - expected 0 args
+}
+
+// Test meta_trace_is_enabled with args (expects 0)
+meta fn test_trace_is_enabled_arity() -> Bool {
+    meta_trace_is_enabled(true)  // ERROR: M101 - expected 0 args
+}
+
+// Test meta_trace_depth with args (expects 0)
+meta fn test_trace_depth_arity() -> Int {
+    meta_trace_depth(42)  // ERROR: M101 - expected 0 args
+}
+
+// Test meta_trace_log without args (expects 1)
+meta fn test_trace_log_no_args() -> () {
+    meta_trace_log()  // ERROR: M101 - expected 1 arg
+}
+
+// Test meta_trace_log with too many args
+meta fn test_trace_log_too_many_args() -> () {
+    meta_trace_log("a", "b", "c")  // ERROR: M101 - expected 1 arg
+}
+
+// Test meta_trace_enter without args (expects 1)
+meta fn test_trace_enter_no_args() -> () {
+    meta_trace_enter()  // ERROR: M101 - expected 1 arg
+}
+
+// Test meta_trace_exit without args (expects 1)
+meta fn test_trace_exit_no_args() -> () {
+    meta_trace_exit()  // ERROR: M101 - expected 1 arg
+}
+
+// Test meta_trace_value with wrong arity (expects 2)
+meta fn test_trace_value_one_arg() -> () {
+    meta_trace_value("label")  // ERROR: M101 - expected 2 args
+}
+
+// Test meta_trace_assert with wrong arity (expects 2)
+meta fn test_trace_assert_one_arg() -> () {
+    meta_trace_assert(true)  // ERROR: M101 - expected 2 args
+}
+
+fn main() {
+    test_trace_on_arity();
+}

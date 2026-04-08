@@ -1,0 +1,255 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, trie, lookup, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT flat trie simulation using record-based 4-way branching
+
+// Simulate a 2-level trie with 4 children at each level = 16 slots
+// Key 0..15, using 2-bit chunks: low 2 bits = level 0, next 2 bits = level 1
+type Trie16 is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    s8: Int, s9: Int, s10: Int, s11: Int,
+    s12: Int, s13: Int, s14: Int, s15: Int
+};
+
+fn trie_new() -> Trie16 {
+    Trie16 {
+        s0: -1, s1: -1, s2: -1, s3: -1,
+        s4: -1, s5: -1, s6: -1, s7: -1,
+        s8: -1, s9: -1, s10: -1, s11: -1,
+        s12: -1, s13: -1, s14: -1, s15: -1
+    }
+}
+
+fn trie_get(t: Trie16, key: Int) -> Int {
+    let k = key % 16;
+    if k == 0 { t.s0 }
+    else if k == 1 { t.s1 }
+    else if k == 2 { t.s2 }
+    else if k == 3 { t.s3 }
+    else if k == 4 { t.s4 }
+    else if k == 5 { t.s5 }
+    else if k == 6 { t.s6 }
+    else if k == 7 { t.s7 }
+    else if k == 8 { t.s8 }
+    else if k == 9 { t.s9 }
+    else if k == 10 { t.s10 }
+    else if k == 11 { t.s11 }
+    else if k == 12 { t.s12 }
+    else if k == 13 { t.s13 }
+    else if k == 14 { t.s14 }
+    else { t.s15 }
+}
+
+fn trie_set(t: Trie16, key: Int, val: Int) -> Trie16 {
+    let k = key % 16;
+    Trie16 {
+        s0: if k == 0 { val } else { t.s0 },
+        s1: if k == 1 { val } else { t.s1 },
+        s2: if k == 2 { val } else { t.s2 },
+        s3: if k == 3 { val } else { t.s3 },
+        s4: if k == 4 { val } else { t.s4 },
+        s5: if k == 5 { val } else { t.s5 },
+        s6: if k == 6 { val } else { t.s6 },
+        s7: if k == 7 { val } else { t.s7 },
+        s8: if k == 8 { val } else { t.s8 },
+        s9: if k == 9 { val } else { t.s9 },
+        s10: if k == 10 { val } else { t.s10 },
+        s11: if k == 11 { val } else { t.s11 },
+        s12: if k == 12 { val } else { t.s12 },
+        s13: if k == 13 { val } else { t.s13 },
+        s14: if k == 14 { val } else { t.s14 },
+        s15: if k == 15 { val } else { t.s15 }
+    }
+}
+
+fn trie_count(t: Trie16) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 16 {
+        if trie_get(t, i) != -1 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn trie_sum(t: Trie16) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 16 {
+        let v = trie_get(t, i);
+        if v != -1 {
+            total = total + v;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+fn trie_max(t: Trie16) -> Int {
+    let mut best = -1;
+    let mut i = 0;
+    while i < 16 {
+        let v = trie_get(t, i);
+        if v > best {
+            best = v;
+        }
+        i = i + 1;
+    }
+    best
+}
+
+fn trie_min_positive(t: Trie16) -> Int {
+    let mut best = 999999;
+    let mut i = 0;
+    while i < 16 {
+        let v = trie_get(t, i);
+        if v != -1 && v < best {
+            best = v;
+        }
+        i = i + 1;
+    }
+    if best == 999999 { -1 } else { best }
+}
+
+// Check if two tries have same entries
+fn trie_equal(a: Trie16, b: Trie16) -> Bool {
+    let mut eq = true;
+    let mut i = 0;
+    while i < 16 {
+        if trie_get(a, i) != trie_get(b, i) {
+            eq = false;
+        }
+        i = i + 1;
+    }
+    eq
+}
+
+// Remove entry (set to -1)
+fn trie_remove(t: Trie16, key: Int) -> Trie16 {
+    trie_set(t, key, -1)
+}
+
+fn main() -> Int {
+    // === Empty trie ===
+    let t0 = trie_new();
+    assert_eq(trie_count(t0), 0);
+    assert_eq(trie_sum(t0), 0);
+    assert_eq(trie_get(t0, 0), -1);
+    assert_eq(trie_get(t0, 5), -1);
+    assert_eq(trie_get(t0, 15), -1);
+
+    // === Single insert ===
+    let t1 = trie_set(t0, 0, 100);
+    assert_eq(trie_count(t1), 1);
+    assert_eq(trie_get(t1, 0), 100);
+    assert_eq(trie_get(t1, 1), -1);
+
+    // === Two inserts ===
+    let t2 = trie_set(t1, 5, 200);
+    assert_eq(trie_count(t2), 2);
+    assert_eq(trie_get(t2, 0), 100);
+    assert_eq(trie_get(t2, 5), 200);
+    assert_eq(trie_sum(t2), 300);
+
+    // === Overwrite ===
+    let t3 = trie_set(t2, 0, 999);
+    assert_eq(trie_get(t3, 0), 999);
+    assert_eq(trie_get(t3, 5), 200);
+    assert_eq(trie_count(t3), 2);
+
+    // === Fill all 16 slots ===
+    let mut tf = trie_new();
+    let mut i = 0;
+    while i < 16 {
+        tf = trie_set(tf, i, (i + 1) * 10);
+        i = i + 1;
+    }
+    assert_eq(trie_count(tf), 16);
+    assert_eq(trie_get(tf, 0), 10);
+    assert_eq(trie_get(tf, 7), 80);
+    assert_eq(trie_get(tf, 15), 160);
+    // Sum: 10+20+...+160 = 10*(1+2+...+16) = 10*136 = 1360
+    assert_eq(trie_sum(tf), 1360);
+    assert_eq(trie_max(tf), 160);
+    assert_eq(trie_min_positive(tf), 10);
+
+    // === Insert squares ===
+    let mut ts = trie_new();
+    let mut j = 0;
+    while j < 16 {
+        ts = trie_set(ts, j, j * j);
+        j = j + 1;
+    }
+    assert_eq(trie_get(ts, 0), 0);
+    assert_eq(trie_get(ts, 4), 16);
+    assert_eq(trie_get(ts, 10), 100);
+    assert_eq(trie_get(ts, 15), 225);
+    // Sum of squares 0..15 = 1240
+    assert_eq(trie_sum(ts), 1240);
+
+    // === Remove ===
+    let t4 = trie_set(trie_set(trie_set(trie_new(), 3, 30), 7, 70), 11, 110);
+    assert_eq(trie_count(t4), 3);
+    assert_eq(trie_sum(t4), 210);
+
+    let t5 = trie_remove(t4, 7);
+    assert_eq(trie_count(t5), 2);
+    assert_eq(trie_get(t5, 7), -1);
+    assert_eq(trie_sum(t5), 140);
+
+    // === Equality ===
+    let a = trie_set(trie_set(trie_new(), 1, 10), 2, 20);
+    let b = trie_set(trie_set(trie_new(), 2, 20), 1, 10);
+    assert(trie_equal(a, b));
+
+    let c = trie_set(trie_set(trie_new(), 1, 10), 2, 99);
+    assert(!trie_equal(a, c));
+
+    // === Overwrite all with same value ===
+    let mut tu = trie_new();
+    let mut k = 0;
+    while k < 16 {
+        tu = trie_set(tu, k, 42);
+        k = k + 1;
+    }
+    assert_eq(trie_count(tu), 16);
+    assert_eq(trie_sum(tu), 672);  // 42 * 16
+    assert_eq(trie_max(tu), 42);
+    assert_eq(trie_min_positive(tu), 42);
+
+    // === Sparse: insert at even indices only ===
+    let mut te = trie_new();
+    let mut m = 0;
+    while m < 16 {
+        if m % 2 == 0 {
+            te = trie_set(te, m, m * 100);
+        }
+        m = m + 1;
+    }
+    assert_eq(trie_count(te), 8);
+    assert_eq(trie_get(te, 0), 0);
+    assert_eq(trie_get(te, 2), 200);
+    assert_eq(trie_get(te, 14), 1400);
+    assert_eq(trie_get(te, 1), -1);
+    assert_eq(trie_get(te, 3), -1);
+    // Sum: 0+200+400+600+800+1000+1200+1400 = 5600
+    assert_eq(trie_sum(te), 5600);
+
+    // === Remove all ===
+    let mut tr = tf;
+    let mut n = 0;
+    while n < 16 {
+        tr = trie_remove(tr, n);
+        n = n + 1;
+    }
+    assert_eq(trie_count(tr), 0);
+    assert(trie_equal(tr, trie_new()));
+
+    0
+}

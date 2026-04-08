@@ -1,0 +1,105 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: generic, nested, list, map, e2e
+// @description: Test nested generic types - List<List<Int>>, Map of Lists
+
+fn sum_list(items: List<Int>) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < items.len() {
+        s = s + items[i];
+        i = i + 1;
+    }
+    s
+}
+
+fn make_row(start: Int, count: Int) -> List<Int> {
+    let mut row = List.new();
+    let mut i = 0;
+    while i < count {
+        row.push(start + i);
+        i = i + 1;
+    }
+    row
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: List of lists
+    let mut matrix = List.new();
+    matrix.push(make_row(1, 3));   // [1, 2, 3]
+    matrix.push(make_row(4, 3));   // [4, 5, 6]
+    matrix.push(make_row(7, 3));   // [7, 8, 9]
+
+    if matrix.len() != 3 {
+        print(f"FAIL 1: matrix rows = {matrix.len()}");
+        f = f + 1;
+    } else {
+        print("  matrix_rows: OK");
+    }
+
+    // Test 2: Access nested elements
+    let row0 = matrix[0];
+    if row0[0] != 1 {
+        print(f"FAIL 2: [0][0] = {row0[0]}");
+        f = f + 1;
+    } else if row0[2] != 3 {
+        print(f"FAIL 2b: [0][2] = {row0[2]}");
+        f = f + 1;
+    } else {
+        print("  nested_access: OK");
+    }
+
+    // Test 3: Sum all elements
+    let mut total = 0;
+    let mut r = 0;
+    while r < matrix.len() {
+        total = total + sum_list(matrix[r]);
+        r = r + 1;
+    }
+    // 1+2+3+4+5+6+7+8+9 = 45
+    if total != 45 {
+        print(f"FAIL 3: total = {total}");
+        f = f + 1;
+    } else {
+        print("  matrix_sum: OK");
+    }
+
+    // Test 4: Map with list values
+    let mut groups = Map.new();
+    let evens = List.new();
+    evens.push(2);
+    evens.push(4);
+    evens.push(6);
+    groups.insert("evens", evens);
+
+    let odds = List.new();
+    odds.push(1);
+    odds.push(3);
+    odds.push(5);
+    groups.insert("odds", odds);
+
+    if groups.len() != 2 {
+        print(f"FAIL 4: groups len = {groups.len()}");
+        f = f + 1;
+    } else {
+        print("  map_of_lists: OK");
+    }
+
+    // Test 5: Retrieve and sum from map
+    let ev = groups.get("evens");
+    let ev_sum = sum_list(ev);
+    if ev_sum != 12 {
+        print(f"FAIL 5: evens sum = {ev_sum}");
+        f = f + 1;
+    } else {
+        print("  map_list_sum: OK");
+    }
+
+    if f == 0 {
+        print("All nested generic tests passed");
+    }
+    f
+}

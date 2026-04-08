@@ -1,0 +1,109 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @expected-exit: 0
+
+// Integration test: threads + generators + collections working together
+
+fn* fibonacci(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while (i < n) {
+        yield a;
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+}
+
+fn compute_sum(start: Int, end: Int) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    while (i < end) {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    // Test 1: Generator collected into list
+    let mut fibs: List<Int> = [];
+    for v in fibonacci(10) {
+        fibs.push(v);
+    }
+    if (fibs.len() != 10) { return 1; }
+    if (fibs[0] != 0) { return 2; }
+    if (fibs[9] != 34) { return 3; }
+    print(f"fibs={fibs.len()} last={fibs[9]}");
+
+    // Test 2: Generator into map
+    let mut fib_map: Map<Int, Int> = Map.new();
+    let mut idx = 0;
+    for v in fibonacci(8) {
+        fib_map.insert(idx, v);
+        idx = idx + 1;
+    }
+    if (fib_map.len() != 8) { return 4; }
+    print(f"fib_map_len={fib_map.len()}");
+
+    // Test 3: Parallel thread computation
+    let t1 = spawn { compute_sum(0, 1000) };
+    let t2 = spawn { compute_sum(1000, 2000) };
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let total = r1 + r2;
+    print(f"parallel_sum={total}");
+    // sum(0..2000) = 1999000
+    if (total != 1999000) { return 5; }
+
+    // Test 4: Multiple generators interleaved
+    let mut total_gen = 0;
+    for v in fibonacci(8) {
+        total_gen = total_gen + v;
+    }
+    for v in fibonacci(5) {
+        total_gen = total_gen + v;
+    }
+    // fib(8): 0+1+1+2+3+5+8+13=33, fib(5): 0+1+1+2+3=7, total=40
+    print(f"total_gen={total_gen}");
+    if (total_gen != 40) { return 6; }
+
+    // Test 5: Thread + list collection
+    let t3 = spawn {
+        let mut result: List<Int> = [];
+        let mut i = 0;
+        while (i < 100) {
+            result.push(i * i);
+            i = i + 1;
+        }
+        result.len()
+    };
+    let list_len = t3.await;
+    print(f"thread_list_len={list_len}");
+    if (list_len != 100) { return 7; }
+
+    // Test 6: Generator with conditional yields
+    let mut even_count = 0;
+    let gen = fibonacci(15);
+    while (gen.has_next()) {
+        match gen.next() {
+            Some(v) => {
+                if (v % 2 == 0) {
+                    even_count = even_count + 1;
+                }
+            }
+            None => {}
+        }
+    }
+    print(f"even_fibs={even_count}");
+    // Even fibs in first 15: 0,2,8,34,144,610 = 6 items...
+    // fib(15): 0,1,1,2,3,5,8,13,21,34,55,89,144,233,377
+    // Even: 0,2,8,34,144 = 5
+    if (even_count != 5) { return 8; }
+
+    print("integration: PASS");
+    0
+}

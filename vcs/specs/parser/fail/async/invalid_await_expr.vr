@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, await, error
+// @description: Test invalid standalone await without expression
+// @expected-error: E018
+
+async fn test() {
+    await;
+}

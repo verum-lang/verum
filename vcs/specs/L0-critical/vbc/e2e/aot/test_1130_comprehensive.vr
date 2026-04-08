@@ -1,0 +1,204 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: comprehensive, integration, mixed-features
+// @description: Test combining multiple language features together
+
+type Inventory is { items: Map<Text, Int> };
+
+implement Inventory {
+    fn create() -> Inventory {
+        Inventory { items: Map.new() }
+    }
+
+    fn add_item(&mut self, name: Text, qty: Int) {
+        if self.items.contains_key(name) {
+            let current = self.items.get(name);
+            self.items.insert(name, current + qty);
+        } else {
+            self.items.insert(name, qty);
+        }
+    }
+
+    fn remove_item(&mut self, name: Text, qty: Int) -> Bool {
+        if !self.items.contains_key(name) {
+            return false;
+        }
+        let current = self.items.get(name);
+        if current < qty {
+            return false;
+        }
+        if current == qty {
+            self.items.remove(name);
+        } else {
+            self.items.insert(name, current - qty);
+        }
+        true
+    }
+
+    fn count(&self, name: Text) -> Int {
+        if self.items.contains_key(name) {
+            self.items.get(name)
+        } else {
+            0
+        }
+    }
+}
+
+fn test_inventory() -> Int {
+    let mut inv = Inventory.create();
+    inv.add_item("sword", 1);
+    inv.add_item("potion", 5);
+    inv.add_item("potion", 3);
+
+    if inv.count("sword") != 1 {
+        print(f"FAIL inv sword: {inv.count(\"sword\")}");
+        return 1;
+    }
+    if inv.count("potion") != 8 {
+        print(f"FAIL inv potion: {inv.count(\"potion\")}");
+        return 1;
+    }
+    if inv.count("shield") != 0 {
+        print("FAIL: shield should be 0");
+        return 1;
+    }
+
+    let ok = inv.remove_item("potion", 3);
+    if !ok || inv.count("potion") != 5 {
+        print("FAIL: remove potion");
+        return 1;
+    }
+
+    let fail = inv.remove_item("sword", 2);
+    if fail {
+        print("FAIL: should not remove more than available");
+        return 1;
+    }
+    print("  inventory: OK");
+    0
+}
+
+// Fibonacci with memoization using a list
+fn fib_memo(n: Int, memo: List<Int>) -> Int {
+    if memo[n] != -1 {
+        return memo[n];
+    }
+    let result = if n <= 1 {
+        n
+    } else {
+        fib_memo(n - 1, memo) + fib_memo(n - 2, memo)
+    };
+    memo[n] = result;
+    result
+}
+
+fn test_fib_memo() -> Int {
+    let mut memo = List.new();
+    let mut i = 0;
+    while i < 30 {
+        memo.push(-1);
+        i = i + 1;
+    }
+
+    let f10 = fib_memo(10, memo);
+    if f10 != 55 {
+        print(f"FAIL fib(10)={f10}");
+        return 1;
+    }
+    let f20 = fib_memo(20, memo);
+    if f20 != 6765 {
+        print(f"FAIL fib(20)={f20}");
+        return 1;
+    }
+    print("  fib_memo: OK");
+    0
+}
+
+// String processing
+fn count_chars(s: Text, ch: Text) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len() {
+        if s.substring(i, i + 1) == ch {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_string_processing() -> Int {
+    let s = "hello world";
+    let l_count = count_chars(s, "l");
+    if l_count != 3 {
+        print(f"FAIL count_chars: l={l_count}");
+        return 1;
+    }
+    let o_count = count_chars(s, "o");
+    if o_count != 2 {
+        print(f"FAIL count_chars: o={o_count}");
+        return 1;
+    }
+    print("  string_processing: OK");
+    0
+}
+
+// Closure + match + struct combined
+type Action is Attack(Int) | Heal(Int) | Defend;
+
+fn apply_action(hp: Int, action: Action) -> Int {
+    match action {
+        Attack(dmg) => {
+            let result = hp - dmg;
+            if result < 0 { 0 } else { result }
+        },
+        Heal(amount) => {
+            let result = hp + amount;
+            if result > 100 { 100 } else { result }
+        },
+        Defend => hp,
+    }
+}
+
+fn test_action_system() -> Int {
+    let mut hp = 50;
+    hp = apply_action(hp, Attack(20));
+    if hp != 30 {
+        print(f"FAIL attack: hp={hp}");
+        return 1;
+    }
+    hp = apply_action(hp, Heal(40));
+    if hp != 70 {
+        print(f"FAIL heal: hp={hp}");
+        return 1;
+    }
+    hp = apply_action(hp, Attack(100));
+    if hp != 0 {
+        print(f"FAIL overkill: hp={hp}");
+        return 1;
+    }
+    hp = apply_action(hp, Heal(200));
+    if hp != 100 {
+        print(f"FAIL overheal: hp={hp}");
+        return 1;
+    }
+    print("  action_system: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Comprehensive Tests:");
+    let mut failures = 0;
+    failures = failures + test_inventory();
+    failures = failures + test_fib_memo();
+    failures = failures + test_string_processing();
+    failures = failures + test_action_system();
+
+    if failures == 0 {
+        print("All comprehensive tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,376 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, map, extended, functional, set-ops
+// @description: Tests for extended Map APIs: map_values, partition, any/all/find,
+//               difference/intersection/symmetric_difference, invert
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: map_values
+// =============================================================================
+
+@test
+fn test_map_values_double() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    fn double(k: &Int, v: &Int) -> Int { *v * 2 }
+    let m2 = m.map_values(double);
+    assert_eq(m2.len(), 3);
+    assert_eq(*m2.get(&1).unwrap(), 20);
+    assert_eq(*m2.get(&2).unwrap(), 40);
+    assert_eq(*m2.get(&3).unwrap(), 60);
+}
+
+@test
+fn test_map_values_empty() {
+    let m: Map<Int, Int> = Map.new();
+    fn identity(k: &Int, v: &Int) -> Int { *v }
+    let m2 = m.map_values(identity);
+    assert_eq(m2.len(), 0);
+}
+
+@test
+fn test_map_values_type_change() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 42);
+    m.insert(2, 7);
+    fn is_positive(k: &Int, v: &Int) -> Bool { *v > 0 }
+    let m2 = m.map_values(is_positive);
+    assert_eq(*m2.get(&1).unwrap(), true);
+}
+
+// =============================================================================
+// Section 2: partition
+// =============================================================================
+
+@test
+fn test_partition_basic() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+    let pair = m.partition(|k, v| *v > 20);
+    let yes = pair.0;
+    let no = pair.1;
+    assert_eq(yes.len(), 2); // 30 and 40
+    assert_eq(no.len(), 2);  // 10 and 20
+    assert(yes.contains_key(&3));
+    assert(yes.contains_key(&4));
+    assert(no.contains_key(&1));
+    assert(no.contains_key(&2));
+}
+
+@test
+fn test_partition_all_match() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let pair = m.partition(|k, v| *v > 0);
+    assert_eq(pair.0.len(), 2);
+    assert_eq(pair.1.len(), 0);
+}
+
+@test
+fn test_partition_none_match() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let pair = m.partition(|k, v| *v > 100);
+    assert_eq(pair.0.len(), 0);
+    assert_eq(pair.1.len(), 2);
+}
+
+@test
+fn test_partition_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let pair = m.partition(|k, v| true);
+    assert_eq(pair.0.len(), 0);
+    assert_eq(pair.1.len(), 0);
+}
+
+// =============================================================================
+// Section 3: any / all / find
+// =============================================================================
+
+@test
+fn test_any_true() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    assert(m.any(|k, v| *v > 25));
+}
+
+@test
+fn test_any_false() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    assert(!m.any(|k, v| *v > 100));
+}
+
+@test
+fn test_any_empty() {
+    let m: Map<Int, Int> = Map.new();
+    assert(!m.any(|k, v| true));
+}
+
+@test
+fn test_all_true() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    assert(m.all(|k, v| *v > 0));
+}
+
+@test
+fn test_all_false() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, -5);
+    assert(!m.all(|k, v| *v > 0));
+}
+
+@test
+fn test_all_empty() {
+    let m: Map<Int, Int> = Map.new();
+    assert(m.all(|k, v| false)); // vacuously true
+}
+
+@test
+fn test_find_found() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let result = m.find(|k, v| *v == 20);
+    assert(result.is_some());
+}
+
+@test
+fn test_find_not_found() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let result = m.find(|k, v| *v == 99);
+    assert(result.is_none());
+}
+
+@test
+fn test_find_empty() {
+    let m: Map<Int, Int> = Map.new();
+    assert(m.find(|k, v| true).is_none());
+}
+
+// =============================================================================
+// Section 4: difference / intersection / symmetric_difference
+// =============================================================================
+
+@test
+fn test_difference_basic() {
+    let mut m1: Map<Int, Int> = Map.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    m1.insert(3, 30);
+    let mut m2: Map<Int, Int> = Map.new();
+    m2.insert(2, 200);
+    m2.insert(4, 400);
+    let diff = m1.difference(&m2);
+    assert_eq(diff.len(), 2); // keys 1 and 3
+    assert(diff.contains_key(&1));
+    assert(diff.contains_key(&3));
+    assert(!diff.contains_key(&2));
+}
+
+@test
+fn test_difference_no_overlap() {
+    let mut m1: Map<Int, Int> = Map.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    let mut m2: Map<Int, Int> = Map.new();
+    m2.insert(3, 30);
+    let diff = m1.difference(&m2);
+    assert_eq(diff.len(), 2);
+}
+
+@test
+fn test_difference_all_overlap() {
+    let mut m1: Map<Int, Int> = Map.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    let mut m2: Map<Int, Int> = Map.new();
+    m2.insert(1, 100);
+    m2.insert(2, 200);
+    let diff = m1.difference(&m2);
+    assert_eq(diff.len(), 0);
+}
+
+@test
+fn test_difference_empty() {
+    let m1: Map<Int, Int> = Map.new();
+    let m2: Map<Int, Int> = Map.new();
+    assert_eq(m1.difference(&m2).len(), 0);
+}
+
+@test
+fn test_intersection_basic() {
+    let mut m1: Map<Int, Int> = Map.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    m1.insert(3, 30);
+    let mut m2: Map<Int, Int> = Map.new();
+    m2.insert(2, 200);
+    m2.insert(3, 300);
+    m2.insert(4, 400);
+    let inter = m1.intersection(&m2);
+    assert_eq(inter.len(), 2); // keys 2 and 3
+    assert(inter.contains_key(&2));
+    assert(inter.contains_key(&3));
+    // Values come from self (m1)
+    assert_eq(*inter.get(&2).unwrap(), 20);
+    assert_eq(*inter.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_intersection_no_overlap() {
+    let mut m1: Map<Int, Int> = Map.new();
+    m1.insert(1, 10);
+    let mut m2: Map<Int, Int> = Map.new();
+    m2.insert(2, 20);
+    assert_eq(m1.intersection(&m2).len(), 0);
+}
+
+@test
+fn test_intersection_empty() {
+    let m1: Map<Int, Int> = Map.new();
+    let m2: Map<Int, Int> = Map.new();
+    assert_eq(m1.intersection(&m2).len(), 0);
+}
+
+@test
+fn test_symmetric_difference_basic() {
+    let mut m1: Map<Int, Int> = Map.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    m1.insert(3, 30);
+    let mut m2: Map<Int, Int> = Map.new();
+    m2.insert(2, 200);
+    m2.insert(4, 400);
+    let sym = m1.symmetric_difference(&m2);
+    assert_eq(sym.len(), 3); // keys 1, 3, 4
+    assert(sym.contains_key(&1));
+    assert(sym.contains_key(&3));
+    assert(sym.contains_key(&4));
+    assert(!sym.contains_key(&2));
+}
+
+@test
+fn test_symmetric_difference_identical() {
+    let mut m1: Map<Int, Int> = Map.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    let mut m2: Map<Int, Int> = Map.new();
+    m2.insert(1, 100);
+    m2.insert(2, 200);
+    assert_eq(m1.symmetric_difference(&m2).len(), 0);
+}
+
+@test
+fn test_symmetric_difference_disjoint() {
+    let mut m1: Map<Int, Int> = Map.new();
+    m1.insert(1, 10);
+    let mut m2: Map<Int, Int> = Map.new();
+    m2.insert(2, 20);
+    let sym = m1.symmetric_difference(&m2);
+    assert_eq(sym.len(), 2);
+}
+
+// =============================================================================
+// Section 5: invert
+// =============================================================================
+
+@test
+fn test_invert_basic() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let inv = m.invert();
+    assert_eq(inv.len(), 3);
+    assert_eq(*inv.get(&10).unwrap(), 1);
+    assert_eq(*inv.get(&20).unwrap(), 2);
+    assert_eq(*inv.get(&30).unwrap(), 3);
+}
+
+@test
+fn test_invert_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let inv = m.invert();
+    assert_eq(inv.len(), 0);
+}
+
+@test
+fn test_invert_duplicate_values() {
+    // When values are duplicated, last one wins
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 10); // same value
+    let inv = m.invert();
+    // One of the keys is kept (non-deterministic which)
+    assert_eq(inv.len(), 1);
+    assert(inv.contains_key(&10));
+}
+
+// =============================================================================
+// Section 6: Integration
+// =============================================================================
+
+@test
+fn test_map_values_then_partition() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    fn double(k: &Int, v: &Int) -> Int { *v * 2 }
+    let doubled = m.map_values(double);
+    let pair = doubled.partition(|k, v| *v > 40);
+    assert_eq(pair.0.len(), 2); // 60 and... wait, 20*2=40, 30*2=60
+    // 10*2=20, 20*2=40, 30*2=60 → only 60 is > 40
+    assert_eq(pair.0.len(), 1);
+    assert_eq(pair.1.len(), 2);
+}
+
+@test
+fn test_difference_then_intersection_disjoint() {
+    let mut m1: Map<Int, Int> = Map.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    m1.insert(3, 30);
+    let mut m2: Map<Int, Int> = Map.new();
+    m2.insert(2, 200);
+    m2.insert(3, 300);
+    let diff = m1.difference(&m2);   // keys: {1}
+    let inter = m1.intersection(&m2); // keys: {2, 3}
+    // diff and inter should be disjoint
+    assert_eq(diff.len() + inter.len(), m1.len());
+}
+
+@test
+fn test_invert_roundtrip_unique() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+    let inv = m.invert();
+    let back = inv.invert();
+    assert_eq(back.len(), 3);
+    assert_eq(*back.get(&1).unwrap(), 100);
+}

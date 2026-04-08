@@ -1,0 +1,319 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, geometry, coordinate, triangle, convex-hull
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for coordinate geometry: distance, triangle area, cross product,
+// orientation, and simplified convex hull (Jarvis march on small sets)
+
+// Points use scaled integer coordinates (x1000 to avoid floats)
+// All distances and areas are also scaled accordingly
+type Pt is { x: Int, y: Int };
+
+fn pt_eq(a: Pt, b: Pt) -> Bool { a.x == b.x && a.y == b.y }
+
+// Squared distance (no sqrt needed for comparisons)
+fn dist_sq(a: Pt, b: Pt) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
+// Manhattan distance
+fn manhattan(a: Pt, b: Pt) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    let adx = if dx < 0 { -dx } else { dx };
+    let ady = if dy < 0 { -dy } else { dy };
+    adx + ady
+}
+
+// Cross product of vectors (b-a) x (c-a)
+// Positive: c is left of a->b, Negative: right, Zero: collinear
+fn cross_product(a: Pt, b: Pt, c: Pt) -> Int {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+// 2x triangle area (using cross product, avoids division)
+fn triangle_area_2x(a: Pt, b: Pt, c: Pt) -> Int {
+    let area = cross_product(a, b, c);
+    if area < 0 { -area } else { area }
+}
+
+// Orientation: -1 = clockwise, 0 = collinear, 1 = counterclockwise
+fn orientation(a: Pt, b: Pt, c: Pt) -> Int {
+    let cp = cross_product(a, b, c);
+    if cp > 0 { 1 } else if cp < 0 { -1 } else { 0 }
+}
+
+// Check if point is inside triangle (using sign of cross products)
+fn point_in_triangle(p: Pt, a: Pt, b: Pt, c: Pt) -> Bool {
+    let d1 = cross_product(a, b, p);
+    let d2 = cross_product(b, c, p);
+    let d3 = cross_product(c, a, p);
+
+    let has_neg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+    let has_pos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+
+    // If all same sign (or zero), point is inside
+    if has_neg && has_pos { false } else { true }
+}
+
+// === Point array (up to 8 points) ===
+type PtArr8 is { p0: Pt, p1: Pt, p2: Pt, p3: Pt, p4: Pt, p5: Pt, p6: Pt, p7: Pt, len: Int };
+
+fn ptarr_new() -> PtArr8 {
+    let z = Pt { x: 0, y: 0 };
+    PtArr8 { p0: z, p1: z, p2: z, p3: z, p4: z, p5: z, p6: z, p7: z, len: 0 }
+}
+
+fn ptarr_get(a: PtArr8, i: Int) -> Pt {
+    if i == 0 { a.p0 } else if i == 1 { a.p1 }
+    else if i == 2 { a.p2 } else if i == 3 { a.p3 }
+    else if i == 4 { a.p4 } else if i == 5 { a.p5 }
+    else if i == 6 { a.p6 } else { a.p7 }
+}
+
+fn ptarr_set(a: PtArr8, i: Int, p: Pt) -> PtArr8 {
+    PtArr8 {
+        p0: if i == 0 { p } else { a.p0 }, p1: if i == 1 { p } else { a.p1 },
+        p2: if i == 2 { p } else { a.p2 }, p3: if i == 3 { p } else { a.p3 },
+        p4: if i == 4 { p } else { a.p4 }, p5: if i == 5 { p } else { a.p5 },
+        p6: if i == 6 { p } else { a.p6 }, p7: if i == 7 { p } else { a.p7 },
+        len: a.len
+    }
+}
+
+fn ptarr_push(a: PtArr8, p: Pt) -> PtArr8 {
+    let a2 = ptarr_set(a, a.len, p);
+    PtArr8 {
+        p0: a2.p0, p1: a2.p1, p2: a2.p2, p3: a2.p3,
+        p4: a2.p4, p5: a2.p5, p6: a2.p6, p7: a2.p7,
+        len: a.len + 1
+    }
+}
+
+// Find leftmost point (lowest x, then lowest y)
+fn find_leftmost(pts: PtArr8) -> Int {
+    let mut best = 0;
+    let mut i = 1;
+    while i < pts.len {
+        let p = ptarr_get(pts, i);
+        let b = ptarr_get(pts, best);
+        if p.x < b.x || (p.x == b.x && p.y < b.y) {
+            best = i;
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// Convex hull using Jarvis march (gift wrapping)
+// Returns indices of hull points in CCW order
+type Hull8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int, len: Int };
+
+fn hull_new() -> Hull8 {
+    Hull8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 0 }
+}
+
+fn hull_get(h: Hull8, i: Int) -> Int {
+    if i == 0 { h.d0 } else if i == 1 { h.d1 }
+    else if i == 2 { h.d2 } else if i == 3 { h.d3 }
+    else if i == 4 { h.d4 } else if i == 5 { h.d5 }
+    else if i == 6 { h.d6 } else { h.d7 }
+}
+
+fn hull_set(h: Hull8, i: Int, v: Int) -> Hull8 {
+    Hull8 {
+        d0: if i == 0 { v } else { h.d0 }, d1: if i == 1 { v } else { h.d1 },
+        d2: if i == 2 { v } else { h.d2 }, d3: if i == 3 { v } else { h.d3 },
+        d4: if i == 4 { v } else { h.d4 }, d5: if i == 5 { v } else { h.d5 },
+        d6: if i == 6 { v } else { h.d6 }, d7: if i == 7 { v } else { h.d7 },
+        len: h.len
+    }
+}
+
+fn hull_push(h: Hull8, v: Int) -> Hull8 {
+    let h2 = hull_set(h, h.len, v);
+    Hull8 {
+        d0: h2.d0, d1: h2.d1, d2: h2.d2, d3: h2.d3,
+        d4: h2.d4, d5: h2.d5, d6: h2.d6, d7: h2.d7,
+        len: h.len + 1
+    }
+}
+
+fn convex_hull(pts: PtArr8) -> Hull8 {
+    if pts.len < 3 {
+        let mut h = hull_new();
+        let mut i = 0;
+        while i < pts.len { h = hull_push(h, i); i = i + 1; }
+        return h;
+    }
+
+    let start = find_leftmost(pts);
+    let mut hull = hull_new();
+    let mut current = start;
+    let mut iters = 0;
+
+    let mut done = false;
+    while done == false && iters < 8 {
+        hull = hull_push(hull, current);
+        let mut candidate = 0;
+        if candidate == current { candidate = 1; }
+
+        let mut j = 0;
+        while j < pts.len {
+            if j != current {
+                let o = orientation(ptarr_get(pts, current), ptarr_get(pts, candidate), ptarr_get(pts, j));
+                if o == 1 {
+                    candidate = j;
+                } else if o == 0 {
+                    // Collinear: pick farther point
+                    if dist_sq(ptarr_get(pts, current), ptarr_get(pts, j)) > dist_sq(ptarr_get(pts, current), ptarr_get(pts, candidate)) {
+                        candidate = j;
+                    }
+                }
+            }
+            j = j + 1;
+        }
+
+        current = candidate;
+        if current == start { done = true; }
+        iters = iters + 1;
+    }
+    hull
+}
+
+fn test_distance() {
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 3, y: 4 };
+    assert_eq(dist_sq(a, b), 25);  // 3^2 + 4^2 = 25
+
+    let c = Pt { x: 1, y: 1 };
+    let d = Pt { x: 4, y: 5 };
+    assert_eq(dist_sq(c, d), 25);  // 3^2 + 4^2 = 25
+
+    assert_eq(manhattan(a, b), 7);
+    assert_eq(manhattan(c, d), 7);
+}
+
+fn test_cross_product() {
+    let o = Pt { x: 0, y: 0 };
+    let a = Pt { x: 1, y: 0 };
+    let b = Pt { x: 0, y: 1 };
+    assert_eq(cross_product(o, a, b), 1);   // CCW
+
+    let c = Pt { x: 0, y: -1 };
+    assert_eq(cross_product(o, a, c), -1);  // CW
+
+    let d = Pt { x: 2, y: 0 };
+    assert_eq(cross_product(o, a, d), 0);   // Collinear
+}
+
+fn test_triangle_area() {
+    // Right triangle: (0,0), (4,0), (0,3) => area = 6, 2x area = 12
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 4, y: 0 };
+    let c = Pt { x: 0, y: 3 };
+    assert_eq(triangle_area_2x(a, b, c), 12);
+
+    // Unit triangle: (0,0), (1,0), (0,1) => 2x area = 1
+    let d = Pt { x: 0, y: 0 };
+    let e = Pt { x: 1, y: 0 };
+    let f = Pt { x: 0, y: 1 };
+    assert_eq(triangle_area_2x(d, e, f), 1);
+
+    // Degenerate (collinear): area = 0
+    let g = Pt { x: 0, y: 0 };
+    let h = Pt { x: 1, y: 1 };
+    let k = Pt { x: 2, y: 2 };
+    assert_eq(triangle_area_2x(g, h, k), 0);
+}
+
+fn test_point_in_triangle() {
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 10, y: 0 };
+    let c = Pt { x: 0, y: 10 };
+
+    // Inside
+    let p1 = Pt { x: 2, y: 2 };
+    assert_eq(point_in_triangle(p1, a, b, c), true);
+
+    // On edge
+    let p2 = Pt { x: 5, y: 0 };
+    assert_eq(point_in_triangle(p2, a, b, c), true);
+
+    // At vertex
+    assert_eq(point_in_triangle(a, a, b, c), true);
+
+    // Outside
+    let p3 = Pt { x: 6, y: 6 };
+    assert_eq(point_in_triangle(p3, a, b, c), false);
+
+    let p4 = Pt { x: -1, y: 5 };
+    assert_eq(point_in_triangle(p4, a, b, c), false);
+}
+
+fn test_orientation() {
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 4, y: 4 };
+    let c_left = Pt { x: 1, y: 4 };
+    let c_right = Pt { x: 4, y: 1 };
+    let c_col = Pt { x: 2, y: 2 };
+
+    assert_eq(orientation(a, b, c_left), 1);    // CCW
+    assert_eq(orientation(a, b, c_right), -1);   // CW
+    assert_eq(orientation(a, b, c_col), 0);      // Collinear
+}
+
+fn test_convex_hull_square() {
+    // Square: (0,0), (10,0), (10,10), (0,10) + interior point (5,5)
+    let mut pts = ptarr_new();
+    pts = ptarr_push(pts, Pt { x: 0, y: 0 });
+    pts = ptarr_push(pts, Pt { x: 10, y: 0 });
+    pts = ptarr_push(pts, Pt { x: 10, y: 10 });
+    pts = ptarr_push(pts, Pt { x: 0, y: 10 });
+    pts = ptarr_push(pts, Pt { x: 5, y: 5 });
+
+    let hull = convex_hull(pts);
+    // Hull should have 4 vertices (interior point excluded)
+    assert_eq(hull.len, 4);
+}
+
+fn test_convex_hull_triangle() {
+    // Triangle with no interior points
+    let mut pts = ptarr_new();
+    pts = ptarr_push(pts, Pt { x: 0, y: 0 });
+    pts = ptarr_push(pts, Pt { x: 5, y: 10 });
+    pts = ptarr_push(pts, Pt { x: 10, y: 0 });
+
+    let hull = convex_hull(pts);
+    assert_eq(hull.len, 3);
+}
+
+fn test_convex_hull_collinear() {
+    // 3 collinear points
+    let mut pts = ptarr_new();
+    pts = ptarr_push(pts, Pt { x: 0, y: 0 });
+    pts = ptarr_push(pts, Pt { x: 5, y: 5 });
+    pts = ptarr_push(pts, Pt { x: 10, y: 10 });
+
+    let hull = convex_hull(pts);
+    // Collinear: hull is the two endpoints
+    assert_eq(hull.len, 2);
+}
+
+fn main() -> Int {
+    test_distance();
+    test_cross_product();
+    test_triangle_area();
+    test_point_in_triangle();
+    test_orientation();
+    test_convex_hull_square();
+    test_convex_hull_triangle();
+    test_convex_hull_collinear();
+    print("[OK] 286_coord_geometry_aot");
+    0
+}

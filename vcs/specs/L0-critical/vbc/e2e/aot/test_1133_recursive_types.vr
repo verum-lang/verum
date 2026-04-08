@@ -1,0 +1,143 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: recursive, types, heap, tree, linked-list
+// @description: Test recursive type definitions with Heap<T>
+
+// Binary tree only (avoid type inference conflicts with multiple sum types)
+type IntTree is TreeLeaf(Int) | TreeBranch(Heap<IntTree>, Heap<IntTree>);
+
+@allow(unbounded_recursion)
+fn tree_sum(t: IntTree) -> Int {
+    match t {
+        TreeLeaf(v) => v,
+        TreeBranch(left, right) => tree_sum(*left) + tree_sum(*right),
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_depth(t: IntTree) -> Int {
+    match t {
+        TreeLeaf(_) => 1,
+        TreeBranch(left, right) => {
+            let ld = tree_depth(*left);
+            let rd = tree_depth(*right);
+            1 + if ld > rd { ld } else { rd }
+        },
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_count(t: IntTree) -> Int {
+    match t {
+        TreeLeaf(_) => 1,
+        TreeBranch(left, right) => tree_count(*left) + tree_count(*right),
+    }
+}
+
+fn test_simple_tree() -> Int {
+    let leaf = TreeLeaf(42);
+    let s = tree_sum(leaf);
+    if s != 42 {
+        print(f"FAIL simple leaf: {s}");
+        return 1;
+    }
+    print("  simple_tree: OK");
+    0
+}
+
+fn test_binary_tree() -> Int {
+    //       +
+    //      / \
+    //     +   5
+    //    / \
+    //   1   2
+    let tree = TreeBranch(
+        Heap(TreeBranch(Heap(TreeLeaf(1)), Heap(TreeLeaf(2)))),
+        Heap(TreeLeaf(5))
+    );
+    let s = tree_sum(tree);
+    if s != 8 {
+        print(f"FAIL tree sum: {s}, expected 8");
+        return 1;
+    }
+    print("  binary_tree_sum: OK");
+    0
+}
+
+fn test_tree_depth() -> Int {
+    let tree = TreeBranch(
+        Heap(TreeBranch(Heap(TreeLeaf(1)), Heap(TreeBranch(Heap(TreeLeaf(2)), Heap(TreeLeaf(3)))))),
+        Heap(TreeLeaf(4))
+    );
+    let d = tree_depth(tree);
+    if d != 4 {
+        print(f"FAIL tree depth: {d}, expected 4");
+        return 1;
+    }
+    print("  tree_depth: OK");
+    0
+}
+
+fn test_tree_count() -> Int {
+    let tree = TreeBranch(
+        Heap(TreeBranch(Heap(TreeLeaf(1)), Heap(TreeLeaf(2)))),
+        Heap(TreeBranch(Heap(TreeLeaf(3)), Heap(TreeLeaf(4))))
+    );
+    let c = tree_count(tree);
+    if c != 4 {
+        print(f"FAIL tree count: {c}, expected 4");
+        return 1;
+    }
+    print("  tree_count: OK");
+    0
+}
+
+fn test_balanced_tree() -> Int {
+    // Build a complete binary tree with 7 nodes
+    let tree = TreeBranch(
+        Heap(TreeBranch(
+            Heap(TreeBranch(Heap(TreeLeaf(1)), Heap(TreeLeaf(2)))),
+            Heap(TreeBranch(Heap(TreeLeaf(3)), Heap(TreeLeaf(4))))
+        )),
+        Heap(TreeBranch(
+            Heap(TreeBranch(Heap(TreeLeaf(5)), Heap(TreeLeaf(6)))),
+            Heap(TreeBranch(Heap(TreeLeaf(7)), Heap(TreeLeaf(8))))
+        ))
+    );
+    let s = tree_sum(tree);
+    // 1+2+3+4+5+6+7+8 = 36
+    if s != 36 {
+        print(f"FAIL balanced: sum={s}, expected 36");
+        return 1;
+    }
+    let c = tree_count(tree);
+    if c != 8 {
+        print(f"FAIL balanced: count={c}, expected 8");
+        return 1;
+    }
+    let d = tree_depth(tree);
+    if d != 4 {
+        print(f"FAIL balanced: depth={d}, expected 4");
+        return 1;
+    }
+    print("  balanced_tree: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Recursive Type Tests:");
+    let mut failures = 0;
+    failures = failures + test_simple_tree();
+    failures = failures + test_binary_tree();
+    failures = failures + test_tree_depth();
+    failures = failures + test_tree_count();
+    failures = failures + test_balanced_tree();
+
+    if failures == 0 {
+        print("All recursive type tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

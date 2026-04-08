@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, comma, error
+// @description: Test double comma detection
+// @expected-error: E018
+
+fn test_double_comma() {
+    let arr = [1,, 2, 3];
+    let tuple = (a,, b);
+}

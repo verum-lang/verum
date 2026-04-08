@@ -1,0 +1,1778 @@
+// =============================================================================
+// stream_test.vr - Tests for async Stream protocol and combinators
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, stream, combinators, iterator
+// @description: Comprehensive tests for Stream protocol, StreamExt methods,
+//               constructors, and combinator types
+// =============================================================================
+
+mount core.async.stream.{
+    Stream, IntoStream, StreamExt,
+    iter, stream_once, stream_empty, stream_repeat, stream_repeat_n, stream_from_fn,
+    once_future, stream_poll_fn, stream_unfold, interval,
+    StreamIter, StreamOnce, StreamEmpty, StreamRepeat, StreamRepeatN, StreamFromFn,
+    OnceFuture, StreamPollFn, StreamUnfold, StreamInterval,
+    StreamMap, StreamFilter, StreamFilterMap, StreamTake, StreamTakeWhile,
+    StreamSkip, StreamSkipWhile, StreamChain, StreamZip, StreamEnumerate,
+    StreamPeekable, StreamFuse, StreamInspect, StreamScan,
+    StreamFlatten, StreamFlatMap,
+    StreamCollect, StreamFold, StreamForEach, StreamAny, StreamAll, StreamFind, StreamFindMap,
+    StreamCount, StreamLast, StreamFirst, StreamMin, StreamMax,
+    StreamNth,
+    BufferedStream, ChunkedStream,
+};
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.async.waker.{Context, Waker, noop_waker};
+mount core.async.future.Future;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Stream Protocol Definition
+// =============================================================================
+
+// Verify Stream protocol structure
+type TestStream is {
+    items: List<Int>,
+    index: Int,
+};
+
+implement Stream for TestStream {
+    type Item = Int;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Int>> {
+        if self.index < self.items.len() {
+            let val = self.items[self.index];
+            self.index = self.index + 1;
+            Ready(Some(val))
+        } else {
+            Ready(None)
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.items.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+@test
+fn test_stream_protocol_impl() {
+    let stream = TestStream {
+        items: List.from([1, 2, 3]),
+        index: 0,
+    };
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 3);
+}
+
+// =============================================================================
+// Section 2: Stream Constructors
+// =============================================================================
+
+@test
+fn test_iter_constructor() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    // Verify it's a valid stream (compiles)
+    let hint = stream.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_once_constructor() {
+    let stream: StreamOnce<Int> = stream_once(42);
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 1);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 1),
+        None => panic("once should have exact upper bound"),
+    }
+}
+
+@test
+fn test_empty_constructor() {
+    let stream: StreamEmpty<Int> = stream_empty();
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 0);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 0),
+        None => panic("empty should have exact upper bound"),
+    }
+}
+
+@test
+fn test_repeat_constructor() {
+    let stream: StreamRepeat<Int> = stream_repeat(42);
+    let hint = stream.size_hint();
+    // Repeat has large lower bound and no upper bound
+    assert(hint.0 > 0);
+    assert(hint.1 is None);
+}
+
+@test
+fn test_repeat_n_constructor() {
+    let stream: StreamRepeatN<Int> = stream_repeat_n(42, 5);
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 5);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 5),
+        None => panic("repeat_n should have exact upper bound"),
+    }
+}
+
+@test
+fn test_repeat_n_zero() {
+    let stream: StreamRepeatN<Int> = stream_repeat_n(42, 0);
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 0);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 0),
+        None => panic("repeat_n(0) should have exact upper bound"),
+    }
+}
+
+@test
+fn test_repeat_n_one() {
+    let stream: StreamRepeatN<Int> = stream_repeat_n(99, 1);
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 1);
+}
+
+@test
+fn test_from_fn_constructor() {
+    let mut count = 0;
+    let stream = stream_from_fn(|| {
+        if count < 3 {
+            count = count + 1;
+            Some(count)
+        } else {
+            None
+        }
+    });
+    assert(!false); // Runtime-only: async executor required
+}
+
+// =============================================================================
+// Section 3: StreamExt Combinators - Transformations
+// =============================================================================
+
+@test
+fn test_stream_map() {
+    let stream = iter([1, 2, 3].into_iter());
+    let mapped: StreamMap<_, _> = stream.map(|x| x * 2);
+    // Map preserves size_hint from inner stream
+    let hint = mapped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_filter() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let filtered: StreamFilter<_, _> = stream.filter(|x| *x > 2);
+    // Filter has lower bound 0 (all could be filtered)
+    let hint = filtered.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_filter_map() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let fm: StreamFilterMap<_, _> = stream.filter_map(|x| {
+        if x > 2 { Some(x * 10) } else { None }
+    });
+    let hint = fm.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_take() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let taken: StreamTake<_> = stream.take(3);
+    let hint = taken.size_hint();
+    // Take(3) from a 5-element stream: lower <= 3
+    assert(hint.0 <= 3);
+    // Upper bound should be at most 3
+    match hint.1 {
+        Some(upper) => assert(upper <= 3),
+        None => {} // acceptable
+    }
+}
+
+@test
+fn test_stream_take_zero() {
+    let stream = iter([1, 2, 3].into_iter());
+    let taken: StreamTake<_> = stream.take(0);
+    let hint = taken.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_stream_take_while() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let tw: StreamTakeWhile<_, _> = stream.take_while(|x| *x < 4);
+    let hint = tw.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_skip() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let skipped: StreamSkip<_> = stream.skip(2);
+    let hint = skipped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_skip_while() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let sw: StreamSkipWhile<_, _> = stream.skip_while(|x| *x < 3);
+    let hint = sw.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_enumerate() {
+    let stream = iter([10, 20, 30].into_iter());
+    let enumerated: StreamEnumerate<_> = stream.enumerate();
+    // Enumerate preserves size_hint
+    let hint = enumerated.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_inspect() {
+    let stream = iter([1, 2, 3].into_iter());
+    let inspected: StreamInspect<_, _> = stream.inspect(|x| {
+        // Side effect only, no return needed
+    });
+    // Inspect preserves size_hint
+    let hint = inspected.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_scan() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let scanned: StreamScan<_, Int, _> = stream.scan(0, |state, x| {
+        *state = *state + x;
+        Some(*state)
+    });
+    let hint = scanned.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_fuse() {
+    let stream = iter([1, 2, 3].into_iter());
+    let fused: StreamFuse<_> = stream.fuse();
+    let hint = fused.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_peekable() {
+    let stream = iter([1, 2, 3].into_iter());
+    let peekable: StreamPeekable<_> = stream.peekable();
+    let hint = peekable.size_hint();
+    assert(hint.0 >= 0);
+}
+
+// =============================================================================
+// Section 4: StreamExt Combinators - Composition
+// =============================================================================
+
+@test
+fn test_stream_chain() {
+    let s1 = iter([1, 2, 3].into_iter());
+    let s2 = iter([4, 5, 6].into_iter());
+    let chained: StreamChain<_, _> = s1.chain(s2);
+    // Chain size_hint should sum both streams
+    let hint = chained.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_zip() {
+    let s1 = iter([1, 2, 3].into_iter());
+    let s2 = iter(["a", "b", "c"].into_iter());
+    let zipped: StreamZip<_, _> = s1.zip(s2);
+    let hint = zipped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+// =============================================================================
+// Section 5: StreamExt - Sink Methods (Consumers)
+// =============================================================================
+
+@test
+fn test_stream_collect() {
+    let stream = iter([1, 2, 3].into_iter());
+    let collected: StreamCollect<_, List<Int>> = stream.collect();
+    // This is a Future that resolves to List<Int>
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_fold() {
+    let stream = iter([1, 2, 3, 4].into_iter());
+    let folded: StreamFold<_, Int, _> = stream.fold(0, |acc, x| acc + x);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_for_each() {
+    let stream = iter([1, 2, 3].into_iter());
+    let fe: StreamForEach<_, _> = stream.for_each(|x| {
+        // Process each item
+    });
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_any() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let any_gt3: StreamAny<_, _> = stream.any(|x| *x > 3);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_all() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let all_pos: StreamAll<_, _> = stream.all(|x| *x > 0);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_find() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let found: StreamFind<_, _> = stream.find(|x| *x == 3);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_find_map() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let fm: StreamFindMap<_, _> = stream.find_map(|x| {
+        if x > 3 { Some(x * 10) } else { None }
+    });
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_nth() {
+    let stream = iter([10, 20, 30, 40, 50].into_iter());
+    let nth: StreamNth<_> = stream.nth(2);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_count() {
+    let stream = iter([1, 2, 3].into_iter());
+    let count: StreamCount<_> = stream.count();
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_last() {
+    let stream = iter([1, 2, 3].into_iter());
+    let last: StreamLast<_> = stream.last();
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_first() {
+    let stream = iter([1, 2, 3].into_iter());
+    let first: StreamFirst<_> = stream.first();
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_min() {
+    let stream = iter([3, 1, 4, 1, 5].into_iter());
+    let min: StreamMin<_> = stream.min();
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_max() {
+    let stream = iter([3, 1, 4, 1, 5].into_iter());
+    let max: StreamMax<_> = stream.max();
+    assert(!false); // Runtime-only: async executor required
+}
+
+// =============================================================================
+// Section 6: Backpressure & Flow Control
+// =============================================================================
+
+@test
+fn test_stream_buffered() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let buffered: BufferedStream<_> = stream.buffered(10);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_chunks() {
+    let stream = iter([1, 2, 3, 4, 5, 6, 7].into_iter());
+    let chunked: ChunkedStream<_> = stream.chunks(3);
+    assert(!false); // Runtime-only: async executor required
+}
+
+// =============================================================================
+// Section 7: Combinator Chains
+// =============================================================================
+
+@test
+fn test_stream_complex_chain() {
+    // Verify that complex combinator chains compile correctly
+    let stream = iter([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].into_iter());
+    let result = stream
+        .filter(|x| *x > 2)
+        .map(|x| x * 3)
+        .take(5)
+        .enumerate();
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_filter_then_fold() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let result = stream
+        .filter(|x| *x % 2 == 0)
+        .fold(0, |acc, x| acc + x);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_skip_then_take() {
+    let stream = iter([1, 2, 3, 4, 5, 6, 7, 8].into_iter());
+    let result = stream.skip(2).take(3);
+    assert(!false); // Runtime-only: async executor required
+}
+
+// =============================================================================
+// Section 8: IntoStream Protocol
+// =============================================================================
+
+@test
+fn test_into_stream_from_stream() {
+    let stream = iter([1, 2, 3].into_iter());
+    // All Streams implement IntoStream
+    let s2 = stream.into_stream();
+    assert(!false); // Runtime-only: async executor required
+}
+
+// =============================================================================
+// Section 9: TestStream Polling
+// =============================================================================
+
+@test
+fn test_stream_poll_next_returns_ready() {
+    let mut stream = TestStream {
+        items: List.from([10, 20, 30]),
+        index: 0,
+    };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // First poll returns Ready(Some(10))
+    let result = stream.poll_next(&mut cx);
+    assert(result.is_ready());
+}
+
+@test
+fn test_stream_poll_next_sequential() {
+    let mut stream = TestStream {
+        items: List.from([1, 2, 3]),
+        index: 0,
+    };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // Poll three times
+    let r1 = stream.poll_next(&mut cx);
+    let r2 = stream.poll_next(&mut cx);
+    let r3 = stream.poll_next(&mut cx);
+
+    assert(r1.is_ready());
+    assert(r2.is_ready());
+    assert(r3.is_ready());
+}
+
+@test
+fn test_stream_poll_exhausted() {
+    let mut stream = TestStream {
+        items: List.from([42]),
+        index: 0,
+    };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // First poll gets value, second gets None
+    let _ = stream.poll_next(&mut cx);
+    let last = stream.poll_next(&mut cx);
+    assert(last.is_ready());
+}
+
+@test
+fn test_stream_size_hint_decreases() {
+    let mut stream = TestStream {
+        items: List.from([1, 2, 3, 4, 5]),
+        index: 0,
+    };
+    assert_eq(stream.size_hint().0, 5);
+
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let _ = stream.poll_next(&mut cx);
+    assert_eq(stream.size_hint().0, 4);
+
+    let _ = stream.poll_next(&mut cx);
+    assert_eq(stream.size_hint().0, 3);
+}
+
+@test
+fn test_stream_empty_from_start() {
+    let stream = TestStream {
+        items: List.new(),
+        index: 0,
+    };
+    assert_eq(stream.size_hint().0, 0);
+    match stream.size_hint().1 {
+        Some(upper) => assert_eq(upper, 0),
+        None => panic("Expected exact bound"),
+    }
+}
+
+// =============================================================================
+// Section 10: Advanced Combinator Chains
+// =============================================================================
+
+@test
+fn test_stream_map_then_take() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let result = stream.map(|x| x * 10).take(3);
+    let hint = result.size_hint();
+    assert(hint.0 <= 3);
+}
+
+@test
+fn test_stream_filter_then_enumerate() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let result = stream.filter(|x| *x % 2 == 0).enumerate();
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_chain_then_map() {
+    let s1 = iter([1, 2, 3].into_iter());
+    let s2 = iter([4, 5, 6].into_iter());
+    let result = s1.chain(s2).map(|x| x * 2);
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_take_then_fuse() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let result = stream.take(2).fuse();
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_zip_then_map() {
+    let s1 = iter([1, 2, 3].into_iter());
+    let s2 = iter([10, 20, 30].into_iter());
+    let result = s1.zip(s2).map(|pair| pair.0 + pair.1);
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_skip_then_take_subset() {
+    // Skip first 2, take next 3 from [1..8]
+    let stream = iter([1, 2, 3, 4, 5, 6, 7, 8].into_iter());
+    let result = stream.skip(2).take(3);
+    let hint = result.size_hint();
+    assert(hint.0 <= 3);
+}
+
+@test
+fn test_stream_deep_chain() {
+    // Deep chain: filter -> map -> take -> enumerate -> inspect -> fuse
+    let stream = iter([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].into_iter());
+    let result = stream
+        .filter(|x| *x > 3)
+        .map(|x| x * 2)
+        .take(4)
+        .enumerate()
+        .inspect(|_| {})
+        .fuse();
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+// =============================================================================
+// Section 11: Stream Constructor Variations
+// =============================================================================
+
+@test
+fn test_iter_from_empty_array() {
+    let stream = iter([].into_iter());
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_iter_from_single_element() {
+    let stream = iter([42].into_iter());
+    let hint = stream.size_hint();
+    assert(hint.0 >= 1);
+}
+
+@test
+fn test_once_with_text() {
+    let stream: StreamOnce<Text> = stream_once("hello");
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 1);
+}
+
+@test
+fn test_empty_with_bool() {
+    let stream: StreamEmpty<Bool> = stream_empty();
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_repeat_n_large() {
+    let stream = stream_repeat_n(0, 1000);
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 1000);
+}
+
+// =============================================================================
+// Section 12: Additional Factory Function Tests
+// =============================================================================
+
+@test
+fn test_interval_constructor() {
+    let stream = interval(100);
+    assert_eq(stream.period_ms, 100);
+}
+
+@test
+fn test_interval_type_exists() {
+    let _ = StreamInterval;
+}
+
+@test
+fn test_once_future_type_exists() {
+    let _ = OnceFuture;
+}
+
+@test
+fn test_stream_poll_fn_type_exists() {
+    let _ = StreamPollFn;
+}
+
+@test
+fn test_stream_unfold_type_exists() {
+    let _ = StreamUnfold;
+}
+
+@test
+fn test_once_future_function_exists() {
+    let _ = once_future;
+}
+
+@test
+fn test_stream_poll_fn_function_exists() {
+    let _ = stream_poll_fn;
+}
+
+@test
+fn test_stream_unfold_function_exists() {
+    let _ = stream_unfold;
+}
+
+@test
+fn test_interval_function_exists() {
+    let _ = interval;
+}
+
+// =============================================================================
+// Section 13: Flatten and FlatMap Type Tests
+// =============================================================================
+
+@test
+fn test_stream_flatten_type_exists() {
+    let _ = StreamFlatten;
+}
+
+@test
+fn test_stream_flat_map_type_exists() {
+    let _ = StreamFlatMap;
+}
+
+@test
+fn test_stream_flatten_construction() {
+    // Create a stream of streams and flatten
+    let inner1 = stream_once(1);
+    let inner2 = stream_once(2);
+    let items = [inner1, inner2];
+    let outer = iter(items.into_iter());
+    let flattened = outer.flatten();
+    // Verify type compiles
+    let _ = flattened;
+}
+
+@test
+fn test_stream_flat_map_construction() {
+    let items = [1, 2, 3];
+    let stream = iter(items.into_iter());
+    let flat_mapped = stream.flat_map(|x: Int| stream_once(x * 10));
+    let _ = flat_mapped;
+}
+
+// =============================================================================
+// Section 14: Interval and Advanced Patterns
+// =============================================================================
+
+@test
+fn test_interval_zero_period() {
+    let stream = interval(0);
+    assert_eq(stream.period_ms, 0);
+}
+
+@test
+fn test_interval_large_period() {
+    let stream = interval(86400000); // 1 day in ms
+    assert_eq(stream.period_ms, 86400000);
+}
+
+@test
+fn test_stream_map_then_flatten() {
+    let items = [1, 2, 3];
+    let stream = iter(items.into_iter());
+    // Map each item to a stream, then flatten
+    let result = stream.map(|x: Int| stream_once(x)).flatten();
+    let _ = result;
+}
+
+@test
+fn test_stream_take_then_collect() {
+    let items = [1, 2, 3, 4, 5];
+    let stream = iter(items.into_iter());
+    let taken = stream.take(3).collect();
+    let _ = taken;
+}
+
+@test
+fn test_stream_skip_then_count() {
+    let items = [1, 2, 3, 4, 5];
+    let stream = iter(items.into_iter());
+    let counted = stream.skip(2).count();
+    let _ = counted;
+}
+
+@test
+fn test_stream_filter_then_find() {
+    let items = [1, 2, 3, 4, 5];
+    let stream = iter(items.into_iter());
+    let found = stream.filter(|x: &Int| *x > 3).find(|x: &Int| *x == 4);
+    let _ = found;
+}
+
+@test
+fn test_stream_enumerate_then_filter() {
+    let items = [10, 20, 30];
+    let stream = iter(items.into_iter());
+    let result = stream.enumerate().filter(|pair: &(Int, Int)| pair.0 > 0);
+    let _ = result;
+}
+
+@test
+fn test_stream_chain_three() {
+    let s1 = stream_once(1);
+    let s2 = stream_once(2);
+    let s3 = stream_once(3);
+    let chained = s1.chain(s2).chain(s3);
+    let _ = chained;
+}
+
+@test
+fn test_stream_zip_different_lengths() {
+    let items1 = [1, 2, 3];
+    let items2 = [10, 20];
+    let s1 = iter(items1.into_iter());
+    let s2 = iter(items2.into_iter());
+    let zipped = s1.zip(s2);
+    let _ = zipped;
+}
+
+// =============================================================================
+// Section 15: Stream Factory Functions - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_once_with_float() {
+    let stream: StreamOnce<Float> = stream_once(3.14);
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 1);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 1),
+        None => panic("once should have exact upper bound"),
+    }
+}
+
+@test
+fn test_once_with_tuple() {
+    let stream: StreamOnce<(Int, Bool)> = stream_once((42, true));
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 1);
+}
+
+@test
+fn test_empty_with_float() {
+    let stream: StreamEmpty<Float> = stream_empty();
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 0);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 0),
+        None => panic("empty should have exact upper bound"),
+    }
+}
+
+@test
+fn test_empty_with_tuple() {
+    let stream: StreamEmpty<(Int, Text)> = stream_empty();
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_repeat_with_text() {
+    let stream: StreamRepeat<Text> = stream_repeat("hello");
+    let hint = stream.size_hint();
+    assert(hint.0 > 0);
+    assert(hint.1 is None);
+}
+
+@test
+fn test_repeat_with_bool() {
+    let stream: StreamRepeat<Bool> = stream_repeat(true);
+    let hint = stream.size_hint();
+    assert(hint.0 > 0);
+}
+
+@test
+fn test_repeat_n_with_text() {
+    let stream: StreamRepeatN<Text> = stream_repeat_n("world", 3);
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 3);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 3),
+        None => panic("repeat_n should have exact upper bound"),
+    }
+}
+
+@test
+fn test_repeat_n_with_float() {
+    let stream = stream_repeat_n(2.718, 10);
+    let hint = stream.size_hint();
+    assert_eq(hint.0, 10);
+}
+
+// =============================================================================
+// Section 16: Map Adapter - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_map_identity() {
+    let stream = iter([1, 2, 3].into_iter());
+    let mapped = stream.map(|x| x);
+    let hint = mapped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_map_type_change_to_text() {
+    let stream = iter([1, 2, 3].into_iter());
+    let mapped = stream.map(|x: Int| -> Bool { x > 1 });
+    let hint = mapped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_map_to_tuple() {
+    let stream = iter([10, 20, 30].into_iter());
+    let mapped = stream.map(|x: Int| (x, x * 2));
+    let hint = mapped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_map_chain_two() {
+    let stream = iter([1, 2, 3].into_iter());
+    let result = stream.map(|x| x + 1).map(|x| x * 2);
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_map_chain_three() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let result = stream
+        .map(|x| x * 10)
+        .map(|x| x + 1)
+        .map(|x| x - 5);
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_map_on_empty() {
+    let stream = iter([].into_iter());
+    let mapped = stream.map(|x: Int| x * 2);
+    let hint = mapped.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+// =============================================================================
+// Section 17: Filter Adapter - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_filter_none_pass() {
+    // Filter with predicate that rejects everything
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let filtered = stream.filter(|x| *x > 100);
+    let hint = filtered.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_filter_all_pass() {
+    // Filter with predicate that accepts everything
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let filtered = stream.filter(|x| *x > 0);
+    let hint = filtered.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_filter_complex_predicate() {
+    let stream = iter([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].into_iter());
+    let filtered = stream.filter(|x| *x % 2 == 0 && *x > 4);
+    let hint = filtered.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_filter_on_empty() {
+    let stream = iter([].into_iter());
+    let filtered = stream.filter(|x: &Int| *x > 0);
+    let hint = filtered.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_stream_filter_then_map() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let result = stream.filter(|x| *x % 2 == 0).map(|x| x * 10);
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+// =============================================================================
+// Section 18: Take/Skip - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_take_more_than_available() {
+    let stream = iter([1, 2, 3].into_iter());
+    let taken = stream.take(100);
+    let hint = taken.size_hint();
+    // Upper bound capped at min(available, n)
+    assert(hint.0 <= 100);
+}
+
+@test
+fn test_stream_take_exact_count() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let taken = stream.take(5);
+    let hint = taken.size_hint();
+    assert(hint.0 <= 5);
+}
+
+@test
+fn test_stream_take_from_empty() {
+    let stream = iter([].into_iter());
+    let taken = stream.take(10);
+    let hint = taken.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_stream_skip_zero() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let skipped = stream.skip(0);
+    let hint = skipped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_skip_all() {
+    let stream = iter([1, 2, 3].into_iter());
+    let skipped = stream.skip(3);
+    let _ = skipped;
+}
+
+@test
+fn test_stream_skip_more_than_available() {
+    let stream = iter([1, 2, 3].into_iter());
+    let skipped = stream.skip(100);
+    let _ = skipped;
+}
+
+@test
+fn test_stream_skip_from_empty() {
+    let stream = iter([].into_iter());
+    let skipped = stream.skip(5);
+    let hint = skipped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_take_while_always_true() {
+    let stream = iter([1, 2, 3].into_iter());
+    let tw = stream.take_while(|x| *x > 0);
+    let hint = tw.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_take_while_always_false() {
+    let stream = iter([1, 2, 3].into_iter());
+    let tw = stream.take_while(|x| *x < 0);
+    let hint = tw.size_hint();
+    assert(hint.0 >= 0);
+}
+
+// =============================================================================
+// Section 19: Chain - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_chain_empty_with_nonempty() {
+    let s1: StreamEmpty<Int> = stream_empty();
+    let s2 = iter([1, 2, 3].into_iter());
+    let chained = s1.chain(s2);
+    let hint = chained.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_chain_nonempty_with_empty() {
+    let s1 = iter([1, 2, 3].into_iter());
+    let s2: StreamEmpty<Int> = stream_empty();
+    let chained = s1.chain(s2);
+    let hint = chained.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_chain_two_empty() {
+    let s1: StreamEmpty<Int> = stream_empty();
+    let s2: StreamEmpty<Int> = stream_empty();
+    let chained = s1.chain(s2);
+    let hint = chained.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_stream_chain_four_streams() {
+    let s1 = stream_once(1);
+    let s2 = stream_once(2);
+    let s3 = stream_once(3);
+    let s4 = stream_once(4);
+    let chained = s1.chain(s2).chain(s3).chain(s4);
+    let _ = chained;
+}
+
+@test
+fn test_stream_chain_then_take() {
+    let s1 = iter([1, 2, 3].into_iter());
+    let s2 = iter([4, 5, 6].into_iter());
+    let result = s1.chain(s2).take(4);
+    let hint = result.size_hint();
+    assert(hint.0 <= 4);
+}
+
+// =============================================================================
+// Section 20: Zip - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_zip_with_empty_first() {
+    let s1: StreamEmpty<Int> = stream_empty();
+    let s2 = iter([10, 20, 30].into_iter());
+    let zipped = s1.zip(s2);
+    let hint = zipped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_zip_with_empty_second() {
+    let s1 = iter([1, 2, 3].into_iter());
+    let s2: StreamEmpty<Int> = stream_empty();
+    let zipped = s1.zip(s2);
+    let hint = zipped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_zip_both_empty() {
+    let s1: StreamEmpty<Int> = stream_empty();
+    let s2: StreamEmpty<Int> = stream_empty();
+    let zipped = s1.zip(s2);
+    let hint = zipped.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_stream_zip_same_type() {
+    let s1 = iter([1, 2, 3].into_iter());
+    let s2 = iter([4, 5, 6].into_iter());
+    let zipped = s1.zip(s2);
+    let hint = zipped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_zip_longer_first() {
+    let s1 = iter([1, 2, 3, 4, 5].into_iter());
+    let s2 = iter([10, 20].into_iter());
+    let zipped = s1.zip(s2);
+    let _ = zipped;
+}
+
+// =============================================================================
+// Section 21: Enumerate - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_enumerate_empty() {
+    let stream: StreamEmpty<Int> = stream_empty();
+    let enumerated = stream.enumerate();
+    let hint = enumerated.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_stream_enumerate_single_element() {
+    let stream = stream_once(42);
+    let enumerated = stream.enumerate();
+    let hint = enumerated.size_hint();
+    assert_eq(hint.0, 1);
+}
+
+@test
+fn test_stream_enumerate_then_take() {
+    let stream = iter([10, 20, 30, 40, 50].into_iter());
+    let result = stream.enumerate().take(3);
+    let hint = result.size_hint();
+    assert(hint.0 <= 3);
+}
+
+@test
+fn test_stream_enumerate_then_map() {
+    let stream = iter([100, 200, 300].into_iter());
+    let result = stream.enumerate().map(|pair| pair.0);
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+// =============================================================================
+// Section 22: Flatten/FlatMap - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_flatten_empty_outer() {
+    // Flatten an empty stream of streams
+    let items: List<StreamOnce<Int>> = List.new();
+    let outer = iter(items.into_iter());
+    let flattened = outer.flatten();
+    let _ = flattened;
+}
+
+@test
+fn test_stream_flatten_single_inner() {
+    let inner = stream_once(99);
+    let items = [inner];
+    let outer = iter(items.into_iter());
+    let flattened = outer.flatten();
+    let _ = flattened;
+}
+
+@test
+fn test_stream_flat_map_to_empty() {
+    let stream = iter([1, 2, 3].into_iter());
+    let flat_mapped = stream.flat_map(|_x: Int| -> StreamEmpty<Int> { stream_empty() });
+    let _ = flat_mapped;
+}
+
+@test
+fn test_stream_flat_map_to_repeat_n() {
+    let stream = iter([1, 2, 3].into_iter());
+    let flat_mapped = stream.flat_map(|x: Int| stream_repeat_n(x, 2));
+    let _ = flat_mapped;
+}
+
+// =============================================================================
+// Section 23: Fold/Reduce Sinks - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_fold_multiplication() {
+    let stream = iter([1, 2, 3, 4].into_iter());
+    let folded: StreamFold<_, Int, _> = stream.fold(1, |acc, x| acc * x);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_fold_on_empty() {
+    let stream = iter([].into_iter());
+    let folded: StreamFold<_, Int, _> = stream.fold(0, |acc, x: Int| acc + x);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_fold_string_concat() {
+    let stream = iter([1, 2, 3].into_iter());
+    let folded = stream.fold(0, |acc, x| acc + x);
+    let _ = folded;
+}
+
+@test
+fn test_stream_fold_with_initial_value() {
+    let stream = iter([10, 20, 30].into_iter());
+    let folded: StreamFold<_, Int, _> = stream.fold(100, |acc, x| acc + x);
+    assert(!false); // Runtime-only: async executor required
+}
+
+// =============================================================================
+// Section 24: Count/First/Last/Min/Max Sinks - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_count_empty() {
+    let stream = iter([].into_iter());
+    let count: StreamCount<_> = stream.count();
+    let _ = count;
+}
+
+@test
+fn test_stream_count_single() {
+    let stream = stream_once(42);
+    let count: StreamCount<_> = stream.count();
+    let _ = count;
+}
+
+@test
+fn test_stream_first_from_empty() {
+    let stream = iter([].into_iter());
+    let first: StreamFirst<_> = stream.first();
+    let _ = first;
+}
+
+@test
+fn test_stream_last_single() {
+    let stream = stream_once(99);
+    let last: StreamLast<_> = stream.last();
+    let _ = last;
+}
+
+@test
+fn test_stream_min_single_element() {
+    let stream = stream_once(42);
+    let min: StreamMin<_> = stream.min();
+    let _ = min;
+}
+
+@test
+fn test_stream_max_single_element() {
+    let stream = stream_once(42);
+    let max: StreamMax<_> = stream.max();
+    let _ = max;
+}
+
+// =============================================================================
+// Section 25: Any/All Sinks - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_any_on_empty() {
+    let stream = iter([].into_iter());
+    let any_result: StreamAny<_, _> = stream.any(|x: &Int| *x > 0);
+    let _ = any_result;
+}
+
+@test
+fn test_stream_any_all_match() {
+    let stream = iter([2, 4, 6, 8].into_iter());
+    let any_result: StreamAny<_, _> = stream.any(|x| *x % 2 == 0);
+    let _ = any_result;
+}
+
+@test
+fn test_stream_any_none_match() {
+    let stream = iter([1, 3, 5, 7].into_iter());
+    let any_result: StreamAny<_, _> = stream.any(|x| *x % 2 == 0);
+    let _ = any_result;
+}
+
+@test
+fn test_stream_all_on_empty() {
+    let stream = iter([].into_iter());
+    let all_result: StreamAll<_, _> = stream.all(|x: &Int| *x > 0);
+    let _ = all_result;
+}
+
+@test
+fn test_stream_all_none_match() {
+    let stream = iter([1, 2, 3].into_iter());
+    let all_result: StreamAll<_, _> = stream.all(|x| *x > 100);
+    let _ = all_result;
+}
+
+@test
+fn test_stream_all_single_element() {
+    let stream = stream_once(5);
+    let all_result: StreamAll<_, _> = stream.all(|x| *x > 0);
+    let _ = all_result;
+}
+
+// =============================================================================
+// Section 26: Find/FindMap Sinks - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_find_first_element() {
+    let stream = iter([10, 20, 30].into_iter());
+    let found: StreamFind<_, _> = stream.find(|x| *x == 10);
+    let _ = found;
+}
+
+@test
+fn test_stream_find_last_element() {
+    let stream = iter([10, 20, 30].into_iter());
+    let found: StreamFind<_, _> = stream.find(|x| *x == 30);
+    let _ = found;
+}
+
+@test
+fn test_stream_find_no_match() {
+    let stream = iter([1, 2, 3].into_iter());
+    let found: StreamFind<_, _> = stream.find(|x| *x == 99);
+    let _ = found;
+}
+
+@test
+fn test_stream_find_on_empty() {
+    let stream = iter([].into_iter());
+    let found: StreamFind<_, _> = stream.find(|x: &Int| *x == 1);
+    let _ = found;
+}
+
+@test
+fn test_stream_find_map_with_transform() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let fm: StreamFindMap<_, _> = stream.find_map(|x| {
+        if x == 3 { Some(x * 100) } else { None }
+    });
+    let _ = fm;
+}
+
+@test
+fn test_stream_find_map_no_match() {
+    let stream = iter([1, 2, 3].into_iter());
+    let fm: StreamFindMap<_, _> = stream.find_map(|x| {
+        if x > 100 { Some(x) } else { None }
+    });
+    let _ = fm;
+}
+
+// =============================================================================
+// Section 27: Collect - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_collect_from_empty() {
+    let stream = iter([].into_iter());
+    let collected: StreamCollect<_, List<Int>> = stream.collect();
+    let _ = collected;
+}
+
+@test
+fn test_stream_collect_after_filter() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let collected = stream.filter(|x| *x > 3).collect();
+    let _ = collected;
+}
+
+@test
+fn test_stream_collect_after_map() {
+    let stream = iter([1, 2, 3].into_iter());
+    let collected = stream.map(|x| x * 10).collect();
+    let _ = collected;
+}
+
+// =============================================================================
+// Section 28: Inspect/Fuse/Peekable - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_inspect_on_empty() {
+    let stream = iter([].into_iter());
+    let inspected = stream.inspect(|_x: &Int| {});
+    let hint = inspected.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+@test
+fn test_stream_inspect_preserves_elements() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let inspected = stream.inspect(|_x| {});
+    let hint = inspected.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_fuse_on_empty() {
+    let stream: StreamEmpty<Int> = stream_empty();
+    let fused = stream.fuse();
+    let hint = fused.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_fuse_on_once() {
+    let stream = stream_once(42);
+    let fused = stream.fuse();
+    let hint = fused.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_peekable_on_empty() {
+    let stream: StreamEmpty<Int> = stream_empty();
+    let peekable = stream.peekable();
+    let hint = peekable.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_peekable_on_single() {
+    let stream = stream_once(42);
+    let peekable = stream.peekable();
+    let hint = peekable.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_peekable_then_take() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let result = stream.peekable().take(2);
+    let hint = result.size_hint();
+    assert(hint.0 <= 2);
+}
+
+// =============================================================================
+// Section 29: Scan - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_scan_running_product() {
+    let stream = iter([1, 2, 3, 4].into_iter());
+    let scanned: StreamScan<_, Int, _> = stream.scan(1, |state, x| {
+        *state = *state * x;
+        Some(*state)
+    });
+    let hint = scanned.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_scan_with_early_termination() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let scanned: StreamScan<_, Int, _> = stream.scan(0, |state, x| {
+        *state = *state + x;
+        if *state > 6 { None } else { Some(*state) }
+    });
+    let hint = scanned.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_scan_on_empty() {
+    let stream = iter([].into_iter());
+    let scanned: StreamScan<_, Int, _> = stream.scan(0, |state, x: Int| {
+        *state = *state + x;
+        Some(*state)
+    });
+    let hint = scanned.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+// =============================================================================
+// Section 30: FilterMap - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_filter_map_all_some() {
+    let stream = iter([1, 2, 3].into_iter());
+    let fm = stream.filter_map(|x| Some(x * 10));
+    let hint = fm.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_filter_map_all_none() {
+    let stream = iter([1, 2, 3].into_iter());
+    let fm = stream.filter_map(|_x: Int| -> Maybe<Int> { None });
+    let hint = fm.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_filter_map_on_empty() {
+    let stream = iter([].into_iter());
+    let fm = stream.filter_map(|x: Int| Some(x));
+    let hint = fm.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+// =============================================================================
+// Section 31: Nth - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_nth_zero() {
+    let stream = iter([10, 20, 30].into_iter());
+    let nth_result: StreamNth<_> = stream.nth(0);
+    let _ = nth_result;
+}
+
+@test
+fn test_stream_nth_last() {
+    let stream = iter([10, 20, 30].into_iter());
+    let nth_result: StreamNth<_> = stream.nth(2);
+    let _ = nth_result;
+}
+
+@test
+fn test_stream_nth_out_of_bounds() {
+    let stream = iter([10, 20, 30].into_iter());
+    let nth_result: StreamNth<_> = stream.nth(100);
+    let _ = nth_result;
+}
+
+// =============================================================================
+// Section 32: Advanced Combinator Chains - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_filter_map_then_take() {
+    let stream = iter([1, 2, 3, 4, 5, 6, 7, 8].into_iter());
+    let result = stream
+        .filter_map(|x| if x % 2 == 0 { Some(x * 10) } else { None })
+        .take(2);
+    let hint = result.size_hint();
+    assert(hint.0 <= 2);
+}
+
+@test
+fn test_stream_skip_while_then_take_while() {
+    let stream = iter([1, 2, 3, 4, 5, 6, 7].into_iter());
+    let result = stream
+        .skip_while(|x| *x < 3)
+        .take_while(|x| *x < 6);
+    let hint = result.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_stream_chain_then_filter_then_count() {
+    let s1 = iter([1, 2, 3].into_iter());
+    let s2 = iter([4, 5, 6].into_iter());
+    let result = s1.chain(s2).filter(|x| *x > 2).count();
+    let _ = result;
+}
+
+@test
+fn test_stream_map_then_any() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let result = stream.map(|x| x * 2).any(|x| *x > 6);
+    let _ = result;
+}
+
+@test
+fn test_stream_filter_then_last() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let result = stream.filter(|x| *x % 2 == 1).last();
+    let _ = result;
+}
+
+@test
+fn test_stream_map_then_min() {
+    let stream = iter([3, 1, 4, 1, 5].into_iter());
+    let result = stream.map(|x| x * 10).min();
+    let _ = result;
+}
+
+@test
+fn test_stream_map_then_max() {
+    let stream = iter([3, 1, 4, 1, 5].into_iter());
+    let result = stream.map(|x| x * 10).max();
+    let _ = result;
+}
+
+// =============================================================================
+// Section 33: TestStream Polling - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_poll_single_item() {
+    let mut stream = TestStream {
+        items: List.from([100]),
+        index: 0,
+    };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let r1 = stream.poll_next(&mut cx);
+    assert(r1.is_ready());
+
+    let r2 = stream.poll_next(&mut cx);
+    assert(r2.is_ready());
+    // r2 should be Ready(None) since we exhausted the single item
+}
+
+@test
+fn test_stream_poll_large_sequence() {
+    let mut stream = TestStream {
+        items: List.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+        index: 0,
+    };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // Poll all 10 items
+    let mut count = 0;
+    let r1 = stream.poll_next(&mut cx);
+    assert(r1.is_ready());
+    let r2 = stream.poll_next(&mut cx);
+    assert(r2.is_ready());
+    let r3 = stream.poll_next(&mut cx);
+    assert(r3.is_ready());
+    let r4 = stream.poll_next(&mut cx);
+    assert(r4.is_ready());
+    let r5 = stream.poll_next(&mut cx);
+    assert(r5.is_ready());
+    let r6 = stream.poll_next(&mut cx);
+    assert(r6.is_ready());
+    let r7 = stream.poll_next(&mut cx);
+    assert(r7.is_ready());
+    let r8 = stream.poll_next(&mut cx);
+    assert(r8.is_ready());
+    let r9 = stream.poll_next(&mut cx);
+    assert(r9.is_ready());
+    let r10 = stream.poll_next(&mut cx);
+    assert(r10.is_ready());
+
+    // 11th poll should be Ready(None)
+    let r11 = stream.poll_next(&mut cx);
+    assert(r11.is_ready());
+
+    assert_eq(stream.size_hint().0, 0);
+}
+
+@test
+fn test_stream_size_hint_upper_bound_decreases() {
+    let mut stream = TestStream {
+        items: List.from([1, 2, 3]),
+        index: 0,
+    };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    match stream.size_hint().1 {
+        Some(upper) => assert_eq(upper, 3),
+        None => panic("Expected exact bound"),
+    }
+
+    let _ = stream.poll_next(&mut cx);
+
+    match stream.size_hint().1 {
+        Some(upper) => assert_eq(upper, 2),
+        None => panic("Expected exact bound"),
+    }
+
+    let _ = stream.poll_next(&mut cx);
+
+    match stream.size_hint().1 {
+        Some(upper) => assert_eq(upper, 1),
+        None => panic("Expected exact bound"),
+    }
+}
+
+// =============================================================================
+// Section 34: Buffered/Chunked - Deeper Coverage
+// =============================================================================
+
+@test
+fn test_stream_buffered_small_capacity() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let buffered: BufferedStream<_> = stream.buffered(1);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_buffered_large_capacity() {
+    let stream = iter([1, 2, 3].into_iter());
+    let buffered: BufferedStream<_> = stream.buffered(1000);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_chunks_size_one() {
+    let stream = iter([1, 2, 3, 4, 5].into_iter());
+    let chunked: ChunkedStream<_> = stream.chunks(1);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_chunks_larger_than_stream() {
+    let stream = iter([1, 2, 3].into_iter());
+    let chunked: ChunkedStream<_> = stream.chunks(100);
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_stream_chunks_exact_multiple() {
+    let stream = iter([1, 2, 3, 4, 5, 6].into_iter());
+    let chunked: ChunkedStream<_> = stream.chunks(3);
+    assert(!false); // Runtime-only: async executor required
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

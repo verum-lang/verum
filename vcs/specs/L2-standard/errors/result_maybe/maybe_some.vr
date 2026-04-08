@@ -1,0 +1,339 @@
+// @test: run
+// @expected-stdout: Some value: 42\nUnwrapped: 100\nWith default: 50\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, maybe, some, optional
+// @description: Maybe.Some handling patterns
+
+/// Maybe.Some handling - working with present optional values.
+/// Demonstrates various patterns for extracting and using Some values.
+
+type User is {
+    id: Int,
+    name: Text,
+    email: Maybe<Text>
+};
+
+type Config is {
+    port: Int,
+    host: Text,
+    max_connections: Maybe<Int>
+};
+
+/// Basic Some creation
+fn create_some_values() {
+    // Direct Some construction
+    let some_int: Maybe<Int> = Some(42);
+    let some_text: Maybe<Text> = Some("hello");
+    let some_list: Maybe<List<Int>> = Some([1, 2, 3]);
+
+    // Type inference
+    fn takes_maybe(m: Maybe<Int>) -> Int {
+        m.unwrap_or(0)
+    }
+    let inferred = takes_maybe(Some(100));
+}
+
+/// Checking if Maybe is Some
+fn check_some_status() {
+    let present: Maybe<Int> = Some(42);
+    let absent: Maybe<Int> = None;
+
+    // is_some() method
+    assert(present.is_some());
+    assert(!absent.is_some());
+
+    // is_none() method (opposite)
+    assert(!present.is_none());
+    assert(absent.is_none());
+
+    // is_some_and() with predicate
+    let large: Maybe<Int> = Some(100);
+    assert(large.is_some_and(|n| n > 50));
+    assert(!large.is_some_and(|n| n < 50));
+}
+
+/// Extracting Some values
+fn extract_some_values() {
+    let maybe: Maybe<Int> = Some(42);
+
+    // unwrap() - panics on None
+    let value = maybe.unwrap();
+    assert_eq(value, 42);
+
+    // unwrap_or() - provides default
+    let absent: Maybe<Int> = None;
+    let value = absent.unwrap_or(0);
+    assert_eq(value, 0);
+
+    // unwrap_or_else() - lazy default
+    let absent: Maybe<Int> = None;
+    let value = absent.unwrap_or_else(|| compute_default());
+    assert_eq(value, 42);
+
+    // unwrap_or_default() - uses Default trait
+    let absent: Maybe<Int> = None;
+    let value = absent.unwrap_or_default();
+    assert_eq(value, 0);
+
+    // expect() - panics with custom message on None
+    let present: Maybe<Int> = Some(100);
+    let value = present.expect("Value should be present");
+    assert_eq(value, 100);
+}
+
+fn compute_default() -> Int {
+    42
+}
+
+/// Pattern matching on Some
+fn match_some_patterns() {
+    let maybe: Maybe<Int> = Some(42);
+
+    // Basic match
+    let message = match maybe {
+        Some(n) => format("Got number: {}", n),
+        None => "No value"
+    };
+
+    // Match with guard
+    let large_maybe: Maybe<Int> = Some(100);
+    let description = match large_maybe {
+        Some(n) if n > 50 => "Large value",
+        Some(n) if n > 0 => "Small value",
+        Some(0) => "Zero",
+        Some(_) => "Negative value",
+        None => "No value"
+    };
+
+    // Match with destructuring
+    let user_maybe: Maybe<User> = Some(User {
+        id: 1,
+        name: "Alice",
+        email: Some("alice@example.com")
+    });
+
+    let email = match user_maybe {
+        Some(User { email: Some(e), .. }) => e,
+        Some(User { email: None, name }) => format("{}@default.com", name),
+        None => "unknown@example.com"
+    };
+}
+
+/// If-let pattern for Some
+fn if_let_some_pattern() {
+    let maybe: Maybe<Int> = Some(42);
+
+    // if let Some(value) = maybe
+    if let Some(n) = maybe {
+        println(format("Value is: {}", n));
+    }
+
+    // Combined with else
+    let absent: Maybe<Int> = None;
+    if let Some(n) = absent {
+        println(format("Got: {}", n));
+    } else {
+        println("No value available");
+    }
+
+    // With nested if-let
+    let nested: Maybe<Maybe<Int>> = Some(Some(100));
+    if let Some(Some(v)) = nested {
+        println(format("Nested value: {}", v));
+    }
+}
+
+/// While-let pattern for iterating Some
+fn while_let_some_pattern() {
+    let mut stack: List<Int> = [1, 2, 3, 4, 5];
+
+    // while let Some(value) = stack.pop()
+    while let Some(top) = stack.pop() {
+        println(format("Popped: {}", top));
+    }
+}
+
+/// Some with transformations
+fn transform_some() {
+    let maybe: Maybe<Int> = Some(42);
+
+    // map() - transform Some value
+    let doubled = maybe.map(|n| n * 2);
+    assert_eq(doubled.unwrap(), 84);
+
+    // map preserves None
+    let absent: Maybe<Int> = None;
+    let still_none = absent.map(|n| n * 2);
+    assert(still_none.is_none());
+
+    // Multiple maps
+    let processed = Some(10)
+        .map(|n| n + 5)
+        .map(|n| n * 2)
+        .map(|n| format("Result: {}", n));
+    assert_eq(processed.unwrap(), "Result: 30");
+
+    // map_or - map with default
+    let result = Some(42).map_or(0, |n| n * 2);
+    assert_eq(result, 84);
+
+    let result = None.map_or(0, |n: Int| n * 2);
+    assert_eq(result, 0);
+}
+
+/// Chaining Some values with and_then
+fn chain_some_values() {
+    fn double(n: Int) -> Maybe<Int> {
+        Some(n * 2)
+    }
+
+    fn positive_only(n: Int) -> Maybe<Int> {
+        if n > 0 { Some(n) } else { None }
+    }
+
+    let maybe: Maybe<Int> = Some(21);
+
+    // and_then chains Maybe-returning operations
+    let chained = maybe
+        .and_then(|n| double(n))
+        .and_then(|n| positive_only(n));
+    assert_eq(chained.unwrap(), 42);
+
+    // Chain stops at first None
+    let stops_early = Some(-5)
+        .and_then(|n| positive_only(n))  // Returns None
+        .and_then(|n| double(n));  // Never called
+    assert(stops_early.is_none());
+}
+
+/// Converting Some to Result
+fn some_to_result() {
+    let present: Maybe<Int> = Some(42);
+    let absent: Maybe<Int> = None;
+
+    // ok_or converts to Result
+    let result = present.ok_or("Value not found");
+    assert_eq(result.unwrap(), 42);
+
+    let error = absent.ok_or("Value not found");
+    assert_eq(error.unwrap_err(), "Value not found");
+
+    // ok_or_else for lazy error
+    let result = absent.ok_or_else(|| format("Missing at {}", now()));
+}
+
+fn now() -> Int { 0 }
+
+/// Filtering Some values
+fn filter_some() {
+    let value: Maybe<Int> = Some(42);
+
+    // filter - keep if predicate is true
+    let large = value.filter(|n| *n > 50);
+    assert(large.is_none());  // 42 is not > 50
+
+    let positive = value.filter(|n| *n > 0);
+    assert_eq(positive.unwrap(), 42);  // 42 is > 0
+}
+
+/// Some with references
+fn some_with_refs() {
+    let maybe: Maybe<Int> = Some(42);
+
+    // as_ref() borrows the Some value
+    let ref_maybe: Maybe<&Int> = maybe.as_ref();
+    assert_eq(*ref_maybe.unwrap(), 42);
+
+    // as_mut() for mutable reference
+    let mut maybe2: Maybe<Int> = Some(42);
+    if let Some(ref mut n) = maybe2 {
+        *n = 100;
+    }
+    assert_eq(maybe2.unwrap(), 100);
+}
+
+/// Some in collections
+fn some_in_collections() {
+    let maybes: List<Maybe<Int>> = [
+        Some(1),
+        None,
+        Some(2),
+        None,
+        Some(3)
+    ];
+
+    // Filter to only Some values
+    let somes: List<Int> = maybes.iter()
+        .filter_map(|m| m.clone())
+        .collect();
+    assert_eq(somes, [1, 2, 3]);
+
+    // Find first Some
+    let first = maybes.iter()
+        .find(|m| m.is_some())
+        .cloned()
+        .flatten();
+    assert_eq(first, Some(1));
+}
+
+/// Practical examples
+fn practical_examples() {
+    // Safe indexing
+    fn safe_get<T>(list: &List<T>, index: Int) -> Maybe<&T> {
+        if index >= 0 && index < list.len() as Int {
+            Some(&list[index as usize])
+        } else {
+            None
+        }
+    }
+
+    // Optional chaining
+    fn get_user_email(users: &Map<Int, User>, id: Int) -> Maybe<Text> {
+        users.get(&id)
+            .and_then(|u| u.email.clone())
+    }
+
+    // Config with defaults
+    fn get_max_connections(config: &Config) -> Int {
+        config.max_connections.unwrap_or(100)
+    }
+}
+
+/// Zip and combine Some values
+fn combine_some_values() {
+    let a: Maybe<Int> = Some(1);
+    let b: Maybe<Int> = Some(2);
+    let c: Maybe<Int> = None;
+
+    // zip - combine two Maybes
+    let zipped = a.zip(b);
+    assert_eq(zipped, Some((1, 2)));
+
+    // zip with None produces None
+    let with_none = a.zip(c);
+    assert(with_none.is_none());
+
+    // zip_with - combine with function
+    let summed = a.zip_with(b, |x, y| x + y);
+    assert_eq(summed, Some(3));
+}
+
+fn main() {
+    // Basic Some handling
+    let maybe: Maybe<Int> = Some(42);
+    match maybe {
+        Some(n) => println(format("Some value: {}", n)),
+        None => println("No value")
+    }
+
+    // Unwrapping
+    let safe: Maybe<Int> = Some(100);
+    println(format("Unwrapped: {}", safe.unwrap()));
+
+    // With default
+    let value = Some(50).unwrap_or(0);
+    println(format("With default: {}", value));
+
+    println("Operation completed");
+}

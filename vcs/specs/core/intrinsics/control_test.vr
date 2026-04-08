@@ -1,0 +1,673 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/control_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, control, branch_hints, random, panic, exception
+// @description: Comprehensive tests for control flow intrinsics.
+//
+// Coverage:
+// - Branch hints: likely, unlikely, expect, assume
+// - Debug: nop
+// - Random: random_float, random_u64
+// - Types: SourceLocation, PanicInfo
+// - Exception: catch_unwind type signature
+//
+// Note: trap, unreachable, abort, panic are NOT tested as they terminate execution.
+//
+// Test Strategy:
+// - Test branch hints with boolean conditions
+// - Test random number generation for range compliance
+// - Test control flow types exist and can be constructed
+// =============================================================================
+
+module test.stdlib.intrinsics.control_test;
+
+mount core.intrinsics.control.{
+    // Branch hints
+    likely, unlikely, assume, expect,
+    // Debug
+    nop, debugtrap,
+    // Random
+    random_float, random_u64,
+    // Types
+    SourceLocation, PanicInfo,
+    // Exception handling
+    catch_unwind,
+    // Debug assertions
+    debug_assert,
+    // Prefetch
+    prefetch_read, prefetch_write,
+    // Termination (import only, don't call)
+    panic_impl, abort,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Branch Hints — likely
+// =============================================================================
+
+@test
+fn test_likely_true() {
+    assert(likely(true) == true);
+}
+
+@test
+fn test_likely_false() {
+    assert(likely(false) == false);
+}
+
+@test
+fn test_likely_expression() {
+    let x = 5;
+    assert(likely(x > 0) == true);
+    assert(likely(x < 0) == false);
+}
+
+// =============================================================================
+// Branch Hints — unlikely
+// =============================================================================
+
+@test
+fn test_unlikely_true() {
+    assert(unlikely(true) == true);
+}
+
+@test
+fn test_unlikely_false() {
+    assert(unlikely(false) == false);
+}
+
+@test
+fn test_unlikely_expression() {
+    let x = 5;
+    assert(unlikely(x > 0) == true);
+    assert(unlikely(x < 0) == false);
+}
+
+// =============================================================================
+// Branch Hints — assume
+// =============================================================================
+
+@test
+fn test_assume_true_condition() {
+    let a = 10;
+    assume(a > 0);
+    assert(a == 10);
+}
+
+@test
+fn test_assume_in_computation() {
+    let x = 42;
+    assume(x > 0);
+    assume(x < 100);
+    let y = x + 1;
+    assert(y == 43);
+}
+
+// =============================================================================
+// Branch Hints — expect
+// =============================================================================
+
+@test
+fn test_expect_int() {
+    let val = 42;
+    let result = expect(val, 42);
+    assert(result == 42);
+}
+
+@test
+fn test_expect_bool() {
+    let val = true;
+    let result = expect(val, true);
+    assert(result == true);
+}
+
+// =============================================================================
+// Debug — nop
+// =============================================================================
+
+@test
+fn test_nop_single() {
+    nop();
+}
+
+@test
+fn test_nop_loop() {
+    let mut i = 0;
+    while i < 10 {
+        nop();
+        i = i + 1;
+    }
+    assert(i == 10);
+}
+
+@test
+fn test_nop_interleaved() {
+    let mut x = 0;
+    nop();
+    x = x + 1;
+    nop();
+    x = x + 1;
+    nop();
+    assert(x == 2);
+}
+
+// =============================================================================
+// Random — random_float
+// =============================================================================
+
+@test
+fn test_random_float_range() {
+    let mut i = 0;
+    while i < 100 {
+        let f = random_float();
+        assert(f >= 0.0);
+        assert(f < 1.0);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_random_float_type() {
+    let f = random_float();
+    let _: Float = f;
+}
+
+// =============================================================================
+// Random — random_u64
+// =============================================================================
+
+@test
+fn test_random_u64_type() {
+    let r = random_u64();
+    let _: UInt64 = r;
+}
+
+@test
+fn test_random_u64_not_all_zero() {
+    let mut j = 0;
+    let mut has_nonzero = false;
+    while j < 10 {
+        let r = random_u64();
+        if r != (0 as UInt64) {
+            has_nonzero = true;
+        }
+        j = j + 1;
+    }
+    assert(has_nonzero);
+}
+
+@test
+fn test_random_u64_multiple() {
+    let r1 = random_u64();
+    let r2 = random_u64();
+    let r3 = random_u64();
+    let _: UInt64 = r1;
+    let _: UInt64 = r2;
+    let _: UInt64 = r3;
+}
+
+// =============================================================================
+// Types — SourceLocation
+// =============================================================================
+
+@test
+fn test_source_location_construction() {
+    let loc = SourceLocation {
+        file: "test.vr",
+        line: 10,
+        column: 5,
+        offset: 100,
+    };
+    assert_eq(loc.file, "test.vr");
+    assert_eq(loc.line, 10);
+    assert_eq(loc.column, 5);
+    assert_eq(loc.offset, 100);
+}
+
+@test
+fn test_source_location_fields() {
+    let loc = SourceLocation {
+        file: "src/main.vr",
+        line: 42,
+        column: 13,
+        offset: 500,
+    };
+    assert_eq(loc.file, "src/main.vr");
+    assert_eq(loc.line, 42);
+}
+
+// =============================================================================
+// Types — PanicInfo
+// =============================================================================
+
+@test
+fn test_panic_info_with_location() {
+    let loc = SourceLocation {
+        file: "test.vr",
+        line: 1,
+        column: 1,
+        offset: 0,
+    };
+    let info = PanicInfo {
+        message: "something went wrong",
+        location: Some(loc),
+    };
+    assert_eq(info.message, "something went wrong");
+    assert(info.location.is_some());
+}
+
+@test
+fn test_panic_info_without_location() {
+    let info = PanicInfo {
+        message: "unknown panic",
+        location: None,
+    };
+    assert_eq(info.message, "unknown panic");
+    assert(info.location.is_none());
+}
+
+// =============================================================================
+// Debug Assert
+// =============================================================================
+
+@test
+fn test_debug_assert_true() {
+    debug_assert(1 == 1);
+    debug_assert(1 == 1, "should not fail");
+}
+
+@test
+fn test_debug_assert_expression() {
+    let x = 10;
+    debug_assert(x > 0);
+    debug_assert(x > 0, "x should be positive");
+}
+
+// =============================================================================
+// Function Import Verification
+// =============================================================================
+
+@test
+fn test_imports_resolve() {
+    let _ = likely;
+    let _ = unlikely;
+    let _ = assume;
+    let _ = expect;
+    let _ = nop;
+    let _ = random_float;
+    let _ = random_u64;
+    let _ = debug_assert;
+    let _ = catch_unwind;
+}
+
+// =============================================================================
+// Additional Branch Hint Tests
+// =============================================================================
+
+@test
+fn test_likely_chained() {
+    let x = 10;
+    let y = 20;
+    assert(likely(x > 0) == true);
+    assert(likely(y > x) == true);
+    assert(likely(x + y == 30) == true);
+}
+
+@test
+fn test_unlikely_chained() {
+    let x = 10;
+    assert(unlikely(x < 0) == false);
+    assert(unlikely(x == 999) == false);
+}
+
+@test
+fn test_expect_different_values() {
+    assert(expect(1, 1) == 1);
+    assert(expect(0, 0) == 0);
+    assert(expect(100, 100) == 100);
+}
+
+@test
+fn test_assume_multiple() {
+    let a = 5;
+    let b = 10;
+    assume(a > 0);
+    assume(b > 0);
+    assume(a < b);
+    assert(a + b == 15);
+}
+
+// =============================================================================
+// Additional NOP Tests
+// =============================================================================
+
+@test
+fn test_nop_does_not_affect_state() {
+    let mut x = 42;
+    nop();
+    assert(x == 42);
+    nop();
+    x = x + 1;
+    nop();
+    assert(x == 43);
+}
+
+// =============================================================================
+// Additional Random Tests
+// =============================================================================
+
+@test
+fn test_random_float_multiple_calls() {
+    let f1 = random_float();
+    let f2 = random_float();
+    let f3 = random_float();
+    // All should be valid floats in [0, 1)
+    assert(f1 >= 0.0 && f1 < 1.0);
+    assert(f2 >= 0.0 && f2 < 1.0);
+    assert(f3 >= 0.0 && f3 < 1.0);
+}
+
+@test
+fn test_random_u64_type_annotation() {
+    let r1: UInt64 = random_u64();
+    let r2: UInt64 = random_u64();
+    let _ = r1;
+    let _ = r2;
+}
+
+// =============================================================================
+// Additional SourceLocation Tests
+// =============================================================================
+
+@test
+fn test_source_location_zero_line() {
+    let loc = SourceLocation {
+        file: "unknown.vr",
+        line: 0,
+        column: 0,
+        offset: 0,
+    };
+    assert_eq(loc.line, 0);
+    assert_eq(loc.column, 0);
+    assert_eq(loc.offset, 0);
+}
+
+@test
+fn test_panic_info_empty_message() {
+    let info = PanicInfo {
+        message: "",
+        location: None,
+    };
+    assert_eq(info.message, "");
+    assert(info.location.is_none());
+}
+
+@test
+fn test_debugtrap_import() {
+    let _ = debugtrap;
+}
+
+// =============================================================================
+// Additional Branch Hint Tests
+// =============================================================================
+
+@test
+fn test_likely_with_equality() {
+    let x = 42;
+    assert(likely(x == 42) == true);
+    assert(likely(x == 0) == false);
+}
+
+@test
+fn test_unlikely_with_equality() {
+    let x = 42;
+    assert(unlikely(x == 42) == true);
+    assert(unlikely(x == 0) == false);
+}
+
+@test
+fn test_expect_negative_value() {
+    let val = -10;
+    let result = expect(val, -10);
+    assert(result == -10);
+}
+
+@test
+fn test_expect_with_zero() {
+    let val = 0;
+    let result = expect(val, 0);
+    assert(result == 0);
+}
+
+@test
+fn test_assume_equality() {
+    let x = 100;
+    assume(x == 100);
+    assert(x == 100);
+}
+
+@test
+fn test_nop_in_conditional() {
+    let x = 5;
+    if x > 0 {
+        nop();
+    }
+    assert(x == 5);
+}
+
+@test
+fn test_random_float_sum_valid() {
+    let mut sum: Float = 0.0;
+    let mut i = 0;
+    while i < 10 {
+        sum = sum + random_float();
+        i = i + 1;
+    }
+    // Sum of 10 random [0,1) values should be in [0, 10)
+    assert(sum >= 0.0);
+    assert(sum < 10.0);
+}
+
+@test
+fn test_source_location_large_line() {
+    let loc = SourceLocation {
+        file: "big_file.vr",
+        line: 99999,
+        column: 120,
+        offset: 5000000,
+    };
+    assert_eq(loc.line, 99999);
+    assert_eq(loc.column, 120);
+    assert_eq(loc.offset, 5000000);
+}
+
+@test
+fn test_panic_info_long_message() {
+    let info = PanicInfo {
+        message: "A very long error message that describes the panic in great detail",
+        location: None,
+    };
+    assert(info.message.len() > 50);
+    assert(info.location.is_none());
+}
+
+@test
+fn test_debug_assert_computed_expression() {
+    let a = 3;
+    let b = 4;
+    debug_assert(a + b == 7);
+    debug_assert(a * b == 12, "multiplication failed");
+}
+
+// =============================================================================
+// Additional Control Flow Tests
+// =============================================================================
+
+@test
+fn test_likely_with_computed_bool() {
+    let a = 10;
+    let b = 20;
+    let cond = a < b;
+    assert(likely(cond) == true);
+}
+
+@test
+fn test_unlikely_preserves_false() {
+    let cond = false;
+    assert(unlikely(cond) == false);
+}
+
+@test
+fn test_expect_large_value() {
+    let val = 1000000;
+    let result = expect(val, 1000000);
+    assert_eq(result, 1000000);
+}
+
+@test
+fn test_source_location_all_fields() {
+    let loc = SourceLocation {
+        file: "test.vr",
+        line: 1,
+        column: 1,
+        offset: 0,
+    };
+    assert_eq(loc.file, "test.vr");
+    assert_eq(loc.line, 1);
+    assert_eq(loc.column, 1);
+    assert_eq(loc.offset, 0);
+}
+
+@test
+fn test_panic_info_with_detailed_location() {
+    let loc = SourceLocation {
+        file: "panic_site.vr",
+        line: 42,
+        column: 10,
+        offset: 500,
+    };
+    let info = PanicInfo {
+        message: "test panic",
+        location: Some(loc),
+    };
+    assert_eq(info.message, "test panic");
+    assert(info.location.is_some());
+}
+
+@test
+fn test_random_float_multiple_independent() {
+    let a = random_float();
+    let b = random_float();
+    // Both in valid range
+    assert(a >= 0.0 && a < 1.0);
+    assert(b >= 0.0 && b < 1.0);
+}
+
+@test
+fn test_nop_multiple_calls() {
+    nop();
+    nop();
+    nop();
+    let x = 42;
+    assert_eq(x, 42);
+}
+
+@test
+fn test_assume_multiple_conditions() {
+    let x = 10;
+    let y = 20;
+    assume(x > 0);
+    assume(y > x);
+    assume(x + y == 30);
+    assert(x + y == 30);
+}
+
+// =============================================================================
+// Prefetch Tests
+// =============================================================================
+
+@test
+fn test_prefetch_read_import() {
+    // Test that prefetch_read is available
+    let _ = prefetch_read;
+}
+
+@test
+fn test_prefetch_write_import() {
+    // Test that prefetch_write is available
+    let _ = prefetch_write;
+}
+
+// =============================================================================
+// Additional Function Import Tests
+// =============================================================================
+
+@test
+fn test_panic_impl_import() {
+    // Test that panic_impl is available
+    let _ = panic_impl;
+}
+
+@test
+fn test_abort_import() {
+    // Test that abort is available (can't call it)
+    let _ = abort;
+}
+
+// =============================================================================
+// Additional Random Edge Cases
+// =============================================================================
+
+@test
+fn test_random_u64_sequential() {
+    // Generate multiple random values sequentially
+    let r1 = random_u64();
+    let r2 = random_u64();
+    let r3 = random_u64();
+    let r4 = random_u64();
+    let _: UInt64 = r1;
+    let _: UInt64 = r2;
+    let _: UInt64 = r3;
+    let _: UInt64 = r4;
+}
+
+@test
+fn test_random_float_assignment() {
+    let mut value: Float = 0.0;
+    value = random_float();
+    assert(value >= 0.0 && value < 1.0);
+}
+
+// =============================================================================
+// Additional Branch Hint Edge Cases
+// =============================================================================
+
+@test
+fn test_expect_with_computed_value() {
+    let a = 5;
+    let b = 3;
+    let computed = a * b;
+    let result = expect(computed, 15);
+    assert_eq(result, 15);
+}
+
+@test
+fn test_likely_unlikely_combined() {
+    let x = 10;
+    let y = 5;
+    // Test both hints in same scope
+    assert(likely(x > y) == true);
+    assert(unlikely(y > x) == false);
+}

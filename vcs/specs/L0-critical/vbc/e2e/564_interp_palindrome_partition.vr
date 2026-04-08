@@ -1,0 +1,207 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, palindrome_partition, dynamic_programming, min_cuts, strings_as_ints
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Palindrome partitioning — minimum number of cuts to partition a string into
+// palindromes.  Since Verum has no char-level string indexing in tests, strings
+// are encoded as integer arrays [Int; 16] where each element is a character code.
+// is_palindrome(s, i, j) checks if s[i..=j] is a palindrome.
+// min_cuts(s, n): DP where cut[i] = min cuts for s[0..=i].
+//   cut[i] = 0 if s[0..=i] is a palindrome,
+//   else cut[i] = min over j in 0..i { if s[j+1..=i] palindrome: cut[j]+1 }
+
+fn is_pal(s: [Int; 16], lo: Int, hi: Int) -> Int {
+    let mut l = lo;
+    let mut h = hi;
+    while l < h {
+        if s[l] != s[h] { return 0; }
+        l = l + 1;
+        h = h - 1;
+    }
+    1
+}
+
+// Precompute palindrome table pal[i*16+j] = 1 if s[i..=j] palindrome.
+fn precompute_pal(s: [Int; 16], n: Int, pal: [Int; 256]) {
+    // Single chars always palindromes
+    let mut i = 0;
+    while i < n { pal[i * 16 + i] = 1; i = i + 1; }
+    // Substrings of length >= 2
+    let mut len = 2;
+    while len <= n {
+        i = 0;
+        while i <= n - len {
+            let j = i + len - 1;
+            if s[i] == s[j] {
+                let inner = if len == 2 { 1 } else { pal[(i+1)*16 + (j-1)] };
+                pal[i * 16 + j] = inner;
+            } else {
+                pal[i * 16 + j] = 0;
+            }
+            i = i + 1;
+        }
+        len = len + 1;
+    }
+}
+
+// Min cuts DP using precomputed palindrome table.
+// cut[] is [Int; 16]; returns cut[n-1].
+fn min_cuts(s: [Int; 16], n: Int, pal: [Int; 256], cut: [Int; 16]) -> Int {
+    let mut i = 0;
+    while i < n {
+        if pal[0 * 16 + i] == 1 {
+            cut[i] = 0;
+        } else {
+            cut[i] = i;   // worst case: i cuts (cut each char separately)
+            let mut j = 1;
+            while j <= i {
+                if pal[j * 16 + i] == 1 {
+                    let cand = cut[j - 1] + 1;
+                    if cand < cut[i] { cut[i] = cand; }
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    cut[n - 1]
+}
+
+fn test_already_palindrome() {
+    // "aba" = [97,98,97] -> 0 cuts
+    let mut s = [97, 98, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pal = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut cut = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    precompute_pal(s, 3, pal);
+    assert_eq(pal[0 * 16 + 2], 1);
+    let mc = min_cuts(s, 3, pal, cut);
+    assert_eq(mc, 0);
+    print("already_palindrome: ok");
+}
+
+fn test_aab_two_cuts() {
+    // "aab" = [97,97,98].
+    // Palindromes: "a"(0,0), "a"(1,1), "b"(2,2), "aa"(0,1). "aab" not pal.
+    // cut[0]=0 (s[0..0]="a" pal); cut[1]=0 (s[0..1]="aa" pal);
+    // cut[2]: s[0..2]="aab" not pal.
+    //   j=1: s[1..2]="ab" not pal
+    //   j=2: s[2..2]="b" pal -> cut[1]+1=0+1=1
+    // cut[2] = 1
+    let mut s = [97, 97, 98, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pal = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut cut = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    precompute_pal(s, 3, pal);
+    assert_eq(pal[0 * 16 + 1], 1);  // "aa" is palindrome
+    assert_eq(pal[0 * 16 + 2], 0);  // "aab" is not
+    let mc = min_cuts(s, 3, pal, cut);
+    assert_eq(mc, 1);
+    print("aab_two_cuts: ok");
+}
+
+fn test_abcba_zero_cuts() {
+    // "abcba" = [97,98,99,98,97] is a palindrome -> 0 cuts
+    let mut s = [97, 98, 99, 98, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pal = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut cut = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    precompute_pal(s, 5, pal);
+    assert_eq(pal[0 * 16 + 4], 1);
+    let mc = min_cuts(s, 5, pal, cut);
+    assert_eq(mc, 0);
+    print("abcba_zero: ok");
+}
+
+fn test_abcd_three_cuts() {
+    // "abcd" = [1,2,3,4] (no palindromes longer than 1).
+    // cut[0]=0, cut[1]=1, cut[2]=2, cut[3]=3.
+    let mut s = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pal = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut cut = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    precompute_pal(s, 4, pal);
+    assert_eq(pal[0 * 16 + 3], 0);
+    let mc = min_cuts(s, 4, pal, cut);
+    assert_eq(mc, 3);
+    print("abcd_three_cuts: ok");
+}
+
+fn test_is_pal_helper() {
+    // Direct is_pal tests
+    let mut s = [1, 2, 1, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_pal(s, 0, 2), 1);  // [1,2,1] palindrome
+    assert_eq(is_pal(s, 0, 4), 0);  // [1,2,1,3,1] not palindrome
+    assert_eq(is_pal(s, 2, 4), 1);  // [1,3,1] is palindrome
+    assert_eq(is_pal(s, 0, 3), 0);  // [1,2,1,3] not palindrome
+    print("is_pal_helper: ok");
+}
+
+fn main() -> Int {
+    test_already_palindrome();
+    test_aab_two_cuts();
+    test_abcba_zero_cuts();
+    test_abcd_three_cuts();
+    test_is_pal_helper();
+    print("[OK] 564_interp_palindrome_partition");
+    0
+}

@@ -1,0 +1,461 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: micro, virtual, dispatch, vtable, performance
+// @description: Virtual dispatch overhead benchmarks (target: < 10ns per dispatch)
+
+/// Virtual Dispatch Overhead Microbenchmarks
+///
+/// Measures the overhead of different dynamic dispatch patterns.
+/// Virtual dispatch is used for polymorphism via trait objects.
+///
+/// Performance targets:
+/// - Single vtable lookup:     < 10ns
+/// - Devirtualized call:       < 3ns
+/// - Multi-method dispatch:    < 15ns
+/// - Trait upcasting:          < 5ns
+///
+/// Dispatch mechanisms:
+/// - Vtable (fat pointer: data ptr + vtable ptr)
+/// - Monomorphization (compile-time dispatch)
+/// - Devirtualization (when type is known)
+///
+/// Spec reference: docs/detailed/03-type-system.md
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Base protocol for benchmarking
+type Animal is protocol {
+    fn speak(&self) -> Int;
+    fn legs(&self) -> Int;
+    fn can_fly(&self) -> Bool;
+};
+
+type Dog is { bark_volume: Int };
+implement Animal for Dog {
+    fn speak(&self) -> Int { self.bark_volume }
+    fn legs(&self) -> Int { 4 }
+    fn can_fly(&self) -> Bool { false }
+}
+
+type Bird is { wing_span: Int };
+implement Animal for Bird {
+    fn speak(&self) -> Int { self.wing_span / 10 }
+    fn legs(&self) -> Int { 2 }
+    fn can_fly(&self) -> Bool { true }
+}
+
+type Fish is { fin_count: Int };
+implement Animal for Fish {
+    fn speak(&self) -> Int { 0 }
+    fn legs(&self) -> Int { 0 }
+    fn can_fly(&self) -> Bool { false }
+}
+
+/// Benchmark: Single virtual dispatch
+fn benchmark_single_dispatch() -> BenchmarkResult {
+    let dog = Dog { bark_volume: 100 };
+    let animal: &Animal = &dog;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(animal.speak());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(animal.speak());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "single_virtual_dispatch",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 10.0,
+    }
+}
+
+/// Benchmark: Multiple virtual calls on same object
+fn benchmark_multiple_dispatch_same_obj() -> BenchmarkResult {
+    let dog = Dog { bark_volume: 100 };
+    let animal: &Animal = &dog;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(animal.speak());
+        black_box(animal.legs());
+        black_box(animal.can_fly());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 3) {
+        black_box(animal.speak());
+        black_box(animal.legs());
+        black_box(animal.can_fly());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "multiple_dispatch_same_obj",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 10.0,  // Should be similar due to vtable caching
+    }
+}
+
+/// Benchmark: Dispatch with varying types
+fn benchmark_polymorphic_dispatch() -> BenchmarkResult {
+    let dog = Dog { bark_volume: 100 };
+    let bird = Bird { wing_span: 50 };
+    let fish = Fish { fin_count: 4 };
+
+    let animals: [&Animal; 3] = [&dog, &bird, &fish];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        for animal in animals.iter() {
+            black_box(animal.speak());
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 3) {
+        for animal in animals.iter() {
+            black_box(animal.speak());
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "polymorphic_dispatch",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 12.0,  // Slight overhead from type switching
+    }
+}
+
+/// Benchmark: Dispatch through array of trait objects
+fn benchmark_array_dispatch() -> BenchmarkResult {
+    let animals: List<Heap<Animal>> = [
+        Heap(Dog { bark_volume: 100 }),
+        Heap(Bird { wing_span: 50 }),
+        Heap(Fish { fin_count: 4 }),
+        Heap(Dog { bark_volume: 80 }),
+        Heap(Bird { wing_span: 60 }),
+    ];
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 5) {
+        for animal in animals.iter() {
+            black_box(animal.speak());
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 5) {
+        for animal in animals.iter() {
+            black_box(animal.speak());
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "array_dispatch",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 15.0,  // Additional indirection through Box
+    }
+}
+
+/// Benchmark: Static dispatch (monomorphization)
+fn benchmark_static_dispatch() -> BenchmarkResult {
+    fn process_animal<A: Animal>(animal: &A) -> Int {
+        animal.speak()
+    }
+
+    let dog = Dog { bark_volume: 100 };
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(process_animal(&dog));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(process_animal(&dog));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "static_dispatch_generic",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,  // No vtable overhead
+    }
+}
+
+/// Benchmark: Devirtualization (compiler can see concrete type)
+fn benchmark_devirtualized() -> BenchmarkResult {
+    let dog = Dog { bark_volume: 100 };
+
+    // Even through trait object, optimizer may devirtualize
+    fn call_speak(animal: &Animal) -> Int {
+        animal.speak()
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(call_speak(&dog));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Compiler knows dog is Dog, may devirtualize
+        black_box(call_speak(&dog));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "potentially_devirtualized",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,
+    }
+}
+
+/// Benchmark: Nested trait objects
+fn benchmark_nested_trait_obj() -> BenchmarkResult {
+    type Outer is protocol {
+        fn get_inner(&self) -> &Animal;
+    };
+
+    type Container is { animal: Heap<Animal> };
+
+    implement Outer for Container {
+        fn get_inner(&self) -> &Animal {
+            &*self.animal
+        }
+    }
+
+    let container = Container {
+        animal: Heap(Dog { bark_volume: 100 }),
+    };
+    let outer: &Outer = &container;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let inner = outer.get_inner();
+        black_box(inner.speak());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 2) {
+        let inner = outer.get_inner();
+        black_box(inner.speak());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "nested_trait_dispatch",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 2) as f64,
+        target_ns: 20.0,  // Two dispatches
+    }
+}
+
+/// Benchmark: Multiple inheritance (trait composition)
+fn benchmark_multi_trait() -> BenchmarkResult {
+    type CanSpeak is protocol {
+        fn speak(&self) -> Int;
+    };
+
+    type CanMove is protocol {
+        fn move_speed(&self) -> Int;
+    };
+
+    type Creature is { volume: Int, speed: Int };
+
+    implement CanSpeak for Creature {
+        fn speak(&self) -> Int { self.volume }
+    }
+
+    implement CanMove for Creature {
+        fn move_speed(&self) -> Int { self.speed }
+    }
+
+    let creature = Creature { volume: 50, speed: 10 };
+    let speaker: &CanSpeak = &creature;
+    let mover: &CanMove = &creature;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(speaker.speak());
+        black_box(mover.move_speed());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 2) {
+        black_box(speaker.speak());
+        black_box(mover.move_speed());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "multi_trait_dispatch",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 10.0,
+    }
+}
+
+/// Benchmark: Trait with associated types
+fn benchmark_associated_type_dispatch() -> BenchmarkResult {
+    type Producer is protocol {
+        type Output;
+        fn produce(&self) -> Self.Output;
+    };
+
+    type IntProducer is { value: Int };
+
+    implement Producer for IntProducer {
+        type Output = Int;
+        fn produce(&self) -> Int { self.value * 2 }
+    }
+
+    fn use_producer<P: Producer>(p: &P) -> P.Output {
+        p.produce()
+    }
+
+    let producer = IntProducer { value: 21 };
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(use_producer(&producer));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(use_producer(&producer));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "associated_type_dispatch",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,  // Static dispatch
+    }
+}
+
+/// Benchmark: Enum dispatch (match-based, no vtable)
+fn benchmark_enum_dispatch() -> BenchmarkResult {
+    type AnimalEnum is
+        | Dog { bark_volume: Int }
+        | Bird { wing_span: Int }
+        | Fish { fin_count: Int };
+
+    implement AnimalEnum {
+        fn speak(&self) -> Int {
+            match self {
+                AnimalEnum.Dog { bark_volume } => *bark_volume,
+                AnimalEnum.Bird { wing_span } => *wing_span / 10,
+                AnimalEnum.Fish { .. } => 0,
+            }
+        }
+    }
+
+    let animals = [
+        AnimalEnum.Dog { bark_volume: 100 },
+        AnimalEnum.Bird { wing_span: 50 },
+        AnimalEnum.Fish { fin_count: 4 },
+    ];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        for animal in animals.iter() {
+            black_box(animal.speak());
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 3) {
+        for animal in animals.iter() {
+            black_box(animal.speak());
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "enum_dispatch",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,  // Branch prediction helps
+    }
+}
+
+fn main() {
+    println("=== Virtual Dispatch Overhead Microbenchmarks ===\n");
+
+    let results = [
+        benchmark_single_dispatch(),
+        benchmark_multiple_dispatch_same_obj(),
+        benchmark_polymorphic_dispatch(),
+        benchmark_array_dispatch(),
+        benchmark_static_dispatch(),
+        benchmark_devirtualized(),
+        benchmark_nested_trait_obj(),
+        benchmark_multi_trait(),
+        benchmark_associated_type_dispatch(),
+        benchmark_enum_dispatch(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>8}",
+            "Benchmark", "Time (ns)", "Target", "Status");
+    println("{}", "-".repeat(65));
+
+    for result in results {
+        let passed = result.per_op_ns <= result.target_ns;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.2} {:>12.0} {:>8}",
+                result.name, result.per_op_ns, result.target_ns, status);
+    }
+
+    println("");
+    println("Dispatch Targets:");
+    println("  - Static dispatch:  < 3ns");
+    println("  - Virtual dispatch: < 10ns");
+    println("  - Nested dispatch:  < 20ns");
+    println("  - Enum dispatch:    < 5ns");
+}
+
+type BenchmarkResult is {
+    name: Text,
+    per_op_ns: f64,
+    target_ns: f64,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }

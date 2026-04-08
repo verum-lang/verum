@@ -1,0 +1,103 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, interpolation_search, binary_search, sorted_array, search
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpolation search for uniformly distributed sorted integer arrays.
+// Estimates the probe position via linear interpolation between lo and hi bounds:
+//   pos = lo + (target - a[lo]) * (hi - lo) / (a[hi] - a[lo])
+// Falls back to midpoint when a[hi] == a[lo] to avoid division by zero.
+// Returns index of target, or -1 if not found.
+// Arrays have max size 16.
+
+fn interpolation_search(a: [Int; 16], n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi && target >= a[lo] && target <= a[hi] {
+        let range_val = a[hi] - a[lo];
+        let pos = if range_val == 0 {
+            lo
+        } else {
+            lo + (target - a[lo]) * (hi - lo) / range_val
+        };
+        if a[pos] == target { return pos; }
+        if a[pos] < target  { lo = pos + 1; }
+        else                { hi = pos - 1; }
+    }
+    -1
+}
+
+// Standard binary search for comparison.
+fn binary_search(a: [Int; 16], n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if a[mid] == target { return mid; }
+        if a[mid] < target  { lo = mid + 1; }
+        else                { hi = mid - 1; }
+    }
+    -1
+}
+
+fn test_uniform_distribution() {
+    // [10, 20, 30, 40, 50, 60, 70, 80, 90, 100] — uniform spacing 10.
+    let mut a = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 0, 0, 0, 0, 0, 0];
+    assert_eq(interpolation_search(a, 10, 10),  0);
+    assert_eq(interpolation_search(a, 10, 50),  4);
+    assert_eq(interpolation_search(a, 10, 100), 9);
+    assert_eq(interpolation_search(a, 10, 70),  6);
+    assert_eq(interpolation_search(a, 10, 35),  -1);
+    print("uniform_distribution: ok");
+}
+
+fn test_not_found() {
+    let mut a = [1, 3, 5, 7, 9, 11, 13, 15, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Values not in array.
+    assert_eq(interpolation_search(a, 8, 0),  -1);
+    assert_eq(interpolation_search(a, 8, 2),  -1);
+    assert_eq(interpolation_search(a, 8, 16), -1);
+    assert_eq(interpolation_search(a, 8, 10), -1);
+    print("not_found: ok");
+}
+
+fn test_single_element() {
+    let mut a = [42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(interpolation_search(a, 1, 42),  0);
+    assert_eq(interpolation_search(a, 1, 41), -1);
+    assert_eq(interpolation_search(a, 1, 43), -1);
+    print("single_element: ok");
+}
+
+fn test_two_elements() {
+    let mut a = [5, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(interpolation_search(a, 2, 5),  0);
+    assert_eq(interpolation_search(a, 2, 15), 1);
+    assert_eq(interpolation_search(a, 2, 10), -1);
+    print("two_elements: ok");
+}
+
+fn test_interpolation_matches_binary() {
+    // Both algorithms must agree on a densely sorted array.
+    let mut a = [2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35, 0, 0, 0, 0];
+    // Search for all elements in array.
+    assert_eq(interpolation_search(a, 12, 2),  binary_search(a, 12, 2));
+    assert_eq(interpolation_search(a, 12, 14), binary_search(a, 12, 14));
+    assert_eq(interpolation_search(a, 12, 35), binary_search(a, 12, 35));
+    // Search for absent elements.
+    assert_eq(interpolation_search(a, 12, 3),  binary_search(a, 12, 3));
+    assert_eq(interpolation_search(a, 12, 36), binary_search(a, 12, 36));
+    print("interpolation_matches_binary: ok");
+}
+
+fn main() -> Int {
+    test_uniform_distribution();
+    test_not_found();
+    test_single_element();
+    test_two_elements();
+    test_interpolation_matches_binary();
+    print("[OK] 548_interp_interpolation_search");
+    0
+}

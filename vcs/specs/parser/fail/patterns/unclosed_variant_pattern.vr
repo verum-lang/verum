@@ -1,0 +1,55 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, variant, delimiter, error
+// @description: Test unclosed variant pattern (missing closing parenthesis)
+// @expected-error: E080
+
+type Option<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Pair<A, B> is Pair(A, B);
+
+fn test_unclosed_single_arg() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: missing closing parenthesis
+    match opt {
+        Some(x => print("unclosed"),
+        None => print("none"),
+    }
+}
+
+fn test_unclosed_multiple_args() {
+    let pair = Pair(1, 2);
+
+    // Invalid: missing closing parenthesis with multiple args
+    match pair {
+        Pair(a, b => print("unclosed pair"),
+    }
+}
+
+fn test_unclosed_nested() {
+    let nested: Option<Option<Int>> = Some(Some(42));
+
+    // Invalid: unclosed nested variant
+    match nested {
+        Some(Some(x) => print("unclosed nested"),
+        _ => print("other"),
+    }
+}
+
+fn test_unclosed_in_let() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: unclosed variant in let pattern
+    let Some(value = opt;
+}
+
+fn test_unclosed_with_guard() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: unclosed variant with guard (parser confusion)
+    match opt {
+        Some(x if x > 0 => print("unclosed with guard"),
+        None => print("none"),
+    }
+}

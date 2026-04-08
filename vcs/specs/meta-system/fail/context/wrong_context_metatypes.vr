@@ -1,0 +1,36 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, context, wrong, error
+// @description: Test that MetaRuntime context doesn't satisfy MetaTypes requirement
+// @expected-error: E101
+
+// =============================================================================
+// WRONG CONTEXT TESTS - MetaRuntime doesn't provide MetaTypes
+// =============================================================================
+
+// type_name requires MetaTypes, not MetaRuntime
+meta fn test_type_name_wrong_context() -> Text using [MetaRuntime] {
+    type_name(Int)  // ERROR: requires MetaTypes, have MetaRuntime
+}
+
+// size_of requires MetaTypes, not MetaRuntime
+meta fn test_size_of_wrong_context() -> Int using [MetaRuntime] {
+    size_of(Int)  // ERROR: requires MetaTypes, have MetaRuntime
+}
+
+// is_struct requires MetaTypes, not MetaRuntime
+type Point is { x: Int, y: Int };
+
+meta fn test_is_struct_wrong_context() -> Bool using [MetaRuntime] {
+    is_struct(Point)  // ERROR: requires MetaTypes, have MetaRuntime
+}
+
+// fields_of requires MetaTypes, not MetaRuntime
+meta fn test_fields_of_wrong_context() -> List<FieldInfo> using [MetaRuntime] {
+    fields_of(Point)  // ERROR: requires MetaTypes, have MetaRuntime
+}
+
+fn main() {
+    @const assert(text_len(test_type_name_wrong_context()) > 0);
+}

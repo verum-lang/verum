@@ -1,0 +1,264 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, wildcard, rest, basic
+//
+// Tests wildcard patterns: the _ placeholder for ignoring values and
+// the .. rest pattern for ignoring multiple elements in sequences.
+
+//------------------------------------------------------------------------------
+// Single Wildcard Pattern (_)
+//------------------------------------------------------------------------------
+
+/// Wildcard matches any value without binding.
+fn wildcard_catch_all(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 => "one",
+        _ => "other",  // matches anything else
+    }
+}
+
+/// Wildcard in first position.
+fn wildcard_first(n: Int) -> Text {
+    match n {
+        _ => "anything",  // matches all values
+    }
+}
+
+/// Multiple wildcards in tuple.
+fn wildcard_tuple(triple: (Int, Int, Int)) -> Int {
+    match triple {
+        (_, x, _) => x,  // extract middle, ignore ends
+    }
+}
+
+/// Wildcard in nested position.
+fn wildcard_nested(data: ((Int, Int), (Int, Int))) -> Int {
+    match data {
+        ((a, _), (_, d)) => a + d,  // diagonal elements
+    }
+}
+
+/// All wildcards - complete discard.
+fn wildcard_all(pair: (Int, Int)) -> Text {
+    match pair {
+        (_, _) => "discarded",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Wildcard with Enum Variants
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+/// Wildcard in enum variant.
+fn wildcard_maybe(m: Maybe<Int>) -> Bool {
+    match m {
+        Some(_) => true,   // has value, don't need it
+        None => false,
+    }
+}
+
+/// Wildcard ignoring error details.
+fn wildcard_result(r: Result<Int, Text>) -> Int {
+    match r {
+        Ok(x) => x,
+        Err(_) => -1,  // ignore error message
+    }
+}
+
+/// Nested wildcard in enum.
+fn wildcard_nested_enum(m: Maybe<(Int, Int)>) -> Int {
+    match m {
+        Some((x, _)) => x,  // extract first, ignore second
+        None => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Wildcard with Structs
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+/// Wildcard in struct field (not idiomatic, use .. instead).
+fn wildcard_struct_field(p: Point) -> Int {
+    match p {
+        Point { x, y: _ } => x,  // extract x, ignore y
+    }
+}
+
+/// Wildcard with nested struct.
+fn wildcard_nested_struct(r: Rectangle) -> Int {
+    match r {
+        Rectangle { top_left: Point { x, y: _ }, bottom_right: _ } => x,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Rest Pattern (..)
+//------------------------------------------------------------------------------
+
+/// Rest pattern in tuple - head only.
+fn rest_tuple_head(tuple: (Int, Int, Int, Int)) -> Int {
+    match tuple {
+        (first, _, _, _) => first,
+    }
+}
+
+/// Rest pattern in tuple - tail only.
+fn rest_tuple_tail(tuple: (Int, Int, Int, Int)) -> Int {
+    match tuple {
+        (_, _, _, last) => last,
+    }
+}
+
+/// Rest pattern in tuple - head and tail.
+fn rest_tuple_ends(tuple: (Int, Int, Int, Int)) -> (Int, Int) {
+    match tuple {
+        (first, _, _, last) => (first, last),
+    }
+}
+
+/// Rest pattern in struct.
+fn rest_struct(p: Point) -> Int {
+    match p {
+        Point { x, .. } => x,  // ignore y and any other fields
+    }
+}
+
+//------------------------------------------------------------------------------
+// Rest Pattern with Arrays/Slices
+//------------------------------------------------------------------------------
+
+/// Rest at end of list pattern.
+fn rest_array_head(arr: List<Int>) -> Int {
+    match arr {
+        [first, ..] => first,
+        [] => 0,
+    }
+}
+
+/// Rest at start of list pattern.
+fn rest_array_tail(arr: List<Int>) -> Int {
+    match arr {
+        [.., last] => last,
+        [] => 0,
+    }
+}
+
+/// Rest in middle - first and last.
+fn rest_array_ends(arr: List<Int>) -> (Int, Int) {
+    match arr {
+        [first, .., last] => (first, last),
+        [single] => (single, single),
+        [] => (0, 0),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Multiple Wildcards in Same Pattern
+//------------------------------------------------------------------------------
+
+/// Several wildcards ignoring different parts.
+fn multi_wildcard(data: (Int, Text, Bool, Float)) -> Text {
+    match data {
+        (_, text, _, _) => text,
+    }
+}
+
+/// Wildcards at different nesting levels.
+fn multi_level_wildcard(data: ((Int, Int), (Text, Text))) -> Text {
+    match data {
+        ((_, _), (first, _)) => first,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Wildcard in Or-Patterns
+//------------------------------------------------------------------------------
+
+type Status is
+    | Active(Int)
+    | Pending(Int)
+    | Inactive;
+
+/// Wildcard with or-pattern.
+fn wildcard_or_pattern(s: Status) -> Bool {
+    match s {
+        Active(_) | Pending(_) => true,
+        Inactive => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Wildcard with Guards
+//------------------------------------------------------------------------------
+
+/// Wildcard in pattern, guard uses other bindings.
+fn wildcard_with_guard(pair: (Int, Int)) -> Text {
+    match pair {
+        (x, _) if x > 10 => "large first",
+        (x, _) if x < 0 => "negative first",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Basic wildcard
+    assert(wildcard_catch_all(0) == "zero");
+    assert(wildcard_catch_all(1) == "one");
+    assert(wildcard_catch_all(42) == "other");
+
+    // Wildcard in tuple
+    assert(wildcard_tuple((1, 42, 3)) == 42);
+    assert(wildcard_nested(((1, 2), (3, 4))) == 5);  // 1 + 4
+
+    // Wildcard with enum
+    assert(wildcard_maybe(Some(42)) == true);
+    assert(wildcard_maybe(None) == false);
+    assert(wildcard_result(Ok(42)) == 42);
+    assert(wildcard_result(Err("oops")) == -1);
+
+    // Rest pattern - tuple
+    assert(rest_tuple_head((1, 2, 3, 4)) == 1);
+    assert(rest_tuple_tail((1, 2, 3, 4)) == 4);
+    assert(rest_tuple_ends((1, 2, 3, 4)) == (1, 4));
+
+    // Rest pattern - struct
+    assert(rest_struct(Point { x: 10, y: 20 }) == 10);
+
+    // Rest pattern - array
+    let arr = [1, 2, 3, 4, 5];
+    assert(rest_array_head(arr) == 1);
+    assert(rest_array_tail(arr) == 5);
+    assert(rest_array_ends(arr) == (1, 5));
+
+    // Multi-wildcard
+    assert(multi_wildcard((1, "hello", true, 3.14)) == "hello");
+
+    // Wildcard with guard
+    assert(wildcard_with_guard((20, 0)) == "large first");
+    assert(wildcard_with_guard((-5, 0)) == "negative first");
+    assert(wildcard_with_guard((5, 0)) == "other");
+}

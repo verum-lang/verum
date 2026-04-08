@@ -1,0 +1,181 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, text, transform, case, trim
+// @description: Test text transformation operations (upper, lower, trim, replace)
+
+// =============================================================================
+// TEXT_TO_UPPER TESTS
+// =============================================================================
+
+// Test text_to_upper basic
+meta fn test_text_to_upper_basic() -> Text {
+    text_to_upper("hello")  // Should be "HELLO"
+}
+
+// Test text_to_upper already upper
+meta fn test_text_to_upper_already() -> Text {
+    text_to_upper("HELLO")  // Should be "HELLO"
+}
+
+// Test text_to_upper mixed case
+meta fn test_text_to_upper_mixed() -> Text {
+    text_to_upper("HeLLo WoRLd")  // Should be "HELLO WORLD"
+}
+
+// Test text_to_upper empty
+meta fn test_text_to_upper_empty() -> Text {
+    text_to_upper("")  // Should be ""
+}
+
+// Test text_to_upper with numbers
+meta fn test_text_to_upper_numbers() -> Text {
+    text_to_upper("abc123def")  // Should be "ABC123DEF"
+}
+
+// =============================================================================
+// TEXT_TO_LOWER TESTS
+// =============================================================================
+
+// Test text_to_lower basic
+meta fn test_text_to_lower_basic() -> Text {
+    text_to_lower("HELLO")  // Should be "hello"
+}
+
+// Test text_to_lower already lower
+meta fn test_text_to_lower_already() -> Text {
+    text_to_lower("hello")  // Should be "hello"
+}
+
+// Test text_to_lower mixed case
+meta fn test_text_to_lower_mixed() -> Text {
+    text_to_lower("HeLLo WoRLd")  // Should be "hello world"
+}
+
+// Test text_to_lower empty
+meta fn test_text_to_lower_empty() -> Text {
+    text_to_lower("")  // Should be ""
+}
+
+// =============================================================================
+// TEXT_TRIM TESTS
+// =============================================================================
+
+// Test text_trim basic
+meta fn test_text_trim_basic() -> Text {
+    text_trim("  hello  ")  // Should be "hello"
+}
+
+// Test text_trim leading only
+meta fn test_text_trim_leading() -> Text {
+    text_trim("   hello")  // Should be "hello"
+}
+
+// Test text_trim trailing only
+meta fn test_text_trim_trailing() -> Text {
+    text_trim("hello   ")  // Should be "hello"
+}
+
+// Test text_trim no whitespace
+meta fn test_text_trim_none() -> Text {
+    text_trim("hello")  // Should be "hello"
+}
+
+// Test text_trim empty
+meta fn test_text_trim_empty() -> Text {
+    text_trim("")  // Should be ""
+}
+
+// Test text_trim only whitespace
+meta fn test_text_trim_only_ws() -> Text {
+    text_trim("   ")  // Should be ""
+}
+
+// Test text_trim tabs and newlines
+meta fn test_text_trim_tabs() -> Text {
+    text_trim("\t\nhello\n\t")  // Should be "hello"
+}
+
+// =============================================================================
+// TEXT_REPLACE TESTS
+// =============================================================================
+
+// Test text_replace basic
+meta fn test_text_replace_basic() -> Text {
+    text_replace("hello world", "world", "verum")  // Should be "hello verum"
+}
+
+// Test text_replace multiple occurrences
+meta fn test_text_replace_multiple() -> Text {
+    text_replace("ababab", "ab", "x")  // Should be "xxx"
+}
+
+// Test text_replace not found
+meta fn test_text_replace_not_found() -> Text {
+    text_replace("hello", "xyz", "abc")  // Should be "hello"
+}
+
+// Test text_replace empty from
+meta fn test_text_replace_empty_from() -> Text {
+    text_replace("hello", "", "x")  // Should be "hello" (no-op)
+}
+
+// Test text_replace with empty to
+meta fn test_text_replace_empty_to() -> Text {
+    text_replace("hello world", " world", "")  // Should be "hello"
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test upper then lower (identity-ish)
+meta fn test_upper_then_lower() -> Text {
+    text_to_lower(text_to_upper("hello"))  // Should be "hello"
+}
+
+// Test trim then upper
+meta fn test_trim_then_upper() -> Text {
+    text_to_upper(text_trim("  hello  "))  // Should be "HELLO"
+}
+
+// Test replace then trim
+meta fn test_replace_then_trim() -> Text {
+    text_trim(text_replace("  x  ", "x", "hello"))  // Should be "hello"
+}
+
+// Main test function
+fn main() {
+    // upper tests
+    assert_eq(@const(test_text_to_upper_basic()), "HELLO");
+    assert_eq(@const(test_text_to_upper_already()), "HELLO");
+    assert_eq(@const(test_text_to_upper_mixed()), "HELLO WORLD");
+    assert_eq(@const(test_text_to_upper_empty()), "");
+    assert_eq(@const(test_text_to_upper_numbers()), "ABC123DEF");
+
+    // lower tests
+    assert_eq(@const(test_text_to_lower_basic()), "hello");
+    assert_eq(@const(test_text_to_lower_already()), "hello");
+    assert_eq(@const(test_text_to_lower_mixed()), "hello world");
+    assert_eq(@const(test_text_to_lower_empty()), "");
+
+    // trim tests
+    assert_eq(@const(test_text_trim_basic()), "hello");
+    assert_eq(@const(test_text_trim_leading()), "hello");
+    assert_eq(@const(test_text_trim_trailing()), "hello");
+    assert_eq(@const(test_text_trim_none()), "hello");
+    assert_eq(@const(test_text_trim_empty()), "");
+    assert_eq(@const(test_text_trim_only_ws()), "");
+    assert_eq(@const(test_text_trim_tabs()), "hello");
+
+    // replace tests
+    assert_eq(@const(test_text_replace_basic()), "hello verum");
+    assert_eq(@const(test_text_replace_multiple()), "xxx");
+    assert_eq(@const(test_text_replace_not_found()), "hello");
+    assert_eq(@const(test_text_replace_empty_to()), "hello");
+
+    // combined tests
+    assert_eq(@const(test_upper_then_lower()), "hello");
+    assert_eq(@const(test_trim_then_upper()), "HELLO");
+    assert_eq(@const(test_replace_then_trim()), "hello");
+}

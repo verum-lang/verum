@@ -1,0 +1,109 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: maybe, option, chaining, e2e
+// @description: Test Maybe type chaining and map/unwrap patterns
+
+fn safe_div(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+fn safe_sqrt(x: Int) -> Maybe<Int> {
+    if x < 0 {
+        None
+    } else {
+        // Integer approximation
+        let mut r = 0;
+        while r * r <= x {
+            r = r + 1;
+        }
+        Some(r - 1)
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Some value
+    match safe_div(10, 2) {
+        Some(v) => {
+            if v != 5 {
+                print(f"FAIL 1: 10/2 = {v}");
+                f = f + 1;
+            } else {
+                print("  some_value: OK");
+            }
+        }
+        None => {
+            print("FAIL 1: unexpected None");
+            f = f + 1;
+        }
+    }
+
+    // Test 2: None value
+    match safe_div(10, 0) {
+        Some(_) => {
+            print("FAIL 2: expected None");
+            f = f + 1;
+        }
+        None => {
+            print("  none_value: OK");
+        }
+    }
+
+    // Test 3: safe_sqrt
+    match safe_sqrt(16) {
+        Some(v) => {
+            if v != 4 {
+                print(f"FAIL 3: sqrt(16) = {v}");
+                f = f + 1;
+            } else {
+                print("  sqrt_some: OK");
+            }
+        }
+        None => {
+            print("FAIL 3: unexpected None");
+            f = f + 1;
+        }
+    }
+
+    // Test 4: Chained operations
+    let result = safe_div(100, 4);
+    let final_val = match result {
+        Some(v) => {
+            match safe_sqrt(v) {
+                Some(r) => r,
+                None => -1,
+            }
+        }
+        None => -1,
+    };
+    if final_val != 5 {
+        print(f"FAIL 4: chain result = {final_val}");
+        f = f + 1;
+    } else {
+        print("  chain_ops: OK");
+    }
+
+    // Test 5: None chain
+    let bad = safe_div(100, 0);
+    let bad_val = match bad {
+        Some(v) => v,
+        None => -999,
+    };
+    if bad_val != -999 {
+        print(f"FAIL 5: none chain = {bad_val}");
+        f = f + 1;
+    } else {
+        print("  none_chain: OK");
+    }
+
+    if f == 0 {
+        print("All option chaining tests passed");
+    }
+    f
+}

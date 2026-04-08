@@ -1,0 +1,58 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED
+// @tier: 0
+// @expected-exit: 0
+// @description: Test UInt64 methods (checked arithmetic, bit operations)
+
+fn main() {
+    let a: UInt64 = 100;
+    let b: UInt64 = 200;
+
+    // Test checked_add (success)
+    match a.checked_add(b) {
+        Some(result) => assert_eq(result, 300),
+        None => panic("Expected Some"),
+    }
+
+    // Test checked_sub (success)
+    match b.checked_sub(a) {
+        Some(result) => assert_eq(result, 100),
+        None => panic("Expected Some"),
+    }
+
+    // Test checked_sub (would underflow)
+    match a.checked_sub(b) {
+        Some(_) => panic("Expected None"),
+        None => (), // Expected - 100 - 200 would underflow for unsigned
+    }
+
+    // Test wrapping operations
+    let max: UInt64 = UInt64.MAX();
+    assert_eq(max.wrapping_add(1), 0);  // Wraps to 0
+    assert_eq(0.wrapping_sub(1), max);  // Wraps to MAX
+
+    // Test saturating operations
+    assert_eq(max.saturating_add(100), max);  // Saturates at MAX
+    assert_eq(a.saturating_sub(b), 0);        // Saturates at 0
+
+    // Test bit operations
+    let x: UInt64 = 0x00FF;
+    assert_eq(x.leading_zeros(), 56);
+    assert_eq(x.trailing_zeros(), 0);
+    assert_eq(x.count_ones(), 8);
+
+    // Test rotate
+    let y: UInt64 = 0x00F0;
+    let rotated = y.rotate_left(4);
+    assert_eq(rotated, 0x0F00);
+
+    // Test swap_bytes
+    let z: UInt64 = 0x0102030405060708;
+    let swapped = z.swap_bytes();
+    assert_eq(swapped, 0x0807060504030201);
+
+    // Test to_int conversion
+    let val: UInt64 = 42;
+    assert_eq(val.to_int(), 42);
+}

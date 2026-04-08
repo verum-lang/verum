@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, refinement, predicate, error
+// @description: Test detection of refinement with empty predicate
+// @expected-error: E046
+
+// Refinement must have a predicate after the pipe
+type PositiveInt is Int { value: };

@@ -1,0 +1,89 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: modules, imports, nested, syntax
+
+/// Comprehensive nested link syntax tests.
+/// Verifies all forms of nested/grouped imports parse correctly.
+
+module std {
+    pub module collections {
+        pub type Map<K, V> is { /* ... */ };
+        pub type Set<T> is { /* ... */ };
+        pub type List<T> is { /* ... */ };
+        pub type OrderedMap<K, V> is { /* ... */ };
+    }
+
+    pub module io {
+        pub type Read is protocol { fn read(&mut self, buf: &mut Bytes) -> Result<Int, Error>; };
+        pub type Write is protocol { fn write(&mut self, buf: &Bytes) -> Result<Int, Error>; };
+        pub type Error is { code: Int, message: Text };
+
+        pub fn self_import() {}  // Test 'self' in nested
+    }
+
+    pub module sync {
+        pub type Mutex<T> is { /* ... */ };
+        pub type RwLock<T> is { /* ... */ };
+        pub type Condvar is { /* ... */ };
+    }
+
+    pub module prelude {
+        // Re-exports for convenience
+        pub mount super.collections.{List, Map};
+    }
+}
+
+module web {
+    pub module http {
+        pub type Request is { method: Text, path: Text };
+        pub type Response is { status: Int, body: Text };
+        pub type StatusCode is Int;
+        pub type Method is Text;
+    }
+
+    pub module router {
+        pub type Router is { routes: List<Route> };
+        pub type Route is { path: Text, handler: fn(Request) -> Response };
+    }
+
+    pub module middleware {
+        pub type Logger is {};
+        pub type Auth is {};
+        pub type RateLimit is {};
+    }
+}
+
+// Test: Basic nested link
+mount core.collections.{Map, Set};
+
+// Test: Deeply nested link
+mount core.{
+    collections.{Map, Set, OrderedMap},
+    io.{Read, Write},
+    sync.{Mutex, RwLock}
+};
+
+// Test: Nested with self
+mount core.io.{self, Read, Write};
+// Now can use both io.Error and Read, Write directly
+
+// Test: Complex nesting with multiple levels
+mount web.{
+    http.{Request, Response, StatusCode, Method},
+    router.{Router, Route},
+    middleware.*
+};
+
+// Test: Mixed glob and specific imports
+mount core.sync.*;  // All sync items
+mount core.collections.List;  // Plus specific item
+
+fn main() -> Int {
+    // Use various imported types
+    let map: Map<Text, Int> = Map.new();
+    let my_set: Set<Int> = Set.new();
+    let req = Request { method: "GET", path: "/" };
+    let resp = Response { status: 200, body: "OK" };
+    0
+}

@@ -1,0 +1,160 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, range
+
+// Range operators
+
+fn test_basic_ranges() {
+    // Exclusive range (..) - end not included
+    let exclusive = 0..10;      // 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+    let range_5 = 0..5;         // 0, 1, 2, 3, 4
+    let range_neg = -5..5;      // -5, -4, -3, -2, -1, 0, 1, 2, 3, 4
+
+    // Inclusive range (..=) - end included
+    let inclusive = 0..=10;     // 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+    let range_5_incl = 0..=5;   // 0, 1, 2, 3, 4, 5
+    let range_neg_incl = -5..=5;  // -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5
+
+    // Range from (start..) - open ended
+    let from_5 = 5..;           // 5, 6, 7, 8, ... (infinite)
+
+    // Range to (..end) - from beginning to end (exclusive)
+    let to_5 = ..5;             // For slicing: elements 0, 1, 2, 3, 4
+
+    // Range to inclusive (..=end)
+    let to_5_incl = ..=5;       // For slicing: elements 0, 1, 2, 3, 4, 5
+
+    // Full range (..) - entire range
+    let full = ..;              // All elements
+}
+
+fn test_range_in_loops() {
+    // Range in for loops
+    for i in 0..10 {
+        print(i);  // 0 through 9
+    }
+
+    for i in 1..=10 {
+        print(i);  // 1 through 10
+    }
+
+    // Range with step (if supported)
+    for i in (0..10).step_by(2) {
+        print(i);  // 0, 2, 4, 6, 8
+    }
+
+    // Reverse range
+    for i in (0..10).rev() {
+        print(i);  // 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
+    }
+}
+
+// Range in match expressions
+fn categorize_age(age: Int) -> Text {
+    match age {
+        0..=12 => "child"
+        13..=19 => "teenager"
+        20..=64 => "adult"
+        65..=120 => "senior"
+        _ => "invalid"
+    }
+}
+
+fn test_array_slicing() {
+    // Range for slicing arrays
+    let array = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    let first_five = array[0..5];       // [0, 1, 2, 3, 4]
+    let last_five = array[5..10];       // [5, 6, 7, 8, 9]
+    let middle = array[3..7];           // [3, 4, 5, 6]
+
+    // Inclusive slicing
+    let first_five_incl = array[0..=4];  // [0, 1, 2, 3, 4]
+
+    // Partial slicing
+    let from_third = array[2..];         // [2, 3, 4, 5, 6, 7, 8, 9]
+    let to_fifth = array[..5];           // [0, 1, 2, 3, 4]
+    let full_slice = array[..];          // [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+    // String slicing with ranges
+    let text = "Hello, World!";
+    let hello = text[0..5];              // "Hello"
+    let world = text[7..12];             // "World"
+    let from_comma = text[5..];          // ", World!"
+    let to_comma = text[..5];            // "Hello"
+
+    // Range contains check
+    let range = 1..100;
+    let contains_50 = range.contains(50);    // true
+    let contains_0 = range.contains(0);      // false
+    let contains_100 = range.contains(100);  // false (exclusive)
+
+    let range_incl = 1..=100;
+    let contains_100_incl = range_incl.contains(100);  // true
+
+    // Range properties
+    let r = 0..10;
+    let start = r.start;      // 0
+    let end = r.end;          // 10
+    let is_empty = r.is_empty();  // false
+    let len = r.len();        // 10 (if countable)
+
+    // Range iteration methods
+    let range_sum = (1..=100).sum();     // 5050
+    let range_prod = (1..=5).product();  // 120
+    let range_count = (0..10).count();   // 10
+
+    // Range as iterator
+    let doubled = (0..5).map(|x| x * 2).collect();  // [0, 2, 4, 6, 8]
+    let filtered = (0..10).filter(|x| x % 2 == 0).collect();  // [0, 2, 4, 6, 8]
+
+    // Character ranges
+    let lowercase = 'a'..='z';
+    let uppercase = 'A'..='Z';
+    let digits = '0'..='9';
+
+    for c in 'a'..='z' {
+        print(c);
+    }
+}
+
+// Range in conditional
+fn is_valid_port(port: Int) -> Bool {
+    (1..=65535).contains(port)
+}
+
+fn is_printable_ascii(c: Char) -> Bool {
+    (' '..='~').contains(c)
+}
+
+fn test_range_arithmetic() {
+    // Range arithmetic (if supported)
+    let shifted = (0..10).map(|x| x + 5);  // 5..15 equivalent
+    let scaled = (0..10).map(|x| x * 2);   // 0, 2, 4, 6, ... 18
+
+    // Nested ranges
+    for i in 0..3 {
+        for j in 0..3 {
+            print(f"({i}, {j})");
+        }
+    }
+
+    // Range with variables
+    let start = 5;
+    let end = 15;
+    let dynamic_range = start..end;
+    let dynamic_inclusive = start..=end;
+
+    // Empty ranges
+    let empty_range = 10..10;    // Empty: no elements
+    let empty_check = (10..10).is_empty();  // true
+
+    // Reversed inclusive
+    let reversed = (0..=10).rev();  // 10, 9, 8, ..., 0
+
+    // Range bounds
+    let bounded: Range<Int> = 0..100;
+    let lower = bounded.start_bound();  // Included(0)
+    let upper = bounded.end_bound();    // Excluded(100)
+}

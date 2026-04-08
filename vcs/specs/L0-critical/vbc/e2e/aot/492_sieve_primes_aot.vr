@@ -1,0 +1,227 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, sieve, primes, number-theory
+// @timeout: 30000
+
+// Sieve of Eratosthenes and prime number operations (small range)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn ones() -> Arr8 { Arr8 { v0: 1, v1: 1, v2: 1, v3: 1, v4: 1, v5: 1, v6: 1, v7: 1 } }
+
+// Bitmask-based sieve for primes up to 63 (stored in single Int)
+// Bit i set = i is prime
+fn sieve_bits(limit: Int) -> Int {
+    // Start with all bits set (assume all prime)
+    let mut sieve = 0;
+    let mut i = 2;
+    while i <= limit {
+        sieve = sieve + bit_val(i);
+        i = i + 1;
+    }
+    // Cross off composites
+    i = 2;
+    while i * i <= limit {
+        if (sieve / bit_val(i)) % 2 == 1 {
+            // i is prime, mark multiples
+            let mut j = i * i;
+            while j <= limit {
+                // Clear bit j
+                if (sieve / bit_val(j)) % 2 == 1 {
+                    sieve = sieve - bit_val(j);
+                }
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+    sieve
+}
+
+fn bit_val(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn is_prime_sieve(sieve: Int, n: Int) -> Int {
+    if n < 2 { return 0; }
+    (sieve / bit_val(n)) % 2
+}
+
+// Count primes up to n using sieve
+fn count_primes(sieve: Int, limit: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i <= limit {
+        if (sieve / bit_val(i)) % 2 == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Trial division primality test
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n == 2 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return 0; }
+        i = i + 2;
+    }
+    1
+}
+
+// GCD
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+// Euler's totient function
+fn euler_totient(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i <= n {
+        if gcd(i, n) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Sum of divisors
+fn sum_divisors(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        if n % i == 0 { sum = sum + i; }
+        i = i + 1;
+    }
+    sum
+}
+
+// Count divisors
+fn count_divisors(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i <= n {
+        if n % i == 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Nth prime (small n, trial division)
+fn nth_prime(n: Int) -> Int {
+    let mut count = 0;
+    let mut candidate = 2;
+    while count < n {
+        if is_prime(candidate) == 1 { count = count + 1; }
+        if count < n { candidate = candidate + 1; }
+    }
+    candidate
+}
+
+fn test_sieve() -> Int {
+    let sieve = sieve_bits(30);
+    // Primes up to 30: 2,3,5,7,11,13,17,19,23,29
+    assert_eq(is_prime_sieve(sieve, 2), 1);
+    assert_eq(is_prime_sieve(sieve, 3), 1);
+    assert_eq(is_prime_sieve(sieve, 4), 0);
+    assert_eq(is_prime_sieve(sieve, 5), 1);
+    assert_eq(is_prime_sieve(sieve, 7), 1);
+    assert_eq(is_prime_sieve(sieve, 9), 0);
+    assert_eq(is_prime_sieve(sieve, 11), 1);
+    assert_eq(is_prime_sieve(sieve, 15), 0);
+    assert_eq(is_prime_sieve(sieve, 29), 1);
+    assert_eq(count_primes(sieve, 30), 10);
+    1
+}
+
+fn test_trial_division() -> Int {
+    assert_eq(is_prime(0), 0);
+    assert_eq(is_prime(1), 0);
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(17), 1);
+    assert_eq(is_prime(25), 0);
+    assert_eq(is_prime(97), 1);
+    1
+}
+
+fn test_nth_prime() -> Int {
+    assert_eq(nth_prime(1), 2);
+    assert_eq(nth_prime(2), 3);
+    assert_eq(nth_prime(3), 5);
+    assert_eq(nth_prime(4), 7);
+    assert_eq(nth_prime(5), 11);
+    assert_eq(nth_prime(10), 29);
+    1
+}
+
+fn test_euler_totient() -> Int {
+    // phi(1) = 1
+    assert_eq(euler_totient(1), 1);
+    // phi(p) = p-1 for prime p
+    assert_eq(euler_totient(7), 6);
+    assert_eq(euler_totient(11), 10);
+    // phi(12) = 4 (coprime: 1,5,7,11)
+    assert_eq(euler_totient(12), 4);
+    // phi(10) = 4 (coprime: 1,3,7,9)
+    assert_eq(euler_totient(10), 4);
+    1
+}
+
+fn test_divisors() -> Int {
+    // 12: divisors 1,2,3,4,6,12
+    assert_eq(count_divisors(12), 6);
+    assert_eq(sum_divisors(12), 28);
+    // Perfect number: 6 = 1+2+3
+    assert_eq(sum_divisors(6), 12); // 1+2+3+6
+    // Prime: 2 divisors
+    assert_eq(count_divisors(7), 2);
+    assert_eq(sum_divisors(7), 8);
+    // 1
+    assert_eq(count_divisors(1), 1);
+    assert_eq(sum_divisors(1), 1);
+    1
+}
+
+fn main() -> Int {
+    test_sieve();
+    test_trial_division();
+    test_nth_prime();
+    test_euler_totient();
+    test_divisors();
+    print("[OK] 492_sieve_primes_aot");
+    0
+}

@@ -1,0 +1,35 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, list, bounds, error
+// @description: Test that list index out of bounds is caught at compile time
+// @expected-error: None
+
+// =============================================================================
+// LIST INDEX OUT OF BOUNDS TESTS
+// =============================================================================
+
+// Test list_get with negative index
+meta fn test_list_get_negative() -> Int {
+    let arr = [1, 2, 3];
+    maybe_unwrap(list_get(arr, -1))  // ERROR: unwrap of None (index out of bounds)
+}
+
+// Test list_get with index >= length
+meta fn test_list_get_too_large() -> Int {
+    let arr = [1, 2, 3];
+    maybe_unwrap(list_get(arr, 5))  // ERROR: unwrap of None (index 5 out of bounds, length is 3)
+}
+
+// Test list_get on empty list
+meta fn test_list_get_empty() -> Int {
+    let arr: List<Int> = [];
+    maybe_unwrap(list_get(arr, 0))  // ERROR: unwrap of None (index 0 out of bounds, length is 0)
+}
+
+// Test computed index out of bounds
+meta fn test_list_get_computed() -> Int {
+    let arr = [10, 20, 30];
+    let idx = list_len(arr);  // = 3
+    maybe_unwrap(list_get(arr, idx))  // ERROR: unwrap of None (index 3 out of bounds, length is 3)
+}

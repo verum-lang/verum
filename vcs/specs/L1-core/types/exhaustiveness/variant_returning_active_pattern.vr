@@ -1,0 +1,188 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, active-pattern, variant-returning
+// @description: Variant-returning active patterns enable exhaustiveness checking
+
+// ============================================================
+// VARIANT-RETURNING ACTIVE PATTERNS
+// ============================================================
+// Unlike Maybe<T>-returning patterns which require wildcards,
+// variant-returning patterns can be exhaustively checked because
+// the compiler knows all possible return values.
+
+// Define a sum type for parity classification
+type Parity is Even | Odd;
+
+// Variant-returning active pattern - returns sum type directly
+pattern Parity(n: Int) -> Parity =
+    if n % 2 == 0 { Even } else { Odd };
+
+// EXHAUSTIVE: Compiler verifies all variants covered
+fn check_parity(x: Int) -> Text =
+    match Parity(x) {
+        Even => "even number",
+        Odd => "odd number"
+    };
+
+// ============================================================
+// SIGN CLASSIFICATION
+// ============================================================
+
+type Sign is Positive | Negative | Zero;
+
+pattern Sign(n: Int) -> Sign =
+    if n > 0 { Positive }
+    else if n < 0 { Negative }
+    else { Zero };
+
+// EXHAUSTIVE: All three variants covered
+fn describe_sign(n: Int) -> Text =
+    match Sign(n) {
+        Positive => "positive",
+        Negative => "negative",
+        Zero => "zero"
+    };
+
+// ============================================================
+// COMPARISON RESULT
+// ============================================================
+
+type Ordering is Less | Equal | Greater;
+
+pattern Compare(a: Int, b: Int) -> Ordering =
+    if a < b { Less }
+    else if a > b { Greater }
+    else { Equal };
+
+// EXHAUSTIVE: All comparison results handled
+fn compare_values(a: Int, b: Int) -> Text =
+    match Compare(a, b) {
+        Less => f"{a} is less than {b}",
+        Greater => f"{a} is greater than {b}",
+        Equal => f"{a} equals {b}"
+    };
+
+// ============================================================
+// FIZZBUZZ AS VARIANT PATTERN
+// ============================================================
+
+type FizzBuzzResult is FizzBuzz | Fizz | Buzz | Number(Int);
+
+pattern FizzBuzz(n: Int) -> FizzBuzzResult =
+    if n % 15 == 0 { FizzBuzz }
+    else if n % 3 == 0 { Fizz }
+    else if n % 5 == 0 { Buzz }
+    else { Number(n) };
+
+// EXHAUSTIVE: All FizzBuzz cases covered
+fn fizzbuzz(n: Int) -> Text =
+    match FizzBuzz(n) {
+        FizzBuzz => "fizzbuzz",
+        Fizz => "fizz",
+        Buzz => "buzz",
+        Number(x) => x.to_string()
+    };
+
+// ============================================================
+// TEMPERATURE CLASSIFICATION
+// ============================================================
+
+type TempCategory is Freezing | Cold | Mild | Warm | Hot;
+
+pattern Classify(temp: Float) -> TempCategory =
+    if temp <= 0.0 { Freezing }
+    else if temp <= 10.0 { Cold }
+    else if temp <= 20.0 { Mild }
+    else if temp <= 30.0 { Warm }
+    else { Hot };
+
+fn describe_temp(celsius: Float) -> Text =
+    match Classify(celsius) {
+        Freezing => "freezing",
+        Cold => "cold",
+        Mild => "mild",
+        Warm => "warm",
+        Hot => "hot"
+    };
+
+// ============================================================
+// NESTED VARIANT PATTERNS
+// ============================================================
+
+type WeekdayKind is Monday | Tuesday | Wednesday | Thursday | Friday;
+type WeekendKind is Saturday | Sunday;
+type DayType is Weekday(WeekdayKind) | Weekend(WeekendKind);
+
+pattern DayOf(n: Int) -> DayType =
+    match n % 7 {
+        0 => Weekend(Sunday),
+        1 => Weekday(Monday),
+        2 => Weekday(Tuesday),
+        3 => Weekday(Wednesday),
+        4 => Weekday(Thursday),
+        5 => Weekday(Friday),
+        6 => Weekend(Saturday),
+        _ => Weekend(Sunday)  // unreachable but satisfies exhaustiveness
+    };
+
+// EXHAUSTIVE: Matching on nested variants
+fn describe_day(n: Int) -> Text =
+    match DayOf(n) {
+        Weekday(Monday) => "Monday",
+        Weekday(Tuesday) => "Tuesday",
+        Weekday(Wednesday) => "Wednesday",
+        Weekday(Thursday) => "Thursday",
+        Weekday(Friday) => "Friday",
+        Weekend(Saturday) => "Saturday",
+        Weekend(Sunday) => "Sunday"
+    };
+
+// ============================================================
+// COMBINED WITH GUARDS
+// ============================================================
+
+fn describe_special_parity(x: Int) -> Text =
+    match Parity(x) {
+        Even if x == 0 => "zero (special even)",
+        Even => "even",
+        Odd if x == 1 => "one (special odd)",
+        Odd => "odd"
+    };
+
+// ============================================================
+// MAIN
+// ============================================================
+
+fn main() {
+    // Parity tests
+    assert(check_parity(4) == "even number");
+    assert(check_parity(7) == "odd number");
+
+    // Sign tests
+    assert(describe_sign(5) == "positive");
+    assert(describe_sign(-3) == "negative");
+    assert(describe_sign(0) == "zero");
+
+    // Compare tests
+    assert(compare_values(1, 5) == "1 is less than 5");
+    assert(compare_values(5, 1) == "5 is greater than 1");
+    assert(compare_values(3, 3) == "3 equals 3");
+
+    // FizzBuzz tests
+    assert(fizzbuzz(15) == "fizzbuzz");
+    assert(fizzbuzz(9) == "fizz");
+    assert(fizzbuzz(10) == "buzz");
+    assert(fizzbuzz(7) == "7");
+
+    // Temperature tests
+    assert(describe_temp(-5.0) == "freezing");
+    assert(describe_temp(35.0) == "hot");
+
+    // Day tests
+    assert(describe_day(1) == "Monday");
+    assert(describe_day(6) == "Saturday");
+
+    // Special parity
+    assert(describe_special_parity(0) == "zero (special even)");
+    assert(describe_special_parity(1) == "one (special odd)");
+}

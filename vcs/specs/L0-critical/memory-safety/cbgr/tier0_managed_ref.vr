@@ -1,0 +1,24 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, tier0, managed
+// @description: Tests Tier 0 managed references (&T) with CBGR protection
+
+fn main() {
+    let data = Heap.new(42);
+
+    // Tier 0: &T - managed reference with full CBGR protection (~15ns overhead)
+    let managed_ref: &Int = &*data;
+
+    // Access is safe - CBGR verifies generation and epoch
+    assert(*managed_ref == 42);
+
+    // Multiple managed refs can coexist
+    let ref1 = &*data;
+    let ref2 = &*data;
+    assert(*ref1 == *ref2);
+
+    // Safe drop - references are still in scope but won't cause UAF
+    // because they're managed
+    print("Tier 0 managed reference test passed");
+}

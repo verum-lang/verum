@@ -1,0 +1,299 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, radix-sort, sorting, non-comparison
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for LSD (Least Significant Digit) radix sort.
+// Sorts non-negative integers by processing each digit from
+// least significant to most significant, using counting sort
+// as a stable subroutine.
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 } else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 } else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 } else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 } else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 } else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+// 10-element array for counting sort buckets (digits 0-9)
+type Arr10 is {
+    b0: Int, b1: Int, b2: Int, b3: Int, b4: Int,
+    b5: Int, b6: Int, b7: Int, b8: Int, b9: Int
+};
+
+fn a10_get(a: Arr10, i: Int) -> Int {
+    if i == 0 { a.b0 } else if i == 1 { a.b1 } else if i == 2 { a.b2 }
+    else if i == 3 { a.b3 } else if i == 4 { a.b4 } else if i == 5 { a.b5 }
+    else if i == 6 { a.b6 } else if i == 7 { a.b7 } else if i == 8 { a.b8 }
+    else { a.b9 }
+}
+
+fn a10_set(a: Arr10, i: Int, v: Int) -> Arr10 {
+    Arr10 {
+        b0: if i == 0 { v } else { a.b0 }, b1: if i == 1 { v } else { a.b1 },
+        b2: if i == 2 { v } else { a.b2 }, b3: if i == 3 { v } else { a.b3 },
+        b4: if i == 4 { v } else { a.b4 }, b5: if i == 5 { v } else { a.b5 },
+        b6: if i == 6 { v } else { a.b6 }, b7: if i == 7 { v } else { a.b7 },
+        b8: if i == 8 { v } else { a.b8 }, b9: if i == 9 { v } else { a.b9 }
+    }
+}
+
+fn a10_zero() -> Arr10 {
+    Arr10 { b0: 0, b1: 0, b2: 0, b3: 0, b4: 0, b5: 0, b6: 0, b7: 0, b8: 0, b9: 0 }
+}
+
+// Get digit at position exp (1=ones, 10=tens, 100=hundreds, etc.)
+fn get_digit(val: Int, exp: Int) -> Int {
+    (val / exp) % 10
+}
+
+// Find max value in array
+fn find_max(arr: Arr16, n: Int) -> Int {
+    let mut mx = a16_get(arr, 0);
+    let mut i = 1;
+    while i < n {
+        let v = a16_get(arr, i);
+        if v > mx { mx = v; }
+        i = i + 1;
+    }
+    mx
+}
+
+// Counting sort by digit at position exp (stable sort)
+fn counting_sort_pass(arr: Arr16, n: Int, exp: Int) -> Arr16 {
+    // Count occurrences of each digit
+    let mut count = a10_zero();
+    let mut i = 0;
+    while i < n {
+        let d = get_digit(a16_get(arr, i), exp);
+        count = a10_set(count, d, a10_get(count, d) + 1);
+        i = i + 1;
+    }
+
+    // Prefix sum (cumulative count)
+    let mut d = 1;
+    while d < 10 {
+        count = a10_set(count, d, a10_get(count, d) + a10_get(count, d - 1));
+        d = d + 1;
+    }
+
+    // Build output array (iterate from right for stability)
+    let mut output = a16_zero();
+    i = n - 1;
+    while i >= 0 {
+        let val = a16_get(arr, i);
+        let dig = get_digit(val, exp);
+        let pos = a10_get(count, dig) - 1;
+        output = a16_set(output, pos, val);
+        count = a10_set(count, dig, a10_get(count, dig) - 1);
+        i = i - 1;
+    }
+    output
+}
+
+// LSD Radix sort (non-negative integers only)
+fn radix_sort(arr: Arr16, n: Int) -> Arr16 {
+    if n <= 1 { return arr; }
+    let mx = find_max(arr, n);
+
+    let mut sorted = arr;
+    let mut exp = 1;
+    while exp <= mx {
+        sorted = counting_sort_pass(sorted, n, exp);
+        exp = exp * 10;
+    }
+    sorted
+}
+
+fn is_sorted(arr: Arr16, n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if a16_get(arr, i) < a16_get(arr, i - 1) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// ---- Tests ----
+
+fn test_sort_basic() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 170);
+    arr = a16_set(arr, 1, 45);
+    arr = a16_set(arr, 2, 75);
+    arr = a16_set(arr, 3, 90);
+    arr = a16_set(arr, 4, 802);
+    arr = a16_set(arr, 5, 24);
+    arr = a16_set(arr, 6, 2);
+    arr = a16_set(arr, 7, 66);
+    let sorted = radix_sort(arr, 8);
+    assert_eq(a16_get(sorted, 0), 2);
+    assert_eq(a16_get(sorted, 1), 24);
+    assert_eq(a16_get(sorted, 2), 45);
+    assert_eq(a16_get(sorted, 3), 66);
+    assert_eq(a16_get(sorted, 4), 75);
+    assert_eq(a16_get(sorted, 5), 90);
+    assert_eq(a16_get(sorted, 6), 170);
+    assert_eq(a16_get(sorted, 7), 802);
+}
+
+fn test_sort_already_sorted() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 1);
+    arr = a16_set(arr, 1, 2);
+    arr = a16_set(arr, 2, 3);
+    arr = a16_set(arr, 3, 4);
+    arr = a16_set(arr, 4, 5);
+    let sorted = radix_sort(arr, 5);
+    assert_eq(is_sorted(sorted, 5), 1);
+    assert_eq(a16_get(sorted, 0), 1);
+    assert_eq(a16_get(sorted, 4), 5);
+}
+
+fn test_sort_reverse() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 50);
+    arr = a16_set(arr, 1, 40);
+    arr = a16_set(arr, 2, 30);
+    arr = a16_set(arr, 3, 20);
+    arr = a16_set(arr, 4, 10);
+    let sorted = radix_sort(arr, 5);
+    assert_eq(a16_get(sorted, 0), 10);
+    assert_eq(a16_get(sorted, 1), 20);
+    assert_eq(a16_get(sorted, 2), 30);
+    assert_eq(a16_get(sorted, 3), 40);
+    assert_eq(a16_get(sorted, 4), 50);
+}
+
+fn test_sort_duplicates() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 5);
+    arr = a16_set(arr, 1, 3);
+    arr = a16_set(arr, 2, 5);
+    arr = a16_set(arr, 3, 1);
+    arr = a16_set(arr, 4, 3);
+    let sorted = radix_sort(arr, 5);
+    assert_eq(a16_get(sorted, 0), 1);
+    assert_eq(a16_get(sorted, 1), 3);
+    assert_eq(a16_get(sorted, 2), 3);
+    assert_eq(a16_get(sorted, 3), 5);
+    assert_eq(a16_get(sorted, 4), 5);
+}
+
+fn test_sort_single() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 42);
+    let sorted = radix_sort(arr, 1);
+    assert_eq(a16_get(sorted, 0), 42);
+}
+
+fn test_sort_all_same() {
+    let mut arr = a16_zero();
+    let mut i = 0;
+    while i < 8 {
+        arr = a16_set(arr, i, 77);
+        i = i + 1;
+    }
+    let sorted = radix_sort(arr, 8);
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(a16_get(sorted, j), 77);
+        j = j + 1;
+    }
+}
+
+fn test_sort_zeros() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 0);
+    arr = a16_set(arr, 1, 0);
+    arr = a16_set(arr, 2, 100);
+    arr = a16_set(arr, 3, 0);
+    let sorted = radix_sort(arr, 4);
+    assert_eq(a16_get(sorted, 0), 0);
+    assert_eq(a16_get(sorted, 1), 0);
+    assert_eq(a16_get(sorted, 2), 0);
+    assert_eq(a16_get(sorted, 3), 100);
+}
+
+fn test_sort_large_values() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 99999);
+    arr = a16_set(arr, 1, 10000);
+    arr = a16_set(arr, 2, 50000);
+    arr = a16_set(arr, 3, 1);
+    let sorted = radix_sort(arr, 4);
+    assert_eq(a16_get(sorted, 0), 1);
+    assert_eq(a16_get(sorted, 1), 10000);
+    assert_eq(a16_get(sorted, 2), 50000);
+    assert_eq(a16_get(sorted, 3), 99999);
+}
+
+fn test_get_digit() {
+    assert_eq(get_digit(170, 1), 0);
+    assert_eq(get_digit(170, 10), 7);
+    assert_eq(get_digit(170, 100), 1);
+    assert_eq(get_digit(12345, 1), 5);
+    assert_eq(get_digit(12345, 10), 4);
+    assert_eq(get_digit(12345, 100), 3);
+    assert_eq(get_digit(12345, 1000), 2);
+    assert_eq(get_digit(12345, 10000), 1);
+}
+
+fn test_stability() {
+    // Radix sort is stable: equal keys maintain relative order.
+    // We can test this indirectly: sort pairs where first element is key.
+    // Use values that differ only in lower digits to test multi-pass stability.
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 21);
+    arr = a16_set(arr, 1, 11);
+    arr = a16_set(arr, 2, 22);
+    arr = a16_set(arr, 3, 12);
+    let sorted = radix_sort(arr, 4);
+    // 11, 12, 21, 22
+    assert_eq(a16_get(sorted, 0), 11);
+    assert_eq(a16_get(sorted, 1), 12);
+    assert_eq(a16_get(sorted, 2), 21);
+    assert_eq(a16_get(sorted, 3), 22);
+}
+
+fn main() -> Int {
+    test_sort_basic();
+    test_sort_already_sorted();
+    test_sort_reverse();
+    test_sort_duplicates();
+    test_sort_single();
+    test_sort_all_same();
+    test_sort_zeros();
+    test_sort_large_values();
+    test_get_digit();
+    test_stability();
+    print("[OK] 387_radix_sort_aot");
+    0
+}

@@ -1,0 +1,58 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, unit-return
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    // Nested function that returns unit (no explicit return)
+    fn print_nothing() {
+        // This function returns unit implicitly
+    }
+
+    // Call unit-returning function
+    print_nothing();
+
+    // Nested function that does computation but returns unit
+    fn compute_and_discard(x: Int) {
+        let result = x * 2 + 10;
+        // Discards result, returns unit
+    }
+
+    compute_and_discard(5);
+    compute_and_discard(100);
+
+    // Nested function with explicit unit return
+    fn explicit_unit() -> () {
+        return ();
+    }
+
+    let u = explicit_unit();
+    // u is unit type
+
+    // Nested function calling other unit functions
+    fn call_multiple_unit() {
+        print_nothing();
+        compute_and_discard(42);
+        explicit_unit();
+    }
+
+    call_multiple_unit();
+
+    // Mix unit functions with value-returning functions
+    fn get_value() -> Int {
+        return 42;
+    }
+
+    fn process() {
+        let v = get_value();
+        // Use v but don't return it
+        let doubled = v * 2;
+    }
+
+    process();
+
+    // Verify value-returning function still works
+    assert_eq(get_value(), 42);
+}

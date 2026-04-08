@@ -1,0 +1,67 @@
+// @test: parse
+// @level: L0
+// @tags: parser, contexts, advanced
+// @description: Test advanced context system features
+
+// Context with generics
+context Repository<T: Entity> {
+    fn find_by_id(&self, id: T.Id) -> Maybe<T>;
+    fn save(&mut self, entity: T) -> T.Id;
+    fn delete(&mut self, id: T.Id) -> Bool;
+    fn find_all(&self) -> List<T>;
+}
+
+// Context with type constraints
+context Cache<K: Hash + Eq, V: Clone> {
+    fn get(&self, key: K) -> Maybe<V>;
+    fn set(&mut self, key: K, value: V);
+    fn invalidate(&mut self, key: K);
+}
+
+// Context polymorphism in functions
+fn map_with_context<T, U, using C>(
+    items: List<T>,
+    f: fn(T) -> U using C
+) -> List<U> using C {
+    items.map(f)
+}
+
+// Function requiring multiple instances of same context
+fn dual_database_operation() using [Database as primary, Database as replica] {
+    let data = replica.read("key");
+    primary.write("key", data);
+}
+
+// Conditional context based on config
+fn conditional_logging() using [Logger if cfg.logging_enabled] {
+    Logger.info("This may or may not be called");
+}
+
+// Context transformation
+fn scoped_operation() using [Database.transactional(), Cache.scoped(request_id)] {
+    Database.execute("INSERT ...");
+    Cache.set("key", value);
+}
+
+// Negative contexts (ensuring absence)
+pure fn pure_computation(x: Int) -> Int using [!IO, !Database, !Network] {
+    x * x + x
+}
+
+// Context groups
+using IOContexts = [FileSystem, Network, Console];
+using DatabaseContexts = [Database, Cache, TransactionManager];
+using AllContexts = [IOContexts, DatabaseContexts, Logger];
+
+// Function using context group
+fn full_operation() using AllContexts {
+    Logger.info("Starting");
+    let data = Network.fetch("url");
+    Database.save(data);
+    FileSystem.write("backup.dat", data);
+}
+
+// Platform-specific contexts
+fn platform_specific() using [WindowsRegistry if platform.windows, PosixSignals if platform.unix] {
+    // Platform-specific code
+}

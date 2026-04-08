@@ -1,0 +1,547 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: runtime, function, call, overhead, micro
+// @description: Function call overhead benchmark (target: < 5ns overhead)
+
+/// Function Call Overhead Benchmark
+///
+/// This benchmark measures the overhead of function calls in Verum.
+/// Understanding call overhead is critical for performance-sensitive code.
+///
+/// Target: < 5ns overhead per call (Tier 3 AOT)
+///
+/// Call types measured:
+/// - Direct calls (statically resolved)
+/// - Indirect calls (function pointers)
+/// - Virtual calls (protocol dispatch)
+/// - Closure calls (captured environment)
+/// - Context-aware calls (with using clause)
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Function Call Overhead");
+
+    // Direct call benchmarks
+    results.add(benchmark_direct_call());
+    results.add(benchmark_direct_call_with_args());
+    results.add(benchmark_direct_call_with_return());
+    results.add(benchmark_inlined_call());
+
+    // Indirect call benchmarks
+    results.add(benchmark_indirect_call());
+    results.add(benchmark_function_pointer());
+
+    // Virtual/protocol dispatch
+    results.add(benchmark_virtual_call());
+    results.add(benchmark_protocol_dispatch());
+
+    // Closure benchmarks
+    results.add(benchmark_closure_no_capture());
+    results.add(benchmark_closure_with_capture());
+    results.add(benchmark_closure_move_capture());
+
+    // Context-aware calls
+    results.add(benchmark_context_call());
+    results.add(benchmark_multi_context_call());
+
+    results.report();
+    assert(results.all_pass(), "Function call overhead exceeds target");
+}
+
+/// Empty function for measuring pure call overhead
+@inline(never)
+fn empty_function() {}
+
+/// Benchmark: Direct function call (no args, no return)
+fn benchmark_direct_call() -> BenchmarkResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        empty_function();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        empty_function();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "direct_call_empty",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 5.0,
+        passed: per_call_ns < 5.0,
+    }
+}
+
+/// Function with arguments
+@inline(never)
+fn function_with_args(a: Int, b: Int, c: Int, d: Int) -> Int {
+    a
+}
+
+/// Benchmark: Direct call with multiple arguments
+fn benchmark_direct_call_with_args() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(function_with_args(1, 2, 3, 4));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(function_with_args(1, 2, 3, 4));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "direct_call_with_args",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 8.0,
+        passed: per_call_ns < 8.0,
+    }
+}
+
+/// Function returning a value
+@inline(never)
+fn function_with_return() -> Int {
+    42
+}
+
+/// Benchmark: Direct call with return value
+fn benchmark_direct_call_with_return() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(function_with_return());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(function_with_return());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "direct_call_with_return",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 5.0,
+        passed: per_call_ns < 5.0,
+    }
+}
+
+/// Small function that should be inlined
+@inline(always)
+fn small_function(x: Int) -> Int {
+    x + 1
+}
+
+/// Benchmark: Inlined function call
+fn benchmark_inlined_call() -> BenchmarkResult {
+    let mut sum = 0;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        sum += small_function(1);
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += small_function(i as Int);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Inlined calls should have near-zero overhead
+    BenchmarkResult {
+        name: "inlined_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 1.0,
+        passed: per_call_ns < 1.0,
+    }
+}
+
+/// Benchmark: Indirect function call through variable
+fn benchmark_indirect_call() -> BenchmarkResult {
+    let func: fn() = empty_function;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        func();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        func();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Indirect calls add branch prediction overhead
+    BenchmarkResult {
+        name: "indirect_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 8.0,
+        passed: per_call_ns < 8.0,
+    }
+}
+
+/// Benchmark: Function pointer call
+fn benchmark_function_pointer() -> BenchmarkResult {
+    let funcs: List<fn(Int) -> Int> = [
+        |x| x + 1,
+        |x| x * 2,
+        |x| x - 1,
+        |x| x / 2,
+    ];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        for f in funcs.iter() {
+            black_box(f(42));
+        }
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 4) {
+        for f in funcs.iter() {
+            black_box(f(42));
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "function_pointer",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 10.0,
+        passed: per_call_ns < 10.0,
+    }
+}
+
+/// Protocol for virtual dispatch testing
+protocol Callable {
+    fn call(self, x: Int) -> Int;
+}
+
+type TypeA is  { value: Int };
+type TypeB is  { value: Int };
+type TypeC is  { value: Int };
+
+implement Callable for TypeA {
+    fn call(self, x: Int) -> Int { self.value + x }
+}
+
+implement Callable for TypeB {
+    fn call(self, x: Int) -> Int { self.value * x }
+}
+
+implement Callable for TypeC {
+    fn call(self, x: Int) -> Int { self.value - x }
+}
+
+/// Benchmark: Virtual method call (monomorphic)
+fn benchmark_virtual_call() -> BenchmarkResult {
+    let obj: &Callable = &TypeA { value: 10 };
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(obj.call(5));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(obj.call(5));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Virtual call has vtable lookup overhead
+    BenchmarkResult {
+        name: "virtual_call_mono",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 10.0,
+        passed: per_call_ns < 10.0,
+    }
+}
+
+/// Benchmark: Protocol dispatch (polymorphic)
+fn benchmark_protocol_dispatch() -> BenchmarkResult {
+    let objects: List<Heap<Callable>> = [
+        Heap(TypeA { value: 1 }),
+        Heap(TypeB { value: 2 }),
+        Heap(TypeC { value: 3 }),
+    ];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        for obj in objects.iter() {
+            black_box(obj.call(5));
+        }
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 3) {
+        for obj in objects.iter() {
+            black_box(obj.call(5));
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Polymorphic dispatch may have branch mispredictions
+    BenchmarkResult {
+        name: "protocol_dispatch_poly",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 15.0,
+        passed: per_call_ns < 15.0,
+    }
+}
+
+/// Benchmark: Closure without captures
+fn benchmark_closure_no_capture() -> BenchmarkResult {
+    let closure = || 42;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // No-capture closure should be as fast as function pointer
+    BenchmarkResult {
+        name: "closure_no_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 5.0,
+        passed: per_call_ns < 5.0,
+    }
+}
+
+/// Benchmark: Closure with captured variables
+fn benchmark_closure_with_capture() -> BenchmarkResult {
+    let captured_a = 10;
+    let captured_b = 20;
+    let captured_c = 30;
+
+    let closure = |x: Int| captured_a + captured_b + captured_c + x;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure(5));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(5));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Captured variables add indirection
+    BenchmarkResult {
+        name: "closure_with_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 8.0,
+        passed: per_call_ns < 8.0,
+    }
+}
+
+/// Benchmark: Closure with move capture
+fn benchmark_closure_move_capture() -> BenchmarkResult {
+    let large_data = [0; 1000];
+
+    let closure = move |idx: Int| large_data[idx];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure(500));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(500));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_move_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 10.0,
+        passed: per_call_ns < 10.0,
+    }
+}
+
+/// Context definition for testing
+context Logger {
+    fn log(msg: Text);
+}
+
+/// Function using context
+@inline(never)
+fn function_with_context(x: Int) -> Int using [Logger] {
+    x + 1
+}
+
+/// Benchmark: Context-aware function call
+fn benchmark_context_call() -> BenchmarkResult {
+    provide Logger = ConsoleLogger {};
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(function_with_context(42));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(function_with_context(42));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Context lookup adds overhead (~5-30ns per spec)
+    BenchmarkResult {
+        name: "context_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 30.0,
+        passed: per_call_ns < 30.0,
+    }
+}
+
+context Database {
+    fn query(q: Text) -> List<Row>;
+}
+
+context Config {
+    fn get(key: Text) -> Text;
+}
+
+/// Function using multiple contexts
+@inline(never)
+fn function_multi_context(x: Int) -> Int using [Logger, Database, Config] {
+    x + 1
+}
+
+/// Benchmark: Multi-context function call
+fn benchmark_multi_context_call() -> BenchmarkResult {
+    provide Logger = ConsoleLogger {};
+    provide Database = MockDatabase {};
+    provide Config = EnvConfig {};
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(function_multi_context(42));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(function_multi_context(42));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Multiple contexts should not multiply overhead significantly
+    BenchmarkResult {
+        name: "multi_context_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 50.0,
+        passed: per_call_ns < 50.0,
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

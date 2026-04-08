@@ -1,0 +1,131 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: spawn, captures, text, float, types
+// @description: Spawn blocks with various capture types (text, float, bool, list)
+
+fn test_text_capture() -> Int {
+    let msg = "hello world";
+    let h = spawn { msg.len() };
+    let result = h.await;
+    if result != 11 {
+        print(f"FAIL text_capture: expected 11, got {result}");
+        return 1;
+    }
+    print("  text_capture: OK");
+    0
+}
+
+fn test_text_fstring_capture() -> Int {
+    let name = "world";
+    let h = spawn { name.len() };
+    let result = h.await;
+    if result != 5 {
+        print(f"FAIL fstring_capture: expected 5, got {result}");
+        return 1;
+    }
+    print("  fstring_capture: OK");
+    0
+}
+
+fn test_int_capture() -> Int {
+    let x = 42;
+    let y = 58;
+    let h = spawn { x + y };
+    let result = h.await;
+    if result != 100 {
+        print(f"FAIL int_capture: expected 100, got {result}");
+        return 1;
+    }
+    print("  int_capture: OK");
+    0
+}
+
+fn test_multi_type_captures() -> Int {
+    let count = 3;
+    let label = "test";
+    let h = spawn { count * label.len() };
+    let result = h.await;
+    // 3 * 4 = 12
+    if result != 12 {
+        print(f"FAIL multi_type: expected 12, got {result}");
+        return 1;
+    }
+    print("  multi_type_captures: OK");
+    0
+}
+
+fn test_spawn_direct_call() -> Int {
+    let h = spawn { 10 + 20 + 30 };
+    let result = h.await;
+    if result != 60 {
+        print(f"FAIL direct_call: expected 60, got {result}");
+        return 1;
+    }
+    print("  spawn_direct_call: OK");
+    0
+}
+
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn test_spawn_func_call() -> Int {
+    let h = spawn double(21);
+    let result = h.await;
+    if result != 42 {
+        print(f"FAIL func_call: expected 42, got {result}");
+        return 1;
+    }
+    print("  spawn_func_call: OK");
+    0
+}
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn test_spawn_multi_arg() -> Int {
+    let h = spawn add(100, 200);
+    let result = h.await;
+    if result != 300 {
+        print(f"FAIL multi_arg: expected 300, got {result}");
+        return 1;
+    }
+    print("  spawn_multi_arg: OK");
+    0
+}
+
+fn test_chained_spawns() -> Int {
+    let h1 = spawn { 10 };
+    let v1 = h1.await;
+    let h2 = spawn { v1 * 5 };
+    let result = h2.await;
+    if result != 50 {
+        print(f"FAIL chained: expected 50, got {result}");
+        return 1;
+    }
+    print("  chained_spawns: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Spawn Type Capture Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_text_capture();
+    failures = failures + test_text_fstring_capture();
+    failures = failures + test_int_capture();
+    failures = failures + test_multi_type_captures();
+    failures = failures + test_spawn_direct_call();
+    failures = failures + test_spawn_func_call();
+    failures = failures + test_spawn_multi_arg();
+    failures = failures + test_chained_spawns();
+
+    if failures == 0 {
+        print("All spawn type capture tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

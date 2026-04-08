@@ -1,0 +1,434 @@
+// =============================================================================
+// deque_extended_test.vr - Tests for Deque extended methods
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, extended, core
+// @description: Tests for drain, split_off, append, resize, resize_with
+// =============================================================================
+
+mount core.collections.deque.{Deque, deque};
+mount core.collections.list.List;
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// PART 1: Deque.drain
+// =============================================================================
+
+@test
+fn test_deque_drain_basic() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let mut collected: List<Int> = List.new();
+    for v in d.drain() {
+        collected.push(v);
+    }
+
+    assert_eq(collected.len(), 3);
+    assert_eq(collected[0], 1);
+    assert_eq(collected[1], 2);
+    assert_eq(collected[2], 3);
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_drain_empty() {
+    let mut d: Deque<Int> = Deque.new();
+
+    let mut count = 0;
+    for _v in d.drain() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_drain_single() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+
+    let mut iter = d.drain();
+    match iter.next() {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+    assert(iter.next().is_none());
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_drain_preserves_order() {
+    let mut d: Deque<Int> = Deque.new();
+    // Mix front and back pushes
+    d.push_back(3);
+    d.push_back(4);
+    d.push_front(2);
+    d.push_front(1);
+
+    let mut result: List<Int> = List.new();
+    for v in d.drain() {
+        result.push(v);
+    }
+
+    assert_eq(result.len(), 4);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 3);
+    assert_eq(result[3], 4);
+}
+
+// =============================================================================
+// PART 2: Deque.split_off
+// =============================================================================
+
+@test
+fn test_deque_split_off_middle() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    let right = d.split_off(2);
+
+    assert_eq(d.len(), 2);
+    assert_eq(right.len(), 3);
+
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+
+    assert_eq(*right.get(0).unwrap(), 3);
+    assert_eq(*right.get(1).unwrap(), 4);
+    assert_eq(*right.get(2).unwrap(), 5);
+}
+
+@test
+fn test_deque_split_off_at_zero() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let right = d.split_off(0);
+
+    assert(d.is_empty());
+    assert_eq(right.len(), 3);
+}
+
+@test
+fn test_deque_split_off_at_end() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let right = d.split_off(3);
+
+    assert_eq(d.len(), 3);
+    assert(right.is_empty());
+}
+
+@test
+fn test_deque_split_off_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    let right = d.split_off(0);
+
+    assert(d.is_empty());
+    assert(right.is_empty());
+}
+
+@test
+fn test_deque_split_off_single() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+
+    let right = d.split_off(0);
+
+    assert(d.is_empty());
+    assert_eq(right.len(), 1);
+    assert_eq(*right.get(0).unwrap(), 42);
+}
+
+// =============================================================================
+// PART 3: Deque.append
+// =============================================================================
+
+@test
+fn test_deque_append_basic() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(3);
+    b.push_back(4);
+
+    a.append(&mut b);
+
+    assert_eq(a.len(), 4);
+    assert(b.is_empty());
+
+    assert_eq(*a.get(0).unwrap(), 1);
+    assert_eq(*a.get(1).unwrap(), 2);
+    assert_eq(*a.get(2).unwrap(), 3);
+    assert_eq(*a.get(3).unwrap(), 4);
+}
+
+@test
+fn test_deque_append_empty_into_nonempty() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+
+    let mut b: Deque<Int> = Deque.new();
+    a.append(&mut b);
+
+    assert_eq(a.len(), 1);
+    assert(b.is_empty());
+}
+
+@test
+fn test_deque_append_nonempty_into_empty() {
+    let mut a: Deque<Int> = Deque.new();
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(2);
+
+    a.append(&mut b);
+
+    assert_eq(a.len(), 2);
+    assert(b.is_empty());
+}
+
+@test
+fn test_deque_append_both_empty() {
+    let mut a: Deque<Int> = Deque.new();
+    let mut b: Deque<Int> = Deque.new();
+    a.append(&mut b);
+
+    assert(a.is_empty());
+    assert(b.is_empty());
+}
+
+@test
+fn test_deque_append_preserves_front_back_order() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_front(1); // front
+    a.push_back(2);  // back
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_front(3);
+    b.push_back(4);
+
+    a.append(&mut b);
+
+    assert_eq(a.len(), 4);
+    assert_eq(*a.front().unwrap(), 1);
+    assert_eq(*a.back().unwrap(), 4);
+}
+
+// =============================================================================
+// PART 4: Deque.resize
+// =============================================================================
+
+@test
+fn test_deque_resize_grow() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    d.resize(5, 0);
+
+    assert_eq(d.len(), 5);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 0);
+    assert_eq(*d.get(3).unwrap(), 0);
+    assert_eq(*d.get(4).unwrap(), 0);
+}
+
+@test
+fn test_deque_resize_shrink() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    d.resize(2, 0);
+
+    assert_eq(d.len(), 2);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+}
+
+@test
+fn test_deque_resize_same_size() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    d.resize(2, 0);
+
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_deque_resize_from_empty() {
+    let mut d: Deque<Int> = Deque.new();
+
+    d.resize(3, 42);
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 42);
+    assert_eq(*d.get(1).unwrap(), 42);
+    assert_eq(*d.get(2).unwrap(), 42);
+}
+
+@test
+fn test_deque_resize_to_zero() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    d.resize(0, 0);
+
+    assert(d.is_empty());
+}
+
+// =============================================================================
+// PART 5: Deque.resize_with
+// =============================================================================
+
+@test
+fn test_deque_resize_with_grow() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+
+    let mut counter = 10;
+    d.resize_with(4, || {
+        let val = counter;
+        counter = counter + 1;
+        val
+    });
+
+    assert_eq(d.len(), 4);
+    assert_eq(*d.get(0).unwrap(), 1);
+    // Values generated by closure
+    assert_eq(*d.get(1).unwrap(), 10);
+    assert_eq(*d.get(2).unwrap(), 11);
+    assert_eq(*d.get(3).unwrap(), 12);
+}
+
+@test
+fn test_deque_resize_with_shrink() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    d.resize_with(1, || 0);
+
+    assert_eq(d.len(), 1);
+    assert_eq(*d.get(0).unwrap(), 1);
+}
+
+@test
+fn test_deque_resize_with_default() {
+    let mut d: Deque<Int> = Deque.new();
+    d.resize_with(3, || 0);
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 0);
+    assert_eq(*d.get(1).unwrap(), 0);
+    assert_eq(*d.get(2).unwrap(), 0);
+}
+
+// =============================================================================
+// PART 6: Integration / Combined Tests
+// =============================================================================
+
+@test
+fn test_deque_split_off_then_append() {
+    let mut d: Deque<Int> = Deque.new();
+    for i in 0..10 {
+        d.push_back(i);
+    }
+
+    let mut right = d.split_off(5);
+    assert_eq(d.len(), 5);
+    assert_eq(right.len(), 5);
+
+    // Append back
+    d.append(&mut right);
+    assert_eq(d.len(), 10);
+    assert(right.is_empty());
+
+    // Verify order preserved
+    for i in 0..10 {
+        assert_eq(*d.get(i).unwrap(), i);
+    }
+}
+
+@test
+fn test_deque_drain_collect_to_list() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    let list: List<Int> = d.drain().collect();
+
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 10);
+    assert_eq(list[1], 20);
+    assert_eq(list[2], 30);
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_resize_then_drain() {
+    let mut d: Deque<Int> = Deque.new();
+    d.resize(5, 7);
+
+    let list: List<Int> = d.drain().collect();
+    assert_eq(list.len(), 5);
+    for i in 0..5 {
+        assert_eq(list[i], 7);
+    }
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_large_append() {
+    let mut a: Deque<Int> = Deque.new();
+    let mut b: Deque<Int> = Deque.new();
+
+    for i in 0..50 {
+        a.push_back(i);
+    }
+    for i in 50..100 {
+        b.push_back(i);
+    }
+
+    a.append(&mut b);
+
+    assert_eq(a.len(), 100);
+    assert(b.is_empty());
+
+    // Verify order
+    for i in 0..100 {
+        assert_eq(*a.get(i).unwrap(), i);
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

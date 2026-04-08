@@ -1,0 +1,223 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, constraints, unification
+// @description: Type inference through constraint solving and unification
+
+/// Test for type inference through constraint solving and unification.
+/// The type checker generates constraints from usage and solves them
+/// to determine concrete types for type variables.
+
+// ============================================================================
+// Helper functions that generate constraints
+// ============================================================================
+
+fn id<T>(x: T) -> T { x }
+
+fn first<T>(a: T, b: T) -> T { a }
+
+fn pair<A, B>(a: A, b: B) -> (A, B) { (a, b) }
+
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U { f(x) }
+
+fn apply_twice<T>(f: fn(T) -> T, x: T) -> T { f(f(x)) }
+
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |x: A| g(f(x))
+}
+
+fn wrap<T>(x: T) -> Maybe<T> { Some(x) }
+
+fn text_len_fn(s: Text) -> Int { s.len() }
+
+fn unwrap_or<T>(opt: Maybe<T>, def: T) -> T {
+    match opt {
+        Some(v) => v,
+        None => def,
+    }
+}
+
+fn map_list<A, B>(items: List<A>, f: fn(A) -> B) -> List<B> {
+    let mut result: List<B> = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+fn zip_with<A, B, C>(a: List<A>, b: List<B>, f: fn(A, B) -> C) -> List<C> {
+    let mut result: List<C> = [];
+    let min_len = if a.len() < b.len() { a.len() } else { b.len() };
+    let mut i = 0;
+    while i < min_len {
+        result.push(f(a[i], b[i]));
+        i += 1;
+    }
+    result
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // === Basic Unification ===
+
+    // T = Int from argument type
+    let x = id(42);
+    let y = id(x);  // T = Int through id chain
+    assert(y == 42);
+
+    // T = Text from argument type
+    let s = id("hello");
+    let s2 = id(s);
+    assert(s2 == "hello");
+
+    // === Constraint from Assignment ===
+
+    let a = 42;
+    let b = a;  // b: Int from a: Int
+    let c = b;  // c: Int from b: Int
+    assert(c == 42);
+
+    let text_a = "world";
+    let text_b = text_a;
+    assert(text_b == "world");
+
+    // === Constraint from Function Application ===
+
+    fn add_ints(x: Int, y: Int) -> Int { x + y }
+
+    let p = 10;
+    let q = 20;
+    let sum_pq = add_ints(p, q);  // Validates both are Int
+    assert(sum_pq == 30);
+
+    // === Unification with Generics ===
+
+    // A = Int, B = Text resolved from argument types
+    let result_pair = pair(1, "x");
+    assert(result_pair.0 == 1);
+    assert(result_pair.1 == "x");
+
+    // === Multiple Uses Unify to Same Type ===
+
+    // Both arguments must be same type T
+    let f1 = first(10, 20);     // T = Int
+    let f2 = first("a", "b");   // T = Text
+    assert(f1 == 10);
+    assert(f2 == "a");
+
+    // === Constraint Propagation Through Calls ===
+
+    let doubled_val = apply(|x: Int| x * 2, 21);  // T=Int, U=Int
+    assert(doubled_val == 42);
+
+    let doubled_twice = apply_twice(|x: Int| x * 2, 3);  // T=Int
+    assert(doubled_twice == 12);
+
+    // Different T and U - extract function to help type inference
+    let len_val = apply(text_len_fn, "hello");  // T=Text, U=Int
+    assert(len_val == 5);
+
+    // === Composition Constraint Solving ===
+
+    // compose: A=Int, B=Int, C=Text
+    let double = |x: Int| x * 2;
+    let to_text = |n: Int| f"n={n}";
+    let double_then_text = compose(double, to_text);  // fn(Int) -> Text
+    assert(double_then_text(5) == "n=10");
+
+    // Longer chain: A=Int, B=Int, C=Int, then applied
+    let inc = |x: Int| x + 1;
+    let triple = |x: Int| x * 3;
+    let inc_then_triple = compose(inc, triple);  // fn(Int) -> Int
+    assert(inc_then_triple(4) == 15);  // (4+1)*3 = 15
+
+    // === Constraint Propagation Through Containers ===
+
+    let wrapped_int = wrap(42);   // T=Int -> Maybe<Int>
+    let wrapped_text = wrap("hi");  // T=Text -> Maybe<Text>
+    assert(wrapped_int == Some(42));
+    assert(wrapped_text == Some("hi"));
+
+    let unwrapped = unwrap_or(Some(100), 0);  // T=Int
+    assert(unwrapped == 100);
+
+    let default_used = unwrap_or(None, 99);   // T=Int from default
+    assert(default_used == 99);
+
+    // === Solving with Multiple Type Variables ===
+
+    // A=Int, B=Text, C=Bool
+    let combined: Bool = apply(
+        |x: (Int, Text)| x.0 > 0 && x.1 != "",
+        (1, "ok"),
+    );
+    assert(combined == true);
+
+    // === Constraint Propagation Through map_list ===
+
+    // A=Int, B=Int
+    let sq = map_list([1, 2, 3, 4, 5], |x: Int| x * x);
+    assert(sq == [1, 4, 9, 16, 25]);
+
+    // A=Int, B=Text
+    let strs = map_list([1, 2, 3], |x: Int| f"n{x}");
+    assert(strs[0] == "n1");
+
+    // A=Text, B=Int
+    let lens = map_list(["hello", "world", "!"], text_len_fn);
+    assert(lens == [5, 5, 1]);
+
+    // === zip_with Constraint Solving ===
+
+    // A=Int, B=Int, C=Int
+    let sums = zip_with([1, 2, 3], [4, 5, 6], |a: Int, b: Int| a + b);
+    assert(sums == [5, 7, 9]);
+
+    // A=Int, B=Text, C=Text
+    let labeled = zip_with([1, 2, 3], ["a", "b", "c"], |n: Int, s: Text| f"{n}:{s}");
+    assert(labeled == ["1:a", "2:b", "3:c"]);
+
+    // === Nested Constraint Solving ===
+
+    // Nested generic calls: types propagate inward
+    let nested = id(id(id(42)));
+    assert(nested == 42);
+
+    // map_list of pairs
+    let pairs_result: List<(Int, Int)> = map_list(
+        [1, 2, 3],
+        |x: Int| (x, x * x),
+    );
+    assert(pairs_result[0].0 == 1);
+    assert(pairs_result[2].1 == 9);
+
+    // === Constraint Solving in if/match ===
+
+    // All branches must produce same type
+    fn choose(cond: Bool, a: Int, b: Int) -> Int {
+        if cond { a } else { b }
+    }
+
+    assert(choose(true, 10, 20) == 10);
+    assert(choose(false, 10, 20) == 20);
+
+    // Match arms with type constraint
+    fn describe_maybe(opt: Maybe<Int>) -> Text {
+        match opt {
+            Some(n) if n > 0 => "positive",
+            Some(n) if n < 0 => "negative",
+            Some(_) => "zero",
+            None => "nothing",
+        }
+    }
+
+    assert(describe_maybe(Some(5)) == "positive");
+    assert(describe_maybe(Some(-3)) == "negative");
+    assert(describe_maybe(Some(0)) == "zero");
+    assert(describe_maybe(None) == "nothing");
+
+    print("Constraint solving tests passed!");
+}

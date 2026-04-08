@@ -1,0 +1,191 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: implement, method-chain, builder, fluent
+// @description: Test method chaining and builder patterns
+
+type Config is { width: Int, height: Int, title: Text, fullscreen: Bool };
+
+implement Config {
+    fn new() -> Config {
+        Config { width: 800, height: 600, title: "Untitled", fullscreen: false }
+    }
+
+    fn with_size(w: Int, h: Int) -> Config {
+        Config { width: w, height: h, title: "Untitled", fullscreen: false }
+    }
+
+    fn area(&self) -> Int {
+        self.width * self.height
+    }
+
+    fn is_landscape(&self) -> Bool {
+        self.width > self.height
+    }
+}
+
+fn test_config() -> Int {
+    let c = Config.new();
+    if c.width != 800 || c.height != 600 {
+        print("FAIL config defaults");
+        return 1;
+    }
+    if c.area() != 480000 {
+        print(f"FAIL area: {c.area()}");
+        return 1;
+    }
+    let c2 = Config.with_size(1920, 1080);
+    if !c2.is_landscape() {
+        print("FAIL: should be landscape");
+        return 1;
+    }
+    print("  config: OK");
+    0
+}
+
+type Counter is { value: Int, lower: Int, upper: Int };
+
+implement Counter {
+    fn new(lo: Int, hi: Int) -> Counter {
+        Counter { value: lo, lower: lo, upper: hi }
+    }
+
+    fn increment(&mut self) {
+        if self.value < self.upper {
+            self.value = self.value + 1;
+        }
+    }
+
+    fn decrement(&mut self) {
+        if self.value > self.lower {
+            self.value = self.value - 1;
+        }
+    }
+
+    fn reset(&mut self) {
+        self.value = self.lower;
+    }
+
+    fn current(&self) -> Int {
+        self.value
+    }
+
+    fn is_at_upper(&self) -> Bool {
+        self.value == self.upper
+    }
+
+    fn is_at_lower(&self) -> Bool {
+        self.value == self.lower
+    }
+}
+
+fn test_counter() -> Int {
+    let mut c = Counter.new(0, 5);
+    if c.current() != 0 {
+        print(f"FAIL counter init: {c.current()}");
+        return 1;
+    }
+    c.increment();
+    c.increment();
+    c.increment();
+    if c.current() != 3 {
+        print(f"FAIL counter inc: {c.current()}");
+        return 1;
+    }
+    c.decrement();
+    if c.current() != 2 {
+        print(f"FAIL counter dec: {c.current()}");
+        return 1;
+    }
+    // Test clamping at max
+    c.increment();
+    c.increment();
+    c.increment();
+    c.increment(); // Should clamp
+    if c.current() != 5 {
+        print(f"FAIL counter clamp max: {c.current()}");
+        return 1;
+    }
+    if !c.is_at_upper() {
+        print("FAIL: should be at upper");
+        return 1;
+    }
+    c.reset();
+    if !c.is_at_lower() {
+        print("FAIL: should be at lower after reset");
+        return 1;
+    }
+    print("  counter: OK");
+    0
+}
+
+type Range2 is { lo: Int, hi: Int };
+
+implement Range2 {
+    fn new(lo: Int, hi: Int) -> Range2 {
+        Range2 { lo: lo, hi: hi }
+    }
+
+    fn size(&self) -> Int {
+        if self.hi > self.lo {
+            self.hi - self.lo
+        } else {
+            0
+        }
+    }
+
+    fn includes(&self, val: Int) -> Bool {
+        val >= self.lo && val < self.hi
+    }
+
+    fn overlaps(&self, other: Range2) -> Bool {
+        self.lo < other.hi && other.lo < self.hi
+    }
+}
+
+fn test_range() -> Int {
+    let r = Range2.new(5, 15);
+    if r.size() != 10 {
+        print(f"FAIL range size: {r.size()}");
+        return 1;
+    }
+    if !r.includes(5) {
+        print("FAIL: should include 5");
+        return 1;
+    }
+    if !r.includes(14) {
+        print("FAIL: should include 14");
+        return 1;
+    }
+    if r.includes(15) {
+        print("FAIL: should not include 15");
+        return 1;
+    }
+    let r2 = Range2.new(10, 20);
+    if !r.overlaps(r2) {
+        print("FAIL: ranges should overlap");
+        return 1;
+    }
+    let r3 = Range2.new(20, 30);
+    if r.overlaps(r3) {
+        print("FAIL: ranges should not overlap");
+        return 1;
+    }
+    print("  range: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Implement Chain Tests:");
+    let mut failures = 0;
+    failures = failures + test_config();
+    failures = failures + test_counter();
+    failures = failures + test_range();
+
+    if failures == 0 {
+        print("All implement chain tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

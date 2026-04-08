@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, context, error
+// @description: Test detection of empty context list in using clause
+// @expected-error: E039
+
+// Context list must contain at least one context
+type Callback is fn() using [];

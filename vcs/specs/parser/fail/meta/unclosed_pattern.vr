@@ -1,0 +1,7 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, meta, pattern, unclosed, error
+// @description: Test unclosed pattern definition parenthesis
+// @expected-error: E018
+
+pattern Even(n: Int -> Bool = n % 2 == 0;

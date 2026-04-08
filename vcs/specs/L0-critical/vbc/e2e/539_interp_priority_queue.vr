@@ -1,0 +1,215 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, priority_queue, min_heap, heap_operations, decrease_key
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Min-heap priority queue encoded in arrays.
+// Heap state:
+//   heap_keys[]:   key (priority) at position i in the heap array
+//   heap_vals[]:   value (payload) at position i
+//   pos[]:         pos[v] = heap index of value v (for decrease-key O(log n))
+//   heap_size[0]:  current number of elements
+// Max capacity: 16 elements.
+
+fn heap_swap(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], i: Int, j: Int) {
+    let tk = keys[i]; keys[i] = keys[j]; keys[j] = tk;
+    let tv = vals[i]; vals[i] = vals[j]; vals[j] = tv;
+    pos[vals[i]] = i;
+    pos[vals[j]] = j;
+}
+
+fn heap_sift_up(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], i: Int) {
+    let mut cur = i;
+    while cur > 0 {
+        let par = (cur - 1) / 2;
+        if keys[cur] < keys[par] {
+            heap_swap(keys, vals, pos, cur, par);
+            cur = par;
+        } else {
+            return;
+        }
+    }
+}
+
+fn heap_sift_down(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], sz: Int, i: Int) {
+    let mut cur = i;
+    while 2 * cur + 1 < sz {
+        let lc = 2 * cur + 1;
+        let rc = 2 * cur + 2;
+        let mut smallest = cur;
+        if keys[lc] < keys[smallest] { smallest = lc; }
+        if rc < sz && keys[rc] < keys[smallest] { smallest = rc; }
+        if smallest == cur { return; }
+        heap_swap(keys, vals, pos, cur, smallest);
+        cur = smallest;
+    }
+}
+
+// Insert (key, val) into the heap. val must be a unique ID in [0,15].
+fn heap_insert(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], sz: [Int; 1],
+               key: Int, val: Int) {
+    let i = sz[0];
+    keys[i] = key;
+    vals[i] = val;
+    pos[val] = i;
+    sz[0] = sz[0] + 1;
+    heap_sift_up(keys, vals, pos, i);
+}
+
+// Extract minimum: returns the minimum key, puts its value in out_val[0].
+fn heap_extract_min(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], sz: [Int; 1],
+                    out_val: [Int; 1]) -> Int {
+    let min_key = keys[0];
+    out_val[0] = vals[0];
+    sz[0] = sz[0] - 1;
+    let last = sz[0];
+    keys[0] = keys[last];
+    vals[0] = vals[last];
+    pos[vals[0]] = 0;
+    heap_sift_down(keys, vals, pos, sz[0], 0);
+    min_key
+}
+
+// Decrease key of value val to new_key (new_key <= current key).
+fn heap_decrease_key(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16],
+                     val: Int, new_key: Int) {
+    let i = pos[val];
+    keys[i] = new_key;
+    heap_sift_up(keys, vals, pos, i);
+}
+
+// Verify heap property: keys[i] <= keys[2i+1] and keys[i] <= keys[2i+2].
+fn is_min_heap(keys: [Int; 16], sz: Int) -> Int {
+    let mut i = 0;
+    while i < sz {
+        let lc = 2 * i + 1;
+        let rc = 2 * i + 2;
+        if lc < sz && keys[i] > keys[lc] { return 0; }
+        if rc < sz && keys[i] > keys[rc] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_insert_and_extract() {
+    let mut keys  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut vals  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sz    = [0];
+    let mut ov    = [0];
+
+    // Insert 5 elements.
+    heap_insert(keys, vals, pos, sz, 10, 0);
+    heap_insert(keys, vals, pos, sz, 4,  1);
+    heap_insert(keys, vals, pos, sz, 7,  2);
+    heap_insert(keys, vals, pos, sz, 1,  3);
+    heap_insert(keys, vals, pos, sz, 9,  4);
+
+    assert_eq(sz[0], 5);
+    assert_eq(is_min_heap(keys, sz[0]), 1);
+
+    // Extract min repeatedly: should come out sorted 1,4,7,9,10.
+    let k1 = heap_extract_min(keys, vals, pos, sz, ov);
+    assert_eq(k1, 1);
+    assert_eq(ov[0], 3);
+
+    let k2 = heap_extract_min(keys, vals, pos, sz, ov);
+    assert_eq(k2, 4);
+
+    let k3 = heap_extract_min(keys, vals, pos, sz, ov);
+    assert_eq(k3, 7);
+
+    let k4 = heap_extract_min(keys, vals, pos, sz, ov);
+    assert_eq(k4, 9);
+
+    let k5 = heap_extract_min(keys, vals, pos, sz, ov);
+    assert_eq(k5, 10);
+
+    assert_eq(sz[0], 0);
+    print("insert_and_extract: ok");
+}
+
+fn test_decrease_key() {
+    let mut keys  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut vals  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sz    = [0];
+    let mut ov    = [0];
+
+    heap_insert(keys, vals, pos, sz, 20, 0);
+    heap_insert(keys, vals, pos, sz, 15, 1);
+    heap_insert(keys, vals, pos, sz, 30, 2);
+    heap_insert(keys, vals, pos, sz, 10, 3);
+
+    // Decrease key of val=2 from 30 to 5 — it should become the new minimum.
+    heap_decrease_key(keys, vals, pos, 2, 5);
+    assert_eq(is_min_heap(keys, sz[0]), 1);
+
+    let k1 = heap_extract_min(keys, vals, pos, sz, ov);
+    assert_eq(k1, 5);
+    assert_eq(ov[0], 2);
+
+    let k2 = heap_extract_min(keys, vals, pos, sz, ov);
+    assert_eq(k2, 10);
+
+    print("decrease_key: ok");
+}
+
+fn test_heap_sort_via_extract() {
+    // Insert 8 elements, extract all: output should be sorted.
+    let mut keys  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut vals  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sz    = [0];
+    let mut ov    = [0];
+
+    let mut data = [6, 3, 8, 1, 5, 2, 7, 4, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 8 {
+        heap_insert(keys, vals, pos, sz, data[i], i);
+        i = i + 1;
+    }
+    assert_eq(is_min_heap(keys, sz[0]), 1);
+
+    let mut sorted = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut j = 0;
+    while j < 8 {
+        sorted[j] = heap_extract_min(keys, vals, pos, sz, ov);
+        j = j + 1;
+    }
+    // Verify sorted.
+    let mut k = 1;
+    while k < 8 {
+        assert(sorted[k] >= sorted[k - 1]);
+        k = k + 1;
+    }
+    assert_eq(sorted[0], 1);
+    assert_eq(sorted[7], 8);
+    print("heap_sort_via_extract: ok");
+}
+
+fn test_single_element_heap() {
+    let mut keys = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut vals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sz   = [0];
+    let mut ov   = [0];
+    heap_insert(keys, vals, pos, sz, 42, 0);
+    assert_eq(sz[0], 1);
+    assert_eq(is_min_heap(keys, 1), 1);
+    let k = heap_extract_min(keys, vals, pos, sz, ov);
+    assert_eq(k, 42);
+    assert_eq(sz[0], 0);
+    print("single_element_heap: ok");
+}
+
+fn main() -> Int {
+    test_insert_and_extract();
+    test_decrease_key();
+    test_heap_sort_via_extract();
+    test_single_element_heap();
+    print("[OK] 539_interp_priority_queue");
+    0
+}

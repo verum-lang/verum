@@ -1,0 +1,326 @@
+// =============================================================================
+// addr_protocols_test.vr - Tests for address type protocol implementations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: net, addr, protocols, eq, hash, display, core
+// @description: Tests for Eq, Hash, Display on Ipv4Addr, Ipv6Addr, IpAddr,
+//               SocketAddrV4, SocketAddrV6, SocketAddr, AddrParseError
+// =============================================================================
+
+mount core.net.addr.{
+    Ipv4Addr, Ipv6Addr, IpAddr,
+    SocketAddrV4, SocketAddrV6, SocketAddr,
+    AddrParseError,
+};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Ipv6Addr Hash and Display
+// =============================================================================
+
+@test
+fn test_ipv6_eq_same() {
+    let a = Ipv6Addr.localhost();
+    let b = Ipv6Addr.localhost();
+    assert(a == b);
+}
+
+@test
+fn test_ipv6_eq_different() {
+    let a = Ipv6Addr.localhost();
+    let b = Ipv6Addr.unspecified();
+    assert(a != b);
+}
+
+@test
+fn test_ipv6_eq_custom() {
+    let a = Ipv6Addr.new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+    let b = Ipv6Addr.new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 2: IpAddr Eq, Hash, Display
+// =============================================================================
+
+@test
+fn test_ipaddr_eq_v4_same() {
+    let a = IpAddr.v4(127, 0, 0, 1);
+    let b = IpAddr.v4(127, 0, 0, 1);
+    assert(a == b);
+}
+
+@test
+fn test_ipaddr_eq_v4_different() {
+    let a = IpAddr.v4(127, 0, 0, 1);
+    let b = IpAddr.v4(192, 168, 1, 1);
+    assert(a != b);
+}
+
+@test
+fn test_ipaddr_eq_v6_same() {
+    let a = IpAddr.V6(Ipv6Addr.localhost());
+    let b = IpAddr.V6(Ipv6Addr.localhost());
+    assert(a == b);
+}
+
+@test
+fn test_ipaddr_eq_v4_v6_different() {
+    let a = IpAddr.v4(127, 0, 0, 1);
+    let b = IpAddr.V6(Ipv6Addr.localhost());
+    assert(a != b);
+}
+
+@test
+fn test_ipaddr_is_ipv4() {
+    let a = IpAddr.v4(10, 0, 0, 1);
+    assert(a.is_ipv4());
+    assert(!a.is_ipv6());
+}
+
+@test
+fn test_ipaddr_is_ipv6() {
+    let a = IpAddr.V6(Ipv6Addr.unspecified());
+    assert(a.is_ipv6());
+    assert(!a.is_ipv4());
+}
+
+// =============================================================================
+// Section 3: SocketAddrV4 Eq, Hash, Display
+// =============================================================================
+
+@test
+fn test_socketaddrv4_eq_same() {
+    let a = SocketAddrV4.new(Ipv4Addr.localhost(), 8080);
+    let b = SocketAddrV4.new(Ipv4Addr.localhost(), 8080);
+    assert(a == b);
+}
+
+@test
+fn test_socketaddrv4_eq_different_port() {
+    let a = SocketAddrV4.new(Ipv4Addr.localhost(), 8080);
+    let b = SocketAddrV4.new(Ipv4Addr.localhost(), 9090);
+    assert(a != b);
+}
+
+@test
+fn test_socketaddrv4_eq_different_ip() {
+    let a = SocketAddrV4.new(Ipv4Addr.localhost(), 80);
+    let b = SocketAddrV4.new(Ipv4Addr.unspecified(), 80);
+    assert(a != b);
+}
+
+@test
+fn test_socketaddrv4_accessors() {
+    let addr = SocketAddrV4.new(Ipv4Addr.new(192, 168, 1, 1), 443);
+    assert_eq(addr.port(), 443);
+}
+
+// =============================================================================
+// Section 4: SocketAddrV6 Eq, Hash, Debug, Display
+// =============================================================================
+
+@test
+fn test_socketaddrv6_eq_same() {
+    let a = SocketAddrV6.new(Ipv6Addr.localhost(), 8080, 0, 0);
+    let b = SocketAddrV6.new(Ipv6Addr.localhost(), 8080, 0, 0);
+    assert(a == b);
+}
+
+@test
+fn test_socketaddrv6_eq_different_port() {
+    let a = SocketAddrV6.new(Ipv6Addr.localhost(), 8080, 0, 0);
+    let b = SocketAddrV6.new(Ipv6Addr.localhost(), 9090, 0, 0);
+    assert(a != b);
+}
+
+@test
+fn test_socketaddrv6_eq_different_ip() {
+    let a = SocketAddrV6.new(Ipv6Addr.localhost(), 80, 0, 0);
+    let b = SocketAddrV6.new(Ipv6Addr.unspecified(), 80, 0, 0);
+    assert(a != b);
+}
+
+@test
+fn test_socketaddrv6_eq_different_flowinfo() {
+    let a = SocketAddrV6.new(Ipv6Addr.localhost(), 80, 1, 0);
+    let b = SocketAddrV6.new(Ipv6Addr.localhost(), 80, 2, 0);
+    assert(a != b);
+}
+
+@test
+fn test_socketaddrv6_eq_different_scope() {
+    let a = SocketAddrV6.new(Ipv6Addr.localhost(), 80, 0, 1);
+    let b = SocketAddrV6.new(Ipv6Addr.localhost(), 80, 0, 2);
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 5: SocketAddr Eq, Hash
+// =============================================================================
+
+@test
+fn test_socketaddr_eq_v4_same() {
+    let a = SocketAddr.new_v4(Ipv4Addr.localhost(), 80);
+    let b = SocketAddr.new_v4(Ipv4Addr.localhost(), 80);
+    assert(a == b);
+}
+
+@test
+fn test_socketaddr_eq_v4_different() {
+    let a = SocketAddr.new_v4(Ipv4Addr.localhost(), 80);
+    let b = SocketAddr.new_v4(Ipv4Addr.localhost(), 443);
+    assert(a != b);
+}
+
+@test
+fn test_socketaddr_eq_v6_same() {
+    let a = SocketAddr.new_v6(Ipv6Addr.localhost(), 8080);
+    let b = SocketAddr.new_v6(Ipv6Addr.localhost(), 8080);
+    assert(a == b);
+}
+
+@test
+fn test_socketaddr_eq_v4_v6_different() {
+    let a = SocketAddr.new_v4(Ipv4Addr.localhost(), 80);
+    let b = SocketAddr.new_v6(Ipv6Addr.localhost(), 80);
+    assert(a != b);
+}
+
+@test
+fn test_socketaddr_port() {
+    let a = SocketAddr.new_v4(Ipv4Addr.new(10, 0, 0, 1), 3000);
+    assert_eq(a.port(), 3000);
+}
+
+@test
+fn test_socketaddr_is_ipv4() {
+    let a = SocketAddr.new_v4(Ipv4Addr.localhost(), 80);
+    assert(a.is_ipv4());
+    assert(!a.is_ipv6());
+}
+
+@test
+fn test_socketaddr_is_ipv6() {
+    let a = SocketAddr.new_v6(Ipv6Addr.localhost(), 80);
+    assert(a.is_ipv6());
+    assert(!a.is_ipv4());
+}
+
+// =============================================================================
+// Section 6: AddrParseError Eq
+// =============================================================================
+
+@test
+fn test_addr_parse_error_eq_same() {
+    let a = AddrParseError.InvalidFormat;
+    let b = AddrParseError.InvalidFormat;
+    assert(a == b);
+}
+
+@test
+fn test_addr_parse_error_eq_different() {
+    let a = AddrParseError.InvalidFormat;
+    let b = AddrParseError.InvalidOctet;
+    assert(a != b);
+}
+
+@test
+fn test_addr_parse_error_eq_port() {
+    let a = AddrParseError.InvalidPort;
+    let b = AddrParseError.InvalidPort;
+    assert(a == b);
+}
+
+@test
+fn test_addr_parse_error_all_variants() {
+    assert(AddrParseError.InvalidFormat != AddrParseError.InvalidOctet);
+    assert(AddrParseError.InvalidOctet != AddrParseError.InvalidPort);
+    assert(AddrParseError.InvalidFormat != AddrParseError.InvalidPort);
+}
+
+// =============================================================================
+// Section 7: Ipv4Addr existing functionality verification
+// =============================================================================
+
+@test
+fn test_ipv4_eq_same() {
+    let a = Ipv4Addr.new(192, 168, 1, 1);
+    let b = Ipv4Addr.new(192, 168, 1, 1);
+    assert(a == b);
+}
+
+@test
+fn test_ipv4_eq_different() {
+    let a = Ipv4Addr.new(10, 0, 0, 1);
+    let b = Ipv4Addr.new(10, 0, 0, 2);
+    assert(a != b);
+}
+
+@test
+fn test_ipv4_localhost() {
+    let addr = Ipv4Addr.localhost();
+    assert(addr.is_loopback());
+}
+
+@test
+fn test_ipv4_unspecified() {
+    let addr = Ipv4Addr.unspecified();
+    assert(addr.is_unspecified());
+}
+
+@test
+fn test_ipv4_private() {
+    assert(Ipv4Addr.new(10, 0, 0, 1).is_private());
+    assert(Ipv4Addr.new(172, 16, 0, 1).is_private());
+    assert(Ipv4Addr.new(192, 168, 1, 1).is_private());
+    assert(!Ipv4Addr.new(8, 8, 8, 8).is_private());
+}
+
+@test
+fn test_ipv4_broadcast() {
+    assert(Ipv4Addr.broadcast().is_broadcast());
+    assert(!Ipv4Addr.localhost().is_broadcast());
+}
+
+@test
+fn test_ipv4_to_u32() {
+    let addr = Ipv4Addr.new(192, 168, 1, 1);
+    let val = addr.to_u32();
+    let back = Ipv4Addr.from_u32(val);
+    assert(addr == back);
+}
+
+// =============================================================================
+// Section 8: Ipv6Addr functionality
+// =============================================================================
+
+@test
+fn test_ipv6_localhost() {
+    let addr = Ipv6Addr.localhost();
+    assert(addr.is_loopback());
+    assert(!addr.is_unspecified());
+}
+
+@test
+fn test_ipv6_unspecified() {
+    let addr = Ipv6Addr.unspecified();
+    assert(addr.is_unspecified());
+    assert(!addr.is_loopback());
+}
+
+@test
+fn test_ipv6_multicast() {
+    let addr = Ipv6Addr.new(0xFF02, 0, 0, 0, 0, 0, 0, 1);
+    assert(addr.is_multicast());
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,98 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: type-alias, newtype, e2e
+// @description: Test type aliases and newtype wrappers
+
+type Meters is (Int);
+type Seconds is (Int);
+
+fn speed(distance: Meters, time: Seconds) -> Int {
+    distance.0 / time.0
+}
+
+type Matrix is {
+    rows: Int,
+    cols: Int,
+    data: List<Int>,
+};
+
+implement Matrix {
+    fn new(rows: Int, cols: Int) -> Matrix {
+        let mut data = List.new();
+        let mut i = 0;
+        while i < rows * cols {
+            data.push(0);
+            i = i + 1;
+        }
+        Matrix { rows: rows, cols: cols, data: data }
+    }
+
+    fn get(&self, r: Int, c: Int) -> Int {
+        self.data[r * self.cols + c]
+    }
+
+    fn set(&mut self, r: Int, c: Int, val: Int) {
+        self.data[r * self.cols + c] = val;
+    }
+
+    fn sum(&self) -> Int {
+        let mut total = 0;
+        let mut i = 0;
+        while i < self.data.len() {
+            total = total + self.data[i];
+            i = i + 1;
+        }
+        total
+    }
+}
+
+type NodeId is (Int);
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Newtype constructor and field access
+    let dist = Meters(100);
+    let time = Seconds(10);
+    let spd = speed(dist, time);
+    if spd != 10 {
+        print(f"FAIL: speed expected 10, got {spd}");
+        failures = failures + 1;
+    } else {
+        print("  newtype_speed: OK");
+    }
+
+    // Test 2: Matrix type with methods
+    let mut m = Matrix.new(3, 3);
+    m.set(0, 0, 1);
+    m.set(1, 1, 5);
+    m.set(2, 2, 9);
+    let diag_sum = m.get(0, 0) + m.get(1, 1) + m.get(2, 2);
+    if diag_sum != 15 {
+        print(f"FAIL: diag_sum expected 15, got {diag_sum}");
+        failures = failures + 1;
+    } else {
+        print("  matrix_diag: OK");
+    }
+    if m.sum() != 15 {
+        print(f"FAIL: matrix sum expected 15, got {m.sum()}");
+        failures = failures + 1;
+    } else {
+        print("  matrix_sum: OK");
+    }
+
+    // Test 3: NodeId newtype
+    let node = NodeId(42);
+    if node.0 != 42 {
+        print(f"FAIL: node.0 expected 42, got {node.0}");
+        failures = failures + 1;
+    } else {
+        print("  node_id: OK");
+    }
+
+    if failures == 0 {
+        print("All type alias tests passed");
+    }
+    failures
+}

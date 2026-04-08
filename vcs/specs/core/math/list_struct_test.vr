@@ -1,0 +1,35 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, struct, list
+// @description: Struct with List field access test
+
+module specs.core.math.list_struct_test;
+
+type MyVec<T> is {
+    data: List<T>,
+    size: Int,
+};
+
+implement<T> MyVec<T> {
+    public fn new(n: Int) -> MyVec<T> {
+        let data = List.with_capacity(n);
+        MyVec { data, size: n }
+    }
+
+    public fn get_size(&self) -> Int {
+        self.size
+    }
+}
+
+fn main() {
+    print("Creating MyVec<Float> with size 3...");
+    let v: MyVec<Float> = MyVec.new(3);
+    print("MyVec created!");
+
+    print("Getting size...");
+    let s = v.get_size();
+    print(f"size = {s}");
+
+    print("Test done!");
+}

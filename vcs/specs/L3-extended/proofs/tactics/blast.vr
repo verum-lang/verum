@@ -1,0 +1,342 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, blast
+// @timeout: 20000
+// @description: Tests the blast tactic for aggressive automated proving
+
+/// ============================================================
+/// BLAST TACTIC
+/// ============================================================
+///
+/// The blast tactic is an aggressive proof search that combines
+/// multiple strategies: tableaux, superposition, and SMT solving.
+/// It is more powerful than auto but may use more resources.
+
+// ------------------------------------------------------------
+// Basic Blast Proofs
+// ------------------------------------------------------------
+
+/// Propositional logic
+theorem blast_prop_1(p: Bool, q: Bool, r: Bool):
+    (p implies q) implies (q implies r) implies (p implies r)
+{
+    proof by blast
+}
+
+theorem blast_prop_2(p: Bool, q: Bool):
+    (p implies q) implies (!q implies !p)
+{
+    proof by blast
+}
+
+theorem blast_prop_3(p: Bool, q: Bool, r: Bool):
+    ((p || q) && (!p || r)) implies (q || r)
+{
+    proof by blast
+}
+
+/// De Morganps laws
+theorem blast_demorgan_1(p: Bool, q: Bool):
+    !(p && q) == (!p || !q)
+{
+    proof by blast
+}
+
+theorem blast_demorgan_2(p: Bool, q: Bool):
+    !(p || q) == (!p && !q)
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// First-Order Logic
+// ------------------------------------------------------------
+
+/// Universal-existential combinations
+theorem blast_fol_1<T>():
+    (forall x: T. exists y: T. P(x, y)) implies
+    (forall x: T. exists y: T. P(x, y))
+{
+    proof by blast
+}
+
+/// Skolemization handling
+theorem blast_skolem<T>():
+    (exists x: T. forall y: T. P(x, y)) implies
+    (forall y: T. exists x: T. P(x, y))
+{
+    proof by blast
+}
+
+/// Quantifier distribution
+theorem blast_quant_dist<T>(p: fn(T) -> Bool, q: fn(T) -> Bool):
+    (forall x: T. p(x) && q(x)) ==
+    (forall x: T. p(x)) && (forall x: T. q(x))
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Equality Reasoning
+// ------------------------------------------------------------
+
+/// Congruence
+theorem blast_congr(x: Int, y: Int, f: fn(Int) -> Int)
+    requires x == y
+    ensures f(x) == f(y)
+{
+    proof by blast
+}
+
+/// Functional equality
+theorem blast_func_eq<A, B>(f: fn(A) -> B, g: fn(A) -> B)
+    requires forall x: A. f(x) == g(x)
+    ensures f == g
+{
+    proof by blast  // Extensionality
+}
+
+/// Leibniz equality
+theorem blast_leibniz<T>(x: T, y: T)
+    requires x == y
+    ensures forall P: fn(T) -> Bool. P(x) == P(y)
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Arithmetic Reasoning
+// ------------------------------------------------------------
+
+/// Linear arithmetic
+theorem blast_linear(x: Int, y: Int, z: Int)
+    requires x + y > z
+    requires z > 0
+    ensures x + y > 0
+{
+    proof by blast
+}
+
+/// Non-linear arithmetic
+theorem blast_nonlinear(x: Int)
+    requires x > 2
+    ensures x * x > 2 * x
+{
+    proof by blast
+}
+
+/// Integer divisibility
+theorem blast_divides(a: Int, b: Int, c: Int)
+    requires divides(a, b)
+    requires divides(b, c)
+    ensures divides(a, c)
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Set Theory
+// ------------------------------------------------------------
+
+/// Subset transitivity
+theorem blast_subset<T>(A: Set<T>, B: Set<T>, C: Set<T>)
+    requires A.is_subset(B)
+    requires B.is_subset(C)
+    ensures A.is_subset(C)
+{
+    proof by blast
+}
+
+/// Set operations
+theorem blast_set_ops<T>(A: Set<T>, B: Set<T>):
+    A.union(B).inter(A) == A
+{
+    proof by blast
+}
+
+/// Complement laws
+theorem blast_complement<T>(A: Set<T>, U: Set<T>)
+    requires A.is_subset(U)
+    ensures A.union(U.diff(A)) == U
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Type-Specific Reasoning
+// ------------------------------------------------------------
+
+/// Option monad laws
+theorem blast_option_left_id<A, B>(x: A, f: fn(A) -> Maybe<B>):
+    Some(x).and_then(f) == f(x)
+{
+    proof by blast
+}
+
+theorem blast_option_right_id<A>(m: Maybe<A>):
+    m.and_then(|x| Some(x)) == m
+{
+    proof by blast
+}
+
+theorem blast_option_assoc<A, B, C>(
+    m: Maybe<A>,
+    f: fn(A) -> Maybe<B>,
+    g: fn(B) -> Maybe<C>
+):
+    m.and_then(f).and_then(g) == m.and_then(|x| f(x).and_then(g))
+{
+    proof by blast
+}
+
+/// Result monad laws
+theorem blast_result_laws<E, A, B, C>(
+    m: Result<A, E>,
+    f: fn(A) -> Result<B, E>,
+    g: fn(B) -> Result<C, E>
+):
+    m.and_then(f).and_then(g) == m.and_then(|x| f(x).and_then(g))
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Complex Reasoning Chains
+// ------------------------------------------------------------
+
+/// Multi-step reasoning
+theorem blast_chain(
+    a: Int, b: Int, c: Int, d: Int, e: Int
+)
+    requires a > b
+    requires b >= c
+    requires c == d
+    requires d > e
+    ensures a > e
+{
+    proof by blast
+}
+
+/// Case analysis
+theorem blast_cases(x: Int)
+    requires x * x == 4
+    ensures x == 2 || x == -2
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Blast Configuration
+// ------------------------------------------------------------
+
+/// Blast with timeout
+theorem blast_timeout(complex_prop: Bool)
+    requires complex_prop
+    ensures complex_prop
+{
+    proof by blast { timeout: 10000 }
+}
+
+/// Blast with specific strategies
+theorem blast_strategies(p: Bool, q: Bool, r: Bool):
+    ((p implies q) && (q implies r) && p) implies r
+{
+    proof by blast {
+        strategies: [tableaux, resolution, smt]
+    }
+}
+
+/// Blast with depth control
+theorem blast_depth(x: Int, y: Int, z: Int)
+    requires x > y
+    requires y > z
+    ensures x > z
+{
+    proof by blast { max_depth: 20 }
+}
+
+// ------------------------------------------------------------
+// Blast vs Other Tactics
+// ------------------------------------------------------------
+
+/// When blast is overkill (prefer simpler tactics)
+theorem blast_overkill(p: Bool)
+    requires p
+    ensures p
+{
+    // Works but auto or trivial would be better
+    proof by blast
+}
+
+/// When blast is needed
+theorem blast_needed(p: Bool, q: Bool, r: Bool, s: Bool):
+    ((p || q) && (!p || r) && (!q || s) && (!r || !s)) implies
+    false
+{
+    proof by blast  // SAT solving
+}
+
+// ------------------------------------------------------------
+// Blast with Hints
+// ------------------------------------------------------------
+
+/// Provide hints to guide blast
+theorem blast_hints<T>(xs: List<T>, ys: List<T>)
+    requires xs ++ ys == ys ++ xs
+    requires len(xs) == len(ys)
+    ensures xs == ys || xs ++ xs == ys ++ ys
+{
+    proof by blast {
+        hints: [list_append_eq_implies, length_append]
+    }
+}
+
+/// Blast with lemma selection
+theorem blast_lemmas(n: Nat)
+    requires is_prime(n)
+    requires n > 2
+    ensures is_odd(n)
+{
+    proof by blast using [prime_greater_than_2_is_odd]
+}
+
+// ------------------------------------------------------------
+// Blast for Decision Procedures
+// ------------------------------------------------------------
+
+/// Presburger arithmetic
+theorem blast_presburger(x: Int, y: Int, z: Int)
+    requires 3 * x + 2 * y == z
+    requires x >= 0
+    requires y >= 0
+    ensures z >= 0
+{
+    proof by blast { theory: presburger }
+}
+
+/// Bit-vector reasoning
+theorem blast_bitvector(x: u32, y: u32)
+    requires (x & y) == 0
+    ensures (x | y) == (x ^ y)
+{
+    proof by blast { theory: bitvector }
+}
+
+// ------------------------------------------------------------
+// Blast Escape Hatches
+// ------------------------------------------------------------
+
+/// When blast fails, provide partial proof
+theorem blast_partial(n: Nat): sum(0..=n) == n * (n + 1) / 2 {
+    proof {
+        // Blast can't handle induction automatically
+        by induction on n {
+            case 0 => blast
+            case succ(k) => {
+                have ih: sum(0..=k) == k * (k + 1) / 2;
+                blast  // Can handle the algebraic step
+            }
+        }
+    }
+}

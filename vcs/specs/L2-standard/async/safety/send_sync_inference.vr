@@ -1,0 +1,176 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, safety, send, sync, inference
+// @description: Send and Sync trait inference for concurrent safety
+
+/// Send and Sync are auto-traits that determine thread safety:
+/// - Send: Type can be transferred across thread boundaries
+/// - Sync: Type can be shared between threads (T is Sync iff &T is Send)
+
+/// Automatically Send + Sync: primitive types, owned data
+type SafeData is {
+    count: Int,          // Int is Send + Sync
+    name: Text,          // Text is Send + Sync
+    items: List<Int>,    // List<T> is Send + Sync if T is
+};
+
+// SafeData is automatically Send + Sync
+
+/// Non-Send type: contains raw pointer
+type RawPointerWrapper is {
+    ptr: *mut Int,  // Raw pointers are !Send and !Sync
+};
+
+// RawPointerWrapper is !Send and !Sync
+
+/// Non-Sync but Send: interior mutability without sync
+type UnsyncData is {
+    cell: Cell<Int>,  // Cell is Send but !Sync
+};
+
+// UnsyncData is Send but !Sync
+
+/// Sync but not Send: reference to non-Send
+type SyncNotSend is {
+    // This is a contrived example
+    // In practice, this is rare
+};
+
+/// Making a type explicitly not Send
+type ThreadLocal is {
+    data: Int,
+    _not_send: Int,
+};
+
+// ThreadLocal is !Send
+
+/// Wrapper that adds Send+Sync bounds
+type ThreadSafe<T: Send + Sync> is {
+    value: T,
+};
+
+implement ThreadSafe<T> {
+    fn new(value: T) -> Self {
+        Self { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+}
+
+/// Shared wrapper for concurrent access
+type Shared<T> is {
+    inner: Arc<T>,
+};
+
+implement Shared<T> where T: Send + Sync {
+    fn new(value: T) -> Self {
+        Self { inner: Arc.new(value) }
+    }
+
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
+// Shared<T> is Send + Sync if T is Send + Sync
+
+/// Mutex provides Sync for !Sync types
+type SafeMutex<T: Send> is {
+    inner: Mutex<T>,
+};
+
+// SafeMutex<T> is Sync (and Send) if T is Send
+// The mutex provides synchronization
+
+/// Examples of Send/Sync inference
+fn send_sync_examples() {
+    // OK: Int is Send + Sync
+    let x: Int = 42;
+    spawn_requires_send(x);
+
+    // OK: Text is Send + Sync
+    let s = "hello";
+    spawn_requires_send(s);
+
+    // OK: List<Int> is Send + Sync
+    let list = [1, 2, 3];
+    spawn_requires_send(list);
+
+    // OK: SafeData is Send + Sync
+    let data = SafeData { count: 1, name: "test", items: [] };
+    spawn_requires_send(data);
+
+    // ERROR: RawPointerWrapper is !Send
+    // let ptr_data = RawPointerWrapper { ptr: &mut 42 };
+    // spawn_requires_send(ptr_data);  // Compile error
+
+    // OK: Wrap in Mutex to make sendable
+    let unsafe_in_mutex = Mutex.new(RawPointerWrapper { ptr: null_mut() });
+    // Now it's Send (though you need unsafe to use the pointer)
+}
+
+/// Function requiring Send bound
+fn spawn_requires_send<T: Send>(value: T) {
+    spawn {
+        let _ = value;
+    };
+}
+
+/// Function requiring Sync bound
+fn share_requires_sync<T: Sync>(value: &T) {
+    let value_ref = value;
+    spawn {
+        let _ = value_ref;
+    };
+}
+
+/// Conditional Send/Sync implementation
+type Container<T> is {
+    value: T,
+};
+
+// Container is Send if T is Send
+// Container is Sync if T is Sync
+// This is automatic
+
+/// Negative trait bounds
+fn only_single_threaded<T: !Send>(value: T) {
+    // This function only accepts non-Send types
+    // Useful for enforcing single-threaded usage
+}
+
+/// Arc + Mutex pattern for shared mutable state
+type SharedMutable<T: Send> is {
+    inner: Arc<Mutex<T>>,
+};
+
+implement SharedMutable<T> {
+    fn new(value: T) -> Self {
+        Self { inner: Arc.new(Mutex.new(value)) }
+    }
+
+    fn with<R>(&self, f: fn(&mut T) -> R) -> R {
+        let mut guard = self.inner.lock().unwrap();
+        f(&mut *guard)
+    }
+
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
+// SharedMutable<T> is Send + Sync if T is Send
+
+type Cell<T> is { value: T };
+type PhantomData<T> is {};
+type Arc<T> is { ptr: *const T };
+type Mutex<T> is { data: T };
+
+fn null_mut<T>() -> *mut T { 0 as *mut T }
+
+fn main() {
+    send_sync_examples();
+}

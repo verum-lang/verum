@@ -1,0 +1,110 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, and-pattern, pattern-matching
+// @description: And-pattern (conjunction) exhaustiveness checking
+
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+
+// And-patterns require all conjuncts to match
+fn classify_maybe(opt: Maybe<Int>) -> Text =
+    match opt {
+        None => "nothing",
+        Some(x) & _ if x > 0 => "positive",
+        Some(x) & _ if x < 0 => "negative",
+        Some(0) => "zero"
+    };
+
+// And-pattern with destructuring on both sides
+fn extract_both(pair: (Maybe<Int>, Maybe<Text>)) -> Text =
+    match pair {
+        (Some(n), Some(s)) & _ if n > 0 => f"positive {n}: {s}",
+        (Some(n), Some(s)) => f"non-positive {n}: {s}",
+        (None, _) & (_, None) => "both none",  // Intersection
+        (None, Some(s)) => f"just text: {s}",
+        (Some(n), None) => f"just number: {n}"
+    };
+
+// Named binding on both sides of &
+fn swap_if_ordered(a: Int, b: Int) -> (Int, Int) =
+    match (a, b) {
+        (x, y) & _ if x <= y => (x, y),
+        (x, y) => (y, x)
+    };
+
+// Combining patterns with and
+type Color is Red | Green | Blue;
+type Shape is Circle | Square | Triangle;
+
+fn is_primary_circle(c: Color, s: Shape) -> Bool =
+    match (c, s) {
+        (Red & _, Circle) => true,
+        (Blue & _, Circle) => true,
+        _ => false
+    };
+
+// And-pattern in nested context
+fn process_nested(opt: Maybe<Maybe<Int>>) -> Int =
+    match opt {
+        Some(Some(x)) & _ if x > 0 => x,
+        Some(Some(x)) & Some(_) => -x,
+        Some(None) & _ => 0,
+        None => -1
+    };
+
+// And-pattern with record destructuring
+type Person is { name: Text, age: Int };
+
+fn classify_person(p: Person) -> Text =
+    match p {
+        Person { name, age } & _ if age >= 18 => f"adult: {name}",
+        Person { name, .. } => f"minor: {name}"
+    };
+
+// And-pattern combining with or-pattern
+fn complex_match(n: Int) -> Text =
+    match n {
+        (1 | 2 | 3) & _ => "small",
+        (10 | 20 | 30) & _ => "decade",
+        x & _ if x < 0 => "negative",
+        _ => "other"
+    };
+
+// Multiple and conjuncts
+fn triple_check(a: Int, b: Int, c: Int) -> Bool =
+    match (a, b, c) {
+        (x, y, z) & _ & _ if x < y && y < z => true,
+        _ => false
+    };
+
+// And-pattern with type narrowing
+fn narrow_type(opt: Maybe<Int>) -> Int =
+    match opt {
+        Some(x) & Some(_) if x > 0 => x,  // Both conjuncts must match
+        Some(x) => x,
+        None => 0
+    };
+
+fn main() {
+    assert(classify_maybe(Some(5)) == "positive");
+    assert(classify_maybe(Some(-3)) == "negative");
+    assert(classify_maybe(Some(0)) == "zero");
+    assert(classify_maybe(None) == "nothing");
+
+    assert(swap_if_ordered(1, 2) == (1, 2));
+    assert(swap_if_ordered(2, 1) == (1, 2));
+
+    assert(is_primary_circle(Red, Circle));
+    assert(!is_primary_circle(Green, Circle));
+
+    assert(process_nested(Some(Some(5))) == 5);
+    assert(process_nested(Some(None)) == 0);
+    assert(process_nested(None) == -1);
+
+    assert(complex_match(2) == "small");
+    assert(complex_match(20) == "decade");
+    assert(complex_match(-5) == "negative");
+
+    assert(triple_check(1, 2, 3));
+    assert(!triple_check(3, 2, 1));
+}

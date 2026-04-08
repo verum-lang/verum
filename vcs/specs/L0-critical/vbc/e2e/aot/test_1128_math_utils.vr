@@ -1,0 +1,161 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: math, utilities, integer-math
+// @description: Test mathematical utility functions
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    (a / gcd(a, b)) * b
+}
+
+fn test_gcd_lcm() -> Int {
+    if gcd(12, 8) != 4 {
+        print(f"FAIL gcd(12,8)={gcd(12, 8)}");
+        return 1;
+    }
+    if gcd(17, 5) != 1 {
+        print("FAIL gcd(17,5)");
+        return 1;
+    }
+    if lcm(4, 6) != 12 {
+        print(f"FAIL lcm(4,6)={lcm(4, 6)}");
+        return 1;
+    }
+    if lcm(3, 7) != 21 {
+        print(f"FAIL lcm(3,7)={lcm(3, 7)}");
+        return 1;
+    }
+    print("  gcd_lcm: OK");
+    0
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+fn test_clamp() -> Int {
+    if clamp(5, 0, 10) != 5 {
+        print("FAIL clamp mid");
+        return 1;
+    }
+    if clamp(-5, 0, 10) != 0 {
+        print("FAIL clamp lo");
+        return 1;
+    }
+    if clamp(15, 0, 10) != 10 {
+        print("FAIL clamp hi");
+        return 1;
+    }
+    print("  clamp: OK");
+    0
+}
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    if n < 4 { return true; }
+    if n % 2 == 0 { return false; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 {
+            return false;
+        }
+        i = i + 2;
+    }
+    true
+}
+
+fn test_prime() -> Int {
+    if !is_prime(2) { print("FAIL: 2 is prime"); return 1; }
+    if !is_prime(3) { print("FAIL: 3 is prime"); return 1; }
+    if is_prime(4) { print("FAIL: 4 is not prime"); return 1; }
+    if !is_prime(17) { print("FAIL: 17 is prime"); return 1; }
+    if is_prime(15) { print("FAIL: 15 is not prime"); return 1; }
+    if !is_prime(97) { print("FAIL: 97 is prime"); return 1; }
+
+    // Count primes up to 100
+    let mut count = 0;
+    let mut n = 2;
+    while n <= 100 {
+        if is_prime(n) {
+            count = count + 1;
+        }
+        n = n + 1;
+    }
+    // There are 25 primes <= 100
+    if count != 25 {
+        print(f"FAIL prime count: {count}, expected 25");
+        return 1;
+    }
+    print("  prime: OK");
+    0
+}
+
+@allow(unbounded_recursion)
+fn int_pow(base: Int, exp: Int) -> Int {
+    if exp == 0 { return 1; }
+    if exp % 2 == 0 {
+        let half = int_pow(base, exp / 2);
+        half * half
+    } else {
+        base * int_pow(base, exp - 1)
+    }
+}
+
+fn test_power() -> Int {
+    if int_pow(2, 0) != 1 { print("FAIL 2^0"); return 1; }
+    if int_pow(2, 10) != 1024 { print(f"FAIL 2^10={int_pow(2, 10)}"); return 1; }
+    if int_pow(3, 5) != 243 { print(f"FAIL 3^5={int_pow(3, 5)}"); return 1; }
+    if int_pow(10, 6) != 1000000 { print("FAIL 10^6"); return 1; }
+    print("  power: OK");
+    0
+}
+
+fn integer_sqrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+fn test_isqrt() -> Int {
+    if integer_sqrt(0) != 0 { print("FAIL sqrt(0)"); return 1; }
+    if integer_sqrt(1) != 1 { print("FAIL sqrt(1)"); return 1; }
+    if integer_sqrt(4) != 2 { print("FAIL sqrt(4)"); return 1; }
+    if integer_sqrt(9) != 3 { print("FAIL sqrt(9)"); return 1; }
+    if integer_sqrt(100) != 10 { print("FAIL sqrt(100)"); return 1; }
+    if integer_sqrt(10000) != 100 { print(f"FAIL sqrt(10000)={integer_sqrt(10000)}"); return 1; }
+    print("  isqrt: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Math Utils Tests:");
+    let mut failures = 0;
+    failures = failures + test_gcd_lcm();
+    failures = failures + test_clamp();
+    failures = failures + test_prime();
+    failures = failures + test_power();
+    failures = failures + test_isqrt();
+
+    if failures == 0 {
+        print("All math utils tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

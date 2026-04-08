@@ -1,0 +1,195 @@
+// @test: parse-fail
+// @level: L0
+// @tier: all
+// @tags: parser, expressions, destructuring, assignment, error, L0-critical
+// @description: Invalid destructuring assignment patterns - error detection
+// @expected-error: E046
+// Spec: docs/architecture/new-features.md - Cluster 1: Unified Destructuring System
+
+// =============================================================================
+// Section 1: Literals Cannot Be Assignment Targets
+// =============================================================================
+
+fn test_integer_literal_target() {
+    42 = x;                    // ERROR: Cannot assign to integer literal
+}
+
+fn test_string_literal_target() {
+    "hello" = x;               // ERROR: Cannot assign to string literal
+}
+
+fn test_bool_literal_target() {
+    true = x;                  // ERROR: Cannot assign to boolean literal
+}
+
+fn test_float_literal_target() {
+    3.14 = x;                  // ERROR: Cannot assign to float literal
+}
+
+fn test_tuple_of_literals() {
+    (1, 2) = (a, b);           // ERROR: Tuple containing literals
+}
+
+fn test_array_of_literals() {
+    [1, 2, 3] = items;         // ERROR: Array containing literals
+}
+
+fn test_mixed_literal_and_ident() {
+    (a, 42) = values;          // ERROR: Mixed literal and identifier
+}
+
+// =============================================================================
+// Section 2: Function/Method Calls Cannot Be Targets
+// =============================================================================
+
+fn test_function_call_target() {
+    get_value() = x;           // ERROR: Cannot assign to function call
+}
+
+fn test_method_call_target() {
+    obj.method() = x;          // ERROR: Cannot assign to method call
+}
+
+fn test_chained_method_call_target() {
+    a.b().c() = x;             // ERROR: Cannot assign to chained method call
+}
+
+fn test_function_call_in_tuple() {
+    (a, foo()) = values;       // ERROR: Function call in tuple pattern
+}
+
+fn test_method_call_in_array() {
+    [a, obj.get()] = items;    // ERROR: Method call in array pattern
+}
+
+// =============================================================================
+// Section 3: Binary Expressions Cannot Be Targets
+// =============================================================================
+
+fn test_arithmetic_expr_target() {
+    (a + b) = x;               // ERROR: Cannot assign to arithmetic expression
+}
+
+fn test_comparison_expr_target() {
+    (a == b) = true;           // ERROR: Cannot assign to comparison
+}
+
+fn test_logical_expr_target() {
+    (a && b) = true;           // ERROR: Cannot assign to logical expression
+}
+
+fn test_binary_in_tuple() {
+    (a, b * 2) = values;       // ERROR: Binary expression in tuple pattern
+}
+
+// =============================================================================
+// Section 4: Invalid Record Patterns
+// =============================================================================
+
+fn test_anonymous_record() {
+    { x, y } = point;          // ERROR: Record pattern needs type name
+}
+
+fn test_struct_update_in_pattern() {
+    Point { x, ..other } = p;  // ERROR: Struct update syntax not allowed
+}
+
+fn test_duplicate_fields() {
+    Point { x, x } = point;    // ERROR: Duplicate field
+}
+
+// =============================================================================
+// Section 5: Invalid Array Patterns
+// =============================================================================
+
+fn test_multiple_rest_patterns() {
+    [..a, ..b] = items;        // ERROR: Multiple rest patterns
+}
+
+fn test_rest_pattern_not_at_valid_position() {
+    [a, .., b, .., c] = items; // ERROR: Multiple rest patterns
+}
+
+// =============================================================================
+// Section 6: Control Flow Expressions Cannot Be Targets
+// =============================================================================
+
+fn test_if_expr_target() {
+    (if cond { a } else { b }) = x;  // ERROR: Cannot assign to if expression
+}
+
+fn test_match_expr_target() {
+    (match x { _ => y }) = z;  // ERROR: Cannot assign to match expression
+}
+
+fn test_loop_expr_target() {
+    (loop { break 1; }) = x;   // ERROR: Cannot assign to loop expression
+}
+
+// =============================================================================
+// Section 7: Closures Cannot Be Targets
+// =============================================================================
+
+fn test_closure_target() {
+    (|x| x + 1) = f;           // ERROR: Cannot assign to closure
+}
+
+fn test_closure_in_tuple() {
+    (a, |x| x) = values;       // ERROR: Closure in tuple pattern
+}
+
+// =============================================================================
+// Section 8: Special Path Expressions Cannot Be Targets
+// =============================================================================
+
+fn test_self_target() {
+    self = x;                  // ERROR: Cannot assign to self
+}
+
+fn test_super_target() {
+    super = x;                 // ERROR: Cannot assign to super
+}
+
+// =============================================================================
+// Section 9: Unary Expressions (Non-Deref) Cannot Be Targets
+// =============================================================================
+
+fn test_negation_target() {
+    (-a) = x;                  // ERROR: Cannot assign to negation
+}
+
+fn test_not_target() {
+    (!a) = x;                  // ERROR: Cannot assign to logical not
+}
+
+fn test_unary_in_tuple() {
+    (a, -b) = values;          // ERROR: Unary expression in tuple pattern
+}
+
+// =============================================================================
+// Section 10: Nested Invalid Patterns
+// =============================================================================
+
+fn test_nested_function_call() {
+    ((a, foo()), b) = values;  // ERROR: Nested function call
+}
+
+fn test_nested_literal() {
+    (Point { x: 0, y }, z) = data;  // ERROR: Literal in nested record
+}
+
+fn test_deeply_nested_invalid() {
+    (((a, b + 1),),) = deep;   // ERROR: Binary expression deep in nesting
+}
+
+// =============================================================================
+// Section 11: Invalid Type Annotations in Patterns
+// =============================================================================
+
+fn test_type_annotation_in_assignment_pattern() {
+    (a: Int, b: Int) = values; // ERROR: Type annotation not allowed here
+}
+
+fn test_type_annotation_in_record_field() {
+    Point { x: Int, y } = p;   // ERROR: Type where pattern expected
+}

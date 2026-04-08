@@ -1,0 +1,419 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, wasm, memory
+// @description: Tests WebAssembly linear memory access patterns
+
+/// ============================================================
+/// WEBASSEMBLY LINEAR MEMORY
+/// ============================================================
+///
+/// WASM uses a flat, linear memory model. This file demonstrates
+/// safe patterns for accessing and managing WASM memory.
+
+// ------------------------------------------------------------
+// WASM Memory Intrinsics
+// ------------------------------------------------------------
+
+/// WASM memory representation
+type WasmMemory is {
+    /// Base pointer to linear memory
+    base: *mut u8,
+    /// Current size in pages (64KB each)
+    pages: u32,
+};
+
+implement WasmMemory {
+    const PAGE_SIZE: usize = 65536;  // 64KB
+
+    /// Get memory size in bytes
+    fn size(&self) -> usize {
+        (self.pages as usize) * Self.PAGE_SIZE
+    }
+
+    /// Check if address range is valid
+    fn is_valid_range(&self, offset: usize, len: usize) -> Bool {
+        offset.checked_add(len)
+            .map(|end| end <= self.size())
+            .unwrap_or(false)
+    }
+
+    /// Get raw pointer at offset
+    fn ptr_at(&self, offset: usize) -> Result<*mut u8, WasmError> {
+        if offset >= self.size() {
+            Err(WasmError.OutOfBounds { offset, size: self.size() })
+        } else {
+            Ok(unsafe { self.base.add(offset) })
+        }
+    }
+
+    /// Get typed pointer at offset
+    fn ptr_at_typed<T>(&self, offset: usize) -> Result<*mut T, WasmError> {
+        if !self.is_valid_range(offset, T.size) {
+            return Err(WasmError.OutOfBounds { offset, size: self.size() });
+        }
+
+        // Check alignment
+        if offset % T.alignment != 0 {
+            return Err(WasmError.UnalignedAccess { offset, align: T.alignment });
+        }
+
+        Ok(unsafe { self.base.add(offset) as *mut T })
+    }
+
+    /// Read value from memory
+    fn read<T: Copy>(&self, offset: usize) -> Result<T, WasmError> {
+        let ptr = self.ptr_at_typed<T>(offset)?;
+        Ok(unsafe { *ptr })
+    }
+
+    /// Write value to memory
+    fn write<T: Copy>(&mut self, offset: usize, value: T) -> Result<(), WasmError> {
+        let ptr = self.ptr_at_typed<T>(offset)?;
+        unsafe { *ptr = value };
+        Ok(())
+    }
+
+    /// Get slice view of memory range
+    fn slice(&self, offset: usize, len: usize) -> Result<&[u8], WasmError> {
+        if !self.is_valid_range(offset, len) {
+            return Err(WasmError.OutOfBounds { offset, size: self.size() });
+        }
+        Ok(unsafe { std.slice.from_raw_parts(self.base.add(offset), len) })
+    }
+
+    /// Get mutable slice view
+    fn slice_mut(&mut self, offset: usize, len: usize) -> Result<&mut [u8], WasmError> {
+        if !self.is_valid_range(offset, len) {
+            return Err(WasmError.OutOfBounds { offset, size: self.size() });
+        }
+        Ok(unsafe { std.slice.from_raw_parts_mut(self.base.add(offset), len) })
+    }
+
+    /// Grow memory by delta pages
+    fn grow(&mut self, delta: u32) -> Result<u32, WasmError> {
+        let old_pages = self.pages;
+        let new_pages = self.pages.checked_add(delta)
+            .ok_or(WasmError.GrowthOverflow)?;
+
+        // Platform limit check (typically 2GB or 4GB)
+        if new_pages > MAX_WASM_PAGES {
+            return Err(WasmError.MemoryLimitExceeded);
+        }
+
+        // Actual reallocation would happen here
+        self.pages = new_pages;
+        Ok(old_pages)
+    }
+}
+
+const MAX_WASM_PAGES: u32 = 32768;  // 2GB
+
+// ------------------------------------------------------------
+// Memory Operations
+// ------------------------------------------------------------
+
+/// Copy within WASM memory
+fn memory_copy(
+    mem: &mut WasmMemory,
+    dest: usize,
+    src: usize,
+    len: usize
+) -> Result<(), WasmError> {
+    // Validate ranges
+    if !mem.is_valid_range(dest, len) {
+        return Err(WasmError.OutOfBounds { offset: dest, size: mem.size() });
+    }
+    if !mem.is_valid_range(src, len) {
+        return Err(WasmError.OutOfBounds { offset: src, size: mem.size() });
+    }
+
+    unsafe {
+        let dest_ptr = mem.base.add(dest);
+        let src_ptr = mem.base.add(src);
+        // memmove handles overlapping regions
+        std.ptr.copy(src_ptr, dest_ptr, len);
+    }
+
+    Ok(())
+}
+
+/// Fill memory with value
+fn memory_fill(
+    mem: &mut WasmMemory,
+    dest: usize,
+    value: u8,
+    len: usize
+) -> Result<(), WasmError> {
+    if !mem.is_valid_range(dest, len) {
+        return Err(WasmError.OutOfBounds { offset: dest, size: mem.size() });
+    }
+
+    unsafe {
+        std.ptr.write_bytes(mem.base.add(dest), value, len);
+    }
+
+    Ok(())
+}
+
+/// Initialize memory from data segment
+fn memory_init(
+    mem: &mut WasmMemory,
+    dest: usize,
+    data: &[u8],
+    src_offset: usize,
+    len: usize
+) -> Result<(), WasmError> {
+    if src_offset + len > data.len() {
+        return Err(WasmError.DataSegmentOutOfBounds);
+    }
+    if !mem.is_valid_range(dest, len) {
+        return Err(WasmError.OutOfBounds { offset: dest, size: mem.size() });
+    }
+
+    unsafe {
+        std.ptr.copy_nonoverlapping(
+            data.as_ptr().add(src_offset),
+            mem.base.add(dest),
+            len
+        );
+    }
+
+    Ok(())
+}
+
+// ------------------------------------------------------------
+// WASM Memory Allocator
+// ------------------------------------------------------------
+
+/// Simple bump allocator for WASM memory
+type WasmAllocator is {
+    memory: *mut WasmMemory,
+    heap_base: usize,
+    heap_ptr: usize,
+};
+
+implement WasmAllocator {
+    fn new(memory: *mut WasmMemory, heap_base: usize) -> WasmAllocator {
+        WasmAllocator {
+            memory,
+            heap_base,
+            heap_ptr: heap_base,
+        }
+    }
+
+    /// Allocate bytes
+    fn alloc(&mut self, size: usize) -> Result<usize, WasmError> {
+        let mem = unsafe { &*self.memory };
+
+        // Align to 8 bytes
+        let aligned_ptr = (self.heap_ptr + 7) & !7;
+        let new_ptr = aligned_ptr + size;
+
+        if new_ptr > mem.size() {
+            return Err(OutOfMemory);
+        }
+
+        self.heap_ptr = new_ptr;
+        Ok(aligned_ptr)
+    }
+
+    /// Allocate and zero bytes
+    fn calloc(&mut self, size: usize) -> Result<usize, WasmError> {
+        let ptr = self.alloc(size)?;
+        let mem = unsafe { &mut *self.memory };
+        memory_fill(mem, ptr, 0, size)?;
+        Ok(ptr)
+    }
+
+    /// Reset allocator (free all)
+    fn reset(&mut self) {
+        self.heap_ptr = self.heap_base;
+    }
+}
+
+/// Export allocator functions for JS
+@wasm_export
+fn wasm_alloc(size: i32) -> i32 {
+    // Placeholder: real impl uses global allocator
+    0
+}
+
+@wasm_export
+fn wasm_free(_ptr: i32) {
+    // Bump allocator doesn't support individual free
+    // Would need more sophisticated allocator for that
+}
+
+// Global allocator would be a static mut in a real implementation
+
+// ------------------------------------------------------------
+// Typed Memory Views
+// ------------------------------------------------------------
+
+/// View into WASM memory as typed array
+type TypedArray<T> is {
+    memory: *const WasmMemory,
+    offset: usize,
+    length: usize,
+    _marker: PhantomData<T>,
+};
+
+implement<T: Copy> TypedArray<T> {
+    fn new(memory: &WasmMemory, offset: usize, length: usize) -> Result<TypedArray<T>, WasmError> {
+        let byte_len = length * T.size;
+
+        if !memory.is_valid_range(offset, byte_len) {
+            return Err(WasmError.OutOfBounds { offset, size: memory.size() });
+        }
+
+        if offset % T.alignment != 0 {
+            return Err(WasmError.UnalignedAccess { offset, align: T.alignment });
+        }
+
+        Ok(TypedArray {
+            memory,
+            offset,
+            length,
+            _marker: PhantomData,
+        })
+    }
+
+    fn get(&self, index: usize) -> Result<T, WasmError> {
+        if index >= self.length {
+            return Err(WasmError.IndexOutOfBounds { index, length: self.length });
+        }
+
+        let mem = unsafe { &*self.memory };
+        mem.read(self.offset + index * T.size)
+    }
+
+    fn len(&self) -> usize {
+        self.length
+    }
+
+    fn as_slice(&self) -> &[T] {
+        let mem = unsafe { &*self.memory };
+        unsafe {
+            std.slice.from_raw_parts(
+                mem.base.add(self.offset) as *const T,
+                self.length
+            )
+        }
+    }
+}
+
+// Specific typed array types
+type Int8Array is TypedArray<i8>;
+type Uint8Array is TypedArray<u8>;
+type Int16Array is TypedArray<i16>;
+type Uint16Array is TypedArray<u16>;
+type Int32Array is TypedArray<i32>;
+type Uint32Array is TypedArray<u32>;
+type Float32Array is TypedArray<f32>;
+type Float64Array is TypedArray<f64>;
+
+// ------------------------------------------------------------
+// Text Handling
+// ------------------------------------------------------------
+
+/// Read null-terminated string from WASM memory
+fn read_string(mem: &WasmMemory, ptr: usize) -> Result<Text, WasmError> {
+    let mut len = 0;
+    let max_len = mem.size() - ptr;
+
+    // Find null terminator
+    while len < max_len {
+        if mem.read<u8>(ptr + len)? == 0 {
+            break;
+        }
+        len += 1;
+    }
+
+    if len == max_len {
+        return Err(WasmError.NoNullTerminator);
+    }
+
+    let slice = mem.slice(ptr, len)?;
+    Text.from_utf8(slice.to_vec())
+        .map_err(|_| WasmError.InvalidUtf8)
+}
+
+/// Write string to WASM memory
+fn write_string(mem: &mut WasmMemory, ptr: usize, s: &str) -> Result<usize, WasmError> {
+    let bytes = s.as_bytes();
+    let len_with_null = bytes.len() + 1;
+
+    if !mem.is_valid_range(ptr, len_with_null) {
+        return Err(WasmError.OutOfBounds { offset: ptr, size: mem.size() });
+    }
+
+    let slice = mem.slice_mut(ptr, len_with_null)?;
+    slice[..bytes.len()].copy_from_slice(bytes);
+    slice[bytes.len()] = 0;  // Null terminator
+
+    Ok(bytes.len())
+}
+
+/// Read length-prefixed string
+fn read_length_prefixed_string(mem: &WasmMemory, ptr: usize) -> Result<Text, WasmError> {
+    let len: u32 = mem.read(ptr)?;
+    let data_ptr = ptr + 4;
+
+    let slice = mem.slice(data_ptr, len as usize)?;
+    Text.from_utf8(slice.to_vec())
+        .map_err(|_| WasmError.InvalidUtf8)
+}
+
+// ------------------------------------------------------------
+// Memory Exports
+// ------------------------------------------------------------
+
+/// Export memory for JS access
+@wasm_export
+static memory: WasmMemory = WasmMemory { base: null as *mut u8, pages: 0 };
+
+/// Get memory size in pages
+@wasm_export
+fn memory_size() -> i32 {
+    unsafe { (&memory).pages as i32 }
+}
+
+/// Grow memory
+@wasm_export
+fn memory_grow_pages(delta: i32) -> i32 {
+    if delta < 0 {
+        return -1;
+    }
+
+    unsafe {
+        match (&mut memory).grow(delta as u32) {
+            Ok(old_pages) => old_pages as i32,
+            Err(_) => -1,
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type WasmError is
+    | OutOfBounds { offset: usize, size: usize }
+    | UnalignedAccess { offset: usize, align: usize }
+    | IndexOutOfBounds { index: usize, length: usize }
+    | GrowthOverflow
+    | MemoryLimitExceeded
+    | OutOfMemory
+    | DataSegmentOutOfBounds
+    | NoNullTerminator
+    | InvalidUtf8
+    | ArithmeticOverflow;
+
+type PhantomData<T> is {};
+
+// Type properties: use T.size and T.alignment instead of deprecated intrinsics
+
+fn main() {
+    // WASM memory test
+}

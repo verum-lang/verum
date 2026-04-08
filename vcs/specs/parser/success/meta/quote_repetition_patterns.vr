@@ -1,0 +1,292 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, quote, repetition, patterns, keywords
+// @description: Tests for quote repetition pattern parsing, including keywords as identifiers and tuple patterns
+
+// =============================================================================
+// BASIC REPETITION WITH IDENTIFIER PATTERNS
+// =============================================================================
+
+meta fn basic_repetition(items: List<Text>) -> TokenStream {
+    quote {
+        $[for item in items {
+            let $item = 0;
+        }]
+    }
+}
+
+meta fn repetition_with_method_access(fields: List<Field>) -> TokenStream {
+    quote {
+        type Generated is {
+            $[for f in fields {
+                $f.name: $f.ty,
+            }]
+        };
+    }
+}
+
+// =============================================================================
+// KEYWORDS USED AS PATTERN IDENTIFIERS
+// Grammar: Pattern identifier can be a keyword when contextually appropriate
+// =============================================================================
+
+// The 'field' keyword used as a pattern variable
+meta fn keyword_field_as_pattern(fields: List<Field>) -> TokenStream {
+    quote {
+        type Record is {
+            $[for field in fields {
+                $field.name: $field.ty,
+            }]
+        };
+    }
+}
+
+// The 'type' keyword used as a pattern variable
+meta fn keyword_type_as_pattern(types: List<TypeDef>) -> TokenStream {
+    quote {
+        $[for type in types {
+            type $type.name = $type.alias;
+        }]
+    }
+}
+
+// The 'select' keyword used as a pattern variable
+meta fn keyword_select_as_pattern(selects: List<Query>) -> TokenStream {
+    quote {
+        $[for select in selects {
+            let query = $select.sql;
+        }]
+    }
+}
+
+// The 'spawn' keyword used as a pattern variable
+meta fn keyword_spawn_as_pattern(spawns: List<Task>) -> TokenStream {
+    quote {
+        $[for spawn in spawns {
+            let task = $spawn.name;
+        }]
+    }
+}
+
+// The 'await' keyword used as a pattern variable
+meta fn keyword_await_as_pattern(awaits: List<Future>) -> TokenStream {
+    quote {
+        $[for await in awaits {
+            let future = $await.result;
+        }]
+    }
+}
+
+// The 'async' keyword used as a pattern variable
+meta fn keyword_async_as_pattern(asyncs: List<AsyncFn>) -> TokenStream {
+    quote {
+        $[for async in asyncs {
+            fn $async.name() {}
+        }]
+    }
+}
+
+// The 'match' keyword used as a pattern variable
+meta fn keyword_match_as_pattern(matches: List<MatchExpr>) -> TokenStream {
+    quote {
+        $[for match in matches {
+            let result = $match.body;
+        }]
+    }
+}
+
+// The 'loop' keyword used as a pattern variable
+meta fn keyword_loop_as_pattern(loops: List<LoopDef>) -> TokenStream {
+    quote {
+        $[for loop in loops {
+            $loop.label: loop {}
+        }]
+    }
+}
+
+// =============================================================================
+// TUPLE PATTERNS IN REPETITION
+// Grammar: '$' '[' 'for' '(' ident ',' ident ')' 'in' expr '{' token_tree '}' ']'
+// =============================================================================
+
+meta fn tuple_pattern_pair(pairs: List<(Text, Int)>) -> TokenStream {
+    quote {
+        $[for (name, value) in pairs {
+            let $name = $value;
+        }]
+    }
+}
+
+meta fn tuple_pattern_triple(triples: List<(Text, Type, Expr)>) -> TokenStream {
+    quote {
+        $[for (name, ty, init) in triples {
+            let $name: $ty = $init;
+        }]
+    }
+}
+
+meta fn tuple_pattern_nested_access(items: List<(Field, Int)>) -> TokenStream {
+    quote {
+        type Generated is {
+            $[for (field, index) in items {
+                $field.name: $field.ty,  // index=$index
+            }]
+        };
+    }
+}
+
+// =============================================================================
+// COMPLEX REPETITION PATTERNS
+// =============================================================================
+
+meta fn nested_repetitions(modules: List<Module>) -> TokenStream {
+    quote {
+        $[for module in modules {
+            mod $module.name {
+                $[for item in module.items {
+                    $item.decl
+                }]
+            }
+        }]
+    }
+}
+
+meta fn repetition_with_guards(items: List<Item>) -> TokenStream {
+    quote {
+        $[for item in items {
+            @cfg(feature = $item.feature)
+            fn $item.name() {}
+        }]
+    }
+}
+
+meta fn derive_with_field_repetition(ty: TypeDef) -> TokenStream {
+    let type_name = ty.name;
+    quote {
+        implement Debug for $type_name {
+            fn debug(&self) -> Text {
+                let mut s = f"$type_name {{";
+                $[for field in ty.fields {
+                    s = s + f" $field.name: {}," with self.$field.name;
+                }]
+                s + " }"
+            }
+        }
+    }
+}
+
+// =============================================================================
+// KEYWORD COMBINATIONS IN PATTERNS
+// =============================================================================
+
+// Multiple keyword-like identifiers in same quote
+meta fn multiple_keywords_patterns(data: Context) -> TokenStream {
+    quote {
+        $[for field in data.fields {
+            let $field.name = $field.value;
+        }]
+        $[for type in data.types {
+            type $type.name = $type.def;
+        }]
+        $[for match in data.matches {
+            match $match.expr {
+                _ => $match.default
+            }
+        }]
+    }
+}
+
+// Tuple with keywords
+meta fn tuple_with_keywords(pairs: List<(Field, Type)>) -> TokenStream {
+    quote {
+        $[for (field, type) in pairs {
+            let $field.name: $type.name = default();
+        }]
+    }
+}
+
+// =============================================================================
+// PROOF-RELATED KEYWORDS AS PATTERNS
+// =============================================================================
+
+meta fn theorem_generation(theorems: List<Theorem>) -> TokenStream {
+    quote {
+        $[for theorem in theorems {
+            theorem $theorem.name: $theorem.statement {
+                $theorem.proof
+            }
+        }]
+    }
+}
+
+meta fn lemma_generation(lemmas: List<Lemma>) -> TokenStream {
+    quote {
+        $[for lemma in lemmas {
+            lemma $lemma.name: $lemma.claim {
+                $lemma.proof
+            }
+        }]
+    }
+}
+
+meta fn invariant_generation(invariants: List<Invariant>) -> TokenStream {
+    quote {
+        $[for invariant in invariants {
+            @invariant($invariant.condition)
+        }]
+    }
+}
+
+// =============================================================================
+// CONTEXT KEYWORDS AS PATTERNS
+// =============================================================================
+
+meta fn context_generation(contexts: List<ContextDef>) -> TokenStream {
+    quote {
+        $[for context in contexts {
+            context type $context.name;
+        }]
+    }
+}
+
+meta fn provide_generation(provides: List<Provider>) -> TokenStream {
+    quote {
+        $[for provide in provides {
+            provide $provide.context = $provide.value;
+        }]
+    }
+}
+
+// =============================================================================
+// EDGE CASES
+// =============================================================================
+
+// Empty list should produce no output
+meta fn empty_repetition(items: List<()>) -> TokenStream {
+    quote {
+        $[for item in items {
+            // This block will not appear if items is empty
+            let placeholder = ();
+        }]
+    }
+}
+
+// Single item list
+meta fn single_item_repetition(items: List<Text>) -> TokenStream {
+    quote {
+        $[for item in items {
+            let $item = "single";
+        }]
+    }
+}
+
+// Nested expressions in repetition
+meta fn complex_expression_repetition(items: List<Item>) -> TokenStream {
+    quote {
+        $[for item in items {
+            let computed = ${item.a + item.b * item.c};
+        }]
+    }
+}

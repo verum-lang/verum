@@ -1,0 +1,145 @@
+// =============================================================================
+// channel_clone_test.vr - Tests for channel error Clone implementations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, channel, error, clone, protocols, core
+// @description: Tests Clone for SendError, TrySendError, TryRecvError, RecvError
+// =============================================================================
+
+mount core.async.channel.{
+    SendError, TrySendError, TryRecvError, RecvError,
+};
+mount core.base.protocols.{Clone, Debug, Eq};
+mount core.text.format.{format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// =============================================================================
+// Section 1: TryRecvError Clone
+// =============================================================================
+
+@test
+fn test_try_recv_error_clone_empty() {
+    let err = TryRecvError.Empty;
+    let cloned = err.clone();
+    assert(cloned is TryRecvError.Empty);
+}
+
+@test
+fn test_try_recv_error_clone_disconnected() {
+    let err = TryRecvError.Disconnected;
+    let cloned = err.clone();
+    assert(cloned is TryRecvError.Disconnected);
+}
+
+@test
+fn test_try_recv_error_clone_display_matches() {
+    let err = TryRecvError.Empty;
+    let cloned = err.clone();
+    assert_eq(format_display(&err), format_display(&cloned));
+}
+
+@test
+fn test_try_recv_error_clone_debug_matches() {
+    let err = TryRecvError.Disconnected;
+    let cloned = err.clone();
+    assert_eq(format_debug(&err), format_debug(&cloned));
+}
+
+// =============================================================================
+// Section 2: RecvError Clone
+// =============================================================================
+
+@test
+fn test_recv_error_clone() {
+    let err = RecvError;
+    let cloned = err.clone();
+    assert_eq(format_display(&err), format_display(&cloned));
+}
+
+@test
+fn test_recv_error_clone_debug_matches() {
+    let err = RecvError;
+    let cloned = err.clone();
+    assert_eq(format_debug(&err), format_debug(&cloned));
+}
+
+// =============================================================================
+// Section 3: SendError Clone (requires T: Clone)
+// =============================================================================
+
+@test
+fn test_send_error_clone_int() {
+    let err = SendError(42);
+    let cloned = err.clone();
+    assert_eq(format_display(&err), format_display(&cloned));
+}
+
+@test
+fn test_send_error_clone_preserves_display() {
+    let err = SendError(99);
+    let cloned = err.clone();
+    assert_eq(format_debug(&err), format_debug(&cloned));
+}
+
+// =============================================================================
+// Section 4: TrySendError Clone (requires T: Clone)
+// =============================================================================
+
+@test
+fn test_try_send_error_clone_full() {
+    let err = TrySendError.Full(42);
+    let cloned = err.clone();
+    assert(cloned is TrySendError.Full);
+    assert_eq(format_display(&err), format_display(&cloned));
+}
+
+@test
+fn test_try_send_error_clone_disconnected() {
+    let err = TrySendError.Disconnected(99);
+    let cloned = err.clone();
+    assert(cloned is TrySendError.Disconnected);
+    assert_eq(format_display(&err), format_display(&cloned));
+}
+
+// =============================================================================
+// Section 5: Clone Function Existence Proofs
+// =============================================================================
+
+@test
+fn test_try_recv_error_clone_fn_exists() {
+    fn clone_err(e: &TryRecvError) -> TryRecvError {
+        e.clone()
+    }
+    let _ = clone_err;
+}
+
+@test
+fn test_recv_error_clone_fn_exists() {
+    fn clone_err(e: &RecvError) -> RecvError {
+        e.clone()
+    }
+    let _ = clone_err;
+}
+
+@test
+fn test_send_error_clone_fn_exists() {
+    fn clone_err(e: &SendError<Int>) -> SendError<Int> {
+        e.clone()
+    }
+    let _ = clone_err;
+}
+
+@test
+fn test_try_send_error_clone_fn_exists() {
+    fn clone_err(e: &TrySendError<Int>) -> TrySendError<Int> {
+        e.clone()
+    }
+    let _ = clone_err;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

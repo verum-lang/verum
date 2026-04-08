@@ -1,0 +1,139 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: lexer, keywords, comprehensive
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// All Verum Keywords - Comprehensive Lexer Test Seed
+// Tests all 85+ keywords for correct tokenization
+// =============================================================================
+
+// Reserved keywords (only 3 in v5.1)
+let reserved_let = 0;
+fn reserved_fn() {}
+type ReservedIs is ();
+
+// Primary keywords
+type PrimaryType is ();
+fn primary_where<T>() where type T: Clone {}
+fn primary_using() using [Logger] {}
+
+// Control flow keywords
+fn control_flow() {
+    if true {
+        return;
+    } else {
+        loop {
+            break;
+        }
+    }
+
+    for i in 0..10 {
+        continue;
+    }
+
+    while true {
+        break;
+    }
+
+    let x = match 1 {
+        1 => "one",
+        _ => "other",
+    };
+}
+
+// Async/await keywords
+async fn async_keywords() {
+    let future = async { 42 };
+    let result = future.await;
+    spawn some_task();
+    yield 1;
+    defer cleanup();
+    try {
+        fallible_op();
+    };
+}
+
+// Modifier keywords
+pub fn modifier_pub() {}
+fn modifier_mut() {
+    let mut x = 1;
+}
+const MODIFIER_CONST: Int = 42;
+unsafe fn modifier_unsafe() {}
+
+// FFI keyword
+ffi ExternalLib {
+    @extern("c")
+    fn external_function() -> Int;
+}
+
+// Module keywords
+module ModuleKeyword {
+    link std.collections;
+
+    type Protocol is protocol {
+        fn method(&self);
+    };
+
+    type Extended is protocol extends Protocol {};
+
+    implement Protocol for Int {}
+
+    context MyContext {
+        fn get_value(&self) -> Int;
+    }
+}
+
+// Additional keywords
+fn additional_keywords() {
+    let s = self;
+    let sup = super;
+    let cr = crate;
+
+    static STATIC_VAR: Int = 0;
+
+    // meta for compile-time
+    meta fn meta_function() {}
+
+    // provide for context
+    provide Logger = ConsoleLogger {};
+
+    // recovery keywords
+    try {
+        dangerous();
+    } recover {
+        error => handle(error),
+    } finally {
+        cleanup();
+    };
+
+    // loop annotations
+    while x > 0 invariant x >= 0 decreases x {
+        x = x - 1;
+    }
+
+    // stream keyword
+    let s = stream[x * 2 for x in items];
+
+    // tensor keyword
+    let t = tensor<2, 3> Float { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
+
+    // linear/affine types
+    type AffineResource is affine { data: Int };
+}
+
+// Visibility keywords
+public fn visibility_public() {}
+internal fn visibility_internal() {}
+protected fn visibility_protected() {}
+
+// Verification keywords
+fn verification_keywords(x: Int) -> Int
+    where ensures result >= 0
+{
+    requires x >= 0;
+    result
+}

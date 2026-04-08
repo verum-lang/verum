@@ -1,0 +1,218 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, dijkstra, shortest-path, graph, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Dijkstra's shortest path on a 6-node weighted graph
+// Adjacency matrix stored as 6 rows of 6 weights (0 means no edge)
+
+// 6-element array for per-node data
+type Arr6 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int };
+
+fn a6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 }
+    else if i == 2 { a.d2 } else if i == 3 { a.d3 }
+    else if i == 4 { a.d4 } else { a.d5 }
+}
+
+fn a6_set(a: Arr6, i: Int, v: Int) -> Arr6 {
+    Arr6 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 }
+    }
+}
+
+fn a6_fill(val: Int) -> Arr6 {
+    Arr6 { d0: val, d1: val, d2: val, d3: val, d4: val, d5: val }
+}
+
+// 6x6 adjacency matrix: 6 rows, each a Arr6
+// adj[i][j] = weight of edge from i to j, 0 = no edge
+type Graph6 is { r0: Arr6, r1: Arr6, r2: Arr6, r3: Arr6, r4: Arr6, r5: Arr6 };
+
+fn graph_get_row(g: Graph6, r: Int) -> Arr6 {
+    if r == 0 { g.r0 } else if r == 1 { g.r1 }
+    else if r == 2 { g.r2 } else if r == 3 { g.r3 }
+    else if r == 4 { g.r4 } else { g.r5 }
+}
+
+fn graph_weight(g: Graph6, from: Int, to: Int) -> Int {
+    a6_get(graph_get_row(g, from), to)
+}
+
+// Dijkstra: find shortest distances from source to all 6 nodes
+// Returns Arr6 of distances (9999 = unreachable)
+fn dijkstra(g: Graph6, src: Int) -> Arr6 {
+    let inf = 9999;
+    let mut dist = a6_fill(inf);
+    let mut visited = a6_fill(0);
+    dist = a6_set(dist, src, 0);
+
+    let mut step = 0;
+    while step < 6 {
+        // Find unvisited node with minimum distance
+        let mut min_dist = inf + 1;
+        let mut u = -1;
+        let mut k = 0;
+        while k < 6 {
+            if a6_get(visited, k) == 0 {
+                if a6_get(dist, k) < min_dist {
+                    min_dist = a6_get(dist, k);
+                    u = k;
+                }
+            }
+            k = k + 1;
+        }
+
+        // No reachable unvisited node
+        if u == -1 {
+            step = 6; // break
+        } else {
+            visited = a6_set(visited, u, 1);
+            // Relax neighbors
+            let mut v = 0;
+            while v < 6 {
+                let w = graph_weight(g, u, v);
+                if w > 0 {
+                    let new_dist = a6_get(dist, u) + w;
+                    if new_dist < a6_get(dist, v) {
+                        dist = a6_set(dist, v, new_dist);
+                    }
+                }
+                v = v + 1;
+            }
+            step = step + 1;
+        }
+    }
+    dist
+}
+
+// Build test graph:
+//   0 --7-- 1 --3-- 2
+//   |       |       |
+//   2       1       5
+//   |       |       |
+//   3 --4-- 4 --2-- 5
+fn make_test_graph() -> Graph6 {
+    let z = a6_fill(0);
+    // Row 0: edges to 1(7), 3(2)
+    let r0 = a6_set(a6_set(z, 1, 7), 3, 2);
+    // Row 1: edges to 0(7), 2(3), 4(1)
+    let r1 = a6_set(a6_set(a6_set(z, 0, 7), 2, 3), 4, 1);
+    // Row 2: edges to 1(3), 5(5)
+    let r2 = a6_set(a6_set(z, 1, 3), 5, 5);
+    // Row 3: edges to 0(2), 4(4)
+    let r3 = a6_set(a6_set(z, 0, 2), 4, 4);
+    // Row 4: edges to 1(1), 3(4), 5(2)
+    let r4 = a6_set(a6_set(a6_set(z, 1, 1), 3, 4), 5, 2);
+    // Row 5: edges to 2(5), 4(2)
+    let r5 = a6_set(a6_set(z, 2, 5), 4, 2);
+    Graph6 { r0: r0, r1: r1, r2: r2, r3: r3, r4: r4, r5: r5 }
+}
+
+fn test_from_node0() {
+    let g = make_test_graph();
+    let dist = dijkstra(g, 0);
+    // dist[0] = 0
+    assert_eq(a6_get(dist, 0), 0);
+    // 0->3: weight 2
+    assert_eq(a6_get(dist, 3), 2);
+    // 0->3->4: 2+4=6, but 0->1->4: 7+1=8, so 0->3->4=6
+    assert_eq(a6_get(dist, 4), 6);
+    // 0->1: weight 7, but 0->3->4->1: 2+4+1=7, same
+    assert_eq(a6_get(dist, 1), 7);
+    // 0->5: 0->3->4->5: 2+4+2=8
+    assert_eq(a6_get(dist, 5), 8);
+    // 0->2: 0->1->2: 7+3=10 or 0->3->4->1->2: 2+4+1+3=10
+    assert_eq(a6_get(dist, 2), 10);
+}
+
+fn test_from_node4() {
+    let g = make_test_graph();
+    let dist = dijkstra(g, 4);
+    assert_eq(a6_get(dist, 4), 0);
+    assert_eq(a6_get(dist, 1), 1);
+    assert_eq(a6_get(dist, 5), 2);
+    assert_eq(a6_get(dist, 3), 4);
+    assert_eq(a6_get(dist, 2), 4); // 4->1->2: 1+3=4
+    assert_eq(a6_get(dist, 0), 6); // 4->3->0: 4+2=6
+}
+
+fn test_self_distance() {
+    let g = make_test_graph();
+    let mut i = 0;
+    while i < 6 {
+        let dist = dijkstra(g, i);
+        assert_eq(a6_get(dist, i), 0);
+        i = i + 1;
+    }
+}
+
+fn test_disconnected_graph() {
+    // Two disconnected components: {0,1,2} and {3,4,5}
+    let z = a6_fill(0);
+    let r0 = a6_set(z, 1, 5);
+    let r1 = a6_set(a6_set(z, 0, 5), 2, 3);
+    let r2 = a6_set(z, 1, 3);
+    let r3 = a6_set(z, 4, 2);
+    let r4 = a6_set(a6_set(z, 3, 2), 5, 1);
+    let r5 = a6_set(z, 4, 1);
+    let g = Graph6 { r0: r0, r1: r1, r2: r2, r3: r3, r4: r4, r5: r5 };
+
+    let dist = dijkstra(g, 0);
+    assert_eq(a6_get(dist, 0), 0);
+    assert_eq(a6_get(dist, 1), 5);
+    assert_eq(a6_get(dist, 2), 8); // 0->1->2: 5+3
+    // Nodes 3,4,5 unreachable
+    assert_eq(a6_get(dist, 3), 9999);
+    assert_eq(a6_get(dist, 4), 9999);
+    assert_eq(a6_get(dist, 5), 9999);
+}
+
+fn test_triangle_symmetry() {
+    // Simple triangle: 0-1=3, 1-2=4, 0-2=10
+    // Shortest 0->2 should be via 1: 3+4=7
+    let z = a6_fill(0);
+    let r0 = a6_set(a6_set(z, 1, 3), 2, 10);
+    let r1 = a6_set(a6_set(z, 0, 3), 2, 4);
+    let r2 = a6_set(a6_set(z, 0, 10), 1, 4);
+    let g = Graph6 { r0: r0, r1: r1, r2: r2, r3: z, r4: z, r5: z };
+
+    let dist = dijkstra(g, 0);
+    assert_eq(a6_get(dist, 2), 7); // via node 1
+}
+
+fn test_single_node() {
+    // Only node 0, no edges
+    let z = a6_fill(0);
+    let g = Graph6 { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z };
+    let dist = dijkstra(g, 0);
+    assert_eq(a6_get(dist, 0), 0);
+    assert_eq(a6_get(dist, 1), 9999);
+}
+
+fn test_direct_vs_indirect() {
+    // Direct edge 0->2 = 20, but indirect 0->1->2 = 5+6 = 11
+    let z = a6_fill(0);
+    let r0 = a6_set(a6_set(z, 1, 5), 2, 20);
+    let r1 = a6_set(z, 2, 6);
+    let g = Graph6 { r0: r0, r1: r1, r2: z, r3: z, r4: z, r5: z };
+
+    let dist = dijkstra(g, 0);
+    assert_eq(a6_get(dist, 2), 11);
+}
+
+fn main() -> Int {
+    test_from_node0();
+    test_from_node4();
+    test_self_distance();
+    test_disconnected_graph();
+    test_triangle_symmetry();
+    test_single_node();
+    test_direct_vs_indirect();
+    print("[OK] 318_dijkstra_path_aot");
+    0
+}

@@ -1,0 +1,34 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @description: Test overflow detection
+
+module test.stdlib.sys.intrinsics.minimal_test;
+
+mount core.intrinsics.{add_overflow, sub_overflow, mul_overflow};
+
+fn main() {
+    print("Testing add_overflow...");
+    // No overflow cases
+    let (result, overflow) = add_overflow(10, 20);
+    print(f"add_overflow(10, 20) = ({result}, {overflow})");
+    assert(result == 30);
+    assert(!overflow);
+    print("add_overflow passed");
+
+    print("Testing sub_overflow...");
+    let (result, overflow) = sub_overflow(30, 10);
+    print(f"sub_overflow(30, 10) = ({result}, {overflow})");
+    assert(result == 20);
+    assert(!overflow);
+    print("sub_overflow passed");
+
+    print("Testing mul_overflow...");
+    let (result, overflow) = mul_overflow(6, 7);
+    print(f"mul_overflow(6, 7) = ({result}, {overflow})");
+    assert(result == 42);
+    assert(!overflow);
+    print("mul_overflow passed");
+
+    print("All overflow tests passed!");
+}

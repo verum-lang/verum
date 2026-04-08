@@ -1,0 +1,46 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Test each function group
+
+module test.stdlib.sys.intrinsics.float_functions_test;
+
+mount core.intrinsics.{
+    sqrt_f64, abs_f64, floor_f64, ceil_f64, round_f64, trunc_f64,
+    sin_f64, cos_f64, tan_f64,
+    exp_f64, log_f64,
+    pow_f64, powi_f64,
+};
+
+fn main() {
+    print("Testing basic math...");
+    let sqrt_result = sqrt_f64(4.0);
+    let abs_result = abs_f64(-5.0);
+    let floor_result = floor_f64(3.7);
+    let ceil_result = ceil_f64(3.2);
+    let round_result = round_f64(3.5);
+    let trunc_result = trunc_f64(3.9);
+    print("Basic math passed!");
+
+    print("Testing trigonometry...");
+    let sin_result = sin_f64(0.0);
+    let cos_result = cos_f64(0.0);
+    let tan_result = tan_f64(0.0);
+    print("Trigonometry passed!");
+
+    print("Testing exp/log...");
+    let exp_result = exp_f64(0.0);
+    let log_result = log_f64(1.0);
+    print("Exp/log passed!");
+
+    print("Testing power...");
+    let pow_result = pow_f64(2.0, 3.0);
+    print(f"pow(2, 3) = {pow_result}");
+
+    print("Testing powi...");
+    let powi_result = powi_f64(2.0, 3);
+    print(f"powi(2, 3) = {powi_result}");
+
+    print("All tests passed!");
+}

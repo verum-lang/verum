@@ -1,0 +1,52 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, sigma-types, projections, error
+// @expected-error: E400 "Type mismatch"
+
+/// Sigma projections - failure cases
+///
+/// These tests verify that projection operations on dependent pairs
+/// properly respect the dependent relationship between components.
+
+/// Dependent pair type
+type DepPair<A, B> is {
+    fst: A,
+    snd: B,
+};
+
+/// ERROR: Constructing pair with wrong second component type
+fn construct_wrong() -> DepPair<Int, Text> {
+    DepPair {
+        fst: 42,
+        snd: 123,  // ERROR: Int != Text
+    }
+}
+
+/// ERROR: Returning wrong projection type
+fn project_wrong(pair: DepPair<Int, Text>) -> Text {
+    pair.fst  // ERROR: Int != Text
+}
+
+/// ERROR: Using pair as wrong type
+fn use_pair_wrong(pair: DepPair<Int, Text>) -> Int {
+    pair.snd  // ERROR: Text != Int
+}
+
+/// Person record type
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+/// ERROR: Wrong field access
+fn person_wrong(p: Person) -> Text {
+    p.age  // ERROR: Int != Text
+}
+
+fn main() {
+    let _ = construct_wrong();
+    let pair: DepPair<Int, Text> = DepPair { fst: 42, snd: "hello" };
+    let _ = project_wrong(pair);
+    let _ = use_pair_wrong(pair);
+}

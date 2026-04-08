@@ -1,0 +1,175 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, rabin-karp, hashing, string-matching
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Simple polynomial hash: h = sum(a[i] * base^i) mod modulus
+fn poly_hash(data: Arr8, start: Int, length: Int, base: Int, modulus: Int) -> Int {
+    let mut h = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < length {
+        h = (h + get(data, start + i) * power) % modulus;
+        power = (power * base) % modulus;
+        i = i + 1;
+    }
+    h
+}
+
+// Rabin-Karp search: find first occurrence of pattern in text
+// Returns starting index, or -1 if not found
+fn rabin_karp(text: Arr8, text_len: Int, pat: Arr8, pat_len: Int) -> Int {
+    if pat_len > text_len { return -1; }
+    if pat_len == 0 { return 0; }
+    let base = 31;
+    let modulus = 1000003;
+
+    let pat_hash = poly_hash(pat, 0, pat_len, base, modulus);
+
+    let mut i = 0;
+    while i <= text_len - pat_len {
+        let h = poly_hash(text, i, pat_len, base, modulus);
+        if h == pat_hash {
+            // Verify character by character
+            let mut match_ok = 1;
+            let mut j = 0;
+            while j < pat_len {
+                if get(text, i + j) != get(pat, j) {
+                    match_ok = 0;
+                    j = pat_len; // break
+                }
+                j = j + 1;
+            }
+            if match_ok == 1 { return i; }
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Count all occurrences
+fn rabin_karp_count(text: Arr8, text_len: Int, pat: Arr8, pat_len: Int) -> Int {
+    if pat_len > text_len { return 0; }
+    if pat_len == 0 { return text_len + 1; }
+    let base = 31;
+    let modulus = 1000003;
+    let pat_hash = poly_hash(pat, 0, pat_len, base, modulus);
+    let mut count = 0;
+    let mut i = 0;
+    while i <= text_len - pat_len {
+        let h = poly_hash(text, i, pat_len, base, modulus);
+        if h == pat_hash {
+            let mut match_ok = 1;
+            let mut j = 0;
+            while j < pat_len {
+                if get(text, i + j) != get(pat, j) {
+                    match_ok = 0;
+                    j = pat_len;
+                }
+                j = j + 1;
+            }
+            if match_ok == 1 { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Simple rolling hash (for verifying hash properties)
+fn rolling_hash_check(data: Arr8, n: Int, window: Int) -> Int {
+    // Count distinct hashes for all windows
+    let base = 31;
+    let modulus = 1000003;
+    let mut count = 0;
+    let mut i = 0;
+    while i <= n - window {
+        let h = poly_hash(data, i, window, base, modulus);
+        // Check if this hash appeared before
+        let mut dup = 0;
+        let mut j = 0;
+        while j < i {
+            if poly_hash(data, j, window, base, modulus) == h {
+                dup = 1;
+                j = i;
+            }
+            j = j + 1;
+        }
+        if dup == 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Text: [1,2,3,4,5,2,3,4], Pattern: [2,3,4]
+    let mut text = zeros();
+    text = set(set(set(set(set(set(set(set(text, 0, 1), 1, 2), 2, 3), 3, 4), 4, 5), 5, 2), 6, 3), 7, 4);
+    let mut pat = zeros();
+    pat = set(set(set(pat, 0, 2), 1, 3), 2, 4);
+
+    assert_eq(rabin_karp(text, 8, pat, 3), 1);     // First at index 1
+    assert_eq(rabin_karp_count(text, 8, pat, 3), 2); // Two occurrences
+
+    // Pattern at start
+    let mut pat2 = zeros();
+    pat2 = set(set(pat2, 0, 1), 1, 2);
+    assert_eq(rabin_karp(text, 8, pat2, 2), 0);
+
+    // Pattern at end
+    let mut pat3 = zeros();
+    pat3 = set(set(pat3, 0, 3), 1, 4);
+    assert_eq(rabin_karp(text, 8, pat3, 2), 2); // First at 2
+
+    // Not found
+    let mut pat4 = zeros();
+    pat4 = set(set(pat4, 0, 9), 1, 9);
+    assert_eq(rabin_karp(text, 8, pat4, 2), -1);
+    assert_eq(rabin_karp_count(text, 8, pat4, 2), 0);
+
+    // Single element pattern
+    let pat5 = set(zeros(), 0, 5);
+    assert_eq(rabin_karp(text, 8, pat5, 1), 4);
+    assert_eq(rabin_karp_count(text, 8, pat5, 1), 1);
+
+    // Full match
+    assert_eq(rabin_karp(text, 8, text, 8), 0);
+
+    // Pattern longer than text
+    assert_eq(rabin_karp(text, 3, text, 8), -1);
+
+    // All same: [7,7,7,7,7], pattern [7,7]
+    let all7 = Arr8 { d0: 7, d1: 7, d2: 7, d3: 7, d4: 7, d5: 0, d6: 0, d7: 0 };
+    let p77 = Arr8 { d0: 7, d1: 7, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(rabin_karp_count(all7, 5, p77, 2), 4);
+
+    // Hash properties: distinct windows in [1,2,3,4,5] with window=2
+    let data = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 0, d6: 0, d7: 0 };
+    assert_eq(rolling_hash_check(data, 5, 2), 4); // [1,2],[2,3],[3,4],[4,5] all distinct
+
+    // Repeated pattern: [1,2,1,2,1] windows of 2: [1,2],[2,1],[1,2],[2,1] → 2 distinct
+    let rep = Arr8 { d0: 1, d1: 2, d2: 1, d3: 2, d4: 1, d5: 0, d6: 0, d7: 0 };
+    assert_eq(rolling_hash_check(rep, 5, 2), 2);
+
+    print("DIFF_OK: rabin_karp");
+    0
+}

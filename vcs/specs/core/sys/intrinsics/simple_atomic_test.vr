@@ -1,0 +1,35 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, atomic
+// @description: Simple atomic test for debugging segfaults
+
+module test.stdlib.sys.intrinsics.simple_atomic_test;
+
+mount core.intrinsics.{
+    ORDERING_SEQ_CST,
+    atomic_load_u32, atomic_store_u32,
+};
+
+fn main() {
+    print("Starting simple atomic test...");
+
+    // Simple local variable
+    let mut val: UInt32 = 42;
+    print("Initial value: 42");
+
+    // Get a pointer
+    let ptr = &mut val as *mut UInt32;
+    print("Got pointer");
+
+    // Try atomic load
+    let loaded = atomic_load_u32(ptr as *const UInt32, ORDERING_SEQ_CST);
+    print("Loaded value (should be 42):");
+
+    // Verify
+    if loaded == 42 {
+        print("SUCCESS: atomic_load_u32 works!");
+    } else {
+        print("FAIL: got wrong value");
+    }
+}

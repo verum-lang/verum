@@ -1,0 +1,265 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 100ns per recv (hot path)
+// @tags: channels, concurrency, performance
+
+/// Benchmark for channel receive operations
+///
+/// Tests receive patterns:
+/// - Blocking recv
+/// - Non-blocking try_recv
+/// - Recv with timeout
+/// - Batch recv
+
+module benchmarks.micro.channel_recv
+
+using [Benchmark, Async, Channels]
+
+/// Unbounded channel receive
+fn benchmark_channel_unbounded_recv() async {
+    let (tx, rx) = channel<Int>.unbounded();
+
+    // Pre-fill channel
+    for i in 0..100_000 {
+        tx.send(i).await;
+    }
+    drop(tx);
+
+    // Measure recv
+    while let Some(_) = rx.recv().await {}
+}
+
+/// Bounded channel receive
+fn benchmark_channel_bounded_recv() async {
+    let (tx, rx) = channel<Int>.bounded(10_000);
+
+    // Producer
+    let producer = spawn async {
+        for i in 0..1_000_000 {
+            tx.send(i).await;
+        }
+    };
+
+    // Measure recv
+    let mut count = 0;
+    while let Some(_) = rx.recv().await {
+        count += 1;
+        if count >= 1_000_000 { break; }
+    }
+
+    producer.await;
+}
+
+/// Try recv (non-blocking)
+fn benchmark_channel_try_recv() {
+    let (tx, rx) = channel<Int>.bounded(100_000);
+
+    // Pre-fill
+    for i in 0..100_000 {
+        let _ = tx.try_send(i);
+    }
+
+    // Measure try_recv
+    while let Ok(_) = rx.try_recv() {}
+}
+
+/// Try recv on empty channel
+fn benchmark_channel_try_recv_empty() {
+    let (tx, rx) = channel<Int>.bounded(100);
+
+    for _ in 0..1_000_000 {
+        let _ = rx.try_recv();  // Will return Err(Empty)
+    }
+}
+
+/// Recv with timeout (no timeout occurs)
+fn benchmark_channel_recv_timeout_fast() async {
+    let (tx, rx) = channel<Int>.bounded(10_000);
+
+    // Fast producer
+    let producer = spawn async {
+        for i in 0..100_000 {
+            tx.send(i).await;
+        }
+    };
+
+    for _ in 0..100_000 {
+        let _ = rx.recv_timeout(Duration.from_secs(1)).await;
+    }
+
+    producer.await;
+}
+
+/// Recv with timeout (timeout occurs)
+fn benchmark_channel_recv_timeout_slow() async {
+    let (tx, rx) = channel<Int>.bounded(100);
+
+    for _ in 0..1_000 {
+        let _ = rx.recv_timeout(Duration.from_micros(1)).await;
+    }
+}
+
+/// MPSC receive (single consumer from multiple producers)
+fn benchmark_channel_mpsc_recv() async {
+    let (tx, rx) = mpsc<Int>.channel(1000);
+
+    // Multiple producers
+    for _ in 0..4 {
+        let tx = tx.clone();
+        spawn async move {
+            for i in 0..100_000 {
+                tx.send(i).await;
+            }
+        };
+    }
+    drop(tx);
+
+    // Single consumer - measure this
+    let mut count = 0;
+    while let Some(_) = rx.recv().await {
+        count += 1;
+    }
+}
+
+/// SPSC receive (optimized)
+fn benchmark_channel_spsc_recv() async {
+    let (tx, rx) = spsc<Int>.channel(10_000);
+
+    let producer = spawn async {
+        for i in 0..2_000_000 {
+            tx.send(i).await;
+        }
+    };
+
+    while let Some(_) = rx.recv().await {}
+
+    producer.await;
+}
+
+/// Batch receive
+fn benchmark_channel_batch_recv() async {
+    let (tx, rx) = channel<Int>.bounded(10_000);
+
+    let producer = spawn async {
+        for i in 0..1_000_000 {
+            tx.send(i).await;
+        }
+    };
+
+    // Batch recv - more efficient for high throughput
+    let mut batch = List.with_capacity(100);
+    let mut total = 0;
+
+    loop {
+        batch.clear();
+        let count = rx.recv_batch(&mut batch, 100).await;
+        if count == 0 { break; }
+        total += count;
+    }
+
+    producer.await;
+}
+
+/// Recv with peek
+fn benchmark_channel_peek_recv() async {
+    let (tx, rx) = channel<Int>.bounded(1000);
+
+    let producer = spawn async {
+        for i in 0..100_000 {
+            tx.send(i).await;
+        }
+    };
+
+    for _ in 0..100_000 {
+        // Peek first, then recv
+        if rx.peek().await.is_some() {
+            let _ = rx.recv().await;
+        }
+    }
+
+    producer.await;
+}
+
+/// Recv large messages
+fn benchmark_channel_recv_large() async {
+    type LargeMessage is {
+        data: [Int; 1024],
+    };
+
+    let (tx, rx) = channel<LargeMessage>.bounded(100);
+
+    let producer = spawn async {
+        for _ in 0..10_000 {
+            tx.send(LargeMessage { data: [42; 1024] }).await;
+        }
+    };
+
+    while let Some(_) = rx.recv().await {}
+
+    producer.await;
+}
+
+/// Select on multiple receivers
+fn benchmark_channel_select_recv() async {
+    let (tx1, rx1) = channel<Int>.bounded(1000);
+    let (tx2, rx2) = channel<Int>.bounded(1000);
+
+    // Producers
+    let p1 = spawn async {
+        for i in 0..50_000 {
+            tx1.send(i).await;
+        }
+    };
+    let p2 = spawn async {
+        for i in 0..50_000 {
+            tx2.send(i).await;
+        }
+    };
+
+    // Select recv
+    let mut count = 0;
+    loop {
+        select {
+            v = rx1.recv() => {
+                if v.is_none() { break; }
+                count += 1;
+            },
+            v = rx2.recv() => {
+                if v.is_none() { break; }
+                count += 1;
+            },
+        }
+        if count >= 100_000 { break; }
+    }
+
+    p1.await;
+    p2.await;
+}
+
+/// Oneshot recv
+fn benchmark_channel_oneshot_recv() async {
+    for _ in 0..500_000 {
+        let (tx, rx) = oneshot<Int>.channel();
+        spawn async move {
+            tx.send(42);
+        };
+        let _ = rx.await;
+    }
+}
+
+/// Broadcast recv
+fn benchmark_channel_broadcast_recv() async {
+    let (tx, _) = broadcast<Int>.channel(1000);
+    let rx = tx.subscribe();
+
+    let producer = spawn async {
+        for i in 0..100_000 {
+            let _ = tx.send(i);
+        }
+    };
+
+    while let Ok(_) = rx.recv().await {}
+
+    producer.await;
+}

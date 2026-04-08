@@ -1,0 +1,66 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, record-pattern
+// @description: Record patterns with exhaustiveness checking
+
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int, active: Bool };
+type Maybe<T> is None | Some(T);
+
+// Full record destructuring
+fn point_quadrant(p: Point) -> Text =
+    match p {
+        Point { x, y } if x > 0 && y > 0 => "Q1",
+        Point { x, y } if x < 0 && y > 0 => "Q2",
+        Point { x, y } if x < 0 && y < 0 => "Q3",
+        Point { x, y } if x > 0 && y < 0 => "Q4",
+        _ => "origin or axis"
+    };
+
+// Partial record patterns with ..
+fn person_status(p: Person) -> Text =
+    match p {
+        Person { active: true, .. } => "active user",
+        Person { active: false, age } if age > 65 => "retired",
+        Person { active: false, .. } => "inactive"
+    };
+
+// Nested record patterns
+type Address is { city: Text, zip: Int };
+type Employee is { person: Person, address: Address };
+
+fn employee_locale(e: Employee) -> Text =
+    match e {
+        Employee { address: Address { zip, .. }, .. } if zip >= 10000 && zip < 20000 => "region A",
+        Employee { address: Address { zip, .. }, .. } if zip >= 20000 && zip < 30000 => "region B",
+        _ => "other region"
+    };
+
+// Record pattern with variant fields
+type Status is Active { since: Int } | Inactive;
+type Account is { id: Int, status: Status };
+
+fn account_info(a: Account) -> Text =
+    match a {
+        Account { status: Active { since }, .. } if since < 2020 => "veteran",
+        Account { status: Active { .. }, .. } => "member",
+        Account { status: Inactive, .. } => "inactive"
+    };
+
+// Record with optional fields
+type Config is { name: Text, timeout: Maybe<Int> };
+
+fn config_timeout(c: Config) -> Int =
+    match c {
+        Config { timeout: Some(t), .. } => t,
+        Config { timeout: None, .. } => 30  // default
+    };
+
+fn main() {
+    assert(point_quadrant(Point { x: 1, y: 1 }) == "Q1");
+    assert(person_status(Person { name: "Alice", age: 30, active: true }) == "active user");
+    let emp = Employee { person: Person { name: "Bob", age: 40, active: true }, address: Address { city: "NYC", zip: 15000 } };
+    assert(employee_locale(emp) == "region A");
+    assert(account_info(Account { id: 1, status: Active { since: 2015 } }) == "veteran");
+    assert(config_timeout(Config { name: "app", timeout: Some(60) }) == 60);
+}

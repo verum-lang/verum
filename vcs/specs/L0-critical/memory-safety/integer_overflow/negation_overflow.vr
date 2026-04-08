@@ -1,0 +1,13 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, integer-overflow, negation
+// @description: Tests that negation overflow is detected for MIN value
+
+fn main() {
+    // Use -MAX - 1 to get MIN
+    let min_int = -9223372036854775807 - 1;  // Int.MIN
+
+    // Negating MIN causes overflow because -MIN > MAX
+    let _ = -min_int;  // Panic: Integer overflow
+}

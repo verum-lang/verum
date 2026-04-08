@@ -1,0 +1,200 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, lift, const, integration
+// @description: Test lift expressions for crossing stage boundaries
+
+// =============================================================================
+// BASIC LIFT - PRIMITIVE TYPES
+// =============================================================================
+
+meta fn lift_int() -> TokenStream {
+    let x = 42;
+    quote {
+        let value = lift(x);
+    }
+}
+
+meta fn lift_float() -> TokenStream {
+    let pi = 3.14159;
+    quote {
+        let value = lift(pi);
+    }
+}
+
+meta fn lift_bool() -> TokenStream {
+    let flag = true;
+    quote {
+        let value = lift(flag);
+    }
+}
+
+meta fn lift_text() -> TokenStream {
+    let msg = "Hello, World!";
+    quote {
+        let value = lift(msg);
+    }
+}
+
+meta fn lift_char() -> TokenStream {
+    let ch = 'A';
+    quote {
+        let value = lift(ch);
+    }
+}
+
+// =============================================================================
+// LIFT WITH COMPUTATION
+// =============================================================================
+
+meta fn lift_computed_value() -> TokenStream {
+    let base = 10;
+    let multiplier = 5;
+
+    quote {
+        // Lift result of compile-time computation
+        let product = lift(base * multiplier);  // 50
+        let sum = lift(base + multiplier);      // 15
+        let diff = lift(base - multiplier);     // 5
+    }
+}
+
+meta fn lift_conditional() -> TokenStream {
+    let debug = true;
+    let level = if debug { 10 } else { 0 };
+
+    quote {
+        let log_level = lift(level);  // 10
+    }
+}
+
+// =============================================================================
+// LIFT VS SPLICE
+// =============================================================================
+// lift(expr) - evaluates expr, converts result to literal
+// ${expr} - evaluates expr, splices as code (can be more complex types)
+
+meta fn lift_vs_splice_demo() -> TokenStream {
+    let value = 100;
+
+    quote {
+        // Both produce same result for simple values
+        let lifted = lift(value);   // Literal 100
+        let spliced = ${value};     // Also 100
+
+        // But for expressions:
+        let lifted_expr = lift(value * 2);  // Literal 200
+        let spliced_expr = ${value * 2};    // Also 200
+
+        // Key difference: lift always produces a literal
+        // splice can produce more complex expressions
+    }
+}
+
+// =============================================================================
+// LIFT IN DIFFERENT CONTEXTS
+// =============================================================================
+
+meta fn lift_in_array() -> TokenStream {
+    let size = 5;
+    quote {
+        let arr: [Int; lift(size)] = [0; lift(size)];
+    }
+}
+
+meta fn lift_in_match() -> TokenStream {
+    let expected = 42;
+    quote {
+        match value {
+            x if x == lift(expected) => handle_expected(),
+            _ => handle_other(),
+        }
+    }
+}
+
+meta fn lift_in_type_annotation() -> TokenStream {
+    let width = 32;
+    quote {
+        type FixedInt = Int<lift(width)>;  // Type with const generic
+    }
+}
+
+// =============================================================================
+// LIFT WITH COLLECTIONS
+// =============================================================================
+
+meta fn lift_list_elements() -> TokenStream {
+    let items = [1, 2, 3, 4, 5];
+    let sum = items.fold(0, |acc, x| acc + x);  // Computed at compile time
+
+    quote {
+        let total = lift(sum);  // 15
+    }
+}
+
+meta fn lift_map_result() -> TokenStream {
+    let data = map!{
+        "a" => 1,
+        "b" => 2,
+        "c" => 3,
+    };
+    let count = data.len();
+
+    quote {
+        let num_entries = lift(count);  // 3
+    }
+}
+
+// =============================================================================
+// NESTED LIFT
+// =============================================================================
+
+meta fn nested_lift_example() -> TokenStream {
+    let outer = 10;
+
+    quote {
+        let a = lift(outer);
+
+        // Nested quote with lift
+        let nested = quote {
+            // Can lift from the meta level of this quote
+            let inner_computed = 5;
+            let b = lift(inner_computed);
+        };
+
+        a
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_lift_int() {
+    @lift_int();
+    assert(value == 42);
+}
+
+fn test_lift_computed() {
+    @lift_computed_value();
+    assert(product == 50);
+    assert(sum == 15);
+    assert(diff == 5);
+}
+
+fn test_lift_conditional() {
+    @lift_conditional();
+    assert(log_level == 10);
+}
+
+fn test_lift_list() {
+    @lift_list_elements();
+    assert(total == 15);
+}
+
+fn main() {
+    test_lift_int();
+    test_lift_computed();
+    test_lift_conditional();
+    test_lift_list();
+}

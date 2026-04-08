@@ -1,0 +1,219 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, inversions, merge-sort, divide-and-conquer
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for counting inversions in an array using merge-sort-based approach.
+// An inversion is a pair (i, j) where i < j but arr[i] > arr[j].
+// Uses iterative bottom-up merge sort to count inversions.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Result of merge: sorted array and inversion count
+type MergeResult is { arr: Arr8, inv_count: Int };
+
+fn min_val(a: Int, bv: Int) -> Int {
+    if a < bv { a } else { bv }
+}
+
+// Merge two sorted subarrays [left..mid) and [mid..right) counting cross-inversions.
+// Returns the merged subarray (only positions left..right modified) and the count.
+fn merge_count(a: Arr8, left: Int, mid: Int, right: Int) -> MergeResult {
+    // Copy left half to temp_l, right half to temp_r
+    let l_len = mid - left;
+    let r_len = right - mid;
+
+    let mut temp_l = a8_zero();
+    let mut i = 0;
+    while i < l_len {
+        temp_l = a8_set(temp_l, i, a8_get(a, left + i));
+        i = i + 1;
+    }
+
+    let mut temp_r = a8_zero();
+    i = 0;
+    while i < r_len {
+        temp_r = a8_set(temp_r, i, a8_get(a, mid + i));
+        i = i + 1;
+    }
+
+    let mut result = a;
+    let mut inversions = 0;
+    let mut li = 0;
+    let mut ri = 0;
+    let mut k = left;
+
+    while li < l_len {
+        if ri < r_len {
+            if a8_get(temp_l, li) <= a8_get(temp_r, ri) {
+                result = a8_set(result, k, a8_get(temp_l, li));
+                li = li + 1;
+            } else {
+                result = a8_set(result, k, a8_get(temp_r, ri));
+                // All remaining elements in left half form inversions with this element
+                inversions = inversions + (l_len - li);
+                ri = ri + 1;
+            }
+        } else {
+            result = a8_set(result, k, a8_get(temp_l, li));
+            li = li + 1;
+        }
+        k = k + 1;
+    }
+
+    while ri < r_len {
+        result = a8_set(result, k, a8_get(temp_r, ri));
+        ri = ri + 1;
+        k = k + 1;
+    }
+
+    MergeResult { arr: result, inv_count: inversions }
+}
+
+// Bottom-up merge sort with inversion counting
+fn count_inversions(arr: Arr8, n: Int) -> Int {
+    let mut a = arr;
+    let mut total_inv = 0;
+    let mut width = 1;
+
+    while width < n {
+        let mut left = 0;
+        while left < n {
+            let mid = min_val(left + width, n);
+            let right = min_val(left + 2 * width, n);
+            if mid < right {
+                let mr = merge_count(a, left, mid, right);
+                a = mr.arr;
+                total_inv = total_inv + mr.inv_count;
+            }
+            left = left + 2 * width;
+        }
+        width = width * 2;
+    }
+
+    total_inv
+}
+
+// Brute force O(n^2) for verification
+fn brute_force_inversions(arr: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if a8_get(arr, i) > a8_get(arr, j) {
+                count = count + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_sorted_array() {
+    // Already sorted: 0 inversions
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    assert_eq(count_inversions(arr, 8), 0);
+}
+
+fn test_reverse_sorted() {
+    // Reverse sorted: n*(n-1)/2 inversions
+    // [4, 3, 2, 1] -> 6 inversions
+    let arr = Arr8 { a0: 4, a1: 3, a2: 2, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(count_inversions(arr, 4), 6);
+}
+
+fn test_single_element() {
+    let arr = Arr8 { a0: 42, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(count_inversions(arr, 1), 0);
+}
+
+fn test_two_elements_sorted() {
+    let arr = Arr8 { a0: 1, a1: 5, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(count_inversions(arr, 2), 0);
+}
+
+fn test_two_elements_inverted() {
+    let arr = Arr8 { a0: 5, a1: 1, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(count_inversions(arr, 2), 1);
+}
+
+fn test_mixed_array() {
+    // [2, 4, 1, 3, 5]
+    // Inversions: (2,1), (4,1), (4,3) -> 3
+    let arr = Arr8 { a0: 2, a1: 4, a2: 1, a3: 3, a4: 5, a5: 0, a6: 0, a7: 0 };
+    assert_eq(count_inversions(arr, 5), 3);
+}
+
+fn test_duplicates() {
+    // [3, 1, 2, 3]
+    // Inversions: (3,1), (3,2) -> 2
+    let arr = Arr8 { a0: 3, a1: 1, a2: 2, a3: 3, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(count_inversions(arr, 4), 2);
+}
+
+fn test_all_same() {
+    let arr = Arr8 { a0: 5, a1: 5, a2: 5, a3: 5, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(count_inversions(arr, 4), 0);
+}
+
+fn test_brute_force_match() {
+    // Verify merge-sort count matches brute force
+    let arr = Arr8 { a0: 8, a1: 4, a2: 2, a3: 1, a4: 7, a5: 3, a6: 6, a7: 5 };
+    let bf = brute_force_inversions(arr, 8);
+    let ms = count_inversions(arr, 8);
+    assert_eq(ms, bf);
+}
+
+fn test_six_elements() {
+    // [5, 1, 3, 2, 4, 6]
+    // Brute force: (5,1),(5,3),(5,2),(5,4),(3,2) -> 5
+    let arr = Arr8 { a0: 5, a1: 1, a2: 3, a3: 2, a4: 4, a5: 6, a6: 0, a7: 0 };
+    assert_eq(count_inversions(arr, 6), 5);
+    assert_eq(brute_force_inversions(arr, 6), 5);
+}
+
+fn test_reverse_eight() {
+    // [8,7,6,5,4,3,2,1] -> 28 inversions (8*7/2)
+    let arr = Arr8 { a0: 8, a1: 7, a2: 6, a3: 5, a4: 4, a5: 3, a6: 2, a7: 1 };
+    assert_eq(count_inversions(arr, 8), 28);
+}
+
+fn main() -> Int {
+    test_sorted_array();
+    test_reverse_sorted();
+    test_single_element();
+    test_two_elements_sorted();
+    test_two_elements_inverted();
+    test_mixed_array();
+    test_duplicates();
+    test_all_same();
+    test_brute_force_match();
+    test_six_elements();
+    test_reverse_eight();
+    print("[OK] 373_count_inversions_aot");
+    0
+}

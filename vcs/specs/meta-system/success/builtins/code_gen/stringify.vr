@@ -1,0 +1,234 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, code_gen, stringify
+// @description: Comprehensive tests for stringify builtin converting values to text
+
+// =============================================================================
+// STRINGIFY PRIMITIVE TYPES
+// =============================================================================
+
+// Test stringify integer
+meta fn test_stringify_int() -> Text {
+    stringify(42)
+}
+
+// Test stringify negative integer
+meta fn test_stringify_negative_int() -> Text {
+    stringify(-123)
+}
+
+// Test stringify zero
+meta fn test_stringify_zero() -> Text {
+    stringify(0)
+}
+
+// Test stringify large integer
+meta fn test_stringify_large_int() -> Text {
+    stringify(9999999999)
+}
+
+// Test stringify unsigned integer
+meta fn test_stringify_uint() -> Text {
+    let x: UInt = 42;
+    stringify(x)
+}
+
+// Test stringify float
+meta fn test_stringify_float() -> Text {
+    stringify(3.14159)
+}
+
+// Test stringify float with exponent
+meta fn test_stringify_float_exp() -> Text {
+    stringify(1.5e10)
+}
+
+// Test stringify negative float
+meta fn test_stringify_negative_float() -> Text {
+    stringify(-273.15)
+}
+
+// Test stringify bool true
+meta fn test_stringify_bool_true() -> Text {
+    stringify(true)
+}
+
+// Test stringify bool false
+meta fn test_stringify_bool_false() -> Text {
+    stringify(false)
+}
+
+// Test stringify char
+meta fn test_stringify_char() -> Text {
+    stringify('A')
+}
+
+// Test stringify special char
+meta fn test_stringify_char_newline() -> Text {
+    stringify('\n')
+}
+
+// Test stringify unit
+meta fn test_stringify_unit() -> Text {
+    stringify(())
+}
+
+// =============================================================================
+// STRINGIFY TEXT
+// =============================================================================
+
+// Test stringify text (identity for text)
+meta fn test_stringify_text() -> Text {
+    stringify("hello")
+}
+
+// Test stringify empty text
+meta fn test_stringify_empty_text() -> Text {
+    stringify("")
+}
+
+// Test stringify text with spaces
+meta fn test_stringify_text_spaces() -> Text {
+    stringify("hello world")
+}
+
+// Test stringify text with special chars
+meta fn test_stringify_text_special() -> Text {
+    stringify("line1\nline2\ttab")
+}
+
+// =============================================================================
+// STRINGIFY COLLECTIONS
+// =============================================================================
+
+// Test stringify array of ints
+meta fn test_stringify_array_int() -> Text {
+    stringify([1, 2, 3])
+}
+
+// Test stringify empty array
+meta fn test_stringify_empty_array() -> Text {
+    let arr: [Int; 0] = [];
+    stringify(arr)
+}
+
+// Test stringify nested array
+meta fn test_stringify_nested_array() -> Text {
+    stringify([[1, 2], [3, 4]])
+}
+
+// Test stringify tuple
+meta fn test_stringify_tuple() -> Text {
+    stringify((1, "hello", true))
+}
+
+// Test stringify tuple with single element
+meta fn test_stringify_tuple_single() -> Text {
+    stringify((42,))
+}
+
+// Test stringify empty tuple (unit)
+meta fn test_stringify_empty_tuple() -> Text {
+    stringify(())
+}
+
+// Test stringify mixed tuple
+meta fn test_stringify_mixed_tuple() -> Text {
+    stringify((1, 2.5, "text", 'c', false))
+}
+
+// =============================================================================
+// STRINGIFY COMPUTED VALUES
+// =============================================================================
+
+// Test stringify computed integer
+meta fn test_stringify_computed() -> Text {
+    let x = 10 + 20;
+    stringify(x)
+}
+
+// Test stringify from conditional
+meta fn test_stringify_conditional() -> Text {
+    let x = if true { 1 } else { 2 };
+    stringify(x)
+}
+
+// Test stringify from function result
+meta fn get_value() -> Int { 100 }
+
+meta fn test_stringify_fn_result() -> Text {
+    stringify(get_value())
+}
+
+// =============================================================================
+// STRINGIFY IN CODE GENERATION
+// =============================================================================
+
+// Test stringify for generating code comments
+meta fn generate_comment(value: Int) -> Text {
+    text_concat("// value: ", stringify(value))
+}
+
+// Test stringify in string interpolation pattern
+meta fn format_debug(name: Text, value: Int) -> Text {
+    text_concat(name, " = ", stringify(value))
+}
+
+// Test stringify multiple values for code gen
+meta fn format_tuple_debug(a: Int, b: Int) -> Text {
+    text_concat("(", stringify(a), ", ", stringify(b), ")")
+}
+
+// =============================================================================
+// STRINGIFY EDGE CASES
+// =============================================================================
+
+// Test stringify max int (i128 range)
+meta fn test_stringify_max_int() -> Text {
+    stringify(170141183460469231731687303715884105727)
+}
+
+// Test stringify min int (i128 range)
+meta fn test_stringify_min_int() -> Text {
+    stringify(-170141183460469231731687303715884105727)
+}
+
+// Test stringify preserves precision
+meta fn test_stringify_precision() -> Text {
+    let x = 123456789012345;
+    let s = stringify(x);
+    s
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Primitive types
+    @const assert_eq(test_stringify_int(), "42");
+    @const assert_eq(test_stringify_negative_int(), "-123");
+    @const assert_eq(test_stringify_zero(), "0");
+    @const assert_eq(test_stringify_bool_true(), "true");
+    @const assert_eq(test_stringify_bool_false(), "false");
+    @const assert_eq(test_stringify_unit(), "()");
+
+    // Text
+    @const assert_eq(test_stringify_text(), "hello");
+    @const assert_eq(test_stringify_empty_text(), "");
+    @const assert_eq(test_stringify_text_spaces(), "hello world");
+
+    // Computed
+    @const assert_eq(test_stringify_computed(), "30");
+    @const assert_eq(test_stringify_conditional(), "1");
+    @const assert_eq(test_stringify_fn_result(), "100");
+
+    // Code generation helpers
+    @const assert_eq(generate_comment(42), "// value: 42");
+    @const assert_eq(format_debug("x", 10), "x = 10");
+    @const assert_eq(format_tuple_debug(1, 2), "(1, 2)");
+
+    // Precision
+    @const assert_eq(test_stringify_precision(), "123456789012345");
+}

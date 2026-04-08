@@ -1,0 +1,48 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, record, field, error
+// @description: Test missing field value after colon in record pattern
+// @expected-error: E078
+
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int, email: Text };
+
+fn test_missing_value_after_colon() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: colon without following pattern
+    match p {
+        Point { x: } => print("missing value"),
+        _ => print("other"),
+    }
+}
+
+fn test_missing_value_middle_field() {
+    let person = Person { name: "Alice", age: 30, email: "alice@example.com" };
+
+    // Invalid: missing value in middle field
+    match person {
+        Person { name, age:, email } => print("missing middle value"),
+        _ => print("other"),
+    }
+}
+
+fn test_missing_value_last_field() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: missing value in last field before brace
+    match p {
+        Point { x: a, y: } => print("missing last value"),
+        _ => print("other"),
+    }
+}
+
+fn test_colon_with_comma() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: colon followed directly by comma
+    match p {
+        Point { x:, y: b } => print("colon comma"),
+        _ => print("other"),
+    }
+}

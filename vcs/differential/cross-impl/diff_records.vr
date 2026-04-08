@@ -1,0 +1,60 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, records, struct, type
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Record types: field access, construction, functions taking records
+
+type Point is { x: Int, y: Int };
+
+fn distance_sq(p: Point) -> Int {
+    p.x * p.x + p.y * p.y
+}
+
+fn manhattan(p: Point) -> Int {
+    let ax = if p.x < 0 { -p.x } else { p.x };
+    let ay = if p.y < 0 { -p.y } else { p.y };
+    ax + ay
+}
+
+fn add_points(a: Point, b: Point) -> Point {
+    Point { x: a.x + b.x, y: a.y + b.y }
+}
+
+type Rect is { left: Int, top: Int, width: Int, height: Int };
+
+fn area(r: Rect) -> Int {
+    r.width * r.height
+}
+
+fn contains_point(r: Rect, p: Point) -> Bool {
+    p.x >= r.left && p.x < r.left + r.width &&
+    p.y >= r.top && p.y < r.top + r.height
+}
+
+fn main() -> Int {
+    let origin = Point { x: 0, y: 0 };
+    assert_eq(origin.x, 0);
+    assert_eq(origin.y, 0);
+    assert_eq(distance_sq(origin), 0);
+
+    let p1 = Point { x: 3, y: 4 };
+    assert_eq(distance_sq(p1), 25);
+    assert_eq(manhattan(p1), 7);
+
+    let p2 = Point { x: -1, y: 2 };
+    let p3 = add_points(p1, p2);
+    assert_eq(p3.x, 2);
+    assert_eq(p3.y, 6);
+
+    let r = Rect { left: 0, top: 0, width: 10, height: 10 };
+    assert_eq(area(r), 100);
+    assert_eq(contains_point(r, Point { x: 5, y: 5 }), true);
+    assert_eq(contains_point(r, Point { x: 15, y: 5 }), false);
+    assert_eq(contains_point(r, Point { x: -1, y: 5 }), false);
+
+    print("diff_records: ok");
+    0
+}

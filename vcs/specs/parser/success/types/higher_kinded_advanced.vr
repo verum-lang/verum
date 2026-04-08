@@ -1,0 +1,278 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, higher-kinded, hkt, type-constructors, self-hosting-critical
+// @expect: pass
+// Test: Advanced higher-kinded type features for self-hosting verification
+
+// =============================================================================
+// BASIC HKT
+// =============================================================================
+
+// Type constructor with one parameter
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+// Type constructor with two parameters
+type Bifunctor<F<_, _>> is protocol {
+    fn bimap<A, B, C, D>(
+        self: F<A, B>,
+        f: fn(A) -> C,
+        g: fn(B) -> D
+    ) -> F<C, D>;
+};
+
+// =============================================================================
+// MULTIPLE HKT PARAMETERS
+// =============================================================================
+
+// Natural transformation between type constructors
+type Natural<F<_>, G<_>> is protocol {
+    fn transform<A>(fa: F<A>) -> G<A>;
+};
+
+// Functor composition
+type Compose<F<_>, G<_>, A> is F<G<A>>;
+
+// =============================================================================
+// HKT WITH DIFFERENT ARITIES
+// =============================================================================
+
+// Mixed arity constraints
+fn transform_nested<
+    F<_>: Functor,
+    G<_, _>: Bifunctor
+>(
+    value: F<G<Int, Text>>
+) -> F<G<Float, Text>> {
+    F.map(value, |g| G.bimap(g, |i| i as Float, |t| t))
+}
+
+// =============================================================================
+// NESTED HKT
+// =============================================================================
+
+// Nested type constructor
+type NestedFunctor<F<_>, G<_>> is Functor<Compose<F, G, _>>;
+
+// Doubly nested
+type DeepNest<F<_>, G<_>, H<_>, A> is F<G<H<A>>>;
+
+// =============================================================================
+// HKT IN BOUNDS
+// =============================================================================
+
+// Function with HKT bounds
+fn sequence<F<_>: Applicative, T>(
+    list: List<F<T>>
+) -> F<List<T>> {
+    list.fold(
+        F.pure([]),
+        |acc, item| F.map2(acc, item, |l, x| l.append(x))
+    )
+}
+
+// Multiple HKT bounds
+fn bisequence<
+    F<_>: Applicative,
+    B<_, _>: Bitraversable
+>(
+    bab: B<F<Int>, F<Text>>
+) -> F<B<Int, Text>> {
+    B.bisequence(bab)
+}
+
+// =============================================================================
+// TYPE FAMILIES WITH HKT
+// =============================================================================
+
+// Associated type constructor
+type Collection<C<_>> is protocol {
+    type Elem;
+
+    fn empty() -> C<Self.Elem>;
+    fn singleton(x: Self.Elem) -> C<Self.Elem>;
+    fn append(self: C<Self.Elem>, other: C<Self.Elem>) -> C<Self.Elem>;
+};
+
+// =============================================================================
+// MONAD TRANSFORMER STYLE
+// =============================================================================
+
+// Transformer taking type constructor
+type StateT<S, F<_>, A> is fn(S) -> F<(A, S)>;
+
+// Monad transformer type
+type MonadTrans<F<_>, A> is {
+    inner: F<A>,
+};
+
+// =============================================================================
+// DEFUNCTIONALIZATION
+// =============================================================================
+
+// Type-level function representation (using associated types)
+type TypeApply<F<_>, A> is F<A>;
+
+// Higher-order type function composition
+type TypeMap<F<_>, G<_>, A> is F<G<A>>;
+
+// =============================================================================
+// HKT WITH EXISTENTIALS
+// =============================================================================
+
+// Existential wrapper for HKT (using struct)
+type SomeFunctor<A> is {
+    // Existential is erased at runtime, data is the only field
+    data: Heap<()>,  // Type-erased container
+};
+
+// Pack into existential (generic over F)
+fn pack_functor<F<_>: Functor, A>(fa: F<A>) -> SomeFunctor<A> {
+    SomeFunctor { data: Heap(fa as ()) }
+}
+
+// Map over existential (with type witness)
+fn map_existential<A, B>(
+    sf: SomeFunctor<A>,
+    f: fn(A) -> B
+) -> SomeFunctor<B> {
+    // Implementation would use runtime type info
+    SomeFunctor { data: sf.data }
+}
+
+// =============================================================================
+// MONAD HIERARCHY
+// =============================================================================
+
+// Standard monad hierarchy with HKT
+type Applicative<F<_>> is protocol extends Functor<F<_>> {
+    fn pure<A>(a: A) -> F<A>;
+    fn apply<A, B>(self: F<fn(A) -> B>, fa: F<A>) -> F<B>;
+};
+
+type Monad<F<_>> is protocol extends Applicative<F<_>> {
+    fn flat_map<A, B>(self: F<A>, f: fn(A) -> F<B>) -> F<B>;
+
+    // Derived from flat_map
+    fn flatten<A>(self: F<F<A>>) -> F<A> {
+        self.flat_map(|x| x)
+    }
+};
+
+// =============================================================================
+// FREE CONSTRUCTIONS
+// =============================================================================
+
+// Free monad
+type Free<F<_>, A> is
+    | Pure(A)
+    | Suspend(F<Heap<Free<F, A>>>);
+
+// Free applicative (simplified without existential in variant)
+type FreeAp<F<_>, A> is
+    | PureAp(A)
+    | ApplyAp(Heap<FreeAp<F, fn(A) -> A>>, F<A>);
+
+// =============================================================================
+// COMONAD
+// =============================================================================
+
+// Comonad (dual of monad)
+type Comonad<W<_>> is protocol extends Functor<W<_>> {
+    fn extract<A>(self: W<A>) -> A;
+    fn duplicate<A>(self: W<A>) -> W<W<A>>;
+
+    fn extend<A, B>(self: W<A>, f: fn(W<A>) -> B) -> W<B> {
+        self.duplicate().map(f)
+    }
+};
+
+// =============================================================================
+// PROFUNCTOR
+// =============================================================================
+
+// Profunctor (bifunctor contravariant in first argument)
+type Profunctor<P<_, _>> is protocol {
+    fn dimap<A, B, C, D>(
+        self: P<B, C>,
+        f: fn(A) -> B,
+        g: fn(C) -> D
+    ) -> P<A, D>;
+
+    fn lmap<A, B, C>(self: P<B, C>, f: fn(A) -> B) -> P<A, C> {
+        self.dimap(f, |x| x)
+    }
+
+    fn rmap<A, B, C>(self: P<A, B>, g: fn(B) -> C) -> P<A, C> {
+        self.dimap(|x| x, g)
+    }
+};
+
+// =============================================================================
+// ARROW
+// =============================================================================
+
+// Arrow abstraction
+type Arrow<A<_, _>> is protocol extends Profunctor<A<_, _>> {
+    fn arr<B, C>(f: fn(B) -> C) -> A<B, C>;
+    fn first<B, C, D>(self: A<B, C>) -> A<(B, D), (C, D)>;
+
+    fn second<B, C, D>(self: A<B, C>) -> A<(D, B), (D, C)> {
+        fn swap<X, Y>(pair: (X, Y)) -> (Y, X) { (pair.1, pair.0) }
+        A.arr(swap).then(self.first()).then(A.arr(swap))
+    }
+
+    fn then<B, C, D>(self: A<B, C>, other: A<C, D>) -> A<B, D>;
+};
+
+// =============================================================================
+// TRAVERSABLE
+// =============================================================================
+
+// Traversable functor (extends both Functor and Foldable)
+type Traversable<T<_>> is protocol extends Functor<T<_>> + Foldable<T<_>> {
+    fn traverse<F<_>: Applicative, A, B>(
+        self: T<A>,
+        f: fn(A) -> F<B>
+    ) -> F<T<B>>;
+
+    fn sequence<F<_>: Applicative, A>(self: T<F<A>>) -> F<T<A>> {
+        self.traverse(|x| x)
+    }
+};
+
+// =============================================================================
+// APPLICATIVE COMBINATORS
+// =============================================================================
+
+// Applicative map3 combinator
+fn applicative_example<F<_>: Applicative>() -> F<Int> {
+    let fx = F.pure(1);
+    let fy = F.pure(2);
+    let fz = F.pure(3);
+    F.map3(fx, fy, fz, |x, y, z| x + y + z)
+}
+
+// =============================================================================
+// TYPE CLASS COHERENCE
+// =============================================================================
+
+// Only one implementation per type
+implement Functor for List {
+    fn map<A, B>(self: List<A>, f: fn(A) -> B) -> List<B> {
+        self.iter().map(f).collect()
+    }
+}
+
+implement Functor for Maybe {
+    fn map<A, B>(self: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+        match self {
+            Some(x) => Some(f(x)),
+            None => None,
+        }
+    }
+}
+
+// Cannot have another Functor for List (coherence violation)

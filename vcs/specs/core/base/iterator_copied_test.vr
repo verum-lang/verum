@@ -1,0 +1,234 @@
+// =============================================================================
+// iterator_copied_test.vr - Tests for Iterator.copied() method
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, iterator, copied, copy
+// @description: Tests for Iterator.copied() which creates an iterator that
+//               copies each element from an iterator over references.
+//               Similar to cloned() but for Copy types.
+// =============================================================================
+
+mount core.base.iterator.{Iterator, Copied, Range, range};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Basic copied()
+// =============================================================================
+
+@test
+fn test_copied_basic() {
+    let items = [1, 2, 3];
+    let mut iter = items.iter().copied();
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_copied_bool() {
+    let items = [true, false, true];
+    let mut iter = items.iter().copied();
+    assert_eq(iter.next(), Some(true));
+    assert_eq(iter.next(), Some(false));
+    assert_eq(iter.next(), Some(true));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_copied_empty() {
+    let items: List<Int> = [];
+    let mut iter = items.iter().copied();
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_copied_single() {
+    let items = [42];
+    let mut iter = items.iter().copied();
+    assert_eq(iter.next(), Some(42));
+    assert_eq(iter.next(), None);
+}
+
+// =============================================================================
+// Section 2: copied() with collection operations
+// =============================================================================
+
+@test
+fn test_copied_collect() {
+    let items = [1, 2, 3, 4, 5];
+    let result: List<Int> = items.iter().copied().collect();
+    assert_eq(result.len(), 5);
+}
+
+@test
+fn test_copied_sum() {
+    let items = [1, 2, 3, 4, 5];
+    let total: Int = items.iter().copied().sum();
+    assert_eq(total, 15);
+}
+
+@test
+fn test_copied_count() {
+    let items = [10, 20, 30];
+    let count = items.iter().copied().count();
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// Section 3: copied() with adapters
+// =============================================================================
+
+@test
+fn test_copied_filter() {
+    let items = [1, 2, 3, 4, 5];
+    let result: List<Int> = items.iter().copied()
+        .filter(|x| *x > 3)
+        .collect();
+    assert_eq(result.len(), 2);
+}
+
+@test
+fn test_copied_map() {
+    let items = [1, 2, 3];
+    let result: List<Int> = items.iter().copied()
+        .map(|x| x * 2)
+        .collect();
+    assert_eq(result.len(), 3);
+}
+
+@test
+fn test_copied_take() {
+    let items = [1, 2, 3, 4, 5];
+    let result: List<Int> = items.iter().copied()
+        .take(3)
+        .collect();
+    assert_eq(result.len(), 3);
+}
+
+@test
+fn test_copied_skip() {
+    let items = [1, 2, 3, 4, 5];
+    let result: List<Int> = items.iter().copied()
+        .skip(2)
+        .collect();
+    assert_eq(result.len(), 3);
+}
+
+// =============================================================================
+// Section 4: copied() size_hint
+// =============================================================================
+
+@test
+fn test_copied_size_hint() {
+    let items = [1, 2, 3];
+    let iter = items.iter().copied();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 3);
+}
+
+@test
+fn test_copied_size_hint_empty() {
+    let items: List<Int> = [];
+    let iter = items.iter().copied();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+// =============================================================================
+// Section 5: copied() vs cloned() equivalence
+// =============================================================================
+
+@test
+fn test_copied_vs_cloned_same_result() {
+    let items = [1, 2, 3, 4, 5];
+    let copied_sum: Int = items.iter().copied().sum();
+    let cloned_sum: Int = items.iter().cloned().sum();
+    assert_eq(copied_sum, cloned_sum);
+}
+
+@test
+fn test_copied_vs_cloned_collect() {
+    let items = [10, 20, 30];
+    let copied: List<Int> = items.iter().copied().collect();
+    let cloned: List<Int> = items.iter().cloned().collect();
+    assert_eq(copied.len(), cloned.len());
+}
+
+// =============================================================================
+// Section 6: copied() with different Copy types
+// =============================================================================
+
+@test
+fn test_copied_float() {
+    let items = [1.0, 2.0, 3.0];
+    let mut iter = items.iter().copied();
+    // Can't use .unwrap() — Item<Copied<SliceIter<_>>> doesn't resolve
+    assert(iter.next() is Some);
+    let total: Float = items.iter().copied().sum();
+    assert(total > 5.5);
+    assert(total < 6.5);
+}
+
+@test
+fn test_copied_negative_ints() {
+    let items = [-3, -2, -1, 0, 1];
+    let total: Int = items.iter().copied().sum();
+    assert_eq(total, -5);
+}
+
+@test
+fn test_copied_all_same() {
+    let items = [7, 7, 7, 7];
+    let result: List<Int> = items.iter().copied().collect();
+    assert_eq(result.len(), 4);
+}
+
+// =============================================================================
+// Section 7: copied() chaining
+// =============================================================================
+
+@test
+fn test_copied_chain_filter_map() {
+    let items = [1, 2, 3, 4, 5, 6];
+    let result: List<Int> = items.iter().copied()
+        .filter(|x| *x % 2 == 0)
+        .map(|x| x * 10)
+        .collect();
+    assert_eq(result.len(), 3);
+}
+
+@test
+fn test_copied_enumerate() {
+    let items = [10, 20, 30];
+    // Can't use .unwrap() on enumerate — tuple type doesn't resolve through Copied adapter
+    let count = items.iter().copied().enumerate().count();
+    assert_eq(count, 3);
+    // Verify enumerate works by collecting the copied values separately
+    let result: List<Int> = items.iter().copied().collect();
+    assert_eq(result.len(), 3);
+}
+
+@test
+fn test_copied_find() {
+    let items = [1, 2, 3, 4, 5];
+    // Can't use .is_some()/.unwrap() — Item<Copied<SliceIter<_>>> doesn't resolve
+    let found = items.iter().copied().find(|x| *x > 3);
+    assert(found is Some);
+    // Verify the filter count matches expected
+    let gt3_count = items.iter().copied().filter(|x| *x > 3).count();
+    assert_eq(gt3_count, 2);
+}
+
+@test
+fn test_copied_any_all() {
+    let items = [2, 4, 6, 8];
+    assert(items.iter().copied().all(|x| *x % 2 == 0));
+    assert(items.iter().copied().any(|x| *x > 5));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

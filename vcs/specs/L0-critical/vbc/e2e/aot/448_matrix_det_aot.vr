@@ -1,0 +1,143 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, matrix, determinant, linear-algebra
+// @timeout: 30000
+
+// Matrix operations on 4x4 matrices (stored as flat 16 fields)
+
+type Mat4 is {
+    m0: Int, m1: Int, m2: Int, m3: Int,
+    m4: Int, m5: Int, m6: Int, m7: Int,
+    m8: Int, m9: Int, m10: Int, m11: Int,
+    m12: Int, m13: Int, m14: Int, m15: Int
+};
+
+fn get_m4(m: Mat4, r: Int, c: Int) -> Int {
+    let idx = r * 4 + c;
+    if idx == 0 { m.m0 } else if idx == 1 { m.m1 } else if idx == 2 { m.m2 }
+    else if idx == 3 { m.m3 } else if idx == 4 { m.m4 } else if idx == 5 { m.m5 }
+    else if idx == 6 { m.m6 } else if idx == 7 { m.m7 } else if idx == 8 { m.m8 }
+    else if idx == 9 { m.m9 } else if idx == 10 { m.m10 } else if idx == 11 { m.m11 }
+    else if idx == 12 { m.m12 } else if idx == 13 { m.m13 } else if idx == 14 { m.m14 }
+    else { m.m15 }
+}
+
+fn identity4() -> Mat4 {
+    Mat4 {
+        m0: 1, m1: 0, m2: 0, m3: 0,
+        m4: 0, m5: 1, m6: 0, m7: 0,
+        m8: 0, m9: 0, m10: 1, m11: 0,
+        m12: 0, m13: 0, m14: 0, m15: 1
+    }
+}
+
+fn trace4(m: Mat4) -> Int {
+    m.m0 + m.m5 + m.m10 + m.m15
+}
+
+// 2x2 determinant
+fn det2(a: Int, b: Int, c: Int, d: Int) -> Int {
+    a * d - b * c
+}
+
+// 3x3 determinant by cofactor expansion along first row
+fn det3(a11: Int, a12: Int, a13: Int,
+        a21: Int, a22: Int, a23: Int,
+        a31: Int, a32: Int, a33: Int) -> Int {
+    a11 * det2(a22, a23, a32, a33)
+    - a12 * det2(a21, a23, a31, a33)
+    + a13 * det2(a21, a22, a31, a32)
+}
+
+// 4x4 determinant by cofactor expansion along first row
+fn det4(m: Mat4) -> Int {
+    let a = m.m0 * det3(m.m5, m.m6, m.m7, m.m9, m.m10, m.m11, m.m13, m.m14, m.m15);
+    let b = m.m1 * det3(m.m4, m.m6, m.m7, m.m8, m.m10, m.m11, m.m12, m.m14, m.m15);
+    let c = m.m2 * det3(m.m4, m.m5, m.m7, m.m8, m.m9, m.m11, m.m12, m.m13, m.m15);
+    let d = m.m3 * det3(m.m4, m.m5, m.m6, m.m8, m.m9, m.m10, m.m12, m.m13, m.m14);
+    a - b + c - d
+}
+
+// Matrix-vector multiply (4x4 * 4-vector)
+type Vec4 is { x: Int, y: Int, z: Int, w: Int };
+
+fn mat4_vec(m: Mat4, v: Vec4) -> Vec4 {
+    Vec4 {
+        x: m.m0*v.x + m.m1*v.y + m.m2*v.z + m.m3*v.w,
+        y: m.m4*v.x + m.m5*v.y + m.m6*v.z + m.m7*v.w,
+        z: m.m8*v.x + m.m9*v.y + m.m10*v.z + m.m11*v.w,
+        w: m.m12*v.x + m.m13*v.y + m.m14*v.z + m.m15*v.w
+    }
+}
+
+fn test_identity() -> Int {
+    let id = identity4();
+    assert_eq(det4(id), 1);
+    assert_eq(trace4(id), 4);
+
+    let v = Vec4 { x: 1, y: 2, z: 3, w: 4 };
+    let r = mat4_vec(id, v);
+    assert_eq(r.x, 1);
+    assert_eq(r.y, 2);
+    assert_eq(r.z, 3);
+    assert_eq(r.w, 4);
+    1
+}
+
+fn test_det() -> Int {
+    // Diagonal matrix: det = product of diagonal
+    let diag = Mat4 {
+        m0: 2, m1: 0, m2: 0, m3: 0,
+        m4: 0, m5: 3, m6: 0, m7: 0,
+        m8: 0, m9: 0, m10: 4, m11: 0,
+        m12: 0, m13: 0, m14: 0, m15: 5
+    };
+    assert_eq(det4(diag), 120);
+
+    // Upper triangular: det = product of diagonal
+    let upper = Mat4 {
+        m0: 1, m1: 2, m2: 3, m3: 4,
+        m4: 0, m5: 2, m6: 5, m7: 6,
+        m8: 0, m9: 0, m10: 3, m11: 7,
+        m12: 0, m13: 0, m14: 0, m15: 4
+    };
+    assert_eq(det4(upper), 24);
+    1
+}
+
+fn test_singular() -> Int {
+    // Zero row → det = 0
+    let sing = Mat4 {
+        m0: 1, m1: 2, m2: 3, m3: 4,
+        m4: 0, m5: 0, m6: 0, m7: 0,
+        m8: 5, m9: 6, m10: 7, m11: 8,
+        m12: 9, m13: 10, m14: 11, m15: 12
+    };
+    assert_eq(det4(sing), 0);
+    1
+}
+
+fn test_matvec() -> Int {
+    let m = Mat4 {
+        m0: 1, m1: 0, m2: 0, m3: 0,
+        m4: 0, m5: 2, m6: 0, m7: 0,
+        m8: 0, m9: 0, m10: 3, m11: 0,
+        m12: 0, m13: 0, m14: 0, m15: 4
+    };
+    let v = Vec4 { x: 1, y: 2, z: 3, w: 4 };
+    let r = mat4_vec(m, v);
+    assert_eq(r.x, 1);
+    assert_eq(r.y, 4);
+    assert_eq(r.z, 9);
+    assert_eq(r.w, 16);
+    1
+}
+
+fn main() -> Int {
+    test_identity();
+    test_det();
+    test_singular();
+    test_matvec();
+    print("[OK] 448_matrix_det_aot");
+    0
+}

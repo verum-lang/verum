@@ -1,0 +1,229 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stack, calculator, while-loop, variants
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT stack-based calculator using record-based stack
+
+// Simulated stack of 16 elements
+type Stack16 is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    s8: Int, s9: Int, s10: Int, s11: Int,
+    s12: Int, s13: Int, s14: Int, s15: Int,
+    top: Int,
+};
+
+fn stack_new() -> Stack16 {
+    Stack16 {
+        s0: 0, s1: 0, s2: 0, s3: 0,
+        s4: 0, s5: 0, s6: 0, s7: 0,
+        s8: 0, s9: 0, s10: 0, s11: 0,
+        s12: 0, s13: 0, s14: 0, s15: 0,
+        top: 0,
+    }
+}
+
+fn stack_get(s: Stack16, i: Int) -> Int {
+    if i == 0 { s.s0 }
+    else if i == 1 { s.s1 }
+    else if i == 2 { s.s2 }
+    else if i == 3 { s.s3 }
+    else if i == 4 { s.s4 }
+    else if i == 5 { s.s5 }
+    else if i == 6 { s.s6 }
+    else if i == 7 { s.s7 }
+    else if i == 8 { s.s8 }
+    else if i == 9 { s.s9 }
+    else if i == 10 { s.s10 }
+    else if i == 11 { s.s11 }
+    else if i == 12 { s.s12 }
+    else if i == 13 { s.s13 }
+    else if i == 14 { s.s14 }
+    else { s.s15 }
+}
+
+fn stack_set(s: Stack16, i: Int, v: Int) -> Stack16 {
+    Stack16 {
+        s0: if i == 0 { v } else { s.s0 },
+        s1: if i == 1 { v } else { s.s1 },
+        s2: if i == 2 { v } else { s.s2 },
+        s3: if i == 3 { v } else { s.s3 },
+        s4: if i == 4 { v } else { s.s4 },
+        s5: if i == 5 { v } else { s.s5 },
+        s6: if i == 6 { v } else { s.s6 },
+        s7: if i == 7 { v } else { s.s7 },
+        s8: if i == 8 { v } else { s.s8 },
+        s9: if i == 9 { v } else { s.s9 },
+        s10: if i == 10 { v } else { s.s10 },
+        s11: if i == 11 { v } else { s.s11 },
+        s12: if i == 12 { v } else { s.s12 },
+        s13: if i == 13 { v } else { s.s13 },
+        s14: if i == 14 { v } else { s.s14 },
+        s15: if i == 15 { v } else { s.s15 },
+        top: s.top,
+    }
+}
+
+fn stack_push(s: Stack16, v: Int) -> Stack16 {
+    let updated = stack_set(s, s.top, v);
+    Stack16 {
+        s0: updated.s0, s1: updated.s1, s2: updated.s2, s3: updated.s3,
+        s4: updated.s4, s5: updated.s5, s6: updated.s6, s7: updated.s7,
+        s8: updated.s8, s9: updated.s9, s10: updated.s10, s11: updated.s11,
+        s12: updated.s12, s13: updated.s13, s14: updated.s14, s15: updated.s15,
+        top: s.top + 1,
+    }
+}
+
+fn stack_pop_val(s: Stack16) -> Int {
+    stack_get(s, s.top - 1)
+}
+
+fn stack_pop(s: Stack16) -> Stack16 {
+    Stack16 {
+        s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3,
+        s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7,
+        s8: s.s8, s9: s.s9, s10: s.s10, s11: s.s11,
+        s12: s.s12, s13: s.s13, s14: s.s14, s15: s.s15,
+        top: s.top - 1,
+    }
+}
+
+// Op codes: 0=push(next_val), 1=add, 2=sub, 3=mul, 4=div, 5=dup, 6=swap
+type Op is Push(Int) | OpAdd | OpSub | OpMul | OpDiv | OpDup | OpSwap | OpNeg;
+
+fn exec_op(s: Stack16, op: Op) -> Stack16 {
+    match op {
+        Push(v) => stack_push(s, v),
+        OpAdd => {
+            let b = stack_pop_val(s);
+            let s1 = stack_pop(s);
+            let a = stack_pop_val(s1);
+            let s2 = stack_pop(s1);
+            stack_push(s2, a + b)
+        },
+        OpSub => {
+            let b = stack_pop_val(s);
+            let s1 = stack_pop(s);
+            let a = stack_pop_val(s1);
+            let s2 = stack_pop(s1);
+            stack_push(s2, a - b)
+        },
+        OpMul => {
+            let b = stack_pop_val(s);
+            let s1 = stack_pop(s);
+            let a = stack_pop_val(s1);
+            let s2 = stack_pop(s1);
+            stack_push(s2, a * b)
+        },
+        OpDiv => {
+            let b = stack_pop_val(s);
+            let s1 = stack_pop(s);
+            let a = stack_pop_val(s1);
+            let s2 = stack_pop(s1);
+            if b == 0 { stack_push(s2, 0) }
+            else { stack_push(s2, a / b) }
+        },
+        OpDup => {
+            let v = stack_pop_val(s);
+            stack_push(s, v)
+        },
+        OpSwap => {
+            let b = stack_pop_val(s);
+            let s1 = stack_pop(s);
+            let a = stack_pop_val(s1);
+            let s2 = stack_pop(s1);
+            let s3 = stack_push(s2, b);
+            stack_push(s3, a)
+        },
+        OpNeg => {
+            let v = stack_pop_val(s);
+            let s1 = stack_pop(s);
+            stack_push(s1, 0 - v)
+        },
+    }
+}
+
+fn main() -> Int {
+    // Test basic stack operations
+    let s0 = stack_new();
+    assert_eq(s0.top, 0);
+
+    let s1 = stack_push(s0, 10);
+    assert_eq(s1.top, 1);
+    assert_eq(stack_pop_val(s1), 10);
+
+    let s2 = stack_push(s1, 20);
+    assert_eq(s2.top, 2);
+    assert_eq(stack_pop_val(s2), 20);
+
+    // Compute: 3 + 4 (RPN: 3 4 +)
+    let mut stk = stack_new();
+    stk = exec_op(stk, Push(3));
+    stk = exec_op(stk, Push(4));
+    stk = exec_op(stk, OpAdd);
+    assert_eq(stack_pop_val(stk), 7);
+    assert_eq(stk.top, 1);
+
+    // Compute: (5 + 3) * (10 - 2) = 8 * 8 = 64
+    // RPN: 5 3 + 10 2 - *
+    stk = stack_new();
+    stk = exec_op(stk, Push(5));
+    stk = exec_op(stk, Push(3));
+    stk = exec_op(stk, OpAdd);
+    stk = exec_op(stk, Push(10));
+    stk = exec_op(stk, Push(2));
+    stk = exec_op(stk, OpSub);
+    stk = exec_op(stk, OpMul);
+    assert_eq(stack_pop_val(stk), 64);
+
+    // Compute: (100 / 5) - (3 * 4) = 20 - 12 = 8
+    // RPN: 100 5 / 3 4 * -
+    stk = stack_new();
+    stk = exec_op(stk, Push(100));
+    stk = exec_op(stk, Push(5));
+    stk = exec_op(stk, OpDiv);
+    stk = exec_op(stk, Push(3));
+    stk = exec_op(stk, Push(4));
+    stk = exec_op(stk, OpMul);
+    stk = exec_op(stk, OpSub);
+    assert_eq(stack_pop_val(stk), 8);
+
+    // Test dup: 5 dup * = 25
+    stk = stack_new();
+    stk = exec_op(stk, Push(5));
+    stk = exec_op(stk, OpDup);
+    stk = exec_op(stk, OpMul);
+    assert_eq(stack_pop_val(stk), 25);
+
+    // Test swap: push 1 2 swap -> top=1
+    stk = stack_new();
+    stk = exec_op(stk, Push(1));
+    stk = exec_op(stk, Push(2));
+    stk = exec_op(stk, OpSwap);
+    assert_eq(stack_pop_val(stk), 1);
+
+    // Test neg: push 7 neg -> -7
+    stk = stack_new();
+    stk = exec_op(stk, Push(7));
+    stk = exec_op(stk, OpNeg);
+    assert_eq(stack_pop_val(stk), -7);
+
+    // Complex: (2^10) using repeated squaring-like
+    // 2 dup * = 4, dup * = 16, dup * = 256, dup * = 65536
+    stk = stack_new();
+    stk = exec_op(stk, Push(2));
+    stk = exec_op(stk, OpDup);
+    stk = exec_op(stk, OpMul);  // 4
+    stk = exec_op(stk, OpDup);
+    stk = exec_op(stk, OpMul);  // 16
+    stk = exec_op(stk, OpDup);
+    stk = exec_op(stk, OpMul);  // 256
+    stk = exec_op(stk, OpDup);
+    stk = exec_op(stk, OpMul);  // 65536
+    assert_eq(stack_pop_val(stk), 65536);
+
+    0
+}

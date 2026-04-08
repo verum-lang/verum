@@ -1,0 +1,135 @@
+// =============================================================================
+// oneshot_fix_test.vr - Tests for fixed oneshot channel
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, channel, oneshot, core
+// @description: Tests for oneshot channel sender/receiver shared state fix
+// =============================================================================
+
+mount core.async.channel.{
+    oneshot, OneshotSender, OneshotReceiver,
+    SendError, RecvError,
+};
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.async.waker.{Waker, Context, noop_waker};
+mount core.async.future.Future;
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Basic oneshot creation and send
+// =============================================================================
+
+@test
+fn test_oneshot_creation() {
+    let (tx, rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    // Oneshot channel created successfully
+}
+
+@test
+fn test_oneshot_send_succeeds() {
+    let (tx, rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    let result: Result<(), Int> = tx.send(42);
+    match result {
+        Ok(_) => {}
+        Err(_) => panic("Oneshot send should succeed"),
+    }
+}
+
+@test
+fn test_oneshot_send_text() {
+    let (tx, rx): (OneshotSender<Text>, OneshotReceiver<Text>) = oneshot();
+    let result = tx.send("hello");
+    assert(result.is_ok());
+}
+
+@test
+fn test_oneshot_send_bool() {
+    let (tx, rx): (OneshotSender<Bool>, OneshotReceiver<Bool>) = oneshot();
+    let result = tx.send(true);
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Section 2: Oneshot receiver polling (tests shared state)
+// =============================================================================
+
+@test
+fn test_oneshot_receiver_poll_after_send() {
+    let (tx, mut rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    let _ = tx.send(42);
+
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    // After send, polling receiver should return Ready
+    let result: Poll<Result<Int, RecvError>> = rx.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+@test
+fn test_oneshot_receiver_poll_empty() {
+    let (tx, mut rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    // Before send, polling receiver should return Pending
+    let result: Poll<Result<Int, RecvError>> = rx.poll(&mut cx);
+    assert(result.is_pending());
+}
+
+@test
+fn test_oneshot_text_send_recv() {
+    let (tx, mut rx): (OneshotSender<Text>, OneshotReceiver<Text>) = oneshot();
+    let _ = tx.send("world");
+
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    let result: Poll<Result<Text, RecvError>> = rx.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+// =============================================================================
+// Section 3: Multiple oneshot channels
+// =============================================================================
+
+@test
+fn test_multiple_oneshot_channels() {
+    let (tx1, rx1): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    let (tx2, rx2): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    let (tx3, rx3): (OneshotSender<Text>, OneshotReceiver<Text>) = oneshot();
+
+    let _ = tx1.send(1);
+    let _ = tx2.send(2);
+    let _ = tx3.send("three");
+}
+
+@test
+fn test_oneshot_unit_type() {
+    let (tx, rx): (OneshotSender<()>, OneshotReceiver<()>) = oneshot();
+    let result = tx.send(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_oneshot_float() {
+    let (tx, mut rx): (OneshotSender<Float>, OneshotReceiver<Float>) = oneshot();
+    let _ = tx.send(3.14);
+
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    let result: Poll<Result<Float, RecvError>> = rx.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

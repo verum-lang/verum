@@ -1,0 +1,35 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, identifier, reserved, error
+// @description: Test reserved words used as pattern identifiers
+// @expected-error: E071
+
+fn test_reserved_let_pattern() {
+    let value = 42;
+
+    // Invalid: 'let' is reserved and cannot be used as pattern identifier
+    match value {
+        let => print("reserved"),
+        _ => print("other"),
+    }
+}
+
+fn test_reserved_fn_pattern() {
+    let value = 42;
+
+    // Invalid: 'fn' is reserved and cannot be used as pattern identifier
+    match value {
+        fn => print("reserved"),
+        _ => print("other"),
+    }
+}
+
+fn test_reserved_is_pattern() {
+    let value = 42;
+
+    // Invalid: 'is' is reserved and cannot be used as pattern identifier
+    match value {
+        is => print("reserved"),
+        _ => print("other"),
+    }
+}

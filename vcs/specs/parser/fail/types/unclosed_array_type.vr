@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, array, brackets, error
+// @description: Test detection of unclosed array type
+// @expected-error: E070
+
+// Array type missing closing bracket
+fn test(x: [Int; 10) {}

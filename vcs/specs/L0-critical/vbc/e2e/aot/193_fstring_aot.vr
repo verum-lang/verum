@@ -1,0 +1,49 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, format-string, text, interpolation
+// @expected-exit: 0
+
+fn get_greeting() -> Text {
+    "world"
+}
+
+fn main() -> Int {
+    // 1: Text variable interpolation
+    let name = "Verum";
+    let msg1 = f"Hello {name}!";
+    print(msg1);
+
+    // 2: Int interpolation
+    let x = 42;
+    let msg2 = f"x={x}";
+    print(msg2);
+
+    // 3: Mixed Text + Int in same function (former crash case)
+    let lang = "Verum";
+    let ver = 1;
+    let msg3 = f"{lang} v{ver}";
+    print(msg3);
+
+    // 4: Text from function return
+    let who = get_greeting();
+    let msg4 = f"Hi {who}!";
+    print(msg4);
+
+    // 5: Multiple f-strings then int print (register reuse stress)
+    let a = "A";
+    let b = "B";
+    let m5 = f"[{a}]";
+    let m6 = f"[{b}]";
+    print(m5);
+    print(m6);
+    print(99);
+
+    // 6: F-string with surrounding text
+    let s = "X";
+    let msg7 = f"a{s}b";
+    print(msg7);
+    print(42);
+
+    0
+}

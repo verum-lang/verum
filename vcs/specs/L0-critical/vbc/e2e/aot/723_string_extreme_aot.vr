@@ -1,0 +1,28 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, extreme, stress
+// @expected-exit: 0
+
+fn main() -> Int {
+    // 1000 format string allocations
+    let mut i = 0;
+    let mut last = "none";
+    while (i < 1000) {
+        last = f"item_{i}";
+        i = i + 1;
+    }
+    print(last);
+
+    // 500 string concatenations
+    let mut acc = "start";
+    let mut j = 0;
+    while (j < 500) {
+        acc = f"{acc}.";
+        j = j + 1;
+    }
+    // acc should be "start" followed by 500 dots
+    print(j);
+
+    0
+}

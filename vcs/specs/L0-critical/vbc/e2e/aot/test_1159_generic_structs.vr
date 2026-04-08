@@ -1,0 +1,94 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, struct, implement, type-param
+// @description: Test generic struct definitions with implement blocks
+
+type Container<T> is { value: T, label: Text };
+
+implement Container<T> {
+    fn create(val: T, lbl: Text) -> Container<T> {
+        Container { value: val, label: lbl }
+    }
+
+    fn get_value(&self) -> T {
+        self.value
+    }
+
+    fn get_label(&self) -> Text {
+        self.label
+    }
+}
+
+fn test_container_int() -> Int {
+    let c = Container.create(42, "answer");
+    if c.get_value() != 42 {
+        print(f"FAIL container_int: {c.get_value()}");
+        return 1;
+    }
+    if c.get_label() != "answer" {
+        print(f"FAIL container_label: {c.get_label()}");
+        return 1;
+    }
+    print("  container_int: OK");
+    0
+}
+
+type Wrapper<T> is { inner: T };
+
+implement Wrapper<T> {
+    fn wrap(val: T) -> Wrapper<T> {
+        Wrapper { inner: val }
+    }
+
+    fn unwrap(&self) -> T {
+        self.inner
+    }
+}
+
+fn test_wrapper() -> Int {
+    let w = Wrapper.wrap(99);
+    if w.unwrap() != 99 {
+        print(f"FAIL wrapper: {w.unwrap()}");
+        return 1;
+    }
+    print("  wrapper: OK");
+    0
+}
+
+type KeyVal<K, V> is { key: K, val: V };
+
+implement KeyVal<K, V> {
+    fn make(k: K, v: V) -> KeyVal<K, V> {
+        KeyVal { key: k, val: v }
+    }
+}
+
+fn test_two_type_params() -> Int {
+    let kv = KeyVal.make("name", 42);
+    if kv.key != "name" {
+        print(f"FAIL kv_key: {kv.key}");
+        return 1;
+    }
+    if kv.val != 42 {
+        print(f"FAIL kv_val: {kv.val}");
+        return 1;
+    }
+    print("  two_type_params: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Generic Struct Tests:");
+    let mut failures = 0;
+    failures = failures + test_container_int();
+    failures = failures + test_wrapper();
+    failures = failures + test_two_type_params();
+
+    if failures == 0 {
+        print("All generic struct tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

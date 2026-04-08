@@ -1,0 +1,165 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, tagged, uuid
+
+// UUID literal syntax
+
+fn test_standard_uuid_format() {
+    // Standard UUID format (8-4-4-4-12 hexadecimal)
+    let uuid1 = uuid#"550e8400-e29b-41d4-a716-446655440000";
+    let uuid2 = uuid#"6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+    let uuid3 = uuid#"6ba7b811-9dad-11d1-80b4-00c04fd430c8";
+}
+
+fn test_nil_uuid() {
+    // Nil/null UUID
+    let nil_uuid = uuid#"00000000-0000-0000-0000-000000000000";
+}
+
+fn test_max_uuid() {
+    // Max UUID
+    let max_uuid = uuid#"ffffffff-ffff-ffff-ffff-ffffffffffff";
+}
+
+fn test_version_1_uuids() {
+    // Version 1 UUIDs (time-based)
+    let v1_uuid = uuid#"1a2b3c4d-5e6f-1a2b-3c4d-5e6f1a2b3c4d";
+}
+
+fn test_version_4_uuids() {
+    // Version 4 UUIDs (random)
+    let v4_uuid1 = uuid#"f47ac10b-58cc-4372-a567-0e02b2c3d479";
+    let v4_uuid2 = uuid#"7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    let v4_uuid3 = uuid#"550e8400-e29b-41d4-a716-446655440000";
+}
+
+fn test_version_5_uuids() {
+    // Version 5 UUIDs (SHA-1 hash based)
+    let v5_uuid = uuid#"886313e1-3b8a-5372-9b90-0c9aee199e5d";
+}
+
+fn test_uppercase_variant() {
+    // Uppercase variant (should be normalized to lowercase)
+    let upper_uuid = uuid#"550E8400-E29B-41D4-A716-446655440000";
+}
+
+fn test_mixed_case() {
+    // Mixed case
+    let mixed_uuid = uuid#"550e8400-E29B-41d4-A716-446655440000";
+}
+
+fn test_uuid_in_expressions() {
+    // UUID in expressions
+    let user_uuid = uuid#"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+    let session_uuid = uuid#"b1ffc99a-8c1b-5fc9-cc7e-7ccace491b22";
+    let is_same = user_uuid == session_uuid;
+}
+
+fn test_uuid_comparison() {
+    // UUID comparison
+    let uuid_a = uuid#"11111111-1111-1111-1111-111111111111";
+    let uuid_b = uuid#"22222222-2222-2222-2222-222222222222";
+    let uuid_c = uuid#"33333333-3333-3333-3333-333333333333";
+    let is_less = uuid_a < uuid_b;
+}
+
+// UUID in function parameters
+fn find_user(id: Uuid) -> Maybe<User> {
+    Database.find_by_id(id)
+}
+
+fn test_uuid_function_params() {
+    let user = find_user(uuid#"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
+}
+
+// UUID in structs
+type Entity is {
+    id: Uuid,
+    name: Text,
+    created_at: Date,
+};
+
+fn test_uuid_in_structs() {
+    let entity = Entity {
+        id: uuid#"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+        name: "Example Entity",
+        created_at: d#"2025-01-15",
+    };
+}
+
+fn test_uuid_in_arrays() {
+    // UUID in arrays
+    let batch_ids = [
+        uuid#"11111111-1111-1111-1111-111111111111",
+        uuid#"22222222-2222-2222-2222-222222222222",
+        uuid#"33333333-3333-3333-3333-333333333333",
+    ];
+}
+
+fn test_uuid_in_maps() {
+    // UUID in maps
+    let uuid_map: Map<Uuid, Text> = {
+        uuid#"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa": "First",
+        uuid#"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb": "Second",
+        uuid#"cccccccc-cccc-cccc-cccc-cccccccccccc": "Third",
+    };
+}
+
+fn test_uuid_generation() {
+    // UUID generation
+    let new_uuid = Uuid.v4();
+    let deterministic_uuid = Uuid.v5(Uuid.NAMESPACE_DNS, "example.com");
+}
+
+fn test_uuid_to_string_conversion() {
+    // UUID to string conversion
+    let uuid_str = uuid#"550e8400-e29b-41d4-a716-446655440000".to_text();
+    let uuid_bytes = uuid#"550e8400-e29b-41d4-a716-446655440000".to_bytes();
+}
+
+fn test_uuid_parsing() {
+    // UUID from string (parsing)
+    let parsed_uuid = Uuid.parse("550e8400-e29b-41d4-a716-446655440000");
+}
+
+fn test_uuid_validation() {
+    // UUID validation
+    let is_valid = Uuid.is_valid("550e8400-e29b-41d4-a716-446655440000");
+    let is_nil = uuid#"00000000-0000-0000-0000-000000000000".is_nil();
+}
+
+fn test_uuid_version_checking() {
+    // UUID version checking
+    let uuid_version = uuid#"550e8400-e29b-41d4-a716-446655440000".version();
+    let is_v4 = uuid_version == UuidVersion.V4;
+}
+
+// UUID in match
+fn uuid_source(id: Uuid) -> Text {
+    match id.version() {
+        UuidVersion.V1 => "time-based"
+        UuidVersion.V4 => "random"
+        UuidVersion.V5 => "hash-based"
+        _ => "unknown"
+    }
+}
+
+fn test_uuid_namespaces() {
+    // UUID namespaces
+    let dns_namespace = uuid#"6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+    let url_namespace = uuid#"6ba7b811-9dad-11d1-80b4-00c04fd430c8";
+    let oid_namespace = uuid#"6ba7b812-9dad-11d1-80b4-00c04fd430c8";
+    let x500_namespace = uuid#"6ba7b814-9dad-11d1-80b4-00c04fd430c8";
+}
+
+fn test_compact_format() {
+    // Compact format (without dashes, if supported)
+    let compact = uuid#"550e8400e29b41d4a716446655440000";
+}
+
+fn test_uuid_in_database_queries() {
+    // UUID in database queries
+    let user_id = uuid#"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+    let query = sql"SELECT * FROM users WHERE id = {user_id}";
+}

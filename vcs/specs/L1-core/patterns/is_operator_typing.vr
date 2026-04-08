@@ -1,0 +1,266 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, patterns, is-operator, type-narrowing
+// @description: Test is operator type narrowing and pattern type inference
+
+// Tests for the `is` operator type system behavior.
+// The `is` operator enables pattern matching expressions with type narrowing.
+
+// === Type Definitions ===
+
+type Maybe<T> is
+    | None
+    | Some(T);
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { a: Float, b: Float, c: Float };
+
+type Tree<T> is
+    | Leaf(T)
+    | Node(Tree<T>, Tree<T>);
+
+type Status is
+    | Pending
+    | Running { progress: Int }
+    | Completed(Int)
+    | Failed(Text);
+
+// === Basic is operator type narrowing ===
+
+// Test is operator narrowing with Maybe - x is narrowed to Int inside match
+fn test_is_narrowing_maybe(value: Maybe<Int>) -> Int {
+    match value {
+        Some(x) => x * 2,
+        None => 0,
+    }
+}
+
+// Test is operator with None case
+fn test_is_narrowing_none(value: Maybe<Int>) -> Bool {
+    if value is None {
+        true
+    } else {
+        false
+    }
+}
+
+// Test is operator narrowing with Result - extracting Ok value
+fn test_is_narrowing_result_ok(result: Result<Int, Text>) -> Int {
+    match result {
+        Ok(n) => n + 10,
+        Err(_) => -1,
+    }
+}
+
+// Test is operator narrowing with Result - extracting Err value
+fn test_is_narrowing_result_err(result: Result<Int, Text>) -> Text {
+    match result {
+        Err(msg) => f"Error: {msg}",
+        Ok(_) => "Success",
+    }
+}
+
+// === Type narrowing in control flow ===
+
+// Test type narrowing persists after is check in if body
+fn test_narrowing_in_scope(value: Maybe<Text>) -> Int {
+    match value {
+        Some(s) => s.len(),
+        None => 0,
+    }
+}
+
+// Test type narrowing with nested patterns
+fn test_nested_narrowing(value: Maybe<(Int, Text)>) -> Text {
+    match value {
+        Some((n, s)) => f"{s}: {n}",
+        None => "empty",
+    }
+}
+
+// Test narrowing with struct patterns
+fn test_struct_narrowing(shape: Shape) -> Float {
+    match shape {
+        Circle { radius: r } => 3.14159 * r * r,
+        Rectangle { width: w, height: h } => w * h,
+        Triangle { .. } => 0.0,
+    }
+}
+
+// === is operator in expressions ===
+
+// Test is operator as boolean expression
+fn test_is_as_bool_expr(value: Maybe<Int>) -> Bool {
+    value is Some(_)
+}
+
+// Test is operator in logical expressions
+fn test_is_in_logical_expr(a: Maybe<Int>, b: Maybe<Int>) -> Bool {
+    a is Some(_) && b is Some(_)
+}
+
+// === Chained is checks ===
+
+// Test chained is checks
+fn test_chained_is_checks(a: Result<Int, Text>, b: Result<Int, Text>) -> Int {
+    match a {
+        Ok(x) => match b {
+            Ok(y) => x + y,
+            Err(_) => 0,
+        },
+        Err(_) => 0,
+    }
+}
+
+// === Generic type narrowing ===
+
+// Test is operator with generic types
+fn test_generic_narrowing<T>(value: Maybe<T>) -> Bool {
+    if value is Some(_) {
+        true
+    } else {
+        false
+    }
+}
+
+// === is operator with recursive types ===
+
+// Test is with tree type
+fn test_tree_narrowing(tree: Tree<Int>) -> Int {
+    match tree {
+        Leaf(value) => value,
+        Node(_, _) => 0,
+    }
+}
+
+// === is operator in match expressions ===
+
+// Test is operator as match scrutinee enhancement
+fn test_is_in_match_context(value: Maybe<Int>) -> Text {
+    match value {
+        Some(x) if x > 10 => "large some",
+        Some(x) if x > 0 => "positive some",
+        Some(_) => "some",
+        None => "none",
+    }
+}
+
+// === Exhaustiveness with is operator ===
+
+// Test that is operator considers all variants
+fn exhaustive_is_check(result: Result<Int, Text>) -> Int {
+    match result {
+        Ok(n) => n,
+        Err(_) => -1,
+    }
+}
+
+// === is operator with tuple patterns ===
+
+// Test is operator with tuples
+fn test_tuple_is(pair: (Maybe<Int>, Maybe<Text>)) -> Bool {
+    pair is (Some(_), Some(_))
+}
+
+// Test is operator narrowing tuple components
+fn extract_tuple_values(pair: (Maybe<Int>, Maybe<Text>)) -> Text {
+    match pair {
+        (Some(n), Some(s)) => f"{s}: {n}",
+        _ => "incomplete",
+    }
+}
+
+// Test is with Status enum
+fn test_status_is(status: Status) -> Bool {
+    status is Pending
+}
+
+fn test_status_running(status: Status) -> Int {
+    match status {
+        Running { progress: p } => p,
+        _ => 0,
+    }
+}
+
+fn test_status_completed(status: Status) -> Int {
+    match status {
+        Completed(n) => n,
+        _ => -1,
+    }
+}
+
+// === Verification tests ===
+
+fn main() {
+    // Test basic narrowing
+    assert(test_is_narrowing_maybe(Some(5)) == 10);
+    assert(test_is_narrowing_maybe(None) == 0);
+
+    // Test is None
+    assert(test_is_narrowing_none(None) == true);
+    assert(test_is_narrowing_none(Some(1)) == false);
+
+    // Test Result narrowing
+    assert(test_is_narrowing_result_ok(Ok(5)) == 15);
+    assert(test_is_narrowing_result_ok(Err("x")) == -1);
+
+    // Test struct narrowing
+    assert(test_struct_narrowing(Circle { radius: 1.0 }) > 3.14);
+    assert(test_struct_narrowing(Rectangle { width: 2.0, height: 3.0 }) == 6.0);
+    assert(test_struct_narrowing(Triangle { a: 1.0, b: 2.0, c: 3.0 }) == 0.0);
+
+    // Test is as bool expression
+    assert(test_is_as_bool_expr(Some(42)) == true);
+    assert(test_is_as_bool_expr(None) == false);
+
+    // Test logical expr with is
+    assert(test_is_in_logical_expr(Some(1), Some(2)) == true);
+    assert(test_is_in_logical_expr(Some(1), None) == false);
+    assert(test_is_in_logical_expr(None, Some(2)) == false);
+
+    // Test chained checks
+    assert(test_chained_is_checks(Ok(10), Ok(20)) == 30);
+    assert(test_chained_is_checks(Ok(10), Err("x")) == 0);
+
+    // Test generic narrowing
+    assert(test_generic_narrowing(Some(42)) == true);
+    assert(test_generic_narrowing(None) == false);
+
+    // Test tree
+    assert(test_tree_narrowing(Leaf(42)) == 42);
+    assert(test_tree_narrowing(Node(Leaf(1), Leaf(2))) == 0);
+
+    // Test match context
+    assert(test_is_in_match_context(Some(200)) == "large some");
+    assert(test_is_in_match_context(Some(5)) == "positive some");
+    assert(test_is_in_match_context(Some(-1)) == "some");
+    assert(test_is_in_match_context(None) == "none");
+
+    // Test tuple is
+    assert(test_tuple_is((Some(1), Some("hello"))) == true);
+    assert(test_tuple_is((Some(1), None)) == false);
+    assert(test_tuple_is((None, Some("hello"))) == false);
+
+    // Test Status
+    assert(test_status_is(Pending) == true);
+    assert(test_status_is(Running { progress: 50 }) == false);
+    assert(test_status_running(Running { progress: 75 }) == 75);
+    assert(test_status_running(Pending) == 0);
+    assert(test_status_completed(Completed(42)) == 42);
+    assert(test_status_completed(Pending) == -1);
+
+    // Test nested narrowing
+    assert(test_nested_narrowing(Some((42, "answer"))) == "answer: 42");
+    assert(test_nested_narrowing(None) == "empty");
+
+    // Test narrowing in scope
+    assert(test_narrowing_in_scope(Some("hello")) == 5);
+    assert(test_narrowing_in_scope(None) == 0);
+}

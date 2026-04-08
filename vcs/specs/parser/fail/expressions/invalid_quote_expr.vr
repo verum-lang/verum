@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, quote, error
+// @description: Quote expression without block body
+// @expected-error: E018
+
+meta fn test() {
+    quote;  // Quote requires block
+}

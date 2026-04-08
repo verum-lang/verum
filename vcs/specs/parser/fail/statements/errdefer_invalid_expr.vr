@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, errdefer, invalid, error
+// @description: Test errdefer statement with invalid expression
+// @expected-error: E045
+
+fn test() {
+    errdefer let x = 5;
+}

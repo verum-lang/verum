@@ -1,0 +1,146 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, hot-loop, optimization
+
+/// Test CBGR check hoisting in hot loops.
+/// Compiler should hoist checks out of tight loops.
+/// Spec: 26-cbgr-implementation.md#check-optimization
+
+fn main() {
+    test_loop_check_hoisting();
+    test_invariant_ref_optimization();
+    test_array_bounds_with_cbgr();
+    compare_hoisted_vs_naive();
+}
+
+/// Test that reference checks are hoisted out of loops
+fn test_loop_check_hoisting() {
+    let data = Heap.new([1, 2, 3, 4, 5]);
+    let ref_data: &List<Int> = &*data;
+
+    let iterations = 1_000_000;
+    let start = Time.now();
+
+    let mut sum = 0;
+    for _ in 0..iterations {
+        // CBGR check on ref_data should be hoisted
+        // Only checked once, not per iteration
+        sum += ref_data[0];
+    }
+
+    let elapsed = Time.now() - start;
+    let ns_per_iter = elapsed.as_nanos() / iterations;
+
+    print("Loop with hoisted check: " + ns_per_iter.to_string() + "ns/iter");
+
+    // With hoisting, should be very fast
+    assert(ns_per_iter < 10);
+    assert(sum == iterations);
+}
+
+/// Test optimization for loop-invariant references
+fn test_invariant_ref_optimization() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    let iterations = 1_000_000;
+    let start = Time.now();
+
+    let mut result = 0;
+    for i in 0..iterations {
+        // ref_val is loop-invariant
+        // Compiler should verify once before loop
+        result = *ref_val + i;
+    }
+
+    let elapsed = Time.now() - start;
+
+    print("Invariant ref optimization: " + elapsed.as_micros().to_string() + "us");
+    assert(result == 42 + iterations - 1);
+}
+
+/// Test combined array bounds + CBGR checks
+fn test_array_bounds_with_cbgr() {
+    let array = Heap.new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let ref_array: &[Int; 10] = &*array;
+
+    let iterations = 100_000;
+    let start = Time.now();
+
+    let mut sum = 0;
+    for _ in 0..iterations {
+        // Both CBGR and bounds checks should be optimized
+        for i in 0..10 {
+            sum += ref_array[i];
+        }
+    }
+
+    let elapsed = Time.now() - start;
+    let ns_per_outer = elapsed.as_nanos() / iterations;
+
+    print("Array access with CBGR: " + ns_per_outer.to_string() + "ns/outer-iter");
+
+    // 10 accesses per outer iteration, should be fast
+    assert(ns_per_outer < 100);
+    assert(sum == 55 * iterations);  // 1+2+...+10 = 55
+}
+
+/// Compare hoisted vs naive check patterns
+fn compare_hoisted_vs_naive() {
+    let data = Heap.new(100);
+
+    let iterations = 500_000;
+
+    // Simulated hoisted (single check)
+    let start1 = Time.now();
+    let ref_val = &*data;
+    // One-time check
+    let _ = *ref_val;
+    let mut sum1 = 0;
+    for _ in 0..iterations {
+        // No additional checks needed (conceptually)
+        sum1 += unsafe { *ref_val.raw_ptr() };
+    }
+    let time1 = Time.now() - start1;
+
+    // Non-hoisted (check every time)
+    let start2 = Time.now();
+    let mut sum2 = 0;
+    for _ in 0..iterations {
+        let ref_val2 = &*data;  // New ref each time
+        sum2 += *ref_val2;
+    }
+    let time2 = Time.now() - start2;
+
+    print("Hoisted: " + time1.as_micros().to_string() + "us");
+    print("Per-iteration: " + time2.as_micros().to_string() + "us");
+
+    // Hoisted should be faster (or similar with good optimization)
+    // At minimum, shouldn't be significantly slower
+    assert(time1 <= time2 * 2);
+}
+
+/// Test that nested loops benefit from hoisting
+fn test_nested_loop_hoisting() {
+    let matrix = Heap.new([[1, 2, 3], [4, 5, 6], [7, 8, 9]]);
+    let ref_matrix: &[[Int; 3]; 3] = &*matrix;
+
+    let outer_iters = 10_000;
+    let start = Time.now();
+
+    let mut total = 0;
+    for _ in 0..outer_iters {
+        // CBGR check hoisted to outer loop
+        for i in 0..3 {
+            for j in 0..3 {
+                total += ref_matrix[i][j];
+            }
+        }
+    }
+
+    let elapsed = Time.now() - start;
+
+    assert(total == 45 * outer_iters);  // 1+2+...+9 = 45
+    print("Nested loop total time: " + elapsed.as_millis().to_string() + "ms");
+}

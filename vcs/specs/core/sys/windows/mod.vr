@@ -1,0 +1,51 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/windows/mod.vr - Windows Platform Tests Module
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, windows, platform
+// @description: Root test module for Windows-specific V-LLSI implementation.
+//
+// Test Categories:
+// - ntstatus_test.vr  : NT status codes and helpers
+// - ntdll_test.vr     : NT Native API FFI
+// - kernel32_test.vr  : Windows API FFI
+// - tls_test.vr       : Thread-local storage and context system
+// - io_test.vr        : Completion-based I/O with IOCP
+// - thread_test.vr    : Thread creation and synchronization
+// - time_test.vr      : Time and performance counter utilities
+//
+// Windows uses IAT imports via @extern("dll.dll") for API access.
+//
+// Platform: Windows x86_64
+// Layer: 0 (V-LLSI Kernel)
+// =============================================================================
+
+@cfg(target_os = "windows")
+module test.stdlib.sys.windows;
+
+// =============================================================================
+// Test Module Exports
+// =============================================================================
+
+/// NT status code tests
+public module ntstatus_test;
+
+/// NT Native API tests
+public module ntdll_test;
+
+/// Windows API tests
+public module kernel32_test;
+
+/// TLS and context tests
+public module tls_test;
+
+/// IOCP I/O tests
+public module io_test;
+
+/// Thread creation tests
+public module thread_test;
+
+/// Time and performance tests
+public module time_test;

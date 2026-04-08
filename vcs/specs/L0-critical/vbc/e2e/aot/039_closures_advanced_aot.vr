@@ -1,0 +1,139 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, closures, higher-order, currying, combinators
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT advanced closure patterns - currying, partial application, monadic chaining
+
+// Partial application through closures
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * n }
+}
+
+// Function composition
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+// Apply function n times
+fn apply_n(f: fn(Int) -> Int, n: Int, start: Int) -> Int {
+    let mut result = start;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+// Accumulate over a range using a combinator
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+// Filter-count over a range
+fn count_range(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Map over range, applying function and summing results
+fn map_sum_range(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    while i < end {
+        sum = sum + f(i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    // Basic closures returning closures
+    let add5 = make_adder(5);
+    let mul3 = make_multiplier(3);
+    assert_eq(add5(10), 15);
+    assert_eq(mul3(10), 30);
+
+    // Composition
+    let add5_then_mul3 = compose(mul3, add5);
+    assert_eq(add5_then_mul3(10), 45);  // (10+5)*3 = 45
+
+    let mul3_then_add5 = compose(add5, mul3);
+    assert_eq(mul3_then_add5(10), 35);  // 10*3+5 = 35
+
+    // Double composition
+    let add10 = compose(add5, add5);
+    assert_eq(add10(100), 110);
+
+    let mul9 = compose(mul3, mul3);
+    assert_eq(mul9(10), 90);
+
+    // Triple composition
+    let add15 = compose(add5, add10);
+    assert_eq(add15(0), 15);
+
+    // Apply_n
+    assert_eq(apply_n(add5, 0, 100), 100);
+    assert_eq(apply_n(add5, 3, 0), 15);  // 0->5->10->15
+    assert_eq(apply_n(mul3, 4, 1), 81);  // 1->3->9->27->81
+
+    // Fold range: sum 0..10
+    let sum_fn = |acc: Int, x: Int| -> Int { acc + x };
+    assert_eq(fold_range(0, 10, 0, sum_fn), 45);  // 0+1+...+9
+
+    // Fold range: product 1..6 = 5!
+    let prod_fn = |acc: Int, x: Int| -> Int { acc * x };
+    assert_eq(fold_range(1, 6, 1, prod_fn), 120);  // 1*2*3*4*5
+
+    // Count range: even numbers 0..20
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    assert_eq(count_range(0, 20, is_even), 10);
+
+    // Count range: multiples of 3 in 1..30
+    let is_mul3 = |x: Int| -> Bool { x % 3 == 0 };
+    assert_eq(count_range(1, 30, is_mul3), 9);  // 3,6,9,...,27
+
+    // Map+sum: sum of squares 1..5
+    let sq = |x: Int| -> Int { x * x };
+    assert_eq(map_sum_range(1, 5, sq), 30);  // 1+4+9+16
+
+    // Map+sum: sum of cubes 1..4
+    let cube = |x: Int| -> Int { x * x * x };
+    assert_eq(map_sum_range(1, 4, cube), 36);  // 1+8+27
+
+    // Chaining: make multiple closures and compose them
+    let step1 = make_adder(10);    // +10
+    let step2 = make_multiplier(2); // *2
+    let step3 = make_adder(3);     // +3
+    let pipeline = compose(step3, compose(step2, step1));
+    // 5 -> +10 -> 15 -> *2 -> 30 -> +3 -> 33
+    assert_eq(pipeline(5), 33);
+
+    // Using closures that capture from different scopes
+    let base = 100;
+    let offset = 7;
+    let custom = |x: Int| -> Int { x + base + offset };
+    assert_eq(custom(0), 107);
+    assert_eq(map_sum_range(0, 3, custom), 321 + 3);  // 107+108+109 = 324
+
+    0
+}

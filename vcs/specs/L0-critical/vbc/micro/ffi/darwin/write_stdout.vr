@@ -1,0 +1,31 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, libsystem, io
+// @description: Test write() FFI call to stdout using Text->CStr marshalling
+//
+// NOTE: We don't use @expected-stdout because FFI write() bypasses the
+// interpreter's output capture mechanism (it writes directly to fd 1).
+// The assertion on the return value verifies the call succeeded.
+
+@ffi("libSystem.B.dylib")
+extern {
+    // write() accepts a pointer to buffer
+    // Using Text here: FFI codegen maps Text -> CStr (pointer to UTF-8 bytes)
+    // The marshaller automatically converts Text values to C string pointers
+    fn write(fd: Int, buf: Text, nbyte: Int) -> Int;
+}
+
+fn main() {
+    // Write "OK" to stdout (fd=1)
+    // The Text value is automatically marshalled to a C string pointer
+    let msg = "OK";
+
+    let result = write(1, msg, 2);
+
+    // write() returns number of bytes written, or -1 on error
+    // This assertion proves the FFI call worked correctly
+    assert(result == 2);
+}

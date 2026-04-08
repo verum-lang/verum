@@ -1,0 +1,252 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, stdlib, integration, math, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end stdlib integration tests through VBC interpreter.
+// Tests algorithms, math, and common programming idioms using
+// fixed-size arrays (records) to avoid list method dispatch.
+
+// ============================================================================
+// Array simulation with records
+// ============================================================================
+
+type Arr10 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int,
+                e5: Int, e6: Int, e7: Int, e8: Int, e9: Int };
+
+fn arr10_get(a: Arr10, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else { a.e9 }
+}
+
+fn arr10_set(a: Arr10, i: Int, v: Int) -> Arr10 {
+    Arr10 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 }
+    }
+}
+
+fn arr10_zeros() -> Arr10 {
+    Arr10 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0,
+            e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 }
+}
+
+// ============================================================================
+// Sorting: bubble sort on Arr10
+// ============================================================================
+
+fn arr10_swap(a: Arr10, i: Int, j: Int) -> Arr10 {
+    let vi = arr10_get(a, i);
+    let vj = arr10_get(a, j);
+    let a2 = arr10_set(a, i, vj);
+    arr10_set(a2, j, vi)
+}
+
+fn bubble_sort(a: Arr10, n: Int) -> Arr10 {
+    let mut result = a;
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n - 1 - i {
+            if arr10_get(result, j) > arr10_get(result, j + 1) {
+                result = arr10_swap(result, j, j + 1);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn is_sorted(a: Arr10, n: Int) -> Bool {
+    let mut i = 0;
+    while i < n - 1 {
+        if arr10_get(a, i) > arr10_get(a, i + 1) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// ============================================================================
+// Math: GCD, primes, Fibonacci
+// ============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { abs_val(a) }
+    else { gcd(b, a % b) }
+}
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    if n < 4 { return true; }
+    if n % 2 == 0 { return false; }
+    let mut d = 3;
+    while d * d <= n {
+        if n % d == 0 { return false; }
+        d = d + 2;
+    }
+    true
+}
+
+fn fib_loop(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    a
+}
+
+// ============================================================================
+// RPN (Reverse Polish Notation) calculator simulation
+// ============================================================================
+
+type Stack5 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, top: Int };
+
+fn stack_new() -> Stack5 {
+    Stack5 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, top: 0 }
+}
+
+fn stack_push(s: Stack5, val: Int) -> Stack5 {
+    let t = s.top;
+    let mut ns = s;
+    if t == 0 { ns = Stack5 { e0: val, e1: s.e1, e2: s.e2, e3: s.e3, e4: s.e4, top: 1 }; }
+    else if t == 1 { ns = Stack5 { e0: s.e0, e1: val, e2: s.e2, e3: s.e3, e4: s.e4, top: 2 }; }
+    else if t == 2 { ns = Stack5 { e0: s.e0, e1: s.e1, e2: val, e3: s.e3, e4: s.e4, top: 3 }; }
+    else if t == 3 { ns = Stack5 { e0: s.e0, e1: s.e1, e2: s.e2, e3: val, e4: s.e4, top: 4 }; }
+    else { ns = Stack5 { e0: s.e0, e1: s.e1, e2: s.e2, e3: s.e3, e4: val, top: 5 }; }
+    ns
+}
+
+fn stack_peek(s: Stack5) -> Int {
+    let t = s.top - 1;
+    if t == 0 { s.e0 }
+    else if t == 1 { s.e1 }
+    else if t == 2 { s.e2 }
+    else if t == 3 { s.e3 }
+    else { s.e4 }
+}
+
+fn stack_pop(s: Stack5) -> Stack5 {
+    Stack5 { e0: s.e0, e1: s.e1, e2: s.e2, e3: s.e3, e4: s.e4, top: s.top - 1 }
+}
+
+// RPN: evaluate "3 4 + 5 *" = (3+4)*5 = 35
+fn rpn_eval_add_mul() -> Int {
+    let mut s = stack_new();
+    s = stack_push(s, 3);    // [3]
+    s = stack_push(s, 4);    // [3, 4]
+    // Add: pop 4 and 3, push 7
+    let b = stack_peek(s); s = stack_pop(s);
+    let a = stack_peek(s); s = stack_pop(s);
+    s = stack_push(s, a + b);  // [7]
+    s = stack_push(s, 5);      // [7, 5]
+    // Mul: pop 5 and 7, push 35
+    let d = stack_peek(s); s = stack_pop(s);
+    let c = stack_peek(s); s = stack_pop(s);
+    s = stack_push(s, c * d);  // [35]
+    stack_peek(s)
+}
+
+// ============================================================================
+// Main test
+// ============================================================================
+
+fn main() -> Int {
+    // ---- Sorting ----
+    let unsorted = Arr10 { e0: 5, e1: 2, e2: 8, e3: 1, e4: 9,
+                           e5: 3, e6: 7, e7: 4, e8: 6, e9: 0 };
+    let sorted = bubble_sort(unsorted, 10);
+    assert_eq(arr10_get(sorted, 0), 0);
+    assert_eq(arr10_get(sorted, 1), 1);
+    assert_eq(arr10_get(sorted, 4), 4);
+    assert_eq(arr10_get(sorted, 9), 9);
+    assert_eq(is_sorted(sorted, 10), true);
+
+    // Already sorted
+    assert_eq(is_sorted(sorted, 10), true);
+
+    // ---- GCD ----
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(252, 105), 21);
+    assert_eq(gcd(17, 13), 1);  // coprime
+    assert_eq(gcd(100, 0), 100);
+    assert_eq(gcd(0, 7), 7);
+
+    // ---- Primes ----
+    assert_eq(is_prime(2), true);
+    assert_eq(is_prime(3), true);
+    assert_eq(is_prime(4), false);
+    assert_eq(is_prime(17), true);
+    assert_eq(is_prime(97), true);
+    assert_eq(is_prime(100), false);
+
+    // Count primes up to 30
+    let mut count = 0;
+    let mut n = 2;
+    while n <= 30 {
+        if is_prime(n) { count = count + 1; }
+        n = n + 1;
+    }
+    assert_eq(count, 10);  // 2,3,5,7,11,13,17,19,23,29
+
+    // ---- Fibonacci ----
+    assert_eq(fib_loop(0), 0);
+    assert_eq(fib_loop(1), 1);
+    assert_eq(fib_loop(10), 55);
+    assert_eq(fib_loop(20), 6765);
+
+    // ---- RPN Calculator ----
+    assert_eq(rpn_eval_add_mul(), 35);
+
+    // ---- Frequency counting (simulated with Arr10) ----
+    // Count occurrences of digits 0-9 in: 1,3,5,3,1,7,3,9,1,3
+    let data = Arr10 { e0: 1, e1: 3, e2: 5, e3: 3, e4: 1,
+                       e5: 7, e6: 3, e7: 9, e8: 1, e9: 3 };
+    let mut freq = arr10_zeros();
+    let mut i = 0;
+    while i < 10 {
+        let val = arr10_get(data, i);
+        let old_count = arr10_get(freq, val);
+        freq = arr10_set(freq, val, old_count + 1);
+        i = i + 1;
+    }
+    assert_eq(arr10_get(freq, 1), 3);  // 1 appears 3 times
+    assert_eq(arr10_get(freq, 3), 4);  // 3 appears 4 times
+    assert_eq(arr10_get(freq, 5), 1);
+    assert_eq(arr10_get(freq, 7), 1);
+    assert_eq(arr10_get(freq, 9), 1);
+    assert_eq(arr10_get(freq, 0), 0);  // 0 doesn't appear
+
+    print("[OK] 190_interp_stdlib_integration");
+    0
+}

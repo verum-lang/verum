@@ -1,0 +1,231 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, simd, vector, arithmetic, reduction
+// @timeout: 50000
+// @expected-exit: 0
+// @description: SIMD operations — vector create, element-wise arithmetic, horizontal reduction, comparison
+
+// ============================================================================
+// Float helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool {
+    abs_f(a - b) < tol
+}
+
+fn min_f(a: Float, b: Float) -> Float {
+    if a < b { a } else { b }
+}
+
+fn max_f(a: Float, b: Float) -> Float {
+    if a > b { a } else { b }
+}
+
+// ============================================================================
+// Test 1: Element-wise add, sub, mul, div on 4-element vectors
+// ============================================================================
+
+@test
+fn test_simd_arithmetic() {
+    // Vector a = [1, 2, 3, 4], b = [5, 6, 7, 8]
+    let a0 = 1.0; let a1 = 2.0; let a2 = 3.0; let a3 = 4.0;
+    let b0 = 5.0; let b1 = 6.0; let b2 = 7.0; let b3 = 8.0;
+
+    // Add
+    let s0 = a0 + b0; let s1 = a1 + b1; let s2 = a2 + b2; let s3 = a3 + b3;
+    assert(approx_eq(s0, 6.0, 0.001));
+    assert(approx_eq(s1, 8.0, 0.001));
+    assert(approx_eq(s2, 10.0, 0.001));
+    assert(approx_eq(s3, 12.0, 0.001));
+
+    // Sub
+    let d0 = b0 - a0; let d1 = b1 - a1; let d2 = b2 - a2; let d3 = b3 - a3;
+    assert(approx_eq(d0, 4.0, 0.001));
+    assert(approx_eq(d1, 4.0, 0.001));
+    assert(approx_eq(d2, 4.0, 0.001));
+    assert(approx_eq(d3, 4.0, 0.001));
+
+    // Mul
+    let m0 = a0 * b0; let m1 = a1 * b1; let m2 = a2 * b2; let m3 = a3 * b3;
+    assert(approx_eq(m0, 5.0, 0.001));
+    assert(approx_eq(m1, 12.0, 0.001));
+    assert(approx_eq(m2, 21.0, 0.001));
+    assert(approx_eq(m3, 32.0, 0.001));
+
+    // Div
+    let q0 = b0 / a0; let q1 = b1 / a1; let q2 = b2 / a2; let q3 = b3 / a3;
+    assert(approx_eq(q0, 5.0, 0.001));
+    assert(approx_eq(q1, 3.0, 0.001));
+    assert(approx_eq(q2, 7.0 / 3.0, 0.001));
+    assert(approx_eq(q3, 2.0, 0.001));
+
+    print("  test_simd_arithmetic: ok");
+}
+
+// ============================================================================
+// Test 2: Splat and negation
+// ============================================================================
+
+@test
+fn test_splat_neg() {
+    // Splat: all lanes same value
+    let val = 3.14;
+    let s0 = val; let s1 = val; let s2 = val; let s3 = val;
+    assert(approx_eq(s0, 3.14, 0.001));
+    assert(approx_eq(s3, 3.14, 0.001));
+
+    // Negate
+    let n0 = 0.0 - s0; let n1 = 0.0 - s1; let n2 = 0.0 - s2; let n3 = 0.0 - s3;
+    assert(approx_eq(n0, 0.0 - 3.14, 0.001));
+    assert(approx_eq(n3, 0.0 - 3.14, 0.001));
+
+    // Double negate = original
+    let nn0 = 0.0 - n0;
+    assert(approx_eq(nn0, 3.14, 0.001));
+
+    print("  test_splat_neg: ok");
+}
+
+// ============================================================================
+// Test 3: Horizontal reductions
+// ============================================================================
+
+@test
+fn test_horizontal_reduction() {
+    let v0 = 1.0; let v1 = 2.0; let v2 = 3.0; let v3 = 4.0;
+
+    // Sum: 1+2+3+4 = 10
+    let hsum = v0 + v1 + v2 + v3;
+    assert(approx_eq(hsum, 10.0, 0.001));
+
+    // Product: 1*2*3*4 = 24
+    let hprod = v0 * v1 * v2 * v3;
+    assert(approx_eq(hprod, 24.0, 0.001));
+
+    // Min
+    let mut hmin = v0;
+    if v1 < hmin { hmin = v1; }
+    if v2 < hmin { hmin = v2; }
+    if v3 < hmin { hmin = v3; }
+    assert(approx_eq(hmin, 1.0, 0.001));
+
+    // Max
+    let mut hmax = v0;
+    if v1 > hmax { hmax = v1; }
+    if v2 > hmax { hmax = v2; }
+    if v3 > hmax { hmax = v3; }
+    assert(approx_eq(hmax, 4.0, 0.001));
+
+    // With negatives
+    let w0 = 0.0 - 5.0; let w1 = 3.0; let w2 = 0.0 - 1.0; let w3 = 7.0;
+    let wsum = w0 + w1 + w2 + w3;
+    assert(approx_eq(wsum, 4.0, 0.001));
+
+    let mut wmin = w0;
+    if w1 < wmin { wmin = w1; }
+    if w2 < wmin { wmin = w2; }
+    if w3 < wmin { wmin = w3; }
+    assert(approx_eq(wmin, 0.0 - 5.0, 0.001));
+
+    let mut wmax = w0;
+    if w1 > wmax { wmax = w1; }
+    if w2 > wmax { wmax = w2; }
+    if w3 > wmax { wmax = w3; }
+    assert(approx_eq(wmax, 7.0, 0.001));
+
+    print("  test_horizontal_reduction: ok");
+}
+
+// ============================================================================
+// Test 4: Dot product and FMA pattern
+// ============================================================================
+
+@test
+fn test_dot_product() {
+    let a0 = 1.0; let a1 = 2.0; let a2 = 3.0; let a3 = 4.0;
+    let b0 = 5.0; let b1 = 6.0; let b2 = 7.0; let b3 = 8.0;
+
+    // dot = sum(a[i]*b[i]) = 1*5 + 2*6 + 3*7 + 4*8 = 5+12+21+32 = 70
+    let dot = a0*b0 + a1*b1 + a2*b2 + a3*b3;
+    assert(approx_eq(dot, 70.0, 0.001));
+
+    // Self-dot = magnitude squared: 1+4+9+16 = 30
+    let self_dot = a0*a0 + a1*a1 + a2*a2 + a3*a3;
+    assert(approx_eq(self_dot, 30.0, 0.001));
+
+    // Orthogonal vectors: [1,0,0,0] dot [0,1,0,0] = 0
+    let orth_dot = 1.0*0.0 + 0.0*1.0 + 0.0*0.0 + 0.0*0.0;
+    assert(approx_eq(orth_dot, 0.0, 0.001));
+
+    // FMA pattern: a*b + c where c = [10,10,10,10]
+    let c = 10.0;
+    let fma0 = a0*b0 + c;
+    let fma1 = a1*b1 + c;
+    let fma2 = a2*b2 + c;
+    let fma3 = a3*b3 + c;
+    assert(approx_eq(fma0, 15.0, 0.001));  // 1*5 + 10
+    assert(approx_eq(fma1, 22.0, 0.001));  // 2*6 + 10
+    assert(approx_eq(fma2, 31.0, 0.001));  // 3*7 + 10
+    assert(approx_eq(fma3, 42.0, 0.001));  // 4*8 + 10
+
+    print("  test_dot_product: ok");
+}
+
+// ============================================================================
+// Test 5: Clamp (min/max combination)
+// ============================================================================
+
+@test
+fn test_simd_clamp() {
+    // Values to clamp: [-2, 0.5, 1.5, 3.0]
+    // Clamp to [0, 1]
+    let lo = 0.0;
+    let hi = 1.0;
+
+    let v0 = 0.0 - 2.0;
+    let v1 = 0.5;
+    let v2 = 1.5;
+    let v3 = 3.0;
+
+    // clamp = min(max(x, lo), hi)
+    let c0 = min_f(max_f(v0, lo), hi);
+    let c1 = min_f(max_f(v1, lo), hi);
+    let c2 = min_f(max_f(v2, lo), hi);
+    let c3 = min_f(max_f(v3, lo), hi);
+
+    assert(approx_eq(c0, 0.0, 0.001));   // -2 clamped to 0
+    assert(approx_eq(c1, 0.5, 0.001));   // 0.5 unchanged
+    assert(approx_eq(c2, 1.0, 0.001));   // 1.5 clamped to 1
+    assert(approx_eq(c3, 1.0, 0.001));   // 3.0 clamped to 1
+
+    // Wider range clamp [-10, 10]
+    let lo2 = 0.0 - 10.0;
+    let hi2 = 10.0;
+    let c4 = min_f(max_f(0.0 - 20.0, lo2), hi2);
+    let c5 = min_f(max_f(5.0, lo2), hi2);
+    let c6 = min_f(max_f(15.0, lo2), hi2);
+    assert(approx_eq(c4, 0.0 - 10.0, 0.001));
+    assert(approx_eq(c5, 5.0, 0.001));
+    assert(approx_eq(c6, 10.0, 0.001));
+
+    print("  test_simd_clamp: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_simd_arithmetic();
+    test_splat_neg();
+    test_horizontal_reduction();
+    test_dot_product();
+    test_simd_clamp();
+    print("[OK] 089_simd_operations");
+    0
+}

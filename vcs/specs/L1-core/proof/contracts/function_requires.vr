@@ -1,0 +1,45 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, contracts, requires
+// @timeout: 5000
+
+/// Function contracts with requires clauses.
+/// Grammar: requires_clause = 'requires' expression { ',' expression }
+/// Note: For function_def, requires appears within ensures_clause after return type.
+
+// Function with single precondition
+fn divide(a: Int, b: Int) -> Int
+    where ensures b != 0
+{
+    a / b
+}
+
+// Function with multiple preconditions
+fn safe_index(arr: List<Int>, idx: Int) -> Int
+    where ensures idx >= 0, ensures idx < arr.len()
+{
+    arr[idx]
+}
+
+// Function ensuring positive result
+fn absolute(x: Int) -> Int where ensures result >= 0 {
+    if x < 0 { -x } else { x }
+}
+
+// Square root requires non-negative input
+fn sqrt_int(n: Int) -> Int
+    where ensures n >= 0
+{
+    // simplified integer square root
+    let mut guess = n;
+    while guess * guess > n {
+        guess = guess - 1;
+    }
+    guess
+}
+
+fn main() {
+    let r = divide(10, 2);
+    assert_eq(r, 5);
+    print("Function requires tests passed");
+}

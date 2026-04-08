@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, map, errors
+// @expected-error: Type mismatch
+// @description: Test map_get with non-text key produces type error
+
+// map_get with non-text key
+meta fn test_map_get_key_type_error() {
+    let m = map_new();
+    let m = map_insert(m, "key", 42);
+    map_get(m, 123)  // ERROR: Key must be Text, got Int
+}
+
+fn main() {
+    let _ = @const(test_map_get_key_type_error());
+}

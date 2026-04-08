@@ -1,0 +1,38 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, unsigned, arithmetic
+// @description: Test FFI unsigned integer operations
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_add_u32(a: Int, b: Int) -> Int;
+    fn ffi_add_u64(a: Int, b: Int) -> Int;
+    fn ffi_add_f64(a: Float, b: Float) -> Float;
+    fn ffi_add_12_i64(
+        a1: Int, a2: Int, a3: Int, a4: Int,
+        a5: Int, a6: Int, a7: Int, a8: Int,
+        a9: Int, a10: Int, a11: Int, a12: Int
+    ) -> Int;
+}
+
+fn main() {
+    // Test unsigned 32-bit addition
+    let u32_sum = ffi_add_u32(100, 200);
+    assert_eq(u32_sum, 300);
+
+    // Test unsigned 64-bit addition
+    let u64_sum = ffi_add_u64(1000, 2000);
+    assert_eq(u64_sum, 3000);
+
+    // Test 64-bit float addition (f32 return not yet supported)
+    let f64_sum = ffi_add_f64(1.5, 2.5);
+    assert(f64_sum > 3.99 && f64_sum < 4.01);
+
+    // Test 12-argument function
+    let sum_12 = ffi_add_12_i64(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+    assert_eq(sum_12, 78);  // 1+2+...+12 = 78
+
+    print("Unsigned operations tests passed!\n");
+}

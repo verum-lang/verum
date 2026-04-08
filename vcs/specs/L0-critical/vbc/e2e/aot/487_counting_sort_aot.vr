@@ -1,0 +1,206 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, counting-sort, radix-sort, sort
+// @timeout: 30000
+
+// Non-comparison sorting algorithms: counting sort, radix sort (LSD)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Counting sort for values in range [0, max_val]
+// max_val must be <= 7 for our Arr8 count array
+fn counting_sort(arr: Arr8, n: Int, max_val: Int) -> Arr8 {
+    // Count occurrences
+    let mut count = zeros();
+    let mut i = 0;
+    while i < n {
+        let v = get8(arr, i);
+        count = set8(count, v, get8(count, v) + 1);
+        i = i + 1;
+    }
+
+    // Build sorted output
+    let mut result = zeros();
+    let mut pos = 0;
+    let mut v = 0;
+    while v <= max_val {
+        let mut c = get8(count, v);
+        while c > 0 {
+            result = set8(result, pos, v);
+            pos = pos + 1;
+            c = c - 1;
+        }
+        v = v + 1;
+    }
+    result
+}
+
+// Get digit at given position (base 10)
+fn digit_at(n: Int, pos: Int) -> Int {
+    let mut p = 1;
+    let mut i = 0;
+    while i < pos { p = p * 10; i = i + 1; }
+    (n / p) % 10
+}
+
+// Counting sort by specific digit (for radix sort)
+// Only works for digits 0-7 with our Arr8 limitation
+fn counting_sort_by_digit(arr: Arr8, n: Int, digit_pos: Int) -> Arr8 {
+    let mut count = zeros();
+    let mut i = 0;
+    while i < n {
+        let d = digit_at(get8(arr, i), digit_pos);
+        count = set8(count, d, get8(count, d) + 1);
+        i = i + 1;
+    }
+
+    // Prefix sums
+    i = 1;
+    while i < 8 {
+        count = set8(count, i, get8(count, i) + get8(count, i - 1));
+        i = i + 1;
+    }
+
+    // Build output (reverse order for stability)
+    let mut output = zeros();
+    i = n - 1;
+    while i >= 0 {
+        let d = digit_at(get8(arr, i), digit_pos);
+        let pos = get8(count, d) - 1;
+        output = set8(output, pos, get8(arr, i));
+        count = set8(count, d, get8(count, d) - 1);
+        i = i - 1;
+    }
+    output
+}
+
+// Radix sort (LSD, base 10)
+fn radix_sort(arr: Arr8, n: Int, max_digits: Int) -> Arr8 {
+    let mut a = arr;
+    let mut d = 0;
+    while d < max_digits {
+        a = counting_sort_by_digit(a, n, d);
+        d = d + 1;
+    }
+    a
+}
+
+// Check if array is sorted
+fn is_sorted(arr: Arr8, n: Int) -> Int {
+    let mut i = 0;
+    while i < n - 1 {
+        if get8(arr, i) > get8(arr, i + 1) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Frequency count
+fn frequency(arr: Arr8, n: Int, val: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(arr, i) == val { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_counting_sort() -> Int {
+    let arr = Arr8 { v0: 4, v1: 2, v2: 7, v3: 1, v4: 3, v5: 7, v6: 0, v7: 5 };
+    let sorted = counting_sort(arr, 8, 7);
+    assert_eq(is_sorted(sorted, 8), 1);
+    assert_eq(get8(sorted, 0), 0);
+    assert_eq(get8(sorted, 7), 7);
+    // Verify same elements
+    assert_eq(frequency(sorted, 8, 7), 2);
+    assert_eq(frequency(sorted, 8, 4), 1);
+    1
+}
+
+fn test_counting_sort_small() -> Int {
+    // Small range
+    let arr = Arr8 { v0: 2, v1: 0, v2: 1, v3: 0, v4: 1, v5: 0, v6: 0, v7: 0 };
+    let sorted = counting_sort(arr, 6, 2);
+    assert_eq(get8(sorted, 0), 0);
+    assert_eq(get8(sorted, 1), 0);
+    assert_eq(get8(sorted, 2), 0);
+    assert_eq(get8(sorted, 3), 1);
+    assert_eq(get8(sorted, 4), 1);
+    assert_eq(get8(sorted, 5), 2);
+    1
+}
+
+fn test_radix_sort() -> Int {
+    // Values with multiple digits (all < 80 to keep digits 0-7)
+    let arr = Arr8 { v0: 53, v1: 21, v2: 17, v3: 45, v4: 32, v5: 60, v6: 11, v7: 74 };
+    let sorted = radix_sort(arr, 8, 2);
+    assert_eq(is_sorted(sorted, 8), 1);
+    assert_eq(get8(sorted, 0), 11);
+    assert_eq(get8(sorted, 7), 74);
+    1
+}
+
+fn test_already_sorted() -> Int {
+    let arr = Arr8 { v0: 0, v1: 1, v2: 2, v3: 3, v4: 4, v5: 5, v6: 6, v7: 7 };
+    let sorted = counting_sort(arr, 8, 7);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(get8(sorted, i), i);
+        i = i + 1;
+    }
+    1
+}
+
+fn test_all_same() -> Int {
+    let arr = Arr8 { v0: 3, v1: 3, v2: 3, v3: 3, v4: 3, v5: 3, v6: 3, v7: 3 };
+    let sorted = counting_sort(arr, 8, 7);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(get8(sorted, i), 3);
+        i = i + 1;
+    }
+    1
+}
+
+fn test_digit_extraction() -> Int {
+    assert_eq(digit_at(123, 0), 3);
+    assert_eq(digit_at(123, 1), 2);
+    assert_eq(digit_at(123, 2), 1);
+    assert_eq(digit_at(456, 0), 6);
+    assert_eq(digit_at(456, 1), 5);
+    assert_eq(digit_at(456, 2), 4);
+    1
+}
+
+fn main() -> Int {
+    test_counting_sort();
+    test_counting_sort_small();
+    test_radix_sort();
+    test_already_sorted();
+    test_all_same();
+    test_digit_extraction();
+    print("[OK] 487_counting_sort_aot");
+    0
+}

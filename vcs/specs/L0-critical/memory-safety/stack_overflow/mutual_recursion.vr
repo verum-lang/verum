@@ -1,0 +1,40 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, stack-overflow, mutual-recursion
+// @description: Tests that mutual recursion without base case causes stack overflow
+
+fn is_even(n: Int) -> Bool {
+    if n == 0 {
+        true
+    } else {
+        is_odd(n - 1)
+    }
+}
+
+fn is_odd(n: Int) -> Bool {
+    if n == 0 {
+        false
+    } else {
+        is_even(n - 1)
+    }
+}
+
+fn infinite_even(n: Int) -> Bool {
+    // Missing base case - will overflow
+    infinite_odd(n)
+}
+
+fn infinite_odd(n: Int) -> Bool {
+    // Missing base case - will overflow
+    infinite_even(n)
+}
+
+fn main() {
+    // This works - proper base cases
+    assert(is_even(10) == true);
+    assert(is_odd(7) == true);
+
+    // This overflows - no base cases
+    let _ = infinite_even(0);  // Stack overflow
+}

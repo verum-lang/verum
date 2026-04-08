@@ -1,0 +1,292 @@
+// =============================================================================
+// pin_test.vr - Tests for Pin<T> smart pointer
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, memory, pin, async, safety
+// @description: Tests for Pin<T> type which prevents moving of pinned values.
+//               Pin ensures memory address stability for self-referential types
+//               and async futures.
+// =============================================================================
+
+mount core.base.memory.{Pin};
+mount core.base.protocols.{Unpin, Eq, Clone, Debug};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.text.format.{format_debug};
+
+// =============================================================================
+// Section 1: Pin construction
+// =============================================================================
+
+@test
+fn test_pin_new() {
+    let pinned = Pin.new(42);
+    assert(pinned.get_ref() == &42);
+}
+
+@test
+fn test_pin_new_bool() {
+    let pinned = Pin.new(true);
+    assert(*pinned.get_ref() == true);
+}
+
+@test
+fn test_pin_new_text() {
+    let pinned = Pin.new("hello");
+    assert(*pinned.get_ref() == "hello");
+}
+
+@test
+fn test_pin_new_float() {
+    let pinned = Pin.new(3.14);
+    let val = *pinned.get_ref();
+    assert(val > 3.0);
+    assert(val < 4.0);
+}
+
+// =============================================================================
+// Section 2: Pin access methods
+// =============================================================================
+
+@test
+fn test_pin_get_ref() {
+    let pinned = Pin.new(100);
+    let r = pinned.get_ref();
+    assert(*r == 100);
+}
+
+@test
+fn test_pin_get_ref_multiple() {
+    let pinned = Pin.new(42);
+    let r1 = pinned.get_ref();
+    let r2 = pinned.get_ref();
+    assert(*r1 == *r2);
+}
+
+@test
+fn test_pin_into_inner() {
+    let pinned = Pin.new(99);
+    let val = pinned.into_inner();
+    assert_eq(val, 99);
+}
+
+@test
+fn test_pin_into_inner_text() {
+    let pinned = Pin.new("world");
+    let val = pinned.into_inner();
+    assert_eq(val, "world");
+}
+
+@test
+fn test_pin_get_mut() {
+    let mut pinned = Pin.new(10);
+    let m = pinned.get_mut();
+    *m = 20;
+    assert_eq(*pinned.get_ref(), 20);
+}
+
+@test
+fn test_pin_set() {
+    let mut pinned = Pin.new(1);
+    pinned.set(2);
+    assert_eq(*pinned.get_ref(), 2);
+}
+
+@test
+fn test_pin_set_multiple() {
+    let mut pinned = Pin.new(0);
+    pinned.set(10);
+    pinned.set(20);
+    pinned.set(30);
+    assert_eq(*pinned.get_ref(), 30);
+}
+
+// =============================================================================
+// Section 3: Pin with complex types
+// =============================================================================
+
+@test
+fn test_pin_with_list() {
+    let items = [1, 2, 3];
+    let pinned = Pin.new(items);
+    let r = pinned.get_ref();
+    assert_eq(r.len(), 3);
+}
+
+@test
+fn test_pin_with_maybe() {
+    let val: Maybe<Int> = Some(42);
+    let pinned = Pin.new(val);
+    let r = pinned.get_ref();
+    assert(*r is Some);
+}
+
+@test
+fn test_pin_with_tuple() {
+    let t = (1, 2);
+    let pinned = Pin.new(t);
+    let r = pinned.get_ref();
+    assert_eq(r.0, 1);
+    assert_eq(r.1, 2);
+}
+
+// =============================================================================
+// Section 4: Pin protocols
+// =============================================================================
+
+@test
+fn test_pin_eq() {
+    let a = Pin.new(42);
+    let b = Pin.new(42);
+    assert_eq(a, b);
+}
+
+@test
+fn test_pin_eq_different() {
+    let a = Pin.new(1);
+    let b = Pin.new(2);
+    assert(a != b);
+}
+
+@test
+fn test_pin_clone() {
+    let original = Pin.new(42);
+    let cloned = original.clone();
+    assert_eq(original, cloned);
+}
+
+@test
+fn test_pin_clone_independence() {
+    let mut original = Pin.new(10);
+    let cloned = original.clone();
+    original.set(20);
+    assert_eq(*original.get_ref(), 20);
+    assert_eq(*cloned.get_ref(), 10);
+}
+
+@test
+fn test_pin_debug() {
+    let pinned = Pin.new(42);
+    let s = format_debug(&pinned);
+    assert(s.len() > 0);
+}
+
+@test
+fn test_pin_default() {
+    let pinned: Pin<Int> = Pin.default();
+    assert_eq(*pinned.get_ref(), 0);
+}
+
+@test
+fn test_pin_default_bool() {
+    let pinned: Pin<Bool> = Pin.default();
+    assert_eq(*pinned.get_ref(), false);
+}
+
+// =============================================================================
+// Section 5: Pin as_ref / as_deref
+// =============================================================================
+
+@test
+fn test_pin_as_ref() {
+    let pinned = Pin.new(42);
+    let pin_ref = pinned.as_ref();
+    assert_eq(*pin_ref, 42);
+}
+
+@test
+fn test_pin_deref() {
+    let pinned = Pin.new(42);
+    // Pin<T> should deref to T
+    let val: Int = *pinned;
+    assert_eq(val, 42);
+}
+
+// =============================================================================
+// Section 6: Unpin marker interaction
+// =============================================================================
+
+@test
+fn test_unpin_int() {
+    // Int is Unpin — can be freely moved
+    fn takes_unpin<T: Unpin>(val: T) -> T { val }
+    let x = takes_unpin(42);
+    assert_eq(x, 42);
+}
+
+@test
+fn test_pin_unpin_roundtrip() {
+    // For Unpin types, pin/unpin should roundtrip
+    let val = 42;
+    let pinned = Pin.new(val);
+    let unpinned = pinned.into_inner();
+    assert_eq(unpinned, 42);
+}
+
+@test
+fn test_pin_unpin_get_mut() {
+    // For Unpin types, get_mut is safe
+    let mut pinned = Pin.new(42);
+    let r = pinned.get_mut();
+    *r = 100;
+    assert_eq(pinned.into_inner(), 100);
+}
+
+// =============================================================================
+// Section 7: Pin edge cases
+// =============================================================================
+
+@test
+fn test_pin_nested() {
+    let inner = Pin.new(42);
+    let outer = Pin.new(inner);
+    let inner_ref = outer.get_ref();
+    assert_eq(*inner_ref.get_ref(), 42);
+}
+
+@test
+fn test_pin_zero() {
+    let pinned = Pin.new(0);
+    assert_eq(*pinned.get_ref(), 0);
+}
+
+@test
+fn test_pin_negative() {
+    let pinned = Pin.new(-1);
+    assert_eq(*pinned.get_ref(), -1);
+}
+
+@test
+fn test_pin_large_value() {
+    let pinned = Pin.new(999999);
+    assert_eq(*pinned.get_ref(), 999999);
+}
+
+@test
+fn test_pin_empty_text() {
+    let pinned = Pin.new("");
+    assert_eq(*pinned.get_ref(), "");
+}
+
+// =============================================================================
+// Section 8: Pin with map
+// =============================================================================
+
+@test
+fn test_pin_map() {
+    let pinned = Pin.new(21);
+    let mapped = pinned.map(|x| x * 2);
+    assert_eq(*mapped.get_ref(), 42);
+}
+
+@test
+fn test_pin_map_type_change() {
+    let pinned = Pin.new(42);
+    let mapped = pinned.map(|x| x > 0);
+    assert_eq(*mapped.get_ref(), true);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

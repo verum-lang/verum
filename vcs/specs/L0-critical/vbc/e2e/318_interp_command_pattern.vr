@@ -1,0 +1,318 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, design-patterns, command, undo-redo
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Command pattern with undo/redo stack.
+// Commands operate on an integer state. Each command type knows how to
+// execute and undo itself. Supports undo history and redo.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Command encoding
+// Command types: 1=ADD(arg), 2=SUB(arg), 3=MUL(arg), 4=SET(arg)
+// Encoded as type*10000 + arg (arg < 10000)
+// For SET, we also need old_value; encode in undo stack as SET*10000 + old_value
+// =============================================================================
+
+fn cmd_type(cmd: Int) -> Int {
+    cmd / 10000
+}
+
+fn cmd_arg(cmd: Int) -> Int {
+    cmd % 10000
+}
+
+fn make_cmd(ctype: Int, arg: Int) -> Int {
+    ctype * 10000 + arg
+}
+
+// Execute a command on state, return new state
+fn cmd_execute(state: Int, cmd: Int) -> Int {
+    let ct = cmd_type(cmd);
+    let arg = cmd_arg(cmd);
+    if ct == 1 { state + arg }
+    else if ct == 2 { state - arg }
+    else if ct == 3 { state * arg }
+    else if ct == 4 { arg }
+    else { state }
+}
+
+// Create undo command for a given forward command and previous state
+fn cmd_make_undo(cmd: Int, prev_state: Int) -> Int {
+    let ct = cmd_type(cmd);
+    let arg = cmd_arg(cmd);
+    if ct == 1 { make_cmd(2, arg) }       // undo ADD = SUB
+    else if ct == 2 { make_cmd(1, arg) }   // undo SUB = ADD
+    else if ct == 3 { make_cmd(4, prev_state) }  // undo MUL = SET to prev
+    else if ct == 4 { make_cmd(4, prev_state) }  // undo SET = SET to prev
+    else { make_cmd(4, prev_state) }
+}
+
+// =============================================================================
+// Command history (undo/redo stacks)
+// =============================================================================
+
+type CmdHistory is {
+    undo_stack: Arr8,
+    undo_size: Int,
+    redo_stack: Arr8,
+    redo_size: Int,
+    state: Int
+};
+
+fn ch_new(initial: Int) -> CmdHistory {
+    CmdHistory {
+        undo_stack: a8_zeros(),
+        undo_size: 0,
+        redo_stack: a8_zeros(),
+        redo_size: 0,
+        state: initial
+    }
+}
+
+fn ch_execute(ch: CmdHistory, cmd: Int) -> CmdHistory {
+    let prev = ch.state;
+    let new_state = cmd_execute(prev, cmd);
+    let undo_cmd = cmd_make_undo(cmd, prev);
+
+    // Push undo command
+    let new_undo = a8_set(ch.undo_stack, ch.undo_size, undo_cmd);
+
+    // Clear redo stack on new command
+    CmdHistory {
+        undo_stack: new_undo,
+        undo_size: ch.undo_size + 1,
+        redo_stack: a8_zeros(),
+        redo_size: 0,
+        state: new_state
+    }
+}
+
+fn ch_undo(ch: CmdHistory) -> CmdHistory {
+    if ch.undo_size <= 0 {
+        return ch;
+    }
+    let undo_idx = ch.undo_size - 1;
+    let undo_cmd = a8_get(ch.undo_stack, undo_idx);
+    let prev = ch.state;
+    let new_state = cmd_execute(prev, undo_cmd);
+
+    // Push redo command (inverse of undo = original forward command's undo)
+    let redo_cmd = cmd_make_undo(undo_cmd, prev);
+    let new_redo = a8_set(ch.redo_stack, ch.redo_size, redo_cmd);
+
+    CmdHistory {
+        undo_stack: ch.undo_stack,
+        undo_size: ch.undo_size - 1,
+        redo_stack: new_redo,
+        redo_size: ch.redo_size + 1,
+        state: new_state
+    }
+}
+
+fn ch_redo(ch: CmdHistory) -> CmdHistory {
+    if ch.redo_size <= 0 {
+        return ch;
+    }
+    let redo_idx = ch.redo_size - 1;
+    let redo_cmd = a8_get(ch.redo_stack, redo_idx);
+    let prev = ch.state;
+    let new_state = cmd_execute(prev, redo_cmd);
+
+    // Push corresponding undo
+    let undo_cmd = cmd_make_undo(redo_cmd, prev);
+    let new_undo = a8_set(ch.undo_stack, ch.undo_size, undo_cmd);
+
+    CmdHistory {
+        undo_stack: new_undo,
+        undo_size: ch.undo_size + 1,
+        redo_stack: ch.redo_stack,
+        redo_size: ch.redo_size - 1,
+        state: new_state
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_basic_execute() {
+    let mut ch = ch_new(0);
+    ch = ch_execute(ch, make_cmd(1, 10));  // ADD 10
+    assert_eq(ch.state, 10);
+    ch = ch_execute(ch, make_cmd(1, 5));   // ADD 5
+    assert_eq(ch.state, 15);
+}
+
+fn test_undo_add() {
+    let mut ch = ch_new(0);
+    ch = ch_execute(ch, make_cmd(1, 10));
+    assert_eq(ch.state, 10);
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 0);
+}
+
+fn test_undo_sub() {
+    let mut ch = ch_new(100);
+    ch = ch_execute(ch, make_cmd(2, 30));  // SUB 30 => 70
+    assert_eq(ch.state, 70);
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 100);
+}
+
+fn test_undo_mul() {
+    let mut ch = ch_new(5);
+    ch = ch_execute(ch, make_cmd(3, 4));   // MUL 4 => 20
+    assert_eq(ch.state, 20);
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 5);
+}
+
+fn test_undo_set() {
+    let mut ch = ch_new(42);
+    ch = ch_execute(ch, make_cmd(4, 99));  // SET 99
+    assert_eq(ch.state, 99);
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 42);
+}
+
+fn test_multiple_undo() {
+    let mut ch = ch_new(0);
+    ch = ch_execute(ch, make_cmd(1, 10));   // 0+10 = 10
+    ch = ch_execute(ch, make_cmd(1, 20));   // 10+20 = 30
+    ch = ch_execute(ch, make_cmd(2, 5));    // 30-5 = 25
+    assert_eq(ch.state, 25);
+
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 30);
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 10);
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 0);
+}
+
+fn test_redo() {
+    let mut ch = ch_new(0);
+    ch = ch_execute(ch, make_cmd(1, 10));
+    ch = ch_execute(ch, make_cmd(1, 20));
+    assert_eq(ch.state, 30);
+
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 10);
+    ch = ch_redo(ch);
+    assert_eq(ch.state, 30);
+}
+
+fn test_redo_after_multiple_undo() {
+    let mut ch = ch_new(0);
+    ch = ch_execute(ch, make_cmd(1, 5));
+    ch = ch_execute(ch, make_cmd(1, 10));
+    ch = ch_execute(ch, make_cmd(1, 15));
+    assert_eq(ch.state, 30);
+
+    ch = ch_undo(ch);
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 5);
+
+    ch = ch_redo(ch);
+    assert_eq(ch.state, 15);
+    ch = ch_redo(ch);
+    assert_eq(ch.state, 30);
+}
+
+fn test_new_command_clears_redo() {
+    let mut ch = ch_new(0);
+    ch = ch_execute(ch, make_cmd(1, 10));
+    ch = ch_execute(ch, make_cmd(1, 20));
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 10);
+    assert_eq(ch.redo_size, 1);
+
+    // New command should clear redo
+    ch = ch_execute(ch, make_cmd(1, 50));
+    assert_eq(ch.state, 60);
+    assert_eq(ch.redo_size, 0);
+
+    // Redo should have no effect
+    ch = ch_redo(ch);
+    assert_eq(ch.state, 60);
+}
+
+fn test_undo_empty() {
+    let mut ch = ch_new(42);
+    ch = ch_undo(ch);
+    assert_eq(ch.state, 42);  // no change
+}
+
+fn test_redo_empty() {
+    let mut ch = ch_new(42);
+    ch = ch_redo(ch);
+    assert_eq(ch.state, 42);  // no change
+}
+
+fn test_complex_sequence() {
+    let mut ch = ch_new(100);
+    ch = ch_execute(ch, make_cmd(1, 50));   // 150
+    ch = ch_execute(ch, make_cmd(3, 2));    // 300
+    ch = ch_execute(ch, make_cmd(2, 100));  // 200
+    ch = ch_execute(ch, make_cmd(4, 42));   // 42
+    assert_eq(ch.state, 42);
+
+    ch = ch_undo(ch);  // -> 200
+    assert_eq(ch.state, 200);
+    ch = ch_undo(ch);  // -> 300
+    assert_eq(ch.state, 300);
+    ch = ch_redo(ch);  // -> 200
+    assert_eq(ch.state, 200);
+    ch = ch_redo(ch);  // -> 42
+    assert_eq(ch.state, 42);
+}
+
+fn main() -> Int {
+    test_basic_execute();
+    test_undo_add();
+    test_undo_sub();
+    test_undo_mul();
+    test_undo_set();
+    test_multiple_undo();
+    test_redo();
+    test_redo_after_multiple_undo();
+    test_new_command_clears_redo();
+    test_undo_empty();
+    test_redo_empty();
+    test_complex_sequence();
+    print("[OK] 318_interp_command_pattern");
+    0
+}

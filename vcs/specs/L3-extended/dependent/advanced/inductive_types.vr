@@ -1,0 +1,148 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, inductive, advanced
+
+/// Inductive types - well-founded recursive data structures
+
+/// Peano natural numbers
+type PNat is | PZero | PSucc(Heap<PNat>);
+
+fn pnat_to_int(n: PNat) -> Int {
+    match n {
+        PZero => 0,
+        PSucc(pred) => 1 + pnat_to_int(*pred),
+    }
+}
+
+fn int_to_pnat(n: Int) -> PNat {
+    if n <= 0 { PZero }
+    else { PSucc(Heap(int_to_pnat(n - 1))) }
+}
+
+fn padd(a: PNat, b: PNat) -> PNat {
+    match a {
+        PZero => b,
+        PSucc(pred) => PSucc(Heap(padd(*pred, b))),
+    }
+}
+
+fn pmul(a: PNat, b: PNat) -> PNat {
+    match a {
+        PZero => PZero,
+        PSucc(pred) => padd(b, pmul(*pred, b)),
+    }
+}
+
+/// Binary tree
+type BTree<T> is
+    | BLeaf
+    | BNode { value: T, left: Heap<BTree<T>>, right: Heap<BTree<T>> };
+
+fn tree_size<T>(t: BTree<T>) -> Int {
+    match t {
+        BLeaf => 0,
+        BNode { value, left, right } => 1 + tree_size(*left) + tree_size(*right),
+    }
+}
+
+fn tree_depth<T>(t: BTree<T>) -> Int {
+    match t {
+        BLeaf => 0,
+        BNode { value, left, right } => {
+            let ld = tree_depth(*left);
+            let rd = tree_depth(*right);
+            1 + if ld > rd { ld } else { rd }
+        }
+    }
+}
+
+fn tree_map<A, B>(t: BTree<A>, f: fn(A) -> B) -> BTree<B> {
+    match t {
+        BLeaf => BLeaf,
+        BNode { value, left, right } =>
+            BNode {
+                value: f(value),
+                left: Heap(tree_map(*left, f)),
+                right: Heap(tree_map(*right, f)),
+            },
+    }
+}
+
+fn tree_fold<T, R>(t: BTree<T>, leaf: R, node: fn(R, T, R) -> R) -> R {
+    match t {
+        BLeaf => leaf,
+        BNode { value, left, right } =>
+            node(tree_fold(*left, leaf, node), value, tree_fold(*right, leaf, node)),
+    }
+}
+
+/// Rose tree (arbitrary branching)
+type Rose<T> is { value: T, children: List<Rose<T>> };
+
+fn rose_size<T>(t: Rose<T>) -> Int {
+    // Count this node plus direct children (not recursive for safety)
+    1 + t.children.len()
+}
+
+/// Mutual recursion: Even/Odd
+type EvenList<T> is
+    | ENil
+    | ECons { head: T, tail: Heap<OddList<T>> };
+
+type OddList<T> is
+    | OCons { head: T, tail: Heap<EvenList<T>> };
+
+fn even_length<T>(l: EvenList<T>) -> Int {
+    match l {
+        ENil => 0,
+        ECons { head, tail } => 1 + odd_length(*tail),
+    }
+}
+
+fn odd_length<T>(l: OddList<T>) -> Int {
+    match l {
+        OCons { head, tail } => 1 + even_length(*tail),
+    }
+}
+
+fn main() {
+    // Peano arithmetic
+    let two = PSucc(Heap(PSucc(Heap(PZero))));
+    let three = PSucc(Heap(PSucc(Heap(PSucc(Heap(PZero))))));
+    assert(pnat_to_int(two) == 2);
+    assert(pnat_to_int(three) == 3);
+
+    let five = padd(two, three);
+    assert(pnat_to_int(five) == 5);
+
+    let six = pmul(two, three);
+    assert(pnat_to_int(six) == 6);
+
+    // Binary tree
+    let tree = BNode {
+        value: 1,
+        left: Heap(BNode { value: 2, left: Heap(BLeaf), right: Heap(BLeaf) }),
+        right: Heap(BNode { value: 3, left: Heap(BLeaf), right: Heap(BLeaf) }),
+    };
+    assert(tree_size(tree) == 3);
+    assert(tree_depth(tree) == 2);
+
+    // Tree sum via fold
+    let sum = tree_fold(tree, 0, |l, v, r| l + v + r);
+    assert(sum == 6);
+
+    // Rose tree
+    let rose = Rose {
+        value: 1,
+        children: [
+            Rose { value: 2, children: [] },
+            Rose { value: 3, children: [Rose { value: 4, children: [] }] },
+        ],
+    };
+    assert(rose_size(rose) == 3);  // 1 node + 2 direct children
+
+    // Roundtrip
+    let n = int_to_pnat(7);
+    assert(pnat_to_int(n) == 7);
+}

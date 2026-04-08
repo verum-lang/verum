@@ -1,0 +1,120 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, bounds
+
+/// Test for generic functions with trait bounds.
+/// Bounds guarantee that type parameters support required operations.
+
+// Single bound: Ord for comparison
+fn max<T: Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+// Single bound: Debug for formatting
+fn print_debug<T: Debug>(x: T) {
+    print(f"{x:?}");
+}
+
+// Single bound: Clone for duplication
+fn triple<T: Clone>(x: T) -> (T, T, T) {
+    (x.clone(), x.clone(), x)
+}
+
+// Single bound: Default for creating default values
+fn default_if_none<T: Default>(opt: Maybe<T>) -> T {
+    match opt {
+        Some(value) => value,
+        None => T.default(),
+    }
+}
+
+// Bound on generic struct
+type SortedList<T: Ord> is {
+    items: List<T>,
+};
+
+implement SortedList<T> {
+    fn new() -> SortedList<T> {
+        SortedList { items: List.new() }
+    }
+
+    fn insert(&mut self, item: T) {
+        self.items.push(item);
+        self.items.sort();
+    }
+
+    fn min(&self) -> Maybe<&T> {
+        self.items.first()
+    }
+
+    fn max(&self) -> Maybe<&T> {
+        self.items.last()
+    }
+}
+
+// Bound with associated constraint
+fn sum_all<T: Add<Output = T> + Default>(items: &List<T>) -> T {
+    items.iter().fold(T.default(), |acc, x| acc + *x)
+}
+
+// Hash bound for map keys
+fn count_occurrences<T: Hash + Eq>(items: &List<T>) -> Map<&T, Int> {
+    let mut counts: Map<&T, Int> = Map.new();
+    for item in items {
+        *counts.entry(item).or_insert(0) += 1;
+    }
+    counts
+}
+
+// Display bound for string conversion
+fn to_string_list<T: Display>(items: &List<T>) -> List<Text> {
+    items.iter().map(|x| x.to_string()).collect()
+}
+
+fn main() {
+    // Using max with different Ord types
+    let max_int: Int = max(10, 20);
+    let max_text: Text = max("apple", "banana");
+    let max_float: Float = max(3.14, 2.71);
+
+    // Using triple with Clone types
+    let (a, b, c) = triple(42);
+    let (x, y, z) = triple("hello");
+
+    // Using default_if_none
+    let with_value: Int = default_if_none(Some(100));
+    let without_value: Int = default_if_none(None);
+
+    // Using SortedList
+    let mut sorted: SortedList<Int> = SortedList.new();
+    sorted.insert(30);
+    sorted.insert(10);
+    sorted.insert(20);
+
+    // Using sum_all
+    let numbers: List<Int> = [1, 2, 3, 4, 5];
+    let total: Int = sum_all(&numbers);
+
+    // Using count_occurrences
+    let items: List<Text> = ["a", "b", "a", "c", "a", "b"];
+    let counts = count_occurrences(&items);
+
+    // Using to_string_list
+    let nums: List<Int> = [1, 2, 3];
+    let strings: List<Text> = to_string_list(&nums);
+
+    // Assertions
+    assert(max_int == 20);
+    assert(max_text == "banana");
+    assert(max_float == 3.14);
+    assert(a == 42);
+    assert(b == 42);
+    assert(c == 42);
+    assert(with_value == 100);
+    assert(without_value == 0);  // Int.default() == 0
+    assert(*sorted.min().unwrap() == 10);
+    assert(*sorted.max().unwrap() == 30);
+    assert(total == 15);
+    assert(strings == ["1", "2", "3"]);
+}

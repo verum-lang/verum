@@ -1,0 +1,1386 @@
+// =============================================================================
+// vcs/specs/core/math/calculus_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, math, calculus, differentiation, integration, ode, root-finding, optimization
+// @description: Comprehensive tests for numerical analysis module including
+//               differentiation, integration, ODE solvers, root finding, and optimization.
+//
+// Coverage:
+// - Numerical differentiation: forward, backward, central, 5-point, richardson
+// - Automatic derivative, gradient, jacobian, hessian
+// - Integration: trapezoid, simpson, simpson38, romberg, gauss-legendre, adaptive
+// - ODE solvers: euler, heun, midpoint, rk4, rk45
+// - Root finding: bisection, newton_raphson, newton, secant, brent
+// - Optimization: gradient_descent, gradient_descent_bt, newton_optimize, bfgs
+//
+// Test Strategy:
+// - Known closed-form solutions for verification
+// - Error order verification (h vs h² vs h⁴)
+// - Convergence tests for iterative methods
+// - Edge cases: singularities, discontinuities
+// =============================================================================
+
+module specs.core.math.calculus_test;
+
+mount core.math.calculus.{
+    diff_forward, diff_backward, diff_central, diff2_central, diff_central_5pt,
+    optimal_h, derivative, richardson,
+    gradient, jacobian, hessian,
+    trapezoid, simpson, simpson38, romberg, gauss_legendre, adaptive_simpson,
+    euler, heun, midpoint, rk4, rk45,
+    ODESystem, ODESolution, RootResult, OptimResult,
+    bisection, newton_raphson, newton, secant, brent,
+    gradient_descent, gradient_descent_bt, newton_optimize, bfgs,
+};
+mount core.math.elementary.{abs, sin, cos, exp, sqrt, pow, log};
+mount core.math.constants.{E, EPSILON, PI};
+mount core.math.linalg.{Vector, Matrix};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// Vector construction helpers (no from_slice in stdlib)
+fn vec1(a: Float) -> Vector<Float> {
+    Vector.filled(1, a)
+}
+
+fn vec2(a: Float, b: Float) -> Vector<Float> {
+    let mut v = Vector.zeros(2);
+    v.set(0, a);
+    v.set(1, b);
+    v
+}
+
+// f(x) = x², f'(x) = 2x, f''(x) = 2
+fn square(x: Float) -> Float { x * x }
+
+// f(x) = x³, f'(x) = 3x², f''(x) = 6x
+fn cube(x: Float) -> Float { x * x * x }
+
+// f(x) = sin(x), f'(x) = cos(x), f''(x) = -sin(x)
+fn sine(x: Float) -> Float { sin(x) }
+
+// f(x) = e^x, f'(x) = e^x
+fn exponential(x: Float) -> Float { exp(x) }
+
+// f(x) = 1/x
+fn reciprocal(x: Float) -> Float { 1.0 / x }
+
+// ODE: dy/dt = y  =>  y(t) = y0 * e^t
+fn exp_ode(t: Float, y: &Vector<Float>) -> Vector<Float> {
+    y.clone()
+}
+
+// ODE: dy/dt = -y  =>  y(t) = y0 * e^(-t)
+fn decay_ode(t: Float, y: &Vector<Float>) -> Vector<Float> {
+    let mut result = y.clone();
+    let neg_one: Float = 0.0 - 1.0;
+    result.scale(neg_one);
+    result
+}
+
+// Scalar function for optimization: f(x) = x[0]² + x[1]²
+fn sphere(x: &Vector<Float>) -> Float {
+    x.get(0) * x.get(0) + x.get(1) * x.get(1)
+}
+
+// Gradient of sphere: [2*x[0], 2*x[1]]
+fn sphere_grad(x: &Vector<Float>) -> Vector<Float> {
+    let mut g = Vector.zeros(2);
+    g.set(0, 2.0 * x.get(0));
+    g.set(1, 2.0 * x.get(1));
+    g
+}
+
+// Hessian of sphere: [[2, 0], [0, 2]]
+fn sphere_hess(x: &Vector<Float>) -> Matrix<Float> {
+    let mut h = Matrix.zeros(2, 2);
+    h.set(0, 0, 2.0);
+    h.set(1, 1, 2.0);
+    h
+}
+
+// Rosenbrock function: f(x,y) = (1-x)² + 100(y-x²)²
+fn rosenbrock(x: &Vector<Float>) -> Float {
+    let a = 1.0 - x.get(0);
+    let b = x.get(1) - x.get(0) * x.get(0);
+    a * a + 100.0 * b * b
+}
+
+// Rosenbrock gradient
+fn rosenbrock_grad(x: &Vector<Float>) -> Vector<Float> {
+    let x0 = x.get(0);
+    let x1 = x.get(1);
+    let mut g = Vector.zeros(2);
+    g.set(0, -2.0 * (1.0 - x0) - 400.0 * x0 * (x1 - x0 * x0));
+    g.set(1, 200.0 * (x1 - x0 * x0));
+    g
+}
+
+// =============================================================================
+// Numerical Differentiation Tests
+// =============================================================================
+
+@test
+fn test_diff_forward_square() {
+    // f(x) = x², f'(1) = 2
+    let result = diff_forward(square, 1.0, 0.001);
+    assert(abs(result - 2.0) < 0.01, "forward diff of x² at 1 should be ~2");
+}
+
+@test
+fn test_diff_forward_exp() {
+    // f(x) = e^x, f'(0) = 1
+    let result = diff_forward(exponential, 0.0, 0.001);
+    assert(abs(result - 1.0) < 0.01, "forward diff of e^x at 0 should be ~1");
+}
+
+@test
+fn test_diff_backward_square() {
+    // f(x) = x², f'(1) = 2
+    let result = diff_backward(square, 1.0, 0.001);
+    assert(abs(result - 2.0) < 0.01, "backward diff of x² at 1 should be ~2");
+}
+
+@test
+fn test_diff_central_square() {
+    // Central difference is more accurate: O(h²) vs O(h)
+    let result = diff_central(square, 1.0, 0.001);
+    assert(abs(result - 2.0) < 1e-6, "central diff of x² at 1 should be very close to 2");
+}
+
+@test
+fn test_diff_central_sin() {
+    // f(x) = sin(x), f'(0) = cos(0) = 1
+    let result = diff_central(sine, 0.0, 0.001);
+    assert(abs(result - 1.0) < 1e-6, "central diff of sin at 0 should be ~1");
+}
+
+@test
+fn test_diff_central_sin_at_pi_half() {
+    // f'(π/2) = cos(π/2) = 0
+    let result = diff_central(sine, PI / 2.0, 0.001);
+    assert(abs(result) < 1e-5, "central diff of sin at π/2 should be ~0");
+}
+
+@test
+fn test_diff_central_exp_at_1() {
+    // f'(1) = e
+    let result = diff_central(exponential, 1.0, 0.001);
+    assert(abs(result - E) < 1e-5, "central diff of e^x at 1 should be ~e");
+}
+
+@test
+fn test_diff2_central_square() {
+    // f''(x) = 2 for all x
+    let result = diff2_central(square, 1.0, 0.01);
+    assert(abs(result - 2.0) < 0.01, "second derivative of x² should be 2");
+}
+
+@test
+fn test_diff2_central_cube() {
+    // f(x) = x³, f''(x) = 6x, f''(1) = 6
+    let result = diff2_central(cube, 1.0, 0.01);
+    assert(abs(result - 6.0) < 0.1, "second derivative of x³ at 1 should be 6");
+}
+
+@test
+fn test_diff2_central_sin() {
+    // f''(x) = -sin(x), f''(π/4) = -sin(π/4) ≈ -0.7071
+    let sin_val: Float = sin(PI / 4.0);
+    let expected = 0.0 - sin_val;
+    let result = diff2_central(sine, PI / 4.0, 0.01);
+    assert(abs(result - expected) < 0.01, "second derivative of sin at π/4");
+}
+
+@test
+fn test_diff_central_5pt_square() {
+    // 5-point stencil should be O(h⁴) accurate
+    let result = diff_central_5pt(square, 1.0, 0.1);
+    assert(abs(result - 2.0) < 1e-8, "5-point stencil of x² should be very accurate");
+}
+
+@test
+fn test_diff_central_5pt_exp() {
+    // 5-point stencil of e^x at x=1
+    let result = diff_central_5pt(exponential, 1.0, 0.1);
+    assert(abs(result - E) < 1e-7, "5-point stencil of e^x at 1 should be very accurate");
+}
+
+@test
+fn test_derivative_auto_step() {
+    // derivative() picks optimal h automatically
+    let result = derivative(square, 3.0);
+    assert(abs(result - 6.0) < 1e-6, "auto derivative of x² at 3 should be 6");
+}
+
+@test
+fn test_derivative_sin() {
+    let result = derivative(sine, PI / 3.0);
+    let expected = cos(PI / 3.0);
+    assert(abs(result - expected) < 1e-6, "auto derivative of sin at π/3");
+}
+
+@test
+fn test_richardson_extrapolation() {
+    // Richardson extrapolation should give very high accuracy
+    let result = richardson(square, 2.0, 0.1, 4);
+    assert(abs(result - 4.0) < 1e-10, "Richardson extrapolation for x² at 2 should be 4");
+}
+
+@test
+fn test_gradient_2d() {
+    // f(x,y) = x² + y², ∇f = [2x, 2y]
+    let x = vec2(3.0, 4.0);
+    let grad = gradient(sphere, &x, 0.001);
+    assert(abs(grad.get(0) - 6.0) < 0.01, "gradient x-component should be 6");
+    assert(abs(grad.get(1) - 8.0) < 0.01, "gradient y-component should be 8");
+}
+
+@test
+fn test_gradient_at_origin() {
+    // ∇f(0,0) = [0, 0]
+    let x = vec2(0.0, 0.0);
+    let grad = gradient(sphere, &x, 0.001);
+    assert(abs(grad.get(0)) < 0.01, "gradient at origin x should be 0");
+    assert(abs(grad.get(1)) < 0.01, "gradient at origin y should be 0");
+}
+
+// Helper for jacobian test
+fn linear_map(x: &Vector<Float>) -> Vector<Float> {
+    // f([x1,x2]) = [2*x1 + x2, x1 - x2]
+    let mut result = Vector.zeros(2);
+    result.set(0, 2.0 * x.get(0) + x.get(1));
+    result.set(1, x.get(0) - x.get(1));
+    result
+}
+
+@test
+fn test_jacobian_linear() {
+    // Jacobian of linear map should be [[2, 1], [1, -1]]
+    let x = vec2(1.0, 1.0);
+    let jac = jacobian(linear_map, &x, 0.001);
+    assert(abs(jac.get(0, 0) - 2.0) < 0.01, "J[0,0] should be 2");
+    assert(abs(jac.get(0, 1) - 1.0) < 0.01, "J[0,1] should be 1");
+    assert(abs(jac.get(1, 0) - 1.0) < 0.01, "J[1,0] should be 1");
+    assert(abs(jac.get(1, 1) + 1.0) < 0.01, "J[1,1] should be -1");
+}
+
+@test
+fn test_hessian_sphere() {
+    // Hessian of x² + y² is [[2, 0], [0, 2]]
+    let x = vec2(1.0, 2.0);
+    let hess = hessian(sphere, &x, 0.01);
+    assert(abs(hess.get(0, 0) - 2.0) < 0.1, "H[0,0] should be 2");
+    assert(abs(hess.get(0, 1)) < 0.1, "H[0,1] should be 0");
+    assert(abs(hess.get(1, 0)) < 0.1, "H[1,0] should be 0");
+    assert(abs(hess.get(1, 1) - 2.0) < 0.1, "H[1,1] should be 2");
+}
+
+@test
+fn test_hessian_symmetric() {
+    // Hessian should always be symmetric
+    let x = vec2(2.0, 3.0);
+    let hess = hessian(rosenbrock, &x, 0.01);
+    assert(abs(hess.get(0, 1) - hess.get(1, 0)) < 0.1, "Hessian should be symmetric");
+}
+
+// =============================================================================
+// Numerical Integration Tests
+// =============================================================================
+
+@test
+fn test_trapezoid_linear() {
+    // ∫₀¹ x dx = 0.5 (exact for linear functions)
+    let result = trapezoid(|x| x, 0.0, 1.0, 100);
+    assert(abs(result - 0.5) < 1e-10, "trapezoid of x on [0,1] should be 0.5");
+}
+
+@test
+fn test_trapezoid_quadratic() {
+    // ∫₀¹ x² dx = 1/3
+    let result = trapezoid(square, 0.0, 1.0, 1000);
+    assert(abs(result - 1.0 / 3.0) < 1e-4, "trapezoid of x² on [0,1] should be ~1/3");
+}
+
+@test
+fn test_trapezoid_sin() {
+    // ∫₀^π sin(x) dx = 2
+    let result = trapezoid(sine, 0.0, PI, 1000);
+    assert(abs(result - 2.0) < 1e-4, "trapezoid of sin on [0,π] should be 2");
+}
+
+@test
+fn test_simpson_quadratic() {
+    // Simpson's rule is exact for polynomials up to degree 3
+    let result = simpson(square, 0.0, 1.0, 4);
+    assert(abs(result - 1.0 / 3.0) < 1e-10, "Simpson of x² should be exact");
+}
+
+@test
+fn test_simpson_cubic() {
+    // ∫₀¹ x³ dx = 1/4 (Simpson exact for cubics)
+    let result = simpson(cube, 0.0, 1.0, 4);
+    assert(abs(result - 0.25) < 1e-10, "Simpson of x³ should be exact");
+}
+
+@test
+fn test_simpson_sin() {
+    // ∫₀^π sin(x) dx = 2
+    let result = simpson(sine, 0.0, PI, 100);
+    assert(abs(result - 2.0) < 1e-8, "Simpson of sin on [0,π] should be very accurate");
+}
+
+@test
+fn test_simpson38_quadratic() {
+    // ∫₀¹ x² dx = 1/3
+    let result = simpson38(square, 0.0, 1.0, 6);
+    assert(abs(result - 1.0 / 3.0) < 1e-10, "Simpson 3/8 of x² should be exact");
+}
+
+@test
+fn test_simpson38_sin() {
+    // ∫₀^π sin(x) dx = 2
+    let result = simpson38(sine, 0.0, PI, 99);
+    assert(abs(result - 2.0) < 1e-6, "Simpson 3/8 of sin on [0,π]");
+}
+
+@test
+fn test_romberg_convergence() {
+    // Romberg should converge quickly for smooth functions
+    let result = romberg(exponential, 0.0, 1.0, 10, 1e-12);
+    let expected = E - 1.0;  // ∫₀¹ e^x dx = e - 1
+    assert(abs(result - expected) < 1e-10, "Romberg of e^x on [0,1] should be e-1");
+}
+
+@test
+fn test_romberg_sin() {
+    let result = romberg(sine, 0.0, PI, 10, 1e-12);
+    assert(abs(result - 2.0) < 1e-10, "Romberg of sin on [0,π] should converge to 2");
+}
+
+@test
+fn test_gauss_legendre_2pt() {
+    // 2-point GL is exact for polynomials up to degree 3
+    let result = gauss_legendre(cube, -1.0, 1.0, 2);
+    // ∫₋₁¹ x³ dx = 0 (odd function)
+    assert(abs(result) < 1e-10, "GL 2-point of x³ on [-1,1] should be 0");
+}
+
+@test
+fn test_gauss_legendre_3pt() {
+    // 3-point GL on ∫₀¹ x² dx = 1/3
+    let result = gauss_legendre(square, 0.0, 1.0, 3);
+    assert(abs(result - 1.0 / 3.0) < 1e-10, "GL 3-point of x² on [0,1]");
+}
+
+@test
+fn test_gauss_legendre_5pt_exp() {
+    // 5-point GL should handle e^x well
+    let result = gauss_legendre(exponential, 0.0, 1.0, 5);
+    let expected = E - 1.0;
+    assert(abs(result - expected) < 1e-8, "GL 5-point of e^x on [0,1]");
+}
+
+@test
+fn test_adaptive_simpson_exp() {
+    // Adaptive Simpson with tight tolerance
+    let result = adaptive_simpson(exponential, 0.0, 1.0, 1e-10, 20);
+    let expected = E - 1.0;
+    assert(abs(result - expected) < 1e-8, "Adaptive Simpson of e^x");
+}
+
+@test
+fn test_adaptive_simpson_oscillatory() {
+    // ∫₀^2π sin(x) dx = 0 (complete period)
+    let result = adaptive_simpson(sine, 0.0, 2.0 * PI, 1e-8, 20);
+    assert(abs(result) < 1e-6, "Adaptive Simpson of sin over full period should be 0");
+}
+
+@test
+fn test_integration_reciprocal() {
+    // ∫₁² 1/x dx = ln(2)
+    let expected = log(2.0);
+    let result = simpson(reciprocal, 1.0, 2.0, 100);
+    assert(abs(result - expected) < 1e-8, "∫ 1/x dx from 1 to 2 = ln(2)");
+}
+
+// =============================================================================
+// ODE Solver Tests
+// =============================================================================
+
+@test
+fn test_euler_exponential() {
+    // dy/dt = y, y(0) = 1 => y(t) = e^t
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = euler(exp_ode, &y0, 0.0, 1.0, 0.001);
+    let last = sol[sol.len() - 1];
+    let y_final = last.1.get(0);
+    // Euler is first-order, so moderate accuracy expected
+    assert(abs(y_final - E) < 0.01, "Euler: y(1) should be ~e");
+}
+
+@test
+fn test_heun_exponential() {
+    // Heun's method is second-order, should be more accurate
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = heun(exp_ode, &y0, 0.0, 1.0, 0.01);
+    let last = sol[sol.len() - 1];
+    let y_final = last.1.get(0);
+    assert(abs(y_final - E) < 0.001, "Heun: y(1) should be ~e with better accuracy");
+}
+
+@test
+fn test_midpoint_exponential() {
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = midpoint(exp_ode, &y0, 0.0, 1.0, 0.01);
+    let last = sol[sol.len() - 1];
+    let y_final = last.1.get(0);
+    assert(abs(y_final - E) < 0.001, "Midpoint: y(1) should be ~e");
+}
+
+@test
+fn test_rk4_exponential() {
+    // RK4 is fourth-order, should be very accurate
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = rk4(exp_ode, &y0, 0.0, 1.0, 0.01);
+    let last = sol[sol.len() - 1];
+    let y_final = last.1.get(0);
+    assert(abs(y_final - E) < 1e-8, "RK4: y(1) should be very close to e");
+}
+
+@test
+fn test_rk4_decay() {
+    // dy/dt = -y, y(0) = 1 => y(t) = e^(-t)
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = rk4(decay_ode, &y0, 0.0, 1.0, 0.01);
+    let last = sol[sol.len() - 1];
+    let y_final = last.1.get(0);
+    let neg_one: Float = 0.0 - 1.0;
+    let expected = exp(neg_one);
+    assert(abs(y_final - expected) < 1e-8, "RK4 decay: y(1) should be e^(-1)");
+}
+
+@test
+fn test_rk4_trajectory_length() {
+    // Check that trajectory includes start and end
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = rk4(exp_ode, &y0, 0.0, 1.0, 0.1);
+    assert(sol.len() >= 11, "RK4 should produce at least 11 trajectory points");
+    // First point should be initial condition
+    assert(abs(sol[0].0 - 0.0) < EPSILON, "First time should be 0");
+    assert(abs(sol[0].1.get(0) - 1.0) < EPSILON, "First state should be 1");
+}
+
+@test
+fn test_rk45_exponential() {
+    // Adaptive RK45 should achieve good accuracy automatically
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = rk45(exp_ode, &y0, 0.0, 1.0, 1e-8);
+    let last = sol[sol.len() - 1];
+    let y_final = last.1.get(0);
+    assert(abs(y_final - E) < 1e-6, "RK45: y(1) should be very close to e");
+}
+
+@test
+fn test_rk45_adaptive_steps() {
+    // RK45 should use fewer steps than fixed-step methods for smooth ODEs
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = rk45(exp_ode, &y0, 0.0, 1.0, 1e-6);
+    // Adaptive method should need fewer than 100 steps for smooth exponential
+    assert(sol.len() < 200, "RK45 should use adaptive stepping");
+    assert(sol.len() > 2, "RK45 should produce multiple points");
+}
+
+@test
+fn test_euler_vs_rk4_accuracy() {
+    // RK4 should be orders of magnitude more accurate than Euler with same step
+    let y0 = vec1(1.0);
+    let h = 0.1;
+    let sol_euler: List<(Float, Vector<Float>)> = euler(exp_ode, &y0, 0.0, 1.0, h);
+    let sol_rk4: List<(Float, Vector<Float>)> = rk4(exp_ode, &y0, 0.0, 1.0, h);
+
+    let err_euler: Float = abs(sol_euler[sol_euler.len() - 1].1.get(0) - E);
+    let err_rk4: Float = abs(sol_rk4[sol_rk4.len() - 1].1.get(0) - E);
+
+    assert(err_rk4 < err_euler / 100.0, "RK4 should be much more accurate than Euler");
+}
+
+// =============================================================================
+// Root Finding Tests
+// =============================================================================
+
+@test
+fn test_bisection_sqrt2() {
+    // Find root of x² - 2 = 0 => x = √2
+    let result = bisection(|x| x * x - 2.0, 1.0, 2.0, 1e-10, 100);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - sqrt(2.0)) < 1e-9, "bisection should find √2");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "bisection should converge for x²-2 on [1,2]");
+        }
+    }
+}
+
+@test
+fn test_bisection_sin_root() {
+    // sin(x) = 0 near π
+    let result = bisection(sine, 3.0, 3.3, 1e-10, 100);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - PI) < 1e-9, "bisection should find π");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "bisection should converge for sin near π");
+        }
+    }
+}
+
+@test
+fn test_bisection_no_bracket() {
+    // f(a) and f(b) have same sign - should return NoConvergence
+    let result = bisection(square, 1.0, 2.0, 1e-10, 100);
+    match result {
+        RootResult.Found(_) => {
+            assert(false, "bisection should not find root when no bracket");
+        }
+        RootResult.NoConvergence(_) => {
+            // Expected
+        }
+    }
+}
+
+@test
+fn test_newton_raphson_sqrt2() {
+    // f(x) = x²-2, f'(x) = 2x
+    let result = newton_raphson(
+        |x| x * x - 2.0,
+        |x| 2.0 * x,
+        1.5, 1e-12, 50,
+    );
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - sqrt(2.0)) < 1e-11, "Newton-Raphson should find √2");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Newton-Raphson should converge");
+        }
+    }
+}
+
+@test
+fn test_newton_raphson_cubic() {
+    // f(x) = x³ - 1, root at x = 1
+    let result = newton_raphson(
+        |x| x * x * x - 1.0,
+        |x| 3.0 * x * x,
+        0.5, 1e-12, 50,
+    );
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - 1.0) < 1e-10, "Newton-Raphson should find cube root of 1");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Newton-Raphson should converge for x³-1");
+        }
+    }
+}
+
+@test
+fn test_newton_auto_diff() {
+    // Newton with automatic differentiation
+    let result = newton(|x| x * x - 2.0, 1.5, 1e-10, 50);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - sqrt(2.0)) < 1e-8, "Newton (auto) should find √2");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Newton (auto) should converge");
+        }
+    }
+}
+
+@test
+fn test_secant_sqrt2() {
+    let result = secant(|x| x * x - 2.0, 1.0, 2.0, 1e-10, 50);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - sqrt(2.0)) < 1e-9, "Secant should find √2");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Secant should converge");
+        }
+    }
+}
+
+@test
+fn test_secant_exp_root() {
+    // e^x - 2 = 0 => x = ln(2)
+    let result = secant(|x| exp(x) - 2.0, 0.0, 1.0, 1e-10, 50);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - log(2.0)) < 1e-9, "Secant should find ln(2)");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Secant should converge for e^x-2");
+        }
+    }
+}
+
+@test
+fn test_brent_sqrt2() {
+    let result = brent(|x| x * x - 2.0, 1.0, 2.0, 1e-12, 100);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - sqrt(2.0)) < 1e-10, "Brent should find √2");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Brent should converge");
+        }
+    }
+}
+
+@test
+fn test_brent_sin_root() {
+    let result = brent(sine, 3.0, 3.3, 1e-12, 100);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - PI) < 1e-10, "Brent should find π");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Brent should converge for sin near π");
+        }
+    }
+}
+
+@test
+fn test_brent_no_bracket() {
+    let result = brent(square, 1.0, 2.0, 1e-10, 100);
+    match result {
+        RootResult.Found(_) => {
+            assert(false, "Brent should not find root when no bracket");
+        }
+        RootResult.NoConvergence(_) => {
+            // Expected
+        }
+    }
+}
+
+@test
+fn test_root_finders_agree() {
+    // All root finders should give same result for well-behaved problem
+    let f = |x| x * x - 3.0;
+    let expected = sqrt(3.0);
+    let tol = 1e-8;
+
+    let r1 = bisection(f, 1.0, 2.0, tol, 100);
+    let r2 = secant(f, 1.0, 2.0, tol, 50);
+    let r3 = brent(f, 1.0, 2.0, tol, 100);
+
+    let x1 = match r1 { RootResult.Found(x) => x, _ => 0.0 };
+    let x2 = match r2 { RootResult.Found(x) => x, _ => 0.0 };
+    let x3 = match r3 { RootResult.Found(x) => x, _ => 0.0 };
+
+    assert(abs(x1 - expected) < tol, "bisection result");
+    assert(abs(x2 - expected) < tol, "secant result");
+    assert(abs(x3 - expected) < tol, "brent result");
+}
+
+// =============================================================================
+// Optimization Tests
+// =============================================================================
+
+@test
+fn test_gradient_descent_sphere() {
+    // Minimize x² + y², starting from (5, 5)
+    let x0 = vec2(5.0, 5.0);
+    let result = gradient_descent(sphere, sphere_grad, &x0, 0.1, 1e-8, 1000);
+    assert(result.converged, "GD should converge on sphere function");
+    assert(abs(result.x.get(0)) < 1e-4, "x should be near 0");
+    assert(abs(result.x.get(1)) < 1e-4, "y should be near 0");
+    assert(abs(result.f_val) < 1e-8, "minimum should be near 0");
+}
+
+@test
+fn test_gradient_descent_bt_sphere() {
+    // Backtracking line search should also converge
+    let x0 = vec2(5.0, 5.0);
+    let result = gradient_descent_bt(sphere, sphere_grad, &x0, 1e-8, 1000);
+    assert(result.converged, "GD-BT should converge on sphere");
+    assert(abs(result.x.get(0)) < 1e-4, "x near 0");
+    assert(abs(result.x.get(1)) < 1e-4, "y near 0");
+}
+
+@test
+fn test_newton_optimize_sphere() {
+    // Newton's method should converge in very few iterations for quadratic
+    let x0 = vec2(5.0, 5.0);
+    let result = newton_optimize(sphere, sphere_grad, sphere_hess, &x0, 1e-10, 100);
+    assert(result.converged, "Newton should converge on sphere");
+    assert(abs(result.x.get(0)) < 1e-8, "x near 0");
+    assert(abs(result.x.get(1)) < 1e-8, "y near 0");
+    // For a quadratic, Newton should converge in exactly 1 iteration
+    assert(result.iterations <= 2, "Newton should converge quickly on quadratic");
+}
+
+@test
+fn test_bfgs_sphere() {
+    let x0 = vec2(5.0, 5.0);
+    let result = bfgs(sphere, sphere_grad, &x0, 1e-8, 1000);
+    assert(result.converged, "BFGS should converge on sphere");
+    assert(abs(result.x.get(0)) < 1e-4, "x near 0");
+    assert(abs(result.x.get(1)) < 1e-4, "y near 0");
+}
+
+@test
+fn test_bfgs_rosenbrock() {
+    // Rosenbrock is harder - minimum at (1, 1)
+    let x0 = vec2(0.0, 0.0);
+    let result = bfgs(rosenbrock, rosenbrock_grad, &x0, 1e-6, 5000);
+    // BFGS should get close even on Rosenbrock
+    assert(abs(result.x.get(0) - 1.0) < 0.1, "BFGS Rosenbrock x near 1");
+    assert(abs(result.x.get(1) - 1.0) < 0.1, "BFGS Rosenbrock y near 1");
+}
+
+@test
+fn test_optim_result_fields() {
+    // Verify OptimResult fields are accessible
+    let x0 = vec2(1.0, 1.0);
+    let result = gradient_descent(sphere, sphere_grad, &x0, 0.1, 1e-6, 100);
+    let _ = result.x;
+    let _ = result.f_val;
+    let _ = result.converged;
+    let _ = result.iterations;
+    assert(result.iterations > 0, "Should take at least 1 iteration");
+}
+
+@test
+fn test_gradient_descent_step_too_large() {
+    // Very large step size might not converge (but shouldn't crash)
+    let x0 = vec2(1.0, 1.0);
+    let result = gradient_descent(sphere, sphere_grad, &x0, 100.0, 1e-8, 10);
+    // With step size 100 and only 10 iterations, likely won't converge
+    // but the function should still return a valid result
+    let _ = result.f_val;
+}
+
+// =============================================================================
+// Type and Variant Tests
+// =============================================================================
+
+@test
+fn test_root_result_found() {
+    let result = RootResult.Found(1.414);
+    match result {
+        RootResult.Found(x) => assert(abs(x - 1.414) < 0.001, "Found should contain value"),
+        _ => assert(false, "Should be Found"),
+    }
+}
+
+@test
+fn test_root_result_no_convergence() {
+    let result = RootResult.NoConvergence(1.5);
+    match result {
+        RootResult.NoConvergence(x) => assert(abs(x - 1.5) < 0.001, "Should contain last approx"),
+        _ => assert(false, "Should be NoConvergence"),
+    }
+}
+
+@test
+fn test_optim_result_construction() {
+    let x = vec2(0.0, 0.0);
+    let result = OptimResult {
+        x,
+        f_val: 0.0,
+        converged: true,
+        iterations: 42,
+    };
+    assert(result.converged == true, "converged field");
+    assert(result.iterations == 42, "iterations field");
+    assert(abs(result.f_val) < EPSILON, "f_val field");
+}
+
+// =============================================================================
+// Error Order Verification Tests
+// =============================================================================
+
+@test
+fn test_forward_diff_error_order() {
+    // Forward difference error should scale as O(h)
+    let err_h1: Float = abs(diff_forward(square, 1.0, 0.1) - 2.0);
+    let err_h2: Float = abs(diff_forward(square, 1.0, 0.01) - 2.0);
+    let ratio = err_h1 / err_h2;
+    // For O(h), ratio should be approximately 10
+    assert(ratio > 5.0 && ratio < 20.0, "forward diff should be O(h)");
+}
+
+@test
+fn test_central_diff_error_order() {
+    // Central difference error should scale as O(h²)
+    let err_h1: Float = abs(diff_central(square, 1.0, 0.1) - 2.0);
+    let err_h2: Float = abs(diff_central(square, 1.0, 0.01) - 2.0);
+    let ratio = err_h1 / err_h2;
+    // For O(h²), ratio should be approximately 100
+    assert(ratio > 50.0 && ratio < 200.0, "central diff should be O(h²)");
+}
+
+@test
+fn test_trapezoid_error_order() {
+    // Trapezoidal rule error should scale as O(h²) = O(1/n²)
+    let err_n100: Float = abs(trapezoid(sine, 0.0, PI, 100) - 2.0);
+    let err_n200: Float = abs(trapezoid(sine, 0.0, PI, 200) - 2.0);
+    let ratio = err_n100 / err_n200;
+    // For O(1/n²), doubling n reduces error by ~4
+    assert(ratio > 3.0 && ratio < 5.0, "trapezoid should be O(h²)");
+}
+
+@test
+fn test_simpson_error_order() {
+    // Simpson's error should scale as O(h⁴) = O(1/n⁴)
+    let err_n10: Float = abs(simpson(sine, 0.0, PI, 10) - 2.0);
+    let err_n20: Float = abs(simpson(sine, 0.0, PI, 20) - 2.0);
+    let ratio = err_n10 / err_n20;
+    // For O(1/n⁴), doubling n reduces error by ~16
+    assert(ratio > 10.0 && ratio < 25.0, "Simpson should be O(h⁴)");
+}
+
+// =============================================================================
+// Additional Differentiation Tests
+// =============================================================================
+
+@test
+fn test_optimal_h_at_zero() {
+    // optimal_h should return a small positive value based on machine epsilon
+    let h = optimal_h(0.0);
+    assert(h > 0.0, "optimal_h should be positive");
+    assert(h < 0.01, "optimal_h should be small");
+}
+
+@test
+fn test_optimal_h_at_large_x() {
+    // optimal_h should scale with |x|
+    let h_small = optimal_h(1.0);
+    let h_large = optimal_h(1000.0);
+    assert(h_large > h_small, "optimal_h should scale with |x|");
+}
+
+@test
+fn test_optimal_h_symmetric() {
+    // optimal_h(x) should equal optimal_h(-x) since it depends on abs(x)
+    let h_pos = optimal_h(5.0);
+    let h_neg = optimal_h(0.0 - 5.0);
+    assert(abs(h_pos - h_neg) < EPSILON, "optimal_h should be symmetric");
+}
+
+@test
+fn test_diff_central_cube_at_zero() {
+    // f(x) = x³, f'(0) = 0
+    let result = diff_central(cube, 0.0, 0.001);
+    assert(abs(result) < 1e-6, "derivative of x³ at 0 should be 0");
+}
+
+@test
+fn test_diff_central_cube_at_2() {
+    // f(x) = x³, f'(2) = 12
+    let result = diff_central(cube, 2.0, 0.001);
+    assert(abs(result - 12.0) < 1e-4, "derivative of x³ at 2 should be 12");
+}
+
+@test
+fn test_diff2_central_exp() {
+    // f(x) = e^x, f''(x) = e^x, f''(1) = e
+    let result = diff2_central(exponential, 1.0, 0.01);
+    assert(abs(result - E) < 0.01, "second derivative of e^x at 1 should be e");
+}
+
+@test
+fn test_diff2_central_exp_at_zero() {
+    // f''(0) = e^0 = 1
+    let result = diff2_central(exponential, 0.0, 0.01);
+    assert(abs(result - 1.0) < 0.01, "second derivative of e^x at 0 should be 1");
+}
+
+@test
+fn test_diff_forward_sin() {
+    // f'(0) = cos(0) = 1
+    let result = diff_forward(sine, 0.0, 0.001);
+    assert(abs(result - 1.0) < 0.01, "forward diff of sin at 0 should be ~1");
+}
+
+@test
+fn test_diff_backward_exp() {
+    // f'(0) = 1
+    let result = diff_backward(exponential, 0.0, 0.001);
+    assert(abs(result - 1.0) < 0.01, "backward diff of e^x at 0 should be ~1");
+}
+
+@test
+fn test_diff_central_5pt_sin() {
+    // 5-point stencil of sin at π/3, f'(π/3) = cos(π/3) = 0.5
+    let result = diff_central_5pt(sine, PI / 3.0, 0.1);
+    assert(abs(result - 0.5) < 1e-7, "5-point stencil of sin at pi/3 should be 0.5");
+}
+
+@test
+fn test_richardson_sin() {
+    // Richardson extrapolation for sin at 0, f'(0) = 1
+    let result = richardson(sine, 0.0, 0.1, 4);
+    assert(abs(result - 1.0) < 1e-10, "Richardson for sin at 0 should be 1");
+}
+
+@test
+fn test_derivative_exp_at_zero() {
+    // Auto derivative of e^x at 0 = 1
+    let result = derivative(exponential, 0.0);
+    assert(abs(result - 1.0) < 1e-6, "auto derivative of e^x at 0 should be 1");
+}
+
+// =============================================================================
+// Additional Multi-variable Tests
+// =============================================================================
+
+@test
+fn test_gradient_rosenbrock_at_min() {
+    // Gradient of Rosenbrock at (1,1) should be [0, 0]
+    let x = vec2(1.0, 1.0);
+    let grad = gradient(rosenbrock, &x, 0.0001);
+    assert(abs(grad.get(0)) < 0.01, "Rosenbrock gradient x at minimum should be ~0");
+    assert(abs(grad.get(1)) < 0.01, "Rosenbrock gradient y at minimum should be ~0");
+}
+
+@test
+fn test_gradient_rosenbrock_at_origin() {
+    // At (0,0): grad = [-2*(1-0) - 400*0*(0-0), 200*(0-0)] = [-2, 0]
+    let x = vec2(0.0, 0.0);
+    let grad = gradient(rosenbrock, &x, 0.0001);
+    assert(abs(grad.get(0) + 2.0) < 0.1, "Rosenbrock gradient x at origin should be ~-2");
+    assert(abs(grad.get(1)) < 0.1, "Rosenbrock gradient y at origin should be ~0");
+}
+
+@test
+fn test_hessian_rosenbrock_at_min() {
+    // Hessian of Rosenbrock at (1,1):
+    // H = [[2 + 800*1 - 400*(1-3*1), -400*1], [-400*1, 200]]
+    //   = [[802, -400], [-400, 200]]
+    let x = vec2(1.0, 1.0);
+    let hess = hessian(rosenbrock, &x, 0.005);
+    assert(abs(hess.get(0, 0) - 802.0) < 5.0, "H[0,0] at Rosenbrock minimum should be ~802");
+    assert(abs(hess.get(0, 1) + 400.0) < 5.0, "H[0,1] at Rosenbrock minimum should be ~-400");
+    assert(abs(hess.get(1, 0) + 400.0) < 5.0, "H[1,0] at Rosenbrock minimum should be ~-400");
+    assert(abs(hess.get(1, 1) - 200.0) < 5.0, "H[1,1] at Rosenbrock minimum should be ~200");
+}
+
+@test
+fn test_jacobian_identity() {
+    // Jacobian of identity map f(x) = x should be identity matrix
+    let id_map = |x: &Vector<Float>| -> Vector<Float> { x.clone() };
+    let x = vec2(3.0, 7.0);
+    let jac = jacobian(id_map, &x, 0.001);
+    assert(abs(jac.get(0, 0) - 1.0) < 0.01, "J[0,0] of identity should be 1");
+    assert(abs(jac.get(0, 1)) < 0.01, "J[0,1] of identity should be 0");
+    assert(abs(jac.get(1, 0)) < 0.01, "J[1,0] of identity should be 0");
+    assert(abs(jac.get(1, 1) - 1.0) < 0.01, "J[1,1] of identity should be 1");
+}
+
+// =============================================================================
+// Additional Integration Tests
+// =============================================================================
+
+@test
+fn test_trapezoid_constant() {
+    // Integral of constant function: integral from 0 to 1 of 5 dx = 5
+    let result = trapezoid(|x| 5.0, 0.0, 1.0, 10);
+    assert(abs(result - 5.0) < 1e-10, "trapezoid of constant 5 on [0,1] should be 5");
+}
+
+@test
+fn test_simpson_exp() {
+    // Integral of e^x from 0 to 1 = e - 1
+    let expected = E - 1.0;
+    let result = simpson(exponential, 0.0, 1.0, 100);
+    assert(abs(result - expected) < 1e-10, "Simpson of e^x on [0,1] should be e-1");
+}
+
+@test
+fn test_simpson38_exp() {
+    // Integral of e^x from 0 to 1 = e - 1
+    let expected = E - 1.0;
+    let result = simpson38(exponential, 0.0, 1.0, 99);
+    assert(abs(result - expected) < 1e-6, "Simpson 3/8 of e^x on [0,1]");
+}
+
+@test
+fn test_romberg_vs_gauss_legendre() {
+    // Both should agree on integral of e^x from 0 to 1
+    let expected = E - 1.0;
+    let result_r = romberg(exponential, 0.0, 1.0, 10, 1e-12);
+    let result_g = gauss_legendre(exponential, 0.0, 1.0, 5);
+    assert(abs(result_r - expected) < 1e-8, "Romberg should be accurate");
+    assert(abs(result_g - expected) < 1e-8, "GL should be accurate");
+    assert(abs(result_r - result_g) < 1e-6, "Romberg and GL should agree");
+}
+
+@test
+fn test_gauss_legendre_default() {
+    // Using n != 2,3,5 defaults to 5-point
+    let result = gauss_legendre(square, 0.0, 1.0, 7);
+    assert(abs(result - 1.0 / 3.0) < 1e-8, "GL default (5-point) of x²");
+}
+
+@test
+fn test_adaptive_simpson_tight_tol() {
+    // With very tight tolerance, adaptive should refine more
+    let result = adaptive_simpson(sine, 0.0, PI, 1e-12, 30);
+    assert(abs(result - 2.0) < 1e-10, "adaptive Simpson with tight tol should be very accurate");
+}
+
+@test
+fn test_integration_odd_function_symmetry() {
+    // Integral of x³ from -1 to 1 = 0 (odd function over symmetric interval)
+    let result = simpson(cube, -1.0, 1.0, 4);
+    assert(abs(result) < 1e-10, "integral of odd function on symmetric interval should be 0");
+}
+
+@test
+fn test_integration_even_function_symmetry() {
+    // Integral of x² from -1 to 1 = 2/3 (even function, double half-range)
+    let result = simpson(square, -1.0, 1.0, 100);
+    assert(abs(result - 2.0 / 3.0) < 1e-10, "integral of x² on [-1,1] should be 2/3");
+}
+
+@test
+fn test_trapezoid_exp() {
+    // Integral of e^x from 0 to 1 = e - 1
+    let expected = E - 1.0;
+    let result = trapezoid(exponential, 0.0, 1.0, 10000);
+    assert(abs(result - expected) < 1e-6, "trapezoid of e^x with many points should be accurate");
+}
+
+@test
+fn test_gauss_legendre_sin() {
+    // GL 5-point on integral of sin from 0 to pi = 2
+    let result = gauss_legendre(sine, 0.0, PI, 5);
+    assert(abs(result - 2.0) < 0.01, "GL 5-point of sin on [0,pi]");
+}
+
+// =============================================================================
+// Additional ODE Solver Tests
+// =============================================================================
+
+// Harmonic oscillator: y'' = -y  =>  system: y1' = y2, y2' = -y1
+// Solution: y1(t) = cos(t), y2(t) = -sin(t)  for y1(0)=1, y2(0)=0
+fn harmonic_ode(t: Float, y: &Vector<Float>) -> Vector<Float> {
+    let mut dy = Vector.zeros(2);
+    dy.set(0, y.get(1));
+    let neg_y0 = 0.0 - y.get(0);
+    dy.set(1, neg_y0);
+    dy
+}
+
+@test
+fn test_rk4_harmonic_oscillator() {
+    // Solve y'' = -y as a 2D system
+    let y0 = vec2(1.0, 0.0);  // y(0) = cos(0) = 1, y'(0) = -sin(0) = 0
+    let sol: List<(Float, Vector<Float>)> = rk4(harmonic_ode, &y0, 0.0, PI, 0.01);
+    let last = sol[sol.len() - 1];
+    // y1(pi) = cos(pi) = -1, y2(pi) = -sin(pi) = 0
+    let y1_final = last.1.get(0);
+    let y2_final = last.1.get(1);
+    assert(abs(y1_final + 1.0) < 1e-6, "RK4 harmonic: y1(pi) should be -1");
+    assert(abs(y2_final) < 1e-5, "RK4 harmonic: y2(pi) should be ~0");
+}
+
+@test
+fn test_euler_large_step() {
+    // With a larger step, Euler should still not crash, but accuracy degrades
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = euler(exp_ode, &y0, 0.0, 1.0, 0.1);
+    let last = sol[sol.len() - 1];
+    let y_final = last.1.get(0);
+    // Euler with h=0.1 won't be very accurate but should be in the right ballpark
+    assert(abs(y_final - E) < 0.2, "Euler with h=0.1 should be roughly correct");
+    assert(y_final > 2.0, "Euler solution should still be growing");
+}
+
+@test
+fn test_rk45_tight_vs_loose_tolerance() {
+    let y0 = vec1(1.0);
+    let sol_loose: List<(Float, Vector<Float>)> = rk45(exp_ode, &y0, 0.0, 1.0, 1e-4);
+    let sol_tight: List<(Float, Vector<Float>)> = rk45(exp_ode, &y0, 0.0, 1.0, 1e-10);
+
+    let err_loose: Float = abs(sol_loose[sol_loose.len() - 1].1.get(0) - E);
+    let err_tight: Float = abs(sol_tight[sol_tight.len() - 1].1.get(0) - E);
+
+    // Tighter tolerance should give more accurate answer (or at least as accurate)
+    assert(err_tight <= err_loose + 1e-4, "tighter tol should not be less accurate");
+}
+
+@test
+fn test_rk4_decay_at_t2() {
+    // dy/dt = -y, y(0) = 1 => y(2) = e^(-2)
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = rk4(decay_ode, &y0, 0.0, 2.0, 0.01);
+    let last = sol[sol.len() - 1];
+    let y_final = last.1.get(0);
+    let neg_two: Float = 0.0 - 2.0;
+    let expected = exp(neg_two);
+    assert(abs(y_final - expected) < 1e-7, "RK4 decay: y(2) should be e^(-2)");
+}
+
+@test
+fn test_ode_trajectory_monotonicity() {
+    // For dy/dt = y, y(0) = 1, solution e^t is monotonically increasing
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = rk4(exp_ode, &y0, 0.0, 1.0, 0.1);
+    let mut prev = sol[0].1.get(0);
+    for i in 1..sol.len() {
+        let curr = sol[i].1.get(0);
+        assert(curr > prev, "exponential trajectory should be monotonically increasing");
+        prev = curr;
+    }
+}
+
+@test
+fn test_heun_decay() {
+    // dy/dt = -y, y(0) = 1 => y(1) = e^(-1)
+    let y0 = vec1(1.0);
+    let sol: List<(Float, Vector<Float>)> = heun(decay_ode, &y0, 0.0, 1.0, 0.01);
+    let last = sol[sol.len() - 1];
+    let y_final = last.1.get(0);
+    let neg_one: Float = 0.0 - 1.0;
+    let expected = exp(neg_one);
+    assert(abs(y_final - expected) < 0.001, "Heun decay: y(1) should be e^(-1)");
+}
+
+// =============================================================================
+// Additional Root Finding Tests
+// =============================================================================
+
+@test
+fn test_newton_raphson_exp() {
+    // Find root of e^x - 3 = 0 => x = ln(3)
+    let result = newton_raphson(
+        |x| exp(x) - 3.0,
+        |x| exp(x),
+        1.0, 1e-12, 50,
+    );
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - log(3.0)) < 1e-10, "Newton-Raphson should find ln(3)");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Newton-Raphson should converge for e^x - 3");
+        }
+    }
+}
+
+@test
+fn test_secant_cubic_root() {
+    // Find root of x³ - 8 = 0 => x = 2
+    let result = secant(|x| x * x * x - 8.0, 1.0, 3.0, 1e-10, 50);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - 2.0) < 1e-8, "Secant should find cube root of 8");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Secant should converge for x³ - 8");
+        }
+    }
+}
+
+@test
+fn test_secant_vs_newton_agreement() {
+    // Both should find the same root for e^x - 2 = 0
+    let expected = log(2.0);
+    let r_secant = secant(|x| exp(x) - 2.0, 0.0, 1.0, 1e-10, 50);
+    let r_newton = newton(|x| exp(x) - 2.0, 0.5, 1e-10, 50);
+
+    let x_secant = match r_secant { RootResult.Found(x) => x, _ => 0.0 };
+    let x_newton = match r_newton { RootResult.Found(x) => x, _ => 0.0 };
+
+    assert(abs(x_secant - expected) < 1e-8, "secant should find ln(2)");
+    assert(abs(x_newton - expected) < 1e-8, "newton should find ln(2)");
+    assert(abs(x_secant - x_newton) < 1e-6, "secant and newton should agree");
+}
+
+@test
+fn test_bisection_convergence_speed() {
+    // Bisection on [0, 4] for x² - 2 with tol=1e-10
+    // Bisection needs about log2((b-a)/tol) ≈ log2(4/1e-10) ≈ 35 iterations
+    // With 100 max_iter, it should easily converge
+    let result = bisection(|x| x * x - 2.0, 0.0, 4.0, 1e-10, 100);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - sqrt(2.0)) < 1e-9, "bisection with wide bracket");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "bisection should converge with 100 iterations");
+        }
+    }
+}
+
+@test
+fn test_brent_cos() {
+    // Find root of cos(x) near pi/2
+    let cos_fn = |x: Float| -> Float { cos(x) };
+    let result = brent(cos_fn, 1.0, 2.0, 1e-12, 100);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - PI / 2.0) < 1e-10, "Brent should find pi/2 for cos");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Brent should converge for cos on [1,2]");
+        }
+    }
+}
+
+@test
+fn test_newton_cos() {
+    // Find root of cos(x) starting near pi/2
+    let result = newton(|x| cos(x), 1.0, 1e-10, 50);
+    match result {
+        RootResult.Found(x) => {
+            assert(abs(x - PI / 2.0) < 1e-8, "Newton should find pi/2 for cos");
+        }
+        RootResult.NoConvergence(_) => {
+            assert(false, "Newton should converge for cos");
+        }
+    }
+}
+
+// =============================================================================
+// Additional Optimization Tests
+// =============================================================================
+
+@test
+fn test_gradient_descent_different_start() {
+    // Starting from (-3, 4) should still converge to (0, 0)
+    let neg_three: Float = 0.0 - 3.0;
+    let x0 = vec2(neg_three, 4.0);
+    let result = gradient_descent(sphere, sphere_grad, &x0, 0.1, 1e-8, 1000);
+    assert(result.converged, "GD should converge from (-3, 4)");
+    assert(abs(result.x.get(0)) < 1e-3, "x should be near 0");
+    assert(abs(result.x.get(1)) < 1e-3, "y should be near 0");
+}
+
+@test
+fn test_gradient_descent_bt_different_start() {
+    // Starting from (10, -10) on sphere
+    let neg_ten: Float = 0.0 - 10.0;
+    let x0 = vec2(10.0, neg_ten);
+    let result = gradient_descent_bt(sphere, sphere_grad, &x0, 1e-8, 1000);
+    assert(result.converged, "GD-BT should converge from (10, -10)");
+    assert(abs(result.f_val) < 1e-6, "minimum value should be ~0");
+}
+
+@test
+fn test_bfgs_f_val_at_minimum() {
+    // For sphere function, f_val at minimum should be ~0
+    let x0 = vec2(3.0, 4.0);
+    let result = bfgs(sphere, sphere_grad, &x0, 1e-8, 1000);
+    assert(result.converged, "BFGS should converge on sphere");
+    assert(abs(result.f_val) < 1e-6, "f_val at minimum should be ~0");
+}
+
+@test
+fn test_newton_optimize_iterations_on_quadratic() {
+    // Newton's method on a quadratic should converge in very few iterations
+    let x0 = vec2(10.0, 10.0);
+    let result = newton_optimize(sphere, sphere_grad, sphere_hess, &x0, 1e-10, 100);
+    assert(result.converged, "Newton should converge on quadratic");
+    assert(result.iterations <= 3, "Newton on quadratic should converge in <=3 iterations");
+}
+
+@test
+fn test_bfgs_iterations() {
+    // BFGS on sphere should converge in relatively few iterations
+    let x0 = vec2(5.0, 5.0);
+    let result = bfgs(sphere, sphere_grad, &x0, 1e-8, 1000);
+    assert(result.converged, "BFGS should converge");
+    assert(result.iterations < 50, "BFGS on sphere should not need many iterations");
+}
+
+@test
+fn test_gradient_descent_bt_rosenbrock() {
+    // GD-BT on Rosenbrock - harder optimization problem
+    let x0 = vec2(0.0, 0.0);
+    let result = gradient_descent_bt(rosenbrock, rosenbrock_grad, &x0, 1e-4, 10000);
+    // May not fully converge but should get closer to (1,1)
+    let dist = abs(result.x.get(0) - 1.0) + abs(result.x.get(1) - 1.0);
+    assert(dist < 2.0, "GD-BT on Rosenbrock should make progress toward minimum");
+}
+
+// =============================================================================
+// Additional Error Order and Cross-method Tests
+// =============================================================================
+
+@test
+fn test_5pt_error_order() {
+    // 5-point stencil should be O(h⁴) for smooth functions
+    let err_h1: Float = abs(diff_central_5pt(exponential, 1.0, 0.1) - E);
+    let err_h2: Float = abs(diff_central_5pt(exponential, 1.0, 0.05) - E);
+    let ratio = err_h1 / err_h2;
+    // For O(h⁴), halving h reduces error by ~16
+    assert(ratio > 10.0 && ratio < 25.0, "5-point stencil should be O(h^4)");
+}
+
+@test
+fn test_backward_diff_error_order() {
+    // Backward difference error should scale as O(h), similar to forward
+    let err_h1: Float = abs(diff_backward(square, 1.0, 0.1) - 2.0);
+    let err_h2: Float = abs(diff_backward(square, 1.0, 0.01) - 2.0);
+    let ratio = err_h1 / err_h2;
+    assert(ratio > 5.0 && ratio < 20.0, "backward diff should be O(h)");
+}
+
+@test
+fn test_simpson38_error_order() {
+    // Simpson 3/8 is also O(h⁴)
+    let err_n1: Float = abs(simpson38(sine, 0.0, PI, 9) - 2.0);
+    let err_n2: Float = abs(simpson38(sine, 0.0, PI, 18) - 2.0);
+    let ratio = err_n1 / err_n2;
+    // Doubling n for O(1/n⁴) should reduce error by ~16
+    assert(ratio > 8.0 && ratio < 30.0, "Simpson 3/8 should be O(h^4)");
+}
+
+@test
+fn test_heun_vs_euler_accuracy() {
+    // Heun (2nd order) should be more accurate than Euler (1st order)
+    let y0 = vec1(1.0);
+    let h = 0.1;
+    let sol_euler: List<(Float, Vector<Float>)> = euler(exp_ode, &y0, 0.0, 1.0, h);
+    let sol_heun: List<(Float, Vector<Float>)> = heun(exp_ode, &y0, 0.0, 1.0, h);
+
+    let err_euler: Float = abs(sol_euler[sol_euler.len() - 1].1.get(0) - E);
+    let err_heun: Float = abs(sol_heun[sol_heun.len() - 1].1.get(0) - E);
+
+    assert(err_heun < err_euler, "Heun should be more accurate than Euler");
+}
+
+@test
+fn test_midpoint_vs_euler_accuracy() {
+    // Midpoint (2nd order) should be more accurate than Euler (1st order)
+    let y0 = vec1(1.0);
+    let h = 0.1;
+    let sol_euler: List<(Float, Vector<Float>)> = euler(exp_ode, &y0, 0.0, 1.0, h);
+    let sol_mid: List<(Float, Vector<Float>)> = midpoint(exp_ode, &y0, 0.0, 1.0, h);
+
+    let err_euler: Float = abs(sol_euler[sol_euler.len() - 1].1.get(0) - E);
+    let err_mid: Float = abs(sol_mid[sol_mid.len() - 1].1.get(0) - E);
+
+    assert(err_mid < err_euler, "Midpoint should be more accurate than Euler");
+}

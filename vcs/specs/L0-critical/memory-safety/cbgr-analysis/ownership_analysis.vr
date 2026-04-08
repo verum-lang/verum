@@ -1,0 +1,204 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, ownership, cbgr, compile-time-analysis
+// @description: CBGR ownership analysis prevents use-after-free and double-free
+
+/// Ownership Analysis Compile-Time Tests
+///
+/// These tests validate that the CBGR ownership analyzer correctly detects:
+/// 1. Valid ownership transfers (moves)
+/// 2. Prevents use-after-move at compile time
+/// 3. Tracks allocation/deallocation pairs
+///
+/// Spec: docs/detailed/26-cbgr-implementation.md#ownership-analysis
+
+// ============================================================================
+// TEST 1: Valid ownership transfer
+// ============================================================================
+
+fn test_valid_move() {
+    let data = [1, 2, 3, 4, 5];
+
+    // Move ownership to another binding
+    let owned = data;
+
+    // Using owned is valid
+    let sum = owned[0] + owned[1];
+    assert(sum == 3);
+}
+
+// ============================================================================
+// TEST 2: Function consumes ownership
+// ============================================================================
+
+fn consume_array(arr: [Int; 3]) -> Int {
+    arr[0] + arr[1] + arr[2]
+}
+
+fn test_ownership_consumed_by_function() {
+    let data = [10, 20, 30];
+
+    // Function takes ownership
+    let result = consume_array(data);
+
+    assert(result == 60);
+}
+
+// ============================================================================
+// TEST 3: Borrow doesn't transfer ownership
+// ============================================================================
+
+fn borrow_array(arr: &[Int; 3]) -> Int {
+    arr[0]
+}
+
+fn test_borrow_preserves_ownership() {
+    let data = [100, 200, 300];
+
+    // Borrow doesn't move
+    let first = borrow_array(&data);
+
+    // Original still usable
+    let second = data[1];
+
+    assert(first == 100);
+    assert(second == 200);
+}
+
+// ============================================================================
+// TEST 4: Multiple borrows allowed
+// ============================================================================
+
+fn test_multiple_immutable_borrows() {
+    let data = [1, 2, 3];
+
+    let r1 = &data;
+    let r2 = &data;
+    let r3 = &data;
+
+    // All borrows can coexist
+    assert(r1[0] == r2[0]);
+    assert(r2[0] == r3[0]);
+}
+
+// ============================================================================
+// TEST 5: Ownership in nested structures
+// ============================================================================
+
+type Container is {
+    values: [Int; 4],
+    count: Int,
+};
+
+fn test_nested_ownership() {
+    let container = Container {
+        values: [1, 2, 3, 4],
+        count: 4,
+    };
+
+    // Move entire container
+    let moved = container;
+
+    // Access through moved binding
+    assert(moved.values[0] == 1);
+    assert(moved.count == 4);
+}
+
+// ============================================================================
+// TEST 6: Partial moves (field access)
+// ============================================================================
+
+fn test_field_access_no_move() {
+    let container = Container {
+        values: [10, 20, 30, 40],
+        count: 4,
+    };
+
+    // Field access doesn't move the whole struct for Copy types
+    let count = container.count;
+    let first_value = container.values[0];
+
+    assert(count == 4);
+    assert(first_value == 10);
+}
+
+// ============================================================================
+// TEST 7: Ownership through conditionals
+// ============================================================================
+
+fn test_conditional_ownership() {
+    let data = [1, 2, 3];
+
+    let result = if true {
+        // One path takes ownership
+        consume_array(data)
+    } else {
+        0
+    };
+
+    assert(result == 6);
+}
+
+// ============================================================================
+// TEST 8: Ownership in loops
+// ============================================================================
+
+fn test_loop_ownership() {
+    let mut sum = 0;
+
+    // Each iteration creates new owned data
+    for i in 0..5 {
+        let data = [i, i + 1, i + 2];
+        sum += data[0];
+    }
+
+    assert(sum == 10);  // 0 + 1 + 2 + 3 + 4
+}
+
+// ============================================================================
+// TEST 9: Return ownership
+// ============================================================================
+
+fn create_data() -> [Int; 3] {
+    [42, 43, 44]
+}
+
+fn test_returned_ownership() {
+    let data = create_data();
+
+    // Caller owns the returned data
+    assert(data[0] == 42);
+    assert(data[1] == 43);
+    assert(data[2] == 44);
+}
+
+// ============================================================================
+// TEST 10: Drop semantics
+// ============================================================================
+
+fn test_explicit_drop() {
+    let data = 42;
+
+    // Explicit drop is valid
+    drop(data);
+
+    // data cannot be used after drop (compile-time error if attempted)
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    test_valid_move();
+    test_ownership_consumed_by_function();
+    test_borrow_preserves_ownership();
+    test_multiple_immutable_borrows();
+    test_nested_ownership();
+    test_field_access_no_move();
+    test_conditional_ownership();
+    test_loop_ownership();
+    test_returned_ownership();
+    test_explicit_drop();
+}

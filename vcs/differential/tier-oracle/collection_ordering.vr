@@ -1,0 +1,389 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, collections, ordering, hashing
+// @timeout: 15000
+
+/// Collection ordering and hashing tests for Tier 0 vs Tier 3 equivalence.
+/// Tests that collection operations produce identical results across tiers.
+
+fn main() {
+    test_list_ordering();
+    test_map_iteration_order();
+    test_set_operations();
+    test_sorting_stability();
+    test_hash_consistency();
+    test_collection_equality();
+    test_iterator_semantics();
+    test_collection_modification();
+}
+
+/// List operations preserve order
+fn test_list_ordering() {
+    println("=== List Ordering ===");
+
+    // Insertion order preserved
+    let mut list = [];
+    for i in [3, 1, 4, 1, 5, 9, 2, 6] {
+        list.push(i);
+    }
+    println(f"insertion order: {list}");
+
+    // Index access
+    for i in 0..list.len() {
+        println(f"list[{i}] = {list[i]}");
+    }
+
+    // Modification in place
+    list[0] = 100;
+    println(f"after list[0] = 100: {list}");
+
+    // Insert at position
+    let mut list2 = [1, 2, 3, 4, 5];
+    list2.insert(2, 99);
+    println(f"after insert(2, 99): {list2}");
+
+    // Remove at position
+    let removed = list2.remove(2);
+    println(f"removed: {removed}, list: {list2}");
+
+    // Swap
+    list2.swap(0, 4);
+    println(f"after swap(0, 4): {list2}");
+
+    // Reverse
+    let reversed = list2.reversed();
+    println(f"reversed: {reversed}");
+
+    // Rotate
+    let mut rotatable = [1, 2, 3, 4, 5];
+    rotatable.rotate_left(2);
+    println(f"rotate_left(2): {rotatable}");
+
+    rotatable.rotate_right(1);
+    println(f"rotate_right(1): {rotatable}");
+}
+
+/// Map iteration order (insertion order for BTreeMap, undefined for Map)
+fn test_map_iteration_order() {
+    println("\n=== Map Iteration Order ===");
+
+    // BTreeMap maintains sorted order
+    let mut btree: BTreeMap<Text, Int> = {};
+    btree.insert("charlie", 3);
+    btree.insert("alpha", 1);
+    btree.insert("bravo", 2);
+    btree.insert("delta", 4);
+
+    println("BTreeMap iteration (sorted):");
+    for (k, v) in &btree {
+        println(f"  {k}: {v}");
+    }
+
+    // Keys and values should also be sorted
+    println(f"keys: {btree.keys().collect<List<_>>()}");
+    println(f"values: {btree.values().collect<List<_>>()}");
+
+    // LinkedMap maintains insertion order
+    let mut linked: LinkedMap<Text, Int> = {};
+    linked.insert("charlie", 3);
+    linked.insert("alpha", 1);
+    linked.insert("bravo", 2);
+
+    println("\nLinkedMap iteration (insertion order):");
+    for (k, v) in &linked {
+        println(f"  {k}: {v}");
+    }
+
+    // Re-inserting updates value but maintains position
+    linked.insert("alpha", 100);
+    println("\nAfter re-insert 'alpha':");
+    for (k, v) in &linked {
+        println(f"  {k}: {v}");
+    }
+
+    // Map - we need deterministic iteration for differential testing
+    // Use sorted output for comparison
+    let mut hash: Map<Int, Text> = {};
+    for i in [5, 3, 1, 4, 2] {
+        hash.insert(i, f"value_{i}");
+    }
+
+    // Sort for deterministic output
+    let mut sorted_items: List<(Int, Text)> = hash.iter().map(|(k, v)| (*k, v.clone())).collect();
+    sorted_items.sort_by(|a, b| a.0.cmp(&b.0));
+    println("\nMap (sorted for comparison):");
+    for (k, v) in &sorted_items {
+        println(f"  {k}: {v}");
+    }
+}
+
+/// Set operations and ordering
+fn test_set_operations() {
+    println("\n=== Set Operations ===");
+
+    // BTreeSet maintains sorted order
+    let set_a: BTreeSet<Int> = {5, 2, 8, 1, 9, 3};
+    let set_b: BTreeSet<Int> = {3, 6, 9, 2, 7};
+
+    println(f"set_a: {set_a}");  // Should be sorted
+    println(f"set_b: {set_b}");  // Should be sorted
+
+    // Set operations should produce sorted results
+    let union = &set_a | &set_b;
+    let intersection = &set_a & &set_b;
+    let difference = &set_a - &set_b;
+    let symmetric = &set_a ^ &set_b;
+
+    println(f"union: {union}");
+    println(f"intersection: {intersection}");
+    println(f"difference: {difference}");
+    println(f"symmetric_difference: {symmetric}");
+
+    // Subset/superset checks
+    let subset = {1, 2, 3};
+    println(f"{{1,2,3}} is_subset of set_a: {subset.is_subset(&set_a)}");
+    println(f"set_a is_superset of {{1,2,3}}: {set_a.is_superset(&subset)}");
+
+    // First/last for BTreeSet
+    println(f"set_a.first(): {set_a.first()}");
+    println(f"set_a.last(): {set_a.last()}");
+
+    // Range queries
+    let range: List<Int> = set_a.range(2..8).copied().collect();
+    println(f"set_a.range(2..8): {range}");
+}
+
+/// Sorting stability
+fn test_sorting_stability() {
+    println("\n=== Sorting Stability ===");
+
+    // Stable sort should preserve relative order of equal elements
+    type Item is {
+        key: Int,
+        value: Text,
+    };
+
+    let items = [
+        Item { key: 2, value: "a" },
+        Item { key: 1, value: "b" },
+        Item { key: 2, value: "c" },
+        Item { key: 1, value: "d" },
+        Item { key: 2, value: "e" },
+    ];
+
+    // Stable sort by key
+    let sorted = items.sorted_by(|a, b| a.key.cmp(&b.key));
+
+    println("stable sort by key:");
+    for item in &sorted {
+        println(f"  key={item.key}, value={item.value}");
+    }
+
+    // Same key items should maintain original order: a, c, e for key=2
+
+    // Unstable sort (may reorder equal elements)
+    let unsorted = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+    let stable_sorted = unsorted.sorted();
+    let unstable_sorted = unsorted.sort_unstable();
+
+    println(f"\noriginal: {unsorted}");
+    println(f"stable_sorted: {stable_sorted}");
+    println(f"unstable_sorted: {unstable_sorted}");
+
+    // Custom comparator
+    let words = ["apple", "Banana", "cherry", "Date"];
+    let case_insensitive = words.sorted_by(|a, b| {
+        a.to_lowercase().cmp(&b.to_lowercase())
+    });
+    println(f"case-insensitive sort: {case_insensitive}");
+
+    // Reverse sort
+    let descending = [1, 2, 3, 4, 5].sorted_by(|a, b| b.cmp(a));
+    println(f"descending: {descending}");
+}
+
+/// Hash consistency across tiers
+fn test_hash_consistency() {
+    println("\n=== Hash Consistency ===");
+
+    // Hash of primitives
+    fn hash<T: Hash>(value: T) -> U64 {
+        let mut hasher = DefaultHasher.new();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    // Integer hashing
+    for i in [0, 1, -1, 42, 9223372036854775807i64] {
+        println(f"hash({i}) = {hash(i)}");
+    }
+
+    // String hashing
+    for s in ["", "a", "hello", "Hello", "hello world"] {
+        println(f"hash(\"{s}\") = {hash(s)}");
+    }
+
+    // Tuple hashing
+    let tuple_hash = hash((1, 2, 3));
+    println(f"hash((1, 2, 3)) = {tuple_hash}");
+
+    // Order matters for tuples
+    let tuple_hash2 = hash((3, 2, 1));
+    println(f"hash((3, 2, 1)) = {tuple_hash2}");
+    println(f"tuples have different hash: {tuple_hash != tuple_hash2}");
+
+    // List hashing (if supported)
+    let list_hash = hash([1, 2, 3]);
+    println(f"hash([1, 2, 3]) = {list_hash}");
+
+    // Equal values should have equal hashes
+    let a = "test";
+    let b = "test";
+    println(f"hash(\"{a}\") == hash(\"{b}\"): {hash(a) == hash(b)}");
+}
+
+/// Collection equality semantics
+fn test_collection_equality() {
+    println("\n=== Collection Equality ===");
+
+    // List equality is order-sensitive
+    let list1 = [1, 2, 3];
+    let list2 = [1, 2, 3];
+    let list3 = [3, 2, 1];
+
+    println(f"[1,2,3] == [1,2,3]: {list1 == list2}");
+    println(f"[1,2,3] == [3,2,1]: {list1 == list3}");
+
+    // Set equality is order-insensitive
+    let set1: Set<Int> = {1, 2, 3};
+    let set2: Set<Int> = {3, 2, 1};
+    let set3: Set<Int> = {1, 2, 3, 4};
+
+    println(f"{{1,2,3}} == {{3,2,1}}: {set1 == set2}");
+    println(f"{{1,2,3}} == {{1,2,3,4}}: {set1 == set3}");
+
+    // Map equality
+    let map1: Map<Text, Int> = {"a": 1, "b": 2};
+    let map2: Map<Text, Int> = {"b": 2, "a": 1};
+    let map3: Map<Text, Int> = {"a": 1, "b": 3};
+
+    println(f"{{a:1,b:2}} == {{b:2,a:1}}: {map1 == map2}");
+    println(f"{{a:1,b:2}} == {{a:1,b:3}}: {map1 == map3}");
+
+    // Nested collection equality
+    let nested1 = [[1, 2], [3, 4]];
+    let nested2 = [[1, 2], [3, 4]];
+    let nested3 = [[3, 4], [1, 2]];
+
+    println(f"nested1 == nested2: {nested1 == nested2}");
+    println(f"nested1 == nested3: {nested1 == nested3}");
+}
+
+/// Iterator semantics
+fn test_iterator_semantics() {
+    println("\n=== Iterator Semantics ===");
+
+    let data = [1, 2, 3, 4, 5];
+
+    // Map preserves order
+    let mapped: List<Int> = data.iter().map(|x| x * 2).collect();
+    println(f"map(x*2): {mapped}");
+
+    // Filter preserves relative order
+    let filtered: List<Int> = data.iter().filter(|x| x % 2 == 0).copied().collect();
+    println(f"filter(even): {filtered}");
+
+    // Chain order
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let chained: List<Int> = a.iter().chain(b.iter()).copied().collect();
+    println(f"chain: {chained}");
+
+    // Zip pairs in order
+    let zipped: List<(Int, Text)> = [1, 2, 3].iter()
+        .zip(["a", "b", "c"].iter())
+        .map(|(x, y)| (*x, *y))
+        .collect();
+    println(f"zip: {zipped}");
+
+    // Flatten preserves inner order
+    let nested = [[1, 2], [3, 4], [5, 6]];
+    let flattened: List<Int> = nested.iter().flatten().copied().collect();
+    println(f"flatten: {flattened}");
+
+    // Take/skip
+    let taken: List<Int> = data.iter().take(3).copied().collect();
+    let skipped: List<Int> = data.iter().skip(2).copied().collect();
+    println(f"take(3): {taken}");
+    println(f"skip(2): {skipped}");
+
+    // Enumerate
+    let enumerated: List<(Int, Int)> = data.iter()
+        .enumerate()
+        .map(|(i, v)| (i as Int, *v))
+        .collect();
+    println(f"enumerate: {enumerated}");
+
+    // Fold order (left to right)
+    let fold_result = data.iter().fold("".to_text(), |acc, x| f"{acc}{x}");
+    println(f"fold: \"{fold_result}\"");
+
+    // Scan (running fold)
+    let scanned: List<Int> = data.iter().scan(0, |state, x| {
+        *state = *state + x;
+        Some(*state)
+    }).collect();
+    println(f"scan (prefix sums): {scanned}");
+}
+
+/// Collection modification while iterating (or not)
+fn test_collection_modification() {
+    println("\n=== Collection Modification ===");
+
+    // Filter in place (retain)
+    let mut nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    nums.retain(|x| x % 2 == 0);
+    println(f"retain(even): {nums}");
+
+    // Drain
+    let mut source = [1, 2, 3, 4, 5];
+    let drained: List<Int> = source.drain(1..4).collect();
+    println(f"drained: {drained}");
+    println(f"remaining: {source}");
+
+    // Splice
+    let mut target = [1, 2, 3, 4, 5];
+    let removed: List<Int> = target.splice(1..4, [10, 20]).collect();
+    println(f"splice removed: {removed}");
+    println(f"after splice: {target}");
+
+    // Extend
+    let mut extendable = [1, 2, 3];
+    extendable.extend([4, 5, 6]);
+    println(f"after extend: {extendable}");
+
+    // Append (moves from other)
+    let mut dest = [1, 2, 3];
+    let mut src = [4, 5, 6];
+    dest.append(&mut src);
+    println(f"after append dest: {dest}");
+    println(f"after append src: {src}");  // Empty
+
+    // Clear
+    let mut clearable = [1, 2, 3, 4, 5];
+    let cap_before = clearable.capacity();
+    clearable.clear();
+    let cap_after = clearable.capacity();
+    println(f"after clear: len={clearable.len()}, cap maintained: {cap_before == cap_after}");
+
+    // Truncate
+    let mut truncatable = [1, 2, 3, 4, 5];
+    truncatable.truncate(3);
+    println(f"after truncate(3): {truncatable}");
+
+    // Resize
+    let mut resizable = [1, 2, 3];
+    resizable.resize(5, 0);
+    println(f"after resize(5, 0): {resizable}");
+}

@@ -1,0 +1,165 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: tensor, slice
+
+fn main() {
+    // 1D slicing
+    let v: Tensor<f32, [10]> = Tensor.arange(0.0, 10.0, 1.0);
+
+    // Basic range slice
+    let slice1 = v[2..5];
+    assert(slice1.shape() == [3]);
+    assert(slice1[0] == 2.0);
+    assert(slice1[2] == 4.0);
+
+    // From start
+    let from_start = v[..4];
+    assert(from_start.shape() == [4]);
+    assert(from_start[0] == 0.0);
+    assert(from_start[3] == 3.0);
+
+    // To end
+    let to_end = v[7..];
+    assert(to_end.shape() == [3]);
+    assert(to_end[0] == 7.0);
+    assert(to_end[2] == 9.0);
+
+    // Full slice (clone)
+    let full = v[..];
+    assert(full.shape() == [10]);
+
+    // Negative indices in slicing
+    let neg_slice = v[-3..];
+    assert(neg_slice.shape() == [3]);
+    assert(neg_slice[0] == 7.0);
+
+    let neg_range = v[-5..-2];
+    assert(neg_range.shape() == [3]);
+    assert(neg_range[0] == 5.0);
+    assert(neg_range[2] == 7.0);
+
+    // Step slicing
+    let stepped = v.step_by(2);  // Every other element
+    assert(stepped.shape() == [5]);
+    assert(stepped[0] == 0.0);
+    assert(stepped[1] == 2.0);
+    assert(stepped[4] == 8.0);
+
+    let stepped_range = v.slice_step(1, 8, 2);  // Elements 1,3,5,7
+    assert(stepped_range.shape() == [4]);
+    assert(stepped_range[0] == 1.0);
+    assert(stepped_range[3] == 7.0);
+
+    // Reverse slicing
+    let reversed = v.reverse();
+    assert(reversed.shape() == [10]);
+    assert(reversed[0] == 9.0);
+    assert(reversed[9] == 0.0);
+
+    // 2D slicing
+    let m: Tensor<f32, [4, 5]> = tensor<4, 5>f32{
+        {1.0, 2.0, 3.0, 4.0, 5.0},
+        {6.0, 7.0, 8.0, 9.0, 10.0},
+        {11.0, 12.0, 13.0, 14.0, 15.0},
+        {16.0, 17.0, 18.0, 19.0, 20.0}
+    };
+
+    // Row slice
+    let rows = m.slice_rows(1, 3);
+    assert(rows.shape() == [2, 5]);
+    assert(rows[0, 0] == 6.0);
+    assert(rows[1, 4] == 15.0);
+
+    // Column slice
+    let cols = m.slice_cols(2, 4);
+    assert(cols.shape() == [4, 2]);
+    assert(cols[0, 0] == 3.0);
+    assert(cols[3, 1] == 19.0);
+
+    // Submatrix
+    let submat = m[1..3, 1..4];
+    assert(submat.shape() == [2, 3]);
+    assert(submat[0, 0] == 7.0);
+    assert(submat[1, 2] == 14.0);
+
+    // Single row (reduces dimension)
+    let single_row = m.row(2);
+    assert(single_row.shape() == [5]);
+    assert(single_row[0] == 11.0);
+
+    // Single column (reduces dimension)
+    let single_col = m.col(3);
+    assert(single_col.shape() == [4]);
+    assert(single_col[0] == 4.0);
+
+    // 3D slicing
+    let t: Tensor<f32, [3, 4, 5]> = Tensor.arange(0.0, 60.0, 1.0).reshape();
+
+    let depth_slice = t.select(0, 1);
+    assert(depth_slice.shape() == [4, 5]);
+
+    let row_slice = t.select(1, 2);
+    assert(row_slice.shape() == [3, 5]);
+
+    let col_slice = t.select(2, 3);
+    assert(col_slice.shape() == [3, 4]);
+
+    let cube = t[0..2, 1..3, 2..4];
+    assert(cube.shape() == [2, 2, 2]);
+
+    // Mutable slicing
+    let mut mv: Tensor<f32, [6]> = Tensor.zeros();
+    mv[2..5] = tensor<3>f32{10.0, 20.0, 30.0};
+
+    assert(mv[0] == 0.0);
+    assert(mv[2] == 10.0);
+    assert(mv[4] == 30.0);
+    assert(mv[5] == 0.0);
+
+    // Fill slice with scalar
+    let mut mm: Tensor<f32, [4, 4]> = Tensor.zeros();
+    mm[1..3, 1..3] = 1.0;
+
+    assert(mm[0, 0] == 0.0);
+    assert(mm[1, 1] == 1.0);
+    assert(mm[2, 2] == 1.0);
+    assert(mm[3, 3] == 0.0);
+
+    // Slice assignment with broadcasting
+    let mut batch: Tensor<f32, [3, 4]> = Tensor.zeros();
+    batch.set_col(0, tensor<3>f32{1.0, 2.0, 3.0});
+
+    assert(batch[0, 0] == 1.0);
+    assert(batch[1, 0] == 2.0);
+    assert(batch[2, 0] == 3.0);
+
+    // Strided slice assignment
+    let mut strided: Tensor<f32, [8]> = Tensor.zeros();
+    strided.set_step(2, tensor<4>f32{1.0, 3.0, 5.0, 7.0});
+
+    assert(strided[0] == 1.0);
+    assert(strided[1] == 0.0);
+    assert(strided[2] == 3.0);
+    assert(strided[6] == 7.0);
+
+    // Ellipsis for multi-dimensional slicing (using select for fixed dims)
+    let nd: Tensor<f32, [2, 3, 4, 5]> = Tensor.ones();
+
+    let ellipsis_first = nd.select(0, 0);  // [3, 4, 5]
+    assert(ellipsis_first.shape() == [3, 4, 5]);
+
+    let ellipsis_last = nd.select(3, 2);  // [2, 3, 4]
+    assert(ellipsis_last.shape() == [2, 3, 4]);
+
+    let ellipsis_mid = nd.select(0, 1).select(2, 3);  // [3, 4]
+    assert(ellipsis_mid.shape() == [3, 4]);
+
+    // None/newaxis for dimension expansion in slice
+    let vec_expanded = v.unsqueeze(0);  // [1, 10]
+    assert(vec_expanded.shape() == [1, 10]);
+
+    let col_vec = v.unsqueeze(1);  // [10, 1]
+    assert(col_vec.shape() == [10, 1]);
+}

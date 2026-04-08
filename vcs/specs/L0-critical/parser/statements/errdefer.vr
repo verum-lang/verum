@@ -1,0 +1,297 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, error-handling, errdefer, cleanup, v2.8
+
+// ============================================================================
+// Verum v2.8 - Error-Path Deferred Execution (errdefer statement)
+// Grammar: defer_stmt = 'defer' , defer_body | 'errdefer' , defer_body ;
+// Grammar: defer_body = expression , ';' | block_expr ;
+//
+// errdefer executes ONLY when scope exits via error path (unlike defer which
+// executes on all paths). Inspired by Zig's errdefer.
+// ============================================================================
+
+// Basic errdefer with expression
+fn with_resource() -> Result<Data, Error> {
+    let resource = acquire()?;
+    errdefer resource.release();
+
+    let data = process(resource)?;
+    Ok(data)
+}  // resource.release() called ONLY if error occurs
+
+// errdefer with block
+fn with_cleanup_block() -> Result<Int, Error> {
+    let file = File.open(path)?;
+    errdefer {
+        log("Error occurred, closing file");
+        file.close();
+    }
+
+    let content = file.read_all()?;
+    let result = process(content)?;
+    Ok(result)
+}
+
+// Multiple errdefers (LIFO order on error path)
+fn multi_errdefer() -> Result<(), Error> {
+    let r1 = acquire1()?;
+    errdefer r1.release();
+
+    let r2 = acquire2()?;
+    errdefer r2.release();
+
+    let r3 = acquire3()?;
+    errdefer r3.release();
+
+    use_all(r1, r2, r3)?;
+    Ok(())
+}  // On error: r3, r2, r1 released in that order
+
+// errdefer for database transaction rollback
+fn database_operation() -> Result<(), DbError> {
+    let tx = db.begin_transaction()?;
+    errdefer tx.rollback();
+
+    insert_record(tx, record1)?;
+    insert_record(tx, record2)?;
+    update_index(tx)?;
+
+    tx.commit()?;
+    Ok(())
+}  // rollback only if any operation fails before commit
+
+// errdefer with file operations
+fn file_operation(path: Text) -> Result<Data, IoError> {
+    let file = File.create(path)?;
+    errdefer {
+        file.close();
+        File.delete(path);  // Delete incomplete file on error
+    }
+
+    write_header(file)?;
+    write_content(file)?;
+    write_footer(file)?;
+
+    file.sync()?;
+    Ok(Data.from_file(file))
+}
+
+// errdefer vs defer comparison (both in same function)
+fn compare_defers() -> Result<Int, Error> {
+    let resource = acquire()?;
+
+    // Always runs - success or error
+    defer log("Function completed");
+
+    // Only runs on error path
+    errdefer {
+        log("Error occurred, cleaning up");
+        resource.emergency_cleanup();
+    }
+
+    let result = risky_operation(resource)?;
+    resource.normal_cleanup();  // Only on success
+    Ok(result)
+}
+
+// errdefer in async function
+async fn async_with_errdefer() -> Result<Data, Error> {
+    let connection = connect().await?;
+    errdefer connection.abort().await;
+
+    let data = connection.fetch().await?;
+    connection.close().await?;
+    Ok(data)
+}
+
+// errdefer capturing variables
+fn captured_errdefer() -> Result<(), Error> {
+    let name = "transaction";
+    let id = generate_id();
+    errdefer {
+        log(f"Rolling back {name} with id {id}");
+        rollback(id);
+    }
+
+    execute_transaction(id)?;
+    commit(id)?;
+    Ok(())
+}
+
+// Nested errdefers with different scopes
+fn nested_scopes() -> Result<Int, Error> {
+    errdefer outer_cleanup();
+
+    let outer = acquire_outer()?;
+    {
+        errdefer inner_cleanup();
+
+        let inner = acquire_inner()?;
+        process_inner(inner)?;
+        // inner_cleanup called here if process_inner fails
+    }
+
+    process_outer(outer)?;
+    Ok(42)
+}
+
+// errdefer with conditional cleanup
+fn conditional_errdefer() -> Result<Data, Error> {
+    let mut needs_special_cleanup = false;
+
+    let resource = acquire()?;
+    errdefer {
+        if needs_special_cleanup {
+            resource.special_cleanup();
+        } else {
+            resource.normal_cleanup();
+        }
+    }
+
+    if is_special_case() {
+        needs_special_cleanup = true;
+        special_operation(resource)?;
+    } else {
+        normal_operation(resource)?;
+    }
+
+    Ok(finalize(resource))
+}
+
+// errdefer in loop (each iteration has its own errdefer)
+fn errdefer_in_loop() -> Result<List<Int>, Error> {
+    let mut results = [];
+
+    for i in 0..10 {
+        let item = acquire_item(i)?;
+        errdefer item.release();  // Releases on error within iteration
+
+        let processed = process_item(item)?;
+        results.push(processed);
+        // On success: item ownership transferred
+    }
+
+    Ok(results)
+}
+
+// errdefer with error transformation
+fn transform_error() -> Result<Output, CustomError> {
+    let resource = acquire()?;
+    errdefer {
+        let cleanup_result = resource.cleanup();
+        if cleanup_result.is_err() {
+            log("Cleanup also failed during error handling");
+        }
+    }
+
+    let intermediate = step_one(resource)?;
+    let output = step_two(intermediate)?;
+    Ok(output)
+}
+
+// Multiple resources with independent errdefers
+fn multiple_resources() -> Result<(), Error> {
+    let file = File.open(path)?;
+    errdefer file.close();
+
+    let socket = Socket.connect(addr)?;
+    errdefer socket.disconnect();
+
+    let buffer = allocate_buffer(size)?;
+    errdefer deallocate_buffer(buffer);
+
+    transfer_data(file, socket, buffer)?;
+    Ok(())
+}
+
+// errdefer with spawn (spawned cleanup)
+fn spawned_errdefer() -> Result<(), Error> {
+    let resource = acquire()?;
+    errdefer {
+        spawn async_cleanup(resource);  // Non-blocking cleanup on error
+    }
+
+    process(resource)?;
+    Ok(())
+}
+
+// errdefer for state restoration
+fn temporary_state() -> Result<Int, Error> {
+    let old_config = get_config();
+    set_config(new_config);
+
+    // Restore old config only on error
+    errdefer set_config(old_config);
+
+    let result = run_with_new_config()?;
+    // Keep new config on success
+    Ok(result)
+}
+
+// errdefer with context system
+fn with_context() -> Result<Data, Error> using [Logger, Database] {
+    let conn = Database.connect()?;
+    errdefer {
+        Logger.warn("Operation failed, releasing connection");
+        conn.release();
+    }
+
+    let data = conn.query(sql)?;
+    Logger.info("Query successful");
+    Ok(data)
+}
+
+// errdefer interacting with try-recover
+fn errdefer_with_try() -> Result<Int, Error> {
+    let resource = acquire()?;
+    errdefer resource.emergency_release();
+
+    try {
+        let value = risky_operation(resource)?;
+        Ok(value)
+    } recover |e| {
+        // errdefer still runs if recover re-throws
+        log(f"Handling error: {e}");
+        Err(wrap_error(e))
+    }
+}
+
+// Complex errdefer chain with cleanup ordering
+fn cleanup_ordering() -> Result<(), Error> {
+    let a = acquire_a()?;
+    errdefer release_a(a);  // Released last on error
+
+    let b = acquire_b(a)?;
+    errdefer release_b(b);  // Released second on error
+
+    let c = acquire_c(b)?;
+    errdefer release_c(c);  // Released first on error
+
+    let result = process(a, b, c)?;
+
+    // Success path: manual cleanup in reverse order
+    release_c(c);
+    release_b(b);
+    release_a(a);
+
+    Ok(result)
+}
+
+// errdefer with early return considerations
+fn early_return_errdefer() -> Result<Int, Error> {
+    let resource = acquire()?;
+    errdefer cleanup(resource);
+
+    if is_simple_case() {
+        return Ok(simple_result());  // errdefer NOT called (not error path)
+    }
+
+    if is_error_case() {
+        return Err(Error.Invalid);  // errdefer IS called (error path)
+    }
+
+    let result = complex_operation(resource)?;  // errdefer called if this fails
+    Ok(result)
+}

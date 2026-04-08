@@ -1,0 +1,162 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, map, btree, filter
+// @description: Tests for Map.filter() and BTreeMap.filter() methods
+
+mount core.collections.map.{Map};
+mount core.collections.btree.{BTreeMap};
+
+// =============================================================================
+// Map.filter tests
+// =============================================================================
+
+@test
+fn test_map_filter_by_key() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    let evens = m.filter(|k, _v| *k % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert(evens.contains_key(&2));
+    assert(evens.contains_key(&4));
+}
+
+@test
+fn test_map_filter_by_value() {
+    let mut m = Map.new();
+    m.insert(1, 5);
+    m.insert(2, 15);
+    m.insert(3, 25);
+
+    let large = m.filter(|_k, v| *v >= 15);
+    assert_eq(large.len(), 2);
+    assert_eq(*large.get(&2).unwrap(), 15);
+    assert_eq(*large.get(&3).unwrap(), 25);
+}
+
+@test
+fn test_map_filter_none_match() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let result = m.filter(|_k, _v| false);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_map_filter_all_match() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let result = m.filter(|_k, _v| true);
+    assert_eq(result.len(), 2);
+}
+
+@test
+fn test_map_filter_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let result = m.filter(|_k, _v| true);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_map_filter_preserves_values() {
+    let mut m = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+
+    let filtered = m.filter(|k, _v| *k == 1);
+    assert_eq(*filtered.get(&1).unwrap(), 100);
+}
+
+// =============================================================================
+// BTreeMap.filter tests
+// =============================================================================
+
+@test
+fn test_btreemap_filter_by_key() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    let evens = m.filter(|k, _v| *k % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert(evens.contains_key(&2));
+    assert(evens.contains_key(&4));
+}
+
+@test
+fn test_btreemap_filter_by_value() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 5);
+    m.insert(2, 15);
+    m.insert(3, 25);
+
+    let large = m.filter(|_k, v| *v >= 15);
+    assert_eq(large.len(), 2);
+}
+
+@test
+fn test_btreemap_filter_preserves_order() {
+    let mut m = BTreeMap.new();
+    m.insert(5, 50);
+    m.insert(1, 10);
+    m.insert(3, 30);
+
+    let filtered = m.filter(|k, _v| *k >= 3);
+    let keys = filtered.keys_list();
+    assert_eq(keys[0], 3);
+    assert_eq(keys[1], 5);
+}
+
+@test
+fn test_btreemap_filter_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let result = m.filter(|_k, _v| true);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_btreemap_filter_none_match() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let result = m.filter(|_k, _v| false);
+    assert_eq(result.len(), 0);
+}
+
+// =============================================================================
+// Integration: filter + fold
+// =============================================================================
+
+@test
+fn test_map_filter_then_fold() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    let even_key_sum = m.filter(|k, _v| *k % 2 == 0).fold(0, |acc, _k, v| acc + *v);
+    assert_eq(even_key_sum, 60);  // 20 + 40
+}
+
+@test
+fn test_btreemap_filter_then_fold() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    let even_key_sum = m.filter(|k, _v| *k % 2 == 0).fold(0, |acc, _k, v| acc + *v);
+    assert_eq(even_key_sum, 60);  // 20 + 40
+}

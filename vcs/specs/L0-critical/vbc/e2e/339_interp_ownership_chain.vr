@@ -1,0 +1,434 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, memory, ownership, borrow, transfer, cbgr
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Ownership chain simulation.
+// Models ownership transfer, borrowing (shared/mutable), and return patterns.
+// Tracks ownership state machine: Owned -> Borrowed -> Returned -> Owned.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_fill(v: Int) -> Arr8 {
+    Arr8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// Ownership States:
+// 0 = FREE (no owner)
+// 1 = OWNED (single owner)
+// 2 = SHARED_BORROW (immutably borrowed, can have multiple)
+// 3 = MUT_BORROW (mutably borrowed, exclusive)
+// 4 = MOVED (ownership transferred)
+// =============================================================================
+
+type OwnerSys is {
+    values: Arr8,
+    state: Arr8,
+    owner_id: Arr8,
+    borrow_count: Arr8,
+    borrower_id: Arr8,
+    num_resources: Int,
+    ops_log_count: Int,
+    error_count: Int
+};
+
+fn os_new() -> OwnerSys {
+    OwnerSys {
+        values: a8_new(),
+        state: a8_new(),
+        owner_id: a8_fill(-1),
+        borrow_count: a8_new(),
+        borrower_id: a8_fill(-1),
+        num_resources: 0,
+        ops_log_count: 0,
+        error_count: 0
+    }
+}
+
+// Create a new resource owned by owner_handle
+type OsAllocPair is { sys: OwnerSys, res_id: Int };
+
+fn os_create(sys: OwnerSys, val: Int, owner: Int) -> OsAllocPair {
+    let id = sys.num_resources;
+    OsAllocPair {
+        sys: OwnerSys {
+            values: a8_set(sys.values, id, val),
+            state: a8_set(sys.state, id, 1),  // OWNED
+            owner_id: a8_set(sys.owner_id, id, owner),
+            borrow_count: sys.borrow_count,
+            borrower_id: sys.borrower_id,
+            num_resources: id + 1,
+            ops_log_count: sys.ops_log_count + 1,
+            error_count: sys.error_count
+        },
+        res_id: id
+    }
+}
+
+// Transfer ownership (move)
+// Returns 1 if successful, 0 if not possible
+type OsOpPair is { sys: OwnerSys, ok: Int };
+
+fn os_transfer(sys: OwnerSys, res_id: Int, from_owner: Int, to_owner: Int) -> OsOpPair {
+    let st = a8_get(sys.state, res_id);
+    let cur_owner = a8_get(sys.owner_id, res_id);
+
+    // Can only transfer if OWNED and by current owner
+    if st != 1 || cur_owner != from_owner {
+        return OsOpPair {
+            sys: OwnerSys {
+                values: sys.values, state: sys.state, owner_id: sys.owner_id,
+                borrow_count: sys.borrow_count, borrower_id: sys.borrower_id,
+                num_resources: sys.num_resources,
+                ops_log_count: sys.ops_log_count + 1,
+                error_count: sys.error_count + 1
+            },
+            ok: 0
+        };
+    }
+
+    OsOpPair {
+        sys: OwnerSys {
+            values: sys.values,
+            state: sys.state,  // Still OWNED
+            owner_id: a8_set(sys.owner_id, res_id, to_owner),
+            borrow_count: sys.borrow_count,
+            borrower_id: sys.borrower_id,
+            num_resources: sys.num_resources,
+            ops_log_count: sys.ops_log_count + 1,
+            error_count: sys.error_count
+        },
+        ok: 1
+    }
+}
+
+// Shared borrow
+fn os_borrow_shared(sys: OwnerSys, res_id: Int, borrower: Int) -> OsOpPair {
+    let st = a8_get(sys.state, res_id);
+
+    // Can borrow if OWNED or already SHARED_BORROW (but not MUT_BORROW)
+    if st != 1 && st != 2 {
+        return OsOpPair {
+            sys: OwnerSys {
+                values: sys.values, state: sys.state, owner_id: sys.owner_id,
+                borrow_count: sys.borrow_count, borrower_id: sys.borrower_id,
+                num_resources: sys.num_resources,
+                ops_log_count: sys.ops_log_count + 1,
+                error_count: sys.error_count + 1
+            },
+            ok: 0
+        };
+    }
+
+    let new_count = a8_get(sys.borrow_count, res_id) + 1;
+    OsOpPair {
+        sys: OwnerSys {
+            values: sys.values,
+            state: a8_set(sys.state, res_id, 2),  // SHARED_BORROW
+            owner_id: sys.owner_id,
+            borrow_count: a8_set(sys.borrow_count, res_id, new_count),
+            borrower_id: sys.borrower_id,
+            num_resources: sys.num_resources,
+            ops_log_count: sys.ops_log_count + 1,
+            error_count: sys.error_count
+        },
+        ok: 1
+    }
+}
+
+// Mutable borrow (exclusive)
+fn os_borrow_mut(sys: OwnerSys, res_id: Int, borrower: Int) -> OsOpPair {
+    let st = a8_get(sys.state, res_id);
+
+    // Can only mut borrow if OWNED (no existing borrows)
+    if st != 1 {
+        return OsOpPair {
+            sys: OwnerSys {
+                values: sys.values, state: sys.state, owner_id: sys.owner_id,
+                borrow_count: sys.borrow_count, borrower_id: sys.borrower_id,
+                num_resources: sys.num_resources,
+                ops_log_count: sys.ops_log_count + 1,
+                error_count: sys.error_count + 1
+            },
+            ok: 0
+        };
+    }
+
+    OsOpPair {
+        sys: OwnerSys {
+            values: sys.values,
+            state: a8_set(sys.state, res_id, 3),  // MUT_BORROW
+            owner_id: sys.owner_id,
+            borrow_count: a8_set(sys.borrow_count, res_id, 1),
+            borrower_id: a8_set(sys.borrower_id, res_id, borrower),
+            num_resources: sys.num_resources,
+            ops_log_count: sys.ops_log_count + 1,
+            error_count: sys.error_count
+        },
+        ok: 1
+    }
+}
+
+// Return from shared borrow
+fn os_return_shared(sys: OwnerSys, res_id: Int) -> OwnerSys {
+    let st = a8_get(sys.state, res_id);
+    if st != 2 {
+        return sys;
+    }
+    let new_count = a8_get(sys.borrow_count, res_id) - 1;
+    let new_state = if new_count <= 0 { 1 } else { 2 };  // Back to OWNED if all returned
+    OwnerSys {
+        values: sys.values,
+        state: a8_set(sys.state, res_id, new_state),
+        owner_id: sys.owner_id,
+        borrow_count: a8_set(sys.borrow_count, res_id, new_count),
+        borrower_id: sys.borrower_id,
+        num_resources: sys.num_resources,
+        ops_log_count: sys.ops_log_count + 1,
+        error_count: sys.error_count
+    }
+}
+
+// Return from mutable borrow
+fn os_return_mut(sys: OwnerSys, res_id: Int, new_val: Int) -> OwnerSys {
+    let st = a8_get(sys.state, res_id);
+    if st != 3 {
+        return sys;
+    }
+    OwnerSys {
+        values: a8_set(sys.values, res_id, new_val),
+        state: a8_set(sys.state, res_id, 1),  // Back to OWNED
+        owner_id: sys.owner_id,
+        borrow_count: a8_set(sys.borrow_count, res_id, 0),
+        borrower_id: a8_set(sys.borrower_id, res_id, -1),
+        num_resources: sys.num_resources,
+        ops_log_count: sys.ops_log_count + 1,
+        error_count: sys.error_count
+    }
+}
+
+// Drop (free) a resource
+fn os_drop(sys: OwnerSys, res_id: Int) -> OwnerSys {
+    OwnerSys {
+        values: sys.values,
+        state: a8_set(sys.state, res_id, 0),  // FREE
+        owner_id: a8_set(sys.owner_id, res_id, -1),
+        borrow_count: a8_set(sys.borrow_count, res_id, 0),
+        borrower_id: a8_set(sys.borrower_id, res_id, -1),
+        num_resources: sys.num_resources,
+        ops_log_count: sys.ops_log_count + 1,
+        error_count: sys.error_count
+    }
+}
+
+// Read value
+fn os_read(sys: OwnerSys, res_id: Int) -> Int {
+    a8_get(sys.values, res_id)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_create_and_read() {
+    let s0 = os_new();
+    let p = os_create(s0, 42, 0);
+    assert_eq(os_read(p.sys, p.res_id), 42);
+    assert_eq(a8_get(p.sys.state, p.res_id), 1);  // OWNED
+    assert_eq(a8_get(p.sys.owner_id, p.res_id), 0);
+}
+
+fn test_ownership_transfer() {
+    let s0 = os_new();
+    let p = os_create(s0, 100, 0);  // Owner 0
+
+    // Transfer from owner 0 to owner 1
+    let t = os_transfer(p.sys, p.res_id, 0, 1);
+    assert_eq(t.ok, 1);
+    assert_eq(a8_get(t.sys.owner_id, p.res_id), 1);
+    assert_eq(os_read(t.sys, p.res_id), 100);
+
+    // Transfer from owner 1 to owner 2
+    let t2 = os_transfer(t.sys, p.res_id, 1, 2);
+    assert_eq(t2.ok, 1);
+    assert_eq(a8_get(t2.sys.owner_id, p.res_id), 2);
+}
+
+fn test_wrong_owner_transfer_fails() {
+    let s0 = os_new();
+    let p = os_create(s0, 50, 0);
+
+    // Owner 1 tries to transfer (not the owner)
+    let t = os_transfer(p.sys, p.res_id, 1, 2);
+    assert_eq(t.ok, 0);
+    assert_eq(a8_get(t.sys.owner_id, p.res_id), 0);  // Still owner 0
+    assert_eq(t.sys.error_count, 1);
+}
+
+fn test_shared_borrow() {
+    let s0 = os_new();
+    let p = os_create(s0, 77, 0);
+
+    // Borrow 1
+    let b1 = os_borrow_shared(p.sys, p.res_id, 1);
+    assert_eq(b1.ok, 1);
+    assert_eq(a8_get(b1.sys.state, p.res_id), 2);  // SHARED_BORROW
+    assert_eq(a8_get(b1.sys.borrow_count, p.res_id), 1);
+
+    // Borrow 2 (shared borrows can stack)
+    let b2 = os_borrow_shared(b1.sys, p.res_id, 2);
+    assert_eq(b2.ok, 1);
+    assert_eq(a8_get(b2.sys.borrow_count, p.res_id), 2);
+
+    // Return both
+    let s1 = os_return_shared(b2.sys, p.res_id);
+    assert_eq(a8_get(s1.state, p.res_id), 2);  // Still borrowed (1 remaining)
+    let s2 = os_return_shared(s1, p.res_id);
+    assert_eq(a8_get(s2.state, p.res_id), 1);  // Back to OWNED
+}
+
+fn test_mut_borrow_exclusive() {
+    let s0 = os_new();
+    let p = os_create(s0, 10, 0);
+
+    // Mutable borrow
+    let b = os_borrow_mut(p.sys, p.res_id, 1);
+    assert_eq(b.ok, 1);
+    assert_eq(a8_get(b.sys.state, p.res_id), 3);  // MUT_BORROW
+
+    // Try shared borrow while mut borrowed -> fails
+    let b2 = os_borrow_shared(b.sys, p.res_id, 2);
+    assert_eq(b2.ok, 0);
+
+    // Try another mut borrow -> fails
+    let b3 = os_borrow_mut(b.sys, p.res_id, 3);
+    assert_eq(b3.ok, 0);
+
+    // Return with modified value
+    let s1 = os_return_mut(b.sys, p.res_id, 999);
+    assert_eq(a8_get(s1.state, p.res_id), 1);  // OWNED
+    assert_eq(os_read(s1, p.res_id), 999);
+}
+
+fn test_no_transfer_while_borrowed() {
+    let s0 = os_new();
+    let p = os_create(s0, 50, 0);
+
+    // Shared borrow
+    let b = os_borrow_shared(p.sys, p.res_id, 1);
+
+    // Try transfer while borrowed -> fails (state is SHARED_BORROW, not OWNED)
+    let t = os_transfer(b.sys, p.res_id, 0, 2);
+    assert_eq(t.ok, 0);
+}
+
+fn test_borrow_return_cycle() {
+    let s0 = os_new();
+    let p = os_create(s0, 5, 0);
+
+    // Multiple borrow/return cycles
+    let b1 = os_borrow_shared(p.sys, p.res_id, 1);
+    let s1 = os_return_shared(b1.sys, p.res_id);
+    assert_eq(a8_get(s1.state, p.res_id), 1);
+
+    let b2 = os_borrow_mut(s1, p.res_id, 2);
+    let s2 = os_return_mut(b2.sys, p.res_id, 50);
+    assert_eq(a8_get(s2.state, p.res_id), 1);
+    assert_eq(os_read(s2, p.res_id), 50);
+
+    let b3 = os_borrow_shared(s2, p.res_id, 3);
+    let s3 = os_return_shared(b3.sys, p.res_id);
+    assert_eq(a8_get(s3.state, p.res_id), 1);
+}
+
+fn test_drop_frees_resource() {
+    let s0 = os_new();
+    let p = os_create(s0, 99, 0);
+    let s1 = os_drop(p.sys, p.res_id);
+    assert_eq(a8_get(s1.state, p.res_id), 0);  // FREE
+    assert_eq(a8_get(s1.owner_id, p.res_id), -1);
+}
+
+fn test_complex_ownership_chain() {
+    let s0 = os_new();
+
+    // Create 3 resources
+    let p1 = os_create(s0, 10, 0);
+    let p2 = os_create(p1.sys, 20, 0);
+    let p3 = os_create(p2.sys, 30, 1);
+
+    // Transfer resource 0 from owner 0 to owner 1
+    let t1 = os_transfer(p3.sys, p1.res_id, 0, 1);
+    assert_eq(t1.ok, 1);
+
+    // Owner 1 now has resources 0 and 2
+    // Owner 0 has resource 1
+
+    // Owner 1 borrows resource 1 from owner 0 (shared)
+    let b1 = os_borrow_shared(t1.sys, p2.res_id, 1);
+    assert_eq(b1.ok, 1);
+
+    // Owner 0 also borrows resource 1 (shared, multiple ok)
+    let b2 = os_borrow_shared(b1.sys, p2.res_id, 0);
+    assert_eq(b2.ok, 1);
+    assert_eq(a8_get(b2.sys.borrow_count, p2.res_id), 2);
+
+    // Return all borrows
+    let s1 = os_return_shared(os_return_shared(b2.sys, p2.res_id), p2.res_id);
+    assert_eq(a8_get(s1.state, p2.res_id), 1);  // OWNED
+
+    // Drop all resources
+    let s2 = os_drop(os_drop(os_drop(s1, p1.res_id), p2.res_id), p3.res_id);
+    assert_eq(a8_get(s2.state, 0), 0);
+    assert_eq(a8_get(s2.state, 1), 0);
+    assert_eq(a8_get(s2.state, 2), 0);
+}
+
+fn main() -> Int {
+    test_create_and_read();
+    test_ownership_transfer();
+    test_wrong_owner_transfer_fails();
+    test_shared_borrow();
+    test_mut_borrow_exclusive();
+    test_no_transfer_while_borrowed();
+    test_borrow_return_cycle();
+    test_drop_frees_resource();
+    test_complex_ownership_chain();
+    print("[OK] 339_interp_ownership_chain");
+    0
+}

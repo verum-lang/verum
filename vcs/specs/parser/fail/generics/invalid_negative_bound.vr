@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, generics, negative, bound, error
+// @description: Test invalid negative bound syntax
+// @expected-error: E050
+
+fn test<T: !>() {
+    // Negative bound without protocol name
+}

@@ -1,0 +1,639 @@
+// =============================================================================
+// advanced_test.vr - Tests for advanced math API types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, advanced, simd, precision, cbgr, mixed-precision, kernel,
+//        workspace, tiling, gradient-checkpointing
+// @description: Tests for SimdLevel, Precision, RoundingMode, CBGRStats,
+//               MixedPrecisionContext, KernelVariant, Workspace, and function
+//               import existence from the advanced math module.
+// =============================================================================
+
+mount core.math.advanced.{
+    SimdLevel, Precision, RoundingMode,
+    CBGRStats, MixedPrecisionContext,
+    KernelVariant, Workspace,
+    with_tier1, with_tier2,
+    matmul_tiled, matmul_precise, matmul_into,
+    scale_inplace, add_inplace, mul_inplace, softmax_into,
+    profile, profile_cbgr,
+    cbgr_stats, register_kernel,
+    tensor_with_buffer,
+    allocate_tensor_memory, deallocate_tensor_memory,
+    register_vjp,
+    with_stream, record_event, wait_event, stream_synchronize,
+};
+
+// =============================================================================
+// Section 1: SimdLevel Variants
+// =============================================================================
+
+@test
+fn test_simd_level_scalar() {
+    let s = SimdLevel.Scalar;
+    assert(s is SimdLevel.Scalar);
+}
+
+@test
+fn test_simd_level_sse42() {
+    let s = SimdLevel.Sse42;
+    assert(s is SimdLevel.Sse42);
+}
+
+@test
+fn test_simd_level_avx2() {
+    let s = SimdLevel.Avx2;
+    assert(s is SimdLevel.Avx2);
+}
+
+@test
+fn test_simd_level_avx512() {
+    let s = SimdLevel.Avx512;
+    assert(s is SimdLevel.Avx512);
+}
+
+@test
+fn test_simd_level_neon() {
+    let s = SimdLevel.Neon;
+    assert(s is SimdLevel.Neon);
+}
+
+@test
+fn test_simd_level_distinctness() {
+    assert(!(SimdLevel.Scalar is SimdLevel.Sse42));
+    assert(!(SimdLevel.Scalar is SimdLevel.Avx2));
+    assert(!(SimdLevel.Sse42 is SimdLevel.Avx2));
+    assert(!(SimdLevel.Avx2 is SimdLevel.Avx512));
+    assert(!(SimdLevel.Avx512 is SimdLevel.Neon));
+    assert(!(SimdLevel.Neon is SimdLevel.Scalar));
+}
+
+@test
+fn test_simd_level_match_exhaustive() {
+    let levels = [
+        SimdLevel.Scalar,
+        SimdLevel.Sse42,
+        SimdLevel.Avx2,
+        SimdLevel.Avx512,
+        SimdLevel.Neon,
+    ];
+    let mut counts = [0, 0, 0, 0, 0];
+
+    for level in levels {
+        match level {
+            SimdLevel.Scalar => counts[0] = counts[0] + 1,
+            SimdLevel.Sse42 => counts[1] = counts[1] + 1,
+            SimdLevel.Avx2 => counts[2] = counts[2] + 1,
+            SimdLevel.Avx512 => counts[3] = counts[3] + 1,
+            SimdLevel.Neon => counts[4] = counts[4] + 1,
+        }
+    }
+    assert_eq(counts[0], 1);
+    assert_eq(counts[1], 1);
+    assert_eq(counts[2], 1);
+    assert_eq(counts[3], 1);
+    assert_eq(counts[4], 1);
+}
+
+// =============================================================================
+// Section 2: Precision Variants
+// =============================================================================
+
+@test
+fn test_precision_float64() {
+    let p = Precision.Float64;
+    assert(p is Precision.Float64);
+}
+
+@test
+fn test_precision_float32() {
+    let p = Precision.Float32;
+    assert(p is Precision.Float32);
+}
+
+@test
+fn test_precision_tensorfloat32() {
+    let p = Precision.TensorFloat32;
+    assert(p is Precision.TensorFloat32);
+}
+
+@test
+fn test_precision_float16() {
+    let p = Precision.Float16;
+    assert(p is Precision.Float16);
+}
+
+@test
+fn test_precision_bfloat16() {
+    let p = Precision.BFloat16;
+    assert(p is Precision.BFloat16);
+}
+
+@test
+fn test_precision_distinctness() {
+    assert(!(Precision.Float64 is Precision.Float32));
+    assert(!(Precision.Float32 is Precision.TensorFloat32));
+    assert(!(Precision.TensorFloat32 is Precision.Float16));
+    assert(!(Precision.Float16 is Precision.BFloat16));
+    assert(!(Precision.BFloat16 is Precision.Float64));
+}
+
+@test
+fn test_precision_match_exhaustive() {
+    let precisions = [
+        Precision.Float64,
+        Precision.Float32,
+        Precision.TensorFloat32,
+        Precision.Float16,
+        Precision.BFloat16,
+    ];
+    let mut counts = [0, 0, 0, 0, 0];
+
+    for p in precisions {
+        match p {
+            Precision.Float64 => counts[0] = counts[0] + 1,
+            Precision.Float32 => counts[1] = counts[1] + 1,
+            Precision.TensorFloat32 => counts[2] = counts[2] + 1,
+            Precision.Float16 => counts[3] = counts[3] + 1,
+            Precision.BFloat16 => counts[4] = counts[4] + 1,
+        }
+    }
+    assert_eq(counts[0], 1);
+    assert_eq(counts[1], 1);
+    assert_eq(counts[2], 1);
+    assert_eq(counts[3], 1);
+    assert_eq(counts[4], 1);
+}
+
+// =============================================================================
+// Section 3: RoundingMode Variants
+// =============================================================================
+
+@test
+fn test_rounding_mode_nearest() {
+    let r = RoundingMode.RoundNearest;
+    assert(r is RoundingMode.RoundNearest);
+}
+
+@test
+fn test_rounding_mode_to_zero() {
+    let r = RoundingMode.RoundToZero;
+    assert(r is RoundingMode.RoundToZero);
+}
+
+@test
+fn test_rounding_mode_up() {
+    let r = RoundingMode.RoundUp;
+    assert(r is RoundingMode.RoundUp);
+}
+
+@test
+fn test_rounding_mode_down() {
+    let r = RoundingMode.RoundDown;
+    assert(r is RoundingMode.RoundDown);
+}
+
+@test
+fn test_rounding_mode_distinctness() {
+    assert(!(RoundingMode.RoundNearest is RoundingMode.RoundToZero));
+    assert(!(RoundingMode.RoundNearest is RoundingMode.RoundUp));
+    assert(!(RoundingMode.RoundToZero is RoundingMode.RoundDown));
+    assert(!(RoundingMode.RoundUp is RoundingMode.RoundDown));
+}
+
+@test
+fn test_rounding_mode_match_exhaustive() {
+    let modes = [
+        RoundingMode.RoundNearest,
+        RoundingMode.RoundToZero,
+        RoundingMode.RoundUp,
+        RoundingMode.RoundDown,
+    ];
+    let mut counts = [0, 0, 0, 0];
+
+    for mode in modes {
+        match mode {
+            RoundingMode.RoundNearest => counts[0] = counts[0] + 1,
+            RoundingMode.RoundToZero => counts[1] = counts[1] + 1,
+            RoundingMode.RoundUp => counts[2] = counts[2] + 1,
+            RoundingMode.RoundDown => counts[3] = counts[3] + 1,
+        }
+    }
+    assert_eq(counts[0], 1);
+    assert_eq(counts[1], 1);
+    assert_eq(counts[2], 1);
+    assert_eq(counts[3], 1);
+}
+
+// =============================================================================
+// Section 4: CBGRStats Construction and Methods
+// =============================================================================
+
+@test
+fn test_cbgr_stats_construction() {
+    let stats = CBGRStats {
+        tier0_checks: 1000 as U64,
+        tier1_checks: 500 as U64,
+        tier2_accesses: 100 as U64,
+        total_overhead_ns: 15000 as U64,
+    };
+    assert_eq(stats.tier0_checks, 1000 as U64);
+    assert_eq(stats.tier1_checks, 500 as U64);
+    assert_eq(stats.tier2_accesses, 100 as U64);
+    assert_eq(stats.total_overhead_ns, 15000 as U64);
+}
+
+@test
+fn test_cbgr_stats_all_zeros() {
+    let stats = CBGRStats {
+        tier0_checks: 0 as U64,
+        tier1_checks: 0 as U64,
+        tier2_accesses: 0 as U64,
+        total_overhead_ns: 0 as U64,
+    };
+    let (t0, t1, t2) = stats.tier_distribution();
+    assert_eq(t0, 0.0);
+    assert_eq(t1, 0.0);
+    assert_eq(t2, 0.0);
+}
+
+@test
+fn test_cbgr_stats_tier_distribution_all_tier0() {
+    let stats = CBGRStats {
+        tier0_checks: 100 as U64,
+        tier1_checks: 0 as U64,
+        tier2_accesses: 0 as U64,
+        total_overhead_ns: 1500 as U64,
+    };
+    let (t0, t1, t2) = stats.tier_distribution();
+    assert_eq(t0, 1.0);
+    assert_eq(t1, 0.0);
+    assert_eq(t2, 0.0);
+}
+
+@test
+fn test_cbgr_stats_tier_distribution_even() {
+    let stats = CBGRStats {
+        tier0_checks: 100 as U64,
+        tier1_checks: 100 as U64,
+        tier2_accesses: 100 as U64,
+        total_overhead_ns: 1500 as U64,
+    };
+    let (t0, t1, t2) = stats.tier_distribution();
+    assert(t0 > 0.33);
+    assert(t0 < 0.34);
+    assert(t1 > 0.33);
+    assert(t1 < 0.34);
+    assert(t2 > 0.33);
+    assert(t2 < 0.34);
+}
+
+@test
+fn test_cbgr_stats_tier_distribution_all_tier1() {
+    let stats = CBGRStats {
+        tier0_checks: 0 as U64,
+        tier1_checks: 200 as U64,
+        tier2_accesses: 0 as U64,
+        total_overhead_ns: 0 as U64,
+    };
+    let (t0, t1, t2) = stats.tier_distribution();
+    assert_eq(t0, 0.0);
+    assert_eq(t1, 1.0);
+    assert_eq(t2, 0.0);
+}
+
+@test
+fn test_cbgr_stats_tier_distribution_all_tier2() {
+    let stats = CBGRStats {
+        tier0_checks: 0 as U64,
+        tier1_checks: 0 as U64,
+        tier2_accesses: 50 as U64,
+        total_overhead_ns: 0 as U64,
+    };
+    let (t0, t1, t2) = stats.tier_distribution();
+    assert_eq(t0, 0.0);
+    assert_eq(t1, 0.0);
+    assert_eq(t2, 1.0);
+}
+
+@test
+fn test_cbgr_stats_tier_distribution_mixed() {
+    let stats = CBGRStats {
+        tier0_checks: 50 as U64,
+        tier1_checks: 30 as U64,
+        tier2_accesses: 20 as U64,
+        total_overhead_ns: 750 as U64,
+    };
+    let (t0, t1, t2) = stats.tier_distribution();
+    assert_eq(t0, 0.5);
+    assert_eq(t1, 0.3);
+    assert_eq(t2, 0.2);
+}
+
+@test
+fn test_cbgr_stats_large_values() {
+    let stats = CBGRStats {
+        tier0_checks: 1000000 as U64,
+        tier1_checks: 500000 as U64,
+        tier2_accesses: 500000 as U64,
+        total_overhead_ns: 15000000 as U64,
+    };
+    let (t0, t1, t2) = stats.tier_distribution();
+    assert_eq(t0, 0.5);
+    assert_eq(t1, 0.25);
+    assert_eq(t2, 0.25);
+}
+
+@test
+fn test_cbgr_stats_overhead_field() {
+    let stats = CBGRStats {
+        tier0_checks: 10 as U64,
+        tier1_checks: 20 as U64,
+        tier2_accesses: 30 as U64,
+        total_overhead_ns: 99999 as U64,
+    };
+    assert_eq(stats.total_overhead_ns, 99999 as U64);
+}
+
+// =============================================================================
+// Section 5: MixedPrecisionContext Construction
+// =============================================================================
+
+@test
+fn test_mixed_precision_context_new() {
+    let ctx = MixedPrecisionContext.new();
+    assert_eq(ctx.loss_scale, 65536.0);
+    assert_eq(ctx.growth_factor, 2.0);
+    assert_eq(ctx.backoff_factor, 0.5);
+    assert_eq(ctx.growth_interval, 2000);
+    assert_eq(ctx.steps_since_growth, 0);
+    assert_eq(ctx.overflow_count, 0);
+}
+
+@test
+fn test_mixed_precision_context_with_scale() {
+    let ctx = MixedPrecisionContext.with_scale(1024.0);
+    assert_eq(ctx.loss_scale, 1024.0);
+    assert_eq(ctx.growth_factor, 2.0);
+    assert_eq(ctx.backoff_factor, 0.5);
+    assert_eq(ctx.growth_interval, 2000);
+}
+
+@test
+fn test_mixed_precision_context_with_scale_one() {
+    let ctx = MixedPrecisionContext.with_scale(1.0);
+    assert_eq(ctx.loss_scale, 1.0);
+}
+
+@test
+fn test_mixed_precision_context_with_scale_large() {
+    let ctx = MixedPrecisionContext.with_scale(131072.0);
+    assert_eq(ctx.loss_scale, 131072.0);
+}
+
+@test
+fn test_mixed_precision_context_direct_construction() {
+    let ctx = MixedPrecisionContext {
+        loss_scale: 32768.0,
+        growth_factor: 4.0,
+        backoff_factor: 0.25,
+        growth_interval: 1000,
+        steps_since_growth: 50,
+        overflow_count: 3,
+    };
+    assert_eq(ctx.loss_scale, 32768.0);
+    assert_eq(ctx.growth_factor, 4.0);
+    assert_eq(ctx.backoff_factor, 0.25);
+    assert_eq(ctx.growth_interval, 1000);
+    assert_eq(ctx.steps_since_growth, 50);
+    assert_eq(ctx.overflow_count, 3);
+}
+
+@test
+fn test_mixed_precision_context_new_defaults_match() {
+    let ctx = MixedPrecisionContext.new();
+    let ctx2 = MixedPrecisionContext {
+        loss_scale: 65536.0,
+        growth_factor: 2.0,
+        backoff_factor: 0.5,
+        growth_interval: 2000,
+        steps_since_growth: 0,
+        overflow_count: 0,
+    };
+    assert_eq(ctx.loss_scale, ctx2.loss_scale);
+    assert_eq(ctx.growth_factor, ctx2.growth_factor);
+    assert_eq(ctx.backoff_factor, ctx2.backoff_factor);
+    assert_eq(ctx.growth_interval, ctx2.growth_interval);
+    assert_eq(ctx.steps_since_growth, ctx2.steps_since_growth);
+    assert_eq(ctx.overflow_count, ctx2.overflow_count);
+}
+
+@test
+fn test_mixed_precision_context_with_scale_preserves_defaults() {
+    let ctx = MixedPrecisionContext.with_scale(256.0);
+    let default_ctx = MixedPrecisionContext.new();
+    assert_eq(ctx.growth_factor, default_ctx.growth_factor);
+    assert_eq(ctx.backoff_factor, default_ctx.backoff_factor);
+    assert_eq(ctx.growth_interval, default_ctx.growth_interval);
+    assert_eq(ctx.steps_since_growth, default_ctx.steps_since_growth);
+    assert_eq(ctx.overflow_count, default_ctx.overflow_count);
+}
+
+// =============================================================================
+// Section 6: KernelVariant Type Existence
+// =============================================================================
+
+@test
+fn test_kernel_variant_type_exists() {
+    fn accept_kv(kv: &KernelVariant) -> Bool { true }
+    let _ = accept_kv;
+}
+
+@test
+fn test_kernel_variant_as_return_type() {
+    fn return_kv() -> KernelVariant { panic("type check only") }
+    let _ = return_kv;
+}
+
+@test
+fn test_kernel_variant_has_shared_memory_field() {
+    fn get_shared_mem(kv: &KernelVariant) -> USize { kv.shared_memory }
+    let _ = get_shared_mem;
+}
+
+@test
+fn test_kernel_variant_has_simd_field() {
+    fn get_simd(kv: &KernelVariant) -> &Maybe<SimdLevel> { &kv.simd }
+    let _ = get_simd;
+}
+
+@test
+fn test_kernel_variant_has_compute_capability_field() {
+    fn get_cc(kv: &KernelVariant) -> &Maybe<(USize, USize)> { &kv.compute_capability }
+    let _ = get_cc;
+}
+
+@test
+fn test_kernel_variant_has_block_size_field() {
+    fn get_bs(kv: &KernelVariant) -> &Maybe<(USize, USize)> { &kv.block_size }
+    let _ = get_bs;
+}
+
+@test
+fn test_kernel_variant_in_collection() {
+    fn make_list() -> List<KernelVariant> { panic("type check only") }
+    let _ = make_list;
+}
+
+// =============================================================================
+// Section 7: Workspace Type
+// =============================================================================
+
+@test
+fn test_workspace_type_exists() {
+    fn accept_workspace(w: &Workspace) -> Bool { true }
+    let _ = accept_workspace;
+}
+
+@test
+fn test_workspace_has_size_field() {
+    fn get_size(w: &Workspace) -> USize { w.size }
+    let _ = get_size;
+}
+
+@test
+fn test_workspace_has_offset_field() {
+    fn get_offset(w: &Workspace) -> USize { w.offset }
+    let _ = get_offset;
+}
+
+// =============================================================================
+// Section 8: Function Import Existence — Tiled Operations
+// =============================================================================
+
+@test
+fn test_matmul_tiled_fn_exists() {
+    let _ = matmul_tiled;
+}
+
+@test
+fn test_matmul_precise_fn_exists() {
+    let _ = matmul_precise;
+}
+
+@test
+fn test_matmul_into_fn_exists() {
+    let _ = matmul_into;
+}
+
+// =============================================================================
+// Section 9: Function Import Existence — In-Place Operations
+// =============================================================================
+
+@test
+fn test_scale_inplace_fn_exists() {
+    let _ = scale_inplace;
+}
+
+@test
+fn test_add_inplace_fn_exists() {
+    let _ = add_inplace;
+}
+
+@test
+fn test_mul_inplace_fn_exists() {
+    let _ = mul_inplace;
+}
+
+@test
+fn test_softmax_into_fn_exists() {
+    let _ = softmax_into;
+}
+
+// =============================================================================
+// Section 10: Function Import Existence — CBGR & Profiling
+// =============================================================================
+
+@test
+fn test_with_tier1_fn_exists() {
+    let _ = with_tier1;
+}
+
+@test
+fn test_with_tier2_fn_exists() {
+    let _ = with_tier2;
+}
+
+@test
+fn test_cbgr_stats_fn_exists() {
+    let _ = cbgr_stats;
+}
+
+@test
+fn test_profile_fn_exists() {
+    let _ = profile;
+}
+
+@test
+fn test_profile_cbgr_fn_exists() {
+    let _ = profile_cbgr;
+}
+
+// =============================================================================
+// Section 11: Function Import Existence — Memory Management
+// =============================================================================
+
+@test
+fn test_tensor_with_buffer_fn_exists() {
+    let _ = tensor_with_buffer;
+}
+
+@test
+fn test_allocate_tensor_memory_fn_exists() {
+    let _ = allocate_tensor_memory;
+}
+
+@test
+fn test_deallocate_tensor_memory_fn_exists() {
+    let _ = deallocate_tensor_memory;
+}
+
+// =============================================================================
+// Section 12: Function Import Existence — Kernel & Stream
+// =============================================================================
+
+@test
+fn test_register_kernel_fn_exists() {
+    let _ = register_kernel;
+}
+
+@test
+fn test_register_vjp_fn_exists() {
+    let _ = register_vjp;
+}
+
+@test
+fn test_with_stream_fn_exists() {
+    let _ = with_stream;
+}
+
+@test
+fn test_record_event_fn_exists() {
+    let _ = record_event;
+}
+
+@test
+fn test_wait_event_fn_exists() {
+    let _ = wait_event;
+}
+
+@test
+fn test_stream_synchronize_fn_exists() {
+    let _ = stream_synchronize;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,210 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, escape-analysis, verification
+
+/// Test escape analysis for static elimination of CBGR checks.
+/// When the compiler can prove a reference doesn't escape,
+/// it promotes the reference from managed to checked tier.
+/// This eliminates runtime overhead without sacrificing safety.
+
+fn main() {
+    // All these cases should be verified as "escape-analysis: promoted"
+    test_local_scope_promotion();
+    test_inline_function_promotion();
+    test_loop_local_promotion();
+    test_return_analysis();
+    test_closure_analysis();
+}
+
+/// Local scope - reference doesn't escape
+/// @verify: escape-analysis: promoted to checked
+fn test_local_scope_promotion() {
+    let value = 42;
+    let ref_val = &value;
+
+    // Reference used only in same scope
+    // Compiler can prove it doesn't outlive value
+    let result = *ref_val + 10;
+
+    assert(result == 52);
+    // ref_val ends here, value ends here - no escape
+}
+
+/// Inline function - reference analyzed across call
+/// @verify: escape-analysis: promoted to checked
+fn test_inline_function_promotion() {
+    @inline(always)
+    fn add_value(x: &Int, y: Int) -> Int {
+        // Reference is only used here
+        *x + y
+    }
+
+    let value = 100;
+    let result = add_value(&value, 50);
+
+    // Compiler inlines add_value and sees reference doesn't escape
+    assert(result == 150);
+}
+
+/// Loop local - reference doesn't escape iteration
+/// @verify: escape-analysis: promoted to checked
+fn test_loop_local_promotion() {
+    let data = [1, 2, 3, 4, 5];
+
+    let mut sum = 0;
+    for i in 0..5 {
+        let ref_elem = &data[i];
+        // Reference is loop-local, doesn't escape
+        sum += *ref_elem;
+    }
+
+    assert(sum == 15);
+}
+
+/// Return analysis - track if reference escapes via return
+fn test_return_analysis() {
+    // Case 1: No escape
+    /// @verify: escape-analysis: promoted to checked
+    fn no_escape(x: &Int) -> Int {
+        *x * 2  // Returns value, not reference
+    }
+
+    // Case 2: Bounded escape (same lifetime)
+    /// @verify: escape-analysis: lifetime-bounded
+    fn bounded_escape<'a>(x: &'a Int) -> &'a Int {
+        x  // Returns reference with same lifetime
+    }
+
+    // Case 3: Escape to longer lifetime
+    /// @verify: escape-analysis: requires managed
+    fn long_escape(x: &Int) -> &'static Int {
+        // Would require managed tier
+        // (This wouldn't compile without 'static source)
+        &0  // Returning static reference
+    }
+
+    let value = 42;
+    let r1 = no_escape(&value);
+    let r2 = bounded_escape(&value);
+
+    assert(r1 == 84);
+    assert(*r2 == 42);
+}
+
+/// Closure analysis - track captures
+fn test_closure_analysis() {
+    // Case 1: Closure doesn't capture reference
+    /// @verify: escape-analysis: promoted to checked
+    fn with_value_closure() {
+        let value = 42;
+        let closure = || {
+            value  // Captures by value
+        };
+        let result = closure();
+        assert(result == 42);
+    }
+
+    // Case 2: Closure captures but doesn't escape
+    /// @verify: escape-analysis: promoted to checked
+    fn local_ref_closure() {
+        let value = 42;
+        let ref_val = &value;
+        let closure = || {
+            *ref_val  // Uses ref but returns value
+        };
+        let result = closure();
+        assert(result == 42);
+    }
+
+    // Case 3: Closure escapes (conceptual - simplified for typecheck)
+    /// @verify: escape-analysis: requires managed
+    fn escaping_closure() -> Int {
+        let value = Heap(42);
+        *value  // Conceptually, a closure capturing `value` would escape
+    }
+
+    with_value_closure();
+    local_ref_closure();
+    let escaped = escaping_closure();
+    assert(escaped == 42);
+}
+
+/// Verification annotations for escape analysis
+module verification {
+    /// @invariant: All references proven non-escaping are promoted to checked tier
+    /// @invariant: No runtime CBGR checks for promoted references
+    /// @invariant: Safety is preserved (no unsound promotions)
+
+    /// Analysis phases:
+    /// 1. Build escape graph (which references can escape which scopes)
+    /// 2. Compute fixed point (propagate escape information)
+    /// 3. Classify each reference:
+    ///    - NoEscape: Can be promoted to checked
+    ///    - BoundedEscape: Lifetime analysis needed
+    ///    - FullEscape: Must remain managed
+
+    /// Escape sources:
+    /// - Return statement
+    /// - Store to heap
+    /// - Pass to non-inlined function
+    /// - Capture by escaping closure
+    /// - Send to another thread
+}
+
+/// Advanced: type field analysis
+/// @verify: escape-analysis: field-sensitive
+fn test_field_sensitive_analysis() {
+    type Pair<'a> is {
+        first: &'a Int,
+        second: &'a Int,
+    };
+
+    let a = 10;
+    let b = 20;
+
+    let pair = Pair {
+        first: &a,
+        second: &b,
+    };
+
+    // Compiler tracks each field's escape status
+    let sum = *pair.first + *pair.second;
+
+    // Neither field escapes - both can be checked
+    assert(sum == 30);
+}
+
+/// Advanced: interprocedural analysis
+/// @verify: escape-analysis: interprocedural
+fn test_interprocedural() {
+    // Compiler analyzes call graph
+
+    fn level3(x: &Int) -> Int { *x }
+    fn level2(x: &Int) -> Int { level3(x) }
+    fn level1(x: &Int) -> Int { level2(x) }
+
+    let value = 42;
+    let result = level1(&value);
+
+    // Reference passes through 3 levels but never escapes
+    // With interprocedural analysis, can be checked
+    assert(result == 42);
+}
+
+/// Show the difference in generated code
+fn generated_code_comparison() {
+    let value = 42;
+
+    // Managed (with CBGR checks):
+    // mov rax, [ref_ptr]          ; load value
+    // mov ecx, [ref_gen]          ; load ref generation
+    // cmp ecx, [alloc_header]     ; compare with alloc gen
+    // jne use_after_free_panic    ; panic if mismatch
+    // ; use value in rax
+
+    // Checked (promoted, no checks):
+    // mov rax, [ref_ptr]          ; load value
+    // ; use value in rax
+    // (3 fewer instructions!)
+}

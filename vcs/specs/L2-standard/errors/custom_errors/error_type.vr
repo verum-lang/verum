@@ -1,0 +1,306 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, custom, type, definition
+// @description: Defining custom error types
+
+/// Simple error enum - most common pattern
+type ParseError is
+    | EmptyInput
+    | UnexpectedChar(Char)
+    | UnexpectedEof
+    | InvalidToken { expected: Text, found: Text, position: Int }
+    | Nested(Heap<ParseError>);
+
+implement ParseError {
+    fn description(&self) -> Text {
+        match self {
+            ParseError.EmptyInput => "empty input",
+            ParseError.UnexpectedChar(_) => "unexpected character",
+            ParseError.UnexpectedEof => "unexpected end of input",
+            ParseError.InvalidToken { .. } => "invalid token",
+            ParseError.Nested(_) => "nested parse error"
+        }
+    }
+
+    fn to_text(&self) -> Text {
+        match self {
+            ParseError.EmptyInput =>
+                "Cannot parse empty input",
+            ParseError.UnexpectedChar(c) =>
+                f"Unexpected character: '{c}'",
+            ParseError.UnexpectedEof =>
+                "Unexpected end of input",
+            ParseError.InvalidToken { expected, found, position } =>
+                f"Expected {expected} at position {position}, found {found}",
+            ParseError.Nested(inner) =>
+                f"Parse error: {inner.description()}"
+        }
+    }
+}
+
+/// Struct-based error - for more complex error data
+type ValidationError is {
+    field: Text,
+    value: Text,
+    rule: ValidationRule,
+    message: Text,
+    suggestions: List<Text>
+};
+
+type ValidationRule is
+    | Required
+    | MinLength(Int)
+    | MaxLength(Int)
+    | Pattern(Text)
+    | Range { min: Int, max: Int }
+    | Custom(Text);
+
+implement ValidationError {
+    fn new(field: Text, value: Text, rule: ValidationRule) -> Self {
+        let message = ValidationError.generate_message(&field, &value, &rule);
+        ValidationError {
+            field,
+            value,
+            rule,
+            message,
+            suggestions: List.new()
+        }
+    }
+
+    fn with_suggestion(mut self, suggestion: Text) -> Self {
+        self.suggestions.push(suggestion);
+        self
+    }
+
+    fn generate_message(field: &Text, value: &Text, rule: &ValidationRule) -> Text {
+        match rule {
+            ValidationRule.Required =>
+                f"Field '{field}' is required",
+            ValidationRule.MinLength(min) =>
+                f"Field '{field}' must be at least {min} characters",
+            ValidationRule.MaxLength(max) =>
+                f"Field '{field}' must be at most {max} characters",
+            ValidationRule.Pattern(pattern) =>
+                f"Field '{field}' must match pattern: {pattern}",
+            ValidationRule.Range { min, max } =>
+                f"Field '{field}' must be between {min} and {max}",
+            ValidationRule.Custom(msg) =>
+                f"Field '{field}': {msg}"
+        }
+    }
+}
+
+/// Error with source location
+type CompileError is {
+    kind: CompileErrorKind,
+    location: SourceLocation,
+    notes: List<Note>
+};
+
+type CompileErrorKind is
+    | Syntax(Text)
+    | TypeErr { expected: Text, found: Text }
+    | Undefined(Text)
+    | Duplicate(Text)
+    | Circular(List<Text>);
+
+type SourceLocation is {
+    file: Text,
+    line: Int,
+    column: Int,
+    span: Int
+};
+
+type Note is {
+    message: Text,
+    location: Maybe<SourceLocation>
+};
+
+implement CompileError {
+    fn new(kind: CompileErrorKind, location: SourceLocation) -> Self {
+        CompileError {
+            kind,
+            location,
+            notes: List.new()
+        }
+    }
+
+    fn with_note(mut self, message: Text) -> Self {
+        self.notes.push(Note { message, location: None });
+        self
+    }
+
+    fn with_note_at(mut self, message: Text, location: SourceLocation) -> Self {
+        self.notes.push(Note { message, location: Some(location) });
+        self
+    }
+
+    fn to_text(&self) -> Text {
+        let kind_msg = match &self.kind {
+            CompileErrorKind.Syntax(msg) => f"syntax error: {msg}",
+            CompileErrorKind.TypeErr { expected, found } =>
+                f"type error: expected {expected}, found {found}",
+            CompileErrorKind.Undefined(name) =>
+                f"undefined: {name}",
+            CompileErrorKind.Duplicate(name) =>
+                f"duplicate definition: {name}",
+            CompileErrorKind.Circular(cycle) =>
+                f"circular dependency: {cycle.join(\" => \")}"
+        };
+
+        f"{self.location.file}:{self.location.line}:{self.location.column}: {kind_msg}"
+    }
+}
+
+/// Error with stable error codes
+type NetworkError is {
+    code: NetworkErrorCode,
+    message: Text,
+};
+
+type NetworkErrorCode is
+    | E1001_ConnectionRefused
+    | E1002_ConnectionTimeout
+    | E1003_ConnectionReset
+    | E1004_HostNotFound
+    | E2001_InvalidProtocol
+    | E2002_HandshakeFailed
+    | E2003_InvalidMessage
+    | E2004_VersionMismatch
+    | E3001_ResourceExhausted
+    | E3002_QuotaExceeded
+    | E3003_RateLimited;
+
+implement NetworkErrorCode {
+    fn code(&self) -> Int {
+        match self {
+            NetworkErrorCode.E1001_ConnectionRefused => 1001,
+            NetworkErrorCode.E1002_ConnectionTimeout => 1002,
+            NetworkErrorCode.E1003_ConnectionReset => 1003,
+            NetworkErrorCode.E1004_HostNotFound => 1004,
+            NetworkErrorCode.E2001_InvalidProtocol => 2001,
+            NetworkErrorCode.E2002_HandshakeFailed => 2002,
+            NetworkErrorCode.E2003_InvalidMessage => 2003,
+            NetworkErrorCode.E2004_VersionMismatch => 2004,
+            NetworkErrorCode.E3001_ResourceExhausted => 3001,
+            NetworkErrorCode.E3002_QuotaExceeded => 3002,
+            NetworkErrorCode.E3003_RateLimited => 3003
+        }
+    }
+
+    fn is_retriable(&self) -> Bool {
+        match self {
+            NetworkErrorCode.E1002_ConnectionTimeout => true,
+            NetworkErrorCode.E1003_ConnectionReset => true,
+            NetworkErrorCode.E3003_RateLimited => true,
+            _ => false
+        }
+    }
+
+    fn category(&self) -> Text {
+        let c = self.code();
+        if c >= 1000 && c < 2000 {
+            "connection"
+        } else if c >= 2000 && c < 3000 {
+            "protocol"
+        } else if c >= 3000 && c < 4000 {
+            "resource"
+        } else {
+            "unknown"
+        }
+    }
+}
+
+/// Builder pattern for complex errors
+type RequestError is {
+    status_code: Int,
+    message: Text,
+    request_id: Maybe<Text>,
+    timestamp: Int,
+    details: Map<Text, Text>
+};
+
+type RequestErrorBuilder is {
+    status_code: Int,
+    message: Text,
+    request_id: Maybe<Text>,
+    timestamp: Maybe<Int>,
+    details: Map<Text, Text>
+};
+
+implement RequestErrorBuilder {
+    fn new(status_code: Int, message: Text) -> Self {
+        RequestErrorBuilder {
+            status_code,
+            message,
+            request_id: None,
+            timestamp: None,
+            details: Map.new()
+        }
+    }
+
+    fn request_id(mut self, id: Text) -> Self {
+        self.request_id = Some(id);
+        self
+    }
+
+    fn timestamp(mut self, ts: Int) -> Self {
+        self.timestamp = Some(ts);
+        self
+    }
+
+    fn detail(mut self, key: Text, value: Text) -> Self {
+        self.details.insert(key, value);
+        self
+    }
+
+    fn build(self) -> RequestError {
+        RequestError {
+            status_code: self.status_code,
+            message: self.message,
+            request_id: self.request_id,
+            timestamp: self.timestamp.unwrap_or(0),
+            details: self.details
+        }
+    }
+}
+
+/// Generic wrapper error
+type Wrapped<E> is {
+    inner: E,
+    context: Text
+};
+
+implement<E> Wrapped<E> {
+    fn new(inner: E, context: Text) -> Self {
+        Wrapped { inner, context }
+    }
+
+    fn description(&self) -> Text {
+        self.context.clone()
+    }
+}
+
+fn main() {
+    // Create and use custom errors
+    let parse_err = ParseError.InvalidToken {
+        expected: "identifier",
+        found: "number",
+        position: 42
+    };
+    println(f"Parse error: {parse_err.to_text()}");
+
+    let validation_err = ValidationError.new(
+        "email",
+        "invalid@",
+        ValidationRule.Pattern("^[^@]+@[^@]+$")
+    ).with_suggestion("Include a valid domain after @");
+    println(f"Validation error: {validation_err.message}");
+
+    let request_err = RequestErrorBuilder.new(404, "Not Found")
+        .request_id("req-12345")
+        .detail("path", "/api/users/999")
+        .build();
+    println(f"Request error: {request_err.message} ({request_err.status_code})");
+}

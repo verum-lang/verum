@@ -1,0 +1,291 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, type-inference, hindley-milner, bidirectional
+// @description: Generic type inference - Hindley-Milner with extensions
+
+/// Test for generic type inference.
+/// The type checker infers generic type parameters bidirectionally.
+
+// ============================================================================
+// Basic generic functions
+// ============================================================================
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn make_pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+fn first<A, B>(pair: (A, B)) -> A {
+    pair.0
+}
+
+fn second<A, B>(pair: (A, B)) -> B {
+    pair.1
+}
+
+fn swap<A, B>(pair: (A, B)) -> (B, A) {
+    (pair.1, pair.0)
+}
+
+// ============================================================================
+// Generic container
+// ============================================================================
+
+type Box<T> is {
+    value: T,
+};
+
+implement<T> Box<T> {
+    fn wrap(value: T) -> Box<T> {
+        Box { value }
+    }
+
+    fn unwrap(self) -> T {
+        self.value
+    }
+
+    fn peek(&self) -> &T {
+        &self.value
+    }
+
+    fn transform<U>(self, f: fn(T) -> U) -> Box<U> {
+        Box { value: f(self.value) }
+    }
+}
+
+// ============================================================================
+// Constraint-based inference
+// ============================================================================
+
+fn max_val<T: Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+fn min_val<T: Ord>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+fn clamp<T: Ord>(value: T, low: T, high: T) -> T {
+    if value < low { low }
+    else if value > high { high }
+    else { value }
+}
+
+// ============================================================================
+// Higher-order inference
+// ============================================================================
+
+fn apply<A, B>(f: fn(A) -> B, x: A) -> B {
+    f(x)
+}
+
+fn apply_twice<T>(f: fn(T) -> T, x: T) -> T {
+    f(f(x))
+}
+
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |x: A| g(f(x))
+}
+
+fn flip<A, B, C>(f: fn(A, B) -> C) -> fn(B, A) -> C {
+    |b: B, a: A| f(a, b)
+}
+
+// ============================================================================
+// Maybe inference
+// ============================================================================
+
+fn maybe_map<A, B>(opt: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match opt {
+        Some(v) => Some(f(v)),
+        None => None,
+    }
+}
+
+fn maybe_or<T>(opt: Maybe<T>, default: T) -> T {
+    match opt {
+        Some(v) => v,
+        None => default,
+    }
+}
+
+fn maybe_and_then<A, B>(opt: Maybe<A>, f: fn(A) -> Maybe<B>) -> Maybe<B> {
+    match opt {
+        Some(v) => f(v),
+        None => None,
+    }
+}
+
+// ============================================================================
+// List-based generic inference
+// ============================================================================
+
+fn list_head<T: Clone>(items: List<T>) -> Maybe<T> {
+    if items.len() == 0 {
+        None
+    } else {
+        Some(items[0].clone())
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_map<T, U>(items: List<T>, f: fn(T) -> U) -> List<U> {
+    match items {
+        [] => [],
+        [head, ..tail] => {
+            let mut r = list_map(tail, f);
+            let mut out: List<U> = [f(head)];
+            out.append(&mut r);
+            out
+        },
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Basic identity inference
+    let x = identity(42);  // T = Int inferred
+    assert(x == 42);
+
+    let y = identity("hello");  // T = Text inferred
+    assert(y == "hello");
+
+    let z: Float = identity(3.14);  // T = Float from annotation
+    assert(z == 3.14);
+
+    let b = identity(true);  // T = Bool inferred
+    assert(b == true);
+
+    // Pair inference
+    let p = make_pair(1, "two");  // A = Int, B = Text
+    assert(p.0 == 1);
+    assert(p.1 == "two");
+
+    let p2 = make_pair(true, 99);  // A = Bool, B = Int
+    assert(p2.0 == true);
+    assert(p2.1 == 99);
+
+    // first/second inference
+    let fst = first(make_pair(100, true));
+    assert(fst == 100);
+
+    let snd = second(make_pair(100, "test"));
+    assert(snd == "test");
+
+    // swap inference
+    let swapped = swap((42, "hi"));  // (Int, Text) -> (Text, Int)
+    assert(swapped.0 == "hi");
+    assert(swapped.1 == 42);
+
+    // Box inference
+    let b1 = Box.wrap(42);  // T = Int inferred
+    assert(*b1.peek() == 42);
+
+    let b2 = Box.wrap("hello");  // T = Text inferred
+    assert(*b2.peek() == "hello");
+
+    // transform inference
+    let b3 = Box.wrap(10).transform(|x: Int| x * 2);  // T = Int, U = Int
+    assert(b3.unwrap() == 20);
+
+    let b4 = Box.wrap(21).transform(|x: Int| f"val:{x}");  // T = Int, U = Text
+    assert(b4.unwrap() == "val:21");
+
+    // Chained transforms
+    let b5 = Box.wrap(5)
+        .transform(|x: Int| x * 3)
+        .transform(|x: Int| f"n{x}");
+    assert(b5.unwrap() == "n15");
+
+    // Constraint inference
+    let bigger = max_val(10, 20);
+    assert(bigger == 20);
+
+    let text_max = max_val("apple", "banana");
+    assert(text_max == "banana");
+
+    let smaller = min_val(10, 20);
+    assert(smaller == 10);
+
+    let clamped = clamp(15, 0, 10);
+    assert(clamped == 10);
+    let clamped2 = clamp(5, 0, 10);
+    assert(clamped2 == 5);
+
+    // apply inference
+    let sq = apply(|x: Int| x * x, 7);
+    assert(sq == 49);
+
+    let txt = apply(|n: Int| f"n{n}", 3);
+    assert(txt == "n3");
+
+    // apply_twice inference
+    assert(apply_twice(|x: Int| x * 2, 3) == 12);
+    assert(apply_twice(|s: Text| f"[{s}]", "x") == "[[x]]");
+
+    // compose inference
+    let double_then_str = compose(|x: Int| x * 2, |x: Int| f"{x}");
+    assert(double_then_str(21) == "42");
+
+    let str_then_wrap = compose(|n: Int| f"n{n}", |s: Text| f"[{s}]");
+    assert(str_then_wrap(5) == "[n5]");
+
+    // flip inference
+    let div = |a: Int, b: Int| a / b;
+    let div_flipped = flip(div);
+    assert(div_flipped(2, 10) == 5);  // flip(div)(2, 10) = div(10, 2) = 5
+
+    // Maybe inference
+    let some_42: Maybe<Int> = Some(42);
+    let mapped = maybe_map(some_42, |x: Int| x * 2);
+    assert(mapped == Some(84));
+
+    let none_val: Maybe<Int> = None;
+    let mapped2 = maybe_map(none_val, |x: Int| x * 2);
+    assert(mapped2 == None);
+
+    let v = maybe_or(Some(7), 0);
+    assert(v == 7);
+    let v2 = maybe_or(None, 99);
+    assert(v2 == 99);
+
+    // and_then inference
+    let safe_div = |x: Int| if x == 0 { None } else { Some(100 / x) };
+    assert(maybe_and_then(Some(5), safe_div) == Some(20));
+    assert(maybe_and_then(Some(0), safe_div) == None);
+    assert(maybe_and_then(None, safe_div) == None);
+
+    // list_head inference
+    let h1 = list_head([1, 2, 3]);
+    assert(h1 == Some(1));
+    let h2: Maybe<Int> = list_head([]);
+    assert(h2 == None);
+
+    // list_map inference
+    let doubled = list_map([1, 2, 3], |x: Int| x * 2);
+    assert(doubled == [2, 4, 6]);
+
+    // Nested container inference
+    let inner_box = Box.wrap(99);
+    let outer = Box.wrap(inner_box);
+    let outer_ref = outer.peek();
+    assert(*outer_ref.peek() == 99);
+
+    // Nested pair inference
+    let pair_ab = make_pair(1, 2);
+    let pair_cd = make_pair("a", "b");
+    let nested = make_pair(pair_ab, pair_cd);
+    let n0 = nested.0;
+    let n1 = nested.1;
+    assert(n0.0 == 1);
+    assert(n1.0 == "a");
+
+    print("Generic type inference tests passed!");
+}

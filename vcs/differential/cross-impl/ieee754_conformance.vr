@@ -1,0 +1,435 @@
+// @test: differential
+// @tier: all
+// @impl: all
+// @level: L2
+// @tags: differential, ieee754, float, cross-impl
+// @platform: any
+// @timeout: 15000
+
+/// IEEE 754 floating-point conformance tests.
+/// Verifies that all Verum implementations correctly handle IEEE 754
+/// floating-point arithmetic, special values, and edge cases.
+
+fn main() {
+    test_special_values();
+    test_nan_behavior();
+    test_infinity_arithmetic();
+    test_signed_zero();
+    test_subnormal_numbers();
+    test_rounding_behavior();
+    test_comparison_semantics();
+    test_conversion_semantics();
+    test_precision_edge_cases();
+    test_math_functions();
+}
+
+/// Special IEEE 754 values
+fn test_special_values() {
+    println("=== Special Values ===");
+
+    // Positive and negative infinity
+    let pos_inf: F64 = 1.0 / 0.0;
+    let neg_inf: F64 = -1.0 / 0.0;
+
+    println(f"pos_inf: {pos_inf}");
+    println(f"neg_inf: {neg_inf}");
+    println(f"is_infinite(pos_inf): {pos_inf.is_infinite()}");
+    println(f"is_infinite(neg_inf): {neg_inf.is_infinite()}");
+    println(f"is_positive_infinite: {pos_inf > 0.0 && pos_inf.is_infinite()}");
+    println(f"is_negative_infinite: {neg_inf < 0.0 && neg_inf.is_infinite()}");
+
+    // NaN
+    let nan: F64 = 0.0 / 0.0;
+    println(f"nan: {nan}");
+    println(f"is_nan(nan): {nan.is_nan()}");
+
+    // Quiet vs Signaling NaN (if distinguishable)
+    let quiet_nan = F64.NAN;
+    println(f"quiet_nan: {quiet_nan.is_nan()}");
+
+    // Min/Max values
+    println(f"F64.MAX: {F64.MAX}");
+    println(f"F64.MIN: {F64.MIN}");
+    println(f"F64.MIN_POSITIVE: {F64.MIN_POSITIVE}");
+    println(f"F64.EPSILON: {F64.EPSILON}");
+
+    // F32 equivalents
+    println(f"F32.MAX: {F32.MAX}");
+    println(f"F32.MIN: {F32.MIN}");
+    println(f"F32.EPSILON: {F32.EPSILON}");
+}
+
+/// NaN behavior
+fn test_nan_behavior() {
+    println("\n=== NaN Behavior ===");
+
+    let nan = F64.NAN;
+
+    // NaN comparisons (all should be false except !=)
+    println(f"nan == nan: {nan == nan}");
+    println(f"nan != nan: {nan != nan}");
+    println(f"nan < nan: {nan < nan}");
+    println(f"nan <= nan: {nan <= nan}");
+    println(f"nan > nan: {nan > nan}");
+    println(f"nan >= nan: {nan >= nan}");
+
+    // NaN comparison with regular values
+    let x = 1.0;
+    println(f"nan == 1.0: {nan == x}");
+    println(f"nan < 1.0: {nan < x}");
+    println(f"nan > 1.0: {nan > x}");
+
+    // NaN propagation in arithmetic
+    println(f"nan + 1.0: {(nan + 1.0).is_nan()}");
+    println(f"nan - 1.0: {(nan - 1.0).is_nan()}");
+    println(f"nan * 1.0: {(nan * 1.0).is_nan()}");
+    println(f"nan / 1.0: {(nan / 1.0).is_nan()}");
+    println(f"1.0 / nan: {(1.0 / nan).is_nan()}");
+    println(f"nan.sqrt(): {nan.sqrt().is_nan()}");
+
+    // NaN from invalid operations
+    println(f"0.0 / 0.0 is nan: {(0.0 / 0.0).is_nan()}");
+    println(f"inf - inf is nan: {((1.0/0.0) - (1.0/0.0)).is_nan()}");
+    println(f"(-1.0).sqrt() is nan: {(-1.0f64).sqrt().is_nan()}");
+    println(f"inf * 0.0 is nan: {((1.0/0.0) * 0.0).is_nan()}");
+
+    // total_cmp for NaN ordering
+    println(f"nan.total_cmp(nan): {nan.total_cmp(&nan)}");
+    println(f"nan.total_cmp(1.0): {nan.total_cmp(&1.0)}");
+}
+
+/// Infinity arithmetic
+fn test_infinity_arithmetic() {
+    println("\n=== Infinity Arithmetic ===");
+
+    let inf = F64.INFINITY;
+    let neg_inf = F64.NEG_INFINITY;
+
+    // Addition
+    println(f"inf + 1.0: {inf + 1.0}");
+    println(f"inf + inf: {inf + inf}");
+    println(f"inf + neg_inf is nan: {(inf + neg_inf).is_nan()}");
+
+    // Subtraction
+    println(f"inf - 1.0: {inf - 1.0}");
+    println(f"inf - inf is nan: {(inf - inf).is_nan()}");
+    println(f"inf - neg_inf: {inf - neg_inf}");
+
+    // Multiplication
+    println(f"inf * 2.0: {inf * 2.0}");
+    println(f"inf * -1.0: {inf * -1.0}");
+    println(f"inf * 0.0 is nan: {(inf * 0.0).is_nan()}");
+    println(f"inf * inf: {inf * inf}");
+
+    // Division
+    println(f"inf / 2.0: {inf / 2.0}");
+    println(f"1.0 / inf: {1.0 / inf}");
+    println(f"inf / inf is nan: {(inf / inf).is_nan()}");
+    println(f"0.0 / inf: {0.0 / inf}");
+
+    // Power
+    println(f"inf ** 2.0: {inf.powf(2.0)}");
+    println(f"2.0 ** inf: {2.0f64.powf(inf)}");
+    println(f"0.5 ** inf: {0.5f64.powf(inf)}");
+    println(f"1.0 ** inf: {1.0f64.powf(inf)}");
+
+    // Comparison with infinity
+    println(f"inf > F64.MAX: {inf > F64.MAX}");
+    println(f"neg_inf < F64.MIN: {neg_inf < F64.MIN}");
+}
+
+/// Signed zero behavior
+fn test_signed_zero() {
+    println("\n=== Signed Zero ===");
+
+    let pos_zero: F64 = 0.0;
+    let neg_zero: F64 = -0.0;
+
+    // Equality
+    println(f"0.0 == -0.0: {pos_zero == neg_zero}");
+    println(f"0.0 < -0.0: {pos_zero < neg_zero}");
+    println(f"0.0 > -0.0: {pos_zero > neg_zero}");
+
+    // Bit representation differs
+    println(f"bits differ: {pos_zero.to_bits() != neg_zero.to_bits()}");
+    println(f"pos_zero bits: {pos_zero.to_bits()}");
+    println(f"neg_zero bits: {neg_zero.to_bits()}");
+
+    // Sign detection
+    println(f"pos_zero.is_sign_positive(): {pos_zero.is_sign_positive()}");
+    println(f"neg_zero.is_sign_negative(): {neg_zero.is_sign_negative()}");
+
+    // Division by signed zeros
+    println(f"1.0 / pos_zero: {1.0 / pos_zero}");
+    println(f"1.0 / neg_zero: {1.0 / neg_zero}");
+    println(f"-1.0 / pos_zero: {-1.0 / pos_zero}");
+    println(f"-1.0 / neg_zero: {-1.0 / neg_zero}");
+
+    // Signed zero creation
+    println(f"0.0 * -1.0: {0.0 * -1.0}");
+    println(f"-0.0 * -1.0: {-0.0 * -1.0}");
+
+    // copysign
+    println(f"copysign(1.0, -0.0): {1.0f64.copysign(-0.0)}");
+    println(f"copysign(-1.0, 0.0): {(-1.0f64).copysign(0.0)}");
+}
+
+/// Subnormal (denormalized) numbers
+fn test_subnormal_numbers() {
+    println("\n=== Subnormal Numbers ===");
+
+    // Smallest positive normal
+    let min_normal = F64.MIN_POSITIVE;
+    println(f"MIN_POSITIVE: {min_normal}");
+    println(f"is_normal(MIN_POSITIVE): {min_normal.is_normal()}");
+
+    // Subnormal value
+    let subnormal = min_normal / 2.0;
+    println(f"subnormal: {subnormal}");
+    println(f"is_subnormal: {subnormal.is_subnormal()}");
+    println(f"is_normal(subnormal): {subnormal.is_normal()}");
+
+    // Subnormal arithmetic
+    let tiny = F64.MIN_POSITIVE / 1000.0;
+    println(f"tiny value: {tiny}");
+    println(f"tiny + tiny: {tiny + tiny}");
+    println(f"tiny * 2.0: {tiny * 2.0}");
+
+    // Gradual underflow
+    let mut val = F64.MIN_POSITIVE;
+    for i in 0..5 {
+        val = val / 2.0;
+        println(f"underflow {i}: {val}, subnormal={val.is_subnormal()}");
+    }
+
+    // Flush to zero (implementation-specific)
+    let almost_zero = subnormal / 1e100;
+    println(f"almost_zero: {almost_zero}");
+    println(f"almost_zero == 0.0: {almost_zero == 0.0}");
+
+    // F32 subnormals
+    let f32_min = F32.MIN_POSITIVE;
+    let f32_subnormal = f32_min / 2.0;
+    println(f"F32 subnormal: {f32_subnormal}");
+}
+
+/// Rounding behavior
+fn test_rounding_behavior() {
+    println("\n=== Rounding Behavior ===");
+
+    // Round to nearest even (default mode)
+    let val = 2.5;
+    println(f"round(2.5): {val.round()}");
+    println(f"round(3.5): {3.5f64.round()}");
+    println(f"round(4.5): {4.5f64.round()}");
+    println(f"round(5.5): {5.5f64.round()}");
+
+    // Negative rounding
+    println(f"round(-2.5): {(-2.5f64).round()}");
+    println(f"round(-3.5): {(-3.5f64).round()}");
+
+    // Floor and ceil
+    println(f"floor(2.7): {2.7f64.floor()}");
+    println(f"floor(-2.7): {(-2.7f64).floor()}");
+    println(f"ceil(2.3): {2.3f64.ceil()}");
+    println(f"ceil(-2.3): {(-2.3f64).ceil()}");
+
+    // Truncate
+    println(f"trunc(2.7): {2.7f64.trunc()}");
+    println(f"trunc(-2.7): {(-2.7f64).trunc()}");
+
+    // Rounding of large values
+    let large = 9007199254740992.0;  // 2^53
+    println(f"large: {large}");
+    println(f"large + 1: {large + 1.0}");
+    println(f"large + 2: {large + 2.0}");
+
+    // Precision loss demonstration
+    println(f"0.1 + 0.2: {0.1 + 0.2}");
+    println(f"0.1 + 0.2 == 0.3: {0.1 + 0.2 == 0.3}");
+    println(f"0.1 + 0.2 - 0.3: {0.1 + 0.2 - 0.3}");
+}
+
+/// Comparison semantics
+fn test_comparison_semantics() {
+    println("\n=== Comparison Semantics ===");
+
+    // Basic comparisons
+    let a = 1.0;
+    let b = 2.0;
+    println(f"1.0 < 2.0: {a < b}");
+    println(f"1.0 <= 2.0: {a <= b}");
+    println(f"1.0 == 2.0: {a == b}");
+    println(f"1.0 != 2.0: {a != b}");
+    println(f"1.0 > 2.0: {a > b}");
+    println(f"1.0 >= 2.0: {a >= b}");
+
+    // Equality with epsilon
+    fn nearly_equal(a: F64, b: F64, epsilon: F64) -> Bool {
+        (a - b).abs() < epsilon
+    }
+    println(f"nearly_equal(0.1+0.2, 0.3): {nearly_equal(0.1 + 0.2, 0.3, 1e-10)}");
+
+    // total_cmp for total ordering
+    let nan = F64.NAN;
+    let neg_inf = F64.NEG_INFINITY;
+    let neg_zero = -0.0f64;
+    let pos_zero = 0.0f64;
+    let pos_inf = F64.INFINITY;
+
+    // total_cmp ordering: -NaN < -Inf < -x < -0 < +0 < +x < +Inf < +NaN
+    println(f"neg_inf.total_cmp(neg_zero): {neg_inf.total_cmp(&neg_zero)}");
+    println(f"neg_zero.total_cmp(pos_zero): {neg_zero.total_cmp(&pos_zero)}");
+    println(f"pos_zero.total_cmp(pos_inf): {pos_zero.total_cmp(&pos_inf)}");
+
+    // min/max with NaN
+    println(f"1.0.min(nan): {1.0f64.min(nan)}");
+    println(f"nan.min(1.0): {nan.min(1.0)}");
+    println(f"1.0.max(nan): {1.0f64.max(nan)}");
+
+    // minimum/maximum (IEEE 754-2019)
+    println(f"minimum(1.0, nan): {1.0f64.minimum(nan)}");
+    println(f"maximum(1.0, nan): {1.0f64.maximum(nan)}");
+}
+
+/// Type conversion semantics
+fn test_conversion_semantics() {
+    println("\n=== Conversion Semantics ===");
+
+    // Float to int
+    let f = 3.7;
+    println(f"3.7 as Int: {f as Int}");
+    println(f"-3.7 as Int: {(-3.7) as Int}");
+    println(f"3.2 as Int: {3.2 as Int}");
+
+    // Large float to int (overflow behavior)
+    let large = 1e100f64;
+    let int_result = large.to_int_saturating();
+    println(f"1e100 to_int_saturating: {int_result}");
+
+    // Infinity to int
+    let inf = F64.INFINITY;
+    println(f"inf to_int_saturating: {inf.to_int_saturating()}");
+    println(f"neg_inf to_int_saturating: {F64.NEG_INFINITY.to_int_saturating()}");
+
+    // NaN to int
+    let nan = F64.NAN;
+    let nan_int = nan.to_int_saturating();
+    println(f"nan to_int_saturating: {nan_int}");
+
+    // Int to float
+    let n: I64 = 9007199254740993;  // 2^53 + 1
+    let f64_val: F64 = n as F64;
+    println(f"2^53+1 as F64: {f64_val}");
+    println(f"roundtrip: {f64_val as I64}");
+
+    // F32 to F64 and back
+    let f32_val: F32 = 3.14159;
+    let f64_val: F64 = f32_val as F64;
+    let back: F32 = f64_val as F32;
+    println(f"F32->F64->F32: {f32_val} -> {f64_val} -> {back}");
+
+    // Bit conversions
+    let bits = 0x4009249249249249u64;  // Representation of pi
+    let from_bits = F64.from_bits(bits);
+    println(f"from_bits: {from_bits}");
+    println(f"to_bits: 0x{from_bits.to_bits():x}");
+}
+
+/// Precision edge cases
+fn test_precision_edge_cases() {
+    println("\n=== Precision Edge Cases ===");
+
+    // Classic 0.1 + 0.2 problem
+    println(f"0.1: {0.1f64:r}");
+    println(f"0.2: {0.2f64:r}");
+    println(f"0.1 + 0.2: {(0.1 + 0.2):r}");
+    println(f"0.3: {0.3f64:r}");
+
+    // Catastrophic cancellation
+    let a = 1.0000000000000002;
+    let b = 1.0000000000000001;
+    println(f"1.0000000000000002 - 1.0000000000000001: {a - b}");
+
+    // Associativity failure
+    let x = 1e-16;
+    let y = 1.0;
+    let z = -1.0;
+    println(f"(x + y) + z: {(x + y) + z}");
+    println(f"x + (y + z): {x + (y + z)}");
+    println(f"equal: {(x + y) + z == x + (y + z)}");
+
+    // Distributivity failure
+    let a = 1e20;
+    let b = -1e20;
+    let c = 1.0;
+    println(f"a * c + b * c: {a * c + b * c}");
+    println(f"(a + b) * c: {(a + b) * c}");
+
+    // Epsilon comparison
+    let eps = F64.EPSILON;
+    println(f"1.0 + eps > 1.0: {1.0 + eps > 1.0}");
+    println(f"1.0 + eps/2 > 1.0: {1.0 + eps / 2.0 > 1.0}");
+    println(f"1.0 + eps/2 == 1.0: {1.0 + eps / 2.0 == 1.0}");
+
+    // ULP (Unit in Last Place)
+    fn ulp_diff(a: F64, b: F64) -> I64 {
+        (a.to_bits() as I64 - b.to_bits() as I64).abs()
+    }
+    println(f"ulp_diff(1.0, 1.0 + eps): {ulp_diff(1.0, 1.0 + eps)}");
+
+    // Large number precision
+    let large = 1e15;
+    println(f"1e15 + 1: {large + 1.0}");
+    println(f"1e15 + 1 - 1e15: {(large + 1.0) - large}");
+
+    let very_large = 1e16;
+    println(f"1e16 + 1: {very_large + 1.0}");
+    println(f"1e16 + 1 - 1e16: {(very_large + 1.0) - very_large}");
+}
+
+/// Math function behavior
+fn test_math_functions() {
+    println("\n=== Math Functions ===");
+
+    // Square root
+    println(f"sqrt(2.0): {2.0f64.sqrt()}");
+    println(f"sqrt(0.0): {0.0f64.sqrt()}");
+    println(f"sqrt(-0.0): {(-0.0f64).sqrt()}");
+    println(f"sqrt(-1.0) is nan: {(-1.0f64).sqrt().is_nan()}");
+    println(f"sqrt(inf): {F64.INFINITY.sqrt()}");
+
+    // Power
+    println(f"2.0^10.0: {2.0f64.powf(10.0)}");
+    println(f"0.0^0.0: {0.0f64.powf(0.0)}");
+    println(f"0.0^1.0: {0.0f64.powf(1.0)}");
+    println(f"1.0^inf: {1.0f64.powf(F64.INFINITY)}");
+    println(f"(-1.0)^inf: {(-1.0f64).powf(F64.INFINITY)}");
+
+    // Exponential and logarithm
+    println(f"exp(1.0): {1.0f64.exp()}");
+    println(f"exp(-inf): {F64.NEG_INFINITY.exp()}");
+    println(f"exp(inf): {F64.INFINITY.exp()}");
+    println(f"ln(1.0): {1.0f64.ln()}");
+    println(f"ln(0.0): {0.0f64.ln()}");
+    println(f"ln(-1.0) is nan: {(-1.0f64).ln().is_nan()}");
+
+    // Trigonometric
+    println(f"sin(0.0): {0.0f64.sin()}");
+    println(f"cos(0.0): {0.0f64.cos()}");
+    println(f"tan(0.0): {0.0f64.tan()}");
+    println(f"sin(inf) is nan: {F64.INFINITY.sin().is_nan()}");
+
+    // Hyperbolic
+    println(f"sinh(0.0): {0.0f64.sinh()}");
+    println(f"cosh(0.0): {0.0f64.cosh()}");
+
+    // fma (fused multiply-add)
+    println(f"fma(2.0, 3.0, 4.0): {2.0f64.mul_add(3.0, 4.0)}");
+
+    // abs
+    println(f"abs(-3.14): {(-3.14f64).abs()}");
+    println(f"abs(-0.0): {(-0.0f64).abs()}");
+    println(f"abs(nan): {F64.NAN.abs()}");
+    println(f"abs(-inf): {F64.NEG_INFINITY.abs()}");
+}

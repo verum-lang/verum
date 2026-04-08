@@ -1,0 +1,68 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, threading, shared, counter
+// @expected-exit: 0
+
+// Test: shared counter pattern — multiple "threads" summing a range.
+// Uses pure function sum_range to compute partial sums.
+
+fn sum_range(start: Int, end: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < end) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Verify sum_range for n=1000: sum 0..999 = 999*1000/2 = 499500
+    let n = 1000;
+    let result = sum_range(0, n);
+    let expected = n * (n - 1) / 2;
+    if (result != expected) {
+        print(f"FAIL: sum_range(0,{n})={result}, expected={expected}");
+        return 1;
+    }
+
+    // Simulate multiple threads by splitting work into 4 chunks
+    let chunk = n / 4;
+    let t1 = sum_range(0, chunk);
+    let t2 = sum_range(chunk, chunk * 2);
+    let t3 = sum_range(chunk * 2, chunk * 3);
+    let t4 = sum_range(chunk * 3, n);
+    let combined = t1 + t2 + t3 + t4;
+    if (combined != expected) {
+        print(f"FAIL: combined={combined}, expected={expected}");
+        return 1;
+    }
+
+    // Simulate 10-way split
+    let chunk10 = n / 10;
+    let mut total10 = 0;
+    let mut part = 0;
+    while (part < 10) {
+        let s = part * chunk10;
+        let e = if (part == 9) { n } else { (part + 1) * chunk10 };
+        total10 = total10 + sum_range(s, e);
+        part = part + 1;
+    }
+    if (total10 != expected) {
+        print(f"FAIL: total10={total10}, expected={expected}");
+        return 1;
+    }
+
+    // Larger test: n=10000
+    let n2 = 10000;
+    let expected2 = n2 * (n2 - 1) / 2;
+    let result2 = sum_range(0, n2);
+    if (result2 != expected2) {
+        print(f"FAIL: sum_range(0,{n2})={result2}, expected={expected2}");
+        return 1;
+    }
+
+    print("852_thread_shared_counter: PASS");
+    0
+}

@@ -1,0 +1,93 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: protocol, dyn, dispatch, vtable
+// @expect: pass
+
+// Test real dynamic dispatch with &dyn Protocol.
+
+type Shape is protocol {
+    fn area(&self) -> Int;
+};
+
+type Circle is { radius: Int };
+type Rect is { width: Int, height: Int };
+type Triangle is { base: Int, height: Int };
+
+implement Shape for Circle {
+    fn area(&self) -> Int {
+        self.radius * self.radius * 3  // Approximate π≈3
+    }
+}
+
+implement Shape for Rect {
+    fn area(&self) -> Int {
+        self.width * self.height
+    }
+}
+
+implement Shape for Triangle {
+    fn area(&self) -> Int {
+        self.base * self.height / 2
+    }
+}
+
+// Generic function using dyn dispatch
+fn describe_shape(s: &dyn Shape) -> Int {
+    s.area()
+}
+
+fn sum_areas(shapes: List<&dyn Shape>) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < shapes.len() {
+        total = total + shapes[i].area();
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    let c = Circle { radius: 5 };
+    let r = Rect { width: 4, height: 6 };
+    let t = Triangle { base: 10, height: 8 };
+
+    // Direct calls (should work)
+    if c.area() != 75 {
+        print(f"FAIL: circle area = {c.area()}, expected 75");
+        return 1;
+    }
+    if r.area() != 24 {
+        print(f"FAIL: rect area = {r.area()}, expected 24");
+        return 1;
+    }
+    if t.area() != 40 {
+        print(f"FAIL: triangle area = {t.area()}, expected 40");
+        return 1;
+    }
+
+    // Dynamic dispatch through &dyn Shape
+    let ca = describe_shape(&c);
+    let ra = describe_shape(&r);
+    let ta = describe_shape(&t);
+
+    print(f"Circle via dyn: {ca}");
+    print(f"Rect via dyn: {ra}");
+    print(f"Triangle via dyn: {ta}");
+
+    if ca != 75 {
+        print(f"FAIL: dyn circle = {ca}, expected 75");
+        return 1;
+    }
+    if ra != 24 {
+        print(f"FAIL: dyn rect = {ra}, expected 24");
+        return 1;
+    }
+    if ta != 40 {
+        print(f"FAIL: dyn triangle = {ta}, expected 40");
+        return 1;
+    }
+
+    print("PASS: dyn dispatch works correctly");
+    0
+}

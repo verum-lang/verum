@@ -1,0 +1,259 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, reservoir-sampling, prng, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for reservoir sampling with deterministic PRNG (LCG)
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int, len: Int };
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: n }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 }
+    else if i == 2 { a.d2 } else if i == 3 { a.d3 }
+    else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 },
+        len: a.len
+    }
+}
+
+// === Linear Congruential Generator (LCG) ===
+// state = (a * state + c) mod m
+// Using parameters: a=1103515245, c=12345, m=2^31 = 2147483648
+type Rng is { state: Int };
+
+fn rng_new(seed: Int) -> Rng { Rng { state: seed } }
+
+fn rng_next(rng: Rng) -> Rng {
+    // (1103515245 * state + 12345) mod 2147483648
+    let new_state = (1103515245 * rng.state + 12345) % 2147483648;
+    // Make sure it stays positive
+    let ns = if new_state < 0 { -new_state } else { new_state };
+    Rng { state: ns }
+}
+
+fn rng_value(rng: Rng) -> Int { rng.state }
+
+// Random integer in range [0, upper) using modulo
+fn rng_range(rng: Rng, upper: Int) -> Int {
+    if upper <= 0 { return 0; }
+    rng.state % upper
+}
+
+// === Reservoir Sampling (Algorithm R) ===
+// Select k items from a stream of n items (n > k)
+// Stream values are 0, 1, 2, ..., n-1
+// Returns reservoir of k selected items
+type ReservoirState is { reservoir: Arr8, rng: Rng };
+
+fn reservoir_sample(n: Int, k: Int, seed: Int) -> Arr8 {
+    // Fill reservoir with first k items
+    let mut res = arr8_new(k);
+    let mut i = 0;
+    while i < k {
+        res = arr8_set(res, i, i);
+        i = i + 1;
+    }
+
+    // Process remaining items
+    let mut rng = rng_new(seed);
+    i = k;
+    while i < n {
+        rng = rng_next(rng);
+        let j = rng_range(rng, i + 1);  // Random index in [0, i]
+        if j < k {
+            res = arr8_set(res, j, i);  // Replace element j with item i
+        }
+        i = i + 1;
+    }
+    res
+}
+
+// === Weighted reservoir sampling (simplified) ===
+// Items with higher weights should appear more often
+// Weight of item i = weight_func(i)
+fn weighted_reservoir(n: Int, k: Int, seed: Int) -> Arr8 {
+    let mut res = arr8_new(k);
+    let mut best_keys = arr8_new(k);  // Stores priority keys
+    let mut rng = rng_new(seed);
+
+    // Initialize with first k items
+    let mut i = 0;
+    while i < k {
+        rng = rng_next(rng);
+        let key = rng_range(rng, 1000);
+        res = arr8_set(res, i, i);
+        best_keys = arr8_set(best_keys, i, key);
+        i = i + 1;
+    }
+
+    // Process remaining: replace if new key > min key
+    i = k;
+    while i < n {
+        rng = rng_next(rng);
+        let key = rng_range(rng, 1000);
+
+        // Find minimum key in reservoir
+        let mut min_idx = 0;
+        let mut min_key = arr8_get(best_keys, 0);
+        let mut j = 1;
+        while j < k {
+            if arr8_get(best_keys, j) < min_key {
+                min_key = arr8_get(best_keys, j);
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+
+        if key > min_key {
+            res = arr8_set(res, min_idx, i);
+            best_keys = arr8_set(best_keys, min_idx, key);
+        }
+        i = i + 1;
+    }
+    res
+}
+
+// Check if value exists in reservoir
+fn reservoir_contains(res: Arr8, val: Int) -> Bool {
+    let mut i = 0;
+    while i < res.len {
+        if arr8_get(res, i) == val { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// Check all values are in valid range [0, n)
+fn all_in_range(res: Arr8, n: Int) -> Bool {
+    let mut i = 0;
+    while i < res.len {
+        let v = arr8_get(res, i);
+        if v < 0 || v >= n { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Check no duplicates in reservoir
+fn no_duplicates(res: Arr8) -> Bool {
+    let mut i = 0;
+    while i < res.len {
+        let mut j = i + 1;
+        while j < res.len {
+            if arr8_get(res, i) == arr8_get(res, j) { return false; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_rng_deterministic() {
+    let r1 = rng_new(42);
+    let r2 = rng_next(r1);
+    let r3 = rng_next(r2);
+
+    // Same seed should give same sequence
+    let s1 = rng_new(42);
+    let s2 = rng_next(s1);
+    let s3 = rng_next(s2);
+
+    assert_eq(rng_value(r2), rng_value(s2));
+    assert_eq(rng_value(r3), rng_value(s3));
+}
+
+fn test_rng_different_seeds() {
+    let r1 = rng_next(rng_new(1));
+    let r2 = rng_next(rng_new(2));
+    // Different seeds should give different values
+    let diff = rng_value(r1) - rng_value(r2);
+    let absdiff = if diff < 0 { -diff } else { diff };
+    assert_eq(absdiff > 0, true);
+}
+
+fn test_reservoir_basic() {
+    // Select 3 items from stream of 20
+    let res = reservoir_sample(20, 3, 42);
+    assert_eq(res.len, 3);
+    assert_eq(all_in_range(res, 20), true);
+    assert_eq(no_duplicates(res), true);
+}
+
+fn test_reservoir_k_equals_n() {
+    // Select 5 from 5 => should contain all 5
+    let res = reservoir_sample(5, 5, 99);
+    assert_eq(res.len, 5);
+    // All items should be present (just potentially reordered)
+    assert_eq(all_in_range(res, 5), true);
+    assert_eq(no_duplicates(res), true);
+    // Must contain every item 0..4
+    assert_eq(reservoir_contains(res, 0), true);
+    assert_eq(reservoir_contains(res, 1), true);
+    assert_eq(reservoir_contains(res, 2), true);
+    assert_eq(reservoir_contains(res, 3), true);
+    assert_eq(reservoir_contains(res, 4), true);
+}
+
+fn test_reservoir_deterministic() {
+    // Same seed => same result
+    let r1 = reservoir_sample(50, 4, 12345);
+    let r2 = reservoir_sample(50, 4, 12345);
+    assert_eq(arr8_get(r1, 0), arr8_get(r2, 0));
+    assert_eq(arr8_get(r1, 1), arr8_get(r2, 1));
+    assert_eq(arr8_get(r1, 2), arr8_get(r2, 2));
+    assert_eq(arr8_get(r1, 3), arr8_get(r2, 3));
+}
+
+fn test_reservoir_different_seeds() {
+    let r1 = reservoir_sample(100, 4, 111);
+    let r2 = reservoir_sample(100, 4, 222);
+    // Very unlikely to be identical (possible but extremely rare)
+    // At least one element should differ
+    let same_count = (if arr8_get(r1, 0) == arr8_get(r2, 0) { 1 } else { 0 })
+                   + (if arr8_get(r1, 1) == arr8_get(r2, 1) { 1 } else { 0 })
+                   + (if arr8_get(r1, 2) == arr8_get(r2, 2) { 1 } else { 0 })
+                   + (if arr8_get(r1, 3) == arr8_get(r2, 3) { 1 } else { 0 });
+    assert_eq(same_count < 4, true);  // Not all same
+}
+
+fn test_weighted_reservoir() {
+    let res = weighted_reservoir(30, 4, 7777);
+    assert_eq(res.len, 4);
+    assert_eq(all_in_range(res, 30), true);
+    assert_eq(no_duplicates(res), true);
+}
+
+fn test_reservoir_large_stream() {
+    // Select 2 from 200
+    let res = reservoir_sample(200, 2, 54321);
+    assert_eq(res.len, 2);
+    assert_eq(all_in_range(res, 200), true);
+    assert_eq(no_duplicates(res), true);
+}
+
+fn main() -> Int {
+    test_rng_deterministic();
+    test_rng_different_seeds();
+    test_reservoir_basic();
+    test_reservoir_k_equals_n();
+    test_reservoir_deterministic();
+    test_reservoir_different_seeds();
+    test_weighted_reservoir();
+    test_reservoir_large_stream();
+    print("[OK] 284_reservoir_sample_aot");
+    0
+}

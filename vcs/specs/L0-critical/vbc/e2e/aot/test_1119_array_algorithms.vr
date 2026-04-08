@@ -1,0 +1,200 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: algorithms, array, search, sort
+// @description: Test array-based algorithm implementations
+
+fn binary_search(items: List<Int>, target: Int) -> Int {
+    let mut low = 0;
+    let mut high = items.len() - 1;
+    while low <= high {
+        let mid = (low + high) / 2;
+        if items[mid] == target {
+            return mid;
+        }
+        if items[mid] < target {
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    -1
+}
+
+fn test_binary_search() -> Int {
+    let mut items = List.new();
+    let mut i = 0;
+    while i < 20 {
+        items.push(i * 3);
+        i = i + 1;
+    }
+    // items = [0, 3, 6, 9, 12, 15, 18, ...]
+    let idx = binary_search(items, 12);
+    if idx != 4 {
+        print(f"FAIL binary_search: idx={idx}, expected 4");
+        return 1;
+    }
+    let not_found = binary_search(items, 7);
+    if not_found != -1 {
+        print(f"FAIL binary_search_miss: {not_found}");
+        return 1;
+    }
+    print("  binary_search: OK");
+    0
+}
+
+fn insertion_sort(items: List<Int>) {
+    let mut i = 1;
+    while i < items.len() {
+        let key = items[i];
+        let mut j = i - 1;
+        while j >= 0 && items[j] > key {
+            items[j + 1] = items[j];
+            j = j - 1;
+        }
+        items[j + 1] = key;
+        i = i + 1;
+    }
+}
+
+fn test_insertion_sort() -> Int {
+    let mut items = List.new();
+    items.push(5);
+    items.push(2);
+    items.push(8);
+    items.push(1);
+    items.push(9);
+    items.push(3);
+    insertion_sort(items);
+    if items[0] != 1 || items[1] != 2 || items[2] != 3 {
+        print(f"FAIL sort: [{items[0]}, {items[1]}, {items[2]}]");
+        return 1;
+    }
+    if items[3] != 5 || items[4] != 8 || items[5] != 9 {
+        print(f"FAIL sort tail: [{items[3]}, {items[4]}, {items[5]}]");
+        return 1;
+    }
+    print("  insertion_sort: OK");
+    0
+}
+
+fn max_subarray_sum(items: List<Int>) -> Int {
+    let mut max_sum = items[0];
+    let mut current = items[0];
+    let mut i = 1;
+    while i < items.len() {
+        if current + items[i] > items[i] {
+            current = current + items[i];
+        } else {
+            current = items[i];
+        }
+        if current > max_sum {
+            max_sum = current;
+        }
+        i = i + 1;
+    }
+    max_sum
+}
+
+fn test_max_subarray() -> Int {
+    let mut items = List.new();
+    items.push(-2);
+    items.push(1);
+    items.push(-3);
+    items.push(4);
+    items.push(-1);
+    items.push(2);
+    items.push(1);
+    items.push(-5);
+    items.push(4);
+    // Max subarray: [4, -1, 2, 1] = 6
+    let result = max_subarray_sum(items);
+    if result != 6 {
+        print(f"FAIL max_subarray: {result}, expected 6");
+        return 1;
+    }
+    print("  max_subarray: OK");
+    0
+}
+
+fn two_sum(items: List<Int>, target: Int) -> Int {
+    // O(n^2) brute force
+    let mut i = 0;
+    while i < items.len() {
+        let mut j = i + 1;
+        while j < items.len() {
+            if items[i] + items[j] == target {
+                return i * 100 + j;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn test_two_sum() -> Int {
+    let mut nums = List.new();
+    nums.push(2);
+    nums.push(7);
+    nums.push(11);
+    nums.push(15);
+    let result = two_sum(nums, 9);
+    // indices 0 and 1: 0*100 + 1 = 1
+    if result != 1 {
+        print(f"FAIL two_sum: {result}, expected 1");
+        return 1;
+    }
+    let none = two_sum(nums, 3);
+    if none != -1 {
+        print(f"FAIL two_sum_miss: {none}");
+        return 1;
+    }
+    print("  two_sum: OK");
+    0
+}
+
+fn reverse_list(items: List<Int>) {
+    let mut left = 0;
+    let mut right = items.len() - 1;
+    while left < right {
+        let tmp = items[left];
+        items[left] = items[right];
+        items[right] = tmp;
+        left = left + 1;
+        right = right - 1;
+    }
+}
+
+fn test_reverse() -> Int {
+    let mut items = List.new();
+    items.push(1);
+    items.push(2);
+    items.push(3);
+    items.push(4);
+    items.push(5);
+    reverse_list(items);
+    if items[0] != 5 || items[4] != 1 {
+        print(f"FAIL reverse: [{items[0]}, ..., {items[4]}]");
+        return 1;
+    }
+    print("  reverse: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Array Algorithm Tests:");
+    let mut failures = 0;
+    failures = failures + test_binary_search();
+    failures = failures + test_insertion_sort();
+    failures = failures + test_max_subarray();
+    failures = failures + test_two_sum();
+    failures = failures + test_reverse();
+
+    if failures == 0 {
+        print("All array algorithm tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

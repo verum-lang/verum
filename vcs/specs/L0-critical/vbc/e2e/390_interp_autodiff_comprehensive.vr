@@ -1,0 +1,533 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, comprehensive, dual, tape, gradient-descent
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Comprehensive autodiff test
+// Combines forward-mode (dual numbers), reverse-mode (tape), numerical
+// differentiation, gradient descent, chain/product rules, and higher-order.
+// 50+ assertions. Integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn sdiv(a: Int, b: Int) -> Int {
+    (a * scale()) / b
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Part 1: Forward-mode (dual numbers)
+// =============================================================================
+
+type Dual is { val: Int, deriv: Int };
+
+fn dual_var(x: Int) -> Dual { Dual { val: x, deriv: scale() } }
+fn dual_const(c: Int) -> Dual { Dual { val: c, deriv: 0 } }
+fn dual_add(a: Dual, b: Dual) -> Dual { Dual { val: a.val + b.val, deriv: a.deriv + b.deriv } }
+fn dual_sub(a: Dual, b: Dual) -> Dual { Dual { val: a.val - b.val, deriv: a.deriv - b.deriv } }
+fn dual_mul(a: Dual, b: Dual) -> Dual {
+    Dual { val: smul(a.val, b.val), deriv: smul(a.deriv, b.val) + smul(a.val, b.deriv) }
+}
+fn dual_sq(a: Dual) -> Dual { dual_mul(a, a) }
+
+fn test_dual_basic() {
+    // f(x) = x^2 + 3x - 2, f'(x) = 2x + 3
+    // At x=4: f(4) = 16+12-2 = 26, f'(4) = 11
+    let x = dual_var(4 * scale());
+    let three = dual_const(3 * scale());
+    let two = dual_const(2 * scale());
+    let result = dual_sub(dual_add(dual_sq(x), dual_mul(three, x)), two);
+    assert_eq(result.val, 26 * scale());   // assertion 1
+    assert_eq(result.deriv, 11 * scale()); // assertion 2
+
+    // f(x) = x^3 at x=2: f(2)=8, f'(2)=12
+    let x2 = dual_var(2 * scale());
+    let cube = dual_mul(dual_mul(x2, x2), x2);
+    assert_eq(cube.val, 8 * scale());      // 3
+    assert_eq(cube.deriv, 12 * scale());   // 4
+
+    // f(x) = (x+1)(x-1) = x^2-1 at x=3: f=8, f'=6
+    let x3 = dual_var(3 * scale());
+    let one = dual_const(scale());
+    let prod = dual_mul(dual_add(x3, one), dual_sub(x3, one));
+    assert_eq(prod.val, 8 * scale());      // 5
+    assert_eq(prod.deriv, 6 * scale());    // 6
+}
+
+fn test_dual_higher_power() {
+    // f(x) = x^4, f'(x) = 4x^3
+    // At x=2: f=16, f'=32
+    let x = dual_var(2 * scale());
+    let x2 = dual_sq(x);
+    let x4 = dual_sq(x2);
+    assert_eq(x4.val, 16 * scale());       // 7
+    assert_eq(x4.deriv, 32 * scale());     // 8
+}
+
+// =============================================================================
+// Part 2: Reverse-mode (tape)
+// =============================================================================
+
+type Arr16 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int,
+                e8: Int, e9: Int, e10: Int, e11: Int, e12: Int, e13: Int, e14: Int, e15: Int };
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn a16_zeros() -> Arr16 {
+    Arr16 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+            e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 }
+}
+
+type Tape is { ops: Arr16, arg1s: Arr16, arg2s: Arr16, vals: Arr16, sz: Int };
+
+fn t_new() -> Tape {
+    Tape { ops: a16_zeros(), arg1s: a16_zeros(), arg2s: a16_zeros(), vals: a16_zeros(), sz: 0 }
+}
+
+fn t_const(t: Tape, val: Int) -> Tape {
+    let i = t.sz;
+    Tape { ops: a16_set(t.ops, i, 0), arg1s: a16_set(t.arg1s, i, -1),
+           arg2s: a16_set(t.arg2s, i, -1), vals: a16_set(t.vals, i, val), sz: t.sz + 1 }
+}
+
+fn t_add(t: Tape, a1: Int, a2: Int) -> Tape {
+    let i = t.sz;
+    Tape { ops: a16_set(t.ops, i, 1), arg1s: a16_set(t.arg1s, i, a1),
+           arg2s: a16_set(t.arg2s, i, a2),
+           vals: a16_set(t.vals, i, a16_get(t.vals, a1) + a16_get(t.vals, a2)), sz: t.sz + 1 }
+}
+
+fn t_mul(t: Tape, a1: Int, a2: Int) -> Tape {
+    let i = t.sz;
+    Tape { ops: a16_set(t.ops, i, 2), arg1s: a16_set(t.arg1s, i, a1),
+           arg2s: a16_set(t.arg2s, i, a2),
+           vals: a16_set(t.vals, i, smul(a16_get(t.vals, a1), a16_get(t.vals, a2))), sz: t.sz + 1 }
+}
+
+fn t_sub(t: Tape, a1: Int, a2: Int) -> Tape {
+    let i = t.sz;
+    Tape { ops: a16_set(t.ops, i, 3), arg1s: a16_set(t.arg1s, i, a1),
+           arg2s: a16_set(t.arg2s, i, a2),
+           vals: a16_set(t.vals, i, a16_get(t.vals, a1) - a16_get(t.vals, a2)), sz: t.sz + 1 }
+}
+
+fn t_backward(t: Tape) -> Arr16 {
+    let mut g = a16_zeros();
+    g = a16_set(g, t.sz - 1, scale());
+    let mut i = t.sz - 1;
+    while i >= 0 {
+        let op = a16_get(t.ops, i);
+        let a1 = a16_get(t.arg1s, i);
+        let a2 = a16_get(t.arg2s, i);
+        let gi = a16_get(g, i);
+        if op == 1 {
+            if a1 >= 0 { g = a16_set(g, a1, a16_get(g, a1) + gi); }
+            if a2 >= 0 { g = a16_set(g, a2, a16_get(g, a2) + gi); }
+        } else if op == 2 {
+            if a1 >= 0 { g = a16_set(g, a1, a16_get(g, a1) + smul(gi, a16_get(t.vals, a2))); }
+            if a2 >= 0 { g = a16_set(g, a2, a16_get(g, a2) + smul(gi, a16_get(t.vals, a1))); }
+        } else if op == 3 {
+            if a1 >= 0 { g = a16_set(g, a1, a16_get(g, a1) + gi); }
+            if a2 >= 0 { g = a16_set(g, a2, a16_get(g, a2) - gi); }
+        }
+        if i == 0 { i = -1; } else { i = i - 1; }
+    }
+    g
+}
+
+fn test_reverse_basic() {
+    // f(x,y) = x^2 + x*y, df/dx = 2x+y, df/dy = x
+    // At x=3, y=2: f=9+6=15, df/dx=8, df/dy=3
+    let mut t = t_new();
+    t = t_const(t, 3 * scale()); // 0: x
+    t = t_const(t, 2 * scale()); // 1: y
+    t = t_mul(t, 0, 0);           // 2: x^2
+    t = t_mul(t, 0, 1);           // 3: x*y
+    t = t_add(t, 2, 3);           // 4: x^2+x*y
+
+    assert_eq(a16_get(t.vals, 4), 15 * scale()); // 9
+    let g = t_backward(t);
+    assert_eq(a16_get(g, 0), 8 * scale());       // 10
+    assert_eq(a16_get(g, 1), 3 * scale());       // 11
+}
+
+fn test_reverse_subtraction() {
+    // f(x) = x^2 - 2x + 1 = (x-1)^2, f'(x)=2(x-1)
+    // At x=4: f=9, f'=6
+    let mut t = t_new();
+    t = t_const(t, 4 * scale()); // 0: x
+    t = t_const(t, 2 * scale()); // 1: const 2
+    t = t_const(t, scale());     // 2: const 1
+    t = t_mul(t, 0, 0);           // 3: x^2 = 16
+    t = t_mul(t, 1, 0);           // 4: 2*x = 8
+    t = t_sub(t, 3, 4);           // 5: x^2-2x = 8
+    t = t_add(t, 5, 2);           // 6: x^2-2x+1 = 9
+
+    assert_eq(a16_get(t.vals, 6), 9 * scale()); // 12
+    let g = t_backward(t);
+    assert_eq(a16_get(g, 0), 6 * scale());      // 13: f'(4)=2*3=6
+}
+
+// =============================================================================
+// Part 3: Numerical differentiation
+// =============================================================================
+
+fn f_sq(x: Int) -> Int { smul(x, x) }
+
+fn num_deriv(x: Int, h: Int) -> Int {
+    sdiv(f_sq(x + h) - f_sq(x - h), 2 * h)
+}
+
+fn test_numerical() {
+    let h = 1;
+    // f(x)=x^2, f'(x)=2x
+
+    let d1 = num_deriv(3 * scale(), h);
+    assert_eq(within_tol(d1, 6 * scale(), 10), 1); // 14
+
+    let d2 = num_deriv(0, h);
+    assert_eq(within_tol(d2, 0, 10), 1); // 15
+
+    let d3 = num_deriv(-2 * scale(), h);
+    assert_eq(within_tol(d3, -4 * scale(), 10), 1); // 16
+
+    let d4 = num_deriv(5 * scale(), h);
+    assert_eq(within_tol(d4, 10 * scale(), 10), 1); // 17
+}
+
+// =============================================================================
+// Part 4: Gradient descent
+// =============================================================================
+
+fn test_gradient_descent() {
+    // Minimize (x-7)^2
+    let target = 7 * scale();
+    let lr = 100; // 0.1
+    let mut x = 0;
+    let mut i = 0;
+    while i < 100 {
+        let grad = 2 * (x - target);
+        x = x - smul(lr, grad);
+        i = i + 1;
+    }
+    assert_eq(within_tol(x, target, 50), 1); // 18
+
+    // Minimize (x-3)^2 + (y-4)^2
+    let mut px = 0;
+    let mut py = 0;
+    i = 0;
+    while i < 100 {
+        let gx = 2 * (px - 3 * scale());
+        let gy = 2 * (py - 4 * scale());
+        px = px - smul(lr, gx);
+        py = py - smul(lr, gy);
+        i = i + 1;
+    }
+    assert_eq(within_tol(px, 3 * scale(), 50), 1); // 19
+    assert_eq(within_tol(py, 4 * scale(), 50), 1); // 20
+}
+
+// =============================================================================
+// Part 5: Chain rule
+// =============================================================================
+
+fn test_chain_rule() {
+    // f(g(x)) = (3x+1)^2, d/dx = 6(3x+1)
+    // At x=2: g=7, f=49, f'=42
+    let x = 2 * scale();
+    let gx = 3 * x + scale();
+    let fp_gx = 2 * gx; // f'(g(x)) = 2*(3x+1)
+    let gp = 3 * scale(); // g'(x) = 3
+    let chain = smul(fp_gx, gp);
+    assert_eq(chain, 42 * scale()); // 21
+
+    // Verify with dual numbers
+    let xd = dual_var(x);
+    let three = dual_const(3 * scale());
+    let one = dual_const(scale());
+    let gd = dual_add(dual_mul(three, xd), one); // 3x+1
+    let fd = dual_sq(gd);
+    assert_eq(fd.val, 49 * scale());  // 22
+    assert_eq(fd.deriv, 42 * scale()); // 23
+}
+
+// =============================================================================
+// Part 6: Product rule
+// =============================================================================
+
+fn test_product_rule() {
+    // d/dx[x^2 * (x+1)] = 2x*(x+1) + x^2 = 3x^2+2x
+    // At x=3: 27+6 = 33
+    let x = 3 * scale();
+    let pr = smul(2 * x, x + scale()) + smul(x, scale());
+    // 2*3*(3+1) + 3^2*1 = 24 + 9 = 33
+    // Wait, product rule: f'g + fg' = 2x*(x+1) + x^2*1
+    let fv = f_sq(x);       // 9
+    let fd = 2 * x;         // 6
+    let gv = x + scale();   // 4
+    let gd = scale();       // 1
+    let result = smul(fd, gv) + smul(fv, gd);
+    assert_eq(result, 33 * scale()); // 24
+
+    // Verify with dual numbers
+    let xd = dual_var(x);
+    let one = dual_const(scale());
+    let prod = dual_mul(dual_sq(xd), dual_add(xd, one));
+    assert_eq(prod.deriv, 33 * scale()); // 25
+}
+
+// =============================================================================
+// Part 7: Forward vs Reverse agreement
+// =============================================================================
+
+// Helper function for numerical derivative of x^3 + 2x^2 - x
+fn fv_poly(xx: Int) -> Int { smul(smul(xx, xx), xx) + 2 * smul(xx, xx) - xx }
+
+// Helper function for x^3
+fn fv_cube_helper(xx: Int) -> Int { smul(smul(xx, xx), xx) }
+
+fn test_forward_vs_reverse() {
+    // f(x) = x^3 + 2x^2 - x
+    // f'(x) = 3x^2 + 4x - 1
+    // At x=2: f=8+8-2=14, f'=12+8-1=19
+
+    // Forward mode
+    let xd = dual_var(2 * scale());
+    let two = dual_const(2 * scale());
+    let one = dual_const(scale());
+    let cube = dual_mul(dual_mul(xd, xd), xd);
+    let sq2 = dual_mul(two, dual_sq(xd));
+    let result_fwd = dual_sub(dual_add(cube, sq2), xd);
+    assert_eq(result_fwd.val, 14 * scale());   // 26
+    assert_eq(result_fwd.deriv, 19 * scale()); // 27
+
+    // Reverse mode
+    let mut t = t_new();
+    t = t_const(t, 2 * scale()); // 0: x=2
+    t = t_const(t, 2 * scale()); // 1: const 2
+    t = t_mul(t, 0, 0);           // 2: x^2 = 4
+    t = t_mul(t, 2, 0);           // 3: x^3 = 8
+    t = t_mul(t, 1, 2);           // 4: 2*x^2 = 8
+    t = t_add(t, 3, 4);           // 5: x^3+2x^2 = 16
+    t = t_sub(t, 5, 0);           // 6: x^3+2x^2-x = 14
+
+    assert_eq(a16_get(t.vals, 6), 14 * scale()); // 28
+    let g = t_backward(t);
+    assert_eq(a16_get(g, 0), 19 * scale()); // 29
+
+    // Numerical
+    let h = 1;
+    let num = sdiv(fv_poly(2 * scale() + h) - fv_poly(2 * scale() - h), 2 * h);
+    assert_eq(within_tol(num, 19 * scale(), 50), 1); // 30
+}
+
+// =============================================================================
+// Part 8: Higher-order derivatives
+// =============================================================================
+
+fn test_higher_order() {
+    // f(x) = x^3, f'=3x^2, f''=6x, f'''=6
+    let x = 3 * scale();
+
+    // First derivative at x=3: 27
+    let d1 = dual_mul(dual_mul(dual_var(x), dual_var(x)), dual_var(x));
+    assert_eq(d1.deriv, 27 * scale()); // 31
+
+    // Second derivative numerically: f''(x) ≈ (f(x+h) - 2f(x) + f(x-h)) * SCALE^2 / (h*h)
+    let h = 100; // h=0.1 in real units
+    let numer = fv_cube_helper(x + h) - 2 * fv_cube_helper(x) + fv_cube_helper(x - h);
+    let d2_num = (numer * scale() * scale()) / (h * h);
+    assert_eq(within_tol(d2_num, 18 * scale(), 200), 1); // 32: f''(3)=18
+
+    // Analytical: f''(3) = 6*3 = 18
+    assert_eq(6 * x, 18 * scale()); // 33
+}
+
+// =============================================================================
+// Part 9: ReLU gradient
+// =============================================================================
+
+fn relu(x: Int) -> Int { if x > 0 { x } else { 0 } }
+fn relu_d(x: Int) -> Int { if x > 0 { scale() } else { 0 } }
+
+fn test_relu_gradient() {
+    assert_eq(relu(5 * scale()), 5 * scale()); // 34
+    assert_eq(relu(-3 * scale()), 0);           // 35
+    assert_eq(relu_d(5 * scale()), scale());    // 36
+    assert_eq(relu_d(-3 * scale()), 0);         // 37
+    assert_eq(relu_d(0), 0);                    // 38
+
+    // d/dx[relu(2x+1)] = relu'(2x+1) * 2
+    // At x=3: 2*3+1=7>0 => relu'=1, chain=2
+    let x = 3 * scale();
+    let pre = 2 * x + scale();
+    let chain = smul(relu_d(pre), 2 * scale());
+    assert_eq(chain, 2 * scale()); // 39
+
+    // At x=-1: 2*(-1)+1=-1<0 => relu'=0, chain=0
+    let x2 = -1 * scale();
+    let pre2 = 2 * x2 + scale();
+    let chain2 = smul(relu_d(pre2), 2 * scale());
+    assert_eq(chain2, 0); // 40
+}
+
+// =============================================================================
+// Part 10: Mini training loop
+// =============================================================================
+
+fn test_mini_training() {
+    // Train w to minimize (w*x - y)^2 where x=2, y=6 => w should -> 3
+    let x_data = 2 * scale();
+    let y_data = 6 * scale();
+    let lr = 50; // 0.05
+
+    let mut w = 0; // start at 0
+    let mut i = 0;
+    while i < 200 {
+        let pred = smul(w, x_data);
+        let err = pred - y_data;
+        let grad_w = 2 * smul(err, x_data); // d/dw of (wx-y)^2 = 2(wx-y)*x
+        w = w - smul(lr, grad_w);
+        i = i + 1;
+    }
+    assert_eq(within_tol(w, 3 * scale(), 100), 1); // 41
+
+    // Verify final prediction
+    let final_pred = smul(w, x_data);
+    assert_eq(within_tol(final_pred, y_data, 200), 1); // 42
+}
+
+// =============================================================================
+// Part 11: Multivariate gradient
+// =============================================================================
+
+fn test_multivariate() {
+    // f(x,y) = x^2 + xy + y^2
+    // df/dx = 2x+y, df/dy = x+2y
+    let x = 2 * scale();
+    let y = 3 * scale();
+
+    let dx = 2 * x + y;
+    let dy = x + 2 * y;
+    assert_eq(dx, 7 * scale()); // 43
+    assert_eq(dy, 8 * scale()); // 44
+
+    // Gradient magnitude^2: 49+64=113
+    let mag_sq = smul(dx, dx) + smul(dy, dy);
+    assert_eq(mag_sq, 113 * scale()); // 45
+
+    // At origin: gradient is zero
+    assert_eq(2 * 0 + 0, 0); // 46
+    assert_eq(0 + 2 * 0, 0); // 47
+}
+
+// =============================================================================
+// Part 12: Convergence rate comparison
+// =============================================================================
+
+fn test_convergence_comparison() {
+    let target = 5 * scale();
+
+    // Small lr: 50 steps
+    let mut x1 = 0;
+    let mut i = 0;
+    while i < 50 {
+        x1 = x1 - smul(50, 2 * (x1 - target)); // lr=0.05
+        i = i + 1;
+    }
+    let err1 = abs_val(x1 - target);
+
+    // Larger lr: 50 steps
+    let mut x2 = 0;
+    i = 0;
+    while i < 50 {
+        x2 = x2 - smul(100, 2 * (x2 - target)); // lr=0.1
+        i = i + 1;
+    }
+    let err2 = abs_val(x2 - target);
+
+    assert(err2 <= err1 + 1); // 48: larger lr converges faster
+
+    // Both should be close to target
+    assert_eq(within_tol(x1, target, 500), 1); // 49
+    assert_eq(within_tol(x2, target, 50), 1);  // 50
+}
+
+// =============================================================================
+// Part 13: Loss monotonic decrease
+// =============================================================================
+
+fn test_loss_monotonic() {
+    let target = 3 * scale();
+    let lr = 100;
+
+    let mut x = 10 * scale();
+    let mut prev_loss = smul(x - target, x - target);
+    let mut monotonic = 1;
+    let mut i = 0;
+    while i < 15 {
+        let grad = 2 * (x - target);
+        x = x - smul(lr, grad);
+        let loss = smul(x - target, x - target);
+        if loss > prev_loss { monotonic = 0; }
+        prev_loss = loss;
+        i = i + 1;
+    }
+    assert_eq(monotonic, 1); // 51
+
+    // Final loss should be very small
+    assert(prev_loss < scale()); // 52: loss < 1.0
+}
+
+fn main() -> Int {
+    test_dual_basic();
+    test_dual_higher_power();
+    test_reverse_basic();
+    test_reverse_subtraction();
+    test_numerical();
+    test_gradient_descent();
+    test_chain_rule();
+    test_product_rule();
+    test_forward_vs_reverse();
+    test_higher_order();
+    test_relu_gradient();
+    test_mini_training();
+    test_multivariate();
+    test_convergence_comparison();
+    test_loss_monotonic();
+    print("[OK] 390_interp_autodiff_comprehensive");
+    0
+}

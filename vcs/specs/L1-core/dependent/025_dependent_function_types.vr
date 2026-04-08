@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, function-types, dependent-return
+
+/// Dependent function types -- functions whose return type
+/// depends on the value of their arguments (basic Pi types).
+
+// Return type sized by argument
+fn make_zeros(n: Int{> 0}) -> List<Int>
+    where ensures len(result) == n
+{
+    let mut xs: List<Int> = [];
+    let mut i = 0;
+    while i < n {
+        xs.push(0);
+        i = i + 1;
+    }
+    xs
+}
+
+// Return type carries information about the argument
+fn repeat_char(ch: Char, n: Int{>= 0}) -> Text
+    where ensures len(result) == n
+{
+    let mut s = "";
+    let mut i = 0;
+    while i < n {
+        s = s + ch.to_text();
+        i = i + 1;
+    }
+    s
+}
+
+// Return type depends on boolean argument (using Either sum type)
+type Either<A, B> is Left(A) | Right(B);
+
+fn select<A, B>(condition: Bool, a: A, b: B) -> Either<A, B> {
+    if condition { Left(a) } else { Right(b) }
+}
+
+// Dependent return: safe division returns Maybe or value
+fn checked_div(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 { None }
+    else { Some(a / b) }
+}
+
+// Length-preserving operations
+fn map_list<T, U>(xs: List<T>, f: fn(T) -> U) -> List<U>
+    where ensures len(result) == len(xs)
+{
+    let mut result: List<U> = [];
+    for x in xs {
+        result.push(f(x));
+    }
+    result
+}
+
+fn zip<A, B>(xs: List<A>, ys: List<B>) -> List<(A, B)>
+    where ensures len(result) == min(len(xs), len(ys))
+{
+    let mut result: List<(A, B)> = [];
+    let n = min(xs.len(), ys.len());
+    let mut i = 0;
+    while i < n {
+        result.push((xs[i], ys[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn min(a: Int, b: Int) -> Int {
+    if a <= b { a } else { b }
+}
+
+// Concatenation with length guarantee
+fn concat<T>(xs: List<T>, ys: List<T>) -> List<T>
+    where ensures len(result) == len(xs) + len(ys)
+{
+    let mut result = xs;
+    for y in ys {
+        result.push(y);
+    }
+    result
+}
+
+fn main() {
+    let zeros = make_zeros(5);
+    assert(zeros.len() == 5);
+    for z in zeros { assert(z == 0); }
+
+    let stars = repeat_char('*', 3);
+    assert(stars.len() == 3);
+
+    let doubled = map_list([1, 2, 3], |x| x * 2);
+    assert(doubled.len() == 3);
+    assert(doubled == [2, 4, 6]);
+
+    let zipped = zip([1, 2, 3], ["a", "b"]);
+    assert(zipped.len() == 2);
+
+    let joined = concat([1, 2], [3, 4, 5]);
+    assert(joined.len() == 5);
+}

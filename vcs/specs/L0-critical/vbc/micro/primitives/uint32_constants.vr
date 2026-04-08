@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test UInt32 type constants (MIN, MAX, BITS)
+
+fn main() {
+    // Test UInt32.MIN
+    assert_eq(UInt32.MIN(), 0);
+
+    // Test UInt32.MAX (2^32 - 1 = 4294967295)
+    assert_eq(UInt32.MAX(), 4294967295);
+
+    // Test UInt32.BITS
+    assert_eq(UInt32.BITS(), 32);
+
+    // Test u32 alias (FFI compatibility)
+    assert_eq(u32.MIN(), 0);
+    assert_eq(u32.MAX(), 4294967295);
+    assert_eq(u32.BITS(), 32);
+}

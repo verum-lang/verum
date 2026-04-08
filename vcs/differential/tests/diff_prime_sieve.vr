@@ -1,0 +1,88 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, primes, sieve, number-theory
+// @timeout: 10000
+
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut d = 3;
+    while d * d <= n {
+        if n % d == 0 { return 0; }
+        d = d + 2;
+    }
+    1
+}
+
+fn count_primes_up_to(limit: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i <= limit {
+        count = count + is_prime(i);
+        i = i + 1;
+    }
+    count
+}
+
+fn nth_prime(n: Int) -> Int {
+    let mut count = 0;
+    let mut candidate = 2;
+    while count < n {
+        if is_prime(candidate) == 1 {
+            count = count + 1;
+            if count == n { return candidate; }
+        }
+        candidate = candidate + 1;
+    }
+    candidate
+}
+
+fn sum_primes_up_to(limit: Int) -> Int {
+    let mut total = 0;
+    let mut i = 2;
+    while i <= limit {
+        if is_prime(i) == 1 {
+            total = total + i;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Known primes
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(5), 1);
+    assert_eq(is_prime(7), 1);
+    assert_eq(is_prime(11), 1);
+    assert_eq(is_prime(13), 1);
+
+    // Known composites
+    assert_eq(is_prime(1), 0);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(9), 0);
+    assert_eq(is_prime(15), 0);
+    assert_eq(is_prime(25), 0);
+
+    // Prime counting: pi(n)
+    assert_eq(count_primes_up_to(10), 4);   // 2,3,5,7
+    assert_eq(count_primes_up_to(20), 8);   // +11,13,17,19
+    assert_eq(count_primes_up_to(30), 10);  // +23,29
+    assert_eq(count_primes_up_to(100), 25);
+
+    // nth prime
+    assert_eq(nth_prime(1), 2);
+    assert_eq(nth_prime(5), 11);
+    assert_eq(nth_prime(10), 29);
+    assert_eq(nth_prime(25), 97);
+
+    // Sum of primes up to 20
+    // 2+3+5+7+11+13+17+19 = 77
+    assert_eq(sum_primes_up_to(20), 77);
+
+    print("DIFF_OK: prime_sieve");
+    0
+}

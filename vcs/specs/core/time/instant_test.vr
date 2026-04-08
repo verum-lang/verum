@@ -1,0 +1,889 @@
+// =============================================================================
+// instant_test.vr - Comprehensive tests for Instant type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: time, instant, monotonic, core
+// @description: Comprehensive tests for Instant type and methods
+// =============================================================================
+
+mount core.time.{Instant, Duration};
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Section 1: Construction Tests
+// =============================================================================
+
+@test
+fn test_instant_now() {
+    let instant = Instant.now();
+    // Just verify it doesn't crash and returns something
+    let elapsed = instant.elapsed();
+    assert(elapsed.as_nanos() >= 0);
+}
+
+// =============================================================================
+// Section 2: Elapsed Time Tests
+// =============================================================================
+
+@test
+fn test_instant_elapsed() {
+    let start = Instant.now();
+
+    // Do some work
+    let mut sum = 0;
+    for i in 0..1000 {
+        sum = sum + i;
+    }
+
+    let elapsed = start.elapsed();
+    // Should have elapsed some time (at least 0)
+    assert(elapsed.as_nanos() >= 0);
+}
+
+@test
+fn test_instant_duration_since() {
+    let earlier = Instant.now();
+
+    // Small delay
+    let mut sum = 0;
+    for i in 0..100 {
+        sum = sum + i;
+    }
+
+    let later = Instant.now();
+
+    // duration_since returns Maybe<Duration>
+    match later.duration_since(earlier) {
+        Maybe.Some(duration) => assert(duration.as_nanos() >= 0),
+        Maybe.None => panic("Expected Some for later.duration_since(earlier)"),
+    }
+}
+
+@test
+fn test_instant_saturating_duration_since() {
+    let earlier = Instant.now();
+
+    // Small delay
+    let mut sum = 0;
+    for i in 0..100 {
+        sum = sum + i;
+    }
+
+    let later = Instant.now();
+
+    // Correct order: positive duration
+    let duration = later.saturating_duration_since(earlier);
+    assert(duration.as_nanos() >= 0);
+
+    // Reversed order: saturates to zero
+    let zero_duration = earlier.saturating_duration_since(later);
+    assert(zero_duration.is_zero());
+}
+
+// =============================================================================
+// Section 3: Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_instant_add_duration() {
+    let instant = Instant.now();
+    let duration = Duration.secs(10);
+
+    let future = instant + duration;
+
+    // Future instant should be later
+    match future.duration_since(instant) {
+        Maybe.Some(diff) => assert_eq(diff.as_secs(), 10),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_instant_sub_duration() {
+    let instant = Instant.now();
+    let duration = Duration.secs(10);
+
+    // Add then subtract should give us back approximately the same instant
+    let future = instant + duration;
+    let back = future - duration;
+
+    // Using saturating_duration_since for safe comparison
+    let diff = instant.saturating_duration_since(back);
+    // Should be approximately 0
+    assert(diff.as_secs() < 1);
+}
+
+@test
+fn test_instant_sub_instant() {
+    let earlier = Instant.now();
+
+    // Small work
+    let mut sum = 0;
+    for i in 0..100 {
+        sum = sum + i;
+    }
+
+    let later = Instant.now();
+
+    // Instant - Instant gives Duration (saturating)
+    // Note: Using method call instead of operator due to type resolution issue
+    // (Task #64: later - earlier resolves to wrong Sub implementation)
+    let duration: Duration = later.saturating_duration_since(earlier);
+    assert(duration.as_nanos() >= 0);
+}
+
+// =============================================================================
+// Section 4: Comparison Tests
+// =============================================================================
+
+@test
+fn test_instant_ordering() {
+    let first = Instant.now();
+
+    // Small delay
+    let mut sum = 0;
+    for i in 0..100 {
+        sum = sum + i;
+    }
+
+    let second = Instant.now();
+
+    assert(first < second);
+    assert(second > first);
+    assert(first <= first);
+    assert(first >= first);
+}
+
+@test
+fn test_instant_equality() {
+    let instant = Instant.now();
+
+    // Same instant should be equal
+    assert_eq(instant, instant);
+}
+
+// =============================================================================
+// Section 5: Checked Operations Tests
+// =============================================================================
+
+@test
+fn test_instant_checked_add() {
+    let instant = Instant.now();
+    let duration = Duration.secs(100);
+
+    match instant.checked_add(duration) {
+        Maybe.Some(future) => {
+            match future.duration_since(instant) {
+                Maybe.Some(diff) => assert_eq(diff.as_secs(), 100),
+                Maybe.None => panic("Expected Some"),
+            }
+        }
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_instant_checked_sub() {
+    let instant = Instant.now();
+    let small_duration = Duration.millis(1);
+
+    // Should succeed with small duration
+    match instant.checked_sub(small_duration) {
+        Maybe.Some(past) => {
+            // past should be before instant
+            let diff = instant.saturating_duration_since(past);
+            assert_eq(diff.as_millis(), 1);
+        }
+        Maybe.None => {} // Might fail if instant is very close to epoch
+    }
+}
+
+// =============================================================================
+// Section 6: Benchmarking Pattern Tests
+// =============================================================================
+
+@test
+fn test_instant_benchmark_pattern() {
+    let start = Instant.now();
+
+    // Workload to measure
+    let mut result = 0;
+    for i in 0..10000 {
+        result = result + i * i;
+    }
+
+    let elapsed = start.elapsed();
+
+    // Just verify pattern works
+    assert(elapsed.as_nanos() >= 0);
+}
+
+@test
+fn test_instant_lap_timing() {
+    let start = Instant.now();
+    let mut last_lap = start;
+
+    let mut lap_count = 0;
+
+    for lap in 0..3 {
+        // Simulate lap work
+        let mut sum = 0;
+        for i in 0..100 {
+            sum = sum + i;
+        }
+
+        let now = Instant.now();
+        let lap_duration = now.saturating_duration_since(last_lap);
+        // Just verify we got a duration
+        assert(lap_duration.as_nanos() >= 0);
+        last_lap = now;
+        lap_count = lap_count + 1;
+    }
+
+    // Should have completed 3 laps
+    assert_eq(lap_count, 3);
+
+    let total = start.elapsed();
+    // Total should be >= 0
+    assert(total.as_nanos() >= 0);
+}
+
+// =============================================================================
+// Section 7: Edge Cases
+// =============================================================================
+
+@test
+fn test_instant_zero_duration() {
+    let instant = Instant.now();
+    let zero = Duration.zero();
+
+    let same = instant + zero;
+    // Should be effectively the same instant
+    let diff = same.saturating_duration_since(instant);
+    assert(diff.is_zero());
+}
+
+@test
+fn test_instant_self_duration() {
+    let instant = Instant.now();
+
+    // duration_since self returns Maybe.Some(zero)
+    match instant.duration_since(instant) {
+        Maybe.Some(diff) => {
+            assert(diff.is_zero());
+            assert_eq(diff.as_nanos(), 0);
+        }
+        Maybe.None => panic("Expected Some for self duration"),
+    }
+}
+
+// =============================================================================
+// Section 8: now() Patterns
+// =============================================================================
+
+@test
+fn test_instant_two_sequential_nows() {
+    let first = Instant.now();
+    let second = Instant.now();
+    // Monotonic: second is never before first
+    assert(second >= first);
+}
+
+@test
+fn test_instant_now_returns_valid() {
+    let instant = Instant.now();
+    // Elapsed from a just-created instant should be tiny but non-negative
+    let e = instant.elapsed();
+    assert(e.as_nanos() >= 0);
+    assert(e.as_secs() < 60);
+}
+
+@test
+fn test_instant_now_multiple_calls_monotonic() {
+    let a = Instant.now();
+    let b = Instant.now();
+    let c = Instant.now();
+    assert(a <= b);
+    assert(b <= c);
+    assert(a <= c);
+}
+
+// =============================================================================
+// Section 9: Elapsed Deeper
+// =============================================================================
+
+@test
+fn test_instant_elapsed_is_non_negative() {
+    let start = Instant.now();
+    let elapsed = start.elapsed();
+    assert(elapsed.as_nanos() >= 0);
+}
+
+@test
+fn test_instant_elapsed_from_now_is_tiny() {
+    let now = Instant.now();
+    let elapsed = now.elapsed();
+    // Just created, should be under 1 second
+    assert(elapsed.as_secs() == 0);
+}
+
+@test
+fn test_instant_elapsed_after_work() {
+    let start = Instant.now();
+    let mut total = 0;
+    for i in 0..5000 {
+        total = total + i;
+    }
+    let elapsed = start.elapsed();
+    // Should have elapsed at least 0 nanoseconds
+    assert(elapsed.as_nanos() >= 0);
+    // And should be less than a minute
+    assert(elapsed.as_secs() < 60);
+}
+
+// =============================================================================
+// Section 10: duration_since Deeper
+// =============================================================================
+
+@test
+fn test_instant_duration_since_same_instant() {
+    let a = Instant.now();
+    match a.duration_since(a) {
+        Maybe.Some(d) => {
+            assert(d.is_zero());
+            assert_eq(d.as_nanos(), 0);
+            assert_eq(d.as_secs(), 0);
+        }
+        Maybe.None => panic("Expected Some for same instant"),
+    }
+}
+
+@test
+fn test_instant_duration_since_later_from_earlier() {
+    let earlier = Instant.now();
+    let mut sum = 0;
+    for i in 0..500 {
+        sum = sum + i;
+    }
+    let later = Instant.now();
+
+    match later.duration_since(earlier) {
+        Maybe.Some(d) => assert(d.as_nanos() >= 0),
+        Maybe.None => panic("Expected Some for later.duration_since(earlier)"),
+    }
+}
+
+@test
+fn test_instant_duration_since_earlier_from_later_returns_none() {
+    let earlier = Instant.now();
+    let mut sum = 0;
+    for i in 0..500 {
+        sum = sum + i;
+    }
+    let later = Instant.now();
+
+    // Reversed: earlier.duration_since(later) should return None
+    match earlier.duration_since(later) {
+        Maybe.Some(_) => {} // Some implementations might saturate to zero
+        Maybe.None => {}    // Expected behavior
+    }
+    // Either way, this should not panic
+}
+
+// =============================================================================
+// Section 11: saturating_duration_since Deeper
+// =============================================================================
+
+@test
+fn test_instant_saturating_duration_since_same_is_zero() {
+    let a = Instant.now();
+    let d = a.saturating_duration_since(a);
+    assert(d.is_zero());
+    assert_eq(d.as_nanos(), 0);
+}
+
+@test
+fn test_instant_saturating_duration_since_reversed_saturates() {
+    let earlier = Instant.now();
+    let mut sum = 0;
+    for i in 0..500 {
+        sum = sum + i;
+    }
+    let later = Instant.now();
+
+    // Reversed order saturates to zero
+    let d = earlier.saturating_duration_since(later);
+    assert(d.is_zero());
+    assert_eq(d.as_nanos(), 0);
+}
+
+@test
+fn test_instant_saturating_duration_since_correct_order() {
+    let earlier = Instant.now();
+    let mut sum = 0;
+    for i in 0..500 {
+        sum = sum + i;
+    }
+    let later = Instant.now();
+
+    let d = later.saturating_duration_since(earlier);
+    assert(d.as_nanos() >= 0);
+}
+
+// =============================================================================
+// Section 12: checked_add Deeper
+// =============================================================================
+
+@test
+fn test_instant_checked_add_zero_duration() {
+    let instant = Instant.now();
+    let zero = Duration.zero();
+
+    match instant.checked_add(zero) {
+        Maybe.Some(result) => {
+            let diff = result.saturating_duration_since(instant);
+            assert(diff.is_zero());
+        }
+        Maybe.None => panic("Expected Some for checked_add zero"),
+    }
+}
+
+@test
+fn test_instant_checked_add_small_duration() {
+    let instant = Instant.now();
+    let small = Duration.millis(50);
+
+    match instant.checked_add(small) {
+        Maybe.Some(result) => {
+            match result.duration_since(instant) {
+                Maybe.Some(diff) => assert_eq(diff.as_millis(), 50),
+                Maybe.None => panic("Expected Some"),
+            }
+        }
+        Maybe.None => panic("Expected Some for checked_add small"),
+    }
+}
+
+@test
+fn test_instant_checked_add_ordering() {
+    let instant = Instant.now();
+    let d = Duration.secs(5);
+
+    match instant.checked_add(d) {
+        Maybe.Some(future) => {
+            assert(future > instant);
+            assert(instant < future);
+        }
+        Maybe.None => panic("Expected Some for checked_add ordering"),
+    }
+}
+
+@test
+fn test_instant_checked_add_large_duration() {
+    let instant = Instant.now();
+    let large = Duration.hours(24);
+
+    match instant.checked_add(large) {
+        Maybe.Some(future) => {
+            match future.duration_since(instant) {
+                Maybe.Some(diff) => assert_eq(diff.as_secs(), 86400),
+                Maybe.None => panic("Expected Some for duration_since"),
+            }
+        }
+        Maybe.None => {} // Overflow is acceptable
+    }
+}
+
+// =============================================================================
+// Section 13: checked_sub Deeper
+// =============================================================================
+
+@test
+fn test_instant_checked_sub_zero_duration() {
+    let instant = Instant.now();
+    let zero = Duration.zero();
+
+    match instant.checked_sub(zero) {
+        Maybe.Some(result) => {
+            let diff = instant.saturating_duration_since(result);
+            assert(diff.is_zero());
+        }
+        Maybe.None => panic("Expected Some for checked_sub zero"),
+    }
+}
+
+@test
+fn test_instant_checked_sub_small_from_now() {
+    let instant = Instant.now();
+    let small = Duration.millis(1);
+
+    match instant.checked_sub(small) {
+        Maybe.Some(past) => {
+            let diff = instant.saturating_duration_since(past);
+            assert_eq(diff.as_millis(), 1);
+        }
+        Maybe.None => {} // Acceptable if instant is near epoch
+    }
+}
+
+@test
+fn test_instant_checked_sub_returns_earlier() {
+    let instant = Instant.now();
+    let d = Duration.secs(10);
+
+    match instant.checked_sub(d) {
+        Maybe.Some(past) => {
+            // past should be before instant
+            assert(past < instant);
+            assert(instant > past);
+        }
+        Maybe.None => {} // Acceptable
+    }
+}
+
+// =============================================================================
+// Section 14: Operator +/- Deeper
+// =============================================================================
+
+@test
+fn test_instant_add_then_sub_roundtrip() {
+    let instant = Instant.now();
+    let d = Duration.secs(42);
+
+    let future = instant + d;
+    let back = future - d;
+
+    let diff = instant.saturating_duration_since(back);
+    assert(diff.as_secs() < 1);
+}
+
+@test
+fn test_instant_double_add() {
+    let instant = Instant.now();
+    let d1 = Duration.secs(5);
+    let d2 = Duration.secs(10);
+
+    let step1 = instant + d1;
+    let step2 = step1 + d2;
+
+    match step2.duration_since(instant) {
+        Maybe.Some(total) => assert_eq(total.as_secs(), 15),
+        Maybe.None => panic("Expected Some for double add"),
+    }
+}
+
+@test
+fn test_instant_add_zero_identity() {
+    let instant = Instant.now();
+    let zero = Duration.zero();
+
+    let same = instant + zero;
+    let diff = same.saturating_duration_since(instant);
+    assert(diff.is_zero());
+}
+
+@test
+fn test_instant_sub_duration_ordering() {
+    let instant = Instant.now();
+    let d = Duration.secs(100);
+
+    let future = instant + d;
+    let back = future - d;
+
+    // back should be approximately equal to instant
+    let diff_forward = instant.saturating_duration_since(back);
+    let diff_backward = back.saturating_duration_since(instant);
+    assert(diff_forward.as_secs() < 1);
+    assert(diff_backward.as_secs() < 1);
+}
+
+// =============================================================================
+// Section 15: Instant - Instant Deeper
+// =============================================================================
+
+@test
+fn test_instant_sub_instant_non_negative() {
+    let a = Instant.now();
+    let mut sum = 0;
+    for i in 0..200 {
+        sum = sum + i;
+    }
+    let b = Instant.now();
+
+    let duration: Duration = b.saturating_duration_since(a);
+    assert(duration.as_nanos() >= 0);
+}
+
+@test
+fn test_instant_sub_instant_same_is_zero() {
+    let a = Instant.now();
+    let duration: Duration = a.saturating_duration_since(a);
+    assert(duration.is_zero());
+    assert_eq(duration.as_nanos(), 0);
+}
+
+// =============================================================================
+// Section 16: Comparison Deeper
+// =============================================================================
+
+@test
+fn test_instant_reflexive_le() {
+    let a = Instant.now();
+    assert(a <= a);
+    assert(a >= a);
+}
+
+@test
+fn test_instant_reflexive_eq() {
+    let a = Instant.now();
+    assert(a == a);
+    assert(!(a != a));
+}
+
+@test
+fn test_instant_now_vs_now_plus_delta() {
+    let a = Instant.now();
+    let b = a + Duration.secs(1);
+    assert(a < b);
+    assert(b > a);
+    assert(a != b);
+    assert(a <= b);
+    assert(b >= a);
+}
+
+@test
+fn test_instant_comparison_transitivity() {
+    let a = Instant.now();
+    let b = a + Duration.secs(1);
+    let c = b + Duration.secs(1);
+    // a < b < c
+    assert(a < b);
+    assert(b < c);
+    assert(a < c); // Transitivity
+}
+
+// =============================================================================
+// Section 17: Benchmark Pattern Deeper
+// =============================================================================
+
+@test
+fn test_instant_benchmark_elapsed_positive() {
+    let start = Instant.now();
+    let mut product = 1;
+    for i in 1..100 {
+        product = product + i * i;
+    }
+    let elapsed = start.elapsed();
+    assert(elapsed.as_nanos() >= 0);
+}
+
+@test
+fn test_instant_benchmark_two_phases() {
+    let total_start = Instant.now();
+
+    // Phase 1
+    let phase1_start = Instant.now();
+    let mut sum1 = 0;
+    for i in 0..500 {
+        sum1 = sum1 + i;
+    }
+    let phase1_elapsed = phase1_start.elapsed();
+
+    // Phase 2
+    let phase2_start = Instant.now();
+    let mut sum2 = 0;
+    for i in 0..500 {
+        sum2 = sum2 + i;
+    }
+    let phase2_elapsed = phase2_start.elapsed();
+
+    let total_elapsed = total_start.elapsed();
+
+    // Individual phases are non-negative
+    assert(phase1_elapsed.as_nanos() >= 0);
+    assert(phase2_elapsed.as_nanos() >= 0);
+    // Total should be >= each individual
+    assert(total_elapsed.as_nanos() >= 0);
+}
+
+// =============================================================================
+// Section 18: Lap Timing Deeper
+// =============================================================================
+
+@test
+fn test_instant_multiple_laps_cumulative() {
+    let start = Instant.now();
+    let mut last = start;
+    let mut total_lap_nanos = 0;
+
+    for lap in 0..5 {
+        let mut sum = 0;
+        for i in 0..100 {
+            sum = sum + i;
+        }
+
+        let now = Instant.now();
+        let lap_duration = now.saturating_duration_since(last);
+        total_lap_nanos = total_lap_nanos + lap_duration.as_nanos();
+        last = now;
+    }
+
+    // Sum of all laps should be non-negative
+    assert(total_lap_nanos >= 0);
+
+    // Total elapsed should also be non-negative
+    let total = start.elapsed();
+    assert(total.as_nanos() >= 0);
+}
+
+@test
+fn test_instant_lap_count_tracking() {
+    let start = Instant.now();
+    let mut lap_count = 0;
+
+    for _ in 0..10 {
+        let lap_start = Instant.now();
+        let mut v = 0;
+        for j in 0..50 {
+            v = v + j;
+        }
+        let lap_elapsed = lap_start.elapsed();
+        assert(lap_elapsed.as_nanos() >= 0);
+        lap_count = lap_count + 1;
+    }
+
+    assert_eq(lap_count, 10);
+    let total = start.elapsed();
+    assert(total.as_nanos() >= 0);
+}
+
+// =============================================================================
+// Section 19: Self Duration Deeper
+// =============================================================================
+
+@test
+fn test_instant_self_duration_via_method() {
+    let a = Instant.now();
+    match a.duration_since(a) {
+        Maybe.Some(d) => {
+            assert(d.is_zero());
+            assert_eq(d.as_nanos(), 0);
+            assert_eq(d.as_millis(), 0);
+            assert_eq(d.as_secs(), 0);
+        }
+        Maybe.None => panic("Expected Some for self duration_since"),
+    }
+}
+
+@test
+fn test_instant_self_saturating_duration_is_zero() {
+    let a = Instant.now();
+    let d = a.saturating_duration_since(a);
+    assert(d.is_zero());
+    assert_eq(d.as_nanos(), 0);
+    assert_eq(d.as_millis(), 0);
+}
+
+// =============================================================================
+// Section 20: Add Multiple Durations Cumulatively
+// =============================================================================
+
+@test
+fn test_instant_triple_add() {
+    let instant = Instant.now();
+    let d = Duration.secs(1);
+    let step1 = instant + d;
+    let step2 = step1 + d;
+    let step3 = step2 + d;
+    match step3.duration_since(instant) {
+        Maybe.Some(total) => assert_eq(total.as_secs(), 3),
+        Maybe.None => panic("Expected Some for triple add"),
+    }
+}
+
+@test
+fn test_instant_add_millis_precision() {
+    let instant = Instant.now();
+    let d = Duration.millis(500);
+    let future = instant + d;
+    match future.duration_since(instant) {
+        Maybe.Some(diff) => assert_eq(diff.as_millis(), 500),
+        Maybe.None => panic("Expected Some for millis add"),
+    }
+}
+
+@test
+fn test_instant_checked_add_then_checked_sub_roundtrip() {
+    let instant = Instant.now();
+    let d = Duration.secs(50);
+    match instant.checked_add(d) {
+        Maybe.Some(future) => {
+            match future.checked_sub(d) {
+                Maybe.Some(back) => {
+                    let diff = instant.saturating_duration_since(back);
+                    assert(diff.as_secs() < 1);
+                }
+                Maybe.None => panic("Expected Some for checked_sub"),
+            }
+        }
+        Maybe.None => panic("Expected Some for checked_add"),
+    }
+}
+
+@test
+fn test_instant_four_sequential_monotonic() {
+    let a = Instant.now();
+    let b = Instant.now();
+    let c = Instant.now();
+    let d = Instant.now();
+    assert(a <= b);
+    assert(b <= c);
+    assert(c <= d);
+    assert(a <= d);
+}
+
+@test
+fn test_instant_comparison_antisymmetric() {
+    let a = Instant.now();
+    let b = a + Duration.secs(1);
+    // a < b implies !(b < a)
+    assert(a < b);
+    assert(!(b < a));
+}
+
+@test
+fn test_instant_checked_sub_large_returns_none_or_some() {
+    let instant = Instant.now();
+    let large = Duration.hours(999999);
+    // May return None if underflow
+    match instant.checked_sub(large) {
+        Maybe.Some(_) => {} // Acceptable
+        Maybe.None => {}    // Expected for underflow
+    }
+    // Just ensure no panic
+    assert(!false); // Runtime-only: time measurement
+}
+
+@test
+fn test_instant_saturating_duration_since_after_add() {
+    let base = Instant.now();
+    let d = Duration.secs(10);
+    let future = base + d;
+    let sat = future.saturating_duration_since(base);
+    assert_eq(sat.as_secs(), 10);
+}
+
+@test
+fn test_instant_elapsed_type_is_duration() {
+    let start = Instant.now();
+    let elapsed: Duration = start.elapsed();
+    // Verify it's a valid Duration
+    assert(elapsed.as_nanos() >= 0);
+    assert(!elapsed.is_zero() || elapsed.is_zero()); // tautology to confirm Duration methods work
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

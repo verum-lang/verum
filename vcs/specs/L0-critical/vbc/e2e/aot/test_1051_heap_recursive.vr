@@ -1,0 +1,145 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: heap, recursive, tree, linked-list, pattern-matching
+// @description: Heap-allocated recursive data structures with pattern matching
+
+type Tree is
+    Leaf(Int)
+    | Node { left: Heap<Tree>, right: Heap<Tree> };
+
+@allow(unbounded_recursion)
+fn tree_sum(t: &Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Node { left, right } => tree_sum(left) + tree_sum(right),
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_depth(t: &Tree) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node { left, right } => {
+            let ld = tree_depth(left);
+            let rd = tree_depth(right);
+            if ld > rd { ld + 1 } else { rd + 1 }
+        }
+    }
+}
+
+fn test_tree_sum() -> Int {
+    //       Node
+    //      /    \
+    //   Node    Leaf(5)
+    //   /  \
+    // L(1) L(3)
+    let tree = Node {
+        left: Heap(Node {
+            left: Heap(Leaf(1)),
+            right: Heap(Leaf(3)),
+        }),
+        right: Heap(Leaf(5)),
+    };
+    let s = tree_sum(&tree);
+    if s != 9 {
+        print(f"FAIL tree_sum: expected 9, got {s}");
+        return 1;
+    }
+    print("  tree_sum: OK");
+    0
+}
+
+fn test_tree_depth() -> Int {
+    let tree = Node {
+        left: Heap(Node {
+            left: Heap(Leaf(1)),
+            right: Heap(Leaf(2)),
+        }),
+        right: Heap(Leaf(3)),
+    };
+    let d = tree_depth(&tree);
+    if d != 3 {
+        print(f"FAIL tree_depth: expected 3, got {d}");
+        return 1;
+    }
+    print("  tree_depth: OK");
+    0
+}
+
+type IntList is
+    Nil
+    | Cons { head: Int, tail: Heap<IntList> };
+
+@allow(unbounded_recursion)
+fn list_sum(l: &IntList) -> Int {
+    match l {
+        Nil => 0,
+        Cons { head, tail } => head + list_sum(tail),
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_len(l: &IntList) -> Int {
+    match l {
+        Nil => 0,
+        Cons { head: _, tail } => 1 + list_len(tail),
+    }
+}
+
+fn test_linked_list() -> Int {
+    let lst = Cons {
+        head: 10,
+        tail: Heap(Cons {
+            head: 20,
+            tail: Heap(Cons {
+                head: 30,
+                tail: Heap(Nil),
+            }),
+        }),
+    };
+    let s = list_sum(&lst);
+    if s != 60 {
+        print(f"FAIL linked_list sum: expected 60, got {s}");
+        return 1;
+    }
+    let len = list_len(&lst);
+    if len != 3 {
+        print(f"FAIL linked_list len: expected 3, got {len}");
+        return 1;
+    }
+    print("  linked_list: OK");
+    0
+}
+
+fn test_single_leaf() -> Int {
+    let tree = Leaf(42);
+    let s = tree_sum(&tree);
+    if s != 42 {
+        print(f"FAIL single_leaf: expected 42, got {s}");
+        return 1;
+    }
+    let d = tree_depth(&tree);
+    if d != 1 {
+        print(f"FAIL single_leaf depth: expected 1, got {d}");
+        return 1;
+    }
+    print("  single_leaf: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Heap Recursive Tests:");
+    let mut failures = 0;
+    failures = failures + test_tree_sum();
+    failures = failures + test_tree_depth();
+    failures = failures + test_linked_list();
+    failures = failures + test_single_leaf();
+
+    if failures == 0 {
+        print("All heap recursive tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

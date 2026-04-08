@@ -1,0 +1,206 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, binary-heap, priority-queue, data-structure
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Min-heap in Arr8, size tracked separately
+type BinHeap8 is { data: Arr8, size: Int };
+
+fn heap_new() -> BinHeap8 { BinHeap8 { data: zeros(), size: 0 } }
+
+fn heap_parent(i: Int) -> Int { (i - 1) / 2 }
+fn heap_left(i: Int) -> Int { 2 * i + 1 }
+fn heap_right(i: Int) -> Int { 2 * i + 2 }
+
+fn heap_swap(data: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = get(data, i);
+    let vj = get(data, j);
+    set(set(data, i, vj), j, vi)
+}
+
+// Sift up (for insert)
+fn sift_up(data: Arr8, idx: Int) -> Arr8 {
+    let mut d = data;
+    let mut i = idx;
+    while i > 0 {
+        let p = heap_parent(i);
+        if get(d, i) < get(d, p) {
+            d = heap_swap(d, i, p);
+            i = p;
+        } else {
+            i = 0; // break (set to 0 which makes while false since we check > 0)
+            // Actually need to be careful, if i is already 1 and parent is 0
+            // Let me use a flag instead
+        }
+    }
+    d
+}
+
+// Better sift_up with done flag
+fn sift_up2(data: Arr8, idx: Int) -> Arr8 {
+    let mut d = data;
+    let mut i = idx;
+    let mut done = 0;
+    while done == 0 {
+        if i == 0 { done = 1; }
+        else {
+            let p = heap_parent(i);
+            if get(d, i) < get(d, p) {
+                d = heap_swap(d, i, p);
+                i = p;
+            } else {
+                done = 1;
+            }
+        }
+    }
+    d
+}
+
+// Sift down (for extract-min)
+fn sift_down(data: Arr8, idx: Int, size: Int) -> Arr8 {
+    let mut d = data;
+    let mut i = idx;
+    let mut done = 0;
+    while done == 0 {
+        let l = heap_left(i);
+        let r = heap_right(i);
+        let mut smallest = i;
+        if l < size {
+            if get(d, l) < get(d, smallest) { smallest = l; }
+        }
+        if r < size {
+            if get(d, r) < get(d, smallest) { smallest = r; }
+        }
+        if smallest != i {
+            d = heap_swap(d, i, smallest);
+            i = smallest;
+        } else {
+            done = 1;
+        }
+    }
+    d
+}
+
+fn heap_insert(h: BinHeap8, val: Int) -> BinHeap8 {
+    let mut d = set(h.data, h.size, val);
+    d = sift_up2(d, h.size);
+    BinHeap8 { data: d, size: h.size + 1 }
+}
+
+// Returns min value (at index 0)
+fn heap_peek(h: BinHeap8) -> Int { get(h.data, 0) }
+
+// Extract min: swap root with last, decrease size, sift down
+fn heap_extract_data(h: BinHeap8) -> Arr8 {
+    let new_size = h.size - 1;
+    let mut d = heap_swap(h.data, 0, new_size);
+    d = sift_down(d, 0, new_size);
+    d
+}
+
+fn heap_extract_size(h: BinHeap8) -> Int { h.size - 1 }
+
+// Verify min-heap property
+fn is_min_heap(data: Arr8, size: Int) -> Int {
+    let mut i = 0;
+    while i < size {
+        let l = heap_left(i);
+        let r = heap_right(i);
+        if l < size {
+            if get(data, l) < get(data, i) { return 0; }
+        }
+        if r < size {
+            if get(data, r) < get(data, i) { return 0; }
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn main() -> Int {
+    // Build heap by inserting
+    let mut h = heap_new();
+    h = heap_insert(h, 5);
+    assert_eq(h.size, 1);
+    assert_eq(heap_peek(h), 5);
+    assert_eq(is_min_heap(h.data, h.size), 1);
+
+    h = heap_insert(h, 3);
+    assert_eq(heap_peek(h), 3); // 3 < 5
+    assert_eq(is_min_heap(h.data, h.size), 1);
+
+    h = heap_insert(h, 7);
+    assert_eq(heap_peek(h), 3);
+    assert_eq(h.size, 3);
+
+    h = heap_insert(h, 1);
+    assert_eq(heap_peek(h), 1); // 1 is new min
+    assert_eq(is_min_heap(h.data, h.size), 1);
+
+    h = heap_insert(h, 4);
+    h = heap_insert(h, 2);
+    assert_eq(h.size, 6);
+    assert_eq(heap_peek(h), 1);
+    assert_eq(is_min_heap(h.data, h.size), 1);
+
+    // Extract min: should get elements in sorted order
+    let d1 = heap_extract_data(h);
+    let s1 = heap_extract_size(h);
+    assert_eq(is_min_heap(d1, s1), 1);
+    assert_eq(get(d1, 0), 2); // next min after extracting 1
+
+    // Build another heap and extract all in order
+    let mut h2 = heap_new();
+    h2 = heap_insert(h2, 8);
+    h2 = heap_insert(h2, 3);
+    h2 = heap_insert(h2, 6);
+    h2 = heap_insert(h2, 1);
+    h2 = heap_insert(h2, 5);
+
+    // Extract all 5: should come out 1, 3, 5, 6, 8
+    assert_eq(heap_peek(h2), 1);
+    let d2 = heap_extract_data(h2);
+    let sz2 = 4;
+    assert_eq(get(d2, 0), 3); // next min
+
+    let h3 = BinHeap8 { data: d2, size: sz2 };
+    let d3 = heap_extract_data(h3);
+    assert_eq(get(d3, 0), 5);
+
+    let h4 = BinHeap8 { data: d3, size: 3 };
+    let d4 = heap_extract_data(h4);
+    assert_eq(get(d4, 0), 6);
+
+    let h5 = BinHeap8 { data: d4, size: 2 };
+    let d5 = heap_extract_data(h5);
+    assert_eq(get(d5, 0), 8);
+
+    // Single element heap
+    let mut hs = heap_new();
+    hs = heap_insert(hs, 42);
+    assert_eq(heap_peek(hs), 42);
+    assert_eq(hs.size, 1);
+
+    print("DIFF_OK: binary_heap");
+    0
+}

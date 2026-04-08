@@ -1,0 +1,224 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, comparison, logic, and, or, xor, short-circuit
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Test: AND, OR, XOR logical operations
+// Verifies boolean logic and short-circuit evaluation
+
+fn test_and_truth_table() {
+    // AND truth table
+    assert_eq(false && false, false);
+    assert_eq(false && true, false);
+    assert_eq(true && false, false);
+    assert_eq(true && true, true);
+}
+
+fn test_or_truth_table() {
+    // OR truth table
+    assert_eq(false || false, false);
+    assert_eq(false || true, true);
+    assert_eq(true || false, true);
+    assert_eq(true || true, true);
+}
+
+fn test_xor_truth_table() {
+    // XOR truth table (a != b for booleans)
+    assert_eq(false != false, false);
+    assert_eq(false != true, true);
+    assert_eq(true != false, true);
+    assert_eq(true != true, false);
+}
+
+fn test_not() {
+    assert_eq(!true, false);
+    assert_eq(!false, true);
+    assert_eq(!!true, true);
+    assert_eq(!!false, false);
+}
+
+// Helper functions for short-circuit tests (defined at module level)
+fn side_effect_true(c: &mut Int) -> Bool {
+    *c = *c + 1;
+    true
+}
+
+fn side_effect_false(c: &mut Int) -> Bool {
+    *c = *c + 1;
+    false
+}
+
+fn inc_true(c: &mut Int) -> Bool {
+    *c = *c + 1;
+    true
+}
+
+fn inc_false(c: &mut Int) -> Bool {
+    *c = *c + 1;
+    false
+}
+
+fn test_short_circuit_and() {
+    // AND short-circuits on false
+    let mut counter: Int = 0;
+
+    // First operand false - second should NOT be evaluated
+    let result1 = false && side_effect_true(&mut counter);
+    assert_eq(result1, false);
+    assert_eq(counter, 0);  // side_effect not called
+
+    // First operand true - second SHOULD be evaluated
+    let result2 = true && side_effect_true(&mut counter);
+    assert_eq(result2, true);
+    assert_eq(counter, 1);  // side_effect was called
+}
+
+fn test_short_circuit_or() {
+    // OR short-circuits on true
+    let mut counter: Int = 0;
+
+    // First operand true - second should NOT be evaluated
+    let result1 = true || side_effect_false(&mut counter);
+    assert_eq(result1, true);
+    assert_eq(counter, 0);  // side_effect not called
+
+    // First operand false - second SHOULD be evaluated
+    let result2 = false || side_effect_false(&mut counter);
+    assert_eq(result2, false);
+    assert_eq(counter, 1);  // side_effect was called
+}
+
+fn test_chained_and() {
+    assert(true && true && true);
+    assert(!(true && true && false));
+    assert(!(true && false && true));
+    assert(!(false && true && true));
+
+    // Short-circuit in chain
+    let mut counter: Int = 0;
+    let _ = false && inc_true(&mut counter) && inc_true(&mut counter);
+    assert_eq(counter, 0);  // Neither called
+}
+
+fn test_chained_or() {
+    assert(false || false || true);
+    assert(!(false || false || false));
+    assert(true || false || false);
+
+    // Short-circuit in chain
+    let mut counter: Int = 0;
+    let _ = true || inc_false(&mut counter) || inc_false(&mut counter);
+    assert_eq(counter, 0);  // Neither called
+}
+
+fn test_mixed_operators() {
+    // Precedence: NOT > AND > OR
+    assert_eq(true || false && false, true);      // true || (false && false) = true
+    assert_eq((true || false) && false, false);   // (true || false) && false = false
+
+    assert_eq(!true && false, false);             // (!true) && false = false
+    assert_eq(!(true && false), true);            // !(true && false) = true
+
+    assert_eq(!false || true, true);              // (!false) || true = true
+    assert_eq(!(false || true), false);           // !(false || true) = false
+}
+
+fn test_de_morgan() {
+    // De Morgan's laws
+    let a: Bool = true;
+    let b: Bool = false;
+
+    // !(a && b) == (!a) || (!b)
+    assert_eq(!(a && b), (!a) || (!b));
+
+    // !(a || b) == (!a) && (!b)
+    assert_eq(!(a || b), (!a) && (!b));
+
+    // Test all combinations
+    assert_eq(!(true && true), (!true) || (!true));
+    assert_eq(!(true && false), (!true) || (!false));
+    assert_eq(!(false && true), (!false) || (!true));
+    assert_eq(!(false && false), (!false) || (!false));
+
+    assert_eq(!(true || true), (!true) && (!true));
+    assert_eq(!(true || false), (!true) && (!false));
+    assert_eq(!(false || true), (!false) && (!true));
+    assert_eq(!(false || false), (!false) && (!false));
+}
+
+fn test_identity_elements() {
+    let x: Bool = true;
+    let y: Bool = false;
+
+    // AND identity: x && true = x
+    assert_eq(x && true, x);
+    assert_eq(y && true, y);
+
+    // OR identity: x || false = x
+    assert_eq(x || false, x);
+    assert_eq(y || false, y);
+
+    // AND annihilator: x && false = false
+    assert_eq(x && false, false);
+    assert_eq(y && false, false);
+
+    // OR annihilator: x || true = true
+    assert_eq(x || true, true);
+    assert_eq(y || true, true);
+}
+
+fn test_idempotence() {
+    // x && x = x
+    assert_eq(true && true, true);
+    assert_eq(false && false, false);
+
+    // x || x = x
+    assert_eq(true || true, true);
+    assert_eq(false || false, false);
+}
+
+fn test_absorption() {
+    let a: Bool = true;
+    let b: Bool = false;
+
+    // a || (a && b) = a
+    assert_eq(a || (a && b), a);
+    assert_eq(b || (b && a), b);
+
+    // a && (a || b) = a
+    assert_eq(a && (a || b), a);
+    assert_eq(b && (b || a), b);
+}
+
+fn test_comparison_produces_bool() {
+    // Comparisons should produce proper booleans for logic
+    let x: Int = 5;
+    let y: Int = 10;
+
+    assert((x < y) && (y > x));
+    assert((x < y) || (x > y));
+    assert(!(x > y));
+
+    // Chaining with comparisons
+    let in_range = (x >= 0) && (x <= 10);
+    assert(in_range);
+}
+
+fn main() {
+    test_and_truth_table();
+    test_or_truth_table();
+    test_xor_truth_table();
+    test_not();
+    test_short_circuit_and();
+    test_short_circuit_or();
+    test_chained_and();
+    test_chained_or();
+    test_mixed_operators();
+    test_de_morgan();
+    test_identity_elements();
+    test_idempotence();
+    test_absorption();
+    test_comparison_produces_bool();
+}

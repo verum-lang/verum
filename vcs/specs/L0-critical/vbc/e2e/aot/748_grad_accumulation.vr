@@ -1,0 +1,180 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, autodiff, grad-accumulate, mini-batch, training
+// @expected-exit: 0
+
+// Tests gradient accumulation patterns used in mini-batch training.
+// Verifies accumulation correctness, averaging, and momentum updates.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Simulate gradient computation for a simple linear model: y = w*x + b
+// Loss = (y - target)^2 = (w*x + b - target)^2
+// dL/dw = 2*(w*x + b - target)*x
+// dL/db = 2*(w*x + b - target)
+fn compute_grad_w(w: Int, b: Int, x: Int, target: Int) -> Int {
+    let pred = w * x + b;
+    2 * (pred - target) * x
+}
+
+fn compute_grad_b(w: Int, b: Int, x: Int, target: Int) -> Int {
+    let pred = w * x + b;
+    2 * (pred - target)
+}
+
+fn compute_loss(w: Int, b: Int, x: Int, target: Int) -> Int {
+    let diff = w * x + b - target;
+    diff * diff
+}
+
+fn main() -> Int {
+    // Test 1: Single sample gradient
+    let w = 2;
+    let b = 1;
+    // Sample: x=3, target=10
+    // pred = 2*3 + 1 = 7, error = -3
+    // dL/dw = 2*(-3)*3 = -18
+    // dL/db = 2*(-3) = -6
+    let gw = compute_grad_w(w, b, 3, 10);
+    let gb = compute_grad_b(w, b, 3, 10);
+    assert_eq(gw, -18);
+    assert_eq(gb, -6);
+
+    // Test 2: Gradient accumulation over mini-batch
+    // Batch: [(1,5), (2,7), (3,10)]
+    // Accumulated gradients = sum of per-sample gradients
+    let mut acc_gw = 0;
+    let mut acc_gb = 0;
+
+    // Sample 1: x=1, target=5. pred=3, error=-2. gw=-4, gb=-4
+    acc_gw = acc_gw + compute_grad_w(w, b, 1, 5);
+    acc_gb = acc_gb + compute_grad_b(w, b, 1, 5);
+
+    // Sample 2: x=2, target=7. pred=5, error=-2. gw=-8, gb=-4
+    acc_gw = acc_gw + compute_grad_w(w, b, 2, 7);
+    acc_gb = acc_gb + compute_grad_b(w, b, 2, 7);
+
+    // Sample 3: x=3, target=10. pred=7, error=-3. gw=-18, gb=-6
+    acc_gw = acc_gw + compute_grad_w(w, b, 3, 10);
+    acc_gb = acc_gb + compute_grad_b(w, b, 3, 10);
+
+    // Total: gw = -4 + -8 + -18 = -30, gb = -4 + -4 + -6 = -14
+    assert_eq(acc_gw, -30);
+    assert_eq(acc_gb, -14);
+
+    // Test 3: Average gradient (divide by batch size)
+    let batch_size = 3;
+    let avg_gw = acc_gw / batch_size;
+    let avg_gb = acc_gb / batch_size;
+    assert_eq(avg_gw, -10);  // -30/3
+    assert_eq(avg_gb, -4);   // -14/3 ≈ -4 (integer division)
+
+    // Test 4: Gradient descent update
+    // w_new = w - lr * avg_grad (using lr=1 for simplicity)
+    let lr = 1;
+    let w_new = w - lr * avg_gw;  // 2 - 1*(-10) = 12
+    let b_new = b - lr * avg_gb;  // 1 - 1*(-4) = 5
+    assert_eq(w_new, 12);
+    assert_eq(b_new, 5);
+
+    // Test 5: Gradient accumulation with loop
+    let data_x = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let data_y = [3, 5, 7, 9, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 5;
+    let mut total_gw = 0;
+    let mut total_gb = 0;
+    let mut total_loss = 0;
+    let mut i = 0;
+    while (i < n) {
+        total_gw = total_gw + compute_grad_w(w, b, data_x[i], data_y[i]);
+        total_gb = total_gb + compute_grad_b(w, b, data_x[i], data_y[i]);
+        total_loss = total_loss + compute_loss(w, b, data_x[i], data_y[i]);
+        i = i + 1;
+    }
+    // Verify: all targets = 2x + 1, model = 2x + 1, so all predictions are exact
+    // Actually data is y = 2x + 1: 3,5,7,9,11. Model w=2, b=1 is EXACT.
+    // So all gradients should be 0!
+    assert_eq(total_gw, 0);
+    assert_eq(total_gb, 0);
+    assert_eq(total_loss, 0);
+
+    // Test 6: Non-zero accumulated gradients with wrong model
+    let w2 = 1;  // Wrong weight
+    let b2 = 0;  // Wrong bias
+    let mut total_gw2 = 0;
+    let mut total_gb2 = 0;
+    i = 0;
+    while (i < n) {
+        total_gw2 = total_gw2 + compute_grad_w(w2, b2, data_x[i], data_y[i]);
+        total_gb2 = total_gb2 + compute_grad_b(w2, b2, data_x[i], data_y[i]);
+        i = i + 1;
+    }
+    // pred_i = 1*x_i, target_i = 2*x_i + 1
+    // error_i = x_i - (2x_i + 1) = -x_i - 1
+    // gw_i = 2*(-x_i - 1)*x_i
+    // For x=1: 2*(-2)*1 = -4
+    // For x=2: 2*(-3)*2 = -12
+    // For x=3: 2*(-4)*3 = -24
+    // For x=4: 2*(-5)*4 = -40
+    // For x=5: 2*(-6)*5 = -60
+    // Total gw = -4 -12 -24 -40 -60 = -140
+    assert_eq(total_gw2, -140);
+
+    // gb_i = 2*(-x_i - 1)
+    // Total gb = 2*(-2 + -3 + -4 + -5 + -6) = 2*(-20) = -40
+    assert_eq(total_gb2, -40);
+
+    // Test 7: Gradient clipping (L2 norm)
+    // Clip gradients to max norm 10
+    // |grad| = sqrt(gw^2 + gb^2) = sqrt(140^2 + 40^2) = sqrt(19600 + 1600) = sqrt(21200)
+    // ≈ 145.6
+    let grad_sq = total_gw2 * total_gw2 + total_gb2 * total_gb2;
+    assert_eq(grad_sq, 21200);
+    // After clipping to max_norm=10: scale = 10/145.6 ≈ 0.0687
+    // Clipped gw ≈ -9.6, gb ≈ -2.7
+
+    // Test 8: Momentum update
+    // v_t = momentum * v_{t-1} + grad
+    // w_t = w_{t-1} - lr * v_t
+    let momentum = 9;  // 0.9 * 10 (scaled by 10)
+    let mut vel_w = 0;
+    let mut vel_b = 0;
+    let mut mw = w2;
+    let mut mb = b2;
+
+    // Iteration 1: vel = 0.9*0 + (-140/5) = -28
+    vel_w = (momentum * vel_w) / 10 + total_gw2 / n;
+    vel_b = (momentum * vel_b) / 10 + total_gb2 / n;
+    assert_eq(vel_w, -28);
+    assert_eq(vel_b, -8);
+
+    // Update: w = 1 - 1*(-28) = 29, b = 0 - 1*(-8) = 8
+    mw = mw - vel_w;
+    mb = mb - vel_b;
+    assert_eq(mw, 29);
+    assert_eq(mb, 8);
+
+    // Test 9: Gradient is zero at optimum
+    // For perfect model w=2, b=1: all gradients are 0
+    assert_eq(compute_grad_w(2, 1, 100, 201), 0);
+    assert_eq(compute_grad_b(2, 1, 100, 201), 0);
+
+    // Test 10: Loss decreases with gradient step
+    let loss_before = compute_loss(w2, b2, 3, 7);
+    // At w=1, b=0, x=3, target=7: pred=3, loss=16
+    assert_eq(loss_before, 16);
+    // Gradient: gw = 2*(-4)*3 = -24, gb = 2*(-4) = -8
+    // After step with lr=0 (just verify direction): w_new = 1 - (-24) = 25
+    // This is too large, but loss at w=25 is huge
+    // Better: take tiny step. With gw=-24, moving w→w+1=2 (correct direction)
+    let loss_after = compute_loss(w2 + 1, b2, 3, 7);
+    // At w=2, b=0, x=3, target=7: pred=6, loss=1
+    assert_eq(loss_after, 1);
+    assert(loss_after < loss_before);
+
+    print("Grad accumulation: PASS");
+    0
+}

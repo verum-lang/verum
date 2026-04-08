@@ -1,0 +1,222 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, bounds, multiple
+
+/// Test for generic functions with multiple protocol bounds.
+/// Multiple bounds are combined with + operator.
+
+// ============================================================================
+// Custom protocols for testing multiple bounds
+// ============================================================================
+
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+type Scalable is protocol {
+    fn scale(&self, factor: Int) -> Self;
+};
+
+type Summable is protocol {
+    fn sum_val(&self) -> Int;
+};
+
+// ============================================================================
+// Compound bounds: Ord + Clone
+// ============================================================================
+
+fn pick_max<T: Ord + Clone>(a: T, b: T) -> T {
+    if a >= b { a } else { b }
+}
+
+fn pick_min<T: Ord + Clone>(a: T, b: T) -> T {
+    if a <= b { a } else { b }
+}
+
+fn clamp_val<T: Ord + Clone>(val: T, lo: T, hi: T) -> T {
+    if val < lo { lo } else if val > hi { hi } else { val }
+}
+
+// ============================================================================
+// Compound bounds: two custom protocols
+// ============================================================================
+
+fn describe_scaled<T: Describable + Scalable>(item: &T, factor: Int) -> Text {
+    let s = item.scale(factor);
+    s.describe()
+}
+
+fn describe_summed<T: Describable + Summable>(item: &T) -> Text {
+    let n = item.sum_val();
+    let d = item.describe();
+    f"{d} (sum={n})"
+}
+
+// ============================================================================
+// Three bounds (Describable + Scalable + Summable)
+// ============================================================================
+
+fn full_info<T: Describable + Scalable + Summable>(item: &T, factor: Int) -> Text {
+    let d = item.describe();
+    let s = item.sum_val();
+    let scaled = item.scale(factor);
+    let sd = scaled.describe();
+    f"{d} sum={s} scaled2x={sd}"
+}
+
+// ============================================================================
+// Where clause with multiple bounds
+// ============================================================================
+
+fn where_double_bound<T>(item: &T) -> (Text, Int)
+where
+    T: Describable + Summable,
+{
+    (item.describe(), item.sum_val())
+}
+
+fn where_triple_bound<T>(item: &T, factor: Int) -> (Text, Int, Text)
+where
+    T: Describable + Scalable + Summable,
+{
+    let d = item.describe();
+    let s = item.sum_val();
+    let scaled = item.scale(factor);
+    let sd = scaled.describe();
+    (d, s, sd)
+}
+
+// ============================================================================
+// Higher-order with multiple bounds
+// ============================================================================
+
+fn apply_and_describe<T: Describable, R: Describable>(
+    item: &T,
+    f: fn(&T) -> R
+) -> (Text, Text) {
+    let input_desc = item.describe();
+    let output = f(item);
+    let output_desc = output.describe();
+    (input_desc, output_desc)
+}
+
+fn collect_descriptions<T: Describable>(items: List<T>) -> List<Text> {
+    let mut result: List<Text> = [];
+    let mut i = 0;
+    while i < items.len() {
+        result.push(items[i].describe());
+        i += 1;
+    }
+    result
+}
+
+// ============================================================================
+// Concrete types implementing multiple protocols
+// ============================================================================
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+implement Describable for Point {
+    fn describe(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+implement Scalable for Point {
+    fn scale(&self, factor: Int) -> Point {
+        Point { x: self.x * factor, y: self.y * factor }
+    }
+}
+
+implement Summable for Point {
+    fn sum_val(&self) -> Int {
+        self.x + self.y
+    }
+}
+
+type Interval is {
+    lo: Int,
+    hi: Int,
+};
+
+implement Describable for Interval {
+    fn describe(&self) -> Text {
+        f"[{self.lo}, {self.hi}]"
+    }
+}
+
+implement Summable for Interval {
+    fn sum_val(&self) -> Int {
+        self.hi - self.lo
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Ord + Clone bounds
+    assert(pick_max(10, 20) == 20);
+    assert(pick_max("apple", "banana") == "banana");
+    assert(pick_min(10, 20) == 10);
+    assert(pick_min("apple", "banana") == "apple");
+
+    assert(clamp_val(5, 0, 10) == 5);
+    assert(clamp_val(15, 0, 10) == 10);
+    assert(clamp_val(-5, 0, 10) == 0);
+
+    // Two custom protocol bounds
+    let p = Point { x: 3, y: 4 };
+    let p1 = Point { x: 1, y: 2 };
+
+    let scaled_desc = describe_scaled(&p, 2);
+    assert(scaled_desc == "(6, 8)");
+
+    let summed_desc = describe_summed(&p);
+    assert(summed_desc == "(3, 4) (sum=7)");
+
+    // Three bounds (Describable + Scalable + Summable)
+    let info = full_info(&p, 2);
+    assert(info == "(3, 4) sum=7 scaled2x=(6, 8)");
+
+    // Where clause with double bound
+    let desc_sum = where_double_bound(&p);
+    assert(desc_sum.0 == "(3, 4)");
+    assert(desc_sum.1 == 7);
+
+    // Where clause with triple bound
+    let (d, s, sd) = where_triple_bound(&p1, 3);
+    assert(d == "(1, 2)");
+    assert(s == 3);
+    assert(sd == "(3, 6)");
+
+    // collect_descriptions
+    let pts: List<Point> = [
+        Point { x: 1, y: 2 },
+        Point { x: 3, y: 4 },
+        Point { x: 5, y: 6 },
+    ];
+    let descs = collect_descriptions(pts);
+    assert(descs[0] == "(1, 2)");
+    assert(descs[1] == "(3, 4)");
+    assert(descs.len() == 3);
+
+    // Interval
+    let i = Interval { lo: 5, hi: 10 };
+    assert(i.describe() == "[5, 10]");
+    let (id, i_sum) = where_double_bound(&i);
+    assert(id == "[5, 10]");
+    assert(i_sum == 5);
+
+    // apply_and_describe
+    let (in_desc, out_desc) = apply_and_describe(&p1, |pt: &Point| pt.scale(3));
+    assert(in_desc == "(1, 2)");
+    assert(out_desc == "(3, 6)");
+
+    print("Multiple bounds tests passed!");
+}

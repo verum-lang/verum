@@ -1,0 +1,215 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, interval, scheduling, greedy
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Check if two intervals overlap (exclusive endpoints for scheduling)
+fn intervals_overlap(s1: Int, e1: Int, s2: Int, e2: Int) -> Int {
+    if s1 >= e2 { return 0; }
+    if s2 >= e1 { return 0; }
+    1
+}
+
+// Sort indices by end time (selection sort)
+fn sort_by_end(ends: Arr8, n: Int) -> Arr8 {
+    let mut idx = zeros();
+    let mut i = 0;
+    while i < n { idx = set(idx, i, i); i = i + 1; }
+
+    let mut i2 = 0;
+    while i2 < n - 1 {
+        let mut min_j = i2;
+        let mut j = i2 + 1;
+        while j < n {
+            if get(ends, get(idx, j)) < get(ends, get(idx, min_j)) {
+                min_j = j;
+            }
+            j = j + 1;
+        }
+        if min_j != i2 {
+            let tmp = get(idx, i2);
+            idx = set(idx, i2, get(idx, min_j));
+            idx = set(idx, min_j, tmp);
+        }
+        i2 = i2 + 1;
+    }
+    idx
+}
+
+// Activity selection: max number of non-overlapping intervals (greedy by end time)
+fn max_non_overlapping(starts: Arr8, ends: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let sorted = sort_by_end(ends, n);
+    let mut count = 1;
+    let mut last_end = get(ends, get(sorted, 0));
+    let mut i = 1;
+    while i < n {
+        let si = get(starts, get(sorted, i));
+        if si >= last_end {
+            count = count + 1;
+            last_end = get(ends, get(sorted, i));
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Return which intervals are selected (1 = selected, 0 = not)
+fn selected_intervals(starts: Arr8, ends: Arr8, n: Int) -> Arr8 {
+    let mut sel = zeros();
+    if n == 0 { return sel; }
+    let sorted = sort_by_end(ends, n);
+    sel = set(sel, get(sorted, 0), 1);
+    let mut last_end = get(ends, get(sorted, 0));
+    let mut i = 1;
+    while i < n {
+        let si = get(starts, get(sorted, i));
+        if si >= last_end {
+            sel = set(sel, get(sorted, i), 1);
+            last_end = get(ends, get(sorted, i));
+        }
+        i = i + 1;
+    }
+    sel
+}
+
+// Verify no selected intervals overlap
+fn verify_no_overlap(starts: Arr8, ends: Arr8, sel: Arr8, n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        if get(sel, i) == 1 {
+            let mut j = i + 1;
+            while j < n {
+                if get(sel, j) == 1 {
+                    if intervals_overlap(get(starts, i), get(ends, i), get(starts, j), get(ends, j)) == 1 {
+                        return 0;
+                    }
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    1
+}
+
+// Minimum intervals to remove to make remaining non-overlapping
+fn min_removals(starts: Arr8, ends: Arr8, n: Int) -> Int {
+    n - max_non_overlapping(starts, ends, n)
+}
+
+fn test_basic() -> Int {
+    // Non-overlapping: [1,3), [3,5), [5,7) -- all can be selected
+    let s = Arr8 { d0: 1, d1: 3, d2: 5, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e = Arr8 { d0: 3, d1: 5, d2: 7, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_non_overlapping(s, e, 3), 3);
+    assert_eq(min_removals(s, e, 3), 0);
+
+    // All overlap: [1,10), [2,8), [3,6) -- only 1 can be selected
+    let s2 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e2 = Arr8 { d0: 10, d1: 8, d2: 6, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_non_overlapping(s2, e2, 3), 1);
+    assert_eq(min_removals(s2, e2, 3), 2);
+    0
+}
+
+fn test_classic() -> Int {
+    // Classic scheduling: [1,4), [3,5), [0,6), [5,7), [3,9), [5,9), [6,10), [8,11)
+    let s = Arr8 { d0: 1, d1: 3, d2: 0, d3: 5, d4: 3, d5: 5, d6: 6, d7: 8 };
+    let e = Arr8 { d0: 4, d1: 5, d2: 6, d3: 7, d4: 9, d5: 9, d6: 10, d7: 11 };
+    // Greedy by end: [1,4), [5,7), [8,11) = 3
+    // Or: [1,4), [5,7), [8,11) = 3
+    let result = max_non_overlapping(s, e, 8);
+    assert_eq(result, 3);
+
+    let sel = selected_intervals(s, e, 8);
+    assert_eq(verify_no_overlap(s, e, sel, 8), 1);
+
+    // Count selected
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        count = count + get(sel, i);
+        i = i + 1;
+    }
+    assert_eq(count, 3);
+    0
+}
+
+fn test_overlap_check() -> Int {
+    // Overlap detection
+    assert_eq(intervals_overlap(1, 5, 3, 7), 1);   // overlap
+    assert_eq(intervals_overlap(1, 3, 3, 5), 0);    // touching = no overlap
+    assert_eq(intervals_overlap(1, 3, 5, 7), 0);    // gap
+    assert_eq(intervals_overlap(5, 7, 1, 3), 0);    // gap reversed
+    assert_eq(intervals_overlap(1, 10, 3, 5), 1);   // contained
+    assert_eq(intervals_overlap(3, 5, 1, 10), 1);   // contained reversed
+    0
+}
+
+fn test_edge_cases() -> Int {
+    let s = zeros();
+    let e = zeros();
+    // Empty
+    assert_eq(max_non_overlapping(s, e, 0), 0);
+
+    // Single interval
+    let s1 = Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e1 = Arr8 { d0: 5, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_non_overlapping(s1, e1, 1), 1);
+    assert_eq(min_removals(s1, e1, 1), 0);
+
+    // Two identical intervals
+    let s2 = Arr8 { d0: 1, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e2 = Arr8 { d0: 5, d1: 5, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_non_overlapping(s2, e2, 2), 1);
+    assert_eq(min_removals(s2, e2, 2), 1);
+    0
+}
+
+fn test_chain() -> Int {
+    // Chain of adjacent intervals: [0,1), [1,2), [2,3), [3,4), [4,5)
+    let s = Arr8 { d0: 0, d1: 1, d2: 2, d3: 3, d4: 4, d5: 0, d6: 0, d7: 0 };
+    let e = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_non_overlapping(s, e, 5), 5);
+
+    let sel = selected_intervals(s, e, 5);
+    assert_eq(verify_no_overlap(s, e, sel, 5), 1);
+
+    // Interleaved: [0,3), [1,4), [2,5), [3,6), [4,7)
+    let s2 = Arr8 { d0: 0, d1: 1, d2: 2, d3: 3, d4: 4, d5: 0, d6: 0, d7: 0 };
+    let e2 = Arr8 { d0: 3, d1: 4, d2: 5, d3: 6, d4: 7, d5: 0, d6: 0, d7: 0 };
+    let r = max_non_overlapping(s2, e2, 5);
+    assert_eq(r, 2); // [0,3) and [3,6) or [0,3) and [4,7)
+    0
+}
+
+fn main() -> Int {
+    test_basic();
+    test_classic();
+    test_overlap_check();
+    test_edge_cases();
+    test_chain();
+    print("DIFF_OK: interval_scheduling");
+    0
+}

@@ -1,0 +1,45 @@
+// @test: parse
+// @level: L1
+// @tags: meta, derive, hash
+// @timeout: 5000
+
+/// @derive(Hash) for automatic hashing implementation.
+
+@derive(Hash, Eq)
+type Color is Red | Green | Blue | Custom(Int, Int, Int);
+
+@derive(Hash, Eq)
+type Coordinate is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+@derive(Hash)
+type CacheKey is {
+    namespace: Text,
+    key: Text,
+    version: Int,
+};
+
+// Use derived Hash with Map
+fn test_hash_in_map() {
+    let mut map = Map.new();
+    let key = CacheKey { namespace: "users", key: "alice", version: 1 };
+    map.insert(key, "cached_value");
+}
+
+// Use derived Hash with Set
+fn test_hash_in_set() {
+    let mut colors = Set.new();
+    colors.insert(Color.Red);
+    colors.insert(Color.Green);
+    colors.insert(Color.Blue);
+    assert_eq(colors.len(), 3);
+}
+
+fn main() {
+    test_hash_in_map();
+    test_hash_in_set();
+    print("Derive Hash tests parsed");
+}

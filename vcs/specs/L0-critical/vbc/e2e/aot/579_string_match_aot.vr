@@ -1,0 +1,213 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, string-matching, pattern, search
+// @timeout: 30000
+
+// String matching algorithms using integer arrays (simulating characters)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Brute force string matching: find first occurrence of pattern in text
+// Returns index or -1
+fn brute_find(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let mut i = 0;
+    while i <= tlen - plen {
+        let mut j = 0;
+        let mut match_ok = 1;
+        while j < plen {
+            if get8(text, i + j) != get8(pat, j) {
+                match_ok = 0;
+                j = plen; // break
+            } else {
+                j = j + 1;
+            }
+        }
+        if match_ok == 1 { return i; }
+        i = i + 1;
+    }
+    0 - 1
+}
+
+// Count all occurrences of pattern in text
+fn count_matches(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i <= tlen - plen {
+        let mut j = 0;
+        let mut match_ok = 1;
+        while j < plen {
+            if get8(text, i + j) != get8(pat, j) {
+                match_ok = 0;
+                j = plen; // break
+            } else {
+                j = j + 1;
+            }
+        }
+        if match_ok == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Simple hash for rolling hash (Rabin-Karp style)
+// hash = sum of (val * base^pos) mod modulus
+fn arr_hash(arr: Arr8, start: Int, len: Int) -> Int {
+    let base = 31;
+    let modulus = 997;
+    let mut h = 0;
+    let mut pow = 1;
+    let mut i = 0;
+    while i < len {
+        h = (h + get8(arr, start + i) * pow) % modulus;
+        pow = (pow * base) % modulus;
+        i = i + 1;
+    }
+    h
+}
+
+// Rabin-Karp: use hash to speed up matching
+fn rabin_karp(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let pat_hash = arr_hash(pat, 0, plen);
+    let mut i = 0;
+    while i <= tlen - plen {
+        let text_hash = arr_hash(text, i, plen);
+        if text_hash == pat_hash {
+            // Verify match
+            let mut j = 0;
+            let mut match_ok = 1;
+            while j < plen {
+                if get8(text, i + j) != get8(pat, j) {
+                    match_ok = 0;
+                    j = plen; // break
+                } else {
+                    j = j + 1;
+                }
+            }
+            if match_ok == 1 { return i; }
+        }
+        i = i + 1;
+    }
+    0 - 1
+}
+
+// Longest common prefix of two arrays starting at given positions
+fn lcp(a: Arr8, ai: Int, alen: Int, b: Arr8, bi: Int, blen: Int) -> Int {
+    let mut len = 0;
+    while ai + len < alen {
+        if bi + len >= blen { return len; }
+        if get8(a, ai + len) != get8(b, bi + len) { return len; }
+        len = len + 1;
+    }
+    len
+}
+
+// Check if arr is a palindrome from start to start+len-1
+fn is_palindrome(arr: Arr8, start: Int, len: Int) -> Int {
+    let mut i = 0;
+    while i < len / 2 {
+        if get8(arr, start + i) != get8(arr, start + len - 1 - i) {
+            return 0;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_brute_find() -> Int {
+    // text = [1,2,3,4,5,6,7,8], pattern = [3,4,5]
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let pat = Arr8 { v0: 3, v1: 4, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(brute_find(text, 8, pat, 3), 2);
+
+    // Not found
+    let pat2 = Arr8 { v0: 9, v1: 10, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(brute_find(text, 8, pat2, 2), 0 - 1);
+
+    // Found at start
+    let pat3 = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(brute_find(text, 8, pat3, 2), 0);
+
+    // Found at end
+    let pat4 = Arr8 { v0: 7, v1: 8, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(brute_find(text, 8, pat4, 2), 6);
+    1
+}
+
+fn test_count_matches() -> Int {
+    // text = [1,2,1,2,1,2,1,2], pattern = [1,2]
+    let text = Arr8 { v0: 1, v1: 2, v2: 1, v3: 2, v4: 1, v5: 2, v6: 1, v7: 2 };
+    let pat = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_matches(text, 8, pat, 2), 4);
+
+    // Single element pattern
+    let pat2 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_matches(text, 8, pat2, 1), 4);
+    1
+}
+
+fn test_rabin_karp() -> Int {
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let pat = Arr8 { v0: 4, v1: 5, v2: 6, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(rabin_karp(text, 8, pat, 3), 3);
+
+    // Not found
+    let pat2 = Arr8 { v0: 8, v1: 9, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(rabin_karp(text, 8, pat2, 2), 0 - 1);
+    1
+}
+
+fn test_lcp_fn() -> Int {
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 1, v1: 2, v2: 3, v3: 9, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcp(a, 0, 5, b, 0, 4), 3);
+    assert_eq(lcp(a, 2, 5, b, 2, 4), 1); // both start at val 3
+    1
+}
+
+fn test_palindrome() -> Int {
+    // [1,2,3,2,1] is palindrome
+    let p = Arr8 { v0: 1, v1: 2, v2: 3, v3: 2, v4: 1, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_palindrome(p, 0, 5), 1);
+
+    // [1,2,3,4,5] is not
+    let np = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_palindrome(np, 0, 5), 0);
+
+    // Single element is palindrome
+    assert_eq(is_palindrome(p, 0, 1), 1);
+
+    // Subarray palindrome [2,3,2]
+    assert_eq(is_palindrome(p, 1, 3), 1);
+    1
+}
+
+fn main() -> Int {
+    test_brute_find();
+    test_count_matches();
+    test_rabin_karp();
+    test_lcp_fn();
+    test_palindrome();
+    print("[OK] 579_string_match_aot");
+    0
+}

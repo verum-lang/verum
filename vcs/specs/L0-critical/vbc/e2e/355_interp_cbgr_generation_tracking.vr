@@ -1,0 +1,433 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, generation, lifecycle
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: CBGR generation counter behavior and reference lifecycle.
+// Tests that references remain valid within their scope, that values can be
+// passed through multiple function calls with references, and that reference
+// counting (multiple refs to same value) works correctly.
+// Exercises the full create-reference-use-return lifecycle.
+
+// =============================================================================
+// Type definitions
+// =============================================================================
+
+type Counter is { val: Int, gen: Int };
+type RefTracker is { ref_count: Int, value: Int, alive: Int };
+
+// =============================================================================
+// Functions exercising reference validity
+// =============================================================================
+
+fn read_ref(r: &Int) -> Int {
+    *r
+}
+
+fn read_and_add(r: &Int, extra: Int) -> Int {
+    *r + extra
+}
+
+fn pass_through_ref(r: &Int) -> Int {
+    // Just forward to another function
+    read_ref(r)
+}
+
+fn double_via_ref(r: &Int) -> Int {
+    *r + *r
+}
+
+fn chain_read(r: &Int) -> Int {
+    let val = *r;
+    let rval = &val;
+    *rval
+}
+
+// =============================================================================
+// Test: References are valid within their scope
+// =============================================================================
+
+fn test_ref_valid_in_scope() {
+    let x = 42;
+    let r = &x;
+    // Multiple reads of the same reference - all valid
+    let a = *r;
+    let b = *r;
+    let c = *r;
+    assert_eq(a, 42);
+    assert_eq(b, 42);
+    assert_eq(c, 42);
+}
+
+fn test_ref_valid_in_inner_scope() {
+    let x = 100;
+    let r = &x;
+    let result = {
+        // Reference to outer variable is valid in inner scope
+        let val = *r;
+        val + 50
+    };
+    assert_eq(result, 150);
+    // Still valid after inner scope exits
+    assert_eq(*r, 100);
+}
+
+fn test_ref_valid_across_loop_iterations() {
+    let x = 7;
+    let r = &x;
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 10 {
+        sum = sum + *r;
+        i = i + 1;
+    }
+    assert_eq(sum, 70);
+}
+
+// =============================================================================
+// Test: Pass values through multiple function calls with references
+// =============================================================================
+
+fn test_ref_through_one_function() {
+    let x = 55;
+    let result = read_ref(&x);
+    assert_eq(result, 55);
+}
+
+fn test_ref_through_chain() {
+    let x = 77;
+    // pass_through_ref calls read_ref internally
+    let result = pass_through_ref(&x);
+    assert_eq(result, 77);
+}
+
+fn test_ref_used_in_multiple_calls() {
+    let x = 10;
+    let a = read_ref(&x);
+    let b = read_and_add(&x, 5);
+    let c = double_via_ref(&x);
+    let d = chain_read(&x);
+    assert_eq(a, 10);
+    assert_eq(b, 15);
+    assert_eq(c, 20);
+    assert_eq(d, 10);
+}
+
+fn test_ref_reuse_across_calls() {
+    let x = 33;
+    let r = &x;
+    // Same reference used in multiple function calls
+    let a = read_ref(r);
+    let b = read_ref(r);
+    let c = read_ref(r);
+    assert_eq(a, 33);
+    assert_eq(b, 33);
+    assert_eq(c, 33);
+}
+
+// =============================================================================
+// Test: Multiple references to same value (ref counting behavior)
+// =============================================================================
+
+fn test_multiple_immutable_refs() {
+    let x = 42;
+    let r1 = &x;
+    let r2 = &x;
+    let r3 = &x;
+    let r4 = &x;
+    let r5 = &x;
+    // All references read the same value
+    assert_eq(*r1, 42);
+    assert_eq(*r2, 42);
+    assert_eq(*r3, 42);
+    assert_eq(*r4, 42);
+    assert_eq(*r5, 42);
+    // Sum of all derefs
+    assert_eq(*r1 + *r2 + *r3 + *r4 + *r5, 210);
+}
+
+fn test_refs_to_different_values() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let ra = &a;
+    let rb = &b;
+    let rc = &c;
+    let rd = &d;
+    let re = &e;
+    assert_eq(*ra + *rb + *rc + *rd + *re, 15);
+}
+
+fn test_ref_independence() {
+    // Creating a ref to one variable doesn't affect another
+    let x = 10;
+    let y = 20;
+    let rx = &x;
+    assert_eq(*rx, 10);
+    assert_eq(y, 20);
+    let ry = &y;
+    assert_eq(*rx, 10);
+    assert_eq(*ry, 20);
+}
+
+// =============================================================================
+// Test: Clean lifecycle: create, reference, use, return
+// =============================================================================
+
+fn test_lifecycle_simple() {
+    // Create
+    let val = 100;
+    // Reference
+    let r = &val;
+    // Use
+    let doubled = *r * 2;
+    // Return/verify
+    assert_eq(doubled, 200);
+    assert_eq(val, 100);
+}
+
+fn test_lifecycle_with_mutation() {
+    // Create
+    let mut val = 0;
+    // Reference and mutate
+    let r = &mut val;
+    *r = 50;
+    // Verify mutation
+    assert_eq(val, 50);
+    // Reference again
+    let r2 = &val;
+    assert_eq(*r2, 50);
+}
+
+fn test_lifecycle_loop() {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        // Create fresh value each iteration
+        let val = (i + 1) * 10;
+        // Reference it
+        let r = &val;
+        // Use it
+        total = total + *r;
+        // val and r go out of scope, generation bumps
+        i = i + 1;
+    }
+    // 10 + 20 + 30 + 40 + 50 = 150
+    assert_eq(total, 150);
+}
+
+// =============================================================================
+// Test: Simulated reference tracking with records
+// =============================================================================
+
+fn tracker_new(initial: Int) -> RefTracker {
+    RefTracker { ref_count: 0, value: initial, alive: 1 }
+}
+
+fn tracker_add_ref(t: RefTracker) -> RefTracker {
+    RefTracker { ref_count: t.ref_count + 1, value: t.value, alive: t.alive }
+}
+
+fn tracker_remove_ref(t: RefTracker) -> RefTracker {
+    let new_count = t.ref_count - 1;
+    RefTracker { ref_count: new_count, value: t.value, alive: t.alive }
+}
+
+fn tracker_set_value(t: RefTracker, v: Int) -> RefTracker {
+    RefTracker { ref_count: t.ref_count, value: v, alive: t.alive }
+}
+
+fn tracker_drop(t: RefTracker) -> RefTracker {
+    RefTracker { ref_count: 0, value: t.value, alive: 0 }
+}
+
+fn test_simulated_ref_tracking() {
+    let mut t = tracker_new(42);
+    assert_eq(t.ref_count, 0);
+    assert_eq(t.value, 42);
+    assert_eq(t.alive, 1);
+
+    // Add references
+    t = tracker_add_ref(t);
+    assert_eq(t.ref_count, 1);
+    t = tracker_add_ref(t);
+    assert_eq(t.ref_count, 2);
+    t = tracker_add_ref(t);
+    assert_eq(t.ref_count, 3);
+
+    // Modify value while refs exist
+    t = tracker_set_value(t, 100);
+    assert_eq(t.value, 100);
+    assert_eq(t.ref_count, 3);
+
+    // Remove references
+    t = tracker_remove_ref(t);
+    assert_eq(t.ref_count, 2);
+    t = tracker_remove_ref(t);
+    assert_eq(t.ref_count, 1);
+    t = tracker_remove_ref(t);
+    assert_eq(t.ref_count, 0);
+
+    // Drop
+    t = tracker_drop(t);
+    assert_eq(t.alive, 0);
+}
+
+// =============================================================================
+// Test: Generation tracking with counter records
+// =============================================================================
+
+fn counter_new(initial: Int) -> Counter {
+    Counter { val: initial, gen: 1 }
+}
+
+fn counter_increment(c: Counter) -> Counter {
+    Counter { val: c.val + 1, gen: c.gen + 1 }
+}
+
+fn counter_decrement(c: Counter) -> Counter {
+    Counter { val: c.val - 1, gen: c.gen + 1 }
+}
+
+fn counter_reset(c: Counter) -> Counter {
+    Counter { val: 0, gen: c.gen + 1 }
+}
+
+fn test_counter_generation_tracking() {
+    let mut c = counter_new(0);
+    assert_eq(c.val, 0);
+    assert_eq(c.gen, 1);
+
+    c = counter_increment(c);
+    assert_eq(c.val, 1);
+    assert_eq(c.gen, 2);
+
+    c = counter_increment(c);
+    assert_eq(c.val, 2);
+    assert_eq(c.gen, 3);
+
+    c = counter_decrement(c);
+    assert_eq(c.val, 1);
+    assert_eq(c.gen, 4);
+
+    c = counter_reset(c);
+    assert_eq(c.val, 0);
+    assert_eq(c.gen, 5);
+}
+
+fn test_counter_ref_at_each_generation() {
+    let mut c = counter_new(10);
+
+    let r1 = &c;
+    assert_eq((*r1).val, 10);
+    assert_eq((*r1).gen, 1);
+
+    c = counter_increment(c);
+    let r2 = &c;
+    assert_eq((*r2).val, 11);
+    assert_eq((*r2).gen, 2);
+
+    c = counter_increment(c);
+    let r3 = &c;
+    assert_eq((*r3).val, 12);
+    assert_eq((*r3).gen, 3);
+}
+
+// =============================================================================
+// Test: Complex multi-function reference passing
+// =============================================================================
+
+fn compute_step1(x: &Int) -> Int {
+    *x * 2
+}
+
+fn compute_step2(x: &Int) -> Int {
+    *x + 10
+}
+
+fn compute_step3(x: &Int) -> Int {
+    *x * *x
+}
+
+fn test_pipeline_through_refs() {
+    let val = 3;
+    let step1 = compute_step1(&val);    // 6
+    let step2 = compute_step2(&step1);   // 16
+    let step3 = compute_step3(&step2);   // 256
+    assert_eq(step1, 6);
+    assert_eq(step2, 16);
+    assert_eq(step3, 256);
+}
+
+fn test_pipeline_with_branching() {
+    let val = 5;
+    let r = &val;
+    let doubled = compute_step1(r);       // 10
+    let plus_ten = compute_step2(r);      // 15
+    let squared = compute_step3(r);       // 25
+    assert_eq(doubled, 10);
+    assert_eq(plus_ten, 15);
+    assert_eq(squared, 25);
+    assert_eq(doubled + plus_ten + squared, 50);
+}
+
+// =============================================================================
+// Test: Mutable reference generation advances
+// =============================================================================
+
+fn test_mut_ref_advances_value() {
+    let mut x = 0;
+    let mut i = 0;
+    while i < 10 {
+        let r = &mut x;
+        *r = *r + (i + 1);
+        i = i + 1;
+    }
+    // 1+2+3+...+10 = 55
+    assert_eq(x, 55);
+}
+
+fn test_alternating_read_write_cycles() {
+    let mut x = 1;
+    let mut i = 0;
+    while i < 6 {
+        // Read cycle
+        let r = &x;
+        let current = *r;
+        // Write cycle
+        let rm = &mut x;
+        *rm = current * 2;
+        i = i + 1;
+    }
+    // 1 -> 2 -> 4 -> 8 -> 16 -> 32 -> 64
+    assert_eq(x, 64);
+}
+
+fn main() -> Int {
+    test_ref_valid_in_scope();
+    test_ref_valid_in_inner_scope();
+    test_ref_valid_across_loop_iterations();
+    test_ref_through_one_function();
+    test_ref_through_chain();
+    test_ref_used_in_multiple_calls();
+    test_ref_reuse_across_calls();
+    test_multiple_immutable_refs();
+    test_refs_to_different_values();
+    test_ref_independence();
+    test_lifecycle_simple();
+    test_lifecycle_with_mutation();
+    test_lifecycle_loop();
+    test_simulated_ref_tracking();
+    test_counter_generation_tracking();
+    test_counter_ref_at_each_generation();
+    test_pipeline_through_refs();
+    test_pipeline_with_branching();
+    test_mut_ref_advances_value();
+    test_alternating_read_write_cycles();
+    print("[OK] 355_interp_cbgr_generation_tracking");
+    0
+}

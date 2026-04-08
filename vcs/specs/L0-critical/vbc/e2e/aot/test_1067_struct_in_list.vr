@@ -1,0 +1,133 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: struct, list, indexing, field-access
+// @description: Test struct in list indexing and field access
+
+type Point is { x: Int, y: Int };
+
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn sum(&self) -> Int {
+        self.x + self.y
+    }
+}
+
+type Node is { value: Int, next: Int };
+
+fn test_struct_create_and_field() -> Int {
+    let p = Point.new(3, 4);
+    if p.x != 3 {
+        print(f"FAIL field_access: x={p.x}, expected 3");
+        return 1;
+    }
+    if p.y != 4 {
+        print(f"FAIL field_access: y={p.y}, expected 4");
+        return 1;
+    }
+    if p.sum() != 7 {
+        print(f"FAIL field_access: sum={p.sum()}, expected 7");
+        return 1;
+    }
+    print("  field_access: OK");
+    0
+}
+
+fn test_struct_in_list_field_access() -> Int {
+    // Core test: push structs into list, index them, access fields
+    let mut points = List.new();
+    points.push(Point { x: 10, y: 20 });
+    points.push(Point { x: 30, y: 40 });
+    points.push(Point { x: 50, y: 60 });
+
+    let p0 = points[0];
+    let p1 = points[1];
+    let p2 = points[2];
+
+    if p0.x != 10 || p0.y != 20 {
+        print(f"FAIL list_field: p0=({p0.x},{p0.y}), expected (10,20)");
+        return 1;
+    }
+    if p1.x != 30 || p1.y != 40 {
+        print(f"FAIL list_field: p1=({p1.x},{p1.y}), expected (30,40)");
+        return 1;
+    }
+    if p2.x != 50 || p2.y != 60 {
+        print(f"FAIL list_field: p2=({p2.x},{p2.y}), expected (50,60)");
+        return 1;
+    }
+    print("  list_field: OK");
+    0
+}
+
+fn test_node_in_list() -> Int {
+    // The original bug reproduction case
+    let mut nodes = List.new();
+    nodes.push(Node { value: 777, next: 888 });
+    let n = nodes[0];
+    let v = n.value;
+    let nx = n.next;
+    if v != 777 {
+        print(f"FAIL node_list: value={v}, expected 777");
+        return 1;
+    }
+    if nx != 888 {
+        print(f"FAIL node_list: next={nx}, expected 888");
+        return 1;
+    }
+    print("  node_list: OK");
+    0
+}
+
+fn test_struct_method_on_list_element() -> Int {
+    let mut points = List.new();
+    points.push(Point.new(5, 10));
+    points.push(Point.new(100, 200));
+
+    let p = points[0];
+    let s = p.sum();
+    if s != 15 {
+        print(f"FAIL method_on_elem: sum={s}, expected 15");
+        return 1;
+    }
+
+    let p2 = points[1];
+    let s2 = p2.sum();
+    if s2 != 300 {
+        print(f"FAIL method_on_elem: sum2={s2}, expected 300");
+        return 1;
+    }
+    print("  method_on_elem: OK");
+    0
+}
+
+fn test_struct_method_chain() -> Int {
+    let p = Point.new(5, 10);
+    let s = p.sum();
+    if s != 15 {
+        print(f"FAIL method_chain: sum={s}");
+        return 1;
+    }
+    print("  method_chain: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Struct In List Tests:");
+    let mut failures = 0;
+    failures = failures + test_struct_create_and_field();
+    failures = failures + test_struct_in_list_field_access();
+    failures = failures + test_node_in_list();
+    failures = failures + test_struct_method_on_list_element();
+    failures = failures + test_struct_method_chain();
+
+    if failures == 0 {
+        print("All struct in list tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

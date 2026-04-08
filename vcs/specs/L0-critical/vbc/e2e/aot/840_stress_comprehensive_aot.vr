@@ -1,0 +1,239 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress
+// @timeout: 60000
+// @expected-exit: 0
+
+// Comprehensive stress: recursion + variants + records + loops + strings + arithmetic
+
+// --- RECORDS ---
+type Coord is { x: Int, y: Int };
+type Matrix2 is { a: Int, b: Int, c: Int, d: Int };
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+type StatsRec is { count: Int, total: Int, min_val: Int, max_val: Int };
+
+// --- SUM TYPES ---
+type Shape is Circle(Int) | Rect(Int, Int) | Tri(Int, Int, Int) | DotShape;
+type MaybeInt is NoVal | SomeVal(Int);
+type OrderKind is LessThan | Equal | GreaterThan;
+type Op is AddOp | SubOp | MulOp | DivOp | ModOp;
+
+// --- RECORD FUNCTIONS ---
+fn coord_add(a: Coord, b: Coord) -> Coord { Coord { x: a.x + b.x, y: a.y + b.y } }
+fn coord_dot(a: Coord, b: Coord) -> Int { a.x * b.x + a.y * b.y }
+fn coord_scale(v: Coord, s: Int) -> Coord { Coord { x: v.x * s, y: v.y * s } }
+
+fn mat2_mul(a: Matrix2, b: Matrix2) -> Matrix2 {
+    Matrix2 {
+        a: a.a * b.a + a.b * b.c,  b: a.a * b.b + a.b * b.d,
+        c: a.c * b.a + a.d * b.c,  d: a.c * b.b + a.d * b.d
+    }
+}
+fn mat2_det(m: Matrix2) -> Int { m.a * m.d - m.b * m.c }
+
+fn arr8_zeros() -> Arr8 { Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 } }
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if (i == 0) { return a.e0; }  if (i == 1) { return a.e1; }
+    if (i == 2) { return a.e2; }  if (i == 3) { return a.e3; }
+    if (i == 4) { return a.e4; }  if (i == 5) { return a.e5; }
+    if (i == 6) { return a.e6; }  a.e7
+}
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if (i == 0) { v } else { a.e0 },  e1: if (i == 1) { v } else { a.e1 },
+        e2: if (i == 2) { v } else { a.e2 },  e3: if (i == 3) { v } else { a.e3 },
+        e4: if (i == 4) { v } else { a.e4 },  e5: if (i == 5) { v } else { a.e5 },
+        e6: if (i == 6) { v } else { a.e6 },  e7: if (i == 7) { v } else { a.e7 }
+    }
+}
+fn arr8_sum(a: Arr8) -> Int { a.e0 + a.e1 + a.e2 + a.e3 + a.e4 + a.e5 + a.e6 + a.e7 }
+
+// --- SUM TYPE FUNCTIONS ---
+fn shape_area_x100(s: Shape) -> Int {
+    match s { Circle(r) => 314 * r * r, Rect(w, h) => 100 * w * h, Tri(a, b, c) => 100 * a * b / 2, DotShape => 0 }
+}
+fn maybe_unwrap(m: MaybeInt, def: Int) -> Int { match m { NoVal => def, SomeVal(v) => v } }
+fn compare_val(a: Int, b: Int) -> OrderKind {
+    if (a < b) { LessThan } else { if (a == b) { Equal } else { GreaterThan } }
+}
+fn ordering_to_int(o: OrderKind) -> Int { match o { LessThan => -1, Equal => 0, GreaterThan => 1 } }
+fn apply_op(op: Op, a: Int, b: Int) -> Int {
+    match op { AddOp => a + b, SubOp => a - b, MulOp => a * b, DivOp => a / b, ModOp => a % b }
+}
+
+// --- RECURSIVE FUNCTIONS ---
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int { if (n <= 1) { return n; } fib(n - 1) + fib(n - 2) }
+
+@allow(unbounded_recursion)
+fn rec_sum(n: Int, acc: Int) -> Int { if (n <= 0) { return acc; } rec_sum(n - 1, acc + n) }
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int { if (b == 0) { return a; } gcd(b, a % b) }
+
+@allow(unbounded_recursion)
+fn rec_pow(base: Int, exp: Int) -> Int {
+    if (exp == 0) { return 1; }
+    if (exp % 2 == 0) { let h = rec_pow(base, exp / 2); return h * h; }
+    base * rec_pow(base, exp - 1)
+}
+
+@allow(unbounded_recursion)
+fn is_even_r(n: Int) -> Int { if (n == 0) { return 1; } if (n < 0) { return is_even_r(0 - n); } is_odd_r(n - 1) }
+@allow(unbounded_recursion)
+fn is_odd_r(n: Int) -> Int { if (n == 0) { return 0; } is_even_r(n - 1) }
+
+// --- MANY SMALL FUNCTIONS ---
+fn add1(x: Int) -> Int { x + 1 }
+fn add2(x: Int) -> Int { add1(add1(x)) }
+fn add4(x: Int) -> Int { add2(add2(x)) }
+fn add8(x: Int) -> Int { add4(add4(x)) }
+fn add16(x: Int) -> Int { add8(add8(x)) }
+fn add32(x: Int) -> Int { add16(add16(x)) }
+
+fn abs_val(x: Int) -> Int { if (x < 0) { 0 - x } else { x } }
+fn max2(a: Int, b: Int) -> Int { if (a > b) { a } else { b } }
+fn min2(a: Int, b: Int) -> Int { if (a < b) { a } else { b } }
+fn clamp_val(v: Int, lo: Int, hi: Int) -> Int { max2(lo, min2(v, hi)) }
+
+fn popcount(n: Int) -> Int {
+    let mut val = n; let mut cnt = 0;
+    while (val > 0) { cnt = cnt + (val % 2); val = val / 2; }
+    cnt
+}
+
+fn digit_sum(n: Int) -> Int {
+    let mut val = abs_val(n); let mut sum = 0;
+    while (val > 0) { sum = sum + val % 10; val = val / 10; }
+    sum
+}
+
+fn sum_of_squares(n: Int) -> Int {
+    let mut total = 0; let mut i = 1;
+    while (i <= n) { total = total + i * i; i = i + 1; }
+    total
+}
+
+fn collatz_steps(start: Int) -> Int {
+    let mut n = start; let mut steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) { n = n / 2; } else { n = n * 3 + 1; }
+        steps = steps + 1;
+        if (steps > 2000) { return -1; }
+    }
+    steps
+}
+
+fn main() -> Int {
+    // Records
+    let v1 = Coord { x: 3, y: 4 };
+    let v2 = Coord { x: 1, y: 2 };
+    assert_eq(coord_add(v1, v2).x, 4);
+    assert_eq(coord_dot(v1, v2), 11);
+    assert_eq(coord_scale(v1, 3).x, 9);
+
+    let m1 = Matrix2 { a: 1, b: 2, c: 3, d: 4 };
+    let m2 = Matrix2 { a: 5, b: 6, c: 7, d: 8 };
+    let m3 = mat2_mul(m1, m2);
+    assert_eq(m3.a, 19);
+    assert_eq(m3.d, 50);
+    assert_eq(mat2_det(m1), -2);
+
+    let mut arr = arr8_zeros();
+    let mut idx = 0;
+    while (idx < 8) { arr = arr8_set(arr, idx, (idx + 1) * 10); idx = idx + 1; }
+    assert_eq(arr8_sum(arr), 360);
+
+    // Sum types
+    assert_eq(shape_area_x100(Circle(5)), 7850);
+    assert_eq(shape_area_x100(Rect(3, 4)), 1200);
+    assert_eq(maybe_unwrap(SomeVal(42), 0), 42);
+    assert_eq(maybe_unwrap(NoVal, -1), -1);
+    assert_eq(ordering_to_int(compare_val(1, 2)), -1);
+    assert_eq(apply_op(MulOp, 6, 7), 42);
+
+    // Recursion
+    assert_eq(fib(10), 55);
+    assert_eq(fib(15), 610);
+    assert_eq(rec_sum(100, 0), 5050);
+    assert_eq(rec_sum(500, 0), 125250);
+    assert_eq(gcd(48, 18), 6);
+    assert_eq(rec_pow(2, 10), 1024);
+    assert_eq(is_even_r(100), 1);
+    assert_eq(is_odd_r(101), 1);
+
+    // Function chains
+    assert_eq(add32(0), 32);
+    assert_eq(abs_val(-42), 42);
+    assert_eq(clamp_val(150, 0, 100), 100);
+    assert_eq(popcount(255), 8);
+    assert_eq(digit_sum(12345), 15);
+
+    // Heavy computation
+    assert_eq(sum_of_squares(100), 338350);
+    assert_eq(collatz_steps(27), 111);
+
+    // Deep nesting
+    let mut deep_sum = 0;
+    let mut a = 0;
+    while (a < 5) {
+        let mut b = 0;
+        while (b < 5) {
+            let mut c = 0;
+            while (c < 5) {
+                if (a + b + c < 8) { if (a * b * c > 0) { deep_sum = deep_sum + a + b + c; } }
+                c = c + 1;
+            }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    assert(deep_sum > 0);
+
+    // Strings
+    assert_eq(f"result={42}", "result=42");
+    assert_eq(f"coord=({v1.x},{v1.y})", "coord=(3,4)");
+    assert_eq(f"fib(10)={fib(10)}", "fib(10)=55");
+
+    // Register pressure
+    let r01 = 1; let r02 = 2; let r03 = 3; let r04 = 4; let r05 = 5;
+    let r06 = 6; let r07 = 7; let r08 = 8; let r09 = 9; let r10 = 10;
+    let r11 = 11; let r12 = 12; let r13 = 13; let r14 = 14; let r15 = 15;
+    let r16 = 16; let r17 = 17; let r18 = 18; let r19 = 19; let r20 = 20;
+    let reg_sum = r01+r02+r03+r04+r05+r06+r07+r08+r09+r10+r11+r12+r13+r14+r15+r16+r17+r18+r19+r20;
+    assert_eq(reg_sum, 210);
+
+    // Fibonacci matrix: [[1,1],[1,0]]^4 = [[5,3],[3,2]]
+    let base_mat = Matrix2 { a: 1, b: 1, c: 1, d: 0 };
+    let m2x = mat2_mul(base_mat, base_mat);
+    let m4x = mat2_mul(m2x, m2x);
+    assert_eq(m4x.a, 5);
+    assert_eq(m4x.b, 3);
+
+    // Heavy combined loop
+    let mut big_acc = 0;
+    let mut li = 0;
+    while (li < 200) {
+        let sq = li * li;
+        let ds = digit_sum(sq);
+        let pc = popcount(li);
+        let cmp = ordering_to_int(compare_val(ds, pc));
+        big_acc = big_acc + ds + pc + cmp;
+        li = li + 1;
+    }
+    let mut big_acc2 = 0;
+    let mut li2 = 0;
+    while (li2 < 200) {
+        let sq2 = li2 * li2;
+        let ds2 = digit_sum(sq2);
+        let pc2 = popcount(li2);
+        let cmp2 = ordering_to_int(compare_val(ds2, pc2));
+        big_acc2 = big_acc2 + ds2 + pc2 + cmp2;
+        li2 = li2 + 1;
+    }
+    assert_eq(big_acc, big_acc2);
+
+    print("840_stress_comprehensive: PASS");
+    0
+}

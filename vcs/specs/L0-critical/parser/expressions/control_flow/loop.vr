@@ -1,0 +1,186 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, loop, infinite
+
+fn test_simple_infinite_loop() {
+    // Simple infinite loop
+    loop {
+        do_forever();
+    }
+}
+
+fn test_loop_with_break() {
+    // Loop with break
+    loop {
+        if done {
+            break;
+        }
+        work();
+    }
+}
+
+fn test_loop_with_break_value() {
+    // Loop with break value
+    let res = loop {
+        if found {
+            break value;
+        }
+        search();
+    };
+}
+
+fn test_loop_conditional_break() {
+    // Loop with conditional break
+    let answer = loop {
+        let input = read_input();
+        if is_valid(input) {
+            break input;
+        }
+        print("Invalid input, try again");
+    };
+}
+
+fn test_loop_with_continue() {
+    // Loop with continue
+    loop {
+        let item = next_item();
+        if item.skip {
+            continue;
+        }
+        if item.done {
+            break;
+        }
+        process(item);
+    }
+}
+
+fn test_labeled_loop() {
+    // Labeled loop
+    'main: loop {
+        'inner: loop {
+            if inner_done {
+                break 'inner;
+            }
+            if all_done {
+                break 'main;
+            }
+        }
+    }
+}
+
+fn test_labeled_loop_with_value() {
+    // Labeled loop with value
+    let res = 'search: loop {
+        for item in batch {
+            if item.matches(criteria) {
+                break 'search item;
+            }
+        }
+        if no_more_batches {
+            break 'search Maybe.None;
+        }
+    };
+}
+
+fn test_loop_state_machine() {
+    // Loop as state machine
+    loop {
+        state = match state {
+            State.Init => {
+                initialize();
+                State.Running
+            },
+            State.Running => {
+                if work() {
+                    State.Done
+                } else {
+                    State.Running
+                }
+            },
+            State.Done => { break; }
+        };
+    }
+}
+
+fn find_value() -> Maybe<Int> {
+    // Loop with early return
+    loop {
+        let candidate = generate();
+        if candidate.is_valid() {
+            return Maybe.Some(candidate);
+        }
+        if attempts_exhausted {
+            return Maybe.None;
+        }
+    }
+}
+
+fn test_loop_resource_cleanup() {
+    // Loop with resource cleanup
+    loop {
+        let resource = acquire();
+        let res = use_resource(resource);
+        release(resource);
+        if res.done {
+            break res.value;
+        }
+    }
+}
+
+fn test_loop_with_counter() {
+    // Loop with counter
+    let mut i = 0;
+    loop {
+        if i >= 10 {
+            break;
+        }
+        process(i);
+        i += 1;
+    }
+}
+
+fn test_loop_multiple_break_points() {
+    // Loop with multiple break points
+    let status = loop {
+        if error_detected {
+            break Status.Error;
+        }
+        if completed {
+            break Status.Success;
+        }
+        if timeout {
+            break Status.Timeout;
+        }
+        work();
+    };
+}
+
+fn test_nested_labeled_loops() {
+    // Nested loops with labels
+    'outer: loop {
+        let batch = get_batch();
+        'batch: loop {
+            let item = batch.next();
+            if item.none {
+                break 'batch;
+            }
+            if item.is_target {
+                break 'outer item;
+            }
+        }
+    }
+}
+
+fn test_loop_try_break() {
+    // Loop with try-break pattern
+    let res = loop {
+        match try_operation() {
+            Result.Ok(value) => break value,
+            Result.Err(_) if can_retry() => continue,
+            Result.Err(e) => {
+                break error_result;
+            },
+        }
+    };
+}

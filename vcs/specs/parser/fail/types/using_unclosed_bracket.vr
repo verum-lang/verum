@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, error
+// @description: Test detection of unclosed context list in using clause
+// @expected-error: E039
+
+// Context list must be properly closed
+type Callback is fn() using [Database;

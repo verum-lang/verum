@@ -1,0 +1,382 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, arithmetic, modular, nested-calls
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT stress test: long arithmetic chains, deep function calls, modular arithmetic
+
+// Modular arithmetic to keep values bounded
+fn mod_pos(a: Int, m: Int) -> Int {
+    let r = a % m;
+    if r < 0 { r + m } else { r }
+}
+
+// Chain of arithmetic: acc = (acc * a + b) % m, repeated n times
+fn arith_chain(acc: Int, a: Int, b: Int, m: Int, n: Int) -> Int {
+    let mut result = acc;
+    let mut i = 0;
+    while i < n {
+        result = mod_pos(result * a + b, m);
+        i = i + 1;
+    }
+    result
+}
+
+// Nested function calls: depth 12
+fn nest_0(x: Int) -> Int { x + 1 }
+fn nest_1(x: Int) -> Int { nest_0(x) * 2 + 3 }
+fn nest_2(x: Int) -> Int { nest_1(x) + nest_0(x) }
+fn nest_3(x: Int) -> Int { nest_2(x) * 3 - nest_1(x) }
+fn nest_4(x: Int) -> Int { nest_3(x) + nest_2(x) + 7 }
+fn nest_5(x: Int) -> Int { nest_4(x) * 2 - nest_3(x) }
+fn nest_6(x: Int) -> Int { nest_5(x) + nest_4(x) + nest_0(x) }
+fn nest_7(x: Int) -> Int { nest_6(x) - nest_5(x) + nest_3(x) }
+fn nest_8(x: Int) -> Int { nest_7(x) * 2 + nest_6(x) }
+fn nest_9(x: Int) -> Int { nest_8(x) + nest_7(x) - nest_0(x) }
+fn nest_10(x: Int) -> Int { nest_9(x) + nest_8(x) + 100 }
+fn nest_11(x: Int) -> Int { nest_10(x) - nest_9(x) + nest_1(x) }
+
+// Large nested arithmetic expression
+fn big_expr(a: Int, b: Int, c: Int, d: Int) -> Int {
+    let t1 = a * a + b * b;
+    let t2 = c * c + d * d;
+    let t3 = (a + b) * (c + d);
+    let t4 = (a - b) * (c - d);
+    let t5 = t1 * t2 + t3 * t4;
+    let t6 = t5 - t1 + t2 * 3;
+    let t7 = t6 * 2 + t3 - t4;
+    let t8 = (t7 + t6 + t5) % 10000;
+    t8
+}
+
+// Fibonacci with modular arithmetic
+fn fib_mod(n: Int, m: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        let tmp = b;
+        b = (a + b) % m;
+        a = tmp;
+        i = i + 1;
+    }
+    a
+}
+
+// Iterative power of a value mod m (binary exponentiation)
+fn fast_modpow(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % m;
+        }
+        b = (b * b) % m;
+        e = e / 2;
+    }
+    result
+}
+
+// Accumulate hash: simple non-cryptographic hash mix
+fn hash_mix(seed: Int, val: Int) -> Int {
+    let h = seed * 31 + val;
+    mod_pos(h, 1000000007)
+}
+
+// Sum of squares 1^2 + 2^2 + ... + n^2 = n(n+1)(2n+1)/6
+fn sum_squares(n: Int) -> Int {
+    n * (n + 1) * (2 * n + 1) / 6
+}
+
+// Sum of cubes 1^3 + ... + n^3 = (n(n+1)/2)^2
+fn sum_cubes(n: Int) -> Int {
+    let s = n * (n + 1) / 2;
+    s * s
+}
+
+// Collatz-like iteration with modular bound
+fn collatz_mod(start: Int, steps: Int, m: Int) -> Int {
+    let mut x = start;
+    let mut i = 0;
+    while i < steps {
+        if x % 2 == 0 {
+            x = x / 2;
+        } else {
+            x = mod_pos(3 * x + 1, m);
+        }
+        i = i + 1;
+    }
+    x
+}
+
+// Linear congruential generator simulation
+fn lcg_run(seed: Int, a: Int, c: Int, m: Int, steps: Int) -> Int {
+    let mut x = seed;
+    let mut i = 0;
+    while i < steps {
+        x = mod_pos(a * x + c, m);
+        i = i + 1;
+    }
+    x
+}
+
+fn main() -> Int {
+    // ================================================================
+    // Test 1: Long arithmetic chain (150 operations)
+    // acc = (acc * 7 + 13) % 10007, starting from 1, 150 iterations
+    // ================================================================
+    let chain1 = arith_chain(1, 7, 13, 10007, 150);
+    // Verify by computing again via lcg_run (same algorithm)
+    let verify1 = lcg_run(1, 7, 13, 10007, 150);
+    assert_eq(chain1, verify1);
+
+    // Two different chains from same start should diverge
+    let chain2 = arith_chain(1, 11, 17, 10007, 150);
+    assert(chain1 != chain2);
+
+    // ================================================================
+    // Test 2: Deeply nested function calls (12 levels)
+    // ================================================================
+    // nest_0(5) = 6
+    assert_eq(nest_0(5), 6);
+
+    // nest_1(5) = 6*2+3 = 15
+    assert_eq(nest_1(5), 15);
+
+    // nest_2(5) = 15+6 = 21
+    assert_eq(nest_2(5), 21);
+
+    // nest_3(5) = 21*3-15 = 48
+    assert_eq(nest_3(5), 48);
+
+    // nest_4(5) = 48+21+7 = 76
+    assert_eq(nest_4(5), 76);
+
+    // nest_5(5) = 76*2-48 = 104
+    assert_eq(nest_5(5), 104);
+
+    // nest_6(5) = 104+76+6 = 186
+    assert_eq(nest_6(5), 186);
+
+    // nest_7(5) = 186-104+48 = 130
+    assert_eq(nest_7(5), 130);
+
+    // nest_8(5) = 130*2+186 = 446
+    assert_eq(nest_8(5), 446);
+
+    // nest_9(5) = 446+130-6 = 570
+    assert_eq(nest_9(5), 570);
+
+    // nest_10(5) = 570+446+100 = 1116
+    assert_eq(nest_10(5), 1116);
+
+    // nest_11(5) = 1116-570+15 = 561
+    assert_eq(nest_11(5), 561);
+
+    // Verify with different input: x=0
+    // nest_0(0)=1, nest_1(0)=5, nest_2(0)=6, nest_3(0)=13, nest_4(0)=26,
+    // nest_5(0)=39, nest_6(0)=66, nest_7(0)=40, nest_8(0)=146, nest_9(0)=185,
+    // nest_10(0)=431, nest_11(0)=431-185+5=251
+    assert_eq(nest_11(0), 251);
+
+    // Verify with x=10
+    // nest_0(10)=11, nest_1(10)=11*2+3=25, nest_2(10)=25+11=36
+    // nest_3(10)=36*3-25=83, nest_4(10)=83+36+7=126
+    // nest_5(10)=126*2-83=169, nest_6(10)=169+126+11=306
+    // nest_7(10)=306-169+83=220, nest_8(10)=220*2+306=746
+    // nest_9(10)=746+220-11=955, nest_10(10)=955+746+100=1801
+    // nest_11(10)=1801-955+25=871
+    assert_eq(nest_11(10), 871);
+
+    // ================================================================
+    // Test 3: Large nested arithmetic expressions
+    // ================================================================
+    let e1 = big_expr(3, 5, 7, 11);
+    // t1=9+25=34, t2=49+121=170, t3=8*18=144, t4=(-2)*(-4)=8
+    // t5=34*170+144*8=5780+1152=6932
+    // t6=6932-34+170*3=6932-34+510=7408
+    // t7=7408*2+144-8=14816+136=14952
+    // t8=(14952+7408+6932)%10000=29292%10000=9292
+    assert_eq(e1, 9292);
+
+    let e2 = big_expr(10, 20, 30, 40);
+    // t1=100+400=500, t2=900+1600=2500, t3=30*70=2100, t4=(-10)*(-10)=100
+    // t5=500*2500+2100*100=1250000+210000=1460000
+    // t6=1460000-500+2500*3=1467000
+    // t7=1467000*2+2100-100=2936000
+    // t8=(2936000+1467000+1460000)%10000=5863000%10000=3000
+    assert_eq(e2, 3000);
+
+    // ================================================================
+    // Test 4: Fibonacci with modular arithmetic
+    // ================================================================
+    assert_eq(fib_mod(0, 1000), 0);
+    assert_eq(fib_mod(1, 1000), 1);
+    assert_eq(fib_mod(2, 1000), 1);
+    assert_eq(fib_mod(10, 1000), 55);
+    assert_eq(fib_mod(20, 1000), 765);  // fib(20)=6765, 6765%1000=765
+    assert_eq(fib_mod(30, 1000), 40);   // fib(30)=832040, 832040%1000=40
+    assert_eq(fib_mod(50, 1000), 25);   // fib(50)=12586269025, mod 1000=25
+
+    // Pisano period: fib mod m is periodic. Period for m=8 is 12.
+    let mut pk = 0;
+    while pk < 10 {
+        assert_eq(fib_mod(pk, 8), fib_mod(pk + 12, 8));
+        pk = pk + 1;
+    }
+
+    // ================================================================
+    // Test 5: Modular exponentiation stress
+    // ================================================================
+    assert_eq(fast_modpow(2, 10, 1000), 24);
+    assert_eq(fast_modpow(2, 20, 1000), 576);
+    assert_eq(fast_modpow(3, 100, 1000), 1);
+
+    // Fermat's little theorem: a^(p-1) = 1 mod p for prime p
+    assert_eq(fast_modpow(2, 996, 997), 1);
+    assert_eq(fast_modpow(3, 996, 997), 1);
+    assert_eq(fast_modpow(5, 996, 997), 1);
+
+    // Powers of 10 mod 97
+    assert_eq(fast_modpow(10, 1, 97), 10);
+    assert_eq(fast_modpow(10, 2, 97), 3);     // 100%97=3
+    assert_eq(fast_modpow(10, 3, 97), 30);    // 1000%97=30
+    assert_eq(fast_modpow(10, 4, 97), 9);     // 10000%97=9
+
+    // ================================================================
+    // Test 6: Hash accumulation (200 iterations)
+    // ================================================================
+    let mut hash_acc = 0;
+    let mut hi = 0;
+    while hi < 200 {
+        hash_acc = hash_mix(hash_acc, hi);
+        hi = hi + 1;
+    }
+    // Recompute to verify determinism
+    let mut hash_acc2 = 0;
+    let mut hi2 = 0;
+    while hi2 < 200 {
+        hash_acc2 = hash_mix(hash_acc2, hi2);
+        hi2 = hi2 + 1;
+    }
+    assert_eq(hash_acc, hash_acc2);
+    assert(hash_acc >= 0);
+    assert(hash_acc < 1000000007);
+
+    // ================================================================
+    // Test 7: Sum formulas verified against iterative computation
+    // ================================================================
+    assert_eq(sum_squares(1), 1);
+    assert_eq(sum_squares(10), 385);
+    assert_eq(sum_squares(100), 338350);
+
+    let mut sq_sum = 0;
+    let mut si = 1;
+    while si <= 50 {
+        sq_sum = sq_sum + si * si;
+        si = si + 1;
+    }
+    assert_eq(sq_sum, sum_squares(50));
+
+    assert_eq(sum_cubes(1), 1);
+    assert_eq(sum_cubes(5), 225);
+    assert_eq(sum_cubes(10), 3025);
+
+    let mut cube_sum = 0;
+    let mut ci = 1;
+    while ci <= 30 {
+        cube_sum = cube_sum + ci * ci * ci;
+        ci = ci + 1;
+    }
+    assert_eq(cube_sum, sum_cubes(30));
+
+    // ================================================================
+    // Test 8: Collatz-like bounded iteration
+    // ================================================================
+    // Deterministic
+    let c1 = collatz_mod(27, 50, 10000);
+    let c2 = collatz_mod(27, 50, 10000);
+    assert_eq(c1, c2);
+
+    // Start at 1: cycle 1->4->2->1
+    assert_eq(collatz_mod(1, 1, 10000), 4);
+    assert_eq(collatz_mod(1, 2, 10000), 2);
+    assert_eq(collatz_mod(1, 3, 10000), 1);
+    assert_eq(collatz_mod(1, 6, 10000), 1);
+
+    // ================================================================
+    // Test 9: LCG pseudo-random sequence
+    // ================================================================
+    let lcg1 = lcg_run(1, 13, 1, 256, 100);
+    let lcg2 = lcg_run(1, 13, 1, 256, 100);
+    assert_eq(lcg1, lcg2);
+
+    // Different seeds give different results
+    let lcg3 = lcg_run(2, 13, 1, 256, 100);
+    assert(lcg1 != lcg3);
+
+    // LCG with full period: a=5, c=3, m=16 has period 16
+    let lcg_16 = lcg_run(0, 5, 3, 16, 16);
+    assert_eq(lcg_16, 0);
+
+    // ================================================================
+    // Test 10: Long accumulation (200+ additions)
+    // ================================================================
+    let mut acc = 0;
+    let mut ai = 0;
+    while ai < 200 {
+        acc = acc + mod_pos(ai * ai + 3 * ai + 7, 997);
+        ai = ai + 1;
+    }
+    let mut acc2 = 0;
+    let mut ai2 = 0;
+    while ai2 < 200 {
+        acc2 = acc2 + mod_pos(ai2 * ai2 + 3 * ai2 + 7, 997);
+        ai2 = ai2 + 1;
+    }
+    assert_eq(acc, acc2);
+    assert(acc > 0);
+
+    // ================================================================
+    // Test 11: Nested expression chain
+    // ================================================================
+    let mut chain = 1;
+    chain = chain * 2 + 3;   // 5
+    chain = chain * 4 + 5;   // 25
+    chain = chain * 6 + 7;   // 157
+    chain = chain * 8 + 9;   // 1265
+    assert_eq(chain, 1265);
+
+    chain = chain * 10 + 11;  // 12661
+    chain = chain * 12 + 13;  // 151945
+    chain = chain * 14 + 15;  // 2127245
+    chain = chain * 16 + 17;  // 34035937
+    assert_eq(chain, 34035937);
+
+    // ================================================================
+    // Test 12: Combined stress -- hash of all computed values
+    // ================================================================
+    let mut final_hash = 0;
+    final_hash = hash_mix(final_hash, nest_11(5));
+    final_hash = hash_mix(final_hash, e1);
+    final_hash = hash_mix(final_hash, fib_mod(50, 1000));
+    final_hash = hash_mix(final_hash, sum_squares(100));
+    final_hash = hash_mix(final_hash, sum_cubes(10));
+    final_hash = hash_mix(final_hash, chain1);
+    final_hash = hash_mix(final_hash, fast_modpow(2, 20, 1000));
+
+    // Recompute with known literal values to verify
+    let mut final_hash2 = 0;
+    final_hash2 = hash_mix(final_hash2, 561);     // nest_11(5)
+    final_hash2 = hash_mix(final_hash2, 9292);    // big_expr(3,5,7,11)
+    final_hash2 = hash_mix(final_hash2, 25);      // fib_mod(50, 1000)
+    final_hash2 = hash_mix(final_hash2, 338350);  // sum_squares(100)
+    final_hash2 = hash_mix(final_hash2, 3025);    // sum_cubes(10)
+    final_hash2 = hash_mix(final_hash2, chain1);
+    final_hash2 = hash_mix(final_hash2, 576);     // fast_modpow(2, 20, 1000)
+    assert_eq(final_hash, final_hash2);
+
+    0
+}

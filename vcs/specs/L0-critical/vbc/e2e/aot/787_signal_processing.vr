@@ -1,0 +1,197 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, signal_processing
+// @expected-exit: 0
+
+// Discrete signal processing with integers
+
+// --- Moving average filter ---
+// window_size must be odd for centering, but we do causal (past only)
+// output[i] = average of signal[max(0, i-window+1) .. i]
+fn moving_average(sig: List<Int>, sig_len: Int, window: Int, out: List<Int>) -> Int {
+    let mut o = out;
+    let mut i = 0;
+    while i < sig_len {
+        let mut sum = 0;
+        let mut count = 0;
+        let mut j = i - window + 1;
+        if j < 0 {
+            j = 0;
+        }
+        while j <= i {
+            sum = sum + sig[j];
+            count = count + 1;
+            j = j + 1;
+        }
+        o[i] = sum / count;
+        i = i + 1;
+    }
+    sig_len
+}
+
+// --- FIR filter ---
+// output[i] = sum(coeffs[k] * signal[i-k]) for k=0..filter_len-1
+// Uses integer coefficients scaled by 100
+fn fir_filter(sig: List<Int>, sig_len: Int, coeffs: List<Int>, filt_len: Int, out: List<Int>) -> Int {
+    let mut o = out;
+    let mut i = 0;
+    while i < sig_len {
+        let mut sum = 0;
+        let mut k = 0;
+        while k < filt_len {
+            if i - k >= 0 {
+                sum = sum + coeffs[k] * sig[i - k];
+            }
+            k = k + 1;
+        }
+        o[i] = sum / 100; // descale
+        i = i + 1;
+    }
+    sig_len
+}
+
+// --- Convolution ---
+// conv[n] = sum(a[k] * b[n-k]) for valid k
+// Output length = a_len + b_len - 1
+fn convolve(a: List<Int>, a_len: Int, bsig: List<Int>, b_len: Int, out: List<Int>) -> Int {
+    let mut o = out;
+    let out_len = a_len + b_len - 1;
+    let mut n = 0;
+    while n < out_len {
+        let mut sum = 0;
+        let mut k = 0;
+        while k < a_len {
+            let bk = n - k;
+            if bk >= 0 {
+                if bk < b_len {
+                    sum = sum + a[k] * bsig[bk];
+                }
+            }
+            k = k + 1;
+        }
+        o[n] = sum;
+        n = n + 1;
+    }
+    out_len
+}
+
+// --- Cross-correlation ---
+// xcorr[lag] = sum(a[i] * b[i + lag]) for valid i
+// For lag=0: dot product
+fn cross_correlation(a: List<Int>, a_len: Int, bsig: List<Int>, b_len: Int, lag: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < a_len {
+        let j = i + lag;
+        if j >= 0 {
+            if j < b_len {
+                sum = sum + a[i] * bsig[j];
+            }
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+// --- Signal energy ---
+// E = sum(signal[i]^2)
+fn signal_energy(sig: List<Int>, sig_len: Int) -> Int {
+    let mut energy = 0;
+    let mut i = 0;
+    while i < sig_len {
+        energy = energy + sig[i] * sig[i];
+        i = i + 1;
+    }
+    energy
+}
+
+// --- Peak detection ---
+// A peak is where signal[i] > signal[i-1] AND signal[i] > signal[i+1]
+// Returns number of peaks
+fn count_peaks(sig: List<Int>, sig_len: Int) -> Int {
+    let mut peaks = 0;
+    let mut i = 1;
+    while i < sig_len - 1 {
+        if sig[i] > sig[i - 1] {
+            if sig[i] > sig[i + 1] {
+                peaks = peaks + 1;
+            }
+        }
+        i = i + 1;
+    }
+    peaks
+}
+
+fn main() -> Int {
+    // Signal: [2, 4, 6, 8, 10, 8, 6, 4, 2, 0, 0, 0, 0, 0, 0, 0]
+    let sig = [2, 4, 6, 8, 10, 8, 6, 4, 2, 0, 0, 0, 0, 0, 0, 0];
+    let sig_len = 9;
+
+    // Test 1: Moving average with window=3
+    // out[0] = 2/1 = 2 (only 1 sample)
+    // out[1] = (2+4)/2 = 3
+    // out[2] = (2+4+6)/3 = 4
+    // out[3] = (4+6+8)/3 = 6
+    // out[4] = (6+8+10)/3 = 8
+    let mut ma_out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ma_len = moving_average(sig, sig_len, 3, ma_out);
+    assert_eq(ma_out[2], 4);
+
+    // Test 2: Moving average at position 4
+    assert_eq(ma_out[4], 8);
+
+    // Test 3: Signal energy of [1, 2, 3, 4] = 1+4+9+16 = 30
+    let test_sig = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let e = signal_energy(test_sig, 4);
+    assert_eq(e, 30);
+
+    // Test 4: Peak detection in signal [2,4,6,8,10,8,6,4,2]
+    // Only peak at index 4 (value 10)
+    let peaks = count_peaks(sig, sig_len);
+    assert_eq(peaks, 1);
+
+    // Test 5: Peak detection in [1, 3, 1, 3, 1, 0, 0, ...]
+    // Peaks at index 1 (3>1, 3>1) and index 3 (3>1, 3>1)
+    let sig2 = [1, 3, 1, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let peaks2 = count_peaks(sig2, 5);
+    assert_eq(peaks2, 2);
+
+    // Test 6: Convolution of [1,2,3] and [1,1] = [1, 3, 5, 3]
+    // conv[0] = 1*1 = 1
+    // conv[1] = 1*1 + 2*1 = 3
+    // conv[2] = 2*1 + 3*1 = 5
+    // conv[3] = 3*1 = 3
+    let a = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bsig = [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut conv_out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let conv_len = convolve(a, 3, bsig, 2, conv_out);
+    assert_eq(conv_out[1], 3);
+
+    // Test 7: Convolution output length
+    assert_eq(conv_len, 4);
+
+    // Test 8: Cross-correlation at lag=0 (dot product)
+    // [1,2,3] dot [1,1,0] = 1+2+0 = 3
+    let xcorr0 = cross_correlation(a, 3, bsig, 2, 0);
+    assert_eq(xcorr0, 3);
+
+    // Test 9: FIR filter with coefficients [50, 50] (scaled by 100 = averaging filter)
+    // sig = [10, 20, 30, 40]
+    // out[0] = (50*10)/100 = 5
+    // out[1] = (50*20 + 50*10)/100 = 15
+    // out[2] = (50*30 + 50*20)/100 = 25
+    // out[3] = (50*40 + 50*30)/100 = 35
+    let fir_sig = [10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let fir_coeff = [50, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut fir_out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let fir_len = fir_filter(fir_sig, 4, fir_coeff, 2, fir_out);
+    assert_eq(fir_out[2], 25);
+
+    // Test 10: Energy of original signal [2,4,6,8,10,8,6,4,2] = 4+16+36+64+100+64+36+16+4 = 340
+    let e2 = signal_energy(sig, sig_len);
+    assert_eq(e2, 340);
+
+    print("787_signal_processing: PASS");
+    0
+}

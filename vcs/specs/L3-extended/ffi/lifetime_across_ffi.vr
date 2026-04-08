@@ -1,0 +1,110 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, lifetime, safety
+// @description: Tests FFI declarations for lifetime-related patterns
+
+/// ============================================================
+/// LIFETIME ACROSS FFI - FFI DECLARATIONS
+/// ============================================================
+///
+/// Demonstrates FFI declarations for patterns that manage
+/// lifetimes across FFI boundaries.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_int is i32;
+type c_size is usize;
+
+// ------------------------------------------------------------
+// Storage FFI Declarations
+// ------------------------------------------------------------
+
+/// FFI for storing and retrieving pointers
+ffi storage_api_store {
+    @extern("C")
+    fn store_pointer(ptr: *const u8);
+}
+
+ffi storage_api_retrieve {
+    @extern("C")
+    fn retrieve_pointer() -> *const u8;
+}
+
+ffi storage_api_process {
+    @extern("C")
+    fn process_callback(cb: *const c_void, data: *const u8);
+}
+
+// ------------------------------------------------------------
+// Async Operation FFI Declarations
+// ------------------------------------------------------------
+
+ffi async_api_start {
+    @extern("C")
+    fn start_async_operation(data: *const u8, len: c_size);
+}
+
+ffi async_api_cancel {
+    @extern("C")
+    fn cancel_async_operation(id: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Thread API FFI Declarations
+// ------------------------------------------------------------
+
+ffi thread_api_spawn {
+    @extern("C")
+    fn spawn_thread(func: *const c_void, arg: *mut c_void) -> c_int;
+}
+
+ffi thread_api_join {
+    @extern("C")
+    fn join_thread(thread_id: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Lifetime-Tracked Wrapper Types
+// ------------------------------------------------------------
+
+/// Pinned allocation type
+@repr(C)
+type PinnedData is {
+    ptr: *mut c_void,
+    len: c_size,
+};
+
+/// Scoped callback registration
+@repr(C)
+type ScopedRegistration is {
+    id: c_int,
+    data_ptr: *const c_void,
+};
+
+/// Reference-counted FFI object
+@repr(C)
+type RefCountedFfi is {
+    ptr: *mut c_void,
+    ref_count: *mut c_int,
+};
+
+/// Async operation handle
+@repr(C)
+type AsyncHandle is {
+    id: c_int,
+    data_ptr: *const u8,
+    completed: Bool,
+};
+
+// ------------------------------------------------------------
+// Main
+// ------------------------------------------------------------
+
+fn main() {
+    // Test that FFI declarations and types compile
+    print("Lifetime across FFI declarations passed");
+}

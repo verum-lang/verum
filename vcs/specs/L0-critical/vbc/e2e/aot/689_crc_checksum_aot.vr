@@ -1,0 +1,213 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, crc, checksum, error-detection
+// @timeout: 30000
+
+// CRC and checksum computations
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+fn get_bit(val: Int, pos: Int) -> Int { (val / pow2(pos)) % 2 }
+
+// XOR two values (bitwise for 16 bits)
+fn xor16(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) != get_bit(b, i) {
+            result = result + pow2(i);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Simple additive checksum (mod 256)
+fn checksum_add(data: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = (sum + get8(data, i)) % 256;
+        i = i + 1;
+    }
+    sum
+}
+
+// Fletcher checksum (simplified)
+fn fletcher16(data: Arr8, n: Int) -> Int {
+    let mut sum1 = 0;
+    let mut sum2 = 0;
+    let mut i = 0;
+    while i < n {
+        sum1 = (sum1 + get8(data, i)) % 255;
+        sum2 = (sum2 + sum1) % 255;
+        i = i + 1;
+    }
+    sum2 * 256 + sum1
+}
+
+// XOR checksum
+fn checksum_xor(data: Arr8, n: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < n {
+        result = xor16(result, get8(data, i));
+        i = i + 1;
+    }
+    result
+}
+
+// Simple CRC-like: polynomial division in GF(2)
+// CRC with polynomial x^4+x+1 = 10011 binary = 19
+// For 8-bit data values, compute CRC-4
+fn crc4(data: Arr8, n: Int) -> Int {
+    let poly = 19; // x^4+x+1 = 10011
+    let mut crc = 0;
+    let mut idx = 0;
+    while idx < n {
+        let byte_val = get8(data, idx);
+        // Process each bit
+        let mut bit = 7;
+        let mut going = 1;
+        while going == 1 {
+            if bit < 0 { going = 0; }
+            else {
+                let input_bit = get_bit(byte_val, bit);
+                let top_bit = get_bit(crc, 3);
+                // Shift CRC left by 1
+                crc = (crc * 2) % 16; // keep 4 bits
+                // Add input bit
+                if input_bit == 1 {
+                    crc = xor16(crc, 1);
+                }
+                // XOR with polynomial if top bit was 1
+                if top_bit == 1 {
+                    crc = xor16(crc, poly % 16); // only lower 4 bits of poly
+                }
+                bit = bit - 1;
+            }
+        }
+        idx = idx + 1;
+    }
+    crc
+}
+
+// Luhn checksum (credit card validation algorithm)
+fn luhn_checksum(data: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = n - 1;
+    let mut double_it = 0;
+    let mut going = 1;
+    while going == 1 {
+        if i < 0 { going = 0; }
+        else {
+            let mut d = get8(data, i);
+            if double_it == 1 {
+                d = d * 2;
+                if d > 9 { d = d - 9; }
+            }
+            sum = sum + d;
+            double_it = if double_it == 0 { 1 } else { 0 };
+            i = i - 1;
+        }
+    }
+    sum % 10
+}
+
+fn test_additive() -> Int {
+    let data = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(checksum_add(data, 4), 100);
+    // Overflow wraps mod 256
+    let big = Arr8 { v0: 200, v1: 200, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(checksum_add(big, 2), 144); // 400 mod 256 = 144
+    1
+}
+
+fn test_xor_checksum() -> Int {
+    let data = Arr8 { v0: 5, v1: 3, v2: 5, v3: 3, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // 5^3 = 6, 6^5 = 3, 3^3 = 0
+    assert_eq(checksum_xor(data, 4), 0);
+    // XOR of value with itself = 0
+    let dup = Arr8 { v0: 42, v1: 42, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(checksum_xor(dup, 2), 0);
+    1
+}
+
+fn test_fletcher() -> Int {
+    // Fletcher-16 on [1, 2]
+    // sum1: 0+1=1, sum2: 0+1=1; sum1: 1+2=3, sum2: 1+3=4
+    // Result: 4*256 + 3 = 1027
+    let data = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fletcher16(data, 2), 4 * 256 + 3);
+    // Empty-ish
+    let zero_data = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fletcher16(zero_data, 1), 0);
+    1
+}
+
+fn test_crc() -> Int {
+    // CRC is deterministic
+    let data = Arr8 { v0: 42, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let c1 = crc4(data, 1);
+    let c2 = crc4(data, 1);
+    assert_eq(c1, c2);
+    // CRC of different data should (usually) differ
+    let data2 = Arr8 { v0: 43, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let c3 = crc4(data2, 1);
+    // Not guaranteed but very likely different
+    // CRC is in range [0, 15]
+    assert_eq(c1 >= 0, 1);
+    assert_eq(c1 < 16, 1);
+    1
+}
+
+fn test_luhn() -> Int {
+    // Luhn: digits [7, 9, 9, 2, 7, 3, 9, 8]
+    // From right: 8, 9*2=18→9, 3, 7*2=14→5, 2, 9*2=18→9, 9, 7*2=14→5
+    // Sum: 8+9+3+5+2+9+9+5 = 50 → 50%10 = 0 ✓
+    let data = Arr8 { v0: 7, v1: 9, v2: 9, v3: 2, v4: 7, v5: 3, v6: 9, v7: 8 };
+    assert_eq(luhn_checksum(data, 8), 0);
+    // Modify one digit: should fail
+    let data2 = Arr8 { v0: 7, v1: 9, v2: 9, v3: 2, v4: 7, v5: 3, v6: 9, v7: 9 };
+    let l2 = luhn_checksum(data2, 8);
+    assert_eq(l2 == 0, 0); // not zero → invalid
+    1
+}
+
+fn test_properties() -> Int {
+    // XOR checksum: order independent (commutative)
+    let a = Arr8 { v0: 5, v1: 10, v2: 15, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 15, v1: 5, v2: 10, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(checksum_xor(a, 3), checksum_xor(b, 3));
+    // Fletcher is NOT order independent
+    let f1 = fletcher16(a, 3);
+    let f2 = fletcher16(b, 3);
+    // These should differ (Fletcher detects reordering)
+    // f1: s1: 0+5=5, s2: 0+5=5; s1: 5+10=15, s2: 5+15=20; s1: 15+15=30, s2: 20+30=50 → 50*256+30=12830
+    // f2: s1: 0+15=15, s2: 0+15=15; s1: 15+5=20, s2: 15+20=35; s1: 20+10=30, s2: 35+30=65 → 65*256+30=16670
+    assert_eq(f1 == f2, 0);
+    1
+}
+
+fn main() -> Int {
+    test_additive();
+    test_xor_checksum();
+    test_fletcher();
+    test_crc();
+    test_luhn();
+    test_properties();
+    print("[OK] 689_crc_checksum_aot");
+    0
+}

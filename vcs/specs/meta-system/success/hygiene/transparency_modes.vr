@@ -1,0 +1,179 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, transparency, modes
+// @description: Test different transparency modes for macro hygiene
+
+// =============================================================================
+// OPAQUE MODE (DEFAULT)
+// =============================================================================
+// Fully hygienic - introduced bindings are isolated from caller
+
+meta fn opaque_macro() -> TokenStream {
+    quote {
+        let x = 100;  // This x is isolated
+        let result = x + 1;
+        result
+    }
+}
+
+fn test_opaque() {
+    let x = 999;  // Caller's x
+    let value = @opaque_macro();  // Returns 101, not affected by caller's x
+    assert(value == 101);
+    assert(x == 999);  // Caller's x unchanged
+}
+
+// =============================================================================
+// TRANSPARENT MODE
+// =============================================================================
+// Inherits caller's scope - like inline functions
+
+@transparent
+meta fn transparent_add() -> TokenStream {
+    quote {
+        // In transparent mode, 'a' and 'b' come from caller
+        a + b
+    }
+}
+
+fn test_transparent() {
+    let a = 10;
+    let b = 20;
+    let sum = @transparent_add();  // Uses caller's a and b
+    assert(sum == 30);
+}
+
+// =============================================================================
+// SEMI-TRANSPARENT MODE
+// =============================================================================
+// Can see caller's types but not values
+
+@semi_transparent
+meta fn semi_transparent_create() -> TokenStream {
+    quote {
+        // Can use CallerType from caller's scope
+        let x: CallerType = CallerType::new();
+        x
+    }
+}
+
+type CallerType is {
+    value: Int,
+};
+
+implement CallerType {
+    fn new() -> Self {
+        CallerType { value: 42 }
+    }
+}
+
+fn test_semi_transparent() {
+    let obj = @semi_transparent_create();
+    assert(obj.value == 42);
+}
+
+// =============================================================================
+// EXPLICIT CAPTURE
+// =============================================================================
+// Explicitly declare which variables to capture
+
+@capture(multiplier)
+meta fn capture_multiplier() -> TokenStream {
+    quote {
+        // multiplier comes from caller, explicitly declared
+        let result = base * multiplier;
+        result
+    }
+}
+
+fn test_explicit_capture() {
+    let multiplier = 10;
+    let base = 5;  // Note: base is NOT captured, uses macro's own base
+
+    // This would fail if base was captured, but it's not
+    // The macro uses its own concept of 'base'
+}
+
+// =============================================================================
+// MIXED HYGIENE
+// =============================================================================
+// Combine hygienic and intentionally captured identifiers
+
+meta fn mixed_hygiene(captured: Ident) -> TokenStream {
+    let local = gensym("local");  // Hygienic local variable
+
+    quote {
+        let $local = 100;
+        let result = $local + $captured;  // captured comes from caller
+        result
+    }
+}
+
+fn test_mixed() {
+    let my_value = 50;
+    let result = @mixed_hygiene(my_value);  // 100 + 50 = 150
+    assert(result == 150);
+}
+
+// =============================================================================
+// TRANSPARENCY OVERRIDE IN NESTED QUOTES
+// =============================================================================
+
+@transparent
+meta fn outer_transparent() -> TokenStream {
+    quote {
+        // Outer is transparent - inherits caller's scope
+
+        // But inner quote can be opaque (default)
+        let inner = {
+            meta fn inner_opaque() -> TokenStream {
+                quote {
+                    let x = 1;  // This x is isolated
+                    x
+                }
+            }
+            @inner_opaque()
+        };
+
+        caller_var + inner  // caller_var from caller, inner is 1
+    }
+}
+
+fn test_nested_transparency() {
+    let caller_var = 100;
+    let result = @outer_transparent();
+    assert(result == 101);
+}
+
+// =============================================================================
+// TRANSPARENCY WITH BINDINGS
+// =============================================================================
+
+@transparent
+meta fn transparent_with_local() -> TokenStream {
+    quote {
+        // Even in transparent mode, we can still introduce new bindings
+        let new_var = 42;
+        caller_x + new_var
+    }
+}
+
+fn test_transparent_with_local() {
+    let caller_x = 8;
+    let result = @transparent_with_local();
+    assert(result == 50);  // 8 + 42
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn main() {
+    test_opaque();
+    test_transparent();
+    test_semi_transparent();
+    test_mixed();
+    test_nested_transparency();
+    test_transparent_with_local();
+}

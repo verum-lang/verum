@@ -1,0 +1,50 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, closures, capture, mutable
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Closure captures: immutable, multiple captures, nested closures
+
+fn main() -> Int {
+    // Simple capture
+    let base = 10;
+    let add_base = |x: Int| -> Int { x + base };
+    assert_eq(add_base(5), 15);
+    assert_eq(add_base(0), 10);
+
+    // Multiple captures
+    let a = 3;
+    let b = 4;
+    let hypotenuse_sq = |dummy: Int| -> Int { a * a + b * b };
+    assert_eq(hypotenuse_sq(0), 25);
+
+    // Closure returning closure result via helper
+    let multiplier = 7;
+    let scale = |x: Int| -> Int { x * multiplier };
+    assert_eq(scale(6), 42);
+    assert_eq(scale(10), 70);
+
+    // Closure in loop
+    let factor = 2;
+    let transform = |x: Int| -> Int { x * factor + 1 };
+    let mut results = List.new();
+    let mut i = 0;
+    while i < 5 {
+        results.push(transform(i));
+        i = i + 1;
+    }
+    assert_eq(results[0], 1);   // 0*2+1
+    assert_eq(results[1], 3);   // 1*2+1
+    assert_eq(results[2], 5);   // 2*2+1
+    assert_eq(results[3], 7);   // 3*2+1
+    assert_eq(results[4], 9);   // 4*2+1
+
+    // Boolean capture
+    let flag = true;
+    let check = |x: Int| -> Int { if flag { x } else { 0 } };
+    assert_eq(check(42), 42);
+
+    print("diff_closures_capture: ok");
+    0
+}

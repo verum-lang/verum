@@ -1,0 +1,158 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: primitives, protocols, generics, sized-integers
+// @description: Tests that sized integers work in generic contexts requiring Eq, Hash, Clone, Ord, Default
+
+mount core.*;
+
+// Test: Can we use Int32 in a Set? (requires Hash + Eq)
+@test
+fn test_int32_in_set() {
+    let mut s: Set<Int32> = Set.new();
+    s.insert(1 as Int32);
+    s.insert(2 as Int32);
+    s.insert(1 as Int32);
+    assert_eq(s.len(), 2);
+}
+
+// Test: Can we use Int32 as a Map key? (requires Hash + Eq)
+@test
+fn test_int32_as_map_key() {
+    let mut m: Map<Int32, Text> = Map.new();
+    m.insert(1 as Int32, "one");
+    m.insert(2 as Int32, "two");
+    assert_eq(m.len(), 2);
+}
+
+// Test: Can we clone a List<Int32>? (requires Clone)
+@test
+fn test_clone_list_of_int32() {
+    let list: List<Int32> = [1 as Int32, 2 as Int32, 3 as Int32];
+    let cloned = list.clone();
+    assert_eq(cloned.len(), 3);
+}
+
+// Test: Can we sort a List<Int32>? (requires Ord)
+@test
+fn test_sort_list_of_int32() {
+    let mut list: List<Int32> = [3 as Int32, 1 as Int32, 2 as Int32];
+    list.sort();
+    assert_eq(list[0], 1 as Int32);
+    assert_eq(list[1], 2 as Int32);
+    assert_eq(list[2], 3 as Int32);
+}
+
+// Test: Can we use UInt32 in a Set?
+@test
+fn test_uint32_in_set() {
+    let mut s: Set<UInt32> = Set.new();
+    s.insert(10 as UInt32);
+    s.insert(20 as UInt32);
+    assert_eq(s.len(), 2);
+}
+
+// Test: Can we use UInt64 as Map key?
+@test
+fn test_uint64_as_map_key() {
+    let mut m: Map<UInt64, Int> = Map.new();
+    m.insert(100 as UInt64, 1);
+    m.insert(200 as UInt64, 2);
+    assert_eq(m.len(), 2);
+}
+
+// Test: Sort UInt32 list
+@test
+fn test_sort_uint32() {
+    let mut list: List<UInt32> = [30 as UInt32, 10 as UInt32, 20 as UInt32];
+    list.sort();
+    assert_eq(list[0], 10 as UInt32);
+    assert_eq(list[2], 30 as UInt32);
+}
+
+// Test: Int8 in set
+@test
+fn test_int8_in_set() {
+    let mut s: Set<Int8> = Set.new();
+    s.insert(1 as Int8);
+    s.insert(2 as Int8);
+    s.insert(3 as Int8);
+    assert_eq(s.len(), 3);
+}
+
+// Test: Default protocol
+@test
+fn test_int32_default() {
+    let d: Int32 = Int32.default();
+    assert_eq(d, 0 as Int32);
+}
+
+@test
+fn test_uint32_default() {
+    let d: UInt32 = UInt32.default();
+    assert_eq(d, 0 as UInt32);
+}
+
+@test
+fn test_int8_default() {
+    let d: Int8 = Int8.default();
+    assert_eq(d, 0 as Int8);
+}
+
+@test
+fn test_uint64_default() {
+    let d: UInt64 = UInt64.default();
+    assert_eq(d, 0 as UInt64);
+}
+
+@test
+fn test_float32_default() {
+    let d: Float32 = Float32.default();
+    assert_eq(d, 0.0 as Float32);
+}
+
+@test
+fn test_isize_default() {
+    let d: ISize = ISize.default();
+    assert_eq(d, 0 as ISize);
+}
+
+@test
+fn test_usize_default() {
+    let d: USize = USize.default();
+    assert_eq(d, 0 as USize);
+}
+
+// Test: Int64 sort
+@test
+fn test_sort_int64() {
+    let mut list: List<Int64> = [300 as Int64, 100 as Int64, 200 as Int64];
+    list.sort();
+    assert_eq(list[0], 100 as Int64);
+}
+
+// Test: Float32 in list operations (no Set — Float not Hashable)
+@test
+fn test_float32_list_ops() {
+    let list: List<Float32> = [3.0 as Float32, 1.0 as Float32, 2.0 as Float32];
+    let cloned = list.clone();
+    assert_eq(cloned.len(), 3);
+}
+
+// Test: ISize in set
+@test
+fn test_isize_in_set() {
+    let mut s: Set<ISize> = Set.new();
+    s.insert(1 as ISize);
+    s.insert(2 as ISize);
+    assert_eq(s.len(), 2);
+}
+
+// Test: USize in set
+@test
+fn test_usize_in_set() {
+    let mut s: Set<USize> = Set.new();
+    s.insert(10 as USize);
+    s.insert(20 as USize);
+    assert_eq(s.len(), 2);
+}

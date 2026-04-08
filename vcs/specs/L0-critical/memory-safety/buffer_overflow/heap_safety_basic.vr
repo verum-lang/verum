@@ -1,0 +1,113 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, buffer-overflow, heap, bounds-checking
+// @description: Tests basic heap operations with bounds checking
+
+/// Basic heap safety tests using currently implemented features.
+/// Tests List.new(), Heap.new(), Map.new() and collection methods.
+
+fn main() {
+    test_list_basic();
+    test_list_growth();
+    test_heap_basic();
+    test_map_basic();
+
+    print("Basic heap safety tests passed!");
+}
+
+fn test_list_basic() {
+    // Create list using List.new()
+    let mut list: List<Int> = List.new();
+
+    // Safe growth
+    list.push(10);
+    list.push(20);
+    list.push(30);
+
+    assert(list.len() == 3);
+
+    // Safe access via index
+    assert(list[0] == 10);
+    assert(list[1] == 20);
+    assert(list[2] == 30);
+
+    // Pop removes last element
+    let last = list.pop();
+    assert(list.len() == 2);
+
+    // Capacity management
+    let cap = list.capacity();
+    assert(cap >= list.len());
+
+    list.reserve(100);
+    assert(list.capacity() >= 100);
+
+    list.shrink_to_fit();
+    assert(list.capacity() >= list.len());
+}
+
+fn test_list_growth() {
+    let mut list: List<Int> = List.new();
+
+    // Safe growth - list handles reallocation internally
+    for i in 0..1000 {
+        list.push(i);  // Automatically grows capacity
+    }
+
+    assert(list.len() == 1000);
+
+    // Capacity is always >= length
+    assert(list.capacity() >= list.len());
+
+    // Reserve additional capacity
+    list.reserve(500);
+    assert(list.capacity() >= 1500);
+
+    // Shrink to fit
+    list.shrink_to_fit();
+    assert(list.capacity() >= list.len());
+}
+
+fn test_heap_basic() {
+    // Heap allocates on the heap
+    let boxed: Heap<Int> = Heap.new(42);
+    assert(*boxed == 42);
+
+    // Heap with complex type
+    let boxed_array: Heap<[Int; 3]> = Heap.new([1, 2, 3]);
+    assert((*boxed_array)[0] == 1);
+    assert((*boxed_array)[2] == 3);
+}
+
+fn test_map_basic() {
+    // Create map using Map.new()
+    let mut map: Map<Text, Int> = Map.new();
+
+    // Safe insertion
+    map.insert(Text.from("one"), 1);
+    map.insert(Text.from("two"), 2);
+    map.insert(Text.from("three"), 3);
+
+    assert(map.len() == 3);
+
+    // Safe lookup returns Maybe
+    let key = Text.from("two");
+    let val = map.get(key);
+    match val {
+        Some(v) => assert(v == 2),  // get returns value, not reference
+        None => panic("key not found"),
+    }
+
+    // Missing key returns None
+    let missing_key = Text.from("missing");
+    let missing = map.get(missing_key);
+    match missing {
+        Some(_) => panic("should be None"),
+        None => {}, // Expected
+    }
+
+    // Safe contains check
+    let check_key = Text.from("one");
+    assert(map.contains_key(check_key));
+}

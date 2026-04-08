@@ -1,0 +1,687 @@
+// @test: parse-fail
+// @level: L0
+// @tier: 0
+// @tags: parser, patterns, cluster6, errors, diagnostics, comprehensive
+// @description: Comprehensive pattern error diagnostics test suite for Cluster 6 Pattern Extensions
+// @expected-error: E070, E071, E072, E073, E074, E075, E076, E077, E078, E079, E080, E081, E082, E083, E084, E085, E086, E087, E088
+
+// ============================================================================
+// REFERENCE DOCUMENT: Pattern Parser Error Codes
+// ============================================================================
+//
+// Error Code Reference:
+// E070 - Invalid @ binding pattern (missing identifier, pattern after @)
+// E071 - Invalid identifier in pattern (keywords, invalid chars)
+// E072 - Invalid rest/spread pattern position or syntax
+// E073 - Invalid mut pattern position
+// E074 - Empty tuple/array pattern with trailing comma
+// E075 - Invalid active pattern arguments
+// E076 - Invalid field pattern syntax (wrong separator, missing field)
+// E077 - Duplicate field in record pattern
+// E078 - Nested or-pattern without parentheses (ambiguity)
+// E079 - Or-pattern with inconsistent bindings
+// E080 - Invalid range pattern bounds
+// E081 - Invalid reference pattern syntax
+// E082 - Invalid type test pattern
+// E083 - Invalid stream pattern syntax
+// E084 - Invalid and-pattern syntax
+// E085 - Invalid guard expression
+// E086 - Invalid variant pattern syntax
+// E087 - Unclosed pattern delimiter
+// E088 - Invalid let pattern (leading pipe, invalid context)
+//
+// ============================================================================
+
+// ============================================================================
+// SECTION 1: E070 - INVALID @ BINDING PATTERN
+// ============================================================================
+
+fn test_e070_at_without_identifier() {
+    // ERROR: @ without preceding identifier
+    match opt {
+        @ Some(x) => use(x),
+        None => none()
+    }
+}
+
+fn test_e070_at_with_literal() {
+    // ERROR: literal cannot precede @ (must be identifier)
+    match value {
+        42 @ x => use(x),
+        _ => other()
+    }
+}
+
+fn test_e070_double_at() {
+    // ERROR: double @ symbol
+    match opt {
+        val @@ Some(x) => use(val, x),
+        None => none()
+    }
+}
+
+fn test_e070_at_missing_subpattern() {
+    // ERROR: @ without following pattern
+    match opt {
+        val @ => use(val),
+        None => none()
+    }
+}
+
+fn test_e070_at_in_field_position() {
+    // ERROR: @ cannot appear in field position
+    match point {
+        Point { @ x } => use(x),
+        _ => other()
+    }
+}
+
+fn test_e070_chained_at() {
+    // ERROR: chained @ bindings not allowed
+    match opt {
+        a @ b @ Some(x) => use(a, b, x),
+        None => none()
+    }
+}
+
+// ============================================================================
+// SECTION 2: E071 - INVALID IDENTIFIER IN PATTERN
+// ============================================================================
+
+fn test_e071_keyword_as_pattern() {
+    // ERROR: keyword 'fn' cannot be a pattern identifier
+    let fn = value;
+}
+
+fn test_e071_reserved_keyword_let() {
+    // ERROR: keyword 'let' cannot be a pattern identifier
+    let let = value;
+}
+
+fn test_e071_reserved_keyword_is() {
+    // ERROR: keyword 'is' cannot be a pattern identifier
+    let is = value;
+}
+
+fn test_e071_invalid_identifier_start() {
+    // ERROR: identifier cannot start with digit
+    let 42abc = value;
+}
+
+// ============================================================================
+// SECTION 3: E072 - INVALID REST PATTERN POSITION
+// ============================================================================
+
+fn test_e072_multiple_rest_in_array() {
+    // ERROR: multiple rest patterns in array
+    match arr {
+        [.., x, ..] => use(x),
+        _ => other()
+    }
+}
+
+fn test_e072_rest_with_invalid_binding_syntax() {
+    // ERROR: rest with invalid binding syntax (..= instead of ..)
+    match arr {
+        [first, ..= rest, last] => use(first, rest, last),
+        _ => other()
+    }
+}
+
+fn test_e072_rest_with_space_before_name() {
+    // ERROR: space between .. and identifier
+    match arr {
+        [first, .. rest] => use(first, rest),
+        _ => other()
+    }
+}
+
+fn test_e072_triple_dot_in_array() {
+    // ERROR: triple dot in array pattern (... instead of ..)
+    match arr {
+        [first, ...rest] => use(first, rest),
+        _ => other()
+    }
+}
+
+fn test_e072_bare_rest_as_match_pattern() {
+    // ERROR: bare rest pattern as primary match pattern
+    match value {
+        .. => use(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 4: E073 - INVALID MUT PATTERN
+// ============================================================================
+
+fn test_e073_mut_in_match_arm() {
+    // ERROR: mut in wrong position in match arm
+    match value {
+        mut => use(value),
+        _ => other()
+    }
+}
+
+fn test_e073_double_mut() {
+    // ERROR: double mut modifier
+    let mut mut x = value;
+}
+
+fn test_e073_mut_ref_order() {
+    // ERROR: mut before ref (should be ref mut)
+    let mut ref x = value;
+}
+
+// ============================================================================
+// SECTION 5: E074 - EMPTY TUPLE/ARRAY PATTERN
+// ============================================================================
+
+fn test_e074_tuple_leading_comma() {
+    // ERROR: leading comma in tuple pattern
+    let (,) = value;
+}
+
+fn test_e074_tuple_consecutive_commas() {
+    // ERROR: consecutive commas (missing element)
+    let (a,, b) = value;
+}
+
+fn test_e074_array_leading_comma() {
+    // ERROR: leading comma in array pattern
+    let [, a] = arr;
+}
+
+fn test_e074_array_consecutive_commas() {
+    // ERROR: consecutive commas in array pattern
+    let [a,, b] = arr;
+}
+
+fn test_e074_record_empty_field() {
+    // ERROR: empty field in record pattern
+    let Point { , } = point;
+}
+
+// ============================================================================
+// SECTION 6: E075 - INVALID ACTIVE PATTERN ARGUMENTS
+// ============================================================================
+
+fn test_e075_active_empty_comma() {
+    // ERROR: comma without argument in active pattern params
+    match value {
+        InRange(,)() => use(),
+        _ => other()
+    }
+}
+
+fn test_e075_active_double_comma() {
+    // ERROR: double comma in active pattern params
+    match value {
+        InRange(0,, 100)() => use(),
+        _ => other()
+    }
+}
+
+fn test_e075_active_args_in_invocation() {
+    // ERROR: arguments in invocation parentheses (total pattern)
+    match value {
+        Even(42) => use(),
+        _ => other()
+    }
+}
+
+fn test_e075_active_pattern_in_params() {
+    // ERROR: pattern instead of expression in params
+    match value {
+        InRange(x, y)() => use(),
+        _ => other()
+    }
+}
+
+fn test_e075_active_unclosed_params() {
+    // ERROR: unclosed parameter list
+    match n {
+        InRange(1, 2 => use()
+    }
+}
+
+fn test_e075_active_unclosed_bindings() {
+    // ERROR: unclosed binding list
+    match n {
+        ParseInt()(n => use()
+    }
+}
+
+// ============================================================================
+// SECTION 7: E076 - INVALID FIELD PATTERN SYNTAX
+// ============================================================================
+
+fn test_e076_equals_instead_of_colon() {
+    // ERROR: using = instead of : for field pattern
+    let Point { x = px } = point;
+}
+
+fn test_e076_numeric_field_name() {
+    // ERROR: numeric field name
+    let Point { 42: x } = point;
+}
+
+fn test_e076_missing_field_value() {
+    // ERROR: field without value after colon
+    let Point { x: } = point;
+}
+
+fn test_e076_double_colon_field() {
+    // ERROR: double colon in field pattern
+    let Point { x:: y } = point;
+}
+
+// ============================================================================
+// SECTION 8: E077 - DUPLICATE FIELD IN PATTERN
+// ============================================================================
+
+fn test_e077_duplicate_shorthand() {
+    // ERROR: duplicate field name
+    let Point { x, x } = point;
+}
+
+fn test_e077_duplicate_with_rename() {
+    // ERROR: duplicate field (shorthand and renamed)
+    let Point { x, x: px } = point;
+}
+
+// ============================================================================
+// SECTION 9: E078 - NESTED OR-PATTERN ERRORS
+// ============================================================================
+
+fn test_e078_or_leading_pipe() {
+    // ERROR: leading pipe in or pattern
+    let | a | b = value;
+}
+
+fn test_e078_or_trailing_pipe() {
+    // ERROR: trailing pipe in or pattern
+    let a | b | = value;
+}
+
+fn test_e078_or_double_pipe() {
+    // ERROR: double pipe (logical OR, not pattern OR)
+    let a || b = value;
+}
+
+fn test_e078_or_empty_alternative() {
+    // ERROR: empty alternative in or pattern
+    let a | | b = value;
+}
+
+// ============================================================================
+// SECTION 10: E080 - INVALID RANGE PATTERN BOUNDS
+// ============================================================================
+
+fn test_e080_range_variable_bounds() {
+    // ERROR: identifiers not allowed as range bounds in patterns
+    match n {
+        x..y => use(x, y),
+        _ => other()
+    }
+}
+
+fn test_e080_range_expression_bounds() {
+    // ERROR: expressions not allowed as range bounds
+    match n {
+        (1+2)..(3+4) => use(),
+        _ => other()
+    }
+}
+
+fn test_e080_range_missing_both_bounds() {
+    // ERROR: open-ended range in wrong context (both bounds missing)
+    let ... = value;
+}
+
+// ============================================================================
+// SECTION 11: E081 - INVALID REFERENCE PATTERN SYNTAX
+// ============================================================================
+
+fn test_e081_ref_missing_inner() {
+    // ERROR: reference without inner pattern
+    let & = x;
+}
+
+fn test_e081_mut_ref_missing_inner() {
+    // ERROR: mutable reference without inner pattern
+    let &mut = x;
+}
+
+fn test_e081_double_ampersand_ref() {
+    // ERROR: && is logical AND, not double reference
+    let && x = value;
+}
+
+fn test_e081_ref_mut_wrong_order_in_ref() {
+    // ERROR: mut& instead of &mut
+    let mut& x = value;
+}
+
+// ============================================================================
+// SECTION 12: E082 - INVALID TYPE TEST PATTERN
+// ============================================================================
+
+fn test_e082_is_missing_type() {
+    // ERROR: 'is' without type
+    match val {
+        x is => use(x),
+        _ => other()
+    }
+}
+
+fn test_e082_is_without_binding() {
+    // ERROR: 'is' without identifier
+    match val {
+        is Int => use(),
+        _ => other()
+    }
+}
+
+fn test_e082_is_with_expression() {
+    // ERROR: expression instead of identifier before 'is'
+    match val {
+        (x + 1) is Int => use(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 13: E083 - INVALID STREAM PATTERN SYNTAX
+// ============================================================================
+
+fn test_e083_stream_missing_bracket() {
+    // ERROR: missing closing bracket
+    match s {
+        stream[first, second => use(first, second),
+        _ => other()
+    }
+}
+
+fn test_e083_stream_double_dot_rest() {
+    // ERROR: using .. instead of ... for stream rest
+    match s {
+        stream[first, ..rest] => use(first, rest),
+        _ => other()
+    }
+}
+
+fn test_e083_stream_multiple_rest() {
+    // ERROR: multiple rest patterns in stream
+    match s {
+        stream[...a, ...b] => use(a, b),
+        _ => other()
+    }
+}
+
+fn test_e083_stream_empty_invalid_comma() {
+    // ERROR: comma in empty stream pattern
+    match s {
+        stream[,] => use(),
+        _ => other()
+    }
+}
+
+fn test_e083_stream_rest_in_middle() {
+    // ERROR: rest not at the end
+    match s {
+        stream[a, ...middle, b] => use(a, middle, b),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 14: E084 - INVALID AND-PATTERN SYNTAX
+// ============================================================================
+
+fn test_e084_and_trailing_ampersand() {
+    // ERROR: trailing & with no following pattern
+    match value {
+        Even() & => use(),
+        _ => other()
+    }
+}
+
+fn test_e084_and_leading_ampersand() {
+    // ERROR: leading & with no preceding pattern
+    match value {
+        & Positive() => use(),
+        _ => other()
+    }
+}
+
+fn test_e084_and_double_ampersand() {
+    // ERROR: && is logical AND, not pattern AND
+    match value {
+        Even() && Positive() => use(),
+        _ => other()
+    }
+}
+
+fn test_e084_and_empty_between() {
+    // ERROR: empty between & symbols
+    match value {
+        Even() & & Positive() => use(),
+        _ => other()
+    }
+}
+
+fn test_e084_and_triple_ampersand() {
+    // ERROR: triple &
+    match value {
+        Even() &&& Positive() => use(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 15: E085 - INVALID GUARD EXPRESSION
+// ============================================================================
+
+fn test_e085_guard_missing_condition() {
+    // ERROR: guard without condition
+    match n {
+        (x if) => use(x),
+        _ => other()
+    }
+}
+
+fn test_e085_guard_with_pattern_instead_of_expr() {
+    // ERROR: pattern instead of expression in guard
+    match n {
+        x if Some(y) => use(x, y),
+        _ => other()
+    }
+}
+
+fn test_e085_where_missing_condition() {
+    // ERROR: where without condition
+    match n {
+        x where => use(x),
+        _ => other()
+    }
+}
+
+fn test_e085_double_guard() {
+    // ERROR: double guard
+    match n {
+        x if x > 0 if x < 100 => use(x),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 16: E086 - INVALID VARIANT PATTERN SYNTAX
+// ============================================================================
+
+fn test_e086_variant_unclosed_tuple() {
+    // ERROR: unclosed variant tuple
+    match opt {
+        Some(x => use(x),
+        None => none()
+    }
+}
+
+fn test_e086_variant_unclosed_record() {
+    // ERROR: unclosed variant record
+    match msg {
+        Message::Text { content => use(content),
+        _ => other()
+    }
+}
+
+fn test_e086_variant_mixed_tuple_record() {
+    // ERROR: mixing tuple and record syntax
+    match value {
+        Variant(x, y { z }) => use(x, y, z),
+        _ => other()
+    }
+}
+
+fn test_e086_variant_trailing_comma_unit() {
+    // ERROR: trailing content after unit variant
+    match dir {
+        North, => go_north(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 17: E087 - UNCLOSED PATTERN DELIMITER
+// ============================================================================
+
+fn test_e087_unclosed_tuple() {
+    // ERROR: unclosed tuple pattern
+    let (a, b = pair;
+}
+
+fn test_e087_unclosed_array() {
+    // ERROR: unclosed array pattern
+    let [a, b = array;
+}
+
+fn test_e087_unclosed_record() {
+    // ERROR: unclosed record pattern
+    let Point { x = point;
+}
+
+fn test_e087_deeply_nested_unclosed() {
+    // ERROR: deeply nested unclosed
+    let ((([[ = value;
+}
+
+fn test_e087_unclosed_paren_pattern() {
+    // ERROR: unclosed parenthesized pattern
+    let (x | y = value;
+}
+
+// ============================================================================
+// SECTION 18: E088 - INVALID LET PATTERN
+// ============================================================================
+
+fn test_e088_let_leading_pipe() {
+    // ERROR: leading pipe in let pattern
+    let | x = value;
+}
+
+fn test_e088_let_missing_pattern() {
+    // ERROR: missing pattern after let
+    let = value;
+}
+
+fn test_e088_let_keyword_as_pattern() {
+    // ERROR: keyword as pattern
+    let fn = value;
+}
+
+fn test_e088_let_double_equals() {
+    // ERROR: double equals in let
+    let x == value;
+}
+
+// ============================================================================
+// SECTION 19: MATCH ARM ERRORS
+// ============================================================================
+
+fn test_match_missing_pattern() {
+    // ERROR: missing pattern in match arm
+    match x {
+        => use()
+    }
+}
+
+fn test_match_missing_arrow() {
+    // ERROR: missing => in match arm
+    match x {
+        Some(y) use(y),
+        None => none()
+    }
+}
+
+fn test_match_wrong_arrow() {
+    // ERROR: wrong arrow syntax (-> instead of =>)
+    match x {
+        Some(y) -> use(y),
+        None => none()
+    }
+}
+
+fn test_match_missing_body() {
+    // ERROR: missing body after arrow
+    match x {
+        Some(y) =>,
+        None => none()
+    }
+}
+
+// ============================================================================
+// SECTION 20: CONTEXT-SPECIFIC ERRORS
+// ============================================================================
+
+fn test_for_pattern_error() {
+    // ERROR: invalid pattern in for loop
+    for 42 in items {
+        process();
+    }
+}
+
+fn test_function_param_pattern_error() {
+    // ERROR: invalid pattern in function parameter
+    fn invalid(42: Int) -> Int {
+        42
+    }
+}
+
+fn test_closure_param_pattern_error() {
+    // ERROR: invalid pattern in closure parameter
+    let f = |42| { use() };
+}
+
+fn test_if_let_pattern_error() {
+    // ERROR: invalid pattern in if-let
+    if let | x = value {
+        use(x);
+    }
+}
+
+fn test_while_let_pattern_error() {
+    // ERROR: invalid pattern in while-let
+    while let | x = iterator.next() {
+        process(x);
+    }
+}
+
+// ============================================================================
+// MAIN - Error compilation will fail before this runs
+// ============================================================================
+
+fn main() {
+    // This file is expected to fail parsing
+    // All functions above contain intentional syntax errors
+}

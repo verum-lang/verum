@@ -1,0 +1,84 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, real-opcode, reduce
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL tensor reduction intrinsics through VBC interpreter.
+// Exercises tensor_reduce with ops: sum(0), mean(1), max(2), min(3), prod(4).
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let diff = tensor_binop(t, e, 1);
+    let val = tensor_get_scalar(diff, idx);
+    if val == 0 { 0 } else { 1 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Create tensor: [1, 2, 3, 4, 5]
+    let t = tensor_new(5, 1);
+    let t = tensor_set_scalar(t, 0, 1);
+    let t = tensor_set_scalar(t, 1, 2);
+    let t = tensor_set_scalar(t, 2, 3);
+    let t = tensor_set_scalar(t, 3, 4);
+    let t = tensor_set_scalar(t, 4, 5);
+
+    // --- Test 1: SUM (op=0) ---
+    // sum([1,2,3,4,5]) = 15
+    let s = tensor_reduce(t, 0, 0);
+    errors = errors + check_val(s, 0, 15);
+
+    // --- Test 2: MAX (op=2) ---
+    // max([1,2,3,4,5]) = 5
+    let mx = tensor_reduce(t, 2, 0);
+    errors = errors + check_val(mx, 0, 5);
+
+    // --- Test 3: MIN (op=3) ---
+    // min([1,2,3,4,5]) = 1
+    let mn = tensor_reduce(t, 3, 0);
+    errors = errors + check_val(mn, 0, 1);
+
+    // --- Test 4: PROD (op=4) ---
+    // prod([1,2,3,4,5]) = 120
+    let p = tensor_reduce(t, 4, 0);
+    errors = errors + check_val(p, 0, 120);
+
+    // --- Test 5: Sum of constant tensor ---
+    // sum([7,7,7]) = 21
+    let c = tensor_fill(3, 7, 1);
+    let cs = tensor_reduce(c, 0, 0);
+    errors = errors + check_val(cs, 0, 21);
+
+    // --- Test 6: Sum of single element ---
+    let single = tensor_fill(1, 42, 1);
+    let ss = tensor_reduce(single, 0, 0);
+    errors = errors + check_val(ss, 0, 42);
+
+    // --- Test 7: Max/Min with negatives ---
+    let neg = tensor_new(4, 1);
+    let neg = tensor_set_scalar(neg, 0, -5);
+    let neg = tensor_set_scalar(neg, 1, 3);
+    let neg = tensor_set_scalar(neg, 2, -1);
+    let neg = tensor_set_scalar(neg, 3, 7);
+    let neg_max = tensor_reduce(neg, 2, 0);
+    errors = errors + check_val(neg_max, 0, 7);
+    let neg_min = tensor_reduce(neg, 3, 0);
+    errors = errors + check_val(neg_min, 0, -5);
+
+    // --- Test 8: Sum of zeros ---
+    let z = tensor_new(10, 1);
+    let zs = tensor_reduce(z, 0, 0);
+    errors = errors + check_val(zs, 0, 0);
+
+    // --- Test 9: Chained: sum of (a * b) ---
+    let a = tensor_fill(4, 3, 1);
+    let b = tensor_fill(4, 5, 1);
+    let ab = tensor_binop(a, b, 2);
+    let ab_sum = tensor_reduce(ab, 0, 0);
+    errors = errors + check_val(ab_sum, 0, 60);
+
+    errors
+}

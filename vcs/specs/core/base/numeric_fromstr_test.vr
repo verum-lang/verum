@@ -1,0 +1,396 @@
+// =============================================================================
+// numeric_fromstr_test.vr - FromStr for sized integer types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, primitives, fromstr, parsing, numeric
+// @description: Tests for FromStr implementations on sized integer types.
+//               Verifies string parsing with valid inputs, boundary values,
+//               overflow/underflow detection, and invalid format handling.
+// =============================================================================
+
+mount core.base.protocols.{FromStr, Eq};
+mount core.text.ParseError;
+
+// =============================================================================
+// Section 1: FromStr for Int8
+// =============================================================================
+
+@test
+fn test_int8_fromstr_zero() {
+    let result = Int8.from_str(&"0");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int8_fromstr_positive() {
+    let result = Int8.from_str(&"42");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int8_fromstr_negative() {
+    let result = Int8.from_str(&"-42");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int8_fromstr_max() {
+    let result = Int8.from_str(&"127");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int8_fromstr_min() {
+    let result = Int8.from_str(&"-128");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int8_fromstr_overflow() {
+    let result = Int8.from_str(&"128");
+    assert(result.is_err());
+}
+
+@test
+fn test_int8_fromstr_underflow() {
+    let result = Int8.from_str(&"-129");
+    assert(result.is_err());
+}
+
+@test
+fn test_int8_fromstr_large_overflow() {
+    let result = Int8.from_str(&"1000");
+    assert(result.is_err());
+}
+
+@test
+fn test_int8_fromstr_invalid() {
+    let result = Int8.from_str(&"abc");
+    assert(result.is_err());
+}
+
+@test
+fn test_int8_fromstr_empty() {
+    let result = Int8.from_str(&"");
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 2: FromStr for Int16
+// =============================================================================
+
+@test
+fn test_int16_fromstr_zero() {
+    let result = Int16.from_str(&"0");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int16_fromstr_positive() {
+    let result = Int16.from_str(&"1000");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int16_fromstr_negative() {
+    let result = Int16.from_str(&"-1000");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int16_fromstr_max() {
+    let result = Int16.from_str(&"32767");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int16_fromstr_min() {
+    let result = Int16.from_str(&"-32768");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int16_fromstr_overflow() {
+    let result = Int16.from_str(&"32768");
+    assert(result.is_err());
+}
+
+@test
+fn test_int16_fromstr_underflow() {
+    let result = Int16.from_str(&"-32769");
+    assert(result.is_err());
+}
+
+@test
+fn test_int16_fromstr_invalid() {
+    let result = Int16.from_str(&"xyz");
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 3: FromStr for Int32
+// =============================================================================
+
+@test
+fn test_int32_fromstr_zero() {
+    let result = Int32.from_str(&"0");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_fromstr_positive() {
+    let result = Int32.from_str(&"100000");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_fromstr_max() {
+    let result = Int32.from_str(&"2147483647");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_fromstr_min() {
+    let result = Int32.from_str(&"-2147483648");
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_fromstr_overflow() {
+    let result = Int32.from_str(&"2147483648");
+    assert(result.is_err());
+}
+
+@test
+fn test_int32_fromstr_underflow() {
+    let result = Int32.from_str(&"-2147483649");
+    assert(result.is_err());
+}
+
+@test
+fn test_int32_fromstr_invalid() {
+    let result = Int32.from_str(&"not_a_number");
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 4: FromStr for UInt8
+// =============================================================================
+
+@test
+fn test_uint8_fromstr_zero() {
+    let result = UInt8.from_str(&"0");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint8_fromstr_positive() {
+    let result = UInt8.from_str(&"200");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint8_fromstr_max() {
+    let result = UInt8.from_str(&"255");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint8_fromstr_overflow() {
+    let result = UInt8.from_str(&"256");
+    assert(result.is_err());
+}
+
+@test
+fn test_uint8_fromstr_negative() {
+    let result = UInt8.from_str(&"-1");
+    assert(result.is_err());
+}
+
+@test
+fn test_uint8_fromstr_invalid() {
+    let result = UInt8.from_str(&"abc");
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 5: FromStr for UInt16
+// =============================================================================
+
+@test
+fn test_uint16_fromstr_zero() {
+    let result = UInt16.from_str(&"0");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint16_fromstr_positive() {
+    let result = UInt16.from_str(&"40000");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint16_fromstr_max() {
+    let result = UInt16.from_str(&"65535");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint16_fromstr_overflow() {
+    let result = UInt16.from_str(&"65536");
+    assert(result.is_err());
+}
+
+@test
+fn test_uint16_fromstr_negative() {
+    let result = UInt16.from_str(&"-1");
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 6: FromStr for UInt32
+// =============================================================================
+
+@test
+fn test_uint32_fromstr_zero() {
+    let result = UInt32.from_str(&"0");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_fromstr_positive() {
+    let result = UInt32.from_str(&"3000000000");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_fromstr_max() {
+    let result = UInt32.from_str(&"4294967295");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_fromstr_overflow() {
+    let result = UInt32.from_str(&"4294967296");
+    assert(result.is_err());
+}
+
+@test
+fn test_uint32_fromstr_negative() {
+    let result = UInt32.from_str(&"-1");
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 7: FromStr for UInt64
+// =============================================================================
+
+@test
+fn test_uint64_fromstr_zero() {
+    let result = UInt64.from_str(&"0");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint64_fromstr_positive() {
+    let result = UInt64.from_str(&"1000000");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint64_fromstr_max_int() {
+    // Max Int value should be valid UInt64
+    let result = UInt64.from_str(&"9223372036854775807");
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint64_fromstr_negative() {
+    let result = UInt64.from_str(&"-1");
+    assert(result.is_err());
+}
+
+@test
+fn test_uint64_fromstr_invalid() {
+    let result = UInt64.from_str(&"not_a_number");
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 8: Edge cases
+// =============================================================================
+
+@test
+fn test_fromstr_whitespace() {
+    // Leading/trailing whitespace should fail (strict parsing)
+    let result = Int8.from_str(&" 42");
+    assert(result.is_err());
+}
+
+@test
+fn test_fromstr_plus_sign() {
+    // Verum accepts leading '+' in numeric parsing (consistent with from_str_radix)
+    let result = Int8.from_str(&"+42");
+    assert(result.is_ok());
+}
+
+@test
+fn test_fromstr_leading_zeros() {
+    let result = Int8.from_str(&"007");
+    assert(result.is_ok());
+}
+
+@test
+fn test_fromstr_multiple_types_same_value() {
+    let r1 = Int8.from_str(&"100");
+    let r2 = Int16.from_str(&"100");
+    let r3 = Int32.from_str(&"100");
+    let r4 = UInt8.from_str(&"100");
+    let r5 = UInt16.from_str(&"100");
+    let r6 = UInt32.from_str(&"100");
+    let r7 = UInt64.from_str(&"100");
+    assert(r1.is_ok());
+    assert(r2.is_ok());
+    assert(r3.is_ok());
+    assert(r4.is_ok());
+    assert(r5.is_ok());
+    assert(r6.is_ok());
+    assert(r7.is_ok());
+}
+
+@test
+fn test_fromstr_type_limits() {
+    // Value valid for Int16 but not Int8
+    let r_int8 = Int8.from_str(&"200");
+    let r_int16 = Int16.from_str(&"200");
+    assert(r_int8.is_err());
+    assert(r_int16.is_ok());
+}
+
+@test
+fn test_fromstr_boundary_cross_type() {
+    // 255 valid for UInt8 but not Int8
+    let r_uint8 = UInt8.from_str(&"255");
+    let r_int8 = Int8.from_str(&"255");
+    assert(r_uint8.is_ok());
+    assert(r_int8.is_err());
+}
+
+@test
+fn test_fromstr_negative_unsigned() {
+    // All unsigned types should reject negative values
+    let r1 = UInt8.from_str(&"-5");
+    let r2 = UInt16.from_str(&"-5");
+    let r3 = UInt32.from_str(&"-5");
+    let r4 = UInt64.from_str(&"-5");
+    assert(r1.is_err());
+    assert(r2.is_err());
+    assert(r3.is_err());
+    assert(r4.is_err());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

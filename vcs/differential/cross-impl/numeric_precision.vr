@@ -1,0 +1,200 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, numeric_precision
+
+/// Numeric precision tests
+/// Verifies consistent floating-point behavior across implementations
+
+fn main() {
+    // ===== Basic floating-point precision =====
+    println("=== Basic Precision ===");
+
+    // Classic 0.1 + 0.2 problem
+    let a = 0.1;
+    let b = 0.2;
+    let c = 0.3;
+    let sum = a + b;
+
+    println(f"0.1 = {a:.20}");
+    println(f"0.2 = {b:.20}");
+    println(f"0.3 = {c:.20}");
+    println(f"0.1 + 0.2 = {sum:.20}");
+    println(f"0.1 + 0.2 == 0.3: {sum == c}");
+    println(f"difference: {(sum - c).abs():.20}");
+
+    // ===== Accumulation errors =====
+    println("\n=== Accumulation Errors ===");
+
+    let mut naive_sum = 0.0;
+    for _ in 0..1000 {
+        naive_sum = naive_sum + 0.1;
+    }
+    println(f"0.1 * 1000 (loop) = {naive_sum}");
+    println(f"expected: {0.1 * 1000.0}");
+    println(f"difference: {(naive_sum - 100.0).abs()}");
+
+    // Kahan summation for comparison
+    fn kahan_sum(values: List<Float>) -> Float {
+        let mut sum = 0.0;
+        let mut c = 0.0;  // compensation
+        for v in values {
+            let y = v - c;
+            let t = sum + y;
+            c = (t - sum) - y;
+            sum = t;
+        }
+        sum
+    }
+
+    let values = List.fill(1000, 0.1);
+    let kahan = kahan_sum(values);
+    println(f"Kahan sum = {kahan}");
+
+    // ===== Large number precision =====
+    println("\n=== Large Numbers ===");
+
+    let large = 1e15;
+    let small = 1.0;
+
+    println(f"1e15 + 1 = {large + small}");
+    println(f"1e15 + 1 - 1e15 = {large + small - large}");
+
+    let very_large = 1e308;
+    println(f"1e308 = {very_large}");
+    println(f"1e308 * 2 = {very_large * 2.0}");  // Infinity
+
+    // ===== Small number precision =====
+    println("\n=== Small Numbers ===");
+
+    let tiny = 1e-300;
+    println(f"1e-300 = {tiny}");
+    println(f"1e-300 / 1e10 = {tiny / 1e10}");  // Subnormal
+
+    let subnormal = 5e-324;  // Smallest subnormal
+    println(f"5e-324 = {subnormal}");
+    println(f"5e-324 / 2 = {subnormal / 2.0}");  // Underflow to 0
+
+    // ===== Special values =====
+    println("\n=== Special Values ===");
+
+    let inf = 1.0 / 0.0;
+    let neg_inf = -1.0 / 0.0;
+    let nan = 0.0 / 0.0;
+
+    println(f"1/0 = {inf}");
+    println(f"-1/0 = {neg_inf}");
+    println(f"0/0 = {nan}");
+
+    println(f"inf + 1 = {inf + 1.0}");
+    println(f"inf - inf = {inf - inf}");
+    println(f"inf * 0 = {inf * 0.0}");
+    println(f"inf / inf = {inf / inf}");
+
+    println(f"nan + 1 = {nan + 1.0}");
+    println(f"nan == nan = {nan == nan}");
+    println(f"nan != nan = {nan != nan}");
+
+    // ===== Rounding modes =====
+    println("\n=== Rounding ===");
+
+    let values = [2.5, 3.5, 4.5, -2.5, -3.5];
+    for v in values {
+        println(f"round({v}) = {v.round()}");
+        println(f"floor({v}) = {v.floor()}");
+        println(f"ceil({v}) = {v.ceil()}");
+        println(f"trunc({v}) = {v.trunc()}");
+    }
+
+    // ===== Comparison ordering =====
+    println("\n=== Ordering ===");
+
+    let test_values = [neg_inf, -1.0, -0.0, 0.0, 1.0, inf, nan];
+
+    for a in test_values {
+        for b in test_values {
+            let cmp = if a < b { "<" }
+                     else if a > b { ">" }
+                     else if a == b { "=" }
+                     else { "?" };
+            println(f"{a} {cmp} {b}");
+        }
+    }
+
+    // Negative zero
+    let neg_zero = -0.0;
+    let pos_zero = 0.0;
+    println(f"\n-0.0 == 0.0: {neg_zero == pos_zero}");
+    println(f"1/-0.0 = {1.0 / neg_zero}");
+    println(f"1/0.0 = {1.0 / pos_zero}");
+
+    // ===== Mathematical functions =====
+    println("\n=== Math Functions ===");
+
+    let x = 2.0;
+    println(f"sqrt(2) = {x.sqrt():.15}");
+    println(f"2^0.5 = {x.powf(0.5):.15}");
+
+    println(f"sin(pi/6) = {(Float.PI / 6.0).sin():.15}");
+    println(f"expected 0.5");
+
+    println(f"cos(pi/3) = {(Float.PI / 3.0).cos():.15}");
+    println(f"expected 0.5");
+
+    println(f"exp(1) = {1.0f64.exp():.15}");
+    println(f"expected e = 2.718281828459045");
+
+    println(f"ln(e) = {Float.E.ln():.15}");
+    println(f"expected 1.0");
+
+    // ===== Integer arithmetic precision =====
+    println("\n=== Integer Precision ===");
+
+    // 64-bit integer range
+    let i64_max: Int = 9223372036854775807;
+    let i64_min: Int = -9223372036854775808;
+
+    println(f"i64_max = {i64_max}");
+    println(f"i64_min = {i64_min}");
+
+    // Integer division
+    println(f"17 / 5 = {17 / 5}");
+    println(f"17 % 5 = {17 % 5}");
+    println(f"-17 / 5 = {-17 / 5}");
+    println(f"-17 % 5 = {-17 % 5}");
+
+    // Bitwise precision
+    println(f"1 << 62 = {1 << 62}");
+    println(f"(1 << 62) << 1 = {(1 << 62) << 1}");  // Sign bit
+
+    // ===== Decimal arithmetic =====
+    println("\n=== Decimal (if supported) ===");
+
+    // If Decimal type is available
+    let d1 = Decimal.from_str("0.1");
+    let d2 = Decimal.from_str("0.2");
+    let d3 = d1 + d2;
+    println(f"Decimal: 0.1 + 0.2 = {d3}");
+    println(f"Decimal: 0.1 + 0.2 == 0.3: {d3 == Decimal.from_str(\"0.3\")}");
+
+    // ===== Cross-implementation consistency =====
+    println("\n=== Consistency Checks ===");
+
+    // These should produce EXACTLY the same bit patterns
+    let precise_tests = [
+        (1.0, 3.0, "/"),
+        (Float.PI, Float.E, "*"),
+        (2.0, 0.5, "**"),
+    ];
+
+    for (a, b, op) in precise_tests {
+        let result = match op {
+            "/" => a / b,
+            "*" => a * b,
+            "**" => a.powf(b),
+            _ => 0.0,
+        };
+        // Print as hex to compare exact bits
+        println(f"{a} {op} {b} = {result:.17} (bits: {result.to_bits():016x})");
+    }
+}

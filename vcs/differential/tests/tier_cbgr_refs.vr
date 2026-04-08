@@ -1,0 +1,313 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, cbgr-refs
+// @timeout: 10000
+
+/// Tests CBGR (Concurrent Bump-pointer with Generational References) patterns:
+/// generation tracking, reference acquire/release lifecycle, epoch-based
+/// validation, and ref counting simulation for cross-tier consistency.
+
+fn main() {
+    test_generation_acquire_release();
+    test_epoch_validation();
+    test_ref_counting_simulation();
+    test_generation_overflow_wrap();
+    test_multi_slot_arena();
+}
+
+/// Simulated generation-based reference: acquire increments generation,
+/// release invalidates, subsequent access detects stale reference.
+fn test_generation_acquire_release() {
+    println("=== Generation Acquire/Release ===");
+
+    // Arena with 4 slots, each has a generation counter
+    let mut generations = [0, 0, 0, 0];
+    let mut occupied = [false, false, false, false];
+    let num_slots = 4;
+
+    // Allocate: find free slot, mark occupied, return (slot, generation)
+    fn find_free(occupied: &List<Bool>, n: Int) -> Int {
+        let mut i = 0;
+        while i < n {
+            if occupied[i] == false {
+                return i;
+            }
+            i = i + 1;
+        }
+        -1 // no free slot
+    }
+
+    // Allocate slot 0
+    let slot0 = find_free(&occupied, num_slots);
+    occupied[slot0] = true;
+    let gen0 = generations[slot0];
+    println(f"alloc: slot={slot0}, gen={gen0}");
+
+    // Allocate slot 1
+    let slot1 = find_free(&occupied, num_slots);
+    occupied[slot1] = true;
+    let gen1 = generations[slot1];
+    println(f"alloc: slot={slot1}, gen={gen1}");
+
+    // Validate reference (slot, gen) - valid if generation matches
+    let valid0 = generations[slot0] == gen0 && occupied[slot0];
+    println(f"validate slot {slot0} gen {gen0}: {valid0}");
+
+    // Release slot 0: increment generation, mark free
+    generations[slot0] = generations[slot0] + 1;
+    occupied[slot0] = false;
+    println(f"release: slot={slot0}, new_gen={generations[slot0]}");
+
+    // Old reference to slot 0 is now stale
+    let stale0 = generations[slot0] == gen0;
+    println(f"validate stale ref slot {slot0} gen {gen0}: {stale0}");
+
+    // Reallocate slot 0
+    let slot0b = find_free(&occupied, num_slots);
+    occupied[slot0b] = true;
+    let gen0b = generations[slot0b];
+    println(f"realloc: slot={slot0b}, gen={gen0b}");
+
+    // New reference is valid, old is still stale
+    let valid0b = generations[slot0b] == gen0b && occupied[slot0b];
+    let still_stale = generations[slot0b] == gen0;
+    println(f"validate new ref: {valid0b}");
+    println(f"validate old ref: {still_stale}");
+
+    // Release all
+    let mut i = 0;
+    while i < num_slots {
+        if occupied[i] {
+            generations[i] = generations[i] + 1;
+            occupied[i] = false;
+            println(f"release: slot={i}, new_gen={generations[i]}");
+        }
+        i = i + 1;
+    }
+
+    println("final generations:");
+    let mut j = 0;
+    while j < num_slots {
+        println(f"  slot {j}: gen={generations[j]}, occupied={occupied[j]}");
+        j = j + 1;
+    }
+}
+
+/// Epoch-based validation: references are valid within their epoch.
+/// Advancing the epoch invalidates all references from prior epochs.
+fn test_epoch_validation() {
+    println("\n=== Epoch Validation ===");
+
+    let mut current_epoch = 0;
+
+    // Create references tagged with epoch
+    type EpochRef is { slot: Int, epoch: Int };
+
+    fn make_ref(slot: Int, epoch: Int) -> EpochRef {
+        EpochRef { slot: slot, epoch: epoch }
+    }
+
+    fn is_valid(r: &EpochRef, current: Int) -> Bool {
+        r.epoch == current
+    }
+
+    // Create refs in epoch 0
+    let ref_a = make_ref(0, current_epoch);
+    let ref_b = make_ref(1, current_epoch);
+    let ref_c = make_ref(2, current_epoch);
+    println(f"epoch {current_epoch}: ref_a valid={is_valid(&ref_a, current_epoch)}");
+    println(f"epoch {current_epoch}: ref_b valid={is_valid(&ref_b, current_epoch)}");
+    println(f"epoch {current_epoch}: ref_c valid={is_valid(&ref_c, current_epoch)}");
+
+    // Advance epoch
+    current_epoch = current_epoch + 1;
+    println(f"advanced to epoch {current_epoch}");
+
+    // Old refs are now invalid
+    println(f"epoch {current_epoch}: ref_a valid={is_valid(&ref_a, current_epoch)}");
+    println(f"epoch {current_epoch}: ref_b valid={is_valid(&ref_b, current_epoch)}");
+
+    // Create new refs in epoch 1
+    let ref_d = make_ref(0, current_epoch);
+    let ref_e = make_ref(3, current_epoch);
+    println(f"epoch {current_epoch}: ref_d valid={is_valid(&ref_d, current_epoch)}");
+    println(f"epoch {current_epoch}: ref_e valid={is_valid(&ref_e, current_epoch)}");
+
+    // Advance again
+    current_epoch = current_epoch + 1;
+    println(f"advanced to epoch {current_epoch}");
+
+    // All previous refs invalid
+    println(f"epoch {current_epoch}: ref_a valid={is_valid(&ref_a, current_epoch)}");
+    println(f"epoch {current_epoch}: ref_d valid={is_valid(&ref_d, current_epoch)}");
+
+    // Only current-epoch refs valid
+    let ref_f = make_ref(5, current_epoch);
+    println(f"epoch {current_epoch}: ref_f valid={is_valid(&ref_f, current_epoch)}");
+}
+
+/// Simulated reference counting with strong/weak separation
+fn test_ref_counting_simulation() {
+    println("\n=== Ref Counting ===");
+
+    // Track strong and weak counts for 4 objects
+    let mut strong = [0, 0, 0, 0];
+    let mut weak = [0, 0, 0, 0];
+    let mut alive = [false, false, false, false];
+    let num_objects = 4;
+
+    // Create objects (strong count starts at 1)
+    let mut i = 0;
+    while i < num_objects {
+        strong[i] = 1;
+        alive[i] = true;
+        println(f"create obj[{i}]: strong={strong[i]}, weak={weak[i]}");
+        i = i + 1;
+    }
+
+    // Clone (increment strong count)
+    strong[0] = strong[0] + 1;
+    println(f"clone obj[0]: strong={strong[0]}");
+    strong[0] = strong[0] + 1;
+    println(f"clone obj[0]: strong={strong[0]}");
+
+    // Create weak reference
+    weak[0] = weak[0] + 1;
+    println(f"weak_ref obj[0]: weak={weak[0]}");
+    weak[1] = weak[1] + 1;
+    println(f"weak_ref obj[1]: weak={weak[1]}");
+
+    // Drop strong references one at a time
+    strong[0] = strong[0] - 1;
+    println(f"drop obj[0]: strong={strong[0]}, alive={strong[0] > 0}");
+    strong[0] = strong[0] - 1;
+    println(f"drop obj[0]: strong={strong[0]}, alive={strong[0] > 0}");
+    strong[0] = strong[0] - 1;
+    if strong[0] == 0 {
+        alive[0] = false;
+        println(f"obj[0] destroyed: weak refs remain={weak[0]}");
+    }
+
+    // Try to upgrade weak ref after object destroyed
+    let upgrade_result = if alive[0] { "Some" } else { "None" };
+    println(f"upgrade weak obj[0]: {upgrade_result}");
+
+    // Upgrade weak ref while object alive
+    let upgrade_result1 = if alive[1] { "Some" } else { "None" };
+    println(f"upgrade weak obj[1]: {upgrade_result1}");
+
+    // Drop weak ref
+    weak[0] = weak[0] - 1;
+    println(f"drop weak obj[0]: weak={weak[0]}");
+
+    // Final state
+    println("final state:");
+    let mut j = 0;
+    while j < num_objects {
+        println(f"  obj[{j}]: strong={strong[j]}, weak={weak[j]}, alive={alive[j]}");
+        j = j + 1;
+    }
+}
+
+/// Test generation counter wrapping behavior (deterministic modular arithmetic)
+fn test_generation_overflow_wrap() {
+    println("\n=== Generation Overflow Wrap ===");
+
+    // Simulate generation counter with a small max to test wrapping
+    let gen_max = 256; // 8-bit generation
+
+    let mut gen = 0;
+    let mut allocations = 0;
+
+    // Do many alloc/free cycles, tracking generation with modular wrap
+    let mut cycle = 0;
+    while cycle < 10 {
+        // Allocate
+        let alloc_gen = gen;
+        allocations = allocations + 1;
+
+        // Free (bump generation with wrap)
+        gen = (gen + 1) % gen_max;
+
+        println(f"cycle {cycle}: alloc_gen={alloc_gen}, free_gen={gen}");
+        cycle = cycle + 1;
+    }
+
+    println(f"total_allocations: {allocations}");
+    println(f"final_gen: {gen}");
+
+    // Test near-wrap boundary
+    gen = 250;
+    let mut near_wrap = 0;
+    while near_wrap < 12 {
+        let old_gen = gen;
+        gen = (gen + 1) % gen_max;
+        let wrapped = if gen < old_gen { "WRAPPED" } else { "normal" };
+        println(f"gen: {old_gen} -> {gen} ({wrapped})");
+        near_wrap = near_wrap + 1;
+    }
+}
+
+/// Multi-slot arena: allocate into specific slots, track generations per slot
+fn test_multi_slot_arena() {
+    println("\n=== Multi-Slot Arena ===");
+
+    let num_slots = 8;
+    let mut slot_gen = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut slot_used = [false, false, false, false, false, false, false, false];
+
+    // Allocation sequence: alloc, alloc, alloc, free, alloc (into freed slot), etc.
+    // Action: 1=alloc, 0=free(slot_index)
+    let actions = [1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1];
+    let free_targets = [0, 0, 0, 0, 0, 1, 3, 0, 0, 0, 0]; // which slot to free (only used when action=0)
+    let num_actions = 11;
+
+    let mut alloc_count = 0;
+    let mut free_count = 0;
+
+    let mut a = 0;
+    while a < num_actions {
+        if actions[a] == 1 {
+            // Find first free slot
+            let mut found = -1;
+            let mut s = 0;
+            while s < num_slots {
+                if slot_used[s] == false {
+                    found = s;
+                    s = num_slots; // break
+                } else {
+                    s = s + 1;
+                }
+            }
+            if found >= 0 {
+                slot_used[found] = true;
+                println(f"alloc: slot={found}, gen={slot_gen[found]}");
+                alloc_count = alloc_count + 1;
+            } else {
+                println("alloc: FULL");
+            }
+        } else {
+            let target = free_targets[a];
+            if slot_used[target] {
+                slot_gen[target] = slot_gen[target] + 1;
+                slot_used[target] = false;
+                println(f"free: slot={target}, new_gen={slot_gen[target]}");
+                free_count = free_count + 1;
+            } else {
+                println(f"free: slot={target} already free");
+            }
+        }
+        a = a + 1;
+    }
+
+    println(f"total allocs: {alloc_count}, total frees: {free_count}");
+
+    // Final arena state
+    println("arena state:");
+    let mut i = 0;
+    while i < num_slots {
+        println(f"  slot {i}: gen={slot_gen[i]}, used={slot_used[i]}");
+        i = i + 1;
+    }
+}

@@ -1,0 +1,145 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, mutual-recursion, hofstadter, math, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT mutual recursion patterns - Hofstadter sequences and similar
+
+// Hofstadter Male-Female sequences
+// F(0) = 1, M(0) = 0
+// F(n) = n - M(F(n-1)) for n > 0
+// M(n) = n - F(M(n-1)) for n > 0
+
+fn hof_f(n: Int) -> Int {
+    if n == 0 { 1 }
+    else { n - hof_m(hof_f(n - 1)) }
+}
+
+fn hof_m(n: Int) -> Int {
+    if n == 0 { 0 }
+    else { n - hof_f(hof_m(n - 1)) }
+}
+
+// Mutual type classification
+type Parity is Even | Odd;
+
+fn classify(n: Int) -> Parity {
+    if n == 0 { Even }
+    else if n == 1 { Odd }
+    else { classify_helper(n - 2) }
+}
+
+fn classify_helper(n: Int) -> Parity {
+    classify(n)
+}
+
+fn is_even_parity(p: Parity) -> Bool {
+    p is Even
+}
+
+// Ping-pong counter: two functions that bounce a counter between them
+fn ping(n: Int, acc: Int) -> Int {
+    if n == 0 { acc }
+    else { pong(n - 1, acc + 1) }
+}
+
+fn pong(n: Int, acc: Int) -> Int {
+    if n == 0 { acc }
+    else { ping(n - 1, acc + 2) }
+}
+
+// Iterative Collatz counter (avoids E321 unbounded recursion detection)
+fn collatz_steps(start: Int) -> Int {
+    let mut n = start;
+    let mut steps = 0;
+    while n != 1 {
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+// A-B alternating sum: A adds, B subtracts
+fn alt_a(n: Int) -> Int {
+    if n == 0 { 0 }
+    else { n + alt_b(n - 1) }
+}
+
+fn alt_b(n: Int) -> Int {
+    if n == 0 { 0 }
+    else { 0 - n + alt_a(n - 1) }
+}
+
+fn main() -> Int {
+    // Hofstadter Female: first values are 1,1,2,2,3,3,4,5,5,6,...
+    assert_eq(hof_f(0), 1);
+    assert_eq(hof_f(1), 1);
+    assert_eq(hof_f(2), 2);
+    assert_eq(hof_f(3), 2);
+    assert_eq(hof_f(4), 3);
+    assert_eq(hof_f(5), 3);
+    assert_eq(hof_f(6), 4);
+    assert_eq(hof_f(7), 5);
+
+    // Hofstadter Male: first values are 0,0,1,2,2,3,4,4,5,6,...
+    assert_eq(hof_m(0), 0);
+    assert_eq(hof_m(1), 0);
+    assert_eq(hof_m(2), 1);
+    assert_eq(hof_m(3), 2);
+    assert_eq(hof_m(4), 2);
+    assert_eq(hof_m(5), 3);
+    assert_eq(hof_m(6), 4);
+    assert_eq(hof_m(7), 4);
+
+    // Parity classification
+    assert(is_even_parity(classify(0)));
+    assert(!is_even_parity(classify(1)));
+    assert(is_even_parity(classify(2)));
+    assert(!is_even_parity(classify(3)));
+    assert(is_even_parity(classify(10)));
+    assert(!is_even_parity(classify(11)));
+
+    // Ping-pong: each round adds 1 (ping) or 2 (pong)
+    // ping(4, 0): ping adds 1 -> pong(3, 1) -> pong adds 2 -> ping(2, 3)
+    //           -> ping adds 1 -> pong(1, 4) -> pong adds 2 -> ping(0, 6) = 6
+    assert_eq(ping(4, 0), 6);
+    // ping(1, 0): n=1, acc=0 -> pong(0, 1) = 1
+    assert_eq(ping(1, 0), 1);
+    // ping(2, 0): n=2 -> pong(1, 1): n=1 -> ping(0, 3) = 3
+    assert_eq(ping(2, 0), 3);
+    // ping(6, 0) = ?
+    // ping->pong->ping->pong->ping->pong->return
+    // Adds: 1,2,1,2,1,2 = 9
+    assert_eq(ping(6, 0), 9);
+
+    // Iterative Collatz
+    // Collatz(1) = 0 steps
+    assert_eq(collatz_steps(1), 0);
+    // Collatz(2) = 1 step (2->1)
+    assert_eq(collatz_steps(2), 1);
+    // Collatz(3) = 7 steps (3->10->5->16->8->4->2->1)
+    assert_eq(collatz_steps(3), 7);
+    // Collatz(6) = 8 steps (6->3->10->5->16->8->4->2->1)
+    assert_eq(collatz_steps(6), 8);
+    // Collatz(7) = 16 steps
+    assert_eq(collatz_steps(7), 16);
+
+    // Alternating sum
+    // alt_a(0) = 0
+    assert_eq(alt_a(0), 0);
+    // alt_a(1) = 1 + alt_b(0) = 1 + 0 = 1
+    assert_eq(alt_a(1), 1);
+    // alt_a(2) = 2 + alt_b(1) = 2 + (-1 + alt_a(0)) = 2 + (-1) = 1
+    assert_eq(alt_a(2), 1);
+    // alt_a(3) = 3 + alt_b(2) = 3 + (-2 + alt_a(1)) = 3 + (-2 + 1) = 2
+    assert_eq(alt_a(3), 2);
+    // alt_a(4) = 4 + alt_b(3) = 4 + (-3 + alt_a(2)) = 4 + (-3 + 1) = 2
+    assert_eq(alt_a(4), 2);
+
+    0
+}

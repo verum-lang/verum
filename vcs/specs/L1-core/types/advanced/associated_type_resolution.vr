@@ -1,0 +1,217 @@
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1
+// @tags: associated-types, resolution, projection, advanced-type-syntax
+// @description: Associated type projection and resolution tests
+
+// =============================================================================
+// Test 1: Basic associated type projection
+// =============================================================================
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+fn first_item<I: Iterator>(mut iter: I) -> Maybe<I.Item> {
+    iter.next()
+}
+
+fn test_basic_projection() {
+    let mut iter = [1, 2, 3].iter();
+    let first: Maybe<Int> = first_item(iter);
+    assert(first == Some(1));
+}
+
+// =============================================================================
+// Test 2: Associated type in return position
+// =============================================================================
+type IntoIterator is protocol {
+    type Item;
+    type IntoIter: Iterator<Item = Self.Item>;
+
+    fn into_iter(self) -> Self.IntoIter;
+};
+
+// =============================================================================
+// Test 3: Nested associated type resolution
+// =============================================================================
+type Container is protocol {
+    type Item;
+    type Iter: Iterator<Item = Self.Item>;
+
+    fn iter(&self) -> Self.Iter;
+    fn len(&self) -> Int;
+};
+
+// =============================================================================
+// Test 4: Associated type bounds propagation
+// =============================================================================
+type Sortable is protocol extends Container {
+    fn sort(&mut self);
+};
+
+fn sorted_first<S: Sortable>(mut container: S) -> Maybe<S.Item>
+    where type S.Item: Ord + Clone
+{
+    container.sort();
+    container.iter().next()
+}
+
+// =============================================================================
+// Test 5: Multiple associated type constraints
+// =============================================================================
+type Graph is protocol {
+    type Node: Eq + Hash;
+    type Edge;
+    type NodeIter: Iterator<Item = Self.Node>;
+    type EdgeIter: Iterator<Item = Self.Edge>;
+
+    fn nodes(&self) -> Self.NodeIter;
+    fn edges(&self, from: &Self.Node) -> Self.EdgeIter;
+};
+
+// =============================================================================
+// Test 6: Chained associated type access
+// =============================================================================
+type Wrapper is protocol {
+    type Inner: Container;
+
+    fn unwrap(&self) -> &Self.Inner;
+};
+
+fn get_wrapper_len<W: Wrapper>(wrapper: &W) -> Int {
+    wrapper.unwrap().len()
+}
+
+// =============================================================================
+// Test 7: Associated type equality in where clause
+// =============================================================================
+fn zip_iters<A: Iterator, B: Iterator>(mut a: A, mut b: B) -> List<(A.Item, B.Item)> {
+    let mut result: List<(A.Item, B.Item)> = List.new();
+    loop {
+        match (a.next(), b.next()) {
+            (Some(x), Some(y)) => result.push((x, y)),
+            _ => break,
+        }
+    }
+    result
+}
+
+// =============================================================================
+// Test 8: Concrete iterator with associated type
+// =============================================================================
+type BasicIterator is protocol {
+    type Item;
+
+    fn next(&mut self) -> Maybe<Self.Item>;
+    fn has_next(&self) -> Bool;
+};
+
+type RangeIterator is {
+    current: Int,
+    end: Int,
+};
+
+implement BasicIterator for RangeIterator {
+    type Item is Int;
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end {
+            let val = self.current;
+            self.current += 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+
+    fn has_next(&self) -> Bool {
+        self.current < self.end
+    }
+}
+
+fn use_basic_iterator<I: BasicIterator>(mut iter: I) {
+    while let Some(_item) = iter.next() {
+        // Process item
+    }
+}
+
+// =============================================================================
+// Test 9: Associated type with default
+// =============================================================================
+type Defaultable is protocol {
+    type Output is Self;  // Default: same as Self
+
+    fn default_output() -> Self.Output;
+};
+
+implement Defaultable for Int {
+    fn default_output() -> Int {
+        0
+    }
+}
+
+// =============================================================================
+// Test 10: Concrete process_iterator (avoiding dyn dispatch)
+// =============================================================================
+fn process_range_iterator(mut iter: RangeIterator) -> Int {
+    let mut sum = 0;
+    while let Some(x) = iter.next() {
+        sum += x;
+    }
+    sum
+}
+
+fn test_concrete_iterator() {
+    let iter = RangeIterator { current: 0, end: 5 };
+    let sum = process_range_iterator(iter);
+    assert(sum == 10); // 0+1+2+3+4
+}
+
+// =============================================================================
+// Test 11: Associated type in impl blocks
+// =============================================================================
+type Collection<T> is {
+    items: List<T>,
+};
+
+implement<T> Collection<T> {
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+}
+
+// =============================================================================
+// Test 12: Complex associated type unification
+// =============================================================================
+type Transform<In, Out> is protocol {
+    type Error;
+
+    fn transform(&self, input: In) -> Result<Out, Self.Error>;
+};
+
+// Helper types
+type ListIter<T> is { items: &List<T>, pos: Int };
+
+// Standard protocols (using correct Verum syntax)
+type Ordering is Lt | Eq | Gt;
+
+fn main() {
+    test_basic_projection();
+    test_concrete_iterator();
+
+    // Test collection
+    let col = Collection { items: [1, 2, 3] };
+    assert(col.len() == 3);
+
+    // Test range iterator
+    let mut range = RangeIterator { current: 0, end: 3 };
+    assert(range.has_next());
+    assert(range.next() == Some(0));
+    assert(range.next() == Some(1));
+    assert(range.next() == Some(2));
+    assert(!range.has_next());
+    assert(range.next() == None);
+
+    assert(true);
+}

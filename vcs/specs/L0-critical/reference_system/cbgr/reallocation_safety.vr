@@ -1,0 +1,82 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, reallocation, safety, borrow-check
+// Note: changed from run-interpreter-panic to typecheck-fail because the
+// borrow checker correctly catches this at compile time (E310: cannot borrow
+// as mutable while already borrowed as immutable)
+
+/// Test CBGR catches references invalidated by reallocation.
+/// When a container reallocates, old references become dangling.
+/// Spec: 26-cbgr-implementation.md#generation-tracking
+
+fn main() {
+    test_reallocation_detection();
+}
+
+/// Test that references into reallocated storage are caught
+fn test_reallocation_detection() {
+    let mut buffer = List.with_capacity(2);
+    buffer.push(10);
+    buffer.push(20);
+
+    unsafe {
+        // Get reference to element
+        let ref_elem: &Int = &buffer[0];
+        let captured_gen = ref_elem.stored_generation();
+
+        print("Captured generation: " + captured_gen.to_string());
+        print("Before reallocation, value: " + (*ref_elem).to_string());
+
+        // Force reallocation by adding many elements
+        for i in 0..100 {
+            buffer.push(i);
+        }
+
+        print("After reallocation, buffer capacity: " + buffer.capacity().to_string());
+
+        // Old storage is freed, new storage allocated
+        // ref_elem now points to freed memory with stale generation
+
+        // This access should trigger CBGR panic
+        let _ = *ref_elem;  // PANIC: generation mismatch
+    }
+}
+
+/// Alternative scenario: Vec growth invalidates iterator
+fn vec_growth_invalidation() {
+    let mut items = [1, 2, 3];
+
+    unsafe {
+        // Get reference during iteration
+        let first_ref = &items[0];
+
+        // Modify collection (triggers reallocation)
+        for i in 0..1000 {
+            items.push(i);
+        }
+
+        // Original reference is now dangling
+        let _ = *first_ref;  // PANIC
+    }
+}
+
+/// String reallocation scenario
+fn string_reallocation() {
+    let mut text = Text.with_capacity(10);
+    text.push_str("hello");
+
+    unsafe {
+        // Reference into string buffer
+        let char_ref: &Char = &text.chars()[0];
+
+        // Grow string beyond capacity
+        for _ in 0..100 {
+            text.push_str(" more text");
+        }
+
+        // Reference is now invalid
+        let _ = *char_ref;  // PANIC
+    }
+}

@@ -1,0 +1,240 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, huffman, frequency, encoding
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests Huffman-like frequency-based encoding: character frequency analysis,
+// optimal bit-length assignment, and encoding efficiency computation.
+
+fn test_frequency_analysis() {
+    // Count character frequencies in a simulated string
+    // "abracadabra" -> a:5, b:2, r:2, c:1, d:1
+    // Encoded as array of char indices: a=0,b=1,c=2,d=3,r=17
+    let msg = [0, 1, 17, 0, 2, 0, 3, 0, 1, 17, 0]; // "abracadabra"
+    let len = 11;
+    let mut freq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let mut i = 0;
+    while i < len {
+        freq[msg[i]] = freq[msg[i]] + 1;
+        i = i + 1;
+    }
+
+    assert_eq(freq[0], 5);  // 'a' appears 5 times
+    assert_eq(freq[1], 2);  // 'b' appears 2 times
+    assert_eq(freq[2], 1);  // 'c' appears 1 time
+    assert_eq(freq[3], 1);  // 'd' appears 1 time
+    assert_eq(freq[17], 2); // 'r' appears 2 times
+
+    // Total characters
+    let total = freq[0] + freq[1] + freq[2] + freq[3] + freq[17];
+    assert_eq(total, 11);
+
+    print("frequency_analysis: ok");
+}
+
+fn test_huffman_bit_lengths() {
+    // Huffman code bit lengths for "abracadabra" frequencies:
+    // a:5, b:2, c:1, d:1, r:2
+    // Huffman tree construction (greedy, combine smallest):
+    // Nodes: a(5), b(2), c(1), d(1), r(2)
+    // Step 1: combine c(1)+d(1) -> cd(2)
+    // Step 2: now: a(5), b(2), r(2), cd(2)
+    //         combine b(2)+r(2) -> br(4)
+    // Step 3: now: a(5), br(4), cd(2)
+    //         combine cd(2)+br(4) -> cdbr(6)   wait, actually combine smallest two:
+    //         smallest are cd(2) and... b(2) and r(2) were already merged.
+    //         Actually Step 2: a(5), b(2), r(2), cd(2). Smallest two: b(2),r(2) or b(2),cd(2) (tie).
+    //         Let's pick: combine cd(2)+b(2) -> cdb(4) [or any tie-break]
+    // Step 3: a(5), r(2), cdb(4). Smallest two: r(2), cdb(4) -> rcdb(6)
+    // Step 4: a(5), rcdb(6). Root: total(11)
+    //   a: 1 bit (direct child of root)
+    //   r: 2 bits (child of rcdb, child of root)
+    //   c,d,b: 3 bits (leaves of cdb, child of rcdb, child of root)
+
+    // Total bits = freq * bits_per_char
+    // a:5*1=5, r:2*2=4, b:2*3=6, c:1*3=3, d:1*3=3
+    // Total = 5+4+6+3+3 = 21 bits
+    let total_bits = 5 * 1 + 2 * 2 + 2 * 3 + 1 * 3 + 1 * 3;
+    assert_eq(total_bits, 21);
+
+    // Without Huffman (uniform 3 bits for 5 chars):
+    let naive_bits = 11 * 3; // 33
+    assert_eq(naive_bits, 33);
+
+    // Savings
+    let savings = naive_bits - total_bits; // 12 bits saved
+    assert_eq(savings, 12);
+
+    print("huffman_bit_lengths: ok");
+}
+
+fn test_greedy_symbol_selection() {
+    // Greedy: always merge two lowest frequency symbols
+    // Simulate for frequencies [10, 4, 7, 2, 6] (5 symbols)
+    let mut weights = [10, 4, 7, 2, 6];
+    let n = 5;
+    let mut total_cost = 0;
+    let mut active = 5; // number of active symbols
+
+    // Iteratively merge lowest two until one left
+    let mut step = 0;
+    while active > 1 {
+        // Find two minimums
+        let mut min1 = 999999;
+        let mut min1_idx = -1;
+        let mut i = 0;
+        while i < n {
+            if weights[i] >= 0 && weights[i] < min1 {
+                min1 = weights[i];
+                min1_idx = i;
+            }
+            i = i + 1;
+        }
+
+        let mut min2 = 999999;
+        let mut min2_idx = -1;
+        i = 0;
+        while i < n {
+            if i != min1_idx && weights[i] >= 0 && weights[i] < min2 {
+                min2 = weights[i];
+                min2_idx = i;
+            }
+            i = i + 1;
+        }
+
+        // Merge: cost += min1 + min2
+        let merge_cost = min1 + min2;
+        total_cost = total_cost + merge_cost;
+
+        // Replace min1_idx with merged weight, remove min2_idx
+        weights[min1_idx] = merge_cost;
+        weights[min2_idx] = -1; // mark as removed
+        active = active - 1;
+        step = step + 1;
+    }
+
+    // Frequencies: [10, 4, 7, 2, 6]
+    // Step 1: merge 2+4=6, cost=6. Remaining: [10, 6, 7, 6]  (indices 0,1->6,2,4->now: [10,6,7,-1,6])
+    // Step 2: merge 6+6=12, cost=12. Remaining: [10, 12, 7] (weights[4]=6 was removed; weights[1]=6 now 12)
+    //         -> [10, 12, 7, -1, -1]
+    // Step 3: merge 7+10=17, cost=17. Remaining: [17, 12] -> [17, 12, -1, -1, -1] wait, weights[0]=17
+    //         -> weights: [17, 12, -1, -1, -1]
+    // Step 4: merge 12+17=29, cost=29. Remaining: [29]
+    // Total = 6+12+17+29 = 64
+    assert_eq(total_cost, 64);
+    assert_eq(step, 4); // n-1 merges
+
+    print("greedy_symbol_selection: ok");
+}
+
+fn test_encoding_efficiency() {
+    // Compare fixed-length vs Huffman encoding efficiency
+    // For N symbols with given frequencies
+    // Fixed-length: ceil(log2(N)) bits per symbol
+    // 4 symbols -> 2 bits, 8 symbols -> 3 bits
+
+    // Example: 4 symbols with frequencies [1, 1, 2, 4]
+    // Total = 8 characters
+    let freqs = [1, 1, 2, 4];
+    let total = 8;
+
+    // Fixed: 2 bits per symbol
+    let fixed_bits = total * 2; // 16
+
+    // Huffman bit lengths: merge 1+1=2, merge 2+2=4, merge 4+4=8
+    // Symbol 0: 3 bits, Symbol 1: 3 bits, Symbol 2: 2 bits, Symbol 3: 1 bit
+    // OR: merge 1+1=2(cost=2), merge 2+2=4(cost=4), merge 4+4=8(cost=8); total_cost=14
+    // Bit lengths: determined by tree depth
+    // Tree: root(8) -> sym3(4), node4(4) -> node2(2), sym2(2) -> sym0(1), sym1(1)
+    // Depths: sym3=1bit, sym2=2bits, sym0=3bits, sym1=3bits
+    let huffman_bits = freqs[3] * 1 + freqs[2] * 2 + freqs[0] * 3 + freqs[1] * 3;
+    // = 4*1 + 2*2 + 1*3 + 1*3 = 4 + 4 + 3 + 3 = 14
+    assert_eq(huffman_bits, 14);
+    assert_eq(fixed_bits, 16);
+
+    // Compression ratio (fixed * 100 / huffman)
+    let ratio_pct = fixed_bits * 100 / huffman_bits; // 16*100/14 = 1600/14 = 114%
+    assert(ratio_pct > 100); // Huffman is more efficient
+
+    // Bits saved
+    let saved = fixed_bits - huffman_bits; // 2
+    assert_eq(saved, 2);
+
+    print("encoding_efficiency: ok");
+}
+
+fn test_canonical_huffman_codes() {
+    // Canonical Huffman: assign codes based on bit lengths only
+    // Given sorted bit lengths: [1, 2, 3, 3, 3]
+    // Symbols sorted by bit length, then lexicographically
+    // Code assignment:
+    // len=1: code=0 (symbol A)
+    // len=2: code=10 (symbol B) [next code after 0 at len 1: (0+1)<<(2-1) = 2 = binary 10]
+    // len=3: code=110, 111, 100... wait, canonical:
+    // next_code[1] = 0; next_code[2] = (0+1)*2 = 2 (binary 10)
+    // next_code[3] = (2+1)*2 = 6 (binary 110)
+    // Assign: len1: code=0, len2: code=2(10), len3: code=6(110), 7(111), 8(1000)?
+    // Wait 8 is 4-bit... let's verify:
+    // len=3: codes 6(110), 7(111) for 2 symbols, but we have 3 len-3 symbols
+    // So len3 gets: 6(110), 7(111), 8(1000)?  No, 8 is 4-bit.
+    // Hmm, 3-bit codes from 6: 6=110, 7=111. Only 2 available at 3 bits starting from 6.
+    // Actually the bit lengths [1,2,3,3,3] may be invalid for Huffman (Kraft inequality):
+    // 1/2 + 1/4 + 1/8 + 1/8 + 1/8 = 4/8+2/8+1/8+1/8+1/8 = 9/8 > 1 — invalid!
+    // Let's use valid lengths: [2, 2, 3, 3, 4, 4]
+    // Kraft: 1/4+1/4+1/8+1/8+1/16+1/16 = 4/16+4/16+2/16+2/16+1/16+1/16 = 14/16 < 1?
+    // For Huffman with 6 symbols, valid lengths could be [2,2,3,3,3,3]
+    // Kraft: 2*(1/4) + 4*(1/8) = 1/2 + 1/2 = 1 ✓
+    // Canonical codes:
+    // next_code[2] = 0, next_code[3] = (0+2)*2 = 4 (binary 100)
+    // Codes: 0(00), 1(01), 4(100), 5(101), 6(110), 7(111)
+
+    let bit_lens = [2, 2, 3, 3, 3, 3]; // 6 symbols
+    let nsymbols = 6;
+
+    // Compute Kraft sum * 64 (2^6 denominator) to avoid fractions
+    // len=2 -> contributes 64/4=16 each, len=3 -> contributes 64/8=8 each
+    let mut kraft_x64 = 0;
+    let mut i = 0;
+    while i < nsymbols {
+        let denom = if bit_lens[i] == 2 { 4 } else { 8 };
+        kraft_x64 = kraft_x64 + 64 / denom;
+        i = i + 1;
+    }
+    // 2 symbols at len=2: 2*16=32, 4 symbols at len=3: 4*8=32. Total=64
+    assert_eq(kraft_x64, 64); // Kraft = 1.0 (complete tree)
+
+    // Compute next_code for canonical assignment
+    let mut count_per_len = [0, 0, 0, 0, 0]; // indexed by bit_len-1
+    i = 0;
+    while i < nsymbols {
+        count_per_len[bit_lens[i] - 1] = count_per_len[bit_lens[i] - 1] + 1;
+        i = i + 1;
+    }
+    assert_eq(count_per_len[1], 2); // 2 symbols with len=2
+    assert_eq(count_per_len[2], 4); // 4 symbols with len=3
+
+    // next_code[len=2] = 0, next_code[len=3] = (0+2)<<(3-2) = 4
+    let code_start_len2 = 0;
+    let code_start_len3 = (code_start_len2 + count_per_len[1]) * 2; // (0+2)*2=4
+    assert_eq(code_start_len2, 0);
+    assert_eq(code_start_len3, 4);
+
+    // Last code at len=3: 4+4-1 = 7 (binary 111), fits in 3 bits (max 7) ✓
+    let last_code_len3 = code_start_len3 + count_per_len[2] - 1;
+    assert_eq(last_code_len3, 7);
+
+    print("canonical_huffman_codes: ok");
+}
+
+fn main() -> Int {
+    test_frequency_analysis();
+    test_huffman_bit_lengths();
+    test_greedy_symbol_selection();
+    test_encoding_efficiency();
+    test_canonical_huffman_codes();
+    print("[OK] 445_interp_huffman_encoding");
+    0
+}

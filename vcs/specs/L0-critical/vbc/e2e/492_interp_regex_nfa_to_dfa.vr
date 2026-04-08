@@ -1,0 +1,254 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, regex, nfa, dfa, subset_construction, automata
+// @timeout: 15000
+// @expected-exit: 0
+//
+// NFA to DFA subset construction on small automata.
+//
+// Representation:
+//   NFA: up to 8 states, up to 2 symbols (0 and 1).
+//   nfa_trans[state * 2 + sym] = bitmask of next states reachable on symbol sym.
+//   nfa_eps[state] = bitmask of states reachable via epsilon transitions.
+//
+// Subset construction:
+//   DFA states are subsets of NFA states (encoded as bitmasks).
+//   dfa_trans[dfa_state * 2 + sym] = bitmask (next DFA state subset).
+//   dfa_accept[dfa_state] = 1 if subset contains any NFA accept state.
+//
+// We simulate subset construction up to 8 DFA states and verify transitions.
+
+// Compute epsilon closure of a state set (bitmask) using BFS.
+fn eps_closure(
+    nfa_eps: [Int; 8],
+    states:  Int,
+    n_nfa:   Int
+) -> Int {
+    let mut closure = states;
+    let mut changed = 1;
+    while changed == 1 {
+        changed = 0;
+        let mut s = 0;
+        while s < n_nfa {
+            // If state s is in closure, add its epsilon targets
+            if (closure >> s) % 2 == 1 {
+                let new_states = nfa_eps[s];
+                let merged = closure | new_states;
+                if merged != closure {
+                    closure = merged;
+                    changed = 1;
+                }
+            }
+            s = s + 1;
+        }
+    }
+    closure
+}
+
+// Compute move(states, sym): union of NFA transitions from each state in `states` on `sym`.
+fn nfa_move(
+    nfa_trans: [Int; 16],
+    states:    Int,
+    sym:       Int,
+    n_nfa:     Int
+) -> Int {
+    let mut result = 0;
+    let mut s = 0;
+    while s < n_nfa {
+        if (states >> s) % 2 == 1 {
+            result = result | nfa_trans[s * 2 + sym];
+        }
+        s = s + 1;
+    }
+    result
+}
+
+// Check if a DFA state (bitmask) contains any accept state.
+fn contains_accept(dfa_state: Int, nfa_accept: Int) -> Int {
+    if (dfa_state & nfa_accept) != 0 { 1 } else { 0 }
+}
+
+fn test_simple_nfa_no_eps() {
+    // NFA for strings ending in "01" (binary alphabet {0,1}).
+    // States: 0=start, 1=seen_0, 2=accept (seen_01)
+    // Transitions:
+    //   state 0 on 0 -> {0, 1} (stay or move to seen_0)
+    //   state 0 on 1 -> {0}   (stay in start)
+    //   state 1 on 0 -> {1}   (stay in seen_0 — wait, this is non-deterministic)
+    //   state 1 on 1 -> {2}   (go to accept)
+    //   state 2 on 0 -> {} (dead)
+    //   state 2 on 1 -> {} (dead)
+    // No epsilon transitions.
+    // Accept: {2}
+    // nfa_trans[s*2+sym]: state 0 sym 0 = 0b011 = 3, state 0 sym 1 = 0b001 = 1
+    //                     state 1 sym 0 = 0b010 = 2, state 1 sym 1 = 0b100 = 4
+    //                     state 2 sym 0 = 0,          state 2 sym 1 = 0
+    let nfa_trans = [3, 1, 2, 4, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0];
+    let nfa_eps   = [0, 0, 0, 0, 0, 0, 0, 0];
+    let nfa_accept = 4; // bitmask: state 2 -> bit 2 = 4
+    let n_nfa = 3;
+
+    // DFA construction from start state {0} = bitmask 1.
+    // eps_closure({0}) = {0} (no eps transitions)
+    let start_set = eps_closure(nfa_eps, 1, n_nfa);
+    assert_eq(start_set, 1); // just state 0
+
+    // DFA state A = {0}:
+    //   on 0: move({0}, 0) = nfa_trans[0] = 3 = {0,1} -> eps_closure = {0,1} = 3
+    //   on 1: move({0}, 1) = nfa_trans[1] = 1 = {0}   -> eps_closure = {0} = 1
+    let dfa_a_on_0 = eps_closure(nfa_eps, nfa_move(nfa_trans, start_set, 0, n_nfa), n_nfa);
+    let dfa_a_on_1 = eps_closure(nfa_eps, nfa_move(nfa_trans, start_set, 1, n_nfa), n_nfa);
+    assert_eq(dfa_a_on_0, 3); // {0,1}
+    assert_eq(dfa_a_on_1, 1); // {0}
+
+    // DFA state B = {0,1} = 3:
+    //   on 0: move({0,1}, 0) = nfa_trans[0] | nfa_trans[2] = 3 | 2 = 3 = {0,1}
+    //   on 1: move({0,1}, 1) = nfa_trans[1] | nfa_trans[3] = 1 | 4 = 5 = {0,2}
+    let dfa_b_on_0 = eps_closure(nfa_eps, nfa_move(nfa_trans, 3, 0, n_nfa), n_nfa);
+    let dfa_b_on_1 = eps_closure(nfa_eps, nfa_move(nfa_trans, 3, 1, n_nfa), n_nfa);
+    assert_eq(dfa_b_on_0, 3); // {0,1}
+    assert_eq(dfa_b_on_1, 5); // {0,2}
+
+    // DFA state C = {0,2} = 5:
+    //   on 0: move({0,2}, 0) = nfa_trans[0] | nfa_trans[4] = 3 | 0 = 3 = {0,1}
+    //   on 1: move({0,2}, 1) = nfa_trans[1] | nfa_trans[5] = 1 | 0 = 1 = {0}
+    let dfa_c_on_0 = eps_closure(nfa_eps, nfa_move(nfa_trans, 5, 0, n_nfa), n_nfa);
+    let dfa_c_on_1 = eps_closure(nfa_eps, nfa_move(nfa_trans, 5, 1, n_nfa), n_nfa);
+    assert_eq(dfa_c_on_0, 3); // {0,1}
+    assert_eq(dfa_c_on_1, 1); // {0}
+
+    // Accept states: subsets containing NFA state 2 (bit 2, mask 4)
+    assert_eq(contains_accept(start_set, nfa_accept), 0); // {0} - no accept
+    assert_eq(contains_accept(3, nfa_accept), 0);         // {0,1} - no accept
+    assert_eq(contains_accept(5, nfa_accept), 1);         // {0,2} - has accept state 2
+
+    print("nfa_no_eps: ok");
+}
+
+fn test_nfa_with_eps() {
+    // NFA with epsilon transitions.
+    // States: 0, 1, 2.  Accept: state 2 (mask=4).
+    // Epsilon: 0-eps->1, 1-eps->2 (epsilon chain: start reaches all).
+    // Transitions: state 0 on 0 -> {0}, others empty.
+    let nfa_trans = [1, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0];
+    // eps[0]=0b110=6 (reaches 1 and 2), eps[1]=0b100=4 (reaches 2), eps[2]=0
+    let nfa_eps = [6, 4, 0, 0, 0, 0, 0, 0];
+    let nfa_accept = 4;
+    let n_nfa = 3;
+
+    // eps_closure({0}) = {0,1,2} = 7 (via 0-eps->1-eps->2)
+    let start_set = eps_closure(nfa_eps, 1, n_nfa);
+    assert_eq(start_set, 7);
+    // Start state contains accept -> start is an accept DFA state
+    assert_eq(contains_accept(start_set, nfa_accept), 1);
+
+    // DFA state {0,1,2} on symbol 0:
+    //   move({0,1,2}, 0) = nfa_trans[0] | nfa_trans[2] | nfa_trans[4] = 1|0|0 = 1 = {0}
+    //   eps_closure({0}) = {0,1,2} = 7
+    let next_on_0 = eps_closure(nfa_eps, nfa_move(nfa_trans, 7, 0, n_nfa), n_nfa);
+    assert_eq(next_on_0, 7);
+
+    // DFA state {0,1,2} on symbol 1:
+    //   move({0,1,2}, 1) = nfa_trans[1] | nfa_trans[3] | nfa_trans[5] = 0|0|0 = 0
+    //   eps_closure({}) = 0 (dead state)
+    let next_on_1 = eps_closure(nfa_eps, nfa_move(nfa_trans, 7, 1, n_nfa), n_nfa);
+    assert_eq(next_on_1, 0);
+
+    print("nfa_with_eps: ok");
+}
+
+fn test_dfa_acceptance_chain() {
+    // Simulate DFA execution on an input sequence using the NFA-to-DFA result.
+    // Use the DFA from test_simple_nfa_no_eps:
+    //   States: A={0}=1, B={0,1}=3, C={0,2}=5 (accept)
+    //   Transitions:
+    //     A on 0->B, A on 1->A
+    //     B on 0->B, B on 1->C
+    //     C on 0->B, C on 1->A
+    //
+    // Input "001" should end in accept state C:
+    //   Start=A, '0'->B, '0'->B, '1'->C (accept)
+    let nfa_trans = [3, 1, 2, 4, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0];
+    let nfa_eps   = [0, 0, 0, 0, 0, 0, 0, 0];
+    let nfa_accept = 4;
+    let n_nfa = 3;
+
+    // Simulate input [0, 0, 1] starting from DFA start = eps_closure({0}) = 1
+    let input = [0, 0, 1, 0, 0, 0, 0, 0];
+    let mut state = eps_closure(nfa_eps, 1, n_nfa);
+    let mut step = 0;
+    while step < 3 {
+        let moved = nfa_move(nfa_trans, state, input[step], n_nfa);
+        state = eps_closure(nfa_eps, moved, n_nfa);
+        step = step + 1;
+    }
+    // After "001", should be in {0,2}=5 (accept)
+    assert_eq(state, 5);
+    assert_eq(contains_accept(state, nfa_accept), 1);
+
+    // Input "010" should NOT be in accept state:
+    //   Start=A={0}=1, '0'->B={0,1}=3, '1'->C={0,2}=5, '0'->B={0,1}=3 (not accept)
+    state = eps_closure(nfa_eps, 1, n_nfa);
+    let input2 = [0, 1, 0, 0, 0, 0, 0, 0];
+    step = 0;
+    while step < 3 {
+        let moved = nfa_move(nfa_trans, state, input2[step], n_nfa);
+        state = eps_closure(nfa_eps, moved, n_nfa);
+        step = step + 1;
+    }
+    assert_eq(state, 3); // {0,1} - not accept
+    assert_eq(contains_accept(state, nfa_accept), 0);
+
+    print("dfa_acceptance_chain: ok");
+}
+
+fn test_minimal_nfa_two_states() {
+    // Two-state NFA: state 0 is start, state 1 is accept.
+    // Transition: 0 on 'a'(=0) -> {1}, 0 on 'b'(=1) -> {0}
+    //             1 on 'a'(=0) -> {1}, 1 on 'b'(=1) -> {0}
+    // No epsilon.  Accepts strings ending in 'a'.
+    let nfa_trans = [2, 1, 2, 1, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0];
+    let nfa_eps   = [0, 0, 0, 0, 0, 0, 0, 0];
+    let nfa_accept = 2; // state 1 -> bit 1 = 2
+    let n_nfa = 2;
+
+    let start = eps_closure(nfa_eps, 1, n_nfa); // {0} = 1
+    // DFA has 2 states: {0}=1 (not accept), {1}=2 (accept)
+    // Transitions:
+    //   {0} on 0 -> move({0},0)=nfa_trans[0]=2={1} -> eps={1}=2
+    //   {0} on 1 -> move({0},1)=nfa_trans[1]=1={0} -> eps={0}=1
+    //   {1} on 0 -> move({1},0)=nfa_trans[2]=2={1} -> eps={1}=2
+    //   {1} on 1 -> move({1},1)=nfa_trans[3]=1={0} -> eps={0}=1
+    let from_start_on_a = eps_closure(nfa_eps, nfa_move(nfa_trans, 1, 0, n_nfa), n_nfa);
+    let from_start_on_b = eps_closure(nfa_eps, nfa_move(nfa_trans, 1, 1, n_nfa), n_nfa);
+    assert_eq(from_start_on_a, 2); // {1}
+    assert_eq(from_start_on_b, 1); // {0}
+    assert_eq(contains_accept(from_start_on_a, nfa_accept), 1);
+    assert_eq(contains_accept(from_start_on_b, nfa_accept), 0);
+
+    // Simulate "bba" (1,1,0): b->b-> stays in {0}; a -> {1} accept
+    let mut st = start;
+    let seq = [1, 1, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 3 {
+        st = eps_closure(nfa_eps, nfa_move(nfa_trans, st, seq[i], n_nfa), n_nfa);
+        i = i + 1;
+    }
+    assert_eq(contains_accept(st, nfa_accept), 1);
+
+    print("minimal_nfa_two_states: ok");
+}
+
+fn main() -> Int {
+    test_simple_nfa_no_eps();
+    test_nfa_with_eps();
+    test_dfa_acceptance_chain();
+    test_minimal_nfa_two_states();
+    print("[OK] 492_interp_regex_nfa_to_dfa");
+    0
+}

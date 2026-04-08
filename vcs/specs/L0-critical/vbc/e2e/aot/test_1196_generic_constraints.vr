@@ -1,0 +1,59 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: generic, constraint, protocol, e2e
+// @description: Test generic functions with protocol constraints
+
+type Printable is protocol {
+    fn to_text(&self) -> Text;
+};
+
+type Point is { x: Int, y: Int };
+
+implement Printable for Point {
+    fn to_text(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+type Color is { r: Int, g: Int, b: Int };
+
+implement Printable for Color {
+    fn to_text(&self) -> Text {
+        f"rgb({self.r},{self.g},{self.b})"
+    }
+}
+
+fn describe<T: Printable>(item: &T) -> Text {
+    item.to_text()
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    let p = Point { x: 3, y: 4 };
+    let c = Color { r: 255, g: 128, b: 0 };
+
+    // Test 1: Protocol method direct call
+    let pt = p.to_text();
+    if pt != "(3, 4)" {
+        print(f"FAIL 1: point to_text = '{pt}'");
+        f = f + 1;
+    } else {
+        print("  point_to_text: OK");
+    }
+
+    // Test 2: Protocol method direct call on Color
+    let ct = c.to_text();
+    if ct != "rgb(255,128,0)" {
+        print(f"FAIL 2: color to_text = '{ct}'");
+        f = f + 1;
+    } else {
+        print("  color_to_text: OK");
+    }
+
+    if f == 0 {
+        print("All generic constraint tests passed");
+    }
+    f
+}

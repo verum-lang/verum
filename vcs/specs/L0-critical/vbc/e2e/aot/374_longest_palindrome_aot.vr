@@ -1,0 +1,292 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, palindrome, expand-center, string-algorithms
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for longest palindromic substring using expand-from-center approach.
+// Strings are encoded as integer arrays (each int = a character code).
+// Tests odd-length and even-length palindromes.
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+// Palindrome result: start index and length
+type PalinResult is { start: Int, length: Int };
+
+// Expand from center, return length of palindrome found
+// For odd palindromes: left == right (single center)
+// For even palindromes: right = left + 1
+fn expand_from_center(arr: Arr16, n: Int, left_init: Int, right_init: Int) -> Int {
+    let mut lo = left_init;
+    let mut hi = right_init;
+    while lo >= 0 {
+        if hi < n {
+            if a16_get(arr, lo) == a16_get(arr, hi) {
+                lo = lo - 1;
+                hi = hi + 1;
+            } else {
+                return hi - lo - 1;
+            }
+        } else {
+            return hi - lo - 1;
+        }
+    }
+    hi - lo - 1
+}
+
+// Find longest palindromic substring, return (start, length)
+fn longest_palindrome(arr: Arr16, n: Int) -> PalinResult {
+    if n == 0 {
+        return PalinResult { start: 0, length: 0 };
+    }
+
+    let mut best_start = 0;
+    let mut best_len = 1;
+
+    let mut i = 0;
+    while i < n {
+        // Odd-length palindrome centered at i
+        let odd_len = expand_from_center(arr, n, i, i);
+        if odd_len > best_len {
+            best_len = odd_len;
+            best_start = i - (odd_len - 1) / 2;
+        }
+
+        // Even-length palindrome centered between i and i+1
+        let even_len = expand_from_center(arr, n, i, i + 1);
+        if even_len > best_len {
+            best_len = even_len;
+            best_start = i - (even_len - 2) / 2;
+        }
+
+        i = i + 1;
+    }
+
+    PalinResult { start: best_start, length: best_len }
+}
+
+// Check if substring arr[start..start+len] is a palindrome
+fn is_palindrome(arr: Arr16, start: Int, length: Int) -> Int {
+    let mut lo = start;
+    let mut hi = start + length - 1;
+    while lo < hi {
+        if a16_get(arr, lo) != a16_get(arr, hi) {
+            return 0;
+        }
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+    1
+}
+
+// Count total palindromic substrings
+fn count_palindromes(arr: Arr16, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        // Odd-length palindromes centered at i
+        let mut lo = i;
+        let mut hi = i;
+        while lo >= 0 {
+            if hi < n {
+                if a16_get(arr, lo) == a16_get(arr, hi) {
+                    count = count + 1;
+                    lo = lo - 1;
+                    hi = hi + 1;
+                } else {
+                    lo = -1; // break
+                }
+            } else {
+                lo = -1; // break
+            }
+        }
+
+        // Even-length palindromes centered between i and i+1
+        lo = i;
+        hi = i + 1;
+        while lo >= 0 {
+            if hi < n {
+                if a16_get(arr, lo) == a16_get(arr, hi) {
+                    count = count + 1;
+                    lo = lo - 1;
+                    hi = hi + 1;
+                } else {
+                    lo = -1; // break
+                }
+            } else {
+                lo = -1; // break
+            }
+        }
+
+        i = i + 1;
+    }
+    count
+}
+
+fn test_single_char() {
+    // "a" -> palindrome of length 1
+    let arr = Arr16 { a0: 1, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let r = longest_palindrome(arr, 1);
+    assert_eq(r.length, 1);
+    assert_eq(r.start, 0);
+}
+
+fn test_two_same() {
+    // "aa" -> palindrome of length 2
+    let arr = Arr16 { a0: 1, a1: 1, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let r = longest_palindrome(arr, 2);
+    assert_eq(r.length, 2);
+}
+
+fn test_two_different() {
+    // "ab" -> palindrome of length 1
+    let arr = Arr16 { a0: 1, a1: 2, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let r = longest_palindrome(arr, 2);
+    assert_eq(r.length, 1);
+}
+
+fn test_odd_palindrome() {
+    // "abcba" -> palindrome of length 5
+    let arr = Arr16 { a0: 1, a1: 2, a2: 3, a3: 2, a4: 1, a5: 0, a6: 0, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let r = longest_palindrome(arr, 5);
+    assert_eq(r.length, 5);
+    assert_eq(r.start, 0);
+    assert_eq(is_palindrome(arr, r.start, r.length), 1);
+}
+
+fn test_even_palindrome() {
+    // "abba" -> palindrome of length 4
+    let arr = Arr16 { a0: 1, a1: 2, a2: 2, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let r = longest_palindrome(arr, 4);
+    assert_eq(r.length, 4);
+    assert_eq(r.start, 0);
+}
+
+fn test_palindrome_in_middle() {
+    // "xabcbay" -> "abcba" (length 5 at index 1)
+    let arr = Arr16 { a0: 24, a1: 1, a2: 2, a3: 3, a4: 2, a5: 1, a6: 25, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let r = longest_palindrome(arr, 7);
+    assert_eq(r.length, 5);
+    assert_eq(r.start, 1);
+    assert_eq(is_palindrome(arr, r.start, r.length), 1);
+}
+
+fn test_all_same() {
+    // "aaaa" -> entire string is palindrome
+    let arr = Arr16 { a0: 1, a1: 1, a2: 1, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let r = longest_palindrome(arr, 4);
+    assert_eq(r.length, 4);
+}
+
+fn test_no_long_palindrome() {
+    // "abcdef" -> longest is 1
+    let arr = Arr16 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 0, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let r = longest_palindrome(arr, 6);
+    assert_eq(r.length, 1);
+}
+
+fn test_is_palindrome_check() {
+    // "racecar" encoded: r=18,a=1,c=3,e=5,c=3,a=1,r=18
+    let arr = Arr16 { a0: 18, a1: 1, a2: 3, a3: 5, a4: 3, a5: 1, a6: 18, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    assert_eq(is_palindrome(arr, 0, 7), 1);
+    assert_eq(is_palindrome(arr, 0, 3), 0); // "rac" is not palindrome
+    assert_eq(is_palindrome(arr, 1, 5), 1); // "aceca" is palindrome
+}
+
+fn test_count_palindromes() {
+    // "aab" -> palindromic substrings: "a","a","b","aa" -> 4
+    let arr = Arr16 { a0: 1, a1: 1, a2: 2, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    assert_eq(count_palindromes(arr, 3), 4);
+}
+
+fn test_count_all_same() {
+    // "aaa" -> palindromic substrings: "a","a","a","aa","aa","aaa" -> 6
+    let arr = Arr16 { a0: 1, a1: 1, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    assert_eq(count_palindromes(arr, 3), 6);
+}
+
+fn test_empty() {
+    let arr = a16_zero();
+    let r = longest_palindrome(arr, 0);
+    assert_eq(r.length, 0);
+}
+
+fn test_result_is_palindrome() {
+    // For any input, the result should actually be a palindrome
+    let arr = Arr16 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 9, a6: 2, a7: 6,
+                      a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let r = longest_palindrome(arr, 8);
+    assert_eq(is_palindrome(arr, r.start, r.length), 1);
+}
+
+fn main() -> Int {
+    test_single_char();
+    test_two_same();
+    test_two_different();
+    test_odd_palindrome();
+    test_even_palindrome();
+    test_palindrome_in_middle();
+    test_all_same();
+    test_no_long_palindrome();
+    test_is_palindrome_check();
+    test_count_palindromes();
+    test_count_all_same();
+    test_empty();
+    test_result_is_palindrome();
+    print("[OK] 374_longest_palindrome_aot");
+    0
+}

@@ -1,0 +1,410 @@
+// @test: benchmark
+// @tier: 0
+// @level: L0
+// @tags: vbc, stress, memory, allocation, gc
+// @timeout: 30000
+// @expect: pass
+//
+// Test: Memory stress testing for VBC interpreter
+// Verifies stability under heavy allocation, no memory leaks, CBGR correctness
+
+// =============================================================================
+// Massive allocations
+// =============================================================================
+
+fn test_many_small_allocations() {
+    // 100,000 small allocations
+    let mut objects: List<Heap<Int>> = [];
+
+    for i in 0..100000 {
+        objects.push(Heap(i));
+    }
+
+    // Verify all values
+    for i in 0..100000 {
+        assert_eq(*objects[i], i);
+    }
+
+    // Drop all
+    objects.clear();
+
+    assert(true);  // No crash
+}
+
+fn test_many_struct_allocations() {
+    type Point is { x: Float, y: Float, z: Float };
+
+    let mut points: List<Point> = [];
+
+    for i in 0..50000 {
+        points.push(Point {
+            x: i as Float,
+            y: (i * 2) as Float,
+            z: (i * 3) as Float
+        });
+    }
+
+    // Verify
+    assert_eq(points[25000].x, 25000.0);
+    assert_eq(points[25000].y, 50000.0);
+
+    points.clear();
+}
+
+fn test_nested_allocations() {
+    type Node is { value: Int, children: List<Heap<Node>> };
+
+    fn create_tree(depth: Int, width: Int) -> Heap<Node> {
+        let mut children: List<Heap<Node>> = [];
+
+        if depth > 0 {
+            for _ in 0..width {
+                children.push(create_tree(depth - 1, width));
+            }
+        }
+
+        Heap(Node { value: depth, children: children })
+    }
+
+    // Create tree with 4^6 = 4096 nodes
+    let tree = create_tree(6, 4);
+
+    // Verify root
+    assert_eq(tree.value, 6);
+
+    // Drop entire tree
+    drop(tree);
+}
+
+fn test_allocation_deallocation_cycles() {
+    // Repeated allocation/deallocation to stress allocator
+    for cycle in 0..100 {
+        let mut list: List<Heap<[Int; 100]>> = [];
+
+        for _ in 0..1000 {
+            list.push(Heap([0; 100]));
+        }
+
+        // Random access
+        for i in 0..100 {
+            let idx = (cycle * 7 + i * 13) % 1000;
+            list[idx][0] = i;
+        }
+
+        // Drop all
+        list.clear();
+    }
+
+    assert(true);
+}
+
+// =============================================================================
+// CBGR stress tests
+// =============================================================================
+
+fn test_reference_stress() {
+    type Data is { values: [Int; 1000] };
+
+    let mut datas: List<Data> = [];
+    for i in 0..100 {
+        let mut d = Data { values: [0; 1000] };
+        for j in 0..1000 {
+            d.values[j] = i * 1000 + j;
+        }
+        datas.push(d);
+    }
+
+    // Create many references
+    let mut refs: List<&Int> = [];
+    for i in 0..100 {
+        for j in 0..10 {
+            refs.push(&datas[i].values[j * 100]);
+        }
+    }
+
+    // Validate all references
+    for (idx, r) in refs.iter().enumerate() {
+        let i = idx / 10;
+        let j = (idx % 10) * 100;
+        assert_eq(**r, i * 1000 + j);
+    }
+}
+
+fn test_concurrent_reference_validation() {
+    // Many references validated repeatedly
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    for _ in 0..10000 {
+        let r0: &Int = &data[0];
+        let r1: &Int = &data[1];
+        let r2: &Int = &data[2];
+        let r3: &Int = &data[3];
+        let r4: &Int = &data[4];
+
+        // Each access triggers CBGR validation
+        let sum = *r0 + *r1 + *r2 + *r3 + *r4;
+        assert_eq(sum, 15);
+    }
+}
+
+fn test_generation_counter_wrap() {
+    // Try to wrap generation counter by many allocations
+    for _ in 0..100000 {
+        let h = Heap(42);
+        assert_eq(*h, 42);
+        drop(h);
+    }
+
+    assert(true);
+}
+
+// =============================================================================
+// Collection stress tests
+// =============================================================================
+
+fn test_list_growth_stress() {
+    let mut list: List<Int> = [];
+
+    // Grow to 1 million elements
+    for i in 0..1000000 {
+        list.push(i);
+    }
+
+    assert_eq(list.len(), 1000000);
+    assert_eq(list[0], 0);
+    assert_eq(list[999999], 999999);
+    assert_eq(list[500000], 500000);
+}
+
+fn test_map_stress() {
+    let mut map: Map<Int, Int> = {};
+
+    // Insert 100,000 entries
+    for i in 0..100000 {
+        map[i] = i * 2;
+    }
+
+    assert_eq(map.len(), 100000);
+
+    // Verify
+    for i in 0..100000 {
+        assert_eq(map[i], i * 2);
+    }
+
+    // Remove half
+    for i in 0..50000 {
+        map.remove(&(i * 2));
+    }
+
+    assert_eq(map.len(), 50000);
+}
+
+fn test_nested_collections() {
+    // List of maps of lists
+    let mut outer: List<Map<Text, List<Int>>> = [];
+
+    for i in 0..100 {
+        let mut map: Map<Text, List<Int>> = {};
+
+        for j in 0..10 {
+            let key = f"key_{i}_{j}";
+            let mut inner: List<Int> = [];
+
+            for k in 0..100 {
+                inner.push(i * 1000 + j * 100 + k);
+            }
+
+            map[key] = inner;
+        }
+
+        outer.push(map);
+    }
+
+    // Verify deep access
+    assert_eq(outer[50]["key_50_5"][50], 50 * 1000 + 5 * 100 + 50);
+}
+
+// =============================================================================
+// Recursion stress tests
+// =============================================================================
+
+fn test_deep_recursion() {
+    fn recurse(n: Int) -> Int {
+        if n <= 0 { 0 }
+        else { 1 + recurse(n - 1) }
+    }
+
+    // Should handle deep recursion without stack overflow
+    // (using tail call optimization if available)
+    let result = recurse(10000);
+    assert_eq(result, 10000);
+}
+
+fn test_mutual_recursion_stress() {
+    fn even(n: Int) -> Bool {
+        if n == 0 { true }
+        else { odd(n - 1) }
+    }
+
+    fn odd(n: Int) -> Bool {
+        if n == 0 { false }
+        else { even(n - 1) }
+    }
+
+    assert(even(10000));
+    assert(odd(10001));
+}
+
+fn test_tree_recursion() {
+    type Tree is { value: Int, children: List<Heap<Tree>> };
+
+    fn tree_sum(t: &Tree) -> Int {
+        let mut sum = t.value;
+        for child in &t.children {
+            sum = sum + tree_sum(&**child);
+        }
+        sum
+    }
+
+    fn build_balanced_tree(depth: Int, value: Int) -> Tree {
+        if depth == 0 {
+            Tree { value: value, children: [] }
+        } else {
+            Tree {
+                value: value,
+                children: [
+                    Heap(build_balanced_tree(depth - 1, value * 2)),
+                    Heap(build_balanced_tree(depth - 1, value * 2 + 1))
+                ]
+            }
+        }
+    }
+
+    let tree = build_balanced_tree(10, 1);  // 2^11 - 1 = 2047 nodes
+    let sum = tree_sum(&tree);
+
+    // Sum of all values in complete binary tree
+    assert(sum > 0);
+}
+
+// =============================================================================
+// String stress tests
+// =============================================================================
+
+fn test_string_concatenation_stress() {
+    let mut s = "";
+
+    for i in 0..10000 {
+        s = s + f"{i},";
+    }
+
+    assert(s.len() > 30000);
+}
+
+fn test_string_interning_stress() {
+    // Create many similar strings
+    let mut strings: List<Text> = [];
+
+    for i in 0..10000 {
+        strings.push(f"string_{i % 100}");
+    }
+
+    // Strings with same content may be interned
+    assert_eq(strings.len(), 10000);
+}
+
+// =============================================================================
+// Mixed stress test
+// =============================================================================
+
+fn test_mixed_operations() {
+    // Combine all operations in realistic scenario
+    type Entity is {
+        id: Int,
+        name: Text,
+        data: List<Float>,
+        children: List<Heap<Entity>>
+    };
+
+    fn process_entity(e: &Entity) -> Float {
+        let mut sum: Float = 0.0;
+        for d in &e.data {
+            sum = sum + *d;
+        }
+        for child in &e.children {
+            sum = sum + process_entity(&**child);
+        }
+        sum
+    }
+
+    // Create complex structure
+    let mut entities: List<Entity> = [];
+
+    for i in 0..100 {
+        let mut data: List<Float> = [];
+        for j in 0..100 {
+            data.push((i * j) as Float);
+        }
+
+        let mut children: List<Heap<Entity>> = [];
+        for k in 0..10 {
+            let mut child_data: List<Float> = [];
+            for l in 0..10 {
+                child_data.push((k * l) as Float);
+            }
+            children.push(Heap(Entity {
+                id: i * 10 + k,
+                name: f"child_{i}_{k}",
+                data: child_data,
+                children: []
+            }));
+        }
+
+        entities.push(Entity {
+            id: i,
+            name: f"entity_{i}",
+            data: data,
+            children: children
+        });
+    }
+
+    // Process all
+    let mut total: Float = 0.0;
+    for e in &entities {
+        total = total + process_entity(e);
+    }
+
+    assert(total > 0.0);
+}
+
+fn main() {
+    // Allocation stress
+    test_many_small_allocations();
+    test_many_struct_allocations();
+    test_nested_allocations();
+    test_allocation_deallocation_cycles();
+
+    // CBGR stress
+    test_reference_stress();
+    test_concurrent_reference_validation();
+    test_generation_counter_wrap();
+
+    // Collection stress
+    test_list_growth_stress();
+    test_map_stress();
+    test_nested_collections();
+
+    // Recursion stress
+    test_deep_recursion();
+    test_mutual_recursion_stress();
+    test_tree_recursion();
+
+    // String stress
+    test_string_concatenation_stress();
+    test_string_interning_stress();
+
+    // Mixed
+    test_mixed_operations();
+
+    print("001_memory_stress: PASSED");
+}

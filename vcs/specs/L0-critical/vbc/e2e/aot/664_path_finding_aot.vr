@@ -1,0 +1,176 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, pathfinding, dijkstra, graph
+// @timeout: 30000
+
+// Simplified Dijkstra's shortest path on a small weighted graph
+// 5 nodes (0-4), edges stored as adjacency matrix in flat array
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(val: Int, pos: Int) -> Int { (val / pow2(pos)) % 2 }
+
+// Edge weight from node u to v (0 = no edge)
+// Graph encoded: for 5 nodes, use function instead of matrix
+// Graph:
+//   0 --1-- 1 --3-- 3
+//   |       |       |
+//   4       2       1
+//   |       |       |
+//   2 --5-- 4 ------+
+fn edge_weight(u: Int, v: Int) -> Int {
+    if u == 0 {
+        if v == 1 { 1 } else if v == 2 { 4 } else { 0 }
+    } else if u == 1 {
+        if v == 0 { 1 } else if v == 3 { 3 } else if v == 4 { 2 } else { 0 }
+    } else if u == 2 {
+        if v == 0 { 4 } else if v == 4 { 5 } else { 0 }
+    } else if u == 3 {
+        if v == 1 { 3 } else if v == 4 { 1 } else { 0 }
+    } else if u == 4 {
+        if v == 1 { 2 } else if v == 2 { 5 } else if v == 3 { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn inf() -> Int { 99999 }
+
+// Dijkstra from source, returns dist array (5 nodes in Arr8[0..4])
+fn dijkstra(src: Int) -> Arr8 {
+    let mut dist = zeros();
+    let mut visited = 0; // bitset
+    // Initialize distances to infinity
+    let mut i = 0;
+    while i < 5 {
+        dist = set8(dist, i, inf());
+        i = i + 1;
+    }
+    dist = set8(dist, src, 0);
+
+    let mut iter = 0;
+    while iter < 5 {
+        // Find unvisited node with minimum distance
+        let mut min_dist = inf();
+        let mut u = 0 - 1;
+        let mut j = 0;
+        while j < 5 {
+            if get_bit(visited, j) == 0 {
+                if get8(dist, j) < min_dist {
+                    min_dist = get8(dist, j);
+                    u = j;
+                }
+            }
+            j = j + 1;
+        }
+        if u < 0 { iter = 5; } // no reachable node
+        else {
+            visited = visited + pow2(u);
+            // Relax neighbors
+            let mut v = 0;
+            while v < 5 {
+                let w = edge_weight(u, v);
+                if w > 0 {
+                    let new_dist = get8(dist, u) + w;
+                    if new_dist < get8(dist, v) {
+                        dist = set8(dist, v, new_dist);
+                    }
+                }
+                v = v + 1;
+            }
+            iter = iter + 1;
+        }
+    }
+    dist
+}
+
+fn test_from_0() -> Int {
+    let d = dijkstra(0);
+    assert_eq(get8(d, 0), 0);  // self
+    assert_eq(get8(d, 1), 1);  // 0->1: weight 1
+    assert_eq(get8(d, 2), 4);  // 0->2: weight 4 (direct)
+    assert_eq(get8(d, 3), 4);  // 0->1->3: 1+3=4 or 0->1->4->3: 1+2+1=4
+    assert_eq(get8(d, 4), 3);  // 0->1->4: 1+2=3
+    1
+}
+
+fn test_from_3() -> Int {
+    let d = dijkstra(3);
+    assert_eq(get8(d, 3), 0);  // self
+    assert_eq(get8(d, 4), 1);  // 3->4: 1
+    assert_eq(get8(d, 1), 3);  // 3->1: 3 or 3->4->1: 1+2=3 (same)
+    assert_eq(get8(d, 0), 4);  // 3->1->0: 3+1=4 or 3->4->1->0: 1+2+1=4
+    assert_eq(get8(d, 2), 6);  // 3->4->2: 1+5=6 or 3->1->0->2: 3+1+4=8
+    1
+}
+
+fn test_symmetry() -> Int {
+    // In undirected graph: dist(u,v) = dist(v,u)
+    let d0 = dijkstra(0);
+    let d1 = dijkstra(1);
+    let d2 = dijkstra(2);
+    assert_eq(get8(d0, 1), get8(d1, 0));
+    assert_eq(get8(d0, 2), get8(d2, 0));
+    assert_eq(get8(d1, 2), get8(d2, 1));
+    1
+}
+
+fn test_triangle_inequality() -> Int {
+    // dist(a,c) <= dist(a,b) + dist(b,c) for all a,b,c
+    let d0 = dijkstra(0);
+    let d1 = dijkstra(1);
+    // dist(0,3) <= dist(0,1) + dist(1,3)
+    let ok1 = if get8(d0, 3) <= get8(d0, 1) + get8(d1, 3) { 1 } else { 0 };
+    assert_eq(ok1, 1);
+    // dist(0,4) <= dist(0,2) + dist(dijkstra(2), 4)
+    let d2 = dijkstra(2);
+    let ok2 = if get8(d0, 4) <= get8(d0, 2) + get8(d2, 4) { 1 } else { 0 };
+    assert_eq(ok2, 1);
+    1
+}
+
+fn test_self_distance() -> Int {
+    let mut i = 0;
+    while i < 5 {
+        let d = dijkstra(i);
+        assert_eq(get8(d, i), 0);
+        i = i + 1;
+    }
+    1
+}
+
+fn main() -> Int {
+    test_from_0();
+    test_from_3();
+    test_symmetry();
+    test_triangle_inequality();
+    test_self_distance();
+    print("[OK] 664_path_finding_aot");
+    0
+}

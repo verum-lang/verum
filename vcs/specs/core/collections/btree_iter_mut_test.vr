@@ -1,0 +1,180 @@
+// =============================================================================
+// btree_iter_mut_test.vr - Tests for BTreeMap iter_mut() method
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, btree, iterator, mutable
+// @description: Tests for BTreeMap mutable entry iterator
+// =============================================================================
+
+mount core.collections.btree.{BTreeMap, BTreeMapIterMut};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Basic iter_mut() usage
+// =============================================================================
+
+@test
+fn test_iter_mut_basic() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+
+    // Mutate all values via iter_mut
+    for (k, v) in map.iter_mut() {
+        *v = *v + 1;
+    }
+
+    assert_eq(map.get(&1), Some(&11));
+    assert_eq(map.get(&2), Some(&21));
+    assert_eq(map.get(&3), Some(&31));
+}
+
+@test
+fn test_iter_mut_empty() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut count = 0;
+    for (_k, _v) in map.iter_mut() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_iter_mut_single() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(42, 100);
+
+    for (_k, v) in map.iter_mut() {
+        *v = 999;
+    }
+
+    assert_eq(map.get(&42), Some(&999));
+}
+
+@test
+fn test_iter_mut_preserves_order() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(3, 30);
+    map.insert(1, 10);
+    map.insert(5, 50);
+    map.insert(2, 20);
+    map.insert(4, 40);
+
+    // Collect keys from iter_mut - should be in ascending order
+    let mut keys: List<Int> = List.new();
+    for (k, _v) in map.iter_mut() {
+        keys.push(*k);
+    }
+
+    assert_eq(keys.len(), 5);
+    assert_eq(keys[0], 1);
+    assert_eq(keys[1], 2);
+    assert_eq(keys[2], 3);
+    assert_eq(keys[3], 4);
+    assert_eq(keys[4], 5);
+}
+
+@test
+fn test_iter_mut_keys_immutable() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+
+    // Keys are &K (immutable), values are &mut V
+    for (k, v) in map.iter_mut() {
+        // Can read key
+        let key_val = *k;
+        // Can modify value
+        *v = key_val * 100;
+    }
+
+    assert_eq(map.get(&1), Some(&100));
+    assert_eq(map.get(&2), Some(&200));
+}
+
+@test
+fn test_iter_mut_count() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 1);
+    map.insert(2, 2);
+    map.insert(3, 3);
+    map.insert(4, 4);
+
+    let mut count = 0;
+    for (_k, _v) in map.iter_mut() {
+        count = count + 1;
+    }
+    assert_eq(count, 4);
+}
+
+@test
+fn test_iter_mut_double_values() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(10, 5);
+    map.insert(20, 15);
+    map.insert(30, 25);
+
+    for (_k, v) in map.iter_mut() {
+        *v = *v * 2;
+    }
+
+    assert_eq(map.get(&10), Some(&10));
+    assert_eq(map.get(&20), Some(&30));
+    assert_eq(map.get(&30), Some(&50));
+}
+
+@test
+fn test_iter_mut_conditional_update() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    map.insert(4, 40);
+    map.insert(5, 50);
+
+    // Only update values for even keys
+    for (k, v) in map.iter_mut() {
+        if *k % 2 == 0 {
+            *v = 0;
+        }
+    }
+
+    assert_eq(map.get(&1), Some(&10));
+    assert_eq(map.get(&2), Some(&0));
+    assert_eq(map.get(&3), Some(&30));
+    assert_eq(map.get(&4), Some(&0));
+    assert_eq(map.get(&5), Some(&50));
+}
+
+@test
+fn test_iter_mut_type_exists() {
+    // Verify the BTreeMapIterMut type is importable and produces correct count
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 1);
+    let it: BTreeMapIterMut<Int, Int> = map.iter_mut();
+    assert_eq(it.count(), 1);
+}
+
+@test
+fn test_iter_mut_after_modifications() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 100);
+    map.insert(2, 200);
+
+    // Modify the map first
+    map.remove(&1);
+    map.insert(3, 300);
+
+    let mut count = 0;
+    for (_k, _v) in map.iter_mut() {
+        count = count + 1;
+    }
+    assert_eq(count, 2); // Keys 2 and 3
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

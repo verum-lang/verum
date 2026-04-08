@@ -1,0 +1,227 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, linked-list, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Singly-linked list using index-based node array (8 nodes max)
+
+// ============================================================================
+// Node and LinkedList types
+// ============================================================================
+
+type Node is {
+    value: Int,
+    next: Int   // -1 means null
+};
+
+type LList is {
+    n0: Node, n1: Node, n2: Node, n3: Node,
+    n4: Node, n5: Node, n6: Node, n7: Node,
+    head: Int,   // index of head node, -1 if empty
+    count: Int   // number of nodes allocated
+};
+
+fn null_node() -> Node {
+    Node { value: 0, next: -1 }
+}
+
+fn llist_new() -> LList {
+    let n = null_node();
+    LList {
+        n0: n, n1: n, n2: n, n3: n,
+        n4: n, n5: n, n6: n, n7: n,
+        head: -1, count: 0
+    }
+}
+
+// ============================================================================
+// Node access helpers
+// ============================================================================
+
+fn get_value(ll: LList, i: Int) -> Int {
+    if i == 0 { ll.n0.value }
+    else if i == 1 { ll.n1.value }
+    else if i == 2 { ll.n2.value }
+    else if i == 3 { ll.n3.value }
+    else if i == 4 { ll.n4.value }
+    else if i == 5 { ll.n5.value }
+    else if i == 6 { ll.n6.value }
+    else { ll.n7.value }
+}
+
+fn get_next(ll: LList, i: Int) -> Int {
+    if i == 0 { ll.n0.next }
+    else if i == 1 { ll.n1.next }
+    else if i == 2 { ll.n2.next }
+    else if i == 3 { ll.n3.next }
+    else if i == 4 { ll.n4.next }
+    else if i == 5 { ll.n5.next }
+    else if i == 6 { ll.n6.next }
+    else { ll.n7.next }
+}
+
+fn set_node(ll: LList, i: Int, val: Int, nxt: Int) -> LList {
+    LList {
+        n0: if i == 0 { Node { value: val, next: nxt } } else { ll.n0 },
+        n1: if i == 1 { Node { value: val, next: nxt } } else { ll.n1 },
+        n2: if i == 2 { Node { value: val, next: nxt } } else { ll.n2 },
+        n3: if i == 3 { Node { value: val, next: nxt } } else { ll.n3 },
+        n4: if i == 4 { Node { value: val, next: nxt } } else { ll.n4 },
+        n5: if i == 5 { Node { value: val, next: nxt } } else { ll.n5 },
+        n6: if i == 6 { Node { value: val, next: nxt } } else { ll.n6 },
+        n7: if i == 7 { Node { value: val, next: nxt } } else { ll.n7 },
+        head: ll.head,
+        count: ll.count
+    }
+}
+
+// ============================================================================
+// Operations
+// ============================================================================
+
+fn push_front(ll: LList, val: Int) -> LList {
+    let idx = ll.count;
+    let updated = set_node(ll, idx, val, ll.head);
+    LList {
+        n0: updated.n0, n1: updated.n1, n2: updated.n2, n3: updated.n3,
+        n4: updated.n4, n5: updated.n5, n6: updated.n6, n7: updated.n7,
+        head: idx,
+        count: ll.count + 1
+    }
+}
+
+fn peek_front(ll: LList) -> Int {
+    get_value(ll, ll.head)
+}
+
+fn pop_front(ll: LList) -> LList {
+    let nxt = get_next(ll, ll.head);
+    LList {
+        n0: ll.n0, n1: ll.n1, n2: ll.n2, n3: ll.n3,
+        n4: ll.n4, n5: ll.n5, n6: ll.n6, n7: ll.n7,
+        head: nxt,
+        count: ll.count
+    }
+}
+
+fn llist_size(ll: LList) -> Int {
+    let mut cnt = 0;
+    let mut cur = ll.head;
+    while cur != -1 {
+        cur = get_next(ll, cur);
+        cnt = cnt + 1;
+    }
+    cnt
+}
+
+fn search_list(ll: LList, val: Int) -> Int {
+    let mut cur = ll.head;
+    let mut found = 0;
+    while cur != -1 {
+        if get_value(ll, cur) == val { found = 1; }
+        cur = get_next(ll, cur);
+    }
+    found
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_push_and_peek() {
+    let mut ll = llist_new();
+    ll = push_front(ll, 10);
+    ll = push_front(ll, 20);
+    ll = push_front(ll, 30);
+    assert_eq(peek_front(ll), 30);
+    assert_eq(llist_size(ll), 3);
+    print("  test_push_and_peek: ok");
+}
+
+@test
+fn test_pop_front() {
+    let mut ll = llist_new();
+    ll = push_front(ll, 10);
+    ll = push_front(ll, 20);
+    ll = push_front(ll, 30);
+    ll = pop_front(ll);
+    assert_eq(peek_front(ll), 20);
+    assert_eq(llist_size(ll), 2);
+    ll = pop_front(ll);
+    assert_eq(peek_front(ll), 10);
+    assert_eq(llist_size(ll), 1);
+    print("  test_pop_front: ok");
+}
+
+@test
+fn test_search() {
+    let mut ll = llist_new();
+    ll = push_front(ll, 5);
+    ll = push_front(ll, 15);
+    ll = push_front(ll, 25);
+    assert_eq(search_list(ll, 15), 1);
+    assert_eq(search_list(ll, 5), 1);
+    assert_eq(search_list(ll, 99), 0);
+    assert_eq(search_list(ll, 0), 0);
+    print("  test_search: ok");
+}
+
+@test
+fn test_collect_order() {
+    let mut ll = llist_new();
+    ll = push_front(ll, 1);
+    ll = push_front(ll, 2);
+    ll = push_front(ll, 3);
+    // Traversal order: 3 -> 2 -> 1 (head to tail)
+    let mut cur = ll.head;
+    assert_eq(get_value(ll, cur), 3);
+    cur = get_next(ll, cur);
+    assert_eq(get_value(ll, cur), 2);
+    cur = get_next(ll, cur);
+    assert_eq(get_value(ll, cur), 1);
+    print("  test_collect_order: ok");
+}
+
+@test
+fn test_reverse() {
+    let mut ll = llist_new();
+    ll = push_front(ll, 1);
+    ll = push_front(ll, 2);
+    ll = push_front(ll, 3);
+    // Before reverse: 3 -> 2 -> 1
+    // Reverse by relinking
+    let mut new_head = -1;
+    let mut cur = ll.head;
+    while cur != -1 {
+        let old_next = get_next(ll, cur);
+        ll = set_node(ll, cur, get_value(ll, cur), new_head);
+        new_head = cur;
+        cur = old_next;
+    }
+    ll = LList {
+        n0: ll.n0, n1: ll.n1, n2: ll.n2, n3: ll.n3,
+        n4: ll.n4, n5: ll.n5, n6: ll.n6, n7: ll.n7,
+        head: new_head,
+        count: ll.count
+    };
+    // After reverse: 1 -> 2 -> 3
+    cur = ll.head;
+    assert_eq(get_value(ll, cur), 1);
+    cur = get_next(ll, cur);
+    assert_eq(get_value(ll, cur), 2);
+    cur = get_next(ll, cur);
+    assert_eq(get_value(ll, cur), 3);
+    print("  test_reverse: ok");
+}
+
+fn main() -> Int {
+    test_push_and_peek();
+    test_pop_front();
+    test_search();
+    test_collect_order();
+    test_reverse();
+    print("[OK] 097_linked_list");
+    0
+}

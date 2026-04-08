@@ -1,0 +1,30 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn l1() -> Int {
+        fn l2() -> Int {
+            fn l3() -> Int {
+                fn l4() -> Int {
+                    fn l5() -> Int {
+                        fn l6() -> Int {
+                            return 6;
+                        }
+                        return l6() + 1;
+                    }
+                    return l5() + 1;
+                }
+                return l4() + 1;
+            }
+            return l3() + 1;
+        }
+        return l2() + 1;
+    }
+
+    let result = l1();
+    assert_eq(result, 11);  // 6 + 5 increments = 11
+}

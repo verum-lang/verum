@@ -1,0 +1,182 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, rank2, polymorphism, higher-order, self-hosting-critical
+// @expect: pass
+// Test: Rank-2 polymorphic function types for self-hosting verification
+
+// =============================================================================
+// BASIC RANK-2 FUNCTION TYPES
+// =============================================================================
+
+// Basic rank-2 type: function that works for ALL R (caller cannot choose)
+type Reducer<A, R> is fn(R, A) -> R;
+
+// Rank-2 transducer: transform works for any R
+type Transducer<A, B> is {
+    transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>,
+};
+
+// =============================================================================
+// RANK-2 IN TYPE ALIASES
+// =============================================================================
+
+// Rank-2 identity transformer
+type Identity<A> is {
+    run: fn<R>(fn(A) -> R) -> R,
+};
+
+// Rank-2 continuation
+type Cont<R, A> is fn(fn(A) -> R) -> R;
+
+// Church encoding of natural numbers (rank-2)
+type ChurchNat is fn<A>(fn(A) -> A, A) -> A;
+
+// =============================================================================
+// RANK-2 IN PROTOCOL DEFINITIONS
+// =============================================================================
+
+// Functor with rank-2 map
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+// Natural transformation (rank-2)
+type NaturalTransformation<F<_>, G<_>> is {
+    transform: fn<A>(F<A>) -> G<A>,
+};
+
+// =============================================================================
+// RANK-2 IN FUNCTION SIGNATURES
+// =============================================================================
+
+// Function taking a rank-2 function
+fn apply_to_both<A, B>(
+    f: fn<X>(X) -> X,
+    a: A,
+    b: B
+) -> (A, B) {
+    (f(a), f(b))
+}
+
+// Function returning a rank-2 function
+fn make_identity<A>() -> fn<X>(X) -> X {
+    |x| x
+}
+
+// =============================================================================
+// RANK-2 WITH BOUNDS
+// =============================================================================
+
+// Rank-2 with bounds on the quantified type
+type BoundedTransform<A> is {
+    transform: fn<R: Default>(fn(A) -> R) -> R,
+};
+
+// Multiple bounds
+type MultiBoundTransform is {
+    run: fn<T: Clone + Debug>(T) -> Text,
+};
+
+// =============================================================================
+// NESTED RANK-2 TYPES
+// =============================================================================
+
+// Doubly polymorphic
+type Bifunctor<F<_, _>> is protocol {
+    fn bimap<A, B, C, D>(
+        self: F<A, B>,
+        f: fn(A) -> C,
+        g: fn(B) -> D
+    ) -> F<C, D>;
+};
+
+// =============================================================================
+// RANK-2 IN STRUCT FIELDS
+// =============================================================================
+
+// Struct with rank-2 field
+type Runner is {
+    run: fn<A>(fn() -> A) -> A,
+    with_context: fn<A, Ctx>(Ctx, fn(Ctx) -> A) -> A,
+};
+
+// =============================================================================
+// RANK-2 IN PARAMETERS
+// =============================================================================
+
+// Protocol with rank-2 method parameter
+type Executable is protocol {
+    fn execute<R>(self, handler: fn<E>(E) -> R) -> R;
+};
+
+// =============================================================================
+// RANK-2 WITH EXISTENTIALS
+// =============================================================================
+
+// Protocol-bounded existential types in Verum
+// Note: Verum uses `some T: Bound` syntax for existentials
+type BoxedIterator<Item> is some I: Iterator<Item = Item>;
+
+// Existential with higher-kinded parameter (F is a Functor)
+// The existential hides the concrete type while exposing the interface
+type ExistsFunctor is some F: Functor;
+
+// Rank-2 unpacker for existential iterators
+fn unpack_iter<R>(
+    e: BoxedIterator<Int>,
+    handler: fn<I: Iterator<Item = Int>>(I) -> R
+) -> R {
+    handler(e)
+}
+
+// =============================================================================
+// COMPLEX COMBINATIONS
+// =============================================================================
+
+// Stateful rank-2 transducer
+type StatefulTransducer<A, B, S> is {
+    initial_state: S,
+    transform: fn<R>(Reducer<B, R>, &mut S) -> Reducer<A, R>,
+};
+
+// Free monad construction (rank-2 heavy)
+type Free<F<_>, A> is
+    | Pure(A)
+    | Free(F<Free<F, A>>);
+
+// =============================================================================
+// RANK-2 IN IMPLEMENTATIONS
+// =============================================================================
+
+implement Functor for List {
+    fn map<A, B>(self: List<A>, f: fn(A) -> B) -> List<B> {
+        self.iter().map(f).collect()
+    }
+}
+
+// Natural transformation example
+fn list_to_option<A>(list: List<A>) -> Maybe<A> {
+    list.first()
+}
+
+// =============================================================================
+// PRACTICAL EXAMPLES
+// =============================================================================
+
+// Helper type alias for lens modifier function
+type Modifier<A, F<_>> is fn(A) -> F<A>;
+
+// Lens type (rank-2)
+type Lens<S, A> is {
+    get: fn(S) -> A,
+    modify: fn<F: Functor>(f: Modifier<A, F>, s: S) -> F<S>,
+};
+
+// Helper type alias for traversal function
+type TraverseFn<A, B, F<_>> is fn(A) -> F<B>;
+
+// Traversal (rank-2)
+type Traversal<S, A> is {
+    traverse: fn<F: Applicative, B>(f: TraverseFn<A, B, F>, s: S) -> F<S>,
+};

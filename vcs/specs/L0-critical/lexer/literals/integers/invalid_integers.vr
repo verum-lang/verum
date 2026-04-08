@@ -1,0 +1,134 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, integers, invalid, negative
+
+// Invalid integer literals - each line should fail to parse
+
+fn test_leading_zeros() {
+    // Leading zeros in decimal (ambiguous with octal in some languages)
+    let invalid_leading_zero = 0123;
+}
+
+fn test_invalid_hex_digits() {
+    // Invalid hex digits
+    let invalid_hex_g = 0xGG;
+    let invalid_hex_z = 0xZZ;
+    let invalid_hex_special = 0x!@;
+}
+
+fn test_invalid_binary_digits() {
+    // Invalid binary digits
+    let invalid_bin_2 = 0b2;
+    let invalid_bin_9 = 0b192;
+    let invalid_bin_a = 0bABC;
+}
+
+fn test_invalid_octal_digits() {
+    // Invalid octal digits
+    let invalid_oct_8 = 0o8;
+    let invalid_oct_9 = 0o9;
+    let invalid_oct_a = 0oABC;
+}
+
+fn test_empty_after_prefix() {
+    // Empty after prefix
+    let empty_hex = 0x;
+    let empty_bin = 0b;
+    let empty_oct = 0o;
+}
+
+fn test_double_prefix() {
+    // Double prefix
+    let double_hex = 0x0x1;
+    let double_bin = 0b0b1;
+}
+
+fn test_invalid_underscore_positions() {
+    // Invalid underscore positions
+    let leading_underscore = _123;
+    let double_underscore = 1__000;
+    let underscore_after_prefix = 0x_FF;
+    let underscore_before_suffix = 123__i32;
+}
+
+fn test_invalid_suffixes() {
+    // Invalid suffixes
+    let invalid_suffix = 42_int;
+    let invalid_suffix2 = 42_Integer;
+    let invalid_suffix3 = 42_f  // f alone is not valid for integers;
+    let unknown_suffix = 42_i256;
+    let wrong_suffix = 42_str;
+}
+
+fn test_overflow_literals() {
+    // Overflow literals (too large for any integer type)
+    let overflow_u128 = 340282366920938463463374607431768211456u128;
+    let overflow_i128 = 170141183460469231731687303715884105728i128;
+}
+
+fn test_mixed_base_indicators() {
+    // Mixed base indicators
+    let mixed_base = 0x0b10;
+    let wrong_prefix = 0d123;
+    let bad_prefix = 0z999;
+}
+
+fn test_spaces_in_numbers() {
+    // Spaces in numbers
+    let space_in_num = 1 000;
+    let space_after_prefix = 0x FF;
+}
+
+fn test_non_ascii_digits() {
+    // Non-ASCII digits
+    let unicode_digit = 42０  // fullwidth zero;
+    let arabic_digit = ٤٢    // Arabic-Indic digits;
+}
+
+fn test_float_where_integer_expected() {
+    // Floating point where integer expected
+    let float_suffix = 42.0i32;
+}
+
+fn test_negative_unsigned() {
+    // Negative unsigned
+    let neg_unsigned = -1u32;
+}
+
+fn test_letter_after_number() {
+    // Letter after number without underscore (identifier-like)
+    let num_letter = 123abc;
+}
+
+fn test_multiple_decimal_points() {
+    // Multiple decimal points (not an integer)
+    let multi_dot = 1.2.3;
+}
+
+fn test_comma_separator() {
+    // Comma as separator (not underscore)
+    let comma_sep = 1,000;
+}
+
+fn test_exponent_on_integer() {
+    // Exponent on integer (should be float)
+    let int_exp = 42e10i32;
+}
+
+fn test_trailing_underscore() {
+    // Trailing underscore before suffix is invalid
+    let bad_trail = 42__i32;
+}
+
+fn test_wrong_case_mixing() {
+    // Prefix with wrong case mixing
+    let bad_case = 0X_ff  // if uppercase X requires uppercase hex;
+}
+
+fn test_just_prefix() {
+    // Just a prefix with no digits
+    let just_0x = 0x_;
+    let just_0b = 0b_;
+    let just_0o = 0o_;
+}

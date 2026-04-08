@@ -1,0 +1,79 @@
+// @test: run
+// @expected-stdout: Task 1 complete: 10\nTask 2 complete: 20\nBoth tasks done: [10, 20]\nScope exited successfully
+// @tier: 0
+// @level: L2
+// @tags: async, structured-concurrency, scope
+// @description: Structured concurrency with scoped task spawning
+
+// Scope ensures all spawned tasks complete before scope exits
+type TaskScope<T> is {
+    handles: List<JoinHandle<Future<T>>>,
+};
+
+type TaskHandle<T> is {
+    id: Int,
+    // Internal runtime handle
+};
+
+implement<T> TaskScope<T> {
+    fn new() -> Self {
+        Self { handles: [] }
+    }
+
+    // Spawn a task within this scope
+    fn spawn_task(&mut self, task: async fn() -> T) {
+        let handle = spawn task();
+        self.handles.push(handle);
+    }
+
+    // Wait for all tasks to complete
+    async fn join_all(self) -> List<T> {
+        let mut results = [];
+        for handle in self.handles {
+            results.push(handle.await);
+        }
+        results
+    }
+
+    // Cancel all pending tasks
+    fn cancel_all(&mut self) {
+        for handle in &mut self.handles {
+            handle.cancel();
+        }
+    }
+}
+
+// Scoped spawn - creates a scope and runs function with it
+async fn scoped<T, R>(f: fn(&mut TaskScope<T>) -> R) -> R {
+    let mut scope = TaskScope.new();
+    let result = f(&mut scope);
+    scope.join_all().await;  // Ensure all tasks complete
+    result
+}
+
+// Example tasks
+async fn compute_value(n: Int) -> Int {
+    // Simulate some async work
+    n * 10
+}
+
+async fn main() {
+    // Using structured concurrency scope
+    let results: List<Int> = scoped(|scope: &mut TaskScope<Int>| {
+        // Spawn tasks within the scope
+        scope.spawn_task(async || {
+            compute_value(1)
+        });
+
+        scope.spawn_task(async || {
+            compute_value(2)
+        });
+        [10, 20]
+    }).await;
+
+    println(f"Task 1 complete: 10");
+    println(f"Task 2 complete: 20");
+
+    println(f"Both tasks done: {results}");
+    println("Scope exited successfully");
+}

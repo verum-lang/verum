@@ -1,0 +1,198 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, lcs, dp, string
+// @timeout: 30000
+
+// Longest Common Subsequence and related string DP problems
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// LCS using rolling 1D DP
+// dp[j] = LCS length of a[0..i] and b[0..j]
+fn lcs_length(a: Arr8, la: Int, b: Arr8, lb: Int) -> Int {
+    let mut dp = zeros();
+    let mut i = 0;
+    while i < la {
+        let mut prev = 0; // dp[j-1] from previous row
+        let mut j = 0;
+        while j < lb {
+            let old_dp_j = get8(dp, j);
+            if get8(a, i) == get8(b, j) {
+                dp = set8(dp, j, prev + 1);
+            } else {
+                let left = if j > 0 { get8(dp, j - 1) } else { 0 };
+                dp = set8(dp, j, max_val(old_dp_j, left));
+            }
+            prev = old_dp_j;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    if lb > 0 { get8(dp, lb - 1) } else { 0 }
+}
+
+// Longest Increasing Subsequence length
+fn lis_length(arr: Arr8, n: Int) -> Int {
+    // dp[i] = length of LIS ending at index i
+    let mut dp = zeros();
+    let mut max_lis = 0;
+    let mut i = 0;
+    while i < n {
+        dp = set8(dp, i, 1);
+        let mut j = 0;
+        while j < i {
+            if get8(arr, j) < get8(arr, i) {
+                let new_len = get8(dp, j) + 1;
+                if new_len > get8(dp, i) {
+                    dp = set8(dp, i, new_len);
+                }
+            }
+            j = j + 1;
+        }
+        if get8(dp, i) > max_lis { max_lis = get8(dp, i); }
+        i = i + 1;
+    }
+    max_lis
+}
+
+// Longest Common Substring (contiguous)
+fn lc_substring(a: Arr8, la: Int, b: Arr8, lb: Int) -> Int {
+    let mut dp = zeros();
+    let mut max_len = 0;
+    let mut i = 0;
+    while i < la {
+        // Process right-to-left to avoid overwriting
+        let mut j = lb - 1;
+        while j >= 0 {
+            if get8(a, i) == get8(b, j) {
+                let prev = if j > 0 { get8(dp, j - 1) } else { 0 };
+                // But we need prev from previous i... this needs 2D
+                // Simplified: use rolling approach
+                dp = set8(dp, j, prev + 1);
+                if get8(dp, j) > max_len { max_len = get8(dp, j); }
+            } else {
+                dp = set8(dp, j, 0);
+            }
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+    max_len
+}
+
+// Edit distance (Levenshtein) using rolling DP
+fn edit_distance(a: Arr8, la: Int, b: Arr8, lb: Int) -> Int {
+    let mut dp = zeros();
+    // Initialize: dp[j] = j
+    let mut j = 0;
+    while j <= lb {
+        if j < 8 { dp = set8(dp, j, j); }
+        j = j + 1;
+    }
+
+    let mut i = 1;
+    while i <= la {
+        let mut prev = get8(dp, 0);
+        dp = set8(dp, 0, i);
+        j = 1;
+        while j <= lb {
+            let old = get8(dp, j);
+            if get8(a, i - 1) == get8(b, j - 1) {
+                dp = set8(dp, j, prev);
+            } else {
+                let ins = get8(dp, j) + 1;
+                let del = get8(dp, j - 1) + 1;
+                let rep = prev + 1;
+                dp = set8(dp, j, min_val(ins, min_val(del, rep)));
+            }
+            prev = old;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    if lb < 8 { get8(dp, lb) } else { 0 }
+}
+
+fn test_lcs() -> Int {
+    // LCS of "ABCBDAB" and "BDCAB"
+    // Encoded as ASCII: A=1, B=2, C=3, D=4
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 2, v4: 4, v5: 1, v6: 2, v7: 0 };
+    let b = Arr8 { v0: 2, v1: 4, v2: 3, v3: 1, v4: 2, v5: 0, v6: 0, v7: 0 };
+    // LCS = "BCAB" or "BDAB" = length 4
+    assert_eq(lcs_length(a, 7, b, 5), 4);
+
+    // Identical sequences
+    let c = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcs_length(c, 3, c, 3), 3);
+
+    // No common elements
+    let d = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let e = Arr8 { v0: 3, v1: 4, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcs_length(d, 2, e, 2), 0);
+    1
+}
+
+fn test_lis() -> Int {
+    // LIS of [10, 22, 9, 33, 21, 50, 41, 60]
+    // But values too large for Arr8... use smaller: [3, 5, 2, 7, 4, 8, 6]
+    let arr = Arr8 { v0: 3, v1: 5, v2: 2, v3: 7, v4: 4, v5: 8, v6: 6, v7: 0 };
+    // LIS: 2,4,6 or 3,5,7,8 = length 4
+    assert_eq(lis_length(arr, 7), 4);
+
+    // Already sorted
+    let sorted = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lis_length(sorted, 5), 5);
+
+    // Reverse sorted
+    let rev = Arr8 { v0: 5, v1: 4, v2: 3, v3: 2, v4: 1, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lis_length(rev, 5), 1);
+    1
+}
+
+fn test_edit_distance() -> Int {
+    // "kitten" vs "sitting": distance 3
+    // k=1,i=2,t=3,t=3,e=4,n=5  vs  s=6,i=2,t=3,t=3,i=2,n=5,g=7
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 3, v4: 4, v5: 5, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 6, v1: 2, v2: 3, v3: 3, v4: 2, v5: 5, v6: 7, v7: 0 };
+    assert_eq(edit_distance(a, 6, b, 7), 3);
+
+    // Same string
+    assert_eq(edit_distance(a, 6, a, 6), 0);
+
+    // Empty vs non-empty
+    let c = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let empty = zeros();
+    assert_eq(edit_distance(c, 3, empty, 0), 3);
+    1
+}
+
+fn main() -> Int {
+    test_lcs();
+    test_lis();
+    test_edit_distance();
+    print("[OK] 486_longest_common_aot");
+    0
+}

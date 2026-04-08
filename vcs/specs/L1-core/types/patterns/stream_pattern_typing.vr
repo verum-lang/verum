@@ -1,0 +1,276 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: types, patterns, stream, iterator, type-inference
+// @description: Stream pattern type checking and inference
+
+module tests.types.patterns.stream_typing;
+
+mount core.*;
+
+// =============================================================================
+// Section 1: Basic Stream Pattern Type Inference
+// =============================================================================
+
+// Stream pattern infers element type from iterator
+fn test_stream_type_inference<I: Iterator<Item = Int>>(iter: I) -> Int {
+    match iter {
+        stream[] => 0,
+        stream[first, ...rest] => first,  // first: Int inferred
+    }
+}
+
+// Stream pattern with explicit generic
+fn test_generic_stream<T, I: Iterator<Item = T>>(iter: I) -> Maybe<T> {
+    match iter {
+        stream[] => Maybe.None,
+        stream[head, ...] => Maybe.Some(head),
+    }
+}
+
+// Stream pattern preserves iterator type in rest
+fn test_rest_iterator_type<I: Iterator<Item = Int>>(iter: I) -> Int {
+    match iter {
+        stream[] => 0,
+        stream[first, ...rest] => {
+            // rest should be same iterator type I (or a derived type)
+            let sum = rest.fold(first, |acc, x| acc + x);
+            sum
+        }
+    }
+}
+
+// =============================================================================
+// Section 2: Stream Pattern with Nested Types
+// =============================================================================
+
+type Pair<A, B> is { first: A, second: B };
+
+fn test_stream_of_pairs<I: Iterator<Item = Pair<Int, Text>>>(iter: I) -> Text {
+    match iter {
+        stream[] => "empty",
+        stream[Pair { first, second }, ...] => f"first pair: {first}, {second}",
+    }
+}
+
+type Result<T, E> is Ok(T) | Err(E);
+
+fn test_stream_of_results<I: Iterator<Item = Result<Int, Text>>>(iter: I) -> Int {
+    match iter {
+        stream[] => 0,
+        stream[Ok(n), ...rest] => n + test_stream_of_results(rest),
+        stream[Err(_), ...rest] => test_stream_of_results(rest),  // Skip errors
+    }
+}
+
+// =============================================================================
+// Section 3: Stream Pattern with Multiple Head Elements
+// =============================================================================
+
+fn test_two_head_elements<I: Iterator<Item = Int>>(iter: I) -> Maybe<(Int, Int)> {
+    match iter {
+        stream[] => Maybe.None,
+        stream[only] => Maybe.None,  // Single element, no pair
+        stream[a, b, ...] => Maybe.Some((a, b)),
+    }
+}
+
+fn test_three_head_elements<I: Iterator<Item = Text>>(iter: I) -> Text {
+    match iter {
+        stream[a, b, c, ...] => f"{a}-{b}-{c}",
+        stream[a, b] => f"{a}-{b}",
+        stream[a] => a,
+        stream[] => "",
+    }
+}
+
+// =============================================================================
+// Section 4: Stream Pattern Type Coercion
+// =============================================================================
+
+// Numeric widening in stream patterns (if supported)
+fn test_stream_numeric_coercion<I: Iterator<Item = Int>>(iter: I) -> Float {
+    match iter {
+        stream[] => 0.0,
+        stream[n, ...] => n.to_float(),  // Explicit conversion
+    }
+}
+
+// =============================================================================
+// Section 5: Stream Pattern with Guards and Types
+// =============================================================================
+
+fn test_stream_guard_types<I: Iterator<Item = Int>>(iter: I) -> Text {
+    match iter {
+        stream[] => "empty",
+        stream[n, ...] if n > 0 => "positive start",  // n: Int in guard
+        stream[n, ...] if n < 0 => "negative start",
+        stream[n, ...] => "zero start",
+    }
+}
+
+fn test_stream_guard_with_rest<I: Iterator<Item = Int>>(iter: I) -> Text {
+    match iter {
+        stream[a, b, ...rest] if a + b > 10 => {
+            let rest_sum = rest.fold(0, |acc, x| acc + x);
+            f"sum with rest: {a + b + rest_sum}"
+        }
+        stream[a, b, ...] => f"small start: {a + b}",
+        stream[_] => "single",
+        stream[] => "empty",
+    }
+}
+
+// =============================================================================
+// Section 6: Stream Pattern Exhaustiveness with Types
+// =============================================================================
+
+type Color is Red | Green | Blue;
+
+fn test_stream_variant_exhaustive<I: Iterator<Item = Color>>(iter: I) -> Text {
+    match iter {
+        stream[] => "no colors",
+        stream[Red, ...] => "starts with red",
+        stream[Green, ...] => "starts with green",
+        stream[Blue, ...] => "starts with blue",
+    }
+}
+
+// Non-exhaustive should produce warning (compile-time diagnostic)
+fn test_stream_partial_match<I: Iterator<Item = Color>>(iter: I) -> Maybe<Text> {
+    match iter {
+        stream[Red, Green, ...] => Maybe.Some("red-green pattern"),
+        stream[Blue, ...] => Maybe.Some("blue start"),
+        _ => Maybe.None,
+    }
+}
+
+// =============================================================================
+// Section 7: Stream Pattern with Protocol Bounds
+// =============================================================================
+
+type Comparable is protocol {
+    fn compare(&self, other: &Self) -> Int;
+};
+
+fn test_stream_protocol_bound<T: Comparable, I: Iterator<Item = T>>(iter: I) -> Bool {
+    match iter {
+        stream[] => true,
+        stream[only] => true,
+        stream[a, b, ...rest] => {
+            if a.compare(&b) <= 0 {
+                // Create new iterator with b as first element
+                test_stream_protocol_bound(once(b).chain(rest))
+            } else {
+                false
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 8: Stream Pattern with Associated Types
+// =============================================================================
+
+type Collection<T> is protocol {
+    type Iter: Iterator<Item = T>;
+    fn iter(&self) -> Self.Iter;
+};
+
+fn test_stream_associated_type<C: Collection<Int>>(col: C) -> Int {
+    match col.iter() {
+        stream[] => 0,
+        stream[first, ...rest] => first + rest.fold(0, |a, x| a + x),
+    }
+}
+
+// =============================================================================
+// Section 9: Stream Pattern Error Cases (compile-time)
+// =============================================================================
+
+// The following should produce type errors if uncommented:
+
+// fn test_wrong_element_type<I: Iterator<Item = Int>>(iter: I) -> Text {
+//     match iter {
+//         stream[s, ...] => s.len(),  // ERROR: s is Int, not Text
+//         stream[] => 0,
+//     }
+// }
+
+// fn test_incompatible_rest<I: Iterator<Item = Int>>(iter: I) {
+//     match iter {
+//         stream[n, ...rest] => {
+//             let text_iter: Iterator<Item = Text> = rest;  // ERROR: type mismatch
+//         }
+//         stream[] => {}
+//     }
+// }
+
+// =============================================================================
+// Section 10: Advanced Stream Pattern Scenarios
+// =============================================================================
+
+// Recursive stream processing with type preservation
+fn sum_stream<I: Iterator<Item = Int>>(iter: I) -> Int {
+    match iter {
+        stream[] => 0,
+        stream[n, ...rest] => n + sum_stream(rest),
+    }
+}
+
+// Stream pattern with transformation
+fn transform_stream<T, U, I: Iterator<Item = T>>(
+    iter: I,
+    f: fn(T) -> U
+) -> List<U> {
+    match iter {
+        stream[] => [],
+        stream[head, ...rest] => {
+            let mut result = [f(head)];
+            result.extend(transform_stream(rest, f));
+            result
+        }
+    }
+}
+
+// Stream pattern in closure
+fn test_stream_in_closure() -> fn(List<Int>) -> Int {
+    |list| {
+        match list.iter() {
+            stream[] => 0,
+            stream[n, ...rest] => n + rest.fold(0, |a, x| a + x),
+        }
+    }
+}
+
+// =============================================================================
+// Main Test Function
+// =============================================================================
+
+fn main() {
+    // Test type inference
+    let iter1 = [1, 2, 3, 4, 5].iter();
+    assert_eq(test_stream_type_inference(iter1), 1);
+
+    // Test generic stream
+    let iter2 = [10, 20, 30].iter();
+    assert_eq(test_generic_stream(iter2), Maybe.Some(10));
+
+    // Test two head elements
+    let iter3 = [5, 10, 15].iter();
+    assert_eq(test_two_head_elements(iter3), Maybe.Some((5, 10)));
+
+    // Test sum via stream recursion
+    let iter4 = [1, 2, 3, 4, 5].iter();
+    assert_eq(sum_stream(iter4), 15);
+
+    // Test transformation
+    let iter5 = [1, 2, 3].iter();
+    let doubled = transform_stream(iter5, |x| x * 2);
+    assert_eq(doubled, [2, 4, 6]);
+
+    // Test closure with stream
+    let sum_fn = test_stream_in_closure();
+    assert_eq(sum_fn([10, 20, 30]), 60);
+
+    print("All stream pattern typing tests passed!");
+}

@@ -1,0 +1,208 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged
+
+// Tagged literals - compile-time parsed string literals
+// NOTE: Multiline tagged literals require lexer/parser updates
+
+// ============================================================================
+// SECTION 1: Basic Single-Line Tagged Literals
+// ============================================================================
+
+fn test_basic_tagged_literals() {
+    // DateTime tagged literal
+    let date = d#"2025-11-05";
+
+    // Regex tagged literal
+    let pattern = rx#"[a-zA-Z]+";
+
+    // UUID tagged literal
+    let id = uuid#"550e8400-e29b-41d4-a716-446655440000";
+
+    // SQL tagged literal
+    let query = sql#"SELECT * FROM users";
+
+    // URL tagged literal
+    let endpoint = url#"https://api.example.com/v1";
+
+    // Email tagged literal
+    let contact = email#"user@example.com";
+}
+
+fn test_tagged_literal_with_raw_string() {
+    // Triple-quoted tagged literal (raw, no escape processing)
+    let regex = rx#"""[a-z]+""";
+    let complex_rx = rx#"""foo#bar""";
+
+    // SQL with triple-quoted tagged string
+    let sql_raw = sql#"""SELECT * FROM "users" """;
+}
+
+// ============================================================================
+// SECTION 2: Tagged Literals in Expressions
+// ============================================================================
+
+fn test_tagged_in_function_call() {
+    fn process_query(q: SqlQuery) -> Int { 0 }
+    fn parse_date(d: DateTime) -> Text { "parsed" }
+
+    // Tagged literal as function argument
+    let result = process_query(sql#"SELECT 1");
+    let date_str = parse_date(d#"2025-01-01");
+}
+
+fn test_tagged_in_match() {
+    type Format is Json | Yaml | Toml;
+
+    let format = Format.Json;
+
+    // Tagged literal in match arm
+    let default_config = match format {
+        Format.Json => json#"{}",
+        Format.Yaml => yaml#"",
+        Format.Toml => toml#"",
+    };
+}
+
+fn test_tagged_in_array() {
+    // Array of tagged literals
+    let patterns = [
+        rx#"[a-z]+",
+        rx#"[0-9]+",
+        rx#"[A-Z]+",
+    ];
+}
+
+fn test_tagged_in_struct() {
+    type Config is {
+        query: SqlQuery,
+        pattern: Regex,
+        date: DateTime,
+    };
+
+    // Tagged literals in struct initialization
+    let config = Config {
+        query: sql#"SELECT * FROM config",
+        pattern: rx#".*\\.conf$",
+        date: d#"2025-01-01",
+    };
+}
+
+fn test_tagged_in_conditional() {
+    let use_simple = true;
+
+    // Tagged literal in conditional
+    let query = if use_simple {
+        sql#"SELECT id FROM users"
+    } else {
+        sql#"SELECT u.id, u.name FROM users u"
+    };
+}
+
+// ============================================================================
+// SECTION 3: Edge Cases
+// ============================================================================
+
+fn test_empty_tagged_literals() {
+    // Empty content
+    let empty_json = json#"{}";
+    let empty_array = json#"[]";
+    let empty_yaml = yaml#"";
+    let empty_toml = toml#"";
+}
+
+fn test_tagged_with_special_chars() {
+    // Special characters in content
+    let with_quotes = json#"{ \"key\": \"value\" }";
+    let with_newline = sql#"SELECT * FROM users";
+}
+
+fn test_tagged_literal_assignment() {
+    let mut query: SqlQuery;
+
+    // Assignment with tagged literal
+    query = sql#"SELECT 1";
+    query = sql#"SELECT 2";
+}
+
+fn test_tagged_in_tuple() {
+    // Tagged literals in tuple
+    let pair = (d#"2025-01-01", d#"2025-12-31");
+    let triple = (sql#"SELECT 1", rx#".*", uuid#"00000000-0000-0000-0000-000000000000");
+}
+
+// ============================================================================
+// SECTION 4: Type Annotations with Tagged Literals
+// ============================================================================
+
+fn test_explicit_type_annotations() {
+    // Explicit type annotations
+    let date: DateTime = d#"2025-01-01";
+    let pattern: Regex = rx#"[a-z]+";
+    let query: SqlQuery = sql#"SELECT 1";
+}
+
+fn returns_tagged_literal() -> DateTime {
+    d#"2025-06-15"
+}
+
+fn accepts_tagged_literal(date: DateTime) -> Bool {
+    true
+}
+
+fn test_tagged_as_return() {
+    let date = returns_tagged_literal();
+    let result = accepts_tagged_literal(d#"2025-01-01");
+}
+
+// ============================================================================
+// SECTION 5: Various Tag Names
+// ============================================================================
+
+fn test_various_tags() {
+    // Common semantic tags
+    let gql_query = gql#"query { users { id } }";
+    let xml_doc = xml#"<root><child/></root>";
+    let html_frag = html#"<div>Hello</div>";
+
+    // Single-char tags
+    let f_string = f#"formatted";
+    let s_string = s#"simple";
+
+    // Numeric content
+    let decimal = dec#"123.456";
+    let money = usd#"99.99";
+}
+
+fn test_tagged_with_escapes() {
+    // Tagged literals with escape sequences
+    let with_tab = json#"{\t\"key\":\t\"value\"\t}";
+    let with_newline = json#"{\"line1\":\n\"line2\"}";
+    let with_unicode = json#"{\"emoji\": \"\\u2764\"}";
+}
+
+// ============================================================================
+// SECTION 6: Complex Expressions
+// ============================================================================
+
+fn test_tagged_in_binary_ops() {
+    // Tagged literals in expressions (conceptual - if supported)
+    fn combine(a: SqlQuery, b: SqlQuery) -> SqlQuery { a }
+
+    let combined = combine(sql#"SELECT 1", sql#"SELECT 2");
+}
+
+fn test_tagged_method_calls() {
+    // Method calls on results of tagged literal parsing
+    let date = d#"2025-06-15";
+    // date.year() would work after type checking
+}
+
+fn test_chained_tagged() {
+    fn parse_and_validate(q: SqlQuery) -> SqlQuery { q }
+    fn execute(q: SqlQuery) -> Int { 0 }
+
+    // Chained function calls with tagged literals
+    let result = execute(parse_and_validate(sql#"SELECT 1"));
+}

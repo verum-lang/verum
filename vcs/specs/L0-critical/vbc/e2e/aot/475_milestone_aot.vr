@@ -1,0 +1,271 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, fsm, automaton
+// @timeout: 30000
+
+// Milestone test: Finite state machine (FSM) simulation
+// Simple regex-like pattern matching using state transitions
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// FSM transition table packed as: table[state * num_symbols + symbol] = next_state
+// We use a flat Arr8 for small FSMs (max 8 entries in transition table)
+
+// Simple FSM: accepts strings matching "ab" over alphabet {a=0, b=1}
+// States: 0=start, 1=seen_a, 2=accept, 3=dead
+fn fsm_ab_next(state: Int, symbol: Int) -> Int {
+    if state == 0 {
+        if symbol == 0 { 1 } else { 3 } // 'a' -> 1, 'b' -> dead
+    } else if state == 1 {
+        if symbol == 1 { 2 } else { 3 } // 'b' -> accept, 'a' -> dead
+    } else { 3 } // accept/dead stay
+}
+
+fn fsm_run(input: Arr8, len: Int) -> Int {
+    let mut state = 0;
+    let mut i = 0;
+    while i < len {
+        state = fsm_ab_next(state, get8(input, i));
+        i = i + 1;
+    }
+    state
+}
+
+// FSM for matching "a*b" (zero or more a's followed by b)
+// States: 0=start, 1=accept, 2=dead
+fn fsm_astarb_next(state: Int, symbol: Int) -> Int {
+    if state == 0 {
+        if symbol == 0 { 0 }       // 'a' -> stay in start (loop)
+        else if symbol == 1 { 1 }  // 'b' -> accept
+        else { 2 }                 // other -> dead
+    } else if state == 1 {
+        2 // after accept, any more input -> dead
+    } else { 2 }
+}
+
+fn fsm_astarb_run(input: Arr8, len: Int) -> Int {
+    let mut state = 0;
+    let mut i = 0;
+    while i < len {
+        state = fsm_astarb_next(state, get8(input, i));
+        i = i + 1;
+    }
+    state
+}
+
+// FSM for matching even number of 1s in binary string {0, 1}
+// States: 0=even (accept), 1=odd (reject)
+fn fsm_even_ones_next(state: Int, symbol: Int) -> Int {
+    if symbol == 1 {
+        if state == 0 { 1 } else { 0 } // toggle on 1
+    } else { state } // stay on 0
+}
+
+fn fsm_even_ones_run(input: Arr8, len: Int) -> Int {
+    let mut state = 0;
+    let mut i = 0;
+    while i < len {
+        state = fsm_even_ones_next(state, get8(input, i));
+        i = i + 1;
+    }
+    state
+}
+
+// FSM for divisibility by 3 (reading binary number MSB first)
+// States: 0 (mod 0, accept), 1 (mod 1), 2 (mod 2)
+fn fsm_div3_next(state: Int, bit: Int) -> Int {
+    let val = state * 2 + bit;
+    val % 3
+}
+
+fn fsm_div3_run(input: Arr8, len: Int) -> Int {
+    let mut state = 0;
+    let mut i = 0;
+    while i < len {
+        state = fsm_div3_next(state, get8(input, i));
+        i = i + 1;
+    }
+    state
+}
+
+// Count reachable states from initial state
+fn count_reachable(num_states: Int, num_symbols: Int) -> Int {
+    // For the "ab" FSM, traverse from state 0
+    let mut visited = 0; // bitmask
+    let mut queue = zeros(); // simple queue
+    queue = set8(queue, 0, 0); // start with state 0
+    let mut front = 0;
+    let mut back = 1;
+
+    let mut b = 1; // bit for state 0
+    visited = visited + b;
+
+    while front < back {
+        let state = get8(queue, front);
+        front = front + 1;
+        let mut sym = 0;
+        while sym < num_symbols {
+            let next = fsm_ab_next(state, sym);
+            // Check if visited
+            let mut nb = 1;
+            let mut ni = 0;
+            while ni < next { nb = nb * 2; ni = ni + 1; }
+            if (visited / nb) % 2 == 0 {
+                visited = visited + nb;
+                if back < 8 {
+                    queue = set8(queue, back, next);
+                    back = back + 1;
+                }
+            }
+            sym = sym + 1;
+        }
+    }
+    // Count set bits
+    let mut count = 0;
+    let mut m = visited;
+    while m > 0 {
+        count = count + m % 2;
+        m = m / 2;
+    }
+    count
+}
+
+fn test_fsm_ab() -> Int {
+    // "ab" -> accept (state 2)
+    let input1 = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_run(input1, 2), 2);
+
+    // "a" -> incomplete (state 1)
+    let input2 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_run(input2, 1), 1);
+
+    // "b" -> dead (state 3)
+    let input3 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_run(input3, 1), 3);
+
+    // "ba" -> dead (state 3)
+    let input4 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_run(input4, 2), 3);
+
+    // "aa" -> dead (state 3)
+    let input5 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_run(input5, 2), 3);
+
+    // empty -> start (state 0)
+    assert_eq(fsm_run(input1, 0), 0);
+    1
+}
+
+fn test_fsm_astarb() -> Int {
+    // "b" -> accept
+    let b = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_astarb_run(b, 1), 1);
+
+    // "ab" -> accept
+    let ab = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_astarb_run(ab, 2), 1);
+
+    // "aab" -> accept
+    let aab = Arr8 { v0: 0, v1: 0, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_astarb_run(aab, 3), 1);
+
+    // "aaab" -> accept
+    let aaab = Arr8 { v0: 0, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_astarb_run(aaab, 4), 1);
+
+    // "a" -> not accept (state 0, start)
+    let a = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_astarb_run(a, 1), 0);
+
+    // "ba" -> dead
+    let ba = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_astarb_run(ba, 2), 2);
+    1
+}
+
+fn test_even_ones() -> Int {
+    // Empty string: 0 ones = even -> state 0 (accept)
+    let empty = zeros();
+    assert_eq(fsm_even_ones_run(empty, 0), 0);
+
+    // "0" -> 0 ones = even -> state 0
+    assert_eq(fsm_even_ones_run(empty, 1), 0);
+
+    // "1" -> 1 one = odd -> state 1
+    let one = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_even_ones_run(one, 1), 1);
+
+    // "11" -> 2 ones = even -> state 0
+    let two = Arr8 { v0: 1, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_even_ones_run(two, 2), 0);
+
+    // "10110" -> 3 ones = odd -> state 1
+    let three = Arr8 { v0: 1, v1: 0, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_even_ones_run(three, 5), 1);
+
+    // "1111" -> 4 ones = even -> state 0
+    let four = Arr8 { v0: 1, v1: 1, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_even_ones_run(four, 4), 0);
+    1
+}
+
+fn test_div3() -> Int {
+    // 0 (empty) -> state 0 (divisible)
+    let empty = zeros();
+    assert_eq(fsm_div3_run(empty, 0), 0);
+
+    // Binary "110" = 6, divisible by 3 -> state 0
+    let six = Arr8 { v0: 1, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_div3_run(six, 3), 0);
+
+    // Binary "111" = 7, 7 % 3 = 1 -> state 1
+    let seven = Arr8 { v0: 1, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_div3_run(seven, 3), 1);
+
+    // Binary "1001" = 9, divisible by 3 -> state 0
+    let nine = Arr8 { v0: 1, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_div3_run(nine, 4), 0);
+
+    // Binary "101" = 5, 5 % 3 = 2 -> state 2
+    let five = Arr8 { v0: 1, v1: 0, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fsm_div3_run(five, 3), 2);
+    1
+}
+
+fn test_reachable() -> Int {
+    // For "ab" FSM with 4 states, 2 symbols: all 4 states reachable
+    // state 0: start. 0->'a'->1, 0->'b'->3. 1->'b'->2, 1->'a'->3
+    assert_eq(count_reachable(4, 2), 4);
+    1
+}
+
+fn main() -> Int {
+    test_fsm_ab();
+    test_fsm_astarb();
+    test_even_ones();
+    test_div3();
+    test_reachable();
+    print("[OK] 475_milestone_aot");
+    0
+}

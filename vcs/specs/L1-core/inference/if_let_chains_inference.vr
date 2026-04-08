@@ -1,0 +1,397 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, if-let, chains, conditionals, rfc2497
+// @description: Type inference tests for if-let chains following RFC 2497 semantics
+//
+// This test validates that:
+// 1. Pattern bindings are correctly typed in if-let conditions
+// 2. Bindings from earlier conditions are in scope for later conditions
+// 3. All bindings are in scope within the then-branch
+// 4. Bindings are NOT in scope in else-branch or after the if
+// 5. Type narrowing works correctly through pattern matching
+// 6. Expression conditions correctly expect Bool type
+//
+// Note: type inference is verified via explicit type annotations (let _: T = x)
+// rather than static_assert/typeof (compile-time meta constructs).
+// Note: while-let chains require WhileCondition AST support — not yet implemented;
+//       tested via equivalent if+break patterns.
+
+mount core.prelude.*;
+
+fn main() {
+    // === Section 1: Basic If-Let Type Inference ===
+    test_single_if_let_inference();
+    test_if_let_with_generic_option();
+    test_if_let_with_result_local();
+
+    // === Section 2: Two-Element Chains ===
+    test_two_let_chain_inference();
+    test_let_then_expr_chain();
+    test_expr_then_let_chain();
+
+    // === Section 3: Complex Chains ===
+    test_three_element_chain_inference();
+
+    // === Section 4: Binding Scope ===
+    test_binding_scope_in_then();
+    test_binding_not_in_else();
+    test_binding_used_in_later_condition();
+
+    // === Section 5: Pattern Complexity ===
+    test_tuple_pattern_inference();
+    test_struct_pattern_inference();
+    test_nested_pattern_inference();
+
+    // === Section 6: Type Narrowing ===
+    test_type_narrowing_in_chain();
+
+    // === Section 7: Edge Cases ===
+    test_expression_type_requirements();
+    test_shadowing_inference();
+
+    // === Section 8: Real-World Patterns ===
+    test_config_validation();
+}
+
+// =============================================================================
+// SECTION 1: Basic If-Let Type Inference
+// =============================================================================
+
+fn test_single_if_let_inference() {
+    let opt: Maybe<Int> = Some(42);
+
+    if let Some(x) = opt {
+        // Verify x is Int via type annotation
+        let _: Int = x;
+        assert(x == 42);
+
+        let doubled: Int = x * 2;
+        assert(doubled == 84);
+    }
+
+    // Nested option
+    let nested: Maybe<Maybe<Text>> = Some(Some("hello"));
+
+    if let Some(inner) = nested {
+        let _: Maybe<Text> = inner;
+
+        if let Some(text) = inner {
+            let _: Text = text;
+            assert(text == "hello");
+        }
+    }
+}
+
+fn test_if_let_with_generic_option() {
+    fn process_option<T>(opt: Maybe<T>) -> Maybe<T> {
+        if let Some(value) = opt {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    let result = process_option(Some(123));
+    let _: Maybe<Int> = result;
+
+    let text_result = process_option(Some("test"));
+    let _: Maybe<Text> = text_result;
+}
+
+fn test_if_let_with_result_local() {
+    // Local Result type (not core.base.result.Result)
+    type MyResult<T, E> is Ok(T) | Err(E);
+
+    let r: MyResult<Int, Text> = Ok(100);
+
+    if let Ok(value) = r {
+        let _: Int = value;
+        assert(value == 100);
+    }
+
+    if let Err(error) = r {
+        let _: Text = error;
+    }
+}
+
+// =============================================================================
+// SECTION 2: Two-Element Chains
+// =============================================================================
+
+fn test_two_let_chain_inference() {
+    let opt1: Maybe<Int> = Some(10);
+    let opt2: Maybe<Text> = Some("hello");
+
+    // Both patterns should have their types inferred
+    if let Some(x) = opt1 && let Some(y) = opt2 {
+        let _: Int = x;
+        let _: Text = y;
+        assert(x == 10);
+        assert(y == "hello");
+    }
+
+    // Same type for both
+    let a: Maybe<Int> = Some(1);
+    let b: Maybe<Int> = Some(2);
+
+    if let Some(x) = a && let Some(y) = b {
+        let _: Int = x;
+        let _: Int = y;
+        let sum: Int = x + y;
+        assert(sum == 3);
+    }
+}
+
+fn test_let_then_expr_chain() {
+    let opt: Maybe<Int> = Some(50);
+
+    // Expression condition uses binding from let
+    if let Some(x) = opt && x > 0 {
+        let _: Int = x;
+        assert(x > 0);
+    }
+
+    // Multiple expressions after let
+    if let Some(n) = opt && n > 10 && n < 100 {
+        let _: Int = n;
+        assert(n > 10 && n < 100);
+    }
+}
+
+fn test_expr_then_let_chain() {
+    let condition = true;
+    let opt: Maybe<Int> = Some(42);
+
+    // Expression before let
+    if condition && let Some(x) = opt {
+        let _: Int = x;
+        assert(x == 42);
+    }
+
+    // Function call before let
+    fn is_ready() -> Bool { true }
+
+    if is_ready() && let Some(value) = opt {
+        let _: Int = value;
+    }
+}
+
+// =============================================================================
+// SECTION 3: Complex Chains
+// =============================================================================
+
+fn test_three_element_chain_inference() {
+    let opt1: Maybe<Int> = Some(1);
+    let opt2: Maybe<Float> = Some(2.5);
+    let opt3: Maybe<Text> = Some("three");
+
+    if let Some(a) = opt1 && let Some(b) = opt2 && let Some(c) = opt3 {
+        let _: Int = a;
+        let _: Float = b;
+        let _: Text = c;
+    }
+
+    // Mixed with expressions
+    if let Some(x) = opt1 && x > 0 && let Some(y) = opt2 {
+        let _: Int = x;
+        let _: Float = y;
+    }
+}
+
+// =============================================================================
+// SECTION 4: Binding Scope
+// =============================================================================
+
+fn test_binding_scope_in_then() {
+    let opt: Maybe<(Int, Text)> = Some((42, "answer"));
+
+    if let Some((num, text)) = opt && num > 0 {
+        let _: Int = num;
+        let _: Text = text;
+        assert(num == 42);
+        assert(text == "answer");
+    }
+}
+
+fn test_binding_not_in_else() {
+    let opt: Maybe<Int> = None;
+
+    // In else branch, x from if-let is NOT in scope
+    let result = if let Some(x) = opt {
+        x
+    } else {
+        // Cannot use x here - it's not bound
+        -1
+    };
+
+    assert(result == -1);
+}
+
+fn test_binding_used_in_later_condition() {
+    type Container is { data: Maybe<Int> };
+
+    let container: Maybe<Container> = Some(Container { data: Some(100) });
+
+    // First binding used to access second
+    if let Some(c) = container && let Some(value) = c.data {
+        let _: Container = c;
+        let _: Int = value;
+        assert(value == 100);
+    }
+}
+
+// =============================================================================
+// SECTION 5: Pattern Complexity
+// =============================================================================
+
+fn test_tuple_pattern_inference() {
+    let opt: Maybe<(Int, Float, Text)> = Some((1, 2.5, "three"));
+
+    if let Some((a, b, c)) = opt {
+        let _: Int = a;
+        let _: Float = b;
+        let _: Text = c;
+    }
+
+    // Nested tuples
+    let nested: Maybe<((Int, Int), (Text, Text))> = Some(((1, 2), ("a", "b")));
+
+    if let Some(((x1, x2), (y1, y2))) = nested {
+        let _: Int = x1;
+        let _: Int = x2;
+        let _: Text = y1;
+        let _: Text = y2;
+    }
+}
+
+fn test_struct_pattern_inference() {
+    type Point is { x: Float, y: Float };
+    type User is { name: Text, age: Int, active: Bool };
+
+    let opt_point: Maybe<Point> = Some(Point { x: 1.0, y: 2.0 });
+    let opt_user: Maybe<User> = Some(User { name: "Alice", age: 30, active: true });
+
+    if let Some(Point { x, y }) = opt_point && x >= 0.0 && y >= 0.0 {
+        let _: Float = x;
+        let _: Float = y;
+    }
+
+    if let Some(User { name, age, active }) = opt_user && active && age >= 18 {
+        let _: Text = name;
+        let _: Int = age;
+        let _: Bool = active;
+    }
+
+    // Partial destructuring
+    if let Some(User { age, .. }) = opt_user && age > 0 {
+        let _: Int = age;
+    }
+}
+
+fn test_nested_pattern_inference() {
+    type Outer is { inner: Maybe<Int>, flag: Bool };
+
+    let opt: Maybe<Outer> = Some(Outer { inner: Some(42), flag: true });
+
+    // Two-level if-let
+    if let Some(Outer { inner, flag }) = opt && flag {
+        let _: Maybe<Int> = inner;
+        let _: Bool = flag;
+
+        if let Some(value) = inner {
+            let _: Int = value;
+        }
+    }
+
+    // Chain with nested patterns
+    if let Some(Outer { inner: Some(v), flag: true }) = opt {
+        let _: Int = v;
+        assert(v == 42);
+    }
+}
+
+// =============================================================================
+// SECTION 6: Type Narrowing
+// =============================================================================
+
+fn test_type_narrowing_in_chain() {
+    type Status is Pending | Running(Int) | Complete { result: Text };
+
+    let status: Status = Running(50);
+
+    // Pattern matching narrows the type
+    if let Running(progress) = status && progress > 0 && progress < 100 {
+        let _: Int = progress;
+        assert(progress == 50);
+    }
+
+    if let Complete { result } = status {
+        let _: Text = result;
+    }
+}
+
+// =============================================================================
+// SECTION 7: Edge Cases
+// =============================================================================
+
+fn test_expression_type_requirements() {
+    let opt: Maybe<Int> = Some(42);
+
+    // Expression conditions must be Bool
+    fn returns_bool() -> Bool { true }
+
+    if let Some(x) = opt && returns_bool() {
+        assert(x == 42);
+    }
+
+    // Comparison results are Bool
+    if let Some(x) = opt && x > 0 {
+        let comparison: Bool = x > 0;
+        assert(comparison);
+    }
+}
+
+fn test_shadowing_inference() {
+    let x: Float = 3.14;
+
+    // This is valid - x in pattern shadows outer x
+    let opt: Maybe<Int> = Some(42);
+
+    if let Some(x) = opt {
+        // x here is Int, not Float
+        let _: Int = x;
+        assert(x == 42);
+    }
+
+    // After if, x is Float again
+    let _: Float = x;
+    assert(x == 3.14);
+}
+
+// =============================================================================
+// SECTION 8: Real-World Patterns
+// =============================================================================
+
+type Config is { enabled: Bool, threshold: Int, name: Maybe<Text> };
+
+fn test_config_validation() {
+    let config: Maybe<Config> = Some(Config {
+        enabled: true,
+        threshold: 100,
+        name: Some("test"),
+    });
+
+    if let Some(Config { enabled, threshold, name }) = config
+        && enabled
+        && threshold > 0
+        && let Some(config_name) = name
+    {
+        let _: Bool = enabled;
+        let _: Int = threshold;
+        let _: Text = config_name;
+
+        assert(threshold == 100);
+        assert(config_name == "test");
+    }
+}

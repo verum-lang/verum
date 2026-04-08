@@ -1,0 +1,91 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, mutex, threads, concurrency
+// @expected-exit: 0
+
+// Test: Mutex contention under concurrent access.
+// Multiple threads compute partial sums, main thread aggregates.
+
+fn __mutex_new_raw() -> Int {
+    0
+}
+
+fn __mutex_lock_raw(mtx: Int) -> Int {
+    0
+}
+
+fn __mutex_unlock_raw(mtx: Int) -> Int {
+    0
+}
+
+fn __mutex_trylock_raw(mtx: Int) -> Int {
+    0
+}
+
+fn worker_sum(iterations: Int) -> Int {
+    let mut acc = 0;
+    let mut i = 0;
+    while (i < iterations) {
+        acc = acc + 1;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: Mutex basic lock/unlock
+    let mtx = __mutex_new_raw();
+    __mutex_lock_raw(mtx);
+    __mutex_unlock_raw(mtx);
+
+    // Test 2: Try-lock on unlocked mutex
+    let got_lock = __mutex_trylock_raw(mtx);
+    if (got_lock == 0) {
+        print("FAIL test2: trylock should succeed on unlocked mutex");
+        return 1;
+    }
+    __mutex_unlock_raw(mtx);
+
+    // Test 3: Multiple lock/unlock cycles
+    let mut i = 0;
+    while (i < 100) {
+        __mutex_lock_raw(mtx);
+        __mutex_unlock_raw(mtx);
+        i = i + 1;
+    }
+
+    // Test 4: Concurrent workers with mutex
+    // Each worker independently computes sum, main aggregates
+    let t1 = spawn worker_sum(1000);
+    let t2 = spawn worker_sum(1000);
+    let t3 = spawn worker_sum(1000);
+    let t4 = spawn worker_sum(1000);
+
+    // Wait for all threads
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+    let r4 = t4.await;
+    let total = r1 + r2 + r3 + r4;
+
+    // Total should be exactly 4000
+    if (total != 4000) {
+        print(f"FAIL test4: total={total} expected 4000");
+        return 1;
+    }
+
+    // Test 5: Two separate mutexes (different addresses)
+    let mtx2 = __mutex_new_raw();
+    if (mtx2 == mtx) {
+        print("FAIL test5: two mutexes have same address");
+        return 1;
+    }
+    __mutex_lock_raw(mtx);
+    __mutex_lock_raw(mtx2);
+    __mutex_unlock_raw(mtx2);
+    __mutex_unlock_raw(mtx);
+
+    print("928_mutex_contention: PASS");
+    0
+}

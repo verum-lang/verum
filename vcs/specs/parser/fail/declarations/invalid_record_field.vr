@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, record, error
+// @description: Test invalid record field syntax detection
+// @expected-error: E046
+
+type Point is { 123: Int };
+
+type Bad is { x y: Int };
+
+type Wrong is { x:: Int };
+
+type Missing is { x: };

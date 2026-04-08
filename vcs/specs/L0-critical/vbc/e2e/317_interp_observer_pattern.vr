@@ -1,0 +1,289 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, design-patterns, observer, pubsub
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Observer/pub-sub pattern using record-based subscribers.
+// Subjects notify subscribers of changes; subscribers filter by topic and
+// accumulate notifications.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Topics: 1=PRICE, 2=VOLUME, 3=NEWS, 4=ALERT
+// Subscriber: has an ID, a topic_mask (bitmask of subscribed topics), and
+//   accumulated notification count and value sum
+// =============================================================================
+
+type Subscriber is {
+    sub_id: Int,
+    topic_mask: Int,
+    notif_count: Int,
+    value_sum: Int
+};
+
+fn make_sub(sid: Int, mask: Int) -> Subscriber {
+    Subscriber { sub_id: sid, topic_mask: mask, notif_count: 0, value_sum: 0 }
+}
+
+// Check if subscriber is interested in topic
+fn sub_interested(sub: Subscriber, topic: Int) -> Int {
+    let mut bit = 1;
+    let mut k = 0;
+    while k < topic {
+        bit = bit * 2;
+        k = k + 1;
+    }
+    if (sub.topic_mask & bit) != 0 { 1 } else { 0 }
+}
+
+// Notify subscriber with value for a topic
+fn sub_notify(sub: Subscriber, topic: Int, value: Int) -> Subscriber {
+    if sub_interested(sub, topic) == 1 {
+        Subscriber {
+            sub_id: sub.sub_id,
+            topic_mask: sub.topic_mask,
+            notif_count: sub.notif_count + 1,
+            value_sum: sub.value_sum + value
+        }
+    } else {
+        sub
+    }
+}
+
+// =============================================================================
+// Subject with up to 6 subscribers
+// =============================================================================
+
+type Subject is {
+    s0: Subscriber, s1: Subscriber, s2: Subscriber,
+    s3: Subscriber, s4: Subscriber, s5: Subscriber,
+    num_subs: Int
+};
+
+fn subject_new() -> Subject {
+    let empty = make_sub(0, 0);
+    Subject {
+        s0: empty, s1: empty, s2: empty,
+        s3: empty, s4: empty, s5: empty,
+        num_subs: 0
+    }
+}
+
+fn subject_get_sub(subj: Subject, i: Int) -> Subscriber {
+    if i == 0 { subj.s0 }
+    else if i == 1 { subj.s1 }
+    else if i == 2 { subj.s2 }
+    else if i == 3 { subj.s3 }
+    else if i == 4 { subj.s4 }
+    else { subj.s5 }
+}
+
+fn subject_set_sub(subj: Subject, i: Int, sub: Subscriber) -> Subject {
+    Subject {
+        s0: if i == 0 { sub } else { subj.s0 },
+        s1: if i == 1 { sub } else { subj.s1 },
+        s2: if i == 2 { sub } else { subj.s2 },
+        s3: if i == 3 { sub } else { subj.s3 },
+        s4: if i == 4 { sub } else { subj.s4 },
+        s5: if i == 5 { sub } else { subj.s5 },
+        num_subs: subj.num_subs
+    }
+}
+
+fn subject_subscribe(subj: Subject, sub: Subscriber) -> Subject {
+    let idx = subj.num_subs;
+    let s2 = subject_set_sub(subj, idx, sub);
+    Subject {
+        s0: s2.s0, s1: s2.s1, s2: s2.s2,
+        s3: s2.s3, s4: s2.s4, s5: s2.s5,
+        num_subs: subj.num_subs + 1
+    }
+}
+
+fn subject_publish(subj: Subject, topic: Int, value: Int) -> Subject {
+    let mut s = subj;
+    let mut i = 0;
+    while i < s.num_subs {
+        let sub = subject_get_sub(s, i);
+        let updated = sub_notify(sub, topic, value);
+        s = subject_set_sub(s, i, updated);
+        i = i + 1;
+    }
+    s
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_no_subscribers() {
+    let mut subj = subject_new();
+    subj = subject_publish(subj, 1, 100);
+    // No subscribers, nothing happens
+    assert_eq(subj.num_subs, 0);
+}
+
+fn test_single_subscriber_all_topics() {
+    let mut subj = subject_new();
+    // Subscribe to all topics (mask = 0b11110 = topics 1,2,3,4)
+    subj = subject_subscribe(subj, make_sub(1, 30));  // 2+4+8+16
+
+    subj = subject_publish(subj, 1, 10);  // PRICE
+    subj = subject_publish(subj, 2, 20);  // VOLUME
+    subj = subject_publish(subj, 3, 30);  // NEWS
+
+    let s0 = subject_get_sub(subj, 0);
+    assert_eq(s0.notif_count, 3);
+    assert_eq(s0.value_sum, 60);
+}
+
+fn test_topic_filtering() {
+    let mut subj = subject_new();
+    // Sub 1: only PRICE (topic 1, bit=2)
+    subj = subject_subscribe(subj, make_sub(1, 2));
+    // Sub 2: only VOLUME (topic 2, bit=4)
+    subj = subject_subscribe(subj, make_sub(2, 4));
+
+    subj = subject_publish(subj, 1, 100);  // PRICE
+    subj = subject_publish(subj, 2, 200);  // VOLUME
+    subj = subject_publish(subj, 3, 300);  // NEWS
+
+    let s0 = subject_get_sub(subj, 0);
+    assert_eq(s0.notif_count, 1);
+    assert_eq(s0.value_sum, 100);
+
+    let s1 = subject_get_sub(subj, 1);
+    assert_eq(s1.notif_count, 1);
+    assert_eq(s1.value_sum, 200);
+}
+
+fn test_multiple_subscribers_same_topic() {
+    let mut subj = subject_new();
+    // Both subscribe to PRICE (bit=2)
+    subj = subject_subscribe(subj, make_sub(1, 2));
+    subj = subject_subscribe(subj, make_sub(2, 2));
+
+    subj = subject_publish(subj, 1, 50);
+    subj = subject_publish(subj, 1, 75);
+
+    let s0 = subject_get_sub(subj, 0);
+    let s1 = subject_get_sub(subj, 1);
+    assert_eq(s0.notif_count, 2);
+    assert_eq(s0.value_sum, 125);
+    assert_eq(s1.notif_count, 2);
+    assert_eq(s1.value_sum, 125);
+}
+
+fn test_no_matching_topic() {
+    let mut subj = subject_new();
+    // Subscribe to ALERT (topic 4, bit=16)
+    subj = subject_subscribe(subj, make_sub(1, 16));
+
+    // Publish PRICE and VOLUME (topics 1, 2)
+    subj = subject_publish(subj, 1, 100);
+    subj = subject_publish(subj, 2, 200);
+
+    let s0 = subject_get_sub(subj, 0);
+    assert_eq(s0.notif_count, 0);
+    assert_eq(s0.value_sum, 0);
+}
+
+fn test_mixed_subscriptions() {
+    let mut subj = subject_new();
+    // Sub A: PRICE+NEWS (2+8=10)
+    subj = subject_subscribe(subj, make_sub(1, 10));
+    // Sub B: VOLUME+ALERT (4+16=20)
+    subj = subject_subscribe(subj, make_sub(2, 20));
+    // Sub C: All (2+4+8+16=30)
+    subj = subject_subscribe(subj, make_sub(3, 30));
+
+    subj = subject_publish(subj, 1, 10);  // PRICE
+    subj = subject_publish(subj, 2, 20);  // VOLUME
+    subj = subject_publish(subj, 3, 30);  // NEWS
+    subj = subject_publish(subj, 4, 40);  // ALERT
+
+    let sa = subject_get_sub(subj, 0);
+    assert_eq(sa.notif_count, 2);  // PRICE + NEWS
+    assert_eq(sa.value_sum, 40);
+
+    let sb = subject_get_sub(subj, 1);
+    assert_eq(sb.notif_count, 2);  // VOLUME + ALERT
+    assert_eq(sb.value_sum, 60);
+
+    let sc = subject_get_sub(subj, 2);
+    assert_eq(sc.notif_count, 4);  // all
+    assert_eq(sc.value_sum, 100);
+}
+
+fn test_many_publishes() {
+    let mut subj = subject_new();
+    subj = subject_subscribe(subj, make_sub(1, 2));  // PRICE only
+
+    let mut i = 0;
+    while i < 8 {
+        subj = subject_publish(subj, 1, i + 1);
+        i = i + 1;
+    }
+
+    let s0 = subject_get_sub(subj, 0);
+    assert_eq(s0.notif_count, 8);
+    assert_eq(s0.value_sum, 36);  // 1+2+...+8 = 36
+}
+
+fn test_unsubscribed_topic_ignored() {
+    let mut subj = subject_new();
+    // Subscribe to topic 1 only
+    subj = subject_subscribe(subj, make_sub(1, 2));
+
+    // Publish on topics 2, 3, 4
+    subj = subject_publish(subj, 2, 999);
+    subj = subject_publish(subj, 3, 999);
+    subj = subject_publish(subj, 4, 999);
+
+    let s0 = subject_get_sub(subj, 0);
+    assert_eq(s0.notif_count, 0);
+}
+
+fn main() -> Int {
+    test_no_subscribers();
+    test_single_subscriber_all_topics();
+    test_topic_filtering();
+    test_multiple_subscribers_same_topic();
+    test_no_matching_topic();
+    test_mixed_subscriptions();
+    test_many_publishes();
+    test_unsubscribed_topic_ignored();
+    print("[OK] 317_interp_observer_pattern");
+    0
+}

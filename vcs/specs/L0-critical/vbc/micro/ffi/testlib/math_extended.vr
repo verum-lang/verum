@@ -1,0 +1,127 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, math, trigonometry
+// @description: Test FFI extended math operations (sin, cos, pow, etc.)
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_sin_f64(x: Float) -> Float;
+    fn ffi_cos_f64(x: Float) -> Float;
+    fn ffi_pow_f64(base: Float, exp: Float) -> Float;
+    fn ffi_sqrt_f64(x: Float) -> Float;
+    fn ffi_is_nan_f64(x: Float) -> Int;  // Returns i32 (marshalled to Int): 1 if NaN, 0 otherwise
+    fn ffi_is_inf_f64(x: Float) -> Int;  // Returns i32 (marshalled to Int): 1 if infinite, 0 otherwise
+    fn ffi_floor_f64(x: Float) -> Float;
+    fn ffi_ceil_f64(x: Float) -> Float;
+    fn ffi_round_f64(x: Float) -> Float;
+}
+
+fn main() {
+    // Pi approximation for testing
+    let pi = 3.14159265358979;
+    let pi_half = pi / 2.0;
+    let epsilon = 0.0001;
+
+    // Test sin
+    // sin(0) = 0
+    let sin_0 = ffi_sin_f64(0.0);
+    assert(sin_0 > -epsilon && sin_0 < epsilon);
+
+    // sin(pi/2) = 1
+    let sin_pi2 = ffi_sin_f64(pi_half);
+    assert(sin_pi2 > 1.0 - epsilon && sin_pi2 < 1.0 + epsilon);
+
+    // sin(pi) ≈ 0
+    let sin_pi = ffi_sin_f64(pi);
+    assert(sin_pi > -epsilon && sin_pi < epsilon);
+
+    // Test cos
+    // cos(0) = 1
+    let cos_0 = ffi_cos_f64(0.0);
+    assert(cos_0 > 1.0 - epsilon && cos_0 < 1.0 + epsilon);
+
+    // cos(pi/2) ≈ 0
+    let cos_pi2 = ffi_cos_f64(pi_half);
+    assert(cos_pi2 > -epsilon && cos_pi2 < epsilon);
+
+    // cos(pi) = -1
+    let cos_pi = ffi_cos_f64(pi);
+    assert(cos_pi > -1.0 - epsilon && cos_pi < -1.0 + epsilon);
+
+    // Pythagorean identity: sin²(x) + cos²(x) = 1
+    let x = 0.7;
+    let sin_x = ffi_sin_f64(x);
+    let cos_x = ffi_cos_f64(x);
+    let identity = sin_x * sin_x + cos_x * cos_x;
+    assert(identity > 1.0 - epsilon && identity < 1.0 + epsilon);
+
+    // Test pow
+    // 2^3 = 8
+    let pow_2_3 = ffi_pow_f64(2.0, 3.0);
+    assert(pow_2_3 > 7.99 && pow_2_3 < 8.01);
+
+    // 10^2 = 100
+    let pow_10_2 = ffi_pow_f64(10.0, 2.0);
+    assert(pow_10_2 > 99.99 && pow_10_2 < 100.01);
+
+    // 2^0.5 = sqrt(2) ≈ 1.414
+    let pow_2_half = ffi_pow_f64(2.0, 0.5);
+    assert(pow_2_half > 1.41 && pow_2_half < 1.42);
+
+    // Test sqrt
+    let sqrt_4 = ffi_sqrt_f64(4.0);
+    assert(sqrt_4 > 1.99 && sqrt_4 < 2.01);
+
+    let sqrt_2 = ffi_sqrt_f64(2.0);
+    assert(sqrt_2 > 1.41 && sqrt_2 < 1.42);
+
+    // Test is_nan
+    let sqrt_neg = ffi_sqrt_f64(-1.0);
+    let is_nan = ffi_is_nan_f64(sqrt_neg);
+    assert_eq(is_nan, 1);  // sqrt(-1) produces NaN
+
+    let not_nan = ffi_is_nan_f64(1.0);
+    assert_eq(not_nan, 0);  // 1.0 is not NaN
+
+    // Test is_inf
+    let inf = 1.0 / 0.0;
+    let is_inf = ffi_is_inf_f64(inf);
+    assert_eq(is_inf, 1);  // 1.0/0.0 is positive infinity
+
+    let neg_inf = -1.0 / 0.0;
+    let is_neg_inf = ffi_is_inf_f64(neg_inf);
+    assert_eq(is_neg_inf, 1);  // -1.0/0.0 is negative infinity
+
+    let not_inf = ffi_is_inf_f64(1.0);
+    assert_eq(not_inf, 0);  // 1.0 is not infinite
+
+    // Test floor
+    let floor_pos = ffi_floor_f64(3.7);
+    assert(floor_pos > 2.99 && floor_pos < 3.01);
+
+    let floor_neg = ffi_floor_f64(-3.7);
+    assert(floor_neg > -4.01 && floor_neg < -3.99);
+
+    // Test ceil
+    let ceil_pos = ffi_ceil_f64(3.2);
+    assert(ceil_pos > 3.99 && ceil_pos < 4.01);
+
+    let ceil_neg = ffi_ceil_f64(-3.2);
+    assert(ceil_neg > -3.01 && ceil_neg < -2.99);
+
+    // Test round
+    let round_up = ffi_round_f64(3.6);
+    assert(round_up > 3.99 && round_up < 4.01);
+
+    let round_down = ffi_round_f64(3.4);
+    assert(round_down > 2.99 && round_down < 3.01);
+
+    // Test round at 0.5 (typically rounds to nearest even or away from zero)
+    let round_half = ffi_round_f64(3.5);
+    assert(round_half > 3.49 && round_half < 4.01);
+
+    print("Extended math tests passed!");
+}

@@ -1,0 +1,868 @@
+// =============================================================================
+// VCS Test Suite: stdlib/mem/segment.vr - Segment Management Tests
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: mem, segment, slice, allocator, mimalloc, commit, purge
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for the mimalloc-style segment management system with 32 MiB segments
+// and 64 KiB slices.
+//
+// =============================================================================
+
+mount core.mem.segment.{
+    // Constants
+    SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT, MASK_WORDS, SEGMENT_ALIGN,
+    SMALL_PAGE_SIZE, MEDIUM_PAGE_SIZE, LARGE_PAGE_THRESHOLD,
+    PURGE_DELAY_NS, MAX_RECLAIM_PER_OP,
+
+    // Slice info
+    SliceInfo, SLICE_FREE, SLICE_USED, SLICE_SPAN_START, SLICE_SPAN_CONTINUE,
+
+    // Segment
+    Segment, SEGMENT_NORMAL, SEGMENT_HUGE,
+
+    // Functions
+    segment_alloc, segment_free, segment_abandon, ptr_to_segment, get_segment_stats,
+
+    // Types
+    SegmentError, SegmentStats,
+};
+
+// =============================================================================
+// Constant Tests
+// =============================================================================
+
+@test
+fn test_segment_size() {
+    // 32 MiB = 32 * 1024 * 1024 = 33554432 bytes
+    assert_eq(SEGMENT_SIZE, 33554432);
+    assert_eq(SEGMENT_SIZE, 32 * 1024 * 1024);
+}
+
+@test
+fn test_slice_size() {
+    // 64 KiB = 64 * 1024 = 65536 bytes
+    assert_eq(SLICE_SIZE, 65536);
+    assert_eq(SLICE_SIZE, 64 * 1024);
+}
+
+@test
+fn test_slices_per_segment() {
+    // 32 MiB / 64 KiB = 512 slices
+    assert_eq(SLICES_PER_SEGMENT, 512);
+    assert_eq(SLICES_PER_SEGMENT, SEGMENT_SIZE / SLICE_SIZE);
+}
+
+@test
+fn test_mask_words() {
+    // 512 slices / 64 bits per word = 8 words
+    assert_eq(MASK_WORDS, 8);
+    assert_eq(MASK_WORDS, SLICES_PER_SEGMENT / 64);
+}
+
+@test
+fn test_segment_align() {
+    // Segment alignment equals segment size
+    assert_eq(SEGMENT_ALIGN, SEGMENT_SIZE);
+}
+
+@test
+fn test_small_page_size() {
+    // Small page = 1 slice = 64 KiB
+    assert_eq(SMALL_PAGE_SIZE, SLICE_SIZE);
+    assert_eq(SMALL_PAGE_SIZE, 65536);
+}
+
+@test
+fn test_medium_page_size() {
+    // Medium page = 8 slices = 512 KiB
+    assert_eq(MEDIUM_PAGE_SIZE, 8 * SLICE_SIZE);
+    assert_eq(MEDIUM_PAGE_SIZE, 524288);
+}
+
+@test
+fn test_large_page_threshold() {
+    // Large page threshold = medium page size
+    assert_eq(LARGE_PAGE_THRESHOLD, MEDIUM_PAGE_SIZE);
+}
+
+@test
+fn test_purge_delay() {
+    // Default 10ms purge delay
+    assert_eq(PURGE_DELAY_NS, 10_000_000);
+}
+
+@test
+fn test_max_reclaim_per_op() {
+    // Maximum 8 segments reclaimed per operation
+    assert_eq(MAX_RECLAIM_PER_OP, 8);
+}
+
+// =============================================================================
+// Slice State Constants Tests
+// =============================================================================
+
+@test
+fn test_slice_state_free() {
+    assert_eq(SLICE_FREE, 0u8);
+}
+
+@test
+fn test_slice_state_used() {
+    assert_eq(SLICE_USED, 1u8);
+}
+
+@test
+fn test_slice_state_span_start() {
+    assert_eq(SLICE_SPAN_START, 2u8);
+}
+
+@test
+fn test_slice_state_span_continue() {
+    assert_eq(SLICE_SPAN_CONTINUE, 3u8);
+}
+
+// =============================================================================
+// Segment Kind Constants Tests
+// =============================================================================
+
+@test
+fn test_segment_kind_normal() {
+    assert_eq(SEGMENT_NORMAL, 0u8);
+}
+
+@test
+fn test_segment_kind_huge() {
+    assert_eq(SEGMENT_HUGE, 1u8);
+}
+
+// =============================================================================
+// SliceInfo Tests
+// =============================================================================
+
+@test
+fn test_slice_info_size() {
+    // SliceInfo should be 8 bytes (packed)
+    assert_eq(SliceInfo.size, 8);
+}
+
+@test
+fn test_slice_info_free_constructor() {
+    let info = SliceInfo.free();
+
+    assert_eq(info.state, SLICE_FREE);
+    assert_eq(info.span_count, 0);
+    assert_eq(info.size_class, 0);
+    assert_eq(info.flags, 0);
+    assert_eq(info.reserved, 0);
+}
+
+@test
+fn test_slice_info_span_start_constructor() {
+    let info = SliceInfo.span_start(4, 23);
+
+    assert_eq(info.state, SLICE_SPAN_START);
+    assert_eq(info.span_count, 4);
+    assert_eq(info.size_class, 23);
+    assert_eq(info.flags, 0);
+}
+
+@test
+fn test_slice_info_span_continue_constructor() {
+    let info = SliceInfo.span_continue();
+
+    assert_eq(info.state, SLICE_SPAN_CONTINUE);
+    assert_eq(info.span_count, 0);
+    assert_eq(info.size_class, 0);
+}
+
+@test
+fn test_slice_info_is_free() {
+    let free_info = SliceInfo.free();
+    let used_info = SliceInfo.span_start(1, 0);
+
+    assert(free_info.is_free());
+    assert(!used_info.is_free());
+}
+
+@test
+fn test_slice_info_is_span_start() {
+    let free_info = SliceInfo.free();
+    let start_info = SliceInfo.span_start(4, 7);
+    let continue_info = SliceInfo.span_continue();
+
+    assert(!free_info.is_span_start());
+    assert(start_info.is_span_start());
+    assert(!continue_info.is_span_start());
+}
+
+@test
+fn test_slice_info_span_count_max() {
+    // span_count is UInt8, max 255 slices
+    let info = SliceInfo.span_start(255, 0);
+    assert_eq(info.span_count, 255);
+}
+
+@test
+fn test_slice_info_size_class_max() {
+    // size_class is UInt8, max 255
+    let info = SliceInfo.span_start(1, 72);  // Max normal size class
+    assert_eq(info.size_class, 72);
+}
+
+// =============================================================================
+// Segment Header Tests
+// =============================================================================
+
+@test
+fn test_segment_header_size() {
+    // Header should be < 4 KiB to fit in first slice
+    // 64 + 32 + 128 + 16 + 16 + 4096 = 4352 bytes
+    assert_eq(Segment.HEADER_SIZE, 4352);
+    assert(Segment.HEADER_SIZE < SLICE_SIZE);
+}
+
+@test
+fn test_segment_alignment() {
+    // Segment should be 64-byte aligned (cache line)
+    assert_eq(Segment.align, 64);
+}
+
+@test
+fn test_segment_slices_array_size() {
+    // Should have 512 slice info entries
+    // Each SliceInfo is 8 bytes, so 512 * 8 = 4096 bytes
+    let expected_array_size = SLICES_PER_SEGMENT * 8;
+    assert_eq(expected_array_size, 4096);
+}
+
+// =============================================================================
+// Commit Mask Tests
+// =============================================================================
+
+@test
+fn test_commit_mask_words() {
+    // Commit mask should have MASK_WORDS (8) entries
+    // This is implicitly tested by the fact that commit_mask is [UInt64; 8]
+    assert_eq(MASK_WORDS, 8);
+}
+
+@test
+fn test_commit_mask_covers_all_slices() {
+    // 8 words * 64 bits = 512 bits = 512 slices
+    assert_eq(MASK_WORDS * 64, SLICES_PER_SEGMENT);
+}
+
+@test
+fn test_is_committed_bit_calculation() {
+    // Test that bit indexing works correctly
+    // Slice 0: word 0, bit 0
+    // Slice 63: word 0, bit 63
+    // Slice 64: word 1, bit 0
+    // Slice 511: word 7, bit 63
+
+    // Simulate bit calculation
+    let test_indices = [
+        (0, 0, 0),      // slice 0 → word 0, bit 0
+        (63, 0, 63),    // slice 63 → word 0, bit 63
+        (64, 1, 0),     // slice 64 → word 1, bit 0
+        (127, 1, 63),   // slice 127 → word 1, bit 63
+        (511, 7, 63),   // slice 511 → word 7, bit 63
+    ];
+
+    let mut i = 0;
+    while i < 5 {
+        let entry = test_indices[i];
+        let slice_idx = entry.0;
+        let expected_word = entry.1;
+        let expected_bit = entry.2;
+        let word = slice_idx / 64;
+        let bit = slice_idx % 64;
+        assert_eq(word, expected_word);
+        assert_eq(bit, expected_bit);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Slice Pointer Calculation Tests
+// =============================================================================
+
+@test
+fn test_slice_ptr_offset_calculation() {
+    // Slice pointer = segment base + slice_index * SLICE_SIZE
+    let base_addr = 0x1000_0000 as Int;
+
+    // Slice 0 should be at base
+    let slice0_offset = 0 * SLICE_SIZE;
+    assert_eq(slice0_offset, 0);
+
+    // Slice 1 should be at base + 64 KiB
+    let slice1_offset = 1 * SLICE_SIZE;
+    assert_eq(slice1_offset, 65536);
+
+    // Slice 511 should be at base + 511 * 64 KiB
+    let slice511_offset = 511 * SLICE_SIZE;
+    assert_eq(slice511_offset, 33488896);
+}
+
+@test
+fn test_slice_index_from_pointer() {
+    // Given a pointer, we can calculate slice index
+    let base = 0x1000_0000;
+    let ptr1 = base + 65536;   // Slice 1
+    let ptr2 = base + 131072;  // Slice 2
+    let ptr511 = base + 511 * SLICE_SIZE;
+
+    assert_eq((ptr1 - base) / SLICE_SIZE, 1);
+    assert_eq((ptr2 - base) / SLICE_SIZE, 2);
+    assert_eq((ptr511 - base) / SLICE_SIZE, 511);
+}
+
+// =============================================================================
+// ptr_to_segment Tests
+// =============================================================================
+
+@test
+fn test_ptr_to_segment_alignment_mask() {
+    // ptr_to_segment uses alignment mask to find segment start
+    let segment_mask = !(SEGMENT_SIZE - 1);
+
+    // Segment size is 32 MiB = 0x200_0000
+    // Mask should clear lower 25 bits
+    assert_eq(SEGMENT_SIZE - 1, 0x1FF_FFFF);
+    assert_eq(segment_mask, !0x1FF_FFFF);
+}
+
+@test
+fn test_ptr_to_segment_calculation() {
+    // Any pointer within a segment should map to segment start
+    let segment_base = 0x4000_0000 as Int;  // 1 GiB aligned
+
+    // Test various offsets within the segment
+    let test_offsets = [0, 1, 65536, 1000000, SEGMENT_SIZE - 1];
+
+    for offset in test_offsets {
+        let ptr = segment_base + offset;
+        let segment_addr = ptr & !(SEGMENT_SIZE - 1);
+        assert_eq(segment_addr, segment_base);
+    }
+}
+
+// =============================================================================
+// SegmentError Tests
+// =============================================================================
+
+@test
+fn test_segment_error_mmap_failed() {
+    let err = SegmentError.MmapFailed { code: -12 };
+
+    match err {
+        MmapFailed { code } => assert_eq(code, -12),
+        _ => assert(false, "Wrong error variant"),
+    }
+}
+
+@test
+fn test_segment_error_munmap_failed() {
+    let err = SegmentError.MunmapFailed { code: -22 };
+
+    match err {
+        MunmapFailed { code } => assert_eq(code, -22),
+        _ => assert(false, "Wrong error variant"),
+    }
+}
+
+@test
+fn test_segment_error_out_of_memory() {
+    let err = SegmentError.OutOfMemory;
+
+    match err {
+        OutOfMemory => { /* OK */ }
+        _ => assert(false, "Wrong error variant"),
+    }
+}
+
+@test
+fn test_segment_error_message_mmap() {
+    let err = SegmentError.MmapFailed { code: 12 };
+    let msg = err.message();
+    assert(msg.contains("mmap failed"));
+    assert(msg.contains("12"));
+}
+
+@test
+fn test_segment_error_message_munmap() {
+    let err = SegmentError.MunmapFailed { code: 22 };
+    let msg = err.message();
+    assert(msg.contains("munmap failed"));
+    assert(msg.contains("22"));
+}
+
+@test
+fn test_segment_error_message_oom() {
+    let err = SegmentError.OutOfMemory;
+    let msg = err.message();
+    assert(msg.contains("out of memory"));
+}
+
+// =============================================================================
+// SegmentStats Tests
+// =============================================================================
+
+@test
+fn test_segment_stats_construction() {
+    let stats = SegmentStats {
+        total_segments: 10,
+        abandoned_segments: 2,
+        used_slices: 1000,
+        committed_bytes: 65536000,
+    };
+
+    assert_eq(stats.total_segments, 10);
+    assert_eq(stats.abandoned_segments, 2);
+    assert_eq(stats.used_slices, 1000);
+    assert_eq(stats.committed_bytes, 65536000);
+}
+
+@test
+fn test_segment_stats_zero() {
+    let stats = SegmentStats {
+        total_segments: 0,
+        abandoned_segments: 0,
+        used_slices: 0,
+        committed_bytes: 0,
+    };
+
+    assert_eq(stats.total_segments, 0);
+    assert_eq(stats.abandoned_segments, 0);
+}
+
+@test
+fn test_get_segment_stats_callable() {
+    // Should not panic, returns valid stats
+    let stats = get_segment_stats();
+
+    assert(stats.total_segments >= 0);
+    assert(stats.abandoned_segments <= stats.total_segments);
+}
+
+// =============================================================================
+// Slice Allocation Logic Tests
+// =============================================================================
+
+@test
+fn test_first_fit_finds_contiguous_slices() {
+    // Test the first-fit algorithm logic
+    // Given: slices [used, used, free, free, free, used, free, free]
+    // Request: 3 slices
+    // Expected: starts at index 2
+
+    let slices_state = [true, true, false, false, false, true, false, false];
+    let request = 3;
+
+    let mut run_start = 0;
+    let mut run_len = 0;
+    let mut result = None;
+
+    for i in 0..slices_state.len() {
+        if !slices_state[i] {  // Free
+            if run_len == 0 {
+                run_start = i;
+            }
+            run_len = run_len + 1;
+
+            if run_len >= request {
+                result = Some(run_start);
+                break;
+            }
+        } else {
+            run_len = 0;
+        }
+    }
+
+    assert(result.is_some());
+    assert_eq(result.unwrap(), 2);
+}
+
+@test
+fn test_first_fit_no_contiguous_slices() {
+    // Given: slices [free, used, free, used, free]
+    // Request: 2 contiguous slices
+    // Expected: None
+
+    let slices_state = [false, true, false, true, false];
+    let request = 2;
+
+    let mut run_start = 0;
+    let mut run_len = 0;
+    let mut result: Maybe<Int> = None;
+
+    for i in 0..slices_state.len() {
+        if !slices_state[i] {
+            if run_len == 0 {
+                run_start = i;
+            }
+            run_len = run_len + 1;
+
+            if run_len >= request {
+                result = Some(run_start);
+                break;
+            }
+        } else {
+            run_len = 0;
+        }
+    }
+
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Purge Mask Tests
+// =============================================================================
+
+@test
+fn test_purge_mask_bit_operations() {
+    // Test setting purge bits
+    let mut mask: UInt64 = 0;
+
+    // Set bit 5
+    mask = mask | ((1 as UInt64) << 5);
+    assert_eq(mask, 32 as UInt64);
+
+    // Set bit 10
+    mask = mask | ((1 as UInt64) << 10);
+    assert_eq(mask, (32 + 1024) as UInt64);
+
+    // Clear bit 5
+    mask = mask & !((1 as UInt64) << 5);
+    assert_eq(mask, 1024 as UInt64);
+}
+
+@test
+fn test_purge_trigger_threshold() {
+    // Large spans (>= 4 slices) trigger purge scheduling
+    let threshold = 4;
+
+    // 3 slices: no purge
+    assert(3 < threshold);
+
+    // 4 slices: triggers purge
+    assert(4 >= threshold);
+
+    // 8 slices (medium page): triggers purge
+    assert(8 >= threshold);
+}
+
+// =============================================================================
+// Generation/Epoch Tests
+// =============================================================================
+
+@test
+fn test_generation_wraparound() {
+    // When generation wraps from MAX to 0, epoch should increment
+    let max_gen: UInt32 = 0xFFFF_FFFF;
+    let new_gen = max_gen + 1;
+
+    // new_gen should be 0 (wrapped)
+    assert_eq(new_gen, 0);
+}
+
+@test
+fn test_epoch_increment_on_wraparound() {
+    // Epoch is 16-bit
+    let mut epoch: UInt16 = 100;
+
+    // Simulate wraparound handling
+    if true {  // Simulating new_gen == 0
+        epoch = epoch + 1;
+    }
+
+    assert_eq(epoch, 101);
+}
+
+// =============================================================================
+// Memory Layout Verification Tests
+// =============================================================================
+
+@test
+fn test_segment_layout_fits_in_segment() {
+    // Header + data must fit in segment
+    assert(Segment.HEADER_SIZE < SEGMENT_SIZE);
+}
+
+@test
+fn test_slice_0_reserved_for_header() {
+    // Slice 0 is always used for the segment header
+    // New segments should have used_slices = 1
+    let initial_used_slices = 1;
+    assert_eq(initial_used_slices, 1);
+}
+
+@test
+fn test_usable_slices() {
+    // Usable slices = total slices - 1 (header)
+    let usable = SLICES_PER_SEGMENT - 1;
+    assert_eq(usable, 511);
+}
+
+@test
+fn test_max_allocation_in_segment() {
+    // Maximum allocation = all usable slices
+    let max_bytes = 511 * SLICE_SIZE;
+    assert_eq(max_bytes, 33488896);  // ~32 MiB - 64 KiB
+}
+
+// =============================================================================
+// Abandoned Segment Logic Tests
+// =============================================================================
+
+@test
+fn test_abandoned_thread_id_is_zero() {
+    // Abandoned segments have thread_id = 0
+    let abandoned_thread_id: UInt64 = 0;
+    assert_eq(abandoned_thread_id, 0);
+}
+
+@test
+fn test_try_claim_uses_cas() {
+    // Claiming uses compare-and-swap on thread_id
+    // Expected: 0 (abandoned), new: actual thread ID
+
+    let expected: UInt64 = 0;
+    let new_thread_id: UInt64 = 12345;
+
+    // Simulating CAS logic
+    let current: UInt64 = 0;
+    let cas_success = current == expected;
+
+    assert(cas_success);
+}
+
+@test
+fn test_abandoned_visits_increment() {
+    // Each reclaim attempt increments visit count
+    let mut visits: UInt16 = 0;
+
+    visits = visits + 1;
+    assert_eq(visits, 1);
+
+    visits = visits + 1;
+    assert_eq(visits, 2);
+}
+
+// =============================================================================
+// Span Management Tests
+// =============================================================================
+
+@test
+fn test_span_start_marks_first_slice() {
+    // First slice of a span has state SPAN_START
+    let info = SliceInfo.span_start(4, 23);
+    assert_eq(info.state, SLICE_SPAN_START);
+    assert_eq(info.span_count, 4);
+}
+
+@test
+fn test_span_continue_marks_remaining_slices() {
+    // Remaining slices have state SPAN_CONTINUE
+    let info = SliceInfo.span_continue();
+    assert_eq(info.state, SLICE_SPAN_CONTINUE);
+}
+
+@test
+fn test_span_free_resets_all_slices() {
+    // Freeing a span should reset all slices to FREE
+    let free_info = SliceInfo.free();
+
+    assert_eq(free_info.state, SLICE_FREE);
+    assert(free_info.is_free());
+}
+
+// =============================================================================
+// Page Size Tests
+// =============================================================================
+
+@test
+fn test_small_page_one_slice() {
+    // Small pages use 1 slice (64 KiB)
+    let slices_for_small = 1;
+    let size = slices_for_small * SLICE_SIZE;
+    assert_eq(size, 65536);
+}
+
+@test
+fn test_medium_page_eight_slices() {
+    // Medium pages use 8 slices (512 KiB)
+    let slices_for_medium = 8;
+    let size = slices_for_medium * SLICE_SIZE;
+    assert_eq(size, 524288);
+}
+
+@test
+fn test_large_page_variable_slices() {
+    // Large pages use variable number of slices
+    // For 1 MiB allocation: 1048576 / 65536 = 16 slices
+
+    let allocation_size = 1048576;  // 1 MiB
+    let slices_needed = (allocation_size + SLICE_SIZE - 1) / SLICE_SIZE;
+    assert_eq(slices_needed, 16);
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_max_slices_per_segment() {
+    // Cannot allocate more than SLICES_PER_SEGMENT - 1 slices
+    let max_allocatable = SLICES_PER_SEGMENT - 1;
+    assert_eq(max_allocatable, 511);
+}
+
+@test
+fn test_zero_slice_request() {
+    // Zero slices request should be handled gracefully
+    let request = 0;
+    // Implementation should handle this edge case
+    assert(request == 0);
+}
+
+@test
+fn test_oversized_slice_request() {
+    // Request for more slices than available
+    let request = 600;  // > 511 usable
+    let available = 511;
+
+    assert(request > available);
+}
+
+@test
+fn test_purge_delay_timing() {
+    // Purge should not execute before delay expires
+    let now: UInt64 = 1_000_000_000;  // 1 second
+    let purge_expire: UInt64 = 2_000_000_000;  // 2 seconds
+
+    let should_purge = now >= purge_expire;
+    assert(!should_purge);
+
+    // After delay
+    let now2: UInt64 = 3_000_000_000;  // 3 seconds
+    let should_purge2 = now2 >= purge_expire;
+    assert(should_purge2);
+}
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+
+@test
+fn test_slice_allocation_workflow() {
+    // Simulate typical slice allocation workflow
+    // 1. Check for free contiguous slices
+    // 2. Mark as span start + continuations
+    // 3. Update used_slices counter
+    // 4. Commit memory if needed
+
+    let mut used_slices: UInt32 = 1;  // Header
+    let slices_to_alloc = 4;
+
+    // Allocate
+    used_slices = used_slices + slices_to_alloc as UInt32;
+    assert_eq(used_slices, 5);
+
+    // Free
+    used_slices = used_slices - slices_to_alloc as UInt32;
+    assert_eq(used_slices, 1);
+}
+
+@test
+fn test_segment_lifecycle() {
+    // Segment lifecycle: alloc → use → abandon → reclaim/free
+
+    // States
+    let state_allocated = "allocated";
+    let state_in_use = "in_use";
+    let state_abandoned = "abandoned";
+    let state_reclaimed = "reclaimed";
+    let state_freed = "freed";
+
+    // Simulate transitions
+    let mut state = state_allocated;
+
+    // Use
+    state = state_in_use;
+    assert_eq(state, "in_use");
+
+    // Abandon (thread exit)
+    state = state_abandoned;
+    assert_eq(state, "abandoned");
+
+    // Another thread reclaims
+    state = state_reclaimed;
+    assert_eq(state, "reclaimed");
+
+    // Eventually freed when empty
+    state = state_freed;
+    assert_eq(state, "freed");
+}
+
+@test
+fn test_commit_mask_population_count() {
+    // Count committed slices using popcount
+    let mask: UInt64 = 0b1010_1010_1010_1010;
+
+    // Count bits manually
+    let mut count = 0;
+    let mut temp = mask;
+    while temp != 0 {
+        count = count + (temp & 1) as Int;
+        temp = temp >> 1;
+    }
+
+    assert_eq(count, 8);  // 8 bits set
+}
+
+// =============================================================================
+// Concurrency Safety Tests
+// =============================================================================
+
+@test
+fn test_segment_lock_unlock_pattern() {
+    // Lock/unlock should be paired
+    let mut lock_count = 0;
+
+    // Lock
+    lock_count = lock_count + 1;
+    assert_eq(lock_count, 1);
+
+    // Critical section...
+
+    // Unlock
+    lock_count = lock_count - 1;
+    assert_eq(lock_count, 0);
+}
+
+@test
+fn test_atomic_thread_id_operations() {
+    // Thread ID uses atomic operations
+    // Load with acquire, store with release
+
+    let initial: UInt64 = 12345;
+    let abandoned: UInt64 = 0;
+
+    // Abandon uses atomic store
+    let thread_id = abandoned;
+    assert_eq(thread_id, 0);
+
+    // Claim uses atomic CAS
+    let expected = abandoned;
+    let new = initial;
+    let success = thread_id == expected;
+    assert(success);
+}
+

@@ -1,0 +1,27 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, corollary
+// @timeout: 5000
+
+/// Corollary declarations — consequences of theorems.
+
+theorem base_theorem(n: Int)
+    requires n > 0
+    proof by auto;
+
+// Corollary derived from base_theorem
+corollary positive_double(n: Int)
+    requires n > 0
+    proof by auto;
+
+// Corollary with structured proof
+corollary positive_triple(n: Int)
+    requires n > 0
+    proof {
+        have h: n > 0 by assumption;
+        show n * 3 > 0 by omega;
+    };
+
+fn main() {
+    print("Corollary tests parsed");
+}

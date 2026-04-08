@@ -1,0 +1,190 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, patterns, active-patterns, imports
+// @description: Active pattern imports across module boundaries
+
+// Module defining active patterns
+module patterns {
+    pub type Maybe<T> is None | Some(T);
+
+    // Total active pattern for parity
+    pub pattern Even(n: Int) -> Bool =
+        n % 2 == 0;
+
+    pub pattern Odd(n: Int) -> Bool =
+        n % 2 == 1;
+
+    // Total active pattern for sign
+    pub pattern Positive(n: Int) -> Maybe<Int> =
+        if n > 0 { Some(n) } else { None };
+
+    pub pattern Negative(n: Int) -> Maybe<Int> =
+        if n < 0 { Some(n) } else { None };
+
+    pub pattern Zero(n: Int) -> Bool =
+        n == 0;
+
+    // Partial active pattern for parsing
+    pub pattern ParseInt(s: &Text) -> Maybe<Int> =
+        s.parse_int();
+
+    pub pattern ParseFloat(s: &Text) -> Maybe<Float> =
+        s.parse_float();
+
+    // Active pattern with multiple outputs
+    pub pattern SplitAt(s: &Text, delim: Char) -> Maybe<(Text, Text)> =
+        match s.find_char(delim) {
+            Some(idx) => Some((s.slice(0, idx), s.slice(idx + 1, s.len()))),
+            None => None
+        };
+
+    // Parameterized active pattern
+    pub pattern DivisibleBy(n: Int, divisor: Int) -> Bool =
+        n % divisor == 0;
+
+    // Range active pattern
+    pub pattern InRange(n: Int, min: Int, max: Int) -> Maybe<Int> =
+        if n >= min && n <= max { Some(n) } else { None };
+
+    // Recursive active pattern for lists
+    pub pattern NonEmpty<T>(list: &List<T>) -> Maybe<(&T, &List<T>)> =
+        if list.is_empty() {
+            None
+        } else {
+            Some((list.first().unwrap(), list.rest()))
+        };
+}
+
+// Module using imported active patterns
+module consumer {
+    mount super.patterns.{
+        Maybe, Even, Odd, Positive, Negative, Zero,
+        ParseInt, ParseFloat, SplitAt, DivisibleBy, InRange, NonEmpty
+    };
+
+    // Using imported total active patterns
+    pub fn classify_number(n: Int) -> Text =
+        match n {
+            Zero() => "zero",
+            Positive(p) if Even(p) => f"positive even: {p}",
+            Positive(p) if Odd(p) => f"positive odd: {p}",
+            Negative(neg) => f"negative: {neg}",
+            _ => unreachable()
+        };
+
+    // Using imported partial active patterns
+    pub fn try_parse(s: &Text) -> Text =
+        match s {
+            ParseInt(n) => f"integer: {n}",
+            ParseFloat(f) => f"float: {f}",
+            _ => "not a number"
+        };
+
+    // Combining imported active patterns
+    pub fn parse_key_value(line: &Text) -> Maybe<(Text, Int)> =
+        match line {
+            SplitAt('=', (key, value)) =>
+                match &value {
+                    ParseInt(n) => Some((key, n)),
+                    _ => None
+                },
+            _ => None
+        };
+
+    // Using parameterized active patterns
+    pub fn fizzbuzz(n: Int) -> Text =
+        match n {
+            _ if DivisibleBy(n, 15) => "FizzBuzz",
+            _ if DivisibleBy(n, 3) => "Fizz",
+            _ if DivisibleBy(n, 5) => "Buzz",
+            x => f"{x}"
+        };
+
+    // Using range active pattern
+    pub fn grade(score: Int) -> Text =
+        match score {
+            InRange(_, 90, 100) => "A",
+            InRange(_, 80, 89) => "B",
+            InRange(_, 70, 79) => "C",
+            InRange(_, 60, 69) => "D",
+            _ => "F"
+        };
+
+    // Using recursive active pattern
+    pub fn sum_list(list: &List<Int>) -> Int =
+        match list {
+            NonEmpty((first, rest)) => *first + sum_list(rest),
+            _ => 0
+        };
+}
+
+// Module extending patterns
+module extended {
+    mount super.patterns.{Maybe, InRange, ParseInt};
+
+    // Define new active patterns using imported ones
+    pub pattern Byte(n: Int) -> Maybe<Int> =
+        InRange(n, 0, 255);
+
+    pub pattern Percentage(n: Int) -> Maybe<Int> =
+        InRange(n, 0, 100);
+
+    pub pattern ValidPort(n: Int) -> Maybe<Int> =
+        InRange(n, 1, 65535);
+
+    // Composing active patterns
+    pub fn parse_port(s: &Text) -> Maybe<Int> =
+        match s {
+            ParseInt(n) => match n {
+                ValidPort(port) => Some(port),
+                _ => None
+            },
+            _ => None
+        };
+
+    // Using byte pattern
+    pub fn validate_rgb(r: Int, g: Int, b: Int) -> Bool =
+        match (r, g, b) {
+            (Byte(_), Byte(_), Byte(_)) => true,
+            _ => false
+        };
+}
+
+fn main() {
+    mount consumer.{classify_number, try_parse, fizzbuzz, grade, sum_list};
+    mount extended.{parse_port, validate_rgb};
+
+    // Test basic active patterns
+    assert(classify_number(0) == "zero");
+    assert(classify_number(4) == "positive even: 4");
+    assert(classify_number(7) == "positive odd: 7");
+    assert(classify_number(-3) == "negative: -3");
+
+    // Test parsing active patterns
+    assert(try_parse("42") == "integer: 42");
+    assert(try_parse("3.14") == "float: 3.14");
+    assert(try_parse("hello") == "not a number");
+
+    // Test fizzbuzz
+    assert(fizzbuzz(15) == "FizzBuzz");
+    assert(fizzbuzz(9) == "Fizz");
+    assert(fizzbuzz(10) == "Buzz");
+    assert(fizzbuzz(7) == "7");
+
+    // Test grade ranges
+    assert(grade(95) == "A");
+    assert(grade(85) == "B");
+    assert(grade(75) == "C");
+    assert(grade(55) == "F");
+
+    // Test list active pattern
+    let nums = [1, 2, 3, 4, 5];
+    assert(sum_list(&nums) == 15);
+
+    // Test extended patterns
+    assert(validate_rgb(255, 128, 0));
+    assert(!validate_rgb(256, 0, 0));
+    assert(parse_port("8080") == Some(8080));
+    assert(parse_port("99999") == None);
+}

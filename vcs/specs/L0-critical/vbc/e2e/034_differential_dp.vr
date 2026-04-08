@@ -1,0 +1,338 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, interpreter-vs-aot, dynamic-programming
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Differential DP test: verifies interpreter and AOT produce identical results
+// for dynamic programming (fibonacci, prefix sums, Kadane's max subarray).
+
+// Fixed-size array of 8 elements
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+    }
+}
+
+fn arr8_zero() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn min_val(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+// --- Fibonacci (iterative DP) ---
+fn fib(n: Int) -> Int {
+    if n <= 1 { n }
+    else {
+        let mut a = 0;
+        let mut b = 1;
+        let mut i = 2;
+        while i <= n {
+            let c = a + b;
+            a = b;
+            b = c;
+            i = i + 1;
+        }
+        b
+    }
+}
+
+// Fill first n fibonacci numbers into Arr8
+fn fib_table(n: Int) -> Arr8 {
+    let mut arr = arr8_zero();
+    let mut i = 0;
+    while i < n {
+        arr = arr8_set(arr, i, fib(i));
+        i = i + 1;
+    }
+    arr
+}
+
+// --- Prefix Sums ---
+fn prefix_sums(a: Arr8, n: Int) -> Arr8 {
+    let mut result = arr8_zero();
+    let mut running = 0;
+    let mut i = 0;
+    while i < n {
+        running = running + arr8_get(a, i);
+        result = arr8_set(result, i, running);
+        i = i + 1;
+    }
+    result
+}
+
+// Range sum using prefix sums: sum of a[l..r] inclusive
+fn range_sum(prefix: Arr8, l: Int, r: Int) -> Int {
+    if l == 0 { arr8_get(prefix, r) }
+    else { arr8_get(prefix, r) - arr8_get(prefix, l - 1) }
+}
+
+// --- Kadane's Algorithm: Maximum Subarray Sum ---
+fn kadane(a: Arr8, n: Int) -> Int {
+    let mut max_ending = arr8_get(a, 0);
+    let mut max_so_far = arr8_get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let v = arr8_get(a, i);
+        max_ending = max_val(v, max_ending + v);
+        max_so_far = max_val(max_so_far, max_ending);
+        i = i + 1;
+    }
+    max_so_far
+}
+
+// Extended Kadane: return (max_sum, start, end) as a record
+type SubarrayResult is { sum: Int, start: Int, end: Int };
+
+fn kadane_extended(a: Arr8, n: Int) -> SubarrayResult {
+    let mut max_ending = arr8_get(a, 0);
+    let mut max_so_far = arr8_get(a, 0);
+    let mut start = 0;
+    let mut end = 0;
+    let mut temp_start = 0;
+    let mut i = 1;
+    while i < n {
+        let v = arr8_get(a, i);
+        if v > max_ending + v {
+            max_ending = v;
+            temp_start = i;
+        } else {
+            max_ending = max_ending + v;
+        }
+        if max_ending > max_so_far {
+            max_so_far = max_ending;
+            start = temp_start;
+            end = i;
+        }
+        i = i + 1;
+    }
+    SubarrayResult { sum: max_so_far, start: start, end: end }
+}
+
+// --- Longest Increasing Subsequence length (DP, O(n^2)) ---
+fn lis_length(a: Arr8, n: Int) -> Int {
+    // dp[i] = length of LIS ending at index i
+    let mut dp = arr8_zero();
+    let mut i = 0;
+    while i < n {
+        dp = arr8_set(dp, i, 1); // every element is an LIS of length 1
+        i = i + 1;
+    }
+
+    i = 1;
+    while i < n {
+        let mut j = 0;
+        while j < i {
+            if arr8_get(a, j) < arr8_get(a, i) {
+                let new_len = arr8_get(dp, j) + 1;
+                if new_len > arr8_get(dp, i) {
+                    dp = arr8_set(dp, i, new_len);
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    // Find max in dp
+    let mut best = 0;
+    i = 0;
+    while i < n {
+        best = max_val(best, arr8_get(dp, i));
+        i = i + 1;
+    }
+    best
+}
+
+// --- Coin change: minimum coins to make amount (using coins 1, 3, 4) ---
+// dp[i] = min coins to make amount i, dp size = Arr8 so max amount = 7
+fn min_coins(amount: Int) -> Int {
+    // Coins: 1, 3, 4
+    let mut dp = arr8_zero();
+    // dp[0] = 0 (base case)
+    let mut i = 1;
+    while i <= amount && i < 8 {
+        let mut best = i; // worst case: all 1-coins
+        // coin = 1
+        if i >= 1 {
+            best = min_val(best, arr8_get(dp, i - 1) + 1);
+        }
+        // coin = 3
+        if i >= 3 {
+            best = min_val(best, arr8_get(dp, i - 3) + 1);
+        }
+        // coin = 4
+        if i >= 4 {
+            best = min_val(best, arr8_get(dp, i - 4) + 1);
+        }
+        dp = arr8_set(dp, i, best);
+        i = i + 1;
+    }
+    arr8_get(dp, amount)
+}
+
+// --- Max non-adjacent sum ---
+// Given array, find max sum of non-adjacent elements
+fn max_non_adjacent(a: Arr8, n: Int) -> Int {
+    if n == 0 { 0 }
+    else if n == 1 { max_val(0, arr8_get(a, 0)) }
+    else {
+        let mut prev2 = max_val(0, arr8_get(a, 0));
+        let mut prev1 = max_val(prev2, arr8_get(a, 1));
+        let mut i = 2;
+        while i < n {
+            let cur = max_val(prev1, prev2 + arr8_get(a, i));
+            prev2 = prev1;
+            prev1 = cur;
+            i = i + 1;
+        }
+        prev1
+    }
+}
+
+fn main() -> Int {
+    // --- Fibonacci ---
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(2), 1);
+    assert_eq(fib(3), 2);
+    assert_eq(fib(4), 3);
+    assert_eq(fib(5), 5);
+    assert_eq(fib(6), 8);
+    assert_eq(fib(7), 13);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(15), 610);
+    assert_eq(fib(20), 6765);
+
+    let ft = fib_table(8);
+    assert_eq(arr8_get(ft, 0), 0);
+    assert_eq(arr8_get(ft, 1), 1);
+    assert_eq(arr8_get(ft, 2), 1);
+    assert_eq(arr8_get(ft, 3), 2);
+    assert_eq(arr8_get(ft, 4), 3);
+    assert_eq(arr8_get(ft, 5), 5);
+    assert_eq(arr8_get(ft, 6), 8);
+    assert_eq(arr8_get(ft, 7), 13);
+
+    // --- Prefix Sums ---
+    let a1 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let ps1 = prefix_sums(a1, 8);
+    assert_eq(arr8_get(ps1, 0), 1);
+    assert_eq(arr8_get(ps1, 1), 3);
+    assert_eq(arr8_get(ps1, 2), 6);
+    assert_eq(arr8_get(ps1, 3), 10);
+    assert_eq(arr8_get(ps1, 4), 15);
+    assert_eq(arr8_get(ps1, 5), 21);
+    assert_eq(arr8_get(ps1, 6), 28);
+    assert_eq(arr8_get(ps1, 7), 36);
+
+    // Range sums using prefix
+    assert_eq(range_sum(ps1, 0, 7), 36);  // full array
+    assert_eq(range_sum(ps1, 0, 0), 1);   // just first
+    assert_eq(range_sum(ps1, 2, 4), 12);  // 3 + 4 + 5
+    assert_eq(range_sum(ps1, 3, 5), 15);  // 4 + 5 + 6
+    assert_eq(range_sum(ps1, 7, 7), 8);   // just last
+
+    // Prefix sums with negative numbers
+    let a2 = Arr8 { e0: 3, e1: 0 - 1, e2: 4, e3: 0 - 2, e4: 5, e5: 0 - 3, e6: 1, e7: 2 };
+    let ps2 = prefix_sums(a2, 8);
+    assert_eq(arr8_get(ps2, 0), 3);
+    assert_eq(arr8_get(ps2, 1), 2);   // 3 + (-1)
+    assert_eq(arr8_get(ps2, 2), 6);   // 3 + (-1) + 4
+    assert_eq(arr8_get(ps2, 7), 9);   // total sum
+
+    // --- Kadane's Max Subarray ---
+    let k1 = Arr8 { e0: 0 - 2, e1: 1, e2: 0 - 3, e3: 4, e4: 0 - 1, e5: 2, e6: 1, e7: 0 - 5 };
+    assert_eq(kadane(k1, 8), 6);  // subarray [4, -1, 2, 1] = 6
+
+    let ke1 = kadane_extended(k1, 8);
+    assert_eq(ke1.sum, 6);
+    assert_eq(ke1.start, 3);
+    assert_eq(ke1.end, 6);
+
+    // All positive
+    let k2 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    assert_eq(kadane(k2, 8), 36);  // whole array
+
+    // All negative: max is the least negative
+    let k3 = Arr8 { e0: 0 - 5, e1: 0 - 3, e2: 0 - 8, e3: 0 - 1, e4: 0 - 7, e5: 0 - 2, e6: 0 - 9, e7: 0 - 4 };
+    assert_eq(kadane(k3, 8), 0 - 1);
+
+    // Single element
+    let k4 = Arr8 { e0: 42, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(kadane(k4, 1), 42);
+
+    // Mixed with max at beginning
+    let k5 = Arr8 { e0: 10, e1: 0 - 1, e2: 0 - 1, e3: 0 - 1, e4: 0 - 1, e5: 0 - 1, e6: 0 - 1, e7: 0 - 1 };
+    assert_eq(kadane(k5, 8), 10);
+
+    // --- Longest Increasing Subsequence ---
+    let l1 = Arr8 { e0: 10, e1: 9, e2: 2, e3: 5, e4: 3, e5: 7, e6: 101, e7: 18 };
+    assert_eq(lis_length(l1, 8), 4);  // e.g. [2, 5, 7, 101] or [2, 3, 7, 101] or [2, 5, 7, 18]
+
+    let l2 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    assert_eq(lis_length(l2, 8), 8);  // already increasing
+
+    let l3 = Arr8 { e0: 8, e1: 7, e2: 6, e3: 5, e4: 4, e5: 3, e6: 2, e7: 1 };
+    assert_eq(lis_length(l3, 8), 1);  // decreasing, LIS = 1
+
+    let l4 = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    // LIS: [1, 4, 5, 9] or [1, 4, 5, 6] or [3, 4, 5, 9] = length 4
+    assert_eq(lis_length(l4, 8), 4);
+
+    // --- Coin Change ---
+    assert_eq(min_coins(0), 0);
+    assert_eq(min_coins(1), 1);  // 1
+    assert_eq(min_coins(2), 2);  // 1+1
+    assert_eq(min_coins(3), 1);  // 3
+    assert_eq(min_coins(4), 1);  // 4
+    assert_eq(min_coins(5), 2);  // 4+1
+    assert_eq(min_coins(6), 2);  // 3+3
+    assert_eq(min_coins(7), 2);  // 4+3
+
+    // --- Max Non-Adjacent Sum ---
+    let na1 = Arr8 { e0: 3, e1: 2, e2: 7, e3: 10, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(max_non_adjacent(na1, 4), 13);  // 3 + 10
+
+    let na2 = Arr8 { e0: 3, e1: 2, e2: 5, e3: 10, e4: 7, e5: 0, e6: 0, e7: 0 };
+    assert_eq(max_non_adjacent(na2, 5), 15);  // 3 + 5 + 7
+
+    let na3 = Arr8 { e0: 5, e1: 5, e2: 10, e3: 100, e4: 10, e5: 5, e6: 0, e7: 0 };
+    assert_eq(max_non_adjacent(na3, 6), 110);  // 5 + 100 + 5
+
+    let na4 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(max_non_adjacent(na4, 3), 4);  // 1 + 3
+
+    let na5 = Arr8 { e0: 100, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(max_non_adjacent(na5, 1), 100);
+
+    print("[OK] 034_differential_dp");
+    0
+}

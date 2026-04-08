@@ -1,0 +1,99 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: deque, collections, push, pop
+// @description: Test Deque (double-ended queue) operations
+
+fn test_deque_basic() -> Int {
+    let mut dq = Deque.new();
+    dq.push_back(1);
+    dq.push_back(2);
+    dq.push_back(3);
+
+    if dq.len() != 3 {
+        print(f"FAIL deque_len: {dq.len()}");
+        return 1;
+    }
+
+    let first = match dq.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    if first != 1 {
+        print(f"FAIL deque_front: {first}, expected 1");
+        return 1;
+    }
+
+    let last = match dq.pop_back() {
+        Some(v) => v,
+        None => -1,
+    };
+    if last != 3 {
+        print(f"FAIL deque_back: {last}, expected 3");
+        return 1;
+    }
+
+    if dq.len() != 1 {
+        print(f"FAIL deque_len2: {dq.len()}");
+        return 1;
+    }
+    print("  deque_basic: OK");
+    0
+}
+
+fn test_deque_push_front() -> Int {
+    let mut dq = Deque.new();
+    dq.push_front(3);
+    dq.push_front(2);
+    dq.push_front(1);
+
+    // Should be [1, 2, 3]
+    let a = match dq.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    let b = match dq.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    let c = match dq.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+
+    if a != 1 || b != 2 || c != 3 {
+        print(f"FAIL push_front: [{a}, {b}, {c}]");
+        return 1;
+    }
+    print("  deque_push_front: OK");
+    0
+}
+
+fn test_deque_empty_pop() -> Int {
+    let mut dq = Deque.new();
+    let result = match dq.pop_front() {
+        Some(v) => v,
+        None => -999,
+    };
+    if result != -999 {
+        print(f"FAIL empty_pop: {result}, expected -999");
+        return 1;
+    }
+    print("  deque_empty_pop: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Deque Operations Tests:");
+    let mut failures = 0;
+    failures = failures + test_deque_basic();
+    failures = failures + test_deque_push_front();
+    failures = failures + test_deque_empty_pop();
+
+    if failures == 0 {
+        print("All deque tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

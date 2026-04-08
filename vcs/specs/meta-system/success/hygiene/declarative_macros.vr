@@ -1,0 +1,136 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, declarative, macro
+// @description: Test declarative macro definitions per grammar meta_def production
+
+// =============================================================================
+// META FUNCTIONS (Procedural Macros)
+// =============================================================================
+// In Verum, meta functions are the primary way to define compile-time code
+// transformation. They use the `meta fn` syntax.
+
+// =============================================================================
+// BASIC META FUNCTION
+// =============================================================================
+
+meta fn double(x: Int) -> Int {
+    x * 2
+}
+
+meta fn square(x: Int) -> Int {
+    x * x
+}
+
+// =============================================================================
+// META FUNCTION RETURNING TOKEN STREAM
+// =============================================================================
+
+meta fn swap_template(a: Ident, b: Ident) -> TokenStream {
+    quote {
+        let temp = $a;
+        $a = $b;
+        $b = temp;
+    }
+}
+
+// =============================================================================
+// META FUNCTION WITH TYPE GENERATION
+// =============================================================================
+
+meta fn new_list_type(elem_type: Type) -> TokenStream {
+    quote {
+        type Container is {
+            items: List<$elem_type>,
+        };
+    }
+}
+
+// =============================================================================
+// META FUNCTION WITH CONDITIONAL GENERATION
+// =============================================================================
+
+meta fn maybe_default(use_default: Bool, val: Int) -> Int {
+    if use_default {
+        0
+    } else {
+        val
+    }
+}
+
+// =============================================================================
+// META FUNCTION WITH LIST PROCESSING
+// =============================================================================
+
+meta fn sum_list(items: List<Int>) -> Int {
+    let mut total = 0;
+    for item in items {
+        total = total + item;
+    }
+    total
+}
+
+meta fn max_in_list(items: List<Int>) -> Int {
+    let mut result = items[0];
+    for item in items {
+        if item > result {
+            result = item;
+        }
+    }
+    result
+}
+
+// =============================================================================
+// PUBLIC META FUNCTION
+// =============================================================================
+
+pub meta fn exported_double(x: Int) -> Int {
+    x * 2
+}
+
+// =============================================================================
+// META FUNCTION WITH GENSYM
+// =============================================================================
+
+meta fn safe_temp(expr: TokenStream) -> TokenStream {
+    let tmp = gensym("temp");
+    quote {
+        let $tmp = $expr;
+        $tmp
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_double() {
+    @const assert_eq(double(5), 10);
+    @const assert_eq(double(3), 6);
+}
+
+fn test_square() {
+    @const assert_eq(square(5), 25);
+    @const assert_eq(square(3), 9);
+}
+
+fn test_maybe_default() {
+    @const assert_eq(maybe_default(true, 42), 0);
+    @const assert_eq(maybe_default(false, 42), 42);
+}
+
+fn test_sum_list() {
+    @const assert_eq(sum_list([1, 2, 3, 4]), 10);
+}
+
+fn test_max_list() {
+    @const assert_eq(max_in_list([3, 1, 4, 1, 5]), 5);
+}
+
+fn main() {
+    test_double();
+    test_square();
+    test_maybe_default();
+    test_sum_list();
+    test_max_list();
+}

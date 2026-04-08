@@ -1,0 +1,342 @@
+// @test: parser
+// @tier: 0
+// @level: L0
+// @tags: parser, green-tree, events, tree-sink, lossless
+// @expect: pass
+// @description: Test GreenTreeSink builds correct tree from events including child ordering, widths, and trivia
+// Note: This is a parse-only test - it exercises tree construction, not type checking
+
+// ============================================================================
+// SECTION 1: Basic Tree Construction from Events
+// ============================================================================
+
+// Test simplest tree: just a function with empty body
+// Should produce: SOURCE_FILE > FN_DEF > [tokens]
+fn simplest_tree() { }
+
+// Test tree with single statement
+// Should produce: SOURCE_FILE > FN_DEF > BLOCK > LET_STMT
+fn single_statement_tree() {
+    let x = 1;
+}
+
+// Test tree with multiple statements
+fn multiple_statement_tree() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+}
+
+// ============================================================================
+// SECTION 2: Child Ordering Verification
+// ============================================================================
+
+// Test that children appear in source order
+fn child_ordering_linear() {
+    let first = 1;
+    let second = 2;
+    let third = 3;
+}
+
+// Test child ordering in nested structures
+fn child_ordering_nested() {
+    if true {
+        let inner_first = 1;
+        let inner_second = 2;
+    }
+}
+
+// Test child ordering in parameter lists
+fn child_ordering_params(a: Int, b: Int, c: Int, d: Int) {
+    // Parameters should appear in order: a, b, c, d
+}
+
+// Test child ordering in binary expressions
+fn child_ordering_binary() {
+    let x = 1 + 2 + 3;  // Children: (1+2) + 3, properly nested
+}
+
+// Test child ordering in match arms
+fn child_ordering_match(x: Maybe<Int>) -> Int {
+    match x {
+        Some(0) => 0,
+        Some(n) => n,
+        None => -1,
+    }
+}
+
+// ============================================================================
+// SECTION 3: Node Width Calculation
+// ============================================================================
+
+// Test that node widths include all child content
+fn width_includes_children() {
+    let variable_name = 42;  // Width of LET_STMT includes entire statement
+}
+
+// Test that node widths include trivia
+fn width_includes_trivia() {
+    let x = 1;   // Trailing spaces before semicolon
+    let y   =   2;  // Extra spaces around equals
+}
+
+// Test width calculation for nested structures
+fn width_nested() {
+    {
+        {
+            let deep = 1;
+        }
+    }
+}
+
+// Test width with multi-line content
+fn width_multiline() {
+    let msg = "line 1
+line 2
+line 3";
+}
+
+// ============================================================================
+// SECTION 4: Trivia Attachment to Tree Nodes
+// ============================================================================
+
+// Test leading trivia attachment (whitespace before token)
+fn trivia_leading() {
+    // This comment is leading trivia for the let statement
+    let x = 1;
+}
+
+// Test trailing trivia attachment (up to newline)
+fn trivia_trailing() {
+    let x = 1;  // Trailing comment
+    let y = 2;
+}
+
+// Test block comment as trivia
+fn trivia_block_comment() {
+    /* Block comment before */ let x = /* inline */ 1; /* after */
+}
+
+// Test doc comment trivia
+/// This is a doc comment
+fn trivia_doc_comment() {
+    // Implementation
+}
+
+// Test multiple trivia items
+fn trivia_multiple() {
+    // Comment 1
+    // Comment 2
+    // Comment 3
+    let x = 1;
+}
+
+// ============================================================================
+// SECTION 5: GreenTreeSink Error Handling
+// ============================================================================
+
+// Test that errors are collected during tree building
+fn sink_error_collection() {
+    let valid = 1;
+    // Parser may emit errors during recovery
+}
+
+// Test that tree is still built with errors
+fn sink_tree_with_errors() {
+    let x = 1;
+    let y = 2;
+}
+
+// ============================================================================
+// SECTION 6: Green Node Properties
+// ============================================================================
+
+// Test that green nodes have correct kind
+fn green_node_kind() {
+    let x = 1;  // LET_STMT kind
+}
+
+// Test that green nodes report correct text
+fn green_node_text() {
+    let exactly_this = 42;
+}
+
+// Test that green nodes report correct children count
+fn green_node_children_count(a: Int, b: Int, c: Int) -> Int {
+    a + b + c
+}
+
+// ============================================================================
+// SECTION 7: GreenBuilder State Tracking
+// ============================================================================
+
+// Test is_building state during construction
+fn builder_state_during_construction() {
+    let x = 1;
+}
+
+// Test proper start_node/finish_node pairing
+fn builder_proper_pairing() {
+    {
+        {
+            {
+                let deep = 1;
+            }
+        }
+    }
+}
+
+// ============================================================================
+// SECTION 8: StatsSink Verification
+// ============================================================================
+
+// Test node counting
+fn stats_node_count() {
+    let x = 1;
+    let y = 2;
+}
+
+// Test token counting
+fn stats_token_count(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Test max depth calculation
+fn stats_max_depth() {
+    {
+        {
+            {
+                {
+                    let deepest = 1;
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// SECTION 9: TextTreeSink Output
+// ============================================================================
+
+// Test text output format for debugging
+fn text_sink_format() {
+    let x = 1;
+}
+
+// Test indentation in text output
+fn text_sink_indentation() {
+    {
+        let inner = 1;
+    }
+}
+
+// ============================================================================
+// SECTION 10: MultiplexSink Functionality
+// ============================================================================
+
+// Test that events are sent to all registered sinks
+fn multiplex_all_sinks() {
+    let x = 1;
+    let y = 2;
+    let z = x + y;
+}
+
+// ============================================================================
+// SECTION 11: Complex Tree Structures
+// ============================================================================
+
+// Test complex record type tree structure
+type TreeTestRecord is {
+    id: Int,
+    name: Text,
+    nested: Heap<TreeTestRecord>,
+};
+
+// Test sum type tree structure
+type TreeTestSum is
+    | Leaf(Int)
+    | Branch { left: Heap<TreeTestSum>, right: Heap<TreeTestSum> };
+
+// Test protocol tree structure
+type TreeTestIterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+    fn size_hint(&self) -> (Int, Maybe<Int>);
+};
+
+// Test complex expression tree structure
+fn complex_expression_tree() {
+    let result = (a + b) * (c - d) / ((e + f) * g);
+}
+
+// Test lambda/closure tree structure
+fn closure_tree_structure() {
+    let add = |x, y| x + y;
+    let complex = |a| {
+        let b = a * 2;
+        b + 1
+    };
+}
+
+// Test async expression tree structure
+async fn async_tree_structure() {
+    let result = some_async_fn().await;
+}
+
+// Test try/recover tree structure
+fn try_recover_tree() {
+    try {
+        let result = might_fail();
+    } recover |e| {
+        handle_error(e)
+    }
+}
+
+// ============================================================================
+// SECTION 12: Tree Equality and Comparison
+// ============================================================================
+
+// Test that semantically identical code produces equivalent trees
+fn tree_equivalence_a() {
+    let x = 1 + 2;
+}
+
+fn tree_equivalence_b() {
+    let x = 1+2;  // Same semantics, different formatting
+}
+
+// Test that different code produces different trees
+fn tree_difference_a() {
+    let x = 1 + 2;
+}
+
+fn tree_difference_b() {
+    let x = 2 + 1;  // Different AST despite commutative operation
+}
+
+// ============================================================================
+// SECTION 13: Edge Cases
+// ============================================================================
+
+// Test empty block
+fn empty_block() { }
+
+// Test empty parameter list
+fn empty_params() -> Int {
+    0
+}
+
+// Test single expression (no semicolon)
+fn single_expr() -> Int {
+    42
+}
+
+// Test deeply nested parens
+fn deep_parens() {
+    let x = ((((1))));
+}
+
+// Test long identifier
+fn long_identifier_test() {
+    let this_is_a_very_long_identifier_name_that_should_still_work = 42;
+}

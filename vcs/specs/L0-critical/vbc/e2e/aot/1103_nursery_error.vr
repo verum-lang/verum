@@ -1,0 +1,111 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, nursery, error, structured-concurrency
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Nursery error propagation — task failure, error collection
+
+fn test_one_failing_task() -> Int {
+    let result_ch = Channel.new(10);
+    let error_ch = Channel.new(10);
+
+    let t1 = spawn {
+        result_ch.send(42);
+        42
+    };
+    let t2 = spawn {
+        error_ch.send(-1);
+        -1
+    };
+    let t3 = spawn {
+        result_ch.send(99);
+        99
+    };
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+
+    if r1 != 42 { return 1; }
+    if r2 != -1 { return 1; }
+    if r3 != 99 { return 1; }
+
+    let mut got_error = false;
+    match error_ch.recv() {
+        Some(v) => { if v == -1 { got_error = true; } }
+        None => {}
+    }
+    if !got_error { return 1; }
+    0
+}
+
+fn test_error_collection() -> Int {
+    let err_ch = Channel.new(10);
+
+    let f1 = spawn { err_ch.send(101); -1 };
+    let f2 = spawn { err_ch.send(102); -1 };
+    let f3 = spawn { err_ch.send(103); -1 };
+
+    f1.await;
+    f2.await;
+    f3.await;
+
+    let mut error_sum = 0;
+    let mut c = 0;
+    while c < 3 {
+        match err_ch.recv() {
+            Some(v) => { error_sum = error_sum + v; }
+            None => {}
+        }
+        c = c + 1;
+    }
+
+    // 101 + 102 + 103 = 306
+    if error_sum != 306 { return 1; }
+    0
+}
+
+fn test_worker_completion() -> Int {
+    let work_ch = Channel.new(10);
+
+    let w1 = spawn {
+        let mut i = 0;
+        while i < 5 {
+            work_ch.send(i * 10);
+            i = i + 1;
+        }
+        0
+    };
+
+    w1.await;
+
+    let mut sum = 0;
+    let mut count = 0;
+    while count < 5 {
+        match work_ch.recv() {
+            Some(v) => { sum = sum + v; }
+            None => {}
+        }
+        count = count + 1;
+    }
+
+    // 0 + 10 + 20 + 30 + 40 = 100
+    if sum != 100 { return 1; }
+    0
+}
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    if test_one_failing_task() == 0 { pass = pass + 1; } else { print("FAIL1"); }
+    if test_error_collection() == 0 { pass = pass + 1; } else { print("FAIL2"); }
+    if test_worker_completion() == 0 { pass = pass + 1; } else { print("FAIL3"); }
+
+    print(f"pass = {pass}/3");
+    if pass == 3 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

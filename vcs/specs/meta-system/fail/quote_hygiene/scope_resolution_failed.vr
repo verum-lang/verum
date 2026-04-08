@@ -1,0 +1,49 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M408
+// @tags: meta, quote, hygiene, scope, resolution
+// @description: Tests detection of undeclared variable captures in quotes
+
+// =============================================================================
+// SCOPE RESOLUTION FAILED
+// =============================================================================
+
+// Reference to undefined identifier in quote
+meta fn undefined_in_quote() -> TokenStream {
+    quote {
+        // 'completely_undefined_var' doesn't exist anywhere
+        let x = completely_undefined_var + 1;  // ERROR: M404 - Scope resolution failed
+    }
+}
+
+// Reference to variable defined after quote
+meta fn forward_reference() -> TokenStream {
+    let ts = quote {
+        // 'later_var' is not yet defined at quote creation
+        later_var  // ERROR: M404 - Cannot resolve 'later_var'
+    };
+
+    let later_var = 42;  // Too late
+    ts
+}
+
+// Reference to private binding from different scope
+meta fn private_scope_access() -> TokenStream {
+    quote {
+        {
+            let private_inner = 42;
+        }
+        // private_inner is not in scope here
+        private_inner  // ERROR: M404 - 'private_inner' not in scope
+    }
+}
+
+fn test_undefined() {
+    // This invocation should fail with M404
+    let result = @undefined_in_quote();
+}
+
+fn main() {
+    test_undefined();
+}

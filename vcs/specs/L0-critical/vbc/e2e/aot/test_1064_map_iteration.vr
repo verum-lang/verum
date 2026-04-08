@@ -1,0 +1,125 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: map, iteration, keys, values
+// @description: Test Map operations - get/insert/remove/contains/overwrite
+
+fn test_map_keys_values() -> Int {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    if m.len() != 3 {
+        print(f"FAIL keys_values: len={m.len()}, expected 3");
+        return 1;
+    }
+
+    if !m.contains_key(1) {
+        print("FAIL keys_values: missing key 1");
+        return 1;
+    }
+    if m.contains_key(99) {
+        print("FAIL keys_values: false positive for key 99");
+        return 1;
+    }
+
+    let v = m.get(2);
+    if v != 20 {
+        print(f"FAIL keys_values: get(2)={v}, expected 20");
+        return 1;
+    }
+
+    let removed = m.remove(3);
+    if m.len() != 2 {
+        print(f"FAIL keys_values: after remove len={m.len()}, expected 2");
+        return 1;
+    }
+
+    print("  keys_values: OK");
+    0
+}
+
+fn test_map_overwrite() -> Int {
+    let mut m = Map.new();
+    m.insert(1, 100);
+    m.insert(1, 200);
+
+    let v = m.get(1);
+    if v != 200 {
+        print(f"FAIL overwrite: get(1)={v}, expected 200");
+        return 1;
+    }
+    if m.len() != 1 {
+        print(f"FAIL overwrite: len={m.len()}, expected 1");
+        return 1;
+    }
+    print("  overwrite: OK");
+    0
+}
+
+fn test_map_as_counter() -> Int {
+    let mut counts = Map.new();
+    counts.insert(1, 0);
+    counts.insert(2, 0);
+
+    // Increment key 1 three times
+    counts.insert(1, counts.get(1) + 1);
+    counts.insert(1, counts.get(1) + 1);
+    counts.insert(1, counts.get(1) + 1);
+
+    // Increment key 2 twice
+    counts.insert(2, counts.get(2) + 1);
+    counts.insert(2, counts.get(2) + 1);
+
+    if counts.get(1) != 3 {
+        print(f"FAIL counter: key1={counts.get(1)}, expected 3");
+        return 1;
+    }
+    if counts.get(2) != 2 {
+        print(f"FAIL counter: key2={counts.get(2)}, expected 2");
+        return 1;
+    }
+    print("  counter: OK");
+    0
+}
+
+fn test_map_many_entries() -> Int {
+    let mut m = Map.new();
+    let mut i = 0;
+    while i < 50 {
+        m.insert(i, i * i);
+        i = i + 1;
+    }
+    if m.len() != 50 {
+        print(f"FAIL many_entries: len={m.len()}, expected 50");
+        return 1;
+    }
+    // Spot check
+    if m.get(7) != 49 {
+        print(f"FAIL many_entries: get(7)={m.get(7)}, expected 49");
+        return 1;
+    }
+    if m.get(25) != 625 {
+        print(f"FAIL many_entries: get(25)={m.get(25)}, expected 625");
+        return 1;
+    }
+    print("  many_entries: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Map Tests:");
+    let mut failures = 0;
+    failures = failures + test_map_keys_values();
+    failures = failures + test_map_overwrite();
+    failures = failures + test_map_as_counter();
+    failures = failures + test_map_many_entries();
+
+    if failures == 0 {
+        print("All map tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

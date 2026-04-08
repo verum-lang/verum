@@ -1,0 +1,11 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-check, slice
+// @description: Tests that slice access beyond bounds causes a panic
+
+fn main() {
+    let data = [1, 2, 3, 4, 5];
+    let slice = data[1..3];  // Valid slice: [2, 3]
+    let _ = slice[10];  // Panic: Slice index out of bounds
+}

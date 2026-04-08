@@ -1,0 +1,52 @@
+// @test: parser
+// @tier: 0
+// @level: L0
+// @tags: parser, type-level-literals, meta, syntax, advanced-type-syntax
+// @expect: pass
+// @description: Parser tests for type-level literal syntax
+// @spec: 03-type-system.md Section 13 grammar extensions
+
+// Fixed-size array types
+type SmallBuffer is [u8; 64];
+type LargeBuffer is [u8; 4096];
+
+// Meta parameter with literal type
+fn create_buffer<N: meta usize>() -> [u8; N] {
+    [0u8; N]
+}
+
+// Type-level arithmetic in array size
+fn concat_arrays<N: meta usize, M: meta usize>(
+    a: [Int; N],
+    b: [Int; M]
+) -> [Int; N + M] {
+    // Compile-time size computation
+    a
+}
+
+// Matrix with meta parameters
+type Matrix<T, R: meta usize, C: meta usize> is {
+    data: [[T; C]; R]
+};
+
+// Type-level boolean
+type Feature<Enabled: meta bool> is {
+    value: Int
+};
+
+// Meta parameter with refinement
+fn positive_array<N: meta usize{N > 0}>() -> [Int; N] {
+    [0; N]
+}
+
+// Complex type-level expression
+fn dot_product<N: meta usize>(
+    a: [Float; N],
+    b: [Float; N]
+) -> Float {
+    let mut sum = 0.0;
+    for i in 0..N {
+        sum = sum + a[i] * b[i];
+    }
+    sum
+}

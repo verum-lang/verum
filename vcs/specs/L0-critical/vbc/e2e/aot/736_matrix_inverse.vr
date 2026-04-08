@@ -1,0 +1,159 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, linalg, inverse, solve
+// @expected-exit: 0
+
+// Tests matrix inverse correctness: A * A^-1 = I
+// Uses integer arithmetic with known analytical solutions.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// 2x2 matrix operations (flat array, row-major)
+fn mat2_mul(a: List<Int>, b: List<Int>) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    r[0] = a[0] * b[0] + a[1] * b[2];
+    r[1] = a[0] * b[1] + a[1] * b[3];
+    r[2] = a[2] * b[0] + a[3] * b[2];
+    r[3] = a[2] * b[1] + a[3] * b[3];
+    r
+}
+
+fn mat2_det(a: List<Int>) -> Int {
+    a[0] * a[3] - a[1] * a[2]
+}
+
+// 2x2 inverse: A^-1 = [[d,-b],[-c,a]] / det  (integer, det must divide evenly)
+fn mat2_inv_scaled(a: List<Int>) -> List<Int> {
+    // Returns det * A^-1 (to avoid fractions)
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    r[0] = a[3];
+    r[1] = 0 - a[1];
+    r[2] = 0 - a[2];
+    r[3] = a[0];
+    r
+}
+
+// 3x3 determinant
+fn mat3_det(a: List<Int>) -> Int {
+    a[0] * (a[4] * a[8] - a[5] * a[7])
+    - a[1] * (a[3] * a[8] - a[5] * a[6])
+    + a[2] * (a[3] * a[7] - a[4] * a[6])
+}
+
+// 3x3 adjugate (cofactor matrix transposed)
+fn mat3_adj(a: List<Int>) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Cofactors (transposed)
+    r[0] = a[4]*a[8] - a[5]*a[7];
+    r[1] = 0 - (a[1]*a[8] - a[2]*a[7]);
+    r[2] = a[1]*a[5] - a[2]*a[4];
+    r[3] = 0 - (a[3]*a[8] - a[5]*a[6]);
+    r[4] = a[0]*a[8] - a[2]*a[6];
+    r[5] = 0 - (a[0]*a[5] - a[2]*a[3]);
+    r[6] = a[3]*a[7] - a[4]*a[6];
+    r[7] = 0 - (a[0]*a[7] - a[1]*a[6]);
+    r[8] = a[0]*a[4] - a[1]*a[3];
+    r
+}
+
+// 3x3 multiply
+fn mat3_mul(a: List<Int>, b: List<Int>) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < 3) {
+        let mut j = 0;
+        while (j < 3) {
+            let mut sum = 0;
+            let mut k = 0;
+            while (k < 3) {
+                sum = sum + a[i * 3 + k] * b[k * 3 + j];
+                k = k + 1;
+            }
+            r[i * 3 + j] = sum;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    r
+}
+
+fn main() -> Int {
+    // Test 1: 2x2 inverse
+    // A = [[2, 1], [1, 3]], det = 5
+    let a2 = [2, 1, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let det2 = mat2_det(a2);
+    assert_eq(det2, 5);
+
+    // det * A^-1 = [[3, -1], [-1, 2]]
+    let adj2 = mat2_inv_scaled(a2);
+    assert_eq(adj2[0], 3);
+    assert_eq(adj2[1], -1);
+    assert_eq(adj2[2], -1);
+    assert_eq(adj2[3], 2);
+
+    // Verify A * (det * A^-1) = det * I
+    let prod2 = mat2_mul(a2, adj2);
+    assert_eq(prod2[0], det2); // 5
+    assert_eq(prod2[1], 0);
+    assert_eq(prod2[2], 0);
+    assert_eq(prod2[3], det2); // 5
+
+    // Test 2: 3x3 inverse
+    // A = [[1, 2, 3], [0, 1, 4], [5, 6, 0]]
+    let a3 = [1, 2, 3, 0, 1, 4, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0];
+    let det3 = mat3_det(a3);
+    assert_eq(det3, 1);  // det = 1*(0-24) - 2*(0-20) + 3*(0-5) = -24+40-15 = 1
+
+    // adj(A) = A^-1 (since det=1)
+    let adj3 = mat3_adj(a3);
+    // Verify A * adj(A) = det * I = I
+    let prod3 = mat3_mul(a3, adj3);
+    assert_eq(prod3[0], 1);
+    assert_eq(prod3[1], 0);
+    assert_eq(prod3[2], 0);
+    assert_eq(prod3[3], 0);
+    assert_eq(prod3[4], 1);
+    assert_eq(prod3[5], 0);
+    assert_eq(prod3[6], 0);
+    assert_eq(prod3[7], 0);
+    assert_eq(prod3[8], 1);
+
+    // Test 3: 3x3 with larger determinant
+    // A = [[2, 0, 1], [0, 3, 0], [1, 0, 2]], det = 2*(6-0) - 0 + 1*(0-3) = 12-3 = 9
+    let a3b = [2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0];
+    let det3b = mat3_det(a3b);
+    assert_eq(det3b, 9);
+
+    let adj3b = mat3_adj(a3b);
+    let prod3b = mat3_mul(a3b, adj3b);
+    // Should be det * I = 9 * I
+    assert_eq(prod3b[0], 9);
+    assert_eq(prod3b[1], 0);
+    assert_eq(prod3b[2], 0);
+    assert_eq(prod3b[3], 0);
+    assert_eq(prod3b[4], 9);
+    assert_eq(prod3b[5], 0);
+    assert_eq(prod3b[6], 0);
+    assert_eq(prod3b[7], 0);
+    assert_eq(prod3b[8], 9);
+
+    // Test 4: LU decomposition property — for lower triangular L and upper U
+    // L = [[1,0,0],[2,1,0],[3,4,1]], U = [[1,2,3],[0,1,2],[0,0,1]]
+    let l = [1, 0, 0, 2, 1, 0, 3, 4, 1, 0, 0, 0, 0, 0, 0, 0];
+    let u = [1, 2, 3, 0, 1, 2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+    let lu = mat3_mul(l, u);
+    // L*U = A
+    assert_eq(lu[0], 1); assert_eq(lu[1], 2); assert_eq(lu[2], 3);
+    assert_eq(lu[3], 2); assert_eq(lu[4], 5); assert_eq(lu[5], 8);
+    assert_eq(lu[6], 3); assert_eq(lu[7], 10); assert_eq(lu[8], 18);
+
+    // det(L) = 1, det(U) = 1, so det(L*U) = 1
+    let det_lu = mat3_det(lu);
+    assert_eq(det_lu, 1);
+
+    print("Matrix inverse: PASS");
+    0
+}

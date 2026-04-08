@@ -1,0 +1,367 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, rabin-karp, string-matching, rolling-hash
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for Rabin-Karp string matching using rolling hash.
+// Works with arrays of integers representing character codes.
+// Uses polynomial rolling hash with modular arithmetic.
+
+type Arr32 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int,
+    a16: Int, a17: Int, a18: Int, a19: Int, a20: Int, a21: Int, a22: Int, a23: Int,
+    a24: Int, a25: Int, a26: Int, a27: Int, a28: Int, a29: Int, a30: Int, a31: Int
+};
+
+fn a32_zero() -> Arr32 {
+    Arr32 {
+        a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0,
+        a16: 0, a17: 0, a18: 0, a19: 0, a20: 0, a21: 0, a22: 0, a23: 0,
+        a24: 0, a25: 0, a26: 0, a27: 0, a28: 0, a29: 0, a30: 0, a31: 0
+    }
+}
+
+fn a32_get(a: Arr32, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 } else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 } else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 } else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 } else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 } else if i == 14 { a.a14 }
+    else if i == 15 { a.a15 } else if i == 16 { a.a16 } else if i == 17 { a.a17 }
+    else if i == 18 { a.a18 } else if i == 19 { a.a19 } else if i == 20 { a.a20 }
+    else if i == 21 { a.a21 } else if i == 22 { a.a22 } else if i == 23 { a.a23 }
+    else if i == 24 { a.a24 } else if i == 25 { a.a25 } else if i == 26 { a.a26 }
+    else if i == 27 { a.a27 } else if i == 28 { a.a28 } else if i == 29 { a.a29 }
+    else if i == 30 { a.a30 } else { a.a31 }
+}
+
+fn a32_set(a: Arr32, i: Int, v: Int) -> Arr32 {
+    Arr32 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 },
+        a16: if i == 16 { v } else { a.a16 }, a17: if i == 17 { v } else { a.a17 },
+        a18: if i == 18 { v } else { a.a18 }, a19: if i == 19 { v } else { a.a19 },
+        a20: if i == 20 { v } else { a.a20 }, a21: if i == 21 { v } else { a.a21 },
+        a22: if i == 22 { v } else { a.a22 }, a23: if i == 23 { v } else { a.a23 },
+        a24: if i == 24 { v } else { a.a24 }, a25: if i == 25 { v } else { a.a25 },
+        a26: if i == 26 { v } else { a.a26 }, a27: if i == 27 { v } else { a.a27 },
+        a28: if i == 28 { v } else { a.a28 }, a29: if i == 29 { v } else { a.a29 },
+        a30: if i == 30 { v } else { a.a30 }, a31: if i == 31 { v } else { a.a31 }
+    }
+}
+
+// Hash parameters
+fn hash_base() -> Int { 31 }
+fn hash_mod() -> Int { 1000000007 }
+
+// Compute hash of arr[start..start+len-1]
+fn compute_hash(arr: Arr32, start: Int, len: Int) -> Int {
+    let mut h = 0;
+    let mut i = 0;
+    while i < len {
+        h = (h * hash_base() + a32_get(arr, start + i)) % hash_mod();
+        i = i + 1;
+    }
+    h
+}
+
+// Power: base^exp mod m
+fn pow_mod(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % m;
+        }
+        b = (b * b) % m;
+        e = e / 2;
+    }
+    result
+}
+
+// Check if arr[i..i+plen-1] == pat[0..plen-1]
+fn exact_match(text: Arr32, i: Int, pat: Arr32, plen: Int) -> Int {
+    let mut j = 0;
+    while j < plen {
+        if a32_get(text, i + j) != a32_get(pat, j) {
+            return 0;
+        }
+        j = j + 1;
+    }
+    1
+}
+
+// Rabin-Karp: find first occurrence of pattern in text. Returns index or -1.
+fn rk_search(text: Arr32, tlen: Int, pat: Arr32, plen: Int) -> Int {
+    if plen == 0 { return 0; }
+    if plen > tlen { return -1; }
+
+    let pat_hash = compute_hash(pat, 0, plen);
+    let mut text_hash = compute_hash(text, 0, plen);
+    let h = pow_mod(hash_base(), plen - 1, hash_mod());
+
+    // Check first window
+    if text_hash == pat_hash {
+        if exact_match(text, 0, pat, plen) == 1 {
+            return 0;
+        }
+    }
+
+    // Slide the window
+    let mut i = 1;
+    while i <= tlen - plen {
+        // Remove leading char, add trailing char
+        let old_char = a32_get(text, i - 1);
+        let new_char = a32_get(text, i + plen - 1);
+        text_hash = (text_hash - old_char * h % hash_mod() + hash_mod()) % hash_mod();
+        text_hash = (text_hash * hash_base() + new_char) % hash_mod();
+
+        if text_hash == pat_hash {
+            if exact_match(text, i, pat, plen) == 1 {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Count all occurrences of pattern in text
+fn rk_count(text: Arr32, tlen: Int, pat: Arr32, plen: Int) -> Int {
+    if plen == 0 { return 0; }
+    if plen > tlen { return 0; }
+
+    let pat_hash = compute_hash(pat, 0, plen);
+    let mut text_hash = compute_hash(text, 0, plen);
+    let h = pow_mod(hash_base(), plen - 1, hash_mod());
+    let mut count = 0;
+
+    if text_hash == pat_hash {
+        if exact_match(text, 0, pat, plen) == 1 {
+            count = count + 1;
+        }
+    }
+
+    let mut i = 1;
+    while i <= tlen - plen {
+        let old_char = a32_get(text, i - 1);
+        let new_char = a32_get(text, i + plen - 1);
+        text_hash = (text_hash - old_char * h % hash_mod() + hash_mod()) % hash_mod();
+        text_hash = (text_hash * hash_base() + new_char) % hash_mod();
+
+        if text_hash == pat_hash {
+            if exact_match(text, i, pat, plen) == 1 {
+                count = count + 1;
+            }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// ---- Tests ----
+
+fn test_search_basic() {
+    // text = "ABCABC" (65,66,67,65,66,67), pat = "BCA" (66,67,65)
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 65);
+    text = a32_set(text, 1, 66);
+    text = a32_set(text, 2, 67);
+    text = a32_set(text, 3, 65);
+    text = a32_set(text, 4, 66);
+    text = a32_set(text, 5, 67);
+
+    let mut pat = a32_zero();
+    pat = a32_set(pat, 0, 66);
+    pat = a32_set(pat, 1, 67);
+    pat = a32_set(pat, 2, 65);
+
+    assert_eq(rk_search(text, 6, pat, 3), 1);
+}
+
+fn test_search_at_start() {
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 1);
+    text = a32_set(text, 1, 2);
+    text = a32_set(text, 2, 3);
+
+    let mut pat = a32_zero();
+    pat = a32_set(pat, 0, 1);
+    pat = a32_set(pat, 1, 2);
+
+    assert_eq(rk_search(text, 3, pat, 2), 0);
+}
+
+fn test_search_at_end() {
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 1);
+    text = a32_set(text, 1, 2);
+    text = a32_set(text, 2, 3);
+    text = a32_set(text, 3, 4);
+
+    let mut pat = a32_zero();
+    pat = a32_set(pat, 0, 3);
+    pat = a32_set(pat, 1, 4);
+
+    assert_eq(rk_search(text, 4, pat, 2), 2);
+}
+
+fn test_search_not_found() {
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 1);
+    text = a32_set(text, 1, 2);
+    text = a32_set(text, 2, 3);
+
+    let mut pat = a32_zero();
+    pat = a32_set(pat, 0, 4);
+    pat = a32_set(pat, 1, 5);
+
+    assert_eq(rk_search(text, 3, pat, 2), -1);
+}
+
+fn test_search_single_char() {
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 10);
+    text = a32_set(text, 1, 20);
+    text = a32_set(text, 2, 30);
+
+    let mut pat = a32_zero();
+    pat = a32_set(pat, 0, 20);
+
+    assert_eq(rk_search(text, 3, pat, 1), 1);
+}
+
+fn test_search_full_match() {
+    // Pattern equals text
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 5);
+    text = a32_set(text, 1, 6);
+    text = a32_set(text, 2, 7);
+
+    assert_eq(rk_search(text, 3, text, 3), 0);
+}
+
+fn test_search_pattern_longer() {
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 1);
+    text = a32_set(text, 1, 2);
+
+    let mut pat = a32_zero();
+    pat = a32_set(pat, 0, 1);
+    pat = a32_set(pat, 1, 2);
+    pat = a32_set(pat, 2, 3);
+
+    assert_eq(rk_search(text, 2, pat, 3), -1);
+}
+
+fn test_count_multiple() {
+    // text = "ABABAB", pat = "AB"
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 65);
+    text = a32_set(text, 1, 66);
+    text = a32_set(text, 2, 65);
+    text = a32_set(text, 3, 66);
+    text = a32_set(text, 4, 65);
+    text = a32_set(text, 5, 66);
+
+    let mut pat = a32_zero();
+    pat = a32_set(pat, 0, 65);
+    pat = a32_set(pat, 1, 66);
+
+    assert_eq(rk_count(text, 6, pat, 2), 3);
+}
+
+fn test_count_overlapping() {
+    // text = "AAAA", pat = "AA" -> 3 overlapping occurrences
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 65);
+    text = a32_set(text, 1, 65);
+    text = a32_set(text, 2, 65);
+    text = a32_set(text, 3, 65);
+
+    let mut pat = a32_zero();
+    pat = a32_set(pat, 0, 65);
+    pat = a32_set(pat, 1, 65);
+
+    assert_eq(rk_count(text, 4, pat, 2), 3);
+}
+
+fn test_count_none() {
+    let mut text = a32_zero();
+    text = a32_set(text, 0, 1);
+    text = a32_set(text, 1, 2);
+    text = a32_set(text, 2, 3);
+
+    let mut pat = a32_zero();
+    pat = a32_set(pat, 0, 9);
+
+    assert_eq(rk_count(text, 3, pat, 1), 0);
+}
+
+fn test_hash_consistency() {
+    // Same content should produce same hash
+    let mut a = a32_zero();
+    a = a32_set(a, 0, 100);
+    a = a32_set(a, 1, 200);
+    a = a32_set(a, 2, 300);
+
+    let mut b = a32_zero();
+    b = a32_set(b, 0, 100);
+    b = a32_set(b, 1, 200);
+    b = a32_set(b, 2, 300);
+
+    assert_eq(compute_hash(a, 0, 3), compute_hash(b, 0, 3));
+}
+
+fn test_hash_different() {
+    let mut a = a32_zero();
+    a = a32_set(a, 0, 1);
+    a = a32_set(a, 1, 2);
+
+    let mut b = a32_zero();
+    b = a32_set(b, 0, 2);
+    b = a32_set(b, 1, 1);
+
+    // Different order should (usually) produce different hash
+    let ha = compute_hash(a, 0, 2);
+    let hb = compute_hash(b, 0, 2);
+    // 1*31 + 2 = 33,  2*31 + 1 = 63
+    assert_eq(ha, 33);
+    assert_eq(hb, 63);
+}
+
+fn test_pow_mod() {
+    assert_eq(pow_mod(2, 10, 1000), 24); // 1024 mod 1000
+    assert_eq(pow_mod(3, 5, 100), 43);   // 243 mod 100
+    assert_eq(pow_mod(31, 0, 1000000007), 1);
+    assert_eq(pow_mod(31, 1, 1000000007), 31);
+}
+
+fn main() -> Int {
+    test_search_basic();
+    test_search_at_start();
+    test_search_at_end();
+    test_search_not_found();
+    test_search_single_char();
+    test_search_full_match();
+    test_search_pattern_longer();
+    test_count_multiple();
+    test_count_overlapping();
+    test_count_none();
+    test_hash_consistency();
+    test_hash_different();
+    test_pow_mod();
+    print("[OK] 385_rabin_karp_aot");
+    0
+}

@@ -1,0 +1,101 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: pure, function-modifier, no-side-effects
+// @description: Tests pure fn modifier — compiler-verified no side effects
+// @expected-exit: 0
+
+// Pure functions: no side effects, deterministic, can be memoized/CSE'd.
+// Grammar: function_modifiers = [ 'pure' ] [ meta ] [ 'async' ] [ 'unsafe' ]
+
+// Pure arithmetic — no side effects
+pure fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+pure fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+pure fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+pure fn fibonacci(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+// Pure function calling other pure functions
+pure fn compute(x: Int, y: Int) -> Int {
+    let sum = add(x, y);
+    let product = multiply(x, y);
+    add(sum, product)
+}
+
+// Pure function with pattern matching
+pure fn abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+pure fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+pure fn min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+pure fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    min(max(x, lo), hi)
+}
+
+fn main() {
+    // Test 1: Basic pure arithmetic
+    assert(add(3, 4) == 7);
+    assert(multiply(5, 6) == 30);
+    print("Test 1 PASS: pure arithmetic");
+
+    // Test 2: Pure recursive functions
+    assert(factorial(5) == 120);
+    assert(factorial(10) == 3628800);
+    print("Test 2 PASS: pure factorial");
+
+    // Test 3: Pure fibonacci
+    assert(fibonacci(0) == 0);
+    assert(fibonacci(1) == 1);
+    assert(fibonacci(10) == 55);
+    print("Test 3 PASS: pure fibonacci");
+
+    // Test 4: Pure function composition
+    assert(compute(3, 4) == 19); // (3+4) + (3*4) = 7+12 = 19
+    print("Test 4 PASS: pure composition");
+
+    // Test 5: Pure conditional logic
+    assert(abs(-5) == 5);
+    assert(abs(5) == 5);
+    assert(abs(0) == 0);
+    print("Test 5 PASS: pure abs");
+
+    // Test 6: Pure min/max/clamp
+    assert(max(3, 7) == 7);
+    assert(min(3, 7) == 3);
+    assert(clamp(15, 0, 10) == 10);
+    assert(clamp(-5, 0, 10) == 0);
+    assert(clamp(5, 0, 10) == 5);
+    print("Test 6 PASS: pure clamp");
+
+    // Test 7: Repeated pure calls (CSE opportunity)
+    let a = factorial(8);
+    let b = factorial(8);
+    assert(a == b); // Same result guaranteed by purity
+    assert(a == 40320);
+    print("Test 7 PASS: pure determinism");
+
+    print("All pure fn tests passed");
+}

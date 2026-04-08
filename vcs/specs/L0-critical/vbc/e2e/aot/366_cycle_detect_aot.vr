@@ -1,0 +1,220 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, cycle-detection, floyd, tortoise-hare
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Floyd's cycle detection algorithm (tortoise and hare).
+// Models a linked list using an array of "next pointers" (indices).
+// next[i] = j means node i points to node j. -1 means end.
+// Tests: cycle detection, cycle length, cycle start (mu), and rho.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Follow the "next" pointer: given position p, return next[p]
+fn follow(next: Arr8, p: Int) -> Int {
+    a8_get(next, p)
+}
+
+// Detect if there's a cycle. Returns 1 if cycle found, 0 if not.
+// Uses Floyd's tortoise and hare algorithm.
+fn has_cycle(next: Arr8, start: Int) -> Int {
+    let mut slow = start;
+    let mut fast = start;
+    let mut steps = 0;
+    while steps < 16 {
+        // Move slow by 1
+        slow = follow(next, slow);
+        if slow == -1 { return 0; }
+        // Move fast by 2
+        fast = follow(next, fast);
+        if fast == -1 { return 0; }
+        fast = follow(next, fast);
+        if fast == -1 { return 0; }
+        if slow == fast { return 1; }
+        steps = steps + 1;
+    }
+    0
+}
+
+// Find the cycle length (lambda). Assumes a cycle exists.
+// After tortoise and hare meet, keep hare still and move tortoise
+// one step at a time, counting until they meet again.
+fn cycle_length(next: Arr8, start: Int) -> Int {
+    // First, find meeting point
+    let mut slow = start;
+    let mut fast = start;
+    let mut steps = 0;
+    while steps < 16 {
+        slow = follow(next, slow);
+        fast = follow(next, fast);
+        fast = follow(next, fast);
+        if slow == fast {
+            // Now count cycle length
+            let mut count = 1;
+            let mut pos = follow(next, slow);
+            while pos != slow {
+                pos = follow(next, pos);
+                count = count + 1;
+            }
+            return count;
+        }
+        steps = steps + 1;
+    }
+    0
+}
+
+// Find the start of the cycle (mu). Assumes a cycle exists.
+// After finding the meeting point, reset one pointer to start.
+// Move both one step at a time until they meet — that's the cycle start.
+fn cycle_start(next: Arr8, start: Int) -> Int {
+    // First, find meeting point
+    let mut slow = start;
+    let mut fast = start;
+    let mut steps = 0;
+    let mut met = -1;
+    while steps < 16 {
+        slow = follow(next, slow);
+        fast = follow(next, fast);
+        fast = follow(next, fast);
+        if slow == fast {
+            met = slow;
+            steps = 100; // break
+        }
+        steps = steps + 1;
+    }
+    if met == -1 { return -1; }
+
+    // Reset slow to start, keep fast at meeting point
+    slow = start;
+    let mut fast2 = met;
+    let mut steps2 = 0;
+    while steps2 < 16 {
+        if slow == fast2 { return slow; }
+        slow = follow(next, slow);
+        fast2 = follow(next, fast2);
+        steps2 = steps2 + 1;
+    }
+    -1
+}
+
+// --- Test cases ---
+
+fn test_simple_cycle() {
+    // 0 -> 1 -> 2 -> 3 -> 1 (cycle at node 1, length 3)
+    let next = Arr8 { a0: 1, a1: 2, a2: 3, a3: 1, a4: -1, a5: -1, a6: -1, a7: -1 };
+    assert_eq(has_cycle(next, 0), 1);
+    assert_eq(cycle_length(next, 0), 3);
+    assert_eq(cycle_start(next, 0), 1);
+}
+
+fn test_no_cycle() {
+    // 0 -> 1 -> 2 -> 3 -> -1 (no cycle)
+    let next = Arr8 { a0: 1, a1: 2, a2: 3, a3: -1, a4: -1, a5: -1, a6: -1, a7: -1 };
+    assert_eq(has_cycle(next, 0), 0);
+}
+
+fn test_self_loop() {
+    // 0 -> 1 -> 1 (node 1 points to itself, cycle length 1)
+    let next = Arr8 { a0: 1, a1: 1, a2: -1, a3: -1, a4: -1, a5: -1, a6: -1, a7: -1 };
+    assert_eq(has_cycle(next, 0), 1);
+    assert_eq(cycle_length(next, 0), 1);
+    assert_eq(cycle_start(next, 0), 1);
+}
+
+fn test_immediate_cycle() {
+    // 0 -> 0 (node 0 points to itself)
+    let next = Arr8 { a0: 0, a1: -1, a2: -1, a3: -1, a4: -1, a5: -1, a6: -1, a7: -1 };
+    assert_eq(has_cycle(next, 0), 1);
+    assert_eq(cycle_length(next, 0), 1);
+    assert_eq(cycle_start(next, 0), 0);
+}
+
+fn test_long_tail_short_cycle() {
+    // 0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 3 (tail of 3, cycle of 3: 3->4->5->3)
+    let next = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 3, a6: -1, a7: -1 };
+    assert_eq(has_cycle(next, 0), 1);
+    assert_eq(cycle_length(next, 0), 3);
+    assert_eq(cycle_start(next, 0), 3);
+}
+
+fn test_full_cycle() {
+    // 0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 0 (full cycle of 8)
+    let next = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 0 };
+    assert_eq(has_cycle(next, 0), 1);
+    assert_eq(cycle_length(next, 0), 8);
+    assert_eq(cycle_start(next, 0), 0);
+}
+
+fn test_cycle_of_two() {
+    // 0 -> 1 -> 2 -> 3 -> 2 (cycle between 2 and 3, length 2)
+    let next = Arr8 { a0: 1, a1: 2, a2: 3, a3: 2, a4: -1, a5: -1, a6: -1, a7: -1 };
+    assert_eq(has_cycle(next, 0), 1);
+    assert_eq(cycle_length(next, 0), 2);
+    assert_eq(cycle_start(next, 0), 2);
+}
+
+fn test_functional_sequence() {
+    // Model f(x) = (x^2 + 1) mod 8 starting from x=2
+    // f(2) = 5, f(5) = 2, f(2) = 5... cycle of length 2
+    // Encode: next[0]=1, next[1]=2, next[2]=5, next[3]=2, next[4]=1, next[5]=2, next[6]=5, next[7]=0
+    // Start at 2: 2 -> 5 -> 2 -> 5 (cycle length 2, start at 2)
+    let next = Arr8 { a0: 1, a1: 2, a2: 5, a3: 2, a4: 1, a5: 2, a6: 5, a7: 0 };
+    assert_eq(has_cycle(next, 2), 1);
+    assert_eq(cycle_length(next, 2), 2);
+    assert_eq(cycle_start(next, 2), 2);
+}
+
+// Test rho shape: tail length = mu, cycle length = lambda
+// Total shape looks like the Greek letter rho
+fn test_rho_shape() {
+    // 0 -> 1 -> 2 -> 3 -> 4 -> 2 (mu=2, lambda=3)
+    let next = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 2, a5: -1, a6: -1, a7: -1 };
+    assert_eq(has_cycle(next, 0), 1);
+    let mu = cycle_start(next, 0);
+    let lam = cycle_length(next, 0);
+    assert_eq(mu, 2);
+    assert_eq(lam, 3);
+}
+
+fn test_no_cycle_single_node() {
+    // Single node pointing to -1
+    let next = Arr8 { a0: -1, a1: -1, a2: -1, a3: -1, a4: -1, a5: -1, a6: -1, a7: -1 };
+    assert_eq(has_cycle(next, 0), 0);
+}
+
+fn main() -> Int {
+    test_simple_cycle();
+    test_no_cycle();
+    test_self_loop();
+    test_immediate_cycle();
+    test_long_tail_short_cycle();
+    test_full_cycle();
+    test_cycle_of_two();
+    test_functional_sequence();
+    test_rho_shape();
+    test_no_cycle_single_node();
+    print("[OK] 366_cycle_detect_aot");
+    0
+}

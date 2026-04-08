@@ -1,0 +1,96 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, generic, type-parameter
+
+// Generic Result type
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// Generic container with single parameter
+type Heap<T> is {
+    value: T,
+};
+
+// Generic with multiple parameters
+type Either<L, R> is
+    | Left(L)
+    | Right(R);
+
+// Generic with constraint
+type Comparable<T: Ord> is {
+    items: List<T>,
+};
+
+// Generic with multiple constraints
+type Processable<T: Clone + Debug + Send> is {
+    data: T,
+};
+
+// Generic with constraint inline (where clause goes before 'is' in type defs)
+type Container<T: Clone> is {
+    items: List<T>,
+};
+
+// Generic with multiple constraints inline
+type BiContainer<A: Clone + Debug, B: Clone + Debug> is {
+    left: A,
+    right: B,
+};
+
+// Generic alias
+type Pair<T> is (T, T);
+type Triple<T> is (T, T, T);
+
+// Generic with multiple type parameters
+// Note: Default type parameters (H = DefaultHasher) are not currently supported
+type Map<K, V, H> is {
+    hasher: H,
+    buckets: List<List<(K, V)>>,
+};
+
+// Higher-kinded type concept (parser exploration)
+// Note: Higher-kinded type syntax F<_> requires special parser support
+// Using simpler generic syntax for now
+type Functor<T> is protocol {
+    fn map<A, B>(fa: T, f: fn(A) -> B) -> T;
+};
+
+// Generic with associated type
+// Note: Associated type bounds with = (Item = T) are not supported in protocol definitions
+type Collection<T> is protocol {
+    type Iter;
+    fn iter(&self) -> Self.Iter;
+};
+
+// Recursive generic type
+type Tree<T> is
+    | Leaf(T)
+    | Node { value: T, children: List<Tree<T>> };
+
+// Generic with variance annotation (parser exploration - may not be fully supported)
+// Note: Variance is typically inferred in Verum, but explicit syntax may be added
+// For now, using standard type parameter syntax:
+type Covariant<T> is { value: T };
+type Contravariant<T> is { handler: fn(T) -> () };
+type Invariant<T> is { get: fn() -> T, set: fn(T) -> () };
+
+// Generic array wrapper
+// Note: const generic parameters (const N: Int) require special syntax
+// Using meta parameter syntax instead
+type Array<T, N: meta Int> is {
+    data: [T; N],
+};
+
+// Nested generics
+type Nested<A, B, C> is {
+    outer: Map<A, List<Maybe<B>>>,
+    inner: Result<C, Text>,
+};
+
+// Generic function type alias
+type Transformer<A, B> is fn(A) -> B;
+type BiTransformer<A, B, C> is fn(A, B) -> C;
+// Note: async fn type syntax is not supported in type aliases
+type AsyncTransformer<A, B> is fn(A) -> B;

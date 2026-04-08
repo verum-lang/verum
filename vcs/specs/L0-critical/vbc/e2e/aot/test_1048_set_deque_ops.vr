@@ -1,0 +1,162 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: set, deque, collections, operations
+// @description: Set and Deque collection operations
+
+fn test_set_basic() -> Int {
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    if s.len() != 3 {
+        print(f"FAIL set_basic len: expected 3, got {s.len()}");
+        return 1;
+    }
+    if !s.contains(20) {
+        print("FAIL set_basic: should contain 20");
+        return 1;
+    }
+    if s.contains(99) {
+        print("FAIL set_basic: should not contain 99");
+        return 1;
+    }
+    print("  set_basic: OK");
+    0
+}
+
+fn test_set_duplicates() -> Int {
+    let mut s = Set.new();
+    s.insert(5);
+    s.insert(5);
+    s.insert(5);
+    if s.len() != 1 {
+        print(f"FAIL set_duplicates: expected len 1, got {s.len()}");
+        return 1;
+    }
+    print("  set_duplicates: OK");
+    0
+}
+
+fn test_set_remove() -> Int {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.remove(2);
+    if s.len() != 2 {
+        print(f"FAIL set_remove len: expected 2, got {s.len()}");
+        return 1;
+    }
+    if s.contains(2) {
+        print("FAIL set_remove: should not contain 2");
+        return 1;
+    }
+    print("  set_remove: OK");
+    0
+}
+
+fn test_deque_basic() -> Int {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    if d.len() != 3 {
+        print(f"FAIL deque_basic len: expected 3, got {d.len()}");
+        return 1;
+    }
+    // front()/back() return Maybe<&T> which has AOT issues with reference unwrap
+    // Use pop to verify values instead
+    let front = match d.pop_front() { Some(v) => v, None => -1 };
+    if front != 10 {
+        print(f"FAIL deque_basic front: expected 10, got {front}");
+        return 1;
+    }
+    let back = match d.pop_back() { Some(v) => v, None => -1 };
+    if back != 30 {
+        print(f"FAIL deque_basic back: expected 30, got {back}");
+        return 1;
+    }
+    // Should have 1 element left (20)
+    if d.len() != 1 {
+        print(f"FAIL deque_basic remaining: expected 1, got {d.len()}");
+        return 1;
+    }
+    print("  deque_basic: OK");
+    0
+}
+
+fn test_deque_push_pop() -> Int {
+    let mut d = Deque.new();
+    d.push_front(1);
+    d.push_front(2);
+    d.push_back(3);
+    // order: [2, 1, 3]
+
+    let v1 = match d.pop_front() { Some(v) => v, None => -1 };
+    let v2 = match d.pop_back() { Some(v) => v, None => -1 };
+    let v3 = match d.pop_front() { Some(v) => v, None => -1 };
+
+    if v1 != 2 {
+        print(f"FAIL deque_push_pop v1: expected 2, got {v1}");
+        return 1;
+    }
+    if v2 != 3 {
+        print(f"FAIL deque_push_pop v2: expected 3, got {v2}");
+        return 1;
+    }
+    if v3 != 1 {
+        print(f"FAIL deque_push_pop v3: expected 1, got {v3}");
+        return 1;
+    }
+    if d.len() != 0 {
+        print(f"FAIL deque empty: expected 0, got {d.len()}");
+        return 1;
+    }
+    print("  deque_push_pop: OK");
+    0
+}
+
+fn test_deque_as_queue() -> Int {
+    let mut q = Deque.new();
+    q.push_back(10);
+    q.push_back(20);
+    q.push_back(30);
+
+    let v1 = match q.pop_front() { Some(v) => v, None => -1 };
+    let v2 = match q.pop_front() { Some(v) => v, None => -1 };
+    let v3 = match q.pop_front() { Some(v) => v, None => -1 };
+
+    if v1 != 10 {
+        print(f"FAIL queue v1: expected 10, got {v1}");
+        return 1;
+    }
+    if v2 != 20 {
+        print(f"FAIL queue v2: expected 20, got {v2}");
+        return 1;
+    }
+    if v3 != 30 {
+        print(f"FAIL queue v3: expected 30, got {v3}");
+        return 1;
+    }
+    print("  deque_as_queue: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Set & Deque Tests:");
+    let mut failures = 0;
+    failures = failures + test_set_basic();
+    failures = failures + test_set_duplicates();
+    failures = failures + test_set_remove();
+    failures = failures + test_deque_basic();
+    failures = failures + test_deque_push_pop();
+    failures = failures + test_deque_as_queue();
+
+    if failures == 0 {
+        print("All set & deque tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

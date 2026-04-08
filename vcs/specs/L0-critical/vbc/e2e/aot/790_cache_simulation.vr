@@ -1,0 +1,257 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, cache
+// @expected-exit: 0
+
+// Cache simulation algorithms
+
+// --- Direct-mapped cache ---
+// cache_size lines, each maps address -> cache[addr % cache_size]
+// Returns (hits, misses) encoded as hits * 10000 + misses
+fn direct_mapped_sim(addresses: List<Int>, num_accesses: Int, cache_size: Int) -> Int {
+    // cache_tags[i] = tag stored in line i, -1 = empty
+    let mut cache_tags = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    let mut hits = 0;
+    let mut misses = 0;
+
+    let mut i = 0;
+    while i < num_accesses {
+        let addr = addresses[i];
+        let line = addr % cache_size;
+        let tag = addr / cache_size;
+
+        if cache_tags[line] == tag {
+            hits = hits + 1;
+        } else {
+            misses = misses + 1;
+            cache_tags[line] = tag;
+        }
+        i = i + 1;
+    }
+
+    hits * 10000 + misses
+}
+
+// --- LRU cache simulation ---
+// cache_size entries, track LRU order
+// lru_order: most recently used at front (index 0), least at back
+// Returns (hits, misses) encoded as hits * 10000 + misses
+fn lru_sim(addresses: List<Int>, num_accesses: Int, cache_size: Int) -> Int {
+    let mut cache = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    let mut cache_count = 0;
+    let mut hits = 0;
+    let mut misses = 0;
+
+    let mut i = 0;
+    while i < num_accesses {
+        let addr = addresses[i];
+
+        // Search for addr in cache
+        let mut found_idx = -1;
+        let mut j = 0;
+        while j < cache_count {
+            if cache[j] == addr {
+                found_idx = j;
+                j = cache_count; // break
+            }
+            j = j + 1;
+        }
+
+        if found_idx >= 0 {
+            hits = hits + 1;
+            // Move to front (most recently used)
+            let mut k = found_idx;
+            while k > 0 {
+                cache[k] = cache[k - 1];
+                k = k - 1;
+            }
+            cache[0] = addr;
+        } else {
+            misses = misses + 1;
+            if cache_count < cache_size {
+                // Cache not full, add to front
+                let mut k = cache_count;
+                while k > 0 {
+                    cache[k] = cache[k - 1];
+                    k = k - 1;
+                }
+                cache[0] = addr;
+                cache_count = cache_count + 1;
+            } else {
+                // Evict LRU (last element), shift all right, insert at front
+                let mut k = cache_size - 1;
+                while k > 0 {
+                    cache[k] = cache[k - 1];
+                    k = k - 1;
+                }
+                cache[0] = addr;
+            }
+        }
+
+        i = i + 1;
+    }
+
+    hits * 10000 + misses
+}
+
+// --- Cache line fill simulation ---
+// Block size = 4 words, cache holds cache_lines blocks
+// Address maps to block = addr / block_size
+// Returns number of distinct blocks loaded
+fn cache_fill_count(addresses: List<Int>, num_accesses: Int, blk_size: Int) -> Int {
+    let mut blocks_seen = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut num_blocks = 0;
+
+    let mut i = 0;
+    while i < num_accesses {
+        let blk = addresses[i] / blk_size;
+        let mut found = 0;
+        let mut j = 0;
+        while j < num_blocks {
+            if blocks_seen[j] == blk {
+                found = 1;
+                j = num_blocks; // break
+            }
+            j = j + 1;
+        }
+        if found == 0 {
+            if num_blocks < 16 {
+                blocks_seen[num_blocks] = blk;
+                num_blocks = num_blocks + 1;
+            }
+        }
+        i = i + 1;
+    }
+
+    num_blocks
+}
+
+// --- Write-through policy simulation ---
+// Counts write-throughs to memory (every write goes through)
+// Returns total write operations to memory
+fn write_through_count(operations: List<Int>, num_ops: Int) -> Int {
+    // operations[i]: 0 = read, 1 = write
+    let mut writes = 0;
+    let mut i = 0;
+    while i < num_ops {
+        if operations[i] == 1 {
+            writes = writes + 1;
+        }
+        i = i + 1;
+    }
+    writes
+}
+
+// --- Hit rate calculation (scaled by 1000) ---
+fn hit_rate_scaled(hits: Int, total: Int) -> Int {
+    if total == 0 {
+        0
+    } else {
+        (hits * 1000) / total
+    }
+}
+
+fn main() -> Int {
+    // Access pattern: [0, 4, 0, 4, 8, 0, 4, 8, 12, 0]
+    let addrs = [0, 4, 0, 4, 8, 0, 4, 8, 12, 0, 0, 0, 0, 0, 0, 0];
+    let num_acc = 10;
+
+    // Test 1: Direct-mapped cache with 4 lines
+    // addr=0: line=0, tag=0, miss -> cache[0]=0
+    // addr=4: line=0, tag=1, miss (conflict!) -> cache[0]=1
+    // addr=0: line=0, tag=0, miss (conflict!) -> cache[0]=0
+    // addr=4: line=0, tag=1, miss (conflict!) -> cache[0]=1
+    // addr=8: line=0, tag=2, miss (conflict!) -> cache[0]=2
+    // addr=0: line=0, tag=0, miss (conflict!) -> cache[0]=0
+    // addr=4: line=0, tag=1, miss -> cache[0]=1
+    // addr=8: line=0, tag=2, miss -> cache[0]=2
+    // addr=12: line=0, tag=3, miss -> cache[0]=3
+    // addr=0: line=0, tag=0, miss -> cache[0]=0
+    // All misses due to conflict on single line: hits=0, misses=10
+    let dm_result = direct_mapped_sim(addrs, num_acc, 4);
+    assert_eq(dm_result, 10); // 0 * 10000 + 10 = 10
+
+    // Test 2: Direct-mapped cache with 16 lines (no conflicts)
+    // addr 0->line 0, 4->line 4, 8->line 8, 12->line 12
+    // First access to each is miss, repeat access is hit
+    // Accesses: 0(miss), 4(miss), 0(hit), 4(hit), 8(miss), 0(hit), 4(hit), 8(hit), 12(miss), 0(hit)
+    // hits=5, misses=5 -> result = 50005
+    // Wait, recalculate: tag = addr/16 = 0 for all, line = addr%16
+    // addr=0: line=0, tag=0, miss
+    // addr=4: line=4, tag=0, miss
+    // addr=0: line=0, tag=0, hit
+    // addr=4: line=4, tag=0, hit
+    // addr=8: line=8, tag=0, miss
+    // addr=0: line=0, tag=0, hit
+    // addr=4: line=4, tag=0, hit
+    // addr=8: line=8, tag=0, hit
+    // addr=12: line=12, tag=0, miss
+    // addr=0: line=0, tag=0, hit
+    // hits=6, misses=4 -> 60004
+    let dm_result2 = direct_mapped_sim(addrs, num_acc, 16);
+    assert_eq(dm_result2, 60004);
+
+    // Test 3: LRU cache with 4 entries
+    // addr=0: miss, cache=[0]
+    // addr=4: miss, cache=[4,0]
+    // addr=0: hit, cache=[0,4]
+    // addr=4: hit, cache=[4,0]
+    // addr=8: miss, cache=[8,4,0]
+    // addr=0: hit, cache=[0,8,4]
+    // addr=4: hit, cache=[4,0,8]
+    // addr=8: hit, cache=[8,4,0]
+    // addr=12: miss, cache=[12,8,4,0]
+    // addr=0: hit, cache=[0,12,8,4]
+    // hits=6, misses=4 -> 60004
+    let lru_result = lru_sim(addrs, num_acc, 4);
+    assert_eq(lru_result, 60004);
+
+    // Test 4: LRU cache with 2 entries (more evictions)
+    // addr=0: miss, cache=[0]
+    // addr=4: miss, cache=[4,0]
+    // addr=0: hit, cache=[0,4]
+    // addr=4: hit, cache=[4,0]
+    // addr=8: miss, evict 0, cache=[8,4]
+    // addr=0: miss, evict 4, cache=[0,8]
+    // addr=4: miss, evict 8, cache=[4,0]
+    // addr=8: miss, evict 0, cache=[8,4]
+    // addr=12: miss, evict 4, cache=[12,8]
+    // addr=0: miss, evict 8, cache=[0,12]
+    // hits=2, misses=8 -> 20008
+    let lru_result2 = lru_sim(addrs, num_acc, 2);
+    assert_eq(lru_result2, 20008);
+
+    // Test 5: Cache fill count with block size 4
+    // blocks: 0/4=0, 4/4=1, 0/4=0, 4/4=1, 8/4=2, 0/4=0, 4/4=1, 8/4=2, 12/4=3, 0/4=0
+    // Distinct blocks: {0, 1, 2, 3} = 4
+    let fill = cache_fill_count(addrs, num_acc, 4);
+    assert_eq(fill, 4);
+
+    // Test 6: Cache fill count with block size 8
+    // blocks: 0/8=0, 4/8=0, 0/8=0, 4/8=0, 8/8=1, 0/8=0, 4/8=0, 8/8=1, 12/8=1, 0/8=0
+    // Distinct blocks: {0, 1} = 2
+    let fill2 = cache_fill_count(addrs, num_acc, 8);
+    assert_eq(fill2, 2);
+
+    // Test 7: Write-through count
+    // Operations: [0,1,0,1,1,0,0,1,0,0] -> 4 writes
+    let ops = [0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+    let wt = write_through_count(ops, 10);
+    assert_eq(wt, 4);
+
+    // Test 8: Hit rate for dm with 16 lines: 6 hits / 10 total = 600
+    let hr = hit_rate_scaled(6, 10);
+    assert_eq(hr, 600);
+
+    // Test 9: Hit rate for LRU with 4 entries: 6 hits / 10 total = 600
+    let hr2 = hit_rate_scaled(6, 10);
+    assert_eq(hr2, 600);
+
+    // Test 10: Hit rate for LRU with 2 entries: 2 hits / 10 total = 200
+    let hr3 = hit_rate_scaled(2, 10);
+    assert_eq(hr3, 200);
+
+    print("790_cache_simulation: PASS");
+    0
+}

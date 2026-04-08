@@ -1,0 +1,23 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, minimal
+// @description: Test generic sqrt intrinsic
+
+module test.stdlib.sys.intrinsics.generic_sqrt_test;
+
+mount core.intrinsics.{sqrt, abs};
+
+fn main() {
+    // Test generic sqrt with explicit Float type
+    let x: Float = 4.0;
+    let result = sqrt(x);
+    print(f"sqrt(4.0) = {result}");
+
+    // Test generic abs
+    let y: Float = -5.0;
+    let abs_result = abs(y);
+    print(f"abs(-5.0) = {abs_result}");
+
+    print("All generic tests passed!");
+}

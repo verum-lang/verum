@@ -1,0 +1,213 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, dispatch
+// @timeout: 60000
+// @expected-exit: 0
+
+// Closure-like patterns: functions returning function-dispatch IDs, record-based dispatch tables
+
+// Strategy pattern via integer tags + dispatch
+// Operation types: 0=add, 1=sub, 2=mul, 3=div, 4=mod, 5=max, 6=min, 7=pow
+
+fn dispatch_op(tag: Int, a: Int, b: Int) -> Int {
+    if (tag == 0) { return a + b; }
+    if (tag == 1) { return a - b; }
+    if (tag == 2) { return a * b; }
+    if (tag == 3) { if (b != 0) { return a / b; } return 0; }
+    if (tag == 4) { if (b != 0) { return a % b; } return 0; }
+    if (tag == 5) { if (a > b) { return a; } return b; }
+    if (tag == 6) { if (a < b) { return a; } return b; }
+    if (tag == 7) {
+        let mut res = 1;
+        let mut i = 0;
+        while (i < b) { res = res * a; i = i + 1; }
+        return res;
+    }
+    0
+}
+
+// "Function object" via record: stores operation tag and one bound argument
+type BoundOp is { op_tag: Int, bound_val: Int };
+
+fn make_adder(n: Int) -> BoundOp { BoundOp { op_tag: 0, bound_val: n } }
+fn make_multiplier(n: Int) -> BoundOp { BoundOp { op_tag: 2, bound_val: n } }
+fn make_subtractor(n: Int) -> BoundOp { BoundOp { op_tag: 1, bound_val: n } }
+
+fn apply_bound(bo: BoundOp, x: Int) -> Int {
+    dispatch_op(bo.op_tag, x, bo.bound_val)
+}
+
+// Compose two bound operations: apply first, then second
+fn compose_apply(first: BoundOp, second: BoundOp, x: Int) -> Int {
+    let intermediate = apply_bound(first, x);
+    apply_bound(second, intermediate)
+}
+
+// Pipeline: apply a chain of operations (up to 8 via record)
+type Pipeline is { s0: BoundOp, s1: BoundOp, s2: BoundOp, s3: BoundOp,
+                   s4: BoundOp, s5: BoundOp, s6: BoundOp, s7: BoundOp, length: Int };
+
+fn pipeline_new() -> Pipeline {
+    let nop = BoundOp { op_tag: 0, bound_val: 0 };  // add 0 = identity
+    Pipeline { s0: nop, s1: nop, s2: nop, s3: nop, s4: nop, s5: nop, s6: nop, s7: nop, length: 0 }
+}
+
+fn pipeline_get(p: Pipeline, i: Int) -> BoundOp {
+    if (i == 0) { return p.s0; }  if (i == 1) { return p.s1; }
+    if (i == 2) { return p.s2; }  if (i == 3) { return p.s3; }
+    if (i == 4) { return p.s4; }  if (i == 5) { return p.s5; }
+    if (i == 6) { return p.s6; }  p.s7
+}
+
+fn pipeline_push(p: Pipeline, bo: BoundOp) -> Pipeline {
+    let idx = p.length;
+    let nop = BoundOp { op_tag: 0, bound_val: 0 };
+    Pipeline {
+        s0: if (idx == 0) { bo } else { p.s0 },
+        s1: if (idx == 1) { bo } else { p.s1 },
+        s2: if (idx == 2) { bo } else { p.s2 },
+        s3: if (idx == 3) { bo } else { p.s3 },
+        s4: if (idx == 4) { bo } else { p.s4 },
+        s5: if (idx == 5) { bo } else { p.s5 },
+        s6: if (idx == 6) { bo } else { p.s6 },
+        s7: if (idx == 7) { bo } else { p.s7 },
+        length: idx + 1
+    }
+}
+
+fn pipeline_execute(p: Pipeline, x: Int) -> Int {
+    let mut val = x;
+    let mut i = 0;
+    while (i < p.length) {
+        val = apply_bound(pipeline_get(p, i), val);
+        i = i + 1;
+    }
+    val
+}
+
+// Higher-order: "map" over an array using a BoundOp
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if (i == 0) { return a.e0; }  if (i == 1) { return a.e1; }
+    if (i == 2) { return a.e2; }  if (i == 3) { return a.e3; }
+    if (i == 4) { return a.e4; }  if (i == 5) { return a.e5; }
+    if (i == 6) { return a.e6; }  a.e7
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if (i == 0) { v } else { a.e0 }, e1: if (i == 1) { v } else { a.e1 },
+        e2: if (i == 2) { v } else { a.e2 }, e3: if (i == 3) { v } else { a.e3 },
+        e4: if (i == 4) { v } else { a.e4 }, e5: if (i == 5) { v } else { a.e5 },
+        e6: if (i == 6) { v } else { a.e6 }, e7: if (i == 7) { v } else { a.e7 }
+    }
+}
+
+fn a8_sum(a: Arr8) -> Int { a.e0 + a.e1 + a.e2 + a.e3 + a.e4 + a.e5 + a.e6 + a.e7 }
+
+fn map_array(arr: Arr8, n: Int, op: BoundOp) -> Arr8 {
+    let mut out = arr;
+    let mut i = 0;
+    while (i < n) {
+        out = a8_set(out, i, apply_bound(op, a8_get(arr, i)));
+        i = i + 1;
+    }
+    out
+}
+
+// "reduce" over array with a binary op tag
+fn reduce_array(arr: Arr8, n: Int, op_tag: Int, init: Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while (i < n) {
+        acc = dispatch_op(op_tag, acc, a8_get(arr, i));
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Basic dispatch
+    assert_eq(dispatch_op(0, 10, 20), 30);   // add
+    assert_eq(dispatch_op(1, 50, 30), 20);   // sub
+    assert_eq(dispatch_op(2, 6, 7), 42);     // mul
+    assert_eq(dispatch_op(3, 100, 4), 25);   // div
+    assert_eq(dispatch_op(4, 17, 5), 2);     // mod
+    assert_eq(dispatch_op(5, 10, 20), 20);   // max
+    assert_eq(dispatch_op(6, 10, 20), 10);   // min
+    assert_eq(dispatch_op(7, 2, 10), 1024);  // pow
+
+    // Bound operations
+    let add5 = make_adder(5);
+    assert_eq(apply_bound(add5, 10), 15);
+    assert_eq(apply_bound(add5, 0), 5);
+
+    let mul3 = make_multiplier(3);
+    assert_eq(apply_bound(mul3, 10), 30);
+    assert_eq(apply_bound(mul3, 7), 21);
+
+    let sub10 = make_subtractor(10);
+    assert_eq(apply_bound(sub10, 25), 15);
+
+    // Composition: add5 then mul3 => (x+5)*3
+    assert_eq(compose_apply(add5, mul3, 10), 45);  // (10+5)*3 = 45
+    assert_eq(compose_apply(mul3, add5, 10), 35);  // (10*3)+5 = 35
+
+    // Pipeline
+    let mut pipe = pipeline_new();
+    pipe = pipeline_push(pipe, add5);          // x+5
+    pipe = pipeline_push(pipe, mul3);          // (x+5)*3
+    pipe = pipeline_push(pipe, make_adder(1)); // (x+5)*3+1
+    assert_eq(pipe.length, 3);
+    assert_eq(pipeline_execute(pipe, 10), 46);  // (10+5)*3+1 = 46
+    assert_eq(pipeline_execute(pipe, 0), 16);   // (0+5)*3+1 = 16
+
+    // Longer pipeline
+    let mut pipe2 = pipeline_new();
+    pipe2 = pipeline_push(pipe2, make_multiplier(2));  // x*2
+    pipe2 = pipeline_push(pipe2, make_adder(3));       // x*2+3
+    pipe2 = pipeline_push(pipe2, make_multiplier(2));  // (x*2+3)*2
+    pipe2 = pipeline_push(pipe2, make_subtractor(1));  // (x*2+3)*2-1
+    assert_eq(pipeline_execute(pipe2, 5), 25);  // (5*2+3)*2-1 = (13)*2-1 = 25
+
+    // Map over array
+    let arr = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let doubled = map_array(arr, 8, make_multiplier(2));
+    assert_eq(a8_get(doubled, 0), 2);
+    assert_eq(a8_get(doubled, 7), 16);
+    assert_eq(a8_sum(doubled), 72);  // 2*(1+2+...+8) = 72
+
+    let inc_arr = map_array(arr, 8, make_adder(10));
+    assert_eq(a8_get(inc_arr, 0), 11);
+    assert_eq(a8_get(inc_arr, 7), 18);
+
+    // Reduce
+    let sum_val = reduce_array(arr, 8, 0, 0);   // sum
+    assert_eq(sum_val, 36);
+
+    let prod_val = reduce_array(arr, 5, 2, 1);  // product of first 5: 1*2*3*4*5 = 120
+    assert_eq(prod_val, 120);
+
+    let max_val = reduce_array(arr, 8, 5, 0);   // max
+    assert_eq(max_val, 8);
+
+    let min_val = reduce_array(arr, 8, 6, 999);  // min
+    assert_eq(min_val, 1);
+
+    // Stress: map then reduce in a loop
+    let mut total = 0;
+    let mut k = 1;
+    while (k <= 10) {
+        let mapped = map_array(arr, 8, make_multiplier(k));
+        let sum_m = reduce_array(mapped, 8, 0, 0);
+        total = total + sum_m;
+        k = k + 1;
+    }
+    // sum(arr) = 36; mapped sum = 36*k; total = 36*(1+2+...+10) = 36*55 = 1980
+    assert_eq(total, 1980);
+
+    print("849_stress_closure_patterns: PASS");
+    0
+}

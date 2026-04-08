@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, dangling-reference, resize, cbgr
+// @description: Tests that compile-time borrow checking detects reference invalidation on collection mutation
+
+fn main() {
+    let mut data = [1, 2, 3];
+
+    // Take reference to element
+    let elem_ref = &data[1];
+
+    // Resize collection - may reallocate, invalidating reference
+    for i in 0..1000 {
+        data.push(i);  // Forces reallocation
+    }
+
+    // Reference is now invalid
+    let _ = *elem_ref;  // CBGR detects invalidated reference
+}

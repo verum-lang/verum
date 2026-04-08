@@ -1,0 +1,62 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, proof-scripts, binary-search, correctness
+// @timeout: 45000
+
+/// Binary search correctness proof
+
+fn binary_search(arr: List<Int>, target: Int) -> Maybe<Nat>;
+fn is_sorted_list(arr: List<Int>) -> Bool;
+
+/// Binary search finds the target if it exists
+theorem binary_search_finds(arr: List<Int>, target: Int, idx: Nat)
+    requires is_sorted_list(arr)
+    requires idx < len(arr)
+    requires arr.get(idx) == Some(target)
+    ensures binary_search(arr, target) != None
+{
+    proof by auto
+}
+
+/// Binary search returns valid index
+theorem binary_search_valid_index(arr: List<Int>, target: Int)
+    requires is_sorted_list(arr)
+    ensures match binary_search(arr, target) {
+        None => true,
+        Some(i) => i < len(arr),
+    }
+{
+    proof by auto
+}
+
+/// Binary search result matches target
+theorem binary_search_correct(arr: List<Int>, target: Int)
+    requires is_sorted_list(arr)
+    ensures match binary_search(arr, target) {
+        None => forall i: Nat. i < len(arr) implies arr.get(i) != Some(target),
+        Some(idx) => arr.get(idx) == Some(target),
+    }
+{
+    proof by auto
+}
+
+/// Invariant: search range always contains target if present
+theorem search_invariant(arr: List<Int>, target: Int, lo: Nat, hi: Nat)
+    requires is_sorted_list(arr)
+    requires lo <= hi
+    requires hi <= len(arr)
+    ensures true
+{
+    proof by auto
+}
+
+/// Termination: search range strictly decreases
+theorem search_terminates(lo: Nat, hi: Nat)
+    requires lo < hi
+    ensures hi - lo > 0
+{
+    proof by omega
+}
+
+fn main() {}

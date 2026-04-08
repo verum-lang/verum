@@ -1,0 +1,200 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, stdlib, iterator
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Manual map/filter/fold on fixed arrays, verify accumulated results
+
+fn main() -> Int {
+    test_manual_map_square();
+    test_manual_map_doubled();
+    test_manual_filter();
+    test_manual_fold_sum();
+    test_manual_fold_product();
+    test_manual_fold_max();
+    test_chained_operations();
+    0
+}
+
+/// Map: apply square to each element (in-place)
+fn test_manual_map_square() {
+    let mut arr = [0, 0, 0, 0, 0];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+    let n = 5;
+
+    let mut i = 0;
+    while i < n {
+        arr[i] = arr[i] * arr[i];
+        i = i + 1;
+    }
+
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 4);
+    assert_eq(arr[2], 9);
+    assert_eq(arr[3], 16);
+    assert_eq(arr[4], 25);
+    print("manual_map_square: pass\n");
+}
+
+/// Map: apply x*2+1 to each element (in-place)
+fn test_manual_map_doubled() {
+    let mut arr = [0, 0, 0, 0, 0];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+    let n = 5;
+
+    let mut i = 0;
+    while i < n {
+        arr[i] = arr[i] * 2 + 1;
+        i = i + 1;
+    }
+    assert_eq(arr[0], 3);
+    assert_eq(arr[2], 7);
+    assert_eq(arr[4], 11);
+    print("manual_map_doubled: pass\n");
+}
+
+/// Filter: keep even elements (single array, in-place compaction)
+fn test_manual_filter() {
+    let mut arr = [0, 0, 0, 0, 0, 0, 0, 0];
+    arr[0] = 3;
+    arr[1] = 7;
+    arr[2] = 2;
+    arr[3] = 8;
+    arr[4] = 1;
+    arr[5] = 9;
+    arr[6] = 4;
+    arr[7] = 6;
+    let mut even_count = 0;
+    let mut i = 0;
+    // Count evens and compact them to the front
+    while i < 8 {
+        if arr[i] % 2 == 0 {
+            arr[even_count] = arr[i];
+            even_count = even_count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(even_count, 4);
+    assert_eq(arr[0], 2);
+    assert_eq(arr[1], 8);
+    assert_eq(arr[2], 4);
+    assert_eq(arr[3], 6);
+    print("manual_filter: pass\n");
+}
+
+/// Fold sum: accumulate with addition
+fn test_manual_fold_sum() {
+    let mut arr = [0, 0, 0, 0, 0];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+    let n = 5;
+
+    let mut sum_acc = 0;
+    let mut i = 0;
+    while i < n {
+        sum_acc = sum_acc + arr[i];
+        i = i + 1;
+    }
+    assert_eq(sum_acc, 15);
+    print("manual_fold_sum: pass\n");
+}
+
+/// Fold product: accumulate with multiplication
+fn test_manual_fold_product() {
+    let mut arr = [0, 0, 0, 0, 0];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+    let n = 5;
+
+    let mut prod_acc = 1;
+    let mut i = 0;
+    while i < n {
+        prod_acc = prod_acc * arr[i];
+        i = i + 1;
+    }
+    assert_eq(prod_acc, 120);
+    print("manual_fold_product: pass\n");
+}
+
+/// Fold max: find maximum value
+fn test_manual_fold_max() {
+    let mut vals = [0, 0, 0, 0, 0, 0];
+    vals[0] = 3;
+    vals[1] = 7;
+    vals[2] = 1;
+    vals[3] = 9;
+    vals[4] = 2;
+    vals[5] = 8;
+    let mut max_val = vals[0];
+    let mut i = 1;
+    while i < 6 {
+        if vals[i] > max_val {
+            max_val = vals[i];
+        }
+        i = i + 1;
+    }
+    assert_eq(max_val, 9);
+    print("manual_fold_max: pass\n");
+}
+
+/// Chain: filter evens, square them, sum — all in one array
+fn test_chained_operations() {
+    let mut arr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+    arr[5] = 6;
+    arr[6] = 7;
+    arr[7] = 8;
+    arr[8] = 9;
+    arr[9] = 10;
+    let n = 10;
+
+    // Step 1: filter evens to front (in-place)
+    let mut ec = 0;
+    let mut i = 0;
+    while i < n {
+        if arr[i] % 2 == 0 {
+            arr[ec] = arr[i];
+            ec = ec + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(ec, 5); // 2,4,6,8,10
+
+    // Step 2: square in-place (just the first ec elements)
+    i = 0;
+    while i < ec {
+        arr[i] = arr[i] * arr[i];
+        i = i + 1;
+    }
+
+    // Step 3: fold sum
+    let mut total = 0;
+    i = 0;
+    while i < ec {
+        total = total + arr[i];
+        i = i + 1;
+    }
+    // 4 + 16 + 36 + 64 + 100 = 220
+    assert_eq(total, 220);
+    print("chained_operations: pass\n");
+}

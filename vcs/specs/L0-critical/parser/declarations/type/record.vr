@@ -1,0 +1,102 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, record, struct
+
+// Simple record type
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+// Record with different field types
+type Person is {
+    name: Text,
+    age: Int,
+    active: Bool,
+};
+
+// Record with optional field
+type Config is {
+    host: Text,
+    port: Int,
+    timeout: Maybe<Int>,
+};
+
+// Record with generic field
+type Container<T> is {
+    value: T,
+    count: Int,
+};
+
+// Record with multiple generic parameters
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+// Record with nested record field
+type Address is {
+    street: Text,
+    city: Text,
+    zip: Text,
+};
+
+type Employee is {
+    name: Text,
+    address: Address,
+    salary: Float,
+};
+
+// Record with list field
+type Team is {
+    name: Text,
+    members: List<Person>,
+};
+
+// Record with function field
+type Handler is {
+    name: Text,
+    callback: fn(Event) -> (),
+};
+
+// Record with reference field
+type Node<T> is {
+    value: T,
+    next: Maybe<&Node<T>>,
+};
+
+// Record with visibility modifiers (not currently supported in parser)
+// TODO: Enable when parser supports field visibility
+type Module is {
+    name: Text,
+    internal_state: Int,
+};
+
+// Record with trailing comma
+type Trailing is {
+    a: Int,
+    b: Int,
+    c: Int,
+};
+
+// Empty record (unit-like)
+type Unit is { };
+
+// Single-field record
+type Wrapper<T> is {
+    inner: T,
+};
+
+// Record with complex nested types
+type ComplexRecord is {
+    data: Map<Text, List<Maybe<Int>>>,
+    handlers: List<fn(Int) -> Bool>,
+};
+
+// Record with mutable field annotation (not currently supported in parser)
+// TODO: Enable when parser supports field mutability
+type MutableRecord is {
+    counter: Int,
+    readonly: Text,
+};

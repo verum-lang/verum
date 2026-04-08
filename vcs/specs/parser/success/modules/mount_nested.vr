@@ -1,0 +1,86 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Nested group: a.{b.{c, d}, e}
+mount core.{collections.{List, Map}, io};
+
+// Two levels of nesting
+mount core.{
+    collections.{List, Set, Map},
+    io.{Read, Write}
+};
+
+// Three levels of nesting
+mount mylib.{
+    core.{
+        types.{Point, Vector},
+        utils.{helper}
+    },
+    ext
+};
+
+// Nested with aliases
+mount core.{
+    collections.{List as L, Map as M},
+    io as stdio
+};
+
+// Complex nested structure
+mount external.{
+    http.{
+        client.{HttpClient, ClientConfig},
+        server.{HttpServer, ServerConfig}
+    },
+    websocket.{
+        client.WsClient,
+        server.WsServer
+    },
+    common.{Error, Result}
+};
+
+// Nested glob patterns
+mount core.{
+    collections.*,
+    io.{Read, Write}
+};
+
+// Mixed nested patterns
+mount myorg.{
+    project1.{module1, module2.*},
+    project2.{module3.Item, module4.*}
+};
+
+// Deep nesting with single items
+mount a.{b.{c.{d.{e}}}};
+
+// Nested groups at different depths
+mount lib.{
+    shallow,
+    medium.deep,
+    very.deeply.nested.item
+};
+
+// Nested with trailing commas
+mount core.{
+    io,
+    fs.{File, OpenOptions,},
+    net.{TcpStream,},
+};
+
+// Complex real-world pattern
+mount verum.{
+    core.{
+        types.{Int, Float, Text, Bool},
+        collections.{List, Map, Set},
+        maybe.{Maybe, Some, None}
+    },
+    io.{
+        fs.{read_file, write_file},
+        net.{connect, listen}
+    },
+    async.{
+        runtime.{spawn, block_on},
+        channel.{channel, Sender, Receiver}
+    }
+};

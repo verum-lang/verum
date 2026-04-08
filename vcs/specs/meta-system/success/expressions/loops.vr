@@ -1,0 +1,62 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, expressions, while, for, loop
+// @description: Test loop expression evaluation in meta functions
+
+// =============================================================================
+// FOR LOOPS (for loops are more predictable)
+// =============================================================================
+
+meta fn test_for_sum() -> Int {
+    let mut sum = 0;
+    for i in [1, 2, 3] {
+        sum = sum + i;
+    }
+    sum
+}
+
+meta fn test_for_empty() -> Int {
+    let mut count = 0;
+    for _ in [] {
+        count = count + 1;
+    }
+    count
+}
+
+meta fn test_for_single() -> Int {
+    let mut result = 0;
+    for i in [42] {
+        result = i;
+    }
+    result
+}
+
+// =============================================================================
+// SIMPLE COMPUTATIONS (no loops)
+// =============================================================================
+
+meta fn test_double(n: Int) -> Int {
+    n * 2
+}
+
+meta fn test_square(n: Int) -> Int {
+    n * n
+}
+
+meta fn test_sum_pair(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Main test function
+fn main() {
+    // For loop tests
+    @const assert_eq(test_for_sum(), 6);
+    @const assert_eq(test_for_empty(), 0);
+    @const assert_eq(test_for_single(), 42);
+
+    // Simple computations
+    @const assert_eq(test_double(5), 10);
+    @const assert_eq(test_square(4), 16);
+    @const assert_eq(test_sum_pair(10, 20), 30);
+}

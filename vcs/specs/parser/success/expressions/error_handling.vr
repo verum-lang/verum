@@ -1,0 +1,409 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, try, recover, finally, throw, error-handling
+// @description: Test error handling expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// TRY EXPRESSIONS (Section 2.12.1 - try_expr)
+// =============================================================================
+
+fn test_basic_try() {
+    let result = try {
+        risky_operation()
+    };
+}
+
+fn test_try_with_multiple_statements() {
+    let result = try {
+        let a = step_one();
+        let b = step_two(a);
+        let c = step_three(b);
+        c
+    };
+}
+
+fn test_try_with_question_mark() {
+    let result = try {
+        let data = fetch()?;
+        let parsed = parse(data)?;
+        let validated = validate(parsed)?;
+        validated
+    };
+}
+
+// =============================================================================
+// TRY WITH RECOVER (Section 2.12.1 - try_recovery)
+// =============================================================================
+
+fn test_try_recover_match_arms() {
+    let result = try {
+        risky_operation()
+    } recover {
+        NetworkError(e) => handle_network(e),
+        TimeoutError => retry(),
+        _ => default_value()
+    };
+}
+
+fn test_try_recover_closure() {
+    let result = try {
+        dangerous_compute()
+    } recover |e| {
+        log_error(e);
+        fallback_value()
+    };
+
+    // Closure with expression body
+    let simple = try {
+        may_fail()
+    } recover |e| default_for_error(e);
+}
+
+fn test_try_recover_patterns() {
+    let result = try {
+        process_data()
+    } recover {
+        IoError { kind: NotFound, .. } => create_default(),
+        IoError { kind: PermissionDenied, .. } => {
+            request_permission();
+            retry()
+        },
+        ParseError(msg) if msg.contains("syntax") => syntax_fallback(),
+        ParseError(msg) => general_parse_fallback(msg),
+        err => {
+            log_unknown(err);
+            panic("Unexpected error")
+        }
+    };
+}
+
+fn test_try_recover_with_guards() {
+    let result = try {
+        fetch_resource()
+    } recover {
+        HttpError(code) if code == 404 => not_found_handler(),
+        HttpError(code) if code >= 500 => server_error_handler(code),
+        HttpError(code) => other_http_error(code),
+        _ => generic_error()
+    };
+}
+
+// =============================================================================
+// TRY WITH FINALLY (Section 2.12.1 - try_finally)
+// =============================================================================
+
+fn test_try_finally() {
+    let result = try {
+        let file = open("data.txt");
+        read(file)
+    } finally {
+        close_all_handles();
+    };
+}
+
+fn test_try_finally_complex() {
+    try {
+        let lock = acquire_lock();
+        let resource = allocate_resource();
+        process(resource)
+    } finally {
+        release_all_locks();
+        log("Cleanup complete");
+    };
+}
+
+// =============================================================================
+// TRY WITH RECOVER AND FINALLY
+// =============================================================================
+
+fn test_try_recover_finally() {
+    let result = try {
+        let connection = connect();
+        let data = fetch(connection);
+        process(data)
+    } recover {
+        ConnectionError(e) => {
+            log_connection_error(e);
+            cached_data()
+        },
+        DataError(e) => {
+            log_data_error(e);
+            default_data()
+        }
+    } finally {
+        cleanup_connections();
+        flush_logs();
+    };
+}
+
+fn test_try_recover_closure_finally() {
+    let result = try {
+        risky_operation()
+    } recover |e| handle_any_error(e)
+    finally {
+        always_cleanup();
+    };
+}
+
+// =============================================================================
+// THROW EXPRESSIONS (Section 2.12 - throw_expr)
+// =============================================================================
+
+fn test_basic_throw() {
+    throw ValidationError.Empty;
+}
+
+fn test_throw_with_message() {
+    throw ParseError("Invalid syntax at line 42");
+}
+
+fn test_throw_constructed() {
+    throw NetworkError {
+        code: 500,
+        message: "Internal server error",
+        retryable: true
+    };
+}
+
+fn test_throw_in_function() throws(ValidationError) {
+    if input.is_empty() {
+        throw ValidationError.Empty;
+    }
+    if input.len() > MAX_LEN {
+        throw ValidationError.TooLong(input.len());
+    }
+    process(input)
+}
+
+fn test_throw_in_condition() throws(ValidationError) {
+    if !is_valid(data) {
+        throw ValidationError.Invalid;
+    }
+    data
+}
+
+fn test_throw_in_match() throws(ProcessError) {
+    match input {
+        Valid(data) => process(data),
+        Invalid(reason) => throw ProcessError.InvalidInput(reason),
+        Empty => throw ProcessError.NoInput
+    }
+}
+
+// =============================================================================
+// QUESTION MARK OPERATOR (postfix_op)
+// =============================================================================
+
+fn test_question_mark() -> Result<Data, Error> {
+    let a = might_fail()?;
+    let b = another_fallible(a)?;
+    Ok(b)
+}
+
+fn test_question_mark_chained() -> Result<Output, Error> {
+    let result = first()?
+        .then_second()?
+        .then_third()?;
+    Ok(result)
+}
+
+fn test_question_mark_in_expressions() -> Result<Int, Error> {
+    let sum = get_a()? + get_b()?;
+    let product = compute_x()? * compute_y()?;
+    Ok(sum + product)
+}
+
+// =============================================================================
+// DEFER AND ERRDEFER (Section 2.13 - defer_stmt)
+// =============================================================================
+
+fn test_defer() {
+    let file = open("data.txt");
+    defer close(file);
+
+    let data = read(file);
+    process(data)
+}
+
+fn test_defer_block() {
+    let resources = allocate();
+    defer {
+        deallocate(resources);
+        log("Resources freed");
+    };
+
+    use_resources(resources)
+}
+
+fn test_errdefer() {
+    let transaction = begin_transaction();
+    errdefer rollback(transaction);
+
+    let result = perform_operations(transaction);
+    commit(transaction);
+    result
+}
+
+fn test_errdefer_block() {
+    let state = setup_state();
+    errdefer {
+        cleanup_partial_state(state);
+        log_failure("Operation failed");
+    };
+
+    complete_operation(state)
+}
+
+fn test_multiple_defers() {
+    let a = acquire_a();
+    defer release_a(a);
+
+    let b = acquire_b();
+    defer release_b(b);
+
+    let c = acquire_c();
+    defer release_c(c);
+
+    // Defers execute in reverse order: c, b, a
+    use_all(a, b, c)
+}
+
+fn test_defer_errdefer_combined() {
+    let lock = acquire_lock();
+    defer release_lock(lock);
+
+    let partial_result = start_operation();
+    errdefer cleanup_partial(partial_result);
+
+    let final_result = complete_operation(partial_result);
+    finalize(final_result)
+}
+
+// =============================================================================
+// NESTED ERROR HANDLING
+// =============================================================================
+
+fn test_nested_try() {
+    let result = try {
+        let outer = try {
+            let inner = try {
+                deeply_nested_operation()
+            } recover |e| inner_fallback(e);
+            process(inner)
+        } recover |e| outer_fallback(e);
+        finalize(outer)
+    } recover |e| top_level_fallback(e);
+}
+
+fn test_try_in_match() {
+    let result = match mode {
+        Safe => try {
+            safe_operation()
+        } recover |_| safe_default(),
+
+        Risky => try {
+            risky_operation()
+        } recover {
+            ExpectedError => expected_fallback(),
+            _ => panic("Unexpected error in risky mode")
+        }
+    };
+}
+
+fn test_try_in_loop() {
+    for item in items {
+        let processed = try {
+            process_item(item)
+        } recover |e| {
+            log_error(e);
+            continue;
+        };
+        store(processed);
+    }
+}
+
+// =============================================================================
+// ERROR HANDLING WITH ASYNC
+// =============================================================================
+
+fn test_try_async() {
+    let result = try {
+        let data = fetch().await;
+        parse(data)?
+    } recover {
+        NetworkError(e) => cached_data(),
+        ParseError(e) => default_parsed()
+    };
+}
+
+fn test_async_with_defer() {
+    async {
+        let connection = connect().await;
+        defer connection.close();
+
+        let data = connection.fetch().await;
+        process(data)
+    }
+}
+
+fn test_async_with_errdefer() {
+    async {
+        let transaction = begin().await;
+        errdefer transaction.rollback().await;
+
+        let result = perform().await;
+        transaction.commit().await;
+        result
+    }
+}
+
+// =============================================================================
+// COMPLEX ERROR HANDLING PATTERNS
+// =============================================================================
+
+fn test_error_propagation() throws(AppError) {
+    let config = load_config().map_err(|e| AppError.Config(e))?;
+    let connection = connect(config).map_err(|e| AppError.Connection(e))?;
+    let data = fetch(connection).map_err(|e| AppError.Fetch(e))?;
+    Ok(data)
+}
+
+fn test_error_context() {
+    let result = try {
+        fetch_user(id)
+    } recover |e| {
+        throw AppError.UserFetch {
+            user_id: id,
+            cause: e,
+            context: "Failed to fetch user for display"
+        };
+    };
+}
+
+fn test_retry_pattern() {
+    let mut attempts = 0;
+    let result = loop {
+        attempts += 1;
+        let outcome = try {
+            fetch_with_timeout()
+        } recover |e| {
+            if attempts < MAX_RETRIES {
+                continue;
+            }
+            throw MaxRetriesExceeded(attempts);
+        };
+        break outcome;
+    };
+}
+
+fn test_fallback_chain() {
+    let data = try {
+        fetch_from_primary()
+    } recover |_| try {
+        fetch_from_secondary()
+    } recover |_| try {
+        fetch_from_cache()
+    } recover |_| {
+        default_data()
+    };
+}

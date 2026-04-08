@@ -1,0 +1,587 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for variant patterns (unit, tuple, record variants)
+
+// Grammar Reference:
+// variant_pattern = path , [ variant_pattern_data ] ;
+// variant_pattern_data = '(' , pattern_list , ')'
+//                      | '{' , field_patterns , '}' ;
+
+// ============================================================================
+// SECTION 1: Unit Variant Patterns (No Payload)
+// ============================================================================
+
+fn test_unit_variants() {
+    // Simple unit variants
+    match option {
+        None => handle_none()
+    }
+
+    match direction {
+        North => go_north(),
+        South => go_south(),
+        East => go_east(),
+        West => go_west()
+    }
+
+    match status {
+        Pending => wait(),
+        Complete => done(),
+        Failed => retry()
+    }
+
+    // Boolean-like enums
+    match answer {
+        Yes => affirm(),
+        No => deny(),
+        Maybe => ponder()
+    }
+}
+
+// ============================================================================
+// SECTION 2: Tuple Variant Patterns (Positional Payload)
+// ============================================================================
+
+fn test_tuple_variants() {
+    // Single value tuple variant
+    match option {
+        Some(value) => use(value),
+        None => default()
+    }
+
+    match result {
+        Ok(value) => success(value),
+        Err(error) => failure(error)
+    }
+
+    // Multi-value tuple variant
+    match color {
+        RGB(r, g, b) => rgb_color(r, g, b),
+        RGBA(r, g, b, a) => rgba_color(r, g, b, a)
+    }
+
+    match point {
+        Point2D(x, y) => two_dim(x, y),
+        Point3D(x, y, z) => three_dim(x, y, z)
+    }
+
+    // With wildcards
+    match color {
+        RGB(r, _, _) => just_red(r),
+        RGB(_, g, _) => just_green(g),
+        RGB(_, _, b) => just_blue(b)
+    }
+
+    // With literals
+    match value {
+        Value(0) => zero(),
+        Value(1) => one(),
+        Value(n) => other(n)
+    }
+}
+
+// ============================================================================
+// SECTION 3: Record Variant Patterns (Named Payload)
+// ============================================================================
+
+fn test_record_variants() {
+    // Basic record variant
+    match shape {
+        Circle { radius } => draw_circle(radius),
+        Square { side } => draw_square(side)
+    }
+
+    // Multi-field record variant
+    match shape {
+        Rectangle { width, height } => draw_rect(width, height),
+        Triangle { base, height } => draw_triangle(base, height)
+    }
+
+    // With field renaming
+    match shape {
+        Circle { radius: r } => area(r),
+        Rectangle { width: w, height: h } => area_rect(w, h)
+    }
+
+    // With rest
+    match shape {
+        Circle { radius, .. } => simple_circle(radius),
+        Rectangle { width, .. } => partial_rect(width)
+    }
+
+    // With wildcards
+    match shape {
+        Circle { radius: _ } => is_circle(),
+        Rectangle { width: _, height: _ } => is_rectangle()
+    }
+}
+
+// ============================================================================
+// SECTION 4: Mixed Variant Types
+// ============================================================================
+
+fn test_mixed_variants() {
+    // Enum with all variant types
+    match token {
+        // Unit variant
+        EndOfFile => eof(),
+        // Tuple variant
+        Number(n) => number(n),
+        // Record variant
+        Identifier { name, span } => ident(name, span)
+    }
+
+    match ast {
+        Empty => empty_node(),
+        Literal(value) => literal_node(value),
+        Binary { left, op, right } => binary_node(left, op, right),
+        Unary { op, operand } => unary_node(op, operand)
+    }
+}
+
+// ============================================================================
+// SECTION 5: Nested Variant Patterns
+// ============================================================================
+
+fn test_nested_variants() {
+    // Option of option
+    match nested {
+        Some(Some(value)) => inner_value(value),
+        Some(None) => inner_none(),
+        None => outer_none()
+    }
+
+    // Result of option
+    match result {
+        Ok(Some(value)) => ok_some(value),
+        Ok(None) => ok_none(),
+        Err(error) => err(error)
+    }
+
+    // Option of result
+    match option {
+        Some(Ok(value)) => some_ok(value),
+        Some(Err(error)) => some_err(error),
+        None => none()
+    }
+
+    // Deep nesting
+    match deep {
+        Some(Some(Some(value))) => very_deep(value),
+        Some(Some(None)) => two_deep(),
+        Some(None) => one_deep(),
+        None => no_value()
+    }
+
+    // Nested different types
+    match container {
+        Box(Inner { value: Some(v), .. }) => boxed_inner_some(v),
+        Box(Inner { value: None, .. }) => boxed_inner_none(),
+        Empty => empty()
+    }
+}
+
+// ============================================================================
+// SECTION 6: Variant Patterns with Tuples
+// ============================================================================
+
+fn test_variants_with_tuples() {
+    // Tuple inside variant
+    match result {
+        Ok((a, b)) => pair_ok(a, b),
+        Err((code, msg)) => pair_err(code, msg)
+    }
+
+    // Nested tuples
+    match value {
+        Some(((a, b), (c, d))) => nested_tuples(a, b, c, d),
+        None => no_tuples()
+    }
+
+    // Variant inside tuple
+    match pair {
+        (Some(x), Some(y)) => both_some(x, y),
+        (Some(x), None) => first_some(x),
+        (None, Some(y)) => second_some(y),
+        (None, None) => both_none()
+    }
+}
+
+// ============================================================================
+// SECTION 7: Variant Patterns with Arrays
+// ============================================================================
+
+fn test_variants_with_arrays() {
+    // Array inside variant
+    match result {
+        Ok([first, second]) => ok_pair(first, second),
+        Ok([single]) => ok_single(single),
+        Ok([]) => ok_empty(),
+        Err(e) => err(e)
+    }
+
+    // With rest
+    match value {
+        Some([head, ..tail]) => some_list(head, tail),
+        Some([]) => some_empty(),
+        None => none()
+    }
+
+    // Variant inside array
+    match array {
+        [Some(a), Some(b)] => both_some(a, b),
+        [Some(a), None] => first_some(a),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 8: Variant Patterns with Records
+// ============================================================================
+
+fn test_variants_with_records() {
+    // Record inside variant
+    match result {
+        Ok(Point { x, y }) => ok_point(x, y),
+        Err(Error { code, msg }) => err_details(code, msg)
+    }
+
+    // Variant inside record
+    match data {
+        Data { value: Some(v), .. } => has_value(v),
+        Data { value: None, .. } => no_value()
+    }
+
+    // Mixed nesting
+    match container {
+        Wrapper {
+            content: Ok(Item { id, value: Some(v) }),
+            ..
+        } => full_item(id, v),
+        Wrapper {
+            content: Ok(Item { id, value: None }),
+            ..
+        } => partial_item(id),
+        Wrapper { content: Err(e), .. } => error(e)
+    }
+}
+
+// ============================================================================
+// SECTION 9: Variant Patterns with @ Bindings
+// ============================================================================
+
+fn test_variants_with_at() {
+    // Bind whole variant
+    match option {
+        whole @ Some(_) => use_whole(whole),
+        None => none()
+    }
+
+    // Bind inner value
+    match option {
+        Some(inner @ [_, ..]) => use_list(inner),
+        Some(inner @ []) => use_empty(inner),
+        None => none()
+    }
+
+    // Bind at multiple levels
+    match result {
+        outer @ Ok(inner @ Some(value)) => all_three(outer, inner, value),
+        Ok(None) => ok_none(),
+        Err(e) => err(e)
+    }
+
+    // @ with record variant
+    match shape {
+        whole @ Circle { radius } => use_circle(whole, radius),
+        whole @ Rectangle { width, height } => use_rect(whole, width, height)
+    }
+}
+
+// ============================================================================
+// SECTION 10: Variant Patterns with Mutable Bindings
+// ============================================================================
+
+fn test_mutable_in_variants() {
+    // Mutable inner binding
+    match option {
+        Some(mut value) => modify(value),
+        None => none()
+    }
+
+    // Mutable tuple variant
+    match color {
+        RGB(mut r, mut g, mut b) => adjust(r, g, b)
+    }
+
+    // Mutable record variant
+    match shape {
+        Circle { mut radius } => scale(radius),
+        Rectangle { mut width, mut height } => resize(width, height)
+    }
+}
+
+// ============================================================================
+// SECTION 11: Variant Patterns with Ref Bindings
+// ============================================================================
+
+fn test_ref_in_variants() {
+    // Ref inner binding
+    match option {
+        Some(ref value) => borrow(value),
+        None => none()
+    }
+
+    // Ref mut inner binding
+    match option {
+        Some(ref mut value) => modify(value),
+        None => none()
+    }
+
+    // Ref in tuple variant
+    match color {
+        RGB(ref r, ref g, ref b) => read_only(r, g, b)
+    }
+
+    // Ref in record variant
+    match shape {
+        Circle { ref radius } => borrow_radius(radius),
+        Rectangle { ref width, ref mut height } => mixed(width, height)
+    }
+}
+
+// ============================================================================
+// SECTION 12: Variant Patterns (Simple)
+// ============================================================================
+
+fn test_simple_variants() {
+    // Basic option variants
+    match value {
+        Some(x) => some(x),
+        None => none()
+    }
+
+    match result {
+        Ok(v) => ok(v),
+        Err(e) => err(e)
+    }
+
+    // Custom variants
+    match data {
+        Value(n) => value(n),
+        Empty => empty()
+    }
+}
+
+// ============================================================================
+// SECTION 13: Variant Patterns in Match with Guards
+// ============================================================================
+
+fn test_variants_with_guards() {
+    // Simple guard
+    match option {
+        Some(x) if x > 0 => positive(x),
+        Some(x) if x < 0 => negative(x),
+        Some(_) => zero(),
+        None => none()
+    }
+
+    // Guard with record variant
+    match shape {
+        Circle { radius } if radius > 100 => large_circle(radius),
+        Circle { radius } if radius < 10 => small_circle(radius),
+        Circle { radius } => medium_circle(radius),
+        _ => other_shape()
+    }
+
+    // Complex guard
+    match result {
+        Ok(Some(value)) if value.is_valid() => valid(value),
+        Ok(Some(value)) => invalid(value),
+        Ok(None) => empty(),
+        Err(e) if e.is_fatal() => fatal(e),
+        Err(e) => recoverable(e)
+    }
+}
+
+// ============================================================================
+// SECTION 14: Variant Patterns in Let Bindings
+// ============================================================================
+
+fn test_variants_in_let() {
+    // Irrefutable variant patterns (with else)
+    let Some(value) = option else { return };
+    let Ok(result) = computation else { panic("failed") };
+
+    // Tuple variant in let-else
+    let Some(inner) = nested else { return };
+}
+
+// ============================================================================
+// SECTION 15: Variant Patterns in If-Let
+// ============================================================================
+
+fn test_variants_in_if_let() {
+    // Basic if-let
+    if let Some(value) = option {
+        use(value)
+    }
+
+    // Chained if-let
+    if let Some(x) = first && let Some(y) = second {
+        use_both(x, y)
+    }
+
+    // With else
+    if let Ok(value) = result {
+        success(value)
+    } else {
+        failure()
+    }
+
+    // Nested in if-let
+    if let Some(Some(inner)) = nested {
+        use_inner(inner)
+    }
+
+    // Record variant in if-let
+    if let Circle { radius } = shape {
+        draw_circle(radius)
+    }
+}
+
+// ============================================================================
+// SECTION 16: Variant Patterns in While-Let
+// ============================================================================
+
+fn test_variants_in_while_let() {
+    // Basic while-let
+    while let Some(item) = iterator.next() {
+        process(item)
+    }
+
+    // Nested variant
+    while let Some(Ok(value)) = stream.next() {
+        handle(value)
+    }
+
+    // Tuple variant
+    while let Some((key, value)) = map.next() {
+        process_pair(key, value)
+    }
+}
+
+// ============================================================================
+// SECTION 17: Variant Patterns in For Loops
+// ============================================================================
+
+fn test_variants_in_loops() {
+    // Destructure result in loop
+    for Ok(value) in results.filter_ok() {
+        process(value)
+    }
+
+    // Nested patterns
+    for Some((k, v)) in optional_pairs {
+        insert(k, v)
+    }
+}
+
+// ============================================================================
+// SECTION 18: Or Patterns with Variants
+// ============================================================================
+
+fn test_or_with_variants() {
+    // Or pattern across variants
+    match result {
+        Ok(_) | Err(_) => has_value()
+    }
+
+    match option {
+        Some(0) | Some(1) => small(),
+        Some(n) => other(n),
+        None => none()
+    }
+
+    // Or within variant
+    match value {
+        Value(0 | 1 | 2) => small(),
+        Value(n) => other(n)
+    }
+
+    // Multiple or patterns
+    match pair {
+        (Some(_), Some(_)) | (None, None) => matched(),
+        _ => unmatched()
+    }
+}
+
+// ============================================================================
+// SECTION 19: Complex Variant Patterns
+// ============================================================================
+
+fn test_complex_variants() {
+    // All features combined
+    match data {
+        outer @ Some(
+            inner @ Ok(
+                Item {
+                    ref id,
+                    mut value,
+                    metadata: Meta { timestamp, .. },
+                }
+            )
+        ) if value > 0 => process(outer, inner, id, value, timestamp),
+
+        Some(Ok(Item { value: 0, .. })) => zero_value(),
+
+        Some(Err(ref e)) => handle_error(e),
+
+        None => no_data()
+    }
+
+    // Deeply nested with various patterns
+    match tree {
+        Node {
+            value,
+            left: Some(left_node @ Node { value: lv, .. }),
+            right: Some(Node { value: rv, .. }),
+        } if lv < value && value < rv => balanced(left_node),
+
+        Node { left: None, right: None, .. } => leaf(),
+
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 20: Edge Cases
+// ============================================================================
+
+fn test_edge_cases() {
+    // Empty tuple variant (unit-like)
+    match value {
+        Empty() => empty(),  // Explicit empty parens
+        Value(x) => has_value(x)
+    }
+
+    // Single-element tuple variant
+    match wrapped {
+        Wrapped(inner) => unwrap(inner)
+    }
+
+    // Many-element tuple variant
+    match big {
+        Many(a, b, c, d, e, f, g, h) => handle_many(a, b, c, d, e, f, g, h)
+    }
+
+    // Record variant with many fields
+    match config {
+        Config {
+            a, b, c, d, e,
+            f, g, h, i, j,
+            ..
+        } => handle_config(a, b, c, d, e, f, g, h, i, j)
+    }
+}

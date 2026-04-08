@@ -1,0 +1,153 @@
+// @test: differential
+
+// @level: L0
+// @tags: differential, bits, manipulation, bitwise
+// @timeout: 30000
+
+// Bit manipulation algorithms
+
+fn popcount(x: Int) -> Int {
+    let mut count = 0;
+    let mut v = x;
+    while v > 0 {
+        if v % 2 == 1 { count = count + 1; }
+        v = v / 2;
+    }
+    count
+}
+
+fn ctz(x: Int) -> Int {
+    if x == 0 { return 32; }
+    let mut count = 0;
+    let mut v = x;
+    while v % 2 == 0 { count = count + 1; v = v / 2; }
+    count
+}
+
+fn clz16(x: Int) -> Int {
+    if x == 0 { return 16; }
+    let mut pos = 0;
+    let mut tmp = x;
+    while tmp > 0 { tmp = tmp / 2; pos = pos + 1; }
+    16 - pos
+}
+
+fn reverse_bits8(x: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    let mut v = x;
+    while i < 8 {
+        result = result * 2 + (v % 2);
+        v = v / 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn is_power_of_2(x: Int) -> Int {
+    if x <= 0 { return 0; }
+    if popcount(x) == 1 { 1 } else { 0 }
+}
+
+fn next_pow2(x: Int) -> Int {
+    if x <= 1 { return 1; }
+    let mut p = 1;
+    while p < x { p = p * 2; }
+    p
+}
+
+fn parity(x: Int) -> Int { popcount(x) % 2 }
+
+fn lowest_set_bit(x: Int) -> Int {
+    if x == 0 { return 0; }
+    let mut mask = 1;
+    let mut v = x;
+    while v % 2 == 0 { mask = mask * 2; v = v / 2; }
+    mask
+}
+
+fn turn_off_lowest(x: Int) -> Int { x - lowest_set_bit(x) }
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(1023), 10);
+    1
+}
+
+fn test_ctz() -> Int {
+    assert_eq(ctz(1), 0);
+    assert_eq(ctz(2), 1);
+    assert_eq(ctz(4), 2);
+    assert_eq(ctz(8), 3);
+    assert_eq(ctz(12), 2);
+    assert_eq(ctz(0), 32);
+    1
+}
+
+fn test_clz16() -> Int {
+    assert_eq(clz16(0), 16);
+    assert_eq(clz16(1), 15);
+    assert_eq(clz16(2), 14);
+    assert_eq(clz16(128), 8);
+    assert_eq(clz16(32768), 0);
+    1
+}
+
+fn test_reverse_bits() -> Int {
+    assert_eq(reverse_bits8(0), 0);
+    assert_eq(reverse_bits8(1), 128);
+    assert_eq(reverse_bits8(255), 255);
+    assert_eq(reverse_bits8(170), 85);
+    assert_eq(reverse_bits8(85), 170);
+    1
+}
+
+fn test_power_of_2() -> Int {
+    assert_eq(is_power_of_2(0), 0);
+    assert_eq(is_power_of_2(1), 1);
+    assert_eq(is_power_of_2(2), 1);
+    assert_eq(is_power_of_2(3), 0);
+    assert_eq(is_power_of_2(4), 1);
+    assert_eq(is_power_of_2(1024), 1);
+    assert_eq(is_power_of_2(1023), 0);
+    1
+}
+
+fn test_next_pow2() -> Int {
+    assert_eq(next_pow2(1), 1);
+    assert_eq(next_pow2(2), 2);
+    assert_eq(next_pow2(3), 4);
+    assert_eq(next_pow2(5), 8);
+    assert_eq(next_pow2(9), 16);
+    assert_eq(next_pow2(1000), 1024);
+    1
+}
+
+fn test_parity_and_lowest() -> Int {
+    assert_eq(parity(0), 0);
+    assert_eq(parity(1), 1);
+    assert_eq(parity(3), 0);
+    assert_eq(parity(7), 1);
+    assert_eq(lowest_set_bit(0), 0);
+    assert_eq(lowest_set_bit(6), 2);
+    assert_eq(lowest_set_bit(12), 4);
+    assert_eq(turn_off_lowest(6), 4);
+    assert_eq(turn_off_lowest(12), 8);
+    assert_eq(turn_off_lowest(7), 6);
+    1
+}
+
+fn main() -> Int {
+    test_popcount();
+    test_ctz();
+    test_clz16();
+    test_reverse_bits();
+    test_power_of_2();
+    test_next_pow2();
+    test_parity_and_lowest();
+    print("[OK] diff_bit_manipulation");
+    0
+}

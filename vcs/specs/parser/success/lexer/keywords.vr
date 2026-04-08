@@ -1,0 +1,94 @@
+// @test: parse
+// @level: L0
+// @tags: parser, lexer, keywords
+// @description: Test keyword recognition - reserved, primary, contextual
+
+// Reserved keywords (always reserved)
+fn test_reserved_keywords() {
+    let x = 42;
+    fn nested() {}
+    type Unit is ();
+}
+
+// Control flow keywords
+fn test_control_flow() {
+    if true { }
+    else { }
+
+    match x {
+        _ => {}
+    }
+
+    for i in items { }
+    while true { }
+    loop { break; }
+    return;
+    continue;
+}
+
+// Async keywords
+async fn test_async_keywords() {
+    let future = async { 42 };
+    let result = future.await;
+    spawn async { };
+    defer cleanup();
+
+    // Combined try-recover-finally expression (recover/finally must follow try directly)
+    try { } recover |e| { } finally { }
+
+    yield 42;
+}
+
+// Modifier keywords
+pub fn test_modifiers() {
+    let mut x = 42;
+    const PI: Float = 3.14;
+}
+
+pure fn test_pure() -> Int {
+    42
+}
+
+unsafe fn test_unsafe() {}
+
+// Module keywords
+module test_module {
+    mount core.collections;
+
+    type MyProtocol is protocol {
+        fn method(&self);
+    };
+
+    implement MyProtocol for Int { }
+
+    context Database {
+        fn query(&self) -> Text;
+    }
+}
+
+// Proof keywords
+theorem test_theorem(x: Int)
+    requires x > 0
+    ensures result > 0
+{
+    proof by auto
+}
+
+lemma test_lemma(a: Int, b: Int)
+    requires a > 0, b > 0
+{
+    proof {
+        have h1: a + b > 0 by simp;
+        show a + b > a by trivial;
+    }
+}
+
+axiom test_axiom(x: Int) -> Bool;
+
+// Additional keywords
+fn test_additional() {
+    let s = self;
+    let result = result;
+
+    stream[x for x in items];
+}

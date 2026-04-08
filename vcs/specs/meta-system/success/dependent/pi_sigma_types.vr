@@ -1,0 +1,236 @@
+// @test: meta-pass
+// @level: L3
+// @tier: 0
+// @tags: meta, dependent, functions, pairs, compile-time
+// @description: Tests function and pair patterns in meta-system (conceptually similar to Pi/Sigma types)
+
+// =============================================================================
+// DEPENDENT-LIKE FUNCTION PATTERNS
+// =============================================================================
+
+// Functions whose return value structure depends on input
+meta fn replicate(value: Int, n: Int) -> List<Int> {
+    let mut result = [];
+    let mut i = 0;
+    while i < n {
+        result = list_push(result, value);
+        i = i + 1;
+    }
+    result
+}
+
+// Function that returns different structure based on input
+meta fn make_pair_or_triple(n: Int) -> List<Int> {
+    if n == 2 {
+        [1, 2]
+    } else if n == 3 {
+        [1, 2, 3]
+    } else {
+        []
+    }
+}
+
+// Iota function: create range [0, n)
+meta fn iota(n: Int) -> List<Int> {
+    let mut result = [];
+    let mut i = 0;
+    while i < n {
+        result = list_push(result, i);
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// DEPENDENT PAIR PATTERNS (Sigma-like)
+// =============================================================================
+
+// A pair where the second component's validity depends on the first
+meta fn make_validated_pair(value: Int) -> (Int, Bool) {
+    // Pair of (value, is_positive)
+    (value, value > 0)
+}
+
+// Create a dynamic list with its length (simulating dependent pair)
+meta fn pack_with_length(items: List<Int>) -> (Int, List<Int>) {
+    (list_len(items), items)
+}
+
+// Unpack and verify length
+meta fn verify_pack(pack: (Int, List<Int>)) -> Bool {
+    let (len, items) = pack;
+    len == list_len(items)
+}
+
+// =============================================================================
+// SMART CONSTRUCTORS (ensuring invariants)
+// =============================================================================
+
+// Only construct if positive
+meta fn make_positive(n: Int) -> (Bool, Int) {
+    if n > 0 {
+        (true, n)
+    } else {
+        (false, 0)
+    }
+}
+
+// Only construct if non-empty
+meta fn make_non_empty(items: List<Int>) -> (Bool, List<Int>) {
+    if list_len(items) > 0 {
+        (true, items)
+    } else {
+        (false, [])
+    }
+}
+
+// Safe division: returns (success, result)
+meta fn safe_div(a: Int, b: Int) -> (Bool, Int) {
+    if b != 0 {
+        (true, a / b)
+    } else {
+        (false, 0)
+    }
+}
+
+// =============================================================================
+// BOUNDED VALUES
+// =============================================================================
+
+// Percentage as a constrained value
+meta fn make_percentage(value: Int) -> (Bool, Int) {
+    if value >= 0 && value <= 100 {
+        (true, value)
+    } else {
+        (false, 0)
+    }
+}
+
+// Bounded index
+meta fn make_bounded_index(idx: Int, len: Int) -> (Bool, Int) {
+    if idx >= 0 && idx < len {
+        (true, idx)
+    } else {
+        (false, 0)
+    }
+}
+
+// =============================================================================
+// EXISTENTIAL-LIKE PATTERNS
+// =============================================================================
+
+// Pack a value with its type tag (simulating existential)
+meta fn pack_int(value: Int) -> (Text, Int) {
+    ("Int", value)
+}
+
+meta fn pack_from_bool(value: Bool) -> (Text, Int) {
+    ("Bool", if value { 1 } else { 0 })
+}
+
+// Unpack and apply operation based on type tag
+meta fn unpack_and_add(pack: (Text, Int), n: Int) -> Int {
+    let (tag, value) = pack;
+    if text_eq(tag, "Int") {
+        value + n
+    } else {
+        value  // bool conversion, no add
+    }
+}
+
+// =============================================================================
+// EQUALITY PROOFS (compile-time validation)
+// =============================================================================
+
+// Assert two values are equal at compile time
+meta fn assert_compile_eq(a: Int, b: Int) -> Bool {
+    a == b
+}
+
+// Transitivity: if a == b and b == c, then a == c
+meta fn transitive_eq(a: Int, b: Int, c: Int) -> Bool {
+    (a == b) && (b == c)
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Test replicate
+    @const assert_eq(list_len(replicate(42, 5)), 5);
+    @const assert_eq(list_get(replicate(42, 3), 0), Some(42));
+    @const assert_eq(list_get(replicate(42, 3), 2), Some(42));
+
+    // Test make_pair_or_triple
+    @const assert_eq(list_len(make_pair_or_triple(2)), 2);
+    @const assert_eq(list_len(make_pair_or_triple(3)), 3);
+    @const assert_eq(list_len(make_pair_or_triple(1)), 0);
+
+    // Test iota
+    @const assert_eq(list_len(iota(5)), 5);
+    @const assert_eq(list_get(iota(5), 0), Some(0));
+    @const assert_eq(list_get(iota(5), 4), Some(4));
+
+    // Test validated pairs
+    let pos_pair = make_validated_pair(42);
+    @const assert(pos_pair.1);
+    let neg_pair = make_validated_pair(-5);
+    @const assert(!neg_pair.1);
+
+    // Test pack with length
+    let packed = pack_with_length([1, 2, 3, 4, 5]);
+    @const assert_eq(packed.0, 5);
+    @const assert(verify_pack(packed));
+
+    // Test smart constructors
+    let pos = make_positive(42);
+    @const assert(pos.0);
+    @const assert_eq(pos.1, 42);
+
+    let neg = make_positive(-5);
+    @const assert(!neg.0);
+
+    let non_empty = make_non_empty([1, 2, 3]);
+    @const assert(non_empty.0);
+
+    let empty = make_non_empty([]);
+    @const assert(!empty.0);
+
+    // Test safe division
+    let div_ok = safe_div(10, 2);
+    @const assert(div_ok.0);
+    @const assert_eq(div_ok.1, 5);
+
+    let div_fail = safe_div(10, 0);
+    @const assert(!div_fail.0);
+
+    // Test percentage
+    let pct_ok = make_percentage(75);
+    @const assert(pct_ok.0);
+    @const assert_eq(pct_ok.1, 75);
+
+    let pct_fail = make_percentage(150);
+    @const assert(!pct_fail.0);
+
+    // Test bounded index
+    let idx_ok = make_bounded_index(3, 10);
+    @const assert(idx_ok.0);
+    @const assert_eq(idx_ok.1, 3);
+
+    let idx_fail = make_bounded_index(15, 10);
+    @const assert(!idx_fail.0);
+
+    // Test existential-like packing
+    let packed_int = pack_int(42);
+    @const assert_eq(unpack_and_add(packed_int, 8), 50);
+
+    let packed_bool = pack_from_bool(true);
+    @const assert_eq(unpack_and_add(packed_bool, 8), 1);
+
+    // Test equality proofs
+    @const assert(assert_compile_eq(5, 5));
+    @const assert(!assert_compile_eq(5, 6));
+    @const assert(transitive_eq(5, 5, 5));
+    @const assert(!transitive_eq(5, 5, 6));
+}

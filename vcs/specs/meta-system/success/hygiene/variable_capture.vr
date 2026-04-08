@@ -1,0 +1,65 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, capture, closure
+// @description: Test variable capture semantics in meta functions
+
+// =============================================================================
+// LEXICAL SCOPING
+// =============================================================================
+
+// Inner block captures outer variable
+meta fn lexical_capture() -> Int {
+    let outer = 100;
+    let result = {
+        outer + 10  // Captures outer
+    };
+    result
+}
+
+// Multiple levels of capture
+meta fn multi_level_capture() -> Int {
+    let a = 1;
+    let result = {
+        let b = a + 1;
+        {
+            let c = a + b + 1;
+            c
+        }
+    };
+    result
+}
+
+// =============================================================================
+// SHADOWING VS CAPTURE
+// =============================================================================
+
+// Shadowing creates new binding, doesn't affect outer
+meta fn shadow_vs_capture() -> Int {
+    let x = 10;
+    let inner = {
+        let x = 20;  // Shadow
+        x
+    };
+    x + inner  // Original x still 10
+}
+
+// Capture without shadowing
+meta fn capture_without_shadow() -> Int {
+    let base = 5;
+    let derived = {
+        base * 2  // Capture, no shadow
+    };
+    base + derived
+}
+
+// Main test function
+fn main() {
+    // Lexical capture tests
+    @const assert_eq(lexical_capture(), 110);
+    @const assert_eq(multi_level_capture(), 4);
+
+    // Shadowing vs capture
+    @const assert_eq(shadow_vs_capture(), 30);
+    @const assert_eq(capture_without_shadow(), 15);
+}

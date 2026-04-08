@@ -1,0 +1,106 @@
+// @test: compile-only
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, alignment
+
+/// Test alignment requirements for reference types.
+/// All reference types must be properly aligned for atomic access.
+/// CBGR metadata requires specific alignment for thread-safe checks.
+/// Spec: 26-cbgr-implementation.md#memory-layout
+
+fn main() {
+    verify_thin_ref_alignment();
+    verify_fat_ref_alignment();
+    verify_generation_alignment();
+    verify_array_packing();
+}
+
+/// Verify ThinRef alignment (8-byte aligned)
+fn verify_thin_ref_alignment() {
+    // All ThinRefs are 8-byte aligned
+    assert((&Int).alignment == 8);
+    assert((&Bool).alignment == 8);
+    assert((&Float).alignment == 8);
+    assert((&Point).alignment == 8);
+
+    // Mutable ThinRefs same alignment
+    assert((&mut Int).alignment == 8);
+    assert((&mut Point).alignment == 8);
+
+    // Checked and unsafe refs also 8-byte aligned
+    assert((&checked Int).alignment == 8);
+    assert((&unsafe Int).alignment == 8);
+}
+
+/// Verify FatRef alignment (8-byte aligned)
+fn verify_fat_ref_alignment() {
+    // Slices are 8-byte aligned
+    assert((&[Int]).alignment == 8);
+    assert((&[u8]).alignment == 8);
+    assert((&Text).alignment == 8);
+
+    // Protocol objects are 8-byte aligned
+    assert((&Display).alignment == 8);
+
+    // Mutable fat refs same alignment
+    assert((&mut [Int]).alignment == 8);
+    assert((&mut Write).alignment == 8);
+}
+
+/// Verify generation field is aligned for atomic access
+fn verify_generation_alignment() {
+    // Generation is at offset 8 in ThinRef
+    // This ensures it's 4-byte aligned within the 16-byte structure
+    // Allows atomic read/compare operations
+
+    let value = 42;
+    let ref_val: &Int = &value;
+
+    let raw: ThinRefRaw = transmute(ref_val);
+
+    // Generation at offset 8 (after 8-byte pointer)
+    assert(offset_of(ThinRefRaw, generation) == 8);
+
+    // 4-byte generation is naturally aligned at offset 8
+    let gen_alignment = offset_of(ThinRefRaw, generation) % 4;
+    assert(gen_alignment == 0);
+}
+
+/// Verify arrays of refs are tightly packed
+fn verify_array_packing() {
+    // Array of ThinRefs: each is 16 bytes
+    let refs: [&Int; 4] = [&0, &0, &0, &0];
+    assert([&Int; 4].size == 64);  // 4 * 16
+
+    // No padding between elements
+    let array_size = [&Int; 4].size;
+    let elem_size = (&Int).size;
+    assert(array_size == 4 * elem_size);
+
+    // Array of FatRefs: each is 24 bytes
+    let fat_refs: [&[Int]; 3] = [&[], &[], &[]];
+    assert([&[Int]; 3].size == 72);  // 3 * 24
+}
+
+@repr(C)
+type ThinRefRaw is {
+    ptr: RawPtr,
+    generation: u32,
+    epoch_caps: u32,
+};
+
+/// Raw pointer type alias
+type RawPtr = Int;
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type Write is protocol {
+    fn write(&mut self, data: &[u8]) -> Result<Int, Error>;
+};

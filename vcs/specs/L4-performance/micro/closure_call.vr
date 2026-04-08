@@ -1,0 +1,448 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: micro, closure, lambda, capture, performance
+// @description: Closure invocation overhead benchmarks (target: < 5ns for simple closures)
+
+/// Closure Call Overhead Microbenchmarks
+///
+/// Measures the overhead of different closure patterns.
+/// Closures are fundamental to functional programming in Verum.
+///
+/// Performance targets:
+/// - Non-capturing:     < 2ns
+/// - Value capture:     < 3ns
+/// - Reference capture: < 4ns
+/// - Mutable capture:   < 5ns
+/// - Move capture:      < 3ns
+/// - Boxed closure:     < 12ns
+///
+/// Closure types:
+/// - Fn:     Immutable borrow of environment
+/// - FnMut:  Mutable borrow of environment
+/// - FnOnce: Takes ownership of environment
+///
+/// Spec reference: docs/detailed/05-syntax-grammar.md
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 100_000_000;
+
+/// Benchmark: Non-capturing closure
+fn benchmark_non_capturing() -> BenchmarkResult {
+    let closure = |x: Int| -> Int { x + 1 };
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "non_capturing",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 2.0,
+    }
+}
+
+/// Benchmark: Single value capture
+fn benchmark_single_value_capture() -> BenchmarkResult {
+    let offset = 42;
+    let closure = |x: Int| -> Int { x + offset };
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "single_value_capture",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Multiple value captures
+fn benchmark_multiple_value_capture() -> BenchmarkResult {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let d = 40;
+    let closure = |x: Int| -> Int { x + a + b + c + d };
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "multiple_value_capture",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 4.0,
+    }
+}
+
+/// Benchmark: Reference capture
+fn benchmark_reference_capture() -> BenchmarkResult {
+    let data = [1, 2, 3, 4, 5];
+    let closure = |idx: Int| -> Int { data[idx as usize] };
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(closure((i % 5) as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(closure((i % 5) as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "reference_capture",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 4.0,
+    }
+}
+
+/// Benchmark: Mutable capture
+fn benchmark_mutable_capture() -> BenchmarkResult {
+    let mut counter = 0;
+    let mut closure = || {
+        counter += 1;
+        counter
+    };
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    counter = 0;
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "mutable_capture",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,
+    }
+}
+
+/// Benchmark: Move capture
+fn benchmark_move_capture() -> BenchmarkResult {
+    let value = 42;
+    let closure = move |x: Int| -> Int { x + value };
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "move_capture",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Large capture (struct)
+fn benchmark_large_capture() -> BenchmarkResult {
+    type LargeStruct is {
+        a: Int,
+        b: Int,
+        c: Int,
+        d: Int,
+        e: Int,
+        f: Int,
+        g: Int,
+        h: Int,
+    };
+
+    let large = LargeStruct {
+        a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8,
+    };
+
+    let closure = |x: Int| -> Int { x + large.a + large.h };
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "large_capture",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,
+    }
+}
+
+/// Benchmark: Boxed Fn trait object
+fn benchmark_boxed_fn() -> BenchmarkResult {
+    let offset = 42;
+    let closure: Heap<Fn(Int) -> Int> = Heap(move |x| x + offset);
+
+    // Warmup
+    for i in 0..(WARMUP_ITERATIONS / 10) {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 10) {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "boxed_fn",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 10) as f64,
+        target_ns: 12.0,
+    }
+}
+
+/// Benchmark: Boxed FnMut
+fn benchmark_boxed_fn_mut() -> BenchmarkResult {
+    let mut counter = 0;
+    let mut closure: Heap<FnMut() -> Int> = Heap(|| {
+        counter += 1;
+        counter
+    });
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 10) {
+        black_box(closure());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 10) {
+        black_box(closure());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "boxed_fn_mut",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 10) as f64,
+        target_ns: 15.0,
+    }
+}
+
+/// Benchmark: Nested closure
+fn benchmark_nested_closure() -> BenchmarkResult {
+    let outer = |x: Int| {
+        let inner = |y: Int| -> Int { x + y };
+        inner
+    };
+
+    let closure = outer(10);
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "nested_closure",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 4.0,
+    }
+}
+
+/// Benchmark: Closure as function parameter
+fn benchmark_closure_parameter() -> BenchmarkResult {
+    @inline(never)
+    fn apply<F: Fn(Int) -> Int>(f: F, x: Int) -> Int {
+        f(x)
+    }
+
+    let closure = |x: Int| x + 42;
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(apply(&closure, i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(apply(&closure, i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "closure_parameter",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,
+    }
+}
+
+/// Benchmark: Closure returning closure
+fn benchmark_closure_returning_closure() -> BenchmarkResult {
+    fn make_adder(n: Int) -> impl Fn(Int) -> Int {
+        move |x| x + n
+    }
+
+    let add_42 = make_adder(42);
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(add_42(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(add_42(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "closure_returning_closure",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Iterator with closure
+fn benchmark_iterator_closure() -> BenchmarkResult {
+    let data: List<Int> = (0..1000).collect();
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 1000) {
+        let sum: Int = data.iter().map(|x| x * 2).sum();
+        black_box(sum);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1000) {
+        let sum: Int = data.iter().map(|x| x * 2).sum();
+        black_box(sum);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "iterator_closure",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 2.0,  // Should optimize well
+    }
+}
+
+fn main() {
+    println("=== Closure Call Overhead Microbenchmarks ===\n");
+
+    let results = [
+        benchmark_non_capturing(),
+        benchmark_single_value_capture(),
+        benchmark_multiple_value_capture(),
+        benchmark_reference_capture(),
+        benchmark_mutable_capture(),
+        benchmark_move_capture(),
+        benchmark_large_capture(),
+        benchmark_boxed_fn(),
+        benchmark_boxed_fn_mut(),
+        benchmark_nested_closure(),
+        benchmark_closure_parameter(),
+        benchmark_closure_returning_closure(),
+        benchmark_iterator_closure(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>8}",
+            "Benchmark", "Time (ns)", "Target", "Status");
+    println("{}", "-".repeat(65));
+
+    for result in results {
+        let passed = result.per_op_ns <= result.target_ns;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.2} {:>12.0} {:>8}",
+                result.name, result.per_op_ns, result.target_ns, status);
+    }
+
+    println("");
+    println("Closure Targets:");
+    println("  - Non-capturing:  < 2ns");
+    println("  - Value capture:  < 3ns");
+    println("  - Mutable:        < 5ns");
+    println("  - Boxed:          < 12ns");
+}
+
+type BenchmarkResult is {
+    name: Text,
+    per_op_ns: f64,
+    target_ns: f64,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }

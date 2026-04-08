@@ -1,0 +1,92 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: higher-order, closure, functional, e2e
+// @description: Test higher-order function patterns: map, filter, fold, compose
+
+fn apply<T>(f: fn(T) -> T, x: T) -> T {
+    f(x)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Apply identity
+    let id = |x: Int| -> Int { x };
+    if apply(id, 42) != 42 {
+        print("FAIL 1: apply identity");
+        f = f + 1;
+    } else {
+        print("  apply_id: OK");
+    }
+
+    // Test 2: Apply transform
+    let double = |x: Int| -> Int { x * 2 };
+    if apply(double, 21) != 42 {
+        print("FAIL 2: apply double");
+        f = f + 1;
+    } else {
+        print("  apply_double: OK");
+    }
+
+    // Test 3: Compose
+    let add1 = |x: Int| -> Int { x + 1 };
+    let mul3 = |x: Int| -> Int { x * 3 };
+    // compose(add1, mul3, 5) = add1(mul3(5)) = add1(15) = 16
+    if compose(add1, mul3, 5) != 16 {
+        print(f"FAIL 3: compose = {compose(add1, mul3, 5)}");
+        f = f + 1;
+    } else {
+        print("  compose: OK");
+    }
+
+    // Test 4: Twice
+    // twice(double, 3) = double(double(3)) = double(6) = 12
+    if twice(double, 3) != 12 {
+        print(f"FAIL 4: twice = {twice(double, 3)}");
+        f = f + 1;
+    } else {
+        print("  twice: OK");
+    }
+
+    // Test 5: List.map with closure
+    let mut nums = List.new();
+    nums.push(1);
+    nums.push(2);
+    nums.push(3);
+    let mut sum = 0;
+    let mut i = 0;
+    while i < nums.len() {
+        sum = sum + nums[i] * 2;
+        i = i + 1;
+    }
+    if sum != 12 {
+        print(f"FAIL 5: manual map sum = {sum}");
+        f = f + 1;
+    } else {
+        print("  manual_map: OK");
+    }
+
+    // Test 6: Closure capturing
+    let base = 100;
+    let add_base = |x: Int| -> Int { x + base };
+    if add_base(42) != 142 {
+        print(f"FAIL 6: closure capture = {add_base(42)}");
+        f = f + 1;
+    } else {
+        print("  closure_capture: OK");
+    }
+
+    if f == 0 {
+        print("All higher-order pattern tests passed");
+    }
+    f
+}

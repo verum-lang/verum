@@ -1,0 +1,270 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, tensor, einsum, contraction
+
+/// Einstein summation notation for tensor operations.
+/// Provides a powerful unified interface for various tensor operations.
+
+fn main() {
+    let device = Device.gpu(0);
+
+    // Basic einsum operations
+    test_basic_einsum(device);
+
+    // Matrix operations via einsum
+    test_matrix_einsum(device);
+
+    // Batch operations
+    test_batch_einsum(device);
+
+    // Advanced contractions
+    test_advanced_contractions(device);
+
+    // Optimization and performance
+    test_einsum_optimization(device);
+}
+
+fn test_basic_einsum(device: Device) {
+    // Trace: "ii->" (sum of diagonal elements)
+    let a: Tensor<f32, [3, 3]> = tensor<3, 3>f32{
+        {1.0, 2.0, 3.0},
+        {4.0, 5.0, 6.0},
+        {7.0, 8.0, 9.0}
+    }.to(device);
+
+    let trace = einsum("ii->", a);
+    // 1 + 5 + 9 = 15
+    assert((trace - 15.0).abs() < 1e-5);
+
+    // Diagonal extraction: "ii->i"
+    let diag = einsum("ii->i", a);
+    assert(diag.shape() == [3]);
+    assert((diag[0] - 1.0).abs() < 1e-5);
+    assert((diag[1] - 5.0).abs() < 1e-5);
+    assert((diag[2] - 9.0).abs() < 1e-5);
+
+    // Transpose: "ij->ji"
+    let b: Tensor<f32, [2, 3]> = tensor<2, 3>f32{
+        {1.0, 2.0, 3.0},
+        {4.0, 5.0, 6.0}
+    }.to(device);
+
+    let b_t = einsum("ij->ji", b);
+    assert(b_t.shape() == [3, 2]);
+    assert((b_t[0, 1] - 4.0).abs() < 1e-5);  // b[1, 0]
+
+    // Sum all elements: "ij->"
+    let total = einsum("ij->", b);
+    // 1+2+3+4+5+6 = 21
+    assert((total - 21.0).abs() < 1e-5);
+
+    // Sum along axis: "ij->i" (row sums)
+    let row_sums = einsum("ij->i", b);
+    assert(row_sums.shape() == [2]);
+    assert((row_sums[0] - 6.0).abs() < 1e-5);   // 1+2+3
+    assert((row_sums[1] - 15.0).abs() < 1e-5);  // 4+5+6
+
+    // Sum along axis: "ij->j" (column sums)
+    let col_sums = einsum("ij->j", b);
+    assert(col_sums.shape() == [3]);
+    assert((col_sums[0] - 5.0).abs() < 1e-5);   // 1+4
+}
+
+fn test_matrix_einsum(device: Device) {
+    let a: Tensor<f32, [2, 3]> = Tensor.randn().to(device);
+    let b: Tensor<f32, [3, 4]> = Tensor.randn().to(device);
+
+    // Matrix multiplication: "ik,kj->ij"
+    let c = einsum("ik,kj->ij", a, b);
+    assert(c.shape() == [2, 4]);
+
+    // Verify equivalence to @ operator
+    let c_ref = matmul(a, b);
+    assert((c - c_ref).abs().max() < 1e-4);
+
+    // Element-wise multiply: "ij,ij->ij" (Hadamard product)
+    let x: Tensor<f32, [3, 4]> = Tensor.randn().to(device);
+    let y: Tensor<f32, [3, 4]> = Tensor.randn().to(device);
+
+    let hadamard = einsum("ij,ij->ij", x, y);
+    let hadamard_ref = x * y;
+    assert((hadamard - hadamard_ref).abs().max() < 1e-5);
+
+    // Inner product (Frobenius dot): "ij,ij->"
+    let frobenius = einsum("ij,ij->", x, y);
+    let frobenius_ref = (x * y).sum();
+    assert((frobenius - frobenius_ref).abs() < 1e-4);
+
+    // Outer product: "i,j->ij"
+    let u: Tensor<f32, [3]> = tensor<3>f32{1.0, 2.0, 3.0}.to(device);
+    let v: Tensor<f32, [4]> = tensor<4>f32{1.0, 2.0, 3.0, 4.0}.to(device);
+
+    let outer = einsum("i,j->ij", u, v);
+    assert(outer.shape() == [3, 4]);
+    assert((outer[2, 3] - 12.0).abs() < 1e-5);  // 3 * 4
+
+    // Dot product: "i,i->"
+    let w: Tensor<f32, [5]> = tensor<5>f32{1.0, 2.0, 3.0, 4.0, 5.0}.to(device);
+    let z: Tensor<f32, [5]> = tensor<5>f32{5.0, 4.0, 3.0, 2.0, 1.0}.to(device);
+
+    let dot = einsum("i,i->", w, z);
+    assert((dot - 35.0).abs() < 1e-5);
+
+    // Matrix-vector: "ij,j->i"
+    let mat: Tensor<f32, [3, 4]> = Tensor.ones().to(device);
+    let vec: Tensor<f32, [4]> = tensor<4>f32{1.0, 2.0, 3.0, 4.0}.to(device);
+
+    let mv = einsum("ij,j->i", mat, vec);
+    assert(mv.shape() == [3]);
+    assert((mv[0] - 10.0).abs() < 1e-5);  // 1+2+3+4
+}
+
+fn test_batch_einsum(device: Device) {
+    // Batched matrix multiplication: "bij,bjk->bik"
+    let a: Tensor<f32, [8, 4, 3]> = Tensor.randn().to(device);
+    let b: Tensor<f32, [8, 3, 5]> = Tensor.randn().to(device);
+
+    let c = einsum("bij,bjk->bik", a, b);
+    assert(c.shape() == [8, 4, 5]);
+
+    // Verify against bmm
+    let c_ref = a.bmm(b);
+    assert((c - c_ref).abs().max() < 1e-4);
+
+    // Batched trace: "bii->b"
+    let sq: Tensor<f32, [4, 3, 3]> = Tensor.randn().to(device);
+    let traces = einsum("bii->b", sq);
+    assert(traces.shape() == [4]);
+
+    // Batched diagonal: "bii->bi"
+    let diags = einsum("bii->bi", sq);
+    assert(diags.shape() == [4, 3]);
+
+    // Contract over batch: "bij,bij->"
+    let total = einsum("bij,bij->", a, a);
+    // Squared Frobenius norm
+    let norm_sq = (a * a).sum();
+    assert((total - norm_sq).abs() < 1e-3);
+
+    // Broadcast batch: "ij,bjk->bik" (single matrix times batch)
+    let single: Tensor<f32, [4, 3]> = Tensor.randn().to(device);
+    let batched: Tensor<f32, [8, 3, 5]> = Tensor.randn().to(device);
+
+    let broadcast = einsum("ij,bjk->bik", single, batched);
+    assert(broadcast.shape() == [8, 4, 5]);
+}
+
+fn test_advanced_contractions(device: Device) {
+    // Tensor contraction: "ijk,jkl->il"
+    let t1: Tensor<f32, [2, 3, 4]> = Tensor.randn().to(device);
+    let t2: Tensor<f32, [3, 4, 5]> = Tensor.randn().to(device);
+
+    let contracted = einsum("ijk,jkl->il", t1, t2);
+    assert(contracted.shape() == [2, 5]);
+
+    // Multi-tensor contraction: "ij,jk,kl->il"
+    let a: Tensor<f32, [3, 4]> = Tensor.randn().to(device);
+    let b: Tensor<f32, [4, 5]> = Tensor.randn().to(device);
+    let c: Tensor<f32, [5, 6]> = Tensor.randn().to(device);
+
+    let multi = einsum("ij,jk,kl->il", a, b, c);
+    assert(multi.shape() == [3, 6]);
+
+    // Verify equivalence
+    let multi_ref = matmul(matmul(a, b), c);
+    assert((multi - multi_ref).abs().max() < 1e-3);
+
+    // Bilinear form: "i,ij,j->"
+    let u: Tensor<f32, [4]> = Tensor.randn().to(device);
+    let m: Tensor<f32, [4, 4]> = Tensor.randn().to(device);
+    let v: Tensor<f32, [4]> = Tensor.randn().to(device);
+
+    let bilinear = einsum("i,ij,j->", u, m, v);
+    let bilinear_ref = u.dot(matmul(m, v));
+    assert((bilinear - bilinear_ref).abs() < 1e-4);
+
+    // Attention-like operation: "bhqd,bhkd->bhqk"
+    let query: Tensor<f32, [2, 8, 16, 64]> = Tensor.randn().to(device);
+    let key: Tensor<f32, [2, 8, 32, 64]> = Tensor.randn().to(device);
+
+    let attention = einsum("bhqd,bhkd->bhqk", query, key);
+    assert(attention.shape() == [2, 8, 16, 32]);
+
+    // Kronecker product: "ij,kl->ikjl"
+    let x: Tensor<f32, [2, 3]> = Tensor.randn().to(device);
+    let y: Tensor<f32, [4, 5]> = Tensor.randn().to(device);
+
+    let kron = einsum("ij,kl->ikjl", x, y);
+    assert(kron.shape() == [2, 4, 3, 5]);
+}
+
+fn test_einsum_optimization(device: Device) {
+    // Optimal contraction path for large tensors
+    let a: Tensor<f32, [100, 50]> = Tensor.randn().to(device);
+    let b: Tensor<f32, [50, 200]> = Tensor.randn().to(device);
+    let c: Tensor<f32, [200, 30]> = Tensor.randn().to(device);
+
+    // Let einsum find optimal ordering
+    let result = einsum_with_optimize("ij,jk,kl->il", [a, b, c], optimize: true);
+    assert(result.shape() == [100, 30]);
+
+    // Pre-compute contraction path
+    let path = einsum_path("ij,jk,kl->il", [a.shape(), b.shape(), c.shape()]);
+    // path contains optimal contraction order
+
+    // Reuse path for multiple similar operations
+    let result2 = einsum_with_path("ij,jk,kl->il", [a, b, c], path);
+
+    // Compare performance
+    let naive_result = matmul(matmul(a, b), c);
+    assert((result - naive_result).abs().max() < 1e-2);
+
+    // Memory-efficient einsum (streaming for large tensors)
+    let large_a: Tensor<f32, [1000, 500]> = Tensor.randn().to(device);
+    let large_b: Tensor<f32, [500, 800]> = Tensor.randn().to(device);
+
+    let streamed = einsum_chunked("ij,jk->ik", large_a, large_b, chunk_size: 128);
+
+    // Gradient-compatible einsum
+    @differentiable
+    fn einsum_loss(x: Tensor<f32, [N, M]>, w: Tensor<f32, [M, K]>) -> f32 {
+        let result = einsum("ij,jk->ik", x, w);
+        result.sum()
+    }
+
+    let x: Tensor<f32, [4, 3]> = Tensor.randn().to(device);
+    let w: Tensor<f32, [3, 2]> = Tensor.randn().to(device);
+
+    let (loss, (grad_x, grad_w)) = gradient_all(einsum_loss, x, w);
+    assert(grad_x.shape() == [4, 3]);
+    assert(grad_w.shape() == [3, 2]);
+}
+
+// Helper type declarations for einsum
+fn einsum(spec: Text, args: List<Tensor>) -> Tensor {
+    // Implementation provided by runtime
+    intrinsic_einsum(spec, args)
+}
+
+fn einsum_with_optimize(spec: Text, tensors: List<Tensor>, optimize: bool) -> Tensor {
+    intrinsic_einsum_optimized(spec, tensors, optimize)
+}
+
+fn einsum_path(spec: Text, shapes: List<List<Int>>) -> ContractionPath {
+    intrinsic_einsum_path(spec, shapes)
+}
+
+fn einsum_with_path(spec: Text, tensors: List<Tensor>, path: ContractionPath) -> Tensor {
+    intrinsic_einsum_with_path(spec, tensors, path)
+}
+
+fn einsum_chunked(spec: Text, a: Tensor, b: Tensor, chunk_size: Int) -> Tensor {
+    intrinsic_einsum_chunked(spec, a, b, chunk_size)
+}
+
+type ContractionPath is {
+    order: List<(Int, Int)>,
+    cost: f64,
+};

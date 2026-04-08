@@ -1,0 +1,242 @@
+// @test: typecheck-fail
+// @expected-error: Type introspection error
+// @tier: 3
+// @level: L3
+// @tags: meta, compile-time, type-introspection, error
+
+/// Type introspection failure cases
+///
+/// These tests verify that type introspection correctly handles
+/// invalid or unsupported introspection requests.
+
+// ============================================================
+// INVALID TYPE INTROSPECTION
+// ============================================================
+
+// ERROR: Introspecting private type from another module
+meta fn introspect_private() -> TypeInfo {
+    // ERROR: Cannot introspect private type 'internal.PrivateTypep
+    internal.PrivateType.type_info()
+}
+
+// ERROR: Introspecting incomplete type
+type ForwardDecl is ();  // Forward declaration placeholder
+
+meta fn introspect_incomplete() -> TypeInfo {
+    // ERROR: Cannot introspect incomplete type 'ForwardDeclp
+    ForwardDecl.type_info()
+}
+
+// ERROR: Introspecting opaque FFI type
+@repr(C)
+type OpaqueHandle is intrinsic;
+
+meta fn introspect_opaque() -> List<FieldInfo> {
+    // ERROR: Cannot introspect fields of opaque type
+    OpaqueHandle.type_info().fields()
+}
+
+// ============================================================
+// FIELD ACCESS ERRORS
+// ============================================================
+
+type Point is { x: Int, y: Int };
+
+// ERROR: Accessing non-existent field
+meta fn bad_field_access() -> FieldInfo {
+    // ERROR: Type 'Pointp has no field 'zp
+    Point.type_info().field("z")
+}
+
+// ERROR: Accessing field by invalid index
+meta fn bad_field_index() -> FieldInfo {
+    // ERROR: Field index 5 out of bounds for type with 2 fields
+    Point.type_info().field_at(5)
+}
+
+// ERROR: Introspecting field of primitive type
+meta fn primitive_fields() -> List<FieldInfo> {
+    // ERROR: Primitive type 'Intp has no fields
+    Int.type_info().fields()
+}
+
+// ============================================================
+// VARIANT ACCESS ERRORS
+// ============================================================
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+// ERROR: Accessing non-existent variant
+meta fn bad_variant() -> VariantInfo {
+    // ERROR: Enum 'Colorp has no variant 'Yellowp
+    Color.type_info().variant("Yellow")
+}
+
+// ERROR: Accessing variants of non-enum type
+meta fn struct_variants() -> List<VariantInfo> {
+    // ERROR: Type 'Pointp is not an enum, has no variants
+    Point.type_info().variants()
+}
+
+// ERROR: Accessing variant fields when variant has none
+meta fn unit_variant_fields() -> List<FieldInfo> {
+    // ERROR: Variant 'Redp has no fields
+    Color.type_info().variant("Red").fields()
+}
+
+// ============================================================
+// METHOD INTROSPECTION ERRORS
+// ============================================================
+
+// ERROR: Accessing private method info
+type Counter is { value: Int };
+
+implement Counter {
+    fn get(&self) -> Int { self.value }
+
+    @private
+    fn internal_increment(&mut self) { self.value += 1; }
+}
+
+meta fn private_method() -> MethodInfo {
+    // ERROR: Cannot introspect private method 'internal_incrementp
+    Counter.type_info().method("internal_increment")
+}
+
+// ERROR: Accessing non-existent method
+meta fn missing_method() -> MethodInfo {
+    // ERROR: Type 'Counterp has no method 'decrementp
+    Counter.type_info().method("decrement")
+}
+
+// ERROR: Accessing trait method without impl
+meta fn unimplemented_method() -> MethodInfo {
+    // ERROR: Method 'clonep not implemented for 'Counterp
+    Counter.type_info().method("clone")
+}
+
+// ============================================================
+// ATTRIBUTE ACCESS ERRORS
+// ============================================================
+
+@derive(Debug)
+type Tagged is { value: Int };
+
+// ERROR: Accessing non-existent attribute
+meta fn missing_attr() -> Attribute {
+    // ERROR: Type 'Taggedp has no attribute 'serdep
+    Tagged.type_info().attribute("serde")
+}
+
+// ERROR: Parsing attribute with wrong type
+@custom_attr(value = 42)
+type WithAttr is {};
+
+meta fn wrong_attr_type() -> Text {
+    // ERROR: Attribute 'valuep has type Int, not Text
+    WithAttr.type_info().attribute("custom_attr").get<Text>("value")
+}
+
+// ============================================================
+// GENERIC TYPE INTROSPECTION ERRORS
+// ============================================================
+
+type Generic<T> is { value: T };
+
+// ERROR: Introspecting uninstantiated generic
+meta fn generic_uninstantiated() -> TypeInfo {
+    // ERROR: Cannot introspect uninstantiated generic 'Genericp
+    Generic.type_info()  // Must specify T
+}
+
+// ERROR: Wrong number of type arguments
+meta fn wrong_type_args() -> TypeInfo {
+    // ERROR: Generic 'Genericp expects 1 type argument, got 2
+    Generic<Int, Text>.type_info()
+}
+
+// ERROR: Type argument doesn't satisfy bounds
+type Bounded<T: Clone + Eq> is { value: T };
+
+type NoClone is { data: Heap<Fn()> };  // Not Clone
+
+meta fn unsatisfied_bounds() -> TypeInfo {
+    // ERROR: 'NoClonep does not implement 'Clonep
+    Bounded<NoClone>.type_info()
+}
+
+// ============================================================
+// LIFETIME INTROSPECTION ERRORS
+// ============================================================
+
+type Borrowed<'a> is { reference: &'a Int };
+
+// ERROR: Introspecting with invalid lifetime
+meta fn invalid_lifetime() -> TypeInfo {
+    // ERROR: Lifetime 'b is not defined
+    Borrowed<'b>.type_info()
+}
+
+// ERROR: Lifetime mismatch
+meta fn lifetime_mismatch<'a, 'b>() -> TypeInfo
+where 'a: 'b
+{
+    // ERROR: Cannot coerce Borrowed<'a> to Borrowed<'b>
+    let info = Borrowed<'a>.type_info();
+    info  // Returning info of different lifetime
+}
+
+// ============================================================
+// CONST GENERIC INTROSPECTION ERRORS
+// ============================================================
+
+type Array<const N: usize> is [Int; N];
+
+// ERROR: Negative const generic
+meta fn negative_const() -> TypeInfo {
+    // ERROR: Const generic cannot be negative
+    Array.<-5>.type_info()
+}
+
+// ERROR: Non-const expression for const generic
+fn get_size() -> usize { 10 }
+
+meta fn non_const_generic() -> TypeInfo {
+    // ERROR: Const generic requires constant expression
+    Array<get_size()>.type_info()
+}
+
+// ============================================================
+// RECURSIVE TYPE ERRORS
+// ============================================================
+
+// ERROR: Infinite size detection
+type Infinite is { next: Infinite };  // No indirection
+
+meta fn infinite_size() -> usize {
+    // ERROR: Type 'Infinitep has infinite size
+    Infinite.type_info().size
+}
+
+// ============================================================
+// RUNTIME TYPE INTROSPECTION LIMITS
+// ============================================================
+
+// ERROR: Introspecting erased type
+meta fn erased_introspection<T>(value: T) -> TypeInfo {
+    // ERROR: Cannot introspect erased generic type at compile time
+    T.type_info()  // T is not known at compile time
+}
+
+// ERROR: Introspecting protocol object
+meta fn trait_object_introspection() -> TypeInfo {
+    // ERROR: Cannot fully introspect protocol object type
+    <Clone>.type_info().concrete_type()  // No concrete type
+}
+
+fn main() {
+    // All introspection operations above should fail
+}

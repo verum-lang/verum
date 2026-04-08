@@ -1,0 +1,25 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, libsystem, random
+// @description: Test arc4random() FFI call for cryptographic random
+
+@ffi("libSystem.B.dylib")
+extern {
+    fn arc4random() -> u32;
+}
+
+fn main() {
+    // arc4random() returns a random 32-bit unsigned integer
+    // It never fails and provides cryptographic-quality random
+
+    let r1 = arc4random();
+    let r2 = arc4random();
+
+    // Two calls should (almost certainly) return different values
+    // The probability of collision is 1/2^32
+    // This is a sanity check that the function actually generates random data
+    assert(r1 != r2);
+}

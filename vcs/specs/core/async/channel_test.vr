@@ -1,0 +1,1353 @@
+// =============================================================================
+// channel_test.vr - Tests for async MPSC channels
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, channel, mpsc, sender, receiver, oneshot, core
+// @description: Comprehensive tests for async MPSC channels and oneshot channels
+// =============================================================================
+
+mount core.async.channel.{
+    channel, bounded,
+    Sender, Receiver,
+    SendError, TrySendError, Full, Disconnected,
+    TryRecvError, Empty, RecvError,
+    oneshot, OneshotSender, OneshotReceiver,
+};
+mount core.async.future.Future;
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.async.waker.{Waker, Context, noop_waker};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Unbounded Channel Creation
+// =============================================================================
+
+@test
+fn test_channel_creation() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    // Channel created with sender and receiver
+}
+
+@test
+fn test_channel_creation_different_types() {
+    // Int channel
+    let (tx_int, rx_int): (Sender<Int>, Receiver<Int>) = channel();
+
+    // Bool channel
+    let (tx_bool, rx_bool): (Sender<Bool>, Receiver<Bool>) = channel();
+
+    // Text channel
+    let (tx_text, rx_text): (Sender<Text>, Receiver<Text>) = channel();
+}
+
+@test
+fn test_channel_initial_state() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    assert(!tx.is_closed());
+    assert(!rx.is_closed());
+    assert(tx.is_empty());
+    assert(rx.is_empty());
+}
+
+// =============================================================================
+// Section 2: Bounded Channel Creation
+// =============================================================================
+
+@test
+fn test_bounded_channel_creation() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(10);
+    // Bounded channel with capacity 10
+}
+
+@test
+fn test_bounded_channel_capacity() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(5);
+    match tx.capacity() {
+        Some(cap) => assert_eq(cap, 5),
+        None => panic("Expected bounded capacity"),
+    }
+}
+
+@test
+fn test_unbounded_channel_no_capacity() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    match tx.capacity() {
+        Some(_) => panic("Expected None for unbounded"),
+        None => {} // Expected
+    }
+}
+
+// =============================================================================
+// Section 3: Sender Operations
+// =============================================================================
+
+@test
+fn test_sender_send() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let result: Result<(), SendError<Int>> = tx.send(42);
+    match result {
+        Ok(_) => {} // Expected
+        Err(_) => panic("Send should succeed"),
+    }
+}
+
+@test
+fn test_sender_try_send() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let result: Result<(), TrySendError<Int>> = tx.try_send(42);
+    match result {
+        Ok(_) => {} // Expected
+        Err(_) => panic("try_send should succeed"),
+    }
+}
+
+@test
+fn test_sender_multiple_sends() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+    let _ = tx.send(3);
+    assert_eq(tx.len(), 3);
+}
+
+@test
+fn test_sender_len() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    assert_eq(tx.len(), 0);
+    let _ = tx.send(42);
+    assert_eq(tx.len(), 1);
+}
+
+@test
+fn test_sender_is_empty() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    assert(tx.is_empty());
+    let _ = tx.send(42);
+    assert(!tx.is_empty());
+}
+
+@test
+fn test_sender_is_closed_false() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    assert(!tx.is_closed());
+}
+
+// =============================================================================
+// Section 4: Receiver Operations
+// =============================================================================
+
+@test
+fn test_receiver_try_recv_empty() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let result: Result<Int, TryRecvError> = rx.try_recv();
+    match result {
+        Ok(_) => panic("Expected Empty error"),
+        Err(err) => {
+            match err {
+                Empty => {} // Expected
+                Disconnected => panic("Expected Empty, not Disconnected"),
+            }
+        }
+    }
+}
+
+@test
+fn test_receiver_try_recv_success() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(42);
+    let result: Result<Int, TryRecvError> = rx.try_recv();
+    match result {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_receiver_len() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    assert_eq(rx.len(), 0);
+    let _ = tx.send(42);
+    assert_eq(rx.len(), 1);
+}
+
+@test
+fn test_receiver_is_empty() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    assert(rx.is_empty());
+    let _ = tx.send(42);
+    assert(!rx.is_empty());
+}
+
+@test
+fn test_receiver_close() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    rx.close();
+    assert(tx.is_closed());
+}
+
+// =============================================================================
+// Section 5: Sender Clone
+// =============================================================================
+
+@test
+fn test_sender_clone() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    let tx2: Sender<Int> = tx.clone();
+    // Both senders can send
+    let _ = tx.send(1);
+    let _ = tx2.send(2);
+}
+
+@test
+fn test_sender_clone_count() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    let tx2: Sender<Int> = tx.clone();
+    let tx3: Sender<Int> = tx.clone();
+    // Channel remains open with multiple senders
+    assert(!tx.is_closed());
+}
+
+// =============================================================================
+// Section 6: Error Types
+// =============================================================================
+
+@test
+fn test_send_error() {
+    let err: SendError<Int> = SendError(42);
+    // SendError wraps the value that failed to send
+}
+
+@test
+fn test_try_send_error_full() {
+    let err: TrySendError<Int> = Full(42);
+    match err {
+        Full(v) => assert_eq(v, 42),
+        Disconnected(_) => panic("Expected Full"),
+    }
+}
+
+@test
+fn test_try_send_error_disconnected() {
+    let err: TrySendError<Int> = Disconnected(42);
+    match err {
+        Full(_) => panic("Expected Disconnected"),
+        Disconnected(v) => assert_eq(v, 42),
+    }
+}
+
+@test
+fn test_try_recv_error_empty() {
+    let err: TryRecvError = Empty;
+    match err {
+        Empty => {} // Expected
+        Disconnected => panic("Expected Empty"),
+    }
+}
+
+@test
+fn test_try_recv_error_disconnected() {
+    let err: TryRecvError = Disconnected;
+    match err {
+        Empty => panic("Expected Disconnected"),
+        Disconnected => {} // Expected
+    }
+}
+
+@test
+fn test_try_recv_error_is_pattern() {
+    let empty_err: TryRecvError = Empty;
+    let disc_err: TryRecvError = Disconnected;
+
+    assert(empty_err is Empty);
+    assert(!(empty_err is Disconnected));
+    assert(disc_err is Disconnected);
+    assert(!(disc_err is Empty));
+}
+
+// =============================================================================
+// Section 7: Oneshot Channel
+// =============================================================================
+
+@test
+fn test_oneshot_creation() {
+    let (tx, rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    // Oneshot channel created
+}
+
+@test
+fn test_oneshot_send() {
+    let (tx, rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    let result: Result<(), Int> = tx.send(42);
+    match result {
+        Ok(_) => {} // Expected
+        Err(_) => panic("Oneshot send should succeed"),
+    }
+}
+
+// =============================================================================
+// Section 8: Channel as Future
+// =============================================================================
+
+@test
+fn test_receiver_poll_empty() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    // Polling empty channel returns Pending
+    let result: Poll<Maybe<Int>> = rx.poll(&mut cx);
+    assert(result.is_pending());
+}
+
+@test
+fn test_receiver_poll_with_value() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(42);
+
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    // Polling channel with value returns Ready(Some(value))
+    let result: Poll<Maybe<Int>> = rx.poll(&mut cx);
+    assert(result.is_ready());
+    match result.unwrap() {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 9: FIFO Order
+// =============================================================================
+
+@test
+fn test_channel_fifo_order() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+    let _ = tx.send(3);
+
+    // Receive in FIFO order
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, 1),
+        Err(_) => panic("Expected value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, 2),
+        Err(_) => panic("Expected value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, 3),
+        Err(_) => panic("Expected value"),
+    }
+}
+
+// =============================================================================
+// Section 10: Edge Cases
+// =============================================================================
+
+@test
+fn test_channel_with_unit() {
+    let (tx, mut rx): (Sender<()>, Receiver<()>) = channel();
+    let _ = tx.send(());
+    match rx.try_recv() {
+        Ok(_) => {} // Expected
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_channel_with_negative_int() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(-42);
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, -42),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_channel_with_zero() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(0);
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, 0),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_bounded_channel_minimum_capacity() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(1);
+    match tx.capacity() {
+        Some(cap) => assert_eq(cap, 1),
+        None => panic("Expected capacity"),
+    }
+}
+
+// =============================================================================
+// Section 11: Bounded Channel Backpressure
+// =============================================================================
+
+@test
+fn test_bounded_try_send_when_full() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(2);
+    // Fill to capacity
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+    assert_eq(tx.len(), 2);
+
+    // try_send should fail with Full
+    let result: Result<(), TrySendError<Int>> = tx.try_send(3);
+    match result {
+        Ok(_) => panic("Expected Full error"),
+        Err(err) => {
+            match err {
+                Full(v) => assert_eq(v, 3),
+                Disconnected(_) => panic("Expected Full, not Disconnected"),
+            }
+        }
+    }
+}
+
+@test
+fn test_bounded_try_send_after_recv() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(1);
+    let _ = tx.send(10);
+    assert_eq(tx.len(), 1);
+
+    // Receive to free space
+    let v = rx.try_recv();
+    match v {
+        Ok(val) => assert_eq(val, 10),
+        Err(_) => panic("Expected value"),
+    }
+
+    // Now send should work again
+    let result = tx.try_send(20);
+    assert(result.is_ok());
+}
+
+@test
+fn test_bounded_capacity_one() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(1);
+    match tx.capacity() {
+        Some(cap) => assert_eq(cap, 1),
+        None => panic("Expected capacity"),
+    }
+    let _ = tx.send(99);
+    assert_eq(tx.len(), 1);
+}
+
+// =============================================================================
+// Section 12: Receiver Operations Extended
+// =============================================================================
+
+@test
+fn test_receiver_try_recv_multiple() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(10);
+    let _ = tx.send(20);
+    let _ = tx.send(30);
+
+    assert_eq(rx.try_recv().unwrap(), 10);
+    assert_eq(rx.try_recv().unwrap(), 20);
+    assert_eq(rx.try_recv().unwrap(), 30);
+
+    // Now channel is empty
+    match rx.try_recv() {
+        Ok(_) => panic("Expected Empty"),
+        Err(err) => assert(err is Empty),
+    }
+}
+
+@test
+fn test_receiver_len_decreases_on_recv() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+    assert_eq(rx.len(), 2);
+
+    let _ = rx.try_recv();
+    assert_eq(rx.len(), 1);
+
+    let _ = rx.try_recv();
+    assert_eq(rx.len(), 0);
+}
+
+@test
+fn test_receiver_is_empty_after_drain() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+    assert(!rx.is_empty());
+
+    let _ = rx.try_recv();
+    let _ = rx.try_recv();
+    assert(rx.is_empty());
+}
+
+// =============================================================================
+// Section 13: Channel Closure Semantics
+// =============================================================================
+
+@test
+fn test_sender_detects_receiver_close() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    assert(!tx.is_closed());
+    rx.close();
+    assert(tx.is_closed());
+}
+
+@test
+fn test_send_after_close_fails() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    rx.close();
+
+    let result = tx.send(42);
+    match result {
+        Ok(_) => panic("Expected SendError"),
+        Err(_) => {} // Expected
+    }
+}
+
+@test
+fn test_try_send_after_close_returns_disconnected() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    rx.close();
+
+    let result = tx.try_send(42);
+    match result {
+        Ok(_) => panic("Expected Disconnected"),
+        Err(err) => {
+            match err {
+                Full(_) => panic("Expected Disconnected, not Full"),
+                Disconnected(v) => assert_eq(v, 42),
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 14: RecvError Type
+// =============================================================================
+
+@test
+fn test_recv_error_type_exists() {
+    // RecvError is a unit type - verify it can be used as a type annotation
+    let _: Maybe<RecvError> = None;
+}
+
+// =============================================================================
+// Section 15: Oneshot Extended
+// =============================================================================
+
+@test
+fn test_oneshot_different_types() {
+    // Text oneshot
+    let (tx_text, rx_text): (OneshotSender<Text>, OneshotReceiver<Text>) = oneshot();
+
+    // Bool oneshot
+    let (tx_bool, rx_bool): (OneshotSender<Bool>, OneshotReceiver<Bool>) = oneshot();
+
+    // Unit oneshot
+    let (tx_unit, rx_unit): (OneshotSender<()>, OneshotReceiver<()>) = oneshot();
+}
+
+@test
+fn test_oneshot_receiver_as_future() {
+    let (tx, mut rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    let _ = tx.send(42);
+
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    // Polling oneshot receiver after send should return Ready
+    let result: Poll<Result<Int, RecvError>> = rx.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+// =============================================================================
+// Section 16: Channel with Complex Types
+// =============================================================================
+
+@test
+fn test_channel_with_tuple() {
+    let (tx, mut rx): (Sender<(Int, Bool)>, Receiver<(Int, Bool)>) = channel();
+    let _ = tx.send((42, true));
+    match rx.try_recv() {
+        Ok(v) => {
+            assert_eq(v.0, 42);
+            assert(v.1);
+        }
+        Err(_) => panic("Expected value"),
+    }
+}
+
+@test
+fn test_channel_with_result() {
+    let (tx, mut rx): (Sender<Result<Int, Text>>, Receiver<Result<Int, Text>>) = channel();
+    let _ = tx.send(Ok(100));
+    let _ = tx.send(Err("fail"));
+
+    match rx.try_recv() {
+        Ok(v) => assert(v.is_ok()),
+        Err(_) => panic("Expected value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => assert(v.is_err()),
+        Err(_) => panic("Expected value"),
+    }
+}
+
+@test
+fn test_channel_with_maybe() {
+    let (tx, mut rx): (Sender<Maybe<Int>>, Receiver<Maybe<Int>>) = channel();
+    let _ = tx.send(Some(42));
+    let _ = tx.send(None);
+
+    match rx.try_recv() {
+        Ok(v) => {
+            match v {
+                Some(n) => assert_eq(n, 42),
+                None => panic("Expected Some"),
+            }
+        }
+        Err(_) => panic("Expected value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => assert(v is None),
+        Err(_) => panic("Expected value"),
+    }
+}
+
+// =============================================================================
+// Section 17: Multiple Sender Clones
+// =============================================================================
+
+@test
+fn test_multiple_senders_send() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let tx2 = tx.clone();
+    let tx3 = tx.clone();
+
+    let _ = tx.send(1);
+    let _ = tx2.send(2);
+    let _ = tx3.send(3);
+
+    assert_eq(rx.len(), 3);
+}
+
+@test
+fn test_sender_clone_independent() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    let tx2 = tx.clone();
+
+    // Both senders should report same state
+    assert(!tx.is_closed());
+    assert(!tx2.is_closed());
+    assert(tx.is_empty());
+    assert(tx2.is_empty());
+}
+
+// =============================================================================
+// Section 18: Bounded vs Unbounded Properties
+// =============================================================================
+
+@test
+fn test_unbounded_no_limit() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    // Unbounded: can send many values without blocking
+    for i in 0..100 {
+        let _ = tx.send(i);
+    }
+    assert_eq(tx.len(), 100);
+}
+
+@test
+fn test_bounded_large_capacity() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(1000);
+    match tx.capacity() {
+        Some(cap) => assert_eq(cap, 1000),
+        None => panic("Expected capacity"),
+    }
+}
+
+// =============================================================================
+// Section 11: Oneshot Channel Extended Tests
+// =============================================================================
+
+@test
+fn test_oneshot_sender_type_exists() {
+    let _ = OneshotSender;
+}
+
+@test
+fn test_oneshot_receiver_type_exists() {
+    let _ = OneshotReceiver;
+}
+
+@test
+fn test_oneshot_with_text() {
+    let (tx, rx): (OneshotSender<Text>, OneshotReceiver<Text>) = oneshot();
+    tx.send("hello");
+    // Verify send doesn't panic
+}
+
+@test
+fn test_oneshot_with_bool() {
+    let (tx, rx): (OneshotSender<Bool>, OneshotReceiver<Bool>) = oneshot();
+    tx.send(true);
+}
+
+// =============================================================================
+// Section 12: Bounded Channel Extended Tests
+// =============================================================================
+
+@test
+fn test_bounded_capacity_matches() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(5);
+    match tx.capacity() {
+        Some(cap) => assert_eq(cap, 5),
+        None => panic("Expected capacity for bounded channel"),
+    }
+}
+
+@test
+fn test_unbounded_capacity_is_none() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    assert(tx.capacity().is_none());
+}
+
+@test
+fn test_bounded_send_then_recv() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(2);
+    tx.try_send(42);
+    let result = rx.try_recv();
+    match result {
+        Ok(val) => assert_eq(val, 42),
+        Err(_) => panic("Expected value"),
+    }
+}
+
+@test
+fn test_bounded_fill_and_drain() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(3);
+    tx.try_send(1);
+    tx.try_send(2);
+    tx.try_send(3);
+
+    // Channel should be full
+    assert_eq(tx.len(), 3);
+
+    // Drain
+    let v1 = rx.try_recv();
+    let v2 = rx.try_recv();
+    let v3 = rx.try_recv();
+
+    assert(v1.is_ok());
+    assert(v2.is_ok());
+    assert(v3.is_ok());
+    assert_eq(v1.unwrap(), 1);
+    assert_eq(v2.unwrap(), 2);
+    assert_eq(v3.unwrap(), 3);
+
+    // Now empty
+    assert(rx.is_empty());
+}
+
+// =============================================================================
+// Section 19: Bounded Channel Various Capacities
+// =============================================================================
+
+@test
+fn test_bounded_capacity_two() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(2);
+    match tx.capacity() {
+        Some(cap) => assert_eq(cap, 2),
+        None => panic("Expected capacity 2"),
+    }
+}
+
+@test
+fn test_bounded_capacity_ten() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(10);
+    match tx.capacity() {
+        Some(cap) => assert_eq(cap, 10),
+        None => panic("Expected capacity 10"),
+    }
+}
+
+@test
+fn test_bounded_capacity_hundred() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(100);
+    match tx.capacity() {
+        Some(cap) => assert_eq(cap, 100),
+        None => panic("Expected capacity 100"),
+    }
+}
+
+@test
+fn test_bounded_capacity_fifty() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(50);
+    match tx.capacity() {
+        Some(cap) => assert_eq(cap, 50),
+        None => panic("Expected capacity 50"),
+    }
+}
+
+// =============================================================================
+// Section 20: Unbounded Channel Bulk Operations
+// =============================================================================
+
+@test
+fn test_unbounded_send_twenty() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    for i in 0..20 {
+        let _ = tx.send(i);
+    }
+    assert_eq(tx.len(), 20);
+}
+
+@test
+fn test_unbounded_send_fifty() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    for i in 0..50 {
+        let _ = tx.send(i);
+    }
+    assert_eq(tx.len(), 50);
+}
+
+@test
+fn test_unbounded_send_and_recv_all() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    for i in 0..10 {
+        let _ = tx.send(i);
+    }
+    assert_eq(rx.len(), 10);
+
+    // Receive all 10 and verify order
+    for i in 0..10 {
+        match rx.try_recv() {
+            Ok(v) => assert_eq(v, i),
+            Err(_) => panic("Expected value"),
+        }
+    }
+    assert(rx.is_empty());
+}
+
+// =============================================================================
+// Section 21: Send/Recv with Various Types
+// =============================================================================
+
+@test
+fn test_send_recv_text() {
+    let (tx, mut rx): (Sender<Text>, Receiver<Text>) = channel();
+    let _ = tx.send("hello");
+    let _ = tx.send("world");
+
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, "hello"),
+        Err(_) => panic("Expected text value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, "world"),
+        Err(_) => panic("Expected text value"),
+    }
+}
+
+@test
+fn test_send_recv_bool() {
+    let (tx, mut rx): (Sender<Bool>, Receiver<Bool>) = channel();
+    let _ = tx.send(true);
+    let _ = tx.send(false);
+
+    match rx.try_recv() {
+        Ok(v) => assert(v),
+        Err(_) => panic("Expected bool value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => assert(!v),
+        Err(_) => panic("Expected bool value"),
+    }
+}
+
+@test
+fn test_send_recv_float() {
+    let (tx, mut rx): (Sender<Float>, Receiver<Float>) = channel();
+    let _ = tx.send(3.14);
+    let _ = tx.send(2.718);
+
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, 3.14),
+        Err(_) => panic("Expected float value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, 2.718),
+        Err(_) => panic("Expected float value"),
+    }
+}
+
+@test
+fn test_send_recv_maybe_values() {
+    let (tx, mut rx): (Sender<Maybe<Text>>, Receiver<Maybe<Text>>) = channel();
+    let _ = tx.send(Some("present"));
+    let _ = tx.send(None);
+    let _ = tx.send(Some("also present"));
+
+    match rx.try_recv() {
+        Ok(v) => assert(v.is_some()),
+        Err(_) => panic("Expected value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => assert(v.is_none()),
+        Err(_) => panic("Expected value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => {
+            match v {
+                Some(s) => assert_eq(s, "also present"),
+                None => panic("Expected Some"),
+            }
+        }
+        Err(_) => panic("Expected value"),
+    }
+}
+
+// =============================================================================
+// Section 22: try_send / try_recv Deeper Patterns
+// =============================================================================
+
+@test
+fn test_try_send_success_unbounded() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let result: Result<(), TrySendError<Int>> = tx.try_send(99);
+    assert(result.is_ok());
+    assert_eq(tx.len(), 1);
+}
+
+@test
+fn test_try_recv_empty_then_send_then_recv() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+
+    // First try_recv on empty should fail with Empty
+    let empty_result: Result<Int, TryRecvError> = rx.try_recv();
+    assert(empty_result.is_err());
+    match empty_result {
+        Ok(_) => panic("Expected Empty"),
+        Err(e) => assert(e is Empty),
+    }
+
+    // Now send and try again
+    let _ = tx.send(77);
+    let recv_result = rx.try_recv();
+    assert(recv_result.is_ok());
+    assert_eq(recv_result.unwrap(), 77);
+}
+
+@test
+fn test_try_send_bounded_full_returns_value() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(1);
+    let _ = tx.send(100);
+
+    // Channel is full, try_send should fail
+    let result: Result<(), TrySendError<Int>> = tx.try_send(200);
+    match result {
+        Ok(_) => panic("Expected Full"),
+        Err(err) => {
+            match err {
+                Full(v) => assert_eq(v, 200),
+                Disconnected(_) => panic("Expected Full"),
+            }
+        }
+    }
+}
+
+@test
+fn test_try_send_multiple_bounded() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(3);
+    assert(tx.try_send(1).is_ok());
+    assert(tx.try_send(2).is_ok());
+    assert(tx.try_send(3).is_ok());
+
+    // Fourth send should fail
+    let result = tx.try_send(4);
+    match result {
+        Ok(_) => panic("Expected Full"),
+        Err(err) => {
+            match err {
+                Full(v) => assert_eq(v, 4),
+                Disconnected(_) => panic("Expected Full"),
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 23: Channel Closing and Disconnection
+// =============================================================================
+
+@test
+fn test_close_then_try_send_disconnected() {
+    let (tx, mut rx): (Sender<Text>, Receiver<Text>) = channel();
+    rx.close();
+
+    let result: Result<(), TrySendError<Text>> = tx.try_send("closed");
+    match result {
+        Ok(_) => panic("Expected Disconnected"),
+        Err(err) => {
+            match err {
+                Full(_) => panic("Expected Disconnected, not Full"),
+                Disconnected(v) => assert_eq(v, "closed"),
+            }
+        }
+    }
+}
+
+@test
+fn test_close_then_send_error() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    rx.close();
+
+    let result: Result<(), SendError<Int>> = tx.send(55);
+    assert(result.is_err());
+}
+
+@test
+fn test_close_receiver_is_closed_on_sender() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    assert(!tx.is_closed());
+    rx.close();
+    assert(tx.is_closed());
+}
+
+@test
+fn test_close_bounded_channel() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(5);
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+    rx.close();
+
+    assert(tx.is_closed());
+    let result = tx.send(3);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 24: Error Type Construction and Inspection
+// =============================================================================
+
+@test
+fn test_send_error_with_text() {
+    // Verify SendError type can be parameterized with Text
+    let _: Maybe<SendError<Text>> = None;
+    let _: Result<(), SendError<Text>> = Ok(());
+}
+
+@test
+fn test_send_error_with_bool() {
+    // Verify SendError type can be parameterized with Bool
+    let _: Maybe<SendError<Bool>> = None;
+    let _: Result<(), SendError<Bool>> = Ok(());
+}
+
+@test
+fn test_try_send_error_full_with_text() {
+    let err: TrySendError<Text> = Full("overflow");
+    match err {
+        Full(v) => assert_eq(v, "overflow"),
+        Disconnected(_) => panic("Expected Full"),
+    }
+}
+
+@test
+fn test_try_send_error_disconnected_with_text() {
+    let err: TrySendError<Text> = Disconnected("lost");
+    match err {
+        Full(_) => panic("Expected Disconnected"),
+        Disconnected(v) => assert_eq(v, "lost"),
+    }
+}
+
+@test
+fn test_try_send_error_is_pattern() {
+    let full_err: TrySendError<Int> = Full(10);
+    let disc_err: TrySendError<Int> = Disconnected(20);
+
+    assert(full_err is Full);
+    assert(!(full_err is Disconnected));
+    assert(disc_err is Disconnected);
+    assert(!(disc_err is Full));
+}
+
+@test
+fn test_recv_error_as_type() {
+    // RecvError is a unit type - verify it can be used in type positions
+    let _: Maybe<RecvError> = None;
+    let _: Result<Int, RecvError> = Ok(42);
+}
+
+// =============================================================================
+// Section 25: Multiple Messages Order Verification
+// =============================================================================
+
+@test
+fn test_fifo_order_ten_messages() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    for i in 0..10 {
+        let _ = tx.send(i);
+    }
+
+    for i in 0..10 {
+        let result = rx.try_recv();
+        assert(result.is_ok());
+        assert_eq(result.unwrap(), i);
+    }
+}
+
+@test
+fn test_fifo_order_twenty_messages() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    for i in 0..20 {
+        let _ = tx.send(i * 10);
+    }
+
+    for i in 0..20 {
+        let result = rx.try_recv();
+        assert(result.is_ok());
+        assert_eq(result.unwrap(), i * 10);
+    }
+    // Verify channel is empty after draining
+    assert(rx.is_empty());
+}
+
+@test
+fn test_bounded_fifo_order() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(5);
+    // Send up to capacity
+    for i in 0..5 {
+        let _ = tx.send(i + 100);
+    }
+
+    // Receive in order
+    for i in 0..5 {
+        match rx.try_recv() {
+            Ok(v) => assert_eq(v, i + 100),
+            Err(_) => panic("Expected value in bounded FIFO"),
+        }
+    }
+}
+
+@test
+fn test_interleaved_send_recv() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+
+    let _ = tx.send(1);
+    assert_eq(rx.try_recv().unwrap(), 1);
+
+    let _ = tx.send(2);
+    assert_eq(rx.try_recv().unwrap(), 2);
+
+    let _ = tx.send(3);
+    let _ = tx.send(4);
+    assert_eq(rx.try_recv().unwrap(), 3);
+    assert_eq(rx.try_recv().unwrap(), 4);
+
+    assert(rx.is_empty());
+}
+
+// =============================================================================
+// Section 26: Channel with Various Container Types
+// =============================================================================
+
+@test
+fn test_channel_with_tuple_int_text() {
+    let (tx, mut rx): (Sender<(Int, Text)>, Receiver<(Int, Text)>) = channel();
+    let _ = tx.send((1, "one"));
+    let _ = tx.send((2, "two"));
+
+    match rx.try_recv() {
+        Ok(v) => {
+            assert_eq(v.0, 1);
+            assert_eq(v.1, "one");
+        }
+        Err(_) => panic("Expected tuple value"),
+    }
+    match rx.try_recv() {
+        Ok(v) => {
+            assert_eq(v.0, 2);
+            assert_eq(v.1, "two");
+        }
+        Err(_) => panic("Expected tuple value"),
+    }
+}
+
+@test
+fn test_channel_with_triple_tuple() {
+    let (tx, mut rx): (Sender<(Int, Bool, Float)>, Receiver<(Int, Bool, Float)>) = channel();
+    let _ = tx.send((42, true, 3.14));
+
+    match rx.try_recv() {
+        Ok(v) => {
+            assert_eq(v.0, 42);
+            assert(v.1);
+            assert_eq(v.2, 3.14);
+        }
+        Err(_) => panic("Expected triple tuple"),
+    }
+}
+
+@test
+fn test_channel_with_nested_result() {
+    let (tx, mut rx): (Sender<Result<Text, Int>>, Receiver<Result<Text, Int>>) = channel();
+    let _ = tx.send(Ok("success"));
+    let _ = tx.send(Err(404));
+
+    let v1 = rx.try_recv().unwrap();
+    assert(v1.is_ok());
+
+    let v2 = rx.try_recv().unwrap();
+    assert(v2.is_err());
+}
+
+// =============================================================================
+// Section 27: Bounded Channel Fill/Drain Cycles
+// =============================================================================
+
+@test
+fn test_bounded_fill_drain_cycle() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(2);
+
+    // First cycle: fill and drain
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+    assert_eq(tx.len(), 2);
+
+    assert_eq(rx.try_recv().unwrap(), 1);
+    assert_eq(rx.try_recv().unwrap(), 2);
+    assert(rx.is_empty());
+
+    // Second cycle: fill and drain again
+    let _ = tx.send(3);
+    let _ = tx.send(4);
+    assert_eq(tx.len(), 2);
+
+    assert_eq(rx.try_recv().unwrap(), 3);
+    assert_eq(rx.try_recv().unwrap(), 4);
+    assert(rx.is_empty());
+}
+
+@test
+fn test_bounded_partial_drain_refill() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(3);
+    let _ = tx.send(10);
+    let _ = tx.send(20);
+    let _ = tx.send(30);
+
+    // Drain one, refill one
+    assert_eq(rx.try_recv().unwrap(), 10);
+    assert(tx.try_send(40).is_ok());
+
+    // Verify remaining order
+    assert_eq(rx.try_recv().unwrap(), 20);
+    assert_eq(rx.try_recv().unwrap(), 30);
+    assert_eq(rx.try_recv().unwrap(), 40);
+    assert(rx.is_empty());
+}
+
+// =============================================================================
+// Section 28: Edge Cases Extended
+// =============================================================================
+
+@test
+fn test_channel_send_max_int() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(9223372036854775807);
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, 9223372036854775807),
+        Err(_) => panic("Expected max Int value"),
+    }
+}
+
+@test
+fn test_channel_send_empty_text() {
+    let (tx, mut rx): (Sender<Text>, Receiver<Text>) = channel();
+    let _ = tx.send("");
+    match rx.try_recv() {
+        Ok(v) => assert_eq(v, ""),
+        Err(_) => panic("Expected empty text"),
+    }
+}
+
+@test
+fn test_try_recv_after_all_consumed() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+    let _ = rx.try_recv();
+    let _ = rx.try_recv();
+
+    // Channel is now empty
+    let result = rx.try_recv();
+    match result {
+        Ok(_) => panic("Expected Empty"),
+        Err(err) => assert(err is Empty),
+    }
+}
+
+@test
+fn test_len_consistency_sender_receiver() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+    let _ = tx.send(3);
+
+    // Both sender and receiver should report same length
+    assert_eq(tx.len(), 3);
+    assert_eq(rx.len(), 3);
+}
+
+@test
+fn test_oneshot_with_float() {
+    let (tx, rx): (OneshotSender<Float>, OneshotReceiver<Float>) = oneshot();
+    let result = tx.send(2.71828);
+    match result {
+        Ok(_) => {} // Expected
+        Err(_) => panic("Oneshot send should succeed"),
+    }
+}
+
+@test
+fn test_oneshot_with_tuple() {
+    let (tx, rx): (OneshotSender<(Int, Text)>, OneshotReceiver<(Int, Text)>) = oneshot();
+    let result = tx.send((42, "answer"));
+    assert(result.is_ok());
+}
+
+@test
+fn test_bounded_recv_frees_capacity() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(2);
+    let _ = tx.send(1);
+    let _ = tx.send(2);
+
+    // Full - try_send should fail
+    assert(tx.try_send(3).is_err());
+
+    // Receive one to free space
+    let _ = rx.try_recv();
+
+    // Now should be able to send again
+    assert(tx.try_send(3).is_ok());
+    assert_eq(tx.len(), 2);
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

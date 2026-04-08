@@ -1,0 +1,151 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, automata, dfa
+// @timeout: 50000
+// @expected-exit: 0
+// @description: DFA simulation — transition table, run on input, acceptance check (binary divisible by 3)
+
+// ============================================================================
+// DFA for binary strings divisible by 3
+// States: 0 = remainder 0, 1 = remainder 1, 2 = remainder 2
+// Alphabet: {0, 1}
+// Transition: delta(state, bit) = (state * 2 + bit) mod 3
+// Accept: state 0
+// ============================================================================
+
+// Transition table: flat array of 6 entries (3 states x 2 symbols)
+// Index = state * 2 + symbol
+type DFA is {
+    t0: Int, t1: Int, t2: Int, t3: Int, t4: Int, t5: Int,
+    start: Int,
+    num_states: Int
+};
+
+fn dfa_div3() -> DFA {
+    // delta(0,0)=0, delta(0,1)=1, delta(1,0)=2, delta(1,1)=0,
+    // delta(2,0)=1, delta(2,1)=2
+    DFA {
+        t0: 0, t1: 1,  // state 0: on 0->0, on 1->1
+        t2: 2, t3: 0,  // state 1: on 0->2, on 1->0
+        t4: 1, t5: 2,  // state 2: on 0->1, on 1->2
+        start: 0,
+        num_states: 3
+    }
+}
+
+fn dfa_transition(dfa: DFA, state: Int, symbol: Int) -> Int {
+    let idx = state * 2 + symbol;
+    if idx == 0 { dfa.t0 }
+    else if idx == 1 { dfa.t1 }
+    else if idx == 2 { dfa.t2 }
+    else if idx == 3 { dfa.t3 }
+    else if idx == 4 { dfa.t4 }
+    else { dfa.t5 }
+}
+
+// Input sequence: Arr8
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn arr_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+// Run DFA on input, return final state
+fn run_dfa(dfa: DFA, input: Arr8) -> Int {
+    let mut state = dfa.start;
+    let mut i = 0;
+    while i < input.len {
+        let sym = arr_get(input, i);
+        state = dfa_transition(dfa, state, sym);
+        i = i + 1;
+    }
+    state
+}
+
+// Check if final state is accepting (state 0 = divisible by 3)
+fn is_accepted(final_state: Int) -> Int {
+    if final_state == 0 { 1 } else { 0 }
+}
+
+// Helper to make input arrays
+fn make_input(e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int, n: Int) -> Arr8 {
+    Arr8 { e0: e0, e1: e1, e2: e2, e3: e3, e4: e4, e5: e5, e6: e6, e7: e7, len: n }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_zero_is_div3() -> Int {
+    // Binary "0" = decimal 0, divisible by 3
+    let dfa = dfa_div3();
+    let input = make_input(0, 0, 0, 0, 0, 0, 0, 0, 1);
+    let state = run_dfa(dfa, input);
+    assert_eq(is_accepted(state), 1);
+    0
+}
+
+@test
+fn test_three_is_div3() -> Int {
+    // Binary "11" = decimal 3, divisible by 3
+    let dfa = dfa_div3();
+    let input = make_input(1, 1, 0, 0, 0, 0, 0, 0, 2);
+    let state = run_dfa(dfa, input);
+    assert_eq(is_accepted(state), 1);
+    0
+}
+
+@test
+fn test_six_is_div3() -> Int {
+    // Binary "110" = decimal 6, divisible by 3
+    let dfa = dfa_div3();
+    let input = make_input(1, 1, 0, 0, 0, 0, 0, 0, 3);
+    let state = run_dfa(dfa, input);
+    assert_eq(is_accepted(state), 1);
+    0
+}
+
+@test
+fn test_not_div3() -> Int {
+    // Binary "1" = decimal 1, NOT divisible by 3
+    let dfa = dfa_div3();
+    let input1 = make_input(1, 0, 0, 0, 0, 0, 0, 0, 1);
+    assert_eq(is_accepted(run_dfa(dfa, input1)), 0);
+    // Binary "10" = decimal 2, NOT divisible by 3
+    let input2 = make_input(1, 0, 0, 0, 0, 0, 0, 0, 2);
+    assert_eq(is_accepted(run_dfa(dfa, input2)), 0);
+    // Binary "101" = decimal 5, NOT divisible by 3
+    let input5 = make_input(1, 0, 1, 0, 0, 0, 0, 0, 3);
+    assert_eq(is_accepted(run_dfa(dfa, input5)), 0);
+    0
+}
+
+@test
+fn test_nine_and_twelve() -> Int {
+    // Binary "1001" = decimal 9, divisible by 3
+    let dfa = dfa_div3();
+    let input9 = make_input(1, 0, 0, 1, 0, 0, 0, 0, 4);
+    assert_eq(is_accepted(run_dfa(dfa, input9)), 1);
+    // Binary "1100" = decimal 12, divisible by 3
+    let input12 = make_input(1, 1, 0, 0, 0, 0, 0, 0, 4);
+    assert_eq(is_accepted(run_dfa(dfa, input12)), 1);
+    0
+}
+
+fn main() -> Int {
+    test_zero_is_div3();
+    test_three_is_div3();
+    test_six_is_div3();
+    test_not_div3();
+    test_nine_and_twelve();
+    print("[OK] 126_automata");
+    0
+}

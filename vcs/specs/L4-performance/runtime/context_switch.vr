@@ -1,0 +1,512 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: runtime, context, di, lookup, switch
+// @description: Context system performance benchmark (target: < 30ns context lookup)
+
+/// Context System Performance Benchmark
+///
+/// This benchmark measures the performance of Verum's context system.
+/// The context system provides dependency injection with runtime lookup.
+///
+/// Target: < 30ns context lookup (per spec ~5-30ns)
+///
+/// Context operations measured:
+/// - Context lookup (using clause resolution)
+/// - Context provision (provide statement)
+/// - Context propagation (through call stack)
+/// - Context scope management
+///
+/// Spec reference: docs/detailed/16-context-system.md
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Context System Performance");
+
+    // Basic lookup benchmarks
+    results.add(benchmark_single_context_lookup());
+    results.add(benchmark_multiple_context_lookup());
+    results.add(benchmark_nested_context_lookup());
+
+    // Provision benchmarks
+    results.add(benchmark_context_provision());
+    results.add(benchmark_context_override());
+
+    // Propagation benchmarks
+    results.add(benchmark_context_propagation_depth());
+    results.add(benchmark_context_in_closure());
+
+    // Scope benchmarks
+    results.add(benchmark_context_scope_enter());
+    results.add(benchmark_context_scope_exit());
+
+    // Complex scenarios
+    results.add(benchmark_di_resolution());
+    results.add(benchmark_lazy_context());
+
+    results.report();
+    assert(results.all_pass(), "Context performance exceeds target");
+}
+
+/// Context definitions for testing
+context Logger {
+    fn log(level: LogLevel, msg: Text);
+    fn is_enabled(level: LogLevel) -> Bool;
+}
+
+context Database {
+    fn query(sql: Text) -> QueryResult;
+    fn execute(sql: Text) -> Result<Int, Error>;
+}
+
+context Config {
+    fn get(key: Text) -> Maybe<Text>;
+    fn get_int(key: Text) -> Maybe<Int>;
+}
+
+context Cache {
+    fn get(key: Text) -> Maybe<Text>;
+    fn set(key: Text, value: Text);
+}
+
+type LogLevel is Debug | Info | Warn | Error;
+
+/// Simple logger implementation
+type ConsoleLogger is  {};
+
+implement Logger for ConsoleLogger {
+    fn log(level: LogLevel, msg: Text) {
+        // Noop for benchmark
+    }
+
+    fn is_enabled(level: LogLevel) -> Bool {
+        true
+    }
+}
+
+/// Mock implementations
+type MockDatabase is  {};
+implement Database for MockDatabase {
+    fn query(sql: Text) -> QueryResult { QueryResult.empty() }
+    fn execute(sql: Text) -> Result<Int, Error> { Ok(0) }
+}
+
+type EnvConfig is  {};
+implement Config for EnvConfig {
+    fn get(key: Text) -> Maybe<Text> { None }
+    fn get_int(key: Text) -> Maybe<Int> { None }
+}
+
+type MemoryCache is  {};
+implement Cache for MemoryCache {
+    fn get(key: Text) -> Maybe<Text> { None }
+    fn set(key: Text, value: Text) {}
+}
+
+/// Benchmark: Single context lookup
+fn benchmark_single_context_lookup() -> BenchmarkResult {
+    provide Logger = ConsoleLogger {};
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(use_logger());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(use_logger());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_lookup_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "single_context_lookup",
+        metric: "ns/lookup",
+        value: per_lookup_ns,
+        target: 30.0,
+        passed: per_lookup_ns < 30.0,
+    }
+}
+
+@inline(never)
+fn use_logger() -> Bool using [Logger] {
+    Logger.is_enabled(LogLevel.Info)
+}
+
+/// Benchmark: Multiple context lookup in one function
+fn benchmark_multiple_context_lookup() -> BenchmarkResult {
+    provide Logger = ConsoleLogger {};
+    provide Database = MockDatabase {};
+    provide Config = EnvConfig {};
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(use_multiple_contexts());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(use_multiple_contexts());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Multiple contexts should not multiply lookup time significantly
+    BenchmarkResult {
+        name: "multiple_context_lookup",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 50.0,
+        passed: per_call_ns < 50.0,
+    }
+}
+
+@inline(never)
+fn use_multiple_contexts() -> Int using [Logger, Database, Config] {
+    let enabled = Logger.is_enabled(LogLevel.Info);
+    let config = Config.get_int("batch_size");
+    enabled as Int + config.unwrap_or(0)
+}
+
+/// Benchmark: Nested context lookup (shadow and restore)
+fn benchmark_nested_context_lookup() -> BenchmarkResult {
+    provide Logger = ConsoleLogger {};
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(nested_context_call());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(nested_context_call());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "nested_context_lookup",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 60.0,
+        passed: per_call_ns < 60.0,
+    }
+}
+
+@inline(never)
+fn nested_context_call() -> Int using [Logger] {
+    let outer = Logger.is_enabled(LogLevel.Debug);
+
+    // Override in nested scope
+    provide Logger = ConsoleLogger {};
+    let inner = Logger.is_enabled(LogLevel.Error);
+
+    (outer as Int) + (inner as Int)
+}
+
+/// Benchmark: Context provision (provide statement)
+fn benchmark_context_provision() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        provide Logger = ConsoleLogger {};
+        black_box(use_logger());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        provide Logger = ConsoleLogger {};
+        black_box(use_logger());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_provision_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "context_provision",
+        metric: "ns/provide",
+        value: per_provision_ns,
+        target: 50.0,
+        passed: per_provision_ns < 50.0,
+    }
+}
+
+/// Benchmark: Context override in nested scope
+fn benchmark_context_override() -> BenchmarkResult {
+    provide Logger = ConsoleLogger {};
+
+    for _ in 0..WARMUP_ITERATIONS {
+        provide Logger = ConsoleLogger {};  // Override
+        black_box(use_logger());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        provide Logger = ConsoleLogger {};  // Override
+        black_box(use_logger());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_override_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "context_override",
+        metric: "ns/override",
+        value: per_override_ns,
+        target: 80.0,
+        passed: per_override_ns < 80.0,
+    }
+}
+
+/// Benchmark: Context propagation through call depth
+fn benchmark_context_propagation_depth() -> BenchmarkResult {
+    provide Logger = ConsoleLogger {};
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(propagate_depth(10));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 10) {
+        black_box(propagate_depth(10));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_lookup_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Propagation depth should not significantly impact lookup time
+    BenchmarkResult {
+        name: "context_propagation_10_deep",
+        metric: "ns/lookup",
+        value: per_lookup_ns,
+        target: 30.0,
+        passed: per_lookup_ns < 30.0,
+    }
+}
+
+@inline(never)
+fn propagate_depth(depth: Int) -> Bool using [Logger] {
+    if depth > 0 {
+        propagate_depth(depth - 1)
+    } else {
+        Logger.is_enabled(LogLevel.Info)
+    }
+}
+
+/// Benchmark: Context in closure capture
+fn benchmark_context_in_closure() -> BenchmarkResult {
+    provide Logger = ConsoleLogger {};
+
+    let closure = || -> Bool using [Logger] {
+        Logger.is_enabled(LogLevel.Info)
+    };
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "context_in_closure",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 40.0,
+        passed: per_call_ns < 40.0,
+    }
+}
+
+/// Benchmark: Context scope enter performance
+fn benchmark_context_scope_enter() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        context_scope.enter();
+        context_scope.exit();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        context_scope.enter();
+        context_scope.exit();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_enter_ns = elapsed_ns as Float / (BENCHMARK_ITERATIONS as Float * 2.0);
+
+    BenchmarkResult {
+        name: "context_scope_enter",
+        metric: "ns/enter",
+        value: per_enter_ns,
+        target: 20.0,
+        passed: per_enter_ns < 20.0,
+    }
+}
+
+/// Benchmark: Context scope exit performance
+fn benchmark_context_scope_exit() -> BenchmarkResult {
+    provide Logger = ConsoleLogger {};
+    provide Database = MockDatabase {};
+    provide Config = EnvConfig {};
+
+    for _ in 0..WARMUP_ITERATIONS {
+        {
+            provide Cache = MemoryCache {};
+            black_box(1);
+        }
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        {
+            provide Cache = MemoryCache {};
+            black_box(1);
+        }  // Scope exit - restore previous context
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_exit_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "context_scope_exit",
+        metric: "ns/exit",
+        value: per_exit_ns,
+        target: 30.0,
+        passed: per_exit_ns < 30.0,
+    }
+}
+
+/// Benchmark: Full DI resolution pattern
+fn benchmark_di_resolution() -> BenchmarkResult {
+    // Typical DI setup
+    provide Logger = ConsoleLogger {};
+    provide Database = MockDatabase {};
+    provide Config = EnvConfig {};
+    provide Cache = MemoryCache {};
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(service_operation());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(service_operation());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "di_resolution_4_contexts",
+        metric: "ns/op",
+        value: per_op_ns,
+        target: 100.0,
+        passed: per_op_ns < 100.0,
+    }
+}
+
+@inline(never)
+fn service_operation() -> Int using [Logger, Database, Config, Cache] {
+    let enabled = Logger.is_enabled(LogLevel.Info);
+    let cached = Cache.get("key");
+    let config = Config.get_int("value");
+
+    (enabled as Int) + (cached.is_some() as Int) + config.unwrap_or(0)
+}
+
+/// Benchmark: Lazy context initialization
+fn benchmark_lazy_context() -> BenchmarkResult {
+    // Lazy initialization - context created on first access
+    provide Logger = ConsoleLogger {};  // lazy initialization not shown here
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(use_logger());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(use_logger());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_lookup_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // After first access, lazy should be same as eager
+    BenchmarkResult {
+        name: "lazy_context_lookup",
+        metric: "ns/lookup",
+        value: per_lookup_ns,
+        target: 35.0,
+        passed: per_lookup_ns < 35.0,
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

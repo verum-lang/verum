@@ -1,0 +1,187 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, simd, basic
+// @timeout: 50000
+// @expected-exit: 0
+// @description: SIMD operations — 4-wide splat, add, sub, mul, horizontal sum, min, max
+// NOTE: Cannot use simd_* as function names — they collide with SimdExtended intrinsics.
+
+// ============================================================================
+// Simd4: 4-wide SIMD vector simulation
+// ============================================================================
+
+type Simd4 is { x0: Int, x1: Int, x2: Int, x3: Int };
+
+fn vec4_splat(v: Int) -> Simd4 {
+    Simd4 { x0: v, x1: v, x2: v, x3: v }
+}
+
+fn vec4_new(a: Int, b: Int, c: Int, d: Int) -> Simd4 {
+    Simd4 { x0: a, x1: b, x2: c, x3: d }
+}
+
+fn vec4_add(a: Simd4, b: Simd4) -> Simd4 {
+    Simd4 {
+        x0: a.x0 + b.x0, x1: a.x1 + b.x1,
+        x2: a.x2 + b.x2, x3: a.x3 + b.x3
+    }
+}
+
+fn vec4_sub(a: Simd4, b: Simd4) -> Simd4 {
+    Simd4 {
+        x0: a.x0 - b.x0, x1: a.x1 - b.x1,
+        x2: a.x2 - b.x2, x3: a.x3 - b.x3
+    }
+}
+
+fn vec4_mul(a: Simd4, b: Simd4) -> Simd4 {
+    Simd4 {
+        x0: a.x0 * b.x0, x1: a.x1 * b.x1,
+        x2: a.x2 * b.x2, x3: a.x3 * b.x3
+    }
+}
+
+fn vec4_hsum(v: Simd4) -> Int {
+    v.x0 + v.x1 + v.x2 + v.x3
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn vec4_hmin(v: Simd4) -> Int {
+    int_min(int_min(v.x0, v.x1), int_min(v.x2, v.x3))
+}
+
+fn vec4_hmax(v: Simd4) -> Int {
+    int_max(int_max(v.x0, v.x1), int_max(v.x2, v.x3))
+}
+
+fn vec4_min(a: Simd4, b: Simd4) -> Simd4 {
+    Simd4 {
+        x0: int_min(a.x0, b.x0), x1: int_min(a.x1, b.x1),
+        x2: int_min(a.x2, b.x2), x3: int_min(a.x3, b.x3)
+    }
+}
+
+fn vec4_max(a: Simd4, b: Simd4) -> Simd4 {
+    Simd4 {
+        x0: int_max(a.x0, b.x0), x1: int_max(a.x1, b.x1),
+        x2: int_max(a.x2, b.x2), x3: int_max(a.x3, b.x3)
+    }
+}
+
+// ============================================================================
+// Test 1: Splat and add
+// ============================================================================
+
+@test
+fn test_splat_add() {
+    let a = vec4_splat(5);
+    assert_eq(a.x0, 5);
+    assert_eq(a.x3, 5);
+
+    let b = vec4_splat(3);
+    let c = vec4_add(a, b);
+    assert_eq(c.x0, 8);
+    assert_eq(c.x1, 8);
+    assert_eq(c.x2, 8);
+    assert_eq(c.x3, 8);
+    assert_eq(vec4_hsum(c), 32);
+    print("  test_splat_add: ok");
+}
+
+// ============================================================================
+// Test 2: Elementwise sub and mul
+// ============================================================================
+
+@test
+fn test_sub_mul() {
+    let a = vec4_new(10, 20, 30, 40);
+    let b = vec4_new(1, 2, 3, 4);
+    let diff = vec4_sub(a, b);
+    assert_eq(diff.x0, 9);
+    assert_eq(diff.x1, 18);
+    assert_eq(diff.x2, 27);
+    assert_eq(diff.x3, 36);
+
+    let prod = vec4_mul(a, b);
+    assert_eq(prod.x0, 10);
+    assert_eq(prod.x1, 40);
+    assert_eq(prod.x2, 90);
+    assert_eq(prod.x3, 160);
+    print("  test_sub_mul: ok");
+}
+
+// ============================================================================
+// Test 3: Horizontal reductions
+// ============================================================================
+
+@test
+fn test_hreductions() {
+    let v = vec4_new(3, 1, 4, 2);
+    assert_eq(vec4_hsum(v), 10);
+    assert_eq(vec4_hmin(v), 1);
+    assert_eq(vec4_hmax(v), 4);
+
+    let v2 = vec4_new(-5, 10, -3, 7);
+    assert_eq(vec4_hsum(v2), 9);
+    assert_eq(vec4_hmin(v2), -5);
+    assert_eq(vec4_hmax(v2), 10);
+    print("  test_hreductions: ok");
+}
+
+// ============================================================================
+// Test 4: Dot product via mul + hsum
+// ============================================================================
+
+@test
+fn test_dot_product() {
+    let a = vec4_new(1, 2, 3, 4);
+    let b = vec4_new(5, 6, 7, 8);
+    // dot = 1*5 + 2*6 + 3*7 + 4*8 = 5+12+21+32 = 70
+    let dot = vec4_hsum(vec4_mul(a, b));
+    assert_eq(dot, 70);
+    print("  test_dot_product: ok");
+}
+
+// ============================================================================
+// Test 5: Lane-wise min/max
+// ============================================================================
+
+@test
+fn test_lane_min_max() {
+    let a = vec4_new(1, 8, 3, 6);
+    let b = vec4_new(5, 2, 7, 4);
+    let lo = vec4_min(a, b);
+    assert_eq(lo.x0, 1);
+    assert_eq(lo.x1, 2);
+    assert_eq(lo.x2, 3);
+    assert_eq(lo.x3, 4);
+
+    let hi = vec4_max(a, b);
+    assert_eq(hi.x0, 5);
+    assert_eq(hi.x1, 8);
+    assert_eq(hi.x2, 7);
+    assert_eq(hi.x3, 6);
+    print("  test_lane_min_max: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_splat_add();
+    test_sub_mul();
+    test_hreductions();
+    test_dot_product();
+    test_lane_min_max();
+    print("[OK] 141_simd_opcode_basic");
+    0
+}

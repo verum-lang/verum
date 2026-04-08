@@ -1,0 +1,24 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, epoch
+// @description: Tests CBGR epoch capability enforcement
+
+fn main() {
+    let data = Heap.new([1, 2, 3]);
+
+    // Spawn async task that captures reference
+    let data_ref = &data;
+
+    async {
+        // Simulate crossing epoch boundary
+        async_operation().await;
+
+        // Access after epoch - capabilities may have changed
+        let _ = data_ref.len();  // Panic: CBGR epoch violation
+    }.await;
+}
+
+async fn async_operation() {
+    // Simulates work that may invalidate epoch capabilities
+}

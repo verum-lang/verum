@@ -1,0 +1,121 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, method, self
+
+// Method taking self by value (consumes self)
+type Counter is { value: Int };
+
+implement Counter {
+    fn consume(self) -> Int {
+        self.value
+    }
+}
+
+// Method taking self by reference
+implement Counter {
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+// Method taking self by mutable reference
+implement Counter {
+    fn increment(&mut self) {
+        self.value += 1;
+    }
+}
+
+// NOTE: &checked self is NOT a supported self parameter syntax in Verum.
+// The parser supports: self, mut self, &self, &mut self, %self, %mut self
+// For checked references, use explicit typed self: self: &checked Counter
+// implement Counter {
+//     fn checked_get(&checked self) -> Int {  // UNSUPPORTED
+//         self.value
+//     }
+// }
+
+// Alternative: explicit typed self with checked reference
+implement Counter {
+    fn checked_get(self: &checked Counter) -> Int {
+        self.value
+    }
+}
+
+// Method with additional parameters
+implement Counter {
+    fn add(&mut self, amount: Int) {
+        self.value += amount;
+    }
+}
+
+// Method with return type
+implement Counter {
+    fn with_value(self, new_value: Int) -> Counter {
+        Counter { value: new_value }
+    }
+}
+
+// Static method (associated function)
+implement Counter {
+    fn new() -> Counter {
+        Counter { value: 0 }
+    }
+
+    fn with_initial(value: Int) -> Counter {
+        Counter { value }
+    }
+}
+
+// Generic method
+implement Counter {
+    fn map<T>(&self, f: fn(Int) -> T) -> T {
+        f(self.value)
+    }
+}
+
+// Async method
+implement Counter {
+    async fn fetch_and_set(&mut self) {
+        self.value = fetch_value().await;
+    }
+}
+
+// Method with context
+implement Counter {
+    fn persist(&self) using [Database] {
+        Database.save("counter", self.value);
+    }
+}
+
+// Method in protocol implementation
+implement Display for Counter {
+    fn display(&self) -> Text {
+        format("Counter({})", self.value)
+    }
+}
+
+// Method with where clause
+// Note: In Verum, where clauses on methods use 'where type T: ...' syntax
+// The constraint should apply to the impl block, not the method
+implement<T: Clone + Debug> Container<T> {
+    fn process(&self) {
+        let cloned = self.value.clone();
+        print(cloned.debug());
+    }
+}
+
+// Builder pattern methods
+implement Builder {
+    fn with_name(self, name: Text) -> Builder {
+        Builder { name, ..self }
+    }
+
+    fn with_age(self, age: Int) -> Builder {
+        Builder { age, ..self }
+    }
+
+    fn build(self) -> Result<Person, Error> {
+        Ok(Person { name: self.name, age: self.age })
+    }
+}

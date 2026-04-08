@@ -1,0 +1,225 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, module
+
+// Module system keywords: module, link, implement, context, protocol, extends
+
+// Module declaration
+module math {
+    pub fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    pub fn multiply(a: Int, b: Int) -> Int {
+        a * b
+    }
+
+    fn internal_helper() -> Int {
+        42
+    }
+}
+
+// Nested modules
+module graphics {
+    module shapes {
+        pub type Circle is { radius: Float };
+        pub type Rectangle is { width: Float, height: Float };
+    }
+
+    module colors {
+        pub type Color is { r: Int, g: Int, b: Int };
+        pub const RED: Color = Color { r: 255, g: 0, b: 0 };
+    }
+}
+
+// Module with types
+module types {
+    pub type UserId is Int;
+    pub type Email is Text;
+
+    pub type User is {
+        id: UserId,
+        email: Email,
+        name: Text,
+    };
+}
+
+// Import statements
+mount core.collections.List;
+mount core.collections.Map;
+mount core.io.Read;
+mount core.io.Write;
+mount core.text.Text;
+
+// Import with alias
+mount core.collections.Map as LocalMap;
+mount core.io.Result as IoResult;
+mount long.module.path.SomeType as ST;
+
+// Import all from module
+mount core.prelude.*;
+
+// Import from parent/sibling
+mount super.parent_module.function;
+mount cog.root_module.RootType;
+
+// Import specific items
+mount module.ItemA;
+mount module.ItemB;
+mount module.ItemC;
+
+// Protocol definition
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type Debug is protocol {
+    fn debug_fmt(&self, f: &mut Formatter) -> Result<(), Error>;
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+// Protocol with associated types
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type Container is protocol {
+    type Element;
+    type Index;
+
+    fn get(&self, index: Self.Index) -> Maybe<&Self.Element>;
+    fn set(&mut self, index: Self.Index, value: Self.Element);
+};
+
+// Protocol with default methods
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+
+    fn ne(&self, other: &Self) -> Bool {
+        !self.eq(other)
+    }
+};
+
+// Protocol extension/inheritance
+type PartialOrd is protocol extends Eq {
+    fn partial_cmp(&self, other: &Self) -> Maybe<Ordering>;
+};
+
+type Ord is protocol extends PartialOrd {
+    fn cmp(&self, other: &Self) -> Ordering;
+};
+
+// Implement protocol for type
+implement Display for Int {
+    fn display(&self) -> Text {
+        self.to_string()
+    }
+}
+
+implement Clone for types.User {
+    fn clone(&self) -> Self {
+        User {
+            id: self.id,
+            email: self.email.clone(),
+            name: self.name.clone(),
+        }
+    }
+}
+
+// Implement generic protocol
+implement<T> Iterator for List<T> {
+    type Item is T;
+
+    fn next(&mut self) -> Maybe<T> {
+        self.pop_front()
+    }
+}
+
+// Context definition
+context Database {
+    fn query(&self, sql: Text) -> Result<Rows, Error>;
+    fn execute(&self, sql: Text) -> Result<Int, Error>;
+    fn transaction<T>(&self, f: fn() -> T) -> Result<T, Error>;
+}
+
+context Logger {
+    fn debug(&self, msg: Text);
+    fn info(&self, msg: Text);
+    fn warn(&self, msg: Text);
+    fn error(&self, msg: Text);
+}
+
+context FileSystem {
+    fn read(&self, path: Text) -> Result<Bytes, Error>;
+    fn write(&self, path: Text, data: Bytes) -> Result<(), Error>;
+    fn exists(&self, path: Text) -> Bool;
+}
+
+// Context group
+using WebContext = [Database, Logger, Http, Cache];
+
+using ApplicationContext = [Database, Logger, FileSystem, Config];
+
+// Context provisioning
+fn process_request(request: Request) -> Response
+using [Database, Logger, Cache]
+{
+    Logger.info(f"Processing request: {request.id}");
+    let data = Cache.get(request.key) ?? Database.query(request.query)?;
+    Response.ok(data)
+}
+
+// Implement context
+implement Database for PostgresDb {
+    fn query(&self, sql: Text) -> Result<Rows, Error> {
+        self.connection.execute_query(sql)
+    }
+
+    fn execute(&self, sql: Text) -> Result<Int, Error> {
+        self.connection.execute(sql)
+    }
+
+    fn transaction<T>(&self, f: fn() -> T) -> Result<T, Error> {
+        self.connection.begin()?;
+        let result = f();
+        self.connection.commit()?;
+        Ok(result)
+    }
+}
+
+// Module-level context provision
+@provide(Database = PostgresDb.new())
+@provide(Logger = ConsoleLogger.new())
+module app {
+    pub fn main() using [Database, Logger] {
+        Logger.info("Application starting");
+        // ...
+    }
+}
+
+// Conditional imports
+@cfg(feature = "async")
+mount async_std.task;
+
+@cfg(test)
+mount testing.*;
+
+// Module with visibility
+pub module public_module {
+    fn internal_fn() {}
+}
+
+// Inline module
+module inline_module;  // Loads from inline_module.vr
+
+// Protocol object types
+fn render(items: List<Heap<Display>>) {
+    for item in items {
+        print(item.display());
+    }
+}

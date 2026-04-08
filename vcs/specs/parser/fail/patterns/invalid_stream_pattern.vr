@@ -1,0 +1,65 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, stream, error
+// @description: Test invalid stream pattern syntax
+// @expected-error: E083
+
+fn test_stream_missing_bracket() {
+    let s = stream[1, 2, 3];
+
+    // Invalid: missing closing bracket in stream pattern
+    match s {
+        stream[first, second => print("missing bracket"),
+        _ => print("other"),
+    }
+}
+
+fn test_stream_wrong_rest_syntax() {
+    let s = stream[1, 2, 3, 4, 5];
+
+    // Invalid: using .. instead of ... for stream rest
+    match s {
+        stream[first, ..rest] => print("wrong rest syntax"),
+        _ => print("other"),
+    }
+}
+
+fn test_stream_multiple_rest() {
+    let s = stream[1, 2, 3, 4, 5];
+
+    // Invalid: multiple rest patterns in stream
+    match s {
+        stream[...a, ...b] => print("multiple rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_stream_rest_without_name() {
+    let s = stream[1, 2, 3];
+
+    // Invalid: ... without identifier (if required)
+    match s {
+        stream[first, ...] => print("nameless rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_stream_empty_invalid() {
+    let s = stream[1, 2, 3];
+
+    // Invalid: stream pattern with invalid content
+    match s {
+        stream[,] => print("comma only"),
+        _ => print("other"),
+    }
+}
+
+fn test_not_stream_keyword() {
+    let arr = [1, 2, 3];
+
+    // Invalid: using stream keyword with regular array
+    match arr {
+        stream[] => print("stream on array"),
+        _ => print("other"),
+    }
+}

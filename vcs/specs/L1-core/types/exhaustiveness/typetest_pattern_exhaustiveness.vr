@@ -1,0 +1,77 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, typetest-pattern, is-pattern
+// @description: TypeTest (is) patterns with exhaustiveness checking
+
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { base: Float, height: Float };
+
+// TypeTest patterns for variant exhaustiveness
+fn area(s: Shape) -> Float =
+    match s {
+        c is Circle => 3.14159 * c.radius * c.radius,
+        r is Rectangle => r.width * r.height,
+        t is Triangle => 0.5 * t.base * t.height
+    };
+
+// Combined with guards
+fn classify_shape(s: Shape) -> Text =
+    match s {
+        c is Circle if c.radius > 10.0 => "large circle",
+        sc is Circle => "small circle",
+        r is Rectangle if r.width == r.height => "square",
+        sr is Rectangle => "rectangle",
+        st is Triangle => "triangle"
+    };
+
+// TypeTest with protocol/interface types
+type Drawable is protocol {
+    fn draw(&self) -> Text;
+};
+
+// Implement Drawable for the whole Shape sum type (variants are not standalone types)
+implement Drawable for Shape {
+    fn draw(&self) -> Text =
+        match self {
+            Circle { radius } => f"Circle(r={radius})",
+            Rectangle { width, height } => f"Rect({width}x{height})",
+            Triangle { base, height } => f"Triangle({base},{height})"
+        };
+}
+
+// Mixed pattern with is-patterns and destructuring
+fn describe_shape(s: Shape) -> Text =
+    match s {
+        Circle { radius } if radius == 0.0 => "point",
+        c is Circle => f"circle with radius {c.radius}",
+        Rectangle { width, height } if width == height => f"square {width}x{height}",
+        r is Rectangle => f"rectangle {r.width}x{r.height}",
+        Triangle { base, height } => f"triangle base={base} height={height}"
+    };
+
+// Nested TypeTest patterns
+type Container is
+    | Box { content: Shape }
+    | Empty;
+
+fn container_area(c: Container) -> Float =
+    match c {
+        Box { content } if content is Circle => area(content),
+        Box { content } if content is Rectangle => area(content),
+        Box { content } if content is Triangle => area(content),
+        Empty => 0.0
+    };
+
+fn main() {
+    let circle = Circle { radius: 5.0 };
+    let rect = Rectangle { width: 4.0, height: 6.0 };
+    let tri = Triangle { base: 3.0, height: 4.0 };
+
+    assert(area(circle) > 78.0);
+    assert(area(rect) == 24.0);
+    assert(area(tri) == 6.0);
+    assert(classify_shape(Circle { radius: 15.0 }) == "large circle");
+    assert(describe_shape(Rectangle { width: 5.0, height: 5.0 }) == "square 5x5");
+}

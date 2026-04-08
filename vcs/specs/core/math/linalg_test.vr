@@ -1,0 +1,1599 @@
+// =============================================================================
+// vcs/specs/core/math/linalg_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, math, linalg, vector, matrix, blas, decomposition
+// @description: Comprehensive tests for linear algebra including vectors,
+//               matrices, BLAS operations, and matrix decompositions.
+//
+// Coverage:
+// - Vector: construction, access, arithmetic, norms
+// - Matrix: construction, access, transpose, arithmetic
+// - BLAS Level 1: dot, nrm2, asum, iamax, scal, axpy, rotg
+// - BLAS Level 2: gemv, trsv, ger
+// - BLAS Level 3: gemm, trsm
+// - Decompositions: LU, QR, Cholesky
+// - Utilities: solve, inverse, determinant
+//
+// Test Strategy:
+// - Correctness: verify against known results
+// - Properties: verify mathematical properties (symmetry, orthogonality)
+// - Edge cases: empty, single element, large
+// =============================================================================
+
+module specs.core.math.linalg_test;
+
+// Import from core.math (re-exports from linalg)
+mount core.math.{
+    // Types
+    Vector, Matrix, StaticVector, StaticMatrix,
+    Transpose, TriangularType, DiagonalType, Side,
+    // BLAS Level 1
+    dot, nrm2, asum, iamax, scal, axpy, copy, swap, rotg, rot,
+    // BLAS Level 2
+    gemv, trsv, ger, syr,
+    // BLAS Level 3
+    gemm, trsm, syrk,
+    // Decompositions
+    LUDecomposition, QRDecomposition, CholeskyDecomposition,
+    lu, lu_solve, qr, qr_solve, cholesky, cholesky_solve,
+    determinant, inverse, solve,
+};
+
+// Import advanced types directly from linalg
+mount core.math.linalg.{
+    Numeric, EigenDecomposition, SVDDecomposition,
+    ComplexEigenDecomposition, SchurDecomposition,
+    svd, eigh, eig, schur,
+    power_iteration, inverse_iteration,
+    cond, rank, null_space,
+};
+mount core.math.elementary.{abs, sqrt};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool {
+    abs(a - b) < tol
+}
+
+fn approx_eq_rel(a: Float, b: Float, rel_tol: Float) -> Bool {
+    let scale = if abs(b) > 1.0 { abs(b) } else { 1.0 };
+    abs(a - b) < rel_tol * scale
+}
+
+fn vector_approx_eq(a: &Vector<Float>, b: &Vector<Float>, tol: Float) -> Bool {
+    if a.len() != b.len() { return false; }
+    for i in 0..a.len() {
+        if !approx_eq(a.get(i), b.get(i), tol) {
+            return false;
+        }
+    }
+    true
+}
+
+fn matrix_approx_eq(a: &Matrix<Float>, b: &Matrix<Float>, tol: Float) -> Bool {
+    if a.rows() != b.rows() || a.cols() != b.cols() { return false; }
+    for i in 0..a.rows() {
+        for j in 0..a.cols() {
+            if !approx_eq(a.get(i, j), b.get(i, j), tol) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+// =============================================================================
+// Vector Construction Tests
+// =============================================================================
+
+@test
+fn test_vector_construction() {
+    // Zero vector
+    let v0: Vector<Float> = Vector.zeros(3);
+    assert(v0.len() == 3);
+    assert(v0.get(0) == 0.0);
+    assert(v0.get(1) == 0.0);
+    assert(v0.get(2) == 0.0);
+
+    // Filled vector
+    let v1: Vector<Float> = Vector.filled(4, 2.5);
+    assert(v1.len() == 4);
+    assert(v1.get(0) == 2.5);
+    assert(v1.get(3) == 2.5);
+
+    // Clone
+    let v2 = v1.clone();
+    assert(v2.len() == v1.len());
+    assert(v2.get(0) == v1.get(0));
+
+    print("Vector construction tests passed");
+}
+
+@test
+fn test_vector_access() {
+    let mut v: Vector<Float> = Vector.zeros(5);
+
+    // Set and get
+    v.set(0, 1.0);
+    v.set(2, 3.0);
+    v.set(4, 5.0);
+
+    assert(v.get(0) == 1.0);
+    assert(v.get(1) == 0.0);
+    assert(v.get(2) == 3.0);
+    assert(v.get(4) == 5.0);
+
+    print("Vector access tests passed");
+}
+
+@test
+fn test_vector_arithmetic() {
+    // Element-wise addition
+    let a: Vector<Float> = Vector.filled(3, 1.0);
+    let b: Vector<Float> = Vector.filled(3, 2.0);
+    let c = a.add(&b);
+    assert(approx_eq(c.get(0), 3.0, 1e-12));
+    assert(approx_eq(c.get(1), 3.0, 1e-12));
+    assert(approx_eq(c.get(2), 3.0, 1e-12));
+
+    // Element-wise subtraction
+    let d = b.sub(&a);
+    assert(approx_eq(d.get(0), 1.0, 1e-12));
+
+    // Hadamard product
+    let mut e: Vector<Float> = Vector.zeros(3);
+    e.set(0, 2.0);
+    e.set(1, 3.0);
+    e.set(2, 4.0);
+    let f = e.hadamard(&e);
+    assert(approx_eq(f.get(0), 4.0, 1e-12));
+    assert(approx_eq(f.get(1), 9.0, 1e-12));
+    assert(approx_eq(f.get(2), 16.0, 1e-12));
+
+    print("Vector arithmetic tests passed");
+}
+
+@test
+fn test_vector_norms() {
+    // Create test vector [3, 4]
+    let mut v: Vector<Float> = Vector.zeros(2);
+    v.set(0, 3.0);
+    v.set(1, 4.0);
+
+    // L2 norm: sqrt(9 + 16) = 5
+    assert(approx_eq(v.norm_l2(), 5.0, 1e-12));
+
+    // L1 norm: |3| + |4| = 7
+    assert(approx_eq(v.norm_l1(), 7.0, 1e-12));
+
+    // Infinity norm: max(|3|, |4|) = 4
+    assert(approx_eq(v.norm_inf(), 4.0, 1e-12));
+
+    // Test with negative values
+    let mut w: Vector<Float> = Vector.zeros(3);
+    w.set(0, -5.0);
+    w.set(1, 3.0);
+    w.set(2, -1.0);
+    assert(approx_eq(w.norm_l1(), 9.0, 1e-12));
+    assert(approx_eq(w.norm_inf(), 5.0, 1e-12));
+
+    print("Vector norms tests passed");
+}
+
+@test
+fn test_vector_operations() {
+    // Scale
+    let mut v: Vector<Float> = Vector.filled(3, 2.0);
+    v.scale(3.0);
+    assert(approx_eq(v.get(0), 6.0, 1e-12));
+    assert(approx_eq(v.get(1), 6.0, 1e-12));
+
+    // AXPY: y := α*x + y
+    let mut y: Vector<Float> = Vector.filled(3, 1.0);
+    let x: Vector<Float> = Vector.filled(3, 2.0);
+    y.axpy(3.0, &x);  // y = 3*2 + 1 = 7
+    assert(approx_eq(y.get(0), 7.0, 1e-12));
+
+    // Dot product
+    let mut a: Vector<Float> = Vector.zeros(3);
+    a.set(0, 1.0);
+    a.set(1, 2.0);
+    a.set(2, 3.0);
+
+    let mut b: Vector<Float> = Vector.zeros(3);
+    b.set(0, 4.0);
+    b.set(1, 5.0);
+    b.set(2, 6.0);
+
+    // 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
+    assert(approx_eq(a.dot(&b), 32.0, 1e-12));
+
+    // IAMAX
+    let mut c: Vector<Float> = Vector.zeros(4);
+    c.set(0, 1.0);
+    c.set(1, -5.0);  // Largest absolute value
+    c.set(2, 3.0);
+    c.set(3, 2.0);
+    assert(c.iamax() == 1);
+
+    print("Vector operations tests passed");
+}
+
+// =============================================================================
+// Matrix Construction Tests
+// =============================================================================
+
+@test
+fn test_matrix_construction() {
+    // Zero matrix
+    let m0: Matrix<Float> = Matrix.zeros(2, 3);
+    assert(m0.rows() == 2);
+    assert(m0.cols() == 3);
+    assert(m0.get(0, 0) == 0.0);
+    assert(m0.get(1, 2) == 0.0);
+
+    // Identity matrix
+    let id: Matrix<Float> = Matrix.eye(3);
+    assert(id.rows() == 3);
+    assert(id.cols() == 3);
+    assert(id.get(0, 0) == 1.0);
+    assert(id.get(1, 1) == 1.0);
+    assert(id.get(2, 2) == 1.0);
+    assert(id.get(0, 1) == 0.0);
+    assert(id.get(1, 0) == 0.0);
+
+    // Diagonal matrix
+    let mut d: Vector<Float> = Vector.zeros(3);
+    d.set(0, 2.0);
+    d.set(1, 3.0);
+    d.set(2, 4.0);
+    let diag_mat: Matrix<Float> = Matrix.diag(&d);
+    assert(diag_mat.get(0, 0) == 2.0);
+    assert(diag_mat.get(1, 1) == 3.0);
+    assert(diag_mat.get(2, 2) == 4.0);
+    assert(diag_mat.get(0, 1) == 0.0);
+
+    print("Matrix construction tests passed");
+}
+
+@test
+fn test_matrix_access() {
+    let mut m: Matrix<Float> = Matrix.zeros(3, 3);
+
+    // Set and get
+    m.set(0, 0, 1.0);
+    m.set(1, 1, 2.0);
+    m.set(2, 2, 3.0);
+    m.set(0, 2, 4.0);
+
+    assert(m.get(0, 0) == 1.0);
+    assert(m.get(1, 1) == 2.0);
+    assert(m.get(2, 2) == 3.0);
+    assert(m.get(0, 2) == 4.0);
+    assert(m.get(0, 1) == 0.0);
+
+    // Row extraction
+    let row0 = m.row(0);
+    assert(row0.get(0) == 1.0);
+    assert(row0.get(2) == 4.0);
+
+    // Column extraction
+    let col0 = m.col(0);
+    assert(col0.get(0) == 1.0);
+    assert(col0.get(1) == 0.0);
+    assert(col0.get(2) == 0.0);
+
+    print("Matrix access tests passed");
+}
+
+@test
+fn test_matrix_transpose() {
+    // Create 2x3 matrix
+    let mut m: Matrix<Float> = Matrix.zeros(2, 3);
+    m.set(0, 0, 1.0);
+    m.set(0, 1, 2.0);
+    m.set(0, 2, 3.0);
+    m.set(1, 0, 4.0);
+    m.set(1, 1, 5.0);
+    m.set(1, 2, 6.0);
+
+    // Transpose should be 3x2
+    let mt = m.transpose();
+    assert(mt.rows() == 3);
+    assert(mt.cols() == 2);
+    assert(mt.get(0, 0) == 1.0);
+    assert(mt.get(0, 1) == 4.0);
+    assert(mt.get(1, 0) == 2.0);
+    assert(mt.get(1, 1) == 5.0);
+    assert(mt.get(2, 0) == 3.0);
+    assert(mt.get(2, 1) == 6.0);
+
+    // Double transpose should give original
+    let mtt = mt.transpose();
+    assert(matrix_approx_eq(&mtt, &m, 1e-12));
+
+    print("Matrix transpose tests passed");
+}
+
+@test
+fn test_matrix_arithmetic() {
+    // Create test matrices
+    let mut a: Matrix<Float> = Matrix.zeros(2, 2);
+    a.set(0, 0, 1.0);
+    a.set(0, 1, 2.0);
+    a.set(1, 0, 3.0);
+    a.set(1, 1, 4.0);
+
+    let mut b: Matrix<Float> = Matrix.zeros(2, 2);
+    b.set(0, 0, 5.0);
+    b.set(0, 1, 6.0);
+    b.set(1, 0, 7.0);
+    b.set(1, 1, 8.0);
+
+    // Addition
+    let c = a.add(&b);
+    assert(approx_eq(c.get(0, 0), 6.0, 1e-12));
+    assert(approx_eq(c.get(0, 1), 8.0, 1e-12));
+    assert(approx_eq(c.get(1, 0), 10.0, 1e-12));
+    assert(approx_eq(c.get(1, 1), 12.0, 1e-12));
+
+    // Subtraction
+    let d = b.sub(&a);
+    assert(approx_eq(d.get(0, 0), 4.0, 1e-12));
+
+    // Scale
+    let mut e = a.clone();
+    e.scale(2.0);
+    assert(approx_eq(e.get(0, 0), 2.0, 1e-12));
+    assert(approx_eq(e.get(1, 1), 8.0, 1e-12));
+
+    print("Matrix arithmetic tests passed");
+}
+
+@test
+fn test_matrix_operations() {
+    // Matrix-vector multiplication
+    let mut A: Matrix<Float> = Matrix.zeros(2, 3);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(0, 2, 3.0);
+    A.set(1, 0, 4.0);
+    A.set(1, 1, 5.0);
+    A.set(1, 2, 6.0);
+
+    let mut x: Vector<Float> = Vector.zeros(3);
+    x.set(0, 1.0);
+    x.set(1, 2.0);
+    x.set(2, 3.0);
+
+    // y = A*x = [1*1+2*2+3*3, 4*1+5*2+6*3] = [14, 32]
+    let y = A.matvec(&x);
+    assert(approx_eq(y.get(0), 14.0, 1e-12));
+    assert(approx_eq(y.get(1), 32.0, 1e-12));
+
+    // Matrix-matrix multiplication
+    let mut B: Matrix<Float> = Matrix.zeros(2, 2);
+    B.set(0, 0, 1.0);
+    B.set(0, 1, 2.0);
+    B.set(1, 0, 3.0);
+    B.set(1, 1, 4.0);
+
+    let mut C: Matrix<Float> = Matrix.zeros(2, 2);
+    C.set(0, 0, 5.0);
+    C.set(0, 1, 6.0);
+    C.set(1, 0, 7.0);
+    C.set(1, 1, 8.0);
+
+    // result = B*C = [[1*5+2*7, 1*6+2*8], [3*5+4*7, 3*6+4*8]] = [[19, 22], [43, 50]]
+    let result = B.matmul(&C);
+    assert(approx_eq(result.get(0, 0), 19.0, 1e-12));
+    assert(approx_eq(result.get(0, 1), 22.0, 1e-12));
+    assert(approx_eq(result.get(1, 0), 43.0, 1e-12));
+    assert(approx_eq(result.get(1, 1), 50.0, 1e-12));
+
+    // Frobenius norm
+    // ||B||_F = sqrt(1 + 4 + 9 + 16) = sqrt(30)
+    assert(approx_eq(B.norm_frobenius(), sqrt(30.0), 1e-10));
+
+    // Trace
+    assert(approx_eq(B.trace(), 5.0, 1e-12));  // 1 + 4
+
+    print("Matrix operations tests passed");
+}
+
+// =============================================================================
+// BLAS Level 1 Tests
+// =============================================================================
+
+@test
+fn test_blas1_dot() {
+    let mut x: Vector<Float> = Vector.zeros(3);
+    x.set(0, 1.0);
+    x.set(1, 2.0);
+    x.set(2, 3.0);
+
+    let mut y: Vector<Float> = Vector.zeros(3);
+    y.set(0, 4.0);
+    y.set(1, 5.0);
+    y.set(2, 6.0);
+
+    // dot(x, y) = 1*4 + 2*5 + 3*6 = 32
+    assert(approx_eq(dot(&x, &y), 32.0, 1e-12));
+
+    // Self dot = squared norm
+    assert(approx_eq(dot(&x, &x), 14.0, 1e-12));
+
+    print("BLAS1 dot tests passed");
+}
+
+@test
+fn test_blas1_nrm2() {
+    let mut x: Vector<Float> = Vector.zeros(2);
+    x.set(0, 3.0);
+    x.set(1, 4.0);
+
+    assert(approx_eq(nrm2(&x), 5.0, 1e-12));
+
+    print("BLAS1 nrm2 tests passed");
+}
+
+@test
+fn test_blas1_asum() {
+    let mut x: Vector<Float> = Vector.zeros(4);
+    x.set(0, 1.0);
+    x.set(1, -2.0);
+    x.set(2, 3.0);
+    x.set(3, -4.0);
+
+    assert(approx_eq(asum(&x), 10.0, 1e-12));
+
+    print("BLAS1 asum tests passed");
+}
+
+@test
+fn test_blas1_iamax() {
+    let mut x: Vector<Float> = Vector.zeros(5);
+    x.set(0, 1.0);
+    x.set(1, -5.0);  // Largest absolute value
+    x.set(2, 3.0);
+    x.set(3, -4.0);
+    x.set(4, 2.0);
+
+    assert(iamax(&x) == 1);
+
+    print("BLAS1 iamax tests passed");
+}
+
+@test
+fn test_blas1_scal() {
+    let mut x: Vector<Float> = Vector.zeros(3);
+    x.set(0, 1.0);
+    x.set(1, 2.0);
+    x.set(2, 3.0);
+
+    scal(2.0, &mut x);
+
+    assert(approx_eq(x.get(0), 2.0, 1e-12));
+    assert(approx_eq(x.get(1), 4.0, 1e-12));
+    assert(approx_eq(x.get(2), 6.0, 1e-12));
+
+    print("BLAS1 scal tests passed");
+}
+
+@test
+fn test_blas1_axpy() {
+    let mut x: Vector<Float> = Vector.zeros(3);
+    x.set(0, 1.0);
+    x.set(1, 2.0);
+    x.set(2, 3.0);
+
+    let mut y: Vector<Float> = Vector.zeros(3);
+    y.set(0, 10.0);
+    y.set(1, 20.0);
+    y.set(2, 30.0);
+
+    // y := 2*x + y = [2+10, 4+20, 6+30] = [12, 24, 36]
+    axpy(2.0, &x, &mut y);
+
+    assert(approx_eq(y.get(0), 12.0, 1e-12));
+    assert(approx_eq(y.get(1), 24.0, 1e-12));
+    assert(approx_eq(y.get(2), 36.0, 1e-12));
+
+    print("BLAS1 axpy tests passed");
+}
+
+@test
+fn test_blas1_copy_swap() {
+    // Test copy operation
+    let mut src: Vector<Float> = Vector.zeros(3);
+    src.set(0, 1.0);
+    src.set(1, 2.0);
+    src.set(2, 3.0);
+
+    let mut dst: Vector<Float> = Vector.zeros(3);
+
+    copy(&src, &mut dst);
+
+    // Verify copy worked
+    assert(approx_eq(dst.get(0), 1.0, 1e-12));
+    assert(approx_eq(dst.get(1), 2.0, 1e-12));
+    assert(approx_eq(dst.get(2), 3.0, 1e-12));
+
+    // Test swap operation with fresh vectors
+    let mut a: Vector<Float> = Vector.zeros(2);
+    a.set(0, 1.0);
+    a.set(1, 2.0);
+
+    let mut b: Vector<Float> = Vector.zeros(2);
+    b.set(0, 10.0);
+    b.set(1, 20.0);
+
+    swap(&mut a, &mut b);
+    assert(approx_eq(a.get(0), 10.0, 1e-12));
+    assert(approx_eq(a.get(1), 20.0, 1e-12));
+    assert(approx_eq(b.get(0), 1.0, 1e-12));
+    assert(approx_eq(b.get(1), 2.0, 1e-12));
+
+    print("BLAS1 copy/swap tests passed");
+}
+
+@test
+fn test_blas1_rotg() {
+    // Test Givens rotation generation
+    let (r, _z, c, s) = rotg(3.0, 4.0);
+
+    // r should be hypot(3, 4) = 5
+    assert(approx_eq(r, 5.0, 1e-12));
+
+    // c = a/r = 3/5 = 0.6
+    assert(approx_eq(c, 0.6, 1e-12));
+
+    // s = b/r = 4/5 = 0.8
+    assert(approx_eq(s, 0.8, 1e-12));
+
+    // Verify: c*a + s*b = r
+    assert(approx_eq(c * 3.0 + s * 4.0, r, 1e-12));
+
+    // Verify: -s*a + c*b = 0
+    assert(approx_eq(-s * 3.0 + c * 4.0, 0.0, 1e-10));
+
+    print("BLAS1 rotg tests passed");
+}
+
+// =============================================================================
+// BLAS Level 2 Tests
+// =============================================================================
+
+@test
+fn test_blas2_gemv() {
+    // A = [[1, 2], [3, 4], [5, 6]]  (3x2)
+    let mut A: Matrix<Float> = Matrix.zeros(3, 2);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(1, 0, 3.0);
+    A.set(1, 1, 4.0);
+    A.set(2, 0, 5.0);
+    A.set(2, 1, 6.0);
+
+    // x = [1, 2]
+    let mut x: Vector<Float> = Vector.zeros(2);
+    x.set(0, 1.0);
+    x.set(1, 2.0);
+
+    // y = [0, 0, 0]
+    let mut y: Vector<Float> = Vector.zeros(3);
+
+    // y := 2*A*x + 0*y
+    // A*x = [1*1+2*2, 3*1+4*2, 5*1+6*2] = [5, 11, 17]
+    // 2*A*x = [10, 22, 34]
+    gemv(Transpose.NoTrans, 2.0, &A, &x, 0.0, &mut y);
+
+    assert(approx_eq(y.get(0), 10.0, 1e-12));
+    assert(approx_eq(y.get(1), 22.0, 1e-12));
+    assert(approx_eq(y.get(2), 34.0, 1e-12));
+
+    // Test transpose: y := A^T * x
+    let mut z: Vector<Float> = Vector.zeros(2);
+    let mut x2: Vector<Float> = Vector.zeros(3);
+    x2.set(0, 1.0);
+    x2.set(1, 2.0);
+    x2.set(2, 3.0);
+
+    // A^T * x2 = [[1,3,5], [2,4,6]] * [1,2,3] = [1+6+15, 2+8+18] = [22, 28]
+    gemv(Transpose.Trans, 1.0, &A, &x2, 0.0, &mut z);
+
+    assert(approx_eq(z.get(0), 22.0, 1e-12));
+    assert(approx_eq(z.get(1), 28.0, 1e-12));
+
+    print("BLAS2 gemv tests passed");
+}
+
+@test
+fn test_blas2_trsv() {
+    // Lower triangular matrix L
+    let mut L: Matrix<Float> = Matrix.zeros(3, 3);
+    L.set(0, 0, 2.0);
+    L.set(1, 0, 1.0);
+    L.set(1, 1, 3.0);
+    L.set(2, 0, 1.0);
+    L.set(2, 1, 2.0);
+    L.set(2, 2, 4.0);
+
+    // Solve L*x = b where b = [4, 11, 25]
+    // Should give x = [2, 3, 4]
+    let mut x: Vector<Float> = Vector.zeros(3);
+    x.set(0, 4.0);
+    x.set(1, 11.0);
+    x.set(2, 25.0);
+
+    trsv(TriangularType.Lower, Transpose.NoTrans, DiagonalType.NonUnit, &L, &mut x);
+
+    assert(approx_eq(x.get(0), 2.0, 1e-10));
+    assert(approx_eq(x.get(1), 3.0, 1e-10));
+    assert(approx_eq(x.get(2), 4.0, 1e-10));
+
+    // Upper triangular matrix U
+    let mut U: Matrix<Float> = Matrix.zeros(3, 3);
+    U.set(0, 0, 2.0);
+    U.set(0, 1, 1.0);
+    U.set(0, 2, 1.0);
+    U.set(1, 1, 3.0);
+    U.set(1, 2, 2.0);
+    U.set(2, 2, 4.0);
+
+    // Solve U*y = b where b = [13, 20, 16]
+    // Should give y = [2, 4, 4]
+    let mut y: Vector<Float> = Vector.zeros(3);
+    y.set(0, 13.0);
+    y.set(1, 20.0);
+    y.set(2, 16.0);
+
+    trsv(TriangularType.Upper, Transpose.NoTrans, DiagonalType.NonUnit, &U, &mut y);
+
+    assert(approx_eq(y.get(0), 2.0, 1e-10));
+    assert(approx_eq(y.get(1), 4.0, 1e-10));
+    assert(approx_eq(y.get(2), 4.0, 1e-10));
+
+    print("BLAS2 trsv tests passed");
+}
+
+@test
+fn test_blas2_ger() {
+    // Rank-1 update: A := α*x*y^T + A
+    let mut A: Matrix<Float> = Matrix.zeros(2, 3);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(0, 2, 3.0);
+    A.set(1, 0, 4.0);
+    A.set(1, 1, 5.0);
+    A.set(1, 2, 6.0);
+
+    let mut x: Vector<Float> = Vector.zeros(2);
+    x.set(0, 2.0);
+    x.set(1, 3.0);
+
+    let mut y: Vector<Float> = Vector.zeros(3);
+    y.set(0, 1.0);
+    y.set(1, 2.0);
+    y.set(2, 3.0);
+
+    // A := 1*x*y^T + A
+    // x*y^T = [[2,4,6], [3,6,9]]
+    // Result = [[3,6,9], [7,11,15]]
+    ger(1.0, &x, &y, &mut A);
+
+    assert(approx_eq(A.get(0, 0), 3.0, 1e-12));
+    assert(approx_eq(A.get(0, 1), 6.0, 1e-12));
+    assert(approx_eq(A.get(0, 2), 9.0, 1e-12));
+    assert(approx_eq(A.get(1, 0), 7.0, 1e-12));
+    assert(approx_eq(A.get(1, 1), 11.0, 1e-12));
+    assert(approx_eq(A.get(1, 2), 15.0, 1e-12));
+
+    print("BLAS2 ger tests passed");
+}
+
+// =============================================================================
+// BLAS Level 3 Tests
+// =============================================================================
+
+@test
+fn test_blas3_gemm() {
+    // A = [[1, 2], [3, 4]]  (2x2)
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(1, 0, 3.0);
+    A.set(1, 1, 4.0);
+
+    // B = [[5, 6], [7, 8]]  (2x2)
+    let mut B: Matrix<Float> = Matrix.zeros(2, 2);
+    B.set(0, 0, 5.0);
+    B.set(0, 1, 6.0);
+    B.set(1, 0, 7.0);
+    B.set(1, 1, 8.0);
+
+    // C = zeros(2, 2)
+    let mut C: Matrix<Float> = Matrix.zeros(2, 2);
+
+    // C := 1*A*B + 0*C
+    // A*B = [[19, 22], [43, 50]]
+    gemm(Transpose.NoTrans, Transpose.NoTrans, 1.0, &A, &B, 0.0, &mut C);
+
+    assert(approx_eq(C.get(0, 0), 19.0, 1e-12));
+    assert(approx_eq(C.get(0, 1), 22.0, 1e-12));
+    assert(approx_eq(C.get(1, 0), 43.0, 1e-12));
+    assert(approx_eq(C.get(1, 1), 50.0, 1e-12));
+
+    // Test with transpose
+    let mut D: Matrix<Float> = Matrix.zeros(2, 2);
+
+    // D := A^T * A
+    // A^T = [[1, 3], [2, 4]]
+    // A^T * A = [[10, 14], [14, 20]]
+    gemm(Transpose.Trans, Transpose.NoTrans, 1.0, &A, &A, 0.0, &mut D);
+
+    assert(approx_eq(D.get(0, 0), 10.0, 1e-12));
+    assert(approx_eq(D.get(0, 1), 14.0, 1e-12));
+    assert(approx_eq(D.get(1, 0), 14.0, 1e-12));
+    assert(approx_eq(D.get(1, 1), 20.0, 1e-12));
+
+    print("BLAS3 gemm tests passed");
+}
+
+// =============================================================================
+// Decomposition Tests
+// =============================================================================
+
+@test
+fn test_lu_decomposition() {
+    // Test matrix
+    let mut A: Matrix<Float> = Matrix.zeros(3, 3);
+    A.set(0, 0, 2.0);
+    A.set(0, 1, 1.0);
+    A.set(0, 2, 1.0);
+    A.set(1, 0, 4.0);
+    A.set(1, 1, 3.0);
+    A.set(1, 2, 3.0);
+    A.set(2, 0, 8.0);
+    A.set(2, 1, 7.0);
+    A.set(2, 2, 9.0);
+
+    let decomp = lu(&A);
+
+    // Solve Ax = b
+    let mut b: Vector<Float> = Vector.zeros(3);
+    b.set(0, 5.0);
+    b.set(1, 11.0);
+    b.set(2, 25.0);
+
+    let x = lu_solve(&decomp, &b);
+
+    // Verify: A*x should equal b
+    let ax_result = A.matvec(&x);
+    assert(vector_approx_eq(&ax_result, &b, 1e-10));
+
+    print("LU decomposition tests passed");
+}
+
+@test
+fn test_qr_decomposition() {
+    // Test matrix
+    let mut A: Matrix<Float> = Matrix.zeros(3, 2);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(1, 0, 3.0);
+    A.set(1, 1, 4.0);
+    A.set(2, 0, 5.0);
+    A.set(2, 1, 6.0);
+
+    let decomp = qr(&A);
+
+    // Q should be orthogonal: Q^T * Q = I
+    let qt_q = decomp.q.transpose().matmul(&decomp.q);
+    for i in 0..qt_q.rows() {
+        for j in 0..qt_q.cols() {
+            let expected = if i == j { 1.0 } else { 0.0 };
+            assert(approx_eq(qt_q.get(i, j), expected, 1e-10));
+        }
+    }
+
+    // R should be upper triangular (zeros below diagonal)
+    for i in 1..decomp.r.rows() {
+        let limit = if i < decomp.r.cols() { i } else { decomp.r.cols() };
+        for j in 0..limit {
+            assert(approx_eq(decomp.r.get(i, j), 0.0, 1e-10));
+        }
+    }
+
+    // Q*R should equal A
+    let qr_product = decomp.q.matmul(&decomp.r);
+    assert(matrix_approx_eq(&qr_product, &A, 1e-10));
+
+    print("QR decomposition tests passed");
+}
+
+@test
+fn test_cholesky_decomposition() {
+    // Symmetric positive definite matrix
+    // A = [[4, 2], [2, 5]]
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 4.0);
+    A.set(0, 1, 2.0);
+    A.set(1, 0, 2.0);
+    A.set(1, 1, 5.0);
+
+    match cholesky(&A) {
+        Maybe.Some(decomp) => {
+            // L should be lower triangular
+            assert(approx_eq(decomp.l.get(0, 1), 0.0, 1e-12));
+
+            // L * L^T should equal A
+            let l_lt = decomp.l.matmul(&decomp.l.transpose());
+            assert(matrix_approx_eq(&l_lt, &A, 1e-10));
+
+            // Test solve
+            let mut b: Vector<Float> = Vector.zeros(2);
+            b.set(0, 10.0);
+            b.set(1, 17.0);
+
+            let x = cholesky_solve(&decomp, &b);
+
+            // Verify: A*x = b
+            let ax_result = A.matvec(&x);
+            assert(vector_approx_eq(&ax_result, &b, 1e-10));
+        }
+        Maybe.None => {
+            assert(false);  // Should succeed for positive definite matrix
+        }
+    }
+
+    // Non-positive definite matrix should fail
+    let mut B: Matrix<Float> = Matrix.zeros(2, 2);
+    B.set(0, 0, 1.0);
+    B.set(0, 1, 2.0);
+    B.set(1, 0, 2.0);
+    B.set(1, 1, 1.0);  // det = 1 - 4 = -3 < 0
+
+    match cholesky(&B) {
+        Maybe.Some(_) => {
+            assert(false);  // Should fail for non-positive definite
+        }
+        Maybe.None => {
+            // Expected
+        }
+    }
+
+    print("Cholesky decomposition tests passed");
+}
+
+// =============================================================================
+// Utility Function Tests
+// =============================================================================
+
+@test
+fn test_solve() {
+    // 2x2 system
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 3.0);
+    A.set(0, 1, 1.0);
+    A.set(1, 0, 1.0);
+    A.set(1, 1, 2.0);
+
+    let mut b: Vector<Float> = Vector.zeros(2);
+    b.set(0, 9.0);
+    b.set(1, 8.0);
+
+    match solve(&A, &b) {
+        Maybe.Some(x) => {
+            // Verify: A*x = b
+            let ax_result = A.matvec(&x);
+            assert(vector_approx_eq(&ax_result, &b, 1e-10));
+
+            // Solution should be [2, 3]
+            assert(approx_eq(x.get(0), 2.0, 1e-10));
+            assert(approx_eq(x.get(1), 3.0, 1e-10));
+        }
+        Maybe.None => {
+            assert(false);
+        }
+    }
+
+    print("Solve tests passed");
+}
+
+@test
+fn test_inverse() {
+    // 2x2 matrix
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 4.0);
+    A.set(0, 1, 7.0);
+    A.set(1, 0, 2.0);
+    A.set(1, 1, 6.0);
+
+    match inverse(&A) {
+        Maybe.Some(a_inv) => {
+            // A * A^-1 should be identity
+            let ident = A.matmul(&a_inv);
+            assert(approx_eq(ident.get(0, 0), 1.0, 1e-10));
+            assert(approx_eq(ident.get(0, 1), 0.0, 1e-10));
+            assert(approx_eq(ident.get(1, 0), 0.0, 1e-10));
+            assert(approx_eq(ident.get(1, 1), 1.0, 1e-10));
+
+            // A^-1 * A should also be identity
+            let ident2 = a_inv.matmul(&A);
+            assert(approx_eq(ident2.get(0, 0), 1.0, 1e-10));
+            assert(approx_eq(ident2.get(1, 1), 1.0, 1e-10));
+        }
+        Maybe.None => {
+            assert(false);
+        }
+    }
+
+    // Singular matrix should fail
+    let mut S: Matrix<Float> = Matrix.zeros(2, 2);
+    S.set(0, 0, 1.0);
+    S.set(0, 1, 2.0);
+    S.set(1, 0, 2.0);
+    S.set(1, 1, 4.0);  // Rank 1
+
+    match inverse(&S) {
+        Maybe.Some(_) => {
+            assert(false);  // Should fail for singular matrix
+        }
+        Maybe.None => {
+            // Expected
+        }
+    }
+
+    print("Inverse tests passed");
+}
+
+@test
+fn test_determinant() {
+    // 2x2 matrix: det = ad - bc
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 3.0);
+    A.set(0, 1, 8.0);
+    A.set(1, 0, 4.0);
+    A.set(1, 1, 6.0);
+
+    // det = 3*6 - 8*4 = 18 - 32 = -14
+    assert(approx_eq(determinant(&A), -14.0, 1e-10));
+
+    // Identity matrix has determinant 1
+    let id: Matrix<Float> = Matrix.eye(3);
+    assert(approx_eq(determinant(&id), 1.0, 1e-10));
+
+    // Singular matrix has determinant 0
+    let mut S: Matrix<Float> = Matrix.zeros(2, 2);
+    S.set(0, 0, 1.0);
+    S.set(0, 1, 2.0);
+    S.set(1, 0, 2.0);
+    S.set(1, 1, 4.0);
+    assert(approx_eq(determinant(&S), 0.0, 1e-10));
+
+    print("Determinant tests passed");
+}
+
+// =============================================================================
+// Type Existence Tests
+// =============================================================================
+
+@test
+fn test_numeric_protocol_float() {
+    // Float implements Numeric
+    fn accept_numeric_vec(v: &Vector<Float>) -> Bool { true }
+    let _ = accept_numeric_vec;
+
+}
+
+@test
+fn test_numeric_protocol_float32() {
+    // Float32 implements Numeric
+    fn accept_numeric_vec32(v: &Vector<Float32>) -> Bool { true }
+    let _ = accept_numeric_vec32;
+
+}
+
+@test
+fn test_side_type_exists() {
+    // Side enum has Left and Right variants
+    fn accept_side(s: Side) -> Bool { true }
+    let _ = accept_side;
+
+}
+
+@test
+fn test_static_vector_type_exists() {
+    fn accept_sv(v: &StaticVector<Float, 3>) -> Bool { true }
+    let _ = accept_sv;
+
+}
+
+@test
+fn test_static_matrix_type_exists() {
+    fn accept_sm(m: &StaticMatrix<Float, 2, 3>) -> Bool { true }
+    let _ = accept_sm;
+
+}
+
+@test
+fn test_svd_decomposition_type_exists() {
+    fn accept_svd(s: &SVDDecomposition<Float>) -> Bool { true }
+    let _ = accept_svd;
+
+}
+
+@test
+fn test_eigen_decomposition_type_exists() {
+    fn accept_eigen(e: &EigenDecomposition<Float>) -> Bool { true }
+    let _ = accept_eigen;
+
+}
+
+@test
+fn test_complex_eigen_type_exists() {
+    fn accept_ceigen(c: &ComplexEigenDecomposition<Float>) -> Bool { true }
+    let _ = accept_ceigen;
+
+}
+
+@test
+fn test_schur_decomposition_type_exists() {
+    fn accept_schur(s: &SchurDecomposition<Float>) -> Bool { true }
+    let _ = accept_schur;
+
+}
+
+// =============================================================================
+// BLAS Extended Tests
+// =============================================================================
+
+@test
+fn test_blas1_rot() {
+    // Apply plane rotation
+    let mut x: Vector<Float> = Vector.zeros(3);
+    x.set(0, 1.0);
+    x.set(1, 2.0);
+    x.set(2, 3.0);
+
+    let mut y: Vector<Float> = Vector.zeros(3);
+    y.set(0, 4.0);
+    y.set(1, 5.0);
+    y.set(2, 6.0);
+
+    // Apply rotation with c=0.6, s=0.8
+    rot(&mut x, &mut y, 0.6, 0.8);
+
+    // x_new = c*x + s*y = 0.6*1 + 0.8*4 = 3.8
+    assert(approx_eq(x.get(0), 3.8, 1e-10));
+    // y_new = -s*x + c*y = -0.8*1 + 0.6*4 = 1.6
+    assert(approx_eq(y.get(0), 1.6, 1e-10));
+
+    print("BLAS1 rot tests passed");
+}
+
+@test
+fn test_blas2_syr() {
+    // Symmetric rank-1 update: A := α*x*x^T + A
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(1, 0, 2.0);
+    A.set(1, 1, 3.0);
+
+    let mut x: Vector<Float> = Vector.zeros(2);
+    x.set(0, 1.0);
+    x.set(1, 2.0);
+
+    // A := 1*x*x^T + A
+    // x*x^T = [[1,2],[2,4]]
+    // Result (upper) = [[2,4],[2,7]]
+    syr(TriangularType.Upper, 1.0, &x, &mut A);
+
+    assert(approx_eq(A.get(0, 0), 2.0, 1e-12));
+    assert(approx_eq(A.get(1, 1), 7.0, 1e-12));
+
+    print("BLAS2 syr tests passed");
+}
+
+@test
+fn test_blas3_trsm_fn() {
+    let _ = trsm;
+
+}
+
+@test
+fn test_blas3_syrk_fn() {
+    let _ = syrk;
+
+}
+
+// =============================================================================
+// Advanced Decomposition Function Import Tests
+// =============================================================================
+
+@test
+fn test_svd_fn() {
+    let _ = svd;
+
+}
+
+@test
+fn test_eigh_fn() {
+    let _ = eigh;
+
+}
+
+@test
+fn test_eig_fn() {
+    let _ = eig;
+
+}
+
+@test
+fn test_schur_fn() {
+    let _ = schur;
+
+}
+
+@test
+fn test_power_iteration_fn() {
+    let _ = power_iteration;
+
+}
+
+@test
+fn test_inverse_iteration_fn() {
+    let _ = inverse_iteration;
+
+}
+
+@test
+fn test_cond_fn() {
+    let _ = cond;
+
+}
+
+@test
+fn test_rank_fn() {
+    let _ = rank;
+
+}
+
+@test
+fn test_null_space_fn() {
+    let _ = null_space;
+
+}
+
+@test
+fn test_qr_solve_fn() {
+    let _ = qr_solve;
+
+}
+
+// =============================================================================
+// SVD Decomposition Tests
+// =============================================================================
+
+@test
+fn test_svd_2x2() {
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 3.0);
+    A.set(0, 1, 0.0);
+    A.set(1, 0, 0.0);
+    A.set(1, 1, 4.0);
+
+    let decomp = svd(&A);
+
+    // Singular values should be 4 and 3 (sorted descending)
+    assert(decomp.s.get(0) >= decomp.s.get(1));
+
+    // U should be orthogonal: U^T * U = I
+    let ut_u = decomp.u.transpose().matmul(&decomp.u);
+    assert(approx_eq(ut_u.get(0, 0), 1.0, 1e-10));
+    assert(approx_eq(ut_u.get(1, 1), 1.0, 1e-10));
+
+    // V should be orthogonal: V^T * V = I
+    let vt_v = decomp.vt.transpose().matmul(&decomp.vt);
+    assert(approx_eq(vt_v.get(0, 0), 1.0, 1e-10));
+
+    print("SVD 2x2 tests passed");
+}
+
+@test
+fn test_svd_diagonal() {
+    // SVD of diagonal matrix should return diagonal singular values
+    let mut A: Matrix<Float> = Matrix.zeros(3, 3);
+    A.set(0, 0, 5.0);
+    A.set(1, 1, 3.0);
+    A.set(2, 2, 1.0);
+
+    let decomp = svd(&A);
+
+    // Singular values in descending order
+    assert(decomp.s.get(0) >= decomp.s.get(1));
+    assert(decomp.s.get(1) >= decomp.s.get(2));
+
+    print("SVD diagonal tests passed");
+}
+
+// =============================================================================
+// Eigenvalue Tests
+// =============================================================================
+
+@test
+fn test_eigh_symmetric() {
+    // Symmetric 2x2 matrix
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 4.0);
+    A.set(0, 1, 1.0);
+    A.set(1, 0, 1.0);
+    A.set(1, 1, 3.0);
+
+    let decomp = eigh(&A);
+
+    // Eigenvalues should be real for symmetric matrix
+    let _ = decomp.values;
+    let _ = decomp.vectors;
+
+
+    print("eigh symmetric tests passed");
+}
+
+@test
+fn test_eig_general() {
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(1, 0, 3.0);
+    A.set(1, 1, 4.0);
+
+    let decomp = eig(&A);
+    let _ = decomp.real_parts;
+    let _ = decomp.imag_parts;
+
+
+    print("eig general tests passed");
+}
+
+// =============================================================================
+// Schur Decomposition Tests
+// =============================================================================
+
+@test
+fn test_schur_decomposition() {
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(1, 0, 0.0);
+    A.set(1, 1, 3.0);
+
+    let decomp = schur(&A);
+    let _ = decomp.t;
+    let _ = decomp.z;
+
+
+    print("Schur decomposition tests passed");
+}
+
+// =============================================================================
+// Matrix Condition Number and Rank Tests
+// =============================================================================
+
+@test
+fn test_cond_identity() {
+    let id: Matrix<Float> = Matrix.eye(3);
+    let c = cond(&id);
+    // Condition number of identity is 1
+    assert(approx_eq(c, 1.0, 1e-8));
+
+    print("Condition number identity test passed");
+}
+
+@test
+fn test_cond_diagonal() {
+    let mut d: Vector<Float> = Vector.zeros(2);
+    d.set(0, 10.0);
+    d.set(1, 1.0);
+    let a = Matrix.diag(&d);
+    let c = cond(&a);
+    // cond = max_sv / min_sv = 10 / 1 = 10
+    assert(approx_eq(c, 10.0, 1e-6));
+
+    print("Condition number diagonal test passed");
+}
+
+@test
+fn test_rank_full() {
+    let id: Matrix<Float> = Matrix.eye(3);
+    let r = rank(&id, 1e-10);
+    assert_eq(r, 3);
+
+    print("Rank full test passed");
+}
+
+@test
+fn test_rank_deficient() {
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(1, 0, 2.0);
+    A.set(1, 1, 4.0);
+    let r = rank(&A, 1e-10);
+    assert_eq(r, 1);
+
+    print("Rank deficient test passed");
+}
+
+@test
+fn test_null_space_identity() {
+    let id: Matrix<Float> = Matrix.eye(3);
+    let ns = null_space(&id, 1e-10);
+    // Identity has empty null space (0 columns)
+    assert_eq(ns.cols(), 0);
+
+    print("Null space identity test passed");
+}
+
+// =============================================================================
+// QR Solve Tests
+// =============================================================================
+
+@test
+fn test_qr_solve_basic() {
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 1.0);
+    A.set(1, 0, 1.0);
+    A.set(1, 1, 2.0);
+
+    let mut b: Vector<Float> = Vector.zeros(2);
+    b.set(0, 3.0);
+    b.set(1, 5.0);
+
+    let decomp = qr(&A);
+    let x = qr_solve(&decomp, &b);
+
+    // Verify A*x = b
+    let ax = A.matvec(&x);
+    assert(vector_approx_eq(&ax, &b, 1e-10));
+
+    print("QR solve tests passed");
+}
+
+// =============================================================================
+// Additional Vector Tests
+// =============================================================================
+
+@test
+fn test_vector_empty() {
+    let v: Vector<Float> = Vector.zeros(0);
+    assert_eq(v.len(), 0);
+}
+
+@test
+fn test_vector_single() {
+    let v: Vector<Float> = Vector.filled(1, 42.0);
+    assert_eq(v.len(), 1);
+    assert(approx_eq(v.get(0), 42.0, 1e-12));
+}
+
+@test
+fn test_vector_large() {
+    let v: Vector<Float> = Vector.zeros(1000);
+    assert_eq(v.len(), 1000);
+    assert(v.get(999) == 0.0);
+}
+
+@test
+fn test_vector_scale_zero() {
+    let mut v: Vector<Float> = Vector.filled(3, 5.0);
+    v.scale(0.0);
+    assert(v.get(0) == 0.0);
+    assert(v.get(1) == 0.0);
+    assert(v.get(2) == 0.0);
+}
+
+@test
+fn test_vector_dot_self() {
+    let mut v: Vector<Float> = Vector.zeros(3);
+    v.set(0, 1.0);
+    v.set(1, 2.0);
+    v.set(2, 3.0);
+    // ||v||^2 = 1 + 4 + 9 = 14
+    assert(approx_eq(dot(&v, &v), 14.0, 1e-12));
+}
+
+@test
+fn test_vector_orthogonal_dot() {
+    let mut v1: Vector<Float> = Vector.zeros(2);
+    v1.set(0, 1.0);
+    v1.set(1, 0.0);
+
+    let mut v2: Vector<Float> = Vector.zeros(2);
+    v2.set(0, 0.0);
+    v2.set(1, 1.0);
+
+    assert(approx_eq(dot(&v1, &v2), 0.0, 1e-12));
+}
+
+// =============================================================================
+// Additional Matrix Tests
+// =============================================================================
+
+@test
+fn test_matrix_identity_multiply() {
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 3.0);
+    A.set(0, 1, 7.0);
+    A.set(1, 0, 2.0);
+    A.set(1, 1, 5.0);
+
+    let id: Matrix<Float> = Matrix.eye(2);
+    let ai = A.matmul(&id);
+    assert(matrix_approx_eq(&ai, &A, 1e-12));
+}
+
+@test
+fn test_matrix_transpose_symmetric() {
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 3.0);
+    A.set(1, 0, 3.0);
+    A.set(1, 1, 2.0);
+
+    let at = A.transpose();
+    assert(matrix_approx_eq(&at, &A, 1e-12));
+}
+
+@test
+fn test_matrix_trace_identity() {
+    let id: Matrix<Float> = Matrix.eye(4);
+    assert(approx_eq(id.trace(), 4.0, 1e-12));
+}
+
+@test
+fn test_matrix_clone() {
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 1.0);
+    A.set(1, 1, 2.0);
+    let b = A.clone();
+    assert(matrix_approx_eq(&b, &A, 1e-12));
+}
+
+// =============================================================================
+// Transpose Enum Tests
+// =============================================================================
+
+@test
+fn test_transpose_notrans() {
+    let t = Transpose.NoTrans;
+    assert(t is Transpose.NoTrans);
+}
+
+@test
+fn test_transpose_trans() {
+    let t = Transpose.Trans;
+    assert(t is Transpose.Trans);
+}
+
+@test
+fn test_transpose_conjtrans() {
+    let t = Transpose.ConjTrans;
+    assert(t is Transpose.ConjTrans);
+}
+
+@test
+fn test_transpose_distinctness() {
+    assert(!(Transpose.NoTrans is Transpose.Trans));
+    assert(!(Transpose.NoTrans is Transpose.ConjTrans));
+    assert(!(Transpose.Trans is Transpose.ConjTrans));
+}
+
+// =============================================================================
+// TriangularType and DiagonalType Tests
+// =============================================================================
+
+@test
+fn test_triangular_type_upper() {
+    let t = TriangularType.Upper;
+    assert(t is TriangularType.Upper);
+}
+
+@test
+fn test_triangular_type_lower() {
+    let t = TriangularType.Lower;
+    assert(t is TriangularType.Lower);
+}
+
+@test
+fn test_diagonal_type_unit() {
+    let d = DiagonalType.Unit;
+    assert(d is DiagonalType.Unit);
+}
+
+@test
+fn test_diagonal_type_nonunit() {
+    let d = DiagonalType.NonUnit;
+    assert(d is DiagonalType.NonUnit);
+}
+
+// =============================================================================
+// LU Solve Verify Tests
+// =============================================================================
+
+@test
+fn test_lu_solve_2x2() {
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 2.0);
+    A.set(0, 1, 1.0);
+    A.set(1, 0, 5.0);
+    A.set(1, 1, 7.0);
+
+    let decomp = lu(&A);
+
+    let mut b: Vector<Float> = Vector.zeros(2);
+    b.set(0, 11.0);
+    b.set(1, 13.0);
+
+    let x = lu_solve(&decomp, &b);
+    let ax = A.matvec(&x);
+    assert(vector_approx_eq(&ax, &b, 1e-10));
+}
+
+@test
+fn test_determinant_3x3() {
+    let mut A: Matrix<Float> = Matrix.zeros(3, 3);
+    A.set(0, 0, 1.0);
+    A.set(0, 1, 2.0);
+    A.set(0, 2, 3.0);
+    A.set(1, 0, 4.0);
+    A.set(1, 1, 5.0);
+    A.set(1, 2, 6.0);
+    A.set(2, 0, 7.0);
+    A.set(2, 1, 8.0);
+    A.set(2, 2, 10.0);
+
+    // det = 1*(50-48) - 2*(40-42) + 3*(32-35) = 2+4-9 = -3
+    assert(approx_eq(determinant(&A), -3.0, 1e-8));
+}
+
+@test
+fn test_inverse_2x2_specific() {
+    // A = [[2, 1], [7, 4]]
+    // det = 8 - 7 = 1
+    // A^-1 = [[4, -1], [-7, 2]]
+    let mut A: Matrix<Float> = Matrix.zeros(2, 2);
+    A.set(0, 0, 2.0);
+    A.set(0, 1, 1.0);
+    A.set(1, 0, 7.0);
+    A.set(1, 1, 4.0);
+
+    match inverse(&A) {
+        Maybe.Some(a_inv) => {
+            assert(approx_eq(a_inv.get(0, 0), 4.0, 1e-10));
+            assert(approx_eq(a_inv.get(0, 1), -1.0, 1e-10));
+            assert(approx_eq(a_inv.get(1, 0), -7.0, 1e-10));
+            assert(approx_eq(a_inv.get(1, 1), 2.0, 1e-10));
+        }
+        Maybe.None => {
+            assert(false);
+        }
+    }
+}

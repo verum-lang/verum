@@ -1,0 +1,101 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: ffi, type-safety, repr_c, extern, validation
+// @description: Comprehensive FFI type safety — all valid types from spec
+// @expected-exit: 0
+
+// ============================================================
+// Valid FFI types (from ffi_boundary.rs type rules):
+//   Primitives: Bool, Int, Float, Char, Unit
+//   Fixed-width: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64
+//   Pointers: *T, &unsafe T
+//   @repr(C) structs
+//   Function pointers: fn(A) -> B
+//   Arrays with size: [T; N]
+// ============================================================
+
+// @repr(C) structs — valid for FFI
+@repr(C)
+type Vec2 is {
+    x: Float,
+    y: Float,
+};
+
+@repr(C)
+type Pair is {
+    first: Int,
+    second: Int,
+};
+
+@repr(C)
+type Triple is {
+    a: Int,
+    b: Int,
+    c: Int,
+};
+
+@ffi("libSystem.B.dylib")
+extern {
+    // Primitive types — always valid
+    fn getpid() -> Int;
+    fn getuid() -> Int;
+
+    // Pointer types — valid
+    fn malloc(size: Int) -> &unsafe Byte;
+    fn free(ptr: &unsafe Byte) -> ();
+    fn memset(ptr: &unsafe Byte, value: Int, size: Int) -> &unsafe Byte;
+}
+
+fn dot(a: Vec2, b: Vec2) -> Float {
+    a.x * b.x + a.y * b.y
+}
+
+fn pair_sum(p: Pair) -> Int {
+    p.first + p.second
+}
+
+fn triple_sum(t: Triple) -> Int {
+    t.a + t.b + t.c
+}
+
+fn main() {
+    // Test 1: Primitive Int through FFI
+    let pid = getpid();
+    assert(pid > 0);
+    print(f"Test 1 PASS: Int through FFI — pid={pid}");
+
+    // Test 2: @repr(C) struct — Vec2 dot product
+    let v1 = Vec2 { x: 3.0, y: 4.0 };
+    let v2 = Vec2 { x: 1.0, y: 0.0 };
+    let d = dot(v1, v2);
+    assert(d == 3.0);
+    print(f"Test 2 PASS: @repr(C) Vec2 — dot={d}");
+
+    // Test 3: @repr(C) struct — Pair
+    let p = Pair { first: 10, second: 20 };
+    let s = pair_sum(p);
+    assert(s == 30);
+    print(f"Test 3 PASS: @repr(C) Pair — sum={s}");
+
+    // Test 4: @repr(C) struct — Triple
+    let t = Triple { a: 100, b: 200, c: 300 };
+    let ts = triple_sum(t);
+    assert(ts == 600);
+    print(f"Test 4 PASS: @repr(C) Triple — sum={ts}");
+
+    // Test 5: Pointer types through extern
+    let buf = malloc(64);
+    memset(buf, 0, 64);
+    free(buf);
+    print("Test 5 PASS: Pointer types — malloc/memset/free");
+
+    // Test 6: Multiple @repr(C) types in same program
+    let v3 = Vec2 { x: 0.0, y: 1.0 };
+    let p2 = Pair { first: -1, second: 1 };
+    assert(dot(v3, v3) == 1.0);
+    assert(pair_sum(p2) == 0);
+    print("Test 6 PASS: Multiple @repr(C) types coexist");
+
+    print("All type safety tests passed");
+}

@@ -1,0 +1,118 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, kadane, max-subarray, contiguous
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// Kadane's algorithm: max sum contiguous subarray
+fn max_subarray_sum(a: Arr8, n: Int) -> Int {
+    let mut max_ending_here = get(a, 0);
+    let mut max_so_far = get(a, 0);
+    let mut i = 1;
+    while i < n {
+        max_ending_here = max_val(get(a, i), max_ending_here + get(a, i));
+        max_so_far = max_val(max_so_far, max_ending_here);
+        i = i + 1;
+    }
+    max_so_far
+}
+
+// Brute force max subarray sum for cross-check
+fn brute_max_subarray(a: Arr8, n: Int) -> Int {
+    let mut best = get(a, 0);
+    let mut i = 0;
+    while i < n {
+        let mut sum = 0;
+        let mut j = i;
+        while j < n {
+            sum = sum + get(a, j);
+            best = max_val(best, sum);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// Min subarray sum (flip sign of Kadane)
+fn min_subarray_sum(a: Arr8, n: Int) -> Int {
+    let mut min_ending_here = get(a, 0);
+    let mut min_so_far = get(a, 0);
+    let mut i = 1;
+    while i < n {
+        min_ending_here = min_val(get(a, i), min_ending_here + get(a, i));
+        min_so_far = min_val(min_so_far, min_ending_here);
+        i = i + 1;
+    }
+    min_so_far
+}
+
+// Max circular subarray sum
+fn max_circular_subarray(a: Arr8, n: Int) -> Int {
+    let max_normal = max_subarray_sum(a, n);
+    let mut total = 0;
+    let mut i = 0;
+    while i < n { total = total + get(a, i); i = i + 1; }
+    let min_sub = min_subarray_sum(a, n);
+    // If all negative, min_sub == total, so max_circular would be 0 — use max_normal
+    if total == min_sub { max_normal }
+    else { max_val(max_normal, total - min_sub) }
+}
+
+fn main() -> Int {
+    // Classic example: [-2,1,-3,4,-1,2,1,-5]
+    let a1 = Arr8 { d0: -2, d1: 1, d2: -3, d3: 4, d4: -1, d5: 2, d6: 1, d7: -5 };
+    assert_eq(max_subarray_sum(a1, 8), 6); // [4,-1,2,1] = 6
+    assert_eq(brute_max_subarray(a1, 8), 6);
+
+    // All positive
+    let a2 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_subarray_sum(a2, 5), 15); // entire array
+
+    // All negative
+    let a3 = Arr8 { d0: -5, d1: -3, d2: -8, d3: -1, d4: -7, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_subarray_sum(a3, 5), -1); // just [-1]
+    assert_eq(brute_max_subarray(a3, 5), -1);
+
+    // Single element
+    let a4 = Arr8 { d0: 42, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_subarray_sum(a4, 1), 42);
+
+    // Mixed
+    let a5 = Arr8 { d0: 5, d1: -9, d2: 6, d3: -2, d4: 3, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_subarray_sum(a5, 5), 7); // [6,-2,3] = 7
+    assert_eq(brute_max_subarray(a5, 5), 7);
+
+    // Min subarray
+    assert_eq(min_subarray_sum(a1, 8), -5); // just [-5] or [-3] or [-2,-3+1=-2]...
+    // Actually: min ending at each: -2, min(-2+1,1)=-1, min(-1-3,-3)=-4, min(-4+4,4)=0, min(0-1,-1)=-1, min(-1+2,2)=1, min(1+1,1)=1, min(1-5,-5)=-5. min_so_far=-5
+    assert_eq(min_subarray_sum(a1, 8), -5);
+
+    // Circular max subarray: [3,-1,2,-1] → normal max=4, circular: [2,-1,3]=4 or...
+    let a6 = Arr8 { d0: 3, d1: -1, d2: 2, d3: -1, d4: 0, d5: 0, d6: 0, d7: 0 };
+    // normal max: [3,-1,2] = 4
+    // total = 3, min_sub = -1, circular = 3-(-1) = 4
+    assert_eq(max_circular_subarray(a6, 4), 4);
+
+    // Circular better: [8,-1,3,-2] → normal max [8,-1,3]=10, circular [3,-2,8]=9... no
+    // total=8, min=-2, circular=10. Normal=10. Same.
+    // Better example: [-1,5,-1,5] → normal max [5,-1,5]=9, circular [5,-1,5]=9 or [5,5]=10 wrapping
+    // total=8, min=-1, circular=8-(-1)=9. Hmm, wrapping gives 5+5=10? No, wrapping [5,-1,5,-1] wrapped to [5, 5] needs removing middle [-1,-1]... min_sub=min(-1,-1+5=4,...) = -1. circular=8-(-1)=9. Not 10.
+    // Actually [5,-1,5,-1]: min_sub = min of all contiguous subarrays. min is -1 (single element or [-1]).
+    // circular = total - min_sub = 8 - (-1) = 9. Normal max = 5+(-1)+5 = 9. Same.
+
+    print("DIFF_OK: kadane");
+    0
+}

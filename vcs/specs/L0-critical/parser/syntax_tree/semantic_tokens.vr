@@ -1,0 +1,209 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, syntax-tree, semantic-tokens, lsp, events, trivia
+// @description: Test semantic token classification for IDE highlighting via event-based parsing
+
+// ============================================================================
+// SECTION 1: Keyword Classification
+// ============================================================================
+
+// Test keywords (should be classified as Keyword)
+fn keyword_test() {
+    let x = 1;
+    if x > 0 {
+        return x;
+    } else {
+        return 0;
+    }
+}
+
+// Test all control flow keywords
+fn control_keywords() {
+    for i in 0..10 {
+        if i > 5 {
+            break;
+        }
+        continue;
+    }
+
+    while true {
+        break;
+    }
+
+    loop {
+        break;
+    }
+}
+
+// ============================================================================
+// SECTION 2: Operator Classification
+// ============================================================================
+
+// Test operators (should be classified as Operator)
+fn operator_test(a: Int, b: Int) -> Int {
+    let sum = a + b;
+    let diff = a - b;
+    let prod = a * b;
+    let quot = a / b;
+    let eq = a == b;
+    let neq = a != b;
+    let lt = a < b;
+    let gt = a > b;
+    let land = eq && neq;
+    let lor = lt || gt;
+    sum
+}
+
+// Test additional operators
+fn additional_operators() {
+    let range = 0..10;
+    let range_incl = 0..=10;
+    let pipe = value |> transform;
+}
+
+// ============================================================================
+// SECTION 3: Literal Classification
+// ============================================================================
+
+// Test literals (should be classified as Number/String)
+fn literal_test() {
+    let int_lit = 42;
+    let float_lit = 3.14;
+    let str_lit = "hello world";
+    let char_lit = 'x';
+}
+
+// Test numeric literal variants
+fn numeric_literals() {
+    let decimal = 123456;
+    let hex = 0xDEADBEEF;
+    let octal = 0o755;
+    let binary = 0b10101010;
+    let float_exp = 1.5e10;
+}
+
+// ============================================================================
+// SECTION 4: Comment Classification
+// ============================================================================
+
+// Test comments (should be classified as Comment)
+fn comment_test() {
+    // This is a line comment
+    let x = 1;  // Trailing comment
+
+    /* Block comment
+       spanning multiple lines */
+    let y = 2;
+}
+
+/// Doc comment (should have documentation modifier)
+/// This function is documented
+fn documented_function() {
+    // Implementation
+}
+
+//! Inner doc comment for module
+fn inner_doc_test() { }
+
+// ============================================================================
+// SECTION 5: Identifier Classification
+// ============================================================================
+
+// Test identifiers in different contexts
+fn identifier_test() {
+    let variable = 1;
+    let _ = variable + 1;
+}
+
+// Test type identifiers vs value identifiers
+fn identifier_contexts(param: Int) -> Int {
+    let local = param;
+    local
+}
+
+// ============================================================================
+// SECTION 6: Attribute Classification
+// ============================================================================
+
+// Test attributes (should be classified as Decorator)
+// Note: 'pure' is a function modifier, not an attribute
+pure fn pure_function(x: Int) -> Int {
+    x * 2
+}
+
+@inline
+fn inline_function(x: Int) -> Int {
+    x + 1
+}
+
+@derive(Debug, Clone)
+type SemanticRecord is {
+    field: Int,
+};
+
+// ============================================================================
+// SECTION 7: Event-Based Token Generation
+// ============================================================================
+
+// Test that Token events carry correct SyntaxKind for highlighting
+fn token_event_syntax_kind() {
+    let x = 1;  // Each token event has kind for highlighting
+}
+
+// Test that trivia tokens are properly classified
+fn trivia_token_classification() {
+    // Line comment -> LineComment kind
+    /* Block */ let x = 1; /* Block comment kind */
+}
+
+// ============================================================================
+// SECTION 8: Semantic Token Deltas
+// ============================================================================
+
+// Test token position deltas for LSP
+fn token_deltas() {
+    let first = 1;
+    let second = 2;
+    let third = 3;
+}
+
+// Test token position across multiple lines
+fn multiline_tokens() {
+    let a = 1;
+
+    let b = 2;
+
+
+    let c = 3;
+}
+
+// ============================================================================
+// SECTION 9: Token Modifiers
+// ============================================================================
+
+// Test token modifiers (mutable, static, etc.)
+fn token_modifiers() {
+    let mut mutable_var = 1;
+    mutable_var = 2;
+}
+
+// Test declaration vs reference modifiers
+fn declaration_vs_reference() {
+    let declared = 1;      // Declaration modifier
+    let used = declared;   // Reference, no declaration modifier
+}
+
+// ============================================================================
+// SECTION 10: Complex Token Sequences
+// ============================================================================
+
+// Test complex expression token sequence
+fn complex_tokens() {
+    let result = (a + b) * (c - d) / ((e + f) * g);
+}
+
+// Test method chain token sequence
+fn chain_tokens() {
+    let x = value.field.method().another_method().final_field;
+}

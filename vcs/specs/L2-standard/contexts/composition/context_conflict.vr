@@ -1,0 +1,82 @@
+// @test: typecheck-fail
+// @expected-error: E808 "Duplicate provide for same context"
+// @tier: 0
+// @level: L2
+// @tags: contexts, conflict, duplicate, error
+// @description: Tests detection of conflicting context providers in same scope
+
+/// When multiple providers offer the same context type,
+/// a conflict occurs that must be resolved explicitly.
+
+context Database {
+    fn query(&self, sql: Text) -> Result<Rows, DbError>;
+    fn execute(&self, sql: Text) -> Result<Int, DbError>;
+}
+
+// Two implementations of Database
+type PostgresDb is {
+    conn_string: Text,
+};
+
+implement Database for PostgresDb {
+    fn query(&self, sql: Text) -> Result<Rows, DbError> {
+        // PostgreSQL implementation
+        Ok(Rows.empty())
+    }
+
+    fn execute(&self, sql: Text) -> Result<Int, DbError> {
+        Ok(0)
+    }
+}
+
+type MySqlDb is {
+    conn_string: Text,
+};
+
+implement Database for MySqlDb {
+    fn query(&self, sql: Text) -> Result<Rows, DbError> {
+        // MySQL implementation
+        Ok(Rows.empty())
+    }
+
+    fn execute(&self, sql: Text) -> Result<Int, DbError> {
+        Ok(0)
+    }
+}
+
+fn use_database() using [Database] {
+    // Uses the provided Database context
+    Database.query("SELECT 1");
+}
+
+fn main() {
+    let postgres = PostgresDb { conn_string: "postgres://..." };
+    let mysql = MySqlDb { conn_string: "mysql://..." };
+
+    // ERROR: Conflicting context providers for Database
+    // Both postgres and mysql provide Database - this should cause an error
+    provide Database = postgres;
+    provide Database = mysql;  // Duplicate provide for same context
+    use_database();
+}
+
+// The error should be:
+// E0301: Conflicting context providers for `Database`
+//   --> context_conflict.vr:57:5
+//    |
+// 57 |     provide postgres, mysql {
+//    |             ^^^^^^^^  ^^^^^ second provider here
+//    |             |
+//    |             first provider here
+//    |
+//    = help: use explicit context naming to resolve:
+//            provide Database = postgres { ... }
+
+type Rows is { data: List<List<Text>> };
+implement Rows {
+    fn empty() -> Self {
+        let empty_data: List<List<Text>> = [];
+        Self { data: empty_data }
+    }
+}
+type DbError is ConnectionFailed | QueryFailed;

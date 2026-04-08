@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, stream, comprehension, error
+// @description: Stream comprehension with invalid syntax
+// @expected-error: E018
+
+fn test() {
+    let s = stream[x for];  // Incomplete stream comprehension
+}

@@ -1,0 +1,173 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: types, patterns, typetest, is-pattern, type-errors
+// @expected-error: E018
+// @description: TypeTest (is) pattern type errors
+
+module tests.types.patterns.typetest_errors;
+
+mount core.*;
+
+// =============================================================================
+// ERROR 1: TypeTest with unrelated type
+// =============================================================================
+
+type Animal is Dog { name: Text } | Cat { name: Text };
+type Vehicle is Car { brand: Text } | Bike { type_: Text };
+
+fn error_unrelated_type(a: Animal) -> Text {
+    match a {
+        c is Car => c.brand,  // ERROR: Car is not a variant of Animal
+        _ => "unknown",
+    }
+}
+
+// =============================================================================
+// ERROR 2: TypeTest accessing wrong fields after narrowing
+// =============================================================================
+
+fn error_wrong_field_access(a: Animal) -> Text {
+    match a {
+        d is Dog => d.indoor,  // ERROR: Dog has no field 'indoor' (that's Cat)
+        c is Cat => c.name,
+    }
+}
+
+// =============================================================================
+// ERROR 3: TypeTest without valid variant
+// =============================================================================
+
+type Color is Red | Green | Blue;
+
+fn error_typetest_primitive(c: Color) -> Text {
+    match c {
+        n is Int => f"{n}",  // ERROR: Int is not a variant of Color
+        _ => "color",
+    }
+}
+
+// =============================================================================
+// ERROR 4: TypeTest on non-variant type
+// =============================================================================
+
+type Point is { x: Int, y: Int };  // Record, not variant
+
+fn error_typetest_on_record(p: Point) -> Int {
+    match p {
+        pt is Point => pt.x,  // May or may not be error depending on semantics
+        // ERROR: Point is not a sum type, TypeTest doesn't make sense
+    }
+}
+
+// =============================================================================
+// ERROR 5: Return type mismatch with narrowed type
+// =============================================================================
+
+fn error_return_mismatch(a: Animal) -> Int {
+    match a {
+        d is Dog => d.name,  // ERROR: d.name is Text, return type is Int
+        c is Cat => c.name,  // ERROR: same issue
+    }
+}
+
+// =============================================================================
+// ERROR 6: TypeTest binding used outside scope
+// =============================================================================
+
+fn error_binding_scope(a: Animal) -> Text {
+    match a {
+        d is Dog => "dog",
+        _ => d.name,  // ERROR: d is not in scope here
+    }
+}
+
+// =============================================================================
+// ERROR 7: TypeTest with incorrect generic type argument
+// =============================================================================
+
+type Result<T, E> is Ok(T) | Err(E);
+
+fn error_generic_mismatch(r: Result<Int, Text>) -> Text {
+    match r {
+        o is Ok => f"{o.0.len()}",  // ERROR: o.0 is Int, has no .len()
+        e is Err => e.0,
+    }
+}
+
+// =============================================================================
+// ERROR 8: TypeTest method call on wrong narrowed type
+// =============================================================================
+
+// Note: 'implement Trait for Variant' syntax (Animal::Dog) not valid Verum syntax
+// Simplified ERROR 8: type mismatch in protocol method
+type Printable is protocol {
+    fn print_val(&self) -> Int;
+};
+
+fn error_protocol_not_impl(a: Animal) -> Int {
+    // ERROR: Animal doesn't implement Printable
+    a.print_val()
+}
+
+// =============================================================================
+// ERROR 9: Guard expression type error in TypeTest branch
+// =============================================================================
+
+fn error_guard_type(a: Animal) -> Text {
+    match a {
+        d is Dog if d.name > 10 => "big name",  // ERROR: Text can't compare with Int
+        _ => "other",
+    }
+}
+
+// =============================================================================
+// ERROR 10: TypeTest with conflicting bindings
+// =============================================================================
+
+fn error_conflicting_bindings(a: Animal) -> Text {
+    // Note: and-pattern with same binding 'd' twice is an error
+    match a {
+        d is Dog => d.indoor,  // ERROR: Dog has no field 'indoor' (duplicate logic)
+        _ => "normal",
+    }
+}
+
+// =============================================================================
+// ERROR 11: TypeTest on type parameter without constraint
+// =============================================================================
+
+fn error_unconstrained_generic<T>(value: T) -> Text {
+    // Note: '_ is Dog' wildcard-typetest not supported; use named binding
+    match value {
+        x is Dog => "dog",  // ERROR: T could be anything, not necessarily Animal
+        _ => "other",
+    }
+}
+
+// =============================================================================
+// ERROR 12: Invalid TypeTest chain
+// =============================================================================
+
+type Container is
+    | Box { content: Animal }
+    | Empty;
+
+fn error_chained_typetest(c: Container) -> Text {
+    match c {
+        b is Box if b.content is Dog => {
+            // b.content is Dog in this branch due to the guard
+            let d: Dog = b.content;  // This should work if flow-sensitive
+            d.name
+        }
+        b is Box => {
+            let d: Dog = b.content;  // ERROR: b.content is Animal, not Dog
+            d.name
+        }
+        // Note: '_ is Empty' wildcard-typetest not supported; use named binding
+        e is Empty => "empty",
+    }
+}
+
+fn main() {
+    // This file should not compile due to the type errors above
+}

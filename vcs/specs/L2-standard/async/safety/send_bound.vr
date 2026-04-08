@@ -1,0 +1,307 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, safety, send, bounds
+// @description: Comprehensive Send bound tests for cross-task type transfer
+
+// The Send trait indicates types that can be safely transferred across thread boundaries
+type Send is protocol {};
+
+// Primitive types are Send
+implement Send for Int {}
+implement Send for Int8 {}
+implement Send for Int16 {}
+implement Send for Int32 {}
+implement Send for Int64 {}
+implement Send for UInt {}
+implement Send for UInt8 {}
+implement Send for UInt16 {}
+implement Send for UInt32 {}
+implement Send for UInt64 {}
+implement Send for Float {}
+implement Send for Float32 {}
+implement Send for Float64 {}
+implement Send for Bool {}
+implement Send for Char {}
+implement Send for Text {}
+
+// Unit type is Send
+implement Send for () {}
+
+// Containers of Send types are Send
+implement Send for List<T> where T: Send {}
+implement Send for Maybe<T> where T: Send {}
+implement Send for Map<K, V> where K: Send, V: Send {}
+implement Send for Set<T> where T: Send {}
+implement Send for Heap<T> where T: Send {}
+implement Send for Result<T, E> where T: Send, E: Send {}
+
+// Tuples of Send types are Send
+implement Send for (A, B) where A: Send, B: Send {}
+implement Send for (A, B, C) where A: Send, B: Send, C: Send {}
+implement Send for (A, B, C, D) where A: Send, B: Send, C: Send, D: Send {}
+
+// Shared<T> is Send if T is Send + Sync
+implement Send for Shared<T> where T: Send + Sync {}
+
+// Mutex<T> is Send if T is Send (allows exclusive access)
+implement Send for Mutex<T> where T: Send {}
+
+// RwLock<T> is Send if T is Send + Sync
+implement Send for RwLock<T> where T: Send + Sync {}
+
+// Atomic types are Send
+implement Send for AtomicInt {}
+implement Send for AtomicBool {}
+implement Send for AtomicUInt {}
+implement Send for AtomicCell<T> where T: Send {}
+
+// Channel types are Send if their contents are Send
+implement Send for Sender<T> where T: Send {}
+implement Send for Receiver<T> where T: Send {}
+implement Send for OneshotSender<T> where T: Send {}
+implement Send for OneshotReceiver<T> where T: Send {}
+
+// Raw pointers are NOT Send by default (unsafe to transfer)
+// implement Send for *const T {} // Forbidden!
+// implement Send for *mut T {}   // Forbidden!
+
+// Non-Send types (thread-local data)
+// implement Send for Rc<T> {}       // Forbidden - not thread-safe
+// implement Send for RefCell<T> {}  // Forbidden - not thread-safe
+// implement Send for Cell<T> {}     // Forbidden - not thread-safe
+
+// Function requiring Send
+async fn spawn_task<T: Send>(f: async fn() -> T) -> JoinHandle<T> {
+    spawn f()
+}
+
+// Generic spawn requiring Send
+async fn spawn_with_result<T: Send, E: Send>(
+    f: async fn() -> Result<T, E>,
+) -> JoinHandle<Result<T, E>> {
+    spawn f()
+}
+
+// This compiles because Int is Send
+async fn send_int() {
+    let handle = spawn_task(async || -> Int { 42 });
+    let result = handle.await;
+}
+
+// This compiles because List<Int> is Send
+async fn send_list() {
+    let handle = spawn_task(async || -> List<Int> {
+        [1, 2, 3]
+    });
+    let result = handle.await;
+}
+
+// Struct with all Send fields is automatically Send
+type Message is {
+    id: Int,
+    content: Text,
+    timestamp: Int,
+};
+
+async fn send_message() {
+    let handle = spawn_task(async || -> Message {
+        Message { id: 1, content: "hello", timestamp: 12345 }
+    });
+    let result = handle.await;
+}
+
+// Struct with nested Send types
+type Package<T: Send> is {
+    data: T,
+    metadata: Map<Text, Text>,
+};
+
+async fn send_package() {
+    let handle = spawn_task(async || -> Package<Int> {
+        Package {
+            data: 42,
+            metadata: [("key", "value")].into(),
+        }
+    });
+    let result = handle.await;
+}
+
+// Enum with Send variants
+type Event is
+    | Created { id: Int }
+    | Updated { id: Int, data: Text }
+    | Deleted { id: Int };
+
+async fn send_event() {
+    let handle = spawn_task(async || -> Event {
+        Event.Created { id: 1 }
+    });
+    let result = handle.await;
+}
+
+// Moving owned data into spawned task
+async fn move_into_spawn() {
+    let data = [1, 2, 3, 4, 5];
+
+    // data is moved into the spawned task
+    let handle = spawn {
+        let sum: Int = data.iter().sum();
+        sum
+    };
+
+    // data is no longer accessible here
+    let result = handle.await;
+}
+
+// Sending cloned data
+async fn clone_and_send() {
+    let data = Text.from("shared");
+
+    let handle = spawn {
+        let cloned = data.clone();  // Clone before move
+        cloned.len()
+    };
+
+    // data is still accessible
+    println(f"Original: {data}");
+
+    let result = handle.await;
+}
+
+// Conditionally Send types
+type MaybeSend<T> is {
+    value: T,
+};
+
+// Only Send if T is Send
+implement Send for MaybeSend<T> where T: Send {}
+
+// Using Send bounds in generic functions
+async fn process_in_background<T: Send + Clone>(data: T) -> T {
+    let cloned = data.clone();
+
+    let handle = spawn {
+        // Process data in background
+        cloned
+    };
+
+    handle.await
+}
+
+// Send bound
+async fn send_with_bound<T: Send>(data: T) -> T {
+    let handle = spawn {
+        data
+    };
+    handle.await
+}
+
+// Negative example comments (these would fail to compile):
+/*
+// ERROR: Rc<T> is not Send
+async fn bad_send_rc() {
+    let rc = Rc.new(42);
+    let handle = spawn {
+        *rc  // Cannot send Rc across threads
+    };
+}
+
+// ERROR: RefCell is not Send
+async fn bad_send_refcell() {
+    let cell = RefCell.new(42);
+    let handle = spawn {
+        cell.borrow()  // Cannot send RefCell across threads
+    };
+}
+
+// ERROR: Raw pointer is not Send
+async fn bad_send_pointer() {
+    let ptr: *const Int = &42;
+    let handle = spawn {
+        unsafe { *ptr }  // Cannot send raw pointer across threads
+    };
+}
+*/
+
+// Wrapper to make non-Send types sendable (unsafe)
+type UnsafeSend<T> is {
+    value: T,
+};
+
+// SAFETY: User asserts this is safe to send
+unsafe implement Send for UnsafeSend<T> {}
+
+implement UnsafeSend<T> {
+    // SAFETY: Caller must ensure it's safe to send across threads
+    unsafe fn new(value: T) -> Self {
+        Self { value }
+    }
+
+    fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+// Example of asserting Send for wrapper
+async fn send_with_assertion() {
+    let non_send = LocalData.new();
+
+    // Wrap in UnsafeSend to assert it's safe
+    let wrapped = unsafe { UnsafeSend.new(non_send) };
+
+    let handle = spawn {
+        let data = wrapped.into_inner();
+        // Use data
+    };
+
+    handle.await;
+}
+
+type LocalData is {
+    // Some thread-local data
+};
+
+implement LocalData {
+    fn new() -> Self {
+        Self {}
+    }
+}
+
+// Testing Send inference in closures
+async fn closure_send_inference() {
+    let x = 42;  // Int is Send
+
+    // Closure captures x, closure is Send
+    let closure = async move || {
+        x * 2
+    };
+
+    let handle = spawn closure;
+    let result = handle.await;
+}
+
+// Complex nested Send types
+type ComplexSend is {
+    numbers: List<Int>,
+    mapping: Map<Text, List<Int>>,
+    optional: Maybe<Heap<Text>>,
+    nested: Shared<Mutex<List<Text>>>,
+};
+
+implement Send for ComplexSend {}
+
+async fn send_complex() {
+    let complex = ComplexSend {
+        numbers: [1, 2, 3],
+        mapping: [("a", [1, 2, 3])].into(),
+        optional: Some(Heap("hello")),
+        nested: Shared.new(Mutex.new(["world"])),
+    };
+
+    let handle = spawn {
+        complex.numbers.len()
+    };
+
+    let result = handle.await;
+}

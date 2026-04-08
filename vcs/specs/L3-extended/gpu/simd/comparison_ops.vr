@@ -1,0 +1,189 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: SIMD tests can parse without runtime
+// @tags: simd, comparison
+
+fn main() {
+    let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let b: f32x4 = f32x4(2.0, 2.0, 2.0, 5.0);
+
+    // Equal comparison
+    let eq = a == b;  // Returns mask type
+    // Result: [false, true, false, false] -> mask bits: 0b0010
+    assert(eq[0] == false);
+    assert(eq[1] == true);
+    assert(eq[2] == false);
+    assert(eq[3] == false);
+
+    // Not equal
+    let ne = a != b;
+    assert(ne[0] == true);
+    assert(ne[1] == false);
+    assert(ne[2] == true);
+    assert(ne[3] == true);
+
+    // Less than
+    let lt = a < b;  // [1<2, 2<2, 3<2, 4<5]
+    assert(lt[0] == true);
+    assert(lt[1] == false);
+    assert(lt[2] == false);
+    assert(lt[3] == true);
+
+    // Less than or equal
+    let le = a <= b;  // [1<=2, 2<=2, 3<=2, 4<=5]
+    assert(le[0] == true);
+    assert(le[1] == true);
+    assert(le[2] == false);
+    assert(le[3] == true);
+
+    // Greater than
+    let gt = a > b;  // [1>2, 2>2, 3>2, 4>5]
+    assert(gt[0] == false);
+    assert(gt[1] == false);
+    assert(gt[2] == true);
+    assert(gt[3] == false);
+
+    // Greater than or equal
+    let ge = a >= b;  // [1>=2, 2>=2, 3>=2, 4>=5]
+    assert(ge[0] == false);
+    assert(ge[1] == true);
+    assert(ge[2] == true);
+    assert(ge[3] == false);
+
+    // Comparison with scalar
+    let gt_two = a > 2.0;
+    assert(gt_two[0] == false);
+    assert(gt_two[1] == false);
+    assert(gt_two[2] == true);
+    assert(gt_two[3] == true);
+
+    // Convert mask to integer (movemask)
+    let mask_bits = lt.to_bitmask();
+    assert(mask_bits == 0b1001);  // Lanes 0 and 3 are true
+
+    // Use mask for conditional selection (blend/select)
+    let c: f32x4 = f32x4(10.0, 20.0, 30.0, 40.0);
+    let d: f32x4 = f32x4(100.0, 200.0, 300.0, 400.0);
+
+    // Select c where lt is true, d where lt is false
+    let selected = lt.select(c, d);  // [10, 200, 300, 40]
+    assert(selected[0] == 10.0);   // lt[0] = true -> c[0]
+    assert(selected[1] == 200.0);  // lt[1] = false -> d[1]
+    assert(selected[2] == 300.0);  // lt[2] = false -> d[2]
+    assert(selected[3] == 40.0);   // lt[3] = true -> c[3]
+
+    // All/Any/None reductions on mask
+    let all_true = (a > 0.0).all();
+    assert(all_true == true);
+
+    let all_gt_two = (a > 2.0).all();
+    assert(all_gt_two == false);
+
+    let any_gt_two = (a > 2.0).any();
+    assert(any_gt_two == true);
+
+    let none_negative = (a < 0.0).none();
+    assert(none_negative == true);
+
+    // Count true lanes
+    let true_count = (a > 2.0).count_ones();
+    assert(true_count == 2);  // Lanes 2 and 3
+
+    // Integer comparisons
+    let ia: i32x4 = i32x4(1, -2, 3, -4);
+    let ib: i32x4 = i32x4(1, 2, -3, -4);
+
+    // Signed comparison
+    let ieq = ia == ib;
+    assert(ieq[0] == true);
+    assert(ieq[1] == false);
+    assert(ieq[3] == true);
+
+    let ilt = ia < ib;  // Signed: [1<1, -2<2, 3<-3, -4<-4]
+    assert(ilt[0] == false);
+    assert(ilt[1] == true);   // -2 < 2
+    assert(ilt[2] == false);  // 3 > -3
+    assert(ilt[3] == false);
+
+    // Unsigned comparison (reinterpret bits)
+    let ua: u32x4 = ia.as_u32();
+    let ub: u32x4 = ib.as_u32();
+
+    // With unsigned, -2 becomes a very large positive number
+    let ult = ua.lt_unsigned(ub);
+    assert(ult[1] == false);  // 0xFFFFFFFE > 2 unsigned
+
+    // Min/Max based on comparison
+    let min_vals = a.min(b);  // Element-wise minimum
+    assert(min_vals[0] == 1.0);
+    assert(min_vals[2] == 2.0);
+
+    let max_vals = a.max(b);  // Element-wise maximum
+    assert(max_vals[0] == 2.0);
+    assert(max_vals[2] == 3.0);
+
+    // Clamp using comparisons
+    let values: f32x4 = f32x4(-1.0, 0.5, 1.5, 3.0);
+    let lower: f32x4 = f32x4.splat(0.0);
+    let upper: f32x4 = f32x4.splat(1.0);
+
+    let clamped = values.clamp(lower, upper);
+    assert(clamped[0] == 0.0);   // Was -1, clamped to 0
+    assert(clamped[1] == 0.5);   // In range
+    assert(clamped[2] == 1.0);   // Was 1.5, clamped to 1
+    assert(clamped[3] == 1.0);   // Was 3, clamped to 1
+
+    // NaN handling in comparisons
+    let with_nan: f32x4 = f32x4(1.0, f32.nan(), 3.0, 4.0);
+    let normal: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+
+    // NaN comparisons (IEEE 754)
+    let eq_nan = with_nan == normal;
+    assert(eq_nan[0] == true);
+    assert(eq_nan[1] == false);  // NaN != anything, including itself
+    assert(eq_nan[2] == true);
+
+    // Ordered vs unordered comparisons
+    let ord_lt = with_nan.cmp_lt_ordered(normal);   // Returns false for NaN
+    let unord_lt = with_nan.cmp_lt_unordered(normal); // Returns true for NaN
+
+    assert(ord_lt[1] == false);    // NaN comparison is false (ordered)
+    assert(unord_lt[1] == true);   // NaN comparison is true (unordered)
+
+    // Test for NaN
+    let is_nan = with_nan.is_nan();
+    assert(is_nan[0] == false);
+    assert(is_nan[1] == true);
+
+    // Test for infinity
+    let with_inf: f32x4 = f32x4(1.0, f32.infinity, -f32.infinity, 0.0);
+    let is_inf = with_inf.is_infinite();
+    assert(is_inf[0] == false);
+    assert(is_inf[1] == true);
+    assert(is_inf[2] == true);
+    assert(is_inf[3] == false);
+
+    // Test for finite
+    let is_finite = with_inf.is_finite();
+    assert(is_finite[0] == true);
+    assert(is_finite[1] == false);
+
+    // Sign bit extraction
+    let mixed_signs: f32x4 = f32x4(1.0, -2.0, 3.0, -4.0);
+    let sign_mask = mixed_signs.sign_bit();
+    // Returns mask where true = negative
+    assert(sign_mask[0] == false);
+    assert(sign_mask[1] == true);
+    assert(sign_mask[2] == false);
+    assert(sign_mask[3] == true);
+
+    // Copy sign
+    let magnitudes: f32x4 = f32x4(10.0, 20.0, 30.0, 40.0);
+    let signs: f32x4 = f32x4(-1.0, 1.0, -1.0, 1.0);
+    let with_signs = magnitudes.copysign(signs);
+    assert(with_signs[0] == -10.0);
+    assert(with_signs[1] == 20.0);
+    assert(with_signs[2] == -30.0);
+    assert(with_signs[3] == 40.0);
+}

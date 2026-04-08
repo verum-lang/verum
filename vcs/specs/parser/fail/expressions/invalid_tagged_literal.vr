@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, tagged-literal, error
+// @description: Tagged literal with missing string
+// @expected-error: E010
+
+fn test() {
+    let q = sql#;  // Missing string content after tag
+}

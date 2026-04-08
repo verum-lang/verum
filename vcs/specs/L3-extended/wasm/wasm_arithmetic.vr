@@ -1,0 +1,66 @@
+// @test: run
+// @level: L3
+// @tier: 2
+// @tags: wasm, arithmetic, cross-compilation
+// @expected-exit: 0
+// @description: Integer and floating-point arithmetic under WASM target
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn sub(a: Int, b: Int) -> Int {
+    a - b
+}
+
+fn mul(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn div(a: Int, b: Int) -> Int {
+    a / b
+}
+
+fn modulo(a: Int, b: Int) -> Int {
+    a % b
+}
+
+fn bitwise_and(a: Int, b: Int) -> Int {
+    a & b
+}
+
+fn bitwise_or(a: Int, b: Int) -> Int {
+    a | b
+}
+
+fn bitwise_xor(a: Int, b: Int) -> Int {
+    a ^ b
+}
+
+fn main() -> Int {
+    // Basic arithmetic
+    assert_eq(add(20, 22), 42);
+    assert_eq(sub(100, 58), 42);
+    assert_eq(mul(6, 7), 42);
+    assert_eq(div(84, 2), 42);
+    assert_eq(modulo(47, 5), 2);
+
+    // Negative numbers
+    assert_eq(add(-10, 52), 42);
+    assert_eq(mul(-6, -7), 42);
+
+    // Overflow-safe large values
+    assert_eq(add(1000000, 2000000), 3000000);
+    assert_eq(mul(10000, 10000), 100000000);
+
+    // Bitwise operations
+    assert_eq(bitwise_and(0xFF, 0x0F), 0x0F);
+    assert_eq(bitwise_or(0xF0, 0x0F), 0xFF);
+    assert_eq(bitwise_xor(0xFF, 0x0F), 0xF0);
+
+    // Chained operations
+    let result = add(mul(3, 10), add(5, 7));
+    assert_eq(result, 42);
+
+    0
+}

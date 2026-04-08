@@ -1,0 +1,51 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: context, multi-impl, dispatch
+// @description: Tests context with multiple implementations
+// @expected-exit: 0
+
+context Counter {
+    fn get(&self) -> Int;
+    fn increment(&mut self) -> Int;
+}
+
+type UpCounter is { value: Int };
+implement Counter for UpCounter {
+    fn get(&self) -> Int { self.value }
+    fn increment(&mut self) -> Int {
+        self.value = self.value + 1;
+        self.value
+    }
+}
+
+type DownCounter is { value: Int };
+implement Counter for DownCounter {
+    fn get(&self) -> Int { self.value }
+    fn increment(&mut self) -> Int {
+        self.value = self.value - 1;
+        self.value
+    }
+}
+
+fn read_counter() -> Int using [Counter] {
+    Counter.get()
+}
+
+fn step_counter() -> Int using [Counter] {
+    Counter.increment()
+}
+
+fn main() {
+    // Test 1: UpCounter via context
+    let mut up = UpCounter { value: 10 };
+    provide Counter = up;
+
+    let v1 = read_counter();
+    assert(v1 == 10);
+    let v2 = step_counter();
+    assert(v2 == 11);
+    print(f"Test 1 PASS: up counter {v1} -> {v2}");
+
+    print("All multi-impl context tests passed");
+}

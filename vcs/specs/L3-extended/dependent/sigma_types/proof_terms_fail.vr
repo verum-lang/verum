@@ -1,0 +1,53 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, sigma-types, proof-terms, error
+// @expected-error: E400 "Type mismatch"
+
+/// Proof terms - failure cases
+///
+/// These tests verify that proof term construction and manipulation
+/// properly catches type mismatches.
+
+/// Proof witness type
+type ProofWitness<T> is | Witnessed;
+
+/// Equality proof type
+type EqProof<T> is | EqRefl;
+
+/// ERROR: Constructing wrong proof type
+fn wrong_proof_type() -> EqProof<Int> {
+    42  // ERROR: Int != EqProof<Int>
+}
+
+/// ERROR: Using proof as wrong type
+fn proof_as_int(p: EqProof<Int>) -> Int {
+    p  // ERROR: EqProof<Int> != Int
+}
+
+/// ERROR: Wrong witness type
+fn wrong_witness() -> ProofWitness<Text> {
+    123  // ERROR: Int != ProofWitness<Text>
+}
+
+/// Bounded value
+type BoundedValue is {
+    value: Int,
+    lo: Int,
+    hi: Int,
+};
+
+/// ERROR: Constructing with wrong field types
+fn bounded_wrong() -> BoundedValue {
+    BoundedValue {
+        value: "hello",  // ERROR: Text != Int
+        lo: 0,
+        hi: 10,
+    }
+}
+
+fn main() {
+    let _ = wrong_proof_type();
+    let _ = wrong_witness();
+    let _ = bounded_wrong();
+}

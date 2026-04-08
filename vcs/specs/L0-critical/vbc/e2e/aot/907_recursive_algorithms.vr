@@ -1,0 +1,305 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, recursion, memoization, fibonacci, factorial, gcd, power
+// @expected-exit: 0
+
+// Test: Recursive algorithms — factorial, GCD, exponentiation by squaring,
+// and iterative fibonacci with memoization via list-based DP.
+
+// Iterative fibonacci using list as memo table
+fn fib(n: Int) -> Int {
+    if (n <= 0) {
+        return 0;
+    }
+    if (n == 1) {
+        return 1;
+    }
+    let mut memo: List<Int> = [0, 1];
+    let mut i = 2;
+    while (i <= n) {
+        let prev1 = memo[i - 1];
+        let prev2 = memo[i - 2];
+        memo.push(prev1 + prev2);
+        i = i + 1;
+    }
+    memo[n]
+}
+
+// Classic recursive factorial
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if (n <= 1) {
+        return 1;
+    }
+    n * factorial(n - 1)
+}
+
+// Recursive GCD (Euclidean algorithm)
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if (b == 0) {
+        return a;
+    }
+    gcd(b, a % b)
+}
+
+// Recursive power (exponentiation by squaring)
+@allow(unbounded_recursion)
+fn power(base: Int, exp: Int) -> Int {
+    if (exp == 0) {
+        return 1;
+    }
+    if (exp % 2 == 0) {
+        let half = power(base, exp / 2);
+        return half * half;
+    }
+    base * power(base, exp - 1)
+}
+
+// Iterative binomial coefficient using list for Pascal's triangle row
+fn binomial(n: Int, k: Int) -> Int {
+    // Build row by row using lists
+    let mut prev: List<Int> = [1];
+
+    let mut row = 1;
+    while (row <= n) {
+        let mut curr: List<Int> = [1];
+        let mut col = 1;
+        while (col < row) {
+            let left = prev[col - 1];
+            let mut above = 0;
+            if (col < prev.len()) {
+                above = prev[col];
+            }
+            curr.push(left + above);
+            col = col + 1;
+        }
+        curr.push(1);
+        prev = curr;
+        row = row + 1;
+    }
+    prev[k]
+}
+
+// Recursive sum of digits
+@allow(unbounded_recursion)
+fn digit_sum(n: Int) -> Int {
+    if (n < 10) {
+        return n;
+    }
+    let remainder = n % 10;
+    let rest = n / 10;
+    remainder + digit_sum(rest)
+}
+
+fn main() -> Int {
+    // Test 1: Fibonacci
+    let fib0 = fib(0);
+    if (fib0 != 0) {
+        print(f"FAIL test1a: fib(0)={fib0}, expected 0");
+        return 1;
+    }
+
+    let fib1 = fib(1);
+    if (fib1 != 1) {
+        print(f"FAIL test1b: fib(1)={fib1}, expected 1");
+        return 1;
+    }
+
+    let fib10 = fib(10);
+    if (fib10 != 55) {
+        print(f"FAIL test1c: fib(10)={fib10}, expected 55");
+        return 1;
+    }
+
+    let fib20 = fib(20);
+    if (fib20 != 6765) {
+        print(f"FAIL test1d: fib(20)={fib20}, expected 6765");
+        return 1;
+    }
+
+    let fib30 = fib(30);
+    if (fib30 != 832040) {
+        print(f"FAIL test1e: fib(30)={fib30}, expected 832040");
+        return 1;
+    }
+
+    // Test 2: Factorial
+    let f0 = factorial(0);
+    if (f0 != 1) {
+        print(f"FAIL test2a: 0!={f0}, expected 1");
+        return 1;
+    }
+
+    let f1 = factorial(1);
+    if (f1 != 1) {
+        print(f"FAIL test2b: 1!={f1}, expected 1");
+        return 1;
+    }
+
+    let f5 = factorial(5);
+    if (f5 != 120) {
+        print(f"FAIL test2c: 5!={f5}, expected 120");
+        return 1;
+    }
+
+    let f10 = factorial(10);
+    if (f10 != 3628800) {
+        print(f"FAIL test2d: 10!={f10}, expected 3628800");
+        return 1;
+    }
+
+    // Test 3: GCD
+    let g1 = gcd(48, 18);
+    if (g1 != 6) {
+        print(f"FAIL test3a: gcd(48,18)={g1}, expected 6");
+        return 1;
+    }
+
+    let g2 = gcd(100, 75);
+    if (g2 != 25) {
+        print(f"FAIL test3b: gcd(100,75)={g2}, expected 25");
+        return 1;
+    }
+
+    let g3 = gcd(17, 13);
+    if (g3 != 1) {
+        print(f"FAIL test3c: gcd(17,13)={g3}, expected 1");
+        return 1;
+    }
+
+    let g4 = gcd(0, 42);
+    if (g4 != 42) {
+        print(f"FAIL test3d: gcd(0,42)={g4}, expected 42");
+        return 1;
+    }
+
+    let g5 = gcd(12, 12);
+    if (g5 != 12) {
+        print(f"FAIL test3e: gcd(12,12)={g5}, expected 12");
+        return 1;
+    }
+
+    // Verify: gcd(a,b) * lcm(a,b) = a * b
+    // gcd(12,8) = 4, lcm = 12*8/4 = 24
+    let g6 = gcd(12, 8);
+    if (g6 != 4) {
+        print(f"FAIL test3f: gcd(12,8)={g6}, expected 4");
+        return 1;
+    }
+    let lcm_12_8 = 12 * 8 / g6;
+    if (lcm_12_8 != 24) {
+        print(f"FAIL test3g: lcm(12,8)={lcm_12_8}, expected 24");
+        return 1;
+    }
+
+    // Test 4: Power (exponentiation by squaring)
+    let p1 = power(2, 10);
+    if (p1 != 1024) {
+        print(f"FAIL test4a: 2^10={p1}, expected 1024");
+        return 1;
+    }
+
+    let p2 = power(3, 7);
+    if (p2 != 2187) {
+        print(f"FAIL test4b: 3^7={p2}, expected 2187");
+        return 1;
+    }
+
+    let p3 = power(5, 0);
+    if (p3 != 1) {
+        print(f"FAIL test4c: 5^0={p3}, expected 1");
+        return 1;
+    }
+
+    let p4 = power(7, 4);
+    if (p4 != 2401) {
+        print(f"FAIL test4d: 7^4={p4}, expected 2401");
+        return 1;
+    }
+
+    let p5 = power(2, 20);
+    if (p5 != 1048576) {
+        print(f"FAIL test4e: 2^20={p5}, expected 1048576");
+        return 1;
+    }
+
+    // Test 5: Binomial coefficients via Pascal's triangle
+    let c5_2 = binomial(5, 2);
+    if (c5_2 != 10) {
+        print(f"FAIL test5a: C(5,2)={c5_2}, expected 10");
+        return 1;
+    }
+
+    let c10_3 = binomial(10, 3);
+    if (c10_3 != 120) {
+        print(f"FAIL test5b: C(10,3)={c10_3}, expected 120");
+        return 1;
+    }
+
+    let c10_0 = binomial(10, 0);
+    if (c10_0 != 1) {
+        print(f"FAIL test5c: C(10,0)={c10_0}, expected 1");
+        return 1;
+    }
+
+    let c12_6 = binomial(12, 6);
+    if (c12_6 != 924) {
+        print(f"FAIL test5d: C(12,6)={c12_6}, expected 924");
+        return 1;
+    }
+
+    // Test 6: Verify C(n,k) = n! / (k! * (n-k)!)
+    // C(8,3) = 8! / (3! * 5!) = 40320 / (6 * 120) = 56
+    let c8_3 = binomial(8, 3);
+    let f8 = factorial(8);
+    let f3 = factorial(3);
+    let f5_val = factorial(5);
+    let expected = f8 / (f3 * f5_val);
+    if (c8_3 != expected) {
+        print(f"FAIL test6a: C(8,3)={c8_3}, factorial formula={expected}");
+        return 1;
+    }
+    if (c8_3 != 56) {
+        print(f"FAIL test6b: C(8,3)={c8_3}, expected 56");
+        return 1;
+    }
+
+    // Test 7: Digit sum (recursive)
+    let ds1 = digit_sum(123);
+    // 1 + 2 + 3 = 6
+    if (ds1 != 6) {
+        print(f"FAIL test7a: digit_sum(123)={ds1}, expected 6");
+        return 1;
+    }
+
+    let ds2 = digit_sum(9999);
+    // 9 + 9 + 9 + 9 = 36
+    if (ds2 != 36) {
+        print(f"FAIL test7b: digit_sum(9999)={ds2}, expected 36");
+        return 1;
+    }
+
+    let ds3 = digit_sum(7);
+    if (ds3 != 7) {
+        print(f"FAIL test7c: digit_sum(7)={ds3}, expected 7");
+        return 1;
+    }
+
+    // Test 8: Combined — verify fib(n) properties
+    // fib(n)^2 + fib(n+1)^2 = fib(2n+1) (Fibonacci identity)
+    let f7 = fib(7);
+    let f8_val = fib(8);
+    let f15 = fib(15);
+    // fib(7)=13, fib(8)=21, fib(15)=610
+    // 13^2 + 21^2 = 169 + 441 = 610 = fib(15)
+    let sum_sq = f7 * f7 + f8_val * f8_val;
+    if (sum_sq != f15) {
+        print(f"FAIL test8: fib(7)^2+fib(8)^2={sum_sq}, fib(15)={f15}");
+        return 1;
+    }
+
+    print("907_recursive_algorithms: PASS");
+    0
+}

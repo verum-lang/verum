@@ -1,0 +1,388 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, memory, gc, mark-sweep, cbgr
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Mark-and-sweep garbage collector simulation.
+// Objects form a reference graph (adjacency matrix). GC marks reachable objects
+// from roots, then sweeps unmarked ones.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// GC Heap simulation
+// 6 objects max, 6x6 adjacency matrix (row-major in 36 slots = 5 Arr8s, but
+// we'll use a simpler encoding: adj[i*6+j] packed into arrays)
+//
+// alive[i]: 1 if object exists, 0 if collected
+// marked[i]: 1 if reachable during mark phase
+// values[i]: simulated data
+// roots[i]: 1 if object is a GC root
+// edges: 6 Arr8s representing adjacency rows (edges_r0..edges_r5)
+// =============================================================================
+
+type GCHeap is {
+    alive: Arr8,
+    marked: Arr8,
+    values: Arr8,
+    roots: Arr8,
+    edges_r0: Arr8,
+    edges_r1: Arr8,
+    edges_r2: Arr8,
+    edges_r3: Arr8,
+    edges_r4: Arr8,
+    edges_r5: Arr8,
+    num_objects: Int,
+    total_collected: Int
+};
+
+fn gc_new() -> GCHeap {
+    GCHeap {
+        alive: a8_new(),
+        marked: a8_new(),
+        values: a8_new(),
+        roots: a8_new(),
+        edges_r0: a8_new(),
+        edges_r1: a8_new(),
+        edges_r2: a8_new(),
+        edges_r3: a8_new(),
+        edges_r4: a8_new(),
+        edges_r5: a8_new(),
+        num_objects: 0,
+        total_collected: 0
+    }
+}
+
+// Get edge from object i to object j
+fn gc_get_edge(h: GCHeap, i: Int, j: Int) -> Int {
+    if i == 0 { a8_get(h.edges_r0, j) }
+    else if i == 1 { a8_get(h.edges_r1, j) }
+    else if i == 2 { a8_get(h.edges_r2, j) }
+    else if i == 3 { a8_get(h.edges_r3, j) }
+    else if i == 4 { a8_get(h.edges_r4, j) }
+    else { a8_get(h.edges_r5, j) }
+}
+
+// Set edge from object i to object j
+fn gc_set_edge(h: GCHeap, i: Int, j: Int, val: Int) -> GCHeap {
+    if i == 0 {
+        GCHeap { alive: h.alive, marked: h.marked, values: h.values, roots: h.roots,
+            edges_r0: a8_set(h.edges_r0, j, val), edges_r1: h.edges_r1,
+            edges_r2: h.edges_r2, edges_r3: h.edges_r3, edges_r4: h.edges_r4,
+            edges_r5: h.edges_r5, num_objects: h.num_objects, total_collected: h.total_collected }
+    } else if i == 1 {
+        GCHeap { alive: h.alive, marked: h.marked, values: h.values, roots: h.roots,
+            edges_r0: h.edges_r0, edges_r1: a8_set(h.edges_r1, j, val),
+            edges_r2: h.edges_r2, edges_r3: h.edges_r3, edges_r4: h.edges_r4,
+            edges_r5: h.edges_r5, num_objects: h.num_objects, total_collected: h.total_collected }
+    } else if i == 2 {
+        GCHeap { alive: h.alive, marked: h.marked, values: h.values, roots: h.roots,
+            edges_r0: h.edges_r0, edges_r1: h.edges_r1,
+            edges_r2: a8_set(h.edges_r2, j, val), edges_r3: h.edges_r3, edges_r4: h.edges_r4,
+            edges_r5: h.edges_r5, num_objects: h.num_objects, total_collected: h.total_collected }
+    } else if i == 3 {
+        GCHeap { alive: h.alive, marked: h.marked, values: h.values, roots: h.roots,
+            edges_r0: h.edges_r0, edges_r1: h.edges_r1,
+            edges_r2: h.edges_r2, edges_r3: a8_set(h.edges_r3, j, val), edges_r4: h.edges_r4,
+            edges_r5: h.edges_r5, num_objects: h.num_objects, total_collected: h.total_collected }
+    } else if i == 4 {
+        GCHeap { alive: h.alive, marked: h.marked, values: h.values, roots: h.roots,
+            edges_r0: h.edges_r0, edges_r1: h.edges_r1,
+            edges_r2: h.edges_r2, edges_r3: h.edges_r3, edges_r4: a8_set(h.edges_r4, j, val),
+            edges_r5: h.edges_r5, num_objects: h.num_objects, total_collected: h.total_collected }
+    } else {
+        GCHeap { alive: h.alive, marked: h.marked, values: h.values, roots: h.roots,
+            edges_r0: h.edges_r0, edges_r1: h.edges_r1,
+            edges_r2: h.edges_r2, edges_r3: h.edges_r3, edges_r4: h.edges_r4,
+            edges_r5: a8_set(h.edges_r5, j, val), num_objects: h.num_objects, total_collected: h.total_collected }
+    }
+}
+
+// Allocate a new object (returns updated heap and object id)
+type GCAllocPair is { heap: GCHeap, obj_id: Int };
+
+fn gc_alloc(h: GCHeap, val: Int, is_root: Int) -> GCAllocPair {
+    let id = h.num_objects;
+    GCAllocPair {
+        heap: GCHeap {
+            alive: a8_set(h.alive, id, 1),
+            marked: h.marked,
+            values: a8_set(h.values, id, val),
+            roots: a8_set(h.roots, id, is_root),
+            edges_r0: h.edges_r0, edges_r1: h.edges_r1,
+            edges_r2: h.edges_r2, edges_r3: h.edges_r3,
+            edges_r4: h.edges_r4, edges_r5: h.edges_r5,
+            num_objects: id + 1,
+            total_collected: h.total_collected
+        },
+        obj_id: id
+    }
+}
+
+// Add a reference edge from src to dst
+fn gc_add_ref(h: GCHeap, src: Int, dst: Int) -> GCHeap {
+    gc_set_edge(h, src, dst, 1)
+}
+
+// Count alive objects
+fn gc_alive_count(h: GCHeap) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < h.num_objects {
+        cnt = cnt + a8_get(h.alive, i);
+        i = i + 1;
+    }
+    cnt
+}
+
+// Mark phase: iterative DFS-like marking (fixed-point iteration)
+fn gc_mark(h: GCHeap) -> GCHeap {
+    // Clear all marks
+    let mut mk = a8_new();
+
+    // Mark roots
+    let mut i = 0;
+    while i < h.num_objects {
+        if a8_get(h.roots, i) == 1 && a8_get(h.alive, i) == 1 {
+            mk = a8_set(mk, i, 1);
+        }
+        i = i + 1;
+    }
+
+    // Fixed-point: propagate marks through edges
+    let mut changed = 1;
+    while changed == 1 {
+        changed = 0;
+        let mut src = 0;
+        while src < h.num_objects {
+            if a8_get(mk, src) == 1 {
+                let mut dst = 0;
+                while dst < h.num_objects {
+                    if gc_get_edge(h, src, dst) == 1 && a8_get(h.alive, dst) == 1 && a8_get(mk, dst) == 0 {
+                        mk = a8_set(mk, dst, 1);
+                        changed = 1;
+                    }
+                    dst = dst + 1;
+                }
+            }
+            src = src + 1;
+        }
+    }
+
+    GCHeap {
+        alive: h.alive,
+        marked: mk,
+        values: h.values,
+        roots: h.roots,
+        edges_r0: h.edges_r0, edges_r1: h.edges_r1,
+        edges_r2: h.edges_r2, edges_r3: h.edges_r3,
+        edges_r4: h.edges_r4, edges_r5: h.edges_r5,
+        num_objects: h.num_objects,
+        total_collected: h.total_collected
+    }
+}
+
+// Sweep phase: free unmarked objects
+fn gc_sweep(h: GCHeap) -> GCHeap {
+    let mut new_alive = h.alive;
+    let mut collected = 0;
+    let mut i = 0;
+    while i < h.num_objects {
+        if a8_get(h.alive, i) == 1 && a8_get(h.marked, i) == 0 {
+            new_alive = a8_set(new_alive, i, 0);
+            collected = collected + 1;
+        }
+        i = i + 1;
+    }
+    GCHeap {
+        alive: new_alive,
+        marked: a8_new(),
+        values: h.values,
+        roots: h.roots,
+        edges_r0: h.edges_r0, edges_r1: h.edges_r1,
+        edges_r2: h.edges_r2, edges_r3: h.edges_r3,
+        edges_r4: h.edges_r4, edges_r5: h.edges_r5,
+        num_objects: h.num_objects,
+        total_collected: h.total_collected + collected
+    }
+}
+
+// Full GC cycle
+fn gc_collect(h: GCHeap) -> GCHeap {
+    let marked = gc_mark(h);
+    gc_sweep(marked)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_no_garbage() {
+    // All objects are roots => nothing to collect
+    let h0 = gc_new();
+    let p1 = gc_alloc(h0, 10, 1);
+    let p2 = gc_alloc(p1.heap, 20, 1);
+    let p3 = gc_alloc(p2.heap, 30, 1);
+    let h1 = p3.heap;
+
+    assert_eq(gc_alive_count(h1), 3);
+    let h2 = gc_collect(h1);
+    assert_eq(gc_alive_count(h2), 3);
+    assert_eq(h2.total_collected, 0);
+}
+
+fn test_all_garbage() {
+    // No roots => everything collected
+    let h0 = gc_new();
+    let p1 = gc_alloc(h0, 10, 0);
+    let p2 = gc_alloc(p1.heap, 20, 0);
+    let p3 = gc_alloc(p2.heap, 30, 0);
+    let h1 = p3.heap;
+
+    assert_eq(gc_alive_count(h1), 3);
+    let h2 = gc_collect(h1);
+    assert_eq(gc_alive_count(h2), 0);
+    assert_eq(h2.total_collected, 3);
+}
+
+fn test_reachable_chain() {
+    // Root -> A -> B -> C (all reachable)
+    let h0 = gc_new();
+    let p_root = gc_alloc(h0, 1, 1);     // obj 0: root
+    let p_a = gc_alloc(p_root.heap, 2, 0); // obj 1
+    let p_b = gc_alloc(p_a.heap, 3, 0);   // obj 2
+    let p_c = gc_alloc(p_b.heap, 4, 0);   // obj 3
+
+    let h1 = gc_add_ref(p_c.heap, 0, 1);  // root -> A
+    let h2 = gc_add_ref(h1, 1, 2);         // A -> B
+    let h3 = gc_add_ref(h2, 2, 3);         // B -> C
+
+    let h4 = gc_collect(h3);
+    assert_eq(gc_alive_count(h4), 4);  // All reachable
+    assert_eq(h4.total_collected, 0);
+}
+
+fn test_unreachable_island() {
+    // Root -> A, B -> C (B and C are unreachable island)
+    let h0 = gc_new();
+    let p_root = gc_alloc(h0, 1, 1);       // obj 0: root
+    let p_a = gc_alloc(p_root.heap, 2, 0);  // obj 1
+    let p_b = gc_alloc(p_a.heap, 3, 0);     // obj 2
+    let p_c = gc_alloc(p_b.heap, 4, 0);     // obj 3
+
+    let h1 = gc_add_ref(p_c.heap, 0, 1);   // root -> A
+    let h2 = gc_add_ref(h1, 2, 3);          // B -> C (island)
+
+    let h3 = gc_collect(h2);
+    assert_eq(gc_alive_count(h3), 2);  // Root + A alive
+    assert_eq(h3.total_collected, 2);  // B + C collected
+
+    // Verify which survived
+    assert_eq(a8_get(h3.alive, 0), 1);  // root
+    assert_eq(a8_get(h3.alive, 1), 1);  // A
+    assert_eq(a8_get(h3.alive, 2), 0);  // B collected
+    assert_eq(a8_get(h3.alive, 3), 0);  // C collected
+}
+
+fn test_cycle_collection() {
+    // Root -> A, B -> C -> B (cycle, no root ref)
+    let h0 = gc_new();
+    let p_root = gc_alloc(h0, 1, 1);       // obj 0: root
+    let p_a = gc_alloc(p_root.heap, 2, 0);  // obj 1
+    let p_b = gc_alloc(p_a.heap, 3, 0);     // obj 2
+    let p_c = gc_alloc(p_b.heap, 4, 0);     // obj 3
+
+    let h1 = gc_add_ref(p_c.heap, 0, 1);   // root -> A
+    let h2 = gc_add_ref(h1, 2, 3);          // B -> C
+    let h3 = gc_add_ref(h2, 3, 2);          // C -> B (cycle)
+
+    let h4 = gc_collect(h3);
+    assert_eq(gc_alive_count(h4), 2);  // Root + A
+    assert_eq(h4.total_collected, 2);  // Cycle collected
+}
+
+fn test_multiple_gc_cycles() {
+    // First cycle: collect some, second cycle: collect more
+    let h0 = gc_new();
+    let p0 = gc_alloc(h0, 10, 1);     // root
+    let p1 = gc_alloc(p0.heap, 20, 0); // reachable
+    let p2 = gc_alloc(p1.heap, 30, 0); // garbage
+    let h1 = gc_add_ref(p2.heap, 0, 1); // root -> obj1
+
+    // First GC: collect obj2
+    let h2 = gc_collect(h1);
+    assert_eq(gc_alive_count(h2), 2);
+    assert_eq(h2.total_collected, 1);
+
+    // Remove edge from root to obj1
+    let h3 = gc_set_edge(h2, 0, 1, 0);
+
+    // Second GC: collect obj1
+    let h4 = gc_collect(h3);
+    assert_eq(gc_alive_count(h4), 1);  // Only root
+    assert_eq(h4.total_collected, 2);  // Cumulative
+}
+
+fn test_diamond_graph() {
+    // Root -> A, Root -> B, A -> C, B -> C
+    let h0 = gc_new();
+    let p_root = gc_alloc(h0, 1, 1);
+    let p_a = gc_alloc(p_root.heap, 2, 0);
+    let p_b = gc_alloc(p_a.heap, 3, 0);
+    let p_c = gc_alloc(p_b.heap, 4, 0);
+
+    let h1 = gc_add_ref(p_c.heap, 0, 1);  // root -> A
+    let h2 = gc_add_ref(h1, 0, 2);         // root -> B
+    let h3 = gc_add_ref(h2, 1, 3);         // A -> C
+    let h4 = gc_add_ref(h3, 2, 3);         // B -> C
+
+    let h5 = gc_collect(h4);
+    assert_eq(gc_alive_count(h5), 4);  // All reachable via diamond
+    assert_eq(h5.total_collected, 0);
+}
+
+fn main() -> Int {
+    test_no_garbage();
+    test_all_garbage();
+    test_reachable_chain();
+    test_unreachable_island();
+    test_cycle_collection();
+    test_multiple_gc_cycles();
+    test_diamond_graph();
+    print("[OK] 333_interp_gc_mark_sweep");
+    0
+}

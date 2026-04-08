@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @tier: 2
+// @level: L1
+// @tags: types, collections, set
+// @timeout: 30000
+// @description: Tests Set<T> collection type operations
+
+fn main() {
+    // Set creation
+    let empty: Set<Int> = Set.new();
+    let mut numbers: Set<Int> = Set.new();
+    numbers.insert(1);
+    numbers.insert(2);
+    numbers.insert(3);
+    numbers.insert(4);
+    numbers.insert(5);
+
+    let mut strings: Set<Text> = Set.new();
+    strings.insert("apple");
+    strings.insert("banana");
+    strings.insert("cherry");
+
+    // Basic property access
+    assert_eq(empty.len(), 0);
+    assert_eq(numbers.len(), 5);
+    assert_eq(strings.len(), 3);
+
+    // is_empty check
+    assert(empty.is_empty());
+    assert(!numbers.is_empty());
+
+    // contains
+    assert(numbers.contains(3));
+    assert(!numbers.contains(10));
+    assert(strings.contains("banana"));
+    assert(!strings.contains("grape"));
+
+    // Mutable set operations
+    let mut items: Set<Int> = Set.new();
+    items.insert(1);
+    items.insert(2);
+    items.insert(3);
+
+    // insert new element
+    items.insert(4);
+    assert_eq(items.len(), 4);
+    assert(items.contains(4));
+
+    // insert duplicate (len should not change)
+    items.insert(2);
+    assert_eq(items.len(), 4);
+
+    // remove
+    items.remove(2);
+    assert_eq(items.len(), 3);
+    assert(!items.contains(2));
+
+    // remove non-existent (len should not change)
+    items.remove(100);
+    assert_eq(items.len(), 3);
+
+    // clear
+    let mut to_clear: Set<Int> = Set.new();
+    to_clear.insert(1);
+    to_clear.insert(2);
+    to_clear.insert(3);
+    to_clear.clear();
+    assert(to_clear.is_empty());
+
+    // Subset and superset
+    let mut small: Set<Int> = Set.new();
+    small.insert(1);
+    small.insert(2);
+
+    let mut large: Set<Int> = Set.new();
+    large.insert(1);
+    large.insert(2);
+    large.insert(3);
+    large.insert(4);
+
+    assert(small.is_subset(large));
+    assert(!large.is_subset(small));
+    assert(large.is_superset(small));
+    assert(!small.is_superset(large));
+
+    print("Set tests passed!");
+}

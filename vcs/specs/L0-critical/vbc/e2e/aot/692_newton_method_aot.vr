@@ -1,0 +1,188 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, newton, root-finding, numerical
+// @timeout: 30000
+
+// Integer approximation of Newton's method for square root and cube root
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Integer square root: largest k such that k*k <= n
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else {
+        let mut x = n;
+        let mut y = (x + 1) / 2;
+        while y < x {
+            x = y;
+            y = (x + n / x) / 2;
+        }
+        x
+    }
+}
+
+// Integer cube root: largest k such that k*k*k <= n
+fn icbrt(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else {
+        let mut x = n;
+        let mut y = (2 * x + n / (x * x)) / 3;
+        let mut iter = 0;
+        while iter < 30 {
+            if y < x {
+                x = y;
+                // Avoid division by zero
+                if x == 0 { y = 0; }
+                else { y = (2 * x + n / (x * x)) / 3; }
+            }
+            iter = iter + 1;
+        }
+        // Verify: x^3 <= n < (x+1)^3
+        while x * x * x > n { x = x - 1; }
+        x
+    }
+}
+
+// Binary search for integer square root (simpler)
+fn isqrt_binary(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else {
+        let mut lo = 1;
+        let mut hi = n;
+        if hi > 46340 { hi = 46340; } // avoid overflow
+        let mut result = 0;
+        while lo <= hi {
+            let mid = (lo + hi) / 2;
+            if mid <= n / mid {
+                result = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        result
+    }
+}
+
+// Integer log base 2 (floor)
+fn ilog2(n: Int) -> Int {
+    if n <= 0 { 0 - 1 }
+    else {
+        let mut k = 0;
+        let mut v = n;
+        while v > 1 { v = v / 2; k = k + 1; }
+        k
+    }
+}
+
+// Power function
+fn ipow(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < exp { result = result * base; i = i + 1; }
+    result
+}
+
+fn test_isqrt() -> Int {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(144), 12);
+    // Non-perfect squares
+    assert_eq(isqrt(2), 1);
+    assert_eq(isqrt(3), 1);
+    assert_eq(isqrt(5), 2);
+    assert_eq(isqrt(8), 2);
+    assert_eq(isqrt(10), 3);
+    assert_eq(isqrt(99), 9);
+    assert_eq(isqrt(101), 10);
+    1
+}
+
+fn test_isqrt_binary() -> Int {
+    // Should match Newton's method
+    assert_eq(isqrt_binary(0), 0);
+    assert_eq(isqrt_binary(1), 1);
+    assert_eq(isqrt_binary(4), 2);
+    assert_eq(isqrt_binary(100), 10);
+    assert_eq(isqrt_binary(10000), 100);
+    // Verify consistency
+    let mut i = 0;
+    let mut ok = 1;
+    while i < 50 {
+        let s = isqrt(i);
+        // s*s <= i < (s+1)*(s+1)
+        if s * s > i { ok = 0; }
+        if (s + 1) * (s + 1) <= i { ok = 0; }
+        i = i + 1;
+    }
+    assert_eq(ok, 1);
+    1
+}
+
+fn test_icbrt() -> Int {
+    assert_eq(icbrt(0), 0);
+    assert_eq(icbrt(1), 1);
+    assert_eq(icbrt(8), 2);
+    assert_eq(icbrt(27), 3);
+    assert_eq(icbrt(64), 4);
+    assert_eq(icbrt(125), 5);
+    // Non-perfect cubes
+    assert_eq(icbrt(7), 1);
+    assert_eq(icbrt(9), 2);
+    assert_eq(icbrt(26), 2);
+    assert_eq(icbrt(100), 4);
+    1
+}
+
+fn test_ilog2() -> Int {
+    assert_eq(ilog2(1), 0);
+    assert_eq(ilog2(2), 1);
+    assert_eq(ilog2(4), 2);
+    assert_eq(ilog2(8), 3);
+    assert_eq(ilog2(16), 4);
+    assert_eq(ilog2(1024), 10);
+    // Non-powers
+    assert_eq(ilog2(3), 1);
+    assert_eq(ilog2(5), 2);
+    assert_eq(ilog2(7), 2);
+    assert_eq(ilog2(9), 3);
+    1
+}
+
+fn test_ipow() -> Int {
+    assert_eq(ipow(2, 0), 1);
+    assert_eq(ipow(2, 1), 2);
+    assert_eq(ipow(2, 10), 1024);
+    assert_eq(ipow(3, 4), 81);
+    assert_eq(ipow(5, 3), 125);
+    // Verify: ipow(isqrt(n), 2) <= n
+    assert_eq(ipow(isqrt(50), 2) <= 50, 1);
+    1
+}
+
+fn test_relationships() -> Int {
+    // isqrt(n^2) = n
+    assert_eq(isqrt(49), 7);
+    assert_eq(isqrt(ipow(12, 2)), 12);
+    // icbrt(n^3) = n
+    assert_eq(icbrt(ipow(3, 3)), 3);
+    assert_eq(icbrt(ipow(5, 3)), 5);
+    // ilog2(2^n) = n
+    assert_eq(ilog2(ipow(2, 8)), 8);
+    1
+}
+
+fn main() -> Int {
+    test_isqrt();
+    test_isqrt_binary();
+    test_icbrt();
+    test_ilog2();
+    test_ipow();
+    test_relationships();
+    print("[OK] 692_newton_method_aot");
+    0
+}

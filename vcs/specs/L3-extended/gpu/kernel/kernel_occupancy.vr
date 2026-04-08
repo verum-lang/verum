@@ -1,0 +1,368 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, kernel, occupancy, optimization
+// @description: GPU kernel occupancy and performance optimization
+
+/// GPU kernel occupancy analysis and optimization strategies
+/// for maximizing hardware utilization.
+
+mount gpu.occupancy.{OccupancyCalculator, LaunchConfig};
+
+fn main() {
+    let device = Device.gpu(0);
+
+    // Basic occupancy calculation
+    test_occupancy_calculation(device);
+
+    // Automatic launch configuration
+    test_auto_launch_config(device);
+
+    // Register pressure
+    test_register_optimization(device);
+
+    // Shared memory impact
+    test_shared_memory_occupancy(device);
+
+    // Warp-level optimization
+    test_warp_efficiency(device);
+}
+
+fn test_occupancy_calculation(device: Device) {
+    let props = device.properties();
+
+    // Device limits
+    let max_threads_per_sm = props.max_threads_per_multiprocessor;  // e.g., 1536 or 2048
+    let max_blocks_per_sm = props.max_blocks_per_multiprocessor;     // e.g., 16 or 32
+    let max_warps_per_sm = max_threads_per_sm / props.warp_size;     // e.g., 48 or 64
+    let total_smem_per_sm = props.shared_memory_per_multiprocessor;  // e.g., 64KB or 96KB
+    let total_regs_per_sm = props.registers_per_multiprocessor;      // e.g., 65536
+
+    // Calculate occupancy for a specific kernel configuration
+    @kernel(block_size = 256)
+    fn example_kernel(data: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N { data[idx] *= 2.0; }
+    }
+
+    // Query kernel resource requirements
+    let kernel_info = example_kernel.kernel_info();
+    let regs_per_thread = kernel_info.registers_per_thread;
+    let smem_static = kernel_info.static_shared_memory;
+    let smem_dynamic = 0;  // Dynamic shared memory
+
+    // Calculate active warps per SM
+    let threads_per_block = 256;
+    let warps_per_block = threads_per_block / 32;
+
+    // Register-limited occupancy
+    let regs_per_block = regs_per_thread * threads_per_block;
+    let max_blocks_by_regs = total_regs_per_sm / regs_per_block;
+
+    // Shared memory-limited occupancy
+    let smem_per_block = smem_static + smem_dynamic;
+    let max_blocks_by_smem = if smem_per_block > 0 {
+        total_smem_per_sm / smem_per_block
+    } else {
+        max_blocks_per_sm
+    };
+
+    // Thread-limited occupancy
+    let max_blocks_by_threads = max_threads_per_sm / threads_per_block;
+
+    // Actual blocks per SM
+    let blocks_per_sm = min(
+        min(max_blocks_by_regs, max_blocks_by_smem),
+        min(max_blocks_by_threads, max_blocks_per_sm)
+    );
+
+    // Occupancy percentage
+    let active_warps = blocks_per_sm * warps_per_block;
+    let occupancy = active_warps as f32 / max_warps_per_sm as f32;
+
+    assert(occupancy > 0.0 && occupancy <= 1.0);
+}
+
+fn test_auto_launch_config(device: Device) {
+    let n = 1000000;
+
+    @kernel
+    fn simple_kernel(data: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N { data[idx] = idx as f32; }
+    }
+
+    // Automatic optimal block size selection
+    let (optimal_block_size, min_grid_size) = simple_kernel.occupancy_max_potential_block_size();
+
+    // Launch with optimal configuration
+    let grid_size = (n + optimal_block_size - 1) / optimal_block_size;
+    let mut data: Tensor<f32, [1000000]> = Tensor.zeros().to(device);
+
+// LAUNCH:     simple_kernel<<<grid_size, optimal_block_size>>>(&mut data);
+
+    // With dynamic shared memory
+    @kernel
+    fn smem_kernel(data: &mut Tensor<f32, [N]>) {
+        @shared let mut cache: [f32; BLOCK_SIZE];
+        let tid = threadIdx.x;
+        cache[tid] = data[global_id().x];
+        barrier();
+        // ...
+    }
+
+    let dynamic_smem_size = |block_size: usize| -> usize {
+        block_size * 4  // 4 bytes per thread for float cache
+    };
+
+    let (opt_block_smem, _) = smem_kernel.occupancy_max_potential_block_size_with_smem(dynamic_smem_size);
+
+    // Query active blocks for specific configuration
+    let active_blocks = simple_kernel.occupancy_max_active_blocks_per_sm(
+        block_size: 256,
+        dynamic_smem: 0
+    );
+
+    // Launch configuration with cooperative launch
+    @kernel
+    @cooperative
+    fn coop_kernel(data: &mut Tensor<f32, [N]>) {
+        let grid = cooperative_groups.this_grid();
+        // ...
+    }
+
+    let max_active_blocks = coop_kernel.max_active_blocks_per_sm(256);
+    let total_blocks = max_active_blocks * device.multiprocessor_count();
+
+    // Launch cooperative kernel
+// LAUNCH:     coop_kernel<<<total_blocks, 256>>>(&mut data);
+}
+
+fn test_register_optimization(device: Device) {
+    // High register usage kernel
+    @kernel(block_size = 256)
+    fn high_register_kernel(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx >= N { return; }
+
+        // Many local variables -> high register pressure
+        let v0 = input[idx];
+        let v1 = v0 * 2.0;
+        let v2 = v1 + v0;
+        let v3 = v2.sin();
+        let v4 = v3.cos();
+        let v5 = v4.exp();
+        let v6 = v5.log();
+        let v7 = v6.sqrt();
+        let v8 = v7 * v0;
+        let v9 = v8 + v1;
+        let v10 = v9 * v2;
+
+        output[idx] = v10;
+    }
+
+    // Register-limited kernel with explicit limit
+    @kernel(block_size = 256, max_registers = 32)
+    fn limited_register_kernel(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+        // Compiler will spill to local memory if needed
+        let idx = global_id().x;
+        if idx >= N { return; }
+
+        let v = input[idx];
+        output[idx] = v * 2.0;
+    }
+
+    // Check actual register usage
+    let high_info = high_register_kernel.kernel_info();
+    let limited_info = limited_register_kernel.kernel_info();
+
+    // Limited version should have <= 32 registers
+    assert(limited_info.registers_per_thread <= 32);
+
+    // But may have local memory usage (spilling)
+    let spill_stores = limited_info.local_memory_per_thread;
+}
+
+fn test_shared_memory_occupancy(device: Device) {
+    // Different shared memory configurations
+    const SMEM_SMALL: usize = 1024;    // 1 KB
+    const SMEM_MEDIUM: usize = 16384;  // 16 KB
+    const SMEM_LARGE: usize = 49152;   // 48 KB
+
+    @kernel(block_size = 256)
+    fn small_smem_kernel(data: &mut Tensor<f32, [N]>) {
+        @shared let mut cache: [f32; SMEM_SMALL / 4];  // 256 floats
+        // ...
+    }
+
+    @kernel(block_size = 256)
+    fn medium_smem_kernel(data: &mut Tensor<f32, [N]>) {
+        @shared let mut cache: [f32; SMEM_MEDIUM / 4];  // 4K floats
+        // ...
+    }
+
+    @kernel(block_size = 256)
+    fn large_smem_kernel(data: &mut Tensor<f32, [N]>) {
+        @shared let mut cache: [f32; SMEM_LARGE / 4];  // 12K floats
+        // ...
+    }
+
+    // Compare occupancy
+    let small_occ = small_smem_kernel.occupancy_max_active_blocks_per_sm(256, 0);
+    let medium_occ = medium_smem_kernel.occupancy_max_active_blocks_per_sm(256, 0);
+    let large_occ = large_smem_kernel.occupancy_max_active_blocks_per_sm(256, 0);
+
+    // Larger shared memory -> lower occupancy
+    assert(small_occ >= medium_occ);
+    assert(medium_occ >= large_occ);
+
+    // Configure shared memory / L1 cache split
+    device.set_cache_config(CacheConfig.PreferShared);   // More shared memory
+    // device.set_cache_config(CacheConfig.PreferL1);    // More L1 cache
+    // device.set_cache_config(CacheConfig.Equal);       // Balanced
+
+    // Per-kernel cache configuration
+    large_smem_kernel.set_cache_config(CacheConfig.PreferShared);
+}
+
+fn test_warp_efficiency(device: Device) {
+    // Warp divergence - avoid if possible
+    @kernel(block_size = 256)
+    fn divergent_kernel(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx >= N { return; }
+
+        // BAD: High warp divergence
+        // Different threads in same warp take different paths
+        if input[idx] > 0.5 {
+            output[idx] = input[idx].exp();
+        } else if input[idx] > 0.0 {
+            output[idx] = input[idx].log();
+        } else {
+            output[idx] = input[idx].abs();
+        }
+    }
+
+    @kernel(block_size = 256)
+    fn non_divergent_kernel(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx >= N { return; }
+
+        // GOOD: Warp-uniform branching
+        // All threads in warp take same path (if data is sorted)
+        let warp_idx = idx / 32;
+        let is_positive = warp_vote_all(input[idx] > 0.0);
+
+        if is_positive {
+            output[idx] = input[idx].exp();
+        } else {
+            output[idx] = input[idx].abs();
+        }
+    }
+
+    // Predicated execution (no divergence)
+    @kernel(block_size = 256)
+    fn predicated_kernel(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx >= N { return; }
+
+        let val = input[idx];
+
+        // Use select instead of branch
+        let result_pos = val.exp();
+        let result_neg = val.abs();
+        output[idx] = select(val > 0.0, result_pos, result_neg);
+    }
+
+    // Instruction-level parallelism
+    @kernel(block_size = 256)
+    fn ilp_kernel(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+        let tid = global_id().x;
+        let stride = gridDim.x * blockDim.x;
+
+        // Process multiple elements per thread for better ILP
+        let mut sum0 = 0.0f32;
+        let mut sum1 = 0.0f32;
+        let mut sum2 = 0.0f32;
+        let mut sum3 = 0.0f32;
+
+        let mut i = tid;
+        while i + 3 * stride < N {
+            sum0 += input[i];
+            sum1 += input[i + stride];
+            sum2 += input[i + 2 * stride];
+            sum3 += input[i + 3 * stride];
+            i += 4 * stride;
+        }
+
+        // Handle remainder
+        while i < N {
+            sum0 += input[i];
+            i += stride;
+        }
+
+        output[tid] = sum0 + sum1 + sum2 + sum3;
+    }
+
+    // Memory coalescing check
+    @kernel(block_size = 256)
+    fn coalesced_kernel(data: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx >= N { return; }
+
+        // GOOD: Consecutive threads access consecutive memory
+        // Transaction: single 128-byte (32 floats) load for warp
+        output[idx] = data[idx] * 2.0;
+    }
+
+    @kernel(block_size = 256)
+    fn uncoalesced_kernel(data: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx >= N { return; }
+
+        // BAD: Strided access pattern
+        // May require multiple memory transactions per warp
+        let strided_idx = (idx * 33) % N;
+        output[idx] = data[strided_idx] * 2.0;
+    }
+}
+
+// Occupancy API types
+implement<F> KernelFn<F> {
+    fn kernel_info(&self) -> KernelInfo { unreachable() }
+
+    fn occupancy_max_potential_block_size(&self) -> (usize, usize) { unreachable() }
+
+    fn occupancy_max_potential_block_size_with_smem<G>(&self, smem_fn: G) -> (usize, usize)
+    where G: Fn(usize) -> usize { unreachable() }
+
+    fn occupancy_max_active_blocks_per_sm(&self, block_size: usize, dynamic_smem: usize) -> usize { unreachable() }
+
+    fn max_active_blocks_per_sm(&self, block_size: usize) -> usize { unreachable() }
+
+    fn set_cache_config(&self, config: CacheConfig) {}
+}
+
+type KernelInfo is {
+    registers_per_thread: usize,
+    static_shared_memory: usize,
+    local_memory_per_thread: usize,
+};
+
+type CacheConfig is PreferShared | PreferL1 | Equal;
+
+fn warp_vote_all(predicate: bool) -> bool { predicate }
+
+fn select<T>(cond: bool, a: T, b: T) -> T { if cond { a } else { b } }
+
+const BLOCK_SIZE: usize = 256;
+
+fn main_impl() {
+    let device = Device.gpu(0);
+    test_occupancy_calculation(device);
+    test_auto_launch_config(device);
+    test_register_optimization(device);
+    test_shared_memory_occupancy(device);
+    test_warp_efficiency(device);
+}

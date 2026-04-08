@@ -1,0 +1,81 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: channel, send, recv, runtime
+// @description: Test basic channel operations - send/recv/len/FIFO
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Basic send/recv
+    let ch = Channel.new(10);
+    ch.send(42);
+    ch.send(100);
+    let v1 = match ch.recv() { Some(v) => v, None => -1 };
+    let v2 = match ch.recv() { Some(v) => v, None => -1 };
+    if v1 != 42 {
+        print(f"FAIL: expected 42, got {v1}");
+        failures = failures + 1;
+    }
+    if v2 != 100 {
+        print(f"FAIL: expected 100, got {v2}");
+        failures = failures + 1;
+    }
+
+    // Test 2: Channel length
+    let ch2 = Channel.new(5);
+    ch2.send(1);
+    ch2.send(2);
+    ch2.send(3);
+    let len = ch2.len();
+    if len != 3 {
+        print(f"FAIL: expected len 3, got {len}");
+        failures = failures + 1;
+    }
+
+    // Test 3: FIFO ordering
+    let ch3 = Channel.new(10);
+    let mut i = 0;
+    while i < 5 {
+        ch3.send(i * 10);
+        i = i + 1;
+    }
+
+    let mut ordered = true;
+    i = 0;
+    while i < 5 {
+        let val = match ch3.recv() { Some(v) => v, None => -1 };
+        if val != i * 10 {
+            ordered = false;
+        }
+        i = i + 1;
+    }
+    if !ordered {
+        print("FAIL: channel not FIFO ordered");
+        failures = failures + 1;
+    }
+
+    // Test 4: Send many values
+    let ch4 = Channel.new(100);
+    i = 0;
+    while i < 50 {
+        ch4.send(i);
+        i = i + 1;
+    }
+    let mut sum = 0;
+    i = 0;
+    while i < 50 {
+        sum = sum + match ch4.recv() { Some(v) => v, None => 0 };
+        i = i + 1;
+    }
+    // Sum of 0..49 = 1225
+    if sum != 1225 {
+        print(f"FAIL: expected sum 1225, got {sum}");
+        failures = failures + 1;
+    }
+
+    if failures == 0 {
+        print("All channel basic tests passed");
+    }
+    failures
+}

@@ -1,0 +1,373 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, gpu, event, timing
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU event timing operations — create events, record timestamps, measure elapsed
+
+// ============================================================================
+// Types: simulated GPU events with timestamps
+// ============================================================================
+
+type GpuEvent is {
+    event_id: Int,
+    recorded: Int,
+    timestamp: Int
+};
+
+type EventTimeline is {
+    e0: GpuEvent,
+    e1: GpuEvent,
+    e2: GpuEvent,
+    e3: GpuEvent,
+    next_id: Int,
+    clock: Int
+};
+
+// ============================================================================
+// GpuEvent helpers
+// ============================================================================
+
+fn event_new(eid: Int) -> GpuEvent {
+    GpuEvent { event_id: eid, recorded: 0, timestamp: 0 }
+}
+
+fn event_record(ev: GpuEvent, ts: Int) -> GpuEvent {
+    GpuEvent { event_id: ev.event_id, recorded: 1, timestamp: ts }
+}
+
+fn event_is_recorded(ev: GpuEvent) -> Bool {
+    ev.recorded == 1
+}
+
+fn event_elapsed(start_ev: GpuEvent, end_ev: GpuEvent) -> Int {
+    // Both must be recorded; elapsed = end - start
+    if start_ev.recorded == 1 {
+        if end_ev.recorded == 1 {
+            end_ev.timestamp - start_ev.timestamp
+        } else {
+            0 - 1
+        }
+    } else {
+        0 - 1
+    }
+}
+
+// ============================================================================
+// EventTimeline helpers (up to 4 events)
+// ============================================================================
+
+fn timeline_new() -> EventTimeline {
+    EventTimeline {
+        e0: event_new(0),
+        e1: event_new(0),
+        e2: event_new(0),
+        e3: event_new(0),
+        next_id: 1,
+        clock: 100
+    }
+}
+
+fn timeline_get(tl: EventTimeline, idx: Int) -> GpuEvent {
+    if idx == 0 { tl.e0 }
+    else if idx == 1 { tl.e1 }
+    else if idx == 2 { tl.e2 }
+    else { tl.e3 }
+}
+
+fn timeline_set(tl: EventTimeline, idx: Int, ev: GpuEvent) -> EventTimeline {
+    EventTimeline {
+        e0: if idx == 0 { ev } else { tl.e0 },
+        e1: if idx == 1 { ev } else { tl.e1 },
+        e2: if idx == 2 { ev } else { tl.e2 },
+        e3: if idx == 3 { ev } else { tl.e3 },
+        next_id: tl.next_id,
+        clock: tl.clock
+    }
+}
+
+fn timeline_create_event(tl: EventTimeline, slot: Int) -> EventTimeline {
+    let eid = tl.next_id;
+    let ev = event_new(eid);
+    let tl2 = timeline_set(tl, slot, ev);
+    EventTimeline {
+        e0: tl2.e0,
+        e1: tl2.e1,
+        e2: tl2.e2,
+        e3: tl2.e3,
+        next_id: tl.next_id + 1,
+        clock: tl2.clock
+    }
+}
+
+fn timeline_record_event(tl: EventTimeline, slot: Int) -> EventTimeline {
+    let ev = timeline_get(tl, slot);
+    let recorded = event_record(ev, tl.clock);
+    let tl2 = timeline_set(tl, slot, recorded);
+    // Advance clock by 10 after each recording
+    EventTimeline {
+        e0: tl2.e0,
+        e1: tl2.e1,
+        e2: tl2.e2,
+        e3: tl2.e3,
+        next_id: tl2.next_id,
+        clock: tl.clock + 10
+    }
+}
+
+fn timeline_advance_clock(tl: EventTimeline, amount: Int) -> EventTimeline {
+    EventTimeline {
+        e0: tl.e0,
+        e1: tl.e1,
+        e2: tl.e2,
+        e3: tl.e3,
+        next_id: tl.next_id,
+        clock: tl.clock + amount
+    }
+}
+
+fn timeline_destroy_event(tl: EventTimeline, slot: Int) -> EventTimeline {
+    let blank = event_new(0);
+    timeline_set(tl, slot, blank)
+}
+
+// ============================================================================
+// Simulated computation (burns clock ticks)
+// ============================================================================
+
+fn do_work(tl: EventTimeline, iterations: Int) -> EventTimeline {
+    // Simulate work by advancing the clock proportionally
+    let ticks = iterations * 5;
+    timeline_advance_clock(tl, ticks)
+}
+
+// ============================================================================
+// Test 1: Create event, verify ID, destroy
+// ============================================================================
+
+fn test_event_create_destroy() {
+    let tl = timeline_new();
+
+    // Create event in slot 0
+    let tl2 = timeline_create_event(tl, 0);
+    let ev0 = timeline_get(tl2, 0);
+
+    // Verify event was allocated with correct ID
+    assert_eq(ev0.event_id, 1);
+    assert_eq(ev0.recorded, 0);
+    assert_eq(ev0.timestamp, 0);
+
+    // Next ID should have advanced
+    assert_eq(tl2.next_id, 2);
+
+    // Destroy the event
+    let tl3 = timeline_destroy_event(tl2, 0);
+    let ev0_after = timeline_get(tl3, 0);
+    assert_eq(ev0_after.event_id, 0);
+    assert_eq(ev0_after.recorded, 0);
+
+    print("  test_event_create_destroy: ok");
+}
+
+// ============================================================================
+// Test 2: Create start/end events, work between, measure elapsed > 0
+// ============================================================================
+
+fn test_event_pair_timing() {
+    let tl = timeline_new();
+
+    // Create start event in slot 0, end event in slot 1
+    let tl2 = timeline_create_event(tl, 0);
+    let tl3 = timeline_create_event(tl2, 1);
+
+    // Record start event
+    let tl4 = timeline_record_event(tl3, 0);
+    let start_ev = timeline_get(tl4, 0);
+    assert(event_is_recorded(start_ev));
+
+    // Do some computation between start and end
+    let tl5 = do_work(tl4, 20);
+
+    // Record end event
+    let tl6 = timeline_record_event(tl5, 1);
+    let end_ev = timeline_get(tl6, 1);
+    assert(event_is_recorded(end_ev));
+
+    // Measure elapsed time
+    let elapsed = event_elapsed(start_ev, end_ev);
+    assert(elapsed > 0);
+
+    // The elapsed should be: work ticks (20*5=100) + record advance (10)
+    // start recorded at clock=100, clock advances to 110
+    // work advances clock by 100 to 210
+    // end recorded at clock=210, clock advances to 220
+    assert_eq(start_ev.timestamp, 100);
+    assert_eq(end_ev.timestamp, 210);
+    assert_eq(elapsed, 110);
+
+    print("  test_event_pair_timing: ok");
+}
+
+// ============================================================================
+// Test 3: Multiple events, verify unique IDs
+// ============================================================================
+
+fn test_multiple_events() {
+    let tl = timeline_new();
+
+    // Create 4 events in all 4 slots
+    let tl2 = timeline_create_event(tl, 0);
+    let tl3 = timeline_create_event(tl2, 1);
+    let tl4 = timeline_create_event(tl3, 2);
+    let tl5 = timeline_create_event(tl4, 3);
+
+    let ev0 = timeline_get(tl5, 0);
+    let ev1 = timeline_get(tl5, 1);
+    let ev2 = timeline_get(tl5, 2);
+    let ev3 = timeline_get(tl5, 3);
+
+    // All IDs should be unique
+    assert_eq(ev0.event_id, 1);
+    assert_eq(ev1.event_id, 2);
+    assert_eq(ev2.event_id, 3);
+    assert_eq(ev3.event_id, 4);
+
+    // No two IDs should be the same
+    assert(ev0.event_id != ev1.event_id);
+    assert(ev0.event_id != ev2.event_id);
+    assert(ev0.event_id != ev3.event_id);
+    assert(ev1.event_id != ev2.event_id);
+    assert(ev1.event_id != ev3.event_id);
+    assert(ev2.event_id != ev3.event_id);
+
+    // next_id should reflect all allocations
+    assert_eq(tl5.next_id, 5);
+
+    print("  test_multiple_events: ok");
+}
+
+// ============================================================================
+// Test 4: Start before end => elapsed >= 0
+// ============================================================================
+
+fn test_elapsed_ordering() {
+    let tl = timeline_new();
+
+    // Create two events
+    let tl2 = timeline_create_event(tl, 0);
+    let tl3 = timeline_create_event(tl2, 1);
+
+    // Record event 0 first (earlier timestamp)
+    let tl4 = timeline_record_event(tl3, 0);
+
+    // Advance clock by some work
+    let tl5 = do_work(tl4, 10);
+
+    // Record event 1 second (later timestamp)
+    let tl6 = timeline_record_event(tl5, 1);
+
+    let ev_start = timeline_get(tl6, 0);
+    let ev_end = timeline_get(tl6, 1);
+
+    // Elapsed from start to end should be >= 0
+    let elapsed = event_elapsed(ev_start, ev_end);
+    assert(elapsed >= 0);
+
+    // Reverse order: elapsed from end to start should be negative
+    let reverse_elapsed = event_elapsed(ev_end, ev_start);
+    assert(reverse_elapsed < 0);
+
+    // Verify exact values
+    // start recorded at clock=100, clock->110
+    // work = 10*5 = 50, clock->160
+    // end recorded at clock=160
+    assert_eq(ev_start.timestamp, 100);
+    assert_eq(ev_end.timestamp, 160);
+    assert_eq(elapsed, 60);
+    assert_eq(reverse_elapsed, 0 - 60);
+
+    print("  test_elapsed_ordering: ok");
+}
+
+// ============================================================================
+// Test 5: Record sequence of events, verify monotonic timestamps
+// ============================================================================
+
+fn test_event_sequence() {
+    let tl = timeline_new();
+
+    // Create 4 events
+    let tl2 = timeline_create_event(tl, 0);
+    let tl3 = timeline_create_event(tl2, 1);
+    let tl4 = timeline_create_event(tl3, 2);
+    let tl5 = timeline_create_event(tl4, 3);
+
+    // Record events in order with work between each
+    let tl6 = timeline_record_event(tl5, 0);
+    let tl7 = do_work(tl6, 3);
+    let tl8 = timeline_record_event(tl7, 1);
+    let tl9 = do_work(tl8, 7);
+    let tl10 = timeline_record_event(tl9, 2);
+    let tl11 = do_work(tl10, 2);
+    let tl12 = timeline_record_event(tl11, 3);
+
+    let ev0 = timeline_get(tl12, 0);
+    let ev1 = timeline_get(tl12, 1);
+    let ev2 = timeline_get(tl12, 2);
+    let ev3 = timeline_get(tl12, 3);
+
+    // All should be recorded
+    assert(event_is_recorded(ev0));
+    assert(event_is_recorded(ev1));
+    assert(event_is_recorded(ev2));
+    assert(event_is_recorded(ev3));
+
+    // Timestamps should be strictly monotonically increasing
+    assert(ev0.timestamp < ev1.timestamp);
+    assert(ev1.timestamp < ev2.timestamp);
+    assert(ev2.timestamp < ev3.timestamp);
+
+    // Verify exact timestamps:
+    // ev0: clock=100, recorded at 100, clock->110
+    // work 3*5=15, clock->125
+    // ev1: recorded at 125, clock->135
+    // work 7*5=35, clock->170
+    // ev2: recorded at 170, clock->180
+    // work 2*5=10, clock->190
+    // ev3: recorded at 190, clock->200
+    assert_eq(ev0.timestamp, 100);
+    assert_eq(ev1.timestamp, 125);
+    assert_eq(ev2.timestamp, 170);
+    assert_eq(ev3.timestamp, 190);
+
+    // Verify elapsed between consecutive events
+    let e01 = event_elapsed(ev0, ev1);
+    let e12 = event_elapsed(ev1, ev2);
+    let e23 = event_elapsed(ev2, ev3);
+    let e_total = event_elapsed(ev0, ev3);
+
+    assert_eq(e01, 25);
+    assert_eq(e12, 45);
+    assert_eq(e23, 20);
+    assert_eq(e_total, 90);
+
+    // Sum of intervals should equal total
+    assert_eq(e01 + e12 + e23, e_total);
+
+    print("  test_event_sequence: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_event_create_destroy();
+    test_event_pair_timing();
+    test_multiple_events();
+    test_elapsed_ordering();
+    test_event_sequence();
+    print("[OK] 007_gpu_event_timing");
+    0
+}

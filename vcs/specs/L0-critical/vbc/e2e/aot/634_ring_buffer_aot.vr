@@ -1,0 +1,187 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, ring-buffer, circular, queue
+// @timeout: 30000
+
+// Ring buffer (circular queue) implementation using Arr8
+// State: head, tail, count stored separately
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Ring buffer state encoded as: head*10000 + tail*100 + count
+// Using capacity = 8 (full Arr8)
+fn rb_head(state: Int) -> Int { state / 10000 }
+fn rb_tail(state: Int) -> Int { (state / 100) % 100 }
+fn rb_count(state: Int) -> Int { state % 100 }
+fn make_rb(head: Int, tail: Int, count: Int) -> Int { head * 10000 + tail * 100 + count }
+
+fn rb_empty() -> Int { make_rb(0, 0, 0) }
+fn rb_is_empty(state: Int) -> Int { if rb_count(state) == 0 { 1 } else { 0 } }
+fn rb_is_full(state: Int) -> Int { if rb_count(state) == 8 { 1 } else { 0 } }
+
+// Push to back (returns new state, writes to buf at tail position)
+fn rb_push_state(state: Int) -> Int {
+    let count = rb_count(state);
+    if count >= 8 { state } // full
+    else {
+        let tail = rb_tail(state);
+        let new_tail = (tail + 1) % 8;
+        make_rb(rb_head(state), new_tail, count + 1)
+    }
+}
+
+// Pop from front (returns new state)
+fn rb_pop_state(state: Int) -> Int {
+    let count = rb_count(state);
+    if count == 0 { state } // empty
+    else {
+        let head = rb_head(state);
+        let new_head = (head + 1) % 8;
+        make_rb(new_head, rb_tail(state), count - 1)
+    }
+}
+
+// Peek front value
+fn rb_peek(buf: Arr8, state: Int) -> Int {
+    get8(buf, rb_head(state))
+}
+
+// Get element at logical index i (0 = front)
+fn rb_at(buf: Arr8, state: Int, i: Int) -> Int {
+    let physical = (rb_head(state) + i) % 8;
+    get8(buf, physical)
+}
+
+fn test_empty() -> Int {
+    let state = rb_empty();
+    assert_eq(rb_is_empty(state), 1);
+    assert_eq(rb_is_full(state), 0);
+    assert_eq(rb_count(state), 0);
+    1
+}
+
+fn test_push_pop() -> Int {
+    let mut buf = zeros();
+    let mut state = rb_empty();
+
+    // Push 10
+    let tail = rb_tail(state);
+    buf = set8(buf, tail, 10);
+    state = rb_push_state(state);
+    assert_eq(rb_count(state), 1);
+    assert_eq(rb_peek(buf, state), 10);
+
+    // Push 20
+    let tail2 = rb_tail(state);
+    buf = set8(buf, tail2, 20);
+    state = rb_push_state(state);
+    assert_eq(rb_count(state), 2);
+    assert_eq(rb_peek(buf, state), 10); // front is still 10
+
+    // Pop -> should get 10
+    let front = rb_peek(buf, state);
+    assert_eq(front, 10);
+    state = rb_pop_state(state);
+    assert_eq(rb_count(state), 1);
+    assert_eq(rb_peek(buf, state), 20); // now front is 20
+
+    // Pop -> should get 20
+    state = rb_pop_state(state);
+    assert_eq(rb_count(state), 0);
+    assert_eq(rb_is_empty(state), 1);
+    1
+}
+
+fn test_wrap_around() -> Int {
+    // Fill buffer, pop some, push more to test wrap-around
+    // Pre-build a buffer with values at specific positions
+    // Simulate: push 6 items, pop 4, push 4 more
+    // After pushing 6: head=0, tail=6, count=6
+    let buf1 = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 60, v6: 0, v7: 0 };
+    let state1 = make_rb(0, 6, 6);
+    assert_eq(rb_at(buf1, state1, 0), 10);
+    assert_eq(rb_at(buf1, state1, 5), 60);
+
+    // Pop 4: head=4, tail=6, count=2
+    let state2 = make_rb(4, 6, 2);
+    assert_eq(rb_at(buf1, state2, 0), 50);
+    assert_eq(rb_at(buf1, state2, 1), 60);
+
+    // Push 2 more at positions 6 and 7: tail wraps
+    let buf2 = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 60, v6: 70, v7: 80 };
+    let state3 = make_rb(4, 0, 4); // tail wrapped to 0
+    assert_eq(rb_at(buf2, state3, 0), 50);
+    assert_eq(rb_at(buf2, state3, 3), 80);
+    1
+}
+
+fn test_full() -> Int {
+    // Full buffer: 8 items
+    let buf = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let state = make_rb(0, 0, 8); // head=0, tail=0 (wrapped), count=8
+    assert_eq(rb_is_full(state), 1);
+    assert_eq(rb_count(state), 8);
+    assert_eq(rb_at(buf, state, 0), 1);
+    assert_eq(rb_at(buf, state, 7), 8);
+    // Push on full should not change state
+    let state2 = rb_push_state(state);
+    assert_eq(rb_count(state2), 8);
+    1
+}
+
+fn test_pop_empty() -> Int {
+    // Pop on empty should not change state
+    let state = rb_empty();
+    let state2 = rb_pop_state(state);
+    assert_eq(rb_count(state2), 0);
+    assert_eq(rb_is_empty(state2), 1);
+    1
+}
+
+fn test_fifo_order() -> Int {
+    // Verify FIFO ordering with pre-built state
+    // Push 100, 200, 300 -> pop should give 100, 200, 300
+    let buf = Arr8 { v0: 100, v1: 200, v2: 300, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let state = make_rb(0, 3, 3);
+    assert_eq(rb_at(buf, state, 0), 100);
+    assert_eq(rb_at(buf, state, 1), 200);
+    assert_eq(rb_at(buf, state, 2), 300);
+    // Pop first
+    let state2 = rb_pop_state(state);
+    assert_eq(rb_peek(buf, state2), 200);
+    let state3 = rb_pop_state(state2);
+    assert_eq(rb_peek(buf, state3), 300);
+    1
+}
+
+fn main() -> Int {
+    test_empty();
+    test_push_pop();
+    test_wrap_around();
+    test_full();
+    test_pop_empty();
+    test_fifo_order();
+    print("[OK] 634_ring_buffer_aot");
+    0
+}

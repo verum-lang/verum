@@ -1,0 +1,374 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, memory, slab, allocator, bitmap, cbgr
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Slab allocator for fixed-size objects.
+// Uses bitmap tracking to manage allocation of uniform-size slots.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// Slab allocator
+// bitmap: 8-bit bitmap (each bit = 1 slot). Stored as single integer.
+//   bit i set = slot i is allocated
+// Each slot holds 2 fields (field_a[i], field_b[i]) for object data.
+// slot_size: conceptual size of each object
+// capacity: max 8 slots
+// =============================================================================
+
+type Slab is {
+    bitmap: Int,
+    field_a: Arr8,
+    field_b: Arr8,
+    capacity: Int,
+    num_allocs: Int,
+    num_frees: Int
+};
+
+fn slab_new(cap: Int) -> Slab {
+    Slab {
+        bitmap: 0,
+        field_a: a8_new(),
+        field_b: a8_new(),
+        capacity: cap,
+        num_allocs: 0,
+        num_frees: 0
+    }
+}
+
+// Check if slot i is allocated
+fn slab_is_allocated(s: Slab, i: Int) -> Int {
+    // Check bit i of bitmap
+    let mut mask = 1;
+    let mut k = 0;
+    while k < i {
+        mask = mask * 2;
+        k = k + 1;
+    }
+    if (s.bitmap / mask) % 2 == 1 { 1 } else { 0 }
+}
+
+// Set bit i in bitmap
+fn bitmap_set_bit(bm: Int, i: Int) -> Int {
+    let mut mask = 1;
+    let mut k = 0;
+    while k < i {
+        mask = mask * 2;
+        k = k + 1;
+    }
+    // Only set if not already set
+    if (bm / mask) % 2 == 0 {
+        bm + mask
+    } else {
+        bm
+    }
+}
+
+// Clear bit i in bitmap
+fn bitmap_clear_bit(bm: Int, i: Int) -> Int {
+    let mut mask = 1;
+    let mut k = 0;
+    while k < i {
+        mask = mask * 2;
+        k = k + 1;
+    }
+    if (bm / mask) % 2 == 1 {
+        bm - mask
+    } else {
+        bm
+    }
+}
+
+// Count set bits (popcount)
+fn bitmap_popcount(bm: Int) -> Int {
+    let mut cnt = 0;
+    let mut val = bm;
+    let mut i = 0;
+    while i < 8 {
+        cnt = cnt + (val % 2);
+        val = val / 2;
+        i = i + 1;
+    }
+    cnt
+}
+
+// Find first free slot (first zero bit), returns -1 if full
+fn slab_find_free(s: Slab) -> Int {
+    let mut i = 0;
+    while i < s.capacity {
+        if slab_is_allocated(s, i) == 0 {
+            return i;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Allocate a slot with two fields, return (slab, slot_id)
+type SlabAllocPair is { slab: Slab, slot: Int };
+
+fn slab_alloc(s: Slab, va: Int, vb: Int) -> SlabAllocPair {
+    let slot = slab_find_free(s);
+    if slot == -1 {
+        return SlabAllocPair { slab: s, slot: -1 };
+    }
+    SlabAllocPair {
+        slab: Slab {
+            bitmap: bitmap_set_bit(s.bitmap, slot),
+            field_a: a8_set(s.field_a, slot, va),
+            field_b: a8_set(s.field_b, slot, vb),
+            capacity: s.capacity,
+            num_allocs: s.num_allocs + 1,
+            num_frees: s.num_frees
+        },
+        slot: slot
+    }
+}
+
+// Free a slot
+fn slab_free(s: Slab, slot: Int) -> Slab {
+    if slab_is_allocated(s, slot) == 0 {
+        return s;
+    }
+    Slab {
+        bitmap: bitmap_clear_bit(s.bitmap, slot),
+        field_a: s.field_a,
+        field_b: s.field_b,
+        capacity: s.capacity,
+        num_allocs: s.num_allocs,
+        num_frees: s.num_frees + 1
+    }
+}
+
+// Read fields
+fn slab_get_a(s: Slab, slot: Int) -> Int {
+    a8_get(s.field_a, slot)
+}
+
+fn slab_get_b(s: Slab, slot: Int) -> Int {
+    a8_get(s.field_b, slot)
+}
+
+// Write fields
+fn slab_set_a(s: Slab, slot: Int, val: Int) -> Slab {
+    Slab {
+        bitmap: s.bitmap,
+        field_a: a8_set(s.field_a, slot, val),
+        field_b: s.field_b,
+        capacity: s.capacity,
+        num_allocs: s.num_allocs,
+        num_frees: s.num_frees
+    }
+}
+
+fn slab_set_b(s: Slab, slot: Int, val: Int) -> Slab {
+    Slab {
+        bitmap: s.bitmap,
+        field_a: s.field_a,
+        field_b: a8_set(s.field_b, slot, val),
+        capacity: s.capacity,
+        num_allocs: s.num_allocs,
+        num_frees: s.num_frees
+    }
+}
+
+// Count allocated slots
+fn slab_used(s: Slab) -> Int {
+    bitmap_popcount(s.bitmap)
+}
+
+fn slab_available(s: Slab) -> Int {
+    s.capacity - slab_used(s)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_bitmap_ops() {
+    assert_eq(bitmap_set_bit(0, 0), 1);
+    assert_eq(bitmap_set_bit(0, 1), 2);
+    assert_eq(bitmap_set_bit(0, 2), 4);
+    assert_eq(bitmap_set_bit(0, 3), 8);
+    assert_eq(bitmap_set_bit(1, 1), 3);    // 01 | 10 = 11
+    assert_eq(bitmap_set_bit(5, 1), 7);    // 101 | 010 = 111
+
+    assert_eq(bitmap_clear_bit(7, 1), 5);  // 111 & ~010 = 101
+    assert_eq(bitmap_clear_bit(3, 0), 2);  // 11 & ~01 = 10
+    assert_eq(bitmap_clear_bit(0, 0), 0);  // Already clear
+
+    assert_eq(bitmap_popcount(0), 0);
+    assert_eq(bitmap_popcount(1), 1);
+    assert_eq(bitmap_popcount(7), 3);      // 111
+    assert_eq(bitmap_popcount(255), 8);    // 11111111
+    assert_eq(bitmap_popcount(170), 4);    // 10101010
+}
+
+fn test_initial_state() {
+    let s = slab_new(8);
+    assert_eq(slab_used(s), 0);
+    assert_eq(slab_available(s), 8);
+    assert_eq(s.bitmap, 0);
+}
+
+fn test_single_alloc() {
+    let s = slab_new(8);
+    let r = slab_alloc(s, 10, 20);
+    assert_eq(r.slot, 0);
+    assert_eq(slab_get_a(r.slab, 0), 10);
+    assert_eq(slab_get_b(r.slab, 0), 20);
+    assert_eq(slab_used(r.slab), 1);
+    assert_eq(slab_is_allocated(r.slab, 0), 1);
+    assert_eq(slab_is_allocated(r.slab, 1), 0);
+}
+
+fn test_sequential_alloc() {
+    let s = slab_new(4);
+    let r1 = slab_alloc(s, 1, 2);
+    let r2 = slab_alloc(r1.slab, 3, 4);
+    let r3 = slab_alloc(r2.slab, 5, 6);
+    let r4 = slab_alloc(r3.slab, 7, 8);
+
+    assert_eq(r1.slot, 0);
+    assert_eq(r2.slot, 1);
+    assert_eq(r3.slot, 2);
+    assert_eq(r4.slot, 3);
+
+    assert_eq(slab_used(r4.slab), 4);
+    assert_eq(slab_available(r4.slab), 0);
+
+    // Verify all data
+    assert_eq(slab_get_a(r4.slab, 0), 1);
+    assert_eq(slab_get_b(r4.slab, 0), 2);
+    assert_eq(slab_get_a(r4.slab, 3), 7);
+    assert_eq(slab_get_b(r4.slab, 3), 8);
+}
+
+fn test_alloc_exhaustion() {
+    let s = slab_new(2);
+    let r1 = slab_alloc(s, 1, 1);
+    let r2 = slab_alloc(r1.slab, 2, 2);
+    let r3 = slab_alloc(r2.slab, 3, 3);
+    assert_eq(r3.slot, -1);  // Full
+}
+
+fn test_free_and_realloc() {
+    let s = slab_new(4);
+    let r1 = slab_alloc(s, 10, 100);
+    let r2 = slab_alloc(r1.slab, 20, 200);
+    let r3 = slab_alloc(r2.slab, 30, 300);
+
+    // Free middle slot
+    let s2 = slab_free(r3.slab, 1);
+    assert_eq(slab_used(s2), 2);
+    assert_eq(slab_is_allocated(s2, 0), 1);
+    assert_eq(slab_is_allocated(s2, 1), 0);
+    assert_eq(slab_is_allocated(s2, 2), 1);
+
+    // Reallocate -> should get slot 1 back
+    let r4 = slab_alloc(s2, 99, 999);
+    assert_eq(r4.slot, 1);
+    assert_eq(slab_get_a(r4.slab, 1), 99);
+    assert_eq(slab_get_b(r4.slab, 1), 999);
+}
+
+fn test_update_fields() {
+    let s = slab_new(8);
+    let r = slab_alloc(s, 1, 2);
+    let s2 = slab_set_a(r.slab, 0, 100);
+    let s3 = slab_set_b(s2, 0, 200);
+    assert_eq(slab_get_a(s3, 0), 100);
+    assert_eq(slab_get_b(s3, 0), 200);
+}
+
+fn test_fragmentation() {
+    let s = slab_new(8);
+    // Fill all 8 slots
+    let mut cur = s;
+    let mut i = 0;
+    while i < 8 {
+        let r = slab_alloc(cur, i * 10, i * 100);
+        cur = r.slab;
+        i = i + 1;
+    }
+    assert_eq(slab_used(cur), 8);
+
+    // Free even slots (0, 2, 4, 6)
+    cur = slab_free(cur, 0);
+    cur = slab_free(cur, 2);
+    cur = slab_free(cur, 4);
+    cur = slab_free(cur, 6);
+    assert_eq(slab_used(cur), 4);
+
+    // Odd slots still have data
+    assert_eq(slab_get_a(cur, 1), 10);
+    assert_eq(slab_get_a(cur, 3), 30);
+    assert_eq(slab_get_a(cur, 5), 50);
+    assert_eq(slab_get_a(cur, 7), 70);
+
+    // Reallocate into freed slots
+    let r1 = slab_alloc(cur, 77, 88);
+    assert_eq(r1.slot, 0);  // First free
+    let r2 = slab_alloc(r1.slab, 99, 111);
+    assert_eq(r2.slot, 2);  // Next free
+}
+
+fn test_statistics() {
+    let s = slab_new(4);
+    let r1 = slab_alloc(s, 1, 1);
+    let r2 = slab_alloc(r1.slab, 2, 2);
+    let s2 = slab_free(r2.slab, 0);
+    let r3 = slab_alloc(s2, 3, 3);
+
+    assert_eq(r3.slab.num_allocs, 3);
+    assert_eq(r3.slab.num_frees, 1);
+}
+
+fn main() -> Int {
+    test_bitmap_ops();
+    test_initial_state();
+    test_single_alloc();
+    test_sequential_alloc();
+    test_alloc_exhaustion();
+    test_free_and_realloc();
+    test_update_fields();
+    test_fragmentation();
+    test_statistics();
+    print("[OK] 337_interp_slab_allocator");
+    0
+}

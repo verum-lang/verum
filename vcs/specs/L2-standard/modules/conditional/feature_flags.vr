@@ -1,0 +1,172 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, conditional, features
+// @description: Conditional compilation with feature flags
+
+/// Feature flags for conditional compilation
+
+// Feature-gated module
+@cfg(feature = "logging")
+module logging {
+    public fn log(message: Text) {
+        println(f"[LOG] {message}");
+    }
+
+    public fn debug(message: Text) {
+        @cfg(debug_assertions)
+        println(f"[DEBUG] {message}");
+    }
+
+    public fn error(message: Text) {
+        println(f"[ERROR] {message}");
+    }
+}
+
+// Stub module when logging is disabled
+@cfg(not(feature = "logging"))
+module logging {
+    public fn log(_message: Text) {}
+    public fn debug(_message: Text) {}
+    public fn error(_message: Text) {}
+}
+
+// Feature-gated type implementation
+type Connection is {
+    host: Text,
+    port: Int,
+
+    @cfg(feature = "tls")
+    tls_config: Maybe<TlsConfig>,
+
+    @cfg(feature = "metrics")
+    metrics: ConnectionMetrics,
+};
+
+@cfg(feature = "tls")
+type TlsConfig is {
+    cert_path: Text,
+    key_path: Text,
+    verify_peer: Bool,
+};
+
+@cfg(feature = "metrics")
+type ConnectionMetrics is {
+    bytes_sent: Int,
+    bytes_received: Int,
+    requests: Int,
+};
+
+implement Connection {
+    @cfg(feature = "tls")
+    fn with_tls(self, config: TlsConfig) -> Self {
+        Self { tls_config: Some(config), ..self }
+    }
+
+    @cfg(feature = "tls")
+    fn is_secure(&self) -> Bool {
+        self.tls_config.is_some()
+    }
+
+    @cfg(not(feature = "tls"))
+    fn is_secure(&self) -> Bool {
+        false
+    }
+
+    @cfg(feature = "metrics")
+    fn record_bytes_sent(&mut self, bytes: Int) {
+        self.metrics.bytes_sent += bytes;
+    }
+
+    @cfg(feature = "metrics")
+    fn get_stats(&self) -> ConnectionMetrics {
+        self.metrics.clone()
+    }
+}
+
+// Feature-gated function implementations
+@cfg(feature = "parallel")
+fn process_items<T, R>(items: List<T>, f: fn(T) -> R) -> List<R> {
+    // Parallel implementation using rayon-like API
+    items.par_iter().map(f).collect()
+}
+
+@cfg(not(feature = "parallel"))
+fn process_items<T, R>(items: List<T>, f: fn(T) -> R) -> List<R> {
+    // Sequential fallback
+    items.iter().map(f).collect()
+}
+
+// Platform-specific code
+@cfg(target_os = "linux")
+fn get_memory_info() -> MemoryInfo {
+    // Read from /proc/meminfo
+    MemoryInfo { total: 0, available: 0 }
+}
+
+@cfg(target_os = "macos")
+fn get_memory_info() -> MemoryInfo {
+    // Use sysctl
+    MemoryInfo { total: 0, available: 0 }
+}
+
+@cfg(target_os = "windows")
+fn get_memory_info() -> MemoryInfo {
+    // Use GlobalMemoryStatusEx
+    MemoryInfo { total: 0, available: 0 }
+}
+
+type MemoryInfo is {
+    total: Int,
+    available: Int,
+};
+
+// Architecture-specific optimizations
+@cfg(target_arch = "x86_64")
+fn fast_hash(data: &[u8]) -> Int {
+    // Use SSE/AVX intrinsics
+    0
+}
+
+@cfg(target_arch = "aarch64")
+fn fast_hash(data: &[u8]) -> Int {
+    // Use NEON intrinsics
+    0
+}
+
+@cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))
+fn fast_hash(data: &[u8]) -> Int {
+    // Generic implementation
+    let mut hash = 0;
+    for byte in data {
+        hash = hash * 31 + *byte as Int;
+    }
+    hash
+}
+
+// Compile-time assertions
+@cfg(all(feature = "tls", feature = "insecure"))
+fn compile_error_check() {
+    // Cannot enable both 'tls' and 'insecure' features
+    panic("Cannot enable both 'tls' and 'insecure' features");
+}
+
+// Feature-gated derive
+@cfg_attr(feature = "serde", derive(Serialize, Deserialize))
+@cfg_attr(feature = "debug", derive(Debug))
+type Config is {
+    name: Text,
+    value: Int,
+};
+
+fn main() {
+    logging.log("Starting application");
+
+    @cfg(feature = "parallel")
+    println("Parallel processing enabled");
+
+    @cfg(not(feature = "parallel"))
+    println("Running in sequential mode");
+
+    logging.log("Application started");
+}

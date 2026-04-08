@@ -1,0 +1,91 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: loop, expression, break-value
+// @description: Test loop as expression with break returning values
+
+fn find_first_above(threshold: Int) -> Int {
+    let mut n = 0;
+    loop {
+        n = n + 1;
+        if n * n > threshold {
+            break n;
+        }
+    }
+}
+
+fn test_loop_expr_basic() -> Int {
+    let val = find_first_above(100);
+    // 11*11 = 121 > 100
+    if val != 11 {
+        print(f"FAIL loop_basic: {val}, expected 11");
+        return 1;
+    }
+    print("  loop_expr_basic: OK");
+    0
+}
+
+fn test_loop_assigned() -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    let final_i = loop {
+        sum = sum + i;
+        if sum > 20 {
+            break i;
+        }
+        i = i + 1;
+    };
+    // 1+2+3+4+5+6 = 21 > 20, so final_i = 6
+    if final_i != 6 {
+        print(f"FAIL loop_assigned: {final_i}, expected 6");
+        return 1;
+    }
+    if sum != 21 {
+        print(f"FAIL loop_sum: {sum}, expected 21");
+        return 1;
+    }
+    print("  loop_assigned: OK");
+    0
+}
+
+fn collatz_loop(start: Int) -> Int {
+    let mut n = start;
+    let mut steps = 0;
+    loop {
+        if n == 1 {
+            break steps;
+        }
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = n * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+}
+
+fn test_collatz_loop() -> Int {
+    let steps = collatz_loop(6);
+    // 6->3->10->5->16->8->4->2->1 = 8 steps
+    if steps != 8 {
+        print(f"FAIL collatz: {steps}, expected 8");
+        return 1;
+    }
+    print("  collatz_loop: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Loop Expression Tests:");
+    let mut failures = 0;
+    failures = failures + test_loop_expr_basic();
+    failures = failures + test_loop_assigned();
+    failures = failures + test_collatz_loop();
+
+    if failures == 0 {
+        print("All loop expression tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,370 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, memory, arena, allocator, cbgr
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Arena allocator simulation.
+// Sequential allocation from a fixed-size pool with bump pointer.
+// Supports bulk free (reset) and region-based allocation.
+
+// =============================================================================
+// Array infrastructure (16-slot using two Arr8)
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// 16-slot array
+type Arr16 is { lo: Arr8, hi: Arr8 };
+
+fn a16_new() -> Arr16 {
+    Arr16 { lo: a8_new(), hi: a8_new() }
+}
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i < 8 { a8_get(a.lo, i) }
+    else { a8_get(a.hi, i - 8) }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    if i < 8 {
+        Arr16 { lo: a8_set(a.lo, i, v), hi: a.hi }
+    } else {
+        Arr16 { lo: a.lo, hi: a8_set(a.hi, i - 8, v) }
+    }
+}
+
+// =============================================================================
+// Arena allocator
+// memory[i]: simulated memory slots (16 total)
+// bump: next free offset
+// capacity: total arena capacity
+// alloc_count: number of allocations made
+// saved_marks: stack of saved positions for nested regions (max 8)
+// mark_depth: number of saved marks
+// =============================================================================
+
+type Arena is {
+    memory: Arr16,
+    bump: Int,
+    capacity: Int,
+    alloc_count: Int,
+    saved_marks: Arr8,
+    mark_depth: Int
+};
+
+fn arena_new(cap: Int) -> Arena {
+    Arena {
+        memory: a16_new(),
+        bump: 0,
+        capacity: cap,
+        alloc_count: 0,
+        saved_marks: a8_new(),
+        mark_depth: 0
+    }
+}
+
+// Allocate n slots from arena, returns (arena, start_offset) where -1 = failure
+type ArenaPair is { arena: Arena, offset: Int };
+
+fn arena_alloc(ar: Arena, n: Int) -> ArenaPair {
+    if ar.bump + n > ar.capacity {
+        return ArenaPair { arena: ar, offset: -1 };
+    }
+    let start = ar.bump;
+    ArenaPair {
+        arena: Arena {
+            memory: ar.memory,
+            bump: ar.bump + n,
+            capacity: ar.capacity,
+            alloc_count: ar.alloc_count + 1,
+            saved_marks: ar.saved_marks,
+            mark_depth: ar.mark_depth
+        },
+        offset: start
+    }
+}
+
+// Write a value at a specific offset
+fn arena_write(ar: Arena, off: Int, val: Int) -> Arena {
+    if off < 0 || off >= ar.capacity {
+        return ar;
+    }
+    Arena {
+        memory: a16_set(ar.memory, off, val),
+        bump: ar.bump,
+        capacity: ar.capacity,
+        alloc_count: ar.alloc_count,
+        saved_marks: ar.saved_marks,
+        mark_depth: ar.mark_depth
+    }
+}
+
+// Read a value at a specific offset
+fn arena_read(ar: Arena, off: Int) -> Int {
+    a16_get(ar.memory, off)
+}
+
+// Reset the arena (bulk free)
+fn arena_reset(ar: Arena) -> Arena {
+    Arena {
+        memory: a16_new(),
+        bump: 0,
+        capacity: ar.capacity,
+        alloc_count: 0,
+        saved_marks: ar.saved_marks,
+        mark_depth: 0
+    }
+}
+
+// Save current bump position (for nested region)
+fn arena_save_mark(ar: Arena) -> Arena {
+    let d = ar.mark_depth;
+    Arena {
+        memory: ar.memory,
+        bump: ar.bump,
+        capacity: ar.capacity,
+        alloc_count: ar.alloc_count,
+        saved_marks: a8_set(ar.saved_marks, d, ar.bump),
+        mark_depth: d + 1
+    }
+}
+
+// Restore to last saved mark
+fn arena_restore_mark(ar: Arena) -> Arena {
+    if ar.mark_depth <= 0 {
+        return ar;
+    }
+    let new_depth = ar.mark_depth - 1;
+    let saved_bump = a8_get(ar.saved_marks, new_depth);
+    Arena {
+        memory: ar.memory,
+        bump: saved_bump,
+        capacity: ar.capacity,
+        alloc_count: ar.alloc_count,
+        saved_marks: ar.saved_marks,
+        mark_depth: new_depth
+    }
+}
+
+// How much space is used
+fn arena_used(ar: Arena) -> Int {
+    ar.bump
+}
+
+// How much space is free
+fn arena_free(ar: Arena) -> Int {
+    ar.capacity - ar.bump
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_basic_allocation() {
+    let ar = arena_new(16);
+    assert_eq(arena_used(ar), 0);
+    assert_eq(arena_free(ar), 16);
+
+    let p1 = arena_alloc(ar, 3);
+    assert_eq(p1.offset, 0);
+    assert_eq(arena_used(p1.arena), 3);
+    assert_eq(arena_free(p1.arena), 13);
+
+    let p2 = arena_alloc(p1.arena, 5);
+    assert_eq(p2.offset, 3);
+    assert_eq(arena_used(p2.arena), 8);
+}
+
+fn test_write_and_read() {
+    let ar = arena_new(16);
+    let p1 = arena_alloc(ar, 4);
+    let mut a = p1.arena;
+
+    // Write values to allocated slots
+    a = arena_write(a, 0, 100);
+    a = arena_write(a, 1, 200);
+    a = arena_write(a, 2, 300);
+    a = arena_write(a, 3, 400);
+
+    assert_eq(arena_read(a, 0), 100);
+    assert_eq(arena_read(a, 1), 200);
+    assert_eq(arena_read(a, 2), 300);
+    assert_eq(arena_read(a, 3), 400);
+}
+
+fn test_sequential_allocations() {
+    let ar = arena_new(16);
+    let p1 = arena_alloc(ar, 2);
+    let a1 = arena_write(arena_write(p1.arena, 0, 10), 1, 20);
+
+    let p2 = arena_alloc(a1, 3);
+    let a2 = arena_write(arena_write(arena_write(p2.arena, 3, 30), 4, 40), 5, 50);
+
+    // Both regions accessible
+    assert_eq(arena_read(a2, 0), 10);
+    assert_eq(arena_read(a2, 1), 20);
+    assert_eq(arena_read(a2, 3), 30);
+    assert_eq(arena_read(a2, 4), 40);
+    assert_eq(arena_read(a2, 5), 50);
+    assert_eq(a2.alloc_count, 2);
+}
+
+fn test_overflow_protection() {
+    let ar = arena_new(8);
+    let p1 = arena_alloc(ar, 6);
+    assert_eq(p1.offset, 0);
+
+    // Try to allocate 5 more (only 2 free)
+    let p2 = arena_alloc(p1.arena, 5);
+    assert_eq(p2.offset, -1);  // Failed
+
+    // But 2 more should work
+    let p3 = arena_alloc(p1.arena, 2);
+    assert_eq(p3.offset, 6);
+    assert_eq(arena_used(p3.arena), 8);
+    assert_eq(arena_free(p3.arena), 0);
+}
+
+fn test_bulk_reset() {
+    let ar = arena_new(16);
+    let p1 = arena_alloc(ar, 4);
+    let p2 = arena_alloc(p1.arena, 4);
+    let a1 = arena_write(arena_write(p2.arena, 0, 99), 4, 88);
+    assert_eq(arena_used(a1), 8);
+
+    // Reset everything
+    let a2 = arena_reset(a1);
+    assert_eq(arena_used(a2), 0);
+    assert_eq(arena_free(a2), 16);
+    assert_eq(a2.alloc_count, 0);
+
+    // Can allocate again from the start
+    let p3 = arena_alloc(a2, 3);
+    assert_eq(p3.offset, 0);
+}
+
+fn test_save_restore_marks() {
+    let ar = arena_new(16);
+
+    // Allocate region 1
+    let p1 = arena_alloc(ar, 3);
+    let a1 = arena_write(arena_write(arena_write(p1.arena, 0, 10), 1, 20), 2, 30);
+
+    // Save mark
+    let a2 = arena_save_mark(a1);
+    assert_eq(a2.mark_depth, 1);
+
+    // Allocate temporary region
+    let p2 = arena_alloc(a2, 4);
+    let a3 = arena_write(arena_write(p2.arena, 3, 40), 4, 50);
+    assert_eq(arena_used(a3), 7);
+
+    // Restore mark -> temporary region freed
+    let a4 = arena_restore_mark(a3);
+    assert_eq(arena_used(a4), 3);
+    assert_eq(a4.mark_depth, 0);
+
+    // Original data still there
+    assert_eq(arena_read(a4, 0), 10);
+    assert_eq(arena_read(a4, 1), 20);
+    assert_eq(arena_read(a4, 2), 30);
+}
+
+fn test_nested_regions() {
+    let ar = arena_new(16);
+
+    let p1 = arena_alloc(ar, 2);
+    let a1 = arena_write(arena_write(p1.arena, 0, 1), 1, 2);
+
+    // Save mark 1
+    let a2 = arena_save_mark(a1);
+    let p2 = arena_alloc(a2, 2);
+    let a3 = arena_write(arena_write(p2.arena, 2, 3), 3, 4);
+
+    // Save mark 2 (nested)
+    let a4 = arena_save_mark(a3);
+    assert_eq(a4.mark_depth, 2);
+
+    let p3 = arena_alloc(a4, 3);
+    let a5 = p3.arena;
+    assert_eq(arena_used(a5), 7);
+
+    // Restore mark 2 -> deepest region freed
+    let a6 = arena_restore_mark(a5);
+    assert_eq(arena_used(a6), 4);
+
+    // Restore mark 1 -> middle region also freed
+    let a7 = arena_restore_mark(a6);
+    assert_eq(arena_used(a7), 2);
+
+    // Original still intact
+    assert_eq(arena_read(a7, 0), 1);
+    assert_eq(arena_read(a7, 1), 2);
+}
+
+fn test_fill_entire_arena() {
+    let ar = arena_new(8);
+    let mut a = ar;
+    let mut i = 0;
+    while i < 8 {
+        let p = arena_alloc(a, 1);
+        a = arena_write(p.arena, i, i * 10);
+        i = i + 1;
+    }
+    assert_eq(arena_used(a), 8);
+    assert_eq(arena_free(a), 0);
+
+    // Verify all values
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(arena_read(a, j), j * 10);
+        j = j + 1;
+    }
+
+    // No more room
+    let p_fail = arena_alloc(a, 1);
+    assert_eq(p_fail.offset, -1);
+}
+
+fn main() -> Int {
+    test_basic_allocation();
+    test_write_and_read();
+    test_sequential_allocations();
+    test_overflow_protection();
+    test_bulk_reset();
+    test_save_restore_marks();
+    test_nested_regions();
+    test_fill_entire_arena();
+    print("[OK] 332_interp_arena_allocator");
+    0
+}

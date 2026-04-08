@@ -1,0 +1,155 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, pi-types, type-inference
+
+/// Pi type inference - automatic deduction of dependent return types
+///
+/// The type checker infers dependent types from function implementations,
+/// reducing annotation burden while maintaining full type safety.
+
+/// Sized array for dependent type tracking
+type SizedArray<T, N: meta Int> is {
+    data: [T; N],
+};
+
+/// Inferred: return type is SizedArray<T, N>
+fn make_array<T, N: meta Int>(x: T) -> SizedArray<T, N> {
+    SizedArray { data: [x; N] }
+}
+
+/// Inferred: return type depends on both arguments
+fn safe_append<T>(xs: List<T>, ys: List<T>) -> List<T>
+where ensures len(result) == len(xs) + len(ys) {
+    let mut result = xs;
+    for y in ys {
+        result.push(y);
+    }
+    result
+}
+
+/// Bidirectional inference with explicit annotation
+fn take_first<T>(xs: List<T>) -> List<T>
+where ensures len(result) <= len(xs) {
+    if xs.len() > 0 {
+        [xs[0]]
+    } else {
+        []
+    }
+}
+
+/// Inference through higher-order functions
+fn map_infer<T, U>(xs: List<T>, f: fn(T) -> U) -> List<U>
+where ensures len(result) == len(xs) {
+    xs.map(f)
+}
+
+/// Inference with conditional types
+fn maybe_empty<T>(cond: Bool, xs: List<T>) -> List<T> {
+    if cond { xs } else { [] }
+}
+
+/// Inference propagates through let bindings
+fn binding_inference<T, N: meta Int{> 1}>(xs: SizedArray<T, N>) -> (T, T) {
+    let first = xs.data[0];
+    let second = xs.data[1];
+    (first, second)
+}
+
+/// Inference in closures
+fn closure_inference() -> fn(Int) -> Int {
+    let f = |x: Int| x * 2;
+    f
+}
+
+/// Inference with pattern matching
+fn match_inference<T>(opt: Maybe<T>) -> Maybe<T> {
+    match opt {
+        Some(x) => Some(x),
+        None => None,
+    }
+}
+
+/// Inference with recursive functions
+fn reverse_infer<T>(xs: List<T>) -> List<T>
+where ensures len(result) == len(xs) {
+    fn go<T>(acc: List<T>, rest: List<T>) -> List<T> {
+        match rest {
+            [] => acc,
+            [x, ..tail] => go([x] ++ acc, tail),
+        }
+    }
+    go([], xs)
+}
+
+/// Inference unifies type-level expressions
+fn concat3<T>(a: List<T>, b: List<T>, c: List<T>) -> List<T>
+where ensures len(result) == len(a) + len(b) + len(c) {
+    let mut result = a;
+    for x in b { result.push(x); }
+    for x in c { result.push(x); }
+    result
+}
+
+/// Inference across module boundaries
+module Vectors {
+    pub fn zeros(n: Int) -> List<Float> {
+        let mut result: List<Float> = [];
+        let mut i = 0;
+        while i < n {
+            result.push(0.0);
+            i = i + 1;
+        }
+        result
+    }
+
+    pub fn ones(n: Int) -> List<Float> {
+        let mut result: List<Float> = [];
+        let mut i = 0;
+        while i < n {
+            result.push(1.0);
+            i = i + 1;
+        }
+        result
+    }
+
+    pub fn add(a: List<Float>, b: List<Float>) -> List<Float>
+    where len(a) == len(b) {
+        a.zip(b).map(|(x, y)| x + y)
+    }
+}
+
+/// Complex inference chain
+fn pipeline(xs: List<Int>) -> List<(Int, Int)>
+where ensures len(result) == len(xs) {
+    xs.map(|x| (x, x * 2))
+}
+
+fn main() {
+    // All types inferred correctly
+    let xs: SizedArray<Int, 5> = make_array(42);
+    assert(xs.data.len() == 5);
+
+    let ys = safe_append([1, 2], [3, 4, 5]);
+    assert(ys.len() == 5);
+
+    // Binding inference
+    let pair = binding_inference(SizedArray { data: [10, 20, 30] });
+    assert(pair.0 == 10);
+    assert(pair.1 == 20);
+
+    // Higher-order inference
+    let doubled = map_infer([1, 2, 3], |x| x * 2);
+    assert(doubled.len() == 3);
+
+    // Module inference
+    let v1 = Vectors.zeros(10);
+    let v2 = Vectors.ones(10);
+    let v3 = Vectors.add(v1, v2);
+    assert(v3.len() == 10);
+
+    // Pipeline inference
+    let data = [1, 2, 3, 4, 5];
+    let result = pipeline(data);
+    assert(result.len() == 5);
+}

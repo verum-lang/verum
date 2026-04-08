@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, for, in, error
+// @description: For loop missing 'in' keyword
+// @expected-error: E089
+
+fn test() {
+    for x items { }  // Missing 'in' keyword
+}

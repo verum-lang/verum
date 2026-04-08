@@ -1,0 +1,27 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: parser, minimal, program-structure
+// @timeout: 1000
+// @expect: pass
+
+// =============================================================================
+// Minimal Program - Parser Minimal Test Seed
+// Tests absolute minimum valid program structures
+// =============================================================================
+
+// Empty program is valid
+
+// Single empty function
+fn empty() {}
+
+// Function with return
+fn returns() -> Int {
+    42
+}
+
+// Single type definition
+type Unit is ();
+
+// Single constant
+const ZERO: Int = 0;

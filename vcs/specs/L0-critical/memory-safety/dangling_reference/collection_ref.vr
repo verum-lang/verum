@@ -1,0 +1,20 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, dangling-reference, collection, invalidation, cbgr
+// @description: Tests that collection references are invalidated on mutation (detected at COMPILE-TIME)
+
+fn main() {
+    let mut items: List<Int> = [1, 2, 3, 4, 5];
+
+    // Get reference to first element
+    let first_ref = &items[0];
+
+    // Mutation may reallocate, invalidating all references
+    // CBGR tracks the generation - mutation bumps generation
+    items.push(6);
+
+    // Attempt to use invalidated reference
+    // CBGR detects generation mismatch at runtime
+    print(*first_ref);  // PANIC: generation mismatch (reference invalidated)
+}

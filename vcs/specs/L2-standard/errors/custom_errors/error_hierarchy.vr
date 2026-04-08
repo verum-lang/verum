@@ -1,0 +1,406 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, custom, hierarchy, composition
+
+/// Error hierarchy - organizing errors into composable structures.
+/// Demonstrates error categorization, nesting, and aggregation patterns.
+
+/// Base error protocol for all application errors
+type AppError is protocol extends Error + Display + Debug {
+    /// Error category for logging/metrics
+    fn category(&self) -> ErrorCategory;
+
+    /// Severity level
+    fn severity(&self) -> Severity;
+
+    /// Whether this error is retriable
+    fn is_retriable(&self) -> Bool {
+        false
+    }
+
+    /// HTTP status code if applicable
+    fn http_status(&self) -> Maybe<Int> {
+        None
+    }
+};
+
+type ErrorCategory is
+    | Validation
+    | Authentication
+    | Authorization
+    | NotFound
+    | Conflict
+    | Internal
+    | External
+    | Network
+    | Database
+    | Configuration;
+
+type Severity is
+    | Debug
+    | Info
+    | Warning
+    | Error
+    | Critical;
+
+/// Layer 1: Infrastructure errors
+module infrastructure {
+    /// Database errors
+    pub type DatabaseError is
+    | ConnectionFailed { host: Text, port: Int, reason: Text }
+    | QueryFailed { query: Text, reason: Text }
+    | TransactionFailed { reason: Text }
+    | PoolExhausted
+    | Timeout;
+
+    implement AppError for DatabaseError {
+        fn category(&self) -> ErrorCategory {
+            ErrorCategory.Database
+        }
+
+        fn severity(&self) -> Severity {
+            match self {
+                DatabaseError.PoolExhausted => Severity.Critical,
+                DatabaseError.ConnectionFailed { .. } => Severity.Critical,
+                _ => Severity.Error
+            }
+        }
+
+        fn is_retriable(&self) -> Bool {
+            match self {
+                DatabaseError.Timeout => true,
+                DatabaseError.PoolExhausted => true,
+                _ => false
+            }
+        }
+    }
+
+    /// Cache errors
+    pub type CacheError is
+    | ConnectionFailed(Text)
+    | KeyNotFound(Text)
+    | SerializationFailed(Text)
+    | Expired(Text);
+
+    implement AppError for CacheError {
+        fn category(&self) -> ErrorCategory {
+            ErrorCategory.External
+        }
+
+        fn severity(&self) -> Severity {
+            match self {
+                CacheError.ConnectionFailed(_) => Severity.Warning,
+                _ => Severity.Info
+            }
+        }
+
+        fn is_retriable(&self) -> Bool {
+            (self) is (CacheError.ConnectionFailed(_))
+        }
+    }
+
+    /// External service errors
+    pub type ExternalServiceError is
+    | Unavailable { service: Text, reason: Text }
+    | Timeout { service: Text, duration_ms: Int }
+    | RateLimited { service: Text, retry_after_ms: Int }
+    | InvalidResponse { service: Text, details: Text };
+
+    implement AppError for ExternalServiceError {
+        fn category(&self) -> ErrorCategory {
+            ErrorCategory.External
+        }
+
+        fn severity(&self) -> Severity {
+            Severity.Warning
+        }
+
+        fn is_retriable(&self) -> Bool {
+            match self {
+                ExternalServiceError.Timeout { .. } => true,
+                ExternalServiceError.RateLimited { .. } => true,
+                ExternalServiceError.Unavailable { .. } => true,
+                _ => false
+            }
+        }
+    }
+}
+
+/// Layer 2: Domain errors
+module domain {
+    mount super.infrastructure.*;
+
+    /// User-related errors
+    pub type UserError is
+    | NotFound(UserId)
+    | AlreadyExists { email: Text }
+    | InvalidCredentials
+    | AccountLocked { reason: Text, until: Maybe<Timestamp> }
+    | InsufficientPermissions { required: Permission, has: List<Permission> };
+
+    pub type UserId is Int;
+    pub type Timestamp is Int;
+    pub type Permission is Text;
+
+    implement AppError for UserError {
+        fn category(&self) -> ErrorCategory {
+            match self {
+                UserError.NotFound(_) => ErrorCategory.NotFound,
+                UserError.AlreadyExists { .. } => ErrorCategory.Conflict,
+                UserError.InvalidCredentials => ErrorCategory.Authentication,
+                UserError.AccountLocked { .. } => ErrorCategory.Authentication,
+                UserError.InsufficientPermissions { .. } => ErrorCategory.Authorization
+            }
+        }
+
+        fn severity(&self) -> Severity {
+            match self {
+                UserError.InvalidCredentials => Severity.Warning,
+                UserError.AccountLocked { .. } => Severity.Warning,
+                _ => Severity.Info
+            }
+        }
+
+        fn http_status(&self) -> Maybe<Int> {
+            Some(match self {
+                UserError.NotFound(_) => 404,
+                UserError.AlreadyExists { .. } => 409,
+                UserError.InvalidCredentials => 401,
+                UserError.AccountLocked { .. } => 403,
+                UserError.InsufficientPermissions { .. } => 403
+            })
+        }
+    }
+
+    /// Order-related errors
+    pub type OrderError is
+    | NotFound(OrderId)
+    | InvalidState { current: OrderState, attempted_action: Text }
+    | InsufficientInventory { product_id: ProductId, requested: Int, available: Int }
+    | PaymentFailed(PaymentError)
+    | ValidationFailed(List<ValidationError>);
+
+    pub type OrderId is Int;
+    pub type ProductId is Int;
+    pub type OrderState is Draft | Pending | Confirmed | Shipped | Delivered | Cancelled;
+    pub type PaymentError is { code: Text, message: Text };
+    pub type ValidationError is { field: Text, message: Text };
+
+    implement AppError for OrderError {
+        fn category(&self) -> ErrorCategory {
+            match self {
+                OrderError.NotFound(_) => ErrorCategory.NotFound,
+                OrderError.InvalidState { .. } => ErrorCategory.Conflict,
+                OrderError.InsufficientInventory { .. } => ErrorCategory.Conflict,
+                OrderError.PaymentFailed(_) => ErrorCategory.External,
+                OrderError.ValidationFailed(_) => ErrorCategory.Validation
+            }
+        }
+
+        fn severity(&self) -> Severity {
+            match self {
+                OrderError.PaymentFailed(_) => Severity.Warning,
+                _ => Severity.Info
+            }
+        }
+
+        fn http_status(&self) -> Maybe<Int> {
+            Some(match self {
+                OrderError.NotFound(_) => 404,
+                OrderError.InvalidState { .. } => 409,
+                OrderError.InsufficientInventory { .. } => 409,
+                OrderError.PaymentFailed(_) => 402,
+                OrderError.ValidationFailed(_) => 400
+            })
+        }
+    }
+}
+
+/// Layer 3: Application errors (aggregate)
+module application {
+    mount super.infrastructure.*;
+    mount super.domain.*;
+
+    /// Top-level application error that encompasses all error types
+    pub type AppError is
+    | Database(DatabaseError)
+    | Cache(CacheError)
+    | ExternalService(ExternalServiceError)
+    | User(UserError)
+    | Order(OrderError)
+    | Configuration(Text)
+    | Internal(Text);
+
+    // Conversion implementations
+    implement From<DatabaseError> for AppError {
+        fn from(e: DatabaseError) -> AppError {
+            AppError.Database(e)
+        }
+    }
+
+    implement From<CacheError> for AppError {
+        fn from(e: CacheError) -> AppError {
+            AppError.Cache(e)
+        }
+    }
+
+    implement From<ExternalServiceError> for AppError {
+        fn from(e: ExternalServiceError) -> AppError {
+            AppError.ExternalService(e)
+        }
+    }
+
+    implement From<UserError> for AppError {
+        fn from(e: UserError) -> AppError {
+            AppError.User(e)
+        }
+    }
+
+    implement From<OrderError> for AppError {
+        fn from(e: OrderError) -> AppError {
+            AppError.Order(e)
+        }
+    }
+
+    implement AppError for AppError {
+        fn category(&self) -> ErrorCategory {
+            match self {
+                AppError.Database(e) => e.category(),
+                AppError.Cache(e) => e.category(),
+                AppError.ExternalService(e) => e.category(),
+                AppError.User(e) => e.category(),
+                AppError.Order(e) => e.category(),
+                AppError.Configuration(_) => ErrorCategory.Configuration,
+                AppError.Internal(_) => ErrorCategory.Internal
+            }
+        }
+
+        fn severity(&self) -> Severity {
+            match self {
+                AppError.Database(e) => e.severity(),
+                AppError.Cache(e) => e.severity(),
+                AppError.ExternalService(e) => e.severity(),
+                AppError.User(e) => e.severity(),
+                AppError.Order(e) => e.severity(),
+                AppError.Configuration(_) => Severity.Critical,
+                AppError.Internal(_) => Severity.Error
+            }
+        }
+
+        fn is_retriable(&self) -> Bool {
+            match self {
+                AppError.Database(e) => e.is_retriable(),
+                AppError.Cache(e) => e.is_retriable(),
+                AppError.ExternalService(e) => e.is_retriable(),
+                _ => false
+            }
+        }
+
+        fn http_status(&self) -> Maybe<Int> {
+            match self {
+                AppError.User(e) => e.http_status(),
+                AppError.Order(e) => e.http_status(),
+                AppError.Database(_) => Some(503),
+                AppError.Cache(_) => None,  // Cache errors often shouldn't affect HTTP status
+                AppError.ExternalService(_) => Some(502),
+                AppError.Configuration(_) => Some(500),
+                AppError.Internal(_) => Some(500)
+            }
+        }
+    }
+}
+
+/// Error aggregation - collecting multiple errors
+type ErrorBatch<E> is {
+    errors: List<E>,
+    context: Text
+};
+
+implement<E: Error> ErrorBatch<E> {
+    fn new(context: Text) -> Self {
+        ErrorBatch {
+            errors: List.new(),
+            context
+        }
+    }
+
+    fn add(&mut self, error: E) {
+        self.errors.push(error);
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.errors.is_empty()
+    }
+
+    fn into_result<T>(self, success: T) -> Result<T, Self> {
+        if self.is_empty() {
+            Ok(success)
+        } else {
+            Err(self)
+        }
+    }
+}
+
+implement<E: Display> Display for ErrorBatch<E> {
+    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
+        formatter.write_str(f"{self.context} ({self.errors.len()} errors):");
+        for (i, e) in self.errors.iter().enumerate() {
+            formatter.write_str(f"\n  {i + 1}. {e}");
+        }
+        Ok(())
+    }
+}
+
+/// Error chain - for tracking error causation
+type ErrorChain is {
+    errors: List<Heap<Error>>
+};
+
+implement ErrorChain {
+    fn new(root: impl Error) -> Self {
+        ErrorChain {
+            errors: [Heap(root)]
+        }
+    }
+
+    fn caused_by(mut self, cause: impl Error) -> Self {
+        self.errors.push(Heap(cause));
+        self
+    }
+
+    fn root(&self) -> &Error {
+        self.errors.first().unwrap().as_ref()
+    }
+
+    fn cause(&self) -> Maybe<&Error> {
+        if self.errors.len() > 1 {
+            Some(self.errors.last().unwrap().as_ref())
+        } else {
+            None
+        }
+    }
+}
+
+fn main() {
+    mount application.AppError;
+    mount domain.{UserError, UserId, ValidationError};
+
+    // Using the error hierarchy
+    let user_error: UserError = NotFound(12345);
+    let app_error: AppError = user_error.into();
+
+    print(f"Category: {app_error.category()}");
+    print(f"Severity: {app_error.severity()}");
+    print(f"HTTP Status: {app_error.http_status()}");
+    print(f"Retriable: {app_error.is_retriable()}");
+
+    // Batch errors
+    let mut batch = ErrorBatch.new("Validation errors");
+    batch.add(ValidationError { field: "email", message: "Invalid format" });
+    batch.add(ValidationError { field: "age", message: "Must be positive" });
+
+    if !batch.is_empty() {
+        print(f"Batch: {batch}");
+    }
+}

@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, record, literal, error
+// @description: Record literal using = instead of : for field initialization
+// @expected-error: E018
+
+type Point is { x: Int, y: Int };
+
+fn test() {
+    let p = Point { x = 1, y = 2 };  // Wrong: should use : not =
+}

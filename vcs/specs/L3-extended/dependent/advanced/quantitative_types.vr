@@ -1,0 +1,133 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, linear-types, quantitative, advanced
+
+/// Quantitative types - tracking resource usage at the type level
+///
+/// Quantitative type theory tracks how many times a value is used.
+
+/// Affine type: used at most once
+type affine FileHandle is {
+    path: Text,
+    fd: Int,
+};
+
+/// Open a file (creates affine handle)
+fn open_file(path: Text) -> Maybe<FileHandle> {
+    Some(FileHandle { path, fd: 42 })
+}
+
+/// Read from file (consumes handle, returns new one)
+fn read_file(f: FileHandle) -> (List<Int>, FileHandle) {
+    ([1, 2, 3], FileHandle { path: f.path, fd: f.fd })
+}
+
+/// Close file (consumes handle permanently)
+fn close_file(f: FileHandle) {
+    // Handle consumed, no longer usable
+}
+
+/// Linear pair: both components must be used
+type LinPair<A, B> is {
+    fst: A,
+    snd: B,
+};
+
+fn lin_pair<A, B>(a: A, b: B) -> LinPair<A, B> {
+    LinPair { fst: a, snd: b }
+}
+
+fn use_both<A, B, R>(p: LinPair<A, B>, f: fn(A, B) -> R) -> R {
+    f(p.fst, p.snd)
+}
+
+/// Resource tracking type
+type Resource<T> is {
+    value: T,
+    count: Int,
+};
+
+fn acquire<T>(value: T) -> Resource<T> {
+    Resource { value, count: 1 }
+}
+
+fn use_resource<T, R>(r: Resource<T>, f: fn(&T) -> R) -> (R, Resource<T>) {
+    let result = f(&r.value);
+    (result, Resource { value: r.value, count: r.count + 1 })
+}
+
+fn release<T>(r: Resource<T>) -> T {
+    r.value
+}
+
+/// Capability-based security using linear types
+type Capability<T> is {
+    token: Int,
+    data: T,
+};
+
+fn grant_capability<T>(data: T) -> Capability<T> {
+    Capability { token: 1, data }
+}
+
+fn use_capability<T, R>(cap: Capability<T>, f: fn(&T) -> R) -> (R, Capability<T>) {
+    let result = f(&cap.data);
+    (result, Capability { token: cap.token + 1, data: cap.data })
+}
+
+fn revoke_capability<T>(cap: Capability<T>) {
+    // Capability consumed
+}
+
+/// Session type (simplified)
+type Session<T> is {
+    channel: Int,
+    state: T,
+};
+
+type SendState<T> is { payload: T };
+type RecvState<T> is { expected: T };
+type EndState is { done: Bool };
+
+fn send_msg<T>(s: Session<SendState<T>>, msg: T) -> Session<EndState> {
+    Session { channel: s.channel, state: EndState { done: true } }
+}
+
+fn recv_msg<T>(s: Session<RecvState<T>>) -> (T, Session<EndState>) {
+    (s.state.expected, Session { channel: s.channel, state: EndState { done: true } })
+}
+
+fn close_session<T>(s: Session<T>) {
+    // Session ended
+}
+
+fn main() {
+    // File handle (affine usage)
+    let file = open_file("test.txt");
+    match file {
+        Some(f) => {
+            let (data, f) = read_file(f);
+            assert(data.len() == 3);
+            close_file(f);  // Must close
+        }
+        None => {}
+    }
+
+    // Linear pair
+    let pair = lin_pair(42, "hello");
+    let result = use_both(pair, |a, b| f"{a}: {b}");
+
+    // Resource tracking
+    let res = acquire(100);
+    let (val, res) = use_resource(res, |v| *v * 2);
+    assert(val == 200);
+    let original = release(res);
+    assert(original == 100);
+
+    // Capability
+    let cap = grant_capability([1, 2, 3]);
+    let (len, cap) = use_capability(cap, |data| data.len());
+    assert(len == 3);
+    revoke_capability(cap);
+}

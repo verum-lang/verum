@@ -1,0 +1,77 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, inference, ambiguous, error
+// @expected-error: E018
+
+/// Test for ambiguous type inference.
+/// These cases cannot be resolved without additional type annotations.
+///
+/// UNIMPLEMENTED FEATURES:
+/// - [] macro syntax
+/// - Default.default() method
+/// - Maybe/None type and constructors
+/// - parse() method
+/// - collect() method
+/// - From.from() method
+/// - Closure expressions
+/// - Protocol definitions and implement blocks
+/// - Function overloading (not supported in Verum)
+
+fn main() {
+    // ERROR: Empty collection without type annotation
+    let empty = [];  // E404: Cannot infer element type
+
+    // ERROR: Default.default without context
+    let default_val = Default.default();  // E404: Cannot infer type for Default
+
+    // ERROR: None without type context
+    let none_val = None;  // E404: Cannot infer Maybe<?>
+
+    // ERROR: parse without target type
+    let parsed = "42".parse();  // E404: Cannot infer parse target type
+
+    // ERROR: collect without target collection type
+    let collected = (1..5).map(|x| x * 2).collect();  // E404: Cannot infer collection
+
+    // ERROR: From.from without source/target context
+    let converted = From.from(42);  // E404: Ambiguous conversion target
+
+    // ERROR: Numeric literal in overloaded context
+    fn overloaded(x: Int) { }
+    fn overloaded(x: Float) { }
+    overloaded(42);  // E404: Ambiguous overload (if overloading supported)
+
+    // ERROR: Generic function with unconstrained return
+    fn unconstrained<T>() -> T {
+        panic("cannot create T")
+    }
+    let unknown = unconstrained();  // E404: Cannot infer T
+
+    // ERROR: Closure with ambiguous parameter types
+    let ambiguous_closure = |x| x;  // E404: Cannot infer type of x
+    ambiguous_closure(1);  // Too late - closure type already needed
+
+    // ERROR: Multiple trait implementations without disambiguation
+    type Convertible is protocol {
+        fn convert(&self) -> Self;
+    }
+    implement Convertible for Int { fn convert(&self) -> Int { *self } }
+    implement Convertible for Float { fn convert(&self) -> Float { *self } }
+
+    fn use_convertible<T: Convertible>(x: T) -> T { x.convert() }
+    // use_convertible(???);  // E404: Cannot infer which Convertible
+
+    // ERROR: Associated type without concrete type
+    fn get_item<I: Iterator>() -> I.Item {
+        panic("cannot create item")
+    }
+    let item = get_item();  // E404: Cannot infer I
+
+    // ERROR: Phantom type without usage
+    type Phantom<T> is ();
+    let phantom = Phantom;  // E404: Cannot infer T for Phantom<T>
+}
+
+// Note: These are all expected to fail with E404.
+// The file is intentionally invalid to test error detection.

@@ -1,0 +1,155 @@
+// @test: run
+// @expected-stdout: Sub1 received: hello\nSub2 received: hello\nSub1 received: world\nSub2 received: world\nBroadcast complete
+// @tier: 0
+// @level: L2
+// @tags: async, channels, broadcast
+// @description: Broadcast channel for multi-consumer messaging
+
+// Broadcast channel - multiple receivers all get the same messages
+type BroadcastSender<T> is {
+    tx: Any
+};
+
+type BroadcastReceiver<T> is {
+    rx: Any
+};
+
+// Create broadcast channel with capacity
+fn broadcast<T: Clone>(capacity: Int) -> (BroadcastSender<T>, BroadcastReceiver<T>) {
+    let (tx, rx) = runtime.create_broadcast(capacity);
+    (BroadcastSender { tx }, BroadcastReceiver { rx })
+}
+
+// Broadcast errors
+type BroadcastSendError is NoReceivers;
+
+type BroadcastRecvError is
+    | Closed
+    | Lagged(Int);  // Number of skipped messages
+
+implement<T: Clone> BroadcastSender<T> {
+    // Send to all subscribers
+    fn send(&self, value: T) -> Result<Int, BroadcastSendError> {
+        // Returns number of receivers that got the message
+    }
+
+    // Get number of active subscribers
+    fn receiver_count(&self) -> Int {
+        // Implementation
+    }
+
+    // Subscribe to receive messages
+    fn subscribe(&self) -> BroadcastReceiver<T> {
+        // Creates new receiver
+    }
+}
+
+implement<T: Clone> BroadcastReceiver<T> {
+    // Receive next message
+    async fn recv(&mut self) -> Result<T, BroadcastRecvError> {
+        // Implementation
+    }
+
+    // Try receive without waiting
+    fn try_recv(&mut self) -> Result<T, TryRecvError> {
+        // Implementation
+    }
+
+    // Resubscribe (catch up to latest)
+    fn resubscribe(&self) -> Self {
+        // Creates fresh receiver from current position
+    }
+}
+
+// Pub/Sub pattern
+type Topic<T> is {
+    sender: BroadcastSender<T>,
+};
+
+implement<T: Clone> Topic<T> {
+    fn new(capacity: Int) -> Self {
+        let (tx, _) = broadcast(capacity);
+        Self { sender: tx }
+    }
+
+    fn publish(&self, message: T) -> Result<Int, BroadcastSendError> {
+        self.sender.send(message)
+    }
+
+    fn subscribe(&self) -> Subscription<T> {
+        Subscription { receiver: self.sender.subscribe() }
+    }
+}
+
+type Subscription<T> is {
+    receiver: BroadcastReceiver<T>,
+};
+
+implement<T: Clone> Subscription<T> {
+    async fn next(&mut self) -> Maybe<T> {
+        match self.receiver.recv().await {
+            Ok(v) => Some(v),
+            Err(BroadcastRecvError.Lagged(n)) => {
+                // Skip lagged messages and try again
+                self.next().await
+            }
+            Err(BroadcastRecvError.Closed) => None,
+        }
+    }
+
+    fn with_handler<F: Fn(T)>(self, handler: F) -> SubscriptionHandler<T, F> {
+        SubscriptionHandler { sub: self, handler }
+    }
+}
+
+type SubscriptionHandler<T, F> is {
+    sub: Subscription<T>,
+    handler: F,
+};
+
+implement<T: Clone, F: Fn(T)> SubscriptionHandler<T, F> {
+    async fn run(mut self) {
+        while let Some(msg) = self.sub.next().await {
+            (self.handler)(msg);
+        }
+    }
+}
+
+async fn subscriber(name: Text, mut rx: BroadcastReceiver<Text>) {
+    loop {
+        match rx.recv().await {
+            Ok(msg) => println(f"{name} received: {msg}"),
+            Err(BroadcastRecvError.Lagged(n)) => {
+                println(f"{name} lagged by {n} messages");
+            }
+            Err(BroadcastRecvError.Closed) => break,
+        }
+    }
+}
+
+async fn main() {
+    let (tx, rx1) = broadcast<Text>(16);
+    let rx2 = tx.subscribe();
+
+    // Start subscribers
+    let h1 = spawn subscriber("Sub1", rx1);
+    let h2 = spawn subscriber("Sub2", rx2);
+
+    // Give subscribers time to start
+    sleep(Duration.from_millis(10)).await;
+
+    // Broadcast messages
+    tx.send("hello");
+    tx.send("world");
+
+    // Give time to receive
+    sleep(Duration.from_millis(10)).await;
+
+    // Close channel
+    drop(tx);
+
+    h1.await;
+    h2.await;
+
+    println("Broadcast complete");
+}

@@ -1,0 +1,938 @@
+// =============================================================================
+// supervisor_test.vr - Tests for supervision tree types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, supervisor, erlang, otp, fault-tolerance, core
+// @description: Tests for Erlang/OTP-style supervision tree types
+//
+// Coverage:
+// - SupervisorId and ChildId generation
+// - SupervisionStrategy variants
+// - RestartStrategy behavior
+// - FailureReason classification
+// - ChildStatus transitions
+// - ChildSpec construction and variants
+// - RestartIntensity tracking
+// - ShutdownStrategy configuration
+// - SupervisorConfig construction
+// - EscalationPolicy and EscalationReason
+// =============================================================================
+
+module specs.core.runtime.supervisor_test;
+
+mount core.runtime.supervisor.{
+    SupervisorId,
+    ChildId,
+    SupervisionStrategy,
+    RestartStrategy,
+    FailureReason,
+    ChildStatus,
+    ChildSpec,
+    RestartIntensity,
+    ShutdownStrategy,
+    SupervisorConfig,
+    EscalationPolicy,
+    EscalationReason,
+    SupervisorError,
+    SupervisorHandle,
+    SupervisorStatus,
+    RestartEvent,
+};
+mount core.runtime.spawn.{PriorityLevel};
+
+// =============================================================================
+// Section 1: SupervisorId Tests
+// =============================================================================
+
+@test
+fn test_supervisor_id_new() {
+    let id1 = SupervisorId.new();
+    let id2 = SupervisorId.new();
+
+    // IDs should be unique
+    assert(id1.raw() != id2.raw());
+
+    print("SupervisorId.new() test passed");
+}
+
+@test
+fn test_supervisor_id_root() {
+    let root = SupervisorId.root();
+
+    // Root ID should be 0
+    assert_eq(root.raw(), 0);
+
+    print("SupervisorId.root() test passed");
+}
+
+@test
+fn test_supervisor_id_raw() {
+    let id = SupervisorId.new();
+    let raw = id.raw();
+
+    // Raw value should be positive (non-root)
+    assert(raw > 0);
+
+    print("SupervisorId.raw() test passed");
+}
+
+// =============================================================================
+// Section 2: ChildId Tests
+// =============================================================================
+
+@test
+fn test_child_id_new() {
+    let id1 = ChildId.new();
+    let id2 = ChildId.new();
+
+    // IDs should be unique
+    assert(id1.raw() != id2.raw());
+
+    print("ChildId.new() test passed");
+}
+
+@test
+fn test_child_id_raw() {
+    let id = ChildId.new();
+    let raw = id.raw();
+
+    // Raw value should be positive
+    assert(raw > 0);
+
+    print("ChildId.raw() test passed");
+}
+
+// =============================================================================
+// Section 3: SupervisionStrategy Tests
+// =============================================================================
+
+@test
+fn test_supervision_strategy_variants() {
+    let one_for_one = SupervisionStrategy.OneForOne;
+    let one_for_all = SupervisionStrategy.OneForAll;
+    let rest_for_one = SupervisionStrategy.RestForOne;
+
+    assert(one_for_one is SupervisionStrategy.OneForOne);
+    assert(one_for_all is SupervisionStrategy.OneForAll);
+    assert(rest_for_one is SupervisionStrategy.RestForOne);
+
+    print("SupervisionStrategy variants test passed");
+}
+
+@test
+fn test_supervision_strategy_description() {
+    let one_for_one = SupervisionStrategy.OneForOne;
+    let desc = one_for_one.description();
+
+    assert(!desc.is_empty());
+
+    print("SupervisionStrategy.description() test passed");
+}
+
+@test
+fn test_supervision_strategy_one_for_one() {
+    // OneForOne: Only restart the failed child
+    let strategy = SupervisionStrategy.OneForOne;
+    let desc = strategy.description();
+
+    assert(desc.contains(&"one") || desc.contains(&"One"));
+
+    print("SupervisionStrategy OneForOne test passed");
+}
+
+@test
+fn test_supervision_strategy_one_for_all() {
+    // OneForAll: Restart all children when one fails
+    let strategy = SupervisionStrategy.OneForAll;
+    let desc = strategy.description();
+
+    assert(desc.contains(&"all") || desc.contains(&"All"));
+
+    print("SupervisionStrategy OneForAll test passed");
+}
+
+@test
+fn test_supervision_strategy_rest_for_one() {
+    // RestForOne: Restart failed child and all children started after it
+    let strategy = SupervisionStrategy.RestForOne;
+    let desc = strategy.description();
+
+    assert(desc.contains(&"rest") || desc.contains(&"Rest"));
+
+    print("SupervisionStrategy RestForOne test passed");
+}
+
+// =============================================================================
+// Section 4: RestartStrategy Tests
+// =============================================================================
+
+@test
+fn test_restart_strategy_variants() {
+    let permanent = RestartStrategy.Permanent;
+    let transient = RestartStrategy.Transient;
+    let temporary = RestartStrategy.Temporary;
+
+    assert(permanent is RestartStrategy.Permanent);
+    assert(transient is RestartStrategy.Transient);
+    assert(temporary is RestartStrategy.Temporary);
+
+    print("RestartStrategy variants test passed");
+}
+
+@test
+fn test_restart_strategy_permanent() {
+    // Permanent: Always restart
+    let strategy = RestartStrategy.Permanent;
+
+    // Should restart for any failure
+    let normal_exit = FailureReason.NormalExit;
+    let crash = FailureReason.Panic("test");
+
+    assert(strategy.should_restart(normal_exit));
+    assert(strategy.should_restart(crash));
+
+    print("RestartStrategy Permanent test passed");
+}
+
+@test
+fn test_restart_strategy_transient() {
+    // Transient: Only restart on abnormal exit
+    let strategy = RestartStrategy.Transient;
+
+    let normal_exit = FailureReason.NormalExit;
+    let crash = FailureReason.Panic("test");
+
+    assert(!strategy.should_restart(normal_exit));  // Normal exit: don't restart
+    assert(strategy.should_restart(crash));          // Crash: restart
+
+    print("RestartStrategy Transient test passed");
+}
+
+@test
+fn test_restart_strategy_temporary() {
+    // Temporary: Never restart
+    let strategy = RestartStrategy.Temporary;
+
+    let normal_exit = FailureReason.NormalExit;
+    let crash = FailureReason.Panic("test");
+
+    assert(!strategy.should_restart(normal_exit));
+    assert(!strategy.should_restart(crash));
+
+    print("RestartStrategy Temporary test passed");
+}
+
+// =============================================================================
+// Section 5: FailureReason Tests
+// =============================================================================
+
+@test
+fn test_failure_reason_variants() {
+    let normal = FailureReason.NormalExit;
+    let shutdown = FailureReason.SupervisorShutdown;
+    let crash = FailureReason.Panic("error");
+    let timeout = FailureReason.Timeout;
+    let killed = FailureReason.Cancelled;
+
+    assert(normal is FailureReason.NormalExit);
+    assert(shutdown is FailureReason.SupervisorShutdown);
+    assert(crash is FailureReason.Panic);
+    assert(timeout is FailureReason.Timeout);
+    assert(killed is FailureReason.Cancelled);
+
+    print("FailureReason variants test passed");
+}
+
+@test
+fn test_failure_reason_is_abnormal() {
+    // Normal exit and shutdown are normal
+    assert(!FailureReason.NormalExit.is_abnormal());
+    assert(!FailureReason.SupervisorShutdown.is_abnormal());
+
+    // Crash, timeout, killed are abnormal
+    let crash = FailureReason.Panic("error");
+    assert(crash.is_abnormal());
+    assert(FailureReason.Timeout.is_abnormal());
+    assert(FailureReason.Cancelled.is_abnormal());
+
+    print("FailureReason.is_abnormal() test passed");
+}
+
+@test
+fn test_failure_reason_description() {
+    let normal = FailureReason.NormalExit;
+    let crash = FailureReason.Panic("test error");
+
+    let normal_desc = normal.description();
+    let crash_desc = crash.description();
+
+    assert(!normal_desc.is_empty());
+    assert(!crash_desc.is_empty());
+    assert(crash_desc.contains(&"test error") || crash_desc.contains(&"error"));
+
+    print("FailureReason.description() test passed");
+}
+
+// =============================================================================
+// Section 6: ChildStatus Tests
+// =============================================================================
+
+@test
+fn test_child_status_variants() {
+    let running = ChildStatus.Running;
+    let starting = ChildStatus.Starting;
+    let restarting = ChildStatus.Restarting;
+    let terminated = ChildStatus.Terminated;
+    let failed = ChildStatus.Failed;
+    let stopped = ChildStatus.Stopped;
+
+    assert(running is ChildStatus.Running);
+    assert(starting is ChildStatus.Starting);
+    assert(restarting is ChildStatus.Restarting);
+    assert(terminated is ChildStatus.Terminated);
+    assert(failed is ChildStatus.Failed);
+    assert(stopped is ChildStatus.Stopped);
+
+    print("ChildStatus variants test passed");
+}
+
+@test
+fn test_child_status_from_u8() {
+    // Test conversion from u8
+    let running = ChildStatus.from_u8(0);
+    let starting = ChildStatus.from_u8(1);
+    let restarting = ChildStatus.from_u8(2);
+    let terminated = ChildStatus.from_u8(3);
+    let failed = ChildStatus.from_u8(4);
+    let stopped = ChildStatus.from_u8(5);
+
+    assert(running is ChildStatus.Running);
+    assert(starting is ChildStatus.Starting);
+    assert(restarting is ChildStatus.Restarting);
+    assert(terminated is ChildStatus.Terminated);
+    assert(failed is ChildStatus.Failed);
+    assert(stopped is ChildStatus.Stopped);
+
+    print("ChildStatus.from_u8() test passed");
+}
+
+@test
+fn test_child_status_is_active() {
+    // Active states: Running, Starting, Restarting
+    assert(ChildStatus.Running.is_active());
+    assert(ChildStatus.Starting.is_active());
+    assert(ChildStatus.Restarting.is_active());
+
+    // Inactive states: Terminated, Failed, Stopped
+    assert(!ChildStatus.Terminated.is_active());
+    assert(!ChildStatus.Failed.is_active());
+    assert(!ChildStatus.Stopped.is_active());
+
+    print("ChildStatus.is_active() test passed");
+}
+
+// =============================================================================
+// Section 7: ChildSpec Tests
+// =============================================================================
+
+@test
+fn test_child_spec_new() {
+    let spec = ChildSpec.new("test");
+
+    // Default values
+    assert(spec.restart is RestartStrategy.Transient);
+
+    print("ChildSpec.new() test passed");
+}
+
+@test
+fn test_child_spec_permanent() {
+    let spec = ChildSpec.permanent("test");
+
+    assert(spec.restart is RestartStrategy.Permanent);
+
+    print("ChildSpec.permanent() test passed");
+}
+
+@test
+fn test_child_spec_temporary() {
+    let spec = ChildSpec.temporary("test");
+
+    assert(spec.restart is RestartStrategy.Temporary);
+
+    print("ChildSpec.temporary() test passed");
+}
+
+@test
+fn test_child_spec_default() {
+    let spec = ChildSpec.default();
+
+    // Default should be Transient
+    assert(spec.restart is RestartStrategy.Transient);
+
+    print("ChildSpec.default() test passed");
+}
+
+@test
+fn test_child_spec_with_restart() {
+    let spec = ChildSpec.new("test")
+        .with_restart(RestartStrategy.Permanent);
+
+    assert(spec.restart is RestartStrategy.Permanent);
+
+    print("ChildSpec.with_restart() test passed");
+}
+
+@test
+fn test_child_spec_with_shutdown_timeout() {
+    let spec = ChildSpec.new("test")
+        .with_shutdown_timeout_ms(5000);
+
+    // Verify timeout is set
+    assert(spec.shutdown_timeout_ms > 0);
+    assert_eq(spec.shutdown_timeout_ms, 5000);
+
+    print("ChildSpec.with_shutdown_timeout_ms() test passed");
+}
+
+@test
+fn test_child_spec_with_restart_limits() {
+    let spec = ChildSpec.new("test")
+        .with_restart_limits(3, 60000);  // 3 restarts in 60 seconds
+
+    assert_eq(spec.max_restarts, 3);
+    assert_eq(spec.restart_window_secs, 60000);
+
+    print("ChildSpec.with_restart_limits() test passed");
+}
+
+@test
+fn test_child_spec_with_priority() {
+    let spec = ChildSpec.new("test")
+        .with_priority(PriorityLevel.High.to_u8());
+
+    assert_eq(spec.priority, PriorityLevel.High.to_u8());
+
+    print("ChildSpec.with_priority() test passed");
+}
+
+@test
+fn test_child_spec_builder_chain() {
+    let spec = ChildSpec.new("test")
+        .with_restart(RestartStrategy.Permanent)
+        .with_shutdown_timeout_ms(10000)
+        .with_restart_limits(5, 120000)
+        .with_priority(PriorityLevel.Critical.to_u8());
+
+    assert(spec.restart is RestartStrategy.Permanent);
+    assert_eq(spec.shutdown_timeout_ms, 10000);
+    assert_eq(spec.max_restarts, 5);
+    assert_eq(spec.restart_window_secs, 120000);
+    assert_eq(spec.priority, PriorityLevel.Critical.to_u8());
+
+    print("ChildSpec builder chain test passed");
+}
+
+// =============================================================================
+// Section 8: RestartIntensity Tests
+// =============================================================================
+
+@test
+fn test_restart_intensity_new() {
+    let intensity = RestartIntensity.new(3, 60000);  // 3 restarts in 60 seconds
+
+    assert_eq(intensity.max_restarts, 3);
+    assert_eq(intensity.window_ms, 60000);
+    assert_eq(intensity.current_count(), 0);
+
+    print("RestartIntensity.new() test passed");
+}
+
+@test
+fn test_restart_intensity_record_restart() {
+    let mut intensity = RestartIntensity.new(3, 60000);
+
+    // First restart should be allowed
+    let allowed1 = intensity.record_restart();
+    assert(allowed1);
+    assert_eq(intensity.current_count(), 1);
+
+    // Second restart should be allowed
+    let allowed2 = intensity.record_restart();
+    assert(allowed2);
+    assert_eq(intensity.current_count(), 2);
+
+    // Third restart should be allowed
+    let allowed3 = intensity.record_restart();
+    assert(allowed3);
+    assert_eq(intensity.current_count(), 3);
+
+    // Fourth restart should NOT be allowed (exceeds limit)
+    let allowed4 = intensity.record_restart();
+    assert(!allowed4);
+
+    print("RestartIntensity.record_restart() test passed");
+}
+
+@test
+fn test_restart_intensity_would_allow() {
+    let mut intensity = RestartIntensity.new(2, 60000);
+
+    // Should allow first two
+    assert(intensity.would_allow_restart());
+    intensity.record_restart();
+
+    assert(intensity.would_allow_restart());
+    intensity.record_restart();
+
+    // Should not allow third
+    assert(!intensity.would_allow_restart());
+
+    print("RestartIntensity.would_allow_restart() test passed");
+}
+
+@test
+fn test_restart_intensity_reset() {
+    let mut intensity = RestartIntensity.new(3, 60000);
+
+    // Record some restarts
+    intensity.record_restart();
+    intensity.record_restart();
+    assert_eq(intensity.current_count(), 2);
+
+    // Reset
+    intensity.reset();
+    assert_eq(intensity.current_count(), 0);
+
+    // Should allow restarts again
+    assert(intensity.would_allow_restart());
+
+    print("RestartIntensity.reset() test passed");
+}
+
+// =============================================================================
+// Section 9: ShutdownStrategy Tests
+// =============================================================================
+
+@test
+fn test_shutdown_strategy_graceful() {
+    let shutdown = ShutdownStrategy.graceful();
+
+    assert_eq(shutdown.timeout_ms(), 5000);  // Default graceful timeout
+
+    print("ShutdownStrategy.graceful() test passed");
+}
+
+@test
+fn test_shutdown_strategy_brutal() {
+    let shutdown = ShutdownStrategy.brutal();
+
+    assert_eq(shutdown.timeout_ms(), 0);  // Immediate
+
+    print("ShutdownStrategy.brutal() test passed");
+}
+
+@test
+fn test_shutdown_strategy_custom_timeout() {
+    let graceful = ShutdownStrategy.Graceful { timeout_ms: 10000 };
+
+    assert_eq(graceful.timeout_ms(), 10000);
+
+    print("ShutdownStrategy custom timeout test passed");
+}
+
+// =============================================================================
+// Section 10: SupervisorConfig Tests
+// =============================================================================
+
+@test
+fn test_supervisor_config_one_for_one() {
+    let config = SupervisorConfig.one_for_one("test");
+
+    assert(config.strategy is SupervisionStrategy.OneForOne);
+
+    print("SupervisorConfig.one_for_one() test passed");
+}
+
+@test
+fn test_supervisor_config_one_for_all() {
+    let config = SupervisorConfig.one_for_all("test");
+
+    assert(config.strategy is SupervisionStrategy.OneForAll);
+
+    print("SupervisorConfig.one_for_all() test passed");
+}
+
+@test
+fn test_supervisor_config_rest_for_one() {
+    let config = SupervisorConfig.rest_for_one("test");
+
+    assert(config.strategy is SupervisionStrategy.RestForOne);
+
+    print("SupervisorConfig.rest_for_one() test passed");
+}
+
+@test
+fn test_supervisor_config_default() {
+    let config = SupervisorConfig.default();
+
+    // Default is OneForOne
+    assert(config.strategy is SupervisionStrategy.OneForOne);
+
+    print("SupervisorConfig.default() test passed");
+}
+
+@test
+fn test_supervisor_config_with_restart_limits() {
+    let config = SupervisorConfig.one_for_one("test")
+        .with_restart_limits(10, 300000);  // 10 restarts in 5 minutes
+
+    assert_eq(config.max_restarts, 10);
+    assert_eq(config.restart_window_secs, 300000);
+
+    print("SupervisorConfig.with_restart_limits() test passed");
+}
+
+@test
+fn test_supervisor_config_with_escalation() {
+    let config = SupervisorConfig.one_for_one("test")
+        .with_escalation(EscalationPolicy.RestartSubtree);
+
+    assert(config.escalation is EscalationPolicy.RestartSubtree);
+
+    print("SupervisorConfig.with_escalation() test passed");
+}
+
+// =============================================================================
+// Section 11: EscalationPolicy Tests
+// =============================================================================
+
+@test
+fn test_escalation_variants() {
+    let escalate = EscalationPolicy.EscalateToParent;
+    let restart = EscalationPolicy.RestartSubtree;
+    let shutdown = EscalationPolicy.Terminate;
+    let ignore = EscalationPolicy.LogAndIgnore;
+
+    assert(escalate is EscalationPolicy.EscalateToParent);
+    assert(restart is EscalationPolicy.RestartSubtree);
+    assert(shutdown is EscalationPolicy.Terminate);
+    assert(ignore is EscalationPolicy.LogAndIgnore);
+
+    print("EscalationPolicy variants test passed");
+}
+
+// =============================================================================
+// Section 12: EscalationReason Tests
+// =============================================================================
+
+@test
+fn test_escalation_reason_variants() {
+    // Test RestartLimitExceeded variant with named fields
+    let child_id = ChildId.new();
+    let restart_limit = EscalationReason.RestartLimitExceeded {
+        child_id: child_id,
+        child_name: "worker",
+        max_restarts: 10,
+        window_secs: 60,
+        last_failure: FailureReason.Panic("test error"),
+    };
+    assert(restart_limit is EscalationReason.RestartLimitExceeded);
+
+    // Test InternalFault variant
+    let fault = EscalationReason.InternalFault { error: "internal error" };
+    assert(fault is EscalationReason.InternalFault);
+
+    // Test AllStrategiesExhausted variant
+    let exhausted = EscalationReason.AllStrategiesExhausted;
+    assert(exhausted is EscalationReason.AllStrategiesExhausted);
+
+    print("EscalationReason variants test passed");
+}
+
+@test
+fn test_escalation_reason_description() {
+    let reason = EscalationReason.AllStrategiesExhausted;
+    let desc = reason.description();
+
+    assert(!desc.is_empty());
+
+    print("EscalationReason.description() test passed");
+}
+
+// =============================================================================
+// Section 13: SupervisorError Tests
+// =============================================================================
+
+@test
+fn test_supervisor_error_too_many_restarts() {
+    let err = SupervisorError.TooManyRestarts { count: 5, window_secs: 60 };
+    assert(err is SupervisorError.TooManyRestarts);
+    let desc = err.description();
+    assert(!desc.is_empty());
+}
+
+@test
+fn test_supervisor_error_child_not_found() {
+    let id = ChildId.new();
+    let err = SupervisorError.ChildNotFound(id);
+    assert(err is SupervisorError.ChildNotFound);
+    let desc = err.description();
+    assert(!desc.is_empty());
+}
+
+@test
+fn test_supervisor_error_shutting_down() {
+    let err = SupervisorError.ShuttingDown;
+    assert(err is SupervisorError.ShuttingDown);
+    let desc = err.description();
+    assert(!desc.is_empty());
+}
+
+@test
+fn test_supervisor_error_spawn_failed() {
+    let err = SupervisorError.SpawnFailed("task crashed");
+    assert(err is SupervisorError.SpawnFailed);
+    let desc = err.description();
+    assert(desc.contains(&"task crashed") || desc.contains(&"spawn"));
+}
+
+@test
+fn test_supervisor_error_channel_closed() {
+    let err = SupervisorError.ChannelClosed;
+    assert(err is SupervisorError.ChannelClosed);
+}
+
+@test
+fn test_supervisor_error_invalid_spec() {
+    let err = SupervisorError.InvalidSpec("missing name");
+    assert(err is SupervisorError.InvalidSpec);
+    let desc = err.description();
+    assert(!desc.is_empty());
+}
+
+@test
+fn test_supervisor_error_no_parent() {
+    let err = SupervisorError.NoParentSupervisor;
+    assert(err is SupervisorError.NoParentSupervisor);
+}
+
+@test
+fn test_supervisor_error_other() {
+    let err = SupervisorError.Other("custom error");
+    assert(err is SupervisorError.Other);
+    let desc = err.description();
+    assert_eq(desc, "custom error");
+}
+
+@test
+fn test_supervisor_error_all_descriptions_non_empty() {
+    // Verify every variant produces a non-empty description
+    let id = ChildId.new();
+    let errors: List<SupervisorError> = [
+        SupervisorError.TooManyRestarts { count: 1, window_secs: 10 },
+        SupervisorError.ChildNotFound(id),
+        SupervisorError.ShuttingDown,
+        SupervisorError.SpawnFailed("test"),
+        SupervisorError.ChannelClosed,
+        SupervisorError.InvalidSpec("test"),
+        SupervisorError.NoParentSupervisor,
+        SupervisorError.Other("test"),
+    ];
+    for err in errors.iter() {
+        assert(!err.description().is_empty());
+    }
+}
+
+// =============================================================================
+// Section 14: SupervisorHandle Construction
+// =============================================================================
+
+@test
+fn test_supervisor_handle_new() {
+    let config = SupervisorConfig.one_for_one("test-sup");
+    let handle: SupervisorHandle = SupervisorHandle.new(config);
+    assert(handle.id().raw() > 0);
+}
+
+@test
+fn test_supervisor_handle_root() {
+    let config = SupervisorConfig.one_for_one("root");
+    let handle: SupervisorHandle = SupervisorHandle.root(config);
+    assert_eq(handle.id().raw(), 0);
+}
+
+@test
+fn test_supervisor_handle_name() {
+    let config = SupervisorConfig.one_for_one("my-supervisor");
+    let handle = SupervisorHandle.new(config);
+    assert_eq(handle.name(), "my-supervisor");
+}
+
+@test
+fn test_supervisor_handle_status() {
+    let config = SupervisorConfig.one_for_one("status-test");
+    let handle = SupervisorHandle.new(config);
+    let status: SupervisorStatus = handle.status();
+    assert_eq(status.child_count, 0);
+    assert_eq(status.running_count, 0);
+    assert(status.is_running);
+}
+
+@test
+fn test_supervisor_handle_unique_ids() {
+    let config1 = SupervisorConfig.one_for_one("sup1");
+    let config2 = SupervisorConfig.one_for_one("sup2");
+    let h1 = SupervisorHandle.new(config1);
+    let h2 = SupervisorHandle.new(config2);
+    assert(h1.id().raw() != h2.id().raw());
+}
+
+// =============================================================================
+// Section 15: SupervisorConfig Advanced
+// =============================================================================
+
+@test
+fn test_supervisor_config_full_builder() {
+    let config = SupervisorConfig.one_for_all("full-config")
+        .with_restart_limits(5, 120000)
+        .with_escalation(EscalationPolicy.Terminate);
+    assert(config.strategy is SupervisionStrategy.OneForAll);
+    assert_eq(config.max_restarts, 5);
+    assert_eq(config.restart_window_secs, 120000);
+    assert(config.escalation is EscalationPolicy.Terminate);
+}
+
+@test
+fn test_supervisor_config_rest_for_one_with_escalation() {
+    let config = SupervisorConfig.rest_for_one("rfo-sup")
+        .with_escalation(EscalationPolicy.EscalateToParent);
+    assert(config.strategy is SupervisionStrategy.RestForOne);
+    assert(config.escalation is EscalationPolicy.EscalateToParent);
+}
+
+// =============================================================================
+// Section 16: FailureReason Extended
+// =============================================================================
+
+@test
+fn test_failure_reason_error_exit() {
+    let reason = FailureReason.ErrorExit("connection refused");
+    assert(reason.is_abnormal());
+    let desc = reason.description();
+    assert(!desc.is_empty());
+}
+
+@test
+fn test_failure_reason_manual() {
+    let reason = FailureReason.Manual;
+    let desc = reason.description();
+    assert(!desc.is_empty());
+}
+
+@test
+fn test_restart_strategy_transient_with_error_exit() {
+    let strategy = RestartStrategy.Transient;
+    let error_exit = FailureReason.ErrorExit("disk full");
+    assert(strategy.should_restart(error_exit));
+}
+
+@test
+fn test_restart_strategy_transient_with_cancelled() {
+    let strategy = RestartStrategy.Transient;
+    let cancelled = FailureReason.Cancelled;
+    // Cancelled is abnormal, so Transient should restart
+    assert(strategy.should_restart(cancelled));
+}
+
+// =============================================================================
+// Section 17: EscalationReason Extended
+// =============================================================================
+
+@test
+fn test_escalation_reason_sub_supervisor() {
+    let sup_id = SupervisorId.new();
+    let inner_reason = EscalationReason.AllStrategiesExhausted;
+    let reason = EscalationReason.SubSupervisorEscalation {
+        supervisor_id: sup_id,
+        reason: Heap.new(inner_reason),
+    };
+    assert(reason is EscalationReason.SubSupervisorEscalation);
+    let desc = reason.description();
+    assert(!desc.is_empty());
+}
+
+@test
+fn test_escalation_reason_internal_fault() {
+    let reason = EscalationReason.InternalFault { error: "memory corruption" };
+    assert(reason is EscalationReason.InternalFault);
+    let desc = reason.description();
+    assert(!desc.is_empty());
+}
+
+@test
+fn test_escalation_reason_restart_limit() {
+    let child_id = ChildId.new();
+    let reason = EscalationReason.RestartLimitExceeded {
+        child_id: child_id,
+        child_name: "database-worker",
+        max_restarts: 3,
+        window_secs: 60,
+        last_failure: FailureReason.Panic("OOM"),
+    };
+    let desc = reason.description();
+    assert(!desc.is_empty());
+}
+
+// =============================================================================
+// Section 18: RestartIntensity Edge Cases
+// =============================================================================
+
+@test
+fn test_restart_intensity_single_restart_limit() {
+    let mut intensity = RestartIntensity.new(1, 60000);
+    assert(intensity.would_allow_restart());
+    let allowed = intensity.record_restart();
+    assert(allowed);
+    // Now at limit
+    assert(!intensity.would_allow_restart());
+    let denied = intensity.record_restart();
+    assert(!denied);
+}
+
+@test
+fn test_restart_intensity_zero_limit() {
+    let mut intensity = RestartIntensity.new(0, 60000);
+    // Zero limit means no restarts allowed
+    assert(!intensity.would_allow_restart());
+    let denied = intensity.record_restart();
+    assert(!denied);
+}
+
+@test
+fn test_restart_intensity_multiple_resets() {
+    let mut intensity = RestartIntensity.new(2, 60000);
+    intensity.record_restart();
+    intensity.record_restart();
+    assert(!intensity.would_allow_restart());
+
+    // First reset
+    intensity.reset();
+    assert(intensity.would_allow_restart());
+    intensity.record_restart();
+    assert_eq(intensity.current_count(), 1);
+
+    // Second reset
+    intensity.reset();
+    assert_eq(intensity.current_count(), 0);
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

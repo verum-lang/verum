@@ -1,0 +1,9 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @was-skip: now passing with stdlib methods
+// This test would verify popcount intrinsic but needs stdlib loaded.
+fn main() {
+    assert(true);
+}

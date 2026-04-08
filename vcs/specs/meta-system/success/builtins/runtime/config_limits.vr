@@ -1,0 +1,388 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, runtime, config, limits, recursion, iteration
+// @description: Comprehensive tests for configuration and resource limit builtins
+// @contexts: MetaRuntime
+
+// =============================================================================
+// RECURSION_LIMIT TESTS
+// =============================================================================
+
+// Test recursion_limit returns positive integer
+meta fn test_recursion_limit_positive() -> Bool using [MetaRuntime] {
+    let limit = recursion_limit();
+    limit > 0
+}
+
+// Test recursion_limit is reasonable
+meta fn test_recursion_limit_reasonable() -> Bool using [MetaRuntime] {
+    let limit = recursion_limit();
+    // Typical limits are between 64 and 10000
+    limit >= 64 && limit <= 100000
+}
+
+// =============================================================================
+// ITERATION_LIMIT TESTS
+// =============================================================================
+
+// Test iteration_limit returns positive integer
+meta fn test_iteration_limit_positive() -> Bool using [MetaRuntime] {
+    let limit = iteration_limit();
+    limit > 0
+}
+
+// Test iteration_limit is reasonable
+meta fn test_iteration_limit_reasonable() -> Bool using [MetaRuntime] {
+    let limit = iteration_limit();
+    // Iteration limits are typically larger than recursion limits
+    limit >= 1000 && limit <= 100000000
+}
+
+// Test iteration_limit >= recursion_limit
+meta fn test_iteration_ge_recursion() -> Bool using [MetaRuntime] {
+    let iter_limit = iteration_limit();
+    let rec_limit = recursion_limit();
+    // Iteration limit is typically larger
+    iter_limit >= rec_limit
+}
+
+// =============================================================================
+// MEMORY_LIMIT TESTS
+// =============================================================================
+
+// Test memory_limit returns positive integer (bytes)
+meta fn test_memory_limit_positive() -> Bool using [MetaRuntime] {
+    let limit = memory_limit();
+    limit > 0
+}
+
+// Test memory_limit is reasonable (at least 1MB)
+meta fn test_memory_limit_reasonable() -> Bool using [MetaRuntime] {
+    let limit = memory_limit();
+    let one_mb = 1024 * 1024;
+    limit >= one_mb
+}
+
+// =============================================================================
+// TIMEOUT_MS TESTS
+// =============================================================================
+
+// Test timeout_ms returns positive integer
+meta fn test_timeout_ms_positive() -> Bool using [MetaRuntime] {
+    let timeout = timeout_ms();
+    timeout > 0
+}
+
+// Test timeout_ms is reasonable (at least 100ms)
+meta fn test_timeout_ms_reasonable() -> Bool using [MetaRuntime] {
+    let timeout = timeout_ms();
+    timeout >= 100
+}
+
+// =============================================================================
+// CONFIG_GET TESTS
+// =============================================================================
+
+// Test config_get returns Maybe<Text>
+meta fn test_config_get_returns_maybe() -> Bool using [MetaRuntime] {
+    let value = config_get("some_config_key");
+    // Value is either None or Some(text)
+    match value {
+        None => true,
+        Some(_) => true
+    }
+}
+
+// Test config_get for unknown key returns None
+meta fn test_config_get_unknown() -> Bool using [MetaRuntime] {
+    let value = config_get("this_config_key_definitely_does_not_exist_xyz");
+    match value {
+        None => true,
+        Some(_) => false  // Should not have a value
+    }
+}
+
+// =============================================================================
+// CONFIG_GET_INT TESTS
+// =============================================================================
+
+// Test config_get_int returns Maybe<Int>
+meta fn test_config_get_int_returns_maybe() -> Bool using [MetaRuntime] {
+    let value = config_get_int("some_int_config");
+    match value {
+        None => true,
+        Some(_) => true
+    }
+}
+
+// Test config_get_int for unknown key returns None
+meta fn test_config_get_int_unknown() -> Bool using [MetaRuntime] {
+    let value = config_get_int("unknown_int_config_xyz");
+    match value {
+        None => true,
+        Some(_) => false
+    }
+}
+
+// =============================================================================
+// CONFIG_GET_BOOL TESTS
+// =============================================================================
+
+// Test config_get_bool returns Maybe<Bool>
+meta fn test_config_get_bool_returns_maybe() -> Bool using [MetaRuntime] {
+    let value = config_get_bool("some_bool_config");
+    match value {
+        None => true,
+        Some(_) => true
+    }
+}
+
+// Test config_get_bool for unknown key returns None
+meta fn test_config_get_bool_unknown() -> Bool using [MetaRuntime] {
+    let value = config_get_bool("unknown_bool_config_xyz");
+    match value {
+        None => true,
+        Some(_) => false
+    }
+}
+
+// =============================================================================
+// CONFIG_GET_ARRAY TESTS
+// =============================================================================
+
+// Test config_get_array returns Maybe<List<Text>>
+meta fn test_config_get_array_returns_maybe() -> Bool using [MetaRuntime] {
+    let value = config_get_array("some_array_config");
+    match value {
+        None => true,
+        Some(arr) => list_len(arr) >= 0  // Valid list
+    }
+}
+
+// Test config_get_array for unknown key returns None
+meta fn test_config_get_array_unknown() -> Bool using [MetaRuntime] {
+    let value = config_get_array("unknown_array_config_xyz");
+    match value {
+        None => true,
+        Some(_) => false
+    }
+}
+
+// =============================================================================
+// RUNTIME_CONFIG TESTS
+// =============================================================================
+
+// Test runtime_config returns configuration object/map
+meta fn test_runtime_config_valid() -> Bool using [MetaRuntime] {
+    let config = runtime_config();
+    // Config should be a valid map/struct
+    // Just verify it doesn't panic
+    true
+}
+
+// =============================================================================
+// ENV TESTS
+// =============================================================================
+
+// Test env returns Maybe<Text>
+meta fn test_env_returns_maybe() -> Bool using [MetaRuntime] {
+    let value = env("PATH");
+    match value {
+        None => true,
+        Some(_) => true
+    }
+}
+
+// Test env for common environment variable
+meta fn test_env_path() -> Bool using [MetaRuntime] {
+    // PATH is typically set on all systems
+    let value = env("PATH");
+    match value {
+        None => true,  // May not be available in sandboxed meta-evaluation
+        Some(path) => text_len(path) > 0
+    }
+}
+
+// Test env for unknown variable returns None
+meta fn test_env_unknown() -> Bool using [MetaRuntime] {
+    let value = env("THIS_ENV_VAR_DEFINITELY_DOES_NOT_EXIST_XYZ123");
+    match value {
+        None => true,
+        Some(_) => false  // Should not exist
+    }
+}
+
+// =============================================================================
+// IS_CI TESTS
+// =============================================================================
+
+// Test is_ci returns boolean
+meta fn test_is_ci_returns_bool() -> Bool using [MetaRuntime] {
+    let ci = is_ci();
+    ci || !ci  // Tautology
+}
+
+// =============================================================================
+// LIMIT RELATIONSHIP TESTS
+// =============================================================================
+
+// Test limits form a consistent hierarchy
+meta fn test_limits_consistency() -> Bool using [MetaRuntime] {
+    let rec_limit = recursion_limit();
+    let iter_limit = iteration_limit();
+    let mem_limit = memory_limit();
+    let timeout = timeout_ms();
+
+    // All limits should be positive
+    rec_limit > 0 &&
+    iter_limit > 0 &&
+    mem_limit > 0 &&
+    timeout > 0
+}
+
+// =============================================================================
+// CONDITIONAL LOGIC BASED ON LIMITS
+// =============================================================================
+
+// Choose algorithm based on recursion limit
+meta fn select_algorithm_for_depth(depth: Int) -> Text using [MetaRuntime] {
+    let limit = recursion_limit();
+    if depth <= limit / 2 {
+        "recursive"
+    } else {
+        "iterative"
+    }
+}
+
+meta fn test_select_algorithm() -> Bool using [MetaRuntime] {
+    let shallow = select_algorithm_for_depth(10);
+    let deep = select_algorithm_for_depth(recursion_limit());
+
+    text_len(shallow) > 0 && text_len(deep) > 0
+}
+
+// Choose batch size based on memory limit
+meta fn calculate_batch_size(item_size: Int) -> Int using [MetaRuntime] {
+    let mem_limit = memory_limit();
+    let available = mem_limit / 2;  // Use half the limit
+
+    if item_size > 0 {
+        available / item_size
+    } else {
+        0
+    }
+}
+
+meta fn test_calculate_batch_size() -> Bool using [MetaRuntime] {
+    let batch = calculate_batch_size(1024);  // 1KB items
+    batch > 0
+}
+
+// =============================================================================
+// CONFIG-DRIVEN BEHAVIOR
+// =============================================================================
+
+// Get config value with default
+meta fn config_or_default(key: Text, default: Text) -> Text using [MetaRuntime] {
+    let value = config_get(key);
+    match value {
+        None => default,
+        Some(v) => v
+    }
+}
+
+meta fn test_config_or_default() -> Bool using [MetaRuntime] {
+    let value = config_or_default("nonexistent_key", "default_value");
+    value == "default_value"
+}
+
+// Get int config with default
+meta fn config_int_or_default(key: Text, default: Int) -> Int using [MetaRuntime] {
+    let value = config_get_int(key);
+    match value {
+        None => default,
+        Some(v) => v
+    }
+}
+
+meta fn test_config_int_or_default() -> Bool using [MetaRuntime] {
+    let value = config_int_or_default("nonexistent_int_key", 42);
+    value == 42
+}
+
+// Get bool config with default
+meta fn config_bool_or_default(key: Text, default: Bool) -> Bool using [MetaRuntime] {
+    let value = config_get_bool(key);
+    match value {
+        None => default,
+        Some(v) => v
+    }
+}
+
+meta fn test_config_bool_or_default() -> Bool using [MetaRuntime] {
+    let value = config_bool_or_default("nonexistent_bool_key", true);
+    value == true
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Recursion limit tests
+    @const assert(test_recursion_limit_positive());
+    @const assert(test_recursion_limit_reasonable());
+
+    // Iteration limit tests
+    @const assert(test_iteration_limit_positive());
+    @const assert(test_iteration_limit_reasonable());
+    @const assert(test_iteration_ge_recursion());
+
+    // Memory limit tests
+    @const assert(test_memory_limit_positive());
+    @const assert(test_memory_limit_reasonable());
+
+    // Timeout tests
+    @const assert(test_timeout_ms_positive());
+    @const assert(test_timeout_ms_reasonable());
+
+    // config_get tests
+    @const assert(test_config_get_returns_maybe());
+    @const assert(test_config_get_unknown());
+
+    // config_get_int tests
+    @const assert(test_config_get_int_returns_maybe());
+    @const assert(test_config_get_int_unknown());
+
+    // config_get_bool tests
+    @const assert(test_config_get_bool_returns_maybe());
+    @const assert(test_config_get_bool_unknown());
+
+    // config_get_array tests
+    @const assert(test_config_get_array_returns_maybe());
+    @const assert(test_config_get_array_unknown());
+
+    // runtime_config tests
+    @const assert(test_runtime_config_valid());
+
+    // env tests
+    @const assert(test_env_returns_maybe());
+    @const assert(test_env_path());
+    @const assert(test_env_unknown());
+
+    // is_ci tests
+    @const assert(test_is_ci_returns_bool());
+
+    // Limit relationship tests
+    @const assert(test_limits_consistency());
+
+    // Conditional logic tests
+    @const assert(test_select_algorithm());
+    @const assert(test_calculate_batch_size());
+
+    // Config-driven behavior tests
+    @const assert(test_config_or_default());
+    @const assert(test_config_int_or_default());
+    @const assert(test_config_bool_or_default());
+}

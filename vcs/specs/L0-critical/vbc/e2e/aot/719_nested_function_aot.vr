@@ -1,0 +1,21 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, nested-function
+// @expected-exit: 0
+
+fn main() -> Int {
+    fn double(x: Int) -> Int {
+        x * 2
+    }
+
+    let a = double(5);
+    print(a);
+    assert_eq(a, 10);
+
+    let b = double(21);
+    print(b);
+    assert_eq(b, 42);
+
+    0
+}

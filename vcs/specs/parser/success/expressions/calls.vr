@@ -1,0 +1,411 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, calls, method-calls, function-calls
+// @description: Test function and method call expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// BASIC FUNCTION CALLS (Section 2.12 - postfix_op, call_args)
+// =============================================================================
+
+fn test_no_argument_call() {
+    let a = func();
+    let b = compute();
+    let c = get_value();
+}
+
+fn test_single_argument_call() {
+    let a = func(42);
+    let b = process(data);
+    let c = compute(x + y);
+}
+
+fn test_multiple_argument_call() {
+    let a = func(1, 2);
+    let b = process(a, b, c);
+    let c = compute(x, y, z, w);
+}
+
+fn test_trailing_comma() {
+    let a = func(1,);
+    let b = process(a, b, c,);
+    let c = compute(
+        first,
+        second,
+        third,
+    );
+}
+
+fn test_expression_arguments() {
+    let a = func(x + 1, y * 2);
+    let b = process(compute(), transform());
+    let c = handle(if cond { a } else { b });
+}
+
+fn test_nested_calls() {
+    let a = outer(inner());
+    let b = a(b(c(d())));
+    let c = process(transform(compute(data)));
+}
+
+// =============================================================================
+// METHOD CALLS (Section 2.12 - postfix_op)
+// =============================================================================
+
+fn test_simple_method_call() {
+    let a = obj.method();
+    let b = data.process();
+    let c = list.len();
+}
+
+fn test_method_with_arguments() {
+    let a = obj.method(arg);
+    let b = list.push(item);
+    let c = map.get("key");
+}
+
+fn test_method_multiple_arguments() {
+    let a = obj.method(a, b);
+    let b = string.replace("old", "new");
+    let c = list.insert(index, value);
+}
+
+fn test_method_chain() {
+    let a = obj.first().second();
+    let b = data.transform().process().finalize();
+    let c = items
+        .iter()
+        .filter(|x| x > 0)
+        .map(|x| x * 2)
+        .collect();
+}
+
+fn test_long_method_chain() {
+    let result = builder
+        .with_config(config)
+        .set_timeout(30)
+        .enable_logging()
+        .add_middleware(auth)
+        .add_middleware(logging)
+        .build();
+}
+
+// =============================================================================
+// GENERIC FUNCTION CALLS (use <T> directly, NOT <T>)
+// =============================================================================
+
+fn test_generic_function_call() {
+    let a = parse<Int>(text);
+    let b = convert<Float>(value);
+    let c = create<User>();
+}
+
+fn test_generic_multiple_type_args() {
+    let a = transform<A, B>(input);
+    let b = map_convert<Text, Int>(data);
+    let c = process<In, Mid, Out>(pipeline);
+}
+
+fn test_generic_with_complex_types() {
+    let a = parse<List<Int>>(json);
+    let b = convert<Map<Text, User>>(data);
+    let c = create<Result<Data, Error>>();
+}
+
+fn test_generic_nested() {
+    let a = outer<T>(inner<U>(value));
+    let b = process<A>(transform<B>(data));
+}
+
+// =============================================================================
+// GENERIC METHOD CALLS
+// =============================================================================
+
+fn test_generic_method() {
+    let a = obj.method<Int>();
+    let b = data.parse<User>();
+    let c = list.collect<Set<Int>>();
+}
+
+fn test_generic_method_with_args() {
+    let a = obj.convert<Int>(value);
+    let b = parser.parse<Config>(text);
+}
+
+fn test_generic_method_chain() {
+    let a = data
+        .transform<A>()
+        .process<B>()
+        .finalize<C>();
+}
+
+// =============================================================================
+// CONSTRUCTOR CALLS (using . for paths)
+// =============================================================================
+
+fn test_type_constructor() {
+    let a = Point.new(1, 2);
+    let b = User.create("Alice", 30);
+    let c = List.with_capacity(100);
+}
+
+fn test_qualified_constructor() {
+    let a = std.collections.List.new();
+    let b = mymod.Type.create();
+    let c = package.mymod.Builder.new();
+}
+
+fn test_generic_constructor() {
+    let a = List<Int>.new();
+    let b = Map<Text, Int>.new();
+    let c = Set<User>.with_capacity(50);
+}
+
+fn test_enum_constructor() {
+    let a = Option.Some(42);
+    let b = Result.Ok(data);
+    let c = Result.Err(error);
+}
+
+// =============================================================================
+// OPTIONAL CHAINING CALLS (Section 1.6 - optional_chain)
+// =============================================================================
+
+fn test_optional_chain_method() {
+    let a = obj?.method();
+    let b = maybe?.process();
+    let c = option?.value?.inner();
+}
+
+fn test_optional_chain_with_args() {
+    let a = obj?.method(arg);
+    let b = maybe?.transform(data);
+}
+
+fn test_optional_chain_chain() {
+    let a = a?.b?.c?.d();
+    let b = user?.profile?.settings?.get("theme");
+}
+
+fn test_mixed_chain() {
+    let a = obj.method()?.process();
+    let b = data?.transform().finalize();
+    let c = optional?.required.another_optional?.final();
+}
+
+// =============================================================================
+// FIELD ACCESS (Section 2.12 - postfix_op)
+// =============================================================================
+
+fn test_simple_field_access() {
+    let a = obj.field;
+    let b = point.x;
+    let c = user.name;
+}
+
+fn test_nested_field_access() {
+    let a = obj.inner.field;
+    let b = user.profile.avatar;
+    let c = config.settings.timeout;
+}
+
+fn test_optional_field_access() {
+    let a = obj?.field;
+    let b = maybe?.value;
+    let c = user?.profile?.name;
+}
+
+fn test_tuple_field_access() {
+    let a = tuple.0;
+    let b = pair.1;
+    let c = triple.2;
+}
+
+fn test_field_then_method() {
+    let a = obj.field.method();
+    let b = user.name.len();
+    let c = config.items.iter();
+}
+
+fn test_method_then_field() {
+    let a = obj.get_inner().field;
+    let b = create_user().name;
+}
+
+// =============================================================================
+// INDEXING CALLS
+// =============================================================================
+
+fn test_index_access() {
+    let a = arr[0];
+    let b = map["key"];
+    let c = matrix[i][j];
+}
+
+fn test_index_then_method() {
+    let a = arr[0].method();
+    let b = items[i].process();
+}
+
+fn test_method_then_index() {
+    let a = get_array()[0];
+    let b = create_map()["key"];
+}
+
+fn test_index_with_expression() {
+    let a = arr[i + 1];
+    let b = matrix[row * cols + col];
+    let c = data[compute_index()];
+}
+
+// =============================================================================
+// BUILT-IN FUNCTION CALLS (NO ! syntax)
+// =============================================================================
+
+fn test_print_calls() {
+    print("Hello, World!");
+    print(f"Value: {x}");
+    eprint("Error occurred");
+}
+
+fn test_assert_calls() {
+    assert(condition);
+    assert(x > 0, "x must be positive");
+    assert_eq(a, b);
+    assert_ne(a, b);
+    debug_assert(holds_invariant());
+}
+
+fn test_control_flow_calls() {
+    panic("Fatal error");
+    unreachable();
+    unimplemented();
+    todo("Implement this later");
+}
+
+fn test_async_built_ins() {
+    let (a, b) = join(task_a(), task_b());
+    let result = try_join(fetch_a(), fetch_b())?;
+    let results = join_all(tasks);
+}
+
+// =============================================================================
+// HIGHER-ORDER FUNCTION CALLS
+// =============================================================================
+
+fn test_function_as_argument() {
+    let a = map(items, transform);
+    let b = filter(data, predicate);
+    let c = reduce(list, combine, initial);
+}
+
+fn test_closure_as_argument() {
+    let a = items.map(|x| x * 2);
+    let b = data.filter(|x| x > 0);
+    let c = list.fold(0, |acc, x| acc + x);
+}
+
+fn test_returning_function() {
+    let f = make_adder(5);
+    let result = f(10);
+}
+
+fn test_immediate_call() {
+    let a = (|x| x + 1)(41);
+    let b = create_handler()(event);
+}
+
+// =============================================================================
+// COMPLEX CALL PATTERNS
+// =============================================================================
+
+fn test_call_in_expression() {
+    let a = func() + other();
+    let b = compute() * factor;
+    let c = if check() { yes() } else { no() };
+}
+
+fn test_call_as_argument() {
+    let a = outer(inner(), another());
+    let b = process(get_data(), get_config());
+}
+
+fn test_mixed_access_and_calls() {
+    let a = obj.field.method().another_field.final_method();
+    let b = arr[0].method().field;
+    let c = map["key"]?.process().field;
+}
+
+fn test_call_with_block_argument() {
+    let a = with_context({
+        setup();
+        compute()
+    });
+}
+
+fn test_call_with_closure_last() {
+    // Common pattern for builder/DSL APIs
+    let result = configure() |options| {
+        options.set_timeout(30);
+        options.enable_logging();
+    };
+}
+
+// =============================================================================
+// META CALLS (@ prefix)
+// =============================================================================
+
+fn test_meta_function_calls() {
+    let a = @const(compute_at_compile_time());
+    let b = @cfg(feature = "debug");
+    let c = @stringify(identifier);
+    let d = @type_name();
+}
+
+fn test_meta_location_introspection() {
+    let file = @file();
+    let line = @line();
+    let column = @column();
+    let mod_name = @module();
+    let func_name = @function();
+}
+
+fn test_meta_type_introspection() {
+    let name = @type_name();
+    let fields = @type_fields();
+    let is_struct_type = @is_struct();
+    let is_enum_type = @is_enum();
+}
+
+// =============================================================================
+// AS CASTS IN CALL CHAINS
+// =============================================================================
+
+fn test_cast_then_call() {
+    let a = (value as Int).abs();
+    let b = (obj as Trait).method();
+}
+
+fn test_call_then_cast() {
+    let a = compute() as Float;
+    let b = get_value() as Int;
+}
+
+// =============================================================================
+// AWAIT IN CALL CHAINS
+// =============================================================================
+
+fn test_await_in_chain() {
+    let a = fetch().await;
+    let b = client.request().send().await.json().await;
+    let c = compute().await.process();
+}
+
+// =============================================================================
+// CALL WITH TYPE ASCRIPTION
+// =============================================================================
+
+fn test_call_with_type_annotation() {
+    let a: Int = compute();
+    let b: List<User> = fetch_users();
+    let c: Result<Data, Error> = try_load();
+}

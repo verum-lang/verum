@@ -1,0 +1,139 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, next_greater_element, monotone_stack, stack_simulation
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Next greater element — monotone stack approach.
+//
+// For each element in the array, find the next element to its right
+// that is strictly greater than it. If no such element exists, result is -1.
+//
+// Algorithm (O(n)):
+//   Maintain a stack of indices with pending "no answer yet" status.
+//   Process left to right: while stack non-empty and arr[stack.top] < arr[i],
+//   pop and set result[popped] = arr[i].
+//   Push i onto stack.
+//   After loop, remaining stack indices get result = -1.
+//
+// Stack: stk[0..15], stk_top[0] = top pointer (number of elements).
+// Arrays of size 16.
+
+fn nge_compute(arr: [Int; 16], n: Int, res: [Int; 16],
+               stk: [Int; 16], stk_top: [Int; 4]) {
+    // Init result to -1.
+    let mut i = 0;
+    while i < n { res[i] = -1; i = i + 1; }
+    stk_top[0] = 0;
+
+    i = 0;
+    while i < n {
+        // While stack non-empty and top element < arr[i], pop and assign.
+        while stk_top[0] > 0 && arr[stk[stk_top[0] - 1]] < arr[i] {
+            let top_idx = stk[stk_top[0] - 1];
+            res[top_idx] = arr[i];
+            stk_top[0] = stk_top[0] - 1;
+        }
+        stk[stk_top[0]] = i;
+        stk_top[0] = stk_top[0] + 1;
+        i = i + 1;
+    }
+    // Remaining stack: already -1.
+}
+
+fn test_basic_nge() {
+    // [4,5,2,10,8]: NGE should be [5,10,10,-1,-1].
+    let mut arr = [4,5,2,10,8,0,0,0,0,0,0,0,0,0,0,0];
+    let mut res = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut stk = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut top = [0,0,0,0];
+    nge_compute(arr, 5, res, stk, top);
+    assert_eq(res[0], 5);
+    assert_eq(res[1], 10);
+    assert_eq(res[2], 10);
+    assert_eq(res[3], -1);
+    assert_eq(res[4], -1);
+    print("basic_nge: ok");
+}
+
+fn test_decreasing_array() {
+    // [5,4,3,2,1]: all NGE = -1 (strictly decreasing).
+    let mut arr = [5,4,3,2,1,0,0,0,0,0,0,0,0,0,0,0];
+    let mut res = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut stk = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut top = [0,0,0,0];
+    nge_compute(arr, 5, res, stk, top);
+    assert_eq(res[0], -1);
+    assert_eq(res[1], -1);
+    assert_eq(res[2], -1);
+    assert_eq(res[3], -1);
+    assert_eq(res[4], -1);
+    print("decreasing_array: ok");
+}
+
+fn test_increasing_array() {
+    // [1,2,3,4,5]: NGE = [2,3,4,5,-1].
+    let mut arr = [1,2,3,4,5,0,0,0,0,0,0,0,0,0,0,0];
+    let mut res = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut stk = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut top = [0,0,0,0];
+    nge_compute(arr, 5, res, stk, top);
+    assert_eq(res[0], 2);
+    assert_eq(res[1], 3);
+    assert_eq(res[2], 4);
+    assert_eq(res[3], 5);
+    assert_eq(res[4], -1);
+    print("increasing_array: ok");
+}
+
+fn test_equal_elements() {
+    // [3,3,3,3]: NGE uses STRICTLY greater. All -1.
+    let mut arr = [3,3,3,3,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut res = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut stk = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut top = [0,0,0,0];
+    nge_compute(arr, 4, res, stk, top);
+    assert_eq(res[0], -1);
+    assert_eq(res[1], -1);
+    assert_eq(res[2], -1);
+    assert_eq(res[3], -1);
+    print("equal_elements: ok");
+}
+
+fn test_mixed_nge() {
+    // [1,3,2,4,1,6,5,7]: NGE = [3,4,4,6,6,7,7,-1].
+    // i=0(1): stack=[0]
+    // i=1(3): arr[0]=1<3 → res[0]=3, pop; stack=[]; push 1. stack=[1]
+    // i=2(2): arr[1]=3>2 → push 2. stack=[1,2]
+    // i=3(4): arr[2]=2<4 → res[2]=4, pop; arr[1]=3<4 → res[1]=4, pop; push 3. stack=[3]
+    // i=4(1): arr[3]=4>1 → push 4. stack=[3,4]
+    // i=5(6): arr[4]=1<6 → res[4]=6, pop; arr[3]=4<6 → res[3]=6, pop; push 5. stack=[5]
+    // i=6(5): arr[5]=6>5 → push 6. stack=[5,6]
+    // i=7(7): arr[6]=5<7 → res[6]=7, pop; arr[5]=6<7 → res[5]=7, pop; push 7. stack=[7]
+    // Remaining: res[7]=-1.
+    let mut arr = [1,3,2,4,1,6,5,7,0,0,0,0,0,0,0,0];
+    let mut res = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut stk = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut top = [0,0,0,0];
+    nge_compute(arr, 8, res, stk, top);
+    assert_eq(res[0], 3);
+    assert_eq(res[1], 4);
+    assert_eq(res[2], 4);
+    assert_eq(res[3], 6);
+    assert_eq(res[4], 6);
+    assert_eq(res[5], 7);
+    assert_eq(res[6], 7);
+    assert_eq(res[7], -1);
+    print("mixed_nge: ok");
+}
+
+fn main() -> Int {
+    test_basic_nge();
+    test_decreasing_array();
+    test_increasing_array();
+    test_equal_elements();
+    test_mixed_nge();
+    print("[OK] 594_interp_next_greater_element");
+    0
+}

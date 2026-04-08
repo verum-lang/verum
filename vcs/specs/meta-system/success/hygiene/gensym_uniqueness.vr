@@ -1,0 +1,74 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, gensym, uniqueness
+// @description: Test gensym uniqueness for hygienic identifier generation
+
+// =============================================================================
+// GENSYM BASIC UNIQUENESS
+// =============================================================================
+
+// Each gensym call produces a unique identifier
+meta fn test_gensym_unique() -> Bool {
+    let sym1 = gensym("temp");
+    let sym2 = gensym("temp");
+    let sym3 = gensym("temp");
+
+    // All three should be different despite same prefix
+    sym1 != sym2 && sym2 != sym3 && sym1 != sym3
+}
+
+// Gensym with different prefixes
+meta fn test_prefix_differentiation() -> Bool {
+    let sym_a = gensym("prefix_a");
+    let sym_b = gensym("prefix_b");
+    let sym_c = gensym("prefix_c");
+
+    // Different prefixes produce different unique symbols
+    sym_a != sym_b && sym_b != sym_c && sym_a != sym_c
+}
+
+// Gensym produces text with prefix
+meta fn test_gensym_has_prefix() -> Bool {
+    let sym = gensym("myprefix");
+    text_starts_with(sym, "myprefix")
+}
+
+// Gensym counter is incrementing
+meta fn test_gensym_sequential() -> Bool {
+    let sym1 = gensym("seq");
+    let sym2 = gensym("seq");
+
+    // Both should have the prefix
+    text_starts_with(sym1, "seq") && text_starts_with(sym2, "seq")
+}
+
+// Multiple invocations get unique symbols
+meta fn test_multiple_invocations() -> Bool {
+    let syms_a = gensym("counter");
+    let syms_b = gensym("counter");
+    let syms_c = gensym("counter");
+
+    syms_a != syms_b && syms_b != syms_c
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Basic uniqueness
+    @const assert(test_gensym_unique());
+
+    // Prefix differentiation
+    @const assert(test_prefix_differentiation());
+
+    // Has prefix
+    @const assert(test_gensym_has_prefix());
+
+    // Sequential generation
+    @const assert(test_gensym_sequential());
+
+    // Multiple invocations
+    @const assert(test_multiple_invocations());
+}

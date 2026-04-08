@@ -1,0 +1,387 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, multi_gpu, p2p, nvlink
+
+/// Peer-to-peer (P2P) GPU memory access and direct GPU-to-GPU transfers.
+/// Includes NVLink and PCIe P2P communication patterns.
+
+fn main() {
+    let devices = Device.all_gpus();
+    let num_devices = devices.len();
+
+    if num_devices < 2 {
+        // Skip P2P tests with single GPU
+        return;
+    }
+
+    let device0 = devices[0];
+    let device1 = devices[1];
+
+    // P2P capability checks
+    test_p2p_capability(device0, device1);
+
+    // Direct memory access
+    test_direct_memory_access(device0, device1);
+
+    // P2P memory copy
+    test_p2p_copy(device0, device1);
+
+    // P2P kernel access
+    test_p2p_kernel_access(device0, device1);
+
+    // Ring communication
+    test_ring_p2p(devices);
+
+    // All-to-all P2P
+    test_all_to_all_p2p(devices);
+}
+
+fn test_p2p_capability(dev0: Device, dev1: Device) {
+    // Check if P2P is possible
+    let can_access_0_to_1 = dev0.can_access_peer(dev1);
+    let can_access_1_to_0 = dev1.can_access_peer(dev0);
+
+    // Query P2P link type
+    let link_type = dev0.peer_link_type(dev1);
+    match link_type {
+        PeerLinkType.NVLink => {
+            // High bandwidth, low latency
+        },
+        PeerLinkType.NVSwitch => {
+            // Full bisection bandwidth for many GPUs
+        },
+        PeerLinkType.PCIe => {
+            // Standard PCIe P2P
+        },
+        PeerLinkType.None => {
+            // No direct P2P, must go through host
+            return;
+        }
+    }
+
+    // Get P2P bandwidth
+    let bandwidth = dev0.peer_bandwidth(dev1);  // GB/s
+    assert(bandwidth > 0.0);
+
+    // Get P2P latency (approximate)
+    let latency = dev0.peer_latency(dev1);  // microseconds
+
+    // Check atomic operations support over P2P
+    let atomic_support = dev0.peer_atomic_support(dev1);
+}
+
+fn test_direct_memory_access(dev0: Device, dev1: Device) {
+    // Enable P2P access
+    dev0.enable_peer_access(dev1);
+    dev1.enable_peer_access(dev0);
+
+// DEVICE:     // Allocate on device 0
+    let tensor0: Tensor<f32, [1024]> = Tensor.full(1.0).to(dev0);
+
+    // Device 1 can directly access device 0ps memory
+    let stream1 = Stream.new(dev1);
+
+    @kernel(block_size = 256)
+    fn read_remote(
+        remote: &Tensor<f32, [N]>,  // On device 0
+        local: &mut Tensor<f32, [N]>  // On device 1
+    ) {
+        let idx = global_id().x;
+        if idx < N {
+            // Direct P2P read
+            local[idx] = remote[idx] * 2.0;
+        }
+    }
+
+    let mut tensor1: Tensor<f32, [1024]> = Tensor.zeros().to(dev1);
+
+    with_device(dev1, || {
+        // Kernel on dev1 accessing memory on dev0
+// LAUNCH:         read_remote<<<auto, 256, stream1>>>(&tensor0, &mut tensor1);
+    });
+
+    stream1.synchronize();
+
+    // Verify
+    let result = tensor1.to_host();
+    assert(result[0] == 2.0);
+
+    // Write to remote memory
+    @kernel(block_size = 256)
+    fn write_remote(
+        local: &Tensor<f32, [N]>,
+        remote: &mut Tensor<f32, [N]>
+    ) {
+        let idx = global_id().x;
+        if idx < N {
+            // Direct P2P write
+            remote[idx] = local[idx] * 3.0;
+        }
+    }
+
+    with_device(dev1, || {
+// LAUNCH:         write_remote<<<auto, 256>>>(&tensor1, &mut tensor0);
+    });
+
+    dev0.synchronize();
+    let result0 = tensor0.to_host();
+    assert(result0[0] == 6.0);  // 2.0 * 3.0
+
+    // Disable P2P when done
+    dev0.disable_peer_access(dev1);
+    dev1.disable_peer_access(dev0);
+}
+
+fn test_p2p_copy(dev0: Device, dev1: Device) {
+    dev0.enable_peer_access(dev1);
+    dev1.enable_peer_access(dev0);
+
+    let src: Tensor<f32, [4096]> = Tensor.randn().to(dev0);
+    let mut dst: Tensor<f32, [4096]> = Tensor.zeros().to(dev1);
+
+    // Synchronous P2P copy
+    src.copy_to(&mut dst);
+
+    let src_host = src.to_host();
+    let dst_host = dst.to_host();
+    assert((src_host[0] - dst_host[0]).abs() < 1e-5);
+
+    // Async P2P copy
+    let stream = Stream.new(dev0);
+
+    let src2: Tensor<f32, [4096]> = Tensor.randn().to(dev0);
+    let mut dst2: Tensor<f32, [4096]> = Tensor.zeros().to(dev1);
+
+    src2.copy_to_async(&mut dst2, stream);
+
+    // Record event for synchronization
+    let copy_done = Event.new(dev0);
+    stream.record(copy_done);
+
+    // Can do other work on dev1 while waiting
+    let stream1 = Stream.new(dev1);
+    stream1.wait(copy_done);
+
+    // Now safe to use dst2 on dev1
+    @kernel(block_size = 256)
+    fn process(data: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N {
+            data[idx] *= 2.0;
+        }
+    }
+
+    with_device(dev1, || {
+// LAUNCH:         process<<<auto, 256, stream1>>>(&mut dst2);
+    });
+
+    stream1.synchronize();
+
+    // Bidirectional copy
+    let a: Tensor<f32, [2048]> = Tensor.full(1.0).to(dev0);
+    let b: Tensor<f32, [2048]> = Tensor.full(2.0).to(dev1);
+
+    // Swap contents
+    let stream0 = Stream.new(dev0);
+    let stream1 = Stream.new(dev1);
+
+    let mut tmp0: Tensor<f32, [2048]> = Tensor.zeros().to(dev0);
+    let mut tmp1: Tensor<f32, [2048]> = Tensor.zeros().to(dev1);
+
+    b.copy_to_async(&mut tmp0, stream0);  // dev1 -> dev0
+    a.copy_to_async(&mut tmp1, stream1);  // dev0 -> dev1
+
+    Stream.synchronize_all([stream0, stream1]);
+
+    let tmp0_host = tmp0.to_host();
+    let tmp1_host = tmp1.to_host();
+    assert(tmp0_host[0] == 2.0);
+    assert(tmp1_host[0] == 1.0);
+}
+
+fn test_p2p_kernel_access(dev0: Device, dev1: Device) {
+    dev0.enable_peer_access(dev1);
+    dev1.enable_peer_access(dev0);
+
+    // Stencil computation with halo exchange
+    let data0: Tensor<f32, [1024]> = Tensor.randn().to(dev0);
+    let data1: Tensor<f32, [1024]> = Tensor.randn().to(dev1);
+
+    let halo_size = 2;
+
+    // Each device needs halo from neighbor
+    @kernel(block_size = 256)
+    fn stencil_with_halo(
+        local: &Tensor<f32, [N]>,
+        remote: &Tensor<f32, [N]>,  // P2P accessible
+        output: &mut Tensor<f32, [N]>,
+        is_left_boundary: bool
+    ) {
+        let idx = global_id().x;
+        if idx >= N { return; }
+
+        // Get left and right neighbors
+        let left = if idx > 0 {
+            local[idx - 1]
+        } else if is_left_boundary {
+            0.0  // Boundary condition
+        } else {
+            remote[N - 1]  // P2P read from neighbor device
+        };
+
+        let right = if idx < N - 1 {
+            local[idx + 1]
+        } else if !is_left_boundary {
+            0.0  // Boundary condition
+        } else {
+            remote[0]  // P2P read from neighbor device
+        };
+
+        let center = local[idx];
+        output[idx] = 0.25 * left + 0.5 * center + 0.25 * right;
+    }
+
+    let mut out0: Tensor<f32, [1024]> = Tensor.zeros().to(dev0);
+    let mut out1: Tensor<f32, [1024]> = Tensor.zeros().to(dev1);
+
+    let stream0 = Stream.new(dev0);
+    let stream1 = Stream.new(dev1);
+
+    with_device(dev0, || {
+// LAUNCH:         stencil_with_halo<<<auto, 256, stream0>>>(&data0, &data1, &mut out0, true);
+    });
+
+    with_device(dev1, || {
+// LAUNCH:         stencil_with_halo<<<auto, 256, stream1>>>(&data1, &data0, &mut out1, false);
+    });
+
+    Stream.synchronize_all([stream0, stream1]);
+}
+
+fn test_ring_p2p(devices: List<Device>) {
+    let n = devices.len();
+
+    // Enable ring P2P access
+    for i in 0..n {
+        let next = (i + 1) % n;
+        devices[i].enable_peer_access(devices[next]);
+    }
+
+    // Allocate tensors on each device
+    let tensors: List<Tensor<f32, [1024]> > = devices.iter()
+        .enumerate()
+        .map(|(i, d)| Tensor.full((i + 1) as f32).to(*d))
+        .collect();
+
+    // Ring reduce: each GPU adds its data and passes along
+    @kernel(block_size = 256)
+    fn ring_add(
+        local: &mut Tensor<f32, [N]>,
+        incoming: &Tensor<f32, [N]>  // P2P from previous in ring
+    ) {
+        let idx = global_id().x;
+        if idx < N {
+            local[idx] += incoming[idx];
+        }
+    }
+
+    let streams: List<Stream> = devices.iter()
+        .map(|d| Stream.new(*d))
+        .collect();
+
+    // Perform n-1 ring steps
+    for step in 0..n-1 {
+        for i in 0..n {
+            let prev = (i + n - 1) % n;
+
+            with_device(devices[i], || {
+                // LAUNCH: ring_add(&mut tensors[i], &tensors[prev]);
+            });
+        }
+
+        // Synchronize before next step
+        for i in 0..n {
+            streams[i].synchronize();
+        }
+    }
+
+    // All GPUs now have sum
+    for i in 0..n {
+        let result = tensors[i].to_host();
+        let expected: f32 = (1..=n).sum() as f32;
+        assert((result[0] - expected).abs() < 1e-3);
+    }
+}
+
+fn test_all_to_all_p2p(devices: List<Device>) {
+    let n = devices.len();
+
+    // Enable full P2P mesh
+    for i in 0..n {
+        for j in 0..n {
+            if i != j {
+                devices[i].enable_peer_access(devices[j]);
+            }
+        }
+    }
+
+    // Each device has data for every other device
+    let chunk_size = 256;
+    let send_bufs: List<Tensor<f32, [_]> > = devices.iter()
+        .enumerate()
+        .map(|(i, d)| {
+            // Device i has n chunks, chunk j intended for device j
+            Tensor.from_fn(n * chunk_size, |idx| {
+                let target = idx / chunk_size;
+                (i * n + target) as f32  // Encode sender*n + receiver
+            }).to(*d)
+        })
+        .collect();
+
+    let mut recv_bufs: List<Tensor<f32, [_]> > = devices.iter()
+        .map(|d| Tensor.zeros_with_size(n * chunk_size).to(*d))
+        .collect();
+
+    // All-to-all exchange using P2P
+    let streams: List<List<Stream> > = devices.iter()
+        .map(|d| {
+            (0..n).map(|_| Stream.new(*d)).collect()
+        })
+        .collect();
+
+    // Each device sends chunk j to device j
+    for sender in 0..n {
+        for receiver in 0..n {
+            let send_offset = receiver * chunk_size;
+            let recv_offset = sender * chunk_size;
+
+            // Async P2P copy from sender to receiver
+            send_bufs[sender][send_offset..send_offset + chunk_size]
+                .copy_to_async(
+                    &mut recv_bufs[receiver][recv_offset..recv_offset + chunk_size],
+                    streams[sender][receiver]
+                );
+        }
+    }
+
+    // Synchronize all streams
+    for sender in 0..n {
+        for receiver in 0..n {
+            streams[sender][receiver].synchronize();
+        }
+    }
+
+    // Verify: device ips recv_buf chunk j should contain j*n + i
+    for i in 0..n {
+        let recv = recv_bufs[i].to_host();
+        for j in 0..n {
+            let offset = j * chunk_size;
+            let expected = (j * n + i) as f32;
+            assert((recv[offset] - expected).abs() < 1e-5);
+        }
+    }
+}
+
+type PeerLinkType is NVLink | NVSwitch | PCIe | None;

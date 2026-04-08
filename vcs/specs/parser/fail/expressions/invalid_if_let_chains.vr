@@ -1,0 +1,397 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, if-let, chains, error-detection
+// @description: Invalid if-let chain syntax - parser must reject these
+//
+// This file tests that the parser correctly rejects malformed if-let chains.
+// Each test case documents a specific syntax error that must be detected.
+
+// =============================================================================
+// SECTION 1: MISSING COMPONENTS
+// =============================================================================
+
+// @test-case: missing_pattern_in_let
+// @expected-error: E006
+fn test_missing_pattern() {
+    if let = opt {  // ERROR: Missing pattern
+        use(x);
+    }
+}
+
+// @test-case: missing_equals_in_let
+// @expected-error: E006
+fn test_missing_equals() {
+    if let Some(x) opt {  // ERROR: Missing = in let condition
+        use(x);
+    }
+}
+
+// @test-case: missing_expression_in_let
+// @expected-error: E006
+fn test_missing_expr_in_let() {
+    if let Some(x) = {  // ERROR: Missing expression after =
+        use(x);
+    }
+}
+
+// @test-case: missing_block
+// @expected-error: E006
+fn test_missing_block() {
+    if let Some(x) = opt  // ERROR: Missing block after condition
+}
+
+// @test-case: missing_condition
+// @expected-error: E006
+fn test_missing_condition() {
+    if {  // ERROR: Missing condition entirely
+        do_something();
+    }
+}
+
+// =============================================================================
+// SECTION 2: INVALID OPERATORS
+// =============================================================================
+
+// @test-case: or_instead_of_and
+// @expected-error: E006
+fn test_or_operator() {
+    if let Some(x) = opt || x > 0 {  // ERROR: || not allowed, only &&
+        use(x);
+    }
+}
+
+// @test-case: single_and
+// @expected-error: E006
+fn test_single_and() {
+    if let Some(x) = opt & x > 0 {  // ERROR: & is not &&
+        use(x);
+    }
+}
+
+// @test-case: comma_separator
+// @expected-error: E006
+fn test_comma_separator() {
+    if let Some(x) = opt, x > 0 {  // ERROR: Comma not allowed
+        use(x);
+    }
+}
+
+// @test-case: semicolon_separator
+// @expected-error: E006
+fn test_semicolon_separator() {
+    if let Some(x) = opt; x > 0 {  // ERROR: Semicolon not allowed
+        use(x);
+    }
+}
+
+// =============================================================================
+// SECTION 3: MALFORMED LET CONDITIONS
+// =============================================================================
+
+// @test-case: let_without_pattern_assignment
+// @expected-error: E006
+fn test_let_statement_style() {
+    if let x = 5 {  // This is actually valid (irrefutable pattern)
+        use(x);
+    }
+
+    if let {  // ERROR: Missing pattern and expression
+        use(x);
+    }
+}
+
+// @test-case: multiple_equals
+// @expected-error: E006
+fn test_multiple_equals() {
+    if let Some(x) = = opt {  // ERROR: Double equals
+        use(x);
+    }
+}
+
+// @test-case: let_after_brace
+// @expected-error: E006
+fn test_let_in_block() {
+    if { let Some(x) = opt } {  // ERROR: let not valid as block expression
+        use(x);
+    }
+}
+
+// =============================================================================
+// SECTION 4: INVALID CHAIN STRUCTURE
+// =============================================================================
+
+// @test-case: trailing_and
+// @expected-error: E006
+fn test_trailing_and() {
+    if let Some(x) = opt && {  // ERROR: Trailing &&
+        use(x);
+    }
+}
+
+// @test-case: leading_and
+// @expected-error: E006
+fn test_leading_and() {
+    if && let Some(x) = opt {  // ERROR: Leading &&
+        use(x);
+    }
+}
+
+// @test-case: double_and
+// @expected-error: E006
+fn test_double_and() {
+    if let Some(x) = opt && && x > 0 {  // ERROR: Double &&
+        use(x);
+    }
+}
+
+// @test-case: empty_chain_element
+// @expected-error: E006
+fn test_empty_element() {
+    if let Some(x) = opt && && let Some(y) = opt2 {  // ERROR: Empty between &&
+        use(x, y);
+    }
+}
+
+// =============================================================================
+// SECTION 5: CHAINED COMPARISONS (Design Decision: NOT SUPPORTED)
+// =============================================================================
+
+// Verum explicitly chose NOT to support Python-style chained comparisons.
+// These must be written with explicit && operators.
+// The parser should treat these as regular left-associative binary expressions,
+// which may then fail type checking (comparing bool with int).
+
+// @test-case: chained_less_than
+// Note: Parser accepts this as (a < b) < c, type checker rejects
+fn test_chained_less_than() {
+    if 0 < x < 10 {  // Parses as (0 < x) < 10, type error later
+        in_range();
+    }
+}
+
+// @test-case: chained_less_equal
+fn test_chained_less_equal() {
+    if min <= x <= max {  // Parses as (min <= x) <= max
+        valid();
+    }
+}
+
+// @test-case: chained_mixed_comparisons
+fn test_chained_mixed() {
+    if 0 < x <= 10 {  // Parses as (0 < x) <= 10
+        range();
+    }
+}
+
+// =============================================================================
+// SECTION 6: INVALID PATTERNS IN LET
+// =============================================================================
+
+// @test-case: expression_as_pattern
+// @expected-error: E006
+fn test_expr_as_pattern() {
+    if let 1 + 1 = x {  // ERROR: Expression not valid as pattern
+        use(x);
+    }
+}
+
+// @test-case: function_call_as_pattern
+// @expected-error: E006
+fn test_call_as_pattern() {
+    if let Some(compute()) = x {  // ERROR: Call in pattern position
+        use(x);
+    }
+}
+
+// @test-case: assignment_in_pattern
+// @expected-error: E006
+fn test_assignment_in_pattern() {
+    if let Some(x = 5) = opt {  // ERROR: Assignment in pattern
+        use(x);
+    }
+}
+
+// =============================================================================
+// SECTION 7: SCOPE ERRORS
+// =============================================================================
+
+// @test-case: using_unbound_in_condition
+// This is a semantic error (name resolution), not syntax
+fn test_use_before_bind_syntax() {
+    // Note: This parses fine, fails at name resolution
+    if x > 0 && let Some(x) = opt {
+        use(x);
+    }
+}
+
+// =============================================================================
+// SECTION 8: MALFORMED ELSE BRANCHES
+// =============================================================================
+
+// @test-case: else_without_block
+// @expected-error: E006
+fn test_else_without_block() {
+    if let Some(x) = opt {
+        use(x);
+    } else  // ERROR: else without block or if
+}
+
+// @test-case: else_with_condition
+// @expected-error: E006
+fn test_else_with_condition() {
+    if let Some(x) = opt {
+        use(x);
+    } else x > 0 {  // ERROR: else cannot have condition (use else if)
+        other();
+    }
+}
+
+// @test-case: multiple_else
+// @expected-error: E006
+fn test_multiple_else() {
+    if let Some(x) = opt {
+        use(x);
+    } else {
+        fallback();
+    } else {  // ERROR: Multiple else blocks
+        other();
+    }
+}
+
+// =============================================================================
+// SECTION 9: INVALID WHILE-LET CHAINS
+// =============================================================================
+
+// @test-case: while_let_missing_pattern
+// @expected-error: E006
+fn test_while_let_missing_pattern() {
+    while let = iter.next() {  // ERROR: Missing pattern
+        process();
+    }
+}
+
+// @test-case: while_let_or_operator
+// @expected-error: E006
+fn test_while_let_or() {
+    while let Some(x) = iter || x > 0 {  // ERROR: || not allowed
+        process(x);
+    }
+}
+
+// =============================================================================
+// SECTION 10: MIXING IF AND WHILE
+// =============================================================================
+
+// @test-case: if_in_while_condition
+// @expected-error: E006
+fn test_if_in_while() {
+    while if let Some(x) = opt {  // ERROR: if not valid in while condition
+        process(x);
+    }
+}
+
+// @test-case: while_in_if_condition
+// @expected-error: E006
+fn test_while_in_if() {
+    if while condition {  // ERROR: while not valid in if condition
+        process();
+    }
+}
+
+// =============================================================================
+// SECTION 11: INVALID NESTING
+// =============================================================================
+
+// @test-case: nested_if_in_condition
+// @expected-error: E006
+fn test_nested_if_condition() {
+    if (if x { true } else { false }) && let Some(y) = opt {  // Potentially valid
+        use(y);
+    }
+}
+
+// @test-case: let_as_expression
+// @expected-error: E006
+fn test_let_as_expr() {
+    if (let Some(x) = opt) && x > 0 {  // ERROR: let is not an expression
+        use(x);
+    }
+}
+
+// =============================================================================
+// SECTION 12: INVALID LET-ELSE IN CHAINS
+// =============================================================================
+
+// @test-case: let_else_in_condition
+// @expected-error: E006
+fn test_let_else_in_if() {
+    if let Some(x) = opt else { return; } && x > 0 {  // ERROR: else in condition
+        use(x);
+    }
+}
+
+// @test-case: let_else_chain
+// @expected-error: E006
+fn test_let_else_chain() {
+    let Some(x) = opt else { return; } && let Some(y) = opt2;  // ERROR: Invalid
+}
+
+// =============================================================================
+// SECTION 13: UNICODE AND SPECIAL CHARACTERS
+// =============================================================================
+
+// @test-case: unicode_and_operator
+// @expected-error: E006
+fn test_unicode_and() {
+    if let Some(x) = opt ∧ x > 0 {  // ERROR: Unicode ∧ not valid
+        use(x);
+    }
+}
+
+// @test-case: fullwidth_ampersand
+// @expected-error: E006
+fn test_fullwidth_amp() {
+    if let Some(x) = opt ＆＆ x > 0 {  // ERROR: Fullwidth && not valid
+        use(x);
+    }
+}
+
+// =============================================================================
+// SECTION 14: WHITESPACE ERRORS
+// =============================================================================
+
+// @test-case: newline_breaks_condition
+// Valid but shows multiline handling
+fn test_newline_in_condition() {
+    if let Some(x) = opt
+        x > 0 {  // ERROR: Missing && before x > 0
+        use(x);
+    }
+}
+
+// @test-case: space_in_operator
+// @expected-error: E006
+fn test_space_in_and() {
+    if let Some(x) = opt & & x > 0 {  // ERROR: & & is not &&
+        use(x);
+    }
+}
+
+// =============================================================================
+// SECTION 15: TYPE ANNOTATION ERRORS
+// =============================================================================
+
+// @test-case: type_annotation_in_let_condition
+fn test_type_in_let_condition() {
+    if let Some(x: Int) = opt {  // May be valid or invalid depending on grammar
+        use(x);
+    }
+}
+
+// @test-case: return_type_in_condition
+// @expected-error: E006
+fn test_return_type_condition() {
+    if let Some(x) = opt -> Int {  // ERROR: Return type not valid here
+        use(x);
+    }
+}

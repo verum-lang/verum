@@ -1,0 +1,19 @@
+// @test: typecheck-fail
+// @expected-error: E400
+// @tier: 0
+// @level: L1
+// @tags: refinement, errors, type-mismatch
+// @description: Refinement types used with incompatible values
+
+/// Assigning incompatible values to refined type variables produces type errors.
+
+type NonNegative is Int{>= 0};
+type ShortText is Text;
+
+fn process_non_negative(n: NonNegative) -> Int { n }
+fn process_short_text(t: ShortText) -> Text { t }
+
+fn main() {
+    // ERROR E400: Cannot pass Text where Int{>=0} is expected
+    let result = process_non_negative("not a number");
+}

@@ -1,0 +1,1402 @@
+// =============================================================================
+// maybe_test.vr - Comprehensive tests for Maybe<T> optional type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, maybe, optional, monad, safety
+// @description: Tests for Maybe<T> type including predicates, unwrapping,
+//               transformations, combinators, mutation, and protocol implementations.
+//
+// Coverage:
+// - Maybe<T> type definition (None | Some(T))
+// - Predicates (is_some, is_none)
+// - Unwrapping (unwrap, expect, unwrap_or, unwrap_or_else, unwrap_or_default)
+// - Transformations (map, and_then, or_else, map_or, map_or_else)
+// - Filtering (filter)
+// - Combinators (and, or, xor, zip, zip_with)
+// - Conversion to Result (ok_or, ok_or_else)
+// - References (as_ref, as_mut)
+// - Mutation (take, replace, insert, get_or_insert, get_or_insert_with)
+// - Inspection (inspect)
+// - Flattening (flatten)
+// - Iteration (iter, iter_mut, MaybeIter)
+// - Protocol implementations (Default, Eq, Ord, Clone, Copy, Hash, Debug)
+// - From implementations
+// - Try protocol (? operator support)
+// =============================================================================
+
+mount core.base.maybe.{Maybe, MaybeIter};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.protocols.{DefaultHasher};
+
+// =============================================================================
+// SECTION 1: Type Construction Tests
+// =============================================================================
+
+/// Test None construction
+@test
+fn test_none_construction() {
+    let none: Maybe<Int> = None;
+    assert(none.is_none());
+}
+
+/// Test Some construction with various types
+@test
+fn test_some_construction() {
+    let some_int: Maybe<Int> = Some(42);
+    assert(some_int.is_some());
+
+    let some_text: Maybe<Text> = Some("hello");
+    assert(some_text.is_some());
+
+    let some_bool: Maybe<Bool> = Some(true);
+    assert(some_bool.is_some());
+}
+
+/// Test Some with zero value
+@test
+fn test_some_zero_value() {
+    let some_zero: Maybe<Int> = Some(0);
+    assert(some_zero.is_some());
+    assert_eq(some_zero.unwrap(), 0);
+}
+
+/// Test Some with empty string
+@test
+fn test_some_empty_string() {
+    let some_empty: Maybe<Text> = Some("");
+    assert(some_empty.is_some());
+    assert_eq(some_empty.unwrap(), "");
+}
+
+/// Test nested Maybe
+@test
+fn test_nested_maybe() {
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+    assert(nested.is_some());
+
+    let inner = nested.unwrap();
+    assert(inner.is_some());
+    assert_eq(inner.unwrap(), 42);
+}
+
+/// Test nested Maybe with None
+@test
+fn test_nested_maybe_none() {
+    let nested_none: Maybe<Maybe<Int>> = Some(None);
+    assert(nested_none.is_some());
+    assert(nested_none.unwrap().is_none());
+
+    let outer_none: Maybe<Maybe<Int>> = None;
+    assert(outer_none.is_none());
+}
+
+// =============================================================================
+// SECTION 2: Predicates Tests
+// =============================================================================
+
+/// Test is_some on Some
+@test
+fn test_is_some_on_some() {
+    let opt = Some(42);
+    assert(opt.is_some());
+    assert_eq(opt.is_some(), true);
+}
+
+/// Test is_some on None
+@test
+fn test_is_some_on_none() {
+    let opt: Maybe<Int> = None;
+    assert(!opt.is_some());
+    assert_eq(opt.is_some(), false);
+}
+
+/// Test is_none on None
+@test
+fn test_is_none_on_none() {
+    let opt: Maybe<Int> = None;
+    assert(opt.is_none());
+    assert_eq(opt.is_none(), true);
+}
+
+/// Test is_none on Some
+@test
+fn test_is_none_on_some() {
+    let opt = Some(42);
+    assert(!opt.is_none());
+    assert_eq(opt.is_none(), false);
+}
+
+/// Test is_some and is_none are mutually exclusive
+@test
+fn test_predicates_mutually_exclusive() {
+    let some: Maybe<Int> = Some(42);
+    let none: Maybe<Int> = None;
+
+    assert(some.is_some() != some.is_none());
+    assert(none.is_some() != none.is_none());
+
+    // XOR should be true
+    assert(some.is_some() ^ some.is_none());
+    assert(none.is_some() ^ none.is_none());
+}
+
+// =============================================================================
+// SECTION 3: Unwrapping Tests
+// =============================================================================
+
+/// Test unwrap on Some
+@test
+fn test_unwrap_some() {
+    let opt = Some(42);
+    assert_eq(opt.unwrap(), 42);
+}
+
+/// Test unwrap on Some with text
+@test
+fn test_unwrap_some_text() {
+    let opt = Some("hello");
+    assert_eq(opt.unwrap(), "hello");
+}
+
+/// Test expect on Some
+@test
+fn test_expect_some() {
+    let opt = Some(42);
+    assert_eq(opt.expect("should have value"), 42);
+}
+
+/// Test unwrap_or with Some
+@test
+fn test_unwrap_or_some() {
+    let opt = Some(42);
+    assert_eq(opt.unwrap_or(100), 42);
+}
+
+/// Test unwrap_or with None
+@test
+fn test_unwrap_or_none() {
+    let opt: Maybe<Int> = None;
+    assert_eq(opt.unwrap_or(100), 100);
+}
+
+/// Test unwrap_or_else with Some
+@test
+fn test_unwrap_or_else_some() {
+    let opt = Some(42);
+    let result = opt.unwrap_or_else(|| 100);
+    assert_eq(result, 42);
+}
+
+/// Test unwrap_or_else with None
+@test
+fn test_unwrap_or_else_none() {
+    let opt: Maybe<Int> = None;
+    let mut called = false;
+    let result = opt.unwrap_or_else(|| {
+        called = true;
+        100
+    });
+    assert_eq(result, 100);
+    assert(called, "Closure should be called for None");
+}
+
+/// Test unwrap_or_else closure not called for Some
+@test
+fn test_unwrap_or_else_not_called_for_some() {
+    let opt = Some(42);
+    let mut called = false;
+    let result = opt.unwrap_or_else(|| {
+        called = true;
+        100
+    });
+    assert_eq(result, 42);
+    assert(!called, "Closure should not be called for Some");
+}
+
+/// Test unwrap_or_default with Some
+@test
+fn test_unwrap_or_default_some() {
+    let opt = Some(42);
+    assert_eq(opt.unwrap_or_default(), 42);
+}
+
+/// Test unwrap_or_default with None
+@test
+fn test_unwrap_or_default_none() {
+    let opt: Maybe<Int> = None;
+    assert_eq(opt.unwrap_or_default(), 0);  // Int default is 0
+}
+
+// =============================================================================
+// SECTION 4: Transformations Tests
+// =============================================================================
+
+/// Test map on Some
+@test
+fn test_map_some() {
+    let opt = Some(42);
+    let doubled = opt.map(|x| x * 2);
+    assert_eq(doubled.unwrap(), 84);
+}
+
+/// Test map on None
+@test
+fn test_map_none() {
+    let opt: Maybe<Int> = None;
+    let doubled = opt.map(|x| x * 2);
+    assert(doubled.is_none());
+}
+
+/// Test map changes type
+@test
+fn test_map_changes_type() {
+    let opt = Some(42);
+    let as_text = opt.map(|x| f"{x}");
+    assert_eq(as_text.unwrap(), "42");
+}
+
+/// Test map closure not called for None
+@test
+fn test_map_not_called_for_none() {
+    let opt: Maybe<Int> = None;
+    let mut called = false;
+    let _ = opt.map(|x| {
+        called = true;
+        x * 2
+    });
+    assert(!called, "Map closure should not be called for None");
+}
+
+/// Test and_then on Some returning Some
+@test
+fn test_and_then_some_some() {
+    let opt = Some(42);
+    let result = opt.and_then(|x| Some(x * 2));
+    assert_eq(result.unwrap(), 84);
+}
+
+/// Test and_then on Some returning None
+@test
+fn test_and_then_some_none() {
+    let opt = Some(42);
+    let result = opt.and_then(|_| None as Maybe<Int>);
+    assert(result.is_none());
+}
+
+/// Test and_then on None
+@test
+fn test_and_then_none() {
+    let opt: Maybe<Int> = None;
+    let result = opt.and_then(|x| Some(x * 2));
+    assert(result.is_none());
+}
+
+/// Test and_then chaining
+@test
+fn test_and_then_chaining() {
+    let opt = Some(10);
+    let result = opt
+        .and_then(|x| Some(x + 5))
+        .and_then(|x| Some(x * 2))
+        .and_then(|x| Some(x - 10));
+    assert_eq(result.unwrap(), 20);  // ((10 + 5) * 2) - 10 = 20
+}
+
+/// Test or_else on Some
+@test
+fn test_or_else_some() {
+    let opt = Some(42);
+    let result = opt.or_else(|| Some(100));
+    assert_eq(result.unwrap(), 42);
+}
+
+/// Test or_else on None
+@test
+fn test_or_else_none() {
+    let opt: Maybe<Int> = None;
+    let result = opt.or_else(|| Some(100));
+    assert_eq(result.unwrap(), 100);
+}
+
+/// Test or_else closure not called for Some
+@test
+fn test_or_else_not_called_for_some() {
+    let opt = Some(42);
+    let mut called = false;
+    let _ = opt.or_else(|| {
+        called = true;
+        Some(100)
+    });
+    assert(!called);
+}
+
+/// Test map_or on Some
+@test
+fn test_map_or_some() {
+    let opt = Some(42);
+    let result = opt.map_or(0, |x| x * 2);
+    assert_eq(result, 84);
+}
+
+/// Test map_or on None
+@test
+fn test_map_or_none() {
+    let opt: Maybe<Int> = None;
+    let result = opt.map_or(0, |x| x * 2);
+    assert_eq(result, 0);
+}
+
+/// Test map_or_else on Some
+@test
+fn test_map_or_else_some() {
+    let opt = Some(42);
+    let result = opt.map_or_else(|| 0, |x| x * 2);
+    assert_eq(result, 84);
+}
+
+/// Test map_or_else on None
+@test
+fn test_map_or_else_none() {
+    let opt: Maybe<Int> = None;
+    let result = opt.map_or_else(|| 100, |x| x * 2);
+    assert_eq(result, 100);
+}
+
+// =============================================================================
+// SECTION 5: Filtering Tests
+// =============================================================================
+
+/// Test filter keeps value when predicate true
+@test
+fn test_filter_keeps_value() {
+    let opt = Some(42);
+    let result = opt.filter(|x| x > 10);
+    assert_eq(result.unwrap(), 42);
+}
+
+/// Test filter removes value when predicate false
+@test
+fn test_filter_removes_value() {
+    let opt = Some(5);
+    let result = opt.filter(|x| x > 10);
+    assert(result.is_none());
+}
+
+/// Test filter on None
+@test
+fn test_filter_none() {
+    let opt: Maybe<Int> = None;
+    let result = opt.filter(|x| x > 10);
+    assert(result.is_none());
+}
+
+/// Test filter with equality check
+@test
+fn test_filter_equality() {
+    let opt = Some("hello");
+    let result = opt.filter(|s| s == "hello");
+    assert_eq(result.unwrap(), "hello");
+
+    let opt2 = Some("world");
+    let result2 = opt2.filter(|s| s == "hello");
+    assert(result2.is_none());
+}
+
+/// Test filter chaining
+@test
+fn test_filter_chaining() {
+    let opt = Some(42);
+    let result = opt
+        .filter(|x| x > 10)
+        .filter(|x| x < 100)
+        .filter(|x| x % 2 == 0);
+    assert_eq(result.unwrap(), 42);
+}
+
+// =============================================================================
+// SECTION 6: Combinators Tests
+// =============================================================================
+
+/// Test and with Some and Some
+@test
+fn test_and_some_some() {
+    let a = Some(1);
+    let b = Some(2);
+    assert_eq(a.and(b).unwrap(), 2);
+}
+
+/// Test and with Some and None
+@test
+fn test_and_some_none() {
+    let a = Some(1);
+    let b: Maybe<Int> = None;
+    assert(a.and(b).is_none());
+}
+
+/// Test and with None and Some
+@test
+fn test_and_none_some() {
+    let a: Maybe<Int> = None;
+    let b = Some(2);
+    assert(a.and(b).is_none());
+}
+
+/// Test and with None and None
+@test
+fn test_and_none_none() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = None;
+    assert(a.and(b).is_none());
+}
+
+/// Test and with different types
+@test
+fn test_and_different_types() {
+    let a = Some(42);
+    let b = Some("hello");
+    let result = a.and(b);
+    assert_eq(result.unwrap(), "hello");
+}
+
+/// Test or with Some and Some
+@test
+fn test_or_some_some() {
+    let a = Some(1);
+    let b = Some(2);
+    assert_eq(a.or(b).unwrap(), 1);  // First Some wins
+}
+
+/// Test or with Some and None
+@test
+fn test_or_some_none() {
+    let a = Some(1);
+    let b: Maybe<Int> = None;
+    assert_eq(a.or(b).unwrap(), 1);
+}
+
+/// Test or with None and Some
+@test
+fn test_or_none_some() {
+    let a: Maybe<Int> = None;
+    let b = Some(2);
+    assert_eq(a.or(b).unwrap(), 2);
+}
+
+/// Test or with None and None
+@test
+fn test_or_none_none() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = None;
+    assert(a.or(b).is_none());
+}
+
+/// Test xor with Some and Some
+@test
+fn test_xor_some_some() {
+    let a = Some(1);
+    let b = Some(2);
+    assert(a.xor(b).is_none());  // Both Some -> None
+}
+
+/// Test xor with Some and None
+@test
+fn test_xor_some_none() {
+    let a = Some(1);
+    let b: Maybe<Int> = None;
+    assert_eq(a.xor(b).unwrap(), 1);
+}
+
+/// Test xor with None and Some
+@test
+fn test_xor_none_some() {
+    let a: Maybe<Int> = None;
+    let b = Some(2);
+    assert_eq(a.xor(b).unwrap(), 2);
+}
+
+/// Test xor with None and None
+@test
+fn test_xor_none_none() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = None;
+    assert(a.xor(b).is_none());
+}
+
+/// Test zip with Some and Some
+@test
+fn test_zip_some_some() {
+    let a = Some(1);
+    let b = Some("hello");
+    let result = a.zip(b);
+    let (x, y) = result.unwrap();
+    assert_eq(x, 1);
+    assert_eq(y, "hello");
+}
+
+/// Test zip with Some and None
+@test
+fn test_zip_some_none() {
+    let a = Some(1);
+    let b: Maybe<Text> = None;
+    assert(a.zip(b).is_none());
+}
+
+/// Test zip with None and Some
+@test
+fn test_zip_none_some() {
+    let a: Maybe<Int> = None;
+    let b = Some("hello");
+    assert(a.zip(b).is_none());
+}
+
+/// Test zip with None and None
+@test
+fn test_zip_none_none() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Text> = None;
+    assert(a.zip(b).is_none());
+}
+
+/// Test zip_with Some and Some
+@test
+fn test_zip_with_some_some() {
+    let a = Some(10);
+    let b = Some(20);
+    let result = a.zip_with(b, |x, y| x + y);
+    assert_eq(result.unwrap(), 30);
+}
+
+/// Test zip_with with None
+@test
+fn test_zip_with_none() {
+    let a = Some(10);
+    let b: Maybe<Int> = None;
+    let result = a.zip_with(b, |x, y| x + y);
+    assert(result.is_none());
+}
+
+// =============================================================================
+// SECTION 7: Conversion to Result Tests
+// =============================================================================
+
+/// Test ok_or on Some
+@test
+fn test_ok_or_some() {
+    let opt = Some(42);
+    let result: Result<Int, Text> = opt.ok_or("error");
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+/// Test ok_or on None
+@test
+fn test_ok_or_none() {
+    let opt: Maybe<Int> = None;
+    let result: Result<Int, Text> = opt.ok_or("error");
+    assert(result.is_err());
+    assert_eq(result.unwrap_err(), "error");
+}
+
+/// Test ok_or_else on Some
+@test
+fn test_ok_or_else_some() {
+    let opt = Some(42);
+    let result: Result<Int, Text> = opt.ok_or_else(|| "error");
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+/// Test ok_or_else on None
+@test
+fn test_ok_or_else_none() {
+    let opt: Maybe<Int> = None;
+    let result: Result<Int, Text> = opt.ok_or_else(|| "computed error");
+    assert(result.is_err());
+    assert_eq(result.unwrap_err(), "computed error");
+}
+
+/// Test ok_or_else closure not called for Some
+@test
+fn test_ok_or_else_not_called_for_some() {
+    let opt = Some(42);
+    let mut called = false;
+    let _ = opt.ok_or_else(|| {
+        called = true;
+        "error"
+    });
+    assert(!called);
+}
+
+// =============================================================================
+// SECTION 8: Reference Tests
+// =============================================================================
+
+/// Test as_ref on Some
+@test
+fn test_as_ref_some() {
+    let opt = Some(42);
+    let ref_opt = opt.as_ref();
+    assert(ref_opt.is_some());
+    assert_eq(*ref_opt.unwrap(), 42);
+}
+
+/// Test as_ref on None
+@test
+fn test_as_ref_none() {
+    let opt: Maybe<Int> = None;
+    let ref_opt = opt.as_ref();
+    assert(ref_opt.is_none());
+}
+
+/// Test as_ref preserves original
+@test
+fn test_as_ref_preserves_original() {
+    let opt = Some(42);
+    let _ = opt.as_ref();
+    // Original should still be usable
+    assert_eq(opt.unwrap(), 42);
+}
+
+/// Test as_mut on Some
+@test
+fn test_as_mut_some() {
+    let mut opt = Some(42);
+    let ref_opt = opt.as_mut();
+    assert(ref_opt.is_some());
+
+    // Modify through reference
+    *ref_opt.unwrap() = 100;
+    assert_eq(opt.unwrap(), 100);
+}
+
+/// Test as_mut on None
+@test
+fn test_as_mut_none() {
+    let mut opt: Maybe<Int> = None;
+    let ref_opt = opt.as_mut();
+    assert(ref_opt.is_none());
+}
+
+// =============================================================================
+// SECTION 9: Mutation Tests
+// =============================================================================
+
+/// Test take from Some
+@test
+fn test_take_some() {
+    let mut opt = Some(42);
+    let taken = opt.take();
+
+    assert(taken.is_some());
+    assert_eq(taken.unwrap(), 42);
+    assert(opt.is_none());  // Original is now None
+}
+
+/// Test take from None
+@test
+fn test_take_none() {
+    let mut opt: Maybe<Int> = None;
+    let taken = opt.take();
+
+    assert(taken.is_none());
+    assert(opt.is_none());
+}
+
+/// Test replace Some with new value
+@test
+fn test_replace_some() {
+    let mut opt = Some(42);
+    let old = opt.replace(100);
+
+    assert_eq(old.unwrap(), 42);
+    assert_eq(opt.unwrap(), 100);
+}
+
+/// Test replace None with value
+@test
+fn test_replace_none() {
+    let mut opt: Maybe<Int> = None;
+    let old = opt.replace(100);
+
+    assert(old.is_none());
+    assert_eq(opt.unwrap(), 100);
+}
+
+/// Test insert into Some
+@test
+fn test_insert_some() {
+    let mut opt = Some(42);
+    let ref_val = opt.insert(100);
+
+    assert_eq(*ref_val, 100);
+    assert_eq(opt.unwrap(), 100);
+}
+
+/// Test insert into None
+@test
+fn test_insert_none() {
+    let mut opt: Maybe<Int> = None;
+    let ref_val = opt.insert(42);
+
+    assert_eq(*ref_val, 42);
+    assert_eq(opt.unwrap(), 42);
+}
+
+/// Test insert returns mutable reference
+@test
+fn test_insert_mutable_reference() {
+    let mut opt: Maybe<Int> = None;
+    let ref_val = opt.insert(42);
+    *ref_val = 100;
+
+    assert_eq(opt.unwrap(), 100);
+}
+
+/// Test get_or_insert on Some
+@test
+fn test_get_or_insert_some() {
+    let mut opt = Some(42);
+    let val = opt.get_or_insert(100);
+
+    assert_eq(*val, 42);  // Original value preserved
+    assert_eq(opt.unwrap(), 42);
+}
+
+/// Test get_or_insert on None
+@test
+fn test_get_or_insert_none() {
+    let mut opt: Maybe<Int> = None;
+    let val = opt.get_or_insert(42);
+
+    assert_eq(*val, 42);
+    assert_eq(opt.unwrap(), 42);
+}
+
+/// Test get_or_insert returns mutable reference
+@test
+fn test_get_or_insert_mutable() {
+    let mut opt: Maybe<Int> = None;
+    let val = opt.get_or_insert(42);
+    *val = 100;
+
+    assert_eq(opt.unwrap(), 100);
+}
+
+/// Test get_or_insert_with on Some
+@test
+fn test_get_or_insert_with_some() {
+    let mut opt = Some(42);
+    let mut called = false;
+    let val = opt.get_or_insert_with(|| {
+        called = true;
+        100
+    });
+
+    assert(!called, "Closure should not be called for Some");
+    assert_eq(*val, 42);
+}
+
+/// Test get_or_insert_with on None
+@test
+fn test_get_or_insert_with_none() {
+    let mut opt: Maybe<Int> = None;
+    let mut called = false;
+    let val = opt.get_or_insert_with(|| {
+        called = true;
+        42
+    });
+
+    assert(called, "Closure should be called for None");
+    assert_eq(*val, 42);
+}
+
+// =============================================================================
+// SECTION 10: Inspection Tests
+// =============================================================================
+
+/// Test inspect on Some
+@test
+fn test_inspect_some() {
+    let mut inspected = false;
+    let opt = Some(42);
+    let result = opt.inspect(|v| {
+        inspected = true;
+        assert_eq(*v, 42);
+    });
+
+    assert(inspected);
+    assert_eq(result.unwrap(), 42);
+}
+
+/// Test inspect on None
+@test
+fn test_inspect_none() {
+    let mut inspected = false;
+    let opt: Maybe<Int> = None;
+    let result = opt.inspect(|_| {
+        inspected = true;
+    });
+
+    assert(!inspected, "Inspect should not be called for None");
+    assert(result.is_none());
+}
+
+/// Test inspect returns self
+@test
+fn test_inspect_returns_self() {
+    let opt = Some(42);
+    let result = opt.inspect(|_| {});
+    assert_eq(result.unwrap(), 42);
+}
+
+// =============================================================================
+// SECTION 11: Flattening Tests
+// =============================================================================
+
+/// Test flatten nested Some(Some(v))
+@test
+fn test_flatten_some_some() {
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+    let flattened = nested.flatten();
+    assert_eq(flattened.unwrap(), 42);
+}
+
+/// Test flatten Some(None)
+@test
+fn test_flatten_some_none() {
+    let nested: Maybe<Maybe<Int>> = Some(None);
+    let flattened = nested.flatten();
+    assert(flattened.is_none());
+}
+
+/// Test flatten None
+@test
+fn test_flatten_none() {
+    let nested: Maybe<Maybe<Int>> = None;
+    let flattened = nested.flatten();
+    assert(flattened.is_none());
+}
+
+// =============================================================================
+// SECTION 12: Iteration Tests
+// =============================================================================
+
+/// Test iter on Some
+@test
+fn test_iter_some() {
+    let opt = Some(42);
+    let mut iter = opt.iter();
+
+    let first = iter.next();
+    assert(first.is_some());
+    assert_eq(*first.unwrap(), 42);
+
+    let second = iter.next();
+    assert(second.is_none());
+}
+
+/// Test iter on None
+@test
+fn test_iter_none() {
+    let opt: Maybe<Int> = None;
+    let mut iter = opt.iter();
+
+    let first = iter.next();
+    assert(first.is_none());
+}
+
+/// Test iter_mut on Some
+@test
+fn test_iter_mut_some() {
+    let mut opt = Some(42);
+    let mut iter = opt.iter_mut();
+
+    let first = iter.next();
+    assert(first.is_some());
+    *first.unwrap() = 100;
+
+    assert_eq(opt.unwrap(), 100);
+}
+
+/// Test iter_mut on None
+@test
+fn test_iter_mut_none() {
+    let mut opt: Maybe<Int> = None;
+    let mut iter = opt.iter_mut();
+
+    let first = iter.next();
+    assert(first.is_none());
+}
+
+/// Test MaybeIter size_hint for Some
+@test
+fn test_maybe_iter_size_hint_some() {
+    let opt = Some(42);
+    let iter = opt.iter();
+
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 1);
+    assert_eq(upper.unwrap(), 1);
+}
+
+/// Test MaybeIter size_hint for None
+@test
+fn test_maybe_iter_size_hint_none() {
+    let opt: Maybe<Int> = None;
+    let iter = opt.iter();
+
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper.unwrap(), 0);
+}
+
+// =============================================================================
+// SECTION 13: Protocol Implementation Tests - Default
+// =============================================================================
+
+/// Test Default for Maybe returns None
+@test
+fn test_default_returns_none() {
+    let opt: Maybe<Int> = Maybe.default();
+    assert(opt.is_none());
+}
+
+/// Test default construction syntax
+@test
+fn test_default_syntax() {
+    // Use type annotation since Verum doesn't use Rust turbofish syntax
+    let opt: Maybe<Int> = Maybe.default();
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// SECTION 14: Protocol Implementation Tests - Eq
+// =============================================================================
+
+/// Test Eq: None equals None
+@test
+fn test_eq_none_none() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = None;
+    assert(a == b);
+}
+
+/// Test Eq: Some equals Some with same value
+@test
+fn test_eq_some_some_equal() {
+    let a = Some(42);
+    let b = Some(42);
+    assert(a == b);
+}
+
+/// Test Eq: Some not equal Some with different value
+@test
+fn test_eq_some_some_different() {
+    let a = Some(42);
+    let b = Some(100);
+    assert(a != b);
+}
+
+/// Test Eq: None not equal Some
+@test
+fn test_eq_none_some() {
+    let a: Maybe<Int> = None;
+    let b = Some(42);
+    assert(a != b);
+}
+
+/// Test Eq: Some not equal None
+@test
+fn test_eq_some_none() {
+    let a = Some(42);
+    let b: Maybe<Int> = None;
+    assert(a != b);
+}
+
+// =============================================================================
+// SECTION 15: Protocol Implementation Tests - Ord
+// =============================================================================
+
+/// Test Ord: None equals None
+@test
+fn test_ord_none_none() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = None;
+    assert_eq(a.cmp(&b), Equal);
+}
+
+/// Test Ord: None less than Some
+@test
+fn test_ord_none_less_than_some() {
+    let a: Maybe<Int> = None;
+    let b = Some(42);
+    assert_eq(a.cmp(&b), Less);
+    assert(a < b);
+}
+
+/// Test Ord: Some greater than None
+@test
+fn test_ord_some_greater_than_none() {
+    let a = Some(42);
+    let b: Maybe<Int> = None;
+    assert_eq(a.cmp(&b), Greater);
+    assert(a > b);
+}
+
+/// Test Ord: Some compares by inner value
+@test
+fn test_ord_some_some_compare() {
+    let a = Some(10);
+    let b = Some(20);
+    assert_eq(a.cmp(&b), Less);
+    assert(a < b);
+
+    let c = Some(20);
+    let d = Some(10);
+    assert_eq(c.cmp(&d), Greater);
+    assert(c > d);
+
+    let e = Some(10);
+    let f = Some(10);
+    assert_eq(e.cmp(&f), Equal);
+}
+
+// =============================================================================
+// SECTION 16: Protocol Implementation Tests - Clone
+// =============================================================================
+
+/// Test Clone for Some
+@test
+fn test_clone_some() {
+    let opt = Some(42);
+    let cloned = opt.clone();
+
+    assert_eq(opt.unwrap(), 42);
+    assert_eq(cloned.unwrap(), 42);
+}
+
+/// Test Clone for None
+@test
+fn test_clone_none() {
+    let opt: Maybe<Int> = None;
+    let cloned = opt.clone();
+
+    assert(opt.is_none());
+    assert(cloned.is_none());
+}
+
+/// Test Clone produces independent copy
+@test
+fn test_clone_independent() {
+    let mut opt = Some(42);
+    let cloned = opt.clone();
+
+    opt.replace(100);
+
+    assert_eq(opt.unwrap(), 100);
+    assert_eq(cloned.unwrap(), 42);  // Unchanged
+}
+
+// =============================================================================
+// SECTION 17: Protocol Implementation Tests - Hash
+// =============================================================================
+
+/// Test Hash: None has consistent hash
+@test
+fn test_hash_none_consistent() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = None;
+
+    let mut hasher_a = DefaultHasher.new();
+    let mut hasher_b = DefaultHasher.new();
+
+    a.hash(&mut hasher_a);
+    b.hash(&mut hasher_b);
+
+    assert_eq(hasher_a.finish(), hasher_b.finish());
+}
+
+/// Test Hash: Equal Some values have same hash
+@test
+fn test_hash_some_equal() {
+    let a = Some(42);
+    let b = Some(42);
+
+    let mut hasher_a = DefaultHasher.new();
+    let mut hasher_b = DefaultHasher.new();
+
+    a.hash(&mut hasher_a);
+    b.hash(&mut hasher_b);
+
+    assert_eq(hasher_a.finish(), hasher_b.finish());
+}
+
+/// Test Hash: Different Some values (likely) have different hash
+@test
+fn test_hash_some_different() {
+    let a = Some(42);
+    let b = Some(100);
+
+    let mut hasher_a = DefaultHasher.new();
+    let mut hasher_b = DefaultHasher.new();
+
+    a.hash(&mut hasher_a);
+    b.hash(&mut hasher_b);
+
+    // Different values should (almost certainly) have different hashes
+    assert(hasher_a.finish() != hasher_b.finish());
+}
+
+/// Test Hash: None different from Some
+@test
+fn test_hash_none_vs_some() {
+    let a: Maybe<Int> = None;
+    let b = Some(0);
+
+    let mut hasher_a = DefaultHasher.new();
+    let mut hasher_b = DefaultHasher.new();
+
+    a.hash(&mut hasher_a);
+    b.hash(&mut hasher_b);
+
+    assert(hasher_a.finish() != hasher_b.finish());
+}
+
+// =============================================================================
+// SECTION 18: Protocol Implementation Tests - Debug
+// =============================================================================
+
+/// Test Debug for None
+@test
+fn test_debug_none() {
+    let opt: Maybe<Int> = None;
+    let debug_str = f"{opt:?}";
+    assert_eq(debug_str, "None");
+}
+
+/// Test Debug for Some
+@test
+fn test_debug_some() {
+    let opt = Some(42);
+    let debug_str = f"{opt:?}";
+    assert_eq(debug_str, "Some(42)");
+}
+
+// =============================================================================
+// SECTION 19: From Implementation Tests
+// =============================================================================
+
+/// Test From<T> for Maybe<T>
+@test
+fn test_from_value() {
+    let opt: Maybe<Int> = Maybe.from(42);
+    assert_eq(opt.unwrap(), 42);
+}
+
+/// Test into() conversion
+@test
+fn test_into_maybe() {
+    let opt: Maybe<Int> = 42.into();
+    assert_eq(opt.unwrap(), 42);
+}
+
+// =============================================================================
+// SECTION 20: Try Protocol Tests (? operator)
+// =============================================================================
+
+/// Test ? operator extracts value from Some
+@test
+fn test_try_operator_some() -> Maybe<Int> {
+    let opt = Some(42);
+    let value = opt?;
+    Some(value * 2)
+}
+
+/// Test ? operator early returns on None
+@test
+fn test_try_operator_none() -> Maybe<Int> {
+    let opt: Maybe<Int> = None;
+    let value = opt?;  // Should early return here
+    Some(value * 2)  // Never reached
+}
+
+/// Test ? operator in function
+fn function_using_try_operator(a: Maybe<Int>, b: Maybe<Int>) -> Maybe<Int> {
+    let x = a?;
+    let y = b?;
+    Some(x + y)
+}
+
+/// Test ? operator chaining success
+@test
+fn test_try_chaining_success() {
+    let result = function_using_try_operator(Some(10), Some(20));
+    assert_eq(result.unwrap(), 30);
+}
+
+/// Test ? operator chaining first None
+@test
+fn test_try_chaining_first_none() {
+    let result = function_using_try_operator(None, Some(20));
+    assert(result.is_none());
+}
+
+/// Test ? operator chaining second None
+@test
+fn test_try_chaining_second_none() {
+    let result = function_using_try_operator(Some(10), None);
+    assert(result.is_none());
+}
+
+/// Test ? on Result in Maybe-returning function
+@test
+fn test_try_result_in_maybe_function() -> Maybe<Int> {
+    let result: Result<Int, Text> = Ok(42);
+    let value = result?;  // Ok becomes Some, Err becomes None
+    Some(value)
+}
+
+/// Test ? on Result Err in Maybe-returning function
+@test
+fn test_try_result_err_in_maybe_function() -> Maybe<Int> {
+    let result: Result<Int, Text> = Err("error");
+    let value = result?;  // Should early return None
+    Some(value)
+}
+
+// =============================================================================
+// SECTION 21: Edge Cases and Special Values
+// =============================================================================
+
+/// Test Maybe with unit type
+@test
+fn test_maybe_unit() {
+    let some_unit: Maybe<()> = Some(());
+    assert(some_unit.is_some());
+
+    let none_unit: Maybe<()> = None;
+    assert(none_unit.is_none());
+}
+
+/// Test Maybe with boolean
+@test
+fn test_maybe_bool_false() {
+    let some_false = Some(false);
+    assert(some_false.is_some());
+    assert_eq(some_false.unwrap(), false);
+}
+
+/// Test Maybe preserves negative numbers
+@test
+fn test_maybe_negative() {
+    let opt = Some(-42);
+    assert_eq(opt.unwrap(), -42);
+}
+
+/// Test Maybe with floating point
+@test
+fn test_maybe_float() {
+    let opt = Some(3.14);
+    assert(opt.is_some());
+    let val = opt.unwrap();
+    assert(val > 3.0 && val < 4.0);
+}
+
+/// Test Maybe with tuple
+@test
+fn test_maybe_tuple() {
+    let opt = Some((1, "hello", true));
+    assert(opt.is_some());
+    let (a, b, c) = opt.unwrap();
+    assert_eq(a, 1);
+    assert_eq(b, "hello");
+    assert_eq(c, true);
+}
+
+// =============================================================================
+// SECTION 22: Integration Tests
+// =============================================================================
+
+/// Test Maybe in parsing-like scenario
+fn parse_number(s: &Text) -> Maybe<Int> {
+    if s == "42" {
+        Some(42)
+    } else if s == "100" {
+        Some(100)
+    } else {
+        None
+    }
+}
+
+@test
+fn test_maybe_parsing_scenario() {
+    let result = parse_number("42");
+    assert_eq(result.unwrap(), 42);
+
+    let result2 = parse_number("invalid");
+    assert(result2.is_none());
+}
+
+/// Test Maybe chaining in computation
+@test
+fn test_maybe_computation_chain() {
+    let result = Some(10)
+        .map(|x| x * 2)      // 20
+        .filter(|x| x > 15)  // passes
+        .and_then(|x| if x < 100 { Some(x + 5) } else { None })  // 25
+        .map(|x| x.to_string());  // "25"
+
+    assert_eq(result.unwrap(), "25");
+}
+
+/// Test Maybe with early exit pattern
+fn find_first_even(numbers: &[Int]) -> Maybe<Int> {
+    for n in numbers {
+        if n % 2 == 0 {
+            return Some(n);
+        }
+    }
+    None
+}
+
+@test
+fn test_maybe_early_exit() {
+    let numbers = [1, 3, 5, 6, 7, 8];
+    let result = find_first_even(&numbers);
+    assert_eq(result.unwrap(), 6);
+
+    let odd_only = [1, 3, 5, 7];
+    let result2 = find_first_even(&odd_only);
+    assert(result2.is_none());
+}
+
+/// Test Maybe flatten operation using and_then
+/// Note: and_then(|inner| inner) is the identity/flatten operation.
+/// For true optional chaining, outer?.method() extracts the inner value first,
+/// so outer?.and_then(f) would call and_then on Maybe<Int>, not Maybe<Maybe<Int>>.
+fn get_nested_value(outer: Maybe<Maybe<Int>>) -> Maybe<Int> {
+    outer.and_then(|inner| inner)
+}
+
+@test
+fn test_option_chaining() {
+    let nested = Some(Some(42));
+    assert_eq(get_nested_value(nested).unwrap(), 42);
+
+    let inner_none = Some(None);
+    assert(get_nested_value(inner_none).is_none());
+
+    let outer_none: Maybe<Maybe<Int>> = None;
+    assert(get_nested_value(outer_none).is_none());
+}
+
+// =============================================================================
+// Main Test Runner
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

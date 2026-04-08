@@ -1,0 +1,239 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, return
+// @description: Return type inference in functions and closures
+
+/// Test for return type in functions and closures.
+/// Demonstrates how return types are declared and inferred from function bodies.
+
+// ============================================================================
+// Explicit return type declarations
+// ============================================================================
+
+type Point is { x: Int, y: Int };
+
+/// Returns Int from arithmetic
+fn arithmetic_return(x: Int, y: Int) -> Int {
+    x + y * 2
+}
+
+/// Returns Bool from comparison
+fn comparison_return(x: Int, y: Int) -> Bool {
+    x > y
+}
+
+/// Returns a struct from constructor
+fn constructor_return(x: Int, y: Int) -> Point {
+    Point { x, y }
+}
+
+// ============================================================================
+// Return type inference in conditionals
+// ============================================================================
+
+/// Returns Int from if-else branches
+fn conditional_return(cond: Bool) -> Int {
+    if cond {
+        42
+    } else {
+        0
+    }
+}
+
+/// Returns Text from multi-branch if
+fn multi_branch_return(x: Int) -> Text {
+    if x < 0 {
+        "negative"
+    } else if x > 0 {
+        "positive"
+    } else {
+        "zero"
+    }
+}
+
+/// Returns Int from match expression
+fn match_return(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(x) => x,
+        None => 0,
+    }
+}
+
+// ============================================================================
+// Generic functions
+// ============================================================================
+
+/// Generic return type from parameter
+fn identity<T>(x: T) -> T {
+    x
+}
+
+/// Generic tuple return
+fn pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+/// Generic with clone
+fn double_up<T: Clone>(x: T) -> (T, T) {
+    (x.clone(), x)
+}
+
+// ============================================================================
+// Return type inference in closures
+// ============================================================================
+
+fn test_closure_inference() {
+    // Return type inferred from body
+    let add_one = |x: Int| x + 1;  // fn(Int) -> Int
+    let is_positive = |x: Int| x > 0;  // fn(Int) -> Bool
+    let make_pair = |x: Int, y: Int| (x, y);  // fn(Int, Int) -> (Int, Int)
+
+    assert(add_one(5) == 6);
+    assert(is_positive(3) == true);
+    assert(is_positive(-1) == false);
+    let p = make_pair(1, 2);
+    assert(p.0 == 1 && p.1 == 2);
+}
+
+// ============================================================================
+// Return type inference with early returns
+// ============================================================================
+
+/// All return paths return Int
+fn early_return_int(x: Int) -> Int {
+    if x < 0 {
+        return 0;
+    }
+    if x > 100 {
+        return 100;
+    }
+    x
+}
+
+/// Early return with Option
+fn early_return_maybe(x: Int) -> Maybe<Int> {
+    if x < 0 {
+        return None;
+    }
+    Some(x)
+}
+
+// ============================================================================
+// Return type from collections
+// ============================================================================
+
+fn map_values(items: List<Int>) -> List<Int> {
+    let mut result: List<Int> = [];
+    for item in items {
+        result.push(item * 2);
+    }
+    result
+}
+
+// ============================================================================
+// Return type inference with complex expressions
+// ============================================================================
+
+/// Returns Point from complex nested expression
+fn complex_expression(x: Int) -> Point {
+    Point {
+        x: if x > 0 { x } else { 0 },
+        y: x * 2,
+    }
+}
+
+/// Returns Int from block expression
+fn block_return(x: Int) -> Int {
+    let y = x * 2;
+    let z = y + 1;
+    {
+        let result = z * z;
+        result
+    }
+}
+
+// ============================================================================
+// Optional operations
+// ============================================================================
+
+fn option_map_return(opt: Maybe<Int>) -> Maybe<Int> {
+    opt.map(|x| x * 2)
+}
+
+// ============================================================================
+// Recursive functions
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn fibonacci(n: Int) -> Int {
+    match n {
+        0 => 0,
+        1 => 1,
+        _ => fibonacci(n - 1) + fibonacci(n - 2),
+    }
+}
+
+// ============================================================================
+// Main demonstration
+// ============================================================================
+
+fn main() {
+    // Arithmetic
+    assert(arithmetic_return(3, 4) == 11);
+    assert(comparison_return(3, 1) == true);
+    assert(comparison_return(1, 3) == false);
+
+    // Constructor
+    let p = constructor_return(1, 2);
+    assert(p.x == 1 && p.y == 2);
+
+    // Conditional inference
+    let c = conditional_return(true);
+    assert(c == 42);
+    assert(multi_branch_return(-5) == "negative");
+    assert(multi_branch_return(5) == "positive");
+    assert(multi_branch_return(0) == "zero");
+
+    // Match inference
+    assert(match_return(Some(42)) == 42);
+    assert(match_return(None) == 0);
+
+    // Generic inference
+    let id = identity(42);
+    assert(id == 42);
+    let p2 = pair(1, "hello");
+    assert(p2.0 == 1);
+
+    // Closure inference
+    test_closure_inference();
+
+    // Collection inference
+    let mapped = map_values([1, 2, 3]);
+    assert(mapped == [2, 4, 6]);
+
+    // Recursive inference
+    let fact = factorial(5);
+    assert(fact == 120);
+    assert(fibonacci(7) == 13);
+
+    // Optional
+    assert(option_map_return(Some(21)) == Some(42));
+    assert(option_map_return(None) == None);
+
+    // Early return
+    assert(early_return_int(-5) == 0);
+    assert(early_return_int(50) == 50);
+    assert(early_return_int(200) == 100);
+    assert(early_return_maybe(-1) == None);
+    assert(early_return_maybe(5) == Some(5));
+}

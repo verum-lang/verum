@@ -1,0 +1,219 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, hash-table, open-addressing, data-structure
+// @timeout: 30000
+
+// Simple hash table with open addressing (linear probing)
+// Keys and values stored in parallel Arr8 arrays
+// Empty slot indicated by key == -1
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn empty_table() -> Arr8 {
+    Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 }
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Simple hash function
+fn hash_fn(key: Int, cap: Int) -> Int {
+    abs_val(key * 2654435761 / 65536) % cap
+}
+
+// Insert key-value pair. Returns (keys, vals) packed as keys only (vals managed in parallel)
+fn ht_insert_keys(keys: Arr8, key: Int, cap: Int) -> Arr8 {
+    let mut idx = hash_fn(key, cap);
+    let mut probes = 0;
+    while probes < cap {
+        let k = get8(keys, idx);
+        if k == -1 {
+            return set8(keys, idx, key);
+        }
+        if k == key {
+            return keys; // already exists
+        }
+        idx = (idx + 1) % cap;
+        probes = probes + 1;
+    }
+    keys // table full
+}
+
+fn ht_insert_vals(keys: Arr8, vals: Arr8, key: Int, val: Int, cap: Int) -> Arr8 {
+    let mut idx = hash_fn(key, cap);
+    let mut probes = 0;
+    while probes < cap {
+        let k = get8(keys, idx);
+        if k == -1 {
+            return set8(vals, idx, val);
+        }
+        if k == key {
+            return set8(vals, idx, val); // update
+        }
+        idx = (idx + 1) % cap;
+        probes = probes + 1;
+    }
+    vals
+}
+
+// Lookup key, return value or -1 if not found
+fn ht_get(keys: Arr8, vals: Arr8, key: Int, cap: Int) -> Int {
+    let mut idx = hash_fn(key, cap);
+    let mut probes = 0;
+    while probes < cap {
+        let k = get8(keys, idx);
+        if k == -1 { return -1; }
+        if k == key { return get8(vals, idx); }
+        idx = (idx + 1) % cap;
+        probes = probes + 1;
+    }
+    -1
+}
+
+// Check if key exists
+fn ht_contains(keys: Arr8, key: Int, cap: Int) -> Int {
+    let mut idx = hash_fn(key, cap);
+    let mut probes = 0;
+    while probes < cap {
+        let k = get8(keys, idx);
+        if k == -1 { return 0; }
+        if k == key { return 1; }
+        idx = (idx + 1) % cap;
+        probes = probes + 1;
+    }
+    0
+}
+
+// Count entries
+fn ht_count(keys: Arr8, cap: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < cap {
+        if get8(keys, i) != -1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_basic_insert_get() -> Int {
+    let cap = 8;
+    let mut keys = empty_table();
+    let mut vals = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+
+    // Insert (10, 100)
+    vals = ht_insert_vals(keys, vals, 10, 100, cap);
+    keys = ht_insert_keys(keys, 10, cap);
+
+    // Insert (20, 200)
+    vals = ht_insert_vals(keys, vals, 20, 200, cap);
+    keys = ht_insert_keys(keys, 20, cap);
+
+    // Insert (30, 300)
+    vals = ht_insert_vals(keys, vals, 30, 300, cap);
+    keys = ht_insert_keys(keys, 30, cap);
+
+    assert_eq(ht_get(keys, vals, 10, cap), 100);
+    assert_eq(ht_get(keys, vals, 20, cap), 200);
+    assert_eq(ht_get(keys, vals, 30, cap), 300);
+    assert_eq(ht_get(keys, vals, 40, cap), -1); // not found
+    assert_eq(ht_count(keys, cap), 3);
+    1
+}
+
+fn test_update() -> Int {
+    let cap = 8;
+    let mut keys = empty_table();
+    let mut vals = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+
+    vals = ht_insert_vals(keys, vals, 5, 50, cap);
+    keys = ht_insert_keys(keys, 5, cap);
+
+    assert_eq(ht_get(keys, vals, 5, cap), 50);
+
+    // Update value
+    vals = ht_insert_vals(keys, vals, 5, 99, cap);
+    keys = ht_insert_keys(keys, 5, cap);
+
+    assert_eq(ht_get(keys, vals, 5, cap), 99);
+    assert_eq(ht_count(keys, cap), 1); // still 1 entry
+    1
+}
+
+fn test_contains() -> Int {
+    let cap = 8;
+    let mut keys = empty_table();
+    let mut vals = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+
+    assert_eq(ht_contains(keys, 42, cap), 0);
+
+    vals = ht_insert_vals(keys, vals, 42, 1, cap);
+    keys = ht_insert_keys(keys, 42, cap);
+
+    assert_eq(ht_contains(keys, 42, cap), 1);
+    assert_eq(ht_contains(keys, 43, cap), 0);
+    1
+}
+
+fn test_collision_handling() -> Int {
+    let cap = 8;
+    let mut keys = empty_table();
+    let mut vals = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+
+    // Insert several keys - some will collide
+    let mut i = 0;
+    while i < 5 {
+        let key = i * 8; // likely to cause collisions with cap=8
+        vals = ht_insert_vals(keys, vals, key, i * 10, cap);
+        keys = ht_insert_keys(keys, key, cap);
+        i = i + 1;
+    }
+
+    assert_eq(ht_count(keys, cap), 5);
+
+    // Verify all values
+    i = 0;
+    while i < 5 {
+        assert_eq(ht_get(keys, vals, i * 8, cap), i * 10);
+        i = i + 1;
+    }
+    1
+}
+
+fn test_empty_table() -> Int {
+    let cap = 8;
+    let keys = empty_table();
+    let vals = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+
+    assert_eq(ht_count(keys, cap), 0);
+    assert_eq(ht_get(keys, vals, 1, cap), -1);
+    assert_eq(ht_contains(keys, 1, cap), 0);
+    1
+}
+
+fn main() -> Int {
+    test_basic_insert_get();
+    test_update();
+    test_contains();
+    test_collision_handling();
+    test_empty_table();
+    print("[OK] 476_hash_table_aot");
+    0
+}

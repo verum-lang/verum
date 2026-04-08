@@ -1,0 +1,119 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, generics, methods
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT generic types with methods
+
+type Pair is { first: Int, second: Int };
+
+implement Pair {
+    fn new(a: Int, b: Int) -> Pair {
+        Pair { first: a, second: b }
+    }
+
+    fn sum(self) -> Int {
+        self.first + self.second
+    }
+
+    fn swap(self) -> Pair {
+        Pair { first: self.second, second: self.first }
+    }
+
+    fn map(self, f: fn(Int) -> Int) -> Pair {
+        Pair { first: f(self.first), second: f(self.second) }
+    }
+}
+
+type Maybe is Nothing | Just(Int);
+
+implement Maybe {
+    fn unwrap_or(self, default: Int) -> Int {
+        match self {
+            Just(v) => v,
+            Nothing => default,
+        }
+    }
+
+    fn map(self, f: fn(Int) -> Int) -> Maybe {
+        match self {
+            Just(v) => Just(f(v)),
+            Nothing => Nothing,
+        }
+    }
+
+    fn is_just(self) -> Bool {
+        self is Just
+    }
+}
+
+// Stack-like structure using nested pairs
+type Stack is { top: Int, rest_first: Int, rest_second: Int, size: Int };
+
+implement Stack {
+    fn empty() -> Stack {
+        Stack { top: 0, rest_first: 0, rest_second: 0, size: 0 }
+    }
+
+    fn push(self, val: Int) -> Stack {
+        Stack { top: val, rest_first: self.top, rest_second: self.rest_first, size: self.size + 1 }
+    }
+
+    fn peek(self) -> Int {
+        self.top
+    }
+
+    fn size(self) -> Int {
+        self.size
+    }
+}
+
+fn main() -> Int {
+    // Pair operations
+    let p = Pair.new(3, 7);
+    assert_eq(p.sum(), 10);
+
+    let swapped = p.swap();
+    assert_eq(swapped.first, 7);
+    assert_eq(swapped.second, 3);
+    assert_eq(swapped.sum(), 10);
+
+    let doubled = p.map(|x| x * 2);
+    assert_eq(doubled.first, 6);
+    assert_eq(doubled.second, 14);
+
+    // Maybe operations
+    let some_val = Just(42);
+    let no_val = Nothing;
+
+    assert_eq(some_val.unwrap_or(0), 42);
+    assert_eq(no_val.unwrap_or(-1), -1);
+
+    let mapped = some_val.map(|x| x + 8);
+    assert_eq(mapped.unwrap_or(0), 50);
+
+    let mapped_nothing = no_val.map(|x| x + 8);
+    assert_eq(mapped_nothing.unwrap_or(-1), -1);
+
+    assert(some_val.is_just());
+    assert(!no_val.is_just());
+
+    // Stack operations
+    let s = Stack.empty();
+    assert_eq(s.size(), 0);
+
+    let s1 = s.push(10);
+    assert_eq(s1.peek(), 10);
+    assert_eq(s1.size(), 1);
+
+    let s2 = s1.push(20);
+    assert_eq(s2.peek(), 20);
+    assert_eq(s2.size(), 2);
+
+    let s3 = s2.push(30);
+    assert_eq(s3.peek(), 30);
+    assert_eq(s3.size(), 3);
+
+    0
+}

@@ -1,0 +1,48 @@
+// @test: parse
+// @level: L1
+// @tags: meta, derive, attributes
+// @timeout: 5000
+
+/// Basic @derive attribute usage.
+/// Grammar: derive_attribute = 'derive' '(' identifier { ',' identifier } ')'
+///          attribute_item = '@' attribute item
+
+// Single derive
+@derive(Eq)
+type Color is Red | Green | Blue;
+
+// Multiple derives
+@derive(Eq, Hash, Clone)
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+// Derive on sum type
+@derive(Eq, Debug)
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { base: Float, height: Float };
+
+// Derive on tuple type
+@derive(Eq, Ord)
+type Pair is (Int, Int);
+
+// Derive on newtype
+@derive(Eq)
+type UserId is (Int);
+
+// Derive on generic type
+@derive(Eq, Clone)
+type Container<T> is {
+    value: T,
+    label: Text,
+};
+
+fn main() {
+    let c1 = Color.Red;
+    let c2 = Color.Red;
+    let p = Point { x: 1.0, y: 2.0 };
+    print("Derive basic tests parsed");
+}

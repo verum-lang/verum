@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, tactic, error
+// @description: Test malformed tactic declaration
+// @expected-error: E028
+
+tactic my_tactic(
+}

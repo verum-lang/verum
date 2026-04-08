@@ -1,0 +1,12 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, use-after-free, cbgr
+// @description: Tests that CBGR detects simple use-after-free
+
+fn main() {
+    let data = Heap.new(42);
+    let ref_data = &data;
+    drop(data);  // Free the data - increments generation
+    let _ = *ref_data;  // CBGR detects use after free via dereference
+}

@@ -1,0 +1,248 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, pipeline
+
+// Pipeline operator (|>)
+
+fn double(x: Int) -> Int { x * 2 }
+fn square(x: Int) -> Int { x * x }
+fn add_one(x: Int) -> Int { x + 1 }
+
+fn test_basic_pipeline() {
+    // Basic pipeline - passes left value as first argument to right function
+    let result = 5 |> double;  // double(5)
+
+    // Pipeline with function
+    let simple = 5 |> double;  // 10
+}
+
+fn test_chained_pipeline() {
+    // Chained pipelines
+    let chained = 5 |> double |> double |> double;  // 40
+    let complex = 5 |> add_one |> double |> square;  // ((5 + 1) * 2)^2 = 144
+}
+
+fn test_method_pipeline() {
+    // Pipeline with methods
+    let text_result = "hello"
+        |> str.to_upper
+        |> str.trim
+        |> str.reverse;
+}
+
+fn test_lambda_pipeline() {
+    // Pipeline with lambda/closure
+    let with_lambda = 5 |> (|x| x * 2);  // 10
+}
+
+fn test_partial_application_pipeline() {
+    // Pipeline with partial application
+    let incremented = [1, 2, 3] |> map(|x| x + 1);  // [2, 3, 4]
+}
+
+fn filter<T>(pred: fn(T) -> Bool) -> fn(List<T>) -> List<T> {
+    |list| list.filter(pred)
+}
+
+fn map<T, U>(f: fn(T) -> U) -> fn(List<T>) -> List<U> {
+    |list| list.map(f)
+}
+
+fn take<T>(n: Int) -> fn(List<T>) -> List<T> {
+    |list| list.take(n)
+}
+
+fn sum(list: List<Int>) -> Int {
+    list.fold(0, |acc, x| acc + x)
+}
+
+fn test_data_processing_pipeline() {
+    // Data processing pipeline
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    let processed = data
+        |> filter(|x| x % 2 == 0)      // [2, 4, 6, 8, 10]
+        |> map(|x| x * 2)               // [4, 8, 12, 16, 20]
+        |> take(3)                       // [4, 8, 12]
+        |> sum;                          // 24
+}
+
+fn test_typed_pipeline() {
+    // Pipeline with explicit type
+    let typed: Int = 5 |> double |> square;
+}
+
+fn fetch(url: Text) -> Text { "" }
+fn parse_json(t: Text) -> Text { t }
+fn extract_data(t: Text) -> Text { t }
+
+async fn test_async_pipeline() {
+    // Async pipeline
+    let url = "http://example.com";
+    let fetched = fetch(url).await;
+    let parsed = parse_json(fetched).await;
+    let async_result = extract_data(parsed);
+}
+
+fn validate_input(input: Text) -> Result<Text, Text> { Ok(input) }
+
+fn test_error_pipeline() {
+    // Error handling in pipeline
+    let input = "test";
+    let default_value = "default";
+    let safe_result = input
+        |> validate_input
+        |> map(|v| process(v))
+        |> unwrap_or(default_value);
+}
+
+fn process(v: Text) -> Text { v }
+fn unwrap_or<T>(default: T) -> fn(Result<T, Text>) -> T {
+    |result| match result {
+        Ok(v) => v
+        Err(_) => default
+    }
+}
+
+fn test_option_pipeline() {
+    // Pipeline with Option/Maybe
+    let maybe_result = Some(5)
+        |> Option.map(double)
+        |> Option.and_then(|x| if x > 0 { Some(x) } else { None })
+        |> Option.unwrap_or(0);
+}
+
+fn parse_int(s: Text) -> Result<Int, Text> { Ok(0) }
+
+fn test_result_pipeline() {
+    // Pipeline with Result
+    let result_chain = "42"
+        |> parse_int
+        |> Result.map(double)
+        |> Result.map_err(|e| f"Parse error: {e}");
+}
+
+// Complex data transformation
+type User is { name: Text, age: Int, email: Text };
+
+fn get_users() -> List<User> { [] }
+
+fn test_complex_transformation() {
+    let users = get_users();
+
+    let adult_emails = users
+        |> filter(|u| u.age >= 18)
+        |> map(|u| u.email)
+        |> filter(|e| e.contains("@"))
+        |> collect;
+}
+
+fn collect<T>(list: List<T>) -> List<T> { list }
+
+fn trim(t: Text) -> Text { t.trim() }
+fn validate_format(t: Text) -> Result<Text, Text> { Ok(t) }
+fn parse(t: Text) -> Result<Text, Text> { Ok(t) }
+fn transform(t: Text) -> Result<Text, Text> { Ok(t) }
+fn finalize(t: Text) -> Result<Text, Text> { Ok(t) }
+
+type Output is ();
+type Error is ();
+
+// Pipeline in function definition
+fn process_input(input: Text) -> Result<Output, Error> {
+    input
+        |> trim
+        |> validate_format
+        |> parse
+        |> transform
+        |> finalize
+}
+
+fn tap<T>(f: fn(T) -> ()) -> fn(T) -> T {
+    |v| {
+        f(v);
+        v
+    }
+}
+
+fn transform_value(v: Int) -> Int { v * 2 }
+
+fn test_debug_pipeline() {
+    // Pipeline with debug/logging
+    let value = 10;
+    let debugged = value
+        |> tap(|v| print(f"Before: {v}"))
+        |> transform_value
+        |> tap(|v| print(f"After: {v}"));
+}
+
+// Pipeline with multiple arguments using partial application
+fn add(a: Int, b: Int) -> Int { a + b }
+fn multiply(a: Int, b: Int) -> Int { a * b }
+
+fn test_multi_arg_pipeline() {
+    let multi_arg = 5
+        |> add(3, _)      // add(3, 5) = 8, if placeholder syntax supported
+        |> multiply(2, _); // multiply(2, 8) = 16
+}
+
+// Alternative: curried functions
+fn add_curried(a: Int) -> fn(Int) -> Int {
+    |b| a + b
+}
+
+fn test_curried_pipeline() {
+    let curried_result = 5 |> add_curried(3);  // 8
+}
+
+fn test_collection_stats_pipeline() {
+    // Pipeline with collection operations
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Note: Anonymous record literals (struct-like { field: value }) inside
+    // closures need a type name. Using tuple instead:
+    let stats = numbers
+        |> (|arr| (arr.min(), arr.max(), arr.sum()));
+}
+
+fn transform_a(v: Int) -> Int { v }
+fn transform_b(v: Int) -> Int { v }
+
+fn test_conditional_pipeline() {
+    let condition = true;
+    let value = 10;
+
+    // Conditional pipeline
+    let conditional = value
+        |> (|v| if condition { transform_a(v) } else { transform_b(v) });
+}
+
+fn test_early_exit_pipeline() {
+    // Pipeline with early exit
+    let input = "test";
+    let validated = input
+        |> validate_input
+        |> (|r| match r {
+            Ok(v) => Ok(process(v))
+            Err(e) => Err(e)
+        });
+}
+
+fn test_method_vs_pipeline() {
+    // Method chaining vs pipeline
+    // Method chain: value.method1().method2().method3()
+    // Pipeline:     value |> method1 |> method2 |> method3
+
+    let method_chain = "hello".to_upper().trim().len();
+    let pipeline_equiv = "hello" |> str.to_upper |> str.trim |> str.len;
+}
+
+fn test_iterator_pipeline() {
+    // Pipeline with iterator adaptors
+    let iter_pipeline = (0..100)
+        |> Iterator.filter(|x| x % 3 == 0)
+        |> Iterator.map(|x| x * x)
+        |> Iterator.take_while(|x| x < 500)
+        |> Iterator.collect;
+}

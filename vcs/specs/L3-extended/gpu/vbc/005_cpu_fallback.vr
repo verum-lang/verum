@@ -1,0 +1,103 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, gpu, fallback
+// @timeout: 50000
+// @expected-exit: 0
+// @description: CPU fallback operations — simulated tensor ops that fall back to CPU when no GPU
+
+type SimTensor is { rows: Int, cols: Int };
+
+fn sim_ones(r: Int, c: Int) -> SimTensor { SimTensor { rows: r, cols: c } }
+fn sim_zeros(r: Int, c: Int) -> SimTensor { SimTensor { rows: r, cols: c } }
+fn sim_full(r: Int, c: Int, v: Float) -> SimTensor { SimTensor { rows: r, cols: c } }
+
+// Identity matrix: square only
+fn sim_eye(n: Int) -> SimTensor { SimTensor { rows: n, cols: n } }
+
+fn shape_eq(t: SimTensor, r: Int, c: Int) -> Bool { t.rows == r && t.cols == c }
+fn numel(t: SimTensor) -> Int { t.rows * t.cols }
+
+fn t_add(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_mul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_matmul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.cols, b.rows);
+    SimTensor { rows: a.rows, cols: b.cols }
+}
+
+fn t_sum(a: SimTensor) -> SimTensor { SimTensor { rows: 1, cols: 1 } }
+fn t_sqrt(a: SimTensor) -> SimTensor { SimTensor { rows: a.rows, cols: a.cols } }
+fn t_softmax(a: SimTensor) -> SimTensor { SimTensor { rows: a.rows, cols: a.cols } }
+fn t_transpose(a: SimTensor) -> SimTensor { SimTensor { rows: a.cols, cols: a.rows } }
+
+@test
+fn test_cpu_fallback_add() {
+    let a = sim_ones(1, 5);
+    let b = sim_ones(1, 5);
+    let c = t_add(a, b);
+    assert(shape_eq(c, 1, 5));
+}
+
+@test
+fn test_cpu_fallback_matmul() {
+    let a = sim_eye(3);
+    let b = sim_ones(3, 3);
+    let c = t_matmul(a, b);
+    assert(shape_eq(c, 3, 3));
+}
+
+@test
+fn test_cpu_fallback_reduce() {
+    let t = sim_ones(4, 4);
+    let s = t_sum(t);
+    assert_eq(numel(s), 1);
+}
+
+@test
+fn test_cpu_fallback_unary() {
+    let t = sim_full(3, 3, 4.0);
+    let s = t_sqrt(t);
+    assert(shape_eq(s, 3, 3));
+}
+
+@test
+fn test_cpu_fallback_softmax() {
+    let t = sim_ones(2, 5);
+    let s = t_softmax(t);
+    assert(shape_eq(s, 2, 5));
+}
+
+@test
+fn test_cpu_fallback_transpose() {
+    let t = sim_zeros(3, 4);
+    let tr = t_transpose(t);
+    assert(shape_eq(tr, 4, 3));
+}
+
+@test
+fn test_cpu_fallback_chain() {
+    let a = sim_ones(3, 3);
+    let b = sim_ones(3, 3);
+    let c = t_mul(t_add(a, b), sim_full(3, 3, 0.5));
+    assert(shape_eq(c, 3, 3));
+}
+
+fn main() {
+    test_cpu_fallback_add();
+    test_cpu_fallback_matmul();
+    test_cpu_fallback_reduce();
+    test_cpu_fallback_unary();
+    test_cpu_fallback_softmax();
+    test_cpu_fallback_transpose();
+    test_cpu_fallback_chain();
+}

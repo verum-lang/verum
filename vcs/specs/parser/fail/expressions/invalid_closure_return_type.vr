@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, closure, return-type, error
+// @description: Closure with invalid return type syntax
+// @expected-error: E018
+
+fn test() {
+    let f = |x| -> { x };  // Missing type after ->
+}

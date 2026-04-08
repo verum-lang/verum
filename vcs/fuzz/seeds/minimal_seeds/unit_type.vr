@@ -1,0 +1,10 @@
+// Minimal: Unit type
+type Empty is ();
+
+fn do_nothing() -> () {
+    ()
+}
+
+fn main() {
+    let _: () = do_nothing();
+}

@@ -1,0 +1,219 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, thread-safety, send, sync, bounds, protocols
+// @description: Tests Send and Sync protocol bounds for thread safety
+
+/// Send and Sync are marker protocols that enable compile-time data race prevention:
+///
+/// Send: A type is Send if it's safe to send to another thread (move ownership)
+/// - Most types are Send
+/// - Rc, raw pointers are NOT Send
+///
+/// Sync: A type is Sync if it's safe to share references between threads
+/// - T is Sync if &T is Send
+/// - Mutex<T>, AtomicInt, immutable data are Sync
+/// - RefCell, Cell are NOT Sync
+///
+/// These bounds are automatically derived but can be manually implemented in unsafe.
+
+fn main() {
+    test_send_types();
+    test_sync_types();
+    test_automatic_derivation();
+    test_bounds_in_generics();
+    test_wrapper_types();
+
+    print("All Send/Sync bounds tests passed!");
+}
+
+fn test_send_types() {
+    // Primitive types are Send
+    let i: Int = 42;
+    spawn_and_consume(i);
+
+    let f: Float = 3.14;
+    spawn_and_consume(f);
+
+    let b: Bool = true;
+    spawn_and_consume(b);
+
+    // Owned containers are Send (if contents are Send)
+    let list: List<Int> = [1, 2, 3];
+    spawn_and_consume(list);
+
+    let text: Text = Text.from("hello");
+    spawn_and_consume(text);
+
+    let map: Map<Text, Int> = Map.from([("a", 1), ("b", 2)]);
+    spawn_and_consume(map);
+
+    // Heap-allocated values are Send
+    let boxed: Heap<Int> = Heap.new(42);
+    spawn_and_consume(boxed);
+
+    // Shared<T> is Send (atomic reference counting)
+    let shared: Shared<Int> = Shared.new(42);
+    spawn_and_consume(shared.clone());
+}
+
+fn spawn_and_consume<T: Send>(value: T) {
+    let handle = spawn(move || {
+        // value is consumed in the new thread
+        drop(value);
+    });
+    handle.join().unwrap();
+}
+
+fn test_sync_types() {
+    // Immutable primitives are Sync
+    let i: Int = 42;
+    share_reference(&i);
+
+    // Atomic types are Sync
+    let atomic = AtomicInt.new(0);
+    share_reference(&atomic);
+
+    // Mutex<T> is Sync when T is Send
+    let mutex = Mutex.new([1, 2, 3]);
+    share_reference(&mutex);
+
+    // RwLock<T> is Sync when T is Send + Sync
+    let rwlock = RwLock.new(Map.new());
+    share_reference(&rwlock);
+
+    // Shared<T> is Sync (allows shared references to be shared)
+    let shared: Shared<Int> = Shared.new(42);
+    share_reference(&shared);
+}
+
+fn share_reference<T: Sync>(value: &T) {
+    let value_ref = value;
+    let handles: List<JoinHandle<()>> = (0..4)
+        .map(|_| {
+            spawn(move || {
+                // Read reference in multiple threads
+                let _ = value_ref;
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+}
+
+fn test_automatic_derivation() {
+    // Type is Send if all fields are Send
+    type Point is {
+        x: Float,
+        y: Float,
+    };
+
+    let point = Point { x: 1.0, y: 2.0 };
+    spawn_and_consume(point);  // OK: Float is Send
+
+    // Type is Sync if all fields are Sync
+    type Config is {
+        timeout: Int,
+        retries: Int,
+    };
+
+    let config = Config { timeout: 30, retries: 3 };
+    share_reference(&config);  // OK: Int is Sync
+
+    // Generic type inherits bounds from type parameters
+    type Container<T> is {
+        value: T,
+    };
+
+    let container: Container<Int> = Container { value: 42 };
+    spawn_and_consume(container);  // OK: Int is Send
+    share_reference(&Container { value: 42 });  // OK: Int is Sync
+}
+
+fn test_bounds_in_generics() {
+    // Function requiring Send bound
+    fn process_in_thread<T: Send>(value: T) -> JoinHandle<T> {
+        spawn(move || { value })
+    }
+
+    let result = process_in_thread(42);
+    assert(result.join().unwrap() == 42);
+
+    // Function requiring Sync bound
+    fn share_with_threads<T: Sync>(value: &T) {
+        for _ in 0..4 {
+            spawn(move || {
+                let _ = value;
+            });
+        }
+    }
+
+    // Function requiring both Send + Sync
+    fn parallel_map<T: Send, U: Send, F: Fn(T) -> U + Send + Sync + Clone>(items: List<T>, f: F) -> List<U> {
+        items
+            .into_iter()
+            .map(|item| {
+                let f_clone = f.clone();
+                spawn(move || { f_clone(item) })
+            })
+            .map(|handle| handle.join().unwrap())
+            .collect()
+    }
+
+    let numbers = [1, 2, 3, 4, 5];
+    let doubled = parallel_map(numbers, |n| n * 2);
+    assert(doubled == [2, 4, 6, 8, 10]);
+}
+
+// Helper type for test_wrapper_types - RefCell is not Sync
+type UnsyncInner is {
+    data: RefCell<Int>,
+};
+
+fn test_wrapper_types() {
+    // Mutex makes inner type safely shareable
+
+    // Mutex<UnsyncInner> IS Sync because access is serialized
+    let inner = UnsyncInner {
+        data: RefCell.new(0),
+    };
+    let protected = Mutex.new(inner);
+
+    let handles: List<JoinHandle<Unit>> = (0..10)
+        .map(|_| {
+            let protected_ref = &protected;
+            spawn(move || {
+                let guard = protected_ref.lock().unwrap();
+                *guard.data.borrow_mut() += 1;
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let lock_result = protected.lock().unwrap();
+    assert(*lock_result.data.borrow() == 10);
+
+    // SendWrapper for forcing Send (unsafe)
+    // This is only available in unsafe code and should be used carefully
+}
+
+// Demonstrate that non-Send types are rejected
+fn compile_time_rejection_demo() {
+    // This code would not compile:
+    //
+    // let rc = Rc.new(42);  // Rc is NOT Send
+    // spawn move || {
+    //     println("{}", *rc);  // ERROR: Rc is not Send
+    // });
+    //
+    // let cell = Cell.new(42);  // Cell is NOT Sync
+    // let cell_ref = &cell;
+    // spawn || {
+    //     cell_ref.get();  // ERROR: &Cell is not Send (Cell not Sync)
+    // });
+}

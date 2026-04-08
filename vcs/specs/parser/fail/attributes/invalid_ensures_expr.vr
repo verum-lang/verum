@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, attributes, ensures, verification, error
+// @description: Test invalid empty ensures clause
+// @expected-error: E017
+
+@ensures()
+fn test(x: Int) -> Int {
+    x + 1
+}

@@ -1,0 +1,167 @@
+// @test: run
+// Classic algorithms — binary search, sort, GCD
+
+fn binary_search(xs: List<Int>, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = xs.len() - 1;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        if (xs[mid] == target) {
+            return mid;
+        }
+        if (xs[mid] < target) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    -1
+}
+
+fn insertion_sort(xs: List<Int>) -> List<Int> {
+    let result = List.new();
+    let mut i = 0;
+    while i < xs.len() {
+        result.push(xs[i]);
+        i = i + 1;
+    }
+    let mut k = 1;
+    while k < result.len() {
+        let key = result[k];
+        let mut j = k - 1;
+        while j >= 0 && result[j] > key {
+            result[j + 1] = result[j];
+            j = j - 1;
+        }
+        result[j + 1] = key;
+        k = k + 1;
+    }
+    result
+}
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if (b == 0) { return a; }
+    gcd(b, a % b)
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    a / gcd(a, b) * b
+}
+
+@allow(unbounded_recursion)
+fn power(base: Int, exp: Int) -> Int {
+    if (exp == 0) { return 1; }
+    if (exp % 2 == 0) {
+        let half = power(base, exp / 2);
+        return half * half;
+    }
+    base * power(base, exp - 1)
+}
+
+fn main() -> Int {
+    // Test 1: Binary search
+    let sorted = [2, 5, 8, 12, 16, 23, 38, 56, 72, 91];
+    let idx1 = binary_search(sorted, 23);
+    if (idx1 != 5) {
+        print(f"FAIL test1a: idx = {idx1}");
+        return 1;
+    }
+    let idx2 = binary_search(sorted, 99);
+    if (idx2 != -1) {
+        print(f"FAIL test1b: idx = {idx2}");
+        return 1;
+    }
+    print("test1 binary_search: OK");
+
+    // Test 2: Insertion sort
+    let unsorted = [5, 3, 8, 1, 9, 2, 7, 4, 6, 0];
+    let sorted2 = insertion_sort(unsorted);
+    if (sorted2[0] != 0 || sorted2[9] != 9) {
+        print(f"FAIL test2: sorted[0]={sorted2[0]}, sorted[9]={sorted2[9]}");
+        return 1;
+    }
+    // Check all elements in order
+    let mut ok = true;
+    let mut i = 1;
+    while i < sorted2.len() {
+        if (sorted2[i] < sorted2[i - 1]) {
+            ok = false;
+        }
+        i = i + 1;
+    }
+    if (!ok) {
+        print("FAIL test2: not sorted");
+        return 1;
+    }
+    print("test2 insertion_sort: OK");
+
+    // Test 3: GCD
+    if (gcd(48, 18) != 6) {
+        print(f"FAIL test3a: gcd(48,18) = {gcd(48, 18)}");
+        return 1;
+    }
+    if (gcd(100, 75) != 25) {
+        print(f"FAIL test3b: gcd(100,75) = {gcd(100, 75)}");
+        return 1;
+    }
+    print("test3 gcd: OK");
+
+    // Test 4: LCM
+    if (lcm(4, 6) != 12) {
+        print(f"FAIL test4a: lcm(4,6) = {lcm(4, 6)}");
+        return 1;
+    }
+    if (lcm(7, 5) != 35) {
+        print(f"FAIL test4b: lcm(7,5) = {lcm(7, 5)}");
+        return 1;
+    }
+    print("test4 lcm: OK");
+
+    // Test 5: Fast exponentiation
+    if (power(2, 10) != 1024) {
+        print(f"FAIL test5a: 2^10 = {power(2, 10)}");
+        return 1;
+    }
+    if (power(3, 5) != 243) {
+        print(f"FAIL test5b: 3^5 = {power(3, 5)}");
+        return 1;
+    }
+    print("test5 power: OK");
+
+    // Test 6: Sieve of Eratosthenes (count primes under 100)
+    let mut is_prime = List.new();
+    let mut j = 0;
+    while j < 100 {
+        is_prime.push(1);
+        j = j + 1;
+    }
+    is_prime[0] = 0;
+    is_prime[1] = 0;
+    let mut p = 2;
+    while p * p < 100 {
+        if (is_prime[p] == 1) {
+            let mut m = p * p;
+            while m < 100 {
+                is_prime[m] = 0;
+                m = m + p;
+            }
+        }
+        p = p + 1;
+    }
+    let mut prime_count = 0;
+    let mut k = 0;
+    while k < 100 {
+        prime_count = prime_count + is_prime[k];
+        k = k + 1;
+    }
+    // There are 25 primes under 100
+    if (prime_count != 25) {
+        print(f"FAIL test6: primes under 100 = {prime_count}");
+        return 1;
+    }
+    print("test6 sieve: OK");
+
+    print("1033_algorithms: PASS");
+    0
+}

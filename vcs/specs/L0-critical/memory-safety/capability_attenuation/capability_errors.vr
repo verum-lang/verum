@@ -1,0 +1,116 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L0
+// @tags: capability, errors, negative-tests
+// @timeout: 5000
+// @expect: error
+//
+// Capability Error Tests (Negative Tests)
+// =======================================
+// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+//
+// These tests verify that the compiler correctly rejects invalid capability operations.
+// Each test case should produce a compile-time error.
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
+type Database is {
+    name: Text,
+};
+
+implement Database {
+    fn new(name: Text) -> Database { Database { name } }
+
+    // Read method
+    fn query(&self, sql: Text) -> List<Text> { List.new() }
+
+    // Write method
+    fn delete_all(&mut self) -> () {}
+
+    // Admin method
+    fn grant_admin(&mut self, user: Text) -> () {}
+}
+
+// ============================================================================
+// ERROR TEST 1: Cannot add capabilities
+// ============================================================================
+
+// ERROR: Cannot widen capabilities - read-only cannot become read-write
+// fn test_cannot_add_capabilities() -> () {
+//     let readonly: Database with [Read] = Database.new("test".to_text());
+//     let readwrite: Database with [Read, Write] = readonly;  // ERROR!
+// }
+
+// ============================================================================
+// ERROR TEST 2: Cannot call write method on read-only database
+// ============================================================================
+
+// ERROR: Method delete_all requires Write capability but only Read is available
+fn test_write_on_readonly() -> () {
+    let readonly: Database with [Read] = Database.new("test".to_text());
+    readonly.delete_all();  // ERROR: requires Write, only Read available
+}
+
+// ============================================================================
+// ERROR TEST 3: Cannot call admin method without Admin capability
+// ============================================================================
+
+// ERROR: Method grant_admin requires Admin capability
+fn test_admin_without_capability() -> () {
+    let db: Database with [Read, Write] = Database.new("test".to_text());
+    db.grant_admin("user".to_text());  // ERROR: requires Admin
+}
+
+// ============================================================================
+// ERROR TEST 4: Function requires more capabilities than provided
+// ============================================================================
+
+fn requires_write(db: &mut Database with [Write]) -> () {
+    db.delete_all();
+}
+
+// ERROR: Cannot pass read-only to function requiring Write
+fn test_insufficient_capabilities() -> () {
+    let readonly: Database with [Read] = Database.new("test".to_text());
+    requires_write(&mut readonly);  // ERROR: requires Write, only Read available
+}
+
+// ============================================================================
+// ERROR TEST 5: Cannot downcast capabilities
+// ============================================================================
+
+fn requires_admin(db: Database with [Admin]) -> () {}
+
+// ERROR: Cannot pass Read-only to function requiring Admin
+fn test_cannot_downcast() -> () {
+    let readonly: Database with [Read] = Database.new("test".to_text());
+    requires_admin(readonly);  // ERROR: Read cannot be used as Admin
+}
+
+// ============================================================================
+// ERROR TEST 6: Missing required capability in subset
+// ============================================================================
+
+fn requires_read_write(db: Database with [Read, Write]) -> () {}
+
+// ERROR: [Read, Execute] does not include Write
+fn test_missing_capability() -> () {
+    let db: Database with [Read, Execute] = Database.new("test".to_text());
+    requires_read_write(db);  // ERROR: missing Write capability
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // All tests above should fail at compile time
+    // If this file compiles successfully, the tests have failed
+    test_write_on_readonly();
+    test_admin_without_capability();
+    test_insufficient_capabilities();
+    test_cannot_downcast();
+    test_missing_capability();
+}

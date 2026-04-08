@@ -1,0 +1,337 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stdlib, list
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: List-like operations via flat struct arrays.
+// Tests push, pop, get, set, reverse, contains, index_of, sum, sort.
+
+// ============================================================================
+// List backed by 8-element flat struct
+// ============================================================================
+
+type IntList is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn list_new() -> IntList {
+    IntList { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn list_get(l: IntList, i: Int) -> Int {
+    if i == 0 { l.e0 } else if i == 1 { l.e1 }
+    else if i == 2 { l.e2 } else if i == 3 { l.e3 }
+    else if i == 4 { l.e4 } else if i == 5 { l.e5 }
+    else if i == 6 { l.e6 } else { l.e7 }
+}
+
+fn list_set(l: IntList, i: Int, val: Int) -> IntList {
+    IntList {
+        e0: if i == 0 { val } else { l.e0 },
+        e1: if i == 1 { val } else { l.e1 },
+        e2: if i == 2 { val } else { l.e2 },
+        e3: if i == 3 { val } else { l.e3 },
+        e4: if i == 4 { val } else { l.e4 },
+        e5: if i == 5 { val } else { l.e5 },
+        e6: if i == 6 { val } else { l.e6 },
+        e7: if i == 7 { val } else { l.e7 },
+        len: l.len
+    }
+}
+
+fn list_push(l: IntList, val: Int) -> IntList {
+    let updated = list_set(l, l.len, val);
+    IntList {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        len: l.len + 1
+    }
+}
+
+fn list_pop(l: IntList) -> IntList {
+    IntList {
+        e0: l.e0, e1: l.e1, e2: l.e2, e3: l.e3,
+        e4: l.e4, e5: l.e5, e6: l.e6, e7: l.e7,
+        len: l.len - 1
+    }
+}
+
+fn list_last(l: IntList) -> Int {
+    list_get(l, l.len - 1)
+}
+
+fn list_is_empty(l: IntList) -> Bool { l.len == 0 }
+
+// ============================================================================
+// List algorithms
+// ============================================================================
+
+fn list_contains(l: IntList, val: Int) -> Bool {
+    let mut i = 0;
+    let mut found = false;
+    while i < l.len {
+        if list_get(l, i) == val { found = true; }
+        i = i + 1;
+    }
+    found
+}
+
+fn list_index_of(l: IntList, val: Int) -> Int {
+    let mut i = 0;
+    let mut idx = -1;
+    let mut done = false;
+    while i < l.len && !done {
+        if list_get(l, i) == val {
+            idx = i;
+            done = true;
+        }
+        i = i + 1;
+    }
+    idx
+}
+
+fn list_sum(l: IntList) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < l.len {
+        total = total + list_get(l, i);
+        i = i + 1;
+    }
+    total
+}
+
+fn list_min(l: IntList) -> Int {
+    let mut mn = list_get(l, 0);
+    let mut i = 1;
+    while i < l.len {
+        let v = list_get(l, i);
+        if v < mn { mn = v; }
+        i = i + 1;
+    }
+    mn
+}
+
+fn list_max(l: IntList) -> Int {
+    let mut mx = list_get(l, 0);
+    let mut i = 1;
+    while i < l.len {
+        let v = list_get(l, i);
+        if v > mx { mx = v; }
+        i = i + 1;
+    }
+    mx
+}
+
+fn list_reverse(l: IntList) -> IntList {
+    let mut result = list_new();
+    let mut i = 0;
+    while i < l.len {
+        result = list_set(result, i, list_get(l, l.len - 1 - i));
+        i = i + 1;
+    }
+    IntList {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: l.len
+    }
+}
+
+fn list_count(l: IntList, val: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < l.len {
+        if list_get(l, i) == val { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+// Swap two elements in list
+fn list_swap(l: IntList, i: Int, j: Int) -> IntList {
+    let vi = list_get(l, i);
+    let vj = list_get(l, j);
+    let tmp = list_set(l, i, vj);
+    list_set(tmp, j, vi)
+}
+
+// Selection sort (ascending)
+fn list_sort(l: IntList) -> IntList {
+    let mut arr = l;
+    let mut i = 0;
+    while i < arr.len - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < arr.len {
+            if list_get(arr, j) < list_get(arr, min_idx) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            arr = list_swap(arr, i, min_idx);
+        }
+        i = i + 1;
+    }
+    arr
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_push_pop() {
+    let mut l = list_new();
+    assert(list_is_empty(l));
+    assert_eq(l.len, 0);
+
+    l = list_push(l, 10);
+    l = list_push(l, 20);
+    l = list_push(l, 30);
+    assert_eq(l.len, 3);
+    assert_eq(list_get(l, 0), 10);
+    assert_eq(list_get(l, 1), 20);
+    assert_eq(list_get(l, 2), 30);
+    assert_eq(list_last(l), 30);
+
+    l = list_pop(l);
+    assert_eq(l.len, 2);
+    assert_eq(list_last(l), 20);
+
+    l = list_pop(l);
+    l = list_pop(l);
+    assert(list_is_empty(l));
+}
+
+fn test_contains_index_of() {
+    let mut l = list_new();
+    l = list_push(l, 5);
+    l = list_push(l, 10);
+    l = list_push(l, 15);
+    l = list_push(l, 20);
+    l = list_push(l, 25);
+
+    assert(list_contains(l, 10));
+    assert(list_contains(l, 25));
+    assert(!list_contains(l, 12));
+    assert(!list_contains(l, 0));
+
+    assert_eq(list_index_of(l, 5), 0);
+    assert_eq(list_index_of(l, 15), 2);
+    assert_eq(list_index_of(l, 25), 4);
+    assert_eq(list_index_of(l, 99), -1);
+}
+
+fn test_sum_min_max() {
+    let mut l = list_new();
+    l = list_push(l, 3);
+    l = list_push(l, 1);
+    l = list_push(l, 4);
+    l = list_push(l, 1);
+    l = list_push(l, 5);
+    l = list_push(l, 9);
+
+    assert_eq(list_sum(l), 23);
+    assert_eq(list_min(l), 1);
+    assert_eq(list_max(l), 9);
+
+    // Single element
+    let mut s = list_new();
+    s = list_push(s, 42);
+    assert_eq(list_sum(s), 42);
+    assert_eq(list_min(s), 42);
+    assert_eq(list_max(s), 42);
+}
+
+fn test_reverse() {
+    let mut l = list_new();
+    l = list_push(l, 1);
+    l = list_push(l, 2);
+    l = list_push(l, 3);
+    l = list_push(l, 4);
+    l = list_push(l, 5);
+
+    let rev = list_reverse(l);
+    assert_eq(rev.len, 5);
+    assert_eq(list_get(rev, 0), 5);
+    assert_eq(list_get(rev, 1), 4);
+    assert_eq(list_get(rev, 2), 3);
+    assert_eq(list_get(rev, 3), 2);
+    assert_eq(list_get(rev, 4), 1);
+
+    // Double reverse = original
+    let rev2 = list_reverse(rev);
+    let mut i = 0;
+    while i < l.len {
+        assert_eq(list_get(rev2, i), list_get(l, i));
+        i = i + 1;
+    }
+}
+
+fn test_count() {
+    let mut l = list_new();
+    l = list_push(l, 1);
+    l = list_push(l, 2);
+    l = list_push(l, 1);
+    l = list_push(l, 3);
+    l = list_push(l, 1);
+    l = list_push(l, 2);
+
+    assert_eq(list_count(l, 1), 3);
+    assert_eq(list_count(l, 2), 2);
+    assert_eq(list_count(l, 3), 1);
+    assert_eq(list_count(l, 4), 0);
+}
+
+fn test_sort() {
+    let mut l = list_new();
+    l = list_push(l, 5);
+    l = list_push(l, 3);
+    l = list_push(l, 8);
+    l = list_push(l, 1);
+    l = list_push(l, 4);
+    l = list_push(l, 2);
+
+    let sorted = list_sort(l);
+    assert_eq(list_get(sorted, 0), 1);
+    assert_eq(list_get(sorted, 1), 2);
+    assert_eq(list_get(sorted, 2), 3);
+    assert_eq(list_get(sorted, 3), 4);
+    assert_eq(list_get(sorted, 4), 5);
+    assert_eq(list_get(sorted, 5), 8);
+
+    // Already sorted
+    let sorted2 = list_sort(sorted);
+    let mut i = 0;
+    while i < sorted.len {
+        assert_eq(list_get(sorted2, i), list_get(sorted, i));
+        i = i + 1;
+    }
+}
+
+fn test_set_update() {
+    let mut l = list_new();
+    l = list_push(l, 10);
+    l = list_push(l, 20);
+    l = list_push(l, 30);
+
+    l = list_set(l, 1, 99);
+    assert_eq(list_get(l, 0), 10);
+    assert_eq(list_get(l, 1), 99);
+    assert_eq(list_get(l, 2), 30);
+}
+
+fn main() -> Int {
+    test_push_pop();
+    test_contains_index_of();
+    test_sum_min_max();
+    test_reverse();
+    test_count();
+    test_sort();
+    test_set_update();
+    print("[OK] 136_stdlib_list_aot");
+    0
+}

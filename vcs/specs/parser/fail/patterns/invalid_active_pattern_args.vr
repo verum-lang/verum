@@ -1,0 +1,60 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, active, args, error
+// @description: Test invalid arguments in active pattern invocation
+// @expected-error: E075
+
+// Active pattern definitions
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+pattern Divisible(by: Int)(n: Int) -> Bool = n % by == 0;
+
+fn test_active_pattern_empty_comma() {
+    let value = 42;
+
+    // Invalid: comma without argument in active pattern params
+    match value {
+        InRange(,)() => print("empty comma"),
+        _ => print("other"),
+    }
+}
+
+fn test_active_pattern_double_comma() {
+    let value = 42;
+
+    // Invalid: double comma in active pattern params
+    match value {
+        InRange(0,, 100)() => print("double comma"),
+        _ => print("other"),
+    }
+}
+
+fn test_active_pattern_trailing_comma_invocation() {
+    let value = 42;
+
+    // Invalid: content in invocation parens (should be empty)
+    match value {
+        Even(,) => print("comma in invocation"),
+        _ => print("other"),
+    }
+}
+
+fn test_active_pattern_args_in_invocation() {
+    let value = 42;
+
+    // Invalid: arguments in invocation parentheses
+    match value {
+        Even(42) => print("arg in invocation"),
+        _ => print("other"),
+    }
+}
+
+fn test_active_pattern_pattern_in_params() {
+    let value = 42;
+
+    // Invalid: pattern instead of expression in params
+    match value {
+        InRange(x, y)() => print("pattern in params"),
+        _ => print("other"),
+    }
+}

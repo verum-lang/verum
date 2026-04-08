@@ -1,0 +1,610 @@
+// =============================================================================
+// protocols_test.vr - Tests for I/O protocols and error types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: io, protocols, stream, error, seek, cursor, core
+// @description: Comprehensive tests for I/O protocols, error types, and utility readers/writers
+// =============================================================================
+
+mount core.io.protocols.{
+    StreamError, IoErrorKind, IoResult, SeekFrom,
+    NotFound, PermissionDenied, ConnectionRefused, ConnectionReset,
+    ConnectionAborted, NotConnected, AddrInUse, AddrNotAvailable,
+    BrokenPipe, AlreadyExists, WouldBlock, InvalidInput, InvalidData,
+    TimedOut, WriteZero, Interrupted, UnexpectedEof, OutOfMemory,
+    Unsupported, Other,
+    Start, End, Current,
+    Empty, ByteRepeat, Sink,
+    empty_reader, repeat_byte, sink,
+};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+// NOTE: List import commented out - List operations (push, etc.) require memory
+// intrinsics that are not yet connected in the VBC interpreter.
+// mount core.collections.List;
+
+// =============================================================================
+// Section 1: IoErrorKind Variants
+// =============================================================================
+
+@test
+fn test_error_kind_not_found() {
+    let kind: IoErrorKind = NotFound;
+    assert(kind is NotFound);
+}
+
+@test
+fn test_error_kind_permission_denied() {
+    let kind: IoErrorKind = PermissionDenied;
+    assert(kind is PermissionDenied);
+}
+
+@test
+fn test_error_kind_connection_refused() {
+    let kind: IoErrorKind = ConnectionRefused;
+    assert(kind is ConnectionRefused);
+}
+
+@test
+fn test_error_kind_connection_reset() {
+    let kind: IoErrorKind = ConnectionReset;
+    assert(kind is ConnectionReset);
+}
+
+@test
+fn test_error_kind_broken_pipe() {
+    let kind: IoErrorKind = BrokenPipe;
+    assert(kind is BrokenPipe);
+}
+
+@test
+fn test_error_kind_already_exists() {
+    let kind: IoErrorKind = AlreadyExists;
+    assert(kind is AlreadyExists);
+}
+
+@test
+fn test_error_kind_would_block() {
+    let kind: IoErrorKind = WouldBlock;
+    assert(kind is WouldBlock);
+}
+
+@test
+fn test_error_kind_invalid_input() {
+    let kind: IoErrorKind = InvalidInput;
+    assert(kind is InvalidInput);
+}
+
+@test
+fn test_error_kind_timed_out() {
+    let kind: IoErrorKind = TimedOut;
+    assert(kind is TimedOut);
+}
+
+@test
+fn test_error_kind_unexpected_eof() {
+    let kind: IoErrorKind = UnexpectedEof;
+    assert(kind is UnexpectedEof);
+}
+
+@test
+fn test_error_kind_other() {
+    let kind: IoErrorKind = Other;
+    assert(kind is Other);
+}
+
+// =============================================================================
+// Section 2: StreamError Construction
+// =============================================================================
+
+@test
+fn test_stream_error_new() {
+    let err: StreamError = StreamError.new(NotFound);
+    assert(err.kind() is NotFound);
+    match err.message() {
+        Some(_) => panic("Expected no message"),
+        None => {} // Expected
+    }
+}
+
+@test
+fn test_stream_error_with_message() {
+    let err: StreamError = StreamError.with_message(NotFound, "file not found");
+    assert(err.kind() is NotFound);
+    match err.message() {
+        Some(msg) => assert_eq(*msg, "file not found"),
+        None => panic("Expected message"),
+    }
+}
+
+@test
+fn test_stream_error_kind_getter() {
+    let err: StreamError = StreamError.new(PermissionDenied);
+    let kind: IoErrorKind = err.kind();
+    assert(kind is PermissionDenied);
+}
+
+@test
+fn test_stream_error_from_errno_enoent() {
+    // ENOENT = 2 (NotFound)
+    let err: StreamError = StreamError.from_raw_os_error(2);
+    assert(err.kind() is NotFound);
+}
+
+@test
+fn test_stream_error_from_errno_eacces() {
+    // EACCES = 13 (PermissionDenied)
+    let err: StreamError = StreamError.from_raw_os_error(13);
+    assert(err.kind() is PermissionDenied);
+}
+
+@test
+fn test_stream_error_from_errno_eexist() {
+    // EEXIST = 17 (AlreadyExists)
+    let err: StreamError = StreamError.from_raw_os_error(17);
+    assert(err.kind() is AlreadyExists);
+}
+
+@test
+fn test_stream_error_from_errno_unknown() {
+    // Unknown errno maps to Other
+    let err: StreamError = StreamError.from_raw_os_error(999);
+    assert(err.kind() is Other);
+}
+
+@test
+fn test_stream_error_clone() {
+    let err: StreamError = StreamError.with_message(TimedOut, "operation timed out");
+    let cloned: StreamError = err.clone();
+    assert(cloned.kind() is TimedOut);
+    match cloned.message() {
+        Some(msg) => assert_eq(*msg, "operation timed out"),
+        None => panic("Expected message"),
+    }
+}
+
+// =============================================================================
+// Section 3: SeekFrom Variants
+// =============================================================================
+
+@test
+fn test_seek_from_start() {
+    let pos: SeekFrom = Start(100);
+    match pos {
+        Start(n) => assert_eq(n, 100),
+        _ => panic("Expected Start"),
+    }
+}
+
+@test
+fn test_seek_from_end() {
+    let pos: SeekFrom = End(-10);
+    match pos {
+        End(n) => assert_eq(n, -10),
+        _ => panic("Expected End"),
+    }
+}
+
+@test
+fn test_seek_from_current() {
+    let pos: SeekFrom = Current(5);
+    match pos {
+        Current(n) => assert_eq(n, 5),
+        _ => panic("Expected Current"),
+    }
+}
+
+@test
+fn test_seek_from_is_pattern() {
+    let start: SeekFrom = Start(0);
+    let end: SeekFrom = End(0);
+    let current: SeekFrom = Current(0);
+
+    assert(start is Start);
+    assert(!(start is End));
+    assert(!(start is Current));
+
+    assert(end is End);
+    assert(!(end is Start));
+
+    assert(current is Current);
+    assert(!(current is End));
+}
+
+// =============================================================================
+// Section 4: Empty Reader
+// =============================================================================
+
+@test
+fn test_empty_reader_construction() {
+    let reader: Empty = empty_reader();
+    // Empty reader created - it's a unit type
+    let _: &Empty = &reader;
+}
+
+// =============================================================================
+// Section 5: ByteRepeat Reader
+// =============================================================================
+
+@test
+fn test_repeat_byte_construction() {
+    let reader: ByteRepeat = repeat_byte(0xFF);
+    // ByteRepeat created with byte value
+    let _: &ByteRepeat = &reader;
+}
+
+@test
+fn test_repeat_byte_zero() {
+    let reader: ByteRepeat = repeat_byte(0);
+    let _: &ByteRepeat = &reader;
+}
+
+@test
+fn test_repeat_byte_field_access() {
+    let reader: ByteRepeat = repeat_byte(42);
+    assert_eq(reader.byte, 42);
+}
+
+// =============================================================================
+// Section 6: Sink Writer
+// =============================================================================
+
+@test
+fn test_sink_construction() {
+    let writer: Sink = sink();
+    // Sink is a unit type
+    let _: &Sink = &writer;
+}
+
+// =============================================================================
+// Section 8: IoResult Type
+// =============================================================================
+
+@test
+fn test_io_result_ok() {
+    let result: IoResult<Int> = Ok(42);
+    match result {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_io_result_err() {
+    let result: IoResult<Int> = Err(StreamError.new(NotFound));
+    match result {
+        Ok(_) => panic("Expected Err"),
+        Err(e) => assert(e.kind() is NotFound),
+    }
+}
+
+// =============================================================================
+// Section 9: Error Kind Match
+// =============================================================================
+
+@test
+fn test_error_kind_match_all() {
+    let kinds: List<IoErrorKind> = [
+        NotFound, PermissionDenied, ConnectionRefused, ConnectionReset,
+        ConnectionAborted, NotConnected, AddrInUse, AddrNotAvailable,
+        BrokenPipe, AlreadyExists, WouldBlock, InvalidInput, InvalidData,
+        TimedOut, WriteZero, Interrupted, UnexpectedEof, OutOfMemory,
+        Unsupported, Other,
+    ];
+
+    for kind in kinds.iter() {
+        match *kind {
+            NotFound => {}
+            PermissionDenied => {}
+            ConnectionRefused => {}
+            ConnectionReset => {}
+            ConnectionAborted => {}
+            NotConnected => {}
+            AddrInUse => {}
+            AddrNotAvailable => {}
+            BrokenPipe => {}
+            AlreadyExists => {}
+            WouldBlock => {}
+            InvalidInput => {}
+            InvalidData => {}
+            TimedOut => {}
+            WriteZero => {}
+            Interrupted => {}
+            UnexpectedEof => {}
+            OutOfMemory => {}
+            Unsupported => {}
+            Other => {}
+        }
+    }
+}
+
+// =============================================================================
+// Section 10: Edge Cases
+// =============================================================================
+
+@test
+fn test_stream_error_empty_message() {
+    let err: StreamError = StreamError.with_message(Other, "");
+    match err.message() {
+        Some(msg) => assert_eq(*msg, ""),
+        None => panic("Expected empty message"),
+    }
+}
+
+@test
+fn test_seek_from_start_zero() {
+    let pos: SeekFrom = Start(0);
+    match pos {
+        Start(n) => assert_eq(n, 0),
+        _ => panic("Expected Start(0)"),
+    }
+}
+
+@test
+fn test_seek_from_end_zero() {
+    let pos: SeekFrom = End(0);
+    match pos {
+        End(n) => assert_eq(n, 0),
+        _ => panic("Expected End(0)"),
+    }
+}
+
+@test
+fn test_seek_from_current_negative() {
+    let pos: SeekFrom = Current(-5);
+    match pos {
+        Current(n) => assert_eq(n, -5),
+        _ => panic("Expected Current(-5)"),
+    }
+}
+
+@test
+fn test_cursor_position_zero() {
+    let data: List<Byte> = List.new();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    assert_eq(cursor.position(), 0);
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+// =============================================================================
+// Section 11: Missing IoErrorKind Variants
+// =============================================================================
+
+@test
+fn test_error_kind_connection_aborted() {
+    let kind: IoErrorKind = ConnectionAborted;
+    assert(kind is ConnectionAborted);
+}
+
+@test
+fn test_error_kind_not_connected() {
+    let kind: IoErrorKind = NotConnected;
+    assert(kind is NotConnected);
+}
+
+@test
+fn test_error_kind_addr_in_use() {
+    let kind: IoErrorKind = AddrInUse;
+    assert(kind is AddrInUse);
+}
+
+@test
+fn test_error_kind_addr_not_available() {
+    let kind: IoErrorKind = AddrNotAvailable;
+    assert(kind is AddrNotAvailable);
+}
+
+@test
+fn test_error_kind_invalid_data() {
+    let kind: IoErrorKind = InvalidData;
+    assert(kind is InvalidData);
+}
+
+@test
+fn test_error_kind_write_zero() {
+    let kind: IoErrorKind = WriteZero;
+    assert(kind is WriteZero);
+}
+
+@test
+fn test_error_kind_interrupted() {
+    let kind: IoErrorKind = Interrupted;
+    assert(kind is Interrupted);
+}
+
+@test
+fn test_error_kind_out_of_memory() {
+    let kind: IoErrorKind = OutOfMemory;
+    assert(kind is OutOfMemory);
+}
+
+@test
+fn test_error_kind_unsupported() {
+    let kind: IoErrorKind = Unsupported;
+    assert(kind is Unsupported);
+}
+
+// =============================================================================
+// Section 12: StreamError Convenience Constructors
+// =============================================================================
+
+@test
+fn test_stream_error_from_errno() {
+    // from_errno is an alias for from_raw_os_error
+    let err = StreamError.from_errno(2);
+    assert(err.kind() is NotFound);
+}
+
+@test
+fn test_stream_error_from_errno_permission() {
+    let err = StreamError.from_errno(13);
+    assert(err.kind() is PermissionDenied);
+}
+
+@test
+fn test_stream_error_other_constructor() {
+    let err = StreamError.Other("custom error message");
+    assert(err.kind() is Other);
+    match err.message() {
+        Some(msg) => assert_eq(*msg, "custom error message"),
+        None => panic("Expected message"),
+    }
+}
+
+@test
+fn test_stream_error_other_empty_message() {
+    let err = StreamError.Other("");
+    assert(err.kind() is Other);
+    match err.message() {
+        Some(msg) => assert_eq(*msg, ""),
+        None => panic("Expected message"),
+    }
+}
+
+// =============================================================================
+// Section 13: StreamError from_raw_os_error Extended
+// =============================================================================
+
+@test
+fn test_stream_error_from_raw_os_error_would_block() {
+    // EAGAIN = 11
+    let err = StreamError.from_raw_os_error(11);
+    assert(err.kind() is WouldBlock);
+}
+
+@test
+fn test_stream_error_from_raw_os_error_broken_pipe() {
+    // EPIPE = 32
+    let err = StreamError.from_raw_os_error(32);
+    assert(err.kind() is BrokenPipe);
+}
+
+@test
+fn test_stream_error_from_raw_os_error_timed_out() {
+    // ETIMEDOUT = 110
+    let err = StreamError.from_raw_os_error(110);
+    assert(err.kind() is TimedOut);
+}
+
+@test
+fn test_stream_error_from_raw_os_error_connection_refused() {
+    // ECONNREFUSED = 111
+    let err = StreamError.from_raw_os_error(111);
+    assert(err.kind() is ConnectionRefused);
+}
+
+@test
+fn test_stream_error_from_raw_os_error_connection_reset() {
+    // ECONNRESET = 104
+    let err = StreamError.from_raw_os_error(104);
+    assert(err.kind() is ConnectionReset);
+}
+
+// =============================================================================
+// Section 14: IoErrorKind Distinctness
+// =============================================================================
+
+@test
+fn test_error_kind_all_distinct() {
+    // Verify each kind is distinct from others
+    let nf: IoErrorKind = NotFound;
+    assert(nf is NotFound);
+    assert(!(nf is PermissionDenied));
+    assert(!(nf is ConnectionRefused));
+    assert(!(nf is BrokenPipe));
+    assert(!(nf is Other));
+}
+
+@test
+fn test_error_kind_network_errors_distinct() {
+    let cr: IoErrorKind = ConnectionRefused;
+    let creset: IoErrorKind = ConnectionReset;
+    let ca: IoErrorKind = ConnectionAborted;
+    let nc: IoErrorKind = NotConnected;
+
+    assert(cr is ConnectionRefused);
+    assert(!(cr is ConnectionReset));
+    assert(creset is ConnectionReset);
+    assert(!(creset is ConnectionAborted));
+    assert(ca is ConnectionAborted);
+    assert(!(ca is NotConnected));
+    assert(nc is NotConnected);
+    assert(!(nc is ConnectionRefused));
+}
+
+// =============================================================================
+// Section 15: SeekFrom Edge Cases
+// =============================================================================
+
+@test
+fn test_seek_from_start_large_offset() {
+    let pos = Start(1073741824); // 1GB
+    match pos {
+        Start(n) => assert_eq(n, 1073741824),
+        _ => panic("Expected Start"),
+    }
+}
+
+@test
+fn test_seek_from_end_large_negative() {
+    let pos = End(-1048576); // -1MB
+    match pos {
+        End(n) => assert_eq(n, -1048576),
+        _ => panic("Expected End"),
+    }
+}
+
+@test
+fn test_seek_from_current_large_positive() {
+    let pos = Current(4096);
+    match pos {
+        Current(n) => assert_eq(n, 4096),
+        _ => panic("Expected Current"),
+    }
+}
+
+// =============================================================================
+// Section 16: IoResult with Different Types
+// =============================================================================
+
+@test
+fn test_io_result_ok_text() {
+    let result: IoResult<Text> = Ok("hello");
+    match result {
+        Ok(s) => assert_eq(s, "hello"),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_io_result_ok_bool() {
+    let result: IoResult<Bool> = Ok(true);
+    match result {
+        Ok(b) => assert(b),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_io_result_err_with_message() {
+    let result: IoResult<Int> = Err(StreamError.with_message(TimedOut, "connection timed out after 30s"));
+    match result {
+        Ok(_) => panic("Expected Err"),
+        Err(e) => {
+            assert(e.kind() is TimedOut);
+            match e.message() {
+                Some(msg) => assert(msg.contains("30s")),
+                None => panic("Expected message"),
+            }
+        }
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

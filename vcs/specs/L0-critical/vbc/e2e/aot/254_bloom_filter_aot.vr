@@ -1,0 +1,138 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, bloom, filter, probabilistic
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for simple Bloom filter (bit array with multiple hash functions)
+
+fn bnot(x: Int) -> Int { !x }
+
+// Bloom filter: 32-bit bitset with 3 hash functions
+type Bloom is { bits: Int };
+
+fn bloom_new() -> Bloom { Bloom { bits: 0 } }
+
+// Hash functions (simple integer hashes)
+fn hash1(x: Int) -> Int { (x * 2654435761) & 31 }  // Knuth multiplicative
+fn hash2(x: Int) -> Int { ((x * 2246822519) >> 3) & 31 }
+fn hash3(x: Int) -> Int { ((x ^ (x >> 4)) * 668265263) & 31 }
+
+fn bloom_add(b: Bloom, x: Int) -> Bloom {
+    let mut bits = b.bits;
+    bits = bits | (1 << hash1(x));
+    bits = bits | (1 << hash2(x));
+    bits = bits | (1 << hash3(x));
+    Bloom { bits: bits }
+}
+
+fn bloom_may_contain(b: Bloom, x: Int) -> Bool {
+    let h1 = hash1(x);
+    let h2 = hash2(x);
+    let h3 = hash3(x);
+    ((b.bits >> h1) & 1) == 1 &&
+    ((b.bits >> h2) & 1) == 1 &&
+    ((b.bits >> h3) & 1) == 1
+}
+
+// Count bits set
+fn popcount32(x: Int) -> Int {
+    let mut n = x;
+    let mut count = 0;
+    while n != 0 {
+        count = count + (n & 1);
+        n = n >> 1;
+    }
+    count
+}
+
+fn bloom_fill_ratio(b: Bloom) -> Int {
+    popcount32(b.bits)
+}
+
+fn test_basic() {
+    let mut bf = bloom_new();
+    // Empty bloom filter should not contain anything (very likely)
+    assert_eq(bloom_may_contain(bf, 42), false);
+
+    bf = bloom_add(bf, 42);
+    // After adding, must contain
+    assert_eq(bloom_may_contain(bf, 42), true);
+}
+
+fn test_multiple_adds() {
+    let mut bf = bloom_new();
+    bf = bloom_add(bf, 10);
+    bf = bloom_add(bf, 20);
+    bf = bloom_add(bf, 30);
+
+    assert_eq(bloom_may_contain(bf, 10), true);
+    assert_eq(bloom_may_contain(bf, 20), true);
+    assert_eq(bloom_may_contain(bf, 30), true);
+}
+
+fn test_no_false_negatives() {
+    // Add elements 1-10 and verify all present
+    let mut bf = bloom_new();
+    let mut i = 1;
+    while i <= 10 {
+        bf = bloom_add(bf, i);
+        i = i + 1;
+    }
+
+    let mut j = 1;
+    while j <= 10 {
+        assert_eq(bloom_may_contain(bf, j), true);
+        j = j + 1;
+    }
+}
+
+fn test_fill_ratio() {
+    let bf = bloom_new();
+    assert_eq(bloom_fill_ratio(bf), 0);
+
+    // Single element sets at most 3 bits
+    let bf2 = bloom_add(bf, 42);
+    let fr = bloom_fill_ratio(bf2);
+    assert_eq(fr >= 1, true);
+    assert_eq(fr <= 3, true);
+}
+
+fn test_idempotent() {
+    // Adding same element twice doesn't change filter
+    let mut bf = bloom_new();
+    bf = bloom_add(bf, 99);
+    let bits1 = bf.bits;
+    bf = bloom_add(bf, 99);
+    let bits2 = bf.bits;
+    assert_eq(bits1, bits2);
+}
+
+fn test_union() {
+    // Union of two bloom filters = OR of bits
+    let mut bf1 = bloom_new();
+    bf1 = bloom_add(bf1, 10);
+    bf1 = bloom_add(bf1, 20);
+
+    let mut bf2 = bloom_new();
+    bf2 = bloom_add(bf2, 30);
+    bf2 = bloom_add(bf2, 40);
+
+    let combined = Bloom { bits: bf1.bits | bf2.bits };
+    assert_eq(bloom_may_contain(combined, 10), true);
+    assert_eq(bloom_may_contain(combined, 20), true);
+    assert_eq(bloom_may_contain(combined, 30), true);
+    assert_eq(bloom_may_contain(combined, 40), true);
+}
+
+fn main() -> Int {
+    test_basic();
+    test_multiple_adds();
+    test_no_false_negatives();
+    test_fill_ratio();
+    test_idempotent();
+    test_union();
+    print("[OK] 254_bloom_filter_aot");
+    0
+}

@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, spawn, error
+// @description: Test invalid spawn expression without body
+// @expected-error: E048
+
+async fn test() {
+    spawn;
+}

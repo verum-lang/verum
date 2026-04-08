@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, contexts, using, empty-context, error
+// @description: Test invalid using clause with leading comma
+// @expected-error: E018
+
+fn foo() using [,] {
+    let x = 42;
+}

@@ -1,0 +1,178 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, invalid, negative
+
+// Invalid string literals - each line should fail to parse
+
+fn test_unterminated_strings() {
+    // Unterminated strings
+    let unterminated = "Hello;
+    let unterminated2 = "Hello World;
+}
+
+fn test_escape_at_end() {
+    // Unterminated with escape at end
+    let escape_at_end = "Hello\;
+}
+
+fn test_invalid_escapes() {
+    // Invalid escape sequences
+    let invalid_escape_x = "\x";
+    let invalid_escape_q = "\q";
+    let invalid_escape_z = "\z";
+    let invalid_escape_c = "\c";
+}
+
+fn test_invalid_unicode_escapes() {
+    // Invalid Unicode escapes
+    let unicode_no_brace = "\u1234";
+    let unicode_no_close = "\u{1234";
+    let unicode_no_open = "\u1234}";
+    let unicode_empty = "\u{}";
+    let unicode_invalid_hex = "\u{GHIJ}";
+    let unicode_too_long = "\u{1234567}";
+    let unicode_overflow = "\u{FFFFFF}";
+}
+
+fn test_unterminated_raw() {
+    // Unterminated raw strings
+    let raw_unterminated = r#"Hello;
+    let raw_mismatched = r#"Hello"##;
+    let raw_wrong_end = r##"Hello"#;
+}
+
+fn test_mismatched_triple() {
+    // Mismatched triple quotes
+    let triple_unterminated = """Hello;
+    let triple_mismatched = """Hello"";
+}
+
+fn test_embedded_newline() {
+    // Newline in regular string (not multiline)
+    let embedded_newline = "Line1;
+Line2"
+}
+
+fn test_null_issues() {
+    // Null character issues
+    let null_in_string = "Hello\0World";  // Might be invalid depending on spec
+}
+
+fn test_control_chars() {
+    // Control characters
+    let control_char = "Hello\x01World";
+    let bell_char = "Alert\x07";
+}
+
+fn test_invalid_hex() {
+    // Invalid hex escape
+    let hex_incomplete = "\xG";
+    let hex_too_short = "\x1";
+    let hex_invalid = "\xZZ";
+}
+
+fn test_mixed_quotes() {
+    // Mixed quote types
+    let mixed_quotes = "Hello';
+    let mixed_quotes2 = 'Hello";
+}
+
+fn test_trailing_backslash() {
+    // Backslash at end without escape
+    let trailing_backslash = "Hello\";
+}
+
+fn test_empty_escape() {
+    // Empty escape
+    let empty_escape = "\";
+}
+
+fn test_odd_backslashes() {
+    // Double backslash issues
+    let odd_backslashes = "\\\";
+}
+
+fn test_surrogates() {
+    // Unicode surrogate pairs (invalid in UTF-8)
+    let high_surrogate = "\u{D800}";
+    let low_surrogate = "\u{DC00}";
+    let surrogate_pair = "\u{D800}\u{DC00}";
+}
+
+fn test_overlong_utf8() {
+    // Overlong UTF-8 encoding (if using byte escapes)
+    let overlong_nul = "\xC0\x80";
+}
+
+fn test_invalid_raw_delimiter() {
+    // Invalid raw string delimiter
+    let raw_no_hash = r"Hello"#;
+    let raw_extra_hash = r#"Hello"###;
+}
+
+fn test_triple_quote_issues() {
+    // Triple quote issues
+    let triple_single_end = """Hello";
+    let triple_double_end = """Hello"";
+}
+
+fn test_only_invalid_escape() {
+    // String with only escape
+    let only_invalid_escape = "\q";
+}
+
+fn test_long_invalid() {
+    // Very long invalid escape
+    let long_invalid = "\unicode";
+}
+
+fn test_octal_escapes() {
+    // Octal escapes (not supported)
+    let octal_escape = "\777";
+    let octal_escape2 = "\123";
+}
+
+fn test_c_escapes() {
+    // C-style escapes not in Verum
+    let invalid_c_escape = "\a\b";  // If not supported
+}
+
+fn test_regex_escapes() {
+    // Regex-like escapes that aren't valid
+    let regex_escape = "\d\w\s";
+}
+
+fn test_nested_bad() {
+    // Nested quote issues
+    let nested_bad = ""inside"";
+    let nested_bad2 = """triple "broken" triple""";  // Edge case
+}
+
+fn test_line_cont() {
+    // Line continuation (not supported?)
+    let line_cont = "Hello \;
+World"
+}
+
+fn test_space_after_backslash() {
+    // Tab/space confusion in escape
+    let space_after_backslash = "\ n";
+}
+
+fn test_multi_unterm() {
+    // Multiple unterminated
+    let multi_unterm = "Start;
+"Continue
+}
+
+fn test_valid_then_invalid() {
+    // Invalid after valid escape
+    let valid_then_invalid = "\n\q";
+}
+
+fn test_just_quotes() {
+    // Just quotes
+    let just_quote = ";
+    let double_just = "";  // This might be valid empty string
+}

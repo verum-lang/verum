@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, async, using, error
+// @description: Test detection of using clause before return type
+// @expected-error: E018
+
+// using clause must come after return type
+type Callback is fn() using [Database] -> Int;

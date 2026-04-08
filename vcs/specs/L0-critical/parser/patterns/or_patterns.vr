@@ -1,0 +1,229 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, or, alternative
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Color is Red | Yellow | Orange | Blue | Green | Purple;
+type Point is { x: Int, y: Int };
+type Status is Success | Partial | Failure | Timeout;
+type Error is Failed;
+type Token is Plus | Minus | Star | Slash | Percent | LParen | RParen | LBrace | RBrace | Semicolon | Comma | Colon | Other;
+type Event is Start | Resume | Retry | Pause | Stop | Cancel | Other;
+type ABC is A | B | C;
+
+// Helper functions
+fn format(fmt: Text, n: Int) -> Text { fmt }
+fn use<T>(x: T) { }
+fn default() -> Int { 0 }
+fn process<T>(x: T) { }
+fn log(msg: Text) { }
+fn cleanup() { }
+fn execute() { }
+fn terminate() { }
+fn show_help() { }
+fn handle_unknown() { }
+fn special_condition() -> Bool { true }
+
+fn test_simple_or_pattern_with_literals() {
+    let char_val = 'a';
+
+    // Simple or-pattern with literals
+    match char_val {
+        'a' | 'e' | 'i' | 'o' | 'u' => "vowel",
+        _ => "consonant",
+    };
+}
+
+fn test_or_pattern_with_integers() {
+    let number = 5;
+
+    // Or-pattern with integers
+    match number {
+        0 | 1 => "binary",
+        2 | 3 | 5 | 7 => "small prime",
+        _ => "other",
+    };
+}
+
+fn test_or_pattern_with_enum_variants() {
+    let option: Maybe<Int> = Maybe.Some(0);
+
+    // Or-pattern with enum variants
+    match option {
+        Maybe.Some(0) | Maybe.None => "zero or nothing",
+        Maybe.Some(n) => format("value: {}", n),
+    };
+}
+
+fn test_or_pattern_with_multiple_enum_variants() {
+    let color = Color.Red;
+
+    // Or-pattern with multiple enum variants
+    match color {
+        Color.Red | Color.Yellow | Color.Orange => "warm",
+        Color.Blue | Color.Green | Color.Purple => "cool",
+        _ => "neutral",
+    };
+}
+
+fn test_or_pattern_with_struct_patterns() {
+    let point = Point { x: 0, y: 0 };
+
+    // Or-pattern with struct patterns
+    match point {
+        Point { x: 0, y: 0 } | Point { x: 1, y: 1 } => "special",
+        _ => "general",
+    };
+}
+
+fn test_or_pattern_with_tuple_patterns() {
+    let pair = (0, 0);
+
+    // Or-pattern with tuple patterns
+    match pair {
+        (0, 0) | (1, 1) | (2, 2) => "diagonal",
+        _ => "off-diagonal",
+    };
+}
+
+fn test_or_pattern_with_bindings() {
+    let value: Result<Int, Int> = Result.Ok(42);
+
+    // Or-pattern with bindings (same binding in all alternatives)
+    match value {
+        Result.Ok(x) | Result.Err(x) => use(x),
+    };
+}
+
+fn test_or_pattern_with_ranges() {
+    let age = 10;
+
+    // Or-pattern with ranges
+    match age {
+        0..=12 | 65..=120 => "special rate",
+        _ => "normal rate",
+    };
+}
+
+fn test_or_pattern_in_if_let() {
+    let value: Result<Int, Int> = Result.Ok(42);
+
+    // Or-pattern in if-let
+    if let Result.Ok(x) | Result.Err(x) = value {
+        process(x)
+    }
+}
+
+fn test_or_pattern_in_while_let() {
+    let iter: Result<Int, Int> = Result.Ok(42);
+
+    // Or-pattern in while-let
+    while let Result.Ok(x) | Result.Err(x) = iter {
+        process(x);
+    }
+}
+
+fn test_or_pattern_in_let_else() {
+    let value: Result<Int, Int> = Result.Ok(42);
+
+    // Or-pattern in let-else
+    let Result.Ok(x) | Result.Err(x) = value else {
+        return;
+    };
+}
+
+fn test_or_pattern_with_nested_patterns() {
+    let nested: Maybe<Maybe<Int>> = Maybe.Some(Maybe.Some(0));
+
+    // Or-pattern with nested patterns
+    match nested {
+        Maybe.Some(Maybe.Some(0)) | Maybe.Some(Maybe.None) | Maybe.None => "special",
+        Maybe.Some(Maybe.Some(n)) => format("nested: {}", n),
+    };
+}
+
+fn test_or_pattern_grouped_with_parentheses() {
+    let value = ABC.A;
+
+    // Or-pattern grouped with parentheses
+    match value {
+        (ABC.A | ABC.B) => "a or b",
+        ABC.C => "c",
+    };
+}
+
+fn test_or_pattern_with_complex_alternatives() {
+    let event = Event.Start;
+
+    // Or-pattern with complex alternatives
+    match event {
+        Event.Start | Event.Resume | Event.Retry => "beginning",
+        Event.Pause | Event.Stop | Event.Cancel => "ending",
+        _ => "other",
+    };
+}
+
+fn test_or_pattern_with_guards() {
+    let number = 2;
+    let threshold = 1;
+
+    // Or-pattern with guards (guard applies to all)
+    match number {
+        x @ (1 | 2 | 3) if x > threshold => "small but above threshold",
+        x @ (1 | 2 | 3) => "small",
+        _ => "other",
+    };
+}
+
+fn test_or_pattern_in_match_arm_with_block() {
+    let status = Status.Success;
+
+    // Or-pattern in match arm with block
+    match status {
+        Status.Success | Status.Partial => {
+            log("completed");
+            cleanup();
+            Result.Ok(())
+        },
+        Status.Failure | Status.Timeout => {
+            log("failed");
+            Result.Err(Error.Failed)
+        },
+    };
+}
+
+fn test_chained_or_patterns() {
+    let token = Token.Plus;
+
+    // Chained or-patterns
+    match token {
+        Token.Plus | Token.Minus | Token.Star | Token.Slash | Token.Percent => "operator",
+        Token.LParen | Token.RParen | Token.LBrace | Token.RBrace => "bracket",
+        Token.Semicolon | Token.Comma | Token.Colon => "punctuation",
+        _ => "other",
+    };
+}
+
+fn test_or_pattern_with_string_literals() {
+    let command = "start";
+
+    // Or-pattern with string literals
+    match command {
+        "start" | "begin" | "run" => execute(),
+        "stop" | "end" | "halt" => terminate(),
+        "help" | "?" | "h" => show_help(),
+        _ => handle_unknown(),
+    };
+}
+
+fn test_or_pattern_with_boolean() {
+    let flag = true;
+
+    // Or-pattern with boolean
+    match flag {
+        true | false => "boolean",
+    };
+}

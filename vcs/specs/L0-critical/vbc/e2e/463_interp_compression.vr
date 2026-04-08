@@ -1,0 +1,292 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, compression, rle, lz77, encoding
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Run-Length Encoding (RLE) and a simplified LZ77-like sliding window
+// compression on integer arrays. Values stored inline; lengths tracked
+// via sentinel values.
+
+// ---- Run-Length Encoding ----
+
+// RLE encode: input arr[0..n-1], write to out[] as (value, count) pairs.
+// out[0] = number of pairs * 2 (total encoded length).
+// Example: [1,1,1,2,2,3] -> [6, 1,3, 2,2, 3,1]
+fn rle_encode(arr: [Int; 32], n: Int, out: [Int; 64]) {
+    if n == 0 {
+        out[0] = 0;
+    } else {
+        let mut wi = 1; // write index into out
+        let mut i = 0;
+        while i < n {
+            let cur = arr[i];
+            let mut cnt = 1;
+            while i + cnt < n && arr[i + cnt] == cur {
+                cnt = cnt + 1;
+            }
+            out[wi] = cur;
+            out[wi + 1] = cnt;
+            wi = wi + 2;
+            i = i + cnt;
+        }
+        out[0] = wi - 1; // number of ints stored after index 0
+    }
+}
+
+// RLE decode: input out[] (as produced by rle_encode), write back to arr[].
+// Returns decoded length.
+fn rle_decode(enc: [Int; 64], arr: [Int; 32]) -> Int {
+    let enc_len = enc[0];
+    let mut wi = 0;
+    let mut ri = 1;
+    while ri <= enc_len {
+        let val = enc[ri];
+        let cnt = enc[ri + 1];
+        let mut k = 0;
+        while k < cnt {
+            arr[wi] = val;
+            wi = wi + 1;
+            k = k + 1;
+        }
+        ri = ri + 2;
+    }
+    wi
+}
+
+fn test_rle_basic() {
+    // [1,1,1,2,2,3] -> pairs: (1,3),(2,2),(3,1) -> 6 ints stored
+    let arr = [1, 1, 1, 2, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut enc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    rle_encode(arr, 6, enc);
+    // enc[0]=6, enc[1]=1, enc[2]=3, enc[3]=2, enc[4]=2, enc[5]=3, enc[6]=1
+    assert_eq(enc[0], 6);
+    assert_eq(enc[1], 1); // value
+    assert_eq(enc[2], 3); // count
+    assert_eq(enc[3], 2);
+    assert_eq(enc[4], 2);
+    assert_eq(enc[5], 3);
+    assert_eq(enc[6], 1);
+
+    // Decode back
+    let mut dec = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dec_len = rle_decode(enc, dec);
+    assert_eq(dec_len, 6);
+    assert_eq(dec[0], 1);
+    assert_eq(dec[1], 1);
+    assert_eq(dec[2], 1);
+    assert_eq(dec[3], 2);
+    assert_eq(dec[4], 2);
+    assert_eq(dec[5], 3);
+
+    print("rle_basic: ok");
+}
+
+fn test_rle_all_same() {
+    // [5,5,5,5,5,5,5,5] -> (5,8) -> enc_len=2
+    let arr = [5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut enc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    rle_encode(arr, 8, enc);
+    assert_eq(enc[0], 2); // one pair = 2 ints
+    assert_eq(enc[1], 5);
+    assert_eq(enc[2], 8);
+
+    // Decode
+    let mut dec = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dec_len = rle_decode(enc, dec);
+    assert_eq(dec_len, 8);
+    let mut all5 = 1;
+    let mut i = 0;
+    while i < 8 { if dec[i] != 5 { all5 = 0; } i = i + 1; }
+    assert_eq(all5, 1);
+
+    print("rle_all_same: ok");
+}
+
+fn test_rle_alternating() {
+    // [1,2,1,2,1,2] -> (1,1),(2,1),(1,1),(2,1),(1,1),(2,1) -> enc_len=12
+    let arr = [1, 2, 1, 2, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut enc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    rle_encode(arr, 6, enc);
+    // 6 pairs, each count=1 -> 12 ints stored
+    assert_eq(enc[0], 12);
+
+    // Decode
+    let mut dec = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dec_len = rle_decode(enc, dec);
+    assert_eq(dec_len, 6);
+    assert_eq(dec[0], 1);
+    assert_eq(dec[1], 2);
+    assert_eq(dec[2], 1);
+    assert_eq(dec[3], 2);
+    assert_eq(dec[4], 1);
+    assert_eq(dec[5], 2);
+
+    print("rle_alternating: ok");
+}
+
+// ---- Simplified LZ-like sliding window ----
+// Encode tokens: (0, literal) for literal, (offset, length) for back-reference.
+// Only look back up to window_size=8.
+// Output: pairs [type, val] where type=0 means literal (val=char),
+//         type=1 means back-ref (val=offset*16+length, length>=2).
+
+fn lz_encode(src: [Int; 32], n: Int, out: [Int; 64], window: Int) {
+    let mut oi = 1; // output index (out[0] = count of tokens * 2)
+    let mut i = 0;
+    while i < n {
+        // Find longest match in window [max(0,i-window)..i-1]
+        let wstart = if i >= window { i - window } else { 0 };
+        let mut best_off = 0;
+        let mut best_len = 0;
+        let mut j = wstart;
+        while j < i {
+            // How long is match starting at j vs i?
+            let mut mlen = 0;
+            while i + mlen < n && src[j + mlen] == src[i + mlen] && mlen < 15 {
+                mlen = mlen + 1;
+            }
+            if mlen > best_len {
+                best_len = mlen;
+                best_off = i - j;
+            }
+            j = j + 1;
+        }
+        if best_len >= 2 {
+            // Back-reference
+            out[oi] = 1;
+            out[oi + 1] = best_off * 16 + best_len;
+            oi = oi + 2;
+            i = i + best_len;
+        } else {
+            // Literal
+            out[oi] = 0;
+            out[oi + 1] = src[i];
+            oi = oi + 2;
+            i = i + 1;
+        }
+    }
+    out[0] = oi - 1;
+}
+
+fn lz_decode(enc: [Int; 64], out: [Int; 32]) -> Int {
+    let enc_len = enc[0];
+    let mut oi = 0;
+    let mut ri = 1;
+    while ri <= enc_len {
+        let ttype = enc[ri];
+        let val   = enc[ri + 1];
+        if ttype == 0 {
+            // Literal
+            out[oi] = val;
+            oi = oi + 1;
+        } else {
+            // Back-reference
+            let offset = val / 16;
+            let length = val % 16;
+            let start  = oi - offset;
+            let mut k = 0;
+            while k < length {
+                out[oi] = out[start + k];
+                oi = oi + 1;
+                k = k + 1;
+            }
+        }
+        ri = ri + 2;
+    }
+    oi
+}
+
+fn test_lz_roundtrip() {
+    // [1,2,3,1,2,3,1,2,3] has repeating pattern
+    let src = [1, 2, 3, 1, 2, 3, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 9;
+    let mut enc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    lz_encode(src, n, enc, 8);
+
+    // Decode and verify round-trip
+    let mut dec = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dec_len = lz_decode(enc, dec);
+    assert_eq(dec_len, 9);
+    assert_eq(dec[0], 1);
+    assert_eq(dec[1], 2);
+    assert_eq(dec[2], 3);
+    assert_eq(dec[3], 1);
+    assert_eq(dec[4], 2);
+    assert_eq(dec[5], 3);
+    assert_eq(dec[6], 1);
+    assert_eq(dec[7], 2);
+    assert_eq(dec[8], 3);
+
+    // Encoding should be shorter than 18 tokens (9 literals * 2 = 18)
+    // With back-references, should use fewer tokens
+    assert(enc[0] < 18);
+
+    print("lz_roundtrip: ok");
+}
+
+fn test_lz_no_repetition() {
+    // [10, 20, 30, 40] — no repetition, all literals
+    let src = [10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 4;
+    let mut enc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    lz_encode(src, n, enc, 8);
+
+    // All 4 literals: enc[0]=8, tokens = [(0,10),(0,20),(0,30),(0,40)]
+    assert_eq(enc[0], 8);
+    assert_eq(enc[1], 0);  // literal
+    assert_eq(enc[2], 10);
+    assert_eq(enc[3], 0);
+    assert_eq(enc[4], 20);
+
+    let mut dec = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dec_len = lz_decode(enc, dec);
+    assert_eq(dec_len, 4);
+    assert_eq(dec[0], 10);
+    assert_eq(dec[1], 20);
+    assert_eq(dec[2], 30);
+    assert_eq(dec[3], 40);
+
+    print("lz_no_repetition: ok");
+}
+
+fn main() -> Int {
+    test_rle_basic();
+    test_rle_all_same();
+    test_rle_alternating();
+    test_lz_roundtrip();
+    test_lz_no_repetition();
+    print("[OK] 463_interp_compression");
+    0
+}

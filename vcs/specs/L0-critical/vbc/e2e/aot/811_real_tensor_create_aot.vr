@@ -1,0 +1,53 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, create
+// @expected-exit: 0
+
+// Tests REAL tensor creation intrinsics through AOT (LLVM) pipeline.
+// Validates tensor_new, tensor_fill, tensor_get_scalar, tensor_set_scalar.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_from_slice(data: Int, shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FROM_SLICE", data, shape, dtype) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    if a != b { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    let t1 = tensor_new(4, 1);
+    errors = errors + check_val(t1, 0, 0);
+    errors = errors + check_val(t1, 3, 0);
+
+    let t2 = tensor_fill(4, 42, 1);
+    errors = errors + check_val(t2, 0, 42);
+    errors = errors + check_val(t2, 3, 42);
+
+    let t3 = tensor_fill(3, 10, 1);
+    let t3 = tensor_set_scalar(t3, 1, 99);
+    errors = errors + check_val(t3, 0, 10);
+    errors = errors + check_val(t3, 1, 99);
+    errors = errors + check_val(t3, 2, 10);
+
+    let t4 = tensor_from_slice(7, 1, 1);
+    errors = errors + check_val(t4, 0, 7);
+
+    let t5 = tensor_new(3, 1);
+    let t5 = tensor_set_scalar(t5, 0, 1);
+    let t5 = tensor_set_scalar(t5, 1, 2);
+    let t5 = tensor_set_scalar(t5, 2, 3);
+    errors = errors + check_val(t5, 0, 1);
+    errors = errors + check_val(t5, 1, 2);
+    errors = errors + check_val(t5, 2, 3);
+
+    errors
+}

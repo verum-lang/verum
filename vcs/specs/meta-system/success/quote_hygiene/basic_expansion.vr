@@ -1,0 +1,158 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, quote, hygiene, expansion, basic
+// @description: Tests basic quote expansion without hygiene violations
+
+// =============================================================================
+// BASIC QUOTE CREATION
+// =============================================================================
+
+// Simple quote returning literal tokens
+meta fn quote_literal() -> TokenStream {
+    quote { 42 }
+}
+
+// Quote with identifier
+meta fn quote_ident() -> TokenStream {
+    quote { my_variable }
+}
+
+// Quote with expression
+meta fn quote_expr() -> TokenStream {
+    quote { 1 + 2 * 3 }
+}
+
+// Quote with statement
+meta fn quote_stmt() -> TokenStream {
+    quote { let x = 42; }
+}
+
+// Quote with block
+meta fn quote_block() -> TokenStream {
+    quote {
+        let x = 10;
+        let y = 20;
+        x + y
+    }
+}
+
+// =============================================================================
+// QUOTE WITH SPLICING
+// =============================================================================
+
+// Single variable splice
+meta fn quote_splice_var() -> TokenStream {
+    let name = ident("foo");
+    quote { let $name = 42; }
+}
+
+// Expression splice
+meta fn quote_splice_expr() -> TokenStream {
+    let value = 100;
+    quote { let x = ${value * 2}; }
+}
+
+// Multiple splices
+meta fn quote_multi_splice() -> TokenStream {
+    let a = ident("alpha");
+    let b = ident("beta");
+    let op = ident("add");
+    quote { fn $op($a: Int, $b: Int) -> Int { $a + $b } }
+}
+
+// =============================================================================
+// QUOTE WITH REPETITION
+// =============================================================================
+
+// Basic repetition
+meta fn quote_repeat_basic() -> TokenStream {
+    let names = [ident("a"), ident("b"), ident("c")];
+    quote {
+        $[for name in names {
+            let $name = 0;
+        }]
+    }
+}
+
+// Repetition with separator
+meta fn quote_repeat_comma() -> TokenStream {
+    let fields = [ident("x"), ident("y"), ident("z")];
+    quote {
+        type Point is { $[for f in fields { $f: Float }], };
+    }
+}
+
+// Nested repetition
+meta fn quote_repeat_nested() -> TokenStream {
+    let structs = [
+        (ident("Point"), [ident("x"), ident("y")]),
+        (ident("Color"), [ident("r"), ident("g"), ident("b")]),
+    ];
+    quote {
+        $[for (name, fields) in structs {
+            type $name is {
+                $[for f in fields { $f: Float }],
+            };
+        }]
+    }
+}
+
+// =============================================================================
+// QUOTE PARSING RESULTS
+// =============================================================================
+
+// Parse as expression
+meta fn quote_parse_expr() -> Bool {
+    let ts = quote { 1 + 2 };
+    match ts.parse_as_expr() {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+// Parse as type
+meta fn quote_parse_type() -> Bool {
+    let ts = quote { List<Int> };
+    match ts.parse_as_type() {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+// Parse as item
+meta fn quote_parse_item() -> Bool {
+    let ts = quote { fn foo() -> Int { 42 } };
+    match ts.parse_as_item() {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn main() {
+    // Basic quotes produce non-empty token streams
+    @const assert(!quote_literal().is_empty());
+    @const assert(!quote_ident().is_empty());
+    @const assert(!quote_expr().is_empty());
+    @const assert(!quote_stmt().is_empty());
+    @const assert(!quote_block().is_empty());
+
+    // Splice quotes work
+    @const assert(!quote_splice_var().is_empty());
+    @const assert(!quote_splice_expr().is_empty());
+    @const assert(!quote_multi_splice().is_empty());
+
+    // Repetition quotes work
+    @const assert(!quote_repeat_basic().is_empty());
+    @const assert(!quote_repeat_comma().is_empty());
+    @const assert(!quote_repeat_nested().is_empty());
+
+    // Parsing works
+    @const assert(quote_parse_expr());
+    @const assert(quote_parse_type());
+    @const assert(quote_parse_item());
+}

@@ -1,0 +1,881 @@
+// =============================================================================
+// maybe_test.vr - Comprehensive tests for Maybe<T> type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, maybe, option, core, fundamental
+// @description: Industrial-grade tests for Maybe<T> covering all methods,
+//               protocol implementations, and edge cases
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// Section 1: Predicates Tests
+// =============================================================================
+
+@test
+fn test_maybe_is_some() {
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    assert(some_val.is_some());
+    assert(!none_val.is_some());
+}
+
+@test
+fn test_maybe_is_none() {
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    assert(!some_val.is_none());
+    assert(none_val.is_none());
+}
+
+// =============================================================================
+// Section 2: Unwrapping Tests
+// =============================================================================
+
+@test
+fn test_maybe_unwrap_some() {
+    let m: Maybe<Int> = Some(42);
+    assert_eq(m.unwrap(), 42);
+}
+
+@test
+fn test_maybe_unwrap_or() {
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    assert_eq(some_val.unwrap_or(0), 42);
+    assert_eq(none_val.unwrap_or(0), 0);
+}
+
+@test
+fn test_maybe_unwrap_or_else() {
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    assert_eq(some_val.unwrap_or_else(|| 100), 42);
+    assert_eq(none_val.unwrap_or_else(|| 100), 100);
+}
+
+@test
+fn test_maybe_expect_some() {
+    let m: Maybe<Int> = Some(42);
+    assert_eq(m.expect(&"should have value"), 42);
+}
+
+// =============================================================================
+// Section 3: Transformation Tests
+// =============================================================================
+
+@test
+fn test_maybe_map() {
+    let some_val: Maybe<Int> = Some(5);
+    let none_val: Maybe<Int> = None;
+
+    let mapped_some = some_val.map(|x| x * 2);
+    let mapped_none = none_val.map(|x| x * 2);
+
+    match mapped_some {
+        Some(v) => assert_eq(v, 10),
+        None => panic("Expected Some"),
+    }
+
+    match mapped_none {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_maybe_map_type_change() {
+    let m: Maybe<Int> = Some(42);
+    let mapped: Maybe<Text> = m.map(|x| f"{x}");
+
+    match mapped {
+        Some(s) => assert_eq(s, "42"),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_maybe_and_then() {
+    let some_val: Maybe<Int> = Some(5);
+    let none_val: Maybe<Int> = None;
+
+    // and_then with function that returns Some
+    let result1 = some_val.and_then(|x| Some(x * 2));
+    match result1 {
+        Some(v) => assert_eq(v, 10),
+        None => panic("Expected Some"),
+    }
+
+    // and_then with function that returns None
+    let result2: Maybe<Int> = some_val.and_then(|_| None);
+    match result2 {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    // and_then on None
+    let result3 = none_val.and_then(|x| Some(x * 2));
+    match result3 {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_maybe_or_else() {
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    let result1 = some_val.or_else(|| Some(100));
+    match result1 {
+        Some(v) => assert_eq(v, 42), // Original value preserved
+        None => panic("Expected Some"),
+    }
+
+    let result2 = none_val.or_else(|| Some(100));
+    match result2 {
+        Some(v) => assert_eq(v, 100), // Fallback value
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_maybe_map_or() {
+    let some_val: Maybe<Int> = Some(5);
+    let none_val: Maybe<Int> = None;
+
+    assert_eq(some_val.map_or(0, |x| x * 2), 10);
+    assert_eq(none_val.map_or(0, |x| x * 2), 0);
+}
+
+@test
+fn test_maybe_map_or_else() {
+    let some_val: Maybe<Int> = Some(5);
+    let none_val: Maybe<Int> = None;
+
+    assert_eq(some_val.map_or_else(|| 0, |x| x * 2), 10);
+    assert_eq(none_val.map_or_else(|| 0, |x| x * 2), 0);
+}
+
+// =============================================================================
+// Section 4: Filtering Tests
+// =============================================================================
+
+@test
+fn test_maybe_filter() {
+    let m: Maybe<Int> = Some(10);
+
+    // Filter passes
+    let result1 = m.filter(|x| *x > 5);
+    match result1 {
+        Some(v) => assert_eq(v, 10),
+        None => panic("Expected Some"),
+    }
+
+    // Filter fails
+    let result2 = m.filter(|x| *x > 100);
+    match result2 {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    // Filter on None
+    let none_val: Maybe<Int> = None;
+    let result3 = none_val.filter(|x| *x > 0);
+    match result3 {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 5: Combinator Tests
+// =============================================================================
+
+@test
+fn test_maybe_and() {
+    let some1: Maybe<Int> = Some(1);
+    let some2: Maybe<Text> = Some("hello");
+    let none_int: Maybe<Int> = None;
+    let none_text: Maybe<Text> = None;
+
+    // Some and Some -> Some (second value)
+    match some1.and(some2) {
+        Some(s) => assert_eq(s, "hello"),
+        None => panic("Expected Some"),
+    }
+
+    // Some and None -> None
+    match some1.and(none_text) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    // None and Some -> None
+    match none_int.and(some2) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_maybe_or() {
+    let some1: Maybe<Int> = Some(1);
+    let some2: Maybe<Int> = Some(2);
+    let none_val: Maybe<Int> = None;
+
+    // Some or Some -> first Some
+    match some1.or(some2) {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+
+    // Some or None -> Some
+    match some1.or(none_val) {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+
+    // None or Some -> Some
+    match none_val.or(some2) {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+
+    // None or None -> None
+    let none2: Maybe<Int> = None;
+    match none_val.or(none2) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_maybe_xor() {
+    let some1: Maybe<Int> = Some(1);
+    let some2: Maybe<Int> = Some(2);
+    let none_val: Maybe<Int> = None;
+
+    // Some xor None -> Some
+    match some1.xor(none_val) {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+
+    // None xor Some -> Some
+    let none2: Maybe<Int> = None;
+    match none2.xor(some2) {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+
+    // Some xor Some -> None
+    match some1.xor(some2) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    // None xor None -> None
+    let none3: Maybe<Int> = None;
+    let none4: Maybe<Int> = None;
+    match none3.xor(none4) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_maybe_zip() {
+    let some1: Maybe<Int> = Some(1);
+    let some2: Maybe<Text> = Some("a");
+    let none_int: Maybe<Int> = None;
+
+    // Some zip Some -> Some tuple
+    match some1.zip(some2) {
+        Some((a, b)) => {
+            assert_eq(a, 1);
+            assert_eq(b, "a");
+        }
+        None => panic("Expected Some"),
+    }
+
+    // Some zip None -> None
+    let none_text: Maybe<Text> = None;
+    match some1.zip(none_text) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    // None zip Some -> None
+    let some3: Maybe<Text> = Some("b");
+    match none_int.zip(some3) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_maybe_zip_with() {
+    let some1: Maybe<Int> = Some(2);
+    let some2: Maybe<Int> = Some(3);
+    let none_val: Maybe<Int> = None;
+
+    // Some zip_with Some
+    match some1.zip_with(some2, |a, b| a * b) {
+        Some(v) => assert_eq(v, 6),
+        None => panic("Expected Some"),
+    }
+
+    // With None
+    match some1.zip_with(none_val, |a, b| a * b) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 6: Result Conversion Tests
+// =============================================================================
+
+@test
+fn test_maybe_ok_or() {
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    match some_val.ok_or("error") {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => panic("Expected Ok"),
+    }
+
+    match none_val.ok_or("error") {
+        Err(e) => assert_eq(e, "error"),
+        Ok(_) => panic("Expected Err"),
+    }
+}
+
+@test
+fn test_maybe_ok_or_else() {
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    match some_val.ok_or_else(|| "computed error") {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => panic("Expected Ok"),
+    }
+
+    match none_val.ok_or_else(|| "computed error") {
+        Err(e) => assert_eq(e, "computed error"),
+        Ok(_) => panic("Expected Err"),
+    }
+}
+
+// =============================================================================
+// Section 7: Reference Tests
+// =============================================================================
+
+@test
+fn test_maybe_as_ref() {
+    let m: Maybe<Int> = Some(42);
+    let ref_m = m.as_ref();
+
+    match ref_m {
+        Some(r) => assert_eq(*r, 42),
+        None => panic("Expected Some"),
+    }
+
+    let none_val: Maybe<Int> = None;
+    match none_val.as_ref() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_maybe_as_mut() {
+    let mut m: Maybe<Int> = Some(42);
+
+    match m.as_mut() {
+        Some(r) => {
+            *r = 100;
+        }
+        None => panic("Expected Some"),
+    }
+
+    match m {
+        Some(v) => assert_eq(v, 100),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 8: Mutation Tests
+// =============================================================================
+
+@test
+fn test_maybe_take() {
+    let mut m: Maybe<Int> = Some(42);
+
+    let taken = m.take();
+
+    match taken {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+
+    // Original should now be None
+    match m {
+        None => {} // Expected
+        Some(_) => panic("Expected None after take"),
+    }
+}
+
+@test
+fn test_maybe_replace() {
+    let mut m: Maybe<Int> = Some(42);
+
+    let old = m.replace(100);
+
+    match old {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+
+    match m {
+        Some(v) => assert_eq(v, 100),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_maybe_replace_none() {
+    let mut m: Maybe<Int> = None;
+
+    let old = m.replace(100);
+
+    match old {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    match m {
+        Some(v) => assert_eq(v, 100),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_maybe_insert() {
+    let mut m: Maybe<Int> = None;
+
+    let r = m.insert(42);
+    *r = 100; // Modify through returned reference
+
+    match m {
+        Some(v) => assert_eq(v, 100),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_maybe_get_or_insert() {
+    let mut m: Maybe<Int> = None;
+
+    let r = m.get_or_insert(42);
+    assert_eq(*r, 42);
+
+    // Call again - should return existing value
+    let r2 = m.get_or_insert(100);
+    assert_eq(*r2, 42); // Still 42, not 100
+}
+
+@test
+fn test_maybe_get_or_insert_with() {
+    let mut m: Maybe<Int> = None;
+
+    let r = m.get_or_insert_with(|| 42);
+    assert_eq(*r, 42);
+
+    // Call again - closure should not be called
+    let r2 = m.get_or_insert_with(|| panic("Should not be called"));
+    assert_eq(*r2, 42);
+}
+
+// =============================================================================
+// Section 9: Inspection Tests
+// =============================================================================
+
+// Inspect tests: verify inspect calls closure on Some and returns self.
+// We use assert inside the closure instead of mutable capture.
+
+@test
+fn test_maybe_inspect_some() {
+    let m: Maybe<Int> = Some(42);
+    // inspect should call the closure with the value and return self
+    let result = m.inspect(|v| assert_eq(*v, 42));
+    assert(result.is_some());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_maybe_inspect_none() {
+    let m: Maybe<Int> = None;
+    // inspect on None should not call the closure, and return None
+    let result = m.inspect(|_v| panic("Should not be called on None"));
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 10: Protocol Implementation Tests
+// =============================================================================
+
+@test
+fn test_maybe_eq() {
+    let some1: Maybe<Int> = Some(42);
+    let some2: Maybe<Int> = Some(42);
+    let some3: Maybe<Int> = Some(100);
+    let none1: Maybe<Int> = None;
+    let none2: Maybe<Int> = None;
+
+    assert(some1 == some2);
+    assert(!(some1 == some3));
+    assert(!(some1 == none1));
+    assert(none1 == none2);
+}
+
+@test
+fn test_maybe_ord() {
+    let none_val: Maybe<Int> = None;
+    let some1: Maybe<Int> = Some(1);
+    let some2: Maybe<Int> = Some(2);
+
+    // None < Some(anything)
+    match none_val.cmp(&some1) {
+        Ordering.Less => {} // Expected
+        _ => panic("Expected Less"),
+    }
+
+    // Some(1) < Some(2)
+    match some1.cmp(&some2) {
+        Ordering.Less => {} // Expected
+        _ => panic("Expected Less"),
+    }
+
+    // Equal
+    let some1_copy: Maybe<Int> = Some(1);
+    match some1.cmp(&some1_copy) {
+        Ordering.Equal => {} // Expected
+        _ => panic("Expected Equal"),
+    }
+
+    // None == None
+    let none2: Maybe<Int> = None;
+    match none_val.cmp(&none2) {
+        Ordering.Equal => {} // Expected
+        _ => panic("Expected Equal"),
+    }
+}
+
+@test
+fn test_maybe_default() {
+    let m: Maybe<Int> = Maybe.default();
+    match m {
+        None => {} // Expected
+        Some(_) => panic("Expected None for default"),
+    }
+}
+
+@test
+fn test_maybe_clone() {
+    let original: Maybe<Int> = Some(42);
+    let cloned = original.clone();
+
+    match cloned {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+
+    // Clone None
+    let none_val: Maybe<Int> = None;
+    let cloned_none = none_val.clone();
+    match cloned_none {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_maybe_from() {
+    let m: Maybe<Int> = Maybe.from(42);
+    match m {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 11: Chaining Tests
+// =============================================================================
+
+@test
+fn test_maybe_chaining() {
+    // Test complex chaining of operations
+    let m: Maybe<Int> = Some(5);
+
+    let result = m
+        .map(|x| x * 2)           // Some(10)
+        .filter(|x| *x > 5)       // Some(10)
+        .and_then(|x| Some(x + 1)) // Some(11)
+        .map(|x| x * 2);          // Some(22)
+
+    match result {
+        Some(v) => assert_eq(v, 22),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_maybe_chaining_with_none() {
+    let m: Maybe<Int> = Some(5);
+
+    let result = m
+        .map(|x| x * 2)            // Some(10)
+        .filter(|x| *x > 100)      // None (filter fails)
+        .and_then(|x| Some(x + 1)) // None (short-circuit)
+        .map(|x| x * 2);           // None (short-circuit)
+
+    match result {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 12: Edge Cases
+// =============================================================================
+
+@test
+fn test_maybe_nested() {
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+
+    match nested {
+        Some(inner) => {
+            match inner {
+                Some(v) => assert_eq(v, 42),
+                None => panic("Expected inner Some"),
+            }
+        }
+        None => panic("Expected outer Some"),
+    }
+}
+
+@test
+fn test_maybe_with_zero() {
+    // Zero is a valid value, not None
+    let m: Maybe<Int> = Some(0);
+
+    assert(m.is_some());
+    assert(!m.is_none());
+    assert_eq(m.unwrap(), 0);
+}
+
+@test
+fn test_maybe_with_empty_text() {
+    // Empty string is a valid value, not None
+    let m: Maybe<Text> = Some("");
+
+    assert(m.is_some());
+    assert(!m.is_none());
+    assert_eq(m.unwrap(), "");
+}
+
+@test
+fn test_maybe_multiple_transforms() {
+    // Ensure each transform creates a new Maybe
+    let m1: Maybe<Int> = Some(1);
+    let m2 = m1.map(|x| x + 1);
+    let m3 = m1.map(|x| x + 2);
+
+    // m1 should be consumed, but m2 and m3 should be independent
+    match m2 {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+
+    match m3 {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 13: Iterator Tests
+// =============================================================================
+
+@test
+fn test_maybe_iter_some() {
+    let m: Maybe<Int> = Some(42);
+
+    let mut count = 0;
+    let mut sum = 0;
+
+    for v in m.iter() {
+        count = count + 1;
+        sum = sum + *v;
+    }
+
+    assert_eq(count, 1);
+    assert_eq(sum, 42);
+}
+
+@test
+fn test_maybe_iter_none() {
+    let m: Maybe<Int> = None;
+
+    let mut count = 0;
+
+    for _v in m.iter() {
+        count = count + 1;
+    }
+
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section 14: Additional Predicates (contains, is_some_and, is_none_or)
+// =============================================================================
+
+@test
+fn test_maybe_contains_some_match() {
+    let m: Maybe<Int> = Some(42);
+    assert(m.contains(&42));
+}
+
+@test
+fn test_maybe_contains_some_no_match() {
+    let m: Maybe<Int> = Some(42);
+    assert(!m.contains(&0));
+}
+
+@test
+fn test_maybe_contains_none() {
+    let n: Maybe<Int> = None;
+    assert(!n.contains(&42));
+}
+
+@test
+fn test_maybe_is_some_and_true() {
+    let m: Maybe<Int> = Some(42);
+    assert(m.is_some_and(|v| *v > 0));
+}
+
+@test
+fn test_maybe_is_some_and_false() {
+    let m: Maybe<Int> = Some(42);
+    assert(!m.is_some_and(|v| *v < 0));
+}
+
+@test
+fn test_maybe_is_some_and_none() {
+    let n: Maybe<Int> = None;
+    assert(!n.is_some_and(|v| *v > 0));
+}
+
+@test
+fn test_maybe_is_none_or_none() {
+    let n: Maybe<Int> = None;
+    assert(n.is_none_or(|v| *v < 0));
+}
+
+@test
+fn test_maybe_is_none_or_some_true() {
+    let m: Maybe<Int> = Some(42);
+    assert(m.is_none_or(|v| *v > 0));
+}
+
+@test
+fn test_maybe_is_none_or_some_false() {
+    let m: Maybe<Int> = Some(42);
+    assert(!m.is_none_or(|v| *v < 0));
+}
+
+// =============================================================================
+// Section: take_if Tests
+// =============================================================================
+
+@test
+fn test_take_if_some_matches() {
+    let mut m: Maybe<Int> = Some(42);
+    let taken = m.take_if(|v| *v > 10);
+    assert(taken.is_some());
+    assert(taken.unwrap() == 42);
+    assert(m.is_none());
+}
+
+@test
+fn test_take_if_some_no_match() {
+    let mut m: Maybe<Int> = Some(5);
+    let taken = m.take_if(|v| *v > 10);
+    assert(taken.is_none());
+    assert(m.is_some());
+    assert(m.unwrap() == 5);
+}
+
+@test
+fn test_take_if_none() {
+    let mut m: Maybe<Int> = None;
+    let taken = m.take_if(|v| *v > 10);
+    assert(taken.is_none());
+    assert(m.is_none());
+}
+
+@test
+fn test_take_if_zero() {
+    let mut m: Maybe<Int> = Some(0);
+    let taken = m.take_if(|v| *v == 0);
+    assert(taken.is_some());
+    assert(taken.unwrap() == 0);
+    assert(m.is_none());
+}
+
+// =============================================================================
+// Section: get_or_insert_default Tests
+// =============================================================================
+
+@test
+fn test_get_or_insert_default_none() {
+    let mut m: Maybe<Int> = None;
+    let val = m.get_or_insert_default();
+    assert(*val == 0);
+    assert(m.is_some());
+}
+
+@test
+fn test_get_or_insert_default_some() {
+    let mut m: Maybe<Int> = Some(42);
+    let val = m.get_or_insert_default();
+    assert(*val == 42);
+}
+
+@test
+fn test_get_or_insert_default_bool() {
+    let mut m: Maybe<Bool> = None;
+    let val = m.get_or_insert_default();
+    assert(*val == false);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

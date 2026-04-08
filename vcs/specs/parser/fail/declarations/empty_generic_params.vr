@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, generics, error
+// @description: Test empty generic parameter list detection
+// @expected-error: E018
+
+fn empty_generics<>() {}
+
+type Empty<> is Int;
+
+implement<> Display for Int {}

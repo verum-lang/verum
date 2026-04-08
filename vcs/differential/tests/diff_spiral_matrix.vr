@@ -1,0 +1,191 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, spiral, matrix, traversal
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// 4x4 matrix stored flat (16 elements in 2 Arr8s)
+type Mat4 is { lo: Arr8, hi: Arr8 };
+
+fn mat4_get(m: Mat4, row: Int, col: Int) -> Int {
+    let idx = row * 4 + col;
+    if idx < 8 { get(m.lo, idx) } else { get(m.hi, idx - 8) }
+}
+
+fn mat4_set(m: Mat4, row: Int, col: Int, v: Int) -> Mat4 {
+    let idx = row * 4 + col;
+    if idx < 8 {
+        Mat4 { lo: set(m.lo, idx, v), hi: m.hi }
+    } else {
+        Mat4 { lo: m.lo, hi: set(m.hi, idx - 8, v) }
+    }
+}
+
+fn mat4_zeros() -> Mat4 { Mat4 { lo: zeros(), hi: zeros() } }
+
+// Fill matrix in spiral order: 1, 2, 3, ... n*n
+fn spiral_fill(n: Int) -> Mat4 {
+    let mut m = mat4_zeros();
+    let mut val = 1;
+    let mut top = 0;
+    let mut bottom = n - 1;
+    let mut left = 0;
+    let mut right = n - 1;
+
+    while top <= bottom {
+        if left > right { top = bottom + 1; }
+        else {
+            // Right
+            let mut col = left;
+            while col <= right {
+                m = mat4_set(m, top, col, val);
+                val = val + 1;
+                col = col + 1;
+            }
+            top = top + 1;
+
+            // Down
+            let mut row = top;
+            while row <= bottom {
+                m = mat4_set(m, row, right, val);
+                val = val + 1;
+                row = row + 1;
+            }
+            right = right - 1;
+
+            // Left
+            if top <= bottom {
+                let mut col2 = right;
+                let mut done = 0;
+                while done == 0 {
+                    if col2 < left { done = 1; }
+                    else {
+                        m = mat4_set(m, bottom, col2, val);
+                        val = val + 1;
+                        col2 = col2 - 1;
+                    }
+                }
+                bottom = bottom - 1;
+            }
+
+            // Up
+            if left <= right {
+                let mut row2 = bottom;
+                let mut done2 = 0;
+                while done2 == 0 {
+                    if row2 < top { done2 = 1; }
+                    else {
+                        m = mat4_set(m, row2, left, val);
+                        val = val + 1;
+                        row2 = row2 - 1;
+                    }
+                }
+                left = left + 1;
+            }
+        }
+    }
+    m
+}
+
+// Extract spiral order traversal from an existing matrix
+fn spiral_sum(m: Mat4, n: Int) -> Int {
+    let mut sum = 0;
+    let mut top = 0;
+    let mut bottom = n - 1;
+    let mut left = 0;
+    let mut right = n - 1;
+
+    while top <= bottom {
+        if left > right { top = bottom + 1; }
+        else {
+            let mut col = left;
+            while col <= right { sum = sum + mat4_get(m, top, col); col = col + 1; }
+            top = top + 1;
+            let mut row = top;
+            while row <= bottom { sum = sum + mat4_get(m, row, right); row = row + 1; }
+            right = right - 1;
+            if top <= bottom {
+                let mut col2 = right;
+                let mut done = 0;
+                while done == 0 {
+                    if col2 < left { done = 1; }
+                    else { sum = sum + mat4_get(m, bottom, col2); col2 = col2 - 1; }
+                }
+                bottom = bottom - 1;
+            }
+            if left <= right {
+                let mut row2 = bottom;
+                let mut done2 = 0;
+                while done2 == 0 {
+                    if row2 < top { done2 = 1; }
+                    else { sum = sum + mat4_get(m, row2, left); row2 = row2 - 1; }
+                }
+                left = left + 1;
+            }
+        }
+    }
+    sum
+}
+
+fn main() -> Int {
+    // 3x3 spiral:
+    // 1 2 3
+    // 8 9 4
+    // 7 6 5
+    let m3 = spiral_fill(3);
+    assert_eq(mat4_get(m3, 0, 0), 1);
+    assert_eq(mat4_get(m3, 0, 1), 2);
+    assert_eq(mat4_get(m3, 0, 2), 3);
+    assert_eq(mat4_get(m3, 1, 2), 4);
+    assert_eq(mat4_get(m3, 2, 2), 5);
+    assert_eq(mat4_get(m3, 2, 1), 6);
+    assert_eq(mat4_get(m3, 2, 0), 7);
+    assert_eq(mat4_get(m3, 1, 0), 8);
+    assert_eq(mat4_get(m3, 1, 1), 9);
+
+    // Sum = 1+2+...+9 = 45
+    assert_eq(spiral_sum(m3, 3), 45);
+
+    // 2x2 spiral:
+    // 1 2
+    // 4 3
+    let m2 = spiral_fill(2);
+    assert_eq(mat4_get(m2, 0, 0), 1);
+    assert_eq(mat4_get(m2, 0, 1), 2);
+    assert_eq(mat4_get(m2, 1, 1), 3);
+    assert_eq(mat4_get(m2, 1, 0), 4);
+    assert_eq(spiral_sum(m2, 2), 10);
+
+    // 1x1
+    let m1 = spiral_fill(1);
+    assert_eq(mat4_get(m1, 0, 0), 1);
+
+    // 4x4 spiral should contain 1..16
+    let m4 = spiral_fill(4);
+    assert_eq(mat4_get(m4, 0, 0), 1);
+    assert_eq(mat4_get(m4, 0, 3), 4);
+    // Sum = 1+2+...+16 = 136
+    assert_eq(spiral_sum(m4, 4), 136);
+
+    print("DIFF_OK: spiral_matrix");
+    0
+}

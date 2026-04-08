@@ -1,0 +1,65 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, automation
+// @timeout: 20000
+
+/// Auto tactic with depth control and hint databases
+
+theorem auto_trivial(): true { proof by auto }
+theorem auto_refl(x: Int): x == x { proof by auto }
+theorem auto_and<P: Prop, Q: Prop>() requires P requires Q ensures P && Q { proof by auto }
+theorem auto_or_left<P: Prop, Q: Prop>() requires P ensures P || Q { proof by auto }
+theorem auto_impl<P: Prop, Q: Prop>() requires P requires P -> Q ensures Q { proof by auto }
+theorem auto_chain<P: Prop, Q: Prop, R: Prop>() requires P requires P -> Q requires Q -> R ensures R { proof by auto }
+
+/// Auto with depth limit
+theorem auto_depth(a: Int, b: Int, c: Int) requires a < b requires b < c ensures a < c {
+    proof by auto { depth: 3 }
+}
+
+/// Auto with hint databases
+@auto
+lemma nat_succ_pos(n: Nat): succ(n) > 0 { proof by arithmetic }
+
+theorem use_auto_hint(n: Nat): succ(succ(n)) > 0 { proof by auto }
+
+/// Auto with backtracking
+theorem auto_backtrack<P: Prop, Q: Prop, R: Prop>()
+    requires (P && Q) || (P && R)
+    requires Q -> R
+    ensures P && R
+{
+    proof by auto
+}
+
+/// Auto with arithmetic
+theorem auto_arith(x: Int, y: Int) requires x > y requires y > 0 ensures x > 0 { proof by auto }
+theorem auto_bounds(a: Int, b: Int, c: Int) requires a <= b requires b <= c ensures a <= c { proof by auto }
+
+/// Auto with equality
+theorem auto_eq(x: Int, y: Int, z: Int) requires x == y requires y == z ensures x == z { proof by auto }
+theorem auto_subst(x: Int, y: Int, f: fn(Int) -> Int) requires x == y ensures f(x) == f(y) { proof by auto }
+
+/// Auto with type classes
+theorem auto_typeclass<T: Eq>(x: T, y: T, z: T) requires x == y requires y == z ensures x == z { proof by auto }
+
+/// Auto with quantifiers
+theorem auto_forall(n: Nat) requires forall m: Nat. m + 0 == m ensures n + 0 == n { proof by auto }
+
+/// Auto with configuration
+theorem auto_verbose<P: Prop, Q: Prop>() requires P && Q ensures Q && P { proof by auto { verbose: true } }
+theorem auto_timeout(complex: Bool) requires complex ensures complex { proof by auto { timeout: 5000 } }
+
+/// Auto then simp
+theorem auto_simp(x: Int) requires x + 0 > 0 ensures x > 0 { proof by auto; simp }
+
+/// Auto with fallback
+theorem auto_fallback(n: Nat): n + 0 == n {
+    proof {
+        try { auto }
+        catch { simp }
+    }
+}
+
+fn main() {}

@@ -1,0 +1,44 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, maybe, safe
+// @description: Tests safe unwrapping patterns with Maybe
+
+fn find_element(list: List<Int>, target: Int) -> Maybe<Int> {
+    for elem in list {
+        if elem == target {
+            return Maybe.Some(elem);
+        }
+    }
+    Maybe.None
+}
+
+fn main() {
+    let numbers = [1, 2, 3, 42, 5];
+
+    // Pattern 1: match expression
+    let result1 = find_element(numbers, 42);
+    match result1 {
+        Some(value) => print(value),
+        None => print("Not found"),
+    }
+
+    // Pattern 2: if let
+    if let Some(value) = find_element(numbers, 42) {
+        assert(value == 42);
+    }
+
+    // Pattern 3: unwrap_or with default
+    let value = find_element(numbers, 99).unwrap_or(0);
+    assert(value == 0);
+
+    // Pattern 4: map for transformation
+    let doubled = find_element(numbers, 42).map(|x| x * 2);
+    assert(doubled == Maybe.Some(84));
+
+    // Pattern 5: is_some/is_none checks
+    let found = find_element(numbers, 42);
+    if found.is_some() {
+        let _ = found.unwrap();  // Safe: we checked is_some
+    }
+}

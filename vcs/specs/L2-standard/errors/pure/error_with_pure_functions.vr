@@ -1,0 +1,666 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, pure, throws, result, recover, errdefer, error-handling
+// @description: Tests error handling integration with pure functions
+//
+// Pure functions can use typed error handling through throws clauses and
+// Result types. They maintain referential transparency while still being
+// able to signal and propagate errors.
+//
+// Spec: docs/detailed/20-error-handling.md Part I.5.4
+// Grammar: grammar/verum.ebnf Section 2.4 (function_modifiers)
+//
+// Key points:
+// - pure fn can use throws clause for typed errors
+// - pure fn can return Result<T, E>
+// - pure fn can use ? operator for error propagation
+// - pure fn can be used in recover blocks
+// - pure fn can use errdefer for error-path cleanup
+// - Error handlers can themselves be pure functions
+
+// ============================================================================
+// Error type definitions
+// ============================================================================
+
+type MathError is
+    | NegativeInput(Float)
+    | DivisionByZero
+    | Overflow
+    | Underflow;
+
+type JsonError is
+    | Empty
+    | InvalidSyntax { position: Int, message: Text }
+    | UnexpectedToken(Text)
+    | UnterminatedString;
+
+type ConfigError is
+    | EmptyName
+    | NameTooLong(Int)
+    | InvalidPort(Int)
+    | InvalidTimeout(Int)
+    | MissingRequired(Text);
+
+type ParseError is
+    | UnexpectedEof
+    | InvalidNumber(Text)
+    | InvalidFormat(Text);
+
+type ValidationError is
+    | Empty
+    | TooShort { min: Int, actual: Int }
+    | TooLong { max: Int, actual: Int }
+    | InvalidCharacter(Char);
+
+// ============================================================================
+// Test 1: Pure function with throws clause
+// ============================================================================
+
+/// Pure function that can fail with typed error.
+/// No side effects, but can signal errors through throws clause.
+pure fn parse_json(text: Text) throws(JsonError) -> JsonValue {
+    if text.is_empty() {
+        throw JsonError.Empty;
+    }
+
+    let trimmed = text.trim();
+    if !trimmed.starts_with("{") && !trimmed.starts_with("[") {
+        throw JsonError.InvalidSyntax {
+            position: 0,
+            message: "JSON must start with '{' or '['"
+        };
+    }
+
+    // Simplified parsing for demonstration
+    parse_json_impl(trimmed)
+}
+
+/// Pure function with throws and complex validation
+pure fn validate_json_string(s: Text) throws(JsonError) -> Text {
+    if s.is_empty() {
+        throw JsonError.Empty;
+    }
+
+    if !s.starts_with("\"") {
+        throw JsonError.UnexpectedToken(f"Expected '\"', got '{s.chars().next().unwrap()}'");
+    }
+
+    if !s.ends_with("\"") {
+        throw JsonError.UnterminatedString;
+    }
+
+    // Return the string content without quotes
+    s[1..s.len() - 1].to_text()
+}
+
+// ============================================================================
+// Test 2: Pure function returning Result<T, E>
+// ============================================================================
+
+/// Pure function using Result type for error handling.
+/// Maintains purity while being able to signal errors.
+pure fn safe_sqrt(x: Float) -> Result<Float, MathError> {
+    if x < 0.0 {
+        Err(MathError.NegativeInput(x))
+    } else {
+        Ok(x.sqrt())
+    }
+}
+
+/// Pure division with Result type
+pure fn safe_divide(numerator: Float, denominator: Float) -> Result<Float, MathError> {
+    if denominator == 0.0 {
+        Err(MathError.DivisionByZero)
+    } else {
+        Ok(numerator / denominator)
+    }
+}
+
+/// Pure function with multiple error conditions
+pure fn safe_log(x: Float, base: Float) -> Result<Float, MathError> {
+    if x <= 0.0 {
+        return Err(MathError.NegativeInput(x));
+    }
+    if base <= 0.0 || base == 1.0 {
+        return Err(MathError.NegativeInput(base));
+    }
+
+    Ok(x.ln() / base.ln())
+}
+
+/// Pure numeric parsing
+pure fn parse_float(input: Text) -> Result<Float, ParseError> {
+    if input.is_empty() {
+        return Err(ParseError.UnexpectedEof);
+    }
+
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(ParseError.UnexpectedEof);
+    }
+
+    // Check for valid float format
+    let mut has_dot = false;
+    let mut has_digit = false;
+
+    let mut i = 0;
+    for c in trimmed.chars() {
+        if c >= '0' && c <= '9' {
+            has_digit = true;
+        } else if (c == '-' || c == '+') && i == 0 {
+            i += 1;
+            continue;
+        } else if c == '.' && !has_dot {
+            has_dot = true;
+        } else if c == '.' {
+            return Err(ParseError.InvalidFormat("Multiple decimal points"));
+        } else {
+            return Err(ParseError.InvalidNumber(f"Invalid character: {c}"));
+        }
+        i += 1;
+    }
+
+    if !has_digit {
+        return Err(ParseError.InvalidNumber(trimmed));
+    }
+
+    trimmed.parse_float()
+}
+
+// ============================================================================
+// Test 3: Pure function with ? operator for error propagation
+// ============================================================================
+
+/// Config validation types
+type Config is {
+    name: Text,
+    port: Int,
+    timeout: Int,
+};
+
+type ValidConfig is {
+    name: Text,
+    port: Int,
+    timeout: Int,
+};
+
+/// Pure functions can compose with error handling using ? operator.
+/// All validators are pure, and errors propagate cleanly.
+pure fn validate_config(config: Config) -> Result<ValidConfig, ConfigError> {
+    let name = validate_name(config.name)?;
+    let port = validate_port(config.port)?;
+    let timeout = validate_timeout(config.timeout)?;
+
+    Ok(ValidConfig { name, port, timeout })
+}
+
+/// Pure name validator
+pure fn validate_name(name: Text) -> Result<Text, ConfigError> {
+    if name.is_empty() {
+        Err(ConfigError.EmptyName)
+    } else if name.len() > 100 {
+        Err(ConfigError.NameTooLong(name.len()))
+    } else {
+        Ok(name)
+    }
+}
+
+/// Pure port validator
+pure fn validate_port(port: Int) -> Result<Int, ConfigError> {
+    if port < 1 || port > 65535 {
+        Err(ConfigError.InvalidPort(port))
+    } else {
+        Ok(port)
+    }
+}
+
+/// Pure timeout validator
+pure fn validate_timeout(timeout: Int) -> Result<Int, ConfigError> {
+    if timeout < 0 {
+        Err(ConfigError.InvalidTimeout(timeout))
+    } else {
+        Ok(timeout)
+    }
+}
+
+/// Complex pure validation with multiple ? operators
+pure fn validate_all_fields(
+    name: Text,
+    port: Int,
+    timeout: Int,
+    extra: Text
+) -> Result<ValidConfig, ConfigError> {
+    // Each step can fail and propagate with ?
+    let validated_name = validate_name(name)?;
+    let validated_port = validate_port(port)?;
+    let validated_timeout = validate_timeout(timeout)?;
+
+    // Additional validation
+    if extra.is_empty() {
+        return Err(ConfigError.MissingRequired("extra"));
+    }
+
+    Ok(ValidConfig {
+        name: validated_name,
+        port: validated_port,
+        timeout: validated_timeout,
+    })
+}
+
+/// Chained pure function calls with error propagation
+pure fn compute_validated_result(a: Float, b: Float) -> Result<Float, MathError> {
+    let sqrt_a = safe_sqrt(a)?;
+    let sqrt_b = safe_sqrt(b)?;
+    let sum = sqrt_a + sqrt_b;
+    let result = safe_divide(sum, 2.0)?;
+    Ok(result)
+}
+
+// ============================================================================
+// Test 4: Pure function in recover block
+// ============================================================================
+
+/// Pure error transformer
+pure fn transform_math_error(e: MathError) -> Text {
+    match e {
+        MathError.NegativeInput(x) => f"Cannot compute with negative input: {x}",
+        MathError.DivisionByZero => "Division by zero is undefined",
+        MathError.Overflow => "Result too large to represent",
+        MathError.Underflow => "Result too small to represent",
+    }
+}
+
+/// Pure default value provider
+pure fn default_for_math_error(e: MathError) -> Float {
+    match e {
+        MathError.NegativeInput(_) => 0.0,
+        MathError.DivisionByZero => Float.infinity(),
+        MathError.Overflow => Float.max_value(),
+        MathError.Underflow => 0.0,
+    }
+}
+
+/// Using pure function in recover block
+fn compute_with_recovery(x: Float) -> Float {
+    let result = safe_sqrt(x);
+    match result {
+        Ok(v) => v,
+        Err(e) => default_for_math_error(e),
+    }
+}
+
+/// Using pure transformer in recover block
+fn compute_with_message(x: Float) -> Result<Float, Text> {
+    let result = safe_sqrt(x);
+    match result {
+        Ok(v) => Ok(v),
+        Err(e) => Err(transform_math_error(e)),
+    }
+}
+
+/// Pure recovery function with pattern matching
+pure fn recover_parse_error(e: ParseError) -> Float {
+    match e {
+        ParseError.UnexpectedEof => 0.0,
+        ParseError.InvalidNumber(_) => Float.nan(),
+        ParseError.InvalidFormat(_) => Float.nan(),
+    }
+}
+
+/// Combining multiple pure functions in recovery
+fn safe_compute(input: Text) -> Float {
+    let result = parse_float(input);
+    match result {
+        Ok(value) => {
+            let sq = safe_sqrt(value);
+            match sq {
+                Ok(v) => v,
+                Err(_) => 0.0,
+            }
+        }
+        Err(_) => 0.0,
+    }
+}
+
+// ============================================================================
+// Test 5: Pure function with errdefer
+// ============================================================================
+
+/// Pure counter state
+type Counter is {
+    value: Int,
+    log: List<Text>,
+};
+
+/// Pure function creating new counter
+pure fn new_counter() -> Counter {
+    Counter { value: 0, log: List.new() }
+}
+
+/// Pure function to increment counter
+pure fn increment(counter: Counter) -> Counter {
+    let mut new_log = counter.log.clone();
+    new_log.push(f"incremented to {counter.value + 1}");
+    Counter {
+        value: counter.value + 1,
+        log: new_log,
+    }
+}
+
+/// Pure function to record error
+pure fn record_error(counter: Counter, msg: Text) -> Counter {
+    let mut new_log = counter.log.clone();
+    new_log.push(f"error: {msg}");
+    Counter {
+        value: counter.value,
+        log: new_log,
+    }
+}
+
+/// Pure function demonstrating errdefer usage.
+/// errdefer works with pure functions for error-path cleanup logic.
+fn transactional_computation(
+    initial: Counter,
+    should_fail: Bool
+) -> Result<Counter, Text> {
+    let mut counter = initial;
+
+    // errdefer uses pure function to record error state
+    errdefer {
+        counter = record_error(counter, "computation failed");
+    }
+
+    counter = increment(counter);
+    counter = increment(counter);
+
+    if should_fail {
+        return Err("intentional failure");
+    }
+
+    counter = increment(counter);
+
+    Ok(counter)
+}
+
+/// Pure state transformation with errdefer
+fn build_validated_config(
+    name: Text,
+    port: Int
+) -> Result<ValidConfig, ConfigError> {
+    let mut steps_completed: List<Text> = List.new();
+
+    errdefer {
+        // Log what steps completed before failure
+        for step in steps_completed {
+            log_step(step);
+        }
+    }
+
+    let validated_name = validate_name(name)?;
+    steps_completed.push("name validated");
+
+    let validated_port = validate_port(port)?;
+    steps_completed.push("port validated");
+
+    Ok(ValidConfig {
+        name: validated_name,
+        port: validated_port,
+        timeout: 30,
+    })
+}
+
+/// Pure logging helper (for demonstration)
+fn log_step(step: Text) {
+    // In real code, this would log to a context
+    print(f"Step completed: {step}");
+}
+
+// ============================================================================
+// Test 6: Pure error handler functions
+// ============================================================================
+
+/// Pure error handler protocol
+type ErrorHandler<E, T> is protocol {
+    pure fn handle(error: E) -> T;
+};
+
+/// Pure error categorizer
+pure fn categorize_error(e: MathError) -> Text {
+    match e {
+        MathError.NegativeInput(_) => "input_error",
+        MathError.DivisionByZero => "arithmetic_error",
+        MathError.Overflow | MathError.Underflow => "range_error",
+    }
+}
+
+/// Pure error severity classifier
+pure fn error_severity(e: ConfigError) -> Int {
+    match e {
+        ConfigError.EmptyName => 3,  // Critical
+        ConfigError.NameTooLong(_) => 1,  // Warning
+        ConfigError.InvalidPort(_) => 2,  // Error
+        ConfigError.InvalidTimeout(_) => 1,  // Warning
+        ConfigError.MissingRequired(_) => 3,  // Critical
+    }
+}
+
+/// Pure error chain builder
+pure fn chain_errors(first: Text, second: Text) -> Text {
+    f"{first}\n  Caused by: {second}"
+}
+
+/// Pure error formatter
+pure fn format_config_error(e: ConfigError) -> Text {
+    match e {
+        ConfigError.EmptyName =>
+            "Configuration error: name cannot be empty",
+        ConfigError.NameTooLong(len) =>
+            f"Configuration error: name too long ({len} chars, max 100)",
+        ConfigError.InvalidPort(port) =>
+            f"Configuration error: invalid port {port} (must be 1-65535)",
+        ConfigError.InvalidTimeout(timeout) =>
+            f"Configuration error: invalid timeout {timeout} (must be >= 0)",
+        ConfigError.MissingRequired(field) =>
+            f"Configuration error: missing required field '{field}'",
+    }
+}
+
+/// Pure error comparator
+pure fn is_recoverable(e: MathError) -> Bool {
+    match e {
+        MathError.NegativeInput(_) => true,  // Can use absolute value
+        MathError.DivisionByZero => false,   // Cannot recover
+        MathError.Overflow => false,          // Cannot recover
+        MathError.Underflow => true,          // Can use zero
+    }
+}
+
+/// Pure recovery strategy selector
+pure fn select_recovery_strategy(e: MathError) -> Text {
+    if is_recoverable(e) {
+        match e {
+            MathError.NegativeInput(_) => "use_absolute_value",
+            MathError.Underflow => "use_zero",
+            _ => "no_recovery"
+        }
+    } else {
+        "propagate_error"
+    }
+}
+
+/// Apply pure recovery based on strategy
+pure fn apply_recovery(value: Float, strategy: Text) -> Float {
+    match strategy {
+        "use_absolute_value" => value.abs(),
+        "use_zero" => 0.0,
+        "use_max" => Float.max_value(),
+        "use_min" => Float.min_value(),
+        _ => Float.nan()
+    }
+}
+
+// ============================================================================
+// Combined tests demonstrating pure error handling patterns
+// ============================================================================
+
+/// Full pure pipeline with error handling
+pure fn process_number(input: Text) -> Result<Float, Text> {
+    // Parse
+    let value = parse_float(input)
+        .map_err(|e| format_parse_error(e))?;
+
+    // Validate
+    if value < 0.0 {
+        return Err("Value must be non-negative");
+    }
+
+    // Compute
+    let result = safe_sqrt(value)
+        .map_err(|e| transform_math_error(e))?;
+
+    Ok(result)
+}
+
+/// Pure parse error formatter
+pure fn format_parse_error(e: ParseError) -> Text {
+    match e {
+        ParseError.UnexpectedEof => "Unexpected end of input",
+        ParseError.InvalidNumber(s) => f"Invalid number: {s}",
+        ParseError.InvalidFormat(s) => f"Invalid format: {s}",
+    }
+}
+
+/// Pure validation pipeline
+pure fn validate_user_input(
+    name: Text,
+    value: Text
+) -> Result<(Text, Float), Text> {
+    // Validate name
+    let valid_name = validate_name(name)
+        .map_err(|e| format_config_error(e))?;
+
+    // Parse and validate value
+    let parsed = parse_float(value)
+        .map_err(|e| format_parse_error(e))?;
+
+    if parsed < 0.0 {
+        return Err("Value must be non-negative");
+    }
+
+    Ok((valid_name, parsed))
+}
+
+// ============================================================================
+// Helper types and functions
+// ============================================================================
+
+type JsonValue is
+    | Null
+    | Bool(Bool)
+    | Number(Float)
+    | String(Text)
+    | Array(List<JsonValue>)
+    | Object(Map<Text, JsonValue>);
+
+/// Simplified JSON parser (stub for demonstration)
+pure fn parse_json_impl(text: Text) -> JsonValue {
+    // Simplified implementation
+    if text == "null" {
+        JsonValue.Null
+    } else if text == "true" {
+        JsonValue.Bool(true)
+    } else if text == "false" {
+        JsonValue.Bool(false)
+    } else {
+        JsonValue.String(text)
+    }
+}
+
+// ============================================================================
+// Test entry point
+// ============================================================================
+
+fn main() {
+    // Test 1: Pure function with throws
+    try {
+        let _ = parse_json("");
+    } recover |e| {
+        assert(e is JsonError.Empty);
+    }
+
+    try {
+        let _ = validate_json_string("no quotes");
+    } recover |e| {
+        assert(e is JsonError.UnexpectedToken(_));
+    }
+
+    // Test 2: Pure function returning Result
+    let sqrt_result = safe_sqrt(-4.0);
+    assert(sqrt_result.is_err());
+    match sqrt_result {
+        Err(MathError.NegativeInput(x)) => assert_eq(x, -4.0),
+        _ => panic("Expected NegativeInput error"),
+    }
+
+    let sqrt_ok = safe_sqrt(16.0);
+    assert(sqrt_ok.is_ok());
+    assert_eq(sqrt_ok.unwrap(), 4.0);
+
+    // Test 3: Pure function with ? operator
+    let config_result = validate_config(Config {
+        name: "",
+        port: 8080,
+        timeout: 30,
+    });
+    assert(config_result.is_err());
+
+    let valid_config = validate_config(Config {
+        name: "my-service",
+        port: 8080,
+        timeout: 30,
+    });
+    assert(valid_config.is_ok());
+
+    // Test 4: Pure function in recover
+    let recovered = compute_with_recovery(-9.0);
+    assert_eq(recovered, 0.0);  // default_for_math_error returns 0.0 for NegativeInput
+
+    let ok_result = compute_with_recovery(25.0);
+    assert_eq(ok_result, 5.0);
+
+    // Test 5: errdefer with pure functions
+    let counter = new_counter();
+    let success = transactional_computation(counter.clone(), false);
+    assert(success.is_ok());
+    assert_eq(success.unwrap().value, 3);
+
+    let failure = transactional_computation(counter, true);
+    assert(failure.is_err());
+
+    // Test 6: Pure error handlers
+    let category = categorize_error(MathError.DivisionByZero);
+    assert_eq(category, "arithmetic_error");
+
+    let severity = error_severity(ConfigError.EmptyName);
+    assert_eq(severity, 3);
+
+    let formatted = format_config_error(ConfigError.InvalidPort(0));
+    assert(formatted.contains("invalid port"));
+
+    let recoverable = is_recoverable(MathError.NegativeInput(-5.0));
+    assert(recoverable);
+
+    let not_recoverable = is_recoverable(MathError.DivisionByZero);
+    assert(!not_recoverable);
+
+    // Combined tests
+    let processed = process_number("16.0");
+    assert(processed.is_ok());
+    assert_eq(processed.unwrap(), 4.0);
+
+    let processed_err = process_number("-4.0");
+    assert(processed_err.is_err());
+
+    print("All pure function error handling tests passed!");
+}

@@ -1,0 +1,178 @@
+// @test: benchmark
+// @tier: 0
+// @level: L0
+// @tags: parser, incremental, performance, benchmark
+// @timeout: 30000
+// @description: Tests performance benefits of incremental parsing over full reparsing.
+//              Verifies that small edits to large files are significantly faster.
+
+// ============================================================================
+// This file is intentionally large to test performance characteristics.
+// Incremental parsing should be faster than full reparsing for small edits.
+// ============================================================================
+
+// Benchmark 1: Single character edit in large file
+// Expected: Incremental significantly faster than full parse
+fn benchmark_function_001() -> Int {
+    let local_var = 42;
+    local_var
+}
+
+fn benchmark_function_002() -> Int {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    a + b + c
+}
+
+fn benchmark_function_003() -> Int {
+    let x = 10;
+    let y = 20;
+    let z = 30;
+    x * y + z
+}
+
+fn benchmark_function_004() -> Int {
+    let result = if true {
+        100
+    } else {
+        200
+    };
+    result
+}
+
+fn benchmark_function_005() -> Int {
+    let list = [1, 2, 3, 4, 5];
+    let sum = list.fold(0, |acc, x| acc + x);
+    sum
+}
+
+fn benchmark_function_006() -> Int {
+    let map = { "a": 1, "b": 2, "c": 3 };
+    map.get("a") ?? 0
+}
+
+fn benchmark_function_007() -> Int {
+    let opt = Some(42);
+    match opt {
+        Some(x) => x,
+        None => 0,
+    }
+}
+
+fn benchmark_function_008() -> Int {
+    let mut counter = 0;
+    for i in 0..10 {
+        counter = counter + i;
+    }
+    counter
+}
+
+fn benchmark_function_009() -> Int {
+    let mut value = 1;
+    while value < 100 {
+        value = value * 2;
+    }
+    value
+}
+
+fn benchmark_function_010() -> Int {
+    let closure = |x: Int, y: Int| x + y;
+    closure(10, 20)
+}
+
+// Large type definition
+type BenchmarkData is {
+    field_01: Int,
+    field_02: Int,
+    field_03: Int,
+    field_04: Text,
+    field_05: Text,
+    field_06: Bool,
+    field_07: Float,
+    field_08: Float,
+    field_09: Maybe<Int>,
+    field_10: List<Int>,
+};
+
+// Implementation block
+implement BenchmarkData {
+    fn sum_ints(self) -> Int {
+        self.field_01 + self.field_02 + self.field_03
+    }
+
+    fn has_values(self) -> Bool {
+        self.field_06
+    }
+
+    fn get_first_text(self) -> Text {
+        self.field_04
+    }
+
+    fn compute_floats(self) -> Float {
+        self.field_07 + self.field_08
+    }
+
+    fn unwrap_maybe(self) -> Int {
+        self.field_09 ?? 0
+    }
+
+    fn list_len(self) -> Int {
+        self.field_10.len()
+    }
+}
+
+// More benchmark functions to increase file size
+fn benchmark_function_011() -> Int { 11 }
+fn benchmark_function_012() -> Int { 12 }
+fn benchmark_function_013() -> Int { 13 }
+fn benchmark_function_014() -> Int { 14 }
+fn benchmark_function_015() -> Int { 15 }
+fn benchmark_function_016() -> Int { 16 }
+fn benchmark_function_017() -> Int { 17 }
+fn benchmark_function_018() -> Int { 18 }
+fn benchmark_function_019() -> Int { 19 }
+fn benchmark_function_020() -> Int { 20 }
+
+fn benchmark_function_021() -> Int { 21 }
+fn benchmark_function_022() -> Int { 22 }
+fn benchmark_function_023() -> Int { 23 }
+fn benchmark_function_024() -> Int { 24 }
+fn benchmark_function_025() -> Int { 25 }
+fn benchmark_function_026() -> Int { 26 }
+fn benchmark_function_027() -> Int { 27 }
+fn benchmark_function_028() -> Int { 28 }
+fn benchmark_function_029() -> Int { 29 }
+fn benchmark_function_030() -> Int { 30 }
+
+// Complex function for edit testing
+fn complex_benchmark_target() -> Int {
+    let a = benchmark_function_001();
+    let b = benchmark_function_002();
+    let c = benchmark_function_003();
+    let d = benchmark_function_004();
+    let e = benchmark_function_005();
+    let f = benchmark_function_006();
+    let g = benchmark_function_007();
+    let h = benchmark_function_008();
+    let i = benchmark_function_009();
+    let j = benchmark_function_010();
+
+    a + b + c + d + e + f + g + h + i + j
+}
+
+// Performance test cases:
+// 1. Edit single character in benchmark_function_001 body
+//    Expected speedup: >10x for this file size
+//
+// 2. Add new function at end of file
+//    Expected: Only new function parsed
+//
+// 3. Delete benchmark_function_015
+//    Expected: Only affected region reparsed
+//
+// 4. Modify BenchmarkData type (add field)
+//    Expected: Only type definition reparsed
+//
+// 5. Change method in implement block
+//    Expected: Only that method reparsed

@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, pi-types, length-tracking
+
+/// Length tracking for lists using dependent types
+///
+/// Demonstrates how meta parameters enable compile-time tracking of list lengths,
+/// eliminating runtime bounds checks and proving correctness of list operations.
+
+/// A fixed-size array with statically known length
+type SizedArray<T, N: meta Int> is {
+    data: [T; N],
+};
+
+/// Empty array has length 0
+fn empty<T>() -> SizedArray<T, 0> {
+    SizedArray { data: [] }
+}
+
+/// Reverse preserves length
+fn reverse_sized<T, N: meta Int>(xs: SizedArray<T, N>) -> SizedArray<T, N> {
+    let mut d = xs.data;
+    d.reverse();
+    SizedArray { data: d }
+}
+
+/// Map preserves length
+fn map_sized<T, U, N: meta Int>(xs: SizedArray<T, N>, f: fn(T) -> U) -> SizedArray<U, N> {
+    SizedArray { data: xs.data.map(f) }
+}
+
+/// Zip requires equal lengths
+fn zip_sized<T, U, N: meta Int>(
+    xs: SizedArray<T, N>,
+    ys: SizedArray<U, N>
+) -> SizedArray<(T, U), N> {
+    SizedArray { data: xs.data.zip(ys.data) }
+}
+
+/// Head is safe for non-empty arrays
+fn head<T, N: meta Int{> 0}>(xs: SizedArray<T, N>) -> T {
+    xs.data[0]
+}
+
+/// Tail removes one element (returns List for simplicity)
+fn tail<T, N: meta Int{> 0}>(xs: SizedArray<T, N>) -> List<T> {
+    let items = xs.data.to_list();
+    items.skip(1)
+}
+
+/// Last element of non-empty array
+fn last<T, N: meta Int{> 0}>(xs: SizedArray<T, N>) -> T {
+    xs.data[N - 1]
+}
+
+/// Replicate: create array of N identical values
+fn replicate<T, N: meta Int>(value: T) -> SizedArray<T, N> {
+    SizedArray { data: [value; N] }
+}
+
+/// Safe indexing with compile-time bounds
+fn safe_index<T, N: meta Int{> 0}>(xs: SizedArray<T, N>, i: Int) -> T
+where i >= 0, i < N {
+    xs.data[i]
+}
+
+/// Length-preserving filter with existential return
+fn filter_sized<T, N: meta Int>(
+    xs: SizedArray<T, N>,
+    pred: fn(T) -> Bool
+) -> List<T> {
+    xs.data.to_list().filter(pred)
+}
+
+/// Concatenation of two lists
+fn append<T>(xs: List<T>, ys: List<T>) -> List<T>
+where ensures len(result) == len(xs) + len(ys) {
+    let mut result = xs;
+    for y in ys {
+        result.push(y);
+    }
+    result
+}
+
+fn main() {
+    // Build a sized array
+    let xs: SizedArray<Int, 5> = replicate(42);
+    assert(xs.data.len() == 5);
+
+    // Length is tracked through operations
+    let doubled: SizedArray<Int, 5> = map_sized(xs, |x| x * 2);
+    assert(doubled.data.len() == 5);
+
+    // Zip requires matching lengths
+    let a: SizedArray<Int, 3> = replicate(1);
+    let b: SizedArray<Int, 3> = replicate(2);
+    let pairs: SizedArray<(Int, Int), 3> = zip_sized(a, b);
+    assert(pairs.data.len() == 3);
+
+    // Head/tail on non-empty arrays
+    let arr: SizedArray<Int, 4> = SizedArray { data: [10, 20, 30, 40] };
+    let h: Int = head(arr);
+    assert(h == 10);
+
+    let l: Int = last(arr);
+    assert(l == 40);
+
+    // Reverse preserves length
+    let rev: SizedArray<Int, 4> = reverse_sized(arr);
+    assert(rev.data.len() == 4);
+
+    // Append with length guarantee
+    let combined = append([1, 2, 3], [4, 5]);
+    assert(combined.len() == 5);
+}

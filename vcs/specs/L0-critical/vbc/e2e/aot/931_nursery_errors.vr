@@ -1,0 +1,160 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, nursery, structured-concurrency, error-handling
+// @expected-exit: 0
+
+// Test: Nursery-style structured concurrency with error detection.
+// Multiple tasks complete, verify all results collected correctly.
+
+fn safe_worker(n: Int) -> Int {
+    // Returns n-th triangular number
+    let mut acc = 0;
+    let mut i = 1;
+    while (i <= n) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn factorial(n: Int) -> Int {
+    if (n <= 1) {
+        return 1;
+    }
+    let mut acc = 1;
+    let mut i = 2;
+    while (i <= n) {
+        acc = acc * i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn collatz_steps(n: Int) -> Int {
+    // Count steps to reach 1 in Collatz sequence
+    let mut x = n;
+    let mut steps = 0;
+    while (x != 1) {
+        if (x % 2 == 0) {
+            x = x / 2;
+        } else {
+            x = x * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn main() -> Int {
+    // Test 1: 5 tasks all completing successfully
+    let t1 = spawn safe_worker(10);
+    let t2 = spawn safe_worker(20);
+    let t3 = spawn safe_worker(50);
+    let t4 = spawn safe_worker(100);
+    let t5 = spawn safe_worker(200);
+
+    let r1 = t1.await; // tri(10) = 55
+    let r2 = t2.await; // tri(20) = 210
+    let r3 = t3.await; // tri(50) = 1275
+    let r4 = t4.await; // tri(100) = 5050
+    let r5 = t5.await; // tri(200) = 20100
+
+    if (r1 != 55) {
+        print(f"FAIL test1a: r1={r1}");
+        return 1;
+    }
+    if (r2 != 210) {
+        print(f"FAIL test1b: r2={r2}");
+        return 1;
+    }
+    if (r3 != 1275) {
+        print(f"FAIL test1c: r3={r3}");
+        return 1;
+    }
+    if (r4 != 5050) {
+        print(f"FAIL test1d: r4={r4}");
+        return 1;
+    }
+    if (r5 != 20100) {
+        print(f"FAIL test1e: r5={r5}");
+        return 1;
+    }
+
+    // Test 2: Mixed computation types in parallel
+    let ft = spawn factorial(12);
+    let cs = spawn collatz_steps(27);
+    let tw = spawn safe_worker(1000);
+
+    let ft_result = ft.await; // 12! = 479001600
+    let cs_result = cs.await; // Collatz(27) = 111 steps
+    let tw_result = tw.await; // tri(1000) = 500500
+
+    if (ft_result != 479001600) {
+        print(f"FAIL test2a: factorial={ft_result}");
+        return 1;
+    }
+    if (cs_result != 111) {
+        print(f"FAIL test2b: collatz={cs_result}");
+        return 1;
+    }
+    if (tw_result != 500500) {
+        print(f"FAIL test2c: worker={tw_result}");
+        return 1;
+    }
+
+    // Test 3: Large fan-out — 8 tasks
+    let a = spawn factorial(8);
+    let b = spawn factorial(9);
+    let c = spawn factorial(10);
+    let d = spawn collatz_steps(7);
+    let e = spawn collatz_steps(15);
+    let f = spawn collatz_steps(27);
+    let g = spawn safe_worker(50);
+    let h = spawn safe_worker(100);
+
+    let ra = a.await; // 40320
+    let rb = b.await; // 362880
+    let rc = c.await; // 3628800
+    let rd = d.await; // 16
+    let re = e.await; // 17
+    let rf = f.await; // 111
+    let rg = g.await; // 1275
+    let rh = h.await; // 5050
+
+    if (ra != 40320) {
+        print(f"FAIL test3a: {ra}");
+        return 1;
+    }
+    if (rb != 362880) {
+        print(f"FAIL test3b: {rb}");
+        return 1;
+    }
+    if (rc != 3628800) {
+        print(f"FAIL test3c: {rc}");
+        return 1;
+    }
+    if (rd != 16) {
+        print(f"FAIL test3d: {rd}");
+        return 1;
+    }
+    if (re != 17) {
+        print(f"FAIL test3e: {re}");
+        return 1;
+    }
+    if (rf != 111) {
+        print(f"FAIL test3f: {rf}");
+        return 1;
+    }
+    if (rg != 1275) {
+        print(f"FAIL test3g: {rg}");
+        return 1;
+    }
+    if (rh != 5050) {
+        print(f"FAIL test3h: {rh}");
+        return 1;
+    }
+
+    print("931_nursery_errors: PASS");
+    0
+}

@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, try, body, error
+// @description: Try without block body
+// @expected-error: E018
+
+fn test() {
+    try fallible_call();  // Try requires block body
+}

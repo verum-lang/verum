@@ -1,0 +1,115 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/runtime_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: stdlib, sys, intrinsics, runtime, supervisor, recovery, registry
+// @description: Tests for runtime intrinsics that power the supervisor system
+//               and resource management. Basic handle type tests run without
+//               full runtime; advanced tests document expected behavior.
+//
+// Coverage:
+// - Opaque handle types for supervisor system
+// - spawn_supervised: Spawn supervised tasks
+// - supervisor_log_escalation: Log supervisor escalation events
+// - supervisor_set_parent: Link child to parent supervisor
+// - exec_with_recovery: Execute with retry/circuit breaker
+// - global_allocator: Get global memory allocator
+// - default_executor: Get default async executor
+// - default_io_driver: Get default I/O driver
+// - shared_registry_global: Get global shared registry
+// - middleware_chain_empty: Create empty middleware chain
+//
+// Note: This test requires full runtime support. Without runtime, these
+// intrinsics may not be available. The test is skipped when runtime is
+// not present.
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.runtime_test;
+
+mount core.intrinsics.{
+    // Basic types that should always be available
+    FutureHandle, JoinHandleOpaque, ExecutorHandle,
+
+    // Null pointer for handle initialization
+    null_ptr,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Basic Handle Type Tests
+// =============================================================================
+// Verify handle types that are available even without full runtime.
+
+@test
+fn test_basic_handle_types() {
+    // Create null byte pointers (type inference from annotation)
+    let ptr1: *const Byte = null_ptr();
+    let ptr2: *const Byte = null_ptr();
+    let ptr3: *const Byte = null_ptr();
+
+    // Construct newtypes using constructor syntax
+    // FutureHandle - basic async handle
+    let null_future = FutureHandle(ptr1);
+    assert((null_future as Int) == 0);
+
+    // JoinHandleOpaque - join handle for spawned tasks
+    let null_join = JoinHandleOpaque(ptr2);
+    assert((null_join as Int) == 0);
+
+    // ExecutorHandle - executor reference
+    let null_executor = ExecutorHandle(ptr3);
+    assert((null_executor as Int) == 0);
+
+    // Verify handles contain null pointers
+    let check_ptr: *const Byte = null_ptr();
+    assert((null_future as Int) == (check_ptr as Int));
+    assert((null_join as Int) == (check_ptr as Int));
+    assert((null_executor as Int) == (check_ptr as Int));
+
+    print("Basic handle types verified");
+}
+
+// =============================================================================
+// Runtime-Dependent Tests (Require Full Runtime)
+// =============================================================================
+// The following tests require full runtime support and are documented here
+// for reference. They are not executed in compile-time-only mode.
+//
+// Full runtime testing would include:
+//
+// 1. SupervisorHandleOpaque, ChildSpecOpaque, ExecutionEnvOpaque
+//    - Supervisor system handles for task supervision
+//
+// 2. RecoveryError type with variants:
+//    - MaxRetriesExceeded
+//    - CircuitOpen
+//    - Timeout
+//    - InnerError(Error)
+//
+// 3. Supervisor intrinsics:
+//    - spawn_supervised(supervisor, future, spec, env) -> JoinHandleOpaque
+//    - supervisor_log_escalation(reason: *const Byte)
+//    - supervisor_set_parent(child, parent)
+//
+// 4. Recovery intrinsics:
+//    - exec_with_recovery(ctx, factory) -> Result<*const Byte, RecoveryError>
+//    - inline_cb_as_ref(storage) -> CircuitBreakerOpaque
+//
+// 5. Global resource intrinsics:
+//    - global_allocator() -> AllocHandle
+//    - default_executor() -> ExecutorHandle
+//    - default_io_driver() -> IODriverHandle
+//    - shared_registry_global() -> SharedRegistryOpaque
+//    - middleware_chain_empty() -> MiddlewareChainOpaque
+//
+// 6. Single-thread executor:
+//    - single_thread_block_on(executor, future) -> *const Byte

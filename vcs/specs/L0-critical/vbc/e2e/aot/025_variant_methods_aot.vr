@@ -1,0 +1,126 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, variants, methods, implement
+// @timeout: 30000
+// @expected-exit: 0
+// @description: AOT methods on variant types and variant-returning functions
+
+type Ordering is Less | Equal | Greater;
+
+fn compare(a: Int, b: Int) -> Ordering {
+    if a < b {
+        Less
+    } else if a > b {
+        Greater
+    } else {
+        Equal
+    }
+}
+
+fn ordering_to_int(o: Ordering) -> Int {
+    match o {
+        Less => -1,
+        Equal => 0,
+        Greater => 1,
+    }
+}
+
+fn is_equal(o: Ordering) -> Bool {
+    o is Equal
+}
+
+type Expr is Lit(Int) | Neg(Int) | BinPlus(Int, Int) | BinMul(Int, Int);
+
+fn eval(e: Expr) -> Int {
+    match e {
+        Lit(v) => v,
+        Neg(v) => 0 - v,
+        BinPlus(a, b) => a + b,
+        BinMul(a, b) => a * b,
+    }
+}
+
+fn is_literal(e: Expr) -> Bool {
+    e is Lit
+}
+
+type Option is None | Some(Int);
+
+fn option_map(opt: Option, f: fn(Int) -> Int) -> Option {
+    match opt {
+        None => None,
+        Some(v) => Some(f(v)),
+    }
+}
+
+fn option_flat_map(opt: Option, f: fn(Int) -> Option) -> Option {
+    match opt {
+        None => None,
+        Some(v) => f(v),
+    }
+}
+
+fn option_get_or(opt: Option, default: Int) -> Int {
+    match opt {
+        None => default,
+        Some(v) => v,
+    }
+}
+
+fn safe_div(a: Int, b: Int) -> Option {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+fn main() -> Int {
+    // Ordering
+    assert_eq(ordering_to_int(compare(1, 2)), -1);
+    assert_eq(ordering_to_int(compare(2, 2)), 0);
+    assert_eq(ordering_to_int(compare(3, 2)), 1);
+    assert(is_equal(compare(5, 5)));
+    assert(!is_equal(compare(5, 6)));
+
+    // Expr evaluation
+    assert_eq(eval(Lit(42)), 42);
+    assert_eq(eval(Neg(7)), -7);
+    assert_eq(eval(BinPlus(3, 4)), 7);
+    assert_eq(eval(BinMul(5, 6)), 30);
+    assert(is_literal(Lit(0)));
+    assert(!is_literal(Neg(1)));
+
+    // Option operations
+    let some5 = Some(5);
+    let none = None;
+
+    assert_eq(option_get_or(some5, 0), 5);
+    assert_eq(option_get_or(none, 99), 99);
+
+    let doubled = option_map(some5, |x| x * 2);
+    assert_eq(option_get_or(doubled, 0), 10);
+
+    let mapped_none = option_map(none, |x| x * 2);
+    assert_eq(option_get_or(mapped_none, -1), -1);
+
+    // Flat map (monadic bind)
+    let result = option_flat_map(Some(10), |x| safe_div(x, 2));
+    assert_eq(option_get_or(result, 0), 5);
+
+    let result2 = option_flat_map(Some(10), |x| safe_div(x, 0));
+    assert_eq(option_get_or(result2, -1), -1);
+
+    let result3 = option_flat_map(None, |x| safe_div(x, 2));
+    assert_eq(option_get_or(result3, -1), -1);
+
+    // Chained operations
+    let chain = option_flat_map(
+        option_flat_map(Some(100), |x| safe_div(x, 5)),
+        |x| safe_div(x, 2)
+    );
+    assert_eq(option_get_or(chain, 0), 10);
+
+    0
+}

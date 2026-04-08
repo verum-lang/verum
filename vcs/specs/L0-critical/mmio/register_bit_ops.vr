@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: mmio, register, bitops, systems
+// @timeout: 5000
+// @description: Verify register bit manipulation operations compile correctly.
+
+mount sys.mmio;
+
+// Example register bit definitions
+const UART_TX_ENABLE: UInt32 = (1 << 0) as UInt32;
+const UART_RX_ENABLE: UInt32 = (1 << 1) as UInt32;
+const UART_TX_READY: UInt32 = (1 << 2) as UInt32;
+const UART_RX_READY: UInt32 = (1 << 3) as UInt32;
+const UART_PARITY_ERR: UInt32 = (1 << 4) as UInt32;
+const UART_FRAME_ERR: UInt32 = (1 << 5) as UInt32;
+
+/// Test set_bits operation.
+fn test_set_bits() {
+    let ctrl: Register<UInt32, ReadWrite> = Register.at(0x4000_0000);
+
+    // Set TX and RX enable bits
+    ctrl.set_bits(UART_TX_ENABLE | UART_RX_ENABLE);
+}
+
+/// Test clear_bits operation.
+fn test_clear_bits() {
+    let ctrl: Register<UInt32, ReadWrite> = Register.at(0x4000_0000);
+
+    // Clear error bits
+    ctrl.clear_bits(UART_PARITY_ERR | UART_FRAME_ERR);
+}
+
+/// Test toggle_bits operation.
+fn test_toggle_bits() {
+    let ctrl: Register<UInt32, ReadWrite> = Register.at(0x4000_0000);
+
+    // Toggle TX enable (flip state)
+    ctrl.toggle_bits(UART_TX_ENABLE);
+}
+
+/// Test any_set check.
+fn test_any_set() {
+    let status: Register<UInt32, ReadWrite> = Register.at(0x4000_0004);
+
+    // Check if any ready flags are set
+    if status.any_set(UART_TX_READY | UART_RX_READY) {
+        // At least one is ready
+    }
+
+    // Check for any errors
+    let has_error = status.any_set(UART_PARITY_ERR | UART_FRAME_ERR);
+}
+
+/// Test all_set check.
+fn test_all_set() {
+    let status: Register<UInt32, ReadWrite> = Register.at(0x4000_0004);
+
+    // Check if both TX and RX are enabled
+    if status.all_set(UART_TX_ENABLE | UART_RX_ENABLE) {
+        // Both are enabled
+    }
+}
+
+/// Test modify with closure.
+fn test_modify() {
+    let ctrl: Register<UInt32, ReadWrite> = Register.at(0x4000_0000);
+
+    // Modify using closure with explicit types to guide inference
+    // Note: Currently bitwise NOT in closures requires explicit type annotation
+    ctrl.modify(|val: UInt32| -> UInt32 {
+        // Use intermediate variable with explicit type for clear mask
+        let clear_mask: UInt32 = UART_PARITY_ERR | UART_FRAME_ERR;
+        let inverted: UInt32 = ~clear_mask;
+        let cleared: UInt32 = val & inverted;
+        cleared | UART_TX_ENABLE
+    });
+}
+
+fn main() -> Int {
+    test_set_bits();
+    test_clear_bits();
+    test_toggle_bits();
+    test_any_set();
+    test_all_set();
+    test_modify();
+    0
+}

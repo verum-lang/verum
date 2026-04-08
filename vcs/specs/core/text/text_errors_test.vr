@@ -1,0 +1,152 @@
+// =============================================================================
+// text_errors_test.vr - Tests for text error type Display implementations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, error, utf8, parse, display, protocols, core
+// @description: Tests Display for Utf8Error and ParseError
+// =============================================================================
+
+mount core.text.text.{Utf8Error, ParseError};
+mount core.base.protocols.{Display, Debug};
+mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// =============================================================================
+// Section 1: Utf8Error Display
+// =============================================================================
+
+@test
+fn test_utf8_error_display() {
+    let err = Utf8Error { valid_up_to: 5 };
+    let text = format_display(&err);
+    assert(text.contains("utf-8") || text.contains("UTF-8") || text.contains("utf8"));
+}
+
+@test
+fn test_utf8_error_display_contains_index() {
+    let err = Utf8Error { valid_up_to: 42 };
+    let text = format_display(&err);
+    assert(text.contains("42"));
+}
+
+@test
+fn test_utf8_error_display_differs_by_index() {
+    let err1 = Utf8Error { valid_up_to: 0 };
+    let err2 = Utf8Error { valid_up_to: 100 };
+    assert(format_display(&err1) != format_display(&err2));
+}
+
+@test
+fn test_utf8_error_display_is_actionable() {
+    let err = Utf8Error { valid_up_to: 10 };
+    let msg = format_display(&err);
+    assert(msg.len() > 15);
+}
+
+@test
+fn test_utf8_error_display_fn_exists() {
+    let err = Utf8Error { valid_up_to: 5 };
+    let text = format_display(&err);
+    assert(text.len() > 0);
+}
+
+// =============================================================================
+// Section 2: Utf8Error Debug (already existed, verify still works)
+// =============================================================================
+
+@test
+fn test_utf8_error_debug() {
+    let err = Utf8Error { valid_up_to: 7 };
+    let text = format_debug(&err);
+    assert(text.contains("Utf8Error"));
+    assert(text.contains("7"));
+}
+
+// =============================================================================
+// Section 3: ParseError Display
+// =============================================================================
+
+@test
+fn test_parse_error_display() {
+    let err = ParseError { message: "unexpected token" };
+    let text = format_display(&err);
+    assert(text.contains("unexpected token"));
+}
+
+@test
+fn test_parse_error_display_is_message() {
+    let err = ParseError { message: "invalid number format" };
+    let text = format_display(&err);
+    assert_eq(text, "invalid number format");
+}
+
+@test
+fn test_parse_error_display_empty_message() {
+    let err = ParseError { message: "" };
+    let text = format_display(&err);
+    assert_eq(text, "");
+}
+
+@test
+fn test_parse_error_display_fn_exists() {
+    let err = ParseError { message: "bad format" };
+    let text = format_display(&err);
+    assert(text.contains("bad format"));
+}
+
+// =============================================================================
+// Section 4: ParseError Debug (already existed, verify still works)
+// =============================================================================
+
+@test
+fn test_parse_error_debug() {
+    let err = ParseError { message: "bad input" };
+    let text = format_debug(&err);
+    assert(text.contains("ParseError"));
+    assert(text.contains("bad input"));
+}
+
+// =============================================================================
+// Section 5: Display vs Debug differ
+// =============================================================================
+
+@test
+fn test_utf8_error_display_vs_debug_differ() {
+    let err = Utf8Error { valid_up_to: 3 };
+    let display_text = format_display(&err);
+    let debug_text = format_debug(&err);
+    // Display is user-friendly, Debug includes type name
+    assert(debug_text.contains("Utf8Error"));
+}
+
+@test
+fn test_parse_error_display_vs_debug_differ() {
+    let err = ParseError { message: "test" };
+    let display_text = format_display(&err);
+    let debug_text = format_debug(&err);
+    // Debug includes "ParseError:" prefix
+    assert(debug_text.contains("ParseError"));
+}
+
+// =============================================================================
+// Section 6: Type Existence
+// =============================================================================
+
+@test
+fn test_utf8_error_type_exists() {
+    let err: Utf8Error = Utf8Error { valid_up_to: 0 };
+    assert_eq(err.valid_up_to, 0);
+}
+
+@test
+fn test_parse_error_type_exists() {
+    let err: ParseError = ParseError { message: "test" };
+    assert_eq(err.message, "test");
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,284 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, kmp, string-matching, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for KMP failure function and pattern matching on integer arrays
+
+// We represent "strings" as integer arrays where each int is a character code
+type Arr16 is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int, d12: Int, d13: Int, d14: Int, d15: Int,
+    len: Int
+};
+
+fn arr16_new(n: Int) -> Arr16 {
+    Arr16 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0,
+            d8: 0, d9: 0, d10: 0, d11: 0, d12: 0, d13: 0, d14: 0, d15: 0, len: n }
+}
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 }
+    else if i == 2 { a.d2 } else if i == 3 { a.d3 }
+    else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else if i == 7 { a.d7 }
+    else if i == 8 { a.d8 } else if i == 9 { a.d9 }
+    else if i == 10 { a.d10 } else if i == 11 { a.d11 }
+    else if i == 12 { a.d12 } else if i == 13 { a.d13 }
+    else if i == 14 { a.d14 } else { a.d15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 },
+        d8: if i == 8 { v } else { a.d8 }, d9: if i == 9 { v } else { a.d9 },
+        d10: if i == 10 { v } else { a.d10 }, d11: if i == 11 { v } else { a.d11 },
+        d12: if i == 12 { v } else { a.d12 }, d13: if i == 13 { v } else { a.d13 },
+        d14: if i == 14 { v } else { a.d14 }, d15: if i == 15 { v } else { a.d15 },
+        len: a.len
+    }
+}
+
+// === KMP Failure Function ===
+// failure[i] = length of longest proper prefix of pattern[0..i] that is also a suffix
+fn kmp_failure(pattern: Arr16) -> Arr16 {
+    let m = pattern.len;
+    let mut fail = arr16_new(m);
+    // fail[0] = 0 by definition
+    let mut i = 1;
+    let mut k = 0;  // length of current matching prefix
+    while i < m {
+        // While mismatch, follow failure links
+        let mut k2 = k;
+        let mut done = 0;
+        while done == 0 {
+            if k2 > 0 && arr16_get(pattern, k2) != arr16_get(pattern, i) {
+                k2 = arr16_get(fail, k2 - 1);
+            } else {
+                done = 1;
+            }
+        }
+        if arr16_get(pattern, k2) == arr16_get(pattern, i) {
+            k2 = k2 + 1;
+        }
+        fail = arr16_set(fail, i, k2);
+        k = k2;
+        i = i + 1;
+    }
+    fail
+}
+
+// === KMP Search ===
+// Returns index of first match, or -1 if not found
+fn kmp_search(text: Arr16, pattern: Arr16) -> Int {
+    let n = text.len;
+    let m = pattern.len;
+    if m == 0 { return 0; }
+    if m > n { return -1; }
+
+    let fail = kmp_failure(pattern);
+    let mut i = 0;  // index in text
+    let mut j = 0;  // index in pattern
+
+    while i < n {
+        // While mismatch, follow failure links
+        let mut done = 0;
+        while done == 0 {
+            if j > 0 && arr16_get(pattern, j) != arr16_get(text, i) {
+                j = arr16_get(fail, j - 1);
+            } else {
+                done = 1;
+            }
+        }
+        if arr16_get(pattern, j) == arr16_get(text, i) {
+            j = j + 1;
+        }
+        if j == m {
+            return i - m + 1;  // Found match at this position
+        }
+        i = i + 1;
+    }
+    -1  // No match
+}
+
+// Count all occurrences
+fn kmp_count(text: Arr16, pattern: Arr16) -> Int {
+    let n = text.len;
+    let m = pattern.len;
+    if m == 0 { return 0; }
+    if m > n { return 0; }
+
+    let fail = kmp_failure(pattern);
+    let mut i = 0;
+    let mut j = 0;
+    let mut count = 0;
+
+    while i < n {
+        let mut done = 0;
+        while done == 0 {
+            if j > 0 && arr16_get(pattern, j) != arr16_get(text, i) {
+                j = arr16_get(fail, j - 1);
+            } else {
+                done = 1;
+            }
+        }
+        if arr16_get(pattern, j) == arr16_get(text, i) {
+            j = j + 1;
+        }
+        if j == m {
+            count = count + 1;
+            j = arr16_get(fail, j - 1);  // Continue searching for overlapping matches
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_failure_function() {
+    // Pattern "ABABC" = [1, 2, 1, 2, 3]
+    let mut pat = arr16_new(5);
+    pat = arr16_set(pat, 0, 1);  // A
+    pat = arr16_set(pat, 1, 2);  // B
+    pat = arr16_set(pat, 2, 1);  // A
+    pat = arr16_set(pat, 3, 2);  // B
+    pat = arr16_set(pat, 4, 3);  // C
+
+    let fail = kmp_failure(pat);
+    assert_eq(arr16_get(fail, 0), 0);  // ""
+    assert_eq(arr16_get(fail, 1), 0);  // "AB" - no proper prefix=suffix
+    assert_eq(arr16_get(fail, 2), 1);  // "ABA" - "A" is prefix and suffix
+    assert_eq(arr16_get(fail, 3), 2);  // "ABAB" - "AB" is prefix and suffix
+    assert_eq(arr16_get(fail, 4), 0);  // "ABABC" - no match
+}
+
+fn test_failure_all_same() {
+    // Pattern "AAAA" = [5, 5, 5, 5]
+    let mut pat = arr16_new(4);
+    pat = arr16_set(pat, 0, 5);
+    pat = arr16_set(pat, 1, 5);
+    pat = arr16_set(pat, 2, 5);
+    pat = arr16_set(pat, 3, 5);
+
+    let fail = kmp_failure(pat);
+    assert_eq(arr16_get(fail, 0), 0);
+    assert_eq(arr16_get(fail, 1), 1);
+    assert_eq(arr16_get(fail, 2), 2);
+    assert_eq(arr16_get(fail, 3), 3);
+}
+
+fn test_search_found() {
+    // Text: [1, 2, 3, 1, 2, 3, 4, 5] len=8
+    // Pattern: [1, 2, 3, 4] len=4
+    let mut text = arr16_new(8);
+    text = arr16_set(text, 0, 1);
+    text = arr16_set(text, 1, 2);
+    text = arr16_set(text, 2, 3);
+    text = arr16_set(text, 3, 1);
+    text = arr16_set(text, 4, 2);
+    text = arr16_set(text, 5, 3);
+    text = arr16_set(text, 6, 4);
+    text = arr16_set(text, 7, 5);
+
+    let mut pat = arr16_new(4);
+    pat = arr16_set(pat, 0, 1);
+    pat = arr16_set(pat, 1, 2);
+    pat = arr16_set(pat, 2, 3);
+    pat = arr16_set(pat, 3, 4);
+
+    let idx = kmp_search(text, pat);
+    assert_eq(idx, 3);  // Match at position 3
+}
+
+fn test_search_at_start() {
+    // Text: [7, 8, 9, 0] len=4
+    // Pattern: [7, 8] len=2
+    let mut text = arr16_new(4);
+    text = arr16_set(text, 0, 7);
+    text = arr16_set(text, 1, 8);
+    text = arr16_set(text, 2, 9);
+    text = arr16_set(text, 3, 0);
+
+    let mut pat = arr16_new(2);
+    pat = arr16_set(pat, 0, 7);
+    pat = arr16_set(pat, 1, 8);
+
+    assert_eq(kmp_search(text, pat), 0);
+}
+
+fn test_search_not_found() {
+    // Text: [1, 2, 3, 4] len=4
+    // Pattern: [5, 6] len=2
+    let mut text = arr16_new(4);
+    text = arr16_set(text, 0, 1);
+    text = arr16_set(text, 1, 2);
+    text = arr16_set(text, 2, 3);
+    text = arr16_set(text, 3, 4);
+
+    let mut pat = arr16_new(2);
+    pat = arr16_set(pat, 0, 5);
+    pat = arr16_set(pat, 1, 6);
+
+    assert_eq(kmp_search(text, pat), -1);
+}
+
+fn test_search_pattern_longer() {
+    let text = arr16_new(2);
+    let pat = arr16_new(5);
+    assert_eq(kmp_search(text, pat), -1);
+}
+
+fn test_count_overlapping() {
+    // Text: [1, 1, 1, 1, 1] len=5
+    // Pattern: [1, 1] len=2
+    // Overlapping matches at: 0, 1, 2, 3 => 4 matches
+    let mut text = arr16_new(5);
+    text = arr16_set(text, 0, 1);
+    text = arr16_set(text, 1, 1);
+    text = arr16_set(text, 2, 1);
+    text = arr16_set(text, 3, 1);
+    text = arr16_set(text, 4, 1);
+
+    let mut pat = arr16_new(2);
+    pat = arr16_set(pat, 0, 1);
+    pat = arr16_set(pat, 1, 1);
+
+    assert_eq(kmp_count(text, pat), 4);
+}
+
+fn test_count_non_overlapping_pattern() {
+    // Text: [1, 2, 3, 1, 2, 3] len=6
+    // Pattern: [1, 2, 3] len=3
+    // Matches at: 0 and 3 => 2 matches
+    let mut text = arr16_new(6);
+    text = arr16_set(text, 0, 1);
+    text = arr16_set(text, 1, 2);
+    text = arr16_set(text, 2, 3);
+    text = arr16_set(text, 3, 1);
+    text = arr16_set(text, 4, 2);
+    text = arr16_set(text, 5, 3);
+
+    let mut pat = arr16_new(3);
+    pat = arr16_set(pat, 0, 1);
+    pat = arr16_set(pat, 1, 2);
+    pat = arr16_set(pat, 2, 3);
+
+    assert_eq(kmp_count(text, pat), 2);
+}
+
+fn main() -> Int {
+    test_failure_function();
+    test_failure_all_same();
+    test_search_found();
+    test_search_at_start();
+    test_search_not_found();
+    test_search_pattern_longer();
+    test_count_overlapping();
+    test_count_non_overlapping_pattern();
+    print("[OK] 282_kmp_match_aot");
+    0
+}

@@ -1,0 +1,559 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, edge, state-machine, mutable
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: State machine via mutable references.
+// Tests state record modification through mutable reference,
+// transition functions taking &mut State, multi-step transitions,
+// and complex state with multiple fields.
+
+// =============================================================================
+// State machine 1: Traffic Light
+// State codes: 0=Red, 1=Green, 2=Yellow
+// =============================================================================
+
+type TrafficState is {
+    phase: Int,
+    ticks_in_phase: Int,
+    total_ticks: Int,
+    transitions: Int
+};
+
+fn traffic_new() -> TrafficState {
+    TrafficState {
+        phase: 0,
+        ticks_in_phase: 0,
+        total_ticks: 0,
+        transitions: 0
+    }
+}
+
+fn traffic_tick(s: &mut TrafficState) {
+    *s = TrafficState {
+        phase: (*s).phase,
+        ticks_in_phase: (*s).ticks_in_phase + 1,
+        total_ticks: (*s).total_ticks + 1,
+        transitions: (*s).transitions
+    };
+}
+
+fn traffic_transition(s: &mut TrafficState) {
+    let next_phase = if (*s).phase == 0 { 1 }
+                     else if (*s).phase == 1 { 2 }
+                     else { 0 };
+    *s = TrafficState {
+        phase: next_phase,
+        ticks_in_phase: 0,
+        total_ticks: (*s).total_ticks,
+        transitions: (*s).transitions + 1
+    };
+}
+
+fn traffic_run_phase(s: &mut TrafficState, duration: Int) {
+    let mut i = 0;
+    while i < duration {
+        traffic_tick(s);
+        i = i + 1;
+    }
+    traffic_transition(s);
+}
+
+fn test_traffic_light() {
+    let mut state = traffic_new();
+    assert_eq(state.phase, 0);    // Red
+
+    // Run Red phase for 5 ticks
+    traffic_run_phase(&mut state, 5);
+    assert_eq(state.phase, 1);    // Now Green
+    assert_eq(state.ticks_in_phase, 0);
+    assert_eq(state.total_ticks, 5);
+    assert_eq(state.transitions, 1);
+
+    // Run Green phase for 4 ticks
+    traffic_run_phase(&mut state, 4);
+    assert_eq(state.phase, 2);    // Now Yellow
+    assert_eq(state.total_ticks, 9);
+    assert_eq(state.transitions, 2);
+
+    // Run Yellow phase for 2 ticks
+    traffic_run_phase(&mut state, 2);
+    assert_eq(state.phase, 0);    // Back to Red
+    assert_eq(state.total_ticks, 11);
+    assert_eq(state.transitions, 3);
+
+    // Full cycle
+    traffic_run_phase(&mut state, 5);  // Red -> Green
+    traffic_run_phase(&mut state, 4);  // Green -> Yellow
+    traffic_run_phase(&mut state, 2);  // Yellow -> Red
+    assert_eq(state.phase, 0);
+    assert_eq(state.transitions, 6);
+    assert_eq(state.total_ticks, 22);
+}
+
+// =============================================================================
+// State machine 2: Counter with bounds
+// =============================================================================
+
+type BoundedCounter is {
+    value: Int,
+    min_val: Int,
+    max_val: Int,
+    overflows: Int,
+    underflows: Int
+};
+
+fn counter_new(mn: Int, mx: Int) -> BoundedCounter {
+    BoundedCounter {
+        value: mn,
+        min_val: mn,
+        max_val: mx,
+        overflows: 0,
+        underflows: 0
+    }
+}
+
+fn counter_increment(c: &mut BoundedCounter) {
+    if (*c).value < (*c).max_val {
+        *c = BoundedCounter {
+            value: (*c).value + 1,
+            min_val: (*c).min_val,
+            max_val: (*c).max_val,
+            overflows: (*c).overflows,
+            underflows: (*c).underflows
+        };
+    } else {
+        *c = BoundedCounter {
+            value: (*c).min_val,
+            min_val: (*c).min_val,
+            max_val: (*c).max_val,
+            overflows: (*c).overflows + 1,
+            underflows: (*c).underflows
+        };
+    }
+}
+
+fn counter_decrement(c: &mut BoundedCounter) {
+    if (*c).value > (*c).min_val {
+        *c = BoundedCounter {
+            value: (*c).value - 1,
+            min_val: (*c).min_val,
+            max_val: (*c).max_val,
+            overflows: (*c).overflows,
+            underflows: (*c).underflows
+        };
+    } else {
+        *c = BoundedCounter {
+            value: (*c).max_val,
+            min_val: (*c).min_val,
+            max_val: (*c).max_val,
+            overflows: (*c).overflows,
+            underflows: (*c).underflows + 1
+        };
+    }
+}
+
+fn counter_reset(c: &mut BoundedCounter) {
+    *c = BoundedCounter {
+        value: (*c).min_val,
+        min_val: (*c).min_val,
+        max_val: (*c).max_val,
+        overflows: (*c).overflows,
+        underflows: (*c).underflows
+    };
+}
+
+fn test_bounded_counter() {
+    let mut c = counter_new(0, 5);
+    assert_eq(c.value, 0);
+
+    // Increment to max
+    let mut i = 0;
+    while i < 5 {
+        counter_increment(&mut c);
+        i = i + 1;
+    }
+    assert_eq(c.value, 5);
+    assert_eq(c.overflows, 0);
+
+    // One more triggers overflow
+    counter_increment(&mut c);
+    assert_eq(c.value, 0);
+    assert_eq(c.overflows, 1);
+
+    // Decrement from 0 triggers underflow
+    counter_decrement(&mut c);
+    assert_eq(c.value, 5);
+    assert_eq(c.underflows, 1);
+
+    // Many increments wrap multiple times
+    counter_reset(&mut c);
+    let mut j = 0;
+    while j < 18 {
+        counter_increment(&mut c);
+        j = j + 1;
+    }
+    // 18 increments from 0, range 0-5 (6 values): 18/6 = 3 full cycles, remainder 0
+    assert_eq(c.value, 0);
+    assert_eq(c.overflows, 4);  // initial 1 + 3 new wraps
+}
+
+// =============================================================================
+// State machine 3: Stack-based calculator
+// =============================================================================
+
+type CalcState is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    sp: Int,
+    error_flag: Int
+};
+
+fn calc_new() -> CalcState {
+    CalcState { s0: 0, s1: 0, s2: 0, s3: 0, sp: 0, error_flag: 0 }
+}
+
+fn calc_get(c: CalcState, i: Int) -> Int {
+    if i == 0 { c.s0 }
+    else if i == 1 { c.s1 }
+    else if i == 2 { c.s2 }
+    else { c.s3 }
+}
+
+fn calc_set_stack(c: CalcState, i: Int, v: Int) -> CalcState {
+    CalcState {
+        s0: if i == 0 { v } else { c.s0 },
+        s1: if i == 1 { v } else { c.s1 },
+        s2: if i == 2 { v } else { c.s2 },
+        s3: if i == 3 { v } else { c.s3 },
+        sp: c.sp,
+        error_flag: c.error_flag
+    }
+}
+
+fn calc_push(c: &mut CalcState, v: Int) {
+    if (*c).sp >= 4 {
+        *c = CalcState {
+            s0: (*c).s0, s1: (*c).s1, s2: (*c).s2, s3: (*c).s3,
+            sp: (*c).sp,
+            error_flag: 1
+        };
+    } else {
+        let new_c = calc_set_stack(*c, (*c).sp, v);
+        *c = CalcState {
+            s0: new_c.s0, s1: new_c.s1, s2: new_c.s2, s3: new_c.s3,
+            sp: (*c).sp + 1,
+            error_flag: 0
+        };
+    }
+}
+
+fn calc_pop(c: &mut CalcState) -> Int {
+    if (*c).sp <= 0 {
+        *c = CalcState {
+            s0: (*c).s0, s1: (*c).s1, s2: (*c).s2, s3: (*c).s3,
+            sp: 0,
+            error_flag: 2
+        };
+        0
+    } else {
+        let new_sp = (*c).sp - 1;
+        let val = calc_get(*c, new_sp);
+        *c = CalcState {
+            s0: (*c).s0, s1: (*c).s1, s2: (*c).s2, s3: (*c).s3,
+            sp: new_sp,
+            error_flag: 0
+        };
+        val
+    }
+}
+
+fn calc_add(c: &mut CalcState) {
+    let b = calc_pop(c);
+    let a = calc_pop(c);
+    calc_push(c, a + b);
+}
+
+fn calc_mul(c: &mut CalcState) {
+    let b = calc_pop(c);
+    let a = calc_pop(c);
+    calc_push(c, a * b);
+}
+
+fn calc_sub(c: &mut CalcState) {
+    let b = calc_pop(c);
+    let a = calc_pop(c);
+    calc_push(c, a - b);
+}
+
+fn test_stack_calculator() {
+    let mut st = calc_new();
+
+    // Compute (3 + 4) * 2 = 14
+    calc_push(&mut st, 3);
+    calc_push(&mut st, 4);
+    calc_add(&mut st);
+    calc_push(&mut st, 2);
+    calc_mul(&mut st);
+
+    let result = calc_pop(&mut st);
+    assert_eq(result, 14);
+    assert_eq(st.sp, 0);
+    assert_eq(st.error_flag, 0);
+
+    // Compute (10 - 3) * (2 + 5) = 7 * 7 = 49
+    calc_push(&mut st, 10);
+    calc_push(&mut st, 3);
+    calc_sub(&mut st);
+    calc_push(&mut st, 2);
+    calc_push(&mut st, 5);
+    calc_add(&mut st);
+    calc_mul(&mut st);
+
+    let result2 = calc_pop(&mut st);
+    assert_eq(result2, 49);
+}
+
+// =============================================================================
+// State machine 4: Simple FSM with transition table
+// States: 0=Idle, 1=Running, 2=Paused, 3=Stopped
+// Events: 0=Start, 1=Pause, 2=Resume, 3=Stop
+// =============================================================================
+
+type FsmState is {
+    current: Int,
+    event_count: Int,
+    invalid_events: Int
+};
+
+fn fsm_new() -> FsmState {
+    FsmState { current: 0, event_count: 0, invalid_events: 0 }
+}
+
+fn fsm_next_state(cur: Int, event: Int) -> Int {
+    // Returns next state, or -1 for invalid transition
+    if cur == 0 {
+        if event == 0 { 1 } else { -1 }
+    } else if cur == 1 {
+        if event == 1 { 2 }
+        else if event == 3 { 3 }
+        else { -1 }
+    } else if cur == 2 {
+        if event == 2 { 1 }
+        else if event == 3 { 3 }
+        else { -1 }
+    } else { -1 }
+}
+
+fn fsm_process(state: FsmState, event: Int) -> FsmState {
+    let next = fsm_next_state(state.current, event);
+    if next >= 0 {
+        FsmState {
+            current: next,
+            event_count: state.event_count + 1,
+            invalid_events: state.invalid_events
+        }
+    } else {
+        FsmState {
+            current: state.current,
+            event_count: state.event_count + 1,
+            invalid_events: state.invalid_events + 1
+        }
+    }
+}
+
+fn test_fsm() {
+    let mut fsm = fsm_new();
+    assert_eq(fsm.current, 0);  // Idle
+
+    // Start
+    fsm = fsm_process(fsm, 0);
+    assert_eq(fsm.current, 1);  // Running
+    assert_eq(fsm.event_count, 1);
+
+    // Pause
+    fsm = fsm_process(fsm, 1);
+    assert_eq(fsm.current, 2);  // Paused
+
+    // Resume
+    fsm = fsm_process(fsm, 2);
+    assert_eq(fsm.current, 1);  // Running
+
+    // Pause again
+    fsm = fsm_process(fsm, 1);
+    assert_eq(fsm.current, 2);
+
+    // Start (invalid in Paused state)
+    fsm = fsm_process(fsm, 0);
+    assert_eq(fsm.current, 2);       // Still Paused
+    assert_eq(fsm.invalid_events, 1);
+
+    // Stop from Paused
+    fsm = fsm_process(fsm, 3);
+    assert_eq(fsm.current, 3);  // Stopped
+
+    // All events invalid in Stopped state
+    fsm = fsm_process(fsm, 0);
+    fsm = fsm_process(fsm, 1);
+    fsm = fsm_process(fsm, 2);
+    assert_eq(fsm.current, 3);
+    assert_eq(fsm.invalid_events, 4);
+    assert_eq(fsm.event_count, 9);
+}
+
+// =============================================================================
+// State machine 5: Accumulator with history
+// =============================================================================
+
+type AccumState is {
+    value: Int,
+    prev_value: Int,
+    op_count: Int,
+    max_seen: Int,
+    min_seen: Int
+};
+
+fn accum_new() -> AccumState {
+    AccumState {
+        value: 0,
+        prev_value: 0,
+        op_count: 0,
+        max_seen: 0,
+        min_seen: 0
+    }
+}
+
+fn accum_update(s: &mut AccumState, new_val: Int) {
+    let mx = if new_val > (*s).max_seen { new_val } else { (*s).max_seen };
+    let mn = if new_val < (*s).min_seen { new_val } else { (*s).min_seen };
+    *s = AccumState {
+        value: new_val,
+        prev_value: (*s).value,
+        op_count: (*s).op_count + 1,
+        max_seen: mx,
+        min_seen: mn
+    };
+}
+
+fn accum_add(s: &mut AccumState, v: Int) {
+    accum_update(s, (*s).value + v);
+}
+
+fn accum_mul(s: &mut AccumState, v: Int) {
+    accum_update(s, (*s).value * v);
+}
+
+fn accum_undo(s: &mut AccumState) {
+    // Restore previous value (one level only)
+    let prev = (*s).prev_value;
+    *s = AccumState {
+        value: prev,
+        prev_value: prev,
+        op_count: (*s).op_count + 1,
+        max_seen: (*s).max_seen,
+        min_seen: (*s).min_seen
+    };
+}
+
+fn test_accumulator_state() {
+    let mut acc = accum_new();
+
+    accum_add(&mut acc, 10);
+    assert_eq(acc.value, 10);
+    assert_eq(acc.prev_value, 0);
+
+    accum_add(&mut acc, 5);
+    assert_eq(acc.value, 15);
+    assert_eq(acc.prev_value, 10);
+
+    accum_mul(&mut acc, 2);
+    assert_eq(acc.value, 30);
+    assert_eq(acc.prev_value, 15);
+    assert_eq(acc.max_seen, 30);
+
+    accum_add(&mut acc, -50);
+    assert_eq(acc.value, -20);
+    assert_eq(acc.min_seen, -20);
+
+    // Undo last operation
+    accum_undo(&mut acc);
+    assert_eq(acc.value, 30);
+    assert_eq(acc.op_count, 5);
+
+    // Max/min preserved
+    assert_eq(acc.max_seen, 30);
+    assert_eq(acc.min_seen, -20);
+}
+
+// =============================================================================
+// Test: Long-running state machine
+// =============================================================================
+
+fn test_long_running_fsm() {
+    let mut c = counter_new(0, 9);
+
+    // Run 100 increments
+    let mut i = 0;
+    while i < 100 {
+        counter_increment(&mut c);
+        i = i + 1;
+    }
+
+    // 100 increments from 0 in range 0-9 (10 values)
+    // 100/10 = 10 full cycles, value at 0
+    assert_eq(c.value, 0);
+    assert_eq(c.overflows, 10);
+
+    // Now decrement 35 times
+    let mut j = 0;
+    while j < 35 {
+        counter_decrement(&mut c);
+        j = j + 1;
+    }
+    // From 0, decrement: wrap to 9, then 3.5 more cycles
+    // 35 decrements from 0: first underflow to 9, then 34 more decrements
+    // 34/10 = 3 wraps remainder 4, so 9-4 = 5
+    assert_eq(c.value, 5);
+    assert_eq(c.underflows, 4);  // 1 initial + 3 more wraps
+}
+
+// =============================================================================
+// Test: Interleaved state machines via refs
+// =============================================================================
+
+fn test_interleaved_machines() {
+    let mut c1 = counter_new(0, 3);
+    let mut c2 = counter_new(10, 15);
+
+    // Alternate between the two counters
+    let mut i = 0;
+    while i < 20 {
+        if i % 2 == 0 {
+            counter_increment(&mut c1);
+        } else {
+            counter_increment(&mut c2);
+        }
+        i = i + 1;
+    }
+
+    // c1 got 10 increments in range 0-3 (4 values): 10/4 = 2 wraps, remainder 2
+    assert_eq(c1.value, 2);
+    assert_eq(c1.overflows, 2);
+
+    // c2 got 10 increments from 10 in range 10-15 (6 values): 10/6 = 1 wrap, remainder 4
+    assert_eq(c2.value, 14);
+    assert_eq(c2.overflows, 1);
+}
+
+fn main() -> Int {
+    test_traffic_light();
+    test_bounded_counter();
+    test_stack_calculator();
+    test_fsm();
+    test_accumulator_state();
+    test_long_running_fsm();
+    test_interleaved_machines();
+    print("[OK] 374_interp_cbgr_ref_state_machine");
+    0
+}

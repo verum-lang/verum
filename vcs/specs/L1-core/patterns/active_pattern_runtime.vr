@@ -1,0 +1,132 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: patterns, active, extraction, runtime
+// @description: Runtime tests for Active Pattern total patterns and parameterized matching
+// @expected-exit: 0
+
+// Note: Partial pattern extraction (ParseInt()(n) where n is used as Int) is not yet
+// fully resolved by the type checker. Tests here cover total and parameterized patterns.
+
+// =============================================================================
+// Active Pattern Definitions
+// =============================================================================
+
+// Total patterns - return Bool
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+pattern Odd(n: Int) -> Bool = n % 2 == 1;
+pattern Positive(n: Int) -> Bool = n > 0;
+pattern Negative(n: Int) -> Bool = n < 0;
+
+// Parameterized total patterns
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+pattern Divisible(divisor: Int)(n: Int) -> Bool = n % divisor == 0;
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_total_patterns() {
+    let value = 42;
+
+    match value {
+        Even() => assert(true, "42 is even"),
+        Odd() => assert(false, "42 should not be odd")
+    }
+
+    match value {
+        Positive() => assert(true, "42 is positive"),
+        Negative() => assert(false, "42 should not be negative"),
+        _ => assert(false, "42 should be positive")
+    }
+}
+
+fn test_negative_patterns() {
+    let value = -7;
+
+    match value {
+        Negative() => assert(true, "-7 is negative"),
+        Positive() => assert(false, "-7 should not be positive"),
+        _ => assert(false, "-7 should match")
+    }
+
+    match value {
+        Odd() => assert(true, "-7 is odd"),
+        Even() => assert(false, "-7 should not be even")
+    }
+}
+
+fn test_parameterized_total_patterns() {
+    let value = 50;
+
+    match value {
+        InRange(0, 100)() => assert(true, "50 is in range [0, 100]"),
+        _ => assert(false, "50 should be in range")
+    }
+
+    match value {
+        Divisible(10)() => assert(true, "50 is divisible by 10"),
+        _ => assert(false, "50 should be divisible by 10")
+    }
+
+    match value {
+        InRange(60, 100)() => assert(false, "50 should not be in [60, 100]"),
+        InRange(0, 50)() => assert(true, "50 is in range [0, 50]"),
+        _ => assert(false, "unexpected")
+    }
+}
+
+fn test_and_patterns() {
+    let value = 42;
+
+    match value {
+        Even() & Positive() => assert(true, "42 is even and positive"),
+        _ => assert(false, "42 should be even and positive")
+    }
+
+    match value {
+        InRange(0, 100)() & Divisible(2)() => assert(true, "42 is in range and even"),
+        _ => assert(false, "42 should match both conditions")
+    }
+}
+
+fn test_or_patterns() {
+    let values = [1, 2, 3, 4, 5, 6];
+    let mut even_count = 0;
+
+    for v in values {
+        match v {
+            Even() | Divisible(3)() => even_count = even_count + 1,
+            _ => {}
+        }
+    }
+
+    // 2, 3, 4, 6 match (2 is even, 3 is div by 3, 4 is even, 6 is both)
+    assert(even_count == 4, "Should have 4 matches");
+}
+
+fn test_pattern_guards() {
+    let value = 50;
+
+    // Guard on total pattern match — no extraction binding, just guard on original value
+    match value {
+        Even() if value > 40 => assert(true, "50 is even and > 40"),
+        _ => assert(false, "Should match")
+    }
+
+    match value {
+        Positive() if value < 100 => assert(true, "50 is positive and < 100"),
+        _ => assert(false, "Should match")
+    }
+}
+
+fn main() {
+    test_total_patterns();
+    test_negative_patterns();
+    test_parameterized_total_patterns();
+    test_and_patterns();
+    test_or_patterns();
+    test_pattern_guards();
+
+    print("All active pattern runtime tests passed!");
+}

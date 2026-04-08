@@ -1,0 +1,29 @@
+// Complexity: Complex pattern matching
+type Expr is
+    Lit(Int)
+    | Var(Text)
+    | Add { left: Heap<Expr>, right: Heap<Expr> }
+    | Mul { left: Heap<Expr>, right: Heap<Expr> }
+    | If { cond: Heap<Expr>, then_: Heap<Expr>, else_: Heap<Expr> };
+
+fn eval(expr: &Expr, env: &Map<Text, Int>) -> Int {
+    match expr {
+        Lit(n) => *n,
+        Var(name) => env.get(name) ?? 0,
+        Add { left, right } => eval(left, env) + eval(right, env),
+        Mul { left, right } => eval(left, env) * eval(right, env),
+        If { cond, then_, else_ } => {
+            if eval(cond, env) != 0 {
+                eval(then_, env)
+            } else {
+                eval(else_, env)
+            }
+        },
+    }
+}
+
+fn main() {
+    let expr = Lit(42);
+    let env = {};
+    let result = eval(&expr, &env);
+}

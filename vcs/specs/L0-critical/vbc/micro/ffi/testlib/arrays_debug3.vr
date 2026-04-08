@@ -1,0 +1,34 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, arrays, debug
+// @description: Debug test for FFI mutable array operations
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_fill_array_i32(arr: &mut Int, len: Int, value: Int);
+}
+
+fn main() {
+    // Test fill_array_i32
+    let mut arr4 = [0, 0, 0, 0];
+    print("Before fill:\n");
+    print("arr4[0] = "); print(arr4[0]); print("\n");
+    print("arr4[1] = "); print(arr4[1]); print("\n");
+
+    print("Calling ffi_fill_array_i32...\n");
+    ffi_fill_array_i32(&mut arr4[0], 4, 42);
+
+    print("After fill:\n");
+    print("arr4[0] = "); print(arr4[0]); print("\n");
+    print("arr4[1] = "); print(arr4[1]); print("\n");
+    print("arr4[2] = "); print(arr4[2]); print("\n");
+    print("arr4[3] = "); print(arr4[3]); print("\n");
+
+    if arr4[0] == 42 && arr4[1] == 42 && arr4[2] == 42 && arr4[3] == 42 {
+        print("SUCCESS!\n");
+    } else {
+        print("FAILURE: array was not filled correctly\n");
+    }
+}

@@ -1,0 +1,506 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, declarations, fn, function, pure, v2.12
+
+// ============================================================================
+// Verum v2.12 - Pure Functions
+// Grammar: function_modifiers = [ 'pure' ] , [ 'meta' ] , [ 'async' ] , [ 'unsafe' ] | epsilon ;
+// The 'pure' modifier indicates the function has no side effects and is
+// compiler-verified to be deterministic (same inputs always produce same outputs).
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// Section 1: Basic pure fn syntax
+// ----------------------------------------------------------------------------
+
+// Simple pure function with empty body
+pure fn noop() { }
+
+// Pure function with single expression
+pure fn answer() -> Int {
+    42
+}
+
+// Pure function with computation
+pure fn square(x: Int) -> Int {
+    x * x
+}
+
+// Pure function with multiple statements
+pure fn compute_sum() -> Int {
+    let a = 10;
+    let b = 20;
+    a + b
+}
+
+// Pure function with explicit return
+pure fn explicit_return_pure() -> Int {
+    return 100;
+}
+
+// ----------------------------------------------------------------------------
+// Section 2: Pure function with parameters
+// ----------------------------------------------------------------------------
+
+// Pure function with single parameter
+pure fn identity(x: Int) -> Int {
+    x
+}
+
+// Pure function with multiple parameters
+pure fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Pure function with reference parameter (immutable)
+pure fn get_value(r: &Int) -> Int {
+    *r
+}
+
+// Pure function with multiple typed parameters
+pure fn weighted_sum(values: &List<Float>, weights: &List<Float>) -> Float {
+    let mut sum = 0.0;
+    for i in 0..values.len() {
+        sum = sum + values[i] * weights[i];
+    }
+    sum
+}
+
+// Pure function with tuple parameter
+pure fn tuple_sum(pair: (Int, Int)) -> Int {
+    pair.0 + pair.1
+}
+
+// Pure function with complex parameter types
+pure fn process_data(data: &Data, config: &Config) -> Result {
+    let intermediate = transform(data, config);
+    finalize(intermediate)
+}
+
+// ----------------------------------------------------------------------------
+// Section 3: Pure function with return type
+// ----------------------------------------------------------------------------
+
+// Pure function returning simple type
+pure fn get_pi() -> Float {
+    3.14159265359
+}
+
+// Pure function returning Maybe type
+pure fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+// Pure function returning Result type
+pure fn parse_int(s: &Text) -> Result<Int, ParseError> {
+    // Parsing logic here
+    Ok(42)
+}
+
+// Pure function returning tuple
+pure fn min_max(values: &List<Int>) -> (Int, Int) {
+    let min = values[0];
+    let max = values[0];
+    (min, max)
+}
+
+// Pure function returning unit type
+pure fn validate_invariant(data: &Data) -> () {
+    assert(data.is_valid());
+}
+
+// Pure function with refinement in return type
+pure fn abs(x: Int) -> Int{>= 0} {
+    if x < 0 { -x } else { x }
+}
+
+// ----------------------------------------------------------------------------
+// Section 4: Pure function with generics
+// ----------------------------------------------------------------------------
+
+// Pure generic function with single type parameter
+pure fn pure_identity<T>(x: T) -> T {
+    x
+}
+
+// Pure generic function with multiple type parameters
+pure fn pure_swap<A, B>(pair: (A, B)) -> (B, A) {
+    (pair.1, pair.0)
+}
+
+// Pure generic function with bounds
+pure fn pure_clone<T: Clone>(x: &T) -> T {
+    x.clone()
+}
+
+// Pure generic function with multiple bounds
+pure fn pure_compare<T: Ord + Eq>(a: &T, b: &T) -> Int {
+    if a < b { -1 }
+    else if a > b { 1 }
+    else { 0 }
+}
+
+// Pure generic function with where clause
+pure fn pure_transform<T, U>(x: T) -> U
+    where type T: Into<U> {
+    x.into()
+}
+
+// Pure generic function with meta parameter
+pure fn pure_array_sum<N: meta Int>(arr: [Int; N]) -> Int {
+    let mut sum = 0;
+    for i in 0..N {
+        sum = sum + arr[i];
+    }
+    sum
+}
+
+// Pure generic function with complex constraints
+pure fn pure_fold<T, U, F>(items: &List<T>, init: U, f: F) -> U
+    where type F: Fn(&T, U) -> U {
+    let mut acc = init;
+    for item in items {
+        acc = f(item, acc);
+    }
+    acc
+}
+
+// ----------------------------------------------------------------------------
+// Section 5: Pure combined with meta modifier
+// ----------------------------------------------------------------------------
+
+// Pure meta function (compile-time pure computation)
+pure meta fn const_factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * const_factorial(n - 1)
+    }
+}
+
+// Pure meta function for type-level computation
+pure meta fn type_size<T>() -> Int {
+    T.size
+}
+
+// Pure meta function with generic bounds
+pure meta fn compile_time_max<A: meta Int, B: meta Int>() -> Int {
+    if A > B { A } else { B }
+}
+
+// Pure meta function for static assertions
+pure meta fn static_check<T: Copy>() -> Bool {
+    true
+}
+
+// ----------------------------------------------------------------------------
+// Section 5b: Pure combined with async modifier
+// Pure async functions perform pure computations with async control flow.
+// The async mechanism (suspend/resume) does not introduce side effects.
+// The result is still deterministic - same inputs produce same outputs.
+// ----------------------------------------------------------------------------
+
+// Basic pure async function
+pure async fn pure_async_compute(x: Int) -> Int {
+    x * 2
+}
+
+// Pure async with await (awaiting other pure async functions)
+pure async fn pure_async_chain(a: Int, b: Int) -> Int {
+    let x = pure_async_compute(a).await;
+    let y = pure_async_compute(b).await;
+    x + y
+}
+
+// Pure async with parameters
+pure async fn pure_async_transform<T: Clone>(value: T) -> T {
+    value.clone()
+}
+
+// Pure async with Maybe return
+pure async fn pure_async_maybe(x: Int) -> Maybe<Int> {
+    if x > 0 {
+        Some(x * 2)
+    } else {
+        None
+    }
+}
+
+// Pure async with Result return
+pure async fn pure_async_result(x: Int) -> Result<Int, ComputeError> {
+    if x >= 0 {
+        Ok(x * x)
+    } else {
+        Err(ComputeError.NegativeInput)
+    }
+}
+
+// Pure async with throws clause
+pure async fn pure_async_throws(input: Text) throws(ParseError) -> Int {
+    parse_pure(input)?
+}
+
+// Pure async with generics and bounds
+pure async fn pure_async_fold<T, U, F>(items: List<T>, init: U, f: F) -> U
+    where type F: Fn(T, U) -> U {
+    let mut acc = init;
+    for item in items {
+        acc = f(item, acc);
+    }
+    acc
+}
+
+// Pure async in cooperative computation (yielding control periodically)
+pure async fn pure_async_fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        // Yield control between recursive calls
+        let a = pure_async_fibonacci(n - 1).await;
+        let b = pure_async_fibonacci(n - 2).await;
+        a + b
+    }
+}
+
+// Pure async with local mutation (still pure - no external side effects)
+pure async fn pure_async_sum(values: List<Int>) -> Int {
+    let mut total = 0;
+    for v in values {
+        total = total + v;
+    }
+    total
+}
+
+// Public pure async function
+public pure async fn pub_pure_async() -> Int {
+    42
+}
+
+// Pure meta async (compile-time async pure computation)
+pure meta async fn pure_meta_async_compute<N: meta Int>() -> Int {
+    N * 2
+}
+
+// ----------------------------------------------------------------------------
+// Section 6: Pure function with throws clause
+// ----------------------------------------------------------------------------
+
+// Pure function with throws clause (deterministic errors)
+pure fn pure_parse(s: &Text) throws(ParseError) -> Int {
+    // Pure parsing that may fail deterministically
+    s.parse_int()?
+}
+
+// Pure function with multiple error types
+pure fn pure_convert(input: &Input) throws(ParseError | ValidationError) -> Output {
+    let parsed = parse(input)?;
+    let validated = validate(parsed)?;
+    validated
+}
+
+// Pure generic with throws
+pure fn pure_try_transform<T, U, E>(x: T) throws(E) -> U
+    where type T: TryInto<U, Error = E> {
+    x.try_into()?
+}
+
+// Pure function with throws and refinement return type
+pure fn pure_sqrt(x: Float{>= 0.0}) throws(MathError) -> Float{>= 0.0} {
+    math_sqrt(x)?
+}
+
+// Pure function with throws and ensures clause
+pure fn pure_divide(a: Int, b: Int) throws(DivideError) -> Int
+    where ensures result * b == a {
+    if b == 0 {
+        return Err(DivideError.ByZero);
+    }
+    a / b
+}
+
+// ----------------------------------------------------------------------------
+// Section 7: Pure function with visibility modifiers
+// ----------------------------------------------------------------------------
+
+// Public pure function
+public pure fn pub_pure() -> Int {
+    42
+}
+
+// Internal pure function
+internal pure fn internal_pure() -> Bool {
+    true
+}
+
+// Protected pure function
+protected pure fn protected_pure() -> Text {
+    "protected"
+}
+
+// Pure function in implement block
+implement Calculator {
+    fn add(&self, a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    fn multiply(&self, a: Int, b: Int) -> Int {
+        a * b
+    }
+
+    public fn compute(&self, op: Op, a: Int, b: Int) -> Int {
+        match op {
+            Op.Add => self.add(a, b),
+            Op.Mul => self.multiply(a, b),
+        }
+    }
+}
+
+// Protocol definition (pure is not a valid modifier for protocol methods)
+type PureMath is protocol {
+    fn compute(&self, x: Int) -> Int;
+    fn transform(&self, a: Int, b: Int) -> (Int, Int);
+};
+
+// ----------------------------------------------------------------------------
+// Section 8: Pure function with ensures and requires clauses
+// ----------------------------------------------------------------------------
+
+// Pure function with ensures clause
+pure fn pure_abs(x: Int) -> Int
+    where ensures result >= 0 {
+    if x < 0 { -x } else { x }
+}
+
+// Pure function with multiple ensures
+pure fn pure_clamp(x: Int, min: Int, max: Int) -> Int
+    where ensures result >= min, ensures result <= max {
+    if x < min { min }
+    else if x > max { max }
+    else { x }
+}
+
+// Pure function with where clause and ensures
+pure fn pure_bounded<T: Ord>(x: T, low: T, high: T) -> T
+    where ensures result >= low, ensures result <= high {
+    if x < low { low }
+    else if x > high { high }
+    else { x }
+}
+
+// ----------------------------------------------------------------------------
+// Section 9: Complex pure function examples
+// ----------------------------------------------------------------------------
+
+// Pure recursive function
+pure fn pure_fib(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        pure_fib(n - 1) + pure_fib(n - 2)
+    }
+}
+
+// Pure function with pattern matching
+pure fn pure_option_map<T, U>(opt: Maybe<T>, f: fn(T) -> U) -> Maybe<U> {
+    match opt {
+        None => None,
+        Some(x) => Some(f(x)),
+    }
+}
+
+// Pure function with list comprehension
+pure fn pure_squares(n: Int) -> List<Int> {
+    [x * x for x in 0..n]
+}
+
+// Pure function with nested blocks
+pure fn pure_complex_compute(data: &Data) -> Result {
+    let intermediate = {
+        let a = compute_a(data);
+        let b = compute_b(data);
+        combine(a, b)
+    };
+    finalize(intermediate)
+}
+
+// Pure function calling other pure functions
+pure fn pure_compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |x| g(f(x))
+}
+
+// Pure function with loop invariant
+pure fn pure_sum(values: &List<Int>) -> Int {
+    let mut sum = 0;
+    for value in values
+        invariant sum >= 0
+    {
+        sum = sum + value;
+    }
+    sum
+}
+
+// Pure higher-order function
+pure fn pure_map<T, U>(items: List<T>, f: fn(T) -> U) -> List<U> {
+    let mut result = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+// Pure function with type properties
+pure fn pure_type_info<T>() -> TypeInfo {
+    TypeInfo {
+        size: T.size,
+        alignment: T.alignment,
+        name: T.name,
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Section 10: Pure function edge cases
+// ----------------------------------------------------------------------------
+
+// Pure function with deeply nested generics
+pure fn pure_nested<T: Container<U>, U: Clone>(x: &T) -> U {
+    x.get().clone()
+}
+
+// Pure function with associated types
+pure fn pure_iter_sum<I>(iter: I) -> Int
+    where type I: Iterator<Item = Int> {
+    let mut sum = 0;
+    for x in iter {
+        sum = sum + x;
+    }
+    sum
+}
+
+// Pure closure returned from pure function
+pure fn pure_make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+// Pure function with documentation
+/// Computes the greatest common divisor using Euclidean algorithm.
+/// This function is pure - it has no side effects and always returns
+/// the same result for the same inputs.
+pure fn pure_gcd(a: Int, b: Int) -> Int {
+    if b == 0 {
+        a
+    } else {
+        pure_gcd(b, a % b)
+    }
+}
+
+// Pure function with multiple attributes
+@inline
+@verify(formal)
+pure fn pure_fast_compute(x: Int) -> Int {
+    x * 2
+}

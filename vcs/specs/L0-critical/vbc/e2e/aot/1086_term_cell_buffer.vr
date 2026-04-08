@@ -1,0 +1,252 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, term, cell, buffer, rendering
+// @expected-exit: 0
+// @description: Terminal Cell and Buffer types — creation, set_string, set_style, merge, reset
+
+type Cell is { ch: Text, fg: Int, bg: Int, skip: Bool };
+
+implement Cell {
+    pub fn new(ch: Text, fg: Int, bg: Int) -> Cell {
+        Cell { ch: ch, fg: fg, bg: bg, skip: false }
+    }
+
+    pub fn blank() -> Cell {
+        Cell { ch: " ", fg: 0, bg: 0, skip: false }
+    }
+
+    pub fn with_skip() -> Cell {
+        Cell { ch: " ", fg: 0, bg: 0, skip: true }
+    }
+}
+
+type Buffer is { cells: List<Cell>, width: Int, height: Int };
+
+implement Buffer {
+    pub fn new(width: Int, height: Int) -> Buffer {
+        let mut cells: List<Cell> = [];
+        let total = width * height;
+        let mut i = 0;
+        while i < total {
+            cells.push(Cell.blank());
+            i = i + 1;
+        }
+        Buffer { cells: cells, width: width, height: height }
+    }
+
+    pub fn index(&self, x: Int, y: Int) -> Int {
+        y * self.width + x
+    }
+
+    pub fn get_cell(&self, x: Int, y: Int) -> Cell {
+        let idx = self.index(x, y);
+        self.cells[idx]
+    }
+
+    pub fn set_cell(&mut self, x: Int, y: Int, cell: Cell) {
+        let idx = self.index(x, y);
+        self.cells[idx] = cell;
+    }
+
+    pub fn set_string(&mut self, x: Int, y: Int, text: Text, fg: Int, bg: Int) {
+        let mut col = x;
+        let mut i = 0;
+        let len = text.len();
+        while i < len && col < self.width {
+            // Extract single character as substring
+            let ch = text.slice(i, i + 1);
+            self.set_cell(col, y, Cell.new(ch, fg, bg));
+            col = col + 1;
+            i = i + 1;
+        }
+    }
+
+    pub fn set_style_region(&mut self, x1: Int, y1: Int, x2: Int, y2: Int, fg: Int, bg: Int) {
+        let mut y = y1;
+        while y < y2 && y < self.height {
+            let mut x = x1;
+            while x < x2 && x < self.width {
+                let old = self.get_cell(x, y);
+                self.set_cell(x, y, Cell.new(old.ch, fg, bg));
+                x = x + 1;
+            }
+            y = y + 1;
+        }
+    }
+
+    pub fn reset(&mut self) {
+        let total = self.width * self.height;
+        let mut i = 0;
+        while i < total {
+            self.cells[i] = Cell.blank();
+            i = i + 1;
+        }
+    }
+
+    pub fn count_non_blank(&self) -> Int {
+        let mut count = 0;
+        let total = self.width * self.height;
+        let mut i = 0;
+        while i < total {
+            if self.cells[i].ch != " " {
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        count
+    }
+}
+
+fn merge_buffers(base: &mut Buffer, overlay: &Buffer, offset_x: Int, offset_y: Int) {
+    let mut y = 0;
+    while y < overlay.height {
+        let mut x = 0;
+        while x < overlay.width {
+            let dx = offset_x + x;
+            let dy = offset_y + y;
+            if dx >= 0 && dx < base.width && dy >= 0 && dy < base.height {
+                let cell = overlay.get_cell(x, y);
+                if !cell.skip && cell.ch != " " {
+                    base.set_cell(dx, dy, cell);
+                }
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+}
+
+fn test_buffer_creation() -> Int {
+    let buf = Buffer.new(10, 5);
+    if buf.width != 10 {
+        print(f"FAIL width: {buf.width}");
+        return 1;
+    }
+    if buf.height != 5 {
+        print(f"FAIL height: {buf.height}");
+        return 1;
+    }
+    if buf.cells.len() != 50 {
+        print(f"FAIL cell count: {buf.cells.len()}");
+        return 1;
+    }
+    let cell = buf.get_cell(0, 0);
+    if cell.ch != " " {
+        print("FAIL default cell should be blank");
+        return 1;
+    }
+    0
+}
+
+fn test_set_string() -> Int {
+    let mut buf = Buffer.new(10, 3);
+    buf.set_string(2, 1, "Hello", 7, 0);
+    let h = buf.get_cell(2, 1);
+    if h.ch != "H" {
+        print(f"FAIL char at (2,1): {h.ch}");
+        return 1;
+    }
+    if h.fg != 7 {
+        print(f"FAIL fg at (2,1): {h.fg}");
+        return 1;
+    }
+    let o = buf.get_cell(6, 1);
+    if o.ch != "o" {
+        print(f"FAIL char at (6,1): {o.ch}");
+        return 1;
+    }
+    // Count non-blank cells
+    let count = buf.count_non_blank();
+    if count != 5 {
+        print(f"FAIL non-blank count: {count}");
+        return 1;
+    }
+    0
+}
+
+fn test_set_style_region() -> Int {
+    let mut buf = Buffer.new(5, 5);
+    buf.set_string(0, 0, "ABCDE", 1, 0);
+    buf.set_style_region(1, 0, 4, 1, 2, 3);
+    // Cells at (1,0), (2,0), (3,0) should have fg=2, bg=3
+    let b = buf.get_cell(1, 0);
+    if b.fg != 2 {
+        print(f"FAIL style fg: {b.fg}");
+        return 1;
+    }
+    if b.bg != 3 {
+        print(f"FAIL style bg: {b.bg}");
+        return 1;
+    }
+    if b.ch != "B" {
+        print(f"FAIL style ch preserved: {b.ch}");
+        return 1;
+    }
+    // Cell at (0,0) should be unchanged
+    let a = buf.get_cell(0, 0);
+    if a.fg != 1 {
+        print(f"FAIL unchanged fg: {a.fg}");
+        return 1;
+    }
+    0
+}
+
+fn test_merge() -> Int {
+    let mut base = Buffer.new(10, 5);
+    base.set_string(0, 0, "Background", 1, 0);
+
+    let mut overlay = Buffer.new(3, 1);
+    overlay.set_string(0, 0, "OVR", 7, 4);
+
+    merge_buffers(&mut base, &overlay, 2, 0);
+    // Positions 2,3,4 on row 0 should be O,V,R with fg=7
+    let o = base.get_cell(2, 0);
+    if o.ch != "O" {
+        print(f"FAIL merge (2,0): {o.ch}");
+        return 1;
+    }
+    if o.fg != 7 {
+        print(f"FAIL merge fg: {o.fg}");
+        return 1;
+    }
+    // Position 0 should still be from base
+    let b = base.get_cell(0, 0);
+    if b.ch != "B" {
+        print(f"FAIL base preserved (0,0): {b.ch}");
+        return 1;
+    }
+    0
+}
+
+fn test_reset() -> Int {
+    let mut buf = Buffer.new(5, 5);
+    buf.set_string(0, 0, "Hello", 7, 0);
+    let count_before = buf.count_non_blank();
+    if count_before != 5 {
+        print(f"FAIL before reset: {count_before}");
+        return 1;
+    }
+    buf.reset();
+    let count_after = buf.count_non_blank();
+    if count_after != 0 {
+        print(f"FAIL after reset: {count_after}");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_buffer_creation();
+    if r1 != 0 { return r1; }
+    let r2 = test_set_string();
+    if r2 != 0 { return r2; }
+    let r3 = test_set_style_region();
+    if r3 != 0 { return r3; }
+    let r4 = test_merge();
+    if r4 != 0 { return r4; }
+    let r5 = test_reset();
+    if r5 != 0 { return r5; }
+    print("PASS: term_cell_buffer");
+    0
+}

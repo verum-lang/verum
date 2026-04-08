@@ -1,0 +1,12 @@
+# Baseline results directory
+# This directory stores baseline results for performance comparisons
+
+# Types of baselines:
+# - correctness-baseline.json : Known-good test results for regression detection
+# - performance-baseline.json : Benchmark timing baselines
+# - coverage-baseline.json    : Coverage metrics baseline
+
+# Usage:
+# - Baselines are created manually or via CI/CD at release points
+# - Used by gap-analyzer.sh and progress-tracker.sh for comparison
+# - Should be updated when new features are added or thresholds change

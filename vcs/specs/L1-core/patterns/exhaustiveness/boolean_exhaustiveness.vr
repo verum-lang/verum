@@ -1,0 +1,294 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, exhaustiveness, boolean
+//
+// Tests exhaustiveness checking specifically for boolean types.
+// Boolean has exactly two values (true, false), making it ideal for exhaustiveness testing.
+
+//------------------------------------------------------------------------------
+// Single Boolean Exhaustiveness
+//------------------------------------------------------------------------------
+
+/// Explicit true and false coverage.
+fn bool_explicit(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        false => "no",
+    }
+}
+
+/// Reversed order (still exhaustive).
+fn bool_reversed(b: Bool) -> Text {
+    match b {
+        false => "no",
+        true => "yes",
+    }
+}
+
+/// With wildcard for second case.
+fn bool_wildcard_second(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        _ => "no",
+    }
+}
+
+/// With wildcard for first case.
+fn bool_wildcard_first(b: Bool) -> Text {
+    match b {
+        false => "no",
+        _ => "yes",
+    }
+}
+
+/// Single wildcard (trivially exhaustive).
+fn bool_single_wildcard(b: Bool) -> Text {
+    match b {
+        _ => "boolean",
+    }
+}
+
+/// Single binding (trivially exhaustive).
+fn bool_single_binding(b: Bool) -> Text {
+    match b {
+        x => if x { "yes" } else { "no" },
+    }
+}
+
+//------------------------------------------------------------------------------
+// Boolean Tuple Exhaustiveness
+//------------------------------------------------------------------------------
+
+/// All 4 combinations of (Bool, Bool).
+fn bool_pair_all(pair: (Bool, Bool)) -> Int {
+    match pair {
+        (true, true) => 3,
+        (true, false) => 2,
+        (false, true) => 1,
+        (false, false) => 0,
+    }
+}
+
+/// Using or-patterns for grouping.
+fn bool_pair_or(pair: (Bool, Bool)) -> Text {
+    match pair {
+        (true, true) | (false, false) => "same",
+        (true, false) | (false, true) => "different",
+    }
+}
+
+/// Mixed explicit and wildcard.
+fn bool_pair_mixed(pair: (Bool, Bool)) -> Text {
+    match pair {
+        (true, true) => "both true",
+        (false, false) => "both false",
+        _ => "one of each",
+    }
+}
+
+/// One dimension explicit, other wildcard.
+fn bool_pair_partial(pair: (Bool, Bool)) -> Text {
+    match pair {
+        (true, _) => "first true",
+        (false, _) => "first false",
+    }
+}
+
+/// Alternative partial coverage.
+fn bool_pair_partial_alt(pair: (Bool, Bool)) -> Text {
+    match pair {
+        (_, true) => "second true",
+        (_, false) => "second false",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Boolean Triple Exhaustiveness
+//------------------------------------------------------------------------------
+
+/// All 8 combinations of (Bool, Bool, Bool).
+fn bool_triple_all(triple: (Bool, Bool, Bool)) -> Int {
+    match triple {
+        (true, true, true) => 7,
+        (true, true, false) => 6,
+        (true, false, true) => 5,
+        (true, false, false) => 4,
+        (false, true, true) => 3,
+        (false, true, false) => 2,
+        (false, false, true) => 1,
+        (false, false, false) => 0,
+    }
+}
+
+/// Grouped by parity.
+fn bool_triple_parity(triple: (Bool, Bool, Bool)) -> Text {
+    match triple {
+        (true, true, true) => "all true",
+        (false, false, false) => "all false",
+        (true, true, false) | (true, false, true) | (false, true, true) => "two true",
+        (true, false, false) | (false, true, false) | (false, false, true) => "one true",
+    }
+}
+
+/// Mixed explicit and wildcard.
+fn bool_triple_mixed(triple: (Bool, Bool, Bool)) -> Text {
+    match triple {
+        (true, true, true) => "all true",
+        (false, false, false) => "all false",
+        (true, _, _) => "starts with true",
+        (false, _, _) => "starts with false",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Boolean with Enum
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+/// Maybe<Bool> - 3 cases.
+fn maybe_bool(m: Maybe<Bool>) -> Text {
+    match m {
+        Some(true) => "some true",
+        Some(false) => "some false",
+        None => "none",
+    }
+}
+
+/// Maybe<Bool> grouped.
+fn maybe_bool_grouped(m: Maybe<Bool>) -> Text {
+    match m {
+        Some(b) => if b { "some true" } else { "some false" },
+        None => "none",
+    }
+}
+
+/// (Bool, Maybe<Bool>) - 6 cases.
+fn bool_maybe_bool(data: (Bool, Maybe<Bool>)) -> Int {
+    match data {
+        (true, Some(true)) => 5,
+        (true, Some(false)) => 4,
+        (true, None) => 3,
+        (false, Some(true)) => 2,
+        (false, Some(false)) => 1,
+        (false, None) => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Boolean with Struct
+//------------------------------------------------------------------------------
+
+type Flags is {
+    enabled: Bool,
+    visible: Bool,
+};
+
+/// Struct with boolean fields - 4 cases.
+fn flags_all(f: Flags) -> Text {
+    match f {
+        Flags { enabled: true, visible: true } => "enabled and visible",
+        Flags { enabled: true, visible: false } => "enabled but hidden",
+        Flags { enabled: false, visible: true } => "disabled but visible",
+        Flags { enabled: false, visible: false } => "disabled and hidden",
+    }
+}
+
+/// Struct boolean with rest.
+fn flags_partial(f: Flags) -> Text {
+    match f {
+        Flags { enabled: true, .. } => "enabled",
+        Flags { enabled: false, .. } => "disabled",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Boolean Logic Patterns
+//------------------------------------------------------------------------------
+
+/// AND truth table.
+fn bool_and(pair: (Bool, Bool)) -> Bool {
+    match pair {
+        (true, true) => true,
+        (true, false) => false,
+        (false, true) => false,
+        (false, false) => false,
+    }
+}
+
+/// OR truth table.
+fn bool_or(pair: (Bool, Bool)) -> Bool {
+    match pair {
+        (true, true) => true,
+        (true, false) => true,
+        (false, true) => true,
+        (false, false) => false,
+    }
+}
+
+/// XOR truth table.
+fn bool_xor(pair: (Bool, Bool)) -> Bool {
+    match pair {
+        (true, true) => false,
+        (true, false) => true,
+        (false, true) => true,
+        (false, false) => false,
+    }
+}
+
+/// IMPLIES truth table.
+fn bool_implies(pair: (Bool, Bool)) -> Bool {
+    match pair {
+        (true, true) => true,
+        (true, false) => false,
+        (false, true) => true,
+        (false, false) => true,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+@test
+fn main() {
+    // Single boolean
+    assert(bool_explicit(true) == "yes");
+    assert(bool_explicit(false) == "no");
+    assert(bool_wildcard_second(true) == "yes");
+    assert(bool_wildcard_second(false) == "no");
+
+    // Boolean pairs
+    assert(bool_pair_all((true, true)) == 3);
+    assert(bool_pair_all((false, false)) == 0);
+    assert(bool_pair_or((true, true)) == "same");
+    assert(bool_pair_or((true, false)) == "different");
+
+    // Boolean triple
+    assert(bool_triple_all((true, true, true)) == 7);
+    assert(bool_triple_all((false, false, false)) == 0);
+    assert(bool_triple_parity((true, true, true)) == "all true");
+    assert(bool_triple_parity((true, false, false)) == "one true");
+
+    // Maybe<Bool>
+    assert(maybe_bool(Some(true)) == "some true");
+    assert(maybe_bool(Some(false)) == "some false");
+    assert(maybe_bool(None) == "none");
+
+    // Flags
+    assert(flags_all(Flags { enabled: true, visible: true }) == "enabled and visible");
+    assert(flags_partial(Flags { enabled: true, visible: false }) == "enabled");
+
+    // Logic tables
+    assert(bool_and((true, true)) == true);
+    assert(bool_and((true, false)) == false);
+    assert(bool_or((false, false)) == false);
+    assert(bool_or((true, false)) == true);
+    assert(bool_xor((true, true)) == false);
+    assert(bool_xor((true, false)) == true);
+    assert(bool_implies((true, false)) == false);
+    assert(bool_implies((false, false)) == true);
+}

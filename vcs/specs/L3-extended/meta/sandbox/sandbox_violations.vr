@@ -1,0 +1,205 @@
+// @test: typecheck-fail
+// @expected-error: Sandbox violation
+// @tier: 3
+// @level: L3
+// @tags: meta, sandbox, violations
+
+/// Нарушения sandbox в meta функциях
+///
+/// Эти примеры демонстрируют различные нарушения sandbox,
+/// которые приводят к ошибкам компиляции.
+
+// ============================================================
+// НАРУШЕНИЯ ПАМЯТИ
+// ============================================================
+
+// ERROR: Unsafe код запрещён в meta
+meta fn unsafe_memory() -> i64 {
+    // ERROR: Cannot use unsafe in meta context
+    unsafe {
+        let ptr = 0x12345678 as *const i64;
+        *ptr
+    }
+}
+
+// ERROR: Raw pointer dereference запрещён
+meta fn raw_pointer_deref(ptr: *const i64) -> i64 {
+    // ERROR: Cannot dereference raw pointers in meta context
+    unsafe { *ptr }
+}
+
+// ERROR: Transmute запрещён
+meta fn transmute_type(x: u64) -> f64 {
+    // ERROR: Cannot transmute types in meta context
+    unsafe { std.mem.transmute(x) }
+}
+
+// ============================================================
+// НАРУШЕНИЯ ГЛОБАЛЬНОГО СОСТОЯНИЯ
+// ============================================================
+
+// ERROR: Глобальные переменные недоступны
+static mut COUNTER: u64 = 0;
+
+meta fn access_global() -> u64 {
+    // ERROR: Cannot access mutable global state in meta context
+    unsafe {
+        COUNTER += 1;
+        COUNTER
+    }
+}
+
+// ERROR: Thread-local storage запрещено
+thread_local! {
+    static TLS_VALUE: Cell<u64> = Cell.new(0);
+}
+
+meta fn access_tls() -> u64 {
+    // ERROR: Cannot access thread-local storage in meta context
+    TLS_VALUE.with(|v| v.get())
+}
+
+// ERROR: Static mut недоступен
+meta fn modify_static() {
+    // ERROR: Cannot modify static variables in meta context
+    static mut STATE: i32 = 0;
+    unsafe { STATE += 1; }
+}
+
+// ============================================================
+// НАРУШЕНИЯ ДЕТЕРМИНИЗМА
+// ============================================================
+
+// ERROR: Адреса памяти недетерминированы
+meta fn get_address<T>(x: &T) -> usize {
+    // ERROR: Memory addresses are non-deterministic
+    x as *const T as usize
+}
+
+// ERROR: Указатели на функции недетерминированы
+meta fn function_address() -> usize {
+    // ERROR: Function addresses are non-deterministic
+    pure_function as usize
+}
+
+fn pure_function() -> i32 { 42 }
+
+// ERROR: Размер стека недетерминирован
+meta fn stack_usage() -> usize {
+    // ERROR: Cannot query stack in meta context
+    std.thread.current().stack_size()
+}
+
+// ============================================================
+// НАРУШЕНИЯ РЕСУРСОВ
+// ============================================================
+
+// ERROR: Бесконечный цикл/рекурсия (ограничение ресурсов)
+meta fn infinite_loop() -> i32 {
+    // ERROR: Infinite loop detected in meta context
+    loop {}
+}
+
+meta fn infinite_recursion(n: u64) -> u64 {
+    // ERROR: Recursion limit exceeded in meta context
+    infinite_recursion(n + 1)
+}
+
+// ERROR: Слишком большое выделение памяти
+meta fn huge_allocation() -> List<u8> {
+    // ERROR: Memory allocation limit exceeded in meta context
+    List.filled(1_000_000_000, 0u8)
+}
+
+// ERROR: Слишком долгое выполнение
+meta fn slow_function() -> u64 {
+    // ERROR: Execution time limit exceeded in meta context
+    let mut sum = 0u64;
+    for i in 0..1_000_000_000_000u64 {
+        sum += i;
+    }
+    sum
+}
+
+// ============================================================
+// НАРУШЕНИЯ ТИПОВ
+// ============================================================
+
+// ERROR: Interior mutability запрещена
+meta fn interior_mutability() -> i32 {
+    // ERROR: Cannot use interior mutability in meta context
+    let cell = Cell.new(0);
+    cell.set(42);
+    cell.get()
+}
+
+meta fn ref_cell_usage() -> i32 {
+    // ERROR: Cannot use RefCell in meta context
+    let rc = RefCell.new(0);
+    *rc.borrow_mut() = 42;
+    *rc.borrow()
+}
+
+// ERROR: Rc/Arc запрещены (внутреннее изменяемое состояние)
+meta fn reference_counting() -> Rc<i32> {
+    // ERROR: Cannot use reference counting in meta context
+    Rc.new(42)
+}
+
+// ============================================================
+// НАРУШЕНИЯ ВНЕШНИХ ЗАВИСИМОСТЕЙ
+// ============================================================
+
+// ERROR: Доступ к аргументам командной строки
+meta fn get_args() -> List<Text> {
+    // ERROR: Cannot access command-line arguments in meta context
+    std.env.args().collect()
+}
+
+// ERROR: Доступ к текущей директории
+meta fn get_cwd() -> Text {
+    // ERROR: Cannot access current directory in meta context
+    std.env.current_dir()
+        .expect("Failed")
+        .to_string()
+}
+
+// ERROR: Доступ к пользователю
+meta fn get_user() -> Text {
+    // ERROR: Cannot access user information in meta context
+    std.env.var("USER").unwrap_or_default()
+}
+
+// ============================================================
+// ПОПЫТКИ ОБХОДА SANDBOX
+// ============================================================
+
+// ERROR: Attempt through protocol object
+meta fn through_trait_object() {
+    // ERROR: Cannot use protocol objects to bypass sandbox
+    let writer: &mut Write = &mut List.new();
+    writer.write_all(b"sneaky");
+}
+
+// ERROR: Попытка через замыкание
+meta fn through_closure() -> i32 {
+    // ERROR: Closures in meta context cannot capture mutable state
+    let mut x = 0;
+    let mut f = || { x += 1; x };
+    f()
+}
+
+// ERROR: Попытка через async
+meta fn through_async() {
+    // ERROR: Cannot use async in meta context
+    let future = async { 42 };
+    // Нет executor-а в sandbox
+}
+
+fn main() {
+    // Все эти константы вызовут ошибки компиляции
+    const UNSAFE_VALUE: i64 = unsafe_memory();     // ERROR
+    const GLOBAL_VALUE: u64 = access_global();     // ERROR
+    const ADDRESS: usize = function_address();     // ERROR
+    const INFINITE: i32 = infinite_loop();         // ERROR
+}

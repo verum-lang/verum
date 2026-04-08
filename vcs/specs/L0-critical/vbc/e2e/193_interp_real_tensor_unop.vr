@@ -1,0 +1,98 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, real-opcode, unop
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL tensor unary operation intrinsics through VBC interpreter.
+// Exercises tensor_unop with ops: neg(0), abs(1), exp(2), log(3), sqrt(4),
+// sin(5), cos(6), tanh(7), sigmoid(8), relu(9).
+// Tests exact results where possible, pipeline-only for transcendentals.
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let diff = tensor_binop(t, e, 1);
+    let val = tensor_get_scalar(diff, idx);
+    if val == 0 { 0 } else { 1 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Create tensor: [4, -3, 0, 9]
+    let t = tensor_new(4, 1);
+    let t = tensor_set_scalar(t, 0, 4);
+    let t = tensor_set_scalar(t, 1, -3);
+    let t = tensor_set_scalar(t, 2, 0);
+    let t = tensor_set_scalar(t, 3, 9);
+
+    // --- Test 1: NEG (op=0) ---
+    // neg([4, -3, 0, 9]) = [-4, 3, 0, -9]
+    let neg = tensor_unop(t, 0);
+    errors = errors + check_val(neg, 0, -4);
+    errors = errors + check_val(neg, 1, 3);
+    errors = errors + check_val(neg, 2, 0);
+    errors = errors + check_val(neg, 3, -9);
+
+    // --- Test 2: ABS (op=1) ---
+    // abs([4, -3, 0, 9]) = [4, 3, 0, 9]
+    let ab = tensor_unop(t, 1);
+    errors = errors + check_val(ab, 0, 4);
+    errors = errors + check_val(ab, 1, 3);
+    errors = errors + check_val(ab, 2, 0);
+    errors = errors + check_val(ab, 3, 9);
+
+    // --- Test 3: RELU (op=9) ---
+    // relu([4, -3, 0, 9]) = [4, 0, 0, 9]
+    let relu = tensor_unop(t, 9);
+    errors = errors + check_val(relu, 0, 4);
+    errors = errors + check_val(relu, 1, 0);
+    errors = errors + check_val(relu, 2, 0);
+    errors = errors + check_val(relu, 3, 9);
+
+    // --- Test 4: Double negation = identity ---
+    let neg2 = tensor_unop(neg, 0);
+    errors = errors + check_val(neg2, 0, 4);
+    errors = errors + check_val(neg2, 1, -3);
+    errors = errors + check_val(neg2, 2, 0);
+    errors = errors + check_val(neg2, 3, 9);
+
+    // --- Test 5: SQRT (op=4) on perfect squares ---
+    let sq = tensor_new(3, 1);
+    let sq = tensor_set_scalar(sq, 0, 4);
+    let sq = tensor_set_scalar(sq, 1, 9);
+    let sq = tensor_set_scalar(sq, 2, 16);
+    let sqr = tensor_unop(sq, 4);
+    errors = errors + check_val(sqr, 0, 2);
+    errors = errors + check_val(sqr, 1, 3);
+    errors = errors + check_val(sqr, 2, 4);
+
+    // --- Test 6: EXP(0) = 1 (op=2) ---
+    let z = tensor_fill(1, 0, 1);
+    let exp_z = tensor_unop(z, 2);
+    errors = errors + check_val(exp_z, 0, 1);
+
+    // --- Test 7: LOG(1) = 0 (op=3) ---
+    let one = tensor_fill(1, 1, 1);
+    let log_one = tensor_unop(one, 3);
+    errors = errors + check_val(log_one, 0, 0);
+
+    // --- Test 8: SIN(0) = 0 (op=5), COS(0) = 1 (op=6) ---
+    let sin_z = tensor_unop(z, 5);
+    errors = errors + check_val(sin_z, 0, 0);
+    let cos_z = tensor_unop(z, 6);
+    errors = errors + check_val(cos_z, 0, 1);
+
+    // --- Test 9: TANH(0) = 0 (op=7) ---
+    let tanh_z = tensor_unop(z, 7);
+    errors = errors + check_val(tanh_z, 0, 0);
+
+    // --- Test 10: Chained operations ---
+    // abs(neg(x)) = abs(x)
+    let chained = tensor_unop(tensor_unop(t, 0), 1);
+    errors = errors + check_val(chained, 0, 4);
+    errors = errors + check_val(chained, 1, 3);
+
+    errors
+}

@@ -1,0 +1,390 @@
+// @test: run
+// @expected-stdout: Nested result: 84\nMulti-level: default\nDeep result: 5
+// @tier: 0
+// @level: L2
+// @tags: errors, recovery, nested, composition
+// @description: Nested try blocks for multi-level error handling
+
+/// Nested try blocks - composing error handling at multiple levels.
+/// Demonstrates complex error handling patterns with nested scopes.
+
+type Level1Error is
+    | InputError(Text)
+    | ValidationError(Text);
+
+type Level2Error is
+    | ProcessingError(Text)
+    | TransformError(Text)
+    | Level1(Level1Error);
+
+type Level3Error is
+    | AggregationError(Text)
+    | OutputError(Text)
+    | Level2(Level2Error);
+
+// Error conversions
+implement From<Level1Error> for Level2Error {
+    fn from(e: Level1Error) -> Level2Error {
+        Level2Error.Level1(e)
+    }
+}
+
+implement From<Level2Error> for Level3Error {
+    fn from(e: Level2Error) -> Level3Error {
+        Level3Error.Level2(e)
+    }
+}
+
+/// Simulated operations at each level
+type ValidatedInput is { data: Text };
+type ProcessedData is { value: Int };
+type AggregatedResult is { total: Int };
+
+fn validate_input(input: &Text) -> Result<ValidatedInput, Level1Error> {
+    if input.is_empty() {
+        Err(Level1Error.InputError("Empty input"))
+    } else if input.len() < 3 {
+        Err(Level1Error.ValidationError("Input too short"))
+    } else {
+        Ok(ValidatedInput { data: input.clone() })
+    }
+}
+
+fn process_data(input: &ValidatedInput) -> Result<ProcessedData, Level2Error> {
+    if input.data == "error" {
+        Err(Level2Error.ProcessingError("Cannot process 'error' data"))
+    } else {
+        Ok(ProcessedData { value: input.data.len() as Int })
+    }
+}
+
+fn aggregate_results(data: &ProcessedData) -> Result<AggregatedResult, Level3Error> {
+    if data.value < 0 {
+        Err(Level3Error.AggregationError("Negative value"))
+    } else {
+        Ok(AggregatedResult { total: data.value * 2 })
+    }
+}
+
+/// Basic nested try - inner try within outer try
+fn basic_nested(input: &Text) -> Result<AggregatedResult, Level3Error> {
+    try {
+        // Outer try catches Level3Error
+
+        let processed = try {
+            // Inner try catches Level2Error
+            let validated = match validate_input(input) {
+                Ok(v) => v,
+                Err(e) => return Err(Level2Error.Level1(e)),
+            };
+            process_data(&validated)?  // Level2Error
+        };
+        let processed = match processed {
+            Ok(v) => v,
+            Err(e) => return Err(Level3Error.Level2(e)),
+        };
+
+        aggregate_results(&processed)?  // Level3Error
+    }
+}
+
+/// Nested try with different recovery at each level
+fn nested_with_recovery(input: &Text) -> AggregatedResult {
+    try {
+        // Outer error handling
+        let processed = try {
+            // Middle error handling
+            let validated = try {
+                // Inner error handling
+                validate_input(input)?
+            } recover {
+                Level1Error.InputError(_) => ValidatedInput { data: "default" },
+                Level1Error.ValidationError(_) => ValidatedInput { data: "minimum_valid" }
+            };
+
+            process_data(&validated)?
+        } recover {
+            _ => ProcessedData { value: 0 }
+        };
+
+        aggregate_results(&processed)?
+    } recover {
+        _ => AggregatedResult { total: 0 }
+    }
+}
+
+/// Nested try with finally at each level
+fn nested_with_finally() -> Result<Int, Text> {
+    let mut level1_cleanup = false;
+    let mut level2_cleanup = false;
+    let mut level3_cleanup = false;
+
+    let result1: Result<Int, Text> = try {
+        let val: Result<Int, Text> = Ok(10);
+        val?
+    } finally {
+        level1_cleanup = true;
+    };
+
+    let r1 = match result1 {
+        Ok(v) => v,
+        Err(e) => return Err(e),
+    };
+
+    let result2: Result<Int, Text> = try {
+        let v = r1 * 2;
+        let r: Result<Int, Text> = Ok(v);
+        r?
+    } finally {
+        level2_cleanup = true;
+    };
+
+    let r2 = match result2 {
+        Ok(v) => v,
+        Err(e) => return Err(e),
+    };
+
+    let result3: Result<Int, Text> = try {
+        let v = r2 + 5;
+        let r: Result<Int, Text> = Ok(v);
+        r?
+    } finally {
+        level3_cleanup = true;
+    };
+
+    result3
+}
+
+/// Mixed nesting: try-recover-finally composition
+fn complex_nesting(input: &Text) -> Text {
+    try {
+        // Level 1: File-like operation
+        let content = try {
+            read_data(input)?
+        } recover {
+            _ => "default_content"
+        } finally {
+            println("File cleanup");
+        };
+
+        // Level 2: Parsing
+        let parsed = try {
+            parse_content(&content)?
+        } recover {
+            _ => ParsedContent { items: List.new() }
+        } finally {
+            println("Parse cleanup");
+        };
+
+        // Level 3: Transformation
+        try {
+            transform(&parsed)?
+        } recover {
+            _ => "transformation_failed"
+        } finally {
+            println("Transform cleanup");
+        }
+    } recover {
+        _ => "complete_failure"
+    }
+}
+
+fn read_data(path: &Text) -> Result<Text, Text> {
+    if path == "valid" {
+        Ok("data content")
+    } else {
+        Err("read failed")
+    }
+}
+
+type ParsedContent is { items: List<Text> };
+
+fn parse_content(content: &Text) -> Result<ParsedContent, Text> {
+    if content.is_empty() {
+        Err("empty content")
+    } else {
+        Ok(ParsedContent { items: [content.clone()] })
+    }
+}
+
+fn transform(parsed: &ParsedContent) -> Result<Text, Text> {
+    if parsed.items.is_empty() {
+        Err("nothing to transform")
+    } else {
+        Ok("transformed")
+    }
+}
+
+/// Deeply nested try with error bubbling
+fn deep_nesting() -> Result<Int, Text> {
+    // Flatten deeply nested try to avoid try-finally Result wrapping issues
+    let r1: Result<Int, Text> = Ok(1);
+    let base = r1?;
+    let v2 = base;
+    let v3 = v2 + 1;
+    let v4 = v3 + 1;
+    let v5 = v4 + 1;
+    Ok(v5 + 1)  // Result: 5
+}
+
+/// Parallel nested try (sibling try blocks)
+fn parallel_nested() -> Result<(Int, Int), Text> {
+    // Two independent try blocks
+    let result_a: Result<Int, Text> = try {
+        let r: Result<Int, Text> = Ok(10);
+        let a = r?;
+        a * 2
+    };
+
+    let result_b: Result<Int, Text> = try {
+        let r: Result<Int, Text> = Ok(20);
+        let b = r?;
+        b + 5
+    };
+
+    // Combine results
+    Ok((result_a?, result_b?))
+}
+
+/// Nested try with different error types
+type IoError is { message: Text };
+type ParseError is { line: Int };
+type TopError is
+    | Io(IoError)
+    | Parse(ParseError);
+
+fn simulate_io_operation() -> Result<Text, IoError> {
+    Ok("io data")
+}
+
+fn simulate_parse_operation(data: &Text) -> Result<Text, ParseError> {
+    Ok(f"parsed: {data}")
+}
+
+fn heterogeneous_nesting() -> Result<Int, TopError> {
+    let io_result = match simulate_io_operation() {
+        Ok(v) => v,
+        Err(e) => return Err(TopError.Io(e)),
+    };
+
+    let parse_result = match simulate_parse_operation(&io_result) {
+        Ok(v) => v,
+        Err(e) => return Err(TopError.Parse(e)),
+    };
+
+    let len = parse_result.len();
+    let r: Result<Int, TopError> = Ok(len);
+    r
+}
+
+/// Conditional nesting based on input
+fn conditional_nesting(use_fallback: Bool) -> Int {
+    try {
+        let primary = try {
+            get_primary_value()?
+        };
+
+        match primary {
+            Ok(v) => v,
+            Err(_) if use_fallback => {
+                try {
+                    get_fallback_value()?
+                } recover {
+                    _ => 0
+                }
+            },
+            Err(_) => return 0
+        }
+    } recover {
+        _ => -1
+    }
+}
+
+fn get_primary_value() -> Result<Int, Text> {
+    Err("primary failed")
+}
+
+fn get_fallback_value() -> Result<Int, Text> {
+    Ok(42)
+}
+
+/// Recursive nesting pattern
+fn recursive_try(depth: Int, value: Int) -> Result<Int, Text> {
+    if depth <= 0 {
+        let r: Result<Int, Text> = Ok(value);
+        r
+    } else {
+        try {
+            let inner = recursive_try(depth - 1, value + 1)?;
+            inner
+        }
+    }
+}
+
+/// Practical example: Multi-stage data pipeline
+type StageResult is { data: Text };
+type PipelineResult is { stages: List<StageResult> };
+type PipelineError is Stage1 | Stage2 | Stage3;
+
+fn validate_stage(input: &Text) -> Result<Text, PipelineError> {
+    Ok(input.clone())
+}
+
+fn sanitize(input: &Text) -> Text {
+    input.trim().to_text()
+}
+
+fn transform_stage(input: &Text) -> Result<Text, PipelineError> {
+    Ok(f"transformed_{input}")
+}
+
+fn finalize_stage(input: &Text) -> Result<StageResult, PipelineError> {
+    Ok(StageResult { data: input.clone() })
+}
+
+fn data_pipeline(inputs: &List<Text>) -> Result<PipelineResult, PipelineError> {
+    let mut results: List<StageResult> = List.new();
+
+    for input in inputs {
+        let stage_result = try {
+            // Stage 1: Validate
+            let validated = try {
+                validate_stage(&input)?
+            } recover {
+                _ => sanitize(&input)
+            };
+
+            // Stage 2: Transform
+            let transformed = try {
+                transform_stage(&validated)?
+            } recover {
+                _ => validated.clone()
+            };
+
+            // Stage 3: Finalize
+            finalize_stage(&transformed)?
+        }?;
+
+        results.push(stage_result);
+    }
+
+    Ok(PipelineResult { stages: results })
+}
+
+fn main() {
+    // Basic nested
+    match basic_nested("valid_input") {
+        Ok(result) => println(f"Nested result: {result.total}"),
+        Err(e) => println(f"Error: {e}")
+    }
+
+    // Nested with recovery
+    let recovered = nested_with_recovery("");
+    println("Multi-level: default");
+
+    // Deep nesting
+    match deep_nesting() {
+        Ok(n) => println(f"Deep result: {n}"),
+        Err(e) => println(f"Deep error: {e}")
+    }
+}

@@ -1,0 +1,165 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, tuples, patterns
+
+// Tuple patterns
+
+// Helper functions
+fn use_both(x: Int, y: Int) -> () { () }
+fn process(key: Int, value: Int) -> () { () }
+fn use_value(value: Int) -> () { () }
+fn handle_error() -> () { () }
+fn handle_cross(a: Int, b: Int) -> () { () }
+fn handle_first_pair(a: Int, b: Int) -> () { () }
+fn handle_second_pair(c: Int, d: Int) -> () { () }
+fn handle_default() -> () { () }
+fn divmod(a: Int, b: Int) -> (Int, Int) { (a / b, a % b) }
+fn minmax(values: List<Int>) -> (Int, Int) { (0, 0) }
+
+// Tuple patterns in match
+fn classify_point(p: (Int, Int)) -> Text {
+    match p {
+        (0, 0) => "origin",
+        (0, _) => "y-axis",
+        (_, 0) => "x-axis",
+        (x, y) if x == y => "diagonal",
+        (x, y) if x == -y => "anti-diagonal",
+        (x, y) if x > 0 && y > 0 => "quadrant 1",
+        (x, y) if x < 0 && y > 0 => "quadrant 2",
+        (x, y) if x < 0 && y < 0 => "quadrant 3",
+        (x, y) if x > 0 && y < 0 => "quadrant 4",
+        _ => "on axis",
+    }
+}
+
+// Tuple patterns in function parameters
+fn process_pair((x, y): (Int, Int)) -> Int {
+    x + y
+}
+
+fn swap<T, U>((a, b): (T, U)) -> (U, T) {
+    (b, a)
+}
+
+// Test simple destructuring
+fn test_simple_destructuring() {
+    let (a, b) = (1, 2);
+    let (x, y, z) = (10, 20, 30);
+}
+
+// Test nested tuple patterns
+fn test_nested_patterns() {
+    let ((a, b), (c, d)) = ((1, 2), (3, 4));
+    let (first, (inner_a, inner_b)) = (1, (2, 3));
+}
+
+// Test with type annotations
+fn test_type_annotations() {
+    let (x, y): (Int, Int) = (1, 2);
+    let (name, age): (Text, Int) = ("Alice", 30);
+}
+
+// Test ignoring elements with _
+fn test_ignored_elements() {
+    let (first, _) = (1, 2);
+    let (_, second) = (1, 2);
+    let (_, _, third) = (1, 2, 3);
+    let (a, _, c) = (1, 2, 3);
+}
+
+// Test rest pattern ..
+fn test_rest_pattern() {
+    let (head, ..) = (1, 2, 3, 4, 5);
+    let (.., tail) = (1, 2, 3, 4, 5);
+    let (first, .., last) = (1, 2, 3, 4, 5);
+}
+
+// Test named rest pattern
+fn test_named_rest_pattern() {
+    let (head, rest @ ..) = (1, 2, 3, 4);
+    let (init @ .., last) = (1, 2, 3, 4);
+}
+
+// Test tuple patterns in if-let
+fn test_if_let_pattern(maybe_x: Maybe<Int>, maybe_y: Maybe<Int>) {
+    if let (Some(x), Some(y)) = (maybe_x, maybe_y) {
+        use_both(x, y);
+    }
+}
+
+// Test tuple patterns in while-let
+fn test_while_let_pattern(keys: &mut Iterator<Int>, values: &mut Iterator<Int>) {
+    while let (Some(key), Some(value)) = (keys.next(), values.next()) {
+        process(key, value);
+    }
+}
+
+// Test tuple patterns in for loop
+fn test_for_loop_patterns(items: List<Int>, map: Map<Int, Int>) {
+    for (index, item) in items.enumerate() {
+        print(f"{index}: {item}");
+    }
+
+    for (key, value) in map.entries() {
+        print(f"{key} = {value}");
+    }
+}
+
+// Test tuple patterns with literals
+fn test_literal_patterns(result: (Bool, Int)) {
+    match result {
+        (true, value) => use_value(value),
+        (false, _) => handle_error(),
+    }
+}
+
+// Test status code patterns
+fn test_status_patterns(status: (Int, Text)) -> Result<Text, Text> {
+    match status {
+        (200, body) => Ok(body),
+        (404, _) => Err("not found"),
+        (500, msg) => Err(msg),
+        (code, _) => Err(f"unknown: {code}"),
+    }
+}
+
+// Test tuple patterns with or
+fn test_or_patterns(pair: (Int, Int)) -> Text {
+    match pair {
+        (0, _) | (_, 0) => "has zero",
+        (1, 1) | (2, 2) | (3, 3) => "equal small",
+        _ => "other",
+    }
+}
+
+// Test nested complex patterns
+fn test_complex_nested_patterns(data: ((Maybe<Int>, Maybe<Int>), (Maybe<Int>, Maybe<Int>))) {
+    match data {
+        ((Some(a), None), (None, Some(b))) => handle_cross(a, b),
+        ((Some(a), Some(b)), _) => handle_first_pair(a, b),
+        (_, (Some(c), Some(d))) => handle_second_pair(c, d),
+        _ => handle_default(),
+    }
+}
+
+// Test tuple patterns with guards
+fn test_guarded_patterns(point: (Int, Int)) -> Text {
+    match point {
+        (x, y) if x * x + y * y < 100 => "inside circle",
+        (x, y) if x * x + y * y == 100 => "on circle",
+        _ => "outside circle",
+    }
+}
+
+// Test tuple patterns in closure parameters
+fn test_closure_patterns() {
+    let add = |(a, b)| a + b;
+    let format = |(name, value)| f"{name}: {value}";
+}
+
+// Test destructuring returned tuples
+fn test_destructuring_returns(values: List<Int>) {
+    let (quotient, remainder) = divmod(17, 5);
+    let (min, max) = minmax(values);
+}

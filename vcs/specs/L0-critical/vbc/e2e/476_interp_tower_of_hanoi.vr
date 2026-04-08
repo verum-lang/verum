@@ -1,0 +1,225 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tower_of_hanoi, recursion, move_counting
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tower of Hanoi: move counting and peg state simulation.
+// Number of moves for n disks = 2^n - 1.
+// Peg state encoded as arrays: peg[0..2] are pegs A,B,C each holding a stack of disks.
+// For simulation, peg_data[peg*10 + depth] = disk number (0=empty), peg_top[peg] = stack size.
+
+// Compute 2^n iteratively.
+fn pow2(n: Int) -> Int {
+    let mut p = 1;
+    let mut i = 0;
+    while i < n { p = p * 2; i = i + 1; }
+    p
+}
+
+// Count moves for n disks = 2^n - 1.
+fn hanoi_moves(n: Int) -> Int {
+    pow2(n) - 1
+}
+
+// Perform one disk move: from peg src to peg dst.
+// peg_data: flat [Int;30] = 3 pegs * 10 slots each
+// peg_top: [Int;3] = stack heights
+fn peg_push(peg_data: [Int; 30], peg_top: [Int; 3], peg: Int, disk: Int) {
+    let top = peg_top[peg];
+    peg_data[peg * 10 + top] = disk;
+    peg_top[peg] = top + 1;
+}
+
+fn peg_pop(peg_data: [Int; 30], peg_top: [Int; 3], peg: Int) -> Int {
+    let top = peg_top[peg] - 1;
+    let disk = peg_data[peg * 10 + top];
+    peg_data[peg * 10 + top] = 0;
+    peg_top[peg] = top;
+    disk
+}
+
+fn peg_peek(peg_data: [Int; 30], peg_top: [Int; 3], peg: Int) -> Int {
+    let top = peg_top[peg];
+    if top == 0 { 0 } else { peg_data[peg * 10 + top - 1] }
+}
+
+// Iterative Hanoi simulation using the frame-stack approach.
+// Encodes each frame as (n, src, dst, aux, phase).
+// frame_data[i*5+0..4] = (n, src, dst, aux, phase)
+// phase 0: move n-1 disks from src to aux (push phase1 + phase0 for n-1)
+// phase 1: move disk n from src to dst
+// phase 2: move n-1 disks from aux to dst
+// Returns total moves performed.
+fn hanoi_simulate(n: Int, src: Int, dst: Int, aux: Int,
+                  peg_data: [Int; 30], peg_top: [Int; 3]) -> Int {
+    // Frame stack: each frame = [n, src, dst, aux, phase]
+    let mut fs = [0, 0, 0, 0, 0,  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,  0, 0, 0, 0, 0,  0, 0, 0, 0, 0];
+    let mut fsp = 0; // frame stack pointer (number of frames)
+    let mut moves = 0;
+
+    // Push initial frame
+    fs[fsp * 5 + 0] = n;
+    fs[fsp * 5 + 1] = src;
+    fs[fsp * 5 + 2] = dst;
+    fs[fsp * 5 + 3] = aux;
+    fs[fsp * 5 + 4] = 0; // phase
+    fsp = fsp + 1;
+
+    while fsp > 0 {
+        fsp = fsp - 1;
+        let fn_n   = fs[fsp * 5 + 0];
+        let fn_src = fs[fsp * 5 + 1];
+        let fn_dst = fs[fsp * 5 + 2];
+        let fn_aux = fs[fsp * 5 + 3];
+        let phase  = fs[fsp * 5 + 4];
+
+        if fn_n == 0 {
+            // Nothing to do
+        } else if fn_n == 1 {
+            // Base case: move one disk
+            let disk = peg_pop(peg_data, peg_top, fn_src);
+            peg_push(peg_data, peg_top, fn_dst, disk);
+            moves = moves + 1;
+        } else if phase == 0 {
+            // Push in reverse order (since stack = LIFO):
+            // 3rd: move n-1 from aux to dst
+            fs[fsp * 5 + 0] = fn_n - 1;
+            fs[fsp * 5 + 1] = fn_aux;
+            fs[fsp * 5 + 2] = fn_dst;
+            fs[fsp * 5 + 3] = fn_src;
+            fs[fsp * 5 + 4] = 0;
+            fsp = fsp + 1;
+            // 2nd: move disk n from src to dst (phase=1 -> base case for this disk)
+            fs[fsp * 5 + 0] = 1;
+            fs[fsp * 5 + 1] = fn_src;
+            fs[fsp * 5 + 2] = fn_dst;
+            fs[fsp * 5 + 3] = fn_aux;
+            fs[fsp * 5 + 4] = 1;
+            fsp = fsp + 1;
+            // 1st: move n-1 from src to aux
+            fs[fsp * 5 + 0] = fn_n - 1;
+            fs[fsp * 5 + 1] = fn_src;
+            fs[fsp * 5 + 2] = fn_aux;
+            fs[fsp * 5 + 3] = fn_dst;
+            fs[fsp * 5 + 4] = 0;
+            fsp = fsp + 1;
+        } else {
+            // phase=1: just move one disk (treated like fn_n=1)
+            let disk = peg_pop(peg_data, peg_top, fn_src);
+            peg_push(peg_data, peg_top, fn_dst, disk);
+            moves = moves + 1;
+        }
+    }
+    moves
+}
+
+fn test_move_counts() {
+    // 2^n - 1 formula
+    // n=1: 1, n=2: 3, n=3: 7, n=4: 15, n=5: 31, n=6: 63, n=7: 127, n=8: 255
+    assert_eq(hanoi_moves(1), 1);
+    assert_eq(hanoi_moves(2), 3);
+    assert_eq(hanoi_moves(3), 7);
+    assert_eq(hanoi_moves(4), 15);
+    assert_eq(hanoi_moves(5), 31);
+    assert_eq(hanoi_moves(6), 63);
+    assert_eq(hanoi_moves(7), 127);
+    assert_eq(hanoi_moves(8), 255);
+
+    // Property: hanoi_moves(n+1) = 2 * hanoi_moves(n) + 1
+    let mut i = 1;
+    while i <= 7 {
+        assert_eq(hanoi_moves(i + 1), 2 * hanoi_moves(i) + 1);
+        i = i + 1;
+    }
+
+    print("move_counts: ok");
+}
+
+fn test_simulate_1_disk() {
+    // n=1: A->C, should take 1 move, disk 1 ends on peg C.
+    let mut pd = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pt = [0, 0, 0];
+    // Initialize: disk 1 on peg 0 (A)
+    peg_push(pd, pt, 0, 1);
+
+    let moves = hanoi_simulate(1, 0, 2, 1, pd, pt);
+    assert_eq(moves, 1);
+    assert_eq(pt[0], 0); // peg A empty
+    assert_eq(pt[2], 1); // peg C has 1 disk
+    assert_eq(peg_peek(pd, pt, 2), 1); // disk 1 on peg C
+
+    print("simulate_1_disk: ok");
+}
+
+fn test_simulate_2_disks() {
+    // n=2: A->C using B, 3 moves. Disks 2(bottom),1(top) on A -> both on C.
+    let mut pd = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pt = [0, 0, 0];
+    // Push disk 2 (larger) first, then disk 1 (smaller) on top
+    peg_push(pd, pt, 0, 2);
+    peg_push(pd, pt, 0, 1);
+
+    let moves = hanoi_simulate(2, 0, 2, 1, pd, pt);
+    assert_eq(moves, 3);
+    assert_eq(pt[0], 0); // peg A empty
+    assert_eq(pt[1], 0); // peg B empty
+    assert_eq(pt[2], 2); // peg C has 2 disks
+    // Top of C = disk 1 (smallest), bottom = disk 2 (largest)
+    assert_eq(peg_peek(pd, pt, 2), 1);
+
+    print("simulate_2_disks: ok");
+}
+
+fn test_simulate_3_disks() {
+    // n=3: A->C using B, 7 moves.
+    let mut pd = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pt = [0, 0, 0];
+    peg_push(pd, pt, 0, 3);
+    peg_push(pd, pt, 0, 2);
+    peg_push(pd, pt, 0, 1);
+
+    let moves = hanoi_simulate(3, 0, 2, 1, pd, pt);
+    assert_eq(moves, 7);
+    assert_eq(pt[0], 0); // A empty
+    assert_eq(pt[1], 0); // B empty
+    assert_eq(pt[2], 3); // C has all 3 disks
+    assert_eq(peg_peek(pd, pt, 2), 1); // smallest on top
+
+    print("simulate_3_disks: ok");
+}
+
+fn test_hanoi_sum() {
+    // Sum of moves for n=1..8 = 1+3+7+15+31+63+127+255 = 502
+    let mut s = 0;
+    let mut n = 1;
+    while n <= 8 {
+        s = s + hanoi_moves(n);
+        n = n + 1;
+    }
+    assert_eq(s, 502);
+
+    // hanoi_moves(n) = sum of moves for n=1..n as: 2^1-1 + 2^2-1 + ... + 2^n-1 = 2^(n+1)-2-n
+    // For n=8: 2^9 - 2 - 8 = 512 - 10 = 502. Verified.
+    print(f"hanoi_sum: total_moves_1_to_8={s} ok");
+}
+
+fn main() -> Int {
+    test_move_counts();
+    test_simulate_1_disk();
+    test_simulate_2_disks();
+    test_simulate_3_disks();
+    test_hanoi_sum();
+    print("[OK] 476_interp_tower_of_hanoi");
+    0
+}

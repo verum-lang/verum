@@ -1,0 +1,169 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, ranges, patterns
+
+// Range patterns in match expressions
+
+// Integer range patterns
+fn classify_number(n: Int) -> Text {
+    match n {
+        ..0 => "negative",
+        0 => "zero",
+        1..10 => "small positive",
+        10..100 => "medium",
+        100..1000 => "large",
+        1000.. => "very large",
+    }
+}
+
+// Inclusive range patterns
+fn classify_score(score: Int) -> Text {
+    match score {
+        0..=59 => "F",
+        60..=69 => "D",
+        70..=79 => "C",
+        80..=89 => "B",
+        90..=100 => "A",
+        _ => "invalid",
+    }
+}
+
+// Character range patterns
+fn classify_char(c: Char) -> Text {
+    match c {
+        'a'..='z' => "lowercase letter",
+        'A'..='Z' => "uppercase letter",
+        '0'..='9' => "digit",
+        ' ' | '\t' | '\n' => "whitespace",
+        '!' | '?' | '.' => "punctuation",
+        _ => "other",
+    }
+}
+
+// Combined with other patterns
+fn analyze(value: Int) -> Text {
+    match value {
+        0 => "zero",
+        1 | 2 | 3 => "small",
+        4..=10 => "medium small",
+        11..=50 => "medium",
+        51..=100 => "medium large",
+        n if n > 100 => "large",
+        n if n < 0 => "negative",
+        _ => "unknown",
+    }
+}
+
+// Range in tuple pattern
+fn classify_point(p: (Int, Int)) -> Text {
+    match p {
+        (0..=10, 0..=10) => "near origin",
+        (x, y) if x > 100 || y > 100 => "far away",
+        _ => "somewhere",
+    }
+}
+
+// Range with guards
+fn complex_match(n: Int) -> Text {
+    match n {
+        x @ 0..=100 if x % 2 == 0 => f"even in range: {x}",
+        x @ 0..=100 if x % 2 == 1 => f"odd in range: {x}",
+        x if x > 100 => f"above range: {x}",
+        x if x < 0 => f"below range: {x}",
+        _ => "unexpected",
+    }
+}
+
+// Nested range patterns in record
+type Data is { value: Int, status: Status };
+type Status is Active | Inactive;
+
+fn test_nested_range_patterns(data: Data) -> Text {
+    match data {
+        Data { value: 0..=10, .. } => handle_small(),
+        Data { value: 11..=100, status: Status.Active } => handle_active_medium(),
+        Data { value: 101.., .. } => handle_large(),
+        _ => handle_default(),
+    }
+}
+
+fn handle_small() -> Text { "small" }
+fn handle_active_medium() -> Text { "active medium" }
+fn handle_large() -> Text { "large" }
+fn handle_default() -> Text { "default" }
+
+// Range in or pattern
+fn is_special(n: Int) -> Bool {
+    match n {
+        1..=3 | 7..=9 | 13 | 42 => true,
+        _ => false,
+    }
+}
+
+// ASCII classification with ranges
+fn ascii_class(byte: u8) -> Text {
+    match byte {
+        0x00..=0x1F => "control",
+        0x20 => "space",
+        0x21..=0x2F => "punctuation",
+        0x30..=0x39 => "digit",
+        0x3A..=0x40 => "punctuation",
+        0x41..=0x5A => "uppercase",
+        0x5B..=0x60 => "punctuation",
+        0x61..=0x7A => "lowercase",
+        0x7B..=0x7E => "punctuation",
+        0x7F => "delete",
+        _ => "extended",
+    }
+}
+
+// Unicode range patterns
+fn unicode_block(c: Char) -> Text {
+    match c {
+        '\u{0000}'..='\u{007F}' => "Basic Latin",
+        '\u{0080}'..='\u{00FF}' => "Latin-1 Supplement",
+        '\u{0100}'..='\u{017F}' => "Latin Extended-A",
+        '\u{0370}'..='\u{03FF}' => "Greek and Coptic",
+        '\u{0400}'..='\u{04FF}' => "Cyrillic",
+        '\u{4E00}'..='\u{9FFF}' => "CJK Unified Ideographs",
+        _ => "Other",
+    }
+}
+
+// Note: Float range patterns are not yet supported in the parser
+// This is a placeholder for future implementation
+// fn classify_temperature(temp: Float) -> Text {
+//     match temp {
+//         ..0.0 => "freezing",
+//         0.0..=10.0 => "cold",
+//         10.0..=20.0 => "cool",
+//         20.0..=30.0 => "warm",
+//         30.0.. => "hot",
+//     }
+// }
+
+// HTTP status code classification
+fn http_status_class(code: Int) -> Text {
+    match code {
+        100..=199 => "informational",
+        200..=299 => "success",
+        300..=399 => "redirection",
+        400..=499 => "client error",
+        500..=599 => "server error",
+        _ => "unknown",
+    }
+}
+
+// Main function that exercises the range patterns
+fn main() {
+    // Test various range pattern functions
+    let _ = classify_number(50);
+    let _ = classify_score(85);
+    let _ = classify_char('a');
+    let _ = analyze(25);
+    let _ = classify_point((5, 5));
+    let _ = complex_match(42);
+    let _ = is_special(7);
+    let _ = http_status_class(200);
+}

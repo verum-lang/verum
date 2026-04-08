@@ -1,0 +1,41 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: builtin-syntax, format-literals, strings
+// @timeout: 5000
+//
+// Tests format string literals f"..." (replaces format!() macro).
+// Spec: grammar/verum.ebnf Section 2.20 - Format Strings
+
+fn main() -> Int {
+    let name: Text = "Verum";
+    let version: Int = 1;
+    let pi: Float = 3.14159;
+
+    // Simple interpolation (NOT format!("Hello, {}", name))
+    let greeting: Text = f"Hello, {name}!";
+
+    // Multiple values
+    let info: Text = f"Language: {name}, Version: {version}";
+
+    // Expression interpolation
+    let x: Int = 10;
+    let y: Int = 20;
+    let sum_msg: Text = f"Sum of {x} and {y} is {x + y}";
+
+    // Precision format
+    let formatted_pi: Text = f"Pi: {pi:.2}";
+
+    // Debug format
+    let debug_info: Text = f"{name:?}";
+
+    // Nested expressions
+    let complex: Text = f"Result: {if x > 5 { x * 2 } else { x }}";
+
+    print(greeting);
+    print(info);
+    print(sum_msg);
+    print(formatted_pi);
+
+    0
+}

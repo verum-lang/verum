@@ -1,0 +1,38 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: context, protocol, generic_bounds, using, dual_kind
+// @description: A `context protocol` can be used BOTH as a generic type bound
+//   AND in a `using [...]` clause. This tests the dual-kind (Constraint & Injectable)
+//   nature of context protocols.
+//   Grammar: context_protocol_def, context_clause, bounds
+
+// Dual-kind context protocol extends usable as both type bound and injectable context
+context protocol Serializable {
+    fn serialize(&self) -> Text;
+    fn content_type(&self) -> Text;
+}
+
+// Use as a generic type bound (0ns, monomorphised)
+fn serialize_item<T: Serializable>(item: T) -> Text {
+    item.serialize()
+}
+
+// Use as an injectable context (~5-30ns, dynamic dispatch)
+fn serialize_all() -> Text
+    using [Serializable]
+{
+    Serializable.serialize()
+}
+
+// Use in BOTH positions: generic bound AND using clause
+fn serialize_and_log<T: Serializable>(item: T) -> Text
+    using [Serializable]
+{
+    let direct = item.serialize();
+    let via_ctx = Serializable.content_type();
+    direct
+}
+
+fn main() -> Int {
+    0
+}

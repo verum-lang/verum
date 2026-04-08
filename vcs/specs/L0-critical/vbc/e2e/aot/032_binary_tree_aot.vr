@@ -1,0 +1,144 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, data-structures, binary-tree, recursion, variants
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT binary search tree with insert, search, and traversal
+
+type BST is Empty | Node { val: Int, left: BST, right: BST };
+
+fn bst_insert(tree: BST, v: Int) -> BST {
+    match tree {
+        Empty => Node { val: v, left: Empty, right: Empty },
+        Node { val: x, left, right } => {
+            if v < x {
+                Node { val: x, left: bst_insert(left, v), right: right }
+            } else if v > x {
+                Node { val: x, left: left, right: bst_insert(right, v) }
+            } else {
+                tree  // duplicate, no change
+            }
+        },
+    }
+}
+
+fn bst_contains(tree: BST, v: Int) -> Bool {
+    match tree {
+        Empty => false,
+        Node { val: x, left, right } => {
+            if v == x { true }
+            else if v < x { bst_contains(left, v) }
+            else { bst_contains(right, v) }
+        },
+    }
+}
+
+fn bst_size(tree: BST) -> Int {
+    match tree {
+        Empty => 0,
+        Node { val: _, left, right } => 1 + bst_size(left) + bst_size(right),
+    }
+}
+
+fn bst_min(tree: BST) -> Int {
+    match tree {
+        Empty => 999999,  // sentinel
+        Node { val: x, left, right: _ } => {
+            match left {
+                Empty => x,
+                _ => bst_min(left),
+            }
+        },
+    }
+}
+
+fn bst_max(tree: BST) -> Int {
+    match tree {
+        Empty => -999999,  // sentinel
+        Node { val: x, left: _, right } => {
+            match right {
+                Empty => x,
+                _ => bst_max(right),
+            }
+        },
+    }
+}
+
+fn bst_height(tree: BST) -> Int {
+    match tree {
+        Empty => 0,
+        Node { val: _, left, right } => {
+            let lh = bst_height(left);
+            let rh = bst_height(right);
+            if lh > rh { 1 + lh } else { 1 + rh }
+        },
+    }
+}
+
+// In-order sum (should give same result regardless of traversal order)
+fn bst_sum(tree: BST) -> Int {
+    match tree {
+        Empty => 0,
+        Node { val: x, left, right } => bst_sum(left) + x + bst_sum(right),
+    }
+}
+
+fn main() -> Int {
+    // Empty tree
+    let empty = Empty;
+    assert_eq(bst_size(empty), 0);
+    assert(!bst_contains(empty, 5));
+
+    // Insert elements: 5, 3, 7, 1, 4, 6, 8
+    let mut tree = Empty;
+    tree = bst_insert(tree, 5);
+    tree = bst_insert(tree, 3);
+    tree = bst_insert(tree, 7);
+    tree = bst_insert(tree, 1);
+    tree = bst_insert(tree, 4);
+    tree = bst_insert(tree, 6);
+    tree = bst_insert(tree, 8);
+
+    // Size
+    assert_eq(bst_size(tree), 7);
+
+    // Contains
+    assert(bst_contains(tree, 5));
+    assert(bst_contains(tree, 1));
+    assert(bst_contains(tree, 8));
+    assert(bst_contains(tree, 4));
+    assert(!bst_contains(tree, 2));
+    assert(!bst_contains(tree, 9));
+    assert(!bst_contains(tree, 0));
+
+    // Min and Max
+    assert_eq(bst_min(tree), 1);
+    assert_eq(bst_max(tree), 8);
+
+    // Height (balanced: 3 levels)
+    assert_eq(bst_height(tree), 3);
+
+    // Sum = 1+3+4+5+6+7+8 = 34
+    assert_eq(bst_sum(tree), 34);
+
+    // Duplicate insert doesn't change size
+    let tree2 = bst_insert(tree, 5);
+    assert_eq(bst_size(tree2), 7);
+
+    // Skewed tree (insert in order)
+    let mut skewed = Empty;
+    skewed = bst_insert(skewed, 1);
+    skewed = bst_insert(skewed, 2);
+    skewed = bst_insert(skewed, 3);
+    skewed = bst_insert(skewed, 4);
+    skewed = bst_insert(skewed, 5);
+
+    assert_eq(bst_size(skewed), 5);
+    assert_eq(bst_height(skewed), 5);  // degenerate: linear
+    assert_eq(bst_min(skewed), 1);
+    assert_eq(bst_max(skewed), 5);
+    assert_eq(bst_sum(skewed), 15);
+
+    0
+}

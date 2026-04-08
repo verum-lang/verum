@@ -1,0 +1,313 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: self-hosting, lexer, tokenization, scanning
+// @description: Token scanning patterns for self-hosting lexer
+// FIXED: SmallStr GetF handler in interpreter now materializes Text struct fields for inline small strings
+
+type CharClass is
+    | Alpha
+    | Digit
+    | Whitespace
+    | Operator
+    | Delimiter
+    | Quote
+    | Unknown;
+
+fn classify_char(c: Int) -> CharClass {
+    if (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 {
+        CharClass.Alpha
+    } else if c >= 48 && c <= 57 {
+        CharClass.Digit
+    } else if c == 32 || c == 10 || c == 13 || c == 9 {
+        CharClass.Whitespace
+    } else if c == 43 || c == 45 || c == 42 || c == 47 || c == 61 || c == 60 || c == 62 || c == 33 || c == 38 || c == 124 {
+        CharClass.Operator
+    } else if c == 40 || c == 41 || c == 123 || c == 125 || c == 91 || c == 93 || c == 44 || c == 59 || c == 58 || c == 46 {
+        CharClass.Delimiter
+    } else if c == 34 || c == 39 {
+        CharClass.Quote
+    } else {
+        CharClass.Unknown
+    }
+}
+
+fn char_class_tag(c: CharClass) -> Int {
+    match c {
+        Alpha => 0,
+        Digit => 1,
+        Whitespace => 2,
+        Operator => 3,
+        Delimiter => 4,
+        Quote => 5,
+        Unknown => 6,
+    }
+}
+
+type Tok is
+    | TIdent(Text)
+    | TNumber(Int)
+    | TKeyword(Text)
+    | TString(Text)
+    | TOp(Text)
+    | TDelim(Text)
+    | TEof;
+
+fn tok_tag(t: Tok) -> Int {
+    match t {
+        TIdent(_) => 0,
+        TNumber(_) => 1,
+        TKeyword(_) => 2,
+        TString(_) => 3,
+        TOp(_) => 4,
+        TDelim(_) => 5,
+        TEof => 6,
+    }
+}
+
+fn is_keyword(name: Text) -> Bool {
+    name == "let" || name == "fn" || name == "is" ||
+    name == "if" || name == "else" || name == "while" ||
+    name == "for" || name == "in" || name == "return" ||
+    name == "type" || name == "match" || name == "true" ||
+    name == "false" || name == "mut" || name == "implement"
+}
+
+fn get_byte(s: Text, pos: Int) -> Int {
+    match s.byte_at(pos) {
+        Some(b) => b,
+        None => 0,
+    }
+}
+
+fn byte_to_op_text(b: Int) -> Text {
+    if b == 43 { "+" }
+    else if b == 45 { "-" }
+    else if b == 42 { "*" }
+    else if b == 47 { "/" }
+    else if b == 61 { "=" }
+    else if b == 60 { "<" }
+    else if b == 62 { ">" }
+    else { "?" }
+}
+
+fn byte_to_delim_text(b: Int) -> Text {
+    if b == 40 { "(" }
+    else if b == 41 { ")" }
+    else if b == 123 { "{" }
+    else if b == 125 { "}" }
+    else if b == 91 { "[" }
+    else if b == 93 { "]" }
+    else if b == 44 { "," }
+    else if b == 59 { ";" }
+    else if b == 58 { ":" }
+    else if b == 46 { "." }
+    else { "?" }
+}
+
+fn scan_number_from(s: Text, slen: Int, start: Int) -> Int {
+    // Returns packed: (value << 16) | end_pos
+    let mut val = 0;
+    let mut pos = start;
+    while pos < slen {
+        let b = get_byte(s, pos);
+        if b >= 48 && b <= 57 {
+            val = val * 10 + (b - 48);
+            pos = pos + 1;
+        } else {
+            return val * 65536 + pos;
+        }
+    }
+    val * 65536 + pos
+}
+
+fn scan_ident_from(s: Text, slen: Int, start: Int) -> Int {
+    // Returns end position
+    let mut pos = start;
+    while pos < slen {
+        let b = get_byte(s, pos);
+        if (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 || (b >= 48 && b <= 57) {
+            pos = pos + 1;
+        } else {
+            return pos;
+        }
+    }
+    pos
+}
+
+fn tokenize_source(input: Text) -> List<Tok> {
+    let mut tokens = List.new();
+    let slen = input.len();
+    let mut i = 0;
+
+    while i < slen {
+        let b = get_byte(input, i);
+        let cls = classify_char(b);
+        let cls_tag = char_class_tag(cls);
+
+        if cls_tag == 2 {
+            // Whitespace
+            i = i + 1;
+        } else if cls_tag == 1 {
+            // Digit
+            let packed = scan_number_from(input, slen, i);
+            let val = packed / 65536;
+            let end = packed % 65536;
+            tokens.push(Tok.TNumber(val));
+            i = end;
+        } else if cls_tag == 0 {
+            // Alpha
+            let end = scan_ident_from(input, slen, i);
+            // Extract substring by building from bytes
+            let mut name = "";
+            let mut j = i;
+            while j < end {
+                let ch = get_byte(input, j);
+                if ch >= 97 && ch <= 122 {
+                    // lowercase a-z
+                    let letters = ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z"];
+                    name = name + letters[ch - 97];
+                } else if ch == 95 {
+                    name = name + "_";
+                }
+                j = j + 1;
+            }
+            if is_keyword(name) {
+                tokens.push(Tok.TKeyword(name));
+            } else {
+                tokens.push(Tok.TIdent(name));
+            }
+            i = end;
+        } else if cls_tag == 3 {
+            // Operator
+            tokens.push(Tok.TOp(byte_to_op_text(b)));
+            i = i + 1;
+        } else if cls_tag == 4 {
+            // Delimiter
+            tokens.push(Tok.TDelim(byte_to_delim_text(b)));
+            i = i + 1;
+        } else {
+            i = i + 1;
+        }
+    }
+    tokens.push(Tok.TEof);
+    tokens
+}
+
+fn test_char_classification() -> Int {
+    if char_class_tag(classify_char(65)) != 0 {
+        print("FAIL: 'A' should be Alpha");
+        return 1;
+    }
+    if char_class_tag(classify_char(48)) != 1 {
+        print("FAIL: '0' should be Digit");
+        return 1;
+    }
+    if char_class_tag(classify_char(32)) != 2 {
+        print("FAIL: ' ' should be Whitespace");
+        return 1;
+    }
+    if char_class_tag(classify_char(43)) != 3 {
+        print("FAIL: '+' should be Operator");
+        return 1;
+    }
+    if char_class_tag(classify_char(40)) != 4 {
+        print("FAIL: '(' should be Delimiter");
+        return 1;
+    }
+    print("  char_classification: OK");
+    0
+}
+
+fn test_keyword_detection() -> Int {
+    if !is_keyword("let") { print("FAIL: let is keyword"); return 1; }
+    if !is_keyword("fn") { print("FAIL: fn is keyword"); return 1; }
+    if !is_keyword("is") { print("FAIL: is is keyword"); return 1; }
+    if !is_keyword("type") { print("FAIL: type is keyword"); return 1; }
+    if !is_keyword("match") { print("FAIL: match is keyword"); return 1; }
+    if is_keyword("foo") { print("FAIL: foo is not keyword"); return 1; }
+    if is_keyword("hello") { print("FAIL: hello is not keyword"); return 1; }
+    print("  keyword_detection: OK");
+    0
+}
+
+fn test_number_scanning() -> Int {
+    let s = "12345";
+    let packed = scan_number_from(s, s.len(), 0);
+    let val = packed / 65536;
+    let end = packed % 65536;
+    if val != 12345 {
+        print(f"FAIL number: expected 12345, got {val}");
+        return 1;
+    }
+    if end != 5 {
+        print(f"FAIL number: expected end=5, got {end}");
+        return 1;
+    }
+    print("  number_scanning: OK");
+    0
+}
+
+fn test_full_tokenization() -> Int {
+    let tokens = tokenize_source("let x = 42");
+    // Should produce: TKeyword("let"), TIdent("x"), TOp("="), TNumber(42), TEof
+    if tokens.len() != 5 {
+        print(f"FAIL tokenize: expected 5 tokens, got {tokens.len()}");
+        return 1;
+    }
+    if tok_tag(tokens[0]) != 2 {
+        print(f"FAIL tokenize: token 0 should be Keyword, got tag {tok_tag(tokens[0])}");
+        return 1;
+    }
+    if tok_tag(tokens[1]) != 0 {
+        print(f"FAIL tokenize: token 1 should be Ident, got tag {tok_tag(tokens[1])}");
+        return 1;
+    }
+    if tok_tag(tokens[2]) != 4 {
+        print(f"FAIL tokenize: token 2 should be Op, got tag {tok_tag(tokens[2])}");
+        return 1;
+    }
+    if tok_tag(tokens[3]) != 1 {
+        print(f"FAIL tokenize: token 3 should be Number, got tag {tok_tag(tokens[3])}");
+        return 1;
+    }
+    if tok_tag(tokens[4]) != 6 {
+        print(f"FAIL tokenize: token 4 should be Eof, got tag {tok_tag(tokens[4])}");
+        return 1;
+    }
+    print("  full_tokenization: OK");
+    0
+}
+
+fn test_tokenize_function_decl() -> Int {
+    let tokens = tokenize_source("fn main()");
+    // fn, main, (, ), EOF
+    if tokens.len() != 5 {
+        print(f"FAIL fn_decl: expected 5 tokens, got {tokens.len()}");
+        return 1;
+    }
+    if tok_tag(tokens[0]) != 2 {
+        print("FAIL fn_decl: 'fn' should be keyword");
+        return 1;
+    }
+    if tok_tag(tokens[1]) != 0 {
+        print("FAIL fn_decl: 'main' should be ident");
+        return 1;
+    }
+    print("  tokenize_function_decl: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_char_classification();
+    failures = failures + test_keyword_detection();
+    failures = failures + test_number_scanning();
+    failures = failures + test_full_tokenization();
+    failures = failures + test_tokenize_function_decl();
+
+    if failures == 0 {
+        print("All lexer pattern tests passed");
+    }
+    failures
+}

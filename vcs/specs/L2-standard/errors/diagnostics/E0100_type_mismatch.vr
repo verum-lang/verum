@@ -1,0 +1,90 @@
+// @test: typecheck-fail
+// @expected-error: E0100
+// @tier: 0
+// @level: L2
+// @tags: errors, diagnostics, type-mismatch
+// @description: Type mismatch error E0100
+
+/// Error E0100: Type mismatch
+/// Occurs when an expression's type doesn't match the expected type.
+
+fn type_mismatch_examples() {
+    // E0100: Type mismatch in assignment
+    let x: Int = "hello";  // Error: expected Int, found Text
+
+    // E0100: Type mismatch in function return
+    fn returns_int() -> Int {
+        "not an int"  // Error: expected Int, found Text
+    }
+
+    // E0100: Type mismatch in function argument
+    fn takes_int(n: Int) {}
+    takes_int("string");  // Error: expected Int, found Text
+
+    // E0100: Type mismatch in binary operation
+    let y = 5 + "hello";  // Error: cannot add Int and Text
+
+    // E0100: Type mismatch in array elements
+    let arr: List<Int> = [1, 2, "three"];  // Error: expected Int, found Text
+
+    // E0100: Type mismatch in conditional branches
+    let z = if true { 42 } else { "string" };  // Error: branches have different types
+
+    // E0100: Type mismatch in match arms
+    let result = match Some(5) {
+        Some(n) => n,      // Int
+        None => "none",    // Text - Error
+    };
+}
+
+fn refinement_type_mismatch() {
+    // E0100: Refinement type mismatch
+    let positive: Int{> 0} = -5;  // Error: -5 does not satisfy refinement > 0
+
+    fn takes_non_empty(list: List<Int>{len > 0}) {}
+    takes_non_empty([]);  // Error: empty list doesn't satisfy len > 0
+
+    // E0100: Generic constraint mismatch
+    fn requires_clone<T: Clone>(value: T) {}
+    type NotCloneable is { data: *mut Int };
+    let nc = NotCloneable { data: null_mut() };
+    requires_clone(nc);  // Error: NotCloneable does not implement Clone
+}
+
+fn complex_type_mismatch() {
+    // E0100: Nested type mismatch
+    let nested: List<Maybe<Int>> = [Some("wrong")];
+    // Error: expected Maybe<Int>, found Maybe<Text>
+
+    // E0100: Function type mismatch
+    let f: fn(Int) -> Int = |s: Text| s.len();
+    // Error: expected fn(Int) -> Int, found fn(Text) -> Int
+
+    // E0100: Tuple type mismatch
+    let tuple: (Int, Text) = (1, 2);
+    // Error: expected (Int, Text), found (Int, Int)
+
+    // E0100: Record field type mismatch
+    type Person is { name: Text, age: Int };
+    let p = Person { name: 42, age: "old" };
+    // Error: name expected Text, age expected Int
+}
+
+// Expected error message format:
+// error[E0100]: type mismatch
+//   --> type_mismatch.vr:10:19
+//    |
+// 10 |     let x: Int = "hello";
+//    |            ---   ^^^^^^^ expected `Int`, found `Text`
+//    |            |
+//    |            expected due to this
+//    |
+//    = note: expected type `Int`
+//               found type `Text`
+//    = help: consider using `parse` to convert Text to Int
+
+fn null_mut<T>() -> *mut T { 0 as *mut T }
+
+fn main() {
+    // This file should not compile
+}

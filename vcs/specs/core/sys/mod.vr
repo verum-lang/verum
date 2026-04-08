@@ -1,0 +1,55 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/mod.vr - System Layer Test Module
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, module
+// @description: Root test module for stdlib/sys layer (V-LLSI kernel).
+//
+// This module organizes comprehensive tests for the system layer, which is the
+// foundation of the Verum standard library. Tests are organized by functional
+// category following SOLID principles.
+//
+// Test Categories:
+// - intrinsics/    : VBC runtime intrinsics (memory, atomic, math, etc.)
+// - common_test.vr : Cross-platform OS abstractions
+// - init_test.vr   : Runtime initialization sequence
+// - io_engine_test.vr : Completion-based I/O protocol
+// - linux/         : Linux-specific FFI tests
+// - darwin/        : macOS-specific FFI tests
+// - windows/       : Windows-specific FFI tests
+//
+// Layer: 0 (V-LLSI Kernel - No dependencies on higher layers)
+// =============================================================================
+
+module test.stdlib.sys;
+
+// =============================================================================
+// Test Module Exports
+// =============================================================================
+// Each submodule contains tests for a specific category of functionality.
+// Tests follow the VCS test format with directives for tier, level, and tags.
+// =============================================================================
+
+// Intrinsic tests (organized by category)
+public module intrinsics;
+
+// Common system abstractions
+public module common_test;
+
+// Runtime initialization
+public module init_test;
+
+// I/O engine protocol
+public module io_engine_test;
+
+// Platform-specific tests
+@cfg(target_os = "linux")
+public module linux;
+
+@cfg(target_os = "macos")
+public module darwin;
+
+@cfg(target_os = "windows")
+public module windows;

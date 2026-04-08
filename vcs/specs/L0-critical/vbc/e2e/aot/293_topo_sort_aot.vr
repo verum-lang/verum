@@ -1,0 +1,318 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, topological-sort, graph, kahn, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for topological sort using Kahn's algorithm on DAGs
+
+// Adjacency matrix for up to 8 nodes (row-major: adj[i*8+j] = 1 means edge i->j)
+// Using 64 entries as a flat record
+type AdjRow is {
+    e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+type Graph8 is {
+    r0: AdjRow, r1: AdjRow, r2: AdjRow, r3: AdjRow,
+    r4: AdjRow, r5: AdjRow, r6: AdjRow, r7: AdjRow,
+    nodes: Int
+};
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+fn row_new() -> AdjRow { AdjRow { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 } }
+
+fn row_get(r: AdjRow, j: Int) -> Int {
+    if j == 0 { r.e0 } else if j == 1 { r.e1 }
+    else if j == 2 { r.e2 } else if j == 3 { r.e3 }
+    else if j == 4 { r.e4 } else if j == 5 { r.e5 }
+    else if j == 6 { r.e6 } else { r.e7 }
+}
+
+fn row_set(r: AdjRow, j: Int, v: Int) -> AdjRow {
+    AdjRow {
+        e0: if j == 0 { v } else { r.e0 }, e1: if j == 1 { v } else { r.e1 },
+        e2: if j == 2 { v } else { r.e2 }, e3: if j == 3 { v } else { r.e3 },
+        e4: if j == 4 { v } else { r.e4 }, e5: if j == 5 { v } else { r.e5 },
+        e6: if j == 6 { v } else { r.e6 }, e7: if j == 7 { v } else { r.e7 }
+    }
+}
+
+fn graph_get_row(g: Graph8, i: Int) -> AdjRow {
+    if i == 0 { g.r0 } else if i == 1 { g.r1 }
+    else if i == 2 { g.r2 } else if i == 3 { g.r3 }
+    else if i == 4 { g.r4 } else if i == 5 { g.r5 }
+    else if i == 6 { g.r6 } else { g.r7 }
+}
+
+fn graph_set_row(g: Graph8, i: Int, r: AdjRow) -> Graph8 {
+    Graph8 {
+        r0: if i == 0 { r } else { g.r0 }, r1: if i == 1 { r } else { g.r1 },
+        r2: if i == 2 { r } else { g.r2 }, r3: if i == 3 { r } else { g.r3 },
+        r4: if i == 4 { r } else { g.r4 }, r5: if i == 5 { r } else { g.r5 },
+        r6: if i == 6 { r } else { g.r6 }, r7: if i == 7 { r } else { g.r7 },
+        nodes: g.nodes
+    }
+}
+
+fn graph_has_edge(g: Graph8, from: Int, to: Int) -> Bool {
+    row_get(graph_get_row(g, from), to) == 1
+}
+
+fn graph_new(n: Int) -> Graph8 {
+    let r = row_new();
+    Graph8 { r0: r, r1: r, r2: r, r3: r, r4: r, r5: r, r6: r, r7: r, nodes: n }
+}
+
+fn graph_add_edge(g: Graph8, from: Int, to: Int) -> Graph8 {
+    let old_row = graph_get_row(g, from);
+    let new_row = row_set(old_row, to, 1);
+    graph_set_row(g, from, new_row)
+}
+
+// Compute in-degree for each node
+fn compute_in_degrees(g: Graph8) -> Arr8 {
+    let mut deg = arr8_new(g.nodes);
+    let mut i = 0;
+    while i < g.nodes {
+        let mut j = 0;
+        while j < g.nodes {
+            if graph_has_edge(g, i, j) {
+                deg = arr8_set(deg, j, arr8_get(deg, j) + 1);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    deg
+}
+
+// Kahn's algorithm for topological sort
+// Returns: sorted order in Arr8 (with len = number of nodes processed)
+// If len < g.nodes, graph has a cycle
+type TopoResult is { order: Arr8, valid: Int };
+
+fn topo_sort(g: Graph8) -> TopoResult {
+    let mut in_deg = compute_in_degrees(g);
+
+    // Queue (use Arr8 as simple queue with front/back pointers)
+    let mut queue = arr8_new(0);
+    let mut q_front = 0;
+    let mut q_back = 0;
+
+    // Enqueue all nodes with in-degree 0
+    let mut i = 0;
+    while i < g.nodes {
+        if arr8_get(in_deg, i) == 0 {
+            queue = arr8_set(queue, q_back, i);
+            q_back = q_back + 1;
+        }
+        i = i + 1;
+    }
+
+    let mut order = arr8_new(0);
+    let mut count = 0;
+
+    while q_front < q_back {
+        let node = arr8_get(queue, q_front);
+        q_front = q_front + 1;
+
+        order = arr8_set(order, count, node);
+        count = count + 1;
+
+        // Reduce in-degree of neighbors
+        let mut j = 0;
+        while j < g.nodes {
+            if graph_has_edge(g, node, j) {
+                let new_deg = arr8_get(in_deg, j) - 1;
+                in_deg = arr8_set(in_deg, j, new_deg);
+                if new_deg == 0 {
+                    queue = arr8_set(queue, q_back, j);
+                    q_back = q_back + 1;
+                }
+            }
+            j = j + 1;
+        }
+    }
+
+    let result_order = Arr8 {
+        a0: order.a0, a1: order.a1, a2: order.a2, a3: order.a3,
+        a4: order.a4, a5: order.a5, a6: order.a6, a7: order.a7,
+        len: count
+    };
+
+    if count == g.nodes {
+        TopoResult { order: result_order, valid: 1 }
+    } else {
+        TopoResult { order: result_order, valid: 0 }
+    }
+}
+
+// Validate topological order: for every edge u->v, u must appear before v
+fn validate_topo_order(g: Graph8, order: Arr8) -> Bool {
+    // Build position map: position[node] = index in order
+    let mut pos = arr8_new(g.nodes);
+    let mut i = 0;
+    while i < order.len {
+        pos = arr8_set(pos, arr8_get(order, i), i);
+        i = i + 1;
+    }
+
+    // Check all edges
+    i = 0;
+    while i < g.nodes {
+        let mut j = 0;
+        while j < g.nodes {
+            if graph_has_edge(g, i, j) {
+                // i must come before j
+                if arr8_get(pos, i) >= arr8_get(pos, j) { return false; }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_linear_dag() {
+    // 0 -> 1 -> 2 -> 3
+    let mut g = graph_new(4);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 1, 2);
+    g = graph_add_edge(g, 2, 3);
+
+    let result = topo_sort(g);
+    assert_eq(result.valid, 1);
+    assert_eq(result.order.len, 4);
+    assert_eq(validate_topo_order(g, result.order), true);
+    // Only valid order: 0, 1, 2, 3
+    assert_eq(arr8_get(result.order, 0), 0);
+    assert_eq(arr8_get(result.order, 1), 1);
+    assert_eq(arr8_get(result.order, 2), 2);
+    assert_eq(arr8_get(result.order, 3), 3);
+}
+
+fn test_diamond_dag() {
+    // 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3
+    let mut g = graph_new(4);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 0, 2);
+    g = graph_add_edge(g, 1, 3);
+    g = graph_add_edge(g, 2, 3);
+
+    let result = topo_sort(g);
+    assert_eq(result.valid, 1);
+    assert_eq(result.order.len, 4);
+    assert_eq(validate_topo_order(g, result.order), true);
+    // 0 must be first, 3 must be last
+    assert_eq(arr8_get(result.order, 0), 0);
+    assert_eq(arr8_get(result.order, 3), 3);
+}
+
+fn test_disconnected_dag() {
+    // Two separate chains: 0->1, 2->3
+    let mut g = graph_new(4);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 2, 3);
+
+    let result = topo_sort(g);
+    assert_eq(result.valid, 1);
+    assert_eq(result.order.len, 4);
+    assert_eq(validate_topo_order(g, result.order), true);
+}
+
+fn test_complex_dag() {
+    // 6 nodes:
+    // 5 -> 0, 5 -> 2, 4 -> 0, 4 -> 1, 2 -> 3, 3 -> 1
+    let mut g = graph_new(6);
+    g = graph_add_edge(g, 5, 0);
+    g = graph_add_edge(g, 5, 2);
+    g = graph_add_edge(g, 4, 0);
+    g = graph_add_edge(g, 4, 1);
+    g = graph_add_edge(g, 2, 3);
+    g = graph_add_edge(g, 3, 1);
+
+    let result = topo_sort(g);
+    assert_eq(result.valid, 1);
+    assert_eq(result.order.len, 6);
+    assert_eq(validate_topo_order(g, result.order), true);
+}
+
+fn test_single_node() {
+    let g = graph_new(1);
+    let result = topo_sort(g);
+    assert_eq(result.valid, 1);
+    assert_eq(result.order.len, 1);
+    assert_eq(arr8_get(result.order, 0), 0);
+}
+
+fn test_no_edges() {
+    // All isolated nodes
+    let g = graph_new(5);
+    let result = topo_sort(g);
+    assert_eq(result.valid, 1);
+    assert_eq(result.order.len, 5);
+}
+
+fn test_in_degrees() {
+    let mut g = graph_new(4);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 0, 2);
+    g = graph_add_edge(g, 1, 3);
+    g = graph_add_edge(g, 2, 3);
+
+    let deg = compute_in_degrees(g);
+    assert_eq(arr8_get(deg, 0), 0);
+    assert_eq(arr8_get(deg, 1), 1);
+    assert_eq(arr8_get(deg, 2), 1);
+    assert_eq(arr8_get(deg, 3), 2);
+}
+
+fn test_wide_fan_out() {
+    // Node 0 points to all others
+    let mut g = graph_new(5);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 0, 2);
+    g = graph_add_edge(g, 0, 3);
+    g = graph_add_edge(g, 0, 4);
+
+    let result = topo_sort(g);
+    assert_eq(result.valid, 1);
+    assert_eq(arr8_get(result.order, 0), 0);  // 0 must be first
+    assert_eq(validate_topo_order(g, result.order), true);
+}
+
+fn main() -> Int {
+    test_linear_dag();
+    test_diamond_dag();
+    test_disconnected_dag();
+    test_complex_dag();
+    test_single_node();
+    test_no_edges();
+    test_in_degrees();
+    test_wide_fan_out();
+    print("[OK] 293_topo_sort_aot");
+    0
+}

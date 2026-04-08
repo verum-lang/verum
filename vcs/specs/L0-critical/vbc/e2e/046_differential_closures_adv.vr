@@ -1,0 +1,409 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, interpreter-vs-aot, higher-order, closures, composition
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential higher-order functions test: verifies interpreter and AOT produce
+// identical results for function-as-argument passing, composition, currying
+// simulation via nested calls, and callback patterns.
+
+// ============================================================================
+// Basic named functions used as arguments
+// ============================================================================
+
+fn double(x: Int) -> Int { x * 2 }
+fn triple(x: Int) -> Int { x * 3 }
+fn add_one(x: Int) -> Int { x + 1 }
+fn sub_one(x: Int) -> Int { x - 1 }
+fn square(x: Int) -> Int { x * x }
+fn negate(x: Int) -> Int { 0 - x }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+fn identity(x: Int) -> Int { x }
+fn clamp_to_100(x: Int) -> Int { if x > 100 { 100 } else { x } }
+fn is_even_int(x: Int) -> Int { if x % 2 == 0 { 1 } else { 0 } }
+
+// Two-argument named functions
+fn add_ints(a: Int, b: Int) -> Int { a + b }
+fn mul_ints(a: Int, b: Int) -> Int { a * b }
+fn max_ints(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_ints(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn sub_ints(a: Int, b: Int) -> Int { a - b }
+
+// ============================================================================
+// Higher-order: apply function as argument
+// ============================================================================
+
+fn apply(x: Int, f: fn(Int) -> Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(x: Int, f: fn(Int) -> Int) -> Int {
+    f(f(x))
+}
+
+fn apply_thrice(x: Int, f: fn(Int) -> Int) -> Int {
+    f(f(f(x)))
+}
+
+fn apply_n(x: Int, n: Int, f: fn(Int) -> Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_apply_basic() {
+    assert_eq(apply(5, double), 10);
+    assert_eq(apply(5, square), 25);
+    assert_eq(apply(5, negate), 0 - 5);
+    assert_eq(apply(5, identity), 5);
+
+    assert_eq(apply_twice(3, double), 12);
+    assert_eq(apply_twice(2, square), 16);
+    assert_eq(apply_twice(7, negate), 7);
+
+    assert_eq(apply_thrice(1, double), 8);
+    assert_eq(apply_thrice(3, negate), 0 - 3);
+
+    assert_eq(apply_n(1, 10, double), 1024);
+    assert_eq(apply_n(0, 100, add_one), 100);
+    assert_eq(apply_n(42, 0, double), 42);
+    assert_eq(apply_n(2, 4, square), 65536);
+
+    print("apply_basic: ok");
+}
+
+// ============================================================================
+// Function composition: compose(f, g)(x) = g(f(x))
+// ============================================================================
+
+fn compose(x: Int, f: fn(Int) -> Int, g: fn(Int) -> Int) -> Int {
+    g(f(x))
+}
+
+fn pipeline3(x: Int, f1: fn(Int) -> Int, f2: fn(Int) -> Int, f3: fn(Int) -> Int) -> Int {
+    f3(f2(f1(x)))
+}
+
+fn pipeline4(x: Int, f1: fn(Int) -> Int, f2: fn(Int) -> Int, f3: fn(Int) -> Int, f4: fn(Int) -> Int) -> Int {
+    f4(f3(f2(f1(x))))
+}
+
+fn test_composition() {
+    assert_eq(compose(5, double, add_one), 11);
+    assert_eq(compose(5, add_one, double), 12);
+    assert_eq(compose(3, square, negate), 0 - 9);
+    assert_eq(compose(3, negate, square), 9);
+
+    // Not commutative
+    assert(compose(4, double, add_one) != compose(4, add_one, double));
+
+    // Pipeline of 3 and 4 functions
+    assert_eq(pipeline3(2, double, add_one, square), 25);
+    assert_eq(pipeline3(5, add_one, double, triple), 36);
+    assert_eq(pipeline4(1, add_one, double, add_one, triple), 15);
+    assert_eq(pipeline4(3, double, double, double, double), 48);
+
+    print("composition: ok");
+}
+
+// ============================================================================
+// Currying simulation: nested function calls
+// ============================================================================
+
+fn make_adder_result(base: Int, x: Int) -> Int {
+    base + x
+}
+
+fn make_multiplier_result(factor: Int, x: Int) -> Int {
+    factor * x
+}
+
+fn make_power_result(exp: Int, base: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < exp {
+        result = result * base;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_currying_simulation() {
+    assert_eq(make_adder_result(5, 10), 15);
+    assert_eq(make_adder_result(0, 42), 42);
+    assert_eq(make_adder_result(0 - 3, 10), 7);
+
+    assert_eq(make_multiplier_result(3, 7), 21);
+    assert_eq(make_multiplier_result(0, 100), 0);
+
+    assert_eq(make_power_result(0, 5), 1);
+    assert_eq(make_power_result(2, 5), 25);
+    assert_eq(make_power_result(3, 2), 8);
+    assert_eq(make_power_result(10, 2), 1024);
+
+    print("currying: ok");
+}
+
+// ============================================================================
+// Callback patterns with flat struct arrays
+// ============================================================================
+
+type Arr6 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int };
+
+fn arr6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else { a.e5 }
+}
+
+fn arr6_set(a: Arr6, i: Int, v: Int) -> Arr6 {
+    Arr6 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+    }
+}
+
+fn arr6_map(a: Arr6, f: fn(Int) -> Int) -> Arr6 {
+    Arr6 {
+        e0: f(a.e0),
+        e1: f(a.e1),
+        e2: f(a.e2),
+        e3: f(a.e3),
+        e4: f(a.e4),
+        e5: f(a.e5),
+    }
+}
+
+fn arr6_fold(a: Arr6, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let r0 = f(init, a.e0);
+    let r1 = f(r0, a.e1);
+    let r2 = f(r1, a.e2);
+    let r3 = f(r2, a.e3);
+    let r4 = f(r3, a.e4);
+    f(r4, a.e5)
+}
+
+fn arr6_count_if(a: Arr6, pred: fn(Int) -> Int) -> Int {
+    pred(a.e0) + pred(a.e1) + pred(a.e2) + pred(a.e3) + pred(a.e4) + pred(a.e5)
+}
+
+fn test_map_callback() {
+    let a = Arr6 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6 };
+
+    let doubled = arr6_map(a, double);
+    assert_eq(arr6_get(doubled, 0), 2);
+    assert_eq(arr6_get(doubled, 5), 12);
+
+    let squared = arr6_map(a, square);
+    assert_eq(arr6_get(squared, 0), 1);
+    assert_eq(arr6_get(squared, 5), 36);
+
+    let negated = arr6_map(a, negate);
+    assert_eq(arr6_get(negated, 0), 0 - 1);
+    assert_eq(arr6_get(negated, 5), 0 - 6);
+
+    assert_eq(arr6_get(arr6_map(a, identity), 0), 1);
+
+    print("map_callback: ok");
+}
+
+fn test_fold_callback() {
+    let a = Arr6 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6 };
+
+    // Sum via fold
+    assert_eq(arr6_fold(a, 0, add_ints), 21);
+
+    // Product via fold
+    assert_eq(arr6_fold(a, 1, mul_ints), 720);
+
+    // Max via fold
+    assert_eq(arr6_fold(a, 0, max_ints), 6);
+
+    // Min via fold (start with large value)
+    assert_eq(arr6_fold(a, 9999, min_ints), 1);
+
+    // Fold with subtraction (left-fold): ((((((0-1)-2)-3)-4)-5)-6) = -21
+    assert_eq(arr6_fold(a, 0, sub_ints), 0 - 21);
+
+    print("fold_callback: ok");
+}
+
+fn test_count_callback() {
+    let a = Arr6 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6 };
+
+    // Count even values
+    assert_eq(arr6_count_if(a, is_even_int), 3);
+
+    // All zeros -> no evens (identity returns nonzero for all)
+    let zeros = Arr6 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0 };
+    assert_eq(arr6_count_if(zeros, is_even_int), 6);
+
+    print("count_callback: ok");
+}
+
+// ============================================================================
+// Reduce range with callback
+// ============================================================================
+
+fn reduce_range(lo: Int, hi: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = lo;
+    while i <= hi {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_reduce_range() {
+    // Sum 1..10
+    assert_eq(reduce_range(1, 10, 0, add_ints), 55);
+
+    // Factorial 6!
+    assert_eq(reduce_range(1, 6, 1, mul_ints), 720);
+
+    // Factorial 10!
+    assert_eq(reduce_range(1, 10, 1, mul_ints), 3628800);
+
+    // Max in range
+    assert_eq(reduce_range(1, 20, 0, max_ints), 20);
+
+    // Sum of empty range
+    assert_eq(reduce_range(5, 4, 0, add_ints), 0);
+
+    print("reduce_range: ok");
+}
+
+// ============================================================================
+// Function selection via dispatch
+// ============================================================================
+
+fn select_transform(op: Int) -> fn(Int) -> Int {
+    if op == 0 { double }
+    else if op == 1 { triple }
+    else if op == 2 { square }
+    else if op == 3 { negate }
+    else { identity }
+}
+
+fn test_function_dispatch() {
+    let f0 = select_transform(0);
+    let f1 = select_transform(1);
+    let f2 = select_transform(2);
+    let f3 = select_transform(3);
+    let f4 = select_transform(99);
+
+    assert_eq(f0(5), 10);
+    assert_eq(f1(5), 15);
+    assert_eq(f2(5), 25);
+    assert_eq(f3(5), 0 - 5);
+    assert_eq(f4(5), 5);
+
+    // Apply dispatched function in a loop
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 4 {
+        let f = select_transform(i);
+        sum = sum + f(3);
+        i = i + 1;
+    }
+    // double(3)=6 + triple(3)=9 + square(3)=9 + negate(3)=-3 = 21
+    assert_eq(sum, 21);
+
+    print("dispatch: ok");
+}
+
+// ============================================================================
+// Chained map operations
+// ============================================================================
+
+fn test_chained_maps() {
+    let a = Arr6 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6 };
+
+    // double then add_one
+    let b = arr6_map(arr6_map(a, double), add_one);
+    assert_eq(arr6_get(b, 0), 3);  // 1*2+1
+    assert_eq(arr6_get(b, 1), 5);  // 2*2+1
+    assert_eq(arr6_get(b, 5), 13); // 6*2+1
+
+    // triple then square
+    let c = arr6_map(arr6_map(a, triple), square);
+    assert_eq(arr6_get(c, 0), 9);    // (1*3)^2
+    assert_eq(arr6_get(c, 1), 36);   // (2*3)^2
+    assert_eq(arr6_get(c, 2), 81);   // (3*3)^2
+
+    // negate then abs_val = same as abs_val (for positive inputs)
+    let d = arr6_map(arr6_map(a, negate), abs_val);
+    assert_eq(arr6_get(d, 0), 1);
+    assert_eq(arr6_get(d, 5), 6);
+
+    print("chained_maps: ok");
+}
+
+// ============================================================================
+// Two-pass transforms: map then fold
+// ============================================================================
+
+fn test_map_fold_sum_squares() {
+    let a = Arr6 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6 };
+    let sq = arr6_map(a, square);
+    assert_eq(arr6_fold(sq, 0, add_ints), 91);
+    print("map_fold_sum_sq: ok");
+}
+
+fn test_map_fold_sum_doubled() {
+    let a = Arr6 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6 };
+    let db = arr6_map(a, double);
+    assert_eq(arr6_fold(db, 0, add_ints), 42);
+    print("map_fold_sum_dbl: ok");
+}
+
+fn test_map_fold_product_inc() {
+    let a = Arr6 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6 };
+    let inc = arr6_map(a, add_one);
+    // inc = [2,3,4,5,6,7], fold(1, mul) = 1*2*3*4*5*6*7 = 5040
+    assert_eq(arr6_fold(inc, 1, mul_ints), 5040);
+    print("map_fold_prod: ok");
+}
+
+fn compute_map_fold_max_neg() -> Int {
+    let a = Arr6 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6 };
+    let neg = arr6_map(a, negate);
+    arr6_fold(neg, 0 - 9999, max_ints)
+}
+
+fn test_map_fold_max_neg() {
+    assert_eq(compute_map_fold_max_neg(), 0 - 1);
+    print("map_fold_max_neg: ok");
+}
+
+fn main() -> Int {
+    test_apply_basic();
+    test_composition();
+    test_currying_simulation();
+    test_map_callback();
+    test_fold_callback();
+    test_count_callback();
+    test_reduce_range();
+    test_function_dispatch();
+    test_chained_maps();
+    test_map_fold_sum_squares();
+    test_map_fold_sum_doubled();
+    test_map_fold_product_inc();
+    test_map_fold_max_neg();
+    print("[OK] 046_differential_closures_adv");
+    0
+}

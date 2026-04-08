@@ -1,0 +1,154 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, linker, visibility, symbols
+// @description: Symbol visibility control tests
+
+/// Default visibility - exported from shared library
+@visibility(default)
+fn exported_function() -> Int {
+    42
+}
+
+/// Hidden visibility - not exported from shared library
+/// Can still be called within the same shared object
+@visibility(hidden)
+fn internal_implementation() -> Int {
+    100
+}
+
+/// Protected visibility - exported but cannot be overridden
+/// Prevents symbol interposition/preloading
+@visibility(protected)
+fn protected_function() -> Int {
+    200
+}
+
+/// Combining visibility with linkage
+@linkage(external)
+@visibility(default)
+fn fully_public() -> Int {
+    1
+}
+
+@linkage(external)
+@visibility(hidden)
+fn hidden_external() -> Int {
+    // Externally linked but not exported
+    2
+}
+
+/// Global variable visibility
+@visibility(default)
+static PUBLIC_GLOBAL: Int = 10;
+
+@visibility(hidden)
+static HIDDEN_GLOBAL: Int = 20;
+
+@visibility(protected)
+static PROTECTED_GLOBAL: Int = 30;
+
+/// Type with visibility on its functions
+type Counter is {
+    value: Int,
+};
+
+implement Counter {
+    /// Public constructor
+    @visibility(default)
+    fn new() -> Self {
+        Counter { value: 0 }
+    }
+
+    /// Hidden implementation detail
+    @visibility(hidden)
+    fn internal_reset(&mut self) {
+        self.value = 0;
+    }
+
+    /// Protected method
+    @visibility(protected)
+    fn increment(&mut self) {
+        self.value += 1;
+    }
+
+    /// Accessor is public
+    @visibility(default)
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+/// Visibility for C exports
+@export("C")
+@visibility(default)
+fn c_api_public(x: Int) -> Int {
+    x * 2
+}
+
+@export("C")
+@visibility(hidden)
+fn c_api_internal(x: Int) -> Int {
+    // Internal helper for other C functions in same .so
+    x + 1
+}
+
+/// Template-like function with hidden visibility for each instantiation
+@visibility(hidden)
+fn internal_generic<T>(x: T) -> T {
+    x
+}
+
+/// Weak symbol with visibility
+@weak
+@visibility(default)
+fn overridable_hook() -> Int {
+    0
+}
+
+/// Protected weak (unusual but valid)
+@weak
+@visibility(protected)
+fn protected_weak() -> Int {
+    1
+}
+
+/// Module-level visibility pragma (affects all following symbols)
+// @pragma visibility(hidden)
+fn function_affected_by_pragma() -> Int {
+    3
+}
+
+fn main() {
+    let a = exported_function();
+    assert(a == 42);
+
+    let b = internal_implementation();
+    assert(b == 100);
+
+    let c = protected_function();
+    assert(c == 200);
+
+    assert(PUBLIC_GLOBAL == 10);
+    assert(HIDDEN_GLOBAL == 20);
+    assert(PROTECTED_GLOBAL == 30);
+
+    let mut counter = Counter::new();
+    counter.increment();
+    assert(counter.get() == 1);
+
+    let d = c_api_public(10);
+    assert(d == 20);
+
+    let e = c_api_internal(5);
+    assert(e == 6);
+
+    let f = internal_generic(42);
+    assert(f == 42);
+
+    let g = overridable_hook();
+    assert(g == 0);
+
+    let h = protected_weak();
+    assert(h == 1);
+}

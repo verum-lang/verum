@@ -1,0 +1,132 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, return, function
+
+// Simple return with value
+fn get_value() -> Int {
+    return 42;
+}
+
+// Return without value (unit)
+fn do_action() {
+    action();
+    return;
+}
+
+// Implicit return (last expression)
+fn compute() -> Int {
+    let x = 5;
+    x * 2  // implicit return
+}
+
+// Early return
+fn process(x: Int) -> Int {
+    if x < 0 {
+        return -1;
+    }
+    x * 2
+}
+
+// Multiple early returns
+fn classify(x: Int) -> Text {
+    if x < 0 {
+        return "negative";
+    }
+    if x == 0 {
+        return "zero";
+    }
+    if x < 10 {
+        return "small";
+    }
+    return "large";
+}
+
+// Return from nested block
+fn find(list: List<Int>, target: Int) -> Maybe<Int> {
+    for (i, item) in list.enumerate() {
+        if item == target {
+            return Some(i);
+        }
+    }
+    return None;
+}
+
+// Return with complex expression
+fn calculate() -> Int {
+    return compute_a() + compute_b() * compute_c();
+}
+
+// Return with function call
+fn delegate() -> Result<Data, Error> {
+    return other_function();
+}
+
+// Return with constructor
+fn create_point() -> Point {
+    return Point { x: 1.0, y: 2.0 };
+}
+
+// Return Option/Maybe
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        return None;
+    }
+    return Some(a / b);
+}
+
+// Return Result
+fn try_parse(s: Text) -> Result<Int, Error> {
+    if s.is_empty() {
+        return Err(Error.Empty);
+    }
+    return Ok(s.parse());
+}
+
+// Return with match
+fn process_option(opt: Maybe<Int>) -> Int {
+    return match opt {
+        Some(x) => x * 2,
+        None => 0,
+    };
+}
+
+// Return in closure
+fn test_return_in_closure() {
+    let f = |x| {
+        if x < 0 {
+            return 0;
+        }
+        return x;
+    };
+}
+
+// Return with tuple
+fn get_pair() -> (Int, Int) {
+    return (1, 2);
+}
+
+// Return reference
+fn get_ref(x: &Int) -> &Int {
+    return x;
+}
+
+// Return with type cast
+fn to_float(x: Int) -> Float {
+    return x as Float;
+}
+
+// Return with await
+async fn fetch() -> Data {
+    return http_get(url).await;
+}
+
+// Never return (diverging) - Verum uses Never type instead of !
+fn panic_fn() -> Never {
+    panic("This never returns");
+}
+
+// Return from if expression
+fn abs(x: Int) -> Int {
+    return if x < 0 { -x } else { x };
+}

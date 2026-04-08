@@ -1,0 +1,56 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: iterator, protocol, custom-type, for-in
+// @description: Custom iterator protocol — user types with has_next()/next() in for-in
+
+type Counter is {
+    current: Int,
+    max: Int,
+};
+
+implement Counter {
+    fn has_next(&self) -> Bool {
+        self.current < self.max
+    }
+
+    fn next(&mut self) -> Int {
+        let val = self.current;
+        self.current = self.current + 1;
+        val
+    }
+}
+
+fn sum_counter(c: &mut Counter) -> Int {
+    let mut total = 0;
+    for x in c {
+        total = total + x;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Test 1: basic custom iterator
+    let mut c = Counter { current: 0, max: 5 };
+    let mut sum = 0;
+    for x in c {
+        sum = sum + x;
+    }
+    assert_eq(sum, 10); // 0+1+2+3+4
+
+    // Test 2: custom iterator in helper function
+    let mut c2 = Counter { current: 1, max: 4 };
+    let s2 = sum_counter(&mut c2);
+    assert_eq(s2, 6); // 1+2+3
+
+    // Test 3: empty iterator
+    let mut c3 = Counter { current: 5, max: 5 };
+    let mut count = 0;
+    for x in c3 {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+
+    print("985_custom_iterator_protocol: PASS");
+    0
+}

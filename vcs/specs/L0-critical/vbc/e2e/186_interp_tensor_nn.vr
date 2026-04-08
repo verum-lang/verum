@@ -1,0 +1,798 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, nn
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Neural network operations — softmax, layer norm, batch norm, ReLU, sigmoid, tanh, cross-entropy, dropout simulation
+
+// ============================================================================
+// Arr8: Fixed-size array of 8 Ints with length
+// All values stored as scaled integers (x1000) for precision.
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        len: a.len
+    }
+}
+
+fn a8_from4(a: Int, b: Int, c: Int, d: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: 0, e5: 0, e6: 0, e7: 0, len: 4 }
+}
+
+fn a8_from5(a: Int, b: Int, c: Int, d: Int, e: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: 0, e6: 0, e7: 0, len: 5 }
+}
+
+fn a8_from8(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: g, e7: h, len: 8 }
+}
+
+fn a8_zeros(n: Int) -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: n }
+}
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+// ============================================================================
+// Activation functions
+// ============================================================================
+
+// ReLU: max(0, x)
+fn relu(x: Int) -> Int {
+    if x > 0 { x } else { 0 }
+}
+
+fn arr_relu(a: Arr8) -> Arr8 {
+    let mut r = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        r = a8_set(r, i, relu(a8_get(a, i)));
+        i = i + 1;
+    }
+    r
+}
+
+// Leaky ReLU: x if x >= 0, else x/10 (approximating alpha=0.1)
+fn leaky_relu(x: Int) -> Int {
+    if x >= 0 { x } else { x / 10 }
+}
+
+fn arr_leaky_relu(a: Arr8) -> Arr8 {
+    let mut r = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        r = a8_set(r, i, leaky_relu(a8_get(a, i)));
+        i = i + 1;
+    }
+    r
+}
+
+// ReLU6: min(max(0, x), 6000) (values scaled x1000, so 6 = 6000)
+fn relu6(x: Int) -> Int {
+    if x < 0 { 0 }
+    else if x > 6000 { 6000 }
+    else { x }
+}
+
+fn arr_relu6(a: Arr8) -> Arr8 {
+    let mut r = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        r = a8_set(r, i, relu6(a8_get(a, i)));
+        i = i + 1;
+    }
+    r
+}
+
+// ELU: x if x >= 0, else alpha*(exp(x)-1) approximated
+// Using alpha=1000 (representing 1.0 scaled x1000)
+// exp(x) approx: 1000 + x for small x (x scaled x1000)
+fn elu_approx(x: Int) -> Int {
+    if x >= 0 { x }
+    else {
+        // alpha * (exp(x/1000) - 1) * 1000
+        // approx: x for small negative x (first-order Taylor)
+        x
+    }
+}
+
+fn arr_elu(a: Arr8) -> Arr8 {
+    let mut r = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        r = a8_set(r, i, elu_approx(a8_get(a, i)));
+        i = i + 1;
+    }
+    r
+}
+
+// Sigmoid approximation: maps input to [0, 1000] range
+// sigmoid(x) ~ 500 + x*100, clamped to [0, 1000]
+// Input x is in "real" units (not scaled), output scaled x1000
+fn sigmoid_approx(x: Int) -> Int {
+    let raw = 500 + x * 100;
+    if raw < 0 { 0 }
+    else if raw > 1000 { 1000 }
+    else { raw }
+}
+
+fn arr_sigmoid(a: Arr8) -> Arr8 {
+    let mut r = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        r = a8_set(r, i, sigmoid_approx(a8_get(a, i)));
+        i = i + 1;
+    }
+    r
+}
+
+// Tanh approximation: maps input to [-1000, 1000]
+// tanh(x) ~ x*200, clamped to [-1000, 1000]
+fn tanh_approx(x: Int) -> Int {
+    let raw = x * 200;
+    if raw < -1000 { -1000 }
+    else if raw > 1000 { 1000 }
+    else { raw }
+}
+
+fn arr_tanh(a: Arr8) -> Arr8 {
+    let mut r = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        r = a8_set(r, i, tanh_approx(a8_get(a, i)));
+        i = i + 1;
+    }
+    r
+}
+
+// GELU approximation: x * sigmoid(1.702 * x)
+// Simplified: x * (500 + x * 170) / 1000 (for small x)
+fn gelu_approx(x: Int) -> Int {
+    let sig = sigmoid_approx(x * 170 / 100);
+    x * sig / 1000
+}
+
+// ============================================================================
+// Softmax (integer approximation)
+// exp_approx maps [-10..10] -> [positive values]
+// Then normalizes to sum = 10000
+// ============================================================================
+
+fn exp_approx(x: Int) -> Int {
+    let val = 1000 + x * 100;
+    if val < 1 { 1 } else { val }
+}
+
+fn softmax_int(input: Arr8) -> Arr8 {
+    let mut exp_sum = 0;
+    let mut i = 0;
+    while i < input.len {
+        exp_sum = exp_sum + exp_approx(a8_get(input, i));
+        i = i + 1;
+    }
+    let mut out = a8_zeros(input.len);
+    i = 0;
+    while i < input.len {
+        let exp_val = exp_approx(a8_get(input, i));
+        out = a8_set(out, i, exp_val * 10000 / exp_sum);
+        i = i + 1;
+    }
+    out
+}
+
+fn argmax(a: Arr8) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = a8_get(a, 0);
+    let mut i = 1;
+    while i < a.len {
+        let v = a8_get(a, i);
+        if v > best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn arr_sum(a: Arr8) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < a.len {
+        s = s + a8_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+// ============================================================================
+// Layer normalization (integer approximation)
+// LayerNorm(x) = (x - mean) * weight / sqrt(var) + bias
+// We approximate: compute mean, compute variance (scaled), normalize
+// ============================================================================
+
+fn arr_mean(a: Arr8) -> Int {
+    arr_sum(a) / a.len
+}
+
+fn arr_variance_x1000(a: Arr8) -> Int {
+    let mean = arr_mean(a);
+    let mut var_sum = 0;
+    let mut i = 0;
+    while i < a.len {
+        let diff = a8_get(a, i) - mean;
+        var_sum = var_sum + diff * diff;
+        i = i + 1;
+    }
+    (var_sum * 1000) / a.len
+}
+
+// Approximate integer sqrt for small values using Newton's method
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        let mut x = n;
+        let mut y = (x + 1) / 2;
+        while y < x {
+            x = y;
+            y = (x + n / x) / 2;
+        }
+        x
+    }
+}
+
+// Layer norm: normalize to zero mean, unit variance (scaled x1000)
+// weight and bias applied as: out = normalized * weight + bias
+fn layer_norm(input: Arr8, weight: Arr8, bias: Arr8) -> Arr8 {
+    let mean = arr_mean(input);
+    let var_x1000 = arr_variance_x1000(input);
+    // std_x1000 = sqrt(var_x1000 * 1000) = sqrt(var * 1000000) / 1000
+    // We need std in scaled form: std_inv ~= 1000 / sqrt(var)
+    // Approximate: sqrt(var_x1000) gives us sqrt(var*1000)
+    let std_approx = isqrt(var_x1000);
+    let eps = 1;  // Small epsilon to prevent division by zero
+    let std_safe = if std_approx < eps { eps } else { std_approx };
+
+    let mut out = a8_zeros(input.len);
+    let mut i = 0;
+    while i < input.len {
+        let centered = a8_get(input, i) - mean;
+        // normalized = centered * 1000 / std (in sqrt(x*1000) space)
+        let normalized = centered * 31 / std_safe;  // ~sqrt(1000) ~= 31.6
+        // Apply weight and bias (both scaled appropriately)
+        let scaled = normalized * a8_get(weight, i) / 1000 + a8_get(bias, i);
+        out = a8_set(out, i, scaled);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Batch normalization simulation
+// BN(x) = (x - running_mean) * weight / sqrt(running_var + eps) + bias
+// ============================================================================
+
+fn batch_norm(input: Arr8, running_mean: Arr8, running_var: Arr8, weight: Arr8, bias: Arr8) -> Arr8 {
+    let mut out = a8_zeros(input.len);
+    let mut i = 0;
+    while i < input.len {
+        let centered = a8_get(input, i) - a8_get(running_mean, i);
+        let var_i = a8_get(running_var, i);
+        let std_i = isqrt(int_abs(var_i));
+        let std_safe = if std_i < 1 { 1 } else { std_i };
+        let normalized = centered * 100 / std_safe;
+        let scaled = normalized * a8_get(weight, i) / 100 + a8_get(bias, i);
+        out = a8_set(out, i, scaled);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Cross-entropy loss (integer approximation)
+// CE = -sum(target * log(pred))
+// We use log approximation: log(x/10000) * 1000 ~ (x - 5000) / 5 for mid-range
+// ============================================================================
+
+fn log_approx_x1000(x: Int) -> Int {
+    // x is in [1, 10000] representing [0.0001, 1.0]
+    // log(1) = 0, log(0.5) = -693, log(0.1) = -2302
+    // Piecewise linear approximation
+    if x <= 0 { -10000 }  // very negative for zero probability
+    else if x <= 100 { -7000 + x * 20 }
+    else if x <= 1000 { -4600 + (x - 100) * 3 }
+    else if x <= 5000 { -1600 + (x - 1000) / 3 }
+    else if x <= 9000 { -266 + (x - 5000) / 6 }
+    else { 0 - (10000 - x) / 10 }
+}
+
+fn cross_entropy_loss(pred: Arr8, target_idx: Int) -> Int {
+    // For one-hot target, CE = -log(pred[target_idx])
+    let p = a8_get(pred, target_idx);
+    0 - log_approx_x1000(p)
+}
+
+// ============================================================================
+// Dropout simulation (deterministic with fixed mask)
+// During training: multiply by mask, scale by 1/(1-p)
+// During inference: no-op
+// ============================================================================
+
+fn dropout_train(input: Arr8, mask: Arr8, inv_keep_prob_x1000: Int) -> Arr8 {
+    // mask: 0 = dropped, 1000 = kept
+    let mut out = a8_zeros(input.len);
+    let mut i = 0;
+    while i < input.len {
+        let m = a8_get(mask, i);
+        if m > 0 {
+            out = a8_set(out, i, a8_get(input, i) * inv_keep_prob_x1000 / 1000);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Test 1: ReLU
+// ============================================================================
+
+@test
+fn test_relu() {
+    let data = a8_from5(-3, -1, 0, 2, 5);
+    let result = arr_relu(data);
+    assert_eq(a8_get(result, 0), 0);
+    assert_eq(a8_get(result, 1), 0);
+    assert_eq(a8_get(result, 2), 0);
+    assert_eq(a8_get(result, 3), 2);
+    assert_eq(a8_get(result, 4), 5);
+
+    // ReLU is idempotent: relu(relu(x)) = relu(x)
+    let rr = arr_relu(arr_relu(data));
+    assert_eq(a8_get(rr, 0), 0);
+    assert_eq(a8_get(rr, 3), 2);
+    assert_eq(a8_get(rr, 4), 5);
+    print("  test_relu: ok");
+}
+
+// ============================================================================
+// Test 2: Leaky ReLU
+// ============================================================================
+
+@test
+fn test_leaky_relu() {
+    let data = a8_from5(-100, -50, 0, 30, 70);
+    let result = arr_leaky_relu(data);
+    assert_eq(a8_get(result, 0), -10);   // -100/10
+    assert_eq(a8_get(result, 1), -5);    // -50/10
+    assert_eq(a8_get(result, 2), 0);
+    assert_eq(a8_get(result, 3), 30);
+    assert_eq(a8_get(result, 4), 70);
+
+    // Leaky ReLU preserves positive values
+    let pos = a8_from4(10, 20, 30, 40);
+    let lr = arr_leaky_relu(pos);
+    assert_eq(a8_get(lr, 0), 10);
+    assert_eq(a8_get(lr, 3), 40);
+    print("  test_leaky_relu: ok");
+}
+
+// ============================================================================
+// Test 3: ReLU6
+// ============================================================================
+
+@test
+fn test_relu6() {
+    // Values scaled x1000: 6 = 6000
+    let data = a8_from5(-2000, 0, 3000, 6000, 9000);
+    let result = arr_relu6(data);
+    assert_eq(a8_get(result, 0), 0);       // clipped to 0
+    assert_eq(a8_get(result, 1), 0);
+    assert_eq(a8_get(result, 2), 3000);    // pass through
+    assert_eq(a8_get(result, 3), 6000);    // at upper bound
+    assert_eq(a8_get(result, 4), 6000);    // clipped to 6000
+    print("  test_relu6: ok");
+}
+
+// ============================================================================
+// Test 4: Sigmoid approximation
+// ============================================================================
+
+@test
+fn test_sigmoid() {
+    // sigmoid(0) ~ 0.5 -> 500
+    assert_eq(sigmoid_approx(0), 500);
+
+    // sigmoid(-10) ~ 0 -> 0
+    assert_eq(sigmoid_approx(-10), 0);
+
+    // sigmoid(10) ~ 1 -> 1000
+    assert_eq(sigmoid_approx(10), 1000);
+
+    // sigmoid(2) ~ 0.7 -> 700
+    assert_eq(sigmoid_approx(2), 700);
+
+    // sigmoid(-2) ~ 0.3 -> 300
+    assert_eq(sigmoid_approx(-2), 300);
+
+    // Symmetry: sigmoid(x) + sigmoid(-x) ~ 1000
+    let s2 = sigmoid_approx(2);
+    let sm2 = sigmoid_approx(-2);
+    assert_eq(s2 + sm2, 1000);
+
+    let s3 = sigmoid_approx(3);
+    let sm3 = sigmoid_approx(-3);
+    assert_eq(s3 + sm3, 1000);
+
+    // Apply to array
+    let data = a8_from4(-5, -2, 0, 3);
+    let sig = arr_sigmoid(data);
+    // Values should be monotonically increasing
+    assert(a8_get(sig, 0) < a8_get(sig, 1));
+    assert(a8_get(sig, 1) < a8_get(sig, 2));
+    assert(a8_get(sig, 2) < a8_get(sig, 3));
+    print("  test_sigmoid: ok");
+}
+
+// ============================================================================
+// Test 5: Tanh approximation
+// ============================================================================
+
+@test
+fn test_tanh() {
+    // tanh(0) = 0
+    assert_eq(tanh_approx(0), 0);
+
+    // tanh large positive -> 1000
+    assert_eq(tanh_approx(10), 1000);
+
+    // tanh large negative -> -1000
+    assert_eq(tanh_approx(-10), -1000);
+
+    // tanh(2) ~ 400
+    assert_eq(tanh_approx(2), 400);
+
+    // Anti-symmetry: tanh(-x) = -tanh(x)
+    assert_eq(tanh_approx(3), 0 - tanh_approx(-3));
+    assert_eq(tanh_approx(1), 0 - tanh_approx(-1));
+
+    // Array tanh
+    let data = a8_from4(-5, -1, 1, 5);
+    let th = arr_tanh(data);
+    // Should be anti-symmetric
+    assert_eq(a8_get(th, 0), 0 - a8_get(th, 3));
+    assert_eq(a8_get(th, 1), 0 - a8_get(th, 2));
+    print("  test_tanh: ok");
+}
+
+// ============================================================================
+// Test 6: Softmax
+// ============================================================================
+
+@test
+fn test_softmax() {
+    // Equal inputs -> equal outputs
+    let uniform = a8_from4(5, 5, 5, 5);
+    let sm = softmax_int(uniform);
+    assert_eq(a8_get(sm, 0), 2500);
+    assert_eq(a8_get(sm, 1), 2500);
+    assert_eq(a8_get(sm, 2), 2500);
+    assert_eq(a8_get(sm, 3), 2500);
+
+    // Sum should be ~10000
+    let sm_sum = arr_sum(sm);
+    assert_eq(sm_sum, 10000);
+
+    // Peaked distribution: argmax preserved
+    let peaked = a8_from4(0, 0, 9, 0);
+    let sm_peaked = softmax_int(peaked);
+    assert_eq(argmax(sm_peaked), 2);
+
+    // All values should be positive
+    assert(a8_get(sm_peaked, 0) > 0);
+    assert(a8_get(sm_peaked, 2) > a8_get(sm_peaked, 0));
+
+    // Verify sum ~ 10000 (within integer truncation tolerance)
+    let sum_peaked = arr_sum(sm_peaked);
+    assert(sum_peaked >= 9900);
+    assert(sum_peaked <= 10100);
+
+    // Ordering preserved: softmax is monotonic
+    let ordered = a8_from4(1, 3, 2, 4);
+    let sm_ord = softmax_int(ordered);
+    assert(a8_get(sm_ord, 3) > a8_get(sm_ord, 1));
+    assert(a8_get(sm_ord, 1) > a8_get(sm_ord, 2));
+    assert(a8_get(sm_ord, 2) > a8_get(sm_ord, 0));
+    print("  test_softmax: ok");
+}
+
+// ============================================================================
+// Test 7: Layer normalization
+// ============================================================================
+
+@test
+fn test_layer_norm() {
+    // Input: [10, 20, 30, 40]
+    let input = a8_from4(10, 20, 30, 40);
+    // Weight = all 1000 (representing 1.0), Bias = all 0
+    let weight = a8_from4(1000, 1000, 1000, 1000);
+    let bias = a8_from4(0, 0, 0, 0);
+
+    let result = layer_norm(input, weight, bias);
+
+    // After layer norm: mean should be close to 0
+    let mean = arr_mean(result);
+    assert(int_abs(mean) < 5);  // mean ~ 0 within tolerance
+
+    // Verify symmetry: values symmetric around 0
+    // input is [10, 20, 30, 40], centered: [-15, -5, 5, 15]
+    // So output should be: [negative, small neg, small pos, positive]
+    assert(a8_get(result, 0) < 0);
+    assert(a8_get(result, 3) > 0);
+
+    // Constant input: layer norm should give zeros (or near zero)
+    let constant = a8_from4(50, 50, 50, 50);
+    let ln_const = layer_norm(constant, weight, bias);
+    assert_eq(a8_get(ln_const, 0), 0);
+    assert_eq(a8_get(ln_const, 3), 0);
+    print("  test_layer_norm: ok");
+}
+
+// ============================================================================
+// Test 8: Batch normalization
+// ============================================================================
+
+@test
+fn test_batch_norm() {
+    // Input features
+    let input = a8_from4(100, 200, 300, 400);
+    // Running stats
+    let running_mean = a8_from4(150, 250, 350, 450);
+    let running_var = a8_from4(100, 100, 100, 100);
+    // Affine params: weight=100 (1.0 scaled), bias=0
+    let weight = a8_from4(100, 100, 100, 100);
+    let bias = a8_from4(0, 0, 0, 0);
+
+    let result = batch_norm(input, running_mean, running_var, weight, bias);
+
+    // All inputs are below their running mean by 50
+    // centered = input - mean = [-50, -50, -50, -50]
+    // All results should be negative and equal
+    assert(a8_get(result, 0) < 0);
+    assert_eq(a8_get(result, 0), a8_get(result, 1));
+    assert_eq(a8_get(result, 1), a8_get(result, 2));
+    assert_eq(a8_get(result, 2), a8_get(result, 3));
+
+    // With bias offset
+    let bias2 = a8_from4(1000, 1000, 1000, 1000);
+    let result2 = batch_norm(input, running_mean, running_var, weight, bias2);
+    // Should be shifted up by 1000
+    assert_eq(a8_get(result2, 0), a8_get(result, 0) + 1000);
+    print("  test_batch_norm: ok");
+}
+
+// ============================================================================
+// Test 9: Cross-entropy loss
+// ============================================================================
+
+@test
+fn test_cross_entropy() {
+    // Perfect prediction: pred = [0, 0, 10000, 0], target = index 2
+    // CE = -log(1.0) = 0
+    let perfect = a8_from4(0, 0, 10000, 0);
+    let ce_perfect = cross_entropy_loss(perfect, 2);
+    assert(int_abs(ce_perfect) < 200);  // near 0
+
+    // Uniform prediction: pred = [2500, 2500, 2500, 2500], target = 0
+    // CE = -log(0.25) ~ 1386
+    let uniform_pred = a8_from4(2500, 2500, 2500, 2500);
+    let ce_uniform = cross_entropy_loss(uniform_pred, 0);
+    assert(ce_uniform > 0);  // loss should be positive
+
+    // Worse prediction has higher loss
+    let bad_pred = a8_from4(100, 100, 100, 9700);
+    let ce_bad_for_0 = cross_entropy_loss(bad_pred, 0);
+    let ce_good_for_3 = cross_entropy_loss(bad_pred, 3);
+    assert(ce_bad_for_0 > ce_good_for_3);  // predicting wrong class has higher loss
+    print("  test_cross_entropy: ok");
+}
+
+// ============================================================================
+// Test 10: Dropout simulation
+// ============================================================================
+
+@test
+fn test_dropout() {
+    let input = a8_from4(100, 200, 300, 400);
+    // Mask: drop element 1 (index 1), keep others
+    // Keep prob = 0.75, inv_keep_prob = 1333 (1/0.75 * 1000)
+    let mask = a8_from4(1000, 0, 1000, 1000);
+    let result = dropout_train(input, mask, 1333);
+
+    // Dropped element should be 0
+    assert_eq(a8_get(result, 1), 0);
+
+    // Kept elements should be scaled up
+    // element 0: 100 * 1333 / 1000 = 133
+    assert_eq(a8_get(result, 0), 133);
+    // element 2: 300 * 1333 / 1000 = 399
+    assert_eq(a8_get(result, 2), 399);
+    // element 3: 400 * 1333 / 1000 = 533
+    assert_eq(a8_get(result, 3), 533);
+
+    // With no dropout (all keep), inv_keep = 1000
+    let no_drop_mask = a8_from4(1000, 1000, 1000, 1000);
+    let no_drop = dropout_train(input, no_drop_mask, 1000);
+    assert_eq(a8_get(no_drop, 0), 100);
+    assert_eq(a8_get(no_drop, 3), 400);
+    print("  test_dropout: ok");
+}
+
+// ============================================================================
+// Test 11: Activation function composition
+// ============================================================================
+
+@test
+fn test_activation_composition() {
+    let data = a8_from8(-500, -200, -50, 0, 50, 200, 500, 1000);
+
+    // ReLU then tanh: tanh clips [0, ...] -> [0, 1000]
+    let r = arr_relu(data);
+    assert_eq(a8_get(r, 0), 0);
+    assert_eq(a8_get(r, 3), 0);
+    assert_eq(a8_get(r, 4), 50);
+    assert_eq(a8_get(r, 7), 1000);
+
+    // Leaky ReLU preserves more info than ReLU
+    let lr = arr_leaky_relu(data);
+    assert_eq(a8_get(lr, 0), -50);  // -500/10
+    assert_eq(a8_get(lr, 7), 1000);
+
+    // Compare: for positive inputs, ReLU = LeakyReLU
+    assert_eq(a8_get(r, 4), a8_get(lr, 4));
+    assert_eq(a8_get(r, 7), a8_get(lr, 7));
+
+    // For negative inputs, LeakyReLU has nonzero output
+    let neg_relu = a8_get(r, 0);
+    let neg_leaky = a8_get(lr, 0);
+    assert_eq(neg_relu, 0);
+    assert(neg_leaky < 0);
+    print("  test_activation_composition: ok");
+}
+
+// ============================================================================
+// Test 12: Softmax temperature scaling
+// ============================================================================
+
+@test
+fn test_softmax_temperature() {
+    // Same logits, different temperatures via pre-scaling
+    let logits = a8_from4(1, 3, 2, 4);
+
+    // Temperature = 1 (normal)
+    let sm1 = softmax_int(logits);
+
+    // Temperature = 2 (divide logits by 2 before softmax -> smoother)
+    let logits_t2 = a8_from4(0, 1, 1, 2);  // floor(logits/2)
+    let sm2 = softmax_int(logits_t2);
+
+    // High temp softmax should be more uniform (less peaked)
+    // Max/min ratio should be smaller for high temperature
+    let max1 = a8_get(sm1, argmax(sm1));
+    let min1 = a8_get(sm1, 0);  // smallest is index 0
+    let max2 = a8_get(sm2, argmax(sm2));
+    let min2 = a8_get(sm2, 0);
+
+    // Both should preserve argmax
+    assert_eq(argmax(sm1), 3);
+    assert_eq(argmax(sm2), 3);
+
+    // High temperature ratio should be smaller (more uniform)
+    let ratio1 = max1 * 100 / (min1 + 1);
+    let ratio2 = max2 * 100 / (min2 + 1);
+    assert(ratio1 >= ratio2);  // low temp is more peaked
+    print("  test_softmax_temperature: ok");
+}
+
+// ============================================================================
+// Test 13: Neural network forward pass simulation
+// Conv1D (using simple weighted sum) -> ReLU -> Softmax
+// ============================================================================
+
+@test
+fn test_nn_forward_pass() {
+    // Input "features" (4 values)
+    let input = a8_from4(3, -1, 2, -2);
+
+    // "Linear layer": weights = [1, 2, -1, 3], bias = [1, 0, -1, 2]
+    let weights = a8_from4(1, 2, -1, 3);
+    let bias_vals = a8_from4(1, 0, -1, 2);
+
+    // Apply linear: out[i] = input[i] * weight[i] + bias[i]
+    let mut linear_out = a8_zeros(4);
+    let mut i = 0;
+    while i < 4 {
+        let v = a8_get(input, i) * a8_get(weights, i) + a8_get(bias_vals, i);
+        linear_out = a8_set(linear_out, i, v);
+        i = i + 1;
+    }
+    // linear: [3*1+1, -1*2+0, 2*-1-1, -2*3+2] = [4, -2, -3, -4]
+    assert_eq(a8_get(linear_out, 0), 4);
+    assert_eq(a8_get(linear_out, 1), -2);
+    assert_eq(a8_get(linear_out, 2), -3);
+    assert_eq(a8_get(linear_out, 3), -4);
+
+    // Apply ReLU
+    let relu_out = arr_relu(linear_out);
+    assert_eq(a8_get(relu_out, 0), 4);
+    assert_eq(a8_get(relu_out, 1), 0);
+    assert_eq(a8_get(relu_out, 2), 0);
+    assert_eq(a8_get(relu_out, 3), 0);
+
+    // Apply softmax
+    let probs = softmax_int(relu_out);
+
+    // After ReLU, only index 0 is nonzero, so softmax should peak there
+    assert_eq(argmax(probs), 0);
+    assert(a8_get(probs, 0) > 2500);  // Should be dominant
+
+    // Verify sum ~10000
+    let prob_sum = arr_sum(probs);
+    assert(prob_sum >= 9900);
+    assert(prob_sum <= 10100);
+    print("  test_nn_forward_pass: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_relu();
+    test_leaky_relu();
+    test_relu6();
+    test_sigmoid();
+    test_tanh();
+    test_softmax();
+    test_layer_norm();
+    test_batch_norm();
+    test_cross_entropy();
+    test_dropout();
+    test_activation_composition();
+    test_softmax_temperature();
+    test_nn_forward_pass();
+    print("[OK] 186_interp_tensor_nn");
+    0
+}

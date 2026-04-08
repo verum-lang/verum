@@ -1,0 +1,101 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: tensor, indexing
+
+fn main() {
+    // 1D indexing
+    let v: Tensor<f32, [5]> = tensor<5>f32{10.0, 20.0, 30.0, 40.0, 50.0};
+
+    assert(v[0] == 10.0);
+    assert(v[2] == 30.0);
+    assert(v[4] == 50.0);
+
+    // Negative indexing
+    assert(v[-1] == 50.0);
+    assert(v[-2] == 40.0);
+    assert(v[-5] == 10.0);
+
+    // 2D indexing
+    let m: Tensor<f32, [3, 4]> = tensor<3, 4>f32{
+        {1.0, 2.0, 3.0, 4.0},
+        {5.0, 6.0, 7.0, 8.0},
+        {9.0, 10.0, 11.0, 12.0}
+    };
+
+    assert(m[0, 0] == 1.0);
+    assert(m[1, 2] == 7.0);
+    assert(m[2, 3] == 12.0);
+
+    // Mixed positive/negative indexing
+    assert(m[-1, -1] == 12.0);
+    assert(m[0, -1] == 4.0);
+    assert(m[-1, 0] == 9.0);
+
+    // 3D indexing
+    let t: Tensor<f32, [2, 3, 2]> = tensor<2, 3, 2>f32{
+        {
+            {1.0, 2.0},
+            {3.0, 4.0},
+            {5.0, 6.0}
+        },
+        {
+            {7.0, 8.0},
+            {9.0, 10.0},
+            {11.0, 12.0}
+        }
+    };
+
+    assert(t[0, 0, 0] == 1.0);
+    assert(t[1, 1, 1] == 10.0);
+    assert(t[-1, -1, -1] == 12.0);
+
+    // Mutable indexing
+    let mut mv: Tensor<f32, [3]> = tensor<3>f32{1.0, 2.0, 3.0};
+    mv[0] = 100.0;
+    mv[1] = 200.0;
+    mv[-1] = 300.0;
+
+    assert(mv[0] == 100.0);
+    assert(mv[1] == 200.0);
+    assert(mv[2] == 300.0);
+
+    let mut mm: Tensor<f32, [2, 2]> = Tensor.zeros();
+    mm[0, 0] = 1.0;
+    mm[0, 1] = 2.0;
+    mm[1, 0] = 3.0;
+    mm[1, 1] = 4.0;
+
+    assert(mm[0, 0] == 1.0);
+    assert(mm[1, 1] == 4.0);
+
+    // Advanced indexing with tensors
+    let indices: Tensor<i32, [3]> = tensor<3>i32{0, 2, 4};
+    let selected = v[indices];  // Gather operation
+
+    assert(selected.shape() == [3]);
+    assert(selected[0] == 10.0);
+    assert(selected[1] == 30.0);
+    assert(selected[2] == 50.0);
+
+    // Boolean indexing (masking)
+    let mask: Tensor<bool, [5]> = tensor<5>bool{true, false, true, false, true};
+    let masked = v[mask];
+
+    assert(masked.shape() == [3]);  // Dynamic shape based on true count
+    assert(masked[0] == 10.0);
+    assert(masked[1] == 30.0);
+    assert(masked[2] == 50.0);
+
+    // Row/column selection in 2D
+    let row0 = m.row(0);  // First row
+    assert(row0.shape() == [4]);
+    assert(row0[0] == 1.0);
+    assert(row0[3] == 4.0);
+
+    let col1 = m.col(1);  // Second column
+    assert(col1.shape() == [3]);
+    assert(col1[0] == 2.0);
+    assert(col1[2] == 10.0);
+}

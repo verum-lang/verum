@@ -1,0 +1,25 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Basic conversion
+    let i: Int = 42;
+    let f: Float = i as Float;
+    assert_eq(f, 42.0);
+
+    // Negative conversion
+    let neg: Int = -100;
+    let neg_f: Float = neg as Float;
+    assert_eq(neg_f, -100.0);
+
+    // Zero
+    let zero: Int = 0;
+    let zero_f: Float = zero as Float;
+    assert_eq(zero_f, 0.0);
+
+    // Large positive
+    let large: Int = 1000000;
+    let large_f: Float = large as Float;
+    assert_eq(large_f, 1000000.0);
+}

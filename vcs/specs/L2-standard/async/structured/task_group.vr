@@ -1,0 +1,134 @@
+// @test: run
+// @expected-stdout: Processing: 1\nProcessing: 2\nProcessing: 3\nAll processed: [10, 20, 30]
+// @tier: 0
+// @level: L2
+// @tags: async, structured-concurrency, task-group
+// @description: Task groups for parallel execution with result collection
+
+// Task group collects results from parallel tasks
+type TaskGroup<T> is {
+    tasks: List<JoinHandle<Result<T, TaskError>>>,
+    max_parallelism: Int,
+};
+
+type TaskError is
+    | Panicked(Text)
+    | Timeout
+    | Cancelled;
+
+implement<T> TaskGroup<T> {
+    fn new() -> Self {
+        Self { tasks: [], max_parallelism: 0 }  // 0 = unlimited
+    }
+
+    fn with_parallelism(n: Int) -> Self {
+        Self { tasks: [], max_parallelism: n }
+    }
+
+    // Add a task to the group
+    fn add(&mut self, f: async fn() -> T) {
+        let handle = spawn {
+            let result: Result<T, TaskError> = Ok(f().await);
+            result
+        };
+        self.tasks.push(handle);
+    }
+
+    // Add multiple tasks
+    fn add_all<I: Iterator<Item = async fn() -> T>>(&mut self, tasks: I) {
+        for task in tasks {
+            self.add(task);
+        }
+    }
+
+    // Wait for all tasks, return first error or all results
+    async fn wait(self) -> Result<List<T>, TaskError> {
+        let mut results = [];
+        let mut first_error = None;
+
+        for handle in self.tasks {
+            match handle.await {
+                Ok(result) => results.push(result),
+                Err(e) if first_error.is_none() => {
+                    first_error = Some(e);
+                }
+                Err(_) => {}
+            }
+        }
+
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(results),
+        }
+    }
+
+    // Wait for first completed task
+    async fn wait_first(self) -> Result<T, TaskError> {
+        // Await the first task in the list
+        if self.tasks.is_empty() {
+            return Err(TaskError.Cancelled);
+        }
+        let first = self.tasks[0];
+        first.await
+    }
+
+    // Wait for first N completions
+    async fn wait_n(self, n: Int) -> Result<List<T>, TaskError> {
+        let mut results: List<T> = [];
+        let count = if n < self.tasks.len() { n } else { self.tasks.len() };
+
+        for i in 0..count {
+            let result = self.tasks[i].await;
+            match result {
+                Ok(val) => results.push(val),
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(results)
+    }
+}
+
+// Parallel map utility
+async fn parallel_map<T, R>(
+    items: List<T>,
+    f: async fn(T) -> R
+) -> List<R> {
+    let mut group = TaskGroup.new();
+
+    for item in items {
+        let item_copy = item.clone();
+        group.add(async move || f(item_copy).await);
+    }
+
+    group.wait().await.unwrap_or([])
+}
+
+// Parallel map with limited concurrency
+async fn parallel_map_limit<T, R>(
+    items: List<T>,
+    limit: Int,
+    f: async fn(T) -> R
+) -> List<R> {
+    let mut results = [];
+    let chunks = items.chunks(limit);
+
+    for chunk in chunks {
+        let chunk_results = parallel_map(chunk.to_list(), f).await;
+        results.extend(chunk_results);
+    }
+
+    results
+}
+
+// Process function
+async fn process(n: Int) -> Int {
+    println(f"Processing: {n}");
+    n * 10
+}
+
+async fn main() {
+    let items = [1, 2, 3];
+    let results = parallel_map(items, process).await;
+    println(f"All processed: {results}");
+}

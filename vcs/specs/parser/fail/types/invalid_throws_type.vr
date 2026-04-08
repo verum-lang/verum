@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, throws, error
+// @description: Test detection of throws clause without error type
+// @expected-error: E018
+
+// throws clause must have parenthesized error type
+type Callback is fn() throws;

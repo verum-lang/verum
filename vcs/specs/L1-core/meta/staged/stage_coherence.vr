@@ -1,0 +1,52 @@
+// @test: parse
+// @level: L1
+// @tags: meta, staged, coherence, metaprogramming
+// @timeout: 5000
+
+/// Stage coherence rules: Stage N can only directly generate Stage N-1 code.
+
+// Valid: Stage 1 generates Stage 0 (runtime)
+meta fn valid_s1() {
+    quote {
+        let x = 42;
+    }
+}
+
+// Valid: Stage 1 with explicit quote(0)
+meta(1) fn valid_s1_explicit() {
+    quote(0) {
+        let y = 100;
+    }
+}
+
+// Valid: Stage 2 generates Stage 1
+meta(2) fn valid_s2() {
+    quote(1) {
+        meta fn inner() {
+            quote(0) {
+                let z = 200;
+            }
+        }
+    }
+}
+
+// Lift operator within quote
+meta fn with_lift() {
+    let compile_val = 42 * 2;
+    quote {
+        let runtime_val = lift(compile_val);
+        $assert_eq(runtime_val, 84);
+    }
+}
+
+// Stage escape within quote
+meta fn with_escape() {
+    let n = 5;
+    quote {
+        let items = $(stage 1){ List.of(1, 2, 3, 4, n) };
+    }
+}
+
+fn main() {
+    print("Stage coherence tests parsed");
+}

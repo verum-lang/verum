@@ -1,0 +1,524 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, btreeset, lower-bound, upper-bound, set-ops, in-place
+// @description: Tests for new BTreeSet APIs: lower_bound, upper_bound,
+//               symmetric_difference_update, extend_from_set, remove_from_set
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: BTreeSet.lower_bound
+// =============================================================================
+
+@test
+fn test_btreeset_lower_bound_exact() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(3);
+    s.insert(5);
+    s.insert(7);
+    let result = s.lower_bound(&3);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 3);
+}
+
+@test
+fn test_btreeset_lower_bound_between() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(3);
+    s.insert(5);
+    s.insert(7);
+    let result = s.lower_bound(&4);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 5);
+}
+
+@test
+fn test_btreeset_lower_bound_before_all() {
+    let mut s = BTreeSet.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    let result = s.lower_bound(&5);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 10);
+}
+
+@test
+fn test_btreeset_lower_bound_after_all() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(3);
+    s.insert(5);
+    let result = s.lower_bound(&10);
+    assert(result.is_none());
+}
+
+@test
+fn test_btreeset_lower_bound_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    assert(s.lower_bound(&1).is_none());
+}
+
+@test
+fn test_btreeset_lower_bound_first_element() {
+    let mut s = BTreeSet.new();
+    s.insert(10);
+    s.insert(20);
+    let result = s.lower_bound(&10);
+    assert_eq(*result.unwrap(), 10);
+}
+
+@test
+fn test_btreeset_lower_bound_last_element() {
+    let mut s = BTreeSet.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    let result = s.lower_bound(&30);
+    assert_eq(*result.unwrap(), 30);
+}
+
+@test
+fn test_btreeset_lower_bound_single() {
+    let mut s = BTreeSet.new();
+    s.insert(42);
+    assert_eq(*s.lower_bound(&42).unwrap(), 42);
+    assert_eq(*s.lower_bound(&1).unwrap(), 42);
+    assert(s.lower_bound(&100).is_none());
+}
+
+// =============================================================================
+// Section 2: BTreeSet.upper_bound
+// =============================================================================
+
+@test
+fn test_btreeset_upper_bound_exact() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(3);
+    s.insert(5);
+    s.insert(7);
+    // upper_bound(3) = strictly greater = 5
+    let result = s.upper_bound(&3);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 5);
+}
+
+@test
+fn test_btreeset_upper_bound_between() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(3);
+    s.insert(5);
+    s.insert(7);
+    let result = s.upper_bound(&4);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 5);
+}
+
+@test
+fn test_btreeset_upper_bound_last() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(3);
+    s.insert(5);
+    // Nothing strictly > 5
+    let result = s.upper_bound(&5);
+    assert(result.is_none());
+}
+
+@test
+fn test_btreeset_upper_bound_before_all() {
+    let mut s = BTreeSet.new();
+    s.insert(10);
+    s.insert(20);
+    let result = s.upper_bound(&5);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 10);
+}
+
+@test
+fn test_btreeset_upper_bound_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    assert(s.upper_bound(&1).is_none());
+}
+
+@test
+fn test_btreeset_upper_bound_single() {
+    let mut s = BTreeSet.new();
+    s.insert(42);
+    assert_eq(*s.upper_bound(&1).unwrap(), 42);
+    assert(s.upper_bound(&42).is_none());
+    assert(s.upper_bound(&100).is_none());
+}
+
+@test
+fn test_btreeset_upper_bound_first() {
+    let mut s = BTreeSet.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    // upper_bound(10) = 20
+    let result = s.upper_bound(&10);
+    assert_eq(*result.unwrap(), 20);
+}
+
+// =============================================================================
+// Section 3: BTreeSet.symmetric_difference_update
+// =============================================================================
+
+@test
+fn test_btreeset_sym_diff_update_basic() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+    a.symmetric_difference_update(&b);
+    // a = {1, 4}
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&4));
+    assert(!a.contains(&2));
+    assert(!a.contains(&3));
+}
+
+@test
+fn test_btreeset_sym_diff_update_disjoint() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(3);
+    b.insert(4);
+    a.symmetric_difference_update(&b);
+    // No overlap: result is union
+    assert_eq(a.len(), 4);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+    assert(a.contains(&4));
+}
+
+@test
+fn test_btreeset_sym_diff_update_identical() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+    a.symmetric_difference_update(&b);
+    // All overlap: result is empty
+    assert(a.is_empty());
+}
+
+@test
+fn test_btreeset_sym_diff_update_empty_other() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let b: BTreeSet<Int> = BTreeSet.new();
+    a.symmetric_difference_update(&b);
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_btreeset_sym_diff_update_self_empty() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    a.symmetric_difference_update(&b);
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+}
+
+@test
+fn test_btreeset_sym_diff_update_partial_overlap() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    a.insert(4);
+    a.insert(5);
+    let mut b = BTreeSet.new();
+    b.insert(3);
+    b.insert(5);
+    b.insert(7);
+    a.symmetric_difference_update(&b);
+    // Remove 3,5 from a; add 7
+    // a = {1, 2, 4, 7}
+    assert_eq(a.len(), 4);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&4));
+    assert(a.contains(&7));
+    assert(!a.contains(&3));
+    assert(!a.contains(&5));
+}
+
+// =============================================================================
+// Section 4: BTreeSet.extend_from_set
+// =============================================================================
+
+@test
+fn test_btreeset_extend_from_set_basic() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(3);
+    b.insert(4);
+    a.extend_from_set(&b);
+    assert_eq(a.len(), 4);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+    assert(a.contains(&4));
+    // b is NOT drained
+    assert_eq(b.len(), 2);
+}
+
+@test
+fn test_btreeset_extend_from_set_overlap() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+    a.extend_from_set(&b);
+    assert_eq(a.len(), 4);
+}
+
+@test
+fn test_btreeset_extend_from_set_empty_other() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    let b: BTreeSet<Int> = BTreeSet.new();
+    a.extend_from_set(&b);
+    assert_eq(a.len(), 1);
+}
+
+@test
+fn test_btreeset_extend_from_set_self_empty() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+    a.extend_from_set(&b);
+    assert_eq(a.len(), 3);
+    assert_eq(b.len(), 3); // unchanged
+}
+
+@test
+fn test_btreeset_extend_from_set_identical() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    a.extend_from_set(&b);
+    assert_eq(a.len(), 2); // no growth
+}
+
+// =============================================================================
+// Section 5: BTreeSet.remove_from_set
+// =============================================================================
+
+@test
+fn test_btreeset_remove_from_set_basic() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    a.insert(4);
+    let mut b = BTreeSet.new();
+    b.insert(2);
+    b.insert(4);
+    a.remove_from_set(&b);
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&3));
+    assert(!a.contains(&2));
+    assert(!a.contains(&4));
+}
+
+@test
+fn test_btreeset_remove_from_set_no_overlap() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(3);
+    b.insert(4);
+    a.remove_from_set(&b);
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_btreeset_remove_from_set_complete() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+    a.remove_from_set(&b);
+    assert(a.is_empty());
+}
+
+@test
+fn test_btreeset_remove_from_set_empty_other() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let b: BTreeSet<Int> = BTreeSet.new();
+    a.remove_from_set(&b);
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_btreeset_remove_from_set_self_empty() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    a.remove_from_set(&b);
+    assert(a.is_empty());
+}
+
+@test
+fn test_btreeset_remove_from_set_superset_other() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+    a.remove_from_set(&b);
+    assert(a.is_empty());
+}
+
+// =============================================================================
+// Section 6: Integration tests
+// =============================================================================
+
+@test
+fn test_btreeset_lower_upper_bound_consistency() {
+    let mut s = BTreeSet.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    s.insert(40);
+    s.insert(50);
+    // lower_bound(30) = 30 (>=), upper_bound(30) = 40 (>)
+    assert_eq(*s.lower_bound(&30).unwrap(), 30);
+    assert_eq(*s.upper_bound(&30).unwrap(), 40);
+    // For values between elements
+    assert_eq(*s.lower_bound(&25).unwrap(), 30);
+    assert_eq(*s.upper_bound(&25).unwrap(), 30);
+}
+
+@test
+fn test_btreeset_bound_queries_large() {
+    let mut s = BTreeSet.new();
+    let mut i = 0;
+    while i < 100 {
+        s.insert(i * 2); // Even numbers: 0, 2, 4, ..., 198
+        i = i + 1;
+    }
+    // lower_bound(99) should find 100
+    assert_eq(*s.lower_bound(&99).unwrap(), 100);
+    // upper_bound(100) should find 102
+    assert_eq(*s.upper_bound(&100).unwrap(), 102);
+    // lower_bound(0) should find 0
+    assert_eq(*s.lower_bound(&0).unwrap(), 0);
+    // upper_bound(198) should be None
+    assert(s.upper_bound(&198).is_none());
+}
+
+@test
+fn test_btreeset_operations_compose() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(4);
+    b.insert(5);
+    // extend, then remove subset
+    a.extend_from_set(&b);
+    assert_eq(a.len(), 5);
+    let mut to_remove = BTreeSet.new();
+    to_remove.insert(2);
+    to_remove.insert(4);
+    a.remove_from_set(&to_remove);
+    assert_eq(a.len(), 3);
+    assert(a.contains(&1));
+    assert(a.contains(&3));
+    assert(a.contains(&5));
+}
+
+@test
+fn test_btreeset_sym_diff_matches_functional() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+    // Functional version
+    let functional_result = a.symmetric_difference(&b);
+    // In-place version
+    let mut in_place = a.clone();
+    in_place.symmetric_difference_update(&b);
+    // Both should produce same result
+    assert_eq(functional_result.len(), in_place.len());
+    for x in functional_result.iter() {
+        assert(in_place.contains(x));
+    }
+}
+
+@test
+fn test_btreeset_extend_vs_append() {
+    let mut a1 = BTreeSet.new();
+    a1.insert(1);
+    a1.insert(2);
+    let mut a2 = a1.clone();
+
+    let mut b = BTreeSet.new();
+    b.insert(3);
+    b.insert(4);
+    let mut b_copy = b.clone();
+
+    // extend_from_set preserves other
+    a1.extend_from_set(&b);
+    assert_eq(a1.len(), 4);
+    assert_eq(b.len(), 2); // b is preserved
+
+    // append drains other
+    a2.append(&mut b_copy);
+    assert_eq(a2.len(), 4);
+    assert(b_copy.is_empty()); // b_copy is drained
+}

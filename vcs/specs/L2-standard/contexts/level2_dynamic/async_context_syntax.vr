@@ -1,0 +1,179 @@
+// @test: parse
+// @tier: 0
+// @level: L2
+// @tags: contexts, async, syntax, grammar
+// @description: Tests all async context syntax variants and context method features
+//
+// Grammar reference (grammar/verum.ebnf):
+// context_def = visibility , ( 'context' , [ 'async' ] | 'async' , 'context' ) , identifier , [ generics ]
+//             , '{' , { context_item } , '}' ;
+// context_function = visibility , [ 'async' ] , 'fn' , identifier , [ generics ]
+//                  , '(' , param_list , ')' , [ '->' , type_expr ]
+//                  , [ context_clause ] , ';' ;
+
+// ============================================================================
+// PART 1: Async Context Declaration Syntax Variants
+// ============================================================================
+
+// Variant 1: context async Name - preferred syntax
+context async AsyncDatabase1 {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+// Variant 2: async context Name - alternative syntax (equivalent)
+async context AsyncDatabase2 {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+// ============================================================================
+// PART 2: Mixed Sync/Async Methods in Context
+// ============================================================================
+
+// Sync context with individual async methods
+context Logger {
+    fn info(msg: Text);
+    fn error(msg: Text);
+    fn debug(msg: Text);
+    // Individual async methods in sync context
+    async fn flush() -> Result<(), IoError>;
+    async fn rotate_logs() -> Result<(), IoError>;
+}
+
+// Sync context for metrics
+context Metrics {
+    fn increment(name: Text);
+    fn gauge(name: Text, value: Float);
+}
+
+// ============================================================================
+// PART 3: Context Methods with Using Clause (Context Requirements)
+// ============================================================================
+
+// Context methods can declare their own context requirements
+context UserService {
+    // Sync method requiring Database context
+    fn get_user(id: UserId) -> Maybe<User> using [AsyncDatabase1];
+
+    // Async method requiring multiple contexts
+    async fn save_user(user: User) -> Result<(), DbError> using [AsyncDatabase1, Logger];
+
+    // Method requiring another service context
+    fn validate_user(user: User) -> Bool using [ValidationService];
+}
+
+context ValidationService {
+    fn validate_email(email: Text) -> Bool;
+    fn validate_phone(phone: Text) -> Bool;
+}
+
+// ============================================================================
+// PART 4: Nested Sub-Contexts with Async
+// ============================================================================
+
+// Parent context containing async sub-contexts
+// Note: Nested contexts use 'context Name' or 'async context Name' syntax
+context Storage {
+    fn get_type() -> Text;
+
+    // Nested async sub-context
+    async context File {
+        async fn read(path: Text) -> Result<Bytes, IoError>;
+        async fn write(path: Text, data: Bytes) -> Result<(), IoError>;
+    }
+
+    // Another nested async sub-context
+    async context Network {
+        async fn fetch(url: Text) -> Result<Response, NetworkError>;
+        async fn post(url: Text, body: Bytes) -> Result<Response, NetworkError>;
+    }
+}
+
+// ============================================================================
+// PART 5: Context Methods with Complex Signatures
+// ============================================================================
+
+context async AdvancedService {
+    // Method with multiple context requirements
+    async fn complex_operation(data: Data) -> Result<Report, Error>
+        using [Logger, Metrics];
+
+    // Method with timeout parameter
+    async fn query_with_timeout(sql: Text, timeout_ms: Int) -> Result<List<Row>, DbError>;
+}
+
+// ============================================================================
+// PART 6: Type Definitions and Helpers
+// ============================================================================
+
+type UserId is Int;
+type User is { id: UserId, name: Text, email: Text };
+type Row is { columns: List<Text> };
+type Data is { value: Text };
+type Report is { summary: Text, details: List<Text> };
+type Response is { status: Int, body: Text };
+type Bytes is List<u8>;
+
+type DbError is
+    | ConnectionFailed
+    | QueryFailed(Text)
+    | NotFound;
+
+type IoError is
+    | FileNotFound(Text)
+    | PermissionDenied
+    | IoFailed(Text);
+
+type NetworkError is
+    | ConnectionFailed
+    | Timeout
+    | InvalidResponse;
+
+type Error is
+    | Db(DbError)
+    | Io(IoError)
+    | Network(NetworkError)
+    | Custom(Text);
+
+// ============================================================================
+// PART 7: Usage Examples
+// ============================================================================
+
+// Function using async context (variant 1: context async)
+async fn use_database1() -> Result<List<Row>, DbError> using [AsyncDatabase1] {
+    AsyncDatabase1.query("SELECT * FROM users").await
+}
+
+// Function using async context (variant 2: async context)
+async fn use_database2() -> Result<List<Row>, DbError> using [AsyncDatabase2] {
+    AsyncDatabase2.query("SELECT * FROM users").await
+}
+
+// Function using context with method-level using clause
+async fn process_user(id: UserId) -> Result<User, Error> using [UserService, Logger] {
+    Logger.info(f"Processing user {id}");
+    match UserService.get_user(id) {
+        Some(user) => Ok(user),
+        None => Err(Error.Custom("User not found")),
+    }
+}
+
+// Function using sync context with async method
+async fn log_and_flush(msg: Text) using [Logger] {
+    Logger.info(msg);
+    Logger.flush().await;
+}
+
+// Function using advanced service
+async fn do_complex_work(data: Data) -> Result<Report, Error>
+    using [AdvancedService, Logger, Metrics]
+{
+    Logger.info("Starting complex work");
+    Metrics.increment("complex_work_started");
+    AdvancedService.complex_operation(data).await
+}
+
+fn main() {
+    println("Async context syntax tests compiled successfully");
+}

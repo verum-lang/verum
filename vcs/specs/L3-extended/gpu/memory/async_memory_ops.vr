@@ -1,0 +1,244 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, memory, async
+// @description: Asynchronous memory operations for GPU
+
+/// Asynchronous memory operations allow overlap of compute and memory transfers.
+
+mount gpu.async_copy.{memcpy_async, barrier, arrive_and_wait};
+
+/// Async copy from global to shared memory
+@kernel
+fn async_global_to_shared(
+    global_data: &Tensor<f32, [N]>,
+    result: &mut Tensor<f32, [N]>
+) {
+    @shared let mut shared_buffer: [f32; BLOCK_SIZE];
+
+    let tid = threadIdx.x;
+    let bid = blockIdx.x;
+    let gid = bid * blockDim.x + tid;
+
+    // Initiate async copy
+    memcpy_async(&shared_buffer[tid], &global_data[gid], sizeof<f32>());
+
+    // Arrive at barrier (copy initiated)
+    barrier.arrive();
+
+    // Do independent work while copy is in flight
+    let independent_result = compute_something(tid);
+
+    // Wait for copy to complete
+    barrier.wait();
+
+    // Now safe to use shared_buffer
+    let loaded = shared_buffer[tid];
+    result[gid] = loaded + independent_result;
+}
+
+/// Pipeline with multiple stages
+@kernel
+fn pipelined_processing(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [N]>
+) {
+    const NUM_STAGES: Int = 3;
+
+    @shared let mut buffers: [[f32; TILE_SIZE]; NUM_STAGES];
+    @shared let mut barriers: [Barrier; NUM_STAGES];
+
+    let tid = threadIdx.x;
+    let tiles_per_block = N / (gridDim.x * TILE_SIZE);
+
+    // Initialize barriers
+    for i in 0..NUM_STAGES {
+        barriers[i].init(BLOCK_SIZE);
+    }
+
+    __syncthreads();
+
+    // Pipeline prologue - fill the pipeline
+    for stage in 0..min(NUM_STAGES, tiles_per_block) {
+        let tile_idx = blockIdx.x * tiles_per_block + stage;
+        let global_idx = tile_idx * TILE_SIZE + tid;
+
+        if global_idx < N {
+            memcpy_async(
+                &buffers[stage % NUM_STAGES][tid],
+                &input[global_idx],
+                sizeof<f32>()
+            );
+        }
+        barriers[stage % NUM_STAGES].arrive();
+    }
+
+    // Pipeline body
+    for tile in NUM_STAGES..tiles_per_block {
+        let compute_stage = (tile - NUM_STAGES) % NUM_STAGES;
+        let load_stage = tile % NUM_STAGES;
+
+        // Wait for data to be ready
+        barriers[compute_stage].wait();
+
+        // Process the data
+        let value = buffers[compute_stage][tid];
+        let result = process(value);
+
+        // Store result
+        let out_tile = tile - NUM_STAGES;
+        let out_idx = (blockIdx.x * tiles_per_block + out_tile) * TILE_SIZE + tid;
+        output[out_idx] = result;
+
+        // Start next async copy
+        let global_idx = (blockIdx.x * tiles_per_block + tile) * TILE_SIZE + tid;
+        if global_idx < N {
+            memcpy_async(
+                &buffers[load_stage][tid],
+                &input[global_idx],
+                sizeof<f32>()
+            );
+        }
+        barriers[load_stage].arrive();
+
+        // Reset barrier for reuse
+        barriers[compute_stage].init(BLOCK_SIZE);
+    }
+
+    // Pipeline epilogue
+    for stage in 0..min(NUM_STAGES, tiles_per_block) {
+        let compute_stage = (tiles_per_block - NUM_STAGES + stage) % NUM_STAGES;
+
+        barriers[compute_stage].wait();
+
+        let value = buffers[compute_stage][tid];
+        let result = process(value);
+
+        let out_tile = tiles_per_block - NUM_STAGES + stage;
+        let out_idx = (blockIdx.x * tiles_per_block + out_tile) * TILE_SIZE + tid;
+        if out_idx < N {
+            output[out_idx] = result;
+        }
+    }
+}
+
+/// Async copy with commit group
+@kernel
+fn grouped_async_copy(
+    data: &Tensor<f32, [N, M]>,
+    result: &mut Tensor<f32, [N, M]>
+) {
+    @shared let mut tile: [[f32; TILE_M]; TILE_N];
+
+    let tx = threadIdx.x;
+    let ty = threadIdx.y;
+
+    // Start multiple async copies in a group
+    async_copy_group.begin();
+
+    for i in 0..ELEMENTS_PER_THREAD {
+        let row = ty * ELEMENTS_PER_THREAD + i;
+        if row < TILE_N {
+            memcpy_async(&tile[row][tx], &data[row][tx], sizeof<f32>());
+        }
+    }
+
+    // Commit the group
+    async_copy_group.commit();
+
+    // Wait for all copies in group
+    async_copy_group.wait();
+
+    // Process tile
+    for i in 0..ELEMENTS_PER_THREAD {
+        let row = ty * ELEMENTS_PER_THREAD + i;
+        if row < TILE_N {
+            result[row][tx] = tile[row][tx] * 2.0;
+        }
+    }
+}
+
+/// Tensor memory accelerator (TMA) operations
+@kernel
+fn tma_bulk_copy(
+    src: &Tensor<f32, [N, M]>,
+    dst: &mut Tensor<f32, [N, M]>
+) {
+    @shared let mut smem_buffer: [[f32; TILE_M]; TILE_N];
+
+    // TMA descriptor for 2D tensor
+    let tma_desc = TmaDescriptor.create_2d(
+        src.data_ptr(),
+        [N, M],
+        [TILE_N, TILE_M],
+        sizeof<f32>()
+    );
+
+    // Bulk async copy using TMA
+    if threadIdx.x == 0 && threadIdx.y == 0 {
+        tma_desc.copy_2d_tile(
+            &smem_buffer,
+            blockIdx.y * TILE_N,
+            blockIdx.x * TILE_M
+        );
+    }
+
+    // Barrier for TMA completion
+    __syncthreads();
+
+    // Use the data
+    let tx = threadIdx.x;
+    let ty = threadIdx.y;
+    let value = smem_buffer[ty][tx];
+
+    // Write back
+    let gx = blockIdx.x * TILE_M + tx;
+    let gy = blockIdx.y * TILE_N + ty;
+    if gx < M && gy < N {
+        dst[gy][gx] = value * 2.0;
+    }
+}
+
+/// Stream-ordered memory operations
+fn stream_ordered_memory() {
+    let stream = gpu.Stream.new();
+
+    // Allocate memory in stream order
+    let device_ptr = gpu.malloc_async(1024 * sizeof<f32>(), stream);
+
+    // Launch kernel
+// LAUNCH:     my_kernel<<<grid, block, 0, stream>>>(device_ptr);
+
+    // Free memory (will happen after kernel completes)
+    gpu.free_async(device_ptr, stream);
+
+    // Synchronize
+    stream.synchronize();
+}
+
+type Barrier is { count: AtomicInt };
+implement Barrier {
+    fn init(&mut self, count: Int) { self.count.store(count); }
+    fn arrive(&mut self) { self.count.fetch_sub(1); }
+    fn wait(&self) { while self.count.load() > 0 {} }
+}
+
+type TmaDescriptor is {};
+implement TmaDescriptor {
+    fn create_2d(ptr: *const f32, dims: [Int; 2], tile: [Int; 2], elem_size: Int) -> Self { Self {} }
+    fn copy_2d_tile(&self, dst: *mut [[f32; TILE_M]; TILE_N], row: Int, col: Int) {}
+}
+
+fn compute_something(tid: Int) -> f32 { tid as f32 }
+fn process(value: f32) -> f32 { value * 2.0 }
+
+const BLOCK_SIZE: Int = 256;
+const TILE_SIZE: Int = 64;
+const TILE_N: Int = 32;
+const TILE_M: Int = 32;
+const ELEMENTS_PER_THREAD: Int = 4;
+
+fn main() {
+    // GPU kernel compilation only
+}

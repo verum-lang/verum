@@ -1,0 +1,22 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, use-after-free, cbgr, list, borrow-checker
+// @description: Tests that borrow checker prevents use-after-free on list element at compile-time
+
+fn main() {
+    let mut items: List<Heap<Int>> = [
+        Heap.new(10),
+        Heap.new(20),
+        Heap.new(30),
+    ];
+
+    // Get reference to first element
+    let first_ref = &items[0];
+
+    // Clear the list, freeing all elements
+    items.clear();
+
+    // Attempt to access the freed element
+    let _ = *first_ref;  // CBGR detects use after free
+}

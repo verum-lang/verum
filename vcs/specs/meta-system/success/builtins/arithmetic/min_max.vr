@@ -1,0 +1,111 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, min, max
+// @description: Test min and max builtins with various inputs
+
+// =============================================================================
+// MIN BUILTIN TESTS
+// =============================================================================
+
+// Test min with two positive numbers
+meta fn test_min_positive() -> Int {
+    min(5, 10)  // Should be 5
+}
+
+meta fn test_min_positive_reverse() -> Int {
+    min(10, 5)  // Should be 5
+}
+
+// Test min with negative numbers
+meta fn test_min_negative() -> Int {
+    min(-5, -10)  // Should be -10
+}
+
+// Test min with mixed signs
+meta fn test_min_mixed() -> Int {
+    min(-5, 10)  // Should be -5
+}
+
+// Test min with equal values
+meta fn test_min_equal() -> Int {
+    min(7, 7)  // Should be 7
+}
+
+// Test min with zero
+meta fn test_min_zero() -> Int {
+    min(0, 5)  // Should be 0
+}
+
+// =============================================================================
+// MAX BUILTIN TESTS
+// =============================================================================
+
+// Test max with two positive numbers
+meta fn test_max_positive() -> Int {
+    max(5, 10)  // Should be 10
+}
+
+meta fn test_max_positive_reverse() -> Int {
+    max(10, 5)  // Should be 10
+}
+
+// Test max with negative numbers
+meta fn test_max_negative() -> Int {
+    max(-5, -10)  // Should be -5
+}
+
+// Test max with mixed signs
+meta fn test_max_mixed() -> Int {
+    max(-5, 10)  // Should be 10
+}
+
+// Test max with equal values
+meta fn test_max_equal() -> Int {
+    max(7, 7)  // Should be 7
+}
+
+// Test max with zero
+meta fn test_max_zero() -> Int {
+    max(0, -5)  // Should be 0
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test min and max in expressions
+meta fn test_minmax_expr() -> Int {
+    min(max(1, 5), 3)  // max(1,5)=5, min(5,3)=3
+}
+
+// Test clamping pattern
+meta fn test_clamp() -> Int {
+    let value = 15;
+    let low = 0;
+    let high = 10;
+    min(max(value, low), high)  // Should be 10 (clamped)
+}
+
+// Main test function
+fn main() {
+    // Min tests
+    assert_eq(@const(test_min_positive()), 5);
+    assert_eq(@const(test_min_positive_reverse()), 5);
+    assert_eq(@const(test_min_negative()), -10);
+    assert_eq(@const(test_min_mixed()), -5);
+    assert_eq(@const(test_min_equal()), 7);
+    assert_eq(@const(test_min_zero()), 0);
+
+    // Max tests
+    assert_eq(@const(test_max_positive()), 10);
+    assert_eq(@const(test_max_positive_reverse()), 10);
+    assert_eq(@const(test_max_negative()), -5);
+    assert_eq(@const(test_max_mixed()), 10);
+    assert_eq(@const(test_max_equal()), 7);
+    assert_eq(@const(test_max_zero()), 0);
+
+    // Combined tests
+    assert_eq(@const(test_minmax_expr()), 3);
+    assert_eq(@const(test_clamp()), 10);
+}

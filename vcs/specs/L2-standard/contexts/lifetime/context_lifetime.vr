@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: contexts, lifetime, scope
+// @description: Context lifetime and scope management
+
+// Context with borrowed access to config
+context BorrowedConfig {
+    fn get(&self, key: &Text) -> Maybe<Text>;
+}
+
+// Context for request-scoped logging
+context RequestLogger {
+    fn log(&self, message: Text);
+    fn request_id(&self) -> Text;
+}
+
+// Implementation with lifetime
+type ConfigRef is {
+    data: Map<Text, Text>,
+};
+
+implement BorrowedConfig for ConfigRef {
+    fn get(&self, key: &Text) -> Maybe<Text> {
+        Some(self.data.get(key))
+    }
+}
+
+// Scoped context usage
+fn with_config(config: Map<Text, Text>) using [BorrowedConfig] {
+    let value = BorrowedConfig.get("key");
+    print(f"Got: {value}");
+}
+
+// Request-scoped logger
+type ScopedLogger is {
+    request_id: Text,
+};
+
+implement RequestLogger for ScopedLogger {
+    fn log(&self, message: Text) {
+        let formatted = f"[{self.request_id}] {message}";
+        print(formatted);
+    }
+
+    fn request_id(&self) -> Text {
+        self.request_id
+    }
+}
+
+// Context usage in nested scopes
+fn outer_scope() using [BorrowedConfig] {
+    let value = BorrowedConfig.get("key");
+
+    // Inner scope with additional context
+    provide RequestLogger = ScopedLogger {
+        request_id: "req-123",
+    } {
+        inner_scope();
+    }
+}
+
+fn inner_scope() using [BorrowedConfig, RequestLogger] {
+    // Both contexts available
+    let config_value = BorrowedConfig.get("setting");
+    RequestLogger.log(f"Config value: {config_value}");
+}
+
+// Context with data processing
+context DataProcessor {
+    fn process(&self, input: List<Int>) -> List<Int>;
+}
+
+type StreamProcessor is {
+    scale: Int,
+};
+
+implement DataProcessor for StreamProcessor {
+    fn process(&self, input: List<Int>) -> List<Int> {
+        input.map(|x| x * self.scale)
+    }
+}
+
+// Context variance patterns
+context ReadOnly {
+    fn get(&self) -> Text;
+}
+
+context WriteOnly {
+    fn set(&self, value: Text);
+}
+
+fn main() {
+    let config = Map.new();
+
+    provide BorrowedConfig = ConfigRef { data: config } {
+        outer_scope();
+    }
+}

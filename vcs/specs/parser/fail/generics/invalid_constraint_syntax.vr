@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, generics, constraint, error
+// @description: Test invalid inline constraint with missing bound
+// @expected-error: E050
+
+fn foo<T: >() {
+    let x: T;
+}

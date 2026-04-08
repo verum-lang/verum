@@ -1,0 +1,41 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, pi-types, type-level-arithmetic, error
+// @expected-error: E400 "Type mismatch"
+
+/// Type-level arithmetic failures
+///
+/// These tests verify that type-level computations are correctly
+/// checked and mismatches are caught at compile time.
+
+/// Matrix with statically known dimensions
+type Matrix<T, Rows: meta Int, Cols: meta Int> is {
+    data: [T; Rows * Cols],
+};
+
+/// Fixed-size array
+type FixedArray<T, N: meta Int> is {
+    data: [T; N],
+};
+
+/// ERROR: Wrong return type - Int not FixedArray
+fn arithmetic_wrong() -> FixedArray<Int, 5> {
+    42  // ERROR: Int != FixedArray<Int, 5>
+}
+
+/// ERROR: Wrong field type
+fn field_wrong() -> Matrix<Float, 3, 3> {
+    Matrix { data: "not an array" }  // ERROR: Text != [Float; 9]
+}
+
+/// ERROR: Inconsistent matrix construction
+fn matrix_wrong() -> Matrix<Int, 2, 2> {
+    Matrix { data: [1.0, 2.0, 3.0, 4.0] }  // ERROR: Float != Int
+}
+
+fn main() {
+    let _ = arithmetic_wrong();
+    let _ = field_wrong();
+    let _ = matrix_wrong();
+}

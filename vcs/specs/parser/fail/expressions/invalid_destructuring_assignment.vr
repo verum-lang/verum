@@ -1,0 +1,128 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, destructuring, assignment, error
+// @description: Invalid destructuring assignment targets
+// @expected-error: E046
+// Spec: docs/architecture/new-features.md - Cluster 1: Unified Destructuring System
+
+// =============================================================================
+// Literals Cannot Be Destructuring Targets
+// =============================================================================
+
+fn test_literal_targets() {
+    // Integer literals
+    42 = x;           // ERROR: Cannot assign to literal
+    (1, 2) = (a, b);  // ERROR: Tuple of literals
+
+    // String literals
+    "hello" = x;      // ERROR: Cannot assign to literal
+
+    // Boolean literals
+    true = x;         // ERROR: Cannot assign to literal
+
+    // Float literals
+    3.14 = x;         // ERROR: Cannot assign to literal
+}
+
+// =============================================================================
+// Function Calls Cannot Be Destructuring Targets
+// =============================================================================
+
+fn test_function_call_targets() {
+    // Function call as target
+    get_value() = x;         // ERROR: Cannot assign to function call
+
+    // Function call in tuple
+    (a, get_b()) = (1, 2);   // ERROR: Function call in destructuring target
+
+    // Method call as target
+    obj.method() = x;        // ERROR: Cannot assign to method call
+
+    // Chained calls
+    a.b().c() = x;           // ERROR: Cannot assign to method chain
+}
+
+// =============================================================================
+// Operators in Destructuring Targets
+// =============================================================================
+
+fn test_operator_targets() {
+    // Arithmetic expressions
+    (a + b) = x;             // ERROR: Cannot assign to expression
+    (a * 2, b) = (1, 2);     // ERROR: Expression in tuple
+
+    // Comparison expressions
+    (a == b) = true;         // ERROR: Cannot assign to comparison
+
+    // Logical expressions
+    (a && b) = true;         // ERROR: Cannot assign to logical expr
+}
+
+// =============================================================================
+// Invalid Record Destructuring
+// =============================================================================
+
+fn test_invalid_record_destructuring() {
+    // Missing type name
+    { x, y } = point;        // ERROR: Record needs type name
+
+    // Computed field name
+    Point { [key], y } = p;  // ERROR: Computed field in pattern
+
+    // Duplicate fields
+    Point { x, x } = p;      // ERROR: Duplicate field
+}
+
+// =============================================================================
+// Invalid Array Destructuring
+// =============================================================================
+
+fn test_invalid_array_destructuring() {
+    // Multiple rest patterns
+    [..a, ..b] = items;      // ERROR: Multiple rest patterns
+
+    // Rest not at end
+    [..rest, last] = items;  // ERROR: Rest must be at end
+
+    // Empty array pattern
+    [] = items;              // ERROR: Empty destructuring pattern
+}
+
+// =============================================================================
+// Invalid Compound Destructuring
+// =============================================================================
+
+fn test_invalid_compound_destructuring() {
+    // Division by potentially zero
+    // (a, b) /= (0, 1);     // Runtime error, not parse error
+
+    // Compound with literal target
+    (1, 2) += (a, b);        // ERROR: Cannot compound assign to literals
+
+    // Mismatched operation types
+    ("a", "b") += (1, 2);    // Type error - caught later
+}
+
+// =============================================================================
+// Type Annotations in Wrong Places
+// =============================================================================
+
+fn test_invalid_type_annotations() {
+    // Type annotation in assignment target
+    (a: Int, b: Int) = (1, 2);  // ERROR: Type annotation in pattern assignment
+
+    // Type on right side of record field
+    Point { x: Int, y } = p;    // ERROR: Type where value expected
+}
+
+// =============================================================================
+// Invalid Nesting
+// =============================================================================
+
+fn test_invalid_nesting() {
+    // Mixing incompatible structures
+    [a, (b, c)] = tuple;     // Type mismatch - array vs tuple
+
+    // Too many nesting levels without proper structure
+    ((((a)))) = 1;           // Excessive parentheses, single value
+}

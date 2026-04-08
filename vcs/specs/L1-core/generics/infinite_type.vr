@@ -1,0 +1,251 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L1
+// @tags: generics, errors, infinite-type, occurs-check
+// @expected-error: E403 "Infinite type"
+
+/// Test for infinite type errors (occurs check failures).
+/// These examples create recursive type constraints that cannot be solved.
+///
+/// Error code E403 indicates that type unification would produce an infinite type,
+/// typically caught by the "occurs check" in the type inference algorithm.
+
+// =============================================================================
+// SECTION 1: Self-Referential Function Types
+// =============================================================================
+
+/// ERROR: E403 - Self-referential closure creates infinite type
+fn bad_self_reference() {
+    // f has type T -> U, but T = (T -> U), which is infinite
+    let f = |x| f(x);  // ERROR: infinite type in self-application
+}
+
+/// ERROR: E403 - Recursive function without explicit type annotation
+fn bad_recursive_closure() {
+    // rec has type T -> U, where T depends on rec itself
+    let rec = |n| {
+        if n == 0 { 0 }
+        else { rec(n - 1) }  // ERROR: rec's type is infinite without annotation
+    };
+}
+
+// =============================================================================
+// SECTION 2: Occurs Check Failures in Unification
+// =============================================================================
+
+/// ERROR: E403 - Variable unified with expression containing itself
+fn bad_occurs_check() {
+    fn id<T>(x: T) -> T { x }
+    let x = id(x);  // ERROR: x: T but T = typeof(id(x)) = T, infinite
+}
+
+/// ERROR: E403 - Type variable escapes into containing type
+fn bad_unification<T>(x: T) -> T {
+    (x, x)  // ERROR: T = (T, T) would be infinite
+}
+
+/// ERROR: E403 - Nested self-reference
+fn bad_nested_self_ref<T>(x: T) -> T {
+    ((x, x), x)  // ERROR: T = ((T, T), T) is infinite
+}
+
+// =============================================================================
+// SECTION 3: Self-Containing Collection Types
+// =============================================================================
+
+/// ERROR: E403 - List containing itself
+fn bad_self_containing_list() {
+    let list = [list];  // ERROR: List<List<List<...>>> infinite type
+}
+
+/// ERROR: E403 - Map with self as value
+fn bad_self_containing_map() {
+    let mut map: Map<Int, _> = Map.new();
+    map.insert(1, map);  // ERROR: Map<Int, Map<Int, Map<...>>> infinite
+}
+
+/// ERROR: E403 - Heap containing itself
+fn bad_self_containing_heap() {
+    type Heap<T> is { value: T };
+    let b = Heap { value: b };  // ERROR: Heap<Heap<Heap<...>>> infinite
+}
+
+// =============================================================================
+// SECTION 4: Function Returning Itself
+// =============================================================================
+
+/// ERROR: E403 - Self-referencing type alias (infinite expansion)
+type SelfRef is SelfRef;  // ERROR: type alias creates infinite expansion
+
+/// ERROR: E403 - Closure returning itself
+fn bad_closure_returns_self() {
+    let f: _ = || f;  // ERROR: f's type would be () -> (() -> (() -> ...))
+}
+
+// =============================================================================
+// SECTION 5: Mutual Recursion Creating Infinite Types
+// =============================================================================
+
+/// ERROR: E403 - Indirect infinite type through mutual recursion
+fn bad_mutual_a<T>(x: T) -> T {
+    bad_mutual_b(x)
+}
+
+fn bad_mutual_b<T>(x: T) -> T {
+    bad_mutual_a((x, x))  // ERROR: through mutual recursion, T becomes (T, T), then ((T, T), (T, T)), etc.
+}
+
+/// ERROR: E403 - Three-way mutual recursion
+fn bad_triple_a<T>(x: T) -> T {
+    bad_triple_b(x)
+}
+
+fn bad_triple_b<T>(x: T) -> T {
+    bad_triple_c(x)
+}
+
+fn bad_triple_c<T>(x: T) -> T {
+    bad_triple_a((x, x))  // ERROR: creates infinite type through cycle
+}
+
+// =============================================================================
+// SECTION 6: Self-Referential Struct Without Indirection
+// =============================================================================
+
+// Note: This would be caught at definition time, not during type inference
+// type BadNode is {
+//     value: Int,
+//     next: BadNode,  // ERROR: infinite type without Heap/Box indirection
+// };
+
+/// Correct version uses indirection:
+type GoodNode is {
+    value: Int,
+    next: Maybe<Heap<GoodNode>>,  // OK: Heap provides indirection
+};
+
+// =============================================================================
+// SECTION 7: Type Inference Loop
+// =============================================================================
+
+/// ERROR: E403 - Type inference cannot terminate
+fn bad_apply<A, B>(f: fn(A) -> B, x: A) -> B {
+    f(x)
+}
+
+fn bad_complex_inference() {
+    // This creates a complex type that cannot be resolved
+    let result = bad_apply(|x| bad_apply(|y| y, x), 42);
+    // In some cases this may trigger occurs check failures
+}
+
+// =============================================================================
+// SECTION 8: Polymorphic Recursion Without Annotation
+// =============================================================================
+
+/// ERROR: E403 - Polymorphic recursion needs explicit type annotation
+fn bad_poly_rec(n: Int) {
+    if n > 0 {
+        bad_poly_rec(n - 1);
+        bad_poly_rec(f"{n}");  // ERROR: n is used as both Int and Text, inference fails
+    }
+}
+
+// =============================================================================
+// SECTION 9: Self-Application
+// =============================================================================
+
+/// ERROR: E403 - Self-application creates infinite type
+fn bad_self_apply<T>(f: fn(T) -> T) -> T {
+    f(f)  // ERROR: f: (T -> T), but passed as T, so T = (T -> T), infinite
+}
+
+/// ERROR: E403 - Omega combinator
+fn bad_omega_combinator() {
+    let omega_fn = |x| x(x);  // ERROR: x has type T, x(x) requires T = (T -> U), infinite
+    omega_fn(omega_fn);
+}
+
+// =============================================================================
+// SECTION 10: Y Combinator (Without Type Annotations)
+// =============================================================================
+
+/// ERROR: E403 - Y combinator creates infinite type
+fn bad_y_combinator<T>(f: fn(fn(T) -> T) -> fn(T) -> T) -> fn(T) -> T {
+    let g = |x| f(|n| (x(x))(n));
+    g(g)  // ERROR: x(x) creates infinite type
+}
+
+// =============================================================================
+// SECTION 11: Circular Type Aliases
+// =============================================================================
+
+// Note: These would be errors at the definition level
+// type A = B;
+// type B = A;  // ERROR: circular type definition
+
+// type X = List<X>;  // ERROR: without indirection, this is infinite
+
+// =============================================================================
+// SECTION 12: Generic Type Escaping Scope
+// =============================================================================
+
+/// ERROR: E403 - Type variable escapes its binding scope
+fn bad_escape<T>() -> T {
+    let inner = |x: T| x;
+    inner  // ERROR: returns fn(T) -> T but T is not constrained
+}
+
+/// ERROR: E403 - Existential type escape
+fn bad_existential() {
+    fn make<T>() -> T { panic("unreachable") }
+    let x = make();  // ERROR: T cannot be inferred, unconstrained
+    x
+}
+
+// =============================================================================
+// SECTION 13: Recursive Enum Without Indirection
+// =============================================================================
+
+// This would be an error at definition time:
+// enum BadTree<T> {
+//     Leaf(T),
+//     Node(BadTree<T>, BadTree<T>),  // ERROR: infinite size without Heap
+// }
+
+/// Correct version:
+type GoodTree<T> is
+    | Leaf(T)
+    | Node(Heap<GoodTree<T>>, Heap<GoodTree<T>>);  // OK with indirection
+
+// =============================================================================
+// SECTION 14: Main Function With Error Cases
+// =============================================================================
+
+fn main() {
+    // Each of these should trigger E403 infinite type errors:
+
+    // Self-reference
+    bad_self_reference();
+
+    // Occurs check
+    bad_occurs_check();
+
+    // Self-containing collections
+    bad_self_containing_list();
+
+    // Mutual recursion
+    let _ = bad_mutual_a(42);
+
+    // Self-application
+    let _ = bad_self_apply(|x| x);
+
+    // Polymorphic recursion
+    bad_poly_rec(5);
+}
+
+// =============================================================================
+// All examples above should produce E403 "Infinite type" errors.
+// These errors occur during type unification when the occurs check detects
+// that a type variable would need to be unified with a type containing itself.
+// =============================================================================

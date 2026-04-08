@@ -1,0 +1,32 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, overflow, error
+// @description: Test that arithmetic overflow is caught at compile time
+// @expected-error: Shift amount
+
+// =============================================================================
+// ARITHMETIC OVERFLOW TESTS
+// =============================================================================
+
+// Test shift left overflow
+meta fn test_shift_overflow() -> Int {
+    shift_left(1, 200)  // ERROR: shift amount too large
+}
+
+// Test power overflow (result too large)
+meta fn test_pow_overflow() -> Int {
+    pow(10, 100)  // ERROR: result overflows
+}
+
+// Test large multiplication
+meta fn test_mult_overflow() -> Int {
+    let max = 9223372036854775807;  // I64 max
+    max * 2  // ERROR: overflow
+}
+
+// Test large addition
+meta fn test_add_overflow() -> Int {
+    let max = 9223372036854775807;
+    max + max  // ERROR: overflow
+}

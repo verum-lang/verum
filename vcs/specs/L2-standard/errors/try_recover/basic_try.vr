@@ -1,0 +1,214 @@
+// @test: run
+// @expected-stdout: Try block result: 42\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, try, block
+
+/// Basic try block - expression-based error handling scope.
+/// Try blocks allow grouping fallible operations with explicit error boundaries.
+
+type FileError is
+    | NotFound(Text)
+    | PermissionDenied
+    | IoError(Text);
+
+type ParseError is
+    | InvalidFormat(Text)
+    | UnexpectedToken(Text)
+    | EndOfInput;
+
+/// Simulated file operations
+fn read_file(path: &Text) -> Result<Text, FileError> {
+    if path == "valid.txt" {
+        Ok("42")
+    } else if path == "empty.txt" {
+        Ok("")
+    } else {
+        Err(FileError.NotFound(path.clone()))
+    }
+}
+
+fn parse_number(text: &Text) -> Result<Int, ParseError> {
+    if text.is_empty() {
+        Err(ParseError.EndOfInput)
+    } else if text == "42" {
+        Ok(42)
+    } else {
+        Err(ParseError.InvalidFormat(text.clone()))
+    }
+}
+
+/// Combined error type for try block
+type ProcessError is
+    | File(FileError)
+    | Parse(ParseError);
+
+implement From<FileError> for ProcessError {
+    fn from(e: FileError) -> ProcessError {
+        ProcessError.File(e)
+    }
+}
+
+implement From<ParseError> for ProcessError {
+    fn from(e: ParseError) -> ProcessError {
+        ProcessError.Parse(e)
+    }
+}
+
+/// Basic try block usage - groups multiple fallible operations
+fn process_file(path: &Text) -> Result<Int, ProcessError> {
+    // Explicit error conversion instead of try block with mixed error types
+    let content = match read_file(path) {
+        Ok(c) => c,
+        Err(e) => return Err(ProcessError.File(e)),
+    };
+    let number = match parse_number(&content) {
+        Ok(n) => n,
+        Err(e) => return Err(ProcessError.Parse(e)),
+    };
+    Ok(number * 2)
+}
+
+/// Try block as expression - evaluates to Result
+fn try_as_expression() -> Int {
+    // Try block evaluates to Result<T, E>
+    let result: Result<Int, Text> = try {
+        let a = Some(10).ok_or("Missing a")?;
+        let b = Some(20).ok_or("Missing b")?;
+        a + b
+    };
+
+    result.unwrap_or(0)
+}
+
+/// Multiple try blocks for different error domains
+fn multi_domain_operation() -> Result<Data, AppError> {
+    // First domain: file operations
+    let file_content = try {
+        let raw = read_file("config.txt")?;
+        raw.trim()
+    }.map_err(|e| AppError.Io(format("{:?}", e)))?;
+
+    // Second domain: parsing
+    let parsed = try {
+        let number = parse_number(&file_content)?;
+        Config { value: number }
+    }.map_err(|e| AppError.Parse(format("{:?}", e)))?;
+
+    // Third domain: validation
+    let validated = try {
+        if parsed.value < 0 {
+            Err(ValidationError.NegativeValue)?
+        }
+        if parsed.value > 1000 {
+            Err(ValidationError.TooLarge)?
+        }
+        parsed
+    }.map_err(|e| AppError.Validation(format("{:?}", e)))?;
+
+    Ok(Data { config: validated })
+}
+
+type Config is { value: Int };
+type Data is { config: Config };
+
+type AppError is
+    | Io(Text)
+    | Parse(Text)
+    | Validation(Text);
+
+type ValidationError is
+    | NegativeValue
+    | TooLarge
+    | InvalidFormat;
+
+/// Try with immediate handling via explicit error conversion
+fn try_with_match() -> Text {
+    let content_result = read_file("data.txt");
+    let result: Result<Int, ProcessError> = match content_result {
+        Ok(content) => {
+            match parse_number(&content) {
+                Ok(n) => Ok(n),
+                Err(e) => Err(ProcessError.Parse(e)),
+            }
+        }
+        Err(e) => Err(ProcessError.File(e)),
+    };
+
+    match result {
+        Ok(n) => f"Got number: {n}",
+        Err(ProcessError.File(FileError.NotFound(path))) =>
+            f"File not found: {path}",
+        Err(ProcessError.File(_)) =>
+            "File error occurred",
+        Err(ProcessError.Parse(_)) =>
+            "Parse error occurred",
+        Err(_) => "Unknown error",
+    }
+}
+
+/// Try block with type annotation
+fn try_with_annotation() -> Result<Int, ProcessError> {
+    // Explicit type annotation on try block
+    let result: Result<Int, ProcessError> = try {
+        let x = read_file("valid.txt")?;
+        let n = parse_number(&x)?;
+        n
+    };
+
+    result
+}
+
+/// Try block returning unit
+fn try_returning_unit() -> Result<(), ProcessError> {
+    try {
+        let _ = read_file("log.txt")?;
+        let _ = parse_number("42")?;
+        // Implicit unit return
+    }
+}
+
+/// Try block with early return inside
+fn try_with_early_return() -> Result<Int, ProcessError> {
+    try {
+        let content = read_file("valid.txt")?;
+
+        // Early return from function (not just try block)
+        if content.is_empty() {
+            return Ok(0);
+        }
+
+        let number = parse_number(&content)?;
+        number
+    }
+}
+
+/// Chaining try block results
+fn chained_try_blocks() -> Result<Int, Text> {
+    let a: Result<Int, Text> = try {
+        Some(10).ok_or("Missing")?
+    };
+
+    let b: Result<Int, Text> = try {
+        a? + 20
+    };
+
+    let c: Result<Int, Text> = try {
+        b? * 2
+    };
+
+    c
+}
+
+fn main() {
+    // Basic try block
+    match process_file("valid.txt") {
+        Ok(n) => println(format("Try block result: {}", n / 2)),
+        Err(e) => println(format("Error: {:?}", e))
+    }
+
+    // Try as expression
+    let expr_result = try_as_expression();
+
+    println("Operation completed");
+}

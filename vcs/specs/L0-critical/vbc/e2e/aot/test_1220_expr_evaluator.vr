@@ -1,0 +1,66 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: recursive, variant, heap, float, expression-tree, e2e
+// @description: Recursive expression evaluator with Heap-allocated tree nodes and float arithmetic
+
+type Expr is
+    Num(Float) |
+    Add(Heap<Expr>, Heap<Expr>) |
+    Mul(Heap<Expr>, Heap<Expr>) |
+    Neg(Heap<Expr>);
+
+@allow(unbounded_recursion)
+fn eval(e: Expr) -> Float {
+    match e {
+        Expr.Num(v) => v,
+        Expr.Add(l, r) => eval(*l) + eval(*r),
+        Expr.Mul(l, r) => eval(*l) * eval(*r),
+        Expr.Neg(inner) => 0.0 - eval(*inner),
+    }
+}
+
+fn num(v: Float) -> Expr { Expr.Num(v) }
+fn add(l: Expr, r: Expr) -> Expr { Expr.Add(Heap(l), Heap(r)) }
+fn mul(l: Expr, r: Expr) -> Expr { Expr.Mul(Heap(l), Heap(r)) }
+fn neg(e: Expr) -> Expr { Expr.Neg(Heap(e)) }
+
+fn check(name: Text, got: Float, expected: Float) -> Bool {
+    let diff = got - expected;
+    let abs_diff = if diff < 0.0 { 0.0 - diff } else { diff };
+    if abs_diff > 0.01 {
+        print(f"FAIL {name}: got {got}, expected {expected}");
+        false
+    } else {
+        true
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // 42.0
+    if !check("num", eval(num(42.0)), 42.0) { f = f + 1; }
+
+    // 3.0 + 4.0 = 7.0
+    if !check("add", eval(add(num(3.0), num(4.0))), 7.0) { f = f + 1; }
+
+    // 3.0 * 4.0 = 12.0
+    if !check("mul", eval(mul(num(3.0), num(4.0))), 12.0) { f = f + 1; }
+
+    // -(5.0) = -5.0
+    if !check("neg", eval(neg(num(5.0))), -5.0) { f = f + 1; }
+
+    // (2 + 3) * (4 + 5) = 5 * 9 = 45
+    let e = mul(add(num(2.0), num(3.0)), add(num(4.0), num(5.0)));
+    if !check("nested", eval(e), 45.0) { f = f + 1; }
+
+    // -(2 * (3 + 4)) = -(2 * 7) = -14
+    let e2 = neg(mul(num(2.0), add(num(3.0), num(4.0))));
+    if !check("complex", eval(e2), -14.0) { f = f + 1; }
+
+    if f == 0 {
+        print("All expression evaluator tests passed");
+    }
+    f
+}

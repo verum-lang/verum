@@ -1,0 +1,220 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, basic, identity, polymorphism
+
+/// Test for basic generic functions and types.
+/// Generics enable type-safe polymorphism without runtime overhead (monomorphization).
+///
+/// This file tests:
+/// - Generic identity function
+/// - Generic wrapper types
+/// - Generic enums
+/// - Type parameter substitution
+/// - Return type generics
+
+// =============================================================================
+// SECTION 1: Basic Generic Functions
+// =============================================================================
+
+/// The identity function - returns its argument unchanged.
+/// This is the simplest possible generic function.
+fn identity<T>(x: T) -> T {
+    x
+}
+
+/// Generic function that wraps value in a tuple with itself
+fn duplicate<T: Clone>(x: T) -> (T, T) {
+    (x.clone(), x)
+}
+
+/// Generic function with explicit return
+fn wrap_in_some<T>(x: T) -> Maybe<T> {
+    Some(x)
+}
+
+/// Generic const function - ignores second argument
+fn const_fn<A, B>(a: A, _b: B) -> A {
+    a
+}
+
+// =============================================================================
+// SECTION 2: Generic Struct Types
+// =============================================================================
+
+/// Simple generic wrapper type
+type Wrapper<T> is {
+    value: T,
+};
+
+implement<T> Wrapper<T> {
+    fn new(value: T) -> Wrapper<T> {
+        Wrapper { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn into_inner(self) -> T {
+        self.value
+    }
+
+    fn map<U>(self, f: fn(T) -> U) -> Wrapper<U> {
+        Wrapper { value: f(self.value) }
+    }
+}
+
+/// Generic pair type
+type Pair<T> is {
+    first: T,
+    second: T,
+};
+
+implement<T> Pair<T> {
+    fn new(first: T, second: T) -> Pair<T> {
+        Pair { first, second }
+    }
+
+    fn swap(self) -> Pair<T> {
+        Pair {
+            first: self.second,
+            second: self.first,
+        }
+    }
+}
+
+// =============================================================================
+// SECTION 3: Generic Enum Types
+// =============================================================================
+
+/// Generic Option/Maybe type
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+implement<T> Maybe<T> {
+    fn is_some(&self) -> Bool {
+        match self {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    fn is_none(&self) -> Bool {
+        !self.is_some()
+    }
+
+    fn unwrap(self) -> T {
+        match self {
+            Some(x) => x,
+            None => panic("called unwrap on None"),
+        }
+    }
+
+    fn map<U>(self, f: fn(T) -> U) -> Maybe<U> {
+        match self {
+            Some(x) => Some(f(x)),
+            None => None,
+        }
+    }
+}
+
+// =============================================================================
+// SECTION 4: Main Test Cases
+// =============================================================================
+
+fn main() {
+    // Test identity with different types
+    let int_id: Int = identity(42);
+    let text_id: Text = identity("hello");
+    let bool_id: Bool = identity(true);
+    let float_id: Float = identity(3.14);
+
+    assert(int_id == 42);
+    assert(text_id == "hello");
+    assert(bool_id == true);
+    assert(float_id == 3.14);
+
+    // Test identity with compound types
+    let list_id: List<Int> = identity([1, 2, 3]);
+    let tuple_id: (Int, Text) = identity((42, "answer"));
+
+    assert(list_id == [1, 2, 3]);
+    assert(tuple_id == (42, "answer"));
+
+    // Test duplicate function
+    let (a, b) = duplicate(100);
+    assert(a == 100);
+    assert(b == 100);
+
+    // Test Wrapper type
+    let int_box: Wrapper<Int> = Wrapper.new(42);
+    let text_box: Wrapper<Text> = Wrapper.new("world");
+
+    assert(*int_box.get() == 42);
+    assert(*text_box.get() == "world");
+
+    // Test Wrapper.map
+    let doubled_box: Wrapper<Int> = Wrapper.new(21).map(|x| x * 2);
+    assert(*doubled_box.get() == 42);
+
+    // Test Wrapper.into_inner
+    let unboxed: Int = Wrapper.new(99).into_inner();
+    assert(unboxed == 99);
+
+    // Test Pair type
+    let pair: Pair<Int> = Pair.new(1, 2);
+    assert(pair.first == 1);
+    assert(pair.second == 2);
+
+    let swapped = pair.swap();
+    assert(swapped.first == 2);
+    assert(swapped.second == 1);
+
+    // Test Maybe enum
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    assert(some_val.is_some());
+    assert(!some_val.is_none());
+    assert(none_val.is_none());
+    assert(!none_val.is_some());
+
+    // Test Maybe.unwrap
+    assert(Some(100).unwrap() == 100);
+
+    // Test Maybe.map
+    let mapped: Maybe<Int> = Some(21).map(|x| x * 2);
+    assert(mapped.unwrap() == 42);
+
+    let mapped_none: Maybe<Int> = None.map(|x| x * 2);
+    assert(mapped_none.is_none());
+
+    // Test nested generics
+    let nested_box: Wrapper<Wrapper<Int>> = Wrapper.new(Wrapper.new(42));
+    assert(*nested_box.get().get() == 42);
+
+    let nested_option: Maybe<Maybe<Int>> = Some(Some(42));
+    assert(nested_option.unwrap().unwrap() == 42);
+
+    // Test const_fn
+    let result = const_fn(42, "ignored");
+    assert(result == 42);
+
+    // Test wrap_in_some
+    let wrapped: Maybe<Int> = wrap_in_some(42);
+    assert(wrapped == Some(42));
+
+    // Test identity preserves reference structure
+    let original_list = [1, 2, 3];
+    let id_list = identity(original_list.clone());
+    assert(id_list == [1, 2, 3]);
+}
+
+// =============================================================================
+// SECTION 5: Negative Tests (in separate file: bound_errors.vr)
+// =============================================================================
+// The following would be type errors:
+// - identity without valid type: let x = identity();
+// - Type mismatch: let x: Int = identity("string");

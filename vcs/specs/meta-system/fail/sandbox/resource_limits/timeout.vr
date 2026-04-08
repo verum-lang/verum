@@ -1,0 +1,16 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M303
+// @description: Tests that excessive recursion is caught by resource limits
+// @tags: meta-system, sandbox, recursion, resource-limits
+
+// Simple infinite recursion that definitely exceeds depth limit
+meta fn deep_recursion() -> Int {
+    // This will hit M303 RecursionLimitExceeded (limit is 50)
+    1 + deep_recursion()
+}
+
+fn main() {
+    // This infinite recursion will hit M303
+    @const assert(deep_recursion() > 0);
+}

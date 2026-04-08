@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, context, error
+// @description: Test missing context body detection
+// @expected-error: E059
+
+context Database
+
+context async Logger
+
+context FileSystem;

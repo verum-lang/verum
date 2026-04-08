@@ -1,0 +1,182 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, edge-cases, whitespace
+
+// Whitespace handling edge cases
+
+fn test_whitespace_handling() {
+    // Space character (0x20)
+    let a = 1;
+    let b  =  2;
+    let c   =   3;
+    let d    =    4;
+
+    // Multiple spaces between tokens
+    let   spaced   =   42;
+    let     very_spaced     =     100;
+
+    // Tab character (0x09)
+    let	tabbed	=	42;
+    let		double_tab		=		100;
+
+    // Mixed spaces and tabs
+    let 	mixed	 =	 42;
+    let  	 	space_tab_mix  	 	=  	 	100;
+
+    // Newline handling (0x0A)
+    let first = 1;
+
+    let second = 2;
+
+
+    let third = 3;
+
+
+
+    let fourth = 4;
+
+    // Whitespace in expressions
+    let expr1 = (  1 + 2  );
+    let expr2 = (		1 + 2		);
+    let expr3 = (
+        1 + 2
+    );
+
+    // Whitespace in array literals
+    let arr1 = [1, 2, 3];
+    let arr2 = [ 1 , 2 , 3 ];
+    let arr3 = [  1  ,  2  ,  3  ];
+    let arr4 = [
+        1,
+        2,
+        3,
+    ];
+
+    // Whitespace in struct literals
+    let struct1 = Point { x: 1, y: 2 };
+    let struct2 = Point {  x:  1,  y:  2  };
+    let struct3 = Point {
+        x: 1,
+        y: 2,
+    };
+
+    // Whitespace in function calls
+    let call1 = func(1, 2, 3);
+    let call2 = func( 1 , 2 , 3 );
+    let call3 = func(  1  ,  2  ,  3  );
+    let call4 = func(
+        1,
+        2,
+        3,
+    );
+
+    // Whitespace around operators
+    let op1 = 1+2;
+    let op2 = 1 + 2;
+    let op3 = 1  +  2;
+    let op4 = 1	+	2;
+
+    // No whitespace between tokens (where valid)
+    let no_space = 1+2*3;
+    let no_space2 = (1+2)*(3+4);
+
+    // Whitespace in type annotations
+    let typed1: Int = 42;
+    let typed2 : Int = 42;
+    let typed3 :  Int  =  42;
+    let typed4:Int=42;
+
+    // Whitespace in generics
+    let gen1: List<Int> = [];
+    let gen2: List< Int > = [];
+    let gen3: List<  Int  > = [];
+    let gen4: Map<Text, Int> = {};
+    let gen5: Map< Text , Int > = {};
+
+    // Whitespace in closures
+    let closure1 = |x| x * 2;
+    let closure2 = | x | x * 2;
+    let closure3 = |  x  |  x  *  2;
+    let closure4 = |x|x*2;
+
+    // Vertical whitespace in expressions (line continuation)
+    let continued = 1
+        + 2
+        + 3
+        + 4;
+
+    let value = 42;
+    let chained = value
+        .to_string()
+        .len();
+
+    // Comment affecting whitespace perception
+    let commented = 1 /* comment */ + 2;
+    let commented2 = 1/* no space */+/* no space */2;
+
+    // Significant vs insignificant whitespace
+    let indented_block = {
+        let a = 1;
+        let b = 2;
+        a + b
+    };
+
+    // Maximum consecutive whitespace
+    let many_spaces                                                             = 42;
+}
+
+// Indentation variations
+fn function_normal() {
+    let inner = 42;
+}
+
+fn function_tabbed() {
+	let inner = 42;
+}
+
+fn function_deep() {
+        let very_deep = 42;
+    let less_deep = 100;
+}
+
+// Blank lines in blocks
+fn with_blanks() {
+    let a = 1;
+
+    let b = 2;
+
+
+    let c = 3;
+}
+
+// Empty blocks (just whitespace)
+fn empty() {
+
+}
+
+fn empty_tabbed() {
+
+}
+
+// Whitespace in string literals (preserved, not tokenization whitespace)
+fn test_string_whitespace() {
+    let str_spaces = "hello   world";
+    let str_tabs = "hello		world";
+    let str_newlines = "hello\nworld";
+
+    // Whitespace-only lines between code
+    let before = 1;
+
+    let after = 2;
+}
+
+// Helper types and functions for struct literals
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+fn func(a: Int, b: Int, c: Int) -> Int {
+    a + b + c
+}

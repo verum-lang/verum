@@ -1,0 +1,146 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, linker, export, abi, ffi
+// @description: Symbol export and ABI control tests
+
+/// Export with C ABI (no name mangling)
+@export("C")
+fn c_compatible_function(x: Int) -> Int {
+    x * 2
+}
+
+/// Export with custom symbol name
+@export("C", name = "my_custom_name")
+fn verum_internal_name(a: Int, b: Int) -> Int {
+    a + b
+}
+
+/// Export with stdcall convention (Windows)
+@export("stdcall")
+fn windows_callback(hwnd: Int, msg: Int) -> Int {
+    0
+}
+
+/// Export with fastcall convention
+@export("fastcall")
+fn fast_entrypoint(x: Int) -> Int {
+    x
+}
+
+/// Export for shared library
+@export("C")
+@visibility(default)
+fn library_public_api() -> Int {
+    42
+}
+
+/// Export struct with C layout
+@export("C")
+@repr(C)
+type CPoint is {
+    x: Float,
+    y: Float,
+};
+
+/// Export function using C struct
+@export("C")
+fn create_point(x: Float, y: Float) -> CPoint {
+    CPoint { x, y }
+}
+
+/// Export function taking C struct pointer
+@export("C")
+fn distance_from_origin(p: &CPoint) -> Float {
+    (p.x * p.x + p.y * p.y).sqrt()
+}
+
+/// Export with versioned symbol (ELF)
+@export("C", name = "calculate@@VERSION_2")
+fn calculate_v2_impl(x: Int) -> Int {
+    x * x
+}
+
+/// Default version symbol
+@export("C", name = "calculate@VERSION_1")
+fn calculate_v1_impl(x: Int) -> Int {
+    x
+}
+
+/// Export global variable
+@export("C")
+let EXPORTED_CONSTANT: Int = 100;
+
+/// Export mutable global (careful with thread safety)
+@export("C")
+static mut EXPORTED_STATE: Int = 0;
+
+/// Combining export with weak for plugin hooks
+@export("C")
+@weak
+fn plugin_hook() -> Int {
+    // Default implementation
+    0
+}
+
+/// Export for dynamic loading
+@export("C")
+@visibility(default)
+fn plugin_initialize() -> Int {
+    1
+}
+
+@export("C")
+@visibility(default)
+fn plugin_shutdown() {
+    // Cleanup
+}
+
+/// Export with no-return hint
+@export("C")
+@noreturn
+fn abort_handler() {
+    panic("abort called");
+}
+
+/// Naked export for custom prologue/epilogue
+@export("C")
+@naked
+fn custom_entry() {
+    @asm("ret", options(noreturn));
+}
+
+/// System ABI (platform default)
+@export("system")
+fn system_abi_function(x: Int) -> Int {
+    x + 1
+}
+
+fn main() {
+    let a = c_compatible_function(21);
+    assert(a == 42);
+
+    let b = verum_internal_name(10, 20);
+    assert(b == 30);
+
+    let c = library_public_api();
+    assert(c == 42);
+
+    let p = create_point(3.0, 4.0);
+    let d = distance_from_origin(&p);
+    assert(d == 5.0);
+
+    assert(EXPORTED_CONSTANT == 100);
+
+    EXPORTED_STATE = 42;
+    assert(EXPORTED_STATE == 42);
+
+    let e = plugin_hook();
+    assert(e == 0);
+
+    let f = plugin_initialize();
+    assert(f == 1);
+
+    let g = system_abi_function(5);
+    assert(g == 6);
+}

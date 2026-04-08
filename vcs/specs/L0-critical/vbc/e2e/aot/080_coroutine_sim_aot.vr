@@ -1,0 +1,362 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, coroutine, state-machine, generator, cooperative
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT coroutine simulation using explicit state machines for counting, fibonacci, and accumulator generators
+
+// Coroutine state
+type CoState is CReady(Int) | CYielded { val: Int, next_input: Int } | CDone(Int);
+
+fn co_is_done(state: CoState) -> Bool {
+    state is CDone
+}
+
+fn co_is_yielded(state: CoState) -> Bool {
+    state is CYielded
+}
+
+fn co_is_ready(state: CoState) -> Bool {
+    state is CReady
+}
+
+// Extract the yielded value, or -1 if not yielded
+fn co_yielded_val(state: CoState) -> Int {
+    match state {
+        CReady(_) => -1,
+        CYielded { val, next_input: _ } => val,
+        CDone(_) => -1,
+    }
+}
+
+// Extract the final value from CDone, or -1
+fn co_done_val(state: CoState) -> Int {
+    match state {
+        CReady(_) => -1,
+        CYielded { val: _, next_input: _ } => -1,
+        CDone(v) => v,
+    }
+}
+
+// ======= Counting coroutine =======
+// Counts from start up to (but not including) limit, yielding each value.
+// State encoding: CReady(start) -> initial
+// Internal state: current count stored in next_input field
+type CounterCo is { current: Int, limit: Int };
+
+fn counter_new(start: Int, limit: Int) -> CounterCo {
+    CounterCo { current: start, limit: limit }
+}
+
+// Step the counter coroutine: yields current value and advances
+fn counter_step(co: CounterCo) -> CoState {
+    if co.current >= co.limit {
+        CDone(co.current)
+    } else {
+        CYielded { val: co.current, next_input: co.current + 1 }
+    }
+}
+
+fn counter_resume(co: CounterCo) -> CounterCo {
+    CounterCo { current: co.current + 1, limit: co.limit }
+}
+
+// Collect all yielded values from counter into a sum
+fn counter_sum(co: CounterCo) -> Int {
+    let mut total = 0;
+    let mut c = co;
+    let mut done = false;
+    while !done {
+        let state = counter_step(c);
+        match state {
+            CDone(_) => { done = true; },
+            CYielded { val, next_input: _ } => {
+                total = total + val;
+                c = counter_resume(c);
+            },
+            CReady(_) => { done = true; },
+        }
+    }
+    total
+}
+
+// Count how many values are yielded
+fn counter_count(co: CounterCo) -> Int {
+    let mut count = 0;
+    let mut c = co;
+    let mut done = false;
+    while !done {
+        let state = counter_step(c);
+        match state {
+            CDone(_) => { done = true; },
+            CYielded { val: _, next_input: _ } => {
+                count = count + 1;
+                c = counter_resume(c);
+            },
+            CReady(_) => { done = true; },
+        }
+    }
+    count
+}
+
+// ======= Fibonacci coroutine =======
+type FibCo is { a: Int, b: Int, remaining: Int };
+
+fn fib_new(n: Int) -> FibCo {
+    FibCo { a: 0, b: 1, remaining: n }
+}
+
+fn fib_step(co: FibCo) -> CoState {
+    if co.remaining <= 0 {
+        CDone(co.a)
+    } else {
+        CYielded { val: co.a, next_input: co.remaining - 1 }
+    }
+}
+
+fn fib_resume(co: FibCo) -> FibCo {
+    FibCo { a: co.b, b: co.a + co.b, remaining: co.remaining - 1 }
+}
+
+// Collect all yielded fibonacci values into a sum
+fn fib_sum(co: FibCo) -> Int {
+    let mut total = 0;
+    let mut c = co;
+    let mut done = false;
+    while !done {
+        let state = fib_step(c);
+        match state {
+            CDone(_) => { done = true; },
+            CYielded { val, next_input: _ } => {
+                total = total + val;
+                c = fib_resume(c);
+            },
+            CReady(_) => { done = true; },
+        }
+    }
+    total
+}
+
+// Get the last yielded fibonacci value
+fn fib_last(co: FibCo) -> Int {
+    let mut last = 0;
+    let mut c = co;
+    let mut done = false;
+    while !done {
+        let state = fib_step(c);
+        match state {
+            CDone(_) => { done = true; },
+            CYielded { val, next_input: _ } => {
+                last = val;
+                c = fib_resume(c);
+            },
+            CReady(_) => { done = true; },
+        }
+    }
+    last
+}
+
+// Collect nth yielded value (0-indexed)
+fn fib_nth(co: FibCo, n: Int) -> Int {
+    let mut c = co;
+    let mut idx = 0;
+    let mut result = -1;
+    let mut done = false;
+    while !done {
+        let state = fib_step(c);
+        match state {
+            CDone(_) => { done = true; },
+            CYielded { val, next_input: _ } => {
+                if idx == n {
+                    result = val;
+                    done = true;
+                } else {
+                    idx = idx + 1;
+                    c = fib_resume(c);
+                }
+            },
+            CReady(_) => { done = true; },
+        }
+    }
+    result
+}
+
+// ======= Accumulator coroutine =======
+// Yields running sum as it accumulates values from a list
+type AccCo is { total: Int, remaining: Int, step_val: Int };
+
+fn acc_new(step: Int, count: Int) -> AccCo {
+    AccCo { total: 0, remaining: count, step_val: step }
+}
+
+fn acc_step(co: AccCo) -> CoState {
+    if co.remaining <= 0 {
+        CDone(co.total)
+    } else {
+        let new_total = co.total + co.step_val;
+        CYielded { val: new_total, next_input: co.remaining - 1 }
+    }
+}
+
+fn acc_resume(co: AccCo) -> AccCo {
+    AccCo { total: co.total + co.step_val, remaining: co.remaining - 1, step_val: co.step_val }
+}
+
+// ======= Chaining coroutines =======
+// Feed the final value of one coroutine as the start of a counter
+fn chain_counter_to_counter(start: Int, mid_limit: Int, final_limit: Int) -> Int {
+    // First counter: counts from start to mid_limit, sum all yielded
+    let sum1 = counter_sum(counter_new(start, mid_limit));
+    // Use that sum as start of second counter
+    let sum2 = counter_sum(counter_new(0, sum1));
+    // Return second sum modulo final_limit to keep it manageable
+    sum2
+}
+
+fn main() -> Int {
+    // === Counter coroutine: basic ===
+    let c1 = counter_new(0, 5);
+    let s1 = counter_step(c1);
+    assert(co_is_yielded(s1));
+    assert_eq(co_yielded_val(s1), 0);
+
+    let c2 = counter_resume(c1);
+    let s2 = counter_step(c2);
+    assert(co_is_yielded(s2));
+    assert_eq(co_yielded_val(s2), 1);
+
+    // === Counter: iterate to completion ===
+    // count(0, 5) yields: 0, 1, 2, 3, 4 then Done(5)
+    let c_full = counter_new(0, 5);
+    assert_eq(counter_count(c_full), 5);
+    // Sum: 0+1+2+3+4 = 10
+    assert_eq(counter_sum(c_full), 10);
+
+    // === Counter: different ranges ===
+    // count(3, 7) yields: 3, 4, 5, 6 => sum = 18
+    assert_eq(counter_sum(counter_new(3, 7)), 18);
+    assert_eq(counter_count(counter_new(3, 7)), 4);
+
+    // count(10, 10) yields nothing, immediately done
+    assert_eq(counter_sum(counter_new(10, 10)), 0);
+    assert_eq(counter_count(counter_new(10, 10)), 0);
+
+    // count(0, 1) yields: 0 => sum = 0
+    assert_eq(counter_sum(counter_new(0, 1)), 0);
+    assert_eq(counter_count(counter_new(0, 1)), 1);
+
+    // count(1, 11) yields: 1..10 => sum = 55
+    assert_eq(counter_sum(counter_new(1, 11)), 55);
+
+    // === Counter: done state ===
+    let cdone = counter_new(5, 5);
+    let sdone = counter_step(cdone);
+    assert(co_is_done(sdone));
+    assert_eq(co_done_val(sdone), 5);
+
+    // === Fibonacci coroutine ===
+    // fib(8) yields: 0, 1, 1, 2, 3, 5, 8, 13 then Done(21)
+    let f1 = fib_new(8);
+    // First yield is 0
+    assert_eq(co_yielded_val(fib_step(f1)), 0);
+
+    // Second yield is 1
+    let f2 = fib_resume(f1);
+    assert_eq(co_yielded_val(fib_step(f2)), 1);
+
+    // Sum of first 8 fib: 0+1+1+2+3+5+8+13 = 33
+    assert_eq(fib_sum(fib_new(8)), 33);
+
+    // Last yielded of fib(8) is 13
+    assert_eq(fib_last(fib_new(8)), 13);
+
+    // fib_nth: 0th=0, 1st=1, 2nd=1, 3rd=2, 4th=3, 5th=5, 6th=8, 7th=13
+    assert_eq(fib_nth(fib_new(8), 0), 0);
+    assert_eq(fib_nth(fib_new(8), 1), 1);
+    assert_eq(fib_nth(fib_new(8), 2), 1);
+    assert_eq(fib_nth(fib_new(8), 3), 2);
+    assert_eq(fib_nth(fib_new(8), 4), 3);
+    assert_eq(fib_nth(fib_new(8), 5), 5);
+    assert_eq(fib_nth(fib_new(8), 6), 8);
+    assert_eq(fib_nth(fib_new(8), 7), 13);
+
+    // fib(1) yields just 0
+    assert_eq(fib_sum(fib_new(1)), 0);
+    assert_eq(fib_last(fib_new(1)), 0);
+
+    // fib(0) yields nothing
+    let f0 = fib_new(0);
+    assert(co_is_done(fib_step(f0)));
+    assert_eq(fib_sum(f0), 0);
+
+    // fib(10) yields: 0,1,1,2,3,5,8,13,21,34 => sum = 88
+    assert_eq(fib_sum(fib_new(10)), 88);
+    assert_eq(fib_last(fib_new(10)), 34);
+
+    // === Accumulator coroutine ===
+    // acc(5, 4): yields 5, 10, 15, 20 then Done(20)
+    let a1 = acc_new(5, 4);
+    let as1 = acc_step(a1);
+    assert(co_is_yielded(as1));
+    assert_eq(co_yielded_val(as1), 5);
+
+    let a2 = acc_resume(a1);
+    let as2 = acc_step(a2);
+    assert_eq(co_yielded_val(as2), 10);
+
+    let a3 = acc_resume(a2);
+    let as3 = acc_step(a3);
+    assert_eq(co_yielded_val(as3), 15);
+
+    let a4 = acc_resume(a3);
+    let as4 = acc_step(a4);
+    assert_eq(co_yielded_val(as4), 20);
+
+    let a5 = acc_resume(a4);
+    let as5 = acc_step(a5);
+    assert(co_is_done(as5));
+    assert_eq(co_done_val(as5), 20);
+
+    // acc(3, 0) immediately done
+    let a_empty = acc_new(3, 0);
+    assert(co_is_done(acc_step(a_empty)));
+    assert_eq(co_done_val(acc_step(a_empty)), 0);
+
+    // === Chaining coroutines ===
+    // chain_counter_to_counter(0, 5, _):
+    //   first counter: sum(0..5) = 10
+    //   second counter: sum(0..10) = 45
+    assert_eq(chain_counter_to_counter(0, 5, 100), 45);
+
+    // chain_counter_to_counter(1, 4, _):
+    //   first counter: sum(1,2,3) = 6
+    //   second counter: sum(0..6) = 15
+    assert_eq(chain_counter_to_counter(1, 4, 100), 15);
+
+    // === CoState variant checks ===
+    let ready = CReady(42);
+    assert(co_is_ready(ready));
+    assert(!co_is_done(ready));
+    assert(!co_is_yielded(ready));
+
+    let yielded = CYielded { val: 10, next_input: 5 };
+    assert(co_is_yielded(yielded));
+    assert(!co_is_ready(yielded));
+    assert(!co_is_done(yielded));
+    assert_eq(co_yielded_val(yielded), 10);
+
+    let done = CDone(99);
+    assert(co_is_done(done));
+    assert(!co_is_ready(done));
+    assert(!co_is_yielded(done));
+    assert_eq(co_done_val(done), 99);
+
+    // Extractors return -1 for wrong variant
+    assert_eq(co_yielded_val(ready), -1);
+    assert_eq(co_done_val(ready), -1);
+    assert_eq(co_yielded_val(done), -1);
+    assert_eq(co_done_val(yielded), -1);
+
+    0
+}

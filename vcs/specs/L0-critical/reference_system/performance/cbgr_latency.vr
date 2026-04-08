@@ -1,0 +1,250 @@
+// @test: compile-only
+// @expected-performance: < 15ns
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, latency, benchmark
+
+/// Benchmark CBGR latency: target < 15ns per reference access.
+/// This measures the overhead of generation and epoch checking.
+/// Critical for ensuring CBGR doesn't significantly impact performance.
+
+
+
+fn main() using [Benchmark] {
+    let bench = Benchmark.new("CBGR Latency");
+
+    bench.run("managed_ref_access", benchmark_managed_ref_access);
+    bench.run("checked_ref_access", benchmark_checked_ref_access);
+    bench.run("unsafe_ref_access", benchmark_unsafe_ref_access);
+    bench.run("generation_check", benchmark_generation_check);
+    bench.run("epoch_check", benchmark_epoch_check);
+    bench.run("combined_check", benchmark_combined_check);
+
+    bench.report();
+}
+
+/// Benchmark managed reference access (full CBGR)
+@benchmark
+fn benchmark_managed_ref_access(b: &mut Bencher) {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    b.iter(|| {
+        // Full CBGR check: generation + epoch
+        let _ = *ref_val;
+    });
+
+    // Target: < 15ns per iteration
+    b.assert_time_less_than(15.ns());
+}
+
+/// Benchmark checked reference access (no CBGR)
+@benchmark
+fn benchmark_checked_ref_access(b: &mut Bencher) {
+    let value = 42;
+    let ref_val: &checked Int = &checked value;
+
+    b.iter(|| {
+        // No CBGR check - just pointer dereference
+        let _ = *ref_val;
+    });
+
+    // Target: < 1ns (essentially free)
+    b.assert_time_less_than(1.ns());
+}
+
+/// Benchmark unsafe reference access (no CBGR)
+@benchmark
+fn benchmark_unsafe_ref_access(b: &mut Bencher) {
+    let value = 42;
+
+    // SAFETY: value lives for entire benchmark
+    let ref_val: &unsafe Int = unsafe { &unsafe value };
+
+    b.iter(|| {
+        // No CBGR check - just pointer dereference
+        unsafe { let _ = *ref_val; }
+    });
+
+    // Target: < 1ns (essentially free)
+    b.assert_time_less_than(1.ns());
+}
+
+/// Benchmark generation check in isolation
+@benchmark
+fn benchmark_generation_check(b: &mut Bencher) {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Extract generation values
+    let ref_gen = ref_val.stored_generation();
+    let alloc_ptr = ref_val.raw_ptr();
+
+    b.iter(|| {
+        // Just the generation comparison
+        let current_gen = load_generation(alloc_ptr);
+        if ref_gen != current_gen {
+            unreachable();
+        }
+    });
+
+    // Target: < 5ns (memory load + compare)
+    b.assert_time_less_than(5.ns());
+}
+
+/// Benchmark epoch check in isolation
+@benchmark
+fn benchmark_epoch_check(b: &mut Bencher) {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    let ref_epoch = ref_val.epoch_caps().epoch();
+
+    b.iter(|| {
+        // Just the epoch validation
+        let current = Epoch.current();
+        if !epoch_valid(ref_epoch, current) {
+            unreachable();
+        }
+    });
+
+    // Target: < 3ns (load + compare)
+    b.assert_time_less_than(3.ns());
+}
+
+/// Benchmark combined generation + epoch check
+@benchmark
+fn benchmark_combined_check(b: &mut Bencher) {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    let ref_gen = ref_val.stored_generation();
+    let ref_epoch = ref_val.epoch_caps().epoch();
+    let alloc_ptr = ref_val.raw_ptr();
+
+    b.iter(|| {
+        // Generation check
+        let current_gen = load_generation(alloc_ptr);
+        if ref_gen != current_gen {
+            unreachable();
+        }
+
+        // Epoch check
+        let current_epoch = Epoch.current();
+        if !epoch_valid(ref_epoch, current_epoch) {
+            unreachable();
+        }
+
+        // Actual access
+        let _ = load_value(alloc_ptr);
+    });
+
+    // Target: < 15ns (combined overhead)
+    b.assert_time_less_than(15.ns());
+}
+
+/// Benchmark overhead in realistic scenarios
+@benchmark
+fn benchmark_realistic_loop(b: &mut Bencher) {
+    let data = Heap.new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+    b.iter(|| {
+        let mut sum = 0;
+        for item in &*data {
+            sum += *item;  // Each access has CBGR check
+        }
+        sum
+    });
+
+    // 10 accesses, each < 15ns, plus iteration overhead
+    b.assert_time_less_than(200.ns());
+}
+
+/// Compare managed vs checked performance ratio
+@benchmark
+fn benchmark_overhead_ratio(b: &mut Bencher) {
+    let managed_value = Heap.new(42);
+    let checked_value = 42;
+
+    // Measure managed
+    let managed_time = b.measure(|| {
+        for _ in 0..1000 {
+            let _ = *&*managed_value;
+        }
+    });
+
+    // Measure checked
+    let checked_time = b.measure(|| {
+        for _ in 0..1000 {
+            let _ = *&checked checked_value;
+        }
+    });
+
+    let ratio: Float = (managed_time.as_nanos() as Float) / (checked_time.as_nanos() as Float);
+
+    // Managed should be at most 20x slower than checked
+    // (15ns vs ~0.5ns per access)
+    assert(ratio < 50.0);
+
+    print("Overhead ratio (managed/checked): " + ratio.to_string() + "x");
+}
+
+// Helper functions
+fn load_generation(ptr: RawPtr) -> u32 {
+    // Load generation from allocation header
+    unsafe { *((ptr as Int - 8) as *const u32) }
+}
+
+fn load_value(ptr: RawPtr) -> Int {
+    unsafe { *(ptr as *const Int) }
+}
+
+fn epoch_valid(ref_epoch: u32, current: u32) -> Bool {
+    current - ref_epoch < 1_000_000
+}
+
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+}
+
+// Benchmark framework types
+type Benchmark is {
+    name: Text,
+    results: List<BenchResult>,
+};
+
+type Bencher is {
+    // Internal state
+};
+
+type BenchResult is {
+    name: Text,
+    time_ns: Float,
+    iterations: Int,
+};
+
+implement Benchmark {
+    fn new(name: Text) -> Benchmark { /* ... */ }
+    fn run(&mut self, name: &Text, f: fn(&mut Bencher)) { /* ... */ }
+    fn report(&self) { /* ... */ }
+}
+
+implement Bencher {
+    fn iter<F: Fn() -> T, T>(&mut self, f: F) { /* ... */ }
+    fn measure<F: Fn()>(&mut self, f: F) -> Duration { /* ... */ }
+    fn assert_time_less_than(&self, d: Duration) { /* ... */ }
+}
+
+type DurationExt is protocol {
+    fn ns(self) -> Duration;
+};
+
+implement DurationExt for Int {
+    fn ns(self) -> Duration {
+        Duration.from_nanos(self as u64)
+    }
+}

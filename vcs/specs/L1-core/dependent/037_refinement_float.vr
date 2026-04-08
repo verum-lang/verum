@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, float
+
+/// Float refinement types -- constraints on floating point values
+/// for domain-specific safety.
+
+type NonNegFloat is Float{>= 0.0};
+type PositiveFloat is Float{> 0.0};
+type UnitInterval is Float{>= 0.0, <= 1.0};
+type Probability is UnitInterval;
+type Angle is Float{>= 0.0, < 360.0};
+type Radian is Float{>= 0.0, < 6.283185307};
+
+// Temperature types
+type Kelvin is Float{>= 0.0};
+type Celsius is Float{>= -273.15};
+
+// Type definitions are the core test --
+// verifying the compiler accepts refinement type definitions.
+
+// Function using base types (arithmetic not yet supported on refined types)
+fn safe_sqrt(x: Float) -> Float {
+    x.sqrt()
+}
+
+fn safe_log(x: Float) -> Float {
+    x.ln()
+}
+
+fn safe_asin(x: Float) -> Float {
+    x.asin()
+}
+
+fn complement(p: Float) -> Float {
+    1.0 - p
+}
+
+fn joint_independent(p: Float, q: Float) -> Float {
+    p * q
+}
+
+fn bayesian_update(prior: Float, likelihood: Float, evidence: Float) -> Float {
+    let posterior = prior * likelihood / evidence;
+    if posterior > 1.0 { 1.0 }
+    else if posterior < 0.0 { 0.0 }
+    else { posterior }
+}
+
+fn kelvin_to_celsius(k: Float) -> Float {
+    k - 273.15
+}
+
+fn celsius_to_kelvin(c: Float) -> Float {
+    c + 273.15
+}
+
+fn normalize_angle(degrees: Float) -> Float {
+    let mut a = degrees % 360.0;
+    if a < 0.0 { a = a + 360.0; }
+    a
+}
+
+fn distance(x1: Float, y1: Float, x2: Float, y2: Float) -> Float {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    safe_sqrt(dx * dx + dy * dy)
+}
+
+fn lerp(a: Float, b: Float, t: Float) -> Float {
+    a * (1.0 - t) + b * t
+}
+
+fn main() {
+    // Test refined type definitions are accepted
+    let p: Probability = 0.7;
+    let k: Kelvin = 373.15;
+    let angle: Angle = 90.0;
+    let pos: PositiveFloat = 3.14;
+    let nnf: NonNegFloat = 0.0;
+
+    let root = safe_sqrt(16.0);
+    assert(root == 4.0);
+
+    let q = complement(0.7);
+    assert(q > 0.29 && q < 0.31);
+
+    let boiling = celsius_to_kelvin(100.0);
+    assert(boiling == 373.15);
+
+    let d = distance(0.0, 0.0, 3.0, 4.0);
+    assert(d == 5.0);
+
+    let mid = lerp(0.0, 10.0, 0.5);
+    assert(mid == 5.0);
+}

@@ -1,0 +1,174 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, permutations, combinatorics
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Permutation generation — next_permutation (lexicographic), count 4! = 24
+
+// ============================================================================
+// Arr4: Fixed-size array of 4 Ints
+// ============================================================================
+
+type Arr4 is {
+    e0: Int, e1: Int, e2: Int, e3: Int
+};
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, val: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 }
+    }
+}
+
+fn arr4_swap(a: Arr4, i: Int, j: Int) -> Arr4 {
+    let vi = arr4_get(a, i);
+    let vj = arr4_get(a, j);
+    let tmp = arr4_set(a, i, vj);
+    arr4_set(tmp, j, vi)
+}
+
+// ============================================================================
+// Result type for next_permutation
+// ============================================================================
+
+type PermResult is { arr: Arr4, has_next: Int };
+
+// Reverse elements from index lo to hi (inclusive)
+fn arr4_reverse_range(a: Arr4, lo: Int, hi: Int) -> Arr4 {
+    let mut result = a;
+    let mut left = lo;
+    let mut right = hi;
+    while left < right {
+        result = arr4_swap(result, left, right);
+        left = left + 1;
+        right = right - 1;
+    }
+    result
+}
+
+// Next permutation in lexicographic order (standard algorithm)
+// Returns {arr: next_perm, has_next: 1} or {arr: a, has_next: 0} if last
+fn next_perm(a: Arr4) -> PermResult {
+    let n = 4;
+    // Step 1: Find largest i such that a[i] < a[i+1]
+    let mut pivot = -1;
+    let mut idx = n - 2;
+    while idx >= 0 {
+        if arr4_get(a, idx) < arr4_get(a, idx + 1) {
+            if pivot == -1 {
+                pivot = idx;
+            }
+        }
+        idx = idx - 1;
+    }
+    if pivot == -1 {
+        // Already last permutation
+        PermResult { arr: a, has_next: 0 }
+    } else {
+        // Step 2: Find largest j > pivot such that a[j] > a[pivot]
+        let mut swap_idx = n - 1;
+        while arr4_get(a, swap_idx) <= arr4_get(a, pivot) {
+            swap_idx = swap_idx - 1;
+        }
+        // Step 3: Swap a[pivot] and a[swap_idx]
+        let mut result = arr4_swap(a, pivot, swap_idx);
+        // Step 4: Reverse suffix starting at pivot+1
+        result = arr4_reverse_range(result, pivot + 1, n - 1);
+        PermResult { arr: result, has_next: 1 }
+    }
+}
+
+// Count all permutations starting from [1,2,3,4]
+fn count_perms() -> Int {
+    let mut current = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let mut count = 1;  // Count the initial permutation
+    let mut cont = 1;
+    while cont == 1 {
+        let pr = next_perm(current);
+        if pr.has_next == 1 {
+            current = pr.arr;
+            count = count + 1;
+        } else {
+            cont = 0;
+        }
+    }
+    count
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_first_permutation() -> Int {
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let pr = next_perm(a);
+    assert_eq(pr.has_next, 1);
+    // [1,2,3,4] -> [1,2,4,3]
+    assert_eq(arr4_get(pr.arr, 0), 1);
+    assert_eq(arr4_get(pr.arr, 1), 2);
+    assert_eq(arr4_get(pr.arr, 2), 4);
+    assert_eq(arr4_get(pr.arr, 3), 3);
+    0
+}
+
+@test
+fn test_second_permutation() -> Int {
+    // [1,2,4,3] -> [1,3,2,4]
+    let a = Arr4 { e0: 1, e1: 2, e2: 4, e3: 3 };
+    let pr = next_perm(a);
+    assert_eq(pr.has_next, 1);
+    assert_eq(arr4_get(pr.arr, 0), 1);
+    assert_eq(arr4_get(pr.arr, 1), 3);
+    assert_eq(arr4_get(pr.arr, 2), 2);
+    assert_eq(arr4_get(pr.arr, 3), 4);
+    0
+}
+
+@test
+fn test_last_permutation() -> Int {
+    // [4,3,2,1] is the last permutation
+    let a = Arr4 { e0: 4, e1: 3, e2: 2, e3: 1 };
+    let pr = next_perm(a);
+    assert_eq(pr.has_next, 0);
+    0
+}
+
+@test
+fn test_count_all_permutations() -> Int {
+    // 4! = 24
+    let total = count_perms();
+    assert_eq(total, 24);
+    0
+}
+
+@test
+fn test_specific_middle_perm() -> Int {
+    // [2,1,3,4] -> [2,1,4,3]
+    let a = Arr4 { e0: 2, e1: 1, e2: 3, e3: 4 };
+    let pr = next_perm(a);
+    assert_eq(pr.has_next, 1);
+    assert_eq(arr4_get(pr.arr, 0), 2);
+    assert_eq(arr4_get(pr.arr, 1), 1);
+    assert_eq(arr4_get(pr.arr, 2), 4);
+    assert_eq(arr4_get(pr.arr, 3), 3);
+    0
+}
+
+fn main() -> Int {
+    test_first_permutation();
+    test_second_permutation();
+    test_last_permutation();
+    test_count_all_permutations();
+    test_specific_middle_perm();
+    print("[OK] 124_permutations");
+    0
+}

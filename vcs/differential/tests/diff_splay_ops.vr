@@ -1,0 +1,141 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, splay, bst, rotation
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// BST stored as arrays: keys[0..n-1], left[i], right[i] (indices, -1 = null)
+// Simplified: sorted array BST - insert maintains sorted order
+type BST8 is { keys: Arr8, n: Int };
+
+fn bst_new() -> BST8 { BST8 { keys: zeros(), n: 0 } }
+
+fn bst_insert(t: BST8, val: Int) -> BST8 {
+    // Insert maintaining sorted order
+    let mut keys = t.keys;
+    let mut pos = t.n;
+    // Find insertion point
+    let mut i = 0;
+    while i < t.n {
+        if val < get(keys, i) {
+            pos = i;
+            i = t.n; // break
+        } else {
+            i = i + 1;
+        }
+    }
+    // Shift right
+    let mut j = t.n;
+    while j > pos {
+        keys = set(keys, j, get(keys, j - 1));
+        j = j - 1;
+    }
+    keys = set(keys, pos, val);
+    BST8 { keys: keys, n: t.n + 1 }
+}
+
+fn bst_contains(t: BST8, val: Int) -> Int {
+    // Binary search
+    let mut lo = 0;
+    let mut hi = t.n - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        let midval = get(t.keys, mid);
+        if midval == val { return 1; }
+        if midval < val { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    0
+}
+
+fn bst_min(t: BST8) -> Int { get(t.keys, 0) }
+fn bst_max(t: BST8) -> Int { get(t.keys, t.n - 1) }
+
+// Count elements less than val
+fn bst_rank(t: BST8, val: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < t.n {
+        if get(t.keys, i) < val { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Get element at rank k (0-indexed)
+fn bst_select(t: BST8, k: Int) -> Int { get(t.keys, k) }
+
+fn test_insert_search() -> Int {
+    let mut t = bst_new();
+    t = bst_insert(t, 5);
+    t = bst_insert(t, 3);
+    t = bst_insert(t, 7);
+    t = bst_insert(t, 1);
+    t = bst_insert(t, 4);
+    assert_eq(t.n, 5);
+    assert_eq(bst_contains(t, 5), 1);
+    assert_eq(bst_contains(t, 3), 1);
+    assert_eq(bst_contains(t, 7), 1);
+    assert_eq(bst_contains(t, 6), 0);
+    assert_eq(bst_contains(t, 0), 0);
+    1
+}
+
+fn test_order() -> Int {
+    let mut t = bst_new();
+    t = bst_insert(t, 5);
+    t = bst_insert(t, 3);
+    t = bst_insert(t, 7);
+    t = bst_insert(t, 1);
+    t = bst_insert(t, 4);
+    // Sorted: [1, 3, 4, 5, 7]
+    assert_eq(get(t.keys, 0), 1);
+    assert_eq(get(t.keys, 1), 3);
+    assert_eq(get(t.keys, 2), 4);
+    assert_eq(get(t.keys, 3), 5);
+    assert_eq(get(t.keys, 4), 7);
+    1
+}
+
+fn test_min_max_rank() -> Int {
+    let mut t = bst_new();
+    t = bst_insert(t, 5);
+    t = bst_insert(t, 3);
+    t = bst_insert(t, 7);
+    t = bst_insert(t, 1);
+    t = bst_insert(t, 4);
+    assert_eq(bst_min(t), 1);
+    assert_eq(bst_max(t), 7);
+    assert_eq(bst_rank(t, 5), 3);
+    assert_eq(bst_rank(t, 1), 0);
+    assert_eq(bst_select(t, 2), 4);
+    1
+}
+
+fn main() -> Int {
+    test_insert_search();
+    test_order();
+    test_min_max_rank();
+
+    print("DIFF_OK: splay_ops");
+    0
+}

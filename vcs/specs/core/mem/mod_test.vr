@@ -1,0 +1,631 @@
+// =============================================================================
+// mod_test.vr - Tests for mem module root types and constants
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: mem, cbgr, error, execution-tier, core
+// @description: Tests for CBGR error types (UseAfterFreeError, RevocationError),
+//               ExecutionTier enum, and generation constants from mem/mod.vr.
+// =============================================================================
+
+mount core.mem.{
+    UseAfterFreeError, RevocationError, ExecutionTier,
+    GEN_INITIAL, GEN_MAX, GEN_UNALLOCATED,
+};
+
+// =============================================================================
+// SECTION 1: CBGR Generation Constants
+// =============================================================================
+
+@test
+fn test_gen_initial_value() {
+    // GEN_INITIAL = 1 (first valid generation)
+    assert_eq(GEN_INITIAL, 1 as UInt32);
+}
+
+@test
+fn test_gen_max_value() {
+    // GEN_MAX = 0xFFFF_FFFE (max before wraparound)
+    assert_eq(GEN_MAX, 0xFFFFFFFE as UInt32);
+}
+
+@test
+fn test_gen_unallocated_value() {
+    // GEN_UNALLOCATED = 0 (sentinel for freed memory)
+    assert_eq(GEN_UNALLOCATED, 0 as UInt32);
+}
+
+@test
+fn test_gen_ordering() {
+    // Unallocated < Initial < Max
+    assert(GEN_UNALLOCATED < GEN_INITIAL);
+    assert(GEN_INITIAL < GEN_MAX);
+}
+
+@test
+fn test_gen_initial_not_unallocated() {
+    // GEN_INITIAL must differ from GEN_UNALLOCATED
+    assert(GEN_INITIAL != GEN_UNALLOCATED);
+}
+
+// =============================================================================
+// SECTION 2: UseAfterFreeError Construction
+// =============================================================================
+
+@test
+fn test_use_after_free_error_new() {
+    let err = UseAfterFreeError.new(
+        5 as UInt32,    // expected gen
+        10 as UInt32,   // actual gen
+        1 as UInt16,    // expected epoch
+        2 as UInt16,    // actual epoch
+        "MyType",
+    );
+    assert_eq(err.expected_gen, 5 as UInt32);
+    assert_eq(err.actual_gen, 10 as UInt32);
+    assert_eq(err.expected_epoch, 1 as UInt16);
+    assert_eq(err.actual_epoch, 2 as UInt16);
+}
+
+@test
+fn test_use_after_free_error_null_pointer() {
+    let err = UseAfterFreeError.null_pointer("Foo");
+    assert_eq(err.expected_gen, GEN_UNALLOCATED);
+    assert_eq(err.actual_gen, GEN_UNALLOCATED);
+    assert_eq(err.expected_epoch, 0 as UInt16);
+    assert_eq(err.actual_epoch, 0 as UInt16);
+}
+
+@test
+fn test_use_after_free_error_capability_violation() {
+    let err = UseAfterFreeError.capability_violation("WRITE", "Buffer");
+    // Capability violations encode info in type_name
+    assert(err.type_name.contains("capability violation"));
+    assert(err.type_name.contains("WRITE"));
+    assert(err.type_name.contains("Buffer"));
+}
+
+// =============================================================================
+// SECTION 3: UseAfterFreeError Messages
+// =============================================================================
+
+@test
+fn test_use_after_free_message_gen_mismatch() {
+    let err = UseAfterFreeError.new(
+        5 as UInt32, 10 as UInt32,
+        1 as UInt16, 2 as UInt16,
+        "MyStruct",
+    );
+    let msg = err.message();
+    assert(msg.contains("use-after-free"));
+    assert(msg.contains("MyStruct"));
+}
+
+@test
+fn test_use_after_free_message_null() {
+    let err = UseAfterFreeError.null_pointer("Widget");
+    let msg = err.message();
+    assert(msg.contains("null pointer"));
+    assert(msg.contains("Widget"));
+}
+
+@test
+fn test_use_after_free_message_capability() {
+    let err = UseAfterFreeError.capability_violation("READ", "Secret");
+    let msg = err.message();
+    // This error has GEN_UNALLOCATED-like gens (0,0), so message
+    // may be either "null pointer" or "use-after-free"
+    // Either way it should contain type info
+    assert(msg.len() > 0);
+}
+
+// =============================================================================
+// SECTION 4: RevocationError Construction
+// =============================================================================
+
+@test
+fn test_revocation_error_null_pointer() {
+    let err = RevocationError.null_pointer("Node");
+    assert(err is RevocationError.NullPointer);
+}
+
+@test
+fn test_revocation_error_capability_violation() {
+    let err = RevocationError.capability_violation("Buffer");
+    assert(err is RevocationError.CapabilityViolation);
+}
+
+@test
+fn test_revocation_error_already_revoked() {
+    let err = RevocationError.already_revoked("Ref");
+    assert(err is RevocationError.AlreadyRevoked);
+}
+
+@test
+fn test_revocation_error_internal() {
+    let err = RevocationError.internal_error("Ptr", "segfault");
+    assert(err is RevocationError.Internal);
+}
+
+// =============================================================================
+// SECTION 5: RevocationError Messages
+// =============================================================================
+
+@test
+fn test_revocation_error_null_pointer_message() {
+    let err = RevocationError.null_pointer("Foo");
+    let msg = err.message();
+    assert(msg.contains("null pointer"));
+    assert(msg.contains("Foo"));
+}
+
+@test
+fn test_revocation_error_capability_violation_message() {
+    let err = RevocationError.capability_violation("Bar");
+    let msg = err.message();
+    assert(msg.contains("revoke capability"));
+    assert(msg.contains("Bar"));
+}
+
+@test
+fn test_revocation_error_already_revoked_message() {
+    let err = RevocationError.already_revoked("Baz");
+    let msg = err.message();
+    assert(msg.contains("already revoked"));
+    assert(msg.contains("Baz"));
+}
+
+@test
+fn test_revocation_error_internal_message() {
+    let err = RevocationError.internal_error("Qux", "corruption");
+    let msg = err.message();
+    assert(msg.contains("internal"));
+    assert(msg.contains("Qux"));
+    assert(msg.contains("corruption"));
+}
+
+// =============================================================================
+// SECTION 6: RevocationError Pattern Matching
+// =============================================================================
+
+@test
+fn test_revocation_error_match_all_variants() {
+    let e1 = RevocationError.null_pointer("A");
+    let e2 = RevocationError.capability_violation("B");
+    let e3 = RevocationError.already_revoked("C");
+    let e4 = RevocationError.internal_error("D", "reason");
+
+    let m1 = match e1 {
+        RevocationError.NullPointer { .. } => 1,
+        RevocationError.CapabilityViolation { .. } => 2,
+        RevocationError.AlreadyRevoked { .. } => 3,
+        RevocationError.Internal { .. } => 4,
+    };
+    assert_eq(m1, 1);
+
+    let m2 = match e2 {
+        RevocationError.NullPointer { .. } => 1,
+        RevocationError.CapabilityViolation { .. } => 2,
+        RevocationError.AlreadyRevoked { .. } => 3,
+        RevocationError.Internal { .. } => 4,
+    };
+    assert_eq(m2, 2);
+
+    let m3 = match e3 {
+        RevocationError.NullPointer { .. } => 1,
+        RevocationError.CapabilityViolation { .. } => 2,
+        RevocationError.AlreadyRevoked { .. } => 3,
+        RevocationError.Internal { .. } => 4,
+    };
+    assert_eq(m3, 3);
+
+    let m4 = match e4 {
+        RevocationError.NullPointer { .. } => 1,
+        RevocationError.CapabilityViolation { .. } => 2,
+        RevocationError.AlreadyRevoked { .. } => 3,
+        RevocationError.Internal { .. } => 4,
+    };
+    assert_eq(m4, 4);
+}
+
+// =============================================================================
+// SECTION 7: ExecutionTier
+// =============================================================================
+
+@test
+fn test_execution_tier_interpreter() {
+    let tier = ExecutionTier.Interpreter;
+    assert(tier is ExecutionTier.Interpreter);
+}
+
+@test
+fn test_execution_tier_baseline_jit() {
+    let tier = ExecutionTier.BaselineJit;
+    assert(tier is ExecutionTier.BaselineJit);
+}
+
+@test
+fn test_execution_tier_optimizing_jit() {
+    let tier = ExecutionTier.OptimizingJit;
+    assert(tier is ExecutionTier.OptimizingJit);
+}
+
+@test
+fn test_execution_tier_aot() {
+    let tier = ExecutionTier.Aot;
+    assert(tier is ExecutionTier.Aot);
+}
+
+@test
+fn test_execution_tier_match_all() {
+    let tiers = [
+        ExecutionTier.Interpreter,
+        ExecutionTier.BaselineJit,
+        ExecutionTier.OptimizingJit,
+        ExecutionTier.Aot,
+    ];
+
+    let mut i = 0;
+    while i < 4 {
+        let val = match tiers[i] {
+            ExecutionTier.Interpreter => 0,
+            ExecutionTier.BaselineJit => 1,
+            ExecutionTier.OptimizingJit => 2,
+            ExecutionTier.Aot => 3,
+        };
+        assert_eq(val, i);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_execution_tier_not_equal() {
+    assert(!(ExecutionTier.Interpreter is ExecutionTier.BaselineJit));
+    assert(!(ExecutionTier.BaselineJit is ExecutionTier.OptimizingJit));
+    assert(!(ExecutionTier.OptimizingJit is ExecutionTier.Aot));
+}
+
+// =============================================================================
+// SECTION 8: Edge Cases
+// =============================================================================
+
+@test
+fn test_use_after_free_error_empty_type_name() {
+    let err = UseAfterFreeError.null_pointer("");
+    let msg = err.message();
+    assert(msg.contains("null pointer"));
+}
+
+@test
+fn test_revocation_error_empty_type_name() {
+    let err = RevocationError.null_pointer("");
+    let msg = err.message();
+    assert(msg.len() > 0);
+}
+
+@test
+fn test_use_after_free_error_matching_gens() {
+    // When expected == actual, this shouldn't happen in practice
+    // but the error type should still work
+    let err = UseAfterFreeError.new(
+        5 as UInt32, 5 as UInt32,
+        1 as UInt16, 1 as UInt16,
+        "Test",
+    );
+    assert_eq(err.expected_gen, err.actual_gen);
+}
+
+// =============================================================================
+// SECTION 9: Generation Constant Arithmetic
+// =============================================================================
+
+@test
+fn test_gen_range() {
+    // The valid generation range should be large
+    let range = GEN_MAX - GEN_INITIAL;
+    assert(range > 0 as UInt32);
+    assert(range > 1000000 as UInt32);
+}
+
+@test
+fn test_gen_initial_is_one() {
+    assert_eq(GEN_INITIAL, 1 as UInt32);
+}
+
+@test
+fn test_gen_max_is_not_max_uint32() {
+    // GEN_MAX is 0xFFFFFFFE, not 0xFFFFFFFF
+    assert(GEN_MAX < 0xFFFFFFFF as UInt32);
+}
+
+// =============================================================================
+// SECTION 10: UseAfterFreeError Additional Patterns
+// =============================================================================
+
+@test
+fn test_use_after_free_error_gen_initial() {
+    let err = UseAfterFreeError.new(
+        GEN_INITIAL, GEN_INITIAL + 1,
+        0 as UInt16, 0 as UInt16,
+        "Widget",
+    );
+    assert_eq(err.expected_gen, GEN_INITIAL);
+    assert_eq(err.actual_gen, GEN_INITIAL + 1);
+}
+
+@test
+fn test_use_after_free_error_gen_max() {
+    let err = UseAfterFreeError.new(
+        GEN_MAX, GEN_UNALLOCATED,
+        0 as UInt16, 0 as UInt16,
+        "Buffer",
+    );
+    assert_eq(err.expected_gen, GEN_MAX);
+    assert_eq(err.actual_gen, GEN_UNALLOCATED);
+    let msg = err.message();
+    assert(msg.len() > 0);
+}
+
+@test
+fn test_use_after_free_error_different_epochs() {
+    let err = UseAfterFreeError.new(
+        5 as UInt32, 5 as UInt32,
+        1 as UInt16, 2 as UInt16,
+        "Node",
+    );
+    assert_eq(err.expected_epoch, 1 as UInt16);
+    assert_eq(err.actual_epoch, 2 as UInt16);
+}
+
+@test
+fn test_use_after_free_error_type_name_preserved() {
+    let err = UseAfterFreeError.new(
+        1 as UInt32, 2 as UInt32,
+        0 as UInt16, 0 as UInt16,
+        "MyCustomType",
+    );
+    assert(err.type_name.contains("MyCustomType"));
+}
+
+// =============================================================================
+// SECTION 11: RevocationError Additional Patterns
+// =============================================================================
+
+@test
+fn test_revocation_error_internal_with_long_reason() {
+    let err = RevocationError.internal_error("Allocator", "heap corruption detected during gc sweep");
+    let msg = err.message();
+    assert(msg.contains("heap corruption"));
+}
+
+@test
+fn test_revocation_error_all_variants_distinct() {
+    let e1 = RevocationError.null_pointer("A");
+    let e2 = RevocationError.capability_violation("A");
+    let e3 = RevocationError.already_revoked("A");
+    let e4 = RevocationError.internal_error("A", "r");
+
+    assert(e1 is RevocationError.NullPointer);
+    assert(!(e1 is RevocationError.CapabilityViolation));
+    assert(e2 is RevocationError.CapabilityViolation);
+    assert(!(e2 is RevocationError.AlreadyRevoked));
+    assert(e3 is RevocationError.AlreadyRevoked);
+    assert(!(e3 is RevocationError.Internal));
+    assert(e4 is RevocationError.Internal);
+    assert(!(e4 is RevocationError.NullPointer));
+}
+
+// =============================================================================
+// SECTION 12: ExecutionTier Additional Tests
+// =============================================================================
+
+@test
+fn test_execution_tier_all_four_distinct() {
+    let t1 = ExecutionTier.Interpreter;
+    let t2 = ExecutionTier.BaselineJit;
+    let t3 = ExecutionTier.OptimizingJit;
+    let t4 = ExecutionTier.Aot;
+
+    // Each pair should be distinct
+    assert(!(t1 is ExecutionTier.BaselineJit));
+    assert(!(t1 is ExecutionTier.OptimizingJit));
+    assert(!(t1 is ExecutionTier.Aot));
+    assert(!(t2 is ExecutionTier.OptimizingJit));
+    assert(!(t2 is ExecutionTier.Aot));
+    assert(!(t3 is ExecutionTier.Aot));
+}
+
+// =============================================================================
+// SECTION 13: Additional UseAfterFreeError Tests
+// =============================================================================
+
+@test
+fn test_use_after_free_error_epoch_overflow_boundary() {
+    let err = UseAfterFreeError.new(
+        1 as UInt32, 2 as UInt32,
+        0xFFFF as UInt16, 0 as UInt16,
+        "EpochWrap",
+    );
+    assert_eq(err.expected_epoch, 0xFFFF as UInt16);
+    assert_eq(err.actual_epoch, 0 as UInt16);
+}
+
+@test
+fn test_use_after_free_error_gen_max_boundary() {
+    let err = UseAfterFreeError.new(
+        GEN_MAX, GEN_MAX,
+        0 as UInt16, 0 as UInt16,
+        "MaxGen",
+    );
+    assert_eq(err.expected_gen, GEN_MAX);
+    assert_eq(err.actual_gen, GEN_MAX);
+}
+
+@test
+fn test_revocation_error_null_not_others() {
+    let e = RevocationError.null_pointer("X");
+    assert(e is RevocationError.NullPointer);
+    assert(!(e is RevocationError.CapabilityViolation));
+    assert(!(e is RevocationError.AlreadyRevoked));
+    assert(!(e is RevocationError.Internal));
+}
+
+@test
+fn test_revocation_error_capability_not_others() {
+    let e = RevocationError.capability_violation("X");
+    assert(e is RevocationError.CapabilityViolation);
+    assert(!(e is RevocationError.NullPointer));
+    assert(!(e is RevocationError.AlreadyRevoked));
+    assert(!(e is RevocationError.Internal));
+}
+
+@test
+fn test_revocation_error_revoked_not_others() {
+    let e = RevocationError.already_revoked("X");
+    assert(e is RevocationError.AlreadyRevoked);
+    assert(!(e is RevocationError.NullPointer));
+    assert(!(e is RevocationError.CapabilityViolation));
+    assert(!(e is RevocationError.Internal));
+}
+
+@test
+fn test_revocation_error_internal_not_others() {
+    let e = RevocationError.internal_error("X", "r");
+    assert(e is RevocationError.Internal);
+    assert(!(e is RevocationError.NullPointer));
+    assert(!(e is RevocationError.CapabilityViolation));
+    assert(!(e is RevocationError.AlreadyRevoked));
+}
+
+@test
+fn test_gen_unallocated_is_zero() {
+    assert_eq(GEN_UNALLOCATED, 0 as UInt32);
+}
+
+@test
+fn test_gen_max_minus_initial() {
+    let range = GEN_MAX - GEN_INITIAL;
+    // Should be 0xFFFFFFFE - 1 = 0xFFFFFFFD
+    assert(range == 0xFFFFFFFD as UInt32);
+}
+
+@test
+fn test_execution_tier_match_returns_correct() {
+    let tier = ExecutionTier.OptimizingJit;
+    let val = match tier {
+        ExecutionTier.Interpreter => 0,
+        ExecutionTier.BaselineJit => 1,
+        ExecutionTier.OptimizingJit => 2,
+        ExecutionTier.Aot => 3,
+    };
+    assert_eq(val, 2);
+}
+
+@test
+fn test_use_after_free_error_null_pointer_message_contains_type() {
+    let err = UseAfterFreeError.null_pointer("VerySpecificTypeName");
+    let msg = err.message();
+    assert(msg.contains("VerySpecificTypeName"));
+}
+
+// =============================================================================
+// SECTION 14: Additional Tests
+// =============================================================================
+
+@test
+fn test_use_after_free_error_max_epoch_and_gen() {
+    let err = UseAfterFreeError.new(
+        GEN_MAX, GEN_MAX,
+        0xFFFF as UInt16, 0xFFFF as UInt16,
+        "MaxBoundary",
+    );
+    assert_eq(err.expected_gen, GEN_MAX);
+    assert_eq(err.expected_epoch, 0xFFFF as UInt16);
+    let msg = err.message();
+    assert(msg.len() > 0);
+}
+
+@test
+fn test_revocation_error_long_type_name() {
+    let long_name = "VeryLongModulePath.SubModule.DeepNested.TypeName";
+    let err = RevocationError.null_pointer(long_name);
+    let msg = err.message();
+    assert(msg.len() > 0);
+}
+
+@test
+fn test_execution_tier_in_array() {
+    let tiers = [
+        ExecutionTier.Interpreter,
+        ExecutionTier.BaselineJit,
+        ExecutionTier.OptimizingJit,
+        ExecutionTier.Aot,
+    ];
+    assert(tiers[0] is ExecutionTier.Interpreter);
+    assert(tiers[1] is ExecutionTier.BaselineJit);
+    assert(tiers[2] is ExecutionTier.OptimizingJit);
+    assert(tiers[3] is ExecutionTier.Aot);
+}
+
+@test
+fn test_gen_constants_all_different() {
+    assert(GEN_UNALLOCATED != GEN_INITIAL);
+    assert(GEN_INITIAL != GEN_MAX);
+    assert(GEN_UNALLOCATED != GEN_MAX);
+}
+
+@test
+fn test_use_after_free_error_zero_gen_and_epoch() {
+    let err = UseAfterFreeError.new(
+        0 as UInt32, 0 as UInt32,
+        0 as UInt16, 0 as UInt16,
+        "ZeroAll",
+    );
+    assert_eq(err.expected_gen, 0 as UInt32);
+    assert_eq(err.actual_gen, 0 as UInt32);
+    assert_eq(err.expected_epoch, 0 as UInt16);
+    assert_eq(err.actual_epoch, 0 as UInt16);
+}
+
+@test
+fn test_revocation_error_messages_all_nonempty() {
+    let e1 = RevocationError.null_pointer("T");
+    let e2 = RevocationError.capability_violation("T");
+    let e3 = RevocationError.already_revoked("T");
+    let e4 = RevocationError.internal_error("T", "r");
+    assert(e1.message().len() > 0);
+    assert(e2.message().len() > 0);
+    assert(e3.message().len() > 0);
+    assert(e4.message().len() > 0);
+}
+
+@test
+fn test_execution_tier_match_to_text() {
+    fn tier_name(t: ExecutionTier) -> Text {
+        match t {
+            ExecutionTier.Interpreter => "interpreter",
+            ExecutionTier.BaselineJit => "baseline",
+            ExecutionTier.OptimizingJit => "optimizing",
+            ExecutionTier.Aot => "aot",
+        }
+    }
+    assert_eq(tier_name(ExecutionTier.Interpreter), "interpreter");
+    assert_eq(tier_name(ExecutionTier.Aot), "aot");
+}
+
+@test
+fn test_gen_initial_plus_one_still_valid() {
+    let next = GEN_INITIAL + 1;
+    assert(next > GEN_INITIAL);
+    assert(next <= GEN_MAX);
+    assert(next != GEN_UNALLOCATED);
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

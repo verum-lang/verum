@@ -1,0 +1,321 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, matrix, determinant, cramer, linear-algebra
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT matrix determinants, inverse, and Cramer's rule for linear systems
+
+// 2x2 matrix: [[a, b], [c, d]]
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+// 3x3 matrix stored row-major
+type Mat3 is {
+    m00: Int, m01: Int, m02: Int,
+    m10: Int, m11: Int, m12: Int,
+    m20: Int, m21: Int, m22: Int
+};
+
+// 2D vector
+type Vec2 is { x: Int, y: Int };
+
+// 3D vector
+type Vec3 is { x: Int, y: Int, z: Int };
+
+// 2x2 determinant: ad - bc
+fn det2(m: Mat2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+// 3x3 determinant via cofactor expansion along first row
+fn det3(m: Mat3) -> Int {
+    let c00 = m.m11 * m.m22 - m.m12 * m.m21;
+    let c01 = m.m10 * m.m22 - m.m12 * m.m20;
+    let c02 = m.m10 * m.m21 - m.m11 * m.m20;
+    m.m00 * c00 - m.m01 * c01 + m.m02 * c02
+}
+
+// 2x2 matrix multiply
+fn mat2_mul(a: Mat2, b: Mat2) -> Mat2 {
+    Mat2 {
+        a: a.a * b.a + a.b * b.c,
+        b: a.a * b.b + a.b * b.d,
+        c: a.c * b.a + a.d * b.c,
+        d: a.c * b.b + a.d * b.d
+    }
+}
+
+// 2x2 adjugate (classical adjoint): [[d, -b], [-c, a]]
+fn mat2_adj(m: Mat2) -> Mat2 {
+    Mat2 { a: m.d, b: 0 - m.b, c: 0 - m.c, d: m.a }
+}
+
+// 2x2 matrix-vector multiply
+fn mat2_vec(m: Mat2, v: Vec2) -> Vec2 {
+    Vec2 { x: m.a * v.x + m.b * v.y, y: m.c * v.x + m.d * v.y }
+}
+
+// 3x3 adjugate (transpose of cofactor matrix)
+fn mat3_adj(m: Mat3) -> Mat3 {
+    // Cofactors
+    let c00 = m.m11 * m.m22 - m.m12 * m.m21;
+    let c01 = 0 - (m.m10 * m.m22 - m.m12 * m.m20);
+    let c02 = m.m10 * m.m21 - m.m11 * m.m20;
+    let c10 = 0 - (m.m01 * m.m22 - m.m02 * m.m21);
+    let c11 = m.m00 * m.m22 - m.m02 * m.m20;
+    let c12 = 0 - (m.m00 * m.m21 - m.m01 * m.m20);
+    let c20 = m.m01 * m.m12 - m.m02 * m.m11;
+    let c21 = 0 - (m.m00 * m.m12 - m.m02 * m.m10);
+    let c22 = m.m00 * m.m11 - m.m01 * m.m10;
+    // Transpose of cofactor matrix
+    Mat3 {
+        m00: c00, m01: c10, m02: c20,
+        m10: c01, m11: c11, m12: c21,
+        m20: c02, m21: c12, m22: c22
+    }
+}
+
+// 3x3 matrix-vector multiply
+fn mat3_vec(m: Mat3, v: Vec3) -> Vec3 {
+    Vec3 {
+        x: m.m00 * v.x + m.m01 * v.y + m.m02 * v.z,
+        y: m.m10 * v.x + m.m11 * v.y + m.m12 * v.z,
+        z: m.m20 * v.x + m.m21 * v.y + m.m22 * v.z
+    }
+}
+
+// 3x3 matrix multiply
+fn mat3_mul(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        m00: a.m00 * b.m00 + a.m01 * b.m10 + a.m02 * b.m20,
+        m01: a.m00 * b.m01 + a.m01 * b.m11 + a.m02 * b.m21,
+        m02: a.m00 * b.m02 + a.m01 * b.m12 + a.m02 * b.m22,
+        m10: a.m10 * b.m00 + a.m11 * b.m10 + a.m12 * b.m20,
+        m11: a.m10 * b.m01 + a.m11 * b.m11 + a.m12 * b.m21,
+        m12: a.m10 * b.m02 + a.m11 * b.m12 + a.m12 * b.m22,
+        m20: a.m20 * b.m00 + a.m21 * b.m10 + a.m22 * b.m20,
+        m21: a.m20 * b.m01 + a.m21 * b.m11 + a.m22 * b.m21,
+        m22: a.m20 * b.m02 + a.m21 * b.m12 + a.m22 * b.m22
+    }
+}
+
+// Cramer's rule for 2x2 system: Ax = b
+// x = det([b|col2]) / det(A), y = det([col1|b]) / det(A)
+// Returns (x * det, y * det) to stay in integers
+fn cramer2_scaled(m: Mat2, b: Vec2) -> Vec2 {
+    // x_num = det([[bx, m.b], [by, m.d]]) = bx*d - b*by
+    let x_num = b.x * m.d - m.b * b.y;
+    // y_num = det([[m.a, bx], [m.c, by]]) = a*by - bx*c
+    let y_num = m.a * b.y - b.x * m.c;
+    Vec2 { x: x_num, y: y_num }
+}
+
+// Cramer's rule for 3x3 system: Ax = b
+// Returns (x * det, y * det, z * det) to stay in integers
+fn cramer3_scaled(m: Mat3, b: Vec3) -> Vec3 {
+    // Replace column 0 with b
+    let dx = det3(Mat3 {
+        m00: b.x, m01: m.m01, m02: m.m02,
+        m10: b.y, m11: m.m11, m12: m.m12,
+        m20: b.z, m21: m.m21, m22: m.m22
+    });
+    // Replace column 1 with b
+    let dy = det3(Mat3 {
+        m00: m.m00, m01: b.x, m02: m.m02,
+        m10: m.m10, m11: b.y, m12: m.m12,
+        m20: m.m20, m21: b.z, m22: m.m22
+    });
+    // Replace column 2 with b
+    let dz = det3(Mat3 {
+        m00: m.m00, m01: m.m01, m02: b.x,
+        m10: m.m10, m11: m.m11, m12: b.y,
+        m20: m.m20, m21: m.m21, m22: b.z
+    });
+    Vec3 { x: dx, y: dy, z: dz }
+}
+
+// Identity matrices
+fn mat2_id() -> Mat2 { Mat2 { a: 1, b: 0, c: 0, d: 1 } }
+
+fn mat3_id() -> Mat3 {
+    Mat3 {
+        m00: 1, m01: 0, m02: 0,
+        m10: 0, m11: 1, m12: 0,
+        m20: 0, m21: 0, m22: 1
+    }
+}
+
+// Trace of 3x3
+fn mat3_trace(m: Mat3) -> Int {
+    m.m00 + m.m11 + m.m22
+}
+
+// Transpose of 3x3
+fn mat3_transpose(m: Mat3) -> Mat3 {
+    Mat3 {
+        m00: m.m00, m01: m.m10, m02: m.m20,
+        m10: m.m01, m11: m.m11, m12: m.m21,
+        m20: m.m02, m21: m.m12, m22: m.m22
+    }
+}
+
+fn main() -> Int {
+    // === 2x2 Determinants ===
+    // Identity
+    assert_eq(det2(mat2_id()), 1);
+
+    // Simple
+    let m1 = Mat2 { a: 3, b: 1, c: 2, d: 4 };
+    assert_eq(det2(m1), 10);  // 3*4 - 1*2
+
+    // Singular matrix
+    let m2 = Mat2 { a: 2, b: 4, c: 1, d: 2 };
+    assert_eq(det2(m2), 0);  // 2*2 - 4*1
+
+    // Negative determinant
+    let m3 = Mat2 { a: 1, b: 3, c: 4, d: 2 };
+    assert_eq(det2(m3), -10);  // 1*2 - 3*4
+
+    // === 2x2 Adjugate and inverse property ===
+    // adj(A) * A = det(A) * I
+    let adj1 = mat2_adj(m1);
+    let prod = mat2_mul(adj1, m1);
+    assert_eq(prod.a, 10);  // det(m1)
+    assert_eq(prod.b, 0);
+    assert_eq(prod.c, 0);
+    assert_eq(prod.d, 10);
+
+    // === 2x2 Matrix multiply ===
+    let ma = Mat2 { a: 1, b: 2, c: 3, d: 4 };
+    let mb = Mat2 { a: 5, b: 6, c: 7, d: 8 };
+    let mc = mat2_mul(ma, mb);
+    assert_eq(mc.a, 19);  // 1*5 + 2*7
+    assert_eq(mc.b, 22);  // 1*6 + 2*8
+    assert_eq(mc.c, 43);  // 3*5 + 4*7
+    assert_eq(mc.d, 50);  // 3*6 + 4*8
+
+    // det(AB) = det(A) * det(B)
+    assert_eq(det2(mc), det2(ma) * det2(mb));
+
+    // === 3x3 Determinants ===
+    // Identity
+    assert_eq(det3(mat3_id()), 1);
+
+    // Simple 3x3
+    let m4 = Mat3 {
+        m00: 1, m01: 2, m02: 3,
+        m10: 4, m11: 5, m12: 6,
+        m20: 7, m21: 8, m22: 9
+    };
+    assert_eq(det3(m4), 0);  // Singular (rows are arithmetic progression)
+
+    // Non-singular 3x3
+    let m5 = Mat3 {
+        m00: 2, m01: 1, m02: 3,
+        m10: 1, m11: 0, m12: 2,
+        m20: 3, m21: 2, m22: 1
+    };
+    // det = 2*(0*1-2*2) - 1*(1*1-2*3) + 3*(1*2-0*3)
+    //     = 2*(-4) - 1*(-5) + 3*(2)
+    //     = -8 + 5 + 6 = 3
+    assert_eq(det3(m5), 3);
+
+    // Diagonal matrix: det = product of diagonal
+    let m6 = Mat3 {
+        m00: 2, m01: 0, m02: 0,
+        m10: 0, m11: 3, m12: 0,
+        m20: 0, m21: 0, m22: 5
+    };
+    assert_eq(det3(m6), 30);
+
+    // Upper triangular: det = product of diagonal
+    let m7 = Mat3 {
+        m00: 3, m01: 1, m02: 4,
+        m10: 0, m11: 2, m12: 5,
+        m20: 0, m21: 0, m22: 7
+    };
+    assert_eq(det3(m7), 42);  // 3*2*7
+
+    // === 3x3 Adjugate and inverse property ===
+    // adj(A) * A = det(A) * I
+    let adj5 = mat3_adj(m5);
+    let prod5 = mat3_mul(adj5, m5);
+    assert_eq(prod5.m00, 3);  // det(m5) = 3
+    assert_eq(prod5.m01, 0);
+    assert_eq(prod5.m02, 0);
+    assert_eq(prod5.m10, 0);
+    assert_eq(prod5.m11, 3);
+    assert_eq(prod5.m12, 0);
+    assert_eq(prod5.m20, 0);
+    assert_eq(prod5.m21, 0);
+    assert_eq(prod5.m22, 3);
+
+    // === 3x3 Transpose ===
+    let t5 = mat3_transpose(m5);
+    assert_eq(t5.m00, 2);
+    assert_eq(t5.m01, 1);
+    assert_eq(t5.m02, 3);
+    assert_eq(t5.m10, 1);
+    assert_eq(t5.m11, 0);
+    assert_eq(t5.m12, 2);
+    // det(A^T) = det(A)
+    assert_eq(det3(t5), det3(m5));
+
+    // === 3x3 Trace ===
+    assert_eq(mat3_trace(mat3_id()), 3);
+    assert_eq(mat3_trace(m5), 3);  // 2+0+1
+
+    // === 3x3 Matrix multiply det property ===
+    let m8 = Mat3 {
+        m00: 1, m01: 0, m02: 2,
+        m10: 0, m11: 3, m12: 1,
+        m20: 4, m21: 0, m22: 1
+    };
+    let m8m5 = mat3_mul(m8, m5);
+    assert_eq(det3(m8m5), det3(m8) * det3(m5));
+
+    // === Cramer's rule 2x2 ===
+    // Solve: 3x + y = 7, 2x + 4y = 14
+    // det = 10, x = (7*4-1*14)/10 = 14/10, y = (3*14-7*2)/10 = 28/10
+    // Scaled: x*det = 14, y*det = 28
+    let sol2 = cramer2_scaled(m1, Vec2 { x: 7, y: 14 });
+    assert_eq(sol2.x, 14);
+    assert_eq(sol2.y, 28);
+
+    // Verify: A * (sol/det) = b, i.e., A * sol = det * b
+    let check2 = mat2_vec(m1, sol2);
+    assert_eq(check2.x, 10 * 7);   // det * bx
+    assert_eq(check2.y, 10 * 14);  // det * by
+
+    // === Cramer's rule 3x3 ===
+    // Solve m5 * x = [1, 2, 3]
+    let b3 = Vec3 { x: 1, y: 2, z: 3 };
+    let sol3 = cramer3_scaled(m5, b3);
+    // Verify: A * sol = det * b
+    let check3 = mat3_vec(m5, sol3);
+    let d = det3(m5);  // 3
+    assert_eq(check3.x, d * 1);
+    assert_eq(check3.y, d * 2);
+    assert_eq(check3.z, d * 3);
+
+    // === Cramer's 3x3 with known solution ===
+    // System: x + 2y + 3z = 14, 4x + 5y + 6z = 32, 7x + 8y + z = 20
+    // But det=0 for that matrix. Use m5 instead:
+    // 2x + y + 3z = 10, x + 2z = 5, 3x + 2y + z = 10
+    let b4 = Vec3 { x: 10, y: 5, z: 10 };
+    let sol4 = cramer3_scaled(m5, b4);
+    let check4 = mat3_vec(m5, sol4);
+    let d5 = det3(m5);
+    assert_eq(check4.x, d5 * 10);
+    assert_eq(check4.y, d5 * 5);
+    assert_eq(check4.z, d5 * 10);
+
+    // === Matrix-vector multiply identity ===
+    let v1 = Vec3 { x: 7, y: 11, z: 13 };
+    let v1id = mat3_vec(mat3_id(), v1);
+    assert_eq(v1id.x, 7);
+    assert_eq(v1id.y, 11);
+    assert_eq(v1id.z, 13);
+
+    0
+}

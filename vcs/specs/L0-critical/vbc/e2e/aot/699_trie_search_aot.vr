@@ -1,0 +1,200 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, trie, prefix-tree, search
+// @timeout: 30000
+
+// Trie simulation using flat array encoding
+// For alphabet of size 3 (chars 0,1,2), trie node stores:
+//   - children[0..2]: index of child node (0 = no child)
+//   - is_end: 1 if word ends here
+// Pack node as: child0 * 1000000 + child1 * 10000 + child2 * 100 + is_end
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Node encoding: child0 * 1000000 + child1 * 10000 + child2 * 100 + is_end
+fn make_node(c0: Int, c1: Int, c2: Int, end: Int) -> Int {
+    c0 * 1000000 + c1 * 10000 + c2 * 100 + end
+}
+
+fn node_child(node: Int, ch: Int) -> Int {
+    if ch == 0 { node / 1000000 }
+    else if ch == 1 { (node / 10000) % 100 }
+    else { (node / 100) % 100 }
+}
+
+fn node_is_end(node: Int) -> Int { node % 100 }
+
+fn node_set_child(node: Int, ch: Int, child_idx: Int) -> Int {
+    let c0 = if ch == 0 { child_idx } else { node / 1000000 };
+    let c1 = if ch == 1 { child_idx } else { (node / 10000) % 100 };
+    let c2 = if ch == 2 { child_idx } else { (node / 100) % 100 };
+    let end = node % 100;
+    make_node(c0, c1, c2, end)
+}
+
+fn node_set_end(node: Int) -> Int {
+    let base = node - (node % 100);
+    base + 1
+}
+
+// Insert a word (stored as packed digits) into trie
+// Word: d0*1000 + d1*100 + d2*10 + d3 (digits 0-2, padded with 9 for end)
+// Returns (nodes, next_free) packed as next_free * 100000000 + updated
+fn trie_insert(nodes: Arr8, next_free: Int, word: Arr8, wlen: Int) -> Arr8 {
+    let mut cur = 0; // root is always node 0
+    let mut ns = nodes;
+    let mut nf = next_free;
+    let mut i = 0;
+    while i < wlen {
+        let ch = get8(word, i);
+        let child = node_child(get8(ns, cur), ch);
+        if child == 0 {
+            // Create new node
+            ns = set8(ns, cur, node_set_child(get8(ns, cur), ch, nf));
+            ns = set8(ns, nf, 0); // empty node
+            cur = nf;
+            nf = nf + 1;
+        } else {
+            cur = child;
+        }
+        i = i + 1;
+    }
+    // Mark end of word
+    ns = set8(ns, cur, node_set_end(get8(ns, cur)));
+    // Store next_free in v7 (using convention: we won't use node 7)
+    ns = set8(ns, 7, nf);
+    ns
+}
+
+// Search for a word in trie
+fn trie_search(nodes: Arr8, word: Arr8, wlen: Int) -> Int {
+    let mut cur = 0;
+    let mut i = 0;
+    let mut found = 1;
+    while i < wlen {
+        let ch = get8(word, i);
+        let child = node_child(get8(nodes, cur), ch);
+        if child == 0 {
+            found = 0;
+            i = wlen; // break
+        } else {
+            cur = child;
+            i = i + 1;
+        }
+    }
+    if found == 1 { node_is_end(get8(nodes, cur)) }
+    else { 0 }
+}
+
+// Check if any word with given prefix exists
+fn trie_has_prefix(nodes: Arr8, prefix: Arr8, plen: Int) -> Int {
+    let mut cur = 0;
+    let mut i = 0;
+    let mut found = 1;
+    while i < plen {
+        let ch = get8(prefix, i);
+        let child = node_child(get8(nodes, cur), ch);
+        if child == 0 {
+            found = 0;
+            i = plen;
+        } else {
+            cur = child;
+            i = i + 1;
+        }
+    }
+    found
+}
+
+fn test_basic_trie() -> Int {
+    let mut nodes = zeros();
+    let nf = 1; // root is 0, next free is 1
+
+    // Insert word [0, 1] (like "ab")
+    let w1 = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    nodes = trie_insert(nodes, nf, w1, 2);
+    let nf2 = get8(nodes, 7);
+
+    // Search for [0, 1] → found
+    assert_eq(trie_search(nodes, w1, 2), 1);
+
+    // Search for [0] → not found (prefix only, not complete word)
+    let w_a = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(trie_search(nodes, w_a, 1), 0);
+
+    // Has prefix [0] → yes
+    assert_eq(trie_has_prefix(nodes, w_a, 1), 1);
+
+    // Search for [1, 0] → not found
+    let w_ba = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(trie_search(nodes, w_ba, 2), 0);
+    1
+}
+
+fn test_multiple_words() -> Int {
+    let mut nodes = zeros();
+
+    // Insert [0,1] "ab"
+    let w1 = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    nodes = trie_insert(nodes, 1, w1, 2);
+    let nf = get8(nodes, 7);
+
+    // Insert [0,2] "ac"
+    let w2 = Arr8 { v0: 0, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    nodes = trie_insert(nodes, nf, w2, 2);
+    let nf2 = get8(nodes, 7);
+
+    // Insert [0] "a" (prefix of both)
+    let w3 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    nodes = trie_insert(nodes, nf2, w3, 1);
+
+    // All three words should be found
+    assert_eq(trie_search(nodes, w1, 2), 1);
+    assert_eq(trie_search(nodes, w2, 2), 1);
+    assert_eq(trie_search(nodes, w3, 1), 1);
+
+    // Prefix [0] exists
+    assert_eq(trie_has_prefix(nodes, w3, 1), 1);
+
+    // [1] not a prefix
+    let w4 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(trie_has_prefix(nodes, w4, 1), 0);
+    1
+}
+
+fn test_empty_search() -> Int {
+    let nodes = zeros();
+    // Empty trie: nothing found
+    let w = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(trie_search(nodes, w, 1), 0);
+    assert_eq(trie_search(nodes, w, 2), 0);
+    1
+}
+
+fn main() -> Int {
+    test_basic_trie();
+    test_multiple_words();
+    test_empty_search();
+    print("[OK] 699_trie_search_aot");
+    0
+}

@@ -1,0 +1,118 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: error, result, match, runtime
+// @description: Test error handling with Result type and match
+
+type AppError is
+    | NotFound(Text)
+    | InvalidInput(Text)
+    | Overflow;
+
+fn divide(a: Int, b: Int) -> Result<Int, AppError> {
+    if b == 0 {
+        Err(AppError.InvalidInput("division by zero"))
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn safe_index(list: List<Int>, idx: Int) -> Result<Int, AppError> {
+    if idx < 0 || idx >= list.len() {
+        Err(AppError.NotFound(f"index {idx} out of bounds"))
+    } else {
+        Ok(list[idx])
+    }
+}
+
+fn compute_ratio(a: Int, b: Int, list: List<Int>) -> Result<Int, AppError> {
+    let ratio = match divide(a, b) {
+        Ok(v) => v,
+        Err(e) => { return Err(e); }
+    };
+    let val = match safe_index(list, ratio) {
+        Ok(v) => v,
+        Err(e) => { return Err(e); }
+    };
+    Ok(val * 2)
+}
+
+fn test_result_ok() -> Int {
+    match divide(10, 3) {
+        Ok(v) => {
+            if v != 3 {
+                print(f"FAIL: expected 3, got {v}");
+                return 1;
+            }
+        }
+        Err(_) => {
+            print("FAIL: unexpected error");
+            return 1;
+        }
+    }
+    print("  result_ok: OK");
+    0
+}
+
+fn test_result_err() -> Int {
+    match divide(10, 0) {
+        Ok(_) => {
+            print("FAIL: expected error");
+            return 1;
+        }
+        Err(_) => {}
+    }
+    print("  result_err: OK");
+    0
+}
+
+fn test_error_propagation() -> Int {
+    let data = [10, 20, 30, 40, 50];
+
+    // Valid case: 10/5 = 2, data[2] = 30, 30*2 = 60
+    match compute_ratio(10, 5, data) {
+        Ok(v) => {
+            if v != 60 {
+                print(f"FAIL: expected 60, got {v}");
+                return 1;
+            }
+        }
+        Err(_) => {
+            print("FAIL: unexpected error in valid case");
+            return 1;
+        }
+    }
+
+    // Error case: division by zero propagated
+    match compute_ratio(10, 0, data) {
+        Ok(_) => {
+            print("FAIL: expected error for div by zero");
+            return 1;
+        }
+        Err(_) => {} // Expected
+    }
+
+    // Error case: index out of bounds propagated
+    match compute_ratio(100, 1, data) {
+        Ok(_) => {
+            print("FAIL: expected error for out of bounds");
+            return 1;
+        }
+        Err(_) => {} // Expected (index 100 is out of bounds)
+    }
+
+    print("  error_propagation: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_result_ok();
+    failures = failures + test_result_err();
+    failures = failures + test_error_propagation();
+
+    if failures == 0 {
+        print("All error handling tests passed");
+    }
+    failures
+}

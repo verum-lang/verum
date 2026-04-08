@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, match, empty, error
+// @description: Empty match expression with no arms
+// @expected-error: E0B8
+
+fn test(x: Int) {
+    match x { }  // Match must have at least one arm
+}

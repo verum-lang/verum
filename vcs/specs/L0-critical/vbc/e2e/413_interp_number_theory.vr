@@ -1,0 +1,172 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, math, number-theory
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests number theory algorithms: primality, factorization, Euler's totient,
+// extended Euclidean algorithm.
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return 0; }
+        i = i + 2;
+    }
+    1
+}
+
+fn euler_totient(n: Int) -> Int {
+    let mut result = 0;
+    let mut i = 1;
+    while i < n {
+        if gcd(i, n) == 1 {
+            result = result + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_prime_counting() {
+    // Count primes in different ranges
+    let mut count_50 = 0;
+    let mut i = 2;
+    while i <= 50 {
+        count_50 = count_50 + is_prime(i);
+        i = i + 1;
+    }
+    assert_eq(count_50, 15); // 15 primes up to 50
+
+    let mut count_100 = count_50;
+    while i <= 100 {
+        count_100 = count_100 + is_prime(i);
+        i = i + 1;
+    }
+    assert_eq(count_100, 25); // 25 primes up to 100
+    print("prime_counting: ok");
+}
+
+fn test_prime_factorization() {
+    // Factor 360 = 2^3 * 3^2 * 5
+    let mut n = 360;
+    let mut factor_sum = 0;
+    let mut factor_count = 0;
+    let mut d = 2;
+    while d * d <= n {
+        while n % d == 0 {
+            factor_sum = factor_sum + d;
+            factor_count = factor_count + 1;
+            n = n / d;
+        }
+        d = d + 1;
+    }
+    if n > 1 {
+        factor_sum = factor_sum + n;
+        factor_count = factor_count + 1;
+    }
+    // 2+2+2+3+3+5 = 17, count = 6
+    assert_eq(factor_sum, 17);
+    assert_eq(factor_count, 6);
+    print("prime_factorization: ok");
+}
+
+fn test_euler_totient() {
+    // phi(1) = 1 (by convention)
+    // phi(2) = 1
+    assert_eq(euler_totient(2), 1);
+    // phi(6) = 2 (1, 5 coprime to 6)
+    assert_eq(euler_totient(6), 2);
+    // phi(10) = 4 (1, 3, 7, 9)
+    assert_eq(euler_totient(10), 4);
+    // phi(12) = 4 (1, 5, 7, 11)
+    assert_eq(euler_totient(12), 4);
+    // phi(p) = p-1 for prime p
+    assert_eq(euler_totient(13), 12);
+    assert_eq(euler_totient(7), 6);
+    print("euler_totient: ok");
+}
+
+fn test_perfect_numbers() {
+    // Check if a number is perfect (sum of proper divisors = number)
+    // 6 and 28 are the first two perfect numbers
+    let mut n = 6;
+    let mut sum = 0;
+    let mut d = 1;
+    while d < n {
+        if n % d == 0 { sum = sum + d; }
+        d = d + 1;
+    }
+    assert_eq(sum, 6); // 1+2+3 = 6
+
+    n = 28;
+    sum = 0;
+    d = 1;
+    while d < n {
+        if n % d == 0 { sum = sum + d; }
+        d = d + 1;
+    }
+    assert_eq(sum, 28); // 1+2+4+7+14 = 28
+
+    // 12 is NOT perfect
+    n = 12;
+    sum = 0;
+    d = 1;
+    while d < n {
+        if n % d == 0 { sum = sum + d; }
+        d = d + 1;
+    }
+    assert_eq(sum, 16); // 1+2+3+4+6 = 16 != 12
+    print("perfect_numbers: ok");
+}
+
+fn test_modular_inverse() {
+    // Find modular inverse of a mod m using brute force
+    // 3^(-1) mod 7 = 5 because 3*5 = 15 ≡ 1 (mod 7)
+    let a = 3;
+    let m = 7;
+    let mut inv = -1;
+    let mut i = 1;
+    while i < m {
+        if (a * i) % m == 1 {
+            inv = i;
+            i = m; // break
+        }
+        i = i + 1;
+    }
+    assert_eq(inv, 5);
+
+    // 5^(-1) mod 11 = 9 because 5*9 = 45 ≡ 1 (mod 11)
+    let a2 = 5;
+    let m2 = 11;
+    inv = -1;
+    i = 1;
+    while i < m2 {
+        if (a2 * i) % m2 == 1 {
+            inv = i;
+            i = m2;
+        }
+        i = i + 1;
+    }
+    assert_eq(inv, 9);
+    print("modular_inverse: ok");
+}
+
+fn main() -> Int {
+    test_prime_counting();
+    test_prime_factorization();
+    test_euler_totient();
+    test_perfect_numbers();
+    test_modular_inverse();
+    print("[OK] 413_interp_number_theory");
+    0
+}

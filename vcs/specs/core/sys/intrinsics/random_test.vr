@@ -1,0 +1,394 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/random_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, random, rng
+// @description: Comprehensive tests for random number generation intrinsics.
+//
+// Coverage:
+// - random_float(): Generate random Float in [0.0, 1.0)
+// - random_u64(): Generate random 64-bit unsigned integer
+//
+// Test Strategy:
+// - Range validation (floats in [0, 1), full u64 range)
+// - Statistical distribution tests (basic uniformity)
+// - Uniqueness tests (consecutive values differ)
+// - Seed independence verification
+//
+// Note: These tests verify basic correctness and statistical properties.
+// Full PRNG quality testing requires more extensive test suites like
+// TestU01 or PractRand.
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.random_test;
+
+mount core.intrinsics.{
+    random_float, random_u64,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Random Float Range Tests
+// =============================================================================
+
+@test
+fn test_random_float_range() {
+    // Generate many random floats and verify all are in [0.0, 1.0)
+    let iterations = 10000;
+
+    for i in 0..iterations {
+        let r = random_float();
+
+        // Must be >= 0.0
+        assert(r >= 0.0);
+
+        // Must be < 1.0 (exclusive upper bound)
+        assert(r < 1.0);
+    }
+
+    print("random_float range tests passed");
+}
+
+// =============================================================================
+// Random Float Uniqueness Tests
+// =============================================================================
+
+@test
+fn test_random_float_uniqueness() {
+    // Consecutive random values should (almost always) be different
+    let samples = 1000;
+    let mut prev = random_float();
+    let mut duplicates = 0;
+
+    for i in 0..samples {
+        let curr = random_float();
+
+        if curr == prev {
+            duplicates = duplicates + 1;
+        }
+
+        prev = curr;
+    }
+
+    // With a good PRNG, duplicates should be extremely rare
+    // Allow at most 1% duplicates (very generous tolerance)
+    assert(duplicates < samples / 100);
+
+    print(f"random_float uniqueness: {duplicates} duplicates in {samples} samples");
+}
+
+// =============================================================================
+// Random Float Distribution Tests
+// =============================================================================
+
+@test
+fn test_random_float_distribution() {
+    // Test that random_float is approximately uniformly distributed
+    // Divide [0, 1) into buckets and count samples
+
+    let buckets = 10;
+    let samples_per_bucket = 1000;
+    let total_samples = buckets * samples_per_bucket;
+
+    let mut counts: [Int; 10] = [0; 10];
+
+    for i in 0..total_samples {
+        let r = random_float();
+        let bucket = (r * buckets as Float) as Int;
+
+        // Handle edge case where r is very close to 1.0
+        let bucket = if bucket >= buckets { buckets - 1 } else { bucket };
+
+        counts[bucket] = counts[bucket] + 1;
+    }
+
+    // Each bucket should have approximately samples_per_bucket samples
+    // Allow 50% deviation (very generous for statistical test)
+    let min_expected = samples_per_bucket / 2;
+    let max_expected = samples_per_bucket * 3 / 2;
+
+    for i in 0..buckets {
+        assert(counts[i] >= min_expected);
+        assert(counts[i] <= max_expected);
+    }
+
+    // Print distribution
+    print("random_float distribution:");
+    for i in 0..buckets {
+        print(f"  Bucket {i}: {counts[i]}");
+    }
+}
+
+// =============================================================================
+// Random UInt64 Uniqueness Tests
+// =============================================================================
+
+@test
+fn test_random_u64_uniqueness() {
+    // Generate many u64 values and verify they're unique
+    // With 64 bits, collisions should be astronomically rare
+
+    let samples = 1000;
+    let mut values: [UInt64; 1000] = [0; 1000];
+
+    for i in 0..samples {
+        values[i] = random_u64();
+    }
+
+    // Check for duplicates (O(n^2) but small n)
+    let mut duplicates = 0;
+    for i in 0..samples {
+        for j in (i + 1)..samples {
+            if values[i] == values[j] {
+                duplicates = duplicates + 1;
+            }
+        }
+    }
+
+    // Should be zero duplicates with a good PRNG
+    assert(duplicates == 0);
+
+    print("random_u64 uniqueness tests passed");
+}
+
+// =============================================================================
+// Random UInt64 Bit Tests
+// =============================================================================
+
+@test
+fn test_random_u64_bits() {
+    // Test that all bits can be set
+    // OR together many random values - result should have all bits set
+
+    let samples = 1000;
+    let mut or_result: UInt64 = 0;
+    let mut and_result: UInt64 = 0xFFFFFFFFFFFFFFFF;
+
+    for i in 0..samples {
+        let r = random_u64();
+        or_result = or_result | r;
+        and_result = and_result & r;
+    }
+
+    // OR of many random values should have all bits set
+    assert(or_result == 0xFFFFFFFFFFFFFFFF);
+
+    // AND of many random values should have all bits clear
+    assert(and_result == 0);
+
+    // Test individual bit frequencies
+    let bit_samples = 10000;
+    let mut bit_counts: [Int; 64] = [0; 64];
+
+    for i in 0..bit_samples {
+        let r = random_u64();
+
+        for bit in 0..64 {
+            let shift = bit as UInt64;
+            if (r >> shift) & 1 == 1 {
+                bit_counts[bit] = bit_counts[bit] + 1;
+            }
+        }
+    }
+
+    // Each bit should be set approximately 50% of the time
+    // Allow 40-60% range (very generous)
+    let min_count = bit_samples * 4 / 10;  // 40%
+    let max_count = bit_samples * 6 / 10;  // 60%
+
+    for bit in 0..64 {
+        assert(bit_counts[bit] >= min_count);
+        assert(bit_counts[bit] <= max_count);
+    }
+
+    print("random_u64 bit tests passed");
+}
+
+// =============================================================================
+// Random UInt64 Distribution Tests
+// =============================================================================
+
+@test
+fn test_random_u64_distribution() {
+    // Test distribution of upper bits (easier than full range)
+    // Use top 4 bits to create 16 buckets
+
+    let buckets = 16;
+    let samples_per_bucket = 1000;
+    let total_samples = buckets * samples_per_bucket;
+
+    let mut counts: [Int; 16] = [0; 16];
+
+    for i in 0..total_samples {
+        let r = random_u64();
+        let bucket = (r >> 60) as Int;  // Top 4 bits
+
+        counts[bucket] = counts[bucket] + 1;
+    }
+
+    // Each bucket should have approximately samples_per_bucket samples
+    let min_expected = samples_per_bucket / 2;
+    let max_expected = samples_per_bucket * 3 / 2;
+
+    for i in 0..buckets {
+        assert(counts[i] >= min_expected);
+        assert(counts[i] <= max_expected);
+    }
+
+    print("random_u64 distribution tests passed");
+}
+
+// =============================================================================
+// Basic Randomness Tests
+// =============================================================================
+
+@test
+fn test_randomness_basic() {
+    // Test that random values don't follow obvious patterns
+
+    // Ascending/descending test
+    let samples = 100;
+    let mut ascending = 0;
+    let mut descending = 0;
+    let mut prev = random_u64();
+
+    for i in 0..samples {
+        let curr = random_u64();
+
+        if curr > prev {
+            ascending = ascending + 1;
+        } else if curr < prev {
+            descending = descending + 1;
+        }
+
+        prev = curr;
+    }
+
+    // Should have roughly equal ascending and descending
+    // Allow wide tolerance
+    let diff = if ascending > descending {
+        ascending - descending
+    } else {
+        descending - ascending
+    };
+
+    // Difference should be less than 30% of samples
+    assert(diff < samples * 30 / 100);
+
+    // Same test for floats
+    let mut ascending_f = 0;
+    let mut descending_f = 0;
+    let mut prev_f = random_float();
+
+    for i in 0..samples {
+        let curr_f = random_float();
+
+        if curr_f > prev_f {
+            ascending_f = ascending_f + 1;
+        } else if curr_f < prev_f {
+            descending_f = descending_f + 1;
+        }
+
+        prev_f = curr_f;
+    }
+
+    let diff_f = if ascending_f > descending_f {
+        ascending_f - descending_f
+    } else {
+        descending_f - ascending_f
+    };
+
+    assert(diff_f < samples * 30 / 100);
+
+    print("Basic randomness tests passed");
+}
+
+// =============================================================================
+// Random Float Edge Cases
+// =============================================================================
+
+@test
+fn test_random_float_edge_cases() {
+    // Test many samples to check edge case handling
+    let samples = 100000;
+
+    let mut zero_count = 0;
+    let mut near_one_count = 0;  // > 0.999
+
+    for i in 0..samples {
+        let r = random_float();
+
+        if r == 0.0 {
+            zero_count = zero_count + 1;
+        }
+
+        if r > 0.999 {
+            near_one_count = near_one_count + 1;
+        }
+    }
+
+    // Zero should be possible but rare
+    // Near-one should occur about 0.1% of the time
+    print(f"Zero count: {zero_count}");
+    print(f"Near-one count: {near_one_count}");
+
+    // Near-one should be approximately 100 (0.1% of 100000)
+    // Allow wide tolerance: 10 to 500
+    assert(near_one_count >= 10);
+    assert(near_one_count <= 500);
+}
+
+// =============================================================================
+// Random Performance Test
+// =============================================================================
+
+@test
+fn test_random_performance() {
+    mount core.intrinsics.{monotonic_nanos};
+
+    // Test random_u64 performance
+    let iterations = 100000;
+
+    let start = monotonic_nanos();
+    let mut sum: UInt64 = 0;
+
+    for i in 0..iterations {
+        sum = sum ^ random_u64();  // Use XOR to prevent optimization
+    }
+
+    let elapsed = monotonic_nanos() - start;
+    let ns_per_call = elapsed / iterations as UInt64;
+
+    print(f"{iterations} random_u64 calls took {elapsed}ns ({ns_per_call}ns/call)");
+
+    // Should be reasonably fast (< 1μs per call even in interpreter)
+    assert(ns_per_call < 1000);
+
+    // Test random_float performance
+    let start = monotonic_nanos();
+    let mut sum_f: Float = 0.0;
+
+    for i in 0..iterations {
+        sum_f = sum_f + random_float();
+    }
+
+    let elapsed = monotonic_nanos() - start;
+    let ns_per_call = elapsed / iterations as UInt64;
+
+    print(f"{iterations} random_float calls took {elapsed}ns ({ns_per_call}ns/call)");
+
+    assert(ns_per_call < 1000);
+
+    // Use sums to prevent dead code elimination
+    assert(sum != 0 || sum == 0);  // Always true
+    assert(sum_f >= 0.0);  // Always true
+}

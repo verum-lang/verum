@@ -1,0 +1,19 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, arithmetic
+
+/// Sample differential test for fibonacci.
+/// This demonstrates the exact format expected by the differential testing system.
+/// The program must produce identical output on both Tier 0 (interpreter)
+/// and Tier 3 (AOT compiler).
+
+fn fib(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fib(n - 1) + fib(n - 2) }
+}
+
+fn main() {
+    print(fib(10));  // Must be 55 on both tiers
+}

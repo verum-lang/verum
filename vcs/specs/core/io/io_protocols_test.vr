@@ -1,0 +1,139 @@
+// =============================================================================
+// io_protocols_test.vr - Tests for IoErrorKind Clone and Component Display
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: io, error, path, clone, display, protocols, core
+// @description: Tests Clone for IoErrorKind and Display for path Component
+// =============================================================================
+
+mount core.io.protocols.{StreamError, IoErrorKind};
+mount core.io.path.{Component};
+mount core.base.protocols.{Display, Debug, Clone, Eq};
+mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// =============================================================================
+// Section 1: IoErrorKind Clone
+// =============================================================================
+
+@test
+fn test_io_error_kind_clone_not_found() {
+    let kind = IoErrorKind.NotFound;
+    let cloned = kind.clone();
+    assert(cloned == IoErrorKind.NotFound);
+}
+
+@test
+fn test_io_error_kind_clone_permission_denied() {
+    let kind = IoErrorKind.PermissionDenied;
+    let cloned = kind.clone();
+    assert(cloned == IoErrorKind.PermissionDenied);
+}
+
+@test
+fn test_io_error_kind_clone_timed_out() {
+    let kind = IoErrorKind.TimedOut;
+    let cloned = kind.clone();
+    assert(cloned == IoErrorKind.TimedOut);
+}
+
+@test
+fn test_io_error_kind_clone_other() {
+    let kind = IoErrorKind.Other;
+    let cloned = kind.clone();
+    assert(cloned == IoErrorKind.Other);
+}
+
+@test
+fn test_io_error_kind_clone_display_matches() {
+    let kind = IoErrorKind.ConnectionRefused;
+    let cloned = kind.clone();
+    assert_eq(format_display(&kind), format_display(&cloned));
+}
+
+@test
+fn test_io_error_kind_clone_fn_exists() {
+    fn clone_kind(k: &IoErrorKind) -> IoErrorKind {
+        k.clone()
+    }
+    let _ = clone_kind;
+}
+
+// =============================================================================
+// Section 2: Component Display
+// =============================================================================
+
+@test
+fn test_component_root_dir_display() {
+    let c = Component.RootDir;
+    let text = format_display(&c);
+    assert_eq(text, "/");
+}
+
+@test
+fn test_component_cur_dir_display() {
+    let c = Component.CurDir;
+    let text = format_display(&c);
+    assert_eq(text, ".");
+}
+
+@test
+fn test_component_parent_dir_display() {
+    let c = Component.ParentDir;
+    let text = format_display(&c);
+    assert_eq(text, "..");
+}
+
+@test
+fn test_component_normal_display() {
+    let c = Component.Normal("hello");
+    let text = format_display(&c);
+    assert_eq(text, "hello");
+}
+
+@test
+fn test_component_prefix_display() {
+    let c = Component.Prefix("C:");
+    let text = format_display(&c);
+    assert_eq(text, "C:");
+}
+
+@test
+fn test_component_display_vs_debug_differ() {
+    let c = Component.Normal("file.txt");
+    let display_text = format_display(&c);
+    let debug_text = format_debug(&c);
+    // Display is just "file.txt", Debug is "Normal(file.txt)"
+    assert(display_text != debug_text);
+    assert_eq(display_text, "file.txt");
+    assert(debug_text.contains("Normal"));
+}
+
+@test
+fn test_component_display_fn_exists() {
+    fn display_component(c: &Component) -> Text {
+        format_display(c)
+    }
+    let _ = display_component;
+}
+
+// =============================================================================
+// Section 3: Type Existence
+// =============================================================================
+
+@test
+fn test_io_error_kind_type_exists() {
+    let _: Maybe<IoErrorKind> = None;
+}
+
+@test
+fn test_component_type_exists() {
+    let _: Maybe<Component> = None;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

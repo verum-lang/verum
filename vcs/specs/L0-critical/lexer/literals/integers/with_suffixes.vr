@@ -1,0 +1,172 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, integers, suffixes, typed
+
+// Integer literals with type suffixes
+
+fn test_signed_integer_suffixes() {
+    // Signed integer suffixes
+    let i8_val = 42i8;
+    let i16_val = 42i16;
+    let i32_val = 42i32;
+    let i64_val = 42i64;
+    let i128_val = 42i128;
+    let isize_val = 42isize;
+}
+
+fn test_unsigned_integer_suffixes() {
+    // Unsigned integer suffixes
+    let u8_val = 42u8;
+    let u16_val = 42u16;
+    let u32_val = 42u32;
+    let u64_val = 42u64;
+    let u128_val = 42u128;
+    let usize_val = 42usize;
+}
+
+fn test_maximum_signed_values() {
+    // Maximum values for each type
+    let max_i8 = 127i8;
+    let max_i16 = 32767i16;
+    let max_i32 = 2147483647i32;
+    let max_i64 = 9223372036854775807i64;
+}
+
+fn test_maximum_unsigned_values() {
+    let max_u8 = 255u8;
+    let max_u16 = 65535u16;
+    let max_u32 = 4294967295u32;
+    // Note: max u64 (18446744073709551615) cannot be expressed as a literal
+    // because it exceeds i64::MAX. Use u64.max instead.
+    let large_u64 = 9223372036854775807u64;  // i64::MAX fits
+}
+
+fn test_minimum_signed_values() {
+    // Minimum values for signed types
+    // Note: The minimum i64 value (-9223372036854775808) cannot be expressed
+    // as a literal because 9223372036854775808 overflows u64.
+    // Use i64.min or construct via subtraction.
+    let min_i8 = -128i8;
+    let min_i16 = -32768i16;
+    let min_i32 = -2147483648i32;
+    let min_i64 = -9223372036854775807i64 - 1i64;
+}
+
+fn test_zero_with_suffixes() {
+    // Zero with suffixes
+    let zero_i32 = 0i32;
+    let zero_u64 = 0u64;
+    let zero_isize = 0isize;
+}
+
+fn test_hex_with_suffixes() {
+    // Hexadecimal with suffixes
+    let hex_u8 = 0xFF_u8;
+    let hex_u16 = 0xFFFF_u16;
+    let hex_u32 = 0xFFFFFFFF_u32;
+    let hex_i32 = 0x7FFFFFFF_i32;
+}
+
+fn test_binary_with_suffixes() {
+    // Binary with suffixes
+    let bin_u8 = 0b11111111u8;
+    let bin_u16 = 0b1111111111111111u16;
+    let bin_i8 = 0b01111111i8;
+}
+
+fn test_octal_with_suffixes() {
+    // Octal with suffixes
+    let oct_u8 = 0o377u8;
+    let oct_i32 = 0o755i32;
+}
+
+fn test_underscores_and_suffixes() {
+    // With underscores AND suffixes
+    let formatted_i32 = 1_000_000i32;
+    let formatted_u64 = 1_000_000_000u64;
+    let hex_formatted = 0xFF_FF_FF_FF_u32;
+}
+
+fn test_mixed_types_expressions() {
+    // In expressions with mixed types (explicit casting needed)
+    let sum: i64 = 100i32 as i64 + 200i64;
+    let product: u64 = 10u32 as u64 * 20u64;
+}
+
+// In function parameters
+fn process_byte(b: u8) -> u8 {
+    b + 1u8
+}
+
+fn process_word(w: u16) -> u16 {
+    w * 2u16
+}
+
+fn test_arrays_with_explicit_types() {
+    // In arrays with explicit types
+    let bytes: List<u8> = [0u8, 1u8, 2u8, 255u8];
+    let words: List<u16> = [0u16, 1000u16, 65535u16];
+    let dwords: List<u32> = [0u32, 1_000_000u32, 4_294_967_295u32];
+}
+
+// In struct fields
+type Packet is {
+    header: u32,
+    length: u16,
+    checksum: u8,
+    payload_size: usize,
+};
+
+fn test_struct_with_suffixes() {
+    let packet = Packet {
+        header: 0xDEADBEEF_u32,
+        length: 1024u16,
+        checksum: 0xFF_u8,
+        payload_size: 2048usize,
+    };
+}
+
+// In match expressions
+fn size_category(n: usize) -> Text {
+    match n {
+        0usize..256usize => "tiny"
+        256usize..65536usize => "small"
+        65536usize..1048576usize => "medium"
+        _ => "large"
+    }
+}
+
+fn test_bit_operations_typed() {
+    // Bit operations with typed literals
+    let mask: u8 = 0b1111_0000u8;
+    let shifted: u32 = 1u32 << 16;
+    let ored: u64 = 0xFF00_u64 | 0x00FF_u64;
+}
+
+fn test_platform_dependent_sizes() {
+    // Platform-dependent sizes
+    let ptr_size = 8usize;  // on 64-bit
+    let index: isize = -1isize;
+}
+
+// In generics (type inference from suffix)
+fn identity<T>(x: T) -> T { x }
+
+fn test_generic_type_inference() {
+    let result_i32 = identity(42i32);
+    let result_u64 = identity(100u64);
+}
+
+fn test_comparison_with_typed() {
+    // Comparison with typed literals
+    let value = 100;
+    let signed_value = -50;
+    let fits_in_byte = value <= 255u8 as Int;
+    let is_negative = signed_value < 0i32;
+}
+
+// Constants with suffixes
+const MAX_BUFFER: usize = 4096usize;
+const MAGIC_NUMBER: u32 = 0xCAFEBABE_u32;
+const DEFAULT_PORT: u16 = 8080u16;

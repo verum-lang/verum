@@ -1,0 +1,560 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: performance, runtime, allocation, memory
+// @description: Memory allocation benchmark (target: > 10M allocs/sec, < 50ns per alloc)
+
+/// Memory Allocation Performance Benchmark
+///
+/// This benchmark measures the performance of Verum's memory allocator,
+/// including CBGR metadata overhead.
+///
+/// Performance targets:
+/// - Tiny alloc (16B):     > 30M allocs/sec  (< 33ns)
+/// - Small alloc (64B):    > 20M allocs/sec  (< 50ns)
+/// - Medium alloc (1KB):   > 5M allocs/sec   (< 200ns)
+/// - Large alloc (64KB):   > 100K allocs/sec (< 10us)
+/// - Arena alloc:          > 100M allocs/sec (< 10ns)
+///
+/// Allocator features:
+/// - Size-class segregation
+/// - Thread-local allocation caches
+/// - CBGR generation counter integration
+/// - Efficient arena/bump allocators
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 1_000_000;
+
+// Size classes
+const SIZE_TINY: usize = 16;
+const SIZE_SMALL: usize = 64;
+const SIZE_MEDIUM: usize = 1024;
+const SIZE_LARGE: usize = 65536;
+const SIZE_HUGE: usize = 1048576;
+
+/// Baseline: Stack allocation (no heap)
+fn benchmark_stack_allocation() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let data: [u8; 64] = [0; 64];
+        black_box(&data);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let data: [u8; 64] = [0; 64];
+        black_box(&data);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "stack_allocation_64b",
+        size_bytes: 64,
+        iterations: BENCHMARK_ITERATIONS,
+        allocs_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_allocs_per_sec: f64.MAX,
+        is_baseline: true,
+    }
+}
+
+/// Tiny allocation (16 bytes)
+fn benchmark_tiny_allocation() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let obj = Heap([0u8; SIZE_TINY]);
+        black_box(&*obj);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let obj = Heap([0u8; SIZE_TINY]);
+        black_box(&*obj);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "tiny_alloc_16b",
+        size_bytes: SIZE_TINY,
+        iterations: BENCHMARK_ITERATIONS,
+        allocs_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_allocs_per_sec: 30_000_000.0,
+        is_baseline: false,
+    }
+}
+
+/// Small allocation (64 bytes)
+fn benchmark_small_allocation() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let obj = Heap([0u8; SIZE_SMALL]);
+        black_box(&*obj);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let obj = Heap([0u8; SIZE_SMALL]);
+        black_box(&*obj);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "small_alloc_64b",
+        size_bytes: SIZE_SMALL,
+        iterations: BENCHMARK_ITERATIONS,
+        allocs_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_allocs_per_sec: 20_000_000.0,
+        is_baseline: false,
+    }
+}
+
+/// Medium allocation (1KB)
+fn benchmark_medium_allocation() -> BenchmarkResult {
+    let iterations = BENCHMARK_ITERATIONS / 10;
+
+    for _ in 0..(WARMUP_ITERATIONS / 10) {
+        let obj = Heap([0u8; SIZE_MEDIUM]);
+        black_box(&*obj);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        let obj = Heap([0u8; SIZE_MEDIUM]);
+        black_box(&*obj);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "medium_alloc_1kb",
+        size_bytes: SIZE_MEDIUM,
+        iterations,
+        allocs_per_sec: iterations as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / iterations as f64,
+        target_allocs_per_sec: 5_000_000.0,
+        is_baseline: false,
+    }
+}
+
+/// Large allocation (64KB)
+fn benchmark_large_allocation() -> BenchmarkResult {
+    let iterations = BENCHMARK_ITERATIONS / 100;
+
+    for _ in 0..(WARMUP_ITERATIONS / 100) {
+        let obj = Heap([0u8; SIZE_LARGE]);
+        black_box(&*obj);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        let obj = Heap([0u8; SIZE_LARGE]);
+        black_box(&*obj);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "large_alloc_64kb",
+        size_bytes: SIZE_LARGE,
+        iterations,
+        allocs_per_sec: iterations as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / iterations as f64,
+        target_allocs_per_sec: 100_000.0,
+        is_baseline: false,
+    }
+}
+
+/// Huge allocation (1MB)
+fn benchmark_huge_allocation() -> BenchmarkResult {
+    let iterations = BENCHMARK_ITERATIONS / 1000;
+
+    for _ in 0..(WARMUP_ITERATIONS / 1000) {
+        let obj = Heap([0u8; SIZE_HUGE]);
+        black_box(&*obj);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        let obj = Heap([0u8; SIZE_HUGE]);
+        black_box(&*obj);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "huge_alloc_1mb",
+        size_bytes: SIZE_HUGE,
+        iterations,
+        allocs_per_sec: iterations as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / iterations as f64,
+        target_allocs_per_sec: 5_000.0,
+        is_baseline: false,
+    }
+}
+
+/// CBGR Heap allocation (with generation tracking)
+fn benchmark_cbgr_heap_allocation() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let obj = Heap([0u8; SIZE_SMALL]);
+        black_box(&*obj);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Heap<T> includes CBGR metadata
+        let obj = Heap([0u8; SIZE_SMALL]);
+        black_box(&*obj);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "cbgr_heap_64b",
+        size_bytes: SIZE_SMALL + 16,  // +16 for CBGR header
+        iterations: BENCHMARK_ITERATIONS,
+        allocs_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_allocs_per_sec: 15_000_000.0,
+        is_baseline: false,
+    }
+}
+
+/// Arena allocation (bump allocator)
+fn benchmark_arena_allocation() -> BenchmarkResult {
+    let arena = Arena.new(16 * 1024 * 1024);  // 16MB arena
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let ptr = arena.alloc(SIZE_SMALL);
+        black_box(ptr);
+        if arena.used() > arena.capacity() * 3 / 4 {
+            arena.reset();
+        }
+    }
+    arena.reset();
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let ptr = arena.alloc(SIZE_SMALL);
+        black_box(ptr);
+        if arena.used() > arena.capacity() * 3 / 4 {
+            arena.reset();
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "arena_alloc_64b",
+        size_bytes: SIZE_SMALL,
+        iterations: BENCHMARK_ITERATIONS,
+        allocs_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_allocs_per_sec: 100_000_000.0,  // Arena should be very fast
+        is_baseline: false,
+    }
+}
+
+/// List pre-allocation (batch allocation)
+fn benchmark_list_preallocate() -> BenchmarkResult {
+    let capacity = 10_000;
+    let iterations = BENCHMARK_ITERATIONS / capacity;
+
+    for _ in 0..(WARMUP_ITERATIONS / capacity) {
+        let v: List<i64> = List.with_capacity(capacity);
+        black_box(&v);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        let v: List<i64> = List.with_capacity(capacity);
+        black_box(&v);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "list_preallocate_10k",
+        size_bytes: capacity * 8,
+        iterations,
+        allocs_per_sec: iterations as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / iterations as f64,
+        target_allocs_per_sec: 50_000.0,
+        is_baseline: false,
+    }
+}
+
+/// Allocation + deallocation cycle
+fn benchmark_alloc_dealloc_cycle() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let obj = Heap([0u8; SIZE_SMALL]);
+        black_box(&*obj);
+        drop(obj);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let obj = Heap([0u8; SIZE_SMALL]);
+        black_box(&*obj);
+        drop(obj);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "alloc_dealloc_cycle_64b",
+        size_bytes: SIZE_SMALL,
+        iterations: BENCHMARK_ITERATIONS,
+        allocs_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_allocs_per_sec: 15_000_000.0,
+        is_baseline: false,
+    }
+}
+
+/// Multi-threaded allocation
+fn benchmark_multithreaded_allocation() -> BenchmarkResult {
+    mount std.thread;
+    mount std.sync.Arc;
+    mount std.sync.atomic.{AtomicUsize, Ordering};
+
+    const THREADS: usize = 4;
+    const OPS_PER_THREAD: usize = BENCHMARK_ITERATIONS / THREADS;
+
+    let total_allocs = Arc.new(AtomicUsize.new(0));
+
+    let start = Instant.now();
+
+    let handles: List<_> = (0..THREADS).map(|_| {
+        let counter = Arc.clone(&total_allocs);
+        thread.spawn(move || {
+            for _ in 0..OPS_PER_THREAD {
+                let obj = Heap([0u8; SIZE_SMALL]);
+                black_box(&*obj);
+            }
+            counter.fetch_add(OPS_PER_THREAD, Ordering.Relaxed);
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let elapsed = start.elapsed();
+    let total = total_allocs.load(Ordering.Relaxed);
+
+    BenchmarkResult {
+        name: "multithreaded_4_threads",
+        size_bytes: SIZE_SMALL,
+        iterations: total,
+        allocs_per_sec: total as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / total as f64,
+        target_allocs_per_sec: 50_000_000.0,  // Should scale with threads
+        is_baseline: false,
+    }
+}
+
+/// Object pool pattern
+fn benchmark_object_pool() -> BenchmarkResult {
+    type Pooled is  { data: [u8; SIZE_SMALL] };
+
+    let pool: ObjectPool<Pooled> = ObjectPool.with_capacity(1000);
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let obj = pool.acquire();
+        black_box(&obj.data);
+        pool.release(obj);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let obj = pool.acquire();
+        black_box(&obj.data);
+        pool.release(obj);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "object_pool_64b",
+        size_bytes: SIZE_SMALL,
+        iterations: BENCHMARK_ITERATIONS,
+        allocs_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_allocs_per_sec: 50_000_000.0,  // Pool should be very fast
+        is_baseline: false,
+    }
+}
+
+/// Mixed size allocation pattern
+fn benchmark_mixed_sizes() -> BenchmarkResult {
+    let sizes = [16, 32, 64, 128, 256, 512, 1024];
+    let iterations = BENCHMARK_ITERATIONS / sizes.len();
+
+    for _ in 0..(WARMUP_ITERATIONS / sizes.len()) {
+        for &size in sizes.iter() {
+            let v: List<u8> = List.with_capacity(size);
+            black_box(&v);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        for &size in sizes.iter() {
+            let v: List<u8> = List.with_capacity(size);
+            black_box(&v);
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let total_allocs = iterations * sizes.len();
+
+    BenchmarkResult {
+        name: "mixed_sizes",
+        size_bytes: 288,  // Average
+        iterations: total_allocs,
+        allocs_per_sec: total_allocs as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / total_allocs as f64,
+        target_allocs_per_sec: 10_000_000.0,
+        is_baseline: false,
+    }
+}
+
+/// Allocation with zeroing
+fn benchmark_zeroed_allocation() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let obj: Heap<[u8; SIZE_SMALL]> = Heap_zeroed();
+        black_box(&*obj);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let obj: Heap<[u8; SIZE_SMALL]> = Heap_zeroed();
+        black_box(&*obj);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "zeroed_alloc_64b",
+        size_bytes: SIZE_SMALL,
+        iterations: BENCHMARK_ITERATIONS,
+        allocs_per_sec: BENCHMARK_ITERATIONS as f64 / elapsed.as_secs_f64(),
+        ns_per_alloc: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_allocs_per_sec: 15_000_000.0,
+        is_baseline: false,
+    }
+}
+
+fn main() {
+    println("=== Memory Allocation Performance Benchmark ===\n");
+
+    let results = [
+        benchmark_stack_allocation(),
+        benchmark_tiny_allocation(),
+        benchmark_small_allocation(),
+        benchmark_medium_allocation(),
+        benchmark_large_allocation(),
+        benchmark_huge_allocation(),
+        benchmark_cbgr_heap_allocation(),
+        benchmark_arena_allocation(),
+        benchmark_list_preallocate(),
+        benchmark_alloc_dealloc_cycle(),
+        benchmark_multithreaded_allocation(),
+        benchmark_object_pool(),
+        benchmark_mixed_sizes(),
+        benchmark_zeroed_allocation(),
+    ];
+
+    println("{:<28} {:>8} {:>12} {:>12} {:>10} {:>8}",
+            "Benchmark", "Size", "Allocs/sec", "Target", "ns/alloc", "Status");
+    println("{}", "-".repeat(85));
+
+    for result in results {
+        let passed = result.is_baseline || result.allocs_per_sec >= result.target_allocs_per_sec;
+        let status = if passed { "PASS" } else { "FAIL" };
+        let size_str = format_size(result.size_bytes);
+
+        println("{:<28} {:>8} {:>12.2}M {:>12.2}M {:>10.1} {:>8}",
+                result.name,
+                size_str,
+                result.allocs_per_sec / 1e6,
+                result.target_allocs_per_sec / 1e6,
+                result.ns_per_alloc,
+                status);
+    }
+
+    println("");
+    println("Allocation Targets:");
+    println("  Tiny (16B):    > 30M/sec (< 33ns)");
+    println("  Small (64B):   > 20M/sec (< 50ns)");
+    println("  Medium (1KB):  > 5M/sec  (< 200ns)");
+    println("  Arena:         > 100M/sec (< 10ns)");
+}
+
+fn format_size(bytes: usize) -> Text {
+    if bytes >= 1048576 {
+        format("{}MB", bytes / 1048576)
+    } else if bytes >= 1024 {
+        format("{}KB", bytes / 1024)
+    } else {
+        format("{}B", bytes)
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    size_bytes: usize,
+    iterations: Int,
+    allocs_per_sec: f64,
+    ns_per_alloc: f64,
+    target_allocs_per_sec: f64,
+    is_baseline: Bool,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+    fn as_secs_f64(&self) -> f64 { self.nanos as f64 / 1e9 }
+}
+
+type Arena is { cap: usize, used_bytes: usize };
+implement Arena {
+    fn new(capacity: usize) -> Self { Self { cap: capacity, used_bytes: 0 } }
+    fn alloc<T>(&self) -> *mut T { todo() }
+    fn reset(&self) {}
+    fn used(&self) -> usize { self.used_bytes }
+    fn capacity(&self) -> usize { self.cap }
+}
+
+type ObjectPool<T> is { items: List<T> };
+implement<T> ObjectPool<T> {
+    fn with_capacity(cap: usize) -> Self { Self { items: List.new() } }
+    fn acquire(&self) -> T { todo() }
+    fn release(&self, item: T) {}
+}
+
+fn black_box<T>(x: T) -> T { x }

@@ -1,0 +1,123 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: tensor, reshape
+
+fn main() {
+    // Basic reshape: 1D to 2D
+    let v: Tensor<f32, [12]> = Tensor.arange(0.0, 12.0, 1.0);
+    let m: Tensor<f32, [3, 4]> = v.reshape();
+
+    assert(m.shape() == [3, 4]);
+    assert(m[0, 0] == 0.0);
+    assert(m[0, 3] == 3.0);
+    assert(m[1, 0] == 4.0);
+    assert(m[2, 3] == 11.0);
+
+    // Reshape 2D to 1D (flatten)
+    let flat: Tensor<f32, [12]> = m.reshape();
+    assert(flat.shape() == [12]);
+    assert(flat[0] == 0.0);
+    assert(flat[11] == 11.0);
+
+    // Reshape 2D to different 2D
+    let m2: Tensor<f32, [4, 3]> = m.reshape();
+    assert(m2.shape() == [4, 3]);
+    assert(m2[0, 0] == 0.0);
+    assert(m2[0, 2] == 2.0);
+    assert(m2[3, 2] == 11.0);
+
+    // Reshape to 3D
+    let t3: Tensor<f32, [2, 2, 3]> = v.reshape();
+    assert(t3.shape() == [2, 2, 3]);
+    assert(t3[0, 0, 0] == 0.0);
+    assert(t3[0, 0, 2] == 2.0);
+    assert(t3[1, 1, 2] == 11.0);
+
+    // Dynamic reshape with -1 (infer dimension)
+    let data: Tensor<f32, [24]> = Tensor.arange(0.0, 24.0, 1.0);
+
+    let auto_rows = data.reshape_dynamic([6, -1]);  // [6, 4]
+    assert(auto_rows.shape() == [6, 4]);
+
+    let auto_cols = data.reshape_dynamic([-1, 6]);  // [4, 6]
+    assert(auto_cols.shape() == [4, 6]);
+
+    let auto_3d = data.reshape_dynamic([2, -1, 4]);  // [2, 3, 4]
+    assert(auto_3d.shape() == [2, 3, 4]);
+
+    // Flatten operation
+    let matrix: Tensor<f32, [3, 4]> = tensor<3, 4>f32{
+        {1.0, 2.0, 3.0, 4.0},
+        {5.0, 6.0, 7.0, 8.0},
+        {9.0, 10.0, 11.0, 12.0}
+    };
+
+    let flattened = matrix.flatten();
+    assert(flattened.shape() == [12]);
+    assert(flattened[0] == 1.0);
+    assert(flattened[4] == 5.0);
+    assert(flattened[11] == 12.0);
+
+    // Partial flatten (flatten specific dimensions)
+    let t4d: Tensor<f32, [2, 3, 4, 5]> = Tensor.ones();
+
+    let flat_last_two = t4d.flatten_range(2, 4);  // Flatten dims 2 and 3
+    assert(flat_last_two.shape() == [2, 3, 20]);
+
+    let flat_first_two = t4d.flatten_range(0, 2);  // Flatten dims 0 and 1
+    assert(flat_first_two.shape() == [6, 4, 5]);
+
+    // Squeeze (remove dimensions of size 1)
+    let with_ones: Tensor<f32, [1, 3, 1, 4, 1]> = Tensor.ones();
+    let squeezed = with_ones.squeeze();
+    assert(squeezed.shape() == [3, 4]);
+
+    // Squeeze specific dimension
+    let specific: Tensor<f32, [1, 3, 4]> = Tensor.ones();
+    let squeezed_0 = specific.squeeze_dim(0);
+    assert(squeezed_0.shape() == [3, 4]);
+
+    // Unsqueeze (add dimension of size 1)
+    let vec: Tensor<f32, [5]> = tensor<5>f32{1.0, 2.0, 3.0, 4.0, 5.0};
+
+    let row = vec.unsqueeze(0);  // Add batch dimension
+    assert(row.shape() == [1, 5]);
+
+    let col = vec.unsqueeze(1);  // Make column vector
+    assert(col.shape() == [5, 1]);
+
+    // Expand dims (alias for unsqueeze)
+    let expanded = vec.expand_dims(0);
+    assert(expanded.shape() == [1, 5]);
+
+    // Transpose
+    let mat: Tensor<f32, [2, 3]> = tensor<2, 3>f32{
+        {1.0, 2.0, 3.0},
+        {4.0, 5.0, 6.0}
+    };
+
+    let transposed = mat.T;
+    assert(transposed.shape() == [3, 2]);
+    assert(transposed[0, 0] == 1.0);
+    assert(transposed[0, 1] == 4.0);
+    assert(transposed[2, 0] == 3.0);
+    assert(transposed[2, 1] == 6.0);
+
+    // Permute (generalized transpose)
+    let t3d: Tensor<f32, [2, 3, 4]> = Tensor.ones();
+    let permuted = t3d.permute([2, 0, 1]);
+    assert(permuted.shape() == [4, 2, 3]);
+
+    // Contiguous (ensure memory layout)
+    let sliced = matrix.slice_cols(0, 2);  // May be non-contiguous
+    let contiguous = sliced.contiguous();
+    assert(contiguous.is_contiguous());
+
+    // View (reshape without copy, fails if not contiguous)
+    let viewed: Tensor<f32, [6, 2]> = matrix.view();
+    assert(viewed.shape() == [6, 2]);
+    // View shares memory with original
+    assert(viewed.data_ptr() == matrix.data_ptr());
+}

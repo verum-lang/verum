@@ -1,0 +1,183 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, data-structures, hash-table, records
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT simple hash table (open addressing) using record-based arrays
+
+// Fixed-size hash table with 8 slots (open addressing, linear probing)
+// Each slot: key=-1 means empty, else stores (key, value)
+type HT8 is {
+    k0: Int, v0: Int, k1: Int, v1: Int,
+    k2: Int, v2: Int, k3: Int, v3: Int,
+    k4: Int, v4: Int, k5: Int, v5: Int,
+    k6: Int, v6: Int, k7: Int, v7: Int,
+    count: Int,
+};
+
+fn ht_new() -> HT8 {
+    HT8 {
+        k0: -1, v0: 0, k1: -1, v1: 0,
+        k2: -1, v2: 0, k3: -1, v3: 0,
+        k4: -1, v4: 0, k5: -1, v5: 0,
+        k6: -1, v6: 0, k7: -1, v7: 0,
+        count: 0,
+    }
+}
+
+fn ht_get_key(ht: HT8, slot: Int) -> Int {
+    if slot == 0 { ht.k0 }
+    else if slot == 1 { ht.k1 }
+    else if slot == 2 { ht.k2 }
+    else if slot == 3 { ht.k3 }
+    else if slot == 4 { ht.k4 }
+    else if slot == 5 { ht.k5 }
+    else if slot == 6 { ht.k6 }
+    else { ht.k7 }
+}
+
+fn ht_get_val(ht: HT8, slot: Int) -> Int {
+    if slot == 0 { ht.v0 }
+    else if slot == 1 { ht.v1 }
+    else if slot == 2 { ht.v2 }
+    else if slot == 3 { ht.v3 }
+    else if slot == 4 { ht.v4 }
+    else if slot == 5 { ht.v5 }
+    else if slot == 6 { ht.v6 }
+    else { ht.v7 }
+}
+
+fn ht_set_slot(ht: HT8, slot: Int, key: Int, val: Int) -> HT8 {
+    HT8 {
+        k0: if slot == 0 { key } else { ht.k0 },
+        v0: if slot == 0 { val } else { ht.v0 },
+        k1: if slot == 1 { key } else { ht.k1 },
+        v1: if slot == 1 { val } else { ht.v1 },
+        k2: if slot == 2 { key } else { ht.k2 },
+        v2: if slot == 2 { val } else { ht.v2 },
+        k3: if slot == 3 { key } else { ht.k3 },
+        v3: if slot == 3 { val } else { ht.v3 },
+        k4: if slot == 4 { key } else { ht.k4 },
+        v4: if slot == 4 { val } else { ht.v4 },
+        k5: if slot == 5 { key } else { ht.k5 },
+        v5: if slot == 5 { val } else { ht.v5 },
+        k6: if slot == 6 { key } else { ht.k6 },
+        v6: if slot == 6 { val } else { ht.v6 },
+        k7: if slot == 7 { key } else { ht.k7 },
+        v7: if slot == 7 { val } else { ht.v7 },
+        count: ht.count,
+    }
+}
+
+// Simple hash: key mod 8 (positive)
+fn hash(key: Int) -> Int {
+    let h = key % 8;
+    if h < 0 { h + 8 } else { h }
+}
+
+fn ht_insert(ht: HT8, key: Int, val: Int) -> HT8 {
+    let start = hash(key);
+    let mut slot = start;
+    let mut found = false;
+    let mut result = ht;
+    let mut probes = 0;
+    while probes < 8 && !found {
+        let k = ht_get_key(result, slot);
+        if k == -1 || k == key {
+            result = ht_set_slot(result, slot, key, val);
+            if k == -1 {
+                // new key
+                result = HT8 {
+                    k0: result.k0, v0: result.v0, k1: result.k1, v1: result.v1,
+                    k2: result.k2, v2: result.v2, k3: result.k3, v3: result.v3,
+                    k4: result.k4, v4: result.v4, k5: result.k5, v5: result.v5,
+                    k6: result.k6, v6: result.v6, k7: result.k7, v7: result.v7,
+                    count: result.count + 1,
+                };
+            }
+            found = true;
+        }
+        slot = (slot + 1) % 8;
+        probes = probes + 1;
+    }
+    result
+}
+
+fn ht_lookup(ht: HT8, key: Int) -> Int {
+    let start = hash(key);
+    let mut slot = start;
+    let mut probes = 0;
+    let mut result = -1;
+    let mut done = false;
+    while probes < 8 && !done {
+        let k = ht_get_key(ht, slot);
+        if k == key {
+            result = ht_get_val(ht, slot);
+            done = true;
+        } else if k == -1 {
+            done = true;  // empty slot = not found
+        }
+        slot = (slot + 1) % 8;
+        probes = probes + 1;
+    }
+    result
+}
+
+fn ht_contains(ht: HT8, key: Int) -> Bool {
+    ht_lookup(ht, key) != -1
+}
+
+fn main() -> Int {
+    // Empty table
+    let ht0 = ht_new();
+    assert_eq(ht0.count, 0);
+    assert(!ht_contains(ht0, 0));
+    assert_eq(ht_lookup(ht0, 5), -1);
+
+    // Insert one element
+    let ht1 = ht_insert(ht0, 42, 100);
+    assert_eq(ht1.count, 1);
+    assert(ht_contains(ht1, 42));
+    assert_eq(ht_lookup(ht1, 42), 100);
+    assert(!ht_contains(ht1, 43));
+
+    // Insert multiple
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 10, 100);
+    ht = ht_insert(ht, 20, 200);
+    ht = ht_insert(ht, 30, 300);
+    assert_eq(ht.count, 3);
+    assert_eq(ht_lookup(ht, 10), 100);
+    assert_eq(ht_lookup(ht, 20), 200);
+    assert_eq(ht_lookup(ht, 30), 300);
+    assert_eq(ht_lookup(ht, 40), -1);
+
+    // Update existing key
+    ht = ht_insert(ht, 20, 999);
+    assert_eq(ht.count, 3);  // count unchanged
+    assert_eq(ht_lookup(ht, 20), 999);
+
+    // Hash collisions (10 and 2 both hash to slot 2)
+    let mut ht2 = ht_new();
+    ht2 = ht_insert(ht2, 2, 22);
+    ht2 = ht_insert(ht2, 10, 110);  // collides with 2 (both hash to 2)
+    assert_eq(ht2.count, 2);
+    assert_eq(ht_lookup(ht2, 2), 22);
+    assert_eq(ht_lookup(ht2, 10), 110);
+
+    // Fill up to 6 elements (leave some empty for probing)
+    let mut htf = ht_new();
+    htf = ht_insert(htf, 0, 1000);
+    htf = ht_insert(htf, 1, 1001);
+    htf = ht_insert(htf, 2, 1002);
+    htf = ht_insert(htf, 3, 1003);
+    htf = ht_insert(htf, 4, 1004);
+    htf = ht_insert(htf, 5, 1005);
+    assert_eq(htf.count, 6);
+    assert_eq(ht_lookup(htf, 0), 1000);
+    assert_eq(ht_lookup(htf, 5), 1005);
+    assert(!ht_contains(htf, 6));
+
+    0
+}

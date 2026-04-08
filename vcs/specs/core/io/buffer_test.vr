@@ -1,0 +1,637 @@
+// =============================================================================
+// buffer_test.vr - Tests for buffered I/O operations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: io, buffer, bufreader, bufwriter, cursor, core
+// @description: Tests for BufReader, BufWriter, LineWriter, Cursor, and buffer constants
+// =============================================================================
+
+mount core.io.buffer.{
+    DEFAULT_BUF_CAPACITY,
+    MIN_BUF_CAPACITY,
+    BufReader,
+    BufWriter,
+    LineWriter,
+    Cursor,
+    IntoInnerError,
+    copy as buf_copy,
+    read_all,
+};
+mount core.io.protocols.{Read, Write, Seek, BufRead, SeekFrom, IoResult};
+mount core.{List, Byte};
+mount core.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// Helper to create a byte list from values
+fn make_byte_list_3() -> List<Byte> {
+    let mut data: List<Byte> = List.new();
+    data.push(1 as Byte);
+    data.push(2 as Byte);
+    data.push(3 as Byte);
+    data
+}
+
+fn make_byte_list_5() -> List<Byte> {
+    let mut data: List<Byte> = List.new();
+    data.push(1 as Byte);
+    data.push(2 as Byte);
+    data.push(3 as Byte);
+    data.push(4 as Byte);
+    data.push(5 as Byte);
+    data
+}
+
+// =============================================================================
+// Section 1: Buffer Constants
+// =============================================================================
+
+@test
+fn test_default_buf_capacity() {
+    // Default buffer should be 8KB
+    assert_eq(DEFAULT_BUF_CAPACITY, 8192);
+}
+
+@test
+fn test_min_buf_capacity() {
+    // Minimum buffer should be 64 bytes
+    assert_eq(MIN_BUF_CAPACITY, 64);
+}
+
+@test
+fn test_buffer_capacity_relationship() {
+    // Default should be greater than minimum
+    assert(DEFAULT_BUF_CAPACITY > MIN_BUF_CAPACITY);
+}
+
+// =============================================================================
+// Section 2: Cursor - Basic Operations
+// =============================================================================
+
+@test
+fn test_cursor_new() {
+    let data: List<Byte> = List.new();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    assert_eq(cursor.position(), 0);
+}
+
+@test
+fn test_cursor_new_with_data() {
+    let data: List<Byte> = make_byte_list_5();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    assert_eq(cursor.position(), 0);
+}
+
+@test
+fn test_cursor_position() {
+    let data: List<Byte> = make_byte_list_3();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    assert_eq(cursor.position(), 0);
+}
+
+@test
+fn test_cursor_set_position() {
+    let data: List<Byte> = make_byte_list_5();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    cursor.set_position(3);
+    assert_eq(cursor.position(), 3);
+}
+
+@test
+fn test_cursor_get_ref() {
+    let data: List<Byte> = make_byte_list_3();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let inner: &List<Byte> = cursor.get_ref();
+    assert_eq(inner.len(), 3);
+}
+
+@test
+fn test_cursor_into_inner() {
+    let data: List<Byte> = make_byte_list_3();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let recovered: List<Byte> = cursor.into_inner();
+    assert_eq(recovered.len(), 3);
+}
+
+// =============================================================================
+// Section 3: Cursor - Seek Operations
+// =============================================================================
+
+@test
+fn test_cursor_seek_start() {
+    let data: List<Byte> = make_byte_list_5();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let pos = cursor.seek(SeekFrom.Start(2));
+    match pos {
+        Ok(p) => assert_eq(p, 2),
+        Err(_) => panic("Seek should succeed"),
+    }
+    assert_eq(cursor.position(), 2);
+}
+
+@test
+fn test_cursor_seek_current_forward() {
+    let data: List<Byte> = make_byte_list_5();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    cursor.set_position(2);
+    let pos = cursor.seek(SeekFrom.Current(1));
+    match pos {
+        Ok(p) => assert_eq(p, 3),
+        Err(_) => panic("Seek should succeed"),
+    }
+}
+
+@test
+fn test_cursor_seek_end() {
+    let data: List<Byte> = make_byte_list_5();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let pos = cursor.seek(SeekFrom.End(-1));
+    match pos {
+        Ok(p) => assert_eq(p, 4),
+        Err(_) => panic("Seek should succeed"),
+    }
+}
+
+@test
+fn test_cursor_seek_to_end() {
+    let data: List<Byte> = make_byte_list_5();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let pos = cursor.seek(SeekFrom.End(0));
+    match pos {
+        Ok(p) => assert_eq(p, 5),
+        Err(_) => panic("Seek should succeed"),
+    }
+}
+
+// =============================================================================
+// Section 4: Cursor - Read Operations
+// =============================================================================
+
+@test
+fn test_cursor_read_advances_position() {
+    let data: List<Byte> = make_byte_list_5();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let mut buf: [Byte; 2] = [0 as Byte, 0 as Byte];
+    let _ = cursor.read(&mut buf);
+    assert_eq(cursor.position(), 2);
+}
+
+@test
+fn test_cursor_read_at_end() {
+    let data: List<Byte> = make_byte_list_3();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    cursor.set_position(3);  // At end
+    let mut buf: [Byte; 2] = [0 as Byte, 0 as Byte];
+    let result = cursor.read(&mut buf);
+    match result {
+        Ok(n) => assert_eq(n, 0),  // EOF
+        Err(_) => panic("Read should succeed (return 0)"),
+    }
+}
+
+// =============================================================================
+// Section 5: Cursor - Write Operations
+// =============================================================================
+
+@test
+fn test_cursor_write_advances_position() {
+    let data: List<Byte> = List.new();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let buf: [Byte; 4] = [1 as Byte, 2 as Byte, 3 as Byte, 4 as Byte];
+    let _ = cursor.write(&buf);
+    assert_eq(cursor.position(), 4);
+}
+
+@test
+fn test_cursor_write_extends_buffer() {
+    let data: List<Byte> = List.new();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let buf: [Byte; 5] = [1 as Byte, 2 as Byte, 3 as Byte, 4 as Byte, 5 as Byte];
+    let _ = cursor.write(&buf);
+    let inner = cursor.get_ref();
+    assert_eq(inner.len(), 5);
+}
+
+@test
+fn test_cursor_flush() {
+    let data: List<Byte> = List.new();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let result = cursor.flush();
+    assert(result is Ok);
+}
+
+// =============================================================================
+// Section 6: Cursor - BufRead Operations
+// =============================================================================
+
+@test
+fn test_cursor_consume() {
+    let data: List<Byte> = make_byte_list_5();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    cursor.consume(2);
+    assert_eq(cursor.position(), 2);
+}
+
+@test
+fn test_cursor_consume_clamped() {
+    let data: List<Byte> = make_byte_list_3();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    cursor.consume(10);  // More than available
+    assert_eq(cursor.position(), 3);  // Clamped to end
+}
+
+// =============================================================================
+// Section 7: BufReader - Basic Construction
+// =============================================================================
+
+@test
+fn test_bufreader_new() {
+    let data: List<Byte> = make_byte_list_5();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let reader: BufReader<Cursor<List<Byte>>> = BufReader.new(cursor);
+    assert_eq(reader.capacity(), DEFAULT_BUF_CAPACITY);
+}
+
+@test
+fn test_bufreader_with_capacity() {
+    let data: List<Byte> = make_byte_list_3();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let reader: BufReader<Cursor<List<Byte>>> = BufReader.with_capacity(256, cursor);
+    assert_eq(reader.capacity(), 256);
+}
+
+@test
+fn test_bufreader_with_capacity_below_minimum() {
+    let data: List<Byte> = make_byte_list_3();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let reader: BufReader<Cursor<List<Byte>>> = BufReader.with_capacity(10, cursor);
+    // Should use minimum capacity
+    assert_eq(reader.capacity(), MIN_BUF_CAPACITY);
+}
+
+@test
+fn test_bufreader_get_ref() {
+    let data: List<Byte> = make_byte_list_3();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let reader: BufReader<Cursor<List<Byte>>> = BufReader.new(cursor);
+    let inner: &Cursor<List<Byte>> = reader.get_ref();
+    assert_eq(inner.position(), 0);
+}
+
+@test
+fn test_bufreader_into_inner() {
+    let data: List<Byte> = make_byte_list_3();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let reader: BufReader<Cursor<List<Byte>>> = BufReader.new(cursor);
+    let recovered: Cursor<List<Byte>> = reader.into_inner();
+    assert_eq(recovered.position(), 0);
+}
+
+// =============================================================================
+// Section 8: BufWriter - Basic Construction
+// =============================================================================
+
+@test
+fn test_bufwriter_new() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: BufWriter<Cursor<List<Byte>>> = BufWriter.new(cursor);
+    assert_eq(writer.capacity(), DEFAULT_BUF_CAPACITY);
+}
+
+@test
+fn test_bufwriter_with_capacity() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: BufWriter<Cursor<List<Byte>>> = BufWriter.with_capacity(512, cursor);
+    assert_eq(writer.capacity(), 512);
+}
+
+@test
+fn test_bufwriter_with_capacity_below_minimum() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: BufWriter<Cursor<List<Byte>>> = BufWriter.with_capacity(32, cursor);
+    // Should use minimum capacity
+    assert_eq(writer.capacity(), MIN_BUF_CAPACITY);
+}
+
+@test
+fn test_bufwriter_buffer_len_initial() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: BufWriter<Cursor<List<Byte>>> = BufWriter.new(cursor);
+    assert_eq(writer.buffer_len(), 0);
+}
+
+@test
+fn test_bufwriter_get_ref() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: BufWriter<Cursor<List<Byte>>> = BufWriter.new(cursor);
+    let inner: &Cursor<List<Byte>> = writer.get_ref();
+    assert_eq(inner.position(), 0);
+}
+
+// =============================================================================
+// Section 9: LineWriter - Basic Construction
+// =============================================================================
+
+@test
+fn test_linewriter_new() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: LineWriter<Cursor<List<Byte>>> = LineWriter.new(cursor);
+    let inner: &Cursor<List<Byte>> = writer.get_ref();
+    assert_eq(inner.position(), 0);
+}
+
+@test
+fn test_linewriter_with_capacity() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: LineWriter<Cursor<List<Byte>>> = LineWriter.with_capacity(1024, cursor);
+    let inner: &Cursor<List<Byte>> = writer.get_ref();
+    assert_eq(inner.position(), 0);
+}
+
+// =============================================================================
+// Section 10: SeekFrom Variants
+// =============================================================================
+
+@test
+fn test_seekfrom_start() {
+    let pos: SeekFrom = SeekFrom.Start(100);
+    assert(pos is SeekFrom.Start);
+}
+
+@test
+fn test_seekfrom_end() {
+    let pos: SeekFrom = SeekFrom.End(-50);
+    assert(pos is SeekFrom.End);
+}
+
+@test
+fn test_seekfrom_current() {
+    let pos: SeekFrom = SeekFrom.Current(25);
+    assert(pos is SeekFrom.Current);
+}
+
+@test
+fn test_seekfrom_match_start() {
+    let pos: SeekFrom = SeekFrom.Start(42);
+    match pos {
+        SeekFrom.Start(n) => assert_eq(n, 42),
+        _ => panic("Expected Start"),
+    }
+}
+
+@test
+fn test_seekfrom_match_end() {
+    let pos: SeekFrom = SeekFrom.End(-10);
+    match pos {
+        SeekFrom.End(n) => assert_eq(n, -10),
+        _ => panic("Expected End"),
+    }
+}
+
+@test
+fn test_seekfrom_match_current() {
+    let pos: SeekFrom = SeekFrom.Current(5);
+    match pos {
+        SeekFrom.Current(n) => assert_eq(n, 5),
+        _ => panic("Expected Current"),
+    }
+}
+
+// =============================================================================
+// Section 11: LineWriter Extended Tests
+// =============================================================================
+
+@test
+fn test_linewriter_get_ref() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: LineWriter<Cursor<List<Byte>>> = LineWriter.new(cursor);
+    let inner: &Cursor<List<Byte>> = writer.get_ref();
+    assert_eq(inner.position(), 0);
+}
+
+@test
+fn test_linewriter_get_mut() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let mut writer: LineWriter<Cursor<List<Byte>>> = LineWriter.new(cursor);
+    let inner: &mut Cursor<List<Byte>> = writer.get_mut();
+    inner.set_position(5);
+    assert_eq(inner.position(), 5);
+}
+
+@test
+fn test_linewriter_write_no_newline() {
+    // Writing without newline should buffer
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let mut writer: LineWriter<Cursor<List<Byte>>> = LineWriter.new(cursor);
+    let data: [Byte; 3] = [65 as Byte, 66 as Byte, 67 as Byte]; // "ABC"
+    let result = writer.write(&data);
+    assert(result is Ok);
+}
+
+@test
+fn test_linewriter_write_with_newline() {
+    // Writing with newline should flush
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let mut writer: LineWriter<Cursor<List<Byte>>> = LineWriter.new(cursor);
+    let data: [Byte; 4] = [65 as Byte, 66 as Byte, 10 as Byte, 67 as Byte]; // "AB\nC"
+    let result = writer.write(&data);
+    assert(result is Ok);
+}
+
+@test
+fn test_linewriter_flush() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let mut writer: LineWriter<Cursor<List<Byte>>> = LineWriter.new(cursor);
+    let result = writer.flush();
+    assert(result is Ok);
+}
+
+@test
+fn test_linewriter_with_capacity_custom() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: LineWriter<Cursor<List<Byte>>> = LineWriter.with_capacity(2048, cursor);
+    // Verify it constructed successfully
+    let inner: &Cursor<List<Byte>> = writer.get_ref();
+    assert_eq(inner.position(), 0);
+}
+
+// =============================================================================
+// Section 12: IntoInnerError Type Existence
+// =============================================================================
+
+@test
+fn test_into_inner_error_type_exists() {
+    // IntoInnerError wraps a write error during into_inner
+    let val: Maybe<IntoInnerError<Cursor<List<Byte>>>> = None;
+    assert(val is None);
+}
+
+// =============================================================================
+// Section 13: BufReader Extended Tests
+// =============================================================================
+
+@test
+fn test_bufreader_get_mut() {
+    let data: List<Byte> = make_byte_list_5();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let mut reader: BufReader<Cursor<List<Byte>>> = BufReader.new(cursor);
+    let inner: &mut Cursor<List<Byte>> = reader.get_mut();
+    inner.set_position(2);
+    assert_eq(inner.position(), 2);
+}
+
+@test
+fn test_bufreader_capacity_default() {
+    let data: List<Byte> = List.new();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let reader: BufReader<Cursor<List<Byte>>> = BufReader.new(cursor);
+    assert_eq(reader.capacity(), DEFAULT_BUF_CAPACITY);
+}
+
+@test
+fn test_bufreader_capacity_custom() {
+    let data: List<Byte> = List.new();
+    let cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let reader: BufReader<Cursor<List<Byte>>> = BufReader.with_capacity(1024, cursor);
+    assert_eq(reader.capacity(), 1024);
+}
+
+// =============================================================================
+// Section 14: BufWriter Extended Tests
+// =============================================================================
+
+@test
+fn test_bufwriter_get_mut() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let mut writer: BufWriter<Cursor<List<Byte>>> = BufWriter.new(cursor);
+    let inner: &mut Cursor<List<Byte>> = writer.get_mut();
+    inner.set_position(10);
+    assert_eq(inner.position(), 10);
+}
+
+@test
+fn test_bufwriter_write_increases_buffer_len() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let mut writer: BufWriter<Cursor<List<Byte>>> = BufWriter.new(cursor);
+    assert_eq(writer.buffer_len(), 0);
+    let buf: [Byte; 3] = [1 as Byte, 2 as Byte, 3 as Byte];
+    let _ = writer.write(&buf);
+    assert_eq(writer.buffer_len(), 3);
+}
+
+@test
+fn test_bufwriter_flush_clears_buffer() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let mut writer: BufWriter<Cursor<List<Byte>>> = BufWriter.new(cursor);
+    let buf: [Byte; 3] = [1 as Byte, 2 as Byte, 3 as Byte];
+    let _ = writer.write(&buf);
+    assert_eq(writer.buffer_len(), 3);
+    let _ = writer.flush();
+    assert_eq(writer.buffer_len(), 0);
+}
+
+@test
+fn test_bufwriter_into_inner_success() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let mut writer: BufWriter<Cursor<List<Byte>>> = BufWriter.new(cursor);
+    let buf: [Byte; 3] = [1 as Byte, 2 as Byte, 3 as Byte];
+    let _ = writer.write(&buf);
+    let result = writer.into_inner();
+    assert(result is Ok);
+}
+
+@test
+fn test_bufwriter_capacity_custom() {
+    let cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    let writer: BufWriter<Cursor<List<Byte>>> = BufWriter.with_capacity(4096, cursor);
+    assert_eq(writer.capacity(), 4096);
+}
+
+// =============================================================================
+// Section 15: Cursor Extended Tests
+// =============================================================================
+
+@test
+fn test_cursor_get_mut() {
+    let data: List<Byte> = make_byte_list_3();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let inner: &mut List<Byte> = cursor.get_mut();
+    inner.push(4 as Byte);
+    assert_eq(cursor.get_ref().len(), 4);
+}
+
+@test
+fn test_cursor_write_then_read() {
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(List.new());
+    // Write some data
+    let write_buf: [Byte; 4] = [10 as Byte, 20 as Byte, 30 as Byte, 40 as Byte];
+    let _ = cursor.write(&write_buf);
+    assert_eq(cursor.position(), 4);
+    // Seek to start
+    let _ = cursor.seek(SeekFrom.Start(0));
+    assert_eq(cursor.position(), 0);
+    // Read it back
+    let mut read_buf: [Byte; 2] = [0 as Byte, 0 as Byte];
+    let result = cursor.read(&mut read_buf);
+    match result {
+        Ok(n) => assert_eq(n, 2),
+        Err(_) => panic("Read should succeed"),
+    }
+    assert_eq(cursor.position(), 2);
+}
+
+@test
+fn test_cursor_seek_current_backward() {
+    let data: List<Byte> = make_byte_list_5();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    cursor.set_position(4);
+    let pos = cursor.seek(SeekFrom.Current(-2));
+    match pos {
+        Ok(p) => assert_eq(p, 2),
+        Err(_) => panic("Seek should succeed"),
+    }
+}
+
+@test
+fn test_cursor_seek_negative_error() {
+    let data: List<Byte> = make_byte_list_3();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    let result = cursor.seek(SeekFrom.Current(-5)); // Would go below 0
+    assert(result is Err);
+}
+
+@test
+fn test_cursor_consume_zero() {
+    let data: List<Byte> = make_byte_list_3();
+    let mut cursor: Cursor<List<Byte>> = Cursor.new(data);
+    cursor.consume(0);
+    assert_eq(cursor.position(), 0);
+}
+
+// =============================================================================
+// Section 16: Utility Function Type Tests
+// =============================================================================
+
+@test
+fn test_copy_function_type() {
+    let src_data: List<Byte> = make_byte_list_5();
+    let mut reader: Cursor<List<Byte>> = Cursor.new(src_data);
+    let mut writer: Cursor<List<Byte>> = Cursor.new(List.new());
+    let _result: IoResult<Int> = buf_copy(&mut reader, &mut writer);
+}
+
+@test
+fn test_read_all_function_type() {
+    let data: List<Byte> = make_byte_list_3();
+    let mut reader: Cursor<List<Byte>> = Cursor.new(data);
+    let _result: IoResult<List<Byte>> = read_all(&mut reader);
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,65 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Int32 methods (arithmetic, bit operations)
+
+fn main() {
+    let a: Int32 = 100;
+    let b: Int32 = -50;
+
+    // Test abs
+    assert_eq(b.abs(), 50);
+    assert_eq(a.abs(), 100);
+
+    // Test signum
+    assert_eq(a.signum(), 1);
+    assert_eq(b.signum(), -1);
+    assert_eq((0 as Int32).signum(), 0);
+
+    // Test checked_add (success)
+    match a.checked_add(b) {
+        Some(result) => assert_eq(result, 50),
+        None => panic("Expected Some"),
+    }
+
+    // Test checked_sub
+    match a.checked_sub(b) {
+        Some(result) => assert_eq(result, 150),
+        None => panic("Expected Some"),
+    }
+
+    // Test checked_mul
+    let x: Int32 = 1000;
+    let y: Int32 = 2000;
+    match x.checked_mul(y) {
+        Some(result) => assert_eq(result, 2000000),
+        None => panic("Expected Some"),
+    }
+
+    // Test wrapping operations
+    let max: Int32 = Int32.MAX();
+    assert_eq(max.wrapping_add(1), Int32.MIN());  // Wraps to MIN
+
+    // Test saturating operations
+    assert_eq(max.saturating_add(100), max);  // Saturates at MAX
+
+    // Test bit operations
+    let val: Int32 = 0x00FF;
+    assert_eq(val.leading_zeros(), 24);  // 32 - 8 = 24
+    assert_eq(val.count_ones(), 8);
+
+    // Test rotate
+    let r: Int32 = 0x000F;
+    let rotated = r.rotate_left(4);
+    assert_eq(rotated, 0x00F0);
+
+    // Test swap_bytes
+    let s: Int32 = 0x01020304;
+    let swapped = s.swap_bytes();
+    assert_eq(swapped, 0x04030201);
+
+    // Test to_int conversion
+    assert_eq(a.to_int(), 100);
+}

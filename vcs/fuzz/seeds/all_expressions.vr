@@ -1,0 +1,474 @@
+// All expression types in Verum
+// Tests parsing and evaluation of all expression forms
+
+use verum_core.base.{List, Text, Map, Maybe, Set}
+
+fn main() {
+    test_literals();
+    test_arithmetic();
+    test_comparison();
+    test_logical();
+    test_bitwise();
+    test_unary();
+    test_compound();
+    test_function_calls();
+    test_method_calls();
+    test_field_access();
+    test_index_access();
+    test_range_expressions();
+    test_closure_expressions();
+    test_block_expressions();
+    test_tuple_expressions();
+    test_struct_expressions();
+    test_cast_expressions();
+}
+
+// Literal expressions
+fn test_literals() {
+    // Integer literals
+    let dec = 42;
+    let hex = 0xFF;
+    let oct = 0o77;
+    let bin = 0b1010;
+    let with_underscore = 1_000_000;
+
+    // Float literals
+    let f1 = 3.14;
+    let f2 = 2.0e10;
+    let f3 = 1.5e-3;
+    let f4 = 0.5;
+
+    // String literals
+    let s1 = "hello";
+    let s2 = "line1\nline2";
+    let s3 = r"raw\nstring";
+    let s4 = r#"raw with "quotes""#;
+
+    // Char literals
+    let c1 = 'a';
+    let c2 = '\n';
+    let c3 = '\u{1F600}';
+
+    // Boolean literals
+    let t = true;
+    let f = false;
+
+    // Unit literal
+    let u = ();
+
+    // Collection literals
+    let list = [1, 2, 3, 4, 5];
+    let empty_list: List<Int> = [];
+    let map = {"a": 1, "b": 2};
+    let set = {1, 2, 3};
+    let tuple = (1, "hello", true);
+}
+
+// Arithmetic expressions
+fn test_arithmetic() {
+    let a = 10;
+    let b = 3;
+
+    // Basic operators
+    let add = a + b;      // 13
+    let sub = a - b;      // 7
+    let mul = a * b;      // 30
+    let div = a / b;      // 3
+    let rem = a % b;      // 1
+
+    // Floating point
+    let fa = 10.0;
+    let fb = 3.0;
+    let fdiv = fa / fb;   // 3.333...
+
+    // Negative numbers
+    let neg = -a;         // -10
+    let neg_expr = -(a + b); // -13
+
+    // Compound expressions
+    let complex = (a + b) * (a - b) / 2;
+    let nested = ((a + 1) * (b + 2)) - ((a - 1) / (b + 1));
+
+    // Operator precedence
+    let prec1 = a + b * 2;       // 16 (mul first)
+    let prec2 = (a + b) * 2;     // 26 (paren first)
+    let prec3 = a - b - 1;       // 6 (left to right)
+    let prec4 = a / b / 1;       // 3 (left to right)
+}
+
+// Comparison expressions
+fn test_comparison() {
+    let a = 10;
+    let b = 20;
+
+    // Equality
+    let eq = a == b;      // false
+    let ne = a != b;      // true
+
+    // Ordering
+    let lt = a < b;       // true
+    let le = a <= b;      // true
+    let gt = a > b;       // false
+    let ge = a >= b;      // false
+
+    // Chained comparisons (if supported)
+    // let chained = 0 < a < 20;
+
+    // Comparison with different types
+    let s1 = "apple";
+    let s2 = "banana";
+    let str_cmp = s1 < s2;  // true (lexicographic)
+}
+
+// Logical expressions
+fn test_logical() {
+    let t = true;
+    let f = false;
+
+    // Basic operators
+    let and = t && f;     // false
+    let or = t || f;      // true
+    let not = !t;         // false
+
+    // Short-circuit evaluation
+    let short_and = f && expensive_fn();  // expensive_fn not called
+    let short_or = t || expensive_fn();   // expensive_fn not called
+
+    // Complex logical
+    let complex = (t && f) || (!f && t);
+
+    // With comparisons
+    let a = 10;
+    let b = 20;
+    let combined = a > 5 && b < 30 || a == 10;
+}
+
+fn expensive_fn() -> Bool {
+    // This would be expensive
+    true
+}
+
+// Bitwise expressions
+fn test_bitwise() {
+    let a = 0b1100;  // 12
+    let b = 0b1010;  // 10
+
+    // Basic operators
+    let band = a & b;     // 0b1000 = 8
+    let bor = a | b;      // 0b1110 = 14
+    let xor = a ^ b;      // 0b0110 = 6
+    let not = !a;         // bitwise not
+
+    // Shifts
+    let left = a << 2;    // 48
+    let right = a >> 2;   // 3
+
+    // Compound
+    let complex = (a & b) | (a ^ b);
+}
+
+// Unary expressions
+fn test_unary() {
+    let a = 10;
+    let b = true;
+
+    // Negation
+    let neg = -a;
+    let not = !b;
+
+    // Reference/dereference
+    let r = &a;
+    let val = *r;
+
+    // Double negation
+    let double_neg = --a;  // Note: may be parsed differently
+    let double_not = !!b;
+}
+
+// Compound assignment
+fn test_compound() {
+    let mut a = 10;
+
+    a += 5;   // a = 15
+    a -= 3;   // a = 12
+    a *= 2;   // a = 24
+    a /= 4;   // a = 6
+    a %= 4;   // a = 2
+
+    let mut b = 0b1100;
+    b &= 0b1010;  // 0b1000
+    b |= 0b0001;  // 0b1001
+    b ^= 0b0011;  // 0b1010
+    b <<= 1;      // 0b10100
+    b >>= 2;      // 0b101
+}
+
+// Function call expressions
+fn test_function_calls() {
+    // Simple call
+    let r1 = simple_fn();
+
+    // Call with arguments
+    let r2 = fn_with_args(1, 2, 3);
+
+    // Call with named arguments (if supported)
+    // let r3 = fn_with_args(a: 1, b: 2, c: 3);
+
+    // Chained calls
+    let r3 = chain1(chain2(chain3(1)));
+
+    // Generic function call
+    let r4 = generic_fn<Int>(42);
+
+    // UFCS (if supported)
+    let list = [1, 2, 3];
+    let r5 = List.len(&list);
+}
+
+fn simple_fn() -> Int { 42 }
+fn fn_with_args(a: Int, b: Int, c: Int) -> Int { a + b + c }
+fn chain1(x: Int) -> Int { x + 1 }
+fn chain2(x: Int) -> Int { x * 2 }
+fn chain3(x: Int) -> Int { x - 1 }
+fn generic_fn<T>(x: T) -> T { x }
+
+// Method call expressions
+fn test_method_calls() {
+    let list = [1, 2, 3, 4, 5];
+
+    // Simple method
+    let len = list.len();
+
+    // Method with arguments
+    let contains = list.contains(3);
+
+    // Chained methods
+    let result = list
+        .iter()
+        .filter(|x| *x > 2)
+        .map(|x| x * 2)
+        .collect<List<Int>>();
+
+    // Method on result
+    let first = list.first().unwrap();
+
+    // String methods
+    let s = "hello world";
+    let upper = s.to_uppercase();
+    let split = s.split(" ");
+}
+
+// Field access expressions
+fn test_field_access() {
+    type Point is {
+        x: Int,
+        y: Int,
+    };
+
+    let p = Point { x: 10, y: 20 };
+
+    // Simple access
+    let x = p.x;
+    let y = p.y;
+
+    // Nested access
+    type Line is {
+        start: Point,
+        end: Point,
+    };
+
+    let line = Line {
+        start: Point { x: 0, y: 0 },
+        end: Point { x: 10, y: 10 },
+    };
+
+    let start_x = line.start.x;
+    let end_y = line.end.y;
+
+    // Mutable access
+    let mut mp = Point { x: 1, y: 2 };
+    mp.x = 100;
+}
+
+// Index access expressions
+fn test_index_access() {
+    let list = [1, 2, 3, 4, 5];
+
+    // Simple index
+    let first = list[0];
+    let last = list[4];
+
+    // Computed index
+    let idx = 2;
+    let middle = list[idx];
+
+    // Nested index
+    let matrix = [[1, 2], [3, 4], [5, 6]];
+    let elem = matrix[1][0];  // 3
+
+    // Map index
+    let map = {"a": 1, "b": 2};
+    let val = map["a"];
+
+    // Mutable index
+    let mut mlist = [1, 2, 3];
+    mlist[0] = 100;
+
+    // Slice (if supported)
+    let slice = list[1..3];  // [2, 3]
+}
+
+// Range expressions
+fn test_range_expressions() {
+    // Exclusive range
+    let r1 = 0..10;
+
+    // Inclusive range
+    let r2 = 0..=10;
+
+    // Unbounded ranges
+    let r3 = ..10;      // RangeTo
+    let r4 = 5..;       // RangeFrom
+    let r5 = ..;        // RangeFull
+
+    // Range in for loop
+    for i in 0..5 {
+        println("{}", i);
+    }
+
+    // Range for slicing
+    let list = [1, 2, 3, 4, 5];
+    let slice1 = list[1..3];   // [2, 3]
+    let slice2 = list[..3];    // [1, 2, 3]
+    let slice3 = list[2..];    // [3, 4, 5]
+    let slice4 = list[..];     // [1, 2, 3, 4, 5]
+}
+
+// Closure expressions
+fn test_closure_expressions() {
+    // Simple closure
+    let add_one = |x| x + 1;
+
+    // Typed closure
+    let multiply: function(Int, Int) -> Int = |a, b| a * b;
+
+    // Multi-statement closure
+    let complex = |x| {
+        let y = x * 2;
+        y + 1
+    };
+
+    // Closure with capture
+    let factor = 10;
+    let scale = |x| x * factor;
+
+    // Closure as argument
+    let list = [1, 2, 3, 4, 5];
+    let doubled = list.map(|x| x * 2);
+    let filtered = list.filter(|x| *x > 2);
+
+    // Immediately invoked
+    let result = (|x, y| x + y)(1, 2);
+
+    // Move closure
+    let data = [1, 2, 3];
+    let moved = move || {
+        data.iter().sum()
+    };
+}
+
+// Block expressions
+fn test_block_expressions() {
+    // Block as expression
+    let result = {
+        let a = 1;
+        let b = 2;
+        a + b
+    };
+
+    // Nested blocks
+    let nested = {
+        let outer = 10;
+        {
+            let inner = 20;
+            outer + inner
+        }
+    };
+
+    // Block in if
+    let cond = true;
+    let if_result = if cond {
+        let x = 1;
+        let y = 2;
+        x + y
+    } else {
+        0
+    };
+}
+
+// Tuple expressions
+fn test_tuple_expressions() {
+    // Tuple creation
+    let t1 = (1, 2, 3);
+    let t2 = (1, "hello", true);
+    let t3 = ();  // unit tuple
+
+    // Tuple access
+    let first = t1.0;
+    let second = t1.1;
+
+    // Tuple destructuring
+    let (a, b, c) = t1;
+
+    // Nested tuples
+    let nested = ((1, 2), (3, 4));
+    let inner = nested.0.1;  // 2
+}
+
+// Struct expressions
+fn test_struct_expressions() {
+    type Config is {
+        name: Text,
+        value: Int,
+        enabled: Bool,
+    };
+
+    // Full initialization
+    let c1 = Config {
+        name: "test",
+        value: 42,
+        enabled: true,
+    };
+
+    // Shorthand (field punning)
+    let name = "short";
+    let value = 10;
+    let enabled = false;
+    let c2 = Config { name, value, enabled };
+
+    // Struct update syntax
+    let c3 = Config {
+        name: "updated",
+        ..c1
+    };
+
+    // Tuple struct
+    type Point is (Int, Int);
+    let p = Point(10, 20);
+}
+
+// Cast expressions
+fn test_cast_expressions() {
+    let i: Int = 42;
+
+    // Numeric casts
+    let f: Float = i as Float;
+    let b: Byte = i as Byte;
+
+    let f2: Float = 3.7;
+    let i2: Int = f2 as Int;  // 3 (truncates)
+
+    // Reference casts (if applicable)
+    let r: &Int = &i;
+    // let raw: *const Int = r as *const Int;
+}

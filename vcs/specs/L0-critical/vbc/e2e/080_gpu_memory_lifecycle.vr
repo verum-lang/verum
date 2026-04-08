@@ -1,0 +1,519 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, gpu, memory
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU memory lifecycle — allocation tracking, transfer simulation, pool management
+
+// ============================================================================
+// Memory block type
+// ============================================================================
+
+type MemBlock is { addr: Int, size: Int, is_free: Int };
+
+// ============================================================================
+// 8-element MemBlock array
+// ============================================================================
+
+type MemArr8 is {
+    b0: MemBlock, b1: MemBlock, b2: MemBlock, b3: MemBlock,
+    b4: MemBlock, b5: MemBlock, b6: MemBlock, b7: MemBlock
+};
+
+fn memarr8_get(a: MemArr8, i: Int) -> MemBlock {
+    if i == 0 { a.b0 } else if i == 1 { a.b1 }
+    else if i == 2 { a.b2 } else if i == 3 { a.b3 }
+    else if i == 4 { a.b4 } else if i == 5 { a.b5 }
+    else if i == 6 { a.b6 } else { a.b7 }
+}
+
+fn memarr8_set(a: MemArr8, i: Int, blk: MemBlock) -> MemArr8 {
+    MemArr8 {
+        b0: if i == 0 { blk } else { a.b0 },
+        b1: if i == 1 { blk } else { a.b1 },
+        b2: if i == 2 { blk } else { a.b2 },
+        b3: if i == 3 { blk } else { a.b3 },
+        b4: if i == 4 { blk } else { a.b4 },
+        b5: if i == 5 { blk } else { a.b5 },
+        b6: if i == 6 { blk } else { a.b6 },
+        b7: if i == 7 { blk } else { a.b7 }
+    }
+}
+
+fn memarr8_new() -> MemArr8 {
+    let empty = MemBlock { addr: 0, size: 0, is_free: 1 };
+    MemArr8 {
+        b0: empty, b1: empty, b2: empty, b3: empty,
+        b4: empty, b5: empty, b6: empty, b7: empty
+    }
+}
+
+// ============================================================================
+// Int array (8 elements) for data simulation
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// Allocation tracker
+// ============================================================================
+
+type AllocTracker is { allocs: MemArr8, count: Int, next_addr: Int, total_bytes: Int };
+
+fn tracker_new() -> AllocTracker {
+    AllocTracker { allocs: memarr8_new(), count: 0, next_addr: 1000, total_bytes: 0 }
+}
+
+fn tracker_alloc(t: AllocTracker, size: Int) -> AllocTracker {
+    let blk = MemBlock { addr: t.next_addr, size: size, is_free: 0 };
+    let new_allocs = memarr8_set(t.allocs, t.count, blk);
+    AllocTracker {
+        allocs: new_allocs,
+        count: t.count + 1,
+        next_addr: t.next_addr + size,
+        total_bytes: t.total_bytes + size
+    }
+}
+
+fn tracker_free(t: AllocTracker, idx: Int) -> AllocTracker {
+    let blk = memarr8_get(t.allocs, idx);
+    let freed = MemBlock { addr: blk.addr, size: blk.size, is_free: 1 };
+    let new_allocs = memarr8_set(t.allocs, idx, freed);
+    AllocTracker {
+        allocs: new_allocs,
+        count: t.count,
+        next_addr: t.next_addr,
+        total_bytes: t.total_bytes - blk.size
+    }
+}
+
+// ============================================================================
+// Test 1: Alloc/free tracking — verify no leaks
+// ============================================================================
+
+@test
+fn test_alloc_free_tracking() {
+    let mut tracker = tracker_new();
+
+    // Allocate 3 blocks
+    tracker = tracker_alloc(tracker, 256);
+    tracker = tracker_alloc(tracker, 512);
+    tracker = tracker_alloc(tracker, 1024);
+
+    assert_eq(tracker.count, 3);
+    assert_eq(tracker.total_bytes, 256 + 512 + 1024);
+
+    // Verify addresses are sequential
+    let b0 = memarr8_get(tracker.allocs, 0);
+    let b1 = memarr8_get(tracker.allocs, 1);
+    let b2 = memarr8_get(tracker.allocs, 2);
+    assert_eq(b0.addr, 1000);
+    assert_eq(b0.size, 256);
+    assert_eq(b0.is_free, 0);
+    assert_eq(b1.addr, 1256);
+    assert_eq(b1.size, 512);
+    assert_eq(b2.addr, 1768);
+    assert_eq(b2.size, 1024);
+
+    // Free block 1 (512 bytes)
+    tracker = tracker_free(tracker, 1);
+    assert_eq(tracker.total_bytes, 256 + 1024);
+    let freed = memarr8_get(tracker.allocs, 1);
+    assert_eq(freed.is_free, 1);
+    assert_eq(freed.size, 512);
+
+    // Free remaining blocks
+    tracker = tracker_free(tracker, 0);
+    tracker = tracker_free(tracker, 2);
+    assert_eq(tracker.total_bytes, 0);
+
+    // Verify all freed
+    let mut all_free = 1;
+    let mut i = 0;
+    while i < 3 {
+        let blk = memarr8_get(tracker.allocs, i);
+        if blk.is_free == 0 {
+            all_free = 0;
+        }
+        i = i + 1;
+    }
+    assert_eq(all_free, 1);
+
+    print("  test_alloc_free_tracking: ok");
+}
+
+// ============================================================================
+// Test 2: Host-device transfer — simulate H2D/D2H, verify data integrity
+// ============================================================================
+
+@test
+fn test_host_device_transfer() {
+    // Host data: [10, 20, 30, 40, 50, 0, 0, 0]
+    let host = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 0, e6: 0, e7: 0 };
+    let n = 5;
+
+    // Simulate H2D transfer: copy host -> device
+    let mut device = arr8_zeros();
+    let mut i = 0;
+    while i < n {
+        device = arr8_set(device, i, arr8_get(host, i));
+        i = i + 1;
+    }
+
+    // Verify device has correct data
+    let mut j = 0;
+    while j < n {
+        assert_eq(arr8_get(device, j), arr8_get(host, j));
+        j = j + 1;
+    }
+
+    // Simulate GPU kernel: double each element on device
+    let mut k = 0;
+    while k < n {
+        device = arr8_set(device, k, arr8_get(device, k) * 2);
+        k = k + 1;
+    }
+
+    // Simulate D2H transfer: copy device -> host_result
+    let mut host_result = arr8_zeros();
+    let mut m = 0;
+    while m < n {
+        host_result = arr8_set(host_result, m, arr8_get(device, m));
+        m = m + 1;
+    }
+
+    // Verify results
+    assert_eq(arr8_get(host_result, 0), 20);
+    assert_eq(arr8_get(host_result, 1), 40);
+    assert_eq(arr8_get(host_result, 2), 60);
+    assert_eq(arr8_get(host_result, 3), 80);
+    assert_eq(arr8_get(host_result, 4), 100);
+
+    // Verify transfer count accounting
+    let h2d_bytes = n * 8;
+    let d2h_bytes = n * 8;
+    let total_transfer = h2d_bytes + d2h_bytes;
+    assert_eq(total_transfer, 80);
+
+    print("  test_host_device_transfer: ok");
+}
+
+// ============================================================================
+// Test 3: Memory pool — allocate from pool, return to pool
+// Pool has 4 fixed-size blocks
+// ============================================================================
+
+type MemPool is { b0: MemBlock, b1: MemBlock, b2: MemBlock, b3: MemBlock };
+
+fn pool_new(block_size: Int) -> MemPool {
+    MemPool {
+        b0: MemBlock { addr: 0, size: block_size, is_free: 1 },
+        b1: MemBlock { addr: block_size, size: block_size, is_free: 1 },
+        b2: MemBlock { addr: block_size * 2, size: block_size, is_free: 1 },
+        b3: MemBlock { addr: block_size * 3, size: block_size, is_free: 1 }
+    }
+}
+
+fn pool_get(p: MemPool, i: Int) -> MemBlock {
+    if i == 0 { p.b0 }
+    else if i == 1 { p.b1 }
+    else if i == 2 { p.b2 }
+    else { p.b3 }
+}
+
+fn pool_set(p: MemPool, i: Int, blk: MemBlock) -> MemPool {
+    MemPool {
+        b0: if i == 0 { blk } else { p.b0 },
+        b1: if i == 1 { blk } else { p.b1 },
+        b2: if i == 2 { blk } else { p.b2 },
+        b3: if i == 3 { blk } else { p.b3 }
+    }
+}
+
+type PoolAllocOutcome is { pool: MemPool, allocated_idx: Int };
+
+fn pool_alloc(p: MemPool) -> PoolAllocOutcome {
+    // Find first free block
+    let mut i = 0;
+    let mut found = -1;
+    while i < 4 {
+        if found == -1 {
+            let blk = pool_get(p, i);
+            if blk.is_free == 1 {
+                found = i;
+            }
+        }
+        i = i + 1;
+    }
+    if found >= 0 {
+        let blk = pool_get(p, found);
+        let used = MemBlock { addr: blk.addr, size: blk.size, is_free: 0 };
+        PoolAllocOutcome { pool: pool_set(p, found, used), allocated_idx: found }
+    } else {
+        PoolAllocOutcome { pool: p, allocated_idx: -1 }
+    }
+}
+
+fn pool_release(p: MemPool, idx: Int) -> MemPool {
+    let blk = pool_get(p, idx);
+    let freed = MemBlock { addr: blk.addr, size: blk.size, is_free: 1 };
+    pool_set(p, idx, freed)
+}
+
+fn pool_free_count(p: MemPool) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 4 {
+        let blk = pool_get(p, i);
+        if blk.is_free == 1 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+@test
+fn test_memory_pool() {
+    let mut pool = pool_new(256);
+    assert_eq(pool_free_count(pool), 4);
+
+    // Allocate 3 blocks
+    let r1 = pool_alloc(pool);
+    pool = r1.pool;
+    assert_eq(r1.allocated_idx, 0);
+    assert_eq(pool_free_count(pool), 3);
+
+    let r2 = pool_alloc(pool);
+    pool = r2.pool;
+    assert_eq(r2.allocated_idx, 1);
+    assert_eq(pool_free_count(pool), 2);
+
+    let r3 = pool_alloc(pool);
+    pool = r3.pool;
+    assert_eq(r3.allocated_idx, 2);
+    assert_eq(pool_free_count(pool), 1);
+
+    // Free block 1
+    pool = pool_release(pool, 1);
+    assert_eq(pool_free_count(pool), 2);
+
+    // Next alloc should reuse block 1
+    let r4 = pool_alloc(pool);
+    pool = r4.pool;
+    assert_eq(r4.allocated_idx, 1);
+    assert_eq(pool_free_count(pool), 1);
+
+    // Allocate the last block
+    let r5 = pool_alloc(pool);
+    pool = r5.pool;
+    assert_eq(r5.allocated_idx, 3);
+    assert_eq(pool_free_count(pool), 0);
+
+    // Try to allocate when pool is full
+    let r6 = pool_alloc(pool);
+    assert_eq(r6.allocated_idx, -1);
+
+    print("  test_memory_pool: ok");
+}
+
+// ============================================================================
+// Test 4: Pinned memory — track pinned vs pageable allocations
+// ============================================================================
+
+type PinnedTracker is {
+    pinned_count: Int,
+    pageable_count: Int,
+    pinned_bytes: Int,
+    pageable_bytes: Int
+};
+
+fn pinned_new() -> PinnedTracker {
+    PinnedTracker { pinned_count: 0, pageable_count: 0, pinned_bytes: 0, pageable_bytes: 0 }
+}
+
+fn pinned_alloc(t: PinnedTracker, size: Int, is_pinned: Int) -> PinnedTracker {
+    if is_pinned == 1 {
+        PinnedTracker {
+            pinned_count: t.pinned_count + 1,
+            pageable_count: t.pageable_count,
+            pinned_bytes: t.pinned_bytes + size,
+            pageable_bytes: t.pageable_bytes
+        }
+    } else {
+        PinnedTracker {
+            pinned_count: t.pinned_count,
+            pageable_count: t.pageable_count + 1,
+            pinned_bytes: t.pinned_bytes,
+            pageable_bytes: t.pageable_bytes + size
+        }
+    }
+}
+
+@test
+fn test_pinned_memory() {
+    let mut tracker = pinned_new();
+
+    // Allocate some pinned memory (for DMA transfers)
+    tracker = pinned_alloc(tracker, 4096, 1);
+    tracker = pinned_alloc(tracker, 8192, 1);
+    // Allocate some pageable memory (regular)
+    tracker = pinned_alloc(tracker, 1024, 0);
+    tracker = pinned_alloc(tracker, 2048, 0);
+    tracker = pinned_alloc(tracker, 512, 0);
+
+    assert_eq(tracker.pinned_count, 2);
+    assert_eq(tracker.pageable_count, 3);
+    assert_eq(tracker.pinned_bytes, 4096 + 8192);
+    assert_eq(tracker.pageable_bytes, 1024 + 2048 + 512);
+
+    // Total memory
+    let total = tracker.pinned_bytes + tracker.pageable_bytes;
+    assert_eq(total, 15872);
+
+    // Pinned fraction (integer percentage)
+    let pinned_pct = tracker.pinned_bytes * 100 / total;
+    // 12288 * 100 / 15872 = 77 (integer division)
+    assert_eq(pinned_pct, 77);
+
+    print("  test_pinned_memory: ok");
+}
+
+// ============================================================================
+// Test 5: Unified memory — simulate unified memory with access tracking
+// ============================================================================
+
+type UnifiedBlock is {
+    addr: Int,
+    size: Int,
+    host_accesses: Int,
+    device_accesses: Int,
+    last_accessor: Int   // 0 = host, 1 = device
+};
+
+fn ublock_new(addr: Int, size: Int) -> UnifiedBlock {
+    UnifiedBlock { addr: addr, size: size, host_accesses: 0, device_accesses: 0, last_accessor: 0 }
+}
+
+fn ublock_host_access(b: UnifiedBlock) -> UnifiedBlock {
+    UnifiedBlock {
+        addr: b.addr,
+        size: b.size,
+        host_accesses: b.host_accesses + 1,
+        device_accesses: b.device_accesses,
+        last_accessor: 0
+    }
+}
+
+fn ublock_device_access(b: UnifiedBlock) -> UnifiedBlock {
+    UnifiedBlock {
+        addr: b.addr,
+        size: b.size,
+        host_accesses: b.host_accesses,
+        device_accesses: b.device_accesses + 1,
+        last_accessor: 1
+    }
+}
+
+fn ublock_needs_migration(b: UnifiedBlock, target: Int) -> Int {
+    // Migration needed if last accessor differs from target
+    if b.last_accessor == target { 0 } else { 1 }
+}
+
+@test
+fn test_unified_memory() {
+    let mut blk = ublock_new(5000, 4096);
+    assert_eq(blk.host_accesses, 0);
+    assert_eq(blk.device_accesses, 0);
+
+    // Host writes data
+    blk = ublock_host_access(blk);
+    blk = ublock_host_access(blk);
+    assert_eq(blk.host_accesses, 2);
+    assert_eq(blk.last_accessor, 0);
+
+    // Check if device needs migration (yes, data is on host)
+    assert_eq(ublock_needs_migration(blk, 1), 1);
+    // Host access doesn't need migration (already on host)
+    assert_eq(ublock_needs_migration(blk, 0), 0);
+
+    // Device reads/writes (triggers migration)
+    blk = ublock_device_access(blk);
+    assert_eq(blk.device_accesses, 1);
+    assert_eq(blk.last_accessor, 1);
+
+    // Now host needs migration
+    assert_eq(ublock_needs_migration(blk, 0), 1);
+    assert_eq(ublock_needs_migration(blk, 1), 0);
+
+    // Simulate ping-pong pattern: host and device alternate
+    let mut migrations = 0;
+    let mut step = 0;
+    while step < 8 {
+        let target = step % 2;
+        if ublock_needs_migration(blk, target) == 1 {
+            migrations = migrations + 1;
+        }
+        if target == 0 {
+            blk = ublock_host_access(blk);
+        } else {
+            blk = ublock_device_access(blk);
+        }
+        step = step + 1;
+    }
+
+    // Ping-pong: every access triggers migration except the first
+    // Step 0: target=host, blk on device -> migrate. Step 1: target=device, blk on host -> migrate.
+    // ... all 8 steps trigger migration
+    assert_eq(migrations, 8);
+
+    // Total accesses
+    // Started with 2 host, 1 device
+    // Then 4 host accesses (steps 0,2,4,6) and 4 device accesses (steps 1,3,5,7)
+    assert_eq(blk.host_accesses, 6);
+    assert_eq(blk.device_accesses, 5);
+
+    print("  test_unified_memory: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_alloc_free_tracking();
+    test_host_device_transfer();
+    test_memory_pool();
+    test_pinned_memory();
+    test_unified_memory();
+    print("[OK] 080_gpu_memory_lifecycle");
+    0
+}

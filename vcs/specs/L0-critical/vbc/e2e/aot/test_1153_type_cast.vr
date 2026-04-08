@@ -1,0 +1,72 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: type-cast, as, conversion
+// @description: Test type casting with `as` operator
+
+fn test_int_to_float() -> Int {
+    let x: Int = 42;
+    let f = x as Float;
+    // Convert back for comparison
+    let back = f as Int;
+    if back != 42 {
+        print(f"FAIL int_to_float: {back}");
+        return 1;
+    }
+    print("  int_to_float: OK");
+    0
+}
+
+fn test_float_to_int() -> Int {
+    let f: Float = 3.7;
+    let n = f as Int;
+    // Truncates toward zero
+    if n != 3 {
+        print(f"FAIL float_to_int: {n}");
+        return 1;
+    }
+    print("  float_to_int: OK");
+    0
+}
+
+fn test_negative_float_to_int() -> Int {
+    let f: Float = -2.9;
+    let n = f as Int;
+    // Truncates toward zero: -2
+    if n != -2 {
+        print(f"FAIL neg_float_to_int: {n}");
+        return 1;
+    }
+    print("  neg_float_to_int: OK");
+    0
+}
+
+fn test_arithmetic_with_cast() -> Int {
+    let a: Int = 7;
+    let b: Int = 2;
+    let flt_result = (a as Float) / (b as Float);
+    // 7.0 / 2.0 = 3.5
+    let int_result = flt_result as Int;
+    if int_result != 3 {
+        print(f"FAIL arith_cast: {int_result}");
+        return 1;
+    }
+    print("  arithmetic_cast: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Type Cast Tests:");
+    let mut failures = 0;
+    failures = failures + test_int_to_float();
+    failures = failures + test_float_to_int();
+    failures = failures + test_negative_float_to_int();
+    failures = failures + test_arithmetic_with_cast();
+
+    if failures == 0 {
+        print("All type cast tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,222 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, escapes, unicode
+
+// String literals with Unicode escape sequences
+
+fn test_basic_unicode_escapes() {
+    // Basic Unicode escapes (BMP - Basic Multilingual Plane)
+    let null_unicode = "\u{0}";
+    let space_unicode = "\u{20}";
+    let a_unicode = "\u{61}";
+    let A_unicode = "\u{41}";
+}
+
+fn test_unicode_format_variations() {
+    // Common Unicode escape format variations
+    let short_1 = "\u{A}";
+    let short_2 = "\u{AB}";
+    let short_3 = "\u{ABC}";
+    let short_4 = "\u{ABCD}";
+    let long_5 = "\u{1ABCD}";
+    let long_6 = "\u{10FFFF}";
+}
+
+fn test_lowercase_hex() {
+    // Lowercase hex in unicode escapes
+    let lower_hex = "\u{abcd}";
+    let mixed_hex = "\u{AbCd}";
+}
+
+fn test_ascii_via_unicode() {
+    // ASCII via unicode
+    let hello_unicode = "\u{48}\u{65}\u{6C}\u{6C}\u{6F}";  // Hello
+}
+
+fn test_latin_extended() {
+    // Latin Extended characters
+    let a_acute = "\u{E1}";
+    let e_acute = "\u{E9}";
+    let n_tilde = "\u{F1}";
+    let u_umlaut = "\u{FC}";
+    let eszett = "\u{DF}";
+    let euro = "\u{20AC}";
+    let pound = "\u{A3}";
+    let yen = "\u{A5}";
+    let copyright = "\u{A9}";
+    let registered = "\u{AE}";
+}
+
+fn test_greek_letters() {
+    // Greek letters
+    let alpha = "\u{3B1}";
+    let beta = "\u{3B2}";
+    let gamma = "\u{3B3}";
+    let delta = "\u{3B4}";
+    let pi_sym = "\u{3C0}";
+    let sigma = "\u{3C3}";
+    let greek_omega = "\u{3C9}";
+    let greek_alpha_upper = "\u{391}";
+    let greek_omega_upper = "\u{3A9}";
+}
+
+fn test_cyrillic_letters() {
+    // Cyrillic letters
+    let cyrillic_a = "\u{430}";
+    let cyrillic_ya = "\u{44F}";
+    let cyrillic_A = "\u{410}";
+}
+
+fn test_hebrew_letters() {
+    // Hebrew letters
+    let aleph = "\u{5D0}";
+    let bet = "\u{5D1}";
+    let shin = "\u{5E9}";
+}
+
+fn test_arabic_letters() {
+    // Arabic letters
+    let arabic_alef = "\u{627}";
+    let arabic_ba = "\u{628}";
+}
+
+fn test_cjk_characters() {
+    // CJK characters
+    let chinese_one = "\u{4E00}";
+    let chinese_two = "\u{4E8C}";
+    let chinese_three = "\u{4E09}";
+    let chinese_person = "\u{4EBA}";
+    let chinese_water = "\u{6C34}";
+    let japanese_mountain = "\u{5C71}";
+    let korean_ga = "\u{AC00}";
+}
+
+fn test_math_symbols() {
+    // Mathematical symbols
+    let infinity = "\u{221E}";
+    let plus_minus = "\u{B1}";
+    let multiplication = "\u{D7}";
+    let division = "\u{F7}";
+    let not_equal = "\u{2260}";
+    let less_equal = "\u{2264}";
+    let greater_equal = "\u{2265}";
+    let approx = "\u{2248}";
+    let sum_sym = "\u{2211}";
+    let product_sym = "\u{220F}";
+    let integral = "\u{222B}";
+    let sqrt = "\u{221A}";
+}
+
+fn test_arrows() {
+    // Arrows
+    let left_arrow = "\u{2190}";
+    let right_arrow = "\u{2192}";
+    let up_arrow = "\u{2191}";
+    let down_arrow = "\u{2193}";
+    let double_arrow = "\u{21D2}";
+}
+
+fn test_box_drawing() {
+    // Box drawing
+    let box_horizontal = "\u{2500}";
+    let box_vertical = "\u{2502}";
+    let box_corner_tl = "\u{250C}";
+    let box_corner_tr = "\u{2510}";
+}
+
+fn test_emoji() {
+    // Emoji (Supplementary Multilingual Plane)
+    let smiley = "\u{1F600}";
+    let heart = "\u{2764}";
+    let red_heart = "\u{1F497}";
+    let thumbs_up = "\u{1F44D}";
+    let rocket = "\u{1F680}";
+    let fire = "\u{1F525}";
+    let star = "\u{2B50}";
+    let check = "\u{2714}";
+    let cross = "\u{274C}";
+}
+
+fn test_max_unicode() {
+    // Maximum valid Unicode code point
+    let max_unicode = "\u{10FFFF}";
+}
+
+fn test_zero_width() {
+    // Zero-width characters
+    let zwj = "\u{200D}";           // Zero-width joiner
+    let zwnj = "\u{200C}";          // Zero-width non-joiner
+    let zwsp = "\u{200B}";          // Zero-width space
+}
+
+fn test_combining() {
+    // Combining characters
+    let combining_acute = "\u{301}";
+    let combining_grave = "\u{300}";
+    let combining_umlaut = "\u{308}";
+}
+
+fn test_bidi_controls() {
+    // Bidirectional controls
+    let ltr_mark = "\u{200E}";
+    let rtl_mark = "\u{200F}";
+    let ltr_embed = "\u{202A}";
+    let rtl_embed = "\u{202B}";
+}
+
+fn test_mixed_text() {
+    // Mixed with regular text
+    let greeting_russian = "\u{41F}\u{440}\u{438}\u{432}\u{435}\u{442}!";  // Привет!
+    let greeting_japanese = "\u{3053}\u{3093}\u{306B}\u{3061}\u{306F}";   // こんにちは
+    let math_formula = "x \u{2264} \u{221E}";  // x <= infinity
+}
+
+fn test_unicode_expressions() {
+    // In expressions
+    let combined_unicode = "\u{48}\u{65}\u{6C}\u{6C}\u{6F}" + " " + "\u{4E16}\u{754C}";
+}
+
+fn test_unicode_arrays() {
+    // In arrays
+    let greek_letters = ["\u{3B1}", "\u{3B2}", "\u{3B3}", "\u{3B4}"];
+    let emoji_list = ["\u{1F600}", "\u{1F601}", "\u{1F602}", "\u{1F603}"];
+}
+
+fn test_private_use() {
+    // Surrogate pairs (if supported via escape)
+    // Note: Surrogates are for UTF-16, may not be valid in Verum
+    // let high_surrogate = "\u{D800}"  // Invalid if strict
+
+    // Private Use Area
+    let pua_char = "\u{E000}";
+    let pua_end = "\u{F8FF}";
+}
+
+// In struct fields
+type UnicodeData is {
+    symbol: Text,
+    description: Text,
+};
+
+fn test_unicode_struct() {
+    let symbol_data = UnicodeData {
+        symbol: "\u{221E}",
+        description: "infinity symbol",
+    };
+}
+
+fn test_edge_cases() {
+    // Edge cases
+    let single_digit = "\u{0}";
+    let two_digits = "\u{AB}";
+    let full_bmp = "\u{FFFF}";
+    let just_above_bmp = "\u{10000}";
+    let astral_plane = "\u{1F4A9}";
+}
+
+fn test_consecutive_unicode() {
+    // Consecutive unicode escapes
+    let many_unicode = "\u{41}\u{42}\u{43}\u{44}\u{45}";
+    let mixed_escape = "\u{48}ello \u{57}orld";
+}

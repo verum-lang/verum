@@ -1,0 +1,249 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, implement, methods, struct
+// @description: Test generic implement blocks and struct method patterns
+
+type Stack is { data: List<Int>, size: Int };
+
+implement Stack {
+    fn new() -> Stack {
+        Stack { data: List.new(), size: 0 }
+    }
+
+    fn push(&mut self, val: Int) {
+        self.data.push(val);
+        self.size = self.size + 1;
+    }
+
+    fn pop(&mut self) -> Int {
+        if self.size == 0 {
+            return -1;
+        }
+        self.size = self.size - 1;
+        self.data[self.size]
+    }
+
+    fn peek(&self) -> Int {
+        if self.size == 0 {
+            return -1;
+        }
+        self.data[self.size - 1]
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.size == 0
+    }
+
+    fn len(&self) -> Int {
+        self.size
+    }
+}
+
+fn test_stack() -> Int {
+    let mut s = Stack.new();
+    s.push(10);
+    s.push(20);
+    s.push(30);
+
+    if s.len() != 3 {
+        print(f"FAIL stack: len={s.len()}, expected 3");
+        return 1;
+    }
+
+    let top = s.peek();
+    if top != 30 {
+        print(f"FAIL stack: peek={top}, expected 30");
+        return 1;
+    }
+
+    let p1 = s.pop();
+    let p2 = s.pop();
+    if p1 != 30 || p2 != 20 {
+        print(f"FAIL stack: pop1={p1}, pop2={p2}");
+        return 1;
+    }
+
+    if s.len() != 1 {
+        print(f"FAIL stack: len after pop={s.len()}, expected 1");
+        return 1;
+    }
+    print("  stack: OK");
+    0
+}
+
+type Counter is { count: Int, max_val: Int };
+
+implement Counter {
+    fn new(max: Int) -> Counter {
+        Counter { count: 0, max_val: max }
+    }
+
+    fn increment(&mut self) -> Bool {
+        if self.count < self.max_val {
+            self.count = self.count + 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn reset(&mut self) {
+        self.count = 0;
+    }
+
+    fn value(&self) -> Int {
+        self.count
+    }
+}
+
+fn test_counter() -> Int {
+    let mut c = Counter.new(3);
+    c.increment();
+    c.increment();
+    c.increment();
+    let can_inc = c.increment(); // should fail
+    if c.value() != 3 {
+        print(f"FAIL counter: value={c.value()}, expected 3");
+        return 1;
+    }
+    if can_inc != false {
+        print("FAIL counter: should not increment past max");
+        return 1;
+    }
+    c.reset();
+    if c.value() != 0 {
+        print(f"FAIL counter: after reset={c.value()}, expected 0");
+        return 1;
+    }
+    print("  counter: OK");
+    0
+}
+
+type Vec2 is { x: Int, y: Int };
+
+implement Vec2 {
+    fn new(x: Int, y: Int) -> Vec2 {
+        Vec2 { x: x, y: y }
+    }
+
+    fn add(&self, other: Vec2) -> Vec2 {
+        Vec2.new(self.x + other.x, self.y + other.y)
+    }
+
+    fn scale(&self, factor: Int) -> Vec2 {
+        Vec2.new(self.x * factor, self.y * factor)
+    }
+
+    fn dot(&self, other: Vec2) -> Int {
+        self.x * other.x + self.y * other.y
+    }
+
+    fn magnitude_squared(&self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+}
+
+fn test_vec2() -> Int {
+    let v1 = Vec2.new(3, 4);
+    let v2 = Vec2.new(1, 2);
+
+    let sum = v1.add(v2);
+    if sum.x != 4 || sum.y != 6 {
+        print(f"FAIL vec2: add=({sum.x},{sum.y}), expected (4,6)");
+        return 1;
+    }
+
+    let scaled = v1.scale(2);
+    if scaled.x != 6 || scaled.y != 8 {
+        print(f"FAIL vec2: scale=({scaled.x},{scaled.y}), expected (6,8)");
+        return 1;
+    }
+
+    let d = v1.dot(v2);
+    if d != 11 {
+        print(f"FAIL vec2: dot={d}, expected 11");
+        return 1;
+    }
+
+    let mag2 = v1.magnitude_squared();
+    if mag2 != 25 {
+        print(f"FAIL vec2: mag2={mag2}, expected 25");
+        return 1;
+    }
+    print("  vec2: OK");
+    0
+}
+
+type Matrix2 is { a: Int, b: Int, c: Int, d: Int };
+
+implement Matrix2 {
+    fn identity() -> Matrix2 {
+        Matrix2 { a: 1, b: 0, c: 0, d: 1 }
+    }
+
+    fn new(a: Int, b: Int, c: Int, d: Int) -> Matrix2 {
+        Matrix2 { a: a, b: b, c: c, d: d }
+    }
+
+    fn det(&self) -> Int {
+        self.a * self.d - self.b * self.c
+    }
+
+    fn mul(&self, other: Matrix2) -> Matrix2 {
+        Matrix2.new(
+            self.a * other.a + self.b * other.c,
+            self.a * other.b + self.b * other.d,
+            self.c * other.a + self.d * other.c,
+            self.c * other.b + self.d * other.d,
+        )
+    }
+
+    fn transform(&self, v: Vec2) -> Vec2 {
+        Vec2.new(
+            self.a * v.x + self.b * v.y,
+            self.c * v.x + self.d * v.y,
+        )
+    }
+}
+
+fn test_matrix() -> Int {
+    let m = Matrix2.new(2, 1, 1, 3);
+    let det = m.det();
+    if det != 5 {
+        print(f"FAIL matrix: det={det}, expected 5");
+        return 1;
+    }
+
+    let id = Matrix2.identity();
+    let product = m.mul(id);
+    if product.a != 2 || product.d != 3 {
+        print(f"FAIL matrix: m*I != m");
+        return 1;
+    }
+
+    let v = Vec2.new(1, 0);
+    let result = m.transform(v);
+    if result.x != 2 || result.y != 1 {
+        print(f"FAIL matrix: transform=({result.x},{result.y}), expected (2,1)");
+        return 1;
+    }
+    print("  matrix: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Generic Implement Tests:");
+    let mut failures = 0;
+    failures = failures + test_stack();
+    failures = failures + test_counter();
+    failures = failures + test_vec2();
+    failures = failures + test_matrix();
+
+    if failures == 0 {
+        print("All generic implement tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,1004 @@
+// =============================================================================
+// primitives_float_test.vr - Comprehensive tests for Float type methods
+// =============================================================================
+// @test: run-interpreter
+// @level: L1
+// @tier: 0
+// @tags: core, primitives, float, ieee754, math, trigonometry
+// @description: Industrial-grade tests for Float64 (IEEE 754) covering all methods,
+//               special values (NaN, infinity), mathematical functions, and edge cases
+// =============================================================================
+
+module specs.stdlib.core.primitives_float_test;
+
+mount core.prelude.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+// =============================================================================
+// Helper Functions for Float Comparison
+// =============================================================================
+
+/// Check if two floats are approximately equal within relative tolerance
+fn approx_eq(a: Float, b: Float, rel_tol: Float) -> Bool {
+    if a.is_nan() && b.is_nan() { return true; }
+    if a.is_nan() || b.is_nan() { return false; }
+    if a.is_infinite() && b.is_infinite() {
+        return (a > 0.0) == (b > 0.0);  // Same sign infinity
+    }
+    let diff = (a - b).abs();
+    let max_val = a.abs().max(b.abs());
+    if max_val == 0.0 { return diff == 0.0; }
+    diff / max_val < rel_tol
+}
+
+/// Check if two floats are approximately equal within absolute tolerance
+fn approx_eq_abs(a: Float, b: Float, abs_tol: Float) -> Bool {
+    if a.is_nan() && b.is_nan() { return true; }
+    if a.is_nan() || b.is_nan() { return false; }
+    (a - b).abs() < abs_tol
+}
+
+/// Standard ULP-based comparison for floating point
+fn ulp_diff(a: Float, b: Float) -> Int {
+    if a.is_nan() || b.is_nan() { return Int.max_value(); }
+    let bits_a = a.to_bits();
+    let bits_b = b.to_bits();
+    (bits_a - bits_b).abs()
+}
+
+// =============================================================================
+// Constants and Special Values
+// =============================================================================
+
+@test
+fn test_float_constants() {
+    // Mathematical constants
+    assert(approx_eq(Float.pi(), 3.141592653589793, 1e-15));
+    assert(approx_eq(Float.e(), 2.718281828459045, 1e-15));
+
+    // Machine precision
+    assert(Float.epsilon() > 0.0);
+    assert(Float.epsilon() < 1e-10);
+    assert(1.0 + Float.epsilon() != 1.0);  // epsilon is meaningful
+
+    // Boundaries
+    assert(Float.max_value() > 1e300);
+    assert(Float.min_positive() > 0.0);
+    assert(Float.min_positive() < 1e-300);
+}
+
+@test
+fn test_float_special_values() {
+    // Infinity
+    let inf = Float.infinity();
+    let neg_inf = Float.neg_infinity();
+
+    assert(inf > 0.0);
+    assert(neg_inf < 0.0);
+    assert(inf > Float.max_value());
+    assert(neg_inf < -Float.max_value());
+
+    // NaN
+    let nan = Float.nan();
+    assert(nan != nan);  // NaN is not equal to itself (IEEE 754)
+    assert(!(nan == nan));
+    assert(!(nan < 0.0));
+    assert(!(nan > 0.0));
+    assert(!(nan == 0.0));
+}
+
+@test
+fn test_float_special_value_creation() {
+    // Division by zero creates infinity
+    assert_eq(1.0 / 0.0, Float.infinity());
+    assert_eq((-1.0) / 0.0, Float.neg_infinity());
+
+    // 0/0 creates NaN
+    let nan = 0.0 / 0.0;
+    assert(nan.is_nan());
+
+    // Infinity - Infinity is NaN
+    let diff = Float.infinity() - Float.infinity();
+    assert(diff.is_nan());
+
+    // Infinity * 0 is NaN
+    let prod = Float.infinity() * 0.0;
+    assert(prod.is_nan());
+}
+
+// =============================================================================
+// Classification Methods
+// =============================================================================
+
+@test
+fn test_float_is_nan() {
+    assert(Float.nan().is_nan());
+    assert((0.0 / 0.0).is_nan());
+
+    assert(!0.0.is_nan());
+    assert(!1.0.is_nan());
+    assert(!(-1.0).is_nan());
+    assert(!Float.infinity().is_nan());
+    assert(!Float.neg_infinity().is_nan());
+}
+
+@test
+fn test_float_is_infinite() {
+    assert(Float.infinity().is_infinite());
+    assert(Float.neg_infinity().is_infinite());
+    assert((1.0 / 0.0).is_infinite());
+    assert(((-1.0) / 0.0).is_infinite());
+
+    assert(!0.0.is_infinite());
+    assert(!1.0.is_infinite());
+    assert(!Float.max_value().is_infinite());
+    assert(!Float.nan().is_infinite());
+}
+
+@test
+fn test_float_is_finite() {
+    assert(0.0.is_finite());
+    assert(1.0.is_finite());
+    assert((-1.0).is_finite());
+    assert(Float.max_value().is_finite());
+    assert(Float.min_positive().is_finite());
+
+    assert(!Float.infinity().is_finite());
+    assert(!Float.neg_infinity().is_finite());
+    assert(!Float.nan().is_finite());
+}
+
+@test
+fn test_float_is_normal() {
+    assert(1.0.is_normal());
+    assert((-1.0).is_normal());
+    assert(Float.max_value().is_normal());
+    assert(Float.min_positive().is_normal());
+
+    // Subnormal numbers are not normal
+    let subnormal = Float.min_positive() / 2.0;
+    assert(!subnormal.is_normal());
+
+    // Zero is not normal
+    assert(!0.0.is_normal());
+    assert(!(-0.0).is_normal());
+
+    // Special values are not normal
+    assert(!Float.infinity().is_normal());
+    assert(!Float.nan().is_normal());
+}
+
+@test
+fn test_float_sign_classification() {
+    // Positive
+    assert(1.0.is_positive());
+    assert(0.001.is_positive());
+    assert(Float.infinity().is_positive());
+    assert(!0.0.is_positive());
+    assert(!(-1.0).is_positive());
+
+    // Negative
+    assert((-1.0).is_negative());
+    assert((-0.001).is_negative());
+    assert(Float.neg_infinity().is_negative());
+    assert(!0.0.is_negative());
+    assert(!1.0.is_negative());
+
+    // Zero
+    assert(0.0.is_zero());
+    assert((-0.0).is_zero());  // Negative zero is also zero
+    assert(!1.0.is_zero());
+    assert(!(-1.0).is_zero());
+}
+
+@test
+fn test_float_signum() {
+    assert_eq(1.0.signum(), 1.0);
+    assert_eq(42.5.signum(), 1.0);
+    assert_eq(Float.infinity().signum(), 1.0);
+
+    assert_eq((-1.0).signum(), -1.0);
+    assert_eq((-42.5).signum(), -1.0);
+    assert_eq(Float.neg_infinity().signum(), -1.0);
+
+    assert_eq(0.0.signum(), 0.0);
+
+    // NaN returns NaN
+    assert(Float.nan().signum().is_nan());
+}
+
+// =============================================================================
+// Basic Arithmetic
+// =============================================================================
+
+@test
+fn test_float_abs() {
+    assert_eq(5.0.abs(), 5.0);
+    assert_eq((-5.0).abs(), 5.0);
+    assert_eq(0.0.abs(), 0.0);
+
+    // Infinity
+    assert_eq(Float.infinity().abs(), Float.infinity());
+    assert_eq(Float.neg_infinity().abs(), Float.infinity());
+
+    // NaN stays NaN
+    assert(Float.nan().abs().is_nan());
+}
+
+@test
+fn test_float_to_int() {
+    // Truncates toward zero
+    assert_eq(5.7.to_int(), 5);
+    assert_eq(5.3.to_int(), 5);
+    assert_eq((-5.7).to_int(), -5);
+    assert_eq((-5.3).to_int(), -5);
+    assert_eq(0.0.to_int(), 0);
+    assert_eq(0.9.to_int(), 0);
+    assert_eq((-0.9).to_int(), 0);
+}
+
+// =============================================================================
+// Square Root and Cube Root
+// =============================================================================
+
+@test
+fn test_float_sqrt() {
+    assert_eq(4.0.sqrt(), 2.0);
+    assert_eq(9.0.sqrt(), 3.0);
+    assert_eq(16.0.sqrt(), 4.0);
+    assert_eq(1.0.sqrt(), 1.0);
+    assert_eq(0.0.sqrt(), 0.0);
+
+    // sqrt(2) ≈ 1.41421356...
+    assert(approx_eq(2.0.sqrt(), 1.4142135623730951, 1e-14));
+
+    // Negative produces NaN
+    assert((-1.0).sqrt().is_nan());
+
+    // Infinity
+    assert_eq(Float.infinity().sqrt(), Float.infinity());
+}
+
+@test
+fn test_float_cbrt() {
+    assert_eq(8.0.cbrt(), 2.0);
+    assert_eq(27.0.cbrt(), 3.0);
+    assert_eq(1.0.cbrt(), 1.0);
+    assert_eq(0.0.cbrt(), 0.0);
+
+    // Negative values work for cbrt (unlike sqrt)
+    assert_eq((-8.0).cbrt(), -2.0);
+    assert_eq((-27.0).cbrt(), -3.0);
+
+    // Infinity
+    assert_eq(Float.infinity().cbrt(), Float.infinity());
+    assert_eq(Float.neg_infinity().cbrt(), Float.neg_infinity());
+}
+
+// =============================================================================
+// Exponential and Logarithmic Functions
+// =============================================================================
+
+@test
+fn test_float_exp() {
+    assert_eq(0.0.exp(), 1.0);  // e^0 = 1
+    assert_eq(1.0.exp(), Float.e());  // e^1 = e
+    assert(approx_eq(2.0.exp(), 7.38905609893065, 1e-10));
+
+    // Large values
+    assert_eq(Float.infinity().exp(), Float.infinity());
+    assert_eq(Float.neg_infinity().exp(), 0.0);
+}
+
+@test
+fn test_float_exp_m1() {
+    // exp_m1(x) = e^x - 1, more accurate for small x
+    assert_eq(0.0.exp_m1(), 0.0);
+    assert(approx_eq(1.0.exp_m1(), Float.e() - 1.0, 1e-14));
+
+    // Small values - this is where exp_m1 shines
+    let small = 1e-10;
+    assert(approx_eq(small.exp_m1(), small, 1e-15));  // For small x, e^x - 1 ≈ x
+}
+
+@test
+fn test_float_exp2() {
+    assert_eq(0.0.exp2(), 1.0);   // 2^0 = 1
+    assert_eq(1.0.exp2(), 2.0);   // 2^1 = 2
+    assert_eq(2.0.exp2(), 4.0);   // 2^2 = 4
+    assert_eq(3.0.exp2(), 8.0);   // 2^3 = 8
+    assert_eq(10.0.exp2(), 1024.0);  // 2^10 = 1024
+
+    assert_eq((-1.0).exp2(), 0.5);  // 2^(-1) = 0.5
+}
+
+@test
+fn test_float_ln() {
+    assert_eq(1.0.ln(), 0.0);  // ln(1) = 0
+    assert_eq(Float.e().ln(), 1.0);  // ln(e) = 1
+    assert(approx_eq(10.0.ln(), 2.302585092994046, 1e-14));
+
+    // Boundaries
+    assert_eq(Float.infinity().ln(), Float.infinity());
+    assert_eq(0.0.ln(), Float.neg_infinity());
+    assert((-1.0).ln().is_nan());  // ln of negative is NaN
+}
+
+@test
+fn test_float_ln_1p() {
+    // ln_1p(x) = ln(1 + x), more accurate for small x
+    assert_eq(0.0.ln_1p(), 0.0);
+    assert(approx_eq((Float.e() - 1.0).ln_1p(), 1.0, 1e-14));
+
+    // Small values
+    let small = 1e-10;
+    assert(approx_eq(small.ln_1p(), small, 1e-15));  // For small x, ln(1+x) ≈ x
+}
+
+@test
+fn test_float_log10() {
+    assert_eq(1.0.log10(), 0.0);
+    assert_eq(10.0.log10(), 1.0);
+    assert_eq(100.0.log10(), 2.0);
+    assert_eq(1000.0.log10(), 3.0);
+    assert_eq(0.1.log10(), -1.0);
+}
+
+@test
+fn test_float_log2() {
+    assert_eq(1.0.log2(), 0.0);
+    assert_eq(2.0.log2(), 1.0);
+    assert_eq(4.0.log2(), 2.0);
+    assert_eq(8.0.log2(), 3.0);
+    assert_eq(1024.0.log2(), 10.0);
+    assert_eq(0.5.log2(), -1.0);
+}
+
+@test
+fn test_float_log_base() {
+    assert_eq(8.0.log_base(2.0), 3.0);
+    assert_eq(1000.0.log_base(10.0), 3.0);
+    assert_eq(27.0.log_base(3.0), 3.0);
+    assert_eq(16.0.log_base(4.0), 2.0);
+}
+
+// =============================================================================
+// Power Functions
+// =============================================================================
+
+@test
+fn test_float_pow() {
+    assert_eq(2.0.pow(0.0), 1.0);
+    assert_eq(2.0.pow(1.0), 2.0);
+    assert_eq(2.0.pow(2.0), 4.0);
+    assert_eq(2.0.pow(3.0), 8.0);
+    assert_eq(2.0.pow(10.0), 1024.0);
+
+    // Fractional exponents
+    assert_eq(4.0.pow(0.5), 2.0);  // sqrt
+    assert_eq(8.0.pow(1.0 / 3.0), 2.0);  // cbrt (approx)
+
+    // Negative exponents
+    assert_eq(2.0.pow(-1.0), 0.5);
+    assert_eq(2.0.pow(-2.0), 0.25);
+}
+
+@test
+fn test_float_powi() {
+    assert_eq(2.0.powi(0), 1.0);
+    assert_eq(2.0.powi(1), 2.0);
+    assert_eq(2.0.powi(2), 4.0);
+    assert_eq(2.0.powi(10), 1024.0);
+
+    // Negative exponents
+    assert_eq(2.0.powi(-1), 0.5);
+    assert_eq(2.0.powi(-2), 0.25);
+
+    // Integer power is more accurate than float pow
+    assert_eq(10.0.powi(3), 1000.0);
+}
+
+// =============================================================================
+// Rounding Functions
+// =============================================================================
+
+@test
+fn test_float_floor() {
+    assert_eq(2.7.floor(), 2.0);
+    assert_eq(2.0.floor(), 2.0);
+    assert_eq((-2.3).floor(), -3.0);  // Floor goes toward -infinity
+    assert_eq((-2.0).floor(), -2.0);
+    assert_eq(0.9.floor(), 0.0);
+}
+
+@test
+fn test_float_ceil() {
+    assert_eq(2.3.ceil(), 3.0);
+    assert_eq(2.0.ceil(), 2.0);
+    assert_eq((-2.7).ceil(), -2.0);  // Ceil goes toward +infinity
+    assert_eq((-2.0).ceil(), -2.0);
+    assert_eq(0.1.ceil(), 1.0);
+}
+
+@test
+fn test_float_round() {
+    // Round to nearest, half away from zero
+    assert_eq(2.4.round(), 2.0);
+    assert_eq(2.5.round(), 3.0);
+    assert_eq(2.6.round(), 3.0);
+    assert_eq((-2.4).round(), -2.0);
+    assert_eq((-2.5).round(), -3.0);  // Half away from zero
+    assert_eq((-2.6).round(), -3.0);
+}
+
+@test
+fn test_float_trunc() {
+    // Truncate toward zero
+    assert_eq(2.7.trunc(), 2.0);
+    assert_eq(2.0.trunc(), 2.0);
+    assert_eq((-2.7).trunc(), -2.0);  // Toward zero, not -3
+    assert_eq((-2.0).trunc(), -2.0);
+}
+
+@test
+fn test_float_fract() {
+    assert_eq(2.7.fract(), 0.7);
+    assert_eq(2.0.fract(), 0.0);
+    assert(approx_eq((-2.7).fract(), -0.7, 1e-14));
+    assert_eq((-2.0).fract(), 0.0);
+}
+
+@test
+fn test_float_rounding_consistency() {
+    // For any x: x == trunc(x) + fract(x)
+    fn check_consistency(x: Float) {
+        if x.is_finite() {
+            assert(approx_eq(x, x.trunc() + x.fract(), 1e-14));
+        }
+    }
+
+    check_consistency(2.7);
+    check_consistency(-2.7);
+    check_consistency(0.123456789);
+    check_consistency(-0.123456789);
+    check_consistency(1e10);
+}
+
+// =============================================================================
+// Min, Max, Clamp Operations
+// =============================================================================
+
+@test
+fn test_float_min() {
+    assert_eq(3.0.min(5.0), 3.0);
+    assert_eq(5.0.min(3.0), 3.0);
+    assert_eq((-3.0).min(-5.0), -5.0);
+
+    // With zero
+    assert_eq(3.0.min(0.0), 0.0);
+    assert_eq((-3.0).min(0.0), -3.0);
+
+    // NaN propagation (depending on implementation)
+    // IEEE 754-2008: minNum returns non-NaN if one arg is NaN
+}
+
+@test
+fn test_float_max() {
+    assert_eq(3.0.max(5.0), 5.0);
+    assert_eq(5.0.max(3.0), 5.0);
+    assert_eq((-3.0).max(-5.0), -3.0);
+
+    // With infinity
+    assert_eq(Float.infinity().max(1e300), Float.infinity());
+    assert_eq(Float.neg_infinity().max(0.0), 0.0);
+}
+
+@test
+fn test_float_clamp() {
+    assert_eq(5.0.clamp(0.0, 10.0), 5.0);
+    assert_eq((-5.0).clamp(0.0, 10.0), 0.0);
+    assert_eq(15.0.clamp(0.0, 10.0), 10.0);
+
+    // At boundaries
+    assert_eq(0.0.clamp(0.0, 10.0), 0.0);
+    assert_eq(10.0.clamp(0.0, 10.0), 10.0);
+}
+
+// =============================================================================
+// Fused Multiply-Add
+// =============================================================================
+
+@test
+fn test_float_mul_add() {
+    // fma(a, b, c) = a * b + c with single rounding
+    assert_eq(2.0.mul_add(3.0, 4.0), 10.0);  // 2*3+4 = 10
+    assert_eq(0.5.mul_add(4.0, 1.0), 3.0);   // 0.5*4+1 = 3
+
+    // FMA is more accurate than separate mul and add
+    let a = 1e-10;
+    let b = 1e10;
+    let c = -1.0;
+    // a * b + c should be 0.0 exactly
+    assert(approx_eq_abs(a.mul_add(b, c), 0.0, 1e-10));
+}
+
+// =============================================================================
+// Copysign and Hypot
+// =============================================================================
+
+@test
+fn test_float_copysign() {
+    assert_eq(1.0.copysign(2.0), 1.0);
+    assert_eq(1.0.copysign(-2.0), -1.0);
+    assert_eq((-1.0).copysign(2.0), 1.0);
+    assert_eq((-1.0).copysign(-2.0), -1.0);
+
+    // Zero
+    assert_eq(0.0.copysign(1.0), 0.0);
+    assert_eq(0.0.copysign(-1.0), -0.0);
+
+    // Infinity
+    assert_eq(Float.infinity().copysign(-1.0), Float.neg_infinity());
+}
+
+@test
+fn test_float_hypot() {
+    // hypot(a, b) = sqrt(a^2 + b^2), avoiding overflow
+    assert_eq(3.0.hypot(4.0), 5.0);  // 3-4-5 triangle
+    assert_eq(5.0.hypot(12.0), 13.0);  // 5-12-13 triangle
+    assert_eq(0.0.hypot(5.0), 5.0);
+    assert_eq(5.0.hypot(0.0), 5.0);
+
+    // Large values (wouldn't overflow thanks to hypot's careful implementation)
+    let large = 1e200;
+    assert(large.hypot(large).is_finite());
+}
+
+// =============================================================================
+// Trigonometric Functions
+// =============================================================================
+
+@test
+fn test_float_sin() {
+    assert_eq(0.0.sin(), 0.0);
+    assert(approx_eq((Float.pi() / 2.0).sin(), 1.0, 1e-14));
+    assert(approx_eq(Float.pi().sin(), 0.0, 1e-14));
+    assert(approx_eq((3.0 * Float.pi() / 2.0).sin(), -1.0, 1e-14));
+}
+
+@test
+fn test_float_cos() {
+    assert_eq(0.0.cos(), 1.0);
+    assert(approx_eq((Float.pi() / 2.0).cos(), 0.0, 1e-14));
+    assert(approx_eq(Float.pi().cos(), -1.0, 1e-14));
+    assert(approx_eq((2.0 * Float.pi()).cos(), 1.0, 1e-14));
+}
+
+@test
+fn test_float_tan() {
+    assert_eq(0.0.tan(), 0.0);
+    assert(approx_eq((Float.pi() / 4.0).tan(), 1.0, 1e-14));
+    assert(approx_eq(Float.pi().tan(), 0.0, 1e-14));
+}
+
+@test
+fn test_float_sin_cos() {
+    let (s, c) = (Float.pi() / 4.0).sin_cos();
+    let sqrt2_over_2 = 2.0.sqrt() / 2.0;
+    assert(approx_eq(s, sqrt2_over_2, 1e-14));
+    assert(approx_eq(c, sqrt2_over_2, 1e-14));
+
+    // Verify sin^2 + cos^2 = 1
+    fn check_pythagorean(x: Float) {
+        let (s, c) = x.sin_cos();
+        assert(approx_eq(s * s + c * c, 1.0, 1e-14));
+    }
+
+    check_pythagorean(0.0);
+    check_pythagorean(0.5);
+    check_pythagorean(1.0);
+    check_pythagorean(Float.pi());
+    check_pythagorean(2.5);
+}
+
+// =============================================================================
+// Inverse Trigonometric Functions
+// =============================================================================
+
+@test
+fn test_float_asin() {
+    assert_eq(0.0.asin(), 0.0);
+    assert(approx_eq(1.0.asin(), Float.pi() / 2.0, 1e-14));
+    assert(approx_eq((-1.0).asin(), -Float.pi() / 2.0, 1e-14));
+
+    // Domain error (|x| > 1)
+    assert(1.5.asin().is_nan());
+}
+
+@test
+fn test_float_acos() {
+    assert(approx_eq(1.0.acos(), 0.0, 1e-14));
+    assert(approx_eq(0.0.acos(), Float.pi() / 2.0, 1e-14));
+    assert(approx_eq((-1.0).acos(), Float.pi(), 1e-14));
+
+    // Domain error
+    assert(1.5.acos().is_nan());
+}
+
+@test
+fn test_float_atan() {
+    assert_eq(0.0.atan(), 0.0);
+    assert(approx_eq(1.0.atan(), Float.pi() / 4.0, 1e-14));
+    assert(approx_eq(Float.infinity().atan(), Float.pi() / 2.0, 1e-14));
+    assert(approx_eq(Float.neg_infinity().atan(), -Float.pi() / 2.0, 1e-14));
+}
+
+@test
+fn test_float_atan2() {
+    // atan2(y, x) - two-argument arctangent
+    assert(approx_eq(1.0.atan2(1.0), Float.pi() / 4.0, 1e-14));  // 45°
+    assert(approx_eq(1.0.atan2(0.0), Float.pi() / 2.0, 1e-14));  // 90°
+    assert(approx_eq(0.0.atan2(1.0), 0.0, 1e-14));               // 0°
+    assert(approx_eq((-1.0).atan2(-1.0), -3.0 * Float.pi() / 4.0, 1e-14));  // -135°
+}
+
+@test
+fn test_float_trig_inverses() {
+    // sin(asin(x)) = x for |x| <= 1
+    fn check_sin_asin(x: Float) {
+        assert(approx_eq(x.asin().sin(), x, 1e-14));
+    }
+    check_sin_asin(0.0);
+    check_sin_asin(0.5);
+    check_sin_asin(-0.5);
+    check_sin_asin(1.0);
+    check_sin_asin(-1.0);
+
+    // cos(acos(x)) = x for |x| <= 1
+    fn check_cos_acos(x: Float) {
+        assert(approx_eq(x.acos().cos(), x, 1e-14));
+    }
+    check_cos_acos(0.0);
+    check_cos_acos(0.5);
+    check_cos_acos(-0.5);
+    check_cos_acos(1.0);
+
+    // tan(atan(x)) = x
+    fn check_tan_atan(x: Float) {
+        assert(approx_eq(x.atan().tan(), x, 1e-10));
+    }
+    check_tan_atan(0.0);
+    check_tan_atan(1.0);
+    check_tan_atan(-1.0);
+    check_tan_atan(100.0);
+}
+
+// =============================================================================
+// Hyperbolic Functions
+// =============================================================================
+
+@test
+fn test_float_sinh() {
+    assert_eq(0.0.sinh(), 0.0);
+    // sinh(1) ≈ 1.1752011936438014
+    assert(approx_eq(1.0.sinh(), 1.1752011936438014, 1e-14));
+
+    // sinh(-x) = -sinh(x)
+    assert(approx_eq((-1.0).sinh(), -1.0.sinh(), 1e-14));
+}
+
+@test
+fn test_float_cosh() {
+    assert_eq(0.0.cosh(), 1.0);
+    // cosh(1) ≈ 1.5430806348152437
+    assert(approx_eq(1.0.cosh(), 1.5430806348152437, 1e-14));
+
+    // cosh(-x) = cosh(x) (even function)
+    assert_eq((-1.0).cosh(), 1.0.cosh());
+}
+
+@test
+fn test_float_tanh() {
+    assert_eq(0.0.tanh(), 0.0);
+    // tanh(1) ≈ 0.7615941559557649
+    assert(approx_eq(1.0.tanh(), 0.7615941559557649, 1e-14));
+
+    // tanh approaches ±1 for large values
+    assert(approx_eq(100.0.tanh(), 1.0, 1e-10));
+    assert(approx_eq((-100.0).tanh(), -1.0, 1e-10));
+}
+
+@test
+fn test_float_hyperbolic_identity() {
+    // cosh^2(x) - sinh^2(x) = 1
+    fn check_identity(x: Float) {
+        let c = x.cosh();
+        let s = x.sinh();
+        assert(approx_eq(c * c - s * s, 1.0, 1e-12));
+    }
+
+    check_identity(0.0);
+    check_identity(1.0);
+    check_identity(-1.0);
+    check_identity(2.5);
+}
+
+// =============================================================================
+// Inverse Hyperbolic Functions
+// =============================================================================
+
+@test
+fn test_float_asinh() {
+    assert_eq(0.0.asinh(), 0.0);
+    // asinh(sinh(x)) = x
+    assert(approx_eq(1.0.sinh().asinh(), 1.0, 1e-14));
+
+    // Works for all real numbers
+    assert(100.0.asinh().is_finite());
+    assert((-100.0).asinh().is_finite());
+}
+
+@test
+fn test_float_acosh() {
+    assert_eq(1.0.acosh(), 0.0);
+    // acosh(cosh(x)) = |x| for x >= 0
+    assert(approx_eq(2.0.cosh().acosh(), 2.0, 1e-14));
+
+    // Domain is [1, +inf)
+    assert(0.5.acosh().is_nan());
+}
+
+@test
+fn test_float_atanh() {
+    assert_eq(0.0.atanh(), 0.0);
+    // tanh(atanh(x)) = x for |x| < 1
+    assert(approx_eq(0.5.atanh().tanh(), 0.5, 1e-14));
+
+    // Domain is (-1, 1)
+    assert(1.0.atanh().is_infinite());
+    assert((-1.0).atanh().is_infinite());
+    assert(1.5.atanh().is_nan());
+}
+
+// =============================================================================
+// Angle Conversion
+// =============================================================================
+
+@test
+fn test_float_to_degrees() {
+    assert_eq(0.0.to_degrees(), 0.0);
+    assert(approx_eq(Float.pi().to_degrees(), 180.0, 1e-12));
+    assert(approx_eq((Float.pi() / 2.0).to_degrees(), 90.0, 1e-12));
+    assert(approx_eq((2.0 * Float.pi()).to_degrees(), 360.0, 1e-12));
+}
+
+@test
+fn test_float_to_radians() {
+    assert_eq(0.0.to_radians(), 0.0);
+    assert(approx_eq(180.0.to_radians(), Float.pi(), 1e-14));
+    assert(approx_eq(90.0.to_radians(), Float.pi() / 2.0, 1e-14));
+    assert(approx_eq(360.0.to_radians(), 2.0 * Float.pi(), 1e-14));
+}
+
+@test
+fn test_float_angle_roundtrip() {
+    // Degrees -> radians -> degrees
+    fn check_roundtrip(deg: Float) {
+        assert(approx_eq(deg.to_radians().to_degrees(), deg, 1e-12));
+    }
+
+    check_roundtrip(0.0);
+    check_roundtrip(45.0);
+    check_roundtrip(90.0);
+    check_roundtrip(180.0);
+    check_roundtrip(360.0);
+    check_roundtrip(-45.0);
+}
+
+// =============================================================================
+// Bit Manipulation
+// =============================================================================
+
+@test
+fn test_float_to_bits() {
+    // Zero
+    assert_eq(0.0.to_bits(), 0);
+
+    // 1.0 in IEEE 754 double: 0x3FF0000000000000
+    assert_eq(1.0.to_bits(), 0x3FF0000000000000);
+
+    // -1.0: sign bit set
+    assert_eq((-1.0).to_bits(), 0xBFF0000000000000);
+
+    // 2.0
+    assert_eq(2.0.to_bits(), 0x4000000000000000);
+}
+
+@test
+fn test_float_from_bits() {
+    assert_eq(Float.from_bits(0), 0.0);
+    assert_eq(Float.from_bits(0x3FF0000000000000), 1.0);
+    assert_eq(Float.from_bits(0xBFF0000000000000), -1.0);
+    assert_eq(Float.from_bits(0x4000000000000000), 2.0);
+}
+
+@test
+fn test_float_bits_roundtrip() {
+    fn check_roundtrip(x: Float) {
+        if !x.is_nan() {
+            assert_eq(Float.from_bits(x.to_bits()), x);
+        }
+    }
+
+    check_roundtrip(0.0);
+    check_roundtrip(-0.0);
+    check_roundtrip(1.0);
+    check_roundtrip(-1.0);
+    check_roundtrip(Float.pi());
+    check_roundtrip(Float.infinity());
+    check_roundtrip(Float.neg_infinity());
+    check_roundtrip(Float.max_value());
+    check_roundtrip(Float.min_positive());
+}
+
+// =============================================================================
+// Protocol Implementation Tests
+// =============================================================================
+
+@test
+fn test_float_eq_protocol() {
+    // Basic equality
+    assert(5.0 == 5.0);
+    assert(!(5.0 == 6.0));
+    assert(5.0 != 6.0);
+
+    // NaN is not equal to anything, including itself (IEEE 754)
+    assert(!(Float.nan() == Float.nan()));
+    assert(Float.nan() != Float.nan());
+
+    // Infinities
+    assert(Float.infinity() == Float.infinity());
+    assert(Float.neg_infinity() == Float.neg_infinity());
+    assert(Float.infinity() != Float.neg_infinity());
+}
+
+@test
+fn test_float_partial_ord_protocol() {
+    // Basic ordering
+    assert(3.0 < 5.0);
+    assert(5.0 > 3.0);
+    assert(5.0 <= 5.0);
+    assert(5.0 >= 5.0);
+
+    // With negatives
+    assert(-5.0 < -3.0);
+    assert(-3.0 > -5.0);
+
+    // NaN comparisons are always false
+    assert(!(Float.nan() < 0.0));
+    assert(!(Float.nan() > 0.0));
+    assert(!(Float.nan() <= 0.0));
+    assert(!(Float.nan() >= 0.0));
+    assert(!(0.0 < Float.nan()));
+}
+
+@test
+fn test_float_partial_cmp() {
+    let a = 5.0;
+    let b = 3.0;
+
+    assert_eq(a.partial_cmp(&b), Some(Greater));
+    assert_eq(b.partial_cmp(&a), Some(Less));
+    assert_eq(a.partial_cmp(&a), Some(Equal));
+
+    // NaN
+    assert_eq(Float.nan().partial_cmp(&0.0), None);
+    assert_eq((0.0).partial_cmp(&Float.nan()), None);
+}
+
+@test
+fn test_float_clone_copy() {
+    let x = 42.5;
+    let y = x.clone();
+    assert_eq(x, y);
+
+    let z = x;
+    assert_eq(x, 42.5);
+    assert_eq(z, 42.5);
+}
+
+@test
+fn test_float_default() {
+    assert_eq(Float.default(), 0.0);
+}
+
+@test
+fn test_float_zero_one_protocols() {
+    assert_eq(Float.zero(), 0.0);
+    assert(0.0.is_zero());
+    assert(!1.0.is_zero());
+
+    assert_eq(Float.one(), 1.0);
+    assert(1.0.is_one());
+    assert(!0.0.is_one());
+}
+
+// =============================================================================
+// Operator Protocol Tests
+// =============================================================================
+
+@test
+fn test_float_arithmetic_operators() {
+    assert_eq(5.0 + 3.0, 8.0);
+    assert_eq(5.0 - 3.0, 2.0);
+    assert_eq(5.0 * 3.0, 15.0);
+    assert_eq(6.0 / 3.0, 2.0);
+    assert_eq(7.0 % 3.0, 1.0);
+    assert_eq(-5.0, -5.0);
+}
+
+@test
+fn test_float_infinity_arithmetic() {
+    let inf = Float.infinity();
+    let neg_inf = Float.neg_infinity();
+
+    // Infinity + finite = infinity
+    assert_eq(inf + 1.0, inf);
+    assert_eq(neg_inf + 1.0, neg_inf);
+
+    // Infinity * positive = infinity
+    assert_eq(inf * 2.0, inf);
+    assert_eq(inf * (-2.0), neg_inf);
+
+    // Finite / infinity = 0
+    assert_eq(1.0 / inf, 0.0);
+    assert_eq((-1.0) / inf, -0.0);
+
+    // Infinity / finite = infinity
+    assert_eq(inf / 2.0, inf);
+}
+
+// =============================================================================
+// Edge Cases and IEEE 754 Compliance
+// =============================================================================
+
+@test
+fn test_float_negative_zero() {
+    let pos_zero = 0.0;
+    let neg_zero = -0.0;
+
+    // They compare equal
+    assert(pos_zero == neg_zero);
+
+    // But have different bit representations
+    assert(pos_zero.to_bits() != neg_zero.to_bits());
+
+    // Dividing by them produces different infinities
+    assert_eq(1.0 / pos_zero, Float.infinity());
+    assert_eq(1.0 / neg_zero, Float.neg_infinity());
+}
+
+@test
+fn test_float_subnormal() {
+    let subnormal = Float.min_positive() / 2.0;
+
+    assert(subnormal > 0.0);
+    assert(subnormal < Float.min_positive());
+    assert(!subnormal.is_normal());
+    assert(subnormal.is_finite());
+}
+
+@test
+fn test_float_gradual_underflow() {
+    // Multiplication that causes gradual underflow
+    let small = Float.min_positive();
+    let result = small / 2.0;
+
+    assert(result > 0.0);  // Gradual underflow, not flush to zero
+    assert(result < small);
+}
+
+fn main() {
+    print("Float primitive tests loaded successfully");
+}

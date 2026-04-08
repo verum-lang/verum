@@ -1,0 +1,170 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, knapsack, dp, optimization
+// @timeout: 30000
+
+// 0/1 Knapsack and variants using DP with flat arrays
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn min_val(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+// 0/1 Knapsack: n items (weights, values), capacity W
+// Uses 1D DP: dp[w] = max value achievable with capacity w
+// W must be <= 7
+fn knapsack01(weights: Arr8, values: Arr8, n: Int, cap: Int) -> Int {
+    let mut dp = new_arr8();
+    let mut i = 0;
+    while i < n {
+        let wi = get8(weights, i);
+        let vi = get8(values, i);
+        let mut w = cap;
+        while w >= wi {
+            let candidate = get8(dp, w - wi) + vi;
+            if candidate > get8(dp, w) {
+                dp = set8(dp, w, candidate);
+            }
+            w = w - 1;
+        }
+        i = i + 1;
+    }
+    get8(dp, cap)
+}
+
+// Unbounded knapsack: can take each item multiple times
+fn knapsack_unbounded(weights: Arr8, values: Arr8, n: Int, cap: Int) -> Int {
+    let mut dp = new_arr8();
+    let mut w = 1;
+    while w <= cap {
+        let mut best = get8(dp, w);
+        let mut i = 0;
+        while i < n {
+            let wi = get8(weights, i);
+            if wi <= w {
+                let candidate = get8(dp, w - wi) + get8(values, i);
+                if candidate > best { best = candidate; }
+            }
+            i = i + 1;
+        }
+        dp = set8(dp, w, best);
+        w = w + 1;
+    }
+    get8(dp, cap)
+}
+
+// Subset sum: can we make exactly target from n items?
+fn subset_sum(items: Arr8, n: Int, target: Int) -> Int {
+    // dp[s] = 1 if sum s is achievable
+    let mut dp = new_arr8();
+    dp = set8(dp, 0, 1); // sum 0 always achievable
+    let mut i = 0;
+    while i < n {
+        let v = get8(items, i);
+        let mut s = target;
+        while s >= v {
+            if get8(dp, s - v) == 1 {
+                dp = set8(dp, s, 1);
+            }
+            s = s - 1;
+        }
+        i = i + 1;
+    }
+    get8(dp, target)
+}
+
+// Count ways to make change (coin change problem)
+fn coin_change_ways(coins: Arr8, n_coins: Int, amount: Int) -> Int {
+    let mut dp = new_arr8();
+    dp = set8(dp, 0, 1);
+    let mut i = 0;
+    while i < n_coins {
+        let c = get8(coins, i);
+        let mut a = c;
+        while a <= amount {
+            dp = set8(dp, a, get8(dp, a) + get8(dp, a - c));
+            a = a + 1;
+        }
+        i = i + 1;
+    }
+    get8(dp, amount)
+}
+
+fn test_knapsack01() -> Int {
+    // items: weight=[2,3,4,5], value=[3,4,5,6], capacity=7
+    let w = Arr8 { v0: 2, v1: 3, v2: 4, v3: 5, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let v = Arr8 { v0: 3, v1: 4, v2: 5, v3: 6, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Best: items 0+3 (w=7, v=9) or items 1+2 (w=7, v=9)
+    assert_eq(knapsack01(w, v, 4, 7), 9);
+
+    // Single item fits
+    let w2 = Arr8 { v0: 3, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let v2 = Arr8 { v0: 10, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(knapsack01(w2, v2, 1, 5), 10);
+    assert_eq(knapsack01(w2, v2, 1, 2), 0); // doesn't fit
+    1
+}
+
+fn test_unbounded() -> Int {
+    // coins: weight=[1,3], value=[1,4], capacity=7
+    let w = Arr8 { v0: 1, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let v = Arr8 { v0: 1, v1: 4, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Best: 2 items of weight 3 (v=8) + 1 item of weight 1 (v=1) = 9
+    assert_eq(knapsack_unbounded(w, v, 2, 7), 9);
+    1
+}
+
+fn test_subset_sum() -> Int {
+    let items = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(subset_sum(items, 4, 5), 1);  // 2+3 or 1+4
+    assert_eq(subset_sum(items, 4, 7), 1);  // 3+4
+    assert_eq(subset_sum(items, 4, 0), 1);  // empty subset
+    1
+}
+
+fn test_coin_change() -> Int {
+    // coins: [1, 2, 3], amount = 4
+    let coins = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Ways: 1111, 112, 13, 22 → 4 ways
+    assert_eq(coin_change_ways(coins, 3, 4), 4);
+    assert_eq(coin_change_ways(coins, 3, 0), 1); // empty set
+    assert_eq(coin_change_ways(coins, 3, 1), 1); // just [1]
+    1
+}
+
+fn main() -> Int {
+    test_knapsack01();
+    test_unbounded();
+    test_subset_sum();
+    test_coin_change();
+    print("[OK] 445_knapsack_aot");
+    0
+}

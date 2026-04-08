@@ -1,0 +1,158 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, interval, arithmetic, math
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for interval arithmetic (integer intervals)
+
+type Interval is { lo: Int, hi: Int };
+
+fn ivl(lo: Int, hi: Int) -> Interval { Interval { lo: lo, hi: hi } }
+
+fn ivl_width(a: Interval) -> Int { a.hi - a.lo }
+fn ivl_midpoint(a: Interval) -> Int { (a.lo + a.hi) / 2 }
+fn ivl_contains(a: Interval, x: Int) -> Bool { x >= a.lo && x <= a.hi }
+
+fn ivl_overlaps(a: Interval, b: Interval) -> Bool {
+    a.lo <= b.hi && b.lo <= a.hi
+}
+
+fn ivl_subset(a: Interval, b: Interval) -> Bool {
+    a.lo >= b.lo && a.hi <= b.hi
+}
+
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+fn ivl_add(a: Interval, b: Interval) -> Interval {
+    ivl(a.lo + b.lo, a.hi + b.hi)
+}
+
+fn ivl_sub(a: Interval, b: Interval) -> Interval {
+    ivl(a.lo - b.hi, a.hi - b.lo)
+}
+
+fn ivl_mul(a: Interval, b: Interval) -> Interval {
+    let p1 = a.lo * b.lo;
+    let p2 = a.lo * b.hi;
+    let p3 = a.hi * b.lo;
+    let p4 = a.hi * b.hi;
+    let lo = min2(min2(p1, p2), min2(p3, p4));
+    let hi = max2(max2(p1, p2), max2(p3, p4));
+    ivl(lo, hi)
+}
+
+fn ivl_intersection(a: Interval, b: Interval) -> Interval {
+    let lo = max2(a.lo, b.lo);
+    let hi = min2(a.hi, b.hi);
+    if lo > hi { ivl(0, -1) } else { ivl(lo, hi) }
+}
+
+fn ivl_union_hull(a: Interval, b: Interval) -> Interval {
+    ivl(min2(a.lo, b.lo), max2(a.hi, b.hi))
+}
+
+fn ivl_eq(a: Interval, b: Interval) -> Bool {
+    a.lo == b.lo && a.hi == b.hi
+}
+
+fn ivl_is_empty(a: Interval) -> Bool { a.lo > a.hi }
+
+fn test_basic() {
+    let a = ivl(1, 5);
+    assert_eq(ivl_width(a), 4);
+    assert_eq(ivl_midpoint(a), 3);
+    assert_eq(ivl_contains(a, 3), true);
+    assert_eq(ivl_contains(a, 0), false);
+    assert_eq(ivl_contains(a, 6), false);
+    assert_eq(ivl_contains(a, 1), true);
+    assert_eq(ivl_contains(a, 5), true);
+}
+
+fn test_arithmetic() {
+    let a = ivl(2, 4);
+    let b = ivl(1, 3);
+
+    // [2,4] + [1,3] = [3,7]
+    let sum = ivl_add(a, b);
+    assert_eq(sum.lo, 3);
+    assert_eq(sum.hi, 7);
+
+    // [2,4] - [1,3] = [-1, 3]
+    let diff = ivl_sub(a, b);
+    assert_eq(diff.lo, -1);
+    assert_eq(diff.hi, 3);
+
+    // [2,4] * [1,3] = [2, 12]
+    let prod = ivl_mul(a, b);
+    assert_eq(prod.lo, 2);
+    assert_eq(prod.hi, 12);
+}
+
+fn test_negative_mul() {
+    // [-2, 3] * [-1, 4]
+    let a = ivl(-2, 3);
+    let b = ivl(-1, 4);
+    let prod = ivl_mul(a, b);
+    // Products: 2, -8, -3, 12 -> min=-8, max=12
+    assert_eq(prod.lo, -8);
+    assert_eq(prod.hi, 12);
+}
+
+fn test_overlap() {
+    assert_eq(ivl_overlaps(ivl(1, 5), ivl(3, 7)), true);
+    assert_eq(ivl_overlaps(ivl(1, 5), ivl(5, 7)), true);
+    assert_eq(ivl_overlaps(ivl(1, 5), ivl(6, 7)), false);
+    assert_eq(ivl_overlaps(ivl(1, 5), ivl(0, 1)), true);
+}
+
+fn test_subset() {
+    assert_eq(ivl_subset(ivl(2, 4), ivl(1, 5)), true);
+    assert_eq(ivl_subset(ivl(1, 5), ivl(1, 5)), true);
+    assert_eq(ivl_subset(ivl(0, 5), ivl(1, 5)), false);
+}
+
+fn test_intersection() {
+    let i = ivl_intersection(ivl(1, 5), ivl(3, 7));
+    assert_eq(i.lo, 3);
+    assert_eq(i.hi, 5);
+
+    let empty = ivl_intersection(ivl(1, 3), ivl(5, 7));
+    assert_eq(ivl_is_empty(empty), true);
+}
+
+fn test_union_hull() {
+    let u = ivl_union_hull(ivl(1, 3), ivl(5, 7));
+    assert_eq(u.lo, 1);
+    assert_eq(u.hi, 7);
+}
+
+fn test_identities() {
+    let a = ivl(3, 8);
+    let zero = ivl(0, 0);
+
+    // a + [0,0] = a
+    assert_eq(ivl_eq(ivl_add(a, zero), a), true);
+
+    // a * [1,1] = a
+    let one = ivl(1, 1);
+    assert_eq(ivl_eq(ivl_mul(a, one), a), true);
+
+    // intersection(a, a) = a
+    assert_eq(ivl_eq(ivl_intersection(a, a), a), true);
+}
+
+fn main() -> Int {
+    test_basic();
+    test_arithmetic();
+    test_negative_mul();
+    test_overlap();
+    test_subset();
+    test_intersection();
+    test_union_hull();
+    test_identities();
+    print("[OK] 244_interval_arithmetic_aot");
+    0
+}

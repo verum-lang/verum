@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M504
+// @description: Tests M504 ProofConstructionFailed error code
+// @tags: meta-system, type-level, proofs, error-codes
+
+// M504 is triggered when proof term construction fails.
+// This test uses trigger_proof_construction_failed to validate the error code.
+
+meta fn cause_proof_construction_failure() -> Int {
+    // Trigger M504 ProofConstructionFailed error
+    trigger_proof_construction_failed("forall x: Int. x == x + 1", "goal is unprovable")
+}
+
+fn main() {
+    // This will fail at compile time with M504
+    @const assert(cause_proof_construction_failure() == 0);
+}

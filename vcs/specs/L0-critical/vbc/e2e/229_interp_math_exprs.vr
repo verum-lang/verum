@@ -1,0 +1,211 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, math, expressions, algorithms
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: complex mathematical expressions — compound calculations,
+// accumulation patterns, numerical algorithms
+
+// =============================================================================
+// Compound calculations
+// =============================================================================
+
+fn test_polynomial_evaluation() {
+    // Evaluate 3x^2 + 2x + 1 at x=5
+    let x = 5;
+    let result = 3 * x * x + 2 * x + 1;
+    // 75 + 10 + 1 = 86
+    assert_eq(result, 86);
+}
+
+fn test_horner_method() {
+    // Evaluate 2x^3 + 3x^2 - x + 7 at x=4 using Horner's method
+    // ((2*4 + 3)*4 - 1)*4 + 7
+    let x = 4;
+    let result = ((2 * x + 3) * x - 1) * x + 7;
+    // (8+3=11)*4=44, 44-1=43, 43*4=172, 172+7=179
+    assert_eq(result, 179);
+}
+
+fn test_geometric_series_sum() {
+    // Sum of geometric series: 1 + 2 + 4 + 8 + ... + 512 = 2^10 - 1 = 1023
+    let mut sum = 0;
+    let mut term = 1;
+    while term <= 512 {
+        sum = sum + term;
+        term = term * 2;
+    }
+    assert_eq(sum, 1023);
+}
+
+// =============================================================================
+// Accumulation patterns
+// =============================================================================
+
+fn test_running_average_int() {
+    // Compute average of 1..10 using integer arithmetic
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 10 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    let avg = sum / 10;
+    assert_eq(avg, 5);
+}
+
+fn test_prefix_sum() {
+    // Compute cumulative sums: 1, 3, 6, 10, 15
+    let mut cumulative = 0;
+    let mut last = 0;
+    let mut i = 1;
+    while i <= 5 {
+        cumulative = cumulative + i;
+        last = cumulative;
+        i = i + 1;
+    }
+    assert_eq(last, 15);
+}
+
+fn test_alternating_sum() {
+    // 1 - 2 + 3 - 4 + 5 - 6 + 7 - 8 + 9 - 10 = -5
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 10 {
+        if i % 2 == 1 {
+            sum = sum + i;
+        } else {
+            sum = sum - i;
+        }
+        i = i + 1;
+    }
+    assert_eq(sum, -5);
+}
+
+// =============================================================================
+// Numerical algorithms
+// =============================================================================
+
+fn test_integer_sqrt() {
+    // Integer square root via linear search
+    fn isqrt(n: Int) -> Int {
+        let mut r = 0;
+        while (r + 1) * (r + 1) <= n {
+            r = r + 1;
+        }
+        r
+    }
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(99), 9);
+}
+
+fn test_euclidean_algorithm() {
+    fn gcd(a: Int, b: Int) -> Int {
+        let mut x = a;
+        let mut y = b;
+        while y != 0 {
+            let temp = y;
+            y = x % y;
+            x = temp;
+        }
+        x
+    }
+    fn lcm(a: Int, b: Int) -> Int {
+        a / gcd(a, b) * b
+    }
+    assert_eq(gcd(48, 36), 12);
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(12, 15), 60);
+    assert_eq(lcm(7, 11), 77);
+}
+
+fn test_collatz_steps() {
+    // Count steps to reach 1 in Collatz sequence starting from n
+    fn collatz_count(start: Int) -> Int {
+        let mut n = start;
+        let mut steps = 0;
+        while n != 1 {
+            if n % 2 == 0 {
+                n = n / 2;
+            } else {
+                n = 3 * n + 1;
+            }
+            steps = steps + 1;
+        }
+        steps
+    }
+    assert_eq(collatz_count(1), 0);
+    assert_eq(collatz_count(2), 1);
+    assert_eq(collatz_count(3), 7);
+    assert_eq(collatz_count(6), 8);
+    assert_eq(collatz_count(27), 111);
+}
+
+// =============================================================================
+// Combinatorial expressions
+// =============================================================================
+
+fn test_binomial_coefficient() {
+    // C(n, k) = n! / (k! * (n-k)!)
+    fn binom(n: Int, k: Int) -> Int {
+        let mut result = 1;
+        let mut i = 0;
+        while i < k {
+            result = result * (n - i);
+            result = result / (i + 1);
+            i = i + 1;
+        }
+        result
+    }
+    assert_eq(binom(5, 0), 1);
+    assert_eq(binom(5, 1), 5);
+    assert_eq(binom(5, 2), 10);
+    assert_eq(binom(5, 3), 10);
+    assert_eq(binom(10, 5), 252);
+}
+
+fn test_catalan_number() {
+    // Catalan number C(n) = C(2n, n) / (n+1)
+    fn binom(n: Int, k: Int) -> Int {
+        let mut result = 1;
+        let mut i = 0;
+        while i < k {
+            result = result * (n - i);
+            result = result / (i + 1);
+            i = i + 1;
+        }
+        result
+    }
+    fn catalan(n: Int) -> Int {
+        binom(2 * n, n) / (n + 1)
+    }
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+}
+
+fn main() -> Int {
+    test_polynomial_evaluation();
+    test_horner_method();
+    test_geometric_series_sum();
+    test_running_average_int();
+    test_prefix_sum();
+    test_alternating_sum();
+    test_integer_sqrt();
+    test_euclidean_algorithm();
+    test_collatz_steps();
+    test_binomial_coefficient();
+    test_catalan_number();
+    print("[OK] 229_interp_math_exprs");
+    0
+}

@@ -1,0 +1,69 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: condvar, sync, producer_consumer
+// @expect: pass
+
+// Condvar-based producer/consumer with bounded buffer.
+
+fn __mutex_new_raw() -> Int { 0 }
+fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
+fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
+fn __cond_new_raw() -> Int { 0 }
+fn __cond_wait_raw(cond: Int, mtx: Int) -> Int { 0 }
+fn __cond_signal_raw(cond: Int) -> Int { 0 }
+
+fn main() -> Int {
+    let mtx = __mutex_new_raw();
+    let cond_not_empty = __cond_new_raw();
+    let cond_not_full = __cond_new_raw();
+
+    // Bounded buffer via channel (capacity 3)
+    let buffer = Channel.new(3);
+    let result_ch = Channel.new(1);
+
+    // Producer: sends 10 items
+    let producer = spawn {
+        let mut i = 0;
+        while i < 10 {
+            buffer.send(i * i);
+            i = i + 1;
+        }
+        buffer.send(-1); // sentinel
+        10
+    };
+
+    // Consumer: reads until sentinel, sums all values
+    let consumer = spawn {
+        let mut sum = 0;
+        let mut running = true;
+        while running {
+            match buffer.recv() {
+                Some(v) => {
+                    if v == -1 {
+                        running = false;
+                    } else {
+                        sum = sum + v;
+                    }
+                },
+                None => {
+                    running = false;
+                }
+            }
+        }
+        result_ch.send(sum);
+        sum
+    };
+
+    let p_result = producer.await;
+    let c_result = consumer.await;
+
+    // sum of i^2 for i=0..9 = 0+1+4+9+16+25+36+49+64+81 = 285
+    if c_result != 285 {
+        print(f"FAIL: consumer sum = {c_result}, expected 285");
+        return 1;
+    }
+
+    print(f"PASS: producer/consumer sum = {c_result}");
+    0
+}

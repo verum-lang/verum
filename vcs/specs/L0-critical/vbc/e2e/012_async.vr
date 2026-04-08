@@ -1,0 +1,122 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, async, await, pipeline
+// @timeout: 5000
+// @expected-exit: 0
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies async function definitions and await mechanics through the full pipeline
+// NOTE: Interpreter runs async synchronously (single-threaded)
+
+// =============================================================================
+// Basic async functions
+// =============================================================================
+
+async fn compute_value() -> Int {
+    42
+}
+
+async fn compute_sum(a: Int, b: Int) -> Int {
+    a + b
+}
+
+async fn compute_text() -> Text {
+    "hello async"
+}
+
+// =============================================================================
+// Sequential await helpers
+// =============================================================================
+
+async fn step1() -> Int { 1 }
+async fn step2() -> Int { 2 }
+async fn step3() -> Int { 3 }
+
+// =============================================================================
+// Nested async
+// =============================================================================
+
+async fn inner_async() -> Int {
+    100
+}
+
+async fn outer_async() -> Int {
+    let x = inner_async().await;
+    x * 2
+}
+
+async fn deeply_nested() -> Int {
+    let x = outer_async().await;
+    x + 1
+}
+
+// =============================================================================
+// Async with control flow
+// =============================================================================
+
+async fn async_conditional(flag: Bool) -> Int {
+    if flag {
+        42
+    } else {
+        0
+    }
+}
+
+async fn async_with_loop(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+// =============================================================================
+// Test runner — async main orchestrates all tests
+// =============================================================================
+
+async fn run_all_tests() -> Int {
+    // Basic async
+    let result = compute_value().await;
+    assert_eq(result, 42);
+
+    let result2 = compute_sum(10, 20).await;
+    assert_eq(result2, 30);
+
+    let text_result = compute_text().await;
+    assert_eq(text_result, "hello async");
+
+    // Sequential await
+    let a = step1().await;
+    let b = step2().await;
+    let c = step3().await;
+    assert_eq(a + b + c, 6);
+
+    // Nested async
+    let nested = outer_async().await;
+    assert_eq(nested, 200);
+
+    let deep = deeply_nested().await;
+    assert_eq(deep, 201);
+
+    // Async with control flow
+    let cond_true = async_conditional(true).await;
+    assert_eq(cond_true, 42);
+
+    let cond_false = async_conditional(false).await;
+    assert_eq(cond_false, 0);
+
+    let loop_result = async_with_loop(5).await;
+    assert_eq(loop_result, 10);
+
+    0
+}
+
+fn main() -> Int {
+    // In interpreter, async runs synchronously — just call the async runner
+    let _future = run_all_tests();
+    print("[OK] 012_async");
+    0
+}

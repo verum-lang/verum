@@ -1,0 +1,237 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, thread-safety, atomics, lock-free, concurrency
+// @description: Tests atomic operations for safe concurrent programming
+
+/// Atomic operations provide lock-free synchronization primitives:
+/// - AtomicInt, AtomicBool, AtomicPtr
+/// - Guaranteed to be data-race-free
+/// - Memory ordering semantics for visibility
+///
+/// These are the building blocks for lock-free data structures
+/// and efficient concurrent algorithms.
+
+mount core.sync.atomic.{AtomicInt, AtomicBool, AtomicPtr};
+mount core.sync.atomic.MemoryOrdering.{Relaxed, Acquire, Release, AcqRel, SeqCst};
+
+fn main() {
+    test_atomic_int_basic();
+    test_atomic_int_arithmetic();
+    test_atomic_bool();
+    test_compare_exchange();
+    test_memory_ordering();
+    test_spinlock_example();
+    test_counter_example();
+
+    print("All atomic operations tests passed!");
+}
+
+fn test_atomic_int_basic() {
+    let atomic = AtomicInt.new(42);
+
+    // Load: read value atomically
+    let value = atomic.load(Ordering.SeqCst);
+    assert(value == 42);
+
+    // Store: write value atomically
+    atomic.store(100, Ordering.SeqCst);
+    assert(atomic.load(Ordering.SeqCst) == 100);
+
+    // Swap: exchange values atomically
+    let old = atomic.swap(200, Ordering.SeqCst);
+    assert(old == 100);
+    assert(atomic.load(Ordering.SeqCst) == 200);
+}
+
+fn test_atomic_int_arithmetic() {
+    let counter = AtomicInt.new(0);
+
+    // fetch_add: atomic increment, returns old value
+    let old = counter.fetch_add(5, Ordering.SeqCst);
+    assert(old == 0);
+    assert(counter.load(Ordering.SeqCst) == 5);
+
+    // fetch_sub: atomic decrement
+    let old = counter.fetch_sub(2, Ordering.SeqCst);
+    assert(old == 5);
+    assert(counter.load(Ordering.SeqCst) == 3);
+
+    // fetch_max: atomic maximum
+    let old = counter.fetch_max(10, Ordering.SeqCst);
+    assert(old == 3);
+    assert(counter.load(Ordering.SeqCst) == 10);
+
+    // fetch_min: atomic minimum
+    let old = counter.fetch_min(5, Ordering.SeqCst);
+    assert(old == 10);
+    assert(counter.load(Ordering.SeqCst) == 5);
+
+    // Bitwise operations
+    let bits = AtomicInt.new(0b1100);
+    bits.fetch_or(0b0011, Ordering.SeqCst);
+    assert(bits.load(Ordering.SeqCst) == 0b1111);
+
+    bits.fetch_and(0b1010, Ordering.SeqCst);
+    assert(bits.load(Ordering.SeqCst) == 0b1010);
+
+    bits.fetch_xor(0b1111, Ordering.SeqCst);
+    assert(bits.load(Ordering.SeqCst) == 0b0101);
+}
+
+fn test_atomic_bool() {
+    let flag = AtomicBool.new(false);
+
+    // Load and store
+    assert(flag.load(Ordering.SeqCst) == false);
+    flag.store(true, Ordering.SeqCst);
+    assert(flag.load(Ordering.SeqCst) == true);
+
+    // Swap
+    let old = flag.swap(false, Ordering.SeqCst);
+    assert(old == true);
+
+    // Compare and swap for flags
+    let was_set = flag.compare_exchange(false, true, Ordering.SeqCst, Ordering.SeqCst);
+    assert(was_set == Ok(false));  // Was false, now true
+    assert(flag.load(Ordering.SeqCst) == true);
+}
+
+fn test_compare_exchange() {
+    let atomic = AtomicInt.new(5);
+
+    // compare_exchange: CAS operation
+    // If current == expected, set to new and return Ok(expected)
+    // Otherwise return Err(current)
+
+    // Successful CAS
+    let result = atomic.compare_exchange(5, 10, Ordering.SeqCst, Ordering.SeqCst);
+    assert(result == Ok(5));
+    assert(atomic.load(Ordering.SeqCst) == 10);
+
+    // Failed CAS (current value doesn't match expected)
+    let result = atomic.compare_exchange(5, 20, Ordering.SeqCst, Ordering.SeqCst);
+    assert(result == Err(10));  // Current value is 10, not 5
+    assert(atomic.load(Ordering.SeqCst) == 10);  // Unchanged
+
+    // compare_exchange_weak: may spuriously fail
+    // More efficient on some architectures
+    loop {
+        let current = atomic.load(Ordering.SeqCst);
+        match atomic.compare_exchange_weak(current, current + 1, Ordering.SeqCst, Ordering.SeqCst) {
+            Ok(_) => break,
+            Err(_) => continue,  // Retry on spurious failure
+        }
+    }
+    assert(atomic.load(Ordering.SeqCst) == 11);
+}
+
+fn test_memory_ordering() {
+    // Memory ordering controls visibility of operations
+
+    // Relaxed: no synchronization, just atomicity
+    let relaxed = AtomicInt.new(0);
+    relaxed.store(1, Ordering.Relaxed);
+    let _ = relaxed.load(Ordering.Relaxed);
+
+    // Acquire/Release: synchronization pair
+    let data = AtomicInt.new(0);
+    let ready = AtomicBool.new(false);
+
+    // Producer thread (would use Release)
+    data.store(42, Ordering.Relaxed);
+    ready.store(true, Ordering.Release);  // All previous writes visible after this
+
+    // Consumer thread (would use Acquire)
+    while !ready.load(Ordering.Acquire) {
+        // Wait
+    }
+    let value = data.load(Ordering.Relaxed);  // Guaranteed to see 42
+
+    // SeqCst: total ordering across all threads
+    // Most expensive but simplest to reason about
+    let seq = AtomicInt.new(0);
+    seq.store(1, Ordering.SeqCst);
+}
+
+fn test_spinlock_example() {
+    // Simple spinlock using AtomicBool
+    type SpinLock is {
+        locked: AtomicBool,
+    };
+
+    implement SpinLock {
+        fn new() -> Self {
+            SpinLock { locked: AtomicBool.new(false) }
+        }
+
+        fn lock(&self) {
+            // Spin until we acquire the lock
+            while self.locked.compare_exchange_weak(
+                false,
+                true,
+                Ordering.Acquire,
+                Ordering.Relaxed
+            ).is_err() {
+                // Hint to CPU we're spinning
+                std.hint.spin_loop();
+            }
+        }
+
+        fn unlock(&self) {
+            self.locked.store(false, Ordering.Release);
+        }
+    }
+
+    let spinlock = SpinLock.new();
+
+    spinlock.lock();
+    // Critical section
+    spinlock.unlock();
+}
+
+fn test_counter_example() {
+    // Thread-safe counter using atomic operations
+    type AtomicCounter is {
+        count: AtomicInt,
+    };
+
+    implement AtomicCounter {
+        fn new() -> Self {
+            AtomicCounter { count: AtomicInt.new(0) }
+        }
+
+        fn increment(&self) -> Int {
+            self.count.fetch_add(1, Ordering.SeqCst)
+        }
+
+        fn decrement(&self) -> Int {
+            self.count.fetch_sub(1, Ordering.SeqCst)
+        }
+
+        fn get(&self) -> Int {
+            self.count.load(Ordering.SeqCst)
+        }
+    }
+
+    let counter = AtomicCounter.new();
+    let counter_ref = &counter;
+
+    // Increment from multiple threads
+    let handles: List<JoinHandle<()>> = (0..100)
+        .map(|_| {
+            spawn(move || {
+                for _ in 0..100 {
+                    counter_ref.increment();
+                }
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // Should be exactly 10000 (100 threads * 100 increments)
+    assert(counter.get() == 10000);
+}

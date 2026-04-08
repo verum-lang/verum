@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: contexts, declaration
+// @description: Tests context trait declarations with various method signatures
+//
+// Contexts are similar to traits but designed for dependency injection.
+// They can be async or sync, and define the interface for runtime-provided services.
+
+// Async context for database operations
+context async Database {
+    // Async methods for I/O-bound operations
+    async fn fetch_user(id: UserId) -> Maybe<User>;
+    async fn save_user(user: &User) -> Result<(), DbError>;
+    async fn delete_user(id: UserId) -> Result<Bool, DbError>;
+    async fn list_users(page: Int, limit: Int) -> List<User>;
+
+    // Transaction support
+    async fn begin_transaction() -> Transaction;
+    async fn commit(tx: Transaction) -> Result<(), DbError>;
+    async fn rollback(tx: Transaction) -> Result<(), DbError>;
+}
+
+// Sync context for logging - no async needed
+context Logger {
+    fn log(level: Level, message: Text);
+    fn debug(message: Text);
+    fn info(message: Text);
+    fn warn(message: Text);
+    fn error(message: Text);
+}
+
+// Context for configuration - sync, read-only
+context Config {
+    fn get(key: Text) -> Maybe<Text>;
+    fn get_int(key: Text) -> Maybe<Int>;
+    fn get_bool(key: Text) -> Maybe<Bool>;
+    fn require(key: Text) -> Text;  // Panics if missing
+}
+
+// Context for metrics collection
+context async Metrics {
+    fn increment(name: Text);
+    fn gauge(name: Text, value: Float);
+    fn histogram(name: Text, value: Float);
+    async fn flush() -> Result<(), MetricsError>;
+}
+
+// Context for cache operations
+context async Cache {
+    async fn get<T: Serialize>(key: Text) -> Maybe<T>;
+    async fn set<T: Serialize>(key: Text, value: T, ttl: Duration);
+    async fn delete(key: Text) -> Bool;
+    async fn exists(key: Text) -> Bool;
+}
+
+// Context for event publishing
+context async EventBus {
+    async fn publish<E: Event>(event: E) -> Result<(), EventError>;
+    async fn subscribe<E: Event>(handler: fn(E)) -> Subscription;
+}
+
+// Type definitions used by contexts
+type UserId is Int;
+
+type User is {
+    id: UserId,
+    name: Text,
+    email: Text,
+};
+
+type DbError is
+    | ConnectionFailed(Text)
+    | QueryFailed(Text)
+    | NotFound
+    | Conflict;
+
+type Transaction is {
+    id: Text,
+    started_at: Timestamp,
+};
+
+type Level is
+    | Debug
+    | Info
+    | Warn
+    | Error;
+
+type MetricsError is FlushFailed(Text);
+
+type EventError is PublishFailed(Text);
+
+type Subscription is {
+    id: Text,
+};
+
+type Event is protocol {};
+type Serialize is protocol {};
+type Duration is Int;
+type Timestamp is Int;
+
+fn main() {
+    // This file tests context declaration syntax only
+    // No runtime behavior tested here
+}

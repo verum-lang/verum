@@ -1,0 +1,766 @@
+// @test: parse
+// @level: L0
+// @tags: parser, self-hosting, iterators, collections, parser-patterns
+// @description: Iterator and collection patterns needed for parser self-hosting
+
+// =============================================================================
+// Section 1: Peekable Iterator Pattern (Critical for Lexer/Parser)
+// =============================================================================
+
+type PeekableIter<T, I: Iterator<Item = T>> is {
+    inner: I,
+    peeked: Maybe<Maybe<T>>
+};
+
+implement<T, I: Iterator<Item = T>> PeekableIter<T, I> {
+    fn new(iter: I) -> PeekableIter<T, I> {
+        PeekableIter { inner: iter, peeked: None }
+    }
+
+    fn peek(&mut self) -> Maybe<&T> {
+        if self.peeked.is_none() {
+            self.peeked = Some(self.inner.next());
+        }
+        match &self.peeked {
+            Some(Some(ref item)) => Some(item),
+            _ => None
+        }
+    }
+
+    fn peek_mut(&mut self) -> Maybe<&mut T> {
+        if self.peeked.is_none() {
+            self.peeked = Some(self.inner.next());
+        }
+        match &mut self.peeked {
+            Some(Some(ref mut item)) => Some(item),
+            _ => None
+        }
+    }
+
+    fn next(&mut self) -> Maybe<T> {
+        match self.peeked.take() {
+            Some(item) => item,
+            None => self.inner.next()
+        }
+    }
+
+    fn next_if(&mut self, predicate: fn(&T) -> Bool) -> Maybe<T> {
+        match self.peek() {
+            Some(item) if predicate(item) => self.next(),
+            _ => None
+        }
+    }
+
+    fn next_if_eq(&mut self, expected: &T) -> Maybe<T>
+    where T: Eq {
+        self.next_if(|x| x == expected)
+    }
+}
+
+implement<T, I: Iterator<Item = T>> Iterator for PeekableIter<T, I> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        self.next()
+    }
+}
+
+// =============================================================================
+// Section 2: Character Iterator for Lexer
+// =============================================================================
+
+type CharIterator is {
+    source: Text,
+    position: Int,
+    line: Int,
+    column: Int
+};
+
+implement CharIterator {
+    fn new(source: Text) -> CharIterator {
+        CharIterator {
+            source,
+            position: 0,
+            line: 1,
+            column: 1
+        }
+    }
+
+    fn peek(&self) -> Maybe<Char> {
+        if self.position < self.source.len() {
+            Some(self.source.char_at(self.position))
+        } else {
+            None
+        }
+    }
+
+    fn peek_nth(&self, n: Int) -> Maybe<Char> {
+        let pos = self.position + n;
+        if pos < self.source.len() {
+            Some(self.source.char_at(pos))
+        } else {
+            None
+        }
+    }
+
+    fn advance(&mut self) -> Maybe<Char> {
+        if self.position < self.source.len() {
+            let ch = self.source.char_at(self.position);
+            self.position += 1;
+            if ch == '\n' {
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.column += 1;
+            }
+            Some(ch)
+        } else {
+            None
+        }
+    }
+
+    fn skip_while(&mut self, predicate: fn(Char) -> Bool) {
+        while let Some(ch) = self.peek() {
+            if predicate(ch) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn take_while(&mut self, predicate: fn(Char) -> Bool) -> Text {
+        let start = self.position;
+        self.skip_while(predicate);
+        self.source.slice(start, self.position)
+    }
+
+    fn is_at_end(&self) -> Bool {
+        self.position >= self.source.len()
+    }
+
+    fn current_position(&self) -> (Int, Int, Int) {
+        (self.position, self.line, self.column)
+    }
+}
+
+// =============================================================================
+// Section 3: List Operations for AST Building
+// =============================================================================
+
+fn test_list_operations() {
+    let mut items: List<Int> = List.new();
+
+    // Push operations
+    items.push(1);
+    items.push(2);
+    items.push(3);
+
+    // Access operations
+    let first = items.first();
+    let last = items.last();
+    let middle = items.get(1);
+
+    // Iteration
+    for item in items.iter() {
+        print(f"Item: {item}");
+    }
+
+    // Mutable iteration
+    for item in items.iter_mut() {
+        *item *= 2;
+    }
+
+    // Transform operations
+    let doubled = items.iter().map(|x| x * 2).collect();
+    let positive = items.iter().filter(|x| *x > 0).collect();
+    let sum = items.iter().fold(0, |acc, x| acc + *x);
+
+    // Predicates
+    let all_positive = items.iter().all(|x| *x > 0);
+    let any_negative = items.iter().any(|x| *x < 0);
+    let found = items.iter().find(|x| *x == 2);
+
+    // Index operations
+    let at_1 = items[1];
+    items[1] = 100;
+
+    // Length and empty checks
+    let len = items.len();
+    let is_empty = items.is_empty();
+
+    // Pop operations
+    let popped = items.pop();
+
+    // Clear
+    items.clear();
+}
+
+fn test_list_with_custom_types() {
+    type Node is { value: Int, span: Span };
+    type Span is { start: Int, end: Int };
+
+    let mut nodes: List<Node> = List.new();
+    nodes.push(Node { value: 1, span: Span { start: 0, end: 5 } });
+    nodes.push(Node { value: 2, span: Span { start: 6, end: 10 } });
+
+    // Access field after indexing
+    let first_value = nodes[0].value;
+    let first_span = nodes[0].span;
+
+    // Destructuring in iteration
+    for Node { value, span } in nodes.iter() {
+        print(f"Value {value} at {span.start}..{span.end}");
+    }
+
+    // Map to extract values
+    let values: List<Int> = nodes.iter().map(|n| n.value).collect();
+    let spans: List<Span> = nodes.iter().map(|n| n.span).collect();
+}
+
+// =============================================================================
+// Section 4: Stack/Vec Operations for Parser State
+// =============================================================================
+
+type Stack<T> is {
+    items: List<T>
+};
+
+implement<T> Stack<T> {
+    fn new() -> Stack<T> {
+        Stack { items: List.new() }
+    }
+
+    fn push(&mut self, item: T) {
+        self.items.push(item);
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        self.items.pop()
+    }
+
+    fn peek(&self) -> Maybe<&T> {
+        self.items.last()
+    }
+
+    fn peek_mut(&mut self) -> Maybe<&mut T> {
+        self.items.last_mut()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.items.is_empty()
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+
+    fn clear(&mut self) {
+        self.items.clear();
+    }
+}
+
+fn test_stack_operations() {
+    let mut stack: Stack<Int> = Stack.new();
+
+    stack.push(1);
+    stack.push(2);
+    stack.push(3);
+
+    while let Some(item) = stack.pop() {
+        print(f"Popped: {item}");
+    }
+
+    assert(stack.is_empty());
+}
+
+// =============================================================================
+// Section 5: Map Operations for Symbol Tables
+// =============================================================================
+
+fn test_map_operations() {
+    let mut symbols: Map<Text, Int> = Map.new();
+
+    // Insert operations
+    symbols.insert("x", 1);
+    symbols.insert("y", 2);
+    symbols.insert("z", 3);
+
+    // Get operations
+    let x_value = symbols.get("x");
+    let missing = symbols.get("missing");
+
+    // Get with default
+    let value = symbols.get("missing") ?? 0;
+
+    // Contains check
+    let has_x = symbols.contains_key("x");
+
+    // Remove
+    let removed = symbols.remove("x");
+
+    // Iteration
+    for (key, value) in symbols.iter() {
+        print(f"{key} = {value}");
+    }
+
+    // Keys and values
+    let keys: List<Text> = symbols.keys().collect();
+    let values: List<Int> = symbols.values().collect();
+
+    // Entry API pattern
+    if !symbols.contains_key("new") {
+        symbols.insert("new", 100);
+    }
+}
+
+type SymbolTable is {
+    scopes: List<Map<Text, SymbolInfo>>
+};
+
+type SymbolInfo is {
+    name: Text,
+    ty: Text,
+    span: Span
+};
+
+type Span is { start: Int, end: Int };
+
+implement SymbolTable {
+    fn new() -> SymbolTable {
+        SymbolTable { scopes: List.of(Map.new()) }
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(Map.new());
+    }
+
+    fn pop_scope(&mut self) -> Maybe<Map<Text, SymbolInfo>> {
+        self.scopes.pop()
+    }
+
+    fn insert(&mut self, name: Text, info: SymbolInfo) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name, info);
+        }
+    }
+
+    fn lookup(&self, name: &Text) -> Maybe<&SymbolInfo> {
+        // Search scopes from innermost to outermost
+        for scope in self.scopes.iter().rev() {
+            if let Some(info) = scope.get(name) {
+                return Some(info);
+            }
+        }
+        None
+    }
+
+    fn lookup_current_scope(&self, name: &Text) -> Maybe<&SymbolInfo> {
+        self.scopes.last()?.get(name)
+    }
+}
+
+// =============================================================================
+// Section 6: Result Chaining for Error Handling
+// =============================================================================
+
+type ParseError is { message: Text, span: Span };
+
+fn test_result_chaining() {
+    // Chain multiple fallible operations
+    let result: Result<Int, ParseError> = parse_token()
+        .and_then(|t| validate_token(t))
+        .and_then(|t| process_token(t));
+
+    // Map on success
+    let doubled = result.map(|n| n * 2);
+
+    // Map error
+    let converted = result.map_err(|e| f"Error: {e.message}");
+
+    // Unwrap with default
+    let value = result.unwrap_or(0);
+
+    // Unwrap or else
+    let value2 = result.unwrap_or_else(|_| compute_default());
+
+    // Early return with ?
+    let final_value = parse_and_validate()?;
+}
+
+fn parse_token() -> Result<Int, ParseError> {
+    Ok(42)
+}
+
+fn validate_token(token: Int) -> Result<Int, ParseError> {
+    if token > 0 {
+        Ok(token)
+    } else {
+        Err(ParseError { message: "Invalid token", span: Span { start: 0, end: 0 } })
+    }
+}
+
+fn process_token(token: Int) -> Result<Int, ParseError> {
+    Ok(token * 2)
+}
+
+fn compute_default() -> Int {
+    0
+}
+
+fn parse_and_validate() -> Result<Int, ParseError> {
+    let token = parse_token()?;
+    let validated = validate_token(token)?;
+    let processed = process_token(validated)?;
+    Ok(processed)
+}
+
+// =============================================================================
+// Section 7: Maybe/Option Chaining for Optional Values
+// =============================================================================
+
+fn test_maybe_chaining() {
+    let maybe_value: Maybe<Int> = Some(42);
+
+    // Map transformation
+    let doubled = maybe_value.map(|n| n * 2);
+
+    // Flat map (and_then)
+    let chained = maybe_value.and_then(|n| if n > 0 { Some(n) } else { None });
+
+    // Filter
+    let filtered = maybe_value.filter(|n| *n > 10);
+
+    // Unwrap variants
+    let with_default = maybe_value.unwrap_or(0);
+    let with_else = maybe_value.unwrap_or_else(|| compute_default());
+
+    // Null coalescing
+    let coalesced = maybe_value ?? 0;
+
+    // Optional chaining
+    let nested: Maybe<Container> = Some(Container { inner: Some(42) });
+    let inner_value = nested?.inner?;
+
+    // Match on maybe
+    match maybe_value {
+        Some(n) => print(f"Value: {n}"),
+        None => print("No value")
+    }
+
+    // if let pattern
+    if let Some(n) = maybe_value {
+        print(f"Got value: {n}");
+    }
+
+    // while let pattern
+    let mut iter = get_iterator();
+    while let Some(item) = iter.next() {
+        process(item);
+    }
+}
+
+type Container is { inner: Maybe<Int> };
+
+fn get_iterator() -> PeekableIter<Int, ListIter<Int>> {
+    let list = List.of(1, 2, 3);
+    PeekableIter.new(list.iter())
+}
+
+type ListIter<T> is Iterator<Item = T>;
+
+fn process(item: Int) {
+    print(f"Processing: {item}");
+}
+
+// =============================================================================
+// Section 8: Slice and Range Patterns
+// =============================================================================
+
+fn test_slice_patterns() {
+    let tokens: [Token; 10] = [Token.new(Eof); 10];
+    let token_slice: &[Token] = &tokens;
+
+    // Slice indexing
+    let first = token_slice[0];
+    let last = token_slice[token_slice.len() - 1];
+
+    // Subslice
+    let middle = &token_slice[2..5];
+    let from_start = &token_slice[..3];
+    let to_end = &token_slice[5..];
+
+    // Iteration
+    for token in token_slice.iter() {
+        match token.kind {
+            Eof => break,
+            _ => continue
+        }
+    }
+
+    // Pattern matching on slices
+    match token_slice {
+        [] => print("empty"),
+        [single] => print(f"single: {single}"),
+        [first, rest @ ..] => print(f"first: {first}, rest len: {rest.len()}"),
+    }
+}
+
+type Token is { kind: TokenKind, span: Span };
+type TokenKind is Eof | Other;
+
+implement Token {
+    fn new(kind: TokenKind) -> Token {
+        Token { kind, span: Span { start: 0, end: 0 } }
+    }
+}
+
+// =============================================================================
+// Section 9: Builder Pattern for AST Nodes
+// =============================================================================
+
+type ExprBuilder is {
+    kind: Maybe<ExprKind>,
+    span: Maybe<Span>
+};
+
+type ExprKind is
+    | Literal(Int)
+    | Binary { left: Heap<Expr>, op: Text, right: Heap<Expr> }
+    | Unary { op: Text, operand: Heap<Expr> };
+
+type Expr is { kind: ExprKind, span: Span };
+
+implement ExprBuilder {
+    fn new() -> ExprBuilder {
+        ExprBuilder { kind: None, span: None }
+    }
+
+    fn literal(self, value: Int) -> ExprBuilder {
+        ExprBuilder { kind: Some(Literal(value)), ..self }
+    }
+
+    fn binary(self, left: Expr, op: Text, right: Expr) -> ExprBuilder {
+        ExprBuilder {
+            kind: Some(Binary {
+                left: Heap.new(left),
+                op,
+                right: Heap.new(right)
+            }),
+            ..self
+        }
+    }
+
+    fn span(self, span: Span) -> ExprBuilder {
+        ExprBuilder { span: Some(span), ..self }
+    }
+
+    fn build(self) -> Result<Expr, Text> {
+        let kind = self.kind.ok_or("Missing expression kind")?;
+        let span = self.span.unwrap_or(Span { start: 0, end: 0 });
+        Ok(Expr { kind, span })
+    }
+}
+
+fn test_builder() {
+    let expr = ExprBuilder.new()
+        .literal(42)
+        .span(Span { start: 0, end: 2 })
+        .build()?;
+
+    let binary_expr = ExprBuilder.new()
+        .binary(
+            Expr { kind: Literal(1), span: Span { start: 0, end: 1 } },
+            "+",
+            Expr { kind: Literal(2), span: Span { start: 4, end: 5 } }
+        )
+        .span(Span { start: 0, end: 5 })
+        .build()?;
+}
+
+// =============================================================================
+// Section 10: Interning Pattern for Identifiers
+// =============================================================================
+
+type InternTable is {
+    strings: List<Text>,
+    lookup: Map<Text, Int>
+};
+
+type InternedStr is Int;
+
+implement InternTable {
+    fn new() -> InternTable {
+        InternTable {
+            strings: List.new(),
+            lookup: Map.new()
+        }
+    }
+
+    fn intern(&mut self, s: &Text) -> InternedStr {
+        if let Some(id) = self.lookup.get(s) {
+            return *id;
+        }
+        let id = self.strings.len();
+        self.strings.push(s.clone());
+        self.lookup.insert(s.clone(), id);
+        id
+    }
+
+    fn get(&self, id: InternedStr) -> Maybe<&Text> {
+        self.strings.get(id)
+    }
+}
+
+fn test_interning() {
+    let mut interner = InternTable.new();
+
+    let id1 = interner.intern(&"hello");
+    let id2 = interner.intern(&"world");
+    let id3 = interner.intern(&"hello"); // Same as id1
+
+    assert(id1 == id3);
+    assert(id1 != id2);
+
+    let str1 = interner.get(id1);
+    assert(str1 == Some(&"hello"));
+}
+
+// =============================================================================
+// Section 11: Arena Allocation Pattern
+// =============================================================================
+
+type Arena<T> is {
+    items: List<T>
+};
+
+type ArenaId is Int;
+
+implement<T> Arena<T> {
+    fn new() -> Arena<T> {
+        Arena { items: List.new() }
+    }
+
+    fn alloc(&mut self, item: T) -> ArenaId {
+        let id = self.items.len();
+        self.items.push(item);
+        id
+    }
+
+    fn get(&self, id: ArenaId) -> Maybe<&T> {
+        self.items.get(id)
+    }
+
+    fn get_mut(&mut self, id: ArenaId) -> Maybe<&mut T> {
+        self.items.get_mut(id)
+    }
+}
+
+fn test_arena() {
+    let mut expr_arena: Arena<Expr> = Arena.new();
+
+    let lit_id = expr_arena.alloc(Expr {
+        kind: Literal(42),
+        span: Span { start: 0, end: 2 }
+    });
+
+    let expr = expr_arena.get(lit_id);
+    assert(expr.is_some());
+}
+
+// =============================================================================
+// Section 12: Diagnostic Accumulator Pattern
+// =============================================================================
+
+type Diagnostics is {
+    errors: List<Diagnostic>,
+    warnings: List<Diagnostic>
+};
+
+type Diagnostic is {
+    severity: Severity,
+    message: Text,
+    span: Span,
+    notes: List<Note>
+};
+
+type Severity is Error | Warning | Info | Hint;
+
+type Note is {
+    message: Text,
+    span: Maybe<Span>
+};
+
+implement Diagnostics {
+    fn new() -> Diagnostics {
+        Diagnostics {
+            errors: List.new(),
+            warnings: List.new()
+        }
+    }
+
+    fn error(&mut self, message: Text, span: Span) {
+        self.errors.push(Diagnostic {
+            severity: Error,
+            message,
+            span,
+            notes: List.new()
+        });
+    }
+
+    fn warning(&mut self, message: Text, span: Span) {
+        self.warnings.push(Diagnostic {
+            severity: Warning,
+            message,
+            span,
+            notes: List.new()
+        });
+    }
+
+    fn has_errors(&self) -> Bool {
+        !self.errors.is_empty()
+    }
+
+    fn error_count(&self) -> Int {
+        self.errors.len()
+    }
+
+    fn all(&self) -> impl Iterator<Item = &Diagnostic> {
+        self.errors.iter().chain(self.warnings.iter())
+    }
+}
+
+fn test_diagnostics() {
+    let mut diags = Diagnostics.new();
+
+    diags.error("unexpected token", Span { start: 10, end: 15 });
+    diags.warning("unused variable", Span { start: 0, end: 5 });
+
+    assert(diags.has_errors());
+    assert(diags.error_count() == 1);
+
+    for diag in diags.all() {
+        print(f"[{diag.severity}] {diag.message}");
+    }
+}
+
+// =============================================================================
+// Section 13: Main Function
+// =============================================================================
+
+fn main() {
+    print("Iterator patterns for parser self-hosting");
+
+    test_list_operations();
+    test_list_with_custom_types();
+    test_stack_operations();
+    test_map_operations();
+    test_maybe_chaining();
+    test_slice_patterns();
+    test_builder();
+    test_interning();
+    test_arena();
+    test_diagnostics();
+
+    print("All tests passed!");
+}

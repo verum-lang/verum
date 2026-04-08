@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, is, pattern, error
+// @description: Is operator without pattern
+// @expected-error: E018
+
+fn test() {
+    if x is { }  // Missing pattern after is
+}

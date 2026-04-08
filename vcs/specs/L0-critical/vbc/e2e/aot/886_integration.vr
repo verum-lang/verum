@@ -1,0 +1,98 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, integration, threads, file-io, timer, mutex
+// @expected-exit: 0
+
+// Test: integration combining threads + file I/O + timer + mutex.
+// Multi-threaded worker pool computes results, writes to file, verifies.
+
+fn __file_read_to_string_raw(path: Text) -> Text {
+    @intrinsic("file_read_to_string")
+}
+
+fn __file_write_string_raw(path: Text, content: Text) -> Int {
+    @intrinsic("file_write_string")
+}
+
+fn __time_monotonic_nanos_raw() -> Int {
+    @intrinsic("time_monotonic_nanos")
+}
+
+fn __mutex_new_raw() -> Int {
+    @intrinsic("mutex_new")
+}
+
+fn __mutex_lock_raw(mutex: Int) -> Int {
+    @intrinsic("mutex_lock")
+}
+
+fn __mutex_unlock_raw(mutex: Int) -> Int {
+    @intrinsic("mutex_unlock")
+}
+
+fn compute_sum(n: Int) -> Int {
+    let mut acc = 0;
+    let mut i = 1;
+    while (i <= n) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    let t_start = __time_monotonic_nanos_raw();
+
+    // Phase 1: Create mutex
+    let mtx = __mutex_new_raw();
+    if (mtx == 0) {
+        print("FAIL: mutex creation failed");
+        return 1;
+    }
+
+    // Phase 2: Spawn 4 worker threads
+    let w1 = spawn compute_sum(250);
+    let w2 = spawn compute_sum(250);
+    let w3 = spawn compute_sum(250);
+    let w4 = spawn compute_sum(250);
+
+    // Phase 3: Collect results
+    let r1 = w1.await;
+    let r2 = w2.await;
+    let r3 = w3.await;
+    let r4 = w4.await;
+    let total = r1 + r2 + r3 + r4;
+    // 4 * sum(1..250) = 4 * 31375 = 125500
+    if (total != 125500) {
+        print(f"FAIL phase3: total={total}, expected=125500");
+        return 1;
+    }
+
+    // Phase 4: Write result to file
+    let path = "/tmp/verum_test_886.txt";
+    let result_str = f"result={total}";
+    let written = __file_write_string_raw(path, result_str);
+    if (written == 0) {
+        print("FAIL phase4: file write failed");
+        return 1;
+    }
+
+    // Phase 5: Read back and verify
+    let read_back = __file_read_to_string_raw(path);
+    if (read_back != result_str) {
+        print(f"FAIL phase5: read='{read_back}', expected='{result_str}'");
+        return 1;
+    }
+
+    // Phase 6: Verify timing
+    let t_end = __time_monotonic_nanos_raw();
+    let elapsed = t_end - t_start;
+    if (elapsed <= 0) {
+        print(f"FAIL phase6: elapsed={elapsed}, expected > 0");
+        return 1;
+    }
+
+    print("886_integration: PASS");
+    0
+}

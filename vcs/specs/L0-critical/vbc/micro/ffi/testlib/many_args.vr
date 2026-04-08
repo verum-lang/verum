@@ -1,0 +1,31 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, calling-convention, many-args
+// @description: Test FFI with many arguments (tests register spilling to stack)
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_add_8_i64(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int;
+}
+
+fn main() {
+    // Test 8 integer arguments
+    // On System V AMD64 ABI, first 6 integer args go to registers, rest on stack
+    let sum8 = ffi_add_8_i64(1, 2, 3, 4, 5, 6, 7, 8);
+    print("sum(1..8)="); print(sum8); print("\n");
+    assert(sum8 == 36);  // 1+2+3+4+5+6+7+8 = 36
+
+    // Test with larger values
+    let sum8_large = ffi_add_8_i64(100, 200, 300, 400, 500, 600, 700, 800);
+    print("sum(100s)="); print(sum8_large); print("\n");
+    assert(sum8_large == 3600);
+
+    // Test with negative values
+    let sum8_neg = ffi_add_8_i64(-1, -2, -3, -4, 5, 6, 7, 8);
+    print("sum(mix)="); print(sum8_neg); print("\n");
+    assert(sum8_neg == 16);
+
+    print("All many args tests passed!\n");
+}

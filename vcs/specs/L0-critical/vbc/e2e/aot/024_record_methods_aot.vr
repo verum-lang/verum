@@ -1,0 +1,131 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, records, methods, chaining
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT record methods with chaining, multiple impl blocks, multi-field records
+
+type Color is { r: Int, g: Int, b: Int };
+
+implement Color {
+    fn new(r: Int, g: Int, b: Int) -> Color {
+        Color { r: r, g: g, b: b }
+    }
+
+    fn brightness(self) -> Int {
+        (self.r + self.g + self.b) / 3
+    }
+
+    fn mix(self, other: Color) -> Color {
+        Color {
+            r: (self.r + other.r) / 2,
+            g: (self.g + other.g) / 2,
+            b: (self.b + other.b) / 2,
+        }
+    }
+
+    fn darken(self, amount: Int) -> Color {
+        let nr = self.r - amount;
+        let ng = self.g - amount;
+        let nb = self.b - amount;
+        Color {
+            r: if nr < 0 { 0 } else { nr },
+            g: if ng < 0 { 0 } else { ng },
+            b: if nb < 0 { 0 } else { nb },
+        }
+    }
+}
+
+type Matrix2x2 is { a: Int, b: Int, c: Int, d: Int };
+
+implement Matrix2x2 {
+    fn identity() -> Matrix2x2 {
+        Matrix2x2 { a: 1, b: 0, c: 0, d: 1 }
+    }
+
+    fn new(a: Int, b: Int, c: Int, d: Int) -> Matrix2x2 {
+        Matrix2x2 { a: a, b: b, c: c, d: d }
+    }
+
+    fn det(self) -> Int {
+        self.a * self.d - self.b * self.c
+    }
+
+    fn trace(self) -> Int {
+        self.a + self.d
+    }
+
+    fn scale_by(self, k: Int) -> Matrix2x2 {
+        Matrix2x2 {
+            a: self.a * k,
+            b: self.b * k,
+            c: self.c * k,
+            d: self.d * k,
+        }
+    }
+
+    fn transpose(self) -> Matrix2x2 {
+        Matrix2x2 {
+            a: self.a,
+            b: self.c,
+            c: self.b,
+            d: self.d,
+        }
+    }
+}
+
+fn main() -> Int {
+    // Color operations
+    let red = Color.new(255, 0, 0);
+    let blue = Color.new(0, 0, 255);
+    let white = Color.new(255, 255, 255);
+
+    assert_eq(red.brightness(), 85);
+    assert_eq(white.brightness(), 255);
+
+    let purple = red.mix(blue);
+    assert_eq(purple.r, 127);
+    assert_eq(purple.g, 0);
+    assert_eq(purple.b, 127);
+
+    let dark_white = white.darken(100);
+    assert_eq(dark_white.r, 155);
+    assert_eq(dark_white.g, 155);
+    assert_eq(dark_white.b, 155);
+
+    let very_dark = red.darken(300);
+    assert_eq(very_dark.r, 0);  // clamped to 0
+    assert_eq(very_dark.g, 0);
+    assert_eq(very_dark.b, 0);
+
+    // Matrix operations
+    let id = Matrix2x2.identity();
+    assert_eq(id.det(), 1);
+    assert_eq(id.trace(), 2);
+
+    let m = Matrix2x2.new(2, 3, 1, 4);
+    assert_eq(m.det(), 5);    // 2*4 - 3*1
+    assert_eq(m.trace(), 6);  // 2 + 4
+
+    let m2 = m.scale_by(3);
+    assert_eq(m2.a, 6);
+    assert_eq(m2.b, 9);
+    assert_eq(m2.det(), 45);  // 6*12 - 9*3
+
+    let mt = m.transpose();
+    assert_eq(mt.a, 2);
+    assert_eq(mt.b, 1);
+    assert_eq(mt.c, 3);
+    assert_eq(mt.d, 4);
+    assert_eq(mt.det(), 5);  // transpose preserves determinant
+
+    // Method chaining
+    let result = Matrix2x2.new(1, 2, 3, 4).scale_by(2).transpose();
+    assert_eq(result.a, 2);
+    assert_eq(result.b, 6);
+    assert_eq(result.c, 4);
+    assert_eq(result.d, 8);
+
+    0
+}

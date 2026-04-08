@@ -1,0 +1,162 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, stack, machine, vm
+// @timeout: 30000
+
+// Simple stack machine / virtual machine
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Stack machine state
+type VM is { stack: Arr8, sp: Int };
+
+fn vm_new() -> VM {
+    VM { stack: new_arr8(), sp: 0 }
+}
+
+fn vm_push(vm: VM, val: Int) -> VM {
+    let new_stack = set8(vm.stack, vm.sp, val);
+    VM { stack: new_stack, sp: vm.sp + 1 }
+}
+
+fn vm_top(vm: VM) -> Int {
+    get8(vm.stack, vm.sp - 1)
+}
+
+fn vm_pop(vm: VM) -> VM {
+    VM { stack: vm.stack, sp: vm.sp - 1 }
+}
+
+// Opcodes: 1=PUSH, 2=ADD, 3=SUB, 4=MUL, 5=DUP, 6=SWAP
+fn vm_exec_one(vm: VM, opcode: Int, operand: Int) -> VM {
+    if opcode == 1 {
+        // PUSH operand
+        return vm_push(vm, operand);
+    }
+    if opcode == 2 {
+        // ADD: pop two, push sum
+        let a = vm_top(vm);
+        let v1 = vm_pop(vm);
+        let b = vm_top(v1);
+        let v2 = vm_pop(v1);
+        return vm_push(v2, a + b);
+    }
+    if opcode == 3 {
+        // SUB: pop two, push b-a (second - top)
+        let a = vm_top(vm);
+        let v1 = vm_pop(vm);
+        let b = vm_top(v1);
+        let v2 = vm_pop(v1);
+        return vm_push(v2, b - a);
+    }
+    if opcode == 4 {
+        // MUL
+        let a = vm_top(vm);
+        let v1 = vm_pop(vm);
+        let b = vm_top(v1);
+        let v2 = vm_pop(v1);
+        return vm_push(v2, a * b);
+    }
+    if opcode == 5 {
+        // DUP
+        let a = vm_top(vm);
+        return vm_push(vm, a);
+    }
+    if opcode == 6 {
+        // SWAP
+        let a = vm_top(vm);
+        let v1 = vm_pop(vm);
+        let b = vm_top(v1);
+        let v2 = vm_pop(v1);
+        let v3 = vm_push(v2, a);
+        return vm_push(v3, b);
+    }
+    vm
+}
+
+// Execute a program (opcodes in one array, operands in another)
+fn vm_exec(opcodes: Arr8, operands: Arr8, proglen: Int) -> Int {
+    let mut vm = vm_new();
+    let mut pc = 0;
+    while pc < proglen {
+        vm = vm_exec_one(vm, get8(opcodes, pc), get8(operands, pc));
+        pc = pc + 1;
+    }
+    vm_top(vm)
+}
+
+fn test_basic_arith() -> Int {
+    // Program: PUSH 3, PUSH 4, ADD  -> 7
+    let ops = Arr8 { v0: 1, v1: 1, v2: 2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 3, v1: 4, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(vm_exec(ops, vals, 3), 7);
+    1
+}
+
+fn test_mul_sub() -> Int {
+    // Program: PUSH 5, PUSH 3, MUL, PUSH 2, SUB  -> 15-2=13
+    let ops = Arr8 { v0: 1, v1: 1, v2: 4, v3: 1, v4: 3, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 5, v1: 3, v2: 0, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(vm_exec(ops, vals, 5), 13);
+    1
+}
+
+fn test_dup_swap() -> Int {
+    // Program: PUSH 7, DUP, MUL -> 7*7=49
+    let ops = Arr8 { v0: 1, v1: 5, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 7, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(vm_exec(ops, vals, 3), 49);
+
+    // PUSH 10, PUSH 3, SWAP, SUB
+    // After SWAP: stack=[3,10], top=10. SUB pops a=10, b=3, pushes b-a = 3-10 = -7
+    let ops2 = Arr8 { v0: 1, v1: 1, v2: 6, v3: 3, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals2 = Arr8 { v0: 10, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(vm_exec(ops2, vals2, 4), -7);
+    1
+}
+
+fn test_complex() -> Int {
+    // Compute (2+3)*(4+1) = 5*5 = 25
+    // PUSH 2, PUSH 3, ADD, PUSH 4, PUSH 1, ADD, MUL
+    let ops = Arr8 { v0: 1, v1: 1, v2: 2, v3: 1, v4: 1, v5: 2, v6: 4, v7: 0 };
+    let vals = Arr8 { v0: 2, v1: 3, v2: 0, v3: 4, v4: 1, v5: 0, v6: 0, v7: 0 };
+    assert_eq(vm_exec(ops, vals, 7), 25);
+    1
+}
+
+fn main() -> Int {
+    test_basic_arith();
+    test_mul_sub();
+    test_dup_swap();
+    test_complex();
+    print("[OK] 423_stack_machine_aot");
+    0
+}

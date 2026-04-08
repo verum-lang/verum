@@ -1,0 +1,330 @@
+// @test: parse
+// @tier: 1
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: cbgr, latency, jit, baseline, micro
+// @description: Tier 1 JIT baseline CBGR latency benchmark (target: < 15ns per check)
+
+/// Tier 1 (JIT Baseline) CBGR Latency Benchmark
+///
+/// This benchmark measures CBGR safety check overhead in the baseline JIT tier.
+/// Tier 1 performs basic JIT compilation without aggressive optimizations.
+///
+/// Target: < 15ns per check
+///
+/// JIT baseline benefits:
+/// - Hot path detection and native code generation
+/// - Inline caching for generation checks
+/// - Basic register allocation
+///
+/// Expected overhead breakdown:
+/// - Memory load (ptr deref): ~1-2ns
+/// - Generation comparison: ~1ns
+/// - Branch prediction: ~0-1ns (usually predicted)
+/// - Total: ~3-5ns typical, < 15ns guaranteed
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 1_000_000;
+const EXPECTED_LATENCY_NS: Float = 15.0;
+
+fn main() {
+    let results = BenchmarkResults.new("Tier 1 JIT Base CBGR Latency");
+
+    // Core CBGR benchmarks
+    results.add(benchmark_thin_ref_hot_path());
+    results.add(benchmark_fat_ref_indexed());
+    results.add(benchmark_ref_in_loop());
+    results.add(benchmark_ref_through_function());
+    results.add(benchmark_multiple_refs_same_alloc());
+    results.add(benchmark_interleaved_ref_access());
+
+    results.report();
+    assert(results.all_pass(), "Tier 1 CBGR latency exceeds 15ns target");
+}
+
+/// Benchmark: Hot path ThinRef access after JIT warmup
+fn benchmark_thin_ref_hot_path() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let thin_ref: &Int = &*data;
+
+    // Extended warmup to trigger JIT compilation
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*thin_ref);
+    }
+
+    // Force JIT compilation of the access path
+    jit_compile_hint();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(*thin_ref);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "thin_ref_hot_path",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+    }
+}
+
+/// Benchmark: FatRef indexed access with bounds check
+fn benchmark_fat_ref_indexed() -> BenchmarkResult {
+    let data = [0; 1000];  // 1000 elements
+    let fat_ref: &[Int] = &data[..];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(fat_ref[500]);
+    }
+
+    jit_compile_hint();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // Vary index to prevent over-optimization
+        let idx = (i % 1000) as Int;
+        black_box(fat_ref[idx]);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // FatRef adds bounds check overhead
+    let fat_ref_target = EXPECTED_LATENCY_NS * 1.2;
+
+    BenchmarkResult {
+        name: "fat_ref_indexed",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: fat_ref_target,
+        passed: per_op_ns < fat_ref_target,
+    }
+}
+
+/// Benchmark: Reference access in tight loop (loop-invariant hoisting test)
+fn benchmark_ref_in_loop() -> BenchmarkResult {
+    let data = Heap.new(100);
+    let ref_data = &*data;
+
+    // Warmup
+    let mut sum = 0;
+    for _ in 0..WARMUP_ITERATIONS {
+        sum += *ref_data;
+    }
+    black_box(sum);
+
+    jit_compile_hint();
+
+    let timer = Timer.new();
+    timer.start();
+
+    sum = 0;
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // JIT should hoist generation check out of loop
+        sum += *ref_data;
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // With loop hoisting, per-op should be very low
+    let loop_hoisted_target = EXPECTED_LATENCY_NS * 0.5;
+
+    BenchmarkResult {
+        name: "ref_in_loop",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: loop_hoisted_target,
+        passed: per_op_ns < loop_hoisted_target,
+    }
+}
+
+/// Benchmark: Reference passed through function calls
+fn benchmark_ref_through_function() -> BenchmarkResult {
+    let data = Heap.new(42);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(read_ref(&*data));
+    }
+
+    jit_compile_hint();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(read_ref(&*data));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Function call adds small overhead
+    let func_call_target = EXPECTED_LATENCY_NS * 1.5;
+
+    BenchmarkResult {
+        name: "ref_through_function",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: func_call_target,
+        passed: per_op_ns < func_call_target,
+    }
+}
+
+@inline(never)
+fn read_ref(r: &Int) -> Int {
+    *r
+}
+
+/// Benchmark: Multiple references to same allocation
+fn benchmark_multiple_refs_same_alloc() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let ref1 = &*data;
+    let ref2 = &*data;
+    let ref3 = &*data;
+    let ref4 = &*data;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*ref1 + *ref2 + *ref3 + *ref4);
+    }
+
+    jit_compile_hint();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // 4 accesses per iteration
+        black_box(*ref1 + *ref2 + *ref3 + *ref4);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    // 4 accesses per iteration
+    let per_op_ns = elapsed_ns as Float / (BENCHMARK_ITERATIONS as Float * 4.0);
+
+    BenchmarkResult {
+        name: "multiple_refs_same_alloc",
+        iterations: BENCHMARK_ITERATIONS * 4,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+    }
+}
+
+/// Benchmark: Interleaved access to different allocations
+fn benchmark_interleaved_ref_access() -> BenchmarkResult {
+    let data1 = Heap.new(10);
+    let data2 = Heap.new(20);
+    let data3 = Heap.new(30);
+    let data4 = Heap.new(40);
+
+    let ref1 = &*data1;
+    let ref2 = &*data2;
+    let ref3 = &*data3;
+    let ref4 = &*data4;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*ref1);
+        black_box(*ref2);
+        black_box(*ref3);
+        black_box(*ref4);
+    }
+
+    jit_compile_hint();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Interleaved access pattern tests cache behavior
+        black_box(*ref1);
+        black_box(*ref2);
+        black_box(*ref3);
+        black_box(*ref4);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / (BENCHMARK_ITERATIONS as Float * 4.0);
+
+    // Interleaved access may have cache misses
+    let interleaved_target = EXPECTED_LATENCY_NS * 1.3;
+
+    BenchmarkResult {
+        name: "interleaved_ref_access",
+        iterations: BENCHMARK_ITERATIONS * 4,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: interleaved_target,
+        passed: per_op_ns < interleaved_target,
+    }
+}
+
+/// Hint to trigger JIT compilation
+@inline(never)
+fn jit_compile_hint() {
+    // This function call serves as a barrier to ensure
+    // JIT compilation has occurred before benchmarking
+    compiler_fence();
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    total_ns: Int,
+    per_op_ns: Float,
+    target_ns: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2}ns (target: {:.2}ns)",
+                    status, result.name, result.per_op_ns, result.target_ns);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

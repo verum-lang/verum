@@ -1,0 +1,180 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, rational, arithmetic
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Rational number arithmetic — gcd, simplify, add, sub, multiply, divide, equals
+
+// ============================================================================
+// Rational type: num/den, always simplified, den > 0
+// ============================================================================
+
+type Rational is { num: Int, den: Int };
+
+// ============================================================================
+// GCD and simplification
+// ============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn gcd_val(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let tmp = y;
+        y = x - (x / y) * y;
+        x = tmp;
+    }
+    x
+}
+
+fn rational_new(n: Int, d: Int) -> Rational {
+    let g = gcd_val(n, d);
+    let mut sn = n / g;
+    let mut sd = d / g;
+    // Ensure denominator is positive
+    if sd < 0 {
+        sn = 0 - sn;
+        sd = 0 - sd;
+    }
+    Rational { num: sn, den: sd }
+}
+
+// ============================================================================
+// Arithmetic operations
+// ============================================================================
+
+fn rat_add(a: Rational, b: Rational) -> Rational {
+    // a.num/a.den + b.num/b.den = (a.num*b.den + b.num*a.den) / (a.den*b.den)
+    let n = a.num * b.den + b.num * a.den;
+    let d = a.den * b.den;
+    rational_new(n, d)
+}
+
+fn rat_sub(a: Rational, b: Rational) -> Rational {
+    let n = a.num * b.den - b.num * a.den;
+    let d = a.den * b.den;
+    rational_new(n, d)
+}
+
+fn rat_mul(a: Rational, b: Rational) -> Rational {
+    let n = a.num * b.num;
+    let d = a.den * b.den;
+    rational_new(n, d)
+}
+
+fn rat_div(a: Rational, b: Rational) -> Rational {
+    let n = a.num * b.den;
+    let d = a.den * b.num;
+    rational_new(n, d)
+}
+
+fn rat_eq(a: Rational, b: Rational) -> Int {
+    // Both are simplified, so direct comparison works
+    if a.num == b.num {
+        if a.den == b.den { 1 } else { 0 }
+    } else { 0 }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_gcd_and_simplify() -> Int {
+    // gcd(6, 4) = 2
+    assert_eq(gcd_val(6, 4), 2);
+    assert_eq(gcd_val(12, 8), 4);
+    assert_eq(gcd_val(7, 13), 1);
+    // Simplification: 4/6 -> 2/3
+    let r = rational_new(4, 6);
+    assert_eq(r.num, 2);
+    assert_eq(r.den, 3);
+    // Negative denominator normalization: 3/(-6) -> -1/2
+    let r2 = rational_new(3, -6);
+    assert_eq(r2.num, -1);
+    assert_eq(r2.den, 2);
+    0
+}
+
+@test
+fn test_addition() -> Int {
+    // 1/2 + 1/3 = 5/6
+    let a = rational_new(1, 2);
+    let b = rational_new(1, 3);
+    let result = rat_add(a, b);
+    assert_eq(result.num, 5);
+    assert_eq(result.den, 6);
+    // 1/4 + 1/4 = 1/2
+    let c = rational_new(1, 4);
+    let d = rational_new(1, 4);
+    let r2 = rat_add(c, d);
+    assert_eq(r2.num, 1);
+    assert_eq(r2.den, 2);
+    0
+}
+
+@test
+fn test_subtraction() -> Int {
+    // 1/2 - 1/3 = 1/6
+    let a = rational_new(1, 2);
+    let b = rational_new(1, 3);
+    let result = rat_sub(a, b);
+    assert_eq(result.num, 1);
+    assert_eq(result.den, 6);
+    // 3/4 - 1/4 = 1/2
+    let c = rational_new(3, 4);
+    let d = rational_new(1, 4);
+    let r2 = rat_sub(c, d);
+    assert_eq(r2.num, 1);
+    assert_eq(r2.den, 2);
+    0
+}
+
+@test
+fn test_multiplication() -> Int {
+    // 2/3 * 3/4 = 1/2
+    let a = rational_new(2, 3);
+    let b = rational_new(3, 4);
+    let result = rat_mul(a, b);
+    assert_eq(result.num, 1);
+    assert_eq(result.den, 2);
+    // 5/7 * 7/5 = 1/1
+    let c = rational_new(5, 7);
+    let d = rational_new(7, 5);
+    let r2 = rat_mul(c, d);
+    assert_eq(r2.num, 1);
+    assert_eq(r2.den, 1);
+    0
+}
+
+@test
+fn test_division_and_equality() -> Int {
+    // (1/2) / (3/4) = (1/2) * (4/3) = 4/6 = 2/3
+    let a = rational_new(1, 2);
+    let b = rational_new(3, 4);
+    let result = rat_div(a, b);
+    assert_eq(result.num, 2);
+    assert_eq(result.den, 3);
+    // Equality: 2/4 == 1/2 (both simplify)
+    let c = rational_new(2, 4);
+    let d = rational_new(1, 2);
+    assert_eq(rat_eq(c, d), 1);
+    // Inequality: 1/3 != 1/2
+    let e = rational_new(1, 3);
+    assert_eq(rat_eq(d, e), 0);
+    0
+}
+
+fn main() -> Int {
+    test_gcd_and_simplify();
+    test_addition();
+    test_subtraction();
+    test_multiplication();
+    test_division_and_equality();
+    print("[OK] 121_rational_arith");
+    0
+}

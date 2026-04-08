@@ -1,0 +1,233 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, integration, complete
+// @description: Complete verification example combining all verification features
+
+/// A fully verified priority queue implementation demonstrating
+/// integration of contracts, refinements, SMT, and runtime checks.
+
+/// Priority type with ordering
+type Priority is Int{>= 0};
+
+/// Entry in the priority queue
+type Entry<T> is {
+    priority: Priority,
+    value: T,
+};
+
+/// Verified priority queue using a binary heap
+@verify(proof)
+type PriorityQueue<T> is {
+    heap: List<Entry<T>>,
+
+    // Ghost field for size tracking
+    ghost size: Int,
+
+    // Heap property invariant
+    invariant is_heap(heap),
+    invariant size == heap.len(),
+};
+
+/// Ghost predicate: binary heap property
+ghost fn is_heap<T>(heap: List<Entry<T>>) -> Bool {
+    forall i in 0..heap.len() =>
+        ((2 * i + 1) >= heap.len() || heap[i].priority >= heap[2 * i + 1].priority) &&
+        ((2 * i + 2) >= heap.len() || heap[i].priority >= heap[2 * i + 2].priority)
+}
+
+@verify(proof)
+implement PriorityQueue<T> {
+    /// Create empty priority queue
+    fn new() -> Self {
+        contract#"
+            ensures result.heap.is_empty();
+            ensures result.size == 0;
+        ";
+        Self {
+            heap: List.new(),
+            ghost size: 0,
+        }
+    }
+
+    /// Check if queue is empty
+    fn is_empty(&self) -> Bool {
+        contract#"
+            ensures result == (self.size == 0);
+        ";
+        self.heap.is_empty()
+    }
+
+    /// Get number of elements
+    fn len(&self) -> Int{>= 0} {
+        contract#"
+            ensures result == self.size;
+        ";
+        self.heap.len()
+    }
+
+    /// Insert element with priority
+    fn push(mut self, priority: Priority, value: T) {
+        contract#"
+            modifies self.heap, ghost self.size;
+            ensures self.size == old(self.size) + 1;
+            ensures is_heap(self.heap);
+            ensures exists i in 0..self.heap.len() =>
+                self.heap[i].priority == priority &&
+                self.heap[i].value == value;
+        ";
+        self.heap.push(Entry { priority, value });
+        { self.size += 1; }
+        self.sift_up(self.heap.len() - 1);
+    }
+
+    /// Remove and return highest priority element
+    fn pop(mut self) -> Maybe<(Priority, T)> {
+        contract#"
+            modifies self.heap, ghost self.size;
+            ensures old(self.size) == 0 implies result.is_none();
+            ensures old(self.size) > 0 implies result.is_some();
+            ensures result.is_some() implies self.size == old(self.size) - 1;
+            ensures result.is_some() implies forall i in 0..old(self.heap.len()) =>
+                old(self.heap[i]).priority <= result.unwrap().0;
+        ";
+        if self.heap.is_empty() {
+            return None;
+        }
+
+        let max = self.heap.swap_remove(0);
+        { self.size -= 1; }
+
+        if !self.heap.is_empty() {
+            self.sift_down(0);
+        }
+
+        Some((max.priority, max.value))
+    }
+
+    /// Peek at highest priority element
+    fn peek(&self) -> Maybe<&(Priority, T)> {
+        contract#"
+            ensures self.is_empty() implies result.is_none();
+            ensures !self.is_empty() implies result.is_some();
+            ensures result.is_some() implies forall i in 0..self.heap.len() =>
+                self.heap[i].priority <= result.unwrap().0;
+        ";
+        self.heap.first().map(|e| (&e.priority, &e.value))
+    }
+
+    /// Internal: sift up to maintain heap property
+    @verify(hybrid)
+    fn sift_up(mut self, mut idx: Int) {
+        contract#"
+            requires idx >= 0 && idx < self.heap.len();
+            modifies self.heap;
+            ensures is_heap(self.heap);
+            decreases idx;
+        ";
+        while idx > 0 {
+            let parent = (idx - 1) / 2;
+            if self.heap[parent].priority >= self.heap[idx].priority {
+                break;
+            }
+            self.heap.swap(parent, idx);
+            idx = parent;
+        }
+    }
+
+    /// Internal: sift down to maintain heap property
+    @verify(hybrid)
+    fn sift_down(mut self, mut idx: Int) {
+        contract#"
+            requires idx >= 0 && idx < self.heap.len();
+            modifies self.heap;
+            ensures is_heap(self.heap);
+            decreases self.heap.len() - idx;
+        ";
+        loop {
+            let left = 2 * idx + 1;
+            let right = 2 * idx + 2;
+            let mut largest = idx;
+
+            if left < self.heap.len() &&
+               self.heap[left].priority > self.heap[largest].priority {
+                largest = left;
+            }
+            if right < self.heap.len() &&
+               self.heap[right].priority > self.heap[largest].priority {
+                largest = right;
+            }
+
+            if largest == idx {
+                break;
+            }
+
+            self.heap.swap(idx, largest);
+            idx = largest;
+        }
+    }
+}
+
+/// Verified heapsort using priority queue
+@verify(proof)
+fn heapsort<T: Clone>(list: List<T>, priority_fn: fn(&T) -> Priority) -> List<T> {
+    contract#"
+        ensures result.len() == list.len();
+        ensures is_sorted_by(result, priority_fn);
+        ensures is_permutation(result, list);
+    ";
+    let mut pq = PriorityQueue.new();
+
+    // Build heap
+    for item in list.iter() {
+        pq.push(priority_fn(item), item.clone());
+    }
+
+    // Extract in sorted order
+    let mut result = List.new();
+    while let Some((_, value)) = pq.pop() {
+        result.push(value);
+    }
+
+    result.reverse();
+    result
+}
+
+ghost fn is_sorted_by<T>(list: List<T>, priority_fn: fn(&T) -> Priority) -> Bool {
+    forall i in 0..list.len()-1 =>
+        priority_fn(&list[i]) <= priority_fn(&list[i+1])
+}
+
+ghost fn is_permutation<T: Eq>(a: List<T>, b: List<T>) -> Bool {
+    a.len() == b.len() &&
+    forall x in a.iter() => a.count(x) == b.count(x)
+}
+
+/// Example usage with runtime verification
+@verify(runtime)
+fn process_tasks(tasks: List<Task>) -> List<Text> {
+    contract#"
+        ensures result.len() == tasks.len();
+    ";
+    let sorted = heapsort(tasks, |t| t.priority);
+    sorted.iter().map(|t| t.name.clone()).collect()
+}
+
+type Task is {
+    name: Text,
+    priority: Priority,
+};
+
+fn main() {
+    let mut pq: PriorityQueue<Text> = PriorityQueue.new();
+
+    pq.push(3, "medium");
+    pq.push(5, "high");
+    pq.push(1, "low");
+
+    assert(pq.len() == 3);
+
+    let (p, v) = pq.pop().unwrap();
+    assert(p == 5);
+    assert(v == "high");
+}

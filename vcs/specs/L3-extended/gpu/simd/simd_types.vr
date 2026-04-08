@@ -1,0 +1,343 @@
+// @test: parse
+// @tier: 0
+// @level: L3
+// @tags: simd, vector, types, low-level
+// @description: Tests SIMD vector and mask types
+
+/// ============================================================
+/// SIMD VECTOR TYPES
+/// ============================================================
+///
+/// Verum provides portable SIMD types with compile-time width:
+/// - Vec<T, N>: N-element vector of type T
+/// - Mask<N>: N-bit boolean mask for conditional operations
+
+// ------------------------------------------------------------
+// Basic SIMD Vector Types
+// ------------------------------------------------------------
+
+/// Vec<T, N> is a fixed-size vector of N elements
+type SimdF32x4 is Vec<f32, 4>;
+type SimdF64x2 is Vec<f64, 2>;
+type SimdI32x4 is Vec<i32, 4>;
+type SimdI64x2 is Vec<i64, 2>;
+type SimdU8x16 is Vec<u8, 16>;
+type SimdU8x32 is Vec<u8, 32>;
+
+/// Create vectors from constants
+fn test_vector_creation() {
+    // Splat: all elements the same
+    let ones: Vec<f32, 4> = Vec.splat(1.0);
+    let zeros: Vec<i32, 8> = Vec.splat(0);
+
+    // From array
+    let v1: Vec<f32, 4> = Vec.from_array([1.0, 2.0, 3.0, 4.0]);
+    let v2: Vec<i32, 4> = Vec.from_array([10, 20, 30, 40]);
+
+    // Indexing
+    let first = v1[0];
+    assert(first == 1.0);
+}
+
+// ------------------------------------------------------------
+// SIMD Mask Types
+// ------------------------------------------------------------
+
+/// Mask<N> represents N boolean lanes
+type Mask4 is Mask<4>;
+type Mask8 is Mask<8>;
+type Mask16 is Mask<16>;
+
+fn test_mask_operations() {
+    // Create masks from comparison
+    let a: Vec<f32, 4> = Vec.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b: Vec<f32, 4> = Vec.from_array([2.0, 2.0, 2.0, 2.0]);
+
+    let lt_mask: Mask<4> = a.lt(b);   // [true, false, false, false]
+    let eq_mask: Mask<4> = a.eq(b);   // [false, true, false, false]
+    let gt_mask: Mask<4> = a.gt(b);   // [false, false, true, true]
+
+    // Mask methods
+    assert(lt_mask.any());
+    assert(!lt_mask.all());
+    assert(lt_mask.count_ones() == 1);
+}
+
+// ------------------------------------------------------------
+// SIMD Arithmetic Operations
+// ------------------------------------------------------------
+
+fn test_simd_arithmetic() {
+    let a: Vec<f32, 4> = Vec.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b: Vec<f32, 4> = Vec.from_array([5.0, 6.0, 7.0, 8.0]);
+
+    // Element-wise operations
+    let sum = a + b;       // [6.0, 8.0, 10.0, 12.0]
+    let diff = a - b;      // [-4.0, -4.0, -4.0, -4.0]
+    let prod = a * b;      // [5.0, 12.0, 21.0, 32.0]
+    let quot = b / a;      // [5.0, 3.0, 2.333..., 2.0]
+
+    // Fused multiply-add
+    let fma = a.mul_add(b, Vec.splat(10.0));  // a*b + 10
+
+    // Min/max
+    let min_v = a.min(b);
+    let max_v = a.max(b);
+
+    assert(sum[0] == 6.0);
+    assert(prod[1] == 12.0);
+}
+
+fn test_simd_integer_ops() {
+    let a: Vec<i32, 4> = Vec.from_array([10, 20, 30, 40]);
+    let b: Vec<i32, 4> = Vec.from_array([3, 5, 7, 9]);
+
+    // Integer arithmetic
+    let sum = a + b;
+    let diff = a - b;
+    let prod = a * b;
+
+    // Bitwise operations
+    let and_v = a & b;
+    let or_v = a | b;
+    let xor_v = a ^ b;
+    let not_v = !a;
+
+    // Shifts
+    let shl = a << 2;           // Shift all by 2
+    let shr = a >> 1;           // Shift all by 1
+
+    assert(sum[0] == 13);
+    assert(and_v[0] == 2);      // 10 & 3 = 2
+}
+
+// ------------------------------------------------------------
+// Horizontal Operations (Reductions)
+// ------------------------------------------------------------
+
+fn test_horizontal_ops() {
+    let v: Vec<f32, 4> = Vec.from_array([1.0, 2.0, 3.0, 4.0]);
+
+    // Sum all elements
+    let total: f32 = v.reduce_sum();
+    assert(total == 10.0);
+
+    // Product of all elements
+    let product: f32 = v.reduce_product();
+    assert(product == 24.0);
+
+    // Min/max across lanes
+    let minimum: f32 = v.reduce_min();
+    let maximum: f32 = v.reduce_max();
+    assert(minimum == 1.0);
+    assert(maximum == 4.0);
+
+    // Integer reductions
+    let vi: Vec<i32, 4> = Vec.from_array([5, 3, 8, 1]);
+    assert(vi.reduce_sum() == 17);
+    assert(vi.reduce_min() == 1);
+    assert(vi.reduce_max() == 8);
+}
+
+// ------------------------------------------------------------
+// Shuffles and Permutations
+// ------------------------------------------------------------
+
+fn test_shuffles() {
+    let a: Vec<f32, 4> = Vec.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b: Vec<f32, 4> = Vec.from_array([5.0, 6.0, 7.0, 8.0]);
+
+    // Shuffle within vector
+    let shuffled: Vec<f32, 4> = a.shuffle([3, 2, 1, 0]);  // Reverse
+    assert(shuffled[0] == 4.0);
+
+    // Blend two vectors based on mask
+    let mask: Mask<4> = Mask.from_array([true, false, true, false]);
+    let blended = mask.select(a, b);  // [1.0, 6.0, 3.0, 8.0]
+    assert(blended[1] == 6.0);
+
+    // Interleave low/high
+    let interleave_lo = a.interleave_low(b);   // [1, 5, 2, 6]
+    let interleave_hi = a.interleave_high(b);  // [3, 7, 4, 8]
+}
+
+// ------------------------------------------------------------
+// Masked Operations
+// ------------------------------------------------------------
+
+fn test_masked_ops() {
+    let a: Vec<f32, 4> = Vec.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b: Vec<f32, 4> = Vec.from_array([10.0, 20.0, 30.0, 40.0]);
+    let mask: Mask<4> = Mask.from_array([true, false, true, false]);
+
+    // Conditional add: only add where mask is true
+    let result = a.add_masked(b, mask);  // [11.0, 2.0, 33.0, 4.0]
+    assert(result[0] == 11.0);
+    assert(result[1] == 2.0);
+
+    // Masked load/store
+    let arr = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let loaded: Vec<f32, 4> = Vec.load_masked(&arr[2], mask, Vec.splat(0.0));
+    // Loads where mask is true, uses default elsewhere
+}
+
+// ------------------------------------------------------------
+// Gather/Scatter Operations
+// ------------------------------------------------------------
+
+fn test_gather_scatter() {
+    let data = [0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+    let indices: Vec<i32, 4> = Vec.from_array([0, 2, 4, 6]);
+
+    // Gather: load from non-contiguous indices
+    let gathered: Vec<f32, 4> = Vec.gather(&data, indices);
+    assert(gathered[0] == 0.0);
+    assert(gathered[1] == 2.0);
+    assert(gathered[2] == 4.0);
+    assert(gathered[3] == 6.0);
+
+    // Scatter: store to non-contiguous indices
+    let mut output = [0.0f32; 8];
+    let values: Vec<f32, 4> = Vec.splat(99.0);
+    values.scatter(&mut output, indices);
+    assert(output[0] == 99.0);
+    assert(output[1] == 0.0);  // Unchanged
+    assert(output[2] == 99.0);
+}
+
+// ------------------------------------------------------------
+// Platform-Specific SIMD Widths
+// ------------------------------------------------------------
+
+@cfg(target_feature = "avx512")
+type SimdF32Max is Vec<f32, 16>;
+
+@cfg(target_feature = "avx2")
+@cfg(not(target_feature = "avx512"))
+type SimdF32Max is Vec<f32, 8>;
+
+@cfg(target_feature = "sse4.2")
+@cfg(not(target_feature = "avx2"))
+type SimdF32Max is Vec<f32, 4>;
+
+// Generic over SIMD width
+fn sum_array<const N: Int>(arr: &[f32]) -> f32
+    where N > 0
+{
+    let chunks = arr.len() / N;
+    let mut sum_vec: Vec<f32, N> = Vec.splat(0.0);
+
+    for i in 0..chunks {
+        let chunk = Vec.load_aligned(&arr[i * N]);
+        sum_vec = sum_vec + chunk;
+    }
+
+    // Handle remainder
+    let mut sum = sum_vec.reduce_sum();
+    for i in (chunks * N)..arr.len() {
+        sum += arr[i];
+    }
+    sum
+}
+
+// ------------------------------------------------------------
+// SIMD-Accelerated Algorithms
+// ------------------------------------------------------------
+
+/// SIMD dot product
+fn dot_product_simd(a: &[f32], b: &[f32]) -> f32
+    requires len(a) == len(b)
+{
+    let n = a.len();
+    let chunks = n / 4;
+
+    let mut sum_vec: Vec<f32, 4> = Vec.splat(0.0);
+
+    for i in 0..chunks {
+        let av: Vec<f32, 4> = Vec.load_unaligned(&a[i * 4]);
+        let bv: Vec<f32, 4> = Vec.load_unaligned(&b[i * 4]);
+        sum_vec = av.mul_add(bv, sum_vec);
+    }
+
+    let mut sum = sum_vec.reduce_sum();
+
+    // Handle remainder
+    for i in (chunks * 4)..n {
+        sum += a[i] * b[i];
+    }
+
+    sum
+}
+
+/// SIMD memcmp
+fn simd_compare(a: &[u8], b: &[u8]) -> Bool
+    requires len(a) == len(b)
+{
+    let n = a.len();
+    let chunks = n / 16;
+
+    for i in 0..chunks {
+        let av: Vec<u8, 16> = Vec.load_unaligned(&a[i * 16]);
+        let bv: Vec<u8, 16> = Vec.load_unaligned(&b[i * 16]);
+        let eq_mask = av.eq(bv);
+        if !eq_mask.all() {
+            return false;
+        }
+    }
+
+    // Compare remainder
+    for i in (chunks * 16)..n {
+        if a[i] != b[i] {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Find first occurrence using SIMD
+fn simd_find(haystack: &[u8], needle: u8) -> Maybe<Int> {
+    let needle_vec: Vec<u8, 16> = Vec.splat(needle);
+    let chunks = haystack.len() / 16;
+
+    for i in 0..chunks {
+        let chunk: Vec<u8, 16> = Vec.load_unaligned(&haystack[i * 16]);
+        let mask = chunk.eq(needle_vec);
+        if mask.any() {
+            // Find first set bit
+            let first_idx = mask.first_set_index();
+            return Some(i * 16 + first_idx);
+        }
+    }
+
+    // Check remainder
+    for i in (chunks * 16)..haystack.len() {
+        if haystack[i] == needle {
+            return Some(i);
+        }
+    }
+
+    None
+}
+
+fn main() {
+    // Basic vector operations
+    test_vector_creation();
+    test_mask_operations();
+    test_simd_arithmetic();
+    test_simd_integer_ops();
+    test_horizontal_ops();
+    test_shuffles();
+    test_masked_ops();
+    test_gather_scatter();
+
+    // Algorithm tests
+    let a = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let b = [8.0f32, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0];
+    let dot = dot_product_simd(&a, &b);
+    assert(dot == 120.0);  // 1*8 + 2*7 + 3*6 + 4*5 + 5*4 + 6*3 + 7*2 + 8*1
+
+    let text = b"Hello, World!";
+    let idx = simd_find(text, 'W' as u8);
+    assert(idx == Some(7));
+}

@@ -1,0 +1,50 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, let-bindings
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT let bindings, mutable variables, shadowing
+
+fn main() -> Int {
+    // Basic let binding
+    let x = 42;
+    assert_eq(x, 42);
+
+    // Multiple bindings
+    let a = 10;
+    let b = 20;
+    let c = a + b;
+    assert_eq(c, 30);
+
+    // Mutable variables
+    let mut counter = 0;
+    counter = counter + 1;
+    counter = counter + 1;
+    counter = counter + 1;
+    assert_eq(counter, 3);
+
+    // Shadowing
+    let val = 10;
+    let val = val * 2;
+    let val = val + 5;
+    assert_eq(val, 25);
+
+    // Complex expressions
+    let result = (3 + 4) * (5 - 2);
+    assert_eq(result, 21);
+
+    // Nested function calls
+    let f5 = factorial(5);
+    let f6 = factorial(6);
+    assert_eq(f5, 120);
+    assert_eq(f6, 720);
+    assert_eq(f6 / f5, 6);
+
+    0
+}
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}

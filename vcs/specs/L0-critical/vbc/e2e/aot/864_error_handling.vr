@@ -1,0 +1,120 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, error, result, maybe, handling
+// @expected-exit: 0
+
+// Test: error handling patterns with Result and Maybe
+// Validates Result/Maybe construction, matching, propagation.
+
+type ParseError is InvalidNumber | EmptyInput | Overflow;
+
+fn parse_digit(ch: Int) -> Maybe<Int> {
+    // ASCII '0' = 48, '9' = 57
+    if (ch >= 48 && ch <= 57) {
+        Some(ch - 48)
+    } else {
+        None
+    }
+}
+
+fn safe_div(a: Int, b: Int) -> Maybe<Int> {
+    if (b == 0) {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+fn checked_add(a: Int, b: Int, limit: Int) -> Maybe<Int> {
+    let sum = a + b;
+    if (sum > limit) {
+        None
+    } else {
+        Some(sum)
+    }
+}
+
+fn main() -> Int {
+    // Maybe: Some/None
+    let val = Some(42);
+    match val {
+        Some(x) => assert_eq(x, 42),
+        None => panic("expected Some"),
+    }
+
+    let empty: Maybe<Int> = None;
+    match empty {
+        Some(_) => panic("expected None"),
+        None => {},
+    }
+
+    // parse_digit
+    let d = parse_digit(53); // '5' = ASCII 53
+    match d {
+        Some(n) => assert_eq(n, 5),
+        None => panic("expected digit"),
+    }
+
+    let bad = parse_digit(65); // 'A' = ASCII 65
+    match bad {
+        Some(_) => panic("expected None for non-digit"),
+        None => {},
+    }
+
+    // safe_div
+    let result = safe_div(10, 3);
+    match result {
+        Some(v) => assert_eq(v, 3),
+        None => panic("expected Some"),
+    }
+
+    let div_zero = safe_div(10, 0);
+    match div_zero {
+        Some(_) => panic("expected None for div zero"),
+        None => {},
+    }
+
+    // Chained maybe operations
+    let a = safe_div(100, 4); // Some(25)
+    match a {
+        Some(x) => {
+            let b = safe_div(x, 5); // Some(5)
+            match b {
+                Some(y) => assert_eq(y, 5),
+                None => panic("expected Some"),
+            }
+        },
+        None => panic("expected Some"),
+    }
+
+    // checked_add with overflow detection
+    let ok = checked_add(100, 50, 200);
+    match ok {
+        Some(v) => assert_eq(v, 150),
+        None => panic("expected Some"),
+    }
+
+    let overflow = checked_add(100, 150, 200);
+    match overflow {
+        Some(_) => panic("expected None for overflow"),
+        None => {},
+    }
+
+    // Count successes
+    let mut successes = 0;
+    let mut i = 0;
+    while (i < 10) {
+        let r = safe_div(100, i);
+        match r {
+            Some(_) => { successes = successes + 1; },
+            None => {},
+        }
+        i = i + 1;
+    }
+    // i=0 fails, i=1..9 succeed = 9 successes
+    assert_eq(successes, 9);
+
+    print("error_handling: PASS");
+    0
+}

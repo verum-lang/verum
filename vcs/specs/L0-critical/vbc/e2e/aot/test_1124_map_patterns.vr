@@ -1,0 +1,138 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: map, dictionary, key-value, hash
+// @description: Test Map usage patterns
+
+fn test_map_basic() -> Int {
+    let mut m = Map.new();
+    m.insert("x", 10);
+    m.insert("y", 20);
+    m.insert("z", 30);
+
+    if m.len() != 3 {
+        print(f"FAIL map_basic: len={m.len()}, expected 3");
+        return 1;
+    }
+    let x = m.get("x");
+    if x != 10 {
+        print(f"FAIL map_basic: x={x}, expected 10");
+        return 1;
+    }
+    let z = m.get("z");
+    if z != 30 {
+        print(f"FAIL map_basic: z={z}, expected 30");
+        return 1;
+    }
+    print("  map_basic: OK");
+    0
+}
+
+fn test_map_update() -> Int {
+    let mut m = Map.new();
+    m.insert("count", 1);
+    let v1 = m.get("count");
+    m.insert("count", v1 + 1);
+    let v2 = m.get("count");
+    if v2 != 2 {
+        print(f"FAIL map_update: {v2}, expected 2");
+        return 1;
+    }
+    print("  map_update: OK");
+    0
+}
+
+fn test_map_contains() -> Int {
+    let mut m = Map.new();
+    m.insert("hello", 1);
+    m.insert("world", 2);
+
+    if !m.contains_key("hello") {
+        print("FAIL: should contain 'hello'");
+        return 1;
+    }
+    if m.contains_key("missing") {
+        print("FAIL: should not contain 'missing'");
+        return 1;
+    }
+    print("  map_contains: OK");
+    0
+}
+
+fn test_map_remove() -> Int {
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+    m.remove("b");
+
+    if m.len() != 2 {
+        print(f"FAIL map_remove: len={m.len()}, expected 2");
+        return 1;
+    }
+    if m.contains_key("b") {
+        print("FAIL: 'b' should be removed");
+        return 1;
+    }
+    print("  map_remove: OK");
+    0
+}
+
+fn test_frequency_counter() -> Int {
+    // Count word frequencies
+    let mut freq = Map.new();
+    let mut words = List.new();
+    words.push("apple");
+    words.push("banana");
+    words.push("apple");
+    words.push("cherry");
+    words.push("banana");
+    words.push("apple");
+
+    let mut i = 0;
+    while i < words.len() {
+        let word = words[i];
+        if freq.contains_key(word) {
+            let count = freq.get(word);
+            freq.insert(word, count + 1);
+        } else {
+            freq.insert(word, 1);
+        }
+        i = i + 1;
+    }
+
+    let apple_count = freq.get("apple");
+    if apple_count != 3 {
+        print(f"FAIL freq: apple={apple_count}, expected 3");
+        return 1;
+    }
+    let banana_count = freq.get("banana");
+    if banana_count != 2 {
+        print(f"FAIL freq: banana={banana_count}, expected 2");
+        return 1;
+    }
+    let cherry_count = freq.get("cherry");
+    if cherry_count != 1 {
+        print(f"FAIL freq: cherry={cherry_count}, expected 1");
+        return 1;
+    }
+    print("  frequency_counter: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Map Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_map_basic();
+    failures = failures + test_map_update();
+    failures = failures + test_map_contains();
+    failures = failures + test_map_remove();
+    failures = failures + test_frequency_counter();
+
+    if failures == 0 {
+        print("All map pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

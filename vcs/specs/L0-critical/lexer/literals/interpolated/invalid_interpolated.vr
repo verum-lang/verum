@@ -1,0 +1,174 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, interpolated, invalid, negative
+
+// Invalid interpolated string syntax - each line should fail to parse
+
+fn test_unclosed_interpolation() {
+    // Unclosed interpolation braces
+    let unclosed_interp = f"Hello {name";
+    let unclosed_nested = f"Value: {obj.field";
+    let unclosed_expr = f"Sum: {a + b";
+}
+
+fn test_unmatched_braces() {
+    // Unmatched braces in interpolation
+    let unmatched_close = f"Hello name}";
+    let extra_close = f"Hello {name}}";
+    let extra_open = f"Hello {{name}";
+}
+
+fn test_empty_interpolation() {
+    // Empty interpolation
+    let empty_interp = f"Hello {}";
+    let whitespace_only = f"Value: {   }";
+}
+
+fn test_invalid_expressions() {
+    // Invalid expressions in interpolation
+    let invalid_expr = f"Result: {let x = 5}";
+    let incomplete_expr = f"Value: {a +}";
+    let dangling_op = f"Sum: {+ b}";
+}
+
+fn test_nested_string_issues() {
+    // Nested string issues
+    let nested_string_unclosed = f"Outer {\"inner}";
+    let mismatched_quotes = f"Value: {'text\"}";
+}
+
+fn test_interpolation_positions() {
+    // Interpolation at invalid positions
+    let interp_in_escape = f"Path: \{name}";
+}
+
+fn test_invalid_format_specs() {
+    // Invalid format specifiers
+    let bad_format_spec = f"Value: {x:invalid}";
+    let unclosed_format = f"Value: {x:";
+    let empty_format = f"Value: {x:}";
+
+    // Multiple colons in format
+    let multi_colon = f"Value: {x..2:>10}";
+}
+
+fn test_invalid_width_precision() {
+    // Invalid width/precision
+    let negative_width = f"Value: {x:-5}";
+    let float_precision = f"Value: {x:.2.3}";
+}
+
+fn test_interpolation_prefix_issues() {
+    // Interpolation prefix issues
+    let unknown_prefix = x"Hello {name}";
+    let numeric_prefix = 1"Hello {name}";
+    let no_prefix_interp = "Hello {name}"  // If plain strings don't support interpolation;
+}
+
+fn test_nested_interpolation() {
+    // Nested interpolation (if not supported)
+    let nested_interp = f"Outer: {f\"Inner: {val}\"}";
+}
+
+fn test_sql_interpolation_issues() {
+    // SQL interpolation issues
+    let sql_unclosed = sql"SELECT * FROM {table";
+    let sql_injection_attempt = sql"SELECT * FROM {table}; DROP TABLE users";
+}
+
+fn test_html_interpolation_issues() {
+    // HTML interpolation issues
+    let html_unclosed = html"<div>{content";
+    let html_script_interp = html"<script>{unsafe_code}</script>";
+}
+
+fn test_mixed_interpolation_types() {
+    // Mixed interpolation types
+    let mixed_tags = f"Value: sql\"{query}\"";
+}
+
+fn test_line_breaks_in_interpolation() {
+    // Line breaks in interpolation
+    let newline_in_interp = f"Value: {
+name}"
+}
+
+fn test_tab_in_interpolation() {
+    // Tab in interpolation expression
+    let tab_in_expr = f"Value: {	name}";
+}
+
+fn test_unicode_issues() {
+    // Unicode issues in interpolation
+    let unicode_brace = f"Value: {name\u{007D}";
+}
+
+fn test_escape_in_interpolation() {
+    // Escape sequences in interpolation
+    let escape_in_interp = f"Value: {\n}";
+    let backslash_interp = f"Value: {\\name}";
+}
+
+fn test_recursive_braces() {
+    // Recursive braces
+    let recursive_braces = f"Value: {{{name}}}";
+}
+
+fn test_comments_in_interpolation() {
+    // Comments in interpolation (if not supported)
+    let comment_in_interp = f"Value: {name // comment}";
+    let block_comment_interp = f"Value: {/* comment */ name}";
+}
+
+fn test_keywords_in_interpolation() {
+    // Keywords in interpolation
+    let keyword_interp = f"Value: {let}";
+    let reserved_interp = f"Result: {fn}";
+}
+
+fn test_operator_only_interpolation() {
+    // Operator-only interpolation
+    let op_only = f"Value: {+}";
+    let multi_op = f"Result: {+ - *}";
+}
+
+fn test_unterminated_strings() {
+    // Unterminated string with interpolation
+    let unterminated_f = f"Hello {name};
+    let unterminated_sql = sql"SELECT {col};
+}
+
+fn test_triple_quoted_issues() {
+    // Triple-quoted interpolation issues
+    let triple_unclosed_interp = f"""Hello {name""";
+
+    // Multiline format string unclosed
+    let multi_unclosed = f""";
+Name: {name
+Age: {age}
+"""
+}
+
+fn test_shell_unsafe() {
+    // Invalid safe interpolation contexts
+    let shell_unsafe = sh"rm -rf {user_input}"  // Should warn about safety;
+}
+
+fn test_method_chain_issues() {
+    // Method chain issues in interpolation
+    let unclosed_method = f"Value: {obj.method(}";
+    let nested_call_unclosed = f"Result: {func(arg1, func2(}";
+}
+
+fn test_array_access_issues() {
+    // Array access issues
+    let unclosed_array = f"Element: {arr[0";
+    let invalid_index = f"Element: {arr[]}";
+}
+
+fn test_conditional_issues() {
+    // Ternary/conditional issues
+    let unclosed_ternary = f"Value: {if cond { a }";
+    let incomplete_match = f"Result: {match x { }}";
+}

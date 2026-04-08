@@ -1,0 +1,175 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #4: combines all feature categories exercised
+// in tests 401-419. Milestone: 247 interpreter tests.
+
+type Pair is { fst: Int, snd: Int };
+type Maybe is Nothing | Just(Int);
+
+fn maybe_or(m: Maybe, default_val: Int) -> Int {
+    match m { Nothing => default_val, Just(x) => x }
+}
+
+fn* range(start: Int, end_excl: Int) -> Int {
+    let mut i = start;
+    while i < end_excl {
+        yield i;
+        i = i + 1;
+    }
+}
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn test_records_with_closures() {
+    let p = Pair { fst: 10, snd: 20 };
+    let transform = |x: Int| -> Int { x * p.fst + p.snd };
+    assert_eq(transform(3), 50); // 3*10 + 20
+    assert_eq(apply_twice(|x| x + p.fst, 0), 20);
+    print("records_with_closures: ok");
+}
+
+fn test_generator_with_variants() {
+    let mut total = 0;
+    for i in range(0, 10) {
+        let m = if i % 3 == 0 { Just(i * 10) } else { Nothing };
+        total = total + maybe_or(m, 0);
+    }
+    // i=0: Just(0), i=3: Just(30), i=6: Just(60), i=9: Just(90)
+    assert_eq(total, 180);
+    print("generator_with_variants: ok");
+}
+
+fn test_list_with_algorithms() {
+    // Sieve of Eratosthenes up to 30
+    let mut sieve = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+    sieve[0] = 0;
+    sieve[1] = 0;
+
+    let mut p = 2;
+    while p * p <= 30 {
+        if sieve[p] == 1 {
+            let mut j = p * p;
+            while j <= 30 {
+                sieve[j] = 0;
+                j = j + p;
+            }
+        }
+        p = p + 1;
+    }
+
+    let mut count = 0;
+    let mut i = 0;
+    while i <= 30 {
+        count = count + sieve[i];
+        i = i + 1;
+    }
+    // 10 primes up to 30: 2,3,5,7,11,13,17,19,23,29
+    assert_eq(count, 10);
+    print("list_with_algorithms: ok");
+}
+
+fn test_spawn_with_math() {
+    let t1 = spawn gcd(48, 36);
+    let t2 = spawn gcd(100, 75);
+    let r1 = t1.await;
+    let r2 = t2.await;
+    assert_eq(r1, 12);
+    assert_eq(r2, 25);
+    assert_eq(r1 + r2, 37);
+    print("spawn_with_math: ok");
+}
+
+fn test_nested_loops_with_conditions() {
+    // Count pairs (i,j) where gcd(i,j) == 1 for 1..20
+    let mut coprime_count = 0;
+    let mut i = 1;
+    while i <= 20 {
+        let mut j = i + 1;
+        while j <= 20 {
+            if gcd(i, j) == 1 {
+                coprime_count = coprime_count + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Should be > 0 (there are many coprime pairs)
+    assert(coprime_count > 50);
+    print("nested_loops_with_conditions: ok");
+}
+
+fn test_bitwise_with_loops() {
+    // Count set bits in all numbers 0..31
+    let mut total_bits = 0;
+    let mut n = 0;
+    while n < 32 {
+        let mut bits = 0;
+        let mut val = n;
+        while val > 0 {
+            bits = bits + (val & 1);
+            val = val >> 1;
+        }
+        total_bits = total_bits + bits;
+        n = n + 1;
+    }
+    // Each bit position (0-4) is set in exactly 16 numbers → 5*16 = 80
+    assert_eq(total_bits, 80);
+    print("bitwise_with_loops: ok");
+}
+
+fn test_format_strings_complex() {
+    let a = 42;
+    let b = 7;
+    let result = a * b;
+    let msg = f"{a} x {b} = {result}";
+    print(msg);
+
+    // Format in generator loop
+    let mut count = 0;
+    for i in range(1, 6) {
+        let sq = i * i;
+        let s = f"{i}^2={sq}";
+        count = count + 1;
+    }
+    assert_eq(count, 5);
+    print("format_strings_complex: ok");
+}
+
+fn test_higher_order_composition() {
+    let add1 = |x: Int| -> Int { x + 1 };
+    let double = |x: Int| -> Int { x * 2 };
+
+    // Apply add1 twice then double
+    let r = double(apply_twice(add1, 10));
+    assert_eq(r, 24); // (10+1+1)*2 = 24
+
+    // Apply double twice
+    let r2 = apply_twice(double, 3);
+    assert_eq(r2, 12); // 3*2*2 = 12
+    print("higher_order_composition: ok");
+}
+
+fn main() -> Int {
+    test_records_with_closures();
+    test_generator_with_variants();
+    test_list_with_algorithms();
+    test_spawn_with_math();
+    test_nested_loops_with_conditions();
+    test_bitwise_with_loops();
+    test_format_strings_complex();
+    test_higher_order_composition();
+    print("[OK] 420_interp_comprehensive4 — MILESTONE: 247 interpreter tests");
+    0
+}

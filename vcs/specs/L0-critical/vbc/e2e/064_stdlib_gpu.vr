@@ -1,0 +1,1099 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, stdlib, gpu, integration
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Stdlib GPU integration — exercises core.math.gpu API patterns through interpreter
+
+// ============================================================================
+// Core types
+// ============================================================================
+
+type GpuDevice is {
+    id: Int,
+    memory_mb: Int,
+    compute_caps: Int,
+    name_hash: Int
+};
+
+type GpuContext is {
+    device: Int,
+    alloc_bytes: Int,
+    free_bytes: Int,
+    stream_count: Int,
+    event_count: Int,
+    graph_count: Int,
+    kernel_count: Int
+};
+
+// ============================================================================
+// Helper: integer max / min
+// ============================================================================
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// ============================================================================
+// GpuDevice constructors and queries
+// ============================================================================
+
+fn device_new(id: Int, memory_mb: Int, compute_caps: Int, name_hash: Int) -> GpuDevice {
+    GpuDevice { id: id, memory_mb: memory_mb, compute_caps: compute_caps, name_hash: name_hash }
+}
+
+fn device_default() -> GpuDevice {
+    // Default device: id=0, 8192 MB, compute caps 86, name_hash=42
+    GpuDevice { id: 0, memory_mb: 8192, compute_caps: 86, name_hash: 42 }
+}
+
+fn device_supports_fp16(dev: GpuDevice) -> Bool {
+    dev.compute_caps >= 60
+}
+
+fn device_supports_tensor_cores(dev: GpuDevice) -> Bool {
+    dev.compute_caps >= 70
+}
+
+fn device_supports_bf16(dev: GpuDevice) -> Bool {
+    dev.compute_caps >= 80
+}
+
+fn device_max_threads_per_block(dev: GpuDevice) -> Int {
+    if dev.compute_caps >= 80 { 1024 }
+    else if dev.compute_caps >= 60 { 1024 }
+    else { 512 }
+}
+
+fn device_max_shared_memory(dev: GpuDevice) -> Int {
+    // Shared memory in KB based on compute capability
+    if dev.compute_caps >= 80 { 164 }
+    else if dev.compute_caps >= 70 { 96 }
+    else if dev.compute_caps >= 60 { 48 }
+    else { 16 }
+}
+
+fn device_warp_size(dev: GpuDevice) -> Int {
+    32
+}
+
+// ============================================================================
+// GpuContext constructors and mutations
+// ============================================================================
+
+fn ctx_new() -> GpuContext {
+    GpuContext {
+        device: 0,
+        alloc_bytes: 0,
+        free_bytes: 0,
+        stream_count: 0,
+        event_count: 0,
+        graph_count: 0,
+        kernel_count: 0
+    }
+}
+
+fn ctx_with_device(dev_id: Int) -> GpuContext {
+    GpuContext {
+        device: dev_id,
+        alloc_bytes: 0,
+        free_bytes: 0,
+        stream_count: 0,
+        event_count: 0,
+        graph_count: 0,
+        kernel_count: 0
+    }
+}
+
+fn ctx_alloc(ctx: GpuContext, bytes: Int) -> GpuContext {
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: ctx.alloc_bytes + bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        graph_count: ctx.graph_count,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn ctx_free(ctx: GpuContext, bytes: Int) -> GpuContext {
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes + bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        graph_count: ctx.graph_count,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn ctx_live_bytes(ctx: GpuContext) -> Int {
+    ctx.alloc_bytes - ctx.free_bytes
+}
+
+fn ctx_has_leaks(ctx: GpuContext) -> Bool {
+    ctx.alloc_bytes != ctx.free_bytes
+}
+
+fn ctx_create_stream(ctx: GpuContext) -> GpuContext {
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count + 1,
+        event_count: ctx.event_count,
+        graph_count: ctx.graph_count,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn ctx_destroy_stream(ctx: GpuContext) -> GpuContext {
+    let sc = if ctx.stream_count > 0 { ctx.stream_count - 1 } else { 0 };
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: sc,
+        event_count: ctx.event_count,
+        graph_count: ctx.graph_count,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn ctx_create_event(ctx: GpuContext) -> GpuContext {
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count + 1,
+        graph_count: ctx.graph_count,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn ctx_destroy_event(ctx: GpuContext) -> GpuContext {
+    let ec = if ctx.event_count > 0 { ctx.event_count - 1 } else { 0 };
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count,
+        event_count: ec,
+        graph_count: ctx.graph_count,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn ctx_create_graph(ctx: GpuContext) -> GpuContext {
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        graph_count: ctx.graph_count + 1,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn ctx_destroy_graph(ctx: GpuContext) -> GpuContext {
+    let gc = if ctx.graph_count > 0 { ctx.graph_count - 1 } else { 0 };
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        graph_count: gc,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn ctx_launch_kernel(ctx: GpuContext) -> GpuContext {
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        graph_count: ctx.graph_count,
+        kernel_count: ctx.kernel_count + 1
+    }
+}
+
+fn ctx_sync(ctx: GpuContext) -> GpuContext {
+    // In interpreter mode, sync is a no-op
+    ctx
+}
+
+fn ctx_reset(ctx: GpuContext) -> GpuContext {
+    GpuContext {
+        device: ctx.device,
+        alloc_bytes: 0,
+        free_bytes: 0,
+        stream_count: 0,
+        event_count: 0,
+        graph_count: 0,
+        kernel_count: 0
+    }
+}
+
+// ============================================================================
+// Kernel launch config
+// ============================================================================
+
+type KernelConfig is {
+    grid_x: Int,
+    grid_y: Int,
+    grid_z: Int,
+    block_x: Int,
+    block_y: Int,
+    block_z: Int,
+    shared_mem: Int
+};
+
+fn kernel_config_new(gx: Int, gy: Int, gz: Int, bx: Int, b_y: Int, bz: Int, smem: Int) -> KernelConfig {
+    KernelConfig {
+        grid_x: gx, grid_y: gy, grid_z: gz,
+        block_x: bx, block_y: b_y, block_z: bz,
+        shared_mem: smem
+    }
+}
+
+fn kernel_total_blocks(k: KernelConfig) -> Int {
+    k.grid_x * k.grid_y * k.grid_z
+}
+
+fn kernel_threads_per_block(k: KernelConfig) -> Int {
+    k.block_x * k.block_y * k.block_z
+}
+
+fn kernel_total_threads(k: KernelConfig) -> Int {
+    kernel_total_blocks(k) * kernel_threads_per_block(k)
+}
+
+fn kernel_is_valid(k: KernelConfig, dev: GpuDevice) -> Bool {
+    let tpb = kernel_threads_per_block(k);
+    let max_tpb = device_max_threads_per_block(dev);
+    let max_smem = device_max_shared_memory(dev);
+    tpb <= max_tpb && k.shared_mem <= max_smem && tpb > 0 && kernel_total_blocks(k) > 0
+}
+
+// ============================================================================
+// Event timing simulation
+// ============================================================================
+
+type GpuEvent is {
+    id: Int,
+    timestamp: Int,
+    recorded: Int
+};
+
+fn event_new(id: Int) -> GpuEvent {
+    GpuEvent { id: id, timestamp: 0, recorded: 0 }
+}
+
+fn event_record(ev: GpuEvent, ts: Int) -> GpuEvent {
+    GpuEvent { id: ev.id, timestamp: ts, recorded: 1 }
+}
+
+fn event_is_recorded(ev: GpuEvent) -> Bool {
+    ev.recorded == 1
+}
+
+fn event_elapsed(start: GpuEvent, end: GpuEvent) -> Int {
+    // Returns elapsed time; negative if end is before start
+    end.timestamp - start.timestamp
+}
+
+// ============================================================================
+// Memory pool
+// ============================================================================
+
+type MemoryPool is {
+    block_size: Int,
+    total_blocks: Int,
+    used_blocks: Int,
+    alloc_count: Int,
+    free_count: Int,
+    high_watermark: Int
+};
+
+fn pool_new(block_size: Int, total_blocks: Int) -> MemoryPool {
+    MemoryPool {
+        block_size: block_size,
+        total_blocks: total_blocks,
+        used_blocks: 0,
+        alloc_count: 0,
+        free_count: 0,
+        high_watermark: 0
+    }
+}
+
+fn pool_alloc(p: MemoryPool) -> MemoryPool {
+    let new_used = p.used_blocks + 1;
+    let new_hw = int_max(p.high_watermark, new_used);
+    MemoryPool {
+        block_size: p.block_size,
+        total_blocks: p.total_blocks,
+        used_blocks: new_used,
+        alloc_count: p.alloc_count + 1,
+        free_count: p.free_count,
+        high_watermark: new_hw
+    }
+}
+
+fn pool_free(p: MemoryPool) -> MemoryPool {
+    let new_used = if p.used_blocks > 0 { p.used_blocks - 1 } else { 0 };
+    MemoryPool {
+        block_size: p.block_size,
+        total_blocks: p.total_blocks,
+        used_blocks: new_used,
+        alloc_count: p.alloc_count,
+        free_count: p.free_count + 1,
+        high_watermark: p.high_watermark
+    }
+}
+
+fn pool_available(p: MemoryPool) -> Int {
+    p.total_blocks - p.used_blocks
+}
+
+fn pool_is_full(p: MemoryPool) -> Bool {
+    p.used_blocks >= p.total_blocks
+}
+
+fn pool_total_bytes(p: MemoryPool) -> Int {
+    p.total_blocks * p.block_size
+}
+
+fn pool_used_bytes(p: MemoryPool) -> Int {
+    p.used_blocks * p.block_size
+}
+
+fn pool_utilization_pct(p: MemoryPool) -> Int {
+    // Returns percentage 0-100
+    if p.total_blocks == 0 { 0 }
+    else { (p.used_blocks * 100) / p.total_blocks }
+}
+
+// ============================================================================
+// Graph API simulation
+// ============================================================================
+
+type GpuGraph is {
+    id: Int,
+    node_count: Int,
+    captured: Int,
+    instantiated: Int,
+    replay_count: Int
+};
+
+fn graph_new(id: Int) -> GpuGraph {
+    GpuGraph { id: id, node_count: 0, captured: 0, instantiated: 0, replay_count: 0 }
+}
+
+fn graph_add_node(g: GpuGraph) -> GpuGraph {
+    GpuGraph {
+        id: g.id,
+        node_count: g.node_count + 1,
+        captured: g.captured,
+        instantiated: g.instantiated,
+        replay_count: g.replay_count
+    }
+}
+
+fn graph_capture(g: GpuGraph) -> GpuGraph {
+    GpuGraph {
+        id: g.id,
+        node_count: g.node_count,
+        captured: 1,
+        instantiated: g.instantiated,
+        replay_count: g.replay_count
+    }
+}
+
+fn graph_instantiate(g: GpuGraph) -> GpuGraph {
+    GpuGraph {
+        id: g.id,
+        node_count: g.node_count,
+        captured: g.captured,
+        instantiated: 1,
+        replay_count: g.replay_count
+    }
+}
+
+fn graph_replay(g: GpuGraph) -> GpuGraph {
+    GpuGraph {
+        id: g.id,
+        node_count: g.node_count,
+        captured: g.captured,
+        instantiated: g.instantiated,
+        replay_count: g.replay_count + 1
+    }
+}
+
+fn graph_is_captured(g: GpuGraph) -> Bool {
+    g.captured == 1
+}
+
+fn graph_is_instantiated(g: GpuGraph) -> Bool {
+    g.instantiated == 1
+}
+
+fn graph_is_ready(g: GpuGraph) -> Bool {
+    g.captured == 1 && g.instantiated == 1
+}
+
+// ============================================================================
+// Test 1: GPU context initialization
+// ============================================================================
+
+fn test_gpu_context_init() {
+    let ctx = ctx_new();
+    assert_eq(ctx.device, 0);
+    assert_eq(ctx.alloc_bytes, 0);
+    assert_eq(ctx.free_bytes, 0);
+    assert_eq(ctx.stream_count, 0);
+    assert_eq(ctx.event_count, 0);
+    assert_eq(ctx.graph_count, 0);
+    assert_eq(ctx.kernel_count, 0);
+    assert(!ctx_has_leaks(ctx));
+    assert_eq(ctx_live_bytes(ctx), 0);
+
+    // Context with specific device
+    let ctx2 = ctx_with_device(3);
+    assert_eq(ctx2.device, 3);
+    assert_eq(ctx2.alloc_bytes, 0);
+    assert_eq(ctx2.kernel_count, 0);
+
+    // Reset preserves device
+    let mut ctx3 = ctx_with_device(5);
+    ctx3 = ctx_alloc(ctx3, 1000);
+    ctx3 = ctx_create_stream(ctx3);
+    ctx3 = ctx_launch_kernel(ctx3);
+    let ctx4 = ctx_reset(ctx3);
+    assert_eq(ctx4.device, 5);
+    assert_eq(ctx4.alloc_bytes, 0);
+    assert_eq(ctx4.stream_count, 0);
+    assert_eq(ctx4.kernel_count, 0);
+
+    print("test_gpu_context_init passed");
+}
+
+// ============================================================================
+// Test 2: GPU device info
+// ============================================================================
+
+fn test_gpu_device_info() {
+    // Default device (simulated high-end GPU)
+    let dev = device_default();
+    assert_eq(dev.id, 0);
+    assert_eq(dev.memory_mb, 8192);
+    assert_eq(dev.compute_caps, 86);
+    assert_eq(dev.name_hash, 42);
+
+    // Feature queries
+    assert(device_supports_fp16(dev));
+    assert(device_supports_tensor_cores(dev));
+    assert(device_supports_bf16(dev));
+    assert_eq(device_max_threads_per_block(dev), 1024);
+    assert_eq(device_max_shared_memory(dev), 164);
+    assert_eq(device_warp_size(dev), 32);
+
+    // Older device (compute cap 50)
+    let old_dev = device_new(1, 2048, 50, 99);
+    assert_eq(old_dev.memory_mb, 2048);
+    assert(!device_supports_fp16(old_dev));
+    assert(!device_supports_tensor_cores(old_dev));
+    assert(!device_supports_bf16(old_dev));
+    assert_eq(device_max_threads_per_block(old_dev), 512);
+    assert_eq(device_max_shared_memory(old_dev), 16);
+
+    // Mid-range device (compute cap 70)
+    let mid_dev = device_new(2, 4096, 70, 77);
+    assert(device_supports_fp16(mid_dev));
+    assert(device_supports_tensor_cores(mid_dev));
+    assert(!device_supports_bf16(mid_dev));
+    assert_eq(device_max_threads_per_block(mid_dev), 1024);
+    assert_eq(device_max_shared_memory(mid_dev), 96);
+
+    // Boundary: compute cap exactly 60
+    let dev60 = device_new(3, 3072, 60, 60);
+    assert(device_supports_fp16(dev60));
+    assert(!device_supports_tensor_cores(dev60));
+    assert_eq(device_max_shared_memory(dev60), 48);
+
+    print("test_gpu_device_info passed");
+}
+
+// ============================================================================
+// Test 3: GPU memory management
+// ============================================================================
+
+fn test_gpu_memory_management() {
+    let mut ctx = ctx_new();
+
+    // Allocate several buffers
+    ctx = ctx_alloc(ctx, 4096);
+    assert_eq(ctx.alloc_bytes, 4096);
+    assert_eq(ctx_live_bytes(ctx), 4096);
+    assert(ctx_has_leaks(ctx));
+
+    ctx = ctx_alloc(ctx, 2048);
+    assert_eq(ctx.alloc_bytes, 6144);
+    assert_eq(ctx_live_bytes(ctx), 6144);
+
+    ctx = ctx_alloc(ctx, 1024);
+    assert_eq(ctx.alloc_bytes, 7168);
+    assert_eq(ctx_live_bytes(ctx), 7168);
+
+    // Free some
+    ctx = ctx_free(ctx, 2048);
+    assert_eq(ctx.free_bytes, 2048);
+    assert_eq(ctx_live_bytes(ctx), 5120);
+
+    ctx = ctx_free(ctx, 4096);
+    assert_eq(ctx.free_bytes, 6144);
+    assert_eq(ctx_live_bytes(ctx), 1024);
+
+    // Free last
+    ctx = ctx_free(ctx, 1024);
+    assert_eq(ctx_live_bytes(ctx), 0);
+    assert(!ctx_has_leaks(ctx));
+    assert_eq(ctx.alloc_bytes, 7168);
+    assert_eq(ctx.free_bytes, 7168);
+
+    // Repeated alloc-free cycles
+    let mut ctx2 = ctx_new();
+    let mut i = 0;
+    while i < 10 {
+        ctx2 = ctx_alloc(ctx2, 256);
+        ctx2 = ctx_free(ctx2, 256);
+        i = i + 1;
+    }
+    assert_eq(ctx2.alloc_bytes, 2560);
+    assert_eq(ctx2.free_bytes, 2560);
+    assert(!ctx_has_leaks(ctx2));
+
+    print("test_gpu_memory_management passed");
+}
+
+// ============================================================================
+// Test 4: GPU stream API
+// ============================================================================
+
+fn test_gpu_stream_api() {
+    let mut ctx = ctx_new();
+    assert_eq(ctx.stream_count, 0);
+
+    // Create streams
+    ctx = ctx_create_stream(ctx);
+    assert_eq(ctx.stream_count, 1);
+
+    ctx = ctx_create_stream(ctx);
+    ctx = ctx_create_stream(ctx);
+    assert_eq(ctx.stream_count, 3);
+
+    // Sync (no-op in interpreter)
+    let ctx2 = ctx_sync(ctx);
+    assert_eq(ctx2.stream_count, 3);
+    assert_eq(ctx2.kernel_count, ctx.kernel_count);
+
+    // Destroy streams
+    ctx = ctx_destroy_stream(ctx);
+    assert_eq(ctx.stream_count, 2);
+
+    ctx = ctx_destroy_stream(ctx);
+    ctx = ctx_destroy_stream(ctx);
+    assert_eq(ctx.stream_count, 0);
+
+    // Destroy on zero stays at zero
+    ctx = ctx_destroy_stream(ctx);
+    assert_eq(ctx.stream_count, 0);
+
+    // Create and destroy interleaved
+    ctx = ctx_create_stream(ctx);
+    ctx = ctx_create_stream(ctx);
+    ctx = ctx_destroy_stream(ctx);
+    ctx = ctx_create_stream(ctx);
+    ctx = ctx_create_stream(ctx);
+    ctx = ctx_destroy_stream(ctx);
+    ctx = ctx_destroy_stream(ctx);
+    ctx = ctx_destroy_stream(ctx);
+    assert_eq(ctx.stream_count, 0);
+
+    print("test_gpu_stream_api passed");
+}
+
+// ============================================================================
+// Test 5: GPU event timing
+// ============================================================================
+
+fn test_gpu_event_timing() {
+    // Create events
+    let ev_start = event_new(1);
+    assert_eq(ev_start.id, 1);
+    assert(!event_is_recorded(ev_start));
+
+    let ev_end = event_new(2);
+    assert(!event_is_recorded(ev_end));
+
+    // Record events with simulated timestamps
+    let ev_start2 = event_record(ev_start, 1000);
+    assert(event_is_recorded(ev_start2));
+    assert_eq(ev_start2.timestamp, 1000);
+
+    let ev_end2 = event_record(ev_end, 1500);
+    assert(event_is_recorded(ev_end2));
+    assert_eq(ev_end2.timestamp, 1500);
+
+    // Compute elapsed
+    let elapsed = event_elapsed(ev_start2, ev_end2);
+    assert_eq(elapsed, 500);
+
+    // Multiple timing intervals
+    let ev_a = event_record(event_new(10), 100);
+    let ev_b = event_record(event_new(11), 350);
+    let ev_c = event_record(event_new(12), 800);
+    assert_eq(event_elapsed(ev_a, ev_b), 250);
+    assert_eq(event_elapsed(ev_b, ev_c), 450);
+    assert_eq(event_elapsed(ev_a, ev_c), 700);
+
+    // Context event tracking
+    let mut ctx = ctx_new();
+    ctx = ctx_create_event(ctx);
+    ctx = ctx_create_event(ctx);
+    ctx = ctx_create_event(ctx);
+    assert_eq(ctx.event_count, 3);
+
+    ctx = ctx_destroy_event(ctx);
+    assert_eq(ctx.event_count, 2);
+
+    ctx = ctx_destroy_event(ctx);
+    ctx = ctx_destroy_event(ctx);
+    assert_eq(ctx.event_count, 0);
+
+    // Destroy on zero stays at zero
+    ctx = ctx_destroy_event(ctx);
+    assert_eq(ctx.event_count, 0);
+
+    print("test_gpu_event_timing passed");
+}
+
+// ============================================================================
+// Test 6: GPU kernel launch
+// ============================================================================
+
+fn test_gpu_kernel_launch() {
+    let dev = device_default();
+
+    // 1D kernel
+    let k1 = kernel_config_new(256, 1, 1, 256, 1, 1, 0);
+    assert_eq(kernel_total_blocks(k1), 256);
+    assert_eq(kernel_threads_per_block(k1), 256);
+    assert_eq(kernel_total_threads(k1), 65536);
+    assert(kernel_is_valid(k1, dev));
+
+    // 2D kernel
+    let k2 = kernel_config_new(16, 16, 1, 16, 16, 1, 48);
+    assert_eq(kernel_total_blocks(k2), 256);
+    assert_eq(kernel_threads_per_block(k2), 256);
+    assert_eq(kernel_total_threads(k2), 65536);
+    assert(kernel_is_valid(k2, dev));
+
+    // 3D kernel
+    let k3 = kernel_config_new(4, 4, 4, 8, 8, 8, 0);
+    assert_eq(kernel_total_blocks(k3), 64);
+    assert_eq(kernel_threads_per_block(k3), 512);
+    assert_eq(kernel_total_threads(k3), 32768);
+    assert(kernel_is_valid(k3, dev));
+
+    // Invalid: too many threads per block
+    let k_bad = kernel_config_new(1, 1, 1, 32, 32, 2, 0);
+    assert_eq(kernel_threads_per_block(k_bad), 2048);
+    assert(!kernel_is_valid(k_bad, dev));
+
+    // Invalid: too much shared memory (request 200 KB on 164 KB max)
+    let k_smem = kernel_config_new(1, 1, 1, 128, 1, 1, 200);
+    assert(!kernel_is_valid(k_smem, dev));
+
+    // Valid on older device: check thread limit
+    let old_dev = device_new(1, 2048, 50, 99);
+    let k_old = kernel_config_new(1, 1, 1, 512, 1, 1, 0);
+    assert(kernel_is_valid(k_old, old_dev));
+    let k_old_bad = kernel_config_new(1, 1, 1, 1024, 1, 1, 0);
+    assert(!kernel_is_valid(k_old_bad, old_dev));
+
+    // Context kernel count tracking
+    let mut ctx = ctx_new();
+    ctx = ctx_launch_kernel(ctx);
+    ctx = ctx_launch_kernel(ctx);
+    ctx = ctx_launch_kernel(ctx);
+    assert_eq(ctx.kernel_count, 3);
+
+    // Simulate a training step: multiple launches
+    let mut ctx2 = ctx_new();
+    let mut i = 0;
+    while i < 6 {
+        ctx2 = ctx_launch_kernel(ctx2);
+        i = i + 1;
+    }
+    assert_eq(ctx2.kernel_count, 6);
+
+    print("test_gpu_kernel_launch passed");
+}
+
+// ============================================================================
+// Test 7: GPU pipeline (H2D -> compute -> D2H)
+// ============================================================================
+
+fn test_gpu_pipeline() {
+    let mut ctx = ctx_new();
+
+    // Step 1: Create a stream for the pipeline
+    ctx = ctx_create_stream(ctx);
+
+    // Step 2: Host-to-device transfer (allocate device memory, simulate copy)
+    let input_bytes = 4096;
+    let weight_bytes = 8192;
+    ctx = ctx_alloc(ctx, input_bytes);
+    ctx = ctx_alloc(ctx, weight_bytes);
+    assert_eq(ctx_live_bytes(ctx), 12288);
+
+    // Step 3: Compute (kernel launches for forward pass)
+    ctx = ctx_launch_kernel(ctx);  // layer 1
+    ctx = ctx_launch_kernel(ctx);  // layer 2
+    ctx = ctx_launch_kernel(ctx);  // activation
+
+    // Step 4: Allocate output buffer
+    let output_bytes = 2048;
+    ctx = ctx_alloc(ctx, output_bytes);
+    assert_eq(ctx_live_bytes(ctx), 14336);
+
+    // Step 5: Device-to-host transfer (simulate memcpy)
+    ctx = ctx_launch_kernel(ctx);  // D2H kernel
+    ctx = ctx_sync(ctx);
+
+    // Step 6: Cleanup
+    ctx = ctx_free(ctx, input_bytes);
+    ctx = ctx_free(ctx, weight_bytes);
+    ctx = ctx_free(ctx, output_bytes);
+    assert(!ctx_has_leaks(ctx));
+
+    ctx = ctx_destroy_stream(ctx);
+    assert_eq(ctx.stream_count, 0);
+    assert_eq(ctx.kernel_count, 4);
+    assert_eq(ctx.alloc_bytes, 14336);
+    assert_eq(ctx.free_bytes, 14336);
+
+    print("test_gpu_pipeline passed");
+}
+
+// ============================================================================
+// Test 8: Multi-stream overlap
+// ============================================================================
+
+fn test_gpu_multi_stream() {
+    let mut ctx = ctx_new();
+
+    // Create 3 streams for pipelining
+    ctx = ctx_create_stream(ctx);  // stream 0: data loading
+    ctx = ctx_create_stream(ctx);  // stream 1: compute
+    ctx = ctx_create_stream(ctx);  // stream 2: output transfer
+    assert_eq(ctx.stream_count, 3);
+
+    // Create events for synchronization points
+    ctx = ctx_create_event(ctx);  // event 0: data ready
+    ctx = ctx_create_event(ctx);  // event 1: compute done
+
+    // Simulate 3 pipeline stages running concurrently:
+
+    // Stream 0: Load batch data
+    ctx = ctx_alloc(ctx, 1024);
+    ctx = ctx_launch_kernel(ctx);
+
+    // Stream 1: Compute on previous batch
+    ctx = ctx_alloc(ctx, 512);
+    ctx = ctx_launch_kernel(ctx);
+    ctx = ctx_launch_kernel(ctx);
+
+    // Stream 2: Transfer output from two batches ago
+    ctx = ctx_launch_kernel(ctx);
+
+    // Sync all streams
+    ctx = ctx_sync(ctx);
+
+    assert_eq(ctx.kernel_count, 4);
+    assert_eq(ctx_live_bytes(ctx), 1536);
+
+    // Free all allocations
+    ctx = ctx_free(ctx, 1024);
+    ctx = ctx_free(ctx, 512);
+    assert(!ctx_has_leaks(ctx));
+
+    // Cleanup events and streams
+    ctx = ctx_destroy_event(ctx);
+    ctx = ctx_destroy_event(ctx);
+    ctx = ctx_destroy_stream(ctx);
+    ctx = ctx_destroy_stream(ctx);
+    ctx = ctx_destroy_stream(ctx);
+    assert_eq(ctx.stream_count, 0);
+    assert_eq(ctx.event_count, 0);
+
+    // Simulate multi-stream batch processing: 4 batches, 2 streams
+    let mut ctx2 = ctx_new();
+    ctx2 = ctx_create_stream(ctx2);
+    ctx2 = ctx_create_stream(ctx2);
+
+    let mut batch = 0;
+    while batch < 4 {
+        // Alternate streams: even batches on stream 0, odd on stream 1
+        ctx2 = ctx_alloc(ctx2, 256);
+        ctx2 = ctx_launch_kernel(ctx2);
+        ctx2 = ctx_free(ctx2, 256);
+        batch = batch + 1;
+    }
+
+    ctx2 = ctx_sync(ctx2);
+    assert_eq(ctx2.kernel_count, 4);
+    assert(!ctx_has_leaks(ctx2));
+
+    ctx2 = ctx_destroy_stream(ctx2);
+    ctx2 = ctx_destroy_stream(ctx2);
+    assert_eq(ctx2.stream_count, 0);
+
+    print("test_gpu_multi_stream passed");
+}
+
+// ============================================================================
+// Test 9: Graph API (capture, instantiate, replay)
+// ============================================================================
+
+fn test_gpu_graph_api() {
+    // Create a graph
+    let mut graph = graph_new(1);
+    assert_eq(graph.id, 1);
+    assert_eq(graph.node_count, 0);
+    assert(!graph_is_captured(graph));
+    assert(!graph_is_instantiated(graph));
+    assert(!graph_is_ready(graph));
+
+    // Add nodes (operations) to the graph
+    graph = graph_add_node(graph);  // memcpy H2D
+    graph = graph_add_node(graph);  // kernel 1
+    graph = graph_add_node(graph);  // kernel 2
+    graph = graph_add_node(graph);  // memcpy D2H
+    assert_eq(graph.node_count, 4);
+
+    // Capture the graph
+    graph = graph_capture(graph);
+    assert(graph_is_captured(graph));
+    assert(!graph_is_instantiated(graph));
+    assert(!graph_is_ready(graph));
+
+    // Instantiate the graph
+    graph = graph_instantiate(graph);
+    assert(graph_is_captured(graph));
+    assert(graph_is_instantiated(graph));
+    assert(graph_is_ready(graph));
+
+    // Replay the graph multiple times
+    graph = graph_replay(graph);
+    assert_eq(graph.replay_count, 1);
+
+    graph = graph_replay(graph);
+    graph = graph_replay(graph);
+    graph = graph_replay(graph);
+    graph = graph_replay(graph);
+    assert_eq(graph.replay_count, 5);
+
+    // Node count should not change on replay
+    assert_eq(graph.node_count, 4);
+
+    // Track graphs in context
+    let mut ctx = ctx_new();
+    ctx = ctx_create_graph(ctx);
+    ctx = ctx_create_graph(ctx);
+    assert_eq(ctx.graph_count, 2);
+
+    ctx = ctx_destroy_graph(ctx);
+    assert_eq(ctx.graph_count, 1);
+
+    ctx = ctx_destroy_graph(ctx);
+    assert_eq(ctx.graph_count, 0);
+
+    // Destroy on zero stays at zero
+    ctx = ctx_destroy_graph(ctx);
+    assert_eq(ctx.graph_count, 0);
+
+    // Simulate a complete graph-based inference pipeline
+    let mut g2 = graph_new(2);
+    let mut n = 0;
+    while n < 8 {
+        g2 = graph_add_node(g2);
+        n = n + 1;
+    }
+    g2 = graph_capture(g2);
+    g2 = graph_instantiate(g2);
+    assert(graph_is_ready(g2));
+    assert_eq(g2.node_count, 8);
+
+    // Replay 100 inference batches
+    let mut r = 0;
+    while r < 100 {
+        g2 = graph_replay(g2);
+        r = r + 1;
+    }
+    assert_eq(g2.replay_count, 100);
+
+    print("test_gpu_graph_api passed");
+}
+
+// ============================================================================
+// Test 10: Memory pool
+// ============================================================================
+
+fn test_gpu_memory_pool() {
+    // Create a pool: 256-byte blocks, 16 blocks total
+    let mut pool = pool_new(256, 16);
+    assert_eq(pool.block_size, 256);
+    assert_eq(pool.total_blocks, 16);
+    assert_eq(pool.used_blocks, 0);
+    assert_eq(pool_available(pool), 16);
+    assert(!pool_is_full(pool));
+    assert_eq(pool_total_bytes(pool), 4096);
+    assert_eq(pool_used_bytes(pool), 0);
+    assert_eq(pool_utilization_pct(pool), 0);
+
+    // Allocate some blocks
+    pool = pool_alloc(pool);
+    pool = pool_alloc(pool);
+    pool = pool_alloc(pool);
+    assert_eq(pool.used_blocks, 3);
+    assert_eq(pool_available(pool), 13);
+    assert_eq(pool_used_bytes(pool), 768);
+    assert_eq(pool_utilization_pct(pool), 18);  // 3/16 = 18%
+    assert_eq(pool.high_watermark, 3);
+
+    // Free one block (recycled back to pool)
+    pool = pool_free(pool);
+    assert_eq(pool.used_blocks, 2);
+    assert_eq(pool_available(pool), 14);
+    assert_eq(pool.high_watermark, 3);  // watermark doesn't decrease
+
+    // Allocate more
+    pool = pool_alloc(pool);
+    pool = pool_alloc(pool);
+    pool = pool_alloc(pool);
+    pool = pool_alloc(pool);
+    assert_eq(pool.used_blocks, 6);
+    assert_eq(pool.high_watermark, 6);
+    assert_eq(pool.alloc_count, 7);  // 3 + 4
+    assert_eq(pool.free_count, 1);
+
+    // Fill the pool completely
+    let mut pool2 = pool_new(128, 8);
+    let mut i = 0;
+    while i < 8 {
+        pool2 = pool_alloc(pool2);
+        i = i + 1;
+    }
+    assert(pool_is_full(pool2));
+    assert_eq(pool_available(pool2), 0);
+    assert_eq(pool_utilization_pct(pool2), 100);
+    assert_eq(pool2.high_watermark, 8);
+
+    // Free all and reallocate (recycling)
+    let mut j = 0;
+    while j < 8 {
+        pool2 = pool_free(pool2);
+        j = j + 1;
+    }
+    assert_eq(pool2.used_blocks, 0);
+    assert_eq(pool_available(pool2), 8);
+    assert_eq(pool2.high_watermark, 8);
+    assert_eq(pool2.alloc_count, 8);
+    assert_eq(pool2.free_count, 8);
+
+    // Reallocate half the pool (these are recycled blocks)
+    let mut k = 0;
+    while k < 4 {
+        pool2 = pool_alloc(pool2);
+        k = k + 1;
+    }
+    assert_eq(pool2.used_blocks, 4);
+    assert_eq(pool2.alloc_count, 12);
+    assert_eq(pool_utilization_pct(pool2), 50);
+    assert_eq(pool2.high_watermark, 8);
+
+    // Verify watermark with surge pattern
+    let mut pool3 = pool_new(64, 32);
+    // Surge: allocate 20 blocks
+    let mut s = 0;
+    while s < 20 {
+        pool3 = pool_alloc(pool3);
+        s = s + 1;
+    }
+    assert_eq(pool3.high_watermark, 20);
+
+    // Free 15
+    let mut f = 0;
+    while f < 15 {
+        pool3 = pool_free(pool3);
+        f = f + 1;
+    }
+    assert_eq(pool3.used_blocks, 5);
+    assert_eq(pool3.high_watermark, 20);  // watermark preserved
+
+    // Smaller surge: allocate 10 more (total 15, still below watermark)
+    let mut s2 = 0;
+    while s2 < 10 {
+        pool3 = pool_alloc(pool3);
+        s2 = s2 + 1;
+    }
+    assert_eq(pool3.used_blocks, 15);
+    assert_eq(pool3.high_watermark, 20);  // watermark unchanged
+
+    // Larger surge: allocate 10 more (total 25, exceeds watermark)
+    let mut s3 = 0;
+    while s3 < 10 {
+        pool3 = pool_alloc(pool3);
+        s3 = s3 + 1;
+    }
+    assert_eq(pool3.used_blocks, 25);
+    assert_eq(pool3.high_watermark, 25);  // new watermark
+
+    print("test_gpu_memory_pool passed");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_gpu_context_init();
+    test_gpu_device_info();
+    test_gpu_memory_management();
+    test_gpu_stream_api();
+    test_gpu_event_timing();
+    test_gpu_kernel_launch();
+    test_gpu_pipeline();
+    test_gpu_multi_stream();
+    test_gpu_graph_api();
+    test_gpu_memory_pool();
+    print("[OK] 064_stdlib_gpu");
+    0
+}

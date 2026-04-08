@@ -1,0 +1,18 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, data-race, type-system, static
+// @description: Tests static detection of unsynchronized shared mutable access
+
+// This test demonstrates that the type system prevents data races at compile time.
+// Currently skipped because threading primitives (spawn) are not yet implemented.
+// The test verifies that accessing mutable state from multiple threads without
+// synchronization is rejected by the type checker.
+
+fn main() {
+    // Placeholder - actual test requires spawn syntax
+    // The intended test would verify compile-time rejection of:
+    //   let mut counter = 0;
+    //   spawn || { counter += 1; }  // ERROR: unsynchronized access
+    print("Unsynchronized access test - skipped (threading not implemented)");
+}

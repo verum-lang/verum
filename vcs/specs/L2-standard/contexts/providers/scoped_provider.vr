@@ -1,0 +1,213 @@
+// @test: run
+// @expected-stdout: Request 1: Created transaction tx-1\nRequest 1: Committed transaction\nRequest 2: Created transaction tx-2\nRequest 2: Committed transaction
+// @tier: 0
+// @level: L2
+// @tags: contexts, providers, scopes
+// @description: Scoped context providers with lifecycle management
+
+/// Scoped providers manage context lifecycle per request/transaction
+
+// Scope definitions
+type Scope is
+    | Singleton      // One instance for entire application
+    | Request        // New instance per request
+    | Transaction    // New instance per transaction
+    | Prototype;     // New instance every time
+
+// Scoped provider
+type ScopedProvider<T, S: Scope> is protocol {
+    fn get(&self, scope_id: ScopeId) -> &T
+    fn create(&self) -> T
+    fn destroy(&self, scope_id: ScopeId)
+};
+
+type ScopeId is Int;
+type Connection is { url: Text };
+type ConnectionPool is { url: Text };
+
+implement Connection {
+    fn new(url: Text) -> Self { Self { url } }
+}
+
+implement ConnectionPool {
+    fn get_connection(&self) -> Connection {
+        Connection { url: self.url.clone() }
+    }
+}
+
+// Request-scoped transaction
+context Transaction {
+    fn id(&self) -> Text;
+    fn commit(&mut self) -> Result<(), TransactionError>;
+    fn rollback(&mut self);
+}
+
+type TransactionError is CommitFailed(Text);
+
+// Transaction implementation
+type DbTransaction is {
+    id: Text,
+    conn: Connection,
+    committed: Bool,
+};
+
+implement Transaction for DbTransaction {
+    fn id(&self) -> Text { self.id.clone() }
+
+    fn commit(&mut self) -> Result<(), TransactionError> {
+        if self.committed {
+            return Err(TransactionError.CommitFailed("Already committed"));
+        }
+        // Commit to database
+        self.committed = true;
+        Ok(())
+    }
+
+    fn rollback(&mut self) {
+        if !self.committed {
+            // Rollback changes
+        }
+    }
+}
+
+// Scoped transaction provider
+type TransactionProvider is {
+    conn: Connection,
+    counter: Shared<Int>,
+    active: Shared<Map<ScopeId, DbTransaction>>,
+};
+
+implement TransactionProvider {
+    fn new(conn: Connection) -> Self {
+        Self {
+            conn,
+            counter: Shared.new(0),
+            active: Shared.new({}),
+        }
+    }
+}
+
+implement ScopedProvider<DbTransaction, Request> for TransactionProvider {
+    fn get(&self, scope_id: ScopeId) -> &DbTransaction {
+        self.active.read().get(&scope_id)
+            .expect("Transaction not found for scope")
+    }
+
+    fn create(&self) -> DbTransaction {
+        let mut counter = self.counter.write();
+        *counter += 1;
+        let id = f"tx-{counter}";
+
+        DbTransaction {
+            id,
+            conn: self.conn.clone(),
+            committed: false,
+        }
+    }
+
+    fn destroy(&self, scope_id: ScopeId) {
+        let mut active = self.active.write();
+        let mut tx = active.remove(&scope_id);
+        if !tx.committed {
+            tx.rollback();
+        }
+    }
+}
+
+// Request scope manager
+type RequestScope is {
+    id: ScopeId,
+    transaction_provider: &TransactionProvider,
+};
+
+implement RequestScope {
+    fn new(id: ScopeId, tx_provider: &TransactionProvider) -> Self {
+        Self { id, transaction_provider: tx_provider }
+    }
+
+    fn enter(&self) {
+        let tx = self.transaction_provider.create();
+        println(f"Request {self.id}: Created transaction {tx.id}");
+        self.transaction_provider.active.write().insert(self.id, tx);
+    }
+
+    fn exit(&self) {
+        self.transaction_provider.destroy(self.id);
+    }
+}
+
+// Scoped execution
+async fn with_request_scope<T, F: Future<Output = T>>(
+    scope: RequestScope,
+    f: F
+) -> T {
+    scope.enter();
+    defer scope.exit();
+    f.await
+}
+
+// Handler using request-scoped transaction
+async fn handle_request(request_id: Int) using [Transaction] {
+    // Transaction is automatically scoped to this request
+    let tx = Transaction;
+    println(f"Request {request_id}: Using transaction {tx.id()}");
+
+    // Do work...
+
+    tx.commit().unwrap();
+    println(f"Request {request_id}: Committed transaction");
+}
+
+// Singleton provider example
+type ConfigProvider is {
+    config: Shared<AppConfig>,
+};
+
+type AppConfig is {
+    database_url: Text,
+    max_connections: Int,
+};
+
+implement ConfigProvider {
+    fn new(config: AppConfig) -> Self {
+        Self { config: Shared.new(config) }
+    }
+
+    fn get(&self) -> AppConfig {
+        self.config.read()
+    }
+
+    fn update(&self, f: fn(&mut AppConfig)) {
+        let mut config = self.config.write();
+        f(&mut config);
+    }
+}
+
+// Prototype provider - always creates new instance
+type ConnectionProvider is {
+    pool: ConnectionPool,
+};
+
+implement ConnectionProvider {
+    fn get(&self) -> Connection {
+        self.pool.get_connection()
+    }
+}
+
+async fn main() {
+    let conn = Connection.new("postgres://localhost/test");
+    let tx_provider = TransactionProvider.new(conn);
+
+    // Simulate two concurrent requests
+    let scope1 = RequestScope.new(1, &tx_provider);
+    let scope2 = RequestScope.new(2, &tx_provider);
+
+    provide Transaction = tx_provider.get(1);
+    with_request_scope(scope1, async || {
+        handle_request(1).await;
+    }).await;
+
+    with_request_scope(scope2, async || {
+        handle_request(2).await;
+    }).await;
+}

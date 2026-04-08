@@ -1,0 +1,81 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: generator, yield, iterator, runtime
+// @description: Test generator/yield with for-in consumption
+
+fn* count_up(start: Int, end_val: Int) -> Int {
+    let mut i = start;
+    while i < end_val {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn* fib_gen(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut count = 0;
+    while count < n {
+        yield a;
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        count = count + 1;
+    }
+}
+
+fn* sq_gen(n: Int) -> Int {
+    let mut i = 1;
+    while i <= n {
+        yield i * i;
+        i = i + 1;
+    }
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: range generator
+    let mut sum = 0;
+    for val in count_up(0, 10) {
+        sum = sum + val;
+    }
+    if sum != 45 {
+        print(f"FAIL: range sum expected 45, got {sum}");
+        failures = failures + 1;
+    } else {
+        print("  range_generator: OK");
+    }
+
+    // Test 2: fibonacci generator
+    let mut last = 0;
+    let mut count = 0;
+    for fib in fib_gen(10) {
+        last = fib;
+        count = count + 1;
+    }
+    if last != 34 {
+        print(f"FAIL: last fib expected 34, got {last}");
+        failures = failures + 1;
+    } else {
+        print("  fibonacci_generator: OK");
+    }
+
+    // Test 3: squares generator
+    let mut sq_sum = 0;
+    for sq in sq_gen(5) {
+        sq_sum = sq_sum + sq;
+    }
+    if sq_sum != 55 {
+        print(f"FAIL: squares sum expected 55, got {sq_sum}");
+        failures = failures + 1;
+    } else {
+        print("  squares_generator: OK");
+    }
+
+    if failures == 0 {
+        print("All generator tests passed");
+    }
+    failures
+}

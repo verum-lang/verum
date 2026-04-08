@@ -1,0 +1,805 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, ml, tokenizer
+// @timeout: 50000
+// @expected-exit: 0
+// @description: ML tokenizer operations — BPE encoding/decoding concepts
+
+// ============================================================================
+// Array types — simulate fixed-length token sequences
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+// Token pair for BPE merge rules
+type TokenPair is { first: Int, second: Int };
+
+// Merge rule: when you see (first, second) adjacent, replace with merged_id
+type MergeRule is { first: Int, second: Int, merged_id: Int };
+
+// Vocabulary entry: maps token_id to an integer "code" representing the token
+type VocabEntry is { token_id: Int, token_code: Int };
+
+// Result of encoding: token IDs and how many are valid
+type EncodeResult is { tokens: Arr16, length: Int };
+
+// Frequency count result
+type FreqEntry is { token_id: Int, count: Int };
+type FreqTable is {
+    e0: FreqEntry, e1: FreqEntry, e2: FreqEntry, e3: FreqEntry,
+    e4: FreqEntry, e5: FreqEntry, e6: FreqEntry, e7: FreqEntry
+};
+
+// ============================================================================
+// Arr8 helpers
+// ============================================================================
+
+fn arr8_new(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: g, e7: h }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+// ============================================================================
+// Arr16 helpers
+// ============================================================================
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 } else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 } else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        e8: if i == 8 { val } else { a.e8 },
+        e9: if i == 9 { val } else { a.e9 },
+        e10: if i == 10 { val } else { a.e10 },
+        e11: if i == 11 { val } else { a.e11 },
+        e12: if i == 12 { val } else { a.e12 },
+        e13: if i == 13 { val } else { a.e13 },
+        e14: if i == 14 { val } else { a.e14 },
+        e15: if i == 15 { val } else { a.e15 }
+    }
+}
+
+// ============================================================================
+// Merge rule table (up to 8 rules)
+// ============================================================================
+
+type MergeTable is {
+    r0: MergeRule, r1: MergeRule, r2: MergeRule, r3: MergeRule,
+    r4: MergeRule, r5: MergeRule, r6: MergeRule, r7: MergeRule
+};
+
+fn merge_table_get(t: MergeTable, i: Int) -> MergeRule {
+    if i == 0 { t.r0 } else if i == 1 { t.r1 }
+    else if i == 2 { t.r2 } else if i == 3 { t.r3 }
+    else if i == 4 { t.r4 } else if i == 5 { t.r5 }
+    else if i == 6 { t.r6 } else { t.r7 }
+}
+
+fn empty_rule() -> MergeRule {
+    MergeRule { first: -1, second: -1, merged_id: -1 }
+}
+
+// ============================================================================
+// Vocabulary table (up to 8 entries)
+// ============================================================================
+
+type VocabTable is {
+    v0: VocabEntry, v1: VocabEntry, v2: VocabEntry, v3: VocabEntry,
+    v4: VocabEntry, v5: VocabEntry, v6: VocabEntry, v7: VocabEntry
+};
+
+fn vocab_table_get(t: VocabTable, i: Int) -> VocabEntry {
+    if i == 0 { t.v0 } else if i == 1 { t.v1 }
+    else if i == 2 { t.v2 } else if i == 3 { t.v3 }
+    else if i == 4 { t.v4 } else if i == 5 { t.v5 }
+    else if i == 6 { t.v6 } else { t.v7 }
+}
+
+fn empty_vocab() -> VocabEntry {
+    VocabEntry { token_id: -1, token_code: -1 }
+}
+
+// ============================================================================
+// BPE split: simulate splitting into character-level tokens
+// Input: an Arr8 of character codes, length = count of valid chars
+// Output: EncodeResult with each char as its own token ID
+// ============================================================================
+
+fn bpe_split_chars(chars: Arr8, length: Int) -> EncodeResult {
+    let mut tokens = arr16_zeros();
+    let mut i = 0;
+    while i < length {
+        if i < 8 {
+            tokens = arr16_set(tokens, i, arr8_get(chars, i));
+        }
+        i = i + 1;
+    }
+    EncodeResult { tokens: tokens, length: length }
+}
+
+// ============================================================================
+// BPE merge: apply one merge pass over the token sequence
+// Scans left to right for matching (first, second) pair and merges
+// ============================================================================
+
+fn bpe_merge_one_pass(tokens: Arr16, length: Int, rule: MergeRule) -> EncodeResult {
+    let mut out = arr16_zeros();
+    let mut out_len = 0;
+    let mut i = 0;
+    while i < length {
+        if i + 1 < length {
+            let cur = arr16_get(tokens, i);
+            let nxt = arr16_get(tokens, i + 1);
+            if cur == rule.first {
+                if nxt == rule.second {
+                    // Merge this pair
+                    out = arr16_set(out, out_len, rule.merged_id);
+                    out_len = out_len + 1;
+                    i = i + 2;
+                } else {
+                    out = arr16_set(out, out_len, cur);
+                    out_len = out_len + 1;
+                    i = i + 1;
+                }
+            } else {
+                out = arr16_set(out, out_len, cur);
+                out_len = out_len + 1;
+                i = i + 1;
+            }
+        } else {
+            // Last element, no pair possible
+            out = arr16_set(out, out_len, arr16_get(tokens, i));
+            out_len = out_len + 1;
+            i = i + 1;
+        }
+    }
+    EncodeResult { tokens: out, length: out_len }
+}
+
+// Apply all merge rules from a table (up to num_rules rules)
+fn bpe_merge_all(tokens: Arr16, length: Int, table: MergeTable, num_rules: Int) -> EncodeResult {
+    let mut cur_tokens = tokens;
+    let mut cur_len = length;
+    let mut r = 0;
+    while r < num_rules {
+        let rule = merge_table_get(table, r);
+        let result = bpe_merge_one_pass(cur_tokens, cur_len, rule);
+        cur_tokens = result.tokens;
+        cur_len = result.length;
+        r = r + 1;
+    }
+    EncodeResult { tokens: cur_tokens, length: cur_len }
+}
+
+// ============================================================================
+// Vocabulary lookup: map token_id to code and vice versa
+// ============================================================================
+
+fn vocab_lookup_id(table: VocabTable, num_entries: Int, token_id: Int) -> Int {
+    // Returns the token_code for a given token_id, or -1 if not found
+    let mut i = 0;
+    let mut found = -1;
+    while i < num_entries {
+        let entry = vocab_table_get(table, i);
+        if entry.token_id == token_id {
+            found = entry.token_code;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+fn vocab_reverse_lookup(table: VocabTable, num_entries: Int, token_code: Int) -> Int {
+    // Returns the token_id for a given token_code, or -1 if not found
+    let mut i = 0;
+    let mut found = -1;
+    while i < num_entries {
+        let entry = vocab_table_get(table, i);
+        if entry.token_code == token_code {
+            found = entry.token_id;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+// ============================================================================
+// Encode sequence: map each token in sequence to its vocab code
+// ============================================================================
+
+fn encode_sequence(tokens: Arr16, length: Int, vocab: VocabTable, vocab_size: Int) -> EncodeResult {
+    let mut encoded = arr16_zeros();
+    let mut i = 0;
+    while i < length {
+        let tid = arr16_get(tokens, i);
+        let code = vocab_lookup_id(vocab, vocab_size, tid);
+        encoded = arr16_set(encoded, i, code);
+        i = i + 1;
+    }
+    EncodeResult { tokens: encoded, length: length }
+}
+
+// Decode sequence: map each code back to token_id
+fn decode_sequence(codes: Arr16, length: Int, vocab: VocabTable, vocab_size: Int) -> EncodeResult {
+    let mut decoded = arr16_zeros();
+    let mut i = 0;
+    while i < length {
+        let code = arr16_get(codes, i);
+        let tid = vocab_reverse_lookup(vocab, vocab_size, code);
+        decoded = arr16_set(decoded, i, tid);
+        i = i + 1;
+    }
+    EncodeResult { tokens: decoded, length: length }
+}
+
+// ============================================================================
+// Special tokens
+// ============================================================================
+
+// Special token IDs (by convention)
+fn special_bos() -> Int { 1 }
+fn special_eos() -> Int { 2 }
+fn special_pad() -> Int { 0 }
+
+// Wrap a token sequence with BOS and EOS
+fn add_special_tokens(tokens: Arr16, length: Int) -> EncodeResult {
+    let mut out = arr16_zeros();
+    // Prepend BOS
+    out = arr16_set(out, 0, special_bos());
+    // Copy original tokens
+    let mut i = 0;
+    while i < length {
+        out = arr16_set(out, i + 1, arr16_get(tokens, i));
+        i = i + 1;
+    }
+    // Append EOS
+    out = arr16_set(out, length + 1, special_eos());
+    EncodeResult { tokens: out, length: length + 2 }
+}
+
+// Pad sequence to target length
+fn pad_sequence(tokens: Arr16, length: Int, target_len: Int) -> EncodeResult {
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < target_len {
+        if i < length {
+            out = arr16_set(out, i, arr16_get(tokens, i));
+        } else {
+            out = arr16_set(out, i, special_pad());
+        }
+        i = i + 1;
+    }
+    EncodeResult { tokens: out, length: target_len }
+}
+
+// Strip special tokens (BOS/EOS/PAD) from a sequence
+fn strip_special(tokens: Arr16, length: Int) -> EncodeResult {
+    let mut out = arr16_zeros();
+    let mut out_len = 0;
+    let mut i = 0;
+    while i < length {
+        let t = arr16_get(tokens, i);
+        if t != special_bos() {
+            if t != special_eos() {
+                if t != special_pad() {
+                    out = arr16_set(out, out_len, t);
+                    out_len = out_len + 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    EncodeResult { tokens: out, length: out_len }
+}
+
+// ============================================================================
+// Token frequency counting
+// ============================================================================
+
+fn freq_table_zeros() -> FreqTable {
+    let z = FreqEntry { token_id: -1, count: 0 };
+    FreqTable { e0: z, e1: z, e2: z, e3: z, e4: z, e5: z, e6: z, e7: z }
+}
+
+fn freq_table_get(t: FreqTable, i: Int) -> FreqEntry {
+    if i == 0 { t.e0 } else if i == 1 { t.e1 }
+    else if i == 2 { t.e2 } else if i == 3 { t.e3 }
+    else if i == 4 { t.e4 } else if i == 5 { t.e5 }
+    else if i == 6 { t.e6 } else { t.e7 }
+}
+
+fn freq_table_set(t: FreqTable, i: Int, val: FreqEntry) -> FreqTable {
+    FreqTable {
+        e0: if i == 0 { val } else { t.e0 },
+        e1: if i == 1 { val } else { t.e1 },
+        e2: if i == 2 { val } else { t.e2 },
+        e3: if i == 3 { val } else { t.e3 },
+        e4: if i == 4 { val } else { t.e4 },
+        e5: if i == 5 { val } else { t.e5 },
+        e6: if i == 6 { val } else { t.e6 },
+        e7: if i == 7 { val } else { t.e7 }
+    }
+}
+
+// Count frequencies of tokens in a sequence
+// Returns: FreqTable with unique tokens and their counts, plus num_unique
+type FreqResult is { table: FreqTable, num_unique: Int };
+
+fn count_frequencies(tokens: Arr16, length: Int) -> FreqResult {
+    let mut ftable = freq_table_zeros();
+    let mut num_unique = 0;
+    let mut i = 0;
+    while i < length {
+        let tid = arr16_get(tokens, i);
+        // Search if this token already exists in the freq table
+        let mut found_idx = -1;
+        let mut j = 0;
+        while j < num_unique {
+            let entry = freq_table_get(ftable, j);
+            if entry.token_id == tid {
+                found_idx = j;
+            }
+            j = j + 1;
+        }
+        if found_idx >= 0 {
+            // Increment count
+            let old = freq_table_get(ftable, found_idx);
+            let updated = FreqEntry { token_id: old.token_id, count: old.count + 1 };
+            ftable = freq_table_set(ftable, found_idx, updated);
+        } else {
+            // Add new entry (if room)
+            if num_unique < 8 {
+                let new_entry = FreqEntry { token_id: tid, count: 1 };
+                ftable = freq_table_set(ftable, num_unique, new_entry);
+                num_unique = num_unique + 1;
+            }
+        }
+        i = i + 1;
+    }
+    FreqResult { table: ftable, num_unique: num_unique }
+}
+
+// ============================================================================
+// Test 1: BPE split — character-level tokenization
+// ============================================================================
+
+@test
+fn test_bpe_split_basic() {
+    // Simulate splitting "hello" as char codes: h=104, e=101, l=108, l=108, o=111
+    let chars = arr8_new(104, 101, 108, 108, 111, 0, 0, 0);
+    let result = bpe_split_chars(chars, 5);
+
+    // Should have 5 tokens
+    assert_eq(result.length, 5);
+
+    // Each token should match the character code
+    assert_eq(arr16_get(result.tokens, 0), 104);  // h
+    assert_eq(arr16_get(result.tokens, 1), 101);  // e
+    assert_eq(arr16_get(result.tokens, 2), 108);  // l
+    assert_eq(arr16_get(result.tokens, 3), 108);  // l
+    assert_eq(arr16_get(result.tokens, 4), 111);  // o
+
+    // Positions beyond length should be 0 (from arr16_zeros)
+    assert_eq(arr16_get(result.tokens, 5), 0);
+
+    // Single character input
+    let single = arr8_new(65, 0, 0, 0, 0, 0, 0, 0);
+    let result2 = bpe_split_chars(single, 1);
+    assert_eq(result2.length, 1);
+    assert_eq(arr16_get(result2.tokens, 0), 65);  // A
+
+    // Empty input
+    let empty = arr8_zeros();
+    let result3 = bpe_split_chars(empty, 0);
+    assert_eq(result3.length, 0);
+
+    print("  test_bpe_split_basic: ok");
+}
+
+// ============================================================================
+// Test 2: BPE merge — simulate pair merging
+// ============================================================================
+
+@test
+fn test_bpe_merge() {
+    // Token sequence: [10, 20, 30, 10, 20, 40]
+    // Merge rule: (10, 20) -> 100
+    // Expected after merge: [100, 30, 100, 40]
+    let mut tokens = arr16_zeros();
+    tokens = arr16_set(tokens, 0, 10);
+    tokens = arr16_set(tokens, 1, 20);
+    tokens = arr16_set(tokens, 2, 30);
+    tokens = arr16_set(tokens, 3, 10);
+    tokens = arr16_set(tokens, 4, 20);
+    tokens = arr16_set(tokens, 5, 40);
+
+    let rule = MergeRule { first: 10, second: 20, merged_id: 100 };
+    let result = bpe_merge_one_pass(tokens, 6, rule);
+
+    assert_eq(result.length, 4);
+    assert_eq(arr16_get(result.tokens, 0), 100);
+    assert_eq(arr16_get(result.tokens, 1), 30);
+    assert_eq(arr16_get(result.tokens, 2), 100);
+    assert_eq(arr16_get(result.tokens, 3), 40);
+
+    // No matching pairs -> sequence unchanged
+    let rule2 = MergeRule { first: 50, second: 60, merged_id: 200 };
+    let result2 = bpe_merge_one_pass(tokens, 6, rule2);
+    assert_eq(result2.length, 6);
+    assert_eq(arr16_get(result2.tokens, 0), 10);
+    assert_eq(arr16_get(result2.tokens, 5), 40);
+
+    // Merge at the very end: [5, 6] with rule (5,6)->56
+    let mut tokens3 = arr16_zeros();
+    tokens3 = arr16_set(tokens3, 0, 5);
+    tokens3 = arr16_set(tokens3, 1, 6);
+    let rule3 = MergeRule { first: 5, second: 6, merged_id: 56 };
+    let result3 = bpe_merge_one_pass(tokens3, 2, rule3);
+    assert_eq(result3.length, 1);
+    assert_eq(arr16_get(result3.tokens, 0), 56);
+
+    // Single token: no merge possible
+    let mut tokens4 = arr16_zeros();
+    tokens4 = arr16_set(tokens4, 0, 42);
+    let result4 = bpe_merge_one_pass(tokens4, 1, rule);
+    assert_eq(result4.length, 1);
+    assert_eq(arr16_get(result4.tokens, 0), 42);
+
+    // Multi-pass merge with merge_all
+    // Sequence: [1, 2, 3, 4] with rules: (1,2)->12, (12,3)->123
+    let mut seq = arr16_zeros();
+    seq = arr16_set(seq, 0, 1);
+    seq = arr16_set(seq, 1, 2);
+    seq = arr16_set(seq, 2, 3);
+    seq = arr16_set(seq, 3, 4);
+
+    let table = MergeTable {
+        r0: MergeRule { first: 1, second: 2, merged_id: 12 },
+        r1: MergeRule { first: 12, second: 3, merged_id: 123 },
+        r2: empty_rule(),
+        r3: empty_rule(),
+        r4: empty_rule(),
+        r5: empty_rule(),
+        r6: empty_rule(),
+        r7: empty_rule()
+    };
+    let merged = bpe_merge_all(seq, 4, table, 2);
+    assert_eq(merged.length, 2);
+    assert_eq(arr16_get(merged.tokens, 0), 123);
+    assert_eq(arr16_get(merged.tokens, 1), 4);
+
+    print("  test_bpe_merge: ok");
+}
+
+// ============================================================================
+// Test 3: Vocabulary lookup — token ID to code and back
+// ============================================================================
+
+@test
+fn test_vocabulary_lookup() {
+    // Build a simple vocabulary:
+    // token_id 10 -> code 0
+    // token_id 20 -> code 1
+    // token_id 30 -> code 2
+    // token_id 100 -> code 3  (merged token)
+    // token_id 200 -> code 4  (merged token)
+    let vocab = VocabTable {
+        v0: VocabEntry { token_id: 10, token_code: 0 },
+        v1: VocabEntry { token_id: 20, token_code: 1 },
+        v2: VocabEntry { token_id: 30, token_code: 2 },
+        v3: VocabEntry { token_id: 100, token_code: 3 },
+        v4: VocabEntry { token_id: 200, token_code: 4 },
+        v5: empty_vocab(),
+        v6: empty_vocab(),
+        v7: empty_vocab()
+    };
+    let vocab_size = 5;
+
+    // Forward lookup: token_id -> code
+    assert_eq(vocab_lookup_id(vocab, vocab_size, 10), 0);
+    assert_eq(vocab_lookup_id(vocab, vocab_size, 20), 1);
+    assert_eq(vocab_lookup_id(vocab, vocab_size, 30), 2);
+    assert_eq(vocab_lookup_id(vocab, vocab_size, 100), 3);
+    assert_eq(vocab_lookup_id(vocab, vocab_size, 200), 4);
+
+    // Unknown token returns -1
+    assert_eq(vocab_lookup_id(vocab, vocab_size, 999), -1);
+    assert_eq(vocab_lookup_id(vocab, vocab_size, 0), -1);
+
+    // Reverse lookup: code -> token_id
+    assert_eq(vocab_reverse_lookup(vocab, vocab_size, 0), 10);
+    assert_eq(vocab_reverse_lookup(vocab, vocab_size, 1), 20);
+    assert_eq(vocab_reverse_lookup(vocab, vocab_size, 2), 30);
+    assert_eq(vocab_reverse_lookup(vocab, vocab_size, 3), 100);
+    assert_eq(vocab_reverse_lookup(vocab, vocab_size, 4), 200);
+
+    // Unknown code returns -1
+    assert_eq(vocab_reverse_lookup(vocab, vocab_size, 99), -1);
+
+    // Roundtrip: id -> code -> id
+    let code_for_30 = vocab_lookup_id(vocab, vocab_size, 30);
+    let id_back = vocab_reverse_lookup(vocab, vocab_size, code_for_30);
+    assert_eq(id_back, 30);
+
+    print("  test_vocabulary_lookup: ok");
+}
+
+// ============================================================================
+// Test 4: Encode/decode roundtrip
+// ============================================================================
+
+@test
+fn test_encode_decode_roundtrip() {
+    // Vocabulary
+    let vocab = VocabTable {
+        v0: VocabEntry { token_id: 10, token_code: 0 },
+        v1: VocabEntry { token_id: 20, token_code: 1 },
+        v2: VocabEntry { token_id: 30, token_code: 2 },
+        v3: VocabEntry { token_id: 40, token_code: 3 },
+        v4: VocabEntry { token_id: 50, token_code: 4 },
+        v5: empty_vocab(),
+        v6: empty_vocab(),
+        v7: empty_vocab()
+    };
+    let vocab_size = 5;
+
+    // Input token sequence: [10, 20, 30, 40, 50]
+    let mut tokens = arr16_zeros();
+    tokens = arr16_set(tokens, 0, 10);
+    tokens = arr16_set(tokens, 1, 20);
+    tokens = arr16_set(tokens, 2, 30);
+    tokens = arr16_set(tokens, 3, 40);
+    tokens = arr16_set(tokens, 4, 50);
+    let length = 5;
+
+    // Encode: token_ids -> codes
+    let encoded = encode_sequence(tokens, length, vocab, vocab_size);
+    assert_eq(encoded.length, 5);
+    assert_eq(arr16_get(encoded.tokens, 0), 0);
+    assert_eq(arr16_get(encoded.tokens, 1), 1);
+    assert_eq(arr16_get(encoded.tokens, 2), 2);
+    assert_eq(arr16_get(encoded.tokens, 3), 3);
+    assert_eq(arr16_get(encoded.tokens, 4), 4);
+
+    // Decode: codes -> token_ids
+    let decoded = decode_sequence(encoded.tokens, encoded.length, vocab, vocab_size);
+    assert_eq(decoded.length, 5);
+
+    // Roundtrip: decoded should match original
+    let mut i = 0;
+    while i < length {
+        assert_eq(arr16_get(decoded.tokens, i), arr16_get(tokens, i));
+        i = i + 1;
+    }
+
+    // Encode shorter sequence
+    let mut short = arr16_zeros();
+    short = arr16_set(short, 0, 30);
+    short = arr16_set(short, 1, 10);
+    let enc2 = encode_sequence(short, 2, vocab, vocab_size);
+    assert_eq(enc2.length, 2);
+    assert_eq(arr16_get(enc2.tokens, 0), 2);
+    assert_eq(arr16_get(enc2.tokens, 1), 0);
+
+    let dec2 = decode_sequence(enc2.tokens, enc2.length, vocab, vocab_size);
+    assert_eq(arr16_get(dec2.tokens, 0), 30);
+    assert_eq(arr16_get(dec2.tokens, 1), 10);
+
+    print("  test_encode_decode_roundtrip: ok");
+}
+
+// ============================================================================
+// Test 5: Special tokens — BOS, EOS, PAD
+// ============================================================================
+
+@test
+fn test_special_tokens() {
+    // Constants check
+    assert_eq(special_bos(), 1);
+    assert_eq(special_eos(), 2);
+    assert_eq(special_pad(), 0);
+
+    // Wrap sequence [10, 20, 30] with BOS/EOS -> [1, 10, 20, 30, 2]
+    let mut tokens = arr16_zeros();
+    tokens = arr16_set(tokens, 0, 10);
+    tokens = arr16_set(tokens, 1, 20);
+    tokens = arr16_set(tokens, 2, 30);
+
+    let wrapped = add_special_tokens(tokens, 3);
+    assert_eq(wrapped.length, 5);
+    assert_eq(arr16_get(wrapped.tokens, 0), 1);   // BOS
+    assert_eq(arr16_get(wrapped.tokens, 1), 10);
+    assert_eq(arr16_get(wrapped.tokens, 2), 20);
+    assert_eq(arr16_get(wrapped.tokens, 3), 30);
+    assert_eq(arr16_get(wrapped.tokens, 4), 2);   // EOS
+
+    // Pad to length 8: [1, 10, 20, 30, 2, 0, 0, 0]
+    let padded = pad_sequence(wrapped.tokens, wrapped.length, 8);
+    assert_eq(padded.length, 8);
+    assert_eq(arr16_get(padded.tokens, 0), 1);   // BOS
+    assert_eq(arr16_get(padded.tokens, 4), 2);   // EOS
+    assert_eq(arr16_get(padded.tokens, 5), 0);   // PAD
+    assert_eq(arr16_get(padded.tokens, 6), 0);   // PAD
+    assert_eq(arr16_get(padded.tokens, 7), 0);   // PAD
+
+    // Strip special tokens: should recover [10, 20, 30]
+    let stripped = strip_special(padded.tokens, padded.length);
+    assert_eq(stripped.length, 3);
+    assert_eq(arr16_get(stripped.tokens, 0), 10);
+    assert_eq(arr16_get(stripped.tokens, 1), 20);
+    assert_eq(arr16_get(stripped.tokens, 2), 30);
+
+    // Empty sequence wrapped: [BOS, EOS]
+    let empty = arr16_zeros();
+    let wrapped_empty = add_special_tokens(empty, 0);
+    assert_eq(wrapped_empty.length, 2);
+    assert_eq(arr16_get(wrapped_empty.tokens, 0), 1);  // BOS
+    assert_eq(arr16_get(wrapped_empty.tokens, 1), 2);  // EOS
+
+    // Strip from BOS/EOS-only: should be empty
+    let stripped_empty = strip_special(wrapped_empty.tokens, wrapped_empty.length);
+    assert_eq(stripped_empty.length, 0);
+
+    // Padding already-full sequence: no padding needed
+    let mut full = arr16_zeros();
+    full = arr16_set(full, 0, 5);
+    full = arr16_set(full, 1, 6);
+    full = arr16_set(full, 2, 7);
+    let padded_full = pad_sequence(full, 3, 3);
+    assert_eq(padded_full.length, 3);
+    assert_eq(arr16_get(padded_full.tokens, 0), 5);
+    assert_eq(arr16_get(padded_full.tokens, 1), 6);
+    assert_eq(arr16_get(padded_full.tokens, 2), 7);
+
+    print("  test_special_tokens: ok");
+}
+
+// ============================================================================
+// Test 6: Token frequency counting
+// ============================================================================
+
+@test
+fn test_token_frequency() {
+    // Sequence: [10, 20, 10, 30, 10, 20, 40, 10]
+    // Expected frequencies: 10->4, 20->2, 30->1, 40->1
+    let mut tokens = arr16_zeros();
+    tokens = arr16_set(tokens, 0, 10);
+    tokens = arr16_set(tokens, 1, 20);
+    tokens = arr16_set(tokens, 2, 10);
+    tokens = arr16_set(tokens, 3, 30);
+    tokens = arr16_set(tokens, 4, 10);
+    tokens = arr16_set(tokens, 5, 20);
+    tokens = arr16_set(tokens, 6, 40);
+    tokens = arr16_set(tokens, 7, 10);
+
+    let freq = count_frequencies(tokens, 8);
+    assert_eq(freq.num_unique, 4);
+
+    // Check individual frequencies
+    // Entry 0 should be token_id=10, count=4
+    let f0 = freq_table_get(freq.table, 0);
+    assert_eq(f0.token_id, 10);
+    assert_eq(f0.count, 4);
+
+    // Entry 1 should be token_id=20, count=2
+    let f1 = freq_table_get(freq.table, 1);
+    assert_eq(f1.token_id, 20);
+    assert_eq(f1.count, 2);
+
+    // Entry 2 should be token_id=30, count=1
+    let f2 = freq_table_get(freq.table, 2);
+    assert_eq(f2.token_id, 30);
+    assert_eq(f2.count, 1);
+
+    // Entry 3 should be token_id=40, count=1
+    let f3 = freq_table_get(freq.table, 3);
+    assert_eq(f3.token_id, 40);
+    assert_eq(f3.count, 1);
+
+    // Sum of all counts should equal sequence length
+    let total = f0.count + f1.count + f2.count + f3.count;
+    assert_eq(total, 8);
+
+    // Single token sequence
+    let mut single = arr16_zeros();
+    single = arr16_set(single, 0, 99);
+    let freq2 = count_frequencies(single, 1);
+    assert_eq(freq2.num_unique, 1);
+    let s0 = freq_table_get(freq2.table, 0);
+    assert_eq(s0.token_id, 99);
+    assert_eq(s0.count, 1);
+
+    // All same token: [7, 7, 7, 7, 7]
+    let mut same = arr16_zeros();
+    same = arr16_set(same, 0, 7);
+    same = arr16_set(same, 1, 7);
+    same = arr16_set(same, 2, 7);
+    same = arr16_set(same, 3, 7);
+    same = arr16_set(same, 4, 7);
+    let freq3 = count_frequencies(same, 5);
+    assert_eq(freq3.num_unique, 1);
+    let a0 = freq_table_get(freq3.table, 0);
+    assert_eq(a0.token_id, 7);
+    assert_eq(a0.count, 5);
+
+    // Empty sequence
+    let empty = arr16_zeros();
+    let freq4 = count_frequencies(empty, 0);
+    assert_eq(freq4.num_unique, 0);
+
+    print("  test_token_frequency: ok");
+}
+
+// ============================================================================
+// Main — run all tests
+// ============================================================================
+
+fn main() -> Int {
+    test_bpe_split_basic();
+    test_bpe_merge();
+    test_vocabulary_lookup();
+    test_encode_decode_roundtrip();
+    test_special_tokens();
+    test_token_frequency();
+    print("[OK] 067_ml_tokenizer");
+    0
+}

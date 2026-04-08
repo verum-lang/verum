@@ -1,0 +1,93 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: match, pattern, complex, e2e
+// @description: Test complex match patterns including nested, tuple, and guard patterns
+
+type Shape is Circle(Int) | Rect(Int, Int) | Triangle(Int, Int, Int);
+
+fn area(s: Shape) -> Int {
+    match s {
+        Shape.Circle(r) => r * r * 3,
+        Shape.Rect(w, h) => w * h,
+        Shape.Triangle(a, b, c) => {
+            // Heron's formula simplified (just perimeter for test)
+            a + b + c
+        }
+    }
+}
+
+fn classify(x: Int) -> Text {
+    match x {
+        0 => "zero",
+        1 | 2 | 3 => "small",
+        n if n < 0 => "negative",
+        n if n > 100 => "large",
+        _ => "medium",
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Variant matching
+    if area(Shape.Circle(5)) != 75 {
+        print(f"FAIL 1: circle area = {area(Shape.Circle(5))}");
+        f = f + 1;
+    } else {
+        print("  variant_match: OK");
+    }
+
+    // Test 2: Multi-field variant
+    if area(Shape.Rect(4, 6)) != 24 {
+        print("FAIL 2: rect area");
+        f = f + 1;
+    } else {
+        print("  multi_field: OK");
+    }
+
+    // Test 3: Match with guard
+    if classify(0) != "zero" {
+        print(f"FAIL 3: classify(0) = '{classify(0)}'");
+        f = f + 1;
+    } else {
+        print("  guard_zero: OK");
+    }
+
+    // Test 4: Or pattern
+    if classify(2) != "small" {
+        print(f"FAIL 4: classify(2) = '{classify(2)}'");
+        f = f + 1;
+    } else {
+        print("  or_pattern: OK");
+    }
+
+    // Test 5: Guard with negative
+    if classify(-5) != "negative" {
+        print(f"FAIL 5: classify(-5) = '{classify(-5)}'");
+        f = f + 1;
+    } else {
+        print("  guard_negative: OK");
+    }
+
+    // Test 6: Wildcard
+    if classify(50) != "medium" {
+        print(f"FAIL 6: classify(50) = '{classify(50)}'");
+        f = f + 1;
+    } else {
+        print("  wildcard: OK");
+    }
+
+    // Test 7: Guard with large
+    if classify(200) != "large" {
+        print(f"FAIL 7: classify(200) = '{classify(200)}'");
+        f = f + 1;
+    } else {
+        print("  guard_large: OK");
+    }
+
+    if f == 0 {
+        print("All match pattern tests passed");
+    }
+    f
+}

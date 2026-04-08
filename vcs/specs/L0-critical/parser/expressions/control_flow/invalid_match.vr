@@ -1,0 +1,127 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, match, invalid, error
+
+// ERROR: Missing match expression
+match {
+    _ => 0,
+}
+
+// ERROR: Missing arms block
+match value;
+
+// ERROR: Missing arms entirely
+match value { }
+
+// ERROR: Missing arrow in arm
+match value {
+    Some(x) x,
+    None => 0,
+}
+
+// ERROR: Missing pattern
+match value {
+    => 0,
+    None => 1,
+}
+
+// ERROR: Missing body after arrow
+match value {
+    Some(x) =>,
+    None => 0,
+}
+
+// ERROR: Double arrow
+match value {
+    Some(x) => => x,
+}
+
+// ERROR: Invalid pattern syntax
+match value {
+    + => 0,
+    * => 1,
+}
+
+// ERROR: Unclosed match braces
+match value {
+    Some(x) => x,
+    None => 0
+
+// ERROR: Missing comma between arms (if required)
+match value {
+    A => 1
+    B => 2
+}
+
+// ERROR: Invalid guard syntax
+match value {
+    Some(x) if => x,
+    None => 0,
+}
+
+// ERROR: Guard without pattern
+match value {
+    if x > 0 => x,
+    _ => 0,
+}
+
+// ERROR: Multiple guards
+match value {
+    x if x > 0 if x < 10 => x,
+}
+
+// ERROR: Expression in pattern position
+match value {
+    1 + 2 => 3,
+    _ => 0,
+}
+
+// ERROR: Assignment in pattern
+match value {
+    x = 5 => x,
+    _ => 0,
+}
+
+// ERROR: Invalid or-pattern syntax
+match value {
+    A || B => 0,  // Should be single |
+    _ => 1,
+}
+
+// ERROR: Unclosed pattern parentheses
+match value {
+    (a, b => a + b,
+    _ => 0,
+}
+
+// ERROR: Duplicate catch-all
+match value {
+    _ => 0,
+    _ => 1,
+}
+
+// ERROR: Pattern after catch-all (unreachable)
+match value {
+    _ => 0,
+    Some(x) => x,
+}
+
+// ERROR: Empty or-pattern
+match value {
+    | => 0,
+    _ => 1,
+}
+
+// ERROR: Match as statement without semicolon where required
+let x = match value {
+    A => 1,
+    B => 2
+}  // Missing semicolon if statement context
+
+// ERROR: Nested match with missing braces
+match outer {
+    A => match inner
+        X => 0,
+    B => 1,
+}

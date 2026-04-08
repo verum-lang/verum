@@ -1,0 +1,20 @@
+// @test: verify-fail
+// @level: L1
+// @tags: proofs, verification, errors
+// @timeout: 5000
+
+/// Tests that invalid proofs are rejected.
+
+// Theorem with false claim — should fail verification
+theorem false_claim(x: Int)
+    requires x > 0
+    proof by auto;
+
+// This theorem claims negative is positive — should fail
+theorem invalid_sign(x: Int)
+    requires x < 0
+    proof by auto;
+
+fn main() {
+    print("Invalid proof error tests");
+}

@@ -1,0 +1,102 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, recursion, tower-of-hanoi, counting
+// @timeout: 10000
+
+// Tower of Hanoi: minimum moves for n disks = 2^n - 1
+fn hanoi_moves(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < n { result = result * 2; i = i + 1; }
+    result - 1
+}
+
+// Simulate the k-th move (1-indexed) for n disks
+// Returns which disk is moved (1 = smallest)
+fn hanoi_disk_at_move(n: Int, k: Int) -> Int {
+    // The disk moved at step k is determined by the lowest set bit of k
+    let mut v = k;
+    let mut disk = 1;
+    while v % 2 == 0 {
+        disk = disk + 1;
+        v = v / 2;
+    }
+    disk
+}
+
+// Count how many times disk d is moved when solving for n disks
+fn count_disk_moves(n: Int, d: Int) -> Int {
+    // Disk d is moved 2^(n-d) times
+    let mut result = 1;
+    let mut i = 0;
+    while i < n - d { result = result * 2; i = i + 1; }
+    result
+}
+
+// Frame-Stewart for 4-peg Hanoi (only compute for small n)
+// Uses formula: FS(n) = min over k of (2*FS(n-k) + 2^k - 1)
+fn frame_stewart(n: Int) -> Int {
+    if n <= 1 { return n; }
+    // Precompute FS values iteratively for small n
+    // FS(0)=0, FS(1)=1
+    // For n=2: k=1: 2*FS(1) + 2^1-1 = 2+1=3
+    // For n=3: k=1: 2*FS(2)+1=7, k=2: 2*FS(1)+3=5 -> 5
+    // For n=4: k=1: 2*FS(3)+1=11, k=2: 2*FS(2)+3=9, k=3: 2*FS(1)+7=9 -> 9
+    if n == 2 { return 3; }
+    if n == 3 { return 5; }
+    if n == 4 { return 9; }
+    if n == 5 { return 13; }
+    0
+}
+
+fn test_moves() -> Int {
+    assert_eq(hanoi_moves(1), 1);
+    assert_eq(hanoi_moves(2), 3);
+    assert_eq(hanoi_moves(3), 7);
+    assert_eq(hanoi_moves(4), 15);
+    assert_eq(hanoi_moves(5), 31);
+    assert_eq(hanoi_moves(10), 1023);
+    1
+}
+
+fn test_disk_at_move() -> Int {
+    // For n=3: moves are disk 1,2,1,3,1,2,1
+    assert_eq(hanoi_disk_at_move(3, 1), 1);
+    assert_eq(hanoi_disk_at_move(3, 2), 2);
+    assert_eq(hanoi_disk_at_move(3, 3), 1);
+    assert_eq(hanoi_disk_at_move(3, 4), 3);
+    assert_eq(hanoi_disk_at_move(3, 5), 1);
+    assert_eq(hanoi_disk_at_move(3, 6), 2);
+    1
+}
+
+fn test_count_moves() -> Int {
+    // For n=3: disk 1 moved 4 times, disk 2 moved 2 times, disk 3 moved 1 time
+    assert_eq(count_disk_moves(3, 1), 4);
+    assert_eq(count_disk_moves(3, 2), 2);
+    assert_eq(count_disk_moves(3, 3), 1);
+    // Total = 4+2+1 = 7 = 2^3-1
+    assert_eq(count_disk_moves(4, 1), 8);
+    assert_eq(count_disk_moves(4, 4), 1);
+    1
+}
+
+fn test_frame_stewart() -> Int {
+    assert_eq(frame_stewart(1), 1);
+    assert_eq(frame_stewart(2), 3);
+    assert_eq(frame_stewart(3), 5);
+    assert_eq(frame_stewart(4), 9);
+    assert_eq(frame_stewart(5), 13);
+    1
+}
+
+fn main() -> Int {
+    test_moves();
+    test_disk_at_move();
+    test_count_moves();
+    test_frame_stewart();
+    print("DIFF_OK: tower_hanoi");
+    0
+}

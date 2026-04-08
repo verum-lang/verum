@@ -1,0 +1,98 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: error_handling, result, try_recover, question_mark
+// @expect: pass
+
+// Comprehensive error handling patterns.
+
+type AppError is
+    NotFound(Text)
+    | InvalidInput(Text)
+    | Timeout;
+
+type Result<T> is Ok(T) | Err(AppError);
+
+fn parse_int(s: Text) -> Result<Int> {
+    if s == "42" {
+        Ok(42)
+    } else if s == "0" {
+        Ok(0)
+    } else {
+        Err(InvalidInput(f"cannot parse: {s}"))
+    }
+}
+
+fn validate(x: Int) -> Result<Int> {
+    if x > 0 {
+        Ok(x)
+    } else {
+        Err(InvalidInput("must be positive"))
+    }
+}
+
+fn process(input: Text) -> Result<Int> {
+    // Chain operations
+    let parsed = parse_int(input);
+    match parsed {
+        Ok(v) => validate(v),
+        Err(e) => Err(e),
+    }
+}
+
+fn main() -> Int {
+    // Test success path
+    match process("42") {
+        Ok(v) => {
+            if v != 42 {
+                print(f"FAIL: expected 42, got {v}");
+                return 1;
+            }
+        },
+        Err(_) => {
+            print("FAIL: unexpected error for 42");
+            return 1;
+        }
+    }
+
+    // Test error path: invalid input
+    match process("abc") {
+        Ok(_) => {
+            print("FAIL: expected error for abc");
+            return 1;
+        },
+        Err(e) => {
+            match e {
+                InvalidInput(msg) => {
+                    print(f"Got expected error: {msg}");
+                },
+                _ => {
+                    print("FAIL: wrong error type");
+                    return 1;
+                }
+            }
+        }
+    }
+
+    // Test error path: validation failure
+    match process("0") {
+        Ok(_) => {
+            print("FAIL: expected validation error for 0");
+            return 1;
+        },
+        Err(e) => {
+            match e {
+                InvalidInput(msg) => {
+                    print(f"Validation error: {msg}");
+                },
+                _ => {
+                    print("FAIL: wrong error type for 0");
+                    return 1;
+                }
+            }
+        }
+    }
+
+    print("PASS: error handling works");
+    0
+}

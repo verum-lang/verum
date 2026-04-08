@@ -1,0 +1,151 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, memory_allocator
+// @expected-exit: 0
+
+// Memory allocator simulation using lists
+// Free list: [start0, size0, start1, size1, ...]  (up to 8 blocks in 16 elements)
+// 0 size means empty slot
+
+fn find_first_fit(free_starts: List<Int>, free_sizes: List<Int>, max_blocks: Int, req_size: Int) -> Int {
+    // Returns index of first block that fits, or -1
+    let mut i = 0;
+    while (i < max_blocks) {
+        if (free_sizes[i] >= req_size) {
+            return i;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn find_best_fit(free_starts: List<Int>, free_sizes: List<Int>, max_blocks: Int, req_size: Int) -> Int {
+    // Returns index of smallest block that fits, or -1
+    let mut best = -1;
+    let mut best_size = 999999;
+    let mut i = 0;
+    while (i < max_blocks) {
+        if (free_sizes[i] >= req_size) {
+            if (free_sizes[i] < best_size) {
+                best = i;
+                best_size = free_sizes[i];
+            }
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// Count number of free blocks (fragmentation indicator)
+fn count_free_blocks(free_sizes: List<Int>, max_blocks: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while (i < max_blocks) {
+        if (free_sizes[i] > 0) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Total free memory
+fn total_free(free_sizes: List<Int>, max_blocks: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while (i < max_blocks) {
+        total = total + free_sizes[i];
+        i = i + 1;
+    }
+    total
+}
+
+// Allocate from a specific block index, returns the allocated start address
+// Modifies free list in place: splits block if larger than needed
+fn allocate_at(free_starts: List<Int>, free_sizes: List<Int>, idx: Int, req_size: Int) -> List<Int> {
+    // Returns [allocated_start, new_free_start, new_free_size, ...]
+    let alloc_start = free_starts[idx];
+    let remaining = free_sizes[idx] - req_size;
+    let new_start = free_starts[idx] + req_size;
+    [alloc_start, new_start, remaining, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+// Check if two free blocks are adjacent (can be coalesced)
+fn are_adjacent(start1: Int, size1: Int, start2: Int, size2: Int) -> Int {
+    if (start1 + size1 == start2) { return 1; }
+    if (start2 + size2 == start1) { return 1; }
+    0
+}
+
+// Coalesce two adjacent blocks, returns [new_start, new_size]
+fn coalesce(start1: Int, size1: Int, start2: Int, size2: Int) -> List<Int> {
+    let mut new_start = start1;
+    if (start2 < start1) {
+        new_start = start2;
+    }
+    let new_size = size1 + size2;
+    [new_start, new_size, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn main() -> Int {
+    // Initial state: one big free block [0, 1024)
+    let mut free_starts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut free_sizes  = [1024, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let max_blocks = 8;
+
+    // Test 1: Initial state has 1 free block
+    assert_eq(count_free_blocks(free_sizes, max_blocks), 1);
+
+    // Test 2: Total free memory = 1024
+    assert_eq(total_free(free_sizes, max_blocks), 1024);
+
+    // Test 3: First fit for 256 bytes finds block 0
+    let ff_idx = find_first_fit(free_starts, free_sizes, max_blocks, 256);
+    assert_eq(ff_idx, 0);
+
+    // Allocate 256 bytes from block 0
+    let result1 = allocate_at(free_starts, free_sizes, 0, 256);
+    // Block 0 now starts at 256 with size 768
+    free_starts[0] = result1[1];  // 256
+    free_sizes[0] = result1[2];   // 768
+
+    // Test 4: After allocation, free starts at 256
+    assert_eq(free_starts[0], 256);
+
+    // Test 5: Remaining size is 768
+    assert_eq(free_sizes[0], 768);
+
+    // Allocate another 128 bytes
+    let result2 = allocate_at(free_starts, free_sizes, 0, 128);
+    free_starts[0] = result2[1];  // 384
+    free_sizes[0] = result2[2];   // 640
+
+    // Free the first allocation (0, 256) - add as new block
+    free_starts[1] = 0;
+    free_sizes[1] = 256;
+
+    // Test 6: Now have 2 free blocks (fragmented)
+    assert_eq(count_free_blocks(free_sizes, max_blocks), 2);
+
+    // Test 7: Total free = 640 + 256 = 896
+    assert_eq(total_free(free_sizes, max_blocks), 896);
+
+    // Test 8: Best fit for 200 bytes should pick block 1 (size 256) not block 0 (size 640)
+    let bf_idx = find_best_fit(free_starts, free_sizes, max_blocks, 200);
+    assert_eq(bf_idx, 1);
+
+    // Test 9: Check adjacency - block at [0,256) and [256,128) at addr 256
+    // The second alloc occupies [256, 384). Block 0 starts at 384.
+    // Block 1 is [0, 256). These are NOT adjacent to block 0 [384, 1024).
+    // But block 1 [0, 256) ends at 256, second alloc starts at 256, block 0 at 384.
+    // So block 1 [0,256) is not adjacent to block 0 [384,640+384=1024)
+    assert_eq(are_adjacent(0, 256, 384, 640), 0);
+
+    // Test 10: Coalesce test - if we free [256, 384) (the second alloc, size 128)
+    // Then [0, 256) and [256, 128) are adjacent
+    assert_eq(are_adjacent(0, 256, 256, 128), 1);
+
+    print("798_memory_allocator: PASS");
+    0
+}

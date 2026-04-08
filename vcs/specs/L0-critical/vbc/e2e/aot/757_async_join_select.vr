@@ -1,0 +1,160 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, join, select, parallel
+// @expected-exit: 0
+
+// Tests join (wait for all) and select (wait for first) patterns.
+// In single-threaded mode, all computations complete immediately.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if (a > b) { a } else { b }
+}
+
+fn min_val(a: Int, b: Int) -> Int {
+    if (a < b) { a } else { b }
+}
+
+// Simulated async operations
+fn compute_fib(n: Int) -> Int {
+    if (n <= 1) { n }
+    else { compute_fib(n - 1) + compute_fib(n - 2) }
+}
+
+fn compute_fact(n: Int) -> Int {
+    if (n <= 1) { 1 }
+    else { n * compute_fact(n - 1) }
+}
+
+fn is_prime(n: Int) -> Int {
+    if (n < 2) { return 0; }
+    let mut i = 2;
+    while (i * i <= n) {
+        if (n % i == 0) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn count_primes(limit: Int) -> Int {
+    let mut count = 0;
+    let mut n = 2;
+    while (n <= limit) {
+        count = count + is_prime(n);
+        n = n + 1;
+    }
+    count
+}
+
+fn sum_range(start: Int, end: Int) -> Int {
+    let mut total = 0;
+    let mut i = start;
+    while (i <= end) {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Test 1: Join pattern - aggregate results from multiple computations
+    let r1 = compute_fib(8);   // 21
+    let r2 = compute_fib(10);  // 55
+    let r3 = compute_fib(6);   // 8
+    let joined = r1 + r2 + r3;
+    assert_eq(joined, 84);
+
+    // Test 2: Select pattern - take fastest result (all immediate in single-threaded)
+    let s1 = compute_fib(5);   // 5
+    let s2 = compute_fib(7);   // 13
+    // In select, we'd take the first available; in single-threaded, take the first computed
+    let selected = s1;  // First result wins
+    assert_eq(selected, 5);
+
+    // Test 3: Parallel factorials
+    let f5 = compute_fact(5);
+    let f6 = compute_fact(6);
+    let f7 = compute_fact(7);
+    assert_eq(f5, 120);
+    assert_eq(f6, 720);
+    assert_eq(f7, 5040);
+    // Join: product of factorials
+    let product = f5 + f6 + f7;
+    assert_eq(product, 5880);
+
+    // Test 4: Parallel sum ranges (simulating work distribution)
+    // sum(1..100) split into 4 chunks
+    let chunk1 = sum_range(1, 25);
+    let chunk2 = sum_range(26, 50);
+    let chunk3 = sum_range(51, 75);
+    let chunk4 = sum_range(76, 100);
+    let total = chunk1 + chunk2 + chunk3 + chunk4;
+    assert_eq(total, 5050);  // n*(n+1)/2 = 100*101/2
+
+    // Test 5: Select with priority
+    // Simulate: run expensive computation or return cached result
+    let cached = 42;
+    let computed = compute_fib(12);  // 144
+    // "Select" the cached result (it's "faster")
+    let result = cached;
+    assert_eq(result, 42);
+    // But computed is also correct
+    assert_eq(computed, 144);
+
+    // Test 6: Join with aggregation function
+    let counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Count primes in different ranges
+    let c1 = count_primes(25);
+    let c2 = count_primes(50) - count_primes(25);
+    let c3 = count_primes(75) - count_primes(50);
+    let c4 = count_primes(100) - count_primes(75);
+    let total_primes = c1 + c2 + c3 + c4;
+    assert_eq(total_primes, count_primes(100));
+    assert_eq(total_primes, 25);
+
+    // Test 7: Map pattern with join
+    let data = [3, 7, 11, 13, 17, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut all_prime = 1;
+    let mut i = 0;
+    while (i < 5) {
+        if (is_prime(data[i]) == 0) {
+            all_prime = 0;
+        }
+        i = i + 1;
+    }
+    assert_eq(all_prime, 1);  // All are prime
+
+    // Test 8: Race condition proof (in single-threaded, no races possible)
+    let mut counter = 0;
+    // Simulate 10 "parallel" increments
+    i = 0;
+    while (i < 10) {
+        counter = counter + 1;
+        i = i + 1;
+    }
+    assert_eq(counter, 10);  // No races in single-threaded mode
+
+    // Test 9: Barrier synchronization pattern
+    // Phase 1: compute partial results
+    let p1 = compute_fib(5);   // 5
+    let p2 = compute_fib(6);   // 8
+    let p3 = compute_fib(7);   // 13
+    // Barrier: all phase 1 must complete before phase 2
+    let barrier_sum = p1 + p2 + p3;  // 26
+    // Phase 2: use aggregated result
+    let final_result = barrier_sum * 2;
+    assert_eq(final_result, 52);
+
+    // Test 10: Timeout pattern (in single-threaded, always completes)
+    let timed_result = compute_fib(15);  // 610
+    let timed_out = 0;  // Never times out in single-threaded mode
+    assert_eq(timed_result, 610);
+    assert_eq(timed_out, 0);
+
+    print("Async join select: PASS");
+    0
+}

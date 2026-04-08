@@ -1,0 +1,75 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, proof-scripts, sorting, length
+// @timeout: 30000
+
+/// Sorting preserves list length
+
+fn sort_list<T: Ord>(xs: List<T>) -> List<T>;
+fn insert_sorted<T: Ord>(x: T, xs: List<T>) -> List<T>;
+
+/// Insert preserves length + 1
+lemma insert_length<T: Ord>(x: T, xs: List<T>):
+    len(insert_sorted(x, xs)) == len(xs) + 1
+{
+    proof by induction on xs
+}
+
+/// Insertion sort preserves length
+theorem sort_preserves_length<T: Ord>(xs: List<T>): len(sort_list(xs)) == len(xs) {
+    proof by induction on xs {
+        case Nil => { trivial }
+        case Cons(h, t) => {
+            have ih: len(sort_list(t)) == len(t);
+            have: len(insert_sorted(h, sort_list(t))) == len(sort_list(t)) + 1 by insert_length;
+            conclude by auto
+        }
+    }
+}
+
+/// Sort preserves elements
+theorem sort_preserves_elements<T: Ord + Eq>(xs: List<T>, x: T):
+    x in xs <-> x in sort_list(xs)
+{
+    proof by induction on xs
+}
+
+/// Sort is idempotent
+theorem sort_idempotent<T: Ord>(xs: List<T>):
+    sort_list(sort_list(xs)) == sort_list(xs)
+{
+    proof by auto
+}
+
+/// Merge preserves length
+fn merge_lists<T: Ord>(xs: List<T>, ys: List<T>) -> List<T>;
+
+lemma merge_length<T: Ord>(xs: List<T>, ys: List<T>):
+    len(merge_lists(xs, ys)) == len(xs) + len(ys)
+{
+    proof by induction on xs
+}
+
+/// Merge sort preserves length
+fn merge_sort<T: Ord>(xs: List<T>) -> List<T>;
+
+theorem merge_sort_length<T: Ord>(xs: List<T>): len(merge_sort(xs)) == len(xs) {
+    proof by induction on xs
+}
+
+/// Filter length is bounded
+lemma filter_length<T>(xs: List<T>, pred: fn(&T) -> Bool):
+    len(xs.filter(pred)) <= len(xs)
+{
+    proof by induction on xs
+}
+
+/// Quicksort preserves length
+fn qsort<T: Ord>(xs: List<T>) -> List<T>;
+
+theorem qsort_length<T: Ord>(xs: List<T>): len(qsort(xs)) == len(xs) {
+    proof by induction on xs
+}
+
+fn main() {}

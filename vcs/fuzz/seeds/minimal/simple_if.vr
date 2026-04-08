@@ -1,0 +1,5 @@
+// Minimal: Simple if expression
+fn main() {
+    let x = 10;
+    let y = if x > 5 { 1 } else { 0 };
+}

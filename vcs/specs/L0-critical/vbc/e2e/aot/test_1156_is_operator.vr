@@ -1,0 +1,100 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: is, pattern-test, maybe, sum-type
+// @description: Test `is` operator for pattern testing without destructuring
+
+type Shape is Circle(Int) | Rect(Int, Int) | Dot;
+
+fn test_is_maybe() -> Int {
+    let a: Maybe<Int> = Some(42);
+    let b: Maybe<Int> = None;
+
+    if !(a is Some) {
+        print("FAIL: a should be Some");
+        return 1;
+    }
+    if a is None {
+        print("FAIL: a should not be None");
+        return 1;
+    }
+    if !(b is None) {
+        print("FAIL: b should be None");
+        return 1;
+    }
+    if b is Some {
+        print("FAIL: b should not be Some");
+        return 1;
+    }
+    print("  is_maybe: OK");
+    0
+}
+
+fn test_is_sum_type() -> Int {
+    let c = Circle(5);
+    let r = Rect(3, 4);
+    let d = Dot;
+
+    if !(c is Circle) {
+        print("FAIL: c should be Circle");
+        return 1;
+    }
+    if c is Rect {
+        print("FAIL: c should not be Rect");
+        return 1;
+    }
+    if !(r is Rect) {
+        print("FAIL: r should be Rect");
+        return 1;
+    }
+    if !(d is Dot) {
+        print("FAIL: d should be Dot");
+        return 1;
+    }
+    print("  is_sum_type: OK");
+    0
+}
+
+fn count_circles(shapes: List<Shape>) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < shapes.len() {
+        if shapes[i] is Circle {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_is_in_loop() -> Int {
+    let mut shapes = List.new();
+    shapes.push(Circle(1));
+    shapes.push(Rect(2, 3));
+    shapes.push(Circle(4));
+    shapes.push(Dot);
+    shapes.push(Circle(5));
+
+    let n = count_circles(shapes);
+    if n != 3 {
+        print(f"FAIL is_loop: {n}, expected 3");
+        return 1;
+    }
+    print("  is_in_loop: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Is Operator Tests:");
+    let mut failures = 0;
+    failures = failures + test_is_maybe();
+    failures = failures + test_is_sum_type();
+    failures = failures + test_is_in_loop();
+
+    if failures == 0 {
+        print("All is-operator tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

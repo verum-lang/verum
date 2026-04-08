@@ -1,0 +1,122 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, algorithm, dynamic-programming
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Fibonacci and coin change DP, verify known results
+
+fn main() -> Int {
+    test_fibonacci();
+    test_coin_change();
+    test_max_subarray();
+    0
+}
+
+/// Iterative Fibonacci with DP table
+fn test_fibonacci() {
+    let mut fib = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    fib[0] = 0;
+    fib[1] = 1;
+    let mut i = 2;
+    while i <= 12 {
+        fib[i] = fib[i - 1] + fib[i - 2];
+        i = i + 1;
+    }
+    assert_eq(fib[0], 0);
+    assert_eq(fib[1], 1);
+    assert_eq(fib[5], 5);
+    assert_eq(fib[10], 55);
+    assert_eq(fib[12], 144);
+    print("fibonacci: pass\n");
+}
+
+/// Coin change: min coins for amount using coins [1, 3, 4]
+/// Single combined array: [coins(3) | dp(11)] = 14 elements
+fn test_coin_change() {
+    let mut m = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Explicitly initialize all
+    let mut z = 0;
+    while z < 14 {
+        m[z] = 0;
+        z = z + 1;
+    }
+    // coins at offset 0: [1, 3, 4]
+    let c_off = 0;
+    m[c_off + 0] = 1;
+    m[c_off + 1] = 3;
+    m[c_off + 2] = 4;
+    let num_coins = 3;
+    let target = 10;
+
+    // dp at offset 3: dp[0]=0, dp[1..10]=999
+    let d_off = 3;
+    m[d_off + 0] = 0;
+    let mut k = 1;
+    while k <= target {
+        m[d_off + k] = 999;
+        k = k + 1;
+    }
+    // Re-set dp[0] in case of corruption
+    m[d_off + 0] = 0;
+
+    let mut amt = 1;
+    while amt <= target {
+        let mut ci = 0;
+        while ci < num_coins {
+            let coin = m[c_off + ci];
+            if coin <= amt {
+                let prev = m[d_off + amt - coin];
+                if prev + 1 < m[d_off + amt] {
+                    m[d_off + amt] = prev + 1;
+                }
+            }
+            ci = ci + 1;
+        }
+        amt = amt + 1;
+    }
+
+    assert_eq(m[d_off + 0], 0);
+    assert_eq(m[d_off + 1], 1);
+    assert_eq(m[d_off + 3], 1);
+    assert_eq(m[d_off + 4], 1);
+    assert_eq(m[d_off + 6], 2);
+    assert_eq(m[d_off + 7], 2);
+    assert_eq(m[d_off + 10], 3);
+    print("coin_change: pass\n");
+}
+
+/// Kadane's algorithm: maximum subarray sum
+fn test_max_subarray() {
+    let mut arr = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    arr[0] = 0 - 2;
+    arr[1] = 1;
+    arr[2] = 0 - 3;
+    arr[3] = 4;
+    arr[4] = 0 - 1;
+    arr[5] = 2;
+    arr[6] = 1;
+    arr[7] = 0 - 5;
+    arr[8] = 4;
+    let n = 9;
+    let mut max_ending = arr[0];
+    let mut max_so_far = arr[0];
+    let mut i = 1;
+    while i < n {
+        let val = arr[i];
+        let extended = max_ending + val;
+        if val > extended {
+            max_ending = val;
+        } else {
+            max_ending = extended;
+        }
+        if max_ending > max_so_far {
+            max_so_far = max_ending;
+        }
+        i = i + 1;
+    }
+    // Maximum subarray is [4, -1, 2, 1] = 6
+    assert_eq(max_so_far, 6);
+    print("max_subarray: pass\n");
+}

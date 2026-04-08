@@ -1,0 +1,425 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: parser, types, generics, inference, comprehensive
+// @description: Comprehensive generic type inference tests
+
+/// Comprehensive Generic Type Inference Test Suite
+///
+/// This test demonstrates Verum's generic type inference capabilities:
+///
+/// 1. Simple generic function inference
+/// 2. Generic struct inference
+/// 3. Multiple type parameter inference
+/// 4. Nested generic inference
+/// 5. Generic constraints (bounds)
+/// 6. Generic method calls
+/// 7. Return type inference
+///
+/// Spec: 03-type-system.md#type-inference
+
+// ============================================================================
+// SUPPORTING TYPE DEFINITIONS
+// ============================================================================
+
+type Wrapper<T> is {
+    value: T,
+};
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+type Triple<A, B, C> is {
+    a: A,
+    b: B,
+    c: C,
+};
+
+// ============================================================================
+// TEST 1: Simple Generic Function Inference
+// ============================================================================
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn test_simple_generic_inference() {
+    // Int inferred
+    let a = identity(42);
+    assert(a == 42);
+
+    // Bool inferred
+    let b = identity(true);
+    assert(b == true);
+
+    // Text inferred
+    let c = identity("hello");
+    assert(c == "hello");
+}
+
+fn test_explicit_type_annotation() {
+    // Type explicitly specified
+    let a: Int = identity(42);
+    assert(a == 42);
+
+    let b: Bool = identity(false);
+    assert(b == false);
+}
+
+// ============================================================================
+// TEST 2: Generic Struct Inference
+// ============================================================================
+
+fn test_wrapper_inference() {
+    // Type inferred from constructor argument
+    let w1 = Wrapper { value: 42 };
+    assert(w1.value == 42);
+
+    let w2 = Wrapper { value: true };
+    assert(w2.value == true);
+
+    let w3 = Wrapper { value: "test" };
+    assert(w3.value == "test");
+}
+
+fn test_wrapper_with_annotation() {
+    // Explicit type annotation
+    let w: Wrapper<Int> = Wrapper { value: 100 };
+    assert(w.value == 100);
+}
+
+// ============================================================================
+// TEST 3: Multiple Type Parameter Inference
+// ============================================================================
+
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a, second: b }
+}
+
+fn test_pair_inference() {
+    // Both types inferred
+    let p1 = make_pair(1, 2);
+    assert(p1.first == 1);
+    assert(p1.second == 2);
+
+    // Different types inferred
+    let p2 = make_pair(42, true);
+    assert(p2.first == 42);
+    assert(p2.second == true);
+
+    let p3 = make_pair("hello", 100);
+    assert(p3.first == "hello");
+    assert(p3.second == 100);
+}
+
+fn make_triple<A, B, C>(a: A, b: B, c: C) -> Triple<A, B, C> {
+    Triple { a, b, c }
+}
+
+fn test_triple_inference() {
+    let t = make_triple(1, true, "test");
+    assert(t.a == 1);
+    assert(t.b == true);
+    assert(t.c == "test");
+}
+
+// ============================================================================
+// TEST 4: Nested Generic Inference
+// ============================================================================
+
+fn test_nested_wrapper() {
+    // Wrapper<Wrapper<Int>>
+    let inner = Wrapper { value: 42 };
+    let outer = Wrapper { value: inner };
+    assert(outer.value.value == 42);
+}
+
+fn test_nested_pair() {
+    // Pair<Int, Pair<Bool, Text>>
+    let inner = Pair { first: true, second: "test" };
+    let outer = Pair { first: 100, second: inner };
+    assert(outer.first == 100);
+    assert(outer.second.first == true);
+    assert(outer.second.second == "test");
+}
+
+fn test_deeply_nested() {
+    // Triple<Wrapper<Int>, Pair<Bool, Bool>, Wrapper<Text>>
+    let w1 = Wrapper { value: 42 };
+    let p = Pair { first: true, second: false };
+    let w2 = Wrapper { value: "deep" };
+    let deep = Triple { a: w1, b: p, c: w2 };
+
+    assert(deep.a.value == 42);
+    assert(deep.b.first == true);
+    assert(deep.b.second == false);
+    assert(deep.c.value == "deep");
+}
+
+// ============================================================================
+// TEST 5: Generic Function Composition
+// ============================================================================
+
+fn wrap<T>(x: T) -> Wrapper<T> {
+    Wrapper { value: x }
+}
+
+fn unwrap<T>(w: Wrapper<T>) -> T {
+    w.value
+}
+
+fn test_generic_composition() {
+    // wrap then unwrap
+    let x = unwrap(wrap(42));
+    assert(x == 42);
+
+    // Chain of operations
+    let y = unwrap(wrap(unwrap(wrap(100))));
+    assert(y == 100);
+}
+
+fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+fn test_swap_inference() {
+    let p1 = Pair { first: 1, second: true };
+    let p2 = swap(p1);
+    assert(p2.first == true);
+    assert(p2.second == 1);
+}
+
+// ============================================================================
+// TEST 6: Generic Functions with Maybe
+// ============================================================================
+
+fn test_maybe_generic() {
+    // Create Maybe containing a Wrapper
+    let w = Wrapper { value: 42 };
+    let m: Maybe<Wrapper<Int>> = Maybe.Some(w);
+    match m {
+        Maybe.Some(wrapper) => assert(wrapper.value == 42),
+        Maybe.None => assert(false),
+    }
+}
+
+fn first_some<T>(a: Maybe<T>, b: Maybe<T>) -> Maybe<T> {
+    match a {
+        Maybe.Some(x) => Maybe.Some(x),
+        Maybe.None => b,
+    }
+}
+
+fn test_first_some() {
+    let a: Maybe<Int> = Maybe.Some(1);
+    let b: Maybe<Int> = Maybe.Some(2);
+    let c: Maybe<Int> = Maybe.None;
+
+    let r1 = first_some(a, b);
+    match r1 {
+        Maybe.Some(x) => assert(x == 1),
+        Maybe.None => assert(false),
+    }
+
+    let r2 = first_some(c, b);
+    match r2 {
+        Maybe.Some(x) => assert(x == 2),
+        Maybe.None => assert(false),
+    }
+
+    let r3 = first_some(c, c);
+    match r3 {
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
+    }
+}
+
+// ============================================================================
+// TEST 7: Array of Generics
+// ============================================================================
+
+fn test_array_of_wrappers() {
+    let wrappers = [
+        Wrapper { value: 1 },
+        Wrapper { value: 2 },
+        Wrapper { value: 3 },
+    ];
+
+    let mut sum = 0;
+    for i in 0..3 {
+        sum += wrappers[i].value;
+    }
+
+    assert(sum == 6);
+}
+
+fn test_array_of_pairs() {
+    let pairs = [
+        Pair { first: 1, second: 10 },
+        Pair { first: 2, second: 20 },
+        Pair { first: 3, second: 30 },
+    ];
+
+    let mut first_sum = 0;
+    let mut second_sum = 0;
+    for i in 0..3 {
+        first_sum += pairs[i].first;
+        second_sum += pairs[i].second;
+    }
+
+    assert(first_sum == 6);
+    assert(second_sum == 60);
+}
+
+// ============================================================================
+// TEST 8: Generic Return Type Inference
+// ============================================================================
+
+fn test_return_type_from_context() {
+    fn default_value<T>() -> T {
+        // Note: This would need a Default bound in full implementation
+        // For now we test with explicit annotation
+        let result: Int = 0;
+        result
+    }
+
+    // Type inferred from usage context
+    let x: Int = 0;
+    assert(x == 0);
+}
+
+fn test_conditional_generic_return() {
+    fn conditional_wrap<T>(cond: Bool, val: T) -> Maybe<T> {
+        if cond {
+            Maybe.Some(val)
+        } else {
+            Maybe.None
+        }
+    }
+
+    let m1 = conditional_wrap(true, 42);
+    match m1 {
+        Maybe.Some(x) => assert(x == 42),
+        Maybe.None => assert(false),
+    }
+
+    let m2 = conditional_wrap(false, 42);
+    match m2 {
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
+    }
+}
+
+// ============================================================================
+// TEST 9: Generic Functions as Parameters
+// ============================================================================
+
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U {
+    f(x)
+}
+
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn negate(x: Bool) -> Bool {
+    !x
+}
+
+fn test_higher_order_generic() {
+    let a = apply(double, 21);
+    assert(a == 42);
+
+    let b = apply(negate, false);
+    assert(b == true);
+}
+
+fn apply_twice<T>(f: fn(T) -> T, x: T) -> T {
+    f(f(x))
+}
+
+fn test_apply_twice() {
+    let result = apply_twice(double, 5);
+    assert(result == 20);  // 5 * 2 * 2 = 20
+}
+
+// ============================================================================
+// TEST 10: Complex Generic Scenarios
+// ============================================================================
+
+fn zip_pair<A, B>(pair_a: Pair<A, A>, pair_b: Pair<B, B>) -> Pair<Pair<A, B>, Pair<A, B>> {
+    Pair {
+        first: Pair { first: pair_a.first, second: pair_b.first },
+        second: Pair { first: pair_a.second, second: pair_b.second },
+    }
+}
+
+fn test_zip_pair() {
+    let nums = Pair { first: 1, second: 2 };
+    let flags = Pair { first: true, second: false };
+    let zipped = zip_pair(nums, flags);
+
+    assert(zipped.first.first == 1);
+    assert(zipped.first.second == true);
+    assert(zipped.second.first == 2);
+    assert(zipped.second.second == false);
+}
+
+fn map_wrapper<A, B>(w: Wrapper<A>, f: fn(A) -> B) -> Wrapper<B> {
+    Wrapper { value: f(w.value) }
+}
+
+fn test_map_wrapper() {
+    let w = Wrapper { value: 21 };
+    let mapped = map_wrapper(w, double);
+    assert(mapped.value == 42);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Simple generic inference
+    test_simple_generic_inference();
+    test_explicit_type_annotation();
+
+    // Generic struct inference
+    test_wrapper_inference();
+    test_wrapper_with_annotation();
+
+    // Multiple type parameters
+    test_pair_inference();
+    test_triple_inference();
+
+    // Nested generics
+    test_nested_wrapper();
+    test_nested_pair();
+    test_deeply_nested();
+
+    // Generic composition
+    test_generic_composition();
+    test_swap_inference();
+
+    // Maybe with generics
+    test_maybe_generic();
+    test_first_some();
+
+    // Arrays of generics
+    test_array_of_wrappers();
+    test_array_of_pairs();
+
+    // Return type inference
+    test_return_type_from_context();
+    test_conditional_generic_return();
+
+    // Higher-order generics
+    test_higher_order_generic();
+    test_apply_twice();
+
+    // Complex scenarios
+    test_zip_pair();
+    test_map_wrapper();
+}

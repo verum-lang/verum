@@ -1,0 +1,975 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: range, type-inference, iterator, for-loop
+// @description: Comprehensive tests for range type inference
+//               Tests range literals and range() function type inference
+
+module specs.stdlib.core.range_type_test;
+
+mount core.primitives.*;
+mount core.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// RANGE TYPE INFERENCE TEST SUITE
+// =============================================================================
+//
+// Issue Reference: docs/audit.md Section 4.3
+//
+// This suite tests range type inference:
+// - Range literals (0..10, 0..=10)
+// - range() function with type inference
+// - Range iteration patterns
+// - Generic range operations
+//
+// Current Issue: range<T>(start: T, end: T) may not infer T = Int from literals.
+
+// -----------------------------------------------------------------------------
+// Section 1: Range Literal Syntax
+// -----------------------------------------------------------------------------
+
+@test
+fn test_exclusive_range_literal() {
+    // Exclusive range: start..end (includes start, excludes end)
+    let mut count = 0;
+    for i in 0..5 {
+        count = count + 1;
+    }
+    assert_eq(count, 5);
+}
+
+@test
+fn test_inclusive_range_literal() {
+    // Inclusive range: start..=end (includes both start and end)
+    let mut count = 0;
+    for i in 0..=5 {
+        count = count + 1;
+    }
+    assert_eq(count, 6);
+}
+
+@test
+fn test_range_literal_values() {
+    let mut sum = 0;
+    for i in 1..=5 {
+        sum = sum + i;
+    }
+    // 1 + 2 + 3 + 4 + 5 = 15
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_negative_range_literal() {
+    let mut sum = 0;
+    for i in -3..3 {
+        sum = sum + i;
+    }
+    // -3 + -2 + -1 + 0 + 1 + 2 = -3
+    assert_eq(sum, -3);
+}
+
+// -----------------------------------------------------------------------------
+// Section 2: Range with Explicit Type Annotation
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_with_explicit_int() {
+    let start: Int = 0;
+    let end: Int = 10;
+
+    let mut count = 0;
+    for i in start..end {
+        count = count + 1;
+    }
+    assert_eq(count, 10);
+}
+
+@test
+fn test_range_with_explicit_bounds() {
+    let bounds: (Int, Int) = (5, 10);
+
+    let mut sum = 0;
+    for i in bounds.0..bounds.1 {
+        sum = sum + i;
+    }
+    // 5 + 6 + 7 + 8 + 9 = 35
+    assert_eq(sum, 35);
+}
+
+// -----------------------------------------------------------------------------
+// Section 3: Range in Expressions
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_with_computed_bounds() {
+    let base = 5;
+    let offset = 3;
+
+    let mut count = 0;
+    for i in base..(base + offset) {
+        count = count + 1;
+    }
+    // Range 5..8 has 3 elements
+    assert_eq(count, 3);
+}
+
+@test
+fn test_range_with_function_call_bounds() {
+    fn get_start() -> Int { 0 }
+    fn get_end() -> Int { 5 }
+
+    let mut sum = 0;
+    for i in get_start()..get_end() {
+        sum = sum + i;
+    }
+    // 0 + 1 + 2 + 3 + 4 = 10
+    assert_eq(sum, 10);
+}
+
+// -----------------------------------------------------------------------------
+// Section 4: Range Type as Value
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_stored_in_variable() {
+    // Store range as a value (if Range type is available)
+    let r = 0..5;
+
+    let mut count = 0;
+    for i in r {
+        count = count + 1;
+    }
+    assert_eq(count, 5);
+}
+
+@test
+fn test_range_passed_to_function() {
+    fn count_range<R: IntoIterator<Item = Int>>(r: R) -> Int {
+        let mut count = 0;
+        for _ in r {
+            count = count + 1;
+        }
+        count
+    }
+
+    // This tests whether range can be passed as an argument
+    // Note: May need adjustment based on actual Range type implementation
+    let r = 0..10;
+    // count_range(r) would require IntoIterator implementation
+}
+
+// -----------------------------------------------------------------------------
+// Section 5: Nested Range Iterations
+// -----------------------------------------------------------------------------
+
+@test
+fn test_nested_ranges() {
+    let mut sum = 0;
+
+    for i in 0..3 {
+        for j in 0..3 {
+            sum = sum + i * 3 + j;
+        }
+    }
+
+    // (0*3+0) + (0*3+1) + (0*3+2) + (1*3+0) + (1*3+1) + (1*3+2) + (2*3+0) + (2*3+1) + (2*3+2)
+    // = 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 = 36
+    assert_eq(sum, 36);
+}
+
+@test
+fn test_range_with_outer_dependency() {
+    let mut sum = 0;
+
+    for i in 0..4 {
+        for j in 0..i {
+            sum = sum + 1;
+        }
+    }
+
+    // i=0: j in 0..0 = 0 iterations
+    // i=1: j in 0..1 = 1 iteration
+    // i=2: j in 0..2 = 2 iterations
+    // i=3: j in 0..3 = 3 iterations
+    // Total: 0 + 1 + 2 + 3 = 6
+    assert_eq(sum, 6);
+}
+
+// -----------------------------------------------------------------------------
+// Section 6: Range in Match Guards
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_in_match_guard() {
+    fn classify(n: Int) -> Text {
+        match n {
+            _ if n < 0 => "negative",
+            _ if n == 0 => "zero",
+            _ if n < 10 => "small",
+            _ if n < 100 => "medium",
+            _ => "large",
+        }
+    }
+
+    assert_eq(classify(-5), "negative");
+    assert_eq(classify(0), "zero");
+    assert_eq(classify(5), "small");
+    assert_eq(classify(50), "medium");
+    assert_eq(classify(500), "large");
+}
+
+// -----------------------------------------------------------------------------
+// Section 7: Range with Break and Continue
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_with_break() {
+    let mut last = 0;
+
+    for i in 0..100 {
+        if i >= 10 {
+            break;
+        }
+        last = i;
+    }
+
+    assert_eq(last, 9);
+}
+
+@test
+fn test_range_with_continue() {
+    let mut sum = 0;
+
+    for i in 0..10 {
+        if i % 2 == 1 {
+            continue;  // Skip odd numbers
+        }
+        sum = sum + i;
+    }
+
+    // 0 + 2 + 4 + 6 + 8 = 20
+    assert_eq(sum, 20);
+}
+
+// -----------------------------------------------------------------------------
+// Section 8: Range Step Patterns
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_with_manual_step() {
+    // Verum may not have step_by(), so manual stepping
+    let mut sum = 0;
+
+    for i in 0..10 {
+        if i % 2 == 0 {
+            sum = sum + i;
+        }
+    }
+
+    // 0 + 2 + 4 + 6 + 8 = 20
+    assert_eq(sum, 20);
+}
+
+@test
+fn test_range_reverse_manual() {
+    // Reverse iteration via manual decrement
+    let mut values: List<Int> = [];
+
+    let mut i = 4;
+    while i >= 0 {
+        values.push(i);
+        i = i - 1;
+    }
+
+    assert_eq(values.len(), 5);
+    match values.get(0) {
+        Some(v) => assert_eq(*v, 4),
+        None => assert(false),
+    }
+    match values.get(4) {
+        Some(v) => assert_eq(*v, 0),
+        None => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 9: Range with Array Indexing
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_for_array_indexing() {
+    let arr = [10, 20, 30, 40, 50];
+    let mut sum = 0;
+
+    for i in 0..5 {
+        sum = sum + arr[i];
+    }
+
+    assert_eq(sum, 150);
+}
+
+@test
+fn test_range_for_partial_array_access() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut sum = 0;
+
+    // Only sum elements 3..7 (indices 3, 4, 5, 6)
+    for i in 3..7 {
+        sum = sum + arr[i];
+    }
+
+    // 4 + 5 + 6 + 7 = 22
+    assert_eq(sum, 22);
+}
+
+// -----------------------------------------------------------------------------
+// Section 10: Range Bound Types
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_with_variable_bounds() {
+    fn sum_range(start: Int, end: Int) -> Int {
+        let mut sum = 0;
+        for i in start..end {
+            sum = sum + i;
+        }
+        sum
+    }
+
+    assert_eq(sum_range(0, 5), 10);  // 0+1+2+3+4
+    assert_eq(sum_range(5, 10), 35); // 5+6+7+8+9
+    assert_eq(sum_range(-2, 3), 0);  // -2+-1+0+1+2
+}
+
+@test
+fn test_range_bound_inference_from_context() {
+    let arr: [Int; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // Range bounds should infer as Int from usage with array indexing
+    let mut sum = 0;
+    let len = 10;  // Explicit Int
+    for i in 0..len {
+        sum = sum + arr[i];
+    }
+
+    assert_eq(sum, 45);
+}
+
+// -----------------------------------------------------------------------------
+// Section 11: Empty and Single-Element Ranges
+// -----------------------------------------------------------------------------
+
+@test
+fn test_empty_range() {
+    let mut count = 0;
+
+    for i in 5..5 {  // Empty range
+        count = count + 1;
+    }
+
+    assert_eq(count, 0);
+}
+
+@test
+fn test_single_element_range() {
+    let mut sum = 0;
+
+    for i in 5..6 {  // Single element: just 5
+        sum = sum + i;
+    }
+
+    assert_eq(sum, 5);
+}
+
+@test
+fn test_single_element_inclusive_range() {
+    let mut count = 0;
+    let mut value = 0;
+
+    for i in 5..=5 {  // Single element inclusive: just 5
+        count = count + 1;
+        value = i;
+    }
+
+    assert_eq(count, 1);
+    assert_eq(value, 5);
+}
+
+// -----------------------------------------------------------------------------
+// Section 12: Range Arithmetic Bounds
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_with_arithmetic_start() {
+    let base = 10;
+    let mut sum = 0;
+
+    for i in (base - 3)..base {
+        sum = sum + i;
+    }
+
+    // 7 + 8 + 9 = 24
+    assert_eq(sum, 24);
+}
+
+@test
+fn test_range_with_arithmetic_end() {
+    let base = 5;
+    let mut sum = 0;
+
+    for i in 0..(base * 2) {
+        sum = sum + i;
+    }
+
+    // 0 + 1 + 2 + ... + 9 = 45
+    assert_eq(sum, 45);
+}
+
+@test
+fn test_range_with_both_arithmetic_bounds() {
+    let start = 2;
+    let end = 8;
+    let offset = 3;
+
+    let mut sum = 0;
+    for i in (start + offset)..(end + offset) {
+        sum = sum + i;
+    }
+
+    // 5 + 6 + 7 + 8 + 9 + 10 = 45
+    assert_eq(sum, 45);
+}
+
+// -----------------------------------------------------------------------------
+// Section 13: Range with Different Integer Sizes
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_with_i32() {
+    let start: Int32 = 0;
+    let end: Int32 = 5;
+    let mut count: Int32 = 0;
+    for i in start..end {
+        count = count + 1;
+    }
+    assert_eq(count, 5);
+}
+
+@test
+fn test_range_with_i8() {
+    let start: Int8 = 1;
+    let end: Int8 = 6;
+    let mut sum: Int = 0;
+    for i in start..end {
+        sum = sum + (i as Int);
+    }
+    // 1 + 2 + 3 + 4 + 5 = 15
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_range_with_i16() {
+    let start: Int16 = 0;
+    let end: Int16 = 4;
+    let mut count = 0;
+    for i in start..end {
+        count = count + 1;
+    }
+    assert_eq(count, 4);
+}
+
+@test
+fn test_range_with_i64() {
+    let start: Int64 = 10;
+    let end: Int64 = 15;
+    let mut sum: Int64 = 0;
+    for i in start..end {
+        sum = sum + i;
+    }
+    // 10 + 11 + 12 + 13 + 14 = 60
+    assert_eq(sum, 60 as Int64);
+}
+
+@test
+fn test_range_with_u8() {
+    let start: UInt8 = 0;
+    let end: UInt8 = 10;
+    let mut count = 0;
+    for i in start..end {
+        count = count + 1;
+    }
+    assert_eq(count, 10);
+}
+
+@test
+fn test_range_with_u16() {
+    let start: UInt16 = 5;
+    let end: UInt16 = 10;
+    let mut sum: Int = 0;
+    for i in start..end {
+        sum = sum + (i as Int);
+    }
+    // 5 + 6 + 7 + 8 + 9 = 35
+    assert_eq(sum, 35);
+}
+
+@test
+fn test_range_with_u32() {
+    let start: UInt32 = 0;
+    let end: UInt32 = 3;
+    let mut count = 0;
+    for i in start..end {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_range_inclusive_i32() {
+    let start: Int32 = 1;
+    let end: Int32 = 5;
+    let mut sum: Int = 0;
+    let mut r = RangeInclusive { current: start, end: end, done: false };
+    loop {
+        match r.next() {
+            Some(v) => { sum = sum + (v as Int); }
+            None => { break; }
+        }
+    }
+    // 1 + 2 + 3 + 4 + 5 = 15
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_range_empty_i32() {
+    let start: Int32 = 5;
+    let end: Int32 = 5;
+    let mut count = 0;
+    for i in start..end {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_range_negative_i32() {
+    let start: Int32 = -3;
+    let end: Int32 = 3;
+    let mut count = 0;
+    for i in start..end {
+        count = count + 1;
+    }
+    assert_eq(count, 6);
+}
+
+// -----------------------------------------------------------------------------
+// Section 14: Range Patterns in Functions
+// -----------------------------------------------------------------------------
+
+fn process_range(start: Int, end: Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    for i in start..end {
+        result.push(i);
+    }
+    result
+}
+
+@test
+fn test_range_in_function() {
+    let result = process_range(5, 10);
+
+    assert_eq(result.len(), 5);
+    match result.get(0) {
+        Some(v) => assert_eq(*v, 5),
+        None => assert(false),
+    }
+    match result.get(4) {
+        Some(v) => assert_eq(*v, 9),
+        None => assert(false),
+    }
+}
+
+fn generate_squares(n: Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    for i in 0..n {
+        result.push(i * i);
+    }
+    result
+}
+
+@test
+fn test_range_for_generation() {
+    let squares = generate_squares(5);
+
+    assert_eq(squares.len(), 5);
+    match squares.get(0) {
+        Some(v) => assert_eq(*v, 0),
+        None => assert(false),
+    }
+    match squares.get(4) {
+        Some(v) => assert_eq(*v, 16),
+        None => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 15: Range Comparison with While Loop
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_equivalent_to_while() {
+    // Using range
+    let mut sum_for = 0;
+    for i in 0..10 {
+        sum_for = sum_for + i;
+    }
+
+    // Equivalent while loop
+    let mut sum_while = 0;
+    let mut j = 0;
+    while j < 10 {
+        sum_while = sum_while + j;
+        j = j + 1;
+    }
+
+    // Both should produce the same result
+    assert_eq(sum_for, sum_while);
+    assert_eq(sum_for, 45);
+}
+
+// -----------------------------------------------------------------------------
+// Section 16: Complex Range Expressions
+// -----------------------------------------------------------------------------
+
+@test
+fn test_complex_range_bounds() {
+    fn calculate_bound(x: Int) -> Int {
+        x * x
+    }
+
+    let base = 2;
+    let mut count = 0;
+
+    for i in calculate_bound(base)..calculate_bound(base + 1) {
+        count = count + 1;
+    }
+
+    // Range 4..9 has 5 elements
+    assert_eq(count, 5);
+}
+
+@test
+fn test_range_from_tuple() {
+    let bounds = (3, 8);
+
+    let mut sum = 0;
+    for i in bounds.0..bounds.1 {
+        sum = sum + i;
+    }
+
+    // 3 + 4 + 5 + 6 + 7 = 25
+    assert_eq(sum, 25);
+}
+
+@test
+fn test_range_from_array_elements() {
+    let arr = [2, 10];
+
+    let mut sum = 0;
+    for i in arr[0]..arr[1] {
+        sum = sum + i;
+    }
+
+    // 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 = 44
+    assert_eq(sum, 44);
+}
+
+// -----------------------------------------------------------------------------
+// Section 17: Inclusive Range Sum
+// -----------------------------------------------------------------------------
+
+@test
+fn test_inclusive_range_sum() {
+    let mut sum = 0;
+    for i in 1..=100 {
+        sum = sum + i;
+    }
+    // 1 + 2 + ... + 100 = 5050
+    assert_eq(sum, 5050);
+}
+
+// -----------------------------------------------------------------------------
+// Section 18: Range Collect to List
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_collect_to_list() {
+    let mut result: List<Int> = [];
+    for i in 0..5 {
+        result.push(i);
+    }
+    assert_eq(result.len(), 5);
+    assert_eq(result[0], 0);
+    assert_eq(result[4], 4);
+}
+
+@test
+fn test_inclusive_range_collect_to_list() {
+    let mut result: List<Int> = [];
+    for i in 1..=3 {
+        result.push(i);
+    }
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 1);
+    assert_eq(result[2], 3);
+}
+
+// -----------------------------------------------------------------------------
+// Section 19: Large Range Count
+// -----------------------------------------------------------------------------
+
+@test
+fn test_large_range_count() {
+    let mut count = 0;
+    for _ in 0..1000 {
+        count = count + 1;
+    }
+    assert_eq(count, 1000);
+}
+
+// -----------------------------------------------------------------------------
+// Section 20: Range with Accumulator Patterns
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_factorial_pattern() {
+    let mut factorial = 1;
+    for i in 1..=10 {
+        factorial = factorial * i;
+    }
+    // 10! = 3628800
+    assert_eq(factorial, 3628800);
+}
+
+@test
+fn test_range_fibonacci_steps() {
+    let mut a = 0;
+    let mut b = 1;
+    for _ in 0..10 {
+        let temp = a + b;
+        a = b;
+        b = temp;
+    }
+    // fib(10) = 55
+    assert_eq(a, 55);
+}
+
+// -----------------------------------------------------------------------------
+// Section 21: Range Boundary Arithmetic
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_zero_to_one_exclusive() {
+    let mut count = 0;
+    for _ in 0..1 {
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+@test
+fn test_inclusive_range_zero_to_zero() {
+    let mut count = 0;
+    for _ in 0..=0 {
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+@test
+fn test_negative_inclusive_range() {
+    let mut sum = 0;
+    for i in -5..=-1 {
+        sum = sum + i;
+    }
+    // -5 + -4 + -3 + -2 + -1 = -15
+    assert_eq(sum, -15);
+}
+
+// -----------------------------------------------------------------------------
+// Section 22: Additional Range Tests
+// -----------------------------------------------------------------------------
+
+@test
+fn test_range_exclusive_count_formula() {
+    // For range a..b, count = b - a (when b > a)
+    let a = 3;
+    let b = 13;
+    let mut count = 0;
+    for _ in a..b {
+        count = count + 1;
+    }
+    assert_eq(count, b - a);
+}
+
+@test
+fn test_range_inclusive_count_formula() {
+    // For range a..=b, count = b - a + 1 (when b >= a)
+    let a = 3;
+    let b = 13;
+    let mut count = 0;
+    for _ in a..=b {
+        count = count + 1;
+    }
+    assert_eq(count, b - a + 1);
+}
+
+@test
+fn test_range_sum_formula() {
+    // Sum of 0..n = n*(n-1)/2
+    let n = 20;
+    let mut sum = 0;
+    for i in 0..n {
+        sum = sum + i;
+    }
+    assert_eq(sum, n * (n - 1) / 2);
+}
+
+@test
+fn test_inclusive_range_sum_formula() {
+    // Sum of 1..=n = n*(n+1)/2
+    let n = 20;
+    let mut sum = 0;
+    for i in 1..=n {
+        sum = sum + i;
+    }
+    assert_eq(sum, n * (n + 1) / 2);
+}
+
+@test
+fn test_range_with_power_of_two_count() {
+    let mut count = 0;
+    for _ in 0..64 {
+        count = count + 1;
+    }
+    assert_eq(count, 64);
+}
+
+@test
+fn test_range_exclusive_boundary_off_by_one() {
+    // Verify exclusive range doesn't include end
+    let end = 5;
+    let mut last_seen = -1;
+    for i in 0..end {
+        last_seen = i;
+    }
+    assert_eq(last_seen, end - 1);
+}
+
+@test
+fn test_inclusive_range_boundary_includes_end() {
+    // Verify inclusive range includes end
+    let end = 5;
+    let mut last_seen = -1;
+    for i in 0..=end {
+        last_seen = i;
+    }
+    assert_eq(last_seen, end);
+}
+
+@test
+fn test_range_negative_to_positive() {
+    let mut count = 0;
+    for _ in -10..10 {
+        count = count + 1;
+    }
+    assert_eq(count, 20);
+}
+
+// =============================================================================
+// Additional Range Tests
+// =============================================================================
+
+@test
+fn test_range_product() {
+    // 1 * 2 * 3 * 4 * 5 = 120
+    let mut prod = 1;
+    for i in 1..6 {
+        prod = prod * i;
+    }
+    assert_eq(prod, 120);
+}
+
+@test
+fn test_inclusive_range_product() {
+    let mut prod = 1;
+    for i in 1..=5 {
+        prod = prod * i;
+    }
+    assert_eq(prod, 120);
+}
+
+@test
+fn test_range_count_evens() {
+    let mut evens = 0;
+    for i in 0..20 {
+        if i % 2 == 0 {
+            evens = evens + 1;
+        }
+    }
+    assert_eq(evens, 10);
+}
+
+@test
+fn test_range_nested_sum() {
+    let mut sum = 0;
+    for i in 0..3 {
+        for j in 0..3 {
+            sum = sum + i + j;
+        }
+    }
+    // Each i appears 3 times in sum with j, each j appears 3 times with i
+    // sum of i's: (0+1+2)*3 = 9, sum of j's: (0+1+2)*3 = 9, total = 18
+    assert_eq(sum, 18);
+}
+
+@test
+fn test_range_step_simulation() {
+    // Simulate step by 2 with range
+    let mut count = 0;
+    let mut i = 0;
+    while i < 10 {
+        count = count + 1;
+        i = i + 2;
+    }
+    assert_eq(count, 5);
+}
+
+@test
+fn test_range_used_for_indexing() {
+    let arr = [10, 20, 30, 40, 50];
+    let mut sum = 0;
+    for i in 0..5 {
+        sum = sum + arr[i];
+    }
+    assert_eq(sum, 150);
+}
+
+@test
+fn test_range_single_element_inclusive() {
+    let mut count = 0;
+    for _ in 5..=5 {
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+@test
+fn test_range_empty_when_start_equals_end() {
+    let mut count = 0;
+    for _ in 5..5 {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}

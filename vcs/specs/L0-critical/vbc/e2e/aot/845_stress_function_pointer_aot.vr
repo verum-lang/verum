@@ -1,0 +1,244 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, dp
+// @timeout: 60000
+// @expected-exit: 0
+
+// Dynamic programming: knapsack, edit distance, longest common subsequence
+
+// 10-element array
+type A10 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int, e8: Int, e9: Int };
+
+fn a10_get(a: A10, i: Int) -> Int {
+    if (i == 0) { return a.e0; }  if (i == 1) { return a.e1; }
+    if (i == 2) { return a.e2; }  if (i == 3) { return a.e3; }
+    if (i == 4) { return a.e4; }  if (i == 5) { return a.e5; }
+    if (i == 6) { return a.e6; }  if (i == 7) { return a.e7; }
+    if (i == 8) { return a.e8; }  a.e9
+}
+
+fn a10_set(a: A10, i: Int, v: Int) -> A10 {
+    A10 {
+        e0: if (i == 0) { v } else { a.e0 }, e1: if (i == 1) { v } else { a.e1 },
+        e2: if (i == 2) { v } else { a.e2 }, e3: if (i == 3) { v } else { a.e3 },
+        e4: if (i == 4) { v } else { a.e4 }, e5: if (i == 5) { v } else { a.e5 },
+        e6: if (i == 6) { v } else { a.e6 }, e7: if (i == 7) { v } else { a.e7 },
+        e8: if (i == 8) { v } else { a.e8 }, e9: if (i == 9) { v } else { a.e9 }
+    }
+}
+
+fn a10_zeros() -> A10 { A10 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 } }
+
+fn max_v(a: Int, b: Int) -> Int { if (a > b) { a } else { b } }
+fn min_v(a: Int, b: Int) -> Int { if (a < b) { a } else { b } }
+
+// 0/1 Knapsack with up to 5 items and capacity up to 10
+// Returns max value achievable
+// Items: weight[i], value[i], n items, capacity W
+fn knapsack(weights: A10, values: A10, n: Int, cap: Int) -> Int {
+    // dp[w] = max value using capacity w
+    let mut dp = a10_zeros();
+
+    let mut i = 0;
+    while (i < n) {
+        let wi = a10_get(weights, i);
+        let vi = a10_get(values, i);
+        // Process in reverse to avoid using same item twice
+        let mut w = cap;
+        while (w >= wi) {
+            let prev = a10_get(dp, w - wi);
+            let cur = a10_get(dp, w);
+            if (prev + vi > cur) {
+                dp = a10_set(dp, w, prev + vi);
+            }
+            w = w - 1;
+        }
+        i = i + 1;
+    }
+    a10_get(dp, cap)
+}
+
+// Edit distance between two integer sequences (up to length 8)
+// Using a 9x9 DP table flattened into functions
+// Sequences stored in Arr8
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if (i == 0) { return a.e0; }  if (i == 1) { return a.e1; }
+    if (i == 2) { return a.e2; }  if (i == 3) { return a.e3; }
+    if (i == 4) { return a.e4; }  if (i == 5) { return a.e5; }
+    if (i == 6) { return a.e6; }  a.e7
+}
+
+// Edit distance using O(n) space (two rows)
+fn edit_distance(s: Arr8, slen: Int, t: Arr8, tlen: Int) -> Int {
+    // prev_row[j] = edit distance from s[0..0] to t[0..j]
+    let mut prev = a10_zeros();
+    let mut j = 0;
+    while (j <= tlen) {
+        prev = a10_set(prev, j, j);
+        j = j + 1;
+    }
+
+    let mut i = 1;
+    while (i <= slen) {
+        let mut curr = a10_zeros();
+        curr = a10_set(curr, 0, i);
+        let mut jj = 1;
+        while (jj <= tlen) {
+            let cost = if (a8_get(s, i - 1) == a8_get(t, jj - 1)) { 0 } else { 1 };
+            let del_cost = a10_get(prev, jj) + 1;
+            let ins_cost = a10_get(curr, jj - 1) + 1;
+            let sub_cost = a10_get(prev, jj - 1) + cost;
+            let mn = min_v(del_cost, min_v(ins_cost, sub_cost));
+            curr = a10_set(curr, jj, mn);
+            jj = jj + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+    a10_get(prev, tlen)
+}
+
+// Longest Common Subsequence length using O(n) space
+fn lcs_length(s: Arr8, slen: Int, t: Arr8, tlen: Int) -> Int {
+    let mut prev = a10_zeros();
+
+    let mut i = 1;
+    while (i <= slen) {
+        let mut curr = a10_zeros();
+        let mut jj = 1;
+        while (jj <= tlen) {
+            if (a8_get(s, i - 1) == a8_get(t, jj - 1)) {
+                curr = a10_set(curr, jj, a10_get(prev, jj - 1) + 1);
+            } else {
+                curr = a10_set(curr, jj, max_v(a10_get(prev, jj), a10_get(curr, jj - 1)));
+            }
+            jj = jj + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+    a10_get(prev, tlen)
+}
+
+// Maximum subarray sum (Kadane's algorithm)
+fn max_subarray_sum(arr: A10, n: Int) -> Int {
+    let mut best = a10_get(arr, 0);
+    let mut current = a10_get(arr, 0);
+    let mut i = 1;
+    while (i < n) {
+        let val = a10_get(arr, i);
+        if (current + val > val) {
+            current = current + val;
+        } else {
+            current = val;
+        }
+        if (current > best) { best = current; }
+        i = i + 1;
+    }
+    best
+}
+
+// Coin change: minimum coins to make amount (coins: 1, 3, 5, 7)
+fn min_coins(amount: Int) -> Int {
+    if (amount <= 0) { return 0; }
+    let cap = if (amount < 10) { amount } else { 9 };
+    let mut dp = A10 { e0: 0, e1: 9999, e2: 9999, e3: 9999, e4: 9999,
+                       e5: 9999, e6: 9999, e7: 9999, e8: 9999, e9: 9999 };
+
+    let mut amt = 1;
+    while (amt <= cap) {
+        let mut best = 9999;
+        // coin = 1
+        if (amt >= 1) { let c1 = a10_get(dp, amt - 1) + 1; if (c1 < best) { best = c1; } }
+        // coin = 3
+        if (amt >= 3) { let c3 = a10_get(dp, amt - 3) + 1; if (c3 < best) { best = c3; } }
+        // coin = 5
+        if (amt >= 5) { let c5 = a10_get(dp, amt - 5) + 1; if (c5 < best) { best = c5; } }
+        // coin = 7
+        if (amt >= 7) { let c7 = a10_get(dp, amt - 7) + 1; if (c7 < best) { best = c7; } }
+        dp = a10_set(dp, amt, best);
+        amt = amt + 1;
+    }
+    a10_get(dp, cap)
+}
+
+fn main() -> Int {
+    // Knapsack tests
+    // Items: weights=[2,3,4,5], values=[3,4,5,6], capacity=8
+    let wt = A10 { e0: 2, e1: 3, e2: 4, e3: 5, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 };
+    let vl = A10 { e0: 3, e1: 4, e2: 5, e3: 6, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 };
+    // Best: items 0(w=2,v=3) + 1(w=3,v=4) + 2(w=4, won't fit)
+    // Actually: items 0+1 = w=5,v=7; items 0+2 = w=6,v=8; items 1+2 = w=7,v=9; items 0+1+small = w=5 left, take item3 w=5 v=6 => w=10>8
+    // items 1(w=3)+2(w=4)=w=7,v=9; +item0(w=2)=w=9>8. items 1+3=w=8,v=10
+    assert_eq(knapsack(wt, vl, 4, 8), 10);
+
+    // Simple knapsack
+    let wt2 = A10 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 };
+    let vl2 = A10 { e0: 6, e1: 10, e2: 12, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 };
+    // cap=5: take all = w=6>5; take items 1+2 = w=5,v=22
+    assert_eq(knapsack(wt2, vl2, 3, 5), 22);
+
+    // Edit distance tests
+    // Same sequences
+    let s1 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(edit_distance(s1, 3, s1, 3), 0);
+
+    // Completely different
+    let s2 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let s3 = Arr8 { e0: 4, e1: 5, e2: 6, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(edit_distance(s2, 3, s3, 3), 3);
+
+    // One insertion needed
+    let s4 = Arr8 { e0: 1, e1: 2, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let s5 = Arr8 { e0: 1, e1: 3, e2: 2, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(edit_distance(s4, 2, s5, 3), 1);
+
+    // Empty vs non-empty
+    let empty = Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(edit_distance(empty, 0, s2, 3), 3);
+    assert_eq(edit_distance(s2, 3, empty, 0), 3);
+
+    // LCS tests
+    // [1,2,3,4] vs [2,4,6]
+    let la = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let lb = Arr8 { e0: 2, e1: 4, e2: 6, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(lcs_length(la, 4, lb, 3), 2);    // [2,4]
+
+    // Same sequence
+    assert_eq(lcs_length(la, 4, la, 4), 4);
+
+    // No common elements
+    let lc = Arr8 { e0: 5, e1: 6, e2: 7, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(lcs_length(la, 4, lc, 3), 0);
+
+    // [1,3,5,7] vs [1,2,3,4,5]
+    let ld = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let le = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    assert_eq(lcs_length(ld, 4, le, 5), 3);    // [1,3,5]
+
+    // Max subarray sum (Kadane)
+    let ka = A10 { e0: -2, e1: 1, e2: -3, e3: 4, e4: -1, e5: 2, e6: 1, e7: -5, e8: 4, e9: 0 };
+    assert_eq(max_subarray_sum(ka, 9), 6);  // [4,-1,2,1]
+
+    let kb = A10 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 };
+    assert_eq(max_subarray_sum(kb, 5), 15); // all elements
+
+    let kc = A10 { e0: -1, e1: -2, e2: -3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 };
+    assert_eq(max_subarray_sum(kc, 3), -1); // least negative
+
+    // Coin change
+    assert_eq(min_coins(0), 0);
+    assert_eq(min_coins(1), 1);
+    assert_eq(min_coins(3), 1);
+    assert_eq(min_coins(5), 1);
+    assert_eq(min_coins(7), 1);
+    assert_eq(min_coins(6), 2);     // 3+3
+    assert_eq(min_coins(8), 2);     // 1+7 or 3+5
+    assert_eq(min_coins(9), 3);     // 1+1+7 or 1+3+5
+
+    print("845_stress_dynamic_programming: PASS");
+    0
+}

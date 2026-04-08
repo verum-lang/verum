@@ -1,0 +1,48 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Int methods (abs, signum, checked arithmetic, etc.)
+
+fn main() {
+    // Test abs
+    assert_eq((-42).abs(), 42);
+    assert_eq(42.abs(), 42);
+    assert_eq(0.abs(), 0);
+
+    // Test signum
+    assert_eq((-42).signum(), -1);
+    assert_eq(42.signum(), 1);
+    assert_eq(0.signum(), 0);
+
+    // Test is_positive, is_negative, is_zero
+    assert(42.is_positive());
+    assert(!42.is_negative());
+    assert(!42.is_zero());
+
+    assert(!(-42).is_positive());
+    assert((-42).is_negative());
+    assert(!(-42).is_zero());
+
+    assert(!0.is_positive());
+    assert(!0.is_negative());
+    assert(0.is_zero());
+
+    // Test min, max
+    assert_eq(5.min(10), 5);
+    assert_eq(5.max(10), 10);
+
+    // Test clamp
+    assert_eq(5.clamp(0, 10), 5);
+    assert_eq((-5).clamp(0, 10), 0);
+    assert_eq(15.clamp(0, 10), 10);
+
+    // Test in_range
+    assert(5.in_range(0, 10));
+    assert(!10.in_range(0, 10));  // End is exclusive
+
+    // Test pow
+    assert_eq(2.pow(10), 1024);
+    assert_eq(3.pow(4), 81);
+    assert_eq(5.pow(0), 1);
+}

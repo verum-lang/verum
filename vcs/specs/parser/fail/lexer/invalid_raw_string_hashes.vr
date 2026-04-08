@@ -1,0 +1,18 @@
+// @test: parse-fail
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, strings, error
+// @description: Test rejection of hash-delimited raw strings (r#"..."# removed)
+//
+// Per simplified literal architecture v6.0:
+//   - The r#"..."# syntax has been REMOVED
+//   - Raw strings now use triple-quoted syntax: """..."""
+//   - Hash delimiter syntax is only valid for tagged literals: tag#"..."
+//
+// @expected-error: E010
+
+fn test_hash_delimited_raw_string_rejected() {
+    // Old hash-delimited raw string syntax is no longer valid
+    let s = r#"this is invalid"#;
+}

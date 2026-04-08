@@ -1,0 +1,150 @@
+// @test: differential
+
+// @level: L0
+// @tags: differential, geometry, math, polygon
+// @timeout: 30000
+
+// Computational geometry with integer coordinates
+
+type Pt is { x: Int, y: Int };
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Manhattan distance
+fn manhattan(a: Pt, b: Pt) -> Int {
+    abs_val(a.x - b.x) + abs_val(a.y - b.y)
+}
+
+// Squared Euclidean distance (avoids sqrt)
+fn dist_sq(a: Pt, b: Pt) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
+// Cross product of vectors (p1-p0) x (p2-p0)
+fn cross(p0: Pt, p1: Pt, p2: Pt) -> Int {
+    (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x)
+}
+
+// Orientation: positive = CCW, negative = CW, 0 = collinear
+fn orientation(a: Pt, b: Pt, c: Pt) -> Int {
+    let v = cross(a, b, c);
+    if v > 0 { 1 }
+    else if v < 0 { -1 }
+    else { 0 }
+}
+
+// Shoelace formula for triangle area * 2 (to stay in integers)
+fn triangle_area2(a: Pt, b: Pt, c: Pt) -> Int {
+    abs_val(cross(a, b, c))
+}
+
+// Check if point is inside triangle (using area method)
+fn point_in_triangle(p: Pt, a: Pt, b: Pt, c: Pt) -> Int {
+    let total = triangle_area2(a, b, c);
+    let area1 = triangle_area2(p, a, b);
+    let area2 = triangle_area2(p, b, c);
+    let area3 = triangle_area2(p, a, c);
+    if area1 + area2 + area3 == total { 1 } else { 0 }
+}
+
+// Polygon area * 2 for a 4-point polygon (shoelace)
+fn quad_area2(p0: Pt, p1: Pt, p2: Pt, p3: Pt) -> Int {
+    let a = p0.x * p1.y - p1.x * p0.y;
+    let b = p1.x * p2.y - p2.x * p1.y;
+    let c = p2.x * p3.y - p3.x * p2.y;
+    let d = p3.x * p0.y - p0.x * p3.y;
+    abs_val(a + b + c + d)
+}
+
+// Line segment intersection check
+fn segments_intersect(a1: Pt, a2: Pt, b1: Pt, b2: Pt) -> Int {
+    let d1 = orientation(b1, b2, a1);
+    let d2 = orientation(b1, b2, a2);
+    let d3 = orientation(a1, a2, b1);
+    let d4 = orientation(a1, a2, b2);
+    if d1 * d2 < 0 {
+        if d3 * d4 < 0 { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn test_distance() -> Int {
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 3, y: 4 };
+    assert_eq(manhattan(a, b), 7);
+    assert_eq(dist_sq(a, b), 25);
+
+    let c = Pt { x: 1, y: 1 };
+    let d = Pt { x: 4, y: 5 };
+    assert_eq(manhattan(c, d), 7);
+    assert_eq(dist_sq(c, d), 25);
+    1
+}
+
+fn test_orientation() -> Int {
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 1, y: 0 };
+    let c = Pt { x: 0, y: 1 };
+    assert_eq(orientation(a, b, c), 1);  // CCW
+
+    let d = Pt { x: 0, y: -1 };
+    assert_eq(orientation(a, b, d), -1); // CW
+
+    let e = Pt { x: 2, y: 0 };
+    assert_eq(orientation(a, b, e), 0);  // collinear
+    1
+}
+
+fn test_triangle() -> Int {
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 4, y: 0 };
+    let c = Pt { x: 0, y: 3 };
+    assert_eq(triangle_area2(a, b, c), 12); // area = 6, 2*area = 12
+
+    // Point inside
+    let p = Pt { x: 1, y: 1 };
+    assert_eq(point_in_triangle(p, a, b, c), 1);
+
+    // Point outside
+    let q = Pt { x: 3, y: 3 };
+    assert_eq(point_in_triangle(q, a, b, c), 0);
+    1
+}
+
+fn test_quad_area() -> Int {
+    // Square: (0,0), (2,0), (2,2), (0,2), area = 4, 2*area = 8
+    let p0 = Pt { x: 0, y: 0 };
+    let p1 = Pt { x: 2, y: 0 };
+    let p2 = Pt { x: 2, y: 2 };
+    let p3 = Pt { x: 0, y: 2 };
+    assert_eq(quad_area2(p0, p1, p2, p3), 8);
+    1
+}
+
+fn test_segment_intersection() -> Int {
+    // Crossing segments
+    let a1 = Pt { x: 0, y: 0 };
+    let a2 = Pt { x: 4, y: 4 };
+    let b1 = Pt { x: 0, y: 4 };
+    let b2 = Pt { x: 4, y: 0 };
+    assert_eq(segments_intersect(a1, a2, b1, b2), 1);
+
+    // Parallel segments
+    let c1 = Pt { x: 0, y: 0 };
+    let c2 = Pt { x: 4, y: 0 };
+    let d1 = Pt { x: 0, y: 1 };
+    let d2 = Pt { x: 4, y: 1 };
+    assert_eq(segments_intersect(c1, c2, d1, d2), 0);
+    1
+}
+
+fn main() -> Int {
+    test_distance();
+    test_orientation();
+    test_triangle();
+    test_quad_area();
+    test_segment_intersection();
+    print("[OK] diff_geometry");
+    0
+}

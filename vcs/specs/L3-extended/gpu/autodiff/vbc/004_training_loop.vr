@@ -1,0 +1,101 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, autodiff, training
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Training loop forward pass simulation — linear model, loss, SGD update
+
+type SimTensor is { rows: Int, cols: Int };
+
+fn scalar(v: Float) -> SimTensor { SimTensor { rows: 1, cols: 1 } }
+fn ones(r: Int, c: Int) -> SimTensor { SimTensor { rows: r, cols: c } }
+fn zeros(r: Int, c: Int) -> SimTensor { SimTensor { rows: r, cols: c } }
+fn full(r: Int, c: Int, v: Float) -> SimTensor { SimTensor { rows: r, cols: c } }
+
+fn numel(t: SimTensor) -> Int { t.rows * t.cols }
+fn shape_eq(t: SimTensor, r: Int, c: Int) -> Bool { t.rows == r && t.cols == c }
+
+fn t_add(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_sub(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_mul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_matmul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.cols, b.rows);
+    SimTensor { rows: a.rows, cols: b.cols }
+}
+
+fn t_sum(a: SimTensor) -> SimTensor { SimTensor { rows: 1, cols: 1 } }
+
+@test
+fn test_simple_forward_pass() {
+    // Simple linear model: y = Wx + b
+    let w = ones(2, 3);
+    let x = ones(3, 1);
+    let b = zeros(2, 1);
+    let y = t_add(t_matmul(w, x), b);
+    assert(shape_eq(y, 2, 1));
+}
+
+@test
+fn test_loss_computation() {
+    let pred = full(1, 4, 2.0);
+    let target = full(1, 4, 1.0);
+    let diff = t_sub(pred, target);
+    let sq = t_mul(diff, diff);
+    let loss = t_sum(sq);
+    assert_eq(numel(loss), 1);
+}
+
+@test
+fn test_parameter_update() {
+    // Simulate SGD: w = w - lr * grad
+    let w = ones(3, 3);
+    let grad = full(3, 3, 0.1);
+    // lr * grad is scalar broadcast; approximate as element-wise
+    let lr_grad = full(3, 3, 0.001);
+    let new_w = t_sub(w, lr_grad);
+    assert(shape_eq(new_w, 3, 3));
+}
+
+@test
+fn test_multi_step_forward() {
+    // Two-layer network forward pass
+    let w1 = ones(4, 3);
+    let w2 = ones(2, 4);
+    let x = ones(3, 1);
+    let h = t_matmul(w1, x);
+    let y = t_matmul(w2, h);
+    assert(shape_eq(y, 2, 1));
+}
+
+@test
+fn test_batch_processing() {
+    // Batch of inputs
+    let w = ones(2, 3);
+    let x_batch = ones(3, 8);
+    let y = t_matmul(w, x_batch);
+    assert(shape_eq(y, 2, 8));
+}
+
+fn main() {
+    test_simple_forward_pass();
+    test_loss_computation();
+    test_parameter_update();
+    test_multi_step_forward();
+    test_batch_processing();
+}

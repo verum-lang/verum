@@ -1,0 +1,130 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, linker, section, elf
+// @description: Section placement control for ELF/object file output
+
+/// Standard code section
+fn normal_function() -> Int {
+    42
+}
+
+/// Place in custom text section
+@section(".text.hot")
+fn hot_function() -> Int {
+    // Frequently called - place with other hot code
+    1
+}
+
+/// Cold path - rarely executed
+@section(".text.cold")
+fn cold_error_handler() {
+    // Error handling code
+}
+
+/// Read-only data section
+@section(".rodata")
+let CONSTANT_TABLE: [Int; 4] = [1, 2, 3, 4];
+
+/// Writable data section
+@section(".data")
+static mut MUTABLE_STATE: Int = 0;
+
+/// BSS section (zero-initialized)
+@section(".bss")
+static mut ZERO_BUFFER: [Byte; 1024] = [0; 1024];
+
+/// Custom named section for plugin discovery
+@section(".plugins")
+let PLUGIN_INFO: PluginDescriptor = PluginDescriptor {
+    name: "MyPlugin",
+    version: 1,
+};
+
+type PluginDescriptor is {
+    name: Text,
+    version: Int,
+};
+
+/// Section for initialization functions
+@section(".init_array")
+@init_priority(500)
+fn early_init() {
+    MUTABLE_STATE = 1;
+}
+
+/// Interrupt vector table (embedded systems)
+@section(".vectors")
+@repr(C)
+type VectorTable is {
+    reset: fn(),
+    nmi: fn(),
+    hardfault: fn(),
+};
+
+@section(".vectors")
+let VECTORS: VectorTable = VectorTable {
+    reset: reset_handler,
+    nmi: nmi_handler,
+    hardfault: hardfault_handler,
+};
+
+@section(".text.vectors")
+fn reset_handler() {
+    // Reset handling
+}
+
+@section(".text.vectors")
+fn nmi_handler() {
+    // NMI handling
+}
+
+@section(".text.vectors")
+fn hardfault_handler() {
+    // Hardfault handling
+}
+
+/// Combining section with other attributes
+@section(".text.fast")
+@inline(always)
+fn fast_inline() -> Int {
+    0
+}
+
+/// Section with visibility control
+@section(".text.internal")
+@visibility(hidden)
+fn internal_helper() -> Int {
+    99
+}
+
+/// Keep section (prevent dead code elimination)
+@section(".keep")
+@used
+fn required_symbol() {
+    // Linker must keep this
+}
+
+/// LLVM specific section flags via name
+@section(".data.rel.ro")
+let RELRO_DATA: fn() -> Int = normal_function;
+
+fn main() {
+    let a = normal_function();
+    assert(a == 42);
+
+    let b = hot_function();
+    assert(b == 1);
+
+    assert(CONSTANT_TABLE[0] == 1);
+    assert(CONSTANT_TABLE[3] == 4);
+
+    MUTABLE_STATE = 5;
+    assert(MUTABLE_STATE == 5);
+
+    let c = fast_inline();
+    assert(c == 0);
+
+    let d = internal_helper();
+    assert(d == 99);
+}

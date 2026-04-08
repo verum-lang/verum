@@ -1,0 +1,256 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, corollary, theorem, derivation
+// @timeout: 10000
+
+/// Corollary Derivation
+///
+/// Corollaries are immediate consequences of theorems.
+/// They provide convenient restatements or special cases.
+
+// ------------------------------------------------------------
+// Base Theorems
+// ------------------------------------------------------------
+
+/// Addition is associative
+theorem add_assoc(a: Int, b: Int, c: Int): (a + b) + c == a + (b + c) {
+    proof by ring
+}
+
+/// Addition is commutative
+theorem add_comm(a: Int, b: Int): a + b == b + a {
+    proof by ring
+}
+
+/// Multiplication is associative
+theorem mul_assoc(a: Int, b: Int, c: Int): (a * b) * c == a * (b * c) {
+    proof by ring
+}
+
+/// Multiplication is commutative
+theorem mul_comm(a: Int, b: Int): a * b == b * a {
+    proof by ring
+}
+
+/// Distributivity
+theorem distrib_left(a: Int, b: Int, c: Int): a * (b + c) == a * b + a * c {
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Corollaries - Direct Consequences
+// ------------------------------------------------------------
+
+/// Corollary: Addition of zero is identity (right)
+corollary add_zero_right(a: Int): a + 0 == a {
+    proof {
+        have h: a + 0 == 0 + a by add_comm(a, 0);
+        have h2: 0 + a == a by simp;
+        exact eq_trans(h, h2)
+    }
+}
+
+/// Corollary: Addition of zero is identity (left)
+corollary add_zero_left(a: Int): 0 + a == a {
+    proof by simp
+}
+
+/// Corollary: Multiplication by one is identity (right)
+corollary mul_one_right(a: Int): a * 1 == a {
+    proof by ring
+}
+
+/// Corollary: Multiplication by one is identity (left)
+corollary mul_one_left(a: Int): 1 * a == a {
+    proof {
+        rewrite mul_comm;
+        exact mul_one_right(a)
+    }
+}
+
+/// Corollary: Multiplication by zero is zero
+corollary mul_zero(a: Int): a * 0 == 0 {
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Derived Corollaries (from other corollaries)
+// ------------------------------------------------------------
+
+/// From associativity: regrouping four terms
+corollary add_assoc_4(a: Int, b: Int, c: Int, d: Int):
+    ((a + b) + c) + d == a + (b + (c + d))
+{
+    proof {
+        calc {
+            ((a + b) + c) + d
+                == (a + b) + (c + d)  by add_assoc(a + b, c, d)
+                == a + (b + (c + d))  by add_assoc(a, b, c + d)
+        }
+    }
+}
+
+/// Commutativity in context
+corollary add_comm_middle(a: Int, b: Int, c: Int):
+    a + b + c == a + c + b
+{
+    proof {
+        calc {
+            a + b + c
+                == a + (b + c)    by add_assoc
+                == a + (c + b)    by { rewrite add_comm(b, c) }
+                == a + c + b      by add_assoc
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Corollaries with Additional Hypotheses
+// ------------------------------------------------------------
+
+/// If a + b = c, then a = c - b
+corollary subtract_eq(a: Int, b: Int, c: Int):
+    a + b == c -> a == c - b
+{
+    proof {
+        assume h: a + b == c;
+        calc {
+            a
+                == a + 0          by add_zero_right
+                == a + (b + (-b)) by { simp }
+                == (a + b) + (-b) by add_assoc
+                == c + (-b)       by { rewrite h }
+                == c - b          by def_sub
+        }
+    }
+}
+
+/// Cancellation corollary
+corollary add_left_cancel(a: Int, b: Int, c: Int):
+    a + b == a + c -> b == c
+{
+    proof {
+        assume h: a + b == a + c;
+        calc {
+            b
+                == 0 + b          by add_zero_left
+                == ((-a) + a) + b by { simp }
+                == (-a) + (a + b) by add_assoc
+                == (-a) + (a + c) by { rewrite h }
+                == ((-a) + a) + c by add_assoc
+                == 0 + c          by { simp }
+                == c              by add_zero_left
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Parametric Corollaries
+// ------------------------------------------------------------
+
+/// Corollary generalized over rings
+corollary ring_add_comm<R: Ring>(a: R, b: R): a + b == b + a {
+    proof by ring
+}
+
+/// Squared binomial
+corollary binomial_sq<R: Ring>(a: R, b: R):
+    (a + b) * (a + b) == a*a + 2*a*b + b*b
+{
+    proof {
+        calc {
+            (a + b) * (a + b)
+                == a*(a + b) + b*(a + b)        by distrib_right
+                == a*a + a*b + b*a + b*b        by distrib_left
+                == a*a + a*b + a*b + b*b        by { rewrite mul_comm(b, a) }
+                == a*a + 2*a*b + b*b            by { ring }
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Corollaries from Lemmas
+// ------------------------------------------------------------
+
+lemma double_is_add_self(n: Int): 2 * n == n + n {
+    proof by ring
+}
+
+corollary four_times_is_add_four(n: Int): 4 * n == n + n + n + n {
+    proof {
+        calc {
+            4 * n
+                == 2 * (2 * n)        by ring
+                == 2 * (n + n)        by { rewrite double_is_add_self(n) }
+                == (n + n) + (n + n)  by double_is_add_self(n + n)
+                == n + n + n + n      by add_assoc_4
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Immediate Corollaries (no proof needed)
+// ------------------------------------------------------------
+
+/// Immediate from symmetry
+corollary eq_symmetric<T>(x: T, y: T): x == y -> y == x {
+    proof by symmetry
+}
+
+/// Immediate from reflexivity
+corollary eq_reflexive<T>(x: T): x == x {
+    proof by refl
+}
+
+/// Immediate from hypothesis
+corollary identity<P: Prop>: P -> P {
+    proof {
+        assume p: P;
+        exact p
+    }
+}
+
+// ------------------------------------------------------------
+// Chained Corollaries
+// ------------------------------------------------------------
+
+theorem list_append_assoc<T>(xs: List<T>, ys: List<T>, zs: List<T>):
+    (xs ++ ys) ++ zs == xs ++ (ys ++ zs)
+{
+    proof by induction on xs {
+        case Nil => simp
+        case Cons(h, t) => {
+            simp;
+            apply IH
+        }
+    }
+}
+
+corollary list_append_nil<T>(xs: List<T>): xs ++ [] == xs {
+    proof by induction on xs {
+        case Nil => simp
+        case Cons(h, t) => simp; apply IH
+    }
+}
+
+corollary list_append_4<T>(a: List<T>, b: List<T>, c: List<T>, d: List<T>):
+    ((a ++ b) ++ c) ++ d == a ++ (b ++ (c ++ d))
+{
+    proof {
+        rewrite list_append_assoc;
+        rewrite list_append_assoc
+    }
+}
+
+fn main() {
+    // Verify corollaries are properly derived
+    let x = 5;
+    let y = 3;
+
+    // Use corollaries at runtime
+    assert(x + 0 == x);  // add_zero_right
+    assert(0 + y == y);  // add_zero_left
+    assert(x * 1 == x);  // mul_one_right
+    assert(x * 0 == 0);  // mul_zero
+}

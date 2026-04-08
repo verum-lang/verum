@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, numbers, error
+// @description: Test invalid number literal detection
+// @expected-error: E003
+
+fn test_invalid_numbers() {
+    let a = 0x;
+    let b = 0b;
+    let c = 0o;
+}

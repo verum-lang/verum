@@ -1,0 +1,699 @@
+// =============================================================================
+// VCS Test Suite: stdlib/mem/capability.vr - Capability System Tests
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: mem, cbgr, capability, access-control, security
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for the capability-based access control system. Capabilities are
+// monotonically attenuated - once removed, they cannot be restored.
+//
+// =============================================================================
+
+mount core.mem.capability.{
+    // Capability flag constants
+    CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE,
+    CAP_REVOKE, CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE,
+    // Capability presets
+    CAP_ALL, CAP_READ_ONLY, CAP_READ_WRITE, CAP_OWNED,
+    CAP_BORROW_SHARED, CAP_BORROW_MUT, CAP_EXECUTABLE,
+    // Capability type
+    Capability,
+    // Operations
+    has_capability, has_all_capabilities, attenuate, remove_capability,
+    can_delegate, can_revoke, is_borrowed, can_mutate, can_execute,
+    delegate_capability, revoke_capability,
+    owned_capabilities, shared_borrow_capabilities, mutable_borrow_capabilities,
+    validate_read, validate_write, validate_execute,
+};
+
+// =============================================================================
+// Capability Flag Constants Tests
+// =============================================================================
+
+@test
+fn test_cap_read_bit_position() {
+    assert_eq(CAP_READ, (1 as UInt16) << 0);
+    assert_eq(CAP_READ, 0x0001 as UInt16);
+}
+
+@test
+fn test_cap_write_bit_position() {
+    assert_eq(CAP_WRITE, (1 as UInt16) << 1);
+    assert_eq(CAP_WRITE, 0x0002 as UInt16);
+}
+
+@test
+fn test_cap_execute_bit_position() {
+    assert_eq(CAP_EXECUTE, (1 as UInt16) << 2);
+    assert_eq(CAP_EXECUTE, 0x0004 as UInt16);
+}
+
+@test
+fn test_cap_delegate_bit_position() {
+    assert_eq(CAP_DELEGATE, (1 as UInt16) << 3);
+    assert_eq(CAP_DELEGATE, 0x0008 as UInt16);
+}
+
+@test
+fn test_cap_revoke_bit_position() {
+    assert_eq(CAP_REVOKE, (1 as UInt16) << 4);
+    assert_eq(CAP_REVOKE, 0x0010 as UInt16);
+}
+
+@test
+fn test_cap_borrowed_bit_position() {
+    assert_eq(CAP_BORROWED, (1 as UInt16) << 5);
+    assert_eq(CAP_BORROWED, 0x0020 as UInt16);
+}
+
+@test
+fn test_cap_mutable_bit_position() {
+    assert_eq(CAP_MUTABLE, (1 as UInt16) << 6);
+    assert_eq(CAP_MUTABLE, 0x0040 as UInt16);
+}
+
+@test
+fn test_cap_no_escape_bit_position() {
+    assert_eq(CAP_NO_ESCAPE, (1 as UInt16) << 7);
+    assert_eq(CAP_NO_ESCAPE, 0x0080 as UInt16);
+}
+
+@test
+fn test_all_flags_are_distinct() {
+    let flags = [
+        CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE,
+        CAP_REVOKE, CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE,
+    ];
+
+    // Verify no two flags overlap
+    for i in 0..flags.len() {
+        for j in (i + 1)..flags.len() {
+            assert_eq(flags[i] & flags[j], 0);
+        }
+    }
+}
+
+// =============================================================================
+// Capability Preset Tests
+// =============================================================================
+
+@test
+fn test_cap_all_has_all_basic_flags() {
+    assert_eq(CAP_ALL, 0x00FF as UInt16);
+
+    assert(has_capability(CAP_ALL, CAP_READ));
+    assert(has_capability(CAP_ALL, CAP_WRITE));
+    assert(has_capability(CAP_ALL, CAP_EXECUTE));
+    assert(has_capability(CAP_ALL, CAP_DELEGATE));
+    assert(has_capability(CAP_ALL, CAP_REVOKE));
+    assert(has_capability(CAP_ALL, CAP_BORROWED));
+    assert(has_capability(CAP_ALL, CAP_MUTABLE));
+    assert(has_capability(CAP_ALL, CAP_NO_ESCAPE));
+}
+
+@test
+fn test_cap_read_only() {
+    assert_eq(CAP_READ_ONLY, CAP_READ);
+
+    assert(has_capability(CAP_READ_ONLY, CAP_READ));
+    assert(!has_capability(CAP_READ_ONLY, CAP_WRITE));
+    assert(!has_capability(CAP_READ_ONLY, CAP_MUTABLE));
+}
+
+@test
+fn test_cap_read_write() {
+    assert_eq(CAP_READ_WRITE, CAP_READ | CAP_WRITE);
+
+    assert(has_capability(CAP_READ_WRITE, CAP_READ));
+    assert(has_capability(CAP_READ_WRITE, CAP_WRITE));
+    assert(!has_capability(CAP_READ_WRITE, CAP_EXECUTE));
+}
+
+@test
+fn test_cap_owned() {
+    // CAP_OWNED = CAP_READ | CAP_WRITE | CAP_DELEGATE | CAP_REVOKE | CAP_MUTABLE
+    assert(has_capability(CAP_OWNED, CAP_READ));
+    assert(has_capability(CAP_OWNED, CAP_WRITE));
+    assert(has_capability(CAP_OWNED, CAP_DELEGATE));
+    assert(has_capability(CAP_OWNED, CAP_REVOKE));
+    assert(has_capability(CAP_OWNED, CAP_MUTABLE));
+
+    // Owned is NOT borrowed
+    assert(!has_capability(CAP_OWNED, CAP_BORROWED));
+}
+
+@test
+fn test_cap_borrow_shared() {
+    // CAP_BORROW_SHARED = CAP_READ | CAP_BORROWED
+    assert_eq(CAP_BORROW_SHARED, CAP_READ | CAP_BORROWED);
+
+    assert(has_capability(CAP_BORROW_SHARED, CAP_READ));
+    assert(has_capability(CAP_BORROW_SHARED, CAP_BORROWED));
+    assert(!has_capability(CAP_BORROW_SHARED, CAP_WRITE));
+    assert(!has_capability(CAP_BORROW_SHARED, CAP_MUTABLE));
+}
+
+@test
+fn test_cap_borrow_mut() {
+    // CAP_BORROW_MUT = CAP_READ | CAP_WRITE | CAP_BORROWED | CAP_MUTABLE
+    assert(has_capability(CAP_BORROW_MUT, CAP_READ));
+    assert(has_capability(CAP_BORROW_MUT, CAP_WRITE));
+    assert(has_capability(CAP_BORROW_MUT, CAP_BORROWED));
+    assert(has_capability(CAP_BORROW_MUT, CAP_MUTABLE));
+
+    // Borrowed mut cannot delegate or revoke
+    assert(!has_capability(CAP_BORROW_MUT, CAP_DELEGATE));
+    assert(!has_capability(CAP_BORROW_MUT, CAP_REVOKE));
+}
+
+@test
+fn test_cap_executable() {
+    // CAP_EXECUTABLE = CAP_READ | CAP_EXECUTE
+    assert_eq(CAP_EXECUTABLE, CAP_READ | CAP_EXECUTE);
+
+    assert(has_capability(CAP_EXECUTABLE, CAP_READ));
+    assert(has_capability(CAP_EXECUTABLE, CAP_EXECUTE));
+    assert(!has_capability(CAP_EXECUTABLE, CAP_WRITE));
+}
+
+// =============================================================================
+// Capability Type Tests
+// =============================================================================
+
+@test
+fn test_capability_to_bit() {
+    assert_eq(Capability.Read.to_bit(), CAP_READ);
+    assert_eq(Capability.Write.to_bit(), CAP_WRITE);
+    assert_eq(Capability.Execute.to_bit(), CAP_EXECUTE);
+    assert_eq(Capability.Delegate.to_bit(), CAP_DELEGATE);
+    assert_eq(Capability.Revoke.to_bit(), CAP_REVOKE);
+    assert_eq(Capability.Borrowed.to_bit(), CAP_BORROWED);
+    assert_eq(Capability.Mutable.to_bit(), CAP_MUTABLE);
+    assert_eq(Capability.NoEscape.to_bit(), CAP_NO_ESCAPE);
+}
+
+@test
+fn test_capability_is_present() {
+    let flags = CAP_READ | CAP_WRITE | CAP_MUTABLE;
+
+    assert(Capability.Read.is_present(flags));
+    assert(Capability.Write.is_present(flags));
+    assert(Capability.Mutable.is_present(flags));
+    assert(!Capability.Execute.is_present(flags));
+    assert(!Capability.Delegate.is_present(flags));
+}
+
+// =============================================================================
+// has_capability Tests
+// =============================================================================
+
+@test
+fn test_has_capability_single() {
+    let flags = CAP_READ;
+
+    assert(has_capability(flags, CAP_READ));
+    assert(!has_capability(flags, CAP_WRITE));
+}
+
+@test
+fn test_has_capability_multiple() {
+    let flags = CAP_READ | CAP_WRITE | CAP_EXECUTE;
+
+    assert(has_capability(flags, CAP_READ));
+    assert(has_capability(flags, CAP_WRITE));
+    assert(has_capability(flags, CAP_EXECUTE));
+    assert(!has_capability(flags, CAP_DELEGATE));
+}
+
+@test
+fn test_has_capability_zero_flags() {
+    let flags: UInt16 = 0;
+
+    assert(!has_capability(flags, CAP_READ));
+    assert(!has_capability(flags, CAP_WRITE));
+}
+
+@test
+fn test_has_capability_with_combined_cap() {
+    let flags = CAP_READ | CAP_WRITE;
+
+    // Checking for combined capability
+    assert(has_capability(flags, CAP_READ | CAP_WRITE));
+    assert(!has_capability(flags, CAP_READ | CAP_WRITE | CAP_EXECUTE));
+}
+
+// =============================================================================
+// has_all_capabilities Tests
+// =============================================================================
+
+@test
+fn test_has_all_capabilities_exact_match() {
+    let flags = CAP_READ | CAP_WRITE;
+    let required = CAP_READ | CAP_WRITE;
+
+    assert(has_all_capabilities(flags, required));
+}
+
+@test
+fn test_has_all_capabilities_superset() {
+    let flags = CAP_READ | CAP_WRITE | CAP_EXECUTE;
+    let required = CAP_READ | CAP_WRITE;
+
+    assert(has_all_capabilities(flags, required));
+}
+
+@test
+fn test_has_all_capabilities_missing_one() {
+    let flags = CAP_READ | CAP_EXECUTE;
+    let required = CAP_READ | CAP_WRITE;
+
+    assert(!has_all_capabilities(flags, required));
+}
+
+@test
+fn test_has_all_capabilities_empty_required() {
+    let flags = CAP_READ | CAP_WRITE;
+    let required: UInt16 = 0;
+
+    // Empty requirement is always satisfied
+    assert(has_all_capabilities(flags, required));
+}
+
+// =============================================================================
+// attenuate Tests
+// =============================================================================
+
+@test
+fn test_attenuate_removes_capabilities() {
+    let flags = CAP_READ | CAP_WRITE | CAP_EXECUTE;
+    let mask = CAP_READ | CAP_WRITE;
+
+    let result = attenuate(flags, mask);
+
+    assert(has_capability(result, CAP_READ));
+    assert(has_capability(result, CAP_WRITE));
+    assert(!has_capability(result, CAP_EXECUTE));
+}
+
+@test
+fn test_attenuate_with_zero_mask() {
+    let flags = CAP_ALL;
+
+    let result = attenuate(flags, 0);
+
+    assert_eq(result, 0);
+}
+
+@test
+fn test_attenuate_is_monotonic() {
+    // Attenuation can only remove, never add
+    let flags = CAP_READ;
+    let mask = CAP_READ | CAP_WRITE;  // Mask has more than flags
+
+    let result = attenuate(flags, mask);
+
+    // Result should still only have READ (mask doesn't add capabilities)
+    assert_eq(result, CAP_READ);
+}
+
+@test
+fn test_attenuate_self_is_identity() {
+    let flags = CAP_READ | CAP_WRITE;
+
+    let result = attenuate(flags, flags);
+
+    assert_eq(result, flags);
+}
+
+// =============================================================================
+// remove_capability Tests
+// =============================================================================
+
+@test
+fn test_remove_capability_single() {
+    let flags = CAP_READ | CAP_WRITE;
+
+    let result = remove_capability(flags, CAP_WRITE);
+
+    assert(has_capability(result, CAP_READ));
+    assert(!has_capability(result, CAP_WRITE));
+}
+
+@test
+fn test_remove_capability_multiple() {
+    let flags = CAP_READ | CAP_WRITE | CAP_EXECUTE;
+
+    let result = remove_capability(flags, CAP_WRITE | CAP_EXECUTE);
+
+    assert(has_capability(result, CAP_READ));
+    assert(!has_capability(result, CAP_WRITE));
+    assert(!has_capability(result, CAP_EXECUTE));
+}
+
+@test
+fn test_remove_capability_not_present() {
+    let flags = CAP_READ;
+
+    // Removing a capability that doesn't exist is a no-op
+    let result = remove_capability(flags, CAP_WRITE);
+
+    assert_eq(result, flags);
+}
+
+// =============================================================================
+// Convenience Function Tests
+// =============================================================================
+
+@test
+fn test_can_delegate() {
+    assert(can_delegate(CAP_DELEGATE));
+    assert(can_delegate(CAP_OWNED));
+    assert(!can_delegate(CAP_READ_ONLY));
+    assert(!can_delegate(CAP_BORROW_SHARED));
+}
+
+@test
+fn test_can_revoke() {
+    assert(can_revoke(CAP_REVOKE));
+    assert(can_revoke(CAP_OWNED));
+    assert(!can_revoke(CAP_READ_ONLY));
+    assert(!can_revoke(CAP_BORROW_SHARED));
+}
+
+@test
+fn test_is_borrowed() {
+    assert(is_borrowed(CAP_BORROWED));
+    assert(is_borrowed(CAP_BORROW_SHARED));
+    assert(is_borrowed(CAP_BORROW_MUT));
+    assert(!is_borrowed(CAP_OWNED));
+    assert(!is_borrowed(CAP_READ_ONLY));
+}
+
+@test
+fn test_can_mutate() {
+    // Requires both MUTABLE and WRITE
+    assert(can_mutate(CAP_MUTABLE | CAP_WRITE));
+    assert(can_mutate(CAP_OWNED));
+    assert(can_mutate(CAP_BORROW_MUT));
+
+    // MUTABLE alone is not enough
+    assert(!can_mutate(CAP_MUTABLE));
+
+    // WRITE alone is not enough
+    assert(!can_mutate(CAP_WRITE));
+
+    assert(!can_mutate(CAP_READ_ONLY));
+}
+
+@test
+fn test_can_execute() {
+    assert(can_execute(CAP_EXECUTE));
+    assert(can_execute(CAP_EXECUTABLE));
+    assert(!can_execute(CAP_READ_ONLY));
+    assert(!can_execute(CAP_OWNED));
+}
+
+// =============================================================================
+// Capability Factory Tests
+// =============================================================================
+
+@test
+fn test_owned_capabilities() {
+    let caps = owned_capabilities();
+
+    assert_eq(caps, CAP_OWNED);
+}
+
+@test
+fn test_shared_borrow_capabilities() {
+    let caps = shared_borrow_capabilities();
+
+    assert_eq(caps, CAP_BORROW_SHARED);
+}
+
+@test
+fn test_mutable_borrow_capabilities() {
+    let caps = mutable_borrow_capabilities();
+
+    assert_eq(caps, CAP_BORROW_MUT);
+}
+
+// =============================================================================
+// delegate_capability Tests
+// =============================================================================
+
+@test
+fn test_delegate_capability_requires_delegate_flag() {
+    let parent_caps = CAP_READ;  // No DELEGATE flag
+
+    let result = delegate_capability(parent_caps, CAP_READ);
+
+    assert(result.is_none());
+}
+
+@test
+fn test_delegate_capability_success() {
+    let parent_caps = CAP_READ | CAP_WRITE | CAP_DELEGATE;
+
+    let result = delegate_capability(parent_caps, CAP_READ);
+
+    assert(result.is_some());
+    let child_caps = result.unwrap();
+    assert(has_capability(child_caps, CAP_READ));
+}
+
+@test
+fn test_delegate_capability_cannot_exceed_parent() {
+    let parent_caps = CAP_READ | CAP_DELEGATE;
+
+    // Try to delegate WRITE which parent doesn't have
+    let result = delegate_capability(parent_caps, CAP_WRITE);
+
+    assert(result.is_none());
+}
+
+@test
+fn test_delegate_capability_subset() {
+    let parent_caps = CAP_READ | CAP_WRITE | CAP_EXECUTE | CAP_DELEGATE;
+
+    let result = delegate_capability(parent_caps, CAP_READ | CAP_WRITE);
+
+    assert(result.is_some());
+    let child_caps = result.unwrap();
+    assert(has_capability(child_caps, CAP_READ));
+    assert(has_capability(child_caps, CAP_WRITE));
+    // EXECUTE was not delegated
+    assert(!has_capability(child_caps, CAP_EXECUTE));
+}
+
+@test
+fn test_delegate_capability_preserves_delegate_if_requested() {
+    let parent_caps = CAP_READ | CAP_DELEGATE;
+
+    let result = delegate_capability(parent_caps, CAP_READ | CAP_DELEGATE);
+
+    assert(result.is_some());
+    let child_caps = result.unwrap();
+    // Child can also delegate (if explicitly requested)
+    assert(has_capability(child_caps, CAP_DELEGATE));
+}
+
+// =============================================================================
+// revoke_capability Tests
+// =============================================================================
+
+@test
+fn test_revoke_capability_requires_revoke_flag() {
+    let caps = CAP_READ | CAP_WRITE;  // No REVOKE flag
+
+    let result = revoke_capability(caps, CAP_WRITE);
+
+    assert(result.is_none());
+}
+
+@test
+fn test_revoke_capability_success() {
+    let caps = CAP_READ | CAP_WRITE | CAP_REVOKE;
+
+    let result = revoke_capability(caps, CAP_WRITE);
+
+    assert(result.is_some());
+    let new_caps = result.unwrap();
+    assert(has_capability(new_caps, CAP_READ));
+    assert(!has_capability(new_caps, CAP_WRITE));
+}
+
+@test
+fn test_revoke_capability_multiple() {
+    let caps = CAP_ALL;
+
+    let result = revoke_capability(caps, CAP_WRITE | CAP_EXECUTE);
+
+    assert(result.is_some());
+    let new_caps = result.unwrap();
+    assert(!has_capability(new_caps, CAP_WRITE));
+    assert(!has_capability(new_caps, CAP_EXECUTE));
+    assert(has_capability(new_caps, CAP_READ));
+}
+
+// =============================================================================
+// Validation Function Tests
+// =============================================================================
+
+@test
+fn test_validate_read() {
+    assert(validate_read(CAP_READ));
+    assert(validate_read(CAP_READ_ONLY));
+    assert(validate_read(CAP_OWNED));
+    assert(!validate_read(0));
+}
+
+@test
+fn test_validate_write() {
+    // Requires both WRITE and MUTABLE
+    assert(validate_write(CAP_WRITE | CAP_MUTABLE));
+    assert(validate_write(CAP_OWNED));
+    assert(validate_write(CAP_BORROW_MUT));
+
+    // WRITE alone is not enough
+    assert(!validate_write(CAP_WRITE));
+
+    // MUTABLE alone is not enough
+    assert(!validate_write(CAP_MUTABLE));
+
+    assert(!validate_write(CAP_READ_ONLY));
+}
+
+@test
+fn test_validate_execute() {
+    assert(validate_execute(CAP_EXECUTE));
+    assert(validate_execute(CAP_EXECUTABLE));
+    assert(!validate_execute(CAP_READ_ONLY));
+}
+
+// =============================================================================
+// Edge Cases and Security Tests
+// =============================================================================
+
+@test
+fn test_zero_capabilities_is_useless() {
+    let caps: UInt16 = 0;
+
+    assert(!validate_read(caps));
+    assert(!validate_write(caps));
+    assert(!validate_execute(caps));
+    assert(!can_delegate(caps));
+    assert(!can_revoke(caps));
+}
+
+@test
+fn test_capability_cannot_be_amplified() {
+    let caps = CAP_READ;
+
+    // Attenuation can only remove, never add
+    let result1 = attenuate(caps, CAP_ALL);
+    assert_eq(result1, CAP_READ);  // Still just READ
+
+    // OR operation is not exposed - can't amplify
+    // (This is enforced by the API not providing an amplify function)
+}
+
+@test
+fn test_borrowed_flag_distinguishes_ownership() {
+    let owned = CAP_OWNED;
+    let borrowed = CAP_BORROW_MUT;
+
+    // Both can read and write
+    assert(validate_read(owned));
+    assert(validate_read(borrowed));
+    assert(validate_write(owned));
+    assert(validate_write(borrowed));
+
+    // But ownership status is different
+    assert(!is_borrowed(owned));
+    assert(is_borrowed(borrowed));
+
+    // And ownership-specific operations differ
+    assert(can_revoke(owned));
+    assert(!can_revoke(borrowed));
+}
+
+@test
+fn test_no_escape_prevents_storage() {
+    let caps = CAP_READ | CAP_NO_ESCAPE;
+
+    // The NO_ESCAPE flag is present
+    assert(has_capability(caps, CAP_NO_ESCAPE));
+
+    // (Runtime enforcement would prevent storing this reference)
+}
+
+// =============================================================================
+// Combination Tests
+// =============================================================================
+
+@test
+fn test_typical_heap_allocation_capabilities() {
+    // New heap allocation gets CAP_OWNED
+    let caps = owned_capabilities();
+
+    assert(validate_read(caps));
+    assert(validate_write(caps));
+    assert(can_delegate(caps));
+    assert(can_revoke(caps));
+    assert(!is_borrowed(caps));
+}
+
+@test
+fn test_shared_borrow_flow() {
+    let owner = owned_capabilities();
+
+    // Create a shared borrow
+    let borrow = delegate_capability(owner, CAP_READ | CAP_BORROWED);
+
+    assert(borrow.is_some());
+    let shared = borrow.unwrap();
+
+    assert(validate_read(shared));
+    assert(!validate_write(shared));
+    assert(is_borrowed(shared));
+}
+
+@test
+fn test_mutable_borrow_flow() {
+    let owner = owned_capabilities();
+
+    // Create a mutable borrow
+    let borrow = delegate_capability(
+        owner,
+        CAP_READ | CAP_WRITE | CAP_BORROWED | CAP_MUTABLE
+    );
+
+    assert(borrow.is_some());
+    let mutable = borrow.unwrap();
+
+    assert(validate_read(mutable));
+    assert(validate_write(mutable));
+    assert(is_borrowed(mutable));
+    assert(!can_revoke(mutable));
+}
+
+@test
+fn test_capability_chain_attenuation() {
+    // Owner -> Shared -> Even more restricted
+    let owner = CAP_ALL;
+
+    let level1 = attenuate(owner, CAP_READ | CAP_WRITE | CAP_DELEGATE);
+    let level2 = attenuate(level1, CAP_READ | CAP_DELEGATE);
+    let level3 = attenuate(level2, CAP_READ);
+
+    assert(has_all_capabilities(owner, level1));
+    assert(has_all_capabilities(level1, level2));
+    assert(has_all_capabilities(level2, level3));
+
+    assert_eq(level3, CAP_READ);
+}

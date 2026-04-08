@@ -1,0 +1,171 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, game, life, cellular
+// @timeout: 30000
+
+// Conway's Game of Life on a 4x4 grid
+
+// 4x4 grid stored as 16 bits in a single Int
+// Cell (r,c) = bit (r*4+c)
+
+fn get_cell(grid: Int, r: Int, c: Int) -> Int {
+    if r < 0 { return 0; }
+    if r > 3 { return 0; }
+    if c < 0 { return 0; }
+    if c > 3 { return 0; }
+    (grid / ipow2(r * 4 + c)) & 1
+}
+
+fn ipow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n {
+        r = r * 2;
+        i = i + 1;
+    }
+    r
+}
+
+fn set_cell(grid: Int, r: Int, c: Int) -> Int {
+    grid | ipow2(r * 4 + c)
+}
+
+// Count live neighbors of cell (r,c)
+fn count_neighbors(grid: Int, r: Int, c: Int) -> Int {
+    let mut count = 0;
+    let mut dr = -1;
+    while dr <= 1 {
+        let mut dc = -1;
+        while dc <= 1 {
+            if dr != 0 {
+                count = count + get_cell(grid, r + dr, c + dc);
+            } else if dc != 0 {
+                count = count + get_cell(grid, r + dr, c + dc);
+            }
+            dc = dc + 1;
+        }
+        dr = dr + 1;
+    }
+    count
+}
+
+// Step one generation
+fn step(grid: Int) -> Int {
+    let mut next = 0;
+    let mut r = 0;
+    while r < 4 {
+        let mut c = 0;
+        while c < 4 {
+            let alive = get_cell(grid, r, c);
+            let n = count_neighbors(grid, r, c);
+            // Rules: alive with 2 or 3 neighbors survives; dead with 3 becomes alive
+            if alive == 1 {
+                if n == 2 { next = set_cell(next, r, c); }
+                if n == 3 { next = set_cell(next, r, c); }
+            } else {
+                if n == 3 { next = set_cell(next, r, c); }
+            }
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    next
+}
+
+// Count live cells
+fn count_alive(grid: Int) -> Int {
+    let mut count = 0;
+    let mut r = 0;
+    while r < 4 {
+        let mut c = 0;
+        while c < 4 {
+            count = count + get_cell(grid, r, c);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    count
+}
+
+// Run n generations
+fn run_gen(grid: Int, n: Int) -> Int {
+    let mut g = grid;
+    let mut i = 0;
+    while i < n {
+        g = step(g);
+        i = i + 1;
+    }
+    g
+}
+
+fn test_blinker() -> Int {
+    // Blinker: horizontal line at row 1
+    // . . . .
+    // X X X .
+    // . . . .
+    // . . . .
+    let mut grid = 0;
+    grid = set_cell(grid, 1, 0);
+    grid = set_cell(grid, 1, 1);
+    grid = set_cell(grid, 1, 2);
+    assert_eq(count_alive(grid), 3);
+
+    // After 1 step: vertical line at col 1
+    let g1 = step(grid);
+    assert_eq(count_alive(g1), 3);
+    assert_eq(get_cell(g1, 0, 1), 1);
+    assert_eq(get_cell(g1, 1, 1), 1);
+    assert_eq(get_cell(g1, 2, 1), 1);
+
+    // Period 2: after 2 steps should return to original
+    let g2 = step(g1);
+    assert_eq(g2, grid);
+    1
+}
+
+fn test_block() -> Int {
+    // Block (still life): 2x2 at top-left
+    let mut grid = 0;
+    grid = set_cell(grid, 0, 0);
+    grid = set_cell(grid, 0, 1);
+    grid = set_cell(grid, 1, 0);
+    grid = set_cell(grid, 1, 1);
+
+    // Should be stable
+    let g1 = step(grid);
+    assert_eq(g1, grid);
+    assert_eq(count_alive(g1), 4);
+    1
+}
+
+fn test_death() -> Int {
+    // Single cell dies
+    let mut grid = 0;
+    grid = set_cell(grid, 2, 2);
+    let g1 = step(grid);
+    assert_eq(count_alive(g1), 0);
+    1
+}
+
+fn test_multi_gen() -> Int {
+    // L-shape: should evolve
+    let mut grid = 0;
+    grid = set_cell(grid, 0, 0);
+    grid = set_cell(grid, 1, 0);
+    grid = set_cell(grid, 1, 1);
+    let g5 = run_gen(grid, 5);
+    // Just check it doesn't crash and has some cells
+    let alive = count_alive(g5);
+    // Just verify it ran without crashing
+    assert(alive >= 0);
+    1
+}
+
+fn main() -> Int {
+    test_blinker();
+    test_block();
+    test_death();
+    test_multi_gen();
+    print("[OK] 427_game_of_life_aot");
+    0
+}

@@ -1,0 +1,151 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, set, algebra, union, intersection, difference, symmetric_difference
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Integration test for Set algebra methods:
+//   union, intersection, difference, symmetric_difference,
+//   is_subset, is_superset, is_disjoint, for_each, retain, to_list
+
+fn test_set_algebra() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+
+    // Union: {1,2,3,4}
+    let u = a.union(b);
+    assert_eq(u.len(), 4);
+    assert_eq(u.contains(1), true);
+    assert_eq(u.contains(4), true);
+
+    // Intersection: {2,3}
+    let inter = a.intersection(b);
+    assert_eq(inter.len(), 2);
+    assert_eq(inter.contains(2), true);
+    assert_eq(inter.contains(3), true);
+    assert_eq(inter.contains(1), false);
+
+    // Difference: a - b = {1}
+    let diff = a.difference(b);
+    assert_eq(diff.len(), 1);
+    assert_eq(diff.contains(1), true);
+
+    // Symmetric difference: {1, 4}
+    let sym = a.symmetric_difference(b);
+    assert_eq(sym.len(), 2);
+    assert_eq(sym.contains(1), true);
+    assert_eq(sym.contains(4), true);
+    assert_eq(sym.contains(2), false);
+
+    print("set_algebra: ok");
+}
+
+fn test_set_subset_superset() {
+    let mut small = Set.new();
+    small.insert(1);
+    small.insert(2);
+
+    let mut large = Set.new();
+    large.insert(1);
+    large.insert(2);
+    large.insert(3);
+
+    assert_eq(small.is_subset(large), true);
+    assert_eq(large.is_subset(small), false);
+    assert_eq(large.is_superset(small), true);
+    assert_eq(small.is_superset(large), false);
+
+    // Equal sets
+    let mut same = Set.new();
+    same.insert(1);
+    same.insert(2);
+    assert_eq(small.is_subset(same), true);
+    assert_eq(small.is_superset(same), true);
+
+    print("set_subset_superset: ok");
+}
+
+fn test_set_disjoint() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b = Set.new();
+    b.insert(3);
+    b.insert(4);
+
+    assert_eq(a.is_disjoint(b), true);
+
+    b.insert(2);
+    assert_eq(a.is_disjoint(b), false);
+
+    print("set_disjoint: ok");
+}
+
+fn test_set_for_each() {
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+
+    let mut sum = [0; 1];
+    s.for_each(|x| { sum[0] = sum[0] + x; });
+    assert_eq(sum[0], 60);
+    print("set_for_each: ok");
+}
+
+fn test_set_retain() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+
+    // Keep only even numbers
+    s.retain(|x| { x - (x / 2) * 2 == 0 });
+    assert_eq(s.len(), 2);
+    assert_eq(s.contains(2), true);
+    assert_eq(s.contains(4), true);
+    assert_eq(s.contains(1), false);
+    assert_eq(s.contains(3), false);
+    print("set_retain: ok");
+}
+
+fn test_set_to_list() {
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+
+    let lst = s.to_list();
+    assert_eq(lst.len(), 3);
+    // Elements may be in any order, but sum should be 60
+    let mut total = 0;
+    let mut i = 0;
+    while i < lst.len() {
+        total = total + lst[i];
+        i = i + 1;
+    }
+    assert_eq(total, 60);
+    print("set_to_list: ok");
+}
+
+fn main() -> Int {
+    test_set_algebra();
+    test_set_subset_superset();
+    test_set_disjoint();
+    test_set_for_each();
+    test_set_retain();
+    test_set_to_list();
+    print("[OK] 602_interp_set_algebra");
+    0
+}

@@ -1,0 +1,253 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, pipeline, strming, backpressure
+// @expected-exit: 0
+
+// Tests async pipeline patterns including multi-stage processing,
+// backpressure, and strming data transformations.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Pipeline stage functions
+fn stage_parse(raw: Int) -> Int {
+    // Parse: extract lower 8 bits
+    raw % 256
+}
+
+fn stage_validate(parsed: Int) -> Int {
+    // Validate: return -1 if invalid (>200), else value
+    if (parsed > 200) { -1 } else { parsed }
+}
+
+fn stage_transform(validated: Int) -> Int {
+    // Transform: square root approximation
+    if (validated < 0) { -1 }
+    else {
+        let mut g = validated / 2;
+        if (g == 0) { return if (validated == 0) { 0 } else { 1 }; }
+        let mut i = 0;
+        while (i < 15) {
+            g = (g + validated / g) / 2;
+            i = i + 1;
+        }
+        g
+    }
+}
+
+fn stage_aggregate(value: Int, running_sum: Int) -> Int {
+    if (value < 0) { running_sum }  // Skip errors
+    else { running_sum + value }
+}
+
+fn main() -> Int {
+    // Test 1: Linear 4-stage pipeline
+    let raw_data = [100, 49, 169, 225, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 5;
+    let mut running_sum = 0;
+
+    let mut i = 0;
+    while (i < n) {
+        let parsed = stage_parse(raw_data[i]);
+        let validated = stage_validate(parsed);
+        let transformed = stage_transform(validated);
+        running_sum = stage_aggregate(transformed, running_sum);
+        i = i + 1;
+    }
+    // sqrt(100)=10, sqrt(49)=7, sqrt(169)=13, 225>200→skip, sqrt(64)=8
+    // sum = 10 + 7 + 13 + 8 = 38
+    assert_eq(running_sum, 38);
+
+    // Test 2: Pipeline with filtering
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 0, 0, 0, 0, 0];
+    let mut even_squares = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut count = 0;
+    i = 0;
+    while (i < 10) {
+        // Filter: only even numbers
+        if (data[i] % 2 == 0) {
+            // Transform: square
+            even_squares[count] = data[i] * data[i];
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(count, 5);  // 2,4,6,8,10
+    assert_eq(even_squares[0], 4);
+    assert_eq(even_squares[1], 16);
+    assert_eq(even_squares[2], 36);
+    assert_eq(even_squares[3], 64);
+    assert_eq(even_squares[4], 100);
+
+    // Test 3: Parallel pipeline branches
+    let input = [5, 10, 15, 20, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut branch_a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut branch_b = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Branch A: multiply by 3
+    i = 0;
+    while (i < 5) {
+        branch_a[i] = input[i] * 3;
+        i = i + 1;
+    }
+    // Branch B: add 100
+    i = 0;
+    while (i < 5) {
+        branch_b[i] = input[i] + 100;
+        i = i + 1;
+    }
+    // Merge: sum of branches
+    let mut merged = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 5) {
+        merged[i] = branch_a[i] + branch_b[i];
+        i = i + 1;
+    }
+    assert_eq(merged[0], 120);  // 15 + 105
+    assert_eq(merged[2], 160);  // 45 + 115
+    assert_eq(merged[4], 200);  // 75 + 125
+
+    // Test 4: Windowed pipeline (sliding window)
+    let strm = [1, 3, 5, 7, 9, 11, 13, 15, 0, 0, 0, 0, 0, 0, 0, 0];
+    let window_size = 3;
+    let mut window_sums = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i <= 8 - window_size) {
+        let mut wsum = 0;
+        let mut j = 0;
+        while (j < window_size) {
+            wsum = wsum + strm[i + j];
+            j = j + 1;
+        }
+        window_sums[i] = wsum;
+        i = i + 1;
+    }
+    assert_eq(window_sums[0], 9);   // 1+3+5
+    assert_eq(window_sums[1], 15);  // 3+5+7
+    assert_eq(window_sums[2], 21);  // 5+7+9
+    assert_eq(window_sums[5], 39);  // 11+13+15
+
+    // Test 5: Map-reduce pipeline
+    let values = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 0, 0, 0, 0, 0, 0];
+    // Map: square each
+    let mut squared = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 10) {
+        squared[i] = values[i] * values[i];
+        i = i + 1;
+    }
+    // Reduce: sum
+    let mut total = 0;
+    i = 0;
+    while (i < 10) {
+        total = total + squared[i];
+        i = i + 1;
+    }
+    // 9+1+16+1+25+81+4+36+25+9 = 207
+    assert_eq(total, 207);
+
+    // Test 6: Pipeline throughput measurement
+    let mut processed_count = 0;
+    i = 0;
+    while (i < 100) {
+        let val = i * 7 % 13;  // Some computation
+        if (val > 5) {
+            processed_count = processed_count + 1;
+        }
+        i = i + 1;
+    }
+    // Count values of (i*7%13) > 5 for i in 0..99
+    // This is deterministic
+    assert(processed_count > 0);
+    assert(processed_count < 100);
+
+    // Test 7: Batch pipeline processing
+    let batch_size = 4;
+    let total_items = 12;
+    let mut batch_sums = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let all_items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 0, 0, 0];
+    let mut batch_idx = 0;
+    i = 0;
+    while (i < total_items) {
+        let mut batch_sum = 0;
+        let mut j = 0;
+        while (j < batch_size && i + j < total_items) {
+            batch_sum = batch_sum + all_items[i + j];
+            j = j + 1;
+        }
+        batch_sums[batch_idx] = batch_sum;
+        batch_idx = batch_idx + 1;
+        i = i + batch_size;
+    }
+    assert_eq(batch_sums[0], 10);  // 1+2+3+4
+    assert_eq(batch_sums[1], 26);  // 5+6+7+8
+    assert_eq(batch_sums[2], 42);  // 9+10+11+12
+
+    // Test 8: Pipeline with deduplication
+    let with_dups = [3, 1, 4, 1, 5, 3, 2, 4, 5, 1, 0, 0, 0, 0, 0, 0];
+    let mut seen = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut unique_count = 0;
+    i = 0;
+    while (i < 10) {
+        let val = with_dups[i];
+        let mut is_dup = 0;
+        let mut k = 0;
+        while (k < unique_count) {
+            if (seen[k] == val) { is_dup = 1; }
+            k = k + 1;
+        }
+        if (is_dup == 0) {
+            seen[unique_count] = val;
+            unique_count = unique_count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(unique_count, 5);  // 1, 2, 3, 4, 5
+
+    // Test 9: Sorted merge of two sorted strms
+    let s1 = [1, 3, 5, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let s2 = [2, 4, 6, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n1 = 4;
+    let n2 = 4;
+    let mut merged_sorted = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i1 = 0;
+    let mut i2 = 0;
+    let mut mi = 0;
+    while (i1 < n1 && i2 < n2) {
+        if (s1[i1] <= s2[i2]) {
+            merged_sorted[mi] = s1[i1]; i1 = i1 + 1;
+        } else {
+            merged_sorted[mi] = s2[i2]; i2 = i2 + 1;
+        }
+        mi = mi + 1;
+    }
+    while (i1 < n1) {
+        merged_sorted[mi] = s1[i1]; i1 = i1 + 1; mi = mi + 1;
+    }
+    while (i2 < n2) {
+        merged_sorted[mi] = s2[i2]; i2 = i2 + 1; mi = mi + 1;
+    }
+    assert_eq(mi, 8);
+    assert_eq(merged_sorted[0], 1);
+    assert_eq(merged_sorted[3], 4);
+    assert_eq(merged_sorted[7], 8);
+
+    // Test 10: Pipeline correctness (order preserved, no data loss)
+    let original = [7, 14, 21, 28, 35, 42, 49, 56, 63, 70, 0, 0, 0, 0, 0, 0];
+    let mut processed = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Pipeline: divide by 7, add 1, multiply by 3
+    i = 0;
+    while (i < 10) {
+        processed[i] = (original[i] / 7 + 1) * 3;
+        i = i + 1;
+    }
+    // (1+1)*3=6, (2+1)*3=9, ..., (10+1)*3=33
+    assert_eq(processed[0], 6);
+    assert_eq(processed[4], 18);  // (5+1)*3
+    assert_eq(processed[9], 33);  // (10+1)*3
+
+    print("Async pipeline: PASS");
+    0
+}

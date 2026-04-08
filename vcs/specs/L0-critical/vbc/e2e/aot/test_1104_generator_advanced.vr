@@ -1,0 +1,132 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generator, yield, iterator, lazy
+// @description: Test advanced generator patterns
+
+fn* filter_gen(items: List<Int>, threshold: Int) -> Int {
+    let mut i = 0;
+    while i < items.len() {
+        if items[i] > threshold {
+            yield items[i];
+        }
+        i = i + 1;
+    }
+}
+
+fn test_filter_gen() -> Int {
+    let items = [3, 7, 1, 9, 4, 8, 2, 6];
+    let mut result = List.new();
+    for val in filter_gen(items, 5) {
+        result.push(val);
+    }
+    // > 5: [7, 9, 8, 6]
+    if result.len() != 4 {
+        print(f"FAIL filter_gen: len={result.len()}, expected 4");
+        return 1;
+    }
+    if result[0] != 7 || result[1] != 9 {
+        print(f"FAIL filter_gen: wrong values");
+        return 1;
+    }
+    print("  filter_gen: OK");
+    0
+}
+
+fn* map_gen(items: List<Int>, factor: Int) -> Int {
+    let mut i = 0;
+    while i < items.len() {
+        yield items[i] * factor;
+        i = i + 1;
+    }
+}
+
+fn test_map_gen() -> Int {
+    let items = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for val in map_gen(items, 10) {
+        sum = sum + val;
+    }
+    // (1+2+3+4+5) * 10 = 150
+    if sum != 150 {
+        print(f"FAIL map_gen: sum={sum}, expected 150");
+        return 1;
+    }
+    print("  map_gen: OK");
+    0
+}
+
+fn* interleave(a: List<Int>, b: List<Int>) -> Int {
+    let max_len = if a.len() > b.len() { a.len() } else { b.len() };
+    let mut i = 0;
+    while i < max_len {
+        if i < a.len() { yield a[i]; }
+        if i < b.len() { yield b[i]; }
+        i = i + 1;
+    }
+}
+
+fn test_interleave() -> Int {
+    let a = [1, 3, 5];
+    let b = [2, 4, 6];
+    let mut result = List.new();
+    for val in interleave(a, b) {
+        result.push(val);
+    }
+    // [1, 2, 3, 4, 5, 6]
+    if result.len() != 6 {
+        print(f"FAIL interleave: len={result.len()}, expected 6");
+        return 1;
+    }
+    if result[0] != 1 || result[1] != 2 || result[4] != 5 || result[5] != 6 {
+        print("FAIL interleave: wrong order");
+        return 1;
+    }
+    print("  interleave: OK");
+    0
+}
+
+fn* accumulate(items: List<Int>) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < items.len() {
+        sum = sum + items[i];
+        yield sum;
+        i = i + 1;
+    }
+}
+
+fn test_accumulate() -> Int {
+    let items = [1, 2, 3, 4, 5];
+    let mut results = List.new();
+    for val in accumulate(items) {
+        results.push(val);
+    }
+    // [1, 3, 6, 10, 15]
+    if results.len() != 5 {
+        print(f"FAIL accumulate: len={results.len()}");
+        return 1;
+    }
+    if results[0] != 1 || results[2] != 6 || results[4] != 15 {
+        print("FAIL accumulate: wrong values");
+        return 1;
+    }
+    print("  accumulate: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Generator Advanced Tests:");
+    let mut failures = 0;
+    failures = failures + test_filter_gen();
+    failures = failures + test_map_gen();
+    failures = failures + test_interleave();
+    failures = failures + test_accumulate();
+
+    if failures == 0 {
+        print("All generator advanced tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

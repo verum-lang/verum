@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, provide, equals, error
+// @description: Test provide statement missing equals sign
+// @expected-error: E044
+
+fn test() {
+    provide Database db;
+}

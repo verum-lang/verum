@@ -1,0 +1,30 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: memory-safety, borrow-checking, aliasing, cbgr, error-detection
+// @expected-error: E312
+// @description: CBGR rejects mutable borrow while immutable borrows exist
+
+/// Mutable/Immutable Borrow Conflict Test
+///
+/// This test verifies that the CBGR borrow checker correctly
+/// rejects code that creates a mutable reference while immutable
+/// references are still in use.
+///
+/// Spec: docs/detailed/26-cbgr-implementation.md#borrow-checking
+
+fn main() {
+    let mut data = [1, 2, 3];
+
+    // Create immutable borrows
+    let r1 = &data;
+    let r2 = &data;
+
+    // ERROR: mutable borrow while immutable borrows are active
+    let r_mut = &mut data;  // E312: Cannot borrow mutably while borrowed immutably
+
+    // Attempting to use all references
+    let _ = r1[0];
+    let _ = r2[1];
+    r_mut[2] = 100;
+}

@@ -1,0 +1,280 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, sorting, quicksort
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Quicksort with Lomuto partition on fixed-size 8-element array
+
+// ============================================================================
+// Arr8: Fixed-size array of 8 Ints with length
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn arr_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        len: a.len
+    }
+}
+
+fn arr_swap(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = arr_get(a, i);
+    let vj = arr_get(a, j);
+    let tmp = arr_set(a, i, vj);
+    arr_set(tmp, j, vi)
+}
+
+fn arr_from8(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: g, e7: h, len: 8 }
+}
+
+fn arr_from6(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: 0, e7: 0, len: 6 }
+}
+
+fn is_sorted(a: Arr8) -> Int {
+    let mut i = 0;
+    let mut ok = 1;
+    while i < a.len - 1 {
+        if arr_get(a, i) > arr_get(a, i + 1) {
+            ok = 0;
+        }
+        i = i + 1;
+    }
+    ok
+}
+
+// ============================================================================
+// Lomuto partition: pivot = a[high]
+// Returns: { partitioned array, pivot_index }
+// ============================================================================
+
+type PartResult is {
+    arr: Arr8,
+    pivot_idx: Int
+};
+
+fn partition(a: Arr8, lo: Int, hi: Int) -> PartResult {
+    let pivot = arr_get(a, hi);
+    let mut cur = a;
+    let mut i = lo - 1;
+    let mut j = lo;
+    while j < hi {
+        if arr_get(cur, j) <= pivot {
+            i = i + 1;
+            cur = arr_swap(cur, i, j);
+        }
+        j = j + 1;
+    }
+    cur = arr_swap(cur, i + 1, hi);
+    PartResult { arr: cur, pivot_idx: i + 1 }
+}
+
+// ============================================================================
+// Iterative quicksort using an explicit stack (Arr8 as stack)
+// ============================================================================
+
+type Stack is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    top: Int
+};
+
+fn stack_new() -> Stack {
+    Stack { s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0, s7: 0, top: 0 }
+}
+
+fn stack_push(st: Stack, val: Int) -> Stack {
+    let t = st.top;
+    Stack {
+        s0: if t == 0 { val } else { st.s0 },
+        s1: if t == 1 { val } else { st.s1 },
+        s2: if t == 2 { val } else { st.s2 },
+        s3: if t == 3 { val } else { st.s3 },
+        s4: if t == 4 { val } else { st.s4 },
+        s5: if t == 5 { val } else { st.s5 },
+        s6: if t == 6 { val } else { st.s6 },
+        s7: if t == 7 { val } else { st.s7 },
+        top: t + 1
+    }
+}
+
+fn stack_peek(st: Stack) -> Int {
+    let t = st.top - 1;
+    if t == 0 { st.s0 } else if t == 1 { st.s1 } else if t == 2 { st.s2 }
+    else if t == 3 { st.s3 } else if t == 4 { st.s4 } else if t == 5 { st.s5 }
+    else if t == 6 { st.s6 } else { st.s7 }
+}
+
+fn stack_pop(st: Stack) -> Stack {
+    Stack {
+        s0: st.s0, s1: st.s1, s2: st.s2, s3: st.s3,
+        s4: st.s4, s5: st.s5, s6: st.s6, s7: st.s7,
+        top: st.top - 1
+    }
+}
+
+fn quicksort(a: Arr8) -> Arr8 {
+    if a.len <= 1 {
+        a
+    } else {
+        let mut cur = a;
+        let mut stk = stack_new();
+        // Push initial lo and hi
+        stk = stack_push(stk, 0);
+        stk = stack_push(stk, a.len - 1);
+
+        while stk.top > 0 {
+            let hi = stack_peek(stk);
+            stk = stack_pop(stk);
+            let lo = stack_peek(stk);
+            stk = stack_pop(stk);
+
+            if lo < hi {
+                let pr = partition(cur, lo, hi);
+                cur = pr.arr;
+                let p = pr.pivot_idx;
+
+                // Push left partition
+                if p > 0 {
+                    if lo < p - 1 {
+                        stk = stack_push(stk, lo);
+                        stk = stack_push(stk, p - 1);
+                    }
+                }
+                // Push right partition
+                if p + 1 < hi {
+                    stk = stack_push(stk, p + 1);
+                    stk = stack_push(stk, hi);
+                }
+            }
+        }
+        cur
+    }
+}
+
+// ============================================================================
+// Test 1: Sort a random-order array
+// ============================================================================
+
+@test
+fn test_sort_random() {
+    let a = arr_from8(42, 17, 93, 5, 28, 61, 3, 74);
+    let s = quicksort(a);
+    assert_eq(arr_get(s, 0), 3);
+    assert_eq(arr_get(s, 1), 5);
+    assert_eq(arr_get(s, 2), 17);
+    assert_eq(arr_get(s, 3), 28);
+    assert_eq(arr_get(s, 4), 42);
+    assert_eq(arr_get(s, 5), 61);
+    assert_eq(arr_get(s, 6), 74);
+    assert_eq(arr_get(s, 7), 93);
+    assert_eq(is_sorted(s), 1);
+
+    print("  test_sort_random: ok");
+}
+
+// ============================================================================
+// Test 2: Already sorted
+// ============================================================================
+
+@test
+fn test_already_sorted() {
+    let a = arr_from8(10, 20, 30, 40, 50, 60, 70, 80);
+    let s = quicksort(a);
+    assert_eq(arr_get(s, 0), 10);
+    assert_eq(arr_get(s, 7), 80);
+    assert_eq(is_sorted(s), 1);
+
+    print("  test_already_sorted: ok");
+}
+
+// ============================================================================
+// Test 3: Reverse sorted
+// ============================================================================
+
+@test
+fn test_reverse_sorted() {
+    let a = arr_from8(80, 70, 60, 50, 40, 30, 20, 10);
+    let s = quicksort(a);
+    assert_eq(arr_get(s, 0), 10);
+    assert_eq(arr_get(s, 1), 20);
+    assert_eq(arr_get(s, 6), 70);
+    assert_eq(arr_get(s, 7), 80);
+    assert_eq(is_sorted(s), 1);
+
+    print("  test_reverse_sorted: ok");
+}
+
+// ============================================================================
+// Test 4: Duplicates
+// ============================================================================
+
+@test
+fn test_duplicates() {
+    let a = arr_from8(7, 2, 7, 2, 7, 2, 7, 2);
+    let s = quicksort(a);
+    assert_eq(arr_get(s, 0), 2);
+    assert_eq(arr_get(s, 1), 2);
+    assert_eq(arr_get(s, 2), 2);
+    assert_eq(arr_get(s, 3), 2);
+    assert_eq(arr_get(s, 4), 7);
+    assert_eq(arr_get(s, 5), 7);
+    assert_eq(arr_get(s, 6), 7);
+    assert_eq(arr_get(s, 7), 7);
+    assert_eq(is_sorted(s), 1);
+
+    print("  test_duplicates: ok");
+}
+
+// ============================================================================
+// Test 5: Six-element array
+// ============================================================================
+
+@test
+fn test_six_elements() {
+    let a = arr_from6(99, 1, 50, 25, 75, 10);
+    let s = quicksort(a);
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 1), 10);
+    assert_eq(arr_get(s, 2), 25);
+    assert_eq(arr_get(s, 3), 50);
+    assert_eq(arr_get(s, 4), 75);
+    assert_eq(arr_get(s, 5), 99);
+    assert_eq(is_sorted(s), 1);
+
+    print("  test_six_elements: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_sort_random();
+    test_already_sorted();
+    test_reverse_sorted();
+    test_duplicates();
+    test_six_elements();
+    print("[OK] 107_quicksort");
+    0
+}

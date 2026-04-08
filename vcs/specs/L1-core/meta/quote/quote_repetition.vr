@@ -1,0 +1,61 @@
+// @test: parse
+// @level: L1
+// @tags: meta, quote, repetition, code-generation
+// @timeout: 5000
+
+/// Quote repetition for generating repeated code patterns.
+/// Grammar: quote_repetition = splice_operator '[' 'for' pattern 'in' expression '{' token_tree '}' ']'
+
+// Generate multiple constants
+meta fn gen_constants(names: List<Text>, values: List<Int>) {
+    quote {
+        $[for (name, val) in names.zip(values) {
+            const $name: Int = ${val};
+        }]
+    }
+}
+
+// Generate match arms
+meta fn gen_match_arms(variants: List<Text>) {
+    quote {
+        fn to_text(v: MyEnum) -> Text {
+            match v {
+                $[for name in variants {
+                    $name => @stringify($name),
+                }]
+            }
+        }
+    }
+}
+
+// Generate protocol implementations
+meta fn gen_impls(types: List<Text>) {
+    quote {
+        $[for ty in types {
+            implement Display for $ty {
+                fn display(&self) -> Text {
+                    f"${ty}: {self}"
+                }
+            }
+        }]
+    }
+}
+
+// Generate getter methods
+meta fn gen_getters<T>() {
+    let fields = @type_fields(T);
+    let name = @type_name(T);
+    quote {
+        implement $name {
+            $[for (fname, ftype) in fields {
+                fn $fname(&self) -> $ftype {
+                    self.$fname
+                }
+            }]
+        }
+    }
+}
+
+fn main() {
+    print("Quote repetition tests parsed");
+}

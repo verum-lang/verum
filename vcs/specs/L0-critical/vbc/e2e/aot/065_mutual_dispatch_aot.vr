@@ -1,0 +1,272 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, variants, dispatch, mutual, pattern-matching
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT mutual dispatch across variant types with shared logic and nested calls
+
+type TypeA is A1(Int) | A2 { x: Int, y: Int };
+
+type TypeB is B1(Int) | B2 { x: Int, y: Int };
+
+type Merged is MA(TypeA) | MB(TypeB);
+
+// === Core dispatch functions ===
+
+fn process_a(a: TypeA) -> Int {
+    match a {
+        A1(v) => v * 2,
+        A2 { x, y } => x + y,
+    }
+}
+
+fn process_b(b: TypeB) -> Int {
+    match b {
+        B1(v) => v * 3,
+        B2 { x, y } => x * y,
+    }
+}
+
+// Combine: dispatches on both types
+fn combine(a: TypeA, b: TypeB) -> Int {
+    process_a(a) + process_b(b)
+}
+
+// === Transform functions: convert between types ===
+
+fn a_to_b(a: TypeA) -> TypeB {
+    match a {
+        A1(v) => B1(v),
+        A2 { x, y } => B2 { x: x, y: y },
+    }
+}
+
+fn b_to_a(b: TypeB) -> TypeA {
+    match b {
+        B1(v) => A1(v),
+        B2 { x, y } => A2 { x: x, y: y },
+    }
+}
+
+// === Higher-order dispatch ===
+
+fn apply_to_a(a: TypeA, f: fn(Int) -> Int) -> Int {
+    match a {
+        A1(v) => f(v),
+        A2 { x, y } => f(x) + f(y),
+    }
+}
+
+fn apply_to_b(b: TypeB, f: fn(Int) -> Int) -> Int {
+    match b {
+        B1(v) => f(v),
+        B2 { x, y } => f(x) * f(y),
+    }
+}
+
+// === Predicates ===
+
+fn a_is_single(a: TypeA) -> Bool {
+    a is A1
+}
+
+fn b_is_single(b: TypeB) -> Bool {
+    b is B1
+}
+
+fn a_value_sum(a: TypeA) -> Int {
+    match a {
+        A1(v) => v,
+        A2 { x, y } => x + y,
+    }
+}
+
+fn b_value_sum(b: TypeB) -> Int {
+    match b {
+        B1(v) => v,
+        B2 { x, y } => x + y,
+    }
+}
+
+// === Nested dispatch: process_a uses process_b internally ===
+
+fn cross_process_a(a: TypeA) -> Int {
+    let b = a_to_b(a);
+    process_a(a) + process_b(b)
+}
+
+fn cross_process_b(b: TypeB) -> Int {
+    let a = b_to_a(b);
+    process_b(b) + process_a(a)
+}
+
+// === Chain: apply multiple transformations ===
+
+fn chain_ab(a: TypeA) -> Int {
+    // a -> process_a -> create B1 from result -> process_b
+    let intermediate = process_a(a);
+    let b = B1(intermediate);
+    process_b(b)
+}
+
+fn chain_ba(b: TypeB) -> Int {
+    // b -> process_b -> create A1 from result -> process_a
+    let intermediate = process_b(b);
+    let a = A1(intermediate);
+    process_a(a)
+}
+
+// === Merged type dispatch ===
+
+fn process_merged(m: Merged) -> Int {
+    match m {
+        MA(a) => process_a(a),
+        MB(b) => process_b(b),
+    }
+}
+
+fn merged_value_sum(m: Merged) -> Int {
+    match m {
+        MA(a) => a_value_sum(a),
+        MB(b) => b_value_sum(b),
+    }
+}
+
+// === Recursive aggregation ===
+
+type MergedList is MNil | MCons { item: Merged, next: MergedList };
+
+fn merged_list_sum(xs: MergedList) -> Int {
+    match xs {
+        MNil => 0,
+        MCons { item, next } => process_merged(item) + merged_list_sum(next),
+    }
+}
+
+fn merged_list_len(xs: MergedList) -> Int {
+    match xs {
+        MNil => 0,
+        MCons { item: _, next } => 1 + merged_list_len(next),
+    }
+}
+
+fn main() -> Int {
+    // === Basic process_a ===
+    assert_eq(process_a(A1(5)), 10);      // 5 * 2
+    assert_eq(process_a(A1(0)), 0);       // 0 * 2
+    assert_eq(process_a(A2 { x: 3, y: 7 }), 10);  // 3 + 7
+
+    // === Basic process_b ===
+    assert_eq(process_b(B1(5)), 15);      // 5 * 3
+    assert_eq(process_b(B1(0)), 0);       // 0 * 3
+    assert_eq(process_b(B2 { x: 3, y: 7 }), 21);  // 3 * 7
+
+    // === Combine ===
+    assert_eq(combine(A1(5), B1(5)), 25);        // 10 + 15
+    assert_eq(combine(A2 { x: 3, y: 7 }, B1(4)), 22);   // 10 + 12
+    assert_eq(combine(A1(3), B2 { x: 4, y: 5 }), 26);   // 6 + 20
+    assert_eq(combine(A2 { x: 2, y: 3 }, B2 { x: 4, y: 5 }), 25);  // 5 + 20
+
+    // === Type conversion ===
+    let a1 = A1(7);
+    let b_from_a = a_to_b(a1);
+    assert_eq(process_b(b_from_a), 21);  // B1(7), 7*3
+
+    let a2 = A2 { x: 3, y: 4 };
+    let b_from_a2 = a_to_b(a2);
+    assert_eq(process_b(b_from_a2), 12);  // B2{3,4}, 3*4
+
+    let b1 = B1(8);
+    let a_from_b = b_to_a(b1);
+    assert_eq(process_a(a_from_b), 16);  // A1(8), 8*2
+
+    let b2 = B2 { x: 5, y: 6 };
+    let a_from_b2 = b_to_a(b2);
+    assert_eq(process_a(a_from_b2), 11);  // A2{5,6}, 5+6
+
+    // === Predicates ===
+    assert(a_is_single(A1(1)));
+    assert(!a_is_single(A2 { x: 1, y: 2 }));
+    assert(b_is_single(B1(1)));
+    assert(!b_is_single(B2 { x: 1, y: 2 }));
+
+    // === Value sums ===
+    assert_eq(a_value_sum(A1(42)), 42);
+    assert_eq(a_value_sum(A2 { x: 10, y: 20 }), 30);
+    assert_eq(b_value_sum(B1(42)), 42);
+    assert_eq(b_value_sum(B2 { x: 10, y: 20 }), 30);
+
+    // === Higher-order dispatch ===
+    assert_eq(apply_to_a(A1(5), |x| x * x), 25);         // 5^2
+    assert_eq(apply_to_a(A2 { x: 3, y: 4 }, |x| x * x), 25);  // 9 + 16
+    assert_eq(apply_to_b(B1(5), |x| x + 1), 6);          // 5+1
+    assert_eq(apply_to_b(B2 { x: 3, y: 4 }, |x| x + 1), 20);  // (3+1)*(4+1) = 4*5
+
+    // === Cross processing ===
+    // cross_process_a(A1(5)): process_a(A1(5))=10, a_to_b(A1(5))=B1(5), process_b(B1(5))=15 => 25
+    assert_eq(cross_process_a(A1(5)), 25);
+    // cross_process_a(A2{3,4}): process_a=7, a_to_b=B2{3,4}, process_b=12 => 19
+    assert_eq(cross_process_a(A2 { x: 3, y: 4 }), 19);
+
+    // cross_process_b(B1(5)): process_b=15, b_to_a=A1(5), process_a=10 => 25
+    assert_eq(cross_process_b(B1(5)), 25);
+    // cross_process_b(B2{3,4}): process_b=12, b_to_a=A2{3,4}, process_a=7 => 19
+    assert_eq(cross_process_b(B2 { x: 3, y: 4 }), 19);
+
+    // === Chain functions ===
+    // chain_ab(A1(5)): process_a=10, B1(10), process_b=30
+    assert_eq(chain_ab(A1(5)), 30);
+    // chain_ab(A2{3,7}): process_a=10, B1(10), process_b=30
+    assert_eq(chain_ab(A2 { x: 3, y: 7 }), 30);
+
+    // chain_ba(B1(4)): process_b=12, A1(12), process_a=24
+    assert_eq(chain_ba(B1(4)), 24);
+    // chain_ba(B2{3,4}): process_b=12, A1(12), process_a=24
+    assert_eq(chain_ba(B2 { x: 3, y: 4 }), 24);
+
+    // === Merged type ===
+    assert_eq(process_merged(MA(A1(5))), 10);
+    assert_eq(process_merged(MA(A2 { x: 3, y: 7 })), 10);
+    assert_eq(process_merged(MB(B1(5))), 15);
+    assert_eq(process_merged(MB(B2 { x: 3, y: 7 })), 21);
+
+    assert_eq(merged_value_sum(MA(A1(42))), 42);
+    assert_eq(merged_value_sum(MB(B2 { x: 10, y: 20 })), 30);
+
+    // === Merged list ===
+    let mlist = MCons { item: MA(A1(5)), next:
+                MCons { item: MB(B1(3)), next:
+                MCons { item: MA(A2 { x: 2, y: 3 }), next:
+                MCons { item: MB(B2 { x: 4, y: 5 }), next: MNil }}}};
+
+    assert_eq(merged_list_len(mlist), 4);
+    // process_merged: MA(A1(5))=10, MB(B1(3))=9, MA(A2{2,3})=5, MB(B2{4,5})=20
+    assert_eq(merged_list_sum(mlist), 44);
+
+    // === Deeply nested: chain_ab composed with chain_ba ===
+    // chain_ba(B1(2)) = process_b(B1(2))=6, A1(6), process_a(A1(6))=12
+    // Then feed 12 into chain_ab via A1: chain_ab(A1(12)) = process_a=24, B1(24), process_b=72
+    let step1 = chain_ba(B1(2));
+    assert_eq(step1, 12);
+    let step2 = chain_ab(A1(step1));
+    assert_eq(step2, 72);
+
+    // === Symmetry property: cross_process_a(A1(x)) == cross_process_b(B1(x)) ===
+    let mut i = 0;
+    while i < 5 {
+        assert_eq(cross_process_a(A1(i)), cross_process_b(B1(i)));
+        i = i + 1;
+    }
+
+    // === Mixed operations accumulator ===
+    let mut acc = 0;
+    acc = acc + process_a(A1(1));     // +2
+    acc = acc + process_b(B1(1));     // +3
+    acc = acc + combine(A1(2), B1(2)); // +(4+6) = +10
+    acc = acc + process_a(A2 { x: 10, y: 10 }); // +20
+    acc = acc + process_b(B2 { x: 2, y: 3 });   // +6
+    assert_eq(acc, 41);  // 2+3+10+20+6
+
+    0
+}

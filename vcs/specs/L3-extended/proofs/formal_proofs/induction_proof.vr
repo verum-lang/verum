@@ -1,0 +1,247 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-proofs, induction
+// @timeout: 25000
+// @description: Tests induction proof techniques on various structures
+
+/// ============================================================
+/// INDUCTION PROOFS
+/// ============================================================
+
+// ============================================================
+// NATURAL NUMBER INDUCTION
+// ============================================================
+
+/// Sum of first n naturals
+theorem gauss_sum(n: Nat): sum_to(n) == n * (n + 1) / 2 {
+    proof by induction on n {
+        case 0 => {
+            calc {
+                sum_to(0)
+                == { by definition } 0
+                == { by arithmetic } 0 * 1 / 2
+            }
+        }
+        case succ(k) => {
+            have ih: sum_to(k) == k * (k + 1) / 2;
+            calc {
+                sum_to(succ(k))
+                == { by sum_append } sum_to(k) + succ(k)
+                == { by ih } k * (k + 1) / 2 + (k + 1)
+                == { by algebra } succ(k) * (succ(k) + 1) / 2
+            }
+        }
+    }
+}
+
+/// Factorial is positive
+theorem factorial_positive(n: Nat): factorial(n) > 0 {
+    proof by induction on n {
+        case 0 => {
+            have: factorial(0) == 1 by definition;
+            conclude by arithmetic
+        }
+        case succ(k) => {
+            have ih: factorial(k) > 0;
+            conclude by arithmetic
+        }
+    }
+}
+
+fn sum_to(n: Nat) -> Nat;
+fn factorial(n: Nat) -> Nat;
+
+// ============================================================
+// STRONG INDUCTION
+// ============================================================
+
+/// Every natural >= 2 has a prime divisor
+theorem prime_divisor(n: Nat)
+    requires n >= 2
+    ensures exists p: Nat. is_prime(p) && divides(p, n)
+{
+    proof by strong_induction on n {
+        case n => {
+            conclude by auto
+        }
+    }
+}
+
+fn is_prime(n: Nat) -> Bool;
+fn divides(a: Nat, b: Nat) -> Bool;
+
+/// Fibonacci is positive for n > 0
+theorem fib_positive(n: Nat)
+    requires n > 0
+    ensures fib(n) > 0
+{
+    proof by strong_induction on n {
+        case n => {
+            conclude by auto
+        }
+    }
+}
+
+fn fib(n: Nat) -> Nat;
+
+// ============================================================
+// STRUCTURAL INDUCTION
+// ============================================================
+
+/// List length is non-negative
+theorem list_len_nonneg<T>(xs: List<T>): len(xs) >= 0 {
+    proof by induction on xs {
+        case Nil => {
+            have: len(Nil) == 0 by definition;
+            trivial
+        }
+        case Cons(h, t) => {
+            have ih: len(t) >= 0;
+            conclude by arithmetic
+        }
+    }
+}
+
+/// Append length
+theorem append_len<T>(xs: List<T>, ys: List<T>):
+    len(append(xs, ys)) == len(xs) + len(ys)
+{
+    proof by induction on xs {
+        case Nil => {
+            calc {
+                len(append(Nil, ys))
+                == { by definition } len(ys)
+                == { by arithmetic } 0 + len(ys)
+                == { by definition } len(Nil) + len(ys)
+            }
+        }
+        case Cons(h, t) => {
+            have ih: len(append(t, ys)) == len(t) + len(ys);
+            calc {
+                len(append(Cons(h, t), ys))
+                == { by definition } 1 + len(append(t, ys))
+                == { by ih } 1 + len(t) + len(ys)
+                == { by definition } len(Cons(h, t)) + len(ys)
+            }
+        }
+    }
+}
+
+fn append<T>(xs: List<T>, ys: List<T>) -> List<T>;
+
+// ============================================================
+// TREE INDUCTION
+// ============================================================
+
+type Tree<T> is
+    | TreeLeaf
+    | TreeNode(T, Tree<T>, Tree<T>);
+
+/// Tree size is non-negative
+theorem tree_size_nonneg<T>(t: Tree<T>): tree_size(t) >= 0 {
+    proof by induction on t {
+        case TreeLeaf => trivial
+        case TreeNode(v, l, r) => {
+            have ih_left: tree_size(l) >= 0;
+            have ih_right: tree_size(r) >= 0;
+            conclude by arithmetic
+        }
+    }
+}
+
+/// Mirror is involutive
+theorem mirror_mirror<T>(t: Tree<T>): tree_mirror(tree_mirror(t)) == t {
+    proof by induction on t {
+        case TreeLeaf => {
+            trivial
+        }
+        case TreeNode(v, l, r) => {
+            have ih_left: tree_mirror(tree_mirror(l)) == l;
+            have ih_right: tree_mirror(tree_mirror(r)) == r;
+            conclude by ih_left, ih_right
+        }
+    }
+}
+
+fn tree_size<T>(t: Tree<T>) -> Nat;
+fn tree_mirror<T>(t: Tree<T>) -> Tree<T>;
+
+// ============================================================
+// WELL-FOUNDED INDUCTION
+// ============================================================
+
+/// Ackermann function terminates
+theorem ackermann_total(m: Nat, n: Nat): ackermann(m, n) >= 0 {
+    proof by well_founded_induction on (m, n) ordered_by lex_lt {
+        case (0, n) => {
+            have: ackermann(0, n) == n + 1 by definition;
+            conclude by arithmetic
+        }
+        case (succ(mp), 0) => {
+            conclude by auto
+        }
+        case (succ(mp), succ(np)) => {
+            conclude by auto
+        }
+    }
+}
+
+fn ackermann(m: Nat, n: Nat) -> Nat;
+
+// ============================================================
+// MUTUAL INDUCTION
+// ============================================================
+
+/// Even or odd
+theorem even_or_odd(n: Nat): even(n) || odd(n) {
+    proof by induction on n {
+        case 0 => {
+            left;
+            trivial
+        }
+        case succ(k) => {
+            have ih: even(k) || odd(k);
+            conclude by auto
+        }
+    }
+}
+
+/// Not both even and odd
+theorem not_both_even_odd(n: Nat): !(even(n) && odd(n)) {
+    proof by induction on n {
+        case 0 => {
+            trivial
+        }
+        case succ(k) => {
+            have ih: !(even(k) && odd(k));
+            conclude by auto
+        }
+    }
+}
+
+fn even(n: Nat) -> Bool;
+fn odd(n: Nat) -> Bool;
+
+// ============================================================
+// INDUCTION WITH MEASURE
+// ============================================================
+
+/// Quicksort terminates and produces sorted output
+theorem quicksort_terminates<T: Ord>(xs: List<T>): is_sorted(quicksort(xs)) {
+    proof by induction on xs {
+        case Nil => {
+            trivial
+        }
+        case Cons(pivot, rest) => {
+            conclude by auto
+        }
+    }
+}
+
+fn quicksort<T: Ord>(xs: List<T>) -> List<T>;
+fn is_sorted<T: Ord>(xs: List<T>) -> Bool;
+
+fn main() {
+    // Induction proof tests
+}

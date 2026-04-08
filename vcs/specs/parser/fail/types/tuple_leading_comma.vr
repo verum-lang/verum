@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, tuple, comma, error
+// @description: Test detection of leading comma in tuple type
+// @expected-error: E018
+
+// Leading comma is not valid in tuple type
+fn test(x: (, Int, Text)) {}

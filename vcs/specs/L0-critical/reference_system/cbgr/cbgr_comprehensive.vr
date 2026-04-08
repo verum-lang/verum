@@ -1,0 +1,225 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, generation, epoch, comprehensive
+
+/// Comprehensive test of CBGR (Capability-Based Generation Reference) system.
+/// Tests the three core components: generations, epochs, and capabilities.
+/// This is the foundation of Verum's memory safety.
+/// Spec: 26-cbgr-implementation.md
+
+fn main() {
+    print("Starting CBGR comprehensive tests...");
+    test_generation_basics();
+    print("  [OK] test_generation_basics");
+    test_epoch_system();
+    print("  [OK] test_epoch_system");
+    test_capability_tracking();
+    print("  [OK] test_capability_tracking");
+    test_thin_ref_structure();
+    print("  [OK] test_thin_ref_structure");
+    test_allocation_header();
+    print("  [OK] test_allocation_header");
+    test_generation_wraparound();
+    print("  [OK] test_generation_wraparound");
+    test_epoch_validity_window();
+    print("  [OK] test_epoch_validity_window");
+    test_cbgr_check_sequence();
+    print("  [OK] test_cbgr_check_sequence");
+
+    print("All CBGR comprehensive tests passed!");
+}
+
+/// Test generation counter basics
+fn test_generation_basics() {
+    // Each allocation gets unique, monotonically increasing generation
+    let a = Heap.new(1);
+    let b = Heap.new(2);
+    let c = Heap.new(3);
+
+    let gen_a = a.generation();
+    let gen_b = b.generation();
+    let gen_c = c.generation();
+
+    // Strictly increasing
+    assert(gen_a < gen_b);
+    assert(gen_b < gen_c);
+
+    // Generation is positive for valid allocations
+    assert(gen_a > 0);
+    assert(gen_b > 0);
+    assert(gen_c > 0);
+
+    // Reference captures generation at creation
+    let ref_a: &Int = &*a;
+    assert(ref_a.stored_generation() == gen_a);
+
+    // Drop and reallocate - new generation
+    drop(a);
+    let d = Heap.new(4);
+    let gen_d = d.generation();
+
+    // New generation is higher (even if same memory address reused)
+    assert(gen_d > gen_a);
+    assert(gen_d > gen_c);
+}
+
+/// Test epoch-based temporal safety
+fn test_epoch_system() {
+    // Epochs provide temporal scoping for references
+    let current_epoch = Epoch.current();
+
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Reference captures epoch at creation (within same epoch as Epoch.current())
+    let ref_epoch = ref_val.epoch();
+    assert(ref_epoch <= current_epoch);
+
+    // Epochs advance on significant events
+    Epoch.advance();
+    let new_epoch = Epoch.current();
+    assert(new_epoch > current_epoch);
+
+    // Old references remain valid within validity window
+    assert(ref_val.is_epoch_valid());
+
+    // Reference created in new epoch
+    let new_ref: &Int = &*value;
+    let new_ref_epoch = new_ref.epoch();
+    assert(new_ref_epoch == new_epoch);
+}
+
+/// Test capability bits in references
+fn test_capability_tracking() {
+    // Use separate allocations to avoid borrow checker aliasing issues
+    let value_for_immut = Heap.new(100);
+    let mut value_for_mut = Heap.new(200);
+
+    // Immutable reference has read capability
+    let immut_ref: &Int = &*value_for_immut;
+    assert(immut_ref.capabilities().can_read());
+    assert(!immut_ref.capabilities().can_write());
+
+    // Mutable reference has read and write
+    let mut_ref: &mut Int = &mut value_for_mut;
+    assert(mut_ref.capabilities().can_read());
+    assert(mut_ref.capabilities().can_write());
+
+    // Capability downgrade is allowed (mutable -> immutable)
+    let downgraded: &Int = &*mut_ref;
+    assert(downgraded.capabilities().can_read());
+    assert(!downgraded.capabilities().can_write());
+}
+
+/// Test ThinRef structure components
+fn test_thin_ref_structure() {
+    let value = Heap.new(42);
+    let thin_ref: &Int = &*value;
+
+    // Layout: ptr (8) + generation (4) + epoch_caps (4)
+    let generation = thin_ref.stored_generation();
+    let epoch_caps = thin_ref.epoch_caps_raw();
+
+    // Generation is non-zero for valid allocations
+    assert(generation > 0);
+
+    // Epoch and capabilities are packed together
+    let epoch = epoch_caps >> 8;
+    let caps = epoch_caps & 0xFF;
+    assert(epoch > 0);
+    assert(caps > 0);  // At least read capability
+}
+
+/// Test allocation header structure
+fn test_allocation_header() {
+    let value = Heap.new(42);
+
+    // Allocation header is 16 bytes before data
+    // Layout: generation (4) + size (4) + flags (4) + epoch (4)
+
+    // Generation in header matches direct generation query
+    assert(value.header_generation() == value.generation());
+
+    // Size is positive (stores data size)
+    let data_size = value.header_size();
+    assert(data_size > 0);
+
+    // Epoch in header records allocation time
+    let header_epoch = value.header_epoch();
+    assert(header_epoch > 0);
+
+    // Flags indicate allocation state
+    assert(value.is_allocated());
+    assert(!value.is_freed());
+}
+
+/// Test generation comparison near boundary
+fn test_generation_wraparound() {
+    // Generations are 32-bit, test comparison behavior
+    let gen_high = 0xFFFF_FFFE;
+    let gen_low = 0x0000_0001;
+
+    // Normal comparison
+    assert(gen_high > gen_low);
+
+    // Test generation monotonicity across multiple allocations
+    let vals = Heap.new(1);
+    let g1 = vals.generation();
+    drop(vals);
+    let vals2 = Heap.new(2);
+    let g2 = vals2.generation();
+    // Each allocation should get a new, higher generation
+    assert(g2 > g1);
+}
+
+/// Test epoch validity window
+fn test_epoch_validity_window() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Reference valid within window after multiple advances
+    for _ in 0..100 {
+        Epoch.advance();
+    }
+    assert(ref_val.is_epoch_valid());
+}
+
+/// Test the CBGR check sequence (generation + epoch validation)
+fn test_cbgr_check_sequence() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Step 1: Load stored generation from reference
+    let stored_gen = ref_val.stored_generation();
+
+    // Step 2: Load current generation from allocation header
+    let current_gen = value.header_generation();
+
+    // Step 3: Compare - must match for valid reference
+    assert(stored_gen == current_gen);
+
+    // Step 4: Check epoch validity
+    assert(ref_val.is_epoch_valid());
+
+    // Step 5: Dereference is safe
+    let result = *ref_val;
+    assert(result == 42);
+}
+
+// ═══════════════════════════════════════════════════════════
+// Supporting Type Definitions
+// ═══════════════════════════════════════════════════════════
+
+/// Epoch type alias for CBGR temporal tracking
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+
+    fn advance() {
+        Runtime.advance_epoch();
+    }
+}

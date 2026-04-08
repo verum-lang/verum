@@ -1,0 +1,44 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    let mut s = BTreeSet.new();
+    s.insert(42);
+    s.insert(7);
+    s.insert(42);  // duplicate
+    print(f"len after 3 inserts (expect 2): {s.len()}");
+    if s.len() == 2 { pass = pass + 1; }
+
+    let v1 = 7;
+    print(f"contains 7: {s.contains(&v1)}");
+    if s.contains(&v1) { pass = pass + 1; }
+
+    let v2 = 99;
+    print(f"contains 99: {s.contains(&v2)}");
+    if !s.contains(&v2) { pass = pass + 1; }
+
+    // remove
+    print("about to remove 7");
+    s.remove(&v1);
+    print(f"len after remove (expect 1): {s.len()}");
+    if s.len() == 1 { pass = pass + 1; }
+    print(f"contains 7 after remove: {s.contains(&v1)}");
+    if !s.contains(&v1) { pass = pass + 1; }
+
+    // insert after remove
+    s.insert(100);
+    s.insert(200);
+    print(f"len after 2 more inserts (expect 3): {s.len()}");
+    if s.len() == 3 { pass = pass + 1; }
+
+    print(f"pass = {pass}/6");
+    if pass == 6 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

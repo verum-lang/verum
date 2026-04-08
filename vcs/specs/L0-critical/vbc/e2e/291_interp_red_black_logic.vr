@@ -1,0 +1,499 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, red-black-tree, bst
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Red-black tree insertion logic (color tracking, rotation
+// decisions) using flat arrays. We store BST nodes in arrays: key[], color[],
+// left[], right[], parent[]. Color: 0=BLACK, 1=RED. NIL = -1.
+
+// =============================================================================
+// Array infrastructure (16 elements for tree nodes)
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_fill(v: Int) -> Arr16 {
+    Arr16 {
+        e0: v, e1: v, e2: v, e3: v,
+        e4: v, e5: v, e6: v, e7: v,
+        e8: v, e9: v, e10: v, e11: v,
+        e12: v, e13: v, e14: v, e15: v
+    }
+}
+
+// =============================================================================
+// Red-Black Tree stored in flat arrays
+// =============================================================================
+
+// Constants
+// BLACK = 0, RED = 1, NIL_NODE = -1
+
+type RBTree is {
+    keys: Arr16,
+    colors: Arr16,
+    lefts: Arr16,
+    rights: Arr16,
+    parents: Arr16,
+    root: Int,
+    count: Int
+};
+
+fn rb_new() -> RBTree {
+    RBTree {
+        keys: arr16_fill(0),
+        colors: arr16_fill(0),
+        lefts: arr16_fill(-1),
+        rights: arr16_fill(-1),
+        parents: arr16_fill(-1),
+        root: -1,
+        count: 0
+    }
+}
+
+fn rb_color(tree: RBTree, node: Int) -> Int {
+    if node == -1 { 0 }
+    else { arr16_get(tree.colors, node) }
+}
+
+fn rb_left(tree: RBTree, node: Int) -> Int {
+    if node == -1 { -1 }
+    else { arr16_get(tree.lefts, node) }
+}
+
+fn rb_right(tree: RBTree, node: Int) -> Int {
+    if node == -1 { -1 }
+    else { arr16_get(tree.rights, node) }
+}
+
+fn rb_parent(tree: RBTree, node: Int) -> Int {
+    if node == -1 { -1 }
+    else { arr16_get(tree.parents, node) }
+}
+
+fn rb_key(tree: RBTree, node: Int) -> Int {
+    arr16_get(tree.keys, node)
+}
+
+// =============================================================================
+// Left rotate: pivot node x, its right child y becomes parent
+// =============================================================================
+
+fn rb_rotate_left(tree: RBTree, x: Int) -> RBTree {
+    let y = rb_right(tree, x);
+    let yl = rb_left(tree, y);
+    let px = rb_parent(tree, x);
+
+    // x.right = y.left
+    let mut r = arr16_set(tree.rights, x, yl);
+    let mut p = tree.parents;
+    if yl != -1 {
+        p = arr16_set(p, yl, x);
+    }
+    // y.parent = x.parent
+    p = arr16_set(p, y, px);
+    // update parent's child pointer
+    let mut l = tree.lefts;
+    let mut new_root = tree.root;
+    if px == -1 {
+        new_root = y;
+    } else if arr16_get(l, px) == x {
+        l = arr16_set(l, px, y);
+    } else {
+        r = arr16_set(r, px, y);
+    }
+    // y.left = x
+    l = arr16_set(l, y, x);
+    p = arr16_set(p, x, y);
+
+    RBTree {
+        keys: tree.keys, colors: tree.colors,
+        lefts: l, rights: r, parents: p,
+        root: new_root, count: tree.count
+    }
+}
+
+// =============================================================================
+// Right rotate: pivot node x, its left child y becomes parent
+// =============================================================================
+
+fn rb_rotate_right(tree: RBTree, x: Int) -> RBTree {
+    let y = rb_left(tree, x);
+    let yr = rb_right(tree, y);
+    let px = rb_parent(tree, x);
+
+    // x.left = y.right
+    let mut l = arr16_set(tree.lefts, x, yr);
+    let mut p = tree.parents;
+    if yr != -1 {
+        p = arr16_set(p, yr, x);
+    }
+    // y.parent = x.parent
+    p = arr16_set(p, y, px);
+    let mut r = tree.rights;
+    let mut new_root = tree.root;
+    if px == -1 {
+        new_root = y;
+    } else if arr16_get(l, px) == x {
+        l = arr16_set(l, px, y);
+    } else {
+        r = arr16_set(r, px, y);
+    }
+    // y.right = x
+    r = arr16_set(r, y, x);
+    p = arr16_set(p, x, y);
+
+    RBTree {
+        keys: tree.keys, colors: tree.colors,
+        lefts: l, rights: r, parents: p,
+        root: new_root, count: tree.count
+    }
+}
+
+// =============================================================================
+// Fix-up after insert
+// =============================================================================
+
+fn rb_fix_insert(tree: RBTree, z_in: Int) -> RBTree {
+    let mut t = tree;
+    let mut z = z_in;
+    let mut iters = 0;
+    while iters < 20 && z != t.root && rb_color(t, rb_parent(t, z)) == 1 {
+        let p = rb_parent(t, z);
+        let gp = rb_parent(t, p);
+        if gp == -1 {
+            // No grandparent, just color root black
+            iters = 100;
+        } else if p == rb_left(t, gp) {
+            let uncle = rb_right(t, gp);
+            if rb_color(t, uncle) == 1 {
+                // Case 1: uncle is red -> recolor
+                t = RBTree { keys: t.keys, colors: arr16_set(arr16_set(arr16_set(t.colors, p, 0), uncle, 0), gp, 1), lefts: t.lefts, rights: t.rights, parents: t.parents, root: t.root, count: t.count };
+                z = gp;
+            } else {
+                if z == rb_right(t, p) {
+                    // Case 2: z is right child -> left rotate parent
+                    z = p;
+                    t = rb_rotate_left(t, z);
+                }
+                // Case 3: z is left child -> right rotate grandparent
+                let p2 = rb_parent(t, z);
+                let gp2 = rb_parent(t, p2);
+                t = RBTree { keys: t.keys, colors: arr16_set(arr16_set(t.colors, p2, 0), gp2, 1), lefts: t.lefts, rights: t.rights, parents: t.parents, root: t.root, count: t.count };
+                t = rb_rotate_right(t, gp2);
+            }
+        } else {
+            // Mirror: parent is right child of grandparent
+            let uncle = rb_left(t, gp);
+            if rb_color(t, uncle) == 1 {
+                t = RBTree { keys: t.keys, colors: arr16_set(arr16_set(arr16_set(t.colors, p, 0), uncle, 0), gp, 1), lefts: t.lefts, rights: t.rights, parents: t.parents, root: t.root, count: t.count };
+                z = gp;
+            } else {
+                if z == rb_left(t, p) {
+                    z = p;
+                    t = rb_rotate_right(t, z);
+                }
+                let p2 = rb_parent(t, z);
+                let gp2 = rb_parent(t, p2);
+                t = RBTree { keys: t.keys, colors: arr16_set(arr16_set(t.colors, p2, 0), gp2, 1), lefts: t.lefts, rights: t.rights, parents: t.parents, root: t.root, count: t.count };
+                t = rb_rotate_left(t, gp2);
+            }
+        }
+        iters = iters + 1;
+    }
+    // Root is always black
+    RBTree { keys: t.keys, colors: arr16_set(t.colors, t.root, 0), lefts: t.lefts, rights: t.rights, parents: t.parents, root: t.root, count: t.count }
+}
+
+// =============================================================================
+// BST Insert (before fix-up)
+// =============================================================================
+
+fn rb_insert(tree: RBTree, key: Int) -> RBTree {
+    let new_idx = tree.count;
+    let mut t = RBTree {
+        keys: arr16_set(tree.keys, new_idx, key),
+        colors: arr16_set(tree.colors, new_idx, 1),
+        lefts: arr16_set(tree.lefts, new_idx, -1),
+        rights: arr16_set(tree.rights, new_idx, -1),
+        parents: arr16_set(tree.parents, new_idx, -1),
+        root: tree.root,
+        count: tree.count + 1
+    };
+
+    if t.root == -1 {
+        t = RBTree { keys: t.keys, colors: arr16_set(t.colors, new_idx, 0), lefts: t.lefts, rights: t.rights, parents: t.parents, root: new_idx, count: t.count };
+        return t;
+    }
+
+    // BST walk to find insertion point
+    let mut cur = t.root;
+    let mut par = -1;
+    let mut went_left = 0;
+    let mut steps = 0;
+    while cur != -1 && steps < 20 {
+        par = cur;
+        if key < rb_key(t, cur) {
+            cur = rb_left(t, cur);
+            went_left = 1;
+        } else {
+            cur = rb_right(t, cur);
+            went_left = 0;
+        }
+        steps = steps + 1;
+    }
+
+    t = RBTree { keys: t.keys, colors: t.colors, lefts: t.lefts, rights: t.rights, parents: arr16_set(t.parents, new_idx, par), root: t.root, count: t.count };
+    if went_left == 1 {
+        t = RBTree { keys: t.keys, colors: t.colors, lefts: arr16_set(t.lefts, par, new_idx), rights: t.rights, parents: t.parents, root: t.root, count: t.count };
+    } else {
+        t = RBTree { keys: t.keys, colors: t.colors, lefts: t.lefts, rights: arr16_set(t.rights, par, new_idx), parents: t.parents, root: t.root, count: t.count };
+    }
+
+    rb_fix_insert(t, new_idx)
+}
+
+// =============================================================================
+// In-order traversal to collect sorted keys (iterative with stack)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn rb_inorder_count(tree: RBTree, node: Int, depth: Int) -> Int {
+    if node == -1 || depth > 15 { return 0; }
+    let lc = rb_inorder_count(tree, rb_left(tree, node), depth + 1);
+    let rc = rb_inorder_count(tree, rb_right(tree, node), depth + 1);
+    lc + 1 + rc
+}
+
+// Get the k-th element (0-indexed) in in-order
+@allow(unbounded_recursion)
+fn rb_kth_inorder(tree: RBTree, node: Int, k: Int) -> Int {
+    if node == -1 { return -1; }
+    let left_count = rb_inorder_count(tree, rb_left(tree, node), 0);
+    if k < left_count {
+        return rb_kth_inorder(tree, rb_left(tree, node), k);
+    }
+    if k == left_count {
+        return rb_key(tree, node);
+    }
+    rb_kth_inorder(tree, rb_right(tree, node), k - left_count - 1)
+}
+
+// =============================================================================
+// Verify BST property
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn rb_is_bst(tree: RBTree, node: Int, lo: Int, hi: Int) -> Int {
+    if node == -1 { return 1; }
+    let k = rb_key(tree, node);
+    if k < lo || k > hi { return 0; }
+    let l_ok = rb_is_bst(tree, rb_left(tree, node), lo, k - 1);
+    let r_ok = rb_is_bst(tree, rb_right(tree, node), k + 1, hi);
+    if l_ok == 1 && r_ok == 1 { 1 } else { 0 }
+}
+
+// =============================================================================
+// Verify red-black property: no two consecutive red nodes
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn rb_no_red_red(tree: RBTree, node: Int) -> Int {
+    if node == -1 { return 1; }
+    if rb_color(tree, node) == 1 {
+        if rb_color(tree, rb_left(tree, node)) == 1 { return 0; }
+        if rb_color(tree, rb_right(tree, node)) == 1 { return 0; }
+    }
+    let l = rb_no_red_red(tree, rb_left(tree, node));
+    let r = rb_no_red_red(tree, rb_right(tree, node));
+    if l == 1 && r == 1 { 1 } else { 0 }
+}
+
+// =============================================================================
+// Black height (should be same for all paths)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn rb_black_height(tree: RBTree, node: Int) -> Int {
+    if node == -1 { return 1; }
+    let lh = rb_black_height(tree, rb_left(tree, node));
+    let rh = rb_black_height(tree, rb_right(tree, node));
+    if lh != rh { return -1; }
+    if lh == -1 { return -1; }
+    if rb_color(tree, node) == 0 { lh + 1 } else { lh }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_single_insert() {
+    let t = rb_insert(rb_new(), 10);
+    assert_eq(t.count, 1);
+    assert_eq(t.root, 0);
+    assert_eq(rb_key(t, 0), 10);
+    assert_eq(rb_color(t, 0), 0);  // root is black
+}
+
+fn test_two_inserts() {
+    let mut t = rb_new();
+    t = rb_insert(t, 10);
+    t = rb_insert(t, 20);
+    assert_eq(t.count, 2);
+    assert_eq(rb_color(t, t.root), 0);
+    assert_eq(rb_is_bst(t, t.root, -10000, 10000), 1);
+    assert_eq(rb_no_red_red(t, t.root), 1);
+}
+
+fn test_three_inserts_right() {
+    // Insert 10, 20, 30 -> triggers left rotation
+    let mut t = rb_new();
+    t = rb_insert(t, 10);
+    t = rb_insert(t, 20);
+    t = rb_insert(t, 30);
+    assert_eq(t.count, 3);
+    assert_eq(rb_is_bst(t, t.root, -10000, 10000), 1);
+    assert_eq(rb_no_red_red(t, t.root), 1);
+    let bh = rb_black_height(t, t.root);
+    assert(bh > 0);  // valid black height
+}
+
+fn test_three_inserts_left() {
+    // Insert 30, 20, 10 -> triggers right rotation
+    let mut t = rb_new();
+    t = rb_insert(t, 30);
+    t = rb_insert(t, 20);
+    t = rb_insert(t, 10);
+    assert_eq(t.count, 3);
+    assert_eq(rb_is_bst(t, t.root, -10000, 10000), 1);
+    assert_eq(rb_no_red_red(t, t.root), 1);
+}
+
+fn test_five_inserts() {
+    let mut t = rb_new();
+    t = rb_insert(t, 50);
+    t = rb_insert(t, 30);
+    t = rb_insert(t, 70);
+    t = rb_insert(t, 20);
+    t = rb_insert(t, 40);
+    assert_eq(t.count, 5);
+    assert_eq(rb_is_bst(t, t.root, -10000, 10000), 1);
+    assert_eq(rb_no_red_red(t, t.root), 1);
+    let bh = rb_black_height(t, t.root);
+    assert(bh > 0);
+    // In-order should give sorted keys
+    assert_eq(rb_kth_inorder(t, t.root, 0), 20);
+    assert_eq(rb_kth_inorder(t, t.root, 1), 30);
+    assert_eq(rb_kth_inorder(t, t.root, 2), 40);
+    assert_eq(rb_kth_inorder(t, t.root, 3), 50);
+    assert_eq(rb_kth_inorder(t, t.root, 4), 70);
+}
+
+fn test_sequential_inserts() {
+    // Insert 1..8 sequentially — worst case for BST but RB tree balances
+    let mut t = rb_new();
+    let mut i = 1;
+    while i <= 8 {
+        t = rb_insert(t, i);
+        i = i + 1;
+    }
+    assert_eq(t.count, 8);
+    assert_eq(rb_is_bst(t, t.root, -10000, 10000), 1);
+    assert_eq(rb_no_red_red(t, t.root), 1);
+    let bh = rb_black_height(t, t.root);
+    assert(bh > 0);
+    // Sorted order
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(rb_kth_inorder(t, t.root, j), j + 1);
+        j = j + 1;
+    }
+}
+
+fn test_root_always_black() {
+    let mut t = rb_new();
+    let mut i = 0;
+    while i < 8 {
+        t = rb_insert(t, i * 5 + 3);
+        assert_eq(rb_color(t, t.root), 0);
+        i = i + 1;
+    }
+}
+
+fn test_reverse_inserts() {
+    // Insert in reverse: 8, 7, ..., 1
+    let mut t = rb_new();
+    let mut i = 8;
+    while i >= 1 {
+        t = rb_insert(t, i);
+        i = i - 1;
+    }
+    assert_eq(t.count, 8);
+    assert_eq(rb_is_bst(t, t.root, -10000, 10000), 1);
+    assert_eq(rb_no_red_red(t, t.root), 1);
+    assert(rb_black_height(t, t.root) > 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_single_insert();
+    test_two_inserts();
+    test_three_inserts_right();
+    test_three_inserts_left();
+    test_five_inserts();
+    test_sequential_inserts();
+    test_root_always_black();
+    test_reverse_inserts();
+    print("[OK] 291_interp_red_black_logic");
+    0
+}

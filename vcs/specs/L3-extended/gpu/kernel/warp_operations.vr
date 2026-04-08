@@ -1,0 +1,194 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, kernel, warp
+// @description: Warp-level operations for GPU kernels
+
+/// Warp operations allow threads within a warp (32 threads on NVIDIA)
+/// to communicate and synchronize efficiently.
+
+/// Get the lane ID within the current warp
+@kernel
+fn lane_id() -> Int {
+    threadIdx.x % WARP_SIZE
+}
+
+/// Warp shuffle operations - exchange data between lanes
+@kernel
+fn warp_shuffle_example(data: &mut Tensor<f32, [N]>) {
+    let tid = threadIdx.x;
+    let lane = tid % WARP_SIZE;
+
+    // Read this threadps value
+    let value = data[tid];
+
+    // Shuffle: get value from lane (lane + 1) % 32
+    let from_next = __shfl_sync(FULL_MASK, value, (lane + 1) % WARP_SIZE);
+
+    // Shuffle up: get value from lane (lane - delta)
+    let from_below = __shfl_up_sync(FULL_MASK, value, 1);
+
+    // Shuffle down: get value from lane (lane + delta)
+    let from_above = __shfl_down_sync(FULL_MASK, value, 1);
+
+    // Shuffle XOR: get value from lane (lane ^ mask)
+    let xor_partner = __shfl_xor_sync(FULL_MASK, value, 1);
+
+    data[tid] = from_next + from_above;
+}
+
+/// Warp reduction using shuffle
+@kernel
+fn warp_reduce_sum(value: f32) -> f32 {
+    let mut result = value;
+
+    // Parallel reduction across warp
+    for offset in [16, 8, 4, 2, 1] {
+        result += __shfl_down_sync(FULL_MASK, result, offset);
+    }
+
+    // Only lane 0 has the final result
+    result
+}
+
+/// Warp vote operations
+@kernel
+fn warp_vote_example(condition: Bool) -> (Bool, Bool, Int) {
+    // All lanes have condition true?
+    let all_true = __all_sync(FULL_MASK, condition);
+
+    // Any lane has condition true?
+    let any_true = __any_sync(FULL_MASK, condition);
+
+    // Ballot: get bitmask of which lanes have condition true
+    let ballot = __ballot_sync(FULL_MASK, condition);
+
+    // Population count: how many lanes have condition true
+    let count = __popc(ballot);
+
+    (all_true, any_true, count)
+}
+
+/// Warp match operation - find lanes with same value
+@kernel
+fn warp_match_example(value: Int) -> u32 {
+    // Returns bitmask of lanes with matching value
+    __match_any_sync(FULL_MASK, value)
+}
+
+/// Warp-level parallel scan
+@kernel
+fn warp_inclusive_scan(value: f32) -> f32 {
+    let lane = threadIdx.x % WARP_SIZE;
+    let mut result = value;
+
+    // Hillis-Steele parallel scan
+    for offset in [1, 2, 4, 8, 16] {
+        let n = __shfl_up_sync(FULL_MASK, result, offset);
+        if lane >= offset {
+            result += n;
+        }
+    }
+
+    result
+}
+
+/// Warp-level histogram
+@kernel
+fn warp_histogram(
+    data: &Tensor<i32, [N]>,
+    histogram: &mut Tensor<i32, [BINS]>
+) {
+    let tid = threadIdx.x;
+    let lane = tid % WARP_SIZE;
+
+    // Each threadps bin
+    let bin = data[tid] % BINS;
+
+    // Find lanes with same bin
+    let peers = __match_any_sync(FULL_MASK, bin);
+
+    // Count peers (including self)
+    let count = __popc(peers);
+
+    // Only lowest lane in each group does the atomic add
+    let leader = __ffs(peers) - 1;  // Find first set bit
+    if lane == leader {
+        atomicAdd(&histogram[bin], count);
+    }
+}
+
+/// Warp divergence handling
+@kernel
+fn handle_divergence(data: &Tensor<f32, [N]>) -> f32 {
+    let tid = threadIdx.x;
+    let lane = tid % WARP_SIZE;
+
+    // Get active mask for divergent branches
+    if data[tid] > 0.0 {
+        // Only some threads take this branch
+        let active = __activemask();
+
+        // Reduce only among active threads
+        let sum = warp_reduce_active(data[tid], active);
+        return sum;
+    } else {
+        // Other threads take this branch
+        let active = __activemask();
+        return 0.0;
+    }
+}
+
+@kernel
+fn warp_reduce_active(value: f32, mask: u32) -> f32 {
+    let mut result = value;
+
+    for offset in [16, 8, 4, 2, 1] {
+        let n = __shfl_down_sync(mask, result, offset);
+        result += n;
+    }
+
+    result
+}
+
+/// Warp-cooperative matrix operations (Tensor Cores)
+@kernel
+fn tensor_core_matmul(
+    a: &Tensor<f16, [16, 16]>,
+    b: &Tensor<f16, [16, 16]>,
+    c: &mut Tensor<f32, [16, 16]>
+) {
+    // Load matrix fragments
+    let a_frag = wmma.load_matrix_a(a);
+    let b_frag = wmma.load_matrix_b(b);
+    let c_frag = wmma.load_matrix_c(c);
+
+    // Matrix multiply-accumulate
+    let d_frag = wmma.mma(a_frag, b_frag, c_frag);
+
+    // Store result
+    wmma.store_matrix_d(c, d_frag);
+}
+
+const WARP_SIZE: Int = 32;
+const FULL_MASK: u32 = 0xFFFFFFFF;
+const BINS: Int = 256;
+
+/// Warp intrinsics (compiler builtins)
+@intrinsic fn __shfl_sync(mask: u32, val: f32, lane: Int) -> f32;
+@intrinsic fn __shfl_up_sync(mask: u32, val: f32, delta: Int) -> f32;
+@intrinsic fn __shfl_down_sync(mask: u32, val: f32, delta: Int) -> f32;
+@intrinsic fn __shfl_xor_sync(mask: u32, val: f32, mask_val: Int) -> f32;
+@intrinsic fn __all_sync(mask: u32, predicate: Bool) -> Bool;
+@intrinsic fn __any_sync(mask: u32, predicate: Bool) -> Bool;
+@intrinsic fn __ballot_sync(mask: u32, predicate: Bool) -> u32;
+@intrinsic fn __match_any_sync(mask: u32, value: Int) -> u32;
+@intrinsic fn __activemask() -> u32;
+@intrinsic fn __popc(x: u32) -> Int;
+@intrinsic fn __ffs(x: u32) -> Int;
+@intrinsic fn atomicAdd(addr: &mut i32, val: Int) -> Int;
+
+fn main() {
+    // GPU kernel compilation only
+}

@@ -1,0 +1,364 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, lcs, longest-common-subsequence, dynamic-programming
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT longest common subsequence (LCS) with DP table and reconstruction
+
+// Sequence of up to 8 integers
+type Seq8 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    len: Int
+};
+
+fn seq_get(s: Seq8, i: Int) -> Int {
+    if i == 0 { s.c0 }
+    else if i == 1 { s.c1 }
+    else if i == 2 { s.c2 }
+    else if i == 3 { s.c3 }
+    else if i == 4 { s.c4 }
+    else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 }
+    else { s.c7 }
+}
+
+fn seq_empty() -> Seq8 {
+    Seq8 { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 0 }
+}
+
+// Row of 9 elements (indices 0..8)
+type Row9 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int
+};
+
+fn row_get(r: Row9, i: Int) -> Int {
+    if i == 0 { r.a0 }
+    else if i == 1 { r.a1 }
+    else if i == 2 { r.a2 }
+    else if i == 3 { r.a3 }
+    else if i == 4 { r.a4 }
+    else if i == 5 { r.a5 }
+    else if i == 6 { r.a6 }
+    else if i == 7 { r.a7 }
+    else { r.a8 }
+}
+
+fn row_set(r: Row9, i: Int, v: Int) -> Row9 {
+    Row9 {
+        a0: if i == 0 { v } else { r.a0 },
+        a1: if i == 1 { v } else { r.a1 },
+        a2: if i == 2 { v } else { r.a2 },
+        a3: if i == 3 { v } else { r.a3 },
+        a4: if i == 4 { v } else { r.a4 },
+        a5: if i == 5 { v } else { r.a5 },
+        a6: if i == 6 { v } else { r.a6 },
+        a7: if i == 7 { v } else { r.a7 },
+        a8: if i == 8 { v } else { r.a8 }
+    }
+}
+
+fn row_zero() -> Row9 {
+    Row9 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, a8: 0 }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// DP table: 9 rows of Row9
+type DPTable is {
+    r0: Row9, r1: Row9, r2: Row9, r3: Row9,
+    r4: Row9, r5: Row9, r6: Row9, r7: Row9,
+    r8: Row9
+};
+
+fn dp_get_row(t: DPTable, i: Int) -> Row9 {
+    if i == 0 { t.r0 }
+    else if i == 1 { t.r1 }
+    else if i == 2 { t.r2 }
+    else if i == 3 { t.r3 }
+    else if i == 4 { t.r4 }
+    else if i == 5 { t.r5 }
+    else if i == 6 { t.r6 }
+    else if i == 7 { t.r7 }
+    else { t.r8 }
+}
+
+fn dp_set_row(t: DPTable, i: Int, r: Row9) -> DPTable {
+    DPTable {
+        r0: if i == 0 { r } else { t.r0 },
+        r1: if i == 1 { r } else { t.r1 },
+        r2: if i == 2 { r } else { t.r2 },
+        r3: if i == 3 { r } else { t.r3 },
+        r4: if i == 4 { r } else { t.r4 },
+        r5: if i == 5 { r } else { t.r5 },
+        r6: if i == 6 { r } else { t.r6 },
+        r7: if i == 7 { r } else { t.r7 },
+        r8: if i == 8 { r } else { t.r8 }
+    }
+}
+
+fn dp_empty() -> DPTable {
+    let z = row_zero();
+    DPTable { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z, r8: z }
+}
+
+// Build full LCS DP table
+// dp[i][j] = LCS length of s[0..i] and t[0..j]
+fn lcs_table(s: Seq8, t: Seq8) -> DPTable {
+    let n = s.len;
+    let m = t.len;
+    let mut table = dp_empty();
+    // Row 0 is already all zeros
+
+    let mut i = 1;
+    while i <= n {
+        let prev = dp_get_row(table, i - 1);
+        let mut curr = row_zero();
+
+        let mut j = 1;
+        while j <= m {
+            if seq_get(s, i - 1) == seq_get(t, j - 1) {
+                curr = row_set(curr, j, row_get(prev, j - 1) + 1);
+            } else {
+                curr = row_set(curr, j, max_val(row_get(prev, j), row_get(curr, j - 1)));
+            }
+            j = j + 1;
+        }
+
+        table = dp_set_row(table, i, curr);
+        i = i + 1;
+    }
+    table
+}
+
+// Get LCS length from table
+fn lcs_length(s: Seq8, t: Seq8) -> Int {
+    let table = lcs_table(s, t);
+    row_get(dp_get_row(table, s.len), t.len)
+}
+
+// Reconstruct LCS into a Seq8 by backtracking through the table
+fn lcs_reconstruct(table: DPTable, s: Seq8, t: Seq8) -> Seq8 {
+    let mut result = seq_empty();
+    let mut i = s.len;
+    let mut j = t.len;
+    let mut pos = row_get(dp_get_row(table, i), j);  // LCS length
+
+    while i > 0 && j > 0 {
+        if seq_get(s, i - 1) == seq_get(t, j - 1) {
+            // This character is in the LCS
+            pos = pos - 1;
+            result = seq_set(result, pos, seq_get(s, i - 1));
+            i = i - 1;
+            j = j - 1;
+        } else if row_get(dp_get_row(table, i - 1), j) > row_get(dp_get_row(table, i), j - 1) {
+            i = i - 1;
+        } else {
+            j = j - 1;
+        }
+    }
+
+    let lcs_len = row_get(dp_get_row(table, s.len), t.len);
+    Seq8 {
+        c0: result.c0, c1: result.c1, c2: result.c2, c3: result.c3,
+        c4: result.c4, c5: result.c5, c6: result.c6, c7: result.c7,
+        len: lcs_len
+    }
+}
+
+fn seq_set(s: Seq8, i: Int, v: Int) -> Seq8 {
+    Seq8 {
+        c0: if i == 0 { v } else { s.c0 },
+        c1: if i == 1 { v } else { s.c1 },
+        c2: if i == 2 { v } else { s.c2 },
+        c3: if i == 3 { v } else { s.c3 },
+        c4: if i == 4 { v } else { s.c4 },
+        c5: if i == 5 { v } else { s.c5 },
+        c6: if i == 6 { v } else { s.c6 },
+        c7: if i == 7 { v } else { s.c7 },
+        len: s.len
+    }
+}
+
+// Longest Common Substring (contiguous) - different from subsequence
+fn lc_substring(s: Seq8, t: Seq8) -> Int {
+    let n = s.len;
+    let m = t.len;
+    let mut prev = row_zero();
+    let mut best = 0;
+
+    let mut i = 1;
+    while i <= n {
+        let mut curr = row_zero();
+        let mut j = 1;
+        while j <= m {
+            if seq_get(s, i - 1) == seq_get(t, j - 1) {
+                let val = row_get(prev, j - 1) + 1;
+                curr = row_set(curr, j, val);
+                if val > best {
+                    best = val;
+                }
+            }
+            // else curr[j] stays 0
+            j = j + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+
+    best
+}
+
+// Check if seq a is a subsequence of seq b
+fn is_subsequence(a: Seq8, b: Seq8) -> Bool {
+    let mut ai = 0;
+    let mut bi = 0;
+    while ai < a.len && bi < b.len {
+        if seq_get(a, ai) == seq_get(b, bi) {
+            ai = ai + 1;
+        }
+        bi = bi + 1;
+    }
+    ai == a.len
+}
+
+fn main() -> Int {
+    // === Test 1: Classic LCS example ===
+    // s = [1,2,3,4,5], t = [2,4,5,6]
+    // LCS = [2,4,5], length 3
+    let s1 = Seq8 { c0: 1, c1: 2, c2: 3, c3: 4, c4: 5, c5: 0, c6: 0, c7: 0, len: 5 };
+    let t1 = Seq8 { c0: 2, c1: 4, c2: 5, c3: 6, c4: 0, c5: 0, c6: 0, c7: 0, len: 4 };
+    assert_eq(lcs_length(s1, t1), 3);
+
+    // === Test 2: Identical sequences ===
+    assert_eq(lcs_length(s1, s1), 5);
+
+    // === Test 3: Empty sequences ===
+    let empty = seq_empty();
+    assert_eq(lcs_length(empty, empty), 0);
+    assert_eq(lcs_length(s1, empty), 0);
+    assert_eq(lcs_length(empty, s1), 0);
+
+    // === Test 4: No common elements ===
+    let s2 = Seq8 { c0: 1, c1: 3, c2: 5, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 3 };
+    let t2 = Seq8 { c0: 2, c1: 4, c2: 6, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 3 };
+    assert_eq(lcs_length(s2, t2), 0);
+
+    // === Test 5: One is subsequence of other ===
+    let sub = Seq8 { c0: 2, c1: 4, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    assert_eq(lcs_length(s1, sub), 2);
+
+    // === Test 6: Symmetry: LCS(s,t) == LCS(t,s) ===
+    assert_eq(lcs_length(s1, t1), lcs_length(t1, s1));
+    assert_eq(lcs_length(s2, t2), lcs_length(t2, s2));
+
+    // === Test 7: Single element sequences ===
+    let one_a = Seq8 { c0: 5, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 1 };
+    let one_b = Seq8 { c0: 5, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 1 };
+    let one_c = Seq8 { c0: 3, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 1 };
+    assert_eq(lcs_length(one_a, one_b), 1);
+    assert_eq(lcs_length(one_a, one_c), 0);
+
+    // === Test 8: DP table structure ===
+    let table1 = lcs_table(s1, t1);
+    // Row 0 all zeros
+    let mut j = 0;
+    while j <= 4 {
+        assert_eq(row_get(dp_get_row(table1, 0), j), 0);
+        j = j + 1;
+    }
+    // Column 0 all zeros
+    let mut i = 0;
+    while i <= 5 {
+        assert_eq(row_get(dp_get_row(table1, i), 0), 0);
+        i = i + 1;
+    }
+    // Final cell
+    assert_eq(row_get(dp_get_row(table1, 5), 4), 3);
+
+    // === Test 9: DP table monotonicity ===
+    // dp[i][j] >= dp[i-1][j] and dp[i][j] >= dp[i][j-1]
+    let mut i2 = 1;
+    while i2 <= 5 {
+        let mut j2 = 1;
+        while j2 <= 4 {
+            let cur = row_get(dp_get_row(table1, i2), j2);
+            let above = row_get(dp_get_row(table1, i2 - 1), j2);
+            let left = row_get(dp_get_row(table1, i2), j2 - 1);
+            assert(cur >= above);
+            assert(cur >= left);
+            j2 = j2 + 1;
+        }
+        i2 = i2 + 1;
+    }
+
+    // === Test 10: LCS reconstruction ===
+    let lcs1 = lcs_reconstruct(table1, s1, t1);
+    assert_eq(lcs1.len, 3);
+    assert_eq(seq_get(lcs1, 0), 2);
+    assert_eq(seq_get(lcs1, 1), 4);
+    assert_eq(seq_get(lcs1, 2), 5);
+
+    // === Test 11: Reconstructed LCS is subsequence of both ===
+    assert(is_subsequence(lcs1, s1));
+    assert(is_subsequence(lcs1, t1));
+
+    // === Test 12: Longest Common Substring ===
+    // s = [1,2,3,4,5], t = [2,3,4,6] -> LCSubstring = [2,3,4], length 3
+    let t3 = Seq8 { c0: 2, c1: 3, c2: 4, c3: 6, c4: 0, c5: 0, c6: 0, c7: 0, len: 4 };
+    assert_eq(lc_substring(s1, t3), 3);
+
+    // No common substring
+    assert_eq(lc_substring(s2, t2), 0);
+
+    // Identical sequences: substring = full length
+    assert_eq(lc_substring(s1, s1), 5);
+
+    // Single match
+    let t4 = Seq8 { c0: 9, c1: 3, c2: 9, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 3 };
+    assert_eq(lc_substring(s1, t4), 1);
+
+    // === Test 13: LCS bound: LCS(s,t) <= min(|s|, |t|) ===
+    assert(lcs_length(s1, t1) <= 4);  // min(5,4)
+    assert(lcs_length(s1, one_a) <= 1);
+
+    // === Test 14: LCS with repeated elements ===
+    // s = [1,1,1,1], t = [1,1]
+    let rep4 = Seq8 { c0: 1, c1: 1, c2: 1, c3: 1, c4: 0, c5: 0, c6: 0, c7: 0, len: 4 };
+    let rep2 = Seq8 { c0: 1, c1: 1, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    assert_eq(lcs_length(rep4, rep2), 2);
+
+    // === Test 15: LCS with interleaved ===
+    // s = [1,3,5,7], t = [2,3,6,7] -> LCS = [3,7], length 2
+    let s3 = Seq8 { c0: 1, c1: 3, c2: 5, c3: 7, c4: 0, c5: 0, c6: 0, c7: 0, len: 4 };
+    let t5 = Seq8 { c0: 2, c1: 3, c2: 6, c3: 7, c4: 0, c5: 0, c6: 0, c7: 0, len: 4 };
+    assert_eq(lcs_length(s3, t5), 2);
+
+    let table3 = lcs_table(s3, t5);
+    let lcs3 = lcs_reconstruct(table3, s3, t5);
+    assert_eq(lcs3.len, 2);
+    assert_eq(seq_get(lcs3, 0), 3);
+    assert_eq(seq_get(lcs3, 1), 7);
+
+    // === Test 16: is_subsequence checks ===
+    assert(is_subsequence(empty, s1));
+    assert(is_subsequence(empty, empty));
+    assert(is_subsequence(one_a, s1));  // 5 is in s1
+    assert(!is_subsequence(s1, one_a));  // s1 too long
+
+    // === Test 17: Full-length sequences ===
+    let full_a = Seq8 { c0: 1, c1: 2, c2: 3, c3: 4, c4: 5, c5: 6, c6: 7, c7: 8, len: 8 };
+    let full_b = Seq8 { c0: 2, c1: 4, c2: 6, c3: 8, c4: 10, c5: 12, c6: 14, c7: 16, len: 8 };
+    // Common elements: 2, 4, 6, 8 -> LCS length 4
+    assert_eq(lcs_length(full_a, full_b), 4);
+
+    // LCS >= longest common substring (always)
+    assert(lcs_length(s1, t3) >= lc_substring(s1, t3));
+
+    0
+}

@@ -1,0 +1,155 @@
+// @test: run
+// @expected-stdout: Buffered items: [1, 2, 3]\nBuffered items: [4, 5, 6]\nBuffered items: [7, 8, 9]\nBuffered items: [10]
+// @tier: 0
+// @level: L2
+// @tags: async, streams, buffering
+// @description: Buffered async stream processing
+
+type AsyncStream<T> is protocol {
+    async fn next(&mut self) -> Maybe<T>
+};
+
+// Buffered stream - collects items into chunks
+type BufferedStream<S, T> is {
+    source: S,
+    buffer_size: Int,
+};
+
+implement<S: AsyncStream<T>, T> BufferedStream<S, T> {
+    fn new(source: S, buffer_size: Int) -> Self {
+        Self { source, buffer_size }
+    }
+}
+
+implement<S: AsyncStream<T>, T> AsyncStream<List<T>> for BufferedStream<S, T> {
+    async fn next(&mut self) -> Maybe<List<T>> {
+        let mut buffer = [];
+
+        for _ in 0..self.buffer_size {
+            match self.source.next().await {
+                Some(item) => buffer.push(item),
+                None => break,
+            }
+        }
+
+        if buffer.is_empty() {
+            None
+        } else {
+            Some(buffer)
+        }
+    }
+}
+
+// Prefetch stream - eagerly fetches next item
+type PrefetchStream<S, T> is {
+    source: S,
+    prefetched: Maybe<T>,
+    started: Bool,
+};
+
+implement<S: AsyncStream<T>, T> PrefetchStream<S, T> {
+    fn new(source: S) -> Self {
+        Self { source, prefetched: None, started: false }
+    }
+}
+
+implement<S: AsyncStream<T>, T: Clone> AsyncStream<T> for PrefetchStream<S, T> {
+    async fn next(&mut self) -> Maybe<T> {
+        // First call - fetch initial and prefetch next
+        if !self.started {
+            self.started = true;
+            let current = self.source.next().await;
+            self.prefetched = self.source.next().await;
+            return current;
+        }
+
+        // Return prefetched and fetch next
+        let current = self.prefetched.take();
+        if current.is_some() {
+            self.prefetched = self.source.next().await;
+        }
+        current
+    }
+}
+
+// Debounce stream - skips rapid successive items
+type DebounceStream<S, T> is {
+    source: S,
+    delay_ms: Int,
+    last_emit: Maybe<Instant>,
+};
+
+implement<S: AsyncStream<T>, T> DebounceStream<S, T> {
+    fn new(source: S, delay_ms: Int) -> Self {
+        Self { source, delay_ms, last_emit: None }
+    }
+}
+
+// Window stream - sliding window over items
+type WindowStream<S, T> is {
+    source: S,
+    window_size: Int,
+    buffer: List<T>,
+};
+
+implement<S: AsyncStream<T>, T: Clone> WindowStream<S, T> {
+    fn new(source: S, window_size: Int) -> Self {
+        Self { source, window_size, buffer: [] }
+    }
+}
+
+implement<S: AsyncStream<T>, T: Clone> AsyncStream<List<T>> for WindowStream<S, T> {
+    async fn next(&mut self) -> Maybe<List<T>> {
+        // Fill buffer initially
+        while self.buffer.len() < self.window_size {
+            match self.source.next().await {
+                Some(item) => self.buffer.push(item),
+                None => {
+                    if self.buffer.is_empty() {
+                        return None;
+                    }
+                    // Return remaining items as partial window
+                    let window = self.buffer.clone();
+                    self.buffer.clear();
+                    return Some(window);
+                }
+            }
+        }
+
+        // Return current window
+        let window = self.buffer.clone();
+
+        // Slide window
+        self.buffer.remove(0);
+        if let Some(item) = self.source.next().await {
+            self.buffer.push(item);
+        }
+
+        Some(window)
+    }
+}
+
+// Simple range stream for testing
+type RangeStream is { current: Int, end: Int };
+
+implement AsyncStream<Int> for RangeStream {
+    async fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end {
+            let v = self.current;
+            self.current += 1;
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
+
+async fn main() {
+    // Test buffered stream
+    let source = RangeStream { current: 1, end: 11 };
+    let mut buffered = BufferedStream.new(source, 3);
+
+    while let Some(chunk) = buffered.next().await {
+        println(f"Buffered items: {chunk}");
+    }
+}

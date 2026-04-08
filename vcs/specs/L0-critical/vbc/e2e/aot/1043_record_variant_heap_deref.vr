@@ -1,0 +1,64 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: record_variant, heap, deref, method, recursive
+// @expect: pass
+
+// Tests (*node).method() with record variant payloads in Heap<T>
+
+type AST is
+    Num(Int)
+    | BinOp { op: Int, left: Heap<AST>, right: Heap<AST> };
+
+implement AST {
+    @allow(unbounded_recursion)
+    fn eval(&self) -> Int {
+        match self {
+            AST.Num(v) => v,
+            AST.BinOp { op, left, right } => {
+                let l = (*left).eval();
+                let r = (*right).eval();
+                if op == 0 { l + r }
+                else if op == 1 { l * r }
+                else { l - r }
+            },
+        }
+    }
+
+    @allow(unbounded_recursion)
+    fn node_count(&self) -> Int {
+        match self {
+            AST.Num(_) => 1,
+            AST.BinOp { left, right, .. } => {
+                1 + (*left).node_count() + (*right).node_count()
+            },
+        }
+    }
+}
+
+fn main() -> Int {
+    // (3 + 4) * (10 - 2) = 7 * 8 = 56
+    let expr = AST.BinOp {
+        op: 1,
+        left: Heap(AST.BinOp {
+            op: 0,
+            left: Heap(AST.Num(3)),
+            right: Heap(AST.Num(4)),
+        }),
+        right: Heap(AST.BinOp {
+            op: 2,
+            left: Heap(AST.Num(10)),
+            right: Heap(AST.Num(2)),
+        }),
+    };
+
+    if expr.eval() != 56 { return 1; }
+    if expr.node_count() != 7 { return 2; }
+
+    // Simple: Num(42)
+    let simple = AST.Num(42);
+    if simple.eval() != 42 { return 3; }
+    if simple.node_count() != 1 { return 4; }
+
+    0
+}

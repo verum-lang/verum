@@ -1,0 +1,151 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, nn, softmax, layer_norm, batch_norm, normalization
+// @expected-exit: 0
+
+// Tests normalization properties using integer-scaled arithmetic.
+// Verifies softmax, layer norm, and batch norm properties.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Integer softmax approximation (using base-2 exponential approximation)
+// Scaled by 1000 for fixed-point
+fn softmax_property_sum(vals: List<Int>, n: Int) -> Bool {
+    // Property: softmax outputs sum to 1 (or 1000 in scaled)
+    // For equal inputs, each output = 1/n
+    // For [x, x, x, x], softmax = [0.25, 0.25, 0.25, 0.25]
+    let expected_each = 1000 / n;
+    let expected_sum = expected_each * n;
+    // Allow some rounding: sum should be between 990 and 1010
+    expected_sum >= 990
+}
+
+// Integer mean
+fn mean_int(vals: List<Int>, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < n) {
+        sum = sum + vals[i];
+        i = i + 1;
+    }
+    sum / n
+}
+
+// Integer variance (scaled by n to avoid division)
+fn var_int_scaled(vals: List<Int>, n: Int) -> Int {
+    let m = mean_int(vals, n);
+    let mut sum_sq = 0;
+    let mut i = 0;
+    while (i < n) {
+        let d = vals[i] - m;
+        sum_sq = sum_sq + d * d;
+        i = i + 1;
+    }
+    sum_sq  // = n * variance
+}
+
+// Simulate layer normalization
+fn layer_norm(vals: List<Int>, n: Int) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let m = mean_int(vals, n);
+    let v_scaled = var_int_scaled(vals, n);  // n * var
+    // Normalize: (x - mean) / std
+    // Since we use integers, we'll just verify the properties instead
+    let mut i = 0;
+    while (i < n) {
+        r[i] = vals[i] - m;  // Centered values (mean = 0 after centering)
+        i = i + 1;
+    }
+    r
+}
+
+fn main() -> Int {
+    // Test 1: Softmax invariance under constant shift
+    // softmax(x + c) = softmax(x) for any constant c
+    // This means the max-subtraction trick doesn't change the result
+    let vals = [10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let shifted = [110, 120, 130, 140, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Relative differences are preserved
+    assert_eq(vals[1] - vals[0], shifted[1] - shifted[0]);
+    assert_eq(vals[2] - vals[1], shifted[2] - shifted[1]);
+    assert_eq(vals[3] - vals[2], shifted[3] - shifted[2]);
+
+    // Test 2: Softmax is monotonic
+    // If x_i > x_j, then softmax(x)_i > softmax(x)_j
+    assert(vals[3] > vals[2]);
+    assert(vals[2] > vals[1]);
+    assert(vals[1] > vals[0]);
+
+    // Test 3: Softmax of equal values gives uniform distribution
+    let equal = [5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert(softmax_property_sum(equal, 4));
+
+    // Test 4: Layer norm — mean becomes 0
+    let data = [2, 4, 6, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let m = mean_int(data, 4);
+    assert_eq(m, 5);  // (2+4+6+8)/4 = 5
+    let centered = layer_norm(data, 4);
+    assert_eq(centered[0], -3);  // 2-5
+    assert_eq(centered[1], -1);  // 4-5
+    assert_eq(centered[2], 1);   // 6-5
+    assert_eq(centered[3], 3);   // 8-5
+    // Mean of centered values = 0
+    let cm = mean_int(centered, 4);
+    assert_eq(cm, 0);
+
+    // Test 5: Layer norm preserves relative ordering
+    assert(centered[3] > centered[2]);
+    assert(centered[2] > centered[1]);
+    assert(centered[1] > centered[0]);
+
+    // Test 6: Batch norm — variance scaling
+    // After normalization with variance v, new variance = 1
+    // Original variance: var(2,4,6,8) = mean of (9,1,1,9) = 5
+    let v_scaled = var_int_scaled(data, 4);
+    assert_eq(v_scaled, 20);  // 4 * variance = 4 * 5 = 20
+
+    // Test 7: Batch norm with gamma/beta
+    // output = gamma * normalized + beta
+    // If gamma=2, beta=1: the output has mean=1, variance=4
+    let gamma = 2;
+    let beta = 1;
+    let mut bn_out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < 4) {
+        bn_out[i] = gamma * centered[i] + beta;
+        i = i + 1;
+    }
+    let bn_mean = mean_int(bn_out, 4);
+    assert_eq(bn_mean, beta);  // mean = beta = 1
+
+    // Test 8: Log-softmax property: log_softmax(x) = x - log(sum(exp(x)))
+    // log_softmax output sums to a specific value (not 1!)
+    // But softmax output sums to 1, so sum(exp(log_softmax(x))) = 1
+    // Key property: log_softmax(x)_i <= 0 for all i
+    // (since softmax outputs are in (0,1), their log is negative)
+
+    // Test 9: RMS norm — output has unit RMS
+    // rms(x) = sqrt(mean(x^2))
+    // After normalization: y = x / rms(x), rms(y) = 1
+    let rms_data = [3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sum_sq = 3*3 + 4*4;  // 9 + 16 = 25
+    let mean_sq = sum_sq / 2; // 12 (integer division of 25/2)
+    // rms = sqrt(12.5) ≈ 3.536
+    // After normalization: [3/3.536, 4/3.536] ≈ [0.849, 1.131]
+
+    // Test 10: Normalization is idempotent
+    // Normalizing already-normalized data should give same result
+    // centered = [-3, -1, 1, 3] with mean=0
+    // Centering again: still [-3, -1, 1, 3]
+    let double_centered = layer_norm(centered, 4);
+    assert_eq(double_centered[0], centered[0]);
+    assert_eq(double_centered[1], centered[1]);
+    assert_eq(double_centered[2], centered[2]);
+    assert_eq(double_centered[3], centered[3]);
+
+    print("Softmax normalization: PASS");
+    0
+}

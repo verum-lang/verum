@@ -1,0 +1,143 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: iterator, generator, yield, for-in, range
+// @description: Test iterator patterns with generators and for-in loops
+
+// Generator function (fn*)
+fn* range_gen(start: Int, end: Int) -> Int {
+    let mut i = start;
+    while i < end {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn test_generator_basic() -> Int {
+    let mut sum = 0;
+    for val in range_gen(0, 5) {
+        sum = sum + val;
+    }
+    // 0+1+2+3+4 = 10
+    if sum != 10 {
+        print(f"FAIL gen_basic: sum={sum}, expected 10");
+        return 1;
+    }
+    print("  gen_basic: OK");
+    0
+}
+
+fn* fibonacci_gen() -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    loop {
+        yield a;
+        let tmp = b;
+        b = a + b;
+        a = tmp;
+    }
+}
+
+fn test_fibonacci_gen() -> Int {
+    let mut count = 0;
+    let mut last = 0;
+    for val in fibonacci_gen() {
+        last = val;
+        count = count + 1;
+        if count >= 11 { break; }
+    }
+    // fib(10) = 55
+    if last != 55 {
+        print(f"FAIL fib_gen: last={last}, expected 55");
+        return 1;
+    }
+    print("  fib_gen: OK");
+    0
+}
+
+fn* squares_gen(n: Int) -> Int {
+    let mut i = 1;
+    while i <= n {
+        yield i * i;
+        i = i + 1;
+    }
+}
+
+fn test_squares() -> Int {
+    let mut sum = 0;
+    for sq in squares_gen(5) {
+        sum = sum + sq;
+    }
+    // 1+4+9+16+25 = 55
+    if sum != 55 {
+        print(f"FAIL squares: sum={sum}, expected 55");
+        return 1;
+    }
+    print("  squares: OK");
+    0
+}
+
+// For-in with range and operations
+fn test_for_range_ops() -> Int {
+    // Collect even squares from 1..10
+    let mut evens = List.new();
+    for i in 1..10 {
+        let sq = i * i;
+        if sq % 2 == 0 {
+            evens.push(sq);
+        }
+    }
+    // Even squares: 4(2^2), 16(4^2), 36(6^2), 64(8^2)
+    if evens.len() != 4 {
+        print(f"FAIL range_ops: len={evens.len()}, expected 4");
+        return 1;
+    }
+    if evens[0] != 4 || evens[3] != 64 {
+        print(f"FAIL range_ops: [{evens[0]}..{evens[3]}]");
+        return 1;
+    }
+    print("  for_range_ops: OK");
+    0
+}
+
+fn* countdown(n: Int) -> Int {
+    let mut i = n;
+    while i > 0 {
+        yield i;
+        i = i - 1;
+    }
+}
+
+fn test_countdown() -> Int {
+    let mut result = List.new();
+    for val in countdown(5) {
+        result.push(val);
+    }
+    if result.len() != 5 {
+        print(f"FAIL countdown: len={result.len()}, expected 5");
+        return 1;
+    }
+    if result[0] != 5 || result[4] != 1 {
+        print(f"FAIL countdown: [{result[0]}..{result[4]}]");
+        return 1;
+    }
+    print("  countdown: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Iterator Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_generator_basic();
+    failures = failures + test_fibonacci_gen();
+    failures = failures + test_squares();
+    failures = failures + test_for_range_ops();
+    failures = failures + test_countdown();
+
+    if failures == 0 {
+        print("All iterator pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

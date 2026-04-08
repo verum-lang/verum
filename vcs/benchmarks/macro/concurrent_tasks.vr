@@ -1,0 +1,887 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: > 100K tasks/sec spawn, < 1ms join latency
+// @tags: async, spawn, concurrent, tasks, performance
+
+/// Concurrent Tasks Benchmark
+///
+/// Measures async/concurrent task performance:
+/// - Task spawn overhead
+/// - Task join latency
+/// - Channel throughput
+/// - Work stealing efficiency
+/// - Fan-out/fan-in patterns
+///
+/// Targets:
+/// - Task spawn: < 500ns
+/// - Task join: < 1ms for 1000 tasks
+/// - Channel throughput: > 1M messages/sec
+/// - Work stealing: > 90% efficiency
+
+module vcs.benchmarks.macro.concurrent_tasks
+
+using [Benchmark, Async, Channel, Parallel]
+
+const WARMUP_ITERATIONS: Int = 1_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Concurrent Tasks Performance");
+
+    // Task spawn benchmarks
+    results.add(benchmark_spawn_simple());
+    results.add(benchmark_spawn_with_closure());
+    results.add(benchmark_spawn_batch());
+
+    // Task join benchmarks
+    results.add(benchmark_join_immediate());
+    results.add(benchmark_join_delayed());
+    results.add(benchmark_join_all());
+
+    // Channel benchmarks
+    results.add(benchmark_channel_unbounded());
+    results.add(benchmark_channel_bounded());
+    results.add(benchmark_channel_mpsc());
+    results.add(benchmark_channel_mpmc());
+
+    // Work distribution benchmarks
+    results.add(benchmark_parallel_map());
+    results.add(benchmark_parallel_reduce());
+    results.add(benchmark_work_stealing());
+
+    // Pattern benchmarks
+    results.add(benchmark_fan_out_fan_in());
+    results.add(benchmark_pipeline());
+    results.add(benchmark_scatter_gather());
+
+    // Contention benchmarks
+    results.add(benchmark_mutex_contention());
+    results.add(benchmark_rwlock_contention());
+    results.add(benchmark_atomic_contention());
+
+    results.report();
+    assert(results.all_pass(), "Concurrent tasks performance below target");
+}
+
+/// Benchmark simple task spawn
+fn benchmark_spawn_simple() -> BenchmarkResult {
+    let num_tasks = 100_000;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let handle = spawn async { 42 };
+        let _ = handle.await;
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut handles: List<TaskHandle<Int>> = List.with_capacity(num_tasks);
+
+    for _ in 0..num_tasks {
+        handles.push(spawn async { 42 });
+    }
+
+    // Wait for all
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let spawn_ns = elapsed_ns as Float / num_tasks as Float;
+
+    BenchmarkResult {
+        name: "spawn_simple",
+        metric: "ns/spawn",
+        value: spawn_ns,
+        target: 500.0,
+        passed: spawn_ns < 500.0,
+    }
+}
+
+/// Benchmark spawn with closure capture
+fn benchmark_spawn_with_closure() -> BenchmarkResult {
+    let num_tasks = 50_000;
+    let captured_value = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut handles: List<TaskHandle<Int>> = List.with_capacity(num_tasks);
+
+    for i in 0..num_tasks {
+        let local_val = i;
+        handles.push(spawn async move {
+            local_val + captured_value
+        });
+    }
+
+    let mut sum: Int = 0;
+    for handle in handles {
+        sum += handle.await;
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let spawn_ns = elapsed_ns as Float / num_tasks as Float;
+
+    BenchmarkResult {
+        name: "spawn_with_closure",
+        metric: "ns/spawn",
+        value: spawn_ns,
+        target: 600.0,
+        passed: spawn_ns < 600.0,
+    }
+}
+
+/// Benchmark batch task spawning
+fn benchmark_spawn_batch() -> BenchmarkResult {
+    let batch_size = 1000;
+    let num_batches = 100;
+    let total_tasks = batch_size * num_batches;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..num_batches {
+        let handles = spawn_batch(batch_size, |i| async move { i * 2 });
+        let results = join_all(handles).await;
+        black_box(results.len());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let spawn_ns = elapsed_ns as Float / total_tasks as Float;
+
+    BenchmarkResult {
+        name: "spawn_batch",
+        metric: "ns/task",
+        value: spawn_ns,
+        target: 300.0,  // Should be faster due to batching
+        passed: spawn_ns < 300.0,
+    }
+}
+
+/// Benchmark immediate join (task completes before join)
+fn benchmark_join_immediate() -> BenchmarkResult {
+    let num_joins = 100_000;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..num_joins {
+        let handle = spawn async { i * 2 };
+        let result = handle.await;
+        black_box(result);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let join_ns = elapsed_ns as Float / num_joins as Float;
+
+    BenchmarkResult {
+        name: "join_immediate",
+        metric: "ns/join",
+        value: join_ns,
+        target: 1000.0,
+        passed: join_ns < 1000.0,
+    }
+}
+
+/// Benchmark delayed join (tasks run concurrently)
+fn benchmark_join_delayed() -> BenchmarkResult {
+    let num_tasks = 10_000;
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Spawn all tasks first
+    let handles: List<TaskHandle<Int>> = (0..num_tasks)
+        .map(|i| spawn async move {
+            // Simulate some work
+            let mut sum = 0;
+            for j in 0..100 {
+                sum += i + j;
+            }
+            sum
+        })
+        .collect();
+
+    // Join all
+    let mut total: Int = 0;
+    for handle in handles {
+        total += handle.await;
+    }
+    black_box(total);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_task_ns = elapsed_ns as Float / num_tasks as Float;
+
+    BenchmarkResult {
+        name: "join_delayed",
+        metric: "ns/task",
+        value: per_task_ns,
+        target: 2000.0,
+        passed: per_task_ns < 2000.0,
+    }
+}
+
+/// Benchmark join_all for multiple tasks
+fn benchmark_join_all() -> BenchmarkResult {
+    let num_tasks = 1000;
+    let iterations = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let handles: List<TaskHandle<Int>> = (0..num_tasks)
+            .map(|i| spawn async move { i * 2 })
+            .collect();
+
+        let results = join_all(handles).await;
+        black_box(results.len());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_join_all_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "join_all_1000",
+        metric: "ms/join_all",
+        value: per_join_all_ms,
+        target: 1.0,
+        passed: per_join_all_ms < 1.0,
+    }
+}
+
+/// Benchmark unbounded channel
+fn benchmark_channel_unbounded() -> BenchmarkResult {
+    let num_messages = 1_000_000;
+    let (tx, rx) = Channel.unbounded<Int>();
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Producer
+    let producer = spawn async move {
+        for i in 0..num_messages {
+            tx.send(i).await;
+        }
+    };
+
+    // Consumer
+    let consumer = spawn async move {
+        let mut sum: Int = 0;
+        for _ in 0..num_messages {
+            sum += rx.recv().await?;
+        }
+        sum
+    };
+
+    producer.await;
+    let sum = consumer.await?;
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let msgs_per_sec = (num_messages as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "channel_unbounded",
+        metric: "M msgs/sec",
+        value: msgs_per_sec / 1_000_000.0,
+        target: 1.0,
+        passed: msgs_per_sec > 1_000_000.0,
+    }
+}
+
+/// Benchmark bounded channel
+fn benchmark_channel_bounded() -> BenchmarkResult {
+    let num_messages = 1_000_000;
+    let channel_size = 1000;
+    let (tx, rx) = Channel.bounded<Int>(channel_size);
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Producer
+    let producer = spawn async move {
+        for i in 0..num_messages {
+            tx.send(i).await;
+        }
+    };
+
+    // Consumer
+    let consumer = spawn async move {
+        let mut sum: Int = 0;
+        for _ in 0..num_messages {
+            sum += rx.recv().await?;
+        }
+        sum
+    };
+
+    producer.await;
+    let sum = consumer.await?;
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let msgs_per_sec = (num_messages as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "channel_bounded",
+        metric: "M msgs/sec",
+        value: msgs_per_sec / 1_000_000.0,
+        target: 0.8,
+        passed: msgs_per_sec > 800_000.0,
+    }
+}
+
+/// Benchmark MPSC (Multiple Producer Single Consumer)
+fn benchmark_channel_mpsc() -> BenchmarkResult {
+    let num_producers = 8;
+    let msgs_per_producer = 100_000;
+    let total_msgs = num_producers * msgs_per_producer;
+    let (tx, rx) = Channel.unbounded<Int>();
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Producers
+    let producers: List<TaskHandle<()>> = (0..num_producers)
+        .map(|_| {
+            let tx = tx.clone();
+            spawn async move {
+                for i in 0..msgs_per_producer {
+                    tx.send(i).await;
+                }
+            }
+        })
+        .collect();
+
+    // Consumer
+    let consumer = spawn async move {
+        let mut count = 0;
+        while count < total_msgs {
+            let _ = rx.recv().await?;
+            count += 1;
+        }
+        count
+    };
+
+    for p in producers {
+        p.await;
+    }
+    let count = consumer.await?;
+    black_box(count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let msgs_per_sec = (total_msgs as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "channel_mpsc",
+        metric: "M msgs/sec",
+        value: msgs_per_sec / 1_000_000.0,
+        target: 0.5,
+        passed: msgs_per_sec > 500_000.0,
+    }
+}
+
+/// Benchmark MPMC (Multiple Producer Multiple Consumer)
+fn benchmark_channel_mpmc() -> BenchmarkResult {
+    let num_producers = 4;
+    let num_consumers = 4;
+    let msgs_per_producer = 50_000;
+    let total_msgs = num_producers * msgs_per_producer;
+    let (tx, rx) = Channel.bounded<Int>(1000);
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Producers
+    let producers: List<TaskHandle<()>> = (0..num_producers)
+        .map(|_| {
+            let tx = tx.clone();
+            spawn async move {
+                for i in 0..msgs_per_producer {
+                    tx.send(i).await;
+                }
+            }
+        })
+        .collect();
+
+    // Consumers
+    let received = Atomic.new(0);
+    let consumers: List<TaskHandle<Int>> = (0..num_consumers)
+        .map(|_| {
+            let rx = rx.clone();
+            let received = received.clone();
+            spawn async move {
+                let mut count = 0;
+                while received.load() < total_msgs {
+                    match rx.try_recv() {
+                        Some(_) => {
+                            received.fetch_add(1);
+                            count += 1;
+                        }
+                        None => yield_now().await,
+                    }
+                }
+                count
+            }
+        })
+        .collect();
+
+    for p in producers {
+        p.await;
+    }
+
+    let counts: Int = consumers.iter().map(|c| c.await).sum();
+    black_box(counts);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let msgs_per_sec = (total_msgs as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "channel_mpmc",
+        metric: "M msgs/sec",
+        value: msgs_per_sec / 1_000_000.0,
+        target: 0.3,
+        passed: msgs_per_sec > 300_000.0,
+    }
+}
+
+/// Benchmark parallel map
+fn benchmark_parallel_map() -> BenchmarkResult {
+    let data: List<Int> = (0..1_000_000).collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result: List<Int> = data.par_iter()
+        .map(|x| x * 2 + 1)
+        .collect();
+
+    black_box(result.len());
+
+    let elapsed_ns = timer.elapsed_ns();
+    let elems_per_sec = (data.len() as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "parallel_map",
+        metric: "M elems/sec",
+        value: elems_per_sec / 1_000_000.0,
+        target: 10.0,
+        passed: elems_per_sec > 10_000_000.0,
+    }
+}
+
+/// Benchmark parallel reduce
+fn benchmark_parallel_reduce() -> BenchmarkResult {
+    let data: List<Int> = (0..1_000_000).collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    let iterations = 100;
+    let mut sum: Int = 0;
+
+    for _ in 0..iterations {
+        sum += data.par_iter()
+            .reduce(|| 0, |a, b| a + b);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let elems_per_sec = ((data.len() * iterations) as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "parallel_reduce",
+        metric: "M elems/sec",
+        value: elems_per_sec / 1_000_000.0,
+        target: 50.0,
+        passed: elems_per_sec > 50_000_000.0,
+    }
+}
+
+/// Benchmark work stealing efficiency
+fn benchmark_work_stealing() -> BenchmarkResult {
+    // Create unbalanced work to trigger work stealing
+    let num_tasks = 1000;
+
+    fn varying_work(i: Int) -> Int {
+        let work_amount = if i % 10 == 0 { 10_000 } else { 100 };
+        let mut sum = 0;
+        for j in 0..work_amount {
+            sum += i + j;
+        }
+        sum
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result: Int = (0..num_tasks)
+        .par_iter()
+        .map(|i| varying_work(*i))
+        .sum();
+
+    black_box(result);
+
+    let elapsed_ns = timer.elapsed_ns();
+
+    // Compare with sequential for efficiency calculation
+    let seq_timer = Timer.new();
+    seq_timer.start();
+
+    let seq_result: Int = (0..num_tasks)
+        .map(|i| varying_work(i))
+        .sum();
+
+    black_box(seq_result);
+    let seq_ns = seq_timer.elapsed_ns();
+
+    let num_cpus = Parallel.num_cpus();
+    let efficiency = (seq_ns as Float / elapsed_ns as Float) / num_cpus as Float * 100.0;
+
+    BenchmarkResult {
+        name: "work_stealing_efficiency",
+        metric: "% efficiency",
+        value: efficiency,
+        target: 70.0,  // 70% parallel efficiency
+        passed: efficiency > 70.0,
+    }
+}
+
+/// Benchmark fan-out/fan-in pattern
+fn benchmark_fan_out_fan_in() -> BenchmarkResult {
+    let fan_out_factor = 100;
+    let iterations = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for iter in 0..iterations {
+        // Fan out
+        let handles: List<TaskHandle<Int>> = (0..fan_out_factor)
+            .map(|i| spawn async move {
+                // Work
+                let mut sum = 0;
+                for j in 0..100 {
+                    sum += iter * fan_out_factor + i + j;
+                }
+                sum
+            })
+            .collect();
+
+        // Fan in
+        let total: Int = handles.iter().map(|h| h.await).sum();
+        black_box(total);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_iteration_us = (elapsed_ns as Float / 1000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "fan_out_fan_in",
+        metric: "us/iteration",
+        value: per_iteration_us,
+        target: 500.0,
+        passed: per_iteration_us < 500.0,
+    }
+}
+
+/// Benchmark pipeline pattern
+fn benchmark_pipeline() -> BenchmarkResult {
+    let num_items = 10_000;
+    let num_stages = 5;
+
+    // Create channels for each stage
+    let channels: List<(Sender<Int>, Receiver<Int>)> =
+        (0..num_stages).map(|_| Channel.bounded(100)).collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Producer
+    let (first_tx, _) = &channels[0];
+    let producer = spawn async move {
+        for i in 0..num_items {
+            first_tx.send(i).await;
+        }
+    };
+
+    // Pipeline stages
+    let stages: List<TaskHandle<()>> = channels
+        .windows(2)
+        .enumerate()
+        .map(|(stage_idx, window)| {
+            let (_, rx) = &window[0];
+            let (tx, _) = &window[1];
+            spawn async move {
+                for _ in 0..num_items {
+                    let val = rx.recv().await?;
+                    let processed = val * 2 + stage_idx;
+                    tx.send(processed).await;
+                }
+            }
+        })
+        .collect();
+
+    // Consumer
+    let (_, last_rx) = &channels[num_stages - 1];
+    let consumer = spawn async move {
+        let mut sum: Int = 0;
+        for _ in 0..num_items {
+            sum += last_rx.recv().await?;
+        }
+        sum
+    };
+
+    producer.await;
+    for stage in stages {
+        stage.await;
+    }
+    let sum = consumer.await?;
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let items_per_sec = (num_items as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "pipeline",
+        metric: "K items/sec",
+        value: items_per_sec / 1000.0,
+        target: 100.0,
+        passed: items_per_sec > 100_000.0,
+    }
+}
+
+/// Benchmark scatter-gather pattern
+fn benchmark_scatter_gather() -> BenchmarkResult {
+    let num_workers = 8;
+    let items_per_worker = 10_000;
+    let total_items = num_workers * items_per_worker;
+
+    let timer = Timer.new();
+    timer.start();
+
+    let iterations = 10;
+    for _ in 0..iterations {
+        // Scatter
+        let data: List<Int> = (0..total_items).collect();
+        let chunks = data.chunks(items_per_worker);
+
+        // Workers process chunks
+        let handles: List<TaskHandle<Int>> = chunks
+            .map(|chunk| spawn async move {
+                chunk.iter().map(|x| x * 2).sum()
+            })
+            .collect();
+
+        // Gather
+        let total: Int = handles.iter().map(|h| h.await).sum();
+        black_box(total);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let items_per_sec = ((total_items * iterations) as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "scatter_gather",
+        metric: "M items/sec",
+        value: items_per_sec / 1_000_000.0,
+        target: 5.0,
+        passed: items_per_sec > 5_000_000.0,
+    }
+}
+
+/// Benchmark mutex contention
+fn benchmark_mutex_contention() -> BenchmarkResult {
+    let num_threads = 8;
+    let ops_per_thread = 100_000;
+    let counter = Shared.new(Mutex.new(0));
+
+    let timer = Timer.new();
+    timer.start();
+
+    let handles: List<TaskHandle<()>> = (0..num_threads)
+        .map(|_| {
+            let counter = counter.clone();
+            spawn async move {
+                for _ in 0..ops_per_thread {
+                    let mut guard = counter.lock();
+                    *guard += 1;
+                }
+            }
+        })
+        .collect();
+
+    for handle in handles {
+        handle.await;
+    }
+
+    let final_value = *counter.lock();
+    black_box(final_value);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let total_ops = num_threads * ops_per_thread;
+    let ops_per_sec = (total_ops as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "mutex_contention",
+        metric: "M ops/sec",
+        value: ops_per_sec / 1_000_000.0,
+        target: 1.0,
+        passed: ops_per_sec > 1_000_000.0,
+    }
+}
+
+/// Benchmark RWLock contention (read-heavy)
+fn benchmark_rwlock_contention() -> BenchmarkResult {
+    let num_threads = 8;
+    let ops_per_thread = 100_000;
+    let data = Shared.new(RwLock.new(42));
+
+    let timer = Timer.new();
+    timer.start();
+
+    let handles: List<TaskHandle<Int>> = (0..num_threads)
+        .map(|thread_id| {
+            let data = data.clone();
+            spawn async move {
+                let mut sum = 0;
+                for i in 0..ops_per_thread {
+                    // 90% reads, 10% writes
+                    if i % 10 == 0 && thread_id == 0 {
+                        let mut guard = data.write();
+                        *guard += 1;
+                    } else {
+                        let guard = data.read();
+                        sum += *guard;
+                    }
+                }
+                sum
+            }
+        })
+        .collect();
+
+    let total: Int = handles.iter().map(|h| h.await).sum();
+    black_box(total);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let total_ops = num_threads * ops_per_thread;
+    let ops_per_sec = (total_ops as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "rwlock_contention",
+        metric: "M ops/sec",
+        value: ops_per_sec / 1_000_000.0,
+        target: 5.0,
+        passed: ops_per_sec > 5_000_000.0,
+    }
+}
+
+/// Benchmark atomic contention
+fn benchmark_atomic_contention() -> BenchmarkResult {
+    let num_threads = 8;
+    let ops_per_thread = 1_000_000;
+    let counter = Atomic.new(0i64);
+
+    let timer = Timer.new();
+    timer.start();
+
+    let handles: List<TaskHandle<()>> = (0..num_threads)
+        .map(|_| {
+            let counter = counter.clone();
+            spawn async move {
+                for _ in 0..ops_per_thread {
+                    counter.fetch_add(1, Ordering.Relaxed);
+                }
+            }
+        })
+        .collect();
+
+    for handle in handles {
+        handle.await;
+    }
+
+    let final_value = counter.load(Ordering.SeqCst);
+    black_box(final_value);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let total_ops = num_threads * ops_per_thread;
+    let ops_per_sec = (total_ops as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "atomic_contention",
+        metric: "M ops/sec",
+        value: ops_per_sec / 1_000_000.0,
+        target: 10.0,
+        passed: ops_per_sec > 10_000_000.0,
+    }
+}
+
+// Benchmark infrastructure types
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

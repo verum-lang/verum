@@ -1,0 +1,146 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, automaton, cellular, simulation
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for elementary cellular automaton (1D, Rule 110)
+
+fn bnot(x: Int) -> Int { !x }
+
+// 16-cell 1D grid packed in Int (bits 0-15)
+fn get_cell(grid: Int, i: Int) -> Int {
+    (grid >> i) & 1
+}
+
+fn set_cell(grid: Int, i: Int, val: Int) -> Int {
+    if val == 1 {
+        grid | (1 << i)
+    } else {
+        grid & bnot(1 << i)
+    }
+}
+
+// Apply rule to 3-bit neighborhood
+fn apply_rule(rule: Int, left: Int, center: Int, right: Int) -> Int {
+    let pattern = (left << 2) | (center << 1) | right;
+    (rule >> pattern) & 1
+}
+
+// Step: compute next generation
+fn step(grid: Int, size: Int, rule: Int) -> Int {
+    let mut next = 0;
+    let mut i = 0;
+    while i < size {
+        let left = if i == 0 { 0 } else { get_cell(grid, i - 1) };
+        let center = get_cell(grid, i);
+        let right = if i == size - 1 { 0 } else { get_cell(grid, i + 1) };
+        let new_val = apply_rule(rule, left, center, right);
+        next = set_cell(next, i, new_val);
+        i = i + 1;
+    }
+    next
+}
+
+// Count live cells
+fn popcount16(grid: Int, size: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < size {
+        count = count + get_cell(grid, i);
+        i = i + 1;
+    }
+    count
+}
+
+// Run N steps
+fn run_n(grid: Int, size: Int, rule: Int, n: Int) -> Int {
+    let mut g = grid;
+    let mut i = 0;
+    while i < n {
+        g = step(g, size, rule);
+        i = i + 1;
+    }
+    g
+}
+
+fn test_rule110() {
+    // Rule 110 is known to be Turing complete
+    let rule = 110;
+    // Start with single cell at center (bit 8 of 16)
+    let init = 1 << 8;
+    assert_eq(popcount16(init, 16), 1);
+
+    let g1 = step(init, 16, rule);
+    // Rule 110: pattern 010 -> 1, 001 -> 1, 100 -> 0
+    // Center: left=0,center=1,right=0 -> pattern 010 -> bit 2 of rule 110 = 1
+    // Right neighbor: left=1,center=0,right=0 -> pattern 100 -> bit 4 of rule = 0
+    // Left neighbor: left=0,center=0,right=1 -> pattern 001 -> bit 1 of rule 110 = 1
+    assert_eq(get_cell(g1, 7), 1);
+    assert_eq(get_cell(g1, 8), 1);
+
+    // Run several more steps
+    let g5 = run_n(init, 16, rule, 5);
+    let pop5 = popcount16(g5, 16);
+    assert_eq(pop5 > 1, true);
+}
+
+fn test_rule30() {
+    // Rule 30: chaotic behavior
+    let rule = 30;
+    let init = 1 << 8;
+    let g1 = step(init, 16, rule);
+    // Rule 30: 010 -> bit 2 = 1, 001 -> bit 1 = 1, 100 -> bit 4 = 1
+    // So neighbors of center cell should light up
+    let pop = popcount16(g1, 16);
+    assert_eq(pop >= 2, true);
+}
+
+fn test_rule0_dead() {
+    // Rule 0: all cells die
+    let init = 0b1111;
+    let g1 = step(init, 16, 0);
+    assert_eq(g1, 0);
+}
+
+fn test_rule255_alive() {
+    // Rule 255: any pattern produces 1
+    let init = 1 << 5;
+    let g1 = step(init, 16, 255);
+    // All neighbors within distance 1 of a live cell become alive
+    // Plus boundary cells (pattern 000 = bit 0 of 255 = 1, so even dead cells become alive)
+    assert_eq(popcount16(g1, 16), 16);
+}
+
+fn test_determinism() {
+    let rule = 110;
+    let init = 0b1010101;
+    let g5a = run_n(init, 16, rule, 5);
+    let g5b = run_n(init, 16, rule, 5);
+    assert_eq(g5a, g5b);
+}
+
+fn test_get_set() {
+    let mut g = 0;
+    g = set_cell(g, 3, 1);
+    g = set_cell(g, 7, 1);
+    assert_eq(get_cell(g, 3), 1);
+    assert_eq(get_cell(g, 7), 1);
+    assert_eq(get_cell(g, 0), 0);
+    assert_eq(get_cell(g, 5), 0);
+
+    g = set_cell(g, 3, 0);
+    assert_eq(get_cell(g, 3), 0);
+}
+
+fn main() -> Int {
+    test_rule110();
+    test_rule30();
+    test_rule0_dead();
+    test_rule255_alive();
+    test_determinism();
+    test_get_set();
+    print("[OK] 253_automaton_aot");
+    0
+}

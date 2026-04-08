@@ -1,0 +1,329 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, term, event, parser, ansi, escape, fsm
+// @expected-exit: 0
+// @description: Terminal ANSI escape sequence FSM parser — arrows, Ctrl+C, function keys, focus events
+
+type KeyCode is CharKey(Int) | Up | Down | Left | Right | Enter | Escape | Backspace | Tab | FnKey(Int) | Home | End | Delete;
+type KeyMod is NoMod | Ctrl | Alt | Shift;
+type Event is Key(KeyCode, KeyMod) | FocusGained | FocusLost | Unknown;
+
+type ParserState is Ground | EscapeStart | CsiEntry | CsiParam(Int, Int);
+// CsiParam(accumulated_number, modifier_param)
+
+// Parse a single ANSI byte sequence into an Event.
+// Simulates feeding bytes one at a time through the FSM.
+fn parse_bytes(bytes: List<Int>) -> Event {
+    let mut state = Ground;
+    let n = bytes.len();
+    let mut i = 0;
+
+    while i < n {
+        let b = bytes[i];
+        state = match state {
+            Ground => {
+                if b == 27 {
+                    // ESC
+                    EscapeStart
+                } else if b == 13 {
+                    return Key(Enter, NoMod);
+                } else if b == 9 {
+                    return Key(Tab, NoMod);
+                } else if b == 127 {
+                    return Key(Backspace, NoMod);
+                } else if b >= 1 && b <= 26 {
+                    // Ctrl+A through Ctrl+Z
+                    return Key(CharKey(b + 96), Ctrl);
+                } else if b >= 32 && b <= 126 {
+                    return Key(CharKey(b), NoMod);
+                } else {
+                    return Unknown;
+                }
+            },
+            EscapeStart => {
+                if b == 91 {
+                    // '[' -> CSI
+                    CsiEntry
+                } else if b == 79 {
+                    // 'O' -> SS3 (function keys)
+                    // Next byte determines F1-F4
+                    if i + 1 < n {
+                        let next = bytes[i + 1];
+                        if next == 80 { return Key(FnKey(1), NoMod); }
+                        if next == 81 { return Key(FnKey(2), NoMod); }
+                        if next == 82 { return Key(FnKey(3), NoMod); }
+                        if next == 83 { return Key(FnKey(4), NoMod); }
+                    }
+                    return Unknown;
+                } else {
+                    return Key(Escape, NoMod);
+                }
+            },
+            CsiEntry => {
+                // Check for immediate final bytes (arrows, home, end)
+                if b == 65 { return Key(Up, NoMod); }
+                if b == 66 { return Key(Down, NoMod); }
+                if b == 67 { return Key(Right, NoMod); }
+                if b == 68 { return Key(Left, NoMod); }
+                if b == 72 { return Key(Home, NoMod); }
+                if b == 70 { return Key(End, NoMod); }
+                if b == 73 { return FocusGained; }
+                if b == 79 { return FocusLost; }
+                // Digit -> accumulate parameter
+                if b >= 48 && b <= 57 {
+                    CsiParam(b - 48, 0)
+                } else {
+                    return Unknown;
+                }
+            },
+            CsiParam(num, modp) => {
+                if b >= 48 && b <= 57 {
+                    CsiParam(num * 10 + (b - 48), modp)
+                } else if b == 59 {
+                    // Semicolon separates params
+                    CsiParam(0, num)
+                } else if b == 126 {
+                    // ~ terminator: num determines key
+                    if num == 3 { return Key(Delete, NoMod); }
+                    if num == 15 { return Key(FnKey(5), NoMod); }
+                    if num == 17 { return Key(FnKey(6), NoMod); }
+                    if num == 18 { return Key(FnKey(7), NoMod); }
+                    if num == 19 { return Key(FnKey(8), NoMod); }
+                    return Unknown;
+                } else if b == 65 {
+                    // Arrow with modifier
+                    return Key(Up, decode_mod(modp));
+                } else if b == 66 {
+                    return Key(Down, decode_mod(modp));
+                } else if b == 67 {
+                    return Key(Right, decode_mod(modp));
+                } else if b == 68 {
+                    return Key(Left, decode_mod(modp));
+                } else {
+                    return Unknown;
+                }
+            },
+        };
+        i = i + 1;
+    }
+
+    // If we end in EscapeStart with no more bytes, it's bare Escape
+    match state {
+        EscapeStart => Key(Escape, NoMod),
+        _ => Unknown,
+    }
+}
+
+fn decode_mod(modp: Int) -> KeyMod {
+    // xterm modifier encoding: value = 1 + bitmask
+    // 2 = Shift, 3 = Alt, 5 = Ctrl
+    if modp == 2 { return Shift; }
+    if modp == 3 { return Alt; }
+    if modp == 5 { return Ctrl; }
+    NoMod
+}
+
+fn is_key_up(e: Event) -> Bool {
+    match e { Key(k, m) => match k { Up => true, _ => false }, _ => false }
+}
+
+fn is_key_down(e: Event) -> Bool {
+    match e { Key(k, m) => match k { Down => true, _ => false }, _ => false }
+}
+
+fn is_key_right(e: Event) -> Bool {
+    match e { Key(k, m) => match k { Right => true, _ => false }, _ => false }
+}
+
+fn is_key_left(e: Event) -> Bool {
+    match e { Key(k, m) => match k { Left => true, _ => false }, _ => false }
+}
+
+fn is_enter(e: Event) -> Bool {
+    match e { Key(k, m) => match k { Enter => true, _ => false }, _ => false }
+}
+
+fn is_escape(e: Event) -> Bool {
+    match e { Key(k, m) => match k { Escape => true, _ => false }, _ => false }
+}
+
+fn is_ctrl_c(e: Event) -> Bool {
+    match e {
+        Key(k, m) => match k {
+            CharKey(c) => c == 99 && match m { Ctrl => true, _ => false },
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn is_fn_key(e: Event, num: Int) -> Bool {
+    match e {
+        Key(k, m) => match k { FnKey(n) => n == num, _ => false },
+        _ => false,
+    }
+}
+
+fn is_focus_gained(e: Event) -> Bool {
+    match e { FocusGained => true, _ => false }
+}
+
+fn is_focus_lost(e: Event) -> Bool {
+    match e { FocusLost => true, _ => false }
+}
+
+fn is_delete(e: Event) -> Bool {
+    match e { Key(k, m) => match k { Delete => true, _ => false }, _ => false }
+}
+
+fn test_arrows() -> Int {
+    // ESC [ A = Up
+    let mut bytes: List<Int> = [];
+    bytes.push(27); bytes.push(91); bytes.push(65);
+    if !is_key_up(parse_bytes(bytes)) {
+        print("FAIL arrow up");
+        return 1;
+    }
+    // ESC [ B = Down
+    let mut down: List<Int> = [];
+    down.push(27); down.push(91); down.push(66);
+    if !is_key_down(parse_bytes(down)) {
+        print("FAIL arrow down");
+        return 1;
+    }
+    // ESC [ C = Right
+    let mut right: List<Int> = [];
+    right.push(27); right.push(91); right.push(67);
+    if !is_key_right(parse_bytes(right)) {
+        print("FAIL arrow right");
+        return 1;
+    }
+    // ESC [ D = Left
+    let mut left: List<Int> = [];
+    left.push(27); left.push(91); left.push(68);
+    if !is_key_left(parse_bytes(left)) {
+        print("FAIL arrow left");
+        return 1;
+    }
+    0
+}
+
+fn test_ctrl_c() -> Int {
+    // Ctrl+C = byte 3
+    let mut bytes: List<Int> = [];
+    bytes.push(3);
+    if !is_ctrl_c(parse_bytes(bytes)) {
+        print("FAIL ctrl+c");
+        return 1;
+    }
+    0
+}
+
+fn test_enter_escape() -> Int {
+    let mut enter: List<Int> = [];
+    enter.push(13);
+    if !is_enter(parse_bytes(enter)) {
+        print("FAIL enter");
+        return 1;
+    }
+    let mut esc: List<Int> = [];
+    esc.push(27);
+    if !is_escape(parse_bytes(esc)) {
+        print("FAIL escape");
+        return 1;
+    }
+    0
+}
+
+fn test_function_keys() -> Int {
+    // ESC O P = F1
+    let mut f1: List<Int> = [];
+    f1.push(27); f1.push(79); f1.push(80);
+    if !is_fn_key(parse_bytes(f1), 1) {
+        print("FAIL F1");
+        return 1;
+    }
+    // ESC [ 1 5 ~ = F5
+    let mut f5: List<Int> = [];
+    f5.push(27); f5.push(91); f5.push(49); f5.push(53); f5.push(126);
+    if !is_fn_key(parse_bytes(f5), 5) {
+        print("FAIL F5");
+        return 1;
+    }
+    0
+}
+
+fn test_focus() -> Int {
+    // ESC [ I = FocusGained
+    let mut fg: List<Int> = [];
+    fg.push(27); fg.push(91); fg.push(73);
+    if !is_focus_gained(parse_bytes(fg)) {
+        print("FAIL focus gained");
+        return 1;
+    }
+    // ESC [ O = FocusLost
+    let mut fl: List<Int> = [];
+    fl.push(27); fl.push(91); fl.push(79);
+    if !is_focus_lost(parse_bytes(fl)) {
+        print("FAIL focus lost");
+        return 1;
+    }
+    0
+}
+
+fn test_delete() -> Int {
+    // ESC [ 3 ~ = Delete
+    let mut del: List<Int> = [];
+    del.push(27); del.push(91); del.push(51); del.push(126);
+    if !is_delete(parse_bytes(del)) {
+        print("FAIL delete");
+        return 1;
+    }
+    0
+}
+
+fn test_printable() -> Int {
+    // 'a' = 97
+    let mut a: List<Int> = [];
+    a.push(97);
+    let e = parse_bytes(a);
+    match e {
+        Key(k, m) => match k {
+            CharKey(c) => {
+                if c != 97 {
+                    print(f"FAIL char: {c}");
+                    return 1;
+                }
+            },
+            _ => {
+                print("FAIL expected CharKey");
+                return 1;
+            },
+        },
+        _ => {
+            print("FAIL expected Key event");
+            return 1;
+        },
+    }
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_arrows();
+    if r1 != 0 { return r1; }
+    let r2 = test_ctrl_c();
+    if r2 != 0 { return r2; }
+    let r3 = test_enter_escape();
+    if r3 != 0 { return r3; }
+    let r4 = test_function_keys();
+    if r4 != 0 { return r4; }
+    let r5 = test_focus();
+    if r5 != 0 { return r5; }
+    let r6 = test_delete();
+    if r6 != 0 { return r6; }
+    let r7 = test_printable();
+    if r7 != 0 { return r7; }
+    print("PASS: term_event_parser");
+    0
+}

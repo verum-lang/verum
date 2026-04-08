@@ -1,0 +1,59 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, variant, args, error
+// @description: Test invalid variant pattern arguments (empty comma, etc.)
+// @expected-error: E079
+
+type Option<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Tree<T> is Leaf(T) | Node(Tree<T>, T, Tree<T>);
+
+fn test_empty_comma_in_variant() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: comma with no pattern
+    match opt {
+        Some(,) => print("empty comma"),
+        None => print("none"),
+    }
+}
+
+fn test_leading_comma_variant() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // Invalid: leading comma in variant args
+    match result {
+        Ok(, x) => print("leading comma"),
+        Err(e) => print("error"),
+    }
+}
+
+fn test_trailing_double_comma() {
+    let tree: Tree<Int> = Leaf(42);
+
+    // Invalid: double trailing comma
+    match tree {
+        Leaf(x,,) => print("double comma"),
+        Node(_, _, _) => print("node"),
+    }
+}
+
+fn test_multiple_consecutive_commas() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // Invalid: multiple consecutive commas
+    match result {
+        Ok(x,,,y) => print("multiple commas"),
+        Err(_) => print("error"),
+    }
+}
+
+fn test_only_commas() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: only commas, no patterns
+    match opt {
+        Some(,,,) => print("only commas"),
+        None => print("none"),
+    }
+}

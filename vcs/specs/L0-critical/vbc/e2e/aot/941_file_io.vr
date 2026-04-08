@@ -1,0 +1,84 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, file-io, intrinsics
+// @expected-exit: 0
+
+// Test: File I/O intrinsics — write_all, read_all, exists, delete, open/read/write/close.
+
+fn file_read_all(path: Text) -> Text { "" }
+fn file_write_all(path: Text, data: Text) -> Int { 0 }
+fn file_exists(path: Text) -> Int { 0 }
+fn file_delete(path: Text) -> Int { 0 }
+fn file_open(path: Text, mode: Int) -> Int { 0 }
+fn file_close(fd: Int) -> Int { 0 }
+fn file_read(fd: Int, count: Int) -> Text { "" }
+fn file_write(fd: Int, data: Text) -> Int { 0 }
+
+fn test_write_read_all() -> Int {
+    let path = "/tmp/verum_test_941.txt";
+    let content = "Hello from file_write_all!";
+    let w = file_write_all(path, content);
+    if (w <= 0) {
+        print("FAIL test1: file_write_all returned <= 0");
+        return 1;
+    }
+    let r = file_read_all(path);
+    if (r != content) {
+        print(f"FAIL test1: read='{r}', expected='{content}'");
+        return 1;
+    }
+    // Test exists
+    let e1 = file_exists(path);
+    if (e1 != 1) {
+        print(f"FAIL test2: file_exists returned {e1}");
+        return 1;
+    }
+    // Test delete
+    file_delete(path);
+    let gone = file_exists(path);
+    if (gone != 0) {
+        print(f"FAIL test3: file still exists after delete");
+        return 1;
+    }
+    0
+}
+
+fn test_fd_operations() -> Int {
+    let path2 = "/tmp/verum_test_941b.txt";
+    let fd = file_open(path2, 1);
+    if (fd < 0) {
+        print(f"FAIL test4a: file_open(WRITE) returned {fd}");
+        return 1;
+    }
+    let msg = "fd-based write";
+    let wb = file_write(fd, msg);
+    if (wb <= 0) {
+        print(f"FAIL test4b: file_write returned {wb}");
+        return 1;
+    }
+    file_close(fd);
+
+    let fd2 = file_open(path2, 0);
+    if (fd2 < 0) {
+        print(f"FAIL test4c: file_open(READ) returned {fd2}");
+        return 1;
+    }
+    let rd = file_read(fd2, 1024);
+    file_close(fd2);
+    if (rd != msg) {
+        print(f"FAIL test4d: file_read='{rd}', expected='{msg}'");
+        return 1;
+    }
+    file_delete(path2);
+    0
+}
+
+fn main() -> Int {
+    if (test_write_read_all() != 0) { return 1; }
+    print("test1-3: OK");
+    if (test_fd_operations() != 0) { return 1; }
+    print("test4: OK");
+    print("941_file_io: PASS");
+    0
+}

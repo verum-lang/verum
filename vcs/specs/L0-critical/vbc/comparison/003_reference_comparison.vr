@@ -1,0 +1,118 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, comparison, reference, eq_ref, identity
+// @timeout: 5000
+// @expect: pass
+//
+// Test: Reference comparison basics
+// Tests basic reference/pointer identity semantics
+//
+// Note: Many reference comparison features require:
+// - ref_eq intrinsic (not yet available as function)
+// - Closure syntax (different from Rust)
+// - Mutable slice references
+// For now, test basic reference value behaviors.
+
+type Point is { x: Float, y: Float };
+
+fn test_reference_value_through_alias() {
+    // When we take a reference and read through it
+    let p = Point { x: 1.0, y: 2.0 };
+    let r: &Point = &p;
+
+    // The reference should give us the same values
+    assert_eq(r.x, 1.0);
+    assert_eq(r.y, 2.0);
+}
+
+fn test_reference_same_value() {
+    // Two points with same values
+    let p1 = Point { x: 1.0, y: 2.0 };
+    let p2 = Point { x: 1.0, y: 2.0 };
+
+    // Values should be equal
+    assert_eq(p1.x, p2.x);
+    assert_eq(p1.y, p2.y);
+}
+
+fn test_maybe_reference_patterns() {
+    // Testing Maybe type with pattern matching
+    let p = Point { x: 0.0, y: 0.0 };
+    let some_point: Maybe<&Point> = Maybe.Some(&p);
+    let none_point: Maybe<&Point> = Maybe.None;
+
+    // Pattern checks
+    assert(some_point is Maybe.Some);
+    assert(none_point is Maybe.None);
+
+    // Extract value from Some
+    match some_point {
+        Maybe.Some(ref_p) => {
+            assert_eq(ref_p.x, 0.0);
+            assert_eq(ref_p.y, 0.0);
+        },
+        Maybe.None => {
+            assert(false); // Should not reach here
+        }
+    }
+}
+
+fn test_heap_allocated_values() {
+    // Heap allocated values should be independently accessible
+    let h1 = Heap(Point { x: 1.0, y: 2.0 });
+    let h2 = Heap(Point { x: 1.0, y: 2.0 });
+
+    // Both should have same values
+    assert_eq(h1.x, 1.0);
+    assert_eq(h2.x, 1.0);
+    assert_eq(h1.y, h2.y);
+}
+
+fn test_array_reference() {
+    // Reference to array element
+    let arr = [10, 20, 30, 40, 50];
+
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+}
+
+fn test_struct_field_access() {
+    let p = Point { x: 1.5, y: 2.5 };
+
+    // Direct field access
+    let x_val: Float = p.x;
+    let y_val: Float = p.y;
+
+    assert_eq(x_val, 1.5);
+    assert_eq(y_val, 2.5);
+
+    // Different fields have different values
+    assert(x_val != y_val);
+}
+
+fn test_mutable_reference() {
+    let mut p = Point { x: 1.0, y: 2.0 };
+
+    // Initial values
+    assert_eq(p.x, 1.0);
+
+    // Mutation
+    p.x = 100.0;
+
+    // Value changed
+    assert_eq(p.x, 100.0);
+    assert_eq(p.y, 2.0);  // y unchanged
+}
+
+fn main() {
+    test_reference_value_through_alias();
+    test_reference_same_value();
+    test_maybe_reference_patterns();
+    test_heap_allocated_values();
+    test_array_reference();
+    test_struct_field_access();
+    test_mutable_reference();
+    print("003_reference_comparison: PASSED");
+}

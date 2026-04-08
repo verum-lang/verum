@@ -1,0 +1,122 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: try, recover, error-handling, control-flow
+// @description: Test try/recover structured error handling through AOT pipeline
+
+fn test_basic_try_recover() -> Int {
+    let result = try {
+        42
+    } recover |e| {
+        -1
+    };
+    if result != 42 {
+        print(f"FAIL basic_try: expected 42, got {result}");
+        return 1;
+    }
+    print("  basic_try_recover: OK");
+    0
+}
+
+fn test_throw_in_try() -> Int {
+    let result = try {
+        throw 99;
+        0
+    } recover |e| {
+        e
+    };
+    if result != 99 {
+        print(f"FAIL throw_in_try: expected 99, got {result}");
+        return 1;
+    }
+    print("  throw_in_try: OK");
+    0
+}
+
+fn test_conditional_throw() -> Int {
+    let x = -5;
+    let result = try {
+        if x < 0 {
+            throw 100;
+        }
+        x * 2
+    } recover |e| {
+        e + 1
+    };
+    if result != 101 {
+        print(f"FAIL cond_throw: expected 101, got {result}");
+        return 1;
+    }
+    print("  conditional_throw: OK");
+    0
+}
+
+fn test_no_throw_path() -> Int {
+    let x = 10;
+    let result = try {
+        if x < 0 {
+            throw -1;
+        }
+        x * 2
+    } recover |e| {
+        e
+    };
+    if result != 20 {
+        print(f"FAIL no_throw: expected 20, got {result}");
+        return 1;
+    }
+    print("  no_throw_path: OK");
+    0
+}
+
+fn test_exception_value() -> Int {
+    let a = 10;
+    let b = 32;
+    let result = try {
+        throw a + b;
+        0
+    } recover |e| {
+        e
+    };
+    if result != 42 {
+        print(f"FAIL exc_value: expected 42, got {result}");
+        return 1;
+    }
+    print("  exception_value: OK");
+    0
+}
+
+fn test_recover_computation() -> Int {
+    let result = try {
+        throw 30;
+        0
+    } recover |e| {
+        e * 3
+    };
+    if result != 90 {
+        print(f"FAIL recover_comp: expected 90, got {result}");
+        return 1;
+    }
+    print("  recover_computation: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Try/Recover Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_basic_try_recover();
+    failures = failures + test_throw_in_try();
+    failures = failures + test_conditional_throw();
+    failures = failures + test_no_throw_path();
+    failures = failures + test_exception_value();
+    failures = failures + test_recover_computation();
+
+    if failures == 0 {
+        print("All try/recover tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+
+    failures
+}

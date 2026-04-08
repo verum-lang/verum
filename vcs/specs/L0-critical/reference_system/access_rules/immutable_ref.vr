@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, immutable
+
+/// Test immutable referencing semantics.
+/// Multiple immutable references are allowed simultaneously.
+/// The borrowed value cannot be mutated while aliased.
+/// Spec: 04-memory-model.md#aliasing-rules
+/// Key property: Multiple shared references coexist safely.
+
+fn read_only(s: &Text) {
+    print(*s);
+}
+
+fn read_struct(p: &Point) -> Int {
+    p.x + p.y
+}
+
+fn read_list(items: &List<Int>) -> Int {
+    let mut total = 0;
+    for item in items {
+        total = total + item;
+    }
+    total
+}
+
+fn main() {
+    // Basic immutable reference
+    let data = Text.from("hello world");
+    let ref1 = &data;
+    print(*ref1);
+    // data is still valid after borrow ends
+
+    // Multiple immutable references simultaneously
+    let text = Text.from("shared");
+    let ref1 = &text;
+    let ref2 = &text;
+    let ref3 = &text;
+    // All three borrows are valid
+    print(*ref1);
+    print(*ref2);
+    print(*ref3);
+
+    // Pass borrow to function
+    let message = Text.from("passed to function");
+    read_only(&message);
+    // message is still valid
+    print(message);
+
+    // Borrow struct fields
+    let point = Point { x: 10, y: 20 };
+    let sum = read_struct(&point);
+    assert(sum == 30);
+    // point is still valid
+    assert(point.x == 10);
+
+    // Borrow collection
+    let numbers = [1, 2, 3, 4, 5];
+    let total = read_list(&numbers);
+    assert(total == 15);
+    // numbers is still valid
+    assert(numbers.len() == 5);
+
+    // Nested borrows
+    let outer = Container { inner: Text.from("nested") };
+    let ref_outer = &outer;
+    let ref_inner = &ref_outer.inner;
+    print(*ref_inner);
+
+    // Borrow in expressions
+    let a = Text.from("first");
+    let b = Text.from("second");
+    let combined = concat(&a, &b);
+    // Both a and b are still valid
+    print(a);
+    print(b);
+}
+
+fn concat(a: &Text, b: &Text) -> Text {
+    *a + " " + *b
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Container is {
+    inner: Text,
+};

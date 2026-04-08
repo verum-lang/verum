@@ -1,0 +1,112 @@
+// CBGR edge cases
+// Tests three-tier reference model edge conditions
+
+use verum_core.base.{List, Maybe}
+
+// Tier 0: Managed references (~15ns overhead)
+fn managed_ref_basic(data: &Int) -> Int {
+    *data
+}
+
+fn managed_ref_chain(a: &Int, b: &Int) -> Int {
+    *a + *b
+}
+
+fn managed_ref_list(items: &List<Int>) -> Int {
+    items[0]
+}
+
+// Tier 1: Checked references (compile-time proven safe)
+fn checked_ref_local(data: &checked Int) -> Int {
+    *data
+}
+
+fn checked_ref_no_escape(items: &checked List<Int>) -> Int {
+    // Safe because reference doesn't escape
+    let sum = items.iter().sum();
+    sum
+}
+
+// Tier 2: Unsafe references (manual safety proof)
+fn unsafe_ref_raw(data: &unsafe Int) -> Int {
+    // SAFETY: Caller guarantees data is valid
+    *data
+}
+
+// Mixed tier interactions
+fn tier_promotion(data: &Int) -> Int {
+    // Tier 0 should work anywhere Tier 1 or 2 would
+    managed_ref_basic(data)
+}
+
+// Reference across function boundaries
+fn pass_ref_down<T>(data: &T, f: function(&T) -> Int) -> Int {
+    f(data)
+}
+
+// Mutable references
+fn mut_ref_basic(data: &mut Int) {
+    *data = *data + 1;
+}
+
+fn mut_ref_swap(a: &mut Int, b: &mut Int) {
+    let temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+// Reference in containers
+type RefHolder<T> is {
+    data: &T,
+};
+
+fn create_ref_holder<T>(data: &T) -> RefHolder<T> {
+    RefHolder { data }
+}
+
+// Nested references (should be disallowed)
+// function nested_ref(data: &&Int) -> Int { **data }
+
+// Reference lifetime edge cases
+fn ref_from_maybe(opt: &Maybe<Int>) -> Int {
+    match opt {
+        Some(x) => *x,
+        None => 0,
+    }
+}
+
+// CBGR generation tracking
+fn generation_test() {
+    let mut x = 1;
+    let r1 = &x;  // Generation 1
+    let val = *r1;
+
+    x = 2;  // Invalidates r1
+    let r2 = &x;  // Generation 2
+    let val2 = *r2;
+}
+
+fn main() {
+    // Basic tests
+    let x = 42;
+    let y = managed_ref_basic(&x);
+    assert y == 42;
+
+    // Chain tests
+    let a = 10;
+    let b = 20;
+    let sum = managed_ref_chain(&a, &b);
+    assert sum == 30;
+
+    // Mutable tests
+    let mut m = 5;
+    mut_ref_basic(&mut m);
+    assert m == 6;
+
+    // Swap tests
+    let mut p = 1;
+    let mut q = 2;
+    mut_ref_swap(&mut p, &mut q);
+    assert p == 2;
+    assert q == 1;
+}

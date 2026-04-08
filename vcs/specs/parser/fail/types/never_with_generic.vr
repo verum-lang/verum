@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, never, generic, error
+// @description: Test detection of never type with generic arguments
+// @expected-error: E018
+
+// Never type (!) does not take generic arguments
+fn test(x: !<Int>) {}

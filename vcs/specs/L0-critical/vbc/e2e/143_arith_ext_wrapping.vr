@@ -1,0 +1,147 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, arith, wrapping
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Wrapping arithmetic — modular add, sub, mul simulating fixed-width behavior
+// NOTE: Cannot use wrapping_add/wrapping_sub/wrapping_mul/wrapping_negate as function names
+//       because the compiler maps them to ArithExtended intrinsic opcodes.
+
+// ============================================================================
+// Wrapping arithmetic with explicit modulus
+// ============================================================================
+
+fn mod_positive(val: Int, modulus: Int) -> Int {
+    let mut r = val;
+    while r >= modulus { r = r - modulus; }
+    while r < 0 { r = r + modulus; }
+    r
+}
+
+fn wrap_add(a: Int, b: Int, modulus: Int) -> Int {
+    let sum = a + b;
+    mod_positive(sum, modulus)
+}
+
+fn wrap_sub(a: Int, b: Int, modulus: Int) -> Int {
+    let diff = a - b;
+    mod_positive(diff, modulus)
+}
+
+fn wrap_mul(a: Int, b: Int, modulus: Int) -> Int {
+    let prod = a * b;
+    mod_positive(prod, modulus)
+}
+
+fn wrap_neg(a: Int, modulus: Int) -> Int {
+    let neg = 0 - a;
+    mod_positive(neg, modulus)
+}
+
+// ============================================================================
+// Test 1: Wrapping add (8-bit unsigned: mod 256)
+// ============================================================================
+
+@test
+fn test_wrap_add() {
+    let m = 256;
+    assert_eq(wrap_add(100, 50, m), 150);
+    assert_eq(wrap_add(200, 100, m), 44);
+    assert_eq(wrap_add(128, 128, m), 0);
+    assert_eq(wrap_add(42, 0, m), 42);
+    assert_eq(wrap_add(255, 1, m), 0);
+    print("  test_wrap_add: ok");
+}
+
+// ============================================================================
+// Test 2: Wrapping sub (8-bit unsigned: mod 256)
+// ============================================================================
+
+@test
+fn test_wrap_sub() {
+    let m = 256;
+    // Normal
+    assert_eq(wrap_sub(100, 50, m), 50);
+    // Wrap around (underflow)
+    assert_eq(wrap_sub(10, 20, m), 246);
+    // Zero - 1
+    assert_eq(wrap_sub(0, 1, m), 255);
+    // Self subtraction
+    assert_eq(wrap_sub(123, 123, m), 0);
+    print("  test_wrap_sub: ok");
+}
+
+// ============================================================================
+// Test 3: Wrapping mul (8-bit unsigned: mod 256)
+// ============================================================================
+
+@test
+fn test_wrap_mul() {
+    let m = 256;
+    // Normal
+    assert_eq(wrap_mul(10, 10, m), 100);
+    // Wrap
+    assert_eq(wrap_mul(20, 20, m), 144);
+    // Multiply by zero
+    assert_eq(wrap_mul(255, 0, m), 0);
+    // Multiply by one
+    assert_eq(wrap_mul(200, 1, m), 200);
+    // 128 * 2 = 256 -> 0
+    assert_eq(wrap_mul(128, 2, m), 0);
+    print("  test_wrap_mul: ok");
+}
+
+// ============================================================================
+// Test 4: Different moduli (16-bit, custom)
+// ============================================================================
+
+@test
+fn test_different_moduli() {
+    // 16-bit: mod 65536
+    let m16 = 65536;
+    assert_eq(wrap_add(60000, 10000, m16), 4464);
+    assert_eq(wrap_sub(100, 200, m16), 65436);
+
+    // Small modulus (mod 10)
+    assert_eq(wrap_add(7, 8, 10), 5);
+    assert_eq(wrap_mul(7, 8, 10), 6);
+    assert_eq(wrap_sub(3, 5, 10), 8);
+    print("  test_different_moduli: ok");
+}
+
+// ============================================================================
+// Test 5: Wrapping negate and additive inverse
+// ============================================================================
+
+@test
+fn test_wrap_neg() {
+    let m = 256;
+    // -1 mod 256 = 255
+    assert_eq(wrap_neg(1, m), 255);
+    // -0 mod 256 = 0
+    assert_eq(wrap_neg(0, m), 0);
+    // a + (-a) = 0 mod m
+    let a = 42;
+    let neg_a = wrap_neg(a, m);
+    assert_eq(wrap_add(a, neg_a, m), 0);
+
+    let b = 200;
+    let neg_b = wrap_neg(b, m);
+    assert_eq(wrap_add(b, neg_b, m), 0);
+    print("  test_wrap_neg: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_wrap_add();
+    test_wrap_sub();
+    test_wrap_mul();
+    test_different_moduli();
+    test_wrap_neg();
+    print("[OK] 143_arith_ext_wrapping");
+    0
+}

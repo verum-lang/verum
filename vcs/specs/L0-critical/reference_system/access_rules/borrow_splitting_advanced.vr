@@ -1,0 +1,239 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, borrow-splitting, nll, advanced
+// @description: Advanced borrow splitting and NLL tests demonstrating Verum's sophisticated reference analysis
+
+/// Advanced Borrow Splitting and Non-Lexical Lifetimes Tests
+///
+/// This test suite demonstrates Verum's sophisticated borrow checking that
+/// goes beyond basic Rust-style borrow checking to enable more flexible code.
+///
+/// Key features tested:
+/// 1. Struct field borrow splitting - different fields can be borrowed independently
+/// 2. Array index borrow splitting - constant indices can be borrowed independently
+/// 3. Non-Lexical Lifetimes (NLL) - borrows end at last use, not scope end
+/// 4. Complex ownership patterns that would fail in naive borrow checkers
+///
+/// Spec: 04-memory-model.md#aliasing-rules
+
+// ============================================================================
+// TEST 1: Struct Field Borrow Splitting
+// ============================================================================
+// Different struct fields can be borrowed mutably simultaneously because
+// they occupy different memory locations.
+
+type Point3D is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+fn test_struct_field_splitting() {
+    let mut point = Point3D { x: 1, y: 2, z: 3 };
+
+    // Borrow x and y mutably at the same time
+    let x_ref = &mut point.x;
+    let y_ref = &mut point.y;
+
+    // Both borrows are valid - they don't overlap
+    *x_ref = 10;
+    *y_ref = 20;
+
+    // Can still read z immutably while x and y are borrowed mutably
+    // because z is a different field
+    assert(point.z == 3);
+}
+
+fn test_nested_field_splitting() {
+    let mut data = TwoFields { first: 1, second: 2 };
+
+    // Borrow first and second simultaneously
+    let first_ref = &mut data.first;
+    let second_ref = &mut data.second;
+
+    // Both are valid - completely different paths
+    *first_ref = 10;
+    *second_ref = 20;
+
+    assert(*first_ref == 10);
+    assert(*second_ref == 20);
+}
+
+type TwoFields is {
+    first: Int,
+    second: Int,
+};
+
+// ============================================================================
+// TEST 2: Array Index Borrow Splitting
+// ============================================================================
+// When array indices are known at compile time (constant indices),
+// different elements can be borrowed independently.
+
+fn test_array_index_splitting() {
+    let mut arr = [1, 2, 3, 4, 5];
+
+    // Borrow different indices mutably
+    let first = &mut arr[0];
+    let third = &mut arr[2];
+    let last = &mut arr[4];
+
+    // All three borrows are valid - different indices
+    *first = 10;
+    *third = 30;
+    *last = 50;
+
+    // Verify the unchanged elements
+    assert(arr[1] == 2);
+    assert(arr[3] == 4);
+}
+
+fn test_swap_with_index_splitting() {
+    let mut arr = [100, 200];
+
+    // Swap using split borrows
+    let left = &mut arr[0];
+    let right = &mut arr[1];
+
+    // Standard swap pattern - works because indices are disjoint
+    let temp = *left;
+    *left = *right;
+    *right = temp;
+
+    assert(arr[0] == 200);
+    assert(arr[1] == 100);
+}
+
+// ============================================================================
+// TEST 3: Non-Lexical Lifetimes (NLL)
+// ============================================================================
+// Borrows end at their last use, not at scope end. This allows more
+// flexible code patterns.
+
+fn test_nll_basic() {
+    let mut value = 42;
+
+    // First borrow
+    let ref1 = &value;
+    assert(*ref1 == 42);
+    // ref1's last use is here ^
+
+    // New mutable borrow is OK - ref1 is no longer used
+    let ref2 = &mut value;
+    *ref2 = 100;
+
+    assert(value == 100);
+}
+
+fn test_nll_conditional() {
+    let mut data = 0;
+
+    // First block with mutable borrow
+    {
+        let r = &mut data;
+        *r = 42;
+    }
+    // r is dropped, borrow ends
+
+    // Can reborrow after block ends
+    let r2 = &data;
+    assert(*r2 == 42);
+}
+
+fn test_nll_loop() {
+    let mut counter = 0;
+
+    for _ in 0..5 {
+        // Mutable borrow per iteration
+        let r = &mut counter;
+        *r += 1;
+        // r ends at end of loop body
+    }
+
+    // Can read after loop
+    assert(counter == 5);
+}
+
+// ============================================================================
+// TEST 4: Combined Patterns
+// ============================================================================
+// Complex scenarios that combine multiple borrow analysis features.
+
+fn test_combined_field_and_nll() {
+    let mut record = Record { a: 1, b: 2 };
+
+    // First: borrow 'a' mutably in a block
+    {
+        let a_ref = &mut record.a;
+        *a_ref = 10;
+    }
+    // a_ref is dropped
+
+    // Now can borrow 'a' immutably
+    let a_read = &record.a;
+    assert(*a_read == 10);
+
+    // And borrow 'b' mutably (field splitting allows this)
+    let b_ref = &mut record.b;
+    *b_ref = 20;
+
+    assert(record.a == 10);
+    assert(record.b == 20);
+}
+
+type Record is {
+    a: Int,
+    b: Int,
+};
+
+fn test_function_call_borrow_release() {
+    let mut arr = [1, 2, 3];
+
+    // Compute sum using values (copies)
+    let sum = arr[0] + arr[1] + arr[2];
+
+    // Can mutate after using values
+    arr[0] = 100;
+
+    assert(sum == 6);
+    assert(arr[0] == 100);
+}
+
+fn test_reborrow_in_method_chain() {
+    let mut value = 42;
+
+    // Method chain implicitly reborrows
+    // First read, then can mutate after the read is done
+    let read_val = value;  // Copy, not borrow
+
+    // Mutate
+    value = value * 2;
+
+    assert(read_val == 42);
+    assert(value == 84);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Field splitting tests
+    test_struct_field_splitting();
+    test_nested_field_splitting();
+
+    // Index splitting tests
+    test_array_index_splitting();
+    test_swap_with_index_splitting();
+
+    // NLL tests
+    test_nll_basic();
+    test_nll_conditional();
+    test_nll_loop();
+
+    // Combined tests
+    test_combined_field_and_nll();
+    test_function_call_borrow_release();
+    test_reborrow_in_method_chain();
+}

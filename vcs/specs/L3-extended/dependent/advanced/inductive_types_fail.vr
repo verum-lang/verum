@@ -1,0 +1,42 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, inductive, advanced, error
+// @expected-error: E400 "Type mismatch"
+
+/// Inductive types - failure cases
+
+/// Peano natural numbers
+type PNat is | PZero | PSucc(Heap<PNat>);
+
+/// Binary tree
+type BTree<T> is
+    | BLeaf
+    | BNode { value: T, left: Heap<BTree<T>>, right: Heap<BTree<T>> };
+
+/// ERROR: Wrong return type from tree operation
+fn tree_size_wrong<T>(t: BTree<T>) -> Text {
+    match t {
+        BLeaf => 0,  // ERROR: Int != Text
+        BNode { value, left, right } => 1,
+    }
+}
+
+/// ERROR: Wrong type in Peano construction
+fn pnat_wrong() -> PNat {
+    "hello"  // ERROR: Text != PNat
+}
+
+/// ERROR: Tree with wrong value type
+fn tree_wrong() -> BTree<Int> {
+    BNode {
+        value: "not int",  // ERROR: Text != Int
+        left: Heap(BLeaf),
+        right: Heap(BLeaf),
+    }
+}
+
+fn main() {
+    let _ = pnat_wrong();
+    let _ = tree_wrong();
+}

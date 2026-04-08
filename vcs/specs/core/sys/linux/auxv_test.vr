@@ -1,0 +1,108 @@
+// =============================================================================
+// vcs/specs/core/sys/linux/auxv_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, sys, linux, auxv, auxiliary-vector, startup, hwcap
+// @description: Tests for Linux auxiliary vector access including AuxvEntry type,
+//               AT_* constants, and auxv initialization/query functions.
+//
+// Coverage:
+// - AuxvEntry: record construction and field access
+// - AT_* constants: value verification (AT_NULL, AT_HWCAP, AT_PAGESZ, etc.)
+// - init_auxv: function existence
+// - getauxval: function existence
+//
+// Test Strategy:
+// - Type construction and field access
+// - Constant value verification
+// - Function existence verification
+// =============================================================================
+
+module specs.core.sys.linux.auxv_test;
+
+mount core.sys.linux.auxv.{
+    AuxvEntry,
+    AT_NULL, AT_ENTRY, AT_UID, AT_EUID, AT_GID, AT_EGID,
+    AT_HWCAP, AT_PAGESZ, AT_CLKTCK, AT_SECURE, AT_PLATFORM,
+    AT_RANDOM, AT_HWCAP2, AT_EXECFN, AT_SYSINFO_EHDR,
+    init_auxv,
+    getauxval,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// AuxvEntry Type Tests
+// =============================================================================
+
+@test
+fn test_auxv_entry_construction() {
+    let entry = AuxvEntry {
+        type_: 16 as UInt64,
+        value: 0xFFFF as UInt64,
+    };
+    assert_eq(entry.type_, 16 as UInt64);
+    assert_eq(entry.value, 0xFFFF as UInt64);
+}
+
+@test
+fn test_auxv_entry_null() {
+    let entry = AuxvEntry {
+        type_: AT_NULL,
+        value: 0 as UInt64,
+    };
+    assert_eq(entry.type_, 0 as UInt64);
+}
+
+// =============================================================================
+// AT_* Constant Tests
+// =============================================================================
+
+@test
+fn test_at_null_is_zero() {
+    assert_eq(AT_NULL, 0 as UInt64);
+}
+
+@test
+fn test_at_hwcap_value() {
+    assert_eq(AT_HWCAP, 16 as UInt64);
+}
+
+@test
+fn test_at_pagesz_value() {
+    assert_eq(AT_PAGESZ, 6 as UInt64);
+}
+
+@test
+fn test_at_hwcap2_value() {
+    assert_eq(AT_HWCAP2, 26 as UInt64);
+}
+
+@test
+fn test_at_constants_distinct() {
+    assert(AT_NULL != AT_HWCAP, "AT_NULL != AT_HWCAP");
+    assert(AT_HWCAP != AT_PAGESZ, "AT_HWCAP != AT_PAGESZ");
+    assert(AT_ENTRY != AT_UID, "AT_ENTRY != AT_UID");
+}
+
+// =============================================================================
+// Function Existence Tests
+// =============================================================================
+
+@test
+fn test_init_auxv_exists() {
+    let _ = init_auxv;
+}
+
+@test
+fn test_getauxval_exists() {
+    let _ = getauxval;
+}

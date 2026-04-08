@@ -1,0 +1,807 @@
+// =============================================================================
+// format_test.vr - Comprehensive tests for formatting system
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, format, display, debug, core
+// @description: Comprehensive tests for the formatting system including
+//               FormatSpec, Formatter, alignment, padding, Debug/Display traits.
+//
+// Coverage:
+// - FormatSpec construction and properties
+// - Formatter basic operations
+// - Alignment modes (Left, Center, Right)
+// - Sign modes (Minus, Plus, Space)
+// - Width and precision formatting
+// - Fill characters
+// - Alternate mode (#)
+// - Debug formatting for primitives
+// - Display formatting for primitives
+// - Debug helpers (DebugStruct, DebugTuple, DebugList, DebugMap)
+// - Format string (f"...") integration
+// =============================================================================
+
+module specs.core.text.format_test;
+
+mount core.text.{
+    Text,
+    Formatter, FormatSpec, FormatResult, Alignment, Sign,
+    Write, WriteError, WriteErrorKind,
+    DebugStruct, DebugTuple, DebugList, DebugMap,
+    format_debug, format_display, print, println, dbg,
+};
+mount core.base.maybe.{Maybe};
+mount core.base.result.{Result};
+
+// =============================================================================
+// Section 1: Alignment Tests
+// =============================================================================
+
+@test
+fn test_alignment_variants() {
+    // Test all alignment variants exist and are distinct
+    let left = Alignment.Left;
+    let center = Alignment.Center;
+    let right = Alignment.Right;
+
+    // Can compare equality
+    assert(left == Alignment.Left);
+    assert(center == Alignment.Center);
+    assert(right == Alignment.Right);
+
+    // All are different
+    assert(left != center);
+    assert(center != right);
+    assert(left != right);
+
+    print("Alignment variants test passed");
+}
+
+// =============================================================================
+// Section 2: Sign Tests
+// =============================================================================
+
+@test
+fn test_sign_variants() {
+    let minus = Sign.Minus;   // Show minus only for negative
+    let plus = Sign.Plus;     // Show plus for positive, minus for negative
+    let space = Sign.Space;   // Show space for positive, minus for negative
+
+    assert(minus == Sign.Minus);
+    assert(plus == Sign.Plus);
+    assert(space == Sign.Space);
+
+    // All different
+    assert(minus != plus);
+    assert(plus != space);
+    assert(minus != space);
+
+    print("Sign variants test passed");
+}
+
+// =============================================================================
+// Section 3: FormatSpec Tests
+// =============================================================================
+
+@test
+fn test_format_spec_default() {
+    let spec = FormatSpec.default();
+
+    // Default values
+    assert_eq(spec.fill, ' ');              // Space fill
+    assert_eq(spec.align, Alignment.Left);  // Left aligned
+    assert_eq(spec.sign, Sign.Minus);       // Only show minus
+    assert(spec.width.is_none());           // No width
+    assert(spec.precision.is_none());       // No precision
+    assert(!spec.alternate);                // No alternate form
+
+    print("FormatSpec default test passed");
+}
+
+@test
+fn test_format_spec_with_width() {
+    let spec = FormatSpec {
+        fill: ' ',
+        align: Alignment.Right,
+        sign: Sign.Minus,
+        width: Maybe.Some(10),
+        precision: Maybe.None,
+        alternate: false,
+        format_type: Maybe.None,
+    };
+
+    assert_eq(spec.width, Maybe.Some(10));
+    assert_eq(spec.align, Alignment.Right);
+
+    print("FormatSpec with width test passed");
+}
+
+@test
+fn test_format_spec_with_precision() {
+    let spec = FormatSpec {
+        fill: '0',
+        align: Alignment.Right,
+        sign: Sign.Plus,
+        width: Maybe.Some(8),
+        precision: Maybe.Some(2),
+        alternate: false,
+        format_type: Maybe.None,
+    };
+
+    assert_eq(spec.precision, Maybe.Some(2));
+    assert_eq(spec.fill, '0');
+    assert_eq(spec.sign, Sign.Plus);
+
+    print("FormatSpec with precision test passed");
+}
+
+@test
+fn test_format_spec_alternate() {
+    let spec = FormatSpec {
+        fill: ' ',
+        align: Alignment.Left,
+        sign: Sign.Minus,
+        width: Maybe.None,
+        precision: Maybe.None,
+        alternate: true,
+        format_type: Maybe.Some('x'),  // hex
+    };
+
+    assert(spec.alternate);
+    assert_eq(spec.format_type, Maybe.Some('x'));
+
+    print("FormatSpec alternate test passed");
+}
+
+// =============================================================================
+// Section 4: Formatter Basic Tests
+// =============================================================================
+
+@test
+fn test_formatter_new() {
+    let mut buffer: Text = "";
+    let fmt = Formatter.new(&mut buffer);
+
+    // Formatter should have default spec
+    assert_eq(fmt.align(), Alignment.Left);
+    assert_eq(fmt.fill(), ' ');
+    assert(!fmt.alternate());
+
+    print("Formatter new test passed");
+}
+
+@test
+fn test_formatter_write_str() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    match fmt.write_str(&"hello") {
+        Result.Ok(()) => {}
+        Result.Err(_) => panic("write_str failed"),
+    }
+
+    assert_eq(buffer, "hello");
+
+    print("Formatter write_str test passed");
+}
+
+@test
+fn test_formatter_write_char() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    match fmt.write_char('h') {
+        Result.Ok(()) => {}
+        Result.Err(_) => panic("write_char failed"),
+    }
+    match fmt.write_char('i') {
+        Result.Ok(()) => {}
+        Result.Err(_) => panic("write_char failed"),
+    }
+
+    assert_eq(buffer, "hi");
+
+    print("Formatter write_char test passed");
+}
+
+@test
+fn test_formatter_write_int() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    match fmt.write_int(42) {
+        Result.Ok(()) => {}
+        Result.Err(_) => panic("write_int failed"),
+    }
+
+    assert_eq(buffer, "42");
+
+    print("Formatter write_int test passed");
+}
+
+@test
+fn test_formatter_write_int_negative() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    match fmt.write_int(-123) {
+        Result.Ok(()) => {}
+        Result.Err(_) => panic("write_int failed"),
+    }
+
+    assert_eq(buffer, "-123");
+
+    print("Formatter write_int negative test passed");
+}
+
+@test
+fn test_formatter_write_float() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    match fmt.write_float(3.14) {
+        Result.Ok(()) => {}
+        Result.Err(_) => panic("write_float failed"),
+    }
+
+    // Should contain "3.14" (exact representation may vary)
+    assert(buffer.contains(&"3.14") || buffer.contains(&"3.1400"));
+
+    print("Formatter write_float test passed");
+}
+
+// =============================================================================
+// Section 5: format_display Tests
+// =============================================================================
+
+@test
+fn test_format_display_int() {
+    let result = format_display(&42);
+    assert_eq(result, "42");
+
+    let neg = format_display(&-999);
+    assert_eq(neg, "-999");
+
+    print("format_display int test passed");
+}
+
+@test
+fn test_format_display_float() {
+    let result = format_display(&3.14159);
+    assert(result.starts_with(&"3.14"));
+
+    print("format_display float test passed");
+}
+
+@test
+fn test_format_display_bool() {
+    let t = format_display(&true);
+    let f = format_display(&false);
+
+    assert_eq(t, "true");
+    assert_eq(f, "false");
+
+    print("format_display bool test passed");
+}
+
+@test
+fn test_format_display_char() {
+    let result = format_display(&'x');
+    assert_eq(result, "x");
+
+    print("format_display char test passed");
+}
+
+@test
+fn test_format_display_text() {
+    let s: Text = "hello";
+    let result = format_display(&s);
+    assert_eq(result, "hello");
+
+    print("format_display text test passed");
+}
+
+// =============================================================================
+// Section 6: format_debug Tests
+// =============================================================================
+
+@test
+fn test_format_debug_int() {
+    let result = format_debug(&42);
+    assert_eq(result, "42");
+
+    print("format_debug int test passed");
+}
+
+@test
+fn test_format_debug_bool() {
+    let t = format_debug(&true);
+    let f = format_debug(&false);
+
+    assert_eq(t, "true");
+    assert_eq(f, "false");
+
+    print("format_debug bool test passed");
+}
+
+@test
+fn test_format_debug_char() {
+    // Debug char should be quoted
+    let result = format_debug(&'x');
+    assert_eq(result, "'x'");
+
+    print("format_debug char test passed");
+}
+
+@test
+fn test_format_debug_char_escape() {
+    // Special characters should be escaped
+    let newline = format_debug(&'\n');
+    assert_eq(newline, "'\\n'");
+
+    let tab = format_debug(&'\t');
+    assert_eq(tab, "'\\t'");
+
+    let single_quote = format_debug(&'\'');
+    assert_eq(single_quote, "'\\''");
+
+    print("format_debug char escape test passed");
+}
+
+@test
+fn test_format_debug_text() {
+    // Debug text should be quoted
+    let s: Text = "hello";
+    let result = format_debug(&s);
+    assert_eq(result, "\"hello\"");
+
+    print("format_debug text test passed");
+}
+
+@test
+fn test_format_debug_text_escape() {
+    // Strings with special characters should be escaped
+    let s: Text = "hello\nworld";
+    let result = format_debug(&s);
+    assert_eq(result, "\"hello\\nworld\"");
+
+    print("format_debug text escape test passed");
+}
+
+// =============================================================================
+// Section 7: DebugStruct Tests
+// =============================================================================
+
+@test
+fn test_debug_struct_basic() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    let mut ds = fmt.debug_struct(&"Point");
+    ds.field(&"x", &10);
+    ds.field(&"y", &20);
+    ds.finish();
+
+    // Should produce "Point { x: 10, y: 20 }"
+    assert(buffer.contains(&"Point"));
+    assert(buffer.contains(&"x"));
+    assert(buffer.contains(&"10"));
+    assert(buffer.contains(&"y"));
+    assert(buffer.contains(&"20"));
+
+    print("DebugStruct basic test passed");
+}
+
+@test
+fn test_debug_struct_empty() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    let mut ds = fmt.debug_struct(&"Empty");
+    ds.finish();
+
+    assert(buffer.contains(&"Empty"));
+
+    print("DebugStruct empty test passed");
+}
+
+// =============================================================================
+// Section 8: DebugTuple Tests
+// =============================================================================
+
+@test
+fn test_debug_tuple_basic() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    let mut dt = fmt.debug_tuple(&"Pair");
+    dt.field(&10);
+    dt.field(&"hello");
+    dt.finish();
+
+    // Should produce something like "Pair(10, "hello")"
+    assert(buffer.contains(&"Pair"));
+    assert(buffer.contains(&"10"));
+
+    print("DebugTuple basic test passed");
+}
+
+@test
+fn test_debug_tuple_empty() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    let mut dt = fmt.debug_tuple(&"Unit");
+    dt.finish();
+
+    assert(buffer.contains(&"Unit"));
+
+    print("DebugTuple empty test passed");
+}
+
+// =============================================================================
+// Section 9: DebugList Tests
+// =============================================================================
+
+@test
+fn test_debug_list_basic() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    let mut dl = fmt.debug_list();
+    dl.entry(&1);
+    dl.entry(&2);
+    dl.entry(&3);
+    dl.finish();
+
+    // Should produce "[1, 2, 3]"
+    assert(buffer.contains(&"1"));
+    assert(buffer.contains(&"2"));
+    assert(buffer.contains(&"3"));
+    assert(buffer.contains(&"[") || buffer.starts_with(&"["));
+
+    print("DebugList basic test passed");
+}
+
+@test
+fn test_debug_list_empty() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    let mut dl = fmt.debug_list();
+    dl.finish();
+
+    assert_eq(buffer, "[]");
+
+    print("DebugList empty test passed");
+}
+
+// =============================================================================
+// Section 10: DebugMap Tests
+// =============================================================================
+
+@test
+fn test_debug_map_basic() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    let mut dm = fmt.debug_map();
+    dm.entry(&"a", &1);
+    dm.entry(&"b", &2);
+    dm.finish();
+
+    // Should produce something like {"a": 1, "b": 2}
+    assert(buffer.contains(&"a"));
+    assert(buffer.contains(&"1"));
+    assert(buffer.contains(&"b"));
+    assert(buffer.contains(&"2"));
+
+    print("DebugMap basic test passed");
+}
+
+@test
+fn test_debug_map_empty() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    let mut dm = fmt.debug_map();
+    dm.finish();
+
+    assert_eq(buffer, "{}");
+
+    print("DebugMap empty test passed");
+}
+
+// =============================================================================
+// Section 11: Format String Integration Tests
+// =============================================================================
+
+@test
+fn test_format_string_basic() {
+    let name = "world";
+    let result = f"Hello, {name}!";
+
+    assert_eq(result, "Hello, world!");
+
+    print("Format string basic test passed");
+}
+
+@test
+fn test_format_string_int() {
+    let x = 42;
+    let result = f"The answer is {x}";
+
+    assert_eq(result, "The answer is 42");
+
+    print("Format string int test passed");
+}
+
+@test
+fn test_format_string_multiple() {
+    let a = 10;
+    let b = 20;
+    let result = f"{a} + {b} = {a + b}";
+
+    assert_eq(result, "10 + 20 = 30");
+
+    print("Format string multiple test passed");
+}
+
+@test
+fn test_format_string_float() {
+    let pi = 3.14;
+    let result = f"Pi is approximately {pi}";
+
+    assert(result.contains(&"3.14"));
+
+    print("Format string float test passed");
+}
+
+@test
+fn test_format_string_bool() {
+    let flag = true;
+    let result = f"Flag is {flag}";
+
+    assert_eq(result, "Flag is true");
+
+    print("Format string bool test passed");
+}
+
+@test
+fn test_format_string_nested() {
+    let inner = "inner";
+    let outer = f"outer({inner})";
+    let result = f"[{outer}]";
+
+    assert_eq(result, "[outer(inner)]");
+
+    print("Format string nested test passed");
+}
+
+// =============================================================================
+// Section 12: WriteError Tests
+// =============================================================================
+
+@test
+fn test_write_error_kind_variants() {
+    let io = WriteErrorKind.Io;
+    let buffer_full = WriteErrorKind.BufferFull;
+    let encoding = WriteErrorKind.Encoding;
+
+    // All variants exist
+    assert(io == WriteErrorKind.Io);
+    assert(buffer_full == WriteErrorKind.BufferFull);
+    assert(encoding == WriteErrorKind.Encoding);
+
+    // All different
+    assert(io != buffer_full);
+    assert(buffer_full != encoding);
+
+    print("WriteErrorKind variants test passed");
+}
+
+@test
+fn test_write_error_construction() {
+    let err = WriteError { kind: WriteErrorKind.BufferFull };
+
+    assert_eq(err.kind, WriteErrorKind.BufferFull);
+
+    print("WriteError construction test passed");
+}
+
+// =============================================================================
+// Section 13: Edge Cases
+// =============================================================================
+
+@test
+fn test_format_empty_string() {
+    let empty: Text = "";
+    let result = f"{empty}";
+
+    assert_eq(result, "");
+
+    print("Format empty string test passed");
+}
+
+@test
+fn test_format_special_chars() {
+    let special: Text = "hello\nworld\ttab";
+    let result = f"Content: {special}";
+
+    assert(result.contains(&"hello"));
+    assert(result.contains(&"world"));
+
+    print("Format special chars test passed");
+}
+
+@test
+fn test_formatter_sequential_writes() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+
+    fmt.write_str(&"Hello");
+    fmt.write_char(' ');
+    fmt.write_int(42);
+    fmt.write_char('!');
+
+    assert_eq(buffer, "Hello 42!");
+
+    print("Formatter sequential writes test passed");
+}
+
+@test
+fn test_format_large_int() {
+    let big: Int = 9223372036854775807;  // Max Int64
+    let result = format_display(&big);
+
+    assert_eq(result, "9223372036854775807");
+
+    print("Format large int test passed");
+}
+
+@test
+fn test_format_negative_zero() {
+    let neg_zero: Float = -0.0;
+    let result = format_display(&neg_zero);
+
+    // -0.0 may display as "-0" or "0" depending on implementation
+    assert(result.contains(&"0"));
+
+    print("Format negative zero test passed");
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+// =============================================================================
+// Section 14: Additional Formatting Tests
+// =============================================================================
+
+@test
+fn test_format_display_zero() {
+    let result = format_display(&0);
+    assert_eq(result, "0");
+}
+
+@test
+fn test_format_debug_negative_int() {
+    let result = format_debug(&-42);
+    assert_eq(result, "-42");
+}
+
+@test
+fn test_format_display_empty_text() {
+    let empty: Text = "";
+    let result = format_display(&empty);
+    assert_eq(result, "");
+}
+
+@test
+fn test_formatter_write_str_multiple() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+    fmt.write_str(&"abc");
+    fmt.write_str(&"def");
+    fmt.write_str(&"ghi");
+    assert_eq(buffer, "abcdefghi");
+}
+
+@test
+fn test_formatter_write_int_zero() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+    fmt.write_int(0);
+    assert_eq(buffer, "0");
+}
+
+@test
+fn test_debug_struct_single_field() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+    let mut ds = fmt.debug_struct(&"Wrapper");
+    ds.field(&"value", &42);
+    ds.finish();
+    assert(buffer.contains(&"Wrapper"));
+    assert(buffer.contains(&"value"));
+    assert(buffer.contains(&"42"));
+}
+
+@test
+fn test_format_string_zero() {
+    let x = 0;
+    let result = f"value: {x}";
+    assert_eq(result, "value: 0");
+}
+
+@test
+fn test_format_debug_empty_text() {
+    let empty: Text = "";
+    let result = format_debug(&empty);
+    assert_eq(result, "\"\"");
+}
+
+// =============================================================================
+// Additional Format Tests
+// =============================================================================
+
+@test
+fn test_format_display_float() {
+    let val: Float = 3.14;
+    let result = format_display(&val);
+    assert(result.len() > 0);
+}
+
+@test
+fn test_format_display_true() {
+    let result = format_display(&true);
+    assert_eq(result, "true");
+}
+
+@test
+fn test_format_display_false() {
+    let result = format_display(&false);
+    assert_eq(result, "false");
+}
+
+@test
+fn test_format_string_bool() {
+    let b = true;
+    let result = f"flag: {b}";
+    assert_eq(result, "flag: true");
+}
+
+@test
+fn test_formatter_write_char_multiple() {
+    let mut buffer: Text = "";
+    let mut fmt = Formatter.new(&mut buffer);
+    fmt.write_char('a');
+    fmt.write_char('b');
+    fmt.write_char('c');
+    assert_eq(buffer, "abc");
+}
+
+@test
+fn test_format_display_negative_int() {
+    let result = format_display(&-100);
+    assert_eq(result, "-100");
+}
+
+@test
+fn test_format_string_multiple_ints() {
+    let a = 1;
+    let b = 2;
+    let result = f"{a} + {b} = 3";
+    assert_eq(result, "1 + 2 = 3");
+}
+
+@test
+fn test_format_debug_true() {
+    let result = format_debug(&true);
+    assert_eq(result, "true");
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

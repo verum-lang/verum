@@ -1,0 +1,317 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, kernel, shared
+
+// Basic shared memory usage
+@kernel(block_size = 256)
+fn shared_reduce(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [NUM_BLOCKS]>
+) {
+    // Shared memory declaration
+    @shared let sdata: [f32; 256];
+
+    let tid = local_id().x;
+    let idx = global_id().x;
+
+    // Load data into shared memory
+    sdata[tid] = if idx < N { input[idx] } else { 0.0 };
+
+    // Synchronize to ensure all data is loaded
+    barrier();
+
+    // Tree reduction in shared memory
+    for s in [128, 64, 32, 16, 8, 4, 2, 1] {
+        if tid < s {
+            sdata[tid] += sdata[tid + s];
+        }
+        barrier();
+    }
+
+    // Write result from first thread
+    if tid == 0 {
+        output[group_id().x] = sdata[0];
+    }
+}
+
+// Tiled matrix multiplication with shared memory
+@kernel(block_size = (16, 16), grid_size = auto)
+fn tiled_matmul(
+    a: &Tensor<f32, [M, K]>,
+    b: &Tensor<f32, [K, N]>,
+    c: &mut Tensor<f32, [M, N]>
+) {
+    const TILE_SIZE: usize = 16;
+
+    @shared let tile_a: [[f32; TILE_SIZE]; TILE_SIZE];
+    @shared let tile_b: [[f32; TILE_SIZE]; TILE_SIZE];
+
+    let tx = local_id().x;
+    let ty = local_id().y;
+    let row = global_id().y;
+    let col = global_id().x;
+
+    let mut sum = 0.0f32;
+
+    // Iterate over tiles
+    let num_tiles = (K + TILE_SIZE - 1) / TILE_SIZE;
+
+    for t in 0..num_tiles {
+        // Load tile from A
+        let a_col = t * TILE_SIZE + tx;
+        tile_a[ty][tx] = if row < M && a_col < K {
+            a[row, a_col]
+        } else {
+            0.0
+        };
+
+        // Load tile from B
+        let b_row = t * TILE_SIZE + ty;
+        tile_b[ty][tx] = if b_row < K && col < N {
+            b[b_row, col]
+        } else {
+            0.0
+        };
+
+        barrier();
+
+        // Compute partial dot product
+        for k in 0..TILE_SIZE {
+            sum += tile_a[ty][k] * tile_b[k][tx];
+        }
+
+        barrier();
+    }
+
+    // Write result
+    if row < M && col < N {
+        c[row, col] = sum;
+    }
+}
+
+// Coalesced transpose with shared memory (avoids bank conflicts)
+@kernel(block_size = (32, 8), grid_size = auto)
+fn coalesced_transpose(
+    input: &Tensor<f32, [M, N]>,
+    output: &mut Tensor<f32, [N, M]>
+) {
+    const TILE_DIM: usize = 32;
+    const BLOCK_ROWS: usize = 8;
+
+    // Add padding to avoid bank conflicts
+    @shared let tile: [[f32; TILE_DIM + 1]; TILE_DIM];
+
+    let x = group_id().x * TILE_DIM + local_id().x;
+    let y = group_id().y * TILE_DIM + local_id().y;
+
+    // Load input tile (coalesced reads)
+    for j in 0..4 {
+        let row = y + j * BLOCK_ROWS;
+        if x < N && row < M {
+            tile[local_id().y + j * BLOCK_ROWS][local_id().x] = input[row, x];
+        }
+    }
+
+    barrier();
+
+    // Write transposed (coalesced writes)
+    let new_x = group_id().y * TILE_DIM + local_id().x;
+    let new_y = group_id().x * TILE_DIM + local_id().y;
+
+    for j in 0..4 {
+        let row = new_y + j * BLOCK_ROWS;
+        if new_x < M && row < N {
+            output[row, new_x] = tile[local_id().x][local_id().y + j * BLOCK_ROWS];
+        }
+    }
+}
+
+// Histogram with shared memory atomics
+@kernel(block_size = 256)
+fn histogram(
+    data: &Tensor<u8, [N]>,
+    hist: &mut Tensor<u32, [256]>
+) {
+    @shared let local_hist: [u32; 256];
+
+    let tid = local_id().x;
+    let idx = global_id().x;
+
+    // Initialize local histogram
+    local_hist[tid] = 0;
+    barrier();
+
+    // Count in local histogram
+    if idx < N {
+        let bin = data[idx] as usize;
+        atomic_add(&mut local_hist[bin], 1);
+    }
+
+    barrier();
+
+    // Merge to global histogram
+    atomic_add(&mut hist[tid], local_hist[tid]);
+}
+
+// Prefix sum (scan) with shared memory
+@kernel(block_size = 512)
+fn block_prefix_sum(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [N]>,
+    block_sums: &mut Tensor<f32, [NUM_BLOCKS]>
+) {
+    @shared let temp: [f32; 512];
+
+    let tid = local_id().x;
+    let idx = global_id().x;
+
+    // Load input
+    temp[tid] = if idx < N { input[idx] } else { 0.0 };
+    barrier();
+
+    // Up-sweep (reduce)
+    let mut offset = 1;
+    for d in 0..9 {  // log2(512) = 9
+        let limit = 512 >> (d + 1);
+        if tid <= limit - 1 {
+            let ai = offset * (2 * tid + 1) - 1;
+            let bi = offset * (2 * tid + 2) - 1;
+            temp[bi] += temp[ai];
+        }
+        offset *= 2;
+        barrier();
+    }
+
+    // Save block sum and clear last element
+    if tid == 0 {
+        block_sums[group_id().x] = temp[511];
+        temp[511] = 0.0;
+    }
+    barrier();
+
+    // Down-sweep
+    for d in (0..9).rev() {
+        offset /= 2;
+        let limit = 512 >> (d + 1);
+        if tid <= limit - 1 {
+            let ai = offset * (2 * tid + 1) - 1;
+            let bi = offset * (2 * tid + 2) - 1;
+            let t = temp[ai];
+            temp[ai] = temp[bi];
+            temp[bi] += t;
+        }
+        barrier();
+    }
+
+    // Write output
+    if idx < N {
+        output[idx] = temp[tid];
+    }
+}
+
+// Dynamic shared memory allocation
+@kernel(block_size = 256, shared_memory = dynamic)
+fn dynamic_shared(
+    data: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [N]>,
+    window_size: usize
+) {
+    // Dynamic shared memory - size determined at launch
+    @shared(dynamic) let window: [f32];
+
+    let tid = local_id().x;
+    let idx = global_id().x;
+
+    // Load window centered at this threadps position
+    for i in 0..window_size {
+        let load_idx = (idx as i32 - window_size as i32 / 2 + i as i32);
+        window[tid * window_size + i] = if load_idx >= 0 && load_idx < N as i32 {
+            data[load_idx as usize]
+        } else {
+            0.0
+        };
+    }
+
+    barrier();
+
+    // Compute average
+    if idx < N {
+        let mut sum = 0.0f32;
+        for i in 0..window_size {
+            sum += window[tid * window_size + i];
+        }
+        output[idx] = sum / window_size as f32;
+    }
+}
+
+// 2D shared memory example - stencil operation
+@kernel(block_size = (16, 16), grid_size = auto)
+fn stencil_2d(
+    input: &Tensor<f32, [H, W]>,
+    output: &mut Tensor<f32, [H, W]>
+) {
+    const HALO: usize = 1;  // Stencil radius
+    const TILE_SIZE: usize = 16;
+    const SHARED_SIZE: usize = TILE_SIZE + 2 * HALO;
+
+    @shared let tile: [[f32; SHARED_SIZE]; SHARED_SIZE];
+
+    let tx = local_id().x;
+    let ty = local_id().y;
+    let gx = global_id().x;
+    let gy = global_id().y;
+
+    // Load main tile
+    tile[ty + HALO][tx + HALO] = if gx < W && gy < H {
+        input[gy, gx]
+    } else {
+        0.0
+    };
+
+    // Load halos
+    if tx < HALO {
+        // Left halo
+        tile[ty + HALO][tx] = if gx >= HALO && gy < H {
+            input[gy, gx - HALO]
+        } else {
+            0.0
+        };
+        // Right halo
+        tile[ty + HALO][tx + TILE_SIZE + HALO] = if gx + TILE_SIZE < W && gy < H {
+            input[gy, gx + TILE_SIZE]
+        } else {
+            0.0
+        };
+    }
+
+    if ty < HALO {
+        // Top halo
+        tile[ty][tx + HALO] = if gx < W && gy >= HALO {
+            input[gy - HALO, gx]
+        } else {
+            0.0
+        };
+        // Bottom halo
+        tile[ty + TILE_SIZE + HALO][tx + HALO] = if gx < W && gy + TILE_SIZE < H {
+            input[gy + TILE_SIZE, gx]
+        } else {
+            0.0
+        };
+    }
+
+    barrier();
+
+    // Apply 3x3 averaging stencil
+    if gx < W && gy < H {
+        let mut sum = 0.0f32;
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                sum += tile[(ty as i32 + HALO as i32 + dy) as usize]
+                           [(tx as i32 + HALO as i32 + dx) as usize];
+            }
+        }
+        output[gy, gx] = sum / 9.0;
+    }
+}

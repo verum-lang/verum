@@ -1,0 +1,194 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, base, conversion, number
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for number base conversions
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// Extract digit at position from number in given base
+fn digit_at(n: Int, base: Int, pos: Int) -> Int {
+    let mut x = abs_val(n);
+    let mut i = 0;
+    while i < pos {
+        x = x / base;
+        i = i + 1;
+    }
+    x % base
+}
+
+// Count digits in base
+fn digit_count(n: Int, base: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut x = abs_val(n);
+    let mut count = 0;
+    while x > 0 {
+        count = count + 1;
+        x = x / base;
+    }
+    count
+}
+
+// Sum of digits in base
+fn digit_sum(n: Int, base: Int) -> Int {
+    let mut x = abs_val(n);
+    let mut sum = 0;
+    while x > 0 {
+        sum = sum + x % base;
+        x = x / base;
+    }
+    sum
+}
+
+// Convert from base to decimal: digits stored in array
+type Digits8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int, len: Int };
+
+fn digits8_get(d: Digits8, i: Int) -> Int {
+    if i == 0 { d.d0 } else if i == 1 { d.d1 }
+    else if i == 2 { d.d2 } else if i == 3 { d.d3 }
+    else if i == 4 { d.d4 } else if i == 5 { d.d5 }
+    else if i == 6 { d.d6 } else if i == 7 { d.d7 }
+    else { 0 }
+}
+
+// Convert digit array (MSB first) from given base to decimal
+fn from_base(digits: Digits8, base: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < digits.len {
+        result = result * base + digits8_get(digits, i);
+        i = i + 1;
+    }
+    result
+}
+
+// Convert decimal to digit array in given base (MSB first)
+fn to_base(n: Int, base: Int) -> Digits8 {
+    if n == 0 {
+        return Digits8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 1 };
+    }
+    // First, collect digits (LSB first)
+    let mut x = abs_val(n);
+    let mut count = 0;
+    let mut t0 = 0; let mut t1 = 0; let mut t2 = 0; let mut t3 = 0;
+    let mut t4 = 0; let mut t5 = 0; let mut t6 = 0; let mut t7 = 0;
+    while x > 0 && count < 8 {
+        let d = x % base;
+        if count == 0 { t0 = d; }
+        else if count == 1 { t1 = d; }
+        else if count == 2 { t2 = d; }
+        else if count == 3 { t3 = d; }
+        else if count == 4 { t4 = d; }
+        else if count == 5 { t5 = d; }
+        else if count == 6 { t6 = d; }
+        else if count == 7 { t7 = d; }
+        x = x / base;
+        count = count + 1;
+    }
+    // Reverse into MSB-first order
+    let mut r = Digits8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: count };
+    let mut i = 0;
+    while i < count {
+        let src_idx = count - 1 - i;
+        let val = if src_idx == 0 { t0 } else if src_idx == 1 { t1 }
+                  else if src_idx == 2 { t2 } else if src_idx == 3 { t3 }
+                  else if src_idx == 4 { t4 } else if src_idx == 5 { t5 }
+                  else if src_idx == 6 { t6 } else { t7 };
+        r = Digits8 {
+            d0: if i == 0 { val } else { r.d0 }, d1: if i == 1 { val } else { r.d1 },
+            d2: if i == 2 { val } else { r.d2 }, d3: if i == 3 { val } else { r.d3 },
+            d4: if i == 4 { val } else { r.d4 }, d5: if i == 5 { val } else { r.d5 },
+            d6: if i == 6 { val } else { r.d6 }, d7: if i == 7 { val } else { r.d7 },
+            len: count
+        };
+        i = i + 1;
+    }
+    r
+}
+
+// Is palindrome in given base
+fn is_palindrome_in_base(n: Int, base: Int) -> Bool {
+    let d = to_base(n, base);
+    let mut i = 0;
+    while i < d.len / 2 {
+        if digits8_get(d, i) != digits8_get(d, d.len - 1 - i) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_digits() {
+    // 255 in binary = 8 digits, all 1
+    assert_eq(digit_count(255, 2), 8);
+    assert_eq(digit_count(100, 10), 3);
+    assert_eq(digit_count(0, 10), 1);
+
+    // Digit sum
+    assert_eq(digit_sum(123, 10), 6);  // 1+2+3
+    assert_eq(digit_sum(255, 16), 30); // F+F = 15+15
+    assert_eq(digit_sum(255, 2), 8);   // 8 ones
+}
+
+fn test_digit_at() {
+    // 1234 in base 10: digit[0]=4, digit[1]=3, digit[2]=2, digit[3]=1
+    assert_eq(digit_at(1234, 10, 0), 4);
+    assert_eq(digit_at(1234, 10, 1), 3);
+    assert_eq(digit_at(1234, 10, 2), 2);
+    assert_eq(digit_at(1234, 10, 3), 1);
+}
+
+fn test_from_base() {
+    // Binary 1010 = 10
+    let bin = Digits8 { d0: 1, d1: 0, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 4 };
+    assert_eq(from_base(bin, 2), 10);
+
+    // Hex FF = 255
+    let hex = Digits8 { d0: 15, d1: 15, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 2 };
+    assert_eq(from_base(hex, 16), 255);
+
+    // Octal 17 = 15
+    let oct = Digits8 { d0: 1, d1: 7, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 2 };
+    assert_eq(from_base(oct, 8), 15);
+}
+
+fn test_roundtrip() {
+    // Convert to base and back
+    let d = to_base(42, 2);
+    assert_eq(from_base(d, 2), 42);
+
+    let d2 = to_base(255, 16);
+    assert_eq(from_base(d2, 16), 255);
+
+    let d3 = to_base(1000, 8);
+    assert_eq(from_base(d3, 8), 1000);
+}
+
+fn test_palindrome() {
+    // 5 is palindrome in any base
+    assert_eq(is_palindrome_in_base(5, 10), true);
+    assert_eq(is_palindrome_in_base(5, 2), true);   // 101
+
+    // 121 in base 10 is palindrome
+    assert_eq(is_palindrome_in_base(121, 10), true);
+
+    // 7 in binary = 111, palindrome
+    assert_eq(is_palindrome_in_base(7, 2), true);
+
+    // 10 in binary = 1010, not palindrome
+    assert_eq(is_palindrome_in_base(10, 2), false);
+}
+
+fn main() -> Int {
+    test_digits();
+    test_digit_at();
+    test_from_base();
+    test_roundtrip();
+    test_palindrome();
+    print("[OK] 252_base_conversion_aot");
+    0
+}

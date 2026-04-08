@@ -1,0 +1,621 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @description: Comprehensive parser tests for associated type productions
+// Grammar: protocol_type = 'type' , identifier , [ type_params ] , [ ':' , type_bounds ] , [ where_clause ] , [ default_type ] , ';' ;
+//          associated_type_bound = type_path_expr , '.' , identifier , ':' , bounds ;
+//          associated_type_eq = type_path_expr , '.' , identifier , '=' , type_expr ;
+//          type_alias = 'type' , identifier , [ type_params ] , [ ':' , type_bounds ] , '=' , type_expr , ';' ;
+
+// =============================================================================
+// Section 1: Basic Associated Types in Protocols
+// =============================================================================
+
+// Simple associated type declaration
+type Iterator is protocol {
+    type Item;
+
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type IntoIterator is protocol {
+    type Item;
+    type IntoIter: Iterator<Item = Self.Item>;
+
+    fn into_iter(self) -> Self.IntoIter;
+};
+
+// Associated type with bounds
+type Collection is protocol {
+    type Item: Clone;
+
+    fn add(&mut self, item: Self.Item);
+    fn get(&self, index: Int) -> Maybe<Self.Item>;
+};
+
+// Multiple associated types
+type Map is protocol {
+    type Key;
+    type Value;
+
+    fn get(&self, key: &Self.Key) -> Maybe<&Self.Value>;
+    fn insert(&mut self, key: Self.Key, value: Self.Value) -> Maybe<Self.Value>;
+};
+
+// =============================================================================
+// Section 2: Associated Types with Multiple Bounds
+// =============================================================================
+
+type SortedCollection is protocol {
+    type Item: Ord + Clone + Display;
+
+    fn insert(&mut self, item: Self.Item);
+    fn min(&self) -> Maybe<&Self.Item>;
+    fn max(&self) -> Maybe<&Self.Item>;
+};
+
+type HashCollection is protocol {
+    type Item: Hash + Eq + Clone;
+
+    fn contains(&self, item: &Self.Item) -> Bool;
+    fn insert(&mut self, item: Self.Item) -> Bool;
+};
+
+type Display is protocol {
+    fn fmt(&self) -> Text;
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Ord is protocol {
+    fn compare(&self, other: &Self) -> Ordering;
+};
+
+type Ordering is Less | Equal | Greater;
+
+type Hash is protocol {
+    fn hash(&self) -> u64;
+};
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+// =============================================================================
+// Section 3: Generic Associated Types (GATs)
+// =============================================================================
+
+// Grammar: protocol_type = 'type' , identifier , [ type_params ] , ...
+
+// Basic GAT - Note: Verum uses regular type parameters instead of lifetimes
+type LendingIterator is protocol {
+    type Item<L>;
+
+    fn next<L>(&mut self) -> Maybe<Self.Item<L>>;
+};
+
+// GAT with bounds
+type Parser is protocol {
+    type Output<T>: Clone;
+
+    fn parse<T>(input: Text) -> Result<Self.Output<T>, ParseError>;
+};
+
+type ParseError is { message: Text, position: Int };
+
+// GAT with multiple parameters
+type BiMap is protocol {
+    type Entry<K, V>;
+
+    fn get<K, V>(key: K) -> Maybe<Self.Entry<K, V>>;
+};
+
+// GAT with complex bounds
+type Container is protocol {
+    type Element<T>: Clone + Display where T: Default;
+
+    fn wrap<T: Default>(value: T) -> Self.Element<T>;
+    fn unwrap<T: Default>(elem: Self.Element<T>) -> T;
+};
+
+type Default is protocol {
+    fn default() -> Self;
+};
+
+// =============================================================================
+// Section 4: Associated Types with Default Values
+// =============================================================================
+
+// Grammar: default_type = '=' , type_expr ;
+
+type Addable is protocol {
+    type Output = Self;  // Default to Self
+
+    fn add(self, other: Self) -> Self.Output;
+};
+
+type FromStr is protocol {
+    type Error = ParseError;  // Default error type
+
+    fn from_str(s: Text) -> Result<Self, Self.Error>;
+};
+
+type Allocator is protocol {
+    type Pointer<T> = *mut T;  // Default pointer type
+
+    fn allocate<T>(&self, count: Int) -> Self.Pointer<T>;
+    fn deallocate<T>(&self, ptr: Self.Pointer<T>);
+};
+
+// Default GAT
+type Streaming is protocol {
+    type Stream<T> = List<T>;  // Default to List
+
+    fn stream<T>(items: List<T>) -> Self.Stream<T>;
+};
+
+// =============================================================================
+// Section 5: Using Self.AssociatedType
+// =============================================================================
+
+type Sequence is protocol {
+    type Item;
+    type Index;
+
+    fn get(&self, index: Self.Index) -> Maybe<Self.Item>;
+    fn set(&mut self, index: Self.Index, value: Self.Item);
+    fn len(&self) -> Self.Index;
+};
+
+type Graph is protocol {
+    type Node;
+    type Edge;
+    type NodeId;
+    type EdgeId;
+
+    fn add_node(&mut self, data: Self.Node) -> Self.NodeId;
+    fn add_edge(&mut self, from: Self.NodeId, to: Self.NodeId, data: Self.Edge) -> Self.EdgeId;
+    fn get_node(&self, id: Self.NodeId) -> Maybe<&Self.Node>;
+    fn get_edge(&self, id: Self.EdgeId) -> Maybe<&Self.Edge>;
+};
+
+// Nested Self.Type usage
+type Tree is protocol {
+    type Value;
+    type ChildIter: Iterator<Item = Self>;  // Iterator yields Self
+
+    fn value(&self) -> &Self.Value;
+    fn children(&self) -> Self.ChildIter;
+};
+
+// =============================================================================
+// Section 6: Associated Type Bounds in Where Clauses
+// =============================================================================
+
+// Grammar: associated_type_bound = type_path_expr , '.' , identifier , ':' , bounds ;
+
+fn sum_items<I>(iter: I) -> I.Item
+where
+    I: Iterator,
+    I.Item: Add<Output = I.Item> + Default
+{
+    iter.fold(I.Item.default(), |acc, x| acc.add(x))
+}
+
+fn display_all<C>(collection: &C)
+where
+    C: Collection,
+    C.Item: Display
+{
+    for item in collection.iter() {
+        print(item.fmt());
+    }
+}
+
+fn sort_collection<C>(collection: &mut C)
+where
+    C: Collection,
+    C.Item: Ord
+{
+    collection.sort();
+}
+
+type Add is protocol {
+    type Output;
+    fn add(self, other: Self) -> Self.Output;
+};
+
+// =============================================================================
+// Section 7: Associated Type Equality in Where Clauses
+// =============================================================================
+
+// Grammar: associated_type_eq = type_path_expr , '.' , identifier , '=' , type_expr ;
+
+fn collect_ints<I>(iter: I) -> List<Int>
+where
+    I: Iterator,
+    I.Item = Int
+{
+    iter.collect()
+}
+
+fn map_to_strings<I>(iter: I) -> List<Text>
+where
+    I: Iterator,
+    I.Item: Display
+{
+    iter.map(|x| x.fmt()).collect()
+}
+
+fn convert_map<M>(map: M) -> List<(Text, Int)>
+where
+    M: Map,
+    M.Key = Text,
+    M.Value = Int
+{
+    map.entries().collect()
+}
+
+// Combined bounds and equality
+fn process_graph<G>(graph: &G)
+where
+    G: Graph,
+    G.Node: Display,
+    G.Edge: Display,
+    G.NodeId = Int,
+    G.EdgeId = Int
+{
+    // Process graph with specific ID types
+}
+
+// =============================================================================
+// Section 8: Implementing Associated Types
+// =============================================================================
+
+// Concrete implementation
+type IntIterator is {
+    data: List<Int>,
+    pos: Int
+};
+
+implement Iterator for IntIterator {
+    type Item is Int;  // Specify the associated type
+
+    fn next(&mut self) -> Maybe<Self.Item> {
+        if self.pos < self.data.len() {
+            let item = self.data[self.pos];
+            self.pos = self.pos + 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
+// Generic implementation
+type ListIterator<T> is {
+    data: &List<T>,
+    pos: Int
+};
+
+implement<T> Iterator for ListIterator<T> {
+    type Item is T;
+
+    fn next(&mut self) -> Maybe<Self.Item> {
+        self.data.get(self.pos).map(|item| {
+            self.pos = self.pos + 1;
+            item.clone()
+        })
+    }
+}
+
+// GAT implementation - Note: Verum uses regular type parameters instead of lifetimes
+type WindowIterator<T> is {
+    data: &List<T>,
+    window_size: Int,
+    pos: Int
+};
+
+implement<T> LendingIterator for WindowIterator<T> {
+    type Item<L> is &[T];
+
+    fn next<L>(&mut self) -> Maybe<Self.Item<L>> {
+        if self.pos + self.window_size <= self.data.len() {
+            let window = &self.data[self.pos..self.pos + self.window_size];
+            self.pos = self.pos + 1;
+            Some(window)
+        } else {
+            None
+        }
+    }
+}
+
+// =============================================================================
+// Section 9: Associated Types in Type Aliases
+// =============================================================================
+
+// Grammar: type_alias = 'type' , identifier , [ type_params ] , [ ':' , type_bounds ] , '=' , type_expr , ';' ;
+
+// Simple alias
+type StringIter is Iterator<Item = Text>;
+
+// Alias with type parameter
+type ItemIter<T> is Iterator<Item = T>;
+
+// Complex alias
+type MapEntry<K, V> is (K, V);
+type MapIter<K, V> is Iterator<Item = MapEntry<K, V>>;
+
+// Alias for specific associated type binding
+type IntMap<V> is Map<Key = Int, Value = V>;
+type TextMap<V> is Map<Key = Text, Value = V>;
+
+// =============================================================================
+// Section 10: Associated Types with Protocols as Bounds
+// =============================================================================
+
+type Decodable is protocol {
+    type Decoder: Decode;
+
+    fn decode(decoder: &mut Self.Decoder) -> Result<Self, DecodeError>;
+};
+
+type Decode is protocol {
+    fn read_int(&mut self) -> Result<Int, DecodeError>;
+    fn read_text(&mut self) -> Result<Text, DecodeError>;
+    fn read_bool(&mut self) -> Result<Bool, DecodeError>;
+};
+
+type DecodeError is { message: Text };
+
+type Encodable is protocol {
+    type Encoder: Encode;
+
+    fn encode(&self, encoder: &mut Self.Encoder) -> Result<(), EncodeError>;
+};
+
+type Encode is protocol {
+    fn write_int(&mut self, value: Int) -> Result<(), EncodeError>;
+    fn write_text(&mut self, value: Text) -> Result<(), EncodeError>;
+    fn write_bool(&mut self, value: Bool) -> Result<(), EncodeError>;
+};
+
+type EncodeError is { message: Text };
+
+// =============================================================================
+// Section 11: Associated Types in Complex Protocol Hierarchies
+// =============================================================================
+
+// Base protocol with associated type
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+// Extended protocol using parent's structure
+type Applicative<F<_>> is protocol extends Functor<F<_>> {
+    fn pure<A>(a: A) -> F<A>;
+    fn apply<A, B>(self: F<fn(A) -> B>, fa: F<A>) -> F<B>;
+};
+
+// Further extension
+type Monad<M<_>> is protocol extends Applicative<M<_>> {
+    fn flat_map<A, B>(self: M<A>, f: fn(A) -> M<B>) -> M<B>;
+};
+
+// Protocol with associated type referencing another associated type
+type Traversable<T<_>> is protocol extends Functor<T<_>> {
+    fn traverse<F<_>: Applicative, A, B>(self: T<A>, f: fn(A) -> F<B>) -> F<T<B>>;
+};
+
+// =============================================================================
+// Section 12: Type Constructor Associated Types
+// =============================================================================
+
+// Note: Associated types in protocols use regular type params, not HKT placeholder syntax
+type HigherKindedProtocol is protocol {
+    type Constructor;  // A type constructor (parameterized separately)
+
+    fn liftup<A>(a: A) -> Self.Constructor;
+    fn lower<A>(c: Self.Constructor) -> A;
+};
+
+type MonadTrans<M<_>> is protocol {
+    type Base: Monad;
+
+    fn liftup<A>(base: Self.Base) -> M<A>;
+};
+
+// =============================================================================
+// Section 13: Associated Type Projections
+// =============================================================================
+
+// Associated type projections are used in where clauses and type annotations
+// fn get_item_type<C: Collection>() -> type is not valid syntax
+
+fn create_item<C: Collection>() -> C.Item where C.Item: Default {
+    C.Item.default()  // Use the associated type
+}
+
+fn create_iterator<C: IntoIterator>(c: C) -> C.IntoIter {
+    c.into_iter()
+}
+
+fn map_items<I: Iterator, F: Fn(I.Item) -> O, O>(iter: I, f: F) -> MapIterator<I, F> {
+    MapIterator { iter: iter, f: f }
+}
+
+type MapIterator<I, F> is {
+    iter: I,
+    f: F
+};
+
+type Fn<A, B> is protocol {
+    fn call(&self, arg: A) -> B;
+};
+
+// =============================================================================
+// Section 14: Associated Constants (Related to Associated Types)
+// =============================================================================
+
+type Bounded is protocol {
+    type Value;
+    const MIN: Self.Value;  // Associated constant using associated type
+    const MAX: Self.Value;
+
+    fn is_in_bounds(value: Self.Value) -> Bool;
+};
+
+type Numeric is protocol {
+    type Value;
+    const ZERO: Self.Value;
+    const ONE: Self.Value;
+
+    fn add(a: Self.Value, b: Self.Value) -> Self.Value;
+    fn mul(a: Self.Value, b: Self.Value) -> Self.Value;
+};
+
+implement Bounded for Int {
+    type Value is Int;
+    const MIN: Int = -9223372036854775808;
+    const MAX: Int = 9223372036854775807;
+
+    fn is_in_bounds(value: Int) -> Bool {
+        value >= Self.MIN && value <= Self.MAX
+    }
+}
+
+// =============================================================================
+// Section 15: Self in Associated Type Context
+// =============================================================================
+
+type SelfReferential is protocol {
+    type Mirror: SelfReferential<Mirror = Self>;  // Mirror's Mirror is Self
+
+    fn mirror(&self) -> Self.Mirror;
+    fn back(m: Self.Mirror) -> Self;
+};
+
+type Recursive is protocol {
+    type Child: Recursive;
+
+    fn children(&self) -> List<Self.Child>;
+    fn parent(&self) -> Maybe<&Self>;
+};
+
+type Fixpoint is protocol {
+    type Unwrapped;
+
+    fn fix(self) -> Self.Unwrapped;
+    fn unfix(u: Self.Unwrapped) -> Self;
+};
+
+// =============================================================================
+// Section 16: Associated Types with Refinement Types
+// =============================================================================
+
+// Note: Refinement syntax on associated types not supported in protocol definitions
+// Use where clauses for constraints instead
+type ValidatedCollection is protocol {
+    type Item: Validated;  // Use bound instead of inline refinement
+
+    fn add(&mut self, item: Self.Item);
+    fn validate(item: Self.Item) -> Bool;
+};
+
+type Validated is protocol {
+    fn is_valid(&self) -> Bool;
+};
+
+type BoundedContainer is protocol {
+    type Size: NonNegative;  // Use bound instead of inline refinement
+
+    fn len(&self) -> Self.Size;
+    fn capacity(&self) -> Self.Size;
+};
+
+type NonNegative is protocol {
+    fn is_non_negative(&self) -> Bool;
+};
+
+// =============================================================================
+// Section 17: Complex Associated Type Scenarios
+// =============================================================================
+
+// Multiple associated types with complex relationships
+type Database is protocol {
+    type Connection;
+    type Query;
+    type Result;
+    type Error;
+    type Transaction: DatabaseTransaction<Error = Self.Error>;
+
+    fn connect() -> Result<Self.Connection, Self.Error>;
+    fn query(conn: &Self.Connection, q: Self.Query) -> Result<Self.Result, Self.Error>;
+    fn begin_transaction(conn: &mut Self.Connection) -> Result<Self.Transaction, Self.Error>;
+};
+
+type DatabaseTransaction is protocol {
+    type Error;
+
+    fn commit(self) -> Result<(), Self.Error>;
+    fn rollback(self) -> Result<(), Self.Error>;
+};
+
+// Associated types forming a category
+// Note: Self.Object bounds not supported in type params; use where clause instead
+type Category is protocol {
+    type Object;
+    type Morphism<A, B>;
+
+    fn identity<A>() -> Self.Morphism<A, A>;
+    fn compose<A, B, C>(
+        f: Self.Morphism<A, B>,
+        g: Self.Morphism<B, C>
+    ) -> Self.Morphism<A, C>;
+};
+
+// =============================================================================
+// Section 18: Edge Cases
+// =============================================================================
+
+// Associated type with same name as outer type
+type Named is protocol {
+    type Named;  // Valid: associated type can shadow
+
+    fn get_name(&self) -> Self.Named;
+};
+
+// Very long associated type chain
+type Deep is protocol {
+    type Level1;
+};
+
+fn use_deep<T: Deep>() where T.Level1: Deep {
+    // Can chain: T.Level1.Level1
+}
+
+// Associated type with no bounds
+type Unbound is protocol {
+    type Anything;  // No bounds at all
+
+    fn wrap<T>(value: T) -> Self.Anything;
+};
+
+// Multiple protocols with same associated type name
+type HasItem1 is protocol {
+    type Item;
+};
+
+type HasItem2 is protocol {
+    type Item;
+};
+
+fn use_both<T>(x: T)
+where
+    T: HasItem1 + HasItem2,
+    T.Item: Display  // Ambiguous without qualification - both have Item
+{
+    // Implementation
+}

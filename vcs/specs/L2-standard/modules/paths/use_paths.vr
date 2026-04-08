@@ -1,0 +1,240 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, paths, use, link
+
+/// Use paths - path expressions in mount/link statements.
+/// Demonstrates various path forms in import contexts including
+/// absolute, relative, and combined path expressions.
+
+// =============================================================================
+// RELATIVE PATHS IN IMPORTS (super)
+// =============================================================================
+
+module outer {
+    pub type OuterType is {
+        value: Int
+    };
+
+    pub const OUTER_CONST: Int = 100;
+
+    pub module inner {
+        // Import from parent using super
+        mount super.OuterType;
+
+        pub type InnerType is {
+            outer: OuterType,
+            multiplier: Int
+        };
+
+        implement InnerType {
+            pub fn compute(&self) -> Int {
+                self.outer.value * self.multiplier
+            }
+        }
+
+        pub module deep {
+            // Multiple super levels
+            mount super.InnerType;
+            mount super.super.OuterType;
+
+            pub fn create_default() -> InnerType {
+                InnerType {
+                    outer: OuterType { value: 1 },
+                    multiplier: 10
+                }
+            }
+
+            // Can also write paths inline without mount
+            pub fn create_custom(val: Int) -> super.InnerType {
+                super.InnerType {
+                    outer: super.super.OuterType { value: val },
+                    multiplier: 5
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// MIXED PATH EXPRESSIONS
+// =============================================================================
+
+module library {
+    pub module v1 {
+        pub type Api is {
+            version: Int
+        };
+
+        pub fn create() -> Api {
+            Api { version: 1 }
+        }
+    }
+
+    pub module v2 {
+        pub type Api is {
+            version: Int,
+            features: List<Text>
+        };
+
+        pub fn create() -> Api {
+            Api { version: 2, features: List.new() }
+        }
+
+        // Access sibling module types via super
+        pub fn migrate(old: super.v1.Api) -> Api {
+            Api {
+                version: 2,
+                features: List.new()
+            }
+        }
+    }
+
+    pub module compat {
+        // Import from both versions via separate type aliases
+        mount super.v1;
+        mount super.v2;
+        type V1Api = super.v1.Api;
+        type V2Api = super.v2.Api;
+
+        pub type CompatApi is
+    | V1(V1Api)
+    | V2(V2Api);
+
+        pub fn upgrade(api: CompatApi) -> V2Api {
+            match api {
+                V1(old) => super.v2.migrate(old),
+                V2(new_api) => new_api
+            }
+        }
+    }
+}
+
+// =============================================================================
+// PATH EXPRESSIONS IN GENERIC CONTEXTS
+// =============================================================================
+
+module generics {
+    pub module types {
+        pub type Wrapper<T> is {
+            inner: T
+        };
+
+        pub type Pair<A, B> is {
+            first: A,
+            second: B
+        };
+    }
+
+    pub module functions {
+        mount super.types.{Wrapper, Pair};
+
+        pub fn wrap<T>(value: T) -> Wrapper<T> {
+            Wrapper { inner: value }
+        }
+
+        pub fn pair<A, B>(a: A, b: B) -> Pair<A, B> {
+            Pair { first: a, second: b }
+        }
+    }
+}
+
+// =============================================================================
+// PATHS IN TRAIT BOUNDS AND WHERE CLAUSES
+// =============================================================================
+
+module traits_module {
+    pub type Processable is protocol {
+        fn process(&self) -> Int;
+    };
+
+    pub module implementations {
+        mount super.Processable;
+
+        pub type Data is {
+            value: Int
+        };
+
+        implement Processable for Data {
+            fn process(&self) -> Int {
+                self.value * 2
+            }
+        }
+
+        // Function with trait bounds using paths
+        pub fn process_all<T>(items: &List<T>) -> Int
+        where T: Processable {
+            let mut sum = 0;
+            for item in items {
+                sum += item.process();
+            }
+            sum
+        }
+    }
+}
+
+// =============================================================================
+// COMPLEX PATH SCENARIOS
+// =============================================================================
+
+module complex_paths {
+    pub module a {
+        pub module b {
+            pub module c {
+                pub type Deep is {
+                    level: Int
+                };
+
+                pub fn create() -> Deep {
+                    Deep { level: 3 }
+                }
+            }
+        }
+    }
+
+    pub module consumer {
+        // Import deeply nested type
+        mount super.a.b.c.{Deep, create};
+
+        pub fn use_deep() -> Deep {
+            create()
+        }
+
+        // Inline path usage without mount
+        pub fn create_inline() -> super.a.b.c.Deep {
+            super.a.b.c.Deep { level: 99 }
+        }
+    }
+}
+
+fn main() {
+    // Use nested module items
+    let outer_type = outer.OuterType { value: 42 };
+    let inner = outer.inner.InnerType {
+        outer: outer_type,
+        multiplier: 2
+    };
+    let computed = inner.compute();
+
+    // Use deep nested items
+    mount outer.inner.deep.{create_default, create_custom};
+    let default_inner = create_default();
+    let custom_inner = create_custom(10);
+
+    // Use versioned library
+    mount library.v1.create;
+    mount library.v2.migrate;
+
+    let v1_api = create();
+    let migrated = migrate(v1_api);
+
+    // Use generic types with paths
+    mount generics.functions.{wrap, pair};
+    let wrapped = wrap(42);
+    let paired = pair("hello", 123);
+
+    // Use complex paths
+    mount complex_paths.consumer.{use_deep, create_inline};
+    let deep = use_deep();
+    let inline_deep = create_inline();
+}

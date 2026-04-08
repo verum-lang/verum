@@ -1,0 +1,156 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, literals
+// @description: Type inference from literal values
+
+/// Test for type inference from literals.
+/// The compiler infers types from literal values when not explicitly annotated.
+
+fn main() {
+    // === Integer Literal Inference ===
+
+    // Integer literal defaults to Int (arbitrary precision)
+    let x = 42;  // Inferred: Int
+
+    // Large integers still Int (arbitrary precision)
+    let big_int = 999999999999999999999999999;  // Inferred: Int
+
+    // Hex, octal, binary are Int
+    let hex = 0xFF;      // Inferred: Int
+    let oct = 0o77;      // Inferred: Int
+    let bin = 0b1010;    // Inferred: Int
+
+    // Underscored literals preserve type
+    let big = 1_000_000;  // Inferred: Int
+
+    // Negative literals
+    let neg_int = -42;     // Inferred: Int
+
+    // === Float Literal Inference ===
+
+    // Float literal inferred from decimal point
+    let y = 3.14;  // Inferred: Float
+
+    // Negative float
+    let neg_float = -3.14; // Inferred: Float
+
+    // Scientific notation is Float
+    let sci = 1.5e10;  // Inferred: Float
+    let sci_neg = 2.5e-8;  // Inferred: Float
+    let sci_upper = 1.0e5;  // Inferred: Float
+
+    // Float variations
+    let underscored = 1_000.123456;  // Inferred: Float
+
+    // === Boolean Literal Inference ===
+
+    // Boolean literals
+    let t = true;   // Inferred: Bool
+    let f = false;  // Inferred: Bool
+
+    // Boolean from expressions
+    let cmp = 1 < 2;  // Inferred: Bool
+    let eq = 3 == 3;  // Inferred: Bool
+
+    // === Text and Char Literal Inference ===
+
+    // Text literal inferred as Text
+    let s = "hello";  // Inferred: Text
+    let empty_str = "";  // Inferred: Text
+    let unicode = "Hello world";  // Inferred: Text
+
+    // Char literal
+    let c = 'a';  // Inferred: Char
+    let escape_char = '\n';  // Inferred: Char
+
+    // Interpolated string
+    let interp = f"x is {x}";  // Inferred: Text
+
+    // === Unit Literal Inference ===
+
+    // Unit literal
+    let u: Unit = ();  // Unit type
+
+    // === Collection Literal Inference ===
+
+    // Array/list literals infer element type
+    let arr = [1, 2, 3];  // Inferred: List<Int>
+    let float_arr = [1.0, 2.0, 3.0];  // Inferred: List<Float>
+    let bool_arr = [true, false];  // Inferred: List<Bool>
+
+    // Tuple literals
+    let tuple = (1, "hello", true);  // Inferred: (Int, Text, Bool)
+    let nested_tuple = ((1, 2), (3, 4));  // Inferred: ((Int, Int), (Int, Int))
+
+    // List literals
+    let list: List<Int> = [1, 2, 3];
+    let text_list: List<Text> = ["a", "b"];
+
+    // === Inference Through Expressions ===
+
+    // Inference propagates through expressions
+    let sum = x + 10;        // Inferred: Int (x is Int, 10 is Int)
+    let product = y * 2.0;   // Inferred: Float
+
+    // Inference through operators
+    let neg = -x;  // Inferred: Int
+    let not = !t;  // Inferred: Bool
+
+    // Inference through chained operations
+    let chained = ((x + 10) * 2) - 5;  // Inferred: Int
+
+    // === Inference in Control Flow ===
+
+    // Inference in if expressions
+    let cond = if t { 1 } else { 2 };  // Inferred: Int
+    let cond_text = if f { "yes" } else { "no" };  // Inferred: Text
+
+    // Inference in match expressions
+    let matched = match x {
+        0 => "zero",
+        _ => "other",
+    };  // Inferred: Text
+
+    // === Inference from Function Context ===
+
+    // Inference from return type
+    fn double(n: Int) -> Int {
+        n * 2  // 2 inferred as Int to match return type
+    }
+
+    // Inference from function arguments
+    fn takes_float(v: Float) -> Float {
+        v * 2.0
+    }
+    let result = takes_float(5.0);  // 5.0 matches Float parameter
+
+    // === Inference with Generics ===
+
+    // Inference for generic function
+    fn identity<T>(x: T) -> T { x }
+    let id_int = identity(42);  // T = Int
+    let id_text = identity("hi");  // T = Text
+
+    // Inference for Maybe
+    let some_val: Maybe<Int> = Some(42);
+
+    // === Special Cases ===
+
+    // Block expression inherits last expression type
+    let block = { let a = 1; let b = 2; a + b };  // Inferred: Int
+
+    // Closure return type inference
+    let closure = |x: Int| x * 2;
+    let closure_result = closure(21);  // closure type fixed to Int -> Int
+
+    // Runtime assertions
+    assert(x == 42);
+    assert(y == 3.14);
+    assert(s == "hello");
+    assert(arr[0] == 1);
+    assert(tuple.0 == 1);
+    assert(id_int == 42);
+    assert(block == 3);
+    assert(closure_result == 42);
+}

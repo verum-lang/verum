@@ -1,0 +1,165 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, event, system, callback
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for event system simulation with callbacks
+
+// Event types: 0=CLICK, 1=KEY, 2=TIMER, 3=NETWORK
+type Event is { kind: Int, data: Int, timestamp: Int };
+
+// Event log (circular buffer of 8 events)
+type EventLog is {
+    k0: Int, d0: Int, t0: Int,
+    k1: Int, d1: Int, t1: Int,
+    k2: Int, d2: Int, t2: Int,
+    k3: Int, d3: Int, t3: Int,
+    count: Int
+};
+
+fn log_new() -> EventLog {
+    EventLog {
+        k0: 0, d0: 0, t0: 0,
+        k1: 0, d1: 0, t1: 0,
+        k2: 0, d2: 0, t2: 0,
+        k3: 0, d3: 0, t3: 0,
+        count: 0
+    }
+}
+
+fn log_push(log: EventLog, e: Event) -> EventLog {
+    let idx = log.count % 4;
+    EventLog {
+        k0: if idx == 0 { e.kind } else { log.k0 },
+        d0: if idx == 0 { e.data } else { log.d0 },
+        t0: if idx == 0 { e.timestamp } else { log.t0 },
+        k1: if idx == 1 { e.kind } else { log.k1 },
+        d1: if idx == 1 { e.data } else { log.d1 },
+        t1: if idx == 1 { e.timestamp } else { log.t1 },
+        k2: if idx == 2 { e.kind } else { log.k2 },
+        d2: if idx == 2 { e.data } else { log.d2 },
+        t2: if idx == 2 { e.timestamp } else { log.t2 },
+        k3: if idx == 3 { e.kind } else { log.k3 },
+        d3: if idx == 3 { e.data } else { log.d3 },
+        t3: if idx == 3 { e.timestamp } else { log.t3 },
+        count: log.count + 1
+    }
+}
+
+fn log_get_kind(log: EventLog, i: Int) -> Int {
+    if i == 0 { log.k0 } else if i == 1 { log.k1 }
+    else if i == 2 { log.k2 } else { log.k3 }
+}
+
+fn log_get_data(log: EventLog, i: Int) -> Int {
+    if i == 0 { log.d0 } else if i == 1 { log.d1 }
+    else if i == 2 { log.d2 } else { log.d3 }
+}
+
+// Event handler: returns processed value
+fn handle_click(data: Int) -> Int { data * 10 }
+fn handle_key(data: Int) -> Int { data + 100 }
+fn handle_timer(data: Int) -> Int { data }
+fn handle_network(data: Int) -> Int { data * 2 }
+
+fn dispatch(e: Event) -> Int {
+    if e.kind == 0 { handle_click(e.data) }
+    else if e.kind == 1 { handle_key(e.data) }
+    else if e.kind == 2 { handle_timer(e.data) }
+    else { handle_network(e.data) }
+}
+
+// Filter events by kind
+fn count_events_of_kind(log: EventLog, kind: Int) -> Int {
+    let limit = if log.count < 4 { log.count } else { 4 };
+    let mut count = 0;
+    let mut i = 0;
+    while i < limit {
+        if log_get_kind(log, i) == kind {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Apply handler to all logged events and sum results
+fn process_all(log: EventLog, handler: fn(Int) -> Int) -> Int {
+    let limit = if log.count < 4 { log.count } else { 4 };
+    let mut sum = 0;
+    let mut i = 0;
+    while i < limit {
+        sum = sum + handler(log_get_data(log, i));
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_dispatch() {
+    let click = Event { kind: 0, data: 5, timestamp: 100 };
+    assert_eq(dispatch(click), 50);
+
+    let key = Event { kind: 1, data: 65, timestamp: 200 };
+    assert_eq(dispatch(key), 165);
+
+    let timer = Event { kind: 2, data: 42, timestamp: 300 };
+    assert_eq(dispatch(timer), 42);
+
+    let net = Event { kind: 3, data: 10, timestamp: 400 };
+    assert_eq(dispatch(net), 20);
+}
+
+fn test_event_log() {
+    let mut log = log_new();
+    assert_eq(log.count, 0);
+
+    log = log_push(log, Event { kind: 0, data: 1, timestamp: 10 });
+    log = log_push(log, Event { kind: 1, data: 2, timestamp: 20 });
+    log = log_push(log, Event { kind: 0, data: 3, timestamp: 30 });
+    assert_eq(log.count, 3);
+    assert_eq(log_get_kind(log, 0), 0);
+    assert_eq(log_get_data(log, 1), 2);
+    assert_eq(count_events_of_kind(log, 0), 2);
+    assert_eq(count_events_of_kind(log, 1), 1);
+    assert_eq(count_events_of_kind(log, 2), 0);
+}
+
+fn test_process_all() {
+    let mut log = log_new();
+    log = log_push(log, Event { kind: 0, data: 10, timestamp: 1 });
+    log = log_push(log, Event { kind: 1, data: 20, timestamp: 2 });
+    log = log_push(log, Event { kind: 2, data: 30, timestamp: 3 });
+
+    let double = |x: Int| -> Int { x * 2 };
+    assert_eq(process_all(log, double), 120);  // (10+20+30)*2
+
+    let inc = |x: Int| -> Int { x + 1 };
+    assert_eq(process_all(log, inc), 63);  // 11+21+31
+}
+
+fn test_circular_overwrite() {
+    let mut log = log_new();
+    // Fill 4 slots
+    log = log_push(log, Event { kind: 0, data: 1, timestamp: 1 });
+    log = log_push(log, Event { kind: 1, data: 2, timestamp: 2 });
+    log = log_push(log, Event { kind: 2, data: 3, timestamp: 3 });
+    log = log_push(log, Event { kind: 3, data: 4, timestamp: 4 });
+    assert_eq(log.count, 4);
+
+    // 5th event overwrites slot 0
+    log = log_push(log, Event { kind: 0, data: 99, timestamp: 5 });
+    assert_eq(log.count, 5);
+    assert_eq(log_get_data(log, 0), 99);  // Overwritten
+    assert_eq(log_get_data(log, 1), 2);   // Unchanged
+}
+
+fn main() -> Int {
+    test_dispatch();
+    test_event_log();
+    test_process_all();
+    test_circular_overwrite();
+    print("[OK] 223_event_system_aot");
+    0
+}

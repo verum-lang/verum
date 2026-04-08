@@ -1,0 +1,84 @@
+// @test: run
+// Set operations — insert, contains, remove, len
+
+fn main() -> Int {
+    // Test 1: Basic set
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    if (s.len() != 3) {
+        print(f"FAIL test1: len = {s.len()}");
+        return 1;
+    }
+    print("test1 set create: OK");
+
+    // Test 2: Contains
+    if (!s.contains(20)) {
+        print("FAIL test2a: missing 20");
+        return 1;
+    }
+    if (s.contains(99)) {
+        print("FAIL test2b: found 99");
+        return 1;
+    }
+    print("test2 contains: OK");
+
+    // Test 3: Duplicate insert
+    s.insert(20);
+    if (s.len() != 3) {
+        print(f"FAIL test3: len after dup = {s.len()}");
+        return 1;
+    }
+    print("test3 duplicate: OK");
+
+    // Test 4: Remove
+    s.remove(20);
+    if (s.len() != 2) {
+        print(f"FAIL test4: len after remove = {s.len()}");
+        return 1;
+    }
+    if (s.contains(20)) {
+        print("FAIL test4: still contains 20");
+        return 1;
+    }
+    print("test4 remove: OK");
+
+    // Test 5: Build larger set
+    let mut big = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        big.insert(i);
+        i = i + 1;
+    }
+    if (big.len() != 100) {
+        print(f"FAIL test5: len = {big.len()}");
+        return 1;
+    }
+    if (!big.contains(0) || !big.contains(50) || !big.contains(99)) {
+        print("FAIL test5: missing elements");
+        return 1;
+    }
+    if (big.contains(100)) {
+        print("FAIL test5: found 100");
+        return 1;
+    }
+    print("test5 large set: OK");
+
+    // Test 6: Set of unique values from list with duplicates
+    let data = [1, 2, 3, 2, 1, 4, 3, 5, 4, 5];
+    let mut unique = Set.new();
+    let mut j = 0;
+    while j < data.len() {
+        unique.insert(data[j]);
+        j = j + 1;
+    }
+    if (unique.len() != 5) {
+        print(f"FAIL test6: unique count = {unique.len()}");
+        return 1;
+    }
+    print("test6 unique: OK");
+
+    print("1031_set_operations: PASS");
+    0
+}

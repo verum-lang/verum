@@ -1,0 +1,78 @@
+# VCS Test Runner Configuration
+# This file configures the vtest runner for the Verum Compliance Suite
+#
+# Schema: VTestToml as defined in vcs/runner/vtest/src/lib.rs
+
+[discovery]
+# Test directories to scan (relative to where vtest is run)
+paths = ["specs"]
+# Glob pattern for test files
+pattern = "**/*.vr"
+# Glob patterns to exclude
+exclude = ["**/skip/**", "**/wip/**"]
+
+[execution]
+# Number of parallel jobs (default: number of CPU cores)
+parallel = 8
+# Default timeout in milliseconds
+timeout_default = 30000
+# Extended timeout for complex tests
+timeout_extended = 600000
+# Quick timeout for simple tests
+timeout_quick = 5000
+# Default tier filter: "all", "interpreter", "jit", "aot"
+tier_default = "all"
+# Retry failed tests
+retry_count = 0
+# Fail fast on first error
+fail_fast = false
+
+[reporting]
+# Report format: console, json, html, junit, tap, markdown
+format = "console"
+# Use colors in output
+colors = true
+# Verbose output
+verbose = false
+# Show timing information
+show_timing = true
+# Show diffs for failures
+show_diff = true
+# Diff context lines
+diff_context = 3
+# Include passed tests in report
+include_passed = true
+# Include skipped tests in report
+include_skipped = true
+# Output directory for reports
+output_dir = "results"
+
+[tiers]
+# Tier 0: Interpreter
+tier0_name = "interpreter"
+tier0_command = "bin/verum-interpreter"
+# Tier 1: JIT baseline
+tier1_name = "jit-baseline"
+tier1_command = "bin/verum-jit"
+# Tier 2: JIT optimized
+tier2_name = "jit-optimized"
+tier2_command = "bin/verum-jit"
+# Tier 3: AOT
+tier3_name = "aot"
+tier3_command = "bin/verum-aot"
+
+[differential]
+# Tiers to compare for differential testing
+compare_tiers = [0, 3]
+# Memory tolerance for comparison (percentage)
+tolerance_memory = 0.1
+# Output tolerance for floating point
+tolerance_float = 0.0001
+
+[benchmarks]
+# Warmup iterations before measurement
+warmup_iterations = 100
+# Measurement iterations
+measure_iterations = 1000
+# Baseline directory
+baseline_dir = "baselines"

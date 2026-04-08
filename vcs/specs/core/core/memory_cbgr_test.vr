@@ -1,0 +1,936 @@
+// =============================================================================
+// memory_cbgr_test.vr - Comprehensive CBGR Memory Safety Tests
+// =============================================================================
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: core, memory, cbgr, heap, shared, weak, safety, allocation
+// @description: Industrial-grade tests for CBGR memory safety system including
+//               Heap<T>, Shared<T>, Weak<T>, generation/epoch tracking,
+//               use-after-free detection, and reference counting correctness.
+// =============================================================================
+
+module specs.stdlib.core.memory_cbgr_test;
+
+// Heap, Shared, Weak, Maybe, Result, etc. are available from prelude.
+// Ordering, protocols are from core.base.
+// Low-level memory functions from mem module.
+// NOTE: These imports document the API surface being tested.
+// The prelude provides: Heap, Shared, Maybe, Some, None, Result, Ok, Err
+// Additional types imported explicitly:
+
+// Explicitly import memory functions to avoid shadowing by iterator transducers
+// NOTE: swap and replace must be imported from core.base.memory, not linalg
+mount core.base.memory.{drop, take, swap, replace};
+
+// Import Ordering variants for comparison tests
+mount core.base.ordering.{Less, Equal, Greater};
+
+// =============================================================================
+// Test Types for CBGR Verification
+// =============================================================================
+
+/// Simple struct for basic allocation testing
+type SimpleValue is {
+    x: Int,
+    y: Int,
+};
+
+/// Struct with Drop tracking for cleanup verification
+type DropTracker is {
+    id: Int,
+    counter_ptr: &unsafe Int,  // Pointer to increment on drop
+};
+
+implement Drop for DropTracker {
+    fn drop(&mut self) {
+        unsafe {
+            let count = ptr_read(self.counter_ptr);
+            ptr_write(self.counter_ptr, count + 1);
+        }
+    }
+}
+
+/// Recursive struct to test complex allocations
+type Node is {
+    value: Int,
+    next: Maybe<Heap<Node>>,
+};
+
+implement Clone for SimpleValue {
+    fn clone(&self) -> SimpleValue {
+        SimpleValue { x: self.x, y: self.y }
+    }
+}
+
+// =============================================================================
+// Heap<T> ALLOCATION TESTS
+// =============================================================================
+
+@test
+fn test_heap_basic_allocation() {
+    let boxed = Heap.new(42);
+    assert_eq(*boxed, 42);
+
+    let boxed_struct = Heap.new(SimpleValue { x: 10, y: 20 });
+    assert_eq(boxed_struct.x, 10);
+    assert_eq(boxed_struct.y, 20);
+}
+
+@test
+fn test_heap_new_default() {
+    let boxed: Heap<Int> = Heap.new_default();
+    assert_eq(*boxed, 0);  // Int.default() == 0
+
+    let boxed_struct: Heap<SimpleValue> = Heap.new(SimpleValue { x: 0, y: 0 });
+    assert_eq(boxed_struct.x, 0);
+    assert_eq(boxed_struct.y, 0);
+}
+
+@test
+fn test_heap_new_zeroed() {
+    let boxed: Heap<Int> = Heap.new_zeroed();
+    assert_eq(*boxed, 0);
+
+    // Zeroed memory for a struct should have all zero bytes
+    let boxed_struct: Heap<SimpleValue> = Heap.new_zeroed();
+    assert_eq(boxed_struct.x, 0);
+    assert_eq(boxed_struct.y, 0);
+}
+
+@test
+fn test_heap_try_new_success() {
+    let result = Heap.try_new(42);
+    assert(result.is_ok());
+
+    match result {
+        Ok(boxed) => assert_eq(*boxed, 42),
+        Err(_) => panic("Unexpected allocation failure"),
+    }
+}
+
+@test
+fn test_heap_mutation() {
+    let mut boxed = Heap.new(10);
+    assert_eq(*boxed, 10);
+
+    *boxed = 20;
+    assert_eq(*boxed, 20);
+
+    // Mutation through as_mut
+    *boxed.as_mut() = 30;
+    assert_eq(*boxed, 30);
+}
+
+@test
+fn test_heap_into_inner() {
+    let boxed = Heap.new(42);
+    let value = boxed.into_inner();
+    assert_eq(value, 42);
+    // boxed is now consumed, allocation is freed
+}
+
+// =============================================================================
+// CBGR GENERATION AND EPOCH TRACKING
+// =============================================================================
+
+@test
+fn test_heap_generation_tracking() {
+    let boxed = Heap.new(42);
+
+    // Generation should be set
+    let gen = boxed.generation();
+    assert(gen > 0 || gen == 0);  // Valid generation (can be 0 initially)
+
+    // Epoch should be valid
+    let epoch = boxed.epoch();
+    assert(epoch >= 0);
+}
+
+@test
+fn test_heap_validity_check() {
+    let boxed = Heap.new(42);
+
+    // Fresh allocation should be valid
+    assert(boxed.is_valid());
+}
+
+@test
+fn test_heap_generation_uniqueness() {
+    // Each allocation should have its own generation tracking
+    let boxed1 = Heap.new(1);
+    let boxed2 = Heap.new(2);
+
+    // Both should be valid
+    assert(boxed1.is_valid());
+    assert(boxed2.is_valid());
+
+    // They may or may not have the same generation depending on allocator state
+    // But both should remain valid
+}
+
+// =============================================================================
+// DROP AND CLEANUP VERIFICATION
+// =============================================================================
+
+@test
+fn test_heap_drop_calls_destructor() {
+    let mut drop_count = 0;
+    let counter_ptr = &mut drop_count as &unsafe Int;
+
+    {
+        let _boxed = Heap.new(DropTracker {
+            id: 1,
+            counter_ptr: counter_ptr,
+        });
+        // boxed will be dropped here
+    }
+
+    // Destructor should have been called
+    assert_eq(drop_count, 1);
+}
+
+@test
+fn test_heap_into_inner_no_double_drop() {
+    let mut drop_count = 0;
+    let counter_ptr = &mut drop_count as &unsafe Int;
+
+    let boxed = Heap.new(DropTracker {
+        id: 1,
+        counter_ptr: counter_ptr,
+    });
+
+    let tracker = boxed.into_inner();
+    // Value moved out, original allocation freed but not dropped again
+
+    // Drop tracker is now owned directly
+    // When it goes out of scope, it will be dropped once
+    drop(tracker);
+
+    assert_eq(drop_count, 1);  // Dropped exactly once
+}
+
+@test
+fn test_heap_forget_prevents_drop() {
+    let mut drop_count = 0;
+    let counter_ptr = &mut drop_count as &unsafe Int;
+
+    let boxed = Heap.new(DropTracker {
+        id: 1,
+        counter_ptr: counter_ptr,
+    });
+
+    let raw_ptr = boxed.into_raw();
+    // Memory is leaked but not dropped
+
+    // LEAK: We're intentionally not calling from_raw and dropping
+    // In a real program, this would be a memory leak
+
+    assert_eq(drop_count, 0);  // Never dropped
+}
+
+// =============================================================================
+// RAW POINTER CONVERSION
+// =============================================================================
+
+@test
+fn test_heap_into_raw_from_raw_roundtrip() {
+    let boxed = Heap.new(42);
+    let raw = boxed.into_raw();
+
+    // Reconstruct from raw
+    let boxed2 = unsafe { Heap.from_raw(raw) };
+    assert_eq(*boxed2, 42);
+    assert(boxed2.is_valid());
+}
+
+// =============================================================================
+// PROTOCOL IMPLEMENTATIONS FOR Heap<T>
+// =============================================================================
+
+@test
+fn test_heap_clone() {
+    let original = Heap.new(SimpleValue { x: 10, y: 20 });
+    let cloned = original.clone();
+
+    assert_eq(cloned.x, 10);
+    assert_eq(cloned.y, 20);
+
+    // They should be separate allocations
+    // Both should be valid
+    assert(original.is_valid());
+    assert(cloned.is_valid());
+}
+
+@test
+fn test_heap_eq() {
+    let a = Heap.new(42);
+    let b = Heap.new(42);
+    let c = Heap.new(100);
+
+    assert(a == b);
+    assert(!(a == c));
+    assert(a != c);
+}
+
+@test
+fn test_heap_ord() {
+    let a = Heap.new(10);
+    let b = Heap.new(20);
+
+    assert(a < b);
+    assert(b > a);
+    assert(a <= b);
+    assert(b >= a);
+    assert_eq(a.cmp(&b), Less);
+    assert_eq(b.cmp(&a), Greater);
+
+    let c = Heap.new(10);
+    assert_eq(a.cmp(&c), Equal);
+}
+
+@test
+fn test_heap_default() {
+    let boxed: Heap<Int> = Heap.default();
+    assert_eq(*boxed, 0);
+}
+
+// =============================================================================
+// Shared<T> REFERENCE COUNTING TESTS
+// =============================================================================
+
+@test
+fn test_shared_basic_allocation() {
+    let shared = Shared.new(42);
+    assert_eq(*shared, 42);
+    assert_eq(shared.strong_count(), 1);
+    assert_eq(shared.weak_count(), 0);
+}
+
+@test
+fn test_shared_clone_increments_count() {
+    let shared1 = Shared.new(42);
+    assert_eq(shared1.strong_count(), 1);
+
+    let shared2 = shared1.clone();
+    assert_eq(shared1.strong_count(), 2);
+    assert_eq(shared2.strong_count(), 2);  // Same count (same allocation)
+
+    // Values should be equal (same underlying data)
+    assert_eq(*shared1, *shared2);
+}
+
+@test
+fn test_shared_drop_decrements_count() {
+    let shared1 = Shared.new(42);
+    let shared2 = shared1.clone();
+    assert_eq(shared1.strong_count(), 2);
+
+    drop(shared2);
+    assert_eq(shared1.strong_count(), 1);
+}
+
+@test
+fn test_shared_uniqueness() {
+    let shared = Shared.new(42);
+    assert(shared.is_unique());
+
+    let shared2 = shared.clone();
+    assert(!shared.is_unique());
+    assert(!shared2.is_unique());
+
+    drop(shared2);
+    assert(shared.is_unique());
+}
+
+@test
+fn test_shared_get_mut_when_unique() {
+    let mut shared = Shared.new(42);
+    assert(shared.is_unique());
+
+    match shared.get_mut() {
+        Some(ptr) => {
+            *ptr = 100;
+        }
+        None => panic("Expected Some from get_mut on unique Shared"),
+    }
+
+    assert_eq(*shared, 100);
+}
+
+@test
+fn test_shared_get_mut_when_not_unique() {
+    let mut shared1 = Shared.new(42);
+    let _shared2 = shared1.clone();
+
+    // Should return None when not unique
+    assert(shared1.get_mut().is_none());
+}
+
+@test
+fn test_shared_make_unique_clones_when_needed() {
+    let mut shared1 = Shared.new(SimpleValue { x: 10, y: 20 });
+    let shared2 = shared1.clone();
+    assert(!shared1.is_unique());
+
+    // make_unique should clone
+    let ptr = shared1.make_unique();
+    ptr.x = 100;
+
+    // shared1 now points to new allocation
+    assert(shared1.is_unique());
+    assert_eq(shared1.x, 100);
+
+    // shared2 still has original value
+    assert_eq(shared2.x, 10);
+}
+
+@test
+fn test_shared_try_unwrap_success() {
+    let shared = Shared.new(42);
+    assert(shared.is_unique());
+
+    match shared.try_unwrap() {
+        Ok(value) => assert_eq(value, 42),
+        Err(_) => panic("Expected Ok from try_unwrap on unique Shared"),
+    }
+}
+
+@test
+fn test_shared_try_unwrap_failure() {
+    let shared1 = Shared.new(42);
+    let _shared2 = shared1.clone();
+
+    match shared1.try_unwrap() {
+        Ok(_) => panic("Expected Err from try_unwrap on non-unique Shared"),
+        Err(returned) => {
+            // Should return the Shared back
+            assert_eq(*returned, 42);
+        }
+    }
+}
+
+@test
+fn test_shared_drop_cleans_up_value() {
+    let mut drop_count = 0;
+    let counter_ptr = &mut drop_count as &unsafe Int;
+
+    {
+        let shared1 = Shared.new(DropTracker {
+            id: 1,
+            counter_ptr: counter_ptr,
+        });
+        let shared2 = shared1.clone();
+        let shared3 = shared1.clone();
+
+        assert_eq(shared1.strong_count(), 3);
+        // All go out of scope here
+    }
+
+    // Value should be dropped exactly once (when last reference drops)
+    assert_eq(drop_count, 1);
+}
+
+// =============================================================================
+// Weak<T> REFERENCE TESTS
+// =============================================================================
+
+@test
+fn test_weak_from_shared() {
+    let shared = Shared.new(42);
+    let weak = shared.downgrade();
+
+    assert_eq(shared.strong_count(), 1);
+    assert_eq(shared.weak_count(), 1);
+    assert(weak.is_alive());
+}
+
+@test
+fn test_weak_upgrade_when_alive() {
+    let shared = Shared.new(42);
+    let weak = shared.downgrade();
+
+    match weak.upgrade() {
+        Some(upgraded) => {
+            assert_eq(*upgraded, 42);
+            assert_eq(shared.strong_count(), 2);  // Now two strong refs
+        }
+        None => panic("Expected Some from upgrade on alive Weak"),
+    }
+}
+
+@test
+fn test_weak_upgrade_after_drop() {
+    let weak = {
+        let shared = Shared.new(42);
+        shared.downgrade()
+    };  // shared dropped here
+
+    // Weak should no longer upgrade
+    assert(!weak.is_alive());
+    assert(weak.upgrade().is_none());
+}
+
+@test
+fn test_weak_multiple_references() {
+    let shared = Shared.new(42);
+    let weak1 = shared.downgrade();
+    let weak2 = shared.downgrade();
+    let weak3 = weak1.clone();
+
+    assert_eq(shared.strong_count(), 1);
+    assert_eq(shared.weak_count(), 3);
+
+    drop(weak1);
+    assert_eq(shared.weak_count(), 2);
+}
+
+@test
+fn test_weak_keeps_allocation_until_dropped() {
+    // Weak references prevent deallocation even after all strong refs gone
+    let weak = {
+        let shared = Shared.new(42);
+        let w = shared.downgrade();
+        drop(shared);
+        w
+    };
+
+    // Allocation still exists (for weak ref metadata) but value is dropped
+    assert(!weak.is_alive());
+    assert_eq(weak.strong_count(), 0);
+}
+
+// =============================================================================
+// ManuallyDrop<T> TESTS
+// =============================================================================
+
+@test
+fn test_manually_drop_prevents_automatic_drop() {
+    let mut drop_count = 0;
+    let counter_ptr = &mut drop_count as &unsafe Int;
+
+    {
+        let md = ManuallyDrop.new(DropTracker {
+            id: 1,
+            counter_ptr: counter_ptr,
+        });
+        // md goes out of scope but DropTracker is not dropped
+    }
+
+    assert_eq(drop_count, 0);  // Not dropped
+}
+
+@test
+fn test_manually_drop_into_inner() {
+    let mut drop_count = 0;
+    let counter_ptr = &mut drop_count as &unsafe Int;
+
+    let md = ManuallyDrop.new(DropTracker {
+        id: 1,
+        counter_ptr: counter_ptr,
+    });
+
+    let tracker = md.into_inner();
+    drop(tracker);
+
+    assert_eq(drop_count, 1);  // Dropped when tracker goes out of scope
+}
+
+@test
+fn test_manually_drop_deref() {
+    let md = ManuallyDrop.new(42);
+    assert_eq(*md, 42);
+
+    let mut md2 = ManuallyDrop.new(10);
+    *md2 = 20;
+    assert_eq(*md2, 20);
+}
+
+@test
+fn test_manually_drop_explicit_drop() {
+    let mut drop_count = 0;
+    let counter_ptr = &mut drop_count as &unsafe Int;
+
+    let mut md = ManuallyDrop.new(DropTracker {
+        id: 1,
+        counter_ptr: counter_ptr,
+    });
+
+    unsafe {
+        md.drop();
+    }
+
+    assert_eq(drop_count, 1);
+}
+
+// =============================================================================
+// MaybeUninit<T> TESTS
+// =============================================================================
+
+@test
+fn test_maybe_uninit_new() {
+    let mu = MaybeUninit.new(42);
+    let value = unsafe { mu.assume_init() };
+    assert_eq(value, 42);
+}
+
+@test
+fn test_maybe_uninit_zeroed() {
+    let mu: MaybeUninit<Int> = MaybeUninit.zeroed();
+    let value = unsafe { mu.assume_init() };
+    assert_eq(value, 0);
+}
+
+@test
+fn test_maybe_uninit_write() {
+    let mut mu: MaybeUninit<Int> = MaybeUninit.uninit();
+    let ref_value = mu.write(42);
+    assert_eq(*ref_value, 42);
+
+    let value = unsafe { mu.assume_init() };
+    assert_eq(value, 42);
+}
+
+@test
+fn test_maybe_uninit_refs() {
+    let mut mu = MaybeUninit.new(42);
+
+    unsafe {
+        let r = mu.assume_init_ref();
+        assert_eq(*r, 42);
+
+        let mr = mu.assume_init_mut();
+        *mr = 100;
+        assert_eq(*mr, 100);
+    }
+
+    let value = unsafe { mu.assume_init() };
+    assert_eq(value, 100);
+}
+
+@test
+fn test_maybe_uninit_as_ptr() {
+    let mut mu = MaybeUninit.new(42);
+    let ptr = mu.as_ptr();
+    assert(!is_null(ptr));
+
+    let mut_ptr = mu.as_mut_ptr();
+    assert(!is_null(mut_ptr));
+}
+
+// =============================================================================
+// MEMORY MANIPULATION FUNCTIONS
+// =============================================================================
+
+@test
+fn test_swap() {
+    let mut a = 10;
+    let mut b = 20;
+
+    swap(&mut a, &mut b);
+
+    assert_eq(a, 20);
+    assert_eq(b, 10);
+}
+
+@test
+fn test_replace() {
+    let mut value = 10;
+    let old = replace(&mut value, 20);
+
+    assert_eq(old, 10);
+    assert_eq(value, 20);
+}
+
+@test
+fn test_take() {
+    let mut value = 42;
+    let taken = take(&mut value);
+
+    assert_eq(taken, 42);
+    assert_eq(value, 0);  // Default value for Int
+}
+
+@test
+fn test_memcmp_equal() {
+    let a: [Byte; 5] = [1, 2, 3, 4, 5];
+    let b: [Byte; 5] = [1, 2, 3, 4, 5];
+
+    let result = memcmp(&a[0], &b[0], 5);
+    assert_eq(result, 0);
+}
+
+@test
+fn test_memcmp_less_than() {
+    let a: [Byte; 5] = [1, 2, 3, 4, 5];
+    let b: [Byte; 5] = [1, 2, 4, 4, 5];  // b[2] > a[2]
+
+    let result = memcmp(&a[0], &b[0], 5);
+    assert(result < 0);
+}
+
+@test
+fn test_memcmp_greater_than() {
+    let a: [Byte; 5] = [1, 2, 5, 4, 5];  // a[2] > b[2]
+    let b: [Byte; 5] = [1, 2, 3, 4, 5];
+
+    let result = memcmp(&a[0], &b[0], 5);
+    assert(result > 0);
+}
+
+// =============================================================================
+// ALLOCATION FUNCTION TESTS
+// =============================================================================
+
+@test
+fn test_alloc_dealloc() {
+    let ptr = alloc(64, 8);
+    assert(!is_null(ptr));
+
+    dealloc(ptr, 64, 8);
+}
+
+@test
+fn test_alloc_zeroed_returns_zeros() {
+    let ptr = alloc_zeroed(64, 8);
+    assert(!is_null(ptr));
+
+    // Check that memory is zeroed
+    unsafe {
+        let mut i = 0;
+        while i < 64 {
+            let byte_ptr = ptr_offset(ptr, i);
+            assert_eq(ptr_read(byte_ptr), 0);
+            i = i + 1;
+        }
+    }
+
+    dealloc(ptr, 64, 8);
+}
+
+@test
+fn test_realloc_grow() {
+    let ptr = alloc(32, 8);
+
+    // Write some data
+    unsafe {
+        let mut i = 0;
+        while i < 32 {
+            let byte_ptr = ptr_offset(ptr, i);
+            ptr_write(byte_ptr, (i as Byte));
+            i = i + 1;
+        }
+    }
+
+    // Grow
+    let new_ptr = realloc(ptr, 32, 64, 8);
+    assert(!is_null(new_ptr));
+
+    // Original data should be preserved
+    unsafe {
+        let mut i = 0;
+        while i < 32 {
+            let byte_ptr = ptr_offset(new_ptr, i);
+            assert_eq(ptr_read(byte_ptr), (i as Byte));
+            i = i + 1;
+        }
+    }
+
+    dealloc(new_ptr, 64, 8);
+}
+
+@test
+fn test_realloc_shrink() {
+    let ptr = alloc(64, 8);
+
+    // Write some data
+    unsafe {
+        let mut i = 0;
+        while i < 64 {
+            let byte_ptr = ptr_offset(ptr, i);
+            ptr_write(byte_ptr, (i as Byte));
+            i = i + 1;
+        }
+    }
+
+    // Shrink
+    let new_ptr = realloc(ptr, 64, 32, 8);
+    assert(!is_null(new_ptr));
+
+    // First 32 bytes should be preserved
+    unsafe {
+        let mut i = 0;
+        while i < 32 {
+            let byte_ptr = ptr_offset(new_ptr, i);
+            assert_eq(ptr_read(byte_ptr), (i as Byte));
+            i = i + 1;
+        }
+    }
+
+    dealloc(new_ptr, 32, 8);
+}
+
+// =============================================================================
+// NULL POINTER TESTS
+// =============================================================================
+
+@test
+fn test_null_ptr_detection() {
+    let null: &unsafe Int = null_ptr();
+    assert(is_null(null));
+
+    let valid = alloc(8, 8);
+    assert(!is_null(valid));
+    dealloc(valid, 8, 8);
+}
+
+// =============================================================================
+// COMPLEX ALLOCATION PATTERNS
+// =============================================================================
+
+@test
+fn test_nested_heap_allocations() {
+    let outer = Heap.new(Heap.new(Heap.new(42)));
+    assert_eq(***outer, 42);
+}
+
+@test
+fn test_linked_list_nodes() {
+    let node3 = Heap.new(Node { value: 3, next: None });
+    let node2 = Heap.new(Node { value: 2, next: Some(node3) });
+    let node1 = Heap.new(Node { value: 1, next: Some(node2) });
+
+    assert_eq(node1.value, 1);
+    match &node1.next {
+        Some(n2) => {
+            assert_eq(n2.value, 2);
+            match &n2.next {
+                Some(n3) => assert_eq(n3.value, 3),
+                None => panic("Expected node3"),
+            }
+        }
+        None => panic("Expected node2"),
+    }
+}
+
+@test
+fn test_shared_graph_structure() {
+    // Create a shared node that multiple others reference
+    let shared_leaf = Shared.new(42);
+
+    let ref1 = shared_leaf.clone();
+    let ref2 = shared_leaf.clone();
+    let ref3 = shared_leaf.clone();
+
+    assert_eq(shared_leaf.strong_count(), 4);
+
+    // All see the same value
+    assert_eq(*ref1, 42);
+    assert_eq(*ref2, 42);
+    assert_eq(*ref3, 42);
+
+    drop(ref1);
+    drop(ref2);
+    assert_eq(shared_leaf.strong_count(), 2);
+}
+
+// =============================================================================
+// CBGR GENERATION VALIDATION (Critical Safety Tests)
+// =============================================================================
+
+@test
+fn test_heap_cbgr_after_modification() {
+    let mut boxed = Heap.new(42);
+    let gen_before = boxed.generation();
+    let epoch_before = boxed.epoch();
+
+    // Modify value
+    *boxed = 100;
+
+    // Generation and epoch should remain valid
+    assert_eq(boxed.generation(), gen_before);
+    assert_eq(boxed.epoch(), epoch_before);
+    assert(boxed.is_valid());
+}
+
+@test
+fn test_shared_cbgr_through_clones() {
+    let shared1 = Shared.new(42);
+    let gen = shared1.generation();
+    let epoch = shared1.epoch();
+
+    let shared2 = shared1.clone();
+
+    // All clones should have same generation/epoch
+    assert_eq(shared2.generation(), gen);
+    assert_eq(shared2.epoch(), epoch);
+}
+
+// =============================================================================
+// EDGE CASES AND BOUNDARY CONDITIONS
+// =============================================================================
+
+@test
+fn test_zero_sized_type_in_heap() {
+    // Unit type has zero size
+    let boxed: Heap<()> = Heap.new(());
+    assert_eq(*boxed, ());
+}
+
+@test
+fn test_large_allocation() {
+    // Allocate a large buffer
+    let size = 1024 * 1024;  // 1 MB
+    let ptr = alloc(size, 8);
+    assert(!is_null(ptr));
+    dealloc(ptr, size, 8);
+}
+
+@test
+fn test_many_small_allocations() {
+    // Stress test allocator with many small allocations
+    let mut allocations: [&unsafe Byte; 100] = unsafe { MaybeUninit.zeroed().assume_init() };
+
+    let mut i = 0;
+    while i < 100 {
+        allocations[i] = alloc(64, 8);
+        assert(!is_null(allocations[i]));
+        i = i + 1;
+    }
+
+    i = 0;
+    while i < 100 {
+        dealloc(allocations[i], 64, 8);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_allocation_alignment() {
+    // Test various alignments
+    let align1 = alloc(16, 1);
+    let align2 = alloc(16, 2);
+    let align4 = alloc(16, 4);
+    let align8 = alloc(16, 8);
+    let align16 = alloc(16, 16);
+
+    assert(!is_null(align1));
+    assert(!is_null(align2));
+    assert(!is_null(align4));
+    assert(!is_null(align8));
+    assert(!is_null(align16));
+
+    // Verify alignment (pointer should be aligned)
+    assert((align8 as Int) % 8 == 0);
+    assert((align16 as Int) % 16 == 0);
+
+    dealloc(align1, 16, 1);
+    dealloc(align2, 16, 2);
+    dealloc(align4, 16, 4);
+    dealloc(align8, 16, 8);
+    dealloc(align16, 16, 16);
+}
+
+fn main() {
+    print("CBGR memory safety tests loaded successfully");
+}

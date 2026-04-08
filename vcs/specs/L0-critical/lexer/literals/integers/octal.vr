@@ -1,0 +1,153 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, integers, octal
+
+// Octal integer literals
+
+fn test_basic_octal() {
+    // Basic octal values
+    let oct_zero = 0o0;
+    let oct_one = 0o1;
+    let oct_seven = 0o7;
+    let oct_eight = 0o10;
+    let oct_nine = 0o11;
+}
+
+fn test_single_digits() {
+    // Single octal digits
+    let o0 = 0o0;
+    let o1 = 0o1;
+    let o2 = 0o2;
+    let o3 = 0o3;
+    let o4 = 0o4;
+    let o5 = 0o5;
+    let o6 = 0o6;
+    let o7 = 0o7;
+}
+
+fn test_permissions() {
+    // Unix file permissions (most common octal use case)
+    let perm_none = 0o000;
+    let perm_execute = 0o001;
+    let perm_write = 0o002;
+    let perm_write_exec = 0o003;
+    let perm_read = 0o004;
+    let perm_read_exec = 0o005;
+    let perm_read_write = 0o006;
+    let perm_rwx = 0o007;
+}
+
+fn test_file_modes() {
+    // Common file modes
+    let mode_600 = 0o600;
+    let mode_644 = 0o644;
+    let mode_666 = 0o666;
+    let mode_700 = 0o700;
+    let mode_755 = 0o755;
+    let mode_777 = 0o777;
+}
+
+fn test_directory_modes() {
+    // Directory modes
+    let dir_700 = 0o700;
+    let dir_750 = 0o750;
+    let dir_755 = 0o755;
+}
+
+fn test_special_bits() {
+    // Special mode bits
+    let setuid = 0o4000;
+    let setgid = 0o2000;
+    let sticky = 0o1000;
+    let setuid_755 = 0o4755;
+    let setgid_755 = 0o2755;
+    let sticky_777 = 0o1777;
+}
+
+fn test_multi_digit() {
+    // Multi-digit octal values
+    let oct_64 = 0o100;
+    let oct_512 = 0o1000;
+    let oct_4096 = 0o10000;
+}
+
+fn test_larger_values() {
+    // Larger octal values
+    let oct_large = 0o77777777;
+    let oct_max_16 = 0o177777;
+    let oct_max_32 = 0o37777777777;
+}
+
+fn test_underscores() {
+    // With underscores for readability
+    let grouped_perms = 0o7_5_5;
+    let grouped_mode = 0o4_7_5_5;
+    let grouped_large = 0o777_777_777;
+}
+
+fn test_expressions() {
+    let mode_755 = 0o755;
+    let mode_644 = 0o644;
+
+    // In expressions
+    let user_perms = mode_755 >> 6 & 0o7;
+    let group_perms = mode_755 >> 3 & 0o7;
+    let other_perms = mode_755 & 0o7;
+
+    // Permission checks
+    let can_read = (mode_644 & 0o400) != 0;
+    let can_write = (mode_644 & 0o200) != 0;
+    let can_exec = (mode_755 & 0o100) != 0;
+}
+
+// In function parameters
+fn create_file(path: Text, mode: Int) {
+    // mode would be 0o644 typically
+    let _ = mode;
+}
+
+fn set_permissions(path: Text, mode: Int) {
+    // mode would be octal like 0o755
+    let _ = mode;
+}
+
+// In match expressions
+fn describe_permission(perm: Int) -> Text {
+    match perm {
+        0o7 => "read, write, execute"
+        0o6 => "read, write"
+        0o5 => "read, execute"
+        0o4 => "read only"
+        0o3 => "write, execute"
+        0o2 => "write only"
+        0o1 => "execute only"
+        0o0 => "no permission"
+        _ => "invalid"
+    }
+}
+
+fn test_arrays() {
+    // In arrays
+    let permission_levels = [0o000, 0o444, 0o644, 0o755, 0o777];
+    let common_modes = [0o600, 0o644, 0o700, 0o755];
+}
+
+fn test_uppercase_prefix() {
+    // Note: Verum only supports lowercase 0o prefix for octal (per grammar/verum.ebnf)
+    // Using lowercase instead:
+    let octal_prefix = 0o755;
+    let octal_prefix2 = 0o644;
+}
+
+fn test_decimal_equivalents() {
+    // Octal to decimal equivalents for reference
+    let eight = 0o10;
+    let sixty_four = 0o100;
+    let five_twelve = 0o1000;
+}
+
+fn secure_file(path: Text) {
+    let default_mode = 0o600;
+    let secure_dir = 0o700;
+}

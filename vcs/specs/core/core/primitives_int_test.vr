@@ -1,0 +1,882 @@
+// =============================================================================
+// primitives_int_test.vr - Comprehensive tests for Int type methods
+// =============================================================================
+// @test: run-interpreter
+// @level: L1
+// @tier: 0
+// @tags: core, primitives, int, arithmetic, bitwise
+// @description: Industrial-grade tests for Int type covering all methods,
+//               edge cases, boundary values, and protocol implementations
+// =============================================================================
+
+module specs.stdlib.core.primitives_int_test;
+
+mount core.prelude.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+// =============================================================================
+// Constants and Boundary Values
+// =============================================================================
+
+@test
+fn test_int_constants() {
+    // MIN_VALUE and MAX_VALUE
+    assert_eq(Int.min_value(), -9223372036854775808);
+    assert_eq(Int.max_value(), 9223372036854775807);
+
+    // Verify boundaries are correct (2^63 - 1 and -2^63)
+    assert(Int.max_value() > 0);
+    assert(Int.min_value() < 0);
+    assert_eq(Int.max_value() + 1, Int.min_value()); // Overflow wraps (if defined)
+}
+
+// =============================================================================
+// Sign and Classification Methods
+// =============================================================================
+
+@test
+fn test_int_abs() {
+    // Standard cases
+    assert_eq(5.abs(), 5);
+    assert_eq((-5).abs(), 5);
+    assert_eq(0.abs(), 0);
+
+    // Large values
+    assert_eq(Int.max_value().abs(), Int.max_value());
+    assert_eq(1000000000000.abs(), 1000000000000);
+    assert_eq((-1000000000000).abs(), 1000000000000);
+
+    // Note: abs(MIN_VALUE) behavior is implementation-defined
+    // In two's complement, -MIN_VALUE == MIN_VALUE (overflow)
+}
+
+@test
+fn test_int_signum() {
+    // Positive values
+    assert_eq(1.signum(), 1);
+    assert_eq(42.signum(), 1);
+    assert_eq(Int.max_value().signum(), 1);
+
+    // Negative values
+    assert_eq((-1).signum(), -1);
+    assert_eq((-42).signum(), -1);
+    assert_eq(Int.min_value().signum(), -1);
+
+    // Zero
+    assert_eq(0.signum(), 0);
+}
+
+@test
+fn test_int_is_positive() {
+    assert(1.is_positive());
+    assert(42.is_positive());
+    assert(Int.max_value().is_positive());
+
+    assert(!0.is_positive());
+    assert(!(-1).is_positive());
+    assert(!Int.min_value().is_positive());
+}
+
+@test
+fn test_int_is_negative() {
+    assert((-1).is_negative());
+    assert((-42).is_negative());
+    assert(Int.min_value().is_negative());
+
+    assert(!0.is_negative());
+    assert(!1.is_negative());
+    assert(!Int.max_value().is_negative());
+}
+
+@test
+fn test_int_is_zero() {
+    assert(0.is_zero());
+
+    assert(!1.is_zero());
+    assert(!(-1).is_zero());
+    assert(!Int.max_value().is_zero());
+    assert(!Int.min_value().is_zero());
+}
+
+@test
+fn test_int_classification_consistency() {
+    // For any Int, exactly one of (is_positive, is_negative, is_zero) should be true
+    fn check_classification(n: Int) {
+        let pos = n.is_positive();
+        let neg = n.is_negative();
+        let zero = n.is_zero();
+
+        // Exactly one must be true
+        let count = pos.to_int() + neg.to_int() + zero.to_int();
+        assert_eq(count, 1);
+
+        // Consistency with signum
+        if pos { assert_eq(n.signum(), 1); }
+        if neg { assert_eq(n.signum(), -1); }
+        if zero { assert_eq(n.signum(), 0); }
+    }
+
+    check_classification(0);
+    check_classification(1);
+    check_classification(-1);
+    check_classification(Int.max_value());
+    check_classification(Int.min_value());
+    check_classification(12345);
+    check_classification(-12345);
+}
+
+// =============================================================================
+// Type Conversion
+// =============================================================================
+
+@test
+fn test_int_to_float() {
+    assert_eq(0.to_float(), 0.0);
+    assert_eq(1.to_float(), 1.0);
+    assert_eq((-1).to_float(), -1.0);
+    assert_eq(100.to_float(), 100.0);
+    assert_eq((-100).to_float(), -100.0);
+
+    // Large values (note: Float64 can exactly represent integers up to 2^53)
+    assert_eq(9007199254740992.to_float(), 9007199254740992.0);  // 2^53
+}
+
+// =============================================================================
+// Min, Max, Clamp Operations
+// =============================================================================
+
+@test
+fn test_int_min() {
+    assert_eq(5.min(3), 3);
+    assert_eq(3.min(5), 3);
+    assert_eq(5.min(5), 5);
+
+    // With zero
+    assert_eq(5.min(0), 0);
+    assert_eq(0.min(5), 0);
+    assert_eq((-5).min(0), -5);
+
+    // With negative values
+    assert_eq((-3).min(-5), -5);
+    assert_eq((-5).min(-3), -5);
+
+    // With boundaries
+    assert_eq(Int.max_value().min(0), 0);
+    assert_eq(Int.min_value().min(0), Int.min_value());
+}
+
+@test
+fn test_int_max() {
+    assert_eq(5.max(3), 5);
+    assert_eq(3.max(5), 5);
+    assert_eq(5.max(5), 5);
+
+    // With zero
+    assert_eq(5.max(0), 5);
+    assert_eq(0.max(5), 5);
+    assert_eq((-5).max(0), 0);
+
+    // With negative values
+    assert_eq((-3).max(-5), -3);
+    assert_eq((-5).max(-3), -3);
+
+    // With boundaries
+    assert_eq(Int.max_value().max(0), Int.max_value());
+    assert_eq(Int.min_value().max(0), 0);
+}
+
+@test
+fn test_int_clamp() {
+    // Value within range
+    assert_eq(5.clamp(0, 10), 5);
+
+    // Value below range
+    assert_eq((-5).clamp(0, 10), 0);
+
+    // Value above range
+    assert_eq(15.clamp(0, 10), 10);
+
+    // Value at boundaries
+    assert_eq(0.clamp(0, 10), 0);
+    assert_eq(10.clamp(0, 10), 10);
+
+    // Negative range
+    assert_eq(0.clamp(-10, -5), -5);
+    assert_eq((-7).clamp(-10, -5), -7);
+    assert_eq((-15).clamp(-10, -5), -10);
+
+    // Single value range
+    assert_eq(5.clamp(3, 3), 3);
+    assert_eq(0.clamp(3, 3), 3);
+    assert_eq(10.clamp(3, 3), 3);
+}
+
+@test
+fn test_int_in_range() {
+    // Half-open interval [start, end)
+    assert(5.in_range(0, 10));
+    assert(0.in_range(0, 10));
+    assert(!10.in_range(0, 10));  // end is exclusive
+    assert(!(-1).in_range(0, 10));
+    assert(!15.in_range(0, 10));
+
+    // Negative ranges
+    assert((-5).in_range(-10, 0));
+    assert((-10).in_range(-10, 0));
+    assert(!0.in_range(-10, 0));
+
+    // Empty range
+    assert(!5.in_range(5, 5));
+
+    // Single element range
+    assert(5.in_range(5, 6));
+}
+
+// =============================================================================
+// Power Operation
+// =============================================================================
+
+@test
+fn test_int_pow() {
+    // Base cases
+    assert_eq(2.pow(0), 1);
+    assert_eq(2.pow(1), 2);
+    assert_eq(2.pow(2), 4);
+    assert_eq(2.pow(10), 1024);
+
+    // Zero base
+    assert_eq(0.pow(0), 1);  // By convention
+    assert_eq(0.pow(1), 0);
+    assert_eq(0.pow(5), 0);
+
+    // One base
+    assert_eq(1.pow(0), 1);
+    assert_eq(1.pow(100), 1);
+
+    // Negative base
+    assert_eq((-2).pow(0), 1);
+    assert_eq((-2).pow(1), -2);
+    assert_eq((-2).pow(2), 4);
+    assert_eq((-2).pow(3), -8);
+
+    // Larger values
+    assert_eq(10.pow(6), 1000000);
+    assert_eq(3.pow(10), 59049);
+}
+
+// =============================================================================
+// Checked Arithmetic
+// =============================================================================
+
+@test
+fn test_int_checked_add() {
+    // Normal cases
+    assert_eq(5.checked_add(3), Some(8));
+    assert_eq(0.checked_add(0), Some(0));
+    assert_eq((-5).checked_add(3), Some(-2));
+    assert_eq((-5).checked_add(-3), Some(-8));
+
+    // Overflow detection
+    assert_eq(Int.max_value().checked_add(1), None);
+    assert_eq(Int.max_value().checked_add(Int.max_value()), None);
+
+    // Underflow detection
+    assert_eq(Int.min_value().checked_add(-1), None);
+}
+
+@test
+fn test_int_checked_sub() {
+    // Normal cases
+    assert_eq(5.checked_sub(3), Some(2));
+    assert_eq(3.checked_sub(5), Some(-2));
+    assert_eq(0.checked_sub(0), Some(0));
+
+    // Overflow detection (subtracting negative causes positive overflow)
+    assert_eq(Int.max_value().checked_sub(-1), None);
+
+    // Underflow detection
+    assert_eq(Int.min_value().checked_sub(1), None);
+}
+
+@test
+fn test_int_checked_mul() {
+    // Normal cases
+    assert_eq(5.checked_mul(3), Some(15));
+    assert_eq((-5).checked_mul(3), Some(-15));
+    assert_eq((-5).checked_mul(-3), Some(15));
+    assert_eq(0.checked_mul(Int.max_value()), Some(0));
+
+    // Overflow detection
+    assert_eq(Int.max_value().checked_mul(2), None);
+    assert_eq(Int.max_value().checked_mul(Int.max_value()), None);
+
+    // Large multiplication that would overflow
+    let big = 1000000000;
+    assert_eq(big.checked_mul(big), Some(1000000000000000000));
+    assert_eq((big * 10).checked_mul(big * 10), None);  // 10^20 overflows
+}
+
+@test
+fn test_int_checked_div() {
+    // Normal cases
+    assert_eq(10.checked_div(2), Some(5));
+    assert_eq(10.checked_div(3), Some(3));  // Truncates
+    assert_eq((-10).checked_div(3), Some(-3));
+    assert_eq(0.checked_div(5), Some(0));
+
+    // Division by zero
+    assert_eq(10.checked_div(0), None);
+    assert_eq(0.checked_div(0), None);
+    assert_eq((-10).checked_div(0), None);
+}
+
+// =============================================================================
+// Wrapping Arithmetic
+// =============================================================================
+
+@test
+fn test_int_wrapping_add() {
+    // Normal cases (same as regular add)
+    assert_eq(5.wrapping_add(3), 8);
+    assert_eq((-5).wrapping_add(3), -2);
+
+    // Wrapping on overflow
+    assert_eq(Int.max_value().wrapping_add(1), Int.min_value());
+    assert_eq(Int.max_value().wrapping_add(2), Int.min_value() + 1);
+
+    // Wrapping on underflow
+    assert_eq(Int.min_value().wrapping_add(-1), Int.max_value());
+}
+
+@test
+fn test_int_wrapping_sub() {
+    // Normal cases
+    assert_eq(5.wrapping_sub(3), 2);
+    assert_eq(3.wrapping_sub(5), -2);
+
+    // Wrapping on underflow
+    assert_eq(Int.min_value().wrapping_sub(1), Int.max_value());
+
+    // Wrapping on overflow (subtracting negative)
+    assert_eq(Int.max_value().wrapping_sub(-1), Int.min_value());
+}
+
+@test
+fn test_int_wrapping_mul() {
+    // Normal cases
+    assert_eq(5.wrapping_mul(3), 15);
+    assert_eq((-5).wrapping_mul(3), -15);
+
+    // Wrapping on overflow
+    let result = Int.max_value().wrapping_mul(2);
+    assert_eq(result, -2);  // (2^63 - 1) * 2 = 2^64 - 2, wraps to -2
+}
+
+// =============================================================================
+// Saturating Arithmetic
+// =============================================================================
+
+@test
+fn test_int_saturating_add() {
+    // Normal cases
+    assert_eq(5.saturating_add(3), 8);
+    assert_eq((-5).saturating_add(3), -2);
+
+    // Saturation at MAX
+    assert_eq(Int.max_value().saturating_add(1), Int.max_value());
+    assert_eq(Int.max_value().saturating_add(100), Int.max_value());
+    assert_eq((Int.max_value() - 10).saturating_add(20), Int.max_value());
+
+    // Saturation at MIN
+    assert_eq(Int.min_value().saturating_add(-1), Int.min_value());
+}
+
+@test
+fn test_int_saturating_sub() {
+    // Normal cases
+    assert_eq(5.saturating_sub(3), 2);
+    assert_eq(3.saturating_sub(5), -2);
+
+    // Saturation at MIN
+    assert_eq(Int.min_value().saturating_sub(1), Int.min_value());
+    assert_eq(Int.min_value().saturating_sub(100), Int.min_value());
+
+    // Saturation at MAX
+    assert_eq(Int.max_value().saturating_sub(-1), Int.max_value());
+}
+
+// =============================================================================
+// Bit Manipulation
+// =============================================================================
+
+@test
+fn test_int_leading_zeros() {
+    // For 64-bit signed integers
+    assert_eq(0.leading_zeros(), 64);
+    assert_eq(1.leading_zeros(), 63);
+    assert_eq(2.leading_zeros(), 62);
+    assert_eq(255.leading_zeros(), 56);  // 0xFF
+    assert_eq(256.leading_zeros(), 55);  // 0x100
+
+    // Powers of 2
+    assert_eq((1 << 63).leading_zeros(), 0);  // Negative (sign bit set)
+    assert_eq(Int.max_value().leading_zeros(), 1);  // 0x7FFFFFFFFFFFFFFF
+}
+
+@test
+fn test_int_trailing_zeros() {
+    assert_eq(0.trailing_zeros(), 64);
+    assert_eq(1.trailing_zeros(), 0);
+    assert_eq(2.trailing_zeros(), 1);
+    assert_eq(4.trailing_zeros(), 2);
+    assert_eq(8.trailing_zeros(), 3);
+    assert_eq((1 << 20).trailing_zeros(), 20);
+
+    // Odd numbers have 0 trailing zeros
+    assert_eq(7.trailing_zeros(), 0);
+    assert_eq(123.trailing_zeros(), 0);
+
+    // Powers of 2
+    assert_eq(256.trailing_zeros(), 8);
+}
+
+@test
+fn test_int_count_ones() {
+    assert_eq(0.count_ones(), 0);
+    assert_eq(1.count_ones(), 1);
+    assert_eq(3.count_ones(), 2);   // 0b11
+    assert_eq(7.count_ones(), 3);   // 0b111
+    assert_eq(15.count_ones(), 4);  // 0b1111
+    assert_eq(255.count_ones(), 8); // 0xFF
+
+    // Alternating bits
+    assert_eq(0x5555555555555555.count_ones(), 32);  // Alternating 01...
+    assert_eq(0xAAAAAAAAAAAAAAAA.count_ones(), 32);  // Alternating 10... (negative)
+
+    // All ones (except sign bit for positive max)
+    assert_eq(Int.max_value().count_ones(), 63);
+}
+
+@test
+fn test_int_count_zeros() {
+    assert_eq(0.count_zeros(), 64);
+    assert_eq(1.count_zeros(), 63);
+    assert_eq((-1).count_zeros(), 0);  // All bits set
+    assert_eq(Int.max_value().count_zeros(), 1);
+
+    // Verify relationship: count_ones + count_zeros == 64
+    fn check_counts(n: Int) {
+        assert_eq(n.count_ones() + n.count_zeros(), 64);
+    }
+    check_counts(0);
+    check_counts(1);
+    check_counts(-1);
+    check_counts(12345);
+    check_counts(Int.max_value());
+}
+
+@test
+fn test_int_swap_bytes() {
+    // Single byte in LSB position
+    assert_eq(0x0000000000000001.swap_bytes(), 0x0100000000000000);
+    assert_eq(0x0000000000000012.swap_bytes(), 0x1200000000000000);
+
+    // Full pattern
+    assert_eq(0x0102030405060708.swap_bytes(), 0x0807060504030201);
+
+    // Symmetry: swapping twice returns original
+    let x = 0x123456789ABCDEF0;
+    assert_eq(x.swap_bytes().swap_bytes(), x);
+
+    // Zero stays zero
+    assert_eq(0.swap_bytes(), 0);
+}
+
+@test
+fn test_int_reverse_bits() {
+    assert_eq(0.reverse_bits(), 0);
+    assert_eq(1.reverse_bits(), Int.min_value());  // LSB becomes MSB
+
+    // Symmetry: reversing twice returns original
+    let x = 0x123456789ABCDEF0;
+    assert_eq(x.reverse_bits().reverse_bits(), x);
+}
+
+@test
+fn test_int_rotate_left() {
+    // Rotate by 0 is identity
+    assert_eq(42.rotate_left(0), 42);
+
+    // Rotate by 64 is also identity (full rotation)
+    assert_eq(42.rotate_left(64), 42);
+
+    // Simple rotations
+    assert_eq(1.rotate_left(1), 2);
+    assert_eq(1.rotate_left(2), 4);
+    assert_eq(1.rotate_left(63), Int.min_value());  // Wraps to sign bit
+
+    // Rotate and rotate back
+    let x = 0x123456789ABCDEF0;
+    assert_eq(x.rotate_left(20).rotate_right(20), x);
+}
+
+@test
+fn test_int_rotate_right() {
+    // Rotate by 0 is identity
+    assert_eq(42.rotate_right(0), 42);
+
+    // Simple rotations
+    assert_eq(2.rotate_right(1), 1);
+    assert_eq(4.rotate_right(2), 1);
+
+    // Wrap around
+    assert_eq(1.rotate_right(1), Int.min_value());  // Wraps from LSB to MSB
+}
+
+// =============================================================================
+// Byte Conversion
+// =============================================================================
+
+@test
+fn test_int_to_le_bytes() {
+    let bytes = 0x0102030405060708.to_le_bytes();
+    // Little-endian: least significant byte first
+    assert_eq(bytes[0], 0x08);
+    assert_eq(bytes[1], 0x07);
+    assert_eq(bytes[2], 0x06);
+    assert_eq(bytes[3], 0x05);
+    assert_eq(bytes[4], 0x04);
+    assert_eq(bytes[5], 0x03);
+    assert_eq(bytes[6], 0x02);
+    assert_eq(bytes[7], 0x01);
+}
+
+@test
+fn test_int_to_be_bytes() {
+    let bytes = 0x0102030405060708.to_be_bytes();
+    // Big-endian: most significant byte first
+    assert_eq(bytes[0], 0x01);
+    assert_eq(bytes[1], 0x02);
+    assert_eq(bytes[2], 0x03);
+    assert_eq(bytes[3], 0x04);
+    assert_eq(bytes[4], 0x05);
+    assert_eq(bytes[5], 0x06);
+    assert_eq(bytes[6], 0x07);
+    assert_eq(bytes[7], 0x08);
+}
+
+@test
+fn test_int_from_le_bytes() {
+    let bytes: [Byte; 8] = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01];
+    assert_eq(Int.from_le_bytes(bytes), 0x0102030405060708);
+
+    // Round-trip
+    let x = 12345678901234567;
+    assert_eq(Int.from_le_bytes(x.to_le_bytes()), x);
+}
+
+@test
+fn test_int_from_be_bytes() {
+    let bytes: [Byte; 8] = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+    assert_eq(Int.from_be_bytes(bytes), 0x0102030405060708);
+
+    // Round-trip
+    let x = 12345678901234567;
+    assert_eq(Int.from_be_bytes(x.to_be_bytes()), x);
+}
+
+@test
+fn test_int_byte_roundtrip() {
+    // Various values should round-trip correctly
+    fn check_roundtrip(n: Int) {
+        assert_eq(Int.from_le_bytes(n.to_le_bytes()), n);
+        assert_eq(Int.from_be_bytes(n.to_be_bytes()), n);
+    }
+
+    check_roundtrip(0);
+    check_roundtrip(1);
+    check_roundtrip(-1);
+    check_roundtrip(Int.max_value());
+    check_roundtrip(Int.min_value());
+    check_roundtrip(0x123456789ABCDEF0);
+}
+
+// =============================================================================
+// Protocol Implementation Tests
+// =============================================================================
+
+@test
+fn test_int_eq_protocol() {
+    // Basic equality
+    assert(5 == 5);
+    assert(!(5 == 6));
+    assert(5 != 6);
+    assert(!(5 != 5));
+
+    // Boundaries
+    assert(Int.max_value() == Int.max_value());
+    assert(Int.min_value() == Int.min_value());
+    assert(Int.max_value() != Int.min_value());
+
+    // Zero
+    assert(0 == 0);
+    assert(0 != 1);
+    assert(0 != -1);
+}
+
+@test
+fn test_int_ord_protocol() {
+    // Basic ordering
+    assert(3 < 5);
+    assert(5 > 3);
+    assert(5 <= 5);
+    assert(5 >= 5);
+    assert(3 <= 5);
+    assert(5 >= 3);
+
+    // With negatives
+    assert(-5 < -3);
+    assert(-3 > -5);
+    assert(-5 < 0);
+    assert(0 > -5);
+
+    // Boundaries
+    assert(Int.min_value() < Int.max_value());
+    assert(Int.min_value() <= Int.min_value());
+    assert(Int.max_value() >= Int.max_value());
+}
+
+@test
+fn test_int_cmp() {
+    assert_eq(5.cmp(&3), Greater);
+    assert_eq(3.cmp(&5), Less);
+    assert_eq(5.cmp(&5), Equal);
+
+    assert_eq((-5).cmp(&(-3)), Less);
+    assert_eq((-3).cmp(&(-5)), Greater);
+
+    assert_eq(Int.max_value().cmp(&Int.min_value()), Greater);
+}
+
+@test
+fn test_int_clone_copy() {
+    let x = 42;
+    let y = x.clone();
+    assert_eq(x, y);
+
+    // Copy semantics - both retain value
+    let z = x;
+    assert_eq(x, 42);
+    assert_eq(z, 42);
+}
+
+@test
+fn test_int_default() {
+    assert_eq(Int.default(), 0);
+}
+
+@test
+fn test_int_zero_one_protocols() {
+    assert_eq(Int.zero(), 0);
+    assert(0.is_zero());
+    assert(!1.is_zero());
+
+    assert_eq(Int.one(), 1);
+    assert(1.is_one());
+    assert(!0.is_one());
+    assert(!2.is_one());
+}
+
+// =============================================================================
+// Operator Protocol Tests
+// =============================================================================
+
+@test
+fn test_int_add_protocol() {
+    assert_eq(5 + 3, 8);
+    assert_eq((-5) + 3, -2);
+    assert_eq(5 + (-3), 2);
+    assert_eq((-5) + (-3), -8);
+    assert_eq(0 + 0, 0);
+}
+
+@test
+fn test_int_sub_protocol() {
+    assert_eq(5 - 3, 2);
+    assert_eq(3 - 5, -2);
+    assert_eq((-5) - 3, -8);
+    assert_eq((-5) - (-3), -2);
+    assert_eq(0 - 0, 0);
+}
+
+@test
+fn test_int_mul_protocol() {
+    assert_eq(5 * 3, 15);
+    assert_eq((-5) * 3, -15);
+    assert_eq(5 * (-3), -15);
+    assert_eq((-5) * (-3), 15);
+    assert_eq(0 * 12345, 0);
+    assert_eq(1 * 42, 42);
+}
+
+@test
+fn test_int_div_protocol() {
+    assert_eq(10 / 2, 5);
+    assert_eq(10 / 3, 3);  // Truncates toward zero
+    assert_eq((-10) / 3, -3);
+    assert_eq(10 / (-3), -3);
+    assert_eq((-10) / (-3), 3);
+    assert_eq(0 / 5, 0);
+}
+
+@test
+fn test_int_rem_protocol() {
+    assert_eq(10 % 3, 1);
+    assert_eq(10 % 2, 0);
+    assert_eq((-10) % 3, -1);  // Sign follows dividend
+    assert_eq(10 % (-3), 1);
+    assert_eq((-10) % (-3), -1);
+    assert_eq(0 % 5, 0);
+}
+
+@test
+fn test_int_neg_protocol() {
+    assert_eq(-5, -5);
+    assert_eq(-(-5), 5);
+    assert_eq(-0, 0);
+    assert_eq(-Int.max_value(), Int.min_value() + 1);
+}
+
+// =============================================================================
+// Bitwise Operator Protocol Tests
+// =============================================================================
+
+@test
+fn test_int_bitand_protocol() {
+    assert_eq(0b1100 & 0b1010, 0b1000);
+    assert_eq(0xFF & 0x0F, 0x0F);
+    assert_eq((-1) & 42, 42);  // -1 is all ones
+    assert_eq(0 & 42, 0);
+}
+
+@test
+fn test_int_bitor_protocol() {
+    assert_eq(0b1100 | 0b1010, 0b1110);
+    assert_eq(0xF0 | 0x0F, 0xFF);
+    assert_eq(0 | 42, 42);
+}
+
+@test
+fn test_int_bitxor_protocol() {
+    assert_eq(0b1100 ^ 0b1010, 0b0110);
+    assert_eq(42 ^ 42, 0);  // XOR with self is 0
+    assert_eq(42 ^ 0, 42);  // XOR with 0 is identity
+}
+
+@test
+fn test_int_not_protocol() {
+    assert_eq(!0, -1);  // ~0 = all ones = -1
+    assert_eq(!(-1), 0); // ~(-1) = 0
+    assert_eq(!1, -2);   // ~1 = 0xFFFFFFFFFFFFFFFE = -2
+}
+
+@test
+fn test_int_shl_protocol() {
+    assert_eq(1 << 0, 1);
+    assert_eq(1 << 1, 2);
+    assert_eq(1 << 2, 4);
+    assert_eq(1 << 10, 1024);
+    assert_eq(0xFF << 8, 0xFF00);
+}
+
+@test
+fn test_int_shr_protocol() {
+    // Arithmetic right shift (sign-extending)
+    assert_eq(1024 >> 10, 1);
+    assert_eq(8 >> 1, 4);
+    assert_eq(8 >> 2, 2);
+    assert_eq(8 >> 3, 1);
+    assert_eq(8 >> 4, 0);
+
+    // Negative values
+    assert_eq((-8) >> 1, -4);  // Sign-extending shift
+    assert_eq((-1) >> 10, -1);  // All ones remains all ones
+}
+
+// =============================================================================
+// Edge Case and Stress Tests
+// =============================================================================
+
+@test
+fn test_int_boundary_arithmetic() {
+    // Operations near boundaries
+    assert_eq(Int.max_value() - 1 + 1, Int.max_value());
+    assert_eq(Int.min_value() + 1 - 1, Int.min_value());
+
+    // Division that produces boundaries
+    assert_eq(Int.max_value() / 1, Int.max_value());
+    assert_eq(Int.min_value() / 1, Int.min_value());
+
+    // Multiplication by -1
+    assert_eq(Int.max_value() * (-1), -Int.max_value());
+}
+
+@test
+fn test_int_idempotent_operations() {
+    // Operations that are idempotent
+    let x = 42;
+    assert_eq(x.abs().abs(), x.abs());
+    assert_eq(x.max(x), x);
+    assert_eq(x.min(x), x);
+    assert_eq(x.clamp(x, x), x);
+}
+
+@test
+fn test_int_commutative_operations() {
+    let a = 17;
+    let b = 23;
+
+    // Addition is commutative
+    assert_eq(a + b, b + a);
+
+    // Multiplication is commutative
+    assert_eq(a * b, b * a);
+
+    // min/max are commutative
+    assert_eq(a.min(b), b.min(a));
+    assert_eq(a.max(b), b.max(a));
+
+    // Bitwise ops are commutative
+    assert_eq(a & b, b & a);
+    assert_eq(a | b, b | a);
+    assert_eq(a ^ b, b ^ a);
+}
+
+@test
+fn test_int_associative_operations() {
+    let a = 5;
+    let b = 7;
+    let c = 11;
+
+    // Addition is associative
+    assert_eq((a + b) + c, a + (b + c));
+
+    // Multiplication is associative
+    assert_eq((a * b) * c, a * (b * c));
+}
+
+@test
+fn test_int_distributive_property() {
+    let a = 5;
+    let b = 7;
+    let c = 3;
+
+    // Multiplication distributes over addition
+    assert_eq(a * (b + c), (a * b) + (a * c));
+}
+
+fn main() {
+    // All tests are run via the test framework
+    print("Int primitive tests loaded successfully");
+}

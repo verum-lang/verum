@@ -1,0 +1,283 @@
+// @test: parse
+// @level: L2
+// @tags: async, structured-concurrency, nursery, syntax
+// @description: Tests for nursery syntax parsing
+
+// =============================================================================
+// Basic Nursery Syntax
+// =============================================================================
+
+// Basic nursery without options
+fn test_basic_nursery() {
+    nursery {
+        spawn task1();
+        spawn task2();
+    }
+}
+
+// Nursery with timeout option
+fn test_nursery_timeout() {
+    nursery(timeout: 5000) {
+        spawn slow_task();
+    }
+}
+
+// Nursery with max_tasks option
+fn test_nursery_max_tasks() {
+    nursery(max_tasks: 10) {
+        for i in 0..100 {
+            spawn worker(i);
+        }
+    }
+}
+
+// Nursery with on_error option - cancel_all
+fn test_nursery_cancel_all() {
+    nursery(on_error: cancel_all) {
+        spawn risky_task();
+    }
+}
+
+// Nursery with on_error option - wait_all
+fn test_nursery_wait_all() {
+    nursery(on_error: wait_all) {
+        spawn task_a();
+        spawn task_b();
+    }
+}
+
+// Nursery with on_error option - fail_fast
+fn test_nursery_fail_fast() {
+    nursery(on_error: fail_fast) {
+        spawn task_a();
+        spawn task_b();
+    }
+}
+
+// =============================================================================
+// Combined Options
+// =============================================================================
+
+// All options combined
+fn test_nursery_all_options() {
+    nursery(timeout: 10000, max_tasks: 50, on_error: cancel_all) {
+        spawn task();
+    }
+}
+
+// Different option orderings
+fn test_nursery_option_order_1() {
+    nursery(max_tasks: 5, timeout: 1000) {
+        spawn task();
+    }
+}
+
+fn test_nursery_option_order_2() {
+    nursery(on_error: wait_all, timeout: 2000, max_tasks: 3) {
+        spawn task();
+    }
+}
+
+// =============================================================================
+// Error Handlers
+// =============================================================================
+
+// Nursery with on_cancel handler
+fn test_nursery_on_cancel() {
+    nursery {
+        spawn task();
+    } on_cancel {
+        cleanup();
+    }
+}
+
+// Nursery with recover closure
+fn test_nursery_recover_closure() {
+    nursery {
+        spawn fallible_task();
+    } recover |err| {
+        // log_error returns Unit, matching nursery's expected return
+    }
+}
+
+// Nursery with recover match arms
+fn test_nursery_recover_match() {
+    nursery {
+        spawn fallible_task();
+    } recover {
+        _ => {}
+    }
+}
+
+// Nursery with both handlers
+fn test_nursery_both_handlers() {
+    nursery {
+        spawn task();
+    } on_cancel {
+        cleanup_resources();
+    }
+}
+
+// =============================================================================
+// Nested Nurseries
+// =============================================================================
+
+// Nested nursery
+fn test_nested_nursery() {
+    nursery {
+        spawn {
+            nursery {
+                spawn inner_task_1();
+                spawn inner_task_2();
+            }
+        };
+    }
+}
+
+// Deeply nested nurseries
+fn test_deeply_nested() {
+    nursery(timeout: 30000) {
+        spawn {
+            nursery(max_tasks: 10) {
+                spawn {
+                    nursery {
+                        spawn leaf_task();
+                    }
+                };
+            }
+        };
+    }
+}
+
+// =============================================================================
+// Expression Context
+// =============================================================================
+
+// Nursery as expression
+fn test_nursery_expression() -> Int {
+    let result = nursery {
+        spawn compute_a();
+        spawn compute_b();
+        42
+    };
+    result
+}
+
+// Nursery in let binding
+fn test_nursery_in_let() {
+    let value = nursery(timeout: 1000) {
+        spawn fetch_data();
+        process_result()
+    };
+}
+
+// Nursery in return
+fn test_nursery_return() -> Text {
+    return nursery {
+        spawn prepare();
+        "done"
+    };
+}
+
+// =============================================================================
+// Complex Bodies
+// =============================================================================
+
+// Nursery with multiple spawn types
+fn test_nursery_complex_body() {
+    nursery(max_tasks: 100) {
+        // Direct spawn
+        spawn task_a();
+
+        // Spawn with async closure
+        spawn {
+            let x = compute();
+            store(x);
+        };
+
+        // Spawn in loop
+        for i in 0..10 {
+            spawn worker(i);
+        }
+
+        // Conditional spawn
+        if condition() {
+            spawn conditional_task();
+        }
+
+        // Match with spawn
+        match get_mode() {
+            Mode.Fast => spawn fast_task(),
+            Mode.Slow => spawn slow_task(),
+        }
+    }
+}
+
+// =============================================================================
+// Type Inference Context
+// =============================================================================
+
+// Nursery with typed result
+fn test_typed_result() -> List<Int> {
+    nursery {
+        let handles = [];
+        for i in 0..5 {
+            handles.push(spawn { i * 2 });
+        }
+        let mut results = [];
+        for h in handles {
+            results.push(h.await);
+        }
+        results
+    }
+}
+
+// Nursery with generic spawn
+fn test_generic_spawn<T: Clone>(_item: T) {
+    nursery {
+        spawn {
+            _item.clone()
+        };
+    }
+}
+
+// Helper declarations for parsing
+async fn task() {}
+async fn task1() {}
+async fn task2() {}
+async fn task_a() {}
+async fn task_b() {}
+async fn slow_task() {}
+async fn risky_task() {}
+async fn worker(_id: Int) {}
+async fn fallible_task() -> Result<Int, Error> { Ok(42) }
+async fn inner_task_1() {}
+async fn inner_task_2() {}
+async fn leaf_task() {}
+async fn compute_a() -> Int { 1 }
+async fn compute_b() -> Int { 2 }
+async fn fetch_data() {}
+fn process_result() {}
+fn prepare() {}
+fn cleanup() {}
+fn cleanup_resources() {}
+fn log_error(_e: Error) {}
+fn default_value() -> Int { 0 }
+fn fallback_result() -> Int { -1 }
+fn handle_timeout() -> Int { -2 }
+fn handle_cancel() -> Int { -3 }
+fn handle_other(_e: NurseryError) -> Int { -4 }
+fn compute() -> Int { 42 }
+fn store(_x: Int) {}
+fn condition() -> Bool { true }
+async fn conditional_task() {}
+fn get_mode() -> Mode { Mode.Fast }
+async fn fast_task() {}
+
+type Mode is Fast | Slow;
+type TimeoutError is ();
+type CancelledError is ();
+
+fn main() {
+    // This file tests parse-only, no execution
+}

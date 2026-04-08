@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @was-skip: missing stdlib methods (push on arrays)
+// @tags: reference_system, cbgr, access_rules, scope, nll
+
+/// Test valid borrowing patterns with proper scoping.
+/// Borrows that don't overlap are allowed (Non-Lexical Lifetimes).
+/// Spec: 04-memory-model.md#aliasing-rules
+
+fn main() {
+    test_sequential_borrows();
+    test_nll_pattern();
+    test_borrow_ends_before_mut();
+    test_conditional_borrows();
+}
+
+/// Sequential borrows don't conflict
+fn test_sequential_borrows() {
+    let mut data = [1, 2, 3];
+
+    // First borrow scope
+    {
+        let first = &data[0];
+        assert(*first == 1);
+    }
+    // Borrow ends
+
+    // Now we can mutate
+    data.push(4);
+    assert(data.len() == 4);
+}
+
+/// NLL: borrow ends at last use, not at scope end
+fn test_nll_pattern() {
+    let mut value = 100;
+
+    let ref_val = &value;
+    let read = *ref_val;  // Last use of ref_val
+    assert(read == 100);
+
+    // NLL: ref_val is no longer used, borrow is done
+    value = 200;  // OK: mutable access allowed
+    assert(value == 200);
+}
+
+/// Borrow clearly ends before mutation
+fn test_borrow_ends_before_mut() {
+    let mut items = [1, 2, 3];
+
+    // Read phase
+    let sum: Int = items.iter().sum();
+    assert(sum == 6);
+
+    // Modification phase (iter borrow is done)
+    items.push(4);
+    items.push(5);
+
+    assert(items.len() == 5);
+}
+
+/// Conditional borrows with proper exclusivity
+fn test_conditional_borrows() {
+    let mut value = 50;
+    let condition = true;
+
+    if condition {
+        let ref_val = &value;
+        assert(*ref_val == 50);
+        // ref_val ends here
+    }
+
+    // Outside the if, we can mutate
+    value = 75;
+    assert(value == 75);
+}
+
+/// Read-modify-read pattern
+fn test_read_modify_read() {
+    let mut data = Data { value: 10 };
+
+    // Read
+    let v1 = data.value;
+
+    // Modify
+    data.value = 20;
+
+    // Read again
+    let v2 = data.value;
+
+    assert(v1 == 10);
+    assert(v2 == 20);
+}
+
+type Data is {
+    value: Int,
+};

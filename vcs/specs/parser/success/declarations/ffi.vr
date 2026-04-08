@@ -1,0 +1,200 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, ffi, extern, foreign
+// @description: Test FFI and extern block declaration parsing
+
+// Basic extern block with C ABI
+extern "C" {
+    fn malloc(size: usize) -> *mut u8;
+    fn free(ptr: *mut u8);
+    fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8;
+    fn memset(dest: *mut u8, c: Int, n: usize) -> *mut u8;
+}
+
+// Extern block with default ABI (C)
+extern {
+    fn custom_function(x: Int) -> Int;
+    fn another_function();
+}
+
+// Extern with visibility on functions
+extern "C" {
+    pub fn public_extern();
+    internal fn internal_extern();
+    protected fn protected_extern();
+}
+
+// Extern with generics
+extern "C" {
+    fn generic_extern<T>(ptr: *const T) -> T;
+    fn generic_pair<A, B>(a: *const A, b: *const B) -> (A, B);
+}
+
+// Extern with complex parameter types
+extern "C" {
+    fn complex_extern(
+        callback: fn(*const u8) -> Int,
+        data: *mut u8,
+        len: usize
+    ) -> Int;
+
+    fn with_array(arr: *const [u8; 256], len: usize);
+}
+
+// Multiple ABI types
+extern "C" {
+    fn c_style_func(x: Int) -> Int;
+}
+
+extern "stdcall" {
+    fn windows_api_func(hwnd: *mut (), msg: u32) -> Int;
+}
+
+extern "fastcall" {
+    fn fast_func(x: Int, y: Int) -> Int;
+}
+
+extern "system" {
+    fn system_func();
+}
+
+extern "sysv64" {
+    fn sysv_func(x: Int) -> Int;
+}
+
+// FFI boundary declaration (simplified - no requires/ensures/memory_effects)
+ffi LibC {
+    @extern("C")
+    fn allocate(size: usize) -> *mut u8;
+
+    @extern("C")
+    fn deallocate(ptr: *mut u8);
+}
+
+// FFI boundary with multiple functions
+ffi PosixIO {
+    @extern("C")
+    fn open_file(path: *const u8, flags: Int) -> Int;
+
+    @extern("C")
+    fn read_file(fd: Int, buf: *mut u8, count: usize) -> Int;
+
+    @extern("C")
+    fn write_file(fd: Int, buf: *const u8, count: usize) -> Int;
+
+    @extern("C")
+    fn close_file(fd: Int) -> Int;
+}
+
+// FFI with extends (inheriting from another boundary)
+ffi ExtendedLibC extends LibC {
+    @extern("C")
+    fn reallocate(ptr: *mut u8, new_size: usize) -> *mut u8;
+
+    @extern("C")
+    fn allocate_zeroed(count: usize, size: usize) -> *mut u8;
+}
+
+// FFI boundary with simple functions
+ffi StringFunctions {
+    @extern("C")
+    fn duplicate_string(s: *const u8) -> *mut u8;
+
+    @extern("C")
+    fn copy_string(dest: *mut u8, src: *const u8) -> *mut u8;
+}
+
+// FFI boundary for memory operations
+ffi MemoryOperations {
+    @extern("C")
+    fn map_memory(
+        addr: *mut u8,
+        length: usize,
+        prot: Int,
+        flags: Int,
+        fd: Int,
+        offset: Int
+    ) -> *mut u8;
+
+    @extern("C")
+    fn unmap_memory(addr: *mut u8, length: usize) -> Int;
+}
+
+// FFI with return values
+ffi ErrorHandling {
+    @extern("C")
+    fn may_fail(x: Int) -> Int;
+}
+
+ffi IOOperations {
+    @extern("C")
+    fn io_operation(fd: Int) -> Int;
+}
+
+// Public FFI boundary
+pub ffi PublicFFI {
+    @extern("C")
+    fn public_func(x: Int) -> Int;
+}
+
+// FFI with complex types
+extern "C" {
+    fn with_struct_ptr(s: *const MyStruct) -> Int;
+    fn with_callback(cb: fn(Int, Int) -> Int, x: Int, y: Int) -> Int;
+    fn returns_struct() -> MyStruct;
+}
+
+// FFI with varargs (... must be at end of param list)
+extern "C" {
+    fn printf(format: *const u8, ...) -> Int;
+    fn sprintf(buf: *mut u8, format: *const u8, ...) -> Int;
+}
+
+// Empty extern block
+extern "C" {
+}
+
+// Extern with return type annotations
+extern "C" {
+    fn returns_int() -> i32;
+    fn returns_long() -> i64;
+    fn returns_float() -> f32;
+    fn returns_double() -> f64;
+    fn returns_void();
+    fn returns_bool() -> Bool;
+}
+
+// Extern with sized arrays
+extern "C" {
+    fn fixed_array_param(arr: *const [i32; 10]) -> Int;
+    fn fixed_array_return() -> [i32; 10];
+}
+
+// FFI for platform-specific APIs
+extern "C" {
+    // Unix-specific
+    fn fork() -> Int;
+    fn exec(path: *const u8, argv: *const *const u8) -> Int;
+    fn wait(status: *mut Int) -> Int;
+}
+
+extern "stdcall" {
+    // Windows-specific
+    fn GetLastError() -> u32;
+    fn SetLastError(err: u32);
+    fn CreateFileA(
+        name: *const u8,
+        access: u32,
+        share: u32,
+        security: *mut (),
+        disposition: u32,
+        flags: u32,
+        template: *mut ()
+    ) -> *mut ();
+}
+
+// FFI with no return value
+extern "C" {
+    fn void_function();
+    fn void_with_params(x: Int, y: Int);
+}

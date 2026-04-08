@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, capability, empty, error
+// @description: Test detection of empty capability list
+// @expected-error: E076
+
+// Capability list must have at least one capability
+fn test(db: Database with []) {}

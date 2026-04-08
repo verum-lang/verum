@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, block, nested, extra, error
+// @description: Test extra closing brace in nested block
+// @expected-error: E011
+
+fn test() {
+    {
+        let x = 5;
+    }}
+}

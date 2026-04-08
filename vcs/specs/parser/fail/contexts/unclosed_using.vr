@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, contexts, using, unclosed, error
+// @description: Test unclosed using clause bracket
+// @expected-error: E039
+
+fn foo() using [Database {
+    let x = 42;
+}

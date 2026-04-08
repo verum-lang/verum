@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, let, pattern, error
+// @description: Test missing pattern in let statement
+// @expected-error: E040
+
+fn test() {
+    let = 5;
+}

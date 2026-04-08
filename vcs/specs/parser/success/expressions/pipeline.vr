@@ -1,0 +1,288 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, pipeline, null-coalesce
+// @description: Test pipeline and null coalesce expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// PIPELINE EXPRESSIONS (Section 2.10 - pipeline_expr, pipe_op = '|>')
+// =============================================================================
+
+fn test_basic_pipeline() {
+    let a = x |> f;
+    let b = value |> transform;
+    let c = data |> process;
+}
+
+fn test_pipeline_with_function_call() {
+    let a = x |> f();
+    let b = value |> transform();
+    let c = data |> process();
+}
+
+fn test_pipeline_chain() {
+    let a = x |> f |> g;
+    let b = x |> f |> g |> h;
+    let c = data |> step1 |> step2 |> step3 |> step4;
+}
+
+fn test_pipeline_with_closures() {
+    let a = x |> |v| v + 1;
+    let b = data |> |d| transform(d) |> |r| finalize(r);
+}
+
+fn test_pipeline_multiline() {
+    let result = input
+        |> parse
+        |> validate
+        |> transform
+        |> serialize;
+
+    let processed = data
+        |> |d| d.filter(|x| x > 0)
+        |> |d| d.map(|x| x * 2)
+        |> |d| d.collect();
+}
+
+fn test_pipeline_with_method_calls() {
+    let a = items |> iter() |> filter(|x| x > 0) |> collect();
+    let b = text |> trim() |> parse() |> validate();
+}
+
+fn test_pipeline_with_arguments() {
+    let a = x |> f(arg1, arg2);
+    let b = data |> transform(config) |> finalize(options);
+}
+
+// =============================================================================
+// PIPELINE WITH EXPRESSIONS
+// =============================================================================
+
+fn test_pipeline_with_expressions() {
+    let a = (x + y) |> abs;
+    let b = compute() |> transform |> finalize;
+    let c = items.len() |> format;
+}
+
+fn test_pipeline_in_complex_expression() {
+    let a = (data |> process) + (other |> transform);
+    let b = if (x |> validate) { success() } else { failure() };
+}
+
+fn test_pipeline_with_conditionals() {
+    let a = x |> |v| if v > 0 { v } else { -v };
+    let b = data |> |d| match d {
+        Some(v) => v,
+        None => default
+    };
+}
+
+// =============================================================================
+// NULL COALESCE EXPRESSIONS (Section 2.10 - null_coalesce_expr, '??')
+// =============================================================================
+
+fn test_basic_null_coalesce() {
+    let a = maybe ?? default;
+    let b = option ?? fallback;
+    let c = nullable ?? 0;
+}
+
+fn test_null_coalesce_chain() {
+    let a = first ?? second ?? third;
+    let b = primary ?? secondary ?? tertiary ?? default;
+}
+
+fn test_null_coalesce_with_expressions() {
+    let a = maybe ?? compute_default();
+    let b = get_option() ?? create_fallback();
+    let c = cache.get(key) ?? fetch(key);
+}
+
+fn test_null_coalesce_with_methods() {
+    let a = map.get("key") ?? default_value;
+    let b = user?.name ?? "Anonymous";
+    let c = config.get_setting() ?? defaults.get_setting();
+}
+
+fn test_null_coalesce_complex() {
+    let a = (maybe ?? default).process();
+    let b = func(option ?? fallback);
+    let c = if (value ?? false) { yes } else { no };
+}
+
+// =============================================================================
+// COMBINING PIPELINE AND NULL COALESCE
+// =============================================================================
+
+fn test_pipeline_then_null_coalesce() {
+    let a = x |> try_transform ?? default;
+    let b = data |> parse |> validate ?? fallback;
+}
+
+fn test_null_coalesce_then_pipeline() {
+    let a = (maybe ?? default) |> transform;
+    let b = (option ?? fallback) |> process |> finalize;
+}
+
+fn test_mixed_pipeline_coalesce() {
+    let result = input
+        |> parse
+        ?? ParseResult.empty()
+        |> validate
+        ?? ValidationResult.default()
+        |> transform;
+}
+
+// =============================================================================
+// OPTIONAL CHAINING WITH PIPELINE/COALESCE
+// =============================================================================
+
+fn test_optional_chain_coalesce() {
+    let a = user?.profile?.name ?? "Unknown";
+    let b = config?.settings?.timeout ?? 30;
+    let c = obj?.method()?.field ?? default;
+}
+
+fn test_optional_chain_pipeline() {
+    let a = maybe?.value |> transform;
+    let b = user?.data |> process ?? default_result;
+}
+
+fn test_combined_optional_patterns() {
+    let name = user?.profile?.name ?? settings?.default_name ?? "Guest";
+    let value = cache?.get(key) ?? db?.fetch(key) ?? compute(key);
+}
+
+// =============================================================================
+// QUESTION MARK OPERATOR (Error Propagation)
+// =============================================================================
+
+fn test_question_mark_operator() -> Result<Value, Error> {
+    let a = fallible()?;
+    let b = another_fallible()?;
+    Ok(a + b)
+}
+
+fn test_question_mark_chain() -> Result<Output, Error> {
+    let result = step1()?
+        .step2()?
+        .step3()?;
+    Ok(result)
+}
+
+fn test_question_mark_with_coalesce() {
+    // Using default on error scenarios
+    let a = fallible().ok() ?? default;
+    let b = try_parse().ok() ?? fallback_value;
+}
+
+// =============================================================================
+// COMPOSE OPERATORS (Section 1.6 - compose_op)
+// =============================================================================
+
+fn test_forward_compose() {
+    let f = a >> b;
+    let g = step1 >> step2 >> step3;
+}
+
+fn test_backward_compose() {
+    let f = b << a;
+    let g = step3 << step2 << step1;
+}
+
+fn test_compose_with_closures() {
+    let f = |x| x + 1 >> |x| x * 2;
+    let g = |x| x * 2 << |x| x + 1;
+}
+
+// =============================================================================
+// PIPELINE IDIOMS
+// =============================================================================
+
+fn test_data_transformation_pipeline() {
+    let result = raw_data
+        |> deserialize
+        |> validate
+        |> normalize
+        |> transform
+        |> serialize;
+}
+
+fn test_fluent_alternative() {
+    // Pipeline as alternative to method chaining
+    let a = items
+        |> |i| i.iter()
+        |> |i| i.filter(predicate)
+        |> |i| i.map(mapper)
+        |> |i| i.collect();
+}
+
+fn test_error_handling_pipeline() {
+    let result = input
+        |> parse
+        |> |r| r.map_err(|e| ParseError(e))
+        |> |r| r.and_then(validate)
+        |> |r| r.map(transform);
+}
+
+fn test_async_pipeline() {
+    let result = async {
+        url
+            |> fetch().await
+            |> parse().await
+            |> validate
+            |> transform
+    };
+}
+
+// =============================================================================
+// PIPELINE WITH DIFFERENT EXPRESSION TYPES
+// =============================================================================
+
+fn test_pipeline_with_blocks() {
+    let a = data |> {
+        let temp = preprocess(data);
+        finalize(temp)
+    };
+}
+
+fn test_pipeline_with_match() {
+    let a = value |> |v| match v {
+        Some(x) => x,
+        None => default
+    };
+}
+
+fn test_pipeline_with_if() {
+    let a = x |> |v| if v > 0 { v } else { 0 };
+}
+
+// =============================================================================
+// EDGE CASES
+// =============================================================================
+
+fn test_pipeline_precedence() {
+    // Pipeline has low precedence
+    let a = x + y |> f;  // (x + y) |> f
+    let b = x |> f + y;  // This might be (x |> f) + y depending on grammar
+}
+
+fn test_coalesce_precedence() {
+    // Coalesce has low precedence
+    let a = x + y ?? z;  // (x + y) ?? z
+    let b = x ?? y + z;  // x ?? (y + z)
+}
+
+fn test_empty_pipeline() {
+    // Single value (no pipeline)
+    let a = x;
+}
+
+fn test_nested_coalesce() {
+    let a = (first ?? second) ?? third;
+    let b = first ?? (second ?? third);
+}
+
+fn test_coalesce_with_function_call() {
+    let a = get_value() ?? default_value();
+    let b = map.get(key) ?? Map.new().get(key) ?? ultimate_default;
+}

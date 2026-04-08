@@ -1,0 +1,210 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: fstring, format, interpolation, text, advanced
+// @description: Advanced f-string patterns — nested expressions, method calls in interpolation, multiple args, float formatting
+
+type Pair is {
+    first: Int,
+    second: Int,
+};
+
+implement Pair {
+    fn sum(&self) -> Int {
+        self.first + self.second
+    }
+
+    fn describe(&self) -> Text {
+        f"({self.first}, {self.second})"
+    }
+}
+
+fn greet(name: Text, age: Int) -> Text {
+    f"Hello {name}, you are {age} years old"
+}
+
+fn format_list_summary(items: List<Int>) -> Text {
+    let count = items.len();
+    if count == 0 {
+        "empty list"
+    } else {
+        let first = items[0];
+        let last = items[count - 1];
+        f"list of {count} items: first={first}, last={last}"
+    }
+}
+
+fn test_basic_fstring() -> Int {
+    let name = "Verum";
+    let version = 1;
+    let msg = f"Welcome to {name} v{version}";
+    if msg != "Welcome to Verum v1" {
+        print(f"FAIL basic: '{msg}'");
+        return 1;
+    }
+    print("  basic_fstring: OK");
+    0
+}
+
+fn test_expressions_in_fstring() -> Int {
+    let x = 10;
+    let y = 20;
+
+    let msg = f"sum={x + y}";
+    if msg != "sum=30" {
+        print(f"FAIL expr: '{msg}'");
+        return 1;
+    }
+
+    let msg2 = f"product={x * y}";
+    if msg2 != "product=200" {
+        print(f"FAIL product: '{msg2}'");
+        return 1;
+    }
+
+    let msg3 = f"comparison: {x} < {y} is true";
+    if msg3 != "comparison: 10 < 20 is true" {
+        print(f"FAIL comparison: '{msg3}'");
+        return 1;
+    }
+
+    print("  expressions_in_fstring: OK");
+    0
+}
+
+fn test_method_calls_in_fstring() -> Int {
+    let p = Pair { first: 3, second: 7 };
+    let msg = f"pair sum is {p.sum()}";
+    if msg != "pair sum is 10" {
+        print(f"FAIL method: '{msg}'");
+        return 1;
+    }
+
+    let msg2 = f"pair: {p.describe()}";
+    if msg2 != "pair: (3, 7)" {
+        print(f"FAIL describe: '{msg2}'");
+        return 1;
+    }
+
+    print("  method_calls_in_fstring: OK");
+    0
+}
+
+fn test_multiple_interpolations() -> Int {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let msg = f"{a}-{b}-{c}-{d}";
+    if msg != "1-2-3-4" {
+        print(f"FAIL multi: '{msg}'");
+        return 1;
+    }
+
+    let name = "test";
+    let count = 42;
+    let status = "ok";
+    let msg2 = f"[{name}] count={count} status={status}";
+    if msg2 != "[test] count=42 status=ok" {
+        print(f"FAIL multi2: '{msg2}'");
+        return 1;
+    }
+
+    print("  multiple_interpolations: OK");
+    0
+}
+
+fn test_fstring_with_function_calls() -> Int {
+    let msg = greet("Alice", 30);
+    if msg != "Hello Alice, you are 30 years old" {
+        print(f"FAIL greet: '{msg}'");
+        return 1;
+    }
+
+    let items = [10, 20, 30, 40, 50];
+    let summary = format_list_summary(items);
+    if summary != "list of 5 items: first=10, last=50" {
+        print(f"FAIL summary: '{summary}'");
+        return 1;
+    }
+
+    let empty_summary = format_list_summary([]);
+    if empty_summary != "empty list" {
+        print(f"FAIL empty: '{empty_summary}'");
+        return 1;
+    }
+
+    print("  fstring_with_function_calls: OK");
+    0
+}
+
+fn test_nested_fstrings() -> Int {
+    let inner = f"inner={42}";
+    let outer = f"outer contains: {inner}";
+    if outer != "outer contains: inner=42" {
+        print(f"FAIL nested: '{outer}'");
+        return 1;
+    }
+
+    print("  nested_fstrings: OK");
+    0
+}
+
+fn test_fstring_edge_cases() -> Int {
+    // Empty interpolation value
+    let empty = "";
+    let msg = f"before{empty}after";
+    if msg != "beforeafter" {
+        print(f"FAIL empty interp: '{msg}'");
+        return 1;
+    }
+
+    // Zero value
+    let zero = 0;
+    let msg2 = f"value={zero}";
+    if msg2 != "value=0" {
+        print(f"FAIL zero: '{msg2}'");
+        return 1;
+    }
+
+    // Negative value
+    let neg = -42;
+    let msg3 = f"neg={neg}";
+    if msg3 != "neg=-42" {
+        print(f"FAIL neg: '{msg3}'");
+        return 1;
+    }
+
+    print("  fstring_edge_cases: OK");
+    0
+}
+
+fn test_fstring_conditional() -> Int {
+    let x = 10;
+    let label = if x > 5 { "big" } else { "small" };
+    let msg = f"x={x} is {label}";
+    if msg != "x=10 is big" {
+        print(f"FAIL conditional: '{msg}'");
+        return 1;
+    }
+
+    print("  fstring_conditional: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_basic_fstring();
+    failures = failures + test_expressions_in_fstring();
+    failures = failures + test_method_calls_in_fstring();
+    failures = failures + test_multiple_interpolations();
+    failures = failures + test_fstring_with_function_calls();
+    failures = failures + test_nested_fstrings();
+    failures = failures + test_fstring_edge_cases();
+    failures = failures + test_fstring_conditional();
+
+    if failures == 0 {
+        print("All advanced format string tests passed");
+    }
+    failures
+}

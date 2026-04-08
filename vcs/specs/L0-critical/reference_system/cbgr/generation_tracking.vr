@@ -1,0 +1,113 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, generation, runtime
+
+/// Test CBGR generation tracking at runtime.
+/// Each allocation gets a unique generation number.
+/// References store the generation to detect use-after-free.
+/// Generation checking adds ~15ns overhead per access.
+/// Spec: 26-cbgr-implementation.md#generation-tracking
+///
+/// Key properties:
+/// - Generations are monotonically increasing
+/// - Each allocation has unique generation
+/// - References capture generation at creation time
+/// - Access compares ref generation with allocation generation
+
+fn main() {
+    // Test generation increments with each allocation
+    test_generation_increment();
+
+    // Test generation stored in references
+    test_generation_in_refs();
+
+    // Test generation comparison on access
+    test_generation_check();
+
+    // Test generation across scopes
+    test_generation_scope();
+
+    print("All generation tracking tests passed!");
+}
+
+fn test_generation_increment() {
+    // Each Heap allocation gets unique generation
+    let alloc1 = Heap.new(42);
+    let gen1 = alloc1.generation();
+
+    let alloc2 = Heap.new(100);
+    let gen2 = alloc2.generation();
+
+    // Generations are monotonically increasing
+    assert(gen2 > gen1);
+
+    let alloc3 = Heap.new("test");
+    let gen3 = alloc3.generation();
+
+    assert(gen3 > gen2);
+    assert(gen3 > gen1);
+}
+
+fn test_generation_in_refs() {
+    let value = Heap.new(Text.from("stored generation"));
+    let generation = value.generation();
+
+    // Create reference - it captures the generation
+    let ref1: &Text = &*value;
+    let ref_gen = ref1.stored_generation();
+
+    // Reference generation matches allocation generation
+    assert(ref_gen == generation);
+
+    // Multiple refs to same allocation share generation
+    let ref2: &Text = &*value;
+    assert(ref2.stored_generation() == ref1.stored_generation());
+}
+
+fn test_generation_check() {
+    let value = Heap.new(100);
+    let ref_val = &*value;
+
+    // On each access, generation is compared
+    // This should succeed - generations match
+    let accessed = *ref_val;
+    assert(accessed == 100);
+
+    // The check is: ref.generation == allocation.current_generation
+    // If they don't match, it's a use-after-free
+}
+
+fn test_generation_scope() {
+    let outer_gen: Int;
+
+    {
+        let inner = Heap.new(42);
+        outer_gen = inner.generation();
+        // inner is dropped here, generation is invalidated
+    }
+
+    // New allocation may reuse memory but gets NEW generation
+    let new_alloc = Heap.new(100);
+    let new_gen = new_alloc.generation();
+
+    // Even if same address, generation is different
+    assert(new_gen != outer_gen);
+}
+
+/// Demonstrate the ThinRef structure
+fn show_thin_ref_layout() {
+    // ThinRef<T> is 16 bytes:
+    // - ptr: 8 bytes (pointer to T)
+    // - generation: 4 bytes (u32)
+    // - epoch_caps: 4 bytes (packed epoch + capabilities)
+
+    let value = Heap.new(42);
+    let thin_ref: &Int = &*value;
+
+    // Type property: ThinRef is 16 bytes
+    assert((&Int).size == 16);
+}
+
+// NOTE: Multi-threaded generation tests moved to concurrent_generation.vr
+// Threading primitives (spawn, JoinHandle) require std.thread module

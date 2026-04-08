@@ -1,0 +1,40 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, state-machine, error
+// @expected-error: E400 "Type mismatch"
+
+/// State machine - failure cases
+/// Invalid state transitions caught by the type system.
+
+/// Connection states
+type Idle is ();
+type Active is ();
+type Done is ();
+
+/// Typed connection
+type TypedConn<S> is {
+    id: Int,
+    state: S,
+};
+
+/// ERROR: Process requires Active, not Idle
+fn process_idle(c: TypedConn<Idle>) -> Text {
+    c.state  // ERROR: Idle != Text
+}
+
+/// ERROR: Wrong state type in return
+fn activate_wrong(c: TypedConn<Idle>) -> TypedConn<Done> {
+    TypedConn { id: c.id, state: () }  // ERROR: Active != Done
+}
+
+/// ERROR: Cannot finish idle connection
+fn finish_wrong(c: TypedConn<Idle>) -> TypedConn<Active> {
+    TypedConn { id: c.id, state: 42 }  // ERROR: Int != Active
+}
+
+fn main() {
+    let conn: TypedConn<Idle> = TypedConn { id: 1, state: () };
+    let _ = process_idle(conn);
+    let _ = activate_wrong(conn);
+}

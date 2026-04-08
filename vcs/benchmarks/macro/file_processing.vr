@@ -1,0 +1,709 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: > 500 MB/s read, > 200 MB/s write
+// @tags: file, io, processing, performance
+
+/// File Processing Benchmark
+///
+/// Measures file I/O performance with various patterns:
+/// - Sequential read/write
+/// - Buffered vs unbuffered I/O
+/// - Memory-mapped files
+/// - Parallel file processing
+/// - Text file parsing
+///
+/// Targets:
+/// - Sequential read: > 500 MB/s
+/// - Sequential write: > 200 MB/s
+/// - Buffered I/O: > 300 MB/s
+/// - Memory-mapped: > 1 GB/s
+
+module vcs.benchmarks.macro.file_processing
+
+using [Benchmark, FileSystem, IO, Parallel]
+
+const KB: Int = 1024;
+const MB: Int = 1024 * 1024;
+const TEST_FILE_SIZE: Int = 10 * MB;  // 10 MB test file
+
+fn main() {
+    let results = BenchmarkResults.new("File Processing Performance");
+
+    // Setup: Create test files
+    let temp_dir = TempDir.new("vcs_bench_file")?;
+
+    // Sequential I/O benchmarks
+    results.add(benchmark_sequential_read(&temp_dir));
+    results.add(benchmark_sequential_write(&temp_dir));
+    results.add(benchmark_sequential_read_write(&temp_dir));
+
+    // Buffered I/O benchmarks
+    results.add(benchmark_buffered_read(&temp_dir));
+    results.add(benchmark_buffered_write(&temp_dir));
+    results.add(benchmark_buffer_sizes(&temp_dir));
+
+    // Memory-mapped file benchmarks
+    results.add(benchmark_mmap_read(&temp_dir));
+    results.add(benchmark_mmap_write(&temp_dir));
+    results.add(benchmark_mmap_random_access(&temp_dir));
+
+    // Line-based I/O benchmarks
+    results.add(benchmark_read_lines(&temp_dir));
+    results.add(benchmark_write_lines(&temp_dir));
+    results.add(benchmark_parse_csv(&temp_dir));
+
+    // Multiple file benchmarks
+    results.add(benchmark_many_small_files(&temp_dir));
+    results.add(benchmark_parallel_file_read(&temp_dir));
+
+    // Cleanup
+    temp_dir.cleanup();
+
+    results.report();
+    assert(results.all_pass(), "File processing performance below target");
+}
+
+/// Benchmark sequential file read
+fn benchmark_sequential_read(temp_dir: &TempDir) -> BenchmarkResult {
+    // Create test file
+    let file_path = temp_dir.path().join("seq_read.bin");
+    create_random_file(&file_path, TEST_FILE_SIZE)?;
+
+    let iterations = 10;
+    let total_bytes = TEST_FILE_SIZE * iterations;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let file = File.open(&file_path)?;
+        let mut buffer = list![0u8; 64 * KB];
+
+        loop {
+            let bytes_read = file.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            black_box(&buffer[..bytes_read]);
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let mb_per_sec = (total_bytes as Float / MB as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "sequential_read",
+        metric: "MB/s",
+        value: mb_per_sec,
+        target: 500.0,
+        passed: mb_per_sec > 500.0,
+    }
+}
+
+/// Benchmark sequential file write
+fn benchmark_sequential_write(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("seq_write.bin");
+    let data = generate_random_bytes(64 * KB);
+    let iterations = 10;
+    let chunks_per_iteration = TEST_FILE_SIZE / (64 * KB);
+    let total_bytes = TEST_FILE_SIZE * iterations;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let mut file = File.create(&file_path)?;
+
+        for _ in 0..chunks_per_iteration {
+            file.write_all(&data)?;
+        }
+
+        file.sync_all()?;
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let mb_per_sec = (total_bytes as Float / MB as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "sequential_write",
+        metric: "MB/s",
+        value: mb_per_sec,
+        target: 200.0,
+        passed: mb_per_sec > 200.0,
+    }
+}
+
+/// Benchmark combined read-write
+fn benchmark_sequential_read_write(temp_dir: &TempDir) -> BenchmarkResult {
+    let src_path = temp_dir.path().join("copy_src.bin");
+    let dst_path = temp_dir.path().join("copy_dst.bin");
+    create_random_file(&src_path, TEST_FILE_SIZE)?;
+
+    let iterations = 5;
+    let total_bytes = TEST_FILE_SIZE * iterations * 2;  // Read + write
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let src = File.open(&src_path)?;
+        let mut dst = File.create(&dst_path)?;
+        let mut buffer = list![0u8; 64 * KB];
+
+        loop {
+            let bytes_read = src.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            dst.write_all(&buffer[..bytes_read])?;
+        }
+
+        dst.sync_all()?;
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let mb_per_sec = (total_bytes as Float / MB as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "sequential_read_write",
+        metric: "MB/s",
+        value: mb_per_sec,
+        target: 300.0,
+        passed: mb_per_sec > 300.0,
+    }
+}
+
+/// Benchmark buffered read
+fn benchmark_buffered_read(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("buf_read.bin");
+    create_random_file(&file_path, TEST_FILE_SIZE)?;
+
+    let iterations = 10;
+    let total_bytes = TEST_FILE_SIZE * iterations;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let file = File.open(&file_path)?;
+        let reader = BufReader.with_capacity(256 * KB, file);
+        let mut buffer = list![0u8; 8 * KB];
+
+        loop {
+            let bytes_read = reader.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            black_box(&buffer[..bytes_read]);
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let mb_per_sec = (total_bytes as Float / MB as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "buffered_read",
+        metric: "MB/s",
+        value: mb_per_sec,
+        target: 600.0,
+        passed: mb_per_sec > 600.0,
+    }
+}
+
+/// Benchmark buffered write
+fn benchmark_buffered_write(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("buf_write.bin");
+    let data = generate_random_bytes(8 * KB);
+    let iterations = 10;
+    let chunks_per_iteration = TEST_FILE_SIZE / (8 * KB);
+    let total_bytes = TEST_FILE_SIZE * iterations;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let file = File.create(&file_path)?;
+        let mut writer = BufWriter.with_capacity(256 * KB, file);
+
+        for _ in 0..chunks_per_iteration {
+            writer.write_all(&data)?;
+        }
+
+        writer.flush()?;
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let mb_per_sec = (total_bytes as Float / MB as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "buffered_write",
+        metric: "MB/s",
+        value: mb_per_sec,
+        target: 300.0,
+        passed: mb_per_sec > 300.0,
+    }
+}
+
+/// Benchmark different buffer sizes
+fn benchmark_buffer_sizes(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("buffer_test.bin");
+    create_random_file(&file_path, TEST_FILE_SIZE)?;
+
+    let buffer_sizes = list![4 * KB, 16 * KB, 64 * KB, 256 * KB, 1 * MB];
+    let mut best_throughput: Float = 0.0;
+    let mut best_size: Int = 0;
+
+    for size in buffer_sizes.iter() {
+        let timer = Timer.new();
+        timer.start();
+
+        let file = File.open(&file_path)?;
+        let mut buffer = list![0u8; *size];
+
+        loop {
+            let bytes_read = file.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            black_box(&buffer[..bytes_read]);
+        }
+
+        let elapsed_ns = timer.elapsed_ns();
+        let throughput = (TEST_FILE_SIZE as Float / MB as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+        if throughput > best_throughput {
+            best_throughput = throughput;
+            best_size = *size;
+        }
+    }
+
+    BenchmarkResult {
+        name: "optimal_buffer_size",
+        metric: "KB (best throughput)",
+        value: (best_size / KB) as Float,
+        target: 64.0,  // Expect optimal around 64KB
+        passed: best_throughput > 500.0,
+    }
+}
+
+/// Benchmark memory-mapped file read
+fn benchmark_mmap_read(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("mmap_read.bin");
+    create_random_file(&file_path, TEST_FILE_SIZE)?;
+
+    let iterations = 20;
+    let total_bytes = TEST_FILE_SIZE * iterations;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let file = File.open(&file_path)?;
+        let mmap = MemoryMap.map(&file)?;
+
+        // Read all bytes through memory mapping
+        let mut sum: u64 = 0;
+        for chunk in mmap.chunks(64 * KB) {
+            for byte in chunk {
+                sum = sum.wrapping_add(*byte as u64);
+            }
+        }
+        black_box(sum);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let mb_per_sec = (total_bytes as Float / MB as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "mmap_read",
+        metric: "MB/s",
+        value: mb_per_sec,
+        target: 1000.0,
+        passed: mb_per_sec > 1000.0,
+    }
+}
+
+/// Benchmark memory-mapped file write
+fn benchmark_mmap_write(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("mmap_write.bin");
+
+    let iterations = 10;
+    let total_bytes = TEST_FILE_SIZE * iterations;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let file = File.create(&file_path)?;
+        file.set_len(TEST_FILE_SIZE as u64)?;
+        let mut mmap = MemoryMap.map_mut(&file)?;
+
+        // Write through memory mapping
+        for i in 0..mmap.len() {
+            mmap[i] = (i % 256) as u8;
+        }
+
+        mmap.flush()?;
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let mb_per_sec = (total_bytes as Float / MB as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "mmap_write",
+        metric: "MB/s",
+        value: mb_per_sec,
+        target: 500.0,
+        passed: mb_per_sec > 500.0,
+    }
+}
+
+/// Benchmark random access through memory mapping
+fn benchmark_mmap_random_access(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("mmap_random.bin");
+    create_random_file(&file_path, TEST_FILE_SIZE)?;
+
+    let file = File.open(&file_path)?;
+    let mmap = MemoryMap.map(&file)?;
+
+    let accesses = 1_000_000;
+    let mut sum: u64 = 0;
+
+    // Generate random offsets
+    let mut rng = Rng.seed(42);
+    let offsets: List<Int> = (0..accesses).map(|_| rng.next_int() % TEST_FILE_SIZE).collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for offset in offsets.iter() {
+        sum = sum.wrapping_add(mmap[*offset] as u64);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let accesses_per_sec = (accesses as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+    let ns_per_access = elapsed_ns as Float / accesses as Float;
+
+    BenchmarkResult {
+        name: "mmap_random_access",
+        metric: "ns/access",
+        value: ns_per_access,
+        target: 100.0,
+        passed: ns_per_access < 100.0,
+    }
+}
+
+/// Benchmark reading lines from text file
+fn benchmark_read_lines(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("lines.txt");
+    let num_lines = 100_000;
+    let line = "This is a sample line of text for benchmarking file I/O operations.\n";
+
+    // Create file with lines
+    {
+        let mut file = File.create(&file_path)?;
+        for _ in 0..num_lines {
+            file.write_all(line.as_bytes())?;
+        }
+    }
+
+    let iterations = 10;
+    let mut total_lines: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let file = File.open(&file_path)?;
+        let reader = BufReader.new(file);
+
+        for line in reader.lines() {
+            let _ = line?;
+            total_lines += 1;
+        }
+    }
+    black_box(total_lines);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let lines_per_sec = (num_lines * iterations) as Float / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "read_lines",
+        metric: "lines/sec",
+        value: lines_per_sec / 1_000_000.0,  // Report in millions
+        target: 1.0,  // 1 million lines/sec
+        passed: lines_per_sec > 1_000_000.0,
+    }
+}
+
+/// Benchmark writing lines to text file
+fn benchmark_write_lines(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("write_lines.txt");
+    let num_lines = 100_000;
+    let line = "This is a sample line of text for benchmarking file I/O operations.";
+
+    let iterations = 10;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let file = File.create(&file_path)?;
+        let mut writer = BufWriter.new(file);
+
+        for _ in 0..num_lines {
+            writeln(writer, "{}", line)?;
+        }
+
+        writer.flush()?;
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let lines_per_sec = (num_lines * iterations) as Float / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "write_lines",
+        metric: "lines/sec (millions)",
+        value: lines_per_sec / 1_000_000.0,
+        target: 0.5,  // 500K lines/sec
+        passed: lines_per_sec > 500_000.0,
+    }
+}
+
+/// Benchmark CSV parsing
+fn benchmark_parse_csv(temp_dir: &TempDir) -> BenchmarkResult {
+    let file_path = temp_dir.path().join("data.csv");
+    let num_rows = 50_000;
+    let num_cols = 10;
+
+    // Create CSV file
+    {
+        let mut file = File.create(&file_path)?;
+
+        // Header
+        let header = (0..num_cols).map(|i| text("col{}", i)).join(",");
+        writeln(file, "{}", header)?;
+
+        // Data rows
+        for row in 0..num_rows {
+            let values = (0..num_cols).map(|col| text("{}", row * num_cols + col)).join(",");
+            writeln(file, "{}", values)?;
+        }
+    }
+
+    let iterations = 5;
+    let mut total_rows: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let file = File.open(&file_path)?;
+        let reader = BufReader.new(file);
+        let mut lines = reader.lines();
+
+        // Skip header
+        let _ = lines.next();
+
+        for line in lines {
+            let record = line?;
+            let fields: List<&str> = record.split(',').collect();
+            total_rows += 1;
+            black_box(&fields);
+        }
+    }
+    black_box(total_rows);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let rows_per_sec = (num_rows * iterations) as Float / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "parse_csv",
+        metric: "rows/sec (thousands)",
+        value: rows_per_sec / 1000.0,
+        target: 100.0,  // 100K rows/sec
+        passed: rows_per_sec > 100_000.0,
+    }
+}
+
+/// Benchmark many small files
+fn benchmark_many_small_files(temp_dir: &TempDir) -> BenchmarkResult {
+    let num_files = 1000;
+    let file_size = 4 * KB;
+    let dir_path = temp_dir.path().join("small_files");
+    FileSystem.create_dir_all(&dir_path)?;
+
+    let data = generate_random_bytes(file_size);
+
+    // Benchmark write
+    let write_timer = Timer.new();
+    write_timer.start();
+
+    for i in 0..num_files {
+        let file_path = dir_path.join(text("file_{}.bin", i));
+        let mut file = File.create(&file_path)?;
+        file.write_all(&data)?;
+    }
+
+    let write_ns = write_timer.elapsed_ns();
+
+    // Benchmark read
+    let read_timer = Timer.new();
+    read_timer.start();
+
+    let mut total_bytes: Int = 0;
+    for i in 0..num_files {
+        let file_path = dir_path.join(text("file_{}.bin", i));
+        let content = File.read(&file_path)?;
+        total_bytes += content.len();
+    }
+    black_box(total_bytes);
+
+    let read_ns = read_timer.elapsed_ns();
+
+    let files_per_sec = num_files as Float / (read_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "many_small_files",
+        metric: "files/sec",
+        value: files_per_sec,
+        target: 500.0,
+        passed: files_per_sec > 500.0,
+    }
+}
+
+/// Benchmark parallel file reading
+fn benchmark_parallel_file_read(temp_dir: &TempDir) -> BenchmarkResult {
+    let num_files = 100;
+    let file_size = 1 * MB;
+    let dir_path = temp_dir.path().join("parallel_files");
+    FileSystem.create_dir_all(&dir_path)?;
+
+    // Create test files
+    let data = generate_random_bytes(file_size);
+    for i in 0..num_files {
+        let file_path = dir_path.join(text("file_{}.bin", i));
+        let mut file = File.create(&file_path)?;
+        file.write_all(&data)?;
+    }
+
+    let file_paths: List<Path> = (0..num_files)
+        .map(|i| dir_path.join(text("file_{}.bin", i)))
+        .collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Parallel read using rayon-like semantics
+    let results: List<Int> = file_paths
+        .par_iter()
+        .map(|path| {
+            let content = File.read(path)?;
+            content.len()
+        })
+        .collect()?;
+
+    let total_bytes: Int = results.iter().sum();
+    black_box(total_bytes);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let mb_per_sec = ((num_files * file_size) as Float / MB as Float) / (elapsed_ns as Float / 1_000_000_000.0);
+
+    BenchmarkResult {
+        name: "parallel_file_read",
+        metric: "MB/s",
+        value: mb_per_sec,
+        target: 2000.0,  // Should be faster due to parallelism
+        passed: mb_per_sec > 2000.0,
+    }
+}
+
+// Helper functions
+fn create_random_file(path: &Path, size: Int) -> Result<(), Error> {
+    let mut file = File.create(path)?;
+    let chunk_size = 64 * KB;
+    let data = generate_random_bytes(chunk_size);
+    let mut remaining = size;
+
+    while remaining > 0 {
+        let to_write = Int.min(remaining, chunk_size);
+        file.write_all(&data[..to_write])?;
+        remaining -= to_write;
+    }
+
+    Ok(())
+}
+
+fn generate_random_bytes(size: Int) -> List<u8> {
+    let mut rng = Rng.seed(12345);
+    (0..size).map(|_| (rng.next_int() % 256) as u8).collect()
+}
+
+// Benchmark infrastructure types
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

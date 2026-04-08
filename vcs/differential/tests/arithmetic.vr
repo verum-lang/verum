@@ -1,0 +1,129 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, arithmetic
+// @timeout: 10000
+
+/// Comprehensive arithmetic operations for differential testing.
+/// All results must be identical between interpreter (Tier 0) and AOT (Tier 3).
+
+fn main() {
+    test_integer_arithmetic();
+    test_float_arithmetic();
+    test_mixed_type_arithmetic();
+    test_edge_cases();
+    test_operator_associativity();
+}
+
+/// Integer arithmetic operations
+fn test_integer_arithmetic() {
+    println("=== Integer Arithmetic ===");
+
+    // Basic operations
+    let a = 42;
+    let b = 17;
+
+    println(f"add: {a + b}");
+    println(f"sub: {a - b}");
+    println(f"mul: {a * b}");
+    println(f"div: {a / b}");
+    println(f"mod: {a % b}");
+    println(f"pow: {2 ** 10}");
+
+    // Negative numbers
+    let c = -50;
+    let d = 30;
+    println(f"neg add: {c + d}");
+    println(f"neg sub: {c - d}");
+    println(f"neg mul: {c * d}");
+    println(f"neg div: {c / d}");
+
+    // Chained operations
+    let result = 10 + 20 * 3 - 15 / 5;
+    println(f"chained: {result}");
+}
+
+/// Float arithmetic operations
+fn test_float_arithmetic() {
+    println("\n=== Float Arithmetic ===");
+
+    let x = 3.14159;
+    let y = 2.71828;
+
+    println(f"add: {x + y}");
+    println(f"sub: {x - y}");
+    println(f"mul: {x * y}");
+    println(f"div: {x / y}");
+
+    // Precision-sensitive operations
+    let pi = 3.141592653589793;
+    let e = 2.718281828459045;
+    println(f"pi: {pi}");
+    println(f"e: {e}");
+    println(f"pi * e: {pi * e}");
+
+    // Small numbers
+    let small = 0.0000001;
+    println(f"small * 1000000: {small * 1000000.0}");
+}
+
+/// Mixed integer and float operations
+fn test_mixed_type_arithmetic() {
+    println("\n=== Mixed Type Arithmetic ===");
+
+    let i = 42;
+    let f = 3.5;
+
+    println(f"int + float: {i + f}");
+    println(f"int * float: {i * f}");
+    println(f"int / float: {i / f}");
+
+    // Type coercion in expressions
+    let result: Float = (10 + 5) * 2.0 / 3;
+    println(f"coercion result: {result}");
+}
+
+/// Edge cases and boundary conditions
+fn test_edge_cases() {
+    println("\n=== Edge Cases ===");
+
+    // Zero operations
+    println(f"0 + 42: {0 + 42}");
+    println(f"42 * 0: {42 * 0}");
+    println(f"0 / 42: {0 / 42}");
+
+    // One operations
+    println(f"1 * 42: {1 * 42}");
+    println(f"42 / 1: {42 / 1}");
+    println(f"42 ** 1: {42 ** 1}");
+    println(f"1 ** 100: {1 ** 100}");
+    println(f"42 ** 0: {42 ** 0}");
+
+    // Large numbers (within I64 range)
+    let large = 1000000000;
+    println(f"large * 2: {large * 2}");
+    println(f"large + large: {large + large}");
+}
+
+/// Operator associativity tests
+fn test_operator_associativity() {
+    println("\n=== Operator Associativity ===");
+
+    // Left associativity
+    let left = 100 - 50 - 25;  // Should be (100 - 50) - 25 = 25
+    println(f"left assoc sub: {left}");
+
+    let left_div = 100 / 10 / 2;  // Should be (100 / 10) / 2 = 5
+    println(f"left assoc div: {left_div}");
+
+    // Right associativity (power)
+    let right = 2 ** 3 ** 2;  // Should be 2 ** (3 ** 2) = 2 ** 9 = 512
+    println(f"right assoc pow: {right}");
+
+    // Explicit grouping
+    let grouped = (100 - 50) - 25;
+    println(f"grouped same: {grouped}");
+
+    let grouped_diff = 100 - (50 - 25);
+    println(f"grouped diff: {grouped_diff}");
+}

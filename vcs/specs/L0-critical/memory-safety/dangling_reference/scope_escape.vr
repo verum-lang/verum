@@ -1,0 +1,18 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, dangling-reference, scope, cbgr
+// @description: Tests that references escaping their scope are detected at runtime via CBGR
+
+fn main() {
+    let outer_ref: &Int;
+
+    {
+        let inner_val = 42;
+        outer_ref = &inner_val;  // Reference stored - CBGR tracks generation
+    }
+    // inner_val is out of scope - deallocated, generation bumped
+
+    // Attempting to use the reference triggers CBGR check
+    print(*outer_ref);  // PANIC: generation mismatch (inner_val no longer exists)
+}

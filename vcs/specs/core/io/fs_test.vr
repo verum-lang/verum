@@ -1,0 +1,868 @@
+// =============================================================================
+// fs_test.vr - Comprehensive tests for filesystem types and operations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: io, filesystem, metadata, permissions, directory, filetype
+// @description: Tests for FileType variants and methods, Permissions construction
+//               and methods, DirEntry construction and field access, Metadata
+//               construction and methods, WalkDir type, and filesystem operation
+//               type signatures (temp_dir, current_dir, is_file, is_dir, etc.)
+// =============================================================================
+
+mount core.io.fs.{
+    Metadata, FileType, Permissions, DirEntry,
+    WalkDir, ReadDir,
+    is_file, is_dir, is_symlink,
+    temp_dir, current_dir, set_current_dir,
+    metadata, symlink_metadata,
+    create_dir, create_dir_all, remove_dir, remove_dir_all,
+    read_dir, walk_dir,
+    remove_file, rename,
+    copy as fs_copy,
+    hard_link, read_link, canonicalize,
+    read as fs_read, write as fs_write,
+    read_to_string as fs_read_to_string,
+    write_str as fs_write_str,
+    FsMetadataRaw,
+};
+// Note: fs.exists() cannot be imported directly because `exists`
+// is a reserved keyword (quantifier). Must use qualified: core.io.fs.exists().
+mount core.io.path.{Path, PathBuf};
+mount core.io.protocols.{IoResult, IoErrorKind};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: FileType Variant Construction
+// =============================================================================
+
+@test
+fn test_file_type_file() {
+    let ft: FileType = FileType.File;
+    assert(ft is FileType.File);
+    assert(ft.is_file());
+}
+
+@test
+fn test_file_type_directory() {
+    let ft: FileType = FileType.Dir;
+    assert(ft is FileType.Dir);
+    assert(ft.is_dir());
+}
+
+@test
+fn test_file_type_symlink() {
+    let ft: FileType = FileType.Symlink;
+    assert(ft is FileType.Symlink);
+    assert(ft.is_symlink());
+}
+
+@test
+fn test_file_type_unknown() {
+    let ft: FileType = FileType.Unknown;
+    assert(ft is FileType.Unknown);
+    assert(!ft.is_file());
+    assert(!ft.is_dir());
+    assert(!ft.is_symlink());
+}
+
+// =============================================================================
+// Section 2: FileType Method Tests
+// =============================================================================
+
+@test
+fn test_file_type_is_file_true() {
+    let ft = FileType.File;
+    assert(ft.is_file());
+}
+
+@test
+fn test_file_type_is_file_false_dir() {
+    let ft = FileType.Dir;
+    assert(!ft.is_file());
+}
+
+@test
+fn test_file_type_is_file_false_symlink() {
+    let ft = FileType.Symlink;
+    assert(!ft.is_file());
+}
+
+@test
+fn test_file_type_is_file_false_unknown() {
+    let ft = FileType.Unknown;
+    assert(!ft.is_file());
+}
+
+@test
+fn test_file_type_is_dir_true() {
+    let ft = FileType.Dir;
+    assert(ft.is_dir());
+}
+
+@test
+fn test_file_type_is_dir_false_file() {
+    let ft = FileType.File;
+    assert(!ft.is_dir());
+}
+
+@test
+fn test_file_type_is_dir_false_symlink() {
+    let ft = FileType.Symlink;
+    assert(!ft.is_dir());
+}
+
+@test
+fn test_file_type_is_symlink_true() {
+    let ft = FileType.Symlink;
+    assert(ft.is_symlink());
+}
+
+@test
+fn test_file_type_is_symlink_false_file() {
+    let ft = FileType.File;
+    assert(!ft.is_symlink());
+}
+
+@test
+fn test_file_type_is_symlink_false_dir() {
+    let ft = FileType.Dir;
+    assert(!ft.is_symlink());
+}
+
+// =============================================================================
+// Section 3: Permissions Construction
+// =============================================================================
+
+@test
+fn test_permissions_readonly() {
+    let perm = Permissions { mode: 0o444 };
+    assert_eq(perm.mode, 0o444);
+}
+
+@test
+fn test_permissions_readwrite() {
+    let perm = Permissions { mode: 0o644 };
+    assert_eq(perm.mode, 0o644);
+}
+
+@test
+fn test_permissions_executable() {
+    let perm = Permissions { mode: 0o755 };
+    assert_eq(perm.mode, 0o755);
+}
+
+@test
+fn test_permissions_all_access() {
+    let perm = Permissions { mode: 0o777 };
+    assert_eq(perm.mode, 0o777);
+}
+
+@test
+fn test_permissions_no_access() {
+    let perm = Permissions { mode: 0o000 };
+    assert_eq(perm.mode, 0o000);
+}
+
+// =============================================================================
+// Section 4: Permissions Method Tests
+// =============================================================================
+
+@test
+fn test_permissions_from_mode() {
+    let perm = Permissions.from_mode(0o755);
+    assert_eq(perm.mode(), 0o755);
+}
+
+@test
+fn test_permissions_from_mode_masks() {
+    // from_mode masks with 0o7777
+    let perm = Permissions.from_mode(0o100755);
+    assert_eq(perm.mode(), 0o755);
+}
+
+@test
+fn test_permissions_mode_method() {
+    let perm = Permissions { mode: 0o644 };
+    assert_eq(perm.mode(), 0o644);
+}
+
+@test
+fn test_permissions_readonly_true() {
+    // No write permission for owner (0o444)
+    let perm = Permissions { mode: 0o444 };
+    assert(perm.readonly());
+}
+
+@test
+fn test_permissions_readonly_false() {
+    // Has write permission for owner (0o644)
+    let perm = Permissions { mode: 0o644 };
+    assert(!perm.readonly());
+}
+
+@test
+fn test_permissions_readonly_no_perms() {
+    let perm = Permissions { mode: 0o000 };
+    assert(perm.readonly());
+}
+
+@test
+fn test_permissions_set_readonly_true() {
+    let mut perm = Permissions { mode: 0o644 };
+    perm.set_readonly(true);
+    assert(perm.readonly());
+}
+
+@test
+fn test_permissions_set_readonly_false() {
+    let mut perm = Permissions { mode: 0o444 };
+    perm.set_readonly(false);
+    assert(!perm.readonly());
+}
+
+// =============================================================================
+// Section 5: DirEntry Construction and Fields
+// =============================================================================
+
+@test
+fn test_dir_entry_construction() {
+    let entry = DirEntry {
+        path: PathBuf.from("/tmp/test.txt"),
+        file_name: "test.txt",
+        file_type: FileType.File,
+    };
+    assert_eq(entry.file_name, "test.txt");
+}
+
+@test
+fn test_dir_entry_file_type_file() {
+    let entry = DirEntry {
+        path: PathBuf.from("/home/user/doc.pdf"),
+        file_name: "doc.pdf",
+        file_type: FileType.File,
+    };
+    assert_eq(entry.file_type(), FileType.File);
+}
+
+@test
+fn test_dir_entry_file_type_dir() {
+    let entry = DirEntry {
+        path: PathBuf.from("/home/user/projects"),
+        file_name: "projects",
+        file_type: FileType.Dir,
+    };
+    assert_eq(entry.file_type(), FileType.Dir);
+}
+
+@test
+fn test_dir_entry_file_type_symlink() {
+    let entry = DirEntry {
+        path: PathBuf.from("/usr/bin/python"),
+        file_name: "python",
+        file_type: FileType.Symlink,
+    };
+    assert_eq(entry.file_type(), FileType.Symlink);
+}
+
+@test
+fn test_dir_entry_file_name_method() {
+    let entry = DirEntry {
+        path: PathBuf.from("/var/log/syslog"),
+        file_name: "syslog",
+        file_type: FileType.File,
+    };
+    assert_eq(*entry.file_name(), "syslog");
+}
+
+// =============================================================================
+// Section 6: Metadata Type Existence
+// =============================================================================
+// NOTE: Metadata cannot be directly constructed in tests because it wraps
+// FsMetadataRaw, an internal (non-public) type. Metadata instances are
+// obtained via fs.metadata() which requires filesystem access.
+
+@test
+fn test_metadata_type_exists() {
+    // Metadata type exists and can be used in type annotations
+    // Cannot construct Metadata directly - requires filesystem access
+    let _: Maybe<Metadata> = None;
+}
+
+// =============================================================================
+// Section 7: Filesystem Function Signatures
+// =============================================================================
+
+@test
+fn test_temp_dir() {
+    let tmp: PathBuf = temp_dir();
+    // temp_dir returns a valid PathBuf
+    assert(tmp.to_text().len() >= 0);
+}
+
+@test
+fn test_is_file_type() {
+    let path = PathBuf.from("/tmp");
+    let p: Path = path.as_path();
+    let result: Bool = is_file(&p);
+    // Result is a Bool (true or false)
+    assert(result || !result);
+}
+
+@test
+fn test_is_dir_type() {
+    let path = PathBuf.from("/tmp");
+    let p: Path = path.as_path();
+    let result: Bool = is_dir(&p);
+    assert(result || !result);
+}
+
+@test
+fn test_is_symlink_type() {
+    let path = PathBuf.from("/tmp");
+    let p: Path = path.as_path();
+    let result: Bool = is_symlink(&p);
+    assert(result || !result);
+}
+
+// =============================================================================
+// Section 8: FileType Equality
+// =============================================================================
+
+@test
+fn test_file_type_eq_same() {
+    assert_eq(FileType.File, FileType.File);
+    assert_eq(FileType.Dir, FileType.Dir);
+    assert_eq(FileType.Symlink, FileType.Symlink);
+    assert_eq(FileType.Unknown, FileType.Unknown);
+}
+
+@test
+fn test_file_type_neq_different() {
+    assert(FileType.File != FileType.Dir);
+    assert(FileType.File != FileType.Symlink);
+    assert(FileType.Dir != FileType.Symlink);
+    assert(FileType.File != FileType.Unknown);
+}
+
+// =============================================================================
+// Section 9: FileType Match Exhaustive
+// =============================================================================
+
+@test
+fn test_file_type_match_all_variants() {
+    let types = [FileType.File, FileType.Dir, FileType.Symlink, FileType.Unknown];
+    let mut file_count = 0;
+    let mut dir_count = 0;
+    let mut symlink_count = 0;
+    let mut unknown_count = 0;
+
+    // Verify each variant matches exactly one arm
+    let ft1 = FileType.File;
+    match ft1 {
+        FileType.File => file_count = file_count + 1,
+        FileType.Dir => dir_count = dir_count + 1,
+        FileType.Symlink => symlink_count = symlink_count + 1,
+        FileType.Unknown => unknown_count = unknown_count + 1,
+    }
+    assert_eq(file_count, 1);
+
+    let ft2 = FileType.Dir;
+    match ft2 {
+        FileType.File => file_count = file_count + 1,
+        FileType.Dir => dir_count = dir_count + 1,
+        FileType.Symlink => symlink_count = symlink_count + 1,
+        FileType.Unknown => unknown_count = unknown_count + 1,
+    }
+    assert_eq(dir_count, 1);
+}
+
+// =============================================================================
+// Section 10: Permissions Edge Cases
+// =============================================================================
+
+@test
+fn test_permissions_setuid_setgid() {
+    // Setuid (4000) + setgid (2000) + sticky (1000)
+    let perm = Permissions.from_mode(0o7755);
+    assert_eq(perm.mode(), 0o7755);
+}
+
+@test
+fn test_permissions_sticky_bit() {
+    let perm = Permissions.from_mode(0o1755);
+    assert_eq(perm.mode(), 0o1755);
+}
+
+@test
+fn test_permissions_write_only() {
+    let perm = Permissions { mode: 0o200 };
+    assert(!perm.readonly());
+}
+
+@test
+fn test_permissions_group_write_no_owner_write() {
+    // Owner has no write, group does - still "readonly" by owner check
+    let perm = Permissions { mode: 0o464 };
+    assert(perm.readonly());
+}
+
+// =============================================================================
+// Section 11: DirEntry Variants
+// =============================================================================
+
+@test
+fn test_dir_entry_hidden_file() {
+    let entry = DirEntry {
+        path: PathBuf.from("/home/user/.bashrc"),
+        file_name: ".bashrc",
+        file_type: FileType.File,
+    };
+    assert_eq(entry.file_name, ".bashrc");
+    assert(entry.file_type().is_file());
+}
+
+@test
+fn test_dir_entry_directory() {
+    let entry = DirEntry {
+        path: PathBuf.from("/var/log"),
+        file_name: "log",
+        file_type: FileType.Dir,
+    };
+    assert(entry.file_type().is_dir());
+}
+
+@test
+fn test_dir_entry_symlink() {
+    let entry = DirEntry {
+        path: PathBuf.from("/usr/local/bin/node"),
+        file_name: "node",
+        file_type: FileType.Symlink,
+    };
+    assert(entry.file_type().is_symlink());
+}
+
+// =============================================================================
+// Section 12: WalkDir Type Existence
+// =============================================================================
+
+@test
+fn test_walk_dir_type_exists() {
+    // WalkDir is used to recursively iterate a directory tree
+    let _: Maybe<WalkDir> = None;
+}
+
+@test
+fn test_walk_dir_function_signature() {
+    // walk_dir takes a Path and returns IoResult<WalkDir>
+    let path = PathBuf.from("/tmp");
+    let p: Path = path.as_path();
+    let _result: IoResult<WalkDir> = walk_dir(&p);
+}
+
+// =============================================================================
+// Section 13: ReadDir Type Existence
+// =============================================================================
+
+@test
+fn test_read_dir_type_exists() {
+    let _: Maybe<ReadDir> = None;
+}
+
+@test
+fn test_read_dir_function_signature() {
+    let path = PathBuf.from("/tmp");
+    let p: Path = path.as_path();
+    let _result: IoResult<ReadDir> = read_dir(&p);
+}
+
+// =============================================================================
+// Section 14: Metadata Method Tests
+// =============================================================================
+// NOTE: Metadata wraps FsMetadataRaw. We construct FsMetadataRaw directly
+// to test Metadata methods without needing filesystem access.
+
+@test
+fn test_metadata_len() {
+    let raw = FsMetadataRaw {
+        size: 1024,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o644, is_dir: 0, is_file: 1, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert_eq(meta.len(), 1024);
+}
+
+@test
+fn test_metadata_is_file() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o644, is_dir: 0, is_file: 1, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert(meta.is_file());
+    assert(!meta.is_dir());
+    assert(!meta.is_symlink());
+}
+
+@test
+fn test_metadata_is_dir() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o755, is_dir: 1, is_file: 0, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert(meta.is_dir());
+    assert(!meta.is_file());
+}
+
+@test
+fn test_metadata_is_symlink() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o777, is_dir: 0, is_file: 0, is_symlink: 1,
+    };
+    let meta = Metadata { raw: raw };
+    assert(meta.is_symlink());
+}
+
+@test
+fn test_metadata_file_type_file() {
+    let raw = FsMetadataRaw {
+        size: 100,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o644, is_dir: 0, is_file: 1, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert_eq(meta.file_type(), FileType.File);
+}
+
+@test
+fn test_metadata_file_type_dir() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o755, is_dir: 1, is_file: 0, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert_eq(meta.file_type(), FileType.Dir);
+}
+
+@test
+fn test_metadata_file_type_symlink() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o777, is_dir: 0, is_file: 0, is_symlink: 1,
+    };
+    let meta = Metadata { raw: raw };
+    assert_eq(meta.file_type(), FileType.Symlink);
+}
+
+@test
+fn test_metadata_file_type_unknown() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0, is_dir: 0, is_file: 0, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert_eq(meta.file_type(), FileType.Unknown);
+}
+
+@test
+fn test_metadata_timestamps() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 1700000000, modified_nanos: 123456,
+        accessed_secs: 1700000100, accessed_nanos: 0,
+        created_secs: 1699999000, created_nanos: 0,
+        mode: 0o644, is_dir: 0, is_file: 1, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert_eq(meta.modified_secs(), 1700000000);
+    assert_eq(meta.accessed_secs(), 1700000100);
+    assert_eq(meta.created_secs(), 1699999000);
+}
+
+@test
+fn test_metadata_is_readonly_true() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o444, is_dir: 0, is_file: 1, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert(meta.is_readonly());
+}
+
+@test
+fn test_metadata_is_readonly_false() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o644, is_dir: 0, is_file: 1, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert(!meta.is_readonly());
+}
+
+@test
+fn test_metadata_len_zero_for_dir() {
+    let raw = FsMetadataRaw {
+        size: 0,
+        modified_secs: 0, modified_nanos: 0,
+        accessed_secs: 0, accessed_nanos: 0,
+        created_secs: 0, created_nanos: 0,
+        mode: 0o755, is_dir: 1, is_file: 0, is_symlink: 0,
+    };
+    let meta = Metadata { raw: raw };
+    assert_eq(meta.len(), 0);
+}
+
+// =============================================================================
+// Section 15: Filesystem Function Signatures
+// =============================================================================
+
+@test
+fn test_metadata_function_signature() {
+    let path = PathBuf.from("/tmp");
+    let p: Path = path.as_path();
+    let _result: IoResult<Metadata> = metadata(&p);
+}
+
+@test
+fn test_symlink_metadata_function_signature() {
+    let path = PathBuf.from("/tmp");
+    let p: Path = path.as_path();
+    let _result: IoResult<Metadata> = symlink_metadata(&p);
+}
+
+@test
+fn test_create_dir_function_signature() {
+    let path = PathBuf.from("/tmp/nonexistent_test_dir_xyz");
+    let p: Path = path.as_path();
+    let _result: IoResult<()> = create_dir(&p);
+}
+
+@test
+fn test_create_dir_all_function_signature() {
+    let path = PathBuf.from("/tmp/a/b/c");
+    let p: Path = path.as_path();
+    let _result: IoResult<()> = create_dir_all(&p);
+}
+
+@test
+fn test_remove_dir_function_signature() {
+    let path = PathBuf.from("/tmp/nonexistent");
+    let p: Path = path.as_path();
+    let _result: IoResult<()> = remove_dir(&p);
+}
+
+@test
+fn test_remove_dir_all_function_signature() {
+    let path = PathBuf.from("/tmp/nonexistent");
+    let p: Path = path.as_path();
+    let _result: IoResult<()> = remove_dir_all(&p);
+}
+
+@test
+fn test_remove_file_function_signature() {
+    let path = PathBuf.from("/tmp/nonexistent");
+    let p: Path = path.as_path();
+    let _result: IoResult<()> = remove_file(&p);
+}
+
+@test
+fn test_rename_function_signature() {
+    let from = PathBuf.from("/tmp/a");
+    let to = PathBuf.from("/tmp/b");
+    let fp: Path = from.as_path();
+    let tp: Path = to.as_path();
+    let _result: IoResult<()> = rename(&fp, &tp);
+}
+
+@test
+fn test_copy_function_signature() {
+    let from = PathBuf.from("/tmp/a");
+    let to = PathBuf.from("/tmp/b");
+    let fp: Path = from.as_path();
+    let tp: Path = to.as_path();
+    let _result: IoResult<Int> = fs_copy(&fp, &tp);
+}
+
+@test
+fn test_hard_link_function_signature() {
+    let from = PathBuf.from("/tmp/a");
+    let to = PathBuf.from("/tmp/b");
+    let fp: Path = from.as_path();
+    let tp: Path = to.as_path();
+    let _result: IoResult<()> = hard_link(&fp, &tp);
+}
+
+@test
+fn test_read_link_function_signature() {
+    let path = PathBuf.from("/tmp/link");
+    let p: Path = path.as_path();
+    let _result: IoResult<PathBuf> = read_link(&p);
+}
+
+@test
+fn test_canonicalize_function_signature() {
+    let path = PathBuf.from("/tmp");
+    let p: Path = path.as_path();
+    let _result: IoResult<PathBuf> = canonicalize(&p);
+}
+
+@test
+fn test_set_current_dir_function_signature() {
+    let path = PathBuf.from("/tmp");
+    let p: Path = path.as_path();
+    let _result: IoResult<()> = set_current_dir(&p);
+}
+
+// =============================================================================
+// Section 16: Convenience Function Signatures
+// =============================================================================
+
+@test
+fn test_fs_read_function_signature() {
+    let path = PathBuf.from("/tmp/test");
+    let p: Path = path.as_path();
+    let _result: IoResult<List<Byte>> = fs_read(&p);
+}
+
+@test
+fn test_fs_read_to_string_function_signature() {
+    let path = PathBuf.from("/tmp/test");
+    let p: Path = path.as_path();
+    let _result: IoResult<Text> = fs_read_to_string(&p);
+}
+
+@test
+fn test_fs_write_function_signature() {
+    let path = PathBuf.from("/tmp/test");
+    let p: Path = path.as_path();
+    let data: [Byte; 3] = [1 as Byte, 2 as Byte, 3 as Byte];
+    let _result: IoResult<()> = fs_write(&p, &data);
+}
+
+@test
+fn test_fs_write_str_function_signature() {
+    let path = PathBuf.from("/tmp/test");
+    let p: Path = path.as_path();
+    let _result: IoResult<()> = fs_write_str(&p, &"hello");
+}
+
+// =============================================================================
+// Section 17: DirEntry Method Tests
+// =============================================================================
+
+@test
+fn test_dir_entry_path_method() {
+    let entry = DirEntry {
+        path: PathBuf.from("/home/user/file.txt"),
+        file_name: "file.txt",
+        file_type: FileType.File,
+    };
+    let p: Path = entry.path();
+    assert(p.to_text().contains("file.txt"));
+}
+
+@test
+fn test_dir_entry_metadata_type() {
+    let entry = DirEntry {
+        path: PathBuf.from("/tmp"),
+        file_name: "tmp",
+        file_type: FileType.Dir,
+    };
+    // metadata() returns IoResult<Metadata>
+    let _result: IoResult<Metadata> = entry.metadata();
+}
+
+// =============================================================================
+// Section 18: FileType Pattern Matching
+// =============================================================================
+
+@test
+fn test_file_type_comprehensive_match() {
+    // Test each variant individually (iter() returns &FileType, can't match on reference)
+    let ft1 = FileType.File;
+    match ft1 {
+        FileType.File => { assert(ft1.is_file()); }
+        _ => { assert(false); }
+    }
+    let ft2 = FileType.Dir;
+    match ft2 {
+        FileType.Dir => { assert(ft2.is_dir()); }
+        _ => { assert(false); }
+    }
+    let ft3 = FileType.Symlink;
+    match ft3 {
+        FileType.Symlink => { assert(ft3.is_symlink()); }
+        _ => { assert(false); }
+    }
+    let ft4 = FileType.Unknown;
+    match ft4 {
+        FileType.Unknown => { assert(ft4 is FileType.Unknown); }
+        _ => { assert(false); }
+    }
+}
+
+// =============================================================================
+// Section 19: Permissions Extended Tests
+// =============================================================================
+
+@test
+fn test_permissions_set_readonly_toggle() {
+    let mut perm = Permissions { mode: 0o644 };
+    assert(!perm.readonly());
+    perm.set_readonly(true);
+    assert(perm.readonly());
+    perm.set_readonly(false);
+    assert(!perm.readonly());
+}
+
+@test
+fn test_permissions_from_mode_zero() {
+    let perm = Permissions.from_mode(0);
+    assert_eq(perm.mode(), 0);
+    assert(perm.readonly());
+}
+
+@test
+fn test_permissions_from_mode_full() {
+    let perm = Permissions.from_mode(0o7777);
+    assert_eq(perm.mode(), 0o7777);
+    assert(!perm.readonly());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

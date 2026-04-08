@@ -1,0 +1,75 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, real-opcode, shape
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL tensor shape operations through VBC interpreter.
+// Exercises tensor_reshape, tensor_transpose via TensorExtended sub-opcodes.
+// Note: reshape/transpose need 2D shapes which require list args.
+// For now tests shape operations that work with 1D tensors.
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let diff = tensor_binop(t, e, 1);
+    let val = tensor_get_scalar(diff, idx);
+    if val == 0 { 0 } else { 1 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // --- Test 1: Transpose of 1D tensor (should be no-op or identity) ---
+    let t = tensor_new(4, 1);
+    let t = tensor_set_scalar(t, 0, 10);
+    let t = tensor_set_scalar(t, 1, 20);
+    let t = tensor_set_scalar(t, 2, 30);
+    let t = tensor_set_scalar(t, 3, 40);
+
+    let tr = tensor_transpose(t);
+    // Transpose of 1D should preserve elements
+    errors = errors + check_val(tr, 0, 10);
+    errors = errors + check_val(tr, 1, 20);
+    errors = errors + check_val(tr, 2, 30);
+    errors = errors + check_val(tr, 3, 40);
+
+    // --- Test 2: Reshape 1D to same-size 1D (identity reshape) ---
+    // reshape([10,20,30,40], [4]) = [10,20,30,40]
+    let r = tensor_reshape(t, 4);
+    errors = errors + check_val(r, 0, 10);
+    errors = errors + check_val(r, 1, 20);
+    errors = errors + check_val(r, 2, 30);
+    errors = errors + check_val(r, 3, 40);
+
+    // --- Test 3: Operations preserve data after transpose ---
+    let ones = tensor_fill(4, 1, 1);
+    let tr2 = tensor_transpose(ones);
+    let sum = tensor_binop(t, tr2, 0);
+    errors = errors + check_val(sum, 0, 11);
+    errors = errors + check_val(sum, 1, 21);
+
+    // --- Test 4: Transpose of transpose = identity ---
+    let tt = tensor_transpose(tensor_transpose(t));
+    errors = errors + check_val(tt, 0, 10);
+    errors = errors + check_val(tt, 1, 20);
+    errors = errors + check_val(tt, 2, 30);
+    errors = errors + check_val(tt, 3, 40);
+
+    // --- Test 5: Reshape + binop chain ---
+    let a = tensor_fill(6, 5, 1);
+    let b = tensor_fill(6, 3, 1);
+    let r_a = tensor_reshape(a, 6);
+    let result = tensor_binop(r_a, b, 1);
+    errors = errors + check_val(result, 0, 2);
+    errors = errors + check_val(result, 5, 2);
+
+    // --- Test 6: Large tensor reshape ---
+    let big = tensor_fill(100, 1, 1);
+    let big_r = tensor_reshape(big, 100);
+    errors = errors + check_val(big_r, 0, 1);
+    errors = errors + check_val(big_r, 50, 1);
+    errors = errors + check_val(big_r, 99, 1);
+
+    errors
+}

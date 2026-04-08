@@ -1,0 +1,113 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, conversion, roman-numerals, encoding
+// @timeout: 10000
+
+// Roman numeral encoding: store as digit array
+// M=1000, D=500, C=100, L=50, X=10, V=5, I=1
+// Encode as: 7=M, 6=D, 5=C, 4=L, 3=X, 2=V, 1=I
+
+fn roman_digit_val(d: Int) -> Int {
+    if d == 7 { 1000 }
+    else if d == 6 { 500 }
+    else if d == 5 { 100 }
+    else if d == 4 { 50 }
+    else if d == 3 { 10 }
+    else if d == 2 { 5 }
+    else if d == 1 { 1 }
+    else { 0 }
+}
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+// Decode roman numeral digit array to integer
+// If a smaller value precedes a larger value, subtract it
+fn roman_decode(digits: Arr8, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let cur = roman_digit_val(get(digits, i));
+        if i + 1 < n {
+            let nxt = roman_digit_val(get(digits, i + 1));
+            if cur < nxt {
+                total = total - cur;
+            } else {
+                total = total + cur;
+            }
+        } else {
+            total = total + cur;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// Count digits needed for a number (simplified, just count)
+fn int_to_roman_len(n: Int) -> Int {
+    let mut count = 0;
+    let mut v = n;
+    while v >= 1000 { count = count + 1; v = v - 1000; }
+    while v >= 900 { count = count + 2; v = v - 900; }
+    while v >= 500 { count = count + 1; v = v - 500; }
+    while v >= 400 { count = count + 2; v = v - 400; }
+    while v >= 100 { count = count + 1; v = v - 100; }
+    while v >= 90 { count = count + 2; v = v - 90; }
+    while v >= 50 { count = count + 1; v = v - 50; }
+    while v >= 40 { count = count + 2; v = v - 40; }
+    while v >= 10 { count = count + 1; v = v - 10; }
+    while v >= 9 { count = count + 2; v = v - 9; }
+    while v >= 5 { count = count + 1; v = v - 5; }
+    while v >= 4 { count = count + 2; v = v - 4; }
+    while v >= 1 { count = count + 1; v = v - 1; }
+    count
+}
+
+fn test_decode_basic() -> Int {
+    // III = 3 (digits: 1,1,1)
+    let d1 = Arr8 { d0: 1, d1: 1, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(roman_decode(d1, 3), 3);
+    // VII = 7 (digits: 2,1,1)  -> V=2, I=1, I=1
+    let d2 = Arr8 { d0: 2, d1: 1, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(roman_decode(d2, 3), 7);
+    // IV = 4 (digits: 1,2) -> I < V, so -1+5 = 4
+    let d3 = Arr8 { d0: 1, d1: 2, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(roman_decode(d3, 2), 4);
+    1
+}
+
+fn test_decode_complex() -> Int {
+    // MCMXC = 1990 -> M=7, C=5, M=7, X=3, C=5
+    // 1000 - 100 + 1000 - 10 + 100 = 1990
+    let d1 = Arr8 { d0: 7, d1: 5, d2: 7, d3: 3, d4: 5, d5: 0, d6: 0, d7: 0 };
+    assert_eq(roman_decode(d1, 5), 1990);
+    // XIV = 14 -> X=3, I=1, V=2 -> 10 - 1 + 5 = 14
+    let d2 = Arr8 { d0: 3, d1: 1, d2: 2, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(roman_decode(d2, 3), 14);
+    1
+}
+
+fn test_length() -> Int {
+    assert_eq(int_to_roman_len(3), 3);    // III
+    assert_eq(int_to_roman_len(4), 2);    // IV
+    assert_eq(int_to_roman_len(8), 4);    // VIII
+    assert_eq(int_to_roman_len(9), 2);    // IX
+    assert_eq(int_to_roman_len(14), 3);   // XIV
+    assert_eq(int_to_roman_len(1990), 5); // MCMXC
+    1
+}
+
+fn main() -> Int {
+    test_decode_basic();
+    test_decode_complex();
+    test_length();
+    print("DIFF_OK: roman_numerals");
+    0
+}

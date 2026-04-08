@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M006
+// @description: Tests invalid meta stage level (stage 0 is runtime, not meta)
+// @tags: meta-system, core, staging
+
+// M006 is triggered when stage level is invalid
+// Stage 0 is reserved for runtime, meta functions must be stage >= 1
+
+// ERROR M006: Stage level 0 is invalid for meta functions
+meta(0) fn invalid_stage_zero() -> TokenStream {
+    quote {
+        let x = 42;
+    }
+}
+
+fn main() {}

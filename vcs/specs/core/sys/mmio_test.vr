@@ -1,0 +1,194 @@
+// =============================================================================
+// vcs/specs/core/sys/mmio_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, sys, mmio, hardware, volatile, register, memory-mapped-io
+// @description: Tests for memory-mapped I/O types including AccessMode,
+//               BarrierKind, MemoryFlags, and MemoryRegion.
+//
+// Coverage:
+// - AccessMode: all 6 variants
+// - BarrierKind: all 5 variants
+// - MemoryFlags: READ, WRITE, EXEC, DMA constants
+// - MemoryRegion: construction and field access
+//
+// Test Strategy:
+// - Enum variant construction and matching
+// - Constant value verification
+// - Type field access
+// =============================================================================
+
+module specs.core.sys.mmio_test;
+
+mount core.sys.mmio.{
+    AccessMode,
+    BarrierKind,
+    MemoryFlags,
+    MemoryRegion,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// AccessMode Tests
+// =============================================================================
+
+@test
+fn test_access_mode_read_only() {
+    let mode = AccessMode.ReadOnly;
+    match mode {
+        AccessMode.ReadOnly => { /* expected */ }
+        _ => assert(false, "Should be ReadOnly"),
+    }
+}
+
+@test
+fn test_access_mode_write_only() {
+    let mode = AccessMode.WriteOnly;
+    match mode {
+        AccessMode.WriteOnly => { /* expected */ }
+        _ => assert(false, "Should be WriteOnly"),
+    }
+}
+
+@test
+fn test_access_mode_read_write() {
+    let mode = AccessMode.ReadWrite;
+    match mode {
+        AccessMode.ReadWrite => { /* expected */ }
+        _ => assert(false, "Should be ReadWrite"),
+    }
+}
+
+@test
+fn test_access_mode_read_write_once() {
+    let mode = AccessMode.ReadWriteOnce;
+    match mode {
+        AccessMode.ReadWriteOnce => { /* expected */ }
+        _ => assert(false, "Should be ReadWriteOnce"),
+    }
+}
+
+@test
+fn test_access_mode_write_one_to_clear() {
+    let mode = AccessMode.WriteOneToClear;
+    match mode {
+        AccessMode.WriteOneToClear => { /* expected */ }
+        _ => assert(false, "Should be WriteOneToClear"),
+    }
+}
+
+@test
+fn test_access_mode_write_one_to_set() {
+    let mode = AccessMode.WriteOneToSet;
+    match mode {
+        AccessMode.WriteOneToSet => { /* expected */ }
+        _ => assert(false, "Should be WriteOneToSet"),
+    }
+}
+
+// =============================================================================
+// BarrierKind Tests
+// =============================================================================
+
+@test
+fn test_barrier_kind_compiler() {
+    let kind = BarrierKind.Compiler;
+    match kind {
+        BarrierKind.Compiler => { /* expected */ }
+        _ => assert(false, "Should be Compiler"),
+    }
+}
+
+@test
+fn test_barrier_kind_acquire() {
+    let kind = BarrierKind.Acquire;
+    match kind {
+        BarrierKind.Acquire => { /* expected */ }
+        _ => assert(false, "Should be Acquire"),
+    }
+}
+
+@test
+fn test_barrier_kind_release() {
+    let kind = BarrierKind.Release;
+    match kind {
+        BarrierKind.Release => { /* expected */ }
+        _ => assert(false, "Should be Release"),
+    }
+}
+
+@test
+fn test_barrier_kind_acq_rel() {
+    let kind = BarrierKind.AcqRel;
+    match kind {
+        BarrierKind.AcqRel => { /* expected */ }
+        _ => assert(false, "Should be AcqRel"),
+    }
+}
+
+@test
+fn test_barrier_kind_seq_cst() {
+    let kind = BarrierKind.SeqCst;
+    match kind {
+        BarrierKind.SeqCst => { /* expected */ }
+        _ => assert(false, "Should be SeqCst"),
+    }
+}
+
+// =============================================================================
+// MemoryFlags Tests
+// =============================================================================
+
+@test
+fn test_memory_flags_read() {
+    let flags = MemoryFlags.READ;
+    // Verify READ flag is non-zero
+    assert(flags.0 != 0, "READ flag should be non-zero");
+}
+
+@test
+fn test_memory_flags_write() {
+    let flags = MemoryFlags.WRITE;
+    assert(flags.0 != 0, "WRITE flag should be non-zero");
+}
+
+@test
+fn test_memory_flags_exec() {
+    let flags = MemoryFlags.EXEC;
+    assert(flags.0 != 0, "EXEC flag should be non-zero");
+}
+
+@test
+fn test_memory_flags_dma() {
+    let flags = MemoryFlags.DMA;
+    assert(flags.0 != 0, "DMA flag should be non-zero");
+}
+
+@test
+fn test_memory_flags_distinct() {
+    // All flags should be distinct
+    assert(MemoryFlags.READ.0 != MemoryFlags.WRITE.0, "READ != WRITE");
+    assert(MemoryFlags.READ.0 != MemoryFlags.EXEC.0, "READ != EXEC");
+    assert(MemoryFlags.READ.0 != MemoryFlags.DMA.0, "READ != DMA");
+    assert(MemoryFlags.WRITE.0 != MemoryFlags.EXEC.0, "WRITE != EXEC");
+    assert(MemoryFlags.WRITE.0 != MemoryFlags.DMA.0, "WRITE != DMA");
+    assert(MemoryFlags.EXEC.0 != MemoryFlags.DMA.0, "EXEC != DMA");
+}
+
+@test
+fn test_memory_flags_values() {
+    // Verify exact bit positions
+    assert_eq(MemoryFlags.READ.0, 0b0001 as UInt32);
+    assert_eq(MemoryFlags.WRITE.0, 0b0010 as UInt32);
+    assert_eq(MemoryFlags.EXEC.0, 0b0100 as UInt32);
+    assert_eq(MemoryFlags.DMA.0, 0b1000 as UInt32);
+}

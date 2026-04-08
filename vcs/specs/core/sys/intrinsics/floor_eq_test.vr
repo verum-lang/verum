@@ -1,0 +1,23 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Floor with equality test
+
+module test.stdlib.sys.intrinsics.floor_eq_test;
+
+mount core.intrinsics.{floor_f64};
+
+fn main() {
+    // Test floor with equality
+    let result = floor_f64(3.7);
+    print(f"floor(3.7) = {result}");
+
+    let eq_test = result == 3.0;
+    print(f"equals 3.0? = {eq_test}");
+
+    assert(floor_f64(3.7) == 3.0);
+    print("assertion passed");
+
+    print("Done");
+}

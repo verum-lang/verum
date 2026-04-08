@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, visibility, pub-crate
+
+/// Crate-level visibility - items accessible only within the same crate.
+/// `pub(crate)` allows access from any module in the crate but not from
+/// external crates that depend on this one.
+
+// Assume this is the crate root (lib.vr or main.vr)
+
+module internal {
+    /// Crate-local type - visible within crate, hidden from dependents
+    pub(crate) type CrateLocal is {
+        internal_id: Int,
+        data: Bytes
+    };
+
+    /// Crate-local constant
+    pub(crate) const CRATE_SECRET: Text = "internal_key_123";
+
+    // Private constant - only visible in this module
+    const INTERNAL_MULTIPLIER: Int = 7;
+
+    /// Crate-local function
+    pub(crate) fn crate_internal_operation(x: Int) -> Int {
+        x * INTERNAL_MULTIPLIER
+    }
+
+    /// Crate-local protocol for internal implementations
+    pub(crate) type CrateInternalTrait is protocol {
+        fn internal_method(&self) -> Int;
+    };
+
+    implement CrateInternalTrait for CrateLocal {
+        fn internal_method(&self) -> Int {
+            self.internal_id
+        }
+    }
+
+    /// Public API that uses crate-internal types
+    pub type PublicWrapper is {
+        // Field type is crate-local, so this field should be crate-visible only
+        inner: CrateLocal
+    };
+
+    implement PublicWrapper {
+        /// Public constructor - hides internal details
+        pub fn new(id: Int) -> PublicWrapper {
+            PublicWrapper {
+                inner: CrateLocal { internal_id: id, data: Bytes.empty() }
+            }
+        }
+
+        /// Crate-local method using internal types
+        pub(crate) fn get_internal(&self) -> &CrateLocal {
+            &self.inner
+        }
+
+        /// Public method that exposes safe interface
+        pub fn get_id(&self) -> Int {
+            self.inner.internal_id
+        }
+    }
+}
+
+module implementation {
+    // Within the same crate, we can access pub(crate) items
+    mount internal.{CrateLocal, CRATE_SECRET, crate_internal_operation};
+    mount internal.{CrateInternalTrait, PublicWrapper};
+
+    pub(crate) fn process_internal(wrapper: &PublicWrapper) -> Int {
+        // Can access crate-local method
+        let inner = wrapper.get_internal();
+
+        // Can use crate-local trait
+        let value = inner.internal_method();
+
+        // Can call crate-local function
+        crate_internal_operation(value)
+    }
+
+    pub(crate) fn create_internal() -> CrateLocal {
+        CrateLocal {
+            internal_id: 42,
+            data: Bytes.from_slice(&[1, 2, 3, 4])
+        }
+    }
+}
+
+/// Public module that exposes safe interface
+pub module api {
+    mount internal.PublicWrapper;
+    mount implementation.process_internal;
+
+    /// Public function - external crates can call this
+    pub fn do_something(id: Int) -> Int {
+        let wrapper = PublicWrapper.new(id);
+        // Uses crate-internal implementation
+        process_internal(&wrapper)
+    }
+}
+
+fn main() {
+    // Within the crate, everything is accessible
+    mount internal.{CrateLocal, CrateInternalTrait};
+    mount implementation.{process_internal, create_internal};
+    mount api.do_something;
+
+    let local = create_internal();
+    let value = local.internal_method();
+
+    let result = do_something(100);
+}
+
+// ============================================================================
+// If an external crate tried to use this:
+// ============================================================================
+// // In some_external_crate/main.vr
+// mount this_crate.internal.CrateLocal;  // ERROR: not visible
+// mount this_crate.internal.CRATE_SECRET; // ERROR: not visible
+// mount this_crate.api.do_something;      // OK: public
+// ============================================================================

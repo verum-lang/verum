@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: exhaustiveness, or-pattern, error
+// @expected-error: E0601
+// @description: Or-pattern missing variant should fail
+
+type Color is Red | Green | Blue | Yellow;
+
+// ERROR: Or-pattern doesn't cover Yellow
+fn is_rgb(c: Color) -> Bool =
+    match c {
+        Red | Green | Blue => true
+        // E0601: non-exhaustive patterns: `Yellow` not covered
+    };
+
+fn main() {
+    let _ = is_rgb(Red);
+}

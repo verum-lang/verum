@@ -1,0 +1,176 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, autodiff, stop-gradient, detach, straight-through
+// @expected-exit: 0
+
+// Tests stop-gradient (detach) operations.
+// Verifies that gradient flow is blocked at detach points while
+// forward values pass through unchanged.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Simulate stop_gradient: returns value but blocks gradient
+// In real AD, this would be an identity in forward, zero in backward
+fn stop_grad(x: Int) -> Int {
+    x  // Forward: identity
+}
+
+// Gradient through stop_grad is 0
+fn stop_grad_backward(grad_out: Int) -> Int {
+    0  // Backward: zero
+}
+
+// Straight-through estimator: forward uses discretized function,
+// backward uses smooth approximation
+fn hard_threshold(x: Int, thresh: Int) -> Int {
+    if (x >= thresh) { 1 } else { 0 }
+}
+
+// STE backward: pretend the function is identity
+fn ste_backward(grad_out: Int) -> Int {
+    grad_out
+}
+
+// Simulate quantize: round to nearest multiple of step
+fn quantize(x: Int, step: Int) -> Int {
+    (x / step) * step
+}
+
+fn main() -> Int {
+    // Test 1: Stop gradient preserves forward value
+    assert_eq(stop_grad(42), 42);
+    assert_eq(stop_grad(-7), -7);
+    assert_eq(stop_grad(0), 0);
+
+    // Test 2: Stop gradient blocks backward pass
+    assert_eq(stop_grad_backward(1), 0);
+    assert_eq(stop_grad_backward(100), 0);
+    assert_eq(stop_grad_backward(-5), 0);
+
+    // Test 3: Gradient flow in y = x + stop_grad(x)
+    // dy/dx = 1 + 0 = 1 (stop_grad term has zero gradient)
+    let x = 5;
+    let y = x + stop_grad(x);
+    assert_eq(y, 10);  // Forward: 5 + 5 = 10
+    // Backward: dy/dx = 1 (from first x) + stop_grad_backward(1) (from second)
+    let dy_dx = 1 + stop_grad_backward(1);
+    assert_eq(dy_dx, 1);
+
+    // Test 4: Stop gradient in loss computation
+    // Target-dependent loss: L = (pred - stop_grad(target))^2
+    // Only pred contributes to gradient, not target
+    let pred = 7;
+    let target = 10;
+    let loss = (pred - stop_grad(target)) * (pred - stop_grad(target));
+    assert_eq(loss, 9);  // (7-10)^2 = 9
+    // dL/dpred = 2*(pred - target) = 2*(7-10) = -6
+    let dloss_dpred = 2 * (pred - stop_grad(target));
+    assert_eq(dloss_dpred, -6);
+    // dL/dtarget = 0 (stopped)
+    let dloss_dtarget = 2 * (pred - target) * stop_grad_backward(1);
+    assert_eq(dloss_dtarget, 0);
+
+    // Test 5: Straight-through estimator for hard threshold
+    let val = 7;
+    let thresh = 5;
+    let fwd = hard_threshold(val, thresh);
+    assert_eq(fwd, 1);  // 7 >= 5, so output 1
+    // STE backward: pretend threshold is identity
+    let bwd = ste_backward(1);
+    assert_eq(bwd, 1);
+
+    // Below threshold
+    let fwd2 = hard_threshold(3, thresh);
+    assert_eq(fwd2, 0);  // 3 < 5, output 0
+    let bwd2 = ste_backward(1);
+    assert_eq(bwd2, 1);  // STE still passes gradient through
+
+    // Test 6: Quantize-aware training pattern
+    // Forward: quantize(x, step) - discrete
+    // Backward: STE - pretend identity
+    let q_x = 17;
+    let q_step = 4;
+    let q_fwd = quantize(q_x, q_step);
+    assert_eq(q_fwd, 16);  // 17 / 4 = 4, 4 * 4 = 16
+    let q_bwd = ste_backward(1);  // Gradient passes through
+    assert_eq(q_bwd, 1);
+
+    // Test 7: Detach in contrastive loss
+    // L = -log(sim(anchor, positive)) + log(sum(sim(anchor, negative_i)))
+    // Only anchor is trainable, positive/negative are detached
+    let anchor = 10;
+    let positive = 8;
+    let neg1 = 3;
+    let neg2 = 2;
+
+    // Similarity (dot product proxy)
+    let sim_pos = anchor * stop_grad(positive);  // 80
+    let sim_neg1 = anchor * stop_grad(neg1);      // 30
+    let sim_neg2 = anchor * stop_grad(neg2);      // 20
+
+    assert_eq(sim_pos, 80);
+    assert_eq(sim_neg1, 30);
+    assert_eq(sim_neg2, 20);
+
+    // Gradient only flows through anchor
+    // d(sim_pos)/d(anchor) = positive = 8
+    let grad_anchor_pos = stop_grad(positive);
+    assert_eq(grad_anchor_pos, 8);
+    // d(sim_pos)/d(positive) = 0 (detached)
+    let grad_pos = anchor * stop_grad_backward(1);
+    assert_eq(grad_pos, 0);
+
+    // Test 8: Moving average with stop gradient
+    // ema = stop_grad(decay * ema_old) + (1 - decay) * current
+    // Only current contributes gradient
+    let ema_old = 100;
+    let current = 120;
+    let decay_num = 9;   // 0.9 scaled by 10
+    let decay_den = 10;
+    // ema = stop_grad(0.9 * 100) + 0.1 * 120 = 90 + 12 = 102
+    let ema = stop_grad(decay_num * ema_old / decay_den) + (decay_den - decay_num) * current / decay_den;
+    assert_eq(ema, 102);
+    // d(ema)/d(current) = 0.1 = 1/10
+    // d(ema)/d(ema_old) = 0 (stopped)
+
+    // Test 9: Stop gradient selectivity
+    // y = f(x) + stop_grad(g(x))
+    // dy/dx = f'(x) only
+    // f(x) = x^2, g(x) = x^3
+    let sg_x = 3;
+    let sg_y = sg_x * sg_x + stop_grad(sg_x * sg_x * sg_x);
+    assert_eq(sg_y, 36);  // 9 + 27 = 36
+    // dy/dx = 2x + 0 = 6 (g(x) gradient blocked)
+    let sg_grad = 2 * sg_x + 0;
+    assert_eq(sg_grad, 6);
+
+    // Test 10: Teacher-student distillation pattern
+    // Student: trainable, Teacher: stop_grad (frozen)
+    // Loss = (student_output - stop_grad(teacher_output))^2
+    let student = 5;
+    let teacher = 8;
+    let distill_loss = (student - stop_grad(teacher)) * (student - stop_grad(teacher));
+    assert_eq(distill_loss, 9);  // (5-8)^2 = 9
+
+    // Only student gradient exists
+    let grad_student = 2 * (student - stop_grad(teacher));
+    assert_eq(grad_student, -6);  // 2*(5-8) = -6
+
+    // Teacher gradient is stopped
+    let grad_teacher = stop_grad_backward(1);
+    assert_eq(grad_teacher, 0);
+
+    // After gradient step (lr=1): student_new = 5 - (-6) = 11
+    let student_new = student - grad_student;
+    assert_eq(student_new, 11);
+    // New loss decreased: (11-8)^2 = 9... same because we overshot!
+    // With smaller step: student_new = 5 - (-6)/10 = 5.6 ≈ 5 (integer)
+    // Just verify teacher didn't change
+    assert_eq(teacher, 8);
+
+    print("Stop gradient: PASS");
+    0
+}

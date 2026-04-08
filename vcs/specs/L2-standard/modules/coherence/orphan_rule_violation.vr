@@ -1,0 +1,202 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: modules, coherence, orphan-rule, error
+// @expected-error: "no method named"
+
+/// Orphan rule violation - external trait for external type.
+/// You CANNOT implement an EXTERNAL trait for an EXTERNAL type.
+///
+/// This is prohibited because:
+/// - Neither the trait nor the type is local
+/// - Another crate might implement the same trait for the same type
+/// - This would break coherence (conflicting implementations)
+/// - The compiler cannot guarantee uniqueness
+
+// External crate defining traits
+module external_traits {
+    pub type Display is protocol {
+        fn fmt(&self) -> Text;
+    }
+
+    pub type Debug is protocol {
+        fn debug(&self) -> Text;
+    }
+
+    pub type Serialize is protocol {
+        fn serialize(&self) -> Bytes;
+    }
+
+    pub type Clone is protocol {
+        fn clone(&self) -> Self;
+    }
+
+    pub type Default is protocol {
+        fn default() -> Self;
+    }
+}
+
+// Another external crate defining types
+module external_types {
+    pub type ExtList<T> is {
+        data: Heap<[T]>,
+        len: Int
+    };
+
+    pub type String is {
+        data: Bytes
+    };
+
+    pub type Map<K, V> is {
+        buckets: List<(K, V)>
+    };
+
+    pub type Duration is {
+        secs: Int,
+        nanos: Int
+    };
+}
+
+// Our local crate - attempting invalid implementations
+module local_crate {
+    mount external_traits.{Display, Debug, Serialize, Clone, Default};
+    mount external_types.{ExtList, String, Map, Duration};
+
+    // =========================================================================
+    // INVALID: Implement EXTERNAL trait for EXTERNAL type - E203
+    // =========================================================================
+
+    /// ERROR E203: Both Display (trait) and ExtList (type) are external
+    implement<T: Display> Display for ExtList<T> {  // <-- ORPHAN VIOLATION
+        fn fmt(&self) -> Text {
+            let mut result = "[";
+            for (i, item) in self.data.iter().enumerate() {
+                if i > 0 {
+                    result += ", ";
+                }
+                result += item.fmt();
+            }
+            result += "]";
+            result
+        }
+    }
+
+    /// ERROR E203: Both Debug and String are external
+    implement Debug for String {  // <-- ORPHAN VIOLATION
+        fn debug(&self) -> Text {
+            format("String({:?})", self.data)
+        }
+    }
+
+    /// ERROR E203: Both Serialize and HashMap are external
+    implement<K: Serialize, V: Serialize> Serialize for Map<K, V> {  // <-- ORPHAN VIOLATION
+        fn serialize(&self) -> Bytes {
+            let mut buf = Bytes.new();
+            for (k, v) in &self.buckets {
+                buf.extend(k.serialize());
+                buf.extend(v.serialize());
+            }
+            buf
+        }
+    }
+
+    /// ERROR E203: Both Clone and Duration are external
+    implement Clone for Duration {  // <-- ORPHAN VIOLATION
+        fn clone(&self) -> Duration {
+            Duration { secs: self.secs, nanos: self.nanos }
+        }
+    }
+
+    /// ERROR E203: Both Default and Duration are external
+    implement Default for Duration {  // <-- ORPHAN VIOLATION
+        fn default() -> Duration {
+            Duration { secs: 0, nanos: 0 }
+        }
+    }
+}
+
+// ============================================================================
+// Why is this a problem?
+// ============================================================================
+//
+// Imagine two crates both trying to implement Display for ExtList<T>:
+//
+// Crate A:
+//   implement<T: Display> Display for ExtList<T> {
+//       fn fmt(&self) -> Text { "[" + ... + "]" }
+//   }
+//
+// Crate B:
+//   implement<T: Display> Display for ExtList<T> {
+//       fn fmt(&self) -> Text { "List(" + ... + ")" }
+//   }
+//
+// If both crates are used together, which implementation should be used?
+// There's no way to resolve this conflict - hence orphan rules prevent it.
+//
+// ============================================================================
+
+// ============================================================================
+// SOLUTIONS: How to achieve similar functionality legally
+// ============================================================================
+
+module solutions {
+    mount external_traits.{Display, Debug, Serialize};
+    mount external_types.{ExtList, String, Duration};
+
+    // Solution 1: Create a newtype wrapper (local type)
+    pub type MyList<T> is {
+        inner: ExtList<T>
+    };
+
+    // Now we can implement external trait for OUR type
+    implement<T: Display> Display for MyList<T> {
+        fn fmt(&self) -> Text {
+            let mut result = "MyList[";
+            // ... format inner list
+            result += "]";
+            result
+        }
+    }
+
+    // Solution 2: Create a local trait
+    pub type MyDisplay is protocol {
+        fn my_fmt(&self) -> Text;
+    }
+
+    // Implement OUR trait for external type
+    implement<T: MyDisplay> MyDisplay for ExtList<T> {
+        fn my_fmt(&self) -> Text {
+            "[custom formatting]"
+        }
+    }
+
+    // Solution 3: Use extension functions (if language supports)
+    pub fn format_list<T: Display>(list: &ExtList<T>) -> Text {
+        // Free function, not trait impl
+        "[formatted]"
+    }
+
+    // Solution 4: Create a wrapper type with From/Into
+    pub type DisplayableList<T> is {
+        inner: ExtList<T>
+    };
+
+    implement<T> From<ExtList<T>> for DisplayableList<T> {
+        fn from(list: ExtList<T>) -> DisplayableList<T> {
+            DisplayableList { inner: list }
+        }
+    }
+
+    implement<T: Display> Display for DisplayableList<T> {
+        fn fmt(&self) -> Text {
+            // Now legal - DisplayableList is local
+            "[wrapped and formatted]"
+        }
+    }
+}
+
+fn main() {
+    // This file should fail to typecheck due to E203 errors
+    // The orphan implementations in local_crate are invalid
+}

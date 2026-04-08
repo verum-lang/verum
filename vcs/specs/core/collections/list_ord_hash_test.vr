@@ -1,0 +1,257 @@
+// =============================================================================
+// list_ord_hash_test.vr - Tests for List/Deque Hash and comparison impls
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, list, deque, ord, hash, core
+// @description: Tests for List Hash, List cmp_lexicographic, Deque Ord, Deque Hash
+// =============================================================================
+
+mount core.collections.list.List;
+mount core.collections.deque.Deque;
+mount core.base.ordering.{Ordering};
+mount core.base.protocols.{Hasher, DefaultHasher};
+
+// =============================================================================
+// Section 1: List cmp_lexicographic
+// =============================================================================
+
+@test
+fn test_list_cmp_equal() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 3];
+    assert_eq(a.cmp_lexicographic(&b), Ordering.Equal);
+}
+
+@test
+fn test_list_cmp_less_by_element() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 4];
+    assert_eq(a.cmp_lexicographic(&b), Ordering.Less);
+}
+
+@test
+fn test_list_cmp_greater_by_element() {
+    let a: List<Int> = [1, 2, 4];
+    let b: List<Int> = [1, 2, 3];
+    assert_eq(a.cmp_lexicographic(&b), Ordering.Greater);
+}
+
+@test
+fn test_list_cmp_shorter_is_less() {
+    let a: List<Int> = [1, 2];
+    let b: List<Int> = [1, 2, 3];
+    assert_eq(a.cmp_lexicographic(&b), Ordering.Less);
+}
+
+@test
+fn test_list_cmp_longer_is_greater() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2];
+    assert_eq(a.cmp_lexicographic(&b), Ordering.Greater);
+}
+
+@test
+fn test_list_cmp_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+    assert_eq(a.cmp_lexicographic(&b), Ordering.Equal);
+}
+
+@test
+fn test_list_cmp_empty_vs_nonempty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [1];
+    assert_eq(a.cmp_lexicographic(&b), Ordering.Less);
+    assert_eq(b.cmp_lexicographic(&a), Ordering.Greater);
+}
+
+@test
+fn test_list_cmp_first_element_differs() {
+    let a: List<Int> = [1, 100, 100];
+    let b: List<Int> = [2, 0, 0];
+    assert_eq(a.cmp_lexicographic(&b), Ordering.Less);
+}
+
+@test
+fn test_list_cmp_text() {
+    let a: List<Text> = ["apple", "banana"];
+    let b: List<Text> = ["apple", "cherry"];
+    assert_eq(a.cmp_lexicographic(&b), Ordering.Less);
+}
+
+// =============================================================================
+// Section 2: List Hash
+// =============================================================================
+
+@test
+fn test_list_hash_equal_lists_same_hash() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 3];
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert_eq(ha.finish(), hb.finish());
+}
+
+@test
+fn test_list_hash_different_lists_different_hash() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 4];
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert(ha.finish() != hb.finish());
+}
+
+@test
+fn test_list_hash_order_matters() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [3, 2, 1];
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert(ha.finish() != hb.finish());
+}
+
+@test
+fn test_list_hash_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert_eq(ha.finish(), hb.finish());
+}
+
+@test
+fn test_list_hash_length_matters() {
+    let a: List<Int> = [1, 2];
+    let b: List<Int> = [1, 2, 0];
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert(ha.finish() != hb.finish());
+}
+
+// =============================================================================
+// Section 3: Deque Ord (lexicographic ordering)
+// =============================================================================
+
+@test
+fn test_deque_ord_equal() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+    a.push_back(3);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(2);
+    b.push_back(3);
+
+    assert_eq(a.cmp(&b), Ordering.Equal);
+}
+
+@test
+fn test_deque_ord_less() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(3);
+
+    assert_eq(a.cmp(&b), Ordering.Less);
+}
+
+@test
+fn test_deque_ord_shorter_is_less() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(2);
+
+    assert_eq(a.cmp(&b), Ordering.Less);
+}
+
+@test
+fn test_deque_ord_empty() {
+    let a: Deque<Int> = Deque.new();
+    let b: Deque<Int> = Deque.new();
+    assert_eq(a.cmp(&b), Ordering.Equal);
+}
+
+@test
+fn test_deque_ord_comparison_operators() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(3);
+
+    assert(a < b);
+    assert(b > a);
+}
+
+// =============================================================================
+// Section 4: Deque Hash
+// =============================================================================
+
+@test
+fn test_deque_hash_equal() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(2);
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert_eq(ha.finish(), hb.finish());
+}
+
+@test
+fn test_deque_hash_different() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(3);
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert(ha.finish() != hb.finish());
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,80 @@
+// @test: parse-pass
+// @level: L0
+// @tags: parser, declarations, types, protocol
+// @description: Test protocol definition parsing
+
+// Simple protocol
+type Show is protocol {
+    fn show(&self) -> Text;
+};
+
+// Protocol with multiple methods
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+    fn has_next(&self) -> Bool;
+};
+
+// Protocol with default implementation
+type Default is protocol {
+    fn default() -> Self;
+};
+
+// Protocol extending another
+type Clone is protocol extends Copy {
+    fn clone(&self) -> Self;
+};
+
+// Multiple extensions
+type FullyComparable is protocol extends Eq + Ord + Hash {
+    fn compare(&self, other: &Self) -> Ordering;
+};
+
+// Protocol with associated types
+type Collection is protocol {
+    type Item;
+    type Iter: Iterator<Item = Self.Item>;
+
+    fn iter(&self) -> Self.Iter;
+    fn len(&self) -> Int;
+};
+
+// Protocol with const
+type Sized is protocol {
+    const SIZE: Int;
+};
+
+// Protocol with context requirements
+type Repository is protocol {
+    type Entity;
+
+    fn find(&self, id: Int) -> Maybe<Self.Entity> using [Database];
+    fn save(&mut self, entity: Self.Entity) using [Database, Logger];
+};
+
+// Protocol with where clause
+type Convertible<T> is protocol
+    where type T: Clone
+{
+    fn convert(&self) -> T;
+};
+
+// Async protocol methods
+type AsyncReader is protocol {
+    async fn read(&mut self) -> Result<Bytes, IoError>;
+    async fn read_exact(&mut self, buf: &mut Bytes) -> Result<(), IoError>;
+};
+
+// Protocol with generic methods
+type Mapper is protocol {
+    fn map<T, U>(self, f: fn(T) -> U) -> Self;
+};
+
+// Protocol with multiple associated types
+type Container is protocol {
+    type Value;
+    type Key;
+
+    fn get(&self, key: Self.Key) -> Maybe<Self.Value>;
+    fn set(&mut self, key: Self.Key, value: Self.Value);
+};

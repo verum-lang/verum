@@ -1,0 +1,60 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, self-referential
+
+/// Test semantics with self-referential types.
+/// Self-referential types require special handling and are typically affine.
+/// Spec: 04-memory-model.md#pinning
+
+fn main() {
+    test_basic_self_ref();
+}
+
+/// Test basic self-referential type
+fn test_basic_self_ref() {
+    let value = SelfReferential.new();
+    assert(value.get_value() == 42);
+}
+
+// Type definitions
+
+type SelfReferential is {
+    value: Int,
+    self_ref: Maybe<&Int>,
+};
+
+implement SelfReferential {
+    fn new() -> Self {
+        SelfReferential {
+            value: 42,
+            self_ref: None,
+        }
+    }
+
+    fn get_value(&self) -> Int {
+        self.value
+    }
+
+    fn get_via_ref(&self) -> Maybe<Int> {
+        match self.self_ref {
+            Some(ptr) => Some(*ptr),
+            None => None,
+        }
+    }
+}
+
+// Container type (regular, Copy semantics)
+type Container is {
+    value: Int,
+    data: Text,
+};
+
+// Affine types for async are moved not copied
+type Poll<T> is
+    Ready(T)
+    | Pending;
+
+async fn some_async_op(data: &Text) {
+    // Async operation placeholder
+}

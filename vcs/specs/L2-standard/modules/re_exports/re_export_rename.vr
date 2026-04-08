@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, re-exports, rename
+
+/// Re-export with rename - exposing internal items under different names.
+/// Uses type aliases to provide cleaner public API names.
+
+module database_library {
+    // Internal implementation with verbose names
+    pub module internal {
+        pub type PostgreSQLConnectionPool is {
+            url: Text,
+            min_connections: Int,
+            max_connections: Int
+        };
+
+        pub fn create_pool(url: Text) -> PostgreSQLConnectionPool {
+            PostgreSQLConnectionPool {
+                url,
+                min_connections: 5,
+                max_connections: 20
+            }
+        }
+
+        pub type PostgreSQLPreparedStatement is {
+            sql: Text,
+            params: List<Any>
+        };
+
+        pub fn prepare_query(sql: Text) -> PostgreSQLPreparedStatement {
+            PostgreSQLPreparedStatement { sql, params: List.new() }
+        }
+
+        pub type PostgreSQLTransactionManager is {
+            connection: PostgreSQLConnectionPool,
+            auto_commit: Bool
+        };
+    }
+
+    // Public API with cleaner type aliases
+    pub module api {
+        mount super.internal.*;
+
+        // Type aliases for cleaner names
+        pub type Pool = PostgreSQLConnectionPool;
+        pub type Query = PostgreSQLPreparedStatement;
+        pub type Transaction = PostgreSQLTransactionManager;
+
+        pub fn new_pool(url: Text) -> Pool {
+            create_pool(url)
+        }
+
+        pub fn new_query(sql: Text) -> Query {
+            prepare_query(sql)
+        }
+    }
+}
+
+// Application using the clean API
+module application {
+    mount database_library.api.{Pool, Query, Transaction, new_pool, new_query};
+
+    pub fn setup() -> Pool {
+        new_pool("postgres://localhost/mydb")
+    }
+
+    pub fn run_query(sql: Text) -> Query {
+        new_query(sql)
+    }
+}
+
+fn main() {
+    mount application.{setup, run_query};
+
+    let pool = setup();
+    let query = run_query("SELECT * FROM users");
+
+    // Verify the types work
+    assert(pool.min_connections == 5);
+    assert(query.sql == "SELECT * FROM users");
+}

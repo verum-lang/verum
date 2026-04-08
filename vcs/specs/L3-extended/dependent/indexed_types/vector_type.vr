@@ -1,0 +1,128 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, vector
+
+/// Vect<T, N> - length-indexed vectors
+///
+/// Vectors with statically known length, enabling compile-time
+/// verification of length-related properties.
+
+/// Length-indexed vector type
+type Vect<T, N: meta Int> is
+    | VNil where N == 0
+    | VCons { head: T, tail: Vect<T, N - 1> } where N > 0;
+
+/// Create empty vector
+fn vempty<T>() -> Vect<T, 0> { VNil }
+
+/// Create singleton vector
+fn vsingleton<T>(x: T) -> Vect<T, 1> {
+    VCons { head: x, tail: VNil }
+}
+
+/// Get head of non-empty vector
+fn vhead<T, N: meta Int{> 0}>(v: Vect<T, N>) -> T {
+    match v {
+        VCons { head, tail } => head,
+    }
+}
+
+/// Get tail of non-empty vector
+fn vtail<T, N: meta Int{> 0}>(v: Vect<T, N>) -> Vect<T, N - 1> {
+    match v {
+        VCons { head, tail } => tail,
+    }
+}
+
+/// Map over vector (preserves length)
+fn vmap<A, B, N: meta Int>(v: Vect<A, N>, f: fn(A) -> B) -> Vect<B, N> {
+    match v {
+        VNil => VNil,
+        VCons { head, tail } => VCons { head: f(head), tail: vmap(tail, f) },
+    }
+}
+
+/// Fold over vector
+fn vfold<T, Acc, N: meta Int>(v: Vect<T, N>, init: Acc, f: fn(Acc, T) -> Acc) -> Acc {
+    match v {
+        VNil => init,
+        VCons { head, tail } => vfold(tail, f(init, head), f),
+    }
+}
+
+/// Zip two vectors of equal length
+fn vzip<A, B, N: meta Int>(
+    xs: Vect<A, N>,
+    ys: Vect<B, N>
+) -> Vect<(A, B), N> {
+    match (xs, ys) {
+        (VNil, VNil) => VNil,
+        (VCons { head: x, tail: xt }, VCons { head: y, tail: yt }) =>
+            VCons { head: (x, y), tail: vzip(xt, yt) },
+    }
+}
+
+/// Reverse a vector
+fn vreverse<T, N: meta Int>(v: Vect<T, N>) -> Vect<T, N> {
+    fn go<T, N: meta Int, M: meta Int>(
+        acc: Vect<T, M>,
+        rest: Vect<T, N>
+    ) -> Vect<T, N> {
+        match rest {
+            VNil => acc,
+            VCons { head, tail } => go(VCons { head, tail: acc }, tail),
+        }
+    }
+    go(VNil, v)
+}
+
+/// Replicate a value N times
+fn vreplicate<T, N: meta Int>(value: T) -> Vect<T, N> {
+    let mut result: Vect<T, 0> = VNil;
+    let mut i = 0;
+    while i < N {
+        result = VCons { head: value, tail: result };
+        i = i + 1;
+    }
+    result
+}
+
+/// Convert to list
+fn vto_list<T, N: meta Int>(v: Vect<T, N>) -> List<T> {
+    match v {
+        VNil => [],
+        VCons { head, tail } => [head] ++ vto_list(tail),
+    }
+}
+
+fn main() {
+    // Create vectors
+    let v0: Vect<Int, 0> = vempty();
+    let v1: Vect<Int, 1> = vsingleton(42);
+    let v3 = VCons { head: 1, tail: VCons { head: 2, tail: VCons { head: 3, tail: VNil } } };
+
+    // Head and tail
+    let h = vhead(v1);
+    assert(h == 42);
+
+    let h3 = vhead(v3);
+    assert(h3 == 1);
+
+    // Map
+    let doubled = vmap(v3, |x| x * 2);
+    assert(vhead(doubled) == 2);
+
+    // Fold
+    let sum = vfold(v3, 0, |acc, x| acc + x);
+    assert(sum == 6);
+
+    // Zip
+    let names = VCons { head: "a", tail: VCons { head: "b", tail: VNil } };
+    let nums = VCons { head: 1, tail: VCons { head: 2, tail: VNil } };
+    let pairs = vzip(names, nums);
+
+    // To list
+    let list = vto_list(v3);
+    assert(list == [1, 2, 3]);
+}

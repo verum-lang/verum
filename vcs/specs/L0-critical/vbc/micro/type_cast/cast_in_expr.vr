@@ -1,0 +1,19 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Cast in arithmetic expression
+    let i: Int = 5;
+    let result = (i as Float) + 2.5;
+    assert_eq(result, 7.5);
+
+    // Cast in comparison
+    let f: Float = 3.0;
+    assert(f == (3 as Float));
+
+    // Cast in function call
+    fn double_float(x: Float) -> Float { x * 2.0 }
+    let n: Int = 10;
+    assert_eq(double_float(n as Float), 20.0);
+}

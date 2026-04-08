@@ -1,0 +1,159 @@
+// =============================================================================
+// mem_errors_test.vr - Tests for mem error type Debug/Display implementations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: mem, error, display, debug, protocols, core
+// @description: Tests Debug/Display for UseAfterFreeError, RevocationError, ValidationError
+// =============================================================================
+
+mount core.mem.{UseAfterFreeError, RevocationError};
+mount core.mem.header.{ValidationError};
+mount core.base.protocols.{Display, Debug};
+mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// =============================================================================
+// Section 1: UseAfterFreeError Display
+// =============================================================================
+
+@test
+fn test_use_after_free_error_display() {
+    let err = UseAfterFreeError.new(1, 2, 0, 0, "MyType");
+    let text = format_display(&err);
+    assert(text.contains("use-after-free") || text.contains("MyType"));
+}
+
+@test
+fn test_use_after_free_error_null_pointer_display() {
+    let err = UseAfterFreeError.null_pointer("Foo");
+    let text = format_display(&err);
+    assert(text.contains("null") || text.contains("Foo"));
+}
+
+@test
+fn test_use_after_free_error_debug() {
+    let err = UseAfterFreeError.new(1, 2, 0, 0, "Bar");
+    let text = format_debug(&err);
+    assert(text.contains("UseAfterFreeError"));
+}
+
+@test
+fn test_use_after_free_error_display_fn_exists() {
+    fn display_err(e: &UseAfterFreeError) -> Text {
+        format_display(e)
+    }
+    let _ = display_err;
+}
+
+// =============================================================================
+// Section 2: RevocationError Display
+// =============================================================================
+
+@test
+fn test_revocation_error_null_pointer_display() {
+    let err = RevocationError.null_pointer("MyRef");
+    let text = format_display(&err);
+    assert(text.contains("null") || text.contains("MyRef"));
+}
+
+@test
+fn test_revocation_error_already_revoked_display() {
+    let err = RevocationError.already_revoked("SomeType");
+    let text = format_display(&err);
+    assert(text.contains("revoked") || text.contains("SomeType"));
+}
+
+@test
+fn test_revocation_error_capability_violation_display() {
+    let err = RevocationError.capability_violation("Thing");
+    let text = format_display(&err);
+    assert(text.contains("capability") || text.contains("Thing"));
+}
+
+@test
+fn test_revocation_error_debug() {
+    let err = RevocationError.null_pointer("X");
+    let text = format_debug(&err);
+    assert(text.contains("NullPointer"));
+}
+
+@test
+fn test_revocation_error_display_fn_exists() {
+    fn display_err(e: &RevocationError) -> Text {
+        format_display(e)
+    }
+    let _ = display_err;
+}
+
+// =============================================================================
+// Section 3: ValidationError Display
+// =============================================================================
+
+@test
+fn test_validation_error_gen_mismatch_display() {
+    let err = ValidationError.generation_mismatch(1, 2);
+    let text = format_display(&err);
+    assert(text.contains("generation") || text.contains("mismatch"));
+}
+
+@test
+fn test_validation_error_epoch_mismatch_display() {
+    let err = ValidationError.epoch_mismatch(0, 1);
+    let text = format_display(&err);
+    assert(text.contains("epoch") || text.contains("mismatch"));
+}
+
+@test
+fn test_validation_error_debug_gen() {
+    let err = ValidationError.generation_mismatch(5, 10);
+    let text = format_debug(&err);
+    assert(text.contains("GenerationMismatch"));
+}
+
+@test
+fn test_validation_error_debug_epoch() {
+    let err = ValidationError.epoch_mismatch(3, 7);
+    let text = format_debug(&err);
+    assert(text.contains("EpochMismatch"));
+}
+
+@test
+fn test_validation_error_display_fn_exists() {
+    fn display_err(e: &ValidationError) -> Text {
+        format_display(e)
+    }
+    let _ = display_err;
+}
+
+@test
+fn test_validation_error_display_differs_by_variant() {
+    let gen_err = ValidationError.generation_mismatch(1, 2);
+    let epoch_err = ValidationError.epoch_mismatch(1, 2);
+    assert(format_display(&gen_err) != format_display(&epoch_err));
+}
+
+// =============================================================================
+// Section 4: Type Existence
+// =============================================================================
+
+@test
+fn test_use_after_free_error_type_exists() {
+    let _: Maybe<UseAfterFreeError> = None;
+}
+
+@test
+fn test_revocation_error_type_exists() {
+    let _: Maybe<RevocationError> = None;
+}
+
+@test
+fn test_validation_error_type_exists() {
+    let _: Maybe<ValidationError> = None;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

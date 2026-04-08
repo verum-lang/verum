@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine, closures
+
+/// Test copy and affine semantics with closure capture.
+/// Regular types are copied into closures (original binding still valid).
+/// Affine types can be explicitly moved with `move` keyword.
+/// Spec: 04-memory-model.md#closure-capture
+
+// Affine type - will be moved into closures
+type affine Resource is {
+    id: Int,
+    name: Text,
+};
+
+fn main() {
+    // Closure captures Text by copy (Text is not affine)
+    let s = Text.from("captured by copy");
+    let closure = || {
+        print(s);
+    };
+    closure();
+    // s is STILL valid (Text is Copy)
+    print(s);
+
+    // Closure captures multiple values by copy
+    let a = Text.from("first");
+    let b = Text.from("second");
+    let combined = || {
+        let result = a + " " + b;
+        result
+    };
+    let result = combined();
+    print(result);
+    // a and b are STILL valid
+    print(a);
+    print(b);
+
+    // Copy struct into closure
+    let point = Point { x: 10, y: 20 };
+    let compute = || {
+        point.x * point.y
+    };
+    let product = compute();
+    assert(product == 200);
+    // point is STILL valid
+    assert(point.x == 10);
+
+    // Copy collection into closure
+    let numbers = [1, 2, 3, 4, 5];
+    let sum_closure = || {
+        numbers.iter().sum()
+    };
+    let total = sum_closure();
+    assert(total == 15);
+    // numbers is STILL valid
+    assert(numbers.len() == 5);
+
+    // AFFINE: Move affine type into closure with `move`
+    let res = Resource { id: 42, name: Text.from("resource") };
+    let affine_closure = move || {
+        // res is moved into this closure (Resource is affine)
+        print(res.name);
+        res.id
+    };
+    let id = affine_closure();
+    assert(id == 42);
+    // res is NO LONGER valid (affine type was moved)
+    // print(res.name);  // Would panic
+
+    // Nested closures with copy
+    let outer_val = Text.from("outer");
+    let outer_closure = || {
+        let inner_val = Text.from("inner");
+        let inner_closure = || {
+            outer_val + " " + inner_val
+        };
+        inner_closure()
+    };
+    let nested_result = outer_closure();
+    print(nested_result);
+    // outer_val is STILL valid (Text is Copy)
+    print(outer_val);
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};

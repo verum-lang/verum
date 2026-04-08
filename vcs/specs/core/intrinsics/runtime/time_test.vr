@@ -1,0 +1,58 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/runtime/time_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, runtime, time
+// @description: Tests for time intrinsics - verifies imports resolve correctly.
+//
+// Coverage:
+// - Monotonic time: monotonic_nanos
+// - Real time: realtime_secs
+// - System info: num_cpus
+// - (SKIPPED) Sleep: sleep_ms, sleep_ns - would make tests slow
+//
+// Test Strategy:
+// - Verify function imports resolve
+// - Verify function type signatures
+// =============================================================================
+
+module test.stdlib.intrinsics.runtime.time_test;
+
+mount core.intrinsics.runtime.time.{
+    monotonic_nanos,
+    realtime_secs,
+    num_cpus,
+    // sleep_ms, sleep_ns - skip to keep tests fast
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// System Info Tests
+// =============================================================================
+
+@test
+fn test_num_cpus_exists() {
+    // Verify num_cpus function import resolves and has correct signature
+    let _: fn() -> Int = num_cpus;
+}
+
+@test
+fn test_monotonic_nanos_exists() {
+    // Verify monotonic_nanos function import resolves
+    let _ = monotonic_nanos;
+}
+
+@test
+fn test_realtime_secs_exists() {
+    // Verify realtime_secs function import resolves
+    let _ = realtime_secs;
+}

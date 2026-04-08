@@ -1,0 +1,178 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, postfix_eval, stack, expression_evaluation, arithmetic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Stack-based evaluation of postfix (Reverse Polish Notation) arithmetic
+// expressions. Tokens are encoded as integers:
+//   Values 0..999: the integer operand itself
+//   1000 = ADD (+)
+//   1001 = SUB (-)
+//   1002 = MUL (*)
+//   1003 = DIV (/)
+//   1004 = MOD (%)
+//   -1   = end of expression
+// Stack stored as [Int; 32], stack pointer in sp[0].
+// eval_postfix processes tokens[] and returns the result.
+
+fn stack_push(stk: [Int; 32], sp: [Int; 8], val: Int) {
+    stk[sp[0]] = val;
+    sp[0] = sp[0] + 1;
+}
+
+fn stack_pop(stk: [Int; 32], sp: [Int; 8]) -> Int {
+    sp[0] = sp[0] - 1;
+    stk[sp[0]]
+}
+
+// Evaluate postfix expression. Tokens in tok[] up to first -1.
+// Returns result.
+fn eval_postfix(tok: [Int; 32], stk: [Int; 32], sp: [Int; 8]) -> Int {
+    sp[0] = 0;
+    let mut i = 0;
+    while tok[i] != -1 {
+        let t = tok[i];
+        if t < 1000 {
+            stack_push(stk, sp, t);
+        } else {
+            let b = stack_pop(stk, sp);
+            let a = stack_pop(stk, sp);
+            let res = if t == 1000 { a + b }
+                      else { if t == 1001 { a - b }
+                      else { if t == 1002 { a * b }
+                      else { if t == 1003 { a / b }
+                      else { a % b } } } };
+            stack_push(stk, sp, res);
+        }
+        i = i + 1;
+    }
+    stack_pop(stk, sp)
+}
+
+fn make_tok32() -> [Int; 32] {
+    [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+     -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+}
+fn make_stk32() -> [Int; 32] {
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+}
+
+fn test_simple_add() {
+    // 3 4 + = 7
+    let mut tok = make_tok32();
+    tok[0]=3; tok[1]=4; tok[2]=1000; tok[3]=-1;
+    let mut stk = make_stk32();
+    let mut sp  = [0,0,0,0,0,0,0,0];
+    let r = eval_postfix(tok, stk, sp);
+    assert_eq(r, 7);
+    // 10 3 - = 7
+    let mut tok2 = make_tok32();
+    tok2[0]=10; tok2[1]=3; tok2[2]=1001; tok2[3]=-1;
+    let mut stk2 = make_stk32();
+    let mut sp2  = [0,0,0,0,0,0,0,0];
+    let r2 = eval_postfix(tok2, stk2, sp2);
+    assert_eq(r2, 7);
+    print("simple_add_sub: ok");
+}
+
+fn test_mul_div() {
+    // 6 7 * = 42
+    let mut tok = make_tok32();
+    tok[0]=6; tok[1]=7; tok[2]=1002; tok[3]=-1;
+    let mut stk = make_stk32();
+    let mut sp  = [0,0,0,0,0,0,0,0];
+    let r = eval_postfix(tok, stk, sp);
+    assert_eq(r, 42);
+    // 15 4 / = 3 (integer division)
+    let mut tok2 = make_tok32();
+    tok2[0]=15; tok2[1]=4; tok2[2]=1003; tok2[3]=-1;
+    let mut stk2 = make_stk32();
+    let mut sp2  = [0,0,0,0,0,0,0,0];
+    let r2 = eval_postfix(tok2, stk2, sp2);
+    assert_eq(r2, 3);
+    // 17 5 % = 2
+    let mut tok3 = make_tok32();
+    tok3[0]=17; tok3[1]=5; tok3[2]=1004; tok3[3]=-1;
+    let mut stk3 = make_stk32();
+    let mut sp3  = [0,0,0,0,0,0,0,0];
+    let r3 = eval_postfix(tok3, stk3, sp3);
+    assert_eq(r3, 2);
+    print("mul_div_mod: ok");
+}
+
+fn test_complex_expression() {
+    // (3+4)*(2+5) = 7*7 = 49
+    // Postfix: 3 4 + 2 5 + *
+    let mut tok = make_tok32();
+    tok[0]=3; tok[1]=4; tok[2]=1000;
+    tok[3]=2; tok[4]=5; tok[5]=1000;
+    tok[6]=1002; tok[7]=-1;
+    let mut stk = make_stk32();
+    let mut sp  = [0,0,0,0,0,0,0,0];
+    let r = eval_postfix(tok, stk, sp);
+    assert_eq(r, 49);
+    // 5 1 2 + 4 * + 3 - = 5 + (1+2)*4 - 3 = 5+12-3=14
+    // Postfix: 5 1 2 + 4 * + 3 -
+    let mut tok2 = make_tok32();
+    tok2[0]=5; tok2[1]=1; tok2[2]=2; tok2[3]=1000;
+    tok2[4]=4; tok2[5]=1002; tok2[6]=1000; tok2[7]=3; tok2[8]=1001; tok2[9]=-1;
+    let mut stk2 = make_stk32();
+    let mut sp2  = [0,0,0,0,0,0,0,0];
+    let r2 = eval_postfix(tok2, stk2, sp2);
+    assert_eq(r2, 14);
+    print("complex_expression: ok");
+}
+
+fn test_single_operand() {
+    // Single token = the value itself.
+    let mut tok = make_tok32();
+    tok[0] = 42; tok[1] = -1;
+    let mut stk = make_stk32();
+    let mut sp  = [0,0,0,0,0,0,0,0];
+    let r = eval_postfix(tok, stk, sp);
+    assert_eq(r, 42);
+    // Single zero
+    let mut tok2 = make_tok32();
+    tok2[0] = 0; tok2[1] = -1;
+    let mut stk2 = make_stk32();
+    let mut sp2  = [0,0,0,0,0,0,0,0];
+    let r2 = eval_postfix(tok2, stk2, sp2);
+    assert_eq(r2, 0);
+    print("single_operand: ok");
+}
+
+fn test_nested_expression() {
+    // ((2+3)*(4+5))/(5-2) = (5*9)/3 = 45/3 = 15
+    // Postfix: 2 3 + 4 5 + * 5 2 - /
+    let mut tok = make_tok32();
+    tok[0]=2; tok[1]=3; tok[2]=1000;
+    tok[3]=4; tok[4]=5; tok[5]=1000;
+    tok[6]=1002;
+    tok[7]=5; tok[8]=2; tok[9]=1001;
+    tok[10]=1003; tok[11]=-1;
+    let mut stk = make_stk32();
+    let mut sp  = [0,0,0,0,0,0,0,0];
+    let r = eval_postfix(tok, stk, sp);
+    assert_eq(r, 15);
+    // 100 10 % 7 * = (100%10)*7 = 0*7 = 0
+    let mut tok2 = make_tok32();
+    tok2[0]=100; tok2[1]=10; tok2[2]=1004; tok2[3]=7; tok2[4]=1002; tok2[5]=-1;
+    let mut stk2 = make_stk32();
+    let mut sp2  = [0,0,0,0,0,0,0,0];
+    let r2 = eval_postfix(tok2, stk2, sp2);
+    assert_eq(r2, 0);
+    print("nested_expression: ok");
+}
+
+fn main() -> Int {
+    test_simple_add();
+    test_mul_div();
+    test_complex_expression();
+    test_single_operand();
+    test_nested_expression();
+    print("[OK] 569_interp_postfix_eval");
+    0
+}

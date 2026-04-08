@@ -1,0 +1,37 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Simplest module declaration
+module empty {}
+
+// Module with a single function
+module utils {
+    fn helper() -> Int {
+        42
+    }
+}
+
+// Module with a single type
+module types {
+    type Point is { x: Float, y: Float };
+}
+
+// Module with a single constant
+module constants {
+    const MAX_SIZE: Int = 1024;
+}
+
+// Module with forward declaration (semicolon body)
+module external;
+
+// Module with underscore in name
+module my_module {}
+
+// Module with number in name
+module module2 {}
+
+// Multiple simple modules
+module first {}
+module second {}
+module third {}

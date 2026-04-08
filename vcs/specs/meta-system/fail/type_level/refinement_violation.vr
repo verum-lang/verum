@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M505
+// @description: Tests M505 RefinementViolation error code
+// @tags: meta-system, type-level, refinement, error-codes
+
+// M505 is triggered when a refinement predicate is not satisfied.
+// This test uses trigger_refinement_violation to validate the error code.
+
+meta fn cause_refinement_violation() -> Int {
+    // Trigger M505 RefinementViolation error
+    trigger_refinement_violation("self > 0", "-5")
+}
+
+fn main() {
+    // This will fail at compile time with M505
+    @const assert(cause_refinement_violation() == 0);
+}

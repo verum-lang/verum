@@ -1,0 +1,56 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, string, format, f-string
+// @timeout: 10000
+// @expected-exit: 0
+// @description: String formatting: f-strings with various expressions, nested format
+
+fn main() -> Int {
+    // Integer formatting
+    let x = 42;
+    assert_eq(f"x={x}", "x=42");
+    assert_eq(f"double={x * 2}", "double=84");
+
+    // Multiple interpolations
+    let a = 10;
+    let b = 20;
+    assert_eq(f"{a} + {b} = {a + b}", "10 + 20 = 30");
+    assert_eq(f"({a}, {b})", "(10, 20)");
+
+    // Negative numbers
+    let neg = -42;
+    assert_eq(f"neg={neg}", "neg=-42");
+
+    // Boolean formatting
+    let flag = true;
+    assert_eq(f"flag={flag}", "flag=true");
+
+    // Zero
+    assert_eq(f"zero={0}", "zero=0");
+
+    // Large number
+    assert_eq(f"big={1000000}", "big=1000000");
+
+    // String in context
+    let name = "world";
+    assert_eq(f"hello, {name}!", "hello, world!");
+
+    // Chain of formatted values
+    let mut output = "";
+    let mut i = 0;
+    while i < 5 {
+        output = output + f"[{i}]";
+        i = i + 1;
+    }
+    assert_eq(output, "[0][1][2][3][4]");
+
+    // Expression in f-string
+    let p = 7;
+    let q = 3;
+    assert_eq(f"{p}/{q}={p/q}r{p%q}", "7/3=2r1");
+
+    print("diff_string_formatting: ok");
+    0
+}

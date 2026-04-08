@@ -1,0 +1,294 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, boolean
+
+// Boolean literal expressions
+
+// ============================================================================
+// SECTION 1: Basic Boolean Literals
+// ============================================================================
+
+fn test_basic_booleans() {
+    // Basic boolean literals
+    let t = true;
+    let f = false;
+}
+
+fn test_boolean_conditionals() {
+    // Boolean in conditional
+    if true {
+        always_runs();
+    }
+
+    if false {
+        never_runs();
+    }
+}
+
+fn test_boolean_expressions() {
+    // Boolean in expressions
+    let and_result = true && false;
+    let or_result = true || false;
+    let not_result = !true;
+}
+
+fn test_boolean_comparisons() {
+    // Boolean in comparisons
+    let eq = true == true;
+    let neq = true != false;
+}
+
+fn test_boolean_if_expression() {
+    // Boolean in ternary-like if
+    let value = if true { 1 } else { 0 };
+}
+
+fn test_boolean_complex_expressions() {
+    // Boolean with complex expressions
+    let complex = true && (false || true);
+    let nested = !(!true || !false);
+}
+
+// ============================================================================
+// SECTION 2: Booleans in Function Calls and Methods
+// ============================================================================
+
+fn test_boolean_function_calls() {
+    // Boolean in function calls
+    let result = validate(true);
+    let check = verify(false, true);
+}
+
+fn test_boolean_method_calls() {
+    // Boolean in method calls
+    let enabled = config.is_enabled() && true;
+    let disabled = option.is_none() || false;
+}
+
+// ============================================================================
+// SECTION 3: Booleans in Match Expressions
+// ============================================================================
+
+fn test_boolean_match() {
+    // Boolean in match
+    match flag {
+        true => handle_true(),
+        false => handle_false(),
+    }
+}
+
+fn test_boolean_match_guards() {
+    // Boolean in match guards
+    match value {
+        x if true => always(x),
+        x if false => never(x),
+        _ => fallback(),
+    }
+}
+
+fn test_boolean_where_clause() {
+    // Boolean with where clause
+    match value {
+        x where true => always(x),
+        x where false => never(x),
+    }
+}
+
+fn test_boolean_match_expression() {
+    // Boolean in match expression
+    let boolean = match condition {
+        true => true,
+        false => false,
+    };
+}
+
+// ============================================================================
+// SECTION 4: Booleans in Collections
+// ============================================================================
+
+fn test_boolean_struct_literal() {
+    type Config is {
+        debug: Bool,
+        verbose: Bool,
+        strict: Bool,
+    };
+
+    // Boolean in struct literal
+    let config = Config {
+        debug: true,
+        verbose: false,
+        strict: true,
+    };
+}
+
+fn test_boolean_arrays() {
+    // Boolean in array
+    let flags = [true, false, true, false];
+    let all_true = [true, true, true];
+    let all_false = [false, false, false];
+}
+
+fn test_boolean_tuples() {
+    // Boolean in tuple
+    let pair = (true, false);
+    let triple = (true, false, true);
+}
+
+// ============================================================================
+// SECTION 5: Boolean Type Annotations
+// ============================================================================
+
+fn test_boolean_type_annotation() {
+    // Boolean with type annotation
+    let explicit: Bool = true;
+    let also_explicit: Bool = false;
+}
+
+// ============================================================================
+// SECTION 6: Booleans in Pipelines and Short-Circuit
+// ============================================================================
+
+fn test_boolean_pipeline() {
+    // Boolean in pipeline (if bool methods exist)
+    let negated = true |> negate;
+}
+
+fn test_boolean_short_circuit() {
+    // Boolean short-circuit evaluation
+    let short_circuit = false && expensive_call();
+    let lazy_eval = true || expensive_call();
+}
+
+// ============================================================================
+// SECTION 7: Booleans in Loops
+// ============================================================================
+
+fn test_boolean_while_loops() {
+    // Boolean in loop conditions
+    while true {
+        break;
+    }
+
+    while false {
+        unreachable();
+    }
+}
+
+// ============================================================================
+// SECTION 8: Booleans as Function Returns
+// ============================================================================
+
+fn returns_true() -> Bool {
+    // Boolean return
+    true
+}
+
+fn returns_false() -> Bool {
+    // Boolean return
+    false
+}
+
+// ============================================================================
+// SECTION 9: Booleans in Result/Maybe Context
+// ============================================================================
+
+fn test_boolean_result_maybe() {
+    // Boolean in Result/Maybe context
+    let ok_true = Ok(true);
+    let some_false = Some(false);
+}
+
+// ============================================================================
+// SECTION 10: Boolean Operator Precedence
+// ============================================================================
+
+fn test_boolean_precedence() {
+    // Boolean in binary ops precedence
+    let precedence = true || false && true;
+    let explicit_precedence = true || (false && true);
+    let other_precedence = (true || false) && true;
+}
+
+fn test_boolean_comparison_chains() {
+    // Boolean with comparison chains
+    let range_check = x > 0 && x < 100 && true;
+}
+
+// ============================================================================
+// SECTION 11: Booleans in Closures
+// ============================================================================
+
+fn test_boolean_closures() {
+    // Boolean in closure
+    let predicate = |x| true;
+    let always_false = |_| false;
+}
+
+// ============================================================================
+// SECTION 12: Boolean Assignment
+// ============================================================================
+
+fn test_boolean_assignment() {
+    // Boolean assignment
+    let mut flag = true;
+    flag = false;
+}
+
+// ============================================================================
+// SECTION 13: Booleans in Assertions
+// ============================================================================
+
+fn test_boolean_assertions() {
+    // Boolean in assert-like context
+    assert(true);
+    debug_assert(true);
+}
+
+// ============================================================================
+// SECTION 14: Booleans with Optional Chaining
+// ============================================================================
+
+fn test_boolean_optional_chaining() {
+    // Boolean with optional chaining
+    let maybe_bool = maybe?.is_valid() || false;
+}
+
+// ============================================================================
+// SECTION 15: Complex Boolean Conditionals
+// ============================================================================
+
+fn test_boolean_complex_conditional() {
+    // Boolean in complex conditional
+    if (a && b) || (c && d) && true {
+        complex_condition();
+    }
+}
+
+fn test_boolean_negation_chains() {
+    // Boolean with negation chains
+    let double_neg = !!true;
+    let triple_neg = !!!false;
+}
+
+// ============================================================================
+// SECTION 16: Booleans in Implementations
+// ============================================================================
+
+type MyBool is (Bool);
+
+implement Default for MyBool {
+    fn default() -> Bool {
+        // Boolean in implementing Default
+        false
+    }
+}
+
+// ============================================================================
+// SECTION 17: Boolean Constants and Statics
+// ============================================================================
+
+const ENABLED: Bool = true;
+const DISABLED: Bool = false;
+
+static mut DEBUG: Bool = false;

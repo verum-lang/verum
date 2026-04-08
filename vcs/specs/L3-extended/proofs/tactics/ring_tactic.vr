@@ -1,0 +1,341 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, ring
+// @timeout: 15000
+// @description: Tests the ring tactic for ring theory reasoning
+
+/// ============================================================
+/// RING TACTIC
+/// ============================================================
+///
+/// The ring tactic solves equalities in commutative rings by
+/// normalizing both sides to a canonical polynomial form. It
+/// handles addition, subtraction, multiplication, and powers.
+
+// ------------------------------------------------------------
+// Basic Ring Identities
+// ------------------------------------------------------------
+
+/// Commutativity of addition
+theorem ring_add_comm(a: Int, b: Int): a + b == b + a {
+    proof by ring
+}
+
+/// Commutativity of multiplication
+theorem ring_mul_comm(a: Int, b: Int): a * b == b * a {
+    proof by ring
+}
+
+/// Associativity of addition
+theorem ring_add_assoc(a: Int, b: Int, c: Int): (a + b) + c == a + (b + c) {
+    proof by ring
+}
+
+/// Associativity of multiplication
+theorem ring_mul_assoc(a: Int, b: Int, c: Int): (a * b) * c == a * (b * c) {
+    proof by ring
+}
+
+/// Distributivity
+theorem ring_distrib_left(a: Int, b: Int, c: Int): a * (b + c) == a * b + a * c {
+    proof by ring
+}
+
+theorem ring_distrib_right(a: Int, b: Int, c: Int): (a + b) * c == a * c + b * c {
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Identity Elements
+// ------------------------------------------------------------
+
+/// Additive identity
+theorem ring_add_zero(a: Int): a + 0 == a {
+    proof by ring
+}
+
+theorem ring_zero_add(a: Int): 0 + a == a {
+    proof by ring
+}
+
+/// Multiplicative identity
+theorem ring_mul_one(a: Int): a * 1 == a {
+    proof by ring
+}
+
+theorem ring_one_mul(a: Int): 1 * a == a {
+    proof by ring
+}
+
+/// Zero absorption
+theorem ring_mul_zero(a: Int): a * 0 == 0 {
+    proof by ring
+}
+
+theorem ring_zero_mul(a: Int): 0 * a == 0 {
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Inverse Elements
+// ------------------------------------------------------------
+
+/// Additive inverse
+theorem ring_add_neg(a: Int): a + (-a) == 0 {
+    proof by ring
+}
+
+theorem ring_neg_add(a: Int): (-a) + a == 0 {
+    proof by ring
+}
+
+/// Double negation
+theorem ring_neg_neg(a: Int): -(-a) == a {
+    proof by ring
+}
+
+/// Negation distributes
+theorem ring_neg_add_distrib(a: Int, b: Int): -(a + b) == -a + -b {
+    proof by ring
+}
+
+theorem ring_neg_mul_left(a: Int, b: Int): (-a) * b == -(a * b) {
+    proof by ring
+}
+
+theorem ring_neg_mul_right(a: Int, b: Int): a * (-b) == -(a * b) {
+    proof by ring
+}
+
+theorem ring_neg_neg_mul(a: Int, b: Int): (-a) * (-b) == a * b {
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Subtraction
+// ------------------------------------------------------------
+
+/// Subtraction as addition of negative
+theorem ring_sub_def(a: Int, b: Int): a - b == a + (-b) {
+    proof by ring
+}
+
+/// Self subtraction
+theorem ring_sub_self(a: Int): a - a == 0 {
+    proof by ring
+}
+
+/// Subtraction identities
+theorem ring_sub_zero(a: Int): a - 0 == a {
+    proof by ring
+}
+
+theorem ring_zero_sub(a: Int): 0 - a == -a {
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Polynomial Identities
+// ------------------------------------------------------------
+
+/// Square of sum (binomial)
+theorem ring_sq_sum(a: Int, b: Int): (a + b) * (a + b) == a*a + 2*a*b + b*b {
+    proof by ring
+}
+
+/// Square of difference
+theorem ring_sq_diff(a: Int, b: Int): (a - b) * (a - b) == a*a - 2*a*b + b*b {
+    proof by ring
+}
+
+/// Difference of squares
+theorem ring_diff_sq(a: Int, b: Int): (a + b) * (a - b) == a*a - b*b {
+    proof by ring
+}
+
+/// Cube of sum
+theorem ring_cube_sum(a: Int, b: Int):
+    (a + b) * (a + b) * (a + b) == a*a*a + 3*a*a*b + 3*a*b*b + b*b*b
+{
+    proof by ring
+}
+
+/// Cube of difference
+theorem ring_cube_diff(a: Int, b: Int):
+    (a - b) * (a - b) * (a - b) == a*a*a - 3*a*a*b + 3*a*b*b - b*b*b
+{
+    proof by ring
+}
+
+/// Sum of cubes factorization
+theorem ring_sum_cubes(a: Int, b: Int):
+    a*a*a + b*b*b == (a + b) * (a*a - a*b + b*b)
+{
+    proof by ring
+}
+
+/// Difference of cubes factorization
+theorem ring_diff_cubes(a: Int, b: Int):
+    a*a*a - b*b*b == (a - b) * (a*a + a*b + b*b)
+{
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Complex Polynomial Identities
+// ------------------------------------------------------------
+
+/// Multinomial expansion
+theorem ring_trinomial_sq(a: Int, b: Int, c: Int):
+    (a + b + c) * (a + b + c) == a*a + b*b + c*c + 2*a*b + 2*b*c + 2*a*c
+{
+    proof by ring
+}
+
+/// Product of sums
+theorem ring_product_sums(a: Int, b: Int, c: Int, d: Int):
+    (a + b) * (c + d) == a*c + a*d + b*c + b*d
+{
+    proof by ring
+}
+
+/// Sophie Germain identity
+theorem ring_sophie_germain(a: Int, b: Int):
+    a*a*a*a + 4*b*b*b*b ==
+    (a*a + 2*b*b + 2*a*b) * (a*a + 2*b*b - 2*a*b)
+{
+    proof by ring
+}
+
+/// Brahmagupta-Fibonacci identity
+theorem ring_brahmagupta(a: Int, b: Int, c: Int, d: Int):
+    (a*a + b*b) * (c*c + d*d) ==
+    (a*c - b*d)*(a*c - b*d) + (a*d + b*c)*(a*d + b*c)
+{
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Ring with Powers
+// ------------------------------------------------------------
+
+/// Power identities
+theorem ring_pow_add(a: Int, m: Nat, n: Nat):
+    pow(a, m) * pow(a, n) == pow(a, m + n)
+{
+    proof by ring
+
+theorem ring_pow_mul(a: Int, m: Nat, n: Nat):
+    pow(pow(a, m), n) == pow(a, m * n)
+{
+    proof by ring
+
+theorem ring_pow_distrib(a: Int, b: Int, n: Nat):
+    pow(a * b, n) == pow(a, n) * pow(b, n)
+{
+    proof by ring
+
+// ------------------------------------------------------------
+// Ring Normalization
+// ------------------------------------------------------------
+
+/// Polynomial normalization
+theorem ring_normalize_1(x: Int):
+    x * x + 2 * x + 1 == (x + 1) * (x + 1)
+{
+    proof by ring
+}
+
+theorem ring_normalize_2(x: Int, y: Int):
+    x*x*y + x*y*x + y*x*x == 3 * x * x * y
+{
+    proof by ring
+}
+
+/// Collecting like terms
+theorem ring_collect_terms(a: Int, b: Int):
+    3*a + 2*b + 5*a - b == 8*a + b
+{
+    proof by ring
+}
+
+/// Simplification through normalization
+theorem ring_simplify(x: Int, y: Int, z: Int):
+    (x + y) * z - x * z - y * z == 0
+{
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Ring with Type Parameters
+// ------------------------------------------------------------
+
+/// Generic ring operations
+theorem ring_generic<R: Ring>(a: R, b: R): a + b == b + a {
+    proof by ring
+}
+
+theorem ring_generic_distrib<R: Ring>(a: R, b: R, c: R):
+    a * (b + c) == a * b + a * c
+{
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Ring vs Other Tactics
+// ------------------------------------------------------------
+
+/// Ring solves what omega cannot
+theorem ring_nonlinear(x: Int): (x + 1) * (x + 1) - x * x == 2 * x + 1 {
+    // Omega can't handle multiplication, ring can
+    proof by ring
+}
+
+/// Ring for verification conditions
+theorem ring_verify(n: Int)
+    requires n >= 0
+    ensures (n + 1) * (n + 1) == n * n + 2 * n + 1
+{
+    proof by ring
+}
+
+// ------------------------------------------------------------
+// Ring Tactic Configuration
+// ------------------------------------------------------------
+
+/// Ring with explicit coefficient ring
+theorem ring_with_coefficients(a: Int, b: Int):
+    2 * a + 3 * b - a == a + 3 * b
+{
+    proof by ring
+
+/// Ring with commutative semiring
+theorem ring_semiring(a: Nat, b: Nat): a + b == b + a {
+    proof by ring
+
+// ------------------------------------------------------------
+// Ring Failures
+// ------------------------------------------------------------
+
+/// Ring cannot prove inequalities
+// @test: verify-fail
+// @expected-error: ring cannot prove inequalities
+theorem ring_inequality_fail(a: Int, b: Int)
+    requires a > 0
+    requires b > 0
+    ensures a + b > 0
+{
+    // Ring only handles equalities
+    proof by ring  // FAILS
+}
+
+/// Ring cannot prove divisibility without field
+// @test: verify-fail
+// @expected-error: requires field tactic
+theorem ring_division_fail(a: Int)
+    requires a != 0
+    ensures a / a == 1
+{
+    proof by ring  // FAILS - needs field
+}

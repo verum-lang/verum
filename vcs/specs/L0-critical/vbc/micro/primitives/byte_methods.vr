@@ -1,0 +1,49 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Byte (UInt8) methods
+
+fn main() {
+    let b: Byte = 65;  // ASCII 'A'
+
+    // Test ASCII methods
+    assert(b.is_ascii_alphabetic());
+    assert(!b.is_ascii_digit());
+    assert(b.is_ascii_alphanumeric());
+    assert(!b.is_ascii_whitespace());
+
+    // Test case conversion
+    assert_eq(b.to_ascii_lowercase(), 97);  // ASCII 'a'
+
+    let lower: Byte = 97;  // ASCII 'a'
+    assert_eq(lower.to_ascii_uppercase(), 65);  // ASCII 'A'
+
+    // Test whitespace detection
+    let space: Byte = 32;
+    assert(space.is_ascii_whitespace());
+
+    let tab: Byte = 9;
+    assert(tab.is_ascii_whitespace());
+
+    // Test digit detection
+    let digit: Byte = 48;  // ASCII '0'
+    assert(digit.is_ascii_digit());
+    assert(!digit.is_ascii_alphabetic());
+
+    // Test checked_add
+    let x: Byte = 100;
+    let y: Byte = 50;
+    match x.checked_add(y) {
+        Some(result) => assert_eq(result, 150),
+        None => panic("Expected Some"),
+    }
+
+    // Test saturating_add
+    let max_byte: Byte = 255;
+    assert_eq(max_byte.saturating_add(10), 255);
+
+    // Test wrapping_add
+    assert_eq(max_byte.wrapping_add(1), 0);
+}

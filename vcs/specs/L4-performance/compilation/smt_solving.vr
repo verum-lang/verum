@@ -1,0 +1,626 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: compilation, smt, z3, refinement, verification
+// @description: SMT solving time benchmark (target: < 100ms for simple refinements)
+
+/// SMT Solving Time Benchmark
+///
+/// Measures the performance of SMT-based verification using Z3.
+/// This is critical for refinement type checking and formal verification.
+///
+/// Targets (per complexity level):
+/// - Simple refinements: < 10ms
+/// - Medium refinements: < 100ms
+/// - Complex refinements: < 1000ms
+/// - Arithmetic proofs: < 50ms
+/// - Bounds checking: < 20ms
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+module vcs.specs.l4.compilation.smt_solving;
+
+const WARMUP_ITERATIONS: Int = 10;
+const BENCHMARK_ITERATIONS: Int = 100;
+
+fn main() {
+    let results = BenchmarkResults.new("SMT Solving Time");
+
+    // Simple refinement benchmarks
+    results.add(benchmark_simple_non_zero());
+    results.add(benchmark_simple_positive());
+    results.add(benchmark_simple_range());
+
+    // Arithmetic refinement benchmarks
+    results.add(benchmark_arithmetic_addition());
+    results.add(benchmark_arithmetic_multiplication());
+    results.add(benchmark_arithmetic_division_safety());
+
+    // Bounds checking benchmarks
+    results.add(benchmark_array_bounds());
+    results.add(benchmark_slice_bounds());
+    results.add(benchmark_nested_bounds());
+
+    // Complex refinement benchmarks
+    results.add(benchmark_dependent_types());
+    results.add(benchmark_quantified_formulas());
+    results.add(benchmark_recursive_refinements());
+
+    // Real-world patterns
+    results.add(benchmark_option_unwrap_safety());
+    results.add(benchmark_list_index_safety());
+    results.add(benchmark_null_safety());
+
+    results.report();
+    assert(results.all_pass(), "SMT solving time exceeds targets");
+}
+
+/// Simple non-zero refinement
+fn benchmark_simple_non_zero() -> BenchmarkResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_refinement("(assert (not (= x 0)))", "x: Int");
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_refinement("(assert (not (= x 0)))", "x: Int");
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "simple_non_zero",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 10.0,
+        passed: per_check_ms < 10.0,
+    }
+}
+
+/// Simple positive refinement
+fn benchmark_simple_positive() -> BenchmarkResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_refinement("(assert (> x 0))", "x: Int");
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_refinement("(assert (> x 0))", "x: Int");
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "simple_positive",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 10.0,
+        passed: per_check_ms < 10.0,
+    }
+}
+
+/// Range refinement (0 <= x < 100)
+fn benchmark_simple_range() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_refinement("(assert (and (>= x 0) (< x 100)))", "x: Int");
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_refinement("(assert (and (>= x 0) (< x 100)))", "x: Int");
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "simple_range",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 15.0,
+        passed: per_check_ms < 15.0,
+    }
+}
+
+/// Addition overflow checking
+fn benchmark_arithmetic_addition() -> BenchmarkResult {
+    let formula = """
+        (declare-const a Int)
+        (declare-const b Int)
+        (assert (and (>= a 0) (<= a 1000000)))
+        (assert (and (>= b 0) (<= b 1000000)))
+        (assert (< (+ a b) 2147483647))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "arithmetic_addition",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 20.0,
+        passed: per_check_ms < 20.0,
+    }
+}
+
+/// Multiplication overflow checking
+fn benchmark_arithmetic_multiplication() -> BenchmarkResult {
+    let formula = """
+        (declare-const a Int)
+        (declare-const b Int)
+        (assert (and (>= a 0) (<= a 46340)))
+        (assert (and (>= b 0) (<= b 46340)))
+        (assert (< (* a b) 2147483647))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "arithmetic_multiplication",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 30.0,
+        passed: per_check_ms < 30.0,
+    }
+}
+
+/// Division by zero prevention
+fn benchmark_arithmetic_division_safety() -> BenchmarkResult {
+    let formula = """
+        (declare-const dividend Int)
+        (declare-const divisor Int)
+        (assert (not (= divisor 0)))
+        (assert (= (div dividend divisor) (div dividend divisor)))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "arithmetic_division_safety",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 15.0,
+        passed: per_check_ms < 15.0,
+    }
+}
+
+/// Array bounds checking
+fn benchmark_array_bounds() -> BenchmarkResult {
+    let formula = """
+        (declare-const arr_len Int)
+        (declare-const index Int)
+        (assert (> arr_len 0))
+        (assert (>= index 0))
+        (assert (< index arr_len))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "array_bounds",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 20.0,
+        passed: per_check_ms < 20.0,
+    }
+}
+
+/// Slice bounds with start and end
+fn benchmark_slice_bounds() -> BenchmarkResult {
+    let formula = """
+        (declare-const arr_len Int)
+        (declare-const start Int)
+        (declare-const end Int)
+        (assert (> arr_len 0))
+        (assert (>= start 0))
+        (assert (<= start end))
+        (assert (<= end arr_len))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "slice_bounds",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 25.0,
+        passed: per_check_ms < 25.0,
+    }
+}
+
+/// Nested array bounds (matrix access)
+fn benchmark_nested_bounds() -> BenchmarkResult {
+    let formula = """
+        (declare-const rows Int)
+        (declare-const cols Int)
+        (declare-const row_idx Int)
+        (declare-const col_idx Int)
+        (assert (> rows 0))
+        (assert (> cols 0))
+        (assert (and (>= row_idx 0) (< row_idx rows)))
+        (assert (and (>= col_idx 0) (< col_idx cols)))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "nested_bounds",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 35.0,
+        passed: per_check_ms < 35.0,
+    }
+}
+
+/// Dependent type checking
+fn benchmark_dependent_types() -> BenchmarkResult {
+    // Vector length depends on type parameter
+    let formula = """
+        (declare-const n Int)
+        (declare-const vec_len Int)
+        (assert (> n 0))
+        (assert (= vec_len n))
+        (declare-const idx Int)
+        (assert (and (>= idx 0) (< idx n)))
+        (assert (< idx vec_len))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "dependent_types",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 50.0,
+        passed: per_check_ms < 50.0,
+    }
+}
+
+/// Quantified formulas (forall/exists)
+fn benchmark_quantified_formulas() -> BenchmarkResult {
+    let formula = """
+        (declare-const n Int)
+        (assert (> n 0))
+        (assert (forall ((i Int))
+            (=> (and (>= i 0) (< i n))
+                (< i n))))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Quantifiers are expensive
+    BenchmarkResult {
+        name: "quantified_formulas",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 100.0,
+        passed: per_check_ms < 100.0,
+    }
+}
+
+/// Recursive refinements (e.g., sorted list)
+fn benchmark_recursive_refinements() -> BenchmarkResult {
+    let formula = """
+        (declare-sort Elem)
+        (declare-fun sorted (Int Int) Bool)
+        (declare-const arr_len Int)
+        (assert (> arr_len 0))
+        (assert (sorted 0 arr_len))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "recursive_refinements",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 75.0,
+        passed: per_check_ms < 75.0,
+    }
+}
+
+/// Option.unwrap safety verification
+fn benchmark_option_unwrap_safety() -> BenchmarkResult {
+    let formula = """
+        (declare-datatypes () ((Option (None) (Some (value Int)))))
+        (declare-const opt Option)
+        (assert (not (= opt None)))
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "option_unwrap_safety",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 30.0,
+        passed: per_check_ms < 30.0,
+    }
+}
+
+/// List index safety with length tracking
+fn benchmark_list_index_safety() -> BenchmarkResult {
+    let formula = """
+        (declare-const list_len Int)
+        (declare-const idx Int)
+        (assert (> list_len 0))
+        (assert (>= idx 0))
+        (assert (< idx list_len))
+        ; Prove: access is safe
+        (check-sat)
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "list_index_safety",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 20.0,
+        passed: per_check_ms < 20.0,
+    }
+}
+
+/// Null/None safety verification
+fn benchmark_null_safety() -> BenchmarkResult {
+    let formula = """
+        (declare-const ptr_valid Bool)
+        (assert ptr_valid)
+        ; Prove: dereference is safe
+    """;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let _ = smt_check_formula(formula);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = smt_check_formula(formula);
+        black_box(result);
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let per_check_ms = elapsed_ms as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "null_safety",
+        metric: "ms/check",
+        value: per_check_ms,
+        target: 10.0,
+        passed: per_check_ms < 10.0,
+    }
+}
+
+// SMT solver interface (provided by verum_smt crate)
+@extern("verum_smt")
+fn smt_check_refinement(predicate: Text, context: Text) -> SmtResult;
+
+@extern("verum_smt")
+fn smt_check_formula(formula: Text) -> SmtResult;
+
+type SmtResult is Sat | Unsat | Unknown | Timeout;
+
+// Benchmark infrastructure types
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ms(&self) -> Float {
+        (clock_ns() - self.start_time) as Float / 1_000_000.0
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

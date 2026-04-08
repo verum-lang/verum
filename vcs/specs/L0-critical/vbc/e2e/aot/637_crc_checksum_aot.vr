@@ -1,0 +1,211 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, crc, checksum, error-detection
+// @timeout: 30000
+
+// CRC-like checksum computation using polynomial division over GF(2)
+// Simplified to work with small integers
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(val: Int, pos: Int) -> Int { (val / pow2(pos)) % 2 }
+
+// XOR two values
+fn xor_val(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) != get_bit(b, i) {
+            result = result + pow2(i);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Highest set bit position (0-indexed), -1 if 0
+fn highest_bit(val: Int) -> Int {
+    let mut pos = 0 - 1;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(val, i) == 1 { pos = i; }
+        i = i + 1;
+    }
+    pos
+}
+
+// Simple CRC: polynomial division of data by generator over GF(2)
+// Returns remainder (the CRC value)
+fn crc_compute(data: Int, gen: Int, data_bits: Int) -> Int {
+    let gen_degree = highest_bit(gen);
+    // Shift data left by gen_degree bits
+    let mut dividend = data * pow2(gen_degree);
+    let mut i = data_bits + gen_degree - 1;
+    while i >= gen_degree {
+        if get_bit(dividend, i) == 1 {
+            // XOR with generator shifted to align with bit i
+            let shifted_gen = gen * pow2(i - gen_degree);
+            dividend = xor_val(dividend, shifted_gen);
+        }
+        i = i - 1;
+    }
+    dividend // remainder
+}
+
+// Verify CRC: data + CRC should give remainder 0
+fn crc_verify(data: Int, crc: Int, gen: Int, data_bits: Int) -> Int {
+    let gen_degree = highest_bit(gen);
+    let combined = data * pow2(gen_degree) + crc;
+    // Divide combined by generator
+    let mut dividend = combined;
+    let total_bits = data_bits + gen_degree;
+    let mut i = total_bits - 1;
+    while i >= gen_degree {
+        if get_bit(dividend, i) == 1 {
+            let shifted_gen = gen * pow2(i - gen_degree);
+            dividend = xor_val(dividend, shifted_gen);
+        }
+        i = i - 1;
+    }
+    if dividend == 0 { 1 } else { 0 }
+}
+
+// Luhn checksum (simplified for small arrays of single digits)
+fn luhn_check(digits: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        let d = get8(digits, n - 1 - i);
+        if i % 2 == 1 {
+            let doubled = d * 2;
+            if doubled > 9 { sum = sum + doubled - 9; }
+            else { sum = sum + doubled; }
+        } else {
+            sum = sum + d;
+        }
+        i = i + 1;
+    }
+    if sum % 10 == 0 { 1 } else { 0 }
+}
+
+// Simple additive checksum mod 256
+fn checksum8(data: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + get8(data, i);
+        i = i + 1;
+    }
+    sum % 256
+}
+
+fn test_crc_basic() -> Int {
+    // Generator: x^3 + x + 1 = 1011 = 11
+    let gen = 11; // binary: 1011
+    // Data: 110 = 6 (3 bits)
+    let crc = crc_compute(6, gen, 3);
+    // Verify: data with appended CRC should verify
+    assert_eq(crc_verify(6, crc, gen, 3), 1);
+    1
+}
+
+fn test_crc_detect_error() -> Int {
+    let gen = 11; // x^3 + x + 1
+    let data = 6;
+    let crc = crc_compute(data, gen, 3);
+    // Correct data verifies
+    assert_eq(crc_verify(data, crc, gen, 3), 1);
+    // Corrupted data should fail (flip bit 0)
+    let corrupted = xor_val(data, 1);
+    assert_eq(crc_verify(corrupted, crc, gen, 3), 0);
+    1
+}
+
+fn test_crc_different_data() -> Int {
+    let gen = 11;
+    // Different data should produce different CRCs (usually)
+    let crc1 = crc_compute(5, gen, 3);
+    let crc2 = crc_compute(6, gen, 3);
+    let crc3 = crc_compute(7, gen, 3);
+    // At least 2 should be different
+    let same_count = (if crc1 == crc2 { 1 } else { 0 }) + (if crc2 == crc3 { 1 } else { 0 }) + (if crc1 == crc3 { 1 } else { 0 });
+    // With 3-bit CRC space, some collisions possible but not all same
+    // Just verify each self-verifies
+    assert_eq(crc_verify(5, crc1, gen, 3), 1);
+    assert_eq(crc_verify(6, crc2, gen, 3), 1);
+    assert_eq(crc_verify(7, crc3, gen, 3), 1);
+    1
+}
+
+fn test_luhn() -> Int {
+    // Valid Luhn: 7992739871 (checksum digit makes it valid)
+    // Let's use smaller example: 0 (single digit 0) -> valid
+    let d1 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(luhn_check(d1, 1), 1); // 0 mod 10 = 0
+
+    // 18: sum = 8 + 1*2 = 8 + 2 = 10 -> valid
+    let d2 = Arr8 { v0: 1, v1: 8, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(luhn_check(d2, 2), 1);
+
+    // 19: sum = 9 + 1*2 = 9 + 2 = 11 -> invalid
+    let d3 = Arr8 { v0: 1, v1: 9, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(luhn_check(d3, 2), 0);
+    1
+}
+
+fn test_checksum8() -> Int {
+    let data = Arr8 { v0: 100, v1: 200, v2: 50, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(checksum8(data, 3), 350 % 256); // 94
+    let data2 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(checksum8(data2, 3), 0);
+    1
+}
+
+fn test_xor_properties() -> Int {
+    // XOR properties
+    assert_eq(xor_val(0, 0), 0);
+    assert_eq(xor_val(255, 255), 0);
+    assert_eq(xor_val(255, 0), 255);
+    // Self-inverse
+    assert_eq(xor_val(xor_val(42, 73), 73), 42);
+    // Commutative
+    assert_eq(xor_val(10, 20), xor_val(20, 10));
+    1
+}
+
+fn test_highest_bit() -> Int {
+    assert_eq(highest_bit(1), 0);
+    assert_eq(highest_bit(2), 1);
+    assert_eq(highest_bit(4), 2);
+    assert_eq(highest_bit(8), 3);
+    assert_eq(highest_bit(15), 3);
+    assert_eq(highest_bit(255), 7);
+    1
+}
+
+fn main() -> Int {
+    test_crc_basic();
+    test_crc_detect_error();
+    test_crc_different_data();
+    test_luhn();
+    test_checksum8();
+    test_xor_properties();
+    test_highest_bit();
+    print("[OK] 637_crc_checksum_aot");
+    0
+}

@@ -1,0 +1,383 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Tests for inline/nested guard patterns (RFC 3637 style)
+//
+// Spec: Rust RFC 3637 - Guard Patterns
+// Grammar: guarded_pattern = and_pattern , [ 'if' , expression ] ;
+//
+// Inline guards allow guards to nest within or-patterns, enabling per-alternative conditions.
+// Unlike arm-level guards which apply to the entire pattern, inline guards are part of the
+// pattern itself and can vary between or-pattern alternatives.
+
+// ============================================================================
+// SECTION 1: Basic Parenthesized Guard Patterns
+// ============================================================================
+
+fn test_basic_parenthesized_guards() {
+    // Simple parenthesized guard pattern
+    match value {
+        (x if x > 0) => positive(x),
+        (x if x < 0) => negative(x),
+        _ => zero()
+    };
+
+    // Guard with complex condition
+    match value {
+        (x if x > 0 && x < 100) => in_range(x),
+        _ => out_of_range()
+    };
+
+    // Guard with function call
+    match text {
+        (s if s.is_empty()) => empty(),
+        (s if !s.is_empty()) => non_empty(s)
+    };
+}
+
+// ============================================================================
+// SECTION 2: Nested Guards in Or-Patterns (RFC 3637 Key Feature)
+// ============================================================================
+
+fn test_nested_guards_in_or() {
+    // Different guards for each alternative - the main RFC 3637 use case
+    match user.plan() {
+        (Plan.Regular if user.credit() >= 100) |
+        (Plan.Premium if user.credit() >= 80) => complete(),
+        _ => insufficient_credit()
+    };
+
+    // Each alternative has its own threshold
+    match score {
+        (x if x >= 90) | (y if y >= 85 && extra_credit) => a_grade(),
+        (x if x >= 80) | (y if y >= 75 && extra_credit) => b_grade(),
+        _ => other_grade()
+    };
+
+    // Mixing guarded and non-guarded alternatives
+    match value {
+        (x if x > 100) | 50 | 25 => special(),
+        _ => normal()
+    };
+}
+
+// ============================================================================
+// SECTION 3: Guards Inside Tuple Patterns
+// ============================================================================
+
+fn test_guards_in_tuples() {
+    // Guard on first element
+    match pair {
+        ((x if x > 0), y) => first_positive(x, y),
+        ((x if x < 0), y) => first_negative(x, y),
+        (_, y) => first_zero(y)
+    };
+
+    // Guard on second element
+    match pair {
+        (x, (y if y > 0)) => second_positive(x, y),
+        (x, (y if y < 0)) => second_negative(x, y),
+        (x, _) => second_zero(x)
+    };
+
+    // Guards on both elements
+    match pair {
+        ((x if x > 0), (y if y > 0)) => both_positive(x, y),
+        ((x if x < 0), (y if y < 0)) => both_negative(x, y),
+        _ => mixed()
+    };
+
+    // Nested tuple with guards
+    match nested {
+        ((a if a > 0, b), (c, d if d > 0)) => corners_positive(a, d),
+        _ => other()
+    };
+}
+
+// ============================================================================
+// SECTION 4: Guards Inside Array/Slice Patterns
+// ============================================================================
+
+fn test_guards_in_arrays() {
+    // Guard on first element
+    match arr {
+        [(first if first > 0), ..] => positive_start(first),
+        [(first if first < 0), ..] => negative_start(first),
+        [_, ..] => zero_start(),
+        [] => empty()
+    };
+
+    // Guard on multiple elements
+    match arr {
+        [(a if a > 0), (b if b > 0), ..] => both_positive(a, b),
+        [(a if a < 0), (b if b < 0), ..] => both_negative(a, b),
+        [_, _, ..] => mixed(),
+        _ => too_short()
+    };
+
+    // Guard on first and last
+    match arr {
+        [(first if first > 0), .., (last if last > 0)] => positive_ends(first, last),
+        [(first if first == last), .., last] => same_ends(first),
+        [first, .., last] => different_ends(first, last),
+        _ => single_or_empty()
+    };
+}
+
+// ============================================================================
+// SECTION 5: Guards Inside Variant Patterns
+// ============================================================================
+
+fn test_guards_in_variants() {
+    // Guard inside Some
+    match option {
+        Some((x if x > 0)) => positive_some(x),
+        Some((x if x < 0)) => negative_some(x),
+        Some(_) => zero_some(),
+        None => none()
+    };
+
+    // Guard inside Ok/Err
+    match result {
+        Ok((v if v.is_valid())) => valid_ok(v),
+        Ok(_) => invalid_ok(),
+        Err((e if e.is_fatal())) => fatal_error(e),
+        Err(e) => recoverable_error(e)
+    };
+
+    // Nested variants with guards
+    match nested {
+        Some(Some((x if x > threshold))) => deep_above(x),
+        Some(Some(x)) => deep_below(x),
+        Some(None) => shallow_none(),
+        None => outer_none()
+    };
+}
+
+// ============================================================================
+// SECTION 6: Guards Inside Record/Struct Patterns
+// ============================================================================
+
+fn test_guards_in_records() {
+    // Guard on field value
+    match point {
+        Point { x: (val if val > 0), y } => positive_x(val, y),
+        Point { x: (val if val < 0), y } => negative_x(val, y),
+        Point { x: 0, y } => zero_x(y)
+    };
+
+    // Guards on multiple fields
+    match point {
+        Point { x: (a if a > 0), y: (b if b > 0) } => first_quadrant(a, b),
+        Point { x: (a if a < 0), y: (b if b > 0) } => second_quadrant(a, b),
+        Point { x: (a if a < 0), y: (b if b < 0) } => third_quadrant(a, b),
+        Point { x: (a if a > 0), y: (b if b < 0) } => fourth_quadrant(a, b),
+        Point { x, y } => on_axis(x, y)
+    };
+
+    // Nested record with guards
+    match config {
+        Config { settings: Settings { timeout: (t if t > 0), .. }, .. }
+            => with_timeout(t),
+        Config { settings: Settings { timeout: 0, .. }, .. }
+            => no_timeout()
+    };
+}
+
+// ============================================================================
+// SECTION 7: Guards with And-Patterns (&)
+// ============================================================================
+
+fn test_guards_with_and_patterns() {
+    // Guard applied to and-pattern
+    match n {
+        (Even() & Positive() if n < 100) => small_positive_even(),
+        Even() & Positive() => large_positive_even(),
+        _ => other()
+    };
+
+    // Guards on individual parts of and-pattern
+    match n {
+        (x if x > 0) & (y if is_prime(y)) => positive_prime(x),
+        _ => not_positive_prime()
+    };
+}
+
+// ============================================================================
+// SECTION 8: Guards with Active Patterns
+// ============================================================================
+
+fn test_guards_with_active_patterns() {
+    // Guard after active pattern
+    match s {
+        (ParseInt()(n) if n > 100) => large_int(n),
+        (ParseInt()(n) if n > 0) => positive_int(n),
+        ParseInt()(n) => non_positive_int(n),
+        _ => not_an_int()
+    };
+
+    // Guard inside active pattern bindings
+    match pair {
+        HeadTail()((head if head > 0, tail)) => positive_head(head, tail),
+        HeadTail()((head, tail)) => other_head(head, tail),
+        _ => empty_list()
+    };
+}
+
+// ============================================================================
+// SECTION 9: Complex Nested Guard Combinations
+// ============================================================================
+
+fn test_complex_nested_guards() {
+    // Multiple levels of nesting
+    match data {
+        Some(((x if x > 0), (y if y > 0))) |
+        Some(((x if x < 0), (y if y < 0)))
+            => same_sign(x, y),
+        Some((x, y))
+            => different_sign(x, y),
+        None
+            => none()
+    };
+
+    // Guards in deeply nested structure
+    match tree {
+        Node {
+            left: Some((l if l.value > 0)),
+            right: Some((r if r.value > 0)),
+            ..
+        } => both_children_positive(),
+        _ => other()
+    };
+
+    // Combining multiple pattern features with guards
+    match response {
+        Response {
+            status: (200..299),
+            body: Some((data if !data.is_empty())),
+            ..
+        } => success_with_data(data),
+        Response {
+            status: (400..499),
+            error: Some((e if e.is_recoverable())),
+            ..
+        } => recoverable_error(e),
+        _ => other_response()
+    };
+}
+
+// ============================================================================
+// SECTION 10: Guards with @ Bindings
+// ============================================================================
+
+fn test_guards_with_at_bindings() {
+    // Guard on @ bound value
+    match option {
+        (whole @ Some(x) if x > 0) => positive_whole(whole, x),
+        (whole @ Some(_)) => non_positive_whole(whole),
+        None => none()
+    };
+
+    // @ binding inside guard pattern
+    match nested {
+        Some((inner @ (a, b) if a + b > 10)) => large_sum(inner),
+        Some((inner @ (a, b))) => small_sum(inner),
+        None => none()
+    };
+}
+
+// ============================================================================
+// SECTION 11: Guards with Range Patterns
+// ============================================================================
+
+fn test_guards_with_ranges() {
+    // Guard combined with range
+    match score {
+        ((x @ 90..=100) if extra_credit) => a_plus(x),
+        (x @ 90..=100) => a_grade(x),
+        ((x @ 80..90) if extra_credit) => a_grade(x),
+        (x @ 80..90) => b_grade(x),
+        x => other_grade(x)
+    };
+}
+
+// ============================================================================
+// SECTION 12: Practical Examples
+// ============================================================================
+
+fn test_practical_examples() {
+    // HTTP request routing with inline guards
+    match request {
+        Request {
+            method: (m if m == "GET" || m == "HEAD"),
+            path: (p if p.starts_with("/api/")),
+            ..
+        } => api_read(p),
+        Request {
+            method: (m if m == "POST" || m == "PUT" || m == "PATCH"),
+            path: (p if p.starts_with("/api/")),
+            authenticated: true,
+            ..
+        } => api_write(m, p),
+        _ => not_found()
+    };
+
+    // Validation with per-field guards
+    match input {
+        UserInput {
+            email: (e if e.contains("@") && e.len() > 5),
+            password: (p if p.len() >= 8),
+            age: (a if a >= 18 && a <= 120),
+        } => valid_adult_user(e, p, a),
+        UserInput {
+            email: (e if e.contains("@")),
+            password: (p if p.len() >= 8),
+            age: (a if a < 18),
+        } => valid_minor_user(e, p, a),
+        _ => invalid_input()
+    };
+
+    // State machine with guarded transitions
+    match (current_state, event) {
+        ((State.Idle if can_start()), Event.Start) => State.Running,
+        ((State.Running if should_pause()), Event.Pause) => State.Paused,
+        ((State.Paused if can_resume()), Event.Resume) => State.Running,
+        (state, _) => state  // No transition
+    };
+}
+
+// ============================================================================
+// SECTION 13: Edge Cases
+// ============================================================================
+
+fn test_edge_cases() {
+    // Guard with just true/false
+    match x {
+        (n if true) => always(n),
+        _ => never()
+    };
+
+    // Empty parentheses around guard pattern
+    match x {
+        ((n if n > 0)) => double_parens(n),
+        _ => other()
+    };
+
+    // Guard in single-element tuple
+    match x {
+        ((n if n > 0),) => single_tuple_guard(n),
+        _ => other()
+    };
+
+    // Very long guard expression
+    match data {
+        (x if a && b && c && d && e && f && g && h) => many_conditions(x),
+        _ => few()
+    };
+
+    // Guard with complex nested expression
+    match value {
+        (x if compute(transform(validate(x))).is_ok()) => valid(x),
+        _ => invalid()
+    };
+}

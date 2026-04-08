@@ -1,0 +1,125 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: error-handling, question-mark, result, maybe
+// @description: Error propagation with ? operator for Result and Maybe types
+
+type Result<T, E> is Ok(T) | Err(E);
+type Maybe<T> is None | Some(T);
+
+fn parse_non_negative(n: Int) -> Result<Int, Text> {
+    if (n >= 0) {
+        Ok(n)
+    } else {
+        Err("negative number")
+    }
+}
+
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if (b == 0) {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn compute(a: Int, b: Int) -> Result<Int, Text> {
+    let x = parse_non_negative(a)?;
+    let y = parse_non_negative(b)?;
+    let result = safe_divide(x, y)?;
+    Ok(result)
+}
+
+fn find_first_positive(items: List<Int>) -> Maybe<Int> {
+    let len = items.len();
+    let mut i = 0;
+    while (i < len) {
+        if (items[i] > 0) {
+            return Some(items[i]);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn lookup_and_double(items: List<Int>) -> Maybe<Int> {
+    let val = find_first_positive(items)?;
+    Some(val * 2)
+}
+
+fn main() -> Int {
+    // Test 1: ? with Result — success path
+    let r1 = compute(10, 2);
+    match r1 {
+        Ok(v) => {
+            if (v != 5) {
+                print(f"FAIL test1: got {v}, expected 5");
+                return 1;
+            }
+        }
+        Err(e) => {
+            print("FAIL test1: should not fail");
+            return 1;
+        }
+    };
+
+    // Test 2: ? with Result — first arg fails
+    let r2 = compute(-1, 2);
+    match r2 {
+        Ok(v) => {
+            print("FAIL test2: should fail");
+            return 1;
+        }
+        Err(e) => {
+            if (e != "negative number") {
+                print(f"FAIL test2: wrong error: {e}");
+                return 1;
+            }
+        }
+    };
+
+    // Test 3: ? with Result — division by zero
+    let r3 = compute(10, 0);
+    match r3 {
+        Ok(v) => {
+            print("FAIL test3: should fail");
+            return 1;
+        }
+        Err(e) => {
+            if (e != "division by zero") {
+                print(f"FAIL test3: wrong error: {e}");
+                return 1;
+            }
+        }
+    };
+
+    // Test 4: ? with Maybe — success
+    let items = [1, -2, 3];
+    let m1 = lookup_and_double(items);
+    match m1 {
+        Some(v) => {
+            if (v != 2) {
+                print(f"FAIL test4: got {v}, expected 2");
+                return 1;
+            }
+        }
+        None => {
+            print("FAIL test4: should find value");
+            return 1;
+        }
+    };
+
+    // Test 5: ? with Maybe — all negative
+    let neg_items = [-1, -2, -3];
+    let m2 = lookup_and_double(neg_items);
+    match m2 {
+        Some(v) => {
+            print("FAIL test5: should be None");
+            return 1;
+        }
+        None => {}
+    };
+
+    print("986_error_propagation: PASS");
+    0
+}

@@ -1,0 +1,309 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, fibonacci, dynamic-programming, memoization
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Fibonacci via naive recursion, memoized DP, and iterative
+
+// =============================================================================
+// Array for memoization (16 elements, indices 0-15)
+// =============================================================================
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr16_new(val: Int) -> Arr16 {
+    Arr16 {
+        a0: val, a1: val, a2: val, a3: val, a4: val, a5: val, a6: val, a7: val,
+        a8: val, a9: val, a10: val, a11: val, a12: val, a13: val, a14: val, a15: val
+    }
+}
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else if i == 15 { a.a15 }
+    else { -1 }
+}
+
+fn arr16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { val } else { a.a0 },
+        a1: if i == 1 { val } else { a.a1 },
+        a2: if i == 2 { val } else { a.a2 },
+        a3: if i == 3 { val } else { a.a3 },
+        a4: if i == 4 { val } else { a.a4 },
+        a5: if i == 5 { val } else { a.a5 },
+        a6: if i == 6 { val } else { a.a6 },
+        a7: if i == 7 { val } else { a.a7 },
+        a8: if i == 8 { val } else { a.a8 },
+        a9: if i == 9 { val } else { a.a9 },
+        a10: if i == 10 { val } else { a.a10 },
+        a11: if i == 11 { val } else { a.a11 },
+        a12: if i == 12 { val } else { a.a12 },
+        a13: if i == 13 { val } else { a.a13 },
+        a14: if i == 14 { val } else { a.a14 },
+        a15: if i == 15 { val } else { a.a15 }
+    }
+}
+
+// =============================================================================
+// Method 1: Naive recursive Fibonacci (only for small n)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn fib_naive(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fib_naive(n - 1) + fib_naive(n - 2)
+    }
+}
+
+// =============================================================================
+// Method 2: Memoized Fibonacci using record array
+// Returns a record with the memo table and the result
+// =============================================================================
+
+type FibMemoResult is { memo: Arr16, val: Int };
+
+@allow(unbounded_recursion)
+fn fib_memo_helper(n: Int, memo: Arr16) -> FibMemoResult {
+    if n <= 0 {
+        FibMemoResult { memo: memo, val: 0 }
+    } else if n == 1 {
+        FibMemoResult { memo: memo, val: 1 }
+    } else {
+        let cached = arr16_get(memo, n);
+        if cached != -1 {
+            FibMemoResult { memo: memo, val: cached }
+        } else {
+            let r1 = fib_memo_helper(n - 1, memo);
+            let r2 = fib_memo_helper(n - 2, r1.memo);
+            let result = r1.val + r2.val;
+            let new_memo = arr16_set(r2.memo, n, result);
+            FibMemoResult { memo: new_memo, val: result }
+        }
+    }
+}
+
+fn fib_memo(n: Int) -> Int {
+    let memo = arr16_new(-1);
+    let r = fib_memo_helper(n, memo);
+    r.val
+}
+
+// =============================================================================
+// Method 3: Iterative bottom-up DP
+// =============================================================================
+
+fn fib_iterative(n: Int) -> Int {
+    if n <= 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    let mut prev2 = 0;
+    let mut prev1 = 1;
+    let mut i = 2;
+    while i <= n {
+        let curr = prev1 + prev2;
+        prev2 = prev1;
+        prev1 = curr;
+        i = i + 1;
+    }
+    prev1
+}
+
+// =============================================================================
+// Method 4: Bottom-up DP filling an array (stores all values)
+// =============================================================================
+
+fn fib_table(n: Int) -> Arr16 {
+    let mut dp = arr16_new(0);
+    if n >= 1 {
+        dp = arr16_set(dp, 1, 1);
+    }
+    let mut i = 2;
+    while i <= n {
+        let val = arr16_get(dp, i - 1) + arr16_get(dp, i - 2);
+        dp = arr16_set(dp, i, val);
+        i = i + 1;
+    }
+    dp
+}
+
+// =============================================================================
+// Tests — Correctness of each method
+// =============================================================================
+
+fn test_naive_small() {
+    assert_eq(fib_naive(0), 0);
+    assert_eq(fib_naive(1), 1);
+    assert_eq(fib_naive(2), 1);
+    assert_eq(fib_naive(3), 2);
+    assert_eq(fib_naive(4), 3);
+    assert_eq(fib_naive(5), 5);
+    assert_eq(fib_naive(6), 8);
+    assert_eq(fib_naive(7), 13);
+    assert_eq(fib_naive(8), 21);
+    assert_eq(fib_naive(10), 55);
+}
+
+fn test_memo() {
+    assert_eq(fib_memo(0), 0);
+    assert_eq(fib_memo(1), 1);
+    assert_eq(fib_memo(2), 1);
+    assert_eq(fib_memo(5), 5);
+    assert_eq(fib_memo(10), 55);
+    assert_eq(fib_memo(15), 610);
+}
+
+fn test_iterative() {
+    assert_eq(fib_iterative(0), 0);
+    assert_eq(fib_iterative(1), 1);
+    assert_eq(fib_iterative(2), 1);
+    assert_eq(fib_iterative(5), 5);
+    assert_eq(fib_iterative(10), 55);
+    assert_eq(fib_iterative(15), 610);
+    assert_eq(fib_iterative(20), 6765);
+}
+
+fn test_table() {
+    let dp = fib_table(15);
+    assert_eq(arr16_get(dp, 0), 0);
+    assert_eq(arr16_get(dp, 1), 1);
+    assert_eq(arr16_get(dp, 2), 1);
+    assert_eq(arr16_get(dp, 3), 2);
+    assert_eq(arr16_get(dp, 4), 3);
+    assert_eq(arr16_get(dp, 5), 5);
+    assert_eq(arr16_get(dp, 10), 55);
+    assert_eq(arr16_get(dp, 15), 610);
+}
+
+// =============================================================================
+// Tests — Cross-method comparison
+// =============================================================================
+
+fn test_all_methods_agree() {
+    let mut n = 0;
+    while n <= 10 {
+        let naive = fib_naive(n);
+        let memo = fib_memo(n);
+        let iter = fib_iterative(n);
+        assert_eq(naive, memo);
+        assert_eq(memo, iter);
+        n = n + 1;
+    }
+}
+
+fn test_memo_equals_iterative_large() {
+    // For larger values, skip naive (too slow) but compare memo vs iterative
+    assert_eq(fib_memo(12), fib_iterative(12));
+    assert_eq(fib_memo(13), fib_iterative(13));
+    assert_eq(fib_memo(14), fib_iterative(14));
+    assert_eq(fib_memo(15), fib_iterative(15));
+}
+
+// =============================================================================
+// Tests — Fibonacci properties
+// =============================================================================
+
+fn test_fibonacci_sum_property() {
+    // fib(0) + fib(1) + ... + fib(n) = fib(n+2) - 1
+    let mut total = 0;
+    let mut i = 0;
+    while i <= 10 {
+        total = total + fib_iterative(i);
+        i = i + 1;
+    }
+    assert_eq(total, fib_iterative(12) - 1);
+}
+
+fn test_fibonacci_adjacent_gcd() {
+    // Consecutive Fibonacci numbers are coprime: gcd(fib(n), fib(n+1)) = 1
+    let mut i = 1;
+    while i <= 14 {
+        let a = fib_iterative(i);
+        let b = fib_iterative(i + 1);
+        // Compute gcd
+        let mut x = a;
+        let mut y = b;
+        while y != 0 {
+            let tmp = y;
+            y = x % y;
+            x = tmp;
+        }
+        assert_eq(x, 1);
+        i = i + 1;
+    }
+}
+
+fn test_fibonacci_identity() {
+    // Cassini's identity: fib(n-1)*fib(n+1) - fib(n)^2 = (-1)^n
+    let mut n = 2;
+    while n <= 12 {
+        let fm1 = fib_iterative(n - 1);
+        let f = fib_iterative(n);
+        let fp1 = fib_iterative(n + 1);
+        let cassini = fm1 * fp1 - f * f;
+        // (-1)^n: 1 if even, -1 if odd
+        let expected = if n % 2 == 0 { 1 } else { -1 };
+        assert_eq(cassini, expected);
+        n = n + 1;
+    }
+}
+
+fn test_fibonacci_known_values() {
+    assert_eq(fib_iterative(0), 0);
+    assert_eq(fib_iterative(1), 1);
+    assert_eq(fib_iterative(2), 1);
+    assert_eq(fib_iterative(3), 2);
+    assert_eq(fib_iterative(4), 3);
+    assert_eq(fib_iterative(5), 5);
+    assert_eq(fib_iterative(6), 8);
+    assert_eq(fib_iterative(7), 13);
+    assert_eq(fib_iterative(8), 21);
+    assert_eq(fib_iterative(9), 34);
+    assert_eq(fib_iterative(10), 55);
+    assert_eq(fib_iterative(11), 89);
+    assert_eq(fib_iterative(12), 144);
+    assert_eq(fib_iterative(13), 233);
+    assert_eq(fib_iterative(14), 377);
+    assert_eq(fib_iterative(15), 610);
+}
+
+fn main() -> Int {
+    test_naive_small();
+    test_memo();
+    test_iterative();
+    test_table();
+    test_all_methods_agree();
+    test_memo_equals_iterative_large();
+    test_fibonacci_sum_property();
+    test_fibonacci_adjacent_gcd();
+    test_fibonacci_identity();
+    test_fibonacci_known_values();
+    print("[OK] 247_interp_fibonacci_dp");
+    0
+}

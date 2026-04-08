@@ -1,0 +1,104 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: generator, for-loop, fn-star
+// @description: for-in loops over generator function (fn*) calls
+
+fn* count_up(limit: Int) -> Int {
+    let mut i = 0;
+    while (i < limit) {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn* fibonacci(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut count = 0;
+    while (count < n) {
+        yield a;
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        count = count + 1;
+    }
+}
+
+fn* evens(limit: Int) -> Int {
+    let mut i = 0;
+    while (i < limit) {
+        yield i * 2;
+        i = i + 1;
+    }
+}
+
+fn main() -> Int {
+    let mut passed = 0;
+    let mut failed = 0;
+
+    // Test 1: Basic for-in over generator
+    let mut sum = 0;
+    for v in count_up(5) {
+        sum = sum + v;
+    }
+    if (sum == 10) { passed = passed + 1; }
+    else { print(f"FAIL test1: sum={sum}"); failed = failed + 1; }
+
+    // Test 2: for-in over fibonacci generator
+    let mut fib_sum = 0;
+    for v in fibonacci(7) {
+        fib_sum = fib_sum + v;
+    }
+    // fib(7): 0,1,1,2,3,5,8 = 20
+    if (fib_sum == 20) { passed = passed + 1; }
+    else { print(f"FAIL test2: fib_sum={fib_sum}"); failed = failed + 1; }
+
+    // Test 3: Collecting generator values into a list
+    let mut vals = List.new();
+    for v in count_up(4) {
+        vals.push(v);
+    }
+    if (vals.len() == 4) { passed = passed + 1; }
+    else { print(f"FAIL test3: len={vals.len()}"); failed = failed + 1; }
+
+    // Test 4: Nested generators
+    let mut total = 0;
+    for i in count_up(3) {
+        for j in evens(3) {
+            total = total + i + j;
+        }
+    }
+    // i=0: j=0,2,4 -> 0+0+2+4=6. i=1: j=0,2,4 -> 1+3+5=9. i=2: j=0,2,4 -> 2+4+6=12. Total=27
+    if (total == 27) { passed = passed + 1; }
+    else { print(f"FAIL test4: total={total}"); failed = failed + 1; }
+
+    // Test 5: Generator with early break
+    let mut first_fib_above_10 = 0;
+    for v in fibonacci(20) {
+        if (v > 10) {
+            first_fib_above_10 = v;
+            break;
+        }
+    }
+    if (first_fib_above_10 == 13) { passed = passed + 1; }
+    else { print(f"FAIL test5: first_fib_above_10={first_fib_above_10}"); failed = failed + 1; }
+
+    // Test 6: Generator result used in expression
+    let mut product = 1;
+    for v in count_up(5) {
+        if (v > 0) {
+            product = product * v;
+        }
+    }
+    // 1*2*3*4 = 24
+    if (product == 24) { passed = passed + 1; }
+    else { print(f"FAIL test6: product={product}"); failed = failed + 1; }
+
+    if (failed > 0) {
+        print(f"1006_generator_for_loop: {passed}/{passed + failed} passed");
+        return 1;
+    }
+    print(f"1006_generator_for_loop: PASS ({passed}/{passed} tests)");
+    0
+}

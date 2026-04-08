@@ -1,0 +1,19 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, set, errors
+// @expected-error: Type mismatch
+// @description: Test set operations with invalid types produce errors
+
+// =============================================================================
+// TYPE MISMATCH ERRORS
+// =============================================================================
+
+// set_len with non-set argument
+meta fn test_set_len_type_error() -> Int {
+    set_len("not a set")  // ERROR: Expected Set, got Text
+}
+
+fn main() {
+    let _ = @const(test_set_len_type_error());
+}

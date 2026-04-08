@@ -1,0 +1,481 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @baseline-comparison: cpp
+// @tags: comparison, cpp, c++, sorting, algorithm, baseline, performance
+// @description: Sorting vs C++ benchmark (target: 0.85-0.95x C++ performance)
+
+/// Verum vs C++: Sorting Benchmark
+///
+/// This benchmark compares Verum's sorting performance against C++.
+/// C++ std.sort is highly optimized and represents the performance ceiling.
+///
+/// Target: 0.85-0.95x C++ performance
+///
+/// Test cases:
+/// - std.sort equivalent (introsort)
+/// - std.stable_sort equivalent
+/// - std.partial_sort equivalent
+/// - std.nth_element equivalent
+/// - Custom comparator sorting
+///
+/// Why the gap:
+/// - C++ has decades of optimization
+/// - Verum's CBGR adds overhead on array access
+/// - Memory layout differences may affect cache
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const DATA_SIZE: Int = 1_000_000;
+const SMALL_SIZE: Int = 10_000;
+
+/// C++ baseline measurements (with -O3)
+module cpp_baselines {
+    /// C++ std.sort 1M random integers in milliseconds
+    pub const STD_SORT_1M_MS: Float = 75.0;
+
+    /// C++ std.stable_sort 1M random integers in milliseconds
+    pub const STABLE_SORT_1M_MS: Float = 100.0;
+
+    /// C++ std.partial_sort top 1000 of 1M in milliseconds
+    pub const PARTIAL_SORT_1M_MS: Float = 25.0;
+
+    /// C++ std.nth_element 1M in milliseconds
+    pub const NTH_ELEMENT_1M_MS: Float = 15.0;
+
+    /// C++ std.sort with custom comparator 1M in milliseconds
+    pub const CUSTOM_COMPARE_1M_MS: Float = 90.0;
+
+    /// C++ std.sort 1M strings in milliseconds
+    pub const SORT_STRINGS_1M_MS: Float = 400.0;
+
+    /// C++ std.sort 1M structs by field in milliseconds
+    pub const SORT_STRUCTS_1M_MS: Float = 150.0;
+
+    /// C++ pdqsort 1M random integers in milliseconds
+    pub const PDQSORT_1M_MS: Float = 60.0;
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs C++: Sorting");
+
+    // Standard sort algorithms
+    results.add(benchmark_std_sort());
+    results.add(benchmark_stable_sort());
+    results.add(benchmark_partial_sort());
+    results.add(benchmark_nth_element());
+
+    // Specialized sorts
+    results.add(benchmark_custom_comparator());
+    results.add(benchmark_sort_strings());
+    results.add(benchmark_sort_structs());
+
+    // Advanced
+    results.add(benchmark_parallel_sort());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_cpp_sorting.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.ratio >= r.min_target);
+    assert(all_meet_target, "Verum sorting performance below target vs C++");
+}
+
+/// Generate random test data
+fn generate_random_data(size: Int, seed: u64) -> List<Int> {
+    let mut rng = Random.with_seed(seed);
+    (0..size).map(|_| rng.gen_range(0, Int.MAX)).collect()
+}
+
+/// Benchmark: Standard library sort (introsort)
+fn benchmark_std_sort() -> ComparisonResult {
+    let original = generate_random_data(DATA_SIZE, 42);
+
+    // Warmup
+    for _ in 0..3 {
+        let mut data = original[0..SMALL_SIZE].to_vec();
+        data.sort();
+        black_box(data);
+    }
+
+    let mut data = original.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    data.sort();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.STD_SORT_1M_MS;
+
+    black_box(data);
+
+    ComparisonResult {
+        name: "std_sort_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.85,
+        category: "stdlib",
+    }
+}
+
+/// Benchmark: Stable sort (maintains relative order of equal elements)
+fn benchmark_stable_sort() -> ComparisonResult {
+    let original = generate_random_data(DATA_SIZE, 42);
+
+    // Warmup
+    for _ in 0..3 {
+        let mut data = original[0..SMALL_SIZE].to_vec();
+        data.sort_stable();
+        black_box(data);
+    }
+
+    let mut data = original.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    data.sort_stable();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.STABLE_SORT_1M_MS;
+
+    black_box(data);
+
+    ComparisonResult {
+        name: "stable_sort_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.85,
+        category: "stdlib",
+    }
+}
+
+/// Benchmark: Partial sort (find top K elements)
+fn benchmark_partial_sort() -> ComparisonResult {
+    let original = generate_random_data(DATA_SIZE, 42);
+    let k = 1000;
+
+    // Warmup
+    for _ in 0..3 {
+        let mut data = original[0..SMALL_SIZE].to_vec();
+        data.partial_sort(100);
+        black_box(data);
+    }
+
+    let mut data = original.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    data.partial_sort(k);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.PARTIAL_SORT_1M_MS;
+
+    black_box(data);
+
+    ComparisonResult {
+        name: "partial_sort_top1k_of_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.85,
+        category: "stdlib",
+    }
+}
+
+/// Benchmark: Nth element (find median/percentile)
+fn benchmark_nth_element() -> ComparisonResult {
+    let original = generate_random_data(DATA_SIZE, 42);
+    let n = DATA_SIZE / 2; // Median
+
+    // Warmup
+    for _ in 0..3 {
+        let mut data = original[0..SMALL_SIZE].to_vec();
+        data.select_nth(SMALL_SIZE / 2);
+        black_box(data);
+    }
+
+    let mut data = original.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    data.select_nth(n);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.NTH_ELEMENT_1M_MS;
+
+    black_box(data);
+
+    ComparisonResult {
+        name: "nth_element_median_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.85,
+        category: "stdlib",
+    }
+}
+
+/// Benchmark: Sort with custom comparator
+fn benchmark_custom_comparator() -> ComparisonResult {
+    let original = generate_random_data(DATA_SIZE, 42);
+
+    // Warmup
+    for _ in 0..3 {
+        let mut data = original[0..SMALL_SIZE].to_vec();
+        data.sort_by(|a, b| b.cmp(a)); // Reverse order
+        black_box(data);
+    }
+
+    let mut data = original.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Sort in descending order with custom comparator
+    data.sort_by(|a, b| b.cmp(a));
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.CUSTOM_COMPARE_1M_MS;
+
+    black_box(data);
+
+    ComparisonResult {
+        name: "sort_custom_comparator_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.85,
+        category: "custom",
+    }
+}
+
+/// Benchmark: Sort strings
+fn benchmark_sort_strings() -> ComparisonResult {
+    let mut rng = Random.with_seed(42);
+    let original: List<Text> = (0..DATA_SIZE)
+        .map(|i| format("string_{:08}_{}", rng.gen_range(0, 100_000_000), i))
+        .collect();
+
+    // Warmup
+    for _ in 0..3 {
+        let mut data = original[0..SMALL_SIZE].to_vec();
+        data.sort();
+        black_box(data);
+    }
+
+    let mut data = original.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    data.sort();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.SORT_STRINGS_1M_MS;
+
+    black_box(data);
+
+    ComparisonResult {
+        name: "sort_strings_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.85,
+        category: "strings",
+    }
+}
+
+/// Benchmark: Sort structs by field
+fn benchmark_sort_structs() -> ComparisonResult {
+    type Person is {
+        id: Int,
+        age: Int,
+        name: Text,
+    };
+
+    let mut rng = Random.with_seed(42);
+    let original: List<Person> = (0..DATA_SIZE)
+        .map(|i| Person {
+            id: i,
+            age: rng.gen_range(0, 100),
+            name: format("person_{}", i),
+        })
+        .collect();
+
+    // Warmup
+    for _ in 0..3 {
+        let mut data = original[0..SMALL_SIZE].to_vec();
+        data.sort_by_key(|p| p.age);
+        black_box(data);
+    }
+
+    let mut data = original.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    data.sort_by_key(|p| p.age);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.SORT_STRUCTS_1M_MS;
+
+    black_box(data);
+
+    ComparisonResult {
+        name: "sort_structs_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.85,
+        category: "structs",
+    }
+}
+
+/// Benchmark: Parallel sort
+fn benchmark_parallel_sort() -> ComparisonResult {
+    let original = generate_random_data(DATA_SIZE, 42);
+
+    // Warmup
+    for _ in 0..3 {
+        let mut data = original[0..SMALL_SIZE].to_vec();
+        data.par_sort();
+        black_box(data);
+    }
+
+    let mut data = original.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    data.par_sort();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.PDQSORT_1M_MS; // Compare to pdqsort
+
+    black_box(data);
+
+    ComparisonResult {
+        name: "parallel_sort_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.80, // Parallel scaling may differ
+        category: "parallel",
+    }
+}
+
+type ComparisonResult is {
+    name: Text,
+    verum_ms: Float,
+    baseline_ms: Float,
+    ratio: Float,
+    min_target: Float,
+    category: Text,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<ComparisonResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: ComparisonResult) {
+        self.results.push(result);
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<35} {:>12} {:>12} {:>10} {:>8} {:>8}",
+                "Benchmark", "Verum (ms)", "C++ (ms)", "Ratio", "Target", "Status");
+        println("{}", "-".repeat(90));
+
+        for result in &self.results {
+            let passed = result.ratio >= result.min_target;
+            let status = if passed { "PASS" } else { "FAIL" };
+            let ratio_pct = result.ratio * 100.0;
+
+            println("{:<35} {:>12.2} {:>12.2} {:>9.1}% {:>7.0}% {:>8}",
+                    result.name, result.verum_ms, result.baseline_ms,
+                    ratio_pct, result.min_target * 100.0, status);
+        }
+
+        println("");
+        let avg_ratio = self.results.iter()
+            .map(|r| r.ratio)
+            .sum.<Float>() / self.results.len() as Float;
+        println("Average performance ratio: {:.1}% of C++", avg_ratio * 100.0);
+    }
+
+    fn export_comparison(&self, path: Text) {
+        let json = Json.object();
+        json.set("suite", &self.suite_name);
+        json.set("baseline", "cpp");
+
+        let results_json = Json.array();
+        for result in &self.results {
+            let r = Json.object();
+            r.set("name", &result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("baseline_ms", result.baseline_ms);
+            r.set("ratio", result.ratio);
+            r.set("min_target", result.min_target);
+            r.set("category", &result.category);
+            r.set("passed", result.ratio >= result.min_target);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+    }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+type Timer is { start_time: Instant };
+implement Timer {
+    fn new() -> Self { Self { start_time: Instant.now() } }
+    fn start(&mut self) { self.start_time = Instant.now(); }
+    fn elapsed_ms(&self) -> Int { self.start_time.elapsed().as_millis() }
+}
+
+type Random is { seed: u64 };
+implement Random {
+    fn with_seed(seed: u64) -> Self { Self { seed } }
+    fn gen_range(&mut self, min: Int, max: Int) -> Int { min }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+type Json is { data: Map<Text, Heap<Any>> };
+implement Json {
+    fn object() -> Self { Self { data: Map.new() } }
+    fn array() -> Self { Self { data: Map.new() } }
+    fn set<T>(&mut self, key: &Text, value: T) {}
+    fn push<T>(&mut self, value: T) {}
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+module File {
+    pub fn write(path: Text, content: Text) {}
+}

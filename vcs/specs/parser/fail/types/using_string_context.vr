@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, context, literal, error
+// @description: Test detection of string literal as context
+// @expected-error: E039
+
+// Context must be a type name, not a string
+type Callback is fn() using ["Database"];

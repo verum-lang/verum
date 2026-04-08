@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: mmio, register, access-mode, systems
+// @timeout: 5000
+// @description: Verify Register type with different access modes compiles correctly.
+
+mount sys.mmio;
+
+/// Test ReadOnly register - can only read.
+fn test_readonly_register() {
+    let status_reg: Register<UInt32, ReadOnly> = Register.at(0x4000_0000);
+
+    // Should compile: read operation
+    let status = status_reg.read();
+
+    // Note: write operation should NOT compile (verified in separate typecheck-fail test)
+}
+
+/// Test WriteOnly register - can only write.
+fn test_writeonly_register() {
+    let cmd_reg: Register<UInt32, WriteOnly> = Register.at(0x4000_0004);
+
+    // Should compile: write operation
+    cmd_reg.write(0x0001);
+
+    // Note: read operation should NOT compile (verified in separate typecheck-fail test)
+}
+
+/// Test ReadWrite register - can read and write.
+fn test_readwrite_register() {
+    let config_reg: Register<UInt32, ReadWrite> = Register.at(0x4000_0008);
+
+    // Should compile: both operations
+    let current = config_reg.read();
+    config_reg.write(current | 0x0001);
+
+    // Modify operation
+    config_reg.modify(|v| v | 0x0002);
+}
+
+/// Test WriteOneToClear register - read and write-1-to-clear.
+fn test_write_one_to_clear() {
+    let int_status: Register<UInt32, WriteOneToClear> = Register.at(0x4000_000C);
+
+    // Read to check which interrupts are pending
+    let pending = int_status.read();
+
+    // Write 1 to clear specific bits
+    int_status.clear(0x0001);
+
+    // Clear all pending interrupts
+    int_status.clear_all();
+}
+
+/// Test WriteOneToSet register - read and write-1-to-set.
+fn test_write_one_to_set() {
+    let int_enable: Register<UInt32, WriteOneToSet> = Register.at(0x4000_0010);
+
+    // Read current state
+    let enabled = int_enable.read();
+
+    // Write 1 to enable specific interrupts
+    int_enable.set(0x0001);
+}
+
+fn main() -> Int {
+    test_readonly_register();
+    test_writeonly_register();
+    test_readwrite_register();
+    test_write_one_to_clear();
+    test_write_one_to_set();
+    0
+}

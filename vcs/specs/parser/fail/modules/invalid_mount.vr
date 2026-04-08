@@ -1,0 +1,7 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, modules, mount, error
+// @description: Test invalid mount statement without path
+// @expected-error: E063
+
+mount;

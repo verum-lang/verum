@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, refinement, brackets, error
+// @description: Test detection of unclosed refinement type
+// @expected-error: E018
+
+// Refinement type missing closing brace
+type PositiveInt is Int { value: value > 0;

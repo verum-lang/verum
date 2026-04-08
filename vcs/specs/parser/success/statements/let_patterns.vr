@@ -1,0 +1,343 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for let statements with pattern destructuring
+
+// =============================================================================
+// Grammar Reference:
+// let_stmt = 'let' , pattern , [ ':' , type_expr ] , [ '=' , expression ] , ';' ;
+// pattern = or_pattern ;
+// or_pattern = and_pattern , { '|' , and_pattern } ;
+// and_pattern = primary_pattern , { '&' , primary_pattern } ;
+// =============================================================================
+
+fn test_tuple_destructuring() {
+    // Simple tuple
+    let (a, b) = pair;
+    let (x, y, z) = triple;
+    let (first, second, third, fourth) = quad;
+
+    // With types
+    let (a, b): (Int, Int) = (1, 2);
+    let (x, y, z): (Int, Text, Bool) = (1, "two", true);
+
+    // Mutable bindings
+    let (mut a, b) = pair;
+    let (a, mut b) = pair;
+    let (mut a, mut b) = pair;
+
+    // Nested tuples
+    let ((a, b), c) = nested;
+    let (a, (b, c)) = nested;
+    let ((a, b), (c, d)) = deeply_nested;
+    let (((a, b), c), d) = very_nested;
+
+    // Single element tuple
+    let (single,) = one_tuple;
+
+    // Ignoring elements
+    let (a, _) = pair;
+    let (_, b) = pair;
+    let (_, _, c) = triple;
+    let (a, _, c) = triple;
+
+    // Empty tuple (unit)
+    let () = unit_value;
+}
+
+fn test_record_destructuring() {
+    // Simple record
+    let Point { x, y } = point;
+    let Person { name, age } = person;
+    let Config { host, port, timeout } = config;
+
+    // With field renaming
+    let Point { x: px, y: py } = point;
+    let Person { name: person_name, age: person_age } = person;
+
+    // Partial destructuring with rest
+    let Person { name, .. } = person;
+    let Config { host, .. } = config;
+    let Point { x, .. } = point;
+
+    // Mixed rename and shorthand
+    let Person { name, age: years, .. } = person;
+
+    // Nested record destructuring
+    let Rectangle { origin: Point { x, y }, size } = rect;
+    let Response { data: User { name, email }, status } = response;
+
+    // Mutable field bindings
+    let Point { mut x, y } = point;
+    let Point { x, mut y } = point;
+    let Point { mut x, mut y } = point;
+
+    // With type annotation
+    let Point { x, y }: Point = create_point();
+}
+
+fn test_array_destructuring() {
+    // Fixed size arrays
+    let [a, b] = arr2;
+    let [a, b, c] = arr3;
+    let [a, b, c, d, e] = arr5;
+
+    // With type
+    let [a, b, c]: [Int; 3] = [1, 2, 3];
+
+    // Ignoring elements
+    let [a, _] = arr2;
+    let [_, b] = arr2;
+    let [a, _, c] = arr3;
+    let [_, _, c] = arr3;
+
+    // Mutable bindings
+    let [mut a, b] = arr2;
+    let [a, mut b] = arr2;
+    let [mut a, mut b] = arr2;
+
+    // Nested array patterns
+    let [[a, b], [c, d]] = arr2x2;
+    let [[[a]]] = deep_arr;
+}
+
+fn test_slice_destructuring() {
+    // Head and tail pattern
+    let [first, ..rest] = slice;
+    let [a, b, ..rest] = slice;
+    let [a, b, c, ..rest] = slice;
+
+    // Last elements
+    let [..init, last] = slice;
+    let [..init, second_last, last] = slice;
+
+    // Both ends
+    let [first, ..middle, last] = slice;
+    let [a, b, ..middle, y, z] = slice;
+
+    // Just the rest
+    let [..all] = slice;
+
+    // With nested patterns
+    let [(a, b), ..rest] = slice_of_tuples;
+    let [Point { x, y }, ..rest] = slice_of_points;
+}
+
+fn test_variant_destructuring() {
+    // Simple variant (assuming Some/None from Maybe type)
+    let Some(value) = maybe_value;
+    let Ok(data) = result_value;
+    let Err(error) = error_value;
+
+    // Unit variant (no data)
+    let None = empty_maybe;
+
+    // Tuple variant with multiple fields
+    let Position(x, y, z) = pos;
+    let Color(r, g, b, a) = color;
+
+    // Record variant
+    let Error { code, message } = err;
+    let Response { status, body, headers } = resp;
+
+    // Nested variant destructuring
+    let Some(Ok(value)) = nested_result;
+    let Ok(Some(data)) = result_of_maybe;
+    let Some((a, b)) = maybe_pair;
+    let Ok(Point { x, y }) = result_point;
+
+    // Variant patterns
+    let Ok(value) = typed_result;
+
+    // With mutable binding
+    let Some(mut value) = maybe_value;
+    let Ok(mut data) = result_value;
+}
+
+fn test_reference_patterns() {
+    // Reference pattern
+    let &value = ref_value;
+    let &mut value = mut_ref_value;
+
+    // With inner patterns
+    let &(a, b) = ref_tuple;
+    let &Point { x, y } = ref_point;
+    let &[a, b, c] = ref_array;
+
+    // Nested reference patterns
+    let &(&value) = double_ref;
+    let &mut (&value) = ref_to_ref;
+
+    // Binding by reference
+    let ref x = value;
+    let ref mut y = mut_value;
+
+    // Ref pattern with other patterns
+    let (ref a, ref b) = pair;
+    let Point { ref x, ref y } = point;
+}
+
+fn test_literal_patterns() {
+    // Integer literals
+    let 0 = zero_val;
+    let 42 = answer;
+
+    // Boolean literals
+    let true = bool_val;
+    let false = other_bool;
+
+    // Character literals
+    let 'a' = char_val;
+
+    // These would typically be in match, but grammar allows in let
+    // (would fail at runtime if value doesn't match)
+}
+
+fn test_range_patterns() {
+    // Inclusive range
+    let 0..=10 = small_num;
+
+    // Exclusive range
+    let 0..100 = percentage;
+
+    // Character ranges
+    let 'a'..='z' = lowercase;
+}
+
+fn test_or_patterns() {
+    // Simple or pattern
+    let Some(x) | None = maybe_opt;
+
+    // Multiple alternatives
+    let Ok(x) | Err(x) = result;
+
+    // Or pattern with same bindings
+    let Some(Point { x, y }) | Some(Point { x, y }) = maybe_point;
+}
+
+fn test_and_patterns() {
+    // And pattern combining patterns
+    let x @ 0..=100 = bounded_value;
+
+    // Binding while destructuring
+    let whole @ (a, b) = pair;
+    let full @ Point { x, y } = point;
+    let opt @ Some(inner) = maybe_value;
+
+    // Multiple at-bindings
+    let outer @ (inner1 @ a, inner2 @ b) = nested;
+}
+
+fn test_type_test_patterns() {
+    // Type test pattern (is pattern)
+    let x is Int = unknown_value;
+    let s is Text = dynamic_value;
+    let u is User = any_value;
+}
+
+fn test_wildcard_patterns() {
+    // Simple wildcard
+    let _ = ignored_value;
+
+    // Wildcard with type
+    let _: Int = computed_int();
+
+    // Multiple wildcards
+    let (_, _, _) = triple;
+    let Point { x: _, y: _ } = point;
+}
+
+fn test_rest_patterns() {
+    // In tuples (if supported)
+    let (.., last) = many_values;
+    let (first, ..) = many_values;
+    let (first, .., last) = many_values;
+
+    // In records
+    let Point { x, .. } = point;
+    let Config { host, port, .. } = config;
+}
+
+fn test_complex_nested_patterns() {
+    // Deeply nested destructuring
+    let Response {
+        status,
+        body: Body {
+            data: Some(User { name, profile: Profile { bio, .. } }),
+            ..
+        },
+        ..
+    } = api_response;
+
+    // Mixed tuple and record
+    let (
+        Point { x: x1, y: y1 },
+        Point { x: x2, y: y2 },
+    ) = line_segment;
+
+    // Array of records
+    let [
+        Person { name: n1, .. },
+        Person { name: n2, .. },
+        ..rest
+    ] = people;
+
+    // Variant with complex inner
+    let Some(Ok((
+        Config { host, port },
+        Credentials { user, pass },
+    ))) = maybe_connection_info;
+
+    // Triple nesting
+    let Some(Some(Some(value))) = triply_wrapped;
+    let Ok(Ok(Ok(data))) = nested_results;
+}
+
+fn test_pattern_with_guards_setup() {
+    // Patterns that would typically be used with guards in match
+    // Here just setting up the bindings
+
+    let Point { x, y } = point;
+    // guard would be: if x > 0 && y > 0
+
+    let Some(value) = maybe;
+    // guard would be: if value > threshold
+
+    let (a, b) = pair;
+    // guard would be: if a != b
+}
+
+fn test_mutable_patterns() {
+    // Various mutable pattern combinations
+    let (mut a, mut b, mut c) = triple;
+    let Point { mut x, mut y } = point;
+    let [mut first, mut second, ..rest] = array;
+    let Some(mut value) = maybe;
+    let Ok(mut data) = result;
+
+    // Mutable with ref
+    let ref mut x = value;
+    let (ref mut a, ref mut b) = pair;
+}
+
+fn test_stream_patterns() {
+    // Stream pattern destructuring
+    let stream[first, second, ...rest] = data_stream;
+    let stream[head, ...tail] = stream_value;
+    let stream[a, b, c, ...remaining] = input_stream;
+    let stream[] = empty_stream;
+    let stream[...all] = entire_stream;
+}
+
+fn test_active_patterns() {
+    // Active pattern invocation
+    let Even() = even_number;
+    let Positive() = positive_value;
+    let InRange(0, 100)() = percentage;
+
+    // Combined with binding
+    let n @ Even() = even_num;
+
+    // Combined with and-pattern
+    let Even() & Positive() = positive_even;
+}

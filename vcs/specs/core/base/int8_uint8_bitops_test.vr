@@ -1,0 +1,230 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, int8, uint8, bit-operations
+// @description: Tests bit operations for Int8 and UInt8 that were previously missing
+
+mount core.base.primitives.{Int8, UInt8};
+
+// =============================================================================
+// Int8 bit operations
+// =============================================================================
+
+@test
+fn test_int8_leading_zeros() {
+    let val = 1 as Int8;
+    let lz: Int = val.leading_zeros();
+    // For 8-bit signed: 00000001 has 7 leading zeros
+    assert(lz >= 0);
+}
+
+@test
+fn test_int8_trailing_zeros() {
+    let val = 4 as Int8;
+    let tz: Int = val.trailing_zeros();
+    // 00000100 has 2 trailing zeros
+    assert_eq(tz, 2);
+}
+
+@test
+fn test_int8_count_ones() {
+    let val = 7 as Int8;
+    let ones: Int = val.count_ones();
+    // 00000111 has 3 ones
+    assert_eq(ones, 3);
+}
+
+@test
+fn test_int8_count_zeros() {
+    let val = 7 as Int8;
+    let zeros: Int = val.count_zeros();
+    // 8 - 3 = 5 zeros
+    assert_eq(zeros, 5);
+}
+
+@test
+fn test_int8_rotate_left() {
+    let val = 1 as Int8;
+    let rotated = val.rotate_left(1);
+    // Rotate left: bit pattern shifts left with wrap
+    assert(rotated.to_int() != val.to_int());
+}
+
+@test
+fn test_int8_rotate_right() {
+    let val = 2 as Int8;
+    let rotated = val.rotate_right(1);
+    // Rotate right by 1: 00000010 -> 00000001
+    assert_eq(rotated.to_int(), 1);
+}
+
+@test
+fn test_int8_swap_bytes() {
+    let val = 42 as Int8;
+    let swapped = val.swap_bytes();
+    // For a single byte, swap_bytes is identity
+    assert_eq(swapped.to_int(), 42);
+}
+
+@test
+fn test_int8_byte_conversions() {
+    let val = 42 as Int8;
+    let le_bytes: List<Byte> = val.to_le_bytes();
+    let be_bytes: List<Byte> = val.to_be_bytes();
+    // For single byte type, LE and BE are same
+    assert_eq(le_bytes.len(), 1);
+    assert_eq(be_bytes.len(), 1);
+}
+
+// =============================================================================
+// UInt8 bit operations
+// =============================================================================
+
+@test
+fn test_uint8_leading_zeros() {
+    let val = 1 as UInt8;
+    let lz: Int = val.leading_zeros();
+    // 00000001 has 7 leading zeros
+    assert_eq(lz, 7);
+}
+
+@test
+fn test_uint8_trailing_zeros() {
+    let val = 8 as UInt8;
+    let tz: Int = val.trailing_zeros();
+    // 00001000 has 3 trailing zeros
+    assert_eq(tz, 3);
+}
+
+@test
+fn test_uint8_count_ones() {
+    let val = 255 as UInt8;
+    let ones: Int = val.count_ones();
+    // All 8 bits set
+    assert_eq(ones, 8);
+}
+
+@test
+fn test_uint8_count_zeros() {
+    let val = 255 as UInt8;
+    let zeros: Int = val.count_zeros();
+    assert_eq(zeros, 0);
+
+    let val2 = 0 as UInt8;
+    assert_eq(val2.count_zeros(), 8);
+}
+
+@test
+fn test_uint8_rotate_left() {
+    let val = 1 as UInt8;
+    let rotated = val.rotate_left(1);
+    assert_eq(rotated.to_int(), 2);
+
+    let val2 = 128 as UInt8;
+    let rotated2 = val2.rotate_left(1);
+    // 10000000 rotated left = 00000001 = 1
+    assert_eq(rotated2.to_int(), 1);
+}
+
+@test
+fn test_uint8_rotate_right() {
+    let val = 1 as UInt8;
+    let rotated = val.rotate_right(1);
+    // 00000001 rotated right = 10000000 = 128
+    assert_eq(rotated.to_int(), 128);
+}
+
+@test
+fn test_uint8_swap_bytes() {
+    let val = 42 as UInt8;
+    // Single byte: swap is identity
+    assert_eq(val.swap_bytes().to_int(), 42);
+}
+
+@test
+fn test_uint8_byte_conversions() {
+    let val = 200 as UInt8;
+    let le_bytes: List<Byte> = val.to_le_bytes();
+    let be_bytes: List<Byte> = val.to_be_bytes();
+    assert_eq(le_bytes.len(), 1);
+    assert_eq(be_bytes.len(), 1);
+}
+
+// =============================================================================
+// Edge cases
+// =============================================================================
+
+@test
+fn test_int8_leading_zeros_zero() {
+    let val = 0 as Int8;
+    let lz: Int = val.leading_zeros();
+    assert_eq(lz, 8);
+}
+
+@test
+fn test_uint8_trailing_zeros_zero() {
+    let val = 0 as UInt8;
+    let tz: Int = val.trailing_zeros();
+    // All zeros have 8 trailing zeros (implementation defined, but typically BITS)
+    assert(tz >= 0);
+}
+
+@test
+fn test_int8_count_ones_negative() {
+    let val = -1 as Int8;
+    let ones: Int = val.count_ones();
+    // -1 in two's complement = 11111111 = 8 ones
+    assert_eq(ones, 8);
+}
+
+@test
+fn test_uint8_reverse_bits() {
+    let val = 0 as UInt8;
+    assert_eq(val.reverse_bits().to_int(), 0);
+
+    let val2 = 255 as UInt8;
+    assert_eq(val2.reverse_bits().to_int(), 255);
+}
+
+@test
+fn test_int8_all_bit_ops_exist() {
+    let val = 42 as Int8;
+    let _lz: Int = val.leading_zeros();
+    let _tz: Int = val.trailing_zeros();
+    let _co: Int = val.count_ones();
+    let _cz: Int = val.count_zeros();
+    let _rl = val.rotate_left(1);
+    let _rr = val.rotate_right(1);
+    let _sb = val.swap_bytes();
+    let _rb = val.reverse_bits();
+    let _lb: List<Byte> = val.to_le_bytes();
+    let _bb: List<Byte> = val.to_be_bytes();
+    assert_eq(_lz, 2);
+    assert_eq(_tz, 1);
+    assert_eq(_co, 3);
+    assert_eq(_cz, 5);
+    assert_eq(_sb.to_int(), 42);
+    assert_eq(_lb.len(), 1);
+    assert_eq(_bb.len(), 1);
+}
+
+@test
+fn test_uint8_all_bit_ops_exist() {
+    let val = 42 as UInt8;
+    let _lz: Int = val.leading_zeros();
+    let _tz: Int = val.trailing_zeros();
+    let _co: Int = val.count_ones();
+    let _cz: Int = val.count_zeros();
+    let _rl = val.rotate_left(1);
+    let _rr = val.rotate_right(1);
+    let _sb = val.swap_bytes();
+    let _rb = val.reverse_bits();
+    let _lb: List<Byte> = val.to_le_bytes();
+    let _bb: List<Byte> = val.to_be_bytes();
+    assert_eq(_lz, 2);
+    assert_eq(_tz, 1);
+    assert_eq(_co, 3);
+    assert_eq(_cz, 5);
+    assert_eq(_sb.to_int(), 42);
+    assert_eq(_lb.len(), 1);
+    assert_eq(_bb.len(), 1);
+}

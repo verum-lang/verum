@@ -1,0 +1,194 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, scheduler, greedy, activity-selection
+// @timeout: 30000
+
+// Activity selection and job scheduling
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+// Activity selection (greedy): given start/end times sorted by end time,
+// find maximum number of non-overlapping activities
+fn max_activities(starts: Arr8, ends: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut count = 1;
+    let mut last_end = get8(ends, 0);
+    let mut i = 1;
+    while i < n {
+        if get8(starts, i) >= last_end {
+            count = count + 1;
+            last_end = get8(ends, i);
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Weighted job scheduling (DP)
+// Each job: start, end, weight. Sorted by end time.
+// Find max weight set of non-overlapping jobs
+fn latest_non_conflict(ends: Arr8, i: Int, starts: Arr8) -> Int {
+    let si = get8(starts, i);
+    let mut j = i - 1;
+    while j >= 0 {
+        if get8(ends, j) <= si { return j; }
+        j = j - 1;
+    }
+    -1
+}
+
+fn max_weight_schedule(starts: Arr8, ends: Arr8, weights: Arr8, n: Int) -> Int {
+    // dp[i] = max weight using jobs 0..i
+    let mut dp = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    dp = set8(dp, 0, get8(weights, 0));
+    let mut i = 1;
+    while i < n {
+        let include_w = get8(weights, i);
+        let lnc = latest_non_conflict(ends, i, starts);
+        let include_val = if lnc >= 0 { include_w + get8(dp, lnc) } else { include_w };
+        let exclude_val = get8(dp, i - 1);
+        dp = set8(dp, i, max_val(include_val, exclude_val));
+        i = i + 1;
+    }
+    get8(dp, n - 1)
+}
+
+// Task scheduling with deadlines: maximize total profit
+// Jobs sorted by deadline. Each job takes 1 unit of time.
+fn job_scheduling(deadlines: Arr8, profits: Arr8, n: Int) -> Int {
+    // Greedy: schedule highest-profit job as late as possible
+    // First, find max deadline
+    let mut max_d = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(deadlines, i) > max_d { max_d = get8(deadlines, i); }
+        i = i + 1;
+    }
+    // Simple greedy: try each slot from deadline backwards
+    let mut scheduled = 0; // bitmask of used time slots (up to 8)
+    let mut total_profit = 0;
+
+    // Process jobs in decreasing profit order (simple selection)
+    let mut done = 0; // bitmask of scheduled jobs
+    let mut count = 0;
+    while count < n {
+        // Find highest unscheduled profit
+        let mut best_j = -1;
+        let mut best_p = -1;
+        let mut j = 0;
+        while j < n {
+            let mut jmask = 1;
+            let mut jm = 0;
+            while jm < j { jmask = jmask * 2; jm = jm + 1; }
+            if (done / jmask) % 2 == 0 {
+                if get8(profits, j) > best_p {
+                    best_p = get8(profits, j);
+                    best_j = j;
+                }
+            }
+            j = j + 1;
+        }
+        if best_j < 0 { count = n; }
+        else {
+            // Mark as processed
+            let mut bmask = 1;
+            let mut bm = 0;
+            while bm < best_j { bmask = bmask * 2; bm = bm + 1; }
+            done = done + bmask;
+
+            // Try to schedule at latest available slot <= deadline
+            let dl = get8(deadlines, best_j);
+            let mut slot = dl - 1;
+            let mut placed = 0;
+            while slot >= 0 {
+                let mut smask = 1;
+                let mut sm = 0;
+                while sm < slot { smask = smask * 2; sm = sm + 1; }
+                if (scheduled / smask) % 2 == 0 {
+                    scheduled = scheduled + smask;
+                    total_profit = total_profit + best_p;
+                    placed = 1;
+                    slot = -1; // break
+                } else {
+                    slot = slot - 1;
+                }
+            }
+            count = count + 1;
+        }
+    }
+    total_profit
+}
+
+fn test_activity_selection() -> Int {
+    // Activities sorted by end time: (1,4), (3,5), (0,6), (5,7), (3,9), (5,9), (6,10), (8,11)
+    let starts = Arr8 { v0: 1, v1: 3, v2: 0, v3: 5, v4: 3, v5: 5, v6: 6, v7: 8 };
+    let ends = Arr8 { v0: 4, v1: 5, v2: 6, v3: 7, v4: 9, v5: 9, v6: 10, v7: 11 };
+    // Greedy selects: (1,4), (5,7), (8,11) = 3 activities
+    assert_eq(max_activities(starts, ends, 8), 3);
+    1
+}
+
+fn test_weighted_schedule() -> Int {
+    // Jobs sorted by end: (1,2,50), (3,5,20), (6,7,100), (2,8,200)
+    let starts = Arr8 { v0: 1, v1: 3, v2: 6, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let ends = Arr8 { v0: 2, v1: 5, v2: 7, v3: 8, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let weights = Arr8 { v0: 50, v1: 20, v2: 100, v3: 200, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Best: job0(50) + job3(200) = 250 (job0 ends at 2, job3 starts at 2: compatible)
+    assert_eq(max_weight_schedule(starts, ends, weights, 4), 250);
+    1
+}
+
+fn test_weighted_schedule2() -> Int {
+    // Jobs sorted by end: (1,3,5), (2,5,6), (4,6,5), (5,7,11), (6,8,4), (7,9,2)
+    let starts = Arr8 { v0: 1, v1: 2, v2: 4, v3: 5, v4: 6, v5: 7, v6: 0, v7: 0 };
+    let ends = Arr8 { v0: 3, v1: 5, v2: 6, v3: 7, v4: 8, v5: 9, v6: 0, v7: 0 };
+    let weights = Arr8 { v0: 5, v1: 6, v2: 5, v3: 11, v4: 4, v5: 2, v6: 0, v7: 0 };
+    // Best: job1(6) + job3(11) + job5(2) = 19
+    // job1 ends 5, job3 starts 5: OK. job3 ends 7, job5 starts 7: OK
+    assert_eq(max_weight_schedule(starts, ends, weights, 6), 19);
+    1
+}
+
+fn test_job_deadlines() -> Int {
+    // Jobs: (deadline, profit)
+    // Job 0: dl=2, profit=100
+    // Job 1: dl=1, profit=19
+    // Job 2: dl=2, profit=27
+    // Job 3: dl=1, profit=25
+    let deadlines = Arr8 { v0: 2, v1: 1, v2: 2, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let profits = Arr8 { v0: 100, v1: 19, v2: 27, v3: 25, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Best: schedule job0 at slot 1, job2 at slot 0 (both deadline 2)
+    // Profit = 100 + 27 = 127
+    assert_eq(job_scheduling(deadlines, profits, 4), 127);
+    1
+}
+
+fn main() -> Int {
+    test_activity_selection();
+    test_weighted_schedule();
+    test_weighted_schedule2();
+    test_job_deadlines();
+    print("[OK] 469_scheduler_aot");
+    0
+}

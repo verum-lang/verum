@@ -1,0 +1,24 @@
+// @test: run-interpreter-panic
+// @expected-panic: Index out of bounds: index 20 for list of length 10
+// @requires: bounds-checking
+// @tier: 0
+// @level: L0
+// @was-skip: FIXED - run-interpreter-panic now works with interpreter error handling
+// @tags: memory-safety, bounds-check, computed-index
+// @description: Tests bounds checking with computed indices
+
+fn compute_index(x: Int, y: Int) -> Int {
+    x * 10 + y
+}
+
+fn main() {
+    let arr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // Valid computed index
+    let valid_idx = compute_index(0, 5);
+    let _ = arr[valid_idx];  // arr[5] - OK
+
+    // Invalid computed index that exceeds bounds
+    let invalid_idx = compute_index(2, 0);  // Returns 20
+    let _ = arr[invalid_idx];  // Panic: Index out of bounds
+}

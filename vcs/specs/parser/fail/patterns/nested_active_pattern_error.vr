@@ -1,0 +1,62 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, active, nested, error
+// @description: Test invalid nesting of active patterns
+// @expected-error: E079
+
+// Active pattern definitions
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+pattern Positive(n: Int) -> Bool = n > 0;
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+
+fn test_active_pattern_in_tuple() {
+    let pair = (2, 4);
+
+    // Invalid: unclosed active pattern in tuple
+    match pair {
+        (Even(, Even()) => print("both even"),
+        _ => print("other"),
+    }
+}
+
+fn test_active_pattern_in_variant_unclosed() {
+    let opt: Maybe<Int> = Some(42);
+
+    // Invalid: unclosed active pattern in variant
+    match opt {
+        Some(Even( & Positive()) => print("even and positive"),
+        None => print("none"),
+    }
+}
+
+fn test_nested_and_pattern_error() {
+    let value = 42;
+
+    // Invalid: malformed and-pattern with active patterns
+    match value {
+        Even() && Positive() => print("double and"),
+        _ => print("other"),
+    }
+}
+
+fn test_active_with_binding_error() {
+    let value = 42;
+
+    // Invalid: @ binding with active pattern (syntax confusion)
+    match value {
+        x @ Even() & Positive => print("binding with active"),
+        _ => print("other"),
+    }
+}
+
+fn test_chained_active_pattern_error() {
+    let value = 42;
+
+    // Invalid: trying to chain active patterns incorrectly
+    match value {
+        Even()() => print("double invocation"),
+        _ => print("other"),
+    }
+}
+
+type Maybe<T> is None | Some(T);

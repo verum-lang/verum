@@ -1,0 +1,279 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, imports, multiple, grouped
+
+/// Multiple link - importing several items from the same module.
+/// The grouped form: `link module.path.{Item1, Item2, Item3};`
+
+// Multiple imports with braces
+mount core.io.{Read, Write, Seek, BufRead, BufWriter};
+mount core.collections.{List, Map, Set, Deque};
+mount core.sync.{Mutex, RwLock, AtomicBool, Barrier};
+mount core.time.{Duration, Instant, SystemTime};
+
+// Nested multiple imports
+mount data.models.{
+    User,
+    UserProfile,
+    UserSettings,
+    Product,
+    ProductCategory,
+    Order,
+    OrderItem,
+    OrderStatus
+};
+
+// Import mix of types, functions, and constants
+mount math.{
+    PI,
+    E,
+    TAU,
+    sin,
+    cos,
+    tan,
+    sqrt,
+    pow,
+    abs
+};
+
+// Import traits and implementations
+mount traits.{
+    Serialize,
+    Deserialize,
+    Clone,
+    Eq,
+    Ord,
+    Hash,
+    Debug,
+    Display
+};
+
+// Module definitions for the test
+module std {
+    pub module io {
+        pub type Read is protocol {
+            fn read(&mut self, buf: &mut [Byte]) -> Result<Int, IoError>;
+        }
+
+        pub type Write is protocol {
+            fn write(&mut self, buf: &[Byte]) -> Result<Int, IoError>;
+            fn flush(&mut self) -> Result<(), IoError>;
+        }
+
+        pub type Seek is protocol {
+            fn seek(&mut self, pos: SeekFrom) -> Result<Int, IoError>;
+        }
+
+        pub type BufRead is protocol extends Read {
+            fn read_line(&mut self, buf: &mut Text) -> Result<Int, IoError>;
+        }
+
+        pub type BufWriter is protocol extends Write {
+            fn write_all(&mut self, buf: &[Byte]) -> Result<(), IoError>;
+        }
+
+        pub type IoError is
+            | NotFound
+            | PermissionDenied
+            | ConnectionRefused
+            | Other(Text);
+
+        pub type SeekFrom is
+            | Start(Int)
+            | End(Int)
+            | Current(Int);
+    }
+
+    pub module collections {
+        pub type List<T> is { /* ... */ };
+        pub type Map<K, V> is { /* ... */ };
+        pub type Set<T> is { /* ... */ };
+        pub type Deque<T> is { /* ... */ };
+    }
+
+    pub module sync {
+        pub type Mutex<T> is { /* ... */ };
+        pub type RwLock<T> is { /* ... */ };
+        // Arc not available in core.sync
+        pub type AtomicBool is { /* ... */ };
+        pub type Barrier is { /* ... */ };
+    }
+
+    pub module time {
+        pub type Duration is {
+            secs: Int,
+            nanos: Int
+        };
+
+        pub type Instant is {
+            inner: Int
+        };
+
+        pub type SystemTime is {
+            inner: Int
+        };
+    }
+}
+
+module data {
+    pub module models {
+        pub type User is {
+            id: Int,
+            username: Text,
+            email: Text
+        };
+
+        pub type UserProfile is {
+            user_id: Int,
+            display_name: Text,
+            bio: Maybe<Text>,
+            avatar_url: Maybe<Text>
+        };
+
+        pub type UserSettings is {
+            user_id: Int,
+            notifications: Bool,
+            theme: Text,
+            language: Text
+        };
+
+        pub type Product is {
+            id: Int,
+            name: Text,
+            description: Text,
+            price: Float
+        };
+
+        pub type ProductCategory is
+            | Electronics
+            | Clothing
+            | Books
+            | Home
+            | Other(Text);
+
+        pub type Order is {
+            id: Int,
+            user_id: Int,
+            items: List<OrderItem>,
+            status: OrderStatus,
+            total: Float
+        };
+
+        pub type OrderItem is {
+            product_id: Int,
+            quantity: Int,
+            price: Float
+        };
+
+        pub type OrderStatus is
+            | Pending
+            | Processing
+            | Shipped
+            | Delivered
+            | Cancelled;
+    }
+}
+
+module math {
+    pub const PI: Float = 3.14159265358979;
+    pub const E: Float = 2.71828182845904;
+    pub const TAU: Float = 6.28318530717958;
+
+    pub fn sin(x: Float) -> Float { /* ... */ 0.0 }
+    pub fn cos(x: Float) -> Float { /* ... */ 1.0 }
+    pub fn tan(x: Float) -> Float { /* ... */ 0.0 }
+    pub fn sqrt(x: Float) -> Float { /* ... */ 0.0 }
+    pub fn pow(base: Float, exp: Float) -> Float { /* ... */ 1.0 }
+    pub fn abs(x: Float) -> Float { /* ... */ x }
+}
+
+module traits {
+    pub type Serialize is protocol {
+        fn serialize(&self) -> Bytes;
+    }
+
+    pub type Deserialize is protocol {
+        fn deserialize(data: &Bytes) -> Result<Self, Text>;
+    }
+
+    pub type Clone is protocol {
+        fn clone(&self) -> Self;
+    }
+
+    pub type Eq is protocol {
+        fn eq(&self, other: &Self) -> Bool;
+    }
+
+    pub type Ord is protocol extends Eq {
+        fn cmp(&self, other: &Self) -> Ordering;
+    }
+
+    pub type Hash is protocol {
+        fn hash(&self) -> Int;
+    }
+
+    pub type Debug is protocol {
+        fn debug_fmt(&self) -> Text;
+    }
+
+    pub type Display is protocol {
+        fn display_fmt(&self) -> Text;
+    }
+
+    pub type Ordering is
+    | Less
+    | Equal
+    | Greater;
+}
+
+fn main() {
+    // Use multiple imported items from std.collections
+    let mut list: List<Int> = List.new();
+    let mut map: Map<Text, Int> = Map.new();
+    let mut set: Set<Text> = Set.new();
+    let mut deque: Deque<Int> = Deque.new();
+
+    // Use multiple imported items from data.models
+    let user = User { id: 1, username: "alice", email: "alice@example.com" };
+    let profile = UserProfile {
+        user_id: 1,
+        display_name: "Alice",
+        bio: Some("Developer"),
+        avatar_url: None
+    };
+    let settings = UserSettings {
+        user_id: 1,
+        notifications: true,
+        theme: "dark",
+        language: "en"
+    };
+
+    let product = Product {
+        id: 100,
+        name: "Laptop",
+        description: "A powerful laptop",
+        price: 999.99
+    };
+
+    let order = Order {
+        id: 1000,
+        user_id: 1,
+        items: List.from([
+            OrderItem { product_id: 100, quantity: 1, price: 999.99 }
+        ]),
+        status: OrderStatus.Pending,
+        total: 999.99
+    };
+
+    // Use multiple imported math items
+    let circle_area = PI * pow(5.0, 2.0);
+    let hypotenuse = sqrt(pow(3.0, 2.0) + pow(4.0, 2.0));
+    let angle = PI / 4.0;
+    let sine = sin(angle);
+    let cosine = cos(angle);
+
+    // Use multiple imported time items
+    let duration = Duration { secs: 60, nanos: 0 };
+    let now = Instant { inner: 0 };
+}

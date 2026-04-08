@@ -1,0 +1,184 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, monomorphization, polymorphism
+//
+// Tests generic monomorphization - creating specialized versions of generic code
+// for each concrete type used.
+
+// =============================================================================
+// SECTION 1: Basic Monomorphization
+// =============================================================================
+
+/// Generic identity - will be monomorphized for each type used
+fn identity<T>(x: T) -> T {
+    x
+}
+
+/// Generic swap - monomorphized per type pair
+fn swap<A, B>(pair: (A, B)) -> (B, A) {
+    let (a, b) = pair;
+    (b, a)
+}
+
+/// Generic Wrapper - monomorphized per contained type
+type Wrapper<T> is {
+    value: T,
+};
+
+implement<T> Wrapper<T> {
+    fn new(value: T) -> Wrapper<T> {
+        Wrapper { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+// =============================================================================
+// SECTION 2: Multiple Instantiations
+// =============================================================================
+
+fn max<T: Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+fn min<T: Ord>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+// =============================================================================
+// SECTION 3: Nested Generic Monomorphization
+// =============================================================================
+
+/// Generic pair container
+type Pair<T> is {
+    first: T,
+    second: T,
+};
+
+implement<T: Clone> Pair<T> {
+    fn new(first: T, second: T) -> Pair<T> {
+        Pair { first, second }
+    }
+
+    fn to_list(&self) -> List<T> {
+        [self.first.clone(), self.second.clone()]
+    }
+}
+
+// =============================================================================
+// SECTION 4: Generic Methods and Closures
+// =============================================================================
+
+/// Prepend an element to a list (helper to avoid spread-in-expression)
+fn cons<T>(head: T, tail: List<T>) -> List<T> {
+    let mut result: List<T> = [];
+    result.push(head);
+    let mut t = tail;
+    result.append(&mut t);
+    result
+}
+
+@allow(unbounded_recursion)
+fn map_list<T, U>(items: List<T>, f: fn(T) -> U) -> List<U> {
+    match items {
+        [] => [],
+        [head, ..tail] => cons(f(head), map_list(tail, f)),
+    }
+}
+
+@allow(unbounded_recursion)
+fn filter_list<T: Clone>(items: List<T>, pred: fn(T) -> Bool) -> List<T> {
+    match items {
+        [] => [],
+        [head, ..tail] if pred(head.clone()) => cons(head, filter_list(tail, pred)),
+        [_, ..tail] => filter_list(tail, pred),
+    }
+}
+
+@allow(unbounded_recursion)
+fn fold_list<T, A>(items: List<T>, init: A, f: fn(A, T) -> A) -> A {
+    match items {
+        [] => init,
+        [head, ..tail] => fold_list(tail, f(init, head), f),
+    }
+}
+
+// =============================================================================
+// SECTION 5: Main Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Creates identity<Int>
+    let a: Int = identity(42);
+    // Creates identity<Text>
+    let b: Text = identity("hello");
+    // Creates identity<Float>
+    let c: Float = identity(3.14);
+    // Creates identity<Bool>
+    let d: Bool = identity(true);
+
+    assert(a == 42);
+    assert(b == "hello");
+    assert(c == 3.14);
+    assert(d == true);
+
+    // Creates swap<Int, Text>
+    let e: (Text, Int) = swap((42, "answer"));
+    // Creates swap<Bool, Float>
+    let f_val: (Float, Bool) = swap((true, 2.71));
+
+    assert(e == ("answer", 42));
+
+    // Creates Wrapper<Int>, Wrapper<Text>, Wrapper<Float>
+    let box_int: Wrapper<Int> = Wrapper.new(42);
+    let box_text: Wrapper<Text> = Wrapper.new("world");
+    let box_float: Wrapper<Float> = Wrapper.new(1.618);
+
+    assert(*box_int.get() == 42);
+    assert(*box_text.get() == "world");
+
+    // Multiple instantiations of min/max
+    assert(min(10, 20) == 10);
+    assert(min("apple", "banana") == "apple");
+    assert(max(10, 20) == 20);
+    assert(max(3.14, 2.71) == 3.14);
+
+    // Nested generic types
+    let nested_box: Wrapper<Wrapper<Int>> = Wrapper.new(Wrapper.new(42));
+    assert(*nested_box.get().get() == 42);
+
+    // Pair operations monomorphized
+    let pair_int: Pair<Int> = Pair.new(1, 2);
+    let pair_text: Pair<Text> = Pair.new("a", "b");
+
+    assert(pair_int.to_list() == [1, 2]);
+    assert(pair_text.to_list() == ["a", "b"]);
+
+    // Closure monomorphization
+    let numbers = [1, 2, 3, 4, 5];
+
+    // map_list<Int, Int> with closure
+    let doubled = map_list(numbers, |x| x * 2);
+    assert(doubled == [2, 4, 6, 8, 10]);
+
+    // filter_list<Int>
+    let evens = filter_list([1, 2, 3, 4, 5], |x| x % 2 == 0);
+    assert(evens == [2, 4]);
+
+    // fold_list<Int, Int>
+    let sum = fold_list([1, 2, 3, 4, 5], 0, |acc, x| acc + x);
+    assert(sum == 15);
+
+    // Verify different instantiations
+    let box_int2: Wrapper<Int> = Wrapper.new(42);
+    let box_text2: Wrapper<Text> = Wrapper.new("hello");
+    assert(*box_int2.get() == 42);
+    assert(*box_text2.get() == "hello");
+}

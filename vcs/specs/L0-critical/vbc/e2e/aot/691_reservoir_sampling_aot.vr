@@ -1,0 +1,180 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, reservoir-sampling, statistics, deterministic
+// @timeout: 30000
+
+// Deterministic reservoir sampling simulation using LCG PRNG
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Simple LCG: seed' = (a * seed + c) mod m
+fn lcg_next(seed: Int) -> Int {
+    abs_val((seed * 1103515245 + 12345) / 65536) % 32768
+}
+
+// Reservoir sampling: select k items from stream of n items
+// Uses LCG for deterministic "random" numbers
+// Returns the reservoir (Arr8 of k items)
+fn reservoir_sample(stream: Arr8, n: Int, k: Int, seed: Int) -> Arr8 {
+    // Fill reservoir with first k items
+    let mut reservoir = zeros();
+    let mut i = 0;
+    while i < k {
+        reservoir = set8(reservoir, i, get8(stream, i));
+        i = i + 1;
+    }
+    // For remaining items, randomly replace
+    let mut rng = seed;
+    while i < n {
+        rng = lcg_next(rng);
+        let j = rng % (i + 1);
+        if j < k {
+            reservoir = set8(reservoir, j, get8(stream, i));
+        }
+        i = i + 1;
+    }
+    reservoir
+}
+
+// Compute sum of array
+fn sum_arr(a: Arr8, n: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < n { s = s + get8(a, i); i = i + 1; }
+    s
+}
+
+// Compute mean * n (to avoid fractions)
+fn mean_times_n(a: Arr8, n: Int) -> Int { sum_arr(a, n) }
+
+// Variance * n^2 (to avoid fractions): n*sum(x^2) - (sum(x))^2
+fn variance_times_n2(a: Arr8, n: Int) -> Int {
+    let s = sum_arr(a, n);
+    let mut sq_sum = 0;
+    let mut i = 0;
+    while i < n {
+        let v = get8(a, i);
+        sq_sum = sq_sum + v * v;
+        i = i + 1;
+    }
+    n * sq_sum - s * s
+}
+
+fn test_lcg() -> Int {
+    let s0 = 42;
+    let s1 = lcg_next(s0);
+    let s2 = lcg_next(s1);
+    let s3 = lcg_next(s2);
+    // Deterministic: same seed → same sequence
+    assert_eq(lcg_next(42), s1);
+    // Different seeds → different values (with high probability)
+    assert_eq(lcg_next(42) == lcg_next(100), 0);
+    // Values in range [0, 32767]
+    assert_eq(s1 >= 0, 1);
+    assert_eq(s1 < 32768, 1);
+    1
+}
+
+fn test_reservoir_deterministic() -> Int {
+    let stream = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 60, v6: 70, v7: 80 };
+    // Sample 3 from 8 with seed 42
+    let r1 = reservoir_sample(stream, 8, 3, 42);
+    // Same seed → same result
+    let r2 = reservoir_sample(stream, 8, 3, 42);
+    let mut same = 1;
+    let mut i = 0;
+    while i < 3 {
+        if get8(r1, i) != get8(r2, i) { same = 0; }
+        i = i + 1;
+    }
+    assert_eq(same, 1);
+    1
+}
+
+fn test_reservoir_k_equals_n() -> Int {
+    // When k == n, all items selected
+    let stream = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r = reservoir_sample(stream, 4, 4, 99);
+    assert_eq(sum_arr(r, 4), 100); // 10+20+30+40
+    1
+}
+
+fn test_reservoir_k_1() -> Int {
+    // When k == 1, select one item
+    let stream = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 0, v6: 0, v7: 0 };
+    let r = reservoir_sample(stream, 5, 1, 42);
+    let val = get8(r, 0);
+    // Must be one of the stream values
+    let mut found = 0;
+    let mut i = 0;
+    while i < 5 {
+        if get8(stream, i) == val { found = 1; }
+        i = i + 1;
+    }
+    assert_eq(found, 1);
+    1
+}
+
+fn test_statistics() -> Int {
+    let data = Arr8 { v0: 2, v1: 4, v2: 6, v3: 8, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(sum_arr(data, 4), 20);
+    assert_eq(mean_times_n(data, 4), 20); // mean = 5, mean*n = 20
+    // Variance: n*sum(x^2) - (sum(x))^2 = 4*(4+16+36+64) - 400 = 4*120 - 400 = 480-400 = 80
+    assert_eq(variance_times_n2(data, 4), 80);
+    1
+}
+
+fn test_different_seeds() -> Int {
+    let stream = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let r1 = reservoir_sample(stream, 8, 3, 42);
+    let r2 = reservoir_sample(stream, 8, 3, 123);
+    // Different seeds should (usually) produce different samples
+    // Not guaranteed, but verify both are valid subsets
+    let mut all_valid = 1;
+    let mut i = 0;
+    while i < 3 {
+        let v1 = get8(r1, i);
+        let v2 = get8(r2, i);
+        if v1 < 1 { all_valid = 0; }
+        if v1 > 8 { all_valid = 0; }
+        if v2 < 1 { all_valid = 0; }
+        if v2 > 8 { all_valid = 0; }
+        i = i + 1;
+    }
+    assert_eq(all_valid, 1);
+    1
+}
+
+fn main() -> Int {
+    test_lcg();
+    test_reservoir_deterministic();
+    test_reservoir_k_equals_n();
+    test_reservoir_k_1();
+    test_statistics();
+    test_different_seeds();
+    print("[OK] 691_reservoir_sampling_aot");
+    0
+}

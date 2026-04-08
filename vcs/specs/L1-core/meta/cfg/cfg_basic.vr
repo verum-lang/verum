@@ -1,0 +1,50 @@
+// @test: parse
+// @level: L1
+// @tags: meta, cfg, conditional-compilation
+// @timeout: 5000
+
+/// @cfg conditional compilation.
+/// Grammar: meta_function_name includes 'cfg'
+///          config_condition = 'cfg' '.' identifier
+
+// Conditional type definition
+@cfg(target_os = "linux")
+type LinuxHandle is (Int);
+
+@cfg(target_os = "macos")
+type MacHandle is (Int);
+
+// Conditional function definition
+@cfg(debug)
+fn debug_log(msg: Text) {
+    print(f"DEBUG: {msg}");
+}
+
+@cfg(release)
+fn debug_log(msg: Text) {
+    // no-op in release mode
+}
+
+// Conditional field in struct
+type Platform is {
+    name: Text,
+    @cfg(feature = "metrics")
+    metrics_enabled: Bool,
+};
+
+// Inline cfg check using meta function
+fn get_platform() -> Text {
+    if @cfg(target_os = "linux") {
+        "linux"
+    } else if @cfg(target_os = "macos") {
+        "macos"
+    } else {
+        "unknown"
+    }
+}
+
+fn main() {
+    let platform = get_platform();
+    print(f"Platform: {platform}");
+    print("Cfg basic tests parsed");
+}

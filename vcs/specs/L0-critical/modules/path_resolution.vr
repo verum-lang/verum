@@ -1,0 +1,129 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: modules, paths, resolution, self, super, cog
+
+/// Path resolution tests.
+/// Verifies self, super, and cog path resolution.
+
+// Define module hierarchy for path tests
+module parent {
+    pub const PARENT_VALUE: Int = 100;
+
+    pub type ParentType is {
+        value: Int
+    };
+
+    pub fn parent_fn() -> Int {
+        PARENT_VALUE
+    }
+
+    pub module child {
+        pub const CHILD_VALUE: Int = 200;
+
+        // Use super to access parent items
+        pub fn use_parent() -> Int {
+            super.PARENT_VALUE
+        }
+
+        pub fn create_parent_type() -> super.ParentType {
+            super.ParentType { value: super.PARENT_VALUE }
+        }
+
+        pub module grandchild {
+            pub const GRANDCHILD_VALUE: Int = 300;
+
+            // Use super.super to access grandparent
+            pub fn use_grandparent() -> Int {
+                super.super.PARENT_VALUE
+            }
+
+            // Use super to access parent (child)
+            pub fn use_parent() -> Int {
+                super.CHILD_VALUE
+            }
+
+            // Combined access
+            pub fn combined() -> Int {
+                super.super.PARENT_VALUE + super.CHILD_VALUE + GRANDCHILD_VALUE
+            }
+        }
+    }
+
+    pub module sibling {
+        // Access sibling via parent
+        pub fn use_sibling_value() -> Int {
+            super.child.CHILD_VALUE
+        }
+
+        pub fn use_grandchild_value() -> Int {
+            super.child.grandchild.GRANDCHILD_VALUE
+        }
+    }
+}
+
+// Self path tests
+module self_tests {
+    pub const VALUE: Int = 42;
+
+    pub fn get_value() -> Int {
+        VALUE
+    }
+
+    // Using self explicitly (optional but valid)
+    pub fn get_value_explicit() -> Int {
+        self.VALUE
+    }
+
+    pub module inner {
+        pub fn call_parent() -> Int {
+            super.get_value()
+        }
+
+        // self refers to current module (inner)
+        pub fn use_self() -> Int {
+            self.nested_value()
+        }
+
+        pub fn nested_value() -> Int {
+            999
+        }
+    }
+}
+
+// Import using paths
+module importer {
+    // Import using super path
+    mount super.parent.ParentType;
+    mount super.parent.child.CHILD_VALUE;
+
+    pub fn create() -> ParentType {
+        ParentType { value: CHILD_VALUE }
+    }
+
+    pub module nested_importer {
+        // Import from grandparent
+        mount super.super.parent.PARENT_VALUE;
+
+        pub fn get() -> Int {
+            PARENT_VALUE
+        }
+    }
+}
+
+// Crate-level paths
+module cog_paths {
+    // Import using cog root (assuming this file is at cog root)
+    // Note: in real cog structure, this would be `mount cog.some_module.Item`
+
+    pub fn demonstrate_cog_path() -> Int {
+        // cog.parent.PARENT_VALUE would work in full cog context
+        100
+    }
+}
+
+fn main() -> Int {
+    // Note: Path resolution from main requires module integration that is pending.
+    // This test verifies self/super/cog path syntax parsing only.
+    0
+}

@@ -1,0 +1,419 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, lru-cache, doubly-linked-list, flat-array, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT LRU cache simulation using doubly-linked list stored in flat arrays
+
+// LRU Cache with capacity up to 8 entries
+// Each entry: key, value, prev index, next index
+// Uses sentinel head/tail nodes at indices 0 and 1
+// Real entries start at index 2
+// Free list tracks available slots
+type LRU is {
+    // keys (index 0,1 are sentinels)
+    k0: Int, k1: Int, k2: Int, k3: Int, k4: Int, k5: Int, k6: Int, k7: Int,
+    k8: Int, k9: Int,
+    // values
+    v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int,
+    v8: Int, v9: Int,
+    // prev pointers
+    p0: Int, p1: Int, p2: Int, p3: Int, p4: Int, p5: Int, p6: Int, p7: Int,
+    p8: Int, p9: Int,
+    // next pointers
+    n0: Int, n1: Int, n2: Int, n3: Int, n4: Int, n5: Int, n6: Int, n7: Int,
+    n8: Int, n9: Int,
+    // metadata
+    size: Int,
+    capacity: Int,
+    next_free: Int
+};
+
+fn lru_get_key(c: LRU, i: Int) -> Int {
+    if i == 0 { c.k0 } else if i == 1 { c.k1 } else if i == 2 { c.k2 }
+    else if i == 3 { c.k3 } else if i == 4 { c.k4 } else if i == 5 { c.k5 }
+    else if i == 6 { c.k6 } else if i == 7 { c.k7 } else if i == 8 { c.k8 }
+    else { c.k9 }
+}
+
+fn lru_get_val(c: LRU, i: Int) -> Int {
+    if i == 0 { c.v0 } else if i == 1 { c.v1 } else if i == 2 { c.v2 }
+    else if i == 3 { c.v3 } else if i == 4 { c.v4 } else if i == 5 { c.v5 }
+    else if i == 6 { c.v6 } else if i == 7 { c.v7 } else if i == 8 { c.v8 }
+    else { c.v9 }
+}
+
+fn lru_get_prev(c: LRU, i: Int) -> Int {
+    if i == 0 { c.p0 } else if i == 1 { c.p1 } else if i == 2 { c.p2 }
+    else if i == 3 { c.p3 } else if i == 4 { c.p4 } else if i == 5 { c.p5 }
+    else if i == 6 { c.p6 } else if i == 7 { c.p7 } else if i == 8 { c.p8 }
+    else { c.p9 }
+}
+
+fn lru_get_next(c: LRU, i: Int) -> Int {
+    if i == 0 { c.n0 } else if i == 1 { c.n1 } else if i == 2 { c.n2 }
+    else if i == 3 { c.n3 } else if i == 4 { c.n4 } else if i == 5 { c.n5 }
+    else if i == 6 { c.n6 } else if i == 7 { c.n7 } else if i == 8 { c.n8 }
+    else { c.n9 }
+}
+
+fn lru_set_key(c: LRU, i: Int, v: Int) -> LRU {
+    LRU {
+        k0: if i == 0 { v } else { c.k0 }, k1: if i == 1 { v } else { c.k1 },
+        k2: if i == 2 { v } else { c.k2 }, k3: if i == 3 { v } else { c.k3 },
+        k4: if i == 4 { v } else { c.k4 }, k5: if i == 5 { v } else { c.k5 },
+        k6: if i == 6 { v } else { c.k6 }, k7: if i == 7 { v } else { c.k7 },
+        k8: if i == 8 { v } else { c.k8 }, k9: if i == 9 { v } else { c.k9 },
+        v0: c.v0, v1: c.v1, v2: c.v2, v3: c.v3, v4: c.v4,
+        v5: c.v5, v6: c.v6, v7: c.v7, v8: c.v8, v9: c.v9,
+        p0: c.p0, p1: c.p1, p2: c.p2, p3: c.p3, p4: c.p4,
+        p5: c.p5, p6: c.p6, p7: c.p7, p8: c.p8, p9: c.p9,
+        n0: c.n0, n1: c.n1, n2: c.n2, n3: c.n3, n4: c.n4,
+        n5: c.n5, n6: c.n6, n7: c.n7, n8: c.n8, n9: c.n9,
+        size: c.size, capacity: c.capacity, next_free: c.next_free
+    }
+}
+
+fn lru_set_val(c: LRU, i: Int, v: Int) -> LRU {
+    LRU {
+        k0: c.k0, k1: c.k1, k2: c.k2, k3: c.k3, k4: c.k4,
+        k5: c.k5, k6: c.k6, k7: c.k7, k8: c.k8, k9: c.k9,
+        v0: if i == 0 { v } else { c.v0 }, v1: if i == 1 { v } else { c.v1 },
+        v2: if i == 2 { v } else { c.v2 }, v3: if i == 3 { v } else { c.v3 },
+        v4: if i == 4 { v } else { c.v4 }, v5: if i == 5 { v } else { c.v5 },
+        v6: if i == 6 { v } else { c.v6 }, v7: if i == 7 { v } else { c.v7 },
+        v8: if i == 8 { v } else { c.v8 }, v9: if i == 9 { v } else { c.v9 },
+        p0: c.p0, p1: c.p1, p2: c.p2, p3: c.p3, p4: c.p4,
+        p5: c.p5, p6: c.p6, p7: c.p7, p8: c.p8, p9: c.p9,
+        n0: c.n0, n1: c.n1, n2: c.n2, n3: c.n3, n4: c.n4,
+        n5: c.n5, n6: c.n6, n7: c.n7, n8: c.n8, n9: c.n9,
+        size: c.size, capacity: c.capacity, next_free: c.next_free
+    }
+}
+
+fn lru_set_prev(c: LRU, i: Int, v: Int) -> LRU {
+    LRU {
+        k0: c.k0, k1: c.k1, k2: c.k2, k3: c.k3, k4: c.k4,
+        k5: c.k5, k6: c.k6, k7: c.k7, k8: c.k8, k9: c.k9,
+        v0: c.v0, v1: c.v1, v2: c.v2, v3: c.v3, v4: c.v4,
+        v5: c.v5, v6: c.v6, v7: c.v7, v8: c.v8, v9: c.v9,
+        p0: if i == 0 { v } else { c.p0 }, p1: if i == 1 { v } else { c.p1 },
+        p2: if i == 2 { v } else { c.p2 }, p3: if i == 3 { v } else { c.p3 },
+        p4: if i == 4 { v } else { c.p4 }, p5: if i == 5 { v } else { c.p5 },
+        p6: if i == 6 { v } else { c.p6 }, p7: if i == 7 { v } else { c.p7 },
+        p8: if i == 8 { v } else { c.p8 }, p9: if i == 9 { v } else { c.p9 },
+        n0: c.n0, n1: c.n1, n2: c.n2, n3: c.n3, n4: c.n4,
+        n5: c.n5, n6: c.n6, n7: c.n7, n8: c.n8, n9: c.n9,
+        size: c.size, capacity: c.capacity, next_free: c.next_free
+    }
+}
+
+fn lru_set_next(c: LRU, i: Int, v: Int) -> LRU {
+    LRU {
+        k0: c.k0, k1: c.k1, k2: c.k2, k3: c.k3, k4: c.k4,
+        k5: c.k5, k6: c.k6, k7: c.k7, k8: c.k8, k9: c.k9,
+        v0: c.v0, v1: c.v1, v2: c.v2, v3: c.v3, v4: c.v4,
+        v5: c.v5, v6: c.v6, v7: c.v7, v8: c.v8, v9: c.v9,
+        p0: c.p0, p1: c.p1, p2: c.p2, p3: c.p3, p4: c.p4,
+        p5: c.p5, p6: c.p6, p7: c.p7, p8: c.p8, p9: c.p9,
+        n0: if i == 0 { v } else { c.n0 }, n1: if i == 1 { v } else { c.n1 },
+        n2: if i == 2 { v } else { c.n2 }, n3: if i == 3 { v } else { c.n3 },
+        n4: if i == 4 { v } else { c.n4 }, n5: if i == 5 { v } else { c.n5 },
+        n6: if i == 6 { v } else { c.n6 }, n7: if i == 7 { v } else { c.n7 },
+        n8: if i == 8 { v } else { c.n8 }, n9: if i == 9 { v } else { c.n9 },
+        size: c.size, capacity: c.capacity, next_free: c.next_free
+    }
+}
+
+// Create new LRU cache with given capacity (max 8)
+// Index 0 = HEAD sentinel, Index 1 = TAIL sentinel
+// HEAD.next = TAIL, TAIL.prev = HEAD initially
+fn lru_new(cap: Int) -> LRU {
+    LRU {
+        k0: -1, k1: -1, k2: -1, k3: -1, k4: -1, k5: -1, k6: -1, k7: -1, k8: -1, k9: -1,
+        v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1, v8: -1, v9: -1,
+        p0: -1, p1: 0, p2: -1, p3: -1, p4: -1, p5: -1, p6: -1, p7: -1, p8: -1, p9: -1,
+        n0: 1, n1: -1, n2: -1, n3: -1, n4: -1, n5: -1, n6: -1, n7: -1, n8: -1, n9: -1,
+        size: 0,
+        capacity: cap,
+        next_free: 2
+    }
+}
+
+// Remove node at index from the doubly-linked list (does not free it)
+fn ll_remove(c: LRU, idx: Int) -> LRU {
+    let prev_idx = lru_get_prev(c, idx);
+    let next_idx = lru_get_next(c, idx);
+    let mut c2 = lru_set_next(c, prev_idx, next_idx);
+    c2 = lru_set_prev(c2, next_idx, prev_idx);
+    c2
+}
+
+// Insert node at index right after HEAD (index 0)
+fn ll_insert_after_head(c: LRU, idx: Int) -> LRU {
+    let head_next = lru_get_next(c, 0);
+    let mut c2 = lru_set_next(c, 0, idx);
+    c2 = lru_set_prev(c2, idx, 0);
+    c2 = lru_set_next(c2, idx, head_next);
+    c2 = lru_set_prev(c2, head_next, idx);
+    c2
+}
+
+// Find the index of a key in the cache, or -1 if not found
+// Walk from HEAD.next to TAIL
+fn lru_find(c: LRU, key: Int) -> Int {
+    let mut cur = lru_get_next(c, 0);
+    let mut result = -1;
+    while cur != 1 && result == -1 {
+        if lru_get_key(c, cur) == key {
+            result = cur;
+        }
+        cur = lru_get_next(c, cur);
+    }
+    result
+}
+
+// Get a value from cache (returns -1 if not found, moves to front)
+fn lru_get(c: LRU, key: Int) -> LRU {
+    // We return the cache with the item moved to front
+    // Caller should check lru_find first for the value
+    let idx = lru_find(c, key);
+    if idx == -1 { c }
+    else {
+        let c2 = ll_remove(c, idx);
+        ll_insert_after_head(c2, idx)
+    }
+}
+
+// Lookup value for key, returns -1 if missing
+fn lru_lookup(c: LRU, key: Int) -> Int {
+    let idx = lru_find(c, key);
+    if idx == -1 { -1 }
+    else { lru_get_val(c, idx) }
+}
+
+// Put a key-value pair into the cache
+fn lru_put(c: LRU, key: Int, val: Int) -> LRU {
+    // Check if key already exists
+    let existing = lru_find(c, key);
+    if existing != -1 {
+        // Update value and move to front
+        let mut c2 = lru_set_val(c, existing, val);
+        c2 = ll_remove(c2, existing);
+        ll_insert_after_head(c2, existing)
+    } else if c.size < c.capacity {
+        // Have space: use next_free slot
+        let slot = c.next_free;
+        let mut c2 = lru_set_key(c, slot, key);
+        c2 = lru_set_val(c2, slot, val);
+        c2 = ll_insert_after_head(c2, slot);
+        LRU {
+            k0: c2.k0, k1: c2.k1, k2: c2.k2, k3: c2.k3, k4: c2.k4,
+            k5: c2.k5, k6: c2.k6, k7: c2.k7, k8: c2.k8, k9: c2.k9,
+            v0: c2.v0, v1: c2.v1, v2: c2.v2, v3: c2.v3, v4: c2.v4,
+            v5: c2.v5, v6: c2.v6, v7: c2.v7, v8: c2.v8, v9: c2.v9,
+            p0: c2.p0, p1: c2.p1, p2: c2.p2, p3: c2.p3, p4: c2.p4,
+            p5: c2.p5, p6: c2.p6, p7: c2.p7, p8: c2.p8, p9: c2.p9,
+            n0: c2.n0, n1: c2.n1, n2: c2.n2, n3: c2.n3, n4: c2.n4,
+            n5: c2.n5, n6: c2.n6, n7: c2.n7, n8: c2.n8, n9: c2.n9,
+            size: c2.size + 1,
+            capacity: c2.capacity,
+            next_free: c2.next_free + 1
+        }
+    } else {
+        // Evict LRU (node just before TAIL)
+        let lru_idx = lru_get_prev(c, 1);
+        let mut c2 = ll_remove(c, lru_idx);
+        // Reuse this slot
+        c2 = lru_set_key(c2, lru_idx, key);
+        c2 = lru_set_val(c2, lru_idx, val);
+        c2 = ll_insert_after_head(c2, lru_idx);
+        c2
+    }
+}
+
+// Get the most recently used key (first after HEAD)
+fn lru_mru_key(c: LRU) -> Int {
+    let first = lru_get_next(c, 0);
+    if first == 1 { -1 }
+    else { lru_get_key(c, first) }
+}
+
+// Get the least recently used key (last before TAIL)
+fn lru_lru_key(c: LRU) -> Int {
+    let last = lru_get_prev(c, 1);
+    if last == 0 { -1 }
+    else { lru_get_key(c, last) }
+}
+
+// Count entries by walking the list
+fn lru_count(c: LRU) -> Int {
+    let mut cur = lru_get_next(c, 0);
+    let mut count = 0;
+    while cur != 1 {
+        count = count + 1;
+        cur = lru_get_next(c, cur);
+    }
+    count
+}
+
+fn main() -> Int {
+    // === Test 1: New empty cache ===
+    let c0 = lru_new(3);
+    assert_eq(c0.size, 0);
+    assert_eq(c0.capacity, 3);
+    assert_eq(lru_count(c0), 0);
+    assert_eq(lru_mru_key(c0), -1);
+    assert_eq(lru_lru_key(c0), -1);
+    assert_eq(lru_lookup(c0, 1), -1);
+
+    // === Test 2: Single put ===
+    let c1 = lru_put(c0, 10, 100);
+    assert_eq(c1.size, 1);
+    assert_eq(lru_count(c1), 1);
+    assert_eq(lru_lookup(c1, 10), 100);
+    assert_eq(lru_mru_key(c1), 10);
+    assert_eq(lru_lru_key(c1), 10);
+
+    // === Test 3: Two puts ===
+    let c2 = lru_put(c1, 20, 200);
+    assert_eq(c2.size, 2);
+    assert_eq(lru_count(c2), 2);
+    assert_eq(lru_lookup(c2, 10), 100);
+    assert_eq(lru_lookup(c2, 20), 200);
+    assert_eq(lru_mru_key(c2), 20);  // Most recent
+    assert_eq(lru_lru_key(c2), 10);  // Least recent
+
+    // === Test 4: Three puts (fill capacity) ===
+    let c3 = lru_put(c2, 30, 300);
+    assert_eq(c3.size, 3);
+    assert_eq(lru_count(c3), 3);
+    assert_eq(lru_lookup(c3, 30), 300);
+    assert_eq(lru_mru_key(c3), 30);
+    assert_eq(lru_lru_key(c3), 10);
+
+    // === Test 5: Eviction on overflow ===
+    // Adding key 40 should evict key 10 (least recently used)
+    let c4 = lru_put(c3, 40, 400);
+    assert_eq(c4.size, 3);
+    assert_eq(lru_count(c4), 3);
+    assert_eq(lru_lookup(c4, 40), 400);
+    assert_eq(lru_lookup(c4, 10), -1);  // Evicted
+    assert_eq(lru_lookup(c4, 20), 200);
+    assert_eq(lru_lookup(c4, 30), 300);
+    assert_eq(lru_mru_key(c4), 40);
+
+    // === Test 6: Access moves to front ===
+    // c4 order: 40, 30, 20. Access 20 -> 20, 40, 30
+    let c5 = lru_get(c4, 20);
+    assert_eq(lru_mru_key(c5), 20);
+    assert_eq(lru_lru_key(c5), 30);
+    assert_eq(lru_count(c5), 3);
+
+    // === Test 7: Eviction after access reorder ===
+    // c5 order: 20, 40, 30. Put 50 -> evicts 30
+    let c6 = lru_put(c5, 50, 500);
+    assert_eq(lru_lookup(c6, 30), -1);  // Evicted
+    assert_eq(lru_lookup(c6, 50), 500);
+    assert_eq(lru_lookup(c6, 20), 200);
+    assert_eq(lru_lookup(c6, 40), 400);
+    assert_eq(lru_mru_key(c6), 50);
+
+    // === Test 8: Update existing key ===
+    // Update key 20 with new value
+    let c7 = lru_put(c6, 20, 999);
+    assert_eq(c7.size, 3);
+    assert_eq(lru_count(c7), 3);
+    assert_eq(lru_lookup(c7, 20), 999);
+    assert_eq(lru_mru_key(c7), 20);  // Moved to front
+
+    // === Test 9: Capacity 1 cache ===
+    let s0 = lru_new(1);
+    let s1 = lru_put(s0, 1, 10);
+    assert_eq(s1.size, 1);
+    assert_eq(lru_lookup(s1, 1), 10);
+
+    let s2 = lru_put(s1, 2, 20);
+    assert_eq(s2.size, 1);
+    assert_eq(lru_lookup(s2, 2), 20);
+    assert_eq(lru_lookup(s2, 1), -1);  // Evicted
+
+    let s3 = lru_put(s2, 3, 30);
+    assert_eq(lru_lookup(s3, 3), 30);
+    assert_eq(lru_lookup(s3, 2), -1);
+
+    // === Test 10: Multiple evictions ===
+    let mut mc = lru_new(2);
+    mc = lru_put(mc, 1, 10);
+    mc = lru_put(mc, 2, 20);
+    mc = lru_put(mc, 3, 30);  // Evicts 1
+    assert_eq(lru_lookup(mc, 1), -1);
+    mc = lru_put(mc, 4, 40);  // Evicts 2
+    assert_eq(lru_lookup(mc, 2), -1);
+    assert_eq(lru_lookup(mc, 3), 30);
+    assert_eq(lru_lookup(mc, 4), 40);
+
+    // === Test 11: Access pattern prevents eviction ===
+    let mut ac = lru_new(2);
+    ac = lru_put(ac, 1, 10);
+    ac = lru_put(ac, 2, 20);
+    // Access key 1 (moves to front)
+    ac = lru_get(ac, 1);
+    // Now add key 3 -> should evict 2 (not 1 since 1 was just accessed)
+    ac = lru_put(ac, 3, 30);
+    assert_eq(lru_lookup(ac, 1), 10);   // Still present
+    assert_eq(lru_lookup(ac, 2), -1);   // Evicted
+    assert_eq(lru_lookup(ac, 3), 30);
+
+    // === Test 12: Chain of evictions ===
+    let mut cc = lru_new(3);
+    let mut ci = 1;
+    while ci <= 6 {
+        cc = lru_put(cc, ci, ci * 100);
+        ci = ci + 1;
+    }
+    // After putting 1-6 with cap 3: only 4, 5, 6 should remain
+    assert_eq(lru_lookup(cc, 1), -1);
+    assert_eq(lru_lookup(cc, 2), -1);
+    assert_eq(lru_lookup(cc, 3), -1);
+    assert_eq(lru_lookup(cc, 4), 400);
+    assert_eq(lru_lookup(cc, 5), 500);
+    assert_eq(lru_lookup(cc, 6), 600);
+    assert_eq(lru_count(cc), 3);
+
+    // === Test 13: Linked list integrity ===
+    // Walk forward and backward, both should give size entries
+    let mut fwd = lru_get_next(cc, 0);
+    let mut fwd_count = 0;
+    while fwd != 1 {
+        fwd_count = fwd_count + 1;
+        fwd = lru_get_next(cc, fwd);
+    }
+    assert_eq(fwd_count, 3);
+
+    let mut bwd = lru_get_prev(cc, 1);
+    let mut bwd_count = 0;
+    while bwd != 0 {
+        bwd_count = bwd_count + 1;
+        bwd = lru_get_prev(cc, bwd);
+    }
+    assert_eq(bwd_count, 3);
+
+    // === Test 14: Repeated access of same key ===
+    let mut rc = lru_new(3);
+    rc = lru_put(rc, 1, 10);
+    rc = lru_put(rc, 2, 20);
+    rc = lru_put(rc, 3, 30);
+    // Access key 1 multiple times
+    rc = lru_get(rc, 1);
+    rc = lru_get(rc, 1);
+    rc = lru_get(rc, 1);
+    assert_eq(lru_mru_key(rc), 1);
+    assert_eq(lru_count(rc), 3);
+    // Put 4 should evict LRU (which should be 2 or 3)
+    rc = lru_put(rc, 4, 40);
+    assert_eq(lru_lookup(rc, 1), 10);  // 1 was accessed, should survive
+
+    0
+}

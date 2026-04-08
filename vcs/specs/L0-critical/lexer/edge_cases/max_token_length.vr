@@ -1,0 +1,98 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, edge-cases, length, stress
+
+// Maximum token length edge cases
+
+fn test_max_token_length() {
+    // Very long identifier
+    let abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789 = 42;
+
+    // Long camelCase identifier
+    let thisIsAVeryLongVariableNameThatContainsManyWordsAndIsUsedToTestTheLexersAbilityToHandleVeryLongIdentifiersCorrectlyWithoutAnyIssues = 100;
+
+    // Long snake_case identifier
+    let this_is_a_very_long_variable_name_using_snake_case_convention_to_test_lexer_handling_of_long_identifiers_with_underscores = 200;
+
+    // Long string literal
+    let long_string = "This is a very long string literal that contains many characters and words to test the lexer's ability to handle long string tokens. It includes various characters like punctuation marks (.,;:!?), numbers (1234567890), and special symbols (@#$%^&*). The purpose is to ensure the lexer can correctly tokenize strings of significant length without buffer overflows, truncation, or other issues that might arise from processing lengthy text content.";
+
+    // Very long number with underscores (within i64 range)
+    let long_number = 123_456_789_012_345_678;
+
+    // Long hexadecimal number (within i64 range)
+    let long_hex = 0x7FFFFFFFFFFFFFF;
+
+    // Long binary number (within i64 range - 63 bits max)
+    let long_binary = 0b111111111111111111111111111111111111111111111111111111111111111;
+
+    // Long floating point number
+    let long_float = 3.141592653589793238462643383279502884197169399375105820974944592;
+
+    // Long scientific notation
+    let long_scientific = 1.23456789012345678901234567890e123;
+
+    // Long raw string (triple-quoted = raw = no escape processing)
+    let long_raw = """This is a very long raw string that contains many characters including backslashes \ and quotes without escaping. It is used to test how the lexer handles raw strings of significant length.""";
+
+    // Long multiline string
+    let long_multiline = """
+This is a very long multiline string that spans multiple lines.
+Each line contains text that contributes to the overall length.
+Line 3: More content to increase the string length.
+Line 4: Additional text for testing purposes.
+Line 5: The lexer should handle this without issues.
+""";
+
+    // Long interpolated string
+    let some_variable = 1;
+    let another_variable = 2;
+    let yet_another_variable = 3;
+    let final_variable = 4;
+    let long_interpolated = f"This is a long interpolated string with {some_variable} embedded and {another_variable} here and {yet_another_variable} there: {final_variable}.";
+
+    // Repeated pattern (stress test)
+    let repeated = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+}
+
+// Long type name
+type VeryLongTypeNameThatExceedsNormalNamingConventionsAndIsUsedToTestTheLexersCapabilityToProcessLongTypeIdentifiersWithoutErrors is {
+    value: Int,
+};
+
+// Long function name
+fn this_is_an_extremely_long_function_name_that_is_used_to_verify_the_lexer_handles_long_function_identifiers_appropriately() -> Int {
+    42
+}
+
+// Long comment
+// This is an extremely long single-line comment that contains many words and characters. The purpose of this comment is to test the lexer's ability to handle very long comment tokens.
+
+/* This is a very long block comment that spans what could be considered
+   multiple logical lines but is all one token. It contains various content
+   including code samples and explanatory text. */
+
+// Long generic type
+type LongGeneric<A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z> is {
+    a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H, i: I, j: J,
+    k: K, l: L, m: M, n: N, o: O, p: P, q: Q, r: R, s: S, t: T,
+    u: U, v: V, w: W, x: X, y: Y, z: Z,
+};
+
+fn test_long_arrays() {
+    // Long array literal
+    let long_array = [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+        41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
+        61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
+        81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100,
+    ];
+
+    // Long expression chain
+    let value = 42;
+    let long_chain = value
+        .to_string().to_string().to_string().to_string().to_string()
+        .to_string().to_string().to_string().to_string().to_string();
+}

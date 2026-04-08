@@ -1,0 +1,137 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, nested-records, structs
+// @timeout: 50000
+// @expected-exit: 0
+
+type Vec2 is { x: Int, y: Int };
+type Line is { start_x: Int, start_y: Int, end_x: Int, end_y: Int };
+
+implement Vec2 {
+    fn new(x: Int, y: Int) -> Vec2 { Vec2 { x: x, y: y } }
+    fn add(self, other: Vec2) -> Vec2 { Vec2 { x: self.x + other.x, y: self.y + other.y } }
+    fn scale(self, s: Int) -> Vec2 { Vec2 { x: self.x * s, y: self.y * s } }
+    fn mag_sq(self) -> Int { self.x * self.x + self.y * self.y }
+}
+
+implement Line {
+    fn new(sx: Int, sy: Int, ex: Int, ey: Int) -> Line {
+        Line { start_x: sx, start_y: sy, end_x: ex, end_y: ey }
+    }
+    fn dx(self) -> Int { self.end_x - self.start_x }
+    fn dy(self) -> Int { self.end_y - self.start_y }
+    fn length_sq(self) -> Int { self.dx() * self.dx() + self.dy() * self.dy() }
+    fn midpoint_x(self) -> Int { (self.start_x + self.end_x) / 2 }
+    fn midpoint_y(self) -> Int { (self.start_y + self.end_y) / 2 }
+}
+
+fn test_basic_nested() {
+    let v = Vec2.new(3, 4);
+    assert_eq(v.mag_sq(), 25);
+
+    let l = Line.new(0, 0, 3, 4);
+    assert_eq(l.dx(), 3);
+    assert_eq(l.dy(), 4);
+    assert_eq(l.length_sq(), 25);
+    print("  test_basic_nested: ok");
+}
+
+type Color is { r: Int, g: Int, b: Int };
+type Pixel is { x: Int, y: Int, cr: Int, cg: Int, cb: Int };
+
+implement Color {
+    fn new(r: Int, g: Int, b: Int) -> Color { Color { r: r, g: g, b: b } }
+    fn to_int(self) -> Int { self.r * 65536 + self.g * 256 + self.b }
+    fn brightness(self) -> Int { (self.r + self.g + self.b) / 3 }
+}
+
+implement Pixel {
+    fn new(x: Int, y: Int, c: Color) -> Pixel {
+        Pixel { x: x, y: y, cr: c.r, cg: c.g, cb: c.b }
+    }
+    fn color_val(self) -> Int { self.cr * 65536 + self.cg * 256 + self.cb }
+}
+
+fn test_record_composition() {
+    let red = Color.new(255, 0, 0);
+    assert_eq(red.to_int(), 16711680);
+    assert_eq(red.brightness(), 85);
+
+    let px = Pixel.new(10, 20, red);
+    assert_eq(px.x, 10);
+    assert_eq(px.y, 20);
+    assert_eq(px.color_val(), 16711680);
+    print("  test_record_composition: ok");
+}
+
+type Matrix2 is { m00: Int, m01: Int, m10: Int, m11: Int };
+
+implement Matrix2 {
+    fn identity() -> Matrix2 {
+        Matrix2 { m00: 1, m01: 0, m10: 0, m11: 1 }
+    }
+    fn mul(self, other: Matrix2) -> Matrix2 {
+        Matrix2 {
+            m00: self.m00 * other.m00 + self.m01 * other.m10,
+            m01: self.m00 * other.m01 + self.m01 * other.m11,
+            m10: self.m10 * other.m00 + self.m11 * other.m10,
+            m11: self.m10 * other.m01 + self.m11 * other.m11,
+        }
+    }
+    fn det(self) -> Int {
+        self.m00 * self.m11 - self.m01 * self.m10
+    }
+    fn transform(self, vx: Int, vy: Int) -> Vec2 {
+        Vec2 { x: self.m00 * vx + self.m01 * vy, y: self.m10 * vx + self.m11 * vy }
+    }
+}
+
+fn test_matrix_transform() {
+    let id = Matrix2.identity();
+    let v = id.transform(3, 4);
+    assert_eq(v.x, 3);
+    assert_eq(v.y, 4);
+
+    let rot90 = Matrix2 { m00: 0, m01: -1, m10: 1, m11: 0 };
+    let rotated = rot90.transform(1, 0);
+    assert_eq(rotated.x, 0);
+    assert_eq(rotated.y, 1);
+
+    let scale2 = Matrix2 { m00: 2, m01: 0, m10: 0, m11: 2 };
+    let scaled = scale2.transform(3, 4);
+    assert_eq(scaled.x, 6);
+    assert_eq(scaled.y, 8);
+
+    // Matrix multiply
+    let composed = rot90.mul(scale2);
+    let result = composed.transform(1, 0);
+    assert_eq(result.x, 0);
+    assert_eq(result.y, 2);
+
+    assert_eq(rot90.det(), 1);
+    assert_eq(scale2.det(), 4);
+    print("  test_matrix_transform: ok");
+}
+
+fn test_record_in_loop() {
+    let mut total_area = 0;
+    let mut i = 1;
+    while i <= 5 {
+        let rect = Line.new(0, 0, i, i);
+        total_area = total_area + rect.dx() * rect.dy();
+        i = i + 1;
+    }
+    // 1*1 + 2*2 + 3*3 + 4*4 + 5*5 = 55
+    assert_eq(total_area, 55);
+    print("  test_record_in_loop: ok");
+}
+
+fn main() -> Int {
+    test_basic_nested();
+    test_record_composition();
+    test_matrix_transform();
+    test_record_in_loop();
+    print("[OK] 617_interp_nested_records");
+    0
+}

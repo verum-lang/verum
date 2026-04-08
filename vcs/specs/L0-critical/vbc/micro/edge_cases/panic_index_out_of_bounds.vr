@@ -1,0 +1,13 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, panic, bounds-check, array
+// @timeout: 5000
+// @expected-panic: Index out of bounds
+
+fn main() {
+    let arr = [10, 20, 30];
+    let idx = 5;
+    let val = arr[idx];
+    print(f"{val}");
+}

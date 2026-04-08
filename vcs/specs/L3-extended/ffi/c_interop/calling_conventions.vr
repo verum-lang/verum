@@ -1,0 +1,395 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, calling-conventions, abi
+// @timeout: 10000
+// @description: Tests different calling conventions for FFI functions
+
+/// ============================================================
+/// CALLING CONVENTIONS
+/// ============================================================
+///
+/// Calling conventions define how functions receive parameters,
+/// return values, and manage the stack across language boundaries.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+type c_float is f32;
+type c_double is f64;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+
+// Windows-specific types
+type BOOL is c_int;
+type DWORD is c_ulong;
+type HANDLE is *mut c_void;
+type HWND is *mut c_void;
+type LPARAM is isize;
+type WPARAM is usize;
+type LRESULT is isize;
+
+// ------------------------------------------------------------
+// C Calling Convention (cdecl)
+// ------------------------------------------------------------
+
+/// Default C calling convention
+/// - Caller cleans up stack
+/// - Arguments pushed right-to-left
+/// - Return value in EAX/RAX (or XMM0 for floats)
+ffi cdecl_example {
+    @extern("C")
+    fn cdecl_function(a: c_int, b: c_int, c: c_int) -> c_int;
+
+    @extern("C")
+    fn cdecl_with_floats(x: c_float, y: c_double) -> c_double;
+
+    @extern("C")
+    fn cdecl_with_pointers(
+        data: *const u8,
+        len: size_t,
+        out: *mut u8
+    ) -> c_int;
+}
+
+/// Exporting with C convention
+@export("C")
+fn verum_cdecl_export(a: c_int, b: c_int) -> c_int {
+    a + b
+}
+
+// ------------------------------------------------------------
+// Standard Call Convention (stdcall)
+// ------------------------------------------------------------
+
+/// Windows stdcall convention
+/// - Callee cleans up stack
+/// - Arguments pushed right-to-left
+/// - Used by Win32 API
+@cfg(target_os = "windows")
+ffi stdcall_example {
+    @extern("stdcall")
+    fn MessageBoxA(
+        hwnd: HWND,
+        text: *const c_char,
+        caption: *const c_char,
+        uType: c_uint
+    ) -> c_int;
+
+    @extern("stdcall")
+    fn GetLastError() -> DWORD;
+
+    @extern("stdcall")
+    fn SetLastError(dwErrCode: DWORD);
+
+    @extern("stdcall")
+    fn CloseHandle(hObject: HANDLE) -> BOOL;
+
+    @extern("stdcall")
+    fn CreateThread(
+        lpThreadAttributes: *mut c_void,
+        dwStackSize: size_t,
+        lpStartAddress: ThreadProc,
+        lpParameter: *mut c_void,
+        dwCreationFlags: DWORD,
+        lpThreadId: *mut DWORD
+    ) -> HANDLE;
+}
+
+type ThreadProc is extern "stdcall" fn(*mut c_void) -> DWORD;
+
+/// Exporting with stdcall convention
+@cfg(target_os = "windows")
+@export("stdcall")
+fn verum_stdcall_export(handle: HANDLE) -> BOOL {
+    if handle.is_null() { 0 } else { 1 }
+}
+
+// ------------------------------------------------------------
+// Fast Call Convention (fastcall)
+// ------------------------------------------------------------
+
+/// Fastcall convention
+/// - First few arguments in registers (ECX, EDX on x86)
+/// - Callee cleans stack
+/// - Faster for small argument counts
+ffi fastcall_example {
+    @extern("fastcall")
+    fn fast_add(a: c_int, b: c_int) -> c_int;
+
+    @extern("fastcall")
+    fn fast_process(x: c_int, y: c_int, z: c_int) -> c_int;
+}
+
+@export("fastcall")
+fn verum_fastcall_export(a: c_int, b: c_int) -> c_int {
+    a * b
+}
+
+// ------------------------------------------------------------
+// Vectorcall Convention (SIMD optimized)
+// ------------------------------------------------------------
+
+/// Vectorcall convention (Windows)
+/// - Optimized for SIMD/vector arguments
+/// - Vector args passed in XMM/YMM registers
+/// - Efficient for floating-point intensive code
+@cfg(target_os = "windows")
+ffi vectorcall_example {
+    @extern("vectorcall")
+    fn vector_dot_product(
+        a: [c_float; 4],
+        b: [c_float; 4]
+    ) -> c_float;
+
+    @extern("vectorcall")
+    fn vector_cross_product(
+        a: [c_float; 3],
+        b: [c_float; 3],
+        result: *mut [c_float; 3]
+    );
+
+    @extern("vectorcall")
+    fn matrix_multiply_4x4(
+        a: *const [c_float; 16],
+        b: *const [c_float; 16],
+        result: *mut [c_float; 16]
+    );
+}
+
+// ------------------------------------------------------------
+// System Calling Convention
+// ------------------------------------------------------------
+
+/// System calling convention
+/// - Platform default for system APIs
+/// - stdcall on Windows x86
+/// - C calling convention on other platforms
+ffi system_example {
+    @extern("system")
+    fn system_api_call(arg1: c_int, arg2: c_int) -> c_int;
+
+    @extern("system")
+    fn system_with_handle(h: *mut c_void) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Windows x64 ABI
+// ------------------------------------------------------------
+
+/// Win64 calling convention
+/// - First 4 integer/pointer args: RCX, RDX, R8, R9
+/// - First 4 float args: XMM0, XMM1, XMM2, XMM3
+/// - Shadow space required (32 bytes)
+@cfg(all(target_os = "windows", target_arch = "x86_64"))
+ffi win64_example {
+    @extern("win64")
+    fn win64_function(
+        a: c_long,    // RCX
+        b: c_long,    // RDX
+        c: c_long,    // R8
+        d: c_long     // R9
+    ) -> c_long;      // RAX;
+
+    @extern("win64")
+    fn win64_mixed(
+        handle: HANDLE,     // RCX
+        offset: c_long,     // RDX
+        data: *mut u8,      // R8
+        size: size_t        // R9
+    ) -> c_long;
+}
+
+// ------------------------------------------------------------
+// System V AMD64 ABI
+// ------------------------------------------------------------
+
+/// SysV64 calling convention (Linux, macOS, BSD)
+/// - First 6 integer/pointer args: RDI, RSI, RDX, RCX, R8, R9
+/// - First 8 float args: XMM0-XMM7
+/// - No shadow space required
+@cfg(all(not(target_os = "windows"), target_arch = "x86_64"))
+ffi sysv64_example {
+    @extern("sysv64")
+    fn sysv64_function(
+        a: c_long,    // RDI
+        b: c_long,    // RSI
+        c: c_long,    // RDX
+        d: c_long,    // RCX
+        e: c_long,    // R8
+        f: c_long     // R9
+    ) -> c_long;      // RAX;
+
+    @extern("sysv64")
+    fn sysv64_with_floats(
+        x: c_double,   // XMM0
+        y: c_double,   // XMM1
+        z: c_double    // XMM2
+    ) -> c_double;     // XMM0;
+}
+
+// ------------------------------------------------------------
+// ARM64 AAPCS Calling Convention
+// ------------------------------------------------------------
+
+/// ARM64 calling convention (AAPCS64)
+/// - First 8 integer/pointer args: X0-X7
+/// - First 8 float/vector args: V0-V7 (or D0-D7, S0-S7)
+/// - Return in X0 (integer) or V0 (float)
+@cfg(target_arch = "aarch64")
+ffi aarch64_example {
+    @extern("C")  // C calling convention uses AAPCS64 on ARM64
+    fn aarch64_function(
+        a: c_long,    // X0
+        b: c_long,    // X1
+        c: c_long,    // X2
+        d: c_long,    // X3
+        e: c_long,    // X4
+        f: c_long,    // X5
+        g: c_long,    // X6
+        h: c_long     // X7
+    ) -> c_long;      // X0;
+
+    @extern("C")
+    fn aarch64_with_floats(
+        a: c_double,  // D0
+        b: c_double,  // D1
+        c: c_double,  // D2
+        d: c_double   // D3
+    ) -> c_double;    // D0;
+}
+
+// ------------------------------------------------------------
+// Thiscall Convention (C++ methods)
+// ------------------------------------------------------------
+
+/// Thiscall convention
+/// - 'thisp pointer in ECX (x86) or first argument (x64)
+/// - Used for C++ member functions
+@cfg(target_os = "windows")
+ffi thiscall_example {
+    @extern("thiscall")
+    fn cpp_method(this: *mut CppClass, arg: c_int) -> c_int;
+}
+
+@opaque
+type CppClass is ();
+
+// ------------------------------------------------------------
+// Interrupt Handler Convention
+// ------------------------------------------------------------
+
+/// Interrupt handler calling convention
+/// - All registers saved/restored
+/// - Special return instruction (iret)
+@cfg(any(target_arch = "x86", target_arch = "x86_64"))
+@interrupt
+fn timer_interrupt_handler(frame: &InterruptStackFrame) {
+    // Handle timer interrupt
+    // All registers are preserved automatically
+}
+
+@repr(C)
+type InterruptStackFrame is {
+    instruction_pointer: u64,
+    code_segment: u64,
+    cpu_flags: u64,
+    stack_pointer: u64,
+    stack_segment: u64,
+};
+
+// ------------------------------------------------------------
+// Naked Functions
+// ------------------------------------------------------------
+
+/// Naked function - no prologue/epilogue generated
+/// Must be pure assembly
+@naked
+unsafe fn context_switch(
+    old_stack: *mut usize,
+    new_stack: usize
+) {
+    // x86_64 assembly for context switch
+    // Assembly intrinsic - implementation handled by backend
+    let _old = old_stack;
+    let _new = new_stack;
+}
+
+// ------------------------------------------------------------
+// ABI Compatibility Verification
+// ------------------------------------------------------------
+
+/// Verify calling convention compatibility
+const _: () = {
+    // Verify register usage matches platform ABI
+    @cfg(all(target_os = "windows", target_arch = "x86_64"))
+    {
+        static_assert(SHADOW_SPACE_SIZE == 32);
+    }
+
+    @cfg(all(not(target_os = "windows"), target_arch = "x86_64"))
+    {
+        static_assert(RED_ZONE_SIZE == 128);
+    }
+};
+
+const SHADOW_SPACE_SIZE: usize = 32;  // Windows x64
+const RED_ZONE_SIZE: usize = 128;     // System V x64
+
+// ------------------------------------------------------------
+// Callback Type Aliases
+// ------------------------------------------------------------
+
+/// Function pointer types with explicit calling conventions
+type CCallback is extern "C" fn(c_int) -> c_int;
+type StdcallCallback is extern "stdcall" fn(HWND, c_uint, WPARAM, LPARAM) -> LRESULT;
+type FastcallCallback is extern "fastcall" fn(c_int, c_int) -> c_int;
+
+/// Window procedure (stdcall on Windows)
+@cfg(target_os = "windows")
+ffi user32 {
+    @extern("stdcall")
+    fn DefWindowProcW(
+        hwnd: HWND,
+        msg: c_uint,
+        wparam: WPARAM,
+        lparam: LPARAM
+    ) -> LRESULT;
+}
+
+/// Example window procedure implementation
+@cfg(target_os = "windows")
+@export("stdcall")
+fn window_proc(
+    hwnd: HWND,
+    msg: c_uint,
+    wparam: WPARAM,
+    lparam: LPARAM
+) -> LRESULT {
+    const WM_DESTROY: c_uint = 0x0002;
+    const WM_CLOSE: c_uint = 0x0010;
+
+    msg.match {
+        WM_CLOSE => {
+            // Handle close
+            0
+        }
+        WM_DESTROY => {
+            // Post quit message
+            0
+        }
+        _ => unsafe {
+            user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+    }
+}
+
+fn main() {
+    // Calling convention test compilation
+}

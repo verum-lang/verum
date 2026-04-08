@@ -1,0 +1,114 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, invalid, error
+
+// ERROR: Missing function name
+fn () { }
+
+// ERROR: Missing parameter list
+fn missing_params { }
+
+// ERROR: Missing function body
+fn no_body();
+
+// ERROR: Invalid parameter syntax - missing type
+fn bad_param(x) { }
+
+// ERROR: Invalid parameter syntax - missing name
+fn bad_param2(: Int) { }
+
+// ERROR: Duplicate parameter names
+fn dup_params(x: Int, x: Int) { }
+
+// ERROR: Invalid return type syntax
+fn bad_return() -> { }
+
+// ERROR: Missing arrow before return type
+fn no_arrow() Int { 42 }
+
+// ERROR: Invalid generic syntax
+fn bad_generic<>(x: Int) { }
+fn bad_generic2<T,>(x: T) { }
+fn bad_generic3<T U>(x: T) { }
+
+// ERROR: Invalid constraint syntax
+fn bad_constraint<T:>(x: T) { }
+
+// ERROR: Invalid where clause
+fn bad_where<T>(x: T) where { }
+fn bad_where2<T>(x: T) where T: { }
+
+// ERROR: Invalid async placement
+fn async invalid() { }
+
+// ERROR: Invalid unsafe placement
+fn unsafe invalid() { }
+
+// ERROR: Invalid context syntax
+fn bad_context() using { }
+fn bad_context2() using [] { }
+fn bad_context3() using Database { }
+
+// ERROR: Invalid self parameter outside implement
+fn orphan_self(self) { }
+
+// ERROR: Invalid method receiver
+implement Foo {
+    fn bad_receiver(self self) { }
+    fn bad_receiver2(&& self) { }
+}
+
+// ERROR: Unclosed body
+fn unclosed() {
+    let x = 1;
+
+// ERROR: Invalid keyword as function name
+fn fn() { }
+fn type() { }
+fn let() { }
+
+// ERROR: Numeric function name
+fn 123() { }
+fn 0abc() { }
+
+// ERROR: Missing closing brace
+fn unclosed2() {
+    let x = 1;
+    // missing }
+
+// ERROR: Extra closing brace
+fn extra_brace() { } }
+
+// ERROR: Arrow without return type
+fn bad_arrow() -> { }
+fn missing_type() -> { 42 }
+
+// ERROR: Multiple return types
+fn multi_return() -> Int -> Text { }
+
+// ERROR: Invalid visibility modifier
+private fn bad_visibility() { }
+internal pub fn double_vis() { }
+
+// ERROR: Function body as expression without braces
+fn no_braces() 42;
+
+// ERROR: Invalid async modifier position
+fn pub async wrong_order() { }
+
+// ERROR: Duplicate modifiers
+pub pub fn double_pub() { }
+async async fn double_async() { }
+
+// ERROR: Invalid parameter separator
+fn bad_sep(a: Int; b: Int) { }
+
+// ERROR: Missing closing parenthesis in params
+fn missing_paren(a: Int, b: Int { }
+
+// ERROR: Expression in parameter position
+fn expr_param(1 + 2: Int) { }
+
+// ERROR: Invalid where syntax
+fn bad_where<T>() where { }

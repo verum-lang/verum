@@ -1,0 +1,67 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, reflection, variants_of, error
+// @description: Test variants_of error handling for non-variant types
+// @expected-error: M003
+
+// =============================================================================
+// TYPE DEFINITIONS (top-level)
+// =============================================================================
+
+type Point is { x: Int, y: Int };
+type MyEnum is A | B;
+
+// =============================================================================
+// VARIANTS_OF ON NON-VARIANT TYPES
+// =============================================================================
+
+// ERROR: variants_of on record type (not a variant/enum)
+meta fn test_variants_of_record() -> List<Text> using [MetaTypes] {
+    variants_of(Point)  // ERROR: Point is a record, not a variant
+}
+
+// =============================================================================
+// VARIANTS_OF ON PRIMITIVES
+// =============================================================================
+
+// ERROR: variants_of on Int
+meta fn test_variants_of_int() -> List<Text> using [MetaTypes] {
+    variants_of(Int)  // ERROR: Int has no variants
+}
+
+// ERROR: variants_of on Text
+meta fn test_variants_of_text() -> List<Text> using [MetaTypes] {
+    variants_of(Text)  // ERROR: Text has no variants
+}
+
+// =============================================================================
+// VARIANTS_OF ON ARRAY TYPES
+// =============================================================================
+
+// ERROR: variants_of on array
+meta fn test_variants_of_array() -> List<Text> using [MetaTypes] {
+    variants_of([Int; 5])  // ERROR: arrays have no variants
+}
+
+// =============================================================================
+// ARITY ERRORS
+// =============================================================================
+
+// ERROR: variants_of with no arguments
+meta fn test_variants_of_no_args() -> List<Text> using [MetaTypes] {
+    variants_of()  // ERROR: expected 1 argument
+}
+
+// =============================================================================
+// TYPE ERROR ON ARGUMENT
+// =============================================================================
+
+// ERROR: variants_of with non-type argument
+meta fn test_variants_of_non_type() -> List<Text> using [MetaTypes] {
+    variants_of(42)  // ERROR: expected type, got Int
+}
+
+fn main() {
+    @const test_variants_of_record();
+}

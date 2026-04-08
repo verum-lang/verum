@@ -1,0 +1,31 @@
+// @test: run
+// @expected-stdout: Parent request_id: req-123\nChild sees request_id: req-123\nChild sees user_id: user-456
+// @tier: 0
+// @level: L2
+// @tags: async, spawn, context
+// @description: Context propagation across spawn boundaries
+
+context RequestId: Text;
+context UserId: Text;
+
+async fn child_task() using [RequestId, UserId] {
+    println(f"Child sees request_id: {RequestId}");
+    println(f"Child sees user_id: {UserId}");
+}
+
+async fn parent_task() using [RequestId] {
+    println(f"Parent request_id: {RequestId}");
+
+    // Spawn with additional context
+    provide UserId = "user-456" {
+        // Context is automatically propagated to spawned tasks
+        let handle = spawn child_task();
+        handle.await;
+    }
+}
+
+async fn main() {
+    provide RequestId = "req-123" {
+        parent_task().await;
+    }
+}

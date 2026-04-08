@@ -1,0 +1,374 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, sparse-matrix, coo-format, linear-algebra
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for sparse matrix operations in COO (Coordinate) format
+
+// COO sparse matrix: up to 16 non-zero entries
+// Each entry is (row, col, value)
+type SparseMat is {
+    r0: Int, r1: Int, r2: Int, r3: Int, r4: Int, r5: Int, r6: Int, r7: Int,
+    r8: Int, r9: Int, r10: Int, r11: Int, r12: Int, r13: Int, r14: Int, r15: Int,
+    c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int, c12: Int, c13: Int, c14: Int, c15: Int,
+    v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int,
+    v8: Int, v9: Int, v10: Int, v11: Int, v12: Int, v13: Int, v14: Int, v15: Int,
+    nnz: Int, rows: Int, cols: Int
+};
+
+fn sm_row(m: SparseMat, i: Int) -> Int {
+    if i == 0 { m.r0 } else if i == 1 { m.r1 } else if i == 2 { m.r2 }
+    else if i == 3 { m.r3 } else if i == 4 { m.r4 } else if i == 5 { m.r5 }
+    else if i == 6 { m.r6 } else if i == 7 { m.r7 } else if i == 8 { m.r8 }
+    else if i == 9 { m.r9 } else if i == 10 { m.r10 } else if i == 11 { m.r11 }
+    else if i == 12 { m.r12 } else if i == 13 { m.r13 } else if i == 14 { m.r14 }
+    else { m.r15 }
+}
+
+fn sm_col(m: SparseMat, i: Int) -> Int {
+    if i == 0 { m.c0 } else if i == 1 { m.c1 } else if i == 2 { m.c2 }
+    else if i == 3 { m.c3 } else if i == 4 { m.c4 } else if i == 5 { m.c5 }
+    else if i == 6 { m.c6 } else if i == 7 { m.c7 } else if i == 8 { m.c8 }
+    else if i == 9 { m.c9 } else if i == 10 { m.c10 } else if i == 11 { m.c11 }
+    else if i == 12 { m.c12 } else if i == 13 { m.c13 } else if i == 14 { m.c14 }
+    else { m.c15 }
+}
+
+fn sm_val(m: SparseMat, i: Int) -> Int {
+    if i == 0 { m.v0 } else if i == 1 { m.v1 } else if i == 2 { m.v2 }
+    else if i == 3 { m.v3 } else if i == 4 { m.v4 } else if i == 5 { m.v5 }
+    else if i == 6 { m.v6 } else if i == 7 { m.v7 } else if i == 8 { m.v8 }
+    else if i == 9 { m.v9 } else if i == 10 { m.v10 } else if i == 11 { m.v11 }
+    else if i == 12 { m.v12 } else if i == 13 { m.v13 } else if i == 14 { m.v14 }
+    else { m.v15 }
+}
+
+fn sm_set_row(m: SparseMat, i: Int, v: Int) -> SparseMat {
+    SparseMat {
+        r0: if i == 0 { v } else { m.r0 }, r1: if i == 1 { v } else { m.r1 },
+        r2: if i == 2 { v } else { m.r2 }, r3: if i == 3 { v } else { m.r3 },
+        r4: if i == 4 { v } else { m.r4 }, r5: if i == 5 { v } else { m.r5 },
+        r6: if i == 6 { v } else { m.r6 }, r7: if i == 7 { v } else { m.r7 },
+        r8: if i == 8 { v } else { m.r8 }, r9: if i == 9 { v } else { m.r9 },
+        r10: if i == 10 { v } else { m.r10 }, r11: if i == 11 { v } else { m.r11 },
+        r12: if i == 12 { v } else { m.r12 }, r13: if i == 13 { v } else { m.r13 },
+        r14: if i == 14 { v } else { m.r14 }, r15: if i == 15 { v } else { m.r15 },
+        c0: m.c0, c1: m.c1, c2: m.c2, c3: m.c3, c4: m.c4, c5: m.c5, c6: m.c6, c7: m.c7,
+        c8: m.c8, c9: m.c9, c10: m.c10, c11: m.c11, c12: m.c12, c13: m.c13, c14: m.c14, c15: m.c15,
+        v0: m.v0, v1: m.v1, v2: m.v2, v3: m.v3, v4: m.v4, v5: m.v5, v6: m.v6, v7: m.v7,
+        v8: m.v8, v9: m.v9, v10: m.v10, v11: m.v11, v12: m.v12, v13: m.v13, v14: m.v14, v15: m.v15,
+        nnz: m.nnz, rows: m.rows, cols: m.cols
+    }
+}
+
+fn sm_set_col(m: SparseMat, i: Int, v: Int) -> SparseMat {
+    SparseMat {
+        r0: m.r0, r1: m.r1, r2: m.r2, r3: m.r3, r4: m.r4, r5: m.r5, r6: m.r6, r7: m.r7,
+        r8: m.r8, r9: m.r9, r10: m.r10, r11: m.r11, r12: m.r12, r13: m.r13, r14: m.r14, r15: m.r15,
+        c0: if i == 0 { v } else { m.c0 }, c1: if i == 1 { v } else { m.c1 },
+        c2: if i == 2 { v } else { m.c2 }, c3: if i == 3 { v } else { m.c3 },
+        c4: if i == 4 { v } else { m.c4 }, c5: if i == 5 { v } else { m.c5 },
+        c6: if i == 6 { v } else { m.c6 }, c7: if i == 7 { v } else { m.c7 },
+        c8: if i == 8 { v } else { m.c8 }, c9: if i == 9 { v } else { m.c9 },
+        c10: if i == 10 { v } else { m.c10 }, c11: if i == 11 { v } else { m.c11 },
+        c12: if i == 12 { v } else { m.c12 }, c13: if i == 13 { v } else { m.c13 },
+        c14: if i == 14 { v } else { m.c14 }, c15: if i == 15 { v } else { m.c15 },
+        v0: m.v0, v1: m.v1, v2: m.v2, v3: m.v3, v4: m.v4, v5: m.v5, v6: m.v6, v7: m.v7,
+        v8: m.v8, v9: m.v9, v10: m.v10, v11: m.v11, v12: m.v12, v13: m.v13, v14: m.v14, v15: m.v15,
+        nnz: m.nnz, rows: m.rows, cols: m.cols
+    }
+}
+
+fn sm_set_val(m: SparseMat, i: Int, v: Int) -> SparseMat {
+    SparseMat {
+        r0: m.r0, r1: m.r1, r2: m.r2, r3: m.r3, r4: m.r4, r5: m.r5, r6: m.r6, r7: m.r7,
+        r8: m.r8, r9: m.r9, r10: m.r10, r11: m.r11, r12: m.r12, r13: m.r13, r14: m.r14, r15: m.r15,
+        c0: m.c0, c1: m.c1, c2: m.c2, c3: m.c3, c4: m.c4, c5: m.c5, c6: m.c6, c7: m.c7,
+        c8: m.c8, c9: m.c9, c10: m.c10, c11: m.c11, c12: m.c12, c13: m.c13, c14: m.c14, c15: m.c15,
+        v0: if i == 0 { v } else { m.v0 }, v1: if i == 1 { v } else { m.v1 },
+        v2: if i == 2 { v } else { m.v2 }, v3: if i == 3 { v } else { m.v3 },
+        v4: if i == 4 { v } else { m.v4 }, v5: if i == 5 { v } else { m.v5 },
+        v6: if i == 6 { v } else { m.v6 }, v7: if i == 7 { v } else { m.v7 },
+        v8: if i == 8 { v } else { m.v8 }, v9: if i == 9 { v } else { m.v9 },
+        v10: if i == 10 { v } else { m.v10 }, v11: if i == 11 { v } else { m.v11 },
+        v12: if i == 12 { v } else { m.v12 }, v13: if i == 13 { v } else { m.v13 },
+        v14: if i == 14 { v } else { m.v14 }, v15: if i == 15 { v } else { m.v15 },
+        nnz: m.nnz, rows: m.rows, cols: m.cols
+    }
+}
+
+fn sm_empty(nrows: Int, ncols: Int) -> SparseMat {
+    SparseMat {
+        r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0,
+        r8: 0, r9: 0, r10: 0, r11: 0, r12: 0, r13: 0, r14: 0, r15: 0,
+        c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        v8: 0, v9: 0, v10: 0, v11: 0, v12: 0, v13: 0, v14: 0, v15: 0,
+        nnz: 0, rows: nrows, cols: ncols
+    }
+}
+
+// Insert a new entry at position nnz
+fn sm_insert(m: SparseMat, r: Int, c: Int, v: Int) -> SparseMat {
+    let idx = m.nnz;
+    let m2 = sm_set_row(m, idx, r);
+    let m3 = sm_set_col(m2, idx, c);
+    let m4 = sm_set_val(m3, idx, v);
+    SparseMat {
+        r0: m4.r0, r1: m4.r1, r2: m4.r2, r3: m4.r3, r4: m4.r4, r5: m4.r5, r6: m4.r6, r7: m4.r7,
+        r8: m4.r8, r9: m4.r9, r10: m4.r10, r11: m4.r11, r12: m4.r12, r13: m4.r13, r14: m4.r14, r15: m4.r15,
+        c0: m4.c0, c1: m4.c1, c2: m4.c2, c3: m4.c3, c4: m4.c4, c5: m4.c5, c6: m4.c6, c7: m4.c7,
+        c8: m4.c8, c9: m4.c9, c10: m4.c10, c11: m4.c11, c12: m4.c12, c13: m4.c13, c14: m4.c14, c15: m4.c15,
+        v0: m4.v0, v1: m4.v1, v2: m4.v2, v3: m4.v3, v4: m4.v4, v5: m4.v5, v6: m4.v6, v7: m4.v7,
+        v8: m4.v8, v9: m4.v9, v10: m4.v10, v11: m4.v11, v12: m4.v12, v13: m4.v13, v14: m4.v14, v15: m4.v15,
+        nnz: idx + 1, rows: m4.rows, cols: m4.cols
+    }
+}
+
+// Look up value at (r, c), return 0 if not found
+fn sm_get(m: SparseMat, r: Int, c: Int) -> Int {
+    let mut i = 0;
+    while i < m.nnz {
+        if sm_row(m, i) == r {
+            if sm_col(m, i) == c {
+                return sm_val(m, i);
+            }
+        }
+        i = i + 1;
+    }
+    0
+}
+
+// Transpose: swap rows and cols
+fn sm_transpose(m: SparseMat) -> SparseMat {
+    let mut result = sm_empty(m.cols, m.rows);
+    let mut i = 0;
+    while i < m.nnz {
+        result = sm_insert(result, sm_col(m, i), sm_row(m, i), sm_val(m, i));
+        i = i + 1;
+    }
+    result
+}
+
+// Add two sparse matrices (same dimensions)
+fn sm_add(a: SparseMat, b: SparseMat) -> SparseMat {
+    let mut result = sm_empty(a.rows, a.cols);
+    // Add all entries from a
+    let mut i = 0;
+    while i < a.nnz {
+        result = sm_insert(result, sm_row(a, i), sm_col(a, i), sm_val(a, i));
+        i = i + 1;
+    }
+    // Add entries from b, merging duplicates
+    let mut j = 0;
+    while j < b.nnz {
+        let br = sm_row(b, j);
+        let bc = sm_col(b, j);
+        let bv = sm_val(b, j);
+        // Check if this position exists in result
+        let mut found = 0;
+        let mut k = 0;
+        while k < result.nnz {
+            if sm_row(result, k) == br {
+                if sm_col(result, k) == bc {
+                    result = sm_set_val(result, k, sm_val(result, k) + bv);
+                    found = 1;
+                }
+            }
+            k = k + 1;
+        }
+        if found == 0 {
+            result = sm_insert(result, br, bc, bv);
+        }
+        j = j + 1;
+    }
+    result
+}
+
+// Sparse matrix-vector multiply: y = A * x
+// x and y are dense vectors stored in Arr8
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 }
+}
+
+fn spmv(m: SparseMat, x: Arr8) -> Arr8 {
+    let mut y = a8_zero();
+    let mut i = 0;
+    while i < m.nnz {
+        let r = sm_row(m, i);
+        let c = sm_col(m, i);
+        let v = sm_val(m, i);
+        y = a8_set(y, r, a8_get(y, r) + v * a8_get(x, c));
+        i = i + 1;
+    }
+    y
+}
+
+// Frobenius norm squared (sum of squares of all entries)
+fn sm_frobenius_sq(m: SparseMat) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < m.nnz {
+        let v = sm_val(m, i);
+        sum = sum + v * v;
+        i = i + 1;
+    }
+    sum
+}
+
+// Trace (sum of diagonal elements)
+fn sm_trace(m: SparseMat) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < m.nnz {
+        if sm_row(m, i) == sm_col(m, i) {
+            sum = sum + sm_val(m, i);
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_basic_ops() {
+    // 3x3 identity matrix
+    let mut eye = sm_empty(3, 3);
+    eye = sm_insert(eye, 0, 0, 1);
+    eye = sm_insert(eye, 1, 1, 1);
+    eye = sm_insert(eye, 2, 2, 1);
+    assert_eq(eye.nnz, 3);
+    assert_eq(sm_get(eye, 0, 0), 1);
+    assert_eq(sm_get(eye, 1, 1), 1);
+    assert_eq(sm_get(eye, 2, 2), 1);
+    assert_eq(sm_get(eye, 0, 1), 0);
+    assert_eq(sm_trace(eye), 3);
+    assert_eq(sm_frobenius_sq(eye), 3);
+}
+
+fn test_transpose() {
+    // A = [[1, 0, 2], [0, 3, 0]]  (2x3)
+    let mut a = sm_empty(2, 3);
+    a = sm_insert(a, 0, 0, 1);
+    a = sm_insert(a, 0, 2, 2);
+    a = sm_insert(a, 1, 1, 3);
+
+    let at = sm_transpose(a);
+    assert_eq(at.rows, 3);
+    assert_eq(at.cols, 2);
+    assert_eq(at.nnz, 3);
+    assert_eq(sm_get(at, 0, 0), 1);
+    assert_eq(sm_get(at, 2, 0), 2);
+    assert_eq(sm_get(at, 1, 1), 3);
+    assert_eq(sm_get(at, 0, 1), 0);
+}
+
+fn test_addition() {
+    // A = [[1, 2], [0, 3]]
+    let mut a = sm_empty(2, 2);
+    a = sm_insert(a, 0, 0, 1);
+    a = sm_insert(a, 0, 1, 2);
+    a = sm_insert(a, 1, 1, 3);
+
+    // B = [[4, 0], [5, 1]]
+    let mut b = sm_empty(2, 2);
+    b = sm_insert(b, 0, 0, 4);
+    b = sm_insert(b, 1, 0, 5);
+    b = sm_insert(b, 1, 1, 1);
+
+    let c = sm_add(a, b);
+    assert_eq(sm_get(c, 0, 0), 5);  // 1+4
+    assert_eq(sm_get(c, 0, 1), 2);  // 2+0
+    assert_eq(sm_get(c, 1, 0), 5);  // 0+5
+    assert_eq(sm_get(c, 1, 1), 4);  // 3+1
+}
+
+fn test_spmv() {
+    // A = [[2, 0, 1], [0, 3, 0], [1, 0, 4]]
+    let mut a = sm_empty(3, 3);
+    a = sm_insert(a, 0, 0, 2);
+    a = sm_insert(a, 0, 2, 1);
+    a = sm_insert(a, 1, 1, 3);
+    a = sm_insert(a, 2, 0, 1);
+    a = sm_insert(a, 2, 2, 4);
+
+    // x = [1, 2, 3]
+    let x = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+
+    // y = A * x = [2*1+0+1*3, 0+3*2+0, 1*1+0+4*3] = [5, 6, 13]
+    let y = spmv(a, x);
+    assert_eq(a8_get(y, 0), 5);
+    assert_eq(a8_get(y, 1), 6);
+    assert_eq(a8_get(y, 2), 13);
+}
+
+fn test_spmv_identity() {
+    // I * x = x
+    let mut eye = sm_empty(3, 3);
+    eye = sm_insert(eye, 0, 0, 1);
+    eye = sm_insert(eye, 1, 1, 1);
+    eye = sm_insert(eye, 2, 2, 1);
+
+    let x = Arr8 { d0: 7, d1: 11, d2: 13, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let y = spmv(eye, x);
+    assert_eq(a8_get(y, 0), 7);
+    assert_eq(a8_get(y, 1), 11);
+    assert_eq(a8_get(y, 2), 13);
+}
+
+fn test_frobenius_and_trace() {
+    // A = [[3, 0], [0, 4]]
+    let mut a = sm_empty(2, 2);
+    a = sm_insert(a, 0, 0, 3);
+    a = sm_insert(a, 1, 1, 4);
+    assert_eq(sm_trace(a), 7);
+    assert_eq(sm_frobenius_sq(a), 25);  // 9+16
+
+    // B = [[1, 2], [3, 4]]
+    let mut b = sm_empty(2, 2);
+    b = sm_insert(b, 0, 0, 1);
+    b = sm_insert(b, 0, 1, 2);
+    b = sm_insert(b, 1, 0, 3);
+    b = sm_insert(b, 1, 1, 4);
+    assert_eq(sm_trace(b), 5);
+    assert_eq(sm_frobenius_sq(b), 30);  // 1+4+9+16
+}
+
+fn test_empty_matrix() {
+    let e = sm_empty(3, 3);
+    assert_eq(e.nnz, 0);
+    assert_eq(sm_get(e, 0, 0), 0);
+    assert_eq(sm_trace(e), 0);
+    assert_eq(sm_frobenius_sq(e), 0);
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_transpose();
+    test_addition();
+    test_spmv();
+    test_spmv_identity();
+    test_frobenius_and_trace();
+    test_empty_matrix();
+    print("[OK] 301_sparse_matrix_aot");
+    0
+}

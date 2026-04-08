@@ -1,0 +1,22 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: heap, list, field
+// @expect: pass
+
+type Node is {
+    value: Int,
+    children: List<Heap<Node>>,
+};
+
+fn main() -> Int {
+    let leaf = Node { value: 42, children: [] };
+    let root = Node { value: 5, children: [Heap(leaf)] };
+    let kids = root.children;
+    let h = kids[0];
+    let child = *h;
+    let v = child.value;
+    print(f"v = {v}");
+    assert_eq(v, 42);
+    0
+}

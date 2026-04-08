@@ -1,0 +1,136 @@
+// =============================================================================
+// result_intoiter_test.vr - Tests for Result IntoIterator
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, result, intoiterator, core
+// @description: Tests for Result<T, E> IntoIterator protocol implementation
+// =============================================================================
+
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: IntoIterator for Result - basic
+// =============================================================================
+
+@test
+fn test_result_ok_into_iter() {
+    let val: Result<Int, Text> = Ok(42);
+    let mut count = 0;
+    let mut sum = 0;
+    for x in val {
+        count = count + 1;
+        sum = sum + x;
+    }
+    assert_eq(count, 1);
+    assert_eq(sum, 42);
+}
+
+@test
+fn test_result_err_into_iter() {
+    let val: Result<Int, Text> = Err("error");
+    let mut count = 0;
+    for x in val {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_result_ok_text_into_iter() {
+    let val: Result<Text, Int> = Ok("hello");
+    let mut found = false;
+    for x in val {
+        assert_eq(x, "hello");
+        found = true;
+    }
+    assert(found);
+}
+
+// =============================================================================
+// Section 2: ResultIter properties
+// =============================================================================
+
+@test
+fn test_result_iter_size_hint_ok() {
+    let val: Result<Int, Text> = Ok(10);
+    let iter = val.iter();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 1);
+    assert_eq(hint.1.unwrap(), 1);
+}
+
+@test
+fn test_result_iter_size_hint_err() {
+    let val: Result<Int, Text> = Err("e");
+    let iter = val.iter();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 0);
+    assert_eq(hint.1.unwrap(), 0);
+}
+
+@test
+fn test_result_iter_next_ok() {
+    let val: Result<Int, Text> = Ok(5);
+    let mut iter = val.iter();
+    assert_eq(*iter.next().unwrap(), 5);
+    assert(iter.next().is_none());
+}
+
+@test
+fn test_result_iter_next_err() {
+    let val: Result<Int, Text> = Err("e");
+    let mut iter = val.iter();
+    assert(iter.next().is_none());
+}
+
+// =============================================================================
+// Section 3: Using IntoIterator with iterator adapters
+// =============================================================================
+
+@test
+fn test_result_into_iter_collect() {
+    let val: Result<Int, Text> = Ok(42);
+    let items: List<Int> = val.into_iter().collect();
+    assert_eq(items.len(), 1);
+    assert_eq(items[0], 42);
+}
+
+@test
+fn test_result_err_into_iter_collect() {
+    let val: Result<Int, Text> = Err("oops");
+    let items: List<Int> = val.into_iter().collect();
+    assert(items.is_empty());
+}
+
+@test
+fn test_result_into_iter_map() {
+    let val: Result<Int, Text> = Ok(5);
+    let doubled: List<Int> = val.into_iter().map(|x| x * 2).collect();
+    assert_eq(doubled.len(), 1);
+    assert_eq(doubled[0], 10);
+}
+
+@test
+fn test_result_into_iter_filter() {
+    let val: Result<Int, Text> = Ok(5);
+    let filtered: List<Int> = val.into_iter().filter(|x| *x > 10).collect();
+    assert(filtered.is_empty());
+}
+
+@test
+fn test_result_into_iter_filter_pass() {
+    let val: Result<Int, Text> = Ok(15);
+    let filtered: List<Int> = val.into_iter().filter(|x| *x > 10).collect();
+    assert_eq(filtered.len(), 1);
+    assert_eq(filtered[0], 15);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,113 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, file-io, integration, threads
+// @expected-exit: 0
+
+// Test: File I/O integration — write, read, overwrite, verify.
+// Also tests file I/O combined with threads and timing.
+
+fn __file_write_string_raw(path: Text, content: Text) -> Int {
+    0
+}
+
+fn __file_read_to_string_raw(path: Text) -> Text {
+    ""
+}
+
+fn __time_monotonic_nanos_raw() -> Int {
+    0
+}
+
+fn compute_data(n: Int) -> Int {
+    let mut acc = 0;
+    let mut i = 1;
+    while (i <= n) {
+        acc = acc + i * i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: Write and read back a simple string
+    let path1 = "/tmp/verum_test_935a.txt";
+    let content1 = "Verum file I/O test";
+    let written = __file_write_string_raw(path1, content1);
+    if (written == 0) {
+        print("FAIL test1a: write returned 0");
+        return 1;
+    }
+    let read1 = __file_read_to_string_raw(path1);
+    if (read1 != content1) {
+        print(f"FAIL test1b: read='{read1}'");
+        return 1;
+    }
+
+    // Test 2: Write f-string computed content
+    let value = compute_data(10); // sum of squares 1..10 = 385
+    let path2 = "/tmp/verum_test_935b.txt";
+    let content2 = f"computed={value}";
+    let w2 = __file_write_string_raw(path2, content2);
+    if (w2 == 0) {
+        print("FAIL test2a: write returned 0");
+        return 1;
+    }
+    let r2 = __file_read_to_string_raw(path2);
+    if (r2 != content2) {
+        print(f"FAIL test2b: read='{r2}' expected='{content2}'");
+        return 1;
+    }
+
+    // Test 3: Overwrite file with longer content
+    let long_content = "This is a longer string with numbers 1234567890 and special chars";
+    let w3 = __file_write_string_raw(path1, long_content);
+    if (w3 == 0) {
+        print("FAIL test3a: write returned 0");
+        return 1;
+    }
+    let r3 = __file_read_to_string_raw(path1);
+    if (r3 != long_content) {
+        print(f"FAIL test3b: content mismatch");
+        return 1;
+    }
+
+    // Test 4: Timed file I/O
+    let t_start = __time_monotonic_nanos_raw();
+    let path3 = "/tmp/verum_test_935c.txt";
+    __file_write_string_raw(path3, "timing test data");
+    let r4 = __file_read_to_string_raw(path3);
+    let t_end = __time_monotonic_nanos_raw();
+    let elapsed = t_end - t_start;
+    if (r4 != "timing test data") {
+        print(f"FAIL test4a: content mismatch");
+        return 1;
+    }
+    if (elapsed <= 0) {
+        print(f"FAIL test4b: elapsed={elapsed}");
+        return 1;
+    }
+
+    // Test 5: Concurrent computation + file I/O
+    let w1 = spawn compute_data(100);
+    let w2_task = spawn compute_data(200);
+    let result1 = w1.await;
+    let result2 = w2_task.await;
+    // sum of squares 1..100 = 338350
+    if (result1 != 338350) {
+        print(f"FAIL test5a: result1={result1}");
+        return 1;
+    }
+    // Write thread results to file
+    let path4 = "/tmp/verum_test_935d.txt";
+    let result_str = f"r1={result1} r2={result2}";
+    __file_write_string_raw(path4, result_str);
+    let r5 = __file_read_to_string_raw(path4);
+    if (r5 != result_str) {
+        print(f"FAIL test5b: content mismatch");
+        return 1;
+    }
+
+    print("935_file_io_integration: PASS");
+    0
+}

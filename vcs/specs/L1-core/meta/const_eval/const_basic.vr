@@ -1,0 +1,44 @@
+// @test: parse
+// @level: L1
+// @tags: meta, const, compile-time
+// @timeout: 5000
+
+/// Compile-time constant evaluation.
+/// Grammar: const_def = visibility 'const' identifier ':' type_expr '=' const_expr ';'
+///          meta_function_name includes 'const'
+
+// Basic constants
+const PI: Float = 3.14159265358979;
+const TAU: Float = 2.0 * PI;
+const MAX_BUFFER: Int = 1024 * 1024;
+const GREETING: Text = "Hello, World!";
+
+// Computed constant
+const BITS_PER_BYTE: Int = 8;
+const BYTES_PER_INT: Int = 8;
+const BITS_PER_INT: Int = BITS_PER_BYTE * BYTES_PER_INT;
+
+// Boolean constants
+const DEBUG_MODE: Bool = false;
+const ENABLE_LOGGING: Bool = true;
+
+// @const meta function for compile-time evaluation
+fn compute_at_compile_time() {
+    let compile_time_result = @const(2 + 3 * 4);
+    assert_eq(compile_time_result, 14);
+
+    let compile_file = @file();
+    let compile_line = @line();
+    let compile_module = @module();
+}
+
+// Constants used in type definitions
+const MAX_NAME_LEN: Int = 255;
+type BoundedName is Text { self.len() <= MAX_NAME_LEN };
+
+fn main() {
+    assert_eq(BITS_PER_INT, 64);
+    assert_eq(MAX_BUFFER, 1048576);
+    compute_at_compile_time();
+    print("Const basic tests parsed");
+}

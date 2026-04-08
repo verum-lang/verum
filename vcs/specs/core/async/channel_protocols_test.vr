@@ -1,0 +1,296 @@
+// =============================================================================
+// channel_protocols_test.vr - Tests for channel error type Display protocols
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, channel, display, debug, error, protocols, core
+// @description: Tests Display impls for SendError, TrySendError, TryRecvError, RecvError
+// =============================================================================
+
+mount core.async.channel.{
+    SendError,
+    TrySendError,
+    TryRecvError,
+    RecvError,
+    Sender,
+    Receiver,
+    OneshotSender,
+    OneshotReceiver,
+    channel,
+    bounded,
+    oneshot,
+};
+mount core.base.protocols.{Display, Debug, Eq, Clone};
+mount core.text.format.{Formatter, FormatSpec, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: SendError Display
+// =============================================================================
+
+@test
+fn test_send_error_display() {
+    let err: SendError<Int> = SendError(42);
+    let text = format_display(&err);
+    assert_eq(text, "sending on a closed channel");
+}
+
+@test
+fn test_send_error_debug() {
+    let err: SendError<Int> = SendError(42);
+    let text = format_debug(&err);
+    assert(text.contains("SendError"));
+}
+
+@test
+fn test_send_error_inner_value() {
+    let err: SendError<Int> = SendError(99);
+    let SendError(val) = err;
+    assert_eq(val, 99);
+}
+
+@test
+fn test_send_error_display_different_values() {
+    let err1: SendError<Int> = SendError(0);
+    let err2: SendError<Int> = SendError(999);
+    // Display message is the same regardless of inner value
+    assert_eq(format_display(&err1), format_display(&err2));
+}
+
+// =============================================================================
+// Section 2: TrySendError Display
+// =============================================================================
+
+@test
+fn test_try_send_error_full_display() {
+    let err: TrySendError<Int> = TrySendError.Full(42);
+    let text = format_display(&err);
+    assert_eq(text, "sending on a full channel");
+}
+
+@test
+fn test_try_send_error_disconnected_display() {
+    let err: TrySendError<Int> = TrySendError.Disconnected(42);
+    let text = format_display(&err);
+    assert_eq(text, "sending on a disconnected channel");
+}
+
+@test
+fn test_try_send_error_full_debug() {
+    let err: TrySendError<Int> = TrySendError.Full(42);
+    let text = format_debug(&err);
+    assert(text.contains("Full"));
+}
+
+@test
+fn test_try_send_error_disconnected_debug() {
+    let err: TrySendError<Int> = TrySendError.Disconnected(42);
+    let text = format_debug(&err);
+    assert(text.contains("Disconnected"));
+}
+
+@test
+fn test_try_send_error_is_full() {
+    let err: TrySendError<Int> = TrySendError.Full(1);
+    assert(err is TrySendError.Full);
+}
+
+@test
+fn test_try_send_error_is_disconnected() {
+    let err: TrySendError<Int> = TrySendError.Disconnected(1);
+    assert(err is TrySendError.Disconnected);
+}
+
+@test
+fn test_try_send_error_display_differs_by_variant() {
+    let full: TrySendError<Int> = TrySendError.Full(1);
+    let disc: TrySendError<Int> = TrySendError.Disconnected(1);
+    assert(format_display(&full) != format_display(&disc));
+}
+
+// =============================================================================
+// Section 3: TryRecvError Display
+// =============================================================================
+
+@test
+fn test_try_recv_error_empty_display() {
+    let err = TryRecvError.Empty;
+    let text = format_display(&err);
+    assert_eq(text, "receiving on an empty channel");
+}
+
+@test
+fn test_try_recv_error_disconnected_display() {
+    let err = TryRecvError.Disconnected;
+    let text = format_display(&err);
+    assert_eq(text, "receiving from a disconnected channel");
+}
+
+@test
+fn test_try_recv_error_empty_debug() {
+    let err = TryRecvError.Empty;
+    let text = format_debug(&err);
+    assert(text.contains("Empty"));
+}
+
+@test
+fn test_try_recv_error_disconnected_debug() {
+    let err = TryRecvError.Disconnected;
+    let text = format_debug(&err);
+    assert(text.contains("Disconnected"));
+}
+
+@test
+fn test_try_recv_error_display_differs_by_variant() {
+    let empty = TryRecvError.Empty;
+    let disc = TryRecvError.Disconnected;
+    assert(format_display(&empty) != format_display(&disc));
+}
+
+// =============================================================================
+// Section 4: RecvError Display
+// =============================================================================
+
+@test
+fn test_recv_error_display() {
+    let err = RecvError;
+    let text = format_display(&err);
+    assert_eq(text, "receiving on a closed channel");
+}
+
+@test
+fn test_recv_error_debug() {
+    let err = RecvError;
+    let text = format_debug(&err);
+    assert(text.contains("RecvError"));
+}
+
+// =============================================================================
+// Section 5: Channel Constructor Type Tests
+// =============================================================================
+
+@test
+fn test_channel_returns_sender_receiver() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _: &Sender<Int> = &tx;
+    let _: &Receiver<Int> = &rx;
+}
+
+@test
+fn test_bounded_channel_returns_sender_receiver() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(10);
+    let _: &Sender<Int> = &tx;
+    let _: &Receiver<Int> = &rx;
+}
+
+@test
+fn test_oneshot_returns_sender_receiver() {
+    let (tx, rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    let _: &OneshotSender<Int> = &tx;
+    let _: &OneshotReceiver<Int> = &rx;
+}
+
+// =============================================================================
+// Section 6: Error Type Existence
+// =============================================================================
+
+@test
+fn test_send_error_type_exists() {
+    let _: Maybe<SendError<Int>> = None;
+}
+
+@test
+fn test_try_send_error_type_exists() {
+    let _: Maybe<TrySendError<Int>> = None;
+}
+
+@test
+fn test_try_recv_error_type_exists() {
+    let _: Maybe<TryRecvError> = None;
+}
+
+@test
+fn test_recv_error_type_exists() {
+    let _: Maybe<RecvError> = None;
+}
+
+// =============================================================================
+// Section 7: Error Messages Contain Useful Info
+// =============================================================================
+
+@test
+fn test_send_error_message_mentions_channel() {
+    let err: SendError<Int> = SendError(0);
+    let msg = format_display(&err);
+    assert(msg.contains("channel"));
+}
+
+@test
+fn test_try_recv_error_message_mentions_channel() {
+    let err = TryRecvError.Empty;
+    let msg = format_display(&err);
+    assert(msg.contains("channel"));
+}
+
+@test
+fn test_recv_error_message_mentions_channel() {
+    let err = RecvError;
+    let msg = format_display(&err);
+    assert(msg.contains("channel"));
+}
+
+// =============================================================================
+// Section 8: Sender/Receiver Debug
+// =============================================================================
+
+@test
+fn test_sender_debug() {
+    let (tx, _rx): (Sender<Int>, Receiver<Int>) = channel();
+    let text = format_debug(&tx);
+    assert(text.contains("Sender"));
+}
+
+@test
+fn test_receiver_debug() {
+    let (_tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    let text = format_debug(&rx);
+    assert(text.contains("Receiver"));
+}
+
+@test
+fn test_sender_debug_bounded() {
+    let (tx, _rx): (Sender<Int>, Receiver<Int>) = bounded(5);
+    let text = format_debug(&tx);
+    assert(text.contains("Sender"));
+}
+
+@test
+fn test_receiver_debug_bounded() {
+    let (_tx, rx): (Sender<Int>, Receiver<Int>) = bounded(5);
+    let text = format_debug(&rx);
+    assert(text.contains("Receiver"));
+}
+
+// =============================================================================
+// Section 9: OneshotSender/OneshotReceiver Debug
+// =============================================================================
+
+@test
+fn test_oneshot_sender_debug() {
+    let (tx, _rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    let text = format_debug(&tx);
+    assert(text.contains("OneshotSender"));
+}
+
+@test
+fn test_oneshot_receiver_debug() {
+    let (_tx, rx): (OneshotSender<Int>, OneshotReceiver<Int>) = oneshot();
+    let text = format_debug(&rx);
+    assert(text.contains("OneshotReceiver"));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

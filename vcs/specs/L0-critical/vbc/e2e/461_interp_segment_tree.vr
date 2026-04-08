@@ -1,0 +1,218 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, segment_tree, range_query, point_update
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Segment tree simulation using a flat array.
+// Supports range sum queries and point updates.
+// Tree stored in 1-indexed array of size 4*n.
+// For node i: left child=2*i, right child=2*i+1.
+
+// Build segment tree from data array of size n.
+// tree: flat array of size 4*n (1-indexed, so tree[1..4n])
+// data: input array
+// node: current node index (start with 1)
+// start, end: range covered by this node
+@allow(unbounded_recursion)
+fn seg_build(tree: [Int; 64], data: [Int; 16], node: Int, start: Int, end: Int) {
+    if start == end {
+        tree[node] = data[start];
+    } else {
+        let mid = (start + end) / 2;
+        let left  = 2 * node;
+        let right = 2 * node + 1;
+        seg_build(tree, data, left,  start, mid);
+        seg_build(tree, data, right, mid + 1, end);
+        tree[node] = tree[left] + tree[right];
+    }
+}
+
+// Range sum query: sum of data[l..r] (inclusive).
+// Returns sum over [l, r] intersected with node's range [start, end].
+@allow(unbounded_recursion)
+fn seg_query(tree: [Int; 64], node: Int, start: Int, end: Int, l: Int, r: Int) -> Int {
+    if r < start || end < l {
+        0
+    } else if l <= start && end <= r {
+        tree[node]
+    } else {
+        let mid = (start + end) / 2;
+        let left  = 2 * node;
+        let right = 2 * node + 1;
+        let lv = seg_query(tree, left,  start, mid,     l, r);
+        let rv = seg_query(tree, right, mid + 1, end,   l, r);
+        lv + rv
+    }
+}
+
+// Point update: set data[idx] = val, update tree nodes.
+@allow(unbounded_recursion)
+fn seg_update(tree: [Int; 64], node: Int, start: Int, end: Int, idx: Int, val: Int) {
+    if start == end {
+        tree[node] = val;
+    } else {
+        let mid = (start + end) / 2;
+        let left  = 2 * node;
+        let right = 2 * node + 1;
+        if idx <= mid {
+            seg_update(tree, left,  start, mid,     idx, val);
+        } else {
+            seg_update(tree, right, mid + 1, end, idx, val);
+        }
+        tree[node] = tree[left] + tree[right];
+    }
+}
+
+fn test_seg_build_and_query() {
+    // data = [1, 3, 5, 7, 9, 11] (indices 0..5)
+    // total sum = 1+3+5+7+9+11 = 36
+    // prefix sums: [1,4,9,16,25,36]
+    let mut data = [1, 3, 5, 7, 9, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 6;
+    let mut tree = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    seg_build(tree, data, 1, 0, n - 1);
+
+    // Root should hold total sum = 36
+    assert_eq(tree[1], 36);
+
+    // Full range query [0, 5] = 36
+    let q_full = seg_query(tree, 1, 0, n - 1, 0, 5);
+    assert_eq(q_full, 36);
+
+    // Query [0, 0] = data[0] = 1
+    let q0 = seg_query(tree, 1, 0, n - 1, 0, 0);
+    assert_eq(q0, 1);
+
+    // Query [1, 3] = data[1]+data[2]+data[3] = 3+5+7 = 15
+    let q13 = seg_query(tree, 1, 0, n - 1, 1, 3);
+    assert_eq(q13, 15);
+
+    // Query [2, 4] = data[2]+data[3]+data[4] = 5+7+9 = 21
+    let q24 = seg_query(tree, 1, 0, n - 1, 2, 4);
+    assert_eq(q24, 21);
+
+    // Query [4, 5] = data[4]+data[5] = 9+11 = 20
+    let q45 = seg_query(tree, 1, 0, n - 1, 4, 5);
+    assert_eq(q45, 20);
+
+    print("seg_build_and_query: ok");
+}
+
+fn test_seg_point_update() {
+    // data = [2, 4, 6, 8, 10] (indices 0..4), sum=30
+    let mut data = [2, 4, 6, 8, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 5;
+    let mut tree = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    seg_build(tree, data, 1, 0, n - 1);
+    assert_eq(tree[1], 30);
+
+    // Update index 2 from 6 to 20: new sum = 2+4+20+8+10 = 44
+    seg_update(tree, 1, 0, n - 1, 2, 20);
+    assert_eq(tree[1], 44);
+
+    // Query [0, 2] = 2+4+20 = 26
+    let q02 = seg_query(tree, 1, 0, n - 1, 0, 2);
+    assert_eq(q02, 26);
+
+    // Query [2, 4] = 20+8+10 = 38
+    let q24 = seg_query(tree, 1, 0, n - 1, 2, 4);
+    assert_eq(q24, 38);
+
+    // Update index 0 from 2 to 100: new sum = 100+4+20+8+10 = 142
+    seg_update(tree, 1, 0, n - 1, 0, 100);
+    assert_eq(tree[1], 142);
+
+    // Query [0, 1] = 100+4 = 104
+    let q01 = seg_query(tree, 1, 0, n - 1, 0, 1);
+    assert_eq(q01, 104);
+
+    print("seg_point_update: ok");
+}
+
+fn test_seg_single_element() {
+    // Edge case: n=1, single element
+    let mut data = [42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 1;
+    let mut tree = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    seg_build(tree, data, 1, 0, 0);
+    assert_eq(tree[1], 42);
+
+    let q = seg_query(tree, 1, 0, 0, 0, 0);
+    assert_eq(q, 42);
+
+    seg_update(tree, 1, 0, 0, 0, 7);
+    assert_eq(tree[1], 7);
+
+    print("seg_single_element: ok");
+}
+
+fn test_seg_multiple_updates() {
+    // data = [0,0,0,0,0,0,0,0] (8 zeros), run updates and queries
+    let mut data = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 8;
+    let mut tree = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    seg_build(tree, data, 1, 0, n - 1);
+    assert_eq(tree[1], 0);
+
+    // Set indices to their value+1
+    seg_update(tree, 1, 0, n - 1, 0, 1);
+    seg_update(tree, 1, 0, n - 1, 1, 2);
+    seg_update(tree, 1, 0, n - 1, 2, 3);
+    seg_update(tree, 1, 0, n - 1, 3, 4);
+    seg_update(tree, 1, 0, n - 1, 4, 5);
+    seg_update(tree, 1, 0, n - 1, 5, 6);
+    seg_update(tree, 1, 0, n - 1, 6, 7);
+    seg_update(tree, 1, 0, n - 1, 7, 8);
+
+    // Total sum = 1+2+3+4+5+6+7+8 = 36
+    assert_eq(tree[1], 36);
+
+    // Query [0, 3] = 1+2+3+4 = 10
+    let q03 = seg_query(tree, 1, 0, n - 1, 0, 3);
+    assert_eq(q03, 10);
+
+    // Query [4, 7] = 5+6+7+8 = 26
+    let q47 = seg_query(tree, 1, 0, n - 1, 4, 7);
+    assert_eq(q47, 26);
+
+    // Query [3, 4] = 4+5 = 9
+    let q34 = seg_query(tree, 1, 0, n - 1, 3, 4);
+    assert_eq(q34, 9);
+
+    // Update index 3 from 4 to 40: total becomes 36 - 4 + 40 = 72
+    seg_update(tree, 1, 0, n - 1, 3, 40);
+    assert_eq(tree[1], 72);
+
+    // Query [0, 3] = 1+2+3+40 = 46
+    let q03b = seg_query(tree, 1, 0, n - 1, 0, 3);
+    assert_eq(q03b, 46);
+
+    print("seg_multiple_updates: ok");
+}
+
+fn main() -> Int {
+    test_seg_build_and_query();
+    test_seg_point_update();
+    test_seg_single_element();
+    test_seg_multiple_updates();
+    print("[OK] 461_interp_segment_tree");
+    0
+}

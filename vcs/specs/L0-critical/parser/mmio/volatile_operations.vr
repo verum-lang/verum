@@ -1,0 +1,77 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: mmio, parser, volatile, intrinsics
+// @timeout: 5000
+// @description: Test volatile memory operation intrinsic parsing
+//
+// Spec: docs/architecture/low-level-features.md - Section 3.3 (Volatile Semantics)
+
+/// Low-level volatile intrinsic declarations.
+@intrinsic("volatile_load")
+public fn volatile_load<T>(ptr: *const T) -> T;
+
+@intrinsic("volatile_store")
+public fn volatile_store<T>(ptr: *mut T, value: T);
+
+@intrinsic("volatile_load_acquire")
+public fn volatile_load_acquire<T>(ptr: *const T) -> T;
+
+@intrinsic("volatile_store_release")
+public fn volatile_store_release<T>(ptr: *mut T, value: T);
+
+/// Memory barriers.
+@intrinsic("compiler_fence")
+public fn compiler_fence();
+
+@intrinsic("hardware_fence")
+public fn hardware_fence();
+
+/// Simple 32-bit register type.
+@repr(transparent)
+public type Reg32 is {
+    addr: *mut UInt32,
+};
+
+/// Test volatile read and write syntax.
+fn test_volatile_access() -> Int {
+    let addr: *mut UInt32 = 0x4002_0000 as *mut UInt32;
+
+    // Volatile read
+    let value = volatile_load(addr);
+
+    // Volatile write
+    volatile_store(addr, 0x1234_5678);
+
+    // Volatile read with acquire semantics
+    let acquired = volatile_load_acquire(addr);
+
+    // Volatile write with release semantics
+    volatile_store_release(addr, acquired);
+
+    // Memory barriers
+    compiler_fence();
+    hardware_fence();
+
+    0
+}
+
+/// Test read-modify-write pattern.
+fn test_rmw_pattern() -> Int {
+    let addr: *mut UInt32 = 0x4002_0014 as *mut UInt32;
+
+    // Read-modify-write with barriers
+    compiler_fence();
+    let current = volatile_load(addr);
+    let modified = current | 0x0000_0020;  // Set bit 5
+    volatile_store(addr, modified);
+    compiler_fence();
+
+    0
+}
+
+fn main() -> Int {
+    test_volatile_access();
+    test_rmw_pattern();
+    0
+}

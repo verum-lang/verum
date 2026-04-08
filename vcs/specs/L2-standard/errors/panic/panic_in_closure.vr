@@ -1,0 +1,19 @@
+// @test: run-panic
+// @level: L2
+// @tier: 0
+// @tags: errors, panic, closures
+// @timeout: 5000
+// @expected-panic: Division by zero
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn main() {
+    let divisor = 0;
+    let divide_by = |x: Int| -> Int {
+        x / divisor
+    };
+    let result = apply(divide_by, 100);
+    print(f"{result}");
+}

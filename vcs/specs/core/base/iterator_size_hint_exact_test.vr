@@ -1,0 +1,700 @@
+// =============================================================================
+// iterator_size_hint_exact_test.vr - size_hint, ExactSizeIterator, and
+//     DoubleEndedIterator for adapter types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, iterator, size_hint, exact_size, double_ended, fused
+// @description: Tests for size_hint correctness on all adapter types,
+//               ExactSizeIterator for adapters, DoubleEndedIterator for
+//               Enumerate/Take/Skip, and FusedIterator marker impls.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.{List};
+
+// =============================================================================
+// SECTION 1: size_hint for FilterMapIter
+// =============================================================================
+
+@test
+fn test_filter_map_size_hint_basic() {
+    let iter = range(0, 10).filter_map(|x| if x % 2 == 0 { Some(x) } else { None });
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(10));
+}
+
+@test
+fn test_filter_map_size_hint_empty() {
+    let iter = range(0, 0).filter_map(|x| Some(x));
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(0));
+}
+
+// =============================================================================
+// SECTION 2: size_hint for FlatMapIter
+// =============================================================================
+
+@test
+fn test_flat_map_size_hint_no_current() {
+    let iter = range(0, 3).flat_map(|x| range(0, x));
+    let (lower, upper) = iter.size_hint();
+    // No current inner iterator, outer has elements => (0, None)
+    assert_eq(lower, 0);
+    assert(upper is None);
+}
+
+@test
+fn test_flat_map_size_hint_empty_outer() {
+    let iter = range(0, 0).flat_map(|x| range(0, x));
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(0));
+}
+
+// =============================================================================
+// SECTION 3: size_hint for TakeWhileIter
+// =============================================================================
+
+@test
+fn test_take_while_size_hint() {
+    let iter = range(0, 10).take_while(|x| *x < 5);
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(10));
+}
+
+@test
+fn test_take_while_size_hint_after_done() {
+    let mut iter = range(0, 10).take_while(|x| *x < 0);
+    let _ = iter.next(); // triggers done
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(0));
+}
+
+// =============================================================================
+// SECTION 4: size_hint for SkipWhileIter
+// =============================================================================
+
+@test
+fn test_skip_while_size_hint_before_skip() {
+    let iter = range(0, 10).skip_while(|x| *x < 5);
+    let (lower, upper) = iter.size_hint();
+    // Still in skip phase, can't predict lower
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(10));
+}
+
+@test
+fn test_skip_while_size_hint_after_skip() {
+    let mut iter = range(0, 10).skip_while(|x| *x < 3);
+    // Consume first element (which is 3, skipping phase done)
+    let first = iter.next();
+    assert_eq(first, Some(3));
+    // Now in forwarding mode
+    let (lower, upper) = iter.size_hint();
+    // Inner remaining: 4,5,6,7,8,9 = 6 elements
+    assert(lower > 0);
+}
+
+// =============================================================================
+// SECTION 5: size_hint for ChainIter
+// =============================================================================
+
+@test
+fn test_chain_size_hint_both_present() {
+    let iter = range(0, 5).chain(range(0, 3));
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 8);
+    assert_eq(upper, Some(8));
+}
+
+@test
+fn test_chain_size_hint_first_exhausted() {
+    let mut iter = range(0, 2).chain(range(0, 3));
+    // Consume all from first
+    let _ = iter.next(); // 0
+    let _ = iter.next(); // 1
+    let _ = iter.next(); // 0 (from second)
+    let (lower, upper) = iter.size_hint();
+    // Only second remains: 1, 2
+    assert_eq(lower, 2);
+    assert_eq(upper, Some(2));
+}
+
+@test
+fn test_chain_size_hint_empty() {
+    let iter = range(0, 0).chain(range(0, 0));
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(0));
+}
+
+// =============================================================================
+// SECTION 6: size_hint for DedupIter
+// =============================================================================
+
+@test
+fn test_dedup_size_hint() {
+    let items: List<Int> = [1, 1, 2, 2, 3];
+    let iter = items.iter().dedup();
+    let (lower, upper) = iter.size_hint();
+    // At least 1 unique, at most 5
+    assert_eq(lower, 1);
+    assert_eq(upper, Some(5));
+}
+
+@test
+fn test_dedup_size_hint_empty() {
+    let items: List<Int> = [];
+    let iter = items.iter().dedup();
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(0));
+}
+
+// =============================================================================
+// SECTION 7: size_hint for InterleaveIter
+// =============================================================================
+
+@test
+fn test_interleave_size_hint() {
+    let iter = range(0, 3).interleave(range(0, 5));
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 8);
+    assert_eq(upper, Some(8));
+}
+
+// =============================================================================
+// SECTION 8: size_hint for StepByIter
+// =============================================================================
+
+@test
+fn test_step_by_size_hint() {
+    let iter = range(0, 10).step_by(3);
+    let (lower, upper) = iter.size_hint();
+    // ceil(10/3) = 4
+    assert_eq(lower, 4);
+    assert_eq(upper, Some(4));
+}
+
+@test
+fn test_step_by_size_hint_exact() {
+    let iter = range(0, 9).step_by(3);
+    let (lower, upper) = iter.size_hint();
+    // ceil(9/3) = 3
+    assert_eq(lower, 3);
+    assert_eq(upper, Some(3));
+}
+
+@test
+fn test_step_by_size_hint_one() {
+    let iter = range(0, 5).step_by(1);
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 5);
+    assert_eq(upper, Some(5));
+}
+
+// =============================================================================
+// SECTION 9: size_hint for InspectIter
+// =============================================================================
+
+@test
+fn test_inspect_size_hint() {
+    let iter = range(0, 7).inspect(|_x| {});
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 7);
+    assert_eq(upper, Some(7));
+}
+
+// =============================================================================
+// SECTION 10: size_hint for FuseIter
+// =============================================================================
+
+@test
+fn test_fuse_size_hint() {
+    let iter = range(0, 5).fuse();
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 5);
+    assert_eq(upper, Some(5));
+}
+
+@test
+fn test_fuse_size_hint_exhausted() {
+    let mut iter = range(0, 1).fuse();
+    let _ = iter.next(); // consumes single element
+    let _ = iter.next(); // returns None, fuses
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(0));
+}
+
+// =============================================================================
+// SECTION 11: size_hint for ScanIter
+// =============================================================================
+
+@test
+fn test_scan_size_hint() {
+    let iter = range(0, 5).scan(0, |acc, x| { *acc = *acc + x; Some(*acc) });
+    let (lower, upper) = iter.size_hint();
+    // Scan can stop early, so lower is 0
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(5));
+}
+
+// =============================================================================
+// SECTION 12: size_hint for MapWhileIter
+// =============================================================================
+
+@test
+fn test_map_while_size_hint() {
+    let iter = range(0, 10).map_while(|x| if x < 5 { Some(x * 2) } else { None });
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(10));
+}
+
+// =============================================================================
+// SECTION 13: size_hint for IntersperseWithIter
+// =============================================================================
+
+@test
+fn test_intersperse_with_size_hint() {
+    let iter = range(1, 4).intersperse_with(|| 0);
+    let (lower, upper) = iter.size_hint();
+    // 3 elements => interspersed: 5 (3*2-1)
+    assert_eq(lower, 5);
+    assert_eq(upper, Some(5));
+}
+
+// =============================================================================
+// SECTION 14: size_hint for FlattenIter
+// =============================================================================
+
+@test
+fn test_flatten_size_hint_no_inner() {
+    let items: List<List<Int>> = [[1, 2], [3, 4, 5]];
+    let iter = items.iter().flatten();
+    let (lower, _upper) = iter.size_hint();
+    // Without current inner, lower starts at 0
+    assert_eq(lower, 0);
+}
+
+// =============================================================================
+// SECTION 15: size_hint for PairwiseIter
+// =============================================================================
+
+@test
+fn test_pairwise_size_hint() {
+    let iter = range(0, 5).pairwise();
+    let (lower, upper) = iter.size_hint();
+    // After first element consumed (by pairwise setup), inner has 4 remaining
+    // Each produces one pair
+    assert(lower >= 0);
+}
+
+// =============================================================================
+// SECTION 16: size_hint for CycleIter
+// =============================================================================
+
+@test
+fn test_cycle_size_hint_non_empty() {
+    let items: List<Int> = [1, 2, 3];
+    let iter = items.iter().cycle();
+    let (_lower, upper) = iter.size_hint();
+    // Infinite iterator has no upper bound
+    assert(upper is None);
+}
+
+@test
+fn test_cycle_size_hint_empty() {
+    let items: List<Int> = [];
+    let iter = items.iter().cycle();
+    let (_lower, upper) = iter.size_hint();
+    assert(upper is None);
+}
+
+// =============================================================================
+// SECTION 17: ExactSizeIterator for MappedIter
+// =============================================================================
+
+@test
+fn test_mapped_exact_size() {
+    let iter = range(0, 10).map(|x| x * 2);
+    assert_eq(iter.len(), 10);
+    assert(iter.is_empty() == false);
+}
+
+@test
+fn test_mapped_exact_size_empty() {
+    let iter = range(0, 0).map(|x| x * 2);
+    assert_eq(iter.len(), 0);
+    assert(iter.is_empty());
+}
+
+@test
+fn test_mapped_len_decreases() {
+    let mut iter = range(0, 5).map(|x| x * 2);
+    assert_eq(iter.len(), 5);
+    let _ = iter.next();
+    assert_eq(iter.len(), 4);
+    let _ = iter.next();
+    assert_eq(iter.len(), 3);
+}
+
+// =============================================================================
+// SECTION 18: ExactSizeIterator for InspectIter
+// =============================================================================
+
+@test
+fn test_inspect_exact_size() {
+    let iter = range(0, 7).inspect(|_x| {});
+    assert_eq(iter.len(), 7);
+}
+
+// =============================================================================
+// SECTION 19: ExactSizeIterator for EnumerateIter
+// =============================================================================
+
+@test
+fn test_enumerate_exact_size() {
+    let iter = range(0, 5).enumerate();
+    assert_eq(iter.len(), 5);
+}
+
+@test
+fn test_enumerate_exact_size_after_consume() {
+    let mut iter = range(0, 5).enumerate();
+    let _ = iter.next();
+    assert_eq(iter.len(), 4);
+    let _ = iter.next();
+    assert_eq(iter.len(), 3);
+}
+
+// =============================================================================
+// SECTION 20: ExactSizeIterator for FuseIter
+// =============================================================================
+
+@test
+fn test_fuse_exact_size() {
+    let iter = range(0, 5).fuse();
+    assert_eq(iter.len(), 5);
+}
+
+// =============================================================================
+// SECTION 21: ExactSizeIterator for TakeIter
+// =============================================================================
+
+@test
+fn test_take_exact_size_within_bounds() {
+    let iter = range(0, 10).take(3);
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_take_exact_size_exceeds_inner() {
+    let iter = range(0, 3).take(10);
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_take_exact_size_zero() {
+    let iter = range(0, 10).take(0);
+    assert_eq(iter.len(), 0);
+    assert(iter.is_empty());
+}
+
+// =============================================================================
+// SECTION 22: ExactSizeIterator for SkipIter
+// =============================================================================
+
+@test
+fn test_skip_exact_size() {
+    let iter = range(0, 10).skip(3);
+    assert_eq(iter.len(), 7);
+}
+
+@test
+fn test_skip_exact_size_exceeds() {
+    let iter = range(0, 3).skip(10);
+    assert_eq(iter.len(), 0);
+}
+
+// =============================================================================
+// SECTION 23: ExactSizeIterator for ChainIter
+// =============================================================================
+
+@test
+fn test_chain_exact_size() {
+    let iter = range(0, 5).chain(range(0, 3));
+    assert_eq(iter.len(), 8);
+}
+
+// =============================================================================
+// SECTION 24: ExactSizeIterator for ZipIter
+// =============================================================================
+
+@test
+fn test_zip_exact_size() {
+    let iter = range(0, 5).zip(range(0, 3));
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_zip_exact_size_equal() {
+    let iter = range(0, 4).zip(range(0, 4));
+    assert_eq(iter.len(), 4);
+}
+
+// =============================================================================
+// SECTION 25: ExactSizeIterator for StepByIter
+// =============================================================================
+
+@test
+fn test_step_by_exact_size() {
+    let iter = range(0, 10).step_by(3);
+    assert_eq(iter.len(), 4); // ceil(10/3) = 4
+}
+
+@test
+fn test_step_by_exact_size_exact() {
+    let iter = range(0, 9).step_by(3);
+    assert_eq(iter.len(), 3); // ceil(9/3) = 3
+}
+
+// =============================================================================
+// SECTION 26: ExactSizeIterator for Rev
+// =============================================================================
+
+@test
+fn test_rev_exact_size() {
+    let iter = range(0, 5).rev();
+    assert_eq(iter.len(), 5);
+}
+
+// =============================================================================
+// SECTION 27: DoubleEndedIterator for EnumerateIter
+// =============================================================================
+
+@test
+fn test_enumerate_next_back_basic() {
+    let mut iter = range(0, 5).enumerate();
+    // 0..5 enumerate: (0,0),(1,1),(2,2),(3,3),(4,4)
+    assert_eq(iter.next_back(), Some((4, 4)));
+    assert_eq(iter.next_back(), Some((3, 3)));
+    assert_eq(iter.next_back(), Some((2, 2)));
+    assert_eq(iter.next_back(), Some((1, 1)));
+    assert_eq(iter.next_back(), Some((0, 0)));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_enumerate_mixed_front_back() {
+    let mut iter = range(10, 15).enumerate();
+    // (0,10),(1,11),(2,12),(3,13),(4,14)
+    assert_eq(iter.next(), Some((0, 10)));
+    assert_eq(iter.next_back(), Some((4, 14)));
+    assert_eq(iter.next(), Some((1, 11)));
+    assert_eq(iter.next_back(), Some((3, 13)));
+    assert_eq(iter.next(), Some((2, 12)));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_enumerate_next_back_empty() {
+    let mut iter = range(0, 0).enumerate();
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_enumerate_rfold() {
+    let result = range(0, 3).enumerate().rfold(0, |acc, pair| acc + pair.0);
+    // Indices from back: 2,1,0 => 0+2+1+0 = 3
+    assert_eq(result, 3);
+}
+
+// =============================================================================
+// SECTION 28: DoubleEndedIterator for TakeIter
+// =============================================================================
+
+@test
+fn test_take_next_back_basic() {
+    let mut iter = range(0, 10).take(3);
+    // take(3) from [0..10] yields 0,1,2
+    // next_back: 2,1,0
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), Some(1));
+    assert_eq(iter.next_back(), Some(0));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_take_next_back_exceeds() {
+    let mut iter = range(0, 3).take(10);
+    // Only 3 elements available
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), Some(1));
+    assert_eq(iter.next_back(), Some(0));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_take_mixed_front_back() {
+    let mut iter = range(0, 10).take(5);
+    // Elements: 0,1,2,3,4
+    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_take_next_back_zero() {
+    let mut iter = range(0, 10).take(0);
+    assert_eq(iter.next_back(), None);
+}
+
+// =============================================================================
+// SECTION 29: DoubleEndedIterator for SkipIter
+// =============================================================================
+
+@test
+fn test_skip_next_back_basic() {
+    let mut iter = range(0, 10).skip(7);
+    // Elements after skip: 7,8,9
+    // next_back: 9,8,7
+    assert_eq(iter.next_back(), Some(9));
+    assert_eq(iter.next_back(), Some(8));
+    assert_eq(iter.next_back(), Some(7));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_skip_next_back_exceeds() {
+    let mut iter = range(0, 3).skip(10);
+    // No elements after skip
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_skip_mixed_front_back() {
+    let mut iter = range(0, 10).skip(3);
+    // Elements: 3,4,5,6,7,8,9
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next_back(), Some(9));
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next_back(), Some(8));
+}
+
+// =============================================================================
+// SECTION 30: Cloned ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_cloned_exact_size() {
+    let items: List<Int> = [1, 2, 3, 4, 5];
+    let iter = items.iter().cloned();
+    assert_eq(iter.len(), 5);
+}
+
+// =============================================================================
+// SECTION 31: size_hint consistency checks
+// =============================================================================
+
+@test
+fn test_size_hint_decreases_with_consumption() {
+    let mut iter = range(0, 5).map(|x| x * 2);
+    let (l1, u1) = iter.size_hint();
+    assert_eq(l1, 5);
+    assert_eq(u1, Some(5));
+
+    let _ = iter.next();
+    let (l2, u2) = iter.size_hint();
+    assert_eq(l2, 4);
+    assert_eq(u2, Some(4));
+
+    let _ = iter.next();
+    let (l3, u3) = iter.size_hint();
+    assert_eq(l3, 3);
+    assert_eq(u3, Some(3));
+}
+
+@test
+fn test_chain_size_hint_decreases() {
+    let mut iter = range(0, 3).chain(range(0, 2));
+    assert_eq(iter.size_hint(), (5, Some(5)));
+
+    let _ = iter.next();
+    assert_eq(iter.size_hint(), (4, Some(4)));
+
+    let _ = iter.next();
+    assert_eq(iter.size_hint(), (3, Some(3)));
+}
+
+@test
+fn test_zip_size_hint_correct() {
+    let iter = range(0, 5).zip(range(0, 3));
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 3);
+    assert_eq(upper, Some(3));
+}
+
+@test
+fn test_enumerate_size_hint_matches_inner() {
+    let iter = range(0, 7).enumerate();
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 7);
+    assert_eq(upper, Some(7));
+}
+
+// =============================================================================
+// SECTION 32: ExactSizeIterator len consistency with count
+// =============================================================================
+
+@test
+fn test_exact_size_len_equals_count() {
+    let iter = range(0, 10).map(|x| x + 1);
+    let len = iter.len();
+    let count = range(0, 10).map(|x| x + 1).count();
+    assert_eq(len, count);
+}
+
+@test
+fn test_take_len_equals_count() {
+    let iter = range(0, 10).take(5);
+    let len = iter.len();
+    let count = range(0, 10).take(5).count();
+    assert_eq(len, count);
+}
+
+@test
+fn test_skip_len_equals_count() {
+    let iter = range(0, 10).skip(3);
+    let len = iter.len();
+    let count = range(0, 10).skip(3).count();
+    assert_eq(len, count);
+}
+
+@test
+fn test_chain_len_equals_count() {
+    let iter = range(0, 5).chain(range(0, 3));
+    let len = iter.len();
+    let count = range(0, 5).chain(range(0, 3)).count();
+    assert_eq(len, count);
+}
+
+@test
+fn test_zip_len_equals_count() {
+    let iter = range(0, 5).zip(range(0, 3));
+    let len = iter.len();
+    let count = range(0, 5).zip(range(0, 3)).count();
+    assert_eq(len, count);
+}

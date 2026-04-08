@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test UInt64 type constants (MIN, MAX, BITS)
+
+fn main() {
+    // Test UInt64.MIN
+    assert_eq(UInt64.MIN(), 0);
+
+    // Test UInt64.MAX (2^64 - 1 = 18446744073709551615)
+    assert_eq(UInt64.MAX(), 18446744073709551615);
+
+    // Test UInt64.BITS
+    assert_eq(UInt64.BITS(), 64);
+
+    // Test u64 alias (FFI compatibility)
+    assert_eq(u64.MIN(), 0);
+    assert_eq(u64.MAX(), 18446744073709551615);
+    assert_eq(u64.BITS(), 64);
+}

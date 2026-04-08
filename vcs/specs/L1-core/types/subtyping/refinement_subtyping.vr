@@ -1,0 +1,207 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L1
+// @tags: types, subtyping, refinement
+
+/// Test for refinement type subtyping.
+/// Refinement types with stronger predicates are subtypes of weaker ones.
+
+// === Refinement Type Aliases ===
+
+// Integer refinements
+type PositiveInt is Int{> 0};
+type NonNegativeInt is Int{>= 0};
+type NegativeInt is Int{< 0};
+type NonPositiveInt is Int{<= 0};
+type NaturalNumber is Int{>= 1};
+type Percentage is Int{>= 0 && <= 100};
+type NonZeroInt is Int{!= 0};
+
+// Bounded integers
+type SmallPositive is Int{> 0 && < 100};
+type TinyPositive is Int{> 0 && < 10};
+type ByteRange is Int{>= 0 && <= 255};
+
+// Text refinements
+type NonEmptyText is Text{len() > 0};
+type ShortText is Text{len() <= 10};
+type MediumText is Text{len() <= 100};
+type SingleChar is Text{len() == 1};
+
+// Float refinements
+type PositiveFloat is Float{> 0.0};
+type NonNegativeFloat is Float{>= 0.0};
+type UnitInterval is Float{>= 0.0 && <= 1.0};
+type Probability is Float{>= 0.0 && <= 1.0};
+type NonZeroFloat is Float{!= 0.0};
+
+fn main() {
+    // === Basic Refinement Subtyping ===
+
+    // Int{> 0} <: Int
+    let positive: PositiveInt = 42;
+    let any_int: Int = positive;  // Subtype coercion
+
+    // Int{< 0} <: Int
+    let negative: NegativeInt = -42;
+    let any_from_neg: Int = negative;
+
+    // === Predicate Strength Ordering ===
+
+    // Stronger predicate is subtype of weaker
+    let natural: NaturalNumber = 10;  // Int{>= 1}
+    let non_negative: NonNegativeInt = natural;  // Int{>= 1} <: Int{>= 0}
+    let also_positive: PositiveInt = natural;  // Int{>= 1} <: Int{> 0}
+
+    // Conjunction implies constituents
+    let tiny: TinyPositive = 5;  // Int{> 0 && < 10}
+    let small: SmallPositive = tiny;  // {> 0 && < 10} <: {> 0 && < 100}
+    let pos: PositiveInt = tiny;  // {> 0 && < 10} <: {> 0}
+    let nn: NonNegativeInt = tiny;  // {> 0 && < 10} <: {>= 0}
+    let int_from_tiny: Int = tiny;  // TinyPositive <: Int
+
+    // Percentage is subtype of multiple types
+    let pct: Percentage = 50;  // Int{>= 0 && <= 100}
+    let nn_from_pct: NonNegativeInt = pct;  // Percentage <: NonNegativeInt
+    let byte: ByteRange = pct;  // {>= 0 && <= 100} <: {>= 0 && <= 255}
+
+    // === Function Parameter Subtyping ===
+
+    // Function accepting supertype works with subtype
+    fn print_non_negative(n: NonNegativeInt) {
+        print(f"Non-negative: {n}");
+    }
+    print_non_negative(positive);  // PositiveInt <: NonNegativeInt
+    print_non_negative(natural);   // NaturalNumber <: NonNegativeInt
+    print_non_negative(pct);       // Percentage <: NonNegativeInt
+
+    fn takes_int(n: Int) -> Int {
+        n * 2
+    }
+    let doubled_pos: Int = takes_int(positive);  // PositiveInt <: Int
+    let doubled_tiny: Int = takes_int(tiny);     // TinyPositive <: Int
+
+    // Function with refined parameter
+    fn safe_divide(a: Int, b: NonZeroInt) -> Float {
+        a as Float / b as Float
+    }
+    let non_zero: NonZeroInt = 5;
+    let result: Float = safe_divide(10, non_zero);
+
+    // === Refinement Return Type Subtyping ===
+
+    // Refinement in return position
+    fn make_positive(n: Int) -> PositiveInt
+        requires n > 0
+    {
+        n  // Compiler verifies refinement
+    }
+
+    fn make_percentage(n: Int) -> Percentage
+        requires n >= 0 && n <= 100
+    {
+        n
+    }
+
+    fn make_natural(n: Int) -> NaturalNumber
+        requires n >= 1
+    {
+        n
+    }
+
+    // Using refined return values
+    let p2: PositiveInt = make_positive(100);
+    let any_from_pos: Int = make_positive(50);  // PositiveInt <: Int
+    let nn_from_nat: NonNegativeInt = make_natural(42);  // NaturalNumber <: NonNegativeInt
+
+    // === Text Refinement Subtyping ===
+
+    // NonEmptyText <: Text
+    let greeting: NonEmptyText = "Hello";
+    let text: Text = greeting;
+
+    // SingleChar <: NonEmptyText <: Text
+    let single: SingleChar = "X";
+    let non_empty: NonEmptyText = single;
+    let text_from_single: Text = single;
+
+    // ShortText <: MediumText <: Text
+    let short: ShortText = "Hi";
+    let medium: MediumText = short;
+    let text_from_short: Text = short;
+
+    // === Float Refinement Subtyping ===
+
+    // UnitInterval <: NonNegativeFloat <: Float
+    let unit: UnitInterval = 0.5;
+    let nn_float: NonNegativeFloat = unit;
+    let float_val: Float = unit;
+
+    // PositiveFloat <: NonNegativeFloat
+    let pos_float: PositiveFloat = 0.75;
+    let nn_from_pos: NonNegativeFloat = pos_float;
+
+    // Probability is alias for UnitInterval
+    let prob: Probability = 0.8;
+    let unit_from_prob: UnitInterval = prob;
+
+    // === Collection Element Subtyping ===
+
+    // Note: List<PositiveInt> is NOT List<Int> (invariance)
+    // But elements can be used where Int is expected
+    let positives: List<PositiveInt> = [1, 2, 3, 4, 5];
+    for p in positives.iter() {
+        let i: Int = *p;  // Each element coerces to Int
+        print(f"{i}");
+    }
+
+    // Map with refined key/value types
+    fn process_map(m: &Map<Text, Int>) {
+        for (k, v) in m.iter() {
+            print(f"{k}: {v}");
+        }
+    }
+    let refined_map: Map<NonEmptyText, PositiveInt> = Map.from([
+        ("one", 1),
+        ("two", 2),
+    ]);
+    // Each element coerces when iterating
+
+    // === Transitivity of Subtyping ===
+
+    // A <: B and B <: C implies A <: C
+    let tiny_val: TinyPositive = 3;
+    // TinyPositive <: SmallPositive <: PositiveInt <: NonNegativeInt <: Int
+    let step1: SmallPositive = tiny_val;
+    let step2: PositiveInt = step1;
+    let step3: NonNegativeInt = step2;
+    let step4: Int = step3;
+
+    // Direct transitive subtyping
+    let direct: Int = tiny_val;  // TinyPositive <: Int directly
+
+    // === Refinement with Named Predicates ===
+
+    fn is_even(n: Int) -> Bool { n % 2 == 0 }
+    fn is_positive(n: Int) -> Bool { n > 0 }
+
+    type EvenInt is Int where is_even;
+    type PositiveEvenInt is Int where |n| is_even(n) && is_positive(n);
+
+    let even: EvenInt = 42;
+    let pos_even: PositiveEvenInt = 42;
+
+    // PositiveEvenInt <: EvenInt
+    let even_from_pos: EvenInt = pos_even;
+    // EvenInt <: Int
+    let int_from_even: Int = even;
+
+    // === Assertions ===
+    assert(positive > 0);
+    assert(natural >= 1);
+    assert(pct >= 0 && pct <= 100);
+    assert(tiny > 0 && tiny < 10);
+    assert(greeting.len() > 0);
+    assert(unit >= 0.0 && unit <= 1.0);
+    assert(step4 == 3);
+}

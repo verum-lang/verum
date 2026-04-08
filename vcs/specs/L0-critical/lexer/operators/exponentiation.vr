@@ -1,0 +1,189 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, exponentiation, power
+
+// Exponentiation operator (**) tests
+
+fn test_basic_exponentiation() {
+    // Basic exponentiation
+    let squared = 5 ** 2;      // 25
+    let cubed = 3 ** 3;        // 27
+    let fourth = 2 ** 4;       // 16
+}
+
+fn test_powers_of_2() {
+    // Powers of 2
+    let p0 = 2 ** 0;   // 1
+    let p1 = 2 ** 1;   // 2
+    let p2 = 2 ** 2;   // 4
+    let p3 = 2 ** 3;   // 8
+    let p4 = 2 ** 4;   // 16
+    let p5 = 2 ** 5;   // 32
+    let p10 = 2 ** 10; // 1024
+    let p20 = 2 ** 20; // 1048576
+}
+
+fn test_powers_of_10() {
+    // Powers of 10
+    let t1 = 10 ** 1;   // 10
+    let t2 = 10 ** 2;   // 100
+    let t3 = 10 ** 3;   // 1000
+    let t6 = 10 ** 6;   // 1000000
+    let t9 = 10 ** 9;   // 1000000000
+}
+
+fn test_zero_exponent() {
+    // Zero exponent
+    let zero_exp_1 = 1 ** 0;    // 1
+    let zero_exp_5 = 5 ** 0;    // 1
+    let zero_exp_100 = 100 ** 0;  // 1
+}
+
+fn test_one_exponent() {
+    // One exponent
+    let one_exp = 42 ** 1;  // 42
+}
+
+fn test_zero_base() {
+    // Zero base
+    let zero_base_0 = 0 ** 0;  // Mathematically undefined, typically 1
+    let zero_base_1 = 0 ** 1;  // 0
+    let zero_base_5 = 0 ** 5;  // 0
+}
+
+fn test_negative_base() {
+    // Negative base
+    let neg_base_2 = (-2) ** 2;  // 4
+    let neg_base_3 = (-2) ** 3;  // -8
+    let neg_base_4 = (-2) ** 4;  // 16
+    let neg_base_5 = (-2) ** 5;  // -32
+}
+
+fn test_float_exponentiation() {
+    // Floating point exponentiation
+    let float_sq = 2.5 ** 2;   // 6.25
+    let float_cb = 1.5 ** 3;   // 3.375
+    let sqrt_approx = 4.0 ** 0.5;  // 2.0 (square root)
+}
+
+fn test_fractional_exponents() {
+    // Fractional exponents
+    let cube_root = 8.0 ** (1.0/3.0);   // 2.0
+    let fourth_root = 16.0 ** 0.25;     // 2.0
+}
+
+fn test_negative_exponents() {
+    // Negative exponents
+    let neg_exp_1 = 2.0 ** (-1);   // 0.5
+    let neg_exp_2 = 2.0 ** (-2);   // 0.25
+    let neg_exp_3 = 10.0 ** (-3);  // 0.001
+}
+
+fn test_associativity() {
+    // Right associativity test (2 ** 3 ** 2 = 2 ** 9 = 512)
+    let right_assoc = 2 ** 3 ** 2;  // Should be 2 ** (3 ** 2) = 512, not (2 ** 3) ** 2 = 64
+}
+
+fn test_precedence() {
+    // Precedence with other operators
+    let with_add = 2 + 3 ** 2;  // 2 + 9 = 11
+    let with_mul = 2 * 3 ** 2;  // 2 * 9 = 18
+    let grouped = (2 + 3) ** 2; // 25
+    let neg_prec = -2 ** 2;     // Depends on precedence: -(2**2) = -4 or (-2)**2 = 4
+}
+
+fn test_complex_expressions() {
+    // Complex expressions
+    let complex1 = (2 ** 3) ** 2;      // 64
+    let complex2 = 2 ** (3 ** 2);      // 512
+    let complex3 = (1 + 2) ** (1 + 2); // 27
+}
+
+fn test_variables() {
+    // With variables
+    let base = 3;
+    let exp = 4;
+    let result = base ** exp;  // 81
+}
+
+// In function calls
+fn power(base: Int, exp: Int) -> Int {
+    base ** exp
+}
+
+fn test_function_exponentiation() {
+    let computed = power(2, 10);
+}
+
+fn test_array_exponentiation() {
+    // Array of powers
+    let powers_of_2 = [2 ** 0, 2 ** 1, 2 ** 2, 2 ** 3, 2 ** 4, 2 ** 5];
+    let squares = [1 ** 2, 2 ** 2, 3 ** 2, 4 ** 2, 5 ** 2];
+}
+
+fn test_conditional_exponentiation() {
+    // In conditionals
+    let x = 4;
+    if x ** 2 > 10 {
+        // x squared is greater than 10
+    }
+}
+
+// In match
+fn classify_power(n: Int) -> Text {
+    match n ** 2 {
+        0 => "zero"
+        1 => "one"
+        _ if n ** 2 < 100 => "small square"
+        _ => "large square"
+    }
+}
+
+fn test_math_formulas() {
+    // Mathematical formulas
+    let a = 3;
+    let b = 4;
+    let hypotenuse_sq = a ** 2 + b ** 2;  // 25
+
+    // Geometric mean approximation
+    let val1 = 4.0;
+    let val2 = 9.0;
+    let geometric_mean = (val1 * val2) ** 0.5;  // 6.0
+
+    // Compound interest formula: A = P(1 + r)^n
+    let principal = 1000.0;
+    let rate = 0.05;
+    let years = 10;
+    let amount = principal * (1.0 + rate) ** years;
+
+    // Scientific notation equivalence
+    let sci1 = 10 ** 6;    // 1_000_000
+    let sci2 = 10.0 ** 9;  // 1_000_000_000.0
+}
+
+fn test_large_exponents() {
+    // Large exponents
+    let large_exp = 2 ** 30;   // 1073741824
+    let large_exp2 = 2 ** 62;  // Very large
+}
+
+fn test_type_suffixes() {
+    // With type suffixes
+    let i32_pow = 2i32 ** 10;
+    let u64_pow = 2u64 ** 40;
+    let f64_pow = 2.0f64 ** 0.5;
+}
+
+fn test_edge_cases() {
+    // Edge cases
+    let one_to_anything = 1 ** 1000000;  // 1
+    let neg_one_even = (-1) ** 100;      // 1
+    let neg_one_odd = (-1) ** 101;       // -1
+}
+
+// Constants
+const TWO_TO_10: Int = 2 ** 10;
+const KILOBYTE: Int = 2 ** 10;
+const MEGABYTE: Int = 2 ** 20;
+const GIGABYTE: Int = 2 ** 30;

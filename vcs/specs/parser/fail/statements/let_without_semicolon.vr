@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, let, semicolon, error
+// @description: Test let statement missing trailing semicolon
+// @expected-error: E010
+
+fn test() {
+    let x = 5
+    let y = 6;
+}

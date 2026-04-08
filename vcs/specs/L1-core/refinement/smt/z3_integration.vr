@@ -1,0 +1,283 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, z3
+// @solver: z3
+// @timeout: 5000
+
+/// Z3 SMT solver integration tests.
+/// Verifies that refinement proofs correctly delegate to Z3.
+
+// ============================================================================
+// Linear arithmetic (QF_LIA)
+// ============================================================================
+
+@verify(proof)
+fn linear_positive_sum(x: Int{> 0}, y: Int{> 0}) -> Int{> 0} {
+    x + y  // Z3 proves: x > 0 /\ y > 0 => x + y > 0
+}
+
+@verify(proof)
+fn linear_bound_propagation(x: Int{>= 0 && < 100}, y: Int{>= 0 && < 100}) -> Int{>= 0 && < 200} {
+    x + y  // Z3 proves: 0 <= x < 100 /\ 0 <= y < 100 => 0 <= x+y < 200
+}
+
+@verify(proof)
+fn linear_subtraction_order(x: Int, y: Int) -> Bool
+    requires x > y
+    ensures result == true
+{
+    x - y > 0  // Z3 proves: x > y => x - y > 0
+}
+
+// ============================================================================
+// Non-linear arithmetic (QF_NIA)
+// ============================================================================
+
+@verify(proof)
+fn square_non_negative(x: Int) -> Int{>= 0} {
+    x * x  // Z3 proves: forall x. x*x >= 0
+}
+
+@verify(proof)
+fn product_signs(x: Int{> 0}, y: Int{> 0}) -> Int{> 0} {
+    x * y  // Z3 proves: x > 0 /\ y > 0 => x*y > 0
+}
+
+@verify(proof)
+fn cube_preserves_sign(x: Int{> 0}) -> Int{> 0} {
+    x * x * x  // Z3 proves: x > 0 => x^3 > 0
+}
+
+// ============================================================================
+// Bitvector arithmetic (QF_BV)
+// ============================================================================
+
+@verify(proof)
+fn byte_overflow_safe(x: u8, y: u8) -> Bool
+    requires x <= 127 && y <= 127
+    ensures result == true
+{
+    (x + y) < 256  // Z3 BV: no overflow when both < 128
+}
+
+@verify(proof)
+fn bitwise_and_bound(x: u32, y: u32) -> u32
+    ensures result <= x
+    ensures result <= y
+{
+    x & y  // Z3 BV: x & y <= min(x, y)
+}
+
+@verify(proof)
+fn shift_multiply(x: Int{>= 0}) -> Int
+    ensures result == x * 2
+{
+    x << 1  // Z3 BV: left shift by 1 equals multiply by 2
+}
+
+// ============================================================================
+// Array theory (QF_A)
+// ============================================================================
+
+@verify(proof)
+fn array_read_after_write<T>(arr: List<T>, idx: Int{>= 0}, val: T) -> T
+    requires idx < len(arr)
+    ensures result == val
+{
+    let mut new_arr = arr.clone();
+    new_arr[idx] = val;
+    new_arr[idx]  // Z3 arrays: select(store(a, i, v), i) == v
+}
+
+@verify(proof)
+fn array_write_preserves_other<T: Eq>(arr: List<T>, i: Int{>= 0}, j: Int{>= 0}, val: T) -> Bool
+    requires i < len(arr) && j < len(arr)
+    requires i != j
+    ensures result == true
+{
+    let original = arr[j];
+    let mut new_arr = arr.clone();
+    new_arr[i] = val;
+    new_arr[j] == original  // Z3: select(store(a, i, v), j) == select(a, j) when i != j
+}
+
+// ============================================================================
+// Uninterpreted functions (QF_UF)
+// ============================================================================
+
+// Abstract function - Z3 treats as uninterpreted
+fn hash(x: Int) -> Int;
+
+@verify(proof)
+fn hash_deterministic(x: Int, y: Int) -> Bool
+    requires x == y
+    ensures result == true
+{
+    hash(x) == hash(y)  // Z3 UF: f(x) == f(y) when x == y
+}
+
+fn compare<T>(a: T, b: T) -> Int;  // Returns -1, 0, or 1
+
+@verify(proof)
+fn compare_reflexive<T>(x: T) -> Bool
+    ensures result == true
+{
+    compare(x, x) == 0  // Z3 UF with axiom: compare(x, x) == 0
+}
+
+// ============================================================================
+// Combined theories
+// ============================================================================
+
+@verify(proof)
+fn combined_linear_array(arr: List<Int>, idx: Int{>= 0}, delta: Int{> 0}) -> Bool
+    requires idx < len(arr)
+    requires arr[idx] > 0
+    ensures result == true
+{
+    let mut new_arr = arr.clone();
+    new_arr[idx] = arr[idx] + delta;
+    new_arr[idx] > arr[idx]  // Z3 LIA + Arrays
+}
+
+@verify(proof)
+fn combined_bv_array(arr: List<u8>, idx: Int{>= 0}) -> Bool
+    requires idx < len(arr)
+    requires arr[idx] < 255
+    ensures result == true
+{
+    let mut new_arr = arr.clone();
+    new_arr[idx] = arr[idx] + 1;
+    new_arr[idx] > arr[idx]  // Z3 BV + Arrays
+}
+
+// ============================================================================
+// Quantifiers (requires SMT with quantifier support)
+// ============================================================================
+
+@verify(proof)
+fn forall_positive_implies_sum_positive(arr: List<Int>) -> Bool
+    requires forall x in arr => x > 0
+    requires len(arr) > 0
+{
+    let mut total = 0;
+    for x in arr { total += x; }
+    total > 0  // Z3: forall quantifier + LIA
+}
+
+@verify(proof)
+fn exists_zero_implies_product_zero(arr: List<Int>) -> Bool
+    requires exists x in arr => x == 0
+{
+    arr.iter().product() == 0  // Z3: exists quantifier + NIA
+}
+
+// ============================================================================
+// Push/pop context (incremental solving)
+// ============================================================================
+
+@verify(proof)
+fn incremental_constraints(x: Int) -> Int{>= 0}
+    requires x >= -10 && x <= 10
+{
+    // Z3 incremental: push x >= -10, push x <= 10
+    let abs_x = if x >= 0 { x } else { -x };
+    // Z3: pop constraints, result in [0, 10]
+    abs_x
+}
+
+// ============================================================================
+// Model generation (for debugging)
+// ============================================================================
+
+@verify(proof)
+fn model_satisfiable(x: Int, y: Int) -> Bool
+    requires x + y == 10
+    requires x > 0 && y > 0
+    ensures result == true
+{
+    // Z3 finds model: e.g., x=5, y=5
+    x + y == 10
+}
+
+// ============================================================================
+// Optimization queries
+// ============================================================================
+
+@verify(proof)
+fn maximum_in_range(x: Int) -> Int
+    requires x >= 0 && x <= 100
+    ensures result <= 100
+{
+    x  // Z3 optimization: maximize x subject to constraints
+}
+
+// ============================================================================
+// Proof by contradiction
+// ============================================================================
+
+@verify(proof)
+fn contradiction_proof(x: Int) -> Bool
+    requires x > 5
+    requires x < 3
+    // These requirements are contradictory - function is never callable
+    ensures false  // Z3: UNSAT, so any postcondition holds vacuously
+{
+    unreachable()
+}
+
+// ============================================================================
+// Complex SMT encoding
+// ============================================================================
+
+@verify(proof)
+fn gcd_positive(a: Int{> 0}, b: Int{> 0}) -> Int{> 0} {
+    let mut x = a;
+    let mut y = b;
+
+    while y != 0 {
+        invariant x > 0;
+        invariant y >= 0;
+        // Z3 proves loop maintains x > 0
+
+        let temp = y;
+        y = x % y;
+        x = temp;
+    }
+
+    x  // Z3: x > 0 at loop exit
+}
+
+@verify(proof)
+fn modular_inverse_exists(a: Int{> 0}, m: Int{> 1}) -> Bool
+    requires gcd(a, m) == 1
+    ensures result == true
+{
+    // Z3: if gcd(a, m) == 1, then exists x. (a * x) % m == 1
+    exists x: Int{> 0 && < m} => (a * x) % m == 1
+}
+
+fn main() {
+    // Linear arithmetic
+    let sum = linear_positive_sum(3, 5);
+    assert(sum > 0);
+
+    // Non-linear arithmetic
+    let sq = square_non_negative(-7);
+    assert(sq == 49);
+
+    // Array theory
+    let arr = [1, 2, 3];
+    let val = array_read_after_write(arr, 1, 42);
+    assert(val == 42);
+
+    // Combined theories
+    let arr2 = [10, 20, 30];
+    let check = combined_linear_array(arr2, 0, 5);
+    assert(check == true);
+
+    // GCD
+    let g = gcd_positive(48, 18);
+    assert(g == 6);
+}

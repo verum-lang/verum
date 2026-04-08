@@ -1,0 +1,22 @@
+// @test: parser
+// @tier: 0
+// @level: L0
+// @tags: parser, existential, syntax, advanced-type-syntax
+// @expect: pass
+// @description: Parser tests for existential type syntax
+// @spec: 03-type-system.md Section 13 grammar extensions
+
+// Existential type in return position
+fn create_iterator() -> some T: Iterator;
+
+// Existential with multiple bounds
+fn create_display_debug() -> some T: Display + Debug;
+
+// Existential in function parameter
+fn process_opaque(x: some T: Sized);
+
+// Main function for test execution
+fn main() {
+    // Parser-only test - runtime not tested
+    assert(true);
+}

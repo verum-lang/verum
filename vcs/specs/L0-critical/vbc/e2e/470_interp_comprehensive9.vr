@@ -1,0 +1,506 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #9: exercises records, closures, generators,
+// spawn/await, lists, f-strings.
+// Milestone: ~297 interpreter tests.
+
+// -- Record types --
+
+type Matrix2x2 is { a: Int, b: Int, c: Int, d: Int };
+type Accumulator is { total: Int, count: Int, max_val: Int, min_val: Int };
+
+fn mat_new(a: Int, b: Int, c: Int, d: Int) -> Matrix2x2 {
+    Matrix2x2 { a: a, b: b, c: c, d: d }
+}
+
+fn mat_mul(m1: Matrix2x2, m2: Matrix2x2) -> Matrix2x2 {
+    Matrix2x2 {
+        a: m1.a * m2.a + m1.b * m2.c,
+        b: m1.a * m2.b + m1.b * m2.d,
+        c: m1.c * m2.a + m1.d * m2.c,
+        d: m1.c * m2.b + m1.d * m2.d
+    }
+}
+
+fn mat_det(m: Matrix2x2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn mat_trace(m: Matrix2x2) -> Int {
+    m.a + m.d
+}
+
+fn acc_new() -> Accumulator {
+    Accumulator { total: 0, count: 0, max_val: -1000000, min_val: 1000000 }
+}
+
+fn acc_add(a: Accumulator, v: Int) -> Accumulator {
+    let new_max = if v > a.max_val { v } else { a.max_val };
+    let new_min = if v < a.min_val { v } else { a.min_val };
+    Accumulator {
+        total:   a.total + v,
+        count:   a.count + 1,
+        max_val: new_max,
+        min_val: new_min
+    }
+}
+
+fn test_records() {
+    // Matrix multiplication:
+    // [1,2;3,4] * [5,6;7,8] = [1*5+2*7, 1*6+2*8; 3*5+4*7, 3*6+4*8]
+    //                        = [5+14, 6+16; 15+28, 18+32]
+    //                        = [19, 22; 43, 50]
+    let m1 = mat_new(1, 2, 3, 4);
+    let m2 = mat_new(5, 6, 7, 8);
+    let m3 = mat_mul(m1, m2);
+    assert_eq(m3.a, 19);
+    assert_eq(m3.b, 22);
+    assert_eq(m3.c, 43);
+    assert_eq(m3.d, 50);
+
+    // det([1,2;3,4]) = 1*4 - 2*3 = 4 - 6 = -2
+    assert_eq(mat_det(m1), -2);
+    // trace([19,22;43,50]) = 19+50 = 69
+    assert_eq(mat_trace(m3), 69);
+
+    // Identity matrix: [1,0;0,1] * [a,b;c,d] = [a,b;c,d]
+    let id = mat_new(1, 0, 0, 1);
+    let m4 = mat_mul(id, m2);
+    assert_eq(m4.a, m2.a);
+    assert_eq(m4.b, m2.b);
+    assert_eq(m4.c, m2.c);
+    assert_eq(m4.d, m2.d);
+
+    // Accumulator: add values 10, 3, 7, 15, 2
+    let mut acc = acc_new();
+    acc = acc_add(acc, 10);
+    acc = acc_add(acc, 3);
+    acc = acc_add(acc, 7);
+    acc = acc_add(acc, 15);
+    acc = acc_add(acc, 2);
+    assert_eq(acc.total,   37); // 10+3+7+15+2=37
+    assert_eq(acc.count,   5);
+    assert_eq(acc.max_val, 15);
+    assert_eq(acc.min_val, 2);
+    // Average = 37 / 5 = 7 (integer division)
+    assert_eq(acc.total / acc.count, 7);
+
+    print("records: ok");
+}
+
+// -- Closures --
+
+fn fold_left(f: fn(Int, Int) -> Int, init: Int, arr: [Int; 8], n: Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < n { acc = f(acc, arr[i]); i = i + 1; }
+    acc
+}
+
+fn map_array(f: fn(Int) -> Int, arr: [Int; 8], out: [Int; 8], n: Int) {
+    let mut i = 0;
+    while i < n { out[i] = f(arr[i]); i = i + 1; }
+}
+
+fn count_if(pred: fn(Int) -> Int, arr: [Int; 8], n: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n { if pred(arr[i]) == 1 { cnt = cnt + 1; } i = i + 1; }
+    cnt
+}
+
+fn test_closures() {
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6];
+    let n = 8;
+
+    // Sum via fold_left
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let sum = fold_left(add, 0, arr, n);
+    assert_eq(sum, 31); // 3+1+4+1+5+9+2+6=31
+
+    // Product via fold_left
+    let mul = |a: Int, b: Int| -> Int { a * b };
+    let prod = fold_left(mul, 1, arr, n);
+    assert_eq(prod, 6480); // 3*1*4*1*5*9*2*6=6480
+
+    // Max via fold_left (initial = first element trick: use -999 as -inf)
+    let max_fn = |a: Int, b: Int| -> Int { if a > b { a } else { b } };
+    let max_v = fold_left(max_fn, -999, arr, n);
+    assert_eq(max_v, 9);
+
+    // Map: square each element
+    let mut sq_arr = [0, 0, 0, 0, 0, 0, 0, 0];
+    let sq = |x: Int| -> Int { x * x };
+    map_array(sq, arr, sq_arr, n);
+    // [9, 1, 16, 1, 25, 81, 4, 36]
+    assert_eq(sq_arr[0], 9);
+    assert_eq(sq_arr[5], 81);
+    assert_eq(sq_arr[7], 36);
+
+    // Count elements > 4
+    let gt4 = |x: Int| -> Int { if x > 4 { 1 } else { 0 } };
+    let cnt_gt4 = count_if(gt4, arr, n);
+    assert_eq(cnt_gt4, 3); // 5, 9, 6
+
+    // Count even elements
+    let is_even = |x: Int| -> Int { if x % 2 == 0 { 1 } else { 0 } };
+    let cnt_even = count_if(is_even, arr, n);
+    assert_eq(cnt_even, 3); // 4, 2, 6
+
+    print("closures: ok");
+}
+
+// -- Generators --
+
+fn* fibonacci(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        yield a;
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+}
+
+fn* range_step(start: Int, stop: Int, step: Int) -> Int {
+    let mut v = start;
+    while v < stop {
+        yield v;
+        v = v + step;
+    }
+}
+
+fn* squares_gen(n: Int) -> Int {
+    let mut i = 1;
+    while i <= n {
+        yield i * i;
+        i = i + 1;
+    }
+}
+
+fn test_generators() {
+    // Fibonacci: 0,1,1,2,3,5,8,13,21,34
+    let mut fibs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for f in fibonacci(10) {
+        fibs[idx] = f;
+        idx = idx + 1;
+    }
+    assert_eq(fibs[0], 0);
+    assert_eq(fibs[1], 1);
+    assert_eq(fibs[2], 1);
+    assert_eq(fibs[3], 2);
+    assert_eq(fibs[4], 3);
+    assert_eq(fibs[5], 5);
+    assert_eq(fibs[6], 8);
+    assert_eq(fibs[7], 13);
+    assert_eq(fibs[8], 21);
+    assert_eq(fibs[9], 34);
+
+    // Sum of first 10 Fibonacci numbers = 0+1+1+2+3+5+8+13+21+34 = 88
+    let mut fib_sum = 0;
+    let mut k = 0;
+    while k < 10 { fib_sum = fib_sum + fibs[k]; k = k + 1; }
+    assert_eq(fib_sum, 88);
+
+    // Range step: 0, 3, 6, 9, 12 (step=3, stop=15)
+    let mut rng = [0, 0, 0, 0, 0];
+    idx = 0;
+    for v in range_step(0, 15, 3) {
+        rng[idx] = v;
+        idx = idx + 1;
+    }
+    assert_eq(idx, 5);
+    assert_eq(rng[0], 0);
+    assert_eq(rng[4], 12);
+
+    // Sum of squares 1^2..6^2 = 1+4+9+16+25+36 = 91
+    let mut sq_sum = 0;
+    for s in squares_gen(6) {
+        sq_sum = sq_sum + s;
+    }
+    assert_eq(sq_sum, 91);
+
+    print("generators: ok");
+}
+
+// -- Spawn/Await --
+
+fn mat_power_trace(a: Int, b: Int, c: Int, d: Int, n: Int) -> Int {
+    // Compute trace of [[a,b],[c,d]]^n
+    let mut mat = mat_new(a, b, c, d);
+    let base = mat_new(a, b, c, d);
+    let mut i = 1;
+    while i < n {
+        mat = mat_mul(mat, base);
+        i = i + 1;
+    }
+    mat_trace(mat)
+}
+
+fn count_divisors(n: Int) -> Int {
+    // Count number of divisors of n
+    let mut cnt = 0;
+    let mut d = 1;
+    while d <= n {
+        if n % d == 0 { cnt = cnt + 1; }
+        d = d + 1;
+    }
+    cnt
+}
+
+fn digit_sum(n: Int) -> Int {
+    let mut v = if n < 0 { 0 - n } else { n };
+    let mut s = 0;
+    while v > 0 {
+        s = s + v % 10;
+        v = v / 10;
+    }
+    s
+}
+
+fn test_spawn_await() {
+    // [[1,1],[1,0]]^n = Fibonacci matrix; trace = F(n+1) + F(n-1) = L(n) (Lucas numbers)
+    // L(1)=1, L(2)=3, L(3)=4, L(4)=7, L(5)=11, L(6)=18
+    // [[1,1],[1,0]]^6: trace should be 18
+    let t1 = spawn mat_power_trace(1, 1, 1, 0, 6);
+
+    // count_divisors(12) = 6 (1,2,3,4,6,12)
+    let t2 = spawn count_divisors(12);
+
+    // digit_sum(99999) = 45
+    let t3 = spawn digit_sum(99999);
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+
+    assert_eq(r1, 18);
+    assert_eq(r2, 6);
+    assert_eq(r3, 45);
+
+    // count_divisors(36) = 9 (1,2,3,4,6,9,12,18,36)
+    let t4 = spawn count_divisors(36);
+    // digit_sum(12345) = 1+2+3+4+5 = 15
+    let t5 = spawn digit_sum(12345);
+
+    let r4 = t4.await;
+    let r5 = t5.await;
+    assert_eq(r4, 9);
+    assert_eq(r5, 15);
+
+    print("spawn_await: ok");
+}
+
+// -- List operations --
+
+fn test_list_operations() {
+    // Bubble sort
+    let mut arr = [64, 34, 25, 12, 22, 11, 90, 0];
+    let n = 7;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut j = 0;
+        while j < n - 1 - i {
+            if arr[j] > arr[j + 1] {
+                let tmp = arr[j]; arr[j] = arr[j + 1]; arr[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(arr[0], 11);
+    assert_eq(arr[1], 12);
+    assert_eq(arr[2], 22);
+    assert_eq(arr[3], 25);
+    assert_eq(arr[4], 34);
+    assert_eq(arr[5], 64);
+    assert_eq(arr[6], 90);
+
+    // Sliding window maximum over window of size 3
+    // input: [1, 3, -1, -3, 5, 3, 6, 7], window=3
+    // windows: [1,3,-1]->3, [3,-1,-3]->3, [-1,-3,5]->5, [-3,5,3]->5, [5,3,6]->6, [3,6,7]->7
+    let win = [1, 3, -1, -3, 5, 3, 6, 7];
+    let wn = 8;
+    let w = 3;
+    let mut maxes = [0, 0, 0, 0, 0, 0];
+    let mut mi = 0;
+    i = 0;
+    while i <= wn - w {
+        let mut mx = win[i];
+        let mut j = i + 1;
+        while j < i + w {
+            if win[j] > mx { mx = win[j]; }
+            j = j + 1;
+        }
+        maxes[mi] = mx;
+        mi = mi + 1;
+        i = i + 1;
+    }
+    assert_eq(maxes[0], 3);
+    assert_eq(maxes[1], 3);
+    assert_eq(maxes[2], 5);
+    assert_eq(maxes[3], 5);
+    assert_eq(maxes[4], 6);
+    assert_eq(maxes[5], 7);
+
+    // Binary search
+    let sorted = [2, 5, 8, 12, 16, 23, 38, 56, 72, 91];
+    let sn = 10;
+    // Find 23 -> index 5
+    let mut lo = 0;
+    let mut hi = sn - 1;
+    let mut found_idx = -1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if sorted[mid] == 23 { found_idx = mid; lo = hi + 1; }
+        else if sorted[mid] < 23 { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    assert_eq(found_idx, 5);
+
+    // Find 100 -> not found (-1)
+    lo = 0; hi = sn - 1; found_idx = -1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if sorted[mid] == 100 { found_idx = mid; lo = hi + 1; }
+        else if sorted[mid] < 100 { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    assert_eq(found_idx, -1);
+
+    print("list_operations: ok");
+}
+
+// -- Format strings --
+
+fn test_format_strings() {
+    // Matrix formatting
+    let m = mat_new(3, 7, 2, 5);
+    let det = mat_det(m);   // 3*5 - 7*2 = 15 - 14 = 1
+    let tr  = mat_trace(m); // 3+5 = 8
+    print(f"matrix: [{m.a},{m.b};{m.c},{m.d}] det={det} trace={tr}");
+    assert_eq(det, 1);
+    assert_eq(tr,  8);
+
+    // Loop formatting with accumulator
+    let mut acc = acc_new();
+    let mut i = 1;
+    while i <= 5 {
+        let v = i * i;
+        acc = acc_add(acc, v);
+        print(f"  i={i} v={v} running_total={acc.total}");
+        i = i + 1;
+    }
+    // acc: values 1,4,9,16,25; total=55, max=25, min=1
+    assert_eq(acc.total,   55);
+    assert_eq(acc.max_val, 25);
+    assert_eq(acc.min_val, 1);
+    assert_eq(acc.count,   5);
+
+    // Fibonacci formatting
+    let mut a = 0;
+    let mut b = 1;
+    i = 0;
+    while i < 8 {
+        print(f"  fib[{i}]={a}");
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    // After 8 steps: a = fib[8] = 21
+    assert_eq(a, 21);
+
+    print("format_strings: ok");
+}
+
+// -- Combined pipeline --
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    (a / gcd(a, b)) * b
+}
+
+fn test_combined_pipeline() {
+    // Use generator to produce first 8 Fibonacci numbers,
+    // compute their GCDs pairwise and sum them.
+    let mut fibs = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for f in fibonacci(8) {
+        fibs[idx] = f;
+        idx = idx + 1;
+    }
+    // fibs = [0,1,1,2,3,5,8,13]
+
+    // Use closures to transform: filter non-zero Fibonacci, then sum their LCMs
+    // LCM(1,1)=1, LCM(1,2)=2, LCM(2,3)=6, LCM(3,5)=15, LCM(5,8)=40, LCM(8,13)=104
+    let mut lcm_sum = 0;
+    let mut i = 1;
+    while i < 7 {
+        if fibs[i] > 0 && fibs[i + 1] > 0 {
+            lcm_sum = lcm_sum + lcm(fibs[i], fibs[i + 1]);
+        }
+        i = i + 1;
+    }
+    // LCM(1,1)+LCM(1,2)+LCM(2,3)+LCM(3,5)+LCM(5,8)+LCM(8,13)
+    // = 1 + 2 + 6 + 15 + 40 + 104 = 168
+    assert_eq(lcm_sum, 168);
+
+    // Spawn: compute GCDs of pairs using concurrent tasks
+    let t1 = spawn gcd(48, 18);   // gcd(48,18) = 6
+    let t2 = spawn gcd(100, 75);  // gcd(100,75) = 25
+    let t3 = spawn gcd(17, 13);   // gcd(17,13) = 1 (both prime)
+    let g1 = t1.await;
+    let g2 = t2.await;
+    let g3 = t3.await;
+    assert_eq(g1, 6);
+    assert_eq(g2, 25);
+    assert_eq(g3, 1);
+
+    // Matrix power pipeline: compute trace of powers of [[2,1],[1,1]]
+    // [[2,1],[1,1]]^1 trace = 3
+    // [[2,1],[1,1]]^2 = [[5,3],[3,2]] trace = 7
+    // [[2,1],[1,1]]^3 = [[5,3],[3,2]]*[[2,1],[1,1]] = [[13,8],[8,5]] trace = 18
+    let mut traces = [0, 0, 0];
+    let mut k = 1;
+    while k <= 3 {
+        traces[k - 1] = mat_power_trace(2, 1, 1, 1, k);
+        k = k + 1;
+    }
+    assert_eq(traces[0], 3);
+    assert_eq(traces[1], 7);
+    assert_eq(traces[2], 18);
+
+    // Accumulator over trace differences: (7-3) + (18-7) = 4 + 11 = 15
+    let diff_sum = (traces[1] - traces[0]) + (traces[2] - traces[1]);
+    assert_eq(diff_sum, 15);
+
+    let msg = f"pipeline: lcm_sum={lcm_sum} gcd_results={g1},{g2},{g3} trace_diff_sum={diff_sum}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_records();
+    test_closures();
+    test_generators();
+    test_spawn_await();
+    test_list_operations();
+    test_format_strings();
+    test_combined_pipeline();
+    print("[OK] 470_interp_comprehensive9 — MILESTONE: ~297 interpreter tests");
+    0
+}

@@ -1,0 +1,89 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, text, builder, format
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests text building patterns: concatenation, format strings, multi-line.
+
+fn repeat_char(ch: Text, count: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < count {
+        result = result + ch;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_string_building() {
+    let s = repeat_char("*", 5);
+    print(s);
+
+    let line = repeat_char("-", 10);
+    print(line);
+    print("string_building: ok");
+}
+
+fn test_format_table() {
+    // Build a simple table
+    let mut i = 1;
+    while i <= 5 {
+        let sq = i * i;
+        let cube = i * i * i;
+        let row = f"{i}: sq={sq}, cube={cube}";
+        print(row);
+        i = i + 1;
+    }
+    print("format_table: ok");
+}
+
+fn test_conditional_text() {
+    let mut i = 1;
+    while i <= 5 {
+        let label = if i % 2 == 0 { "even" } else { "odd" };
+        let msg = f"{i} is {label}";
+        print(msg);
+        i = i + 1;
+    }
+    print("conditional_text: ok");
+}
+
+fn test_text_accumulation() {
+    // Build a comma-separated list
+    let values = [10, 20, 30, 40, 50];
+    let mut result = "";
+    let mut i = 0;
+    while i < 5 {
+        let v = values[i];
+        if i == 0 {
+            result = f"{v}";
+        } else {
+            result = f"{result},{v}";
+        }
+        i = i + 1;
+    }
+    print(result);
+    print("text_accumulation: ok");
+}
+
+fn test_nested_format() {
+    let a = 3;
+    let b = 4;
+    let sum = a + b;
+    let product = a * b;
+    let msg = f"sum({a},{b})={sum} product({a},{b})={product}";
+    print(msg);
+    print("nested_format: ok");
+}
+
+fn main() -> Int {
+    test_string_building();
+    test_format_table();
+    test_conditional_text();
+    test_text_accumulation();
+    test_nested_format();
+    print("[OK] 435_interp_string_builder");
+    0
+}

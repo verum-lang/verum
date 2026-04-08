@@ -1,0 +1,207 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, refinement, integration
+// @timeout: 5000
+
+/// Integration tests: Contracts with Refinement Types
+/// Demonstrates how contracts and refinement types work together
+
+/// Basic refinement type definitions
+type Money is Float{>= 0.0};
+type Percentage is Float{>= 0.0, <= 100.0};
+type PositiveInt is Int{> 0};
+type NonNegativeInt is Int{>= 0};
+type NonEmptyText is Text{len > 0};
+
+/// Account with balance invariant
+type Account is {
+    id: NonEmptyText,
+    balance: Money,
+    credit_limit: Money,
+};
+
+type TransferError is
+    | InsufficientFunds
+    | InvalidAmount
+    | SameAccount;
+
+@verify(proof)
+fn transfer_funds(
+    from: &mut Account,
+    to: &mut Account,
+    amount: Money{> 0.0}
+) -> Result<(), TransferError> {
+    contract#"
+        requires from.balance >= amount;
+        ensures from.balance == old(from.balance) - amount;
+        ensures to.balance == old(to.balance) + amount;
+    ";
+    if from.balance < amount {
+        return Err(InsufficientFunds);
+    }
+
+    from.balance -= amount;
+    to.balance += amount;
+    Ok(())
+}
+
+/// Refinement constrains, contract verifies complex invariants
+type Index is Int{>= 0};
+type ArraySize is Int{> 0};
+
+@verify(proof)
+fn safe_array_access<T>(
+    arr: List<T>,
+    idx: Index
+) -> Maybe<T> {
+    contract#"
+        ensures match result {
+            Some(v) => idx < arr.len(),
+            None => idx >= arr.len()
+        };
+    ";
+    if idx < arr.len() {
+        Some(arr[idx])
+    } else {
+        None
+    }
+}
+
+/// Combining refinements with quantified contracts
+// SortedList: invariant enforced by contract, not inline refinement
+type SortedList is List<Int>;
+
+@verify(proof)
+fn binary_search(
+    arr: SortedList,
+    target: Int
+) -> Maybe<Index> {
+    contract#"
+        ensures match result {
+            Some(idx) => arr[idx] == target,
+            None => true
+        };
+    ";
+    let mut low: Index = 0;
+    let mut high = arr.len() - 1;
+
+    while low <= high {
+        contract#"invariant
+            low >= 0;
+        ";
+        let mid = low + (high - low) / 2;
+        if arr[mid] == target {
+            return Some(mid);
+        } else if arr[mid] < target {
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    None
+}
+
+/// Refinement types with struct invariants
+// Email: invariant enforced by contract, not inline refinement
+type Email is Text;
+
+type Age is Int{>= 0, <= 150};
+
+type User is {
+    name: NonEmptyText,
+    email: Email,
+    age: Age,
+};
+
+@verify(proof)
+fn create_adult_user(
+    name: NonEmptyText,
+    email: Email,
+    age: Age{>= 18}
+) -> User {
+    contract#"
+        requires age >= 18;
+        ensures result.name == name;
+        ensures result.email == email;
+        ensures result.age == age;
+    ";
+    User { name, email, age }
+}
+
+/// Complex refinement with contract verification
+// Matrix: dimensions enforced by contract, not inline refinement
+type Matrix<R: Int, C: Int> is List<List<Float>>;
+
+@verify(proof)
+fn matrix_multiply(
+    a: List<List<Float>>,
+    b: List<List<Float>>,
+    m: Int, n: Int, p: Int
+) -> List<List<Float>> {
+    contract#"
+        ensures result.len() == m;
+    ";
+    let mut result = List.new();
+    for i in 0..m {
+        let mut row = List.new();
+        for j in 0..p {
+            let mut sum = 0.0;
+            for k in 0..n {
+                sum += a[i][k] * b[k][j];
+            }
+            row.push(sum);
+        }
+        result.push(row);
+    }
+    result
+}
+
+/// Refinement types for units
+type Meters is Float{>= 0.0};
+type Seconds is Float{> 0.0};
+type MetersPerSecond is Float;
+
+@verify(proof)
+fn calculate_speed(distance: Meters, time: Seconds) -> MetersPerSecond {
+    contract#"
+        ensures result == distance / time;
+        ensures distance > 0.0 implies result > 0.0;
+    ";
+    distance / time
+}
+
+/// Dependent refinement types
+type CapacityExceeded is ();
+
+@verify(proof)
+fn bounded_push<T>(
+    list: &mut List<T>,
+    item: T,
+    max: Int
+) -> Result<(), CapacityExceeded> {
+    contract#"
+        ensures match result {
+            Ok(_) => list.len() == old(list.len()) + 1,
+            Err(_) => list.len() == old(list.len())
+        };
+    ";
+    if list.len() >= max {
+        Err(CapacityExceeded)
+    } else {
+        list.push(item);
+        Ok(())
+    }
+}
+
+/// Intersection of refinements and contracts
+type ValidRange is { start: Index, end: Index };
+
+@verify(proof)
+fn slice_array<T>(arr: List<T>, range: ValidRange) -> List<T> {
+    contract#"
+        requires range.end <= arr.len();
+        ensures result.len() == range.end - range.start;
+    ";
+    arr[range.start..range.end].to_list()
+}

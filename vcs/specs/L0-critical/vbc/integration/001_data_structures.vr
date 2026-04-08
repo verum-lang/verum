@@ -1,0 +1,452 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, integration, data-structures, algorithms
+// @timeout: 5000
+// @expect: pass
+// @skip-disabled: Lifetime generics in implement blocks now supported by parser
+//
+// Test: Integration of multiple VBC features through data structure implementations
+// Verifies correct interaction of memory, generics, pattern matching, and control flow
+
+// =============================================================================
+// Linked List implementation
+// =============================================================================
+
+type LinkedList<T> is { head: Maybe<Heap<Node<T>>>, len: Int };
+type Node<T> is { value: T, next: Maybe<Heap<Node<T>>> };
+
+implement<T> LinkedList<T> {
+    fn new() -> LinkedList<T> {
+        LinkedList { head: None, len: 0 }
+    }
+
+    fn push_front(&mut self, value: T) {
+        let new_node = Heap(Node {
+            value: value,
+            next: self.head.take()
+        });
+        self.head = Some(new_node);
+        self.len = self.len + 1;
+    }
+
+    fn pop_front(&mut self) -> Maybe<T> {
+        match self.head.take() {
+            None => None,
+            Some(node) => {
+                self.head = node.next;
+                self.len = self.len - 1;
+                Some(node.value)
+            }
+        }
+    }
+
+    fn len(&self) -> Int { self.len }
+
+    fn is_empty(&self) -> Bool { self.len == 0 }
+
+    fn iter(&self) -> LinkedListIter<T> {
+        LinkedListIter { current: &self.head }
+    }
+}
+
+type LinkedListIter<'a, T> is { current: &'a Maybe<Heap<Node<T>>> };
+
+implement<'a, T> Iterator for LinkedListIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Maybe<&'a T> {
+        match self.current {
+            None => None,
+            Some(node) => {
+                self.current = &node.next;
+                Some(&node.value)
+            }
+        }
+    }
+}
+
+fn test_linked_list() {
+    let mut list: LinkedList<Int> = LinkedList.new();
+
+    assert(list.is_empty());
+    assert_eq(list.len(), 0);
+
+    list.push_front(3);
+    list.push_front(2);
+    list.push_front(1);
+
+    assert_eq(list.len(), 3);
+
+    // Iterate
+    let mut sum: Int = 0;
+    for val in list.iter() {
+        sum = sum + *val;
+    }
+    assert_eq(sum, 6);
+
+    // Pop
+    assert_eq(list.pop_front(), Some(1));
+    assert_eq(list.pop_front(), Some(2));
+    assert_eq(list.pop_front(), Some(3));
+    assert_eq(list.pop_front(), None);
+
+    assert(list.is_empty());
+}
+
+// =============================================================================
+// Binary Search Tree
+// =============================================================================
+
+type BST<T> is { root: Maybe<Heap<BSTNode<T>>> };
+type BSTNode<T> is {
+    value: T,
+    left: Maybe<Heap<BSTNode<T>>>,
+    right: Maybe<Heap<BSTNode<T>>>
+};
+
+implement<T: Ord> BST<T> {
+    fn new() -> BST<T> {
+        BST { root: None }
+    }
+
+    fn insert(&mut self, value: T) {
+        fn insert_node<T: Ord>(node: &mut Maybe<Heap<BSTNode<T>>>, value: T) {
+            match node {
+                None => {
+                    *node = Some(Heap(BSTNode {
+                        value: value,
+                        left: None,
+                        right: None
+                    }));
+                }
+                Some(n) => {
+                    if value < n.value {
+                        insert_node(&mut n.left, value);
+                    } else if value > n.value {
+                        insert_node(&mut n.right, value);
+                    }
+                    // Equal values not inserted (set semantics)
+                }
+            }
+        }
+
+        insert_node(&mut self.root, value);
+    }
+
+    fn contains(&self, value: &T) -> Bool {
+        fn search<T: Ord>(node: &Maybe<Heap<BSTNode<T>>>, value: &T) -> Bool {
+            match node {
+                None => false,
+                Some(n) => {
+                    if *value < n.value {
+                        search(&n.left, value)
+                    } else if *value > n.value {
+                        search(&n.right, value)
+                    } else {
+                        true
+                    }
+                }
+            }
+        }
+
+        search(&self.root, value)
+    }
+
+    fn inorder(&self) -> List<&T> {
+        fn collect<'a, T>(node: &'a Maybe<Heap<BSTNode<T>>>, result: &mut List<&'a T>) {
+            if let Some(n) = node {
+                collect(&n.left, result);
+                result.push(&n.value);
+                collect(&n.right, result);
+            }
+        }
+
+        let mut result: List<&T> = [];
+        collect(&self.root, &mut result);
+        result
+    }
+}
+
+fn test_bst() {
+    let mut tree: BST<Int> = BST.new();
+
+    tree.insert(5);
+    tree.insert(3);
+    tree.insert(7);
+    tree.insert(1);
+    tree.insert(9);
+
+    assert(tree.contains(&5));
+    assert(tree.contains(&1));
+    assert(tree.contains(&9));
+    assert(!tree.contains(&0));
+    assert(!tree.contains(&10));
+
+    // Inorder should be sorted
+    let sorted = tree.inorder();
+    assert_eq(sorted.len(), 5);
+    assert_eq(*sorted[0], 1);
+    assert_eq(*sorted[1], 3);
+    assert_eq(*sorted[2], 5);
+    assert_eq(*sorted[3], 7);
+    assert_eq(*sorted[4], 9);
+}
+
+// =============================================================================
+// Hash Map implementation
+// =============================================================================
+
+type HashMap<K, V> is {
+    buckets: List<List<(K, V)>>,
+    size: Int,
+    capacity: Int
+};
+
+implement<K: Hash + Eq, V> HashMap<K, V> {
+    fn new() -> HashMap<K, V> {
+        let capacity: Int = 16;
+        let mut buckets: List<List<(K, V)>> = [];
+        for _ in 0..capacity {
+            buckets.push([]);
+        }
+        HashMap { buckets: buckets, size: 0, capacity: capacity }
+    }
+
+    fn insert(&mut self, key: K, value: V) -> Maybe<V> {
+        let bucket_idx = key.hash() % self.capacity;
+        let bucket = &mut self.buckets[bucket_idx];
+
+        // Check for existing key
+        for i in 0..bucket.len() {
+            if bucket[i].0 == key {
+                let old = bucket[i].1;
+                bucket[i] = (key, value);
+                return Some(old);
+            }
+        }
+
+        // New key
+        bucket.push((key, value));
+        self.size = self.size + 1;
+        None
+    }
+
+    fn get(&self, key: &K) -> Maybe<&V> {
+        let bucket_idx = key.hash() % self.capacity;
+        let bucket = &self.buckets[bucket_idx];
+
+        for (k, v) in bucket {
+            if k == key {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    fn len(&self) -> Int { self.size }
+}
+
+fn test_hashmap() {
+    let mut map: HashMap<Text, Int> = HashMap.new();
+
+    map.insert("one", 1);
+    map.insert("two", 2);
+    map.insert("three", 3);
+
+    assert_eq(map.len(), 3);
+    assert_eq(*@unwrap(map.get(&"one")), 1);
+    assert_eq(*@unwrap(map.get(&"two")), 2);
+    assert(map.get(&"four") is None);
+
+    // Update
+    map.insert("one", 100);
+    assert_eq(*@unwrap(map.get(&"one")), 100);
+}
+
+// =============================================================================
+// Priority Queue (Min Heap)
+// =============================================================================
+
+type MinHeap<T> is { data: List<T> };
+
+implement<T: Ord> MinHeap<T> {
+    fn new() -> MinHeap<T> {
+        MinHeap { data: [] }
+    }
+
+    fn push(&mut self, value: T) {
+        self.data.push(value);
+        self.sift_up(self.data.len() - 1);
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        if self.data.is_empty() {
+            return None;
+        }
+
+        let last_idx = self.data.len() - 1;
+        self.data.swap(0, last_idx);
+        let result = self.data.pop();
+
+        if !self.data.is_empty() {
+            self.sift_down(0);
+        }
+
+        result
+    }
+
+    fn peek(&self) -> Maybe<&T> {
+        if self.data.is_empty() { None } else { Some(&self.data[0]) }
+    }
+
+    fn sift_up(&mut self, idx: Int) {
+        let mut i = idx;
+        while i > 0 {
+            let parent = (i - 1) / 2;
+            if self.data[i] < self.data[parent] {
+                self.data.swap(i, parent);
+                i = parent;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn sift_down(&mut self, idx: Int) {
+        let mut i = idx;
+        let len = self.data.len();
+
+        loop {
+            let left = 2 * i + 1;
+            let right = 2 * i + 2;
+            let mut smallest = i;
+
+            if left < len && self.data[left] < self.data[smallest] {
+                smallest = left;
+            }
+            if right < len && self.data[right] < self.data[smallest] {
+                smallest = right;
+            }
+
+            if smallest != i {
+                self.data.swap(i, smallest);
+                i = smallest;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn len(&self) -> Int { self.data.len() }
+}
+
+fn test_min_heap() {
+    let mut heap: MinHeap<Int> = MinHeap.new();
+
+    heap.push(5);
+    heap.push(3);
+    heap.push(7);
+    heap.push(1);
+    heap.push(4);
+
+    // Should pop in sorted order
+    assert_eq(heap.pop(), Some(1));
+    assert_eq(heap.pop(), Some(3));
+    assert_eq(heap.pop(), Some(4));
+    assert_eq(heap.pop(), Some(5));
+    assert_eq(heap.pop(), Some(7));
+    assert_eq(heap.pop(), None);
+}
+
+// =============================================================================
+// Graph with BFS/DFS
+// =============================================================================
+
+type Graph is { adj: List<List<Int>> };
+
+implement Graph {
+    fn new(n: Int) -> Graph {
+        let mut adj: List<List<Int>> = [];
+        for _ in 0..n {
+            adj.push([]);
+        }
+        Graph { adj: adj }
+    }
+
+    fn add_edge(&mut self, u: Int, v: Int) {
+        self.adj[u].push(v);
+        self.adj[v].push(u);  // Undirected
+    }
+
+    fn bfs(&self, start: Int) -> List<Int> {
+        let n = self.adj.len();
+        let mut visited = [false; n];
+        let mut result: List<Int> = [];
+        let mut queue: List<Int> = [start];
+
+        visited[start] = true;
+
+        while !queue.is_empty() {
+            let node = queue.remove(0);
+            result.push(node);
+
+            for neighbor in &self.adj[node] {
+                if !visited[*neighbor] {
+                    visited[*neighbor] = true;
+                    queue.push(*neighbor);
+                }
+            }
+        }
+
+        result
+    }
+
+    fn dfs(&self, start: Int) -> List<Int> {
+        let n = self.adj.len();
+        let mut visited = [false; n];
+        let mut result: List<Int> = [];
+
+        fn dfs_visit(g: &Graph, node: Int, visited: &mut [Bool], result: &mut List<Int>) {
+            visited[node] = true;
+            result.push(node);
+
+            for neighbor in &g.adj[node] {
+                if !visited[*neighbor] {
+                    dfs_visit(g, *neighbor, visited, result);
+                }
+            }
+        }
+
+        dfs_visit(self, start, &mut visited, &mut result);
+        result
+    }
+}
+
+fn test_graph() {
+    let mut g = Graph.new(5);
+
+    // Create graph: 0-1-2, 0-3, 3-4
+    g.add_edge(0, 1);
+    g.add_edge(1, 2);
+    g.add_edge(0, 3);
+    g.add_edge(3, 4);
+
+    let bfs_order = g.bfs(0);
+    assert_eq(bfs_order.len(), 5);
+    assert_eq(bfs_order[0], 0);
+
+    let dfs_order = g.dfs(0);
+    assert_eq(dfs_order.len(), 5);
+    assert_eq(dfs_order[0], 0);
+}
+
+fn main() {
+    test_linked_list();
+    test_bst();
+    test_hashmap();
+    test_min_heap();
+    test_graph();
+
+    print("001_data_structures: PASSED");
+}

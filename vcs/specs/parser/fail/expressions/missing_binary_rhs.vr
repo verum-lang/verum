@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, binary, rhs, error
+// @description: Binary operator missing right-hand side operand
+// @expected-error: E018
+
+fn test() {
+    let x = 1 +;  // Missing right operand
+}

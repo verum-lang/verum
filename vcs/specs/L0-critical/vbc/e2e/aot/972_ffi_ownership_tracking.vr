@@ -1,0 +1,71 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: ffi, ownership, transfer_from, transfer_to, borrow, shared
+// @description: Tests FFI ownership semantics from grammar (ownership_mode variants)
+// @expected-exit: 0
+
+// Grammar reference (verum.ebnf lines 976-980):
+//   ownership_mode = 'transfer_to' | 'transfer_from' | 'borrow' | 'shared'
+
+@ffi("libSystem.B.dylib")
+extern {
+    // transfer_from: C allocates, Verum must free
+    fn malloc(size: Int) -> &unsafe Byte;
+    // transfer_to: Verum gives pointer to C, must not use after
+    fn free(ptr: &unsafe Byte) -> ();
+    // borrow: temporary access, no ownership change
+    fn memset(ptr: &unsafe Byte, value: Int, size: Int) -> &unsafe Byte;
+    // shared: both sides access
+    fn getpid() -> Int;
+}
+
+fn main() {
+    // ============================================================
+    // Test 1: transfer_from — C allocates, Verum owns result
+    // ============================================================
+    let p1 = malloc(256);
+    // p1 is now Verum-owned — we're responsible for freeing it
+    memset(p1, 0, 256);
+    print("Test 1 PASS: transfer_from — malloc + memset");
+
+    // ============================================================
+    // Test 2: transfer_to — Verum gives pointer to C
+    // ============================================================
+    free(p1);
+    // After free, p1 is consumed — using it would be use-after-transfer
+    print("Test 2 PASS: transfer_to — free consumed pointer");
+
+    // ============================================================
+    // Test 3: borrow — temporary access only
+    // ============================================================
+    let p2 = malloc(128);
+    let p3 = memset(p2, 42, 128);
+    // p2 and p3 both valid — memset borrows, returns same pointer
+    free(p2);
+    print("Test 3 PASS: borrow — memset returns same pointer");
+
+    // ============================================================
+    // Test 4: shared — concurrent access (getpid is stateless)
+    // ============================================================
+    let pid1 = getpid();
+    let pid2 = getpid();
+    assert(pid1 == pid2); // Same process
+    print(f"Test 4 PASS: shared — pid consistent: {pid1}");
+
+    // ============================================================
+    // Test 5: Multiple allocation/free cycles
+    // ============================================================
+    let a = malloc(64);
+    let b = malloc(128);
+    let c = malloc(256);
+    memset(a, 1, 64);
+    memset(b, 2, 128);
+    memset(c, 3, 256);
+    free(c);
+    free(b);
+    free(a);
+    print("Test 5 PASS: multiple alloc/free cycles");
+
+    print("All ownership tracking tests passed");
+}

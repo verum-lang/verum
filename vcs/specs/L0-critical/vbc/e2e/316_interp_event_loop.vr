@@ -1,0 +1,354 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, design-patterns, event-loop
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Simple event loop simulation.
+// Events have timestamps and type tags. The loop processes events in time order,
+// dispatches to handlers, and tracks handler invocation counts.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Event types: 1=TICK, 2=DATA, 3=TIMER, 4=INPUT, 5=CLOSE
+// Events are encoded as (timestamp * 100 + event_type) for sorting
+// =============================================================================
+
+fn encode_event(timestamp: Int, etype: Int) -> Int {
+    timestamp * 100 + etype
+}
+
+fn event_time(encoded: Int) -> Int {
+    encoded / 100
+}
+
+fn event_type(encoded: Int) -> Int {
+    encoded % 100
+}
+
+// =============================================================================
+// Event Queue (priority queue by timestamp, min-heap)
+// =============================================================================
+
+type EventQueue is {
+    events: Arr8,
+    sz: Int
+};
+
+fn eq_new() -> EventQueue {
+    EventQueue { events: a8_zeros(), sz: 0 }
+}
+
+fn eq_swap(q: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = a8_get(q, i);
+    let vj = a8_get(q, j);
+    let q2 = a8_set(q, i, vj);
+    a8_set(q2, j, vi)
+}
+
+fn eq_sift_up(q: Arr8, idx: Int) -> Arr8 {
+    let mut data = q;
+    let mut i = idx;
+    while i > 0 {
+        let parent = (i - 1) / 2;
+        if a8_get(data, i) < a8_get(data, parent) {
+            data = eq_swap(data, i, parent);
+            i = parent;
+        } else {
+            i = 0;
+            i = -1;
+        }
+    }
+    data
+}
+
+fn eq_sift_down(q: Arr8, idx: Int, sz: Int) -> Arr8 {
+    let mut data = q;
+    let mut i = idx;
+    let mut cont = 1;
+    while cont != 0 {
+        let left = 2 * i + 1;
+        let right = 2 * i + 2;
+        let mut smallest = i;
+        if left < sz && a8_get(data, left) < a8_get(data, smallest) {
+            smallest = left;
+        }
+        if right < sz && a8_get(data, right) < a8_get(data, smallest) {
+            smallest = right;
+        }
+        if smallest != i {
+            data = eq_swap(data, i, smallest);
+            i = smallest;
+        } else {
+            cont = 0;
+        }
+    }
+    data
+}
+
+fn eq_push(q: EventQueue, ev: Int) -> EventQueue {
+    let new_events = a8_set(q.events, q.sz, ev);
+    let sifted = eq_sift_up(new_events, q.sz);
+    EventQueue { events: sifted, sz: q.sz + 1 }
+}
+
+type EQPopResult is { queue: EventQueue, ev: Int };
+
+fn eq_pop(q: EventQueue) -> EQPopResult {
+    if q.sz <= 0 {
+        return EQPopResult { queue: q, ev: -1 };
+    }
+    let min_ev = a8_get(q.events, 0);
+    let last = a8_get(q.events, q.sz - 1);
+    let new_events = a8_set(q.events, 0, last);
+    let sifted = eq_sift_down(new_events, 0, q.sz - 1);
+    EQPopResult {
+        queue: EventQueue { events: sifted, sz: q.sz - 1 },
+        ev: min_ev
+    }
+}
+
+// =============================================================================
+// Handler state: counts of each event type handled
+// =============================================================================
+
+type HandlerState is {
+    tick_count: Int,
+    data_count: Int,
+    timer_count: Int,
+    input_count: Int,
+    close_count: Int,
+    total_data_val: Int,
+    last_time: Int
+};
+
+fn handler_new() -> HandlerState {
+    HandlerState {
+        tick_count: 0, data_count: 0, timer_count: 0,
+        input_count: 0, close_count: 0, total_data_val: 0,
+        last_time: 0
+    }
+}
+
+fn handle_event(hs: HandlerState, ev: Int) -> HandlerState {
+    let t = event_time(ev);
+    let etype = event_type(ev);
+
+    if etype == 1 {
+        // TICK
+        HandlerState {
+            tick_count: hs.tick_count + 1, data_count: hs.data_count,
+            timer_count: hs.timer_count, input_count: hs.input_count,
+            close_count: hs.close_count, total_data_val: hs.total_data_val,
+            last_time: t
+        }
+    } else if etype == 2 {
+        // DATA: accumulate timestamp as data value
+        HandlerState {
+            tick_count: hs.tick_count, data_count: hs.data_count + 1,
+            timer_count: hs.timer_count, input_count: hs.input_count,
+            close_count: hs.close_count, total_data_val: hs.total_data_val + t,
+            last_time: t
+        }
+    } else if etype == 3 {
+        // TIMER
+        HandlerState {
+            tick_count: hs.tick_count, data_count: hs.data_count,
+            timer_count: hs.timer_count + 1, input_count: hs.input_count,
+            close_count: hs.close_count, total_data_val: hs.total_data_val,
+            last_time: t
+        }
+    } else if etype == 4 {
+        // INPUT
+        HandlerState {
+            tick_count: hs.tick_count, data_count: hs.data_count,
+            timer_count: hs.timer_count, input_count: hs.input_count + 1,
+            close_count: hs.close_count, total_data_val: hs.total_data_val,
+            last_time: t
+        }
+    } else {
+        // CLOSE (5) or unknown
+        HandlerState {
+            tick_count: hs.tick_count, data_count: hs.data_count,
+            timer_count: hs.timer_count, input_count: hs.input_count,
+            close_count: hs.close_count + 1, total_data_val: hs.total_data_val,
+            last_time: t
+        }
+    }
+}
+
+// =============================================================================
+// Event loop: process all events from queue
+// =============================================================================
+
+type LoopResult is { handlers: HandlerState, events_processed: Int };
+
+fn run_event_loop(q: EventQueue) -> LoopResult {
+    let mut queue = q;
+    let mut hs = handler_new();
+    let mut count = 0;
+    let mut running = 1;
+
+    while running != 0 && count < 100 {
+        let pop = eq_pop(queue);
+        if pop.ev == -1 {
+            running = 0;
+        } else {
+            queue = pop.queue;
+            hs = handle_event(hs, pop.ev);
+            count = count + 1;
+            // Stop on CLOSE event
+            if event_type(pop.ev) == 5 {
+                running = 0;
+            }
+        }
+    }
+
+    LoopResult { handlers: hs, events_processed: count }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_empty_loop() {
+    let q = eq_new();
+    let lr = run_event_loop(q);
+    assert_eq(lr.events_processed, 0);
+}
+
+fn test_single_event() {
+    let mut q = eq_new();
+    q = eq_push(q, encode_event(10, 1));  // TICK at time 10
+    let lr = run_event_loop(q);
+    assert_eq(lr.events_processed, 1);
+    assert_eq(lr.handlers.tick_count, 1);
+    assert_eq(lr.handlers.last_time, 10);
+}
+
+fn test_ordered_processing() {
+    let mut q = eq_new();
+    // Add events out of order
+    q = eq_push(q, encode_event(30, 2));  // DATA at 30
+    q = eq_push(q, encode_event(10, 1));  // TICK at 10
+    q = eq_push(q, encode_event(20, 3));  // TIMER at 20
+    q = eq_push(q, encode_event(50, 5));  // CLOSE at 50
+
+    let lr = run_event_loop(q);
+    assert_eq(lr.events_processed, 4);
+    assert_eq(lr.handlers.tick_count, 1);
+    assert_eq(lr.handlers.data_count, 1);
+    assert_eq(lr.handlers.timer_count, 1);
+    assert_eq(lr.handlers.close_count, 1);
+    assert_eq(lr.handlers.last_time, 50);
+}
+
+fn test_close_stops_loop() {
+    let mut q = eq_new();
+    q = eq_push(q, encode_event(10, 1));
+    q = eq_push(q, encode_event(20, 5));  // CLOSE
+    q = eq_push(q, encode_event(30, 1));  // This should NOT be processed
+
+    let lr = run_event_loop(q);
+    assert_eq(lr.events_processed, 2);
+    assert_eq(lr.handlers.tick_count, 1);
+    assert_eq(lr.handlers.close_count, 1);
+}
+
+fn test_multiple_same_type() {
+    let mut q = eq_new();
+    q = eq_push(q, encode_event(1, 2));   // DATA at 1
+    q = eq_push(q, encode_event(2, 2));   // DATA at 2
+    q = eq_push(q, encode_event(3, 2));   // DATA at 3
+    q = eq_push(q, encode_event(4, 2));   // DATA at 4
+
+    let lr = run_event_loop(q);
+    assert_eq(lr.events_processed, 4);
+    assert_eq(lr.handlers.data_count, 4);
+    // total_data_val = 1+2+3+4 = 10
+    assert_eq(lr.handlers.total_data_val, 10);
+}
+
+fn test_all_event_types() {
+    let mut q = eq_new();
+    q = eq_push(q, encode_event(1, 1));  // TICK
+    q = eq_push(q, encode_event(2, 2));  // DATA
+    q = eq_push(q, encode_event(3, 3));  // TIMER
+    q = eq_push(q, encode_event(4, 4));  // INPUT
+    q = eq_push(q, encode_event(5, 5));  // CLOSE
+
+    let lr = run_event_loop(q);
+    assert_eq(lr.handlers.tick_count, 1);
+    assert_eq(lr.handlers.data_count, 1);
+    assert_eq(lr.handlers.timer_count, 1);
+    assert_eq(lr.handlers.input_count, 1);
+    assert_eq(lr.handlers.close_count, 1);
+}
+
+fn test_same_timestamp_events() {
+    let mut q = eq_new();
+    // Multiple events at same time
+    q = eq_push(q, encode_event(5, 1));
+    q = eq_push(q, encode_event(5, 2));
+    q = eq_push(q, encode_event(5, 3));
+
+    let lr = run_event_loop(q);
+    assert_eq(lr.events_processed, 3);
+    assert_eq(lr.handlers.last_time, 5);
+}
+
+fn test_data_accumulation() {
+    let mut q = eq_new();
+    q = eq_push(q, encode_event(10, 2));
+    q = eq_push(q, encode_event(20, 2));
+    q = eq_push(q, encode_event(30, 2));
+    q = eq_push(q, encode_event(40, 2));
+    q = eq_push(q, encode_event(50, 2));
+
+    let lr = run_event_loop(q);
+    assert_eq(lr.handlers.data_count, 5);
+    assert_eq(lr.handlers.total_data_val, 150);  // 10+20+30+40+50
+}
+
+fn main() -> Int {
+    test_empty_loop();
+    test_single_event();
+    test_ordered_processing();
+    test_close_stops_loop();
+    test_multiple_same_type();
+    test_all_event_types();
+    test_same_timestamp_events();
+    test_data_accumulation();
+    print("[OK] 316_interp_event_loop");
+    0
+}

@@ -1,0 +1,376 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for identifier patterns (simple and mutable)
+
+// Grammar Reference:
+// identifier_pattern = [ 'ref' ] , [ 'mut' ] , identifier , [ '@' , pattern ] ;
+
+// ============================================================================
+// SECTION 1: Simple Identifier Binding
+// ============================================================================
+
+fn test_simple_identifiers() {
+    // Basic binding
+    let x = 1;
+    let value = compute();
+    let result = operation();
+
+    // Identifiers with underscores
+    let my_value = 1;
+    let some_result = compute();
+    let _private = hidden();
+
+    // Single letter identifiers
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    // Longer descriptive names
+    let user_id = get_user_id();
+    let database_connection = connect();
+    let http_response_status = fetch().status;
+}
+
+// ============================================================================
+// SECTION 2: Mutable Identifier Patterns
+// ============================================================================
+
+fn test_mutable_identifiers() {
+    // Basic mutable binding
+    let mut x = 0;
+    let mut counter = 0;
+    let mut accumulator = initial_value();
+
+    // Multiple mutable bindings
+    let mut a = 1;
+    let mut b = 2;
+    let mut c = 3;
+
+    // Mutable with mutation
+    let mut value = 0;
+    value = value + 1;
+    value = value * 2;
+
+    // Mutable in loops
+    let mut sum = 0;
+    for i in 0..10 {
+        sum = sum + i
+    }
+}
+
+// ============================================================================
+// SECTION 3: Reference Patterns (ref keyword)
+// ============================================================================
+
+fn test_ref_patterns() {
+    // Basic ref binding (borrow instead of move)
+    let ref borrowed = owned_value;
+
+    // Ref in match
+    match data {
+        ref x => use_borrowed(x)
+    }
+
+    // Ref with specific patterns
+    match option {
+        Some(ref inner) => use_ref(inner),
+        None => none()
+    }
+
+    // Ref in record destructuring
+    let Point { ref x, ref y } = point;
+}
+
+// ============================================================================
+// SECTION 4: Mutable Reference Patterns (ref mut)
+// ============================================================================
+
+fn test_ref_mut_patterns() {
+    // Basic ref mut binding
+    let ref mut borrowed_mut = owned_value;
+
+    // Ref mut in match
+    match data {
+        ref mut x => modify(x)
+    }
+
+    // Ref mut with variants
+    match option {
+        Some(ref mut inner) => modify_inner(inner),
+        None => none()
+    }
+
+    // Ref mut in record destructuring
+    let Point { ref mut x, ref mut y } = point;
+}
+
+// ============================================================================
+// SECTION 5: Binding with @ (at-pattern)
+// ============================================================================
+
+fn test_at_patterns() {
+    // Bind whole while destructuring
+    match option {
+        whole @ Some(inner) => use_both(whole, inner),
+        None => none()
+    }
+
+    // Bind with wildcard
+    match value {
+        all @ _ => use_all(all)
+    }
+
+    // Bind with literal pattern
+    match x {
+        zero @ 0 => handle_zero(zero),
+        n @ _ => handle_other(n)
+    }
+
+    // Bind with variant
+    match result {
+        ok @ Ok(_) => handle_ok(ok),
+        err @ Err(_) => handle_err(err)
+    }
+
+    // Bind with tuple
+    match pair {
+        both @ (a, b) => use_all(both, a, b)
+    }
+
+    // Bind with array
+    match array {
+        all @ [first, second] => use_array(all, first, second)
+    }
+
+    // Bind with record
+    match point {
+        p @ Point { x, y } => use_point(p, x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 6: Nested @ Patterns
+// ============================================================================
+
+fn test_nested_at_patterns() {
+    // @ inside tuple
+    match pair {
+        (a @ 0, b) => first_is_zero(a, b),
+        (a, b @ 0) => second_is_zero(a, b),
+        (a, b) => both_nonzero(a, b)
+    }
+
+    // @ inside variant
+    match option {
+        Some(inner @ Some(_)) => nested_some(inner),
+        Some(None) => inner_none(),
+        None => outer_none()
+    }
+
+    // Multiple @ bindings
+    match nested {
+        outer @ (inner @ (a, b), c) => use_all(outer, inner, a, b, c)
+    }
+
+    // @ with range pattern
+    match x {
+        small @ 0..10 => handle_small(small),
+        medium @ 10..100 => handle_medium(medium),
+        large @ _ => handle_large(large)
+    }
+}
+
+// ============================================================================
+// SECTION 7: Mut with @ Patterns
+// ============================================================================
+
+fn test_mut_at_patterns() {
+    // Mutable binding with @
+    let mut whole @ (a, b) = pair;
+    whole = new_pair();
+
+    // In match
+    match option {
+        mut all @ Some(_) => modify(all),
+        None => none()
+    }
+}
+
+// ============================================================================
+// SECTION 8: Ref with @ Patterns
+// ============================================================================
+
+fn test_ref_at_patterns() {
+    // Ref binding with @
+    let ref whole @ (a, b) = pair;
+
+    // Ref mut with @
+    let ref mut whole @ (a, b) = pair;
+
+    // In match
+    match data {
+        ref all @ Some(ref inner) => borrow_both(all, inner),
+        None => none()
+    }
+}
+
+// ============================================================================
+// SECTION 9: Identifiers in Tuple Destructuring
+// ============================================================================
+
+fn test_identifiers_in_tuples() {
+    // All identifiers
+    let (a, b) = pair;
+    let (x, y, z) = triple;
+
+    // Mixed with wildcards
+    let (first, _) = pair;
+    let (_, second) = pair;
+
+    // Mutable in tuples
+    let (mut a, b) = pair;
+    let (a, mut b) = pair;
+    let (mut a, mut b) = pair;
+
+    // Ref in tuples
+    let (ref a, ref b) = pair;
+    let (ref mut a, ref mut b) = pair;
+}
+
+// ============================================================================
+// SECTION 10: Identifiers in Array Destructuring
+// ============================================================================
+
+fn test_identifiers_in_arrays() {
+    // All identifiers
+    let [a, b, c] = array;
+    let [first, second] = short_array;
+
+    // Mixed with wildcards
+    let [head, _, _] = array;
+    let [_, middle, _] = array;
+    let [_, _, last] = array;
+
+    // Mutable in arrays
+    let [mut a, b, c] = array;
+    let [a, mut b, c] = array;
+    let [mut a, mut b, mut c] = array;
+
+    // Ref in arrays
+    let [ref a, ref b] = array;
+    let [ref mut a, ref mut b] = array;
+}
+
+// ============================================================================
+// SECTION 11: Identifiers in Record Destructuring
+// ============================================================================
+
+fn test_identifiers_in_records() {
+    // Field shorthand (name matches field)
+    let Point { x, y } = point;
+    let Person { name, age } = person;
+
+    // Renamed fields
+    let Point { x: px, y: py } = point;
+    let Person { name: person_name, age: person_age } = person;
+
+    // Mixed shorthand and rename
+    let Point { x, y: py } = point;
+    let Person { name, age: years } = person;
+
+    // Mutable fields
+    let Point { mut x, mut y } = point;
+    let Point { x: mut px, y: mut py } = point;
+
+    // Ref fields
+    let Point { ref x, ref y } = point;
+    let Point { ref mut x, ref mut y } = point;
+}
+
+// ============================================================================
+// SECTION 12: Identifier Binding in Match Arms
+// ============================================================================
+
+fn test_identifiers_in_match() {
+    // Simple binding in arm
+    match value {
+        x => use(x)
+    }
+
+    // Binding with condition
+    match value {
+        n if n > 0 => positive(n),
+        n if n < 0 => negative(n),
+        z => zero(z)
+    }
+
+    // Multiple arms with different bindings
+    match option {
+        Some(value) => has_value(value),
+        None => no_value()
+    }
+
+    // Nested bindings
+    match nested {
+        Some(Some(inner)) => deeply_nested(inner),
+        Some(None) => shallow(),
+        None => empty()
+    }
+}
+
+// ============================================================================
+// SECTION 13: Identifier Binding in For Loops
+// ============================================================================
+
+fn test_identifiers_in_loops() {
+    // Simple loop variable
+    for i in 0..10 {
+        process(i)
+    }
+
+    // Tuple destructuring in loop
+    for (index, value) in enumerated {
+        use_both(index, value)
+    }
+
+    // Complex destructuring in loop
+    for Point { x, y } in points {
+        process_point(x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 14: Shadowing
+// ============================================================================
+
+fn test_shadowing() {
+    let x = 1;
+    let x = 2;  // Shadows previous x
+    let x = x + 1;  // Shadows again, uses previous value
+
+    let value = "text";
+    let value = 42;  // Different type, shadows previous
+
+    // Shadowing in nested scope
+    let outer = 1;
+    {
+        let outer = 2;  // Shadows in inner scope
+        use(outer)
+    }
+}
+
+// ============================================================================
+// SECTION 15: Complex Identifier Patterns
+// ============================================================================
+
+fn test_complex_patterns() {
+    // Basic @ pattern binding
+    let whole @ Some(inner) = option;
+
+    // Multiple identifiers with different modifiers
+    let (a, mut b, ref c, ref mut d) = tuple;
+
+    // @ with nested pattern
+    let outer @ (a, (b, c)) = nested;
+}

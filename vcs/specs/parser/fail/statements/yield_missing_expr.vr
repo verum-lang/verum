@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, yield, expression, error
+// @description: Test yield statement with missing expression
+// @expected-error: E048
+
+fn* test() -> Int {
+    yield;
+}

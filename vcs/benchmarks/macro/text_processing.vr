@@ -1,0 +1,309 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: > 100 MB/s text processing
+// @tags: text, string, regex, performance
+
+/// Text Processing Benchmark
+///
+/// Tests realistic text manipulation workloads:
+/// - String operations
+/// - Regular expressions
+/// - Unicode handling
+/// - Text search and replace
+/// - Tokenization
+
+module benchmarks.macro.text_processing
+
+using [Benchmark, Text, Regex]
+
+/// String concatenation
+fn benchmark_text_concatenation() {
+    for _ in 0..10_000 {
+        let mut s = text("");
+        for i in 0..1000 {
+            s = s + &text("item{} ", i);
+        }
+        let _ = s.len();
+    }
+}
+
+/// String builder (efficient concatenation)
+fn benchmark_text_builder() {
+    for _ in 0..10_000 {
+        let mut builder = TextBuilder.with_capacity(10000);
+        for i in 0..1000 {
+            builder.push_str(&text("item{} ", i));
+        }
+        let s = builder.build();
+        let _ = s.len();
+    }
+}
+
+/// String splitting
+fn benchmark_text_split() {
+    let text = "word1 word2 word3 word4 word5 ".repeat(1000);
+
+    for _ in 0..10_000 {
+        let parts: List<&Text> = text.split(" ").collect();
+        let _ = parts.len();
+    }
+}
+
+/// String joining
+fn benchmark_text_join() {
+    let words: List<Text> = (0..1000).map(|i| text("word{}", i)).collect();
+
+    for _ in 0..10_000 {
+        let joined = words.join(" ");
+        let _ = joined.len();
+    }
+}
+
+/// Substring search
+fn benchmark_text_contains() {
+    let haystack = "The quick brown fox jumps over the lazy dog. ".repeat(100);
+    let needles = list!["fox", "dog", "cat", "bird", "lazy"];
+
+    for _ in 0..10_000 {
+        for needle in &needles {
+            let _ = haystack.contains(needle);
+        }
+    }
+}
+
+/// String find (index of)
+fn benchmark_text_find() {
+    let haystack = "abc".repeat(10000) + "needle" + &"xyz".repeat(10000);
+
+    for _ in 0..10_000 {
+        let pos = haystack.find("needle");
+        assert(pos.is_some());
+    }
+}
+
+/// String replace
+fn benchmark_text_replace() {
+    let original = "Hello World! ".repeat(1000);
+
+    for _ in 0..1_000 {
+        let replaced = original.replace("World", "Universe");
+        let _ = replaced.len();
+    }
+}
+
+/// String replace all
+fn benchmark_text_replace_all() {
+    let original = "a b c d e f g h i j ".repeat(1000);
+
+    for _ in 0..1_000 {
+        let replaced = original.replace_all(" ", "_");
+        let _ = replaced.len();
+    }
+}
+
+/// Trim whitespace
+fn benchmark_text_trim() {
+    let texts: List<Text> = (0..1000).map(|_| "   hello world   ".to_text()).collect();
+
+    for _ in 0..10_000 {
+        for t in &texts {
+            let trimmed = t.trim();
+            let _ = trimmed.len();
+        }
+    }
+}
+
+/// Case conversion
+fn benchmark_text_case_conversion() {
+    let original = "Hello World! This Is A Test String.".repeat(100);
+
+    for _ in 0..10_000 {
+        let lower = original.to_lowercase();
+        let upper = original.to_uppercase();
+        let _ = lower.len() + upper.len();
+    }
+}
+
+/// Simple regex match
+fn benchmark_regex_simple_match() {
+    let regex = Regex.compile(r"\d+");
+    let text = "There are 123 apples and 456 oranges.";
+
+    for _ in 0..500_000 {
+        let _ = regex.is_match(text);
+    }
+}
+
+/// Regex find all
+fn benchmark_regex_find_all() {
+    let regex = Regex.compile(r"\b\w+@\w+\.\w+\b");  // Email-like pattern
+    let text = "Contact us at info@example.com or support@company.org for more info.".repeat(100);
+
+    for _ in 0..10_000 {
+        let matches: List<_> = regex.find_all(&text).collect();
+        let _ = matches.len();
+    }
+}
+
+/// Regex with capture groups
+fn benchmark_regex_captures() {
+    let regex = Regex.compile(r"(\d{4})-(\d{2})-(\d{2})");
+    let text = "Dates: 2024-01-15, 2024-02-20, 2024-03-25".repeat(100);
+
+    for _ in 0..10_000 {
+        for capture in regex.captures_all(&text) {
+            let _ = capture.group(1);  // Year
+            let _ = capture.group(2);  // Month
+            let _ = capture.group(3);  // Day
+        }
+    }
+}
+
+/// Regex replace
+fn benchmark_regex_replace() {
+    let regex = Regex.compile(r"\s+");
+    let text = "Hello    World   This    Has   Extra   Spaces".repeat(100);
+
+    for _ in 0..10_000 {
+        let replaced = regex.replace_all(&text, " ");
+        let _ = replaced.len();
+    }
+}
+
+/// Complex regex pattern
+fn benchmark_regex_complex() {
+    // URL pattern
+    let regex = Regex.compile(r"https?://[\w\-.]+(:\d+)?(/[\w\-./?%&=]*)?");
+    let text = "Visit https://example.com:8080/path?query=value or http://test.org/page".repeat(50);
+
+    for _ in 0..5_000 {
+        let matches: List<_> = regex.find_all(&text).collect();
+        let _ = matches.len();
+    }
+}
+
+/// Unicode normalization
+fn benchmark_text_unicode_normalize() {
+    // Text with combining characters
+    let text = "cafe\u{0301}".repeat(1000);  // e + combining acute accent
+
+    for _ in 0..10_000 {
+        let normalized = text.unicode_normalize(NormalizationForm.NFC);
+        let _ = normalized.len();
+    }
+}
+
+/// Unicode character iteration
+fn benchmark_text_unicode_chars() {
+    let text = "Hello World in different scripts".repeat(100);
+
+    for _ in 0..10_000 {
+        let count: Int = text.chars().count();
+        let _ = count;
+    }
+}
+
+/// Tokenization (word splitting)
+fn benchmark_text_tokenize() {
+    let text = "This is a sample text for tokenization. It contains multiple sentences! And various punctuation marks?".repeat(50);
+
+    for _ in 0..5_000 {
+        let tokens = text.tokenize();
+        let _ = tokens.len();
+    }
+}
+
+/// Line iteration
+fn benchmark_text_lines() {
+    let text = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n".repeat(1000);
+
+    for _ in 0..10_000 {
+        let lines: List<_> = text.lines().collect();
+        let _ = lines.len();
+    }
+}
+
+/// String formatting
+fn benchmark_text_format() {
+    for _ in 0..100_000 {
+        let s = text("Name: {}, Age: {}, Score: {:.2}", "John", 30, 95.5);
+        let _ = s.len();
+    }
+}
+
+/// UTF-8 encoding/decoding
+fn benchmark_text_utf8() {
+    let text = "Hello World!".repeat(1000);
+
+    for _ in 0..10_000 {
+        let bytes = text.as_bytes();
+        let decoded = Text.from_utf8(bytes)?;
+        let _ = decoded.len();
+    }
+}
+
+/// String comparison
+fn benchmark_text_compare() {
+    let a = "apple".repeat(1000);
+    let b = "apple".repeat(1000);
+    let c = "banana".repeat(1000);
+
+    for _ in 0..100_000 {
+        let _ = a == b;
+        let _ = a == c;
+        let _ = a < c;
+    }
+}
+
+/// Levenshtein distance
+fn benchmark_text_levenshtein() {
+    let strings = list![
+        "kitten",
+        "sitting",
+        "Saturday",
+        "Sunday",
+        "algorithm",
+        "altruistic",
+    ];
+
+    for _ in 0..10_000 {
+        for i in 0..strings.len() {
+            for j in (i+1)..strings.len() {
+                let _ = strings[i].levenshtein_distance(&strings[j]);
+            }
+        }
+    }
+}
+
+/// HTML entity encoding
+fn benchmark_text_html_encode() {
+    let text = "<script>alert('XSS');</script> & \"quoted\" text".repeat(100);
+
+    for _ in 0..10_000 {
+        let encoded = text.html_encode();
+        let _ = encoded.len();
+    }
+}
+
+/// URL encoding
+fn benchmark_text_url_encode() {
+    let text = "Hello World! Special chars: @#$%^&*()".repeat(100);
+
+    for _ in 0..10_000 {
+        let encoded = text.url_encode();
+        let _ = encoded.len();
+    }
+}
+
+/// Base64 encoding
+fn benchmark_text_base64() {
+    let text = "Hello World!".repeat(100);
+    let bytes = text.as_bytes();
+
+    for _ in 0..50_000 {
+        let encoded = Base64.encode(bytes);
+        let decoded = Base64.decode(&encoded)?;
+        let _ = decoded.len();
+    }
+}

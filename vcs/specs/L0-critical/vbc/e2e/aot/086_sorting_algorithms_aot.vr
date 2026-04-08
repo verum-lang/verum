@@ -1,0 +1,273 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, sorting, algorithms, bubble-sort, selection-sort
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT sorting algorithms on fixed-size 16-element array record
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int,
+    len: Int
+};
+
+fn arr_new(n: Int) -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0,
+        len: n
+    }
+}
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn arr_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 },
+        len: a.len
+    }
+}
+
+fn arr_swap(a: Arr16, i: Int, j: Int) -> Arr16 {
+    let vi = arr_get(a, i);
+    let vj = arr_get(a, j);
+    let a2 = arr_set(a, i, vj);
+    arr_set(a2, j, vi)
+}
+
+fn is_sorted(a: Arr16) -> Bool {
+    let mut i = 0;
+    let mut ok = true;
+    while i < a.len - 1 {
+        if arr_get(a, i) > arr_get(a, i + 1) {
+            ok = false;
+        }
+        i = i + 1;
+    }
+    ok
+}
+
+fn arr_sum(a: Arr16) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < a.len {
+        s = s + arr_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+// Bubble sort
+fn bubble_sort(a: Arr16) -> Arr16 {
+    let mut arr = a;
+    let mut i = 0;
+    while i < arr.len {
+        let mut j = 0;
+        while j < arr.len - 1 - i {
+            if arr_get(arr, j) > arr_get(arr, j + 1) {
+                arr = arr_swap(arr, j, j + 1);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    arr
+}
+
+// Selection sort
+fn selection_sort(a: Arr16) -> Arr16 {
+    let mut arr = a;
+    let mut i = 0;
+    while i < arr.len - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < arr.len {
+            if arr_get(arr, j) < arr_get(arr, min_idx) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            arr = arr_swap(arr, i, min_idx);
+        }
+        i = i + 1;
+    }
+    arr
+}
+
+fn main() -> Int {
+    // === Test 1: Bubble sort on reverse-ordered array ===
+    let mut a1 = arr_new(8);
+    a1 = arr_set(a1, 0, 8);
+    a1 = arr_set(a1, 1, 7);
+    a1 = arr_set(a1, 2, 6);
+    a1 = arr_set(a1, 3, 5);
+    a1 = arr_set(a1, 4, 4);
+    a1 = arr_set(a1, 5, 3);
+    a1 = arr_set(a1, 6, 2);
+    a1 = arr_set(a1, 7, 1);
+    let sum_before = arr_sum(a1);
+    let s1 = bubble_sort(a1);
+    assert(is_sorted(s1));
+    assert_eq(arr_sum(s1), sum_before);
+    assert_eq(arr_get(s1, 0), 1);
+    assert_eq(arr_get(s1, 7), 8);
+
+    // === Test 2: Selection sort on random-ish array ===
+    let mut a2 = arr_new(8);
+    a2 = arr_set(a2, 0, 42);
+    a2 = arr_set(a2, 1, 17);
+    a2 = arr_set(a2, 2, 99);
+    a2 = arr_set(a2, 3, 3);
+    a2 = arr_set(a2, 4, 55);
+    a2 = arr_set(a2, 5, 8);
+    a2 = arr_set(a2, 6, 71);
+    a2 = arr_set(a2, 7, 23);
+    let sum2 = arr_sum(a2);
+    let s2 = selection_sort(a2);
+    assert(is_sorted(s2));
+    assert_eq(arr_sum(s2), sum2);
+    assert_eq(arr_get(s2, 0), 3);
+    assert_eq(arr_get(s2, 1), 8);
+    assert_eq(arr_get(s2, 2), 17);
+    assert_eq(arr_get(s2, 7), 99);
+
+    // === Test 3: Already sorted ===
+    let mut a3 = arr_new(5);
+    a3 = arr_set(a3, 0, 10);
+    a3 = arr_set(a3, 1, 20);
+    a3 = arr_set(a3, 2, 30);
+    a3 = arr_set(a3, 3, 40);
+    a3 = arr_set(a3, 4, 50);
+    let s3 = bubble_sort(a3);
+    assert(is_sorted(s3));
+    assert_eq(arr_get(s3, 0), 10);
+    assert_eq(arr_get(s3, 4), 50);
+
+    // === Test 4: All same values ===
+    let mut a4 = arr_new(6);
+    let mut k = 0;
+    while k < 6 {
+        a4 = arr_set(a4, k, 7);
+        k = k + 1;
+    }
+    let s4 = selection_sort(a4);
+    assert(is_sorted(s4));
+    assert_eq(arr_get(s4, 0), 7);
+    assert_eq(arr_get(s4, 5), 7);
+
+    // === Test 5: Two elements ===
+    let mut a5 = arr_new(2);
+    a5 = arr_set(a5, 0, 100);
+    a5 = arr_set(a5, 1, 1);
+    let s5 = bubble_sort(a5);
+    assert(is_sorted(s5));
+    assert_eq(arr_get(s5, 0), 1);
+    assert_eq(arr_get(s5, 1), 100);
+
+    // === Test 6: Single element ===
+    let mut a6 = arr_new(1);
+    a6 = arr_set(a6, 0, 42);
+    let s6 = selection_sort(a6);
+    assert(is_sorted(s6));
+    assert_eq(arr_get(s6, 0), 42);
+
+    // === Test 7: Negative numbers ===
+    let mut a7 = arr_new(6);
+    a7 = arr_set(a7, 0, 5);
+    a7 = arr_set(a7, 1, -3);
+    a7 = arr_set(a7, 2, 10);
+    a7 = arr_set(a7, 3, -7);
+    a7 = arr_set(a7, 4, 0);
+    a7 = arr_set(a7, 5, -1);
+    let s7 = bubble_sort(a7);
+    assert(is_sorted(s7));
+    assert_eq(arr_get(s7, 0), -7);
+    assert_eq(arr_get(s7, 1), -3);
+    assert_eq(arr_get(s7, 2), -1);
+    assert_eq(arr_get(s7, 3), 0);
+    assert_eq(arr_get(s7, 4), 5);
+    assert_eq(arr_get(s7, 5), 10);
+
+    // === Test 8: Both algorithms same result ===
+    let mut a8 = arr_new(7);
+    a8 = arr_set(a8, 0, 33);
+    a8 = arr_set(a8, 1, 11);
+    a8 = arr_set(a8, 2, 77);
+    a8 = arr_set(a8, 3, 22);
+    a8 = arr_set(a8, 4, 66);
+    a8 = arr_set(a8, 5, 44);
+    a8 = arr_set(a8, 6, 55);
+    let bs = bubble_sort(a8);
+    let ss = selection_sort(a8);
+    let mut m = 0;
+    while m < 7 {
+        assert_eq(arr_get(bs, m), arr_get(ss, m));
+        m = m + 1;
+    }
+    assert_eq(arr_get(bs, 0), 11);
+    assert_eq(arr_get(bs, 6), 77);
+
+    // === Test 9: Full 16 elements ===
+    let mut a9 = arr_new(16);
+    a9 = arr_set(a9, 0, 16);
+    a9 = arr_set(a9, 1, 14);
+    a9 = arr_set(a9, 2, 12);
+    a9 = arr_set(a9, 3, 10);
+    a9 = arr_set(a9, 4, 8);
+    a9 = arr_set(a9, 5, 6);
+    a9 = arr_set(a9, 6, 4);
+    a9 = arr_set(a9, 7, 2);
+    a9 = arr_set(a9, 8, 15);
+    a9 = arr_set(a9, 9, 13);
+    a9 = arr_set(a9, 10, 11);
+    a9 = arr_set(a9, 11, 9);
+    a9 = arr_set(a9, 12, 7);
+    a9 = arr_set(a9, 13, 5);
+    a9 = arr_set(a9, 14, 3);
+    a9 = arr_set(a9, 15, 1);
+    let s9 = bubble_sort(a9);
+    assert(is_sorted(s9));
+    assert_eq(arr_get(s9, 0), 1);
+    assert_eq(arr_get(s9, 15), 16);
+    assert_eq(arr_sum(s9), 136);  // 1+2+...+16 = 136
+
+    0
+}

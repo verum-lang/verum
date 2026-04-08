@@ -1,0 +1,23 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, bounds
+// @expected-error: E400
+
+/// Test for type errors related to missing bounds.
+/// When bound constraints are violated, type mismatches arise.
+
+type CustomType is {
+    value: Int,
+};
+
+// A function that requires specific type
+fn add_ints(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn main() {
+    // Type mismatch: CustomType is not Int
+    let c = CustomType { value: 42 };
+    let result = add_ints(c, 10);  // ERROR E400: expected Int, found CustomType
+}

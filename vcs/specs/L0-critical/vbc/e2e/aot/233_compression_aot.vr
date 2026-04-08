@@ -1,0 +1,151 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, compression, rle, encoding
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for run-length encoding/decoding simulation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int, len: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 } else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 },
+        len: a.len
+    }
+}
+
+fn arr8_empty() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0, len: 0 }
+}
+
+// RLE encode: pairs of (value, count) stored interleaved
+// Returns encoded array with len set
+type RLEResult is { data: Arr8, pairs: Int };
+
+fn rle_encode(input: Arr8) -> RLEResult {
+    if input.len == 0 {
+        return RLEResult { data: arr8_empty(), pairs: 0 };
+    }
+
+    let mut out = arr8_empty();
+    let mut out_idx = 0;
+    let mut i = 0;
+
+    while i < input.len {
+        let val = arr8_get(input, i);
+        let mut count = 1;
+        while i + count < input.len && arr8_get(input, i + count) == val {
+            count = count + 1;
+        }
+        out = arr8_set(out, out_idx, val);
+        out = arr8_set(out, out_idx + 1, count);
+        out_idx = out_idx + 2;
+        i = i + count;
+    }
+
+    RLEResult { data: Arr8 { v0: out.v0, v1: out.v1, v2: out.v2, v3: out.v3, v4: out.v4, v5: out.v5, v6: out.v6, v7: out.v7, len: out_idx }, pairs: out_idx / 2 }
+}
+
+// RLE decode
+fn rle_decode(encoded: Arr8, pairs: Int) -> Arr8 {
+    let mut out = arr8_empty();
+    let mut out_idx = 0;
+    let mut i = 0;
+
+    while i < pairs {
+        let val = arr8_get(encoded, i * 2);
+        let count = arr8_get(encoded, i * 2 + 1);
+        let mut j = 0;
+        while j < count {
+            out = arr8_set(out, out_idx, val);
+            out_idx = out_idx + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    Arr8 { v0: out.v0, v1: out.v1, v2: out.v2, v3: out.v3, v4: out.v4, v5: out.v5, v6: out.v6, v7: out.v7, len: out_idx }
+}
+
+fn arr8_eq(a: Arr8, b: Arr8) -> Bool {
+    if a.len != b.len { return false; }
+    let mut i = 0;
+    while i < a.len {
+        if arr8_get(a, i) != arr8_get(b, i) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_rle_basic() {
+    // [1,1,1,2,2,3] -> [(1,3),(2,2),(3,1)]
+    let input = Arr8 { v0: 1, v1: 1, v2: 1, v3: 2, v4: 2, v5: 3, v6: 0, v7: 0, len: 6 };
+    let result = rle_encode(input);
+    assert_eq(result.pairs, 3);
+    assert_eq(arr8_get(result.data, 0), 1);  // val
+    assert_eq(arr8_get(result.data, 1), 3);  // count
+    assert_eq(arr8_get(result.data, 2), 2);  // val
+    assert_eq(arr8_get(result.data, 3), 2);  // count
+    assert_eq(arr8_get(result.data, 4), 3);  // val
+    assert_eq(arr8_get(result.data, 5), 1);  // count
+}
+
+fn test_rle_roundtrip() {
+    let input = Arr8 { v0: 5, v1: 5, v2: 3, v3: 3, v4: 3, v5: 7, v6: 0, v7: 0, len: 6 };
+    let encoded = rle_encode(input);
+    let decoded = rle_decode(encoded.data, encoded.pairs);
+    assert_eq(arr8_eq(input, decoded), true);
+}
+
+fn test_rle_no_runs() {
+    // All different values: [1,2,3,4]
+    let input = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0, len: 4 };
+    let result = rle_encode(input);
+    assert_eq(result.pairs, 4);  // No compression
+    let decoded = rle_decode(result.data, result.pairs);
+    assert_eq(arr8_eq(input, decoded), true);
+}
+
+fn test_rle_all_same() {
+    // All same: [7,7,7,7]
+    let input = Arr8 { v0: 7, v1: 7, v2: 7, v3: 7, v4: 0, v5: 0, v6: 0, v7: 0, len: 4 };
+    let result = rle_encode(input);
+    assert_eq(result.pairs, 1);  // Maximum compression
+    assert_eq(arr8_get(result.data, 0), 7);
+    assert_eq(arr8_get(result.data, 1), 4);
+}
+
+fn test_rle_single() {
+    let input = Arr8 { v0: 42, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0, len: 1 };
+    let result = rle_encode(input);
+    assert_eq(result.pairs, 1);
+    let decoded = rle_decode(result.data, result.pairs);
+    assert_eq(decoded.len, 1);
+    assert_eq(arr8_get(decoded, 0), 42);
+}
+
+fn main() -> Int {
+    test_rle_basic();
+    test_rle_roundtrip();
+    test_rle_no_runs();
+    test_rle_all_same();
+    test_rle_single();
+    print("[OK] 233_compression_aot");
+    0
+}

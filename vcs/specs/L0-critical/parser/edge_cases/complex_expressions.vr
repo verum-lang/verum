@@ -1,0 +1,267 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge_cases, complex
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+type Map<K, V> is { entries: List<(K, V)> };
+type Item is { field1: Int, field2: Maybe<Int>, valid: Bool, value: Int };
+type Output is { data: Int };
+type Error is { message: Text };
+type Data is { status: Status, value: Int };
+type Status is Ready | Pending | Failed(Error);
+type State is A | B;
+type ComplexType is {
+    field1: Int,
+    field2: Int,
+    field3: Int,
+    field4: List<Int>,
+    field5: (Int, Int, Int),
+};
+type Clone is protocol { };
+type Debug is protocol { };
+type Send is protocol { };
+type Sync is protocol { };
+type SomeVeryLongTypeName<A, B> is { a: A, b: B };
+type Generic1 is Int;
+type Generic2 is Text;
+
+// Helper functions
+fn predicate(x: Item) -> Bool { true }
+fn transform(x: Item) -> Item { x }
+fn validate(x: Item) -> Bool { true }
+fn finalize(x: Item) -> Item { x }
+fn collect(items: List<Item>) -> List<Item> { items }
+fn big_sum(x: Int, y: Int, z: Int) -> Int { x + y + z }
+fn partial(x: Int, y: Int) -> Int { x + y }
+fn single(x: Int) -> Int { x }
+fn default() -> Int { 0 }
+fn threshold() -> Int { 100 }
+fn filter_list<T>(list: List<T>, f: fn(T) -> Bool) -> List<T> { list }
+fn map_list<T, U>(list: List<T>, f: fn(T) -> U) -> List<U> { Nil }
+fn flatten<T>(list: List<Maybe<T>>) -> List<T> { Nil }
+fn reduce<T>(list: List<T>, f: fn(T, T) -> T) -> Maybe<T> { None }
+fn parse(x: Int) -> Int { x }
+fn serialize(x: Int) -> Int { x }
+fn compress(x: Int) -> Int { x }
+fn encrypt(x: Int) -> Int { x }
+fn compute_field1() -> Int { 0 }
+fn condition() -> Bool { true }
+fn value_a() -> Int { 1 }
+fn value_b() -> Int { 2 }
+fn state() -> State { State.A }
+fn create_a() -> Int { 0 }
+fn create_b() -> Int { 0 }
+fn default_values() -> ComplexType { ComplexType { field1: 0, field2: 0, field3: 0, field4: Nil, field5: (0, 0, 0) } }
+fn fetch_a() -> Result<Data, Error> { Ok(Data { status: Status.Ready, value: 0, error: Error { message: "" } }) }
+fn fetch_b(d: Data) -> Result<Data, Error> { Ok(d) }
+fn process(a: Data, b: Data) -> Result<Data, Error> { Ok(a) }
+fn wait_and_retry(c: Data) -> Result<Data, Error> { Ok(c) }
+fn processor<T>(f: fn(List<Result<Map<Text, List<Int>>, Error>>) -> Maybe<Output>) -> fn(List<Result<Map<Text, List<Int>>, Error>>) -> Maybe<Output> { f }
+
+fn test_deeply_nested_arithmetic() {
+    // Deeply nested arithmetic
+    let deep_math = ((((1 + 2) * 3) - 4) / 5) + ((6 * 7) - 8);
+}
+
+fn test_chained_method_calls() {
+    let data: List<Item> = Nil;
+
+    // Chained method calls
+    let chained = filter_list(
+        filter_list(
+            map_list(
+                map_list(data, transform),
+                finalize
+            ),
+            validate
+        ),
+        predicate
+    );
+}
+
+fn test_chained_optional_access() {
+    let a: Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Int>>>>>>>> =
+        Some(Some(Some(Some(Some(Some(Some(Some(42))))))));
+
+    // Chained optional access
+    let optional_chain = match a {
+        Some(Some(Some(Some(Some(Some(Some(Some(v)))))))) => Some(v),
+        _ => None,
+    };
+}
+
+fn test_mixed_operators_and_calls() {
+    let a = Item { field1: 10, field2: Some(5), valid: true, value: 100 };
+    let b = Item { field1: 20, field2: Some(10), valid: true, value: 200 };
+    let c = Item { field1: 30, field2: Some(15), valid: true, value: 300 };
+
+    // Mixed operators and calls
+    let mixed = a.field1 + b.field1 * c.field1;
+}
+
+fn test_ternary_style_if_nested() {
+    let a = true;
+    let b = true;
+    let c = true;
+
+    // Ternary-style if expressions nested
+    let nested_if = if a { if b { 1 } else { 2 } } else { if c { 3 } else { 4 } };
+}
+
+fn test_complex_match_expression() {
+    let a: Maybe<Int> = Some(10);
+    let b: Maybe<Int> = Some(20);
+    let c: Maybe<Int> = Some(30);
+
+    // Complex match expression
+    let complex_match = match (a, b, c) {
+        (Some(x), Some(y), Some(z)) if x + y + z > 100 => big_sum(x, y, z),
+        (Some(x), Some(y), None) => partial(x, y),
+        (Some(x), None, Some(y)) => partial(x, y),
+        (Some(x), ..) => single(x),
+        _ => default(),
+    };
+}
+
+fn test_lambda_in_complex_position() {
+    let items: List<Item> = Nil;
+    let threshold_val = 10;
+
+    // Lambda in complex position
+    let result = flatten(
+        map_list(
+            filter_list(items, |x| x.field1 > threshold_val && match x.field2 { Some(y) => y > 0, None => false }),
+            |item| {
+                if item.valid {
+                    Some(item.value)
+                } else {
+                    None
+                }
+            }
+        )
+    );
+}
+
+fn test_nested_closures() {
+    // Nested closures
+    let nested_closures = |a| |b| |c| a + b + c;
+}
+
+fn test_closure_with_complex_body() {
+    // Closure with complex body
+    let complex_closure = |data: List<Item>| -> Result<Maybe<Item>, Error> {
+        let filtered = filter_list(data, |x| x.valid);
+        let mapped = map_list(filtered, |x| x);
+        let reduced = reduce(mapped, |a, b| a);
+        Ok(reduced)
+    };
+}
+
+fn test_array_tuple_indexing_chains() {
+    let matrix = [[[[Item { field1: 0, field2: None, valid: true, value: 42 }]]]];
+    let i = 0;
+    let j = 0;
+    let k = 0;
+
+    // Array/tuple indexing chains
+    let chain_idx = matrix[i][j][0][k].value;
+}
+
+fn test_complex_type_annotations() {
+    // Complex type annotations in expressions
+    let typed: fn(List<Result<Map<Text, List<Int>>, Error>>) -> Maybe<Output> = |x| None;
+}
+
+// Async with complex await chains
+async fn complex_async() -> Result<Data, Error> {
+    let a = fetch_a()?;
+    let b = fetch_b(a)?;
+    let c = process(a, b)?;
+    let d = match c.status {
+        Ready => c,
+        Pending => wait_and_retry(c)?,
+        Failed(err) => { return Err(err); },
+    };
+    Ok(d)
+}
+
+fn test_expression_spanning_many_lines() {
+    let first_operand = 1;
+    let second_operand = 2;
+    let third_operand = 3;
+    let fourth_operand = 4;
+    let fifth_operand = 5;
+    let sixth_operand = 6;
+    let seventh_operand = 7;
+    let eighth_operand = 8;
+
+    // Expression spanning many lines
+    let very_long = first_operand
+        + second_operand
+        - third_operand
+        * fourth_operand
+        / fifth_operand
+        % sixth_operand
+        & seventh_operand
+        | eighth_operand;
+}
+
+fn test_complex_struct_literal() {
+    let items: List<Int> = Nil;
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    // Complex struct literal
+    let complex_struct = ComplexType {
+        field1: compute_field1(),
+        field2: if condition() { value_a() } else { value_b() },
+        field3: match state() {
+            State.A => create_a(),
+            State.B => create_b(),
+        },
+        field4: items,
+        field5: (a, b, c),
+    };
+}
+
+fn test_pipeline_with_multiple_steps() {
+    let input = 42;
+
+    // Pipeline with multiple steps
+    let piped = input
+        |> parse
+        |> validate_num
+        |> transform_num
+        |> serialize
+        |> compress
+        |> encrypt;
+}
+
+fn validate_num(x: Int) -> Int { x }
+fn transform_num(x: Int) -> Int { x }
+
+// Generic with complex bounds
+fn process_clone<T>(data: T) -> T
+where type T: Clone + Debug + Send + Sync
+{
+    data
+}
+
+// Where clause complexity
+fn complex_generics<A, B, C>(a: A, b: B, c: C) -> (A, B, C)
+where type A: Clone, type B: Clone, type C: Clone
+{
+    (a, b, c)
+}
+
+fn test_parenthesized_type_in_expression() {
+    let value = SomeVeryLongTypeName { a: 1, b: "hello" };
+
+    // Parenthesized type in expression
+    let cast = (value.a as Int) + 1;
+}

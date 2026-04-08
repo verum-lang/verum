@@ -1,0 +1,15 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, context, metatypes, error
+// @description: Test that type reflection requires MetaTypes context
+// @expected-error: M201
+
+// type_name requires MetaTypes context
+meta fn test_no_context() -> Text {
+    type_name(Int)  // Error: requires MetaTypes context
+}
+
+fn main() {
+    @const assert(text_len(test_no_context()) > 0);
+}

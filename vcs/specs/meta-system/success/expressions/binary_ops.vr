@@ -1,0 +1,117 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, expressions, binary, operators
+// @description: Test binary operator expression evaluation in meta functions
+
+// =============================================================================
+// ARITHMETIC OPERATORS
+// =============================================================================
+
+meta fn test_add() -> Int {
+    10 + 5
+}
+
+meta fn test_sub() -> Int {
+    10 - 5
+}
+
+meta fn test_mul() -> Int {
+    10 * 5
+}
+
+meta fn test_div() -> Int {
+    10 / 5
+}
+
+meta fn test_mod() -> Int {
+    10 % 3
+}
+
+meta fn test_complex_arithmetic() -> Int {
+    (10 + 5) * 2 - 3
+}
+
+// =============================================================================
+// COMPARISON OPERATORS
+// =============================================================================
+
+meta fn test_eq() -> Bool {
+    5 == 5
+}
+
+meta fn test_ne() -> Bool {
+    5 != 3
+}
+
+meta fn test_lt() -> Bool {
+    3 < 5
+}
+
+meta fn test_le() -> Bool {
+    5 <= 5
+}
+
+meta fn test_gt() -> Bool {
+    5 > 3
+}
+
+meta fn test_ge() -> Bool {
+    5 >= 5
+}
+
+// =============================================================================
+// LOGICAL OPERATORS
+// =============================================================================
+
+meta fn test_and() -> Bool {
+    true && true
+}
+
+meta fn test_or() -> Bool {
+    true || false
+}
+
+meta fn test_and_false() -> Bool {
+    true && false
+}
+
+meta fn test_complex_logic() -> Bool {
+    (true && false) || (true && true)
+}
+
+// =============================================================================
+// TEXT OPERATORS
+// =============================================================================
+
+meta fn test_text_concat() -> Text {
+    "hello" + " " + "world"
+}
+
+// Main test function
+fn main() {
+    // Arithmetic tests
+    @const assert_eq(test_add(), 15);
+    @const assert_eq(test_sub(), 5);
+    @const assert_eq(test_mul(), 50);
+    @const assert_eq(test_div(), 2);
+    @const assert_eq(test_mod(), 1);
+    @const assert_eq(test_complex_arithmetic(), 27);
+
+    // Comparison tests
+    @const assert(test_eq());
+    @const assert(test_ne());
+    @const assert(test_lt());
+    @const assert(test_le());
+    @const assert(test_gt());
+    @const assert(test_ge());
+
+    // Logical tests
+    @const assert(test_and());
+    @const assert(test_or());
+    @const assert(!test_and_false());
+    @const assert(test_complex_logic());
+
+    // Text tests
+    @const assert_eq(test_text_concat(), "hello world");
+}

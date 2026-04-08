@@ -1,0 +1,60 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, strings, cstring
+// @description: Test FFI advanced string operations using Text type
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_strlen(s: Text) -> Int;
+    fn ffi_strcmp(s1: Text, s2: Text) -> Int32;
+    fn ffi_hash_string(s: Text) -> Int;
+    fn ffi_get_greeting() -> &Int8;  // Returns const char*
+}
+
+fn main() {
+    // Test strlen with string literals
+    let len_hello = ffi_strlen("hello");
+    assert_eq(len_hello, 5);
+
+    let len_world = ffi_strlen("world");
+    assert_eq(len_world, 5);
+
+    let len_abc = ffi_strlen("abc");
+    assert_eq(len_abc, 3);
+
+    // Test strcmp (equal strings)
+    let cmp_equal = ffi_strcmp("hello", "hello");
+    assert_eq(cmp_equal, 0);
+
+    // Test strcmp (different strings)
+    let cmp_diff = ffi_strcmp("hello", "world");
+    assert(cmp_diff != 0);  // "hello" != "world"
+
+    // Test strcmp (ordering)
+    let cmp_abc_abd = ffi_strcmp("abc", "abd");
+    assert(cmp_abc_abd < 0);  // "abc" < "abd" (c < d)
+
+    let cmp_abd_abc = ffi_strcmp("abd", "abc");
+    assert(cmp_abd_abc > 0);  // "abd" > "abc"
+
+    // Test hash_string (same strings should have same hash)
+    let hash1 = ffi_hash_string("hello");
+    let hash2 = ffi_hash_string("hello");
+    assert_eq(hash1, hash2);
+
+    // Different strings should (usually) have different hashes
+    let hash3 = ffi_hash_string("world");
+    assert(hash1 != hash3);
+
+    // Test get_greeting (returns constant "Hello from Verum FFI!")
+    // Note: We can get the pointer but can't easily convert back to string
+    // without proper C string support. Just verify it returns non-null.
+    let greeting = ffi_get_greeting();
+    // The greeting pointer should be non-null (we can't directly compare with null
+    // but ffi_strlen on it should return a positive value if we had proper pointer-to-Text conversion)
+
+    print("Advanced string tests passed!\n");
+}

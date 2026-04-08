@@ -1,0 +1,239 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, strings
+// @timeout: 10000
+
+/// String/Text operations for differential testing.
+/// Tests string manipulation, formatting, and Unicode.
+
+fn main() {
+    test_string_basics();
+    test_string_manipulation();
+    test_string_searching();
+    test_string_formatting();
+    test_unicode();
+}
+
+/// Basic string operations
+fn test_string_basics() {
+    println("=== String Basics ===");
+
+    // Literals
+    let simple = "Hello, World!";
+    let empty = "";
+    let with_escapes = "Line1\nLine2\tTabbed";
+
+    println(f"simple: {simple}");
+    println(f"empty: '{empty}'");
+    println(f"with escapes: {with_escapes}");
+
+    // Length
+    println(f"len(simple): {simple.len()}");
+    println(f"len(empty): {empty.len()}");
+    println(f"is_empty(empty): {empty.is_empty()}");
+
+    // Concatenation
+    let first = "Hello";
+    let second = "World";
+    let joined = first + ", " + second + "!";
+    println(f"joined: {joined}");
+
+    // Repetition
+    let repeated = "ab" * 5;
+    println(f"'ab' * 5: {repeated}");
+
+    // Indexing
+    let text = "Hello";
+    println(f"text[0]: '{text[0]}'");
+    println(f"text[4]: '{text[4]}'");
+
+    // Slicing
+    println(f"text[1..4]: '{text[1..4]}'");
+    println(f"text[..3]: '{text[..3]}'");
+    println(f"text[2..]: '{text[2..]}'");
+
+    // Comparison
+    println(f"'abc' == 'abc': {'abc' == 'abc'}");
+    println(f"'abc' < 'abd': {'abc' < 'abd'}");
+    println(f"'ABC' < 'abc': {'ABC' < 'abc'}");
+}
+
+/// String manipulation
+fn test_string_manipulation() {
+    println("\n=== String Manipulation ===");
+
+    let text = "  Hello, World!  ";
+
+    // Trimming
+    println(f"original: '{text}'");
+    println(f"trim: '{text.trim()}'");
+    println(f"trim_start: '{text.trim_start()}'");
+    println(f"trim_end: '{text.trim_end()}'");
+
+    // Case conversion
+    let mixed = "Hello World";
+    println(f"to_uppercase: '{mixed.to_uppercase()}'");
+    println(f"to_lowercase: '{mixed.to_lowercase()}'");
+
+    // Split
+    let csv = "a,b,c,d,e";
+    let parts = csv.split(",");
+    println(f"split by ',': {parts}");
+
+    let words = "one two three four";
+    let word_list = words.split_whitespace();
+    println(f"split whitespace: {word_list}");
+
+    // Join
+    let items = ["apple", "banana", "cherry"];
+    let joined = items.join(", ");
+    println(f"joined: {joined}");
+
+    // Replace
+    let original = "Hello, World!";
+    let replaced = original.replace("World", "Verum");
+    println(f"replaced: {replaced}");
+
+    let multi = "aaa bbb aaa";
+    let replaced_all = multi.replace("aaa", "xxx");
+    println(f"replace all: {replaced_all}");
+
+    // Reverse
+    let forward = "hello";
+    let backward = forward.chars().rev().collect();
+    println(f"reversed: {backward}");
+
+    // Pad
+    let short = "42";
+    println(f"pad_start 5 '0': '{short.pad_start(5, '0')}'");
+    println(f"pad_end 5 ' ': '{short.pad_end(5, ' ')}'");
+}
+
+/// String searching
+fn test_string_searching() {
+    println("\n=== String Searching ===");
+
+    let text = "Hello, World! Hello, Verum!";
+
+    // Contains
+    println(f"contains 'World': {text.contains('World')}");
+    println(f"contains 'Rust': {text.contains('Rust')}");
+
+    // Starts/ends with
+    println(f"starts_with 'Hello': {text.starts_with('Hello')}");
+    println(f"ends_with '!': {text.ends_with('!')}");
+
+    // Find
+    println(f"find 'Hello': {text.find('Hello')}");
+    println(f"find 'World': {text.find('World')}");
+    println(f"find 'Rust': {text.find('Rust')}");
+
+    // Find last
+    println(f"rfind 'Hello': {text.rfind('Hello')}");
+
+    // Find all
+    let positions = text.find_all("Hello").collect();
+    println(f"all 'Hello' positions: {positions}");
+
+    // Match patterns
+    let emails = "contact@example.com and info@test.org";
+    let found = emails.matches(r"\\w+@\\w+\\.\\w+").collect();
+    println(f"found emails: {found}");
+
+    // Count occurrences
+    let repeated = "abababab";
+    println(f"count 'ab': {repeated.matches('ab').count()}");
+}
+
+/// String formatting
+fn test_string_formatting() {
+    println("\n=== String Formatting ===");
+
+    // Interpolation
+    let name = "Alice";
+    let age = 30;
+    println(f"Name: {name}, Age: {age}");
+
+    // Number formatting
+    let num = 42;
+    println(f"decimal: {num}");
+    println(f"binary: {num:b}");
+    println(f"octal: {num:o}");
+    println(f"hex lower: {num:x}");
+    println(f"hex upper: {num:X}");
+
+    // Width and alignment
+    println(f"right 10: '{num:>10}'");
+    println(f"left 10: '{num:<10}'");
+    println(f"center 10: '{num:^10}'");
+    println(f"zero pad: '{num:010}'");
+
+    // Float formatting
+    let pi = 3.14159265358979;
+    println(f"default: {pi}");
+    println(f"2 decimals: {pi:.2}");
+    println(f"6 decimals: {pi:.6}");
+    println(f"scientific: {pi:e}");
+    println(f"width.precision: {pi:10.3}");
+
+    // Debug format
+    let tuple = (1, "hello", true);
+    println(f"debug: {tuple:?}");
+
+    // Custom formatting
+    type Point is { x: Int, y: Int };
+    let p = Point { x: 3, y: 4 };
+    println(f"point: ({p.x}, {p.y})");
+
+    // Multiline
+    let multi = f"""
+    Name: {name}
+    Age: {age}
+    PI: {pi:.4}
+    """;
+    println(multi);
+}
+
+/// Unicode handling
+fn test_unicode() {
+    println("\n=== Unicode ===");
+
+    // Unicode literals
+    let emoji = "Hello \u{1F44B} World \u{1F30D}";
+    println(f"emoji: {emoji}");
+
+    let chinese = "\u{4F60}\u{597D}";  // 你好
+    println(f"chinese: {chinese}");
+
+    let mixed = "ASCII and \u{03B1}\u{03B2}\u{03B3}";  // αβγ
+    println(f"mixed: {mixed}");
+
+    // Char count vs byte length
+    let text = "Hello \u{1F44B}";
+    println(f"char count: {text.chars().count()}");
+    println(f"byte len: {text.len()}");
+
+    // Grapheme clusters
+    let accented = "e\u{0301}";  // é as e + combining acute
+    println(f"grapheme: {accented}");
+    println(f"chars: {accented.chars().count()}");
+    println(f"graphemes: {accented.graphemes().count()}");
+
+    // Case handling
+    let german = "\u{00DF}";  // ß
+    println(f"ß uppercase: {german.to_uppercase()}");
+
+    // Normalization
+    let nfc = "\u{00E9}";  // é precomposed
+    let nfd = "e\u{0301}";  // é decomposed
+    println(f"NFC == NFD normalized: {nfc == nfd.normalize_nfc()}");
+
+    // Unicode categories
+    let char_a = 'A';
+    let char_1 = '1';
+    let char_space = ' ';
+    println(f"'A' is_alphabetic: {char_a.is_alphabetic()}");
+    println(f"'1' is_numeric: {char_1.is_numeric()}");
+    println(f"' ' is_whitespace: {char_space.is_whitespace()}");
+}

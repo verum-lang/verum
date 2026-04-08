@@ -1,0 +1,158 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: match, nested, complex, pattern-matching
+// @description: Test complex match patterns with nested types
+
+type Token is
+    Number(Int)
+  | Word(Text)
+  | Punct(Text)
+  | Eof;
+
+fn token_to_str(t: Token) -> Text {
+    match t {
+        Number(n) => f"NUM({n})",
+        Word(w) => f"WORD({w})",
+        Punct(p) => f"PUNCT({p})",
+        Eof => "EOF",
+    }
+}
+
+fn test_token_match() -> Int {
+    let t1 = Number(42);
+    let s1 = token_to_str(t1);
+    if s1 != "NUM(42)" {
+        print(f"FAIL token: {s1}");
+        return 1;
+    }
+    let t2 = Word("hello");
+    let s2 = token_to_str(t2);
+    if s2 != "WORD(hello)" {
+        print(f"FAIL token word: {s2}");
+        return 1;
+    }
+    let t3 = Eof;
+    let s3 = token_to_str(t3);
+    if s3 != "EOF" {
+        print(f"FAIL token eof: {s3}");
+        return 1;
+    }
+    print("  token_match: OK");
+    0
+}
+
+type Cmd is
+    SetCmd(Text, Int)
+  | Get2(Text)
+  | Del(Text)
+  | Quit;
+
+fn process_cmd(cmd: Cmd, store: Map<Text, Int>) -> Text {
+    match cmd {
+        SetCmd(key, val) => {
+            store.insert(key, val);
+            "OK"
+        },
+        Get2(key) => {
+            if store.contains_key(key) {
+                let v = store.get(key);
+                f"{v}"
+            } else {
+                "NOT_FOUND"
+            }
+        },
+        Del(key) => {
+            store.remove(key);
+            "DELETED"
+        },
+        Quit => "BYE",
+    }
+}
+
+fn test_cmd_processor() -> Int {
+    let mut store = Map.new();
+
+    let r1 = process_cmd(SetCmd("x", 42), store);
+    if r1 != "OK" {
+        print(f"FAIL set: {r1}");
+        return 1;
+    }
+
+    let r2 = process_cmd(Get2("x"), store);
+    if r2 != "42" {
+        print(f"FAIL get: {r2}");
+        return 1;
+    }
+
+    let r3 = process_cmd(Get2("y"), store);
+    if r3 != "NOT_FOUND" {
+        print(f"FAIL get_miss: {r3}");
+        return 1;
+    }
+
+    let r4 = process_cmd(Del("x"), store);
+    if r4 != "DELETED" {
+        print(f"FAIL del: {r4}");
+        return 1;
+    }
+
+    let r5 = process_cmd(Quit, store);
+    if r5 != "BYE" {
+        print(f"FAIL quit: {r5}");
+        return 1;
+    }
+    print("  cmd_processor: OK");
+    0
+}
+
+type Op is Add3 | Sub3 | Mul3 | Div3;
+
+fn compute(op: Op, a: Int, b: Int) -> Int {
+    match op {
+        Add3 => a + b,
+        Sub3 => a - b,
+        Mul3 => a * b,
+        Div3 => if b != 0 { a / b } else { 0 },
+    }
+}
+
+fn test_calculator() -> Int {
+    if compute(Add3, 10, 5) != 15 {
+        print("FAIL calc add");
+        return 1;
+    }
+    if compute(Sub3, 10, 5) != 5 {
+        print("FAIL calc sub");
+        return 1;
+    }
+    if compute(Mul3, 10, 5) != 50 {
+        print("FAIL calc mul");
+        return 1;
+    }
+    if compute(Div3, 10, 5) != 2 {
+        print("FAIL calc div");
+        return 1;
+    }
+    if compute(Div3, 10, 0) != 0 {
+        print("FAIL calc div0");
+        return 1;
+    }
+    print("  calculator: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Complex Match Tests:");
+    let mut failures = 0;
+    failures = failures + test_token_match();
+    failures = failures + test_cmd_processor();
+    failures = failures + test_calculator();
+
+    if failures == 0 {
+        print("All complex match tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

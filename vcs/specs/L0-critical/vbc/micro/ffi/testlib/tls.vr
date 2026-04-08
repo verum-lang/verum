@@ -1,0 +1,46 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, thread-local-storage
+// @description: Test thread-local storage through FFI
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_tls_set(value: Int);
+    fn ffi_tls_get() -> Int;
+}
+
+fn main() {
+    // Initial value should be 0
+    let init = ffi_tls_get();
+    print("initial="); print(init); print("\n");
+    assert(init == 0);
+
+    // Set and get
+    ffi_tls_set(42);
+    let val1 = ffi_tls_get();
+    print("after set 42="); print(val1); print("\n");
+    assert(val1 == 42);
+
+    // Update
+    ffi_tls_set(100);
+    let val2 = ffi_tls_get();
+    print("after set 100="); print(val2); print("\n");
+    assert(val2 == 100);
+
+    // Negative values
+    ffi_tls_set(-999);
+    let val3 = ffi_tls_get();
+    print("after set -999="); print(val3); print("\n");
+    assert(val3 == -999);
+
+    // Zero
+    ffi_tls_set(0);
+    let val4 = ffi_tls_get();
+    print("after set 0="); print(val4); print("\n");
+    assert(val4 == 0);
+
+    print("All TLS tests passed!\n");
+}

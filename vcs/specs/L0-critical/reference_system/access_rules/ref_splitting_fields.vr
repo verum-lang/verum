@@ -1,0 +1,178 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, splitting, fields
+
+/// Test borrow splitting - borrowing different fields simultaneously.
+/// Verum allows borrowing disjoint fields of a struct mutably at the same time.
+/// This is safe because the fields don't overlap.
+/// Spec: 04-memory-model.md#borrow-splitting
+
+fn main() {
+    test_basic_field_splitting();
+    test_nested_field_splitting();
+    test_array_element_splitting();
+    test_tuple_element_splitting();
+    test_split_and_recombine();
+    test_mixed_split();
+}
+
+/// Test basic splitting of struct fields
+fn test_basic_field_splitting() {
+    let mut point = Point3D { x: 0, y: 0, z: 0 };
+
+    // Borrow different fields mutably at the same time
+    let x_ref = &mut point.x;
+    let y_ref = &mut point.y;
+    let z_ref = &mut point.z;
+
+    // Modify through disjoint borrows
+    *x_ref = 1;
+    *y_ref = 2;
+    *z_ref = 3;
+
+    // After borrows end, verify
+    assert(point.x == 1);
+    assert(point.y == 2);
+    assert(point.z == 3);
+}
+
+/// Test nested field splitting
+fn test_nested_field_splitting() {
+    let mut container = Container {
+        first: Inner { value: 0, name: "first" },
+        second: Inner { value: 0, name: "second" },
+    };
+
+    // Borrow nested fields from DIFFERENT top-level fields only
+    // (borrowing multiple fields from same nested struct is not yet supported)
+    let first_val = &mut container.first.value;
+    let second_val = &mut container.second.value;
+
+    *first_val = 10;
+    *second_val = 20;
+
+    assert(container.first.value == 10);
+    assert(container.second.value == 20);
+}
+
+/// Test splitting array elements by index
+fn test_array_element_splitting() {
+    let mut arr = [0, 0, 0, 0, 0];
+
+    // Borrow disjoint array elements mutably at known indices
+    // In Verum, we can borrow disjoint indices directly
+    let first = &mut arr[0];
+    let second = &mut arr[1];
+    let third = &mut arr[2];
+    let fourth = &mut arr[3];
+
+    *first = 1;
+    *second = 2;
+    *third = 3;
+    *fourth = 4;
+
+    assert(arr == [1, 2, 3, 4, 0]);
+}
+
+/// Test tuple element splitting
+fn test_tuple_element_splitting() {
+    let mut tuple = (
+        "first",
+        [1, 2, 3],
+        42,
+    );
+
+    // Borrow different tuple elements
+    let text_ref = &mut tuple.0;
+    let int_ref = &mut tuple.2;
+
+    *text_ref = "first modified";
+    *int_ref = 100;
+
+    assert(tuple.0 == "first modified");
+    assert(tuple.2 == 100);
+}
+
+/// Test split, process, and recombine pattern
+fn test_split_and_recombine() {
+    let mut data = Data {
+        buffer: [1, 2, 3, 4, 5, 0],
+        metadata: Metadata { count: 5, name: "data" },
+    };
+
+    // Split into mutable references of disjoint fields
+    let buf_ref = &mut data.buffer;
+    let meta_ref = &mut data.metadata;
+
+    // Modify both independently through the borrows
+    buf_ref[5] = 6;
+    meta_ref.count = 6;
+
+    // Verify both were modified
+    assert(data.buffer[5] == 6);  // Last element set
+    assert(data.metadata.count == 6);  // Updated count
+}
+
+/// Test splitting with immutable and mutable references
+fn test_mixed_split() {
+    let mut record = Record {
+        id: 42,
+        name: "record",
+        values: [1, 2, 3, 0],
+    };
+
+    // Immutable reference of id
+    let id_ref = &record.id;
+
+    // Mutable borrow of different field
+    let values_ref = &mut record.values;
+
+    // Both borrows valid simultaneously
+    values_ref[3] = 4;
+
+    assert(*id_ref == 42);
+    assert(record.values[3] == 4);
+}
+
+/// Test that overlapping borrows are rejected
+// This would be a separate typecheck-fail test:
+// fn invalid_overlapping() {
+//     let mut point = Point3D { x: 0, y: 0, z: 0 };
+//     let x1 = &mut point.x;
+//     let x2 = &mut point.x;  // ERROR: overlapping mutable references
+// }
+
+// Type definitions
+
+type Point3D is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+type Inner is {
+    value: Int,
+    name: Text,
+};
+
+type Container is {
+    first: Inner,
+    second: Inner,
+};
+
+type Data is {
+    buffer: [Int; 6],
+    metadata: Metadata,
+};
+
+type Metadata is {
+    count: Int,
+    name: Text,
+};
+
+type Record is {
+    id: Int,
+    name: Text,
+    values: [Int; 4],
+};

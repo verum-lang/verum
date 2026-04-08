@@ -1,0 +1,539 @@
+// =============================================================================
+// buffer_lines_test.vr - Tests for BufRead protocol methods on BufReader/Cursor
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: io, buffer, bufreader, bufread, lines, split, read_line, core
+// @description: Tests for read_line, lines, read_until, split via BufRead protocol
+// =============================================================================
+
+mount core.io.buffer.{BufReader, Cursor};
+mount core.io.protocols.{Read, Write, BufRead, IoResult, StreamError as IoError, LinesIter, SplitIter, BytesIter};
+mount core.{List, Byte, Text, Maybe};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.iterator.Iterator;
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Create a cursor with text content as bytes.
+fn cursor_from_text(s: &Text) -> Cursor<List<Byte>> {
+    let slice = s.as_bytes();
+    let mut bytes: List<Byte> = List.new();
+    for i in 0..slice.len() {
+        bytes.push(slice[i]);
+    }
+    Cursor.new(bytes)
+}
+
+/// Create a BufReader wrapping a text cursor.
+fn reader_from_text(s: &Text) -> BufReader<Cursor<List<Byte>>> {
+    BufReader.new(cursor_from_text(s))
+}
+
+// =============================================================================
+// Section 1: LinesIter Type Tests
+// =============================================================================
+
+@test
+fn test_lines_iter_type_exists() {
+    let _: Maybe<LinesIter<Cursor<List<Byte>>>> = None;
+}
+
+@test
+fn test_lines_iter_from_cursor() {
+    let text = "hello\nworld\n";
+    let cursor = cursor_from_text(&text);
+    let lines: LinesIter<Cursor<List<Byte>>> = cursor.lines();
+    let _: &LinesIter<Cursor<List<Byte>>> = &lines;
+}
+
+@test
+fn test_lines_iter_from_bufreader() {
+    let text = "line1\nline2\n";
+    let reader = reader_from_text(&text);
+    let lines: LinesIter<BufReader<Cursor<List<Byte>>>> = reader.lines();
+    let _: &LinesIter<BufReader<Cursor<List<Byte>>>> = &lines;
+}
+
+@test
+fn test_lines_iter_item_type() {
+    // LinesIter<R>.Item = IoResult<Text>
+    let text = "a\nb\n";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+    let first: Maybe<IoResult<Text>> = lines.next();
+    assert(first is Maybe.Some);
+}
+
+@test
+fn test_lines_iter_yields_line_content() {
+    let text = "hello\nworld\n";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, "hello"),
+        _ => panic("Expected first line"),
+    }
+}
+
+@test
+fn test_lines_iter_strips_newline() {
+    let text = "line1\n";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+    match lines.next() {
+        Some(Ok(line)) => {
+            // LinesIter strips trailing \n
+            assert(!line.ends_with("\n"));
+        }
+        _ => panic("Expected line"),
+    }
+}
+
+@test
+fn test_lines_iter_strips_crlf() {
+    let text = "line1\r\n";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+    match lines.next() {
+        Some(Ok(line)) => {
+            // LinesIter strips trailing \r\n
+            assert(!line.ends_with("\r"));
+            assert(!line.ends_with("\n"));
+        }
+        _ => panic("Expected line"),
+    }
+}
+
+@test
+fn test_lines_iter_multiple_lines() {
+    let text = "alpha\nbeta\ngamma\n";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, "alpha"),
+        _ => panic("Expected alpha"),
+    }
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, "beta"),
+        _ => panic("Expected beta"),
+    }
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, "gamma"),
+        _ => panic("Expected gamma"),
+    }
+}
+
+@test
+fn test_lines_iter_eof() {
+    let text = "only\n";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+
+    let _ = lines.next(); // consume "only"
+    let second = lines.next();
+    assert(second is Maybe.None);
+}
+
+@test
+fn test_lines_iter_empty_input() {
+    let text = "";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+
+    let first = lines.next();
+    assert(first is Maybe.None);
+}
+
+@test
+fn test_lines_iter_no_trailing_newline() {
+    let text = "no newline at end";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, "no newline at end"),
+        _ => panic("Expected line without trailing newline"),
+    }
+}
+
+@test
+fn test_lines_iter_empty_lines() {
+    let text = "a\n\nb\n";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, "a"),
+        _ => panic("Expected a"),
+    }
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, ""),
+        _ => panic("Expected empty line"),
+    }
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, "b"),
+        _ => panic("Expected b"),
+    }
+}
+
+// =============================================================================
+// Section 2: read_line Tests
+// =============================================================================
+
+@test
+fn test_read_line_basic() {
+    let text = "hello\nworld\n";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf = Text.new();
+    let result = cursor.read_line(&mut buf);
+    match result {
+        Ok(n) => {
+            assert(n > 0);
+            assert(buf.contains("hello"));
+        }
+        Err(_) => panic("read_line should succeed"),
+    }
+}
+
+@test
+fn test_read_line_includes_newline() {
+    let text = "hello\n";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf = Text.new();
+    let _ = cursor.read_line(&mut buf);
+    // read_line includes the trailing newline in buf
+    assert(buf.ends_with("\n"));
+}
+
+@test
+fn test_read_line_returns_count() {
+    let text = "abc\n";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf = Text.new();
+    match cursor.read_line(&mut buf) {
+        Ok(n) => assert_eq(n, 4), // "abc\n" = 4 bytes
+        Err(_) => panic("read_line should succeed"),
+    }
+}
+
+@test
+fn test_read_line_eof_returns_zero() {
+    let text = "";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf = Text.new();
+    match cursor.read_line(&mut buf) {
+        Ok(n) => assert_eq(n, 0),
+        Err(_) => panic("read_line at EOF should return Ok(0)"),
+    }
+}
+
+@test
+fn test_read_line_multiple_calls() {
+    let text = "first\nsecond\n";
+    let mut cursor = cursor_from_text(&text);
+
+    let mut buf1 = Text.new();
+    let _ = cursor.read_line(&mut buf1);
+    assert(buf1.contains("first"));
+
+    let mut buf2 = Text.new();
+    let _ = cursor.read_line(&mut buf2);
+    assert(buf2.contains("second"));
+}
+
+@test
+fn test_read_line_no_newline_at_eof() {
+    let text = "no newline";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf = Text.new();
+    match cursor.read_line(&mut buf) {
+        Ok(n) => {
+            assert(n > 0);
+            assert_eq(buf, "no newline");
+        }
+        Err(_) => panic("read_line should succeed"),
+    }
+}
+
+@test
+fn test_read_line_through_bufreader() {
+    let text = "buffered\nread\n";
+    let mut reader = reader_from_text(&text);
+    let mut buf = Text.new();
+    let result = reader.read_line(&mut buf);
+    match result {
+        Ok(n) => {
+            assert(n > 0);
+            assert(buf.contains("buffered"));
+        }
+        Err(_) => panic("read_line through BufReader should work"),
+    }
+}
+
+// =============================================================================
+// Section 3: read_until Tests
+// =============================================================================
+
+@test
+fn test_read_until_newline() {
+    let text = "hello\nworld\n";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf: List<Byte> = List.new();
+    let result = cursor.read_until(b'\n', &mut buf);
+    match result {
+        Ok(n) => assert_eq(n, 6), // "hello\n" = 6 bytes
+        Err(_) => panic("read_until should succeed"),
+    }
+}
+
+@test
+fn test_read_until_custom_delimiter() {
+    let text = "key=value";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf: List<Byte> = List.new();
+    let result = cursor.read_until(b'=', &mut buf);
+    match result {
+        Ok(n) => assert_eq(n, 4), // "key=" = 4 bytes
+        Err(_) => panic("read_until should succeed"),
+    }
+}
+
+@test
+fn test_read_until_no_delimiter() {
+    let text = "no delimiter here";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf: List<Byte> = List.new();
+    let result = cursor.read_until(b'\n', &mut buf); // '\n' not present
+    match result {
+        Ok(n) => assert_eq(n, 17), // reads all bytes
+        Err(_) => panic("read_until should read to EOF"),
+    }
+}
+
+@test
+fn test_read_until_empty() {
+    let text = "";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf: List<Byte> = List.new();
+    match cursor.read_until(b'\n', &mut buf) {
+        Ok(n) => assert_eq(n, 0),
+        Err(_) => panic("read_until on empty should return Ok(0)"),
+    }
+}
+
+@test
+fn test_read_until_includes_delimiter() {
+    let text = "abc:def";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf: List<Byte> = List.new();
+    let _ = cursor.read_until(b':', &mut buf);
+    // Buffer should include the delimiter byte
+    assert_eq(buf.len(), 4); // "abc:" = 4
+    assert_eq(buf[3], b':'); // last byte is ':'
+}
+
+@test
+fn test_read_until_multiple_calls() {
+    let text = "a:b:c";
+    let mut cursor = cursor_from_text(&text);
+
+    let mut buf1: List<Byte> = List.new();
+    let _ = cursor.read_until(b':', &mut buf1); // reads "a:"
+    assert_eq(buf1.len(), 2);
+
+    let mut buf2: List<Byte> = List.new();
+    let _ = cursor.read_until(b':', &mut buf2); // reads "b:"
+    assert_eq(buf2.len(), 2);
+
+    let mut buf3: List<Byte> = List.new();
+    let _ = cursor.read_until(b':', &mut buf3); // reads "c" (no more ':')
+    assert_eq(buf3.len(), 1);
+}
+
+// =============================================================================
+// Section 4: SplitIter Tests
+// =============================================================================
+
+@test
+fn test_split_iter_type_exists() {
+    let _: Maybe<SplitIter<Cursor<List<Byte>>>> = None;
+}
+
+@test
+fn test_split_iter_from_cursor() {
+    let text = "a:b:c";
+    let cursor = cursor_from_text(&text);
+    let split: SplitIter<Cursor<List<Byte>>> = cursor.split(b':'); // ':'
+    let _: &SplitIter<Cursor<List<Byte>>> = &split;
+}
+
+@test
+fn test_split_iter_yields_segments() {
+    let text = "hello:world";
+    let cursor = cursor_from_text(&text);
+    let mut split = cursor.split(b':'); // ':'
+    match split.next() {
+        Some(Ok(segment)) => assert_eq(segment.len(), 6), // "hello:" with delimiter
+        _ => panic("Expected first segment"),
+    }
+}
+
+@test
+fn test_split_iter_newline_delimiter() {
+    let text = "line1\nline2\n";
+    let cursor = cursor_from_text(&text);
+    let mut split = cursor.split(b'\n'); // '\n'
+    match split.next() {
+        Some(Ok(segment)) => assert_eq(segment.len(), 6), // "line1\n"
+        _ => panic("Expected first segment"),
+    }
+}
+
+@test
+fn test_split_iter_eof() {
+    let text = "only";
+    let cursor = cursor_from_text(&text);
+    let mut split = cursor.split(b':'); // ':'
+    let _ = split.next(); // consume "only" (no ':' found)
+    let second = split.next();
+    assert(second is Maybe.None);
+}
+
+// =============================================================================
+// Section 5: BytesIter Tests
+// =============================================================================
+
+@test
+fn test_bytes_iter_type_exists() {
+    let _: Maybe<BytesIter<Cursor<List<Byte>>>> = None;
+}
+
+// =============================================================================
+// Section 6: BufRead Protocol Methods on BufReader
+// =============================================================================
+
+@test
+fn test_bufreader_has_data_left_initially() {
+    let text = "data";
+    let mut reader = reader_from_text(&text);
+    let result = reader.has_data_left();
+    match result {
+        Ok(has_data) => assert(has_data),
+        Err(_) => panic("has_data_left should succeed"),
+    }
+}
+
+@test
+fn test_bufreader_consume() {
+    let text = "hello world";
+    let mut reader = reader_from_text(&text);
+    // Fill the buffer first
+    let _ = reader.fill_buf();
+    // Consume some bytes
+    reader.consume(5);
+    // Buffer should have remaining data
+    let buf = reader.fill_buf();
+    assert(buf is Ok);
+}
+
+@test
+fn test_bufreader_fill_buf() {
+    let text = "test data";
+    let mut reader = reader_from_text(&text);
+    let result = reader.fill_buf();
+    match result {
+        Ok(data) => assert(!data.is_empty()),
+        Err(_) => panic("fill_buf should succeed"),
+    }
+}
+
+@test
+fn test_bufreader_read_until() {
+    let text = "key=value\n";
+    let mut reader = reader_from_text(&text);
+    let mut buf: List<Byte> = List.new();
+    let result = reader.read_until(b'=', &mut buf);
+    match result {
+        Ok(n) => assert_eq(n, 4), // "key="
+        Err(_) => panic("read_until should succeed"),
+    }
+}
+
+@test
+fn test_bufreader_split() {
+    let text = "a,b,c";
+    let reader = reader_from_text(&text);
+    let split: SplitIter<BufReader<Cursor<List<Byte>>>> = reader.split(b',');
+    let _: &SplitIter<BufReader<Cursor<List<Byte>>>> = &split;
+}
+
+// =============================================================================
+// Section 7: Edge Cases
+// =============================================================================
+
+@test
+fn test_lines_single_newline() {
+    let text = "\n";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, ""),
+        _ => panic("Expected empty line from single newline"),
+    }
+}
+
+@test
+fn test_lines_multiple_empty_lines() {
+    let text = "\n\n\n";
+    let cursor = cursor_from_text(&text);
+    let mut lines = cursor.lines();
+
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, ""),
+        _ => panic("Expected empty line 1"),
+    }
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, ""),
+        _ => panic("Expected empty line 2"),
+    }
+    match lines.next() {
+        Some(Ok(line)) => assert_eq(line, ""),
+        _ => panic("Expected empty line 3"),
+    }
+}
+
+@test
+fn test_read_line_appends_to_buffer() {
+    let text = "first\nsecond\n";
+    let mut cursor = cursor_from_text(&text);
+    let mut buf = Text.new();
+    buf.push_str("prefix:");
+    let _ = cursor.read_line(&mut buf);
+    // read_line appends to existing buffer content
+    assert(buf.starts_with("prefix:"));
+    assert(buf.contains("first"));
+}
+
+@test
+fn test_read_until_zero_delimiter() {
+    let mut data: List<Byte> = List.new();
+    data.push(b'A');
+    data.push(b'\0');
+    data.push(b'B');
+    let mut cursor = Cursor.new(data);
+    let mut buf: List<Byte> = List.new();
+    let result = cursor.read_until(b'\0', &mut buf); // null delimiter
+    match result {
+        Ok(n) => assert_eq(n, 2), // "A\0" = 2 bytes
+        Err(_) => panic("read_until with null should succeed"),
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

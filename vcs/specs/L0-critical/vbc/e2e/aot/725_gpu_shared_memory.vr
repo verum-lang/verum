@@ -1,0 +1,93 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, gpu, shared-memory
+// @expected-exit: 0
+
+// GPU shared memory simulation test.
+// Tests functions returning List<Int> for shared memory patterns.
+
+fn shared_mem_reduce(data: List<Int>, n: Int) -> Int {
+    // Tree reduction within a block using shared memory pattern
+    let mut shared = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        shared[i] = data[i];
+        i = i + 1;
+    }
+
+    let mut stride = n / 2;
+    while (stride > 0) {
+        let mut tid = 0;
+        while (tid < stride) {
+            if (tid + stride < n) {
+                shared[tid] = shared[tid] + shared[tid + stride];
+            }
+            tid = tid + 1;
+        }
+        stride = stride / 2;
+    }
+    shared[0]
+}
+
+fn shared_mem_copy(data: List<Int>, n: Int, offset: Int) -> List<Int> {
+    // Simulates shared memory tile loading with offset
+    let mut shared = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        if (i + offset < 16) {
+            shared[i] = data[i + offset];
+        }
+        i = i + 1;
+    }
+    shared
+}
+
+fn main() -> Int {
+    // Test 1: Shared memory load/store
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < 8) {
+        buf[i] = i * 10;
+        i = i + 1;
+    }
+    assert_eq(buf[0], 0);
+    assert_eq(buf[3], 30);
+    assert_eq(buf[7], 70);
+
+    // Test 2: Shared memory reduction (sum)
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sum = shared_mem_reduce(data, 8);
+    assert_eq(sum, 36);
+
+    // Test 3: Reduction with 4 elements
+    let data2 = [10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sum2 = shared_mem_reduce(data2, 4);
+    assert_eq(sum2, 100);
+
+    // Test 4: Shared memory tile copy with function returning List<Int>
+    let full = [100, 200, 300, 400, 500, 600, 700, 800, 0, 0, 0, 0, 0, 0, 0, 0];
+    let tile = shared_mem_copy(full, 4, 2);
+    assert_eq(tile[0], 300);
+    assert_eq(tile[1], 400);
+    assert_eq(tile[2], 500);
+    assert_eq(tile[3], 600);
+
+    // Test 5: Bank-conflict-free stride-1 access
+    let mut no_conflict = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut t = 0;
+    while (t < 8) {
+        no_conflict[t] = t + 1;
+        t = t + 1;
+    }
+    let mut sum3 = 0;
+    let mut k = 0;
+    while (k < 8) {
+        sum3 = sum3 + no_conflict[k];
+        k = k + 1;
+    }
+    assert_eq(sum3, 36);
+
+    print("GPU shared memory: PASS");
+    0
+}

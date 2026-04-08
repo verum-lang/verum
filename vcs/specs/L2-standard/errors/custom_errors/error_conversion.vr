@@ -1,0 +1,374 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, custom, conversion, from, into
+// @description: Error type conversions with From/Into traits
+
+/// Error conversion - converting between error types.
+/// Demonstrates From/Into implementations for error interoperability.
+
+/// Low-level I/O error
+type IoError is
+    | NotFound(Text)
+    | PermissionDenied(Text)
+    | ConnectionRefused(Text)
+    | Timeout
+    | Interrupted
+    | Other(Text);
+
+implement Display for IoError {
+    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
+        match self {
+            IoError.NotFound(path) => formatter.write_str(f"Not found: {path}"),
+            IoError.PermissionDenied(path) => formatter.write_str(f"Permission denied: {path}"),
+            IoError.ConnectionRefused(addr) => formatter.write_str(f"Connection refused: {addr}"),
+            IoError.Timeout => formatter.write_str("Operation timed out"),
+            IoError.Interrupted => formatter.write_str("Operation interrupted"),
+            IoError.Other(msg) => formatter.write_str(f"{msg}")
+        }
+    }
+}
+
+/// Parse error
+type ParseError is
+    | InvalidSyntax { line: Int, message: Text }
+    | UnexpectedEof
+    | InvalidNumber(Text)
+    | InvalidBoolean(Text);
+
+
+implement Display for ParseError {
+    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
+        match self {
+            ParseError.InvalidSyntax { line, message } =>
+                formatter.write_str(f"Line {line}: {message}"),
+            ParseError.UnexpectedEof =>
+                formatter.write_str("Unexpected end of file"),
+            ParseError.InvalidNumber(s) =>
+                formatter.write_str(f"Invalid number: {s}"),
+            ParseError.InvalidBoolean(s) =>
+                formatter.write_str(f"Invalid boolean: {s}")
+        }
+    }
+}
+
+/// Database error
+type DatabaseError is
+    | ConnectionFailed(Text)
+    | QueryFailed(Text)
+    | TransactionFailed(Text)
+    | RecordNotFound { table: Text, id: Text };
+
+implement Display for DatabaseError {
+    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
+        match self {
+            DatabaseError.ConnectionFailed(msg) =>
+                formatter.write_str(f"Database connection failed: {msg}"),
+            DatabaseError.QueryFailed(msg) =>
+                formatter.write_str(f"Query failed: {msg}"),
+            DatabaseError.TransactionFailed(msg) =>
+                formatter.write_str(f"Transaction failed: {msg}"),
+            DatabaseError.RecordNotFound { table, id } =>
+                formatter.write_str(f"Record not found: {table}.{id}")
+        }
+    }
+}
+
+/// Higher-level application error
+type AppError is
+    | Io(IoError)
+    | Parse(ParseError)
+    | Database(DatabaseError)
+    | Config(Text)
+    | Validation(Text)
+    | Internal(Text);
+
+implement Display for AppError {
+    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
+        match self {
+            AppError.Io(e) => formatter.write_str(f"I/O error: {e}"),
+            AppError.Parse(e) => formatter.write_str(f"Parse error: {e}"),
+            AppError.Database(e) => formatter.write_str(f"Database error: {e}"),
+            AppError.Config(msg) => formatter.write_str(f"Configuration error: {msg}"),
+            AppError.Validation(msg) => formatter.write_str(f"Validation error: {msg}"),
+            AppError.Internal(msg) => formatter.write_str(f"Internal error: {msg}")
+        }
+    }
+}
+
+/// From protocol - enables automatic conversion
+type From<T> is protocol {
+    fn from(value: T) -> Self;
+};
+
+/// Into protocol - dual of From
+type Into<T> is protocol {
+    fn into(self) -> T;
+};
+
+// Blanket implementation: From<T> implies Into<T>
+implement<T, U> Into<U> for T where U: From<T> {
+    fn into(self) -> U {
+        U.from(self)
+    }
+}
+
+/// Implementing From for error conversions
+implement From<IoError> for AppError {
+    fn from(e: IoError) -> AppError {
+        AppError.Io(e)
+    }
+}
+
+implement From<ParseError> for AppError {
+    fn from(e: ParseError) -> AppError {
+        AppError.Parse(e)
+    }
+}
+
+implement From<DatabaseError> for AppError {
+    fn from(e: DatabaseError) -> AppError {
+        AppError.Database(e)
+    }
+}
+
+/// Now ? operator works across error types
+fn read_and_parse(path: &Text) -> Result<Config, AppError> {
+    let content = read_file(path)?;  // IoError -> AppError
+    let parsed = parse_config(&content)?;  // ParseError -> AppError
+    Ok(parsed)
+}
+
+fn read_file(path: &Text) -> Result<Text, IoError> {
+    if path.starts_with("/valid") {
+        Ok("key = value")
+    } else {
+        Err(IoError.NotFound(path.clone()))
+    }
+}
+
+type Config is { key: Text, value: Text };
+
+fn parse_config(content: &Text) -> Result<Config, ParseError> {
+    Ok(Config { key: "key", value: "value" })
+}
+
+/// Converting from standard library errors
+implement From<std.io.Error> for AppError {
+    fn from(e: std.io.Error) -> AppError {
+        AppError.Io(IoError.Other(e.to_text()))
+    }
+}
+
+/// Explicit conversion methods for complex cases
+implement IoError {
+    fn into_app_error(self) -> AppError {
+        AppError.Io(self)
+    }
+
+    fn with_context(self, context: &Text) -> AppError {
+        AppError.Io(IoError.Other(f"{context}: {self}"))
+    }
+}
+
+/// Conversion with information loss tracking
+type DetailedError is {
+    kind: AppError,
+    original: Maybe<Text>,
+    lost_info: List<Text>
+};
+
+implement From<IoError> for DetailedError {
+    fn from(e: IoError) -> DetailedError {
+        DetailedError {
+            kind: AppError.Io(e.clone()),
+            original: Some(f"{e}"),
+            lost_info: List.new()
+        }
+    }
+}
+
+/// TryFrom for fallible conversions
+type TryFrom<T> is protocol {
+    type Error;
+    fn try_from(value: T) -> Result<Self, Self.Error>;
+};
+
+type TryInto<T> is protocol {
+    type Error;
+    fn try_into(self) -> Result<T, Self.Error>;
+};
+
+/// TryFrom example: converting error codes
+type HttpError is {
+    status: Int,
+    message: Text
+};
+
+implement TryFrom<Int> for HttpError {
+    type Error = Text;
+
+    fn try_from(status: Int) -> Result<HttpError, Text> {
+        if status >= 400 && status < 600 {
+            let message = match status {
+                400 => "Bad Request",
+                401 => "Unauthorized",
+                403 => "Forbidden",
+                404 => "Not Found",
+                500 => "Internal Server Error",
+                502 => "Bad Gateway",
+                503 => "Service Unavailable",
+                _ => "Unknown Error"
+            };
+            Ok(HttpError { status, message: message.to_text() })
+        } else {
+            Err(f"Status {status} is not an error status")
+        }
+    }
+}
+
+/// Converting between error levels
+type UserFacingError is {
+    message: Text,
+    code: Text,
+    details: Maybe<Text>
+};
+
+implement From<AppError> for UserFacingError {
+    fn from(e: AppError) -> UserFacingError {
+        match e {
+            AppError.Io(IoError.NotFound(_)) => UserFacingError {
+                message: "The requested resource was not found",
+                code: "NOT_FOUND",
+                details: None
+            },
+            AppError.Io(IoError.PermissionDenied(_)) => UserFacingError {
+                message: "You do not have permission to access this resource",
+                code: "FORBIDDEN",
+                details: None
+            },
+            AppError.Parse(_) => UserFacingError {
+                message: "Invalid data format",
+                code: "INVALID_FORMAT",
+                details: None
+            },
+            AppError.Database(DatabaseError.RecordNotFound { table, id }) => UserFacingError {
+                message: "Resource not found",
+                code: "NOT_FOUND",
+                details: Some(f"{table}/{id}")
+            },
+            AppError.Validation(msg) => UserFacingError {
+                message: msg.clone(),
+                code: "VALIDATION_ERROR",
+                details: None
+            },
+            _ => UserFacingError {
+                message: "An unexpected error occurred",
+                code: "INTERNAL_ERROR",
+                details: None
+            }
+        }
+    }
+}
+
+/// Bidirectional conversion (rare, use carefully)
+type ErrorWrapper<E> is {
+    inner: E
+};
+
+implement<E> From<E> for ErrorWrapper<E> {
+    fn from(inner: E) -> ErrorWrapper<E> {
+        ErrorWrapper { inner }
+    }
+}
+
+implement<E: Clone> Into<E> for ErrorWrapper<E> {
+    fn into(self) -> E {
+        self.inner
+    }
+}
+
+/// Conversion chains
+fn full_conversion_chain() -> Result<(), UserFacingError> {
+    // IoError -> AppError -> UserFacingError
+    let io_result: Result<(), IoError> = Err(IoError.NotFound("/file.txt"));
+
+    let app_result: Result<(), AppError> = io_result.map_err(|e| e.into());
+
+    let user_result: Result<(), UserFacingError> = app_result.map_err(|e| e.into());
+
+    user_result
+}
+
+/// Conversion with context preservation
+type ChainedError is {
+    current: AppError,
+    cause: Maybe<Heap<ChainedError>>
+};
+
+implement ChainedError {
+    fn new(error: impl Into<AppError>) -> Self {
+        ChainedError {
+            current: error.into(),
+            cause: None
+        }
+    }
+
+    fn caused_by(mut self, cause: impl Into<AppError>) -> Self {
+        self.cause = Some(Heap(ChainedError.new(cause.into())));
+        self
+    }
+}
+
+/// Practical usage patterns
+fn load_user_data(user_id: Int) -> Result<UserData, AppError> {
+    // Each ? converts the specific error to AppError
+    let config = read_config()?;                    // IoError -> AppError
+    let connection = connect_database(&config)?;    // DatabaseError -> AppError
+    let user = fetch_user(&connection, user_id)?;   // DatabaseError -> AppError
+    let preferences = parse_preferences(&user)?;    // ParseError -> AppError
+
+    Ok(UserData { user, preferences })
+}
+
+type UserData is { user: User, preferences: Preferences };
+type User is { id: Int, name: Text };
+type Preferences is { theme: Text };
+
+fn read_config() -> Result<DbConfig, IoError> {
+    Ok(DbConfig { host: "localhost", port: 5432 })
+}
+
+type DbConfig is { host: Text, port: Int };
+
+fn connect_database(config: &DbConfig) -> Result<Connection, DatabaseError> {
+    Ok(Connection {})
+}
+
+type Connection is {};
+
+fn fetch_user(conn: &Connection, id: Int) -> Result<User, DatabaseError> {
+    Ok(User { id, name: "Test" })
+}
+
+fn parse_preferences(user: &User) -> Result<Preferences, ParseError> {
+    Ok(Preferences { theme: "dark" })
+}
+
+fn main() {
+    // Demonstrate automatic conversion
+    let io_err: IoError = IoError.NotFound("/missing.txt");
+    let app_err: AppError = io_err.into();
+    print(f"Converted: {app_err}");
+
+    // Using ? for automatic conversion
+    match read_and_parse("/valid/config.txt") {
+        Ok(config) => print(f"Config: {config}"),
+        Err(e) => print(f"Error: {e}")
+    }
+
+    // User-facing conversion
+    let internal = AppError.Io(IoError.NotFound("/secret"));
+    let user_facing: UserFacingError = internal.into();
+    print(f"User sees: {user_facing.message}");
+}

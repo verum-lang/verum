@@ -1,0 +1,213 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, string-matching, pattern
+// @timeout: 30000
+
+// Milestone 665: String/sequence matching algorithms
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Naive pattern matching: find first occurrence of pattern in text
+// Returns index or -1 if not found
+fn naive_search(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let mut i = 0;
+    let mut found = 0 - 1;
+    while i <= tlen - plen {
+        if found < 0 {
+            let mut j = 0;
+            let mut matches = 1;
+            while j < plen {
+                if get8(text, i + j) != get8(pat, j) { matches = 0; j = plen; }
+                else { j = j + 1; }
+            }
+            if matches == 1 { found = i; }
+        }
+        i = i + 1;
+    }
+    found
+}
+
+// Count occurrences of pattern in text
+fn count_occurrences(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i <= tlen - plen {
+        let mut j = 0;
+        let mut matches = 1;
+        while j < plen {
+            if get8(text, i + j) != get8(pat, j) { matches = 0; j = plen; }
+            else { j = j + 1; }
+        }
+        if matches == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Check if text starts with pattern
+fn starts_with(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    if plen > tlen { 0 }
+    else {
+        let mut j = 0;
+        let mut ok = 1;
+        while j < plen {
+            if get8(text, j) != get8(pat, j) { ok = 0; j = plen; }
+            else { j = j + 1; }
+        }
+        ok
+    }
+}
+
+// Check if text ends with pattern
+fn ends_with(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    if plen > tlen { 0 }
+    else {
+        let offset = tlen - plen;
+        let mut j = 0;
+        let mut ok = 1;
+        while j < plen {
+            if get8(text, offset + j) != get8(pat, j) { ok = 0; j = plen; }
+            else { j = j + 1; }
+        }
+        ok
+    }
+}
+
+// Find last occurrence
+fn last_search(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let mut last = 0 - 1;
+    let mut i = 0;
+    while i <= tlen - plen {
+        let mut j = 0;
+        let mut matches = 1;
+        while j < plen {
+            if get8(text, i + j) != get8(pat, j) { matches = 0; j = plen; }
+            else { j = j + 1; }
+        }
+        if matches == 1 { last = i; }
+        i = i + 1;
+    }
+    last
+}
+
+// Simple hash of sequence (for Rabin-Karp style matching)
+fn seq_hash(arr: Arr8, start: Int, len: Int) -> Int {
+    let mut h = 0;
+    let mut i = 0;
+    while i < len {
+        h = h * 31 + get8(arr, start + i);
+        i = i + 1;
+    }
+    h
+}
+
+// Hamming distance between two sequences
+fn hamming(a: Arr8, b: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(a, i) != get8(b, i) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_naive_search() -> Int {
+    // text = [1,2,3,4,5,6], pattern = [3,4]
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 0, v7: 0 };
+    let pat = Arr8 { v0: 3, v1: 4, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(naive_search(text, 6, pat, 2), 2);
+    // Pattern at start
+    let pat2 = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(naive_search(text, 6, pat2, 2), 0);
+    // Pattern at end
+    let pat3 = Arr8 { v0: 5, v1: 6, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(naive_search(text, 6, pat3, 2), 4);
+    // Not found
+    let pat4 = Arr8 { v0: 7, v1: 8, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(naive_search(text, 6, pat4, 2), 0 - 1);
+    1
+}
+
+fn test_count() -> Int {
+    // text = [1,2,1,2,1,2], pattern = [1,2]
+    let text = Arr8 { v0: 1, v1: 2, v2: 1, v3: 2, v4: 1, v5: 2, v6: 0, v7: 0 };
+    let pat = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_occurrences(text, 6, pat, 2), 3);
+    // Single element pattern
+    let pat2 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_occurrences(text, 6, pat2, 1), 3);
+    1
+}
+
+fn test_starts_ends() -> Int {
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let s = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(starts_with(text, 5, s, 2), 1);
+    let e = Arr8 { v0: 4, v1: 5, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(ends_with(text, 5, e, 2), 1);
+    let ns = Arr8 { v0: 2, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(starts_with(text, 5, ns, 2), 0);
+    assert_eq(ends_with(text, 5, ns, 2), 0);
+    1
+}
+
+fn test_last_search() -> Int {
+    let text = Arr8 { v0: 1, v1: 2, v2: 1, v3: 2, v4: 1, v5: 2, v6: 0, v7: 0 };
+    let pat = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(last_search(text, 6, pat, 2), 4);
+    assert_eq(naive_search(text, 6, pat, 2), 0);
+    1
+}
+
+fn test_hash() -> Int {
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Same content → same hash
+    assert_eq(seq_hash(a, 0, 3), seq_hash(b, 0, 3));
+    // Different content → different hash (usually)
+    let c = Arr8 { v0: 3, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let diff = if seq_hash(a, 0, 3) != seq_hash(c, 0, 3) { 1 } else { 0 };
+    assert_eq(diff, 1);
+    1
+}
+
+fn test_hamming() -> Int {
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 1, v1: 9, v2: 3, v3: 9, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(hamming(a, b, 4), 2);
+    assert_eq(hamming(a, a, 4), 0);
+    1
+}
+
+fn main() -> Int {
+    test_naive_search();
+    test_count();
+    test_starts_ends();
+    test_last_search();
+    test_hash();
+    test_hamming();
+    print("[OK] 665_milestone_aot");
+    0
+}

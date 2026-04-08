@@ -1,0 +1,5 @@
+// @test: typecheck-pass
+// @level: L0
+// @expect: pass
+fn double(x: Int) -> Int { x * 2 }
+fn main() { assert_eq(double(5), 10); }

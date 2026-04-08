@@ -1,0 +1,610 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for patterns in match expressions
+
+// Grammar Reference:
+// match_expr = [ expression , '.' ] , 'match' , [ expression ] , '{' , match_arms , '}' ;
+// match_arms = [ match_arm , { ',' , match_arm } , [ ',' ] ] ;
+// match_arm  = { attribute } , pattern , [ guard ] , '=>' , expression ;
+
+// ============================================================================
+// SECTION 1: Basic Match Patterns
+// ============================================================================
+
+fn test_basic_match() {
+    // Single arm
+    match value {
+        x => use(x)
+    }
+
+    // Two arms
+    match option {
+        Some(x) => has(x),
+        None => empty()
+    }
+
+    // Multiple arms
+    match n {
+        0 => zero(),
+        1 => one(),
+        2 => two(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 2: Literal Patterns in Match
+// ============================================================================
+
+fn test_literals_in_match() {
+    // Integer literals
+    match num {
+        0 => zero(),
+        1 => one(),
+        -1 => neg_one(),
+        42 => answer(),
+        _ => other()
+    }
+
+    // Boolean literals
+    match flag {
+        true => is_true(),
+        false => is_false()
+    }
+
+    // Character literals
+    match ch {
+        'a' => letter_a(),
+        'b' => letter_b(),
+        '\n' => newline(),
+        _ => other()
+    }
+
+    // String literals
+    match cmd {
+        "help" => help(),
+        "quit" => quit(),
+        "" => empty(),
+        _ => handle_other()
+    }
+}
+
+// ============================================================================
+// SECTION 3: Tuple Patterns in Match
+// ============================================================================
+
+fn test_tuples_in_match() {
+    // Pair matching
+    match pair {
+        (0, 0) => origin(),
+        (0, y) => on_y_axis(y),
+        (x, 0) => on_x_axis(x),
+        (x, y) => general(x, y)
+    }
+
+    // Triple matching
+    match triple {
+        (0, 0, 0) => origin_3d(),
+        (x, 0, 0) => on_x_axis(x),
+        (0, y, 0) => on_y_axis(y),
+        (0, 0, z) => on_z_axis(z),
+        (x, y, z) => general_3d(x, y, z)
+    }
+
+    // Nested tuples
+    match nested {
+        ((0, 0), (0, 0)) => all_origin(),
+        ((a, b), (c, d)) => general(a, b, c, d)
+    }
+}
+
+// ============================================================================
+// SECTION 4: Array Patterns in Match
+// ============================================================================
+
+fn test_arrays_in_match() {
+    // Fixed length
+    match arr {
+        [] => empty(),
+        [x] => single(x),
+        [a, b] => pair(a, b),
+        [a, b, c] => triple(a, b, c)
+    }
+
+    // With rest
+    match arr {
+        [] => empty(),
+        [first, ..rest] => has_elements(first, rest)
+    }
+
+    // Head and tail
+    match list {
+        [] => empty(),
+        [head, ..tail] => cons(head, tail)
+    }
+
+    // First and last
+    match arr {
+        [] => empty(),
+        [only] => single(only),
+        [first, .., last] => bookends(first, last)
+    }
+}
+
+// ============================================================================
+// SECTION 5: Record Patterns in Match
+// ============================================================================
+
+fn test_records_in_match() {
+    // Full matching
+    match point {
+        Point { x: 0, y: 0 } => origin(),
+        Point { x: 0, y } => on_y_axis(y),
+        Point { x, y: 0 } => on_x_axis(x),
+        Point { x, y } => general(x, y)
+    }
+
+    // Partial matching
+    match person {
+        Person { name: "admin", .. } => admin(),
+        Person { age, .. } if age < 18 => minor(),
+        Person { name, age, .. } => user(name, age)
+    }
+
+    // Renamed fields
+    match config {
+        Config { host: h, port: p, .. } => connect(h, p)
+    }
+
+    // Nested records
+    match line {
+        Line { start: Point { x: 0, y: 0 }, end } => from_origin(end),
+        Line { start, end: Point { x: 0, y: 0 } } => to_origin(start),
+        Line { start, end } => general(start, end)
+    }
+}
+
+// ============================================================================
+// SECTION 6: Variant Patterns in Match
+// ============================================================================
+
+fn test_variants_in_match() {
+    // Unit variants
+    match direction {
+        North => go_north(),
+        South => go_south(),
+        East => go_east(),
+        West => go_west()
+    }
+
+    // Tuple variants
+    match option {
+        Some(x) => has_value(x),
+        None => no_value()
+    }
+
+    match result {
+        Ok(value) => success(value),
+        Err(error) => failure(error)
+    }
+
+    // Record variants
+    match shape {
+        Circle { radius } => area_circle(radius),
+        Rectangle { width, height } => area_rect(width, height),
+        Triangle { base, height } => area_tri(base, height)
+    }
+
+    // Nested variants
+    match nested {
+        Some(Some(x)) => inner(x),
+        Some(None) => middle(),
+        None => outer()
+    }
+}
+
+// ============================================================================
+// SECTION 7: Range Patterns in Match
+// ============================================================================
+
+fn test_ranges_in_match() {
+    // Exclusive ranges
+    match n {
+        0..10 => single_digit(),
+        10..100 => double_digit(),
+        100..1000 => triple_digit(),
+        _ => large()
+    }
+
+    // Inclusive ranges
+    match score {
+        0..=59 => failing(),
+        60..=69 => d_grade(),
+        70..=79 => c_grade(),
+        80..=89 => b_grade(),
+        90..=100 => a_grade()
+    }
+
+    // Open-ended ranges
+    match x {
+        ..0 => negative(),
+        0 => zero(),
+        1.. => positive()
+    }
+
+    // Character ranges
+    match ch {
+        'a'..='z' => lowercase(),
+        'A'..='Z' => uppercase(),
+        '0'..='9' => digit(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 8: Or Patterns in Match
+// ============================================================================
+
+fn test_or_in_match() {
+    // Literal or
+    match n {
+        0 | 1 => binary(),
+        2 | 3 | 4 => small(),
+        _ => other()
+    }
+
+    // Variant or
+    match result {
+        Ok(_) | Err(_) => has_result()
+    }
+
+    // Range or
+    match x {
+        0..10 | 20..30 | 40..50 => special(),
+        _ => normal()
+    }
+
+    // Complex or
+    match data {
+        Some(0) | Some(1) | None => special(),
+        Some(n) => value(n)
+    }
+}
+
+// ============================================================================
+// SECTION 9: Guards in Match
+// ============================================================================
+
+fn test_guards_in_match() {
+    // Simple if guard
+    match n {
+        x if x > 0 => positive(x),
+        x if x < 0 => negative(x),
+        _ => zero()
+    }
+
+    // Where guard
+    match n {
+        x where x > 0 => positive(x),
+        x where x < 0 => negative(x),
+        _ => zero()
+    }
+
+    // Complex guards
+    match pair {
+        (x, y) if x == y => equal(x),
+        (x, y) if x > y => first_larger(x, y),
+        (x, y) => second_larger(x, y)
+    }
+
+    // Guards with method calls
+    match text {
+        s if s.is_empty() => empty(),
+        s if s.len() > 100 => long(s),
+        s => normal(s)
+    }
+}
+
+// ============================================================================
+// SECTION 10: @ Bindings in Match
+// ============================================================================
+
+fn test_at_in_match() {
+    // Bind whole pattern
+    match option {
+        whole @ Some(_) => use_option(whole),
+        None => no_value()
+    }
+
+    // Bind inner
+    match option {
+        Some(inner @ Some(_)) => nested(inner),
+        Some(None) => middle_none(),
+        None => outer_none()
+    }
+
+    // Bind with literal
+    match n {
+        zero @ 0 => use_zero(zero),
+        one @ 1 => use_one(one),
+        other @ _ => use_other(other)
+    }
+
+    // Multiple @ bindings
+    match nested {
+        outer @ (inner @ (a, b), c) => all(outer, inner, a, b, c)
+    }
+}
+
+// ============================================================================
+// SECTION 11: Reference Patterns in Match
+// ============================================================================
+
+fn test_refs_in_match() {
+    // Reference pattern
+    match ref_value {
+        &0 => zero_ref(),
+        &n => other_ref(n)
+    }
+
+    // Mutable reference to variable
+    match mut_ref {
+        &mut n if n == 0 => zero_mut(),
+        &mut n => other_mut(n)
+    }
+
+    // ref keyword
+    match data {
+        Some(ref x) => borrow(x),
+        None => none()
+    }
+
+    // ref mut keyword
+    match data {
+        Some(ref mut x) => modify(x),
+        None => none()
+    }
+}
+
+// ============================================================================
+// SECTION 12: Wildcard in Match
+// ============================================================================
+
+fn test_wildcard_in_match() {
+    // Catch-all
+    match value {
+        0 => zero(),
+        1 => one(),
+        _ => other()
+    }
+
+    // Ignore variant payload
+    match option {
+        Some(_) => has_value(),
+        None => no_value()
+    }
+
+    // Partial wildcards
+    match pair {
+        (_, 0) => second_zero(),
+        (0, _) => first_zero(),
+        (_, _) => neither_zero()
+    }
+}
+
+// ============================================================================
+// SECTION 13: Type Test Patterns in Match
+// ============================================================================
+
+fn test_type_test_in_match() {
+    // Basic type test
+    match value {
+        x is Int => handle_int(x),
+        s is Text => handle_text(s),
+        _ => handle_other()
+    }
+
+    // Multiple type tests
+    match any_value {
+        n is Int => integer(n),
+        f is Float => floating(f),
+        b is Bool => boolean(b),
+        s is Text => string(s),
+        _ => handle_other()
+    }
+}
+
+// ============================================================================
+// SECTION 14: Active Patterns in Match
+// ============================================================================
+
+fn test_active_in_match() {
+    // Simple active pattern
+    match n {
+        Even() => even(),
+        Odd() => odd()
+    }
+
+    // Parameterized active pattern
+    match x {
+        InRange(0, 100)() => in_range(),
+        _ => out_of_range()
+    }
+
+    // Combined with regular patterns
+    match value {
+        0 => zero(),
+        Even() => even_nonzero(),
+        Odd() => odd()
+    }
+}
+
+// ============================================================================
+// SECTION 15: And Patterns in Match
+// ============================================================================
+
+fn test_and_in_match() {
+    // Combining active patterns
+    match n {
+        Even() & Positive() => even_positive(),
+        Even() & Negative() => even_negative(),
+        Odd() & Positive() => odd_positive(),
+        Odd() & Negative() => odd_negative(),
+        _ => zero()
+    }
+}
+
+// ============================================================================
+// SECTION 16: Stream Patterns in Match
+// ============================================================================
+
+fn test_stream_in_match() {
+    // Stream pattern
+    match stream {
+        stream[first, second, ...rest] => has_two(first, second, rest),
+        stream[only, ...rest] => has_one(only, rest),
+        stream[] => empty()
+    }
+
+    // Consume all
+    match stream {
+        stream[...all] => consume(all)
+    }
+}
+
+// ============================================================================
+// SECTION 17: Match Expression Forms
+// ============================================================================
+
+fn test_match_forms() {
+    // Standard form
+    match value {
+        pattern => expression()
+    }
+
+    // Method-style match
+    value.match {
+        pattern => expression()
+    }
+
+    // With trailing comma
+    match value {
+        a => expr_a(),
+        b => expr_b(),
+    }
+
+    // Multiple expressions in arm
+    match value {
+        pattern => {
+            first();
+            second();
+            result()
+        }
+    }
+}
+
+// ============================================================================
+// SECTION 18: Match with Attributes
+// ============================================================================
+
+fn test_match_attributes() {
+    // Cold/hot hints
+    match result {
+        @cold Err(e) => handle_error(e),
+        @hot Ok(v) => process(v)
+    }
+
+    // Multiple attributes
+    match value {
+        @likely @inline 0 => fast_zero(),
+        n => slow_other(n)
+    }
+}
+
+// ============================================================================
+// SECTION 19: Complex Match Patterns
+// ============================================================================
+
+fn test_complex_match() {
+    // Many features combined
+    match data {
+        outer @ Some((
+            Point { x: 0, y },
+            [first, ..rest]
+        )) if y > 0 && rest.len() > 0 => {
+            complex_case(outer, y, first, rest)
+        }
+
+        Some((Point { x, y: 0 }, _)) => {
+            on_x_axis(x)
+        }
+
+        Some((_, [])) => {
+            empty_array()
+        }
+
+        None => {
+            no_data()
+        }
+
+        _ => {
+            fallback()
+        }
+    }
+
+    // Deeply nested with guards
+    match tree {
+        Node {
+            value,
+            left: Some(left @ Node { value: lv, .. }),
+            right: Some(Node { value: rv, .. })
+        } if lv < value && value < rv => balanced(left),
+
+        Node { left: None, right: None, .. } => leaf(),
+
+        _ => unbalanced()
+    }
+}
+
+// ============================================================================
+// SECTION 20: Practical Match Examples
+// ============================================================================
+
+fn test_practical_match() {
+    // Command parsing
+    match command {
+        Command { name: "help", args: [] } => show_help(),
+        Command { name: "help", args: [topic, ..] } => show_topic_help(topic),
+        Command { name: "quit", .. } => quit(),
+        Command { name, args } => execute(name, args)
+    }
+
+    // HTTP routing
+    match request {
+        Request { method: "GET", path: "/", .. } => index(),
+        Request { method: "GET", path, .. } if path.starts_with("/api/") => api(path),
+        Request { method: "POST", path: "/login", .. } => login(),
+        Request { method, path, .. } => not_found(method, path)
+    }
+
+    // Error handling
+    match result {
+        Ok(data) if data.is_valid() => process(data),
+        Ok(data) => ValidationError(data),
+        Err(IoError(e)) => handle_io(e),
+        Err(ParseError(e)) => handle_parse(e),
+        Err(e) => handle_other(e)
+    }
+
+    // State machine
+    match state {
+        Idle => waiting(),
+        Running { task, progress } if progress > 90 => almost_done(task),
+        Running { task, progress } => in_progress(task, progress),
+        Paused { task, .. } => paused(task),
+        Completed { result } => done(result),
+        Failed { error, retries } if retries < 3 => retry(error, retries),
+        Failed { error, .. } => give_up(error)
+    }
+}

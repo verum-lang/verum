@@ -1,0 +1,102 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, invalid, error
+
+// ERROR: Expression in pattern position
+let 1 + 2 = value;
+let f(x) = result;
+let x * y = product;
+
+// ERROR: Invalid struct pattern - missing field name
+let Point { : value } = point;
+let Config { , port } = config;
+
+// ERROR: Invalid struct pattern - double rest
+let Point { x, .., .. } = point;
+let Config { .., .., port } = config;
+
+// ERROR: Rest not at end
+let Point { .., x, y } = point;
+
+// ERROR: Invalid tuple pattern - trailing comma only
+let (, ) = pair;
+let (a,, b) = triple;
+
+// ERROR: Invalid or-pattern - empty alternatives
+let | = value;
+let a | | b = value;
+
+// ERROR: Invalid guard - outside match context
+let x if x > 0 = value;
+
+// ERROR: Invalid @ binding - missing pattern
+let @ = value;
+let x @ = value;
+
+// ERROR: Invalid @ binding - expression instead of pattern
+let x @ 1 + 2 = value;
+
+// ERROR: Invalid ref pattern
+let ref = value;
+let ref ref x = value;
+let mut ref x = value;  // Wrong order
+
+// ERROR: Invalid wildcard usage
+let __ = value;  // Double underscore might be identifier
+let _* = value;
+
+// ERROR: Invalid range pattern
+let ..= = value;
+let 1..2..3 = value;
+let 5..=..=10 = value;
+
+// ERROR: Invalid literal pattern
+let "unterminated = value;
+let 0xGGG = value;
+
+// ERROR: Pattern with assignment
+let x = 5 = value;
+let a := b = value;
+
+// ERROR: Invalid enum pattern
+let Some() = maybe;  // Missing inner pattern
+let Ok(,) = result;
+
+// ERROR: Invalid nested pattern
+let ((a, b), (c,)) = nested;  // Trailing comma in nested
+
+// ERROR: Pattern with operator
+let x + = value;
+let &* x = value;
+
+// ERROR: Invalid Heap pattern (Verum uses Heap<T>, not Rust's box keyword)
+// Note: 'box' is not a valid keyword in Verum
+let Heap = value;  // Missing inner pattern
+let Heap Heap x = value;  // Invalid double Heap syntax
+
+// ERROR: Invalid slice pattern
+let [..a..] = slice;  // Multiple rest patterns
+let [a b c] = slice;  // Missing commas
+
+// ERROR: Invalid struct pattern - expression in field position
+let Point { x: 1 + 2, y } = point;
+
+// ERROR: Pattern in wrong context
+fn bad_return() -> 1 | 2 { }  // Pattern in return type
+
+// ERROR: Incomplete pattern
+let Some( = maybe;
+let Point { x = point;
+
+// ERROR: Invalid character in pattern
+let x@ = value;
+let x# = value;
+
+// ERROR: Duplicate field in struct pattern
+let Point { x, x } = point;
+let Config { port, port: p } = config;
+
+// ERROR: Invalid visibility in pattern
+let pub x = value;
+let Point { pub x, y } = point;

@@ -1,0 +1,432 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, statistics, numerical
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: basic statistics on integer arrays
+
+// =============================================================================
+// Arr10 — fixed-size array of 10 integers
+// =============================================================================
+
+type Arr10 is {
+    e0: Int, e1: Int, e2: Int, e3: Int, e4: Int,
+    e5: Int, e6: Int, e7: Int, e8: Int, e9: Int
+};
+
+fn arr10_new() -> Arr10 {
+    Arr10 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 }
+}
+
+fn arr10_get(a: Arr10, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else { a.e9 }
+}
+
+fn arr10_set(a: Arr10, i: Int, v: Int) -> Arr10 {
+    Arr10 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 }
+    }
+}
+
+// =============================================================================
+// Sum of elements
+// =============================================================================
+
+fn arr_sum(a: Arr10, n: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < n {
+        s = s + arr10_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+// =============================================================================
+// Mean (integer division)
+// =============================================================================
+
+fn arr_mean(a: Arr10, n: Int) -> Int {
+    if n == 0 { return 0; }
+    arr_sum(a, n) / n
+}
+
+// =============================================================================
+// Min and Max
+// =============================================================================
+
+fn arr_min(a: Arr10, n: Int) -> Int {
+    let mut m = arr10_get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let v = arr10_get(a, i);
+        if v < m {
+            m = v;
+        }
+        i = i + 1;
+    }
+    m
+}
+
+fn arr_max(a: Arr10, n: Int) -> Int {
+    let mut m = arr10_get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let v = arr10_get(a, i);
+        if v > m {
+            m = v;
+        }
+        i = i + 1;
+    }
+    m
+}
+
+// =============================================================================
+// Range = max - min
+// =============================================================================
+
+fn arr_range(a: Arr10, n: Int) -> Int {
+    arr_max(a, n) - arr_min(a, n)
+}
+
+// =============================================================================
+// Insertion sort (for median computation)
+// =============================================================================
+
+fn arr_sort(a: Arr10, n: Int) -> Arr10 {
+    let mut sorted = a;
+    let mut i = 1;
+    while i < n {
+        let key = arr10_get(sorted, i);
+        let mut j = i - 1;
+        let mut done = 0;
+        while j >= 0 && done == 0 {
+            if arr10_get(sorted, j) > key {
+                sorted = arr10_set(sorted, j + 1, arr10_get(sorted, j));
+                j = j - 1;
+            } else {
+                done = 1;
+            }
+        }
+        sorted = arr10_set(sorted, j + 1, key);
+        i = i + 1;
+    }
+    sorted
+}
+
+// =============================================================================
+// Median (of sorted array)
+// For even n, returns average of two middle elements (integer division)
+// =============================================================================
+
+fn arr_median(a: Arr10, n: Int) -> Int {
+    let sorted = arr_sort(a, n);
+    if n % 2 == 1 {
+        arr10_get(sorted, n / 2)
+    } else {
+        let mid = n / 2;
+        (arr10_get(sorted, mid - 1) + arr10_get(sorted, mid)) / 2
+    }
+}
+
+// =============================================================================
+// Variance (population variance, scaled by n to stay integer)
+// sum of (xi - mean)^2
+// =============================================================================
+
+fn arr_sum_sq_dev(a: Arr10, n: Int) -> Int {
+    let m = arr_mean(a, n);
+    let mut s = 0;
+    let mut i = 0;
+    while i < n {
+        let diff = arr10_get(a, i) - m;
+        s = s + diff * diff;
+        i = i + 1;
+    }
+    s
+}
+
+// =============================================================================
+// Mode (most frequent element) — works on unsorted array
+// Uses O(n^2) counting approach
+// Returns the smallest mode if tied
+// =============================================================================
+
+fn arr_mode(a: Arr10, n: Int) -> Int {
+    let mut best_val = arr10_get(a, 0);
+    let mut best_count = 0;
+    let mut i = 0;
+    while i < n {
+        let v = arr10_get(a, i);
+        let mut count = 0;
+        let mut j = 0;
+        while j < n {
+            if arr10_get(a, j) == v {
+                count = count + 1;
+            }
+            j = j + 1;
+        }
+        if count > best_count {
+            best_count = count;
+            best_val = v;
+        } else if count == best_count && v < best_val {
+            best_val = v;
+        }
+        i = i + 1;
+    }
+    best_val
+}
+
+// =============================================================================
+// Count of a specific value
+// =============================================================================
+
+fn arr_count(a: Arr10, n: Int, target: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < n {
+        if arr10_get(a, i) == target {
+            c = c + 1;
+        }
+        i = i + 1;
+    }
+    c
+}
+
+// =============================================================================
+// Helper: build array from 10 values
+// =============================================================================
+
+fn make10(v0: Int, v1: Int, v2: Int, v3: Int, v4: Int,
+          v5: Int, v6: Int, v7: Int, v8: Int, v9: Int) -> Arr10 {
+    Arr10 { e0: v0, e1: v1, e2: v2, e3: v3, e4: v4,
+            e5: v5, e6: v6, e7: v7, e8: v8, e9: v9 }
+}
+
+// =============================================================================
+// Tests — Sum and Mean
+// =============================================================================
+
+fn test_sum_mean() {
+    let a = make10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+    assert_eq(arr_sum(a, 10), 55);
+    assert_eq(arr_mean(a, 10), 5); // 55/10 = 5
+
+    let b = make10(10, 10, 10, 10, 10, 0, 0, 0, 0, 0);
+    assert_eq(arr_sum(b, 5), 50);
+    assert_eq(arr_mean(b, 5), 10);
+}
+
+fn test_sum_partial() {
+    let a = make10(3, 7, 2, 8, 4, 0, 0, 0, 0, 0);
+    assert_eq(arr_sum(a, 1), 3);
+    assert_eq(arr_sum(a, 2), 10);
+    assert_eq(arr_sum(a, 3), 12);
+    assert_eq(arr_sum(a, 5), 24);
+}
+
+// =============================================================================
+// Tests — Min, Max, Range
+// =============================================================================
+
+fn test_min_max() {
+    let a = make10(5, 3, 9, 1, 7, 2, 8, 4, 6, 10);
+    assert_eq(arr_min(a, 10), 1);
+    assert_eq(arr_max(a, 10), 10);
+    assert_eq(arr_range(a, 10), 9);
+}
+
+fn test_min_max_same() {
+    let a = make10(5, 5, 5, 5, 5, 0, 0, 0, 0, 0);
+    assert_eq(arr_min(a, 5), 5);
+    assert_eq(arr_max(a, 5), 5);
+    assert_eq(arr_range(a, 5), 0);
+}
+
+fn test_min_max_negative() {
+    let a = make10(-3, -1, -7, -2, -5, 0, 0, 0, 0, 0);
+    assert_eq(arr_min(a, 5), -7);
+    assert_eq(arr_max(a, 5), -1);
+    assert_eq(arr_range(a, 5), 6);
+}
+
+fn test_min_max_single() {
+    let a = make10(42, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(arr_min(a, 1), 42);
+    assert_eq(arr_max(a, 1), 42);
+}
+
+// =============================================================================
+// Tests — Median
+// =============================================================================
+
+fn test_median_odd() {
+    // [1, 3, 5, 7, 9] => median = 5
+    let a = make10(9, 1, 5, 3, 7, 0, 0, 0, 0, 0);
+    assert_eq(arr_median(a, 5), 5);
+}
+
+fn test_median_even() {
+    // [1, 2, 3, 4] => median = (2+3)/2 = 2
+    let a = make10(4, 1, 3, 2, 0, 0, 0, 0, 0, 0);
+    assert_eq(arr_median(a, 4), 2);
+}
+
+fn test_median_sorted() {
+    let a = make10(1, 2, 3, 4, 5, 6, 7, 0, 0, 0);
+    assert_eq(arr_median(a, 7), 4);
+}
+
+fn test_median_single() {
+    let a = make10(42, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(arr_median(a, 1), 42);
+}
+
+fn test_median_two() {
+    let a = make10(10, 20, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(arr_median(a, 2), 15); // (10+20)/2
+}
+
+// =============================================================================
+// Tests — Variance
+// =============================================================================
+
+fn test_variance_constant() {
+    // All same values: variance = 0
+    let a = make10(5, 5, 5, 5, 5, 0, 0, 0, 0, 0);
+    assert_eq(arr_sum_sq_dev(a, 5), 0);
+}
+
+fn test_variance_simple() {
+    // [1, 2, 3, 4, 5], mean = 3
+    // deviations: -2, -1, 0, 1, 2
+    // squared: 4, 1, 0, 1, 4 => sum = 10
+    let a = make10(1, 2, 3, 4, 5, 0, 0, 0, 0, 0);
+    assert_eq(arr_sum_sq_dev(a, 5), 10);
+}
+
+fn test_variance_two_values() {
+    // [0, 10], mean = 5
+    // deviations: -5, 5 => sum of squares = 50
+    let a = make10(0, 10, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(arr_sum_sq_dev(a, 2), 50);
+}
+
+// =============================================================================
+// Tests — Mode
+// =============================================================================
+
+fn test_mode_unique() {
+    // [1, 2, 2, 3, 3, 3, 4, 4] => mode = 3
+    let a = make10(1, 2, 2, 3, 3, 3, 4, 4, 0, 0);
+    assert_eq(arr_mode(a, 8), 3);
+}
+
+fn test_mode_all_same() {
+    let a = make10(7, 7, 7, 7, 7, 0, 0, 0, 0, 0);
+    assert_eq(arr_mode(a, 5), 7);
+}
+
+fn test_mode_tie_smallest() {
+    // [1, 1, 2, 2, 3] => mode = 1 (smallest of tied 1 and 2)
+    let a = make10(1, 1, 2, 2, 3, 0, 0, 0, 0, 0);
+    assert_eq(arr_mode(a, 5), 1);
+}
+
+fn test_mode_at_end() {
+    // [1, 2, 3, 4, 4, 4] => mode = 4
+    let a = make10(1, 2, 3, 4, 4, 4, 0, 0, 0, 0);
+    assert_eq(arr_mode(a, 6), 4);
+}
+
+// =============================================================================
+// Tests — Count
+// =============================================================================
+
+fn test_count() {
+    let a = make10(1, 2, 3, 2, 1, 2, 3, 1, 2, 3);
+    assert_eq(arr_count(a, 10, 1), 3);
+    assert_eq(arr_count(a, 10, 2), 4);
+    assert_eq(arr_count(a, 10, 3), 3);
+    assert_eq(arr_count(a, 10, 4), 0);
+}
+
+// =============================================================================
+// Tests — Sort (used internally but worth testing)
+// =============================================================================
+
+fn test_sort() {
+    let a = make10(5, 3, 8, 1, 9, 2, 7, 4, 6, 10);
+    let s = arr_sort(a, 10);
+    assert_eq(arr10_get(s, 0), 1);
+    assert_eq(arr10_get(s, 1), 2);
+    assert_eq(arr10_get(s, 2), 3);
+    assert_eq(arr10_get(s, 3), 4);
+    assert_eq(arr10_get(s, 4), 5);
+    assert_eq(arr10_get(s, 5), 6);
+    assert_eq(arr10_get(s, 6), 7);
+    assert_eq(arr10_get(s, 7), 8);
+    assert_eq(arr10_get(s, 8), 9);
+    assert_eq(arr10_get(s, 9), 10);
+}
+
+fn test_sort_already_sorted() {
+    let a = make10(1, 2, 3, 4, 5, 0, 0, 0, 0, 0);
+    let s = arr_sort(a, 5);
+    assert_eq(arr10_get(s, 0), 1);
+    assert_eq(arr10_get(s, 4), 5);
+}
+
+fn test_sort_reverse() {
+    let a = make10(5, 4, 3, 2, 1, 0, 0, 0, 0, 0);
+    let s = arr_sort(a, 5);
+    assert_eq(arr10_get(s, 0), 1);
+    assert_eq(arr10_get(s, 4), 5);
+}
+
+fn main() -> Int {
+    test_sum_mean();
+    test_sum_partial();
+    test_min_max();
+    test_min_max_same();
+    test_min_max_negative();
+    test_min_max_single();
+    test_median_odd();
+    test_median_even();
+    test_median_sorted();
+    test_median_single();
+    test_median_two();
+    test_variance_constant();
+    test_variance_simple();
+    test_variance_two_values();
+    test_mode_unique();
+    test_mode_all_same();
+    test_mode_tie_smallest();
+    test_mode_at_end();
+    test_count();
+    test_sort();
+    test_sort_already_sorted();
+    test_sort_reverse();
+    print("[OK] 256_interp_statistics");
+    0
+}

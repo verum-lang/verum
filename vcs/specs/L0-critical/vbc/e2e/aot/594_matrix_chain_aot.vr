@@ -1,0 +1,166 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, matrix-chain, dp, optimization
+// @timeout: 30000
+
+// Matrix chain multiplication optimization (order of operations)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// Matrix chain multiplication: given dimensions p[0..n]
+// Matrix i has dimensions p[i] x p[i+1]
+// Find minimum number of scalar multiplications
+// Uses 2D DP: dp[i][j] = min cost to multiply matrices i through j
+// Flattened into 1D: index = i*max_n + j (max_n = 8)
+
+// Since we only have Arr8 (8 slots), limit to n<=4 matrices (5 dimensions)
+// 2D table for n=4: need dp[0..3][0..3] = 16 entries
+// Use two Arr8s: dp_lo (indices 0-7), dp_hi (indices 8-15)
+// Index = i*4 + j
+
+fn get_dp(lo: Arr8, hi: Arr8, idx: Int) -> Int {
+    if idx < 8 { get8(lo, idx) } else { get8(hi, idx - 8) }
+}
+
+fn set_dp_lo(lo: Arr8, idx: Int, val: Int) -> Arr8 {
+    if idx < 8 { set8(lo, idx, val) } else { lo }
+}
+
+fn set_dp_hi(hi: Arr8, idx: Int, val: Int) -> Arr8 {
+    if idx >= 8 { set8(hi, idx - 8, val) } else { hi }
+}
+
+// Matrix chain for n matrices (n+1 dimensions in p)
+// p stored in Arr8, n <= 4
+fn matrix_chain(p: Arr8, n: Int) -> Int {
+    let mut dp_lo = zeros();
+    let mut dp_hi = zeros();
+    // dp[i][i] = 0 (already zero)
+
+    // Fill by chain length
+    let mut cl = 2; // chain length
+    while cl <= n {
+        let mut i = 0;
+        while i <= n - cl {
+            let j = i + cl - 1;
+            let idx = i * n + j;
+            // Initialize with large value
+            dp_lo = set_dp_lo(dp_lo, idx, 99999);
+            dp_hi = set_dp_hi(dp_hi, idx, 99999);
+            let mut k = i;
+            while k < j {
+                let q = get_dp(dp_lo, dp_hi, i * n + k) +
+                        get_dp(dp_lo, dp_hi, (k + 1) * n + j) +
+                        get8(p, i) * get8(p, k + 1) * get8(p, j + 1);
+                let cur = get_dp(dp_lo, dp_hi, idx);
+                if q < cur {
+                    dp_lo = set_dp_lo(dp_lo, idx, q);
+                    dp_hi = set_dp_hi(dp_hi, idx, q);
+                }
+                k = k + 1;
+            }
+            i = i + 1;
+        }
+        cl = cl + 1;
+    }
+    get_dp(dp_lo, dp_hi, 0 * n + (n - 1))
+}
+
+// Simple brute-force for 3 matrices to verify
+// A: p0 x p1, B: p1 x p2, C: p2 x p3
+// (AB)C cost = p0*p1*p2 + p0*p2*p3
+// A(BC) cost = p1*p2*p3 + p0*p1*p3
+fn chain3_cost_lr(p: Arr8) -> Int {
+    let p0 = get8(p, 0);
+    let p1 = get8(p, 1);
+    let p2 = get8(p, 2);
+    let p3 = get8(p, 3);
+    p0 * p1 * p2 + p0 * p2 * p3
+}
+
+fn chain3_cost_rl(p: Arr8) -> Int {
+    let p0 = get8(p, 0);
+    let p1 = get8(p, 1);
+    let p2 = get8(p, 2);
+    let p3 = get8(p, 3);
+    p1 * p2 * p3 + p0 * p1 * p3
+}
+
+fn test_two_matrices() -> Int {
+    // Two matrices: A(10x30), B(30x5) -> cost = 10*30*5 = 1500
+    let p = Arr8 { v0: 10, v1: 30, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(matrix_chain(p, 2), 1500);
+    1
+}
+
+fn test_three_matrices() -> Int {
+    // A(10x30), B(30x5), C(5x60)
+    // (AB)C: 10*30*5 + 10*5*60 = 1500 + 3000 = 4500
+    // A(BC): 30*5*60 + 10*30*60 = 9000 + 18000 = 27000
+    // Optimal: (AB)C = 4500
+    let p = Arr8 { v0: 10, v1: 30, v2: 5, v3: 60, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(matrix_chain(p, 3), 4500);
+    assert_eq(chain3_cost_lr(p), 4500);
+    assert_eq(chain3_cost_rl(p), 27000);
+    assert_eq(min_val(chain3_cost_lr(p), chain3_cost_rl(p)), 4500);
+    1
+}
+
+fn test_classic() -> Int {
+    // Classic example: dimensions [40, 20, 30, 10, 30]
+    // 4 matrices: A(40x20), B(20x30), C(30x10), D(10x30)
+    let p = Arr8 { v0: 40, v1: 20, v2: 30, v3: 10, v4: 30, v5: 0, v6: 0, v7: 0 };
+    let result = matrix_chain(p, 4);
+    // Known optimal: 26000
+    assert_eq(result, 26000);
+    1
+}
+
+fn test_equal_dimensions() -> Int {
+    // All square matrices of same size: A(5x5), B(5x5), C(5x5)
+    // Any order gives same cost: 5*5*5 + 5*5*5 = 250
+    let p = Arr8 { v0: 5, v1: 5, v2: 5, v3: 5, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(matrix_chain(p, 3), 250);
+    // Both orderings should be equal
+    assert_eq(chain3_cost_lr(p), chain3_cost_rl(p));
+    1
+}
+
+fn test_single_matrix() -> Int {
+    // One matrix: no multiplications needed
+    let p = Arr8 { v0: 10, v1: 20, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(matrix_chain(p, 1), 0);
+    1
+}
+
+fn main() -> Int {
+    test_two_matrices();
+    test_three_matrices();
+    test_classic();
+    test_equal_dimensions();
+    test_single_matrix();
+    print("[OK] 594_matrix_chain_aot");
+    0
+}

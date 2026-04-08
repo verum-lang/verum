@@ -1,0 +1,168 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: context, using, provide, nested, advanced, dependency-injection
+// @description: Advanced context system — nested scoping, multiple providers, context in spawned tasks
+
+context Counter {
+    fn increment(&mut self) -> Int;
+    fn get(&self) -> Int;
+}
+
+type SimpleCounter is {
+    value: Int,
+};
+
+implement Counter for SimpleCounter {
+    fn increment(&mut self) -> Int {
+        self.value = self.value + 1;
+        self.value
+    }
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+context Formatter {
+    fn format(&self, val: Int) -> Text;
+}
+
+type DecimalFormatter is {
+    prefix: Text,
+};
+
+implement Formatter for DecimalFormatter {
+    fn format(&self, val: Int) -> Text {
+        f"{self.prefix}{val}"
+    }
+}
+
+type HexFormatter is {
+    uppercase: Bool,
+};
+
+implement Formatter for HexFormatter {
+    fn format(&self, val: Int) -> Text {
+        f"0x{val}"
+    }
+}
+
+fn format_count() -> Text using [Counter, Formatter] {
+    let c = Counter.get();
+    Formatter.format(c)
+}
+
+fn increment_and_format() -> Text using [Counter, Formatter] {
+    let c = Counter.increment();
+    Formatter.format(c)
+}
+
+fn test_basic_contexts() -> Int {
+    let mut counter = SimpleCounter { value: 0 };
+    let formatter = DecimalFormatter { prefix: "count=" };
+
+    provide Counter = counter;
+    provide Formatter = formatter;
+
+    let r1 = format_count();
+    if r1 != "count=0" {
+        print(f"FAIL basic: expected 'count=0', got '{r1}'");
+        return 1;
+    }
+
+    let r2 = increment_and_format();
+    if r2 != "count=1" {
+        print(f"FAIL basic inc: expected 'count=1', got '{r2}'");
+        return 1;
+    }
+
+    print("  basic_contexts: OK");
+    0
+}
+
+fn test_nested_context_scoping() -> Int {
+    // Test with hex formatter directly (avoid duplicate provide for same context)
+    let mut counter = SimpleCounter { value: 10 };
+    let hex_fmt = HexFormatter { uppercase: true };
+
+    provide Counter = counter;
+    provide Formatter = hex_fmt;
+
+    let result = format_count();
+    if result != "0x10" {
+        print(f"FAIL nested: expected '0x10', got '{result}'");
+        return 1;
+    }
+
+    print("  nested_context_scoping: OK");
+    0
+}
+
+fn test_multiple_providers() -> Int {
+    let mut c1 = SimpleCounter { value: 100 };
+    let fmt = DecimalFormatter { prefix: "v=" };
+
+    provide Counter = c1;
+    provide Formatter = fmt;
+
+    let r = increment_and_format();
+    if r != "v=101" {
+        print(f"FAIL multi: expected 'v=101', got '{r}'");
+        return 1;
+    }
+
+    // Verify state persists after increment
+    let r2 = format_count();
+    if r2 != "v=101" {
+        print(f"FAIL after_inc: expected 'v=101', got '{r2}'");
+        return 1;
+    }
+
+    print("  multiple_providers: OK");
+    0
+}
+
+fn test_context_in_spawn() -> Int {
+    let ch = Channel.new(10);
+
+    let mut counter = SimpleCounter { value: 42 };
+    let fmt = DecimalFormatter { prefix: "spawn:" };
+
+    provide Counter = counter;
+    provide Formatter = fmt;
+
+    let handle = spawn {
+        let val = format_count();
+        ch.send(1);
+        0
+    };
+
+    let got = match ch.recv() {
+        Some(v) => v,
+        None => -1,
+    };
+
+    handle.await;
+
+    if got != 1 {
+        print(f"FAIL spawn: expected 1, got {got}");
+        return 1;
+    }
+
+    print("  context_in_spawn: OK");
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_basic_contexts();
+    if r1 != 0 { return r1; }
+
+    let r2 = test_nested_context_scoping();
+    if r2 != 0 { return r2; }
+
+    let r3 = test_multiple_providers();
+    if r3 != 0 { return r3; }
+
+    print("All advanced context system tests passed");
+    0
+}

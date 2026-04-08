@@ -1,0 +1,32 @@
+// @test: parse
+// @level: L0
+// @tags: parser, operators, pipeline
+// @description: Test pipeline operator parsing
+
+fn test_pipeline_operators() {
+    // Basic pipeline
+    let a = x |> f;
+    let b = x |> f |> g;
+    let c = x |> f |> g |> h;
+
+    // With function calls
+    let d = data |> parse;
+    let e = input |> validate |> transform |> save;
+
+    // With method calls
+    let f = text |> trim |> lowercase |> split(",");
+
+    // With closures
+    let g = items |> filter(|x| x > 0) |> map(|x| x * 2);
+
+    // Complex pipeline
+    let result = raw_data
+        |> parse_json
+        |> validate_schema
+        |> transform_data
+        |> serialize;
+
+    // Mixed with other operators
+    let h = (a + b) |> process;
+    let i = x |> f + y |> g;
+}

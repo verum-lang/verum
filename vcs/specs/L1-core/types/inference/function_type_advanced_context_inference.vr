@@ -1,0 +1,170 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: types, inference, function, contexts, advanced, cluster4
+// @description: Type inference tests for advanced context patterns in function types
+
+// =============================================================================
+// Context Definitions (simplified to avoid Self in non-impl context)
+// =============================================================================
+
+context Database {
+    fn find(id: Int) -> Maybe<Text>;
+    fn save(entity: Text) -> Result<(), Text>;
+}
+
+context Logger {
+    fn log(message: Text);
+    fn debug(message: Text);
+    fn info(message: Text);
+}
+
+context Cache {
+    fn get(key: Text) -> Maybe<Text>;
+    fn set(key: Text, value: Text);
+}
+
+type User is { id: Int, name: Text };
+type DbError is { message: Text };
+
+// =============================================================================
+// Section 1: Basic Context Usage in Functions
+// =============================================================================
+
+/// Functions with context requirements
+fn fetch_user(id: Int) -> Maybe<Text> using [Database] {
+    Database.find(id)
+}
+
+fn log_and_fetch(id: Int) -> Maybe<Text> using [Database, Logger] {
+    Logger.info(f"Fetching user {id}");
+    Database.find(id)
+}
+
+// =============================================================================
+// Section 2: Context Subtyping
+// =============================================================================
+
+/// Pure function (no contexts)
+fn pure_double(x: Int) -> Int {
+    x * 2
+}
+
+/// Function requiring Logger
+fn logged_double(x: Int) -> Int using [Logger] {
+    Logger.info(f"Doubling {x}");
+    x * 2
+}
+
+// =============================================================================
+// Section 3: Context in Generic Functions
+// =============================================================================
+
+/// Generic function with context
+fn log_value<T: Debug>(value: T) using [Logger] {
+    Logger.debug(f"Value: {value}");
+}
+
+/// Apply function with optional logging
+fn apply_fn<A, B>(f: fn(A) -> B, arg: A) -> B {
+    f(arg)
+}
+
+// =============================================================================
+// Section 4: Nested Context Functions
+// =============================================================================
+
+fn cached_fetch(key: Text) -> Maybe<Text> using [Cache, Database] {
+    let cached = Cache.get(key);
+    match cached {
+        Some(val) => Some(val),
+        None => {
+            let result = Database.find(0);
+            match result {
+                Some(val) => {
+                    Cache.set(key, val);
+                    Some(val)
+                },
+                None => None,
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 5: Context with Provide Blocks
+// =============================================================================
+
+fn test_provide() {
+    // Pure functions can be called anywhere
+    let result = pure_double(21);
+    assert(result == 42);
+
+    // Apply pure function
+    let result2 = apply_fn(pure_double, 10);
+    assert(result2 == 20);
+}
+
+// =============================================================================
+// Section 6: Context-bearing Function Types
+// =============================================================================
+
+/// A type alias for contextful functions
+type DbQuery is fn(Int) -> Maybe<Text>;
+
+fn run_query(q: DbQuery, id: Int) -> Maybe<Text> {
+    q(id)
+}
+
+// =============================================================================
+// Section 7: Higher-Order Functions with Context
+// =============================================================================
+
+fn map_result<A, B>(opt: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match opt {
+        Some(a) => Some(f(a)),
+        None => None,
+    }
+}
+
+fn test_higher_order() {
+    let numbers = [1, 2, 3, 4, 5];
+    let doubled: List<Int> = numbers.map(|x| x * 2);
+    assert(doubled.len() == 5);
+
+    let maybe_val: Maybe<Int> = Some(21);
+    let doubled_val = map_result(maybe_val, |x| x * 2);
+    assert(doubled_val == Some(42));
+}
+
+// =============================================================================
+// Section 8: Rank-2 Function Types
+// =============================================================================
+
+type Reducer<A, R> is fn(R, A) -> R;
+
+fn fold_list<T, R>(list: List<T>, init: R, reducer: Reducer<T, R>) -> R {
+    let mut acc = init;
+    for item in list {
+        acc = reducer(acc, item);
+    }
+    acc
+}
+
+fn test_fold() {
+    let sum = fold_list([1, 2, 3, 4, 5], 0, |acc, x| acc + x);
+    assert(sum == 15);
+
+    let product = fold_list([1, 2, 3, 4], 1, |acc, x| acc * x);
+    assert(product == 24);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    test_provide();
+    test_higher_order();
+    test_fold();
+    print("Advanced context type inference tests passed");
+}

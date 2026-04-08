@@ -1,0 +1,92 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, conversions, casting
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests type conversions between Int, Float, Bool, and Text representations.
+
+fn test_int_arithmetic() {
+    // Integer arithmetic edge cases
+    let a = 100;
+    let b = 7;
+    assert_eq(a / b, 14);    // Integer division truncates
+    assert_eq(a % b, 2);     // Modulo
+    assert_eq(a / b * b + a % b, a);  // Division identity
+
+    // Negative division
+    let c = -17;
+    let d = 5;
+    assert_eq(c / d, -3);
+    assert_eq(c % d, -2);
+    print("int_arithmetic: ok");
+}
+
+fn test_bool_to_int() {
+    let t = true;
+    let f = false;
+    // Bool coerces to Int: true=1, false=0
+    assert_eq(t, 1);
+    assert_eq(f, 0);
+    print("bool_to_int: ok");
+}
+
+fn test_comparison_returns_bool() {
+    let a = 10;
+    let b = 20;
+    let lt = a < b;
+    let gt = a > b;
+    let eq = a == b;
+    assert_eq(lt, 1);  // true
+    assert_eq(gt, 0);  // false
+    assert_eq(eq, 0);  // false
+    print("comparison_returns_bool: ok");
+}
+
+fn bool_to_count(b: Bool) -> Int {
+    if b { 1 } else { 0 }
+}
+
+fn test_arithmetic_bool() {
+    // Count trues using explicit conversion
+    let count = bool_to_count(1 < 2) + bool_to_count(3 < 4) + bool_to_count(5 > 6) + bool_to_count(7 == 7);
+    // true + true + false + true = 3
+    assert_eq(count, 3);
+    print("arithmetic_bool: ok");
+}
+
+fn test_int_format() {
+    let x = 12345;
+    let s = f"{x}";
+    print(s);
+
+    let neg = -999;
+    let ns = f"{neg}";
+    print(ns);
+    print("int_format: ok");
+}
+
+fn test_conditional_types() {
+    // If branches returning different "conceptual" types
+    // (but in Verum, if/else must return same type)
+    let x = 10;
+    let result = if x > 5 { x * 2 } else { x / 2 };
+    assert_eq(result, 20);
+
+    let y = 3;
+    let result2 = if y > 5 { y * 2 } else { y / 2 };
+    assert_eq(result2, 1);
+    print("conditional_types: ok");
+}
+
+fn main() -> Int {
+    test_int_arithmetic();
+    test_bool_to_int();
+    test_comparison_returns_bool();
+    test_arithmetic_bool();
+    test_int_format();
+    test_conditional_types();
+    print("[OK] 403_interp_type_conversions");
+    0
+}

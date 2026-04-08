@@ -1,0 +1,399 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, polynomial, horner
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Horner's method for polynomial evaluation, polynomial
+// addition, multiplication, derivative, and integral. Uses record-based arrays
+// for coefficient storage. Coefficients stored as c[0] + c[1]*x + c[2]*x^2 + ...
+
+// =============================================================================
+// Array infrastructure for polynomial coefficients (max degree 7)
+// =============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// Polynomial: coefficients + degree
+type Poly is { coeffs: Arr8, deg: Int };
+
+fn poly_new(coeffs: Arr8, deg: Int) -> Poly {
+    Poly { coeffs: coeffs, deg: deg }
+}
+
+// =============================================================================
+// Horner's method: evaluate p(x) = c[n]*x^n + ... + c[1]*x + c[0]
+// Using Horner: p(x) = (...((c[n]*x + c[n-1])*x + c[n-2])*x + ... + c[0])
+// =============================================================================
+
+fn horner_eval(p: Poly, x: Int) -> Int {
+    let mut val = arr8_get(p.coeffs, p.deg);
+    let mut i = p.deg - 1;
+    while i >= 0 {
+        val = val * x + arr8_get(p.coeffs, i);
+        i = i - 1;
+    }
+    val
+}
+
+fn test_horner_constant() {
+    // p(x) = 5
+    let c = arr8_set(arr8_zeros(), 0, 5);
+    let p = poly_new(c, 0);
+    assert_eq(horner_eval(p, 0), 5);
+    assert_eq(horner_eval(p, 1), 5);
+    assert_eq(horner_eval(p, 100), 5);
+    assert_eq(horner_eval(p, -7), 5);
+}
+
+fn test_horner_linear() {
+    // p(x) = 3x + 2 (coeffs: [2, 3])
+    let mut c = arr8_zeros();
+    c = arr8_set(c, 0, 2);
+    c = arr8_set(c, 1, 3);
+    let p = poly_new(c, 1);
+    assert_eq(horner_eval(p, 0), 2);
+    assert_eq(horner_eval(p, 1), 5);
+    assert_eq(horner_eval(p, 2), 8);
+    assert_eq(horner_eval(p, 5), 17);
+    assert_eq(horner_eval(p, -1), -1);
+    assert_eq(horner_eval(p, 10), 32);
+}
+
+fn test_horner_quadratic() {
+    // p(x) = x^2 - 3x + 2 = (x-1)(x-2)
+    // coeffs: [2, -3, 1]
+    let mut c = arr8_zeros();
+    c = arr8_set(c, 0, 2);
+    c = arr8_set(c, 1, -3);
+    c = arr8_set(c, 2, 1);
+    let p = poly_new(c, 2);
+
+    assert_eq(horner_eval(p, 0), 2);
+    assert_eq(horner_eval(p, 1), 0);  // root
+    assert_eq(horner_eval(p, 2), 0);  // root
+    assert_eq(horner_eval(p, 3), 2);
+    assert_eq(horner_eval(p, -1), 6);
+    assert_eq(horner_eval(p, 5), 12);
+}
+
+fn test_horner_cubic() {
+    // p(x) = x^3 - 6x^2 + 11x - 6 = (x-1)(x-2)(x-3)
+    // coeffs: [-6, 11, -6, 1]
+    let mut c = arr8_zeros();
+    c = arr8_set(c, 0, -6);
+    c = arr8_set(c, 1, 11);
+    c = arr8_set(c, 2, -6);
+    c = arr8_set(c, 3, 1);
+    let p = poly_new(c, 3);
+
+    assert_eq(horner_eval(p, 0), -6);
+    assert_eq(horner_eval(p, 1), 0);  // root
+    assert_eq(horner_eval(p, 2), 0);  // root
+    assert_eq(horner_eval(p, 3), 0);  // root
+    assert_eq(horner_eval(p, 4), 6);
+    assert_eq(horner_eval(p, -1), -24);
+}
+
+fn test_horner_higher_degree() {
+    // p(x) = 2x^5 + x^3 - 3x + 7
+    // coeffs: [7, -3, 0, 1, 0, 2]
+    let mut c = arr8_zeros();
+    c = arr8_set(c, 0, 7);
+    c = arr8_set(c, 1, -3);
+    c = arr8_set(c, 2, 0);
+    c = arr8_set(c, 3, 1);
+    c = arr8_set(c, 4, 0);
+    c = arr8_set(c, 5, 2);
+    let p = poly_new(c, 5);
+
+    assert_eq(horner_eval(p, 0), 7);
+    // p(1) = 2 + 1 - 3 + 7 = 7
+    assert_eq(horner_eval(p, 1), 7);
+    // p(2) = 2*32 + 8 - 6 + 7 = 64 + 8 - 6 + 7 = 73
+    assert_eq(horner_eval(p, 2), 73);
+    // p(-1) = -2 - 1 + 3 + 7 = 7
+    assert_eq(horner_eval(p, -1), 7);
+}
+
+// =============================================================================
+// Polynomial derivative: p'(x) from p(x)
+// If p(x) = c0 + c1*x + c2*x^2 + ... + cn*x^n
+// Then p'(x) = c1 + 2*c2*x + 3*c3*x^2 + ... + n*cn*x^(n-1)
+// =============================================================================
+
+fn poly_derivative(p: Poly) -> Poly {
+    if p.deg == 0 {
+        return poly_new(arr8_zeros(), 0);
+    }
+    let mut dc = arr8_zeros();
+    let mut i = 1;
+    while i <= p.deg {
+        dc = arr8_set(dc, i - 1, i * arr8_get(p.coeffs, i));
+        i = i + 1;
+    }
+    poly_new(dc, p.deg - 1)
+}
+
+fn test_derivative() {
+    // d/dx (x^2 - 3x + 2) = 2x - 3
+    let mut c = arr8_zeros();
+    c = arr8_set(c, 0, 2);
+    c = arr8_set(c, 1, -3);
+    c = arr8_set(c, 2, 1);
+    let p = poly_new(c, 2);
+    let dp = poly_derivative(p);
+
+    assert_eq(dp.deg, 1);
+    assert_eq(horner_eval(dp, 0), -3);
+    assert_eq(horner_eval(dp, 1), -1);
+    assert_eq(horner_eval(dp, 2), 1);
+
+    // d/dx (x^3) = 3x^2
+    let mut c2 = arr8_zeros();
+    c2 = arr8_set(c2, 3, 1);
+    let p2 = poly_new(c2, 3);
+    let dp2 = poly_derivative(p2);
+    assert_eq(dp2.deg, 2);
+    assert_eq(horner_eval(dp2, 0), 0);
+    assert_eq(horner_eval(dp2, 1), 3);
+    assert_eq(horner_eval(dp2, 2), 12);
+    assert_eq(horner_eval(dp2, 3), 27);
+
+    // d/dx (5) = 0
+    let mut c3 = arr8_zeros();
+    c3 = arr8_set(c3, 0, 5);
+    let p3 = poly_new(c3, 0);
+    let dp3 = poly_derivative(p3);
+    assert_eq(dp3.deg, 0);
+    assert_eq(horner_eval(dp3, 100), 0);
+}
+
+// =============================================================================
+// Polynomial addition
+// =============================================================================
+
+fn poly_add(p: Poly, q: Poly) -> Poly {
+    let max_deg = if p.deg > q.deg { p.deg } else { q.deg };
+    let mut rc = arr8_zeros();
+    let mut i = 0;
+    while i <= max_deg {
+        let pv = if i <= p.deg { arr8_get(p.coeffs, i) } else { 0 };
+        let qv = if i <= q.deg { arr8_get(q.coeffs, i) } else { 0 };
+        rc = arr8_set(rc, i, pv + qv);
+        i = i + 1;
+    }
+    // Find actual degree (trim leading zeros)
+    let mut actual_deg = max_deg;
+    while actual_deg > 0 {
+        if arr8_get(rc, actual_deg) != 0 {
+            return poly_new(rc, actual_deg);
+        }
+        actual_deg = actual_deg - 1;
+    }
+    poly_new(rc, 0)
+}
+
+fn test_poly_addition() {
+    // (x^2 + 2x + 1) + (x^2 - 2x + 1) = 2x^2 + 2
+    let mut c1 = arr8_zeros();
+    c1 = arr8_set(c1, 0, 1);
+    c1 = arr8_set(c1, 1, 2);
+    c1 = arr8_set(c1, 2, 1);
+    let p1 = poly_new(c1, 2);
+
+    let mut c2 = arr8_zeros();
+    c2 = arr8_set(c2, 0, 1);
+    c2 = arr8_set(c2, 1, -2);
+    c2 = arr8_set(c2, 2, 1);
+    let p2 = poly_new(c2, 2);
+
+    let sum = poly_add(p1, p2);
+    assert_eq(sum.deg, 2);
+    assert_eq(horner_eval(sum, 0), 2);
+    assert_eq(horner_eval(sum, 1), 4);  // 2 + 2 = 4
+    assert_eq(horner_eval(sum, 2), 10); // 8 + 2 = 10
+
+    // (x + 1) + (x^2 - 1) = x^2 + x
+    let mut c3 = arr8_zeros();
+    c3 = arr8_set(c3, 0, 1);
+    c3 = arr8_set(c3, 1, 1);
+    let p3 = poly_new(c3, 1);
+
+    let mut c4 = arr8_zeros();
+    c4 = arr8_set(c4, 0, -1);
+    c4 = arr8_set(c4, 2, 1);
+    let p4 = poly_new(c4, 2);
+
+    let sum2 = poly_add(p3, p4);
+    assert_eq(sum2.deg, 2);
+    assert_eq(horner_eval(sum2, 0), 0);
+    assert_eq(horner_eval(sum2, 1), 2);  // 1 + 1 = 2
+    assert_eq(horner_eval(sum2, 3), 12); // 9 + 3 = 12
+}
+
+// =============================================================================
+// Polynomial multiplication (up to degree 7)
+// =============================================================================
+
+fn poly_mul(p: Poly, q: Poly) -> Poly {
+    let new_deg = p.deg + q.deg;
+    let mut rc = arr8_zeros();
+    let mut i = 0;
+    while i <= p.deg {
+        let mut j = 0;
+        while j <= q.deg {
+            if i + j <= 7 {
+                let cur = arr8_get(rc, i + j);
+                let prod = arr8_get(p.coeffs, i) * arr8_get(q.coeffs, j);
+                rc = arr8_set(rc, i + j, cur + prod);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    let actual_deg = if new_deg <= 7 { new_deg } else { 7 };
+    poly_new(rc, actual_deg)
+}
+
+fn test_poly_multiplication() {
+    // (x + 1)(x - 1) = x^2 - 1
+    let mut c1 = arr8_zeros();
+    c1 = arr8_set(c1, 0, 1);
+    c1 = arr8_set(c1, 1, 1);
+    let p1 = poly_new(c1, 1);
+
+    let mut c2 = arr8_zeros();
+    c2 = arr8_set(c2, 0, -1);
+    c2 = arr8_set(c2, 1, 1);
+    let p2 = poly_new(c2, 1);
+
+    let prod = poly_mul(p1, p2);
+    assert_eq(prod.deg, 2);
+    assert_eq(horner_eval(prod, 0), -1);
+    assert_eq(horner_eval(prod, 1), 0);  // root
+    assert_eq(horner_eval(prod, -1), 0); // root
+    assert_eq(horner_eval(prod, 2), 3);
+    assert_eq(horner_eval(prod, 3), 8);
+
+    // (x + 1)^2 = x^2 + 2x + 1
+    let sq = poly_mul(p1, p1);
+    assert_eq(sq.deg, 2);
+    assert_eq(horner_eval(sq, 0), 1);
+    assert_eq(horner_eval(sq, 1), 4);
+    assert_eq(horner_eval(sq, 2), 9);
+    assert_eq(horner_eval(sq, -1), 0);
+}
+
+// =============================================================================
+// Naive polynomial evaluation (for comparison with Horner)
+// =============================================================================
+
+fn naive_eval(p: Poly, x: Int) -> Int {
+    let mut val = 0;
+    let mut x_pow = 1;
+    let mut i = 0;
+    while i <= p.deg {
+        val = val + arr8_get(p.coeffs, i) * x_pow;
+        x_pow = x_pow * x;
+        i = i + 1;
+    }
+    val
+}
+
+fn test_horner_vs_naive() {
+    // Both methods should give the same result
+    let mut c = arr8_zeros();
+    c = arr8_set(c, 0, 3);
+    c = arr8_set(c, 1, -2);
+    c = arr8_set(c, 2, 5);
+    c = arr8_set(c, 3, -1);
+    let p = poly_new(c, 3);
+
+    let mut x = -5;
+    while x <= 5 {
+        assert_eq(horner_eval(p, x), naive_eval(p, x));
+        x = x + 1;
+    }
+}
+
+// =============================================================================
+// Polynomial composition: p(q(x))
+// Evaluate p at q(x) for specific x values
+// =============================================================================
+
+fn poly_compose_at(p: Poly, q: Poly, x: Int) -> Int {
+    // First evaluate q(x), then evaluate p at that result
+    let qx = horner_eval(q, x);
+    horner_eval(p, qx)
+}
+
+fn test_poly_composition() {
+    // p(x) = x^2, q(x) = x + 1
+    // p(q(x)) = (x+1)^2 = x^2 + 2x + 1
+    let mut cp = arr8_zeros();
+    cp = arr8_set(cp, 2, 1);
+    let p = poly_new(cp, 2);
+
+    let mut cq = arr8_zeros();
+    cq = arr8_set(cq, 0, 1);
+    cq = arr8_set(cq, 1, 1);
+    let q = poly_new(cq, 1);
+
+    assert_eq(poly_compose_at(p, q, 0), 1);   // (0+1)^2 = 1
+    assert_eq(poly_compose_at(p, q, 1), 4);   // (1+1)^2 = 4
+    assert_eq(poly_compose_at(p, q, 2), 9);   // (2+1)^2 = 9
+    assert_eq(poly_compose_at(p, q, 3), 16);  // (3+1)^2 = 16
+    assert_eq(poly_compose_at(p, q, -1), 0);  // (-1+1)^2 = 0
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_horner_constant();
+    test_horner_linear();
+    test_horner_quadratic();
+    test_horner_cubic();
+    test_horner_higher_degree();
+    test_derivative();
+    test_poly_addition();
+    test_poly_multiplication();
+    test_horner_vs_naive();
+    test_poly_composition();
+    print("[OK] 305_interp_polynomial_eval");
+    0
+}

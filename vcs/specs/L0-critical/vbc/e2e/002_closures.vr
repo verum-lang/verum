@@ -1,0 +1,172 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, closures, higher-order, pipeline
+// @timeout: 5000
+// @expect: pass
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies closure capture, higher-order functions, and closure composition
+
+// =============================================================================
+// Basic closures
+// =============================================================================
+
+@test
+fn test_closure_no_capture() {
+    let add_one = |x: Int| -> Int { x + 1 };
+    assert_eq(add_one(5), 6);
+    assert_eq(add_one(0), 1);
+    assert_eq(add_one(-1), 0);
+}
+
+@test
+fn test_closure_with_capture() {
+    let offset = 10;
+    let add_offset = |x: Int| -> Int { x + offset };
+    assert_eq(add_offset(5), 15);
+    assert_eq(add_offset(0), 10);
+}
+
+@test
+fn test_closure_multiple_params() {
+    let multiply = |a: Int, b: Int| -> Int { a * b };
+    assert_eq(multiply(3, 4), 12);
+    assert_eq(multiply(0, 100), 0);
+    assert_eq(multiply(-2, 5), -10);
+}
+
+@test
+fn test_closure_capture_multiple() {
+    let a = 2;
+    let b = 3;
+    let combine = |x: Int| -> Int { x * a + b };
+    assert_eq(combine(5), 13);
+    assert_eq(combine(0), 3);
+}
+
+// =============================================================================
+// Higher-order functions
+// =============================================================================
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+@test
+fn test_pass_closure_to_function() {
+    let double = |x: Int| -> Int { x * 2 };
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(double, 0), 0);
+}
+
+@test
+fn test_apply_twice() {
+    let double = |x: Int| -> Int { x * 2 };
+    assert_eq(apply_twice(double, 3), 12);
+    assert_eq(apply_twice(double, 1), 4);
+}
+
+@test
+fn test_pass_different_closures() {
+    let inc = |x: Int| -> Int { x + 1 };
+    let dec = |x: Int| -> Int { x - 1 };
+    let dbl = |x: Int| -> Int { x * 2 };
+
+    assert_eq(apply(inc, 10), 11);
+    assert_eq(apply(dec, 10), 9);
+    assert_eq(apply(dbl, 10), 20);
+}
+
+// =============================================================================
+// Closures returning closures
+// =============================================================================
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * n }
+}
+
+@test
+fn test_closure_returning_closure() {
+    let add5 = make_adder(5);
+    assert_eq(add5(10), 15);
+    assert_eq(add5(0), 5);
+}
+
+@test
+fn test_different_adders() {
+    let add3 = make_adder(3);
+    let add7 = make_adder(7);
+    assert_eq(add3(10), 13);
+    assert_eq(add7(10), 17);
+}
+
+@test
+fn test_multiplier_factory() {
+    let times3 = make_multiplier(3);
+    let times5 = make_multiplier(5);
+    assert_eq(times3(4), 12);
+    assert_eq(times5(4), 20);
+}
+
+// =============================================================================
+// Closures in control flow
+// =============================================================================
+
+@test
+fn test_closure_in_if() {
+    let x = 10;
+    let f = if x > 5 {
+        |n: Int| -> Int { n * 2 }
+    } else {
+        |n: Int| -> Int { n * 3 }
+    };
+    assert_eq(f(4), 8);
+}
+
+@test
+fn test_closure_in_loop() {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        let adder = |x: Int| -> Int { x + i };
+        sum = sum + adder(0);
+        i = i + 1;
+    }
+    // 0 + 1 + 2 + 3 + 4 = 10
+    assert_eq(sum, 10);
+}
+
+// =============================================================================
+// Closure composition
+// =============================================================================
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+@test
+fn test_compose_closures() {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let double_then_inc = compose(inc, double);
+    // double_then_inc(3) = inc(double(3)) = inc(6) = 7
+    assert_eq(double_then_inc(3), 7);
+}
+
+@test
+fn test_compose_chain() {
+    let add1 = |x: Int| -> Int { x + 1 };
+    let mul2 = |x: Int| -> Int { x * 2 };
+    let composed = compose(mul2, add1);
+    // composed(4) = mul2(add1(4)) = mul2(5) = 10
+    assert_eq(composed(4), 10);
+}

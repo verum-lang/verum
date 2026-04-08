@@ -1,0 +1,289 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, blocks
+// @description: Test block expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// BASIC BLOCK EXPRESSIONS (Section 2.12 - block_expr)
+// =============================================================================
+
+fn test_empty_block() {
+    let a = {};
+}
+
+fn test_expression_only_block() {
+    let a = { 42 };
+    let b = { x + y };
+    let c = { compute() };
+}
+
+fn test_statements_with_expression() {
+    let a = {
+        let x = 1;
+        x + 1
+    };
+
+    let b = {
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+
+    let c = {
+        do_something();
+        do_another();
+        result
+    };
+}
+
+fn test_statements_without_final_expression() {
+    let a = {
+        let x = 1;
+        let y = 2;
+    };
+
+    let b = {
+        perform_action();
+        cleanup();
+    };
+}
+
+// =============================================================================
+// NESTED BLOCKS
+// =============================================================================
+
+fn test_nested_blocks() {
+    let a = {
+        let x = {
+            let y = 1;
+            y + 1
+        };
+        x * 2
+    };
+
+    let b = {
+        {
+            {
+                42
+            }
+        }
+    };
+}
+
+fn test_blocks_with_control_flow() {
+    let a = {
+        if condition {
+            1
+        } else {
+            2
+        }
+    };
+
+    let b = {
+        match x {
+            0 => "zero",
+            _ => "other"
+        }
+    };
+}
+
+// =============================================================================
+// BLOCKS WITH VARIOUS STATEMENTS
+// =============================================================================
+
+fn test_blocks_with_let() {
+    let a = {
+        let x = 1;
+        let y: Int = 2;
+        let z = x + y;
+        z
+    };
+}
+
+fn test_blocks_with_let_patterns() {
+    let a = {
+        let (x, y) = pair;
+        let Point { x: px, y: py } = point;
+        px + py
+    };
+}
+
+fn test_blocks_with_provide() {
+    let a = {
+        provide Logger = console_logger;
+        do_logging();
+        result
+    };
+
+    let b = {
+        provide Database = connection in {
+            query()
+        }
+    };
+}
+
+fn test_blocks_with_defer() {
+    let a = {
+        defer cleanup();
+        let resource = acquire();
+        use_resource(resource);
+        result
+    };
+
+    let b = {
+        defer {
+            close_file();
+            release_lock();
+        };
+        process()
+    };
+
+    let c = {
+        errdefer rollback();
+        let tx = begin_transaction();
+        commit(tx)
+    };
+}
+
+// =============================================================================
+// BLOCKS AS EXPRESSIONS IN CONTEXT
+// =============================================================================
+
+fn test_block_as_function_arg() {
+    let a = process({
+        let x = compute();
+        transform(x)
+    });
+}
+
+fn test_block_in_operators() {
+    let a = { 1 } + { 2 };
+    let b = { compute_left() } * { compute_right() };
+}
+
+fn test_block_in_assignment() {
+    let mut x = 0;
+    x = {
+        let temp = calculate();
+        finalize(temp)
+    };
+}
+
+fn test_block_in_return() {
+    return {
+        let result = process();
+        validate(result);
+        result
+    };
+}
+
+// =============================================================================
+// BLOCKS WITH ITEMS (INNER DEFINITIONS)
+// =============================================================================
+
+fn test_block_with_inner_function() {
+    let a = {
+        fn helper(x: Int) -> Int {
+            x * 2
+        }
+        helper(21)
+    };
+}
+
+fn test_block_with_inner_type() {
+    let a = {
+        type LocalPoint is { x: Int, y: Int };
+        let p = LocalPoint { x: 1, y: 2 };
+        p.x + p.y
+    };
+}
+
+// =============================================================================
+// EXPRESSION STATEMENTS IN BLOCKS
+// =============================================================================
+
+fn test_expression_statements() {
+    {
+        // Expression followed by semicolon
+        compute();
+
+        // Expression with side effects
+        list.push(item);
+
+        // Method chains
+        data.process().transform().finalize();
+
+        // Final expression (no semicolon)
+        result
+    };
+}
+
+fn test_semicolon_significance() {
+    // With semicolon - unit type
+    let a: () = { 42; };
+
+    // Without semicolon - Int type
+    let b: Int = { 42 };
+}
+
+// =============================================================================
+// COMPLEX BLOCK STRUCTURES
+// =============================================================================
+
+fn test_complex_block() {
+    let result = {
+        // Setup
+        let config = load_config();
+        let connection = connect(config);
+
+        // Defer cleanup
+        defer connection.close();
+
+        // Main logic
+        let data = {
+            let raw = connection.fetch();
+            parse(raw)
+        };
+
+        // Process
+        if data.is_valid() {
+            transform(data)
+        } else {
+            default_value()
+        }
+    };
+}
+
+fn test_block_with_early_return() {
+    let a = {
+        if should_abort {
+            return early_result;
+        }
+        let x = compute();
+        finalize(x)
+    };
+}
+
+// =============================================================================
+// UNSAFE AND META BLOCKS
+// =============================================================================
+
+fn test_unsafe_block() {
+    let a = unsafe {
+        let ptr = get_raw_pointer();
+        *ptr
+    };
+}
+
+fn test_meta_block() {
+    let a = meta {
+        generate_code()
+    };
+}
+
+fn test_async_block() {
+    let a = async {
+        let response = fetch().await;
+        parse(response)
+    };
+}

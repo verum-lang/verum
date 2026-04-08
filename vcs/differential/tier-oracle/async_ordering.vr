@@ -1,0 +1,330 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, async, ordering, timing, concurrency
+// @timeout: 30000
+
+/// Async ordering and timing tests for Tier 0 vs Tier 3 equivalence.
+/// Tests that async semantics produce deterministic observable behavior.
+///
+/// Note: These tests focus on observable ordering guarantees, not timing.
+/// The output order should be deterministic based on Verum's async semantics.
+
+fn main() {
+    test_sequential_await();
+    test_join_ordering();
+    test_select_semantics();
+    test_channel_ordering();
+    test_spawn_completion_order();
+    test_barrier_synchronization();
+    test_lock_ordering();
+    test_atomic_operations();
+}
+
+/// Sequential await preserves order
+async fn test_sequential_await() {
+    println("=== Sequential Await ===");
+
+    // Sequential awaits should always produce ordered output
+    async fn step(n: Int) -> Int {
+        println(f"step {n} start");
+        yield_now().await;
+        println(f"step {n} end");
+        n
+    }
+
+    let a = step(1).await;
+    let b = step(2).await;
+    let c = step(3).await;
+
+    println(f"results: {a}, {b}, {c}");
+}
+
+/// Join maintains tuple order regardless of completion time
+async fn test_join_ordering() {
+    println("\n=== Join Ordering ===");
+
+    // Results should be returned in tuple order, not completion order
+    async fn delayed(id: Int, delay_factor: Int) -> Int {
+        // Simulate work proportional to delay_factor
+        for _ in 0..delay_factor {
+            yield_now().await;
+        }
+        id
+    }
+
+    // Task 3 finishes first, but result order is (1, 2, 3)
+    let (a, b, c) = join(
+        delayed(1, 30),
+        delayed(2, 20),
+        delayed(3, 10),
+    ).await;
+
+    println(f"join result: ({a}, {b}, {c})");
+
+    // Nested joins
+    let (x, (y, z)) = join(
+        delayed(10, 5),
+        join(
+            delayed(20, 3),
+            delayed(30, 1),
+        ),
+    ).await;
+
+    println(f"nested join: ({x}, ({y}, {z}))");
+}
+
+/// Select returns first completed task
+async fn test_select_semantics() {
+    println("\n=== Select Semantics ===");
+
+    async fn racer(id: Int, iterations: Int) -> Int {
+        for _ in 0..iterations {
+            yield_now().await;
+        }
+        id
+    }
+
+    // First task (fewest iterations) should win
+    let winner = select {
+        a = racer(1, 100) => a,
+        b = racer(2, 50) => b,
+        c = racer(3, 10) => c,  // Should win
+    }.await;
+
+    println(f"select winner: {winner}");
+
+    // When times are equal, leftmost wins (deterministic)
+    let equal_winner = select {
+        a = racer(1, 10) => a,  // Should win (leftmost)
+        b = racer(2, 10) => b,
+        c = racer(3, 10) => c,
+    }.await;
+
+    println(f"equal race winner: {equal_winner}");
+
+    // Timeout pattern
+    async fn slow_operation() -> Result<Int, Text> {
+        for _ in 0..1000 {
+            yield_now().await;
+        }
+        Ok(42)
+    }
+
+    async fn timeout_after(iterations: Int) -> Result<Int, Text> {
+        for _ in 0..iterations {
+            yield_now().await;
+        }
+        Err("timeout")
+    }
+
+    let timeout_result = select {
+        result = slow_operation() => result,
+        _ = timeout_after(10) => Err("timeout"),
+    }.await;
+
+    println(f"timeout pattern result: {timeout_result}");
+}
+
+/// Channel message ordering
+async fn test_channel_ordering() {
+    println("\n=== Channel Ordering ===");
+
+    let (tx, rx) = channel<Int>();
+
+    // Messages should be received in send order (FIFO)
+    spawn async {
+        for i in 1..=5 {
+            tx.send(i).await;
+        }
+        tx.close();
+    };
+
+    let mut received = [];
+    while let Some(msg) = rx.recv().await {
+        received.push(msg);
+    }
+
+    println(f"received order: {received}");
+
+    // Multiple senders with ordering
+    let (tx2, rx2) = channel.<(Int, Int)>();
+
+    // Spawn multiple senders
+    for sender_id in 1..=3 {
+        let tx_clone = tx2.clone();
+        spawn async {
+            for msg in 1..=3 {
+                tx_clone.send((sender_id, msg)).await;
+            }
+        };
+    }
+    drop(tx2);  // Close original sender
+
+    let mut all_msgs = [];
+    while let Some(msg) = rx2.recv().await {
+        all_msgs.push(msg);
+    }
+
+    // Sort for deterministic output (sender order may vary)
+    all_msgs.sort();
+    println(f"multi-sender messages (sorted): {all_msgs}");
+}
+
+/// Spawn task completion ordering
+async fn test_spawn_completion_order() {
+    println("\n=== Spawn Completion Order ===");
+
+    // Track completion order
+    let completion_order = Arc.new(Mutex.new([]));
+
+    let handles = [];
+    for i in [3, 1, 4, 1, 5, 9, 2, 6] {
+        let order = completion_order.clone();
+        let handle = spawn async {
+            // Work proportional to value
+            for _ in 0..i {
+                yield_now().await;
+            }
+            let mut guard = order.lock().await;
+            guard.push(i);
+            i
+        };
+        handles.push(handle);
+    }
+
+    // Wait for all to complete
+    let results: List<Int> = join_all(handles).await;
+
+    let final_order = completion_order.lock().await;
+    println(f"completion order: {*final_order}");
+    println(f"join_all results: {results}");  // Original order preserved
+}
+
+/// Barrier synchronization
+async fn test_barrier_synchronization() {
+    println("\n=== Barrier Synchronization ===");
+
+    let barrier = Arc.new(Barrier.new(3));
+    let results = Arc.new(Mutex.new([]));
+
+    // Three tasks must all reach barrier before any proceeds
+    let handles = [];
+    for id in 1..=3 {
+        let b = barrier.clone();
+        let r = results.clone();
+        handles.push(spawn async {
+            // Phase 1
+            {
+                let mut guard = r.lock().await;
+                guard.push(f"task {id} before barrier");
+            }
+
+            b.wait().await;
+
+            // Phase 2 - only after all reached barrier
+            {
+                let mut guard = r.lock().await;
+                guard.push(f"task {id} after barrier");
+            }
+        });
+    }
+
+    join_all(handles).await;
+
+    let final_results = results.lock().await;
+    // All "before" messages should appear before any "after" message
+    println("barrier results:");
+    for msg in final_results.iter() {
+        println(f"  {msg}");
+    }
+}
+
+/// Lock ordering guarantees
+async fn test_lock_ordering() {
+    println("\n=== Lock Ordering ===");
+
+    let counter = Arc.new(Mutex.new(0));
+    let log = Arc.new(Mutex.new([]));
+
+    // Sequential access should produce ordered increments
+    let handles = [];
+    for i in 1..=5 {
+        let c = counter.clone();
+        let l = log.clone();
+        handles.push(spawn async {
+            let mut guard = c.lock().await;
+            let old = *guard;
+            *guard = old + 1;
+
+            let mut log_guard = l.lock().await;
+            log_guard.push((i, old, *guard));
+        });
+    }
+
+    join_all(handles).await;
+
+    let final_log = log.lock().await;
+    println(f"increment log: {*final_log}");
+
+    let final_count = counter.lock().await;
+    println(f"final count: {*final_count}");
+}
+
+/// Atomic operation ordering
+async fn test_atomic_operations() {
+    println("\n=== Atomic Operations ===");
+
+    let counter = Arc.new(AtomicInt.new(0));
+
+    // Concurrent atomic increments
+    let handles = [];
+    for _ in 0..10 {
+        let c = counter.clone();
+        handles.push(spawn async {
+            for _ in 0..100 {
+                c.fetch_add(1, Ordering.SeqCst);
+                yield_now().await;
+            }
+        });
+    }
+
+    join_all(handles).await;
+
+    let final_value = counter.load(Ordering.SeqCst);
+    println(f"atomic counter: {final_value}");
+
+    // Compare-and-swap pattern
+    let state = Arc.new(AtomicInt.new(0));
+    let transitions = Arc.new(Mutex.new([]));
+
+    let handles = [];
+    for id in 1..=5 {
+        let s = state.clone();
+        let t = transitions.clone();
+        handles.push(spawn async {
+            loop {
+                let current = s.load(Ordering.SeqCst);
+                if current >= 10 {
+                    break;
+                }
+                if s.compare_exchange(current, current + 1, Ordering.SeqCst, Ordering.SeqCst).is_ok() {
+                    let mut guard = t.lock().await;
+                    guard.push((id, current, current + 1));
+                }
+                yield_now().await;
+            }
+        });
+    }
+
+    join_all(handles).await;
+
+    let final_transitions = transitions.lock().await;
+    println(f"CAS transitions: {*final_transitions}");
+    println(f"final state: {state.load(Ordering.SeqCst)}");
+}
+
+/// Helper: yield execution to scheduler
+async fn yield_now() {
+    sleep(Duration.from_nanos(0)).await;
+}

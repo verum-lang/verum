@@ -1,0 +1,139 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generator, yield, fn-star, iteration
+// @description: Generator functions with yield and for-in consumption
+
+fn* count_up(start: Int, end_val: Int) -> Int {
+    let mut i = start;
+    while i < end_val {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn test_basic_generator() -> Int {
+    let mut sum = 0;
+    for v in count_up(0, 5) {
+        sum = sum + v;
+    }
+    // 0+1+2+3+4 = 10
+    if sum != 10 {
+        print(f"FAIL basic_generator: expected 10, got {sum}");
+        return 1;
+    }
+    print("  basic_generator: OK");
+    0
+}
+
+fn* fibonacci(limit: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut count = 0;
+    while count < limit {
+        yield a;
+        let temp = a + b;
+        a = b;
+        b = temp;
+        count = count + 1;
+    }
+}
+
+fn test_fibonacci_generator() -> Int {
+    let mut values = List.new();
+    for v in fibonacci(8) {
+        values.push(v);
+    }
+    if values.len() != 8 {
+        print(f"FAIL fib_gen len: expected 8, got {values.len()}");
+        return 1;
+    }
+    // Fibonacci: 0,1,1,2,3,5,8,13
+    if values[7] != 13 {
+        print(f"FAIL fib_gen last: expected 13, got {values[7]}");
+        return 1;
+    }
+    if values[0] != 0 {
+        print(f"FAIL fib_gen first: expected 0, got {values[0]}");
+        return 1;
+    }
+    print("  fibonacci_generator: OK");
+    0
+}
+
+fn* evens(max: Int) -> Int {
+    let mut i = 0;
+    while i <= max {
+        yield i;
+        i = i + 2;
+    }
+}
+
+fn test_even_generator() -> Int {
+    let mut sum = 0;
+    let mut count = 0;
+    for v in evens(10) {
+        sum = sum + v;
+        count = count + 1;
+    }
+    // 0+2+4+6+8+10 = 30
+    if sum != 30 {
+        print(f"FAIL even_gen: expected 30, got {sum}");
+        return 1;
+    }
+    if count != 6 {
+        print(f"FAIL even_gen count: expected 6, got {count}");
+        return 1;
+    }
+    print("  even_generator: OK");
+    0
+}
+
+fn* squares(n: Int) -> Int {
+    let mut i = 1;
+    while i <= n {
+        yield i * i;
+        i = i + 1;
+    }
+}
+
+fn test_squares_generator() -> Int {
+    let mut result = List.new();
+    for v in squares(5) {
+        result.push(v);
+    }
+    // 1,4,9,16,25
+    if result.len() != 5 {
+        print(f"FAIL squares len: expected 5, got {result.len()}");
+        return 1;
+    }
+    let mut sum = 0;
+    let mut i = 0;
+    while i < result.len() {
+        sum = sum + result[i];
+        i = i + 1;
+    }
+    // 1+4+9+16+25 = 55
+    if sum != 55 {
+        print(f"FAIL squares sum: expected 55, got {sum}");
+        return 1;
+    }
+    print("  squares_generator: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Generator Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_generator();
+    failures = failures + test_fibonacci_generator();
+    failures = failures + test_even_generator();
+    failures = failures + test_squares_generator();
+
+    if failures == 0 {
+        print("All generator tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

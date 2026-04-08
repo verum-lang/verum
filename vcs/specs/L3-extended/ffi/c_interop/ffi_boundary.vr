@@ -1,0 +1,256 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, ffi-boundary, contracts
+// @timeout: 10000
+// @description: Tests ffi block declarations with contracts and memory effects
+
+/// ============================================================
+/// FFI BOUNDARY DECLARATIONS
+/// ============================================================
+///
+/// FFI blocks define the interface between Verum and foreign code.
+/// They include safety contracts, memory effects, and ownership specs.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+
+// Opaque handle types
+@opaque
+type Handle is ();
+
+@opaque
+type Connection is ();
+
+@opaque
+type Buffer is ();
+
+// ------------------------------------------------------------
+// Basic FFI Block
+// ------------------------------------------------------------
+
+/// Simple FFI block with multiple functions
+ffi SimpleLib {
+    @extern("C")
+    fn simple_init() -> c_int;
+
+    @extern("C")
+    fn simple_cleanup();
+
+    @extern("C")
+    fn simple_process(data: *const c_void, len: size_t) -> c_int;
+}
+
+// ------------------------------------------------------------
+// FFI Block with Requires/Ensures Contracts
+// ------------------------------------------------------------
+
+/// FFI block with preconditions and postconditions
+ffi ContractedLib {
+    /// Initialize library
+    @extern("C")
+    fn lib_init() -> c_int;
+
+    /// Allocate buffer - returns null on failure
+    @extern("C")
+    fn lib_alloc(size: size_t) -> *mut c_void;
+
+    /// Free buffer - must be allocated by lib_alloc
+    @extern("C")
+    fn lib_free(ptr: *mut c_void);
+}
+
+/// FFI block with explicit contracts on each function
+ffi DatabaseLib {
+    /// Open database connection
+    @extern("C")
+    fn db_open(path: *const c_char) -> *mut Connection;
+
+    /// Close database connection
+    @extern("C")
+    fn db_close(conn: *mut Connection) -> c_int;
+
+    /// Execute query
+    @extern("C")
+    fn db_execute(conn: *mut Connection, query: *const c_char) -> c_int;
+
+    /// Get last error message
+    @extern("C")
+    fn db_error_message(conn: *mut Connection) -> *const c_char;
+}
+
+// ------------------------------------------------------------
+// FFI Block with Memory Effects
+// ------------------------------------------------------------
+
+/// FFI with explicit memory effect declarations
+ffi MemoryEffectsLib {
+    /// Pure function - no side effects
+    @extern("C")
+    fn compute_hash(data: *const u8, len: size_t) -> u64;
+
+    /// Function that only reads memory
+    @extern("C")
+    fn validate_data(data: *const u8, len: size_t) -> c_int;
+
+    /// Function that writes to output buffer
+    @extern("C")
+    fn transform_data(input: *const u8, input_len: size_t, output: *mut u8, output_len: size_t) -> c_int;
+
+    /// Function that allocates memory
+    @extern("C")
+    fn create_buffer(size: size_t) -> *mut Buffer;
+
+    /// Function that deallocates memory
+    @extern("C")
+    fn destroy_buffer(buf: *mut Buffer);
+
+    /// Complex memory effects
+    @extern("C")
+    fn process_and_store(input: *const u8, len: size_t, storage: *mut u8) -> *mut Buffer;
+}
+
+// ------------------------------------------------------------
+// FFI Block with Thread Safety
+// ------------------------------------------------------------
+
+@repr(C)
+type State is {
+    value: c_int,
+    flags: c_uint,
+};
+
+/// FFI with thread safety specifications
+ffi ThreadSafeLib {
+    /// Thread-safe function
+    @extern("C")
+    fn atomic_increment(counter: *mut c_long) -> c_long;
+
+    /// NOT thread-safe - requires external synchronization
+    @extern("C")
+    fn non_atomic_update(state: *mut State) -> c_int;
+
+    /// Thread-safe initialization (once)
+    @extern("C")
+    fn init_once() -> c_int;
+}
+
+// ------------------------------------------------------------
+// FFI Block with Error Handling Protocol
+// ------------------------------------------------------------
+
+/// FFI with various error handling conventions
+ffi ErrorHandlingLib {
+    /// Returns -1 on error, sets errno
+    @extern("C")
+    fn unix_style_function(fd: c_int) -> c_int;
+
+    /// Returns NULL on error, specific error code available
+    @extern("C")
+    fn null_on_error(input: *const c_void) -> *mut c_void;
+
+    /// Returns negative value on error
+    @extern("C")
+    fn negative_on_error(data: *const u8, len: size_t) -> c_int;
+
+    /// No error indication (always succeeds or aborts)
+    @extern("C")
+    fn infallible_function(x: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// FFI Block with Ownership Specifications
+// ------------------------------------------------------------
+
+@repr(C)
+type SharedState is {
+    ref_count: c_uint,
+    data: *const c_void,
+};
+
+/// FFI with ownership transfer semantics
+ffi OwnershipLib {
+    /// Creates a handle - caller takes ownership
+    @extern("C")
+    fn create_handle() -> *mut Handle;
+
+    /// Destroys a handle - ownership transferred to C
+    @extern("C")
+    fn destroy_handle(h: *mut Handle);
+
+    /// Borrows handle temporarily - no ownership change
+    @extern("C")
+    fn use_handle(h: *const Handle) -> c_int;
+
+    /// Returns shared reference - multiple owners
+    @extern("C")
+    fn get_shared_state() -> *const SharedState;
+}
+
+// ------------------------------------------------------------
+// FFI Block Extension (Inheritance)
+// ------------------------------------------------------------
+
+/// Base FFI block
+ffi BaseLib {
+    @extern("C")
+    fn base_init() -> c_int;
+
+    @extern("C")
+    fn base_version() -> *const c_char;
+}
+
+/// Extended FFI block (inherits from BaseLib)
+ffi ExtendedLib extends BaseLib {
+    @extern("C")
+    fn extended_feature(data: *const c_void) -> c_int;
+
+    @extern("C")
+    fn extended_cleanup();
+}
+
+// ------------------------------------------------------------
+// Complex FFI Block Example: Crypto Library
+// ------------------------------------------------------------
+
+@opaque
+type CipherContext is ();
+
+/// Cryptographic library FFI
+ffi CryptoLib {
+    /// Initialize crypto library (once per process)
+    @extern("C")
+    fn crypto_init() -> c_int;
+
+    /// Create cipher context
+    @extern("C")
+    fn cipher_create(algorithm: c_int) -> *mut CipherContext;
+
+    /// Initialize cipher for encryption
+    @extern("C")
+    fn cipher_encrypt_init(ctx: *mut CipherContext, key: *const u8, key_len: size_t, iv: *const u8, iv_len: size_t) -> c_int;
+
+    /// Encrypt data
+    @extern("C")
+    fn cipher_encrypt(ctx: *mut CipherContext, input: *const u8, input_len: size_t, output: *mut u8, output_len: *mut size_t) -> c_int;
+
+    /// Finalize encryption
+    @extern("C")
+    fn cipher_encrypt_final(ctx: *mut CipherContext, output: *mut u8, output_len: *mut size_t) -> c_int;
+
+    /// Destroy cipher context
+    @extern("C")
+    fn cipher_destroy(ctx: *mut CipherContext);
+}
+
+fn main() {
+    // FFI boundary test compilation
+}

@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @expected-error: E321
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, stack-overflow, stack-frame, termination
+// @description: Tests that unbounded recursion is detected at compile-time
+
+fn allocate_large_stack() {
+    // Allocate a large array on the stack (will be GC'd by interpreter but recursion still causes overflow)
+    let huge_array = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];  // Stack frame with array
+
+    // Try to access to ensure it's not optimized away
+    let _ = huge_array[0];
+
+    // Recurse to compound the problem - stack overflow
+    allocate_large_stack();
+}
+
+fn main() {
+    allocate_large_stack();  // Stack overflow due to recursion
+}

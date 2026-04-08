@@ -1,0 +1,10 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, binary, operator
+// @description: Unsafe blocks as operands in binary operations
+fn main() {
+    let sum: Int = unsafe { 10 } + unsafe { 20 };
+    let product: Int = unsafe { 3 } * unsafe { 4 };
+    assert_eq(sum, 30);
+    assert_eq(product, 12);
+}

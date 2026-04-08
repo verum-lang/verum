@@ -1,0 +1,275 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, advanced
+// @timeout: 15000
+// @expected-exit: 0
+//
+// CBGR advanced reference test: State machine via mutable ref.
+// FSM transitions, guard conditions, output accumulation,
+// and event-driven state changes through &mut ref.
+
+// ============================================================================
+// Type definitions
+// ============================================================================
+
+// State IDs: 0=Idle, 1=Running, 2=Paused, 3=Stopped
+type FSM is { state: Int, transitions: Int, output: Int };
+type Turnstile is { locked: Bool, coins: Int, passes: Int };
+type Counter is { val: Int, limit: Int, wraps: Int };
+
+// ============================================================================
+// FSM operations
+// ============================================================================
+
+fn fsm_new() -> FSM {
+    FSM { state: 0, transitions: 0, output: 0 }
+}
+
+fn fsm_transition(m: &mut FSM, event: Int) {
+    let s = (*m).state;
+    // event: 1=start, 2=pause, 3=resume, 4=stop, 6=reset
+    if s == 0 && event == 1 {
+        (*m).state = 1;
+        (*m).transitions = (*m).transitions + 1;
+    } else if s == 1 && event == 2 {
+        (*m).state = 2;
+        (*m).transitions = (*m).transitions + 1;
+        (*m).output = (*m).output + 1;
+    } else if s == 1 && event == 4 {
+        (*m).state = 3;
+        (*m).transitions = (*m).transitions + 1;
+        (*m).output = (*m).output + 1;
+    } else if s == 2 && event == 3 {
+        (*m).state = 1;
+        (*m).transitions = (*m).transitions + 1;
+    } else if s == 2 && event == 4 {
+        (*m).state = 3;
+        (*m).transitions = (*m).transitions + 1;
+    } else if s == 3 && event == 6 {
+        (*m).state = 0;
+        (*m).transitions = (*m).transitions + 1;
+    }
+}
+
+// ============================================================================
+// Turnstile: locked/unlocked
+// ============================================================================
+
+fn turnstile_new() -> Turnstile {
+    Turnstile { locked: true, coins: 0, passes: 0 }
+}
+
+fn turnstile_coin(ts: &mut Turnstile) {
+    (*ts).coins = (*ts).coins + 1;
+    (*ts).locked = false;
+}
+
+fn turnstile_push(ts: &mut Turnstile) {
+    if !(*ts).locked {
+        (*ts).passes = (*ts).passes + 1;
+        (*ts).locked = true;
+    }
+}
+
+// ============================================================================
+// Wrapping counter
+// ============================================================================
+
+fn counter_new(limit: Int) -> Counter {
+    Counter { val: 0, limit: limit, wraps: 0 }
+}
+
+fn counter_inc(c: &mut Counter) {
+    (*c).val = (*c).val + 1;
+    if (*c).val >= (*c).limit {
+        (*c).val = 0;
+        (*c).wraps = (*c).wraps + 1;
+    }
+}
+
+fn counter_add(c: &mut Counter, n: Int) {
+    let mut i = 0;
+    while i < n {
+        counter_inc(c);
+        i = i + 1;
+    }
+}
+
+// ============================================================================
+// Guard pattern via ref
+// ============================================================================
+
+fn guarded_inc(r: &mut Int, ceiling: Int) {
+    if *r < ceiling {
+        *r = *r + 1;
+    }
+}
+
+fn guarded_dec(r: &mut Int, floor: Int) {
+    if *r > floor {
+        *r = *r - 1;
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_fsm_basic() {
+    let mut m = fsm_new();
+    assert_eq(m.state, 0);
+    fsm_transition(&mut m, 1); // start
+    assert_eq(m.state, 1);
+    fsm_transition(&mut m, 2); // pause
+    assert_eq(m.state, 2);
+    fsm_transition(&mut m, 3); // resume
+    assert_eq(m.state, 1);
+    fsm_transition(&mut m, 4); // stop
+    assert_eq(m.state, 3);
+    assert_eq(m.transitions, 4);
+}
+
+fn test_fsm_invalid_transitions() {
+    let mut m = fsm_new();
+    fsm_transition(&mut m, 2); // pause from idle => no change
+    assert_eq(m.state, 0);
+    fsm_transition(&mut m, 4); // stop from idle => no change
+    assert_eq(m.state, 0);
+    fsm_transition(&mut m, 1); // start
+    assert_eq(m.state, 1);
+}
+
+fn test_fsm_lifecycle() {
+    let mut m = fsm_new();
+    fsm_transition(&mut m, 1); // start
+    fsm_transition(&mut m, 4); // stop
+    assert_eq(m.state, 3);
+    fsm_transition(&mut m, 6); // reset
+    assert_eq(m.state, 0);
+    fsm_transition(&mut m, 1); // start again
+    assert_eq(m.state, 1);
+}
+
+fn test_fsm_output_counting() {
+    let mut m = fsm_new();
+    fsm_transition(&mut m, 1); // start
+    fsm_transition(&mut m, 2); // pause => output+1
+    assert_eq(m.output, 1);
+    fsm_transition(&mut m, 3); // resume
+    fsm_transition(&mut m, 4); // stop => output+1
+    assert_eq(m.output, 2);
+}
+
+fn test_fsm_state_checks() {
+    let mut m = fsm_new();
+    let idle = m.state == 0;
+    assert_eq(idle, true);
+    fsm_transition(&mut m, 1);
+    let running = m.state == 1;
+    assert_eq(running, true);
+    fsm_transition(&mut m, 2);
+    let paused = m.state == 2;
+    assert_eq(paused, true);
+    fsm_transition(&mut m, 4);
+    let stopped = m.state == 3;
+    assert_eq(stopped, true);
+}
+
+fn test_turnstile() {
+    let mut ts = turnstile_new();
+    assert_eq(ts.locked, true);
+    turnstile_push(&mut ts); // locked, no pass
+    assert_eq(ts.passes, 0);
+    turnstile_coin(&mut ts);
+    assert_eq(ts.locked, false);
+    turnstile_push(&mut ts);
+    assert_eq(ts.passes, 1);
+    assert_eq(ts.locked, true);
+}
+
+fn test_turnstile_multiple() {
+    let mut ts = turnstile_new();
+    let mut i = 0;
+    while i < 10 {
+        turnstile_coin(&mut ts);
+        turnstile_push(&mut ts);
+        i = i + 1;
+    }
+    assert_eq(ts.coins, 10);
+    assert_eq(ts.passes, 10);
+}
+
+fn test_counter_basic() {
+    let mut c = counter_new(5);
+    counter_inc(&mut c);
+    counter_inc(&mut c);
+    counter_inc(&mut c);
+    assert_eq(c.val, 3);
+    assert_eq(c.wraps, 0);
+}
+
+fn test_counter_wrap() {
+    let mut c = counter_new(5);
+    counter_add(&mut c, 7);
+    assert_eq(c.val, 2);
+    assert_eq(c.wraps, 1);
+}
+
+fn test_counter_multi_wrap() {
+    let mut c = counter_new(3);
+    counter_add(&mut c, 10);
+    assert_eq(c.val, 1);
+    assert_eq(c.wraps, 3);
+}
+
+fn test_guarded_inc() {
+    let mut x = 0;
+    let mut i = 0;
+    while i < 20 {
+        guarded_inc(&mut x, 10);
+        i = i + 1;
+    }
+    assert_eq(x, 10); // saturates
+}
+
+fn test_guarded_dec() {
+    let mut x = 15;
+    let mut i = 0;
+    while i < 20 {
+        guarded_dec(&mut x, 5);
+        i = i + 1;
+    }
+    assert_eq(x, 5); // saturates
+}
+
+fn test_two_fsms() {
+    let mut m1 = fsm_new();
+    let mut m2 = fsm_new();
+    fsm_transition(&mut m1, 1);
+    fsm_transition(&mut m1, 2);
+    fsm_transition(&mut m1, 3);
+    fsm_transition(&mut m2, 1);
+    assert_eq(m1.state, 1);
+    assert_eq(m2.state, 1);
+    assert_eq(m1.transitions, 3);
+    assert_eq(m2.transitions, 1);
+}
+
+fn main() -> Int {
+    test_fsm_basic();
+    test_fsm_invalid_transitions();
+    test_fsm_lifecycle();
+    test_fsm_output_counting();
+    test_fsm_state_checks();
+    test_turnstile();
+    test_turnstile_multiple();
+    test_counter_basic();
+    test_counter_wrap();
+    test_counter_multi_wrap();
+    test_guarded_inc();
+    test_guarded_dec();
+    test_two_fsms();
+    print("[OK] 369_interp_cbgr_ref_recursive");
+    0
+}

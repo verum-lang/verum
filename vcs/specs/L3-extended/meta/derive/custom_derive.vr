@@ -1,0 +1,278 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, custom
+
+/// Тестирование @derive атрибутов для различных типов
+///
+/// Verum поддерживает встроенные derive-атрибуты для автоматической
+/// генерации реализаций протоколов.
+/// Тест использует только базовые возможности языка без stdlib.
+/// Примечание: этот тест проверяет синтаксис @derive без вызова методов,
+/// так как генерация методов - отдельная фаза компилятора.
+
+// ============================================================
+// ПРОСТЫЕ СТРУКТУРЫ С DERIVE
+// ============================================================
+
+@derive(Clone, Eq, Debug)
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+@derive(Clone, Eq)
+type Vector3D is {
+    x: Float64,
+    y: Float64,
+    z: Float64,
+};
+
+@derive(Debug)
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+// ============================================================
+// SUM TYPES С DERIVE
+// ============================================================
+
+@derive(Clone, Eq, Debug)
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Custom { r: UInt8, g: UInt8, b: UInt8 };
+
+@derive(Clone, Eq)
+type Status is
+    | Active
+    | Inactive
+    | Pending { reason: Text };
+
+@derive(Debug)
+type Shape is
+    | Circle { radius: Float64 }
+    | Rectangle { width: Float64, height: Float64 }
+    | Triangle { base: Float64, height: Float64 };
+
+// ============================================================
+// GENERIC TYPES С DERIVE
+// ============================================================
+
+@derive(Clone, Eq)
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+@derive(Clone, Debug)
+type Wrapper<T> is {
+    value: T,
+};
+
+@derive(Clone, Eq, Debug)
+type Triple<T> is {
+    a: T,
+    b: T,
+    c: T,
+};
+
+// ============================================================
+// ВЛОЖЕННЫЕ ТИПЫ С DERIVE
+// ============================================================
+
+@derive(Clone, Eq)
+type Coordinate is {
+    point: Point,
+    label: Text,
+};
+
+@derive(Clone)
+type ColoredPoint is {
+    position: Point,
+    color: Color,
+};
+
+// ============================================================
+// NEWTYPES С DERIVE
+// ============================================================
+
+@derive(Clone, Eq, Debug)
+type UserId is (Int);
+
+@derive(Clone, Eq)
+type Email is (Text);
+
+@derive(Clone, Debug)
+type Timestamp is (Int64);
+
+// ============================================================
+// КОМПЛЕКСНЫЕ ПРИМЕРЫ
+// ============================================================
+
+@derive(Clone, Eq, Debug)
+type User is {
+    id: UserId,
+    name: Text,
+    email: Email,
+    created_at: Timestamp,
+};
+
+@derive(Clone, Debug)
+type Config is {
+    host: Text,
+    port: Int,
+    debug_mode: Bool,
+};
+
+@derive(Clone, Eq)
+type ApiResponse<T> is
+    | Success(T)
+    | Error { code: Int, message: Text };
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ ТИПОВ С DERIVE (без вызова методов)
+// ============================================================
+
+fn test_types() {
+    // Простые структуры
+    let p1 = Point { x: 10, y: 20 };
+    let v1 = Vector3D { x: 1.0, y: 2.0, z: 3.0 };
+    let person = Person { name: "Alice", age: 30 };
+
+    // Sum types
+    let c1 = Color.Red;
+    let c2 = Color.Custom { r: 255, g: 128, b: 0 };
+    let status = Status.Active;
+    let shape = Shape.Circle { radius: 5.0 };
+
+    // Generic types
+    let pair: Pair<Int, Bool> = Pair { first: 42, second: true };
+    let wrapper = Wrapper { value: 100 };
+    let triple = Triple { a: 1, b: 2, c: 3 };
+
+    // Вложенные типы
+    let coord = Coordinate { point: p1, label: "origin" };
+    let cp = ColoredPoint { position: Point { x: 0, y: 0 }, color: Color.Blue };
+}
+
+fn test_newtypes() {
+    // Newtypes с derive
+    let user_id = UserId(123);
+    let email = Email("test@example.com");
+    let timestamp = Timestamp(1234567890);
+}
+
+fn test_complex_types() {
+    // Комплексные типы
+    let user = User {
+        id: UserId(1),
+        name: "Bob",
+        email: Email("bob@example.com"),
+        created_at: Timestamp(1700000000),
+    };
+
+    let config = Config {
+        host: "localhost",
+        port: 8080,
+        debug_mode: true,
+    };
+
+    // API response типы
+    let success: ApiResponse<Int> = ApiResponse.Success(42);
+    let error: ApiResponse<Int> = ApiResponse.Error { code: 404, message: "Not Found" };
+}
+
+// ============================================================
+// DERIVE С ОГРАНИЧЕНИЯМИ
+// ============================================================
+
+// Derive Clone для типа с Clone полями
+@derive(Clone)
+type Container<T: Clone> is {
+    value: T,
+    count: Int,
+};
+
+// Derive Eq для типа с Eq полями
+@derive(Eq)
+type ComparableBox<T: Eq> is {
+    inner: T,
+};
+
+// Derive Debug для типа с Debug полями
+@derive(Debug)
+type DebugWrapper<T: Debug> is {
+    wrapped: T,
+    tag: Text,
+};
+
+fn test_constrained_types() {
+    // Container требует Clone bound
+    let container = Container { value: 42, count: 5 };
+
+    // ComparableBox требует Eq bound
+    let cbox = ComparableBox { inner: 100 };
+
+    // DebugWrapper требует Debug bound
+    let dwrap = DebugWrapper { wrapped: Point { x: 1, y: 2 }, tag: "test" };
+}
+
+// ============================================================
+// МНОЖЕСТВЕННЫЕ DERIVES
+// ============================================================
+
+@derive(Clone, Eq, Debug, Display)
+type FullyDerived is {
+    id: Int,
+    name: Text,
+    active: Bool,
+};
+
+fn test_fully_derived() {
+    let item = FullyDerived {
+        id: 1,
+        name: "test",
+        active: true,
+    };
+
+    // Создаём экземпляр без вызова derived методов
+    let item2 = FullyDerived {
+        id: 2,
+        name: "another",
+        active: false,
+    };
+}
+
+// ============================================================
+// EMPTY TYPES С DERIVE
+// ============================================================
+
+@derive(Clone, Eq, Debug)
+type EmptyStruct is { };
+
+@derive(Clone, Eq)
+type UnitEnum is
+    | A
+    | B
+    | C;
+
+fn test_empty_types() {
+    let empty = EmptyStruct { };
+    let empty2 = EmptyStruct { };
+
+    let unit = UnitEnum.A;
+    let unit2 = UnitEnum.B;
+    let unit3 = UnitEnum.C;
+}
+
+fn main() {
+    test_types();
+    test_newtypes();
+    test_complex_types();
+    test_constrained_types();
+    test_fully_derived();
+    test_empty_types();
+}

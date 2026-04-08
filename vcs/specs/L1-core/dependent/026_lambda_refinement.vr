@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, lambda
+
+/// Lambda-style refinement syntax.
+/// Grammar: refinement_method = ... | lambda_expr | ... ;
+///          lambda_expr = '|' param_list_lambda '|' expression ;
+
+// Lambda refinement on type
+type EvenInt is Int where |n| n % 2 == 0;
+
+// Lambda with multiple conditions
+type ValidPort is Int where |p| p >= 1 && p <= 65535;
+
+// Lambda refinement on record field
+type PositiveRect is {
+    width: Float,
+    height: Float,
+} where |r| r.width > 0.0 && r.height > 0.0;
+
+// Lambda refinement with function call
+type NonEmptyText is Text where |s| len(s) > 0;
+
+// Lambda that references generic parameter
+type BoundedList<T, N: meta Int> is List<T> where |xs| len(xs) <= N;
+
+// Lambda as predicate name
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    let mut i = 2;
+    while i * i <= n {
+        if n % i == 0 { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+type Prime is Int where |n| is_prime(n);
+
+// Lambda refinement in function parameter
+fn process_even(x: Int where |n| n % 2 == 0) -> Int {
+    x / 2
+}
+
+// Lambda refinement in return
+fn next_even(x: Int) -> Int where |n| n % 2 == 0 {
+    if x % 2 == 0 { x + 2 } else { x + 1 }
+}
+
+// Complex lambda: multi-field validation
+type Triangle is {
+    a: Float,
+    b: Float,
+    c: Float,
+} where |t| t.a + t.b > t.c && t.b + t.c > t.a && t.a + t.c > t.b;
+
+fn main() {
+    let e: EvenInt = 42;
+    assert(e % 2 == 0);
+
+    let port: ValidPort = 8080;
+    assert(port >= 1);
+
+    let rect = PositiveRect { width: 10.0, height: 5.0 };
+    assert(rect.width > 0.0);
+
+    let ne: NonEmptyText = "hello";
+    assert(ne.len() > 0);
+
+    let p: Prime = 7;
+    assert(is_prime(p));
+
+    let half = process_even(10);
+    assert(half == 5);
+
+    let ne2 = next_even(7);
+    assert(ne2 == 8);
+
+    let tri = Triangle { a: 3.0, b: 4.0, c: 5.0 };
+    assert(tri.a + tri.b > tri.c);
+}

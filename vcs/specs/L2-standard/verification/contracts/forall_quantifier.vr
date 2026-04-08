@@ -1,0 +1,185 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, forall, quantifiers
+// @timeout: 5000
+
+/// Tests for forall quantifier in contracts
+/// Universal quantification over elements
+
+/// Basic forall over array indices
+@verify(proof)
+fn all_positive(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == forall i: Int. 0 <= i < arr.len() implies arr[i] > 0;
+    ";
+    for x in arr {
+        if *x <= 0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Forall with two bound variables
+@verify(proof)
+fn is_sorted(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == forall i: Int, j: Int. 0 <= i < j < arr.len() implies arr[i] <= arr[j];
+    ";
+    for i in 0..arr.len() {
+        for j in i + 1..arr.len() {
+            if arr[i] > arr[j] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Forall in ensures clause
+@verify(proof)
+fn fill<T: Clone>(arr: &mut List<T>, value: T) {
+    contract#"
+        ensures arr.len() == old(arr.len());
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == value;
+    ";
+    for i in 0..arr.len() {
+        arr[i] = value.clone();
+    }
+}
+
+/// Forall with complex predicate
+@verify(proof)
+fn all_within_bounds(arr: &List<Int>, min: Int, max: Int) -> Bool {
+    contract#"
+        requires min <= max;
+        ensures result == forall i: Int. 0 <= i < arr.len() implies min <= arr[i] && arr[i] <= max;
+    ";
+    for x in arr {
+        if *x < min || *x > max {
+            return false;
+        }
+    }
+    true
+}
+
+/// Forall over struct fields
+type Matrix is {
+    rows: Int,
+    cols: Int,
+    data: List<List<Float>>,
+};
+
+@verify(proof)
+fn is_valid_matrix(m: &Matrix) -> Bool {
+    contract#"
+        ensures result == (
+            m.data.len() == m.rows &&
+            forall i: Int. 0 <= i < m.rows implies m.data[i].len() == m.cols
+        );
+    ";
+    if m.data.len() != m.rows {
+        return false;
+    }
+    for row in &m.data {
+        if row.len() != m.cols {
+            return false;
+        }
+    }
+    true
+}
+
+/// Nested forall
+@verify(proof)
+fn all_elements_equal(matrix: &List<List<Int>>, value: Int) -> Bool {
+    contract#"
+        ensures result == forall i: Int. 0 <= i < matrix.len() implies
+            forall j: Int. 0 <= j < matrix[i].len() implies matrix[i][j] == value;
+    ";
+    for row in matrix {
+        for elem in row {
+            if *elem != value {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Forall with implication chain
+@verify(proof)
+fn sorted_insert_maintains_order(arr: &List<Int>, value: Int) -> List<Int> {
+    contract#"
+        requires forall i: Int, j: Int. 0 <= i < j < arr.len() implies arr[i] <= arr[j];
+        ensures forall i: Int, j: Int. 0 <= i < j < result.len() implies result[i] <= result[j];
+        ensures result.len() == arr.len() + 1;
+    ";
+    let mut result = arr.clone();
+    let mut pos = 0;
+    while pos < result.len() && result[pos] < value {
+        pos += 1;
+    }
+    result.insert(pos, value);
+    result
+}
+
+/// Forall with element membership
+@verify(proof)
+fn subset(a: &Set<Int>, b: &Set<Int>) -> Bool {
+    contract#"
+        ensures result == forall x: Int. a.contains(&x) implies b.contains(&x);
+    ";
+    for x in a {
+        if !b.contains(x) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Forall with function application
+fn is_even(x: Int) -> Bool { x % 2 == 0 }
+
+@verify(proof)
+fn all_even(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == forall i: Int. 0 <= i < arr.len() implies is_even(arr[i]);
+    ";
+    for x in arr {
+        if !is_even(*x) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Forall with bounded quantification patterns
+@verify(proof)
+fn no_duplicates(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == forall i: Int, j: Int.
+            0 <= i < arr.len() && 0 <= j < arr.len() && i != j
+            implies arr[i] != arr[j];
+    ";
+    for i in 0..arr.len() {
+        for j in i + 1..arr.len() {
+            if arr[i] == arr[j] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Forall preservation through operation
+@verify(proof)
+fn double_all(arr: &mut List<Int>) {
+    contract#"
+        ensures arr.len() == old(arr.len());
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == old(arr[i]) * 2;
+    ";
+    for i in 0..arr.len() {
+        arr[i] *= 2;
+    }
+}

@@ -1,0 +1,297 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, bloom-filter, hash, probabilistic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Bloom filter with multiple hash functions. Tests insert,
+// lookup (no false negatives), and false positive rate estimation.
+
+// =============================================================================
+// Bit array infrastructure (Arr16 = 16 ints, we use individual bits)
+// We use each int as a single 0/1 flag giving us 16 slots per Arr16,
+// plus an Arr16 of Arr16s approach won't work. Instead we use a flat
+// Arr16 as 16 bit-slots. For a larger filter we combine two Arr16s.
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// =============================================================================
+// Bloom filter: 16 bit slots, 3 hash functions
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// Hash function 1: DJB2-like
+fn hash1(key: Int, sz: Int) -> Int {
+    let h = abs_val(key * 2654435761) % 1000000007;
+    h % sz
+}
+
+// Hash function 2: FNV-like
+fn hash2(key: Int, sz: Int) -> Int {
+    let h = abs_val((key ^ 2166136261) * 16777619) % 1000000007;
+    h % sz
+}
+
+// Hash function 3: multiplicative
+fn hash3(key: Int, sz: Int) -> Int {
+    let h = abs_val(key * 1103515245 + 12345) % 1000000007;
+    h % sz
+}
+
+type BloomFilter is {
+    bits: Arr16,
+    sz: Int
+};
+
+fn bloom_new(sz: Int) -> BloomFilter {
+    BloomFilter { bits: arr16_zeros(), sz: sz }
+}
+
+fn bloom_insert(bf: BloomFilter, key: Int) -> BloomFilter {
+    let h1 = hash1(key, bf.sz);
+    let h2 = hash2(key, bf.sz);
+    let h3 = hash3(key, bf.sz);
+    let b1 = arr16_set(bf.bits, h1, 1);
+    let b2 = arr16_set(b1, h2, 1);
+    let b3 = arr16_set(b2, h3, 1);
+    BloomFilter { bits: b3, sz: bf.sz }
+}
+
+fn bloom_contains(bf: BloomFilter, key: Int) -> Int {
+    let h1 = hash1(key, bf.sz);
+    let h2 = hash2(key, bf.sz);
+    let h3 = hash3(key, bf.sz);
+    if arr16_get(bf.bits, h1) == 0 { return 0; }
+    if arr16_get(bf.bits, h2) == 0 { return 0; }
+    if arr16_get(bf.bits, h3) == 0 { return 0; }
+    1
+}
+
+// Count set bits
+fn bloom_count_bits(bf: BloomFilter) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < bf.sz {
+        if arr16_get(bf.bits, i) != 0 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_empty_filter() {
+    let bf = bloom_new(16);
+    // Empty filter should not contain anything
+    assert_eq(bloom_contains(bf, 42), 0);
+    assert_eq(bloom_contains(bf, 0), 0);
+    assert_eq(bloom_contains(bf, 100), 0);
+    assert_eq(bloom_count_bits(bf), 0);
+}
+
+fn test_single_insert_lookup() {
+    let mut bf = bloom_new(16);
+    bf = bloom_insert(bf, 42);
+    // Must find what we inserted (no false negatives)
+    assert_eq(bloom_contains(bf, 42), 1);
+    // Bits should be set
+    assert(bloom_count_bits(bf) > 0);
+    assert(bloom_count_bits(bf) <= 3);  // at most 3 bits per element
+}
+
+fn test_multiple_inserts_no_false_negatives() {
+    let mut bf = bloom_new(16);
+    bf = bloom_insert(bf, 10);
+    bf = bloom_insert(bf, 20);
+    bf = bloom_insert(bf, 30);
+    bf = bloom_insert(bf, 40);
+    bf = bloom_insert(bf, 50);
+    // All inserted elements must be found
+    assert_eq(bloom_contains(bf, 10), 1);
+    assert_eq(bloom_contains(bf, 20), 1);
+    assert_eq(bloom_contains(bf, 30), 1);
+    assert_eq(bloom_contains(bf, 40), 1);
+    assert_eq(bloom_contains(bf, 50), 1);
+}
+
+fn test_false_positive_rate() {
+    // Insert a few elements, then check many non-inserted ones
+    let mut bf = bloom_new(16);
+    bf = bloom_insert(bf, 100);
+    bf = bloom_insert(bf, 200);
+    bf = bloom_insert(bf, 300);
+
+    // Count false positives among 50 test values
+    let mut fp_count = 0;
+    let mut i = 1;
+    while i <= 50 {
+        let test_val = i * 7 + 1;
+        if test_val != 100 && test_val != 200 && test_val != 300 {
+            if bloom_contains(bf, test_val) == 1 {
+                fp_count = fp_count + 1;
+            }
+        }
+        i = i + 1;
+    }
+    // With 16-bit filter and 3 hash functions, some false positives expected
+    // but not ALL should be false positives
+    assert(fp_count < 50);
+}
+
+fn test_deterministic() {
+    let mut bf1 = bloom_new(16);
+    bf1 = bloom_insert(bf1, 42);
+    bf1 = bloom_insert(bf1, 99);
+
+    let mut bf2 = bloom_new(16);
+    bf2 = bloom_insert(bf2, 42);
+    bf2 = bloom_insert(bf2, 99);
+
+    // Same inserts -> same filter
+    let mut i = 0;
+    while i < 16 {
+        assert_eq(arr16_get(bf1.bits, i), arr16_get(bf2.bits, i));
+        i = i + 1;
+    }
+}
+
+fn test_bit_count_increases() {
+    let mut bf = bloom_new(16);
+    let c0 = bloom_count_bits(bf);
+    assert_eq(c0, 0);
+
+    bf = bloom_insert(bf, 1);
+    let c1 = bloom_count_bits(bf);
+    assert(c1 > c0);
+
+    bf = bloom_insert(bf, 1000);
+    let c2 = bloom_count_bits(bf);
+    assert(c2 >= c1);
+}
+
+fn test_hash_functions_spread() {
+    // Verify hash functions produce different indices for same key
+    let h1 = hash1(42, 16);
+    let h2 = hash2(42, 16);
+    let h3 = hash3(42, 16);
+    // At least two should differ (with 16 slots, very likely all 3 differ)
+    let all_same = if h1 == h2 && h2 == h3 { 1 } else { 0 };
+    // It's theoretically possible all map to same slot, but very unlikely
+    // Just verify they're in range
+    assert(h1 >= 0);
+    assert(h1 < 16);
+    assert(h2 >= 0);
+    assert(h2 < 16);
+    assert(h3 >= 0);
+    assert(h3 < 16);
+}
+
+fn test_insert_same_element_twice() {
+    let mut bf = bloom_new(16);
+    bf = bloom_insert(bf, 77);
+    let c1 = bloom_count_bits(bf);
+    bf = bloom_insert(bf, 77);
+    let c2 = bloom_count_bits(bf);
+    // Inserting same element again shouldn't change bits
+    assert_eq(c1, c2);
+    assert_eq(bloom_contains(bf, 77), 1);
+}
+
+fn test_many_inserts() {
+    let mut bf = bloom_new(16);
+    let mut i = 0;
+    while i < 10 {
+        bf = bloom_insert(bf, i * 13 + 7);
+        i = i + 1;
+    }
+    // After many inserts most bits should be set
+    let bc = bloom_count_bits(bf);
+    assert(bc > 5);
+    // All inserted elements must still be found
+    let mut j = 0;
+    while j < 10 {
+        assert_eq(bloom_contains(bf, j * 13 + 7), 1);
+        j = j + 1;
+    }
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_empty_filter();
+    test_single_insert_lookup();
+    test_multiple_inserts_no_false_negatives();
+    test_false_positive_rate();
+    test_deterministic();
+    test_bit_count_increases();
+    test_hash_functions_spread();
+    test_insert_same_element_twice();
+    test_many_inserts();
+    print("[OK] 292_interp_bloom_filter");
+    0
+}

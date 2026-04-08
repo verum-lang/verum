@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, rank2, generics, error
+// @description: Test detection of unclosed generic list in rank-2 function type
+// @expected-error: E041
+
+// Generic list must be closed with >
+type Transform is fn<R(R) -> R;

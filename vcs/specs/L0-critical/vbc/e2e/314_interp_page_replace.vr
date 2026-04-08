@@ -1,0 +1,317 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, system, page-replacement, fifo, lru, optimal
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Page replacement algorithms.
+// FIFO, LRU, and Optimal page replacement on reference strings.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_fill(v: Int) -> Arr8 {
+    Arr8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 } else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 } else { a.e15 }
+}
+
+// Check if page is in frames
+fn page_in_frames(frames: Arr8, num_frames: Int, page: Int) -> Int {
+    let mut i = 0;
+    while i < num_frames {
+        if a8_get(frames, i) == page {
+            return 1;
+        }
+        i = i + 1;
+    }
+    0
+}
+
+// =============================================================================
+// FIFO Page Replacement
+// =============================================================================
+
+fn fifo_replace(ref_string: Arr16, ref_len: Int, num_frames: Int) -> Int {
+    let mut frames = a8_fill(-1);
+    let mut faults = 0;
+    let mut next_victim = 0;  // circular pointer
+
+    let mut t = 0;
+    while t < ref_len {
+        let page = a16_get(ref_string, t);
+        if page_in_frames(frames, num_frames, page) == 0 {
+            // Page fault: replace at next_victim position
+            frames = a8_set(frames, next_victim, page);
+            next_victim = (next_victim + 1) % num_frames;
+            faults = faults + 1;
+        }
+        t = t + 1;
+    }
+    faults
+}
+
+// =============================================================================
+// LRU Page Replacement
+// =============================================================================
+
+fn lru_replace(ref_string: Arr16, ref_len: Int, num_frames: Int) -> Int {
+    let mut frames = a8_fill(-1);
+    let mut last_used = a8_zeros();  // timestamp of last use
+    let mut faults = 0;
+    let mut filled = 0;
+
+    let mut t = 0;
+    while t < ref_len {
+        let page = a16_get(ref_string, t);
+        if page_in_frames(frames, num_frames, page) == 1 {
+            // Hit: update last_used
+            let mut i = 0;
+            while i < num_frames {
+                if a8_get(frames, i) == page {
+                    last_used = a8_set(last_used, i, t);
+                }
+                i = i + 1;
+            }
+        } else {
+            // Page fault
+            faults = faults + 1;
+            if filled < num_frames {
+                // Still have empty frames
+                frames = a8_set(frames, filled, page);
+                last_used = a8_set(last_used, filled, t);
+                filled = filled + 1;
+            } else {
+                // Find LRU frame (smallest last_used)
+                let mut lru_idx = 0;
+                let mut lru_time = a8_get(last_used, 0);
+                let mut i = 1;
+                while i < num_frames {
+                    if a8_get(last_used, i) < lru_time {
+                        lru_time = a8_get(last_used, i);
+                        lru_idx = i;
+                    }
+                    i = i + 1;
+                }
+                frames = a8_set(frames, lru_idx, page);
+                last_used = a8_set(last_used, lru_idx, t);
+            }
+        }
+        t = t + 1;
+    }
+    faults
+}
+
+// =============================================================================
+// Optimal Page Replacement
+// =============================================================================
+
+// Find when page will next be used after position pos
+fn next_use(ref_string: Arr16, ref_len: Int, page: Int, pos: Int) -> Int {
+    let mut i = pos + 1;
+    while i < ref_len {
+        if a16_get(ref_string, i) == page {
+            return i;
+        }
+        i = i + 1;
+    }
+    999999  // never used again
+}
+
+fn optimal_replace(ref_string: Arr16, ref_len: Int, num_frames: Int) -> Int {
+    let mut frames = a8_fill(-1);
+    let mut faults = 0;
+    let mut filled = 0;
+
+    let mut t = 0;
+    while t < ref_len {
+        let page = a16_get(ref_string, t);
+        if page_in_frames(frames, num_frames, page) == 1 {
+            // Hit: nothing to do
+            t = t + 1;
+        } else {
+            // Page fault
+            faults = faults + 1;
+            if filled < num_frames {
+                frames = a8_set(frames, filled, page);
+                filled = filled + 1;
+            } else {
+                // Find frame whose page is used farthest in the future
+                let mut farthest_idx = 0;
+                let mut farthest_use = next_use(ref_string, ref_len, a8_get(frames, 0), t);
+                let mut i = 1;
+                while i < num_frames {
+                    let nu = next_use(ref_string, ref_len, a8_get(frames, i), t);
+                    if nu > farthest_use {
+                        farthest_use = nu;
+                        farthest_idx = i;
+                    }
+                    i = i + 1;
+                }
+                frames = a8_set(frames, farthest_idx, page);
+            }
+            t = t + 1;
+        }
+    }
+    faults
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_fifo_basic() {
+    // Reference string: 1, 2, 3, 4, 1, 2, 5, 1, 2, 3, 4, 5
+    // 3 frames
+    let refs = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4, e4: 1, e5: 2,
+        e6: 5, e7: 1, e8: 2, e9: 3, e10: 4, e11: 5,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let faults = fifo_replace(refs, 12, 3);
+    // Known FIFO result for this string with 3 frames = 9
+    assert_eq(faults, 9);
+}
+
+fn test_lru_basic() {
+    let refs = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4, e4: 1, e5: 2,
+        e6: 5, e7: 1, e8: 2, e9: 3, e10: 4, e11: 5,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let faults = lru_replace(refs, 12, 3);
+    // LRU typically performs better or equal to FIFO
+    assert_eq(faults, 10);
+}
+
+fn test_optimal_basic() {
+    let refs = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4, e4: 1, e5: 2,
+        e6: 5, e7: 1, e8: 2, e9: 3, e10: 4, e11: 5,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let faults = optimal_replace(refs, 12, 3);
+    // Optimal is always <= others
+    assert(faults <= 10);
+}
+
+fn test_no_faults_repeated() {
+    // Access same page repeatedly
+    let refs = Arr16 {
+        e0: 1, e1: 1, e2: 1, e3: 1, e4: 1, e5: 1,
+        e6: 1, e7: 1, e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let faults = fifo_replace(refs, 8, 3);
+    assert_eq(faults, 1);  // only first access is a fault
+}
+
+fn test_all_faults() {
+    // All different pages, 1 frame
+    let refs = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0,
+        e6: 0, e7: 0, e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let faults = fifo_replace(refs, 5, 1);
+    assert_eq(faults, 5);
+}
+
+fn test_enough_frames() {
+    // More frames than unique pages -> no replacement needed
+    let refs = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 1, e4: 2, e5: 3,
+        e6: 1, e7: 2, e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let fifo_f = fifo_replace(refs, 8, 4);
+    let lru_f = lru_replace(refs, 8, 4);
+    let opt_f = optimal_replace(refs, 8, 4);
+    // Only 3 unique pages, 4 frames -> only 3 faults for all
+    assert_eq(fifo_f, 3);
+    assert_eq(lru_f, 3);
+    assert_eq(opt_f, 3);
+}
+
+fn test_optimal_beats_fifo() {
+    // Belady's anomaly reference string
+    let refs = Arr16 {
+        e0: 7, e1: 0, e2: 1, e3: 2, e4: 0, e5: 3,
+        e6: 0, e7: 4, e8: 2, e9: 3, e10: 0, e11: 3,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let fifo_f = fifo_replace(refs, 12, 3);
+    let opt_f = optimal_replace(refs, 12, 3);
+    // Optimal should be <= FIFO
+    assert(opt_f <= fifo_f);
+}
+
+fn test_lru_with_locality() {
+    // Temporal locality: recently used pages are reused
+    let refs = Arr16 {
+        e0: 1, e1: 2, e2: 1, e3: 2, e4: 3, e5: 4,
+        e6: 3, e7: 4, e8: 5, e9: 6, e10: 5, e11: 6,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let faults = lru_replace(refs, 12, 2);
+    // With 2 frames, pairs (1,2) (3,4) (5,6) fit nicely
+    // Faults: 1,2(2 faults), hits on 1,2, then 3,4 (2 faults), hits on 3,4, then 5,6 (2 faults), hits on 5,6
+    assert_eq(faults, 6);
+}
+
+fn main() -> Int {
+    test_fifo_basic();
+    test_lru_basic();
+    test_optimal_basic();
+    test_no_faults_repeated();
+    test_all_faults();
+    test_enough_frames();
+    test_optimal_beats_fifo();
+    test_lru_with_locality();
+    print("[OK] 314_interp_page_replace");
+    0
+}

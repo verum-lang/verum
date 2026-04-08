@@ -1,0 +1,212 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @level: L0
+// @tags: parser, types, context, protocol, dual-kind
+// @description: Comprehensive tests for context protocol definitions
+
+// ============================================================================
+// Basic Context Protocol Definitions
+// Grammar: context_protocol_def = 'context' , 'protocol' , identifier , [ generics ] , protocol_body
+// ============================================================================
+
+context protocol Serializable {
+    fn serialize(&self) -> Text;
+    fn deserialize(data: Text) -> Self;
+}
+
+context protocol Loggable {
+    fn log_level(&self) -> LogLevel;
+    fn format(&self) -> Text;
+}
+
+context protocol Configurable {
+    type Config;
+    fn configure(&mut self, config: Self.Config);
+}
+
+// ============================================================================
+// Context Protocol with Generics
+// ============================================================================
+
+context protocol Transformer<A, B> {
+    fn transform(&self, input: A) -> B;
+}
+
+context protocol Container<T> {
+    fn get(&self) -> T;
+    fn set(&mut self, value: T);
+}
+
+context protocol Processor<I, O, E> {
+    fn process(&self, input: I) -> Result<O, E>;
+}
+
+// ============================================================================
+// Context Protocol with Extension
+// Grammar: protocol_extension = 'extends' , trait_path , { '+' , trait_path }
+// ============================================================================
+
+context protocol AdvancedSerializer extends Serializable {
+    fn serialize_compact(&self) -> Text;
+    fn deserialize_strict(data: Text) -> Result<Self, Error>;
+}
+
+context protocol FullLogger extends Loggable + Configurable {
+    fn log(&self, message: Text);
+    fn flush(&mut self);
+}
+
+context protocol MultiExtend extends ProtocolA + ProtocolB + ProtocolC {
+    fn combined_method(&self);
+}
+
+// ============================================================================
+// Context Protocol with Where Clause
+// ============================================================================
+
+context protocol BoundedContainer<T> where type T: Clone {
+    fn clone_contents(&self) -> List<T>;
+}
+
+context protocol ComparableProcessor<T> where type T: Ord + Eq {
+    fn compare(&self, a: T, b: T) -> Ordering;
+}
+
+// ============================================================================
+// Context Protocol with Associated Types
+// ============================================================================
+
+context protocol Iterator {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+}
+
+context protocol Collection {
+    type Element;
+    type Iter: Iterator<Item = Self.Element>;
+
+    fn iter(&self) -> Self.Iter;
+    fn len(&self) -> Int;
+}
+
+// ============================================================================
+// Context Protocol with Associated Constants
+// ============================================================================
+
+context protocol Bounded {
+    const MIN: Self;
+    const MAX: Self;
+
+    fn clamp(&self) -> Self;
+}
+
+context protocol Versioned {
+    const VERSION: Text;
+    const API_VERSION: Int;
+}
+
+// ============================================================================
+// Alternative Form: context type ... is protocol
+// Grammar: context_type_protocol_def = 'context' , 'type' , identifier , 'is' , 'protocol' , protocol_body , ';'
+// ============================================================================
+
+context type SerializableAlt is protocol {
+    fn serialize(&self) -> Text;
+    fn deserialize(data: Text) -> Self;
+};
+
+context type LoggableAlt is protocol {
+    fn log_level(&self) -> LogLevel;
+};
+
+// With generics
+context type TransformerAlt<A, B> is protocol {
+    fn transform(&self, input: A) -> B;
+};
+
+// With extension
+context type ExtendedAlt is protocol extends Base {
+    fn extended_method(&self);
+};
+
+// ============================================================================
+// Context Protocol with Default Implementations
+// ============================================================================
+
+context protocol WithDefaults {
+    fn required(&self) -> Int;
+
+    fn optional(&self) -> Int {
+        self.required() * 2
+    }
+
+    fn with_default(&self, x: Int) -> Int = x + 1;
+}
+
+// ============================================================================
+// Context Protocol Usage Examples
+// ============================================================================
+
+// As type bound (compile-time, 0ns)
+fn generic_serialize<T: Serializable>(item: T) -> Text {
+    item.serialize()
+}
+
+// As injectable context (runtime, ~5-30ns)
+fn serialize_all() using [Serializable] {
+    // Uses Serializable from context
+}
+
+// Combined usage
+fn combined<T: Serializable>(item: T) using [Logger] {
+    let data = item.serialize();
+    log(f"Serialized: {data}");
+}
+
+// ============================================================================
+// Async Context Protocols
+// ============================================================================
+
+context protocol AsyncProcessor {
+    async fn process(&self, data: Data) -> Result<Output, Error>;
+    async fn batch_process(&self, items: List<Data>) -> List<Result<Output, Error>>;
+}
+
+context protocol StreamHandler {
+    async fn handle(&self, stream: Stream<Byte>) -> ();
+    async fn close(&mut self);
+}
+
+// ============================================================================
+// Context Protocol with Visibility
+// ============================================================================
+
+pub context protocol PublicProtocol {
+    fn public_method(&self);
+}
+
+internal context protocol InternalProtocol {
+    fn internal_method(&self);
+}
+
+// ============================================================================
+// Complex Context Protocol
+// ============================================================================
+
+pub context protocol DatabaseAccess<T> extends Serializable + Cloneable
+    where type T: Entity
+{
+    type Id;
+    type Error;
+
+    const TABLE_NAME: Text;
+
+    async fn find(&self, id: Self.Id) -> Result<Maybe<T>, Self.Error>;
+    async fn save(&mut self, entity: T) -> Result<Self.Id, Self.Error>;
+    async fn delete(&mut self, id: Self.Id) -> Result<(), Self.Error>;
+
+    fn validate(&self, entity: &T) -> Bool {
+        true
+    }
+}

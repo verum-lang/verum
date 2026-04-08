@@ -1,0 +1,258 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, priority-queue, heap, binary-tree, variants
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT min-heap priority queue using leftist tree variant type
+
+// Leftist min-heap: merge-based priority queue
+// HEmpty = empty heap
+// HNode { val, rank, left, right } where rank = length of right spine
+type MinHeap is HEmpty | HNode { val: Int, rank: Int, left: MinHeap, right: MinHeap };
+
+fn heap_rank(h: MinHeap) -> Int {
+    match h {
+        HEmpty => 0,
+        HNode { val: _, rank, left: _, right: _ } => rank,
+    }
+}
+
+// Make a node, ensuring leftist property (left rank >= right rank)
+fn heap_make_node(v: Int, a: MinHeap, b: MinHeap) -> MinHeap {
+    let ra = heap_rank(a);
+    let rb = heap_rank(b);
+    if ra >= rb {
+        HNode { val: v, rank: rb + 1, left: a, right: b }
+    } else {
+        HNode { val: v, rank: ra + 1, left: b, right: a }
+    }
+}
+
+// Merge two min-heaps
+fn heap_merge(h1: MinHeap, h2: MinHeap) -> MinHeap {
+    match h1 {
+        HEmpty => h2,
+        HNode { val: v1, rank: _, left: l1, right: r1 } => {
+            match h2 {
+                HEmpty => h1,
+                HNode { val: v2, rank: _, left: l2, right: r2 } => {
+                    if v1 <= v2 {
+                        heap_make_node(v1, l1, heap_merge(r1, h2))
+                    } else {
+                        heap_make_node(v2, l2, heap_merge(h1, r2))
+                    }
+                },
+            }
+        },
+    }
+}
+
+// Insert a value into the heap
+fn heap_insert(h: MinHeap, v: Int) -> MinHeap {
+    let single = HNode { val: v, rank: 1, left: HEmpty, right: HEmpty };
+    heap_merge(h, single)
+}
+
+// Get the minimum value (top of the heap), -1 if empty
+fn heap_min(h: MinHeap) -> Int {
+    match h {
+        HEmpty => 0 - 1,
+        HNode { val, rank: _, left: _, right: _ } => val,
+    }
+}
+
+// Remove the minimum value
+fn heap_remove_min(h: MinHeap) -> MinHeap {
+    match h {
+        HEmpty => HEmpty,
+        HNode { val: _, rank: _, left, right } => heap_merge(left, right),
+    }
+}
+
+// Check if heap is empty
+fn heap_is_empty(h: MinHeap) -> Bool {
+    h is HEmpty
+}
+
+// Count the number of elements in the heap
+fn heap_size(h: MinHeap) -> Int {
+    match h {
+        HEmpty => 0,
+        HNode { val: _, rank: _, left, right } => 1 + heap_size(left) + heap_size(right),
+    }
+}
+
+// Sum all elements in the heap
+fn heap_sum(h: MinHeap) -> Int {
+    match h {
+        HEmpty => 0,
+        HNode { val, rank: _, left, right } => val + heap_sum(left) + heap_sum(right),
+    }
+}
+
+// Extract sorted sequence by repeatedly removing min; returns sum of first k elements
+fn heap_sum_first_k(h: MinHeap, k: Int) -> Int {
+    let mut total = 0;
+    let mut current = h;
+    let mut i = 0;
+    while i < k && !heap_is_empty(current) {
+        total = total + heap_min(current);
+        current = heap_remove_min(current);
+        i = i + 1;
+    }
+    total
+}
+
+// Count how many elements are <= threshold
+fn heap_count_le(h: MinHeap, threshold: Int) -> Int {
+    match h {
+        HEmpty => 0,
+        HNode { val, rank: _, left, right } => {
+            let this_count = if val <= threshold { 1 } else { 0 };
+            this_count + heap_count_le(left, threshold) + heap_count_le(right, threshold)
+        },
+    }
+}
+
+fn main() -> Int {
+    // === Empty heap ===
+    let empty = HEmpty;
+    assert(heap_is_empty(empty));
+    assert_eq(heap_size(empty), 0);
+    assert_eq(heap_min(empty), 0 - 1);
+
+    // === Single insert ===
+    let h1 = heap_insert(empty, 42);
+    assert(!heap_is_empty(h1));
+    assert_eq(heap_size(h1), 1);
+    assert_eq(heap_min(h1), 42);
+
+    // === Insert multiple, verify min ===
+    let h2 = heap_insert(h1, 10);
+    assert_eq(heap_min(h2), 10);
+    assert_eq(heap_size(h2), 2);
+
+    let h3 = heap_insert(h2, 30);
+    assert_eq(heap_min(h3), 10);
+    assert_eq(heap_size(h3), 3);
+
+    let h4 = heap_insert(h3, 5);
+    assert_eq(heap_min(h4), 5);
+    assert_eq(heap_size(h4), 4);
+
+    // === Sum of all elements ===
+    // 42 + 10 + 30 + 5 = 87
+    assert_eq(heap_sum(h4), 87);
+
+    // === Remove min and verify ===
+    let after_rm1 = heap_remove_min(h4);
+    assert_eq(heap_min(after_rm1), 10);  // 5 removed, next min is 10
+    assert_eq(heap_size(after_rm1), 3);
+
+    let after_rm2 = heap_remove_min(after_rm1);
+    assert_eq(heap_min(after_rm2), 30);  // 10 removed, next min is 30
+    assert_eq(heap_size(after_rm2), 2);
+
+    let after_rm3 = heap_remove_min(after_rm2);
+    assert_eq(heap_min(after_rm3), 42);  // 30 removed, next min is 42
+    assert_eq(heap_size(after_rm3), 1);
+
+    let after_rm4 = heap_remove_min(after_rm3);
+    assert(heap_is_empty(after_rm4));
+
+    // === Build heap from sequence and extract sorted ===
+    let mut h = HEmpty;
+    h = heap_insert(h, 15);
+    h = heap_insert(h, 3);
+    h = heap_insert(h, 22);
+    h = heap_insert(h, 1);
+    h = heap_insert(h, 8);
+    h = heap_insert(h, 17);
+    h = heap_insert(h, 6);
+
+    assert_eq(heap_size(h), 7);
+    assert_eq(heap_min(h), 1);
+    // sum = 15+3+22+1+8+17+6 = 72
+    assert_eq(heap_sum(h), 72);
+
+    // Extract in sorted order
+    assert_eq(heap_min(h), 1);
+    h = heap_remove_min(h);
+    assert_eq(heap_min(h), 3);
+    h = heap_remove_min(h);
+    assert_eq(heap_min(h), 6);
+    h = heap_remove_min(h);
+    assert_eq(heap_min(h), 8);
+    h = heap_remove_min(h);
+    assert_eq(heap_min(h), 15);
+    h = heap_remove_min(h);
+    assert_eq(heap_min(h), 17);
+    h = heap_remove_min(h);
+    assert_eq(heap_min(h), 22);
+    h = heap_remove_min(h);
+    assert(heap_is_empty(h));
+
+    // === Merge two heaps ===
+    let mut ha = HEmpty;
+    ha = heap_insert(ha, 2);
+    ha = heap_insert(ha, 7);
+    ha = heap_insert(ha, 12);
+
+    let mut hb = HEmpty;
+    hb = heap_insert(hb, 1);
+    hb = heap_insert(hb, 9);
+    hb = heap_insert(hb, 4);
+
+    let merged = heap_merge(ha, hb);
+    assert_eq(heap_size(merged), 6);
+    assert_eq(heap_min(merged), 1);
+    assert_eq(heap_sum(merged), 35);  // 2+7+12+1+9+4
+
+    // Extract sorted from merged
+    let mut m = merged;
+    assert_eq(heap_min(m), 1);
+    m = heap_remove_min(m);
+    assert_eq(heap_min(m), 2);
+    m = heap_remove_min(m);
+    assert_eq(heap_min(m), 4);
+    m = heap_remove_min(m);
+    assert_eq(heap_min(m), 7);
+
+    // === Sum of first k elements ===
+    let mut hk = HEmpty;
+    hk = heap_insert(hk, 50);
+    hk = heap_insert(hk, 10);
+    hk = heap_insert(hk, 30);
+    hk = heap_insert(hk, 20);
+    hk = heap_insert(hk, 40);
+
+    // First 1: 10
+    assert_eq(heap_sum_first_k(hk, 1), 10);
+    // First 2: 10 + 20 = 30
+    assert_eq(heap_sum_first_k(hk, 2), 30);
+    // First 3: 10 + 20 + 30 = 60
+    assert_eq(heap_sum_first_k(hk, 3), 60);
+    // All 5: 10+20+30+40+50 = 150
+    assert_eq(heap_sum_first_k(hk, 5), 150);
+
+    // === Count elements <= threshold ===
+    assert_eq(heap_count_le(hk, 5), 0);
+    assert_eq(heap_count_le(hk, 10), 1);
+    assert_eq(heap_count_le(hk, 25), 2);
+    assert_eq(heap_count_le(hk, 50), 5);
+
+    // === Duplicate values ===
+    let mut hd = HEmpty;
+    hd = heap_insert(hd, 5);
+    hd = heap_insert(hd, 5);
+    hd = heap_insert(hd, 5);
+    assert_eq(heap_size(hd), 3);
+    assert_eq(heap_min(hd), 5);
+    assert_eq(heap_sum(hd), 15);
+    hd = heap_remove_min(hd);
+    assert_eq(heap_min(hd), 5);
+    assert_eq(heap_size(hd), 2);
+
+    0
+}

@@ -1,0 +1,255 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, higher-order, second-derivative, hessian
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Higher-order derivatives
+// f(x) = x^3 => f'(x) = 3x^2 => f''(x) = 6x => f'''(x) = 6
+// Uses numerical and analytical methods.
+// Integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn sdiv(a: Int, b: Int) -> Int {
+    (a * scale()) / b
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Functions and their analytical derivatives
+// =============================================================================
+
+// f(x) = x^3
+fn f_cube(x: Int) -> Int { smul(smul(x, x), x) }
+fn f_cube_d1(x: Int) -> Int { 3 * smul(x, x) }         // 3x^2
+fn f_cube_d2(x: Int) -> Int { 6 * x }                    // 6x
+fn f_cube_d3(x: Int) -> Int { 6 * scale() }              // 6
+
+// g(x) = x^4
+fn f_quartic(x: Int) -> Int { smul(smul(x, x), smul(x, x)) }
+fn f_quartic_d1(x: Int) -> Int { 4 * smul(smul(x, x), x) }   // 4x^3
+fn f_quartic_d2(x: Int) -> Int { 12 * smul(x, x) }            // 12x^2
+fn f_quartic_d3(x: Int) -> Int { 24 * x }                      // 24x
+fn f_quartic_d4(x: Int) -> Int { 24 * scale() }                // 24
+
+// h(x) = x^2 + 3x + 7
+fn f_quad(x: Int) -> Int { smul(x, x) + 3 * x + 7 * scale() }
+fn f_quad_d1(x: Int) -> Int { 2 * x + 3 * scale() }
+fn f_quad_d2(x: Int) -> Int { 2 * scale() }  // constant
+
+// =============================================================================
+// Numerical second derivative
+// f''(x) ≈ (f(x+h) - 2*f(x) + f(x-h)) / h^2
+// =============================================================================
+
+fn num_second_deriv_cube(x: Int, h: Int) -> Int {
+    let fph = f_cube(x + h);
+    let fx = f_cube(x);
+    let fmh = f_cube(x - h);
+    let numer = fph - 2 * fx + fmh;
+    // f'' = numer * SCALE^2 / (h*h)
+    (numer * scale() * scale()) / (h * h)
+}
+
+fn num_second_deriv_quartic(x: Int, h: Int) -> Int {
+    let fph = f_quartic(x + h);
+    let fx = f_quartic(x);
+    let fmh = f_quartic(x - h);
+    let numer = fph - 2 * fx + fmh;
+    (numer * scale() * scale()) / (h * h)
+}
+
+// =============================================================================
+// Numerical third derivative: compute second derivative of f'(x) = 3x^2
+// f'''(x) ≈ (f'(x+h) - 2*f'(x) + f'(x-h)) / h^2
+// Using the analytical first derivative avoids triple precision loss
+// =============================================================================
+
+fn num_third_deriv_cube(x: Int, h: Int) -> Int {
+    // Use analytical first derivative f'(x) = 3x^2
+    let fp_xph = f_cube_d1(x + h);
+    let fp_x = f_cube_d1(x);
+    let fp_xmh = f_cube_d1(x - h);
+    let numer = fp_xph - 2 * fp_x + fp_xmh;
+    (numer * scale() * scale()) / (h * h)
+}
+
+// =============================================================================
+// Dual number approach for second derivative (nested duals)
+// =============================================================================
+
+// Dual number: val + eps * deriv
+type Dual is { val: Int, deriv: Int };
+
+fn dual_var(x: Int) -> Dual { Dual { val: x, deriv: scale() } }
+fn dual_const(c: Int) -> Dual { Dual { val: c, deriv: 0 } }
+
+fn dual_add(a: Dual, b: Dual) -> Dual {
+    Dual { val: a.val + b.val, deriv: a.deriv + b.deriv }
+}
+
+fn dual_mul(a: Dual, b: Dual) -> Dual {
+    Dual {
+        val: smul(a.val, b.val),
+        deriv: smul(a.deriv, b.val) + smul(a.val, b.deriv)
+    }
+}
+
+fn dual_sub(a: Dual, b: Dual) -> Dual {
+    Dual { val: a.val - b.val, deriv: a.deriv - b.deriv }
+}
+
+// Evaluate f(x) = x^3 using dual numbers
+fn eval_cube_dual(x: Dual) -> Dual {
+    dual_mul(dual_mul(x, x), x)
+}
+
+// Evaluate f(x) = x^4 using dual numbers
+fn eval_quartic_dual(x: Dual) -> Dual {
+    let x2 = dual_mul(x, x);
+    dual_mul(x2, x2)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_cube_first_deriv() {
+    // f'(2) = 3*4 = 12
+    let x = 2 * scale();
+    assert_eq(f_cube_d1(x), 12 * scale());
+
+    // Via dual numbers
+    let d = eval_cube_dual(dual_var(x));
+    assert_eq(d.deriv, 12 * scale());
+}
+
+fn test_cube_second_deriv_analytical() {
+    // f''(x) = 6x
+    // f''(2) = 12
+    assert_eq(f_cube_d2(2 * scale()), 12 * scale());
+    assert_eq(f_cube_d2(3 * scale()), 18 * scale());
+    assert_eq(f_cube_d2(0), 0);
+    assert_eq(f_cube_d2(-1 * scale()), -6 * scale());
+}
+
+fn test_cube_second_deriv_numerical() {
+    let x = 2 * scale();
+    let h = 100; // step = 0.1 (needs to be large enough for integer precision)
+
+    let num_d2 = num_second_deriv_cube(x, h);
+    let ana_d2 = f_cube_d2(x); // 12000
+    assert_eq(within_tol(num_d2, ana_d2, 200), 1);
+}
+
+fn test_cube_third_deriv() {
+    // f'''(x) = 6 for all x
+    assert_eq(f_cube_d3(0), 6 * scale());
+    assert_eq(f_cube_d3(100 * scale()), 6 * scale());
+    assert_eq(f_cube_d3(-50 * scale()), 6 * scale());
+}
+
+fn test_cube_third_deriv_numerical() {
+    let x = 2 * scale();
+    let h = 100; // larger step for stability with integer arithmetic
+
+    let num_d3 = num_third_deriv_cube(x, h);
+    assert_eq(within_tol(num_d3, 6 * scale(), 500), 1);
+}
+
+fn test_quartic_derivatives() {
+    let x = 2 * scale();
+
+    // f(x)=x^4: f(2)=16, f'(2)=32, f''(2)=48, f'''(2)=48, f''''(2)=24
+    assert_eq(f_quartic(x), 16 * scale());
+    assert_eq(f_quartic_d1(x), 32 * scale());
+    assert_eq(f_quartic_d2(x), 48 * scale());
+    assert_eq(f_quartic_d3(x), 48 * scale());
+    assert_eq(f_quartic_d4(x), 24 * scale());
+}
+
+fn test_quartic_second_deriv_numerical() {
+    let x = 1 * scale();
+    let h = 100; // step = 0.1
+
+    let num = num_second_deriv_quartic(x, h);
+    let ana = f_quartic_d2(x); // 12*1 = 12000
+    assert_eq(within_tol(num, ana, 500), 1);
+}
+
+fn test_quadratic_second_deriv() {
+    // f(x) = x^2+3x+7, f''(x) = 2 (constant)
+    assert_eq(f_quad_d2(0), 2 * scale());
+    assert_eq(f_quad_d2(100 * scale()), 2 * scale());
+}
+
+fn test_dual_first_deriv_at_points() {
+    // Test first derivative via dual numbers at multiple points
+    // f(x) = x^3, f'(x) = 3x^2
+    let d0 = eval_cube_dual(dual_var(0));
+    assert_eq(d0.deriv, 0);
+
+    let d1 = eval_cube_dual(dual_var(scale()));
+    assert_eq(d1.deriv, 3 * scale());
+
+    let d2 = eval_cube_dual(dual_var(3 * scale()));
+    assert_eq(d2.deriv, 27 * scale());
+
+    let d3 = eval_cube_dual(dual_var(-2 * scale()));
+    assert_eq(d3.deriv, 12 * scale());
+}
+
+fn test_second_deriv_via_nested_numerical() {
+    // Second derivative of f(x)=x^3 at x=2 via nested numerical diff
+    // Use the analytical first derivative to compute second derivative numerically
+    // This avoids double precision loss from nested numerical differentiation
+    let x = 2 * scale();
+    let h = 100; // step = 0.1
+
+    // f'(x+h), f'(x), f'(x-h) using analytical first derivative f'(x)=3x^2
+    let fp_xph = f_cube_d1(x + h);  // 3*(2.1)^2 = 3*4.41 = 13.23 => 13230
+    let fp_xmh = f_cube_d1(x - h);  // 3*(1.9)^2 = 3*3.61 = 10.83 => 10830
+
+    // f''(x) ≈ (f'(x+h) - f'(x-h)) / 2h
+    let d2 = sdiv(fp_xph - fp_xmh, 2 * h);
+    // Expected: f''(2) = 6*2 = 12 => 12000
+    assert_eq(within_tol(d2, 12 * scale(), 200), 1);
+}
+
+fn test_inflection_point() {
+    // f(x)=x^3 has inflection at x=0 where f''(0)=0
+    assert_eq(f_cube_d2(0), 0);
+
+    // f''(x) < 0 for x < 0, f''(x) > 0 for x > 0
+    assert(f_cube_d2(-1 * scale()) < 0);
+    assert(f_cube_d2(scale()) > 0);
+}
+
+fn main() -> Int {
+    test_cube_first_deriv();
+    test_cube_second_deriv_analytical();
+    test_cube_second_deriv_numerical();
+    test_cube_third_deriv();
+    test_cube_third_deriv_numerical();
+    test_quartic_derivatives();
+    test_quartic_second_deriv_numerical();
+    test_quadratic_second_deriv();
+    test_dual_first_deriv_at_points();
+    test_second_deriv_via_nested_numerical();
+    test_inflection_point();
+    print("[OK] 386_interp_autodiff_higher_order");
+    0
+}

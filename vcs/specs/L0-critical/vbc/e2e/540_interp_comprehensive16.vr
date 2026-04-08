@@ -1,0 +1,420 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, binary_insertion_sort, quickselect, modular_exponentiation, lcs, priority_queue, euler_totient
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #16: combines algorithms from tests 531-539 in a pipeline.
+// Pipeline:
+//   1. Binary insertion sort (531) - sort an input array
+//   2. Quickselect (535)          - find median of the sorted data
+//   3. Euler totient (534)        - compute phi values of the sorted elements
+//   4. Modular exponentiation (537) - verify Fermat's little theorem on totient values
+//   5. LCS (538)                  - find LCS between original and sorted arrays
+//   6. Priority queue (539)       - process phi values via min-heap, extract in order
+
+// ============================================================
+// Binary insertion sort (from 531)
+// ============================================================
+
+fn bisect_left_16(a: [Int; 16], len: Int, val: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = len;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if a[mid] < val { lo = mid + 1; } else { hi = mid; }
+    }
+    lo
+}
+
+fn binary_insertion_sort_16(a: [Int; 16], n: Int) {
+    let mut i = 1;
+    while i < n {
+        let key = a[i];
+        let pos = bisect_left_16(a, i, key);
+        let mut j = i;
+        while j > pos {
+            a[j] = a[j - 1];
+            j = j - 1;
+        }
+        a[pos] = key;
+        i = i + 1;
+    }
+}
+
+fn is_sorted_16(a: [Int; 16], n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if a[i] < a[i - 1] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_binsort_pipeline() {
+    let mut a = [7, 3, 9, 1, 5, 8, 2, 6, 4, 10, 0, 0, 0, 0, 0, 0];
+    binary_insertion_sort_16(a, 10);
+    assert_eq(is_sorted_16(a, 10), 1);
+    assert_eq(a[0], 1);
+    assert_eq(a[9], 10);
+    assert_eq(a[4], 5);
+    print("binsort_pipeline: ok");
+}
+
+// ============================================================
+// Quickselect (from 535)
+// ============================================================
+
+fn partition_16(a: [Int; 16], lo: Int, hi: Int) -> Int {
+    let pivot = a[hi];
+    let mut i = lo - 1;
+    let mut j = lo;
+    while j < hi {
+        if a[j] <= pivot {
+            i = i + 1;
+            let tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+        }
+        j = j + 1;
+    }
+    let tmp = a[i + 1]; a[i + 1] = a[hi]; a[hi] = tmp;
+    i + 1
+}
+
+@allow(unbounded_recursion)
+fn quickselect_16(a: [Int; 16], lo: Int, hi: Int, k: Int) -> Int {
+    if lo == hi { return a[lo]; }
+    let p = partition_16(a, lo, hi);
+    if k == p { return a[p]; }
+    else if k < p { return quickselect_16(a, lo, p - 1, k); }
+    else { return quickselect_16(a, p + 1, hi, k); }
+}
+
+fn test_quickselect_pipeline() {
+    // Sort [8,1,6,3,9,2,7,4,5,10] then find median.
+    let mut sorted = [8, 1, 6, 3, 9, 2, 7, 4, 5, 10, 0, 0, 0, 0, 0, 0];
+    binary_insertion_sort_16(sorted, 10);
+    // Sorted: [1,2,3,4,5,6,7,8,9,10], median index 4 = 5.
+    assert_eq(sorted[4], 5);
+
+    // Quickselect on a fresh copy gives the same answer.
+    let mut b = [8, 1, 6, 3, 9, 2, 7, 4, 5, 10, 0, 0, 0, 0, 0, 0];
+    let med = quickselect_16(b, 0, 9, 4);
+    assert_eq(med, 5);
+
+    // k=0 (minimum) and k=9 (maximum).
+    let mut c = [8, 1, 6, 3, 9, 2, 7, 4, 5, 10, 0, 0, 0, 0, 0, 0];
+    assert_eq(quickselect_16(c, 0, 9, 0), 1);
+    let mut d = [8, 1, 6, 3, 9, 2, 7, 4, 5, 10, 0, 0, 0, 0, 0, 0];
+    assert_eq(quickselect_16(d, 0, 9, 9), 10);
+
+    print("quickselect_pipeline: ok");
+}
+
+// ============================================================
+// Euler totient (from 534)
+// ============================================================
+
+fn phi_product(n: Int) -> Int {
+    let mut result = n;
+    let mut p = 2;
+    let mut m = n;
+    while p * p <= m {
+        if m % p == 0 {
+            while m % p == 0 { m = m / p; }
+            result = result / p * (p - 1);
+        }
+        p = p + 1;
+    }
+    if m > 1 { result = result / m * (m - 1); }
+    result
+}
+
+fn test_totient_pipeline() {
+    // phi values of [2,3,4,5,6,7,8,9] should sum to known total.
+    // phi: 1,2,2,4,2,6,4,6 -> sum = 27
+    let mut vals = [2, 3, 4, 5, 6, 7, 8, 9, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut phis = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 8 {
+        phis[i] = phi_product(vals[i]);
+        i = i + 1;
+    }
+    assert_eq(phis[0], 1);  // phi(2)=1
+    assert_eq(phis[1], 2);  // phi(3)=2
+    assert_eq(phis[3], 4);  // phi(5)=4
+    assert_eq(phis[5], 6);  // phi(7)=6
+    let sum = phis[0]+phis[1]+phis[2]+phis[3]+phis[4]+phis[5]+phis[6]+phis[7];
+    assert_eq(sum, 27);
+    print("totient_pipeline: ok");
+}
+
+// ============================================================
+// Modular exponentiation (from 537)
+// ============================================================
+
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    if m == 1 { return 0; }
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b) % m; }
+        b = (b * b) % m;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_modpow_pipeline() {
+    // Verify Fermat's little theorem using phi values as exponents.
+    // For prime p and base a: a^phi(p) = a^(p-1) ≡ 1 (mod p).
+    let primes = [5, 7, 11, 13, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 4 {
+        let p = primes[i];
+        let ph = phi_product(p);  // = p-1 for prime
+        // a^ph ≡ 1 (mod p) for a=2,3,4.
+        assert_eq(mod_pow(2, ph, p), 1);
+        assert_eq(mod_pow(3, ph, p), 1);
+        i = i + 1;
+    }
+    // Use median (5) as base: 5^phi(7) = 5^6 mod 7 = 1.
+    assert_eq(mod_pow(5, phi_product(7), 7), 1);
+    print("modpow_pipeline: ok");
+}
+
+// ============================================================
+// LCS (from 538)
+// ============================================================
+
+fn dp_get_9(dp: [Int; 81], i: Int, j: Int) -> Int { dp[i * 9 + j] }
+fn dp_set_9(dp: [Int; 81], i: Int, j: Int, val: Int) { dp[i * 9 + j] = val; }
+
+fn lcs_len_8(a: [Int; 8], m: Int, b: [Int; 8], n: Int) -> Int {
+    let mut dp = [0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 1;
+    while i <= m {
+        let mut j = 1;
+        while j <= n {
+            if a[i - 1] == b[j - 1] {
+                dp_set_9(dp, i, j, dp_get_9(dp, i - 1, j - 1) + 1);
+            } else {
+                let up   = dp_get_9(dp, i - 1, j);
+                let left = dp_get_9(dp, i, j - 1);
+                if up >= left { dp_set_9(dp, i, j, up); }
+                else          { dp_set_9(dp, i, j, left); }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    dp_get_9(dp, m, n)
+}
+
+fn test_lcs_pipeline() {
+    // Original: [3,1,4,1,5,9,2,6]. Sorted: [1,1,2,3,4,5,6,9].
+    // LCS = [1,1,2] or better: [1,1,5,9] no... [1,4,5,9] no...
+    // LCS([3,1,4,1,5,9,2,6],[1,1,2,3,4,5,6,9]):
+    //   Common subsequences include [1,4,5,6]=4, [1,1,2,6]=4. Length 4.
+    let mut orig = [3, 1, 4, 1, 5, 9, 2, 6];
+    let mut srtd = [1, 1, 2, 3, 4, 5, 6, 9];
+    let l = lcs_len_8(orig, 8, srtd, 8);
+    assert(l >= 4);
+    assert(l <= 8);
+
+    // Identical arrays: LCS = length.
+    let mut a = [1, 2, 3, 4, 5, 6, 7, 8];
+    let mut b = [1, 2, 3, 4, 5, 6, 7, 8];
+    assert_eq(lcs_len_8(a, 8, b, 8), 8);
+
+    // Reverse vs sorted: [1,2,3,4] vs [4,3,2,1] -> LCS length 1.
+    let mut c = [1, 2, 3, 4, 0, 0, 0, 0];
+    let mut d = [4, 3, 2, 1, 0, 0, 0, 0];
+    assert_eq(lcs_len_8(c, 4, d, 4), 1);
+
+    print("lcs_pipeline: ok");
+}
+
+// ============================================================
+// Priority queue min-heap (from 539)
+// ============================================================
+
+fn pq_swap(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], i: Int, j: Int) {
+    let tk = keys[i]; keys[i] = keys[j]; keys[j] = tk;
+    let tv = vals[i]; vals[i] = vals[j]; vals[j] = tv;
+    pos[vals[i]] = i;
+    pos[vals[j]] = j;
+}
+
+fn pq_sift_up(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], i: Int) {
+    let mut cur = i;
+    while cur > 0 {
+        let par = (cur - 1) / 2;
+        if keys[cur] < keys[par] {
+            pq_swap(keys, vals, pos, cur, par);
+            cur = par;
+        } else { return; }
+    }
+}
+
+fn pq_sift_down(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], sz: Int, i: Int) {
+    let mut cur = i;
+    while 2 * cur + 1 < sz {
+        let lc = 2 * cur + 1;
+        let rc = 2 * cur + 2;
+        let mut sm = cur;
+        if keys[lc] < keys[sm] { sm = lc; }
+        if rc < sz && keys[rc] < keys[sm] { sm = rc; }
+        if sm == cur { return; }
+        pq_swap(keys, vals, pos, cur, sm);
+        cur = sm;
+    }
+}
+
+fn pq_insert(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], sz: [Int; 1],
+             key: Int, val: Int) {
+    let i = sz[0];
+    keys[i] = key; vals[i] = val; pos[val] = i;
+    sz[0] = sz[0] + 1;
+    pq_sift_up(keys, vals, pos, i);
+}
+
+fn pq_extract_min(keys: [Int; 16], vals: [Int; 16], pos: [Int; 16], sz: [Int; 1],
+                  out: [Int; 1]) -> Int {
+    let mk = keys[0];
+    out[0] = vals[0];
+    sz[0] = sz[0] - 1;
+    let last = sz[0];
+    keys[0] = keys[last]; vals[0] = vals[last]; pos[vals[0]] = 0;
+    pq_sift_down(keys, vals, pos, sz[0], 0);
+    mk
+}
+
+fn pq_is_heap(keys: [Int; 16], sz: Int) -> Int {
+    let mut i = 0;
+    while i < sz {
+        let lc = 2 * i + 1;
+        let rc = 2 * i + 2;
+        if lc < sz && keys[i] > keys[lc] { return 0; }
+        if rc < sz && keys[i] > keys[rc] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_pq_pipeline() {
+    // Insert phi values of [2,3,4,5,6,7] = [1,2,2,4,2,6] as keys.
+    // Use val=i as unique IDs.
+    let mut keys = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut vals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sz   = [0];
+    let mut ov   = [0];
+
+    let mut ns = [2, 3, 4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 6 {
+        pq_insert(keys, vals, pos, sz, phi_product(ns[i]), i);
+        i = i + 1;
+    }
+    assert_eq(sz[0], 6);
+    assert_eq(pq_is_heap(keys, sz[0]), 1);
+
+    // Extract all in order: phi values should come out non-decreasing.
+    let mut prev = -1;
+    let mut j = 0;
+    while j < 6 {
+        let k = pq_extract_min(keys, vals, pos, sz, ov);
+        assert(k >= prev);
+        prev = k;
+        j = j + 1;
+    }
+    // First extracted = min phi = 1 (from phi(2)).
+    // prev at end = max phi = 6 (from phi(7)).
+    assert_eq(prev, 6);
+    print("pq_pipeline: ok");
+}
+
+// ============================================================
+// Combined cross-algorithm pipeline
+// ============================================================
+
+fn test_combined_pipeline() {
+    // Step 1: sort [11,5,13,7,3] with binary insertion sort.
+    let mut arr = [11, 5, 13, 7, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    binary_insertion_sort_16(arr, 5);
+    // Sorted: [3,5,7,11,13]
+    assert_eq(arr[0], 3);
+    assert_eq(arr[4], 13);
+
+    // Step 2: quickselect finds median (index 2) = 7.
+    let mut arr2 = [11, 5, 13, 7, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let med = quickselect_16(arr2, 0, 4, 2);
+    assert_eq(med, 7);
+
+    // Step 3: compute phi of each sorted element.
+    // phi(3)=2, phi(5)=4, phi(7)=6, phi(11)=10, phi(13)=12.
+    assert_eq(phi_product(3), 2);
+    assert_eq(phi_product(5), 4);
+    assert_eq(phi_product(7), 6);
+    assert_eq(phi_product(11), 10);
+    assert_eq(phi_product(13), 12);
+
+    // Step 4: verify Fermat's little theorem for each prime with its phi.
+    // a^phi(p) ≡ 1 (mod p) for a=2.
+    assert_eq(mod_pow(2, phi_product(3), 3), 1);
+    assert_eq(mod_pow(2, phi_product(5), 5), 1);
+    assert_eq(mod_pow(2, phi_product(7), 7), 1);
+    assert_eq(mod_pow(2, phi_product(11), 11), 1);
+    assert_eq(mod_pow(2, phi_product(13), 13), 1);
+
+    // Step 5: LCS between original [11,5,13,7,3] and sorted [3,5,7,11,13].
+    // LCS is length 1 (only one element can be in order). Actually
+    // [5,13] is a common subsequence of length 2 since 5 before 13 in both.
+    // Also [5,7] length 2; best is [5,13] or [5,7] = 2.
+    let mut orig5 = [11, 5, 13, 7, 3, 0, 0, 0];
+    let mut srt5  = [3,  5,  7, 11, 13, 0, 0, 0];
+    let l = lcs_len_8(orig5, 5, srt5, 5);
+    assert(l >= 2);
+
+    // Step 6: insert phi values into priority queue and extract min.
+    let mut keys = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut vls  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ps   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sz   = [0];
+    let mut ov   = [0];
+    // phi values: 2,4,6,10,12 for primes 3,5,7,11,13.
+    pq_insert(keys, vls, ps, sz, 2,  0);
+    pq_insert(keys, vls, ps, sz, 4,  1);
+    pq_insert(keys, vls, ps, sz, 6,  2);
+    pq_insert(keys, vls, ps, sz, 10, 3);
+    pq_insert(keys, vls, ps, sz, 12, 4);
+    let first = pq_extract_min(keys, vls, ps, sz, ov);
+    assert_eq(first, 2);   // min phi = phi(3) = 2
+    assert_eq(ov[0], 0);   // value ID 0 corresponds to prime 3
+
+    let msg = f"combined: median={med} lcs_len={l} min_phi={first}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_binsort_pipeline();
+    test_quickselect_pipeline();
+    test_totient_pipeline();
+    test_modpow_pipeline();
+    test_lcs_pipeline();
+    test_pq_pipeline();
+    test_combined_pipeline();
+    print("[OK] 540_interp_comprehensive16");
+    0
+}

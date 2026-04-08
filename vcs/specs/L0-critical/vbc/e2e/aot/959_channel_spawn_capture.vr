@@ -1,0 +1,97 @@
+// @test: run
+// @level: L0
+// @description: Channel captured in spawn closure — send from thread, recv on main
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Channel captured directly in spawn, send from thread
+    let ch = Channel.new(10);
+
+    let h = spawn {
+        ch.send(42);
+        ch.send(99);
+        0
+    };
+
+    h.await;
+
+    let mut sum = 0;
+    match ch.recv() {
+        Some(v) => { sum = sum + v; }
+        None => {}
+    }
+    match ch.recv() {
+        Some(v) => { sum = sum + v; }
+        None => {}
+    }
+
+    if (sum != 141) {
+        print(f"FAIL test1: expected 141, got {sum}");
+        return 1;
+    }
+    print(f"Test 1 PASS: spawn send, main recv = {sum}");
+
+    // Test 2: Multiple values sent from spawn
+    let ch2 = Channel.new(20);
+
+    let h2 = spawn {
+        let mut i = 1;
+        while (i <= 10) {
+            ch2.send(i);
+            i = i + 1;
+        }
+        0
+    };
+
+    h2.await;
+
+    let mut total = 0;
+    let mut count = 0;
+    while (count < 10) {
+        match ch2.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        }
+        count = count + 1;
+    }
+
+    // 1+2+...+10 = 55
+    if (total != 55) {
+        print(f"FAIL test2: expected 55, got {total}");
+        return 1;
+    }
+    print(f"Test 2 PASS: 10 values from spawn = {total}");
+
+    // Test 3: Main sends, spawn recvs and returns sum
+    let ch3 = Channel.new(5);
+    ch3.send(10);
+    ch3.send(20);
+    ch3.send(30);
+
+    let h3 = spawn {
+        let mut s = 0;
+        match ch3.recv() {
+            Some(v) => { s = s + v; }
+            None => {}
+        }
+        match ch3.recv() {
+            Some(v) => { s = s + v; }
+            None => {}
+        }
+        match ch3.recv() {
+            Some(v) => { s = s + v; }
+            None => {}
+        }
+        s
+    };
+
+    let result = h3.await;
+    if (result != 60) {
+        print(f"FAIL test3: expected 60, got {result}");
+        return 1;
+    }
+    print(f"Test 3 PASS: main send, spawn recv = {result}");
+
+    print("All channel spawn capture tests passed");
+    0
+}

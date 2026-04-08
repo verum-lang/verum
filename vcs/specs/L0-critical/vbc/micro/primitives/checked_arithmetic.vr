@@ -1,0 +1,58 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: primitive type methods not yet implemented in standard library - FIXED
+// @tier: 0
+// @expected-exit: 0
+// @description: Test checked arithmetic methods for numeric types
+
+fn main() {
+    // Test Int checked_add (success)
+    let a: Int = 100;
+    let b: Int = 200;
+    match a.checked_add(b) {
+        Some(result) => assert_eq(result, 300),
+        None => panic("Expected Some"),
+    }
+
+    // Test Int checked_sub (success)
+    match b.checked_sub(a) {
+        Some(result) => assert_eq(result, 100),
+        None => panic("Expected Some"),
+    }
+
+    // Test Int checked_mul (success)
+    match a.checked_mul(b) {
+        Some(result) => assert_eq(result, 20000),
+        None => panic("Expected Some"),
+    }
+
+    // Test Int checked_div (success)
+    match b.checked_div(a) {
+        Some(result) => assert_eq(result, 2),
+        None => panic("Expected Some"),
+    }
+
+    // Test Int checked_div (division by zero)
+    let zero: Int = 0;
+    match a.checked_div(zero) {
+        Some(_) => panic("Expected None"),
+        None => (), // Expected
+    }
+
+    // Test wrapping_add
+    assert_eq(a.wrapping_add(b), 300);
+
+    // Test saturating_add
+    assert_eq(a.saturating_add(b), 300);
+
+    // Test saturating_sub (no underflow for large positive number)
+    assert_eq(a.saturating_sub(50), 50);
+
+    // Test Byte saturating_add (at max)
+    let max_byte: Byte = 255;
+    assert_eq(max_byte.saturating_add(10), 255);  // Saturates at 255
+
+    // Test Byte wrapping_add
+    assert_eq(max_byte.wrapping_add(1), 0);  // Wraps to 0
+    assert_eq(max_byte.wrapping_add(2), 1);  // Wraps to 1
+}

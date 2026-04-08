@@ -1,0 +1,314 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, digital-circuit, logic-gates, adder
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT digital circuit simulation - logic gates, half adder, full adder, 4-bit ripple carry adder
+
+// All signals are Int: 0 or 1
+
+fn gate_and(a: Int, b: Int) -> Int { a & b }
+fn gate_or(a: Int, b: Int) -> Int { a | b }
+fn gate_not(a: Int) -> Int { if a == 0 { 1 } else { 0 } }
+fn gate_xor(a: Int, b: Int) -> Int { a ^ b }
+fn gate_nand(a: Int, b: Int) -> Int { gate_not(gate_and(a, b)) }
+fn gate_nor(a: Int, b: Int) -> Int { gate_not(gate_or(a, b)) }
+fn gate_xnor(a: Int, b: Int) -> Int { gate_not(gate_xor(a, b)) }
+
+// 2-to-1 MUX: if sel=0, output=a; if sel=1, output=b
+fn mux2(a: Int, b: Int, sel: Int) -> Int {
+    gate_or(gate_and(a, gate_not(sel)), gate_and(b, sel))
+}
+
+// 1-to-2 DEMUX: routes input to one of two outputs based on sel
+// Returns (out0, out1) packed as out0 * 2 + out1
+fn demux2(input: Int, sel: Int) -> Int {
+    let out0 = gate_and(input, gate_not(sel));
+    let out1 = gate_and(input, sel);
+    out0 * 2 + out1
+}
+
+// Half adder: sum = a XOR b, carry = a AND b
+// Returns sum * 2 + carry
+fn half_adder(a: Int, b: Int) -> Int {
+    let sum = gate_xor(a, b);
+    let carry = gate_and(a, b);
+    sum * 2 + carry
+}
+
+// Full adder: sum = a XOR b XOR cin, cout = (a AND b) OR (cin AND (a XOR b))
+// Returns sum * 2 + cout
+fn full_adder(a: Int, b: Int, cin: Int) -> Int {
+    let p = gate_xor(a, b);
+    let sum = gate_xor(p, cin);
+    let cout = gate_or(gate_and(a, b), gate_and(cin, p));
+    sum * 2 + cout
+}
+
+// Extract sum from adder result
+fn adder_sum(result: Int) -> Int { result / 2 }
+// Extract carry from adder result
+fn adder_carry(result: Int) -> Int { result % 2 }
+
+// 4-bit ripple carry adder
+// a and b are 4-bit numbers (0-15), cin is carry in
+// Returns: {sum (4-bit), cout}
+// Packed as: sum * 2 + cout
+fn ripple_add4(a: Int, b: Int, cin: Int) -> Int {
+    // Extract individual bits
+    let a0 = a & 1;
+    let a1 = (a >> 1) & 1;
+    let a2 = (a >> 2) & 1;
+    let a3 = (a >> 3) & 1;
+
+    let b0 = b & 1;
+    let b1 = (b >> 1) & 1;
+    let b2 = (b >> 2) & 1;
+    let b3 = (b >> 3) & 1;
+
+    // Chain full adders
+    let r0 = full_adder(a0, b0, cin);
+    let s0 = adder_sum(r0);
+    let c0 = adder_carry(r0);
+
+    let r1 = full_adder(a1, b1, c0);
+    let s1 = adder_sum(r1);
+    let c1 = adder_carry(r1);
+
+    let r2 = full_adder(a2, b2, c1);
+    let s2 = adder_sum(r2);
+    let c2 = adder_carry(r2);
+
+    let r3 = full_adder(a3, b3, c2);
+    let s3 = adder_sum(r3);
+    let c3 = adder_carry(r3);
+
+    let sum = s0 + s1 * 2 + s2 * 4 + s3 * 8;
+    sum * 2 + c3
+}
+
+// 4-bit subtractor using complement: a - b = a + ~b + 1
+fn ripple_sub4(a: Int, b: Int) -> Int {
+    let not_b = 15 - b;  // bitwise complement for 4 bits: ~b = 15 - b
+    ripple_add4(a, not_b, 1)
+}
+
+// SR Latch (NOR-based)
+// State: q (current Q output)
+// Returns new Q
+fn sr_latch(s: Int, r: Int, q: Int) -> Int {
+    // Q_next = S OR (NOT R AND Q_prev)
+    // Simple behavioral model
+    if s == 1 && r == 0 { 1 }
+    else if s == 0 && r == 1 { 0 }
+    else if s == 0 && r == 0 { q }
+    else { q }  // Both high: undefined, keep current
+}
+
+// D Flip-flop (edge-triggered behavioral model)
+// Returns new Q = D when clock = 1
+fn d_flipflop(d: Int, clk: Int, q: Int) -> Int {
+    if clk == 1 { d } else { q }
+}
+
+// 4-bit shift register: shift left, input new bit at LSB
+fn shift_reg4(reg: Int, new_bit: Int) -> Int {
+    ((reg << 1) & 15) | (new_bit & 1)
+}
+
+fn main() -> Int {
+    // === AND truth table ===
+    assert_eq(gate_and(0, 0), 0);
+    assert_eq(gate_and(0, 1), 0);
+    assert_eq(gate_and(1, 0), 0);
+    assert_eq(gate_and(1, 1), 1);
+
+    // === OR truth table ===
+    assert_eq(gate_or(0, 0), 0);
+    assert_eq(gate_or(0, 1), 1);
+    assert_eq(gate_or(1, 0), 1);
+    assert_eq(gate_or(1, 1), 1);
+
+    // === NOT truth table ===
+    assert_eq(gate_not(0), 1);
+    assert_eq(gate_not(1), 0);
+
+    // === XOR truth table ===
+    assert_eq(gate_xor(0, 0), 0);
+    assert_eq(gate_xor(0, 1), 1);
+    assert_eq(gate_xor(1, 0), 1);
+    assert_eq(gate_xor(1, 1), 0);
+
+    // === NAND truth table ===
+    assert_eq(gate_nand(0, 0), 1);
+    assert_eq(gate_nand(0, 1), 1);
+    assert_eq(gate_nand(1, 0), 1);
+    assert_eq(gate_nand(1, 1), 0);
+
+    // === NOR truth table ===
+    assert_eq(gate_nor(0, 0), 1);
+    assert_eq(gate_nor(0, 1), 0);
+    assert_eq(gate_nor(1, 0), 0);
+    assert_eq(gate_nor(1, 1), 0);
+
+    // === XNOR truth table ===
+    assert_eq(gate_xnor(0, 0), 1);
+    assert_eq(gate_xnor(0, 1), 0);
+    assert_eq(gate_xnor(1, 0), 0);
+    assert_eq(gate_xnor(1, 1), 1);
+
+    // === MUX ===
+    assert_eq(mux2(0, 0, 0), 0);
+    assert_eq(mux2(0, 0, 1), 0);
+    assert_eq(mux2(1, 0, 0), 1);  // sel=0, pass a=1
+    assert_eq(mux2(1, 0, 1), 0);  // sel=1, pass b=0
+    assert_eq(mux2(0, 1, 0), 0);  // sel=0, pass a=0
+    assert_eq(mux2(0, 1, 1), 1);  // sel=1, pass b=1
+    assert_eq(mux2(1, 1, 0), 1);
+    assert_eq(mux2(1, 1, 1), 1);
+
+    // === DEMUX ===
+    // demux2(input, sel) returns out0*2 + out1
+    assert_eq(demux2(0, 0), 0);   // out0=0, out1=0
+    assert_eq(demux2(0, 1), 0);   // out0=0, out1=0
+    assert_eq(demux2(1, 0), 2);   // out0=1, out1=0 -> 1*2+0=2
+    assert_eq(demux2(1, 1), 1);   // out0=0, out1=1 -> 0*2+1=1
+
+    // === Half adder ===
+    let ha00 = half_adder(0, 0);
+    assert_eq(adder_sum(ha00), 0);
+    assert_eq(adder_carry(ha00), 0);
+
+    let ha01 = half_adder(0, 1);
+    assert_eq(adder_sum(ha01), 1);
+    assert_eq(adder_carry(ha01), 0);
+
+    let ha10 = half_adder(1, 0);
+    assert_eq(adder_sum(ha10), 1);
+    assert_eq(adder_carry(ha10), 0);
+
+    let ha11 = half_adder(1, 1);
+    assert_eq(adder_sum(ha11), 0);
+    assert_eq(adder_carry(ha11), 1);
+
+    // === Full adder ===
+    let fa000 = full_adder(0, 0, 0);
+    assert_eq(adder_sum(fa000), 0);
+    assert_eq(adder_carry(fa000), 0);
+
+    let fa001 = full_adder(0, 0, 1);
+    assert_eq(adder_sum(fa001), 1);
+    assert_eq(adder_carry(fa001), 0);
+
+    let fa011 = full_adder(0, 1, 1);
+    assert_eq(adder_sum(fa011), 0);
+    assert_eq(adder_carry(fa011), 1);
+
+    let fa111 = full_adder(1, 1, 1);
+    assert_eq(adder_sum(fa111), 1);
+    assert_eq(adder_carry(fa111), 1);
+
+    let fa101 = full_adder(1, 0, 1);
+    assert_eq(adder_sum(fa101), 0);
+    assert_eq(adder_carry(fa101), 1);
+
+    // === 4-bit ripple carry adder ===
+    // 5 + 3 = 8
+    let r1 = ripple_add4(5, 3, 0);
+    assert_eq(adder_sum(r1), 8);
+    assert_eq(adder_carry(r1), 0);
+
+    // 7 + 7 = 14
+    let r2 = ripple_add4(7, 7, 0);
+    assert_eq(adder_sum(r2), 14);
+    assert_eq(adder_carry(r2), 0);
+
+    // 15 + 1 = 16 -> overflow: sum=0, carry=1
+    let r3 = ripple_add4(15, 1, 0);
+    assert_eq(adder_sum(r3), 0);
+    assert_eq(adder_carry(r3), 1);
+
+    // 15 + 15 = 30 -> sum=14, carry=1 (14+16=30)
+    let r4 = ripple_add4(15, 15, 0);
+    assert_eq(adder_sum(r4), 14);
+    assert_eq(adder_carry(r4), 1);
+
+    // 0 + 0 = 0
+    let r5 = ripple_add4(0, 0, 0);
+    assert_eq(adder_sum(r5), 0);
+    assert_eq(adder_carry(r5), 0);
+
+    // With carry in: 5 + 3 + 1 = 9
+    let r6 = ripple_add4(5, 3, 1);
+    assert_eq(adder_sum(r6), 9);
+    assert_eq(adder_carry(r6), 0);
+
+    // Exhaustive test for small values
+    let mut a = 0;
+    while a < 8 {
+        let mut b = 0;
+        while b < 8 {
+            let r = ripple_add4(a, b, 0);
+            let expected_sum = (a + b) & 15;
+            let expected_carry = if a + b > 15 { 1 } else { 0 };
+            assert_eq(adder_sum(r), expected_sum);
+            assert_eq(adder_carry(r), expected_carry);
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+
+    // === 4-bit subtractor ===
+    // 7 - 3 = 4
+    let s1 = ripple_sub4(7, 3);
+    assert_eq(adder_sum(s1), 4);
+    assert_eq(adder_carry(s1), 1);  // carry=1 means no borrow
+
+    // 5 - 5 = 0
+    let s2 = ripple_sub4(5, 5);
+    assert_eq(adder_sum(s2), 0);
+    assert_eq(adder_carry(s2), 1);
+
+    // 10 - 3 = 7
+    let s3 = ripple_sub4(10, 3);
+    assert_eq(adder_sum(s3), 7);
+    assert_eq(adder_carry(s3), 1);
+
+    // === SR Latch ===
+    let mut q = 0;
+    q = sr_latch(1, 0, q);  // Set
+    assert_eq(q, 1);
+    q = sr_latch(0, 0, q);  // Hold
+    assert_eq(q, 1);
+    q = sr_latch(0, 1, q);  // Reset
+    assert_eq(q, 0);
+    q = sr_latch(0, 0, q);  // Hold
+    assert_eq(q, 0);
+
+    // === D Flip-flop ===
+    let mut dq = 0;
+    dq = d_flipflop(1, 0, dq);  // No clock -> hold
+    assert_eq(dq, 0);
+    dq = d_flipflop(1, 1, dq);  // Clock -> capture D=1
+    assert_eq(dq, 1);
+    dq = d_flipflop(0, 0, dq);  // No clock -> hold
+    assert_eq(dq, 1);
+    dq = d_flipflop(0, 1, dq);  // Clock -> capture D=0
+    assert_eq(dq, 0);
+
+    // === 4-bit shift register ===
+    let mut reg = 0;
+    reg = shift_reg4(reg, 1);  // 0001
+    assert_eq(reg, 1);
+    reg = shift_reg4(reg, 0);  // 0010
+    assert_eq(reg, 2);
+    reg = shift_reg4(reg, 1);  // 0101
+    assert_eq(reg, 5);
+    reg = shift_reg4(reg, 1);  // 1011
+    assert_eq(reg, 11);
+    reg = shift_reg4(reg, 0);  // 0110 (MSB shifted out)
+    assert_eq(reg, 6);
+
+    0
+}

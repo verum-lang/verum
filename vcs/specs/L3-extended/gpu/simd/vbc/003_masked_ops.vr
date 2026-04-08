@@ -1,0 +1,127 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, simd, masked
+// @timeout: 50000
+// @expected-exit: 0
+// @description: SIMD masked operations — mask creation, select, compare, bitwise
+
+type SimdVec4 is { x0: Float, x1: Float, x2: Float, x3: Float };
+type SimdMask4 is { m0: Bool, m1: Bool, m2: Bool, m3: Bool };
+
+fn splat4(v: Float) -> SimdVec4 {
+    SimdVec4 { x0: v, x1: v, x2: v, x3: v }
+}
+
+fn mask_all() -> SimdMask4 {
+    SimdMask4 { m0: true, m1: true, m2: true, m3: true }
+}
+
+fn mask_none() -> SimdMask4 {
+    SimdMask4 { m0: false, m1: false, m2: false, m3: false }
+}
+
+fn mask_any(m: SimdMask4) -> Bool {
+    m.m0 || m.m1 || m.m2 || m.m3
+}
+
+fn simd_select(mask: SimdMask4, a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    SimdVec4 {
+        x0: if mask.m0 { a.x0 } else { b.x0 },
+        x1: if mask.m1 { a.x1 } else { b.x1 },
+        x2: if mask.m2 { a.x2 } else { b.x2 },
+        x3: if mask.m3 { a.x3 } else { b.x3 },
+    }
+}
+
+fn cmp_eq(a: SimdVec4, b: SimdVec4) -> SimdMask4 {
+    SimdMask4 {
+        m0: a.x0 == b.x0, m1: a.x1 == b.x1,
+        m2: a.x2 == b.x2, m3: a.x3 == b.x3,
+    }
+}
+
+fn cmp_lt(a: SimdVec4, b: SimdVec4) -> SimdMask4 {
+    SimdMask4 {
+        m0: a.x0 < b.x0, m1: a.x1 < b.x1,
+        m2: a.x2 < b.x2, m3: a.x3 < b.x3,
+    }
+}
+
+// Bitwise ops simulated with Int lanes
+type SimdVec4i is { x0: Int, x1: Int, x2: Int, x3: Int };
+
+fn splat4i(v: Int) -> SimdVec4i {
+    SimdVec4i { x0: v, x1: v, x2: v, x3: v }
+}
+
+fn bitwise_and(a: SimdVec4i, b: SimdVec4i) -> SimdVec4i {
+    SimdVec4i { x0: a.x0 & b.x0, x1: a.x1 & b.x1, x2: a.x2 & b.x2, x3: a.x3 & b.x3 }
+}
+
+fn bitwise_or(a: SimdVec4i, b: SimdVec4i) -> SimdVec4i {
+    SimdVec4i { x0: a.x0 | b.x0, x1: a.x1 | b.x1, x2: a.x2 | b.x2, x3: a.x3 | b.x3 }
+}
+
+@test
+fn test_simd_mask_all() {
+    let m = mask_all();
+    assert(mask_any(m));
+}
+
+@test
+fn test_simd_mask_none() {
+    let m = mask_none();
+    assert(!mask_any(m));
+}
+
+@test
+fn test_simd_select() {
+    let a = splat4(1.0);
+    let b = splat4(2.0);
+    let m = mask_all();
+    let result = simd_select(m, a, b);
+    assert(result.x0 == 1.0);
+}
+
+@test
+fn test_simd_compare_eq() {
+    let a = splat4(3.0);
+    let b = splat4(3.0);
+    let eq = cmp_eq(a, b);
+    assert(mask_any(eq));
+}
+
+@test
+fn test_simd_compare_lt() {
+    let a = splat4(1.0);
+    let b = splat4(2.0);
+    let lt = cmp_lt(a, b);
+    assert(mask_any(lt));
+}
+
+@test
+fn test_simd_bitwise_and() {
+    let a = splat4i(255);
+    let b = splat4i(15);
+    let result = bitwise_and(a, b);
+    assert(result.x0 == 15);
+}
+
+@test
+fn test_simd_bitwise_or() {
+    let a = splat4i(240);
+    let b = splat4i(15);
+    let result = bitwise_or(a, b);
+    assert(result.x0 == 255);
+}
+
+fn main() {
+    test_simd_mask_all();
+    test_simd_mask_none();
+    test_simd_select();
+    test_simd_compare_eq();
+    test_simd_compare_lt();
+    test_simd_bitwise_and();
+    test_simd_bitwise_or();
+}

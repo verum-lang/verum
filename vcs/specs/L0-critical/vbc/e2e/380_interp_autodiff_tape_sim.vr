@@ -1,0 +1,309 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, tape, reverse-mode
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Simulated gradient tape (reverse-mode AD)
+// Records operations on a tape during forward pass, then walks backward
+// to compute gradients. Uses integer-scaled arithmetic (scale=1000).
+// Tape operations: ADD=1, MUL=2, CONST=0
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Fixed-size tape of 16 entries
+// =============================================================================
+
+// Tape entry: op (0=const, 1=add, 2=mul), arg1 idx, arg2 idx, value
+type Arr16 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int,
+                e8: Int, e9: Int, e10: Int, e11: Int, e12: Int, e13: Int, e14: Int, e15: Int };
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn a16_zeros() -> Arr16 {
+    Arr16 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+            e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 }
+}
+
+// Tape stores 4 parallel arrays: ops, arg1s, arg2s, values
+type Tape is {
+    ops: Arr16,     // operation type per entry
+    arg1s: Arr16,   // first argument index
+    arg2s: Arr16,   // second argument index
+    vals: Arr16,    // computed value at this node
+    sz: Int         // number of entries
+};
+
+fn tape_new() -> Tape {
+    Tape { ops: a16_zeros(), arg1s: a16_zeros(), arg2s: a16_zeros(), vals: a16_zeros(), sz: 0 }
+}
+
+// Push a constant onto the tape, return its index
+fn tape_const(t: Tape, val: Int) -> Tape {
+    let idx = t.sz;
+    Tape {
+        ops: a16_set(t.ops, idx, 0),
+        arg1s: a16_set(t.arg1s, idx, -1),
+        arg2s: a16_set(t.arg2s, idx, -1),
+        vals: a16_set(t.vals, idx, val),
+        sz: t.sz + 1
+    }
+}
+
+// Push an ADD node: value = val[a1] + val[a2]
+fn tape_add(t: Tape, a1: Int, a2: Int) -> Tape {
+    let idx = t.sz;
+    let v = a16_get(t.vals, a1) + a16_get(t.vals, a2);
+    Tape {
+        ops: a16_set(t.ops, idx, 1),
+        arg1s: a16_set(t.arg1s, idx, a1),
+        arg2s: a16_set(t.arg2s, idx, a2),
+        vals: a16_set(t.vals, idx, v),
+        sz: t.sz + 1
+    }
+}
+
+// Push a MUL node: value = val[a1] * val[a2] (scaled)
+fn tape_mul(t: Tape, a1: Int, a2: Int) -> Tape {
+    let idx = t.sz;
+    let v = smul(a16_get(t.vals, a1), a16_get(t.vals, a2));
+    Tape {
+        ops: a16_set(t.ops, idx, 2),
+        arg1s: a16_set(t.arg1s, idx, a1),
+        arg2s: a16_set(t.arg2s, idx, a2),
+        vals: a16_set(t.vals, idx, v),
+        sz: t.sz + 1
+    }
+}
+
+fn tape_last_idx(t: Tape) -> Int { t.sz - 1 }
+fn tape_val(t: Tape, idx: Int) -> Int { a16_get(t.vals, idx) }
+
+// =============================================================================
+// Backward pass: compute gradients
+// =============================================================================
+
+// grads[i] = adjoint for node i
+// Start: grads[output] = 1.0 (scaled)
+// For ADD(a1, a2): grads[a1] += grads[i], grads[a2] += grads[i]
+// For MUL(a1, a2): grads[a1] += grads[i] * val[a2], grads[a2] += grads[i] * val[a1]
+fn backward(t: Tape) -> Arr16 {
+    let mut grads = a16_zeros();
+    // Seed the output
+    grads = a16_set(grads, t.sz - 1, scale());
+
+    // Walk tape in reverse
+    let mut i = t.sz - 1;
+    while i >= 0 {
+        let op = a16_get(t.ops, i);
+        let a1 = a16_get(t.arg1s, i);
+        let a2 = a16_get(t.arg2s, i);
+        let gi = a16_get(grads, i);
+
+        if op == 1 {
+            // ADD: propagate adjoint to both args
+            if a1 >= 0 {
+                grads = a16_set(grads, a1, a16_get(grads, a1) + gi);
+            }
+            if a2 >= 0 {
+                grads = a16_set(grads, a2, a16_get(grads, a2) + gi);
+            }
+        } else if op == 2 {
+            // MUL: grads[a1] += gi * val[a2], grads[a2] += gi * val[a1]
+            if a1 >= 0 {
+                let v2 = a16_get(t.vals, a2);
+                grads = a16_set(grads, a1, a16_get(grads, a1) + smul(gi, v2));
+            }
+            if a2 >= 0 {
+                let v1 = a16_get(t.vals, a1);
+                grads = a16_set(grads, a2, a16_get(grads, a2) + smul(gi, v1));
+            }
+        }
+        // CONST: no propagation needed
+
+        if i == 0 { i = -1; } else { i = i - 1; }
+    }
+    grads
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_simple_add() {
+    // f(x,y) = x + y, df/dx = 1, df/dy = 1
+    let mut t = tape_new();
+    t = tape_const(t, 3 * scale());  // idx 0: x=3
+    t = tape_const(t, 5 * scale());  // idx 1: y=5
+    t = tape_add(t, 0, 1);           // idx 2: x+y=8
+
+    assert_eq(tape_val(t, 2), 8 * scale());
+
+    let grads = backward(t);
+    assert_eq(a16_get(grads, 0), scale()); // df/dx = 1
+    assert_eq(a16_get(grads, 1), scale()); // df/dy = 1
+}
+
+fn test_simple_mul() {
+    // f(x,y) = x * y, df/dx = y, df/dy = x
+    let mut t = tape_new();
+    t = tape_const(t, 3 * scale());  // idx 0: x=3
+    t = tape_const(t, 5 * scale());  // idx 1: y=5
+    t = tape_mul(t, 0, 1);           // idx 2: x*y=15
+
+    assert_eq(tape_val(t, 2), 15 * scale());
+
+    let grads = backward(t);
+    assert_eq(a16_get(grads, 0), 5 * scale()); // df/dx = y = 5
+    assert_eq(a16_get(grads, 1), 3 * scale()); // df/dy = x = 3
+}
+
+fn test_x_plus_2_times_x_plus_3() {
+    // f(x) = (x+2)*(x+3)
+    // f'(x) = (x+3) + (x+2) = 2x+5
+    // At x=1: f(1)=3*4=12, f'(1)=7
+    let mut t = tape_new();
+    t = tape_const(t, 1 * scale());  // idx 0: x=1
+    t = tape_const(t, 2 * scale());  // idx 1: const 2
+    t = tape_const(t, 3 * scale());  // idx 2: const 3
+    t = tape_add(t, 0, 1);           // idx 3: x+2 = 3
+    t = tape_add(t, 0, 2);           // idx 4: x+3 = 4
+    t = tape_mul(t, 3, 4);           // idx 5: (x+2)*(x+3) = 12
+
+    assert_eq(tape_val(t, 5), 12 * scale());
+
+    let grads = backward(t);
+    // df/dx flows through both paths:
+    // Through idx 3 (x+2): adjoint of x from mul = val[4] = 4000
+    // Through idx 4 (x+3): adjoint of x from mul = val[3] = 3000
+    // Total: 7000
+    assert_eq(a16_get(grads, 0), 7 * scale()); // f'(1) = 2*1+5 = 7
+}
+
+fn test_x_squared() {
+    // f(x) = x * x = x^2, f'(x) = 2x
+    // At x=4: f(4)=16, f'(4)=8
+    let mut t = tape_new();
+    t = tape_const(t, 4 * scale());  // idx 0: x=4
+    t = tape_mul(t, 0, 0);           // idx 1: x*x = 16
+
+    assert_eq(tape_val(t, 1), 16 * scale());
+
+    let grads = backward(t);
+    // MUL(0,0): grads[0] += gi*val[0] + gi*val[0] = 2*gi*x
+    // gi = 1000, val[0] = 4000
+    // grads[0] = 1000*4000/1000 + 1000*4000/1000 = 4000+4000 = 8000
+    assert_eq(a16_get(grads, 0), 8 * scale()); // f'(4) = 2*4 = 8
+}
+
+fn test_multi_op_chain() {
+    // f(x) = x * x + x  (= x^2 + x)
+    // f'(x) = 2x + 1
+    // At x=3: f(3)=12, f'(3)=7
+    let mut t = tape_new();
+    t = tape_const(t, 3 * scale());  // idx 0: x=3
+    t = tape_mul(t, 0, 0);           // idx 1: x*x = 9
+    t = tape_add(t, 1, 0);           // idx 2: x*x + x = 12
+
+    assert_eq(tape_val(t, 2), 12 * scale());
+
+    let grads = backward(t);
+    // From ADD(1,0): grads[1] += 1000, grads[0] += 1000
+    // From MUL(0,0): grads[0] += 1000*3000/1000 + 1000*3000/1000 = 3000+3000 = 6000
+    // Total grads[0] = 1000 + 6000 = 7000
+    assert_eq(a16_get(grads, 0), 7 * scale()); // f'(3) = 2*3+1 = 7
+}
+
+fn test_longer_expression() {
+    // f(x,y) = (x+y) * x
+    // df/dx = (x+y) + x = 2x+y
+    // df/dy = x
+    // At x=2, y=3: f=5*2=10, df/dx=7, df/dy=2
+    let mut t = tape_new();
+    t = tape_const(t, 2 * scale());  // idx 0: x=2
+    t = tape_const(t, 3 * scale());  // idx 1: y=3
+    t = tape_add(t, 0, 1);           // idx 2: x+y=5
+    t = tape_mul(t, 2, 0);           // idx 3: (x+y)*x=10
+
+    assert_eq(tape_val(t, 3), 10 * scale());
+
+    let grads = backward(t);
+    // MUL(2,0): grads[2] += gi*val[0]=1000*2000/1000=2000, grads[0] += gi*val[2]=1000*5000/1000=5000
+    // ADD(0,1): grads[0] += grads[2]=2000, grads[1] += grads[2]=2000
+    // Total grads[0] = 5000+2000 = 7000, grads[1] = 2000
+    assert_eq(a16_get(grads, 0), 7 * scale()); // df/dx = 2*2+3 = 7
+    assert_eq(a16_get(grads, 1), 2 * scale()); // df/dy = 2
+}
+
+fn test_constants_have_zero_gradient() {
+    // f(x) = x * 5, f'(x) = 5
+    let mut t = tape_new();
+    t = tape_const(t, 3 * scale());  // idx 0: x=3
+    t = tape_const(t, 5 * scale());  // idx 1: const 5
+    t = tape_mul(t, 0, 1);           // idx 2: x*5=15
+
+    let grads = backward(t);
+    assert_eq(a16_get(grads, 0), 5 * scale()); // df/dx = 5
+    // Constant gradient = 3 (partial w.r.t. "5" is x=3), but we don't care about it
+}
+
+fn test_tape_forward_values() {
+    // Verify forward pass values
+    let mut t = tape_new();
+    t = tape_const(t, 2 * scale());
+    t = tape_const(t, 3 * scale());
+    t = tape_add(t, 0, 1);
+    t = tape_mul(t, 0, 2);
+
+    assert_eq(tape_val(t, 0), 2 * scale());
+    assert_eq(tape_val(t, 1), 3 * scale());
+    assert_eq(tape_val(t, 2), 5 * scale());
+    assert_eq(tape_val(t, 3), 10 * scale());
+}
+
+fn main() -> Int {
+    test_simple_add();
+    test_simple_mul();
+    test_x_plus_2_times_x_plus_3();
+    test_x_squared();
+    test_multi_op_chain();
+    test_longer_expression();
+    test_constants_have_zero_gradient();
+    test_tape_forward_values();
+    print("[OK] 380_interp_autodiff_tape_sim");
+    0
+}

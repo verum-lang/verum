@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, protocol, bound
+// @expected-error: E400
+
+/// Test for type errors when protocol requirements are not met.
+/// Type mismatches occur when passing incompatible types.
+
+type Displayable is protocol {
+    fn display(&self) -> Text;
+};
+
+type MyType is { value: Int };
+
+// MyType does NOT implement Displayable
+
+fn show<T: Displayable>(item: T) -> Text {
+    item.display()
+}
+
+fn takes_text(t: Text) -> Text { t }
+
+fn main() {
+    let m = MyType { value: 42 };
+    // E400: Type mismatch - passing MyType where Text expected
+    let result = takes_text(m);
+}

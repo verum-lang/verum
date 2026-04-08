@@ -1,0 +1,248 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, compile-time, type-level
+// @description: Compile-time computation using meta functions and const generics
+
+/// Compile-time computation позволяет выполнять вычисления
+/// во время компиляции для типобезопасности и оптимизации.
+/// Тест использует только базовые возможности языка без stdlib.
+
+// ============================================================
+// БАЗОВЫЕ META ВЫЧИСЛЕНИЯ
+// ============================================================
+
+// Факториал во время компиляции
+@allow(unbounded_recursion)
+meta fn factorial(n: UInt64) -> UInt64 {
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+// Числа Фибоначчи
+@allow(unbounded_recursion)
+meta fn fibonacci(n: UInt64) -> UInt64 {
+    if n <= 1 { n }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+// Степень двойки
+meta fn power_of_two(n: UInt64) -> UInt64 {
+    if n == 0 { 1 }
+    else { 2 * power_of_two(n - 1) }
+}
+
+// Compile-time вычисленные константы
+const FACT_5: UInt64 = factorial(5);      // 120
+const FACT_10: UInt64 = factorial(10);    // 3628800
+const FIB_10: UInt64 = fibonacci(10);     // 55
+const POW2_8: UInt64 = power_of_two(8);   // 256
+
+// ============================================================
+// CONST GENERICS ДЛЯ РАЗМЕРНОСТЕЙ
+// ============================================================
+
+// Фиксированный массив с compile-time размером
+type FixedArray<const N: Int> is {
+    data: [Int; N],
+};
+
+// Создание экземпляров с разными размерами
+const SMALL: FixedArray<4> = FixedArray { data: [1, 2, 3, 4] };
+const MEDIUM: FixedArray<8> = FixedArray { data: [0, 1, 2, 3, 4, 5, 6, 7] };
+
+// ============================================================
+// ВЫЧИСЛЕНИЕ РАЗМЕРОВ ВО ВРЕМЯ КОМПИЛЯЦИИ
+// ============================================================
+
+// Функция для вычисления размера буфера
+meta fn compute_buffer_size(elements: Int, element_size: Int, header_size: Int) -> Int {
+    header_size + (elements * element_size)
+}
+
+// Функция для выравнивания до степени 2
+meta fn align_to_power_of_two(n: Int) -> Int {
+    let mut v = n - 1;
+    v = v | (v >> 1);
+    v = v | (v >> 2);
+    v = v | (v >> 4);
+    v = v | (v >> 8);
+    v = v | (v >> 16);
+    v + 1
+}
+
+const BUFFER_SIZE: Int = compute_buffer_size(100, 8, 16);  // 816
+const ALIGNED_SIZE: Int = align_to_power_of_two(1000);     // 1024
+
+// Типы с вычисленными размерами
+type AlignedBuffer is {
+    data: [UInt8; ALIGNED_SIZE],
+};
+
+// ============================================================
+// МАТЕМАТИЧЕСКИЕ ОПЕРАЦИИ
+// ============================================================
+
+// НОД (GCD)
+@allow(unbounded_recursion)
+meta fn gcd(a: UInt64, b: UInt64) -> UInt64 {
+    if b == 0 { a }
+    else { gcd(b, a % b) }
+}
+
+// НОК (LCM)
+meta fn lcm(a: UInt64, b: UInt64) -> UInt64 {
+    (a / gcd(a, b)) * b
+}
+
+// Проверка на простоту
+meta fn is_prime(n: UInt64) -> Bool {
+    if n < 2 { return false; }
+    if n == 2 { return true; }
+    if n % 2 == 0 { return false; }
+
+    let mut i: UInt64 = 3;
+    while i * i <= n {
+        if n % i == 0 { return false; }
+        i = i + 2;
+    }
+    true
+}
+
+const GCD_48_18: UInt64 = gcd(48, 18);    // 6
+const LCM_12_18: UInt64 = lcm(12, 18);    // 36
+const IS_17_PRIME: Bool = is_prime(17);    // true
+const IS_18_PRIME: Bool = is_prime(18);    // false
+
+// ============================================================
+// БИТОВЫЕ ОПЕРАЦИИ
+// ============================================================
+
+meta fn count_bits(n: UInt64) -> UInt64 {
+    let mut count: UInt64 = 0;
+    let mut x = n;
+    while x > 0 {
+        count = count + (x & 1);
+        x = x >> 1;
+    }
+    count
+}
+
+meta fn is_power_of_two(n: UInt64) -> Bool {
+    n > 0 && (n & (n - 1)) == 0
+}
+
+meta fn next_power_of_two(n: UInt64) -> UInt64 {
+    if is_power_of_two(n) { n }
+    else {
+        let mut v = n;
+        v = v | (v >> 1);
+        v = v | (v >> 2);
+        v = v | (v >> 4);
+        v = v | (v >> 8);
+        v = v | (v >> 16);
+        v = v | (v >> 32);
+        v + 1
+    }
+}
+
+const BITS_255: UInt64 = count_bits(255);           // 8
+const IS_POW2_16: Bool = is_power_of_two(16);       // true
+const IS_POW2_17: Bool = is_power_of_two(17);       // false
+const NEXT_POW2: UInt64 = next_power_of_two(1000);  // 1024
+
+// ============================================================
+// COMPILE-TIME МАССИВЫ
+// ============================================================
+
+meta fn generate_squares() -> [UInt64; 8] {
+    [0, 1, 4, 9, 16, 25, 36, 49]
+}
+
+meta fn generate_powers_of_two() -> [UInt64; 8] {
+    [1, 2, 4, 8, 16, 32, 64, 128]
+}
+
+const SQUARES: [UInt64; 8] = generate_squares();
+const POWERS: [UInt64; 8] = generate_powers_of_two();
+
+// ============================================================
+// УСЛОВНАЯ ЛОГИКА
+// ============================================================
+
+meta fn max3(a: UInt64, b: UInt64, c: UInt64) -> UInt64 {
+    if a >= b && a >= c { a }
+    else if b >= c { b }
+    else { c }
+}
+
+meta fn min3(a: UInt64, b: UInt64, c: UInt64) -> UInt64 {
+    if a <= b && a <= c { a }
+    else if b <= c { b }
+    else { c }
+}
+
+meta fn clamp(value: UInt64, min_val: UInt64, max_val: UInt64) -> UInt64 {
+    if value < min_val { min_val }
+    else if value > max_val { max_val }
+    else { value }
+}
+
+const MAX_VAL: UInt64 = max3(5, 12, 8);        // 12
+const MIN_VAL: UInt64 = min3(5, 12, 8);        // 5
+const CLAMPED: UInt64 = clamp(100, 0, 50);     // 50
+
+// ============================================================
+// COMPILE-TIME ASSERTIONS
+// ============================================================
+
+const _FACTORIAL_CHECK: () = {
+    @static_assert(factorial(5) == 120);
+};
+
+const _FIBONACCI_CHECK: () = {
+    @static_assert(fibonacci(10) == 55);
+};
+
+const _GCD_CHECK: () = {
+    @static_assert(gcd(48, 18) == 6);
+};
+
+const _PRIME_CHECK: () = {
+    @static_assert(is_prime(17) == true);
+    @static_assert(is_prime(18) == false);
+};
+
+// ============================================================
+// ТИПЫ С COMPILE-TIME ВЫЧИСЛЕННЫМИ ПАРАМЕТРАМИ
+// ============================================================
+
+// Размер кэш-линии как константа
+const CACHE_LINE_SIZE: Int = 64;
+
+// Тип выровненный по кэш-линии
+type CacheAligned<const N: Int> is {
+    data: [UInt8; N],
+    _padding: [UInt8; CACHE_LINE_SIZE],
+};
+
+// Вычисление оптимального размера хэш-таблицы
+meta fn optimal_hash_size(expected_elements: Int) -> Int {
+    // Load factor 0.75 -> size = elements * 4 / 3, rounded up to power of 2
+    let min_size = (expected_elements * 4) / 3;
+    let mut size = 1;
+    while size < min_size {
+        size = size * 2;
+    }
+    size
+}
+
+const HASH_TABLE_SIZE: Int = optimal_hash_size(1000);  // 2048
+
+fn main() {
+    // Все значения вычислены во время компиляции
+    let fact = FACT_5;
+    let fib = FIB_10;
+    let prime_check = IS_17_PRIME;
+    let hash_size = HASH_TABLE_SIZE;
+}

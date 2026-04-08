@@ -1,0 +1,218 @@
+// @test: run
+// @expected-stdout: Recovered value: 0\nUser found: Default User
+// @tier: 0
+// @level: L2
+// @tags: errors, try, recover, catch
+
+/// Recover block - error recovery within try expressions.
+/// The recover clause handles errors and provides fallback values.
+
+type DataError is
+    | NotFound
+    | InvalidFormat(Text)
+    | Timeout
+    | NetworkError(Text);
+
+type Data is {
+    value: Int,
+    source: Text
+};
+
+/// Simulated data fetching
+fn fetch_data(source: &Text) -> Result<Data, DataError> {
+    match source {
+        "local" => Ok(Data { value: 42, source: "local" }),
+        "cache" => Ok(Data { value: 100, source: "cache" }),
+        "invalid" => Err(DataError.InvalidFormat("bad data")),
+        "slow" => Err(DataError.Timeout),
+        _ => Err(DataError.NotFound)
+    }
+}
+
+/// Basic recover block - provides fallback on any error
+fn fetch_with_fallback(source: &Text) -> Data {
+    try {
+        fetch_data(source)?
+    } recover {
+        _ => Data { value: 0, source: "default" }
+    }
+}
+
+/// Recover with error inspection
+fn fetch_with_smart_recovery(source: &Text) -> Data {
+    try {
+        fetch_data(source)?
+    } recover {
+        DataError.NotFound => Data { value: -1, source: "not_found_fallback" },
+        DataError.Timeout => Data { value: 0, source: "timeout_cache" },
+        DataError.InvalidFormat(msg) => {
+            println(format("Invalid format: {}", msg));
+            Data { value: 0, source: "format_error_default" }
+        },
+        DataError.NetworkError(msg) => Data { value: 0, source: "network_error_default" }
+    }
+}
+
+/// Recover block that itself can fail
+fn fetch_with_fallible_recovery(
+    primary: &Text,
+    backup: &Text
+) -> Result<Data, DataError> {
+    try {
+        fetch_data(primary)?
+    } recover {
+        DataError.Timeout => fetch_data(backup)?,
+        error => return Err(error)
+    }
+}
+
+/// Chained recovery with multiple fallbacks
+fn fetch_with_chain(sources: List<&Text>) -> Data {
+    try {
+        for source in sources {
+            match fetch_data(source) {
+                Ok(data) => return data,
+                Err(_) => continue
+            }
+        }
+        Err(DataError.NotFound)?
+    } recover {
+        _ => Data { value: 0, source: "all_failed" }
+    }
+}
+
+/// Recovery with logging
+fn fetch_with_logging(source: &Text) -> Data {
+    try {
+        fetch_data(source)?
+    } recover {
+        error => {
+            log_error(&error);
+            Data { value: 0, source: "logged_default" }
+        }
+    }
+}
+
+fn log_error(error: &DataError) {
+    match error {
+        DataError.NotFound =>
+            println("LOG: Data not found"),
+        DataError.InvalidFormat(msg) =>
+            println(format("LOG: Invalid format - {}", msg)),
+        DataError.Timeout =>
+            println("LOG: Operation timed out"),
+        DataError.NetworkError(msg) =>
+            println(format("LOG: Network error - {}", msg))
+    }
+}
+
+/// Recovery with type transformation
+type UserError is
+    | NotFound(Int)
+    | DatabaseError(Text);
+
+type User is {
+    id: Int,
+    name: Text,
+    is_default: Bool
+};
+
+fn find_user(id: Int) -> Result<User, UserError> {
+    if id == 1 {
+        Ok(User { id: 1, name: "Alice", is_default: false })
+    } else if id == 2 {
+        Ok(User { id: 2, name: "Bob", is_default: false })
+    } else {
+        Err(UserError.NotFound(id))
+    }
+}
+
+fn get_user_or_default(id: Int) -> User {
+    try {
+        find_user(id)?
+    } recover {
+        UserError.NotFound(missing_id) => User {
+            id: missing_id,
+            name: "Default User",
+            is_default: true
+        },
+        UserError.DatabaseError(_) => User {
+            id: 0,
+            name: "Error User",
+            is_default: true
+        }
+    }
+}
+
+/// Recovery with async operations
+async fn fetch_async(source: &Text) -> Result<Data, DataError> {
+    // Simulated async fetch
+    fetch_data(source)
+}
+
+async fn fetch_async_with_recovery(source: &Text) -> Data {
+    try {
+        fetch_async(source).await?
+    } recover {
+        _ => Data { value: 0, source: "async_default" }
+    }
+}
+
+/// Recovery with resource cleanup consideration
+type Resource is {
+    id: Int,
+    acquired: Bool
+};
+
+fn acquire_resource(id: Int) -> Result<Resource, DataError> {
+    if id > 0 {
+        Ok(Resource { id, acquired: true })
+    } else {
+        Err(DataError.NotFound)
+    }
+}
+
+fn use_resource_with_recovery() -> Int {
+    try {
+        let resource = acquire_resource(1)?;
+        process_resource(&resource)?
+    } recover {
+        _ => 0
+    }
+}
+
+fn process_resource(r: &Resource) -> Result<Int, DataError> {
+    if r.acquired {
+        Ok(r.id * 10)
+    } else {
+        Err(DataError.InvalidFormat("Resource not acquired"))
+    }
+}
+
+/// Multiple recover blocks (nested try)
+fn multi_level_recovery() -> Int {
+    try {
+        let outer = try {
+            fetch_data("invalid")?
+        } recover {
+            _ => fetch_data("also_invalid")?
+        };
+
+        outer.value
+    } recover {
+        _ => 0
+    }
+}
+
+fn main() {
+    // Basic recovery
+    let data = fetch_with_fallback("missing");
+    println(format("Recovered value: {}", data.value));
+
+    // User recovery
+    let user = get_user_or_default(999);
+    println(format("User found: {}", user.name));
+
+    // Smart recovery
+    let smart_data = fetch_with_smart_recovery("invalid");
+}

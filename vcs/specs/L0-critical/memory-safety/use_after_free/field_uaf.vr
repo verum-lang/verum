@@ -1,0 +1,23 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, use-after-free, cbgr, field
+// @description: Tests CBGR detection of use-after-free on struct field
+
+type Container is {
+    data: Heap<List<Int>>,
+};
+
+fn main() {
+    let container = Container {
+        data: Heap.new([1, 2, 3]),
+    };
+
+    let data_ref = &container.data;
+
+    // Drop the container which frees the data
+    drop(container);
+
+    // Attempt to access the freed field
+    let _ = data_ref.len();  // CBGR detects use after free
+}

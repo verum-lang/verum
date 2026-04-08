@@ -1,0 +1,77 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, type-conversion, casting
+// @timeout: 50000
+// @expected-exit: 0
+
+fn test_int_arithmetic() {
+    let i = 42;
+    assert_eq(i + 0, 42);
+    assert_eq(i * 1, 42);
+    assert_eq(i - 42, 0);
+
+    // Large multiplication
+    let big = 100000;
+    assert_eq(big * big, 10000000000);
+    print("  test_int_arithmetic: ok");
+}
+
+fn test_bool_to_int() {
+    let t = true;
+    let f = false;
+    assert_eq(t == true, true);
+    assert_eq(f == false, true);
+
+    // Bool in arithmetic context
+    let x = if t { 1 } else { 0 };
+    assert_eq(x, 1);
+    let y = if f { 1 } else { 0 };
+    assert_eq(y, 0);
+    print("  test_bool_to_int: ok");
+}
+
+fn test_int_comparison_to_bool() {
+    let a = 5;
+    let b = 10;
+    let gt = a > b;
+    let lt = a < b;
+    let eq_val = a == b;
+    assert_eq(gt, false);
+    assert_eq(lt, true);
+    assert_eq(eq_val, false);
+    print("  test_int_comparison_to_bool: ok");
+}
+
+fn test_negative_numbers() {
+    let a = -42;
+    assert_eq(a + 42, 0);
+    assert_eq(a * -1, 42);
+    assert_eq(a < 0, true);
+
+    let b = -100;
+    assert_eq(a > b, true);
+    assert_eq(a - b, 58);
+    print("  test_negative_numbers: ok");
+}
+
+fn test_overflow_wrapping() {
+    // Large numbers
+    let big = 1000000000;
+    let product = big * 2;
+    assert_eq(product, 2000000000);
+
+    let sum = big + big + big;
+    assert_eq(sum, 3000000000);
+    print("  test_overflow_wrapping: ok");
+}
+
+fn main() -> Int {
+    test_int_arithmetic();
+    test_bool_to_int();
+    test_int_comparison_to_bool();
+    test_negative_numbers();
+    test_overflow_wrapping();
+    print("[OK] 616_interp_type_conversion");
+    0
+}

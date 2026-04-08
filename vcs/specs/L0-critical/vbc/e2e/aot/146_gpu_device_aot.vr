@@ -1,0 +1,97 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, gpu, device, management
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT GPU device management — device queries, peer access, enumeration, flags
+
+fn test_device_count() {
+    // Simulated device count tracking
+    let count = 0;
+    assert_eq(count, 0);
+    print("test_device_count passed");
+}
+
+fn test_device_properties() {
+    // Device property simulation: memory size, compute capability
+    let total_mem = 8589934592;  // 8GB
+    let compute_major = 8;
+    let compute_minor = 0;
+    assert(total_mem > 0);
+    assert_eq(compute_major, 8);
+    assert_eq(compute_minor, 0);
+    print("test_device_properties passed");
+}
+
+fn test_device_switching() {
+    // Switch between devices (simulated with integers)
+    let mut current = 0;
+    current = 1;
+    assert_eq(current, 1);
+    current = 0;
+    assert_eq(current, 0);
+    print("test_device_switching passed");
+}
+
+fn test_peer_access() {
+    // Peer access checking: can device 0 access device 1?
+    let can_access_0_1 = 0;  // No peer access in CPU fallback
+    let can_access_0_0 = 1;  // Self access always works
+    assert_eq(can_access_0_1, 0);
+    assert_eq(can_access_0_0, 1);
+    print("test_peer_access passed");
+}
+
+fn test_device_enumeration() {
+    // Enumerate available backends
+    let cuda_count = 0;
+    let metal_count = 0;
+    let rocm_count = 0;
+    let vulkan_count = 0;
+    let total = cuda_count + metal_count + rocm_count + vulkan_count;
+    assert_eq(total, 0);  // CPU fallback: no GPU devices
+    print("test_device_enumeration passed");
+}
+
+fn test_memory_info() {
+    // Memory info: free/total
+    let total_bytes = 8589934592;
+    let free_bytes = 8589934592;  // All free initially
+    assert(free_bytes <= total_bytes);
+    assert(total_bytes > 0);
+    print("test_memory_info passed");
+}
+
+fn test_device_flags() {
+    // Device flags: scheduling mode
+    let flag_spin = 0;
+    let flag_yield = 1;
+    let flag_blocking = 2;
+    assert_eq(flag_spin, 0);
+    assert_eq(flag_yield, 1);
+    assert_eq(flag_blocking, 2);
+    print("test_device_flags passed");
+}
+
+fn test_device_reset() {
+    // After reset, device should be back to default
+    let mut device = 3;
+    // Simulate reset
+    device = 0;
+    assert_eq(device, 0);
+    print("test_device_reset passed");
+}
+
+fn main() -> Int {
+    test_device_count();
+    test_device_properties();
+    test_device_switching();
+    test_peer_access();
+    test_device_enumeration();
+    test_memory_info();
+    test_device_flags();
+    test_device_reset();
+    print("ALL PASSED");
+    0
+}

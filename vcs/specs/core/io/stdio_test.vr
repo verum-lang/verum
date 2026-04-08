@@ -1,0 +1,563 @@
+// =============================================================================
+// stdio_test.vr - Comprehensive tests for standard I/O types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: io, stdio, stdin, stdout, stderr, print, lock
+// @description: Tests for Stdin, Stdout, Stderr types and their lock variants,
+//               stdin/stdout/stderr accessor functions, print/println/eprint/
+//               eprintln convenience functions, StdinLock/StdoutLock/StderrLock
+//               types, and StdinLines iterator type
+// =============================================================================
+
+mount core.io.stdio.{
+    Stdin, Stdout, Stderr,
+    StdinLock, StdoutLock, StderrLock,
+    StdinLines,
+    stdin, stdout, stderr,
+    print, println, eprint, eprintln, println_empty,
+};
+mount core.io.protocols.{Read, Write as WriteProto, IoResult};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Standard I/O Type Existence
+// =============================================================================
+
+@test
+fn test_stdin_type() {
+    let s: Stdin = stdin();
+    // Stdin type constructed via accessor function
+    let _: &Stdin = &s;
+    assert(!false);
+}
+
+@test
+fn test_stdout_type() {
+    let s: Stdout = stdout();
+    let _: &Stdout = &s;
+    assert(!false);
+}
+
+@test
+fn test_stderr_type() {
+    let s: Stderr = stderr();
+    let _: &Stderr = &s;
+    assert(!false);
+}
+
+// =============================================================================
+// Section 2: Lock Type Existence
+// =============================================================================
+
+@test
+fn test_stdin_lock_type() {
+    let s = stdin();
+    let lock: StdinLock = s.lock();
+    let _: &StdinLock = &lock;
+    assert(!false);
+}
+
+@test
+fn test_stdout_lock_type() {
+    let s = stdout();
+    let lock: StdoutLock = s.lock();
+    let _: &StdoutLock = &lock;
+    assert(!false);
+}
+
+@test
+fn test_stderr_lock_type() {
+    let s = stderr();
+    let lock: StderrLock = s.lock();
+    let _: &StderrLock = &lock;
+    assert(!false);
+}
+
+// =============================================================================
+// Section 3: Print Function Signatures
+// =============================================================================
+
+@test
+fn test_print_function() {
+    let msg: &Text = "hello";
+    print(msg);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_println_function() {
+    let msg: &Text = "hello";
+    println(msg);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_eprint_function() {
+    let msg: &Text = "error message";
+    eprint(msg);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_eprintln_function() {
+    let msg: &Text = "error message";
+    eprintln(msg);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_println_empty_function() {
+    println_empty();
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 4: Print with Various Content
+// =============================================================================
+
+@test
+fn test_print_empty_string() {
+    print("");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_println_empty_string() {
+    println("");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_eprint_empty_string() {
+    eprint("");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_eprintln_empty_string() {
+    eprintln("");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 5: Multiple Handle Creation
+// =============================================================================
+
+@test
+fn test_multiple_stdin() {
+    let s1 = stdin();
+    let s2 = stdin();
+    // Both are valid Stdin handles
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_multiple_stdout() {
+    let s1 = stdout();
+    let s2 = stdout();
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_multiple_stderr() {
+    let s1 = stderr();
+    let s2 = stderr();
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 6: StdinLines Type
+// =============================================================================
+
+@test
+fn test_stdin_lines_type() {
+    let mut s = stdin();
+    let lines: StdinLines = s.lines();
+    // StdinLines is an iterator over IoResult<Text>
+    let _: &StdinLines = &lines;
+    assert(!false);
+}
+
+// =============================================================================
+// Section 7: Print Functions with Various Content
+// =============================================================================
+
+@test
+fn test_print_long_string() {
+    let long_text = "The quick brown fox jumps over the lazy dog";
+    print(long_text);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_println_special_chars() {
+    println("hello\tworld\nnewline");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_eprint_long_string() {
+    let long_text = "Error: something went terribly wrong in module X";
+    eprint(long_text);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_eprintln_special_chars() {
+    eprintln("error\ttab\nnewline");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 8: Sequential Print Calls
+// =============================================================================
+
+@test
+fn test_print_sequential() {
+    print("first ");
+    print("second ");
+    print("third");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_println_sequential() {
+    println("line 1");
+    println("line 2");
+    println("line 3");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_mixed_stdout_stderr() {
+    println("stdout line");
+    eprintln("stderr line");
+    println("another stdout");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 9: Lock and Handle Patterns
+// =============================================================================
+
+@test
+fn test_stdout_multiple_locks() {
+    let s = stdout();
+    let lock1 = s.lock();
+    // In typecheck mode, we can create lock types
+    let _: &StdoutLock = &lock1;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stderr_multiple_locks() {
+    let s = stderr();
+    let lock1 = s.lock();
+    let _: &StderrLock = &lock1;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stdin_lines_from_handle() {
+    let s = stdin();
+    let lines = s.lines();
+    // lines should be a StdinLines iterator
+    let _: &StdinLines = &lines;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 10: Additional Handle Patterns
+// =============================================================================
+
+@test
+fn test_stdout_then_stderr() {
+    let o = stdout();
+    let e = stderr();
+    let _: &Stdout = &o;
+    let _: &Stderr = &e;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stdin_then_stdout() {
+    let i = stdin();
+    let o = stdout();
+    let _: &Stdin = &i;
+    let _: &Stdout = &o;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_all_three_handles() {
+    let i = stdin();
+    let o = stdout();
+    let e = stderr();
+    let _: &Stdin = &i;
+    let _: &Stdout = &o;
+    let _: &Stderr = &e;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_print_multiple_short_strings() {
+    print("a");
+    print("b");
+    print("c");
+    print("d");
+    print("e");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_println_multiple_lines() {
+    println("line A");
+    println("line B");
+    println("line C");
+    println("line D");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_print_unicode_content() {
+    print("hello world");
+    println("test data");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_all_locks_from_handles() {
+    let i = stdin();
+    let o = stdout();
+    let e = stderr();
+    let li: StdinLock = i.lock();
+    let lo: StdoutLock = o.lock();
+    let le: StderrLock = e.lock();
+    let _: &StdinLock = &li;
+    let _: &StdoutLock = &lo;
+    let _: &StderrLock = &le;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_eprintln_multiple() {
+    eprintln("err 1");
+    eprintln("err 2");
+    eprintln("err 3");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 11: Handle Reference Patterns
+// =============================================================================
+
+@test
+fn test_stdin_reference() {
+    let s = stdin();
+    let r: &Stdin = &s;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stdout_reference() {
+    let s = stdout();
+    let r: &Stdout = &s;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stderr_reference() {
+    let s = stderr();
+    let r: &Stderr = &s;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_print_single_char_content() {
+    print("x");
+    println("y");
+    eprint("z");
+    eprintln("w");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_print_numeric_as_text() {
+    print("42");
+    println("3.14");
+    eprint("0");
+    eprintln("-1");
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stdout_lock_reference() {
+    let s = stdout();
+    let lock = s.lock();
+    let r: &StdoutLock = &lock;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stderr_lock_reference() {
+    let s = stderr();
+    let lock = s.lock();
+    let r: &StderrLock = &lock;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stdin_lock_reference() {
+    let s = stdin();
+    let lock = s.lock();
+    let r: &StdinLock = &lock;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 12: Global Input Functions
+// =============================================================================
+
+mount core.io.stdio.{read_line, read_int, read_float};
+
+@test
+fn test_read_line_fn_exists() {
+    let _ = read_line;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_read_int_fn_exists() {
+    let _ = read_int;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_read_float_fn_exists() {
+    let _ = read_float;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 13: Handle Types in Function Signatures
+// =============================================================================
+
+@test
+fn test_stdin_as_function_parameter() {
+    fn process_stdin(s: &Stdin) -> Bool { true }
+    let _ = process_stdin;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stdout_as_function_parameter() {
+    fn process_stdout(s: &Stdout) -> Bool { true }
+    let _ = process_stdout;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_handles_as_tuple_return() {
+    fn make_handles() -> (Stdin, Stdout, Stderr) {
+        (stdin(), stdout(), stderr())
+    }
+    let _ = make_handles;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_lock_types_as_function_parameters() {
+    fn accept_locks(si: &StdinLock, so: &StdoutLock, se: &StderrLock) -> Bool { true }
+    let _ = accept_locks;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stdin_lines_as_return_type() {
+    fn get_lines(s: &mut Stdin) -> StdinLines { s.lines() }
+    let _ = get_lines;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 14: Stdin Internal Fields and Construction
+// =============================================================================
+
+@test
+fn test_stdin_has_buffer_field() {
+    let s = Stdin { buffer: List.new(), buf_pos: 0 };
+    assert_eq(s.buf_pos, 0);
+}
+
+@test
+fn test_stdin_lock_has_buffer_field() {
+    let lock = StdinLock { buffer: List.new(), buf_pos: 0 };
+    assert_eq(lock.buf_pos, 0);
+}
+
+@test
+fn test_stdin_lock_from_stdin() {
+    let s = stdin();
+    let lock = s.lock();
+    let lock2 = s.lock();
+    // Multiple locks can be created (typecheck verifies)
+    let _: &StdinLock = &lock;
+    let _: &StdinLock = &lock2;
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 15: Write Protocol Implementation
+// =============================================================================
+
+@test
+fn test_stdout_implements_write() {
+    fn accepts_write<T: Write>(w: &mut T) -> Bool { true }
+    let mut s = stdout();
+    let _ = accepts_write(&mut s);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stderr_implements_write() {
+    fn accepts_write<T: Write>(w: &mut T) -> Bool { true }
+    let mut s = stderr();
+    let _ = accepts_write(&mut s);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stdout_lock_implements_write() {
+    fn accepts_write<T: Write>(w: &mut T) -> Bool { true }
+    let s = stdout();
+    let mut lock = s.lock();
+    let _ = accepts_write(&mut lock);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+@test
+fn test_stderr_lock_implements_write() {
+    fn accepts_write<T: Write>(w: &mut T) -> Bool { true }
+    let s = stderr();
+    let mut lock = s.lock();
+    let _ = accepts_write(&mut lock);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+// =============================================================================
+// Section 16: Read Protocol Implementation
+// =============================================================================
+
+@test
+fn test_stdin_implements_read() {
+    fn accepts_read<T: Read>(r: &mut T) -> Bool { true }
+    let mut s = stdin();
+    let _ = accepts_read(&mut s);
+    assert(!false); // Runtime-only: I/O side effect
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

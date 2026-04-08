@@ -1,0 +1,358 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: SHA-256 > 500 MB/s, Blake3 > 2 GB/s
+// @tags: crypto, hash, security, performance
+
+/// Cryptographic Hash Benchmark
+///
+/// Tests various cryptographic hash functions:
+/// - SHA family (SHA-256, SHA-512, SHA-3)
+/// - Blake2/Blake3
+/// - HMAC
+/// - Password hashing (bcrypt, argon2)
+
+module benchmarks.macro.crypto_hash
+
+using [Benchmark, Crypto]
+
+/// SHA-256 - small input
+fn benchmark_hash_sha256_small() {
+    let data = "Hello, World!".as_bytes();
+
+    for _ in 0..1_000_000 {
+        let hash = Sha256.hash(data);
+        let _ = hash.len();
+    }
+}
+
+/// SHA-256 - medium input (1KB)
+fn benchmark_hash_sha256_1kb() {
+    let data = [0x42u8; 1024];
+
+    for _ in 0..100_000 {
+        let hash = Sha256.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// SHA-256 - large input (1MB)
+fn benchmark_hash_sha256_1mb() {
+    let data = [0x42u8; 1_000_000];
+
+    for _ in 0..100 {
+        let hash = Sha256.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// SHA-256 - streaming (incremental)
+fn benchmark_hash_sha256_streaming() {
+    let chunks: List<[u8; 4096]> = [[0x42u8; 4096]; 256];  // 1MB total
+
+    for _ in 0..100 {
+        let mut hasher = Sha256.new();
+        for chunk in &chunks {
+            hasher.update(chunk);
+        }
+        let hash = hasher.finalize();
+        let _ = hash.len();
+    }
+}
+
+/// SHA-512
+fn benchmark_hash_sha512() {
+    let data = [0x42u8; 1024];
+
+    for _ in 0..100_000 {
+        let hash = Sha512.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// SHA-512/256 (truncated)
+fn benchmark_hash_sha512_256() {
+    let data = [0x42u8; 1024];
+
+    for _ in 0..100_000 {
+        let hash = Sha512_256.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// SHA-3 (256-bit)
+fn benchmark_hash_sha3_256() {
+    let data = [0x42u8; 1024];
+
+    for _ in 0..50_000 {
+        let hash = Sha3_256.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// SHA-3 (512-bit)
+fn benchmark_hash_sha3_512() {
+    let data = [0x42u8; 1024];
+
+    for _ in 0..50_000 {
+        let hash = Sha3_512.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// Blake2b
+fn benchmark_hash_blake2b() {
+    let data = [0x42u8; 1024];
+
+    for _ in 0..200_000 {
+        let hash = Blake2b.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// Blake2s (optimized for small inputs)
+fn benchmark_hash_blake2s() {
+    let data = [0x42u8; 64];
+
+    for _ in 0..500_000 {
+        let hash = Blake2s.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// Blake3 - small input
+fn benchmark_hash_blake3_small() {
+    let data = "Hello, World!".as_bytes();
+
+    for _ in 0..2_000_000 {
+        let hash = Blake3.hash(data);
+        let _ = hash.len();
+    }
+}
+
+/// Blake3 - large input (parallelized)
+fn benchmark_hash_blake3_1mb() {
+    let data = [0x42u8; 1_000_000];
+
+    for _ in 0..500 {
+        let hash = Blake3.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// Blake3 - streaming
+fn benchmark_hash_blake3_streaming() {
+    let chunks: List<[u8; 65536]> = [[0x42u8; 65536]; 16];  // 1MB total
+
+    for _ in 0..500 {
+        let mut hasher = Blake3.new();
+        for chunk in &chunks {
+            hasher.update(chunk);
+        }
+        let hash = hasher.finalize();
+        let _ = hash.len();
+    }
+}
+
+/// MD5 (legacy, not for security)
+fn benchmark_hash_md5() {
+    let data = [0x42u8; 1024];
+
+    for _ in 0..200_000 {
+        let hash = Md5.hash(&data);
+        let _ = hash.len();
+    }
+}
+
+/// HMAC-SHA256
+fn benchmark_hmac_sha256() {
+    let key = "secret_key".as_bytes();
+    let data = [0x42u8; 1024];
+
+    for _ in 0..100_000 {
+        let mac = HmacSha256.new(key).chain(&data).finalize();
+        let _ = mac.len();
+    }
+}
+
+/// HMAC-SHA512
+fn benchmark_hmac_sha512() {
+    let key = "secret_key".as_bytes();
+    let data = [0x42u8; 1024];
+
+    for _ in 0..100_000 {
+        let mac = HmacSha512.new(key).chain(&data).finalize();
+        let _ = mac.len();
+    }
+}
+
+/// HKDF (key derivation)
+fn benchmark_hkdf() {
+    let ikm = "input_key_material".as_bytes();
+    let salt = "salt".as_bytes();
+    let info = "context_info".as_bytes();
+
+    for _ in 0..100_000 {
+        let okm = Hkdf<Sha256>.expand(ikm, salt, info, 32);
+        let _ = okm.len();
+    }
+}
+
+/// PBKDF2 (password-based, intentionally slow)
+fn benchmark_pbkdf2() {
+    let password = "password123".as_bytes();
+    let salt = "random_salt".as_bytes();
+    let iterations = 10_000;
+
+    for _ in 0..10 {
+        let key = Pbkdf2<HmacSha256>.derive(password, salt, iterations, 32);
+        let _ = key.len();
+    }
+}
+
+/// Bcrypt (password hashing)
+fn benchmark_bcrypt() {
+    let password = "password123";
+    let cost = 10;  // 2^10 iterations
+
+    for _ in 0..10 {
+        let hash = Bcrypt.hash(password, cost);
+        let _ = Bcrypt.verify(password, &hash);
+    }
+}
+
+/// Argon2 (modern password hashing)
+fn benchmark_argon2() {
+    let password = "password123".as_bytes();
+    let salt = "random_salt_16b".as_bytes();
+
+    type Argon2Config is {
+        memory_cost: Int,
+        time_cost: Int,
+        parallelism: Int,
+    };
+
+    let config = Argon2Config {
+        memory_cost: 65536,  // 64MB
+        time_cost: 3,        // iterations
+        parallelism: 4,
+    };
+
+    for _ in 0..5 {
+        let hash = Argon2.hash(password, salt, &config);
+        let _ = hash.len();
+    }
+}
+
+/// Scrypt (memory-hard password hashing)
+fn benchmark_scrypt() {
+    let password = "password123".as_bytes();
+    let salt = "random_salt".as_bytes();
+
+    type ScryptParams is {
+        n: Int,
+        r: Int,
+        p: Int,
+    };
+
+    let params = ScryptParams {
+        n: 16384,  // CPU/memory cost
+        r: 8,      // Block size
+        p: 1,      // Parallelism
+    };
+
+    for _ in 0..5 {
+        let key = Scrypt.derive(password, salt, &params, 32);
+        let _ = key.len();
+    }
+}
+
+/// CRC32 (non-cryptographic, very fast)
+fn benchmark_crc32() {
+    let data = [0x42u8; 1024];
+
+    for _ in 0..1_000_000 {
+        let crc = Crc32.hash(&data);
+        let _ = crc;
+    }
+}
+
+/// XXHash (non-cryptographic, very fast)
+fn benchmark_xxhash() {
+    let data = [0x42u8; 1024];
+
+    for _ in 0..2_000_000 {
+        let hash = XxHash64.hash(&data);
+        let _ = hash;
+    }
+}
+
+/// SipHash (DoS-resistant)
+fn benchmark_siphash() {
+    let key = [0u8; 16];
+    let data = [0x42u8; 64];
+
+    for _ in 0..2_000_000 {
+        let hash = SipHash.new(&key).chain(&data).finalize();
+        let _ = hash;
+    }
+}
+
+/// Merkle tree construction
+fn benchmark_merkle_tree() {
+    let leaves: List<[u8; 32]> = (0..1024).map(|i| {
+        Sha256.hash(&[i as u8; 32])
+    }).collect();
+
+    for _ in 0..100 {
+        let root = MerkleTree<Sha256>.build(&leaves);
+        let _ = root.len();
+    }
+}
+
+/// Hash comparison (constant time)
+fn benchmark_hash_compare() {
+    let hash1 = Sha256.hash(b"data1");
+    let hash2 = Sha256.hash(b"data1");
+
+    for _ in 0..10_000_000 {
+        let _ = constant_time_eq(&hash1, &hash2);
+    }
+}
+
+/// Parallel hashing of multiple inputs
+fn benchmark_hash_parallel() {
+    let inputs: List<[u8; 1024]> = [[0x42u8; 1024]; 1000];
+
+    for _ in 0..100 {
+        let hashes: List<_> = inputs.par_iter()
+            .map(|data| Sha256.hash(data))
+            .collect();
+        let _ = hashes.len();
+    }
+}
+
+/// Hash throughput measurement
+fn measure_hash_throughput() {
+    let data = [0x42u8; 1_000_000];  // 1MB
+    let iterations = 100;
+
+    // SHA-256
+    let start = Instant.now();
+    for _ in 0..iterations {
+        let _ = Sha256.hash(&data);
+    }
+    let sha256_time = start.elapsed();
+    let sha256_throughput = (iterations * data.len()) as f64 / sha256_time.as_secs_f64() / 1e6;
+
+    // Blake3
+    let start = Instant.now();
+    for _ in 0..iterations {
+        let _ = Blake3.hash(&data);
+    }
+    let blake3_time = start.elapsed();
+    let blake3_throughput = (iterations * data.len()) as f64 / blake3_time.as_secs_f64() / 1e6;
+
+    print(text("SHA-256: {:.0} MB/s", sha256_throughput));
+    print(text("Blake3:  {:.0} MB/s", blake3_throughput));
+}

@@ -1,0 +1,134 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, precedence, associativity
+
+// Operator precedence and associativity tests
+
+fn test_arithmetic_precedence() {
+    // Arithmetic precedence: ** > * / % > + -
+    let arith1 = 2 + 3 * 4;      // 2 + (3 * 4) = 14
+    let arith2 = 2 * 3 + 4;      // (2 * 3) + 4 = 10
+    let arith3 = 10 - 4 / 2;     // 10 - (4 / 2) = 8
+    let arith4 = 10 / 2 - 4;     // (10 / 2) - 4 = 1
+    let arith5 = 2 + 3 ** 2;     // 2 + (3 ** 2) = 11
+    let arith6 = 2 * 3 ** 2;     // 2 * (3 ** 2) = 18
+    let arith7 = 10 % 3 + 2;     // (10 % 3) + 2 = 3
+
+    // Comparison precedence: arithmetic > comparison > logical
+    let cmp1 = 2 + 3 > 4;        // (2 + 3) > 4 = true
+    let cmp2 = 2 * 3 == 6;       // (2 * 3) == 6 = true
+    let cmp3 = 10 / 2 < 6;       // (10 / 2) < 6 = true
+    let cmp4 = 1 + 2 <= 2 + 1;   // (1 + 2) <= (2 + 1) = true
+
+    // Logical precedence: ! > && > ||
+    let log1 = true || false && false;   // true || (false && false) = true
+    let log2 = false && true || true;    // (false && true) || true = true
+    let log3 = !false && true;           // (!false) && true = true
+    let log4 = !false || false;          // (!false) || false = true
+    let log5 = true && !false;           // true && (!false) = true
+
+    // Comparison with logical
+    let mix1 = 1 < 2 && 3 < 4;           // (1 < 2) && (3 < 4) = true
+    let mix2 = 1 < 2 || 3 > 4;           // (1 < 2) || (3 > 4) = true
+    let mix3 = 1 + 1 == 2 && 2 + 2 == 4; // true
+
+    // Bitwise precedence: ~ > << >> > & > ^ > |
+    let bit1 = 0xFF & 0xF0 | 0x0F;       // (0xFF & 0xF0) | 0x0F = 0xFF
+    let bit2 = 0x0F | 0xF0 & 0xFF;       // 0x0F | (0xF0 & 0xFF) = 0xFF
+    let bit3 = 1 << 4 | 0x0F;            // (1 << 4) | 0x0F = 0x1F
+    let bit4 = 0xFF ^ 0x0F & 0xF0;       // 0xFF ^ (0x0F & 0xF0) = 0xFF
+    let bit5 = ~0 & 0xFF;                // (~0) & 0xFF = 0xFF
+
+    // Unary operators precedence
+    let unary1 = -2 ** 2;    // Depends on language: -(2**2) = -4 or (-2)**2 = 4
+    let unary2 = --5;        // -(-5) = 5
+    let unary3 = !true && false;  // (!true) && false = false
+    let unary4 = -1 + 5;     // (-1) + 5 = 4
+    let unary5 = ~0xFF & 0xFFFF;  // (~0xFF) & 0xFFFF
+}
+
+fn test_assignment_associativity() {
+    // Assignment is right-associative
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    a = b = c = 10;  // a = (b = (c = 10))
+
+    // Pipeline operator precedence
+    let pipe1 = 5 |> double |> square;  // (5 |> double) |> square
+    let pipe2 = 1 + 2 |> double;        // (1 + 2) |> double
+
+    // Null coalescing precedence
+    let nc1 = None ?? 1 + 2;    // None ?? (1 + 2)? or (None ?? 1) + 2?
+    let nc2 = None ?? None ?? 3;
+    let nc3 = Some(1) ?? 2 + 3;
+}
+
+// Optional chaining precedence
+type Opt is { val: Maybe<Int> };
+
+fn test_optional_and_range_precedence() {
+    let opt = Opt { val: Some(5) };
+    let chain1 = opt?.val ?? 0;
+
+    // Range operator precedence
+    let rng1 = 1 + 2..5;        // (1 + 2)..5 = 3..5
+    let rng2 = 0..2 * 3;        // 0..(2 * 3) = 0..6
+    let rng3 = 0..10.step(2);   // (0..10).step(2)
+
+    // Complex mixed expressions
+    let complex1 = 2 + 3 * 4 ** 2 / 8 - 1;  // 2 + ((3 * (4 ** 2)) / 8) - 1
+    let complex2 = 1 < 2 && 3 < 4 || 5 > 6; // ((1 < 2) && (3 < 4)) || (5 > 6)
+    let complex3 = 0xFF & 0xF0 | 0x0F ^ 0x03;
+}
+
+fn test_associativity() {
+    // Left-to-right associativity (most binary operators)
+    let left1 = 10 - 5 - 2;      // (10 - 5) - 2 = 3
+    let left2 = 100 / 10 / 2;    // (100 / 10) / 2 = 5
+    let left3 = 8 % 5 % 2;       // (8 % 5) % 2 = 1
+
+    // Right-to-left associativity (exponentiation)
+    let right1 = 2 ** 3 ** 2;    // 2 ** (3 ** 2) = 512
+    let right2 = 2 ** 1 ** 10;   // 2 ** (1 ** 10) = 2
+
+    // Parentheses override precedence
+    let paren1 = (2 + 3) * 4;    // 20, not 14
+    let paren2 = 2 * (3 + 4);    // 14, not 10
+    let paren3 = (10 - 5) - 2;   // 3
+    let paren4 = 10 - (5 - 2);   // 7
+    let paren5 = ((1 + 2) * (3 + 4)) ** 2;  // 441
+
+    // Deeply nested parentheses
+    let deep = ((((1 + 2) + 3) + 4) + 5);
+
+    // Ternary-like if expressions
+    let tern = if 1 < 2 { 10 } else { 20 } + 5;  // What binds tighter?
+    let tern_paren = (if 1 < 2 { 10 } else { 20 }) + 5;
+
+    // Cast operator precedence
+    let cast1 = 10 as Float + 0.5;       // (10 as Float) + 0.5
+    let cast2 = 10 + 20 as Float;        // (10 + 20) as Float? or 10 + (20 as Float)?
+
+    // Reference operators
+    let val = 42;
+    let ref_prec = &val;  // Unary prefix
+    // let deref_prec = *ptr + 1;  // (*ptr) + 1
+
+    // Method call precedence
+    let arr = [1, 2, 3];
+    let method_prec = arr.len() + 1;     // (arr.len()) + 1
+    let method_chain = arr.first().unwrap_or(0) * 2;
+}
+
+// Function call in expressions
+fn f(x: Int) -> Int { x * 2 }
+
+fn test_function_call_precedence() {
+    let fn_prec = f(3) + f(4);           // f(3) + f(4) = 14
+    let fn_prec2 = f(3 + 4);             // f(7) = 14
+
+    // Comprehensive precedence chain
+    let mega = 1 + 2 * 3 ** 2 & 0xFF | 0x100 == 319 && true || false;
+}

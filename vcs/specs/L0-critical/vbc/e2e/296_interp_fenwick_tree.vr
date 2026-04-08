@@ -1,0 +1,289 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, fenwick-tree, bit, prefix-sum
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Binary Indexed Tree (Fenwick Tree) for prefix sums.
+// Supports point update and prefix sum query in O(log n).
+// Uses 1-indexed array of size 8.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+// =============================================================================
+// Fenwick Tree (BIT) - 1-indexed, size n (max 8)
+// bit[0] unused, bit[1..n] are the tree nodes
+// =============================================================================
+
+// lowbit(x) = x & (-x) = isolate lowest set bit
+fn lowbit(x: Int) -> Int {
+    x & (-x)
+}
+
+type FenwickTree is {
+    bit: Arr16,  // 1-indexed, using indices 1..8
+    sz: Int
+};
+
+fn fen_new(n: Int) -> FenwickTree {
+    FenwickTree { bit: arr16_zeros(), sz: n }
+}
+
+// Point update: add delta to index i (1-indexed)
+fn fen_update(ft: FenwickTree, idx: Int, delta: Int) -> FenwickTree {
+    let mut b = ft.bit;
+    let mut i = idx;
+    while i <= ft.sz {
+        b = arr16_set(b, i, arr16_get(b, i) + delta);
+        i = i + lowbit(i);
+    }
+    FenwickTree { bit: b, sz: ft.sz }
+}
+
+// Prefix sum query: sum of elements 1..idx
+fn fen_prefix_sum(ft: FenwickTree, idx: Int) -> Int {
+    let mut sum = 0;
+    let mut i = idx;
+    while i > 0 {
+        sum = sum + arr16_get(ft.bit, i);
+        i = i - lowbit(i);
+    }
+    sum
+}
+
+// Range sum query: sum of elements [l..r] (1-indexed, inclusive)
+fn fen_range_sum(ft: FenwickTree, l: Int, r: Int) -> Int {
+    if l > 1 {
+        fen_prefix_sum(ft, r) - fen_prefix_sum(ft, l - 1)
+    } else {
+        fen_prefix_sum(ft, r)
+    }
+}
+
+// Build Fenwick tree from an array (0-indexed data, length n)
+fn fen_build(data: Arr8, n: Int) -> FenwickTree {
+    let mut ft = fen_new(n);
+    let mut i = 0;
+    while i < n {
+        ft = fen_update(ft, i + 1, arr8_get(data, i));
+        i = i + 1;
+    }
+    ft
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_empty_tree() {
+    let ft = fen_new(8);
+    assert_eq(fen_prefix_sum(ft, 1), 0);
+    assert_eq(fen_prefix_sum(ft, 8), 0);
+}
+
+fn test_single_update() {
+    let mut ft = fen_new(8);
+    ft = fen_update(ft, 3, 10);
+    assert_eq(fen_prefix_sum(ft, 2), 0);
+    assert_eq(fen_prefix_sum(ft, 3), 10);
+    assert_eq(fen_prefix_sum(ft, 8), 10);
+}
+
+fn test_build_from_array() {
+    // data = [1, 3, 5, 7, 9, 11, 13, 15]
+    let data = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 9, e5: 11, e6: 13, e7: 15 };
+    let ft = fen_build(data, 8);
+    // prefix_sum(1) = 1
+    assert_eq(fen_prefix_sum(ft, 1), 1);
+    // prefix_sum(2) = 1+3 = 4
+    assert_eq(fen_prefix_sum(ft, 2), 4);
+    // prefix_sum(4) = 1+3+5+7 = 16
+    assert_eq(fen_prefix_sum(ft, 4), 16);
+    // prefix_sum(8) = 1+3+5+7+9+11+13+15 = 64
+    assert_eq(fen_prefix_sum(ft, 8), 64);
+}
+
+fn test_range_sum() {
+    let data = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 9, e5: 11, e6: 13, e7: 15 };
+    let ft = fen_build(data, 8);
+    // Range [1,1] = 1
+    assert_eq(fen_range_sum(ft, 1, 1), 1);
+    // Range [2,4] = 3+5+7 = 15
+    assert_eq(fen_range_sum(ft, 2, 4), 15);
+    // Range [5,8] = 9+11+13+15 = 48
+    assert_eq(fen_range_sum(ft, 5, 8), 48);
+    // Range [3,6] = 5+7+9+11 = 32
+    assert_eq(fen_range_sum(ft, 3, 6), 32);
+    // Range [1,8] = 64
+    assert_eq(fen_range_sum(ft, 1, 8), 64);
+}
+
+fn test_point_update_and_query() {
+    let data = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let mut ft = fen_build(data, 8);
+    // Total: 1+2+3+4+5+6+7+8 = 36
+    assert_eq(fen_prefix_sum(ft, 8), 36);
+
+    // Add 10 to index 3 (1-indexed)
+    ft = fen_update(ft, 3, 10);
+    // New total: 36 + 10 = 46
+    assert_eq(fen_prefix_sum(ft, 8), 46);
+    // prefix_sum(3) = 1+2+13 = 16
+    assert_eq(fen_prefix_sum(ft, 3), 16);
+    // prefix_sum(2) = 1+2 = 3 (unaffected)
+    assert_eq(fen_prefix_sum(ft, 2), 3);
+}
+
+fn test_multiple_updates() {
+    let mut ft = fen_new(8);
+    // Set each index to its value
+    ft = fen_update(ft, 1, 10);
+    ft = fen_update(ft, 2, 20);
+    ft = fen_update(ft, 3, 30);
+    ft = fen_update(ft, 4, 40);
+    assert_eq(fen_prefix_sum(ft, 1), 10);
+    assert_eq(fen_prefix_sum(ft, 2), 30);
+    assert_eq(fen_prefix_sum(ft, 3), 60);
+    assert_eq(fen_prefix_sum(ft, 4), 100);
+    assert_eq(fen_range_sum(ft, 2, 3), 50);
+}
+
+fn test_lowbit() {
+    assert_eq(lowbit(1), 1);
+    assert_eq(lowbit(2), 2);
+    assert_eq(lowbit(3), 1);
+    assert_eq(lowbit(4), 4);
+    assert_eq(lowbit(5), 1);
+    assert_eq(lowbit(6), 2);
+    assert_eq(lowbit(7), 1);
+    assert_eq(lowbit(8), 8);
+}
+
+fn test_all_same_values() {
+    let data = Arr8 { e0: 5, e1: 5, e2: 5, e3: 5, e4: 5, e5: 5, e6: 5, e7: 5 };
+    let ft = fen_build(data, 8);
+    assert_eq(fen_prefix_sum(ft, 1), 5);
+    assert_eq(fen_prefix_sum(ft, 4), 20);
+    assert_eq(fen_prefix_sum(ft, 8), 40);
+    assert_eq(fen_range_sum(ft, 3, 6), 20);
+}
+
+fn test_negative_updates() {
+    let mut ft = fen_new(4);
+    ft = fen_update(ft, 1, 100);
+    ft = fen_update(ft, 2, 200);
+    ft = fen_update(ft, 3, 300);
+    ft = fen_update(ft, 4, 400);
+    assert_eq(fen_prefix_sum(ft, 4), 1000);
+
+    // Subtract 50 from index 2
+    ft = fen_update(ft, 2, -50);
+    assert_eq(fen_prefix_sum(ft, 4), 950);
+    assert_eq(fen_range_sum(ft, 2, 2), 150);
+}
+
+fn test_cumulative_frequency() {
+    // Use Fenwick tree as cumulative frequency table
+    let mut ft = fen_new(8);
+    // Record occurrences: value 1 appears 3 times, value 3 appears 2 times, value 5 once
+    ft = fen_update(ft, 1, 3);
+    ft = fen_update(ft, 3, 2);
+    ft = fen_update(ft, 5, 1);
+    // Cumulative frequency up to 3 = 3 + 0 + 2 = 5
+    assert_eq(fen_prefix_sum(ft, 3), 5);
+    // Cumulative frequency up to 5 = 5 + 0 + 1 = 6
+    assert_eq(fen_prefix_sum(ft, 5), 6);
+    // Frequency at exactly 3 = range_sum(3,3) = 2
+    assert_eq(fen_range_sum(ft, 3, 3), 2);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_empty_tree();
+    test_single_update();
+    test_build_from_array();
+    test_range_sum();
+    test_point_update_and_query();
+    test_multiple_updates();
+    test_lowbit();
+    test_all_same_values();
+    test_negative_updates();
+    test_cumulative_frequency();
+    print("[OK] 296_interp_fenwick_tree");
+    0
+}

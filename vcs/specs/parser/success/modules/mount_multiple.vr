@@ -1,0 +1,50 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Import two items
+mount core.{io, fs};
+
+// Import three items
+mount core.collections.{List, Set, Map};
+
+// Import many items
+mount core.{io, fs, net, sync, thread, time};
+
+// Single item in braces (valid but unusual)
+mount core.{collections};
+
+// Items with trailing comma
+mount core.{io, fs,};
+
+// Mixed depths in group
+mount core.collections.{List, hash.HashMap, btree.BTreeMap};
+
+// Group from longer path
+mount myorg.myproject.core.utils.{helper1, helper2, helper3};
+
+// Group with underscored names
+mount mymod.{my_item, other_item, third_item};
+
+// Group with mixed case
+mount types.{Point, Vector, Matrix, complex.ComplexNumber};
+
+// Multiple group mounts
+mount core.io.{Read, Write, BufRead, BufWrite};
+mount core.fs.{File, OpenOptions, Metadata};
+mount core.net.{TcpStream, TcpListener, UdpSocket};
+
+// Groups at different nesting levels
+mount a.{b, c};
+mount x.y.{z, w};
+mount p.q.r.{s, t, u, v};
+
+// Group with aliased items
+mount core.collections.{List as L, Map as M, Set as S};
+
+// Complex mixed group
+mount mylib.{
+    types.{Point, Vector},
+    utils.{helper, format},
+    core.Engine
+};

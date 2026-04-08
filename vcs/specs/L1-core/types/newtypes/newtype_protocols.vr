@@ -1,0 +1,242 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, newtypes, protocols, traits
+// @description: Newtypes implementing protocols
+
+/// Test for newtypes implementing protocols.
+/// Newtypes can manually implement protocols.
+
+// ============================================================================
+// Protocol definitions
+// ============================================================================
+
+type Displayable is protocol {
+    fn fmt(&self) -> Text;
+};
+
+type Comparable is protocol {
+    fn compare_val(&self, other: &Self) -> Int;
+};
+
+type Defaultable is protocol {
+    fn default_val() -> Self;
+};
+
+type Addable is protocol {
+    fn add_val(&self, other: &Self) -> Self;
+};
+
+// ============================================================================
+// Newtype with manual protocol implementation
+// ============================================================================
+
+type Temperature is (Float);
+
+implement Displayable for Temperature {
+    fn fmt(&self) -> Text {
+        f"{self.0} degrees"
+    }
+}
+
+implement Comparable for Temperature {
+    fn compare_val(&self, other: &Temperature) -> Int {
+        if self.0 < other.0 { -1 }
+        else if self.0 > other.0 { 1 }
+        else { 0 }
+    }
+}
+
+implement Defaultable for Temperature {
+    fn default_val() -> Temperature {
+        Temperature(0.0)
+    }
+}
+
+// ============================================================================
+// Counter newtype with multiple implementations
+// ============================================================================
+
+type Counter is (Int);
+
+implement Displayable for Counter {
+    fn fmt(&self) -> Text {
+        f"Counter({self.0})"
+    }
+}
+
+implement Defaultable for Counter {
+    fn default_val() -> Counter {
+        Counter(0)
+    }
+}
+
+implement Comparable for Counter {
+    fn compare_val(&self, other: &Counter) -> Int {
+        if self.0 < other.0 { -1 }
+        else if self.0 > other.0 { 1 }
+        else { 0 }
+    }
+}
+
+implement Addable for Counter {
+    fn add_val(&self, other: &Counter) -> Counter {
+        Counter(self.0 + other.0)
+    }
+}
+
+// ============================================================================
+// UserId newtype
+// ============================================================================
+
+type UserId is (Int);
+
+implement Displayable for UserId {
+    fn fmt(&self) -> Text {
+        f"User#{self.0}"
+    }
+}
+
+implement Comparable for UserId {
+    fn compare_val(&self, other: &UserId) -> Int {
+        if self.0 < other.0 { -1 }
+        else if self.0 > other.0 { 1 }
+        else { 0 }
+    }
+}
+
+// ============================================================================
+// Methods on newtypes
+// ============================================================================
+
+implement Temperature {
+    fn celsius(&self) -> Float {
+        self.0
+    }
+
+    fn fahrenheit(&self) -> Float {
+        self.0 * 9.0 / 5.0 + 32.0
+    }
+
+    fn is_freezing(&self) -> Bool {
+        self.0 <= 0.0
+    }
+}
+
+implement Counter {
+    fn increment(&mut self) {
+        self.0 += 1;
+    }
+
+    fn decrement(&mut self) {
+        self.0 -= 1;
+    }
+
+    fn value(&self) -> Int {
+        self.0
+    }
+
+    fn is_zero(&self) -> Bool {
+        self.0 == 0
+    }
+}
+
+// ============================================================================
+// Generic functions using protocol constraints
+// (Only protocol methods with no extra args work in generic context)
+// ============================================================================
+
+fn display_value<T: Displayable>(value: &T) -> Text {
+    value.fmt()
+}
+
+fn get_default<T: Defaultable>() -> T {
+    T.default_val()
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Temperature tests
+    let temp = Temperature(98.6);
+    let temp_str: Text = temp.fmt();
+    assert(temp_str == "98.6 degrees");
+    assert(temp.celsius() == 98.6);
+    assert(!temp.is_freezing());
+
+    let freezing = Temperature(0.0);
+    assert(freezing.is_freezing());
+
+    // Comparable
+    let cold = Temperature(0.0);
+    let hot = Temperature(100.0);
+    assert(cold.compare_val(&hot) == -1);
+    assert(hot.compare_val(&cold) == 1);
+    assert(cold.compare_val(&cold) == 0);
+
+    // Default
+    let default_temp: Temperature = Temperature.default_val();
+    assert(default_temp.0 == 0.0);
+
+    // Counter tests
+    let c1 = Counter(10);
+    let c2 = Counter(20);
+    assert(c1.fmt() == "Counter(10)");
+    assert(c1.compare_val(&c2) == -1);
+    assert(!c1.is_zero());
+
+    // Mutable counter
+    let mut c3 = Counter(0);
+    assert(c3.is_zero());
+    c3.increment();
+    assert(c3.value() == 1);
+    c3.increment();
+    assert(c3.value() == 2);
+    c3.decrement();
+    assert(c3.value() == 1);
+
+    // Add
+    let c4 = Counter(5);
+    let c5 = Counter(7);
+    let c_sum = c4.add_val(&c5);
+    assert(c_sum.0 == 12);
+
+    // Default counter
+    let default_counter: Counter = Counter.default_val();
+    assert(default_counter.is_zero());
+
+    // UserId tests
+    let id1 = UserId(42);
+    let id2 = UserId(99);
+    assert(id1.fmt() == "User#42");
+    assert(id1.compare_val(&id2) == -1);
+
+    // Generic functions (only no-extra-arg protocol methods work in generic context)
+    let temp_display: Text = display_value(&temp);
+    assert(temp_display == "98.6 degrees");
+
+    let counter_display: Text = display_value(&c1);
+    assert(counter_display == "Counter(10)");
+
+    // Direct concrete calls for methods with extra args:
+    let cmp: Int = cold.compare_val(&hot);
+    assert(cmp == -1);
+
+    let default_c: Counter = get_default();
+    assert(default_c.0 == 0);
+
+    // add_val called directly on concrete type
+    let added = Counter(3).add_val(&Counter(4));
+    assert(added.0 == 7);
+
+    // Manual min search (avoids generic with compare_val)
+    let t1 = Temperature(30.0);
+    let t2 = Temperature(10.0);
+    let t3 = Temperature(20.0);
+    let min_t = if t2.compare_val(&t1) < 0 { Temperature(10.0) } else { Temperature(30.0) };
+    assert(min_t.0 == 10.0);
+
+    print("Newtype protocol tests passed!");
+}

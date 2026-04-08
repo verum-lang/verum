@@ -1,0 +1,86 @@
+// @test: parse
+// @level: L0
+// @tags: parser, patterns, compound
+// @description: Test compound pattern parsing (tuple, array, record)
+
+fn test_tuple_patterns() {
+    // Basic tuple
+    let (a, b) = pair;
+    let (x, y, z) = triple;
+    let (first, _) = pair;
+    let (_, second) = pair;
+
+    // Nested tuples
+    let ((a, b), c) = nested;
+    let (a, (b, c)) = nested2;
+    let ((a, b), (c, d)) = deep;
+
+    // Single element tuple
+    let (x,) = single;
+}
+
+fn test_array_patterns() {
+    // Fixed size
+    let [a, b, c] = array;
+    let [first, second] = array;
+    let [_, middle, _] = array;
+
+    // With rest
+    let [head, ..tail] = array;
+    let [first, .., last] = array;
+    let [..init, last] = array;
+
+    // Nested
+    let [[a, b], [c, d]] = matrix;
+}
+
+fn test_record_patterns() {
+    // Full destructuring
+    let Point { x, y } = point;
+    let Person { name, age } = person;
+
+    // With renaming
+    let Point { x: px, y: py } = point;
+    let Person { name: n, age: a } = person;
+
+    // Partial with rest
+    let Point { x, .. } = point;
+    let Person { name, .. } = person;
+
+    // Nested
+    let Line { start: Point { x: x1, y: y1 }, end: Point { x: x2, y: y2 } } = line;
+
+    // Mixed
+    let Data { header, values: [first, .., last] } = data;
+}
+
+fn test_variant_patterns() {
+    // Simple variants
+    match option {
+        Some(x) => use(x),
+        None => default()
+    }
+
+    match result {
+        Ok(value) => success(value),
+        Err(error) => failure(error)
+    }
+
+    // Tuple variants
+    match color {
+        RGB(r, g, b) => rgb(r, g, b),
+        RGBA(r, g, b, a) => rgba(r, g, b, a)
+    }
+
+    // Record variants
+    match shape {
+        Circle { radius } => circle(radius),
+        Rectangle { width, height } => rect(width, height)
+    }
+
+    // Simple variant patterns
+    match value {
+        Some(x) => x,
+        None => default()
+    }
+}

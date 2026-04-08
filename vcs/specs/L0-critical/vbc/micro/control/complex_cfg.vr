@@ -1,0 +1,32 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, control-flow, stress
+// @timeout: 5000
+// @expected-exit: 0
+
+fn classify(n: Int) -> Int {
+    if n < 0 {
+        if n < -100 {
+            return -2;
+        } else {
+            return -1;
+        }
+    } else if n == 0 {
+        return 0;
+    } else {
+        if n > 100 {
+            return 2;
+        } else {
+            return 1;
+        }
+    }
+}
+
+fn main() {
+    assert_eq(classify(-200), -2);
+    assert_eq(classify(-50), -1);
+    assert_eq(classify(0), 0);
+    assert_eq(classify(50), 1);
+    assert_eq(classify(200), 2);
+}

@@ -1,0 +1,41 @@
+// @test: parse
+// @level: L1
+// @tags: meta, cfg, features, conditional-compilation
+// @timeout: 5000
+
+/// @cfg with feature flags and compound conditions.
+
+// Feature-gated function
+@cfg(feature = "async")
+async fn fetch_data(url: Text) -> Text {
+    "data"
+}
+
+// Feature-gated type
+@cfg(feature = "serialization")
+@derive(Serialize)
+type Payload is {
+    data: List<Int>,
+};
+
+// Conditional implementation
+@cfg(feature = "logging")
+fn log(level: Text, msg: Text) {
+    print(f"[{level}] {msg}");
+}
+
+// Conditional constant
+@cfg(debug)
+const MAX_RETRIES: Int = 100;
+
+@cfg(release)
+const MAX_RETRIES: Int = 3;
+
+// Using conditional context
+fn process() using [Logger if cfg.logging_enabled] {
+    print("Processing");
+}
+
+fn main() {
+    print("Cfg features tests parsed");
+}

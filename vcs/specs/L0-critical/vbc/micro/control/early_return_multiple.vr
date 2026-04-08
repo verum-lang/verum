@@ -1,0 +1,42 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, control-flow, stress
+// @timeout: 5000
+// @expected-exit: 0
+
+fn find_divisor(n: Int) -> Int {
+    // Multiple early returns for different conditions
+    if n <= 1 {
+        return -1;  // invalid input
+    }
+
+    if n == 2 {
+        return 2;  // special case for 2
+    }
+
+    if n % 2 == 0 {
+        return 2;  // even numbers
+    }
+
+    let mut i: Int = 3;
+    while i * i <= n {
+        if n % i == 0 {
+            return i;  // found divisor
+        }
+        i = i + 2;
+    }
+
+    return n;  // n is prime
+}
+
+fn main() {
+    assert_eq(find_divisor(0), -1);   // invalid
+    assert_eq(find_divisor(1), -1);   // invalid
+    assert_eq(find_divisor(2), 2);    // special case
+    assert_eq(find_divisor(4), 2);    // even
+    assert_eq(find_divisor(9), 3);    // 3*3
+    assert_eq(find_divisor(15), 3);   // 3*5
+    assert_eq(find_divisor(17), 17);  // prime
+    assert_eq(find_divisor(25), 5);   // 5*5
+}

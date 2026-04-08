@@ -1,0 +1,469 @@
+// @test: run
+// @expected-stdout: All Scoped resource safety tests passed!
+// @tier: 0
+// @level: L2
+// @tags: errors, scoped, resource, raii, cleanup, composition
+// @description: Tests for Scoped Resource Safety
+//
+// Spec: docs/detailed/20-error-handling.md Section 2.5.10 - Scoped Resource Safety
+// Resources often need to be composed with guaranteed cleanup.
+
+// ============================================================================
+// Types for testing
+// ============================================================================
+
+type ResourceError is
+    | AcquisitionFailed(Text)
+    | OperationFailed(Text);
+
+// Simulated resources with tracking
+static mut ACQUIRED_RESOURCES: List<Text> = List.new();
+static mut RELEASED_RESOURCES: List<Text> = List.new();
+
+fn clear_resource_tracking() {
+    ACQUIRED_RESOURCES.clear();
+    RELEASED_RESOURCES.clear();
+}
+
+fn get_acquired() -> List<Text> {
+    ACQUIRED_RESOURCES.clone()
+}
+
+fn get_released() -> List<Text> {
+    RELEASED_RESOURCES.clone()
+}
+
+fn mark_acquired(name: Text) {
+    ACQUIRED_RESOURCES.push(name);
+}
+
+fn mark_released(name: Text) {
+    RELEASED_RESOURCES.push(name);
+}
+
+// ============================================================================
+// File Resource (simulated)
+// ============================================================================
+
+type FileHandle is {
+    path: Text,
+    is_open: Bool,
+};
+
+implement FileHandle {
+    fn open(path: Text) -> Result<FileHandle, ResourceError> {
+        if path.starts_with("/invalid") {
+            Err(ResourceError.AcquisitionFailed(f"Cannot open {path}"))
+        } else {
+            mark_acquired(f"file:{path}");
+            Ok(FileHandle { path, is_open: true })
+        }
+    }
+
+    fn close(&mut self) {
+        if self.is_open {
+            self.is_open = false;
+            mark_released(f"file:{self.path}");
+        }
+    }
+
+    fn read(&self) -> Result<Text, ResourceError> {
+        if !self.is_open {
+            Err(ResourceError.OperationFailed("File not open"))
+        } else {
+            Ok(f"contents of {self.path}")
+        }
+    }
+}
+
+// ============================================================================
+// Database Connection (simulated)
+// ============================================================================
+
+type DbConnection is {
+    id: Int,
+    is_connected: Bool,
+};
+
+implement DbConnection {
+    fn connect(id: Int) -> Result<DbConnection, ResourceError> {
+        if id < 0 {
+            Err(ResourceError.AcquisitionFailed("Invalid connection ID"))
+        } else {
+            mark_acquired(f"db:{id}");
+            Ok(DbConnection { id, is_connected: true })
+        }
+    }
+
+    fn disconnect(&mut self) {
+        if self.is_connected {
+            self.is_connected = false;
+            mark_released(f"db:{self.id}");
+        }
+    }
+
+    fn query(&self, sql: Text) -> Result<Text, ResourceError> {
+        if !self.is_connected {
+            Err(ResourceError.OperationFailed("Not connected"))
+        } else if sql.contains("FAIL") {
+            Err(ResourceError.OperationFailed("Query failed"))
+        } else {
+            Ok(f"result of {sql}")
+        }
+    }
+}
+
+// ============================================================================
+// Transaction (simulated)
+// ============================================================================
+
+type Transaction is {
+    id: Int,
+    is_active: Bool,
+};
+
+implement Transaction {
+    fn begin(conn: &DbConnection) -> Result<Transaction, ResourceError> {
+        if !conn.is_connected {
+            Err(ResourceError.AcquisitionFailed("Connection not active"))
+        } else {
+            mark_acquired(f"tx:{conn.id}");
+            Ok(Transaction { id: conn.id, is_active: true })
+        }
+    }
+
+    fn commit(&mut self) -> Result<(), ResourceError> {
+        if !self.is_active {
+            Err(ResourceError.OperationFailed("Transaction not active"))
+        } else {
+            self.is_active = false;
+            mark_released(f"tx:{self.id}:commit");
+            Ok(())
+        }
+    }
+
+    fn rollback(&mut self) {
+        if self.is_active {
+            self.is_active = false;
+            mark_released(f"tx:{self.id}:rollback");
+        }
+    }
+}
+
+// ============================================================================
+// Scoped Type - Resource with guaranteed cleanup
+// ============================================================================
+
+/// Scoped resource with guaranteed cleanup
+/// Spec: docs/detailed/20-error-handling.md Section 2.5.10
+type Scoped<R, E> is {
+    acquire: fn() -> Result<R, E>,
+    release: fn(&mut R) -> (),
+};
+
+implement<R, E> Scoped<R, E> {
+    /// Create a new scoped resource
+    fn new(
+        acquire: fn() -> Result<R, E>,
+        release: fn(&mut R) -> (),
+    ) -> Self {
+        Scoped { acquire, release }
+    }
+
+    /// Use the resource with guaranteed cleanup
+    fn use_resource<T>(self, f: fn(&mut R) -> Result<T, E>) -> Result<T, E> {
+        let mut resource = (self.acquire)()?;
+        let result = f(&mut resource);
+        (self.release)(&mut resource);
+        result
+    }
+}
+
+/// Create a scoped file resource
+fn scoped_file(path: Text) -> Scoped<FileHandle, ResourceError> {
+    Scoped.new(
+        || FileHandle.open(path.clone()),
+        |f| f.close(),
+    )
+}
+
+/// Create a scoped database connection
+fn scoped_connection(id: Int) -> Scoped<DbConnection, ResourceError> {
+    Scoped.new(
+        || DbConnection.connect(id),
+        |c| c.disconnect(),
+    )
+}
+
+// ============================================================================
+// With-pattern helper (simpler approach)
+// ============================================================================
+
+/// Execute an operation with a resource, ensuring cleanup
+fn with_resource<R, E, T>(
+    acquire: fn() -> Result<R, E>,
+    release: fn(&mut R) -> (),
+    operation: fn(&mut R) -> Result<T, E>,
+) -> Result<T, E> {
+    let mut resource = acquire()?;
+    let result = operation(&mut resource);
+    release(&mut resource);
+    result
+}
+
+/// Execute with file
+fn with_file<T>(path: Text, operation: fn(&mut FileHandle) -> Result<T, ResourceError>) -> Result<T, ResourceError> {
+    with_resource(
+        || FileHandle.open(path),
+        |f| f.close(),
+        operation,
+    )
+}
+
+/// Execute with database connection
+fn with_connection<T>(id: Int, operation: fn(&mut DbConnection) -> Result<T, ResourceError>) -> Result<T, ResourceError> {
+    with_resource(
+        || DbConnection.connect(id),
+        |c| c.disconnect(),
+        operation,
+    )
+}
+
+/// Execute with transaction (nested in connection)
+fn with_transaction<T>(
+    conn: &DbConnection,
+    operation: fn(&mut Transaction) -> Result<T, ResourceError>,
+) -> Result<T, ResourceError> {
+    let mut tx = Transaction.begin(conn)?;
+    let result = operation(&mut tx);
+
+    match result {
+        Ok(v) => {
+            tx.commit()?;
+            Ok(v)
+        }
+        Err(e) => {
+            tx.rollback();
+            Err(e)
+        }
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_scoped_file_success() {
+    clear_resource_tracking();
+
+    let result = with_file("test.txt", |file| {
+        file.read()
+    });
+
+    assert(result.is_ok());
+
+    // File should be acquired and released
+    let acquired = get_acquired();
+    let released = get_released();
+
+    assert_eq(acquired.len(), 1);
+    assert_eq(acquired[0], "file:test.txt");
+    assert_eq(released.len(), 1);
+    assert_eq(released[0], "file:test.txt");
+}
+
+fn test_scoped_file_failure() {
+    clear_resource_tracking();
+
+    // Acquisition failure
+    let result = with_file("/invalid/path.txt", |file| {
+        file.read()
+    });
+
+    assert(result.is_err());
+
+    // Nothing should be acquired or released
+    let acquired = get_acquired();
+    let released = get_released();
+
+    assert_eq(acquired.len(), 0);
+    assert_eq(released.len(), 0);
+}
+
+fn test_scoped_file_operation_error() {
+    clear_resource_tracking();
+
+    let result = with_file("test.txt", |file| -> Result<Text, ResourceError> {
+        // Simulate operation failure
+        Err(ResourceError.OperationFailed("read error"))
+    });
+
+    assert(result.is_err());
+
+    // Resource should still be cleaned up!
+    let acquired = get_acquired();
+    let released = get_released();
+
+    assert_eq(acquired.len(), 1);
+    assert_eq(released.len(), 1);  // Cleanup happens even on error
+}
+
+fn test_scoped_connection_success() {
+    clear_resource_tracking();
+
+    let result = with_connection(1, |conn| {
+        conn.query("SELECT * FROM users")
+    });
+
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), "result of SELECT * FROM users");
+
+    let acquired = get_acquired();
+    let released = get_released();
+
+    assert_eq(acquired.len(), 1);
+    assert_eq(acquired[0], "db:1");
+    assert_eq(released.len(), 1);
+    assert_eq(released[0], "db:1");
+}
+
+fn test_nested_resources() {
+    clear_resource_tracking();
+
+    let result = with_connection(1, |conn| {
+        with_transaction(conn, |tx| {
+            // Simulate successful operation
+            Ok("success")
+        })
+    });
+
+    assert(result.is_ok());
+
+    let acquired = get_acquired();
+    let released = get_released();
+
+    // Both connection and transaction acquired
+    assert_eq(acquired.len(), 2);
+    assert_eq(acquired[0], "db:1");
+    assert_eq(acquired[1], "tx:1");
+
+    // Both released (transaction committed)
+    assert_eq(released.len(), 2);
+    assert_eq(released[0], "tx:1:commit");
+    assert_eq(released[1], "db:1");
+}
+
+fn test_nested_resources_with_rollback() {
+    clear_resource_tracking();
+
+    let result = with_connection(1, |conn| {
+        with_transaction(conn, |tx| -> Result<Text, ResourceError> {
+            // Simulate operation failure
+            Err(ResourceError.OperationFailed("query failed"))
+        })
+    });
+
+    assert(result.is_err());
+
+    let acquired = get_acquired();
+    let released = get_released();
+
+    // Both acquired
+    assert_eq(acquired.len(), 2);
+
+    // Both released, but transaction rolled back
+    assert_eq(released.len(), 2);
+    assert_eq(released[0], "tx:1:rollback");  // Rollback, not commit
+    assert_eq(released[1], "db:1");
+}
+
+fn test_scoped_type_use() {
+    clear_resource_tracking();
+
+    let scoped = scoped_file("config.json");
+
+    let result = scoped.use_resource(|file| {
+        file.read()
+    });
+
+    assert(result.is_ok());
+
+    let acquired = get_acquired();
+    let released = get_released();
+
+    assert_eq(acquired.len(), 1);
+    assert_eq(released.len(), 1);
+}
+
+fn test_multiple_scoped_resources() {
+    clear_resource_tracking();
+
+    // Open multiple files
+    let result = with_file("file1.txt", |f1| {
+        with_file("file2.txt", |f2| {
+            with_file("file3.txt", |f3| {
+                // Use all three files
+                let content1 = f1.read()?;
+                let content2 = f2.read()?;
+                let content3 = f3.read()?;
+                Ok(f"{content1}|{content2}|{content3}")
+            })
+        })
+    });
+
+    assert(result.is_ok());
+
+    let acquired = get_acquired();
+    let released = get_released();
+
+    // All three acquired
+    assert_eq(acquired.len(), 3);
+
+    // All three released (in reverse order)
+    assert_eq(released.len(), 3);
+    assert_eq(released[0], "file:file3.txt");  // LIFO order
+    assert_eq(released[1], "file:file2.txt");
+    assert_eq(released[2], "file:file1.txt");
+}
+
+fn test_partial_acquisition_failure() {
+    clear_resource_tracking();
+
+    let result = with_file("file1.txt", |f1| {
+        // Second file fails to open
+        with_file("/invalid/file2.txt", |f2| {
+            Ok("never reached")
+        })
+    });
+
+    assert(result.is_err());
+
+    let acquired = get_acquired();
+    let released = get_released();
+
+    // Only first file acquired
+    assert_eq(acquired.len(), 1);
+    assert_eq(acquired[0], "file:file1.txt");
+
+    // First file still released on error
+    assert_eq(released.len(), 1);
+    assert_eq(released[0], "file:file1.txt");
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    test_scoped_file_success();
+    test_scoped_file_failure();
+    test_scoped_file_operation_error();
+    test_scoped_connection_success();
+    test_nested_resources();
+    test_nested_resources_with_rollback();
+    test_scoped_type_use();
+    test_multiple_scoped_resources();
+    test_partial_acquisition_failure();
+
+    print("All Scoped resource safety tests passed!");
+}

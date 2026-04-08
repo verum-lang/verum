@@ -1,0 +1,667 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: runtime, context, lookup, dependency-injection
+// @description: Context resolution benchmark (target: < 30ns per lookup)
+
+/// Context Resolution Benchmark
+///
+/// Measures the overhead of Verum's context system (dependency injection).
+/// Context lookup should be efficient as it's used pervasively.
+///
+/// Targets (per spec):
+/// - Single context lookup: 5-30ns
+/// - Multiple context lookup: < 50ns total
+/// - Nested context: < 40ns
+/// - Context propagation: < 10ns
+///
+/// Spec reference: docs/detailed/16-context-system.md
+
+module vcs.specs.l4.runtime.context_lookup;
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Test context definitions
+context Logger {
+    fn log(&self, msg: Text);
+    fn level(&self) -> LogLevel;
+}
+
+context Database {
+    fn query(&self, sql: Text) -> List<Row>;
+    fn execute(&self, sql: Text) -> Int;
+}
+
+context Config {
+    fn get(&self, key: Text) -> Maybe<Text>;
+    fn get_int(&self, key: Text) -> Maybe<Int>;
+}
+
+context Cache {
+    fn get<T>(&self, key: Text) -> Maybe<T>;
+    fn set<T>(&self, key: Text, value: T);
+}
+
+context Metrics {
+    fn counter(&self, name: Text) -> Counter;
+    fn gauge(&self, name: Text) -> Gauge;
+}
+
+/// Log level enumeration
+type LogLevel is Debug | Info | Warn | Error;
+
+/// Placeholder types
+type Row is { data: Map<Text, Text> };
+type Counter is { name: Text };
+type Gauge is { name: Text };
+
+/// Context implementations
+type ConsoleLogger is { level: LogLevel };
+
+implement Logger for ConsoleLogger {
+    fn log(&self, msg: Text) {
+        // No-op for benchmark
+    }
+
+    fn level(&self) -> LogLevel {
+        self.level
+    }
+}
+
+type MockDatabase is {};
+
+implement Database for MockDatabase {
+    fn query(&self, sql: Text) -> List<Row> {
+        List.new()
+    }
+
+    fn execute(&self, sql: Text) -> Int {
+        0
+    }
+}
+
+type EnvConfig is { values: Map<Text, Text> };
+
+implement Config for EnvConfig {
+    fn get(&self, key: Text) -> Maybe<Text> {
+        self.values.get(key)
+    }
+
+    fn get_int(&self, key: Text) -> Maybe<Int> {
+        self.values.get(key).and_then(|s| s.parse_int())
+    }
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Context Resolution Overhead");
+
+    // Setup contexts for all benchmarks
+    provide Logger = ConsoleLogger { level: LogLevel.Info };
+    provide Database = MockDatabase {};
+    provide Config = EnvConfig { values: Map.new() };
+
+    // Single context benchmarks
+    results.add(benchmark_single_context_lookup());
+    results.add(benchmark_context_method_call());
+    results.add(benchmark_context_value_access());
+
+    // Multiple context benchmarks
+    results.add(benchmark_two_context_lookup());
+    results.add(benchmark_three_context_lookup());
+    results.add(benchmark_five_context_lookup());
+
+    // Context propagation
+    results.add(benchmark_context_propagation());
+    results.add(benchmark_nested_context_calls());
+
+    // Context override
+    results.add(benchmark_context_override());
+    results.add(benchmark_scoped_context());
+
+    // Real-world patterns
+    results.add(benchmark_service_layer_pattern());
+    results.add(benchmark_middleware_pattern());
+
+    results.report();
+    assert(results.all_pass(), "Context resolution overhead exceeds targets");
+}
+
+/// Single context lookup
+fn benchmark_single_context_lookup() -> BenchmarkResult {
+    fn use_logger() using [Logger] {
+        // Just accessing the context
+        let _ = Logger;
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        use_logger();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        use_logger();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_lookup_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "single_context_lookup",
+        metric: "ns/lookup",
+        value: per_lookup_ns,
+        target: 10.0,
+        passed: per_lookup_ns < 10.0,
+    }
+}
+
+/// Context lookup with method call
+fn benchmark_context_method_call() -> BenchmarkResult {
+    fn log_message() using [Logger] {
+        Logger.log("test message");
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        log_message();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        log_message();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "context_method_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 15.0,
+        passed: per_call_ns < 15.0,
+    }
+}
+
+/// Context value access
+fn benchmark_context_value_access() -> BenchmarkResult {
+    fn get_log_level() -> LogLevel using [Logger] {
+        Logger.level()
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(get_log_level());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(get_log_level());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_access_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "context_value_access",
+        metric: "ns/access",
+        value: per_access_ns,
+        target: 15.0,
+        passed: per_access_ns < 15.0,
+    }
+}
+
+/// Two context lookups
+fn benchmark_two_context_lookup() -> BenchmarkResult {
+    fn use_two_contexts() using [Logger, Database] {
+        let _ = Logger;
+        let _ = Database;
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        use_two_contexts();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        use_two_contexts();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_lookup_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "two_context_lookup",
+        metric: "ns/lookup",
+        value: per_lookup_ns,
+        target: 20.0,
+        passed: per_lookup_ns < 20.0,
+    }
+}
+
+/// Three context lookups
+fn benchmark_three_context_lookup() -> BenchmarkResult {
+    fn use_three_contexts() using [Logger, Database, Config] {
+        let _ = Logger;
+        let _ = Database;
+        let _ = Config;
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        use_three_contexts();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        use_three_contexts();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_lookup_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "three_context_lookup",
+        metric: "ns/lookup",
+        value: per_lookup_ns,
+        target: 30.0,
+        passed: per_lookup_ns < 30.0,
+    }
+}
+
+/// Five context lookups
+fn benchmark_five_context_lookup() -> BenchmarkResult {
+    provide Cache = InMemoryCache {};
+    provide Metrics = NoOpMetrics {};
+
+    fn use_five_contexts() using [Logger, Database, Config, Cache, Metrics] {
+        let _ = Logger;
+        let _ = Database;
+        let _ = Config;
+        let _ = Cache;
+        let _ = Metrics;
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        use_five_contexts();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        use_five_contexts();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_lookup_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "five_context_lookup",
+        metric: "ns/lookup",
+        value: per_lookup_ns,
+        target: 50.0,
+        passed: per_lookup_ns < 50.0,
+    }
+}
+
+/// Context propagation through function calls
+fn benchmark_context_propagation() -> BenchmarkResult {
+    fn level_3() using [Logger] {
+        Logger.log("level 3");
+    }
+
+    fn level_2() using [Logger] {
+        level_3();
+    }
+
+    fn level_1() using [Logger] {
+        level_2();
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        level_1();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        level_1();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_propagation_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // 3 levels of propagation
+    let per_level_ns = per_propagation_ns / 3.0;
+
+    BenchmarkResult {
+        name: "context_propagation",
+        metric: "ns/level",
+        value: per_level_ns,
+        target: 10.0,
+        passed: per_level_ns < 10.0,
+    }
+}
+
+/// Nested context calls with different contexts
+fn benchmark_nested_context_calls() -> BenchmarkResult {
+    fn inner() using [Database] {
+        let _ = Database;
+    }
+
+    fn outer() using [Logger] {
+        Logger.log("before inner");
+        inner();
+        Logger.log("after inner");
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        outer();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        outer();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "nested_context_calls",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 40.0,
+        passed: per_call_ns < 40.0,
+    }
+}
+
+/// Context override in nested scope
+fn benchmark_context_override() -> BenchmarkResult {
+    fn use_logger() using [Logger] {
+        Logger.log("message");
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        provide Logger = ConsoleLogger { level: LogLevel.Debug };
+        use_logger();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        provide Logger = ConsoleLogger { level: LogLevel.Debug };
+        use_logger();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_override_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "context_override",
+        metric: "ns/override",
+        value: per_override_ns,
+        target: 30.0,
+        passed: per_override_ns < 30.0,
+    }
+}
+
+/// Scoped context with cleanup
+fn benchmark_scoped_context() -> BenchmarkResult {
+    fn scoped_operation() {
+        provide Logger = ConsoleLogger { level: LogLevel.Error };
+        {
+            provide Logger = ConsoleLogger { level: LogLevel.Debug };
+            // Nested scope with different logger
+            fn inner() using [Logger] {
+                let _ = Logger.level();
+            }
+            inner();
+        }
+        // Original logger restored
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        scoped_operation();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        scoped_operation();
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_scope_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "scoped_context",
+        metric: "ns/scope",
+        value: per_scope_ns,
+        target: 50.0,
+        passed: per_scope_ns < 50.0,
+    }
+}
+
+/// Service layer pattern (typical enterprise pattern)
+fn benchmark_service_layer_pattern() -> BenchmarkResult {
+    type UserService is {};
+
+    implement UserService {
+        fn get_user(id: Int) -> Maybe<User> using [Database, Logger, Cache] {
+            Logger.log("Getting user {}", id);
+
+            // Check cache first
+            if let Some(user) = Cache.get.<User>("user:{}", id) {
+                return Some(user);
+            }
+
+            // Query database
+            let rows = Database.query("SELECT * FROM users WHERE id = ?");
+            if rows.is_empty() {
+                return None;
+            }
+
+            let user = User.from_row(&rows[0]);
+            Cache.set("user:{}", id, user.clone());
+            Some(user)
+        }
+    }
+
+    type User is { id: Int, name: Text };
+
+    implement User {
+        fn from_row(row: &Row) -> Self {
+            Self { id: 0, name: "test".to_text() }
+        }
+    }
+
+    provide Cache = InMemoryCache {};
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(UserService.get_user(1));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(UserService.get_user(1));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "service_layer_pattern",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 60.0,
+        passed: per_call_ns < 60.0,
+    }
+}
+
+/// Middleware pattern (request processing chain)
+fn benchmark_middleware_pattern() -> BenchmarkResult {
+    type Request is { path: Text };
+    type Response is { status: Int };
+
+    fn handler(req: Request) -> Response using [Logger, Database] {
+        Logger.log("Handling {}", req.path);
+        Response { status: 200 }
+    }
+
+    fn logging_middleware(req: Request) -> Response using [Logger] {
+        Logger.log("Request: {}", req.path);
+        let response = handler(req);
+        Logger.log("Response: {}", response.status);
+        response
+    }
+
+    fn auth_middleware(req: Request) -> Response using [Logger, Database] {
+        Logger.log("Auth check");
+        logging_middleware(req)
+    }
+
+    let req = Request { path: "/test".to_text() };
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(auth_middleware(req.clone()));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(auth_middleware(req.clone()));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_request_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "middleware_pattern",
+        metric: "ns/request",
+        value: per_request_ns,
+        target: 80.0,
+        passed: per_request_ns < 80.0,
+    }
+}
+
+// Mock implementations
+type InMemoryCache is { data: Map<Text, Heap<Any>> };
+
+implement Cache for InMemoryCache {
+    fn get<T>(&self, key: Text) -> Maybe<T> {
+        None
+    }
+
+    fn set<T>(&self, key: Text, value: T) {
+        // No-op
+    }
+}
+
+type NoOpMetrics is {};
+
+implement Metrics for NoOpMetrics {
+    fn counter(&self, name: Text) -> Counter {
+        Counter { name }
+    }
+
+    fn gauge(&self, name: Text) -> Gauge {
+        Gauge { name }
+    }
+}
+
+// Benchmark infrastructure
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

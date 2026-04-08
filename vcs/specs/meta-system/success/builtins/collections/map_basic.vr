@@ -1,0 +1,148 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, map
+// @description: Test basic map operations (map_new, map_len, map_insert, map_get)
+
+// =============================================================================
+// MAP_NEW TESTS
+// =============================================================================
+
+// Test map_new creates empty map
+meta fn test_map_new_empty() -> Int {
+    let m = map_new();
+    map_len(m)  // Should be 0
+}
+
+// =============================================================================
+// MAP_INSERT TESTS
+// =============================================================================
+
+// Test map_insert on empty map
+meta fn test_map_insert_empty() -> Int {
+    let m = map_new();
+    let m = map_insert(m, "key", 42);
+    map_len(m)  // Should be 1
+}
+
+// Test map_insert multiple keys
+meta fn test_map_insert_multiple() -> Int {
+    let m = map_new();
+    let m = map_insert(m, "a", 1);
+    let m = map_insert(m, "b", 2);
+    let m = map_insert(m, "c", 3);
+    map_len(m)  // Should be 3
+}
+
+// Test map_insert overwrites existing key
+meta fn test_map_insert_overwrite() -> Int {
+    let m = map_new();
+    let m = map_insert(m, "key", 1);
+    let m = map_insert(m, "key", 2);
+    map_len(m)  // Should be 1 (same key)
+}
+
+// =============================================================================
+// MAP_GET TESTS
+// =============================================================================
+
+// Test map_get existing key
+meta fn test_map_get_existing() -> Bool {
+    let m = map_new();
+    let m = map_insert(m, "key", 42);
+    let result = map_get(m, "key");
+    // Result is Some(42)
+    result is Some
+}
+
+// Test map_get missing key
+meta fn test_map_get_missing() -> Bool {
+    let m = map_new();
+    let result = map_get(m, "missing");
+    // Result is None
+    result is None
+}
+
+// =============================================================================
+// MAP_CONTAINS TESTS
+// =============================================================================
+
+// Test map_contains for existing key
+meta fn test_map_contains_existing() -> Bool {
+    let m = map_new();
+    let m = map_insert(m, "key", 42);
+    map_contains(m, "key")  // Should be true
+}
+
+// Test map_contains for missing key
+meta fn test_map_contains_missing() -> Bool {
+    let m = map_new();
+    !map_contains(m, "missing")  // Should be true
+}
+
+// =============================================================================
+// MAP_REMOVE TESTS
+// =============================================================================
+
+// Test map_remove existing key
+meta fn test_map_remove_existing() -> Int {
+    let m = map_new();
+    let m = map_insert(m, "a", 1);
+    let m = map_insert(m, "b", 2);
+    let m = map_remove(m, "a");
+    map_len(m)  // Should be 1
+}
+
+// Test map_remove non-existing key (no-op)
+meta fn test_map_remove_missing() -> Int {
+    let m = map_new();
+    let m = map_insert(m, "a", 1);
+    let m = map_remove(m, "missing");
+    map_len(m)  // Should be 1
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test insert then check contains
+meta fn test_insert_then_contains() -> Bool {
+    let m = map_new();
+    let m = map_insert(m, "x", 10);
+    map_contains(m, "x")  // Should be true
+}
+
+// Test insert then remove then contains
+meta fn test_insert_remove_contains() -> Bool {
+    let m = map_new();
+    let m = map_insert(m, "x", 10);
+    let m = map_remove(m, "x");
+    !map_contains(m, "x")  // Should be true (no longer exists)
+}
+
+// Main test function
+fn main() {
+    // new tests
+    assert_eq(@const(test_map_new_empty()), 0);
+
+    // insert tests
+    assert_eq(@const(test_map_insert_empty()), 1);
+    assert_eq(@const(test_map_insert_multiple()), 3);
+    assert_eq(@const(test_map_insert_overwrite()), 1);
+
+    // get tests
+    assert(@const(test_map_get_existing()));
+    assert(@const(test_map_get_missing()));
+
+    // contains tests
+    assert(@const(test_map_contains_existing()));
+    assert(@const(test_map_contains_missing()));
+
+    // remove tests
+    assert_eq(@const(test_map_remove_existing()), 1);
+    assert_eq(@const(test_map_remove_missing()), 1);
+
+    // combined tests
+    assert(@const(test_insert_then_contains()));
+    assert(@const(test_insert_remove_contains()));
+}

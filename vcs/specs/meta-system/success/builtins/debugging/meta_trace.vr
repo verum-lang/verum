@@ -1,0 +1,263 @@
+// @test: meta-pass
+// @level: L1
+// @description: Tests meta_trace builtin functions for macro debugging
+// @tags: meta-system, builtins, debugging, trace
+
+// Test meta_trace_on and meta_trace_off
+meta fn test_trace_toggle() -> Bool {
+    // Initially tracing is off
+    let initially_off = !meta_trace_is_enabled();
+
+    // Turn on
+    meta_trace_on();
+    let after_on = meta_trace_is_enabled();
+
+    // Turn off
+    meta_trace_off();
+    let after_off = !meta_trace_is_enabled();
+
+    initially_off && after_on && after_off
+}
+
+// Test meta_trace_log basic
+meta fn test_trace_log_basic() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_log("Hello");
+    meta_trace_log("World");
+
+    let output = meta_trace_dump();
+    let has_hello = text_contains(output, "Hello");
+    let has_world = text_contains(output, "World");
+
+    meta_trace_off();
+    has_hello && has_world
+}
+
+// Test trace_log only works when enabled
+meta fn test_trace_log_disabled() -> Bool {
+    meta_trace_clear();
+    meta_trace_off();
+
+    meta_trace_log("This should not appear");
+
+    let output = meta_trace_dump();
+    text_len(output) == 0
+}
+
+// Test meta_trace_lines
+meta fn test_trace_lines() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_log("line1");
+    meta_trace_log("line2");
+    meta_trace_log("line3");
+
+    let lines = meta_trace_lines();
+    let count_ok = list_len(lines) == 3;
+    let line0_ok = list_get(lines, 0) == Some("line1");
+    let line1_ok = list_get(lines, 1) == Some("line2");
+    let line2_ok = list_get(lines, 2) == Some("line3");
+
+    meta_trace_off();
+    count_ok && line0_ok && line1_ok && line2_ok
+}
+
+// Test meta_trace_clear
+meta fn test_trace_clear() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_log("message1");
+    meta_trace_log("message2");
+
+    // Verify something is there
+    let lines_before = meta_trace_lines();
+    let had_messages = list_len(lines_before) == 2;
+
+    // Clear
+    meta_trace_clear();
+
+    // Verify empty
+    let lines_after = meta_trace_lines();
+    let now_empty = list_len(lines_after) == 0;
+
+    meta_trace_off();
+    had_messages && now_empty
+}
+
+// Test meta_trace_depth
+meta fn test_trace_depth() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    let d0 = meta_trace_depth() == 0;
+
+    meta_trace_enter("outer");
+    let d1 = meta_trace_depth() == 1;
+
+    meta_trace_enter("inner");
+    let d2 = meta_trace_depth() == 2;
+
+    meta_trace_exit("inner");
+    let d1b = meta_trace_depth() == 1;
+
+    meta_trace_exit("outer");
+    let d0b = meta_trace_depth() == 0;
+
+    meta_trace_off();
+    d0 && d1 && d2 && d1b && d0b
+}
+
+// Test meta_trace_enter and meta_trace_exit with indentation
+meta fn test_trace_indentation() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_enter("function_a");
+    meta_trace_log("inside a");
+    meta_trace_enter("function_b");
+    meta_trace_log("inside b");
+    meta_trace_exit("function_b");
+    meta_trace_exit("function_a");
+
+    let output = meta_trace_dump();
+
+    // Check structure
+    let has_enter_a = text_contains(output, "-> function_a");
+    let has_inside_a = text_contains(output, "inside a");
+    let has_enter_b = text_contains(output, "-> function_b");
+    let has_inside_b = text_contains(output, "inside b");
+    let has_exit_b = text_contains(output, "<- function_b");
+    let has_exit_a = text_contains(output, "<- function_a");
+
+    meta_trace_off();
+    has_enter_a && has_inside_a && has_enter_b && has_inside_b && has_exit_b && has_exit_a
+}
+
+// Test meta_trace_value
+meta fn test_trace_value() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    let x = 42;
+    let name = "test";
+    let flag = true;
+
+    meta_trace_value("x", x);
+    meta_trace_value("name", name);
+    meta_trace_value("flag", flag);
+
+    let output = meta_trace_dump();
+    let has_x = text_contains(output, "x = 42");
+    let has_name = text_contains(output, "name = ");
+    let has_flag = text_contains(output, "flag = true");
+
+    meta_trace_off();
+    has_x && has_name && has_flag
+}
+
+// Test meta_trace_assert with passing condition
+meta fn test_trace_assert_pass() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_assert(true, "this should pass");
+
+    let output = meta_trace_dump();
+    let has_ok = text_contains(output, "ASSERT OK");
+
+    meta_trace_off();
+    has_ok
+}
+
+// Test complex tracing scenario
+meta fn test_trace_complex_scenario() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_log("Starting computation");
+
+    meta_trace_enter("calculate");
+    let result = 0;
+
+    let i = 0;
+    while i < 3 {
+        meta_trace_log(text_concat("iteration ", stringify(i)));
+        result = result + i;
+        i = i + 1;
+    }
+
+    meta_trace_value("final_result", result);
+    meta_trace_exit("calculate");
+
+    meta_trace_log("Done");
+
+    let output = meta_trace_dump();
+    let has_start = text_contains(output, "Starting computation");
+    let has_enter_calc = text_contains(output, "-> calculate");
+    let has_it0 = text_contains(output, "iteration 0");
+    let has_it1 = text_contains(output, "iteration 1");
+    let has_it2 = text_contains(output, "iteration 2");
+    let has_result = text_contains(output, "final_result = 3");
+    let has_exit_calc = text_contains(output, "<- calculate");
+    let has_done = text_contains(output, "Done");
+
+    meta_trace_off();
+    has_start && has_enter_calc && has_it0 && has_it1 && has_it2 && has_result && has_exit_calc && has_done
+}
+
+// Test that trace output persists across function calls
+meta fn helper_traced() {
+    meta_trace_log("helper called");
+}
+
+meta fn test_trace_across_calls() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_log("before helper");
+    helper_traced();
+    meta_trace_log("after helper");
+
+    let lines = meta_trace_lines();
+    let count_ok = list_len(lines) == 3;
+    let l0_ok = list_get(lines, 0) == Some("before helper");
+    let l1_ok = list_get(lines, 1) == Some("helper called");
+    let l2_ok = list_get(lines, 2) == Some("after helper");
+
+    meta_trace_off();
+    count_ok && l0_ok && l1_ok && l2_ok
+}
+
+// Test trace with array values
+meta fn test_trace_value_array() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    let arr = [1, 2, 3];
+    meta_trace_value("arr", arr);
+
+    let output = meta_trace_dump();
+    let has_arr = text_contains(output, "arr = [1, 2, 3]");
+
+    meta_trace_off();
+    has_arr
+}
+
+fn main() {
+    @const assert(test_trace_toggle());
+    @const assert(test_trace_log_basic());
+    @const assert(test_trace_log_disabled());
+    @const assert(test_trace_lines());
+    @const assert(test_trace_clear());
+    @const assert(test_trace_depth());
+    @const assert(test_trace_indentation());
+    @const assert(test_trace_value());
+    @const assert(test_trace_assert_pass());
+    @const assert(test_trace_complex_scenario());
+    @const assert(test_trace_across_calls());
+    @const assert(test_trace_value_array());
+}

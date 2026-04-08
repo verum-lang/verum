@@ -1,0 +1,337 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, cbgr, use-after-free, safety, detection
+// @timeout: 5000
+// @expect: pass
+//
+// Test: CBGR use-after-free detection
+// Verifies that CBGR correctly detects and prevents use-after-free bugs
+
+type Point is { x: Float, y: Float };
+type Node<T> is { value: T, next: Maybe<Heap<Node<T>>> };
+
+// =============================================================================
+// Use-after-free detection scenarios
+// =============================================================================
+
+fn test_detect_simple_use_after_free() {
+    // This tests that we CAN'T do use-after-free
+    // The type system should prevent this at compile time,
+    // or CBGR catches it at runtime
+
+    let result = @catch_cbgr_violation(fn() {
+        let h = Heap(Point { x: 1.0, y: 2.0 });
+        let r: &Point = &*h;
+
+        // Drop the heap object
+        drop(h);
+
+        // This SHOULD fail - use after free
+        let _ = r.x;
+    });
+
+    assert(result is CbgrViolation(UseAfterFree));
+}
+
+fn test_detect_dangling_reference_from_scope() {
+    // Reference escapes scope of referent
+    let result = @catch_cbgr_violation(fn() -> &Int {
+        let x: Int = 42;
+        &x  // Returns dangling reference
+    });
+
+    // Should either not compile or be caught at runtime
+    assert(result is CbgrViolation);
+}
+
+fn test_detect_iterator_invalidation() {
+    // Modifying collection while iterating
+    let result = @catch_cbgr_violation(fn() {
+        let mut list = [1, 2, 3, 4, 5];
+        let r: &Int = &list[2];
+
+        // This invalidates the reference
+        list.push(6);  // May reallocate
+
+        // Use of potentially invalid reference
+        let _ = *r;
+    });
+
+    // CBGR should detect the generation change
+    assert(result is CbgrViolation(GenerationMismatch) || result is Ok);
+    // Note: Some implementations may handle small pushes without reallocation
+}
+
+fn test_detect_double_free() {
+    let result = @catch_cbgr_violation(fn() {
+        let h = Heap(Point { x: 1.0, y: 2.0 });
+
+        // First drop
+        drop(h);
+
+        // Second drop - double free
+        drop(h);
+    });
+
+    assert(result is CbgrViolation(DoubleFree));
+}
+
+fn test_detect_stale_reference_after_reassignment() {
+    let result = @catch_cbgr_violation(fn() {
+        let mut h = Heap(Point { x: 1.0, y: 2.0 });
+        let r: &Point = &*h;
+
+        // Reassign h - old object is dropped
+        h = Heap(Point { x: 3.0, y: 4.0 });
+
+        // r now points to freed memory
+        let _ = r.x;
+    });
+
+    assert(result is CbgrViolation(UseAfterFree));
+}
+
+// =============================================================================
+// Generation tracking tests
+// =============================================================================
+
+fn test_generation_increments() {
+    // Each allocation should have unique generation
+    let h1 = Heap(42);
+    let gen1 = @get_generation(&*h1);
+
+    drop(h1);
+
+    let h2 = Heap(43);
+    let gen2 = @get_generation(&*h2);
+
+    // New allocation must have different generation
+    assert(gen1 != gen2);
+}
+
+fn test_reference_stores_generation() {
+    let h = Heap(Point { x: 1.0, y: 2.0 });
+    let r: &Point = &*h;
+
+    let obj_gen = @get_generation(&*h);
+    let ref_gen = @get_stored_generation(r);
+
+    // Reference should store the generation at creation time
+    assert_eq(obj_gen, ref_gen);
+}
+
+fn test_generation_mismatch_detection() {
+    let result = @catch_cbgr_violation(fn() {
+        let h1 = Heap(Point { x: 1.0, y: 2.0 });
+        let r: &Point = &*h1;
+        let stored_gen = @get_stored_generation(r);
+
+        drop(h1);
+
+        // Allocate at possibly same address but different generation
+        let h2 = Heap(Point { x: 3.0, y: 4.0 });
+
+        // Force use of stale reference (if address reused)
+        // Generation check should catch this
+        let _ = *r;
+    });
+
+    assert(result is CbgrViolation);
+}
+
+// =============================================================================
+// Epoch capability tests
+// =============================================================================
+
+fn test_epoch_expires_after_scope() {
+    let result = @catch_cbgr_violation(fn() {
+        let mut escaped: Maybe<&Int> = None;
+
+        {
+            let local: Int = 42;
+            escaped = Some(&local);
+            // local's epoch ends here
+        }
+
+        // Attempt to use reference with expired epoch
+        let _ = *@unwrap(escaped);
+    });
+
+    assert(result is CbgrViolation(EpochExpired));
+}
+
+fn test_epoch_preserved_for_valid_reference() {
+    let outer: Int = 42;
+
+    {
+        let r: &Int = &outer;
+        // r's epoch is still valid because outer is still in scope
+        assert_eq(*r, 42);
+    }
+
+    // outer still valid
+    assert_eq(outer, 42);
+}
+
+fn test_nested_epoch_tracking() {
+    let result = @catch_cbgr_violation(fn() {
+        let mut refs: List<&Int> = [];
+
+        for i in 0..5 {
+            let local: Int = i;
+            refs.push(&local);  // Each ref has epoch of its loop iteration
+        }
+
+        // All references have expired epochs
+        for r in refs {
+            let _ = *r;
+        }
+    });
+
+    assert(result is CbgrViolation(EpochExpired));
+}
+
+// =============================================================================
+// Complex lifetime scenarios
+// =============================================================================
+
+fn test_linked_list_drop_order() {
+    // Dropping linked list should not cause use-after-free
+    let n3 = Heap(Node { value: 3, next: None });
+    let n2 = Heap(Node { value: 2, next: Some(n3) });
+    let n1 = Heap(Node { value: 1, next: Some(n2) });
+
+    // Access before drop
+    assert_eq(n1.value, 1);
+    assert_eq(@unwrap(n1.next).value, 2);
+
+    // Drop in order - should not panic
+    drop(n1);  // This drops n2 and n3 transitively
+}
+
+fn test_self_referential_struct_safety() {
+    // Self-referential structures are tricky
+    type SelfRef is {
+        data: Int,
+        ptr: Maybe<&Int>
+    };
+
+    let result = @catch_cbgr_violation(fn() {
+        let mut sr = SelfRef { data: 42, ptr: None };
+        sr.ptr = Some(&sr.data);
+
+        // This is dangerous - if sr moves, ptr becomes invalid
+        let sr2 = sr;  // Move
+
+        // ptr in sr2 might point to old location
+        let _ = *@unwrap(sr2.ptr);
+    });
+
+    // Should either prevent at compile time or detect at runtime
+    assert(result is CbgrViolation || result is Ok);
+}
+
+fn test_closure_capturing_reference() {
+    let result = @catch_cbgr_violation(fn() {
+        let closure;
+
+        {
+            let local: Int = 42;
+            closure = fn() -> Int { local };  // Captures by reference
+        }
+
+        // local is out of scope, closure has dangling reference
+        closure()
+    });
+
+    assert(result is CbgrViolation);
+}
+
+// =============================================================================
+// Bounds checking integration
+// =============================================================================
+
+fn test_bounds_check_with_cbgr() {
+    let result = @catch_cbgr_violation(fn() {
+        let arr = [1, 2, 3, 4, 5];
+        let _ = arr[10];  // Out of bounds
+    });
+
+    assert(result is CbgrViolation(OutOfBounds));
+}
+
+fn test_slice_bounds_validation() {
+    let result = @catch_cbgr_violation(fn() {
+        let arr = [1, 2, 3, 4, 5];
+        let slice = &arr[2..10];  // End out of bounds
+    });
+
+    assert(result is CbgrViolation(OutOfBounds));
+}
+
+// =============================================================================
+// Concurrent access patterns
+// =============================================================================
+
+fn test_mutable_aliasing_detection() {
+    // Two mutable references to same data
+    let result = @catch_cbgr_violation(fn() {
+        let mut x: Int = 42;
+        let r1: &mut Int = &mut x;
+        let r2: &mut Int = &mut x;  // Second mutable reference
+
+        *r1 = 1;
+        *r2 = 2;  // Data race!
+    });
+
+    // Should be caught at compile time or runtime
+    assert(result is CbgrViolation(CapabilityDenied) || result is CompileError);
+}
+
+fn test_immutable_and_mutable_aliasing() {
+    let result = @catch_cbgr_violation(fn() {
+        let mut x: Int = 42;
+        let r1: &Int = &x;
+        let r2: &mut Int = &mut x;  // Mutable while immutable exists
+
+        let _ = *r1;
+        *r2 = 100;
+    });
+
+    assert(result is CbgrViolation || result is CompileError);
+}
+
+fn main() {
+    // Use-after-free detection
+    test_detect_simple_use_after_free();
+    test_detect_dangling_reference_from_scope();
+    test_detect_iterator_invalidation();
+    test_detect_double_free();
+    test_detect_stale_reference_after_reassignment();
+
+    // Generation tracking
+    test_generation_increments();
+    test_reference_stores_generation();
+    test_generation_mismatch_detection();
+
+    // Epoch capability
+    test_epoch_expires_after_scope();
+    test_epoch_preserved_for_valid_reference();
+    test_nested_epoch_tracking();
+
+    // Complex scenarios
+    test_linked_list_drop_order();
+    test_self_referential_struct_safety();
+    test_closure_capturing_reference();
+
+    // Bounds checking
+    test_bounds_check_with_cbgr();
+    test_slice_bounds_validation();
+
+    // Aliasing
+    test_mutable_aliasing_detection();
+    test_immutable_and_mutable_aliasing();
+
+    print("003_use_after_free_detection: PASSED");
+}

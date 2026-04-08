@@ -1,0 +1,47 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, theorems, axioms
+// @timeout: 15000
+
+/// Axiom declarations
+
+axiom excluded_middle<P: Prop>: P | !P;
+axiom non_contradiction<P: Prop>: !(P && !P);
+
+axiom eq_refl<T>(x: T): x == x;
+axiom eq_sym<T>(x: T, y: T): x == y -> y == x;
+axiom eq_trans<T>(x: T, y: T, z: T): x == y -> y == z -> x == z;
+
+axiom zero_is_nat: is_nat(0);
+axiom succ_is_nat(n: Nat): is_nat(succ(n));
+axiom zero_not_succ(n: Nat): !(0 == succ(n));
+axiom succ_injective(m: Nat, n: Nat): succ(m) == succ(n) -> m == n;
+
+axiom set_extensionality<T>(A: Set<T>, B: Set<T>):
+    (forall x: T. x in A <-> x in B) -> A == B;
+
+axiom double_neg_elim<P: Prop>: !!P -> P;
+axiom proof_by_contradiction_axiom<P: Prop>: (!P -> False) -> P;
+
+axiom de_morgan_and<P: Prop, Q: Prop>: !(P && Q) <-> (!P || !Q);
+axiom de_morgan_or<P: Prop, Q: Prop>: !(P || Q) <-> (!P && !Q);
+
+fn is_nat(n: Int) -> Bool;
+
+/// Using axioms
+theorem example_em<P: Prop>: !!P -> P { proof by auto }
+theorem add_zero_right_thm(n: Nat): n + 0 == n {
+    proof by induction on n {
+        case 0 => { trivial }
+        case succ(k) => {
+            calc {
+                succ(k) + 0
+                == { by definition } succ(k + 0)
+                == { by IH } succ(k)
+            }
+        }
+    }
+}
+
+fn main() {}

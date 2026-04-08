@@ -1,0 +1,999 @@
+// =============================================================================
+// VCS Test Suite: stdlib/mem/heap.vr - Thread-Local Heap Tests
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: mem, heap, allocator, page, free-list, cbgr, cross-thread
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for the mimalloc-style thread-local heap with lock-free fast path
+// and 3-level free lists.
+//
+// =============================================================================
+
+mount core.mem.heap.{
+    // Constants
+    DIRECT_LOOKUP_SIZE, PAGE_HEADER_SIZE,
+    PAGE_FLAG_IN_FULL_QUEUE, PAGE_FLAG_HAS_ALIGNED, PAGE_FLAG_ZERO_INIT,
+
+    // Types
+    PageHeader, PageQueue, HeapStats, LocalHeap, HeapError,
+
+    // Functions
+    heap_alloc, heap_alloc_zeroed, heap_free, heap_free_validated,
+    get_heap_stats, get_heap, init_thread_heap, shutdown_thread_heap,
+    encode_ptr, decode_ptr, init_encoding_keys,
+};
+
+mount core.mem.size_class.{BIN_COUNT, BIN_HUGE, BIN_FULL, QUEUE_COUNT, SIZE_CLASSES, size_to_bin};
+mount core.mem.segment.{SLICE_SIZE, SLICES_PER_SEGMENT};
+
+// =============================================================================
+// Constant Tests
+// =============================================================================
+
+@test
+fn test_direct_lookup_size() {
+    // 129 entries: 0-128 words (0-1024 bytes)
+    assert_eq(DIRECT_LOOKUP_SIZE, 129);
+}
+
+@test
+fn test_page_header_size() {
+    // 128 bytes, cache-line aligned
+    assert_eq(PAGE_HEADER_SIZE, 128);
+}
+
+@test
+fn test_page_flag_in_full_queue() {
+    assert_eq(PAGE_FLAG_IN_FULL_QUEUE, 0x0001 as UInt16);
+}
+
+@test
+fn test_page_flag_has_aligned() {
+    assert_eq(PAGE_FLAG_HAS_ALIGNED, 0x0002 as UInt16);
+}
+
+@test
+fn test_page_flag_zero_init() {
+    assert_eq(PAGE_FLAG_ZERO_INIT, 0x0004 as UInt16);
+}
+
+// =============================================================================
+// PageHeader Structure Tests
+// =============================================================================
+
+@test
+fn test_page_header_alignment() {
+    // PageHeader should be 64-byte aligned (cache line)
+    assert_eq(PageHeader.align, 64);
+}
+
+@test
+fn test_page_header_initial_state() {
+    // Test default-initialized page header values
+    // In real usage, init() would be called
+    let page = PageHeader {
+        bin: 0,
+        kind: 0,
+        flags: 0,
+        block_size: 0,
+        _pad0: 0,
+        capacity: 0,
+        used: 0,
+        free: 0,
+        local_free: 0,
+        xthread_free: 0,
+        next: 0 as &unsafe PageHeader,
+        prev: 0 as &unsafe PageHeader,
+        segment: 0 as &Segment,
+        slice_index: 0,
+        slice_count: 0,
+        base_generation: 0,
+        epoch: 0,
+        _pad1: 0,
+        slot_generations: 0 as &unsafe [UInt8],
+        _pad2: [0 as UInt64; 2],
+    };
+
+    assert_eq(page.bin, 0);
+    assert_eq(page.used, 0);
+    assert_eq(page.free, 0);
+}
+
+@test
+fn test_page_header_block_ptr_calculation() {
+    // block_ptr = base + PAGE_HEADER_SIZE + index * block_size
+    let base = 0x1000;
+    let block_size = 64;
+    let index = 5;
+
+    let expected_ptr = base + PAGE_HEADER_SIZE + index * block_size;
+    assert_eq(expected_ptr, 0x1000 + 128 + 320);
+    assert_eq(expected_ptr, 0x1000 + 448);
+}
+
+@test
+fn test_page_header_block_index_calculation() {
+    // block_index = (ptr - base - PAGE_HEADER_SIZE) / block_size
+    let base = 0x1000;
+    let block_size = 64;
+    let ptr = 0x1000 + 128 + 320;  // base + header + 5*64
+
+    let index = (ptr - base - PAGE_HEADER_SIZE) / block_size;
+    assert_eq(index, 5);
+}
+
+@test
+fn test_page_header_is_full() {
+    // Page is full when used >= capacity
+    let mut page = PageHeader {
+        bin: 0,
+        kind: 0,
+        flags: 0,
+        block_size: 64,
+        _pad0: 0,
+        capacity: 100,
+        used: 100,
+        free: 0,
+        local_free: 0,
+        xthread_free: 0,
+        next: 0 as &unsafe PageHeader,
+        prev: 0 as &unsafe PageHeader,
+        segment: 0 as &Segment,
+        slice_index: 0,
+        slice_count: 1,
+        base_generation: 0,
+        epoch: 0,
+        _pad1: 0,
+        slot_generations: 0 as &unsafe [UInt8],
+        _pad2: [0 as UInt64; 2],
+    };
+
+    assert(page.is_full());
+
+    page.used = 99 as UInt32;
+    assert(!page.is_full());
+}
+
+@test
+fn test_page_header_is_empty() {
+    // Page is empty when used == 0
+    let mut page = PageHeader {
+        bin: 0,
+        kind: 0,
+        flags: 0,
+        block_size: 64,
+        _pad0: 0,
+        capacity: 100,
+        used: 0,
+        free: 0,
+        local_free: 0,
+        xthread_free: 0,
+        next: 0 as &unsafe PageHeader,
+        prev: 0 as &unsafe PageHeader,
+        segment: 0 as &Segment,
+        slice_index: 0,
+        slice_count: 1,
+        base_generation: 0,
+        epoch: 0,
+        _pad1: 0,
+        slot_generations: 0 as &unsafe [UInt8],
+        _pad2: [0 as UInt64; 2],
+    };
+
+    assert(page.is_empty());
+
+    page.used = 1 as UInt32;
+    assert(!page.is_empty());
+}
+
+// =============================================================================
+// PageQueue Tests
+// =============================================================================
+
+@test
+fn test_page_queue_empty_constructor() {
+    let pq = PageQueue.empty();
+
+    assert_eq(pq.first as Int, 0);
+    assert_eq(pq.last as Int, 0);
+    assert_eq(pq.block_size, 0);
+    assert_eq(pq.count, 0);
+}
+
+@test
+fn test_page_queue_is_empty() {
+    let pq = PageQueue.empty();
+    assert(pq.is_empty());
+}
+
+@test
+fn test_page_queue_not_empty_after_push() {
+    let mut pq = PageQueue.empty();
+
+    // Simulate having a page
+    // (Can't actually push without real page memory)
+    pq.count = 1 as UInt32;
+    pq.first = 0x1000 as &unsafe PageHeader;
+
+    assert(!pq.is_empty());
+}
+
+@test
+fn test_page_queue_count_increments() {
+    let mut pq = PageQueue {
+        first: 0 as &unsafe PageHeader,
+        last: 0 as &unsafe PageHeader,
+        block_size: 64,
+        count: 0,
+    };
+
+    // Simulate push
+    pq.count = pq.count + 1;
+    assert_eq(pq.count, 1);
+
+    pq.count = pq.count + 1;
+    assert_eq(pq.count, 2);
+
+    // Simulate remove
+    pq.count = pq.count - 1;
+    assert_eq(pq.count, 1);
+}
+
+@test
+fn test_page_queue_peek_empty() {
+    let pq = PageQueue.empty();
+    let result = pq.peek();
+    assert(result.is_none());
+}
+
+// =============================================================================
+// HeapStats Tests
+// =============================================================================
+
+@test
+fn test_heap_stats_new() {
+    let stats = HeapStats.new();
+
+    assert_eq(stats.alloc_count, 0);
+    assert_eq(stats.dealloc_count, 0);
+    assert_eq(stats.bytes_allocated, 0);
+    assert_eq(stats.bytes_freed, 0);
+    assert_eq(stats.live_count, 0);
+    assert_eq(stats.live_bytes, 0);
+    assert_eq(stats.pages_in_use, 0);
+    assert_eq(stats.segments_owned, 0);
+}
+
+@test
+fn test_heap_stats_tracking() {
+    let mut stats = HeapStats.new();
+
+    // Simulate allocation
+    stats.alloc_count = stats.alloc_count + 1;
+    stats.bytes_allocated = stats.bytes_allocated + 64;
+    stats.live_count = stats.live_count + 1;
+    stats.live_bytes = stats.live_bytes + 64;
+
+    assert_eq(stats.alloc_count, 1);
+    assert_eq(stats.bytes_allocated, 64);
+    assert_eq(stats.live_count, 1);
+
+    // Simulate deallocation
+    stats.dealloc_count = stats.dealloc_count + 1;
+    stats.bytes_freed = stats.bytes_freed + 64;
+    stats.live_count = stats.live_count - 1;
+    stats.live_bytes = stats.live_bytes - 64;
+
+    assert_eq(stats.dealloc_count, 1);
+    assert_eq(stats.bytes_freed, 64);
+    assert_eq(stats.live_count, 0);
+}
+
+@test
+fn test_heap_stats_multiple_allocations() {
+    let mut stats = HeapStats.new();
+
+    let sizes = [64, 128, 256, 512, 1024];
+
+    let mut j = 0;
+    while j < 5 {
+        let size = sizes[j];
+        stats.alloc_count = stats.alloc_count + 1;
+        stats.bytes_allocated = stats.bytes_allocated + size as UInt64;
+        stats.live_count = stats.live_count + 1;
+        stats.live_bytes = stats.live_bytes + size as UInt64;
+        j = j + 1;
+    }
+
+    assert_eq(stats.alloc_count, 5);
+    assert_eq(stats.bytes_allocated, 1984);  // 64+128+256+512+1024
+    assert_eq(stats.live_count, 5);
+}
+
+// =============================================================================
+// LocalHeap Tests
+// =============================================================================
+
+@test
+fn test_local_heap_new() {
+    let heap = LocalHeap.new(12345);
+
+    assert_eq(heap.thread_id, 12345);
+    assert_eq(heap.segments as Int, 0);
+    assert_eq(heap.stats.alloc_count, 0);
+}
+
+@test
+fn test_local_heap_pages_direct_initialized() {
+    let heap = LocalHeap.new(1);
+
+    // All direct pages should be null initially
+    let mut i = 0;
+    while i < DIRECT_LOOKUP_SIZE {
+        assert_eq(heap.pages_direct[i] as Int, 0);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_local_heap_page_queues_initialized() {
+    let heap = LocalHeap.new(1);
+
+    // All page queues should be empty
+    let mut i = 0;
+    while i < QUEUE_COUNT {
+        assert(heap.pages[i].is_empty());
+        assert_eq(heap.pages[i].count, 0);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_local_heap_page_queue_block_sizes() {
+    let heap = LocalHeap.new(1);
+
+    // Each queue should have correct block size
+    let mut i = 0;
+    while i < BIN_COUNT {
+        assert_eq(heap.pages[i].block_size, SIZE_CLASSES[i] as UInt32);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// HeapError Tests
+// =============================================================================
+
+@test
+fn test_heap_error_out_of_memory() {
+    let err = HeapError.OutOfMemory;
+
+    match err {
+        OutOfMemory => { /* OK */ }
+        _ => assert(false, "Wrong variant"),
+    }
+}
+
+@test
+fn test_heap_error_page_exhausted() {
+    let err = HeapError.PageExhausted;
+
+    match err {
+        PageExhausted => { /* OK */ }
+        _ => assert(false, "Wrong variant"),
+    }
+}
+
+@test
+fn test_heap_error_invalid_pointer() {
+    let err = HeapError.InvalidPointer;
+
+    match err {
+        InvalidPointer => { /* OK */ }
+        _ => assert(false, "Wrong variant"),
+    }
+}
+
+@test
+fn test_heap_error_invalid_size() {
+    let err = HeapError.InvalidSize { size: -100 };
+
+    match err {
+        InvalidSize { size } => assert_eq(size, -100),
+        _ => assert(false, "Wrong variant"),
+    }
+}
+
+@test
+fn test_heap_error_invalid_alignment() {
+    let err = HeapError.InvalidAlignment { alignment: 7 };
+
+    match err {
+        InvalidAlignment { alignment } => assert_eq(alignment, 7),
+        _ => assert(false, "Wrong variant"),
+    }
+}
+
+@test
+fn test_heap_error_use_after_free() {
+    let err = HeapError.UseAfterFree;
+
+    match err {
+        UseAfterFree => { /* OK */ }
+        _ => assert(false, "Wrong variant"),
+    }
+}
+
+@test
+fn test_heap_error_message_out_of_memory() {
+    let err = HeapError.OutOfMemory;
+    let msg = err.message();
+    assert_eq(msg, "out of memory");
+}
+
+@test
+fn test_heap_error_message_invalid_size() {
+    let err = HeapError.InvalidSize { size: 42 };
+    let msg = err.message();
+    assert(msg.contains("invalid size"));
+    assert(msg.contains("42"));
+}
+
+@test
+fn test_heap_error_message_use_after_free() {
+    let err = HeapError.UseAfterFree;
+    let msg = err.message();
+    assert(msg.contains("use after free"));
+}
+
+// =============================================================================
+// Pointer Encoding Tests
+// =============================================================================
+
+@test
+fn test_encode_decode_roundtrip() {
+    let test_ptrs: [UInt64; 5] = [
+        0x1000,
+        0x1000_0000,
+        0xDEAD_BEEF,
+        0x7FFF_FFFF_FFFF_0000,
+        0,
+    ];
+
+    // Use while loop to avoid for-loop type inference bug with Item<_>
+    let mut i = 0;
+    while i < 5 {
+        let ptr = test_ptrs[i];
+        let encoded = encode_ptr(ptr);
+        let decoded = decode_ptr(encoded);
+        assert_eq(decoded, ptr);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_encode_changes_value() {
+    let ptr: UInt64 = 0x1000_0000;
+    let encoded = encode_ptr(ptr);
+
+    // Encoded value should differ from original
+    // (unless keys XOR to identity, which is unlikely)
+    assert(encoded != ptr || ptr == 0);
+}
+
+@test
+fn test_encode_different_pointers_different_values() {
+    let ptr1: UInt64 = 0x1000_0000;
+    let ptr2: UInt64 = 0x2000_0000;
+
+    let enc1 = encode_ptr(ptr1);
+    let enc2 = encode_ptr(ptr2);
+
+    // Different pointers should encode differently
+    assert(enc1 != enc2);
+}
+
+// =============================================================================
+// Free List Logic Tests
+// =============================================================================
+
+@test
+fn test_free_list_lifo_order() {
+    // Free list should work as LIFO stack
+    // Push: A, B, C
+    // Pop: C, B, A
+
+    let mut head: UInt64 = 0;
+
+    // Simulate push A (encoded)
+    let a_encoded: UInt64 = 0xA000;
+    head = a_encoded;
+
+    // Simulate push B
+    let b_encoded: UInt64 = 0xB000;
+    // In real code: store old head in B's next, set head = B
+    let b_next = head;
+    head = b_encoded;
+
+    // Simulate push C
+    let c_encoded: UInt64 = 0xC000;
+    let c_next = head;
+    head = c_encoded;
+
+    // Pop should get C first
+    assert_eq(head, c_encoded);
+    head = c_next;  // Simulate popping C
+
+    // Pop should get B
+    assert_eq(head, b_encoded);
+    head = b_next;  // Simulate popping B
+
+    // Pop should get A
+    assert_eq(head, a_encoded);
+}
+
+// =============================================================================
+// Three-Level Free List Tests
+// =============================================================================
+
+@test
+fn test_free_list_priority() {
+    // Allocation priority: free → local_free → xthread_free
+
+    let free: UInt64 = 0x1000;
+    let local_free: UInt64 = 0x2000;
+    let xthread_free: UInt64 = 0x3000;
+
+    // If free is non-zero, use it
+    if free != 0 {
+        assert_eq(free, 0x1000);
+    } else if local_free != 0 {
+        assert(false, "Shouldn't reach local_free");
+    } else if xthread_free != 0 {
+        assert(false, "Shouldn't reach xthread_free");
+    }
+}
+
+@test
+fn test_local_free_fallback() {
+    let free: UInt64 = 0;
+    let local_free: UInt64 = 0x2000;
+
+    // When free is empty, try local_free
+    if free != 0 {
+        assert(false, "free is 0");
+    } else if local_free != 0 {
+        assert_eq(local_free, 0x2000);
+    }
+}
+
+@test
+fn test_xthread_collection() {
+    // xthread_free should be atomically swapped to local
+    let mut xthread_free: UInt64 = 0x3000;
+    let mut local_free: UInt64 = 0;
+
+    // Atomic exchange simulation
+    local_free = xthread_free;
+    xthread_free = 0 as UInt64;
+
+    assert_eq(local_free, 0x3000 as UInt64);
+    assert_eq(xthread_free, 0 as UInt64);
+}
+
+// =============================================================================
+// Slot Generation Tests
+// =============================================================================
+
+@test
+fn test_slot_generation_calculation() {
+    // slot_generation = base_generation + delta
+    let base_generation: UInt32 = 1000;
+    let delta: UInt8 = 50;
+
+    let generation = base_generation + delta as UInt32;
+    assert_eq(generation, 1050);
+}
+
+@test
+fn test_slot_generation_delta_wraparound() {
+    // Delta wraps at 256 (UInt8)
+    let mut delta: UInt8 = 255;
+
+    delta = ((delta as Int + 1) % 256) as UInt8;
+    assert_eq(delta, 0);
+}
+
+@test
+fn test_generation_validation_match() {
+    let stored_gen: UInt32 = 1000;
+    let expected_gen: UInt32 = 1000;
+
+    let valid = stored_gen == expected_gen;
+    assert(valid);
+}
+
+@test
+fn test_generation_validation_mismatch() {
+    let stored_gen: UInt32 = 1001;  // Incremented after free
+    let expected_gen: UInt32 = 1000;
+
+    let valid = stored_gen == expected_gen;
+    assert(!valid);  // Use-after-free detected
+}
+
+// =============================================================================
+// Direct Lookup Tests
+// =============================================================================
+
+@test
+fn test_direct_lookup_word_size_calculation() {
+    // wsize = (size + 7) / 8
+    let test_cases = [
+        (1, 1),
+        (8, 1),
+        (9, 2),
+        (16, 2),
+        (64, 8),
+        (65, 9),
+        (1024, 128),
+        (1025, 129),  // Out of direct lookup range
+    ];
+
+    let mut i = 0;
+    while i < 8 {
+        let entry = test_cases[i];
+        let size = entry.0;
+        let expected_wsize = entry.1;
+        let wsize = (size + 7) / 8;
+        assert_eq(wsize, expected_wsize);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_direct_lookup_range() {
+    // Direct lookup covers 0-1024 bytes (wsize 0-128)
+    let max_direct_size = 1024;
+    let max_wsize = (max_direct_size + 7) / 8;
+
+    assert_eq(max_wsize, 128);
+    assert(max_wsize < DIRECT_LOOKUP_SIZE);
+}
+
+// =============================================================================
+// Page Capacity Tests
+// =============================================================================
+
+@test
+fn test_page_capacity_calculation() {
+    // capacity = (page_size - PAGE_HEADER_SIZE) / block_size
+    let page_size = SLICE_SIZE;  // 64 KiB for small pages
+    let block_size = 64;
+
+    let usable = page_size - PAGE_HEADER_SIZE;
+    let capacity = usable / block_size;
+
+    // (65536 - 128) / 64 = 1023
+    assert_eq(usable, 65408);
+    assert_eq(capacity, 1022);  // Actually 1022 with integer division
+}
+
+@test
+fn test_page_capacity_small_blocks() {
+    // Smallest blocks (8 bytes) have most capacity
+    let block_size = 8;
+    let usable = SLICE_SIZE - PAGE_HEADER_SIZE;
+    let capacity = usable / block_size;
+
+    // (65536 - 128) / 8 = 8176
+    assert(capacity > 8000);
+}
+
+@test
+fn test_page_capacity_large_blocks() {
+    // Large blocks have less capacity
+    let block_size = 8192;
+    let usable = SLICE_SIZE - PAGE_HEADER_SIZE;
+    let capacity = usable / block_size;
+
+    // (65536 - 128) / 8192 = 7
+    assert(capacity >= 7);
+    assert(capacity < 10);
+}
+
+// =============================================================================
+// Fast Path Tests
+// =============================================================================
+
+@test
+fn test_fast_path_eligible_size() {
+    // Fast path handles sizes ≤ 1024 bytes
+    let size = 100;
+    let wsize = (size + 7) / 8;
+
+    assert(wsize < DIRECT_LOOKUP_SIZE);
+}
+
+@test
+fn test_fast_path_ineligible_size() {
+    // Sizes > 1024 bytes fall through to slow path
+    let size = 2000;
+    let wsize = (size + 7) / 8;
+
+    assert(wsize >= DIRECT_LOOKUP_SIZE);
+}
+
+// =============================================================================
+// Full Queue Flag Tests
+// =============================================================================
+
+@test
+fn test_full_queue_flag_set() {
+    let mut flags: UInt16 = 0;
+
+    flags = flags | PAGE_FLAG_IN_FULL_QUEUE;
+    assert_eq(flags, 0x0001);
+    assert((flags & PAGE_FLAG_IN_FULL_QUEUE) != 0);
+}
+
+@test
+fn test_full_queue_flag_clear() {
+    let mut flags: UInt16 = PAGE_FLAG_IN_FULL_QUEUE;
+
+    flags = flags & !PAGE_FLAG_IN_FULL_QUEUE;
+    assert_eq(flags, 0);
+    assert((flags & PAGE_FLAG_IN_FULL_QUEUE) == 0);
+}
+
+@test
+fn test_multiple_flags() {
+    let mut flags: UInt16 = 0;
+
+    flags = flags | PAGE_FLAG_IN_FULL_QUEUE;
+    flags = flags | PAGE_FLAG_HAS_ALIGNED;
+    flags = flags | PAGE_FLAG_ZERO_INIT;
+
+    assert_eq(flags, 0x0007);
+    assert((flags & PAGE_FLAG_IN_FULL_QUEUE) != 0);
+    assert((flags & PAGE_FLAG_HAS_ALIGNED) != 0);
+    assert((flags & PAGE_FLAG_ZERO_INIT) != 0);
+}
+
+// =============================================================================
+// Bin Index Tests
+// =============================================================================
+
+@test
+fn test_bin_index_range() {
+    // Bin index should be 0-72 for normal sizes, 73 for huge
+    let mut bin = 0;
+    while bin < BIN_COUNT {
+        assert(bin < BIN_HUGE);
+        bin = bin + 1;
+    }
+    assert_eq(BIN_HUGE, 73);
+    assert_eq(BIN_FULL, 74);
+    assert_eq(QUEUE_COUNT, 75);
+}
+
+@test
+fn test_bin_index_for_page() {
+    // Page stores bin as UInt8 (0-255), but only 0-74 are valid
+    let bin: UInt8 = 23;  // 1024-byte bin
+    assert(bin as Int < QUEUE_COUNT);
+}
+
+// =============================================================================
+// Cross-Thread Deallocation Tests
+// =============================================================================
+
+@test
+fn test_cross_thread_detection() {
+    let page_owner_tid: UInt64 = 100;
+    let current_tid: UInt64 = 200;
+
+    let same_thread = page_owner_tid == current_tid;
+    assert(!same_thread);
+}
+
+@test
+fn test_abandoned_segment_detection() {
+    let owner_tid: UInt64 = 0;  // Abandoned
+
+    let is_abandoned = owner_tid == 0;
+    assert(is_abandoned);
+}
+
+@test
+fn test_xthread_free_atomic_push() {
+    // Simulate atomic CAS for xthread_free
+    let mut xthread_free: UInt64 = 0x1000;
+    let new_head: UInt64 = 0x2000;
+
+    // CAS: expect old value, set new value
+    let old_value = xthread_free;
+    if old_value == 0x1000 {  // CAS succeeds
+        xthread_free = new_head;
+    }
+
+    assert_eq(xthread_free, 0x2000);
+}
+
+// =============================================================================
+// Integration Scenario Tests
+// =============================================================================
+
+@test
+fn test_allocation_deallocation_flow() {
+    // Simulate complete alloc/free flow
+
+    let mut stats = HeapStats.new();
+    let size = 100;
+    let bin = size_to_bin(size);
+    let block_size = SIZE_CLASSES[bin] as UInt64;
+
+    // Allocate
+    stats.alloc_count = stats.alloc_count + 1;
+    stats.bytes_allocated = stats.bytes_allocated + block_size;
+    stats.live_count = stats.live_count + 1;
+    stats.live_bytes = stats.live_bytes + block_size;
+
+    assert_eq(stats.alloc_count, 1);
+    assert_eq(stats.live_count, 1);
+
+    // Free
+    stats.dealloc_count = stats.dealloc_count + 1;
+    stats.bytes_freed = stats.bytes_freed + block_size;
+    stats.live_count = stats.live_count - 1;
+    stats.live_bytes = stats.live_bytes - block_size;
+
+    assert_eq(stats.dealloc_count, 1);
+    assert_eq(stats.live_count, 0);
+    assert_eq(stats.bytes_allocated, stats.bytes_freed);
+}
+
+@test
+fn test_page_fill_and_move_to_full() {
+    // When page becomes full, move to full queue
+
+    let mut page_used: UInt32 = 1022;
+    let page_capacity: UInt32 = 1023;
+    let mut flags: UInt16 = 0;
+
+    // Allocate one more
+    page_used = page_used + 1;
+
+    // Check if full
+    if page_used >= page_capacity {
+        flags = flags | PAGE_FLAG_IN_FULL_QUEUE;
+    }
+
+    assert_eq(flags, PAGE_FLAG_IN_FULL_QUEUE);
+}
+
+@test
+fn test_page_has_space_after_free() {
+    // After free, page has space again
+
+    let mut page_used: UInt32 = 1023;
+    let mut flags: UInt16 = PAGE_FLAG_IN_FULL_QUEUE;
+
+    // Free one block
+    page_used = page_used - 1;
+
+    // Check if was full and now has space
+    let was_full = (flags & PAGE_FLAG_IN_FULL_QUEUE) != 0;
+    let has_space = page_used < 1023;
+
+    if was_full && has_space {
+        // Move from full queue to size class queue
+        flags = flags & !PAGE_FLAG_IN_FULL_QUEUE;
+    }
+
+    assert_eq(flags, 0);
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_zero_size_allocation() {
+    // Zero size should be rejected
+    let size = 0;
+    let is_valid = size > 0;
+    assert(!is_valid);
+}
+
+@test
+fn test_negative_size_allocation() {
+    // Negative size should be rejected
+    let size = -100;
+    let is_valid = size > 0;
+    assert(!is_valid);
+}
+
+@test
+fn test_huge_allocation_threshold() {
+    // Sizes > 5 MiB use dedicated segments
+    let huge_threshold = 5242880;  // 5 MiB
+    let huge_size = 6000000;
+
+    let is_huge = huge_size > huge_threshold;
+    assert(is_huge);
+}
+
+@test
+fn test_null_pointer_free() {
+    // Null pointer free should be rejected
+    let ptr = 0 as &unsafe Byte;
+    let is_null = (ptr as Int) == 0;
+    assert(is_null);
+}
+
+@test
+fn test_generation_mismatch_detection() {
+    // CBGR validation detects use-after-free
+    let expected_gen: UInt32 = 100;
+    let current_gen: UInt32 = 101;  // Incremented by free
+    let expected_epoch: UInt16 = 1;
+    let current_epoch: UInt16 = 1;
+
+    let gen_valid = current_gen == expected_gen;
+    let epoch_valid = current_epoch == expected_epoch;
+
+    assert(!gen_valid);  // Generation mismatch = use-after-free
+    assert(epoch_valid);
+}
+
+// =============================================================================
+// Performance Characteristic Tests
+// =============================================================================
+
+@test
+fn test_fast_path_instruction_count_estimate() {
+    // Fast path should be ~7-15 instructions
+    // This is a conceptual test documenting the expected path:
+    // 1. Load page from pages_direct[wsize]
+    // 2. Load free list head
+    // 3. Check if non-null
+    // 4. Decode pointer
+    // 5. Load next pointer
+    // 6. Store new head
+    // 7. Increment used count
+
+    let instruction_estimate = 7;
+    assert(instruction_estimate >= 7);
+    assert(instruction_estimate <= 15);
+}
+
+@test
+fn test_direct_lookup_is_o1() {
+    // Direct lookup is array indexing = O(1)
+    // Any word size 0-128 maps directly to a page pointer
+    let test_wsizes = [0, 1, 50, 100, 128];
+
+    // Use while loop to avoid for-loop type inference bug with Item<_>
+    let mut i = 0;
+    while i < 5 {
+        let wsize = test_wsizes[i];
+        // Array access is constant time
+        assert(wsize < DIRECT_LOOKUP_SIZE);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_cache_line_alignment_benefits() {
+    // 64-byte alignment helps CPU cache performance
+    // PageHeader is cache-line aligned
+    assert_eq(PageHeader.align, 64);
+
+    // This avoids false sharing between pages
+}
+

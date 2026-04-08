@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: mmio, register, access-mode, systems, error
+// @timeout: 5000
+// @expected-error: E400
+// @description: Verify that reading from a WriteOnly register is rejected.
+
+mount sys.mmio;
+
+fn main() -> Int {
+    let cmd_reg: Register<UInt32, WriteOnly> = Register.at(0x4000_0000);
+
+    // ERROR: Cannot read from a WriteOnly register
+    let val = cmd_reg.read();
+
+    0
+}

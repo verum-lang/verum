@@ -1,0 +1,37 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: lexer, lossless, trivia
+// @description: Test that all trivia (whitespace, comments) is preserved during lexing
+
+fn test_single_space() {
+    // Single space
+    let x = 1;
+}
+
+fn test_multiple_spaces() {
+    // Multiple spaces
+    let  y  =  2;
+}
+
+fn test_tabs() {
+    // Tabs
+    let	z	=	3;
+}
+
+fn test_mixed_whitespace() {
+    // Mixed whitespace
+    let  	 a 	 = 	 4;
+}
+
+// Trailing spaces
+fn foo() { }
+
+// Leading indentation preserved in functions
+fn bar() { }
+
+// Nested indentation
+fn baz() {
+    let inner = 1;
+        let more_indented = 2;
+}

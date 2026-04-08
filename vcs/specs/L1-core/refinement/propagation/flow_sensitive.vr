@@ -1,0 +1,334 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, propagation, flow-sensitive
+
+/// Test for flow-sensitive refinement propagation.
+/// Refinements are tracked through control flow for precision.
+
+// ============================================================================
+// Basic flow-sensitive refinement through if conditions
+// ============================================================================
+
+type NonNegative is Int{>= 0};
+type Positive is Int{> 0};
+type NonZero is Int{!= 0};
+
+fn absolute_value(x: Int) -> NonNegative {
+    if x >= 0 {
+        // Here x is known to be >= 0
+        x  // OK: x has type Int{>= 0}
+    } else {
+        // Here x is known to be < 0
+        -x  // OK: -x when x < 0 gives positive result
+    }
+}
+
+fn check_positive(x: Int) -> Maybe<Positive> {
+    if x > 0 {
+        // x is now refined to Int{> 0}
+        Some(x)
+    } else {
+        None
+    }
+}
+
+fn safe_divide(x: Int, y: Int) -> Maybe<Int> {
+    if y != 0 {
+        // y is now NonZero, safe to divide
+        Some(x / y)
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Refinement through comparison chains
+// ============================================================================
+
+type InRange is Int{>= 0 && <= 100};
+
+fn clamp_to_range(x: Int) -> InRange {
+    if x < 0 {
+        0  // Returns Int{== 0} which is InRange
+    } else if x > 100 {
+        100  // Returns Int{== 100} which is InRange
+    } else {
+        // Here: x >= 0 && x <= 100
+        x
+    }
+}
+
+fn three_way_compare(a: Int, b: Int) -> Int {
+    if a < b {
+        // Know: a < b
+        -1
+    } else if a > b {
+        // Know: a > b (since not a < b and a > b)
+        1
+    } else {
+        // Know: a == b (since not a < b and not a > b)
+        0
+    }
+}
+
+// ============================================================================
+// Refinement through let bindings
+// ============================================================================
+
+fn refined_through_let(x: Int) -> Maybe<Positive> {
+    let is_positive = x > 0;
+    if is_positive {
+        // Flow analysis tracks that is_positive implies x > 0
+        Some(x)
+    } else {
+        None
+    }
+}
+
+fn chain_refinements(x: Int) -> Maybe<Int{> 10}> {
+    let is_positive = x > 0;
+    let is_large = x > 10;
+
+    if is_positive && is_large {
+        // Know: x > 0 && x > 10, which simplifies to x > 10
+        Some(x)
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Refinement through pattern matching
+// ============================================================================
+
+type Maybe<T> is Some(T) | None;
+
+fn unwrap_positive(opt: Maybe<Int>) -> Maybe<Positive> {
+    match opt {
+        Option.Some(x) if x > 0 => {
+            // Guard refines x to be > 0
+            Some(x)
+        }
+        _ => None,
+    }
+}
+
+fn match_range(x: Int) -> Text {
+    match x {
+        n if n < 0 => "negative",
+        0 => "zero",
+        n if n <= 10 => "small positive",  // n is 1..=10
+        n if n <= 100 => "medium",         // n is 11..=100
+        _ => "large",                       // n > 100
+    }
+}
+
+// ============================================================================
+// Refinement through logical operators
+// ============================================================================
+
+fn and_refinement(x: Int, y: Int) -> Maybe<(Int, Int)> {
+    if x > 0 && y > 0 {
+        // Both x and y refined to > 0
+        Some((x, y))
+    } else {
+        None
+    }
+}
+
+fn or_refinement(x: Int) -> Maybe<Int> {
+    if x < 0 || x > 0 {
+        // x is either < 0 or > 0, therefore != 0
+        Some(x)
+    } else {
+        // x == 0
+        None
+    }
+}
+
+fn not_refinement(x: Int) -> Maybe<Positive> {
+    if !(x <= 0) {
+        // !(x <= 0) means x > 0
+        Some(x)
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Refinement through assertions
+// ============================================================================
+
+fn with_assertion(x: Int) -> Positive {
+    assert(x > 0);
+    // After assertion, x is known to be > 0
+    x
+}
+
+fn multiple_assertions(x: Int, y: Int) -> (Positive, Positive) {
+    assert(x > 0);
+    assert(y > 0);
+    // Both are now refined
+    (x, y)
+}
+
+// ============================================================================
+// Refinement in loops
+// ============================================================================
+
+fn loop_refinement(items: List<Int>) -> List<Positive> {
+    let mut result: List<Positive> = [];
+
+    for item in items {
+        if item > 0 {
+            // item is refined to Positive within this branch
+            result.push(item);
+        }
+    }
+
+    result
+}
+
+fn while_refinement(x: Int) -> NonNegative {
+    let mut current = x;
+
+    while current < 0 {
+        current += 1;
+    }
+
+    // After loop: current >= 0 (loop condition became false)
+    current
+}
+
+fn loop_with_break() -> Positive {
+    let mut x = 1;
+
+    loop {
+        if x > 100 {
+            break;
+        }
+        x += 1;
+    }
+
+    // After break: x > 100, which implies x > 0
+    x
+}
+
+// ============================================================================
+// Refinement through function calls
+// ============================================================================
+
+fn is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+fn call_refinement(x: Int) -> Maybe<Positive> {
+    if is_positive(x) {
+        // Function return value can propagate refinement info
+        Some(x)
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Refinement narrowing and widening
+// ============================================================================
+
+type SmallPositive is Int{> 0 && < 10};
+type LargePositive is Int{> 100};
+
+fn narrow_positive(x: Positive) -> Maybe<SmallPositive> {
+    // Start with x > 0, narrow to x > 0 && x < 10
+    if x < 10 {
+        Some(x)
+    } else {
+        None
+    }
+}
+
+fn widen_small(x: SmallPositive) -> Positive {
+    // SmallPositive (> 0 && < 10) is subtype of Positive (> 0)
+    x
+}
+
+// ============================================================================
+// Refinement with struct fields
+// ============================================================================
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type QuadrantOne is {
+    x: Int{> 0},
+    y: Int{> 0},
+};
+
+fn check_quadrant_one(p: Point) -> Maybe<QuadrantOne> {
+    if p.x > 0 && p.y > 0 {
+        // Both fields are now refined
+        Some(QuadrantOne { x: p.x, y: p.y })
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Refinement with nullable/optional
+// ============================================================================
+
+fn null_check(opt: Maybe<Int>) -> Maybe<Positive> {
+    if let Some(x) = opt {
+        if x > 0 {
+            Some(x)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+fn chained_optional(opt: Maybe<Maybe<Int>>) -> Maybe<Positive> {
+    match opt {
+        Some(Some(x)) if x > 0 => Some(x),
+        _ => None,
+    }
+}
+
+// ============================================================================
+// Main demonstration
+// ============================================================================
+
+fn main() {
+    // Absolute value
+    assert(absolute_value(-5) == 5);
+    assert(absolute_value(5) == 5);
+
+    // Safe divide
+    assert(safe_divide(10, 2) == Some(5));
+    assert(safe_divide(10, 0) == None);
+
+    // Clamp
+    assert(clamp_to_range(-5) == 0);
+    assert(clamp_to_range(150) == 100);
+    assert(clamp_to_range(50) == 50);
+
+    // Logical operators
+    assert(and_refinement(1, 2) == Some((1, 2)));
+    assert(and_refinement(-1, 2) == None);
+    assert(or_refinement(5) == Some(5));
+    assert(or_refinement(0) == None);
+
+    // Loop refinement
+    let positives = loop_refinement([-1, 2, -3, 4, 5]);
+    assert(positives == [2, 4, 5]);
+
+    // While refinement
+    assert(while_refinement(-3) >= 0);
+
+    print("All flow-sensitive refinement tests passed!");
+}

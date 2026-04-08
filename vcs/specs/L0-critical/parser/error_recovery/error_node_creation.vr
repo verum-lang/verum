@@ -1,0 +1,95 @@
+// @test: parse-recover
+// @tier: 0
+// @level: L0
+// @tags: parser, error-recovery, error-nodes, ast
+// @expect: errors
+// @description: Tests that ERROR nodes are correctly created in the AST for invalid syntax.
+//              Verifies ERROR nodes wrap unparseable tokens while preserving surrounding valid AST.
+
+// Test 1: ERROR node for invalid token in expression
+// The @#$ should be wrapped in ERROR node
+fn test_error_node_in_expr() {
+    let x = 1 + @#$ + 2;
+    x
+}
+
+// Test 2: ERROR node preserves surrounding structure
+fn test_error_preserves_context() {
+    let before = 10;
+    @@@ invalid @@@
+    let after = 20;
+    before + after
+}
+
+// Test 3: Multiple ERROR nodes in same function
+fn test_multiple_error_nodes() {
+    let a = ~~~;
+    let b = 2;
+    let c = $$$;
+    let d = 4;
+    b + d
+}
+
+// Test 4: ERROR node in nested context
+fn test_nested_error_node() {
+    let result = {
+        let inner = !!!invalid!!!;
+        42
+    };
+    result
+}
+
+// Test 5: ERROR node in type position
+fn test_error_in_type() {
+    let x: @@@Invalid@@@ = 42;
+    let y: Int = 10;
+    y
+}
+
+// Test 6: ERROR node in pattern position
+fn test_error_in_pattern() {
+    let @@@bad@@@ = 42;
+    let good = 10;
+    good
+}
+
+// Test 7: ERROR node in match arm
+fn test_error_in_match() -> Int {
+    let value = Some(42);
+    match value {
+        Some(x) => x,
+        @@@bad@@@ => 0,
+        None => -1,
+    }
+}
+
+// Test 8: ERROR node spans multiple tokens
+fn test_multi_token_error() {
+    let x = @#$ %^& *() invalid;
+    let y = 10;
+    y
+}
+
+// Test 9: ERROR node at function level
+@@@invalid attribute@@@
+fn function_after_error() -> Int {
+    42
+}
+
+// Test 10: ERROR node in parameter list
+fn test_error_in_params(a: Int, @@@bad@@@, b: Int) -> Int {
+    a + b
+}
+
+// Test 11: Consecutive ERROR nodes
+fn test_consecutive_errors() {
+    @@@ $$$ ### !!!
+    let valid = 42;
+    valid
+}
+
+// Test 12: ERROR node with partial valid syntax
+fn test_partial_valid() {
+    let x = 1 + 2 + @invalid + 3 + 4;
+    x
+}

@@ -1,0 +1,144 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, complex, arithmetic, math
+// @timeout: 30000
+
+// Complex number arithmetic using offset encoding
+// Stored as: (re + 500) + (im + 500) * 1000
+// This handles negative values correctly with integer division
+
+fn complex_new(re: Int, im: Int) -> Int {
+    (re + 500) + (im + 500) * 1000
+}
+
+fn complex_re(c: Int) -> Int {
+    c % 1000 - 500
+}
+
+fn complex_im(c: Int) -> Int {
+    c / 1000 - 500
+}
+
+fn complex_add(a: Int, b: Int) -> Int {
+    complex_new(complex_re(a) + complex_re(b), complex_im(a) + complex_im(b))
+}
+
+fn complex_sub(a: Int, b: Int) -> Int {
+    complex_new(complex_re(a) - complex_re(b), complex_im(a) - complex_im(b))
+}
+
+fn complex_mul(a: Int, b: Int) -> Int {
+    let ar = complex_re(a);
+    let ai = complex_im(a);
+    let br = complex_re(b);
+    let bi = complex_im(b);
+    complex_new(ar * br - ai * bi, ar * bi + ai * br)
+}
+
+fn complex_conj(a: Int) -> Int {
+    complex_new(complex_re(a), 0 - complex_im(a))
+}
+
+fn complex_norm_sq(a: Int) -> Int {
+    let r = complex_re(a);
+    let i = complex_im(a);
+    r * r + i * i
+}
+
+fn test_basic() -> Int {
+    let a = complex_new(3, 4);
+    assert_eq(complex_re(a), 3);
+    assert_eq(complex_im(a), 4);
+
+    let b = complex_new(1, 2);
+
+    // (3+4i) + (1+2i) = 4+6i
+    let sum = complex_add(a, b);
+    assert_eq(complex_re(sum), 4);
+    assert_eq(complex_im(sum), 6);
+
+    // (3+4i) - (1+2i) = 2+2i
+    let diff = complex_sub(a, b);
+    assert_eq(complex_re(diff), 2);
+    assert_eq(complex_im(diff), 2);
+    1
+}
+
+fn test_mul() -> Int {
+    // (3+4i)(1+2i) = 3+6i+4i+8i^2 = 3+10i-8 = -5+10i
+    let a = complex_new(3, 4);
+    let b = complex_new(1, 2);
+    let prod = complex_mul(a, b);
+    assert_eq(complex_re(prod), -5);
+    assert_eq(complex_im(prod), 10);
+
+    // (1+i)(1-i) = 1-i^2 = 2
+    let c = complex_new(1, 1);
+    let d = complex_new(1, -1);
+    let prod2 = complex_mul(c, d);
+    assert_eq(complex_re(prod2), 2);
+    assert_eq(complex_im(prod2), 0);
+    1
+}
+
+fn test_conj_norm() -> Int {
+    let a = complex_new(3, 4);
+    let c = complex_conj(a);
+    assert_eq(complex_re(c), 3);
+    assert_eq(complex_im(c), -4);
+
+    // |3+4i|^2 = 9+16 = 25
+    assert_eq(complex_norm_sq(a), 25);
+
+    // a * conj(a) = |a|^2 (real)
+    let prod = complex_mul(a, c);
+    assert_eq(complex_re(prod), 25);
+    assert_eq(complex_im(prod), 0);
+    1
+}
+
+fn test_powers() -> Int {
+    // i^2 = -1
+    let i = complex_new(0, 1);
+    let i2 = complex_mul(i, i);
+    assert_eq(complex_re(i2), -1);
+    assert_eq(complex_im(i2), 0);
+
+    // i^3 = -i
+    let i3 = complex_mul(i2, i);
+    assert_eq(complex_re(i3), 0);
+    assert_eq(complex_im(i3), -1);
+
+    // i^4 = 1
+    let i4 = complex_mul(i3, i);
+    assert_eq(complex_re(i4), 1);
+    assert_eq(complex_im(i4), 0);
+    1
+}
+
+fn test_negative() -> Int {
+    // (-3-4i) + (3+4i) = 0
+    let a = complex_new(-3, -4);
+    let b = complex_new(3, 4);
+    let sum = complex_add(a, b);
+    assert_eq(complex_re(sum), 0);
+    assert_eq(complex_im(sum), 0);
+
+    // (-2+3i) * (4-i) = -8+2i+12i-3i^2 = -8+14i+3 = -5+14i
+    let c = complex_new(-2, 3);
+    let d = complex_new(4, -1);
+    let prod = complex_mul(c, d);
+    assert_eq(complex_re(prod), -5);
+    assert_eq(complex_im(prod), 14);
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_mul();
+    test_conj_norm();
+    test_powers();
+    test_negative();
+    print("[OK] 453_complex_arith_aot");
+    0
+}

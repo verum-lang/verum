@@ -1,0 +1,45 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: all
+// @tags: errors, recovery, try, recover, basic
+// @description: Tests basic try/recover error handling patterns.
+
+type ParseError is
+    | InvalidNumber(Text)
+    | UnexpectedChar(Text)
+    | EmptyInput;
+
+fn parse_int(s: Text) -> Result<Int, ParseError> {
+    if s.is_empty() {
+        return Err(EmptyInput);
+    }
+    // Simplified parsing
+    Ok(42)
+}
+
+fn safe_parse(input: Text) -> Int {
+    try {
+        let value = parse_int(input)?;
+        value
+    } recover err {
+        match err {
+            InvalidNumber(s) => {
+                print(f"Bad number: {s}");
+                0
+            },
+            UnexpectedChar(c) => {
+                print(f"Unexpected: {c}");
+                -1
+            },
+            EmptyInput => {
+                print("Empty input");
+                -1
+            },
+        }
+    }
+}
+
+fn main() {
+    let result = safe_parse("123");
+    assert(result == 42);
+}

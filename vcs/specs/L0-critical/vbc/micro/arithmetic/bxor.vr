@@ -1,0 +1,4 @@
+// @test: typecheck-pass
+// @level: L0
+// @expect: pass
+fn main() { assert_eq(0b1100 ^ 0b1010, 0b0110); }

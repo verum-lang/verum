@@ -1,0 +1,113 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, geometry, coordinate, distance
+// @timeout: 10000
+
+type Point is { x: Int, y: Int };
+
+fn dist_sq(a: Point, b: Point) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
+fn cross_product(o: Point, a: Point, b: Point) -> Int {
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+}
+
+// Dot product of vectors OA and OB
+fn dot_product(o: Point, a: Point, b: Point) -> Int {
+    (a.x - o.x) * (b.x - o.x) + (a.y - o.y) * (b.y - o.y)
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Triangle area * 2 (using cross product)
+fn triangle_area_2(a: Point, b: Point, c: Point) -> Int {
+    abs_val(cross_product(a, b, c))
+}
+
+// Check collinearity
+fn are_collinear(a: Point, b: Point, c: Point) -> Int {
+    if cross_product(a, b, c) == 0 { 1 } else { 0 }
+}
+
+fn test_distances() -> Int {
+    let o = Point { x: 0, y: 0 };
+    let a = Point { x: 3, y: 4 };
+    let b = Point { x: 6, y: 8 };
+    // d^2(O,A) = 9+16 = 25
+    assert_eq(dist_sq(o, a), 25);
+    // d^2(O,B) = 36+64 = 100
+    assert_eq(dist_sq(o, b), 100);
+    // d^2(A,B) = 9+16 = 25
+    assert_eq(dist_sq(a, b), 25);
+    // Self-distance = 0
+    assert_eq(dist_sq(o, o), 0);
+    1
+}
+
+fn test_cross_product() -> Int {
+    let o = Point { x: 0, y: 0 };
+    let a = Point { x: 1, y: 0 };
+    let b = Point { x: 0, y: 1 };
+    // cross(O→A, O→B) = 1*1 - 0*0 = 1 (positive = CCW)
+    assert_eq(cross_product(o, a, b), 1);
+    // Reverse: cross(O→B, O→A) = 0*0 - 1*1 = -1 (CW)
+    assert_eq(cross_product(o, b, a), -1);
+    // Parallel: cross(O→A, O→(2,0)) = 1*0 - 0*2 = 0
+    let c = Point { x: 2, y: 0 };
+    assert_eq(cross_product(o, a, c), 0);
+    1
+}
+
+fn test_triangle() -> Int {
+    let a = Point { x: 0, y: 0 };
+    let b = Point { x: 4, y: 0 };
+    let c = Point { x: 0, y: 3 };
+    // Area*2 = |4*3 - 0*0| = 12
+    assert_eq(triangle_area_2(a, b, c), 12);
+    // Area of (0,0),(1,0),(0,1) = 1/2 → area*2 = 1
+    let d = Point { x: 1, y: 0 };
+    let e = Point { x: 0, y: 1 };
+    assert_eq(triangle_area_2(a, d, e), 1);
+    1
+}
+
+fn test_collinear() -> Int {
+    let a = Point { x: 0, y: 0 };
+    let b = Point { x: 1, y: 1 };
+    let c = Point { x: 2, y: 2 };
+    let d = Point { x: 1, y: 2 };
+    assert_eq(are_collinear(a, b, c), 1);
+    assert_eq(are_collinear(a, b, d), 0);
+    1
+}
+
+fn test_dot_product() -> Int {
+    let o = Point { x: 0, y: 0 };
+    let a = Point { x: 1, y: 0 };
+    let b = Point { x: 0, y: 1 };
+    // Perpendicular → dot = 0
+    assert_eq(dot_product(o, a, b), 0);
+    // Same direction → positive
+    let c = Point { x: 2, y: 0 };
+    assert(dot_product(o, a, c) > 0);
+    // Opposite → negative
+    let d = Point { x: -1, y: 0 };
+    assert(dot_product(o, a, d) < 0);
+    1
+}
+
+fn main() -> Int {
+    test_distances();
+    test_cross_product();
+    test_triangle();
+    test_collinear();
+    test_dot_product();
+
+    print("DIFF_OK: coord_geometry");
+    0
+}

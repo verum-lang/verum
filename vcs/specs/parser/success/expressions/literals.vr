@@ -1,0 +1,295 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, literals
+// @description: Test all literal expression types from grammar/verum.ebnf
+
+// =============================================================================
+// INTEGER LITERALS (Section 1.5.1)
+// =============================================================================
+
+fn test_decimal_integers() {
+    let a = 0;
+    let b = 1;
+    let c = 42;
+    let d = 123456789;
+    let e = 1_000_000;
+    let f = 1_234_567_890;
+}
+
+fn test_hexadecimal_integers() {
+    let a = 0x0;
+    let b = 0xF;
+    let c = 0xFF;
+    let d = 0xDEADBEEF;
+    let e = 0xCAFE_BABE;
+    let f = 0x1234_5678_9ABC_DEF0;
+}
+
+fn test_octal_integers() {
+    let a = 0o0;
+    let b = 0o7;
+    let c = 0o77;
+    let d = 0o755;
+    let e = 0o12_34_56;
+}
+
+fn test_binary_integers() {
+    let a = 0b0;
+    let b = 0b1;
+    let c = 0b1010;
+    let d = 0b1111_0000;
+    let e = 0b1010_1010_1010_1010;
+}
+
+fn test_integer_suffixes() {
+    let a = 42i8;
+    let b = 42i16;
+    let c = 42i32;
+    let d = 42i64;
+    let e = 42i128;
+    let f = 42isize;
+    let g = 42u8;
+    let h = 42u16;
+    let i = 42u32;
+    let j = 42u64;
+    let k = 42u128;
+    let l = 42usize;
+    let m = 0xFF_u8;
+    let n = 0b1010_i32;
+}
+
+// =============================================================================
+// FLOAT LITERALS (Section 1.5.1)
+// =============================================================================
+
+fn test_float_literals() {
+    let a = 0.0;
+    let b = 1.0;
+    let c = 3.14159;
+    let d = 2.718281828;
+    let e = 1_000.000_001;
+    let f = 0.123_456_789;
+}
+
+fn test_float_exponents() {
+    let a = 1e10;
+    let b = 1E10;
+    let c = 1.5e10;
+    let d = 1.5E10;
+    let e = 1e+10;
+    let f = 1e-10;
+    let g = 1.5e+10;
+    let h = 1.5e-10;
+    let i = 6.022e23;
+    let j = 1.602e-19;
+}
+
+fn test_float_suffixes() {
+    let a = 3.14f32;
+    let b = 3.14f64;
+    let c = 1e10f32;
+    let d = 1e10f64;
+    let e = 1.5e-10f64;
+}
+
+// =============================================================================
+// BOOLEAN LITERALS (Section 1.5.3)
+// =============================================================================
+
+fn test_boolean_literals() {
+    let a = true;
+    let b = false;
+}
+
+// =============================================================================
+// CHARACTER LITERALS (Section 1.5.2)
+// =============================================================================
+
+fn test_char_literals() {
+    let a = 'a';
+    let b = 'Z';
+    let c = '0';
+    let d = ' ';
+    let e = '_';
+}
+
+fn test_char_escape_sequences() {
+    let a = '\n';
+    let b = '\r';
+    let c = '\t';
+    let d = '\0';
+    let e = '\\';
+    let f = '\'';
+    let g = '\"';
+    let h = '\x41';
+    let i = '\x7F';
+    let j = '\u{0041}';
+    let k = '\u{1F600}';
+}
+
+// =============================================================================
+// STRING LITERALS (Section 1.5.2)
+// =============================================================================
+
+fn test_plain_strings() {
+    let a = "";
+    let b = "hello";
+    let c = "Hello, World!";
+    let d = "line1\nline2";
+    let e = "tab\there";
+    let f = "quote: \"text\"";
+    let g = "backslash: \\path";
+}
+
+fn test_multiline_strings() {
+    let a = """
+    This is a
+    multiline string
+    """;
+
+    let b = """line 1
+line 2
+line 3""";
+}
+
+fn test_raw_strings() {
+    let a = r#"raw string"#;
+    let b = r##"contains #hash"##;
+    let c = r#"no \escape \sequences"#;
+    let d = r#"can contain "quotes""#;
+}
+
+fn test_byte_strings() {
+    let a = b"hello";
+    let b = b"bytes\x00\x01\x02";
+    let c = b"ascii only";
+}
+
+// =============================================================================
+// INTERPOLATED STRINGS (Section 1.5.2)
+// =============================================================================
+
+fn test_format_strings() {
+    let name = "world";
+    let x = 42;
+
+    let a = f"Hello, {name}!";
+    let b = f"x = {x}";
+    let c = f"sum = {1 + 2}";
+    let d = f"value: {compute()}";
+    let e = f"nested: {f"inner: {x}"}";
+}
+
+fn test_format_specs() {
+    let x = 42;
+    let pi = 3.14159;
+
+    let a = f"{x:d}";
+    let b = f"{x:08}";
+    let c = f"{pi:.2}";
+    let d = f"{x:>10}";
+    let e = f"{x:<10}";
+    let f = f"{x:^10}";
+}
+
+// =============================================================================
+// TAGGED LITERALS (Section 1.5.2.1)
+// =============================================================================
+
+fn test_json_literals() {
+    let a = json#"{\"name\": \"Alice\", \"age\": 30}";
+    let b = json#"""
+    {
+        "users": [
+            {"id": 1, "name": "Bob"},
+            {"id": 2, "name": "Carol"}
+        ]
+    }
+    """;
+    // Relaxed JSON (JSON5-style)
+    let c = json#"{ name: 'value', trailing: true, }";
+}
+
+fn test_sql_literals() {
+    let a = sql#"SELECT * FROM users";
+    let b = sql#"SELECT id, name FROM users WHERE age > 18";
+    let c = sql#"""
+    SELECT u.name, o.total
+    FROM users u
+    JOIN orders o ON u.id = o.user_id
+    WHERE o.status = 'completed'
+    """;
+}
+
+fn test_regex_literals() {
+    let a = rx#"^\d{3}-\d{4}$";
+    let b = rx#"[a-zA-Z_][a-zA-Z0-9_]*";
+    let c = re#"hello.*world";
+}
+
+fn test_url_literals() {
+    let a = url#"https://example.com";
+    let b = url#"https://api.example.com/v1/users?page=1";
+    let c = uri#"mailto:user@example.com";
+}
+
+fn test_datetime_literals() {
+    let a = d#"2024-01-15";
+    let b = d#"2024-01-15T10:30:00Z";
+    let c = dur#"1h30m";
+    let d = dur#"P1DT2H30M";
+}
+
+fn test_xml_html_literals() {
+    let a = xml#"<root><child attr=\"value\"/></root>";
+    let b = html#"<div class=\"container\"><p>Hello</p></div>";
+}
+
+fn test_yaml_toml_literals() {
+    let a = yaml#"""
+    name: config
+    settings:
+      debug: true
+      port: 8080
+    """;
+
+    let b = toml#"""
+    [package]
+    name = "myapp"
+    version = "1.0.0"
+    """;
+}
+
+fn test_network_literals() {
+    let a = ip#"192.168.1.1";
+    let b = ip#"::1";
+    let c = cidr#"10.0.0.0/8";
+    let d = mac#"00:1A:2B:3C:4D:5E";
+}
+
+fn test_other_tagged_literals() {
+    let a = uuid#"550e8400-e29b-41d4-a716-446655440000";
+    let b = ver#"1.2.3";
+    let c = b64#"SGVsbG8gV29ybGQ=";
+    let d = hex#"DEADBEEF";
+    let e = glob#"*.txt";
+    let f = path#"/usr/local/bin";
+    let g = email#"user@example.com";
+}
+
+fn test_tagged_interpolation() {
+    let table = "users";
+    let id = 42;
+
+    let a = sql#"SELECT * FROM ${table} WHERE id = ${id}";
+    let b = json#"""{"id": ${id}, "table": "${table}"}""";
+}
+
+// =============================================================================
+// UNIT LITERAL
+// =============================================================================
+
+fn test_unit_literal() {
+    let a = ();
+    let b: () = ();
+}

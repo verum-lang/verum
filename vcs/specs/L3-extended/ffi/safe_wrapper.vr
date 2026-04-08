@@ -1,0 +1,134 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, safe-wrapper, memory-safety
+
+/// Safe wrappers around FFI functions
+
+type c_int is i32;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+
+type IOError is
+    | OpenFailed(Text)
+    | ReadFailed
+    | WriteFailed
+    | CloseFailed;
+
+type CStr is { ptr: *const c_char };
+
+ffi libc {
+    @extern("C")
+    fn open(path: *const c_char, flags: c_int) -> c_int;
+    @extern("C")
+    fn close(fd: c_int) -> c_int;
+    @extern("C")
+    fn read(fd: c_int, buf: *mut c_void, count: size_t) -> isize;
+    @extern("C")
+    fn write(fd: c_int, buf: *const c_void, count: size_t) -> isize;
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+    @extern("C")
+    fn free(ptr: *mut c_void);
+    @extern("C")
+    fn strlen(s: *const c_char) -> size_t;
+}
+
+/// Safe file handle with RAII
+type FileHandle is {
+    fd: c_int,
+};
+
+implement FileHandle {
+    /// Open a file safely
+    fn open(path: Text) -> Result<FileHandle, IOError> {
+        let c_path = path.to_cstring();
+
+        let fd = unsafe {
+            libc.open(c_path.as_ptr(), 0)
+        };
+
+        if fd < 0 {
+            Err(IOError.OpenFailed(path))
+        } else {
+            Ok(FileHandle { fd })
+        }
+    }
+
+    /// Read into buffer
+    fn read_buf(&self, buf: &mut [u8]) -> Result<size_t, IOError> {
+        let result = unsafe {
+            libc.read(self.fd, buf.as_mut_ptr() as *mut c_void, buf.len())
+        };
+        if result < 0 {
+            Err(IOError.ReadFailed)
+        } else {
+            Ok(result as size_t)
+        }
+    }
+
+    /// Write from buffer
+    fn write_buf(&self, buf: &[u8]) -> Result<size_t, IOError> {
+        let result = unsafe {
+            libc.write(self.fd, buf.as_ptr() as *const c_void, buf.len())
+        };
+        if result < 0 {
+            Err(IOError.WriteFailed)
+        } else {
+            Ok(result as size_t)
+        }
+    }
+}
+
+implement Drop for FileHandle {
+    fn drop(&mut self) {
+        if self.fd >= 0 {
+            unsafe { libc.close(self.fd); }
+        }
+    }
+}
+
+/// Safe malloc wrapper
+fn safe_alloc(size: size_t) -> Maybe<*mut u8> {
+    let ptr = unsafe { libc.malloc(size) };
+    if ptr.is_null() {
+        None
+    } else {
+        Some(ptr as *mut u8)
+    }
+}
+
+/// Safe free wrapper
+fn safe_free(ptr: *mut u8) {
+    if !ptr.is_null() {
+        unsafe { libc.free(ptr as *mut c_void); }
+    }
+}
+
+/// RAII allocation guard
+type AllocGuard is {
+    ptr: *mut u8,
+    size: size_t,
+};
+
+implement AllocGuard {
+    fn new(size: size_t) -> Maybe<AllocGuard> {
+        let ptr = safe_alloc(size);
+        match ptr {
+            Some(p) => Some(AllocGuard { ptr: p, size }),
+            None => None,
+        }
+    }
+}
+
+implement Drop for AllocGuard {
+    fn drop(&mut self) {
+        safe_free(self.ptr);
+    }
+}
+
+fn main() {
+    // Test safe allocation
+    let guard = AllocGuard.new(1024);
+}

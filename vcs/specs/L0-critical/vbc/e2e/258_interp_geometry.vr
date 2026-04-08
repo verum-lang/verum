@@ -1,0 +1,324 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, geometry, computational
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: computational geometry (all integer arithmetic)
+
+// =============================================================================
+// 2D Point
+// =============================================================================
+
+type Pt is { x: Int, y: Int };
+
+fn pt_new(x: Int, y: Int) -> Pt {
+    Pt { x: x, y: y }
+}
+
+// =============================================================================
+// Absolute value
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// =============================================================================
+// Manhattan distance: |x1-x2| + |y1-y2|
+// =============================================================================
+
+fn manhattan(a: Pt, b: Pt) -> Int {
+    abs_val(a.x - b.x) + abs_val(a.y - b.y)
+}
+
+// =============================================================================
+// Squared Euclidean distance (avoids sqrt, stays integer)
+// =============================================================================
+
+fn dist_sq(a: Pt, b: Pt) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
+// =============================================================================
+// Cross product of vectors (P1-P0) x (P2-P0)
+// Positive = counter-clockwise, Negative = clockwise, Zero = collinear
+// =============================================================================
+
+fn cross(o: Pt, a: Pt, b: Pt) -> Int {
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+}
+
+// =============================================================================
+// Orientation: 0 = collinear, 1 = clockwise, 2 = counter-clockwise
+// =============================================================================
+
+fn orientation(p: Pt, q: Pt, r: Pt) -> Int {
+    let cp = cross(p, q, r);
+    if cp == 0 { 0 }
+    else if cp < 0 { 1 }
+    else { 2 }
+}
+
+// =============================================================================
+// Doubled area of triangle (avoids division, stays integer)
+// area * 2 = |cross product|
+// =============================================================================
+
+fn triangle_area2(a: Pt, b: Pt, c: Pt) -> Int {
+    abs_val(cross(a, b, c))
+}
+
+// =============================================================================
+// Point in triangle test (using area method)
+// Point P is inside triangle ABC iff area(PAB) + area(PBC) + area(PCA) = area(ABC)
+// Uses doubled areas to avoid fractions
+// =============================================================================
+
+fn point_in_triangle(p: Pt, a: Pt, b: Pt, c: Pt) -> Bool {
+    let total = triangle_area2(a, b, c);
+    let s1 = triangle_area2(p, a, b);
+    let s2 = triangle_area2(p, b, c);
+    let s3 = triangle_area2(p, c, a);
+    s1 + s2 + s3 == total
+}
+
+// =============================================================================
+// Check if point is on segment (collinear and within bounds)
+// =============================================================================
+
+fn on_segment(p: Pt, a: Pt, b: Pt) -> Bool {
+    let cp = cross(a, p, b);
+    if cp != 0 {
+        return false;
+    }
+    let min_x = if a.x < b.x { a.x } else { b.x };
+    let max_x = if a.x > b.x { a.x } else { b.x };
+    let min_y = if a.y < b.y { a.y } else { b.y };
+    let max_y = if a.y > b.y { a.y } else { b.y };
+    p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y
+}
+
+// =============================================================================
+// Convexity check: are 4 points forming a convex polygon?
+// Points must be given in order. Convex iff all cross products have same sign.
+// =============================================================================
+
+fn is_convex_quad(a: Pt, b: Pt, c: Pt, d: Pt) -> Bool {
+    let c1 = cross(a, b, c);
+    let c2 = cross(b, c, d);
+    let c3 = cross(c, d, a);
+    let c4 = cross(d, a, b);
+    // All positive (CCW) or all negative (CW)
+    let all_pos = c1 > 0 && c2 > 0 && c3 > 0 && c4 > 0;
+    let all_neg = c1 < 0 && c2 < 0 && c3 < 0 && c4 < 0;
+    all_pos || all_neg
+}
+
+// =============================================================================
+// Signed area of polygon (Shoelace formula, doubled)
+// For triangle: same as cross product
+// =============================================================================
+
+fn shoelace_tri(a: Pt, b: Pt, c: Pt) -> Int {
+    a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)
+}
+
+fn shoelace_quad(a: Pt, b: Pt, c: Pt, d: Pt) -> Int {
+    a.x * b.y - b.x * a.y
+    + b.x * c.y - c.x * b.y
+    + c.x * d.y - d.x * c.y
+    + d.x * a.y - a.x * d.y
+}
+
+// =============================================================================
+// Dot product of vectors (a-o) . (b-o)
+// =============================================================================
+
+fn dot(o: Pt, a: Pt, b: Pt) -> Int {
+    (a.x - o.x) * (b.x - o.x) + (a.y - o.y) * (b.y - o.y)
+}
+
+// =============================================================================
+// Tests — Manhattan distance
+// =============================================================================
+
+fn test_manhattan() {
+    assert_eq(manhattan(pt_new(0, 0), pt_new(3, 4)), 7);
+    assert_eq(manhattan(pt_new(1, 1), pt_new(1, 1)), 0);
+    assert_eq(manhattan(pt_new(-2, 3), pt_new(4, -1)), 10);
+    assert_eq(manhattan(pt_new(0, 0), pt_new(5, 0)), 5);
+    assert_eq(manhattan(pt_new(0, 0), pt_new(0, 7)), 7);
+}
+
+// =============================================================================
+// Tests — Squared distance
+// =============================================================================
+
+fn test_dist_sq() {
+    // (3,4) distance from origin: 9+16 = 25
+    assert_eq(dist_sq(pt_new(0, 0), pt_new(3, 4)), 25);
+    assert_eq(dist_sq(pt_new(1, 1), pt_new(1, 1)), 0);
+    assert_eq(dist_sq(pt_new(0, 0), pt_new(1, 0)), 1);
+    assert_eq(dist_sq(pt_new(0, 0), pt_new(0, 1)), 1);
+    // (1,2) to (4,6): dx=3, dy=4 => 25
+    assert_eq(dist_sq(pt_new(1, 2), pt_new(4, 6)), 25);
+}
+
+// =============================================================================
+// Tests — Cross product and orientation
+// =============================================================================
+
+fn test_cross_product() {
+    // (0,0), (1,0), (0,1) => cross = 1*1 - 0*0 = 1 (CCW)
+    assert_eq(cross(pt_new(0, 0), pt_new(1, 0), pt_new(0, 1)), 1);
+    // (0,0), (0,1), (1,0) => cross = 0*0 - 1*1 = -1 (CW)
+    assert_eq(cross(pt_new(0, 0), pt_new(0, 1), pt_new(1, 0)), -1);
+    // Collinear: (0,0), (1,1), (2,2) => cross = 1*2 - 1*2 = 0
+    assert_eq(cross(pt_new(0, 0), pt_new(1, 1), pt_new(2, 2)), 0);
+}
+
+fn test_orientation() {
+    assert_eq(orientation(pt_new(0, 0), pt_new(1, 0), pt_new(0, 1)), 2); // CCW
+    assert_eq(orientation(pt_new(0, 0), pt_new(0, 1), pt_new(1, 0)), 1); // CW
+    assert_eq(orientation(pt_new(0, 0), pt_new(1, 1), pt_new(2, 2)), 0); // collinear
+}
+
+// =============================================================================
+// Tests — Triangle area
+// =============================================================================
+
+fn test_triangle_area() {
+    // Right triangle (0,0), (3,0), (0,4) => area = 6, doubled = 12
+    assert_eq(triangle_area2(pt_new(0, 0), pt_new(3, 0), pt_new(0, 4)), 12);
+    // Unit triangle (0,0), (1,0), (0,1) => area = 0.5, doubled = 1
+    assert_eq(triangle_area2(pt_new(0, 0), pt_new(1, 0), pt_new(0, 1)), 1);
+    // Degenerate (collinear) => area = 0
+    assert_eq(triangle_area2(pt_new(0, 0), pt_new(1, 1), pt_new(2, 2)), 0);
+    // (1,1), (4,1), (1,5) => base=3, height=4, area=6, doubled=12
+    assert_eq(triangle_area2(pt_new(1, 1), pt_new(4, 1), pt_new(1, 5)), 12);
+}
+
+// =============================================================================
+// Tests — Point in triangle
+// =============================================================================
+
+fn test_point_in_triangle() {
+    let a = pt_new(0, 0);
+    let b = pt_new(10, 0);
+    let c = pt_new(0, 10);
+    // Inside
+    assert(point_in_triangle(pt_new(1, 1), a, b, c));
+    assert(point_in_triangle(pt_new(2, 3), a, b, c));
+    // On vertex
+    assert(point_in_triangle(pt_new(0, 0), a, b, c));
+    // On edge
+    assert(point_in_triangle(pt_new(5, 0), a, b, c));
+    assert(point_in_triangle(pt_new(0, 5), a, b, c));
+    // Outside
+    assert(!point_in_triangle(pt_new(6, 6), a, b, c));
+    assert(!point_in_triangle(pt_new(-1, 5), a, b, c));
+    assert(!point_in_triangle(pt_new(11, 0), a, b, c));
+}
+
+fn test_point_in_triangle_symmetric() {
+    // Equilateral-like triangle centered near origin
+    let a = pt_new(0, 10);
+    let b = pt_new(-9, -5);
+    let c = pt_new(9, -5);
+    // Center (0,0) should be inside
+    assert(point_in_triangle(pt_new(0, 0), a, b, c));
+    // Far away should be outside
+    assert(!point_in_triangle(pt_new(20, 20), a, b, c));
+}
+
+// =============================================================================
+// Tests — On segment
+// =============================================================================
+
+fn test_on_segment() {
+    let a = pt_new(0, 0);
+    let b = pt_new(4, 4);
+    // Midpoint
+    assert(on_segment(pt_new(2, 2), a, b));
+    // Endpoints
+    assert(on_segment(pt_new(0, 0), a, b));
+    assert(on_segment(pt_new(4, 4), a, b));
+    // Not collinear
+    assert(!on_segment(pt_new(1, 2), a, b));
+    // Collinear but outside
+    assert(!on_segment(pt_new(5, 5), a, b));
+    assert(!on_segment(pt_new(-1, -1), a, b));
+}
+
+// =============================================================================
+// Tests — Convex quad
+// =============================================================================
+
+fn test_convex_quad() {
+    // Square (convex)
+    assert(is_convex_quad(pt_new(0, 0), pt_new(4, 0), pt_new(4, 4), pt_new(0, 4)));
+    // Rectangle (convex)
+    assert(is_convex_quad(pt_new(0, 0), pt_new(6, 0), pt_new(6, 3), pt_new(0, 3)));
+}
+
+fn test_concave_quad() {
+    // Non-convex: (0,0), (4,0), (2,1), (0,4) — point (2,1) is inside
+    // Cross products will have mixed signs
+    assert(!is_convex_quad(pt_new(0, 0), pt_new(4, 0), pt_new(2, 1), pt_new(0, 4)));
+}
+
+// =============================================================================
+// Tests — Shoelace formula
+// =============================================================================
+
+fn test_shoelace_triangle() {
+    // Same as cross product for triangle
+    let s = shoelace_tri(pt_new(0, 0), pt_new(3, 0), pt_new(0, 4));
+    assert_eq(abs_val(s), 12); // 2 * area = 12
+}
+
+fn test_shoelace_quad() {
+    // Unit square (0,0),(1,0),(1,1),(0,1) area=1, doubled=2
+    let s = shoelace_quad(pt_new(0, 0), pt_new(1, 0), pt_new(1, 1), pt_new(0, 1));
+    assert_eq(abs_val(s), 2);
+    // Rectangle (0,0),(3,0),(3,2),(0,2) area=6, doubled=12
+    let s2 = shoelace_quad(pt_new(0, 0), pt_new(3, 0), pt_new(3, 2), pt_new(0, 2));
+    assert_eq(abs_val(s2), 12);
+}
+
+// =============================================================================
+// Tests — Dot product
+// =============================================================================
+
+fn test_dot_product() {
+    // Perpendicular: (1,0) dot (0,1) = 0
+    assert_eq(dot(pt_new(0, 0), pt_new(1, 0), pt_new(0, 1)), 0);
+    // Parallel: (2,0) dot (3,0) = 6
+    assert_eq(dot(pt_new(0, 0), pt_new(2, 0), pt_new(3, 0)), 6);
+    // Same direction: (1,1) dot (2,2) = 4
+    assert_eq(dot(pt_new(0, 0), pt_new(1, 1), pt_new(2, 2)), 4);
+    // Opposite: (1,0) dot (-1,0) = -1
+    assert_eq(dot(pt_new(0, 0), pt_new(1, 0), pt_new(-1, 0)), -1);
+}
+
+fn main() -> Int {
+    test_manhattan();
+    test_dist_sq();
+    test_cross_product();
+    test_orientation();
+    test_triangle_area();
+    test_point_in_triangle();
+    test_point_in_triangle_symmetric();
+    test_on_segment();
+    test_convex_quad();
+    test_concave_quad();
+    test_shoelace_triangle();
+    test_shoelace_quad();
+    test_dot_product();
+    print("[OK] 258_interp_geometry");
+    0
+}

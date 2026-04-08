@@ -1,0 +1,263 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, math, transcendental
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT full math transcendental coverage — sin, cos, tan, exp, ln, sinh, cosh, tanh
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn sin_approx(x: Float) -> Float {
+    // Taylor series: x - x^3/6 + x^5/120 - x^7/5040 + x^9/362880
+    let x2 = x * x;
+    let x3 = x2 * x;
+    let x5 = x3 * x2;
+    let x7 = x5 * x2;
+    let x9 = x7 * x2;
+    x - x3 / 6.0 + x5 / 120.0 - x7 / 5040.0 + x9 / 362880.0
+}
+
+fn cos_approx(x: Float) -> Float {
+    // Taylor series: 1 - x^2/2 + x^4/24 - x^6/720 + x^8/40320
+    let x2 = x * x;
+    let x4 = x2 * x2;
+    let x6 = x4 * x2;
+    let x8 = x6 * x2;
+    1.0 - x2 / 2.0 + x4 / 24.0 - x6 / 720.0 + x8 / 40320.0
+}
+
+fn exp_approx(x: Float) -> Float {
+    let mut result = 1.0;
+    let mut term = 1.0;
+    let mut n = 1.0;
+    while n < 25.0 {
+        term = term * x / n;
+        result = result + term;
+        n = n + 1.0;
+    }
+    result
+}
+
+fn sqrt_approx(x: Float) -> Float {
+    if x <= 0.0 { 0.0 } else {
+        let mut guess = x / 2.0;
+        let mut i = 0;
+        while i < 25 {
+            guess = (guess + x / guess) / 2.0;
+            i = i + 1;
+        }
+        guess
+    }
+}
+
+fn ln_approx(x: Float) -> Float {
+    if x <= 0.0 { 0.0 - 999999.0 } else {
+        let e_val = 2.71828182845905;
+        let mut val = x;
+        let mut k_count = 0.0;
+        while val > 2.0 {
+            val = val / e_val;
+            k_count = k_count + 1.0;
+        }
+        while val < 0.5 {
+            val = val * e_val;
+            k_count = k_count - 1.0;
+        }
+        let t = (val - 1.0) / (val + 1.0);
+        let t2 = t * t;
+        let mut result = t;
+        let mut pw = t * t2;
+        let mut n = 1.0;
+        while n < 15.0 {
+            result = result + pw / (2.0 * n + 1.0);
+            pw = pw * t2;
+            n = n + 1.0;
+        }
+        result * 2.0 + k_count
+    }
+}
+
+// ============================================================================
+// Test 1: sin and cos basic values
+// ============================================================================
+
+fn test_sin_cos() {
+    let pi = 3.14159265358979;
+
+    // sin(0) = 0
+    assert_eq(abs_f(sin_approx(0.0)) < 0.001, true);
+
+    // cos(0) = 1
+    assert_eq(abs_f(cos_approx(0.0) - 1.0) < 0.001, true);
+
+    // sin(pi/2) ≈ 1
+    assert_eq(abs_f(sin_approx(pi / 2.0) - 1.0) < 0.001, true);
+
+    // cos(pi/2) ≈ 0
+    assert_eq(abs_f(cos_approx(pi / 2.0)) < 0.01, true);
+
+    // sin(pi/6) ≈ 0.5
+    assert_eq(abs_f(sin_approx(pi / 6.0) - 0.5) < 0.001, true);
+
+    // cos(pi/3) ≈ 0.5
+    assert_eq(abs_f(cos_approx(pi / 3.0) - 0.5) < 0.001, true);
+
+    // sin^2 + cos^2 = 1 (Pythagorean identity)
+    let angle = 0.7;
+    let s = sin_approx(angle);
+    let c = cos_approx(angle);
+    assert_eq(abs_f(s * s + c * c - 1.0) < 0.001, true);
+
+    print("test_sin_cos passed");
+}
+
+// ============================================================================
+// Test 2: tan = sin/cos
+// ============================================================================
+
+fn test_tan() {
+    let pi = 3.14159265358979;
+
+    // tan(0) = 0
+    let t0 = sin_approx(0.0) / cos_approx(0.0);
+    assert_eq(abs_f(t0) < 0.001, true);
+
+    // tan(pi/4) ≈ 1
+    let t1 = sin_approx(pi / 4.0) / cos_approx(pi / 4.0);
+    assert_eq(abs_f(t1 - 1.0) < 0.01, true);
+
+    // tan(-x) = -tan(x) (odd function)
+    let angle = 0.5;
+    let tp = sin_approx(angle) / cos_approx(angle);
+    let tn = sin_approx(0.0 - angle) / cos_approx(0.0 - angle);
+    assert_eq(abs_f(tp + tn) < 0.001, true);
+
+    print("test_tan passed");
+}
+
+// ============================================================================
+// Test 3: exp and ln
+// ============================================================================
+
+fn test_exp_ln() {
+    // exp(0) = 1
+    assert_eq(abs_f(exp_approx(0.0) - 1.0) < 0.001, true);
+
+    // exp(1) ≈ e ≈ 2.71828
+    assert_eq(abs_f(exp_approx(1.0) - 2.71828) < 0.001, true);
+
+    // ln(1) = 0
+    assert_eq(abs_f(ln_approx(1.0)) < 0.01, true);
+
+    // ln(e) ≈ 1
+    assert_eq(abs_f(ln_approx(2.71828) - 1.0) < 0.01, true);
+
+    // exp(ln(x)) ≈ x
+    let x = 3.5;
+    assert_eq(abs_f(exp_approx(ln_approx(x)) - x) < 0.1, true);
+
+    // ln(exp(x)) ≈ x
+    let y = 1.5;
+    assert_eq(abs_f(ln_approx(exp_approx(y)) - y) < 0.1, true);
+
+    // exp(a+b) = exp(a)*exp(b)
+    let a = 0.5;
+    let b = 0.7;
+    let lhs = exp_approx(a + b);
+    let rhs = exp_approx(a) * exp_approx(b);
+    assert_eq(abs_f(lhs - rhs) < 0.01, true);
+
+    print("test_exp_ln passed");
+}
+
+// ============================================================================
+// Test 4: sinh, cosh, tanh
+// ============================================================================
+
+fn sinh_approx(x: Float) -> Float {
+    (exp_approx(x) - exp_approx(0.0 - x)) / 2.0
+}
+
+fn cosh_approx(x: Float) -> Float {
+    (exp_approx(x) + exp_approx(0.0 - x)) / 2.0
+}
+
+fn tanh_approx(x: Float) -> Float {
+    let ex = exp_approx(x);
+    let emx = exp_approx(0.0 - x);
+    (ex - emx) / (ex + emx)
+}
+
+fn test_hyperbolic() {
+    // sinh(0) = 0
+    assert_eq(abs_f(sinh_approx(0.0)) < 0.001, true);
+
+    // cosh(0) = 1
+    assert_eq(abs_f(cosh_approx(0.0) - 1.0) < 0.001, true);
+
+    // tanh(0) = 0
+    assert_eq(abs_f(tanh_approx(0.0)) < 0.001, true);
+
+    // cosh^2 - sinh^2 = 1 (hyperbolic identity)
+    let x = 1.0;
+    let ch = cosh_approx(x);
+    let sh = sinh_approx(x);
+    assert_eq(abs_f(ch * ch - sh * sh - 1.0) < 0.01, true);
+
+    // tanh is bounded: -1 < tanh(x) < 1
+    let t_big = tanh_approx(5.0);
+    assert_eq(t_big > 0.99, true);
+    assert_eq(t_big < 1.01, true);
+
+    let t_neg = tanh_approx(-5.0);
+    assert_eq(t_neg < -0.99, true);
+    assert_eq(t_neg > -1.01, true);
+
+    // tanh is odd: tanh(-x) = -tanh(x)
+    let t1 = tanh_approx(1.5);
+    let t2 = tanh_approx(-1.5);
+    assert_eq(abs_f(t1 + t2) < 0.001, true);
+
+    print("test_hyperbolic passed");
+}
+
+// ============================================================================
+// Test 5: sqrt properties
+// ============================================================================
+
+fn test_sqrt() {
+    // Perfect squares
+    assert_eq(abs_f(sqrt_approx(4.0) - 2.0) < 0.001, true);
+    assert_eq(abs_f(sqrt_approx(9.0) - 3.0) < 0.001, true);
+    assert_eq(abs_f(sqrt_approx(16.0) - 4.0) < 0.001, true);
+    assert_eq(abs_f(sqrt_approx(100.0) - 10.0) < 0.001, true);
+
+    // sqrt(0) = 0
+    assert_eq(abs_f(sqrt_approx(0.0)) < 0.001, true);
+
+    // sqrt(1) = 1
+    assert_eq(abs_f(sqrt_approx(1.0) - 1.0) < 0.001, true);
+
+    // sqrt(2) ≈ 1.41421
+    assert_eq(abs_f(sqrt_approx(2.0) - 1.41421) < 0.001, true);
+
+    // sqrt(x)^2 ≈ x
+    let x = 7.5;
+    let s = sqrt_approx(x);
+    assert_eq(abs_f(s * s - x) < 0.001, true);
+
+    print("test_sqrt passed");
+}
+
+fn main() -> Int {
+    test_sin_cos();
+    test_tan();
+    test_exp_ln();
+    test_hyperbolic();
+    test_sqrt();
+    print("ALL PASSED");
+    0
+}

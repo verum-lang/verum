@@ -1,0 +1,37 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, constrained-alias, syntax, advanced-type-syntax
+// @description: Parser tests for constrained type alias syntax
+// @spec: 03-type-system.md Section 13. 2.4.6
+
+// Type alias with single constraint
+type NumList<T: Num> is List<T>;
+
+// Type alias with multiple constraints
+type SortedDisplayList<T: Ord + Display> is List<T>;
+
+// Type alias with where clause
+type ValidatedMap<K, V> is Map<K, V>
+    where type K: Hash + Eq,
+          type V: Clone;
+
+// Higher-kinded constrained alias
+type MonadContainer<M<_>: Monad, T> is M<T>;
+
+// Nested constraints
+type NestedList<T: Clone + Display + Ord> is List<List<T>>;
+
+// Alias with complex generic structure
+type ResultList<T, E: Error> is List<Result<T, E>>;
+
+// Alias with associated type constraint
+type IteratorList<I> is List<I>
+    where type I: Iterator,
+          type I.Item: Clone;
+
+// Multiple type parameters with constraints
+type BiMap<K: Hash + Eq, V: Clone + Default> is (Map<K, V>, Map<V, K>);
+
+// Unit alias with constraint (unusual but valid)
+type MarkedNum<T: Num> is (T, ());

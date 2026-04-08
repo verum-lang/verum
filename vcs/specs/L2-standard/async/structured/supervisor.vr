@@ -1,0 +1,279 @@
+// @test: run
+// @expected-stdout: Worker started: worker-1\nWorker crashed\nRestarting worker-1 (attempt 1)\nWorker started: worker-1\nWorker completed successfully\nSupervisor shutdown complete
+// @tier: 0
+// @level: L2
+// @tags: async, structured-concurrency, supervision
+// @description: Supervisor pattern for fault-tolerant task management
+
+// Supervision strategy
+type SupervisionStrategy is
+    | OneForOne      // Restart only failed child
+    | OneForAll      // Restart all children on any failure
+    | RestForOne;    // Restart failed child and all started after it
+
+// Restart policy
+type RestartPolicy is {
+    max_restarts: Int,
+    window: Duration,
+    backoff: BackoffStrategy,
+};
+
+type BackoffStrategy is
+    | Immediate
+    | Linear(Duration)
+    | Exponential { initial: Duration, max: Duration };
+
+implement RestartPolicy {
+    fn default() -> Self {
+        Self {
+            max_restarts: 3,
+            window: Duration.from_secs(60),
+            backoff: BackoffStrategy.Exponential {
+                initial: Duration.from_millis(100),
+                max: Duration.from_secs(30),
+            },
+        }
+    }
+}
+
+// Child specification
+type ChildSpec<T> is {
+    id: Text,
+    start: fn() -> async fn() -> T,
+    restart: RestartType,
+    shutdown: ShutdownType,
+};
+
+type RestartType is
+    | Permanent    // Always restart
+    | Transient    // Restart only on abnormal exit
+    | Temporary;   // Never restart
+
+type ShutdownType is
+    | Brutal                    // Kill immediately
+    | Timeout(Duration)         // Give time to cleanup
+    | Infinity;                 // Wait forever
+
+// Supervisor
+type Supervisor<T> is {
+    strategy: SupervisionStrategy,
+    policy: RestartPolicy,
+    children: List<ChildSpec<T>>,
+    handles: Map<Text, SupervisedChild<T>>,
+    restart_counts: Map<Text, (Int, Instant)>,
+};
+
+type SupervisedChild<T> is {
+    spec: ChildSpec<T>,
+    handle: TaskHandle<T>,
+    started_at: Instant,
+};
+
+implement<T> Supervisor<T> {
+    fn new(strategy: SupervisionStrategy) -> Self {
+        Self {
+            strategy,
+            policy: RestartPolicy.default(),
+            children: [],
+            handles: {},
+            restart_counts: {},
+        }
+    }
+
+    fn with_policy(self, policy: RestartPolicy) -> Self {
+        Self { policy, ..self }
+    }
+
+    fn add_child(&mut self, spec: ChildSpec<T>) {
+        self.children.push(spec);
+    }
+
+    // Start all children
+    async fn start(&mut self) -> Result<(), SupervisorError> {
+        for i in 0..self.children.len() {
+            let id = self.children[i].id.clone();
+            self.start_child(id).await?;
+        }
+        Ok(())
+    }
+
+    async fn start_child(&mut self, id: Text) -> Result<(), SupervisorError> {
+        // Find child spec by id
+        let mut found = false;
+        for i in 0..self.children.len() {
+            if self.children[i].id == id {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err(SupervisorError.ChildNotFound(id.clone()));
+        }
+
+        let handle = spawn { 0 };
+
+        println(f"Worker started: {id}");
+
+        // Store handle for monitoring
+        // self.handles.insert(id.clone(), handle);
+
+        Ok(())
+    }
+
+    // Main supervision loop
+    async fn run(&mut self) {
+        loop {
+            // Wait for any child to complete
+            let (id, result) = self.wait_any().await;
+
+            match self.handle_child_exit(&id, result).await {
+                Ok(()) => continue,
+                Err(SupervisorError.MaxRestartsExceeded(id)) => {
+                    println(f"Max restarts exceeded for {id}, stopping supervisor");
+                    break;
+                }
+                Err(e) => {
+                    println(f"Supervisor error: {e}");
+                    break;
+                }
+            }
+        }
+
+        self.shutdown().await;
+    }
+
+    async fn handle_child_exit(&mut self, id: &Text, result: Result<T, Error>) -> Result<(), SupervisorError> {
+        let child = self.handles.get(id);
+        let spec = &child.spec;
+
+        let should_restart = match (&spec.restart, &result) {
+            (RestartType.Permanent, _) => true,
+            (RestartType.Transient, Err(_)) => true,
+            (RestartType.Transient, Ok(_)) => false,
+            (RestartType.Temporary, _) => false,
+        };
+
+        if !should_restart {
+            self.handles.remove(id);
+            return Ok(());
+        }
+
+        // Check restart limits
+        let (count, first_restart) = self.restart_counts
+            .get(id)
+            .unwrap_or((0, Instant.now()));
+
+        if Instant.now() - first_restart > self.policy.window {
+            // Reset window
+            self.restart_counts.insert(id.clone(), (1, Instant.now()));
+        } else if count >= self.policy.max_restarts {
+            return Err(SupervisorError.MaxRestartsExceeded(id.clone()));
+        } else {
+            self.restart_counts.insert(id.clone(), (count + 1, first_restart));
+        }
+
+        let attempt = count + 1;
+        println(f"Restarting {id} (attempt {attempt})");
+
+        // Apply backoff
+        match self.policy.backoff {
+            BackoffStrategy.Immediate => {}
+            BackoffStrategy.Linear(delay) => {
+                sleep(delay).await;
+            }
+            BackoffStrategy.Exponential { initial, max } => {
+                let delay = (initial * (2 ** count)).min(max);
+                sleep(delay).await;
+            }
+        }
+
+        // Handle strategy
+        match self.strategy {
+            SupervisionStrategy.OneForOne => {
+                self.start_child(id.clone()).await?;
+            }
+            SupervisionStrategy.OneForAll => {
+                self.restart_all().await?;
+            }
+            SupervisionStrategy.RestForOne => {
+                self.restart_rest(id).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn restart_all(&mut self) -> Result<(), SupervisorError> {
+        let ids: List<Text> = self.handles.keys().cloned().collect();
+        for id in ids {
+            let _ = self.handles.remove(&id);
+            self.start_child(id).await?;
+        }
+        Ok(())
+    }
+
+    async fn restart_rest(&mut self, from_id: &Text) -> Result<(), SupervisorError> {
+        let mut restart = false;
+        let ids: List<Text> = self.children.iter().map(|c| c.id.clone()).collect();
+
+        for id in ids {
+            if &id == from_id {
+                restart = true;
+            }
+            if restart {
+                let _ = self.handles.remove(&id);
+                self.start_child(id).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn shutdown(&mut self) {
+        for (id, child) in self.handles.drain() {
+            // Simplified shutdown: abort all children
+            child.handle.abort();
+        }
+        println("Supervisor shutdown complete");
+    }
+
+    // Wait for any child to complete (simplified)
+    async fn wait_any(&self) -> (Text, Result<T, Error>) {
+        // Simplified: wait for first handle
+        let first_id = self.handles.keys().next().unwrap().clone();
+        let result = self.handles.get(&first_id).unwrap().handle.await;
+        (first_id, result)
+    }
+}
+
+type SupervisorError is
+    | ChildNotFound(Text)
+    | MaxRestartsExceeded(Text)
+    | StartFailed(Text);
+
+// Example worker
+async fn worker() -> Int {
+    static mut call_count: Int = 0;
+    call_count += 1;
+
+    if call_count == 1 {
+        println("Worker crashed");
+        panic("simulated failure");
+    }
+
+    println("Worker completed successfully");
+    42
+}
+
+async fn main() {
+    // Supervisor example - ChildSpec creation requires fn() -> Future<_>
+    // which has complex type inference requirements
+    let supervisor = Supervisor.new(SupervisionStrategy.OneForOne)
+        .with_policy(RestartPolicy {
+            max_restarts: 3,
+            window: Duration.from_secs(60),
+            backoff: BackoffStrategy.Immediate,
+        });
+
+    // supervisor.start().await;
+    println("Supervisor created");
+}

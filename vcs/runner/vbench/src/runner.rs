@@ -371,33 +371,7 @@ impl MemorySnapshot {
         }
     }
 
-    #[cfg(windows)]
-    pub fn capture() -> Self {
-        use windows_sys::Win32::System::ProcessStatus::{
-            GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
-        };
-        use windows_sys::Win32::System::Threading::GetCurrentProcess;
-
-        let rss = unsafe {
-            let mut pmc: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
-            pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-            if GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) != 0 {
-                Some(pmc.WorkingSetSize)
-            } else {
-                None
-            }
-        };
-
-        Self {
-            heap_bytes: 0,
-            peak_heap_bytes: 0,
-            allocation_count: 0,
-            deallocation_count: 0,
-            rss_bytes: rss,
-        }
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     pub fn capture() -> Self {
         Self {
             heap_bytes: 0,

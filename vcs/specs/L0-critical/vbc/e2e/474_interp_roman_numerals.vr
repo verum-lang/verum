@@ -1,0 +1,195 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, roman_numerals, encoding, integer_conversion
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Roman numeral conversion using parallel value/digit arrays.
+// Digits encoded as integers (I=1, V=5, X=10, L=50, C=100, D=500, M=1000).
+// Subtractive notation handled by checking pairs.
+//
+// Representation: roman_vals[14] holds the 14 standard values in decreasing order:
+//   1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1
+// roman_ints holds the equivalent integer values (same array).
+//
+// Encoded numeral: result_vals[i] = i-th symbol value, result_len = number of symbols.
+
+// Convert integer n to roman numeral encoded as value array.
+// vals[]: output array of symbol values (each = one of the 13 canonical values)
+// Returns number of symbols.
+fn to_roman(n: Int, vals: [Int; 32]) -> Int {
+    // Canonical values in decreasing order (13 entries)
+    let rom = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let num_rom = 13;
+    let mut remaining = n;
+    let mut pos = 0;
+    let mut ri = 0;
+    while ri < num_rom {
+        while remaining >= rom[ri] {
+            vals[pos] = rom[ri];
+            pos = pos + 1;
+            remaining = remaining - rom[ri];
+        }
+        ri = ri + 1;
+    }
+    pos
+}
+
+// Sum the value array to recover the integer.
+fn roman_vals_to_int(vals: [Int; 32], len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len { s = s + vals[i]; i = i + 1; }
+    s
+}
+
+// Verify round-trip: int -> roman vals -> sum == original int.
+fn check_roman(n: Int) -> Int {
+    let mut vals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let len = to_roman(n, vals);
+    roman_vals_to_int(vals, len)
+}
+
+fn test_roman_simple_values() {
+    // I=1, V=5, X=10, L=50, C=100, D=500, M=1000
+    assert_eq(check_roman(1),    1);
+    assert_eq(check_roman(5),    5);
+    assert_eq(check_roman(10),   10);
+    assert_eq(check_roman(50),   50);
+    assert_eq(check_roman(100),  100);
+    assert_eq(check_roman(500),  500);
+    assert_eq(check_roman(1000), 1000);
+
+    // Subtractive: 4=IV=4, 9=IX=9, 40=XL=40, 90=XC=90, 400=CD=400, 900=CM=900
+    assert_eq(check_roman(4),   4);
+    assert_eq(check_roman(9),   9);
+    assert_eq(check_roman(40),  40);
+    assert_eq(check_roman(90),  90);
+    assert_eq(check_roman(400), 400);
+    assert_eq(check_roman(900), 900);
+
+    print("roman_simple_values: ok");
+}
+
+fn test_roman_numeral_lengths() {
+    let mut vals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // 1 -> I (1 symbol)
+    assert_eq(to_roman(1, vals), 1);
+
+    // 3 -> III (3 symbols)
+    let l3 = to_roman(3, vals);
+    assert_eq(l3, 3);
+    // All three should be 1
+    assert_eq(vals[0], 1);
+    assert_eq(vals[1], 1);
+    assert_eq(vals[2], 1);
+
+    // 4 -> IV (2 symbols, values 4)
+    // Our encoding: value=4 is one entry
+    let l4 = to_roman(4, vals);
+    assert_eq(l4, 1);
+    assert_eq(vals[0], 4);
+
+    // 8 -> VIII (4 symbols: 5,1,1,1)
+    let l8 = to_roman(8, vals);
+    assert_eq(l8, 4);
+    assert_eq(vals[0], 5);
+    assert_eq(vals[1], 1);
+    assert_eq(vals[2], 1);
+    assert_eq(vals[3], 1);
+
+    // 9 -> IX (1 symbol with value 9)
+    let l9 = to_roman(9, vals);
+    assert_eq(l9, 1);
+    assert_eq(vals[0], 9);
+
+    print("roman_numeral_lengths: ok");
+}
+
+fn test_roman_round_trip() {
+    // Verify round-trip for range 1..20
+    let expected = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    let mut i = 0;
+    while i < 20 {
+        assert_eq(check_roman(expected[i]), expected[i]);
+        i = i + 1;
+    }
+
+    // Spot-check larger values
+    assert_eq(check_roman(58),   58);   // LVIII = 50+5+1+1+1
+    assert_eq(check_roman(1994), 1994); // MCMXCIV = 1000+900+90+4
+    assert_eq(check_roman(2024), 2024); // MMXXIV = 1000+1000+10+10+4
+    assert_eq(check_roman(3999), 3999); // MMMCMXCIX = 1000+1000+1000+900+90+9
+
+    print("roman_round_trip: ok");
+}
+
+fn test_roman_symbol_counts() {
+    let mut vals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // 1994 = MCMXCIV -> values: 1000, 900, 90, 4 -> 4 symbols
+    let l1994 = to_roman(1994, vals);
+    assert_eq(l1994, 4);
+    assert_eq(vals[0], 1000);
+    assert_eq(vals[1], 900);
+    assert_eq(vals[2], 90);
+    assert_eq(vals[3], 4);
+
+    // 38 = XXXVIII -> values: 10,10,10,5,1,1,1 -> 7 symbols
+    let l38 = to_roman(38, vals);
+    assert_eq(l38, 7);
+    assert_eq(vals[0], 10);
+    assert_eq(vals[1], 10);
+    assert_eq(vals[2], 10);
+    assert_eq(vals[3], 5);
+    assert_eq(vals[4], 1);
+    assert_eq(vals[5], 1);
+    assert_eq(vals[6], 1);
+
+    // Sum of symbol counts for 1..10: I,II,III,IV,V,VI,VII,VIII,IX,X = 1+2+3+1+1+2+3+4+1+1 = 19
+    let mut total_syms = 0;
+    let mut n = 1;
+    while n <= 10 {
+        total_syms = total_syms + to_roman(n, vals);
+        n = n + 1;
+    }
+    assert_eq(total_syms, 19);
+
+    print("roman_symbol_counts: ok");
+}
+
+fn test_roman_arithmetic() {
+    // Roman numeral addition: convert both to int, add, convert back, verify.
+    // XIV + IX = 14 + 9 = 23
+    assert_eq(check_roman(14 + 9), 23);
+
+    // MMD - DCC = 2500 - 700 = 1800
+    assert_eq(check_roman(2500 - 700), 1800);
+
+    // Sum of 1..10 = 55
+    let mut s = 0;
+    let mut i = 1;
+    while i <= 10 {
+        s = s + check_roman(i);
+        i = i + 1;
+    }
+    assert_eq(s, 55);
+
+    print("roman_arithmetic: ok");
+}
+
+fn main() -> Int {
+    test_roman_simple_values();
+    test_roman_numeral_lengths();
+    test_roman_round_trip();
+    test_roman_symbol_counts();
+    test_roman_arithmetic();
+    print("[OK] 474_interp_roman_numerals");
+    0
+}

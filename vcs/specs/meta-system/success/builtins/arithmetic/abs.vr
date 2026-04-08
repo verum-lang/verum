@@ -1,0 +1,60 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, abs
+// @description: Test abs builtin with various inputs
+
+// =============================================================================
+// ABS BUILTIN TESTS
+// =============================================================================
+
+// Test abs with positive numbers
+meta fn test_abs_positive() -> Int {
+    abs(42)  // Should be 42
+}
+
+meta fn test_abs_positive_large() -> Int {
+    abs(1000000)  // Should be 1000000
+}
+
+// Test abs with negative numbers
+meta fn test_abs_negative() -> Int {
+    abs(-42)  // Should be 42
+}
+
+meta fn test_abs_negative_large() -> Int {
+    abs(-1000000)  // Should be 1000000
+}
+
+// Test abs with zero
+meta fn test_abs_zero() -> Int {
+    abs(0)  // Should be 0
+}
+
+// Test abs in expressions
+meta fn test_abs_in_expr() -> Int {
+    abs(-10) + abs(20)  // Should be 30
+}
+
+// Test abs with computed values
+meta fn test_abs_computed() -> Int {
+    let x = -5;
+    let y = 3;
+    abs(x * y)  // Should be 15
+}
+
+// Test nested abs
+meta fn test_abs_nested() -> Int {
+    abs(abs(-5))  // Should be 5
+}
+
+// Main test function
+fn main() {
+    // Compile-time evaluation tests
+    assert_eq(@const(test_abs_positive()), 42);
+    assert_eq(@const(test_abs_negative()), 42);
+    assert_eq(@const(test_abs_zero()), 0);
+    assert_eq(@const(test_abs_in_expr()), 30);
+    assert_eq(@const(test_abs_computed()), 15);
+    assert_eq(@const(test_abs_nested()), 5);
+}

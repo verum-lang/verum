@@ -1,0 +1,118 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, modular_arithmetic
+// @expected-exit: 0
+
+// Modular arithmetic operations
+
+@allow(unbounded_recursion)
+fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    if (exp == 0) { return 1; }
+    if (exp % 2 == 0) {
+        let half = mod_pow(base, exp / 2, modulus);
+        return (half * half) % modulus;
+    }
+    let rest = mod_pow(base, exp - 1, modulus);
+    (base * rest) % modulus
+}
+
+// Extended GCD: returns (gcd, x, y) such that a*x + b*y = gcd
+// We return via a list: [gcd, x, y, ...]
+@allow(unbounded_recursion)
+fn ext_gcd(a: Int, b: Int) -> List<Int> {
+    if (b == 0) {
+        return [a, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    }
+    let result = ext_gcd(b, a % b);
+    let g = result[0];
+    let x1 = result[1];
+    let y1 = result[2];
+    let new_x = y1;
+    let new_y = x1 - (a / b) * y1;
+    [g, new_x, new_y, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn mod_inverse(a: Int, m: Int) -> Int {
+    let result = ext_gcd(a, m);
+    let x = result[1];
+    // Make positive
+    ((x % m) + m) % m
+}
+
+// Chinese Remainder Theorem for two congruences:
+// x = a1 (mod m1), x = a2 (mod m2)
+// Assumes gcd(m1, m2) = 1
+fn crt2(a1: Int, m1: Int, a2: Int, m2: Int) -> Int {
+    let m1_inv = mod_inverse(m1, m2);
+    let combined_mod = m1 * m2;
+    let result = (a1 + m1 * ((m1_inv * (a2 - a1)) % m2 + m2) % m2 * m1) % combined_mod;
+    // Simpler approach:
+    // x = a1 + m1 * ((a2 - a1) * m1_inv % m2)
+    let diff = ((a2 - a1) % m2 + m2) % m2;
+    let k = (diff * m1_inv) % m2;
+    let x = a1 + m1 * k;
+    x % combined_mod
+}
+
+// Euler's totient for prime p: phi(p) = p - 1
+// Euler's totient for p*q (distinct primes): phi(p*q) = (p-1)*(q-1)
+fn euler_totient_prime(p: Int) -> Int {
+    p - 1
+}
+
+fn euler_totient_two_primes(p: Int, q: Int) -> Int {
+    (p - 1) * (q - 1)
+}
+
+fn mod_mul(a: Int, b: Int, m: Int) -> Int {
+    ((a % m) * (b % m)) % m
+}
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if (b == 0) { return a; }
+    gcd(b, a % b)
+}
+
+fn main() -> Int {
+    // Test 1: Modular exponentiation: 2^10 mod 1000 = 1024 mod 1000 = 24
+    assert_eq(mod_pow(2, 10, 1000), 24);
+
+    // Test 2: Modular exponentiation: 3^7 mod 13
+    // 3^7 = 2187, 2187 mod 13 = 2187 - 168*13 = 2187 - 2184 = 3
+    assert_eq(mod_pow(3, 7, 13), 3);
+
+    // Test 3: Fermat's little theorem: a^(p-1) = 1 (mod p) for prime p, gcd(a,p)=1
+    // 2^6 mod 7 = 64 mod 7 = 1
+    assert_eq(mod_pow(2, 6, 7), 1);
+
+    // Test 4: Modular inverse: 3^(-1) mod 7
+    // 3 * x = 1 (mod 7), x = 5 since 3*5 = 15 = 2*7 + 1
+    assert_eq(mod_inverse(3, 7), 5);
+
+    // Test 5: Verify modular inverse: a * a_inv mod m = 1
+    let inv = mod_inverse(3, 7);
+    assert_eq((3 * inv) % 7, 1);
+
+    // Test 6: CRT: x = 2 (mod 3), x = 3 (mod 5)
+    // x = 8 satisfies: 8 mod 3 = 2, 8 mod 5 = 3
+    let x = crt2(2, 3, 3, 5);
+    assert_eq(x, 8);
+
+    // Test 7: Verify CRT solution satisfies both congruences
+    assert_eq(x % 3, 2);
+
+    // Test 8: Euler's totient of prime 13 = 12
+    assert_eq(euler_totient_prime(13), 12);
+
+    // Test 9: Euler's totient of 3*5=15: phi(15) = (3-1)*(5-1) = 8
+    assert_eq(euler_totient_two_primes(3, 5), 8);
+
+    // Test 10: Modular multiplication: (17 * 23) mod 100
+    // 17 * 23 = 391, 391 mod 100 = 91
+    assert_eq(mod_mul(17, 23, 100), 91);
+
+    print("793_modular_arithmetic: PASS");
+    0
+}

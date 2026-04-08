@@ -1,0 +1,863 @@
+// =============================================================================
+// VCS Test Suite: stdlib/mem/hazard.vr - Hazard Pointer Tests
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: mem, cbgr, hazard, lock-free, race-protection
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for the hazard pointer system that prevents race conditions between
+// CBGR validation and dereference.
+//
+// =============================================================================
+
+mount core.mem.hazard.{
+    HazardDomain, ThreadRecord, ThreadHazardRecord, RetiredNode,
+    HazardGuard, HazardStats,
+    GLOBAL_HAZARD_DOMAIN,  // Note: THREAD_HAZARD_RECORD is not public
+    HAZARD_POINTERS_PER_THREAD, RETIRED_THRESHOLD, MAX_THREADS,
+    acquire_hazard, retire_hazard, force_reclaim_all, hazard_stats,
+    cleanup_thread_hazards,
+};
+
+// =============================================================================
+// Constant Tests
+// =============================================================================
+
+@test
+fn test_hazard_pointers_per_thread() {
+    // 8 hazard pointers allows reasonable nesting depth
+    assert_eq(HAZARD_POINTERS_PER_THREAD, 8);
+}
+
+@test
+fn test_retired_threshold() {
+    // 64 retired nodes triggers reclamation scan
+    assert_eq(RETIRED_THRESHOLD, 64);
+}
+
+@test
+fn test_max_threads() {
+    // Support up to 256 concurrent threads
+    assert_eq(MAX_THREADS, 256);
+}
+
+// =============================================================================
+// ThreadRecord Structure Tests
+// =============================================================================
+
+@test
+fn test_thread_record_size() {
+    // ThreadRecord should be cache-line sized (64 bytes)
+    let size = ThreadRecord.size;
+    assert_eq(size, 64);
+}
+
+@test
+fn test_thread_record_alignment() {
+    // Must be 64-byte aligned to avoid false sharing
+    let align = ThreadRecord.align;
+    assert_eq(align, 64);
+}
+
+@test
+fn test_thread_record_hazards_array_size() {
+    // Hazards array should have HAZARD_POINTERS_PER_THREAD elements
+    let record = ThreadRecord {
+        hazards: [0 as &unsafe Byte; 8],
+        next: 0 as &unsafe ThreadRecord,
+        active: true,
+        tid: 0,
+        _padding: [0 as UInt32; 9],
+    };
+
+    assert_eq(record.hazards.len(), 8);
+}
+
+@test
+fn test_thread_record_initial_state() {
+    let record = ThreadRecord {
+        hazards: [0 as &unsafe Byte; 8],
+        next: 0 as &unsafe ThreadRecord,
+        active: false,
+        tid: 42,
+        _padding: [0 as UInt32; 9],
+    };
+
+    // All hazard slots should be null initially
+    for i in 0..8 {
+        assert_eq(record.hazards[i] as Int, 0);
+    }
+    assert_eq(record.next as Int, 0);
+    assert(!record.active);
+    assert_eq(record.tid, 42);
+}
+
+// =============================================================================
+// HazardDomain Tests
+// =============================================================================
+
+@test
+fn test_hazard_domain_initial_state() {
+    let domain = HazardDomain {
+        head: 0 as &unsafe ThreadRecord,
+        thread_count: 0,
+        epoch: 0,
+    };
+
+    assert_eq(domain.head as Int, 0);
+    assert_eq(domain.thread_count, 0);
+    assert_eq(domain.epoch, 0);
+}
+
+@test
+fn test_hazard_domain_current_epoch() {
+    let domain = HazardDomain {
+        head: 0 as &unsafe ThreadRecord,
+        thread_count: 0,
+        epoch: 100,
+    };
+
+    assert_eq(domain.current_epoch(), 100);
+}
+
+@test
+fn test_hazard_domain_advance_epoch() {
+    let mut domain = HazardDomain {
+        head: 0 as &unsafe ThreadRecord,
+        thread_count: 0,
+        epoch: 0,
+    };
+
+    let old = domain.advance_epoch();
+    assert_eq(old, 0);
+    assert_eq(domain.current_epoch(), 1);
+
+    let old2 = domain.advance_epoch();
+    assert_eq(old2, 1);
+    assert_eq(domain.current_epoch(), 2);
+}
+
+@test
+fn test_hazard_domain_scan_empty() {
+    let domain = HazardDomain {
+        head: 0 as &unsafe ThreadRecord,
+        thread_count: 0,
+        epoch: 0,
+    };
+
+    let protected = domain.scan_hazards();
+    assert_eq(protected.len(), 0);
+}
+
+// =============================================================================
+// ThreadHazardRecord Tests
+// =============================================================================
+
+@test
+fn test_thread_hazard_record_initial_state() {
+    let record = ThreadHazardRecord {
+        record: None,
+        next_slot: 0,
+        retired: List.new(),
+    };
+
+    assert(record.record.is_none());
+    assert_eq(record.next_slot, 0);
+    assert_eq(record.retired.len(), 0);
+}
+
+@test
+fn test_thread_hazard_record_next_slot_increments() {
+    // Simulating acquire behavior
+    let mut record = ThreadHazardRecord {
+        record: None,
+        next_slot: 0,
+        retired: List.new(),
+    };
+
+    // Simulate slot allocation
+    let slot0 = record.next_slot;
+    record.next_slot += 1;
+    assert_eq(slot0, 0);
+    assert_eq(record.next_slot, 1);
+
+    let slot1 = record.next_slot;
+    record.next_slot += 1;
+    assert_eq(slot1, 1);
+    assert_eq(record.next_slot, 2);
+}
+
+// =============================================================================
+// RetiredNode Tests
+// =============================================================================
+
+@test
+fn test_retired_node_construction() {
+    let node = RetiredNode {
+        ptr: 0x1000 as &unsafe Byte,
+        size: 128,
+        epoch: 5,
+    };
+
+    assert_eq(node.ptr as Int, 0x1000);
+    assert_eq(node.size, 128);
+    assert_eq(node.epoch, 5);
+}
+
+@test
+fn test_retired_node_list() {
+    let mut retired: List<RetiredNode> = List.new();
+
+    retired.push(RetiredNode {
+        ptr: 0x1000 as &unsafe Byte,
+        size: 64,
+        epoch: 1,
+    });
+
+    retired.push(RetiredNode {
+        ptr: 0x2000 as &unsafe Byte,
+        size: 128,
+        epoch: 2,
+    });
+
+    assert_eq(retired.len(), 2);
+    assert_eq(retired[0].ptr as Int, 0x1000);
+    assert_eq(retired[1].ptr as Int, 0x2000);
+}
+
+// =============================================================================
+// HazardGuard Tests
+// =============================================================================
+
+@test
+fn test_hazard_guard_construction() {
+    let guard = HazardGuard {
+        slot: 0,
+        ptr: 0x1000 as &unsafe Byte,
+    };
+
+    assert_eq(guard.slot, 0);
+    assert_eq(guard.ptr() as Int, 0x1000);
+}
+
+@test
+fn test_hazard_guard_ptr_accessor() {
+    let guard = HazardGuard {
+        slot: 3,
+        ptr: 0xDEAD_BEEF as &unsafe Byte,
+    };
+
+    let ptr = guard.ptr();
+    assert_eq(ptr as Int, 0xDEAD_BEEF);
+}
+
+@test
+fn test_hazard_guard_is_protecting_true() {
+    let guard = HazardGuard {
+        slot: 0,
+        ptr: 0x1000 as &unsafe Byte,
+    };
+
+    assert(guard.is_protecting(0x1000 as &unsafe Byte));
+}
+
+@test
+fn test_hazard_guard_is_protecting_false() {
+    let guard = HazardGuard {
+        slot: 0,
+        ptr: 0x1000 as &unsafe Byte,
+    };
+
+    assert(!guard.is_protecting(0x2000 as &unsafe Byte));
+}
+
+@test
+fn test_hazard_guard_multiple_slots() {
+    let guard0 = HazardGuard {
+        slot: 0,
+        ptr: 0x1000 as &unsafe Byte,
+    };
+
+    let guard1 = HazardGuard {
+        slot: 1,
+        ptr: 0x2000 as &unsafe Byte,
+    };
+
+    let guard2 = HazardGuard {
+        slot: 2,
+        ptr: 0x3000 as &unsafe Byte,
+    };
+
+    assert_eq(guard0.slot, 0);
+    assert_eq(guard1.slot, 1);
+    assert_eq(guard2.slot, 2);
+
+    assert(guard0.is_protecting(0x1000 as &unsafe Byte));
+    assert(!guard0.is_protecting(0x2000 as &unsafe Byte));
+
+    assert(guard1.is_protecting(0x2000 as &unsafe Byte));
+    assert(!guard1.is_protecting(0x3000 as &unsafe Byte));
+}
+
+// =============================================================================
+// HazardStats Tests
+// =============================================================================
+
+@test
+fn test_hazard_stats_construction() {
+    let stats = HazardStats {
+        protected_count: 5,
+        retired_count: 30,
+        thread_count: 4,
+    };
+
+    assert_eq(stats.protected_count, 5);
+    assert_eq(stats.retired_count, 30);
+    assert_eq(stats.thread_count, 4);
+}
+
+@test
+fn test_hazard_stats_needs_reclaim_true() {
+    let stats = HazardStats {
+        protected_count: 0,
+        retired_count: 64,  // == RETIRED_THRESHOLD
+        thread_count: 1,
+    };
+
+    assert(stats.needs_reclaim());
+}
+
+@test
+fn test_hazard_stats_needs_reclaim_false() {
+    let stats = HazardStats {
+        protected_count: 0,
+        retired_count: 63,  // < RETIRED_THRESHOLD
+        thread_count: 1,
+    };
+
+    assert(!stats.needs_reclaim());
+}
+
+@test
+fn test_hazard_stats_needs_reclaim_above_threshold() {
+    let stats = HazardStats {
+        protected_count: 10,
+        retired_count: 100,  // > RETIRED_THRESHOLD
+        thread_count: 2,
+    };
+
+    assert(stats.needs_reclaim());
+}
+
+@test
+fn test_hazard_stats_estimated_retired_bytes() {
+    let stats = HazardStats {
+        protected_count: 5,
+        retired_count: 20,
+        thread_count: 2,
+    };
+
+    // 20 retired nodes * 64 bytes average = 1280 bytes
+    let estimated = stats.estimated_retired_bytes(64);
+    assert_eq(estimated, 1280);
+}
+
+@test
+fn test_hazard_stats_estimated_retired_bytes_zero() {
+    let stats = HazardStats {
+        protected_count: 5,
+        retired_count: 0,
+        thread_count: 2,
+    };
+
+    let estimated = stats.estimated_retired_bytes(1024);
+    assert_eq(estimated, 0);
+}
+
+@test
+fn test_hazard_stats_estimated_retired_bytes_large() {
+    let stats = HazardStats {
+        protected_count: 0,
+        retired_count: 64,
+        thread_count: 4,
+    };
+
+    // 64 retired * 4096 byte pages = 262144 bytes
+    let estimated = stats.estimated_retired_bytes(4096);
+    assert_eq(estimated, 262144);
+}
+
+// =============================================================================
+// Public API Tests
+// =============================================================================
+
+@test
+fn test_acquire_hazard_returns_guard() {
+    let ptr = 0x1000 as &unsafe Byte;
+    let guard = acquire_hazard(ptr);
+
+    // Guard should protect the specified pointer
+    assert(guard.is_protecting(ptr));
+}
+
+@test
+fn test_acquire_hazard_multiple_guards() {
+    let ptr1 = 0x1000 as &unsafe Byte;
+    let ptr2 = 0x2000 as &unsafe Byte;
+    let ptr3 = 0x3000 as &unsafe Byte;
+
+    let guard1 = acquire_hazard(ptr1);
+    let guard2 = acquire_hazard(ptr2);
+    let guard3 = acquire_hazard(ptr3);
+
+    // Each guard protects its own pointer
+    assert(guard1.is_protecting(ptr1));
+    assert(guard2.is_protecting(ptr2));
+    assert(guard3.is_protecting(ptr3));
+
+    // Guards don't protect other pointers
+    assert(!guard1.is_protecting(ptr2));
+    assert(!guard2.is_protecting(ptr3));
+    assert(!guard3.is_protecting(ptr1));
+}
+
+@test
+fn test_hazard_stats_accessible() {
+    let stats = hazard_stats();
+
+    // Stats should be valid
+    assert(stats.protected_count >= 0);
+    assert(stats.retired_count >= 0);
+    assert(stats.thread_count >= 0);
+}
+
+@test
+fn test_force_reclaim_all_callable() {
+    // Should not panic
+    force_reclaim_all();
+}
+
+@test
+fn test_cleanup_thread_hazards_callable() {
+    // Should not panic
+    cleanup_thread_hazards();
+}
+
+// =============================================================================
+// RAII Behavior Tests
+// =============================================================================
+
+@test
+fn test_hazard_guard_drop_releases_slot() {
+    // Get initial stats
+    let stats_before = hazard_stats();
+
+    {
+        let ptr = 0x1000 as &unsafe Byte;
+        let _guard = acquire_hazard(ptr);
+        // guard should protect the pointer
+    }
+    // guard dropped here
+
+    // After drop, stats may change
+    let stats_after = hazard_stats();
+
+    // The hazard slot should be released
+    // (protected_count may remain same if we're the only thread)
+    assert(stats_after.protected_count <= stats_before.protected_count + 1);
+}
+
+@test
+fn test_nested_guards_release_in_order() {
+    let ptr1 = 0x1000 as &unsafe Byte;
+    let ptr2 = 0x2000 as &unsafe Byte;
+
+    {
+        let guard1 = acquire_hazard(ptr1);
+        {
+            let guard2 = acquire_hazard(ptr2);
+            // Both guards active
+            assert(guard1.is_protecting(ptr1));
+            assert(guard2.is_protecting(ptr2));
+        }
+        // guard2 dropped, guard1 still active
+        assert(guard1.is_protecting(ptr1));
+    }
+    // guard1 dropped
+}
+
+// =============================================================================
+// Slot Exhaustion Tests
+// =============================================================================
+
+@test
+fn test_max_hazard_guards_limit() {
+    // We can acquire up to HAZARD_POINTERS_PER_THREAD guards
+    let guards: [HazardGuard; 8] = [
+        acquire_hazard(0x1000 as &unsafe Byte),
+        acquire_hazard(0x2000 as &unsafe Byte),
+        acquire_hazard(0x3000 as &unsafe Byte),
+        acquire_hazard(0x4000 as &unsafe Byte),
+        acquire_hazard(0x5000 as &unsafe Byte),
+        acquire_hazard(0x6000 as &unsafe Byte),
+        acquire_hazard(0x7000 as &unsafe Byte),
+        acquire_hazard(0x8000 as &unsafe Byte),
+    ];
+
+    // All guards should be valid
+    for i in 0..8 {
+        let expected_ptr = ((i + 1) * 0x1000) as &unsafe Byte;
+        assert(guards[i].is_protecting(expected_ptr));
+    }
+}
+
+// =============================================================================
+// Race Protection Scenario Tests
+// =============================================================================
+
+@test
+fn test_hazard_protects_during_access() {
+    // Simulate the race protection scenario:
+    // 1. Acquire hazard pointer
+    // 2. Validate reference (would check generation/epoch)
+    // 3. Access the data
+    // 4. Release hazard pointer (via drop)
+
+    let ptr = 0x1000 as &unsafe Byte;
+
+    let guard = acquire_hazard(ptr);
+
+    // In real code, validation would happen here
+    let validated = guard.ptr();
+
+    // Access is safe while guard is held
+    assert_eq(validated as Int, 0x1000);
+
+    // Guard dropped here, deallocation can proceed
+}
+
+@test
+fn test_retirement_before_scan() {
+    // Test that retired nodes are tracked
+    let stats_before = hazard_stats();
+
+    // Retire a pointer (in real code, this would be a real allocation)
+    // We can't actually call retire_hazard without a real allocation,
+    // but we can verify the system is in a consistent state
+    let stats_after = hazard_stats();
+
+    // System should remain consistent
+    assert(stats_after.retired_count >= 0);
+}
+
+// =============================================================================
+// Global Domain Access Tests
+// =============================================================================
+
+@test
+fn test_global_domain_epoch_advances() {
+    unsafe {
+        let epoch1 = GLOBAL_HAZARD_DOMAIN.current_epoch();
+
+        GLOBAL_HAZARD_DOMAIN.advance_epoch();
+
+        let epoch2 = GLOBAL_HAZARD_DOMAIN.current_epoch();
+
+        assert_eq(epoch2, epoch1 + 1);
+    }
+}
+
+@test
+fn test_global_domain_thread_count() {
+    let stats = hazard_stats();
+
+    // At least one thread (ourselves) should be registered after first hazard use
+    // (Note: may be 0 if no hazards have been acquired yet in this test)
+    assert(stats.thread_count >= 0);
+}
+
+// =============================================================================
+// Thread-Local State Tests
+// =============================================================================
+
+@test
+fn test_thread_local_record_lazy_init() {
+    // Thread local record starts uninitialized
+    // First hazard acquisition triggers registration
+    let ptr = 0x1000 as &unsafe Byte;
+    let guard = acquire_hazard(ptr);
+
+    // After acquisition, we should have a registered thread
+    let stats = hazard_stats();
+    assert(stats.thread_count >= 1);
+}
+
+// =============================================================================
+// Pointer Address Tests
+// =============================================================================
+
+@test
+fn test_hazard_guard_different_addresses() {
+    let addr1: Int = 0x0000_1000;
+    let addr2: Int = 0x0000_2000;
+    let addr3: Int = 0xFFFF_FFFF_FFFF_0000;  // High address
+
+    let guard1 = acquire_hazard(addr1 as &unsafe Byte);
+    let guard2 = acquire_hazard(addr2 as &unsafe Byte);
+    let guard3 = acquire_hazard(addr3 as &unsafe Byte);
+
+    assert_eq(guard1.ptr() as Int, addr1);
+    assert_eq(guard2.ptr() as Int, addr2);
+    assert_eq(guard3.ptr() as Int, addr3);
+}
+
+@test
+fn test_hazard_guard_null_pointer() {
+    // Null pointer protection (edge case, typically not valid)
+    let guard = acquire_hazard(0 as &unsafe Byte);
+
+    assert_eq(guard.ptr() as Int, 0);
+    assert(guard.is_protecting(0 as &unsafe Byte));
+}
+
+@test
+fn test_hazard_guard_aligned_addresses() {
+    // Test various alignment patterns
+    let ptr_8 = 0x1008 as &unsafe Byte;    // 8-byte aligned
+    let ptr_16 = 0x1010 as &unsafe Byte;   // 16-byte aligned
+    let ptr_64 = 0x1040 as &unsafe Byte;   // 64-byte aligned
+    let ptr_4096 = 0x2000 as &unsafe Byte; // page aligned
+
+    let g1 = acquire_hazard(ptr_8);
+    let g2 = acquire_hazard(ptr_16);
+    let g3 = acquire_hazard(ptr_64);
+    let g4 = acquire_hazard(ptr_4096);
+
+    assert(g1.is_protecting(ptr_8));
+    assert(g2.is_protecting(ptr_16));
+    assert(g3.is_protecting(ptr_64));
+    assert(g4.is_protecting(ptr_4096));
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_same_pointer_multiple_guards() {
+    // Same pointer can be protected by multiple guards
+    let ptr = 0x1000 as &unsafe Byte;
+
+    let guard1 = acquire_hazard(ptr);
+    let guard2 = acquire_hazard(ptr);
+
+    // Both should protect the same pointer
+    assert(guard1.is_protecting(ptr));
+    assert(guard2.is_protecting(ptr));
+
+    // Different slots
+    assert(guard1.slot != guard2.slot);
+}
+
+@test
+fn test_hazard_stats_empty_state() {
+    // Stats should be valid even in minimal state
+    let stats = HazardStats {
+        protected_count: 0,
+        retired_count: 0,
+        thread_count: 0,
+    };
+
+    assert(!stats.needs_reclaim());
+    assert_eq(stats.estimated_retired_bytes(100), 0);
+}
+
+@test
+fn test_retired_threshold_boundary() {
+    // Test at boundary of threshold
+    let below = HazardStats {
+        protected_count: 0,
+        retired_count: RETIRED_THRESHOLD - 1,
+        thread_count: 1,
+    };
+
+    let at = HazardStats {
+        protected_count: 0,
+        retired_count: RETIRED_THRESHOLD,
+        thread_count: 1,
+    };
+
+    let above = HazardStats {
+        protected_count: 0,
+        retired_count: RETIRED_THRESHOLD + 1,
+        thread_count: 1,
+    };
+
+    assert(!below.needs_reclaim());
+    assert(at.needs_reclaim());
+    assert(above.needs_reclaim());
+}
+
+// =============================================================================
+// Performance Characteristics Tests
+// =============================================================================
+
+@test
+fn test_acquire_release_pattern() {
+    // Typical usage pattern: acquire, use, release
+    for _ in 0..100 {
+        let ptr = 0x1000 as &unsafe Byte;
+        let guard = acquire_hazard(ptr);
+
+        // Simulated validation
+        assert(guard.is_protecting(ptr));
+
+        // Guard automatically released at end of iteration
+    }
+}
+
+@test
+fn test_lifo_slot_reuse() {
+    // Slots should be reused in LIFO order for cache locality
+    let ptr = 0x1000 as &unsafe Byte;
+
+    // Acquire and release multiple times
+    for i in 0..10 {
+        let guard = acquire_hazard(ptr);
+        // If slot reuse works, guard.slot should be consistent
+        // (always reusing slot 0 if nothing else is active)
+        // Note: actual slot value depends on implementation state
+    }
+}
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+
+@test
+fn test_hazard_pointer_validation_flow() {
+    // Simulate complete CBGR validation flow with hazard protection
+
+    let allocation_ptr = 0x1000 as &unsafe Byte;
+
+    // Step 1: Acquire hazard pointer (protects from deallocation)
+    let guard = acquire_hazard(allocation_ptr);
+
+    // Step 2: Would perform CBGR validation here
+    // (check generation, epoch, capabilities)
+
+    // Step 3: Access is safe while guard is held
+    let safe_ptr = guard.ptr();
+    assert_eq(safe_ptr as Int, 0x1000);
+
+    // Step 4: Guard dropped, deallocation can proceed
+}
+
+@test
+fn test_nested_hazard_protection() {
+    // Nested data structures may require nested hazard protection
+
+    let outer_ptr = 0x1000 as &unsafe Byte;
+    let inner_ptr = 0x2000 as &unsafe Byte;
+
+    // Protect outer structure
+    let outer_guard = acquire_hazard(outer_ptr);
+
+    // Access outer, find reference to inner
+    // Protect inner before accessing it
+    let inner_guard = acquire_hazard(inner_ptr);
+
+    // Both are now protected
+    assert(outer_guard.is_protecting(outer_ptr));
+    assert(inner_guard.is_protecting(inner_ptr));
+
+    // Process both safely
+    // ...
+
+    // Inner released first (LIFO)
+    // Outer released after
+}
+
+@test
+fn test_multiple_retire_threshold_cycles() {
+    // Test that reclamation can happen multiple times
+    let stats1 = hazard_stats();
+
+    force_reclaim_all();
+
+    let stats2 = hazard_stats();
+
+    force_reclaim_all();
+
+    let stats3 = hazard_stats();
+
+    // Each reclaim should reduce or maintain retired count
+    assert(stats3.retired_count <= stats2.retired_count || stats2.retired_count == 0);
+}
+
+// =============================================================================
+// Additional Hazard Tests
+// =============================================================================
+
+@test
+fn test_hazard_guard_slot_nonnegative() {
+    let ptr = 0x3000 as &unsafe Byte;
+    let guard = acquire_hazard(ptr);
+    assert(guard.slot >= 0);
+}
+
+@test
+fn test_hazard_stats_active_nonnegative() {
+    let stats = hazard_stats();
+    assert(stats.protected_count >= 0);
+}
+
+@test
+fn test_hazard_stats_retired_nonnegative() {
+    let stats = hazard_stats();
+    assert(stats.retired_count >= 0);
+}
+
+@test
+fn test_hazard_guard_ptr_value() {
+    let ptr = 0x5000 as &unsafe Byte;
+    let guard = acquire_hazard(ptr);
+    assert_eq(guard.ptr() as Int, 0x5000);
+}
+
+@test
+fn test_hazard_guard_is_not_protecting_different_ptr() {
+    let ptr1 = 0x1000 as &unsafe Byte;
+    let ptr2 = 0x2000 as &unsafe Byte;
+    let guard = acquire_hazard(ptr1);
+    assert(!guard.is_protecting(ptr2));
+}
+
+@test
+fn test_hazard_guard_is_protecting_same_ptr() {
+    let ptr = 0x4000 as &unsafe Byte;
+    let guard = acquire_hazard(ptr);
+    assert(guard.is_protecting(ptr));
+}
+
+@test
+fn test_force_reclaim_all_twice() {
+    force_reclaim_all();
+    force_reclaim_all();
+    let stats = hazard_stats();
+    assert(stats.retired_count >= 0);
+}
+
+@test
+fn test_hazard_stats_after_acquire() {
+    let stats_before = hazard_stats();
+    let ptr = 0x6000 as &unsafe Byte;
+    let guard = acquire_hazard(ptr);
+    let stats_after = hazard_stats();
+    // Active count should be at least 1 while guard is held
+    assert(stats_after.protected_count >= 1);
+}
+

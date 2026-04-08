@@ -1,0 +1,65 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: associated-types, bounds, where-clause, advanced-type-syntax
+// @expect: pass
+// @description: Associated type bounds syntax tests
+// @spec: 03-type-system.md Section 13. 3.3
+
+// Test 1: Basic associated type bound
+fn process_iterator<I>(iter: I) -> List<I.Item>
+    where type I: Iterator,
+          type I.Item: Display + Clone
+{
+    iter.map(|x| x.clone()).collect()
+}
+
+// Test 2: Associated type equality constraint
+fn zip_same<I, J>(a: I, b: J) -> List<(I.Item, J.Item)>
+    where type I: Iterator,
+          type J: Iterator,
+          type I.Item = J.Item  // Both must have same Item type
+{
+    a.zip(b).collect()
+}
+
+// Test 3: Multiple associated type constraints
+fn complex_constraint<C>(container: C)
+    where type C: Container,
+          type C.Item: Num + Copy,
+          type C.Error: Display,
+          type C.Iterator.Item = C.Item
+{
+    // Complex type constraints
+}
+
+// Test 4: Associated type bound in protocol definition
+type Collection is protocol {
+    type Item;
+    type Iterator: Iterator where type Iterator.Item = Self.Item;
+
+    fn iter(&self) -> Self.Iterator;
+};
+
+// Test 5: Chained associated type access
+fn get_inner_item<C>(collection: C) -> C.Iterator.Item
+    where type C: Collection,
+          type C.Iterator.Item: Clone
+{
+    collection.iter().next().unwrap().clone()
+}
+
+// Test 6: Associated type equality between type params
+fn merge<A, B>(a: A, b: B) -> List<A.Item>
+    where type A: IntoIterator,
+          type B: IntoIterator,
+          type A.Item = B.Item
+{
+    let mut result = a.into_iter().collect();
+    result.extend(b.into_iter());
+    result
+}
+
+fn main() {
+    assert(true);
+}

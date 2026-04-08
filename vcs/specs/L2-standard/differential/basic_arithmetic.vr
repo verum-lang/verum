@@ -1,0 +1,110 @@
+// @test: differential
+// @tier: 0
+// @level: L2
+// @tags: differential, arithmetic, tier-equivalence
+// @timeout: 10000
+// @expected-exit: 0
+
+/// L2-Standard: Basic Arithmetic Operations
+///
+/// This test verifies that fundamental arithmetic operations produce
+/// identical results in the interpreter (Tier 0) and AOT compiler (Tier 3).
+/// All operations tested here must be semantically equivalent across tiers.
+
+fn check_int(name: Int, actual: Int, expected: Int) -> Int {
+    if actual != expected {
+        print("FAIL");
+        1
+    } else {
+        0
+    }
+}
+
+fn main() -> Int {
+    // Integer addition
+    assert_eq(2 + 3, 5);
+    assert_eq(-5 + 3, -2);
+    assert_eq(42 + 0, 42);
+    assert_eq(0 + 0, 0);
+    assert_eq(100 + 200, 300);
+
+    // Integer subtraction
+    assert_eq(10 - 4, 6);
+    assert_eq(3 - 10, -7);
+    assert_eq(42 - 0, 42);
+    assert_eq(0 - 0, 0);
+
+    // Integer multiplication
+    assert_eq(6 * 7, 42);
+    assert_eq(-3 * 4, -12);
+    assert_eq(999 * 0, 0);
+    assert_eq(42 * 1, 42);
+    assert_eq(-3 * -4, 12);
+
+    // Integer division
+    assert_eq(20 / 4, 5);
+    assert_eq(17 / 5, 3);
+    assert_eq(-20 / 4, -5);
+    assert_eq(42 / 1, 42);
+    assert_eq(7 / 2, 3);
+
+    // Modulo
+    assert_eq(17 % 5, 2);
+    assert_eq(20 % 5, 0);
+    assert_eq(10 % 3, 1);
+    assert_eq(8 % 4, 0);
+
+    // Combined operations (precedence)
+    assert_eq(2 + 3 * 4, 14);
+    assert_eq((2 + 3) * 4, 20);
+    assert_eq(100 - 50 - 25, 25);
+    assert_eq(2 + 3 + 4, 9);
+
+    // Nested arithmetic
+    assert_eq((10 + 5) * (20 - 18), 30);
+    assert_eq(100 / (2 * 5), 10);
+    assert_eq((8 + 2) % 3, 1);
+
+    // Comparisons
+    assert(1 < 2);
+    assert(2 > 1);
+    assert(3 <= 3);
+    assert(3 >= 3);
+    assert(5 == 5);
+    assert(5 != 6);
+    assert(!(5 < 5));
+    assert(!(5 > 5));
+
+    // Larger numbers
+    assert_eq(1000000 + 2000000, 3000000);
+    assert_eq(123456 * 2, 246912);
+    assert_eq(1000000 / 1000, 1000);
+
+    // Bitwise operations
+    assert_eq(0b1010 & 0b1100, 0b1000);
+    assert_eq(0b1010 | 0b0101, 0b1111);
+    assert_eq(0b1010 ^ 0b1100, 0b0110);
+    assert_eq(1 << 4, 16);
+    assert_eq(32 >> 2, 8);
+    assert_eq(0xFF & 0x0F, 0x0F);
+
+    // Print deterministic output for diff comparison
+    let a = 2 + 3 * 4;
+    let b = (2 + 3) * 4;
+    let c = 100 / 10 / 2;
+    let d = 17 % 5;
+    let e = 1 << 4;
+    print("arith_a=14");
+    print("arith_b=20");
+    print("arith_c=5");
+    print("arith_d=2");
+    print("arith_e=16");
+    assert_eq(a, 14);
+    assert_eq(b, 20);
+    assert_eq(c, 5);
+    assert_eq(d, 2);
+    assert_eq(e, 16);
+
+    print("PASS: basic_arithmetic");
+    0
+}

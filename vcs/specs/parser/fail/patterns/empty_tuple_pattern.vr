@@ -1,0 +1,46 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, tuple, empty, error
+// @description: Test empty tuple pattern edge cases that are invalid
+// @expected-error: E074
+
+fn test_empty_tuple_binding_invalid() {
+    let unit = ();
+
+    // Invalid: empty tuple with trailing comma suggests an element
+    match unit {
+        (,) => print("invalid empty"),
+        _ => print("other"),
+    }
+}
+
+fn test_single_element_tuple_missing_comma() {
+    let single = (42,);
+
+    // Invalid: single element without comma is just grouping
+    // This tests the parser's handling of the ambiguity
+    match single {
+        (42) => print("not a tuple pattern"),
+        _ => print("other"),
+    }
+}
+
+fn test_multiple_commas_in_tuple() {
+    let pair = (1, 2);
+
+    // Invalid: multiple consecutive commas
+    match pair {
+        (a,, b) => print("double comma"),
+        _ => print("other"),
+    }
+}
+
+fn test_leading_comma_tuple() {
+    let pair = (1, 2);
+
+    // Invalid: leading comma in tuple pattern
+    match pair {
+        (, a, b) => print("leading comma"),
+        _ => print("other"),
+    }
+}

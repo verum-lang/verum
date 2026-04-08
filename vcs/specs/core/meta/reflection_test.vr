@@ -1,0 +1,856 @@
+// =============================================================================
+// reflection_test.vr - Comprehensive tests for compile-time type reflection
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, reflection, type-kind, field-info, variant-info, visibility,
+//        primitive-type, generic-param, ownership, protocol-info, function-info
+// @description: Tests for all reflection types: TypeKind, FieldInfo, VariantInfo,
+//               VariantKind, GenericParam, GenericParamKind, ProtocolInfo,
+//               FunctionInfo, ParamInfo, SelfKind, Visibility, PrimitiveType,
+//               TraitBound, LifetimeParam, OwnershipInfo, FieldOffset,
+//               MethodResolution, MethodSource, AssociatedTypeInfo.
+// =============================================================================
+
+mount core.meta.reflection.{
+    TypeKind, MethodSource, FieldInfo, VariantInfo, VariantKind,
+    GenericParam, GenericParamKind, Visibility, PrimitiveType,
+    TraitBound, LifetimeParam, OwnershipInfo, FieldOffset,
+    MethodResolution, FunctionInfo, ParamInfo, SelfKind,
+    ProtocolInfo, AssociatedTypeInfo,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+mount core.meta.span.Span;
+
+// =============================================================================
+// Section 1: TypeKind Variants — Exhaustive
+// =============================================================================
+
+@test
+fn test_type_kind_struct() {
+    let k: TypeKind = TypeKind.Struct;
+    assert(k.is_compound());
+    assert(!k.is_reference());
+    assert(!k.is_primitive());
+}
+
+@test
+fn test_type_kind_enum() {
+    let k: TypeKind = TypeKind.Enum;
+    assert(k.is_compound());
+}
+
+@test
+fn test_type_kind_newtype() {
+    let k: TypeKind = TypeKind.Newtype;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_unit() {
+    let k: TypeKind = TypeKind.Unit;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_protocol() {
+    let k: TypeKind = TypeKind.Protocol;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_tuple() {
+    let k: TypeKind = TypeKind.Tuple;
+    assert(k.is_compound());
+}
+
+@test
+fn test_type_kind_array() {
+    let k: TypeKind = TypeKind.Array;
+    assert(!k.is_compound());
+    assert(!k.is_reference());
+}
+
+@test
+fn test_type_kind_slice() {
+    let k: TypeKind = TypeKind.Slice;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_reference() {
+    let k: TypeKind = TypeKind.Reference;
+    assert(k.is_reference());
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_pointer() {
+    let k: TypeKind = TypeKind.Pointer;
+    assert(k.is_reference());
+}
+
+@test
+fn test_type_kind_function() {
+    let k: TypeKind = TypeKind.Function;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_type_param() {
+    let k: TypeKind = TypeKind.TypeParam;
+    assert(!k.is_compound());
+    assert(!k.is_reference());
+    assert(!k.is_primitive());
+}
+
+@test
+fn test_type_kind_associated() {
+    let k: TypeKind = TypeKind.Associated;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_primitive() {
+    let k: TypeKind = TypeKind.Primitive;
+    assert(k.is_primitive());
+}
+
+@test
+fn test_type_kind_never() {
+    let k: TypeKind = TypeKind.Never;
+    assert(!k.is_compound());
+    assert(!k.is_reference());
+    assert(!k.is_primitive());
+}
+
+@test
+fn test_type_kind_infer() {
+    let k: TypeKind = TypeKind.Infer;
+    assert(!k.is_compound());
+    assert(!k.is_primitive());
+}
+
+@test
+fn test_type_kind_unknown() {
+    let k: TypeKind = TypeKind.Unknown;
+    assert(!k.is_compound());
+    assert(!k.is_reference());
+    assert(!k.is_primitive());
+}
+
+// =============================================================================
+// Section 2: TypeKind.name() — All Variants
+// =============================================================================
+
+@test
+fn test_type_kind_name_struct() {
+    assert_eq(TypeKind.Struct.name(), "struct");
+}
+
+@test
+fn test_type_kind_name_enum() {
+    assert_eq(TypeKind.Enum.name(), "enum");
+}
+
+@test
+fn test_type_kind_name_newtype() {
+    assert_eq(TypeKind.Newtype.name(), "newtype");
+}
+
+@test
+fn test_type_kind_name_unit() {
+    assert_eq(TypeKind.Unit.name(), "unit");
+}
+
+@test
+fn test_type_kind_name_protocol() {
+    assert_eq(TypeKind.Protocol.name(), "protocol");
+}
+
+@test
+fn test_type_kind_name_tuple() {
+    assert_eq(TypeKind.Tuple.name(), "tuple");
+}
+
+@test
+fn test_type_kind_name_array() {
+    assert_eq(TypeKind.Array.name(), "array");
+}
+
+@test
+fn test_type_kind_name_slice() {
+    assert_eq(TypeKind.Slice.name(), "slice");
+}
+
+@test
+fn test_type_kind_name_reference() {
+    assert_eq(TypeKind.Reference.name(), "reference");
+}
+
+@test
+fn test_type_kind_name_pointer() {
+    assert_eq(TypeKind.Pointer.name(), "pointer");
+}
+
+@test
+fn test_type_kind_name_function() {
+    assert_eq(TypeKind.Function.name(), "function");
+}
+
+@test
+fn test_type_kind_name_type_param() {
+    assert_eq(TypeKind.TypeParam.name(), "type parameter");
+}
+
+@test
+fn test_type_kind_name_associated() {
+    assert_eq(TypeKind.Associated.name(), "associated type");
+}
+
+@test
+fn test_type_kind_name_primitive() {
+    assert_eq(TypeKind.Primitive.name(), "primitive");
+}
+
+@test
+fn test_type_kind_name_never() {
+    assert_eq(TypeKind.Never.name(), "never");
+}
+
+@test
+fn test_type_kind_name_infer() {
+    assert_eq(TypeKind.Infer.name(), "inferred");
+}
+
+@test
+fn test_type_kind_name_unknown() {
+    assert_eq(TypeKind.Unknown.name(), "unknown");
+}
+
+// =============================================================================
+// Section 3: MethodSource Variants
+// =============================================================================
+
+@test
+fn test_method_source_inherent() {
+    let s: MethodSource = MethodSource.Inherent;
+    assert(s is MethodSource.Inherent);
+    assert(!(s is MethodSource.Protocol));
+    assert(!(s is MethodSource.Derived));
+    assert(!(s is MethodSource.Generated));
+}
+
+@test
+fn test_method_source_protocol() {
+    let s: MethodSource = MethodSource.Protocol;
+    assert(s is MethodSource.Protocol);
+    assert(!(s is MethodSource.Inherent));
+}
+
+@test
+fn test_method_source_derived() {
+    let s: MethodSource = MethodSource.Derived;
+    assert(s is MethodSource.Derived);
+}
+
+@test
+fn test_method_source_generated() {
+    let s: MethodSource = MethodSource.Generated;
+    assert(s is MethodSource.Generated);
+}
+
+// =============================================================================
+// Section 4: VariantKind
+// =============================================================================
+
+@test
+fn test_variant_kind_unit() {
+    let k: VariantKind = VariantKind.Unit;
+    assert(k is VariantKind.Unit);
+}
+
+@test
+fn test_variant_kind_tuple() {
+    let k: VariantKind = VariantKind.Tuple;
+    assert(k is VariantKind.Tuple);
+}
+
+@test
+fn test_variant_kind_struct() {
+    let k: VariantKind = VariantKind.Struct;
+    assert(k is VariantKind.Struct);
+}
+
+// =============================================================================
+// Section 5: GenericParamKind
+// =============================================================================
+
+@test
+fn test_generic_param_kind_type() {
+    let k: GenericParamKind = GenericParamKind.Type;
+    assert(k is GenericParamKind.Type);
+}
+
+@test
+fn test_generic_param_kind_lifetime() {
+    let k: GenericParamKind = GenericParamKind.Lifetime;
+    assert(k is GenericParamKind.Lifetime);
+}
+
+@test
+fn test_generic_param_kind_const() {
+    let k: GenericParamKind = GenericParamKind.Const;
+    assert(k is GenericParamKind.Const);
+}
+
+// =============================================================================
+// Section 6: SelfKind
+// =============================================================================
+
+@test
+fn test_self_kind_value() {
+    let k: SelfKind = SelfKind.Value;
+    assert(k is SelfKind.Value);
+}
+
+@test
+fn test_self_kind_ref() {
+    let k: SelfKind = SelfKind.Ref;
+    assert(k is SelfKind.Ref);
+}
+
+@test
+fn test_self_kind_ref_mut() {
+    let k: SelfKind = SelfKind.RefMut;
+    assert(k is SelfKind.RefMut);
+}
+
+// =============================================================================
+// Section 7: Visibility
+// =============================================================================
+
+@test
+fn test_visibility_public() {
+    let v: Visibility = Visibility.Public;
+    assert(v.is_public());
+}
+
+@test
+fn test_visibility_private() {
+    let v: Visibility = Visibility.Private;
+    assert(!v.is_public());
+}
+
+@test
+fn test_visibility_crate() {
+    let v: Visibility = Visibility.Crate;
+    assert(!v.is_public());
+}
+
+@test
+fn test_visibility_super() {
+    let v: Visibility = Visibility.Super;
+    assert(!v.is_public());
+}
+
+@test
+fn test_visibility_in() {
+    let v: Visibility = Visibility.In("core.meta");
+    assert(!v.is_public());
+}
+
+@test
+fn test_visibility_public_keyword() {
+    let v = Visibility.Public;
+    let kw = v.keyword();
+    assert(kw.is_some());
+}
+
+@test
+fn test_visibility_private_keyword() {
+    let v = Visibility.Private;
+    let kw = v.keyword();
+    assert(kw.is_none());
+}
+
+// =============================================================================
+// Section 8: PrimitiveType — Variants and Methods
+// =============================================================================
+
+@test
+fn test_primitive_type_bool() {
+    let p: PrimitiveType = PrimitiveType.Bool;
+    assert_eq(p.name(), "Bool");
+    assert_eq(p.size(), 1);
+    assert(!p.is_numeric());
+    assert(!p.is_signed());
+    assert(!p.is_unsigned());
+    assert(!p.is_float());
+}
+
+@test
+fn test_primitive_type_char() {
+    let p = PrimitiveType.Char;
+    assert_eq(p.name(), "Char");
+    assert_eq(p.size(), 4);
+    assert(!p.is_numeric());
+}
+
+@test
+fn test_primitive_type_int() {
+    let p = PrimitiveType.Int;
+    assert_eq(p.name(), "Int");
+    assert_eq(p.size(), 8);
+    assert(p.is_numeric());
+    assert(p.is_signed());
+    assert(!p.is_unsigned());
+    assert(!p.is_float());
+}
+
+@test
+fn test_primitive_type_int8() {
+    let p = PrimitiveType.Int8;
+    assert_eq(p.name(), "Int8");
+    assert_eq(p.size(), 1);
+    assert(p.is_signed());
+}
+
+@test
+fn test_primitive_type_int16() {
+    let p = PrimitiveType.Int16;
+    assert_eq(p.name(), "Int16");
+    assert_eq(p.size(), 2);
+    assert(p.is_signed());
+}
+
+@test
+fn test_primitive_type_int32() {
+    let p = PrimitiveType.Int32;
+    assert_eq(p.name(), "Int32");
+    assert_eq(p.size(), 4);
+    assert(p.is_signed());
+}
+
+@test
+fn test_primitive_type_int64() {
+    let p = PrimitiveType.Int64;
+    assert_eq(p.name(), "Int64");
+    assert_eq(p.size(), 8);
+    assert(p.is_signed());
+}
+
+@test
+fn test_primitive_type_uint8() {
+    let p = PrimitiveType.UInt8;
+    assert_eq(p.name(), "UInt8");
+    assert_eq(p.size(), 1);
+    assert(p.is_unsigned());
+    assert(!p.is_signed());
+}
+
+@test
+fn test_primitive_type_uint16() {
+    let p = PrimitiveType.UInt16;
+    assert_eq(p.name(), "UInt16");
+    assert_eq(p.size(), 2);
+    assert(p.is_unsigned());
+}
+
+@test
+fn test_primitive_type_uint32() {
+    let p = PrimitiveType.UInt32;
+    assert_eq(p.name(), "UInt32");
+    assert_eq(p.size(), 4);
+    assert(p.is_unsigned());
+}
+
+@test
+fn test_primitive_type_uint64() {
+    let p = PrimitiveType.UInt64;
+    assert_eq(p.name(), "UInt64");
+    assert_eq(p.size(), 8);
+    assert(p.is_unsigned());
+}
+
+@test
+fn test_primitive_type_float32() {
+    let p = PrimitiveType.Float32;
+    assert_eq(p.name(), "Float32");
+    assert_eq(p.size(), 4);
+    assert(p.is_float());
+    assert(p.is_numeric());
+    assert(!p.is_signed());
+    assert(!p.is_unsigned());
+}
+
+@test
+fn test_primitive_type_float64() {
+    let p = PrimitiveType.Float64;
+    assert_eq(p.name(), "Float64");
+    assert_eq(p.size(), 8);
+    assert(p.is_float());
+}
+
+@test
+fn test_primitive_type_text() {
+    let p = PrimitiveType.Text;
+    assert_eq(p.name(), "Text");
+    assert_eq(p.size(), 24);
+    assert(!p.is_numeric());
+}
+
+@test
+fn test_primitive_type_unit() {
+    let p = PrimitiveType.Unit;
+    assert_eq(p.name(), "()");
+    assert_eq(p.size(), 0);
+    assert(!p.is_numeric());
+}
+
+@test
+fn test_primitive_type_isize() {
+    let p = PrimitiveType.ISize;
+    assert_eq(p.name(), "ISize");
+    assert_eq(p.size(), 8);
+    assert(p.is_signed());
+}
+
+@test
+fn test_primitive_type_usize() {
+    let p = PrimitiveType.USize;
+    assert_eq(p.name(), "USize");
+    assert_eq(p.size(), 8);
+    assert(p.is_unsigned());
+}
+
+// =============================================================================
+// Section 9: OwnershipInfo
+// =============================================================================
+
+@test
+fn test_ownership_info_trivially_copyable() {
+    let info = OwnershipInfo {
+        is_copy: true,
+        is_clone: true,
+        is_send: true,
+        is_sync: true,
+        has_drop: false,
+        needs_drop: false,
+        is_unpin: true,
+        has_interior_mutability: false,
+        blocking_fields: List.new(),
+    };
+    assert(info.is_trivially_copyable());
+    assert(info.is_thread_safe());
+    assert(!info.requires_cleanup());
+}
+
+@test
+fn test_ownership_info_not_copyable() {
+    let info = OwnershipInfo {
+        is_copy: false,
+        is_clone: true,
+        is_send: true,
+        is_sync: true,
+        has_drop: false,
+        needs_drop: false,
+        is_unpin: true,
+        has_interior_mutability: false,
+        blocking_fields: List.new(),
+    };
+    assert(!info.is_trivially_copyable());
+}
+
+@test
+fn test_ownership_info_requires_cleanup() {
+    let info = OwnershipInfo {
+        is_copy: false,
+        is_clone: true,
+        is_send: true,
+        is_sync: true,
+        has_drop: true,
+        needs_drop: true,
+        is_unpin: true,
+        has_interior_mutability: false,
+        blocking_fields: List.new(),
+    };
+    assert(info.requires_cleanup());
+}
+
+@test
+fn test_ownership_info_not_thread_safe() {
+    let info = OwnershipInfo {
+        is_copy: false,
+        is_clone: true,
+        is_send: false,
+        is_sync: false,
+        has_drop: false,
+        needs_drop: false,
+        is_unpin: true,
+        has_interior_mutability: true,
+        blocking_fields: List.new(),
+    };
+    assert(!info.is_thread_safe());
+}
+
+@test
+fn test_ownership_info_non_copy_reason_none() {
+    let info = OwnershipInfo {
+        is_copy: true,
+        is_clone: true,
+        is_send: true,
+        is_sync: true,
+        has_drop: false,
+        needs_drop: false,
+        is_unpin: true,
+        has_interior_mutability: false,
+        blocking_fields: List.new(),
+    };
+    assert(info.non_copy_reason().is_none());
+}
+
+@test
+fn test_ownership_info_non_copy_reason_drop() {
+    let info = OwnershipInfo {
+        is_copy: false,
+        is_clone: true,
+        is_send: true,
+        is_sync: true,
+        has_drop: true,
+        needs_drop: true,
+        is_unpin: true,
+        has_interior_mutability: false,
+        blocking_fields: List.new(),
+    };
+    let reason = info.non_copy_reason();
+    assert(reason.is_some());
+}
+
+// =============================================================================
+// Section 10: FieldOffset
+// =============================================================================
+
+@test
+fn test_field_offset_end() {
+    let fo = FieldOffset {
+        name: "x",
+        offset: 0,
+        size: 8,
+        align: 8,
+        padding_before: 0,
+    };
+    assert_eq(fo.end(), 8);
+}
+
+@test
+fn test_field_offset_has_padding() {
+    let fo = FieldOffset {
+        name: "y",
+        offset: 12,
+        size: 4,
+        align: 4,
+        padding_before: 4,
+    };
+    assert(fo.has_padding());
+}
+
+@test
+fn test_field_offset_no_padding() {
+    let fo = FieldOffset {
+        name: "x",
+        offset: 0,
+        size: 8,
+        align: 8,
+        padding_before: 0,
+    };
+    assert(!fo.has_padding());
+}
+
+@test
+fn test_field_offset_end_with_offset() {
+    let fo = FieldOffset {
+        name: "z",
+        offset: 16,
+        size: 4,
+        align: 4,
+        padding_before: 0,
+    };
+    assert_eq(fo.end(), 20);
+}
+
+// =============================================================================
+// Section 11: GenericParam
+// =============================================================================
+
+@test
+fn test_generic_param_unconstrained() {
+    let gp = GenericParam {
+        name: "T",
+        index: 0,
+        kind: GenericParamKind.Type,
+        bounds: List.new(),
+        default: None,
+        span: Span.call_site(),
+    };
+    assert(!gp.is_constrained());
+    assert(!gp.has_default());
+}
+
+@test
+fn test_generic_param_with_bound() {
+    let mut bounds = List.new();
+    bounds.push("Clone");
+    let gp = GenericParam {
+        name: "T",
+        index: 0,
+        kind: GenericParamKind.Type,
+        bounds: bounds,
+        default: None,
+        span: Span.call_site(),
+    };
+    assert(gp.is_constrained());
+    assert(gp.has_bound("Clone"));
+    assert(!gp.has_bound("Send"));
+}
+
+@test
+fn test_generic_param_with_default() {
+    let gp = GenericParam {
+        name: "T",
+        index: 0,
+        kind: GenericParamKind.Type,
+        bounds: List.new(),
+        default: Some("Int"),
+        span: Span.call_site(),
+    };
+    assert(gp.has_default());
+}
+
+// =============================================================================
+// Section 12: LifetimeParam
+// =============================================================================
+
+@test
+fn test_lifetime_param_normal() {
+    let lp = LifetimeParam {
+        name: "a",
+        index: 0,
+        bounds: List.new(),
+        is_static: false,
+        is_anonymous: false,
+        span: Span.call_site(),
+    };
+    assert(!lp.is_static);
+    assert(!lp.is_anonymous);
+    assert(!lp.has_bounds());
+}
+
+@test
+fn test_lifetime_param_static() {
+    let lp = LifetimeParam {
+        name: "static",
+        index: 0,
+        bounds: List.new(),
+        is_static: true,
+        is_anonymous: false,
+        span: Span.call_site(),
+    };
+    assert(lp.is_static);
+}
+
+@test
+fn test_lifetime_param_anonymous() {
+    let lp = LifetimeParam {
+        name: "_",
+        index: 0,
+        bounds: List.new(),
+        is_static: false,
+        is_anonymous: true,
+        span: Span.call_site(),
+    };
+    assert(lp.is_anonymous);
+}
+
+@test
+fn test_lifetime_param_with_bounds() {
+    let mut bounds = List.new();
+    bounds.push("b");
+    let lp = LifetimeParam {
+        name: "a",
+        index: 0,
+        bounds: bounds,
+        is_static: false,
+        is_anonymous: false,
+        span: Span.call_site(),
+    };
+    assert(lp.has_bounds());
+}
+
+// =============================================================================
+// Section 13: TraitBound
+// =============================================================================
+
+@test
+fn test_trait_bound_marker() {
+    let tb = TraitBound {
+        protocol_name: "Copy",
+        protocol_path: "core.base.copy.Copy",
+        type_args: List.new(),
+        associated_types: List.new(),
+        is_negative: false,
+        is_maybe: false,
+        span: Span.call_site(),
+    };
+    assert(tb.is_marker());
+    assert(tb.implies_copy());
+}
+
+@test
+fn test_trait_bound_not_marker() {
+    let tb = TraitBound {
+        protocol_name: "Iterator",
+        protocol_path: "core.base.iterator.Iterator",
+        type_args: List.new(),
+        associated_types: List.new(),
+        is_negative: false,
+        is_maybe: false,
+        span: Span.call_site(),
+    };
+    assert(!tb.is_marker());
+    assert(!tb.implies_copy());
+}
+
+@test
+fn test_trait_bound_negative() {
+    let tb = TraitBound {
+        protocol_name: "Send",
+        protocol_path: "core.base.send.Send",
+        type_args: List.new(),
+        associated_types: List.new(),
+        is_negative: true,
+        is_maybe: false,
+        span: Span.call_site(),
+    };
+    assert(tb.is_negative);
+}
+
+@test
+fn test_trait_bound_maybe() {
+    let tb = TraitBound {
+        protocol_name: "Sized",
+        protocol_path: "core.base.sized.Sized",
+        type_args: List.new(),
+        associated_types: List.new(),
+        is_negative: false,
+        is_maybe: true,
+        span: Span.call_site(),
+    };
+    assert(tb.is_maybe);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

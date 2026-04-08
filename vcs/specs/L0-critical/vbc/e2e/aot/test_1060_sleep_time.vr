@@ -1,0 +1,60 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: sleep, time, intrinsics
+// @description: Test sleep_ms and time_now_ms intrinsics
+
+fn sleep_ms(millis: Int) -> Int { 0 }
+fn time_now_ms() -> Int { 0 }
+
+fn test_time_now() -> Int {
+    let t1 = time_now_ms();
+    // time_now_ms should return a positive value (ms since epoch)
+    if t1 <= 0 {
+        print(f"FAIL time_now: expected positive value, got {t1}");
+        return 1;
+    }
+    print("  time_now: OK");
+    0
+}
+
+fn test_sleep() -> Int {
+    let t1 = time_now_ms();
+    sleep_ms(50);  // Sleep 50ms
+    let t2 = time_now_ms();
+    let elapsed = t2 - t1;
+    // Should have slept at least ~30ms (allow some slack)
+    if elapsed < 20 {
+        print(f"FAIL sleep: elapsed {elapsed}ms, expected >= 20ms");
+        return 1;
+    }
+    print(f"  sleep: OK (elapsed {elapsed}ms)");
+    0
+}
+
+fn test_time_monotonic() -> Int {
+    let t1 = time_now_ms();
+    let t2 = time_now_ms();
+    // t2 should be >= t1 (monotonic)
+    if t2 < t1 {
+        print(f"FAIL monotonic: t2={t2} < t1={t1}");
+        return 1;
+    }
+    print("  monotonic: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Sleep/Time Tests:");
+    let mut failures = 0;
+    failures = failures + test_time_now();
+    failures = failures + test_sleep();
+    failures = failures + test_time_monotonic();
+
+    if failures == 0 {
+        print("All sleep/time tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

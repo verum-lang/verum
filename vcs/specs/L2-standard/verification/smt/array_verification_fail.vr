@@ -1,0 +1,150 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: smt, arrays, error
+// @timeout: 5000
+// @expected-error: E502 "SMT array theory verification failed"
+
+/// SMT verification failures for array/list operations
+/// Tests error detection in array theory reasoning
+
+/// Bounds check failure
+@verify(proof)
+fn access_out_of_bounds(arr: &List<Int>, idx: Int) -> Int {
+    contract#"
+        requires idx >= 0;
+        // ERROR: Missing idx < arr.len()
+        ensures result == arr[idx];
+    ";
+    arr[idx]
+}
+
+/// Array length invariant violated
+@verify(proof)
+fn fill_wrong_length<T: Clone>(size: Int{>= 0}, value: T) -> List<T> {
+    contract#"
+        requires size >= 0;
+        ensures result.len() == size + 1;  // ERROR: Off by one
+    ";
+    let mut arr = List.new();
+    for _ in 0..size {
+        arr.push(value.clone());
+    }
+    arr
+}
+
+/// Element preservation not maintained
+@verify(proof)
+fn copy_incomplete<T: Clone>(src: &List<T>) -> List<T> {
+    contract#"
+        ensures result.len() == src.len();
+        ensures forall i: Int. 0 <= i < src.len() implies result[i] == src[i];
+    ";
+    // ERROR: Only copies first half
+    let mut result = List.new();
+    for i in 0..src.len() / 2 {
+        result.push(src[i].clone());
+    }
+    // Missing: push remaining elements
+    for _ in src.len() / 2..src.len() {
+        result.push(T.default());  // Wrong values!
+    }
+    result
+}
+
+/// Swap verification failure
+@verify(proof)
+fn swap_wrong<T>(arr: &mut List<T>, i: Int, j: Int) {
+    contract#"
+        requires i >= 0 && i < arr.len();
+        requires j >= 0 && j < arr.len();
+        ensures arr[i] == old(arr[j]);
+        ensures arr[j] == old(arr[i]);
+    ";
+    // ERROR: Missing temp variable, overwrites before reading
+    arr[i] = arr[j];
+    arr[j] = arr[i];  // Both are now old(arr[j])
+}
+
+/// Reverse with wrong indices
+@verify(proof)
+fn reverse_wrong<T>(arr: &mut List<T>) {
+    contract#"
+        ensures arr.len() == old(arr.len());
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == old(arr[arr.len() - 1 - i]);
+    ";
+    // ERROR: Off-by-one in swap range
+    let n = arr.len();
+    for i in 0..n / 2 + 1 {  // Should be n/2, not n/2+1
+        arr.swap(i, n - 1 - i);
+    }
+}
+
+/// Subarray copy bounds error
+@verify(proof)
+fn copy_subarray_wrong<T: Clone>(src: &List<T>, start: Int, len: Int) -> List<T> {
+    contract#"
+        requires start >= 0 && len >= 0;
+        requires start + len <= src.len();
+        ensures result.len() == len;
+        ensures forall i: Int. 0 <= i < len implies result[i] == src[start + i];
+    ";
+    // ERROR: Copies len+1 elements
+    let mut result = List.new();
+    for i in 0..=len {  // Should be 0..len
+        result.push(src[start + i].clone());
+    }
+    result
+}
+
+/// Search with early exit bug
+@verify(proof)
+fn linear_search_wrong<T: Eq>(arr: &List<T>, target: &T) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < arr.len() && arr[idx] == *target,
+            None => forall i: Int. 0 <= i < arr.len() implies arr[i] != *target
+        };
+    ";
+    // ERROR: Returns first index, not index of match
+    if arr.len() > 0 && arr[0] == *target {
+        Some(0)
+    } else {
+        Some(1)  // ERROR: Returns Some(1) even if no match
+    }
+}
+
+/// Partition invariant not maintained
+@verify(proof)
+fn partition_wrong<T: Ord>(arr: &mut List<T>, pivot_idx: Int) -> Int {
+    contract#"
+        requires pivot_idx >= 0 && pivot_idx < arr.len();
+        ensures forall i: Int. 0 <= i < result implies arr[i] <= arr[result];
+        ensures forall i: Int. result < i < arr.len() implies arr[i] > arr[result];
+    ";
+    // ERROR: Doesn't actually partition, just returns pivot_idx
+    pivot_idx
+}
+
+/// 2D array access with wrong dimensions
+@verify(proof)
+fn get_2d_wrong<T>(matrix: &List<List<T>>, row: Int, col: Int) -> &T {
+    contract#"
+        requires row >= 0 && row < matrix.len();
+        requires col >= 0 && col < matrix[row].len();
+        ensures *result == matrix[row][col];
+    ";
+    // ERROR: Swapped row and col
+    &matrix[col][row]
+}
+
+/// Permutation check that's too weak
+@verify(proof)
+fn is_permutation_wrong<T: Eq>(a: &List<T>, b: &List<T>) -> Bool {
+    contract#"
+        ensures result implies a.len() == b.len();
+        ensures result implies forall x: Int. a.contains(&x) == b.contains(&x);
+    ";
+    // ERROR: Only checks length, not actual permutation
+    a.len() == b.len()
+}

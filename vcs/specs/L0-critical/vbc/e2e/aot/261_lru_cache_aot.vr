@@ -1,0 +1,170 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, lru, cache, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for simple LRU cache (4 entries, timestamp-based eviction)
+
+type CacheEntry is { key: Int, value: Int, timestamp: Int, valid: Int };
+
+type LRU4 is {
+    e0: CacheEntry, e1: CacheEntry, e2: CacheEntry, e3: CacheEntry,
+    clock: Int
+};
+
+fn empty_entry() -> CacheEntry { CacheEntry { key: 0, value: 0, timestamp: 0, valid: 0 } }
+
+fn lru_new() -> LRU4 {
+    LRU4 { e0: empty_entry(), e1: empty_entry(), e2: empty_entry(), e3: empty_entry(), clock: 0 }
+}
+
+fn lru_get_entry(c: LRU4, i: Int) -> CacheEntry {
+    if i == 0 { c.e0 } else if i == 1 { c.e1 }
+    else if i == 2 { c.e2 } else { c.e3 }
+}
+
+fn lru_set_entry(c: LRU4, i: Int, e: CacheEntry) -> LRU4 {
+    LRU4 {
+        e0: if i == 0 { e } else { c.e0 }, e1: if i == 1 { e } else { c.e1 },
+        e2: if i == 2 { e } else { c.e2 }, e3: if i == 3 { e } else { c.e3 },
+        clock: c.clock
+    }
+}
+
+// Lookup: returns value or -1 if miss, also updates timestamp
+type LookupResult is { cache: LRU4, value: Int, hit: Int };
+
+fn lru_lookup(c: LRU4, key: Int) -> LookupResult {
+    let mut i = 0;
+    while i < 4 {
+        let e = lru_get_entry(c, i);
+        if e.valid == 1 && e.key == key {
+            let updated = CacheEntry { key: e.key, value: e.value, timestamp: c.clock + 1, valid: 1 };
+            let c2 = lru_set_entry(c, i, updated);
+            return LookupResult { cache: LRU4 { e0: c2.e0, e1: c2.e1, e2: c2.e2, e3: c2.e3, clock: c.clock + 1 }, value: e.value, hit: 1 };
+        }
+        i = i + 1;
+    }
+    LookupResult { cache: c, value: -1, hit: 0 }
+}
+
+// Find LRU slot (oldest timestamp, or first invalid)
+fn find_lru_slot(c: LRU4) -> Int {
+    let mut min_ts = 999999;
+    let mut min_idx = 0;
+    let mut i = 0;
+    while i < 4 {
+        let e = lru_get_entry(c, i);
+        if e.valid == 0 { return i; }
+        if e.timestamp < min_ts {
+            min_ts = e.timestamp;
+            min_idx = i;
+        }
+        i = i + 1;
+    }
+    min_idx
+}
+
+fn lru_insert(c: LRU4, key: Int, value: Int) -> LRU4 {
+    // Check if key exists (update)
+    let mut i = 0;
+    while i < 4 {
+        let e = lru_get_entry(c, i);
+        if e.valid == 1 && e.key == key {
+            let updated = CacheEntry { key: key, value: value, timestamp: c.clock + 1, valid: 1 };
+            let c2 = lru_set_entry(c, i, updated);
+            return LRU4 { e0: c2.e0, e1: c2.e1, e2: c2.e2, e3: c2.e3, clock: c.clock + 1 };
+        }
+        i = i + 1;
+    }
+    // Evict LRU
+    let slot = find_lru_slot(c);
+    let entry = CacheEntry { key: key, value: value, timestamp: c.clock + 1, valid: 1 };
+    let c2 = lru_set_entry(c, slot, entry);
+    LRU4 { e0: c2.e0, e1: c2.e1, e2: c2.e2, e3: c2.e3, clock: c.clock + 1 }
+}
+
+fn lru_count(c: LRU4) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 4 {
+        if lru_get_entry(c, i).valid == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_basic() {
+    let mut c = lru_new();
+    c = lru_insert(c, 1, 100);
+    c = lru_insert(c, 2, 200);
+    assert_eq(lru_count(c), 2);
+
+    let r = lru_lookup(c, 1);
+    assert_eq(r.value, 100);
+    assert_eq(r.hit, 1);
+
+    let r2 = lru_lookup(c, 3);
+    assert_eq(r2.hit, 0);
+}
+
+fn test_eviction() {
+    let mut c = lru_new();
+    c = lru_insert(c, 1, 10);
+    c = lru_insert(c, 2, 20);
+    c = lru_insert(c, 3, 30);
+    c = lru_insert(c, 4, 40);
+    assert_eq(lru_count(c), 4);
+
+    // Insert 5th - should evict LRU (key=1, oldest timestamp)
+    c = lru_insert(c, 5, 50);
+    assert_eq(lru_count(c), 4);
+
+    let r1 = lru_lookup(c, 1);
+    assert_eq(r1.hit, 0);  // Evicted
+
+    let r5 = lru_lookup(c, 5);
+    assert_eq(r5.value, 50);
+    assert_eq(r5.hit, 1);
+}
+
+fn test_access_refreshes() {
+    let mut c = lru_new();
+    c = lru_insert(c, 1, 10);
+    c = lru_insert(c, 2, 20);
+    c = lru_insert(c, 3, 30);
+    c = lru_insert(c, 4, 40);
+
+    // Access key 1 to refresh it
+    let r = lru_lookup(c, 1);
+    c = r.cache;
+
+    // Insert 5 - should evict 2 (now oldest)
+    c = lru_insert(c, 5, 50);
+
+    let r1 = lru_lookup(c, 1);
+    assert_eq(r1.hit, 1);  // Still present
+    let r2 = lru_lookup(c, 2);
+    assert_eq(r2.hit, 0);  // Evicted
+}
+
+fn test_update() {
+    let mut c = lru_new();
+    c = lru_insert(c, 1, 100);
+    c = lru_insert(c, 1, 200);  // Update value
+    assert_eq(lru_count(c), 1);
+
+    let r = lru_lookup(c, 1);
+    assert_eq(r.value, 200);
+}
+
+fn main() -> Int {
+    test_basic();
+    test_eviction();
+    test_access_refreshes();
+    test_update();
+    print("[OK] 261_lru_cache_aot");
+    0
+}

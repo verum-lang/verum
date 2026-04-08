@@ -1,0 +1,78 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: vbc, differential, boolean, bitwise, not
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential test: boolean NOT vs bitwise NOT must behave identically
+
+fn bool_not_test() {
+    // Boolean NOT
+    assert_eq(!true, false);
+    assert_eq(!false, true);
+
+    let x = true;
+    assert_eq(!x, false);
+
+    let y = false;
+    assert_eq(!y, true);
+
+    // Chained boolean NOT
+    assert_eq(!!true, true);
+    assert_eq(!!false, false);
+}
+
+fn comparison_not_test() {
+    // NOT of comparison results
+    let a = 5;
+    let b = 10;
+
+    let eq = a == b;
+    assert_eq(!eq, true);
+
+    let lt = a < b;
+    assert_eq(!lt, false);
+
+    let gt = a > b;
+    assert_eq(!gt, true);
+}
+
+fn bitwise_not_test() {
+    // Bitwise NOT on integers (NOT boolean)
+    let x = 0;
+    let not_x = !x;
+    assert_eq(not_x, -1);  // ~0 = -1 (all bits set)
+
+    let y = -1;
+    let not_y = !y;
+    assert_eq(not_y, 0);  // ~(-1) = 0
+
+    // Bitwise NOT for bit manipulation
+    let mask = 255;  // 0xFF
+    let inv = !mask;
+    assert_eq(inv, -256);
+}
+
+fn mixed_boolean_bitwise() {
+    // Ensure boolean and bitwise NOT don't interfere
+    let flag = true;
+    let num = 42;
+
+    let not_flag = !flag;
+    assert_eq(not_flag, false);
+
+    let not_num = !num;
+    assert_eq(not_num, -43);  // ~42 = -43
+}
+
+fn main() -> Int {
+    bool_not_test();
+    comparison_not_test();
+    bitwise_not_test();
+    mixed_boolean_bitwise();
+
+    print("differential boolean ops ok");
+    0
+}

@@ -1,0 +1,719 @@
+// =============================================================================
+// once_test.vr - Tests for Once, OnceState, and OnceLock<T>
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: sync, once, lazy, initialization, concurrency, core
+// @description: Comprehensive tests for Once, OnceState, OnceLock<T>
+// =============================================================================
+
+mount core.sync.once.{Once, OnceState, OnceLock};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Once Construction Tests
+// =============================================================================
+
+@test
+fn test_once_new() {
+    let once: Once = Once.new();
+    assert(!once.is_completed());
+}
+
+@test
+fn test_once_initial_state() {
+    let once: Once = Once.new();
+    match once.state() {
+        OnceState.New => {} // Expected
+        _ => panic("Expected New state"),
+    }
+}
+
+@test
+fn test_once_default() {
+    let once: Once = Once.default();
+    assert(!once.is_completed());
+    match once.state() {
+        OnceState.New => {} // Expected
+        _ => panic("Expected New state"),
+    }
+}
+
+// =============================================================================
+// Section 2: Once call_once Tests
+// =============================================================================
+
+@test
+fn test_once_call_once() {
+    let once: Once = Once.new();
+    let mut called: Int = 0;
+
+    once.call_once(|| {
+        called = called + 1;
+    });
+
+    assert_eq(called, 1);
+    assert(once.is_completed());
+}
+
+@test
+fn test_once_call_once_multiple_times() {
+    let once: Once = Once.new();
+    let mut called: Int = 0;
+
+    // First call - should execute
+    once.call_once(|| {
+        called = called + 1;
+    });
+
+    // Second call - should not execute
+    once.call_once(|| {
+        called = called + 10;
+    });
+
+    // Third call - should not execute
+    once.call_once(|| {
+        called = called + 100;
+    });
+
+    // Only first call should have executed
+    assert_eq(called, 1);
+}
+
+@test
+fn test_once_call_once_state_changes() {
+    let once: Once = Once.new();
+
+    // Initially New
+    match once.state() {
+        OnceState.New => {} // Expected
+        _ => panic("Expected New state"),
+    }
+
+    once.call_once(|| {});
+
+    // After call_once, should be Done
+    match once.state() {
+        OnceState.Done => {} // Expected
+        _ => panic("Expected Done state"),
+    }
+}
+
+@test
+fn test_once_is_completed_before() {
+    let once: Once = Once.new();
+    assert(!once.is_completed());
+}
+
+@test
+fn test_once_is_completed_after() {
+    let once: Once = Once.new();
+    once.call_once(|| {});
+    assert(once.is_completed());
+}
+
+// =============================================================================
+// Section 3: Once call_once_force Tests
+// =============================================================================
+
+@test
+fn test_once_call_once_force() {
+    let once: Once = Once.new();
+    let mut called: Int = 0;
+
+    once.call_once_force(|| {
+        called = called + 1;
+    });
+
+    assert_eq(called, 1);
+    assert(once.is_completed());
+}
+
+@test
+fn test_once_call_once_force_multiple_times() {
+    let once: Once = Once.new();
+    let mut called: Int = 0;
+
+    // First call - should execute
+    once.call_once_force(|| {
+        called = called + 1;
+    });
+
+    // Second call - should not execute (already complete)
+    once.call_once_force(|| {
+        called = called + 10;
+    });
+
+    assert_eq(called, 1);
+}
+
+// =============================================================================
+// Section 4: OnceState Tests
+// =============================================================================
+
+@test
+fn test_oncestate_new() {
+    let state: OnceState = OnceState.New;
+    match state {
+        OnceState.New => {} // Expected
+        _ => panic("Expected New"),
+    }
+}
+
+@test
+fn test_oncestate_in_progress() {
+    let state: OnceState = OnceState.InProgress;
+    match state {
+        OnceState.InProgress => {} // Expected
+        _ => panic("Expected InProgress"),
+    }
+}
+
+@test
+fn test_oncestate_done() {
+    let state: OnceState = OnceState.Done;
+    match state {
+        OnceState.Done => {} // Expected
+        _ => panic("Expected Done"),
+    }
+}
+
+@test
+fn test_oncestate_poisoned() {
+    let state: OnceState = OnceState.Poisoned;
+    match state {
+        OnceState.Poisoned => {} // Expected
+        _ => panic("Expected Poisoned"),
+    }
+}
+
+// =============================================================================
+// Section 5: OnceLock Construction Tests
+// =============================================================================
+
+@test
+fn test_oncelock_new() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    assert(!lock.is_initialized());
+}
+
+@test
+fn test_oncelock_new_text() {
+    let lock: OnceLock<Text> = OnceLock.new();
+    assert(!lock.is_initialized());
+}
+
+@test
+fn test_oncelock_new_bool() {
+    let lock: OnceLock<Bool> = OnceLock.new();
+    assert(!lock.is_initialized());
+}
+
+@test
+fn test_oncelock_default() {
+    let lock: OnceLock<Int> = OnceLock.default();
+    assert(!lock.is_initialized());
+}
+
+// =============================================================================
+// Section 6: OnceLock get_or_init Tests
+// =============================================================================
+
+@test
+fn test_oncelock_get_or_init() {
+    let lock: OnceLock<Int> = OnceLock.new();
+
+    let val: &Int = lock.get_or_init(|| 42);
+    assert_eq(*val, 42);
+    assert(lock.is_initialized());
+}
+
+@test
+fn test_oncelock_get_or_init_text() {
+    let lock: OnceLock<Text> = OnceLock.new();
+
+    let val: &Text = lock.get_or_init(|| "hello");
+    assert_eq(*val, "hello");
+    assert(lock.is_initialized());
+}
+
+@test
+fn test_oncelock_get_or_init_multiple_times() {
+    let lock: OnceLock<Int> = OnceLock.new();
+
+    // First call - initializes with 42
+    let val1: &Int = lock.get_or_init(|| 42);
+    assert_eq(*val1, 42);
+
+    // Second call - should return same value, not call function
+    let val2: &Int = lock.get_or_init(|| 100);
+    assert_eq(*val2, 42);  // Still 42, not 100
+
+    // Third call - same
+    let val3: &Int = lock.get_or_init(|| 999);
+    assert_eq(*val3, 42);
+}
+
+@test
+fn test_oncelock_get_or_init_counter() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let mut counter: Int = 0;
+
+    // Init function should only run once
+    let _: &Int = lock.get_or_init(|| {
+        counter = counter + 1;
+        42
+    });
+
+    let _: &Int = lock.get_or_init(|| {
+        counter = counter + 10;
+        100
+    });
+
+    assert_eq(counter, 1);  // Only first call incremented
+}
+
+// =============================================================================
+// Section 7: OnceLock get Tests
+// =============================================================================
+
+@test
+fn test_oncelock_get_uninitialized() {
+    let lock: OnceLock<Int> = OnceLock.new();
+
+    match lock.get() {
+        None => {} // Expected - not initialized
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_oncelock_get_initialized() {
+    let lock: OnceLock<Int> = OnceLock.new();
+
+    // Initialize first
+    let _: &Int = lock.get_or_init(|| 42);
+
+    // Now get should return Some
+    match lock.get() {
+        Some(val) => assert_eq(*val, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_oncelock_get_multiple_times() {
+    let lock: OnceLock<Int> = OnceLock.new();
+
+    let _: &Int = lock.get_or_init(|| 42);
+
+    // Multiple gets should all return same value
+    match lock.get() {
+        Some(v1) => {
+            match lock.get() {
+                Some(v2) => {
+                    assert_eq(*v1, *v2);
+                    assert_eq(*v1, 42);
+                }
+                None => panic("Expected Some"),
+            }
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 8: OnceLock set Tests
+// =============================================================================
+
+@test
+fn test_oncelock_set() {
+    let lock: OnceLock<Int> = OnceLock.new();
+
+    let result: Result<(), Int> = lock.set(42);
+    match result {
+        Ok(_) => {} // Expected
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert(lock.is_initialized());
+    match lock.get() {
+        Some(val) => assert_eq(*val, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_oncelock_set_text() {
+    let lock: OnceLock<Text> = OnceLock.new();
+
+    let result: Result<(), Text> = lock.set("hello");
+    match result {
+        Ok(_) => {} // Expected
+        Err(_) => panic("Expected Ok"),
+    }
+
+    match lock.get() {
+        Some(val) => assert_eq(*val, "hello"),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_oncelock_set_already_initialized() {
+    let lock: OnceLock<Int> = OnceLock.new();
+
+    // First set - should succeed
+    let result1: Result<(), Int> = lock.set(42);
+    match result1 {
+        Ok(_) => {} // Expected
+        Err(_) => panic("Expected Ok for first set"),
+    }
+
+    // Second set - should fail
+    let result2: Result<(), Int> = lock.set(100);
+    match result2 {
+        Err(_) => {} // Expected - already initialized
+        Ok(_) => panic("Expected Err for second set"),
+    }
+
+    // Value should still be 42
+    match lock.get() {
+        Some(val) => assert_eq(*val, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 9: OnceLock is_initialized Tests
+// =============================================================================
+
+@test
+fn test_oncelock_is_initialized_false() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    assert(!lock.is_initialized());
+}
+
+@test
+fn test_oncelock_is_initialized_after_get_or_init() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    assert(!lock.is_initialized());
+
+    let _: &Int = lock.get_or_init(|| 42);
+    assert(lock.is_initialized());
+}
+
+@test
+fn test_oncelock_is_initialized_after_set() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    assert(!lock.is_initialized());
+
+    let _: Result<(), Int> = lock.set(42);
+    assert(lock.is_initialized());
+}
+
+// =============================================================================
+// Section 10: OnceLock take Tests
+// =============================================================================
+
+@test
+fn test_oncelock_take_uninitialized() {
+    let mut lock: OnceLock<Int> = OnceLock.new();
+
+    match lock.take() {
+        None => {} // Expected - nothing to take
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_oncelock_take_initialized() {
+    let mut lock: OnceLock<Int> = OnceLock.new();
+
+    let _: &Int = lock.get_or_init(|| 42);
+    assert(lock.is_initialized());
+
+    match lock.take() {
+        Some(val) => assert_eq(val, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_oncelock_take_leaves_none() {
+    let mut lock: OnceLock<Int> = OnceLock.new();
+
+    let _: &Int = lock.get_or_init(|| 42);
+
+    // First take should return value
+    match lock.take() {
+        Some(val) => assert_eq(val, 42),
+        None => panic("Expected Some"),
+    }
+
+    // Second take should return None (value was taken)
+    match lock.take() {
+        None => {} // Expected - value was taken
+        Some(_) => panic("Expected None after take"),
+    }
+}
+
+// =============================================================================
+// Section 11: Complex Type Tests
+// =============================================================================
+
+@test
+fn test_oncelock_with_tuple() {
+    let lock: OnceLock<(Int, Text)> = OnceLock.new();
+
+    let val: &(Int, Text) = lock.get_or_init(|| (42, "hello"));
+    let (num, txt) = *val;
+    assert_eq(num, 42);
+    assert_eq(txt, "hello");
+}
+
+@test
+fn test_oncelock_with_option() {
+    let lock: OnceLock<Maybe<Int>> = OnceLock.new();
+
+    let val: &Maybe<Int> = lock.get_or_init(|| Some(42));
+    match *val {
+        Some(n) => assert_eq(n, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 12: Edge Cases
+// =============================================================================
+
+@test
+fn test_once_call_once_empty_closure() {
+    let once: Once = Once.new();
+    once.call_once(|| {});
+    assert(once.is_completed());
+}
+
+@test
+fn test_oncelock_init_with_zero() {
+    let lock: OnceLock<Int> = OnceLock.new();
+
+    let val: &Int = lock.get_or_init(|| 0);
+    assert_eq(*val, 0);
+    assert(lock.is_initialized());
+}
+
+@test
+fn test_oncelock_init_with_empty_text() {
+    let lock: OnceLock<Text> = OnceLock.new();
+
+    let val: &Text = lock.get_or_init(|| "");
+    assert_eq(*val, "");
+    assert(lock.is_initialized());
+}
+
+@test
+fn test_oncelock_init_with_false() {
+    let lock: OnceLock<Bool> = OnceLock.new();
+
+    let val: &Bool = lock.get_or_init(|| false);
+    assert_eq(*val, false);
+    assert(lock.is_initialized());
+}
+
+// =============================================================================
+// Section 13: OnceState distinctness
+// =============================================================================
+
+@test
+fn test_oncestate_new_is_not_other() {
+    let s = OnceState.New;
+    assert(s is OnceState.New);
+    assert(!(s is OnceState.InProgress));
+    assert(!(s is OnceState.Done));
+    assert(!(s is OnceState.Poisoned));
+}
+
+@test
+fn test_oncestate_done_is_not_other() {
+    let s = OnceState.Done;
+    assert(s is OnceState.Done);
+    assert(!(s is OnceState.New));
+    assert(!(s is OnceState.InProgress));
+    assert(!(s is OnceState.Poisoned));
+}
+
+@test
+fn test_oncestate_poisoned_is_not_other() {
+    let s = OnceState.Poisoned;
+    assert(s is OnceState.Poisoned);
+    assert(!(s is OnceState.New));
+    assert(!(s is OnceState.InProgress));
+    assert(!(s is OnceState.Done));
+}
+
+// =============================================================================
+// Section 14: OnceLock with List type
+// =============================================================================
+
+@test
+fn test_oncelock_with_list() {
+    let lock: OnceLock<List<Int>> = OnceLock.new();
+    let val: &List<Int> = lock.get_or_init(|| List.from([1, 2, 3]));
+    assert_eq(val.len(), 3);
+    assert(lock.is_initialized());
+}
+
+// =============================================================================
+// Section 15: OnceLock set then get_or_init
+// =============================================================================
+
+@test
+fn test_oncelock_set_then_get_or_init() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let _: Result<(), Int> = lock.set(42);
+    // get_or_init should return existing value, not call init
+    let val: &Int = lock.get_or_init(|| 999);
+    assert_eq(*val, 42);
+}
+
+// =============================================================================
+// Section 16: OnceLock take then reinitialize
+// =============================================================================
+
+@test
+fn test_oncelock_take_then_set() {
+    let mut lock: OnceLock<Int> = OnceLock.new();
+    let _: &Int = lock.get_or_init(|| 42);
+    // Take the value
+    let taken = lock.take();
+    assert(taken.is_some());
+    assert_eq(taken.unwrap(), 42);
+    // Lock should now be uninitialized
+    assert(!lock.is_initialized());
+    // Can reinitialize
+    let _: Result<(), Int> = lock.set(100);
+    assert(lock.is_initialized());
+    match lock.get() {
+        Some(val) => assert_eq(*val, 100),
+        None => panic("Expected Some after re-set"),
+    }
+}
+
+// =============================================================================
+// Section 17: OnceLock set error returns value
+// =============================================================================
+
+@test
+fn test_oncelock_set_err_returns_rejected_value() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let _: Result<(), Int> = lock.set(42);
+    // Second set should fail and return the rejected value
+    let result: Result<(), Int> = lock.set(100);
+    match result {
+        Err(rejected) => assert_eq(rejected, 100),
+        Ok(_) => panic("Expected Err"),
+    }
+}
+
+// =============================================================================
+// Section 18: Once five consecutive calls
+// =============================================================================
+
+@test
+fn test_once_five_consecutive_calls() {
+    let once: Once = Once.new();
+    let mut counter: Int = 0;
+    once.call_once(|| { counter = counter + 1; });
+    once.call_once(|| { counter = counter + 1; });
+    once.call_once(|| { counter = counter + 1; });
+    once.call_once(|| { counter = counter + 1; });
+    once.call_once(|| { counter = counter + 1; });
+    assert_eq(counter, 1);
+    assert(once.is_completed());
+}
+
+// =============================================================================
+// Section 19: OnceLock with negative/boundary values
+// =============================================================================
+
+@test
+fn test_oncelock_negative_value() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let val: &Int = lock.get_or_init(|| -999);
+    assert_eq(*val, -999);
+}
+
+@test
+fn test_oncelock_large_value() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let val: &Int = lock.get_or_init(|| 2147483647);
+    assert_eq(*val, 2147483647);
+}
+
+// =============================================================================
+// Section 20: Additional Once/OnceLock Tests
+// =============================================================================
+
+@test
+fn test_once_state_new_initially() {
+    let once = Once.new();
+    assert(once.state() is OnceState.New);
+}
+
+@test
+fn test_once_state_done_after_call() {
+    let once = Once.new();
+    once.call_once(|| {});
+    assert(once.state() is OnceState.Done);
+}
+
+@test
+fn test_oncelock_get_before_init_is_none() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    assert(lock.get().is_none());
+}
+
+@test
+fn test_oncelock_get_after_init_is_some() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let _: Result<(), Int> = lock.set(42);
+    assert(lock.get().is_some());
+}
+
+@test
+fn test_oncelock_zero_value() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let val: &Int = lock.get_or_init(|| 0);
+    assert_eq(*val, 0);
+}
+
+@test
+fn test_oncelock_take_empty_is_none() {
+    let mut lock: OnceLock<Int> = OnceLock.new();
+    let taken = lock.take();
+    assert(taken.is_none());
+}
+
+@test
+fn test_once_not_completed_initially() {
+    let once = Once.new();
+    assert(!once.is_completed());
+}
+
+@test
+fn test_oncelock_bool_type() {
+    let lock: OnceLock<Bool> = OnceLock.new();
+    let val: &Bool = lock.get_or_init(|| true);
+    assert_eq(*val, true);
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,144 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, state-machine, automaton, dfa
+// @timeout: 10000
+
+// DFA simulation: states 0..3, inputs 0..1
+// Transition table stored in Arr8 (state*2 + input -> next_state)
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+// Run DFA: transitions[state*2 + input] = next_state
+// inputs[0..n-1] is the input sequence
+// Returns final state
+fn dfa_run(trans: Arr8, inputs: Arr8, n: Int, start: Int) -> Int {
+    let mut state = start;
+    let mut i = 0;
+    while i < n {
+        let inp = get(inputs, i);
+        state = get(trans, state * 2 + inp);
+        i = i + 1;
+    }
+    state
+}
+
+// Count how many times we visit a specific state
+fn dfa_count_visits(trans: Arr8, inputs: Arr8, n: Int, start: Int, target: Int) -> Int {
+    let mut state = start;
+    let mut count = 0;
+    if state == target { count = 1; }
+    let mut i = 0;
+    while i < n {
+        let inp = get(inputs, i);
+        state = get(trans, state * 2 + inp);
+        if state == target { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Check if DFA accepts (final state is in accept set)
+// accept_mask: bit k set means state k is accepting
+fn dfa_accepts(trans: Arr8, inputs: Arr8, n: Int, start: Int, accept_mask: Int) -> Int {
+    let final_state = dfa_run(trans, inputs, n, start);
+    // Check bit final_state of accept_mask
+    let mut v = accept_mask;
+    let mut i = 0;
+    while i < final_state { v = v / 2; i = i + 1; }
+    v % 2
+}
+
+// Count number of distinct states visited
+fn count_distinct_states(trans: Arr8, inputs: Arr8, n: Int, start: Int) -> Int {
+    // Track visited in 4-bit mask (states 0-3)
+    let mut visited = 0;
+    let mut state = start;
+    // Mark start
+    let mut bit = 1;
+    let mut k = 0;
+    while k < state { bit = bit * 2; k = k + 1; }
+    visited = visited + bit;
+
+    let mut i = 0;
+    while i < n {
+        let inp = get(inputs, i);
+        state = get(trans, state * 2 + inp);
+        bit = 1;
+        k = 0;
+        while k < state { bit = bit * 2; k = k + 1; }
+        // Set bit if not already set
+        let mut check = visited;
+        let mut ck = 0;
+        while ck < state { check = check / 2; ck = ck + 1; }
+        if check % 2 == 0 { visited = visited + bit; }
+        i = i + 1;
+    }
+    // Count bits
+    let mut cnt = 0;
+    let mut v = visited;
+    while v > 0 { cnt = cnt + v % 2; v = v / 2; }
+    cnt
+}
+
+fn test_simple_dfa() -> Int {
+    // DFA: toggles between state 0 and 1 on input 1, stays on input 0
+    // State 0: input 0 -> 0, input 1 -> 1
+    // State 1: input 0 -> 1, input 1 -> 0
+    let trans = Arr8 { d0: 0, d1: 1, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let inp1 = Arr8 { d0: 1, d1: 1, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    // 3 inputs [1,1,1]: 0->1->0->1
+    assert_eq(dfa_run(trans, inp1, 3, 0), 1);
+    let inp2 = Arr8 { d0: 1, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    // 2 inputs [1,1]: 0->1->0
+    assert_eq(dfa_run(trans, inp2, 2, 0), 0);
+    1
+}
+
+fn test_accept() -> Int {
+    // Same toggle DFA, state 0 is accepting (mask = 1 = bit 0)
+    let trans = Arr8 { d0: 0, d1: 1, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let inp_even = Arr8 { d0: 1, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(dfa_accepts(trans, inp_even, 2, 0, 1), 1);
+    let inp_odd = Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(dfa_accepts(trans, inp_odd, 1, 0, 1), 0);
+    // State 1 accepting (mask = 2 = bit 1)
+    assert_eq(dfa_accepts(trans, inp_odd, 1, 0, 2), 1);
+    1
+}
+
+fn test_visits() -> Int {
+    // 3-state DFA: 0 -0-> 0, 0 -1-> 1, 1 -0-> 2, 1 -1-> 0, 2 -0-> 0, 2 -1-> 1
+    let trans = Arr8 { d0: 0, d1: 1, d2: 2, d3: 0, d4: 0, d5: 1, d6: 0, d7: 0 };
+    let inp = Arr8 { d0: 1, d1: 0, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    // Path: 0 -1-> 1 -0-> 2 -1-> 1 -0-> 2
+    assert_eq(dfa_run(trans, inp, 4, 0), 2);
+    assert_eq(dfa_count_visits(trans, inp, 4, 0, 2), 2);
+    assert_eq(count_distinct_states(trans, inp, 4, 0), 3);
+    1
+}
+
+fn test_self_loop() -> Int {
+    // All transitions go to state 0
+    let trans = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let inp = Arr8 { d0: 1, d1: 0, d2: 1, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(dfa_run(trans, inp, 4, 0), 0);
+    assert_eq(count_distinct_states(trans, inp, 4, 0), 1);
+    assert_eq(dfa_count_visits(trans, inp, 4, 0, 0), 5);
+    1
+}
+
+fn main() -> Int {
+    test_simple_dfa();
+    test_accept();
+    test_visits();
+    test_self_loop();
+    print("DIFF_OK: state_machine");
+    0
+}

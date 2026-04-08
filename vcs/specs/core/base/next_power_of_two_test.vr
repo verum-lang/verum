@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, unsigned, next-power-of-two
+// @description: Tests for next_power_of_two on unsigned integer types
+
+mount core.base.primitives.{UInt8, UInt16, UInt32, UInt64, USize};
+
+// =============================================================================
+// UInt8
+// =============================================================================
+
+@test
+fn test_uint8_next_power_of_two_zero() {
+    let val = 0 as UInt8;
+    assert_eq(val.next_power_of_two().to_int(), 1);
+}
+
+@test
+fn test_uint8_next_power_of_two_one() {
+    let val = 1 as UInt8;
+    assert_eq(val.next_power_of_two().to_int(), 1);
+}
+
+@test
+fn test_uint8_next_power_of_two_already_power() {
+    assert_eq((2 as UInt8).next_power_of_two().to_int(), 2);
+    assert_eq((4 as UInt8).next_power_of_two().to_int(), 4);
+    assert_eq((8 as UInt8).next_power_of_two().to_int(), 8);
+    assert_eq((64 as UInt8).next_power_of_two().to_int(), 64);
+    assert_eq((128 as UInt8).next_power_of_two().to_int(), 128);
+}
+
+@test
+fn test_uint8_next_power_of_two_round_up() {
+    assert_eq((3 as UInt8).next_power_of_two().to_int(), 4);
+    assert_eq((5 as UInt8).next_power_of_two().to_int(), 8);
+    assert_eq((7 as UInt8).next_power_of_two().to_int(), 8);
+    assert_eq((9 as UInt8).next_power_of_two().to_int(), 16);
+    assert_eq((33 as UInt8).next_power_of_two().to_int(), 64);
+    assert_eq((65 as UInt8).next_power_of_two().to_int(), 128);
+}
+
+// =============================================================================
+// UInt16
+// =============================================================================
+
+@test
+fn test_uint16_next_power_of_two() {
+    assert_eq((0 as UInt16).next_power_of_two().to_int(), 1);
+    assert_eq((1 as UInt16).next_power_of_two().to_int(), 1);
+    assert_eq((3 as UInt16).next_power_of_two().to_int(), 4);
+    assert_eq((256 as UInt16).next_power_of_two().to_int(), 256);
+    assert_eq((257 as UInt16).next_power_of_two().to_int(), 512);
+    assert_eq((1000 as UInt16).next_power_of_two().to_int(), 1024);
+}
+
+// =============================================================================
+// UInt32
+// =============================================================================
+
+@test
+fn test_uint32_next_power_of_two() {
+    assert_eq((0 as UInt32).next_power_of_two().to_int(), 1);
+    assert_eq((1 as UInt32).next_power_of_two().to_int(), 1);
+    assert_eq((3 as UInt32).next_power_of_two().to_int(), 4);
+    assert_eq((1024 as UInt32).next_power_of_two().to_int(), 1024);
+    assert_eq((1025 as UInt32).next_power_of_two().to_int(), 2048);
+    assert_eq((1000000 as UInt32).next_power_of_two().to_int(), 1048576);
+}
+
+// =============================================================================
+// UInt64
+// =============================================================================
+
+@test
+fn test_uint64_next_power_of_two() {
+    assert_eq((0 as UInt64).next_power_of_two().to_int(), 1);
+    assert_eq((1 as UInt64).next_power_of_two().to_int(), 1);
+    assert_eq((3 as UInt64).next_power_of_two().to_int(), 4);
+    assert_eq((1024 as UInt64).next_power_of_two().to_int(), 1024);
+    assert_eq((1025 as UInt64).next_power_of_two().to_int(), 2048);
+}
+
+// =============================================================================
+// USize
+// =============================================================================
+
+@test
+fn test_usize_next_power_of_two() {
+    assert_eq((0 as USize).next_power_of_two().to_int(), 1);
+    assert_eq((1 as USize).next_power_of_two().to_int(), 1);
+    assert_eq((3 as USize).next_power_of_two().to_int(), 4);
+    assert_eq((100 as USize).next_power_of_two().to_int(), 128);
+    assert_eq((4096 as USize).next_power_of_two().to_int(), 4096);
+    assert_eq((4097 as USize).next_power_of_two().to_int(), 8192);
+}
+
+// =============================================================================
+// Cross-type consistency
+// =============================================================================
+
+@test
+fn test_all_unsigned_have_next_power_of_two() {
+    let _a = (5 as UInt8).next_power_of_two();
+    let _b = (5 as UInt16).next_power_of_two();
+    let _c = (5 as UInt32).next_power_of_two();
+    let _d = (5 as UInt64).next_power_of_two();
+    let _e = (5 as USize).next_power_of_two();
+    assert_eq(_a.to_int(), 8);
+    assert_eq(_b.to_int(), 8);
+    assert_eq(_c.to_int(), 8);
+    assert_eq(_d.to_int(), 8);
+    assert_eq(_e.to_int(), 8);
+}
+
+@test
+fn test_next_power_of_two_idempotent() {
+    // Applying next_power_of_two twice should give the same result
+    let val = 42 as UInt16;
+    let p = val.next_power_of_two();
+    assert_eq(p.next_power_of_two().to_int(), p.to_int());
+}

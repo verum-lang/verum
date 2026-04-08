@@ -1,0 +1,265 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, delimiters, attributes, annotations
+
+// Attribute syntax with @ symbol
+
+// Simple attributes
+@deprecated
+fn old_function() -> Int {
+    42
+}
+
+@inline
+fn fast_function(x: Int) -> Int {
+    x * 2
+}
+
+@cold
+fn rarely_called() {
+    // Optimization hint
+}
+
+// Attributes with arguments
+@deprecated(since = "2.0", reason = "Use new_function instead")
+fn legacy_function() {}
+
+@cfg(target_os = "linux")
+fn linux_only() {}
+
+@cfg(feature = "async")
+async fn optional_async() {}
+
+// Multiple attributes
+@deprecated
+@inline
+@must_use
+fn important_result() -> Result<Int, Error> {
+    Ok(42)
+}
+
+// Attributes on types
+@derive(Clone, Debug, PartialEq)
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+@repr(C)
+type CCompatible is {
+    id: i32,
+    value: f64,
+};
+
+@repr(C, packed)
+type PackedStruct is {
+    a: u8,
+    b: u32,
+};
+
+// Field-level attributes (Grammar v2.7)
+type User is {
+    @serialize(rename = "user_id")
+    id: Int,
+
+    @serialize(skip_if = "is_empty")
+    nickname: Maybe<Text>,
+
+    @deprecated
+    legacy_field: Int,
+};
+
+// Variant-level attributes (Grammar v2.7)
+type Status is
+    @serialize(rename = "ok")
+    Ok
+    | @serialize(rename = "error")
+      Error(Text)
+    | @deprecated
+      Legacy;
+
+// Parameter-level attributes (Grammar v2.7)
+fn process(
+    @unused x: Int,
+    @must_use result: &mut Output,
+) {
+    // process body
+}
+
+// Conditional compilation attributes
+@cfg(debug_assertions)
+fn debug_only_check() {
+    assert(condition);
+}
+
+@cfg(not(debug_assertions))
+fn release_mode_optimization() {
+    // Skip checks in release
+}
+
+@cfg(all(target_os = "linux", feature = "networking"))
+fn linux_networking_feature() {}
+
+@cfg(any(target_os = "macos", target_os = "ios"))
+fn apple_platform() {}
+
+// Test attributes
+@test
+fn test_addition() {
+    assert_eq(1 + 1, 2);
+}
+
+@test
+@should_panic(expected = "division by zero")
+fn test_panic() {
+    let _ = 1 / 0;
+}
+
+@test
+@ignore(reason = "Flaky test, needs investigation")
+fn flaky_test() {
+    // ...
+}
+
+// Benchmark attributes
+@bench
+fn bench_sorting() {
+    // Benchmark code
+}
+
+// Documentation attributes
+@doc("This function computes the factorial of n")
+@doc("# Examples")
+@doc("```")
+@doc("let result = factorial(5);")
+@doc("assert_eq(result, 120);")
+@doc("```")
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+// Visibility attributes
+@pub
+fn public_function() {}
+
+@pub(cog)
+fn cog_visible() {}
+
+@pub(super)
+fn parent_visible() {}
+
+// FFI attributes
+@extern("C")
+fn c_function();
+
+@extern("C")
+@no_mangle
+fn exported_symbol();
+
+@extern("C")
+@link(name = "math")
+fn sin(x: f64) -> f64;
+
+// Safety attributes
+@unsafe_fn
+fn dangerous_operation() {}
+
+@trusted
+fn verified_safe() {}
+
+// Optimization attributes
+@inline(always)
+fn always_inline() {}
+
+@inline(never)
+fn never_inline() {}
+
+@cold
+fn error_path() {}
+
+@hot
+fn critical_path() {}
+
+// Alignment attributes
+@align(16)
+type Aligned16 is [u8; 64];
+
+@align(4096)
+type PageAligned is [u8; 4096];
+
+// Derive with custom implementations
+@derive(Clone)
+@derive(Debug, custom = true)
+type CustomDebug is {
+    visible: Int,
+    secret: Text,
+};
+
+// Async attributes
+@async_trait
+type AsyncProcessor is protocol {
+    async fn process(&self) -> Result<(), Error>;
+};
+
+// Serialization attributes (type-level only, field attributes not yet supported)
+@serialize
+@deserialize
+type Config is {
+    host: Text,
+    port: Int,
+};
+
+// Validation attributes (type-level only, field attributes not yet supported)
+@validate
+type UserInput is {
+    username: Text,
+    email: Text,
+    age: Int,
+};
+
+// Custom attributes
+@custom_attribute(key = "value", flag)
+fn with_custom() {}
+
+// Attribute on impl blocks
+@impl_trait_for_tuples
+implement MyTrait for Tuple {
+    // ...
+}
+
+// Match arm attributes (Grammar v2.7)
+fn handle_result(r: Result<Int, Error>) {
+    match r {
+        @hot
+        Ok(v) => process(v),
+        @cold
+        Err(e) => handle_error(e),
+    }
+}
+
+// Nested attribute arguments
+@complex_attr(
+    name = "test",
+    config = {
+        enabled: true,
+        timeout: 30,
+    },
+    tags = ["unit", "integration"],
+)
+fn complex_attributed() {}
+
+// Module-level attributes
+@allow(dead_code)
+@allow(unused_variables)
+module experimental {
+    // Experimental code
+}
+
+// Attribute groups (each attribute on separate line)
+@inline
+@cold
+@must_use
+fn grouped_attributes() -> Int {
+    42
+}

@@ -1,0 +1,511 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, iterator, double_ended, rfold, next_back, nth_back
+// @description: Tests for DoubleEndedIterator on DequeIter, DequeIterMut, DequeIntoIter, DequeDrain
+// NOTE: rfind() skipped due to type checker limitation resolving Self.Item through protocol default methods
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: DequeIter next_back
+// =============================================================================
+
+@test
+fn test_deque_iter_next_back_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let mut iter = d.iter();
+    assert_eq(*iter.next_back().unwrap(), 5);
+    assert_eq(*iter.next_back().unwrap(), 4);
+    assert_eq(*iter.next_back().unwrap(), 3);
+    assert_eq(*iter.next_back().unwrap(), 2);
+    assert_eq(*iter.next_back().unwrap(), 1);
+    assert(iter.next_back().is_none());
+}
+
+@test
+fn test_deque_iter_next_back_empty() {
+    let d: Deque<Int> = Deque.new();
+    let mut iter = d.iter();
+    assert(iter.next_back().is_none());
+}
+
+@test
+fn test_deque_iter_next_back_single() {
+    let mut d = Deque.new();
+    d.push_back(42);
+    let mut iter = d.iter();
+    assert_eq(*iter.next_back().unwrap(), 42);
+    assert(iter.next_back().is_none());
+}
+
+@test
+fn test_deque_iter_bidirectional() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let mut iter = d.iter();
+    assert_eq(*iter.next().unwrap(), 1);
+    assert_eq(*iter.next_back().unwrap(), 5);
+    assert_eq(*iter.next().unwrap(), 2);
+    assert_eq(*iter.next_back().unwrap(), 4);
+    assert_eq(*iter.next().unwrap(), 3);
+    assert(iter.next().is_none());
+    assert(iter.next_back().is_none());
+}
+
+@test
+fn test_deque_iter_bidirectional_push_front() {
+    let mut d = Deque.new();
+    d.push_front(3);
+    d.push_front(2);
+    d.push_front(1);
+    d.push_back(4);
+    d.push_back(5);
+    // Logical order: [1, 2, 3, 4, 5]
+    let mut iter = d.iter();
+    assert_eq(*iter.next().unwrap(), 1);
+    assert_eq(*iter.next_back().unwrap(), 5);
+    assert_eq(*iter.next().unwrap(), 2);
+    assert_eq(*iter.next_back().unwrap(), 4);
+    assert_eq(*iter.next().unwrap(), 3);
+    assert(iter.next().is_none());
+}
+
+@test
+fn test_deque_iter_all_from_back() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    let mut iter = d.iter();
+    assert_eq(*iter.next_back().unwrap(), 30);
+    assert_eq(*iter.next_back().unwrap(), 20);
+    assert_eq(*iter.next_back().unwrap(), 10);
+    assert(iter.next().is_none());
+}
+
+// =============================================================================
+// Section 2: DequeIter rfold
+// =============================================================================
+
+@test
+fn test_deque_iter_rfold_sum() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    fn add(acc: Int, x: &Int) -> Int { acc + *x }
+    let result = d.iter().rfold(0, add);
+    assert_eq(result, 6);
+}
+
+@test
+fn test_deque_iter_rfold_order() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    fn append(mut acc: List<Int>, x: &Int) -> List<Int> {
+        acc.push(*x);
+        acc
+    }
+    let result = d.iter().rfold(List.new(), append);
+    assert_eq(result[0], 3);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 1);
+}
+
+@test
+fn test_deque_iter_rfold_empty() {
+    let d: Deque<Int> = Deque.new();
+    fn add(acc: Int, x: &Int) -> Int { acc + *x }
+    let result = d.iter().rfold(0, add);
+    assert_eq(result, 0);
+}
+
+@test
+fn test_deque_iter_rfold_vs_fold() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    fn add(acc: Int, x: &Int) -> Int { acc + *x }
+    let forward = d.iter().fold(0, add);
+    let backward = d.iter().rfold(0, add);
+    assert_eq(forward, backward);
+}
+
+// =============================================================================
+// Section 3: DequeIter nth_back
+// =============================================================================
+
+@test
+fn test_deque_iter_nth_back_first() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    d.push_back(40);
+    d.push_back(50);
+    let mut iter = d.iter();
+    assert_eq(*iter.nth_back(0).unwrap(), 50);
+}
+
+@test
+fn test_deque_iter_nth_back_middle() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    d.push_back(40);
+    d.push_back(50);
+    let mut iter = d.iter();
+    assert_eq(*iter.nth_back(2).unwrap(), 30);
+}
+
+@test
+fn test_deque_iter_nth_back_out_of_bounds() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let mut iter = d.iter();
+    assert(iter.nth_back(5).is_none());
+}
+
+// =============================================================================
+// Section 4: DequeIter advance_back_by
+// =============================================================================
+
+@test
+fn test_deque_iter_advance_back_by() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let mut iter = d.iter();
+    let result = iter.advance_back_by(2);
+    assert(result.is_ok());
+    assert_eq(*iter.next_back().unwrap(), 3);
+}
+
+@test
+fn test_deque_iter_advance_back_by_too_many() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let mut iter = d.iter();
+    let result = iter.advance_back_by(5);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 5: DequeIterMut DoubleEndedIterator
+// =============================================================================
+
+@test
+fn test_deque_iter_mut_next_back() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let mut iter = d.iter_mut();
+    let last = iter.next_back().unwrap();
+    *last = 50;
+    let second_last = iter.next_back().unwrap();
+    *second_last = 40;
+    assert_eq(*d.back().unwrap(), 50);
+    assert_eq(*d.get(3).unwrap(), 40);
+}
+
+@test
+fn test_deque_iter_mut_bidirectional() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    let mut iter = d.iter_mut();
+    let first = iter.next().unwrap();
+    *first = 10;
+    let last = iter.next_back().unwrap();
+    *last = 40;
+    assert_eq(*d.front().unwrap(), 10);
+    assert_eq(*d.back().unwrap(), 40);
+}
+
+@test
+fn test_deque_iter_mut_all_from_back() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let mut iter = d.iter_mut();
+    let third = iter.next_back().unwrap();
+    *third = 30;
+    let second = iter.next_back().unwrap();
+    *second = 20;
+    let first = iter.next_back().unwrap();
+    *first = 10;
+    assert(iter.next_back().is_none());
+    assert_eq(*d.get(0).unwrap(), 10);
+    assert_eq(*d.get(1).unwrap(), 20);
+    assert_eq(*d.get(2).unwrap(), 30);
+}
+
+// =============================================================================
+// Section 6: DequeIntoIter DoubleEndedIterator
+// =============================================================================
+
+@test
+fn test_deque_into_iter_next_back() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let mut iter = d.into_iter();
+    assert_eq(iter.next_back().unwrap(), 5);
+    assert_eq(iter.next_back().unwrap(), 4);
+    assert_eq(iter.next_back().unwrap(), 3);
+    assert_eq(iter.next_back().unwrap(), 2);
+    assert_eq(iter.next_back().unwrap(), 1);
+    assert(iter.next_back().is_none());
+}
+
+@test
+fn test_deque_into_iter_bidirectional() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    d.push_back(40);
+    let mut iter = d.into_iter();
+    assert_eq(iter.next().unwrap(), 10);
+    assert_eq(iter.next_back().unwrap(), 40);
+    assert_eq(iter.next().unwrap(), 20);
+    assert_eq(iter.next_back().unwrap(), 30);
+    assert(iter.next().is_none());
+}
+
+@test
+fn test_deque_into_iter_empty() {
+    let d: Deque<Int> = Deque.new();
+    let mut iter = d.into_iter();
+    assert(iter.next_back().is_none());
+}
+
+@test
+fn test_deque_into_iter_rfold() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    fn add(acc: Int, x: Int) -> Int { acc + x }
+    let result = d.into_iter().rfold(0, add);
+    assert_eq(result, 6);
+}
+
+// =============================================================================
+// Section 7: DequeDrain DoubleEndedIterator
+// =============================================================================
+
+@test
+fn test_deque_drain_next_back() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let mut drain = d.drain();
+    assert_eq(drain.next_back().unwrap(), 5);
+    assert_eq(drain.next_back().unwrap(), 4);
+    assert_eq(drain.next_back().unwrap(), 3);
+    assert_eq(drain.next_back().unwrap(), 2);
+    assert_eq(drain.next_back().unwrap(), 1);
+    assert(drain.next_back().is_none());
+}
+
+@test
+fn test_deque_drain_bidirectional() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    d.push_back(40);
+    let mut drain = d.drain();
+    assert_eq(drain.next().unwrap(), 10);
+    assert_eq(drain.next_back().unwrap(), 40);
+    assert_eq(drain.next().unwrap(), 20);
+    assert_eq(drain.next_back().unwrap(), 30);
+    assert(drain.next().is_none());
+}
+
+// =============================================================================
+// Section 8: size_hint with bidirectional consumption
+// =============================================================================
+
+@test
+fn test_deque_iter_size_hint_after_back() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let mut iter = d.iter();
+    assert_eq(iter.size_hint().0, 5);
+    iter.next();
+    assert_eq(iter.size_hint().0, 4);
+    iter.next_back();
+    assert_eq(iter.size_hint().0, 3);
+}
+
+@test
+fn test_deque_into_iter_size_hint() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    let mut iter = d.into_iter();
+    assert_eq(iter.size_hint().0, 4);
+    iter.next();
+    assert_eq(iter.size_hint().0, 3);
+    iter.next_back();
+    assert_eq(iter.size_hint().0, 2);
+}
+
+// =============================================================================
+// Section 9: Large deque tests
+// =============================================================================
+
+@test
+fn test_deque_bidirectional_large() {
+    let mut d: Deque<Int> = Deque.with_capacity(50);
+    let mut i = 0;
+    while i < 50 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    let mut iter = d.iter();
+    let mut j = 0;
+    while j < 10 {
+        let expected = j;
+        let front_val = *iter.next().unwrap();
+        assert_eq(front_val, expected);
+        j = j + 1;
+    }
+    let mut k = 0;
+    while k < 10 {
+        let expected = 49 - k;
+        let back_val = *iter.next_back().unwrap();
+        assert_eq(back_val, expected);
+        k = k + 1;
+    }
+    let count = iter.count();
+    assert_eq(count, 30);
+}
+
+// =============================================================================
+// Section 10: Ring buffer wrap-around tests
+// =============================================================================
+
+@test
+fn test_deque_next_back_after_wrap() {
+    let mut d: Deque<Int> = Deque.with_capacity(4);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_front(2);
+    d.push_front(1);
+    // Logical: [1, 2, 3, 4]
+    let mut iter = d.iter();
+    assert_eq(*iter.next_back().unwrap(), 4);
+    assert_eq(*iter.next_back().unwrap(), 3);
+    assert_eq(*iter.next_back().unwrap(), 2);
+    assert_eq(*iter.next_back().unwrap(), 1);
+    assert(iter.next_back().is_none());
+}
+
+@test
+fn test_deque_bidirectional_after_pop() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    d.pop_front(); // remove 1
+    d.pop_back();  // remove 5
+    // Logical: [2, 3, 4]
+    let mut iter = d.iter();
+    assert_eq(*iter.next().unwrap(), 2);
+    assert_eq(*iter.next_back().unwrap(), 4);
+    assert_eq(*iter.next().unwrap(), 3);
+    assert(iter.next().is_none());
+}
+
+// =============================================================================
+// Section 11: Edge cases
+// =============================================================================
+
+@test
+fn test_deque_iter_two_elements() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let mut iter = d.iter();
+    assert_eq(*iter.next().unwrap(), 1);
+    assert_eq(*iter.next_back().unwrap(), 2);
+    assert(iter.next().is_none());
+    assert(iter.next_back().is_none());
+}
+
+@test
+fn test_deque_iter_next_back_then_fold() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let mut iter = d.iter();
+    iter.next_back(); // skip 5
+    iter.next_back(); // skip 4
+    fn add(acc: Int, x: &Int) -> Int { acc + *x }
+    let result = iter.fold(0, add); // fold remaining [1, 2, 3]
+    assert_eq(result, 6);
+}
+
+@test
+fn test_deque_iter_next_then_rfold() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    let mut iter = d.iter();
+    iter.next(); // skip 1
+    iter.next(); // skip 2
+    fn add(acc: Int, x: &Int) -> Int { acc + *x }
+    let result = iter.rfold(0, add); // rfold remaining [3, 4, 5]
+    assert_eq(result, 12);
+}

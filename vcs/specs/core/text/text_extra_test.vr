@@ -1,0 +1,335 @@
+// =============================================================================
+// text_extra_test.vr - Tests for trim_matches, split_ascii_whitespace,
+//                      char_count, byte_index_of_char
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, text, trim_matches, split_ascii_whitespace, char_count
+// @description: Tests for additional Text utility methods.
+//
+// Coverage:
+// - char_count: ASCII, empty, multi-byte placeholders
+// - trim_matches: basic, no match, empty pattern, multiple
+// - split_ascii_whitespace: spaces, tabs, mixed, leading/trailing, empty
+// - byte_index_of_char: ASCII, boundaries, past-end, out of range
+// =============================================================================
+
+module specs.core.text.text_extra_test;
+
+mount core.base.protocols.{Eq, Clone};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+mount core.text.text.Text;
+
+// =============================================================================
+// Section 1: char_count (now public)
+// =============================================================================
+
+@test
+fn test_char_count_ascii() {
+    let s: Text = "hello";
+    assert_eq(s.char_count(), 5);
+}
+
+@test
+fn test_char_count_empty() {
+    let s: Text = "";
+    assert_eq(s.char_count(), 0);
+}
+
+@test
+fn test_char_count_single() {
+    let s: Text = "x";
+    assert_eq(s.char_count(), 1);
+}
+
+@test
+fn test_char_count_whitespace() {
+    let s: Text = "a b c";
+    assert_eq(s.char_count(), 5);
+}
+
+@test
+fn test_char_count_digits() {
+    let s: Text = "123456789";
+    assert_eq(s.char_count(), 9);
+}
+
+@test
+fn test_char_count_matches_len_for_ascii() {
+    let s: Text = "hello world";
+    assert_eq(s.char_count(), s.len());
+}
+
+// =============================================================================
+// Section 2: trim_matches
+// =============================================================================
+
+@test
+fn test_trim_matches_basic() {
+    let s: Text = "###hello###";
+    let pattern: Text = "#";
+    let result = s.trim_matches(&pattern);
+    assert_eq(result, "hello");
+}
+
+@test
+fn test_trim_matches_multi_char_pattern() {
+    let s: Text = "abcabchelloabcabc";
+    let pattern: Text = "abc";
+    let result = s.trim_matches(&pattern);
+    assert_eq(result, "hello");
+}
+
+@test
+fn test_trim_matches_no_match() {
+    let s: Text = "hello";
+    let pattern: Text = "x";
+    let result = s.trim_matches(&pattern);
+    assert_eq(result, "hello");
+}
+
+@test
+fn test_trim_matches_empty_pattern() {
+    let s: Text = "hello";
+    let pattern: Text = "";
+    let result = s.trim_matches(&pattern);
+    assert_eq(result, "hello");
+}
+
+@test
+fn test_trim_matches_all_pattern() {
+    let s: Text = "aaa";
+    let pattern: Text = "a";
+    let result = s.trim_matches(&pattern);
+    assert_eq(result, "");
+}
+
+@test
+fn test_trim_matches_only_start() {
+    let s: Text = "##hello";
+    let pattern: Text = "#";
+    let result = s.trim_matches(&pattern);
+    assert_eq(result, "hello");
+}
+
+@test
+fn test_trim_matches_only_end() {
+    let s: Text = "hello##";
+    let pattern: Text = "#";
+    let result = s.trim_matches(&pattern);
+    assert_eq(result, "hello");
+}
+
+@test
+fn test_trim_matches_empty_string() {
+    let s: Text = "";
+    let pattern: Text = "#";
+    let result = s.trim_matches(&pattern);
+    assert_eq(result, "");
+}
+
+// =============================================================================
+// Section 3: split_ascii_whitespace
+// =============================================================================
+
+@test
+fn test_split_ascii_whitespace_basic() {
+    let s: Text = "hello world";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 2);
+    assert_eq(*parts.get(0).unwrap(), "hello");
+    assert_eq(*parts.get(1).unwrap(), "world");
+}
+
+@test
+fn test_split_ascii_whitespace_multiple_spaces() {
+    let s: Text = "a  b   c";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 3);
+    assert_eq(*parts.get(0).unwrap(), "a");
+    assert_eq(*parts.get(1).unwrap(), "b");
+    assert_eq(*parts.get(2).unwrap(), "c");
+}
+
+@test
+fn test_split_ascii_whitespace_tabs() {
+    let s: Text = "a\tb\tc";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 3);
+    assert_eq(*parts.get(0).unwrap(), "a");
+    assert_eq(*parts.get(1).unwrap(), "b");
+    assert_eq(*parts.get(2).unwrap(), "c");
+}
+
+@test
+fn test_split_ascii_whitespace_newlines() {
+    let s: Text = "line1\nline2\nline3";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 3);
+    assert_eq(*parts.get(0).unwrap(), "line1");
+    assert_eq(*parts.get(1).unwrap(), "line2");
+    assert_eq(*parts.get(2).unwrap(), "line3");
+}
+
+@test
+fn test_split_ascii_whitespace_mixed() {
+    let s: Text = " hello \t world \n foo ";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 3);
+    assert_eq(*parts.get(0).unwrap(), "hello");
+    assert_eq(*parts.get(1).unwrap(), "world");
+    assert_eq(*parts.get(2).unwrap(), "foo");
+}
+
+@test
+fn test_split_ascii_whitespace_leading_trailing() {
+    let s: Text = "   hello   ";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 1);
+    assert_eq(*parts.get(0).unwrap(), "hello");
+}
+
+@test
+fn test_split_ascii_whitespace_empty() {
+    let s: Text = "";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 0);
+}
+
+@test
+fn test_split_ascii_whitespace_only_spaces() {
+    let s: Text = "   ";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 0);
+}
+
+@test
+fn test_split_ascii_whitespace_single_word() {
+    let s: Text = "hello";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 1);
+    assert_eq(*parts.get(0).unwrap(), "hello");
+}
+
+@test
+fn test_split_ascii_whitespace_carriage_return() {
+    let s: Text = "a\r\nb";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 2);
+    assert_eq(*parts.get(0).unwrap(), "a");
+    assert_eq(*parts.get(1).unwrap(), "b");
+}
+
+// =============================================================================
+// Section 4: byte_index_of_char
+// =============================================================================
+
+@test
+fn test_byte_index_of_char_ascii_first() {
+    let s: Text = "hello";
+    let idx = s.byte_index_of_char(0);
+    assert_eq(idx, Some(0));
+}
+
+@test
+fn test_byte_index_of_char_ascii_middle() {
+    let s: Text = "hello";
+    let idx = s.byte_index_of_char(2);
+    assert_eq(idx, Some(2));
+}
+
+@test
+fn test_byte_index_of_char_ascii_last() {
+    let s: Text = "hello";
+    let idx = s.byte_index_of_char(4);
+    assert_eq(idx, Some(4));
+}
+
+@test
+fn test_byte_index_of_char_past_end() {
+    let s: Text = "hello";
+    // n == char_count returns byte length (past the end)
+    let idx = s.byte_index_of_char(5);
+    assert_eq(idx, Some(5));
+}
+
+@test
+fn test_byte_index_of_char_out_of_range() {
+    let s: Text = "hello";
+    let idx = s.byte_index_of_char(6);
+    assert(idx.is_none());
+}
+
+@test
+fn test_byte_index_of_char_empty() {
+    let s: Text = "";
+    let idx = s.byte_index_of_char(0);
+    assert_eq(idx, Some(0));
+}
+
+@test
+fn test_byte_index_of_char_empty_out_of_range() {
+    let s: Text = "";
+    let idx = s.byte_index_of_char(1);
+    assert(idx.is_none());
+}
+
+@test
+fn test_byte_index_of_char_single() {
+    let s: Text = "x";
+    assert_eq(s.byte_index_of_char(0), Some(0));
+    assert_eq(s.byte_index_of_char(1), Some(1));
+}
+
+// =============================================================================
+// Section 5: Integration tests
+// =============================================================================
+
+@test
+fn test_trim_matches_then_split() {
+    let s: Text = "---hello world---";
+    let pattern: Text = "-";
+    let trimmed = s.trim_matches(&pattern);
+    let parts: List<Text> = trimmed.split_ascii_whitespace();
+    assert_eq(parts.len(), 2);
+    assert_eq(*parts.get(0).unwrap(), "hello");
+    assert_eq(*parts.get(1).unwrap(), "world");
+}
+
+@test
+fn test_char_count_after_trim() {
+    let s: Text = "  abc  ";
+    let trimmed = s.trim();
+    assert_eq(trimmed.char_count(), 3);
+}
+
+@test
+fn test_split_then_count() {
+    let s: Text = "one two three four five";
+    let parts: List<Text> = s.split_ascii_whitespace();
+    assert_eq(parts.len(), 5);
+    let mut total_chars = 0;
+    for i in range(0, parts.len()) {
+        total_chars = total_chars + parts.get(i).unwrap().char_count();
+    }
+    assert_eq(total_chars, 19);
+}
+
+@test
+fn test_byte_index_preserves_slice() {
+    let s: Text = "abcdef";
+    let idx3 = s.byte_index_of_char(3).unwrap();
+    let idx5 = s.byte_index_of_char(5).unwrap();
+    let sub = s.slice(idx3, idx5);
+    assert_eq(sub, "de");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

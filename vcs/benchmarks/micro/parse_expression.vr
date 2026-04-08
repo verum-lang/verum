@@ -1,0 +1,309 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 1us per simple expression
+// @tags: parser, performance
+
+/// Benchmark for expression parsing performance
+///
+/// Tests parsing of various expression types:
+/// - Literals
+/// - Binary operations
+/// - Function calls
+/// - Complex nested expressions
+
+module benchmarks.micro.parse_expression
+
+using [Benchmark, Parser]
+
+/// Simple literal parsing
+fn benchmark_parse_literal_int() {
+    let parser = Parser.new();
+
+    for _ in 0..100_000 {
+        let _ = parser.parse_expr("42");
+    }
+}
+
+fn benchmark_parse_literal_float() {
+    let parser = Parser.new();
+
+    for _ in 0..100_000 {
+        let _ = parser.parse_expr("3.14159");
+    }
+}
+
+fn benchmark_parse_literal_string() {
+    let parser = Parser.new();
+
+    for _ in 0..100_000 {
+        let _ = parser.parse_expr("\"hello world\"");
+    }
+}
+
+fn benchmark_parse_literal_bool() {
+    let parser = Parser.new();
+
+    for _ in 0..100_000 {
+        let _ = parser.parse_expr("true");
+    }
+}
+
+/// Binary operation parsing
+fn benchmark_parse_binary_simple() {
+    let parser = Parser.new();
+
+    for _ in 0..50_000 {
+        let _ = parser.parse_expr("1 + 2");
+    }
+}
+
+fn benchmark_parse_binary_chain() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("1 + 2 * 3 - 4 / 5");
+    }
+}
+
+fn benchmark_parse_binary_precedence() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        // Tests precedence climbing
+        let _ = parser.parse_expr("a + b * c + d * e * f");
+    }
+}
+
+/// Unary operations
+fn benchmark_parse_unary() {
+    let parser = Parser.new();
+
+    for _ in 0..50_000 {
+        let _ = parser.parse_expr("-x");
+        let _ = parser.parse_expr("!flag");
+        let _ = parser.parse_expr("*ptr");
+        let _ = parser.parse_expr("&value");
+    }
+}
+
+/// Parenthesized expressions
+fn benchmark_parse_parentheses() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_expr("(a + b) * (c + d)");
+    }
+}
+
+fn benchmark_parse_nested_parens() {
+    let parser = Parser.new();
+
+    for _ in 0..10_000 {
+        let _ = parser.parse_expr("((((a + b))))");
+    }
+}
+
+/// Function call parsing
+fn benchmark_parse_call_simple() {
+    let parser = Parser.new();
+
+    for _ in 0..50_000 {
+        let _ = parser.parse_expr("foo()");
+    }
+}
+
+fn benchmark_parse_call_with_args() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_expr("foo(a, b, c)");
+    }
+}
+
+fn benchmark_parse_call_chained() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("foo().bar().baz()");
+    }
+}
+
+fn benchmark_parse_call_generic() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("foo<Int, Text>(a, b)");
+    }
+}
+
+/// Method calls
+fn benchmark_parse_method_call() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_expr("obj.method(arg)");
+    }
+}
+
+fn benchmark_parse_method_chain() {
+    let parser = Parser.new();
+
+    for _ in 0..10_000 {
+        let _ = parser.parse_expr("list.iter().map(f).filter(g).collect()");
+    }
+}
+
+/// Index expressions
+fn benchmark_parse_index() {
+    let parser = Parser.new();
+
+    for _ in 0..50_000 {
+        let _ = parser.parse_expr("arr[0]");
+    }
+}
+
+fn benchmark_parse_index_complex() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("matrix[i][j]");
+    }
+}
+
+/// Field access
+fn benchmark_parse_field_access() {
+    let parser = Parser.new();
+
+    for _ in 0..50_000 {
+        let _ = parser.parse_expr("obj.field");
+    }
+}
+
+fn benchmark_parse_field_chain() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("a.b.c.d.e");
+    }
+}
+
+/// Lambda/closure expressions
+fn benchmark_parse_lambda_simple() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_expr("|x| x + 1");
+    }
+}
+
+fn benchmark_parse_lambda_multi_param() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("|a, b, c| a + b + c");
+    }
+}
+
+fn benchmark_parse_lambda_typed() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("|x: Int, y: Int| -> Int { x + y }");
+    }
+}
+
+/// If expressions
+fn benchmark_parse_if_expr() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("if cond { a } else { b }");
+    }
+}
+
+fn benchmark_parse_if_chain() {
+    let parser = Parser.new();
+
+    for _ in 0..10_000 {
+        let _ = parser.parse_expr("if a { 1 } else if b { 2 } else if c { 3 } else { 4 }");
+    }
+}
+
+/// Match expressions
+fn benchmark_parse_match() {
+    let parser = Parser.new();
+
+    for _ in 0..10_000 {
+        let _ = parser.parse_expr("match x { Some(v) => v, None => 0 }");
+    }
+}
+
+/// Block expressions
+fn benchmark_parse_block() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("{ let a = 1; let b = 2; a + b }");
+    }
+}
+
+/// Complex nested expressions
+fn benchmark_parse_complex() {
+    let parser = Parser.new();
+
+    for _ in 0..5_000 {
+        let _ = parser.parse_expr("
+            list.iter()
+                .filter(|x| x > 0 && x < 100)
+                .map(|x| x * 2 + 1)
+                .fold(0, |acc, x| acc + x)
+        ");
+    }
+}
+
+/// List literals
+fn benchmark_parse_list_literal() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("list![1, 2, 3, 4, 5]");
+    }
+}
+
+/// Map literals
+fn benchmark_parse_map_literal() {
+    let parser = Parser.new();
+
+    for _ in 0..10_000 {
+        let _ = parser.parse_expr("map!{\"a\" => 1, \"b\" => 2, \"c\" => 3}");
+    }
+}
+
+/// Struct literals
+fn benchmark_parse_struct_literal() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("Point { x: 10, y: 20 }");
+    }
+}
+
+/// Range expressions
+fn benchmark_parse_range() {
+    let parser = Parser.new();
+
+    for _ in 0..50_000 {
+        let _ = parser.parse_expr("0..100");
+        let _ = parser.parse_expr("0..=99");
+    }
+}
+
+/// Async/await expressions
+fn benchmark_parse_async_await() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_expr("async { foo().await }");
+    }
+}

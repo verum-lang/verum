@@ -1,0 +1,71 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, control-flow
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn fibonacci(n: Int) -> Int {
+        fn fib_inner(x: Int) -> Int {
+            if x <= 1 {
+                return x;
+            }
+            return fib_inner(x - 1) + fib_inner(x - 2);
+        }
+        return fib_inner(n);
+    }
+
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(2), 1);
+    assert_eq(fibonacci(3), 2);
+    assert_eq(fibonacci(4), 3);
+    assert_eq(fibonacci(5), 5);
+    assert_eq(fibonacci(10), 55);
+
+    fn factorial(n: Int) -> Int {
+        fn fact_inner(x: Int, acc: Int) -> Int {
+            if x <= 1 {
+                return acc;
+            }
+            return fact_inner(x - 1, acc * x);
+        }
+        return fact_inner(n, 1);
+    }
+
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(6), 720);
+
+    fn abs_value(x: Int) -> Int {
+        fn check_sign(n: Int) -> Int {
+            if n < 0 {
+                return -n;
+            }
+            return n;
+        }
+        return check_sign(x);
+    }
+
+    assert_eq(abs_value(5), 5);
+    assert_eq(abs_value(-5), 5);
+    assert_eq(abs_value(0), 0);
+    assert_eq(abs_value(-100), 100);
+
+    fn max_of_three(a: Int, b: Int, c: Int) -> Int {
+        fn max2(x: Int, y: Int) -> Int {
+            if x > y {
+                return x;
+            }
+            return y;
+        }
+        return max2(max2(a, b), c);
+    }
+
+    assert_eq(max_of_three(1, 2, 3), 3);
+    assert_eq(max_of_three(3, 2, 1), 3);
+    assert_eq(max_of_three(2, 3, 1), 3);
+    assert_eq(max_of_three(5, 5, 5), 5);
+}

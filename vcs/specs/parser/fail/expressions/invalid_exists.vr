@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, exists, quantifier, error
+// @description: exists expression missing binding
+// @expected-error: E018
+
+fn test() {
+    let found = exists . x > 0;  // Missing binding before dot
+}

@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, generics, bounds, nested, error
+// @description: Test invalid nested type bounds
+// @expected-error: E081
+
+fn process<T: Iterator<Item: Display: Clone>>(items: T) {
+    // Invalid nested bounds syntax
+}

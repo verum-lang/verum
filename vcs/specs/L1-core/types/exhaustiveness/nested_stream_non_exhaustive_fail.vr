@@ -1,0 +1,26 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: exhaustiveness, stream-pattern, nested, error
+// @description: Non-exhaustive nested stream patterns should fail
+// @expected-error: E0601
+// @expected-error-message: non-exhaustive patterns
+
+// ============================================================
+// NON-EXHAUSTIVE NESTED STREAM PATTERNS
+// ============================================================
+// Missing cases in nested stream matching should be detected.
+
+type Stream<T> is Nil | Cons(T, Heap<Stream<T>>);
+
+// ERROR: Missing the case where outer stream is Nil
+fn incomplete_nested(ss: Stream<Stream<Int>>) -> Int =
+    match ss {
+        Cons(Nil, _) => 0,
+        Cons(Cons(x, _), _) => x
+        // Missing: Nil => ...
+    };
+
+fn main() {
+    let ss: Stream<Stream<Int>> = Nil;
+    let _ = incomplete_nested(ss);
+}

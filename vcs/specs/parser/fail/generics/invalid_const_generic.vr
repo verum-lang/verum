@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, generics, const, meta, error
+// @description: Test invalid const generic syntax
+// @expected-error: E018
+
+// Meta parameters should use N: meta Int syntax
+fn fixed_array<const N>(arr: [Int; N]) {
+    // Invalid const generic syntax
+}

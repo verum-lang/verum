@@ -1,0 +1,370 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, destructuring, let-else, refutable
+//
+// Tests let-else style patterns for refutable pattern matching with fallback.
+// Implemented using match expressions with early return in None/Err branches.
+
+//------------------------------------------------------------------------------
+// Basic Type Definitions
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+//------------------------------------------------------------------------------
+// Basic Pattern Matching with Early Return (let-else style)
+//------------------------------------------------------------------------------
+
+/// Simple unwrap-or-return via match.
+fn unwrap_or_return(m: Maybe<Int>) -> Int {
+    let x = match m {
+        Some(v) => v,
+        None => { return 0; },
+    };
+    x
+}
+
+/// Nested Maybe unwrap.
+fn unwrap_nested(mm: Maybe<Maybe<Int>>) -> Int {
+    let inner = match mm {
+        Some(v) => v,
+        None => { return -1; },
+    };
+    let x = match inner {
+        Some(v) => v,
+        None => { return -1; },
+    };
+    x
+}
+
+/// Process Maybe value.
+fn process_maybe(m: Maybe<Int>) -> Int {
+    let value = match m {
+        Some(v) => v,
+        None => { return -1; },
+    };
+    value * 2
+}
+
+//------------------------------------------------------------------------------
+// Pattern Matching with Result
+//------------------------------------------------------------------------------
+
+/// Unwrap Result or return -1.
+fn unwrap_result(r: Result<Int, Text>) -> Int {
+    let x = match r {
+        Ok(v) => v,
+        Err(_) => { return -1; },
+    };
+    x
+}
+
+/// Process Result value.
+fn process_result(r: Result<Int, Text>) -> Result<Int, Text> {
+    let value = match r {
+        Ok(v) => v,
+        Err(_) => { return Err("invalid input"); },
+    };
+    Ok(value * 2)
+}
+
+/// Chained Results.
+fn chain_results(r1: Result<Int, Text>, r2: Result<Int, Text>) -> Result<Int, Text> {
+    let a = match r1 {
+        Ok(v) => v,
+        Err(_) => { return Err("first failed"); },
+    };
+    let b = match r2 {
+        Ok(v) => v,
+        Err(_) => { return Err("second failed"); },
+    };
+    Ok(a + b)
+}
+
+//------------------------------------------------------------------------------
+// Pattern Matching with Enum Variants
+//------------------------------------------------------------------------------
+
+/// Require specific variant.
+fn require_red(c: Color) -> Bool {
+    match c {
+        Red => true,
+        _ => false,
+    }
+}
+
+/// Get active id from Status.
+type Status is
+    | Active { id: Int }
+    | Inactive;
+
+fn get_active_id(s: Status) -> Maybe<Int> {
+    match s {
+        Active { id } => Some(id),
+        Inactive => None,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Pattern Matching with Tuple Patterns
+//------------------------------------------------------------------------------
+
+/// Require pair with positive values.
+fn require_pair_positive(m: Maybe<(Int, Int)>) -> Int {
+    let (a, b) = match m {
+        Some(v) => v,
+        None => { return -1; },
+    };
+    if a < 0 || b < 0 {
+        return -1;
+    }
+    a + b
+}
+
+/// Require nested pair.
+fn require_nested_pair(m: Maybe<((Int, Int), Int)>) -> Int {
+    let ((a, b), c) = match m {
+        Some(v) => v,
+        None => { return 0; },
+    };
+    a + b + c
+}
+
+//------------------------------------------------------------------------------
+// Pattern Matching with Struct Patterns
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Config is {
+    host: Text,
+    port: Int,
+    enabled: Bool,
+};
+
+/// Get point sum from Maybe.
+fn get_point_sum(m: Maybe<Point>) -> Int {
+    let Point { x, y } = match m {
+        Some(v) => v,
+        None => { return 0; },
+    };
+    x + y
+}
+
+/// Get config port from Maybe.
+fn get_config_port(m: Maybe<Config>) -> Int {
+    let Config { port, .. } = match m {
+        Some(v) => v,
+        None => { return -1; },
+    };
+    port
+}
+
+//------------------------------------------------------------------------------
+// Pattern Matching with Specific Values
+//------------------------------------------------------------------------------
+
+/// Require zero value.
+fn require_zero(m: Maybe<Int>) -> Bool {
+    match m {
+        Some(0) => true,
+        _ => false,
+    }
+}
+
+/// Require answer.
+fn require_answer(m: Maybe<Int>) -> Text {
+    match m {
+        Some(42) => "correct",
+        _ => "wrong",
+    }
+}
+
+/// Require positive via range.
+fn require_positive(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) if x >= 1 => x,
+        _ => -1,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Guard-Augmented Patterns
+//------------------------------------------------------------------------------
+
+/// Require positive value.
+fn require_positive_value(m: Maybe<Int>) -> Int {
+    let x = match m {
+        Some(v) => v,
+        None => { return -1; },
+    };
+    if x <= 0 {
+        return -1;
+    }
+    x
+}
+
+//------------------------------------------------------------------------------
+// Multiple Bindings with Early Return
+//------------------------------------------------------------------------------
+
+/// Multiple unwrap-or-return in sequence.
+fn multi_let_else(
+    m1: Maybe<Int>,
+    m2: Maybe<Int>,
+    m3: Maybe<Int>
+) -> Int {
+    let a = match m1 {
+        Some(v) => v,
+        None => { return -1; },
+    };
+    let b = match m2 {
+        Some(v) => v,
+        None => { return -2; },
+    };
+    let c = match m3 {
+        Some(v) => v,
+        None => { return -3; },
+    };
+    a + b + c
+}
+
+/// Dependent unwrap chain.
+fn dependent_let_else(m: Maybe<Maybe<Int>>) -> Int {
+    let inner = match m {
+        Some(v) => v,
+        None => { return -1; },
+    };
+    let value = match inner {
+        Some(v) => v,
+        None => { return -2; },
+    };
+    value
+}
+
+//------------------------------------------------------------------------------
+// Diverging Expressions
+//------------------------------------------------------------------------------
+
+/// Unwrap or panic.
+fn unwrap_or_panic(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        None => panic("expected Some"),
+    }
+}
+
+/// Unwrap with unreachable fallback.
+fn known_some(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        None => unreachable(),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Loop Processing with Pattern Matching
+//------------------------------------------------------------------------------
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+/// Find first Some in list (recursive).
+@allow(unbounded_recursion)
+fn find_first_some(items: ConsList<Maybe<Int>>) -> Int {
+    match items {
+        Nil => -1,
+        Cons(v, rest) => match v {
+            Some(x) => x,
+            None => find_first_some(rest),
+        },
+    }
+}
+
+/// Process until None (recursive - stops at first None).
+@allow(unbounded_recursion)
+fn process_until_none(items: ConsList<Maybe<Int>>) -> Int {
+    match items {
+        Nil => 0,
+        Cons(v, rest) => match v {
+            None => 0,
+            Some(x) => x + process_until_none(rest),
+        },
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+@test
+fn main() {
+    // Basic Maybe
+    assert(unwrap_or_return(Some(42)) == 42);
+    assert(unwrap_or_return(None) == 0);
+
+    // Nested Maybe
+    assert(unwrap_nested(Some(Some(42))) == 42);
+    assert(unwrap_nested(Some(None)) == -1);
+    assert(unwrap_nested(None) == -1);
+
+    // Process Maybe
+    assert(process_maybe(Some(21)) == 42);
+    assert(process_maybe(None) == -1);
+
+    // Result
+    assert(unwrap_result(Ok(42)) == 42);
+    assert(unwrap_result(Err("error")) == -1);
+
+    // Chain results
+    assert(chain_results(Ok(10), Ok(20)) == Ok(30));
+    assert(chain_results(Err("x"), Ok(20)) == Err("first failed"));
+    assert(chain_results(Ok(10), Err("y")) == Err("second failed"));
+
+    // Enum variant
+    assert(require_red(Red) == true);
+    assert(require_red(Green) == false);
+
+    // Struct
+    assert(get_point_sum(Some(Point { x: 3, y: 4 })) == 7);
+    assert(get_point_sum(None) == 0);
+
+    // Literals
+    assert(require_zero(Some(0)) == true);
+    assert(require_zero(Some(1)) == false);
+    assert(require_zero(None) == false);
+    assert(require_answer(Some(42)) == "correct");
+    assert(require_answer(Some(41)) == "wrong");
+
+    // Range
+    assert(require_positive(Some(5)) == 5);
+    assert(require_positive(Some(0)) == -1);
+    assert(require_positive(Some(-5)) == -1);
+    assert(require_positive(None) == -1);
+
+    // Multiple
+    assert(multi_let_else(Some(1), Some(2), Some(3)) == 6);
+    assert(multi_let_else(None, Some(2), Some(3)) == -1);
+    assert(multi_let_else(Some(1), None, Some(3)) == -2);
+    assert(multi_let_else(Some(1), Some(2), None) == -3);
+
+    // Loop processing
+    let items = Cons(Some(1), Cons(Some(2), Cons(None, Cons(Some(4), Nil))));
+    assert(process_until_none(items) == 3);  // 1 + 2, stops at None
+}

@@ -1,0 +1,142 @@
+// @test: verify-fail
+// @tier: 3
+// @level: L3
+// @tags: proofs, failure, negative-test
+// @timeout: 10000
+// @expected-error: proof-failed
+
+/// Proof failure demonstration
+/// These theorems have incorrect proofs that should fail verification
+
+/// FAIL: Wrong conclusion - this theorem is false
+theorem false_theorem_wrong_conclusion(x: Int): x * x < 0 {
+    // This is false: squares are never negative
+    proof by smt
+    // Expected: SMT solver will return UNSAT or fail
+}
+
+/// FAIL: Missing hypothesis makes proof impossible
+theorem missing_hypothesis(x: Int, y: Int)
+    // Missing: requires x > 0
+    ensures x + y > y
+{
+    proof {
+        // Cannot prove x > 0 without the hypothesis
+        have h: x > 0;  // ERROR: cannot establish this
+        conclude by arithmetic
+    }
+}
+
+/// FAIL: Incorrect induction base case
+theorem bad_induction_base(n: Nat): sum(0..=n) == n * (n + 2) / 2 {
+    // Note: the correct formula is n * (n + 1) / 2, not n * (n + 2) / 2
+    proof by induction on n {
+        case 0 => {
+            // sum(0..=0) == 0
+            // 0 * (0 + 2) / 2 == 0
+            // This happens to work for base case, but...
+            trivial
+        }
+        case succ(k) => {
+            // This will fail because the formula is wrong
+            have ih: sum(0..=k) == k * (k + 2) / 2;
+            calc {
+                sum(0..=succ(k))
+                == sum(0..=k) + succ(k)
+                == k * (k + 2) / 2 + succ(k)
+                == succ(k) * (succ(k) + 2) / 2  // ERROR: doesn't equal
+            }
+        }
+    }
+}
+
+/// FAIL: Circular reasoning
+theorem circular_reasoning(x: Int)
+    requires x > 0 implies x > 0
+    ensures x > 0
+{
+    proof {
+        // This is circular - we need to prove x > 0 but only have x > 0 implies x > 0
+        have h: x > 0 implies x > 0 by precondition;
+        // Cannot apply h without first establishing x > 0
+        apply h;  // ERROR: cannot apply, antecedent not established
+        qed
+    }
+}
+
+/// FAIL: Invalid case split - cases not exhaustive
+theorem non_exhaustive_cases(x: Int): x > 0 {
+    proof by cases {
+        case x > 0 => trivial
+        case x > 5 => {
+            have: x > 0 by weakening;
+            trivial
+        }
+        // ERROR: Missing case x <= 0
+    }
+}
+
+/// FAIL: Wrong quantifier instantiation
+theorem wrong_instantiation(): forall x: Int. x * x >= 0 {
+    proof {
+        // Trying to prove universal by example - invalid
+        let x = 5;
+        show 5 * 5 >= 0 by arithmetic;
+        // ERROR: This only proves it for x=5, not for all x
+        qed
+    }
+}
+
+/// FAIL: Type mismatch in proof
+theorem type_mismatch_proof(xs: List<Int>)
+    requires len(xs) > 0
+    ensures head(xs) != None
+{
+    proof {
+        have h: len(xs) > 0 by precondition;
+        // ERROR: Trying to use List length proof for Option type
+        have h2: xs != [] by non_empty_iff_positive_length(h);
+        // This should work, but letps introduce a type error:
+        have h3: xs == Some(42);  // ERROR: xs is List<Int>, not Option
+        qed
+    }
+}
+
+/// FAIL: Contradiction proof with no actual contradiction
+theorem false_contradiction(x: Int)
+    requires x >= 0
+    ensures x < 0
+{
+    proof by contradiction {
+        assume x >= 0;  // But this is our precondition!
+        // No way to derive a contradiction here
+        // because wepre trying to prove something false
+        have h1: x >= 0 by assumption;
+        have h2: x >= 0 by precondition;
+        // ERROR: h1 and h2 are the same, no contradiction
+        contradiction
+    }
+}
+
+/// FAIL: Using unproven lemma
+theorem uses_false_lemma(x: Int): x + 1 == x {
+    proof {
+        apply add_is_identity(x, 1);  // This lemma is false
+        conclude by lemma
+        // ERROR: The referenced lemma doesn't exist or is false
+    }
+}
+
+/// FAIL: Timeout - proof too complex
+theorem timeout_failure(x: Int, y: Int, z: Int, w: Int, v: Int)
+    requires x * x + y * y + z * z + w * w + v * v < 1000000
+    ensures exists a: Int, b: Int, c: Int, d: Int.
+        a * a + b * b + c * c + d * d == x * x + y * y + z * z + w * w + v * v
+{
+    // This requires Lagrangeps four-square theorem which is complex
+    // and may timeout
+    proof by smt {
+        timeout: 100  // Intentionally low timeout
+    }
+    // ERROR: Timeout exceeded
+}

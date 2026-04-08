@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: dependent-types, compile-time, negative
+// @expected-error: E400
+
+/// Compile-time type errors with dependent-like type parameters.
+
+type Wrapper<T> is { data: T };
+
+fn takes_wrapper_int(w: Wrapper<Int>) -> Int {
+    w.data
+}
+
+fn main() {
+    // ERROR E400: Wrapper<Text> is not Wrapper<Int>
+    let w: Wrapper<Text> = Wrapper { data: "hello" };
+    let result = takes_wrapper_int(w);
+}

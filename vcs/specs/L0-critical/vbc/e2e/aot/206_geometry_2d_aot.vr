@@ -1,0 +1,86 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, geometry, 2d, math
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for 2D geometry using integer coordinates
+// Note: AOT has issues with 6+ parameter functions, so we use <=5 params
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+fn dist_sq(ax: Int, ay: Int, bx: Int, bv: Int) -> Int {
+    let dx = ax - bx;
+    let dy = ay - bv;
+    dx * dx + dy * dy
+}
+
+fn manhattan(ax: Int, ay: Int, bx: Int, bv: Int) -> Int {
+    abs_val(ax - bx) + abs_val(ay - bv)
+}
+
+fn chebyshev(ax: Int, ay: Int, bx: Int, bv: Int) -> Int {
+    max2(abs_val(ax - bx), abs_val(ay - bv))
+}
+
+// Orientation using pre-computed vectors instead of 6 params
+fn orient_val(dqx: Int, dqy: Int, drx: Int, dry: Int) -> Int {
+    // Cross product of vectors PQ and QR
+    dqy * drx - dqx * dry
+}
+
+fn orient_sign(val: Int) -> Int {
+    if val == 0 { 0 }
+    else if val > 0 { 1 }
+    else { -1 }
+}
+
+// Triangle area from 3 points, computed as (b-a) cross (c-a) / 2
+fn tri_area_2x(bax: Int, bay: Int, cax: Int, cay: Int) -> Int {
+    abs_val(bax * cay - bay * cax)
+}
+
+fn cross2d(ax: Int, ay: Int, bx: Int, bv: Int) -> Int {
+    ax * bv - ay * bx
+}
+
+fn test_all() {
+    // Distance tests
+    assert_eq(dist_sq(0, 0, 3, 4), 25);
+    assert_eq(dist_sq(0, 0, 0, 0), 0);
+    assert_eq(manhattan(0, 0, 3, 4), 7);
+    assert_eq(manhattan(0, 0, 1, 1), 2);
+    assert_eq(chebyshev(0, 0, 3, 4), 4);
+    assert_eq(chebyshev(0, 0, 1, 1), 1);
+
+    // Orientation: points P(0,0), Q(4,4), R(1,2)
+    // PQ = (4,4), QR = (-3,-2)
+    // Cross = 4*(-3) - 4*(-2) = -12+8 = -4
+    let o1 = orient_sign(orient_val(4, 4, -3, -2));
+    assert_eq(o1, -1);
+
+    // P(0,0), Q(4,4), R(2,1) -> PQ=(4,4), QR=(-2,-3), cross = 4*(-2)-4*(-3)=-8+12=4
+    let o2 = orient_sign(orient_val(4, 4, -2, -3));
+    assert_eq(o2, 1);
+
+    // P(0,0), Q(4,4), R(2,2) -> PQ=(4,4), QR=(-2,-2), cross = 4*(-2)-4*(-2)=-8+8=0
+    let o3 = orient_sign(orient_val(4, 4, -2, -2));
+    assert_eq(o3, 0);
+
+    // Triangle area: (0,0),(4,0),(0,3) -> B-A=(4,0), C-A=(0,3), cross=12
+    assert_eq(tri_area_2x(4, 0, 0, 3), 12);
+    // Collinear: (0,0),(1,1),(2,2) -> B-A=(1,1), C-A=(2,2), cross=0
+    assert_eq(tri_area_2x(1, 1, 2, 2), 0);
+
+    // Cross product
+    assert_eq(cross2d(1, 0, 0, 1), 1);
+    assert_eq(cross2d(3, 4, 4, 3), -7);
+}
+
+fn main() -> Int {
+    test_all();
+    print("[OK] 206_geometry_2d_aot");
+    0
+}

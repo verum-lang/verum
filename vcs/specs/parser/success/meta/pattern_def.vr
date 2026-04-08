@@ -1,0 +1,53 @@
+// @test: parse
+// @level: L0
+// @tags: parser, meta, patterns, active-patterns
+// @description: Test active pattern definition parsing
+
+// Simple active pattern
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+
+// Another simple pattern
+pattern Odd(n: Int) -> Bool = n % 2 != 0;
+
+// Pattern with predicate function
+pattern Positive(n: Int) -> Bool = n > 0;
+
+pattern Negative(n: Int) -> Bool = n < 0;
+
+pattern Zero(n: Int) -> Bool = n == 0;
+
+// Parameterized active pattern
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+
+pattern DivisibleBy(d: Int)(n: Int) -> Bool = n % d == 0;
+
+pattern GreaterThan(threshold: Int)(n: Int) -> Bool = n > threshold;
+
+// Partial active pattern (returns Maybe)
+pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
+
+pattern ParseFloat(s: Text) -> Maybe<Float> = s.parse_float();
+
+// Pattern with complex logic
+pattern ValidEmail(s: Text) -> Bool = {
+    let parts = s.split("@");
+    parts.len() == 2 && parts[0].len() > 0 && parts[1].contains(".")
+};
+
+// Generic pattern
+pattern Empty<T>(list: List<T>) -> Bool = list.len() == 0;
+
+pattern NonEmpty<T>(list: List<T>) -> Bool = list.len() > 0;
+
+// Public pattern
+pub pattern IsAscii(c: Char) -> Bool = (c as u32) < 128;
+
+// Using patterns
+fn classify(n: Int) -> Text {
+    match n {
+        Even() & Positive() => "positive even",
+        Odd() & Positive() => "positive odd",
+        Zero() => "zero",
+        _ => "negative"
+    }
+}

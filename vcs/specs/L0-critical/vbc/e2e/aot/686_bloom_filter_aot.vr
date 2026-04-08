@@ -1,0 +1,173 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, bloom-filter, probabilistic, hash
+// @timeout: 30000
+
+// Bloom filter simulation using bitset with multiple hash functions
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(val: Int, pos: Int) -> Int { (val / pow2(pos)) % 2 }
+fn set_bit(val: Int, pos: Int) -> Int {
+    if get_bit(val, pos) == 0 { val + pow2(pos) } else { val }
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Bloom filter: 16-bit bitset with 3 hash functions
+// Hash function 1: val % 16
+fn hash1(val: Int) -> Int { abs_val(val) % 16 }
+// Hash function 2: (val * 7 + 3) % 16
+fn hash2(val: Int) -> Int { abs_val(val * 7 + 3) % 16 }
+// Hash function 3: (val * 13 + 11) % 16
+fn hash3(val: Int) -> Int { abs_val(val * 13 + 11) % 16 }
+
+// Insert into bloom filter
+fn bf_insert(filter: Int, val: Int) -> Int {
+    let f1 = set_bit(filter, hash1(val));
+    let f2 = set_bit(f1, hash2(val));
+    set_bit(f2, hash3(val))
+}
+
+// Check if value might be in bloom filter
+fn bf_contains(filter: Int, val: Int) -> Int {
+    let b1 = get_bit(filter, hash1(val));
+    let b2 = get_bit(filter, hash2(val));
+    let b3 = get_bit(filter, hash3(val));
+    if b1 == 1 {
+        if b2 == 1 {
+            if b3 == 1 { 1 } else { 0 }
+        } else { 0 }
+    } else { 0 }
+}
+
+// Count bits set in filter (saturation)
+fn bf_count_bits(filter: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 16 {
+        count = count + get_bit(filter, i);
+        i = i + 1;
+    }
+    count
+}
+
+// False positive rate estimate: (k/m)^n where k=bits set, m=16
+// Not easy in integer, just count false positives empirically
+
+fn test_empty() -> Int {
+    let f = 0;
+    assert_eq(bf_contains(f, 42), 0);
+    assert_eq(bf_contains(f, 0), 0);
+    assert_eq(bf_count_bits(f), 0);
+    1
+}
+
+fn test_insert_and_check() -> Int {
+    let mut f = 0;
+    f = bf_insert(f, 10);
+    f = bf_insert(f, 20);
+    f = bf_insert(f, 30);
+    // Inserted elements should always return true
+    assert_eq(bf_contains(f, 10), 1);
+    assert_eq(bf_contains(f, 20), 1);
+    assert_eq(bf_contains(f, 30), 1);
+    // Count bits: should be <= 9 (3 elements * 3 hashes, some may overlap)
+    let bits = bf_count_bits(f);
+    assert_eq(bits > 0, 1);
+    assert_eq(bits <= 9, 1);
+    1
+}
+
+fn test_false_negatives_never() -> Int {
+    // A bloom filter should NEVER have false negatives
+    let mut f = 0;
+    let mut i = 0;
+    while i < 8 {
+        f = bf_insert(f, i * 5);
+        i = i + 1;
+    }
+    // All inserted values must return true
+    i = 0;
+    let mut all_found = 1;
+    while i < 8 {
+        if bf_contains(f, i * 5) == 0 { all_found = 0; }
+        i = i + 1;
+    }
+    assert_eq(all_found, 1);
+    1
+}
+
+fn test_hash_distribution() -> Int {
+    // Verify hash functions produce different outputs
+    assert_eq(hash1(10) == hash2(10), 0); // likely different
+    // hash1(10) = 10, hash2(10) = |70+3|%16 = 73%16 = 9, hash3(10) = |130+11|%16 = 141%16 = 13
+    assert_eq(hash1(10), 10);
+    assert_eq(hash2(10), 9);
+    assert_eq(hash3(10), 13);
+    // All different for this input
+    let h1 = hash1(10);
+    let h2 = hash2(10);
+    let h3 = hash3(10);
+    assert_eq(h1 == h2, 0);
+    assert_eq(h2 == h3, 0);
+    assert_eq(h1 == h3, 0);
+    1
+}
+
+fn test_union() -> Int {
+    // Union of two bloom filters = OR of bitsets
+    let mut f1 = 0;
+    f1 = bf_insert(f1, 10);
+    f1 = bf_insert(f1, 20);
+    let mut f2 = 0;
+    f2 = bf_insert(f2, 30);
+    f2 = bf_insert(f2, 40);
+    // Compute union using OR (bitwise) - construct manually
+    let mut u = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(f1, i) == 1 { u = set_bit(u, i); }
+        if get_bit(f2, i) == 1 { u = set_bit(u, i); }
+        i = i + 1;
+    }
+    // Union should contain all elements from both filters
+    assert_eq(bf_contains(u, 10), 1);
+    assert_eq(bf_contains(u, 20), 1);
+    assert_eq(bf_contains(u, 30), 1);
+    assert_eq(bf_contains(u, 40), 1);
+    1
+}
+
+fn test_saturation() -> Int {
+    // As we insert more elements, the filter saturates
+    let mut f = 0;
+    let bits0 = bf_count_bits(f);
+    f = bf_insert(f, 1);
+    let bits1 = bf_count_bits(f);
+    f = bf_insert(f, 2);
+    let bits2 = bf_count_bits(f);
+    f = bf_insert(f, 3);
+    let bits3 = bf_count_bits(f);
+    // Bits should increase monotonically
+    assert_eq(bits1 >= bits0, 1);
+    assert_eq(bits2 >= bits1, 1);
+    assert_eq(bits3 >= bits2, 1);
+    1
+}
+
+fn main() -> Int {
+    test_empty();
+    test_insert_and_check();
+    test_false_negatives_never();
+    test_hash_distribution();
+    test_union();
+    test_saturation();
+    print("[OK] 686_bloom_filter_aot");
+    0
+}

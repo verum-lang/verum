@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, constraint, syntax, error
+// @description: Test detection of invalid constraint with leading plus
+// @expected-error: E048
+
+// Constraint cannot start with plus
+fn test<T: + Clone>(x: T) {}

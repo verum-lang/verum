@@ -1,0 +1,27 @@
+// Helper module for 946_cross_file_modules test
+// Provides math and string utility functions for cross-file import testing
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn square(x: Int) -> Int {
+    multiply(x, x)
+}
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if (n <= 1) {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}

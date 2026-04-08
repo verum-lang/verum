@@ -1,0 +1,205 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, range, inclusive, exclusive
+// @description: Test range pattern matching in meta functions
+
+// =============================================================================
+// INCLUSIVE RANGE PATTERNS
+// =============================================================================
+
+meta fn test_range_inclusive() -> Text {
+    match 5 {
+        0..=10 => "in range",
+        _ => "out of range",
+    }
+}
+
+meta fn test_range_inclusive_boundary() -> Text {
+    match 10 {
+        0..=10 => "in range (at end)",
+        _ => "out of range",
+    }
+}
+
+meta fn test_range_inclusive_start() -> Text {
+    match 0 {
+        0..=10 => "in range (at start)",
+        _ => "out of range",
+    }
+}
+
+// =============================================================================
+// EXCLUSIVE RANGE PATTERNS
+// =============================================================================
+
+meta fn test_range_exclusive() -> Text {
+    match 5 {
+        0..10 => "in range",
+        _ => "out of range",
+    }
+}
+
+meta fn test_range_exclusive_boundary() -> Text {
+    match 10 {
+        0..10 => "out of range (exclusive end)",
+        _ => "actually out",
+    }
+}
+
+meta fn test_range_exclusive_almost() -> Text {
+    match 9 {
+        0..10 => "in range (just before end)",
+        _ => "out of range",
+    }
+}
+
+// =============================================================================
+// MULTIPLE RANGE PATTERNS
+// =============================================================================
+
+meta fn test_grade(score: Int) -> Text {
+    match score {
+        90..=100 => "A",
+        80..=89 => "B",
+        70..=79 => "C",
+        60..=69 => "D",
+        0..=59 => "F",
+        _ => "Invalid",
+    }
+}
+
+meta fn test_age_category(age: Int) -> Text {
+    match age {
+        0..=12 => "child",
+        13..=19 => "teenager",
+        20..=64 => "adult",
+        65..=150 => "senior",
+        _ => "invalid",
+    }
+}
+
+// =============================================================================
+// RANGE PATTERNS WITH CHAR
+// =============================================================================
+
+meta fn test_char_range_lowercase() -> Bool {
+    match 'g' {
+        'a'..='z' => true,
+        _ => false,
+    }
+}
+
+meta fn test_char_range_uppercase() -> Bool {
+    match 'G' {
+        'A'..='Z' => true,
+        _ => false,
+    }
+}
+
+meta fn test_char_range_digit() -> Bool {
+    match '5' {
+        '0'..='9' => true,
+        _ => false,
+    }
+}
+
+meta fn test_char_category(c: Char) -> Text {
+    match c {
+        'a'..='z' => "lowercase",
+        'A'..='Z' => "uppercase",
+        '0'..='9' => "digit",
+        _ => "other",
+    }
+}
+
+// =============================================================================
+// UNBOUNDED RANGE PATTERNS
+// =============================================================================
+
+meta fn test_range_unbounded_start() -> Text {
+    match 5 {
+        ..10 => "less than 10",
+        _ => "10 or more",
+    }
+}
+
+meta fn test_range_unbounded_end() -> Text {
+    match 100 {
+        10.. => "10 or more",
+        _ => "less than 10",
+    }
+}
+
+meta fn test_positive_negative(n: Int) -> Text {
+    match n {
+        ..0 => "negative",
+        0 => "zero",
+        1.. => "positive",
+    }
+}
+
+// =============================================================================
+// RANGE PATTERNS IN COMPOUND STRUCTURES
+// =============================================================================
+
+meta fn test_range_in_tuple() -> Text {
+    match (5, 15) {
+        (0..=10, 10..=20) => "both in range",
+        (0..=10, _) => "first in range only",
+        (_, 10..=20) => "second in range only",
+        _ => "neither in range",
+    }
+}
+
+meta fn test_range_in_array() -> Text {
+    match [1, 5, 9] {
+        [0..=3, 4..=6, 7..=10] => "all in expected ranges",
+        _ => "unexpected values",
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Inclusive ranges
+    @const assert_eq(test_range_inclusive(), "in range");
+    @const assert_eq(test_range_inclusive_boundary(), "in range (at end)");
+    @const assert_eq(test_range_inclusive_start(), "in range (at start)");
+
+    // Exclusive ranges
+    @const assert_eq(test_range_exclusive(), "in range");
+    @const assert_eq(test_range_exclusive_boundary(), "actually out");
+    @const assert_eq(test_range_exclusive_almost(), "in range (just before end)");
+
+    // Multiple ranges
+    @const assert_eq(test_grade(95), "A");
+    @const assert_eq(test_grade(85), "B");
+    @const assert_eq(test_grade(75), "C");
+    @const assert_eq(test_grade(55), "F");
+    @const assert_eq(test_age_category(10), "child");
+    @const assert_eq(test_age_category(16), "teenager");
+    @const assert_eq(test_age_category(30), "adult");
+    @const assert_eq(test_age_category(70), "senior");
+
+    // Char ranges
+    @const assert(test_char_range_lowercase());
+    @const assert(test_char_range_uppercase());
+    @const assert(test_char_range_digit());
+    @const assert_eq(test_char_category('x'), "lowercase");
+    @const assert_eq(test_char_category('X'), "uppercase");
+    @const assert_eq(test_char_category('7'), "digit");
+
+    // Unbounded ranges
+    @const assert_eq(test_range_unbounded_start(), "less than 10");
+    @const assert_eq(test_range_unbounded_end(), "10 or more");
+    @const assert_eq(test_positive_negative(-5), "negative");
+    @const assert_eq(test_positive_negative(0), "zero");
+    @const assert_eq(test_positive_negative(10), "positive");
+
+    // Compound structures
+    @const assert_eq(test_range_in_tuple(), "both in range");
+    @const assert_eq(test_range_in_array(), "all in expected ranges");
+}

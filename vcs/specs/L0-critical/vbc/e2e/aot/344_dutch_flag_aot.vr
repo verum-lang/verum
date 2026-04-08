@@ -1,0 +1,295 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, dutch-national-flag, three-way-partition, sort-012
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Dutch National Flag problem (Dijkstra's 3-way partition):
+// Sort an array containing only 0s, 1s, and 2s in a single pass.
+// Also tests variants: counting sort approach, and partition around pivot.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn a8_swap(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = a8_get(a, i);
+    let vj = a8_get(a, j);
+    a8_set(a8_set(a, i, vj), j, vi)
+}
+
+// Dutch National Flag: single-pass 3-way partition
+// lo: boundary for 0s (everything before lo is 0)
+// mid: current element under inspection
+// hi: boundary for 2s (everything after hi is 2)
+// Invariant: [0..lo) = 0, [lo..mid) = 1, [mid..hi] = unknown, (hi..n) = 2
+type DnfOut is { arr: Arr8, count0: Int, count1: Int, count2: Int };
+
+fn dutch_flag(arr: Arr8, n: Int) -> DnfOut {
+    let mut a = arr;
+    let mut lo = 0;
+    let mut mid = 0;
+    let mut hi = n - 1;
+
+    while mid <= hi {
+        let val = a8_get(a, mid);
+        if val == 0 {
+            a = a8_swap(a, lo, mid);
+            lo = lo + 1;
+            mid = mid + 1;
+        } else if val == 2 {
+            a = a8_swap(a, mid, hi);
+            hi = hi - 1;
+            // Don't advance mid: swapped element needs inspection
+        } else {
+            // val == 1, already in place
+            mid = mid + 1;
+        }
+    }
+
+    // Count each value
+    let mut c0 = 0;
+    let mut c1 = 0;
+    let mut c2 = 0;
+    let mut i = 0;
+    while i < n {
+        let v = a8_get(a, i);
+        if v == 0 { c0 = c0 + 1; }
+        else if v == 1 { c1 = c1 + 1; }
+        else { c2 = c2 + 1; }
+        i = i + 1;
+    }
+
+    DnfOut { arr: a, count0: c0, count1: c1, count2: c2 }
+}
+
+// Verify sorted: all 0s, then all 1s, then all 2s
+fn is_sorted_012(a: Arr8, n: Int) -> Int {
+    let mut i = 1;
+    let mut ok = 1;
+    while i < n {
+        if a8_get(a, i) < a8_get(a, i - 1) { ok = 0; }
+        i = i + 1;
+    }
+    ok
+}
+
+// Counting sort approach (alternative for comparison)
+fn counting_sort_012(arr: Arr8, n: Int) -> Arr8 {
+    let mut c0 = 0;
+    let mut c1 = 0;
+    let mut c2 = 0;
+    let mut i = 0;
+    while i < n {
+        let v = a8_get(arr, i);
+        if v == 0 { c0 = c0 + 1; }
+        else if v == 1 { c1 = c1 + 1; }
+        else { c2 = c2 + 1; }
+        i = i + 1;
+    }
+    let mut out = a8_zero();
+    let mut pos = 0;
+    i = 0;
+    while i < c0 { out = a8_set(out, pos, 0); pos = pos + 1; i = i + 1; }
+    i = 0;
+    while i < c1 { out = a8_set(out, pos, 1); pos = pos + 1; i = i + 1; }
+    i = 0;
+    while i < c2 { out = a8_set(out, pos, 2); pos = pos + 1; i = i + 1; }
+    out
+}
+
+// 3-way partition around a pivot value (generalized Dutch flag)
+// Returns: (arr, lt_count, eq_count, gt_count)
+type PartOut is { arr: Arr8, lt: Int, eq: Int, gt: Int };
+
+fn three_way_partition(arr: Arr8, n: Int, pivot: Int) -> PartOut {
+    let mut a = arr;
+    let mut lo = 0;
+    let mut mid = 0;
+    let mut hi = n - 1;
+
+    while mid <= hi {
+        let val = a8_get(a, mid);
+        if val < pivot {
+            a = a8_swap(a, lo, mid);
+            lo = lo + 1;
+            mid = mid + 1;
+        } else if val > pivot {
+            a = a8_swap(a, mid, hi);
+            hi = hi - 1;
+        } else {
+            mid = mid + 1;
+        }
+    }
+
+    // Count partitions
+    let mut lt_cnt = 0;
+    let mut eq_cnt = 0;
+    let mut gt_cnt = 0;
+    let mut i = 0;
+    while i < n {
+        let v = a8_get(a, i);
+        if v < pivot { lt_cnt = lt_cnt + 1; }
+        else if v == pivot { eq_cnt = eq_cnt + 1; }
+        else { gt_cnt = gt_cnt + 1; }
+        i = i + 1;
+    }
+
+    PartOut { arr: a, lt: lt_cnt, eq: eq_cnt, gt: gt_cnt }
+}
+
+fn test_basic_sort() {
+    let arr = Arr8 { a0: 2, a1: 0, a2: 1, a3: 2, a4: 0, a5: 1, a6: 0, a7: 2 };
+    let out = dutch_flag(arr, 8);
+    assert_eq(is_sorted_012(out.arr, 8), 1);
+    assert_eq(out.count0, 3);
+    assert_eq(out.count1, 2);
+    assert_eq(out.count2, 3);
+    // Verify first three are 0, next two are 1, last three are 2
+    assert_eq(a8_get(out.arr, 0), 0);
+    assert_eq(a8_get(out.arr, 2), 0);
+    assert_eq(a8_get(out.arr, 3), 1);
+    assert_eq(a8_get(out.arr, 4), 1);
+    assert_eq(a8_get(out.arr, 5), 2);
+    assert_eq(a8_get(out.arr, 7), 2);
+}
+
+fn test_all_zeros() {
+    let arr = Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let out = dutch_flag(arr, 8);
+    assert_eq(is_sorted_012(out.arr, 8), 1);
+    assert_eq(out.count0, 8);
+    assert_eq(out.count1, 0);
+    assert_eq(out.count2, 0);
+}
+
+fn test_all_twos() {
+    let arr = Arr8 { a0: 2, a1: 2, a2: 2, a3: 2, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let out = dutch_flag(arr, 4);
+    assert_eq(is_sorted_012(out.arr, 4), 1);
+    assert_eq(out.count2, 4);
+}
+
+fn test_already_sorted() {
+    let arr = Arr8 { a0: 0, a1: 0, a2: 1, a3: 1, a4: 2, a5: 2, a6: 0, a7: 0 };
+    let out = dutch_flag(arr, 6);
+    assert_eq(is_sorted_012(out.arr, 6), 1);
+    assert_eq(a8_get(out.arr, 0), 0);
+    assert_eq(a8_get(out.arr, 2), 1);
+    assert_eq(a8_get(out.arr, 4), 2);
+}
+
+fn test_reverse_sorted() {
+    let arr = Arr8 { a0: 2, a1: 2, a2: 1, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let out = dutch_flag(arr, 6);
+    assert_eq(is_sorted_012(out.arr, 6), 1);
+    assert_eq(a8_get(out.arr, 0), 0);
+    assert_eq(a8_get(out.arr, 1), 0);
+    assert_eq(a8_get(out.arr, 4), 2);
+    assert_eq(a8_get(out.arr, 5), 2);
+}
+
+fn test_only_ones() {
+    let arr = Arr8 { a0: 1, a1: 1, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let out = dutch_flag(arr, 3);
+    assert_eq(out.count1, 3);
+    assert_eq(is_sorted_012(out.arr, 3), 1);
+}
+
+fn test_two_values_only() {
+    // Only 0s and 2s, no 1s
+    let arr = Arr8 { a0: 2, a1: 0, a2: 2, a3: 0, a4: 2, a5: 0, a6: 0, a7: 0 };
+    let out = dutch_flag(arr, 6);
+    assert_eq(is_sorted_012(out.arr, 6), 1);
+    assert_eq(out.count0, 3);
+    assert_eq(out.count1, 0);
+    assert_eq(out.count2, 3);
+}
+
+fn test_counting_sort_matches() {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 0, a3: 2, a4: 1, a5: 0, a6: 2, a7: 1 };
+    let dnf = dutch_flag(arr, 8);
+    let cnt = counting_sort_012(arr, 8);
+    // Both should produce same sorted result
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(a8_get(dnf.arr, i), a8_get(cnt, i));
+        i = i + 1;
+    }
+}
+
+fn test_three_way_partition() {
+    // Partition [3, 1, 4, 1, 5, 9, 2, 6] around pivot 4
+    let arr = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 9, a6: 2, a7: 6 };
+    let out = three_way_partition(arr, 8, 4);
+    assert_eq(out.lt, 4); // {3, 1, 1, 2}
+    assert_eq(out.eq, 1); // {4}
+    assert_eq(out.gt, 3); // {5, 9, 6}
+
+    // Verify partition: first lt elements < pivot, then eq elements == pivot, then gt > pivot
+    let mut i = 0;
+    while i < out.lt {
+        let v = a8_get(out.arr, i);
+        assert_eq(v < 4, true);
+        i = i + 1;
+    }
+    while i < out.lt + out.eq {
+        assert_eq(a8_get(out.arr, i), 4);
+        i = i + 1;
+    }
+    while i < 8 {
+        let v = a8_get(out.arr, i);
+        assert_eq(v > 4, true);
+        i = i + 1;
+    }
+}
+
+fn test_single_element_dnf() {
+    let arr = Arr8 { a0: 1, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let out = dutch_flag(arr, 1);
+    assert_eq(a8_get(out.arr, 0), 1);
+    assert_eq(out.count1, 1);
+}
+
+fn test_alternating() {
+    let arr = Arr8 { a0: 0, a1: 2, a2: 0, a3: 2, a4: 0, a5: 2, a6: 0, a7: 2 };
+    let out = dutch_flag(arr, 8);
+    assert_eq(is_sorted_012(out.arr, 8), 1);
+    assert_eq(out.count0, 4);
+    assert_eq(out.count2, 4);
+}
+
+fn main() -> Int {
+    test_basic_sort();
+    test_all_zeros();
+    test_all_twos();
+    test_already_sorted();
+    test_reverse_sorted();
+    test_only_ones();
+    test_two_values_only();
+    test_counting_sort_matches();
+    test_three_way_partition();
+    test_single_element_dnf();
+    test_alternating();
+    print("[OK] 344_dutch_flag_aot");
+    0
+}

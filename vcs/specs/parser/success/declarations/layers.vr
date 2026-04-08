@@ -1,0 +1,97 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @category: declarations
+// @description: Layer definitions — compile-time context composition
+// Grammar: layer_def = visibility , 'layer' , identifier , layer_body ;
+//          layer_body = '{' , { layer_item } , '}' | '=' , layer_expr , ';' ;
+//          layer_item = provide_stmt ;
+//          layer_expr = identifier , { '+' , identifier } ;
+
+// =============================================================================
+// BASIC LAYER DEFINITION (BLOCK FORM)
+// =============================================================================
+
+layer DatabaseLayer {
+    provide Database = PostgresConnection.new("localhost", 5432, "app_db");
+}
+
+layer LoggingLayer {
+    provide Logger = FileLogger.new("/var/log/app.log");
+}
+
+layer CacheLayer {
+    provide Cache = RedisCache.new("localhost:6379");
+}
+
+// =============================================================================
+// LAYER COMPOSITION (EXPRESSION FORM)
+// =============================================================================
+
+layer AppLayer = DatabaseLayer + LoggingLayer + CacheLayer;
+
+layer WebLayer = AppLayer + AuthLayer;
+
+layer TestLayer = MockDatabaseLayer + LoggingLayer;
+
+// =============================================================================
+// VISIBILITY MODIFIERS
+// =============================================================================
+
+pub layer PublicLayer {
+    provide Config = AppConfig.default();
+}
+
+layer PrivateLayer {
+    provide InternalService = InternalService.new();
+}
+
+// =============================================================================
+// LAYER WITH MULTIPLE PROVIDES
+// =============================================================================
+
+layer FullStackLayer {
+    provide Database = PostgresConnection.new();
+    provide Logger = ConsoleLogger.new();
+    provide Cache = MemoryCache.new();
+    provide Config = AppConfig.load();
+    provide Auth = JwtAuthProvider.new();
+}
+
+// =============================================================================
+// LAYER WITH COMPLEX PROVIDE EXPRESSIONS
+// =============================================================================
+
+layer ProductionLayer {
+    provide Database = {
+        let config = load_config();
+        PostgresPool.new(config.db_url, config.pool_size)
+    };
+    provide Logger = FileLogger.new("/var/log/prod.log");
+    provide Cache = RedisCache.new(load_config().redis_url);
+}
+
+// =============================================================================
+// NESTED LAYER COMPOSITION
+// =============================================================================
+
+layer InfraLayer = DatabaseLayer + CacheLayer;
+layer ServiceLayer = InfraLayer + LoggingLayer;
+layer FullLayer = ServiceLayer + AuthLayer + MetricsLayer;
+
+// =============================================================================
+// USAGE IN FUNCTIONS
+// =============================================================================
+
+fn start_app() {
+    provide Database = PostgresConnection.new();
+    provide Logger = ConsoleLogger.new();
+    provide Cache = MemoryCache.new();
+    run_server();
+}
+
+fn run_tests() {
+    provide Database = MockDatabase.new();
+    provide Logger = ConsoleLogger.new();
+    execute_test_suite();
+}

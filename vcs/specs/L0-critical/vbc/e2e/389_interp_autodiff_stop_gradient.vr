@@ -1,0 +1,317 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, stop-gradient, detach, rl-target
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Stop gradient / detach simulation
+// In RL, "target networks" should not receive gradients.
+// Detach point: gradients do not flow past it.
+// Integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Tape with detach support
+// Ops: CONST=0, ADD=1, MUL=2, SUB=3, DETACH=4
+// DETACH: copies value but blocks gradient flow
+// =============================================================================
+
+type Arr16 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int,
+                e8: Int, e9: Int, e10: Int, e11: Int, e12: Int, e13: Int, e14: Int, e15: Int };
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn a16_zeros() -> Arr16 {
+    Arr16 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+            e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 }
+}
+
+type Tape is {
+    ops: Arr16,
+    arg1s: Arr16,
+    arg2s: Arr16,
+    vals: Arr16,
+    sz: Int
+};
+
+fn tape_new() -> Tape {
+    Tape { ops: a16_zeros(), arg1s: a16_zeros(), arg2s: a16_zeros(), vals: a16_zeros(), sz: 0 }
+}
+
+fn tape_const(t: Tape, val: Int) -> Tape {
+    let idx = t.sz;
+    Tape {
+        ops: a16_set(t.ops, idx, 0), arg1s: a16_set(t.arg1s, idx, -1),
+        arg2s: a16_set(t.arg2s, idx, -1), vals: a16_set(t.vals, idx, val), sz: t.sz + 1
+    }
+}
+
+fn tape_add(t: Tape, a1: Int, a2: Int) -> Tape {
+    let idx = t.sz;
+    let v = a16_get(t.vals, a1) + a16_get(t.vals, a2);
+    Tape {
+        ops: a16_set(t.ops, idx, 1), arg1s: a16_set(t.arg1s, idx, a1),
+        arg2s: a16_set(t.arg2s, idx, a2), vals: a16_set(t.vals, idx, v), sz: t.sz + 1
+    }
+}
+
+fn tape_mul(t: Tape, a1: Int, a2: Int) -> Tape {
+    let idx = t.sz;
+    let v = smul(a16_get(t.vals, a1), a16_get(t.vals, a2));
+    Tape {
+        ops: a16_set(t.ops, idx, 2), arg1s: a16_set(t.arg1s, idx, a1),
+        arg2s: a16_set(t.arg2s, idx, a2), vals: a16_set(t.vals, idx, v), sz: t.sz + 1
+    }
+}
+
+fn tape_sub(t: Tape, a1: Int, a2: Int) -> Tape {
+    let idx = t.sz;
+    let v = a16_get(t.vals, a1) - a16_get(t.vals, a2);
+    Tape {
+        ops: a16_set(t.ops, idx, 3), arg1s: a16_set(t.arg1s, idx, a1),
+        arg2s: a16_set(t.arg2s, idx, a2), vals: a16_set(t.vals, idx, v), sz: t.sz + 1
+    }
+}
+
+// DETACH: copies value from source but blocks gradient flow
+fn tape_detach(t: Tape, src: Int) -> Tape {
+    let idx = t.sz;
+    Tape {
+        ops: a16_set(t.ops, idx, 4), arg1s: a16_set(t.arg1s, idx, src),
+        arg2s: a16_set(t.arg2s, idx, -1), vals: a16_set(t.vals, idx, a16_get(t.vals, src)),
+        sz: t.sz + 1
+    }
+}
+
+fn tape_val(t: Tape, idx: Int) -> Int { a16_get(t.vals, idx) }
+
+// Backward pass with detach support
+fn backward(t: Tape) -> Arr16 {
+    let mut grads = a16_zeros();
+    grads = a16_set(grads, t.sz - 1, scale());
+
+    let mut i = t.sz - 1;
+    while i >= 0 {
+        let op = a16_get(t.ops, i);
+        let a1 = a16_get(t.arg1s, i);
+        let a2 = a16_get(t.arg2s, i);
+        let gi = a16_get(grads, i);
+
+        if op == 1 {
+            // ADD
+            if a1 >= 0 { grads = a16_set(grads, a1, a16_get(grads, a1) + gi); }
+            if a2 >= 0 { grads = a16_set(grads, a2, a16_get(grads, a2) + gi); }
+        } else if op == 2 {
+            // MUL
+            if a1 >= 0 { grads = a16_set(grads, a1, a16_get(grads, a1) + smul(gi, a16_get(t.vals, a2))); }
+            if a2 >= 0 { grads = a16_set(grads, a2, a16_get(grads, a2) + smul(gi, a16_get(t.vals, a1))); }
+        } else if op == 3 {
+            // SUB
+            if a1 >= 0 { grads = a16_set(grads, a1, a16_get(grads, a1) + gi); }
+            if a2 >= 0 { grads = a16_set(grads, a2, a16_get(grads, a2) - gi); }
+        } else if op == 4 {
+            // DETACH: do NOT propagate gradient to source
+            // gradient dies here
+        }
+        // CONST (op==0): no propagation
+
+        if i == 0 { i = -1; } else { i = i - 1; }
+    }
+    grads
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_detach_blocks_gradient() {
+    // f(x) = x + detach(x)
+    // Forward: x + x = 2x (same value)
+    // Backward: df/dx = 1 (not 2, because detach blocks one path)
+    let mut t = tape_new();
+    t = tape_const(t, 3 * scale());  // 0: x=3
+    t = tape_detach(t, 0);           // 1: detach(x) = 3 (blocks grad)
+    t = tape_add(t, 0, 1);           // 2: x + detach(x) = 6
+
+    assert_eq(tape_val(t, 2), 6 * scale()); // forward value correct
+
+    let grads = backward(t);
+    assert_eq(a16_get(grads, 0), scale()); // only 1, not 2
+}
+
+fn test_no_detach() {
+    // Same expression without detach: f(x) = x + x = 2x, f'=2
+    let mut t = tape_new();
+    t = tape_const(t, 3 * scale()); // 0: x
+    t = tape_add(t, 0, 0);          // 1: x + x
+
+    let grads = backward(t);
+    assert_eq(a16_get(grads, 0), 2 * scale()); // gradient = 2
+}
+
+fn test_detach_in_product() {
+    // f(x) = x * detach(x)
+    // Forward: x * x = x^2
+    // Backward: detach(x) treated as constant c=x_value
+    // df/dx = detach(x) = x_value (but not 2x)
+    let mut t = tape_new();
+    t = tape_const(t, 4 * scale());  // 0: x=4
+    t = tape_detach(t, 0);           // 1: detach(x) = 4
+    t = tape_mul(t, 0, 1);           // 2: x * detach(x)
+
+    assert_eq(tape_val(t, 2), 16 * scale()); // x^2 = 16
+
+    let grads = backward(t);
+    // Without detach: grad = 2x = 8
+    // With detach: grad = detach(x) = 4 (only one path contributes)
+    assert_eq(a16_get(grads, 0), 4 * scale());
+}
+
+fn test_rl_target_network() {
+    // RL: loss = (q_online - detach(q_target))^2
+    // Only q_online should get gradients, not q_target
+    // q_online = w * x, q_target = w_target * x (both use same x for simplicity)
+    let mut t = tape_new();
+    t = tape_const(t, 2 * scale());  // 0: x=2
+    t = tape_const(t, 3 * scale());  // 1: w_online=3
+    t = tape_const(t, 4 * scale());  // 2: w_target=4
+    t = tape_mul(t, 1, 0);           // 3: q_online = w*x = 6
+    t = tape_mul(t, 2, 0);           // 4: q_target = w_t*x = 8
+    t = tape_detach(t, 4);           // 5: detach(q_target) = 8
+    t = tape_sub(t, 3, 5);           // 6: q_online - detach(q_target) = -2
+    t = tape_mul(t, 6, 6);           // 7: (q_online - detach(q_target))^2 = 4
+
+    assert_eq(tape_val(t, 7), 4 * scale());
+
+    let grads = backward(t);
+    // w_online (idx 1) should receive gradient
+    // w_target (idx 2) should NOT (blocked by detach)
+    assert(a16_get(grads, 1) != 0); // w_online gets gradient
+    assert_eq(a16_get(grads, 2), 0); // w_target gets NO gradient
+}
+
+fn test_detach_preserves_forward() {
+    // Detach should not change forward values
+    let mut t = tape_new();
+    t = tape_const(t, 7 * scale()); // 0: x=7
+    t = tape_detach(t, 0);          // 1: detach(x) = 7
+
+    assert_eq(tape_val(t, 0), 7 * scale());
+    assert_eq(tape_val(t, 1), 7 * scale()); // same value
+}
+
+fn test_double_detach() {
+    // detach(detach(x)) — double detach, gradient still blocked
+    let mut t = tape_new();
+    t = tape_const(t, 5 * scale()); // 0: x
+    t = tape_detach(t, 0);          // 1: detach(x)
+    t = tape_detach(t, 1);          // 2: detach(detach(x))
+    t = tape_add(t, 0, 2);          // 3: x + detach(detach(x))
+
+    let grads = backward(t);
+    assert_eq(a16_get(grads, 0), scale()); // only direct path
+}
+
+fn test_detach_one_of_many() {
+    // f(x) = x + x + detach(x)
+    // = 3x forward, but gradient = 2 (two live paths + one dead)
+    let mut t = tape_new();
+    t = tape_const(t, 2 * scale()); // 0: x=2
+    t = tape_detach(t, 0);          // 1: detach(x)
+    t = tape_add(t, 0, 0);          // 2: x + x = 4
+    t = tape_add(t, 2, 1);          // 3: (x+x) + detach(x) = 6
+
+    assert_eq(tape_val(t, 3), 6 * scale());
+
+    let grads = backward(t);
+    assert_eq(a16_get(grads, 0), 2 * scale()); // 2, not 3
+}
+
+fn test_partial_gradient_through_expression() {
+    // f(x,y) = x * detach(y) + y * x
+    // df/dx = detach(y) + y = 2*y_value
+    // df/dy = x (only from y*x, not from detach(y))
+    let mut t = tape_new();
+    t = tape_const(t, 3 * scale()); // 0: x=3
+    t = tape_const(t, 2 * scale()); // 1: y=2
+    t = tape_detach(t, 1);          // 2: detach(y) = 2
+    t = tape_mul(t, 0, 2);          // 3: x * detach(y) = 6
+    t = tape_mul(t, 1, 0);          // 4: y * x = 6
+    t = tape_add(t, 3, 4);          // 5: total = 12
+
+    assert_eq(tape_val(t, 5), 12 * scale());
+
+    let grads = backward(t);
+    // df/dx: from x*detach(y): detach(y)=2000, from y*x: y=2000 => total 4000
+    assert_eq(a16_get(grads, 0), 4 * scale());
+    // df/dy: from y*x: x=3000 (detach(y) blocks the other path)
+    assert_eq(a16_get(grads, 1), 3 * scale());
+}
+
+fn test_loss_with_stop_gradient_constant() {
+    // loss = (x - stop_grad(c))^2 where c=5
+    // This is like supervised learning with fixed target
+    // d_loss/dx = 2*(x - c), d_loss/dc = 0
+    let mut t = tape_new();
+    t = tape_const(t, 3 * scale());  // 0: x=3
+    t = tape_const(t, 5 * scale());  // 1: c=5
+    t = tape_detach(t, 1);           // 2: stop_grad(c)=5
+    t = tape_sub(t, 0, 2);           // 3: x - stop_grad(c) = -2
+    t = tape_mul(t, 3, 3);           // 4: (x - stop_grad(c))^2 = 4
+
+    assert_eq(tape_val(t, 4), 4 * scale());
+
+    let grads = backward(t);
+    // d/dx = 2*(x-c) = 2*(-2) = -4
+    assert_eq(a16_get(grads, 0), -4 * scale());
+    // d/dc = 0 (blocked by detach)
+    assert_eq(a16_get(grads, 1), 0);
+}
+
+fn main() -> Int {
+    test_detach_blocks_gradient();
+    test_no_detach();
+    test_detach_in_product();
+    test_rl_target_network();
+    test_detach_preserves_forward();
+    test_double_detach();
+    test_detach_one_of_many();
+    test_partial_gradient_through_expression();
+    test_loss_with_stop_gradient_constant();
+    print("[OK] 389_interp_autodiff_stop_gradient");
+    0
+}

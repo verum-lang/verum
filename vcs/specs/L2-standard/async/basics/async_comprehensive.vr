@@ -1,0 +1,271 @@
+// @test: run
+// @expected-stdout: All comprehensive async tests passed!
+// @tier: 0
+// @level: L2
+// @tags: async, function, await, nested, comprehensive
+// @description: Comprehensive tests for async/await functionality
+
+// ============================================================================
+// Basic async functions
+// ============================================================================
+
+async fn compute_value() -> Int {
+    42
+}
+
+async fn add_numbers(a: Int, b: Int) -> Int {
+    a + b
+}
+
+async fn multiply(x: Int, y: Int) -> Int {
+    x * y
+}
+
+// ============================================================================
+// Nested async functions
+// ============================================================================
+
+async fn outer_async() -> Int {
+    async fn inner_async() -> Int {
+        100
+    }
+
+    let result = inner_async().await;
+    result * 2
+}
+
+// Deeper nesting
+async fn deeply_nested() -> Int {
+    async fn level1() -> Int {
+        async fn level2() -> Int {
+            async fn level3() -> Int {
+                10
+            }
+            level3().await * 2
+        }
+        level2().await * 3
+    }
+    level1().await * 4
+}
+
+// ============================================================================
+// Multiple await points
+// ============================================================================
+
+async fn pipeline() -> Int {
+    async fn step1() -> Int { 5 }
+    async fn step2(x: Int) -> Int { x * 2 }
+    async fn step3(x: Int) -> Int { x + 10 }
+
+    let a = step1().await;          // 5
+    let b = step2(a).await;         // 10
+    let c = step3(b).await;         // 20
+    c
+}
+
+async fn parallel_simulation() -> Int {
+    // Simulate parallel operations (executed sequentially in interpreter)
+    let a = compute_value().await;  // 42
+    let b = add_numbers(10, 20).await;  // 30
+    let c = multiply(3, 4).await;   // 12
+    a + b + c  // 84
+}
+
+// ============================================================================
+// Control flow in async functions
+// ============================================================================
+
+async fn early_return(flag: Bool) -> Int {
+    if flag {
+        return 100;
+    }
+    200
+}
+
+async fn conditional_await(condition: Bool) -> Int {
+    if condition {
+        compute_value().await
+    } else {
+        add_numbers(1, 2).await
+    }
+}
+
+async fn with_match(value: Int) -> Int {
+    match value {
+        0 => compute_value().await,
+        1 => add_numbers(5, 5).await,
+        _ => multiply(value, 2).await,
+    }
+}
+
+// ============================================================================
+// Recursive async functions
+// ============================================================================
+
+async fn factorial_async(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        let sub = factorial_async(n - 1).await;
+        n * sub
+    }
+}
+
+async fn fibonacci_async(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        let a = fibonacci_async(n - 1).await;
+        let b = fibonacci_async(n - 2).await;
+        a + b
+    }
+}
+
+// ============================================================================
+// Async with loops
+// ============================================================================
+
+async fn sum_range(start: Int, end: Int) -> Int {
+    let mut total = 0;
+    for i in start..end {
+        total = add_numbers(total, i).await;
+    }
+    total
+}
+
+async fn count_iterations(count: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < count {
+        result = add_numbers(result, 1).await;
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Async methods on types
+// ============================================================================
+
+type Calculator is {
+    base: Int,
+};
+
+implement Calculator {
+    fn new(base: Int) -> Calculator {
+        Calculator { base }
+    }
+
+    async fn compute(self, x: Int) -> Int {
+        add_numbers(self.base, x).await
+    }
+
+    async fn compute_squared(self, x: Int) -> Int {
+        let sum = self.compute(x).await;
+        multiply(sum, sum).await
+    }
+}
+
+// ============================================================================
+// Async blocks
+// ============================================================================
+
+fn uses_async_block() -> Int {
+    // Create a future with async block
+    let future = async {
+        42
+    };
+    // In interpreter mode, we can await it synchronously
+    // (For this test, we just verify the block is parsed correctly)
+    42
+}
+
+// ============================================================================
+// Main test function
+// ============================================================================
+
+async fn main() {
+    // Basic tests
+    let v1 = compute_value().await;
+    assert(v1 == 42);
+
+    let v2 = add_numbers(10, 32).await;
+    assert(v2 == 42);
+
+    let v3 = multiply(6, 7).await;
+    assert(v3 == 42);
+    print("Basic async functions: passed");
+
+    // Nested async
+    let v4 = outer_async().await;
+    assert(v4 == 200);
+
+    let v5 = deeply_nested().await;
+    assert(v5 == 240);  // 10 * 2 * 3 * 4 = 240
+    print("Nested async functions: passed");
+
+    // Multiple awaits
+    let v6 = pipeline().await;
+    assert(v6 == 20);
+
+    let v7 = parallel_simulation().await;
+    assert(v7 == 84);
+    print("Multiple await points: passed");
+
+    // Control flow
+    let v8 = early_return(true).await;
+    assert(v8 == 100);
+
+    let v9 = early_return(false).await;
+    assert(v9 == 200);
+
+    let v10 = conditional_await(true).await;
+    assert(v10 == 42);
+
+    let v11 = conditional_await(false).await;
+    assert(v11 == 3);
+
+    let v12 = with_match(0).await;
+    assert(v12 == 42);
+
+    let v13 = with_match(1).await;
+    assert(v13 == 10);
+
+    let v14 = with_match(5).await;
+    assert(v14 == 10);
+    print("Control flow in async: passed");
+
+    // Recursion
+    let v15 = factorial_async(5).await;
+    assert(v15 == 120);
+
+    let v16 = fibonacci_async(10).await;
+    assert(v16 == 55);
+    print("Recursive async: passed");
+
+    // Loops
+    let v17 = sum_range(1, 6).await;  // 1+2+3+4+5 = 15
+    assert(v17 == 15);
+
+    let v18 = count_iterations(10).await;
+    assert(v18 == 10);
+    print("Loops in async: passed");
+
+    // Methods
+    let calculator = Calculator.new(10);
+    let v19 = calculator.compute(5).await;
+    assert(v19 == 15);
+
+    let v20 = calculator.compute_squared(5).await;
+    assert(v20 == 225);  // (10+5)^2 = 225
+    print("Async methods: passed");
+
+    // Async block (parsing test)
+    let v21 = uses_async_block();
+    assert(v21 == 42);
+    print("Async blocks: passed");
+
+    print("All comprehensive async tests passed!");
+}

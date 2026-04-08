@@ -1,0 +1,687 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, linalg, decomposition, svd, eig, schur, lu, qr
+// @timeout: 5000
+// @expect: pass
+//
+// Test: TensorExtended sub-opcodes for linear algebra decompositions
+// Verifies SVD, Eig, Schur, LU, QR, and other matrix factorizations
+
+link math.linalg;
+
+// =============================================================================
+// LU Decomposition
+// =============================================================================
+
+fn test_lu_decomposition() {
+    // Create a 3x3 matrix
+    let a = Tensor.from([
+        [4.0, 3.0, 2.0],
+        [2.0, 1.0, 3.0],
+        [3.0, 4.0, 1.0]
+    ]);
+
+    let (l, u, p) = a.lu();
+
+    // L should be lower triangular with 1s on diagonal
+    assert_eq(l[[0, 0]], 1.0);
+    assert_eq(l[[1, 1]], 1.0);
+    assert_eq(l[[2, 2]], 1.0);
+    assert_eq(l[[0, 1]], 0.0);
+    assert_eq(l[[0, 2]], 0.0);
+    assert_eq(l[[1, 2]], 0.0);
+
+    // U should be upper triangular
+    assert_eq(u[[1, 0]], 0.0);
+    assert_eq(u[[2, 0]], 0.0);
+    assert_eq(u[[2, 1]], 0.0);
+
+    // Verify P * A = L * U (within tolerance)
+    let pa = p @ a;
+    let lu_product = l @ u;
+
+    for i in 0..3 {
+        for j in 0..3 {
+            assert(@abs(pa[[i, j]] - lu_product[[i, j]]) < 0.0001);
+        }
+    }
+}
+
+fn test_lu_identity() {
+    let eye = Tensor.eye(4);
+    let (l, u, p) = eye.lu();
+
+    // For identity matrix: L = I, U = I, P = I
+    for i in 0..4 {
+        for j in 0..4 {
+            let expected = if i == j { 1.0 } else { 0.0 };
+            assert(@abs(l[[i, j]] - expected) < 0.0001);
+            assert(@abs(u[[i, j]] - expected) < 0.0001);
+        }
+    }
+}
+
+// =============================================================================
+// QR Decomposition
+// =============================================================================
+
+fn test_qr_decomposition() {
+    let a = Tensor.from([
+        [12.0, -51.0, 4.0],
+        [6.0, 167.0, -68.0],
+        [-4.0, 24.0, -41.0]
+    ]);
+
+    let (q, r) = a.qr();
+
+    // Q should be orthogonal: Q^T * Q = I
+    let qt = q.T();
+    let qtq = qt @ q;
+
+    for i in 0..3 {
+        for j in 0..3 {
+            let expected = if i == j { 1.0 } else { 0.0 };
+            assert(@abs(qtq[[i, j]] - expected) < 0.0001);
+        }
+    }
+
+    // R should be upper triangular
+    assert(@abs(r[[1, 0]]) < 0.0001);
+    assert(@abs(r[[2, 0]]) < 0.0001);
+    assert(@abs(r[[2, 1]]) < 0.0001);
+
+    // Verify A = Q * R
+    let qr_product = q @ r;
+    for i in 0..3 {
+        for j in 0..3 {
+            assert(@abs(a[[i, j]] - qr_product[[i, j]]) < 0.001);
+        }
+    }
+}
+
+// =============================================================================
+// Cholesky Decomposition
+// =============================================================================
+
+fn test_cholesky_decomposition() {
+    // Create a symmetric positive-definite matrix
+    let a = Tensor.from([
+        [4.0, 2.0, 2.0],
+        [2.0, 5.0, 1.0],
+        [2.0, 1.0, 6.0]
+    ]);
+
+    let l = a.cholesky();
+
+    // L should be lower triangular
+    assert(@abs(l[[0, 1]]) < 0.0001);
+    assert(@abs(l[[0, 2]]) < 0.0001);
+    assert(@abs(l[[1, 2]]) < 0.0001);
+
+    // Verify A = L * L^T
+    let lt = l.T();
+    let llt = l @ lt;
+
+    for i in 0..3 {
+        for j in 0..3 {
+            assert(@abs(a[[i, j]] - llt[[i, j]]) < 0.0001);
+        }
+    }
+}
+
+// =============================================================================
+// Singular Value Decomposition (SVD)
+// =============================================================================
+
+fn test_svd_decomposition() {
+    let a = Tensor.from([
+        [1.0, 2.0],
+        [3.0, 4.0],
+        [5.0, 6.0]
+    ]);
+
+    let (u, s, vt) = a.svd();
+
+    // U should have orthonormal columns: U^T * U = I
+    let ut = u.T();
+    let utu = ut @ u;
+
+    for i in 0..2 {
+        for j in 0..2 {
+            let expected = if i == j { 1.0 } else { 0.0 };
+            assert(@abs(utu[[i, j]] - expected) < 0.001);
+        }
+    }
+
+    // V^T should be orthogonal
+    let v = vt.T();
+    let vtv = vt @ v;
+
+    for i in 0..2 {
+        for j in 0..2 {
+            let expected = if i == j { 1.0 } else { 0.0 };
+            assert(@abs(vtv[[i, j]] - expected) < 0.001);
+        }
+    }
+
+    // Singular values should be non-negative and sorted descending
+    assert(s[0] >= s[1]);
+    assert(s[0] >= 0.0);
+    assert(s[1] >= 0.0);
+
+    // Verify A = U * S * V^T
+    let sigma = Tensor.zeros([3, 2]);
+    sigma[[0, 0]] = s[0];
+    sigma[[1, 1]] = s[1];
+
+    let reconstructed = u @ sigma @ vt;
+    for i in 0..3 {
+        for j in 0..2 {
+            assert(@abs(a[[i, j]] - reconstructed[[i, j]]) < 0.01);
+        }
+    }
+}
+
+fn test_svd_rank_deficient() {
+    // Create rank-1 matrix
+    let a = Tensor.from([
+        [1.0, 2.0, 3.0],
+        [2.0, 4.0, 6.0]
+    ]);
+
+    let (u, s, vt) = a.svd();
+
+    // Should have one significant singular value, rest near zero
+    assert(s[0] > 1.0);
+    assert(s[1] < 0.0001);
+}
+
+// =============================================================================
+// Eigenvalue Decomposition (Symmetric)
+// =============================================================================
+
+fn test_eig_symmetric() {
+    // Symmetric matrix
+    let a = Tensor.from([
+        [4.0, 2.0, 1.0],
+        [2.0, 5.0, 3.0],
+        [1.0, 3.0, 6.0]
+    ]);
+
+    let (eigenvalues, eigenvectors) = a.eigh();
+
+    // Eigenvalues should be real (for symmetric matrix)
+    // Eigenvectors should be orthonormal
+    let vt = eigenvectors.T();
+    let vtv = vt @ eigenvectors;
+
+    for i in 0..3 {
+        for j in 0..3 {
+            let expected = if i == j { 1.0 } else { 0.0 };
+            assert(@abs(vtv[[i, j]] - expected) < 0.01);
+        }
+    }
+
+    // Verify A * v = lambda * v for each eigenpair
+    for k in 0..3 {
+        let v = eigenvectors.slice(0.., k..k+1).squeeze(1);
+        let av = a @ v;
+        let lambda_v = v * eigenvalues[k];
+
+        for i in 0..3 {
+            assert(@abs(av[i] - lambda_v[i]) < 0.01);
+        }
+    }
+}
+
+fn test_eig_symmetric_diagonal() {
+    // Diagonal matrix - eigenvalues are diagonal elements
+    let a = Tensor.from([
+        [3.0, 0.0, 0.0],
+        [0.0, 5.0, 0.0],
+        [0.0, 0.0, 7.0]
+    ]);
+
+    let (eigenvalues, _) = a.eigh();
+
+    // Eigenvalues should be 3, 5, 7 (possibly reordered)
+    let sorted = eigenvalues.sort();
+    assert(@abs(sorted[0] - 3.0) < 0.0001);
+    assert(@abs(sorted[1] - 5.0) < 0.0001);
+    assert(@abs(sorted[2] - 7.0) < 0.0001);
+}
+
+// =============================================================================
+// Eigenvalue Decomposition (General)
+// =============================================================================
+
+fn test_eig_general() {
+    // Non-symmetric matrix with complex eigenvalues
+    let a = Tensor.from([
+        [0.0, -1.0],
+        [1.0, 0.0]
+    ]);
+
+    let (real_parts, imag_parts) = a.eig();
+
+    // Eigenvalues should be +i and -i (real part 0, imag part +/-1)
+    assert(@abs(real_parts[0]) < 0.0001);
+    assert(@abs(real_parts[1]) < 0.0001);
+    assert(@abs(@abs(imag_parts[0]) - 1.0) < 0.0001);
+    assert(@abs(@abs(imag_parts[1]) - 1.0) < 0.0001);
+}
+
+fn test_eig_real_eigenvalues() {
+    // Matrix with real eigenvalues
+    let a = Tensor.from([
+        [4.0, 1.0],
+        [2.0, 3.0]
+    ]);
+
+    let (real_parts, imag_parts) = a.eig();
+
+    // Should have real eigenvalues (imaginary parts near zero)
+    assert(@abs(imag_parts[0]) < 0.0001);
+    assert(@abs(imag_parts[1]) < 0.0001);
+
+    // Eigenvalues are 5 and 2
+    let sum = real_parts[0] + real_parts[1];
+    let product = real_parts[0] * real_parts[1];
+
+    assert(@abs(sum - 7.0) < 0.0001);      // trace = sum of eigenvalues
+    assert(@abs(product - 10.0) < 0.001);  // det = product of eigenvalues
+}
+
+// =============================================================================
+// Schur Decomposition
+// =============================================================================
+
+fn test_schur_decomposition() {
+    let a = Tensor.from([
+        [3.0, 2.0, 1.0],
+        [1.0, 4.0, 2.0],
+        [0.0, 1.0, 5.0]
+    ]);
+
+    let (t, z) = a.schur();
+
+    // Z should be orthogonal: Z^T * Z = I
+    let zt = z.T();
+    let ztz = zt @ z;
+
+    for i in 0..3 {
+        for j in 0..3 {
+            let expected = if i == j { 1.0 } else { 0.0 };
+            assert(@abs(ztz[[i, j]] - expected) < 0.01);
+        }
+    }
+
+    // T should be quasi-upper-triangular (upper triangular for real eigenvalues)
+    // For this matrix with real eigenvalues, T should be upper triangular
+    assert(@abs(t[[1, 0]]) < 0.01);
+    assert(@abs(t[[2, 0]]) < 0.01);
+    assert(@abs(t[[2, 1]]) < 0.01);
+
+    // Verify A = Z * T * Z^T
+    let reconstructed = z @ t @ zt;
+    for i in 0..3 {
+        for j in 0..3 {
+            assert(@abs(a[[i, j]] - reconstructed[[i, j]]) < 0.01);
+        }
+    }
+}
+
+// =============================================================================
+// Condition Number and Rank
+// =============================================================================
+
+fn test_condition_number() {
+    // Well-conditioned matrix (close to identity)
+    let a = Tensor.from([
+        [1.0, 0.1],
+        [0.1, 1.0]
+    ]);
+
+    let cond = a.cond();
+
+    // Condition number should be relatively small
+    assert(cond > 1.0);
+    assert(cond < 10.0);
+}
+
+fn test_condition_number_ill_conditioned() {
+    // Nearly singular matrix
+    let a = Tensor.from([
+        [1.0, 1.0],
+        [1.0, 1.0001]
+    ]);
+
+    let cond = a.cond();
+
+    // Condition number should be very large
+    assert(cond > 1000.0);
+}
+
+fn test_matrix_rank() {
+    // Full rank matrix
+    let a = Tensor.from([
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0],
+        [7.0, 8.0, 10.0]  // Not 9, to ensure full rank
+    ]);
+
+    let r = a.rank();
+    assert_eq(r, 3);
+}
+
+fn test_matrix_rank_deficient() {
+    // Rank-deficient matrix (row 3 = row 1 + row 2)
+    let a = Tensor.from([
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0],
+        [5.0, 7.0, 9.0]
+    ]);
+
+    let r = a.rank();
+    assert_eq(r, 2);
+}
+
+// =============================================================================
+// Determinant and Trace
+// =============================================================================
+
+fn test_determinant() {
+    let a = Tensor.from([
+        [1.0, 2.0],
+        [3.0, 4.0]
+    ]);
+
+    let det = a.det();
+
+    // det = 1*4 - 2*3 = -2
+    assert(@abs(det - (-2.0)) < 0.0001);
+}
+
+fn test_determinant_3x3() {
+    let a = Tensor.from([
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0],
+        [7.0, 8.0, 10.0]
+    ]);
+
+    let det = a.det();
+
+    // Determinant of this matrix is -3
+    assert(@abs(det - (-3.0)) < 0.001);
+}
+
+fn test_trace() {
+    let a = Tensor.from([
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0],
+        [7.0, 8.0, 9.0]
+    ]);
+
+    let tr = a.trace();
+
+    // trace = 1 + 5 + 9 = 15
+    assert_eq(tr, 15.0);
+}
+
+// =============================================================================
+// Matrix Norm
+// =============================================================================
+
+fn test_frobenius_norm() {
+    let a = Tensor.from([
+        [1.0, 2.0],
+        [3.0, 4.0]
+    ]);
+
+    let norm = a.norm(kind: "fro");
+
+    // ||A||_F = sqrt(1 + 4 + 9 + 16) = sqrt(30)
+    assert(@abs(norm - @sqrt(30.0)) < 0.0001);
+}
+
+fn test_spectral_norm() {
+    let a = Tensor.from([
+        [1.0, 0.0],
+        [0.0, 2.0]
+    ]);
+
+    let norm = a.norm(kind: 2);
+
+    // For diagonal matrix, spectral norm is max singular value = 2
+    assert(@abs(norm - 2.0) < 0.0001);
+}
+
+// =============================================================================
+// Linear System Solving
+// =============================================================================
+
+fn test_solve() {
+    // Solve Ax = b
+    let a = Tensor.from([
+        [3.0, 1.0],
+        [1.0, 2.0]
+    ]);
+    let b = Tensor.from([9.0, 8.0]);
+
+    let x = a.solve(b);
+
+    // Verify A * x = b
+    let ax = a @ x;
+    assert(@abs(ax[0] - b[0]) < 0.0001);
+    assert(@abs(ax[1] - b[1]) < 0.0001);
+}
+
+fn test_lstsq() {
+    // Overdetermined system (more equations than unknowns)
+    let a = Tensor.from([
+        [1.0, 1.0],
+        [1.0, 2.0],
+        [1.0, 3.0]
+    ]);
+    let b = Tensor.from([1.0, 2.0, 2.0]);
+
+    let x = a.lstsq(b);
+
+    // Solution minimizes ||Ax - b||^2
+    let residual = a @ x - b;
+    let residual_norm = residual.norm();
+
+    // For least squares, A^T * (Ax - b) = 0
+    let at = a.T();
+    let normal_eq = at @ residual;
+    assert(@abs(normal_eq[0]) < 0.01);
+    assert(@abs(normal_eq[1]) < 0.01);
+}
+
+// =============================================================================
+// Matrix Inverse and Pseudoinverse
+// =============================================================================
+
+fn test_inverse() {
+    let a = Tensor.from([
+        [4.0, 7.0],
+        [2.0, 6.0]
+    ]);
+
+    let a_inv = a.inv();
+
+    // A * A^-1 = I
+    let product = a @ a_inv;
+
+    for i in 0..2 {
+        for j in 0..2 {
+            let expected = if i == j { 1.0 } else { 0.0 };
+            assert(@abs(product[[i, j]] - expected) < 0.0001);
+        }
+    }
+}
+
+fn test_pseudoinverse() {
+    // Non-square matrix
+    let a = Tensor.from([
+        [1.0, 2.0],
+        [3.0, 4.0],
+        [5.0, 6.0]
+    ]);
+
+    let a_pinv = a.pinv();
+
+    // For pseudoinverse: A * A+ * A = A
+    let aaa = a @ a_pinv @ a;
+
+    for i in 0..3 {
+        for j in 0..2 {
+            assert(@abs(a[[i, j]] - aaa[[i, j]]) < 0.01);
+        }
+    }
+}
+
+// =============================================================================
+// Kronecker Product and Cross Product
+// =============================================================================
+
+fn test_kronecker_product() {
+    let a = Tensor.from([[1.0, 2.0], [3.0, 4.0]]);
+    let b = Tensor.from([[0.0, 5.0], [6.0, 7.0]]);
+
+    let kron = a.kron(b);
+
+    // Result should be 4x4
+    assert_eq(kron.shape(), [4, 4]);
+
+    // Check specific elements
+    // kron[0,0] = a[0,0] * b[0,0] = 1 * 0 = 0
+    assert_eq(kron[[0, 0]], 0.0);
+    // kron[0,1] = a[0,0] * b[0,1] = 1 * 5 = 5
+    assert_eq(kron[[0, 1]], 5.0);
+    // kron[2,2] = a[1,0] * b[0,0] = 3 * 0 = 0
+    assert_eq(kron[[2, 2]], 0.0);
+}
+
+fn test_cross_product() {
+    let a = Tensor.from([1.0, 0.0, 0.0]);
+    let b = Tensor.from([0.0, 1.0, 0.0]);
+
+    let c = a.cross(b);
+
+    // i x j = k
+    assert_eq(c[0], 0.0);
+    assert_eq(c[1], 0.0);
+    assert_eq(c[2], 1.0);
+}
+
+// =============================================================================
+// Matrix Exponential and Power
+// =============================================================================
+
+fn test_matrix_exponential() {
+    // For nilpotent matrix N^2 = 0: exp(N) = I + N
+    let n = Tensor.from([
+        [0.0, 1.0],
+        [0.0, 0.0]
+    ]);
+
+    let exp_n = n.expm();
+
+    // exp(N) = I + N = [[1, 1], [0, 1]]
+    assert(@abs(exp_n[[0, 0]] - 1.0) < 0.0001);
+    assert(@abs(exp_n[[0, 1]] - 1.0) < 0.0001);
+    assert(@abs(exp_n[[1, 0]]) < 0.0001);
+    assert(@abs(exp_n[[1, 1]] - 1.0) < 0.0001);
+}
+
+fn test_matrix_power() {
+    let a = Tensor.from([
+        [1.0, 1.0],
+        [1.0, 0.0]
+    ]);
+
+    let a2 = a.matrix_power(2);
+    let a3 = a.matrix_power(3);
+
+    // A^2 = A * A
+    let expected_a2 = a @ a;
+    for i in 0..2 {
+        for j in 0..2 {
+            assert(@abs(a2[[i, j]] - expected_a2[[i, j]]) < 0.0001);
+        }
+    }
+
+    // A^3 = A * A * A
+    let expected_a3 = a @ a @ a;
+    for i in 0..2 {
+        for j in 0..2 {
+            assert(@abs(a3[[i, j]] - expected_a3[[i, j]]) < 0.0001);
+        }
+    }
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // LU Decomposition
+    test_lu_decomposition();
+    test_lu_identity();
+
+    // QR Decomposition
+    test_qr_decomposition();
+
+    // Cholesky Decomposition
+    test_cholesky_decomposition();
+
+    // SVD
+    test_svd_decomposition();
+    test_svd_rank_deficient();
+
+    // Eigenvalue (Symmetric)
+    test_eig_symmetric();
+    test_eig_symmetric_diagonal();
+
+    // Eigenvalue (General)
+    test_eig_general();
+    test_eig_real_eigenvalues();
+
+    // Schur Decomposition
+    test_schur_decomposition();
+
+    // Condition Number and Rank
+    test_condition_number();
+    test_condition_number_ill_conditioned();
+    test_matrix_rank();
+    test_matrix_rank_deficient();
+
+    // Determinant and Trace
+    test_determinant();
+    test_determinant_3x3();
+    test_trace();
+
+    // Matrix Norm
+    test_frobenius_norm();
+    test_spectral_norm();
+
+    // Linear System Solving
+    test_solve();
+    test_lstsq();
+
+    // Matrix Inverse
+    test_inverse();
+    test_pseudoinverse();
+
+    // Kronecker and Cross Product
+    test_kronecker_product();
+    test_cross_product();
+
+    // Matrix Functions
+    test_matrix_exponential();
+    test_matrix_power();
+
+    print("003_linalg: PASSED");
+}

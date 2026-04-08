@@ -1,0 +1,57 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: context, protocol, kind_modifier, implement
+// @expected-exit: 0
+// @description: Context protocol with implement blocks and method dispatch
+
+context protocol Validator {
+    fn is_valid(&self) -> Bool;
+    fn error_msg(&self) -> Text;
+}
+
+type Email is { address: Text };
+
+implement Validator for Email {
+    fn is_valid(&self) -> Bool {
+        self.address.len() > 3
+    }
+    fn error_msg(&self) -> Text {
+        f"bad email: {self.address}"
+    }
+}
+
+fn check<T: Validator>(item: T) -> Bool {
+    item.is_valid()
+}
+
+fn main() -> Int {
+    let good = Email { address: "user@test.com" };
+    let bad = Email { address: "x" };
+
+    // Test 1: Valid email
+    if !check(good) {
+        print("FAIL test1");
+        return 1;
+    }
+    print("test1 valid: OK");
+
+    // Test 2: Invalid email
+    if check(bad) {
+        print("FAIL test2");
+        return 1;
+    }
+    print("test2 invalid: OK");
+
+    // Test 3: Direct method
+    let e = Email { address: "hi" };
+    let msg = e.error_msg();
+    if msg != "bad email: hi" {
+        print(f"FAIL test3: {msg}");
+        return 1;
+    }
+    print("test3 error_msg: OK");
+
+    print("1094_context_protocol_dual_use: PASS");
+    0
+}

@@ -1,0 +1,380 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, buffer-overflow, memcpy, copy-operations, advanced
+// @description: Comprehensive tests for safe memory copy operations that prevent buffer overflows
+
+/// Unlike C's memcpy which can overflow destination buffers,
+/// Verum's copy operations are always bounds-checked:
+/// - clone() creates independent copy
+/// - clone_from_slice() copies with size verification
+/// - extend() / extend_from_slice() grows list safely
+/// - copy_within() copies within same buffer safely
+/// - No raw memory copy functions in safe code
+/// - All operations prevent classic buffer overflow vulnerabilities
+
+fn main() {
+    // Basic copy operations
+    test_list_clone();
+    test_list_extend();
+    test_safe_buffer_operations();
+    test_text_copy();
+
+    // Advanced memory copy methods
+    test_clone_from_slice();
+    test_extend_from_slice();
+    test_copy_within();
+    test_swap();
+    test_fill();
+    test_rotate();
+    test_reverse_sort();
+    test_truncate_resize();
+    test_split_and_drain();
+    test_splice();
+
+    // Practical scenarios
+    test_network_packet_handling();
+    test_ring_buffer_simulation();
+    test_memory_pool_simulation();
+
+    print("All safe copy tests passed!");
+}
+
+// ========== Basic Copy Operations ==========
+
+fn test_list_clone() {
+    let source = [10, 20, 30, 40, 50];
+
+    // Clone creates independent copy
+    let dest = source.clone();
+    assert(dest == source);
+    assert(dest.len() == source.len());
+
+    // Verify independence - modify original shouldn't affect clone
+    let mut original = [1, 2, 3];
+    let cloned = original.clone();
+    original[0] = 999;
+    assert(cloned[0] == 1);  // Clone is independent
+}
+
+fn test_list_extend() {
+    // extend grows list safely
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+
+    let more = [4, 5, 6];
+    list.extend(more);
+    assert(list.len() == 6);
+    assert(list[5] == 6);
+
+    // extend handles large sizes safely
+    let mut large_list: List<Int> = List.new();
+    for i in 0..1000 {
+        large_list.push(i);
+    }
+    assert(large_list.len() == 1000);
+    assert(large_list[999] == 999);
+}
+
+fn test_safe_buffer_operations() {
+    // Simulate safe buffer processing (like network packets)
+    let packet_data = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04];
+
+    // Read elements safely with bounds checking
+    let magic_byte1 = packet_data[0];
+    let magic_byte2 = packet_data[1];
+    assert(magic_byte1 == 0xDE);
+    assert(magic_byte2 == 0xAD);
+
+    // Read header bytes
+    let header_b2 = packet_data[2];
+    let header_b3 = packet_data[3];
+    let length = (header_b2 * 256) + header_b3;  // Big endian u16
+    assert(length == 0xBEEF);
+
+    // Read payload bytes safely
+    let payload_start = packet_data[4];
+    assert(payload_start == 0x01);
+
+    // Cannot access out of bounds - would panic, not memory corruption
+    // packet_data[100] would be a runtime error
+}
+
+fn test_text_copy() {
+    let source = Text.from("Hello, World!");
+
+    // Clone creates independent copy
+    let dest = source.clone();
+    assert(dest == source);
+
+    // Substring via slicing is bounds-checked
+    let hello = source[0..5];
+    assert(hello == "Hello");
+
+    // Safe text building
+    let mut builder = Text.new();
+    builder.push_str("Part 1, ");
+    builder.push_str("Part 2, ");
+    builder.push_str("Part 3");
+    assert(builder == "Part 1, Part 2, Part 3");
+
+    // replace is safe
+    let replaced = source.replace("World", "Verum");
+    assert(replaced == "Hello, Verum!");
+
+    // Large text operations are safe
+    let repeated = "x".repeat(1000);
+    assert(repeated.len() == 1000);
+}
+
+// ========== Advanced Memory Copy Methods ==========
+
+fn test_clone_from_slice() {
+    // clone_from_slice copies all elements from source (sizes must match)
+    let mut dest = [0, 0, 0, 0, 0];
+    let source = [1, 2, 3, 4, 5];
+    dest.clone_from_slice(source);
+    assert(dest == [1, 2, 3, 4, 5]);
+
+    // Works with any element type
+    let mut text_dest = ["", "", ""];
+    let text_source = ["hello", "world", "verum"];
+    text_dest.clone_from_slice(text_source);
+    assert(text_dest[0] == "hello");
+    assert(text_dest[2] == "verum");
+}
+
+fn test_extend_from_slice() {
+    // extend_from_slice appends all elements from source
+    let mut list = [1, 2, 3];
+    let extra = [4, 5, 6];
+    list.extend_from_slice(extra);
+    assert(list == [1, 2, 3, 4, 5, 6]);
+
+    // Chain multiple extends
+    let mut chain: List<Int> = List.new();
+    chain.extend_from_slice([1, 2]);
+    chain.extend_from_slice([3, 4]);
+    chain.extend_from_slice([5, 6]);
+    assert(chain.len() == 6);
+    assert(chain[5] == 6);
+}
+
+fn test_copy_within() {
+    // copy_within copies elements within the same list
+    let mut arr = [1, 2, 3, 4, 5, 6, 7, 8];
+    // Copy [0..3] (elements 1,2,3) to position 5
+    arr.copy_within(0..3, 5);
+    assert(arr == [1, 2, 3, 4, 5, 1, 2, 3]);
+
+    // Overlapping copy (destination overlaps source)
+    let mut overlap = [1, 2, 3, 4, 5];
+    overlap.copy_within(0..3, 2);  // Copy [1,2,3] to position 2
+    assert(overlap == [1, 2, 1, 2, 3]);
+
+    // Copy to beginning
+    let mut to_start = [0, 0, 0, 4, 5, 6];
+    to_start.copy_within(3..6, 0);
+    assert(to_start == [4, 5, 6, 4, 5, 6]);
+}
+
+fn test_swap() {
+    // swap exchanges two elements
+    let mut list = [10, 20, 30, 40, 50];
+    list.swap(1, 3);
+    assert(list == [10, 40, 30, 20, 50]);
+
+    // swap with same index is no-op
+    list.swap(0, 0);
+    assert(list[0] == 10);
+
+    // swap last and first
+    list.swap(0, 4);
+    assert(list[0] == 50);
+    assert(list[4] == 10);
+}
+
+fn test_fill() {
+    // fill sets all elements to the same value
+    let mut list = [1, 2, 3, 4, 5];
+    list.fill(42);
+    assert(list == [42, 42, 42, 42, 42]);
+
+    // fill with zero (common for buffer clearing)
+    let mut buffer = [0xFF, 0xFF, 0xFF, 0xFF];
+    buffer.fill(0);
+    assert(buffer == [0, 0, 0, 0]);
+}
+
+fn test_rotate() {
+    // rotate_left moves elements n positions to the left
+    let mut list = [1, 2, 3, 4, 5];
+    list.rotate_left(2);
+    assert(list == [3, 4, 5, 1, 2]);
+
+    // rotate_right moves elements n positions to the right
+    list.rotate_right(2);
+    assert(list == [1, 2, 3, 4, 5]);
+
+    // Rotate by length is identity
+    let mut identity = [1, 2, 3];
+    identity.rotate_left(3);
+    assert(identity == [1, 2, 3]);
+
+    // Rotate by more than length wraps around
+    identity.rotate_left(4);  // Same as rotate_left(1)
+    assert(identity == [2, 3, 1]);
+}
+
+fn test_reverse_sort() {
+    // reverse reverses the list in place
+    let mut list = [1, 2, 3, 4, 5];
+    list.reverse();
+    assert(list == [5, 4, 3, 2, 1]);
+
+    // sort sorts the list
+    let mut unsorted = [5, 2, 8, 1, 9, 3];
+    unsorted.sort();
+    assert(unsorted == [1, 2, 3, 5, 8, 9]);
+
+    // dedup removes consecutive duplicates (after sort for unique)
+    let mut with_dups = [1, 2, 2, 3, 3, 3, 4];
+    with_dups.dedup();
+    assert(with_dups == [1, 2, 3, 4]);
+}
+
+fn test_truncate_resize() {
+    // truncate reduces list to first n elements
+    let mut list = [1, 2, 3, 4, 5];
+    list.truncate(3);
+    assert(list == [1, 2, 3]);
+
+    // resize changes length, filling with value if growing
+    list.resize(6, 0);
+    assert(list == [1, 2, 3, 0, 0, 0]);
+
+    // resize to smaller truncates
+    list.resize(2, 99);
+    assert(list == [1, 2]);
+}
+
+fn test_split_and_drain() {
+    // split_off splits list at index, returning second part
+    let mut list = [1, 2, 3, 4, 5];
+    let second_half = list.split_off(3);
+    assert(list == [1, 2, 3]);
+    assert(second_half == [4, 5]);
+
+    // drain removes and returns a range of elements
+    let mut full = [1, 2, 3, 4, 5, 6, 7];
+    let drained = full.drain(2..5);
+    assert(full == [1, 2, 6, 7]);
+    assert(drained == [3, 4, 5]);
+
+    // append adds all elements from another list
+    let mut base = [1, 2];
+    let more = [3, 4];
+    base.append(more);
+    assert(base == [1, 2, 3, 4]);
+}
+
+fn test_splice() {
+    // splice replaces a range with new elements, returning removed ones
+    let mut list = [1, 2, 3, 4, 5];
+    let removed = list.splice(1..4, [10, 20]);
+    assert(list == [1, 10, 20, 5]);
+    assert(removed == [2, 3, 4]);
+
+    // splice can insert without removing (empty range)
+    let mut insert_only = [1, 5];
+    let empty = insert_only.splice(1..1, [2, 3, 4]);
+    assert(insert_only == [1, 2, 3, 4, 5]);
+    assert(empty.len() == 0);
+
+    // splice can remove without inserting (empty replacement)
+    let mut remove_only = [1, 2, 3, 4, 5];
+    let old = remove_only.splice(1..4, []);
+    assert(remove_only == [1, 5]);
+    assert(old == [2, 3, 4]);
+}
+
+// ========== Practical Scenarios ==========
+
+fn test_network_packet_handling() {
+    // Simulating safe network packet buffer manipulation
+    let mut recv_buffer = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];  // 10-byte receive buffer
+
+    // "Receive" packet header
+    let packet_header = [0x01, 0x02, 0x03, 0x04];
+    recv_buffer.clone_from_slice([0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0, 0, 0]);
+
+    // Verify magic number (first 2 bytes)
+    assert(recv_buffer[0] == 0x01);
+    assert(recv_buffer[1] == 0x02);
+
+    // Copy payload to processing buffer
+    let mut process_buffer = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    process_buffer.clone_from_slice(recv_buffer);
+
+    // Safe transformation
+    process_buffer.rotate_left(4);  // Move payload to front
+    assert(process_buffer[0] == 0);  // First byte of original payload area
+}
+
+fn test_ring_buffer_simulation() {
+    // Simulating a ring buffer with safe operations
+    let mut ring_buf = [0, 0, 0, 0, 0];  // 5-element ring buffer
+    let mut write_pos = 0;
+
+    // Write some values
+    for i in 0..5 {
+        ring_buf[write_pos] = i * 10;
+        write_pos = (write_pos + 1) % 5;
+    }
+    assert(ring_buf == [0, 10, 20, 30, 40]);
+
+    // Rotate to simulate read pointer movement
+    ring_buf.rotate_left(2);
+    assert(ring_buf == [20, 30, 40, 0, 10]);
+
+    // Clear and refill
+    ring_buf.fill(0);
+    assert(ring_buf == [0, 0, 0, 0, 0]);
+}
+
+fn test_memory_pool_simulation() {
+    // Simulating a memory pool with block management
+    let mut pool = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];  // 12-unit pool
+
+    // Allocate blocks (mark as used with block ID)
+    pool.splice(0..4, [1, 1, 1, 1]);  // Block 1: units 0-3
+    assert(pool[0] == 1);
+    assert(pool[3] == 1);
+
+    // Allocate another block
+    pool.splice(4..8, [2, 2, 2, 2]);  // Block 2: units 4-7
+    assert(pool[4] == 2);
+
+    // Free block 1 (mark as available)
+    pool.splice(0..4, [0, 0, 0, 0]);
+    assert(pool[0] == 0);
+    assert(pool[4] == 2);  // Block 2 still allocated
+
+    // Coalesce: move block 2 to freed space (compaction)
+    pool.copy_within(4..8, 0);
+    pool.splice(4..8, [0, 0, 0, 0]);  // Clear old location
+    assert(pool[0] == 2);  // Block 2 moved to front
+    assert(pool[4] == 0);  // Old location cleared
+}
+
+// Demonstrate that buffer overflow is impossible:
+// 1. No raw memcpy - use clone(), clone_from_slice(), extend() etc.
+// 2. Array indexing is bounds-checked
+// 3. List grows dynamically, can't overflow
+// 4. Text handles its own memory
+// 5. No raw pointers in safe Verum code
+// 6. All mutation operations preserve invariants
+// 7. copy_within() is bounds-checked
+// 8. splice(), drain(), split_off() maintain valid state

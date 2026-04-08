@@ -1,0 +1,172 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, ghost, specification
+// @timeout: 10000
+// @description: Ghost variables for specification purposes
+
+/// Ghost variables exist only for verification, not in compiled code
+
+// Ghost field in type
+type Counter is {
+    value: Int,
+    ghost total_increments: Int,
+    ghost total_decrements: Int,
+};
+
+implement Counter {
+    @verify(proof)
+    fn new() -> Self {
+        contract#"
+            ensures result.value == 0;
+            ensures result.total_increments == 0;
+            ensures result.total_decrements == 0;
+        ";
+        Self {
+            value: 0,
+            ghost total_increments: 0,
+            ghost total_decrements: 0,
+        }
+    }
+
+    @verify(proof)
+    fn increment(&mut self) {
+        contract#"
+            ensures self.value == old(self.value) + 1;
+            ensures self.total_increments == old(self.total_increments) + 1;
+            ensures self.total_decrements == old(self.total_decrements);
+        ";
+        self.value += 1;
+        { self.total_increments += 1; }
+    }
+
+    @verify(proof)
+    fn decrement(&mut self) {
+        contract#"
+            ensures self.value == old(self.value) - 1;
+            ensures self.total_increments == old(self.total_increments);
+            ensures self.total_decrements == old(self.total_decrements) + 1;
+        ";
+        self.value -= 1;
+        { self.total_decrements += 1; }
+    }
+
+    @verify(proof)
+    fn net_operations(&self) -> Int {
+        contract#"
+            ensures result == self.total_increments - self.total_decrements;
+            ensures result == self.value;
+        ";
+        { self.total_increments - self.total_decrements }
+    }
+}
+
+// Ghost parameters for specification
+@verify(proof)
+fn binary_search(
+    arr: &[Int],
+    target: Int,
+    sorted_witness: fn(i: Int, j: Int) -> Bool  // Proof that array is sorted
+) -> Maybe<Int> {
+    contract#"
+        requires forall i: Int, j: Int. 0 <= i < j < arr.len() implies sorted_witness(i, j);
+        requires forall i: Int, j: Int. sorted_witness(i, j) implies arr[i] <= arr[j];
+        ensures match result {
+            Some(i) => arr[i] == target,
+            None => forall i: Int. 0 <= i < arr.len() implies arr[i] != target,
+        };
+    ";
+    let mut low = 0;
+    let mut high = arr.len() as Int;
+
+    while low < high
+        invariant 0 <= low <= high <= arr.len()
+        invariant forall i: Int. 0 <= i < low implies arr[i] < target
+        invariant forall i: Int. high <= i < arr.len() implies arr[i] > target
+    {
+        let mid = low + (high - low) / 2;
+        if arr[mid] == target {
+            return Some(mid);
+        } else if arr[mid] < target {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+
+    None
+}
+
+// Ghost state for protocol verification
+type Connection is {
+    socket: Socket,
+    ghost state: ConnectionState,
+};
+
+type ConnectionState is
+    | Closed
+    | Connecting
+    | Connected
+    | Disconnecting;
+
+implement Connection {
+    @verify(proof)
+    fn connect(&mut self) -> Result<(), Error> {
+        contract#"
+            requires self.state == ConnectionState.Closed;
+            ensures match result {
+                Ok(()) => self.state == ConnectionState.Connected,
+                Err(_) => self.state == ConnectionState.Closed,
+            };
+        ";
+        { self.state = ConnectionState.Connecting; }
+
+        match self.socket.connect() {
+            Ok(()) => {
+                { self.state = ConnectionState.Connected; }
+                Ok(())
+            }
+            Err(e) => {
+                { self.state = ConnectionState.Closed; }
+                Err(e)
+            }
+        }
+    }
+
+    @verify(proof)
+    fn send(&self, data: &[Byte]) -> Result<(), Error> {
+        contract#"
+            requires self.state == ConnectionState.Connected;
+        ";
+        self.socket.send(data);
+        Ok(())
+    }
+}
+
+// Ghost loop counters
+@verify(proof)
+fn sum_array(arr: &[Int]) -> Int {
+    contract#"
+        ensures result == arr.iter().sum();
+    ";
+    let mut sum = 0;
+    let mut ghost_sum = 0;
+
+    for i in 0..arr.len()
+        invariant sum == ghost_sum
+        invariant ghost_sum == arr[0..i].iter().sum()
+    {
+        sum += arr[i];
+        { ghost_sum += arr[i]; }
+    }
+
+    sum
+}
+
+fn main() {
+    let mut counter = Counter.new();
+    counter.increment();
+    counter.increment();
+    counter.decrement();
+    assert(counter.value == 1);
+}

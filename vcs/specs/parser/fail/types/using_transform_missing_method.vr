@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, context, transform, error
+// @description: Test detection of invalid transform syntax (dot without method)
+// @expected-error: E018
+
+// Transform requires method call after dot
+type Callback is fn() using [Database.];

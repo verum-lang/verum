@@ -1,0 +1,293 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, fft, scatter, random, memory
+// @timeout: 50000
+// @expected-exit: 0
+// @description: TensorExt utility operations — FFT simulation, scatter, contiguous view, random, memory ops
+
+// ============================================================================
+// Float helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool {
+    abs_f(a - b) < tol
+}
+
+// ============================================================================
+// 8-element float array
+// ============================================================================
+
+type FArr8 is {
+    e0: Float, e1: Float, e2: Float, e3: Float,
+    e4: Float, e5: Float, e6: Float, e7: Float
+};
+
+fn farr8_get(a: FArr8, i: Int) -> Float {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn farr8_set(a: FArr8, i: Int, val: Float) -> FArr8 {
+    FArr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+fn farr8_zeros() -> FArr8 {
+    FArr8 { e0: 0.0, e1: 0.0, e2: 0.0, e3: 0.0, e4: 0.0, e5: 0.0, e6: 0.0, e7: 0.0 }
+}
+
+// ============================================================================
+// 8-element int array
+// ============================================================================
+
+type IArr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn iarr8_get(a: IArr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn iarr8_set(a: IArr8, i: Int, val: Int) -> IArr8 {
+    IArr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+fn iarr8_zeros() -> IArr8 {
+    IArr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// Test 1: Simple DFT (2-point) — manual Fourier transform
+// For N=2: X[0] = x[0]+x[1], X[1] = x[0]-x[1]
+// ============================================================================
+
+@test
+fn test_fft_2point() {
+    let x0 = 3.0;
+    let x1 = 5.0;
+
+    // 2-point DFT
+    let real0 = x0 + x1;  // DC component
+    let real1 = x0 - x1;  // Nyquist component
+
+    assert(approx_eq(real0, 8.0, 0.001));
+    assert(approx_eq(real1, 0.0 - 2.0, 0.001));
+
+    // Inverse: x[0] = (X[0]+X[1])/2, x[1] = (X[0]-X[1])/2
+    let inv0 = (real0 + real1) / 2.0;
+    let inv1 = (real0 - real1) / 2.0;
+    assert(approx_eq(inv0, 3.0, 0.001));
+    assert(approx_eq(inv1, 5.0, 0.001));
+
+    print("  test_fft_2point: ok");
+}
+
+// ============================================================================
+// Test 2: 4-point DFT (real part only, simplified)
+// X[k] = sum_n x[n] * cos(2*pi*k*n/N)
+// Using cos approx: cos(x) ~ 1 - x^2/2 + x^4/24
+// ============================================================================
+
+fn manual_cos(x: Float) -> Float {
+    let x2 = x * x;
+    let x4 = x2 * x2;
+    let x6 = x4 * x2;
+    1.0 - x2 / 2.0 + x4 / 24.0 - x6 / 720.0
+}
+
+@test
+fn test_fft_4point_real() {
+    // Input: [1.0, 2.0, 3.0, 4.0]
+    let x0 = 1.0;
+    let x1 = 2.0;
+    let x2 = 3.0;
+    let x3 = 4.0;
+    let pi = 3.14159265;
+
+    // X[0] = x0 + x1 + x2 + x3 = 10
+    let dc = x0 + x1 + x2 + x3;
+    assert(approx_eq(dc, 10.0, 0.001));
+
+    // X[2] (real part at Nyquist for N=4)
+    // cos(0)=1, cos(pi)=-1, cos(2pi)=1, cos(3pi)=-1
+    let nyquist = x0 * 1.0 + x1 * (0.0 - 1.0) + x2 * 1.0 + x3 * (0.0 - 1.0);
+    // = 1 - 2 + 3 - 4 = -2
+    assert(approx_eq(nyquist, 0.0 - 2.0, 0.001));
+
+    // Parseval's theorem: sum |x[n]|^2 = (1/N) * sum |X[k]|^2
+    let energy_time = x0 * x0 + x1 * x1 + x2 * x2 + x3 * x3;
+    // = 1 + 4 + 9 + 16 = 30
+    assert(approx_eq(energy_time, 30.0, 0.001));
+
+    print("  test_fft_4point_real: ok");
+}
+
+// ============================================================================
+// Test 3: Scatter — write values at arbitrary indices
+// ============================================================================
+
+@test
+fn test_scatter() {
+    // Source values: [10.0, 20.0, 30.0]
+    // Indices:       [2, 5, 0]
+    // Destination (8 elements, initially zero), scatter into it
+    let mut dst = farr8_zeros();
+
+    let src_vals_0 = 10.0;
+    let src_vals_1 = 20.0;
+    let src_vals_2 = 30.0;
+    let idx_0 = 2;
+    let idx_1 = 5;
+    let idx_2 = 0;
+
+    dst = farr8_set(dst, idx_0, src_vals_0);
+    dst = farr8_set(dst, idx_1, src_vals_1);
+    dst = farr8_set(dst, idx_2, src_vals_2);
+
+    assert(approx_eq(farr8_get(dst, 0), 30.0, 0.001));
+    assert(approx_eq(farr8_get(dst, 1), 0.0, 0.001));
+    assert(approx_eq(farr8_get(dst, 2), 10.0, 0.001));
+    assert(approx_eq(farr8_get(dst, 3), 0.0, 0.001));
+    assert(approx_eq(farr8_get(dst, 5), 20.0, 0.001));
+
+    // Scatter-add: accumulate at same index
+    let mut acc = farr8_zeros();
+    acc = farr8_set(acc, 1, farr8_get(acc, 1) + 5.0);
+    acc = farr8_set(acc, 1, farr8_get(acc, 1) + 7.0);
+    acc = farr8_set(acc, 1, farr8_get(acc, 1) + 3.0);
+    assert(approx_eq(farr8_get(acc, 1), 15.0, 0.001));
+
+    print("  test_scatter: ok");
+}
+
+// ============================================================================
+// Test 4: Contiguous view — stride/offset simulation
+// ============================================================================
+
+fn view_index(data_offset: Int, stride_row: Int, stride_col: Int, row: Int, col: Int) -> Int {
+    data_offset + row * stride_row + col * stride_col
+}
+
+fn view_is_contiguous(stride_col: Int, stride_row: Int, shape_cols: Int) -> Int {
+    if stride_col == 1 {
+        if stride_row == shape_cols { 1 } else { 0 }
+    } else { 0 }
+}
+
+@test
+fn test_contiguous_view() {
+    // 3x4 contiguous matrix: offset=0, rows=3, cols=4, stride_row=4, stride_col=1
+    assert_eq(view_is_contiguous(1, 4, 4), 1);
+    assert_eq(view_index(0, 4, 1, 0, 0), 0);
+    assert_eq(view_index(0, 4, 1, 1, 2), 6);   // 0 + 1*4 + 2*1 = 6
+    assert_eq(view_index(0, 4, 1, 2, 3), 11);  // 0 + 2*4 + 3*1 = 11
+
+    // Transposed view (non-contiguous): stride_row=1, stride_col=4
+    assert_eq(view_is_contiguous(4, 1, 3), 0);
+    assert_eq(view_index(0, 1, 4, 2, 1), 6);   // 0 + 2*1 + 1*4 = 6
+
+    // Slice with offset=4
+    assert_eq(view_is_contiguous(1, 4, 4), 1);
+    assert_eq(view_index(4, 4, 1, 0, 0), 4);   // row 1 of original
+    assert_eq(view_index(4, 4, 1, 1, 3), 11);  // 4 + 1*4 + 3*1 = 11
+
+    print("  test_contiguous_view: ok");
+}
+
+// ============================================================================
+// Test 5: Linear congruential PRNG simulation
+// ============================================================================
+
+type RngState is { seed: Int };
+
+fn rng_next(state: RngState) -> RngState {
+    // LCG: seed = (a * seed + c) mod m
+    // Using small modulus for testability
+    let a = 1103515245;
+    let c = 12345;
+    let m = 2147483648;  // 2^31
+    let next = (a * state.seed + c) % m;
+    // Ensure positive
+    let pos = if next < 0 { next + m } else { next };
+    RngState { seed: pos }
+}
+
+fn rng_value_in_range(state: RngState, max_val: Int) -> Int {
+    state.seed % max_val
+}
+
+@test
+fn test_random_generation() {
+    let mut rng = RngState { seed: 42 };
+
+    // Generate a sequence and verify determinism
+    rng = rng_next(rng);
+    let v0 = rng.seed;
+    rng = rng_next(rng);
+    let v1 = rng.seed;
+    rng = rng_next(rng);
+    let v2 = rng.seed;
+
+    // Same seed should produce same sequence
+    let mut rng2 = RngState { seed: 42 };
+    rng2 = rng_next(rng2);
+    assert_eq(rng2.seed, v0);
+    rng2 = rng_next(rng2);
+    assert_eq(rng2.seed, v1);
+    rng2 = rng_next(rng2);
+    assert_eq(rng2.seed, v2);
+
+    // Values should be in range [0, m)
+    assert(v0 >= 0);
+    assert(v1 >= 0);
+    assert(v2 >= 0);
+
+    // Range mapping
+    let r = rng_value_in_range(rng, 100);
+    assert(r >= 0);
+    assert(r < 100);
+
+    print("  test_random_generation: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_fft_2point();
+    test_fft_4point_real();
+    test_scatter();
+    test_contiguous_view();
+    test_random_generation();
+    print("[OK] 082_tensor_ext_utility");
+    0
+}

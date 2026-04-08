@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, error
+// @description: Test missing type body detection
+// @expected-error: E045
+
+type Point is;
+
+type Option<T> is;
+
+type Empty is ;

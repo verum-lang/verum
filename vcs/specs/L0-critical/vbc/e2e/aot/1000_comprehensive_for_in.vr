@@ -1,0 +1,147 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: for-in, list, map, range, iteration, closures
+// @description: Comprehensive for-in iteration over all collection types
+
+fn sum_list(items: List<Int>) -> Int {
+    let mut total = 0;
+    for item in items {
+        total = total + item;
+    }
+    total
+}
+
+fn count_if(items: List<Int>, threshold: Int) -> Int {
+    let mut count = 0;
+    for item in items {
+        if (item > threshold) {
+            count = count + 1;
+        }
+    }
+    count
+}
+
+fn collect_range(start: Int, end: Int) -> List<Int> {
+    let mut result = [];
+    for i in start..end {
+        result.push(i);
+    }
+    result
+}
+
+fn sum_map_values(m: Map<Text, Int>) -> Int {
+    let mut total = 0;
+    for (k, v) in m {
+        total = total + v;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Test 1: for-in over List param
+    let nums = [10, 20, 30, 40, 50];
+    let s = sum_list(nums);
+    if (s != 150) {
+        print(f"FAIL test1: sum={s}");
+        return 1;
+    }
+
+    // Test 2: for-in with condition
+    let count = count_if(nums, 25);
+    if (count != 3) {
+        print(f"FAIL test2: count={count}");
+        return 1;
+    }
+
+    // Test 3: for-in range
+    let collected = collect_range(5, 10);
+    if (collected.len() != 5) {
+        print(f"FAIL test3: len={collected.len()}");
+        return 1;
+    }
+    if (collected[0] != 5 || collected[4] != 9) {
+        print(f"FAIL test3b");
+        return 1;
+    }
+
+    // Test 4: for-in inclusive range
+    let mut inc_sum = 0;
+    for i in 1..=10 {
+        inc_sum = inc_sum + i;
+    }
+    if (inc_sum != 55) {
+        print(f"FAIL test4: inc_sum={inc_sum}");
+        return 1;
+    }
+
+    // Test 5: nested for-in
+    let mut matrix_sum = 0;
+    for i in 0..3 {
+        for j in 0..4 {
+            matrix_sum = matrix_sum + (i * 4 + j);
+        }
+    }
+    if (matrix_sum != 66) {
+        print(f"FAIL test5: matrix_sum={matrix_sum}");
+        return 1;
+    }
+
+    // Test 6: for-in over local list
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut even_sum = 0;
+    for x in data {
+        if (x % 2 == 0) {
+            even_sum = even_sum + x;
+        }
+    }
+    if (even_sum != 30) {
+        print(f"FAIL test6: even_sum={even_sum}");
+        return 1;
+    }
+
+    // Test 7: for-in building new list
+    let mut squares = [];
+    for i in 1..=5 {
+        squares.push(i * i);
+    }
+    let sq_sum = sum_list(squares);
+    if (sq_sum != 55) {
+        print(f"FAIL test7: sq_sum={sq_sum}");
+        return 1;
+    }
+
+    // Test 8: for-in with closures
+    let items = [3, 1, 4, 1, 5, 9, 2, 6];
+    let above4 = count_if(items, 4);
+    if (above4 != 3) {
+        print(f"FAIL test8: above4={above4}");
+        return 1;
+    }
+
+    // Test 9: for-in over Map
+    let mut m = Map.new();
+    m.insert("x", 10);
+    m.insert("y", 20);
+    m.insert("z", 30);
+    let mv = sum_map_values(m);
+    if (mv != 60) {
+        print(f"FAIL test9: mv={mv}");
+        return 1;
+    }
+
+    // Test 10: for-in range with computed bounds
+    let lo = 3;
+    let hi = 8;
+    let mut range_sum = 0;
+    for i in lo..hi {
+        range_sum = range_sum + i;
+    }
+    if (range_sum != 25) {
+        print(f"FAIL test10: range_sum={range_sum}");
+        return 1;
+    }
+
+    print("1000_comprehensive_for_in: PASS");
+    0
+}

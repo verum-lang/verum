@@ -1,0 +1,140 @@
+// @test: parse-pass
+// @tier: 0
+// @category: contexts
+// @description: Test context group definitions and @std attribute
+
+// Basic context group definition
+using IOContexts = [FileSystem, Network, Console];
+
+// Database-related contexts
+using DatabaseContexts = [Database, Cache, TransactionManager];
+
+// Logging and metrics
+using ObservabilityContexts = [Logger, Metrics, Tracer];
+
+// Combined groups
+using AllContexts = [IOContexts, DatabaseContexts, ObservabilityContexts];
+
+// Single context group (for consistency)
+using SingleContext = [Logger];
+
+// Group with negative contexts
+using PureContexts = [!IO, !Database, !Network, !FileSystem];
+
+// Group with conditional contexts
+using DebugContexts = [Logger, Debugger if cfg.debug, Profiler if cfg.profile];
+
+// Group with transformed contexts
+using TransactionalContexts = [Database.transactional(), Cache.scoped()];
+
+// Standard library context groups with @std attribute
+@std(io)
+context FileSystem {
+    fn read(&self, path: Text) -> Result<Bytes, IoError>;
+    fn write(&mut self, path: Text, data: Bytes) -> Result<(), IoError>;
+}
+
+@std(io)
+context Network {
+    fn connect(&self, host: Text, port: Int) -> Result<Connection, NetError>;
+}
+
+@std(logging)
+context Logger {
+    fn log(&self, level: LogLevel, msg: Text);
+    fn info(&self, msg: Text);
+    fn warn(&self, msg: Text);
+    fn error(&self, msg: Text);
+    fn debug(&self, msg: Text);
+}
+
+@std(metrics)
+context Metrics {
+    fn counter(&mut self, name: Text, value: Int);
+    fn gauge(&mut self, name: Text, value: Float);
+    fn histogram(&mut self, name: Text, value: Float);
+}
+
+@std(time)
+context Clock {
+    fn now(&self) -> Instant;
+    fn sleep(&self, duration: Duration);
+}
+
+@std(random)
+context Random {
+    fn next_int(&mut self) -> Int;
+    fn next_float(&mut self) -> Float;
+    fn next_bool(&mut self) -> Bool;
+}
+
+// Function using context group
+fn full_operation() using AllContexts {
+    Logger.info("Starting operation");
+    let data = Network.fetch(url);
+    Database.save(data);
+    FileSystem.write("backup.dat", data);
+    Metrics.increment("operations_completed");
+}
+
+// Function using standard IO contexts
+fn io_operation() using IOContexts {
+    let content = FileSystem.read("input.txt");
+    let response = Network.post(url, content);
+    Console.print(response);
+}
+
+// Function using database contexts
+fn db_operation() using DatabaseContexts {
+    let cached = Cache.get("key");
+    if cached is None {
+        TransactionManager.begin();
+        let data = Database.query("...");
+        Cache.set("key", data);
+        TransactionManager.commit();
+    }
+}
+
+// Function with pure restriction
+fn pure_compute(x: Int) -> Int using PureContexts {
+    // Can only do pure computation, no side effects
+    x * x + x
+}
+
+// Combining groups in using clause
+fn combined() using [IOContexts, Logger] {
+    FileSystem.read("test.txt");
+    Network.fetch(url);
+    Logger.info("Done");
+}
+
+// Nested group expansion
+using WebContexts = [Network, Logger, Metrics];
+using ServiceContexts = [WebContexts, Database, Cache];
+
+fn service_handler(req: Request) -> Response using ServiceContexts {
+    Metrics.increment("requests");
+    Logger.info(f"Handling {req.path}");
+
+    let data = Cache.get(req.path) ?? {
+        let fresh = Database.query(req.query);
+        Cache.set(req.path, fresh);
+        fresh
+    };
+
+    Response.ok(data)
+}
+
+// Multiple std groups
+using HttpContexts = [Network, Logger, Metrics, Tracer];
+
+using PersistenceContexts = [Database, Cache, TransactionManager];
+
+// Context group with aliased members
+using DualDbContexts = [Database as primary, Database as replica, Logger];
+
+fn replicated_read() using DualDbContexts {
+    let data = replica.query("SELECT ...");
+    Logger.info(f"Read from replica: {data}");
+    data
+}

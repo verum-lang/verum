@@ -1,0 +1,28 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let mut outer_count = 0;
+    let mut inner_total = 0;
+
+    while true {
+        outer_count = outer_count + 1;
+        let mut inner_count = 0;
+
+        while true {
+            inner_count = inner_count + 1;
+            inner_total = inner_total + 1;
+            if inner_count >= 3 {
+                break;  // Breaks inner loop
+            }
+        }
+
+        if outer_count >= 2 {
+            break;  // Breaks outer loop
+        }
+    }
+
+    assert_eq(outer_count, 2);
+    assert_eq(inner_total, 6);  // 3 iterations × 2 outer loops
+}

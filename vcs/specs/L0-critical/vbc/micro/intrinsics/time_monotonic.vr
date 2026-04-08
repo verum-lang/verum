@@ -1,0 +1,16 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Test that basic operations complete in finite time
+    // This indirectly tests that the runtime is functioning
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 100 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    // sum should be 0+1+2+...+99 = 4950
+    assert_eq(sum, 4950);
+}

@@ -1,0 +1,104 @@
+// @test: run
+// @expected-stdout: All verification levels working correctly
+// @tier: 0
+// @level: L2
+// @tags: verification, fallback, levels
+
+/// Verification level fallback demonstration
+/// Shows how verification levels degrade gracefully
+
+/// Level 3 (proof) - verified by SMT solver if available
+@verify(proof, fallback: compile_time)
+fn proven_abs(x: Int) -> Int{>= 0} {
+    // contract: 
+    //         ensures result >= 0;
+    if x >= 0 { x } else { -x }
+}
+
+/// Level 2 (static) - verified by type checker
+@verify(static, fallback: runtime)
+fn typed_positive(x: Int{> 0}) -> Int{> 0} {
+    // contract: 
+    //         requires x > 0;
+    //         ensures result > 0;
+    x * 2
+}
+
+/// Level 1 (runtime) - verified at execution time
+@verify(runtime)
+fn runtime_checked(x: Int) -> Int {
+    // contract: 
+    //         requires x != 0;
+    100 / x
+}
+
+/// Automatic level selection based on context
+@verify(auto)
+fn auto_verified(list: &List<Int>, idx: Int) -> Int {
+    // contract: 
+    //         requires idx >= 0 && idx < list.len();
+    list[idx]
+}
+
+/// Fallback chain: proof -> static -> runtime
+@verify(proof)
+fn triple_fallback(x: Int{> 0}, y: Int{> 0}) -> Int{> 0}
+    requires x > 0 && y > 0
+    ensures result > 0
+{
+    x + y
+}
+
+/// Conditional verification based on build mode
+@cfg(debug)
+@verify(runtime)
+fn debug_checked(x: Int) -> Int {
+    // contract: 
+    //         requires x >= 0;
+    x
+}
+
+@cfg(release)
+@verify(static)
+fn debug_checked(x: Int{>= 0}) -> Int{>= 0} {
+    // contract: 
+    //         requires x >= 0;
+    x
+}
+
+// Module-level verification settings (compile-time only)
+// @verification_level(static) — applied at module scope
+
+/// Function overrides module setting
+@verify(proof)
+fn override_module_level(x: Int) -> Int {
+    // contract: 
+    //         ensures result == x * 2;
+    x * 2
+}
+
+fn main() {
+    // Test each verification level
+    let abs_result = proven_abs(-5);
+    assert(abs_result == 5);
+
+    let positive_result = typed_positive(10);
+    assert(positive_result == 20);
+
+    let runtime_result = runtime_checked(4);
+    assert(runtime_result == 25);
+
+    let auto_result = auto_verified(&[1, 2, 3], 1);
+    assert(auto_result == 2);
+
+    let fallback_result = triple_fallback(3, 7);
+    assert(fallback_result == 10);
+
+    let debug_result = debug_checked(42);
+    assert(debug_result == 42);
+
+    let override_result = override_module_level(5);
+    assert(override_result == 10);
+
+    println("All verification levels working correctly");
+}

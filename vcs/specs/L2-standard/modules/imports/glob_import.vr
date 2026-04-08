@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, imports, glob, wildcard
+
+/// Glob link - importing all public items from a module.
+/// The wildcard form: `link module.path.*;`
+
+module math {
+    pub fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    pub fn multiply(a: Int, b: Int) -> Int {
+        a * b
+    }
+
+    pub fn factorial(n: Int) -> Int {
+        if n <= 1 { 1 }
+        else { n * factorial(n - 1) }
+    }
+}
+
+module utils {
+    pub fn double(n: Int) -> Int {
+        n * 2
+    }
+
+    pub fn triple(n: Int) -> Int {
+        n * 3
+    }
+}
+
+module nested {
+    pub module inner {
+        pub fn value() -> Int {
+            42
+        }
+
+        pub fn increment(n: Int) -> Int {
+            n + 1
+        }
+    }
+}
+
+// Import all from math module
+mount math.*;
+
+// Import all from utils module
+mount utils.*;
+
+// Import all from nested.inner module
+mount nested.inner.*;
+
+fn main() {
+    // Use math functions directly (from math.*)
+    let sum = add(5, 3);
+    print(f"add(5, 3) = {sum}");
+
+    let product = multiply(4, 7);
+    print(f"multiply(4, 7) = {product}");
+
+    let fact = factorial(5);
+    print(f"factorial(5) = {fact}");
+
+    // Use utils functions directly (from utils.*)
+    let d = double(10);
+    print(f"double(10) = {d}");
+
+    let t = triple(10);
+    print(f"triple(10) = {t}");
+
+    // Use nested.inner functions directly (from nested.inner.*)
+    let v = value();
+    print(f"value() = {v}");
+
+    let inc = increment(41);
+    print(f"increment(41) = {inc}");
+}

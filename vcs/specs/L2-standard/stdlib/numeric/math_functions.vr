@@ -1,0 +1,533 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, numeric, math, functions
+
+/// Comprehensive test suite for mathematical functions.
+/// Tests trigonometric, exponential, logarithmic, and special functions.
+
+fn main() {
+    test_trigonometric_functions();
+    test_inverse_trigonometric();
+    test_hyperbolic_functions();
+    test_exponential_functions();
+    test_logarithmic_functions();
+    test_power_functions();
+    test_rounding_functions();
+    test_special_functions();
+    test_numeric_constants();
+    test_complex_calculations();
+}
+
+/// Test trigonometric functions
+fn test_trigonometric_functions() {
+    let epsilon: Float = 1e-10;
+    let pi: Float = Float.PI;
+
+    // sin
+    assert(0.0.sin().abs() < epsilon);
+    assert(((pi / 2.0).sin() - 1.0).abs() < epsilon);
+    assert(pi.sin().abs() < epsilon);
+    assert(((3.0 * pi / 2.0).sin() + 1.0).abs() < epsilon);
+
+    // cos
+    assert((0.0.cos() - 1.0).abs() < epsilon);
+    assert((pi / 2.0).cos().abs() < epsilon);
+    assert((pi.cos() + 1.0).abs() < epsilon);
+    assert(((2.0 * pi).cos() - 1.0).abs() < epsilon);
+
+    // tan
+    assert(0.0.tan().abs() < epsilon);
+    assert(((pi / 4.0).tan() - 1.0).abs() < epsilon);
+    // tan(pi/2) is undefined (infinity)
+
+    // Pythagorean identity: sin^2 + cos^2 = 1
+    for angle in [0.0, 0.5, 1.0, 1.5, 2.0, 3.0] {
+        let s = angle.sin();
+        let c = angle.cos();
+        assert((s * s + c * c - 1.0).abs() < epsilon);
+    }
+
+    // sin_cos (more efficient than separate calls)
+    let (sin_val, cos_val) = (pi / 4.0).sin_cos();
+    assert((sin_val - cos_val).abs() < epsilon);  // sin(45) = cos(45)
+
+    // Degrees to radians conversion
+    fn deg_to_rad(deg: Float) -> Float {
+        deg * pi / 180.0
+    }
+
+    assert((deg_to_rad(90.0).sin() - 1.0).abs() < epsilon);
+    assert((deg_to_rad(180.0).cos() + 1.0).abs() < epsilon);
+    assert((deg_to_rad(45.0).tan() - 1.0).abs() < epsilon);
+
+    // to_radians / to_degrees methods
+    let deg: Float = 180.0;
+    let rad: Float = deg.to_radians();
+    assert((rad - pi).abs() < epsilon);
+
+    let back_to_deg: Float = rad.to_degrees();
+    assert((back_to_deg - 180.0).abs() < epsilon);
+}
+
+/// Test inverse trigonometric functions
+fn test_inverse_trigonometric() {
+    let epsilon: Float = 1e-10;
+    let pi: Float = Float.PI;
+
+    // asin (arc sine) - returns radians
+    assert(0.0.asin().abs() < epsilon);
+    assert((1.0.asin() - pi / 2.0).abs() < epsilon);
+    assert(((-1.0).asin() + pi / 2.0).abs() < epsilon);
+    assert((0.5.asin() - pi / 6.0).abs() < epsilon);
+
+    // acos (arc cosine)
+    assert((1.0.acos()).abs() < epsilon);
+    assert((0.0.acos() - pi / 2.0).abs() < epsilon);
+    assert(((-1.0).acos() - pi).abs() < epsilon);
+
+    // atan (arc tangent)
+    assert(0.0.atan().abs() < epsilon);
+    assert((1.0.atan() - pi / 4.0).abs() < epsilon);
+
+    // atan2 (two-argument arc tangent)
+    assert((1.0.atan2(1.0) - pi / 4.0).abs() < epsilon);    // 45 degrees
+    assert((1.0.atan2(-1.0) - 3.0 * pi / 4.0).abs() < epsilon);  // 135 degrees
+    assert(((-1.0).atan2(-1.0) + 3.0 * pi / 4.0).abs() < epsilon);  // -135 degrees
+    assert((0.0.atan2(1.0)).abs() < epsilon);  // 0 degrees
+
+    // atan2 handles quadrants correctly
+    assert((0.0).atan2(1.0) == 0.0);          // Positive x-axis
+    assert((1.0).atan2(0.0) == pi / 2.0);     // Positive y-axis
+    assert((0.0).atan2(-1.0) == pi);          // Negative x-axis
+    assert((-1.0).atan2(0.0) == -pi / 2.0); // Negative y-axis
+
+    // Inverse functions are inverses of forward functions
+    for x in [-0.9, -0.5, 0.0, 0.5, 0.9] {
+        assert((x.asin().sin() - x).abs() < epsilon);
+        assert((x.acos().cos() - x).abs() < epsilon);
+    }
+
+    for x in [-10.0, -1.0, 0.0, 1.0, 10.0] {
+        assert((x.atan().tan() - x).abs() < epsilon);
+    }
+
+    // Domain errors
+    assert(2.0.asin().is_nan());   // |x| > 1
+    assert((-2.0).acos().is_nan()); // |x| > 1
+}
+
+/// Test hyperbolic functions
+fn test_hyperbolic_functions() {
+    let epsilon: Float = 1e-10;
+
+    // sinh (hyperbolic sine)
+    assert(0.0.sinh().abs() < epsilon);
+    let sinh_1: Float = 1.0.sinh();
+    assert((sinh_1 - 1.1752011936438014).abs() < epsilon);
+
+    // cosh (hyperbolic cosine)
+    assert((0.0.cosh() - 1.0).abs() < epsilon);
+    let cosh_1: Float = 1.0.cosh();
+    assert((cosh_1 - 1.5430806348152437).abs() < epsilon);
+
+    // tanh (hyperbolic tangent)
+    assert(0.0.tanh().abs() < epsilon);
+    let tanh_1: Float = 1.0.tanh();
+    assert((tanh_1 - 0.7615941559557649).abs() < epsilon);
+
+    // Identity: cosh^2 - sinh^2 = 1
+    for x in [0.0, 0.5, 1.0, 2.0, 5.0] {
+        let s = x.sinh();
+        let c = x.cosh();
+        assert((c * c - s * s - 1.0).abs() < epsilon);
+    }
+
+    // tanh = sinh / cosh
+    for x in [0.5, 1.0, 2.0] {
+        assert((x.tanh() - x.sinh() / x.cosh()).abs() < epsilon);
+    }
+
+    // Inverse hyperbolic functions
+    // asinh
+    assert(0.0.asinh().abs() < epsilon);
+    assert((1.0.asinh().sinh() - 1.0).abs() < epsilon);
+
+    // acosh (only defined for x >= 1)
+    assert(1.0.acosh().abs() < epsilon);
+    assert((2.0.acosh().cosh() - 2.0).abs() < epsilon);
+    assert(0.5.acosh().is_nan());  // Domain error
+
+    // atanh (only defined for |x| < 1)
+    assert(0.0.atanh().abs() < epsilon);
+    assert((0.5.atanh().tanh() - 0.5).abs() < epsilon);
+    assert(1.0.atanh().is_infinite());
+    assert(2.0.atanh().is_nan());
+
+    // Limits
+    assert((100.0.tanh() - 1.0).abs() < epsilon);  // tanh -> 1 as x -> inf
+    assert(((-100.0).tanh() + 1.0).abs() < epsilon);  // tanh -> -1 as x -> -inf
+}
+
+/// Test exponential functions
+fn test_exponential_functions() {
+    let epsilon: Float = 1e-10;
+    let e: Float = Float.E;
+
+    // exp (e^x)
+    assert((0.0.exp() - 1.0).abs() < epsilon);
+    assert((1.0.exp() - e).abs() < epsilon);
+    assert((2.0.exp() - e * e).abs() < epsilon);
+    assert(((-1.0).exp() - 1.0 / e).abs() < epsilon);
+
+    // exp2 (2^x)
+    assert((0.0.exp2() - 1.0).abs() < epsilon);
+    assert((1.0.exp2() - 2.0).abs() < epsilon);
+    assert((10.0.exp2() - 1024.0).abs() < epsilon);
+    assert(((-1.0).exp2() - 0.5).abs() < epsilon);
+
+    // exp_m1 (e^x - 1, more accurate for small x)
+    assert(0.0.exp_m1().abs() < epsilon);
+    assert((1.0.exp_m1() - (e - 1.0)).abs() < epsilon);
+
+    // For small x, exp_m1 is more accurate than exp(x) - 1
+    let small: Float = 1e-15;
+    let exp_m1_result: Float = small.exp_m1();
+    let naive_result: Float = small.exp() - 1.0;
+    // exp_m1_result is more accurate
+
+    // Properties
+    assert((2.0.exp() * 3.0.exp() - 5.0.exp()).abs() < epsilon);  // e^a * e^b = e^(a+b)
+
+    // Overflow/underflow
+    assert(1000.0.exp().is_infinite());
+    assert((-1000.0).exp() == 0.0);  // Underflow to zero
+}
+
+/// Test logarithmic functions
+fn test_logarithmic_functions() {
+    let epsilon: Float = 1e-10;
+    let e: Float = Float.E;
+
+    // ln (natural logarithm)
+    assert((1.0.ln()).abs() < epsilon);
+    assert((e.ln() - 1.0).abs() < epsilon);
+    assert(((e * e).ln() - 2.0).abs() < epsilon);
+
+    // log2 (base-2 logarithm)
+    assert((1.0.log2()).abs() < epsilon);
+    assert((2.0.log2() - 1.0).abs() < epsilon);
+    assert((1024.0.log2() - 10.0).abs() < epsilon);
+
+    // log10 (base-10 logarithm)
+    assert((1.0.log10()).abs() < epsilon);
+    assert((10.0.log10() - 1.0).abs() < epsilon);
+    assert((1000.0.log10() - 3.0).abs() < epsilon);
+
+    // log (arbitrary base)
+    assert((8.0.log_base(2.0) - 3.0).abs() < epsilon);
+    assert((81.0.log_base(3.0) - 4.0).abs() < epsilon);
+    assert((100.0.log_base(10.0) - 2.0).abs() < epsilon);
+
+    // ln_1p (ln(1 + x), more accurate for small x)
+    assert(0.0.ln_1p().abs() < epsilon);
+    assert(((e - 1.0).ln_1p() - 1.0).abs() < epsilon);
+
+    // For small x, ln_1p is more accurate than (1 + x).ln()
+    let small: Float = 1e-15;
+    let ln_1p_result: Float = small.ln_1p();
+    // More accurate than (1.0 + small).ln()
+
+    // Properties
+    assert(((2.0 * 3.0).ln() - 2.0.ln() - 3.0.ln()).abs() < epsilon);  // ln(ab) = ln(a) + ln(b)
+    assert((8.0.ln() - 3.0 * 2.0.ln()).abs() < epsilon);  // ln(a^n) = n*ln(a)
+
+    // Domain errors
+    assert(0.0.ln().is_infinite());  // ln(0) = -infinity
+    assert((-1.0).ln().is_nan());    // ln(negative) is undefined
+}
+
+/// Test power and root functions
+fn test_power_functions() {
+    let epsilon: Float = 1e-10;
+
+    // pow (x^y)
+    assert((2.0.pow(3.0) - 8.0).abs() < epsilon);
+    assert((3.0.pow(2.0) - 9.0).abs() < epsilon);
+    assert((4.0.pow(0.5) - 2.0).abs() < epsilon);  // Square root
+    assert((8.0.pow(1.0 / 3.0) - 2.0).abs() < epsilon);  // Cube root
+    assert((2.0.pow(-1.0) - 0.5).abs() < epsilon);
+
+    // powi (x^n where n is integer, faster)
+    assert((2.0.powi(10) - 1024.0).abs() < epsilon);
+    assert((3.0.powi(4) - 81.0).abs() < epsilon);
+    assert((2.0.powi(-3) - 0.125).abs() < epsilon);
+
+    // sqrt (square root)
+    assert((4.0.sqrt() - 2.0).abs() < epsilon);
+    assert((2.0.sqrt() - 1.4142135623730951).abs() < epsilon);
+    assert((0.0.sqrt()).abs() < epsilon);
+    assert((-1.0).sqrt().is_nan());  // Domain error
+
+    // cbrt (cube root)
+    assert((8.0.cbrt() - 2.0).abs() < epsilon);
+    assert((27.0.cbrt() - 3.0).abs() < epsilon);
+    assert(((-8.0).cbrt() + 2.0).abs() < epsilon);  // Negative cube root
+
+    // hypot (sqrt(x^2 + y^2), avoiding overflow)
+    assert((3.0.hypot(4.0) - 5.0).abs() < epsilon);  // 3-4-5 triangle
+    assert((5.0.hypot(12.0) - 13.0).abs() < epsilon);  // 5-12-13 triangle
+
+    // hypot handles large values without overflow
+    let large: Float = 1e200;
+    let hypot_large: Float = large.hypot(large);
+    assert(!hypot_large.is_infinite());
+
+    // powf is alias for pow
+    assert((2.0.powf(3.0) - 8.0).abs() < epsilon);
+
+    // Special cases
+    assert((0.0.pow(0.0) - 1.0).abs() < epsilon);  // 0^0 = 1 by convention
+    // Commented out: Float.infinity not yet accessible as constant
+    // assert((Float.infinity.pow(0.0) - 1.0).abs() < epsilon);  // inf^0 = 1
+    // assert((1.0.pow(Float.infinity) - 1.0).abs() < epsilon);  // 1^inf = 1
+}
+
+/// Test rounding functions
+fn test_rounding_functions() {
+    // floor
+    assert(3.7.floor() == 3.0);
+    assert((-3.7).floor() == -4.0);
+    assert(3.0.floor() == 3.0);
+
+    // ceil
+    assert(3.2.ceil() == 4.0);
+    assert((-3.2).ceil() == -3.0);
+    assert(3.0.ceil() == 3.0);
+
+    // round (round half to even)
+    assert(3.5.round() == 4.0);
+    assert(2.5.round() == 2.0);  // Ties to even
+    assert(3.4.round() == 3.0);
+    assert((-3.5).round() == -4.0);
+
+    // trunc (toward zero)
+    assert(3.7.trunc() == 3.0);
+    assert((-3.7).trunc() == -3.0);
+
+    // fract (fractional part)
+    assert((3.7.fract() - 0.7).abs() < 1e-10);
+    assert(((-3.7).fract() - (-0.7)).abs() < 1e-10);
+
+    // mul_add (fused multiply-add, more accurate)
+    let result: Float = 2.0.mul_add(3.0, 4.0);  // 2*3 + 4 = 10
+    assert((result - 10.0).abs() < 1e-10);
+
+    // div_euclid / rem_euclid (Euclidean division)
+    assert(7.0.div_euclid(4.0) == 1.0);
+    assert(7.0.rem_euclid(4.0) == 3.0);
+    assert((-7.0).rem_euclid(4.0) == 1.0);  // Always non-negative
+
+    // min / max
+    assert(3.0.min(5.0) == 3.0);
+    assert(3.0.max(5.0) == 5.0);
+
+    // clamp
+    assert(5.0.clamp(0.0, 10.0) == 5.0);
+    assert((-5.0).clamp(0.0, 10.0) == 0.0);
+    assert(15.0.clamp(0.0, 10.0) == 10.0);
+}
+
+/// Test special mathematical functions
+fn test_special_functions() {
+    let epsilon: Float = 1e-10;
+
+    // abs (absolute value)
+    assert((-3.14).abs() == 3.14);
+    assert(3.14.abs() == 3.14);
+    assert((-0.0).abs() == 0.0);
+
+    // copysign (copy sign from another value)
+    assert(3.0.copysign(-1.0) == -3.0);
+    assert((-3.0).copysign(1.0) == 3.0);
+
+    // signum
+    assert(3.0.signum() == 1.0);
+    assert((-3.0).signum() == -1.0);
+    assert(0.0.signum() == 1.0);  // Note: +0.0
+
+    // Gamma function (via tgamma if available)
+    // tgamma(n) = (n-1)! for positive integers
+    // assert((5.0.tgamma() - 24.0).abs() < epsilon);  // 4! = 24
+
+    // Error function (erf)
+    // Probability integral
+    // assert(0.0.erf().abs() < epsilon);
+
+    // Bessel functions (if available)
+    // J0, J1, Y0, Y1
+
+    // Factorial (for integers)
+    fn factorial(n: u64) -> u64 {
+        if n <= 1 { 1 } else { n * factorial(n - 1) }
+    }
+    assert(factorial(5) == 120);
+    assert(factorial(10) == 3628800);
+
+    // Binomial coefficient
+    fn binomial(n: u64, k: u64) -> u64 {
+        if k > n { return 0; }
+        factorial(n) / (factorial(k) * factorial(n - k))
+    }
+    assert(binomial(5, 2) == 10);
+    assert(binomial(10, 5) == 252);
+
+    // GCD for floats (approximate)
+    fn float_gcd(a: Float, b: Float, tolerance: Float) -> Float {
+        let (mut a, mut b) = (a.abs(), b.abs());
+        while b > tolerance {
+            let t = b;
+            b = a % b;
+            a = t;
+        }
+        a
+    }
+
+    // Polynomial evaluation (Horner's method)
+    fn eval_poly(coeffs: &[Float], x: Float) -> Float {
+        coeffs.iter().rev().fold(0.0, |acc, c| acc * x + c)
+    }
+    // p(x) = 1 + 2x + 3x^2 = [1, 2, 3]
+    assert((eval_poly(&[1.0, 2.0, 3.0], 2.0) - 17.0).abs() < epsilon);  // 1 + 4 + 12
+}
+
+/// Test numeric constants
+fn test_numeric_constants() {
+    let epsilon: Float = 1e-15;
+
+    // Pi
+    let pi: Float = Float.PI;
+    assert((pi - 3.141592653589793).abs() < epsilon);
+
+    // Euler's number
+    let e: Float = Float.E;
+    assert((e - 2.718281828459045).abs() < epsilon);
+
+    // Square root of 2
+    let sqrt2: Float = 1.4142135623730951;
+    assert((sqrt2 - 1.4142135623730951).abs() < epsilon);
+
+    // Natural log of 2
+    let ln2: Float = 0.6931471805599453;
+    assert((ln2 - 0.6931471805599453).abs() < epsilon);
+
+    // Natural log of 10
+    let ln10: Float = 2.302585092994046;
+    assert((ln10 - 2.302585092994046).abs() < epsilon);
+
+    // Log base 2 of e
+    let log2_e: Float = 1.4426950408889634;
+    assert((log2_e - 1.4426950408889634).abs() < epsilon);
+
+    // Log base 10 of e
+    let log10_e: Float = 0.4342944819032518;
+    assert((log10_e - 0.4342944819032518).abs() < epsilon);
+
+    // Pi / 2
+    let frac_pi_2: Float = 1.5707963267948966;
+    assert((frac_pi_2 - pi / 2.0).abs() < epsilon);
+
+    // Pi / 4
+    let frac_pi_4: Float = 0.7853981633974483;
+    assert((frac_pi_4 - pi / 4.0).abs() < epsilon);
+
+    // 2 * Pi (tau)
+    let tau: Float = 6.283185307179586;
+    assert((tau - 2.0 * pi).abs() < epsilon);
+
+    // Golden ratio
+    let phi: Float = (1.0 + 5.0.sqrt()) / 2.0;
+    assert((phi - 1.618033988749895).abs() < epsilon);
+}
+
+/// Test complex mathematical calculations
+fn test_complex_calculations() {
+    let epsilon: Float = 1e-10;
+    let pi: Float = Float.PI;
+
+    // Quadratic formula
+    fn quadratic_roots(a: Float, b: Float, c: Float) -> Maybe<(Float, Float)> {
+        let discriminant = b * b - 4.0 * a * c;
+        if discriminant < 0.0 {
+            None
+        } else {
+            let sqrt_d = discriminant.sqrt();
+            Some(((-b + sqrt_d) / (2.0 * a), (-b - sqrt_d) / (2.0 * a)))
+        }
+    }
+
+    let roots = quadratic_roots(1.0, -5.0, 6.0);
+    assert(roots == Some((3.0, 2.0)));
+
+    // Distance formula
+    fn distance(x1: Float, y1: Float, x2: Float, y2: Float) -> Float {
+        ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt()
+    }
+    assert((distance(0.0, 0.0, 3.0, 4.0) - 5.0).abs() < epsilon);
+
+    // Angle between vectors
+    fn angle_between(x1: Float, y1: Float, x2: Float, y2: Float) -> Float {
+        let dot = x1 * x2 + y1 * y2;
+        let mag1 = (x1 * x1 + y1 * y1).sqrt();
+        let mag2 = (x2 * x2 + y2 * y2).sqrt();
+        (dot / (mag1 * mag2)).acos()
+    }
+    assert((angle_between(1.0, 0.0, 0.0, 1.0) - pi / 2.0).abs() < epsilon);
+
+    // Numerical derivative
+    fn derivative(f: fn(Float) -> Float, x: Float, h: Float) -> Float {
+        (f(x + h) - f(x - h)) / (2.0 * h)
+    }
+    let d_sin = derivative(|x| x.sin(), 0.0, 1e-8);
+    assert((d_sin - 1.0).abs() < 1e-6);  // d/dx sin(x) at x=0 = cos(0) = 1
+
+    // Numerical integration (trapezoidal rule)
+    fn integrate(f: fn(Float) -> Float, a: Float, b: Float, n: usize) -> Float {
+        let h = (b - a) / n as Float;
+        let mut sum = (f(a) + f(b)) / 2.0;
+        for i in 1..n {
+            sum += f(a + i as Float * h);
+        }
+        sum * h
+    }
+    let integral_sin = integrate(|x| x.sin(), 0.0, pi, 1000);
+    assert((integral_sin - 2.0).abs() < 0.001);  // integral of sin from 0 to pi = 2
+
+    // Newton-Raphson root finding
+    fn newton_raphson(f: fn(Float) -> Float, df: fn(Float) -> Float, x0: Float, tol: Float) -> Float {
+        let mut x = x0;
+        for _ in 0..100 {
+            let fx = f(x);
+            if fx.abs() < tol {
+                break;
+            }
+            x = x - fx / df(x);
+        }
+        x
+    }
+    let sqrt2 = newton_raphson(|x| x * x - 2.0, |x| 2.0 * x, 1.0, 1e-10);
+    assert((sqrt2 - 1.4142135623730951).abs() < epsilon);
+
+    // Series expansion of e^x
+    fn exp_series(x: Float, terms: usize) -> Float {
+        let mut sum: Float = 1.0;
+        let mut term: Float = 1.0;
+        for n in 1..terms {
+            term *= x / n as Float;
+            sum += term;
+        }
+        sum
+    }
+    let e_approx = exp_series(1.0, 20);
+    assert((e_approx - Float.E).abs() < epsilon);
+}

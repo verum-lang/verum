@@ -1,0 +1,140 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, where, constraints
+// @description: Test compile-time constraint checking in meta functions
+
+// =============================================================================
+// META FUNCTIONS WITH COMPILE-TIME CHECKS
+// =============================================================================
+// Meta functions can validate constraints at compile time
+
+// =============================================================================
+// BOUNDS CHECKING
+// =============================================================================
+
+meta fn checked_value(n: Int) -> Int {
+    // Runtime-style bounds check in meta context
+    if n < 0 {
+        panic("Value must be non-negative");
+    }
+    if n > 100 {
+        panic("Value must be <= 100");
+    }
+    n * 2
+}
+
+// =============================================================================
+// TYPE PROPERTY CHECKING
+// =============================================================================
+
+meta fn size_check<T>() -> Int using [MetaTypes] {
+    let sz = size_of<T>();
+    if sz == 0 {
+        panic("Type must have non-zero size");
+    }
+    sz
+}
+
+// =============================================================================
+// CONDITIONAL GENERATION
+// =============================================================================
+
+meta fn conditional_gen(use_fast: Bool) -> TokenStream {
+    if use_fast {
+        quote {
+            fn compute(x: Int) -> Int {
+                x * 2  // Fast path
+            }
+        }
+    } else {
+        quote {
+            fn compute(x: Int) -> Int {
+                let mut result = 0;
+                for _ in range(0, 2) {
+                    result = result + x;
+                }
+                result  // Slow path
+            }
+        }
+    }
+}
+
+// =============================================================================
+// COMPILE-TIME ASSERTIONS
+// =============================================================================
+
+meta fn assert_positive(n: Int) -> Int {
+    if n <= 0 {
+        panic("Value must be positive");
+    }
+    n
+}
+
+meta fn assert_power_of_two(n: Int) -> Int {
+    if n <= 0 {
+        panic("Value must be positive");
+    }
+    if (n & (n - 1)) != 0 {
+        panic("Value must be power of two");
+    }
+    n
+}
+
+// =============================================================================
+// VALIDATION WITH ERROR MESSAGES
+// =============================================================================
+
+meta fn validate_range(min: Int, max: Int, val: Int) -> Int {
+    if min >= max {
+        panic("min must be less than max");
+    }
+    if val < min || val > max {
+        panic("value out of range");
+    }
+    val
+}
+
+// =============================================================================
+// VERIFICATION - Meta test function for test runner
+// =============================================================================
+
+meta fn test_meta_constraints() -> Int {
+    // Test bounds checking
+    let v1 = checked_value(50);  // Should be 100
+
+    // Test assertions
+    let v2 = assert_positive(10);  // Should be 10
+
+    let v3 = assert_power_of_two(8);  // Should be 8
+
+    // Test range validation
+    let v4 = validate_range(0, 100, 50);  // Should be 50
+
+    // Return sum as success indicator: 100 + 10 + 8 + 50 = 168
+    v1 + v2 + v3 + v4
+}
+
+fn test_checked_value() {
+    assert_eq(checked_value(50), 100);
+}
+
+fn test_assert_positive() {
+    assert_eq(assert_positive(10), 10);
+}
+
+fn test_assert_power_of_two() {
+    assert_eq(assert_power_of_two(8), 8);
+    assert_eq(assert_power_of_two(16), 16);
+}
+
+fn test_validate_range() {
+    assert_eq(validate_range(0, 100, 50), 50);
+}
+
+fn main() {
+    test_checked_value();
+    test_assert_positive();
+    test_assert_power_of_two();
+    test_validate_range();
+}

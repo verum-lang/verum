@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, expression, field, incomplete, error
+// @description: Test incomplete field access expression
+// @expected-error: E048
+
+fn test() {
+    let obj = create();
+    obj.;
+}

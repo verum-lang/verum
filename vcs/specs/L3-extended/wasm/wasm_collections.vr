@@ -1,0 +1,81 @@
+// @test: run
+// @level: L3
+// @tier: 2
+// @tags: wasm, collections, list, map, cross-compilation
+// @expected-exit: 0
+// @description: Collection operations (List, Map) under WASM target
+
+fn test_list_basic() {
+    let mut list: List<Int> = [];
+    list.push(10);
+    list.push(20);
+    list.push(30);
+    assert(list.len() == 3);
+    assert(list[0] == 10);
+    assert(list[1] == 20);
+    assert(list[2] == 30);
+}
+
+fn test_list_iteration() {
+    let items = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for item in items {
+        sum = sum + item;
+    }
+    assert(sum == 15);
+}
+
+fn test_list_push_pop() {
+    let mut stack: List<Int> = [];
+    stack.push(1);
+    stack.push(2);
+    stack.push(3);
+    let top = stack.pop();
+    assert(top == Some(3));
+    assert(stack.len() == 2);
+}
+
+fn test_map_basic() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("one", 1);
+    m.insert("two", 2);
+    m.insert("three", 3);
+    assert(m.len() == 3);
+    assert(m.get("one") == 1);
+    assert(m.get("two") == 2);
+}
+
+fn test_map_contains() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+    assert(m.contains_key("key"));
+    assert(!m.contains_key("missing"));
+}
+
+fn test_map_remove() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.remove("a");
+    assert(m.len() == 1);
+    assert(!m.contains_key("a"));
+}
+
+fn test_nested_list() {
+    let matrix = [[1, 2], [3, 4], [5, 6]];
+    assert(matrix.len() == 3);
+    assert(matrix[0][0] == 1);
+    assert(matrix[1][1] == 4);
+    assert(matrix[2][0] == 5);
+}
+
+fn main() {
+    test_list_basic();
+    test_list_iteration();
+    test_list_push_pop();
+    test_map_basic();
+    test_map_contains();
+    test_map_remove();
+    test_nested_list();
+    print("WASM collection tests: all passed");
+}

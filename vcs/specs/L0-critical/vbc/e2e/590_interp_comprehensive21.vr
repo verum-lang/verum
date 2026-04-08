@@ -1,0 +1,296 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, sieve, house_robber, two_pointer, convolution, power_set, bucket_sort
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #21: combines algorithms from tests 581-589 in a pipeline.
+//
+// Pipeline:
+//   1. Sieve (581)          — generate primes, build input arrays from primes
+//   2. Bucket sort (583)    — sort a derived sequence by counting sort
+//   3. Two-pointer (588)    — count pairs summing to a target in the sorted sequence
+//   4. House robber (586)   — find max non-adjacent sum from the prime sequence
+//   5. Convolution (587)    — multiply two short sequences derived from prime data
+//   6. Power set (582)      — count subsets of given size from a small set
+
+// ============================================================
+// Sieve (from 581)
+// ============================================================
+
+fn sieve_run(limit: Int, sieve: [Int; 64]) {
+    let mut i = 0;
+    while i <= limit { sieve[i] = 0; i = i + 1; }
+    i = 2;
+    while i <= limit { sieve[i] = 1; i = i + 1; }
+    i = 2;
+    while i * i <= limit {
+        if sieve[i] == 1 {
+            let mut j = i * i;
+            while j <= limit {
+                sieve[j] = 0;
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+}
+
+fn sieve_count(limit: Int, sieve: [Int; 64]) -> Int {
+    let mut cnt = 0;
+    let mut i = 2;
+    while i <= limit { if sieve[i] == 1 { cnt = cnt + 1; } i = i + 1; }
+    cnt
+}
+
+// Collect first k primes from sieve into out[0..k-1]. limit must cover k primes.
+fn collect_primes(k: Int, limit: Int, sieve: [Int; 64], out: [Int; 16]) {
+    let mut cnt = 0;
+    let mut i = 2;
+    while i <= limit && cnt < k {
+        if sieve[i] == 1 { out[cnt] = i; cnt = cnt + 1; }
+        i = i + 1;
+    }
+}
+
+// ============================================================
+// Bucket / counting sort (from 583)
+// ============================================================
+
+fn counting_sort2(arr: [Int; 16], n: Int, out: [Int; 16],
+                  count: [Int; 64], max_val: Int) {
+    let mut i = 0;
+    while i <= max_val { count[i] = 0; i = i + 1; }
+    i = 0;
+    while i < n { count[arr[i]] = count[arr[i]] + 1; i = i + 1; }
+    let mut idx = 0;
+    i = 0;
+    while i <= max_val {
+        let mut k = 0;
+        while k < count[i] { out[idx] = i; idx = idx + 1; k = k + 1; }
+        i = i + 1;
+    }
+}
+
+fn is_sorted2(arr: [Int; 16], n: Int) -> Int {
+    let mut i = 1;
+    while i < n { if arr[i] < arr[i - 1] { return 0; } i = i + 1; }
+    1
+}
+
+// ============================================================
+// Two-pointer (from 588)
+// ============================================================
+
+fn two_sum_cnt(arr: [Int; 16], n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    let mut cnt = 0;
+    while lo < hi {
+        let s = arr[lo] + arr[hi];
+        if s == target { cnt = cnt + 1; lo = lo + 1; hi = hi - 1; }
+        else { if s < target { lo = lo + 1; } else { hi = hi - 1; } }
+    }
+    cnt
+}
+
+// ============================================================
+// House robber (from 586)
+// ============================================================
+
+fn house_rob(arr: [Int; 16], n: Int) -> Int {
+    if n == 0 { return 0; }
+    if n == 1 { return arr[0]; }
+    let mut prev2 = arr[0];
+    let mut prev1 = if arr[0] > arr[1] { arr[0] } else { arr[1] };
+    let mut i = 2;
+    while i < n {
+        let cand = prev2 + arr[i];
+        let next = if cand > prev1 { cand } else { prev1 };
+        prev2 = prev1;
+        prev1 = next;
+        i = i + 1;
+    }
+    prev1
+}
+
+// ============================================================
+// Convolution (from 587)
+// ============================================================
+
+fn convolve2(a: [Int; 8], m: Int, b: [Int; 8], n: Int, c: [Int; 16]) {
+    let len = m + n - 1;
+    let mut k = 0;
+    while k < len { c[k] = 0; k = k + 1; }
+    let mut i = 0;
+    while i < m {
+        let mut j = 0;
+        while j < n {
+            c[i + j] = c[i + j] + a[i] * b[j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn conv_sum2(c: [Int; 16], len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len { s = s + c[i]; i = i + 1; }
+    s
+}
+
+// ============================================================
+// Popcount / power set (from 582)
+// ============================================================
+
+fn popcount2(x: Int) -> Int {
+    let mut n = x;
+    let mut cnt = 0;
+    while n > 0 {
+        cnt = cnt + (n - (n / 2) * 2);
+        n = n / 2;
+    }
+    cnt
+}
+
+fn count_of_size(sz: Int, total_masks: Int) -> Int {
+    let mut cnt = 0;
+    let mut mask = 0;
+    while mask < total_masks {
+        if popcount2(mask) == sz { cnt = cnt + 1; }
+        mask = mask + 1;
+    }
+    cnt
+}
+
+// ============================================================
+// Pipeline test 1: Sieve -> Collect primes -> House robber
+// ============================================================
+
+fn test_pipeline_sieve_house_robber() {
+    // Generate primes up to 30: 2,3,5,7,11,13,17,19,23,29 (10 primes).
+    let mut sieve = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    sieve_run(30, sieve);
+    assert_eq(sieve_count(30, sieve), 10);
+
+    // Collect first 8 primes: [2,3,5,7,11,13,17,19].
+    let mut primes = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    collect_primes(8, 30, sieve, primes);
+    assert_eq(primes[0], 2);
+    assert_eq(primes[7], 19);
+
+    // House robber on [2,3,5,7,11,13,17,19]:
+    // dp[0]=2, dp[1]=3, dp[2]=max(3,2+5)=7, dp[3]=max(7,3+7)=10,
+    // dp[4]=max(10,7+11)=18, dp[5]=max(18,10+13)=23,
+    // dp[6]=max(23,18+17)=35, dp[7]=max(35,23+19)=42.
+    let rob = house_rob(primes, 8);
+    assert_eq(rob, 42);
+
+    print("pipeline1_sieve_house_robber: ok");
+}
+
+// ============================================================
+// Pipeline test 2: Sieve -> Collect -> Bucket sort -> Two-pointer
+// ============================================================
+
+fn test_pipeline_sieve_sort_twoptr() {
+    // Primes up to 20: [2,3,5,7,11,13,17,19].
+    let mut sieve = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    sieve_run(20, sieve);
+    let mut primes = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    collect_primes(8, 20, sieve, primes);
+
+    // Bucket sort the primes (already sorted, verify idempotent).
+    let mut sorted_out = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut count_buf  = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    counting_sort2(primes, 8, sorted_out, count_buf, 19);
+    assert_eq(is_sorted2(sorted_out, 8), 1);
+    assert_eq(sorted_out[0], 2);
+    assert_eq(sorted_out[7], 19);
+
+    // Two-pointer on sorted primes: pairs summing to 20.
+    // [2,3,5,7,11,13,17,19]: lo=0(2),hi=7(19): 21>20,hi=6(17). 2+17=19<20,lo=1(3). 3+17=20 cnt=1,lo=2(5),hi=5(13).
+    // 5+13=18<20,lo=3(7). 7+13=20 cnt=2,lo=4(11),hi=4(11): lo=hi stop.
+    // Count = 2. Pairs: (3,17) and (7,13).
+    let pairs = two_sum_cnt(sorted_out, 8, 20);
+    assert_eq(pairs, 2);
+
+    print("pipeline2_sieve_sort_twoptr: ok");
+}
+
+// ============================================================
+// Pipeline test 3: Primes -> Convolution -> Verify product sum
+// ============================================================
+
+fn test_pipeline_convolution_powerset() {
+    // Use first 3 primes [2,3,5] and [1,1,1].
+    // Convolution: (2+3x+5x^2)*(1+x+x^2) = 2+5x+10x^2+8x^3+5x^4.
+    // C[0]=2*1=2, C[1]=2*1+3*1=5, C[2]=2*1+3*1+5*1=10,
+    // C[3]=3*1+5*1=8, C[4]=5*1=5.
+    let mut a = [2,3,5,0,0,0,0,0];
+    let mut b = [1,1,1,0,0,0,0,0];
+    let mut c = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    convolve2(a, 3, b, 3, c);
+    assert_eq(c[0], 2);
+    assert_eq(c[1], 5);
+    assert_eq(c[2], 10);
+    assert_eq(c[3], 8);
+    assert_eq(c[4], 5);
+    // Sum = 30 = (2+3+5)*(1+1+1) = 10*3.
+    assert_eq(conv_sum2(c, 5), 30);
+
+    // Power set: for n=3 elements, C(3,1)=3, C(3,2)=3.
+    // count_of_size uses 2^3=8 masks.
+    assert_eq(count_of_size(1, 8), 3);
+    assert_eq(count_of_size(2, 8), 3);
+    assert_eq(count_of_size(0, 8), 1);
+    assert_eq(count_of_size(3, 8), 1);
+
+    print("pipeline3_convolution_powerset: ok");
+}
+
+// ============================================================
+// Pipeline test 4: House robber -> Two-pointer cross-check
+// ============================================================
+
+fn test_pipeline_house_two_pointer() {
+    // House robber on [1,2,3,4,5,6,7,8].
+    // dp[0]=1,dp[1]=2,dp[2]=max(2,1+3)=4,dp[3]=max(4,2+4)=6,
+    // dp[4]=max(6,4+5)=9,dp[5]=max(9,6+6)=12,
+    // dp[6]=max(12,9+7)=16,dp[7]=max(16,12+8)=20.
+    let mut a = [1,2,3,4,5,6,7,8,0,0,0,0,0,0,0,0];
+    assert_eq(house_rob(a, 8), 20);
+
+    // Two-pointer on sorted [1,2,3,4,5,6,7,8], target=9.
+    // (1,8),(2,7),(3,6),(4,5) -> 4 pairs.
+    let mut sorted = [1,2,3,4,5,6,7,8,0,0,0,0,0,0,0,0];
+    assert_eq(two_sum_cnt(sorted, 8, 9), 4);
+
+    // Cross-check: house robber max (20) > total pairs count (4). Verify.
+    let hmax = house_rob(a, 8);
+    let tpairs = two_sum_cnt(sorted, 8, 9);
+    let diff = hmax - tpairs;
+    assert_eq(diff, 16);
+
+    print("pipeline4_house_two_pointer: ok");
+}
+
+fn main() -> Int {
+    test_pipeline_sieve_house_robber();
+    test_pipeline_sieve_sort_twoptr();
+    test_pipeline_convolution_powerset();
+    test_pipeline_house_two_pointer();
+    print("[OK] 590_interp_comprehensive21");
+    0
+}

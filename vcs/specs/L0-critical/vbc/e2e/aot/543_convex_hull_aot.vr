@@ -1,0 +1,197 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, convex-hull, geometry, algorithms
+// @timeout: 30000
+
+// Convex hull (simplified gift-wrapping for small point sets)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Points: packed as x*1000 + y
+fn pt_x(p: Int) -> Int { p / 1000 }
+fn pt_y(p: Int) -> Int { p % 1000 }
+fn pack_pt(x: Int, y: Int) -> Int { x * 1000 + y }
+
+// Cross product of vectors (p1->p2) x (p1->p3)
+fn cross(p1: Int, p2: Int, p3: Int) -> Int {
+    let ax = pt_x(p2) - pt_x(p1);
+    let ay = pt_y(p2) - pt_y(p1);
+    let bx = pt_x(p3) - pt_x(p1);
+    let b_y = pt_y(p3) - pt_y(p1);
+    ax * b_y - ay * bx
+}
+
+// Find leftmost point (lowest x, then lowest y)
+fn find_leftmost(pts: Arr8, n: Int) -> Int {
+    let mut best = 0;
+    let mut i = 1;
+    while i < n {
+        let p = get8(pts, i);
+        let b = get8(pts, best);
+        if pt_x(p) < pt_x(b) {
+            best = i;
+        } else if pt_x(p) == pt_x(b) {
+            if pt_y(p) < pt_y(b) { best = i; }
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// Gift wrapping (Jarvis march) - returns hull indices and count
+type HullResult is { hull: Arr8, count: Int };
+
+fn convex_hull(pts: Arr8, n: Int) -> HullResult {
+    let start = find_leftmost(pts, n);
+    let mut hull = zeros();
+    let mut count = 0;
+    let mut current = start;
+
+    let mut safety = 0;
+    while safety < 10 {
+        hull = set8(hull, count, current);
+        count = count + 1;
+
+        let mut next = 0;
+        if current == 0 { next = 1; }
+
+        let mut i = 0;
+        while i < n {
+            if i != current {
+                let c = cross(get8(pts, current), get8(pts, next), get8(pts, i));
+                if c < 0 {
+                    next = i;
+                } else if c == 0 {
+                    // Collinear: pick the farther point
+                    let dx1 = pt_x(get8(pts, next)) - pt_x(get8(pts, current));
+                    let dy1 = pt_y(get8(pts, next)) - pt_y(get8(pts, current));
+                    let dx2 = pt_x(get8(pts, i)) - pt_x(get8(pts, current));
+                    let dy2 = pt_y(get8(pts, i)) - pt_y(get8(pts, current));
+                    if dx2*dx2 + dy2*dy2 > dx1*dx1 + dy1*dy1 {
+                        next = i;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+
+        current = next;
+        if current == start {
+            safety = 100; // break
+        }
+        safety = safety + 1;
+    }
+    HullResult { hull: hull, count: count }
+}
+
+// Polygon area (Shoelace formula) * 2 (to stay in integers)
+fn polygon_area2(pts: Arr8, hull: Arr8, hull_n: Int) -> Int {
+    let mut area = 0;
+    let mut i = 0;
+    while i < hull_n {
+        let j = (i + 1) % hull_n;
+        let pi = get8(pts, get8(hull, i));
+        let pj = get8(pts, get8(hull, j));
+        area = area + pt_x(pi) * pt_y(pj) - pt_x(pj) * pt_y(pi);
+        i = i + 1;
+    }
+    if area < 0 { 0 - area } else { area }
+}
+
+fn test_triangle() -> Int {
+    // Triangle: (0,0), (4,0), (2,3)
+    let pts = Arr8 {
+        v0: pack_pt(0, 0), v1: pack_pt(4, 0), v2: pack_pt(2, 3),
+        v3: 0, v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    let hr = convex_hull(pts, 3);
+    assert_eq(hr.count, 3); // all points on hull
+    1
+}
+
+fn test_square() -> Int {
+    // Square with interior point
+    let pts = Arr8 {
+        v0: pack_pt(0, 0), v1: pack_pt(4, 0), v2: pack_pt(4, 4),
+        v3: pack_pt(0, 4), v4: pack_pt(2, 2), // interior point
+        v5: 0, v6: 0, v7: 0
+    };
+    let hr = convex_hull(pts, 5);
+    assert_eq(hr.count, 4); // 4 hull points, interior excluded
+    1
+}
+
+fn test_collinear() -> Int {
+    // Collinear points: (0,0), (1,0), (2,0), (3,0)
+    let pts = Arr8 {
+        v0: pack_pt(0, 0), v1: pack_pt(1, 0), v2: pack_pt(2, 0),
+        v3: pack_pt(3, 0), v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    let hr = convex_hull(pts, 4);
+    assert_eq(hr.count, 2); // degenerate hull = line segment
+    1
+}
+
+fn test_polygon_area() -> Int {
+    // Triangle (0,0), (4,0), (0,3) → area = 6, area*2 = 12
+    let pts = Arr8 {
+        v0: pack_pt(0, 0), v1: pack_pt(4, 0), v2: pack_pt(0, 3),
+        v3: 0, v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    let hull = Arr8 { v0: 0, v1: 1, v2: 2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(polygon_area2(pts, hull, 3), 12);
+    1
+}
+
+fn test_leftmost() -> Int {
+    let pts = Arr8 {
+        v0: pack_pt(3, 1), v1: pack_pt(1, 4), v2: pack_pt(5, 2),
+        v3: pack_pt(2, 3), v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    assert_eq(find_leftmost(pts, 4), 1); // (1,4) is leftmost
+    1
+}
+
+fn test_cross_product() -> Int {
+    // Cross product (0,0)->(1,0) x (0,0)->(0,1) = 1 (CCW)
+    let p1 = pack_pt(0, 0);
+    let p2 = pack_pt(1, 0);
+    let p3 = pack_pt(0, 1);
+    assert_eq(cross(p1, p2, p3), 1);
+
+    // Cross product (0,0)->(0,1) x (0,0)->(1,0) = -1 (CW)
+    assert_eq(cross(p1, p3, p2), -1);
+    1
+}
+
+fn main() -> Int {
+    test_triangle();
+    test_square();
+    test_collinear();
+    test_polygon_area();
+    test_leftmost();
+    test_cross_product();
+    print("[OK] 543_convex_hull_aot");
+    0
+}

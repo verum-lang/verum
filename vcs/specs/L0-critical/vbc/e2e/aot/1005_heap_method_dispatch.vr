@@ -1,0 +1,89 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: heap, method-dispatch, auto-deref
+// @description: Method calls on Heap<T>-wrapped struct values
+
+type Vec2 is { x: Int, y: Int };
+
+implement Vec2 {
+    fn new(x: Int, y: Int) -> Vec2 {
+        Vec2 { x: x, y: y }
+    }
+    fn magnitude_sq(&self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+    fn add(&self, other: Vec2) -> Vec2 {
+        Vec2 { x: self.x + other.x, y: self.y + other.y }
+    }
+    fn scale(&self, factor: Int) -> Vec2 {
+        Vec2 { x: self.x * factor, y: self.y * factor }
+    }
+}
+
+type IntList is Nil | Cons(Int, Heap<IntList>);
+
+@allow(unbounded_recursion)
+fn list_len(lst: Heap<IntList>) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(_, rest) => 1 + list_len(rest),
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_sum(lst: Heap<IntList>) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(v, rest) => v + list_sum(rest),
+    }
+}
+
+fn main() -> Int {
+    let mut passed = 0;
+    let mut failed = 0;
+
+    // Test 1: Method call on direct struct
+    let v1 = Vec2.new(3, 4);
+    if (v1.magnitude_sq() == 25) { passed = passed + 1; }
+    else { print("FAIL test1"); failed = failed + 1; }
+
+    // Test 2: Method call on Heap-wrapped struct
+    let v2 = Heap(Vec2.new(5, 12));
+    if (v2.magnitude_sq() == 169) { passed = passed + 1; }
+    else { print(f"FAIL test2: {v2.magnitude_sq()}"); failed = failed + 1; }
+
+    // Test 3: Method with args on Heap struct
+    let v3 = Heap(Vec2 { x: 1, y: 2 });
+    let scaled = v3.scale(10);
+    if (scaled.x == 10 && scaled.y == 20) { passed = passed + 1; }
+    else { print(f"FAIL test3: ({scaled.x},{scaled.y})"); failed = failed + 1; }
+
+    // Test 4: Method with struct arg on Heap struct
+    let v4 = Heap(Vec2 { x: 3, y: 4 });
+    let sum_v = v4.add(Vec2 { x: 7, y: 6 });
+    if (sum_v.x == 10 && sum_v.y == 10) { passed = passed + 1; }
+    else { print(f"FAIL test4: ({sum_v.x},{sum_v.y})"); failed = failed + 1; }
+
+    // Test 5: Field access on Heap struct
+    let v5 = Heap(Vec2 { x: 42, y: 99 });
+    if (v5.x == 42 && v5.y == 99) { passed = passed + 1; }
+    else { print(f"FAIL test5: ({v5.x},{v5.y})"); failed = failed + 1; }
+
+    // Test 6: Recursive Heap data with auto-deref match
+    let lst = Heap(Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil)))))))));
+    if (list_sum(lst) == 10 && list_len(lst) == 4) { passed = passed + 1; }
+    else { print(f"FAIL test6: sum={list_sum(lst)} len={list_len(lst)}"); failed = failed + 1; }
+
+    // Test 7: Nested Heap (Heap(Heap(value))) - double transparent
+    let v7 = Heap(Heap(Vec2 { x: 7, y: 8 }));
+    if (v7.magnitude_sq() == 113) { passed = passed + 1; }
+    else { print(f"FAIL test7: {v7.magnitude_sq()}"); failed = failed + 1; }
+
+    if (failed > 0) {
+        print(f"1005_heap_method_dispatch: {passed}/{passed + failed} passed");
+        return 1;
+    }
+    print(f"1005_heap_method_dispatch: PASS ({passed}/{passed} tests)");
+    0
+}

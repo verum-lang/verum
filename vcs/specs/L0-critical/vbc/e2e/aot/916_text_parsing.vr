@@ -1,0 +1,164 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, text, split, contains, replace, trim
+// @expected-exit: 0
+
+// Test: Text operations — split, contains, starts_with, ends_with, replace, trim, len
+
+fn main() -> Int {
+    // Test 1: split basics
+    let csv = "alice,bob,charlie";
+    let parts = csv.split(",");
+    if (parts.len() != 3) {
+        print(f"FAIL t1a: parts.len()={parts.len()}");
+        return 1;
+    }
+
+    // Test 2: contains
+    let haystack = "the quick brown fox";
+    if (haystack.contains("quick") != true) {
+        print("FAIL t2a: should contain 'quick'");
+        return 1;
+    }
+    if (haystack.contains("slow") != false) {
+        print("FAIL t2b: should not contain 'slow'");
+        return 1;
+    }
+    if (haystack.contains("fox") != true) {
+        print("FAIL t2c: should contain 'fox'");
+        return 1;
+    }
+    if (haystack.contains("the") != true) {
+        print("FAIL t2d: should contain 'the'");
+        return 1;
+    }
+    // Empty string always contained
+    if (haystack.contains("") != true) {
+        print("FAIL t2e: should contain empty string");
+        return 1;
+    }
+
+    // Test 3: starts_with / ends_with
+    let greeting = "hello world";
+    if (greeting.starts_with("hello") != true) {
+        print("FAIL t3a: starts_with 'hello'");
+        return 1;
+    }
+    if (greeting.starts_with("world") != false) {
+        print("FAIL t3b: should not start with 'world'");
+        return 1;
+    }
+    if (greeting.ends_with("world") != true) {
+        print("FAIL t3c: ends_with 'world'");
+        return 1;
+    }
+    if (greeting.ends_with("hello") != false) {
+        print("FAIL t3d: should not end with 'hello'");
+        return 1;
+    }
+
+    // Test 4: string len
+    let s = "abcdef";
+    if (s.len() != 6) {
+        print(f"FAIL t4a: len={s.len()}");
+        return 1;
+    }
+    let empty2 = "";
+    if (empty2.len() != 0) {
+        print(f"FAIL t4b: empty len={empty2.len()}");
+        return 1;
+    }
+
+    // Test 5: multi-line split
+    let multiline = "line1\nline2\nline3\nline4";
+    let ml_lines = multiline.split("\n");
+    if (ml_lines.len() != 4) {
+        print(f"FAIL t5a: lines={ml_lines.len()}");
+        return 1;
+    }
+
+    // Test 6: split single element (no delimiter found)
+    let single = "nosplit";
+    let sp = single.split(",");
+    if (sp.len() != 1) {
+        print(f"FAIL t6: sp.len()={sp.len()}");
+        return 1;
+    }
+
+    // Test 7: replace
+    let orig = "foo bar foo baz foo";
+    let replaced = orig.replace("foo", "qux");
+    if (replaced != "qux bar qux baz qux") {
+        print(f"FAIL t7a: replaced='{replaced}'");
+        return 1;
+    }
+    // Replace with empty
+    let no_spaces = "a b c".replace(" ", "");
+    if (no_spaces != "abc") {
+        print(f"FAIL t7b: no_spaces='{no_spaces}'");
+        return 1;
+    }
+
+    // Test 8: trim
+    let padded = "   hello   ";
+    let trimmed = padded.trim();
+    if (trimmed != "hello") {
+        print(f"FAIL t8a: trimmed='{trimmed}'");
+        return 1;
+    }
+    let already_clean = "clean";
+    let still_clean = already_clean.trim();
+    if (still_clean != "clean") {
+        print(f"FAIL t8b: still_clean='{still_clean}'");
+        return 1;
+    }
+
+    // Test 9: split and access individual elements
+    let path = "/usr/local/bin/verum";
+    let segs = path.split("/");
+    // ["", "usr", "local", "bin", "verum"]
+    if (segs.len() != 5) {
+        print(f"FAIL t9a: segs.len()={segs.len()}");
+        return 1;
+    }
+
+    // Test 10: chained string operations
+    let messy = "  Hello, World!  ";
+    let cleaned = messy.trim();
+    if (cleaned.starts_with("Hello") != true) {
+        print("FAIL t10a: trimmed starts_with");
+        return 1;
+    }
+    if (cleaned.ends_with("World!") != true) {
+        print("FAIL t10b: trimmed ends_with");
+        return 1;
+    }
+    if (cleaned.contains(",") != true) {
+        print("FAIL t10c: trimmed contains comma");
+        return 1;
+    }
+
+    // Test 11: replace then check
+    let sentence = "I love cats and cats love me";
+    let updated = sentence.replace("cats", "dogs");
+    if (updated.contains("cats") != false) {
+        print("FAIL t11a: should not contain 'cats'");
+        return 1;
+    }
+    if (updated.contains("dogs") != true) {
+        print("FAIL t11b: should contain 'dogs'");
+        return 1;
+    }
+
+    // Test 12: split on multi-char delimiter
+    let data = "one::two::three";
+    let dp = data.split("::");
+    if (dp.len() != 3) {
+        print(f"FAIL t12: dp.len()={dp.len()}");
+        return 1;
+    }
+
+    print("916_text_parsing: PASS");
+    0
+}

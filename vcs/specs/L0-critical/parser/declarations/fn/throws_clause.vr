@@ -1,0 +1,168 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, error-handling, throws, function-signature, v2.8
+
+// ============================================================================
+// Verum v2.8 - Typed Error Boundaries (throws clause)
+// Grammar: throws_clause = 'throws' , '(' , error_type_list , ')' ;
+// Grammar: error_type_list = type_expr , { '|' , type_expr } ;
+// ============================================================================
+
+// Simple throws clause with single error type
+fn parse(input: Text) throws(ParseError) -> AST {
+    let tokens = tokenize(input)?;
+    let ast = build_ast(tokens)?;
+    ast
+}
+
+// Throws clause with union of error types
+fn process(data: Data) throws(ParseError | ValidationError) -> ProcessResult {
+    let parsed = parse_data(data)?;
+    let validated = validate(parsed)?;
+    Ok(validated)
+}
+
+// Async function with throws clause
+async fn fetch() throws(NetworkError | TimeoutError) -> Data {
+    let response = http_get(url).await?;
+    let data = response.json().await?;
+    data
+}
+
+// Multiple error types in throws clause
+fn complex_operation(input: Input) throws(IoError | ParseError | ValidationError | NetworkError) -> Output {
+    let file = File.open(input.path)?;
+    let content = file.read_all()?;
+    let parsed = parse(content)?;
+    let validated = validate(parsed)?;
+    Output { data: validated }
+}
+
+// Throws with generic error type
+fn transform<T, E>(value: T) throws(E) -> T where type E: Error {
+    let result = do_transform(value)?;
+    result
+}
+
+// Throws with generic error union
+fn pipeline<A, B, E1, E2>(input: A) throws(E1 | E2) -> B
+    where type E1: Error, E2: Error {
+    let intermediate = step1(input)?;
+    let output = step2(intermediate)?;
+    output
+}
+
+// Throws with parameterized error types
+fn read_typed<T>(path: Text) throws(IoError | DeserializeError<T>) -> T {
+    let content = File.read(path)?;
+    let value = deserialize<T>(content)?;
+    value
+}
+
+// Async function with multiple throws and context
+async fn fetch_user(id: UserId) throws(NetworkError | NotFoundError | AuthError) -> User
+    using [HttpClient, Logger] {
+    Logger.info(f"Fetching user {id}");
+    let response = HttpClient.get(f"/users/{id}").await?;
+    let user = response.json<User>().await?;
+    user
+}
+
+// Throws with refinement type errors
+fn divide(a: Int, b: Int{!= 0}) throws(DivisionError) -> Int {
+    if b == 0 {
+        return Err(DivisionError.ByZero);
+    }
+    Ok(a / b)
+}
+
+// Visibility modifier with throws
+public fn api_endpoint(request: Request) throws(HttpError | AuthError | ValidationError) -> Response {
+    let auth = authenticate(request)?;
+    let validated = validate_request(request)?;
+    process_request(validated, auth)?
+}
+
+// Throws in method signature (within implement block)
+implement Parser {
+    fn parse_expression(&mut self) throws(ParseError) -> Expr {
+        let token = self.peek()?;
+        self.parse_expr_inner(token)?
+    }
+
+    fn parse_statement(&mut self) throws(ParseError | SyntaxError) -> Stmt {
+        let token = self.current()?;
+        self.parse_stmt_inner(token)?
+    }
+}
+
+// Throws with where clause for error constraints
+fn convert<S, D, E>(source: S) throws(E) -> D
+    where type S: Serializable, D: Deserializable, E: ConversionError {
+    let bytes = source.serialize()?;
+    let dest = D.deserialize(bytes)?;
+    dest
+}
+
+// Throws in protocol method signature
+type Parser is protocol {
+    fn parse(&mut self, input: Text) throws(ParseError) -> AST;
+    fn parse_partial(&mut self, input: Text) throws(ParseError | IncompleteError) -> PartialAST;
+};
+
+// Throws with ensures clause
+fn sqrt(x: Float{>= 0.0}) throws(MathError) -> Float
+    where ensures result >= 0.0 {
+    if x < 0.0 {
+        return Err(MathError.NegativeInput);
+    }
+    Ok(math_sqrt(x))
+}
+
+// Throws with meta parameters
+fn create_array<N: meta Int>(init: Int) throws(AllocationError) -> [Int; N]
+    where meta N > 0 {
+    let arr = allocate_array(N)?;
+    fill_array(arr, init);
+    arr
+}
+
+// Empty-like error union (single type, different syntax emphasis)
+fn simple_fallible() throws(Error) -> Int {
+    fallible_computation()?
+}
+
+// Async with throws and spawn
+async fn parallel_fetch() throws(NetworkError | AggregateError) -> List<Data> {
+    let futures = urls.map(|url| spawn fetch_one(url));
+    let results = await_all(futures).await?;
+    results
+}
+
+// Throws with unsafe block interaction
+// NOTE: Pointer return types (-> *const T) are not fully supported in the parser.
+// Use a wrapper type or Maybe<RawPtr> instead.
+fn unsafe_with_throws() throws(SafetyError) -> Maybe<RawPtr> {
+    let ptr = unsafe { allocate_raw()? };
+    if ptr.is_null() {
+        return Err(SafetyError.NullPointer);
+    }
+    Some(ptr)
+}
+
+// Multiple functions demonstrating throws variety
+fn step1() throws(Error1) -> A { compute_a()? }
+fn step2(a: A) throws(Error2) -> B { transform_to_b(a)? }
+fn step3(b: B) throws(Error3) -> C { finalize_to_c(b)? }
+
+fn pipeline_all() throws(Error1 | Error2 | Error3) -> C {
+    let a = step1()?;
+    let b = step2(a)?;
+    let c = step3(b)?;
+    c
+}
+
+// NOTE: throws clause in function types (fn(A) throws(E) -> B) is NOT supported.
+// The parser only supports throws on function declarations, not function types.
+// Use Result<T, E> return types in function type parameters instead.

@@ -1,0 +1,146 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, try, nested, error-handling
+
+// Simple nested try blocks
+fn test_simple_nested() {
+    try {
+        try {
+            inner_operation()
+        } recover |inner_e| handle_inner(inner_e)
+    } recover |outer_e| handle_outer(outer_e)
+}
+
+// Nested try with different error handling
+fn test_nested_with_result() {
+    try {
+        let result = try {
+            parse(input)?
+        } recover |_| use_default();
+        validate(result)?
+    } recover |validation_error| handle_validation(validation_error)
+}
+
+// Deep nesting
+fn test_deep_nesting() {
+    try {
+        try {
+            try {
+                deepest_operation()
+            } recover |e| level_3_recovery(e)
+        } recover |e| level_2_recovery(e)
+    } recover |e| level_1_recovery(e)
+}
+
+// Nested try-finally
+fn test_nested_try_finally() {
+    try {
+        let outer_resource = acquire_outer();
+        try {
+            let inner_resource = acquire_inner();
+            use_resources(outer_resource, inner_resource)
+        } finally {
+            release_inner()
+        }
+    } finally {
+        release_outer()
+    }
+}
+
+// Nested try with question mark propagation
+fn complex_operation() -> Result<Data, Error> {
+    try {
+        let partial = try {
+            fetch_data()?
+        } recover |_| cached_data();
+        transform(partial)?
+    } recover |e| Err(wrap_error(e))
+}
+
+// Nested try in loop
+fn test_nested_in_loop() {
+    for item in items {
+        try {
+            try {
+                process(item)
+            } recover {
+                e if e.is_retryable() => retry_process(item),
+                _ => skip(item),
+            }
+        } recover |e| log_failure(item, e)
+    }
+}
+
+// Nested try with break
+fn test_nested_with_break() {
+    'outer: loop {
+        try {
+            try {
+                let result = operation()?;
+                if result.done {
+                    break 'outer;
+                }
+            } recover {
+                inner if inner.is_fatal() => break 'outer,
+                _ => {},
+            }
+        } recover |outer| handle_outer(outer)
+    }
+}
+
+// Nested try in async context
+async fn async_nested() -> Result<Data, Error> {
+    try {
+        let connection = try {
+            connect().await?
+        } recover |_| fallback_connect().await?;
+
+        fetch_data(connection).await?
+    } recover |_| emergency_fallback().await
+}
+
+// Try inside recover block
+fn test_try_inside_recover() {
+    try {
+        risky_operation()
+    } recover |_| {
+        try {
+            recovery_operation()
+        } recover |_| final_fallback()
+    }
+}
+
+// Nested try with finally chain
+fn test_nested_finally_chain() {
+    try {
+        try {
+            critical_operation()
+        } finally {
+            inner_cleanup()
+        }
+    } recover |_| {
+        try {
+            recovery()
+        } finally {
+            recovery_cleanup()
+        }
+    } finally {
+        outer_cleanup()
+    }
+}
+
+// Complex nested structure
+fn multi_stage() -> Result<Output, Error> {
+    let stage1 = try {
+        try {
+            primary_source()?
+        } recover |_| secondary_source()?
+    } recover |_| cached_source();
+
+    let stage2 = try {
+        transform(stage1)?
+    } recover |_| simple_transform(stage1);
+
+    Ok(stage2)
+}

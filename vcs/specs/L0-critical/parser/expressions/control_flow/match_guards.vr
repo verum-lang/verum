@@ -1,0 +1,131 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, match, pattern, guard
+
+fn test_simple_match_guard() {
+    // Simple match guard
+    match x {
+        n if n > 0 => "positive",
+        n if n < 0 => "negative",
+        _ => "zero",
+    }
+}
+
+fn test_guard_with_binding() {
+    // Guard with binding
+    match option {
+        Some(x) if x > 10 => "large",
+        Some(x) if x > 0 => "positive",
+        Some(_) => "non-positive",
+        None => "none",
+    }
+}
+
+fn test_guard_complex_condition() {
+    // Guard with complex condition
+    match pair {
+        (x, y) if x > 0 && y > 0 => "first quadrant",
+        (x, y) if x < 0 && y > 0 => "second quadrant",
+        (x, y) if x < 0 && y < 0 => "third quadrant",
+        (x, y) if x > 0 && y < 0 => "fourth quadrant",
+        _ => "on axis",
+    }
+}
+
+fn test_guard_function_call() {
+    // Guard with function call
+    match value {
+        x if is_valid(x) => process(x),
+        x if is_recoverable(x) => retry(x),
+        _ => fail(),
+    }
+}
+
+fn test_guard_method_call() {
+    // Guard with method call
+    match item {
+        x if x.is_active() => x.process(),
+        x if x.can_activate() => x.activate(),
+        _ => skip(),
+    }
+}
+
+fn test_guard_captured_variable() {
+    // Guard with captured variable
+    let threshold = 100;
+    match value {
+        n if n > threshold => "above",
+        n if n < threshold => "below",
+        _ => "equal",
+    }
+}
+
+fn test_guard_struct_pattern() {
+    // Guard on struct pattern
+    match point {
+        Point { x, y } if x == y => "diagonal",
+        Point { x, y } if x == -y => "anti-diagonal",
+        Point { x, y: 0 } if x > 0 => "positive x-axis",
+        _ => "other",
+    }
+}
+
+fn test_guard_enum_variant() {
+    // Guard on enum variant
+    match result {
+        Ok(n) if n > 0 => "positive success",
+        Ok(n) if n == 0 => "zero success",
+        Ok(_) => "negative success",
+        Err(e) if e.is_recoverable() => "recoverable error",
+        Err(_) => "fatal error",
+    }
+}
+
+fn test_guard_or_patterns() {
+    // Guard with or-patterns
+    match char {
+        c if c.is_alphanumeric() => "alphanumeric",
+        ' ' | '\t' | '\n' if allow_whitespace => "whitespace",
+        _ => "other",
+    }
+}
+
+fn test_guard_range_binding() {
+    // Guard with range binding
+    match age {
+        n @ 0..=12 if n > 5 => "school-age child",
+        n @ 0..=12 => "young child",
+        n @ 13..=19 => "teenager",
+        _ => "adult",
+    }
+}
+
+fn test_nested_guards() {
+    // Nested guards
+    match nested {
+        Some(inner) if match inner {
+            Inner.Valid => true,
+            _ => false,
+        } => "valid inner",
+        _ => "other",
+    }
+}
+
+fn test_guard_logical_operators() {
+    // Guard with logical operators
+    match value {
+        x if x > 0 && x % 2 == 0 => "positive even",
+        x if x > 0 && x % 2 != 0 => "positive odd",
+        x if x < 0 || x == 0 => "non-positive",
+        _ => "unreachable",
+    }
+}
+
+fn test_guard_multiple_bindings() {
+    // Guard referencing multiple bindings
+    match triple {
+        (a, b, c) if a + b > c && b + c > a && a + c > b => "valid triangle",
+        _ => "not a triangle",
+    }
+}

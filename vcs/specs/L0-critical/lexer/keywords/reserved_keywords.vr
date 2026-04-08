@@ -1,0 +1,60 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, reserved
+
+// Reserved keywords that cannot be used as identifiers
+// These are fundamental language constructs
+// Note: Only 3 keywords are truly reserved: let, fn, is
+
+// Variable binding - must be inside a function
+fn test_let_binding() {
+    let x = 42;
+    let mut counter = 0;
+}
+
+// Function definition
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// 'is' keyword in type definitions
+type Point is { x: Float, y: Float };
+type Maybe<T> is None | Some(T);
+
+// Let in expressions
+fn test_let_expressions() {
+    let result = {
+        let temp = 10;
+        let doubled = temp * 2;
+        doubled + 5
+    };
+}
+
+// Nested let bindings
+fn test_nested_let() {
+    let outer = {
+        let inner = {
+            let deepest = 1;
+            deepest
+        };
+        inner + 1
+    };
+}
+
+// Mutable bindings with let mut
+fn test_mutable_let() {
+    let mut accumulator = 0;
+    accumulator = accumulator + 1;
+    accumulator = accumulator + 2;
+}
+
+// Function with multiple parameters
+fn multiply(x: Int, y: Int, z: Int) -> Int {
+    x * y * z
+}
+
+// Function returning unit
+fn side_effect() {
+    let _ = 42;
+}

@@ -1,0 +1,71 @@
+// @test: run
+// Tuple destructuring preserves element types
+
+fn make_list_and_text() -> (List<Int>, Text) {
+    let nums = List.new();
+    nums.push(10);
+    nums.push(20);
+    nums.push(30);
+    (nums, "hello")
+}
+
+fn make_text_pair() -> (Text, Text) {
+    ("foo", "bar")
+}
+
+fn make_list_pair() -> (List<Int>, List<Int>) {
+    let a = List.new();
+    a.push(1); a.push(2);
+    let b = List.new();
+    b.push(3); b.push(4); b.push(5);
+    (a, b)
+}
+
+fn main() -> Int {
+    let mut passed = 0;
+    let mut failed = 0;
+
+    // Test 1: List from tuple — len() must work
+    let (nums, text) = make_list_and_text();
+    if (nums.len() == 3) { passed = passed + 1; }
+    else { print(f"FAIL 1: nums.len()={nums.len()}"); failed = failed + 1; }
+
+    // Test 2: Text from tuple — len() must work
+    if (text.len() == 5) { passed = passed + 1; }
+    else { print(f"FAIL 2: text.len()={text.len()}"); failed = failed + 1; }
+
+    // Test 3: List element access from tuple
+    if (nums[0] == 10 && nums[2] == 30) { passed = passed + 1; }
+    else { print(f"FAIL 3: nums[0]={nums[0]} nums[2]={nums[2]}"); failed = failed + 1; }
+
+    // Test 4: Text pair from tuple
+    let (a, b) = make_text_pair();
+    if (a == "foo" && b == "bar") { passed = passed + 1; }
+    else { print(f"FAIL 4: a={a} b={b}"); failed = failed + 1; }
+
+    // Test 5: List pair from tuple — both tracked as lists
+    let (x, y) = make_list_pair();
+    if (x.len() == 2 && y.len() == 3) { passed = passed + 1; }
+    else { print(f"FAIL 5: x.len()={x.len()} y.len()={y.len()}"); failed = failed + 1; }
+
+    // Test 6: Push to list from tuple
+    let (mut items, _label) = make_list_and_text();
+    items.push(40);
+    if (items.len() == 4) { passed = passed + 1; }
+    else { print(f"FAIL 6: items.len()={items.len()}"); failed = failed + 1; }
+
+    // Test 7: Tuple literal with tracked types
+    let my_list = List.new();
+    my_list.push(100);
+    let pair = (my_list, "world");
+    let (l, t) = pair;
+    if (l.len() == 1 && t == "world") { passed = passed + 1; }
+    else { print(f"FAIL 7: l.len()={l.len()} t={t}"); failed = failed + 1; }
+
+    if (failed > 0) {
+        print(f"tuple_type_tracking: {passed}/{passed + failed} passed");
+        return 1;
+    }
+    print(f"tuple_type_tracking: PASS ({passed}/{passed} tests)");
+    0
+}

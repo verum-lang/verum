@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M506
+// @description: Tests M506 MetaWhereUnsatisfied error code
+// @tags: meta-system, type-level, where-clause, error-codes
+
+// M506 is triggered when a meta where clause constraint is not satisfied.
+// This test uses trigger_meta_where_unsatisfied to validate the error code.
+
+meta fn cause_where_unsatisfied() -> Int {
+    // Trigger M506 MetaWhereUnsatisfied error
+    trigger_meta_where_unsatisfied("size_of<LargeStruct>() <= 8")
+}
+
+fn main() {
+    // This will fail at compile time with M506
+    @const assert(cause_where_unsatisfied() == 0);
+}

@@ -1,0 +1,137 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, max_product_subarray, dynamic_programming, kadane_variant
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Maximum product subarray — DP tracking both min and max.
+//
+// Because a negative number times a negative number is positive,
+// we must track both the maximum and minimum product ending at each position.
+//
+// Algorithm:
+//   cur_max = arr[0], cur_min = arr[0], global_max = arr[0]
+//   For i in 1..n:
+//     candidates = {arr[i], cur_max*arr[i], cur_min*arr[i]}
+//     cur_max = max of candidates
+//     cur_min = min of candidates
+//     global_max = max(global_max, cur_max)
+//
+// All-integer arithmetic. Arrays of size 16.
+
+fn max3(a: Int, b: Int, c: Int) -> Int {
+    let m = if a > b { a } else { b };
+    if m > c { m } else { c }
+}
+
+fn min3(a: Int, b: Int, c: Int) -> Int {
+    let m = if a < b { a } else { b };
+    if m < c { m } else { c }
+}
+
+fn max_product(arr: [Int; 16], n: Int) -> Int {
+    let mut cur_max = arr[0];
+    let mut cur_min = arr[0];
+    let mut best    = arr[0];
+    let mut i = 1;
+    while i < n {
+        let a = arr[i];
+        let p1 = cur_max * a;
+        let p2 = cur_min * a;
+        cur_max = max3(a, p1, p2);
+        cur_min = min3(a, p1, p2);
+        if cur_max > best { best = cur_max; }
+        i = i + 1;
+    }
+    best
+}
+
+fn test_all_positive() {
+    // [2,3,4]: max product = 24 (entire array).
+    let mut arr = [2,3,4,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr, 3), 24);
+    // [1,2,3,4,5]: max product = 120.
+    let mut arr2 = [1,2,3,4,5,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr2, 5), 120);
+    print("all_positive: ok");
+}
+
+fn test_single_negative() {
+    // [-2,3,4]: products: [-2],[3],[4],[-2,3]=-6,[3,4]=12,[-2,3,4]=-24.
+    // Max = 12.
+    let mut arr = [-2,3,4,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr, 3), 12);
+
+    // [2,-3,4]: subarrays: 2,-3,4,[2,-3]=-6,[-3,4]=-12,[2,-3,4]=-24.
+    // Max = 4.
+    let mut arr2 = [2,-3,4,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr2, 3), 4);
+    print("single_negative: ok");
+}
+
+fn test_two_negatives() {
+    // [-2,-3,4]: [-2]*[-3]=6, 6*4=24. Max=24.
+    let mut arr = [-2,-3,4,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr, 3), 24);
+
+    // [2,3,-2,4]: 2*3=6, [2,3,-2,4]=-48, [3,-2]=-6, [-2,4]=-8.
+    // Best contiguous subarray: 6 or 4. Max=6.
+    let mut arr2 = [2,3,-2,4,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr2, 4), 6);
+    print("two_negatives: ok");
+}
+
+fn test_with_zeros() {
+    // [0,2]: max product = 2.
+    let mut arr = [0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr, 2), 2);
+
+    // [-1,0,3]: subarrays: -1,0,3,[-1,0]=0,[0,3]=0,[-1,0,3]=0.
+    // Max = 3.
+    let mut arr2 = [-1,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr2, 3), 3);
+
+    // [0,0,0]: max product = 0.
+    let mut arr3 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr3, 3), 0);
+    print("with_zeros: ok");
+}
+
+fn test_single_element() {
+    // Single positive.
+    let mut arr = [7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr, 1), 7);
+    // Single negative.
+    let mut arr2 = [-5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr2, 1), -5);
+    // Single zero.
+    let mut arr3 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr3, 1), 0);
+    print("single_element: ok");
+}
+
+fn test_alternating_negatives() {
+    // [-1,-2,-3,-4]: pairs: (-1*-2)=2, (-2*-3)=6, (-3*-4)=12, all four: 24.
+    // Best=24.
+    let mut arr = [-1,-2,-3,-4,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr, 4), 24);
+
+    // [-1,-2,-3,-4,-5]: odd count of negatives.
+    // Best even prefix/suffix: [-1,-2,-3,-4]=24, [-2,-3,-4,-5]=120.
+    // Also [-1,-2,-3,-4,-5]=-120. Max=120.
+    let mut arr2 = [-1,-2,-3,-4,-5,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product(arr2, 5), 120);
+    print("alternating_negatives: ok");
+}
+
+fn main() -> Int {
+    test_all_positive();
+    test_single_negative();
+    test_two_negatives();
+    test_with_zeros();
+    test_single_element();
+    test_alternating_negatives();
+    print("[OK] 598_interp_max_product_subarray");
+    0
+}

@@ -1,0 +1,296 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, heapsort, sorting
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: heapsort (build max-heap, extract max) on fixed-size arrays
+
+// =============================================================================
+// Array type and accessors (8 elements)
+// =============================================================================
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn arr_new() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn arr_get(arr: Arr8, idx: Int) -> Int {
+    if idx == 0 { arr.a0 }
+    else if idx == 1 { arr.a1 }
+    else if idx == 2 { arr.a2 }
+    else if idx == 3 { arr.a3 }
+    else if idx == 4 { arr.a4 }
+    else if idx == 5 { arr.a5 }
+    else if idx == 6 { arr.a6 }
+    else if idx == 7 { arr.a7 }
+    else { -1 }
+}
+
+fn arr_set(arr: Arr8, idx: Int, val: Int) -> Arr8 {
+    Arr8 {
+        a0: if idx == 0 { val } else { arr.a0 },
+        a1: if idx == 1 { val } else { arr.a1 },
+        a2: if idx == 2 { val } else { arr.a2 },
+        a3: if idx == 3 { val } else { arr.a3 },
+        a4: if idx == 4 { val } else { arr.a4 },
+        a5: if idx == 5 { val } else { arr.a5 },
+        a6: if idx == 6 { val } else { arr.a6 },
+        a7: if idx == 7 { val } else { arr.a7 },
+    }
+}
+
+fn arr_swap(arr: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = arr_get(arr, i);
+    let vj = arr_get(arr, j);
+    let tmp = arr_set(arr, i, vj);
+    arr_set(tmp, j, vi)
+}
+
+fn is_sorted(arr: Arr8, lo: Int, hi: Int) -> Bool {
+    let mut i = lo;
+    while i < hi - 1 {
+        if arr_get(arr, i) > arr_get(arr, i + 1) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Sift down: fix the max-heap property at node i within heap of size n
+// =============================================================================
+
+fn sift_down(arr: Arr8, start: Int, n: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = start;
+    let mut done = 0;
+    while done == 0 {
+        let left = 2 * i + 1;
+        let right = 2 * i + 2;
+        let mut largest = i;
+        if left < n {
+            if arr_get(a, left) > arr_get(a, largest) {
+                largest = left;
+            }
+        }
+        if right < n {
+            if arr_get(a, right) > arr_get(a, largest) {
+                largest = right;
+            }
+        }
+        if largest != i {
+            a = arr_swap(a, i, largest);
+            i = largest;
+        } else {
+            done = 1;
+        }
+    }
+    a
+}
+
+// =============================================================================
+// Build max-heap (Floyd's algorithm)
+// =============================================================================
+
+fn build_max_heap(arr: Arr8, n: Int) -> Arr8 {
+    let mut a = arr;
+    // Start from last non-leaf node
+    let mut i = n / 2 - 1;
+    while i >= 0 {
+        a = sift_down(a, i, n);
+        i = i - 1;
+    }
+    a
+}
+
+// =============================================================================
+// Heapsort
+// =============================================================================
+
+fn heapsort(arr: Arr8, n: Int) -> Arr8 {
+    let mut a = build_max_heap(arr, n);
+    let mut sz = n;
+    while sz > 1 {
+        // Swap root (max) with last element
+        a = arr_swap(a, 0, sz - 1);
+        sz = sz - 1;
+        // Restore heap property
+        a = sift_down(a, 0, sz);
+    }
+    a
+}
+
+fn sort8(arr: Arr8) -> Arr8 {
+    heapsort(arr, 8)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_basic_sort() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 4);
+    a = arr_set(a, 1, 1);
+    a = arr_set(a, 2, 3);
+    a = arr_set(a, 3, 2);
+    a = arr_set(a, 4, 8);
+    a = arr_set(a, 5, 5);
+    a = arr_set(a, 6, 7);
+    a = arr_set(a, 7, 6);
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 1), 2);
+    assert_eq(arr_get(s, 2), 3);
+    assert_eq(arr_get(s, 3), 4);
+    assert_eq(arr_get(s, 4), 5);
+    assert_eq(arr_get(s, 5), 6);
+    assert_eq(arr_get(s, 6), 7);
+    assert_eq(arr_get(s, 7), 8);
+}
+
+fn test_reverse_order() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 8);
+    a = arr_set(a, 1, 7);
+    a = arr_set(a, 2, 6);
+    a = arr_set(a, 3, 5);
+    a = arr_set(a, 4, 4);
+    a = arr_set(a, 5, 3);
+    a = arr_set(a, 6, 2);
+    a = arr_set(a, 7, 1);
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 7), 8);
+}
+
+fn test_already_sorted() {
+    let mut a = arr_new();
+    let mut i = 0;
+    while i < 8 {
+        a = arr_set(a, i, i * 10 + 1);
+        i = i + 1;
+    }
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 7), 71);
+}
+
+fn test_duplicates() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 5);
+    a = arr_set(a, 1, 3);
+    a = arr_set(a, 2, 5);
+    a = arr_set(a, 3, 1);
+    a = arr_set(a, 4, 3);
+    a = arr_set(a, 5, 5);
+    a = arr_set(a, 6, 1);
+    a = arr_set(a, 7, 3);
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 1), 1);
+    assert_eq(arr_get(s, 2), 3);
+    assert_eq(arr_get(s, 3), 3);
+    assert_eq(arr_get(s, 4), 3);
+    assert_eq(arr_get(s, 5), 5);
+    assert_eq(arr_get(s, 6), 5);
+    assert_eq(arr_get(s, 7), 5);
+}
+
+fn test_all_same() {
+    let mut a = arr_new();
+    let mut i = 0;
+    while i < 8 {
+        a = arr_set(a, i, 99);
+        i = i + 1;
+    }
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), 99);
+    assert_eq(arr_get(s, 7), 99);
+}
+
+fn test_negatives() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, -2);
+    a = arr_set(a, 1, 5);
+    a = arr_set(a, 2, -9);
+    a = arr_set(a, 3, 0);
+    a = arr_set(a, 4, 3);
+    a = arr_set(a, 5, -7);
+    a = arr_set(a, 6, 1);
+    a = arr_set(a, 7, -4);
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), -9);
+    assert_eq(arr_get(s, 1), -7);
+    assert_eq(arr_get(s, 2), -4);
+    assert_eq(arr_get(s, 3), -2);
+    assert_eq(arr_get(s, 4), 0);
+    assert_eq(arr_get(s, 5), 1);
+    assert_eq(arr_get(s, 6), 3);
+    assert_eq(arr_get(s, 7), 5);
+}
+
+fn test_build_max_heap() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 1);
+    a = arr_set(a, 1, 2);
+    a = arr_set(a, 2, 3);
+    a = arr_set(a, 3, 4);
+    a = arr_set(a, 4, 5);
+    a = arr_set(a, 5, 6);
+    a = arr_set(a, 6, 7);
+    a = arr_set(a, 7, 8);
+    let h = build_max_heap(a, 8);
+    // Root should be max
+    assert_eq(arr_get(h, 0), 8);
+    // Max-heap property: parent >= children
+    let mut i = 0;
+    while i < 4 {
+        let left = 2 * i + 1;
+        let right = 2 * i + 2;
+        if left < 8 {
+            assert(arr_get(h, i) >= arr_get(h, left));
+        }
+        if right < 8 {
+            assert(arr_get(h, i) >= arr_get(h, right));
+        }
+        i = i + 1;
+    }
+}
+
+fn test_small_sort() {
+    // Sort 4 elements
+    let mut a = arr_new();
+    a = arr_set(a, 0, 4);
+    a = arr_set(a, 1, 2);
+    a = arr_set(a, 2, 3);
+    a = arr_set(a, 3, 1);
+    let s = heapsort(a, 4);
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 1), 2);
+    assert_eq(arr_get(s, 2), 3);
+    assert_eq(arr_get(s, 3), 4);
+}
+
+fn main() -> Int {
+    test_basic_sort();
+    test_reverse_order();
+    test_already_sorted();
+    test_duplicates();
+    test_all_same();
+    test_negatives();
+    test_build_max_heap();
+    test_small_sort();
+    print("[OK] 243_interp_heapsort");
+    0
+}

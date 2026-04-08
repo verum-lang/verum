@@ -1,0 +1,24 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test type stride property (array element spacing)
+
+fn main() {
+    // For primitive types, stride equals size (no padding)
+    assert_eq(Int8.stride, 1);
+    assert_eq(Int16.stride, 2);
+    assert_eq(Int32.stride, 4);
+    assert_eq(Int64.stride, 8);
+
+    assert_eq(UInt8.stride, 1);
+    assert_eq(UInt16.stride, 2);
+    assert_eq(UInt32.stride, 4);
+    assert_eq(UInt64.stride, 8);
+
+    assert_eq(Float32.stride, 4);
+    assert_eq(Float64.stride, 8);
+
+    assert_eq(Bool.stride, 1);
+    assert_eq(Byte.stride, 1);
+}

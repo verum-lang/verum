@@ -1,0 +1,29 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, minimal
+// @description: Minimal test for abs_f64 intrinsic
+
+module test.stdlib.sys.intrinsics.abs_minimal_test;
+
+mount core.intrinsics.{abs_f64, sqrt_f64};
+
+fn main() {
+    // Test sqrt
+    let x: Float64 = 4.0;
+    let sqrt_result = sqrt_f64(x);
+    print(f"sqrt(4.0) = {sqrt_result}");
+
+    // Test abs
+    let y: Float64 = -5.0;
+    let abs_result = abs_f64(y);
+    print(f"abs(-5.0) = {abs_result}");
+
+    // Test subtraction and abs
+    let a: Float64 = 2.0;
+    let b: Float64 = 0.0;
+    let diff = a - b;
+    print(f"2.0 - 0.0 = {diff}");
+    let abs_diff = abs_f64(diff);
+    print(f"abs(diff) = {abs_diff}");
+}

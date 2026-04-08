@@ -1,0 +1,184 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, fibonacci, matrix, exponentiation
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Fibonacci via 2x2 matrix exponentiation.
+// [[F(n+1), F(n)], [F(n), F(n-1)]] = [[1,1],[1,0]]^n
+// Matrix stored as 4 integers (a, b, c, d) for [[a,b],[c,d]].
+// Uses fast exponentiation (repeated squaring).
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+// Matrix multiply: result = m1 * m2
+fn mat_mul(m1: Mat2, m2: Mat2) -> Mat2 {
+    Mat2 {
+        a: m1.a * m2.a + m1.b * m2.c,
+        b: m1.a * m2.b + m1.b * m2.d,
+        c: m1.c * m2.a + m1.d * m2.c,
+        d: m1.c * m2.b + m1.d * m2.d
+    }
+}
+
+// Identity matrix
+fn mat_id() -> Mat2 {
+    Mat2 { a: 1, b: 0, c: 0, d: 1 }
+}
+
+// Fibonacci base matrix [[1,1],[1,0]]
+fn fib_base() -> Mat2 {
+    Mat2 { a: 1, b: 1, c: 1, d: 0 }
+}
+
+// Matrix power by repeated squaring
+fn mat_pow(m: Mat2, n: Int) -> Mat2 {
+    if n == 0 { return mat_id(); }
+    let mut result = mat_id();
+    let mut base = m;
+    let mut exp = n;
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = mat_mul(result, base);
+        }
+        base = mat_mul(base, base);
+        exp = exp / 2;
+    }
+    result
+}
+
+// Fibonacci(n) using matrix exponentiation
+// fib(0)=0, fib(1)=1, fib(2)=1, ...
+fn fib_matrix(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let m = mat_pow(fib_base(), n);
+    m.b
+}
+
+// Naive Fibonacci for cross-validation
+fn fib_naive(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    b
+}
+
+// ========== Tests ==========
+
+fn test_mat_mul_identity() -> Int {
+    let m = fib_base();
+    let id = mat_id();
+    let r = mat_mul(m, id);
+    assert_eq(r.a, 1);
+    assert_eq(r.b, 1);
+    assert_eq(r.c, 1);
+    assert_eq(r.d, 0);
+    0
+}
+
+fn test_mat_mul_base_squared() -> Int {
+    // [[1,1],[1,0]]^2 = [[2,1],[1,1]]
+    let m = fib_base();
+    let r = mat_mul(m, m);
+    assert_eq(r.a, 2);
+    assert_eq(r.b, 1);
+    assert_eq(r.c, 1);
+    assert_eq(r.d, 1);
+    0
+}
+
+fn test_mat_pow_small() -> Int {
+    let m = fib_base();
+    // m^0 = identity
+    let r0 = mat_pow(m, 0);
+    assert_eq(r0.a, 1);
+    assert_eq(r0.b, 0);
+    assert_eq(r0.c, 0);
+    assert_eq(r0.d, 1);
+    0
+}
+
+fn test_mat_pow_one() -> Int {
+    let m = fib_base();
+    let r1 = mat_pow(m, 1);
+    assert_eq(r1.a, 1);
+    assert_eq(r1.b, 1);
+    assert_eq(r1.c, 1);
+    assert_eq(r1.d, 0);
+    0
+}
+
+fn test_fib_base_cases() -> Int {
+    assert_eq(fib_matrix(0), 0);
+    assert_eq(fib_matrix(1), 1);
+    assert_eq(fib_matrix(2), 1);
+    assert_eq(fib_matrix(3), 2);
+    assert_eq(fib_matrix(4), 3);
+    assert_eq(fib_matrix(5), 5);
+    0
+}
+
+fn test_fib_medium() -> Int {
+    assert_eq(fib_matrix(6), 8);
+    assert_eq(fib_matrix(7), 13);
+    assert_eq(fib_matrix(8), 21);
+    assert_eq(fib_matrix(9), 34);
+    assert_eq(fib_matrix(10), 55);
+    0
+}
+
+fn test_fib_larger() -> Int {
+    assert_eq(fib_matrix(15), 610);
+    assert_eq(fib_matrix(20), 6765);
+    assert_eq(fib_matrix(25), 75025);
+    0
+}
+
+fn test_fib_cross_validate() -> Int {
+    // Verify matrix method matches naive iterative for multiple values
+    assert_eq(fib_matrix(0), fib_naive(0));
+    assert_eq(fib_matrix(1), fib_naive(1));
+    assert_eq(fib_matrix(5), fib_naive(5));
+    assert_eq(fib_matrix(10), fib_naive(10));
+    assert_eq(fib_matrix(20), fib_naive(20));
+    0
+}
+
+fn test_fib_cross_validate_more() -> Int {
+    assert_eq(fib_matrix(12), fib_naive(12));
+    assert_eq(fib_matrix(18), fib_naive(18));
+    assert_eq(fib_matrix(25), fib_naive(25));
+    assert_eq(fib_matrix(30), fib_naive(30));
+    0
+}
+
+fn test_fib_30() -> Int {
+    // fib(30) = 832040
+    assert_eq(fib_matrix(30), 832040);
+    assert_eq(fib_naive(30), 832040);
+    0
+}
+
+fn main() -> Int {
+    test_mat_mul_identity();
+    test_mat_mul_base_squared();
+    test_mat_pow_small();
+    test_mat_pow_one();
+    test_fib_base_cases();
+    test_fib_medium();
+    test_fib_larger();
+    test_fib_cross_validate();
+    test_fib_cross_validate_more();
+    test_fib_30();
+    print("[OK] 416_fibonacci_matrix_aot");
+    0
+}

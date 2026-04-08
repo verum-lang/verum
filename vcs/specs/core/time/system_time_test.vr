@@ -1,0 +1,1068 @@
+// =============================================================================
+// system_time_test.vr - Comprehensive tests for SystemTime type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: time, systemtime, wallclock, core
+// @description: Comprehensive tests for SystemTime type (wall-clock time)
+//
+// Coverage:
+// - Construction: UNIX_EPOCH, now, from_timestamp
+// - Accessors: timestamp, timestamp_millis, timestamp_nanos
+// - Duration calculations: duration_since_epoch, duration_since, elapsed
+// - Arithmetic: checked_add, checked_sub, operator overloads
+// - Comparison: Eq, Ord
+// - Error handling: SystemTimeError
+// =============================================================================
+
+module specs.core.time.system_time_test;
+
+mount core.time.{Duration, SystemTime, SystemTimeError};
+mount core.base.maybe.{Maybe};
+mount core.base.result.{Result};
+
+// =============================================================================
+// Section 1: Constructor Tests
+// =============================================================================
+
+@test
+fn test_unix_epoch() {
+    let epoch = SystemTime.UNIX_EPOCH();
+
+    // UNIX epoch is January 1, 1970, 00:00:00 UTC
+    assert_eq(epoch.timestamp(), 0);
+    assert_eq(epoch.timestamp_millis(), 0);
+    assert_eq(epoch.timestamp_nanos(), 0);
+
+    print("UNIX_EPOCH test passed");
+}
+
+@test
+fn test_system_time_now() {
+    let now = SystemTime.now();
+
+    // Now should be after UNIX epoch
+    let epoch = SystemTime.UNIX_EPOCH();
+    assert(now > epoch);
+
+    // Timestamp should be positive (we're after 1970)
+    assert(now.timestamp() > 0);
+
+    // Should be a reasonable year (after 2020, before 3000)
+    let secs_in_year: Int = 365 * 24 * 60 * 60;
+    let year_2020 = 50 * secs_in_year;  // Roughly 50 years after 1970
+    let year_3000 = 1030 * secs_in_year;
+
+    assert(now.timestamp() > year_2020);
+    assert(now.timestamp() < year_3000);
+
+    print("SystemTime.now() test passed");
+}
+
+@test
+fn test_from_timestamp() {
+    // Create time from Unix timestamp
+    let ts: Int = 1000000000;  // September 9, 2001
+    let time = SystemTime.from_timestamp(ts);
+
+    assert_eq(time.timestamp(), ts);
+    assert_eq(time.timestamp_millis(), ts * 1000);
+
+    print("from_timestamp test passed");
+}
+
+@test
+fn test_from_timestamp_millis() {
+    // Create time from millisecond timestamp
+    let ms: Int = 1234567890123;  // February 13, 2009, plus milliseconds
+    let time = SystemTime.from_timestamp_millis(ms);
+
+    assert_eq(time.timestamp_millis(), ms);
+    assert_eq(time.timestamp(), ms / 1000);
+
+    print("from_timestamp_millis test passed");
+}
+
+@test
+fn test_from_timestamp_zero() {
+    // Timestamp 0 is UNIX epoch
+    let time = SystemTime.from_timestamp(0);
+    let epoch = SystemTime.UNIX_EPOCH();
+
+    assert_eq(time, epoch);
+    assert_eq(time.timestamp(), 0);
+
+    print("from_timestamp zero test passed");
+}
+
+// =============================================================================
+// Section 2: Accessor Tests
+// =============================================================================
+
+@test
+fn test_timestamp() {
+    let epoch = SystemTime.UNIX_EPOCH();
+    assert_eq(epoch.timestamp(), 0);
+
+    let time = SystemTime.from_timestamp(12345);
+    assert_eq(time.timestamp(), 12345);
+
+    print("timestamp test passed");
+}
+
+@test
+fn test_timestamp_millis() {
+    let time = SystemTime.from_timestamp(1);
+    assert_eq(time.timestamp_millis(), 1000);  // 1 second = 1000 ms
+
+    let time_ms = SystemTime.from_timestamp_millis(5500);
+    assert_eq(time_ms.timestamp_millis(), 5500);
+    assert_eq(time_ms.timestamp(), 5);  // 5 seconds (truncated)
+
+    print("timestamp_millis test passed");
+}
+
+@test
+fn test_timestamp_nanos() {
+    let time = SystemTime.from_timestamp(1);
+    assert_eq(time.timestamp_nanos(), 1_000_000_000);  // 1 second in nanos
+
+    let time_ms = SystemTime.from_timestamp_millis(500);  // 0.5 seconds
+    assert_eq(time_ms.timestamp_nanos(), 500_000_000);
+
+    print("timestamp_nanos test passed");
+}
+
+// =============================================================================
+// Section 3: Duration Since Epoch Tests
+// =============================================================================
+
+@test
+fn test_duration_since_epoch() {
+    let time = SystemTime.from_timestamp(100);
+    let dur = time.duration_since_epoch();
+
+    assert_eq(dur.as_secs(), 100);
+    assert_eq(dur.as_nanos(), 100_000_000_000);
+
+    print("duration_since_epoch test passed");
+}
+
+@test
+fn test_duration_since_epoch_millis() {
+    let time = SystemTime.from_timestamp_millis(1500);  // 1.5 seconds
+    let dur = time.duration_since_epoch();
+
+    assert_eq(dur.as_secs(), 1);
+    assert_eq(dur.as_millis(), 1500);
+    assert_eq(dur.subsec_millis(), 500);
+
+    print("duration_since_epoch millis test passed");
+}
+
+@test
+fn test_duration_since_epoch_zero() {
+    let epoch = SystemTime.UNIX_EPOCH();
+    let dur = epoch.duration_since_epoch();
+
+    assert(dur.is_zero());
+    assert_eq(dur.as_nanos(), 0);
+
+    print("duration_since_epoch zero test passed");
+}
+
+// =============================================================================
+// Section 4: Duration Since Other Time Tests
+// =============================================================================
+
+@test
+fn test_duration_since_earlier() {
+    let earlier = SystemTime.from_timestamp(100);
+    let later = SystemTime.from_timestamp(150);
+
+    match later.duration_since(&earlier) {
+        Result.Ok(dur) => {
+            assert_eq(dur.as_secs(), 50);
+        }
+        Result.Err(_) => panic("Expected Ok for later.duration_since(earlier)"),
+    }
+
+    print("duration_since earlier test passed");
+}
+
+@test
+fn test_duration_since_later() {
+    // When trying to get duration from a later time (time went backwards)
+    let earlier = SystemTime.from_timestamp(100);
+    let later = SystemTime.from_timestamp(150);
+
+    match earlier.duration_since(&later) {
+        Result.Err(err) => {
+            // Error should contain the duration by which time "went backwards"
+            let backwards_dur = err.duration();
+            assert_eq(backwards_dur.as_secs(), 50);
+        }
+        Result.Ok(_) => panic("Expected Err for earlier.duration_since(later)"),
+    }
+
+    print("duration_since later (error) test passed");
+}
+
+@test
+fn test_duration_since_same() {
+    let time = SystemTime.from_timestamp(100);
+
+    match time.duration_since(&time) {
+        Result.Ok(dur) => {
+            assert(dur.is_zero());
+        }
+        Result.Err(_) => panic("Expected Ok for same time"),
+    }
+
+    print("duration_since same test passed");
+}
+
+// =============================================================================
+// Section 5: Elapsed Tests
+// =============================================================================
+
+@test
+fn test_elapsed_basic() {
+    // Create a time in the past
+    let past = SystemTime.from_timestamp(1000000000);  // 2001
+
+    match past.elapsed() {
+        Result.Ok(dur) => {
+            // Should be positive (we're after 2001)
+            assert(dur.as_secs() > 0);
+            // Should be more than 20 years
+            let twenty_years = 20 * 365 * 24 * 60 * 60;
+            assert(dur.as_secs() > twenty_years);
+        }
+        Result.Err(_) => panic("Expected Ok for elapsed from past time"),
+    }
+
+    print("elapsed basic test passed");
+}
+
+@test
+fn test_elapsed_now() {
+    let now = SystemTime.now();
+
+    // Elapsed from now should be very small (near zero)
+    match now.elapsed() {
+        Result.Ok(dur) => {
+            // Should be less than 1 second (test execution time)
+            assert(dur.as_secs() < 1);
+        }
+        Result.Err(_) => {}  // Might error if clock went backwards, but unlikely
+    }
+
+    print("elapsed now test passed");
+}
+
+// =============================================================================
+// Section 6: Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_checked_add() {
+    let time = SystemTime.from_timestamp(100);
+    let dur = Duration.secs(50);
+
+    match time.checked_add(dur) {
+        Maybe.Some(result) => {
+            assert_eq(result.timestamp(), 150);
+        }
+        Maybe.None => panic("Expected Some for checked_add"),
+    }
+
+    print("checked_add test passed");
+}
+
+@test
+fn test_checked_add_zero() {
+    let time = SystemTime.from_timestamp(100);
+    let zero = Duration.zero();
+
+    match time.checked_add(zero) {
+        Maybe.Some(result) => {
+            assert_eq(result.timestamp(), 100);
+            assert_eq(result, time);
+        }
+        Maybe.None => panic("Expected Some for adding zero"),
+    }
+
+    print("checked_add zero test passed");
+}
+
+@test
+fn test_checked_sub() {
+    let time = SystemTime.from_timestamp(100);
+    let dur = Duration.secs(30);
+
+    match time.checked_sub(dur) {
+        Maybe.Some(result) => {
+            assert_eq(result.timestamp(), 70);
+        }
+        Maybe.None => panic("Expected Some for checked_sub"),
+    }
+
+    print("checked_sub test passed");
+}
+
+@test
+fn test_checked_sub_to_epoch() {
+    let time = SystemTime.from_timestamp(100);
+    let dur = Duration.secs(100);
+
+    match time.checked_sub(dur) {
+        Maybe.Some(result) => {
+            assert_eq(result, SystemTime.UNIX_EPOCH());
+        }
+        Maybe.None => panic("Expected Some for checked_sub to epoch"),
+    }
+
+    print("checked_sub to epoch test passed");
+}
+
+@test
+fn test_checked_sub_underflow() {
+    let time = SystemTime.from_timestamp(50);
+    let dur = Duration.secs(100);  // Larger than time since epoch
+
+    match time.checked_sub(dur) {
+        Maybe.None => {}  // Expected - would go before UNIX epoch
+        Maybe.Some(_) => panic("Expected None for underflow"),
+    }
+
+    print("checked_sub underflow test passed");
+}
+
+@test
+fn test_add_operator() {
+    let time = SystemTime.from_timestamp(100);
+    let dur = Duration.secs(25);
+
+    let result = time + dur;
+    assert_eq(result.timestamp(), 125);
+
+    print("add operator test passed");
+}
+
+@test
+fn test_sub_operator() {
+    let time = SystemTime.from_timestamp(100);
+    let dur = Duration.secs(25);
+
+    let result = time - dur;
+    assert_eq(result.timestamp(), 75);
+
+    print("sub operator test passed");
+}
+
+// =============================================================================
+// Section 7: Comparison Tests
+// =============================================================================
+
+@test
+fn test_system_time_equality() {
+    let a = SystemTime.from_timestamp(1000);
+    let b = SystemTime.from_timestamp(1000);
+    let c = SystemTime.from_timestamp(2000);
+
+    assert_eq(a, b);
+    assert(a != c);
+    assert(b != c);
+
+    print("SystemTime equality test passed");
+}
+
+@test
+fn test_system_time_ordering() {
+    let earlier = SystemTime.from_timestamp(1000);
+    let later = SystemTime.from_timestamp(2000);
+    let epoch = SystemTime.UNIX_EPOCH();
+
+    assert(epoch < earlier);
+    assert(earlier < later);
+    assert(later > earlier);
+    assert(earlier >= epoch);
+    assert(later >= earlier);
+    assert(earlier <= later);
+
+    print("SystemTime ordering test passed");
+}
+
+@test
+fn test_system_time_ordering_millis() {
+    let a = SystemTime.from_timestamp_millis(1000);  // 1 second
+    let b = SystemTime.from_timestamp_millis(1001);  // 1 second + 1 ms
+    let c = SystemTime.from_timestamp_millis(1000);  // Same as a
+
+    assert(a < b);
+    assert(b > a);
+    assert(a == c);
+    assert(a <= c);
+    assert(a >= c);
+
+    print("SystemTime ordering millis test passed");
+}
+
+// =============================================================================
+// Section 8: SystemTimeError Tests
+// =============================================================================
+
+@test
+fn test_system_time_error_duration() {
+    let earlier = SystemTime.from_timestamp(100);
+    let later = SystemTime.from_timestamp(200);
+
+    // Create error by computing "earlier" - "later" (time went backwards)
+    match earlier.duration_since(&later) {
+        Result.Err(err) => {
+            let dur = err.duration();
+            assert_eq(dur.as_secs(), 100);  // 200 - 100 = 100 seconds difference
+        }
+        Result.Ok(_) => panic("Expected error"),
+    }
+
+    print("SystemTimeError duration test passed");
+}
+
+// =============================================================================
+// Section 9: Edge Cases
+// =============================================================================
+
+@test
+fn test_large_timestamp() {
+    // Test a timestamp far in the future (year 3000-ish)
+    let far_future: Int = 32503680000;  // Approximately year 3000
+    let time = SystemTime.from_timestamp(far_future);
+
+    assert_eq(time.timestamp(), far_future);
+
+    // Can still do arithmetic
+    let dur = Duration.secs(1);
+    let result = time + dur;
+    assert_eq(result.timestamp(), far_future + 1);
+
+    print("large timestamp test passed");
+}
+
+@test
+fn test_millisecond_precision() {
+    // Test sub-second precision is preserved
+    let time_a = SystemTime.from_timestamp_millis(1000);   // 1.000 seconds
+    let time_b = SystemTime.from_timestamp_millis(1500);   // 1.500 seconds
+    let time_c = SystemTime.from_timestamp_millis(1999);   // 1.999 seconds
+
+    // All have timestamp() of 1 second (truncated)
+    assert_eq(time_a.timestamp(), 1);
+    assert_eq(time_b.timestamp(), 1);
+    assert_eq(time_c.timestamp(), 1);
+
+    // But millisecond timestamps differ
+    assert_eq(time_a.timestamp_millis(), 1000);
+    assert_eq(time_b.timestamp_millis(), 1500);
+    assert_eq(time_c.timestamp_millis(), 1999);
+
+    // And they should compare correctly
+    assert(time_a < time_b);
+    assert(time_b < time_c);
+
+    print("millisecond precision test passed");
+}
+
+@test
+fn test_nanosecond_precision() {
+    let time = SystemTime.from_timestamp_millis(1);  // 1 millisecond
+    let nanos = time.timestamp_nanos();
+
+    assert_eq(nanos, 1_000_000);  // 1 ms = 1,000,000 ns
+
+    print("nanosecond precision test passed");
+}
+
+@test
+fn test_consecutive_now_calls() {
+    // Two consecutive now() calls should return non-decreasing times
+    let t1 = SystemTime.now();
+    let t2 = SystemTime.now();
+
+    // t2 should be >= t1 (monotonic within reasonable accuracy)
+    assert(t2 >= t1);
+
+    print("consecutive now calls test passed");
+}
+
+// =============================================================================
+// Section 10: From Timestamp Patterns
+// =============================================================================
+
+@test
+fn test_from_timestamp_one_day() {
+    // 86400 seconds = 1 day
+    let one_day: Int = 86400;
+    let time = SystemTime.from_timestamp(one_day);
+
+    assert_eq(time.timestamp(), one_day);
+    assert_eq(time.timestamp_millis(), one_day * 1000);
+
+    // Should be exactly 1 day after epoch
+    let epoch = SystemTime.UNIX_EPOCH();
+    match time.duration_since(&epoch) {
+        Result.Ok(dur) => {
+            assert_eq(dur.as_secs(), 86400);
+        }
+        Result.Err(_) => panic("Expected Ok for one day after epoch"),
+    }
+
+    print("from_timestamp one day test passed");
+}
+
+@test
+fn test_from_timestamp_one_million() {
+    // 1,000,000 seconds ~ about 11.5 days
+    let ts: Int = 1000000;
+    let time = SystemTime.from_timestamp(ts);
+
+    assert_eq(time.timestamp(), ts);
+
+    // Verify via duration_since_epoch
+    let dur = time.duration_since_epoch();
+    assert_eq(dur.as_secs(), 1000000);
+
+    print("from_timestamp one million test passed");
+}
+
+@test
+fn test_from_timestamp_year_2000() {
+    // January 1, 2000 00:00:00 UTC = 946684800
+    let y2k: Int = 946684800;
+    let time = SystemTime.from_timestamp(y2k);
+
+    assert_eq(time.timestamp(), y2k);
+
+    // Should be before now
+    let now = SystemTime.now();
+    assert(time < now);
+
+    print("from_timestamp year 2000 test passed");
+}
+
+// =============================================================================
+// Section 11: From Timestamp Millis Patterns
+// =============================================================================
+
+@test
+fn test_from_timestamp_millis_one_second() {
+    // 1000 millis = 1 second
+    let time = SystemTime.from_timestamp_millis(1000);
+
+    assert_eq(time.timestamp(), 1);
+    assert_eq(time.timestamp_millis(), 1000);
+    assert_eq(time.timestamp_nanos(), 1_000_000_000);
+
+    print("from_timestamp_millis one second test passed");
+}
+
+@test
+fn test_from_timestamp_millis_half_second() {
+    // 500 millis = 0.5 seconds
+    let time = SystemTime.from_timestamp_millis(500);
+
+    assert_eq(time.timestamp(), 0);  // Truncated to 0 seconds
+    assert_eq(time.timestamp_millis(), 500);
+    assert_eq(time.timestamp_nanos(), 500_000_000);
+
+    print("from_timestamp_millis half second test passed");
+}
+
+@test
+fn test_from_timestamp_millis_zero() {
+    // 0 millis = epoch
+    let time = SystemTime.from_timestamp_millis(0);
+    let epoch = SystemTime.UNIX_EPOCH();
+
+    assert_eq(time, epoch);
+    assert_eq(time.timestamp_millis(), 0);
+
+    print("from_timestamp_millis zero test passed");
+}
+
+// =============================================================================
+// Section 12: Timestamp Roundtrip Tests
+// =============================================================================
+
+@test
+fn test_timestamp_roundtrip_seconds() {
+    // from_timestamp then timestamp should be identity
+    let values = [0, 1, 100, 86400, 1000000, 1000000000];
+
+    let t0 = SystemTime.from_timestamp(0);
+    assert_eq(t0.timestamp(), 0);
+
+    let t1 = SystemTime.from_timestamp(1);
+    assert_eq(t1.timestamp(), 1);
+
+    let t100 = SystemTime.from_timestamp(100);
+    assert_eq(t100.timestamp(), 100);
+
+    let t_day = SystemTime.from_timestamp(86400);
+    assert_eq(t_day.timestamp(), 86400);
+
+    let t_million = SystemTime.from_timestamp(1000000);
+    assert_eq(t_million.timestamp(), 1000000);
+
+    let t_billion = SystemTime.from_timestamp(1000000000);
+    assert_eq(t_billion.timestamp(), 1000000000);
+
+    print("timestamp roundtrip seconds test passed");
+}
+
+@test
+fn test_timestamp_roundtrip_millis() {
+    // from_timestamp_millis then timestamp_millis should be identity
+    let t0 = SystemTime.from_timestamp_millis(0);
+    assert_eq(t0.timestamp_millis(), 0);
+
+    let t500 = SystemTime.from_timestamp_millis(500);
+    assert_eq(t500.timestamp_millis(), 500);
+
+    let t1234 = SystemTime.from_timestamp_millis(1234);
+    assert_eq(t1234.timestamp_millis(), 1234);
+
+    let t99999 = SystemTime.from_timestamp_millis(99999);
+    assert_eq(t99999.timestamp_millis(), 99999);
+
+    print("timestamp roundtrip millis test passed");
+}
+
+@test
+fn test_timestamp_secs_millis_consistency() {
+    // from_timestamp(N) should give timestamp_millis() == N * 1000
+    let time = SystemTime.from_timestamp(42);
+    assert_eq(time.timestamp_millis(), 42000);
+    assert_eq(time.timestamp_nanos(), 42_000_000_000);
+
+    print("timestamp secs/millis consistency test passed");
+}
+
+// =============================================================================
+// Section 13: Duration Since Epoch Deeper
+// =============================================================================
+
+@test
+fn test_duration_since_epoch_now_positive() {
+    let now = SystemTime.now();
+    let dur = now.duration_since_epoch();
+
+    // Must be positive (we are long after 1970)
+    assert(dur.as_secs() > 0);
+    assert(dur.as_nanos() > 0);
+
+    print("duration_since_epoch now positive test passed");
+}
+
+@test
+fn test_duration_since_epoch_specific() {
+    // 3600 seconds = 1 hour
+    let time = SystemTime.from_timestamp(3600);
+    let dur = time.duration_since_epoch();
+
+    assert_eq(dur.as_secs(), 3600);
+    assert_eq(dur.as_millis(), 3_600_000);
+    assert_eq(dur.as_nanos(), 3_600_000_000_000);
+
+    print("duration_since_epoch specific test passed");
+}
+
+// =============================================================================
+// Section 14: Duration Since Deeper
+// =============================================================================
+
+@test
+fn test_duration_since_equal_times() {
+    let a = SystemTime.from_timestamp(5000);
+    let b = SystemTime.from_timestamp(5000);
+
+    match a.duration_since(&b) {
+        Result.Ok(dur) => {
+            assert(dur.is_zero());
+            assert_eq(dur.as_secs(), 0);
+        }
+        Result.Err(_) => panic("Expected Ok for equal times"),
+    }
+
+    print("duration_since equal times test passed");
+}
+
+@test
+fn test_duration_since_commutative_error() {
+    // If a.duration_since(b) = Ok(d), then b.duration_since(a) = Err(d)
+    let a = SystemTime.from_timestamp(200);
+    let b = SystemTime.from_timestamp(100);
+
+    let forward_dur = match a.duration_since(&b) {
+        Result.Ok(dur) => dur.as_secs(),
+        Result.Err(_) => panic("Expected Ok for a > b"),
+    };
+
+    let backward_dur = match b.duration_since(&a) {
+        Result.Err(err) => err.duration().as_secs(),
+        Result.Ok(_) => panic("Expected Err for b < a"),
+    };
+
+    assert_eq(forward_dur, backward_dur);
+    assert_eq(forward_dur, 100);
+
+    print("duration_since commutative error test passed");
+}
+
+@test
+fn test_duration_since_millis_precision() {
+    let a = SystemTime.from_timestamp_millis(5500);  // 5.5 seconds
+    let b = SystemTime.from_timestamp_millis(3200);  // 3.2 seconds
+
+    match a.duration_since(&b) {
+        Result.Ok(dur) => {
+            assert_eq(dur.as_millis(), 2300);  // 5500 - 3200 = 2300 ms
+            assert_eq(dur.as_secs(), 2);       // Truncated seconds
+        }
+        Result.Err(_) => panic("Expected Ok for a > b"),
+    }
+
+    print("duration_since millis precision test passed");
+}
+
+// =============================================================================
+// Section 15: Elapsed Deeper
+// =============================================================================
+
+@test
+fn test_elapsed_epoch() {
+    // Elapsed since epoch should be large
+    let epoch = SystemTime.UNIX_EPOCH();
+
+    match epoch.elapsed() {
+        Result.Ok(dur) => {
+            // We are at least 50 years past epoch
+            let fifty_years = 50 * 365 * 24 * 60 * 60;
+            assert(dur.as_secs() > fifty_years);
+        }
+        Result.Err(_) => panic("Expected Ok for elapsed from epoch"),
+    }
+
+    print("elapsed epoch test passed");
+}
+
+// =============================================================================
+// Section 16: Checked Add/Sub Deeper
+// =============================================================================
+
+@test
+fn test_checked_add_then_sub_roundtrip() {
+    let original = SystemTime.from_timestamp(500);
+    let dur = Duration.secs(200);
+
+    let added = match original.checked_add(dur) {
+        Maybe.Some(t) => t,
+        Maybe.None => panic("Expected Some for checked_add"),
+    };
+    assert_eq(added.timestamp(), 700);
+
+    let restored = match added.checked_sub(dur) {
+        Maybe.Some(t) => t,
+        Maybe.None => panic("Expected Some for checked_sub"),
+    };
+    assert_eq(restored.timestamp(), 500);
+    assert_eq(restored, original);
+
+    print("checked_add then sub roundtrip test passed");
+}
+
+@test
+fn test_checked_sub_zero_identity() {
+    let time = SystemTime.from_timestamp(12345);
+    let zero = Duration.zero();
+
+    match time.checked_sub(zero) {
+        Maybe.Some(result) => {
+            assert_eq(result.timestamp(), 12345);
+            assert_eq(result, time);
+        }
+        Maybe.None => panic("Expected Some for subbing zero"),
+    }
+
+    print("checked_sub zero identity test passed");
+}
+
+@test
+fn test_checked_add_millis() {
+    let time = SystemTime.from_timestamp(10);
+    let dur = Duration.millis(500);  // 0.5 seconds
+
+    match time.checked_add(dur) {
+        Maybe.Some(result) => {
+            assert_eq(result.timestamp(), 10);  // Still 10 seconds (truncated)
+            assert_eq(result.timestamp_millis(), 10500);  // 10.5 seconds in millis
+        }
+        Maybe.None => panic("Expected Some for checked_add millis"),
+    }
+
+    print("checked_add millis test passed");
+}
+
+@test
+fn test_checked_sub_exact_to_epoch() {
+    // Subtracting exact amount to reach epoch
+    let time = SystemTime.from_timestamp(999);
+    let dur = Duration.secs(999);
+
+    match time.checked_sub(dur) {
+        Maybe.Some(result) => {
+            assert_eq(result, SystemTime.UNIX_EPOCH());
+            assert_eq(result.timestamp(), 0);
+        }
+        Maybe.None => panic("Expected Some for exact sub to epoch"),
+    }
+
+    print("checked_sub exact to epoch test passed");
+}
+
+@test
+fn test_checked_add_large_duration() {
+    let time = SystemTime.from_timestamp(0);
+    let one_year = Duration.secs(365 * 24 * 60 * 60);
+
+    match time.checked_add(one_year) {
+        Maybe.Some(result) => {
+            assert_eq(result.timestamp(), 365 * 24 * 60 * 60);
+        }
+        Maybe.None => panic("Expected Some for large duration add"),
+    }
+
+    print("checked_add large duration test passed");
+}
+
+// =============================================================================
+// Section 17: Operator +/- Deeper
+// =============================================================================
+
+@test
+fn test_add_then_sub_operator_roundtrip() {
+    let time = SystemTime.from_timestamp(1000);
+    let dur = Duration.secs(333);
+
+    let added = time + dur;
+    assert_eq(added.timestamp(), 1333);
+
+    let restored = added - dur;
+    assert_eq(restored.timestamp(), 1000);
+    assert_eq(restored, time);
+
+    print("add then sub operator roundtrip test passed");
+}
+
+@test
+fn test_add_zero_duration_operator() {
+    let time = SystemTime.from_timestamp(42);
+    let zero = Duration.zero();
+
+    let result = time + zero;
+    assert_eq(result, time);
+    assert_eq(result.timestamp(), 42);
+
+    print("add zero duration operator test passed");
+}
+
+@test
+fn test_sub_zero_duration_operator() {
+    let time = SystemTime.from_timestamp(42);
+    let zero = Duration.zero();
+
+    let result = time - zero;
+    assert_eq(result, time);
+    assert_eq(result.timestamp(), 42);
+
+    print("sub zero duration operator test passed");
+}
+
+@test
+fn test_add_millis_operator() {
+    let time = SystemTime.from_timestamp(5);
+    let dur = Duration.millis(250);
+
+    let result = time + dur;
+    assert_eq(result.timestamp_millis(), 5250);
+
+    print("add millis operator test passed");
+}
+
+// =============================================================================
+// Section 18: Comparison Deeper
+// =============================================================================
+
+@test
+fn test_epoch_less_than_now() {
+    let epoch = SystemTime.UNIX_EPOCH();
+    let now = SystemTime.now();
+
+    assert(epoch < now);
+    assert(now > epoch);
+    assert(epoch != now);
+
+    print("epoch less than now test passed");
+}
+
+@test
+fn test_comparison_reflexive() {
+    let time = SystemTime.from_timestamp(7777);
+
+    assert_eq(time, time);
+    assert(time >= time);
+    assert(time <= time);
+
+    print("comparison reflexive test passed");
+}
+
+@test
+fn test_comparison_transitivity() {
+    let a = SystemTime.from_timestamp(100);
+    let b = SystemTime.from_timestamp(200);
+    let c = SystemTime.from_timestamp(300);
+
+    // a < b and b < c implies a < c
+    assert(a < b);
+    assert(b < c);
+    assert(a < c);
+
+    print("comparison transitivity test passed");
+}
+
+// =============================================================================
+// Section 19: Precision Tests
+// =============================================================================
+
+@test
+fn test_millis_precision_roundtrip() {
+    // Verify that sub-second precision is preserved through roundtrip
+    let ms_values = [1, 50, 100, 250, 499, 500, 750, 999];
+
+    let t1 = SystemTime.from_timestamp_millis(1);
+    assert_eq(t1.timestamp_millis(), 1);
+
+    let t50 = SystemTime.from_timestamp_millis(50);
+    assert_eq(t50.timestamp_millis(), 50);
+
+    let t250 = SystemTime.from_timestamp_millis(250);
+    assert_eq(t250.timestamp_millis(), 250);
+
+    let t999 = SystemTime.from_timestamp_millis(999);
+    assert_eq(t999.timestamp_millis(), 999);
+
+    // All should have timestamp() == 0 (less than 1 full second)
+    assert_eq(t1.timestamp(), 0);
+    assert_eq(t50.timestamp(), 0);
+    assert_eq(t250.timestamp(), 0);
+    assert_eq(t999.timestamp(), 0);
+
+    print("millis precision roundtrip test passed");
+}
+
+@test
+fn test_nanos_from_millis() {
+    // 1 ms = 1,000,000 ns
+    let time = SystemTime.from_timestamp_millis(42);
+    assert_eq(time.timestamp_nanos(), 42_000_000);
+
+    // 1 second = 1,000,000,000 ns
+    let one_sec = SystemTime.from_timestamp(1);
+    assert_eq(one_sec.timestamp_nanos(), 1_000_000_000);
+
+    // 2.5 seconds = 2,500,000,000 ns
+    let two_half = SystemTime.from_timestamp_millis(2500);
+    assert_eq(two_half.timestamp_nanos(), 2_500_000_000);
+
+    print("nanos from millis test passed");
+}
+
+// =============================================================================
+// Section 20: SystemTimeError Deeper
+// =============================================================================
+
+@test
+fn test_system_time_error_small_difference() {
+    let a = SystemTime.from_timestamp(100);
+    let b = SystemTime.from_timestamp(101);
+
+    // a is before b, so a.duration_since(b) gives error
+    match a.duration_since(&b) {
+        Result.Err(err) => {
+            let dur = err.duration();
+            assert_eq(dur.as_secs(), 1);
+        }
+        Result.Ok(_) => panic("Expected Err for earlier.duration_since(later)"),
+    }
+
+    print("system time error small difference test passed");
+}
+
+@test
+fn test_system_time_error_large_difference() {
+    let a = SystemTime.from_timestamp(0);        // epoch
+    let b = SystemTime.from_timestamp(86400);     // 1 day later
+
+    match a.duration_since(&b) {
+        Result.Err(err) => {
+            let dur = err.duration();
+            assert_eq(dur.as_secs(), 86400);
+            assert_eq(dur.as_millis(), 86_400_000);
+        }
+        Result.Ok(_) => panic("Expected Err for epoch.duration_since(day_later)"),
+    }
+
+    print("system time error large difference test passed");
+}
+
+// =============================================================================
+// Section 21: Constants and Identity Tests
+// =============================================================================
+
+@test
+fn test_epoch_constants() {
+    let epoch = SystemTime.UNIX_EPOCH();
+
+    // All accessors should be zero for epoch
+    assert_eq(epoch.timestamp(), 0);
+    assert_eq(epoch.timestamp_millis(), 0);
+    assert_eq(epoch.timestamp_nanos(), 0);
+
+    // Duration since epoch should be zero
+    let dur = epoch.duration_since_epoch();
+    assert(dur.is_zero());
+
+    print("epoch constants test passed");
+}
+
+@test
+fn test_two_epoch_calls_equal() {
+    // Multiple calls to UNIX_EPOCH should return the same value
+    let e1 = SystemTime.UNIX_EPOCH();
+    let e2 = SystemTime.UNIX_EPOCH();
+
+    assert_eq(e1, e2);
+    assert_eq(e1.timestamp(), e2.timestamp());
+
+    print("two epoch calls equal test passed");
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,33 @@
+// @test: run-interpreter-panic
+// @expected-panic: Index out of bounds: index 100 for list of length 5
+// @tier: 0
+// @level: L0
+// @was-skip: FIXED - run-interpreter-panic now works with interpreter error handling
+// @tags: memory-safety, bounds-checking, runtime, dynamic
+// @description: Tests runtime bounds checking for dynamic indices
+
+/// When array indices cannot be verified at compile time (dynamic indices),
+/// Verum inserts runtime bounds checks. These checks:
+/// - Execute in O(1) time
+/// - Cause a controlled panic on violation
+/// - Prevent buffer overflows and memory corruption
+/// - Provide clear error messages with index and length
+
+fn main() {
+    let arr = [10, 20, 30, 40, 50];
+
+    // Test dynamic index from user input simulation
+    let dynamic_index = get_user_index();  // Returns 100
+
+    // This triggers runtime bounds check and panics
+    let value = arr[dynamic_index];  // PANIC: Index out of bounds: index 100, length 5
+
+    // This line is never reached
+    print(f"Value: {value}");
+}
+
+fn get_user_index() -> Int {
+    // Simulates getting an index from external source
+    // Compiler cannot know this value at compile time
+    100
+}

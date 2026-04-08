@@ -1,0 +1,108 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, hash, data-structures
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for simulated hash table with open addressing
+
+// Simple hash table with 8 slots using linear probing
+type HashSlot is { key: Int, val: Int, used: Int };  // used: 0=empty, 1=occupied
+
+type HT8 is {
+    k0: Int, v0: Int, u0: Int,
+    k1: Int, v1: Int, u1: Int,
+    k2: Int, v2: Int, u2: Int,
+    k3: Int, v3: Int, u3: Int,
+    k4: Int, v4: Int, u4: Int,
+    k5: Int, v5: Int, u5: Int,
+    k6: Int, v6: Int, u6: Int,
+    k7: Int, v7: Int, u7: Int
+};
+
+fn ht_new() -> HT8 {
+    HT8 {
+        k0: 0, v0: 0, u0: 0,
+        k1: 0, v1: 0, u1: 0,
+        k2: 0, v2: 0, u2: 0,
+        k3: 0, v3: 0, u3: 0,
+        k4: 0, v4: 0, u4: 0,
+        k5: 0, v5: 0, u5: 0,
+        k6: 0, v6: 0, u6: 0,
+        k7: 0, v7: 0, u7: 0
+    }
+}
+
+fn ht_hash(key: Int) -> Int {
+    let k = if key < 0 { -key } else { key };
+    k % 8
+}
+
+fn ht_get_key(ht: HT8, i: Int) -> Int {
+    if i == 0 { ht.k0 } else if i == 1 { ht.k1 }
+    else if i == 2 { ht.k2 } else if i == 3 { ht.k3 }
+    else if i == 4 { ht.k4 } else if i == 5 { ht.k5 }
+    else if i == 6 { ht.k6 } else { ht.k7 }
+}
+
+fn ht_get_val(ht: HT8, i: Int) -> Int {
+    if i == 0 { ht.v0 } else if i == 1 { ht.v1 }
+    else if i == 2 { ht.v2 } else if i == 3 { ht.v3 }
+    else if i == 4 { ht.v4 } else if i == 5 { ht.v5 }
+    else if i == 6 { ht.v6 } else { ht.v7 }
+}
+
+fn ht_get_used(ht: HT8, i: Int) -> Int {
+    if i == 0 { ht.u0 } else if i == 1 { ht.u1 }
+    else if i == 2 { ht.u2 } else if i == 3 { ht.u3 }
+    else if i == 4 { ht.u4 } else if i == 5 { ht.u5 }
+    else if i == 6 { ht.u6 } else { ht.u7 }
+}
+
+fn ht_lookup(ht: HT8, key: Int) -> Int {
+    let mut idx = ht_hash(key);
+    let mut probes = 0;
+    while probes < 8 {
+        if ht_get_used(ht, idx) == 0 { return -1; }
+        if ht_get_key(ht, idx) == key { return ht_get_val(ht, idx); }
+        idx = (idx + 1) % 8;
+        probes = probes + 1;
+    }
+    -1
+}
+
+fn main() -> Int {
+    // Manually insert some key-value pairs
+    // key 10 -> slot 2, key 42 -> slot 2 (collision -> 3), key 7 -> slot 7
+    let ht = HT8 {
+        k0: 0, v0: 0, u0: 0,
+        k1: 0, v1: 0, u1: 0,
+        k2: 10, v2: 100, u2: 1,    // key=10, val=100
+        k3: 42, v3: 420, u3: 1,    // key=42, val=420 (collision from slot 2)
+        k4: 0, v4: 0, u4: 0,
+        k5: 0, v5: 0, u5: 0,
+        k6: 0, v6: 0, u6: 0,
+        k7: 7, v7: 70, u7: 1       // key=7, val=70
+    };
+
+    // Lookup existing keys
+    assert_eq(ht_lookup(ht, 10), 100);
+    assert_eq(ht_lookup(ht, 42), 420);
+    assert_eq(ht_lookup(ht, 7), 70);
+
+    // Lookup missing keys
+    assert_eq(ht_lookup(ht, 0), -1);
+    assert_eq(ht_lookup(ht, 99), -1);
+    assert_eq(ht_lookup(ht, 1), -1);
+
+    // Hash function
+    assert_eq(ht_hash(10), 2);
+    assert_eq(ht_hash(42), 2);  // Collision
+    assert_eq(ht_hash(7), 7);
+    assert_eq(ht_hash(0), 0);
+    assert_eq(ht_hash(8), 0);  // Wrap around
+
+    print("[OK] 190_hash_table_aot");
+    0
+}

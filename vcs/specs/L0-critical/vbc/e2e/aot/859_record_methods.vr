@@ -1,0 +1,112 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, record, method, implement, protocol
+// @expected-exit: 0
+
+// Test: record types with implement blocks and methods
+// Validates struct creation, method calls, field access, and protocol-like dispatch.
+
+type Vec2 is {
+    x: Int,
+    y: Int,
+};
+
+implement Vec2 {
+    fn new(x: Int, y: Int) -> Vec2 {
+        Vec2 { x: x, y: y }
+    }
+
+    fn dot(&self, other: &Vec2) -> Int {
+        self.x * other.x + self.y * other.y
+    }
+
+    fn magnitude_sq(&self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+
+    fn scale(&self, factor: Int) -> Vec2 {
+        Vec2 { x: self.x * factor, y: self.y * factor }
+    }
+}
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Custom(Int);
+
+fn color_value(c: Color) -> Int {
+    match c {
+        Red => 1,
+        Green => 2,
+        Blue => 3,
+        Custom(v) => v,
+    }
+}
+
+fn main() -> Int {
+    // Record creation and field access
+    let p = Vec2 { x: 3, y: 4 };
+    if (p.x != 3) {
+        print(f"FAIL: p.x={p.x}, expected=3");
+        return 1;
+    }
+    if (p.y != 4) {
+        print(f"FAIL: p.y={p.y}, expected=4");
+        return 1;
+    }
+
+    // Magnitude squared: 3^2 + 4^2 = 25
+    let mag = p.magnitude_sq();
+    if (mag != 25) {
+        print(f"FAIL: magnitude_sq={mag}, expected=25");
+        return 1;
+    }
+
+    // Dot product: (3,4) . (1,2) = 3+8 = 11
+    let q = Vec2 { x: 1, y: 2 };
+    let d = p.dot(&q);
+    if (d != 11) {
+        print(f"FAIL: dot={d}, expected=11");
+        return 1;
+    }
+
+    // Scale: (3,4) * 5 = (15,20)
+    let scaled = p.scale(5);
+    if (scaled.x != 15) {
+        print(f"FAIL: scaled.x={scaled.x}, expected=15");
+        return 1;
+    }
+    if (scaled.y != 20) {
+        print(f"FAIL: scaled.y={scaled.y}, expected=20");
+        return 1;
+    }
+
+    // Static method
+    let v = Vec2.new(10, 20);
+    if (v.x != 10) {
+        print(f"FAIL: Vec2.new x={v.x}, expected=10");
+        return 1;
+    }
+
+    // Variant type matching
+    let r = color_value(Red);
+    if (r != 1) {
+        print(f"FAIL: Red={r}, expected=1");
+        return 1;
+    }
+    let g = color_value(Green);
+    if (g != 2) {
+        print(f"FAIL: Green={g}, expected=2");
+        return 1;
+    }
+    let custom = color_value(Custom(42));
+    if (custom != 42) {
+        print(f"FAIL: Custom(42)={custom}, expected=42");
+        return 1;
+    }
+
+    print("859_record_methods: PASS");
+    0
+}

@@ -1,0 +1,134 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: closures, factory, higher-order, capture
+// @description: Test closure factories and closures as return values
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn test_adder_factory() -> Int {
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+
+    if add5(3) != 8 {
+        print(f"FAIL adder: add5(3)={add5(3)}");
+        return 1;
+    }
+    if add10(3) != 13 {
+        print(f"FAIL adder: add10(3)={add10(3)}");
+        return 1;
+    }
+    if add5(add10(1)) != 16 {
+        print("FAIL: composed adders");
+        return 1;
+    }
+    print("  adder_factory: OK");
+    0
+}
+
+fn make_multiplier(factor: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * factor }
+}
+
+fn test_multiplier() -> Int {
+    let double = make_multiplier(2);
+    let triple = make_multiplier(3);
+
+    if double(7) != 14 {
+        print(f"FAIL: double(7)={double(7)}");
+        return 1;
+    }
+    if triple(7) != 21 {
+        print(f"FAIL: triple(7)={triple(7)}");
+        return 1;
+    }
+    print("  multiplier: OK");
+    0
+}
+
+fn make_predicate(threshold: Int) -> fn(Int) -> Bool {
+    |x: Int| -> Bool { x > threshold }
+}
+
+fn count_matching(items: List<Int>, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_predicate_factory() -> Int {
+    let gt5 = make_predicate(5);
+    let gt10 = make_predicate(10);
+
+    let mut nums = List.new();
+    nums.push(3);
+    nums.push(7);
+    nums.push(12);
+    nums.push(1);
+    nums.push(15);
+
+    let c1 = count_matching(nums, gt5);
+    if c1 != 3 {
+        print(f"FAIL pred: gt5 count={c1}, expected 3");
+        return 1;
+    }
+
+    let c2 = count_matching(nums, gt10);
+    if c2 != 2 {
+        print(f"FAIL pred: gt10 count={c2}, expected 2");
+        return 1;
+    }
+    print("  predicate_factory: OK");
+    0
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn test_compose() -> Int {
+    let add1 = make_adder(1);
+    let mul2 = make_multiplier(2);
+
+    // compose(add1, mul2)(5) = add1(mul2(5)) = add1(10) = 11
+    let add1_after_mul2 = compose(add1, mul2);
+    let result = add1_after_mul2(5);
+    if result != 11 {
+        print(f"FAIL compose: {result}, expected 11");
+        return 1;
+    }
+
+    // compose(mul2, add1)(5) = mul2(add1(5)) = mul2(6) = 12
+    let mul2_after_add1 = compose(mul2, add1);
+    let result2 = mul2_after_add1(5);
+    if result2 != 12 {
+        print(f"FAIL compose2: {result2}, expected 12");
+        return 1;
+    }
+    print("  compose: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Closure Factory Tests:");
+    let mut failures = 0;
+    failures = failures + test_adder_factory();
+    failures = failures + test_multiplier();
+    failures = failures + test_predicate_factory();
+    failures = failures + test_compose();
+
+    if failures == 0 {
+        print("All closure factory tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

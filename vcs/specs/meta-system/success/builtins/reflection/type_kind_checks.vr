@@ -1,0 +1,103 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, reflection, type-kinds
+// @description: Tests for type kind checking functions
+
+// =============================================================================
+// TYPE DEFINITIONS FOR TESTING
+// =============================================================================
+
+type Point is { x: Float, y: Float };
+type Color is Red | Green | Blue;
+type UserId is (Int);
+
+// =============================================================================
+// IS_STRUCT TESTS
+// =============================================================================
+
+meta fn test_is_struct_with_struct() -> Bool using [MetaTypes] {
+    is_struct(Point)
+}
+
+meta fn test_is_struct_with_enum() -> Bool using [MetaTypes] {
+    !is_struct(Color)
+}
+
+meta fn test_is_struct_with_primitive() -> Bool using [MetaTypes] {
+    !is_struct(Int)
+}
+
+// =============================================================================
+// IS_ENUM TESTS
+// =============================================================================
+
+meta fn test_is_enum_with_enum() -> Bool using [MetaTypes] {
+    is_enum(Color)
+}
+
+meta fn test_is_enum_with_struct() -> Bool using [MetaTypes] {
+    !is_enum(Point)
+}
+
+meta fn test_is_enum_with_primitive() -> Bool using [MetaTypes] {
+    !is_enum(Bool)
+}
+
+// =============================================================================
+// KIND_OF TESTS
+// =============================================================================
+
+meta fn test_kind_of_struct() -> Bool using [MetaTypes] {
+    kind_of(Point) == "struct"
+}
+
+meta fn test_kind_of_enum() -> Bool using [MetaTypes] {
+    kind_of(Color) == "enum"
+}
+
+meta fn test_kind_of_primitive() -> Bool using [MetaTypes] {
+    kind_of(Int) == "primitive"
+}
+
+// =============================================================================
+// TYPE_ID CONSISTENCY TESTS
+// =============================================================================
+
+meta fn test_type_id_same_type() -> Bool using [MetaTypes] {
+    type_id(Int) == type_id(Int)
+}
+
+meta fn test_type_id_different_types() -> Bool using [MetaTypes] {
+    type_id(Int) != type_id(Bool)
+}
+
+meta fn test_type_id_struct() -> Bool using [MetaTypes] {
+    type_id(Point) == type_id(Point)
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // is_struct tests
+    @const assert(test_is_struct_with_struct());
+    @const assert(test_is_struct_with_enum());
+    @const assert(test_is_struct_with_primitive());
+
+    // is_enum tests
+    @const assert(test_is_enum_with_enum());
+    @const assert(test_is_enum_with_struct());
+    @const assert(test_is_enum_with_primitive());
+
+    // kind_of tests
+    @const assert(test_kind_of_struct());
+    @const assert(test_kind_of_enum());
+    @const assert(test_kind_of_primitive());
+
+    // type_id tests
+    @const assert(test_type_id_same_type());
+    @const assert(test_type_id_different_types());
+    @const assert(test_type_id_struct());
+}

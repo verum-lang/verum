@@ -1,0 +1,546 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, checked, shift, pow, overflow
+// @description: Tests for checked_shl, checked_shr, checked_pow on all integer types
+
+mount core.base.primitives.{Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32, UInt64, UInt128, ISize, USize};
+
+// =============================================================================
+// Int - checked_shl
+// =============================================================================
+
+@test
+fn test_int_checked_shl_valid() {
+    assert_eq(1.checked_shl(0), Some(1));
+    assert_eq(1.checked_shl(1), Some(2));
+    assert_eq(1.checked_shl(10), Some(1024));
+    assert_eq(1.checked_shl(62), Some(4611686018427387904));
+}
+
+@test
+fn test_int_checked_shl_overflow() {
+    assert(1.checked_shl(64) is None);
+    assert(1.checked_shl(65) is None);
+    assert(1.checked_shl(100) is None);
+    assert(1.checked_shl(-1) is None);
+}
+
+@test
+fn test_int_checked_shl_zero() {
+    assert_eq(0.checked_shl(0), Some(0));
+    assert_eq(0.checked_shl(63), Some(0));
+}
+
+// =============================================================================
+// Int - checked_shr
+// =============================================================================
+
+@test
+fn test_int_checked_shr_valid() {
+    assert_eq(1024.checked_shr(0), Some(1024));
+    assert_eq(1024.checked_shr(10), Some(1));
+    assert_eq(1024.checked_shr(11), Some(0));
+}
+
+@test
+fn test_int_checked_shr_overflow() {
+    assert(1024.checked_shr(64) is None);
+    assert(1024.checked_shr(65) is None);
+    assert(1024.checked_shr(-1) is None);
+}
+
+// =============================================================================
+// Int - checked_pow
+// =============================================================================
+
+@test
+fn test_int_checked_pow_basic() {
+    assert_eq(2.checked_pow(0), Some(1));
+    assert_eq(2.checked_pow(1), Some(2));
+    assert_eq(2.checked_pow(10), Some(1024));
+    assert_eq(3.checked_pow(3), Some(27));
+    assert_eq(10.checked_pow(6), Some(1000000));
+}
+
+@test
+fn test_int_checked_pow_overflow() {
+    // 2^63 overflows Int (max is 2^63 - 1)
+    assert(2.checked_pow(63) is None);
+    assert(10.checked_pow(19) is None);
+}
+
+@test
+fn test_int_checked_pow_edge() {
+    assert_eq(1.checked_pow(1000), Some(1));
+    assert_eq(0.checked_pow(0), Some(1));
+    assert_eq(0.checked_pow(5), Some(0));
+    assert(2.checked_pow(-1) is None);
+}
+
+// =============================================================================
+// Int8 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_int8_checked_shl() {
+    let one = 1 as Int8;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(6) is Some);
+    assert(one.checked_shl(8) is None);
+    assert(one.checked_shl(-1) is None);
+}
+
+@test
+fn test_int8_checked_shr() {
+    let val = 64 as Int8;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(6) is Some);
+    assert(val.checked_shr(8) is None);
+}
+
+@test
+fn test_int8_checked_pow() {
+    let two = 2 as Int8;
+    assert(two.checked_pow(0) is Some);
+    assert(two.checked_pow(6) is Some); // 64 fits in Int8
+    assert(two.checked_pow(7) is None); // 128 overflows Int8 signed
+    assert(two.checked_pow(-1) is None);
+}
+
+// =============================================================================
+// Int16 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_int16_checked_shl() {
+    let one = 1 as Int16;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(14) is Some);
+    assert(one.checked_shl(16) is None);
+}
+
+@test
+fn test_int16_checked_shr() {
+    let val = 16384 as Int16;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(14) is Some);
+    assert(val.checked_shr(16) is None);
+}
+
+@test
+fn test_int16_checked_pow() {
+    let three = 3 as Int16;
+    assert(three.checked_pow(0) is Some);
+    assert(three.checked_pow(5) is Some);  // 243 fits
+    assert(three.checked_pow(10) is None); // 59049 overflows Int16
+}
+
+// =============================================================================
+// Int32 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_int32_checked_shl() {
+    let one = 1 as Int32;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(30) is Some);
+    assert(one.checked_shl(32) is None);
+}
+
+@test
+fn test_int32_checked_shr() {
+    let val = 1073741824 as Int32;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(30) is Some);
+    assert(val.checked_shr(32) is None);
+}
+
+@test
+fn test_int32_checked_pow() {
+    let ten = 10 as Int32;
+    assert(ten.checked_pow(0) is Some);
+    assert(ten.checked_pow(9) is Some); // 10^9 = 1000000000 fits
+    assert(ten.checked_pow(10) is None); // 10^10 overflows Int32
+}
+
+// =============================================================================
+// Int64 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_int64_checked_shl() {
+    let one = 1 as Int64;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(62) is Some);
+    assert(one.checked_shl(64) is None);
+}
+
+@test
+fn test_int64_checked_shr() {
+    let val = 1 as Int64;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(63) is Some);
+    assert(val.checked_shr(64) is None);
+}
+
+@test
+fn test_int64_checked_pow() {
+    let two = 2 as Int64;
+    assert(two.checked_pow(0) is Some);
+    assert(two.checked_pow(62) is Some);
+    assert(two.checked_pow(63) is None);
+}
+
+// =============================================================================
+// Int128 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_int128_checked_shl() {
+    let one = 1 as Int128;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(126) is Some);
+    assert(one.checked_shl(128) is None);
+}
+
+@test
+fn test_int128_checked_shr() {
+    let val = 1 as Int128;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(127) is Some);
+    assert(val.checked_shr(128) is None);
+}
+
+@test
+fn test_int128_checked_pow() {
+    let two = 2 as Int128;
+    assert(two.checked_pow(0) is Some);
+    assert(two.checked_pow(10) is Some);
+    assert(two.checked_pow(-1) is None);
+}
+
+// =============================================================================
+// UInt8 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_uint8_checked_shl() {
+    let one = 1 as UInt8;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(7) is Some);
+    assert(one.checked_shl(8) is None);
+}
+
+@test
+fn test_uint8_checked_shr() {
+    let val = 128 as UInt8;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(7) is Some);
+    assert(val.checked_shr(8) is None);
+}
+
+@test
+fn test_uint8_checked_pow() {
+    let two = 2 as UInt8;
+    assert(two.checked_pow(0) is Some);
+    assert(two.checked_pow(7) is Some);  // 128 fits in UInt8
+    assert(two.checked_pow(8) is None);  // 256 overflows UInt8
+}
+
+// =============================================================================
+// UInt16 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_uint16_checked_shl() {
+    let one = 1 as UInt16;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(15) is Some);
+    assert(one.checked_shl(16) is None);
+}
+
+@test
+fn test_uint16_checked_shr() {
+    let val = 32768 as UInt16;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(15) is Some);
+    assert(val.checked_shr(16) is None);
+}
+
+@test
+fn test_uint16_checked_pow() {
+    let two = 2 as UInt16;
+    assert(two.checked_pow(0) is Some);
+    assert(two.checked_pow(15) is Some); // 32768 fits
+    assert(two.checked_pow(16) is None); // 65536 overflows UInt16
+}
+
+// =============================================================================
+// UInt32 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_uint32_checked_shl() {
+    let one = 1 as UInt32;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(31) is Some);
+    assert(one.checked_shl(32) is None);
+}
+
+@test
+fn test_uint32_checked_shr() {
+    let val = 2147483648 as UInt32;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(31) is Some);
+    assert(val.checked_shr(32) is None);
+}
+
+@test
+fn test_uint32_checked_pow() {
+    let ten = 10 as UInt32;
+    assert(ten.checked_pow(0) is Some);
+    assert(ten.checked_pow(9) is Some); // 10^9 fits in UInt32
+    assert(ten.checked_pow(10) is None); // 10^10 overflows UInt32
+}
+
+// =============================================================================
+// UInt64 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_uint64_checked_shl() {
+    let one = 1 as UInt64;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(63) is Some);
+    assert(one.checked_shl(64) is None);
+}
+
+@test
+fn test_uint64_checked_shr() {
+    let val = 1 as UInt64;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(63) is Some);
+    assert(val.checked_shr(64) is None);
+}
+
+@test
+fn test_uint64_checked_pow() {
+    let two = 2 as UInt64;
+    assert(two.checked_pow(0) is Some);
+    assert(two.checked_pow(63) is Some);
+    assert(two.checked_pow(64) is None); // overflows UInt64
+}
+
+// =============================================================================
+// UInt128 - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_uint128_checked_shl() {
+    let one = 1 as UInt128;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(127) is Some);
+    assert(one.checked_shl(128) is None);
+}
+
+@test
+fn test_uint128_checked_shr() {
+    let val = 1 as UInt128;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(127) is Some);
+    assert(val.checked_shr(128) is None);
+}
+
+@test
+fn test_uint128_checked_pow() {
+    let two = 2 as UInt128;
+    assert(two.checked_pow(0) is Some);
+    assert(two.checked_pow(10) is Some);
+    assert(two.checked_pow(-1) is None);
+}
+
+// =============================================================================
+// ISize - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_isize_checked_shl() {
+    let one = 1 as ISize;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(62) is Some);
+    assert(one.checked_shl(64) is None);
+}
+
+@test
+fn test_isize_checked_shr() {
+    let val = 1 as ISize;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(63) is Some);
+    assert(val.checked_shr(64) is None);
+}
+
+@test
+fn test_isize_checked_pow() {
+    let two = 2 as ISize;
+    assert(two.checked_pow(0) is Some);
+    assert(two.checked_pow(62) is Some);
+    assert(two.checked_pow(63) is None);
+}
+
+// =============================================================================
+// USize - checked_shl / checked_shr / checked_pow
+// =============================================================================
+
+@test
+fn test_usize_checked_shl() {
+    let one = 1 as USize;
+    assert(one.checked_shl(0) is Some);
+    assert(one.checked_shl(63) is Some);
+    assert(one.checked_shl(64) is None);
+}
+
+@test
+fn test_usize_checked_shr() {
+    let val = 1 as USize;
+    assert(val.checked_shr(0) is Some);
+    assert(val.checked_shr(63) is Some);
+    assert(val.checked_shr(64) is None);
+}
+
+@test
+fn test_usize_checked_pow() {
+    let two = 2 as USize;
+    assert(two.checked_pow(0) is Some);
+    assert(two.checked_pow(63) is Some);
+    assert(two.checked_pow(64) is None);
+}
+
+// =============================================================================
+// Cross-type consistency
+// =============================================================================
+
+@test
+fn test_all_types_have_checked_shl() {
+    let _a = (1).checked_shl(0);
+    let _b = (1 as Int8).checked_shl(0);
+    let _c = (1 as Int16).checked_shl(0);
+    let _d = (1 as Int32).checked_shl(0);
+    let _e = (1 as Int64).checked_shl(0);
+    let _f = (1 as Int128).checked_shl(0);
+    let _g = (1 as UInt8).checked_shl(0);
+    let _h = (1 as UInt16).checked_shl(0);
+    let _i = (1 as UInt32).checked_shl(0);
+    let _j = (1 as UInt64).checked_shl(0);
+    let _k = (1 as UInt128).checked_shl(0);
+    let _l = (1 as ISize).checked_shl(0);
+    let _m = (1 as USize).checked_shl(0);
+    assert(_a is Some);
+    assert(_b is Some);
+    assert(_c is Some);
+    assert(_d is Some);
+    assert(_e is Some);
+    assert(_f is Some);
+    assert(_g is Some);
+    assert(_h is Some);
+    assert(_i is Some);
+    assert(_j is Some);
+    assert(_k is Some);
+    assert(_l is Some);
+    assert(_m is Some);
+}
+
+@test
+fn test_all_types_have_checked_shr() {
+    let _a = (1).checked_shr(0);
+    let _b = (1 as Int8).checked_shr(0);
+    let _c = (1 as Int16).checked_shr(0);
+    let _d = (1 as Int32).checked_shr(0);
+    let _e = (1 as Int64).checked_shr(0);
+    let _f = (1 as Int128).checked_shr(0);
+    let _g = (1 as UInt8).checked_shr(0);
+    let _h = (1 as UInt16).checked_shr(0);
+    let _i = (1 as UInt32).checked_shr(0);
+    let _j = (1 as UInt64).checked_shr(0);
+    let _k = (1 as UInt128).checked_shr(0);
+    let _l = (1 as ISize).checked_shr(0);
+    let _m = (1 as USize).checked_shr(0);
+    assert(_a is Some);
+    assert(_b is Some);
+    assert(_c is Some);
+    assert(_d is Some);
+    assert(_e is Some);
+    assert(_f is Some);
+    assert(_g is Some);
+    assert(_h is Some);
+    assert(_i is Some);
+    assert(_j is Some);
+    assert(_k is Some);
+    assert(_l is Some);
+    assert(_m is Some);
+}
+
+@test
+fn test_all_types_have_checked_pow() {
+    let _a = (2).checked_pow(3);
+    let _b = (2 as Int8).checked_pow(3);
+    let _c = (2 as Int16).checked_pow(3);
+    let _d = (2 as Int32).checked_pow(3);
+    let _e = (2 as Int64).checked_pow(3);
+    let _f = (2 as Int128).checked_pow(3);
+    let _g = (2 as UInt8).checked_pow(3);
+    let _h = (2 as UInt16).checked_pow(3);
+    let _i = (2 as UInt32).checked_pow(3);
+    let _j = (2 as UInt64).checked_pow(3);
+    let _k = (2 as UInt128).checked_pow(3);
+    let _l = (2 as ISize).checked_pow(3);
+    let _m = (2 as USize).checked_pow(3);
+    assert(_a is Some);
+    assert(_b is Some);
+    assert(_c is Some);
+    assert(_d is Some);
+    assert(_e is Some);
+    assert(_f is Some);
+    assert(_g is Some);
+    assert(_h is Some);
+    assert(_i is Some);
+    assert(_j is Some);
+    assert(_k is Some);
+    assert(_l is Some);
+    assert(_m is Some);
+}
+
+// =============================================================================
+// Edge cases: pow with base 0, 1, -1
+// =============================================================================
+
+@test
+fn test_checked_pow_base_zero() {
+    assert_eq(0.checked_pow(0), Some(1));
+    assert_eq(0.checked_pow(1), Some(0));
+    assert_eq(0.checked_pow(100), Some(0));
+}
+
+@test
+fn test_checked_pow_base_one() {
+    assert_eq(1.checked_pow(0), Some(1));
+    assert_eq(1.checked_pow(1), Some(1));
+    assert_eq(1.checked_pow(1000000), Some(1));
+}
+
+@test
+fn test_checked_pow_base_negative_one() {
+    assert_eq((-1).checked_pow(0), Some(1));
+    assert_eq((-1).checked_pow(1), Some(-1));
+    assert_eq((-1).checked_pow(2), Some(1));
+    assert_eq((-1).checked_pow(3), Some(-1));
+}
+
+@test
+fn test_checked_shl_value_preservation() {
+    // Shifting zero always gives zero
+    assert_eq(0.checked_shl(0), Some(0));
+    assert_eq(0.checked_shl(63), Some(0));
+    // Shifting by zero preserves value
+    assert_eq(42.checked_shl(0), Some(42));
+    assert_eq(42.checked_shr(0), Some(42));
+}

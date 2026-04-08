@@ -1,0 +1,154 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, dp, algorithms
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests dynamic programming algorithms using mutable state and lists.
+
+fn test_fibonacci_dp() {
+    let mut dp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dp[0] = 0;
+    dp[1] = 1;
+    let mut i = 2;
+    while i <= 20 {
+        dp[i] = dp[i - 1] + dp[i - 2];
+        i = i + 1;
+    }
+    assert_eq(dp[10], 55);
+    assert_eq(dp[15], 610);
+    assert_eq(dp[20], 6765);
+    print("fibonacci_dp: ok");
+}
+
+fn test_max_subarray() {
+    // Kadane's algorithm
+    let arr = [1, -3, 2, 1, -1, 3, -2, 3, -1, 2];
+    let n = 10;
+    let mut max_ending = arr[0];
+    let mut max_so_far = arr[0];
+    let mut i = 1;
+    while i < n {
+        if max_ending + arr[i] > arr[i] {
+            max_ending = max_ending + arr[i];
+        } else {
+            max_ending = arr[i];
+        }
+        if max_ending > max_so_far {
+            max_so_far = max_ending;
+        }
+        i = i + 1;
+    }
+    // Maximum subarray sum: [2, 1, -1, 3, -2, 3] = 6
+    // Actually: 2+1-1+3-2+3-1+2 = 7? Let me recalculate
+    // [2, 1, -1, 3, -2, 3, -1, 2] = 7
+    assert_eq(max_so_far, 7);
+    print("max_subarray: ok");
+}
+
+fn test_coin_change() {
+    // Minimum coins to make change for amount
+    // Coins: 1, 5, 10, 25
+    let amount = 63;
+    // Greedy for standard denominations: 25+25+10+1+1+1 = 6 coins
+    let mut remaining = amount;
+    let mut coins_used = 0;
+
+    let coin_count_25 = remaining / 25;
+    coins_used = coins_used + coin_count_25;
+    remaining = remaining - coin_count_25 * 25;
+
+    let coin_count_10 = remaining / 10;
+    coins_used = coins_used + coin_count_10;
+    remaining = remaining - coin_count_10 * 10;
+
+    let coin_count_5 = remaining / 5;
+    coins_used = coins_used + coin_count_5;
+    remaining = remaining - coin_count_5 * 5;
+
+    coins_used = coins_used + remaining; // remaining 1-cent coins
+
+    assert_eq(coins_used, 6);  // 25+25+10+1+1+1
+    print("coin_change: ok");
+}
+
+fn test_triangle_path() {
+    // Minimum path sum in a triangle (simplified as array)
+    //     2
+    //    3 4
+    //   6 5 7
+    //  4 1 8 3
+    // Bottom-up DP
+    let mut row3 = [4, 1, 8, 3];
+    let row2 = [6, 5, 7, 0];
+    let row1 = [3, 4, 0, 0];
+    let row0 = [2, 0, 0, 0];
+
+    // Merge row3 into row2
+    let mut i = 0;
+    while i < 3 {
+        let left = row3[i];
+        let right = row3[i + 1];
+        let mn = if left < right { left } else { right };
+        row3[i] = row2[i] + mn;
+        i = i + 1;
+    }
+    // row3 now: [7, 6, 10, ...]
+
+    // Merge into row1
+    i = 0;
+    while i < 2 {
+        let left = row3[i];
+        let right = row3[i + 1];
+        let mn = if left < right { left } else { right };
+        row3[i] = row1[i] + mn;
+        i = i + 1;
+    }
+    // row3 now: [9, 10, ...]
+
+    // Merge into row0
+    let left = row3[0];
+    let right = row3[1];
+    let mn = if left < right { left } else { right };
+    let answer = row0[0] + mn;
+    // Path: 2 -> 3 -> 5 -> 1 = 11
+    assert_eq(answer, 11);
+    print("triangle_path: ok");
+}
+
+fn test_count_paths() {
+    // Count paths in a 4x4 grid from top-left to bottom-right
+    // Can only move right or down
+    let mut grid = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Initialize first row and column to 1
+    let mut i = 0;
+    while i < 4 {
+        grid[i] = 1;       // First row
+        grid[i * 4] = 1;   // First column
+        i = i + 1;
+    }
+    // Fill rest
+    let mut r = 1;
+    while r < 4 {
+        let mut c = 1;
+        while c < 4 {
+            grid[r * 4 + c] = grid[(r - 1) * 4 + c] + grid[r * 4 + (c - 1)];
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    // C(6,3) = 20 paths in 4x4 grid
+    assert_eq(grid[15], 20);
+    print("count_paths: ok");
+}
+
+fn main() -> Int {
+    test_fibonacci_dp();
+    test_max_subarray();
+    test_coin_change();
+    test_triangle_path();
+    test_count_paths();
+    print("[OK] 412_interp_dynamic_programming");
+    0
+}

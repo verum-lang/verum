@@ -1,0 +1,231 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @was-skip: comprehension syntax now fully implemented in parser
+// @tags: parser, expressions, comprehensions, regression
+// @description: L0-critical regression tests for all comprehension types.
+//               Detailed feature tests are in vcs/specs/parser/success/comprehensions/
+
+// ============================================================================
+// LIST COMPREHENSION: [expr for pattern in iter clause*]
+// ============================================================================
+
+fn test_list_comprehension_core() {
+    let items = [1, 2, 3];
+
+    // Basic transform
+    let doubled = [x * 2 for x in items];
+
+    // With filter
+    let evens = [x for x in items if x % 2 == 0];
+
+    // With let clause
+    let computed = [y for x in items let y = x * x];
+
+    // Nested for (cartesian product)
+    let pairs = [(x, y) for x in items for y in items];
+
+    // Multiple clauses combined
+    let complex = [y for x in items
+                     let y = x * 2
+                     if y > 3];
+
+    // Pattern destructuring
+    let first = [a for (a, _) in [(1, 2), (3, 4)]];
+
+    // Range iteration
+    let range = [i * i for i in 1..=10];
+}
+
+// ============================================================================
+// MAP COMPREHENSION: {key: value for pattern in iter clause*}
+// ============================================================================
+
+fn test_map_comprehension_core() {
+    let items = [1, 2, 3];
+    let pairs = [(1, "a"), (2, "b")];
+
+    // Basic map from pairs
+    let map = {k: v for (k, v) in pairs};
+
+    // Transform key and value
+    let squares = {x: x * x for x in items};
+
+    // With filter
+    let filtered = {k: v for (k, v) in pairs if k > 1};
+
+    // With let clause
+    let computed = {x: y for x in items let y = x * 2};
+
+    // Nested for
+    let product = {(x, y): x * y for x in items for y in items};
+
+    // Computed keys
+    let string_keys = {f"key_{x}": x for x in items};
+}
+
+// ============================================================================
+// SET COMPREHENSION: set{expr for pattern in iter clause*}
+// ============================================================================
+
+fn test_set_comprehension_core() {
+    let items = [1, 2, 3, 1, 2];
+
+    // Basic set (removes duplicates)
+    let unique = set{x for x in items};
+
+    // With transform
+    let squares = set{x * x for x in items};
+
+    // With filter
+    let evens = set{x for x in items if x % 2 == 0};
+
+    // With let clause
+    let computed = set{y for x in items let y = x * 2};
+
+    // Nested for
+    let products = set{(x, y) for x in [1, 2] for y in [3, 4]};
+
+    // Pattern destructuring
+    let keys = set{k for (k, _) in [(1, "a"), (2, "b")]};
+}
+
+// ============================================================================
+// GENERATOR EXPRESSION: gen{expr for pattern in iter clause*}
+// ============================================================================
+
+fn test_generator_expression_core() {
+    let items = [1, 2, 3];
+
+    // Basic generator (lazy)
+    let gen = gen{x * 2 for x in items};
+
+    // With filter
+    let evens = gen{x for x in items if x % 2 == 0};
+
+    // With let clause
+    let computed = gen{y for x in items let y = x * x};
+
+    // Nested for
+    let pairs = gen{(x, y) for x in items for y in items};
+
+    // Infinite sequence (safe due to laziness)
+    let naturals = gen{x for x in 1..};
+
+    // Filter on infinite
+    let infinite_evens = gen{x for x in 1.. if x % 2 == 0};
+}
+
+// ============================================================================
+// STREAM COMPREHENSION: stream[expr for pattern in iter clause*]
+// ============================================================================
+
+fn test_stream_comprehension_core() {
+    let items = [1, 2, 3];
+
+    // Basic stream (lazy, reusable)
+    let s = stream[x * 2 for x in items];
+
+    // With filter
+    let evens = stream[x for x in items if x % 2 == 0];
+
+    // With let clause
+    let computed = stream[y for x in items let y = x * x];
+
+    // Nested for
+    let pairs = stream[(x, y) for x in items for y in items];
+
+    // From range
+    let range_stream = stream[i * i for i in 1..100];
+}
+
+// ============================================================================
+// KEYWORD DISAMBIGUATION (set/gen as identifiers)
+// ============================================================================
+
+fn test_keyword_disambiguation() {
+    // 'set' without '{' is parsed as identifier
+    let set = some_module.set;
+    let result = set.contains(42);
+    let new_set = set.new();
+
+    // 'gen' without '{' is parsed as identifier
+    let gen = some_module.gen;
+    let value = gen.next();
+    let advanced = gen.advance();
+
+    // 'stream' without '[' is parsed as identifier
+    let stream = some_module.stream;
+    let data = stream.read();
+}
+
+// ============================================================================
+// COMPLEX EXPRESSIONS IN COMPREHENSIONS
+// ============================================================================
+
+fn test_complex_expressions() {
+    let items = [1, 2, 3];
+    let max = 10;
+
+    // Conditional expression
+    let clamped = [if x > max { max } else { x } for x in items];
+
+    // Match expression
+    let unwrapped = [match opt { Some(v) => v, None => 0 }
+                     for opt in [Some(1), None, Some(2)]];
+
+    // Pipeline
+    let piped = [x |> double |> increment for x in items];
+
+    // Tuple construction
+    let tuples = [(i, i * 2) for i in 1..5];
+
+    // String interpolation
+    let labels = [f"item_{i}" for i in 1..5];
+}
+
+// ============================================================================
+// ITERATOR SOURCES
+// ============================================================================
+
+fn test_iterator_sources() {
+    let items = [1, 2, 3];
+
+    // List iteration
+    let from_list = [x for x in items];
+
+    // Range iteration
+    let from_range = [x for x in 0..100];
+
+    // Inclusive range
+    let inclusive = [x for x in 1..=10];
+
+    // Method call result
+    let from_iter = [x for x in items.iter()];
+
+    // Enumerate
+    let indexed = [(i, x) for (i, x) in items.enumerate()];
+
+    // Zip
+    let zipped = [(a, b) for (a, b) in items.zip(items)];
+
+    // Slice
+    let from_slice = [x for x in items[0..2]];
+}
+
+// ============================================================================
+// TYPE ANNOTATIONS
+// ============================================================================
+
+fn test_comprehension_type_annotations() {
+    let items = [1, 2, 3];
+
+    // Explicit list type
+    let typed_list: List<Int> = [x * 2 for x in items];
+
+    // Map type
+    let typed_map: Map<Int, Int> = {x: x * x for x in items};
+
+    // Set type
+    let typed_set: Set<Int> = set{x for x in items};
+}

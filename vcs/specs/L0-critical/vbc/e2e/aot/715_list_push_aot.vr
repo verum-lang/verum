@@ -1,0 +1,41 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, push, method
+// @expected-exit: 0
+
+fn main() -> Int {
+    let mut xs = [10, 20];
+    assert_eq(xs.len(), 2);
+    assert_eq(xs[0], 10);
+    assert_eq(xs[1], 20);
+
+    // Push elements
+    xs.push(30);
+    assert_eq(xs.len(), 3);
+    assert_eq(xs[2], 30);
+
+    xs.push(40);
+    xs.push(50);
+    assert_eq(xs.len(), 5);
+    assert_eq(xs[4], 50);
+
+    // Verify all elements intact
+    print(xs[0]);
+    print(xs[1]);
+    print(xs[2]);
+    print(xs[3]);
+    print(xs[4]);
+
+    // Sum all
+    let mut total = 0;
+    let mut i = 0;
+    while (i < 5) {
+        total = total + xs[i];
+        i = i + 1;
+    }
+    print(total);
+    assert_eq(total, 150);
+
+    0
+}

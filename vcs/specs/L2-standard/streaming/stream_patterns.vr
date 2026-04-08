@@ -1,0 +1,415 @@
+// =============================================================================
+// stream_patterns.vr - Tests for stream pattern matching
+// =============================================================================
+// @test: unit
+// @tier: 2
+// @level: L2
+// @tags: streaming, patterns, iterator, destructuring, lazy
+// @spec: docs/improvements.md Section 18.3 - Stream Pattern Matching
+// =============================================================================
+//
+// Tests for stream pattern syntax in match expressions:
+// - stream[first, second, ...rest] - consume head, bind rest
+// - stream[head, ...tail] - consume one, bind remaining
+// - stream[] - match empty stream
+//
+// Key difference from slice patterns:
+// - Stream patterns consume lazily from iterator
+// - Rest binding is remaining ITERATOR, not a list
+//
+// =============================================================================
+
+module tests.streaming.stream_patterns;
+
+mount core.*;
+
+// =============================================================================
+// Test 1: Basic stream pattern matching
+// =============================================================================
+
+fn test_stream_pattern_single_head() {
+    let stream = [1, 2, 3, 4, 5].iter();
+
+    match stream {
+        stream[first, ...rest] => {
+            assert_eq(first, 1);
+            // rest is remaining iterator
+            let remaining = rest.collect<List<Int>>();
+            assert_eq(remaining, [2, 3, 4, 5]);
+        }
+    }
+}
+
+fn test_stream_pattern_two_heads() {
+    let stream = [10, 20, 30, 40].iter();
+
+    match stream {
+        stream[first, second, ...rest] => {
+            assert_eq(first, 10);
+            assert_eq(second, 20);
+            let remaining = rest.collect<List<Int>>();
+            assert_eq(remaining, [30, 40]);
+        }
+    }
+}
+
+fn test_stream_pattern_three_heads() {
+    let stream = ["a", "b", "c", "d", "e"].iter();
+
+    match stream {
+        stream[a, b, c, ...rest] => {
+            assert_eq(a, "a");
+            assert_eq(b, "b");
+            assert_eq(c, "c");
+            let remaining = rest.collect<List<Text>>();
+            assert_eq(remaining, ["d", "e"]);
+        }
+    }
+}
+
+// =============================================================================
+// Test 2: Empty stream pattern
+// =============================================================================
+
+fn test_stream_pattern_empty_match() {
+    let stream: List<Int> = [];
+    let iter = stream.iter();
+
+    match iter {
+        stream[] => {
+            // Empty stream matched
+            assert(true);
+        }
+        stream[_, ...] => {
+            assert(false);  // Should not match
+        }
+    }
+}
+
+fn test_stream_pattern_empty_vs_nonempty() {
+    fn classify<I: Iterator<Item = Int>>(stream: I) -> Text {
+        match stream {
+            stream[] => "empty",
+            stream[only] => f"single: {only}",
+            stream[first, second, ...] => f"multiple starting with {first}, {second}",
+        }
+    }
+
+    assert_eq(classify([].iter()), "empty");
+    assert_eq(classify([42].iter()), "single: 42");
+    assert_eq(classify([1, 2].iter()), "multiple starting with 1, 2");
+    assert_eq(classify([1, 2, 3, 4, 5].iter()), "multiple starting with 1, 2");
+}
+
+// =============================================================================
+// Test 3: Stream patterns with nested patterns
+// =============================================================================
+
+fn test_stream_pattern_with_tuple_destructuring() {
+    let stream = [(1, "a"), (2, "b"), (3, "c")].iter();
+
+    match stream {
+        stream[(n, s), ...rest] => {
+            assert_eq(n, 1);
+            assert_eq(s, "a");
+            let remaining = rest.collect<List<(Int, Text)>>();
+            assert_eq(remaining.len(), 2);
+        }
+    }
+}
+
+fn test_stream_pattern_with_variant() {
+    type Item is Value(Int) | Empty;
+
+    let stream = [Value(1), Value(2), Empty, Value(3)].iter();
+
+    match stream {
+        stream[Value(first), Value(second), ...rest] => {
+            assert_eq(first, 1);
+            assert_eq(second, 2);
+        }
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Test 4: Stream pattern exhaustiveness
+// =============================================================================
+
+fn test_stream_pattern_exhaustive() {
+    fn process<I: Iterator<Item = Int>>(stream: I) -> Int {
+        match stream {
+            stream[] => 0,
+            stream[only] => only,
+            stream[a, b, ...rest] => a + b + rest.fold(0, |acc, x| acc + x),
+        }
+    }
+
+    assert_eq(process([].iter()), 0);
+    assert_eq(process([10].iter()), 10);
+    assert_eq(process([1, 2, 3, 4].iter()), 10);
+}
+
+// =============================================================================
+// Test 5: Stream pattern with guards
+// =============================================================================
+
+fn test_stream_pattern_with_guard() {
+    let stream = [5, 10, 15, 20].iter();
+
+    match stream {
+        stream[first, ...rest] if first < 10 => {
+            assert_eq(first, 5);
+        }
+        stream[first, ...rest] if first >= 10 => {
+            assert(false);  // Should not reach
+        }
+        _ => assert(false),
+    }
+}
+
+fn test_stream_pattern_multiple_guards() {
+    fn categorize<I: Iterator<Item = Int>>(stream: I) -> Text {
+        match stream {
+            stream[] => "empty",
+            stream[x, ...] if x < 0 => "starts negative",
+            stream[x, ...] if x == 0 => "starts zero",
+            stream[x, ...] if x > 0 && x < 10 => "starts small positive",
+            stream[x, ...] => "starts large positive",
+        }
+    }
+
+    assert_eq(categorize([].iter()), "empty");
+    assert_eq(categorize([-5, 1, 2].iter()), "starts negative");
+    assert_eq(categorize([0, 1, 2].iter()), "starts zero");
+    assert_eq(categorize([5, 100, 200].iter()), "starts small positive");
+    assert_eq(categorize([100, 200].iter()), "starts large positive");
+}
+
+// =============================================================================
+// Test 6: Stream pattern without rest binding
+// =============================================================================
+
+fn test_stream_pattern_no_rest_binding() {
+    let stream = [1, 2, 3, 4, 5].iter();
+
+    match stream {
+        stream[first, second, ...] => {
+            // rest is discarded
+            assert_eq(first, 1);
+            assert_eq(second, 2);
+        }
+    }
+    // Remaining elements [3, 4, 5] are dropped
+}
+
+fn test_stream_pattern_exact_count() {
+    let stream = [1, 2, 3].iter();
+
+    match stream {
+        stream[a, b, c] => {
+            // Exact match, no rest
+            assert_eq(a, 1);
+            assert_eq(b, 2);
+            assert_eq(c, 3);
+        }
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Test 7: Stream pattern chaining operations
+// =============================================================================
+
+fn test_stream_pattern_chain_remaining() {
+    let stream = range(0, 100);
+
+    match stream {
+        stream[first, ...rest] => {
+            assert_eq(first, 0);
+
+            // Chain operations on remaining iterator
+            let sum = rest.take(10).fold(0, |acc, x| acc + x);
+            // 1 + 2 + 3 + ... + 10 = 55
+            assert_eq(sum, 55);
+        }
+    }
+}
+
+// =============================================================================
+// Test 8: Stream pattern with stream literals
+// =============================================================================
+
+// Commented out: stream literal construction not yet supported by type checker
+// fn test_stream_pattern_on_stream_literal() {
+//     let stream = stream[1, 2, 3, ...];
+//
+//     match stream.take(5) {
+//         stream[a, b, c, d, e] => {
+//             assert_eq([a, b, c, d, e], [1, 2, 3, 1, 2]);
+//         }
+//         _ => assert(false),
+//     }
+// }
+
+// fn test_stream_pattern_on_range_literal() {
+//     match stream[10..20] {
+//         stream[first, second, ...rest] => {
+//             assert_eq(first, 10);
+//             assert_eq(second, 11);
+//             let remaining = rest.collect<List<Int>>();
+//             assert_eq(remaining, [12, 13, 14, 15, 16, 17, 18, 19]);
+//         }
+//     }
+// }
+
+// =============================================================================
+// Test 9: Performance - laziness verification
+// =============================================================================
+
+fn test_stream_pattern_is_lazy() {
+    // Pattern matching should only consume requested elements
+    let mut call_count = 0;
+
+    fn counted_iter() -> impl Iterator<Item = Int> {
+        unfold(0, |state| {
+            call_count = call_count + 1;
+            let current = *state;
+            *state = current + 1;
+            Some(current)
+        })
+    }
+
+    let stream = counted_iter();
+
+    match stream {
+        stream[first, second, ...rest] => {
+            // Only 2 elements consumed by pattern
+            assert_eq(first, 0);
+            assert_eq(second, 1);
+            // call_count should be 2, not infinite!
+            assert_eq(call_count, 2);
+
+            // Now consume 3 more
+            let more = rest.take(3).collect<List<Int>>();
+            assert_eq(more, [2, 3, 4]);
+            assert_eq(call_count, 5);
+        }
+    }
+}
+
+// =============================================================================
+// Test 10: Complex real-world examples
+// =============================================================================
+
+type Command is
+    | Ping
+    | Echo(Text)
+    | Add(Int, Int)
+    | Quit;
+
+fn test_stream_pattern_command_processor() {
+    fn process_commands<I: Iterator<Item = Command>>(commands: I) -> List<Text> {
+        let mut results = List.new();
+
+        fn process_recursive<I: Iterator<Item = Command>>(
+            commands: I,
+            results: &mut List<Text>
+        ) {
+            match commands {
+                stream[] => {}  // Done
+                stream[Ping, ...rest] => {
+                    results.push("PONG");
+                    process_recursive(rest, results);
+                }
+                stream[Echo(msg), ...rest] => {
+                    results.push(msg);
+                    process_recursive(rest, results);
+                }
+                stream[Add(a, b), ...rest] => {
+                    results.push(f"{a + b}");
+                    process_recursive(rest, results);
+                }
+                stream[Quit, ...] => {
+                    results.push("GOODBYE");
+                    // Don't process remaining
+                }
+            }
+        }
+
+        process_recursive(commands, &mut results);
+        results
+    }
+
+    let commands = [Ping, Echo("hello"), Add(2, 3), Quit, Echo("ignored")].iter();
+    let results = process_commands(commands);
+
+    assert_eq(results, ["PONG", "hello", "5", "GOODBYE"]);
+}
+
+fn test_stream_pattern_parse_args() {
+    fn parse_args<I: Iterator<Item = Text>>(args: I) -> Result<(Text, Int), Text> {
+        match args {
+            stream[] => Err("missing arguments"),
+            stream[name] => Err("missing count"),
+            stream[name, count_str, ...] => {
+                match count_str.parse_int() {
+                    Ok(count) => Ok((name, count)),
+                    Err(_) => Err(f"invalid count: {count_str}"),
+                }
+            }
+        }
+    }
+
+    assert_eq(parse_args([].iter()), Err("missing arguments"));
+    assert_eq(parse_args(["name"].iter()), Err("missing count"));
+    assert_eq(parse_args(["name", "42"].iter()), Ok(("name", 42)));
+    assert_eq(parse_args(["name", "abc"].iter()), Err("invalid count: abc"));
+    assert_eq(parse_args(["name", "10", "extra", "args"].iter()), Ok(("name", 10)));
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    // Basic stream patterns
+    test_stream_pattern_single_head();
+    test_stream_pattern_two_heads();
+    test_stream_pattern_three_heads();
+
+    // Empty stream
+    test_stream_pattern_empty_match();
+    test_stream_pattern_empty_vs_nonempty();
+
+    // Nested patterns
+    test_stream_pattern_with_tuple_destructuring();
+    test_stream_pattern_with_variant();
+
+    // Exhaustiveness
+    test_stream_pattern_exhaustive();
+
+    // Guards
+    test_stream_pattern_with_guard();
+    test_stream_pattern_multiple_guards();
+
+    // Without rest binding
+    test_stream_pattern_no_rest_binding();
+    test_stream_pattern_exact_count();
+
+    // Chaining
+    test_stream_pattern_chain_remaining();
+
+    // With stream literals (commented out - stream literal construction not yet supported)
+    // test_stream_pattern_on_stream_literal();
+    // test_stream_pattern_on_range_literal();
+
+    // Laziness
+    test_stream_pattern_is_lazy();
+
+    // Real-world examples
+    test_stream_pattern_command_processor();
+    test_stream_pattern_parse_args();
+
+    print("All stream pattern tests passed!");
+}

@@ -1,0 +1,81 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, closures, captures, higher-order
+// @expected-exit: 0
+
+// Test: closures with variable captures and higher-order functions.
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply2(f: fn(Int, Int) -> Int, a: Int, b: Int) -> Int {
+    f(a, b)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn main() -> Int {
+    // Test 1: basic closure (no capture)
+    let double = |x: Int| -> Int { x * 2 };
+    let r1 = double(21);
+    if (r1 != 42) {
+        print(f"FAIL test1: double(21)={r1}");
+        return 1;
+    }
+
+    // Test 2: closure capturing local variable
+    let offset = 10;
+    let add_offset = |x: Int| -> Int { x + offset };
+    let r2 = add_offset(32);
+    if (r2 != 42) {
+        print(f"FAIL test2: add_offset(32)={r2}");
+        return 1;
+    }
+
+    // Test 3: closure passed to higher-order function
+    let r3 = apply(|x: Int| -> Int { x * x }, 7);
+    if (r3 != 49) {
+        print(f"FAIL test3: apply(square, 7)={r3}");
+        return 1;
+    }
+
+    // Test 4: closure with two parameters
+    let r4 = apply2(|a: Int, b: Int| -> Int { a * b + 1 }, 6, 7);
+    if (r4 != 43) {
+        print(f"FAIL test4: apply2(mul+1, 6, 7)={r4}");
+        return 1;
+    }
+
+    // Test 5: function composition
+    let r5 = compose(|x: Int| -> Int { x + 1 }, |x: Int| -> Int { x * 2 }, 20);
+    // g(20) = 40, f(40) = 41
+    if (r5 != 41) {
+        print(f"FAIL test5: compose(+1, *2, 20)={r5}");
+        return 1;
+    }
+
+    // Test 6: closure capturing multiple variables
+    let base = 100;
+    let scale = 3;
+    let transform = |x: Int| -> Int { base + x * scale };
+    let r6 = transform(14);
+    // 100 + 14*3 = 142
+    if (r6 != 142) {
+        print(f"FAIL test6: transform(14)={r6}");
+        return 1;
+    }
+
+    // Test 7: named function as closure argument
+    let r7 = apply(double, 10);
+    if (r7 != 20) {
+        print(f"FAIL test7: apply(double, 10)={r7}");
+        return 1;
+    }
+
+    print("887_closures_captures: PASS");
+    0
+}

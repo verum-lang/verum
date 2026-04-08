@@ -1,0 +1,25 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, partial-move, tuples, negative-test
+
+/// Test partial move detection in tuples containing affine types at compile time.
+/// Moving an affine element from a tuple leaves it partially moved.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-partial-move
+
+// Affine resource type
+type affine Handle is {
+    fd: Int,
+};
+
+fn main() {
+    let tuple = (Handle { fd: 1 }, Handle { fd: 2 }, 42);
+
+    // Move out first affine element - marks tuple as partially moved
+    let first = tuple.0;
+
+    // Cannot use tuple as a whole after partial move of affine element
+    let copy = tuple;  // COMPILE ERROR: type not found: tuple (partially moved)
+}

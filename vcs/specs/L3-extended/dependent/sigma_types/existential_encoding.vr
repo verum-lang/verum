@@ -1,0 +1,192 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, sigma-types, existential
+
+/// Existential types as sigma types
+///
+/// Demonstrates how existential types enable type abstraction
+/// and implementation hiding using dependent pairs.
+
+/// Counter interface - abstract over internal state
+type CounterOps<S> is {
+    init: S,
+    get: fn(&S) -> Int,
+    inc: fn(S) -> S,
+};
+
+/// Integer counter implementation
+fn int_counter_ops() -> CounterOps<Int> {
+    CounterOps {
+        init: 0,
+        get: |s| *s,
+        inc: |s| s + 1,
+    }
+}
+
+/// Use a counter abstractly through its interface
+fn use_counter<S>(ops: CounterOps<S>) -> Int {
+    let s1 = (ops.inc)(ops.init);
+    let s2 = (ops.inc)(s1);
+    let s3 = (ops.inc)(s2);
+    (ops.get)(&s3)
+}
+
+/// Stack interface - abstract over internal state
+type StackOps<T, S> is {
+    empty: S,
+    push: fn(S, T) -> S,
+    pop: fn(S) -> Maybe<(T, S)>,
+    is_empty: fn(&S) -> Bool,
+};
+
+/// List-based stack implementation
+fn list_stack_ops<T>() -> StackOps<T, List<T>> {
+    StackOps {
+        empty: [],
+        push: |mut s, x| { s.push(x); s },
+        pop: |s| {
+            if s.len() == 0 {
+                None
+            } else {
+                let x = s[s.len() - 1];
+                let rest = s.take(s.len() - 1);
+                Some((x, rest))
+            }
+        },
+        is_empty: |s| s.len() == 0,
+    }
+}
+
+/// Use a stack abstractly
+fn use_stack<T, S>(ops: StackOps<T, S>, items: List<T>) -> List<T> {
+    let mut state = ops.empty;
+    for item in items {
+        state = (ops.push)(state, item);
+    }
+    // Pop all items
+    let mut result: List<T> = [];
+    loop {
+        match (ops.pop)(state) {
+            None => break,
+            Some((item, rest)) => {
+                result.push(item);
+                state = rest;
+            }
+        }
+    }
+    result
+}
+
+/// Iterator interface
+type IterOps<Item, S> is {
+    init: S,
+    next: fn(S) -> Maybe<(Item, S)>,
+};
+
+/// Range iterator
+fn range_iter(start: Int, end: Int) -> IterOps<Int, Int> {
+    IterOps {
+        init: start,
+        next: |current| {
+            if current < end {
+                Some((current, current + 1))
+            } else {
+                None
+            }
+        },
+    }
+}
+
+/// Collect iterator to list
+fn collect<Item, S>(iter: IterOps<Item, S>) -> List<Item> {
+    let mut state = iter.init;
+    let mut result: List<Item> = [];
+    loop {
+        match (iter.next)(state) {
+            None => break,
+            Some((item, new_state)) => {
+                result.push(item);
+                state = new_state;
+            }
+        }
+    }
+    result
+}
+
+/// Map iterator
+fn map_iter<A, B, S>(iter: IterOps<A, S>, f: fn(A) -> B) -> IterOps<B, S> {
+    IterOps {
+        init: iter.init,
+        next: |state| {
+            match (iter.next)(state) {
+                None => None,
+                Some((item, new_state)) => Some((f(item), new_state)),
+            }
+        },
+    }
+}
+
+/// Filter iterator
+fn filter_iter<A, S>(iter: IterOps<A, S>, pred: fn(&A) -> Bool) -> IterOps<A, S> {
+    IterOps {
+        init: iter.init,
+        next: |mut state| {
+            loop {
+                match (iter.next)(state) {
+                    None => return None,
+                    Some((item, new_state)) => {
+                        if pred(&item) {
+                            return Some((item, new_state));
+                        }
+                        state = new_state;
+                    }
+                }
+            }
+        },
+    }
+}
+
+/// Set interface
+type SetOps<Elem, S> is {
+    empty: S,
+    insert: fn(S, Elem) -> S,
+    contains: fn(&S, &Elem) -> Bool,
+    size: fn(&S) -> Int,
+};
+
+/// Use a set abstractly
+fn use_set<Elem, S>(ops: SetOps<Elem, S>, elements: List<Elem>) -> Int {
+    let mut s = ops.empty;
+    for e in elements {
+        s = (ops.insert)(s, e);
+    }
+    (ops.size)(&s)
+}
+
+fn main() {
+    // Counter: both implementations return 3
+    let c1 = int_counter_ops();
+    assert(use_counter(c1) == 3);
+
+    // Stack usage
+    let ops = list_stack_ops.<Int>();
+    let reversed = use_stack(ops, [1, 2, 3]);
+    // Stack reverses: last pushed is first popped
+    assert(reversed.len() == 3);
+
+    // Iterator
+    let iter = range_iter(0, 5);
+    let collected = collect(iter);
+    assert(collected == [0, 1, 2, 3, 4]);
+
+    // Map iterator
+    let doubled_iter = map_iter(range_iter(1, 4), |x| x * 2);
+    let doubled = collect(doubled_iter);
+    assert(doubled == [2, 4, 6]);
+
+    // Filter iterator
+    let even_iter = filter_iter(range_iter(0, 10), |x| *x % 2 == 0);
+    let evens = collect(even_iter);
+    assert(evens == [0, 2, 4, 6, 8]);
+}

@@ -1,0 +1,375 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, integration, 370
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Milestone 370 integration test: comprehensive exercise of AOT features.
+// Combines: matrix operations, polynomial evaluation, prime factorization,
+// combinatorics, bit tricks, and cross-validation of results.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// --- Section 1: Polynomial evaluation (Horner's method) ---
+
+// Evaluate polynomial a[0] + a[1]*x + a[2]*x^2 + ... + a[n-1]*x^(n-1)
+fn poly_eval(coeffs: Arr8, n: Int, x: Int) -> Int {
+    // Horner's: start from highest degree
+    let mut result = 0;
+    let mut i = n - 1;
+    while i >= 0 {
+        result = result * x + a8_get(coeffs, i);
+        i = i - 1;
+    }
+    result
+}
+
+// Derivative: d/dx of polynomial -> new polynomial with n-1 coefficients
+fn poly_deriv(coeffs: Arr8, n: Int) -> Arr8 {
+    let mut result = a8_zero();
+    let mut i = 1;
+    while i < n {
+        result = a8_set(result, i - 1, a8_get(coeffs, i) * i);
+        i = i + 1;
+    }
+    result
+}
+
+// --- Section 2: Prime factorization ---
+
+fn smallest_factor(n: Int) -> Int {
+    if n <= 1 { return n; }
+    if n % 2 == 0 { return 2; }
+    let mut d = 3;
+    while d * d <= n {
+        if n % d == 0 { return d; }
+        d = d + 2;
+    }
+    n
+}
+
+// Count number of prime factors (with multiplicity)
+fn count_prime_factors(n: Int) -> Int {
+    if n <= 1 { return 0; }
+    let mut count = 0;
+    let mut val = n;
+    while val > 1 {
+        let f = smallest_factor(val);
+        val = val / f;
+        count = count + 1;
+    }
+    count
+}
+
+// Count number of distinct prime factors
+fn count_distinct_primes(n: Int) -> Int {
+    if n <= 1 { return 0; }
+    let mut count = 0;
+    let mut val = n;
+    let mut prev_factor = 0;
+    while val > 1 {
+        let f = smallest_factor(val);
+        if f != prev_factor {
+            count = count + 1;
+            prev_factor = f;
+        }
+        val = val / f;
+    }
+    count
+}
+
+// --- Section 3: Combinatorics ---
+
+fn factorial(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 2;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+// Binomial coefficient C(n, k)
+fn choose(n: Int, k: Int) -> Int {
+    if k < 0 { return 0; }
+    if k > n { return 0; }
+    if k == 0 { return 1; }
+    if k == n { return 1; }
+    // Use the smaller of k and n-k
+    let kk = if k < n - k { k } else { n - k };
+    let mut result = 1;
+    let mut i = 0;
+    while i < kk {
+        result = result * (n - i);
+        result = result / (i + 1);
+        i = i + 1;
+    }
+    result
+}
+
+// Catalan number: C_n = C(2n, n) / (n + 1)
+fn catalan(n: Int) -> Int {
+    choose(2 * n, n) / (n + 1)
+}
+
+// --- Section 4: Bit tricks ---
+
+fn is_power_of_2(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    // n & (n-1) == 0 for powers of 2
+    // Implement via: keep dividing by 2
+    let mut val = n;
+    while val > 1 {
+        if val % 2 != 0 { return 0; }
+        val = val / 2;
+    }
+    1
+}
+
+fn next_power_of_2(n: Int) -> Int {
+    let mut p = 1;
+    while p < n {
+        p = p * 2;
+    }
+    p
+}
+
+fn count_trailing_zeros(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut count = 0;
+    let mut val = n;
+    while val % 2 == 0 {
+        count = count + 1;
+        val = val / 2;
+    }
+    count
+}
+
+// --- Section 5: Matrix 2x2 multiply ---
+
+type Mat2 is { m00: Int, m01: Int, m10: Int, m11: Int };
+
+fn mat2_mul(a: Mat2, bm: Mat2) -> Mat2 {
+    Mat2 {
+        m00: a.m00 * bm.m00 + a.m01 * bm.m10,
+        m01: a.m00 * bm.m01 + a.m01 * bm.m11,
+        m10: a.m10 * bm.m00 + a.m11 * bm.m10,
+        m11: a.m10 * bm.m01 + a.m11 * bm.m11
+    }
+}
+
+fn mat2_det(m: Mat2) -> Int {
+    m.m00 * m.m11 - m.m01 * m.m10
+}
+
+fn mat2_identity() -> Mat2 {
+    Mat2 { m00: 1, m01: 0, m10: 0, m11: 1 }
+}
+
+// Matrix exponentiation: m^n
+fn mat2_power(m: Mat2, n: Int) -> Mat2 {
+    let mut result = mat2_identity();
+    let mut base = m;
+    let mut exp = n;
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = mat2_mul(result, base);
+        }
+        base = mat2_mul(base, base);
+        exp = exp / 2;
+    }
+    result
+}
+
+// Fibonacci via matrix exponentiation
+fn fib_matrix(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let m = Mat2 { m00: 1, m01: 1, m10: 1, m11: 0 };
+    let result = mat2_power(m, n);
+    result.m01
+}
+
+// --- Tests ---
+
+fn test_polynomial() {
+    // p(x) = 3 + 2x + x^2
+    let p = Arr8 { a0: 3, a1: 2, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(poly_eval(p, 3, 0), 3);
+    assert_eq(poly_eval(p, 3, 1), 6);  // 3 + 2 + 1
+    assert_eq(poly_eval(p, 3, 2), 11); // 3 + 4 + 4
+    assert_eq(poly_eval(p, 3, 3), 18); // 3 + 6 + 9
+    assert_eq(poly_eval(p, 3, 10), 123); // 3 + 20 + 100
+
+    // Derivative: p'(x) = 2 + 2x
+    let dp = poly_deriv(p, 3);
+    assert_eq(poly_eval(dp, 2, 0), 2);
+    assert_eq(poly_eval(dp, 2, 1), 4);
+    assert_eq(poly_eval(dp, 2, 5), 12);
+}
+
+fn test_prime_factorization_370() {
+    // 370 = 2 * 5 * 37
+    assert_eq(smallest_factor(370), 2);
+    assert_eq(count_prime_factors(370), 3);
+    assert_eq(count_distinct_primes(370), 3);
+    // Verify: 2 * 5 * 37 = 370
+    assert_eq(2 * 5 * 37, 370);
+}
+
+fn test_combinatorics() {
+    assert_eq(choose(5, 0), 1);
+    assert_eq(choose(5, 1), 5);
+    assert_eq(choose(5, 2), 10);
+    assert_eq(choose(5, 3), 10);
+    assert_eq(choose(10, 3), 120);
+    assert_eq(choose(10, 5), 252);
+
+    // Pascal's rule: C(n,k) = C(n-1,k-1) + C(n-1,k)
+    assert_eq(choose(8, 3), choose(7, 2) + choose(7, 3));
+
+    // Catalan numbers: 1, 1, 2, 5, 14, 42, 132
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+}
+
+fn test_bit_tricks() {
+    assert_eq(is_power_of_2(1), 1);
+    assert_eq(is_power_of_2(2), 1);
+    assert_eq(is_power_of_2(64), 1);
+    assert_eq(is_power_of_2(370), 0);
+    assert_eq(is_power_of_2(512), 1);
+
+    assert_eq(next_power_of_2(1), 1);
+    assert_eq(next_power_of_2(3), 4);
+    assert_eq(next_power_of_2(370), 512);
+
+    assert_eq(count_trailing_zeros(8), 3);
+    assert_eq(count_trailing_zeros(12), 2);
+    assert_eq(count_trailing_zeros(370), 1); // 370 = 2 * 185
+}
+
+fn test_matrix_ops() {
+    let id = mat2_identity();
+    assert_eq(mat2_det(id), 1);
+
+    let m = Mat2 { m00: 2, m01: 1, m10: 1, m11: 1 };
+    assert_eq(mat2_det(m), 1); // 2*1 - 1*1
+
+    let m2 = mat2_mul(m, m);
+    assert_eq(m2.m00, 5); // 2*2 + 1*1
+    assert_eq(m2.m01, 3); // 2*1 + 1*1
+    assert_eq(m2.m10, 3);
+    assert_eq(m2.m11, 2);
+}
+
+fn test_fibonacci_matrix() {
+    assert_eq(fib_matrix(0), 0);
+    assert_eq(fib_matrix(1), 1);
+    assert_eq(fib_matrix(2), 1);
+    assert_eq(fib_matrix(5), 5);
+    assert_eq(fib_matrix(10), 55);
+    assert_eq(fib_matrix(15), 610);
+    assert_eq(fib_matrix(20), 6765);
+}
+
+fn test_370_properties() {
+    // 370 is a narcissistic number (Armstrong number):
+    // 3^3 + 7^3 + 0^3 = 27 + 343 + 0 = 370
+    assert_eq(27 + 343 + 0, 370);
+
+    // Sum of digits of 370
+    assert_eq(3 + 7 + 0, 10);
+
+    // 370 in binary: 101110010 -> 9 bits
+    let mut n = 370;
+    let mut bits = 0;
+    while n > 0 {
+        bits = bits + 1;
+        n = n / 2;
+    }
+    assert_eq(bits, 9);
+
+    // Number of divisors of 370
+    // 370 = 2 * 5 * 37, divisors = (1+1)(1+1)(1+1) = 8
+    let mut div_count = 0;
+    let mut d = 1;
+    while d <= 370 {
+        if 370 % d == 0 {
+            div_count = div_count + 1;
+        }
+        d = d + 1;
+    }
+    assert_eq(div_count, 8);
+}
+
+fn test_cross_validation() {
+    // Fibonacci via matrix should equal iterative
+    let mut a = 0;
+    let mut bv = 1;
+    let mut i = 0;
+    while i < 20 {
+        assert_eq(fib_matrix(i), a);
+        let tmp = a + bv;
+        a = bv;
+        bv = tmp;
+        i = i + 1;
+    }
+
+    // Sum of binomial coefficients: sum C(n,k) for k=0..n = 2^n
+    let mut n = 0;
+    while n <= 7 {
+        let mut sum = 0;
+        let mut k = 0;
+        while k <= n {
+            sum = sum + choose(n, k);
+            k = k + 1;
+        }
+        let mut pow = 1;
+        let mut j = 0;
+        while j < n {
+            pow = pow * 2;
+            j = j + 1;
+        }
+        assert_eq(sum, pow);
+        n = n + 1;
+    }
+}
+
+fn main() -> Int {
+    test_polynomial();
+    test_prime_factorization_370();
+    test_combinatorics();
+    test_bit_tricks();
+    test_matrix_ops();
+    test_fibonacci_matrix();
+    test_370_properties();
+    test_cross_validation();
+    print("[OK] 370_milestone_370_aot");
+    0
+}

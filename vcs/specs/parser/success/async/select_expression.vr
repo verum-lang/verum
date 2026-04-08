@@ -1,0 +1,425 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for select expression (async multiplexing)
+
+// ============================================================================
+// Basic Select Expressions
+// ============================================================================
+
+async fn test_basic_select() {
+    // Simple select with two arms
+    select {
+        result = channel.recv().await => {
+            process(result)
+        },
+        _ = timeout(1000).await => {
+            handle_timeout()
+        }
+    };
+
+    // Select with expression bodies (no braces)
+    select {
+        msg = rx.recv().await => handle(msg),
+        _ = timer.await => tick()
+    };
+
+    // Single arm select
+    select {
+        data = source.recv().await => process(data)
+    };
+}
+
+// ============================================================================
+// Select with Multiple Arms
+// ============================================================================
+
+async fn test_multi_arm_select() {
+    // Three arms
+    select {
+        msg = rx1.recv().await => handle1(msg),
+        msg = rx2.recv().await => handle2(msg),
+        msg = rx3.recv().await => handle3(msg)
+    };
+
+    // Many arms
+    select {
+        a = chan_a.recv().await => process_a(a),
+        b = chan_b.recv().await => process_b(b),
+        c = chan_c.recv().await => process_c(c),
+        d = chan_d.recv().await => process_d(d),
+        e = chan_e.recv().await => process_e(e)
+    };
+
+    // Mixed block and expression bodies
+    select {
+        data = fast_channel.recv().await => data,
+        data = slow_channel.recv().await => {
+            log("Got slow data");
+            transform(data)
+        },
+        _ = timeout(5000).await => default_value
+    };
+}
+
+// ============================================================================
+// Select with Pattern Matching
+// ============================================================================
+
+async fn test_select_patterns() {
+    // Tuple pattern
+    select {
+        (x, y) = coords_channel.recv().await => Point.new(x, y),
+        _ = timeout.await => Point.origin()
+    };
+
+    // Struct pattern
+    select {
+        Message { id, body } = msg_channel.recv().await => process(id, body),
+        _ = timer.await => log("timeout")
+    };
+
+    // Option pattern
+    select {
+        Some(value) = maybe_channel.recv().await => value,
+        None = maybe_channel.recv().await => 0
+    };
+
+    // Result pattern
+    select {
+        Ok(data) = result_channel.recv().await => use_data(data),
+        Err(e) = result_channel.recv().await => handle_error(e)
+    };
+
+    // Wildcard pattern
+    select {
+        _ = signal_a.recv().await => action_a(),
+        _ = signal_b.recv().await => action_b()
+    };
+
+    // Or pattern
+    select {
+        Red | Green | Blue = color_channel.recv().await => primary(),
+        _ = other_channel.recv().await => secondary()
+    };
+}
+
+// ============================================================================
+// Select with Guards
+// ============================================================================
+
+async fn test_select_guards() {
+    // Simple if guard
+    select {
+        msg = channel.recv().await if is_valid(msg) => process(msg),
+        _ = timeout.await => default()
+    };
+
+    // Multiple guards
+    select {
+        n = num_channel.recv().await if n > 0 => positive(n),
+        n = num_channel.recv().await if n < 0 => negative(n),
+        n = num_channel.recv().await => zero()
+    };
+
+    // Complex guard expression
+    select {
+        data = source.recv().await if data.is_ready() && data.size() > 0 => {
+            process(data)
+        },
+        _ = fallback.await => default()
+    };
+
+    // Guard with method call
+    select {
+        item = queue.recv().await if item.priority() >= HIGH => urgent(item),
+        item = queue.recv().await => normal(item)
+    };
+
+    // Guard referencing captured variable
+    let threshold = 100;
+    select {
+        value = sensor.recv().await if value > threshold => alert(value),
+        value = sensor.recv().await => log(value)
+    };
+}
+
+// ============================================================================
+// Biased Select
+// ============================================================================
+
+async fn test_biased_select() {
+    // Biased select (priority order)
+    select biased {
+        urgent = priority_channel.recv().await => handle_urgent(urgent),
+        normal = normal_channel.recv().await => handle_normal(normal),
+        low = low_priority_channel.recv().await => handle_low(low)
+    };
+
+    // Biased with guards
+    select biased {
+        msg = critical.recv().await if is_critical(msg) => immediate(msg),
+        msg = standard.recv().await => queued(msg)
+    };
+
+    // Biased with else
+    select biased {
+        data = fast_path.recv().await => fast_handler(data),
+        data = slow_path.recv().await => slow_handler(data),
+        else => fallback()
+    };
+}
+
+// ============================================================================
+// Select with Else Branch
+// ============================================================================
+
+async fn test_select_else() {
+    // Select with else
+    select {
+        msg = rx1.recv().await => handle1(msg),
+        msg = rx2.recv().await => handle2(msg),
+        else => default_action()
+    };
+
+    // Else with block body
+    select {
+        data = source.recv().await => process(data),
+        else => {
+            log("No data available");
+            create_default()
+        }
+    };
+
+    // Else as only fallback
+    select {
+        result = maybe_ready.recv().await if is_ready => result,
+        else => wait_and_retry()
+    };
+
+    // Trailing comma before else
+    select {
+        a = chan_a.recv().await => a,
+        b = chan_b.recv().await => b,
+        else => default(),
+    };
+}
+
+// ============================================================================
+// Select with Attributes
+// ============================================================================
+
+async fn test_select_attributes() {
+    // Attribute on single arm
+    select {
+        @cfg(feature = "fast_path")
+        data = fast_channel.recv().await => fast_process(data),
+        data = slow_channel.recv().await => slow_process(data)
+    };
+
+    // Multiple attributes
+    select {
+        @cfg(debug)
+        @instrument
+        msg = debug_channel.recv().await => debug_handler(msg),
+        msg = normal_channel.recv().await => normal_handler(msg)
+    };
+
+    // Attributes on multiple arms
+    select {
+        @allow(unused)
+        a = chan_a.recv().await => handle_a(a),
+        @cfg(feature = "beta")
+        b = chan_b.recv().await => handle_b(b),
+        c = chan_c.recv().await => handle_c(c)
+    };
+}
+
+// ============================================================================
+// Select as Expression
+// ============================================================================
+
+async fn test_select_as_expression() {
+    // Select in let binding
+    let result = select {
+        data = source.recv().await => process(data),
+        _ = timeout.await => default()
+    };
+
+    // Select as return value
+    return select {
+        success = ok_channel.recv().await => Ok(success),
+        error = err_channel.recv().await => Err(error)
+    };
+
+    // Select in function argument
+    process_result(select {
+        a = chan.recv().await => a,
+        else => default()
+    });
+
+    // Select in match
+    let value = match mode {
+        Mode.Fast => select {
+            data = fast.recv().await => data,
+            else => 0
+        },
+        Mode.Slow => select {
+            data = slow.recv().await => data,
+            else => 0
+        }
+    };
+}
+
+// ============================================================================
+// Nested Select
+// ============================================================================
+
+async fn test_nested_select() {
+    // Select inside select arm
+    select {
+        outer = outer_channel.recv().await => {
+            select {
+                inner = inner_channel.recv().await => combine(outer, inner),
+                _ = timeout.await => outer
+            }
+        },
+        _ = global_timeout.await => default()
+    };
+
+    // Multiple levels of nesting
+    let result = select {
+        a = chan_a.recv().await => select {
+            b = chan_b.recv().await => select {
+                c = chan_c.recv().await => (a, b, c),
+                else => (a, b, 0)
+            },
+            else => (a, 0, 0)
+        },
+        else => (0, 0, 0)
+    };
+}
+
+// ============================================================================
+// Select with Complex Await Expressions
+// ============================================================================
+
+async fn test_select_complex_await() {
+    // Method chain before await
+    select {
+        data = client.connect().fetch().await => data,
+        _ = timeout.await => default()
+    };
+
+    // Generic method call
+    select {
+        result = parser.parse<Data>().await => result,
+        _ = timer.await => default()
+    };
+
+    // Async closure call
+    select {
+        value = (async || fetch().await)().await => value,
+        _ = timeout.await => 0
+    };
+
+    // Field access before await
+    select {
+        data = container.future_field.await => data,
+        _ = fallback.await => default()
+    };
+}
+
+// ============================================================================
+// Select in Loops
+// ============================================================================
+
+async fn test_select_in_loops() {
+    // Select in loop
+    loop {
+        select {
+            msg = channel.recv().await => {
+                if is_done(msg) {
+                    break;
+                }
+                process(msg);
+            },
+            _ = shutdown.recv().await => break
+        };
+    }
+
+    // Select in while
+    while running {
+        select {
+            cmd = command_channel.recv().await => handle_command(cmd),
+            _ = tick_timer.await => tick()
+        };
+    }
+
+    // Select with break/continue
+    loop {
+        select {
+            Stop = control.recv().await => break,
+            Pause = control.recv().await => continue,
+            Work(data) = work.recv().await => process(data)
+        };
+    }
+}
+
+// ============================================================================
+// Select with Try/Error Handling
+// ============================================================================
+
+async fn test_select_error_handling() {
+    // Select with try in arm
+    select {
+        data = source.recv().await => {
+            try {
+                process(data)
+            } recover {
+                Error => default()
+            }
+        },
+        _ = timeout.await => default()
+    };
+
+    // Select with question mark
+    let result = select {
+        data = source.recv().await => Ok(process(data)?),
+        _ = timeout.await => Err(TimeoutError)
+    };
+
+    // Select inside try block
+    try {
+        select {
+            data = risky_channel.recv().await => risky_process(data),
+            _ = timeout.await => throw TimeoutError
+        }
+    } recover {
+        TimeoutError => handle_timeout()
+    };
+}
+
+// ============================================================================
+// Select Trailing Commas
+// ============================================================================
+
+async fn test_select_trailing_commas() {
+    // With trailing comma on last arm
+    select {
+        a = chan_a.recv().await => a,
+        b = chan_b.recv().await => b,
+    };
+
+    // Trailing comma before else
+    select {
+        data = source.recv().await => data,
+        else => default(),
+    };
+
+    // No trailing comma
+    select {
+        a = chan_a.recv().await => a,
+        b = chan_b.recv().await => b
+    };
+}

@@ -1,0 +1,189 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: pipeline, data-processing, functional
+// @description: Test data processing pipeline patterns
+
+fn square(x: Int) -> Int { x * x }
+fn negate(x: Int) -> Int { 0 - x }
+fn add_one(x: Int) -> Int { x + 1 }
+
+fn map_ints(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_ints(items: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            result.push(items[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_ints(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn sum_fn(a: Int, b: Int) -> Int { a + b }
+fn is_positive(x: Int) -> Bool { x > 0 }
+fn is_odd(x: Int) -> Bool { x % 2 != 0 }
+
+fn test_map_filter_fold() -> Int {
+    let mut nums = List.new();
+    nums.push(1);
+    nums.push(2);
+    nums.push(3);
+    nums.push(4);
+    nums.push(5);
+
+    // Map: square each
+    let squared = map_ints(nums, square);
+    // [1, 4, 9, 16, 25]
+
+    // Filter: keep odd
+    let odds = filter_ints(squared, is_odd);
+    // [1, 9, 25]
+
+    // Fold: sum
+    let total = fold_ints(odds, 0, sum_fn);
+    // 1 + 9 + 25 = 35
+    if total != 35 {
+        print(f"FAIL pipeline: total={total}, expected 35");
+        return 1;
+    }
+    print("  map_filter_fold: OK");
+    0
+}
+
+fn test_transform_chain() -> Int {
+    let mut data = List.new();
+    data.push(-3);
+    data.push(-1);
+    data.push(0);
+    data.push(2);
+    data.push(5);
+
+    // Filter positive, then square, then sum
+    let positives = filter_ints(data, is_positive);
+    let squared = map_ints(positives, square);
+    let total = fold_ints(squared, 0, sum_fn);
+    // positive: [2, 5], squared: [4, 25], sum: 29
+    if total != 29 {
+        print(f"FAIL transform: {total}, expected 29");
+        return 1;
+    }
+    print("  transform_chain: OK");
+    0
+}
+
+fn any_match(items: List<Int>, pred: fn(Int) -> Bool) -> Bool {
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            return true;
+        }
+        i = i + 1;
+    }
+    false
+}
+
+fn all_match(items: List<Int>, pred: fn(Int) -> Bool) -> Bool {
+    let mut i = 0;
+    while i < items.len() {
+        if !pred(items[i]) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_any_all() -> Int {
+    let mut nums = List.new();
+    nums.push(1);
+    nums.push(3);
+    nums.push(5);
+    nums.push(7);
+
+    if !all_match(nums, is_odd) {
+        print("FAIL: all should be odd");
+        return 1;
+    }
+    if !all_match(nums, is_positive) {
+        print("FAIL: all should be positive");
+        return 1;
+    }
+
+    let mut mixed = List.new();
+    mixed.push(1);
+    mixed.push(2);
+    mixed.push(3);
+    if all_match(mixed, is_odd) {
+        print("FAIL: not all are odd");
+        return 1;
+    }
+    if !any_match(mixed, is_odd) {
+        print("FAIL: some are odd");
+        return 1;
+    }
+    print("  any_all: OK");
+    0
+}
+
+fn zip_with(a: List<Int>, b: List<Int>, f: fn(Int, Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let min_len = if a.len() < b.len() { a.len() } else { b.len() };
+    let mut i = 0;
+    while i < min_len {
+        result.push(f(a[i], b[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn test_zip() -> Int {
+    let mut a = List.new();
+    a.push(1); a.push(2); a.push(3);
+    let mut b = List.new();
+    b.push(10); b.push(20); b.push(30);
+
+    let sums = zip_with(a, b, sum_fn);
+    if sums[0] != 11 || sums[1] != 22 || sums[2] != 33 {
+        print("FAIL zip");
+        return 1;
+    }
+    print("  zip_with: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Pipeline Tests:");
+    let mut failures = 0;
+    failures = failures + test_map_filter_fold();
+    failures = failures + test_transform_chain();
+    failures = failures + test_any_all();
+    failures = failures + test_zip();
+
+    if failures == 0 {
+        print("All pipeline tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

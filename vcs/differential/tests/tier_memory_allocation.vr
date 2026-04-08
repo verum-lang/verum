@@ -1,0 +1,465 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, memory, allocation
+// @timeout: 20000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for heap allocation.
+/// Tests Heap, List, Map, Set allocations, nested structures, and deallocation patterns.
+
+fn main() {
+    test_heap_primitive();
+    test_heap_compound();
+    test_heap_nested();
+    test_list_allocation();
+    test_map_allocation();
+    test_set_allocation();
+    test_dynamic_growth();
+    test_clone_and_copy();
+    test_allocation_in_loops();
+    test_deallocation_order();
+}
+
+/// Heap allocation of primitives
+fn test_heap_primitive() {
+    println("=== Heap Primitive ===");
+
+    // Integer
+    let boxed_int = Heap(42);
+    println(f"boxed_int: {*boxed_int}");
+    println(f"boxed_int * 2: {*boxed_int * 2}");
+
+    // Float
+    let boxed_float = Heap(3.14159);
+    println(f"boxed_float: {*boxed_float}");
+
+    // Boolean
+    let boxed_bool = Heap(true);
+    println(f"boxed_bool: {*boxed_bool}");
+
+    // Character
+    let boxed_char = Heap('A');
+    println(f"boxed_char: {*boxed_char}");
+
+    // Text
+    let boxed_text = Heap("Hello, World!");
+    println(f"boxed_text: {*boxed_text}");
+    println(f"boxed_text.len(): {(*boxed_text).len()}");
+
+    // Mutation through Heap
+    let mut mutable_box = Heap(100);
+    println(f"before mutation: {*mutable_box}");
+    *mutable_box = 200;
+    println(f"after mutation: {*mutable_box}");
+}
+
+/// Heap allocation of compound types
+fn test_heap_compound() {
+    println("\n=== Heap Compound ===");
+
+    // Tuple
+    let boxed_tuple = Heap((1, 2, 3));
+    println(f"boxed_tuple: {*boxed_tuple}");
+    println(f"boxed_tuple.0: {(*boxed_tuple).0}");
+
+    // Array
+    let boxed_array = Heap([1, 2, 3, 4, 5]);
+    println(f"boxed_array: {*boxed_array}");
+    println(f"boxed_array[2]: {(*boxed_array)[2]}");
+
+    // Record type
+    type Point is { x: Int, y: Int };
+    let boxed_point = Heap(Point { x: 10, y: 20 });
+    println(f"boxed_point: ({(*boxed_point).x}, {(*boxed_point).y})");
+
+    // Sum type
+    type Maybe<T> is None | Some(T);
+    let boxed_some = Heap(Some(42));
+    let boxed_none: Heap<Maybe<Int>> = Heap(None);
+
+    match *boxed_some {
+        Some(v) => println(f"boxed_some: Some({v})"),
+        None => println("boxed_some: None"),
+    }
+
+    match *boxed_none {
+        Some(v) => println(f"boxed_none: Some({v})"),
+        None => println("boxed_none: None"),
+    }
+
+    // Complex struct
+    type Person is { name: Text, age: Int, active: Bool };
+    let person = Heap(Person { name: "Alice", age: 30, active: true });
+    println(f"person: {(*person).name}, age {(*person).age}, active: {(*person).active}");
+}
+
+/// Nested heap allocations
+fn test_heap_nested() {
+    println("\n=== Heap Nested ===");
+
+    // Double boxing
+    let double_box = Heap(Heap(42));
+    println(f"double_box: {**double_box}");
+
+    // Triple boxing
+    let triple_box = Heap(Heap(Heap("deeply nested")));
+    println(f"triple_box: {***triple_box}");
+
+    // Box of tuple with boxes
+    let complex = Heap((Heap(1), Heap(2), Heap(3)));
+    println(f"complex: ({*(*complex).0}, {*(*complex).1}, {*(*complex).2})");
+
+    // Tree structure
+    type Node is { value: Int, children: List<Heap<Node>> };
+
+    let leaf1 = Heap(Node { value: 1, children: [] });
+    let leaf2 = Heap(Node { value: 2, children: [] });
+    let parent = Heap(Node { value: 0, children: [leaf1, leaf2] });
+
+    println(f"parent value: {(*parent).value}");
+    println(f"parent children count: {(*parent).children.len()}");
+    for child in (*parent).children {
+        println(f"  child value: {(*child).value}");
+    }
+
+    // Recursive structure
+    type LinkedNode is { value: Int, next: Maybe<Heap<LinkedNode>> };
+
+    let node3 = Heap(LinkedNode { value: 3, next: None });
+    let node2 = Heap(LinkedNode { value: 2, next: Some(node3) });
+    let node1 = Heap(LinkedNode { value: 1, next: Some(node2) });
+
+    let mut current = Some(node1);
+    println("linked list traversal:");
+    while let Some(node) = current {
+        println(f"  value: {(*node).value}");
+        current = (*node).next;
+    }
+}
+
+/// List allocation patterns
+fn test_list_allocation() {
+    println("\n=== List Allocation ===");
+
+    // Empty list
+    let empty: List<Int> = [];
+    println(f"empty list: {empty}");
+    println(f"empty.len(): {empty.len()}");
+
+    // Literal initialization
+    let nums = [1, 2, 3, 4, 5];
+    println(f"literal list: {nums}");
+
+    // From constructor
+    let zeros = List.repeat(0, 5);
+    println(f"repeat zeros: {zeros}");
+
+    // Dynamic building
+    let mut dynamic: List<Int> = [];
+    for i in 0..5 {
+        dynamic.push(i * 10);
+    }
+    println(f"dynamic list: {dynamic}");
+
+    // List of lists
+    let nested = [[1, 2], [3, 4], [5, 6]];
+    println(f"nested list: {nested}");
+    for row in nested {
+        println(f"  row: {row}");
+    }
+
+    // List of Heap values
+    let mut heap_list: List<Heap<Int>> = [];
+    for i in 0..3 {
+        heap_list.push(Heap(i * 100));
+    }
+    println("list of Heap values:");
+    for item in heap_list {
+        println(f"  {*item}");
+    }
+
+    // List capacity/reallocation
+    let mut growing: List<Int> = [];
+    for i in 0..20 {
+        growing.push(i);
+        if i % 5 == 0 {
+            println(f"  after {i} pushes, len: {growing.len()}");
+        }
+    }
+}
+
+/// Map allocation patterns
+fn test_map_allocation() {
+    println("\n=== Map Allocation ===");
+
+    // Empty map
+    let empty: Map<Text, Int> = {};
+    println(f"empty map len: {empty.len()}");
+
+    // Literal initialization
+    let scores = {"alice": 100, "bob": 85, "carol": 92};
+    println(f"scores len: {scores.len()}");
+
+    // Access
+    println(f"scores['alice']: {scores['alice']}");
+    println(f"scores.get('bob'): {scores.get('bob')}");
+    println(f"scores.get('dave'): {scores.get('dave')}");
+
+    // Dynamic building
+    let mut dynamic: Map<Int, Text> = {};
+    for i in 0..5 {
+        dynamic.insert(i, f"value_{i}");
+    }
+    println(f"dynamic map len: {dynamic.len()}");
+    for (k, v) in dynamic.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Map of complex values
+    type Config is { enabled: Bool, count: Int };
+    let mut configs: Map<Text, Config> = {};
+    configs.insert("feature_a", Config { enabled: true, count: 10 });
+    configs.insert("feature_b", Config { enabled: false, count: 0 });
+
+    for (name, cfg) in configs.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {name}: enabled={cfg.enabled}, count={cfg.count}");
+    }
+
+    // Nested maps
+    let mut nested: Map<Text, Map<Text, Int>> = {};
+    nested.insert("outer1", {"inner1": 1, "inner2": 2});
+    nested.insert("outer2", {"inner3": 3, "inner4": 4});
+
+    println("nested map:");
+    for (outer_key, inner_map) in nested.entries().sorted_by_key(|(k, _)| k) {
+        for (inner_key, val) in inner_map.entries().sorted_by_key(|(k, _)| k) {
+            println(f"  {outer_key}.{inner_key}: {val}");
+        }
+    }
+}
+
+/// Set allocation patterns
+fn test_set_allocation() {
+    println("\n=== Set Allocation ===");
+
+    // Empty set
+    let empty: Set<Int> = {};
+    println(f"empty set len: {empty.len()}");
+
+    // Literal initialization
+    let primes = {2, 3, 5, 7, 11};
+    println(f"primes: {primes.sorted().collect()}");
+
+    // Dynamic building
+    let mut dynamic: Set<Int> = {};
+    for i in 0..10 {
+        dynamic.insert(i * 2);
+    }
+    println(f"evens: {dynamic.sorted().collect()}");
+
+    // From list (deduplication)
+    let with_dups = [1, 2, 2, 3, 3, 3, 4, 4, 4, 4];
+    let unique = Set.from(with_dups);
+    println(f"unique from {with_dups}: {unique.sorted().collect()}");
+
+    // Set of strings
+    let words: Set<Text> = {"apple", "banana", "cherry"};
+    println(f"words contains 'apple': {words.contains('apple')}");
+    println(f"words contains 'grape': {words.contains('grape')}");
+
+    // Set operations
+    let a = {1, 2, 3, 4, 5};
+    let b = {4, 5, 6, 7, 8};
+    println(f"union: {a.union(b).sorted().collect()}");
+    println(f"intersection: {a.intersection(b).sorted().collect()}");
+    println(f"difference: {a.difference(b).sorted().collect()}");
+}
+
+/// Dynamic growth and reallocation
+fn test_dynamic_growth() {
+    println("\n=== Dynamic Growth ===");
+
+    // List growth
+    let mut list: List<Int> = [];
+    println("list growth:");
+    for i in 0..50 {
+        list.push(i);
+        if (i + 1) % 10 == 0 {
+            println(f"  len={list.len()}, last={list[list.len() - 1]}");
+        }
+    }
+
+    // Map growth
+    let mut map: Map<Int, Int> = {};
+    println("map growth:");
+    for i in 0..50 {
+        map.insert(i, i * i);
+        if (i + 1) % 10 == 0 {
+            println(f"  len={map.len()}");
+        }
+    }
+
+    // String concatenation growth
+    let mut text = "";
+    println("text growth:");
+    for i in 0..10 {
+        text = text + f"{i}";
+        println(f"  len={text.len()}, text={text}");
+    }
+
+    // Nested list growth
+    let mut matrix: List<List<Int>> = [];
+    for i in 0..5 {
+        let mut row: List<Int> = [];
+        for j in 0..5 {
+            row.push(i * 5 + j);
+        }
+        matrix.push(row);
+    }
+    println(f"matrix dimensions: {matrix.len()} x {matrix[0].len()}");
+    println(f"matrix[2][3]: {matrix[2][3]}");
+}
+
+/// Clone and copy semantics
+fn test_clone_and_copy() {
+    println("\n=== Clone and Copy ===");
+
+    // Primitive copy
+    let x = 42;
+    let y = x;  // Copy
+    println(f"x: {x}, y: {y}");
+
+    // Heap clone
+    let box1 = Heap(100);
+    let box2 = box1.clone();
+    println(f"box1: {*box1}, box2: {*box2}");
+
+    // List clone
+    let list1 = [1, 2, 3];
+    let list2 = list1.clone();
+    println(f"list1: {list1}, list2: {list2}");
+
+    // Deep clone verification
+    let mut list3 = list1.clone();
+    list3.push(4);
+    println(f"original after clone modified: {list1}");
+    println(f"modified clone: {list3}");
+
+    // Map clone
+    let map1 = {"a": 1, "b": 2};
+    let map2 = map1.clone();
+    println(f"map1 len: {map1.len()}, map2 len: {map2.len()}");
+
+    // Struct clone
+    type Data is { value: Int, items: List<Int> };
+
+    let data1 = Data { value: 10, items: [1, 2, 3] };
+    let data2 = data1.clone();
+    println(f"data1.value: {data1.value}, data2.value: {data2.value}");
+    println(f"data1.items: {data1.items}, data2.items: {data2.items}");
+}
+
+/// Allocation patterns in loops
+fn test_allocation_in_loops() {
+    println("\n=== Allocation in Loops ===");
+
+    // Heap allocation in loop
+    let mut boxes: List<Heap<Int>> = [];
+    for i in 0..5 {
+        boxes.push(Heap(i * 10));
+    }
+    println("boxes:");
+    for (i, box) in boxes.enumerate() {
+        println(f"  [{i}]: {*box}");
+    }
+
+    // Nested allocation
+    let mut nested: List<List<Int>> = [];
+    for i in 0..3 {
+        let mut inner: List<Int> = [];
+        for j in 0..3 {
+            inner.push(i * 10 + j);
+        }
+        nested.push(inner);
+    }
+    println("nested:");
+    for row in nested {
+        println(f"  {row}");
+    }
+
+    // Allocation and immediate use
+    for i in 0..5 {
+        let temp = Heap(i * i);
+        println(f"temp[{i}]: {*temp}");
+        // temp deallocated at end of iteration
+    }
+
+    // Complex allocation pattern
+    type Entry is { id: Int, data: List<Int> };
+    let mut entries: List<Entry> = [];
+    for i in 0..3 {
+        let data = [i, i + 1, i + 2];
+        entries.push(Entry { id: i, data: data });
+    }
+    println("entries:");
+    for entry in entries {
+        println(f"  id={entry.id}, data={entry.data}");
+    }
+}
+
+/// Deallocation order verification
+fn test_deallocation_order() {
+    println("\n=== Deallocation Order ===");
+
+    // Define type that logs on drop
+    type Tracker is { id: Int };
+
+    implement Drop for Tracker {
+        fn drop(&mut self) {
+            println(f"  dropping Tracker {self.id}");
+        }
+    }
+
+    // Simple scope
+    println("simple scope:");
+    {
+        let a = Tracker { id: 1 };
+        let b = Tracker { id: 2 };
+        let c = Tracker { id: 3 };
+        println("  created 1, 2, 3");
+    }
+    println("  scope ended");
+
+    // Nested scopes
+    println("\nnested scopes:");
+    {
+        let outer = Tracker { id: 10 };
+        {
+            let inner = Tracker { id: 20 };
+            println("  inner scope");
+        }
+        println("  inner dropped, outer still alive");
+    }
+    println("  all dropped");
+
+    // In a container
+    println("\ncontainer:");
+    {
+        let mut list: List<Tracker> = [];
+        list.push(Tracker { id: 100 });
+        list.push(Tracker { id: 101 });
+        list.push(Tracker { id: 102 });
+        println("  list populated");
+    }
+    println("  list dropped");
+
+    // Conditional drop
+    println("\nconditional:");
+    for i in 0..3 {
+        if i % 2 == 0 {
+            let t = Tracker { id: i * 100 };
+            println(f"  created {i * 100}");
+        }
+        println(f"  iteration {i} ended");
+    }
+}

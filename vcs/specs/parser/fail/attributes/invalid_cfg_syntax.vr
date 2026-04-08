@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, attributes, cfg, error
+// @description: Test invalid empty cfg attribute
+// @expected-error: E015
+
+@cfg()
+fn test() {}

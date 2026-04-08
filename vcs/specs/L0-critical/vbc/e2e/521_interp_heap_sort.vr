@@ -1,0 +1,121 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, heap_sort, sorting, binary_heap, sift_down
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Heap sort algorithm: in-place sort using a max-heap encoded in an array.
+// Phase 1: Build heap (heapify from bottom-up).
+// Phase 2: Repeatedly extract max to sorted region.
+
+fn left_child(i: Int) -> Int { 2 * i + 1 }
+fn right_child(i: Int) -> Int { 2 * i + 2 }
+fn parent_idx(i: Int) -> Int { (i - 1) / 2 }
+
+fn arr16_get(a: [Int; 16], i: Int) -> Int { a[i] }
+
+fn sift_down_16(a: [Int; 16], root: Int, end: Int) {
+    let mut r = root;
+    while left_child(r) < end {
+        let lc = left_child(r);
+        let rc = right_child(r);
+        let mut largest = r;
+        if a[lc] > a[largest] { largest = lc; }
+        if rc < end && a[rc] > a[largest] { largest = rc; }
+        if largest == r { return; }
+        let tmp = a[r];
+        a[r] = a[largest];
+        a[largest] = tmp;
+        r = largest;
+    }
+}
+
+fn heap_sort_16(a: [Int; 16], n: Int) {
+    // Build max-heap.
+    let mut i = n / 2 - 1;
+    while i >= 0 {
+        sift_down_16(a, i, n);
+        i = i - 1;
+    }
+    // Extract elements from heap one by one.
+    let mut end = n - 1;
+    while end > 0 {
+        let tmp = a[0];
+        a[0] = a[end];
+        a[end] = tmp;
+        sift_down_16(a, 0, end);
+        end = end - 1;
+    }
+}
+
+fn is_sorted_16(a: [Int; 16], n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if a[i] < a[i - 1] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_basic_heap_sort() {
+    let mut a = [5, 3, 8, 1, 9, 2, 7, 4, 6, 0, 0, 0, 0, 0, 0, 0];
+    heap_sort_16(a, 10);
+    assert_eq(is_sorted_16(a, 10), 1);
+    assert_eq(a[0], 0);
+    assert_eq(a[9], 9);
+    assert_eq(a[4], 4);
+    print("basic_heap_sort: ok");
+}
+
+fn test_already_sorted() {
+    let mut a = [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0];
+    heap_sort_16(a, 8);
+    assert_eq(is_sorted_16(a, 8), 1);
+    assert_eq(a[0], 1);
+    assert_eq(a[7], 8);
+    print("already_sorted: ok");
+}
+
+fn test_reverse_sorted() {
+    let mut a = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0];
+    heap_sort_16(a, 9);
+    assert_eq(is_sorted_16(a, 9), 1);
+    assert_eq(a[0], 1);
+    assert_eq(a[8], 9);
+    assert_eq(a[4], 5);
+    print("reverse_sorted: ok");
+}
+
+fn test_duplicates() {
+    let mut a = [4, 2, 4, 1, 4, 3, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0];
+    heap_sort_16(a, 8);
+    assert_eq(is_sorted_16(a, 8), 1);
+    assert_eq(a[0], 1);
+    assert_eq(a[7], 4);
+    // Count 4s: should be 4
+    let cnt = if a[4] == 4 { 1 } else { 0 }
+            + if a[5] == 4 { 1 } else { 0 }
+            + if a[6] == 4 { 1 } else { 0 }
+            + if a[7] == 4 { 1 } else { 0 };
+    assert_eq(cnt, 4);
+    print("duplicates: ok");
+}
+
+fn test_single_element() {
+    let mut a = [42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    heap_sort_16(a, 1);
+    assert_eq(a[0], 42);
+    assert_eq(is_sorted_16(a, 1), 1);
+    print("single_element: ok");
+}
+
+fn main() -> Int {
+    test_basic_heap_sort();
+    test_already_sorted();
+    test_reverse_sorted();
+    test_duplicates();
+    test_single_element();
+    print("[OK] 521_interp_heap_sort");
+    0
+}

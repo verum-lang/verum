@@ -1,0 +1,27 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L0
+// @tags: modules, circular, constants, error
+// @expect-error: E600
+
+/// Circular VALUE dependencies are FORBIDDEN.
+/// Constants cannot depend on each other circularly.
+/// This test verifies the compiler detects and reports this error.
+
+module const_a {
+    link cog.const_b.VALUE_B;
+
+    // ERROR: VALUE_A depends on VALUE_B which depends on VALUE_A
+    pub const VALUE_A: Int = VALUE_B + 1;
+}
+
+module const_b {
+    link cog.const_a.VALUE_A;
+
+    // ERROR: VALUE_B depends on VALUE_A which depends on VALUE_B
+    pub const VALUE_B: Int = VALUE_A + 1;
+}
+
+fn main() -> Int {
+    0
+}

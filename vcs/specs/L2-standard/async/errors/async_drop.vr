@@ -1,0 +1,235 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, errors, drop, cleanup
+// @description: Async drop and cleanup error handling
+
+/// AsyncDrop trait for types that need async cleanup.
+/// Standard Drop is synchronous, but some resources require async cleanup.
+
+/// Trait for async cleanup
+type AsyncDrop is protocol {
+    async fn drop(&mut self);
+}
+
+/// File handle requiring async close
+type AsyncFile is {
+    handle: FileHandle,
+    path: Text,
+    is_open: Bool,
+};
+
+implement AsyncDrop for AsyncFile {
+    async fn drop(&mut self) {
+        if self.is_open {
+            // Flush and close asynchronously
+            match self.flush().await {
+                Ok(()) => {}
+                Err(e) => {
+                    // Log error but don't panic in drop
+                    log_error(f"Failed to flush file: {e}");
+                }
+            }
+
+            match self.close().await {
+                Ok(()) => self.is_open = false,
+                Err(e) => {
+                    log_error(f"Failed to close file: {e}");
+                    // File descriptor may leak, but we can't do much
+                }
+            }
+        }
+    }
+}
+
+implement AsyncFile {
+    async fn open(path: Text) -> Result<Self, IoError> {
+        let handle = FileHandle.open(&path).await?;
+        Ok(Self {
+            handle,
+            path,
+            is_open: true,
+        })
+    }
+
+    async fn flush(&mut self) -> Result<(), IoError> {
+        if self.is_open {
+            self.handle.flush().await
+        } else {
+            Err(IoError.NotOpen)
+        }
+    }
+
+    async fn close(&mut self) -> Result<(), IoError> {
+        if self.is_open {
+            self.handle.close().await?;
+            self.is_open = false;
+            Ok(())
+        } else {
+            Ok(())  // Already closed
+        }
+    }
+}
+
+/// Database connection with async cleanup
+type AsyncDbConnection is {
+    conn: DbHandle,
+    in_transaction: Bool,
+};
+
+implement AsyncDrop for AsyncDbConnection {
+    async fn drop(&mut self) {
+        // Rollback any open transaction
+        if self.in_transaction {
+            match self.rollback().await {
+                Ok(()) => {}
+                Err(e) => log_error(f"Rollback failed during drop: {e}"),
+            }
+        }
+
+        // Close connection
+        match self.conn.close().await {
+            Ok(()) => {}
+            Err(e) => log_error(f"Connection close failed: {e}"),
+        }
+    }
+}
+
+implement AsyncDbConnection {
+    async fn rollback(&mut self) -> Result<(), DbError> {
+        if self.in_transaction {
+            self.conn.execute("ROLLBACK").await?;
+            self.in_transaction = false;
+        }
+        Ok(())
+    }
+}
+
+/// Scope guard for async cleanup
+type AsyncScopeGuard<F: FnOnce() -> Future<Unit>> is {
+    cleanup: Maybe<F>,
+};
+
+implement AsyncScopeGuard<F> {
+    fn new(cleanup: F) -> Self {
+        Self { cleanup: Some(cleanup) }
+    }
+
+    fn cancel(&mut self) {
+        self.cleanup = None;
+    }
+}
+
+implement AsyncDrop for AsyncScopeGuard<F> {
+    async fn drop(&mut self) {
+        if let Some(cleanup) = self.cleanup.take() {
+            cleanup().await;
+        }
+    }
+}
+
+/// Using async scope guard
+async fn with_async_cleanup<T>(
+    operation: impl async FnOnce() -> T,
+    cleanup: impl async FnOnce()
+) -> T {
+    let _guard = AsyncScopeGuard.new(cleanup);
+    operation().await
+}
+
+/// Resource pool with async return
+type AsyncPool<T: AsyncDrop> is {
+    available: Mutex<List<T>>,
+    max_size: Int,
+};
+
+implement AsyncPool<T> {
+    async fn acquire(&self) -> PoolGuard<T> {
+        let item = {
+            let mut available = self.available.lock().await;
+            available.pop()
+        };
+
+        match item {
+            Some(item) => PoolGuard { pool: self, item: Some(item) },
+            None => {
+                // Create new item
+                let item = T.create().await;
+                PoolGuard { pool: self, item: Some(item) }
+            }
+        }
+    }
+
+    async fn release(&self, item: T) {
+        let mut available = self.available.lock().await;
+        if available.len() < self.max_size {
+            available.push(item);
+        } else {
+            // Pool full, drop the item
+            item.drop().await;
+        }
+    }
+}
+
+type PoolGuard<T: AsyncDrop> is {
+    pool: &AsyncPool<T>,
+    item: Maybe<T>,
+};
+
+implement AsyncDrop for PoolGuard<T> {
+    async fn drop(&mut self) {
+        if let Some(item) = self.item.take() {
+            self.pool.release(item).await;
+        }
+    }
+}
+
+/// Error during async drop
+type AsyncDropError is {
+    resource: Text,
+    cause: Heap<Error>,
+};
+
+/// Collecting errors during batch async drop
+async fn drop_all<T: AsyncDrop>(items: List<T>) -> List<AsyncDropError> {
+    let mut errors = List.new();
+
+    for mut item in items {
+        match item.drop().await {
+            Ok(()) => {}
+            Err(e) => errors.push(AsyncDropError {
+                resource: type_name<T>(),
+                cause: Heap(e),
+            }),
+        }
+    }
+
+    errors
+}
+
+type FileHandle is {};
+implement FileHandle {
+    async fn open(path: &Text) -> Result<Self, IoError> { Ok(Self {}) }
+    async fn flush(&self) -> Result<(), IoError> { Ok(()) }
+    async fn close(&self) -> Result<(), IoError> { Ok(()) }
+}
+
+type DbHandle is {};
+implement DbHandle {
+    async fn execute(&self, sql: &str) -> Result<(), DbError> { Ok(()) }
+    async fn close(&self) -> Result<(), DbError> { Ok(()) }
+}
+
+type IoError is NotOpen, WriteFailed, CloseFailed;
+type DbError is ConnectionLost, QueryFailed;
+type Mutex<T> is { data: T };
+
+fn log_error(msg: Text) {
+    println(f"ERROR: {msg}");
+}
+
+fn type_name<T>() -> Text { "T" }
+
+fn main() {
+    // Async drop happens in async context
+}

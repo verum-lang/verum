@@ -1,0 +1,125 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: map, nested, list, collections
+// @description: Maps with complex value types - lists, nested maps
+
+fn test_map_with_list_values() -> Int {
+    let mut m = Map.new();
+    let mut list1 = List.new();
+    list1.push(1);
+    list1.push(2);
+    list1.push(3);
+    m.insert("a", list1);
+
+    let mut list2 = List.new();
+    list2.push(10);
+    list2.push(20);
+    m.insert("b", list2);
+
+    let retrieved = m.get("a");
+    if retrieved.len() != 3 {
+        print(f"FAIL map_list_values: expected len 3, got {retrieved.len()}");
+        return 1;
+    }
+    let sum = retrieved[0] + retrieved[1] + retrieved[2];
+    if sum != 6 {
+        print(f"FAIL map_list_values sum: expected 6, got {sum}");
+        return 1;
+    }
+    print("  map_with_list_values: OK");
+    0
+}
+
+fn test_map_word_count() -> Int {
+    let mut counts = Map.new();
+    let words = ["the", "cat", "sat", "on", "the", "mat", "the"];
+
+    let mut i = 0;
+    while i < words.len() {
+        let word = words[i];
+        if counts.contains_key(word) {
+            let cur = counts.get(word);
+            counts.insert(word, cur + 1);
+        } else {
+            counts.insert(word, 1);
+        }
+        i = i + 1;
+    }
+
+    let the_count = counts.get("the");
+    if the_count != 3 {
+        print(f"FAIL word_count 'the': expected 3, got {the_count}");
+        return 1;
+    }
+    let cat_count = counts.get("cat");
+    if cat_count != 1 {
+        print(f"FAIL word_count 'cat': expected 1, got {cat_count}");
+        return 1;
+    }
+    print("  map_word_count: OK");
+    0
+}
+
+fn test_map_int_keys() -> Int {
+    let mut m = Map.new();
+    let mut i = 0;
+    while i < 10 {
+        m.insert(i, i * i);
+        i = i + 1;
+    }
+    if m.len() != 10 {
+        print(f"FAIL int_keys len: expected 10, got {m.len()}");
+        return 1;
+    }
+    let v5 = m.get(5);
+    if v5 != 25 {
+        print(f"FAIL int_keys get(5): expected 25, got {v5}");
+        return 1;
+    }
+    let v9 = m.get(9);
+    if v9 != 81 {
+        print(f"FAIL int_keys get(9): expected 81, got {v9}");
+        return 1;
+    }
+    print("  map_int_keys: OK");
+    0
+}
+
+fn test_map_remove() -> Int {
+    let mut m = Map.new();
+    m.insert("x", 10);
+    m.insert("y", 20);
+    m.insert("z", 30);
+    m.remove("y");
+    if m.len() != 2 {
+        print(f"FAIL map_remove len: expected 2, got {m.len()}");
+        return 1;
+    }
+    if m.contains_key("y") {
+        print("FAIL map_remove: should not contain 'y'");
+        return 1;
+    }
+    if !m.contains_key("x") {
+        print("FAIL map_remove: should contain 'x'");
+        return 1;
+    }
+    print("  map_remove: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Map Nested Types Tests:");
+    let mut failures = 0;
+    failures = failures + test_map_with_list_values();
+    failures = failures + test_map_word_count();
+    failures = failures + test_map_int_keys();
+    failures = failures + test_map_remove();
+
+    if failures == 0 {
+        print("All map nested type tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

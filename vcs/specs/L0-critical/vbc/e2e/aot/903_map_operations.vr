@@ -1,0 +1,68 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, map, collections, key-value
+// @expected-exit: 0
+
+// Test: Map data structure operations — creation, insert, lookup, contains.
+
+fn main() -> Int {
+    // Test 1: create map and insert
+    let mut m = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+
+    // Test 2: lookup
+    let v1 = m.get(1);
+    let v2 = m.get(2);
+    let v3 = m.get(3);
+    if (v1 != 100) {
+        print(f"FAIL test2a: get(1)={v1}");
+        return 1;
+    }
+    if (v2 != 200) {
+        print(f"FAIL test2b: get(2)={v2}");
+        return 1;
+    }
+    if (v3 != 300) {
+        print(f"FAIL test2c: get(3)={v3}");
+        return 1;
+    }
+
+    // Test 3: length
+    let len = m.len();
+    if (len != 3) {
+        print(f"FAIL test3: len={len}");
+        return 1;
+    }
+
+    // Test 4: overwrite existing key
+    m.insert(2, 999);
+    let v2b = m.get(2);
+    if (v2b != 999) {
+        print(f"FAIL test4: get(2)={v2b}");
+        return 1;
+    }
+
+    // Test 5: many insertions
+    let mut big_map = Map.new();
+    let mut i = 0;
+    while (i < 100) {
+        big_map.insert(i, i * i);
+        i = i + 1;
+    }
+    let v50 = big_map.get(50);
+    if (v50 != 2500) {
+        print(f"FAIL test5: get(50)={v50}");
+        return 1;
+    }
+    let big_len = big_map.len();
+    if (big_len != 100) {
+        print(f"FAIL test5b: len={big_len}");
+        return 1;
+    }
+
+    print("903_map_operations: PASS");
+    0
+}

@@ -1,0 +1,74 @@
+// Deep nesting edge case
+// Tests parser and type checker with deeply nested structures
+
+fn main() {
+    // Deeply nested if expressions
+    let result = if true {
+        if true {
+            if true {
+                if true {
+                    if true {
+                        if true {
+                            if true {
+                                if true {
+                                    if true {
+                                        if true {
+                                            100
+                                        } else {
+                                            99
+                                        }
+                                    } else { 9 }
+                                } else { 8 }
+                            } else { 7 }
+                        } else { 6 }
+                    } else { 5 }
+                } else { 4 }
+            } else { 3 }
+        } else { 2 }
+    } else { 1 };
+
+    // Deeply nested blocks
+    let block_result = {
+        let a = {
+            let b = {
+                let c = {
+                    let d = {
+                        let e = {
+                            let f = {
+                                let g = {
+                                    let h = {
+                                        let i = {
+                                            42
+                                        };
+                                        i + 1
+                                    };
+                                    h + 1
+                                };
+                                g + 1
+                            };
+                            f + 1
+                        };
+                        e + 1
+                    };
+                    d + 1
+                };
+                c + 1
+            };
+            b + 1
+        };
+        a + 1
+    };
+
+    // Deeply nested lists
+    let nested_list = [[[[[[[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]]]]]]];
+
+    // Deeply nested tuples
+    let nested_tuple = ((((((((1, 2), 3), 4), 5), 6), 7), 8), 9);
+
+    // Deeply nested function calls
+    fn add1(x: Int) -> Int { x + 1 }
+    let chain = add1(add1(add1(add1(add1(add1(add1(add1(add1(add1(0))))))))));
+
+    assert result == 100;
+    assert chain == 10;
+}

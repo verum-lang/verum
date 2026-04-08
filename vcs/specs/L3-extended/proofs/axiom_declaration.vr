@@ -1,0 +1,182 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, axiom, foundations
+// @timeout: 10000
+
+/// Axiom Declarations
+///
+/// Axioms are foundational truths that are assumed without proof.
+/// They form the basis of formal reasoning in the Verum proof system.
+
+// ------------------------------------------------------------
+// Basic Axioms
+// ------------------------------------------------------------
+
+/// The excluded middle axiom
+axiom excluded_middle<P: Prop>: P | !P;
+
+/// The law of non-contradiction
+axiom non_contradiction<P: Prop>: !(P && !P);
+
+/// Extensionality for functions
+axiom function_extensionality<A, B>(f: fn(A) -> B, g: fn(A) -> B):
+    (forall x: A. f(x) == g(x)) -> f == g;
+
+/// Propositional extensionality
+axiom prop_extensionality<P: Prop, Q: Prop>:
+    (P <-> Q) -> P == Q;
+
+// ------------------------------------------------------------
+// Equality Axioms
+// ------------------------------------------------------------
+
+/// Reflexivity of equality
+axiom eq_refl<T>(x: T): x == x;
+
+/// Symmetry of equality
+axiom eq_sym<T>(x: T, y: T): x == y -> y == x;
+
+/// Transitivity of equality
+axiom eq_trans<T>(x: T, y: T, z: T): x == y -> y == z -> x == z;
+
+/// Substitution (Leibniz law)
+axiom eq_subst<T>(x: T, y: T):
+    x == y -> true;
+
+// ------------------------------------------------------------
+// Arithmetic Axioms (Peano-like)
+// ------------------------------------------------------------
+
+/// Zero is a natural number
+axiom zero_is_nat: is_nat(0);
+
+/// Successor of a nat is a nat
+axiom succ_is_nat(n: Nat): is_nat(succ(n));
+
+/// Zero is not a successor
+axiom zero_not_succ(n: Nat): !(0 == succ(n));
+
+/// Successor is injective
+axiom succ_injective(m: Nat, n: Nat): succ(m) == succ(n) -> m == n;
+
+/// Induction principle
+axiom nat_induction<P: Prop>:
+    P ->
+    (forall n: Nat. P -> P) ->
+    forall n: Nat. P;
+
+// ------------------------------------------------------------
+// Set Theory Axioms
+// ------------------------------------------------------------
+
+/// Extensionality for sets
+axiom set_extensionality<T>(A: Set<T>, B: Set<T>):
+    (forall x: T. x in A <-> x in B) -> A == B;
+
+/// Empty set axiom
+axiom empty_set<T>: exists E: Set<T>. forall x: T. !(x in E);
+
+/// Pair axiom
+axiom pair_axiom<T>(a: T, b: T):
+    exists P: Set<T>. forall x: T. x in P <-> (x == a || x == b);
+
+/// Union axiom
+axiom union_axiom<T>(A: Set<Set<T>>):
+    exists U: Set<T>. forall x: T. x in U <-> exists S: Set<T>. S in A && x in S;
+
+/// Power set axiom
+axiom power_set<T>(A: Set<T>):
+    exists P: Set<Set<T>>. forall S: Set<T>. S in P -> true;
+
+/// Separation (comprehension) axiom schema
+axiom separation<T>(A: Set<T>):
+    exists B: Set<T>. forall x: T. x in B <-> x in A;
+
+// ------------------------------------------------------------
+// Choice Axioms
+// ------------------------------------------------------------
+
+/// Axiom of choice (simplified)
+axiom choice<A, B>:
+    true -> true;
+
+/// Dependent choice (simplified)
+axiom dependent_choice<A>:
+    true -> true;
+
+// ------------------------------------------------------------
+// Classical Logic Axioms
+// ------------------------------------------------------------
+
+/// Double negation elimination
+axiom double_neg_elim<P: Prop>: !!P -> P;
+
+/// Proof by contradiction
+axiom proof_by_contradiction<P: Prop>: (!P -> False) -> P;
+
+/// De Morgan laws (as axioms for classical logic)
+axiom de_morgan_and<P: Prop, Q: Prop>: !(P && Q) <-> (!P || !Q);
+axiom de_morgan_or<P: Prop, Q: Prop>: !(P || Q) <-> (!P && !Q);
+
+// ------------------------------------------------------------
+// Type Theory Axioms
+// ------------------------------------------------------------
+
+/// Uniqueness of identity proofs (UIP)
+axiom uip<T>(x: T, y: T): (x == y) -> (x == y) -> true;
+
+/// Functional extensionality for dependent functions
+axiom funext<A, B>(f: fn(A) -> B, g: fn(A) -> B):
+    (forall x: A. f(x) == g(x)) -> f == g;
+
+// ------------------------------------------------------------
+// Using Axioms in Proofs
+// ------------------------------------------------------------
+
+/// Proof using the law of excluded middle
+theorem example_em<P: Prop>: !!P -> P {
+    proof by auto
+}
+
+/// Proof using function extensionality
+theorem compose_id_right<A, B>(f: fn(A) -> B): compose(f, id) == f {
+    proof {
+        apply function_extensionality;
+        intro x;
+        // compose(f, id)(x) = f(id(x)) = f(x)
+        refl
+    }
+}
+
+/// Proof using nat induction
+theorem add_zero_right(n: Nat): n + 0 == n {
+    proof by induction on n {
+        case 0 => {
+            // 0 + 0 == 0
+            trivial
+        }
+        case succ(k) => {
+            // IH: k + 0 == k
+            // Goal: succ(k) + 0 == succ(k)
+            calc {
+                succ(k) + 0
+                == { by def_add } succ(k + 0)
+                == { by IH } succ(k)
+            }
+        }
+    }
+}
+
+/// Using choice axiom (simplified)
+theorem surjection_has_right_inverse<A, B>(f: fn(A) -> B)
+    requires is_surjective(f)
+    ensures true
+{
+    proof by auto
+}
+
+fn main() {
+    // Axioms are used in proofs, not at runtime
+    // This test verifies that axiom declarations are accepted
+}

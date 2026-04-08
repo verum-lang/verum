@@ -1,0 +1,181 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, async, concurrency, integration, error
+// @timeout: 5000
+// @expected-error: E100
+
+/// Integration test failures: Contracts in Async Code
+/// Demonstrates common errors when combining contracts and concurrency
+
+/// ERROR: Contract not preserved across await
+@verify(proof)
+async fn invariant_broken_await(counter: &mut Int) -> Int {
+    contract#"
+        ensures *counter == old(*counter) + 2;
+    ";
+    *counter += 1;
+    some_async_work().await;  // Another task might modify counter here
+    *counter += 1;  // Assumes counter wasn't changed during await
+    *counter
+}
+
+async fn some_async_work() {}
+
+/// ERROR: Race condition in contract
+@verify(proof)
+async fn racy_update(shared: &AtomicInt) -> Int {
+    contract#"
+        ensures result == old(shared.load()) + 1;
+        ensures shared.load() == old(shared.load()) + 1;  // ERROR: Race!
+    ";
+    let old_val = shared.load();
+    yield_point().await;  // Another task could modify shared here
+    shared.store(old_val + 1);  // Not atomic, could lose updates
+    shared.load()
+}
+
+async fn yield_point() {}
+
+/// ERROR: Deadlock in contract (lock ordering violated)
+@verify(proof)
+async fn potential_deadlock(
+    lock_a: &AsyncMutex<Int>,
+    lock_b: &AsyncMutex<Int>
+) -> Int {
+    contract#"
+        // ERROR: No lock ordering guarantee
+        ensures result >= 0;
+    ";
+    // Task 1 acquires a then b
+    // Task 2 might acquire b then a -> deadlock!
+    let guard_a = lock_a.lock().await;
+    let guard_b = lock_b.lock().await;
+    *guard_a + *guard_b
+}
+
+/// ERROR: Channel contract violated by concurrent access
+@verify(proof)
+async fn channel_race(tx: &Sender<Int>, rx: &Receiver<Int>) -> Int {
+    contract#"
+        ensures result == 42;  // ERROR: Another receiver might get it
+    ";
+    tx.send(42).await;
+    rx.recv().await.unwrap()  // Different receiver might get the message
+}
+
+/// ERROR: Future cancelled mid-contract
+@verify(proof)
+async fn cancellation_unsafe(data: &mut List<Int>) -> Int {
+    contract#"
+        ensures data.len() == old(data.len()) + 2;
+    ";
+    data.push(1);
+    // If cancelled here, contract is violated
+    long_operation().await;  // Could be cancelled
+    data.push(2);  // Never executes if cancelled
+    data.len()
+}
+
+async fn long_operation() {
+    // Simulate long async work
+}
+
+/// ERROR: Atomic ordering too weak
+@verify(proof)
+fn weak_ordering(counter: &AtomicInt, flag: &AtomicBool) -> Int {
+    contract#"
+        ensures flag.load(Ordering.SeqCst) implies result > 0;
+    ";
+    counter.fetch_add(1, Ordering.Relaxed);  // ERROR: Relaxed ordering
+    flag.store(true, Ordering.Relaxed);       // Might be reordered!
+    counter.load(Ordering.Relaxed)
+}
+
+/// ERROR: Select with incomplete contract
+@verify(proof)
+async fn select_incomplete(
+    fast: impl Future<Output = Int>,
+    slow: impl Future<Output = Int>
+) -> Int {
+    contract#"
+        ensures result == fast.await || result == slow.await;  // ERROR: Not valid
+    ";
+    select {
+        val = fast.await => val,
+        val = slow.await => val,
+    }
+    // Contract references .await on already-consumed futures
+}
+
+/// ERROR: Spawn without join verification
+@verify(proof)
+async fn spawn_unverified(value: Int) -> Int {
+    contract#"
+        ensures result == value * 2;
+    ";
+    let handle = spawn {
+        value * 2
+    };
+    // ERROR: Doesn't await handle, returns before spawn completes
+    value
+}
+
+/// ERROR: Mutex guard dropped too early
+@verify(proof)
+async fn early_unlock(mutex: &AsyncMutex<Int>) -> Int {
+    contract#"
+        ensures result == mutex.lock().await.clone();  // ERROR: Different lock acquisition
+    ";
+    let guard = mutex.lock().await;
+    let value = *guard;
+    drop(guard);  // Released lock
+    yield_point().await;  // Another task could modify
+    value  // Stale value
+}
+
+/// ERROR: Async iterator contract with side effects
+@verify(proof)
+async fn sum_with_side_effect(stream: impl AsyncIterator<Item = Int>) -> Int {
+    contract#"
+        ensures result == stream.collect().await.iter().sum();  // ERROR: Consumes stream twice
+    ";
+    let mut sum = 0;
+    while let Some(item) = stream.next().await {
+        sum += item;
+        global_counter.fetch_add(1);  // Side effect not tracked
+    }
+    sum
+}
+
+/// ERROR: Timeout contract doesn't account for clock skew
+@verify(proof)
+async fn timeout_skew(
+    operation: impl Future<Output = Int>,
+    timeout_ms: Int
+) -> Result<Int, TimeoutError> {
+    contract#"
+        ensures match result {
+            Ok(_) => elapsed_time() < timeout_ms,  // ERROR: Clock could drift
+            Err(_) => elapsed_time() >= timeout_ms
+        };
+    ";
+    // System clock might change during operation
+    select {
+        val = operation.await => Ok(val),
+        _ = sleep(timeout_ms).await => Err(TimeoutError),
+    }
+}
+
+/// ERROR: Context propagation failure
+@verify(proof)
+async fn context_not_propagated() using [Logger] {
+    contract#"
+        ensures Logger.messages_logged() > old(Logger.messages_logged());
+    ";
+    spawn {
+        // ERROR: Logger context not propagated to spawned task
+        Logger.log("This might fail");
+    };
+    // Spawned task doesn't have Logger context
+}

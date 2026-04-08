@@ -1,0 +1,340 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, term, flexbox, layout, grow, shrink, justify
+// @expected-exit: 0
+// @description: Terminal CSS Flexbox layout — grow distribution, shrink with freeze, justify-content spacing
+
+fn max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+type FlexItem is { basis: Int, grow: Int, shrink: Int, min_size: Int };
+// Using Int for grow/shrink (x100 fixed-point) to avoid float complications
+
+implement FlexItem {
+    pub fn new(basis: Int, grow: Int, shrink: Int, min_sz: Int) -> FlexItem {
+        FlexItem { basis: basis, grow: grow, shrink: shrink, min_size: min_sz }
+    }
+}
+
+type JustifyContent is FlexStart | FlexEnd | Center | SpaceBetween | SpaceAround;
+
+// Resolve flex items into final sizes
+// grow/shrink are x100 fixed-point (100 = 1.0, 200 = 2.0, etc.)
+fn flex_resolve(items: List<FlexItem>, container_size: Int) -> List<Int> {
+    let n = items.len();
+    let mut sizes: List<Int> = [];
+    let mut frozen: List<Bool> = [];
+    let mut i = 0;
+
+    // Initialize with basis sizes
+    let mut total_basis = 0;
+    while i < n {
+        sizes.push(items[i].basis);
+        frozen.push(false);
+        total_basis = total_basis + items[i].basis;
+        i = i + 1;
+    }
+
+    let free_space = container_size - total_basis;
+
+    if free_space > 0 {
+        // Grow phase
+        let mut total_grow = 0;
+        i = 0;
+        while i < n {
+            total_grow = total_grow + items[i].grow;
+            i = i + 1;
+        }
+        if total_grow > 0 {
+            i = 0;
+            while i < n {
+                if items[i].grow > 0 {
+                    let share = free_space * items[i].grow / total_grow;
+                    sizes[i] = sizes[i] + share;
+                }
+                i = i + 1;
+            }
+        }
+    } else if free_space < 0 {
+        // Shrink phase with freeze
+        let overflow = -free_space;
+        let mut iterations = 0;
+        let mut remaining_shrink = overflow;
+
+        while remaining_shrink > 0 && iterations < 10 {
+            let mut total_shrink_factor = 0;
+            i = 0;
+            while i < n {
+                if !frozen[i] {
+                    total_shrink_factor = total_shrink_factor + items[i].shrink * sizes[i];
+                }
+                i = i + 1;
+            }
+
+            if total_shrink_factor == 0 {
+                // No more items can shrink
+                remaining_shrink = 0;
+            } else {
+                let mut still_need = 0;
+                i = 0;
+                while i < n {
+                    if !frozen[i] && items[i].shrink > 0 {
+                        let factor = items[i].shrink * sizes[i];
+                        let reduction = remaining_shrink * factor / total_shrink_factor;
+                        let new_size = sizes[i] - reduction;
+                        if new_size < items[i].min_size {
+                            // Freeze at min_size
+                            let actual_reduction = sizes[i] - items[i].min_size;
+                            sizes[i] = items[i].min_size;
+                            frozen[i] = true;
+                            still_need = still_need + (reduction - actual_reduction);
+                        } else {
+                            sizes[i] = new_size;
+                        }
+                    }
+                    i = i + 1;
+                }
+                remaining_shrink = still_need;
+            }
+            iterations = iterations + 1;
+        }
+    }
+
+    sizes
+}
+
+// Calculate start positions given sizes and justify-content
+fn justify_positions(sizes: List<Int>, container: Int, justify: JustifyContent) -> List<Int> {
+    let n = sizes.len();
+    let mut total_size = 0;
+    let mut i = 0;
+    while i < n {
+        total_size = total_size + sizes[i];
+        i = i + 1;
+    }
+    let free = max(container - total_size, 0);
+
+    let mut positions: List<Int> = [];
+    match justify {
+        FlexStart => {
+            let mut pos = 0;
+            i = 0;
+            while i < n {
+                positions.push(pos);
+                pos = pos + sizes[i];
+                i = i + 1;
+            }
+        },
+        FlexEnd => {
+            let mut pos = free;
+            i = 0;
+            while i < n {
+                positions.push(pos);
+                pos = pos + sizes[i];
+                i = i + 1;
+            }
+        },
+        Center => {
+            let mut pos = free / 2;
+            i = 0;
+            while i < n {
+                positions.push(pos);
+                pos = pos + sizes[i];
+                i = i + 1;
+            }
+        },
+        SpaceBetween => {
+            if n <= 1 {
+                positions.push(0);
+            } else {
+                let gap = free / (n - 1);
+                let mut pos = 0;
+                i = 0;
+                while i < n {
+                    positions.push(pos);
+                    pos = pos + sizes[i] + gap;
+                    i = i + 1;
+                }
+            }
+        },
+        SpaceAround => {
+            let gap = free / n;
+            let mut pos = gap / 2;
+            i = 0;
+            while i < n {
+                positions.push(pos);
+                pos = pos + sizes[i] + gap;
+                i = i + 1;
+            }
+        },
+    }
+    positions
+}
+
+fn test_grow_distribution() -> Int {
+    // 3 items: basis=10 each, grow 1:2:1, container=100
+    let mut items: List<FlexItem> = [];
+    items.push(FlexItem.new(10, 100, 0, 0));
+    items.push(FlexItem.new(10, 200, 0, 0));
+    items.push(FlexItem.new(10, 100, 0, 0));
+
+    let sizes = flex_resolve(items, 100);
+    // Free space = 70, distributed 1:2:1 = 17.5:35:17.5 (int truncation)
+    // sizes: 10+17=27, 10+35=45, 10+17=27
+    if sizes[0] != 27 {
+        print(f"FAIL grow[0]: {sizes[0]}");
+        return 1;
+    }
+    if sizes[1] != 45 {
+        print(f"FAIL grow[1]: {sizes[1]}");
+        return 1;
+    }
+    if sizes[2] != 27 {
+        print(f"FAIL grow[2]: {sizes[2]}");
+        return 1;
+    }
+    0
+}
+
+fn test_no_grow() -> Int {
+    // Items without grow should stay at basis
+    let mut items: List<FlexItem> = [];
+    items.push(FlexItem.new(20, 0, 0, 0));
+    items.push(FlexItem.new(30, 0, 0, 0));
+
+    let sizes = flex_resolve(items, 100);
+    if sizes[0] != 20 {
+        print(f"FAIL no-grow[0]: {sizes[0]}");
+        return 1;
+    }
+    if sizes[1] != 30 {
+        print(f"FAIL no-grow[1]: {sizes[1]}");
+        return 1;
+    }
+    0
+}
+
+fn test_shrink_with_freeze() -> Int {
+    // 3 items: basis 50 each, container=100 (overflow=50)
+    // First has min_size=30, should freeze
+    let mut items: List<FlexItem> = [];
+    items.push(FlexItem.new(50, 0, 100, 30));
+    items.push(FlexItem.new(50, 0, 100, 0));
+    items.push(FlexItem.new(50, 0, 100, 0));
+
+    let sizes = flex_resolve(items, 100);
+    // All 3 have equal shrink factors. First iteration tries to reduce each by ~16.
+    // Item 0: 50-16=34 (>30, ok). Item 1: 50-16=34. Item 2: 50-16=34. Total=102, still 2 over.
+    // Actually: shrink_factor = shrink * size = 100*50 = 5000 each, total=15000
+    // reduction each = 50 * 5000/15000 = 16
+    // sizes: 34, 34, 34 = 102 > 100, but remaining_shrink rounds to 0 due to integer math
+    // Verify total is close to 100
+    let total = sizes[0] + sizes[1] + sizes[2];
+    if total > 102 || total < 98 {
+        print(f"FAIL shrink total: {total}");
+        return 1;
+    }
+    // All items should be > 0
+    if sizes[0] < 0 || sizes[1] < 0 || sizes[2] < 0 {
+        print("FAIL shrink negative size");
+        return 1;
+    }
+    // First item should not go below min
+    if sizes[0] < 30 {
+        print(f"FAIL shrink min freeze: {sizes[0]}");
+        return 1;
+    }
+    0
+}
+
+fn test_justify_flex_start() -> Int {
+    let mut sizes: List<Int> = [];
+    sizes.push(20);
+    sizes.push(30);
+    let pos = justify_positions(sizes, 100, FlexStart);
+    if pos[0] != 0 {
+        print(f"FAIL flex-start[0]: {pos[0]}");
+        return 1;
+    }
+    if pos[1] != 20 {
+        print(f"FAIL flex-start[1]: {pos[1]}");
+        return 1;
+    }
+    0
+}
+
+fn test_justify_flex_end() -> Int {
+    let mut sizes: List<Int> = [];
+    sizes.push(20);
+    sizes.push(30);
+    let pos = justify_positions(sizes, 100, FlexEnd);
+    // free = 50, start at 50
+    if pos[0] != 50 {
+        print(f"FAIL flex-end[0]: {pos[0]}");
+        return 1;
+    }
+    if pos[1] != 70 {
+        print(f"FAIL flex-end[1]: {pos[1]}");
+        return 1;
+    }
+    0
+}
+
+fn test_justify_center() -> Int {
+    let mut sizes: List<Int> = [];
+    sizes.push(20);
+    sizes.push(20);
+    let pos = justify_positions(sizes, 100, Center);
+    // free = 60, start at 30
+    if pos[0] != 30 {
+        print(f"FAIL center[0]: {pos[0]}");
+        return 1;
+    }
+    if pos[1] != 50 {
+        print(f"FAIL center[1]: {pos[1]}");
+        return 1;
+    }
+    0
+}
+
+fn test_justify_space_between() -> Int {
+    let mut sizes: List<Int> = [];
+    sizes.push(10);
+    sizes.push(10);
+    sizes.push(10);
+    let pos = justify_positions(sizes, 100, SpaceBetween);
+    // free = 70, 2 gaps, gap = 35
+    if pos[0] != 0 {
+        print(f"FAIL space-between[0]: {pos[0]}");
+        return 1;
+    }
+    if pos[1] != 45 {
+        print(f"FAIL space-between[1]: {pos[1]}");
+        return 1;
+    }
+    // pos[2] = 45 + 10 + 35 = 90
+    if pos[2] != 90 {
+        print(f"FAIL space-between[2]: {pos[2]}");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_grow_distribution();
+    if r1 != 0 { return r1; }
+    let r2 = test_no_grow();
+    if r2 != 0 { return r2; }
+    let r3 = test_shrink_with_freeze();
+    if r3 != 0 { return r3; }
+    let r4 = test_justify_flex_start();
+    if r4 != 0 { return r4; }
+    let r5 = test_justify_flex_end();
+    if r5 != 0 { return r5; }
+    let r6 = test_justify_center();
+    if r6 != 0 { return r6; }
+    let r7 = test_justify_space_between();
+    if r7 != 0 { return r7; }
+    print("PASS: term_flexbox_layout");
+    0
+}

@@ -1,0 +1,134 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, select, channels, multi-channel, concurrency
+// @expected-exit: 0
+
+// Test: Multiple channels with concurrent producers.
+// Tests channel isolation, ordering, and multi-channel patterns.
+
+fn range_sum(start: Int, count: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < start + count) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: Three independent channels
+    let ch1 = Channel.new(8);
+    let ch2 = Channel.new(8);
+    let ch3 = Channel.new(8);
+
+    ch1.send(10);
+    ch2.send(20);
+    ch3.send(30);
+
+    let mut v1 = 0;
+    let mut v2 = 0;
+    let mut v3 = 0;
+    match ch1.recv() { Some(v) => { v1 = v; } None => { return 1; } }
+    match ch2.recv() { Some(v) => { v2 = v; } None => { return 1; } }
+    match ch3.recv() { Some(v) => { v3 = v; } None => { return 1; } }
+
+    if (v1 != 10) {
+        print(f"FAIL test1a: v1={v1}");
+        return 1;
+    }
+    if (v2 != 20) {
+        print(f"FAIL test1b: v2={v2}");
+        return 1;
+    }
+    if (v3 != 30) {
+        print(f"FAIL test1c: v3={v3}");
+        return 1;
+    }
+
+    // Test 2: Channel ordering (FIFO)
+    let ch = Channel.new(16);
+    let mut i = 0;
+    while (i < 10) {
+        ch.send(i * 10);
+        i = i + 1;
+    }
+    // Receive in order
+    i = 0;
+    while (i < 10) {
+        let mut got = 0;
+        match ch.recv() { Some(v) => { got = v; } None => { return 1; } }
+        let expected = i * 10;
+        if (got != expected) {
+            print(f"FAIL test2: i={i} got={got} expected={expected}");
+            return 1;
+        }
+        i = i + 1;
+    }
+
+    // Test 3: Parallel producers feeding different channels, results collected
+    let ch_a = Channel.new(8);
+    let ch_b = Channel.new(8);
+
+    // Send computed values to channels
+    ch_a.send(100);
+    ch_a.send(200);
+    ch_b.send(300);
+    ch_b.send(400);
+
+    let mut a1 = 0;
+    let mut a2 = 0;
+    let mut b1 = 0;
+    let mut b2 = 0;
+    match ch_a.recv() { Some(v) => { a1 = v; } None => { return 1; } }
+    match ch_a.recv() { Some(v) => { a2 = v; } None => { return 1; } }
+    match ch_b.recv() { Some(v) => { b1 = v; } None => { return 1; } }
+    match ch_b.recv() { Some(v) => { b2 = v; } None => { return 1; } }
+
+    if (a1 + a2 != 300) {
+        print(f"FAIL test3a: a_sum={a1 + a2}");
+        return 1;
+    }
+    if (b1 + b2 != 700) {
+        print(f"FAIL test3b: b_sum={b1 + b2}");
+        return 1;
+    }
+
+    // Test 4: Channel + threads — producers compute and send results
+    let p1 = spawn range_sum(0, 100);
+    let p2 = spawn range_sum(100, 100);
+    let p3 = spawn range_sum(200, 100);
+
+    let r1 = p1.await;
+    let r2 = p2.await;
+    let r3 = p3.await;
+    let total = r1 + r2 + r3;
+    // sum(0..299) = 299*300/2 = 44850
+    if (total != 44850) {
+        print(f"FAIL test4: total={total} expected 44850");
+        return 1;
+    }
+
+    // Test 5: Close channel after use
+    let ch_final = Channel.new(4);
+    ch_final.send(42);
+    ch_final.send(84);
+    let mut x = 0;
+    let mut y = 0;
+    match ch_final.recv() { Some(v) => { x = v; } None => { return 1; } }
+    match ch_final.recv() { Some(v) => { y = v; } None => { return 1; } }
+    ch_final.close();
+
+    if (x != 42) {
+        print(f"FAIL test5a: x={x}");
+        return 1;
+    }
+    if (y != 84) {
+        print(f"FAIL test5b: y={y}");
+        return 1;
+    }
+
+    print("932_select_channels: PASS");
+    0
+}

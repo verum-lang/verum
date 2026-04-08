@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, params, error
+// @description: Test detection of fn keyword used as parameter type without proper syntax
+// @expected-error: E018
+
+// fn keyword requires proper function type syntax
+type Callback is fn(fn) -> Int;

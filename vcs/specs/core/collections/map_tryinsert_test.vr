@@ -1,0 +1,183 @@
+// =============================================================================
+// map_tryinsert_test.vr - Tests for Map try_insert and contains_value
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, map, try_insert, contains_value, core
+// @description: Tests for Map try_insert and contains_value methods
+// =============================================================================
+
+mount core.collections.map.Map;
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: try_insert - basic
+// =============================================================================
+
+@test
+fn test_try_insert_vacant() {
+    let mut m: Map<Text, Int> = Map.new();
+    let result = m.try_insert("a", 1);
+    assert(result.is_ok());
+    assert_eq(m.len(), 1);
+    assert_eq(*m.get(&"a").unwrap(), 1);
+}
+
+@test
+fn test_try_insert_occupied() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    let result = m.try_insert("a", 2);
+    assert(result.is_err());
+    // Original value should be unchanged
+    assert_eq(*m.get(&"a").unwrap(), 1);
+}
+
+@test
+fn test_try_insert_multiple_vacant() {
+    let mut m: Map<Text, Int> = Map.new();
+    assert(m.try_insert("a", 1).is_ok());
+    assert(m.try_insert("b", 2).is_ok());
+    assert(m.try_insert("c", 3).is_ok());
+    assert_eq(m.len(), 3);
+}
+
+@test
+fn test_try_insert_err_returns_value() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    match m.try_insert("a", 99) {
+        Err(val) => assert_eq(val, 99),
+        Ok(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_insert_then_get() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.try_insert(1, 10);
+    m.try_insert(2, 20);
+    m.try_insert(3, 30);
+    assert_eq(*m.get(&1).unwrap(), 10);
+    assert_eq(*m.get(&2).unwrap(), 20);
+    assert_eq(*m.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_try_insert_empty_map() {
+    let mut m: Map<Int, Text> = Map.new();
+    assert(m.try_insert(1, "hello").is_ok());
+    assert_eq(m.len(), 1);
+}
+
+// =============================================================================
+// Section 2: contains_value
+// =============================================================================
+
+@test
+fn test_contains_value_present() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 42);
+    m.insert("b", 99);
+    assert(m.contains_value(&42));
+    assert(m.contains_value(&99));
+}
+
+@test
+fn test_contains_value_absent() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 42);
+    assert(!m.contains_value(&0));
+    assert(!m.contains_value(&100));
+}
+
+@test
+fn test_contains_value_empty_map() {
+    let m: Map<Text, Int> = Map.new();
+    assert(!m.contains_value(&1));
+}
+
+@test
+fn test_contains_value_after_remove() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 42);
+    assert(m.contains_value(&42));
+    m.remove(&"a");
+    assert(!m.contains_value(&42));
+}
+
+@test
+fn test_contains_value_duplicates() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 42);
+    m.insert("b", 42);
+    assert(m.contains_value(&42));
+    m.remove(&"a");
+    assert(m.contains_value(&42));  // Still present via "b"
+    m.remove(&"b");
+    assert(!m.contains_value(&42));
+}
+
+@test
+fn test_contains_value_text() {
+    let mut m: Map<Int, Text> = Map.new();
+    m.insert(1, "hello");
+    m.insert(2, "world");
+    assert(m.contains_value(&"hello"));
+    assert(m.contains_value(&"world"));
+    assert(!m.contains_value(&"foo"));
+}
+
+// =============================================================================
+// Section 3: try_insert combined with other operations
+// =============================================================================
+
+@test
+fn test_try_insert_after_remove() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.remove(&"a");
+    // Now "a" is vacant again
+    assert(m.try_insert("a", 2).is_ok());
+    assert_eq(*m.get(&"a").unwrap(), 2);
+}
+
+@test
+fn test_try_insert_many() {
+    let mut m: Map<Int, Int> = Map.new();
+    let mut successes = 0;
+    for i in range(0, 50) {
+        if m.try_insert(i, i * 10).is_ok() {
+            successes = successes + 1;
+        }
+    }
+    assert_eq(successes, 50);
+    assert_eq(m.len(), 50);
+}
+
+@test
+fn test_try_insert_all_occupied() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in range(0, 10) {
+        m.insert(i, i);
+    }
+    let mut failures = 0;
+    for i in range(0, 10) {
+        if m.try_insert(i, i * 100).is_err() {
+            failures = failures + 1;
+        }
+    }
+    assert_eq(failures, 10);
+    // Original values should be preserved
+    assert_eq(*m.get(&0).unwrap(), 0);
+    assert_eq(*m.get(&9).unwrap(), 9);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

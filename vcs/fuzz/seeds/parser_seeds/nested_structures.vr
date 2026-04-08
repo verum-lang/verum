@@ -1,0 +1,322 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: parser, nesting, stress-test
+// @timeout: 10000
+// @expect: pass
+
+// =============================================================================
+// Nested Structures - Parser Nesting Stress Test Seed
+// Tests deeply nested structures for parser robustness
+// =============================================================================
+
+// Deeply nested modules
+module Level1 {
+    module Level2 {
+        module Level3 {
+            module Level4 {
+                module Level5 {
+                    fn deeply_nested() -> Int { 42 }
+                }
+            }
+        }
+    }
+}
+
+// Deeply nested types
+type Nested1<A> is {
+    inner: Nested2<A>,
+};
+
+type Nested2<A> is {
+    inner: Nested3<A>,
+};
+
+type Nested3<A> is {
+    inner: Nested4<A>,
+};
+
+type Nested4<A> is {
+    value: A,
+};
+
+// Deeply nested generics
+type DeepGeneric<A, B, C, D, E> is {
+    field: Map<A, Map<B, Map<C, Map<D, List<E>>>>>,
+};
+
+// Recursive type
+type RecursiveTree<T> is
+    | Leaf(T)
+    | Branch {
+        left: Heap<RecursiveTree<T>>,
+        right: Heap<RecursiveTree<T>>,
+    };
+
+// Mutual recursion
+type Even is Zero | SuccE(Heap<Odd>);
+type Odd is SuccO(Heap<Even>);
+
+// Complex variant nesting
+type ComplexVariant<T, E> is
+    | Simple(T)
+    | Wrapped(Result<T, E>)
+    | Nested(Result<Result<T, E>, E>)
+    | Deep(Result<Result<Result<T, E>, E>, E>);
+
+fn deeply_nested_expressions() {
+    // Nested arithmetic
+    let math = ((((1 + 2) * 3) - 4) / 5) % 6;
+
+    // Nested function calls
+    let calls = f(g(h(i(j(k(x))))));
+
+    // Nested method chains
+    let chain = obj
+        .method1()
+        .method2()
+        .method3()
+        .method4()
+        .method5();
+
+    // Nested blocks
+    let blocks = {
+        let a = {
+            let b = {
+                let c = {
+                    let d = {
+                        42
+                    };
+                    d
+                };
+                c
+            };
+            b
+        };
+        a
+    };
+
+    // Nested if expressions
+    let ifs = if a {
+        if b {
+            if c {
+                if d {
+                    if e {
+                        1
+                    } else {
+                        2
+                    }
+                } else {
+                    3
+                }
+            } else {
+                4
+            }
+        } else {
+            5
+        }
+    } else {
+        6
+    };
+
+    // Nested match expressions
+    let matches = match a {
+        Some(x) => match b {
+            Some(y) => match c {
+                Some(z) => x + y + z,
+                None => x + y,
+            },
+            None => x,
+        },
+        None => 0,
+    };
+
+    // Nested closures
+    let closures = |a| |b| |c| |d| |e| a + b + c + d + e;
+
+    // Nested try expressions
+    let tries = try {
+        try {
+            try {
+                fallible1()?;
+                fallible2()?;
+                fallible3()?
+            }
+        }
+    };
+
+    // Nested loops
+    for a in items_a {
+        for b in items_b {
+            for c in items_c {
+                for d in items_d {
+                    process(a, b, c, d);
+                }
+            }
+        }
+    }
+
+    // Nested comprehensions
+    let comp = [[[z for z in zs] for y in ys] for x in xs];
+
+    // Nested arrays
+    let arrays = [[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]];
+
+    // Nested tuples
+    let tuples = ((((1, 2), (3, 4)), ((5, 6), (7, 8))));
+
+    // Nested records
+    let records = Outer {
+        mid: Middle {
+            inner: Inner {
+                value: 42,
+            },
+        },
+    };
+
+    // Mixed nesting
+    let mixed = Some(Ok([
+        Point { x: 1, y: 2 },
+        Point { x: 3, y: 4 },
+    ]));
+}
+
+fn deeply_nested_patterns() {
+    match complex {
+        // Deep destructuring
+        Outer {
+            mid: Middle {
+                inner: Inner {
+                    value: (a, b, (c, d)),
+                },
+            },
+        } => use(a, b, c, d),
+
+        // Nested variants with guards
+        Some(Ok([first, second, ..rest])) if first > 0 && second > 0 => {
+            process(first, second, rest)
+        },
+
+        // Complex or-patterns
+        A { x: 1 | 2 | 3, y: Some(v) | None } => use(x, v),
+
+        // Binding with nested patterns
+        all @ Some(inner @ Ok(value @ [first, ..])) => {
+            use(all, inner, value, first)
+        },
+
+        _ => default,
+    }
+}
+
+fn deeply_nested_types() {
+    // Nested function types
+    let f: fn(fn(fn(Int) -> Int) -> fn(Int) -> Int) -> Int;
+
+    // Nested generic types
+    let g: Map<Text, List<Set<Maybe<Result<Int, Error>>>>>;
+
+    // Nested tuple types
+    let t: ((((Int, Int), Int), Int), Int);
+
+    // Nested array types
+    let a: [[[Int; 2]; 3]; 4];
+
+    // Nested reference types
+    let r: &mut &checked &Int;
+
+    // Nested pointer types
+    let p: *const *mut *const Int;
+}
+
+fn deeply_nested_async() {
+    async fn nested_async() {
+        let a = async {
+            let b = async {
+                let c = async {
+                    42
+                };
+                c.await
+            };
+            b.await
+        };
+        a.await
+    }
+
+    async fn spawn_chain() {
+        let t1 = spawn async {
+            let t2 = spawn async {
+                let t3 = spawn async {
+                    42
+                };
+                t3.await
+            };
+            t2.await
+        };
+        t1.await
+    }
+}
+
+fn deeply_nested_contexts() using [A, B, C, D, E] {
+    provide A = make_a() {
+        provide B = make_b() {
+            provide C = make_c() {
+                provide D = make_d() {
+                    provide E = make_e() {
+                        use_all_contexts();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Deeply nested protocol implementation
+type DeepProtocol<A, B, C, D> is protocol
+    where type A: Clone + Debug
+    where type B: Hash + Eq
+    where type C: Default
+    where type D: Send + Sync
+{
+    type Output<E> where type E: Clone;
+
+    fn complex<E, F, G>(
+        &self,
+        a: A,
+        b: B,
+        c: C,
+        d: D,
+        e: E,
+        f: F,
+        g: G,
+    ) -> Self.Output<E>
+    where type E: Clone
+    where type F: Debug
+    where type G: Default;
+};
+
+implement<A, B, C, D> DeepProtocol<A, B, C, D> for Nested1<A>
+where type A: Clone + Debug
+where type B: Hash + Eq
+where type C: Default
+where type D: Send + Sync
+{
+    type Output<E> = Result<E, Error> where type E: Clone;
+
+    fn complex<E, F, G>(
+        &self,
+        a: A,
+        b: B,
+        c: C,
+        d: D,
+        e: E,
+        f: F,
+        g: G,
+    ) -> Self.Output<E>
+    where type E: Clone
+    where type F: Debug
+    where type G: Default
+    {
+        Ok(e)
+    }
+}

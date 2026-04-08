@@ -1,0 +1,138 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, data-types, union, memory
+// @timeout: 10000
+// @description: Tests C-compatible union types for FFI
+
+type c_int is i32;
+type c_float is f32;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+
+/// Verum representation of C unions using sum types
+/// C union { int i; float f; } -> Verum sum type
+type IntOrFloat is
+    | IntVal(c_int)
+    | FloatVal(c_float);
+
+implement IntOrFloat {
+    fn from_int(i: c_int) -> IntOrFloat { IntOrFloat.IntVal(i) }
+    fn from_float(f: c_float) -> IntOrFloat { IntOrFloat.FloatVal(f) }
+
+    fn as_int(&self) -> Maybe<c_int> {
+        match self {
+            IntOrFloat.IntVal(i) => Some(*i),
+            _ => None,
+        }
+    }
+}
+
+/// Multi-type buffer (like C union with multiple members)
+type DataBuffer is
+    | Bytes([u8; 8])
+    | Shorts([u16; 4])
+    | Ints([u32; 2])
+    | LongVal(u64);
+
+/// Variant type for dynamic data
+type Variant is
+    | IntVariant(c_int)
+    | FloatVariant(c_float)
+    | StringVariant(Text)
+    | PtrVariant(*mut c_void);
+
+/// Event union (like X11 XEvent)
+type KeyEvent is { keycode: c_int, modifiers: c_int };
+type MouseEvent is { x: c_int, y: c_int, button: c_int };
+type ResizeEvent is { width: c_int, height: c_int };
+
+type Event is
+    | Key(KeyEvent)
+    | Mouse(MouseEvent)
+    | Resize(ResizeEvent);
+
+implement Event {
+    fn is_key_event(&self) -> Bool {
+        match self {
+            Event.Key(_) => true,
+            _ => false,
+        }
+    }
+
+    fn is_mouse_event(&self) -> Bool {
+        match self {
+            Event.Mouse(_) => true,
+            _ => false,
+        }
+    }
+}
+
+/// IEEE 754 float inspection
+type FloatBits is { raw: u32 };
+
+implement FloatBits {
+    fn from_f32(f: f32) -> FloatBits {
+        FloatBits { raw: unsafe { *((&f) as *const f32 as *const u32) } }
+    }
+
+    fn sign(&self) -> Bool { (self.raw >> 31) != 0 }
+    fn exponent(&self) -> u32 { (self.raw >> 23) & 0xFF }
+    fn mantissa(&self) -> u32 { self.raw & 0x7FFFFF }
+    fn is_nan(&self) -> Bool { self.exponent() == 0xFF && self.mantissa() != 0 }
+    fn is_infinity(&self) -> Bool { self.exponent() == 0xFF && self.mantissa() == 0 }
+}
+
+/// Endian conversion
+type EndianU32 is { raw: [u8; 4] };
+
+implement EndianU32 {
+    fn from_be(value: u32) -> EndianU32 {
+        EndianU32 {
+            raw: [
+                ((value >> 24) & 0xFF) as u8,
+                ((value >> 16) & 0xFF) as u8,
+                ((value >> 8) & 0xFF) as u8,
+                (value & 0xFF) as u8,
+            ]
+        }
+    }
+
+    fn to_u32(&self) -> u32 {
+        ((self.raw[0] as u32) << 24) |
+        ((self.raw[1] as u32) << 16) |
+        ((self.raw[2] as u32) << 8) |
+        (self.raw[3] as u32)
+    }
+}
+
+/// Tagged union for safe C interop
+type TaggedUnion is {
+    tag: c_int,
+    data: [u8; 8],  // Raw storage
+};
+
+fn main() {
+    // Test IntOrFloat
+    let u: IntOrFloat = IntVal(42);
+    let val = match u {
+        IntOrFloat.IntVal(i) => Some(i),
+        _ => None,
+    };
+
+    // Test Event
+    let event = Event.Key(KeyEvent { keycode: 65, modifiers: 0 });
+    assert(event.is_key_event());
+    assert(!event.is_mouse_event());
+
+    // Test FloatBits
+    let bits = FloatBits.from_f32(1.0);
+    assert(!bits.is_nan());
+    assert(!bits.is_infinity());
+
+    // Test endian conversion
+    let be = EndianU32.from_be(0x12345678);
+    assert(be.raw[0] == 0x12);
+    assert(be.to_u32() == 0x12345678);
+}

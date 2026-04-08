@@ -1,0 +1,483 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: memory, cbgr, differential
+// @expected-stdout: 42
+
+/// Differential test for memory operations and CBGR behavior
+/// Tests that memory allocation, deallocation, references, and CBGR
+/// produce identical results across Tier 0 (interpreter) and
+/// Tier 3 (AOT) compilation.
+
+// =============================================================================
+// Section 1: Basic Heap Allocation
+// =============================================================================
+
+/// Test basic heap allocation with Box
+fn test_box_allocation() -> Int {
+    let boxed = Heap.new(42);
+    *boxed
+}
+
+/// Test nested box allocation
+fn test_nested_box() -> Int {
+    let outer = Heap.new(Heap.new(42));
+    **outer
+}
+
+/// Test box with complex types
+fn test_box_complex() -> (Int, Text) {
+    let boxed = Heap.new((42, "hello"));
+    *boxed
+}
+
+// =============================================================================
+// Section 2: Shared References
+// =============================================================================
+
+/// Test shared reference counting
+fn test_shared_basic() -> Int {
+    let shared = Shared.new(42);
+    let clone1 = shared.clone();
+    let clone2 = shared.clone();
+    *shared + *clone1 + *clone2  // Should be 126
+}
+
+/// Test shared mutation
+fn test_shared_mutation() -> Int {
+    let shared = Shared.new(0);
+    {
+        let mut borrow = shared.borrow_mut();
+        *borrow = 42;
+    }
+    *shared
+}
+
+/// Test shared with drop
+fn test_shared_drop() -> Int {
+    let shared = Shared.new(42);
+    {
+        let _temp = shared.clone();
+        // _temp drops here
+    }
+    *shared
+}
+
+// =============================================================================
+// Section 3: CBGR Three-Tier References
+// =============================================================================
+
+/// Test Tier 0 managed references
+fn test_tier0_ref() -> Int {
+    let value = 42;
+    let r: &Int = &value;  // Tier 0: managed reference (~15ns overhead)
+    *r
+}
+
+/// Test Tier 1 checked references
+fn test_tier1_ref() -> Int {
+    let value = 42;
+    // Tier 1: compiler-proven safe (escape analysis)
+    let r: &checked Int = &checked value;
+    *r
+}
+
+/// Test reference lifetime within scope
+fn test_ref_scope() -> Int {
+    let mut result = 0;
+    {
+        let value = 42;
+        let r = &value;
+        result = *r;
+        // r is valid only within this scope
+    }
+    result
+}
+
+// =============================================================================
+// Section 4: Generation Tracking (CBGR)
+// =============================================================================
+
+/// Test generation counter behavior
+fn test_generation() -> Int {
+    let mut list = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+
+    // Get reference to element
+    let r = &list[0];
+    let value = *r;
+
+    // After modification, old references would be invalid
+    // But we read before mutation
+    value
+}
+
+/// Test epoch boundary behavior
+fn test_epoch() -> Int {
+    let shared = Shared.new(List.new());
+
+    {
+        let mut borrow = shared.borrow_mut();
+        borrow.push(42);
+    }
+
+    let borrow = shared.borrow();
+    borrow[0]
+}
+
+// =============================================================================
+// Section 5: Memory Layouts
+// =============================================================================
+
+/// Test ThinRef layout (16 bytes: ptr + generation + epoch_caps)
+fn test_thin_ref() -> Int {
+    let value = 42;
+    let thin: &Int = &value;
+    *thin
+}
+
+/// Test FatRef layout (24 bytes: ptr + generation + epoch_caps + len)
+fn test_fat_ref() -> Int {
+    let arr = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &arr;
+    slice.len()
+}
+
+// =============================================================================
+// Section 6: List Operations (Dynamic Memory)
+// =============================================================================
+
+/// Test list push and grow
+fn test_list_grow() -> Int {
+    let mut list = List.new();
+    for i in 0..100 {
+        list.push(i);
+    }
+    list.len()
+}
+
+/// Test list pop
+fn test_list_pop() -> Maybe<Int> {
+    let mut list = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(42);
+    list.pop()
+}
+
+/// Test list clear
+fn test_list_clear() -> Int {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    list.clear();
+    list.len()
+}
+
+/// Test list capacity reallocation
+fn test_list_realloc() -> Int {
+    let mut list = List.with_capacity(4);
+    for i in 0..100 {
+        list.push(i);
+    }
+    list[99]
+}
+
+// =============================================================================
+// Section 7: Map Operations (Hash Table Memory)
+// =============================================================================
+
+/// Test map insertion
+fn test_map_insert() -> Int {
+    let mut map = Map.new();
+    map.insert("a", 1);
+    map.insert("b", 2);
+    map.insert("c", 3);
+    map.len()
+}
+
+/// Test map removal
+fn test_map_remove() -> Maybe<Int> {
+    let mut map = Map.new();
+    map.insert("key", 42);
+    map.remove("key")
+}
+
+/// Test map growth
+fn test_map_grow() -> Int {
+    let mut map = Map.new();
+    for i in 0..100 {
+        map.insert(format("key_{}", i), i);
+    }
+    map.len()
+}
+
+// =============================================================================
+// Section 8: Set Operations
+// =============================================================================
+
+/// Test set operations
+fn test_set() -> Int {
+    let mut set = Set.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    set.insert(2);  // Duplicate - should not increase size
+    set.len()  // Should be 3
+}
+
+// =============================================================================
+// Section 9: String/Text Memory
+// =============================================================================
+
+/// Test text concatenation (may cause allocation)
+fn test_text_concat() -> Text {
+    let a = "Hello, ";
+    let b = "World!";
+    a + b
+}
+
+/// Test text from repeated allocation
+fn test_text_repeat() -> Int {
+    let mut text = "";
+    for i in 0..100 {
+        text = text + "x";
+    }
+    text.len()
+}
+
+/// Test text slicing
+fn test_text_slice() -> Text {
+    let text = "Hello, World!";
+    text[0..5]  // "Hello"
+}
+
+// =============================================================================
+// Section 10: Drop and Cleanup
+// =============================================================================
+
+/// Custom drop tracking
+type Tracked is {
+    value: Int,
+};
+
+implement Drop for Tracked {
+    fn drop(&mut self) {
+        // In real code, this might log or release resources
+    }
+}
+
+/// Test drop order
+fn test_drop_order() -> Int {
+    let _a = Tracked { value: 1 };
+    let _b = Tracked { value: 2 };
+    let _c = Tracked { value: 3 };
+    // Drop order should be: c, b, a (LIFO)
+    42
+}
+
+/// Test early drop
+fn test_early_drop() -> Int {
+    let a = Tracked { value: 1 };
+    drop(a);  // Explicit early drop
+    42
+}
+
+// =============================================================================
+// Section 11: Memory Alignment
+// =============================================================================
+
+/// Test various type alignments
+fn test_alignment() -> Int {
+    let byte: Int8 = 1;
+    let short: Int16 = 2;
+    let int: Int32 = 3;
+    let long: Int64 = 4;
+    let float32: Float32 = 1.0;
+    let float64: Float64 = 2.0;
+
+    // All should be properly aligned
+    byte as Int + short as Int + int as Int + long as Int
+}
+
+// =============================================================================
+// Section 12: Edge Cases
+// =============================================================================
+
+/// Test empty collections
+fn test_empty_collections() -> Int {
+    let list: List<Int> = List.new();
+    let map: Map<Text, Int> = Map.new();
+    let set: Set<Int> = Set.new();
+
+    list.len() + map.len() + set.len()  // Should be 0
+}
+
+/// Test large allocation
+fn test_large_allocation() -> Int {
+    let mut large = List.with_capacity(10000);
+    for i in 0..10000 {
+        large.push(i);
+    }
+    large[9999]
+}
+
+/// Test deep nesting
+fn test_deep_nesting() -> Int {
+    let v = Heap.new(Heap.new(Heap.new(Heap.new(Heap.new(42)))));
+    *****v
+}
+
+/// Test reference chain
+fn test_ref_chain() -> Int {
+    let a = 42;
+    let b = &a;
+    let c = b;  // Copy the reference
+    *c
+}
+
+// =============================================================================
+// Section 13: CBGR Safety Checks
+// =============================================================================
+
+/// Test that generation invalidation works
+fn test_generation_safety() -> Int {
+    let mut list = List.new();
+    list.push(42);
+
+    // Safe: read value before mutation
+    let value = list[0];
+
+    // Mutation would invalidate any outstanding references
+    list.push(100);
+
+    value
+}
+
+/// Test borrow checker integration
+fn test_borrow_checker() -> Int {
+    let mut value = 42;
+
+    {
+        let r = &value;
+        // value cannot be mutated while r exists
+        let result = *r;
+        result
+    }
+    // After r drops, mutation is allowed
+    // value = 100;  // Would be valid here
+}
+
+// =============================================================================
+// Section 14: Memory-Mapped Structures
+// =============================================================================
+
+/// Test struct with pointers
+type Node is {
+    value: Int,
+    next: Maybe<Heap<Node>>,
+};
+
+/// Build a simple linked list
+fn test_linked_list() -> Int {
+    let node3 = Heap.new(Node { value: 3, next: None });
+    let node2 = Heap.new(Node { value: 2, next: Some(node3) });
+    let node1 = Heap.new(Node { value: 1, next: Some(node2) });
+
+    // Walk the list and sum values
+    let mut sum = 0;
+    let mut current = Some(node1);
+
+    while let Some(node) = current {
+        sum = sum + node.value;
+        current = node.next.clone();
+    }
+
+    sum  // Should be 6
+}
+
+// =============================================================================
+// Main Function - Execute all tests
+// =============================================================================
+
+fn main() {
+    // Basic heap allocation
+    print("=== Heap Allocation ===");
+    print(test_box_allocation());        // 42
+    print(test_nested_box());            // 42
+    print(test_box_complex());           // (42, "hello")
+
+    // Shared references
+    print("\n=== Shared References ===");
+    print(test_shared_basic());          // 126
+    print(test_shared_mutation());       // 42
+    print(test_shared_drop());           // 42
+
+    // CBGR references
+    print("\n=== CBGR References ===");
+    print(test_tier0_ref());             // 42
+    print(test_tier1_ref());             // 42
+    print(test_ref_scope());             // 42
+
+    // Generation and epoch
+    print("\n=== Generation Tracking ===");
+    print(test_generation());            // 1
+    print(test_epoch());                 // 42
+
+    // Memory layouts
+    print("\n=== Memory Layouts ===");
+    print(test_thin_ref());              // 42
+    print(test_fat_ref());               // 5
+
+    // List operations
+    print("\n=== List Operations ===");
+    print(test_list_grow());             // 100
+    print(test_list_pop());              // Some(42)
+    print(test_list_clear());            // 0
+    print(test_list_realloc());          // 99
+
+    // Map operations
+    print("\n=== Map Operations ===");
+    print(test_map_insert());            // 3
+    print(test_map_remove());            // Some(42)
+    print(test_map_grow());              // 100
+
+    // Set operations
+    print("\n=== Set Operations ===");
+    print(test_set());                   // 3
+
+    // Text memory
+    print("\n=== Text Memory ===");
+    print(test_text_concat());           // "Hello, World!"
+    print(test_text_repeat());           // 100
+    print(test_text_slice());            // "Hello"
+
+    // Drop behavior
+    print("\n=== Drop Behavior ===");
+    print(test_drop_order());            // 42
+    print(test_early_drop());            // 42
+
+    // Alignment
+    print("\n=== Alignment ===");
+    print(test_alignment());             // 10
+
+    // Edge cases
+    print("\n=== Edge Cases ===");
+    print(test_empty_collections());     // 0
+    print(test_large_allocation());      // 9999
+    print(test_deep_nesting());          // 42
+    print(test_ref_chain());             // 42
+
+    // CBGR safety
+    print("\n=== CBGR Safety ===");
+    print(test_generation_safety());     // 42
+    print(test_borrow_checker());        // 42
+
+    // Linked structures
+    print("\n=== Linked Structures ===");
+    print(test_linked_list());           // 6
+
+    // Final output for differential comparison
+    print("\n=== Final Result ===");
+    print(42);
+}

@@ -1,0 +1,49 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, runtime, context, error
+// @description: Test that config functions require MetaRuntime context
+// @expected-error: requires
+
+// =============================================================================
+// CONFIG MISSING CONTEXT TESTS
+// =============================================================================
+
+// recursion_limit requires MetaRuntime context
+meta fn test_recursion_limit_no_context() -> Int {
+    recursion_limit()  // ERROR: requires MetaRuntime context
+}
+
+// iteration_limit requires MetaRuntime context
+meta fn test_iteration_limit_no_context() -> Int {
+    iteration_limit()  // ERROR: requires MetaRuntime context
+}
+
+// memory_limit requires MetaRuntime context
+meta fn test_memory_limit_no_context() -> Int {
+    memory_limit()  // ERROR: requires MetaRuntime context
+}
+
+// timeout_ms requires MetaRuntime context
+meta fn test_timeout_ms_no_context() -> Int {
+    timeout_ms()  // ERROR: requires MetaRuntime context
+}
+
+// config_get requires MetaRuntime context
+meta fn test_config_get_no_context() -> Maybe<Text> {
+    config_get("key")  // ERROR: requires MetaRuntime context
+}
+
+// config_get_int requires MetaRuntime context
+meta fn test_config_get_int_no_context() -> Maybe<Int> {
+    config_get_int("key")  // ERROR: requires MetaRuntime context
+}
+
+// config_get_bool requires MetaRuntime context
+meta fn test_config_get_bool_no_context() -> Maybe<Bool> {
+    config_get_bool("key")  // ERROR: requires MetaRuntime context
+}
+
+fn main() {
+    @const assert(test_recursion_limit_no_context() > 0);
+}

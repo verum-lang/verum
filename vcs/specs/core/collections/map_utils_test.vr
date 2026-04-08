@@ -1,0 +1,225 @@
+// =============================================================================
+// map_utils_test.vr - Tests for Map filter_map and get_or_default
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, collections, map, filter_map, get_or_default
+// @description: Tests for Map.filter_map and Map.get_or_default methods.
+//
+// Coverage:
+// - get_or_default: present key, missing key, empty map, various defaults
+// - filter_map: keep all, keep none, partial, transformation, empty
+// =============================================================================
+
+module specs.core.collections.map_utils_test;
+
+mount core.base.protocols.{Eq, Clone, Hash};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.map.Map;
+
+// =============================================================================
+// Section 1: get_or_default
+// =============================================================================
+
+@test
+fn test_get_or_default_present() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    let val = m.get_or_default(&1, 0);
+    assert_eq(val, 100);
+}
+
+@test
+fn test_get_or_default_missing() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    let val = m.get_or_default(&99, 42);
+    assert_eq(val, 42);
+}
+
+@test
+fn test_get_or_default_empty_map() {
+    let m: Map<Int, Int> = Map.new();
+    let val = m.get_or_default(&1, -1);
+    assert_eq(val, -1);
+}
+
+@test
+fn test_get_or_default_zero_default() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(5, 50);
+    let val = m.get_or_default(&10, 0);
+    assert_eq(val, 0);
+}
+
+@test
+fn test_get_or_default_text_values() {
+    let mut m: Map<Text, Text> = Map.new();
+    m.insert("key", "value");
+    assert_eq(m.get_or_default(&"key", "default"), "value");
+    assert_eq(m.get_or_default(&"missing", "default"), "default");
+}
+
+@test
+fn test_get_or_default_doesnt_insert() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    let _ = m.get_or_default(&2, 20);
+    // Should NOT insert the default
+    assert_eq(m.len(), 1);
+    assert(!m.contains_key(&2));
+}
+
+@test
+fn test_get_or_default_multiple_calls() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    assert_eq(m.get_or_default(&1, 0), 100);
+    assert_eq(m.get_or_default(&1, 999), 100);
+    assert_eq(m.get_or_default(&2, 0), 0);
+    assert_eq(m.get_or_default(&2, 42), 42);
+}
+
+// =============================================================================
+// Section 2: filter_map
+// =============================================================================
+
+fn double_if_over_10(k: &Int, v: &Int) -> Maybe<Int> {
+    if *v > 10 {
+        Some(*v * 2)
+    } else {
+        None
+    }
+}
+
+fn always_some(k: &Int, v: &Int) -> Maybe<Int> {
+    Some(*v + 1)
+}
+
+fn always_none(k: &Int, v: &Int) -> Maybe<Int> {
+    None
+}
+
+fn even_keys_only(k: &Int, v: &Int) -> Maybe<Int> {
+    if *k % 2 == 0 {
+        Some(*v)
+    } else {
+        None
+    }
+}
+
+fn square_value(k: &Int, v: &Int) -> Maybe<Int> {
+    Some(*v * *v)
+}
+
+@test
+fn test_filter_map_basic() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 5);
+    m.insert(2, 15);
+    m.insert(3, 25);
+    let result = m.filter_map(double_if_over_10);
+    assert_eq(result.len(), 2);
+    assert_eq(*result.get(&2).unwrap(), 30);
+    assert_eq(*result.get(&3).unwrap(), 50);
+    assert(result.get(&1).is_none());
+}
+
+@test
+fn test_filter_map_keep_all() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let result = m.filter_map(always_some);
+    assert_eq(result.len(), 2);
+    assert_eq(*result.get(&1).unwrap(), 11);
+    assert_eq(*result.get(&2).unwrap(), 21);
+}
+
+@test
+fn test_filter_map_keep_none() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let result = m.filter_map(always_none);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_filter_map_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let result = m.filter_map(always_some);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_filter_map_by_key() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+    m.insert(4, 400);
+    let result = m.filter_map(even_keys_only);
+    assert_eq(result.len(), 2);
+    assert_eq(*result.get(&2).unwrap(), 200);
+    assert_eq(*result.get(&4).unwrap(), 400);
+}
+
+@test
+fn test_filter_map_transform() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 3);
+    m.insert(2, 4);
+    m.insert(3, 5);
+    let result = m.filter_map(square_value);
+    assert_eq(result.len(), 3);
+    assert_eq(*result.get(&1).unwrap(), 9);
+    assert_eq(*result.get(&2).unwrap(), 16);
+    assert_eq(*result.get(&3).unwrap(), 25);
+}
+
+@test
+fn test_filter_map_single() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    let result = m.filter_map(double_if_over_10);
+    assert_eq(result.len(), 1);
+    assert_eq(*result.get(&1).unwrap(), 200);
+}
+
+@test
+fn test_filter_map_preserves_original() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 5);
+    m.insert(2, 15);
+    let _ = m.filter_map(double_if_over_10);
+    // Original map unchanged
+    assert_eq(m.len(), 2);
+    assert_eq(*m.get(&1).unwrap(), 5);
+    assert_eq(*m.get(&2).unwrap(), 15);
+}
+
+// =============================================================================
+// Section 3: Integration
+// =============================================================================
+
+@test
+fn test_get_or_default_on_filter_map_result() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 5);
+    m.insert(2, 15);
+    m.insert(3, 25);
+    let filtered = m.filter_map(double_if_over_10);
+    assert_eq(filtered.get_or_default(&2, 0), 30);
+    assert_eq(filtered.get_or_default(&1, -1), -1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,705 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, types, cast, conversion
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: type operation patterns through VBC interpreter.
+// Tests tagged union simulation, safe casts, type equality, downcasting,
+// transmute simulation, type-safe containers, and type registries.
+
+// ============================================================================
+// Tagged union: tag field determines which value is meaningful
+// tag=0: integer, tag=1: boolean (0 or 1), tag=2: unit (no payload)
+// ============================================================================
+
+type TaggedVal is {
+    tag: Int,
+    int_val: Int,
+    bool_val: Int
+};
+
+fn tagged_int(v: Int) -> TaggedVal {
+    TaggedVal { tag: 0, int_val: v, bool_val: 0 }
+}
+
+fn tagged_bool(v: Bool) -> TaggedVal {
+    if v {
+        TaggedVal { tag: 1, int_val: 0, bool_val: 1 }
+    } else {
+        TaggedVal { tag: 1, int_val: 0, bool_val: 0 }
+    }
+}
+
+fn tagged_unit() -> TaggedVal {
+    TaggedVal { tag: 2, int_val: 0, bool_val: 0 }
+}
+
+fn is_int_tag(v: TaggedVal) -> Bool { v.tag == 0 }
+fn is_bool_tag(v: TaggedVal) -> Bool { v.tag == 1 }
+fn is_unit_tag(v: TaggedVal) -> Bool { v.tag == 2 }
+
+fn unwrap_int(v: TaggedVal) -> Int { v.int_val }
+fn unwrap_bool(v: TaggedVal) -> Bool { v.bool_val == 1 }
+
+fn test_tagged_union_basic() {
+    let i = tagged_int(42);
+    assert(is_int_tag(i));
+    assert(!is_bool_tag(i));
+    assert(!is_unit_tag(i));
+    assert_eq(unwrap_int(i), 42);
+
+    let b = tagged_bool(true);
+    assert(!is_int_tag(b));
+    assert(is_bool_tag(b));
+    assert(unwrap_bool(b));
+
+    let bf = tagged_bool(false);
+    assert(is_bool_tag(bf));
+    assert(!unwrap_bool(bf));
+
+    let u = tagged_unit();
+    assert(is_unit_tag(u));
+    assert(!is_int_tag(u));
+    assert(!is_bool_tag(u));
+}
+
+fn test_tagged_union_negative() {
+    let neg = tagged_int(-100);
+    assert(is_int_tag(neg));
+    assert_eq(unwrap_int(neg), -100);
+
+    let zero = tagged_int(0);
+    assert(is_int_tag(zero));
+    assert_eq(unwrap_int(zero), 0);
+
+    let big = tagged_int(999999);
+    assert_eq(unwrap_int(big), 999999);
+}
+
+// ============================================================================
+// Type checking: inspect tag and dispatch
+// ============================================================================
+
+fn tag_name(v: TaggedVal) -> Int {
+    // Return code: 0=int, 1=bool, 2=unit, -1=unknown
+    if v.tag == 0 { 0 }
+    else if v.tag == 1 { 1 }
+    else if v.tag == 2 { 2 }
+    else { -1 }
+}
+
+fn tagged_to_int(v: TaggedVal) -> Int {
+    // Convert any tagged value to int representation
+    if is_int_tag(v) { v.int_val }
+    else if is_bool_tag(v) { v.bool_val }
+    else { 0 } // unit -> 0
+}
+
+fn test_type_checking() {
+    let i = tagged_int(7);
+    let b = tagged_bool(true);
+    let u = tagged_unit();
+
+    assert_eq(tag_name(i), 0);
+    assert_eq(tag_name(b), 1);
+    assert_eq(tag_name(u), 2);
+
+    // Convert all to int
+    assert_eq(tagged_to_int(i), 7);
+    assert_eq(tagged_to_int(b), 1);
+    assert_eq(tagged_to_int(u), 0);
+
+    // Bool false -> 0
+    let bf = tagged_bool(false);
+    assert_eq(tagged_to_int(bf), 0);
+}
+
+// ============================================================================
+// Safe cast: convert between tag types with validation
+// Returns a new TaggedVal or a sentinel on failure
+// ============================================================================
+
+fn safe_cast_to_bool(v: TaggedVal) -> TaggedVal {
+    // Int -> Bool: 0 = false, nonzero = true
+    if is_int_tag(v) {
+        if v.int_val == 0 {
+            tagged_bool(false)
+        } else {
+            tagged_bool(true)
+        }
+    } else if is_bool_tag(v) {
+        v // already bool
+    } else {
+        tagged_bool(false) // unit -> false
+    }
+}
+
+fn safe_cast_to_int(v: TaggedVal) -> TaggedVal {
+    // Bool -> Int: false=0, true=1; Unit -> Int: 0
+    if is_int_tag(v) {
+        v
+    } else if is_bool_tag(v) {
+        tagged_int(v.bool_val)
+    } else {
+        tagged_int(0)
+    }
+}
+
+fn test_safe_cast() {
+    // Int 42 -> Bool = true
+    let i42 = tagged_int(42);
+    let b42 = safe_cast_to_bool(i42);
+    assert(is_bool_tag(b42));
+    assert(unwrap_bool(b42));
+
+    // Int 0 -> Bool = false
+    let i0 = tagged_int(0);
+    let b0 = safe_cast_to_bool(i0);
+    assert(is_bool_tag(b0));
+    assert(!unwrap_bool(b0));
+
+    // Bool true -> Int = 1
+    let bt = tagged_bool(true);
+    let it = safe_cast_to_int(bt);
+    assert(is_int_tag(it));
+    assert_eq(unwrap_int(it), 1);
+
+    // Bool false -> Int = 0
+    let bf = tagged_bool(false);
+    let i_f = safe_cast_to_int(bf);
+    assert_eq(unwrap_int(i_f), 0);
+
+    // Unit -> Int = 0
+    let u = tagged_unit();
+    let iu = safe_cast_to_int(u);
+    assert_eq(unwrap_int(iu), 0);
+
+    // Unit -> Bool = false
+    let ub = safe_cast_to_bool(u);
+    assert(!unwrap_bool(ub));
+
+    // Round-trip: Int -> Bool -> Int
+    let i5 = tagged_int(5);
+    let b5 = safe_cast_to_bool(i5);
+    let back = safe_cast_to_int(b5);
+    assert_eq(unwrap_int(back), 1); // nonzero -> true -> 1
+}
+
+// ============================================================================
+// Type equality: compare tags
+// ============================================================================
+
+fn tags_equal(a: TaggedVal, b: TaggedVal) -> Bool {
+    a.tag == b.tag
+}
+
+fn tagged_eq(a: TaggedVal, b: TaggedVal) -> Bool {
+    // Deep equality: same tag AND same value
+    if a.tag != b.tag { false }
+    else if is_int_tag(a) { a.int_val == b.int_val }
+    else if is_bool_tag(a) { a.bool_val == b.bool_val }
+    else { true } // both unit
+}
+
+fn test_type_equality() {
+    let i1 = tagged_int(10);
+    let i2 = tagged_int(10);
+    let i3 = tagged_int(20);
+    let b1 = tagged_bool(true);
+    let u1 = tagged_unit();
+    let u2 = tagged_unit();
+
+    // Same tag
+    assert(tags_equal(i1, i2));
+    assert(tags_equal(i1, i3));
+    assert(!tags_equal(i1, b1));
+    assert(!tags_equal(i1, u1));
+    assert(!tags_equal(b1, u1));
+    assert(tags_equal(u1, u2));
+
+    // Deep equality
+    assert(tagged_eq(i1, i2));
+    assert(!tagged_eq(i1, i3));
+    assert(!tagged_eq(i1, b1));
+    assert(tagged_eq(u1, u2));
+
+    let bt = tagged_bool(true);
+    let bf = tagged_bool(false);
+    assert(!tagged_eq(bt, bf));
+    assert(tagged_eq(bt, tagged_bool(true)));
+}
+
+// ============================================================================
+// Downcasting: extract typed value from tagged union
+// Returns a result-like pair: (success: Int, value: Int)
+// ============================================================================
+
+type CastOutcome is { ok: Int, value: Int };
+
+fn downcast_to_int(v: TaggedVal) -> CastOutcome {
+    if is_int_tag(v) {
+        CastOutcome { ok: 1, value: v.int_val }
+    } else {
+        CastOutcome { ok: 0, value: 0 }
+    }
+}
+
+fn downcast_to_bool_int(v: TaggedVal) -> CastOutcome {
+    if is_bool_tag(v) {
+        CastOutcome { ok: 1, value: v.bool_val }
+    } else {
+        CastOutcome { ok: 0, value: 0 }
+    }
+}
+
+fn test_downcast() {
+    let i = tagged_int(77);
+    let r1 = downcast_to_int(i);
+    assert_eq(r1.ok, 1);
+    assert_eq(r1.value, 77);
+
+    let r2 = downcast_to_bool_int(i);
+    assert_eq(r2.ok, 0); // cannot downcast int to bool
+
+    let b = tagged_bool(true);
+    let r3 = downcast_to_bool_int(b);
+    assert_eq(r3.ok, 1);
+    assert_eq(r3.value, 1);
+
+    let r4 = downcast_to_int(b);
+    assert_eq(r4.ok, 0); // cannot downcast bool to int
+
+    let u = tagged_unit();
+    let r5 = downcast_to_int(u);
+    assert_eq(r5.ok, 0);
+    let r6 = downcast_to_bool_int(u);
+    assert_eq(r6.ok, 0);
+}
+
+// ============================================================================
+// Transmute simulation: reinterpret bits
+// Simulate "float-like" by storing a scaled integer (value * 1000)
+// ============================================================================
+
+fn int_to_scaled(v: Int) -> Int {
+    // Simulate float by scaling: 42 -> 42000 (representing 42.000)
+    v * 1000
+}
+
+fn scaled_to_int(v: Int) -> Int {
+    // Truncate: 42500 -> 42
+    v / 1000
+}
+
+fn scaled_add(a: Int, b: Int) -> Int { a + b }
+fn scaled_sub(a: Int, b: Int) -> Int { a - b }
+fn scaled_mul(a: Int, b: Int) -> Int { (a * b) / 1000 }
+fn scaled_div(a: Int, b: Int) -> Int { (a * 1000) / b }
+
+fn test_transmute_simulation() {
+    // Represent 3.14 as 3140, 2.71 as 2710
+    let pi_ish = 3140;
+    let e_ish = 2710;
+
+    // Addition: 3.14 + 2.71 = 5.85 -> 5850
+    assert_eq(scaled_add(pi_ish, e_ish), 5850);
+
+    // Subtraction: 3.14 - 2.71 = 0.43 -> 430
+    assert_eq(scaled_sub(pi_ish, e_ish), 430);
+
+    // Multiplication: 3.14 * 2.71 = 8.5094 -> ~8509
+    let prod = scaled_mul(pi_ish, e_ish);
+    assert_eq(prod, 8509); // (3140*2710)/1000 = 8509400/1000 = 8509
+
+    // Division: 3.14 / 2.71 ~= 1.158 -> ~1158
+    let quot = scaled_div(pi_ish, e_ish);
+    assert_eq(quot, 1158); // (3140*1000)/2710 = 3140000/2710 = 1158
+
+    // Round-trip: int -> scaled -> int
+    assert_eq(scaled_to_int(int_to_scaled(42)), 42);
+    assert_eq(scaled_to_int(int_to_scaled(0)), 0);
+    assert_eq(scaled_to_int(int_to_scaled(100)), 100);
+
+    // Scaled truncation
+    assert_eq(scaled_to_int(3500), 3);   // 3.5 -> 3
+    assert_eq(scaled_to_int(999), 0);    // 0.999 -> 0
+    assert_eq(scaled_to_int(1001), 1);   // 1.001 -> 1
+}
+
+// ============================================================================
+// Type-safe container: store/retrieve values with type tags (capacity 8)
+// ============================================================================
+
+type TypedSlot is {
+    tag: Int,
+    val: Int
+};
+
+type TypedContainer is {
+    t0: Int, v0: Int,
+    t1: Int, v1: Int,
+    t2: Int, v2: Int,
+    t3: Int, v3: Int,
+    t4: Int, v4: Int,
+    t5: Int, v5: Int,
+    t6: Int, v6: Int,
+    t7: Int, v7: Int,
+    count: Int
+};
+
+fn container_new() -> TypedContainer {
+    TypedContainer {
+        t0: -1, v0: 0, t1: -1, v1: 0, t2: -1, v2: 0, t3: -1, v3: 0,
+        t4: -1, v4: 0, t5: -1, v5: 0, t6: -1, v6: 0, t7: -1, v7: 0,
+        count: 0
+    }
+}
+
+fn container_get_tag(c: TypedContainer, i: Int) -> Int {
+    if i == 0 { c.t0 } else if i == 1 { c.t1 }
+    else if i == 2 { c.t2 } else if i == 3 { c.t3 }
+    else if i == 4 { c.t4 } else if i == 5 { c.t5 }
+    else if i == 6 { c.t6 } else { c.t7 }
+}
+
+fn container_get_val(c: TypedContainer, i: Int) -> Int {
+    if i == 0 { c.v0 } else if i == 1 { c.v1 }
+    else if i == 2 { c.v2 } else if i == 3 { c.v3 }
+    else if i == 4 { c.v4 } else if i == 5 { c.v5 }
+    else if i == 6 { c.v6 } else { c.v7 }
+}
+
+fn container_put(c: TypedContainer, tag: Int, val: Int) -> TypedContainer {
+    let i = c.count;
+    TypedContainer {
+        t0: if i == 0 { tag } else { c.t0 }, v0: if i == 0 { val } else { c.v0 },
+        t1: if i == 1 { tag } else { c.t1 }, v1: if i == 1 { val } else { c.v1 },
+        t2: if i == 2 { tag } else { c.t2 }, v2: if i == 2 { val } else { c.v2 },
+        t3: if i == 3 { tag } else { c.t3 }, v3: if i == 3 { val } else { c.v3 },
+        t4: if i == 4 { tag } else { c.t4 }, v4: if i == 4 { val } else { c.v4 },
+        t5: if i == 5 { tag } else { c.t5 }, v5: if i == 5 { val } else { c.v5 },
+        t6: if i == 6 { tag } else { c.t6 }, v6: if i == 6 { val } else { c.v6 },
+        t7: if i == 7 { tag } else { c.t7 }, v7: if i == 7 { val } else { c.v7 },
+        count: c.count + 1
+    }
+}
+
+// Typed retrieval: only succeeds if tag matches
+fn container_get_typed(c: TypedContainer, i: Int, expected_tag: Int) -> CastOutcome {
+    if i >= c.count {
+        CastOutcome { ok: 0, value: 0 }
+    } else if container_get_tag(c, i) != expected_tag {
+        CastOutcome { ok: 0, value: 0 }
+    } else {
+        CastOutcome { ok: 1, value: container_get_val(c, i) }
+    }
+}
+
+fn test_typed_container() {
+    let mut c = container_new();
+    c = container_put(c, 0, 42);     // int: 42
+    c = container_put(c, 1, 1);      // bool: true
+    c = container_put(c, 0, -7);     // int: -7
+    c = container_put(c, 2, 0);      // unit
+    c = container_put(c, 1, 0);      // bool: false
+
+    assert_eq(c.count, 5);
+
+    // Typed access
+    let r0 = container_get_typed(c, 0, 0); // int at index 0
+    assert_eq(r0.ok, 1);
+    assert_eq(r0.value, 42);
+
+    let r1 = container_get_typed(c, 1, 1); // bool at index 1
+    assert_eq(r1.ok, 1);
+    assert_eq(r1.value, 1);
+
+    // Wrong type
+    let r2 = container_get_typed(c, 0, 1); // try bool at index 0 (is int)
+    assert_eq(r2.ok, 0);
+
+    let r3 = container_get_typed(c, 1, 0); // try int at index 1 (is bool)
+    assert_eq(r3.ok, 0);
+
+    // Out of bounds
+    let r4 = container_get_typed(c, 10, 0);
+    assert_eq(r4.ok, 0);
+}
+
+fn test_container_count_by_type() {
+    let mut c = container_new();
+    c = container_put(c, 0, 1);
+    c = container_put(c, 0, 2);
+    c = container_put(c, 1, 1);
+    c = container_put(c, 0, 3);
+    c = container_put(c, 2, 0);
+    c = container_put(c, 1, 0);
+
+    // Count ints (tag=0)
+    let mut int_count = 0;
+    let mut bool_count = 0;
+    let mut unit_count = 0;
+    let mut idx = 0;
+    while idx < c.count {
+        let t = container_get_tag(c, idx);
+        if t == 0 { int_count = int_count + 1; }
+        else if t == 1 { bool_count = bool_count + 1; }
+        else if t == 2 { unit_count = unit_count + 1; }
+        idx = idx + 1;
+    }
+    assert_eq(int_count, 3);
+    assert_eq(bool_count, 2);
+    assert_eq(unit_count, 1);
+}
+
+fn test_container_sum_ints() {
+    let mut c = container_new();
+    c = container_put(c, 0, 10);
+    c = container_put(c, 1, 1);    // bool, skip
+    c = container_put(c, 0, 20);
+    c = container_put(c, 2, 0);    // unit, skip
+    c = container_put(c, 0, 30);
+
+    let mut sum = 0;
+    let mut idx = 0;
+    while idx < c.count {
+        if container_get_tag(c, idx) == 0 {
+            sum = sum + container_get_val(c, idx);
+        }
+        idx = idx + 1;
+    }
+    assert_eq(sum, 60);
+}
+
+// ============================================================================
+// Type registry: assign type IDs and look up type information
+// ============================================================================
+
+type TypeInfo is {
+    type_id: Int,
+    size: Int,
+    alignment: Int,
+    is_primitive: Int
+};
+
+type TypeRegistry is {
+    id0: Int, sz0: Int, al0: Int, pr0: Int,
+    id1: Int, sz1: Int, al1: Int, pr1: Int,
+    id2: Int, sz2: Int, al2: Int, pr2: Int,
+    id3: Int, sz3: Int, al3: Int, pr3: Int,
+    id4: Int, sz4: Int, al4: Int, pr4: Int,
+    id5: Int, sz5: Int, al5: Int, pr5: Int,
+    id6: Int, sz6: Int, al6: Int, pr6: Int,
+    id7: Int, sz7: Int, al7: Int, pr7: Int,
+    next_id: Int,
+    count: Int
+};
+
+fn registry_new() -> TypeRegistry {
+    TypeRegistry {
+        id0: 0, sz0: 0, al0: 0, pr0: 0,
+        id1: 0, sz1: 0, al1: 0, pr1: 0,
+        id2: 0, sz2: 0, al2: 0, pr2: 0,
+        id3: 0, sz3: 0, al3: 0, pr3: 0,
+        id4: 0, sz4: 0, al4: 0, pr4: 0,
+        id5: 0, sz5: 0, al5: 0, pr5: 0,
+        id6: 0, sz6: 0, al6: 0, pr6: 0,
+        id7: 0, sz7: 0, al7: 0, pr7: 0,
+        next_id: 1,
+        count: 0
+    }
+}
+
+fn registry_register(r: TypeRegistry, size: Int, align: Int, is_prim: Int) -> TypeRegistry {
+    let i = r.count;
+    let tid = r.next_id;
+    TypeRegistry {
+        id0: if i == 0 { tid } else { r.id0 }, sz0: if i == 0 { size } else { r.sz0 },
+        al0: if i == 0 { align } else { r.al0 }, pr0: if i == 0 { is_prim } else { r.pr0 },
+        id1: if i == 1 { tid } else { r.id1 }, sz1: if i == 1 { size } else { r.sz1 },
+        al1: if i == 1 { align } else { r.al1 }, pr1: if i == 1 { is_prim } else { r.pr1 },
+        id2: if i == 2 { tid } else { r.id2 }, sz2: if i == 2 { size } else { r.sz2 },
+        al2: if i == 2 { align } else { r.al2 }, pr2: if i == 2 { is_prim } else { r.pr2 },
+        id3: if i == 3 { tid } else { r.id3 }, sz3: if i == 3 { size } else { r.sz3 },
+        al3: if i == 3 { align } else { r.al3 }, pr3: if i == 3 { is_prim } else { r.pr3 },
+        id4: if i == 4 { tid } else { r.id4 }, sz4: if i == 4 { size } else { r.sz4 },
+        al4: if i == 4 { align } else { r.al4 }, pr4: if i == 4 { is_prim } else { r.pr4 },
+        id5: if i == 5 { tid } else { r.id5 }, sz5: if i == 5 { size } else { r.sz5 },
+        al5: if i == 5 { align } else { r.al5 }, pr5: if i == 5 { is_prim } else { r.pr5 },
+        id6: if i == 6 { tid } else { r.id6 }, sz6: if i == 6 { size } else { r.sz6 },
+        al6: if i == 6 { align } else { r.al6 }, pr6: if i == 6 { is_prim } else { r.pr6 },
+        id7: if i == 7 { tid } else { r.id7 }, sz7: if i == 7 { size } else { r.sz7 },
+        al7: if i == 7 { align } else { r.al7 }, pr7: if i == 7 { is_prim } else { r.pr7 },
+        next_id: r.next_id + 1,
+        count: r.count + 1
+    }
+}
+
+fn registry_get_id(r: TypeRegistry, i: Int) -> Int {
+    if i == 0 { r.id0 } else if i == 1 { r.id1 }
+    else if i == 2 { r.id2 } else if i == 3 { r.id3 }
+    else if i == 4 { r.id4 } else if i == 5 { r.id5 }
+    else if i == 6 { r.id6 } else { r.id7 }
+}
+
+fn registry_get_size(r: TypeRegistry, i: Int) -> Int {
+    if i == 0 { r.sz0 } else if i == 1 { r.sz1 }
+    else if i == 2 { r.sz2 } else if i == 3 { r.sz3 }
+    else if i == 4 { r.sz4 } else if i == 5 { r.sz5 }
+    else if i == 6 { r.sz6 } else { r.sz7 }
+}
+
+fn registry_get_align(r: TypeRegistry, i: Int) -> Int {
+    if i == 0 { r.al0 } else if i == 1 { r.al1 }
+    else if i == 2 { r.al2 } else if i == 3 { r.al3 }
+    else if i == 4 { r.al4 } else if i == 5 { r.al5 }
+    else if i == 6 { r.al6 } else { r.al7 }
+}
+
+fn registry_get_is_prim(r: TypeRegistry, i: Int) -> Int {
+    if i == 0 { r.pr0 } else if i == 1 { r.pr1 }
+    else if i == 2 { r.pr2 } else if i == 3 { r.pr3 }
+    else if i == 4 { r.pr4 } else if i == 5 { r.pr5 }
+    else if i == 6 { r.pr6 } else { r.pr7 }
+}
+
+// Find index by type_id, returns -1 if not found
+fn registry_find(r: TypeRegistry, type_id: Int) -> Int {
+    let mut idx = 0;
+    let mut found = -1;
+    while idx < r.count && found == -1 {
+        if registry_get_id(r, idx) == type_id {
+            found = idx;
+        }
+        idx = idx + 1;
+    }
+    found
+}
+
+fn test_type_registry() {
+    let mut reg = registry_new();
+
+    // Register types: (size, alignment, is_primitive)
+    // Type 1: Int (8 bytes, 8 align, primitive)
+    reg = registry_register(reg, 8, 8, 1);
+    // Type 2: Bool (1 byte, 1 align, primitive)
+    reg = registry_register(reg, 1, 1, 1);
+    // Type 3: Pair (16 bytes, 8 align, not primitive)
+    reg = registry_register(reg, 16, 8, 0);
+    // Type 4: Triple (24 bytes, 8 align, not primitive)
+    reg = registry_register(reg, 24, 8, 0);
+
+    assert_eq(reg.count, 4);
+    assert_eq(reg.next_id, 5);
+
+    // Verify type IDs are sequential
+    assert_eq(registry_get_id(reg, 0), 1);
+    assert_eq(registry_get_id(reg, 1), 2);
+    assert_eq(registry_get_id(reg, 2), 3);
+    assert_eq(registry_get_id(reg, 3), 4);
+
+    // Verify type info
+    assert_eq(registry_get_size(reg, 0), 8);
+    assert_eq(registry_get_align(reg, 0), 8);
+    assert_eq(registry_get_is_prim(reg, 0), 1);
+
+    assert_eq(registry_get_size(reg, 1), 1);
+    assert_eq(registry_get_is_prim(reg, 1), 1);
+
+    assert_eq(registry_get_size(reg, 2), 16);
+    assert_eq(registry_get_is_prim(reg, 2), 0);
+
+    // Lookup by type_id
+    assert_eq(registry_find(reg, 1), 0);
+    assert_eq(registry_find(reg, 2), 1);
+    assert_eq(registry_find(reg, 3), 2);
+    assert_eq(registry_find(reg, 4), 3);
+    assert_eq(registry_find(reg, 99), -1); // not found
+}
+
+fn test_registry_primitive_count() {
+    let mut reg = registry_new();
+    reg = registry_register(reg, 8, 8, 1);  // Int
+    reg = registry_register(reg, 1, 1, 1);  // Bool
+    reg = registry_register(reg, 4, 4, 1);  // Float32
+    reg = registry_register(reg, 16, 8, 0); // Pair
+    reg = registry_register(reg, 32, 8, 0); // Quad
+
+    let mut prim_count = 0;
+    let mut total_size = 0;
+    let mut idx = 0;
+    while idx < reg.count {
+        if registry_get_is_prim(reg, idx) == 1 {
+            prim_count = prim_count + 1;
+        }
+        total_size = total_size + registry_get_size(reg, idx);
+        idx = idx + 1;
+    }
+    assert_eq(prim_count, 3);
+    assert_eq(total_size, 61); // 8+1+4+16+32
+
+    // Max alignment
+    let mut max_align = 0;
+    let mut j = 0;
+    while j < reg.count {
+        let a = registry_get_align(reg, j);
+        if a > max_align { max_align = a; }
+        j = j + 1;
+    }
+    assert_eq(max_align, 8);
+}
+
+// ============================================================================
+// Composite: tagged container with type registry validation
+// ============================================================================
+
+fn test_registry_validated_container() {
+    // Build a registry
+    let mut reg = registry_new();
+    reg = registry_register(reg, 8, 8, 1); // id=1: Int
+    reg = registry_register(reg, 1, 1, 1); // id=2: Bool
+
+    // Store values in container with type IDs from registry
+    let mut c = container_new();
+    c = container_put(c, 1, 100);  // type_id=1 (Int), value=100
+    c = container_put(c, 2, 1);    // type_id=2 (Bool), value=true
+    c = container_put(c, 1, 200);  // type_id=1 (Int), value=200
+
+    // Validate: can we look up the type for each container slot?
+    let mut idx = 0;
+    let mut valid = 0;
+    while idx < c.count {
+        let tid = container_get_tag(c, idx);
+        let reg_idx = registry_find(reg, tid);
+        if reg_idx >= 0 {
+            valid = valid + 1;
+        }
+        idx = idx + 1;
+    }
+    assert_eq(valid, 3); // all 3 entries have valid type IDs
+
+    // Try an invalid type ID
+    c = container_put(c, 99, 0);
+    let bad_idx = registry_find(reg, 99);
+    assert_eq(bad_idx, -1); // not in registry
+}
+
+fn main() -> Int {
+    test_tagged_union_basic();
+    test_tagged_union_negative();
+    test_type_checking();
+    test_safe_cast();
+    test_type_equality();
+    test_downcast();
+    test_transmute_simulation();
+    test_typed_container();
+    test_container_count_by_type();
+    test_container_sum_ints();
+    test_type_registry();
+    test_registry_primitive_count();
+    test_registry_validated_container();
+    print("[OK] 040_type_operations");
+    0
+}

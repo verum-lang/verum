@@ -1,0 +1,209 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, state-machine, fsm, automaton
+// @timeout: 30000
+
+// Finite state machine simulation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// FSM: transition table stored as packed integers
+// States: 0..N, Inputs: 0..M
+// transition(state, input) -> next_state
+// Pack: state*10 + input -> index into transition table
+
+// Simple FSM: traffic light
+// States: 0=Red, 1=Green, 2=Yellow
+// Input: 0=timer, 1=emergency
+// Transitions:
+//   Red + timer -> Green
+//   Green + timer -> Yellow
+//   Yellow + timer -> Red
+//   Any + emergency -> Red
+fn traffic_next(state: Int, input: Int) -> Int {
+    if input == 1 { 0 } // emergency -> Red
+    else if state == 0 { 1 }  // Red -> Green
+    else if state == 1 { 2 } // Green -> Yellow
+    else { 0 } // Yellow -> Red
+}
+
+// Run FSM on input sequence
+fn run_fsm_traffic(inputs: Arr8, n: Int) -> Int {
+    let mut state = 0; // start at Red
+    let mut i = 0;
+    while i < n {
+        state = traffic_next(state, get8(inputs, i));
+        i = i + 1;
+    }
+    state
+}
+
+// Binary number FSM: accepts binary strings divisible by 3
+// States: 0 (mod 0), 1 (mod 1), 2 (mod 2)
+// Input: 0 or 1 (binary digit)
+// Transition: new_state = (old_state * 2 + input) % 3
+fn div3_next(state: Int, input: Int) -> Int {
+    (state * 2 + input) % 3
+}
+
+fn check_div3(digits: Arr8, n: Int) -> Int {
+    let mut state = 0;
+    let mut i = 0;
+    while i < n {
+        state = div3_next(state, get8(digits, i));
+        i = i + 1;
+    }
+    if state == 0 { 1 } else { 0 }
+}
+
+// Vending machine FSM
+// States: 0=idle, 1=5cents, 2=10cents, 3=15cents, 4=dispense
+// Inputs: 0=nickel(5), 1=dime(10), 2=quarter(25), 3=reset
+// Need 15 cents to dispense
+fn vending_next(state: Int, input: Int) -> Int {
+    if input == 3 { 0 } // reset
+    else if state == 4 { 0 } // auto-reset after dispense
+    else {
+        let cents = state * 5; // current cents
+        let add = if input == 0 { 5 }
+                  else if input == 1 { 10 }
+                  else { 25 };
+        let total = cents + add;
+        if total >= 15 { 4 } // dispense
+        else { total / 5 }
+    }
+}
+
+fn run_vending(inputs: Arr8, n: Int) -> Int {
+    let mut state = 0;
+    let mut dispense_count = 0;
+    let mut i = 0;
+    while i < n {
+        state = vending_next(state, get8(inputs, i));
+        if state == 4 { dispense_count = dispense_count + 1; }
+        i = i + 1;
+    }
+    dispense_count
+}
+
+// Count state visits during FSM execution
+fn count_visits(inputs: Arr8, n: Int) -> Arr8 {
+    let mut visits = zeros();
+    let mut state = 0; // traffic light
+    visits = set8(visits, 0, 1); // count initial state
+    let mut i = 0;
+    while i < n {
+        state = traffic_next(state, get8(inputs, i));
+        visits = set8(visits, state, get8(visits, state) + 1);
+        i = i + 1;
+    }
+    visits
+}
+
+fn test_traffic() -> Int {
+    // Normal cycle: timer, timer, timer -> R->G->Y->R
+    let inputs = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(run_fsm_traffic(inputs, 1), 1); // Red->Green
+    assert_eq(run_fsm_traffic(inputs, 2), 2); // ->Yellow
+    assert_eq(run_fsm_traffic(inputs, 3), 0); // ->Red
+    assert_eq(run_fsm_traffic(inputs, 6), 0); // Two full cycles
+
+    // Emergency interrupt
+    let emerg = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(run_fsm_traffic(emerg, 2), 0); // G->emergency->Red
+    1
+}
+
+fn test_div3() -> Int {
+    // Binary 110 = 6, divisible by 3
+    let b6 = Arr8 { v0: 1, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(check_div3(b6, 3), 1);
+
+    // Binary 101 = 5, not divisible by 3
+    let b5 = Arr8 { v0: 1, v1: 0, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(check_div3(b5, 3), 0);
+
+    // Binary 1001 = 9, divisible by 3
+    let b9 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(check_div3(b9, 4), 1);
+
+    // Binary 0 = 0, divisible by 3
+    let b0 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(check_div3(b0, 1), 1);
+
+    // Binary 11 = 3, divisible by 3
+    let b3 = Arr8 { v0: 1, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(check_div3(b3, 2), 1);
+    1
+}
+
+fn test_vending() -> Int {
+    // 3 nickels = 15 cents -> dispense
+    let nickels = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(run_vending(nickels, 3), 1);
+
+    // Dime + nickel = 15 cents -> dispense
+    let dn = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(run_vending(dn, 2), 1);
+
+    // Quarter -> dispense (overpay)
+    let quarter = Arr8 { v0: 2, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(run_vending(quarter, 1), 1);
+
+    // Nickel only = 5 cents, not enough
+    assert_eq(run_vending(nickels, 1), 0);
+
+    // After 3 nickels → dispense, 4th nickel resets+adds 5c, 5th adds 5c, 6th adds 5c → dispense
+    // 3 for first, then 4th = reset(0)+5c(1), 5th=2, 6th=3→dispense? No:
+    // i=3: state=4, input=0 → reset to 0 (input consumed in reset)
+    // i=4: state=0 → 1
+    // i=5: state=1 → 2 → not enough for dispense
+    // So 6 nickels = 1 dispense (reset eats one turn)
+    assert_eq(run_vending(nickels, 6), 1);
+    // Need 7 nickels for 2 dispenses: 3 + reset + 3
+    assert_eq(run_vending(nickels, 7), 2);
+    1
+}
+
+fn test_state_visits() -> Int {
+    // 6 timer inputs: R->G->Y->R->G->Y->R
+    let inputs = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let visits = count_visits(inputs, 6);
+    // Red visited: initial + 2 returns = 3
+    assert_eq(get8(visits, 0), 3);
+    // Green visited: 2
+    assert_eq(get8(visits, 1), 2);
+    // Yellow visited: 2
+    assert_eq(get8(visits, 2), 2);
+    1
+}
+
+fn main() -> Int {
+    test_traffic();
+    test_div3();
+    test_vending();
+    test_state_visits();
+    print("[OK] 582_state_machine_aot");
+    0
+}

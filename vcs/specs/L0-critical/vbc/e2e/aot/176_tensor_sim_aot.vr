@@ -1,0 +1,156 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, simulation, linalg
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT tensor simulation - matrix operations through LLVM native compilation
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2(a: Int, b: Int, c: Int, d: Int) -> Mat2 {
+    Mat2 { a: a, b: b, c: c, d: d }
+}
+
+fn mat2_add(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 { a: m.a + n.a, b: m.b + n.b, c: m.c + n.c, d: m.d + n.d }
+}
+
+fn mat2_mul(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+fn mat2_det(m: Mat2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn mat2_trace(m: Mat2) -> Int {
+    m.a + m.d
+}
+
+fn mat2_transpose(m: Mat2) -> Mat2 {
+    Mat2 { a: m.a, b: m.c, c: m.b, d: m.d }
+}
+
+fn mat2_scale(m: Mat2, s: Int) -> Mat2 {
+    Mat2 { a: m.a * s, b: m.b * s, c: m.c * s, d: m.d * s }
+}
+
+fn mat2_eq(m: Mat2, n: Mat2) -> Bool {
+    m.a == n.a && m.b == n.b && m.c == n.c && m.d == n.d
+}
+
+// 3x3 matrix
+type Mat3 is {
+    e00: Int, e01: Int, e02: Int,
+    e10: Int, e11: Int, e12: Int,
+    e20: Int, e21: Int, e22: Int
+};
+
+fn mat3_identity() -> Mat3 {
+    Mat3 {
+        e00: 1, e01: 0, e02: 0,
+        e10: 0, e11: 1, e12: 0,
+        e20: 0, e21: 0, e22: 1
+    }
+}
+
+fn mat3_det(m: Mat3) -> Int {
+    m.e00 * (m.e11 * m.e22 - m.e12 * m.e21)
+    - m.e01 * (m.e10 * m.e22 - m.e12 * m.e20)
+    + m.e02 * (m.e10 * m.e21 - m.e11 * m.e20)
+}
+
+fn mat3_trace(m: Mat3) -> Int {
+    m.e00 + m.e11 + m.e22
+}
+
+// Dot product of two int arrays (simulated)
+fn dot_product_3(a0: Int, a1: Int, a2: Int, b0: Int, b1: Int, b2: Int) -> Int {
+    a0 * b0 + a1 * b1 + a2 * b2
+}
+
+fn main() -> Int {
+    // ---- 2x2 Matrix operations ----
+    let identity = mat2(1, 0, 0, 1);
+    let a = mat2(1, 2, 3, 4);
+    let b = mat2(5, 6, 7, 8);
+
+    // Addition
+    let sum = mat2_add(a, b);
+    assert_eq(sum.a, 6);
+    assert_eq(sum.b, 8);
+    assert_eq(sum.c, 10);
+    assert_eq(sum.d, 12);
+
+    // Multiplication: A*I = A
+    let ai = mat2_mul(a, identity);
+    assert_eq(mat2_eq(ai, a), true);
+
+    // A * B
+    let ab = mat2_mul(a, b);
+    assert_eq(ab.a, 19);  // 1*5 + 2*7
+    assert_eq(ab.b, 22);  // 1*6 + 2*8
+    assert_eq(ab.c, 43);  // 3*5 + 4*7
+    assert_eq(ab.d, 50);  // 3*6 + 4*8
+
+    // Determinant
+    assert_eq(mat2_det(a), -2);  // 1*4 - 2*3
+    assert_eq(mat2_det(identity), 1);
+
+    // Trace
+    assert_eq(mat2_trace(a), 5);
+    assert_eq(mat2_trace(identity), 2);
+
+    // Transpose
+    let at = mat2_transpose(a);
+    assert_eq(at.a, 1);
+    assert_eq(at.b, 3);
+    assert_eq(at.c, 2);
+    assert_eq(at.d, 4);
+
+    // Scale
+    let a3 = mat2_scale(a, 3);
+    assert_eq(a3.a, 3);
+    assert_eq(a3.b, 6);
+    assert_eq(a3.c, 9);
+    assert_eq(a3.d, 12);
+
+    // ---- 3x3 Matrix ----
+    let i3 = mat3_identity();
+    assert_eq(mat3_det(i3), 1);
+    assert_eq(mat3_trace(i3), 3);
+
+    let m3 = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 0, e11: 4, e12: 5,
+        e20: 1, e21: 0, e22: 6
+    };
+    // det = 1*(24-0) - 2*(0-5) + 3*(0-4) = 24+10-12 = 22
+    assert_eq(mat3_det(m3), 22);
+    assert_eq(mat3_trace(m3), 11);
+
+    // ---- Dot product ----
+    assert_eq(dot_product_3(1, 2, 3, 4, 5, 6), 32);
+    assert_eq(dot_product_3(1, 0, 0, 0, 1, 0), 0);
+    assert_eq(dot_product_3(1, 1, 1, 1, 1, 1), 3);
+
+    // ---- Cayley-Hamilton theorem: A^2 - trace(A)*A + det(A)*I = 0 ----
+    let a2 = mat2_mul(a, a);
+    let ta = mat2_scale(a, mat2_trace(a));
+    let di = mat2_scale(identity, mat2_det(a));
+    // a2 - ta + di should be zero matrix
+    let check = mat2_add(mat2_add(a2, mat2_scale(ta, -1)), di);
+    assert_eq(check.a, 0);
+    assert_eq(check.b, 0);
+    assert_eq(check.c, 0);
+    assert_eq(check.d, 0);
+
+    print("tensor simulation AOT tests passed");
+    0
+}

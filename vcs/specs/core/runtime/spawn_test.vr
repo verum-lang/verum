@@ -1,0 +1,852 @@
+// =============================================================================
+// spawn_test.vr - Comprehensive tests for SpawnConfig and task spawning
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, spawn, priority, config, core
+// @description: Tests for SpawnConfig builder pattern, PriorityLevel, and spawn utilities
+//
+// Coverage:
+// - PriorityLevel variants and conversion
+// - InlineContextStorage operations
+// - SpawnConfig construction and builder pattern
+// - SpawnConfigBuilder validation
+// - Configuration application to environment
+// =============================================================================
+
+module specs.core.runtime.spawn_test;
+
+mount core.runtime.spawn.{
+    PriorityLevel,
+    SpawnConfig,
+    SpawnConfigBuilder,
+    InlineContextStorage,
+    // Convenience spawn functions (existence verification)
+    spawn_with_retry, spawn_high_priority, spawn_background,
+    spawn_with_timeout, spawn_named, spawn_isolated,
+};
+mount core.runtime.recovery.{
+    BackoffStrategy,
+    RecoveryStrategy,
+    RetryConfig, JitterConfig, RetryPredicate,
+};
+mount core.runtime.env.{IsolationLevel, RestartPolicy, RestartStrategy};
+
+// =============================================================================
+// Section 1: PriorityLevel Tests
+// =============================================================================
+
+@test
+fn test_priority_level_variants() {
+    let bg = PriorityLevel.Background;
+    let low = PriorityLevel.Low;
+    let normal = PriorityLevel.Normal;
+    let high = PriorityLevel.High;
+    let critical = PriorityLevel.Critical;
+
+    // Variants exist and are distinct
+    assert(bg is PriorityLevel.Background);
+    assert(low is PriorityLevel.Low);
+    assert(normal is PriorityLevel.Normal);
+    assert(high is PriorityLevel.High);
+    assert(critical is PriorityLevel.Critical);
+
+    print("PriorityLevel variants test passed");
+}
+
+@test
+fn test_priority_level_to_u8() {
+    assert_eq(PriorityLevel.Background.to_u8(), 32);
+    assert_eq(PriorityLevel.Low.to_u8(), 64);
+    assert_eq(PriorityLevel.Normal.to_u8(), 128);
+    assert_eq(PriorityLevel.High.to_u8(), 192);
+    assert_eq(PriorityLevel.Critical.to_u8(), 255);
+
+    print("PriorityLevel to_u8 test passed");
+}
+
+@test
+fn test_priority_level_from_u8() {
+    // Background: 0..48
+    assert(PriorityLevel.from_u8(0) is PriorityLevel.Background);
+    assert(PriorityLevel.from_u8(32) is PriorityLevel.Background);
+    assert(PriorityLevel.from_u8(47) is PriorityLevel.Background);
+
+    // Low: 48..96
+    assert(PriorityLevel.from_u8(48) is PriorityLevel.Low);
+    assert(PriorityLevel.from_u8(64) is PriorityLevel.Low);
+    assert(PriorityLevel.from_u8(95) is PriorityLevel.Low);
+
+    // Normal: 96..160
+    assert(PriorityLevel.from_u8(96) is PriorityLevel.Normal);
+    assert(PriorityLevel.from_u8(128) is PriorityLevel.Normal);
+    assert(PriorityLevel.from_u8(159) is PriorityLevel.Normal);
+
+    // High: 160..224
+    assert(PriorityLevel.from_u8(160) is PriorityLevel.High);
+    assert(PriorityLevel.from_u8(192) is PriorityLevel.High);
+    assert(PriorityLevel.from_u8(223) is PriorityLevel.High);
+
+    // Critical: 224+
+    assert(PriorityLevel.from_u8(224) is PriorityLevel.Critical);
+    assert(PriorityLevel.from_u8(255) is PriorityLevel.Critical);
+
+    print("PriorityLevel from_u8 test passed");
+}
+
+@test
+fn test_priority_level_default() {
+    let default_priority = PriorityLevel.default();
+    assert(default_priority is PriorityLevel.Normal);
+    assert_eq(default_priority.to_u8(), 128);
+
+    print("PriorityLevel default test passed");
+}
+
+@test
+fn test_priority_level_roundtrip() {
+    // Converting to u8 and back should preserve level (within bucket)
+    let bg = PriorityLevel.Background;
+    let bg_u8 = bg.to_u8();
+    let bg_back = PriorityLevel.from_u8(bg_u8);
+    assert(bg_back is PriorityLevel.Background);
+
+    let critical = PriorityLevel.Critical;
+    let critical_u8 = critical.to_u8();
+    let critical_back = PriorityLevel.from_u8(critical_u8);
+    assert(critical_back is PriorityLevel.Critical);
+
+    print("PriorityLevel roundtrip test passed");
+}
+
+@test
+fn test_priority_level_ordering() {
+    // Higher priority should have higher numeric value
+    assert(PriorityLevel.Background.to_u8() < PriorityLevel.Low.to_u8());
+    assert(PriorityLevel.Low.to_u8() < PriorityLevel.Normal.to_u8());
+    assert(PriorityLevel.Normal.to_u8() < PriorityLevel.High.to_u8());
+    assert(PriorityLevel.High.to_u8() < PriorityLevel.Critical.to_u8());
+
+    print("PriorityLevel ordering test passed");
+}
+
+// =============================================================================
+// Section 2: SpawnConfig Construction Tests
+// =============================================================================
+
+@test
+fn test_spawn_config_new() {
+    let config = SpawnConfig.new();
+
+    // Default values
+    assert(config.name.is_none());
+    assert(config.recovery.is_none());
+    assert(config.restart.is_none());
+    assert(config.isolation.is_none());
+    assert(config.supervisor.is_none());
+    assert(config.deadline_ns == 0);  // 0 = no deadline
+    assert_eq(config.priority, PriorityLevel.Normal);
+
+    print("SpawnConfig.new() test passed");
+}
+
+@test
+fn test_spawn_config_default() {
+    let config = SpawnConfig.default();
+
+    // Same as new()
+    assert(config.name.is_none());
+    assert_eq(config.priority, PriorityLevel.Normal);
+
+    print("SpawnConfig.default() test passed");
+}
+
+// =============================================================================
+// Section 3: SpawnConfig Builder Methods Tests
+// =============================================================================
+
+@test
+fn test_spawn_config_with_name() {
+    let config = SpawnConfig.new().with_name("my-task");
+
+    match config.name {
+        Maybe.Some(name) => assert_eq(name, "my-task"),
+        Maybe.None => panic("Expected name to be set"),
+    }
+
+    print("SpawnConfig.with_name() test passed");
+}
+
+@test
+fn test_spawn_config_with_priority() {
+    let config = SpawnConfig.new().with_priority(PriorityLevel.High);
+
+    assert(config.priority is PriorityLevel.High);
+    assert_eq(config.priority.to_u8(), 192);
+
+    print("SpawnConfig.with_priority() test passed");
+}
+
+@test
+fn test_spawn_config_with_isolation() {
+    let shared = SpawnConfig.new().with_isolation(IsolationLevel.Shared);
+    assert(shared.isolation == Maybe.Some(IsolationLevel.Shared));
+
+    let send_only = SpawnConfig.new().with_isolation(IsolationLevel.SendOnly);
+    assert(send_only.isolation == Maybe.Some(IsolationLevel.SendOnly));
+
+    let full = SpawnConfig.new().with_isolation(IsolationLevel.Full);
+    assert(full.isolation == Maybe.Some(IsolationLevel.Full));
+
+    print("SpawnConfig.with_isolation() test passed");
+}
+
+@test
+fn test_spawn_config_with_timeout_ms() {
+    let config = SpawnConfig.new().with_timeout_ms(5000 as UInt64);
+
+    // Timeout should be converted to deadline in nanoseconds (> 0 means set)
+    assert(config.deadline_ns > 0);
+
+    print("SpawnConfig.with_timeout_ms() test passed");
+}
+
+@test
+fn test_spawn_config_with_deadline_ns() {
+    let deadline: UInt64 = 1000000000;  // 1 second in nanoseconds
+    let config = SpawnConfig.new().with_deadline_ns(deadline);
+
+    assert_eq(config.deadline_ns, deadline);
+
+    print("SpawnConfig.with_deadline_ns() test passed");
+}
+
+@test
+fn test_spawn_config_with_stack_size() {
+    let config = SpawnConfig.new().with_stack_size(65536);  // 64KB
+
+    // stack_size is Int (0 = default), so we just compare directly
+    assert_eq(config.stack_size, 65536);
+
+    print("SpawnConfig.with_stack_size() test passed");
+}
+
+// =============================================================================
+// Section 4: SpawnConfig Chaining Tests
+// =============================================================================
+
+@test
+fn test_spawn_config_builder_chain() {
+    let config = SpawnConfig.new()
+        .with_name("worker-1")
+        .with_priority(PriorityLevel.High)
+        .with_isolation(IsolationLevel.Full)
+        .with_timeout_ms(10000 as UInt64)
+        .with_stack_size(32768);
+
+    // Verify all settings
+    assert_eq(config.name, Maybe.Some("worker-1"));
+    assert(config.priority is PriorityLevel.High);
+    assert(config.isolation == Maybe.Some(IsolationLevel.Full));
+    assert(config.deadline_ns > 0);  // 0 = no deadline, > 0 = set
+    assert_eq(config.stack_size, 32768);  // stack_size is Int
+
+    print("SpawnConfig builder chain test passed");
+}
+
+@test
+fn test_spawn_config_clone() {
+    let original = SpawnConfig.new()
+        .with_name("original")
+        .with_priority(PriorityLevel.Critical);
+
+    let cloned = original.clone();
+
+    // Should have same values
+    assert_eq(cloned.name, original.name);
+    assert_eq(cloned.priority.to_u8(), original.priority.to_u8());
+
+    print("SpawnConfig clone test passed");
+}
+
+// =============================================================================
+// Section 5: SpawnConfigBuilder Tests
+// =============================================================================
+
+@test
+fn test_spawn_config_builder_new() {
+    let builder = SpawnConfigBuilder.new();
+
+    // Builder should start with defaults
+    let config = builder.build_unchecked();
+    assert_eq(config.priority, PriorityLevel.Normal);
+
+    print("SpawnConfigBuilder.new() test passed");
+}
+
+@test
+fn test_spawn_config_builder_from_config() {
+    let base = SpawnConfig.new().with_priority(PriorityLevel.High);
+    let builder = SpawnConfigBuilder.from_config(base);
+
+    let config = builder.build_unchecked();
+    assert(config.priority is PriorityLevel.High);
+
+    print("SpawnConfigBuilder.from_config() test passed");
+}
+
+@test
+fn test_spawn_config_builder_name() {
+    let config = SpawnConfigBuilder.new()
+        .name("builder-task")
+        .build_unchecked();
+
+    assert_eq(config.name, Maybe.Some("builder-task"));
+
+    print("SpawnConfigBuilder.name() test passed");
+}
+
+@test
+fn test_spawn_config_builder_priority_helpers() {
+    let bg = SpawnConfigBuilder.new().background().build_unchecked();
+    assert(bg.priority is PriorityLevel.Background);
+
+    let high = SpawnConfigBuilder.new().high_priority().build_unchecked();
+    assert(high.priority is PriorityLevel.High);
+
+    let critical = SpawnConfigBuilder.new().critical().build_unchecked();
+    assert(critical.priority is PriorityLevel.Critical);
+
+    print("SpawnConfigBuilder priority helpers test passed");
+}
+
+@test
+fn test_spawn_config_builder_restart_helpers() {
+    let permanent = SpawnConfigBuilder.new().permanent().build_unchecked();
+    // Permanent should set restart strategy to always restart
+
+    let transient = SpawnConfigBuilder.new().transient().build_unchecked();
+    // Transient should restart only on failure
+
+    let temporary = SpawnConfigBuilder.new().temporary().build_unchecked();
+    // Temporary should never restart
+
+    print("SpawnConfigBuilder restart helpers test passed");
+}
+
+@test
+fn test_spawn_config_builder_isolated() {
+    let config = SpawnConfigBuilder.new()
+        .isolated()
+        .build_unchecked();
+
+    assert(config.isolation == Maybe.Some(IsolationLevel.Full));
+
+    print("SpawnConfigBuilder.isolated() test passed");
+}
+
+@test
+fn test_spawn_config_builder_send_only() {
+    let config = SpawnConfigBuilder.new()
+        .send_only()
+        .build_unchecked();
+
+    assert(config.isolation == Maybe.Some(IsolationLevel.SendOnly));
+
+    print("SpawnConfigBuilder.send_only() test passed");
+}
+
+// =============================================================================
+// Section 6: Recovery Configuration Tests
+// =============================================================================
+
+@test
+fn test_spawn_config_with_simple_retry() {
+    let config = SpawnConfig.new()
+        .with_simple_retry(3, 1000);  // 3 retries, 1 second delay
+
+    assert(config.recovery.is_some());
+
+    print("SpawnConfig.with_simple_retry() test passed");
+}
+
+@test
+fn test_spawn_config_with_exponential_retry() {
+    let config = SpawnConfig.new()
+        .with_exponential_retry(5 as UInt16, 100 as UInt32, 10000 as UInt32, 0.1 as Float32);  // 5 retries, 100ms base, 10s max, 10% jitter
+
+    assert(config.recovery.is_some());
+
+    print("SpawnConfig.with_exponential_retry() test passed");
+}
+
+@test
+fn test_spawn_config_builder_with_retry_default() {
+    let config = SpawnConfigBuilder.new()
+        .with_retry_default()
+        .build_unchecked();
+
+    // Should have default retry configuration
+    assert(config.recovery.is_some());
+
+    print("SpawnConfigBuilder.with_retry_default() test passed");
+}
+
+@test
+fn test_spawn_config_builder_with_circuit_breaker_default() {
+    let config = SpawnConfigBuilder.new()
+        .with_circuit_breaker_default()
+        .build_unchecked();
+
+    // Should have circuit breaker set
+    // (circuit_breaker is stored separately from recovery)
+
+    print("SpawnConfigBuilder.with_circuit_breaker_default() test passed");
+}
+
+// =============================================================================
+// Section 7: Supervisor Configuration Tests
+// =============================================================================
+
+@test
+fn test_spawn_config_with_restart_limits() {
+    let config = SpawnConfig.new()
+        .with_restart_limits(5, 60000);  // 5 restarts in 60 seconds
+
+    // Restart limits should be stored
+
+    print("SpawnConfig.with_restart_limits() test passed");
+}
+
+// =============================================================================
+// Section 8: Edge Cases
+// =============================================================================
+
+@test
+fn test_spawn_config_empty_name() {
+    let config = SpawnConfig.new().with_name("");
+
+    // Empty name should be allowed (or rejected depending on design)
+    assert_eq(config.name, Maybe.Some(""));
+
+    print("SpawnConfig empty name test passed");
+}
+
+@test
+fn test_spawn_config_zero_timeout() {
+    let config = SpawnConfig.new().with_timeout_ms(0 as UInt64);
+
+    // Zero timeout sets deadline to current time (immediate deadline)
+    assert(config.deadline_ns > 0);
+
+    print("SpawnConfig zero timeout test passed");
+}
+
+@test
+fn test_spawn_config_zero_stack_size() {
+    let config = SpawnConfig.new().with_stack_size(0);
+
+    // Zero stack size means use default (stack_size is Int, 0 = default)
+    assert_eq(config.stack_size, 0);
+
+    print("SpawnConfig zero stack size test passed");
+}
+
+@test
+fn test_spawn_config_large_timeout() {
+    // Very large timeout (1 day in ms)
+    let one_day_ms: UInt64 = (24 as UInt64) * 60 * 60 * 1000;
+    let config = SpawnConfig.new().with_timeout_ms(one_day_ms);
+
+    assert(config.deadline_ns > 0);
+
+    print("SpawnConfig large timeout test passed");
+}
+
+@test
+fn test_spawn_config_override_priority() {
+    // Setting priority multiple times should use the last value
+    let config = SpawnConfig.new()
+        .with_priority(PriorityLevel.Low)
+        .with_priority(PriorityLevel.High)
+        .with_priority(PriorityLevel.Critical);
+
+    assert(config.priority is PriorityLevel.Critical);
+
+    print("SpawnConfig override priority test passed");
+}
+
+@test
+fn test_spawn_config_override_name() {
+    // Setting name multiple times should use the last value
+    let config = SpawnConfig.new()
+        .with_name("first")
+        .with_name("second")
+        .with_name("third");
+
+    assert_eq(config.name, Maybe.Some("third"));
+
+    print("SpawnConfig override name test passed");
+}
+
+// =============================================================================
+// Section 9: PriorityLevel Match Expression
+// =============================================================================
+
+@test
+fn test_priority_level_match_all() {
+    let levels = [
+        PriorityLevel.Background,
+        PriorityLevel.Low,
+        PriorityLevel.Normal,
+        PriorityLevel.High,
+        PriorityLevel.Critical,
+    ];
+
+    let mut i = 0;
+    while i < 5 {
+        let val = match levels[i] {
+            PriorityLevel.Background => 0,
+            PriorityLevel.Low => 1,
+            PriorityLevel.Normal => 2,
+            PriorityLevel.High => 3,
+            PriorityLevel.Critical => 4,
+        };
+        assert_eq(val, i);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_priority_level_is_not_cross() {
+    let bg = PriorityLevel.Background;
+    assert(!(bg is PriorityLevel.Low));
+    assert(!(bg is PriorityLevel.Normal));
+    assert(!(bg is PriorityLevel.High));
+    assert(!(bg is PriorityLevel.Critical));
+}
+
+// =============================================================================
+// Section 10: SpawnConfigBuilder Validation (build() returns Result)
+// =============================================================================
+
+@test
+fn test_builder_build_valid_config() {
+    let result = SpawnConfigBuilder.new()
+        .name("valid-task")
+        .high_priority()
+        .build();
+
+    assert(result.is_ok());
+    let config = result.unwrap();
+    assert_eq(config.name, Maybe.Some("valid-task"));
+    assert(config.priority is PriorityLevel.High);
+}
+
+@test
+fn test_builder_build_with_restart() {
+    let result = SpawnConfigBuilder.new()
+        .permanent()
+        .build();
+
+    // permanent() sets max_restarts=10, so should be valid
+    assert(result.is_ok());
+}
+
+@test
+fn test_builder_build_transient_valid() {
+    let result = SpawnConfigBuilder.new()
+        .transient()
+        .build();
+
+    assert(result.is_ok());
+}
+
+@test
+fn test_builder_build_temporary_valid() {
+    let result = SpawnConfigBuilder.new()
+        .temporary()
+        .build();
+
+    assert(result.is_ok());
+}
+
+@test
+fn test_builder_build_unchecked_returns_config() {
+    let config = SpawnConfigBuilder.new()
+        .name("unchecked")
+        .critical()
+        .build_unchecked();
+
+    assert_eq(config.name, Maybe.Some("unchecked"));
+    assert(config.priority is PriorityLevel.Critical);
+}
+
+// =============================================================================
+// Section 11: RestartPolicy and RestartStrategy Type Tests
+// =============================================================================
+
+@test
+fn test_restart_strategy_permanent() {
+    let strat = RestartStrategy.Permanent;
+    assert(strat is RestartStrategy.Permanent);
+}
+
+@test
+fn test_restart_strategy_transient() {
+    let strat = RestartStrategy.Transient;
+    assert(strat is RestartStrategy.Transient);
+}
+
+@test
+fn test_restart_strategy_temporary() {
+    let strat = RestartStrategy.Temporary;
+    assert(strat is RestartStrategy.Temporary);
+}
+
+@test
+fn test_restart_strategy_match() {
+    let strat = RestartStrategy.Transient;
+    let val = match strat {
+        RestartStrategy.Permanent => "permanent",
+        RestartStrategy.Transient => "transient",
+        RestartStrategy.Temporary => "temporary",
+    };
+    assert_eq(val, "transient");
+}
+
+@test
+fn test_builder_permanent_sets_restart_policy() {
+    let config = SpawnConfigBuilder.new()
+        .permanent()
+        .build_unchecked();
+
+    assert(config.restart.is_some());
+    let policy = config.restart.unwrap();
+    assert(policy.strategy is RestartStrategy.Permanent);
+    assert_eq(policy.max_restarts, 10);
+    assert_eq(policy.time_window_secs, 60 as UInt64);
+}
+
+@test
+fn test_builder_transient_sets_restart_policy() {
+    let config = SpawnConfigBuilder.new()
+        .transient()
+        .build_unchecked();
+
+    assert(config.restart.is_some());
+    let policy = config.restart.unwrap();
+    assert(policy.strategy is RestartStrategy.Transient);
+    assert_eq(policy.max_restarts, 5);
+}
+
+@test
+fn test_builder_temporary_sets_restart_policy() {
+    let config = SpawnConfigBuilder.new()
+        .temporary()
+        .build_unchecked();
+
+    assert(config.restart.is_some());
+    let policy = config.restart.unwrap();
+    assert(policy.strategy is RestartStrategy.Temporary);
+    assert_eq(policy.max_restarts, 0);
+}
+
+// =============================================================================
+// Section 12: SpawnConfig Additional Builder Methods
+// =============================================================================
+
+@test
+fn test_spawn_config_with_restart_limits_fields() {
+    let config = SpawnConfig.new()
+        .with_restart_limits(5, 60000 as UInt64);
+
+    assert(config.restart.is_some());
+    let policy = config.restart.unwrap();
+    assert(policy.strategy is RestartStrategy.Permanent);
+    assert_eq(policy.max_restarts, 5);
+    assert_eq(policy.time_window_secs, 60000 as UInt64);
+}
+
+@test
+fn test_spawn_config_default_deadline() {
+    let config = SpawnConfig.new();
+    assert_eq(config.deadline_ns, 0 as UInt64);
+}
+
+@test
+fn test_spawn_config_default_stack_size() {
+    let config = SpawnConfig.new();
+    assert_eq(config.stack_size, 0);
+}
+
+@test
+fn test_spawn_config_default_circuit_breaker() {
+    let config = SpawnConfig.new();
+    assert(config.circuit_breaker.is_none());
+}
+
+@test
+fn test_spawn_config_default_retry() {
+    let config = SpawnConfig.new();
+    assert(config.retry.is_none());
+}
+
+@test
+fn test_spawn_config_default_child_spec() {
+    let config = SpawnConfig.new();
+    assert(config.child_spec.is_none());
+}
+
+// =============================================================================
+// Section 13: InlineContextStorage Tests
+// =============================================================================
+
+@test
+fn test_inline_context_storage_new() {
+    let storage = InlineContextStorage.new();
+    assert_eq(storage.len(), 0);
+    assert(storage.is_empty());
+}
+
+@test
+fn test_inline_context_storage_type_exists() {
+    let _ = InlineContextStorage;
+}
+
+// =============================================================================
+// Section 14: Combined Builder Patterns
+// =============================================================================
+
+@test
+fn test_builder_combined_name_priority_restart() {
+    let config = SpawnConfigBuilder.new()
+        .name("worker")
+        .high_priority()
+        .permanent()
+        .build_unchecked();
+
+    assert_eq(config.name, Maybe.Some("worker"));
+    assert(config.priority is PriorityLevel.High);
+    assert(config.restart.is_some());
+    let policy = config.restart.unwrap();
+    assert(policy.strategy is RestartStrategy.Permanent);
+}
+
+@test
+fn test_builder_combined_isolation_retry() {
+    let config = SpawnConfigBuilder.new()
+        .isolated()
+        .with_retry_default()
+        .build_unchecked();
+
+    assert(config.isolation == Maybe.Some(IsolationLevel.Full));
+    assert(config.recovery.is_some());
+}
+
+@test
+fn test_builder_last_priority_wins() {
+    let config = SpawnConfigBuilder.new()
+        .background()
+        .high_priority()
+        .critical()
+        .build_unchecked();
+
+    assert(config.priority is PriorityLevel.Critical);
+}
+
+@test
+fn test_builder_last_restart_wins() {
+    let config = SpawnConfigBuilder.new()
+        .permanent()
+        .temporary()
+        .build_unchecked();
+
+    assert(config.restart.is_some());
+    let policy = config.restart.unwrap();
+    assert(policy.strategy is RestartStrategy.Temporary);
+}
+
+// =============================================================================
+// Section 15: Spawn Function Existence Tests
+// =============================================================================
+
+@test
+fn test_spawn_with_retry_exists() {
+    let _ = spawn_with_retry;
+}
+
+@test
+fn test_spawn_high_priority_exists() {
+    let _ = spawn_high_priority;
+}
+
+@test
+fn test_spawn_background_exists() {
+    let _ = spawn_background;
+}
+
+@test
+fn test_spawn_with_timeout_exists() {
+    let _ = spawn_with_timeout;
+}
+
+@test
+fn test_spawn_named_exists() {
+    let _ = spawn_named;
+}
+
+@test
+fn test_spawn_isolated_exists() {
+    let _ = spawn_isolated;
+}
+
+// =============================================================================
+// Section 16: RecoveryStrategy Type Tests
+// =============================================================================
+
+@test
+fn test_recovery_strategy_none() {
+    let strat = RecoveryStrategy.None;
+    assert(strat is RecoveryStrategy.None);
+}
+
+@test
+fn test_recovery_strategy_supervision() {
+    let strat = RecoveryStrategy.Supervision;
+    assert(strat is RecoveryStrategy.Supervision);
+}
+
+@test
+fn test_recovery_strategy_retry_factory() {
+    let strat = RecoveryStrategy.retry(3);
+    assert(strat is RecoveryStrategy.Retry);
+}
+
+@test
+fn test_recovery_strategy_circuit_breaker_factory() {
+    let strat = RecoveryStrategy.circuit_breaker(5);
+    assert(strat is RecoveryStrategy.UseBreaker);
+}
+
+@test
+fn test_recovery_strategy_match() {
+    let strat = RecoveryStrategy.None;
+    let val = match strat {
+        RecoveryStrategy.None => "none",
+        RecoveryStrategy.Retry(_) => "retry",
+        RecoveryStrategy.UseBreaker(_) => "breaker",
+        RecoveryStrategy.Supervision => "supervision",
+        RecoveryStrategy.Composed(_) => "composed",
+    };
+    assert_eq(val, "none");
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

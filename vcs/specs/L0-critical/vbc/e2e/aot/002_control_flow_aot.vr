@@ -1,0 +1,82 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, control-flow
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT control flow: if/else, recursion, nested conditions
+
+fn abs(n: Int) -> Int {
+    if n < 0 {
+        -n
+    } else {
+        n
+    }
+}
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn clamp(val: Int, lo: Int, hi: Int) -> Int {
+    if val < lo {
+        lo
+    } else if val > hi {
+        hi
+    } else {
+        val
+    }
+}
+
+fn main() -> Int {
+    // abs
+    assert_eq(abs(5), 5);
+    assert_eq(abs(-5), 5);
+    assert_eq(abs(0), 0);
+
+    // factorial
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+
+    // fibonacci
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(10), 55);
+
+    // max/min
+    assert_eq(max(3, 7), 7);
+    assert_eq(max(7, 3), 7);
+    assert_eq(min(3, 7), 3);
+    assert_eq(min(7, 3), 3);
+
+    // clamp
+    assert_eq(clamp(5, 0, 10), 5);
+    assert_eq(clamp(-5, 0, 10), 0);
+    assert_eq(clamp(15, 0, 10), 10);
+
+    0
+}

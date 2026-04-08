@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, return, error
+// @description: Test detection of function type with arrow but no return type
+// @expected-error: E092
+
+// Function type with arrow but missing return type
+type Callback is fn(Int) ->;

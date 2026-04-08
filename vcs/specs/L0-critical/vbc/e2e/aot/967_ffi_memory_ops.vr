@@ -1,0 +1,36 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: ffi, memory, malloc, free
+// @description: FFI memory operations — malloc/free through extern blocks
+// @expected-exit: 0
+
+@ffi("libSystem.B.dylib")
+extern {
+    fn malloc(size: Int) -> &unsafe Byte;
+    fn free(ptr: &unsafe Byte) -> ();
+    fn memset(ptr: &unsafe Byte, value: Int, size: Int) -> &unsafe Byte;
+}
+
+fn main() {
+    // Allocate 1024 bytes
+    let ptr = malloc(1024);
+
+    // Zero-fill the allocation
+    memset(ptr, 0, 1024);
+
+    // Free the allocation
+    free(ptr);
+
+    // Multiple allocations
+    let p1 = malloc(64);
+    let p2 = malloc(128);
+    let p3 = malloc(256);
+
+    // Free in reverse order
+    free(p3);
+    free(p2);
+    free(p1);
+
+    print("FFI memory ops: PASS");
+}

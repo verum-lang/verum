@@ -1,0 +1,129 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, expression, eval, postfix
+// @timeout: 30000
+
+// Evaluate postfix (RPN) expressions using a stack
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Token types: positive = number literal, negative = operator
+// -1 = ADD, -2 = SUB, -3 = MUL, -4 = DIV, -5 = MOD
+
+fn eval_rpn(tokens: Arr8, n: Int) -> Int {
+    let mut stack = new_arr8();
+    let mut sp = 0;
+    let mut i = 0;
+    while i < n {
+        let tok = get8(tokens, i);
+        if tok >= 0 {
+            // Push number
+            stack = set8(stack, sp, tok);
+            sp = sp + 1;
+        } else {
+            // Pop two operands
+            sp = sp - 1;
+            let b = get8(stack, sp);
+            sp = sp - 1;
+            let a = get8(stack, sp);
+            let result = if tok == -1 { a + b }
+                else if tok == -2 { a - b }
+                else if tok == -3 { a * b }
+                else if tok == -4 { a / b }
+                else { a % b };
+            stack = set8(stack, sp, result);
+            sp = sp + 1;
+        }
+        i = i + 1;
+    }
+    get8(stack, 0)
+}
+
+// Convert simple expression to result using direct computation
+fn ipow(base: Int, exp: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < exp {
+        r = r * base;
+        i = i + 1;
+    }
+    r
+}
+
+fn test_simple_add() -> Int {
+    // 3 4 + = 7
+    let tokens = Arr8 { v0: 3, v1: 4, v2: -1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(tokens, 3), 7);
+    1
+}
+
+fn test_complex() -> Int {
+    // (2+3)*(4-1) = 5*3 = 15
+    // RPN: 2 3 + 4 1 - *
+    let tokens = Arr8 { v0: 2, v1: 3, v2: -1, v3: 4, v4: 1, v5: -2, v6: -3, v7: 0 };
+    assert_eq(eval_rpn(tokens, 7), 15);
+    1
+}
+
+fn test_div_mod() -> Int {
+    // 17 5 / = 3, 17 5 % = 2
+    let t1 = Arr8 { v0: 17, v1: 5, v2: -4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(t1, 3), 3);
+
+    let t2 = Arr8 { v0: 17, v1: 5, v2: -5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(t2, 3), 2);
+    1
+}
+
+fn test_chained() -> Int {
+    // 1 2 + 3 + 4 + = 10
+    let tokens = Arr8 { v0: 1, v1: 2, v2: -1, v3: 3, v4: -1, v5: 4, v6: -1, v7: 0 };
+    assert_eq(eval_rpn(tokens, 7), 10);
+    1
+}
+
+fn test_ipow() -> Int {
+    assert_eq(ipow(2, 0), 1);
+    assert_eq(ipow(2, 10), 1024);
+    assert_eq(ipow(3, 4), 81);
+    assert_eq(ipow(5, 3), 125);
+    1
+}
+
+fn main() -> Int {
+    test_simple_add();
+    test_complex();
+    test_div_mod();
+    test_chained();
+    test_ipow();
+    print("[OK] 425_expression_eval_aot");
+    0
+}

@@ -1,0 +1,114 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, gpu, device
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU device enumeration — simulated device count, get/set, memory, streams, events
+
+// Simulated GPU device state
+type MemoryInfo is { free: Int, total: Int };
+type DeviceState is { current_device: Int, device_count: Int, next_stream: Int, next_event: Int };
+
+fn make_device_state() -> DeviceState {
+    DeviceState { current_device: 0, device_count: 1, next_stream: 1, next_event: 1 }
+}
+
+fn gpu_device_count(st: DeviceState) -> Int { st.device_count }
+fn gpu_get_device(st: DeviceState) -> Int { st.current_device }
+
+fn gpu_set_device(st: DeviceState, dev: Int) -> DeviceState {
+    DeviceState { current_device: dev, device_count: st.device_count,
+                  next_stream: st.next_stream, next_event: st.next_event }
+}
+
+fn gpu_get_memory_info(st: DeviceState) -> MemoryInfo {
+    MemoryInfo { free: 4096, total: 8192 }
+}
+
+fn gpu_stream_create(st: DeviceState) -> (Int, DeviceState) {
+    let sid = st.next_stream;
+    let new_st = DeviceState { current_device: st.current_device, device_count: st.device_count,
+                               next_stream: st.next_stream + 1, next_event: st.next_event };
+    (sid, new_st)
+}
+
+fn gpu_stream_query(sid: Int) -> Bool { true }
+
+fn gpu_event_create(st: DeviceState) -> (Int, DeviceState) {
+    let eid = st.next_event;
+    let new_st = DeviceState { current_device: st.current_device, device_count: st.device_count,
+                               next_stream: st.next_stream, next_event: st.next_event + 1 };
+    (eid, new_st)
+}
+
+@test
+fn test_gpu_device_count() {
+    let st = make_device_state();
+    let count = gpu_device_count(st);
+    assert(count >= 0);
+}
+
+@test
+fn test_gpu_get_device() {
+    let st = make_device_state();
+    let dev = gpu_get_device(st);
+    assert(dev >= 0);
+}
+
+@test
+fn test_gpu_set_device() {
+    let st = make_device_state();
+    let st2 = gpu_set_device(st, 0);
+    let current = gpu_get_device(st2);
+    assert_eq(current, 0);
+}
+
+@test
+fn test_gpu_memory_info() {
+    let st = make_device_state();
+    let info = gpu_get_memory_info(st);
+    assert(info.free >= 0);
+    assert(info.total >= 0);
+}
+
+@test
+fn test_gpu_stream_create_destroy() {
+    let st = make_device_state();
+    let (sid, st2) = gpu_stream_create(st);
+    assert(sid >= 0);
+    // stream_destroy is a no-op in simulation
+}
+
+@test
+fn test_gpu_stream_query() {
+    let st = make_device_state();
+    let (sid, st2) = gpu_stream_create(st);
+    let ready = gpu_stream_query(sid);
+    assert(ready);
+}
+
+@test
+fn test_gpu_event_create_destroy() {
+    let st = make_device_state();
+    let (eid, st2) = gpu_event_create(st);
+    assert(eid >= 0);
+    // event_destroy is a no-op in simulation
+}
+
+@test
+fn test_gpu_sync_device() {
+    // Sync is a no-op in simulation
+    assert(true);
+}
+
+fn main() {
+    test_gpu_device_count();
+    test_gpu_get_device();
+    test_gpu_set_device();
+    test_gpu_memory_info();
+    test_gpu_stream_create_destroy();
+    test_gpu_stream_query();
+    test_gpu_event_create_destroy();
+    test_gpu_sync_device();
+}

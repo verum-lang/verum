@@ -1,0 +1,217 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, comprehensive
+// @timeout: 50000
+// @expected-exit: 0
+//
+// MILESTONE 300: Comprehensive integration test
+
+// === Math utilities ===
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b) % modulus; }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+fn isqrt(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x { x = y; y = (x + n / x) / 2; }
+    x
+}
+
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut d = 3;
+    while d * d <= n { if n % d == 0 { return 0; } d = d + 2; }
+    1
+}
+
+// === Fibonacci with matrix method ===
+fn fib(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n { let c = a + b; a = b; b = c; i = i + 1; }
+    b
+}
+
+// === Record-based computations ===
+type Vec3 is { x: Int, y: Int, z: Int };
+
+fn vec3_add(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+}
+
+fn vec3_dot(a: Vec3, b: Vec3) -> Int {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn vec3_cross(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x
+    }
+}
+
+fn vec3_len_sq(v: Vec3) -> Int {
+    vec3_dot(v, v)
+}
+
+// === Higher-order patterns ===
+fn apply_twice(x: Int, f: fn(Int) -> Int) -> Int {
+    f(f(x))
+}
+
+fn double(x: Int) -> Int { x * 2 }
+fn inc(x: Int) -> Int { x + 1 }
+
+// === Fold over range ===
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end { acc = f(acc, i); i = i + 1; }
+    acc
+}
+
+fn add_fn(a: Int, b: Int) -> Int { a + b }
+fn mul_fn(a: Int, b: Int) -> Int { a * b }
+
+fn test_math() -> Int {
+    // GCD properties
+    assert_eq(gcd(12, 18), 6);
+    assert_eq(gcd(35, 49), 7);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(0, 5), 5);
+
+    // Modular exponentiation
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    assert_eq(mod_pow(3, 5, 100), 43);
+    // Fermat's little theorem
+    assert_eq(mod_pow(2, 12, 13), 1);
+
+    // Integer sqrt
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(99), 9);
+
+    // Prime checking
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(97), 1);
+    assert_eq(is_prime(100), 0);
+
+    // Fibonacci
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(20), 6765);
+
+    0
+}
+
+fn test_vectors() -> Int {
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+
+    // Addition
+    let c = vec3_add(a, b);
+    assert_eq(c.x, 5);
+    assert_eq(c.y, 7);
+    assert_eq(c.z, 9);
+
+    // Dot product
+    assert_eq(vec3_dot(a, b), 32); // 4+10+18
+
+    // Cross product
+    let cross = vec3_cross(a, b);
+    assert_eq(cross.x, -3);  // 2*6 - 3*5 = -3
+    assert_eq(cross.y, 6);   // 3*4 - 1*6 = 6
+    assert_eq(cross.z, -3);  // 1*5 - 2*4 = -3
+
+    // Cross product is orthogonal to both inputs
+    assert_eq(vec3_dot(cross, a), 0);
+    assert_eq(vec3_dot(cross, b), 0);
+
+    // Length squared
+    assert_eq(vec3_len_sq(a), 14);  // 1+4+9
+
+    0
+}
+
+fn test_higher_order() -> Int {
+    // Apply twice
+    assert_eq(apply_twice(3, double), 12);  // 3*2*2
+    assert_eq(apply_twice(5, inc), 7);      // 5+1+1
+
+    // Fold
+    let sum = fold_range(1, 11, 0, add_fn);  // 1+2+...+10
+    assert_eq(sum, 55);
+
+    let product = fold_range(1, 6, 1, mul_fn);  // 5!
+    assert_eq(product, 120);
+
+    0
+}
+
+fn test_number_theory() -> Int {
+    // Count primes up to 50
+    let mut count = 0;
+    let mut i = 2;
+    while i <= 50 {
+        count = count + is_prime(i);
+        i = i + 1;
+    }
+    assert_eq(count, 15);  // 2,3,5,7,11,13,17,19,23,29,31,37,41,43,47
+
+    // Sum of first 10 Fibonacci numbers
+    let mut fib_sum = 0;
+    let mut j = 0;
+    while j < 10 {
+        fib_sum = fib_sum + fib(j);
+        j = j + 1;
+    }
+    assert_eq(fib_sum, 88);  // 0+1+1+2+3+5+8+13+21+34
+
+    // GCD identity: gcd(a,b) * lcm(a,b) = a * b
+    let a = 12;
+    let b = 18;
+    let g = gcd(a, b);
+    let l = a / g * b;  // lcm = a/gcd * b
+    // Identity: gcd * lcm = a * b
+    assert_eq(g * l / b, a);  // 6 * 36 / 18 = 12
+    assert_eq(l, 36);  // lcm(12,18) = 36
+    assert_eq(g, 6);
+
+    0
+}
+
+fn main() -> Int {
+    test_math();
+    test_vectors();
+    test_higher_order();
+    test_number_theory();
+    print("[OK] 300_milestone_300_aot");
+    0
+}

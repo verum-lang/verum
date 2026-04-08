@@ -1,0 +1,184 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, sudoku, validator, grid
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for 4x4 mini-Sudoku validator
+
+fn bnot(x: Int) -> Int { !x }
+
+// 4x4 grid packed in 16 Int fields
+type Grid4 is {
+    c00: Int, c01: Int, c02: Int, c03: Int,
+    c10: Int, c11: Int, c12: Int, c13: Int,
+    c20: Int, c21: Int, c22: Int, c23: Int,
+    c30: Int, c31: Int, c32: Int, c33: Int
+};
+
+fn g4_get(g: Grid4, row: Int, col: Int) -> Int {
+    let idx = row * 4 + col;
+    if idx == 0 { g.c00 } else if idx == 1 { g.c01 } else if idx == 2 { g.c02 } else if idx == 3 { g.c03 }
+    else if idx == 4 { g.c10 } else if idx == 5 { g.c11 } else if idx == 6 { g.c12 } else if idx == 7 { g.c13 }
+    else if idx == 8 { g.c20 } else if idx == 9 { g.c21 } else if idx == 10 { g.c22 } else if idx == 11 { g.c23 }
+    else if idx == 12 { g.c30 } else if idx == 13 { g.c31 } else if idx == 14 { g.c32 } else { g.c33 }
+}
+
+// Check if row has all values 1-4
+fn check_row(g: Grid4, row: Int) -> Bool {
+    let mut seen = 0;
+    let mut c = 0;
+    while c < 4 {
+        let v = g4_get(g, row, c);
+        if v < 1 || v > 4 { return false; }
+        let bit = 1 << v;
+        if (seen & bit) != 0 { return false; }
+        seen = seen | bit;
+        c = c + 1;
+    }
+    true
+}
+
+// Check if column has all values 1-4
+fn check_col(g: Grid4, col: Int) -> Bool {
+    let mut seen = 0;
+    let mut r = 0;
+    while r < 4 {
+        let v = g4_get(g, r, col);
+        if v < 1 || v > 4 { return false; }
+        let bit = 1 << v;
+        if (seen & bit) != 0 { return false; }
+        seen = seen | bit;
+        r = r + 1;
+    }
+    true
+}
+
+// Check 2x2 box starting at (br, bc)
+fn check_box(g: Grid4, br: Int, bc: Int) -> Bool {
+    let mut seen = 0;
+    let mut r = br;
+    while r < br + 2 {
+        let mut c = bc;
+        while c < bc + 2 {
+            let v = g4_get(g, r, c);
+            if v < 1 || v > 4 { return false; }
+            let bit = 1 << v;
+            if (seen & bit) != 0 { return false; }
+            seen = seen | bit;
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    true
+}
+
+fn is_valid_sudoku(g: Grid4) -> Bool {
+    // Check all rows
+    let mut r = 0;
+    while r < 4 {
+        if check_row(g, r) == false { return false; }
+        r = r + 1;
+    }
+    // Check all columns
+    let mut c = 0;
+    while c < 4 {
+        if check_col(g, c) == false { return false; }
+        c = c + 1;
+    }
+    // Check all 2x2 boxes
+    if check_box(g, 0, 0) == false { return false; }
+    if check_box(g, 0, 2) == false { return false; }
+    if check_box(g, 2, 0) == false { return false; }
+    if check_box(g, 2, 2) == false { return false; }
+    true
+}
+
+fn test_valid_solution() {
+    // Valid 4x4 Sudoku:
+    // 1 2 | 3 4
+    // 3 4 | 1 2
+    // ----+----
+    // 2 1 | 4 3
+    // 4 3 | 2 1
+    let g = Grid4 {
+        c00: 1, c01: 2, c02: 3, c03: 4,
+        c10: 3, c11: 4, c12: 1, c13: 2,
+        c20: 2, c21: 1, c22: 4, c23: 3,
+        c30: 4, c31: 3, c32: 2, c33: 1
+    };
+    assert_eq(is_valid_sudoku(g), true);
+}
+
+fn test_another_valid() {
+    // Another valid:
+    // 2 1 | 4 3
+    // 4 3 | 2 1
+    // ----+----
+    // 1 2 | 3 4
+    // 3 4 | 1 2
+    let g = Grid4 {
+        c00: 2, c01: 1, c02: 4, c03: 3,
+        c10: 4, c11: 3, c12: 2, c13: 1,
+        c20: 1, c21: 2, c22: 3, c23: 4,
+        c30: 3, c31: 4, c32: 1, c33: 2
+    };
+    assert_eq(is_valid_sudoku(g), true);
+}
+
+fn test_duplicate_in_row() {
+    let g = Grid4 {
+        c00: 1, c01: 1, c02: 3, c03: 4,  // Row 0 has two 1s
+        c10: 3, c11: 4, c12: 1, c13: 2,
+        c20: 2, c21: 1, c22: 4, c23: 3,
+        c30: 4, c31: 3, c32: 2, c33: 1
+    };
+    assert_eq(is_valid_sudoku(g), false);
+}
+
+fn test_duplicate_in_col() {
+    let g = Grid4 {
+        c00: 1, c01: 2, c02: 3, c03: 4,
+        c10: 1, c11: 4, c12: 2, c13: 3,  // Col 0 has two 1s
+        c20: 2, c21: 1, c22: 4, c23: 3,
+        c30: 4, c31: 3, c32: 1, c33: 2
+    };
+    assert_eq(is_valid_sudoku(g), false);
+}
+
+fn test_duplicate_in_box() {
+    let g = Grid4 {
+        c00: 1, c01: 2, c02: 3, c03: 4,
+        c10: 2, c11: 1, c12: 4, c13: 3,  // Top-left box: 1,2,2,1 - duplicate
+        c20: 3, c21: 4, c22: 1, c23: 2,
+        c30: 4, c31: 3, c32: 2, c33: 1
+    };
+    assert_eq(is_valid_sudoku(g), false);
+}
+
+fn test_individual_checks() {
+    let g = Grid4 {
+        c00: 1, c01: 2, c02: 3, c03: 4,
+        c10: 3, c11: 4, c12: 1, c13: 2,
+        c20: 2, c21: 1, c22: 4, c23: 3,
+        c30: 4, c31: 3, c32: 2, c33: 1
+    };
+    assert_eq(check_row(g, 0), true);
+    assert_eq(check_row(g, 1), true);
+    assert_eq(check_col(g, 0), true);
+    assert_eq(check_col(g, 3), true);
+    assert_eq(check_box(g, 0, 0), true);
+    assert_eq(check_box(g, 2, 2), true);
+}
+
+fn main() -> Int {
+    test_valid_solution();
+    test_another_valid();
+    test_duplicate_in_row();
+    test_duplicate_in_col();
+    test_duplicate_in_box();
+    test_individual_checks();
+    print("[OK] 263_sudoku_validator_aot");
+    0
+}

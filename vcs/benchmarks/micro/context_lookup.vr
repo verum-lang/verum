@@ -1,0 +1,179 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: 5-30ns per lookup
+// @tags: context, dependency-injection, performance
+
+/// Benchmark for Context System (Dependency Injection) lookup performance
+///
+/// The Context System provides runtime DI with explicit dependencies:
+/// - `context X` declares a context type
+/// - `provide X(value)` injects a value
+/// - `using [X, Y, Z]` declares dependencies
+///
+/// Target performance: 5-30ns per context lookup
+
+module benchmarks.micro.context_lookup
+
+using [Benchmark]
+
+// Define context types
+context Database {
+    fn query(sql: Text) -> Result<List<Row>, Error>
+}
+
+context Logger {
+    fn log(level: LogLevel, message: Text)
+}
+
+context Config {
+    fn get(key: Text) -> Maybe<Text>
+}
+
+context Cache {
+    fn get(key: Text) -> Maybe<Any>
+    fn set(key: Text, value: Any, ttl: Duration)
+}
+
+context Metrics {
+    fn increment(name: Text, value: Int)
+}
+
+/// Simple single context lookup
+fn benchmark_context_single_lookup() using [Logger] {
+    for _ in 0..1_000_000 {
+        Logger.log(LogLevel.Debug, "benchmark message");
+    }
+}
+
+/// Multiple context lookups in sequence
+fn benchmark_context_multi_lookup() using [Database, Logger, Config] {
+    for _ in 0..500_000 {
+        let _ = Config.get("key");
+        Logger.log(LogLevel.Debug, "message");
+        // Database not actually called to avoid I/O
+    }
+}
+
+/// Nested context scopes
+fn benchmark_context_nested_scope() using [Logger] {
+    for _ in 0..100_000 {
+        provide Logger(MockLogger.new()) {
+            // Inner scope with different logger
+            Logger.log(LogLevel.Info, "inner message");
+
+            provide Logger(AnotherMockLogger.new()) {
+                // Even deeper scope
+                Logger.log(LogLevel.Info, "deepest message");
+            }
+        }
+    }
+}
+
+/// Context lookup with thread-local storage
+fn benchmark_context_tls_lookup() using [Metrics] {
+    // Context is stored in thread-local storage for fast access
+    for _ in 0..2_000_000 {
+        Metrics.increment("counter", 1);
+    }
+}
+
+/// Context provide overhead
+fn benchmark_context_provide_overhead() {
+    let logger = MockLogger.new();
+
+    for _ in 0..500_000 {
+        provide Logger(logger) {
+            // Minimal work in scope
+            let _ = 1 + 1;
+        }
+    }
+}
+
+/// Context with complex type
+fn benchmark_context_complex_type() using [Database] {
+    context ComplexContext {
+        config: Map<Text, Any>,
+        handlers: List<fn(Event) -> Result<(), Error>>,
+        state: SharedState,
+    }
+
+    provide ComplexContext(create_complex_context()) {
+        for _ in 0..100_000 {
+            let _ = ComplexContext.config.get("key");
+        }
+    }
+}
+
+/// Context inheritance through call stack
+fn benchmark_context_inheritance() using [Logger, Config] {
+    fn inner_function() using [Logger, Config] {
+        Logger.log(LogLevel.Debug, "inner");
+        let _ = Config.get("key");
+    }
+
+    fn middle_function() using [Logger, Config] {
+        inner_function();
+    }
+
+    for _ in 0..200_000 {
+        middle_function();
+    }
+}
+
+/// Context with optional dependencies
+fn benchmark_context_optional() {
+    fn function_with_optional() using [?Cache] {
+        match Cache {
+            Some(cache) => cache.get("key"),
+            None => Maybe.None,
+        }
+    }
+
+    // Without cache
+    for _ in 0..500_000 {
+        function_with_optional();
+    }
+
+    // With cache
+    provide Cache(MemoryCache.new()) {
+        for _ in 0..500_000 {
+            function_with_optional();
+        }
+    }
+}
+
+/// Benchmark context registry operations
+fn benchmark_context_registry() {
+    for _ in 0..100_000 {
+        let registry = ContextRegistry.new();
+        registry.register<Logger>(MockLogger.new());
+        registry.register<Config>(MockConfig.new());
+        registry.register<Metrics>(MockMetrics.new());
+
+        let _ = registry.resolve<Logger>();
+        let _ = registry.resolve<Config>();
+        let _ = registry.resolve<Metrics>();
+    }
+}
+
+// Mock implementations for benchmarking
+type MockLogger is {};
+implement MockLogger {
+    fn new() -> Self { MockLogger {} }
+}
+implement Logger for MockLogger {
+    fn log(level: LogLevel, message: Text) {
+        // No-op for benchmark
+    }
+}
+
+type MockConfig is {};
+implement Config for MockConfig {
+    fn get(key: Text) -> Maybe<Text> { Maybe.None }
+}
+
+type MockMetrics is {};
+implement Metrics for MockMetrics {
+    fn increment(name: Text, value: Int) {}
+}

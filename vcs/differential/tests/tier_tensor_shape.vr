@@ -1,0 +1,475 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, tensor, shape
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for tensor shape
+/// operations. Tests reshape, flatten, broadcast, and concatenation using struct-based
+/// matrix simulation with shape metadata.
+
+// ============================================================================
+// Flat array representation (8 elements)
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_print(label: Text, a: Arr8, len: Int) {
+    let mut i = 0;
+    while i < len {
+        println(f"  {label}[{i}]: {arr8_get(a, i)}");
+        i = i + 1;
+    }
+}
+
+// ============================================================================
+// 2D matrix with shape metadata (max 16 elements)
+// ============================================================================
+
+type Mat16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int,
+    rows: Int,
+    cols: Int
+};
+
+fn mat16_get(m: Mat16, i: Int) -> Int {
+    if i == 0 { m.e0 } else if i == 1 { m.e1 } else if i == 2 { m.e2 }
+    else if i == 3 { m.e3 } else if i == 4 { m.e4 } else if i == 5 { m.e5 }
+    else if i == 6 { m.e6 } else if i == 7 { m.e7 } else if i == 8 { m.e8 }
+    else if i == 9 { m.e9 } else if i == 10 { m.e10 } else if i == 11 { m.e11 }
+    else if i == 12 { m.e12 } else if i == 13 { m.e13 } else if i == 14 { m.e14 }
+    else { m.e15 }
+}
+
+fn mat16_get2d(m: Mat16, row: Int, col: Int) -> Int {
+    mat16_get(m, row * m.cols + col)
+}
+
+fn mat16_set(m: Mat16, i: Int, v: Int) -> Mat16 {
+    Mat16 {
+        e0: if i == 0 { v } else { m.e0 },
+        e1: if i == 1 { v } else { m.e1 },
+        e2: if i == 2 { v } else { m.e2 },
+        e3: if i == 3 { v } else { m.e3 },
+        e4: if i == 4 { v } else { m.e4 },
+        e5: if i == 5 { v } else { m.e5 },
+        e6: if i == 6 { v } else { m.e6 },
+        e7: if i == 7 { v } else { m.e7 },
+        e8: if i == 8 { v } else { m.e8 },
+        e9: if i == 9 { v } else { m.e9 },
+        e10: if i == 10 { v } else { m.e10 },
+        e11: if i == 11 { v } else { m.e11 },
+        e12: if i == 12 { v } else { m.e12 },
+        e13: if i == 13 { v } else { m.e13 },
+        e14: if i == 14 { v } else { m.e14 },
+        e15: if i == 15 { v } else { m.e15 },
+        rows: m.rows,
+        cols: m.cols
+    }
+}
+
+fn mat16_zeros(rows: Int, cols: Int) -> Mat16 {
+    Mat16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0,
+        rows: rows, cols: cols
+    }
+}
+
+/// Print a 2D matrix
+fn mat16_print(label: Text, m: Mat16) {
+    let mut r = 0;
+    while r < m.rows {
+        let mut c = 0;
+        while c < m.cols {
+            println(f"  {label}[{r},{c}]: {mat16_get2d(m, r, c)}");
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+}
+
+// ============================================================================
+// Shape operations
+// ============================================================================
+
+/// Reshape: reinterpret a flat array as a 2D matrix (data stays the same, only shape changes)
+fn reshape(data: Arr8, rows: Int, cols: Int) -> Mat16 {
+    let mut out = mat16_zeros(rows, cols);
+    let total = rows * cols;
+    let mut i = 0;
+    while i < total && i < 8 {
+        out = mat16_set(out, i, arr8_get(data, i));
+        i = i + 1;
+    }
+    out
+}
+
+/// Flatten: convert a 2D matrix to a flat array
+fn flatten(m: Mat16) -> Arr8 {
+    let mut out = arr8_zeros();
+    let total = m.rows * m.cols;
+    let mut i = 0;
+    while i < total && i < 8 {
+        out = arr8_set(out, i, mat16_get(m, i));
+        i = i + 1;
+    }
+    out
+}
+
+/// Transpose a 2D matrix
+fn mat16_transpose(m: Mat16) -> Mat16 {
+    let mut out = mat16_zeros(m.cols, m.rows);
+    let mut r = 0;
+    while r < m.rows {
+        let mut c = 0;
+        while c < m.cols {
+            out = mat16_set(out, c * m.rows + r, mat16_get2d(m, r, c));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    out
+}
+
+/// Concatenate two flat arrays: result = a[0..len_a] ++ b[0..len_b]
+fn arr8_concat(a: Arr8, len_a: Int, b: Arr8, len_b: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len_a && i < 8 {
+        out = arr8_set(out, i, arr8_get(a, i));
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < len_b && (len_a + j) < 8 {
+        out = arr8_set(out, len_a + j, arr8_get(b, j));
+        j = j + 1;
+    }
+    out
+}
+
+/// Broadcast scalar to array
+fn broadcast_scalar(v: Int, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len && i < 8 {
+        out = arr8_set(out, i, v);
+        i = i + 1;
+    }
+    out
+}
+
+/// Add a broadcasted scalar to each element
+fn arr8_add_broadcast(a: Arr8, scalar: Int, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(a, i) + scalar);
+        i = i + 1;
+    }
+    out
+}
+
+/// Row-wise broadcast add: add a 1D row vector to each row of a matrix
+fn mat16_add_row_broadcast(m: Mat16, row_vec: Arr8) -> Mat16 {
+    let mut out = mat16_zeros(m.rows, m.cols);
+    let mut r = 0;
+    while r < m.rows {
+        let mut c = 0;
+        while c < m.cols {
+            let idx = r * m.cols + c;
+            out = mat16_set(out, idx, mat16_get2d(m, r, c) + arr8_get(row_vec, c));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    out
+}
+
+/// Extract a row from a matrix as a flat array
+fn mat16_get_row(m: Mat16, row: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut c = 0;
+    while c < m.cols && c < 8 {
+        out = arr8_set(out, c, mat16_get2d(m, row, c));
+        c = c + 1;
+    }
+    out
+}
+
+/// Extract a column from a matrix as a flat array
+fn mat16_get_col(m: Mat16, col: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut r = 0;
+    while r < m.rows && r < 8 {
+        out = arr8_set(out, r, mat16_get2d(m, r, col));
+        r = r + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Test functions
+// ============================================================================
+
+/// Test reshape: flat array to 2D and back
+fn test_reshape() {
+    println("=== Reshape ===");
+
+    // [1,2,3,4,5,6] -> 2x3 matrix
+    let data = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 0, e7: 0 };
+    let m23 = reshape(data, 2, 3);
+    println(f"reshape([1..6], 2, 3):");
+    println(f"  shape: {m23.rows}x{m23.cols}");
+    mat16_print("m23", m23);
+
+    // Same data -> 3x2 matrix
+    let m32 = reshape(data, 3, 2);
+    println(f"reshape([1..6], 3, 2):");
+    println(f"  shape: {m32.rows}x{m32.cols}");
+    mat16_print("m32", m32);
+
+    // 1x6 (row vector)
+    let m16 = reshape(data, 1, 6);
+    println(f"reshape([1..6], 1, 6):");
+    println(f"  shape: {m16.rows}x{m16.cols}");
+    mat16_print("m16", m16);
+
+    // 6x1 (column vector)
+    let m61 = reshape(data, 6, 1);
+    println(f"reshape([1..6], 6, 1):");
+    println(f"  shape: {m61.rows}x{m61.cols}");
+    mat16_print("m61", m61);
+
+    // Verify data preserved: same element sum
+    let mut sum_flat = 0;
+    let mut i = 0;
+    while i < 6 {
+        sum_flat = sum_flat + arr8_get(data, i);
+        i = i + 1;
+    }
+    let mut sum_2d = 0;
+    let mut j = 0;
+    while j < 6 {
+        sum_2d = sum_2d + mat16_get(m23, j);
+        j = j + 1;
+    }
+    println(f"flat sum: {sum_flat}");
+    println(f"reshaped sum: {sum_2d}");
+    println(f"sums match: {sum_flat == sum_2d}");
+}
+
+/// Test flatten: 2D to flat
+fn test_flatten() {
+    println("\n=== Flatten ===");
+
+    // Create a 2x3 matrix and flatten it
+    let data = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 0, e7: 0 };
+    let m = reshape(data, 2, 3);
+    let flat = flatten(m);
+    println(f"flatten(2x3 [10..60]):");
+    arr8_print("flat", flat, 6);
+
+    // Flatten preserves data
+    let mut same = true;
+    let mut i = 0;
+    while i < 6 {
+        if arr8_get(flat, i) != arr8_get(data, i) {
+            same = false;
+        }
+        i = i + 1;
+    }
+    println(f"flatten preserves data: {same}");
+
+    // Reshape then flatten = original
+    let data2 = Arr8 { e0: 5, e1: 10, e2: 15, e3: 20, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let m2 = reshape(data2, 2, 2);
+    let flat2 = flatten(m2);
+    println(f"reshape then flatten [5,10,15,20]:");
+    arr8_print("flat2", flat2, 4);
+
+    // 3x3 matrix flatten
+    let data3 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    // Use first 8 elements: reshape as 2x4, then flatten
+    let m3 = reshape(data3, 2, 4);
+    println(f"2x4 matrix:");
+    mat16_print("m3", m3);
+    let flat3 = flatten(m3);
+    println(f"flattened 2x4:");
+    arr8_print("flat3", flat3, 8);
+}
+
+/// Test broadcast operations
+fn test_broadcast() {
+    println("\n=== Broadcast ===");
+
+    // Scalar broadcast
+    let bcast = broadcast_scalar(5, 6);
+    println(f"broadcast(5, 6):");
+    arr8_print("bcast", bcast, 6);
+
+    // Scalar add broadcast on array
+    let a = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 0, e6: 0, e7: 0 };
+    let added = arr8_add_broadcast(a, 100, 5);
+    println(f"[10,20,30,40,50] + broadcast(100):");
+    arr8_print("added", added, 5);
+
+    // Row broadcast on matrix: add [1, 2, 3] to each row of 2x3 matrix
+    let data = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 0, e7: 0 };
+    let m = reshape(data, 2, 3);
+    let row_vec = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let result = mat16_add_row_broadcast(m, row_vec);
+    println(f"2x3 + row_broadcast([1,2,3]):");
+    mat16_print("result", result);
+
+    // Verify: row 0 gets +[1,2,3], row 1 gets +[1,2,3]
+    println(f"  expected [0,0]: {10 + 1}");
+    println(f"  expected [0,1]: {20 + 2}");
+    println(f"  expected [0,2]: {30 + 3}");
+    println(f"  expected [1,0]: {40 + 1}");
+    println(f"  expected [1,1]: {50 + 2}");
+    println(f"  expected [1,2]: {60 + 3}");
+}
+
+/// Test concatenation
+fn test_concatenation() {
+    println("\n=== Concatenation ===");
+
+    // Concatenate two arrays
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 4, e1: 5, e2: 6, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let cat_ab = arr8_concat(a, 3, b, 3);
+    println(f"concat([1,2,3], [4,5,6]):");
+    arr8_print("cat", cat_ab, 6);
+
+    // Concat with empty
+    let empty = arr8_zeros();
+    let cat_ae = arr8_concat(a, 3, empty, 0);
+    println(f"concat([1,2,3], []):");
+    arr8_print("cat_ae", cat_ae, 3);
+
+    let cat_ea = arr8_concat(empty, 0, a, 3);
+    println(f"concat([], [1,2,3]):");
+    arr8_print("cat_ea", cat_ea, 3);
+
+    // Concat unequal lengths
+    let c = Arr8 { e0: 10, e1: 20, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let d = Arr8 { e0: 30, e1: 40, e2: 50, e3: 60, e4: 70, e5: 0, e6: 0, e7: 0 };
+    let cat_cd = arr8_concat(c, 2, d, 5);
+    println(f"concat([10,20], [30,40,50,60,70]):");
+    arr8_print("cat_cd", cat_cd, 7);
+
+    // Total length check
+    println(f"concat length: {2 + 5}");
+}
+
+/// Test row/column extraction and transpose
+fn test_row_col_extract() {
+    println("\n=== Row/Column Extraction ===");
+
+    // Create a 3x3 matrix
+    let data = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    // Actually need 9 elements but Arr8 only has 8, so use 2x4 for this test
+    let m = reshape(data, 2, 4);
+    println(f"2x4 matrix:");
+    mat16_print("m", m);
+
+    // Extract rows
+    let row0 = mat16_get_row(m, 0);
+    println(f"row 0:");
+    arr8_print("r0", row0, 4);
+
+    let row1 = mat16_get_row(m, 1);
+    println(f"row 1:");
+    arr8_print("r1", row1, 4);
+
+    // Extract columns
+    let col0 = mat16_get_col(m, 0);
+    println(f"col 0:");
+    arr8_print("c0", col0, 2);
+
+    let col1 = mat16_get_col(m, 1);
+    println(f"col 1:");
+    arr8_print("c1", col1, 2);
+
+    let col3 = mat16_get_col(m, 3);
+    println(f"col 3:");
+    arr8_print("c3", col3, 2);
+
+    // Transpose
+    let mt = mat16_transpose(m);
+    println(f"transpose(2x4):");
+    println(f"  shape: {mt.rows}x{mt.cols}");
+    mat16_print("mt", mt);
+
+    // Double transpose restores original shape
+    let mtt = mat16_transpose(mt);
+    println(f"double transpose shape: {mtt.rows}x{mtt.cols}");
+
+    // Verify data preserved after double transpose
+    let mut same = true;
+    let total = m.rows * m.cols;
+    let mut i = 0;
+    while i < total {
+        if mat16_get(m, i) != mat16_get(mtt, i) {
+            same = false;
+        }
+        i = i + 1;
+    }
+    println(f"double transpose preserves data: {same}");
+
+    // Transpose exchanges row/col: m[r,c] == mt[c,r]
+    let mut transpose_ok = true;
+    let mut r = 0;
+    while r < m.rows {
+        let mut c = 0;
+        while c < m.cols {
+            if mat16_get2d(m, r, c) != mat16_get2d(mt, c, r) {
+                transpose_ok = false;
+            }
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    println(f"m[r,c] == mt[c,r] for all r,c: {transpose_ok}");
+}
+
+fn main() {
+    test_reshape();
+    test_flatten();
+    test_broadcast();
+    test_concatenation();
+    test_row_col_extract();
+}

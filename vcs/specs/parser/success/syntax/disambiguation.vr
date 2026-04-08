@@ -1,0 +1,339 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: syntax, disambiguation, ambiguity, self-hosting-critical
+// @expect: pass
+// Test: Ambiguous syntax disambiguation for self-hosting verification
+
+// =============================================================================
+// ANGLE BRACKET DISAMBIGUATION: < as comparison vs generic
+// =============================================================================
+
+// Generic type with angle brackets
+fn use_generic<T>(x: T) -> T { x }
+
+// Comparison with less-than
+fn test_less_than() -> Bool {
+    let a = 5 < 10;
+    let b = 3 < 7;
+    a && b
+}
+
+// Generic followed by comparison
+fn test_generic_then_compare<T: Ord>(x: T, y: T) -> Bool {
+    x < y
+}
+
+// Nested generics
+fn nested_generics<T>() -> List<Maybe<T>> {
+    list![]
+}
+
+// Generic in expression position
+fn generic_expr() {
+    let x = List<Int>.new();
+    let y = Map<Text, List<Int>>.new();
+}
+
+// =============================================================================
+// AMPERSAND DISAMBIGUATION: & reference vs & bitwise AND vs & pattern
+// =============================================================================
+
+// Reference type
+fn take_ref(x: &Int) -> Int { *x }
+
+// Reference expression
+fn make_ref() {
+    let x = 5;
+    let r = &x;
+    let mr = &mut x;
+}
+
+// Bitwise AND
+fn bitwise_and() -> Int {
+    let a = 5 & 3;
+    let b = 0xFF & 0x0F;
+    a
+}
+
+// Reference pattern
+fn ref_pattern() {
+    let x = 5;
+    match &x {
+        &n => print(n),
+    }
+}
+
+// Mutable reference type
+fn mut_ref(x: &mut Int) {
+    *x = 10;
+}
+
+// Checked reference
+fn checked_ref(x: &checked Int) -> Int {
+    *x
+}
+
+// =============================================================================
+// PIPE DISAMBIGUATION: | closure vs | bitwise OR vs | or-pattern
+// =============================================================================
+
+// Bitwise OR
+fn bitwise_or() -> Int {
+    let a = 5 | 3;
+    let b = 0xF0 | 0x0F;
+    a
+}
+
+// Closure with pipes
+fn closure_pipe() {
+    let f = || 42;
+    let g = |x| x + 1;
+    let h = |x, y| x + y;
+}
+
+// Or-pattern in match
+fn or_pattern_match(x: Int) -> Text {
+    match x {
+        1 | 2 | 3 => "small",
+        4 | 5 | 6 => "medium",
+        _ => "large",
+    }
+}
+
+// Or-pattern in let
+fn or_pattern_let() {
+    let (a | b) = (1, 2);  // Destructuring with or
+}
+
+// =============================================================================
+// COLON DISAMBIGUATION: : type annotation vs : refinement vs : sigma
+// =============================================================================
+
+// Type annotation
+fn type_annotation() {
+    let x: Int = 5;
+    let y: List<Int> = list![1, 2, 3];
+}
+
+// Labeled loop/block
+fn labeled_loop() {
+    'outer: loop {
+        'inner: for i in 0..10 {
+            if i > 5 { break 'outer; }
+        }
+    }
+}
+
+// Tuple return type (Sigma types are tested in types/sigma_types.vr)
+fn tuple_return(n: Int) -> (Int, List<Int>) {
+    (n, list![1; n])
+}
+
+// Struct field with type
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+// Map literal with colons
+fn map_literal() {
+    let m = map!{
+        "key1": 1,
+        "key2": 2,
+    };
+}
+
+// =============================================================================
+// DOUBLE COLON DISAMBIGUATION: :: path vs :. lens
+// =============================================================================
+
+// Path resolution
+fn path_resolution() {
+    // Qualified path
+    let x: std.collections.List<Int> = [];
+    // Variant construction
+    let y = Maybe.Some(5);
+}
+
+// Lens accessor (if supported)
+fn lens_accessor() {
+    let p = Point { x: 1.0, y: 2.0 };
+    // let x_val = p:.x;  // Lens access
+}
+
+// =============================================================================
+// DOT DISAMBIGUATION: . field vs . method vs . path
+// =============================================================================
+
+// Field access
+fn field_access(p: Point) -> Float {
+    p.x
+}
+
+// Method call
+fn method_call(list: List<Int>) -> Int {
+    list.len()
+}
+
+// Chained access
+fn chained_access(p: Point) -> Float {
+    p.clone().x
+}
+
+// Path with dots
+fn path_with_dots() {
+    mount core.collections;
+    let v = collections.List.new();
+}
+
+// =============================================================================
+// BRACKET DISAMBIGUATION: [] index vs [] array type vs [] array literal
+// =============================================================================
+
+// Array type
+fn array_type(arr: [Int; 5]) -> Int {
+    arr[0]
+}
+
+// Slice type
+fn slice_type(s: &[Int]) -> Int {
+    s[0]
+}
+
+// Array literal
+fn array_literal() -> [Int; 3] {
+    [1, 2, 3]
+}
+
+// Index expression
+fn index_expr(arr: [Int; 5], i: Int) -> Int {
+    arr[i]
+}
+
+// Slice expression
+fn slice_expr(arr: [Int; 10]) -> &[Int] {
+    &arr[2..5]
+}
+
+// =============================================================================
+// BRACE DISAMBIGUATION: {} block vs {} struct literal vs {} map
+// =============================================================================
+
+// Block expression
+fn block_expr() -> Int {
+    {
+        let x = 1;
+        let y = 2;
+        x + y
+    }
+}
+
+// Struct literal
+fn struct_literal() -> Point {
+    Point { x: 1.0, y: 2.0 }
+}
+
+// Map literal
+fn map_literal_brace() -> Map<Text, Int> {
+    map!{"a": 1, "b": 2}
+}
+
+// If with block
+fn if_block() -> Int {
+    if true { 1 } else { 2 }
+}
+
+// =============================================================================
+// ARROW DISAMBIGUATION: -> return type vs -> match arm vs -> closure
+// =============================================================================
+
+// Function return type
+fn return_type() -> Int { 42 }
+
+// Match arm
+fn match_arm(x: Int) -> Text {
+    match x {
+        1 => "one",
+        2 => "two",
+        _ => "other",
+    }
+}
+
+// Closure with return type
+fn closure_with_return() {
+    let f: fn(Int) -> Int = |x| x + 1;
+}
+
+// =============================================================================
+// QUESTION MARK DISAMBIGUATION: ? error propagation vs ? optional
+// =============================================================================
+
+// Error propagation
+fn error_prop() -> Result<Int, Error> {
+    let x = fallible_op()?;
+    Ok(x)
+}
+
+// Optional chaining (if supported)
+fn optional_chain(opt: Maybe<Point>) -> Maybe<Float> {
+    opt?.x
+}
+
+// =============================================================================
+// STAR DISAMBIGUATION: * dereference vs * multiplication vs * pointer
+// =============================================================================
+
+// Dereference
+fn dereference(r: &Int) -> Int {
+    *r
+}
+
+// Multiplication
+fn multiplication() -> Int {
+    5 * 3
+}
+
+// Pointer type (raw)
+fn pointer_type(p: *const Int) -> Int {
+    unsafe { *p }
+}
+
+// =============================================================================
+// KEYWORD DISAMBIGUATION
+// =============================================================================
+
+// 'in' as membership vs 'in' as for-loop keyword
+fn in_disambiguation() {
+    // For loop
+    for x in 0..10 {
+        print(x);
+    }
+
+    // Provide-in expression
+    provide Logger = logger in {
+        log("hello");
+    }
+}
+
+// 'as' as type cast vs 'as' as rename
+fn as_disambiguation() {
+    // Type cast
+    let x = 5 as Float;
+
+    // Import rename
+    mount core.collections.List as L;
+}
+
+// 'match' keyword vs .match() method
+fn match_disambiguation(s: Text) {
+    // Match expression
+    match s {
+        "a" => 1,
+        "b" => 2,
+        _ => 0,
+    };
+
+    // Method call (if there's a match method)
+    // s.match(regex);
+}

@@ -1,0 +1,25 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: name-collision, function, stdlib, e2e
+// @description: Test that user-defined functions named 'pipe' don't collide with stdlib FFI
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { g(f(x)) }
+}
+
+fn main() -> Int {
+    let inc = |x: Int| -> Int { x + 1 };
+    let double = |x: Int| -> Int { x * 2 };
+
+    // pipe(inc, double) should give inc then double: (5+1)*2 = 12
+    let inc_then_double = compose(inc, double);
+    let result = inc_then_double(5);
+    if result != 12 {
+        print(f"FAIL: pipe result = {result}, expected 12");
+        return 1;
+    }
+
+    print("pipe name collision test: PASS");
+    0
+}

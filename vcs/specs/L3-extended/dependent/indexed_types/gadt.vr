@@ -1,0 +1,126 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, gadt
+
+/// Generalized Algebraic Data Types (GADTs)
+///
+/// GADTs allow constructors to carry type witnesses.
+
+/// Expression type for a simple typed language
+type IntExpr is
+    | IntLit(Int)
+    | IntAdd { left: Heap<IntExpr>, right: Heap<IntExpr> }
+    | IntMul { left: Heap<IntExpr>, right: Heap<IntExpr> }
+    | IntNeg(Heap<IntExpr>);
+
+/// Evaluate integer expressions
+fn eval_int(expr: IntExpr) -> Int {
+    match expr {
+        IntLit(n) => n,
+        IntAdd { left, right } => eval_int(*left) + eval_int(*right),
+        IntMul { left, right } => eval_int(*left) * eval_int(*right),
+        IntNeg(inner) => 0 - eval_int(*inner),
+    }
+}
+
+/// Boolean expression type
+type BoolExpr is
+    | BoolLit(Bool)
+    | BoolNot(Heap<BoolExpr>)
+    | BoolAnd { left: Heap<BoolExpr>, right: Heap<BoolExpr> }
+    | BoolOr { left: Heap<BoolExpr>, right: Heap<BoolExpr> }
+    | IntLt { left: Heap<IntExpr>, right: Heap<IntExpr> }
+    | IntEq { left: Heap<IntExpr>, right: Heap<IntExpr> };
+
+/// Evaluate boolean expressions
+fn eval_bool(expr: BoolExpr) -> Bool {
+    match expr {
+        BoolLit(b) => b,
+        BoolNot(inner) => !eval_bool(*inner),
+        BoolAnd { left, right } => eval_bool(*left) && eval_bool(*right),
+        BoolOr { left, right } => eval_bool(*left) || eval_bool(*right),
+        IntLt { left, right } => eval_int(*left) < eval_int(*right),
+        IntEq { left, right } => eval_int(*left) == eval_int(*right),
+    }
+}
+
+/// Type-safe expression builders
+fn lit(n: Int) -> IntExpr { IntLit(n) }
+fn add(a: IntExpr, b: IntExpr) -> IntExpr { IntAdd { left: Heap(a), right: Heap(b) } }
+fn mul(a: IntExpr, b: IntExpr) -> IntExpr { IntMul { left: Heap(a), right: Heap(b) } }
+fn neg(a: IntExpr) -> IntExpr { IntNeg(Heap(a)) }
+
+fn bool_lit(b: Bool) -> BoolExpr { BoolLit(b) }
+fn bool_not(a: BoolExpr) -> BoolExpr { BoolNot(Heap(a)) }
+fn bool_and(a: BoolExpr, b: BoolExpr) -> BoolExpr { BoolAnd { left: Heap(a), right: Heap(b) } }
+fn int_lt(a: IntExpr, b: IntExpr) -> BoolExpr { IntLt { left: Heap(a), right: Heap(b) } }
+fn int_eq(a: IntExpr, b: IntExpr) -> BoolExpr { IntEq { left: Heap(a), right: Heap(b) } }
+
+/// GADT-style typed list
+type TypedNil is ();
+type TypedCons<T> is { head: T, tail_len: Int };
+
+/// GADT-style typed option
+type TypedOption<T> is
+    | TNone
+    | TSome(T);
+
+/// Optimize integer expressions
+fn optimize_int(expr: IntExpr) -> IntExpr {
+    match expr {
+        IntAdd { left, right } => {
+            let l = optimize_int(*left);
+            let r = optimize_int(*right);
+            // Constant folding
+            match (l, r) {
+                (IntLit(0), b) => b,     // 0 + b = b
+                (a, IntLit(0)) => a,     // a + 0 = a
+                (a, b) => IntAdd { left: Heap(a), right: Heap(b) },
+            }
+        }
+        IntMul { left, right } => {
+            let l = optimize_int(*left);
+            let r = optimize_int(*right);
+            match (l, r) {
+                (IntLit(0), _) => IntLit(0),  // 0 * b = 0
+                (_, IntLit(0)) => IntLit(0),  // a * 0 = 0
+                (IntLit(1), b) => b,           // 1 * b = b
+                (a, IntLit(1)) => a,           // a * 1 = a
+                (a, b) => IntMul { left: Heap(a), right: Heap(b) },
+            }
+        }
+        other => other,
+    }
+}
+
+fn main() {
+    // Build and evaluate integer expressions
+    let e1 = add(lit(3), lit(4));
+    assert(eval_int(e1) == 7);
+
+    let e2 = mul(lit(5), lit(6));
+    assert(eval_int(e2) == 30);
+
+    let e3 = neg(lit(42));
+    assert(eval_int(e3) == -42);
+
+    // Boolean expressions
+    let b1 = int_lt(lit(3), lit(5));
+    assert(eval_bool(b1) == true);
+
+    let b2 = bool_not(bool_lit(true));
+    assert(eval_bool(b2) == false);
+
+    let b3 = int_eq(lit(7), add(lit(3), lit(4)));
+    assert(eval_bool(b3) == true);
+
+    // Nested expression
+    let complex = add(mul(lit(2), lit(3)), lit(4));
+    assert(eval_int(complex) == 10);
+
+    // Optimization
+    let redundant = add(lit(0), lit(42));
+    let optimized = optimize_int(redundant);
+    assert(eval_int(optimized) == 42);
+}

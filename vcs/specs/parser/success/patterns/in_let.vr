@@ -1,0 +1,559 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for patterns in let bindings
+
+// Grammar Reference:
+// let_stmt      = 'let' , pattern , [ ':' , type_expr ] , [ '=' , expression ] , ';' ;
+// let_else_stmt = 'let' , pattern , '=' , expression , 'else' , block_expr ;
+
+// ============================================================================
+// SECTION 1: Simple Let Bindings
+// ============================================================================
+
+fn test_simple_let() {
+    // Basic binding
+    let x = 1;
+    let value = compute();
+    let result = expression;
+
+    // With type annotation
+    let x: Int = 1;
+    let value: Text = "hello";
+    let result: Option<Int> = Some(42);
+
+    // Without initializer (declaration only)
+    let x: Int;
+    let value: Text;
+}
+
+// ============================================================================
+// SECTION 2: Mutable Let Bindings
+// ============================================================================
+
+fn test_mutable_let() {
+    // Simple mutable
+    let mut x = 0;
+    let mut counter = 0;
+
+    // With type annotation
+    let mut x: Int = 0;
+    let mut buffer: List<Int> = List.new();
+
+    // Declaration only
+    let mut x: Int;
+}
+
+// ============================================================================
+// SECTION 3: Wildcard in Let
+// ============================================================================
+
+fn test_wildcard_let() {
+    // Discard value
+    let _ = compute();
+    let _ = expensive_operation();
+
+    // With type annotation
+    let _: Int = 42;
+    let _: () = unit_function();
+}
+
+// ============================================================================
+// SECTION 4: Tuple Destructuring in Let
+// ============================================================================
+
+fn test_tuple_let() {
+    // Basic destructure
+    let (a, b) = pair;
+    let (x, y, z) = triple;
+
+    // With type annotation
+    let (a, b): (Int, Int) = pair;
+    let (x, y, z): (Int, Text, Bool) = triple;
+
+    // With wildcards
+    let (_, b) = pair;
+    let (a, _) = pair;
+    let (_, _, c) = triple;
+
+    // Nested tuples
+    let ((a, b), c) = nested;
+    let (a, (b, c)) = nested;
+    let ((a, b), (c, d)) = quad;
+
+    // With mutable
+    let (mut a, b) = pair;
+    let (a, mut b) = pair;
+    let (mut a, mut b) = pair;
+
+    // Single element tuple
+    let (x,) = single_tuple;
+}
+
+// ============================================================================
+// SECTION 5: Array Destructuring in Let
+// ============================================================================
+
+fn test_array_let() {
+    // Fixed size
+    let [a, b] = pair;
+    let [x, y, z] = triple;
+
+    // With type annotation
+    let [a, b]: [Int; 2] = pair;
+
+    // With wildcards
+    let [_, b, c] = arr;
+    let [a, _, c] = arr;
+
+    // With rest
+    let [first, ..] = arr;
+    let [.., last] = arr;
+    let [first, .., last] = arr;
+
+    // Named rest
+    let [head, ..tail] = arr;
+    let [..init, last] = arr;
+    let [first, ..middle, last] = arr;
+
+    // Nested arrays
+    let [[a, b], [c, d]] = matrix;
+}
+
+// ============================================================================
+// SECTION 6: Record Destructuring in Let
+// ============================================================================
+
+fn test_record_let() {
+    // Basic destructure (type name required!)
+    let Point { x, y } = point;
+    let Person { name, age } = person;
+
+    // With type annotation
+    let Point { x, y }: Point = point;
+
+    // Renamed fields
+    let Point { x: px, y: py } = point;
+    let Person { name: n, age: a } = person;
+
+    // Partial with rest
+    let Point { x, .. } = point;
+    let Person { name, .. } = person;
+    let Config { host, port, .. } = config;
+
+    // Just rest (type check)
+    let Point { .. } = point;
+
+    // With mutable
+    let Point { mut x, y } = point;
+    let Point { x: mut px, y } = point;
+
+    // Nested records
+    let Line {
+        start: Point { x: x1, y: y1 },
+        end: Point { x: x2, y: y2 }
+    } = line;
+}
+
+// ============================================================================
+// SECTION 7: Variant Destructuring in Let
+// ============================================================================
+
+fn test_variant_let() {
+    // Simple variant (irrefutable with else)
+    let Some(x) = option else { return };
+    let Ok(value) = result else { panic("error") };
+
+    // Tuple variant
+    let RGB(r, g, b) = color else { return };
+
+    // Record variant
+    let Circle { radius } = shape else { return };
+
+    // Nested variants
+    let Some(Some(x)) = nested else { return };
+    let Ok(Some(value)) = result else { return };
+}
+
+// ============================================================================
+// SECTION 8: Reference Patterns in Let
+// ============================================================================
+
+fn test_ref_let() {
+    // ref keyword
+    let ref x = value;
+    let ref mut x = value;
+
+    // Reference pattern (&)
+    let &x = reference;
+    let &mut x = mut_reference;
+
+    // In destructuring
+    let (ref a, ref b) = pair;
+    let Point { ref x, ref y } = point;
+
+    // Combined
+    let &(a, b) = pair_ref;
+    let &Point { x, y } = point_ref;
+}
+
+// ============================================================================
+// SECTION 9: @ Bindings in Let
+// ============================================================================
+
+fn test_at_let() {
+    // Simple @ binding
+    let whole @ (a, b) = pair;
+    let all @ [first, ..rest] = array;
+    let p @ Point { x, y } = point;
+
+    // Nested @
+    let outer @ (inner @ (a, b), c) = nested;
+
+    // With variant
+    let opt @ Some(value) = option else { return };
+}
+
+// ============================================================================
+// SECTION 10: Or Patterns in Let
+// ============================================================================
+
+fn test_or_let() {
+    // Simple or (with else)
+    let 0 | 1 = value else { return };
+
+    // In tuple
+    let (0 | 1, y) = pair else { return };
+
+    // In variant
+    let Some(0 | 1) = option else { return };
+
+    // Multiple or
+    let (0 | 1, 0 | 1) = bits else { return };
+}
+
+// ============================================================================
+// SECTION 11: Range Patterns in Let (with else)
+// ============================================================================
+
+fn test_range_let() {
+    // Range pattern
+    let 0..10 = value else { return };
+    let 'a'..='z' = char else { return };
+
+    // In tuple
+    let (0..10, y) = pair else { return };
+}
+
+// ============================================================================
+// SECTION 12: Literal Patterns in Let (with else)
+// ============================================================================
+
+fn test_literal_let() {
+    // Integer literal
+    let 42 = answer else { panic("not the answer") };
+
+    // Boolean literal
+    let true = check() else { return };
+
+    // String literal
+    let "expected" = value else { return };
+
+    // Character literal
+    let 'x' = char else { return };
+}
+
+// ============================================================================
+// SECTION 13: Let-Else Statements
+// ============================================================================
+
+fn test_let_else() {
+    // Basic let-else
+    let Some(x) = option else {
+        return
+    };
+
+    // With return value
+    let Ok(value) = result else {
+        return Err("failed")
+    };
+
+    // With panic
+    let Some(x) = option else {
+        panic("unexpected None")
+    };
+
+    // With early exit
+    let [first, ..] = array else {
+        continue
+    };
+
+    // Complex pattern in let-else
+    let Some(Point { x: 0, y }) = option else {
+        return default_y()
+    };
+
+    // Multiple statements in else block
+    let Ok(value) = result else {
+        log_error();
+        cleanup();
+        return None
+    };
+}
+
+// ============================================================================
+// SECTION 14: If-Let Expressions
+// ============================================================================
+
+fn test_if_let() {
+    // Basic if-let
+    if let Some(x) = option {
+        use(x)
+    }
+
+    // With else
+    if let Some(x) = option {
+        use(x)
+    } else {
+        default()
+    }
+
+    // With else-if
+    if let Some(x) = first {
+        use_first(x)
+    } else if let Some(y) = second {
+        use_second(y)
+    } else {
+        neither()
+    }
+
+    // Chained conditions
+    if let Some(x) = option && x > 0 {
+        positive(x)
+    }
+
+    // Multiple let conditions
+    if let Some(a) = first && let Some(b) = second {
+        both(a, b)
+    }
+
+    // Complex pattern
+    if let Some(Point { x: 0, y }) = option {
+        on_y_axis(y)
+    }
+}
+
+// ============================================================================
+// SECTION 15: While-Let Expressions
+// ============================================================================
+
+fn test_while_let() {
+    // Basic while-let
+    while let Some(x) = iterator.next() {
+        process(x)
+    }
+
+    // With complex pattern
+    while let Some((key, value)) = map.next() {
+        insert(key, value)
+    }
+
+    // With variant
+    while let Ok(item) = stream.read() {
+        handle(item)
+    }
+
+    // With array pattern
+    while let [head, ..tail] = remaining {
+        process(head);
+        remaining = tail
+    }
+
+    // With explicit if guard
+    while let Some(x) = iter.next() {
+        if x > 0 {
+            process_positive(x);
+        }
+    }
+}
+
+// ============================================================================
+// SECTION 16: Patterns in For Loops
+// ============================================================================
+
+fn test_for_patterns() {
+    // Simple
+    for x in collection {
+        process(x)
+    }
+
+    // Tuple destructure
+    for (index, value) in enumerated {
+        indexed_process(index, value)
+    }
+
+    // Triple destructure
+    for (a, b, c) in triples {
+        process_triple(a, b, c)
+    }
+
+    // Record destructure
+    for Point { x, y } in points {
+        plot(x, y)
+    }
+
+    // Partial record
+    for Person { name, .. } in people {
+        greet(name)
+    }
+
+    // Array destructure
+    for [a, b] in pairs {
+        combine(a, b)
+    }
+
+    // Reference patterns
+    for &x in references {
+        read(x)
+    }
+
+    for &mut x in mut_references {
+        modify(x)
+    }
+
+    // With wildcards
+    for (_, value) in indexed {
+        process(value)
+    }
+}
+
+// ============================================================================
+// SECTION 17: Nested Patterns in Let
+// ============================================================================
+
+fn test_nested_let() {
+    // Deep tuple
+    let ((a, b), (c, d)) = nested;
+    let (((a, b), c), d) = deep;
+
+    // Deep array
+    let [[a, b], [c, d]] = matrix;
+    let [[[a]]] = cube;
+
+    // Deep record
+    let Outer { inner: Inner { value } } = nested;
+
+    // Deep variant
+    let Some(Some(Some(x))) = very_nested else { return };
+
+    // Mixed nesting
+    let (Point { x, y }, [a, b, c]) = complex;
+    let Some((Point { x, y }, data)) = option else { return };
+}
+
+// ============================================================================
+// SECTION 18: Complex Let Patterns
+// ============================================================================
+
+fn test_complex_let() {
+    // All features in tuple
+    let (
+        ref first,
+        mut second,
+        Point { x: px, .. },
+        Some(inner),
+        [head, ..tail]
+    ) = complex;
+
+    // Complex let-else
+    let Container {
+        data: Some([first, ..rest]),
+        status: Active { since, .. },
+        ..
+    } = container else {
+        return default_container()
+    };
+
+    // Deeply nested with @
+    let outer @ Some((
+        middle @ Point { x, y },
+        [head, ..tail]
+    )) = data else {
+        return None
+    };
+}
+
+// ============================================================================
+// SECTION 19: Let with Type Annotations
+// ============================================================================
+
+fn test_typed_let() {
+    // Simple types
+    let x: Int = 42;
+    let s: Text = "hello";
+    let b: Bool = true;
+
+    // Generic types
+    let opt: Option<Int> = Some(42);
+    let list: List<Text> = List.new();
+    let map: Map<Text, Int> = Map.new();
+
+    // Tuple types
+    let pair: (Int, Text) = (1, "one");
+    let triple: (Int, Int, Int) = (1, 2, 3);
+
+    // Array types
+    let arr: [Int; 3] = [1, 2, 3];
+
+    // Function types
+    let f: fn(Int) -> Int = |x| x + 1;
+
+    // Reference types
+    let r: &Int = &value;
+    let rm: &mut Int = &mut value;
+
+    // Destructuring with type
+    let (a, b): (Int, Text) = pair;
+    let Point { x, y }: Point = point;
+    let [a, b, c]: [Int; 3] = arr;
+}
+
+// ============================================================================
+// SECTION 20: Practical Let Examples
+// ============================================================================
+
+fn test_practical_let() {
+    // Configuration parsing
+    let Config { host, port, timeout, .. } = load_config();
+
+    // Error handling
+    let Ok(connection) = connect(host, port) else {
+        return Err("connection failed")
+    };
+
+    // Tuple unpacking from function
+    let (status, headers, body) = response.into_parts();
+
+    // Iterator usage
+    let [first, second, ..rest] = args else {
+        print("Usage: program <first> <second> [options...]");
+        return
+    };
+
+    // Option chaining
+    let Some(user) = get_user(id) else { return None };
+    let Some(profile) = user.profile else { return None };
+    let Some(email) = profile.email else { return None };
+
+    // Pattern matching result
+    let Ok(parsed) = parse(input) else {
+        log("Parse error");
+        return default_value()
+    };
+
+    // Destructuring in loop setup
+    let (mut iter, len) = prepare_iteration(data);
+    while let Some(item) = iter.next() {
+        process(item)
+    }
+}

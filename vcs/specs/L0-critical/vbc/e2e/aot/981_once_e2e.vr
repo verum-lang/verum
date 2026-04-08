@@ -1,0 +1,46 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, once, sync
+// @timeout: 50000
+// @expected-exit: 0
+
+mount core.sync.atomic.MemoryOrdering;
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    // Test Once semantics via AtomicInt swap
+    // State: 0=incomplete, 1=running, 2=complete
+    let state = AtomicInt.new(0);
+
+    // is_completed initially false
+    let before = state.load(Ordering.Acquire);
+    print(f"before: {before}");
+    if before == 0 { pass = pass + 1; }
+
+    // First call: swap 0 → 1 (claim running)
+    let old = state.swap(1, Ordering.AcqRel);
+    print(f"swap result: {old}");
+    if old == 0 { pass = pass + 1; }
+
+    // Mark complete
+    state.store(2, Ordering.Release);
+
+    // is_completed should be true now
+    let after = state.load(Ordering.Acquire);
+    print(f"after: {after}");
+    if after == 2 { pass = pass + 1; }
+
+    // Second swap should get 2, not 0
+    let old2 = state.swap(1, Ordering.AcqRel);
+    print(f"second swap: {old2}");
+    if old2 == 2 { pass = pass + 1; }
+
+    print(f"pass = {pass}/4");
+    if pass == 4 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

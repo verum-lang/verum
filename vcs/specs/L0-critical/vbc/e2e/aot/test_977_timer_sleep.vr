@@ -1,0 +1,63 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: timer, sleep, monotonic, runtime
+// @description: Test timer/sleep and monotonic clock runtime mechanisms
+
+fn test_sleep_basic() -> Int {
+    let start = monotonic_nanos();
+    sleep_ms(50);
+    let elapsed = monotonic_nanos() - start;
+    // Should have slept at least 40ms (allow some tolerance)
+    if elapsed < 40000000 {
+        print(f"FAIL: sleep too short: {elapsed}ns");
+        return 1;
+    }
+    print("  sleep_basic: OK");
+    0
+}
+
+fn test_sleep_multiple() -> Int {
+    let start = monotonic_nanos();
+    sleep_ms(20);
+    sleep_ms(20);
+    sleep_ms(20);
+    let elapsed = monotonic_nanos() - start;
+    // Should have slept at least 50ms total
+    if elapsed < 50000000 {
+        print(f"FAIL: multiple sleeps too short: {elapsed}ns");
+        return 1;
+    }
+    print("  sleep_multiple: OK");
+    0
+}
+
+fn test_monotonic_increases() -> Int {
+    let t1 = monotonic_nanos();
+    // Do some work
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 10000 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    let t2 = monotonic_nanos();
+    if t2 <= t1 {
+        print("FAIL: monotonic time did not increase");
+        return 1;
+    }
+    print("  monotonic_increases: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_monotonic_increases();
+    failures = failures + test_sleep_basic();
+    failures = failures + test_sleep_multiple();
+
+    if failures == 0 {
+        print("All timer tests passed");
+    }
+    failures
+}

@@ -1,0 +1,440 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, control-flow, return, break, continue, yield
+// @description: Test control flow expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// RETURN EXPRESSIONS (Section 2.12 - return_expr)
+// =============================================================================
+
+fn test_return_unit() {
+    return;
+}
+
+fn test_return_value() {
+    return 42;
+}
+
+fn test_return_expression() {
+    return compute();
+}
+
+fn test_return_complex_expression() {
+    return x + y * z;
+}
+
+fn test_return_conditional() {
+    return if condition { value_a } else { value_b };
+}
+
+fn test_return_match() {
+    return match result {
+        Ok(v) => v,
+        Err(e) => default
+    };
+}
+
+fn test_return_block() {
+    return {
+        let temp = compute();
+        finalize(temp)
+    };
+}
+
+fn test_early_return() {
+    if invalid {
+        return error_value;
+    }
+    normal_computation()
+}
+
+fn test_return_in_closure() {
+    let f = |x| {
+        if x < 0 {
+            return 0;
+        }
+        x
+    };
+}
+
+// =============================================================================
+// BREAK EXPRESSIONS (Section 2.12 - break_expr)
+// =============================================================================
+
+fn test_break_simple() {
+    loop {
+        break;
+    }
+}
+
+fn test_break_with_value() {
+    let val = loop {
+        if found {
+            break value;
+        }
+    };
+}
+
+fn test_break_with_expression() {
+    let result = loop {
+        let candidate = next();
+        if is_match(candidate) {
+            break candidate;
+        }
+    };
+}
+
+fn test_break_complex_value() {
+    let result = loop {
+        break compute_result();
+    };
+}
+
+fn test_break_conditional_value() {
+    let result = loop {
+        break if condition { a } else { b };
+    };
+}
+
+fn test_break_in_nested_loop() {
+    loop {
+        for item in items {
+            if should_stop(item) {
+                break;
+            }
+        }
+        if outer_done {
+            break;
+        }
+    }
+}
+
+fn test_break_in_while() {
+    while condition {
+        if early_exit {
+            break;
+        }
+        process();
+    }
+}
+
+fn test_break_in_for() {
+    for item in items {
+        if found(item) {
+            break;
+        }
+    }
+}
+
+// =============================================================================
+// CONTINUE EXPRESSIONS (Section 2.12 - continue_expr)
+// =============================================================================
+
+fn test_continue_simple() {
+    for item in items {
+        continue;
+    }
+}
+
+fn test_continue_conditional() {
+    for item in items {
+        if should_skip(item) {
+            continue;
+        }
+        process(item);
+    }
+}
+
+fn test_continue_in_while() {
+    while has_more {
+        let item = next();
+        if invalid(item) {
+            continue;
+        }
+        process(item);
+    }
+}
+
+fn test_continue_in_loop() {
+    loop {
+        let attempt = try_operation();
+        if attempt.is_retry() {
+            continue;
+        }
+        if attempt.is_success() {
+            break;
+        }
+    }
+}
+
+fn test_continue_nested() {
+    for outer in outers {
+        for inner in inners {
+            if skip_inner(inner) {
+                continue;
+            }
+            process(outer, inner);
+        }
+    }
+}
+
+// =============================================================================
+// YIELD EXPRESSIONS (Section 2.12.1.1 - yield_expr)
+// =============================================================================
+
+fn* test_yield_simple() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+fn* test_yield_computed() -> Int {
+    let x = compute();
+    yield x;
+    yield x * 2;
+    yield x * 3;
+}
+
+fn* test_yield_in_loop() -> Int {
+    for i in 0..10 {
+        yield i;
+    }
+}
+
+fn* test_yield_conditional() -> Int {
+    for i in 0..100 {
+        if i % 2 == 0 {
+            yield i;
+        }
+    }
+}
+
+async fn* test_yield_async() -> Data {
+    while let Some(url) = next_url().await {
+        let data = fetch(url).await;
+        yield data;
+    }
+}
+
+fn* test_yield_with_transform() -> Processed {
+    for item in source {
+        let processed = transform(item);
+        if processed.is_valid() {
+            yield processed;
+        }
+    }
+}
+
+// =============================================================================
+// CONTROL FLOW IN DIFFERENT CONTEXTS
+// =============================================================================
+
+fn test_control_in_closure() {
+    let items_processed = items.iter().filter_map(|item| {
+        if invalid(item) {
+            return None;
+        }
+        Some(process(item))
+    });
+}
+
+fn test_control_in_match() {
+    let result = match input {
+        Good(v) => v,
+        Bad(e) => return Err(e),
+        Unknown => continue  // In a loop context
+    };
+}
+
+fn test_control_in_if() {
+    // Testing control flow keywords in if statements within loop context
+    loop {
+        if !valid {
+            return early;
+        }
+        if skip_this {
+            continue;  // In loop context
+        }
+        if done {
+            break res;  // In loop context
+        }
+    }
+}
+
+// =============================================================================
+// CONTROL FLOW WITH TRY
+// =============================================================================
+
+fn test_return_with_try() -> Result<Value, Error> {
+    let data = try {
+        fetch()?
+    } recover |e| {
+        return Err(e);
+    };
+    Ok(data)
+}
+
+fn test_break_with_try() {
+    let result = loop {
+        let attempt = try {
+            risky_operation()
+        } recover |_| {
+            continue;
+        };
+        if attempt.is_complete() {
+            break attempt;
+        }
+    };
+}
+
+// =============================================================================
+// CONTROL FLOW WITH ASYNC
+// =============================================================================
+
+async fn test_return_async() -> Data {
+    let result = fetch().await;
+    if !result.is_valid() {
+        return default_data();
+    }
+    process(result)
+}
+
+async fn test_break_in_async_loop() {
+    loop {
+        let msg = receive().await;
+        if msg.is_done() {
+            break;
+        }
+        handle(msg);
+    }
+}
+
+async fn test_continue_in_for_stream() {
+    for item in stream {
+        if should_skip(item) {
+            continue;
+        }
+        process(item).await;
+    }
+}
+
+// =============================================================================
+// COMPLEX CONTROL FLOW PATTERNS
+// =============================================================================
+
+fn test_nested_control_flow() {
+    for outer in outers {
+        if skip_outer(outer) {
+            continue;
+        }
+        let inner_result = loop {
+            let candidate = find_candidate(outer);
+            if candidate.is_none() {
+                break None;
+            }
+            if candidate.unwrap().is_valid() {
+                break candidate;
+            }
+        };
+        if inner_result.is_none() {
+            return early_exit;
+        }
+    }
+}
+
+fn test_control_flow_in_comprehension() {
+    // Using filter instead of explicit continue
+    let filtered = [x for x in items if !should_skip(x)];
+}
+
+fn test_control_flow_with_defer() {
+    loop {
+        let resource = acquire();
+        defer release(resource);
+
+        if should_break(resource) {
+            break;  // defer still runs
+        }
+        if should_continue(resource) {
+            continue;  // defer still runs
+        }
+        process(resource);
+    }
+}
+
+// =============================================================================
+// EARLY RETURN PATTERNS
+// =============================================================================
+
+fn test_guard_clause_pattern() {
+    if precondition_fails {
+        return error_result;
+    }
+
+    if another_precondition_fails {
+        return other_error;
+    }
+
+    // Main logic here
+    compute_result()
+}
+
+fn test_validate_and_return() {
+    let input = match get_input() {
+        Some(i) => i,
+        None => return default_output
+    };
+
+    process(input)
+}
+
+fn test_early_return_with_side_effects() {
+    if !should_continue {
+        cleanup();
+        return early;
+    }
+    proceed()
+}
+
+// =============================================================================
+// LABELED LOOPS (if supported by grammar)
+// =============================================================================
+
+// Note: If Verum supports labeled loops, tests would go here
+// fn test_labeled_break() {
+//     'outer: loop {
+//         loop {
+//             break 'outer;
+//         }
+//     }
+// }
+
+// =============================================================================
+// CONTROL FLOW EDGE CASES
+// =============================================================================
+
+fn test_return_unit_explicit() {
+    return ();
+}
+
+fn test_return_tuple() {
+    return (a, b, c);
+}
+
+fn test_return_closure() {
+    return |x| x + 1;
+}
+
+fn test_break_tuple() {
+    let (a, b) = loop {
+        break (compute_a(), compute_b());
+    };
+}
+
+fn test_yield_complex() {
+    fn* complex_generator() -> (Int, Text) {
+        for i in 0..10 {
+            yield (i, f"item_{i}");
+        }
+    }
+}

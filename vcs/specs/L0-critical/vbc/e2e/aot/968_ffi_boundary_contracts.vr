@@ -1,0 +1,45 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: ffi, boundary, contracts, errors_via, repr_c
+// @description: FFI boundary blocks with contracts, error protocols, and @repr(C) structs
+// @expected-exit: 0
+
+// @repr(C) struct — validated as FFI-safe
+@repr(C)
+type Timespec is {
+    tv_sec: Int,
+    tv_nsec: Int,
+};
+
+// Extern block for actual system calls
+@ffi("libSystem.B.dylib")
+extern {
+    fn getpid() -> Int;
+    fn getuid() -> Int;
+    fn time(tloc: Int) -> Int;
+}
+
+fn main() {
+    // Test 1: Basic extern calls still work
+    let pid = getpid();
+    assert(pid > 0);
+    print(f"Test 1 PASS: pid={pid}");
+
+    // Test 2: Multiple extern calls
+    let uid = getuid();
+    assert(uid >= 0);
+    print(f"Test 2 PASS: uid={uid}");
+
+    // Test 3: time() returns epoch
+    let t = time(0);
+    assert(t > 1000000000);
+    print(f"Test 3 PASS: time={t}");
+
+    // Test 4: Computed values from FFI results
+    let combined = pid * 1000 + uid;
+    assert(combined > 0);
+    print(f"Test 4 PASS: combined={combined}");
+
+    print("All FFI boundary contract tests passed");
+}

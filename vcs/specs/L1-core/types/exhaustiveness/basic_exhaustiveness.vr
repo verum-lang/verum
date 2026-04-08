@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, pattern-matching
+// @description: Basic exhaustiveness checking - all cases covered
+
+// Basic enum exhaustiveness
+type Color is Red | Green | Blue;
+
+fn color_name(c: Color) -> Text =
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue"
+    };
+
+// Boolean exhaustiveness
+fn bool_to_int(b: Bool) -> Int =
+    match b {
+        true => 1,
+        false => 0
+    };
+
+// Maybe exhaustiveness
+fn unwrap_or(opt: Maybe<Int>, default: Int) -> Int =
+    match opt {
+        Some(x) => x,
+        None => default
+    };
+
+// Nested pattern exhaustiveness
+type Tree<T> is Leaf | Node { value: T, left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+fn count_nodes<T>(tree: Tree<T>) -> Int =
+    match tree {
+        Leaf => 0,
+        Node { left, right, .. } => 1 + count_nodes(*left) + count_nodes(*right)
+    };
+
+// Tuple exhaustiveness with wildcards
+fn classify_pair(pair: (Bool, Bool)) -> Text =
+    match pair {
+        (true, true) => "both true",
+        (true, false) => "first only",
+        (false, true) => "second only",
+        (false, false) => "neither"
+    };
+
+// Wildcard pattern covers remaining cases
+fn is_special(n: Int) -> Bool =
+    match n {
+        0 => true,
+        1 => true,
+        _ => false
+    };
+
+fn main() {
+    assert(color_name(Red) == "red");
+    assert(bool_to_int(true) == 1);
+    assert(unwrap_or(Some(42), 0) == 42);
+    assert(unwrap_or(None, 99) == 99);
+    assert(is_special(0));
+    assert(!is_special(100));
+}

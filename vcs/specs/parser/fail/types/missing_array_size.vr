@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, array, size, error
+// @description: Test detection of array type with missing size after semicolon
+// @expected-error: E071
+
+// Array type must have size after semicolon
+fn test(x: [Int;]) {}

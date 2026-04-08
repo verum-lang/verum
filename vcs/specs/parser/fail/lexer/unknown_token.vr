@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, tokens, error
+// @description: Test unknown token/character detection
+// @expected-error: E006
+
+fn test_unknown_token() {
+    let x = §;
+    let y = ¬;
+}

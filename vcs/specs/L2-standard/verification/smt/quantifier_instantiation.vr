@@ -1,0 +1,193 @@
+// @test: verify-pass
+// @timeout: 10000
+// @tier: 0
+// @level: L2
+// @tags: smt, quantifiers, instantiation
+
+/// SMT verification with quantifier instantiation
+/// Tests quantifier handling and triggering strategies
+
+/// Basic universal quantification with trigger
+@verify(proof)
+fn all_positive(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == forall i: Int. {: arr[i] :} 0 <= i < arr.len() implies arr[i] > 0;
+    ";
+    // The {: arr[i] :} is a trigger pattern for the quantifier
+    for x in arr {
+        if *x <= 0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Multi-trigger pattern
+@verify(proof)
+fn pairwise_distinct(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == forall i: Int, j: Int. {: arr[i], arr[j] :}
+            0 <= i < arr.len() && 0 <= j < arr.len() && i != j
+            implies arr[i] != arr[j];
+    ";
+    for i in 0..arr.len() {
+        for j in i + 1..arr.len() {
+            if arr[i] == arr[j] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Nested quantifiers with instantiation
+@verify(proof)
+fn transitivity_check(rel: &fn(Int, Int) -> Bool) -> Bool
+    where rel: Transitive
+{
+    contract#"
+        // Transitivity: forall a, b, c. rel(a, b) && rel(b, c) implies rel(a, c)
+        ensures result == forall a, b, c: Int. {: rel(a, b), rel(b, c) :}
+            rel(a, b) && rel(b, c) implies rel(a, c);
+    ";
+    true  // Assumed from where clause
+}
+
+/// Bounded quantification for arrays
+@verify(proof)
+fn array_sum_bound(arr: &List<Int>, bound: Int) -> Bool {
+    contract#"
+        requires forall i: Int. {: arr[i] :} 0 <= i < arr.len() implies arr[i] <= bound;
+        ensures result implies sum(arr) <= arr.len() * bound;
+    ";
+    let mut total = 0;
+    for x in arr {
+        total += *x;
+    }
+    total <= arr.len() * bound
+}
+
+/// Existential with witness
+@verify(proof)
+fn find_min_index(arr: &List<Int>) -> Int {
+    contract#"
+        requires arr.len() > 0;
+        ensures result >= 0 && result < arr.len();
+        ensures forall i: Int. {: arr[i] :} 0 <= i < arr.len() implies arr[result] <= arr[i];
+        // This implies: exists j: Int. forall i: Int. arr[j] <= arr[i]
+    ";
+    let mut min_idx = 0;
+    for i in 1..arr.len() {
+        contract#"invariant 
+            min_idx >= 0 && min_idx < arr.len();
+            forall j: Int. {: arr[j] :} 0 <= j < i implies arr[min_idx] <= arr[j];
+        ";
+        if arr[i] < arr[min_idx] {
+            min_idx = i;
+        }
+    }
+    min_idx
+}
+
+/// Quantifier elimination via case analysis
+@verify(proof)
+fn check_bounds(arr: &List<Int>, lower: Int, upper: Int) -> Bool {
+    contract#"
+        requires lower <= upper;
+        ensures result == forall i: Int. 0 <= i < arr.len() implies lower <= arr[i] && arr[i] <= upper;
+    ";
+    for x in arr {
+        if *x < lower || *x > upper {
+            return false;
+        }
+    }
+    true
+}
+
+/// Skolemization pattern
+@verify(proof)
+fn find_counterexample(arr: &List<Int>, pred: fn(&Int) -> Bool) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            // Witness for negation: exists i: Int. !pred(arr[i])
+            Some(idx) => idx >= 0 && idx < arr.len() && !pred(&arr[idx]),
+            // Universal holds: forall i: Int. pred(arr[i])
+            None => forall i: Int. {: arr[i] :} 0 <= i < arr.len() implies pred(&arr[i])
+        };
+    ";
+    for i in 0..arr.len() {
+        if !pred(&arr[i]) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Quantifier with function application trigger
+fn square(x: Int) -> Int { x * x }
+
+@verify(proof)
+fn all_squares_positive(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == forall i: Int. {: square(arr[i]) :}
+            0 <= i < arr.len() implies square(arr[i]) >= 0;
+    ";
+    // Trivially true since squares are non-negative
+    true
+}
+
+/// Alternating quantifiers (limited support)
+@verify(proof)
+fn has_common_element(a: &List<Int>, b: &List<Int>) -> Bool {
+    contract#"
+        ensures result == exists x: Int. (
+            exists i: Int. {: a[i] :} 0 <= i < a.len() && a[i] == x
+        ) && (
+            exists j: Int. {: b[j] :} 0 <= j < b.len() && b[j] == x
+        );
+    ";
+    for x in a {
+        for y in b {
+            if *x == *y {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Quantifier splitting for efficiency
+@verify(proof)
+fn all_in_range(arr: &List<Int>, min: Int, max: Int) -> Bool {
+    contract#"
+        requires min <= max;
+        // Split into two separate quantifiers for better SMT performance
+        ensures result == (
+            forall i: Int. {: arr[i] :} 0 <= i < arr.len() implies arr[i] >= min
+        ) && (
+            forall i: Int. {: arr[i] :} 0 <= i < arr.len() implies arr[i] <= max
+        );
+    ";
+    for x in arr {
+        if *x < min || *x > max {
+            return false;
+        }
+    }
+    true
+}
+
+/// Induction principle via quantifiers
+@verify(proof)
+fn sum_formula(n: Int{>= 0}) -> Int {
+    contract#"
+        requires n >= 0;
+        // By induction: forall k: Int. 0 <= k <= n implies sum(0..k) == k*(k+1)/2
+        ensures result == n * (n + 1) / 2;
+        decreases n;
+    ";
+    if n == 0 {
+        0
+    } else {
+        n + sum_formula(n - 1)
+    }
+}

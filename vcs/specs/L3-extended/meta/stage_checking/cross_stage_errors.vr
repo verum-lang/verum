@@ -1,0 +1,160 @@
+// @test: typecheck-fail
+// @expected-error: E1002
+// @tier: 3
+// @level: L3
+// @tags: meta, staged, stage-checking, cross-stage, error
+
+/// Cross-Stage Call Error Tests (E1002)
+///
+/// Validates that the stage checker correctly rejects invalid
+/// cross-stage function calls.
+/// Spec: 17-meta-system.md Section 2.4 - Stage Coherence Rule
+///
+/// ERROR E1002: A stage N function cannot directly call a stage M function
+/// where M != N, unless through quote (generating lower-stage code).
+
+// ============================================================
+// STAGE 0 (RUNTIME) FUNCTIONS
+// ============================================================
+
+fn runtime_helper(x: Int) -> Int {
+    x + 1
+}
+
+fn runtime_compute(x: Int, y: Int) -> Int {
+    x * y
+}
+
+// ============================================================
+// ERROR: META FUNCTION DIRECTLY CALLING RUNTIME FUNCTION
+// ============================================================
+
+// ERROR E1002: Stage 1 function cannot directly call stage 0 function
+// Meta functions execute at compile time, runtime functions execute at runtime
+meta fn bad_meta_calls_runtime(x: Int) -> Int {
+    // ERROR: cross-stage call: stage 1 function cannot directly call
+    // stage 0 function 'runtime_helperp
+    runtime_helper(x)
+}
+
+// ERROR E1002: Same violation in different context
+meta fn bad_meta_with_runtime_computation(a: Int, b: Int) -> Int {
+    // ERROR: cross-stage call violation
+    runtime_compute(a, b) + 1
+}
+
+// ERROR E1002: Indirect violation through local binding
+meta fn bad_meta_indirect_call(x: Int) -> Int {
+    let helper = runtime_helper;  // Function pointer to runtime fn
+    // ERROR: cross-stage call when calling through pointer
+    helper(x)
+}
+
+// ============================================================
+// ERROR: META(2) CALLING META(1) DIRECTLY
+// ============================================================
+
+meta fn stage_1_helper(x: Int) -> Int {
+    x * 2
+}
+
+// ERROR E1002: Stage 2 cannot directly call stage 1
+meta(2) fn bad_stage_2_calls_stage_1(x: Int) -> Int {
+    // ERROR: cross-stage call: stage 2 function cannot directly call
+    // stage 1 function 'stage_1_helperp
+    stage_1_helper(x)
+}
+
+// ============================================================
+// ERROR: META(3) CALLING META(1) - SKIPPING STAGES
+// ============================================================
+
+// ERROR E1002: Stage 3 cannot directly call stage 1 (skips stage 2)
+meta(3) fn bad_stage_3_calls_stage_1(x: Int) -> Int {
+    // ERROR: cross-stage call: stage 3 cannot call stage 1
+    stage_1_helper(x)
+}
+
+// ERROR E1002: Stage 3 cannot directly call runtime
+meta(3) fn bad_stage_3_calls_runtime(x: Int) -> Int {
+    // ERROR: cross-stage call: stage 3 cannot call stage 0
+    runtime_helper(x)
+}
+
+// ============================================================
+// ERROR: CALLING ACROSS STAGES IN EXPRESSIONS
+// ============================================================
+
+meta fn bad_in_conditional(x: Int) -> Int {
+    // ERROR: cross-stage call in conditional expression
+    if runtime_helper(x) > 0 {
+        x
+    } else {
+        0 - x
+    }
+}
+
+meta fn bad_in_binary_expr(x: Int, y: Int) -> Int {
+    // ERROR: cross-stage calls in binary expression operands
+    runtime_helper(x) + runtime_compute(x, y)
+}
+
+meta fn bad_in_match(x: Int) -> Int {
+    // ERROR: cross-stage call in match scrutinee
+    match runtime_helper(x) {
+        0 => 0,
+        n => n * 2,
+    }
+}
+
+// ============================================================
+// ERROR: NESTED CROSS-STAGE VIOLATIONS
+// ============================================================
+
+meta fn outer_bad(x: Int) -> Int {
+    // Even nested in a valid meta call, runtime calls are errors
+    meta_helper(runtime_helper(x))  // ERROR in argument
+}
+
+meta fn meta_helper(x: Int) -> Int {
+    x * 10
+}
+
+// ============================================================
+// ERROR: CROSS-STAGE IN CLOSURES
+// ============================================================
+
+meta fn bad_closure_captures_runtime() -> Int {
+    let f = |x: Int| -> Int {
+        // ERROR: closure inside meta fn cannot call runtime fn
+        runtime_helper(x)
+    };
+    f(42)
+}
+
+// ============================================================
+// ERROR: CROSS-STAGE IN LOOPS
+// ============================================================
+
+meta fn bad_in_loop(n: Int) -> Int {
+    let mut sum = 0;
+    for i in 0..n {
+        // ERROR: cross-stage call inside loop
+        sum = sum + runtime_helper(i);
+    }
+    sum
+}
+
+meta fn bad_in_while(x: Int) -> Int {
+    let mut result = x;
+    // ERROR: cross-stage call in while condition
+    while runtime_helper(result) > 0 {
+        result = result - 1;
+    }
+    result
+}
+
+fn main() {
+    // This file contains only error cases
+    // All meta functions above should fail compilation with E1002
+}

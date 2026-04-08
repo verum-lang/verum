@@ -1,0 +1,42 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, functions, throws, errors
+// @description: Test function throws clause parsing
+
+// Single error type
+fn parse_int(s: Text) throws(ParseError) -> Int {
+    s.parse()
+}
+
+// Multiple error types
+fn process(data: Data) throws(ParseError | ValidationError) -> Result {
+    let parsed = parse(data);
+    validate(parsed)
+}
+
+// With return type
+fn fetch_user(id: Int) throws(NetworkError | NotFoundError) -> User {
+    http_get(f"/users/{id}").await
+}
+
+// With context
+fn query(sql: Text) throws(DatabaseError) -> List<Row> using Database {
+    Database.execute(sql)
+}
+
+// Combined with async
+async fn fetch_data(url: Text) throws(NetworkError) -> Data {
+    http_get(url).await
+}
+
+// Complex combination
+async fn complex_op(input: Input)
+    throws(ParseError | ValidationError | NetworkError)
+    -> Output
+    using [Database, Logger]
+{
+    Logger.info("Processing");
+    let data = parse(input)?;
+    let validated = validate(data)?;
+    Database.save(validated)
+}

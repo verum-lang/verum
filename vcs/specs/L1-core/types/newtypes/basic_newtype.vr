@@ -1,0 +1,57 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, newtypes, basic
+
+/// Test for basic newtype definitions.
+/// Newtypes provide type-safe wrappers around existing types.
+/// They are defined using the `type Name is (WrappedType);` syntax.
+
+// Basic newtype wrapping Int
+type UserId is (Int);
+
+// Newtype wrapping Text
+type Email is (Text);
+
+// Newtype wrapping Float
+type Meters is (Float);
+
+// Newtype wrapping Bool
+type Flag is (Bool);
+
+// Newtype wrapping Char
+type Symbol is (Char);
+
+// Newtype for semantic distinction
+type Seconds is (Float);
+type Milliseconds is (Float);
+
+// Newtype for domain modeling
+type Username is (Text);
+type Password is (Text);
+
+fn main() {
+    // Basic newtype instantiation
+    let id: UserId = UserId(42);
+    let email: Email = Email("user@example.com");
+    let distance: Meters = Meters(100.5);
+    let active: Flag = Flag(true);
+    let sym: Symbol = Symbol('X');
+
+    // Multiple distinct newtypes from same base type
+    let duration_s: Seconds = Seconds(1.5);
+    let duration_ms: Milliseconds = Milliseconds(1500.0);
+
+    // Domain modeling with newtypes
+    let user: Username = Username("alice");
+    let pass: Password = Password("secret123");
+
+    // Newtypes preserve the wrapped value
+    assert(id == UserId(42));
+    assert(email == Email("user@example.com"));
+    assert(distance == Meters(100.5));
+    assert(active == Flag(true));
+    assert(sym == Symbol('X'));
+    assert(duration_s == Seconds(1.5));
+    assert(duration_ms == Milliseconds(1500.0));
+}

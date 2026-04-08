@@ -1,0 +1,481 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, callback, function-pointer, unsafe
+// @description: Tests callback function patterns for C interoperability
+
+/// ============================================================
+/// CALLBACK PATTERNS FOR FFI
+/// ============================================================
+///
+/// Callbacks allow C code to call Verum functions. This requires
+/// careful lifetime management and proper calling conventions.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_int is i32;
+type c_size_t is usize;
+type c_void is ();
+
+type Ordering is
+    | Less
+    | Equal
+    | Greater;
+
+type Error is
+    | RegistrationFailed
+    | InvalidCallback;
+
+type PhantomData<T> is {};
+type RefCell<T> is { value: T };
+
+// ------------------------------------------------------------
+// Function Pointer Types
+// ------------------------------------------------------------
+
+/// Simple callback
+type SimpleCallback is extern "C" fn(c_int) -> c_int;
+
+/// Callback with multiple parameters
+type BinaryCallback is extern "C" fn(c_int, c_int) -> c_int;
+
+/// Void callback
+type VoidCallback is extern "C" fn();
+
+/// Callback with user data pattern
+type UserDataCallback is extern "C" fn(*mut c_void, c_int) -> c_int;
+
+/// Comparison callback for sorting
+type CompareCallback is extern "C" fn(*const c_void, *const c_void) -> c_int;
+
+/// Iteration callback
+type IterCallback<T> is extern "C" fn(*const T, *mut c_void) -> c_int;
+
+/// Progress callback
+type ProgressCallback is extern "C" fn(
+    current: c_size_t,
+    total: c_size_t,
+    user_data: *mut c_void
+) -> c_int;
+
+/// Destructor callback
+type DestructorCallback is extern "C" fn(*mut c_void);
+
+// ------------------------------------------------------------
+// Exporting Verum Functions as Callbacks
+// ------------------------------------------------------------
+
+/// Simple exported function
+@export("C")
+@no_mangle
+@extern("C")
+fn double_value(x: c_int) -> c_int {
+    x * 2
+}
+
+/// Binary operation callback
+@export("C")
+@no_mangle
+@extern("C")
+fn add_values(a: c_int, b: c_int) -> c_int {
+    a + b
+}
+
+/// Comparison function for qsort
+@export("C")
+@no_mangle
+@extern("C")
+fn compare_ints(a: *const c_void, b: *const c_void) -> c_int {
+    // SAFETY: C library guarantees valid int pointers
+    unsafe {
+        let a_val = *(a as *const c_int);
+        let b_val = *(b as *const c_int);
+
+        if a_val < b_val { -1 }
+        else if a_val > b_val { 1 }
+        else { 0 }
+    }
+}
+
+/// Comparison for descending order
+@export("C")
+@no_mangle
+@extern("C")
+fn compare_ints_desc(a: *const c_void, b: *const c_void) -> c_int {
+    -compare_ints(a, b)
+}
+
+/// Callback with user data
+@export("C")
+@no_mangle
+@extern("C")
+fn accumulator_callback(user_data: *mut c_void, value: c_int) -> c_int {
+    // SAFETY: user_data is a valid pointer to c_int
+    unsafe {
+        let sum = user_data as *mut c_int;
+        *sum += value;
+        0  // Continue iteration
+    }
+}
+
+/// Free function callback (destructor)
+@export("C")
+@no_mangle
+@extern("C")
+fn free_verum_string(ptr: *mut c_void) {
+    if !ptr.is_null() {
+        // SAFETY: ptr was allocated by Verum
+        unsafe {
+            let _ = Heap.from_raw(ptr as *mut Text);
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// C Library Callbacks
+// ------------------------------------------------------------
+
+ffi libc {
+    /// qsort uses comparison callback
+    @extern("C")
+    fn qsort(
+        base: *mut c_void,
+        nmemb: c_size_t,
+        size: c_size_t,
+        compar: CompareCallback
+    );
+
+    /// bsearch with callback
+    @extern("C")
+    fn bsearch(
+        key: *const c_void,
+        base: *const c_void,
+        nmemb: c_size_t,
+        size: c_size_t,
+        compar: CompareCallback
+    ) -> *const c_void;
+
+    /// atexit for cleanup callbacks
+    @extern("C")
+    fn atexit(func: extern "C" fn()) -> c_int;
+}
+
+ffi custom_api {
+    /// Register callback with user data
+    @extern("C")
+    fn register_callback(
+        callback: UserDataCallback,
+        user_data: *mut c_void
+    ) -> c_int;
+
+    /// Unregister callback
+    @extern("C")
+    fn unregister_callback(callback_id: c_int);
+
+    /// Iterate with callback
+    @extern("C")
+    fn iterate_items(
+        items: *const c_void,
+        count: c_size_t,
+        callback: extern "C" fn(*const c_void, *mut c_void) -> c_int,
+        user_data: *mut c_void
+    ) -> c_int;
+
+    /// Async operation with completion callback
+    @extern("C")
+    fn start_async(
+        data: *const c_void,
+        size: c_size_t,
+        on_complete: extern "C" fn(c_int, *mut c_void),
+        on_error: extern "C" fn(c_int, *const c_char, *mut c_void),
+        user_data: *mut c_void
+    ) -> c_int;
+
+    /// Set destructor for handle
+    @extern("C")
+    fn set_destructor(
+        handle: *mut c_void,
+        destructor: DestructorCallback
+    );
+}
+
+// ------------------------------------------------------------
+// Safe qsort Wrapper
+// ------------------------------------------------------------
+
+/// Compare function for qsort
+@extern("C")
+fn compare_for_sort<T: Ord>(a: *const c_void, b: *const c_void) -> c_int {
+    // SAFETY: Pointers are valid T references from qsort
+    unsafe {
+        let a_ref = &*(a as *const T);
+        let b_ref = &*(b as *const T);
+
+        match a_ref.cmp(b_ref) {
+            Less => -1,
+            Equal => 0,
+            Greater => 1,
+        }
+    }
+}
+
+/// Type-safe qsort wrapper
+fn sort_slice<T: Ord>(slice: &mut [T]) {
+    if slice.is_empty() {
+        return;
+    }
+
+    // SAFETY: slice is valid, compare is correct for T
+    unsafe {
+        libc.qsort(
+            slice.as_mut_ptr() as *mut c_void,
+            slice.len(),
+            T.size,
+            compare_for_sort
+        );
+    }
+}
+
+// ------------------------------------------------------------
+// Callback with Context (Trampoline Pattern)
+// ------------------------------------------------------------
+
+/// Context struct to pass Verum closure to C
+type CallbackContext<T, F> is {
+    data: T,
+    callback: F,
+};
+
+/// Trampoline that calls the closure
+@extern("C")
+fn trampoline<T, F>(user_data: *mut c_void, value: c_int) -> c_int
+where
+    F: Fn(&T, c_int) -> c_int
+{
+    // SAFETY: user_data is a valid CallbackContext pointer
+    unsafe {
+        let ctx = &*(user_data as *const CallbackContext<T, F>);
+        (ctx.callback)(&ctx.data, value)
+    }
+}
+
+/// Register Verum closure as C callback
+fn register_closure<T, F>(data: T, callback: F) -> Result<CallbackHandle, Error>
+where
+    F: Fn(&T, c_int) -> c_int + 'static
+{
+    let ctx = Heap(CallbackContext { data, callback });
+    let ctx_ptr = Heap.into_raw(ctx) as *mut c_void;
+
+    // SAFETY: ctx_ptr is valid, trampoline is correct
+    let id = unsafe {
+        custom_api.register_callback(trampoline, ctx_ptr)
+    };
+
+    if id < 0 {
+        // Cleanup on failure — let binding drops at end of scope
+        let _cleanup: Heap<CallbackContext<T, F>> = unsafe {
+            Heap.from_raw(ctx_ptr as *mut CallbackContext<T, F>)
+        };
+        Err(RegistrationFailed)
+    } else {
+        Ok(CallbackHandle {
+            id,
+            context: ctx_ptr,
+            _marker: PhantomData,
+        })
+    }
+}
+
+/// RAII handle for registered callback
+type CallbackHandle<T, F> is {
+    id: c_int,
+    context: *mut c_void,
+    _marker: PhantomData<(T, F)>,
+};
+
+implement<T, F> Drop for CallbackHandle<T, F> {
+    fn drop(&mut self) {
+        unsafe {
+            custom_api.unregister_callback(self.id);
+            let _owned: Heap<CallbackContext<T, F>> = Heap.from_raw(self.context as *mut CallbackContext<T, F>);
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Thread-Local Closure Pattern
+// ------------------------------------------------------------
+
+/// Trampoline wrapper for closure callback
+@extern("C")
+fn closure_wrapper(x: c_int) -> c_int {
+    // Would use thread-local closure state in real implementation
+    x
+}
+
+/// Store closure in thread-local for callback access
+fn with_closure_callback<F, R>(closure: F, operation: fn(SimpleCallback) -> R) -> R
+where
+    F: Fn(c_int) -> c_int
+{
+    // Call operation with function pointer
+    let result = operation(closure_wrapper);
+    result
+}
+
+// ------------------------------------------------------------
+// Async Callback Pattern
+// ------------------------------------------------------------
+
+/// Pending async operation state
+type AsyncState is {
+    completed: Bool,
+    result: Maybe<c_int>,
+    error: Maybe<(c_int, Text)>,
+};
+
+/// Completion callback
+@extern("C")
+fn on_async_complete(result: c_int, user_data: *mut c_void) {
+    // SAFETY: user_data is valid AsyncState
+    unsafe {
+        let state = &mut *(user_data as *mut AsyncState);
+        state.completed = true;
+        state.result = Some(result);
+    }
+}
+
+/// Error callback
+@extern("C")
+fn on_async_error(code: c_int, message: *const c_char, user_data: *mut c_void) {
+    // SAFETY: user_data is valid AsyncState, message is C string
+    unsafe {
+        let state = &mut *(user_data as *mut AsyncState);
+        state.completed = true;
+
+        let msg = if message.is_null() {
+            Text.from("Unknown error")
+        } else {
+            cstr_to_text(message)
+        };
+
+        state.error = Some((code, msg));
+    }
+}
+
+/// Start async operation and return handle
+fn start_async_op(data: &[u8]) -> AsyncOperation {
+    let state = Heap(AsyncState {
+        completed: false,
+        result: None,
+        error: None,
+    });
+    let state_ptr = Heap.into_raw(state) as *mut c_void;
+
+    // SAFETY: All pointers are valid
+    let id = unsafe {
+        custom_api.start_async(
+            data.as_ptr() as *const c_void,
+            data.len(),
+            on_async_complete,
+            on_async_error,
+            state_ptr
+        )
+    };
+
+    AsyncOperation { id, state: state_ptr }
+}
+
+type AsyncOperation is {
+    id: c_int,
+    state: *mut c_void,
+};
+
+implement AsyncOperation {
+    fn poll(&self) -> AsyncStatus {
+        // SAFETY: state is valid
+        let state = unsafe { &*(self.state as *const AsyncState) };
+
+        if !state.completed {
+            Pending
+        } else if let Some((code, ref msg)) = state.error {
+            AsyncError(code, msg.clone())
+        } else if let Some(result) = state.result {
+            Complete(result)
+        } else {
+            Pending
+        }
+    }
+}
+
+implement Drop for AsyncOperation {
+    fn drop(&mut self) {
+        // SAFETY: state was Heap.into_raw
+        unsafe {
+            let _owned: Heap<AsyncState> = Heap.from_raw(self.state as *mut AsyncState);
+        }
+    }
+}
+
+type AsyncStatus is
+    | Pending
+    | Complete(c_int)
+    | AsyncError(c_int, Text);
+
+// ------------------------------------------------------------
+// Event Handler Pattern
+// ------------------------------------------------------------
+
+/// Event callback type
+type EventCallback is extern "C" fn(
+    event_type: c_int,
+    event_data: *const c_void,
+    user_data: *mut c_void
+);
+
+/// Event dispatcher managing multiple handlers
+type EventDispatcher is {
+    handlers: Map<c_int, List<(EventCallback, *mut c_void)>>,
+};
+
+implement EventDispatcher {
+    fn new() -> EventDispatcher {
+        EventDispatcher { handlers: Map.new() }
+    }
+
+    fn subscribe(&mut self, event_type: c_int, callback: EventCallback, user_data: *mut c_void) {
+        self.handlers
+            .entry(event_type)
+            .or_insert_with(List.new)
+            .push((callback, user_data));
+    }
+
+    fn dispatch(&self, event_type: c_int, event_data: *const c_void) {
+        // Dispatch events to registered handlers
+        let handlers = self.handlers.get(&event_type);
+    }
+}
+
+// ------------------------------------------------------------
+// Helper Functions
+// ------------------------------------------------------------
+
+unsafe fn cstr_to_text(s: *const c_char) -> Text {
+    let mut len = 0;
+    let mut p = s;
+    while *p != 0 {
+        len += 1;
+        p = p.add(1);
+    }
+
+    let bytes = std.slice.from_raw_parts(s as *const u8, len);
+    Text.from_utf8_unchecked(bytes)
+}
+
+fn main() {
+    // Callback pattern tests
+}

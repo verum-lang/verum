@@ -1,0 +1,179 @@
+// @test: parse
+// @tier: 0
+// @level: L0
+// @tags: parser, types, rank-2, function-types
+// @description: Parser tests for rank-2 polymorphic function type syntax (fn<R>(...))
+
+/// Spec: grammar/verum.ebnf - rank2_function_type
+/// Tests that the parser correctly handles fn<R>(...) syntax
+
+// =============================================================================
+// Basic Rank-2 Function Type Syntax
+// =============================================================================
+
+/// Simple rank-2 type: fn<R>(A) -> R
+type SimpleRank2<A> is fn<R>(A) -> R;
+
+/// Rank-2 with multiple type parameters
+type MultiRank2<A, B> is fn<R, S>(A, B) -> (R, S);
+
+/// Rank-2 in record field
+type RecordWithRank2<A, B> is {
+    transform: fn<R>(A, R) -> R,
+    second: fn<S>(B) -> S,
+};
+
+// =============================================================================
+// Reducer and Transducer Patterns
+// =============================================================================
+
+/// Standard reducer type (used in fold operations)
+type Reducer<A, R> is fn(R, A) -> R;
+
+/// Transducer: rank-2 transformation of reducers
+type Transducer<A, B> is {
+    transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>,
+};
+
+/// Stateful transducer with rank-2 transform
+type StatefulTransducer<A, B, S> is {
+    initial_state: S,
+    transform: fn<R>(Reducer<B, R>, &mut S) -> Reducer<A, R>,
+};
+
+// =============================================================================
+// Rank-2 with Bounds
+// =============================================================================
+
+/// Rank-2 with single bound
+type BoundedRank2<A> is fn<R: Clone>(A) -> R;
+
+/// Rank-2 with multiple bounds
+type MultiBoundRank2<A> is fn<R: Clone + Default>(A) -> R;
+
+/// Rank-2 with where clause bounds
+type WhereRank2<A> is fn<R>(A) -> R where R: Clone;
+
+// =============================================================================
+// Nested Rank-2 Types
+// =============================================================================
+
+/// Type returning a rank-2 function
+type Rank2Factory<A> is fn() -> fn<R>(A) -> R;
+
+/// Nested rank-2: transducer producing transducers
+type TransducerProducer<A, B> is fn<R>(
+    Transducer<A, B>
+) -> fn<S>(Reducer<B, S>) -> Reducer<A, S>;
+
+// =============================================================================
+// Rank-2 in Various Positions
+// =============================================================================
+
+/// Rank-2 as function parameter type
+fn takes_rank2<A, B>(f: fn<R>(A, R) -> R) -> B {
+    unreachable()
+}
+
+/// Rank-2 as function return type
+fn returns_rank2<A>() -> fn<R>(A) -> R {
+    unreachable()
+}
+
+/// Rank-2 in local variable
+fn local_rank2<A>() {
+    let f: fn<R>(A) -> R = unreachable();
+}
+
+/// Rank-2 in tuple
+type TupleWithRank2<A> is (fn<R>(A) -> R, fn<S>(A) -> S);
+
+/// Rank-2 in array type
+type ArrayOfRank2<A> is [fn<R>(A) -> R; 3];
+
+// =============================================================================
+// Rank-2 with Complex Parameter Types
+// =============================================================================
+
+/// Rank-2 with reference parameter
+type RefRank2<A> is fn<R>(&A) -> R;
+
+/// Rank-2 with mutable reference parameter
+type MutRefRank2<A> is fn<R>(&mut A) -> R;
+
+/// Rank-2 with generic parameter
+type GenericRank2<A, B> is fn<R>(List<A>, B) -> R;
+
+/// Rank-2 with optional parameter
+type OptionRank2<A> is fn<R>(Maybe<A>) -> R;
+
+/// Rank-2 with result return
+type ResultRank2<A, E> is fn<R>(A) -> Result<R, E>;
+
+// =============================================================================
+// Rank-2 with Async/Calling Convention
+// =============================================================================
+
+/// Async rank-2 function type
+type AsyncRank2<A> is async fn<R>(A) -> R;
+
+// =============================================================================
+// Protocols with Rank-2 Methods
+// =============================================================================
+
+/// Protocol with rank-2 method signature
+type Foldable is protocol {
+    type Item;
+
+    fn fold<B, F: fn<R>(Reducer<Self.Item, R>) -> Reducer<Self.Item, R>>(
+        &self,
+        transform: F,
+        init: B
+    ) -> B;
+};
+
+/// Protocol for transducible types
+type Transducible is protocol {
+    type Item;
+
+    fn transduce<B>(
+        self,
+        xform: fn<R>(Reducer<B, R>) -> Reducer<Self.Item, R>
+    ) -> List<B>;
+};
+
+// =============================================================================
+// Implement Blocks with Rank-2
+// =============================================================================
+
+implement RecordWithRank2<Int, Bool> {
+    fn apply_transform<R>(self, init: R, value: Int) -> R {
+        (self.transform)(value, init)
+    }
+}
+
+// =============================================================================
+// Main Function (Parse Test)
+// =============================================================================
+
+fn main() {
+    // Local rank-2 type annotation
+    let f: fn<R>(Int) -> R = unreachable();
+
+    // Creating record with rank-2 field
+    let rec: RecordWithRank2<Int, Bool> = RecordWithRank2 {
+        transform: |x, acc| acc,
+        second: |b| unreachable(),
+    };
+
+    // Transducer creation
+    let xform: Transducer<Int, Int> = Transducer {
+        transform: |downstream| downstream,
+    };
+
+    // Stateful transducer
+    let stateful: StatefulTransducer<Int, Int, Bool> = StatefulTransducer {
+        initial_state: false,
+        transform: |downstream, _state| downstream,
+    };
+}

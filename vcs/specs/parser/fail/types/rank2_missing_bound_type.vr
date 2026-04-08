@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, rank2, bounds, error
+// @description: Test detection of bound without type after colon
+// @expected-error: E050
+
+// Bound requires a type after colon
+type Transform is fn<T:>(T) -> T;

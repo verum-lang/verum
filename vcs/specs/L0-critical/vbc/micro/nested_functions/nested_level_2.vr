@@ -1,0 +1,18 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn level1() -> Int {
+        fn level2() -> Int {
+            return 100;
+        }
+        return level2() + 10;
+    }
+
+    let result = level1();
+    assert_eq(result, 110);
+}

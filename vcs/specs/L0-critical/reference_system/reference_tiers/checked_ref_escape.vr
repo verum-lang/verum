@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, checked, escape-analysis, negative-test
+// @description: Verifies that &checked references cannot escape function scope (E311)
+
+/// Test that checked references cannot be created when reference escapes.
+/// The compiler rejects &checked when escape analysis cannot prove safety.
+/// Escaping references must remain as managed references (Tier 0) with runtime checks.
+/// This is a COMPILE-TIME optimization decision, not a borrow checker.
+/// Spec: 26-cbgr-implementation.md#checked-references
+///
+/// Note: E311 is a CBGR tier promotion error.
+/// The compiler's escape analysis determines if a reference can be promoted
+/// from Tier 0 (managed, ~15ns overhead) to Tier 1 (checked, 0ns overhead).
+/// If escape analysis fails, the reference stays at Tier 0 with runtime safety.
+
+fn main() {
+    let escaped = create_escaping_checked_ref();
+    print(*escaped);
+}
+
+fn create_escaping_checked_ref() -> &checked Int {
+    let local = 42;
+    // Cannot promote to checked tier because reference escapes function scope
+    // If this were allowed, reference would be unchecked but unsafe
+    &checked local  // ERROR: E311 Cannot promote to checked: reference escapes
+}

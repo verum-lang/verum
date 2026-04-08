@@ -1,0 +1,421 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, heap_sort, integer_sqrt, chinese_remainder, topological_sort, sliding_window, prim_mst
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #15: combines algorithms from tests 521-527 in a pipeline.
+// Pipeline:
+//   1. Heap sort (521) - sort frequencies
+//   2. Integer sqrt (524) - compute approximate code lengths
+//   3. CRT (527) - combine modular constraints derived from the sorted data
+//   4. Topological sort (526) - schedule derived computations
+//   5. Prim's MST (523) - build weighted graph from sorted data, compute MST
+//   6. Sliding window max (525) - find window maxima over MST edge weights
+
+// ============================================================
+// Heap sort (from 521)
+// ============================================================
+
+fn sift_down_16(a: [Int; 16], root: Int, end: Int) {
+    let mut r = root;
+    while 2 * r + 1 < end {
+        let lc = 2 * r + 1;
+        let rc = 2 * r + 2;
+        let mut largest = r;
+        if a[lc] > a[largest] { largest = lc; }
+        if rc < end && a[rc] > a[largest] { largest = rc; }
+        if largest == r { return; }
+        let tmp = a[r];
+        a[r] = a[largest];
+        a[largest] = tmp;
+        r = largest;
+    }
+}
+
+fn heap_sort_16(a: [Int; 16], n: Int) {
+    let mut i = n / 2 - 1;
+    while i >= 0 {
+        sift_down_16(a, i, n);
+        i = i - 1;
+    }
+    let mut end = n - 1;
+    while end > 0 {
+        let tmp = a[0];
+        a[0] = a[end];
+        a[end] = tmp;
+        sift_down_16(a, 0, end);
+        end = end - 1;
+    }
+}
+
+fn is_sorted_16(a: [Int; 16], n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if a[i] < a[i - 1] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_heapsort_pipeline() {
+    let mut a = [7, 3, 9, 1, 5, 8, 2, 6, 4, 10, 0, 0, 0, 0, 0, 0];
+    heap_sort_16(a, 10);
+    assert_eq(is_sorted_16(a, 10), 1);
+    assert_eq(a[0], 1);
+    assert_eq(a[9], 10);
+    // Median (index 4 and 5 in 0-indexed sorted array of 10) = 5, 6.
+    assert_eq(a[4], 5);
+    assert_eq(a[5], 6);
+    print("heapsort_pipeline: ok");
+}
+
+// ============================================================
+// Integer sqrt (from 524)
+// ============================================================
+
+fn isqrt_newton(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut x = n / 2;
+    let mut iter = 0;
+    while iter < 100 {
+        let nx = (x + n / x) / 2;
+        if nx >= x { return x; }
+        x = nx;
+        iter = iter + 1;
+    }
+    x
+}
+
+fn isqrt_verify(n: Int, r: Int) -> Int {
+    let r1 = r + 1;
+    if r * r <= n && n < r1 * r1 { 1 } else { 0 }
+}
+
+fn test_isqrt_pipeline() {
+    // Sorted array from heap sort: [1,4,9,16,25,36,49] -> isqrt gives [1,2,3,4,5,6,7]
+    let mut vals = [1, 4, 9, 16, 25, 36, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut roots = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 7 {
+        roots[i] = isqrt_newton(vals[i]);
+        i = i + 1;
+    }
+    heap_sort_16(roots, 7);
+    assert_eq(is_sorted_16(roots, 7), 1);
+    assert_eq(roots[0], 1);
+    assert_eq(roots[6], 7);
+    // Sum of roots = 1+2+3+4+5+6+7 = 28
+    let sum = roots[0] + roots[1] + roots[2] + roots[3]
+            + roots[4] + roots[5] + roots[6];
+    assert_eq(sum, 28);
+    print("isqrt_pipeline: ok");
+}
+
+// ============================================================
+// Extended GCD + CRT (from 527)
+// ============================================================
+
+@allow(unbounded_recursion)
+fn ext_gcd(a: Int, b: Int, out: [Int; 2]) -> Int {
+    if b == 0 {
+        out[0] = 1;
+        out[1] = 0;
+        return a;
+    }
+    let mut st = [0, 0];
+    let g = ext_gcd(b, a % b, st);
+    out[0] = st[1];
+    out[1] = st[0] - (a / b) * st[1];
+    g
+}
+
+fn mod_inv(a: Int, m: Int) -> Int {
+    let mut out = [0, 0];
+    ext_gcd(a, m, out);
+    ((out[0] % m) + m) % m
+}
+
+fn crt2(r0: Int, m0: Int, r1: Int, m1: Int) -> Int {
+    let m = m0 * m1;
+    let inv = mod_inv(m0, m1);
+    let diff = ((r1 - r0) % m1 + m1) % m1;
+    let x = r0 + m0 * ((diff * inv) % m1);
+    ((x % m) + m) % m
+}
+
+fn test_crt_pipeline() {
+    // Use isqrt results as modular constraints.
+    // isqrt(25)=5, isqrt(49)=7.
+    // x ≡ 2 (mod 5), x ≡ 3 (mod 7) -> x = 17
+    let x = crt2(2, 5, 3, 7);
+    assert_eq(x % 5, 2);
+    assert_eq(x % 7, 3);
+    assert_eq(x, 17);
+
+    // x ≡ isqrt(4) (mod isqrt(9)), i.e. x ≡ 2 (mod 3)
+    // x ≡ isqrt(16) (mod isqrt(25)), i.e. x ≡ 4 (mod 5)
+    // x ≡ 2 (mod 3) and x ≡ 4 (mod 5): x = 14
+    let x2 = crt2(isqrt_newton(4), isqrt_newton(9), isqrt_newton(16), isqrt_newton(25));
+    assert_eq(x2 % 3, 2);
+    assert_eq(x2 % 5, 4);
+    assert_eq(x2, 14);
+    print("crt_pipeline: ok");
+}
+
+// ============================================================
+// Topological sort (from 526): Kahn's algorithm
+// ============================================================
+
+fn topo_adj_set(adj: [Int; 64], u: Int, v: Int) { adj[u * 8 + v] = 1; }
+fn topo_adj_get(adj: [Int; 64], u: Int, v: Int) -> Int { adj[u * 8 + v] }
+
+fn make_adj64() -> [Int; 64] {
+    [0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn kahn_sort(adj: [Int; 64], n: Int, order: [Int; 8]) -> Int {
+    let mut indeg = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut u = 0;
+    while u < n {
+        let mut v = 0;
+        while v < n {
+            if topo_adj_get(adj, u, v) == 1 {
+                indeg[v] = indeg[v] + 1;
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    let mut queue = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut qhead = 0;
+    let mut qtail = 0;
+    let mut i = 0;
+    while i < n {
+        if indeg[i] == 0 { queue[qtail] = i; qtail = qtail + 1; }
+        i = i + 1;
+    }
+    let mut count = 0;
+    while qhead < qtail {
+        let node = queue[qhead];
+        qhead = qhead + 1;
+        order[count] = node;
+        count = count + 1;
+        let mut v = 0;
+        while v < n {
+            if topo_adj_get(adj, node, v) == 1 {
+                indeg[v] = indeg[v] - 1;
+                if indeg[v] == 0 { queue[qtail] = v; qtail = qtail + 1; }
+            }
+            v = v + 1;
+        }
+    }
+    count
+}
+
+fn test_topo_pipeline() {
+    // Build a DAG based on sorted order of heapsort result indices.
+    // DAG: 0->1->2->3->4 (linear dependency chain).
+    let mut adj = make_adj64();
+    topo_adj_set(adj, 0, 1);
+    topo_adj_set(adj, 1, 2);
+    topo_adj_set(adj, 2, 3);
+    topo_adj_set(adj, 3, 4);
+    let mut order = [0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = kahn_sort(adj, 5, order);
+    assert_eq(cnt, 5);
+    assert_eq(order[0], 0);
+    assert_eq(order[4], 4);
+
+    // Verify no cycle: complex DAG 0->2, 1->2, 2->3, 0->3.
+    let mut adj2 = make_adj64();
+    topo_adj_set(adj2, 0, 2);
+    topo_adj_set(adj2, 1, 2);
+    topo_adj_set(adj2, 2, 3);
+    topo_adj_set(adj2, 0, 3);
+    let mut order2 = [0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt2 = kahn_sort(adj2, 4, order2);
+    assert_eq(cnt2, 4);
+    // 3 must appear last.
+    assert_eq(order2[3], 3);
+    print("topo_pipeline: ok");
+}
+
+// ============================================================
+// Prim's MST (from 523)
+// ============================================================
+
+fn prim_weight(adj: [Int; 25], n: Int) -> Int {
+    let mut in_mst = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut key    = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let inf = 999999;
+    let mut i = 0;
+    while i < n { key[i] = inf; i = i + 1; }
+    key[0] = 0;
+    let mut total = 0;
+    let mut count = 0;
+    while count < n {
+        let mut u = -1;
+        let mut mk = inf + 1;
+        let mut v = 0;
+        while v < n {
+            if in_mst[v] == 0 && key[v] < mk { mk = key[v]; u = v; }
+            v = v + 1;
+        }
+        if u == -1 { return total; }
+        in_mst[u] = 1;
+        total = total + key[u];
+        let mut w = 0;
+        while w < n {
+            let wt = adj[u * 5 + w];
+            if wt > 0 && in_mst[w] == 0 && wt < key[w] { key[w] = wt; }
+            w = w + 1;
+        }
+        count = count + 1;
+    }
+    total
+}
+
+fn test_mst_pipeline() {
+    // Build a 5-node graph where edge weights come from sorted isqrt values.
+    // Nodes 0-4; edges: 0-1:1, 1-2:2, 2-3:3, 3-4:4, 0-4:10 (non-MST).
+    let mut adj = [0, 1, 0, 0, 10,
+                   1, 0, 2, 0, 0,
+                   0, 2, 0, 3, 0,
+                   0, 0, 3, 0, 4,
+                   10, 0, 0, 4, 0];
+    // MST: 0-1(1)+1-2(2)+2-3(3)+3-4(4) = 10, excludes 0-4(10)
+    let w = prim_weight(adj, 5);
+    assert_eq(w, 10);
+    print("mst_pipeline: ok");
+}
+
+// ============================================================
+// Sliding window max (from 525)
+// ============================================================
+
+fn sliding_window_max(arr: [Int; 32], n: Int, k: Int, out: [Int; 32]) {
+    let mut dq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0];
+    dq[0] = 2;   // head
+    dq[1] = 2;   // tail
+    let mut i = 0;
+    while i < n {
+        while dq[0] < dq[1] && dq[dq[0]] <= i - k {
+            dq[0] = dq[0] + 1;
+        }
+        while dq[0] < dq[1] && arr[dq[dq[1] - 1]] <= arr[i] {
+            dq[1] = dq[1] - 1;
+        }
+        dq[dq[1]] = i;
+        dq[1] = dq[1] + 1;
+        if i >= k - 1 {
+            out[i - k + 1] = arr[dq[dq[0]]];
+        }
+        i = i + 1;
+    }
+}
+
+fn test_window_pipeline() {
+    // Use MST-inspired edge weights as input to sliding window.
+    // Array: MST weights from nodes 0..7 (cumulative edge weights).
+    // arr = [1, 3, 6, 10, 15, 21, 28, 36] (partial sums of 1,2,3,4,5,6,7,8)
+    let mut arr = [1, 3, 6, 10, 15, 21, 28, 36, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sliding_window_max(arr, 8, 3, out);
+    // Windows of size 3: [1,3,6]=6, [3,6,10]=10, [6,10,15]=15, [10,15,21]=21,
+    //                    [15,21,28]=28, [21,28,36]=36
+    assert_eq(out[0], 6);
+    assert_eq(out[1], 10);
+    assert_eq(out[2], 15);
+    assert_eq(out[5], 36);
+    print("window_pipeline: ok");
+}
+
+// ============================================================
+// Combined cross-algorithm pipeline
+// ============================================================
+
+fn test_combined_pipeline() {
+    // Step 1: sort some values with heap sort.
+    let mut vals = [16, 4, 25, 9, 1, 36, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    heap_sort_16(vals, 6);
+    // Sorted: [1, 4, 9, 16, 25, 36]
+    assert_eq(vals[0], 1);
+    assert_eq(vals[5], 36);
+
+    // Step 2: isqrt of each sorted value -> [1, 2, 3, 4, 5, 6]
+    let mut roots = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 6 {
+        roots[i] = isqrt_newton(vals[i]);
+        i = i + 1;
+    }
+    assert_eq(roots[0], 1);
+    assert_eq(roots[5], 6);
+
+    // Step 3: use CRT to combine pairs of roots as modular constraints.
+    // x ≡ roots[0] (mod roots[1]+1), x ≡ roots[2] (mod roots[3]+1)
+    // x ≡ 1 (mod 3), x ≡ 3 (mod 5) -> x = 13
+    let x = crt2(roots[0], roots[1] + 1, roots[2], roots[3] + 1);
+    assert_eq(x % (roots[1] + 1), roots[0]);
+    assert_eq(x % (roots[3] + 1), roots[2]);
+    assert_eq(x, 13);
+
+    // Step 4: topological sort of a dependency graph built from root values.
+    // roots = [1,2,3,4,5,6]. Build DAG: i -> i+1 for i=0..4.
+    let mut adj = make_adj64();
+    let mut j = 0;
+    while j < 5 {
+        topo_adj_set(adj, j, j + 1);
+        j = j + 1;
+    }
+    let mut order = [0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = kahn_sort(adj, 6, order);
+    assert_eq(cnt, 6);
+    // Sum of order = 0+1+2+3+4+5 = 15.
+    let osum = order[0] + order[1] + order[2] + order[3] + order[4] + order[5];
+    assert_eq(osum, 15);
+
+    // Step 5: sliding window max over root values with window 2.
+    // [1,2,3,4,5,6], k=2 -> [2,3,4,5,6]
+    let mut rarr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut k = 0;
+    while k < 6 { rarr[k] = roots[k]; k = k + 1; }
+    let mut wout = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sliding_window_max(rarr, 6, 2, wout);
+    assert_eq(wout[0], 2);
+    assert_eq(wout[4], 6);
+
+    let msg = f"combined: sorted_max={vals[5]} roots_sum={osum} crt_x={x} wmax={wout[4]}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_heapsort_pipeline();
+    test_isqrt_pipeline();
+    test_crt_pipeline();
+    test_topo_pipeline();
+    test_mst_pipeline();
+    test_window_pipeline();
+    test_combined_pipeline();
+    print("[OK] 530_interp_comprehensive15");
+    0
+}

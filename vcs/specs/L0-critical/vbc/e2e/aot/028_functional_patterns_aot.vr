@@ -1,0 +1,124 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, functional, higher-order, composition
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT functional programming patterns: map, filter, reduce over ranges
+
+// Iterating with closures
+fn for_range(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while i < end {
+        acc = acc + f(i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn count_where(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn find_first(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut i = start;
+    while i < end {
+        if pred(i) {
+            let result = i;
+            i = end;  // exit loop
+        }
+        i = i + 1;
+    }
+    // If not found, return end (which is start if pred(start) or the found value)
+    i - 1
+}
+
+// Pipeline pattern: chain of transformations
+fn pipeline2(x: Int, f: fn(Int) -> Int, g: fn(Int) -> Int) -> Int {
+    g(f(x))
+}
+
+fn pipeline3(x: Int, f: fn(Int) -> Int, g: fn(Int) -> Int, h: fn(Int) -> Int) -> Int {
+    h(g(f(x)))
+}
+
+// Predicate combinators
+fn both(p1: fn(Int) -> Bool, p2: fn(Int) -> Bool) -> fn(Int) -> Bool {
+    |x| {
+        if p1(x) {
+            p2(x)
+        } else {
+            false
+        }
+    }
+}
+
+fn either(p1: fn(Int) -> Bool, p2: fn(Int) -> Bool) -> fn(Int) -> Bool {
+    |x| {
+        if p1(x) {
+            true
+        } else {
+            p2(x)
+        }
+    }
+}
+
+fn negate(p: fn(Int) -> Bool) -> fn(Int) -> Bool {
+    |x| !p(x)
+}
+
+fn main() -> Int {
+    // Sum of squares
+    let sum_sq = for_range(1, 11, |x| x * x);
+    assert_eq(sum_sq, 385);  // 1+4+9+16+25+36+49+64+81+100
+
+    // Count even numbers
+    let evens = count_where(1, 21, |x| x - (x / 2) * 2 == 0);
+    assert_eq(evens, 10);
+
+    // Count divisible by 3
+    let div3 = count_where(1, 31, |x| x - (x / 3) * 3 == 0);
+    assert_eq(div3, 10);
+
+    // Pipeline
+    let r1 = pipeline2(5, |x| x * 2, |x| x + 1);
+    assert_eq(r1, 11);  // 5*2+1
+
+    let r2 = pipeline3(3, |x| x + 1, |x| x * x, |x| x - 6);
+    assert_eq(r2, 10);  // ((3+1)^2) - 6 = 16-6
+
+    // Predicate combinators
+    let is_even = |x: Int| -> Bool { x - (x / 2) * 2 == 0 };
+    let is_positive = |x: Int| -> Bool { x > 0 };
+    let is_big = |x: Int| -> Bool { x > 10 };
+
+    let even_and_positive = both(is_even, is_positive);
+    assert(even_and_positive(4));
+    assert(!even_and_positive(-4));
+    assert(!even_and_positive(3));
+
+    let even_or_big = either(is_even, is_big);
+    assert(even_or_big(4));
+    assert(even_or_big(15));
+    assert(!even_or_big(3));
+
+    let not_even = negate(is_even);
+    assert(!not_even(4));
+    assert(not_even(3));
+
+    // Combined: count even numbers > 10 in 1..50
+    let combined = both(is_even, is_big);
+    let count = count_where(1, 50, combined);
+    assert_eq(count, 19);  // 12,14,16,...,48 = 19 numbers
+
+    0
+}

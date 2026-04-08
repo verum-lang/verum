@@ -1,0 +1,184 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: implement, methods, protocols
+// @expect: pass
+// @description: Implement block support tests
+// @spec: 03-type-system.md Section 14
+
+// Test 1: Basic inherent implement block
+type Point is {
+    x: Float,
+    y: Float
+};
+
+implement Point {
+    fn new(x: Float, y: Float) -> Point {
+        Point { x, y }
+    }
+
+    fn distance_from_origin(&self) -> Float {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+
+    fn translate(&mut self, dx: Float, dy: Float) {
+        self.x = self.x + dx;
+        self.y = self.y + dy;
+    }
+}
+
+// Test 2: Static methods on custom types
+type Builder is {
+    value: Int
+};
+
+implement Builder {
+    fn new() -> Builder {
+        Builder { value: 0 }
+    }
+
+    fn with_value(v: Int) -> Builder {
+        Builder { value: v }
+    }
+
+    fn build(&self) -> Int {
+        self.value
+    }
+}
+
+// Test 3: Instance methods via implement
+type Counter is {
+    count: Int
+};
+
+implement Counter {
+    fn new() -> Counter {
+        Counter { count: 0 }
+    }
+
+    fn increment(&mut self) {
+        self.count = self.count + 1;
+    }
+
+    fn decrement(&mut self) {
+        self.count = self.count - 1;
+    }
+
+    fn get(&self) -> Int {
+        self.count
+    }
+}
+
+// Test 4: Protocol implementations
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+implement Display for Point {
+    fn display(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+// Test 5: Generic implement blocks
+type Container<T> is {
+    value: T
+};
+
+implement<T> Container<T> {
+    fn new(value: T) -> Container<T> {
+        Container { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn set(&mut self, value: T) {
+        self.value = value;
+    }
+}
+
+// Test 6: Protocol implementation with associated types
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type RangeIter is {
+    current: Int,
+    end: Int
+};
+
+implement Iterator for RangeIter {
+    type Item is Int;
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+}
+
+// Test 7: Multiple protocol implementations
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+implement Clone for Point {
+    fn clone(&self) -> Point {
+        Point { x: self.x, y: self.y }
+    }
+}
+
+// Test 8: Constrained generic implementation
+type Add is protocol {
+    type Output;
+    fn add(self, other: Self) -> Self.Output;
+};
+
+implement Add for Point {
+    type Output is Point;
+
+    fn add(self, other: Point) -> Point {
+        Point {
+            x: self.x + other.x,
+            y: self.y + other.y
+        }
+    }
+}
+
+fn main() {
+    // Test inherent methods
+    let p = Point.new(3.0, 4.0);
+    assert(p.distance_from_origin() == 5.0);
+
+    // Test static methods
+    let b = Builder.with_value(42);
+    assert(b.build() == 42);
+
+    // Test mutable methods
+    let mut c = Counter.new();
+    c.increment();
+    c.increment();
+    assert(c.get() == 2);
+
+    // Test protocol implementation
+    let s = p.display();
+    assert(s == "(3.0, 4.0)");
+
+    // Test generic methods
+    let container = Container.new(100);
+    assert(*container.get() == 100);
+
+    // Test iterator implementation
+    let mut iter = RangeIter { current: 0, end: 3 };
+    assert(iter.next() == Some(0));
+    assert(iter.next() == Some(1));
+    assert(iter.next() == Some(2));
+    assert(iter.next() == None);
+}

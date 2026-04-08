@@ -1,0 +1,143 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, bitwise, shift, and, or, xor
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for bitwise operations (AND, OR, XOR, shifts, NOT)
+
+fn bnot(x: Int) -> Int { !x }
+
+fn test_and() {
+    assert_eq(0xFF & 0x0F, 0x0F);
+    assert_eq(0xFF & 0x00, 0x00);
+    assert_eq(0xFF & 0xFF, 0xFF);
+    assert_eq(0xAA & 0x55, 0x00);
+    assert_eq(0xAB & 0x0F, 0x0B);
+    assert_eq(12 & 10, 8);       // 1100 & 1010 = 1000
+    assert_eq(7 & 3, 3);         // 0111 & 0011 = 0011
+}
+
+fn test_or() {
+    assert_eq(0xF0 | 0x0F, 0xFF);
+    assert_eq(0x00 | 0x00, 0x00);
+    assert_eq(0xAA | 0x55, 0xFF);
+    assert_eq(12 | 10, 14);       // 1100 | 1010 = 1110
+    assert_eq(1 | 2, 3);          // 01 | 10 = 11
+    assert_eq(0 | 0, 0);
+}
+
+fn test_xor() {
+    assert_eq(0xFF ^ 0xFF, 0x00);
+    assert_eq(0xFF ^ 0x00, 0xFF);
+    assert_eq(0xAA ^ 0x55, 0xFF);
+    assert_eq(12 ^ 10, 6);        // 1100 ^ 1010 = 0110
+    assert_eq(7 ^ 3, 4);          // 0111 ^ 0011 = 0100
+    // Self-XOR = 0
+    let x = 42;
+    assert_eq(x ^ x, 0);
+}
+
+fn test_shifts() {
+    assert_eq(1 << 0, 1);
+    assert_eq(1 << 1, 2);
+    assert_eq(1 << 4, 16);
+    assert_eq(1 << 8, 256);
+    assert_eq(1 << 10, 1024);
+    assert_eq(16 >> 1, 8);
+    assert_eq(16 >> 2, 4);
+    assert_eq(16 >> 4, 1);
+    assert_eq(255 >> 4, 15);
+    assert_eq(1024 >> 10, 1);
+}
+
+fn test_bitwise_not() {
+    // Use bnot() helper to avoid register pressure with inline !
+    assert_eq(bnot(0), -1);
+    assert_eq(bnot(-1), 0);
+    assert_eq(bnot(1), -2);
+    assert_eq(bnot(42), -43);
+    assert_eq(bnot(255), -256);
+    // Double NOT = identity
+    assert_eq(bnot(bnot(12345)), 12345);
+}
+
+fn test_combined_masks() {
+    // Mask and shift
+    let val = 0xABCD;
+    let low_byte = val & 0xFF;
+    assert_eq(low_byte, 0xCD);
+    let high_byte = (val >> 8) & 0xFF;
+    assert_eq(high_byte, 0xAB);
+
+    // Set bit
+    let x = 0;
+    let with_bit3 = x | (1 << 3);
+    assert_eq(with_bit3, 8);
+
+    // Toggle bit
+    let z = 0xF0;
+    let toggled = z ^ (1 << 4);
+    assert_eq(toggled, 0xE0);
+
+    // Check if bit is set
+    let val2 = 22;  // 0b10110
+    let bit1_set = (val2 >> 1) & 1;
+    assert_eq(bit1_set, 1);
+    let bit0_set = val2 & 1;
+    assert_eq(bit0_set, 0);
+}
+
+fn test_clear_bit() {
+    // Clear bit using NOT via function
+    let y = 0xFF;
+    let mask = bnot(8);  // ~8 = ...11110111
+    let cleared = y & mask;
+    assert_eq(cleared, 247);  // 0xF7
+}
+
+fn test_swap_without_temp() {
+    // XOR swap
+    let mut a = 42;
+    let mut b = 99;
+    a = a ^ b;
+    b = a ^ b;
+    a = a ^ b;
+    assert_eq(a, 99);
+    assert_eq(b, 42);
+}
+
+fn is_power_of_2(n: Int) -> Bool {
+    if n <= 0 { return false; }
+    (n & (n - 1)) == 0
+}
+
+fn test_power_of_two() {
+    assert_eq(1 & 0, 0);
+    assert_eq(2 & 1, 0);
+    assert_eq(4 & 3, 0);
+    assert_eq(8 & 7, 0);
+    assert_eq(16 & 15, 0);
+    assert_eq(1024 & 1023, 0);
+    assert_eq(is_power_of_2(1), true);
+    assert_eq(is_power_of_2(2), true);
+    assert_eq(is_power_of_2(4), true);
+    assert_eq(is_power_of_2(8), true);
+    assert_eq(is_power_of_2(3), false);
+    assert_eq(is_power_of_2(6), false);
+}
+
+fn main() -> Int {
+    test_and();
+    test_or();
+    test_xor();
+    test_shifts();
+    test_bitwise_not();
+    test_combined_masks();
+    test_clear_bit();
+    test_swap_without_temp();
+    test_power_of_two();
+    print("[OK] 193_bitwise_ops_aot");
+    0
+}

@@ -1,0 +1,147 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, advanced, universes
+
+/// Universe polymorphism - types of types at different levels
+///
+/// Universe polymorphism prevents paradoxes like Type : Type
+/// by stratifying types into universe levels.
+
+/// Identity function - works at any universe level
+fn id<T>(x: T) -> T { x }
+
+/// Constant function
+fn const_fn<A, B>(a: A, b: B) -> A { a }
+
+/// Apply function
+fn apply<A, B>(f: fn(A) -> B, x: A) -> B { f(x) }
+
+/// Compose functions
+fn compose<A, B, C>(f: fn(B) -> C, g: fn(A) -> B) -> fn(A) -> C {
+    |x| f(g(x))
+}
+
+/// Flip arguments
+fn flip<A, B, C>(f: fn(A, B) -> C) -> fn(B, A) -> C {
+    |b, a| f(a, b)
+}
+
+/// Type-level identity
+type Id<T> is T;
+
+/// Type-level pair
+type Pair<A, B> is (A, B);
+
+/// Type-level either
+type Either<A, B> is | Left(A) | Right(B);
+
+/// Functor-like protocol
+type Mappable<F<_>> is protocol {
+    fn map<A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+/// Container abstraction
+type Container<T> is protocol {
+    fn empty() -> Self;
+    fn singleton(value: T) -> Self;
+    fn size(&self) -> Int;
+};
+
+/// Higher-kinded identity type
+fn map_id<T>(x: T) -> T { x }
+
+/// Product of two types
+type Product<A, B> is { fst: A, snd: B };
+
+fn product<A, B>(a: A, b: B) -> Product<A, B> {
+    Product { fst: a, snd: b }
+}
+
+fn fst<A, B>(p: Product<A, B>) -> A { p.fst }
+fn snd<A, B>(p: Product<A, B>) -> B { p.snd }
+
+/// Sum type operations
+fn map_either<A, B, C>(e: Either<A, B>, f: fn(A) -> C) -> Either<C, B> {
+    match e {
+        Left(a) => Left(f(a)),
+        Right(b) => Right(b),
+    }
+}
+
+fn bimap<A, B, C, D>(e: Either<A, B>, f: fn(A) -> C, g: fn(B) -> D) -> Either<C, D> {
+    match e {
+        Left(a) => Left(f(a)),
+        Right(b) => Right(g(b)),
+    }
+}
+
+/// Natural transformation (polymorphic function between type constructors)
+fn list_to_maybe<T>(xs: List<T>) -> Maybe<T> {
+    if xs.len() > 0 { Some(xs[0]) } else { None }
+}
+
+fn maybe_to_list<T>(m: Maybe<T>) -> List<T> {
+    match m {
+        Some(x) => [x],
+        None => [],
+    }
+}
+
+/// Church encoding of natural numbers
+type ChurchNat is fn(fn(Int) -> Int, Int) -> Int;
+
+fn church_zero() -> ChurchNat {
+    |f, x| x
+}
+
+fn church_succ(n: ChurchNat) -> ChurchNat {
+    |f, x| f(n(f, x))
+}
+
+fn church_to_int(n: ChurchNat) -> Int {
+    n(|x| x + 1, 0)
+}
+
+fn church_add(a: ChurchNat, b: ChurchNat) -> ChurchNat {
+    |f, x| a(f, b(f, x))
+}
+
+fn main() {
+    // Basic type-level operations
+    assert(id(42) == 42);
+    assert(const_fn(1, 2) == 1);
+    assert(apply(|x| x * 2, 5) == 10);
+
+    let double_then_add1 = compose(|x: Int| x + 1, |x: Int| x * 2);
+    assert(double_then_add1(3) == 7);
+
+    // Product
+    let p = product(42, "hello");
+    assert(fst(p) == 42);
+    assert(snd(p) == "hello");
+
+    // Either
+    let e: Either<Int, Text> = Left(42);
+    let mapped = map_either(e, |n| n * 2);
+    match mapped {
+        Left(n) => assert(n == 84),
+        Right(_) => {}
+    }
+
+    // Natural transformations
+    assert(list_to_maybe([1, 2, 3]) == Some(1));
+    assert(list_to_maybe([]) == None);
+    assert(maybe_to_list(Some(42)) == [42]);
+    assert(maybe_to_list(None) == []);
+
+    // Church numerals
+    let zero = church_zero();
+    let one = church_succ(zero);
+    let two = church_succ(one);
+    let three = church_add(one, two);
+    assert(church_to_int(zero) == 0);
+    assert(church_to_int(one) == 1);
+    assert(church_to_int(two) == 2);
+    assert(church_to_int(three) == 3);
+}

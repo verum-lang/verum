@@ -1,0 +1,295 @@
+// =============================================================================
+// maybe_collect_test.vr - Tests for collect_maybe, flatten_maybe, flatten_maybe_iter
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, maybe, collect, flatten, utility, core
+// @description: Tests for collect_maybe(), flatten_maybe(), and flatten_maybe_iter()
+//               standalone utility functions.
+// =============================================================================
+
+module specs.core.base.maybe_collect_test;
+
+mount core.*;
+
+// =============================================================================
+// Section 1: collect_maybe Tests
+// =============================================================================
+
+@test
+fn test_collect_maybe_all_some() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(Some(1));
+    items.push(Some(2));
+    items.push(Some(3));
+
+    let result = collect_maybe(items.into_iter());
+    assert(result.is_some());
+    let list = result.unwrap();
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_collect_maybe_with_none() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(Some(1));
+    items.push(None);
+    items.push(Some(3));
+
+    let result = collect_maybe(items.into_iter());
+    assert(result.is_none());
+}
+
+@test
+fn test_collect_maybe_all_none() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(None);
+    items.push(None);
+
+    let result = collect_maybe(items.into_iter());
+    assert(result.is_none());
+}
+
+@test
+fn test_collect_maybe_empty() {
+    let items: List<Maybe<Int>> = List.new();
+    let result = collect_maybe(items.into_iter());
+    assert(result.is_some());
+    assert_eq(result.unwrap().len(), 0);
+}
+
+@test
+fn test_collect_maybe_single_some() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(Some(42));
+
+    let result = collect_maybe(items.into_iter());
+    assert(result.is_some());
+    let list = result.unwrap();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+@test
+fn test_collect_maybe_single_none() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(None);
+
+    let result: Maybe<List<Int>> = collect_maybe(items.into_iter());
+    assert(result.is_none());
+}
+
+@test
+fn test_collect_maybe_none_at_end() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(Some(1));
+    items.push(Some(2));
+    items.push(None);
+
+    let result = collect_maybe(items.into_iter());
+    assert(result.is_none());
+}
+
+@test
+fn test_collect_maybe_none_at_start() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(None);
+    items.push(Some(2));
+    items.push(Some(3));
+
+    let result = collect_maybe(items.into_iter());
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 2: flatten_maybe Tests (list-based)
+// =============================================================================
+
+@test
+fn test_flatten_maybe_mixed() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(Some(1));
+    items.push(None);
+    items.push(Some(2));
+    items.push(None);
+    items.push(Some(3));
+
+    let result = flatten_maybe(&items);
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 3);
+}
+
+@test
+fn test_flatten_maybe_all_some() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(Some(10));
+    items.push(Some(20));
+    items.push(Some(30));
+
+    let result = flatten_maybe(&items);
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 10);
+    assert_eq(result[1], 20);
+    assert_eq(result[2], 30);
+}
+
+@test
+fn test_flatten_maybe_all_none() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(None);
+    items.push(None);
+    items.push(None);
+
+    let result = flatten_maybe(&items);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_flatten_maybe_empty() {
+    let items: List<Maybe<Int>> = List.new();
+    let result = flatten_maybe(&items);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_flatten_maybe_single_some() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(Some(42));
+
+    let result = flatten_maybe(&items);
+    assert_eq(result.len(), 1);
+    assert_eq(result[0], 42);
+}
+
+@test
+fn test_flatten_maybe_single_none() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(None);
+
+    let result = flatten_maybe(&items);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_flatten_maybe_preserves_order() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(None);
+    items.push(Some(5));
+    items.push(None);
+    items.push(None);
+    items.push(Some(10));
+    items.push(Some(15));
+    items.push(None);
+
+    let result = flatten_maybe(&items);
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 5);
+    assert_eq(result[1], 10);
+    assert_eq(result[2], 15);
+}
+
+// =============================================================================
+// Section 3: flatten_maybe_iter Tests (iterator-based)
+// =============================================================================
+
+@test
+fn test_flatten_maybe_iter_mixed() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(Some(1));
+    items.push(None);
+    items.push(Some(2));
+
+    let result = flatten_maybe_iter(items.into_iter());
+    assert_eq(result.len(), 2);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+}
+
+@test
+fn test_flatten_maybe_iter_all_some() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(Some(10));
+    items.push(Some(20));
+
+    let result = flatten_maybe_iter(items.into_iter());
+    assert_eq(result.len(), 2);
+}
+
+@test
+fn test_flatten_maybe_iter_all_none() {
+    let mut items: List<Maybe<Int>> = List.new();
+    items.push(None);
+    items.push(None);
+
+    let result: List<Int> = flatten_maybe_iter(items.into_iter());
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_flatten_maybe_iter_empty() {
+    let items: List<Maybe<Int>> = List.new();
+    let result: List<Int> = flatten_maybe_iter(items.into_iter());
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_flatten_maybe_iter_larger() {
+    let mut items: List<Maybe<Int>> = List.new();
+    for i in range(0, 20) {
+        if i % 2 == 0 {
+            items.push(Some(i));
+        } else {
+            items.push(None);
+        }
+    }
+
+    let result = flatten_maybe_iter(items.into_iter());
+    assert_eq(result.len(), 10); // 0, 2, 4, ..., 18
+    assert_eq(result[0], 0);
+    assert_eq(result[9], 18);
+}
+
+// =============================================================================
+// Section 4: Integration Tests
+// =============================================================================
+
+@test
+fn test_collect_and_flatten_consistency() {
+    // If all Some, collect and flatten should produce same results
+    let mut items1: List<Maybe<Int>> = List.new();
+    items1.push(Some(1));
+    items1.push(Some(2));
+    items1.push(Some(3));
+
+    let mut items2: List<Maybe<Int>> = List.new();
+    items2.push(Some(1));
+    items2.push(Some(2));
+    items2.push(Some(3));
+
+    let collected = collect_maybe(items1.into_iter()).unwrap();
+    let flattened = flatten_maybe(&items2);
+
+    assert_eq(collected.len(), flattened.len());
+    for i in range(0, collected.len()) {
+        assert_eq(collected[i], flattened[i]);
+    }
+}
+
+@test
+fn test_flatten_maybe_text() {
+    let mut items: List<Maybe<Text>> = List.new();
+    items.push(Some("hello"));
+    items.push(None);
+    items.push(Some("world"));
+
+    let result = flatten_maybe(&items);
+    assert_eq(result.len(), 2);
+    assert_eq(result[0], "hello");
+    assert_eq(result[1], "world");
+}

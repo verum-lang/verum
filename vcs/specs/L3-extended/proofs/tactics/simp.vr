@@ -1,0 +1,65 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, simp
+// @timeout: 10000
+
+/// Simplification tactic
+
+/// Basic simp
+theorem simp_add_zero(n: Nat): n + 0 == n { proof by simp }
+theorem simp_mul_one(n: Nat): n * 1 == n { proof by simp }
+theorem simp_mul_zero(n: Nat): n * 0 == 0 { proof by simp }
+theorem simp_double_neg(p: Bool): !!p == p { proof by simp }
+
+/// Simp with lemmas
+@simp lemma add_zero_right(n: Nat): n + 0 == n { proof by definition }
+@simp lemma mul_one_right(n: Nat): n * 1 == n { proof by definition }
+
+theorem simp_combined(n: Nat): n + 0 + 0 == n { proof by simp }
+
+/// Simp with conditional rules
+theorem simp_conditional(x: Int)
+    requires x > 0
+    ensures x + 0 > 0
+{
+    proof by simp
+}
+
+/// Simp for list operations
+theorem simp_list_nil<T>(xs: List<T>): xs ++ [] == xs { proof by simp }
+theorem simp_list_len<T>(): len(Nil) == 0 { proof by simp }
+
+/// Simp for boolean simplification
+theorem simp_bool_and(p: Bool): p && true == p { proof by simp }
+theorem simp_bool_or(p: Bool): p || false == p { proof by simp }
+theorem simp_bool_not_not(p: Bool): !!p == p { proof by simp }
+
+/// Simp in structured proofs
+theorem simp_in_proof(a: Int, b: Int)
+    requires a == b
+    ensures a + 0 == b
+{
+    proof {
+        simp;
+        exact a == b by precondition
+    }
+}
+
+/// Simp with unfolding
+theorem simp_unfold(n: Nat): succ(n) > 0 { proof by simp }
+
+/// Simp only with specific lemmas
+theorem simp_only(n: Nat): n + 0 == n {
+    proof by simp [add_zero_right]
+}
+
+/// Simp with omega fallback
+theorem simp_omega(x: Int)
+    requires x >= 5
+    ensures x > 0
+{
+    proof { simp; omega }
+}
+
+fn main() {}

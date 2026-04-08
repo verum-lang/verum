@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, field, access, error
+// @description: Field access with missing field name
+// @expected-error: E048
+
+fn test() {
+    let x = obj.;  // Missing field name after dot
+}

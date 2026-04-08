@@ -1,0 +1,506 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, platform, darwin
+// @description: Tests macOS/Darwin-specific FFI bindings
+
+/// ============================================================
+/// DARWIN (MACOS) FFI BINDINGS
+/// ============================================================
+///
+/// macOS-specific APIs including Mach kernel interfaces,
+/// Grand Central Dispatch, and CoreFoundation.
+
+@cfg(target_os = "macos")
+
+// ------------------------------------------------------------
+// Darwin Types
+// ------------------------------------------------------------
+
+type mach_port_t is u32;
+type task_t is mach_port_t;
+type thread_t is mach_port_t;
+type kern_return_t is c_int;
+type vm_address_t is usize;
+type vm_size_t is usize;
+type vm_prot_t is c_int;
+type dispatch_queue_t is *mut c_void;
+type dispatch_block_t is *mut c_void;
+type dispatch_time_t is u64;
+type dispatch_group_t is *mut c_void;
+type dispatch_semaphore_t is *mut c_void;
+
+const KERN_SUCCESS: kern_return_t = 0;
+
+// ------------------------------------------------------------
+// Mach Kernel Interfaces
+// ------------------------------------------------------------
+
+ffi mach {
+    @extern("C")
+    fn mach_task_self() -> mach_port_t;
+
+    @extern("C")
+    fn mach_thread_self() -> mach_port_t;
+
+    @extern("C")
+    fn mach_absolute_time() -> u64;
+
+    @extern("C")
+    fn mach_timebase_info(info: *mut mach_timebase_info_data_t) -> kern_return_t;
+
+    @extern("C")
+    fn task_info(
+        target_task: task_t,
+        flavor: c_int,
+        task_info_out: *mut c_int,
+        task_info_outCnt: *mut u32
+    ) -> kern_return_t;
+}
+
+@repr(C)
+type mach_timebase_info_data_t is {
+    numer: u32,
+    denom: u32,
+};
+
+/// Get current task (process) handle
+fn current_task() -> task_t {
+    unsafe { mach.mach_task_self() }
+}
+
+/// High-precision timing
+fn absolute_time_nanos() -> u64 {
+    let ticks = unsafe { mach.mach_absolute_time() };
+
+    static mut TIMEBASE: mach_timebase_info_data_t = mach_timebase_info_data_t { numer: 0, denom: 0 };
+    static mut INIT: Bool = false;
+
+    unsafe {
+        if !INIT {
+            mach.mach_timebase_info(&mut TIMEBASE);
+            INIT = true;
+        }
+        ticks * (TIMEBASE.numer as u64) / (TIMEBASE.denom as u64)
+    }
+}
+
+// ------------------------------------------------------------
+// Virtual Memory (Mach VM)
+// ------------------------------------------------------------
+
+ffi mach_vm {
+    @extern("C")
+    fn mach_vm_allocate(
+        target: mach_port_t,
+        address: *mut vm_address_t,
+        size: vm_size_t,
+        flags: c_int
+    ) -> kern_return_t;
+
+    @extern("C")
+    fn mach_vm_deallocate(
+        target: mach_port_t,
+        address: vm_address_t,
+        size: vm_size_t
+    ) -> kern_return_t;
+
+    @extern("C")
+    fn mach_vm_protect(
+        target: mach_port_t,
+        address: vm_address_t,
+        size: vm_size_t,
+        set_maximum: c_int,
+        new_protection: vm_prot_t
+    ) -> kern_return_t;
+
+    @extern("C")
+    fn mach_vm_read(
+        target_task: mach_port_t,
+        address: vm_address_t,
+        size: vm_size_t,
+        data: *mut *mut c_void,
+        dataCnt: *mut u32
+    ) -> kern_return_t;
+
+    @extern("C")
+    fn mach_vm_write(
+        target_task: mach_port_t,
+        address: vm_address_t,
+        data: *const c_void,
+        dataCnt: u32
+    ) -> kern_return_t;
+}
+
+// VM flags
+const VM_FLAGS_ANYWHERE: c_int = 0x0001;
+const VM_FLAGS_FIXED: c_int = 0x0000;
+
+// VM protection
+const VM_PROT_NONE: vm_prot_t = 0x00;
+const VM_PROT_READ: vm_prot_t = 0x01;
+const VM_PROT_WRITE: vm_prot_t = 0x02;
+const VM_PROT_EXECUTE: vm_prot_t = 0x04;
+
+type MachMemory is {
+    address: vm_address_t,
+    size: vm_size_t,
+};
+
+implement MachMemory {
+    fn allocate(size: usize) -> Result<MachMemory, DarwinError> {
+        let mut address: vm_address_t = 0;
+
+        let kr = unsafe {
+            mach_vm.mach_vm_allocate(
+                mach.mach_task_self(),
+                &mut address,
+                size,
+                VM_FLAGS_ANYWHERE
+            )
+        };
+
+        if kr != KERN_SUCCESS {
+            Err(DarwinError.KernelError(kr))
+        } else {
+            Ok(MachMemory { address, size })
+        }
+    }
+
+    fn protect(&self, protection: vm_prot_t) -> Result<(), DarwinError> {
+        let kr = unsafe {
+            mach_vm.mach_vm_protect(
+                mach.mach_task_self(),
+                self.address,
+                self.size,
+                0,
+                protection
+            )
+        };
+
+        if kr != KERN_SUCCESS {
+            Err(DarwinError.KernelError(kr))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe { std.slice.from_raw_parts(self.address as *const u8, self.size) }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { std.slice.from_raw_parts_mut(self.address as *mut u8, self.size) }
+    }
+}
+
+implement Drop for MachMemory {
+    fn drop(&mut self) {
+        unsafe {
+            mach_vm.mach_vm_deallocate(
+                mach.mach_task_self(),
+                self.address,
+                self.size
+            );
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Grand Central Dispatch (GCD)
+// ------------------------------------------------------------
+
+@link(name = "System")
+ffi dispatch {
+    @extern("C")
+    fn dispatch_get_main_queue() -> dispatch_queue_t;
+
+    @extern("C")
+    fn dispatch_get_global_queue(identifier: c_long, flags: c_ulong) -> dispatch_queue_t;
+
+    @extern("C")
+    fn dispatch_queue_create(label: *const c_char, attr: *const c_void) -> dispatch_queue_t;
+
+    @extern("C")
+    fn dispatch_release(object: *mut c_void);
+
+    @extern("C")
+    fn dispatch_retain(object: *mut c_void);
+
+    @extern("C")
+    fn dispatch_async(queue: dispatch_queue_t, block: dispatch_block_t);
+
+    @extern("C")
+    fn dispatch_sync(queue: dispatch_queue_t, block: dispatch_block_t);
+
+    @extern("C")
+    fn dispatch_after(when: dispatch_time_t, queue: dispatch_queue_t, block: dispatch_block_t);
+
+    @extern("C")
+    fn dispatch_time(when: dispatch_time_t, delta: i64) -> dispatch_time_t;
+
+    @extern("C")
+    fn dispatch_group_create() -> dispatch_group_t;
+
+    @extern("C")
+    fn dispatch_group_async(group: dispatch_group_t, queue: dispatch_queue_t, block: dispatch_block_t);
+
+    @extern("C")
+    fn dispatch_group_wait(group: dispatch_group_t, timeout: dispatch_time_t) -> c_long;
+
+    @extern("C")
+    fn dispatch_group_notify(group: dispatch_group_t, queue: dispatch_queue_t, block: dispatch_block_t);
+
+    @extern("C")
+    fn dispatch_semaphore_create(value: c_long) -> dispatch_semaphore_t;
+
+    @extern("C")
+    fn dispatch_semaphore_wait(dsema: dispatch_semaphore_t, timeout: dispatch_time_t) -> c_long;
+
+    @extern("C")
+    fn dispatch_semaphore_signal(dsema: dispatch_semaphore_t) -> c_long;
+}
+
+// Queue priorities
+const QOS_CLASS_USER_INTERACTIVE: c_long = 0x21;
+const QOS_CLASS_USER_INITIATED: c_long = 0x19;
+const QOS_CLASS_DEFAULT: c_long = 0x15;
+const QOS_CLASS_UTILITY: c_long = 0x11;
+const QOS_CLASS_BACKGROUND: c_long = 0x09;
+
+const DISPATCH_TIME_NOW: dispatch_time_t = 0;
+const DISPATCH_TIME_FOREVER: dispatch_time_t = !0;
+
+type DispatchQueue is {
+    queue: dispatch_queue_t,
+    owned: Bool,
+};
+
+implement DispatchQueue {
+    fn main() -> DispatchQueue {
+        DispatchQueue {
+            queue: unsafe { dispatch.dispatch_get_main_queue() },
+            owned: false,
+        }
+    }
+
+    fn global(qos: c_long) -> DispatchQueue {
+        DispatchQueue {
+            queue: unsafe { dispatch.dispatch_get_global_queue(qos, 0) },
+            owned: false,
+        }
+    }
+
+    fn create(label: &str) -> DispatchQueue {
+        let c_label = label.to_cstring();
+        DispatchQueue {
+            queue: unsafe { dispatch.dispatch_queue_create(c_label.as_ptr(), std.ptr.null()) },
+            owned: true,
+        }
+    }
+}
+
+implement Drop for DispatchQueue {
+    fn drop(&mut self) {
+        if self.owned {
+            unsafe { dispatch.dispatch_release(self.queue) };
+        }
+    }
+}
+
+type DispatchSemaphore is {
+    sema: dispatch_semaphore_t,
+};
+
+implement DispatchSemaphore {
+    fn new(initial_value: i64) -> DispatchSemaphore {
+        DispatchSemaphore {
+            sema: unsafe { dispatch.dispatch_semaphore_create(initial_value as c_long) }
+        }
+    }
+
+    fn wait(&self) -> Bool {
+        unsafe { dispatch.dispatch_semaphore_wait(self.sema, DISPATCH_TIME_FOREVER) == 0 }
+    }
+
+    fn wait_timeout(&self, nanos: u64) -> Bool {
+        let timeout = unsafe { dispatch.dispatch_time(DISPATCH_TIME_NOW, nanos as i64) };
+        unsafe { dispatch.dispatch_semaphore_wait(self.sema, timeout) == 0 }
+    }
+
+    fn signal(&self) {
+        unsafe { dispatch.dispatch_semaphore_signal(self.sema) };
+    }
+}
+
+implement Drop for DispatchSemaphore {
+    fn drop(&mut self) {
+        unsafe { dispatch.dispatch_release(self.sema) };
+    }
+}
+
+// ------------------------------------------------------------
+// CoreFoundation
+// ------------------------------------------------------------
+
+type CFTypeRef is *const c_void;
+type CFAllocatorRef is *const c_void;
+type CFStringRef is *const c_void;
+type CFIndex is c_long;
+type CFStringEncoding is u32;
+
+const kCFStringEncodingUTF8: CFStringEncoding = 0x08000100;
+
+@link(name = "CoreFoundation", kind = "framework")
+ffi cf {
+    @extern("C")
+    fn CFRelease(cf: CFTypeRef);
+
+    @extern("C")
+    fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
+
+    @extern("C")
+    fn CFStringCreateWithCString(
+        alloc: CFAllocatorRef,
+        cStr: *const c_char,
+        encoding: CFStringEncoding
+    ) -> CFStringRef;
+
+    @extern("C")
+    fn CFStringGetLength(theString: CFStringRef) -> CFIndex;
+
+    @extern("C")
+    fn CFStringGetCString(
+        theString: CFStringRef,
+        buffer: *mut c_char,
+        bufferSize: CFIndex,
+        encoding: CFStringEncoding
+    ) -> c_int;
+
+    @extern("C")
+    fn CFGetTypeID(cf: CFTypeRef) -> c_ulong;
+}
+
+type CFString is {
+    inner: CFStringRef,
+};
+
+implement CFString {
+    fn from_str(s: &str) -> CFString {
+        let c_str = s.to_cstring();
+        let cf_str = unsafe {
+            cf.CFStringCreateWithCString(
+                std.ptr.null(),
+                c_str.as_ptr(),
+                kCFStringEncodingUTF8
+            )
+        };
+        CFString { inner: cf_str }
+    }
+
+    fn to_text(&self) -> Text {
+        let len = unsafe { cf.CFStringGetLength(self.inner) } as usize;
+        let mut buffer: [c_char; 1024] = [0; 1024];  // UTF-8 may expand
+
+        let success = unsafe {
+            cf.CFStringGetCString(
+                self.inner,
+                buffer.as_mut_ptr(),
+                buffer.len() as CFIndex,
+                kCFStringEncodingUTF8
+            )
+        };
+
+        if success != 0 {
+            let cstr = unsafe { CStr.from_ptr(buffer.as_ptr()) };
+            cstr.to_text().unwrap_or_default()
+        } else {
+            Text.new()
+        }
+    }
+}
+
+implement Drop for CFString {
+    fn drop(&mut self) {
+        unsafe { cf.CFRelease(self.inner) };
+    }
+}
+
+// ------------------------------------------------------------
+// Security Framework
+// ------------------------------------------------------------
+
+type SecKeychainRef is *mut c_void;
+type SecKeychainItemRef is *mut c_void;
+type OSStatus is i32;
+
+const errSecSuccess: OSStatus = 0;
+
+@link(name = "Security", kind = "framework")
+ffi security {
+    @extern("C")
+    fn SecKeychainFindGenericPassword(
+        keychainOrArray: CFTypeRef,
+        serviceNameLength: u32,
+        serviceName: *const c_char,
+        accountNameLength: u32,
+        accountName: *const c_char,
+        passwordLength: *mut u32,
+        passwordData: *mut *mut c_void,
+        itemRef: *mut SecKeychainItemRef
+    ) -> OSStatus;
+
+    @extern("C")
+    fn SecKeychainItemFreeContent(
+        attrList: *const c_void,
+        data: *mut c_void
+    ) -> OSStatus;
+}
+
+// ------------------------------------------------------------
+// Error Handling
+// ------------------------------------------------------------
+
+type DarwinError is
+    | KernelError(kern_return_t)
+    | SecurityError(OSStatus)
+    | DispatchError
+    | InvalidParameter;
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_char is i8;
+type c_int is i32;
+type c_long is i64;
+type c_ulong is u64;
+
+type CStr is { ptr: *const c_char };
+implement CStr {
+    unsafe fn from_ptr(ptr: *const c_char) -> CStr { CStr { ptr } }
+    fn to_text(&self) -> Result<Text, ()> { Ok(Text.new()) }
+}
+
+type CString is { data: List<u8> };
+
+type ToCString is protocol {
+    fn to_cstring(&self) -> CString;
+}
+
+implement ToCString for str {
+    fn to_cstring(&self) -> CString {
+        let mut data = self.as_bytes().to_vec();
+        data.push(0);
+        CString { data }
+    }
+}
+
+implement CString {
+    fn as_ptr(&self) -> *const c_char { self.data.as_ptr() as *const c_char }
+}
+
+fn main() {
+    // Darwin FFI test
+}

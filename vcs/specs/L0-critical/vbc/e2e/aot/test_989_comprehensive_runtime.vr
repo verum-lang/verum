@@ -1,0 +1,152 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: comprehensive, runtime, integration, e2e
+// @description: Comprehensive runtime integration - threads + channels + mutex + generators
+
+fn __mutex_new_raw() -> Int { 0 }
+fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
+fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
+
+fn* data_source(n: Int) -> Int {
+    let mut i = 1;
+    while i <= n {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn process_item(x: Int) -> Int {
+    let mut n = x;
+    let mut result = 0;
+    while n > 0 {
+        let digit = n % 10;
+        result = result + digit * digit;
+        n = n / 10;
+    }
+    if result == 0 { result = x; }
+    result
+}
+
+fn test_pipeline() -> Int {
+    let n = 30;
+    let work_ch = Channel.new(64);
+    let result_ch = Channel.new(64);
+
+    // Feed generator data into work channel
+    for item in data_source(n) {
+        work_ch.send(item);
+    }
+    // Send 3 stop signals for 3 workers
+    work_ch.send(-1);
+    work_ch.send(-1);
+    work_ch.send(-1);
+
+    // Workers: read from work_ch, process, write to result_ch
+    let w1 = spawn {
+        loop {
+            let val = match work_ch.recv() { Some(v) => v, None => -1 };
+            if val == -1 { break; }
+            result_ch.send(process_item(val));
+        }
+        0
+    };
+    let w2 = spawn {
+        loop {
+            let val = match work_ch.recv() { Some(v) => v, None => -1 };
+            if val == -1 { break; }
+            result_ch.send(process_item(val));
+        }
+        0
+    };
+    let w3 = spawn {
+        loop {
+            let val = match work_ch.recv() { Some(v) => v, None => -1 };
+            if val == -1 { break; }
+            result_ch.send(process_item(val));
+        }
+        0
+    };
+
+    // Collect results
+    let mut result_count = 0;
+    let mut all_positive = true;
+    let mut i = 0;
+    while i < n {
+        let val = match result_ch.recv() { Some(v) => v, None => 0 };
+        if val <= 0 { all_positive = false; }
+        result_count = result_count + 1;
+        i = i + 1;
+    }
+
+    w1.await;
+    w2.await;
+    w3.await;
+
+    if result_count != n {
+        print(f"FAIL: expected {n} results, got {result_count}");
+        return 1;
+    }
+    if !all_positive {
+        print("FAIL: some results not positive");
+        return 1;
+    }
+    print("  pipeline: OK");
+    0
+}
+
+fn test_mutex_with_spawn() -> Int {
+    let mtx = __mutex_new_raw();
+    let ch = Channel.new(10);
+    let n = 100;
+
+    let h1 = spawn {
+        let mut sum = 0;
+        let mut i = 0;
+        while i < n {
+            __mutex_lock_raw(mtx);
+            sum = sum + 1;
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        ch.send(sum);
+        0
+    };
+    let h2 = spawn {
+        let mut sum = 0;
+        let mut i = 0;
+        while i < n {
+            __mutex_lock_raw(mtx);
+            sum = sum + 1;
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        ch.send(sum);
+        0
+    };
+
+    h1.await;
+    h2.await;
+
+    let v1 = match ch.recv() { Some(v) => v, None => 0 };
+    let v2 = match ch.recv() { Some(v) => v, None => 0 };
+    let total = v1 + v2;
+
+    if total != 200 {
+        print(f"FAIL: expected 200, got {total}");
+        return 1;
+    }
+    print("  mutex_with_spawn: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_pipeline();
+    failures = failures + test_mutex_with_spawn();
+
+    if failures == 0 {
+        print("All comprehensive runtime tests passed");
+    }
+    failures
+}

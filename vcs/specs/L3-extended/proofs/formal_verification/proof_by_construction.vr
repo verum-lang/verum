@@ -1,0 +1,76 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-verification, construction
+// @timeout: 20000
+
+/// Proof by construction for formal verification
+
+/// Constructing witnesses
+theorem exists_positive(): exists n: Nat. n > 0 {
+    proof { witness 1; trivial }
+}
+
+theorem exists_even(): exists n: Nat. n % 2 == 0 {
+    proof { witness 2; trivial }
+}
+
+theorem exists_prime(): exists p: Nat. is_prime(p) {
+    proof { witness 2; conclude by two_is_prime }
+}
+
+fn is_prime(n: Nat) -> Bool;
+
+/// Constructing a pair
+theorem pair_exists(x: Int): exists p: (Int, Int). p.0 + p.1 == x {
+    proof { witness (x, 0); conclude by arithmetic }
+}
+
+/// Constructing from hypothesis
+theorem double_exists(n: Nat): exists m: Nat. m == n + n {
+    proof { witness n + n; trivial }
+}
+
+/// Construction with induction
+theorem pow2_exists(n: Nat): exists m: Nat. m == pow(2, n) {
+    proof { witness pow(2, n); trivial }
+}
+
+fn pow(base: Nat, exp: Nat) -> Nat;
+
+/// Identity function is a valid function
+theorem identity_valid<T>(x: T): id(x) == x {
+    proof by auto
+}
+
+fn id<T>(x: T) -> T { x }
+
+/// Constructing sorted list
+theorem sort_exists<T: Ord>(xs: List<T>):
+    exists ys: List<T>. is_sorted(ys) && is_permutation(xs, ys)
+{
+    proof by auto
+}
+
+fn is_sorted<T: Ord>(xs: List<T>) -> Bool;
+fn is_permutation<T>(xs: List<T>, ys: List<T>) -> Bool;
+
+/// Constructing GCD
+theorem gcd_exists(a: Nat, b: Nat)
+    requires a > 0 || b > 0
+    ensures exists g: Nat. g > 0 && divides(g, a) && divides(g, b)
+{
+    proof by auto
+}
+
+fn divides(a: Nat, b: Nat) -> Bool;
+
+/// Constructing square root approximation
+theorem sqrt_approx(x: Float)
+    requires x >= 0
+    ensures exists y: Float. y >= 0 && abs(y * y - x) < 0.001
+{
+    proof by auto
+}
+
+fn main() {}

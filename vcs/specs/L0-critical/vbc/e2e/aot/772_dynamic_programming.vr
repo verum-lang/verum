@@ -1,0 +1,196 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, dynamic-programming, fibonacci, coin-change, lcs
+// @expected-exit: 0
+
+// Iterative fibonacci
+fn fib_iter(n: Int) -> Int {
+    if (n <= 1) {
+        n
+    } else {
+        let mut a = 0;
+        let mut b = 1;
+        let mut i = 2;
+        while (i <= n) {
+            let c = a + b;
+            a = b;
+            b = c;
+            i = i + 1;
+        }
+        b
+    }
+}
+
+// Coin change: minimum coins to make amount using coins [1, 3, 4]
+// dp[i] = min coins to make amount i, dp[0] = 0
+// Returns dp[amount]
+fn min_coins(amount: Int, dp: List<Int>) -> Int {
+    dp[0] = 0;
+    let mut i = 1;
+    while (i <= amount) {
+        dp[i] = 9999; // large sentinel
+        // coin = 1
+        if (i >= 1) {
+            if (dp[i - 1] + 1 < dp[i]) {
+                dp[i] = dp[i - 1] + 1;
+            }
+        }
+        // coin = 3
+        if (i >= 3) {
+            if (dp[i - 3] + 1 < dp[i]) {
+                dp[i] = dp[i - 3] + 1;
+            }
+        }
+        // coin = 4
+        if (i >= 4) {
+            if (dp[i - 4] + 1 < dp[i]) {
+                dp[i] = dp[i - 4] + 1;
+            }
+        }
+        i = i + 1;
+    }
+    dp[amount]
+}
+
+// LCS length of two integer sequences
+// seq_a[0..len_a), seq_b[0..len_b)
+// Uses dp table stored row-major in a flat array of size (len_a+1)*(len_b+1)
+// dp[i*(len_b+1)+j] = LCS length of seq_a[0..i) and seq_b[0..j)
+fn lcs_length(seq_a: List<Int>, len_a: Int, seq_b: List<Int>, len_b: Int, dp: List<Int>) -> Int {
+    let cols = len_b + 1;
+    // Initialize first row and column to 0 (already 0 in fresh list)
+    let mut i = 1;
+    while (i <= len_a) {
+        let mut j = 1;
+        while (j <= len_b) {
+            if (seq_a[i - 1] == seq_b[j - 1]) {
+                dp[i * cols + j] = dp[(i - 1) * cols + (j - 1)] + 1;
+            } else {
+                let up = dp[(i - 1) * cols + j];
+                let left = dp[i * cols + (j - 1)];
+                if (up > left) {
+                    dp[i * cols + j] = up;
+                } else {
+                    dp[i * cols + j] = left;
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    dp[len_a * cols + len_b]
+}
+
+// Max subarray sum (Kadane's algorithm)
+fn max_subarray(arr: List<Int>, n: Int) -> Int {
+    let mut best = arr[0];
+    let mut current = arr[0];
+    let mut i = 1;
+    while (i < n) {
+        if (current + arr[i] > arr[i]) {
+            current = current + arr[i];
+        } else {
+            current = arr[i];
+        }
+        if (current > best) {
+            best = current;
+        }
+        i = i + 1;
+    }
+    best
+}
+
+fn main() -> Int {
+    // Test 1: Fibonacci iterative - fib(0)=0, fib(1)=1, fib(10)=55
+    assert_eq(fib_iter(0), 0);
+    assert_eq(fib_iter(1), 1);
+    assert_eq(fib_iter(10), 55);
+
+    // Test 2: Fibonacci iterative larger values
+    // fib(12) = 144, fib(15) = 610
+    assert_eq(fib_iter(12), 144);
+    assert_eq(fib_iter(15), 610);
+
+    // Test 3: Coin change - amount 6 with coins [1, 3, 4]
+    // dp[0]=0, dp[1]=1, dp[2]=2, dp[3]=1, dp[4]=1, dp[5]=2, dp[6]=2
+    // 6 = 3+3 (2 coins)
+    let mut dp1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let c6 = min_coins(6, dp1);
+    assert_eq(c6, 2);
+
+    // Test 4: Coin change - amount 7
+    // dp[7] = min(dp[6]+1, dp[4]+1, dp[3]+1) = min(3, 2, 2) = 2
+    // 7 = 3+4 (2 coins)
+    let mut dp2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let c7 = min_coins(7, dp2);
+    assert_eq(c7, 2);
+
+    // Test 5: Coin change - amount 11
+    // 11 = 4+4+3 (3 coins)
+    // dp[8]=2(4+4), dp[9]=3(4+4+1? no: 3+3+3=3coins), dp[10]=3(3+3+4), dp[11]=3(4+4+3)
+    // Let me trace: dp[0]=0,1=1,2=2,3=1,4=1,5=2,6=2,7=2,8=2,9=3,10=3,11=3
+    // dp[8]=min(dp[7]+1,dp[5]+1,dp[4]+1)=min(3,3,2)=2 -> 8=4+4
+    // dp[9]=min(dp[8]+1,dp[6]+1,dp[5]+1)=min(3,3,3)=3
+    // dp[10]=min(dp[9]+1,dp[7]+1,dp[6]+1)=min(4,3,3)=3
+    // dp[11]=min(dp[10]+1,dp[8]+1,dp[7]+1)=min(4,3,3)=3
+    let mut dp3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let c11 = min_coins(11, dp3);
+    assert_eq(c11, 3);
+
+    // Test 6: LCS of [1,3,4,5] and [1,2,4,5] -> LCS = [1,4,5] length 3
+    // dp table (5 x 5):
+    //     0 1 2 4 5
+    // 0 | 0 0 0 0 0
+    // 1 | 0 1 1 1 1
+    // 3 | 0 1 1 1 1
+    // 4 | 0 1 1 2 2
+    // 5 | 0 1 1 2 3
+    let sa = [1, 3, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sb = [1, 2, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // dp needs (4+1)*(4+1) = 25 entries, fits in 16 if we use small sequences
+    // Actually 25 > 16, need bigger. Use 3-element sequences instead.
+    // LCS of [1,3,5] and [1,2,5] -> LCS = [1,5] length 2
+    // dp table (4 x 4):
+    //     0 1 2 5
+    // 0 | 0 0 0 0
+    // 1 | 0 1 1 1
+    // 3 | 0 1 1 1
+    // 5 | 0 1 1 2
+    let sa2 = [1, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sb2 = [1, 2, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lcs_dp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let lcs_val = lcs_length(sa2, 3, sb2, 3, lcs_dp);
+    assert_eq(lcs_val, 2);
+
+    // Test 7: LCS of identical sequences [2,4,6] and [2,4,6] -> length 3
+    let sc = [2, 4, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sd = [2, 4, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lcs_dp2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let lcs_val2 = lcs_length(sc, 3, sd, 3, lcs_dp2);
+    assert_eq(lcs_val2, 3);
+
+    // Test 8: LCS of disjoint sequences [1,3,5] and [2,4,6] -> length 0
+    let se = [1, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sf = [2, 4, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lcs_dp3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let lcs_val3 = lcs_length(se, 3, sf, 3, lcs_dp3);
+    assert_eq(lcs_val3, 0);
+
+    // Test 9: Kadane's max subarray sum
+    // arr = [-2, 1, -3, 4, -1, 2, 1, -5, 4, 0, 0, 0, 0, 0, 0, 0]
+    // Max subarray: [4, -1, 2, 1] = 6
+    let karr = [-2, 1, -3, 4, -1, 2, 1, -5, 4, 0, 0, 0, 0, 0, 0, 0];
+    let max_sum = max_subarray(karr, 9);
+    assert_eq(max_sum, 6);
+
+    // Test 10: Kadane's on all-negative array
+    // arr = [-5, -3, -8, -1, -4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // Max subarray: [-1] = -1
+    let karr2 = [-5, -3, -8, -1, -4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let max_sum2 = max_subarray(karr2, 5);
+    assert_eq(max_sum2, -1);
+
+    print("Dynamic programming: PASS");
+    0
+}

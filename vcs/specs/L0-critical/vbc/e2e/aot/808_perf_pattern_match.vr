@@ -1,0 +1,43 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, performance, pattern_match
+// @expected-exit: 0
+
+// Performance: 8-variant match dispatch x 100K iterations
+// Uses integer-based dispatch to simulate variant matching
+
+fn classify(x: Int) -> Int {
+    let tag = x % 8;
+    if (tag == 0) { return x * 2; }
+    if (tag == 1) { return x + 100; }
+    if (tag == 2) { return x - 50; }
+    if (tag == 3) { return x * 3; }
+    if (tag == 4) { return x / 2; }
+    if (tag == 5) { return x + 7; }
+    if (tag == 6) { return x * x % 1000; }
+    return x + 1;
+}
+
+fn main() -> Int {
+    let n = 100000;
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < n) {
+        sum = sum + classify(i);
+        i = i + 1;
+    }
+    // Deterministic result based on distribution across 8 branches
+    // We just verify it's a specific value
+    print(f"OK: pattern_match_100K sum={sum}");
+
+    // Verify by recomputing a small portion
+    let check = classify(0) + classify(1) + classify(2) + classify(3);
+    // classify(0)=0*2=0, classify(1)=1+100=101, classify(2)=2-50=-48, classify(3)=3*3=9
+    let expected_check = 0 + 101 + (-48) + 9;
+    if (check != expected_check) {
+        print(f"FAIL: check={check}, expected={expected_check}");
+        return 1;
+    }
+    0
+}

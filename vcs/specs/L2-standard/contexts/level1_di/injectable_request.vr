@@ -1,0 +1,80 @@
+// @test: run
+// @expected-stdout: Request handler created
+// Request handler created
+// @tier: 0
+// @level: L2
+// @tags: di, injectable, request-scope
+// @description: Tests request scope - new instance per request, shared within request
+
+@injectable(Scope.Request)
+type RequestHandler is {
+    request_id: Text,
+    created_at: Int,
+};
+
+implement RequestHandler {
+    @inject
+    fn new() -> Self {
+        println("Request handler created");
+        Self {
+            request_id: generate_request_id(),
+            created_at: current_timestamp(),
+        }
+    }
+
+    fn get_request_id(&self) -> Text {
+        self.request_id
+    }
+}
+
+fn generate_request_id() -> Text {
+    // Simplified - would be UUID in production
+    "req-" + random_string(8)
+}
+
+fn random_string(len: Int) -> Text {
+    "abcd1234"
+}
+
+fn current_timestamp() -> Int {
+    1234567890
+}
+
+// Helper service that uses RequestHandler within same request
+@injectable(Scope.Request)
+type RequestLogger is {
+    handler: RequestHandler,
+};
+
+implement RequestLogger {
+    @inject
+    fn new(handler: RequestHandler) -> Self {
+        Self { handler }
+    }
+
+    fn log(&self, message: Text) {
+        println("[" + self.handler.get_request_id() + "] " + message);
+    }
+}
+
+fn with_request_scope(f: fn()) {
+    f();
+}
+
+fn main() {
+    // Simulate first request
+    with_request_scope(|| {
+        let handler1 = inject RequestHandler;
+        let logger1 = inject RequestLogger;
+
+        // Within same request, handler should be the same instance
+        assert(handler1.request_id == logger1.handler.request_id);
+    });
+
+    // Simulate second request - new instances created
+    with_request_scope(|| {
+        let handler2 = inject RequestHandler;
+        // handler2 is a different instance than handler1
+        // (can't directly compare across scopes, but new creation message printed)
+    });
+}

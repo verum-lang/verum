@@ -1,0 +1,45 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Single path segment
+mount std;
+
+// Two path segments
+mount core.io;
+
+// Three path segments
+mount core.collections.List;
+
+// Four path segments
+mount core.collections.hash.HashMap;
+
+// Five path segments
+mount myorg.myproject.core.utils.helpers;
+
+// Lowercase module names
+mount lowercase.module.name;
+
+// Mixed case identifiers
+mount MyModule.SubModule.Item;
+
+// With underscores
+mount my_module.sub_module.my_item;
+
+// With numbers
+mount module1.sub2.item3;
+
+// Longer path
+mount org.project.core.utils.helpers.strings;
+
+// Standard library paths
+mount core.fs;
+mount core.net;
+mount core.sync;
+mount core.thread;
+mount core.time;
+
+// Common patterns
+mount verum.core;
+mount verum.std;
+mount verum.runtime;

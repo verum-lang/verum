@@ -1,0 +1,334 @@
+// @test: parse
+// @tier: 2
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: cbgr, latency, jit, optimized, micro
+// @description: Tier 2 JIT CBGR latency benchmark (target: < 15ns per check)
+
+/// Tier 2 (Optimized JIT) CBGR Latency Benchmark
+///
+/// This benchmark measures CBGR overhead with optimized JIT compilation.
+/// Tier 2 applies aggressive optimizations including:
+///
+/// - Escape analysis for reference elision
+/// - Loop invariant code motion (LICM)
+/// - Common subexpression elimination (CSE)
+/// - Inline caching with polymorphic dispatch
+/// - Speculative optimization with deoptimization guards
+///
+/// Target: < 15ns per check (often < 5ns with optimizations)
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 50_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+const EXPECTED_LATENCY_NS: Float = 15.0;
+
+fn main() {
+    let results = BenchmarkResults.new("Tier 2 Optimized JIT CBGR Latency");
+
+    // Optimized CBGR benchmarks
+    results.add(benchmark_escape_analysis_elision());
+    results.add(benchmark_loop_hoisted_check());
+    results.add(benchmark_cse_multiple_refs());
+    results.add(benchmark_speculative_inlining());
+    results.add(benchmark_polymorphic_dispatch());
+    results.add(benchmark_deopt_guard_overhead());
+
+    results.report();
+    assert(results.all_pass(), "Tier 2 CBGR latency exceeds target");
+}
+
+/// Benchmark: Escape analysis should elide CBGR checks for non-escaping refs
+fn benchmark_escape_analysis_elision() -> BenchmarkResult {
+    // Extended warmup to trigger optimization tiers
+    for _ in 0..WARMUP_ITERATIONS {
+        // Local allocation that doesn't escape
+        let local = 42;
+        let local_ref = &local;
+        black_box(*local_ref);
+    }
+
+    optimization_barrier();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Escape analysis should eliminate CBGR overhead
+        // for references to stack-allocated values
+        let local = 42;
+        let local_ref = &local;
+        black_box(*local_ref);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // With escape analysis, should be near zero overhead
+    let elision_target = EXPECTED_LATENCY_NS * 0.3;
+
+    BenchmarkResult {
+        name: "escape_analysis_elision",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: elision_target,
+        passed: per_op_ns < elision_target,
+    }
+}
+
+/// Benchmark: Loop invariant code motion for generation checks
+fn benchmark_loop_hoisted_check() -> BenchmarkResult {
+    let data = Heap.new(100);
+    let ref_data = &*data;
+
+    // Warmup with same loop pattern
+    let mut sum = 0;
+    for _ in 0..WARMUP_ITERATIONS {
+        sum += *ref_data;
+    }
+    black_box(sum);
+
+    optimization_barrier();
+
+    let timer = Timer.new();
+    timer.start();
+
+    sum = 0;
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Generation check should be hoisted out of loop
+        // Only the memory load remains in hot path
+        sum += *ref_data;
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // With hoisting, amortized cost approaches zero
+    let hoisted_target = EXPECTED_LATENCY_NS * 0.2;
+
+    BenchmarkResult {
+        name: "loop_hoisted_check",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: hoisted_target,
+        passed: per_op_ns < hoisted_target,
+    }
+}
+
+/// Benchmark: CSE for multiple refs to same allocation
+fn benchmark_cse_multiple_refs() -> BenchmarkResult {
+    let data = Heap.new(42);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let r1 = &*data;
+        let r2 = &*data;
+        let r3 = &*data;
+        black_box(*r1 + *r2 + *r3);
+    }
+
+    optimization_barrier();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // CSE should recognize all refs have same generation
+        // Single generation check covers all accesses
+        let r1 = &*data;
+        let r2 = &*data;
+        let r3 = &*data;
+        black_box(*r1 + *r2 + *r3);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    // 3 accesses per iteration
+    let per_op_ns = elapsed_ns as Float / (BENCHMARK_ITERATIONS as Float * 3.0);
+
+    // CSE should make per-access cost minimal
+    let cse_target = EXPECTED_LATENCY_NS * 0.4;
+
+    BenchmarkResult {
+        name: "cse_multiple_refs",
+        iterations: BENCHMARK_ITERATIONS * 3,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: cse_target,
+        passed: per_op_ns < cse_target,
+    }
+}
+
+/// Benchmark: Speculative inlining of CBGR checks
+fn benchmark_speculative_inlining() -> BenchmarkResult {
+    let data = Heap.new(42);
+
+    // Warmup through multiple call sites
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(access_value(&*data));
+    }
+
+    optimization_barrier();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Speculative inlining should inline both the function
+        // and the CBGR check, enabling further optimizations
+        black_box(access_value(&*data));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "speculative_inlining",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+    }
+}
+
+@inline(never)
+fn access_value(r: &Int) -> Int {
+    *r
+}
+
+/// Benchmark: Polymorphic reference dispatch with inline caching
+fn benchmark_polymorphic_dispatch() -> BenchmarkResult {
+    let int_data = Heap.new(42);
+    let float_data = Heap.new(3.14);
+    let text_data = Heap.new(Text.from("test"));
+
+    let refs: List<&Display> = [
+        &*int_data as &Display,
+        &*float_data as &Display,
+        &*text_data as &Display,
+    ];
+
+    // Warmup with polymorphic access
+    for _ in 0..WARMUP_ITERATIONS {
+        for r in refs.iter() {
+            black_box(r.to_string());
+        }
+    }
+
+    optimization_barrier();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 3) {
+        // Polymorphic dispatch with CBGR checks
+        for r in refs.iter() {
+            black_box(r.to_string());
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Polymorphic dispatch adds overhead
+    let poly_target = EXPECTED_LATENCY_NS * 2.0;
+
+    BenchmarkResult {
+        name: "polymorphic_dispatch",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: poly_target,
+        passed: per_op_ns < poly_target,
+    }
+}
+
+/// Benchmark: Deoptimization guard overhead
+fn benchmark_deopt_guard_overhead() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let ref_data = &*data;
+
+    // Warmup establishes optimization assumptions
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*ref_data);
+    }
+
+    optimization_barrier();
+
+    // Potentially trigger deoptimization by modifying environment
+    let deopt_trigger = Heap.new(100);
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Deopt guards add small overhead to check assumptions
+        black_box(*ref_data);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "deopt_guard_overhead",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+    }
+}
+
+/// Optimization barrier to prevent cross-benchmark optimization
+@inline(never)
+fn optimization_barrier() {
+    compiler_fence();
+    memory_fence();
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    total_ns: Int,
+    per_op_ns: Float,
+    target_ns: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2}ns (target: {:.2}ns)",
+                    status, result.name, result.per_op_ns, result.target_ns);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

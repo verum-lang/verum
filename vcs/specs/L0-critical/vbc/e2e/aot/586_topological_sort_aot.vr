@@ -1,0 +1,247 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, topological-sort, dag, ordering
+// @timeout: 30000
+
+// Topological sort using Kahn's algorithm (BFS-based)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// DAG adjacency stored as bit flags (same as graph coloring)
+fn has_edge(adj: Arr8, u: Int, v: Int) -> Int {
+    let row = get8(adj, u);
+    let mut mask = 1;
+    let mut k = 0;
+    while k < v { mask = mask * 2; k = k + 1; }
+    if (row / mask) % 2 == 1 { 1 } else { 0 }
+}
+
+fn add_directed_edge(adj: Arr8, u: Int, v: Int) -> Arr8 {
+    let mut mask = 1;
+    let mut k = 0;
+    while k < v { mask = mask * 2; k = k + 1; }
+    let row = get8(adj, u);
+    if (row / mask) % 2 == 0 {
+        set8(adj, u, row + mask)
+    } else { adj }
+}
+
+// Compute in-degree for each node
+fn compute_indegree(adj: Arr8, n: Int) -> Arr8 {
+    let mut indeg = zeros();
+    let mut u = 0;
+    while u < n {
+        let mut v = 0;
+        while v < n {
+            if has_edge(adj, u, v) == 1 {
+                indeg = set8(indeg, v, get8(indeg, v) + 1);
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    indeg
+}
+
+// Kahn's algorithm: returns topological order in result array
+// Returns count of sorted nodes (< n means cycle detected)
+fn topo_sort_count(adj: Arr8, n: Int) -> Int {
+    let mut indeg = compute_indegree(adj, n);
+    // Queue: use simple array-based queue
+    let mut queue = zeros();
+    let mut front = 0;
+    let mut back = 0;
+    // Enqueue all nodes with indegree 0
+    let mut i = 0;
+    while i < n {
+        if get8(indeg, i) == 0 {
+            queue = set8(queue, back, i);
+            back = back + 1;
+        }
+        i = i + 1;
+    }
+    let mut count = 0;
+    while front < back {
+        let u = get8(queue, front);
+        front = front + 1;
+        count = count + 1;
+        // Decrease indegree for neighbors
+        let mut v = 0;
+        while v < n {
+            if has_edge(adj, u, v) == 1 {
+                indeg = set8(indeg, v, get8(indeg, v) - 1);
+                if get8(indeg, v) == 0 {
+                    queue = set8(queue, back, v);
+                    back = back + 1;
+                }
+            }
+            v = v + 1;
+        }
+    }
+    count
+}
+
+// Get topological order
+fn topo_sort_order(adj: Arr8, n: Int) -> Arr8 {
+    let mut indeg = compute_indegree(adj, n);
+    let mut queue = zeros();
+    let mut front = 0;
+    let mut back = 0;
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        if get8(indeg, i) == 0 {
+            queue = set8(queue, back, i);
+            back = back + 1;
+        }
+        i = i + 1;
+    }
+    let mut count = 0;
+    while front < back {
+        let u = get8(queue, front);
+        front = front + 1;
+        result = set8(result, count, u);
+        count = count + 1;
+        let mut v = 0;
+        while v < n {
+            if has_edge(adj, u, v) == 1 {
+                indeg = set8(indeg, v, get8(indeg, v) - 1);
+                if get8(indeg, v) == 0 {
+                    queue = set8(queue, back, v);
+                    back = back + 1;
+                }
+            }
+            v = v + 1;
+        }
+    }
+    result
+}
+
+// Verify topological order: for every edge u->v, u appears before v
+fn verify_order(adj: Arr8, order: Arr8, n: Int) -> Int {
+    // Build position map: pos[node] = index in order
+    let mut pos = zeros();
+    let mut i = 0;
+    while i < n {
+        pos = set8(pos, get8(order, i), i);
+        i = i + 1;
+    }
+    // Check all edges
+    let mut u = 0;
+    while u < n {
+        let mut v = 0;
+        while v < n {
+            if has_edge(adj, u, v) == 1 {
+                if get8(pos, u) >= get8(pos, v) {
+                    return 0; // u should come before v
+                }
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    1
+}
+
+fn test_linear_chain() -> Int {
+    // 0 -> 1 -> 2 -> 3
+    let mut adj = zeros();
+    adj = add_directed_edge(adj, 0, 1);
+    adj = add_directed_edge(adj, 1, 2);
+    adj = add_directed_edge(adj, 2, 3);
+    assert_eq(topo_sort_count(adj, 4), 4); // all sorted
+    let order = topo_sort_order(adj, 4);
+    assert_eq(verify_order(adj, order, 4), 1);
+    // For linear chain, order must be 0,1,2,3
+    assert_eq(get8(order, 0), 0);
+    assert_eq(get8(order, 1), 1);
+    assert_eq(get8(order, 2), 2);
+    assert_eq(get8(order, 3), 3);
+    1
+}
+
+fn test_diamond() -> Int {
+    // 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3
+    let mut adj = zeros();
+    adj = add_directed_edge(adj, 0, 1);
+    adj = add_directed_edge(adj, 0, 2);
+    adj = add_directed_edge(adj, 1, 3);
+    adj = add_directed_edge(adj, 2, 3);
+    assert_eq(topo_sort_count(adj, 4), 4);
+    let order = topo_sort_order(adj, 4);
+    assert_eq(verify_order(adj, order, 4), 1);
+    // 0 must be first, 3 must be last
+    assert_eq(get8(order, 0), 0);
+    assert_eq(get8(order, 3), 3);
+    1
+}
+
+fn test_disconnected() -> Int {
+    // 0 -> 1, 2 -> 3 (two separate chains)
+    let mut adj = zeros();
+    adj = add_directed_edge(adj, 0, 1);
+    adj = add_directed_edge(adj, 2, 3);
+    assert_eq(topo_sort_count(adj, 4), 4);
+    let order = topo_sort_order(adj, 4);
+    assert_eq(verify_order(adj, order, 4), 1);
+    1
+}
+
+fn test_complex_dag() -> Int {
+    // 5 -> 0, 5 -> 2, 4 -> 0, 4 -> 1, 2 -> 3, 3 -> 1
+    let mut adj = zeros();
+    adj = add_directed_edge(adj, 5, 0);
+    adj = add_directed_edge(adj, 5, 2);
+    adj = add_directed_edge(adj, 4, 0);
+    adj = add_directed_edge(adj, 4, 1);
+    adj = add_directed_edge(adj, 2, 3);
+    adj = add_directed_edge(adj, 3, 1);
+    assert_eq(topo_sort_count(adj, 6), 6);
+    let order = topo_sort_order(adj, 6);
+    assert_eq(verify_order(adj, order, 6), 1);
+    1
+}
+
+fn test_indegree() -> Int {
+    // 0 -> 1, 0 -> 2, 1 -> 2
+    let mut adj = zeros();
+    adj = add_directed_edge(adj, 0, 1);
+    adj = add_directed_edge(adj, 0, 2);
+    adj = add_directed_edge(adj, 1, 2);
+    let indeg = compute_indegree(adj, 3);
+    assert_eq(get8(indeg, 0), 0); // no incoming
+    assert_eq(get8(indeg, 1), 1); // from 0
+    assert_eq(get8(indeg, 2), 2); // from 0 and 1
+    1
+}
+
+fn main() -> Int {
+    test_linear_chain();
+    test_diamond();
+    test_disconnected();
+    test_complex_dag();
+    test_indegree();
+    print("[OK] 586_topological_sort_aot");
+    0
+}

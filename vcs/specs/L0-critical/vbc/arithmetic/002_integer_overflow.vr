@@ -1,0 +1,137 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, arithmetic, integer, overflow, boundary
+// @timeout: 5000
+// @expect: pass
+//
+// Test: Integer overflow boundary behavior
+// VBC uses 48-bit signed integers in NaN-boxing
+// Range: -140737488355328 to 140737488355327
+//
+// Note: Checked/Saturating/Wrapping arithmetic intrinsics require
+// return type conversion (tuple -> Maybe) to be implemented.
+// Those tests are in a separate file: 002b_checked_arithmetic.vr
+
+fn test_48bit_boundary_values() {
+    let max_48: Int = 140737488355327;   // 2^47 - 1
+    let min_48: Int = -140737488355328;  // -2^47
+
+    assert_eq(max_48, 140737488355327);
+    assert_eq(min_48, -140737488355328);
+}
+
+fn test_add_near_max() {
+    let max_48: Int = 140737488355327;
+
+    // Just under max
+    let near_max: Int = max_48 - 10;
+    assert_eq(near_max + 5, max_48 - 5);
+    assert_eq(near_max + 10, max_48);
+}
+
+fn test_add_near_min() {
+    let min_48: Int = -140737488355328;
+
+    // Just above min
+    let near_min: Int = min_48 + 10;
+    assert_eq(near_min - 5, min_48 + 5);
+    assert_eq(near_min - 10, min_48);
+}
+
+fn test_mul_boundary() {
+    // Large multiplications that stay within bounds
+    let a: Int = 1000000;
+    let b: Int = 1000000;
+    assert_eq(a * b, 1000000000000);
+
+    // 10^7 * 10^6 = 10^13 (within 48-bit range)
+    let c: Int = 10000000;
+    let d: Int = 1000000;
+    assert_eq(c * d, 10000000000000);
+}
+
+fn test_div_boundary() {
+    let max_48: Int = 140737488355327;
+    let min_48: Int = -140737488355328;
+
+    // Division near boundaries
+    assert_eq(max_48 / 1, max_48);
+    assert_eq(min_48 / 1, min_48);
+    assert_eq(max_48 / max_48, 1);
+    assert_eq(min_48 / min_48, 1);
+
+    // Large divisions
+    assert_eq(1000000000000 / 1000000, 1000000);
+}
+
+fn test_mod_boundary() {
+    let max_48: Int = 140737488355327;
+
+    // Modulo operations
+    assert_eq(max_48 % 2, 1);  // Max is odd
+    assert_eq(max_48 % 10, 7);
+    assert_eq(1000000000000 % 7, 1000000000000 - (142857142857 * 7));
+}
+
+fn test_negation_boundary() {
+    let max_48: Int = 140737488355327;
+    let min_48: Int = -140737488355328;
+
+    // Negation tests
+    assert_eq(-max_48, -140737488355327);
+    // Note: -min_48 would overflow since |min| > max
+
+    // Negation of smaller values
+    assert_eq(-100, -100);
+    assert_eq(-(-100), 100);
+}
+
+fn test_comparison_at_boundary() {
+    let max_48: Int = 140737488355327;
+    let min_48: Int = -140737488355328;
+
+    // Comparisons at boundary
+    assert(max_48 > 0);
+    assert(min_48 < 0);
+    assert(max_48 > min_48);
+    assert(max_48 >= max_48);
+    assert(min_48 <= min_48);
+    assert(max_48 != min_48);
+
+    // Boundary adjacency
+    assert(max_48 > max_48 - 1);
+    assert(min_48 < min_48 + 1);
+}
+
+fn test_arithmetic_properties() {
+    let max_48: Int = 140737488355327;
+    let min_48: Int = -140737488355328;
+
+    // Identity properties at boundary
+    assert_eq(max_48 + 0, max_48);
+    assert_eq(min_48 + 0, min_48);
+    assert_eq(max_48 * 1, max_48);
+    assert_eq(min_48 * 1, min_48);
+
+    // Zero multiplication
+    assert_eq(max_48 * 0, 0);
+    assert_eq(min_48 * 0, 0);
+
+    // Subtraction to zero
+    assert_eq(max_48 - max_48, 0);
+    assert_eq(min_48 - min_48, 0);
+}
+
+fn main() {
+    test_48bit_boundary_values();
+    test_add_near_max();
+    test_add_near_min();
+    test_mul_boundary();
+    test_div_boundary();
+    test_mod_boundary();
+    test_negation_boundary();
+    test_comparison_at_boundary();
+    test_arithmetic_properties();
+    print("002_integer_overflow: PASSED");
+}

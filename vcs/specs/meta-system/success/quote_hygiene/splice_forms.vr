@@ -1,0 +1,293 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, quote, hygiene, splice, unquote, interpolation
+// @description: Tests all splice/unquote forms in quote expressions
+
+// =============================================================================
+// BASIC SPLICE ($ident)
+// =============================================================================
+
+// Simple identifier splice
+meta fn splice_ident() -> TokenStream {
+    let name = ident("foo");
+    quote { let $name = 42; }
+}
+
+// Multiple identifier splices
+meta fn splice_multi_ident() -> TokenStream {
+    let a = ident("alpha");
+    let b = ident("beta");
+    let c = ident("gamma");
+    quote { fn $a($b: Int) -> $c { $b } }
+}
+
+// Splice identifier in path position
+meta fn splice_ident_path() -> TokenStream {
+    let mod_name = ident("std");
+    let item = ident("print");
+    quote { $mod_name.$item("hello"); }
+}
+
+// =============================================================================
+// EXPRESSION SPLICE (${expr})
+// =============================================================================
+
+// Simple expression splice
+meta fn splice_expr_simple() -> TokenStream {
+    let value = 42;
+    quote { let x = ${value}; }
+}
+
+// Computed expression splice
+meta fn splice_expr_computed() -> TokenStream {
+    let a = 10;
+    let b = 20;
+    quote { let sum = ${a + b}; }
+}
+
+// Complex expression splice
+meta fn splice_expr_complex() -> TokenStream {
+    let list = [1, 2, 3, 4, 5];
+    quote {
+        let count = ${list.len()};
+        let sum = ${list.iter().sum()};
+        let avg = ${list.iter().sum() / list.len()};
+    }
+}
+
+// Expression splice with function call
+meta fn splice_expr_call() -> TokenStream {
+    let get_default = || 100;
+    quote { let x = ${get_default()}; }
+}
+
+// =============================================================================
+// REPETITION SPLICE ($[for...])
+// =============================================================================
+
+// Basic repetition
+meta fn splice_repeat_basic() -> TokenStream {
+    let names = [ident("a"), ident("b"), ident("c")];
+    quote {
+        $[for n in names {
+            let $n: Int = 0;
+        }]
+    }
+}
+
+// Repetition with tuple unpacking
+meta fn splice_repeat_tuple() -> TokenStream {
+    let pairs = [
+        (ident("x"), 10),
+        (ident("y"), 20),
+        (ident("z"), 30),
+    ];
+    quote {
+        $[for (name, value) in pairs {
+            let $name = $value;
+        }]
+    }
+}
+
+// Repetition with separator
+meta fn splice_repeat_separator() -> TokenStream {
+    let fields = [ident("name"), ident("age"), ident("email")];
+    quote {
+        type User is {
+            $[for f in fields separator "," {
+                $f: Text
+            }]
+        };
+    }
+}
+
+// Nested repetition
+meta fn splice_repeat_nested() -> TokenStream {
+    let matrix = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+    ];
+    quote {
+        let m = [
+            $[for row in matrix separator "," {
+                [$[for val in row separator "," { $val }]]
+            }]
+        ];
+    }
+}
+
+// Repetition with index
+meta fn splice_repeat_indexed() -> TokenStream {
+    let items = ["first", "second", "third"];
+    quote {
+        $[for (i, item) in items.enumerate() {
+            print(f"Item {$i}: {$item}");
+        }]
+    }
+}
+
+// =============================================================================
+// CONDITIONAL SPLICE
+// =============================================================================
+
+// Optional splice
+meta fn splice_optional() -> TokenStream {
+    let maybe_default: Maybe<Int> = Some(42);
+    quote {
+        let x: Int ${if let Some(v) = maybe_default { = $v } else { }};
+    }
+}
+
+// Conditional splice with else
+meta fn splice_conditional() -> TokenStream {
+    let use_default = true;
+    quote {
+        let value = ${if use_default { 0 } else { compute() }};
+    }
+}
+
+// =============================================================================
+// TYPE SPLICE
+// =============================================================================
+
+// Splice type annotation
+meta fn splice_type() -> TokenStream {
+    let ty = ident("Int");
+    quote { let x: $ty = 42; }
+}
+
+// Splice generic type
+meta fn splice_generic_type() -> TokenStream {
+    let elem_ty = ident("Text");
+    quote { let list: List<$elem_ty> = List.new(); }
+}
+
+// Splice in type position
+meta fn splice_type_position() -> TokenStream {
+    let container = ident("Vec");
+    let element = ident("Int");
+    quote { fn make() -> $container<$element> { $container.new() } }
+}
+
+// =============================================================================
+// PATTERN SPLICE
+// =============================================================================
+
+// Splice pattern
+meta fn splice_pattern() -> TokenStream {
+    let pat = quote { Some(x) };
+    quote {
+        match value {
+            $pat => x,
+            None => 0,
+        }
+    }
+}
+
+// Splice in match arm
+meta fn splice_match_arm() -> TokenStream {
+    let variants = [
+        (ident("Red"), 1),
+        (ident("Green"), 2),
+        (ident("Blue"), 3),
+    ];
+    quote {
+        match color {
+            $[for (name, val) in variants {
+                Color.$name => $val,
+            }]
+        }
+    }
+}
+
+// =============================================================================
+// ITEM SPLICE
+// =============================================================================
+
+// Splice function
+meta fn splice_function() -> TokenStream {
+    let fn_name = ident("generated_fn");
+    let body_expr = quote { 42 };
+    quote {
+        fn $fn_name() -> Int {
+            $body_expr
+        }
+    }
+}
+
+// Splice method in impl
+meta fn splice_method() -> TokenStream {
+    let type_name = ident("MyType");
+    let methods = [
+        (ident("get"), quote { self.value }),
+        (ident("set"), quote { self.value = val; }),
+    ];
+    quote {
+        implement $type_name {
+            $[for (name, body) in methods {
+                fn $name(&mut self) {
+                    $body
+                }
+            }]
+        }
+    }
+}
+
+// =============================================================================
+// COMBINED SPLICES
+// =============================================================================
+
+// All splice forms together
+meta fn splice_combined() -> TokenStream {
+    let name = ident("combined");
+    let value = 42;
+    let fields = [ident("a"), ident("b")];
+    let ty = ident("Int");
+
+    quote {
+        fn $name() -> $ty {
+            $[for f in fields {
+                let $f: $ty = ${value};
+            }]
+            ${fields.len()}
+        }
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn main() {
+    // Basic ident splice
+    @const assert(!splice_ident().is_empty());
+    @const assert(!splice_multi_ident().is_empty());
+    @const assert(!splice_ident_path().is_empty());
+
+    // Expression splice
+    @const assert(!splice_expr_simple().is_empty());
+    @const assert(!splice_expr_computed().is_empty());
+    @const assert(!splice_expr_complex().is_empty());
+    @const assert(!splice_expr_call().is_empty());
+
+    // Repetition splice
+    @const assert(!splice_repeat_basic().is_empty());
+    @const assert(!splice_repeat_tuple().is_empty());
+    @const assert(!splice_repeat_separator().is_empty());
+    @const assert(!splice_repeat_nested().is_empty());
+    @const assert(!splice_repeat_indexed().is_empty());
+
+    // Type splice
+    @const assert(!splice_type().is_empty());
+    @const assert(!splice_generic_type().is_empty());
+    @const assert(!splice_type_position().is_empty());
+
+    // Item splice
+    @const assert(!splice_function().is_empty());
+    @const assert(!splice_method().is_empty());
+
+    // Combined
+    @const assert(!splice_combined().is_empty());
+}

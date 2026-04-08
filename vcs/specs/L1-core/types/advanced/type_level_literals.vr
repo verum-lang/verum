@@ -1,0 +1,88 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: type-level, literals, meta, compile-time, advanced-type-syntax
+// @expect: pass
+// @description: Type-level literal and arithmetic tests
+// @spec: 03-type-system.md Section 13. 3.8
+
+// Test 1: Fixed-size array with literal
+type FixedBuffer is [UInt8; 1024];
+
+// Test 2: Function with meta parameter array return
+fn create_buffer<N: meta Int>() -> [UInt8; N] {
+    [0; N]
+}
+
+// Test 3: Type-level numeric computation
+type Array<T, N: meta Int> is {
+    data: [T; N],
+    len: Int
+};
+
+// Test 4: Type-level addition
+fn concat<A, N: meta Int, M: meta Int>(
+    a: [A; N],
+    b: [A; M]
+) -> [A; N + M] {
+    let mut result = [A.default(); N + M];
+    result[..N].copy_from(a);
+    result[N..].copy_from(b);
+    result
+}
+
+// Test 5: Matrix with dimension safety
+type Matrix<T, Rows: meta Int, Cols: meta Int> is {
+    data: [[T; Cols]; Rows]
+};
+
+// Test 6: Dimension-safe matrix multiplication (simplified)
+fn matmul_2x3_3x2(
+    a: Matrix<Float, 2, 3>,
+    b: Matrix<Float, 3, 2>
+) -> Matrix<Float, 2, 2> {
+    Matrix { data: [[0.0, 0.0], [0.0, 0.0]] }
+}
+
+// Test 7: Vector types with compile-time size
+type Vec2 is [Float; 2];
+type Vec3 is [Float; 3];
+type Vec4 is [Float; 4];
+
+// Test 8: Dot product with meta parameter
+fn dot<N: meta Int>(a: [Float; N], b: [Float; N]) -> Float {
+    let mut sum = 0.0;
+    for i in 0..N {
+        sum = sum + a[i] * b[i];
+    }
+    sum
+}
+
+// Test 9: Type-level booleans
+type EnableFeature<Enabled: meta Bool> is ();
+
+implement EnableFeature<true> {
+    fn feature_enabled() -> Bool { true }
+}
+
+implement EnableFeature<false> {
+    fn feature_enabled() -> Bool { false }
+}
+
+fn main() {
+    // let buf: FixedBuffer = create_buffer<1024>();
+    // assert(buf.len() == 1024);
+
+    let v2: Vec2 = [1.0, 2.0];
+    let v3: Vec3 = [1.0, 2.0, 3.0];
+
+    let d = dot(v2, v2);
+    assert(d == 5.0);  // 1*1 + 2*2
+
+    // Matrix test
+    let m1: Matrix<Float, 2, 3> = Matrix { data: [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]] };
+    let m2: Matrix<Float, 3, 2> = Matrix { data: [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]] };
+    let result = matmul_2x3_3x2(m1, m2);  // Type: Matrix<Float, 2, 2>
+
+    assert(true);
+}

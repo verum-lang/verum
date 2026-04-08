@@ -1,0 +1,205 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, escape-analysis, cbgr, heap-escape
+// @timeout: 5000
+// @description: Tests escape analysis for references that escape their local scope
+
+/// Heap/return escape analysis.
+/// References that escape via return or struct fields must remain at Tier 0
+/// to ensure proper CBGR validation.
+
+// =============================================================================
+// Reference escapes via return
+// =============================================================================
+
+fn return_reference(x: &Int) -> &Int {
+    // Reference escapes via return - must remain Tier 0
+    x
+}
+
+fn return_from_pair(a: &Int, b: &Int, pick_first: Bool) -> &Int {
+    // Conditional return - both references could escape
+    if pick_first {
+        a
+    } else {
+        b
+    }
+}
+
+// =============================================================================
+// Reference stored in structure field
+// =============================================================================
+
+type RefPair is { first: &Int, second: &Int };
+
+fn create_ref_pair(a: &Int, b: &Int) -> RefPair {
+    // References escape via struct fields
+    RefPair { first: a, second: b }
+}
+
+fn use_ref_pair(pair: RefPair) -> Int {
+    // References used from struct
+    *pair.first + *pair.second
+}
+
+// =============================================================================
+// Reference in array escapes
+// =============================================================================
+
+fn refs_in_array(a: &Int, b: &Int, c: &Int) -> [&Int; 3] {
+    // Array of references escapes
+    [a, b, c]
+}
+
+fn sum_ref_array(refs: [&Int; 3]) -> Int {
+    *refs[0] + *refs[1] + *refs[2]
+}
+
+// =============================================================================
+// Nested reference access
+// =============================================================================
+
+type Container is { value: Int };
+
+fn get_container_ref(c: &Container) -> &Int {
+    // Reference to field escapes
+    &c.value
+}
+
+fn nested_field_access(containers: &[Container; 3]) -> Int {
+    // Create references to nested fields
+    let r0 = &containers[0].value;
+    let r1 = &containers[1].value;
+    let r2 = &containers[2].value;
+    *r0 + *r1 + *r2
+}
+
+// =============================================================================
+// Reference passthrough patterns
+// =============================================================================
+
+fn identity_ref(x: &Int) -> &Int {
+    // Simple passthrough - reference escapes
+    x
+}
+
+fn passthrough_chain(x: &Int) -> &Int {
+    // Chained passthrough
+    identity_ref(x)
+}
+
+fn select_ref(refs: [&Int; 3], idx: Int) -> &Int {
+    // Dynamic selection - all refs could escape
+    refs[idx]
+}
+
+// =============================================================================
+// Multiple escape paths
+// =============================================================================
+
+type TwoRefs is { a: &Int, b: &Int };
+
+fn dual_escape(x: &Int, y: &Int) -> (TwoRefs, &Int) {
+    // References escape via multiple paths:
+    // - x escapes via struct field
+    // - y escapes via tuple element
+    // - x also escapes via tuple
+    (TwoRefs { a: x, b: y }, x)
+}
+
+// =============================================================================
+// Escape from match arms
+// =============================================================================
+
+type MaybeRef is None | Some { val: &Int };
+
+fn maybe_escape(flag: Bool, x: &Int) -> MaybeRef {
+    if flag {
+        MaybeRef.Some { val: x }
+    } else {
+        MaybeRef.None
+    }
+}
+
+fn extract_maybe_ref(m: MaybeRef, default: &Int) -> &Int {
+    match m {
+        MaybeRef.Some { val } => val,
+        MaybeRef.None => default,
+    }
+}
+
+// =============================================================================
+// Reference lifetime tracking
+// =============================================================================
+
+fn ref_lifetime_bound(arr: &[Int; 5]) -> &Int {
+    // Reference to element bounded by array lifetime
+    &arr[0]
+}
+
+fn multiple_refs_same_source(arr: &[Int; 5]) -> [&Int; 3] {
+    // Multiple references from same source
+    [&arr[0], &arr[2], &arr[4]]
+}
+
+// =============================================================================
+// Helper consuming references (non-escaping call)
+// =============================================================================
+
+fn consume_ref(r: &Int) -> Int {
+    // Reference consumed locally, doesn't escape
+    *r * 2
+}
+
+fn call_with_ref(x: &Int) -> Int {
+    // Passing reference to non-escaping function
+    // Reference still might need Tier 0 for validation
+    consume_ref(x)
+}
+
+// =============================================================================
+// Main - basic validation
+// =============================================================================
+
+fn main() {
+    let x: Int = 42;
+    let y: Int = 100;
+    let z: Int = 200;
+
+    // Return escape
+    let rx = return_reference(&x);
+    assert(*rx == 42);
+
+    // Conditional return
+    let picked = return_from_pair(&x, &y, true);
+    assert(*picked == 42);
+
+    // Struct escape
+    let pair = create_ref_pair(&x, &y);
+    assert(use_ref_pair(pair) == 142);
+
+    // Array escape
+    let refs = refs_in_array(&x, &y, &z);
+    assert(sum_ref_array(refs) == 342);
+
+    // Container access
+    let containers = [
+        Container { value: 10 },
+        Container { value: 20 },
+        Container { value: 30 }
+    ];
+    assert(nested_field_access(&containers) == 60);
+
+    // Passthrough
+    let passed = passthrough_chain(&x);
+    assert(*passed == 42);
+
+    // Maybe escape
+    let maybe_r = maybe_escape(true, &x);
+    let extracted = extract_maybe_ref(maybe_r, &y);
+    assert(*extracted == 42);
+
+    // Non-escaping call
+    assert(call_with_ref(&x) == 84);
+}

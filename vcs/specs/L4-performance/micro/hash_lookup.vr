@@ -1,0 +1,450 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: micro, hash, map, lookup, performance
+// @description: Hash table lookup/insertion benchmarks (target: < 50ns per lookup)
+
+/// Hash Lookup Overhead Microbenchmarks
+///
+/// Measures the overhead of hash table operations.
+/// Hash tables (Map<K,V>) are fundamental for fast key-value access.
+///
+/// Performance targets:
+/// - Simple lookup (hit):     < 50ns
+/// - Simple lookup (miss):    < 60ns
+/// - Integer key:             < 30ns
+/// - String key:              < 80ns
+/// - Insert:                  < 100ns
+/// - Remove:                  < 80ns
+///
+/// Hash map characteristics:
+/// - Swiss table algorithm
+/// - SIMD-accelerated probing
+/// - Robin Hood hashing
+///
+/// Spec reference: docs/detailed/05-syntax-grammar.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+const MAP_SIZE: Int = 10_000;
+
+/// Benchmark: Integer key lookup (hit)
+fn benchmark_int_lookup_hit() -> BenchmarkResult {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..MAP_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(map.get(&(i % MAP_SIZE)));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(map.get(&(i % MAP_SIZE)));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "int_lookup_hit",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 30.0,
+    }
+}
+
+/// Benchmark: Integer key lookup (miss)
+fn benchmark_int_lookup_miss() -> BenchmarkResult {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..MAP_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(map.get(&(MAP_SIZE + i)));  // All misses
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(map.get(&(MAP_SIZE + (i % MAP_SIZE))));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "int_lookup_miss",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 40.0,
+    }
+}
+
+/// Benchmark: String key lookup
+fn benchmark_string_lookup() -> BenchmarkResult {
+    let mut map: Map<Text, Int> = Map.new();
+    let keys: List<Text> = (0..MAP_SIZE)
+        .map(|i| format("key_{}", i))
+        .collect();
+
+    for (i, key) in keys.iter().enumerate() {
+        map.insert(key.clone(), i as Int);
+    }
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(map.get(&keys[i % MAP_SIZE]));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(map.get(&keys[i % MAP_SIZE]));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "string_lookup",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 80.0,
+    }
+}
+
+/// Benchmark: Short string key lookup
+fn benchmark_short_string_lookup() -> BenchmarkResult {
+    let mut map: Map<Text, Int> = Map.new();
+    let keys: List<Text> = (0..MAP_SIZE)
+        .map(|i| format("k{}", i % 100))  // Short keys
+        .collect();
+
+    for (i, key) in keys.iter().enumerate() {
+        map.insert(key.clone(), i as Int);
+    }
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(map.get(&keys[i % MAP_SIZE]));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(map.get(&keys[i % MAP_SIZE]));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "short_string_lookup",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 50.0,
+    }
+}
+
+/// Benchmark: Insert operation
+fn benchmark_insert() -> BenchmarkResult {
+    let mut map: Map<Int, Int> = Map.with_capacity(BENCHMARK_ITERATIONS / 100);
+
+    let start = Instant.now();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 100) {
+        map.insert(i, i * 2);
+    }
+
+    let elapsed = start.elapsed();
+    black_box(&map);
+
+    BenchmarkResult {
+        name: "insert",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 100) as f64,
+        target_ns: 100.0,
+    }
+}
+
+/// Benchmark: Insert or update (entry API)
+fn benchmark_entry_api() -> BenchmarkResult {
+    let mut map: Map<Int, Int> = Map.new();
+
+    // Pre-populate half
+    for i in 0..(MAP_SIZE / 2) {
+        map.insert(i, i * 2);
+    }
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        let key = i % MAP_SIZE;
+        *map.entry(key).or_insert(0) += 1;
+    }
+
+    map.clear();
+    for i in 0..(MAP_SIZE / 2) {
+        map.insert(i, i * 2);
+    }
+
+    let start = Instant.now();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 10) {
+        let key = i % MAP_SIZE;
+        *map.entry(key).or_insert(0) += 1;
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "entry_api",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 10) as f64,
+        target_ns: 60.0,
+    }
+}
+
+/// Benchmark: Remove operation
+fn benchmark_remove() -> BenchmarkResult {
+    let iterations = BENCHMARK_ITERATIONS / 1000;
+
+    let mut total_time: Int = 0;
+
+    for _ in 0..10 {
+        let mut map: Map<Int, Int> = Map.new();
+        for i in 0..iterations {
+            map.insert(i, i * 2);
+        }
+
+        let start = Instant.now();
+
+        for i in 0..iterations {
+            black_box(map.remove(&i));
+        }
+
+        total_time += start.elapsed().as_nanos();
+    }
+
+    BenchmarkResult {
+        name: "remove",
+        per_op_ns: total_time as f64 / (iterations * 10) as f64,
+        target_ns: 80.0,
+    }
+}
+
+/// Benchmark: Contains key check
+fn benchmark_contains_key() -> BenchmarkResult {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..MAP_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(map.contains_key(&(i % (MAP_SIZE * 2))));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // 50% hits, 50% misses
+        black_box(map.contains_key(&(i % (MAP_SIZE * 2))));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "contains_key",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 35.0,
+    }
+}
+
+/// Benchmark: Iterate over entries
+fn benchmark_iteration() -> BenchmarkResult {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..MAP_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / MAP_SIZE) {
+        for (k, v) in map.iter() {
+            black_box((*k, *v));
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / MAP_SIZE) {
+        for (k, v) in map.iter() {
+            black_box((*k, *v));
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "iteration",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 10.0,
+    }
+}
+
+/// Benchmark: Large value lookup
+fn benchmark_large_value_lookup() -> BenchmarkResult {
+    type LargeValue is { data: [u8; 256] };
+
+    let mut map: Map<Int, LargeValue> = Map.new();
+    for i in 0..MAP_SIZE {
+        map.insert(i, LargeValue { data: [i as u8; 256] });
+    }
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(map.get(&(i % MAP_SIZE)));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 10) {
+        black_box(map.get(&(i % MAP_SIZE)));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "large_value_lookup",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 10) as f64,
+        target_ns: 40.0,  // Same as small value (pointer to data)
+    }
+}
+
+/// Benchmark: High collision scenario
+fn benchmark_high_collision() -> BenchmarkResult {
+    // Use hash that causes many collisions
+    type CollisionKey is { value: Int };
+
+    implement Hash for CollisionKey {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            // Poor hash - many collisions
+            (self.value % 100).hash(state);
+        }
+    }
+
+    implement Eq for CollisionKey {
+        fn eq(&self, other: &Self) -> Bool {
+            self.value == other.value
+        }
+    }
+
+    let mut map: Map<CollisionKey, Int> = Map.new();
+    for i in 0..MAP_SIZE {
+        map.insert(CollisionKey { value: i }, i * 2);
+    }
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(map.get(&CollisionKey { value: i % MAP_SIZE }));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 10) {
+        black_box(map.get(&CollisionKey { value: i % MAP_SIZE }));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "high_collision",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 10) as f64,
+        target_ns: 200.0,  // Much slower due to collisions
+    }
+}
+
+/// Benchmark: Set contains
+fn benchmark_set_contains() -> BenchmarkResult {
+    let set: Set<Int> = (0..MAP_SIZE).collect();
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(set.contains(&(i % (MAP_SIZE * 2))));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(set.contains(&(i % (MAP_SIZE * 2))));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "set_contains",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 30.0,
+    }
+}
+
+fn main() {
+    println("=== Hash Lookup Overhead Microbenchmarks ===\n");
+
+    let results = [
+        benchmark_int_lookup_hit(),
+        benchmark_int_lookup_miss(),
+        benchmark_string_lookup(),
+        benchmark_short_string_lookup(),
+        benchmark_insert(),
+        benchmark_entry_api(),
+        benchmark_remove(),
+        benchmark_contains_key(),
+        benchmark_iteration(),
+        benchmark_large_value_lookup(),
+        benchmark_high_collision(),
+        benchmark_set_contains(),
+    ];
+
+    println("{:<25} {:>12} {:>12} {:>8}",
+            "Benchmark", "Time (ns)", "Target", "Status");
+    println("{}", "-".repeat(60));
+
+    for result in results {
+        let passed = result.per_op_ns <= result.target_ns;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<25} {:>12.2} {:>12.0} {:>8}",
+                result.name, result.per_op_ns, result.target_ns, status);
+    }
+
+    println("");
+    println("Hash Lookup Targets:");
+    println("  - Integer lookup:    < 30ns");
+    println("  - String lookup:     < 80ns");
+    println("  - Insert:            < 100ns");
+    println("  - Remove:            < 80ns");
+}
+
+type BenchmarkResult is {
+    name: Text,
+    per_op_ns: f64,
+    target_ns: f64,
+};
+
+type Hash is protocol {
+    fn hash<H: Hasher>(&self, state: &mut H);
+};
+
+type Hasher is protocol {};
+type Eq is protocol {};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn format(fmt: &Text, args: List<Text>) -> Text { Text.new() }

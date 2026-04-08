@@ -1,0 +1,112 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, unsafe, tier-2
+
+/// Test Tier 2 unsafe reference concepts via managed reference operations.
+/// In production, &unsafe T bypasses CBGR checks for zero overhead.
+/// This test verifies the underlying CBGR mechanisms that &unsafe T bypasses:
+/// - Generation tracking (skipped by &unsafe)
+/// - Epoch validation (skipped by &unsafe)
+/// - Capability checks (skipped by &unsafe)
+///
+/// Spec: 04-memory-model.md#reference-tiers
+
+fn main() {
+    test_generation_is_what_unsafe_skips();
+    print("  [OK] test_generation_is_what_unsafe_skips");
+    test_epoch_is_what_unsafe_skips();
+    print("  [OK] test_epoch_is_what_unsafe_skips");
+    test_capabilities_are_what_unsafe_skips();
+    print("  [OK] test_capabilities_are_what_unsafe_skips");
+    test_managed_ref_overhead_components();
+    print("  [OK] test_managed_ref_overhead_components");
+
+    print("All unsafe ref concept tests passed!");
+}
+
+/// Test that managed references carry generation info (which &unsafe skips)
+fn test_generation_is_what_unsafe_skips() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Managed reference stores generation for use-after-free detection
+    let gen = ref_val.stored_generation();
+    assert(gen > 0);
+
+    // Generation matches the allocation header
+    assert(gen == value.header_generation());
+
+    // An unsafe ref would skip this check entirely
+    // providing 0ns access at the cost of safety
+}
+
+/// Test that managed references validate epochs (which &unsafe skips)
+fn test_epoch_is_what_unsafe_skips() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Managed reference validates epoch on every access
+    assert(ref_val.is_epoch_valid());
+
+    // Advance epoch many times
+    for _ in 0..100 {
+        Epoch.advance();
+    }
+
+    // Still within validity window
+    assert(ref_val.is_epoch_valid());
+
+    // An unsafe ref would skip this epoch validation entirely
+}
+
+/// Test that managed references check capabilities (which &unsafe skips)
+fn test_capabilities_are_what_unsafe_skips() {
+    let value = Heap.new(42);
+    let immut_ref: &Int = &*value;
+
+    // Managed reference encodes capabilities
+    let caps = immut_ref.epoch_caps_raw() & 0xFF;
+    assert(caps & 0x01 != 0);  // has read
+    assert(caps & 0x02 == 0);  // no write (immutable)
+
+    // An unsafe ref would skip capability checking
+    // allowing arbitrary read/write without validation
+}
+
+/// Test the components of managed reference overhead
+fn test_managed_ref_overhead_components() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Component 1: Generation stored in reference
+    let stored_gen = ref_val.stored_generation();
+    assert(stored_gen > 0);
+
+    // Component 2: Generation in allocation header (compared at each access)
+    let header_gen = value.header_generation();
+    assert(stored_gen == header_gen);
+
+    // Component 3: Epoch validation
+    assert(ref_val.is_epoch_valid());
+
+    // Component 4: Capability bits
+    assert(ref_val.capabilities().can_read());
+
+    // Total Tier 0 overhead: ~15ns per access
+    // Tier 2 (&unsafe): 0ns per access (all checks skipped)
+}
+
+// Supporting types
+
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+
+    fn advance() {
+        Runtime.advance_epoch();
+    }
+}

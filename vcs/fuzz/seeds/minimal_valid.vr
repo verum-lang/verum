@@ -1,0 +1,4 @@
+// Minimal valid Verum program
+// This is the smallest syntactically correct program
+
+fn main() {}

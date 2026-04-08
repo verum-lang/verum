@@ -1,0 +1,268 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, move-semantics, ownership, cbgr, comprehensive
+// @active: testing advanced move patterns
+// @description: Comprehensive move semantics tests for non-Copy types
+
+/// Move Semantics Comprehensive Tests
+///
+/// These tests verify move semantics for heap-allocated and non-Copy types.
+/// Using arrays to demonstrate ownership transfer.
+///
+/// Spec: docs/detailed/04-memory-model.md
+
+// ============================================================================
+// TEST 1: Container moves (simulated with struct containing arrays)
+// ============================================================================
+
+type Container is {
+    data: [Int; 3],
+    name: Text,
+};
+
+fn consume_container(c: Container) -> Int {
+    c.data[0] + c.data[1] + c.data[2]
+}
+
+fn test_container_move() {
+    let c = Container {
+        data: [1, 2, 3],
+        name: "test",
+    };
+
+    // First use - moves ownership
+    let sum = consume_container(c);
+    assert(sum == 6);
+
+    // Cannot use c again - it was moved
+    // let _ = c.name; // Would be error: use after move
+}
+
+// ============================================================================
+// TEST 2: Borrow doesn't move
+// ============================================================================
+
+fn borrow_container(c: &Container) -> Int {
+    c.data[0] + c.data[1] + c.data[2]
+}
+
+fn test_borrow_no_move() {
+    let c = Container {
+        data: [10, 20, 30],
+        name: "borrowed",
+    };
+
+    // Borrow - doesn't move
+    let sum = borrow_container(&c);
+    assert(sum == 60);
+
+    // Can still use c
+    assert(c.name == "borrowed");
+}
+
+// ============================================================================
+// TEST 3: Conditional move
+// ============================================================================
+
+fn maybe_consume(take: Bool, c: Container) -> Int {
+    if take {
+        c.data[0] + c.data[1] + c.data[2]
+    } else {
+        0
+    }
+}
+
+fn test_conditional_move() {
+    let c1 = Container {
+        data: [1, 2, 3],
+        name: "c1",
+    };
+
+    let result = maybe_consume(true, c1);
+    assert(result == 6);
+}
+
+// ============================================================================
+// TEST 4: Move in match arms
+// ============================================================================
+
+type Resource is {
+    id: Int,
+    data: [Text; 2],
+};
+
+fn test_match_move() {
+    let r = Resource {
+        id: 42,
+        data: ["a", "b"],
+    };
+
+    let result = match r.id {
+        42 => {
+            // r.data can be accessed
+            2
+        },
+        _ => 0,
+    };
+
+    assert(result == 2);
+}
+
+// ============================================================================
+// TEST 5: Move through function return
+// ============================================================================
+
+fn create_resource(id: Int) -> Resource {
+    Resource {
+        id: id,
+        data: ["created", "value"],
+    }
+}
+
+fn transform_resource(r: Resource) -> Resource {
+    Resource {
+        id: r.id + 1,
+        data: r.data,  // Move data field
+    }
+}
+
+fn test_return_move() {
+    let r1 = create_resource(1);
+    let r2 = transform_resource(r1);
+    // r1 is moved, r2 owns the data now
+    assert(r2.id == 2);
+}
+
+// ============================================================================
+// TEST 6: Move in loop (creating new values each iteration)
+// ============================================================================
+
+fn test_loop_move() {
+    let mut results: [Int; 3] = [0, 0, 0];
+
+    for i in 0..3 {
+        // Each iteration creates new owned value
+        let c = Container {
+            data: [i, i + 1, i + 2],
+            name: "iter",
+        };
+        results[i] = c.data[0];
+        // c is moved/dropped at end of iteration
+    }
+
+    assert(results[0] == 0);
+    assert(results[1] == 1);
+    assert(results[2] == 2);
+}
+
+// ============================================================================
+// TEST 7: Partial field access (read without move for Copy fields)
+// ============================================================================
+
+fn test_field_access_copy() {
+    let r = Resource {
+        id: 100,
+        data: ["x", "y"],
+    };
+
+    // id is Int (Copy) - reading doesn't move
+    let id_copy = r.id;
+    assert(id_copy == 100);
+
+    // Can still access other fields
+    assert(r.data[0] == "x");
+}
+
+// ============================================================================
+// TEST 8: Clone simulation (create independent copy)
+// ============================================================================
+
+fn clone_resource(r: &Resource) -> Resource {
+    Resource {
+        id: r.id,
+        data: [r.data[0], r.data[1]],
+    }
+}
+
+fn test_clone_vs_move() {
+    let r1 = Resource {
+        id: 1,
+        data: ["original", "data"],
+    };
+
+    // Clone creates a copy
+    let r2 = clone_resource(&r1);
+
+    // Both are valid
+    assert(r1.id == 1);
+    assert(r2.id == 1);
+
+    // Consume the clone
+    let id = r2.data[0];
+    assert(id == "original");
+
+    // Original still valid
+    assert(r1.data[0] == "original");
+}
+
+// ============================================================================
+// TEST 9: Nested struct move
+// ============================================================================
+
+type Outer is {
+    inner: Container,
+    count: Int,
+};
+
+fn consume_outer(o: Outer) -> Int {
+    o.inner.data[0] + o.inner.data[1] + o.inner.data[2] + o.count
+}
+
+fn test_nested_move() {
+    let outer = Outer {
+        inner: Container {
+            data: [1, 2, 3],
+            name: "inner",
+        },
+        count: 10,
+    };
+
+    let total = consume_outer(outer);
+    assert(total == 16);  // 1 + 2 + 3 + 10
+}
+
+// ============================================================================
+// TEST 10: Move through assignment
+// ============================================================================
+
+fn test_assignment_move() {
+    let c1 = Container {
+        data: [42, 43, 44],
+        name: "first",
+    };
+
+    // Assignment moves ownership
+    let c2 = c1;
+
+    // c2 owns the data now
+    assert(c2.data[0] == 42);
+    assert(c2.name == "first");
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    test_container_move();
+    test_borrow_no_move();
+    test_conditional_move();
+    test_match_move();
+    test_return_move();
+    test_loop_move();
+    test_field_access_copy();
+    test_clone_vs_move();
+    test_nested_move();
+    test_assignment_move();
+}

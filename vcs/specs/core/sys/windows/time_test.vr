@@ -1,0 +1,370 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/windows/time_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, windows, time, performance
+// @description: Tests for Windows time and performance counter utilities.
+//
+// Coverage:
+// - Duration, Instant, Stopwatch: Time types
+// - PerfCounter, DeadlineTimer: High-resolution timing
+// - monotonic_nanos, monotonic_micros, monotonic_millis: Monotonic time
+// - sleep, sleep_ms, sleep_us: Sleep operations
+// - get_perf_freq, perf_counter_to_nanos: Performance counter utilities
+// - Constants (NANOS_PER_SEC, NANOS_PER_MILLI, NANOS_PER_MICRO)
+//
+// Test Strategy:
+// - Verify monotonicity of time sources
+// - Test sleep accuracy with tolerance
+// - Verify performance counter operations
+//
+// Platform: Windows x86_64
+// =============================================================================
+
+@cfg(target_os = "windows")
+module test.stdlib.sys.windows.time_test;
+
+mount core.sys.windows.time.{
+    Duration, Instant, Stopwatch, PerfCounter, DeadlineTimer,
+    monotonic_nanos, monotonic_micros, monotonic_millis,
+    sleep, sleep_ms, sleep_us,
+    get_perf_freq, perf_counter_to_nanos,
+    NANOS_PER_SEC, NANOS_PER_MILLI, NANOS_PER_MICRO,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Time Constants Tests
+// =============================================================================
+
+@test
+fn test_time_constants() {
+    // Verify nanosecond constants
+    assert(NANOS_PER_SEC == 1_000_000_000);
+    assert(NANOS_PER_MILLI == 1_000_000);
+    assert(NANOS_PER_MICRO == 1_000);
+
+    // Verify relationships
+    assert(NANOS_PER_SEC == NANOS_PER_MILLI * 1000);
+    assert(NANOS_PER_MILLI == NANOS_PER_MICRO * 1000);
+
+    print("Time constants tests passed");
+}
+
+// =============================================================================
+// Duration Tests
+// =============================================================================
+
+@test
+fn test_duration() {
+    // Create from seconds
+    let d1 = Duration.from_secs(5);
+    assert(d1.as_secs() == 5);
+    assert(d1.as_nanos() == 5_000_000_000);
+
+    // Create from milliseconds
+    let d2 = Duration.from_millis(1500);
+    assert(d2.as_millis() == 1500);
+    assert(d2.as_secs() == 1);
+
+    // Create from microseconds
+    let d3 = Duration.from_micros(2_500_000);
+    assert(d3.as_micros() == 2_500_000);
+    assert(d3.as_millis() == 2500);
+
+    // Create from nanoseconds
+    let d4 = Duration.from_nanos(1_234_567_890);
+    assert(d4.as_nanos() == 1_234_567_890);
+
+    // Zero duration
+    let zero = Duration.ZERO;
+    assert(zero.as_nanos() == 0);
+    assert(zero.is_zero());
+
+    // Comparison
+    assert(d1 > d2);
+    assert(d3 > d2);
+    assert(d4 < d2);
+
+    // Addition
+    let sum = d1 + d2;
+    assert(sum.as_millis() == 6500);
+
+    // Subtraction
+    let diff = d1 - d2;
+    assert(diff.as_millis() == 3500);
+
+    print("Duration tests passed");
+}
+
+// =============================================================================
+// Instant Tests
+// =============================================================================
+
+@test
+fn test_instant() {
+    // Get current instant
+    let now = Instant.now();
+
+    // Do some work
+    let mut sum = 0;
+    for i in 0..10000 {
+        sum += i;
+    }
+
+    // Get another instant
+    let later = Instant.now();
+
+    // Later should be after or equal to now
+    assert(later >= now);
+
+    // Calculate elapsed
+    let elapsed = later.duration_since(now);
+    assert(elapsed.as_nanos() >= 0);
+
+    // Elapsed convenience method
+    let elapsed2 = now.elapsed();
+    assert(elapsed2 >= elapsed);
+
+    print("Instant tests passed");
+}
+
+// =============================================================================
+// Monotonic Time Tests
+// =============================================================================
+
+@test
+fn test_monotonic_time() {
+    // Get monotonic nanoseconds
+    let t1 = monotonic_nanos();
+    let t2 = monotonic_nanos();
+    let t3 = monotonic_nanos();
+
+    // Time should never go backward
+    assert(t2 >= t1);
+    assert(t3 >= t2);
+
+    // Different resolutions
+    let millis = monotonic_millis();
+    let micros = monotonic_micros();
+    let nanos = monotonic_nanos();
+
+    // Verify consistency (with tolerance)
+    assert(nanos >= millis * 1_000_000 - 10_000_000);  // 10ms tolerance
+    assert(micros >= millis * 1000 - 10_000);
+
+    // Test monotonicity with many samples
+    let mut prev = monotonic_nanos();
+    for _ in 0..100 {
+        let curr = monotonic_nanos();
+        assert(curr >= prev);
+        prev = curr;
+    }
+
+    print("Monotonic time tests passed");
+}
+
+// =============================================================================
+// Sleep Tests
+// =============================================================================
+
+@test
+fn test_sleep_operations() {
+    // Test sleep_ms (10ms)
+    let before_ms = monotonic_nanos();
+    sleep_ms(10);
+    let after_ms = monotonic_nanos();
+
+    let elapsed_ms = after_ms - before_ms;
+    assert(elapsed_ms >= 9_000_000);     // At least 9ms
+    assert(elapsed_ms < 100_000_000);    // Less than 100ms
+
+    // Test sleep_us (1000us = 1ms)
+    let before_us = monotonic_nanos();
+    sleep_us(1000);
+    let after_us = monotonic_nanos();
+
+    let elapsed_us = after_us - before_us;
+    assert(elapsed_us >= 900_000);       // At least 0.9ms
+    assert(elapsed_us < 50_000_000);     // Less than 50ms
+
+    // Test sleep with Duration
+    let duration = Duration.from_millis(5);
+    let before_d = monotonic_nanos();
+    sleep(duration);
+    let after_d = monotonic_nanos();
+
+    let elapsed_d = after_d - before_d;
+    assert(elapsed_d >= 4_000_000);      // At least 4ms
+    assert(elapsed_d < 100_000_000);     // Less than 100ms
+
+    print("Sleep operations tests passed");
+}
+
+// =============================================================================
+// Stopwatch Tests
+// =============================================================================
+
+@test
+fn test_stopwatch() {
+    // Create stopwatch
+    let mut sw = Stopwatch.new();
+
+    // Initially near-zero
+    let initial = sw.elapsed();
+    assert(initial.as_nanos() < 1_000_000);
+
+    // Sleep and check elapsed
+    sleep_ms(10);
+    let elapsed1 = sw.elapsed();
+    assert(elapsed1.as_millis() >= 9);
+
+    // Stop
+    sw.stop();
+    let stopped = sw.elapsed();
+
+    // Sleep more
+    sleep_ms(10);
+
+    // Elapsed shouldn't change after stop
+    let after_stop = sw.elapsed();
+    assert(after_stop == stopped);
+
+    // Restart
+    sw.start();
+    sleep_ms(5);
+
+    // Elapsed should have increased
+    let restarted = sw.elapsed();
+    assert(restarted > stopped);
+
+    // Reset
+    sw.reset();
+    let after_reset = sw.elapsed();
+    assert(after_reset.as_nanos() < 1_000_000);
+
+    print("Stopwatch tests passed");
+}
+
+// =============================================================================
+// PerfCounter Tests
+// =============================================================================
+
+@test
+fn test_perf_counter() {
+    // Create performance counter
+    let pc1 = PerfCounter.now();
+
+    // Do some work
+    let mut sum = 0;
+    for i in 0..10000 {
+        sum += i;
+    }
+
+    let pc2 = PerfCounter.now();
+
+    // Elapsed should be positive
+    let elapsed = pc2.elapsed_since(pc1);
+    assert(elapsed.as_nanos() >= 0);
+
+    // Raw counter values
+    let raw1 = pc1.raw();
+    let raw2 = pc2.raw();
+    assert(raw2 >= raw1);
+
+    print("PerfCounter tests passed");
+}
+
+// =============================================================================
+// Performance Frequency Tests
+// =============================================================================
+
+@test
+fn test_perf_freq() {
+    // Get performance frequency
+    let freq = get_perf_freq();
+
+    // Should be positive
+    assert(freq > 0);
+
+    // Typically at least 1 MHz (1,000,000 Hz)
+    assert(freq >= 1_000_000);
+
+    // Convert counter value to nanoseconds
+    let counter_value = freq;  // 1 second worth of counts
+    let nanos = perf_counter_to_nanos(counter_value);
+
+    // Should be close to 1 second (1 billion nanoseconds)
+    assert(nanos >= 990_000_000);
+    assert(nanos <= 1_010_000_000);
+
+    print(f"Performance frequency: {freq} Hz");
+}
+
+// =============================================================================
+// DeadlineTimer Tests
+// =============================================================================
+
+@test
+fn test_deadline_timer() {
+    // Create deadline 10ms from now
+    let timer = DeadlineTimer.from_duration(Duration.from_millis(10));
+
+    // Not expired yet
+    assert(!timer.is_expired());
+
+    // Remaining should be close to 10ms
+    let remaining = timer.remaining();
+    assert(remaining.as_millis() >= 5);
+    assert(remaining.as_millis() <= 15);
+
+    // Sleep past deadline
+    sleep_ms(15);
+
+    // Should be expired
+    assert(timer.is_expired());
+
+    // Remaining should be zero
+    let remaining_after = timer.remaining();
+    assert(remaining_after.as_millis() == 0);
+
+    print("DeadlineTimer tests passed");
+}
+
+// =============================================================================
+// Time Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_time_arithmetic() {
+    // Duration arithmetic
+    let d1 = Duration.from_millis(100);
+    let d2 = Duration.from_millis(50);
+
+    // Addition
+    let sum = d1 + d2;
+    assert(sum.as_millis() == 150);
+
+    // Subtraction
+    let diff = d1 - d2;
+    assert(diff.as_millis() == 50);
+
+    // Multiplication
+    let mult = d1 * 3;
+    assert(mult.as_millis() == 300);
+
+    // Division
+    let div = d1 / 2;
+    assert(div.as_millis() == 50);
+
+    print("Time arithmetic tests passed");
+}

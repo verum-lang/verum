@@ -1,0 +1,201 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, patterns, sealed-types, exhaustiveness
+// @description: Pattern matching on sealed (non-extensible) types across modules
+
+// Module defining a sealed variant type
+module json {
+    // Sealed type - all variants defined here, cannot be extended externally
+    @sealed
+    pub type Value is
+        | Null
+        | Boolean(Bool)
+        | Number(Float)
+        | String(Text)
+        | Array(List<Value>)
+        | Object(Map<Text, Value>);
+
+    // Exhaustiveness checker knows all variants
+    pub fn type_name(v: &Value) -> Text =
+        match v {
+            &Null => "null",
+            &Boolean(_) => "boolean",
+            &Number(_) => "number",
+            &String(_) => "string",
+            &Array(_) => "array",
+            &Object(_) => "object"
+        }
+
+    pub fn is_truthy(v: &Value) -> Bool =
+        match v {
+            &Null => false,
+            &Boolean(b) => b,
+            &Number(n) => n != 0.0,
+            &String(s) => !s.is_empty(),
+            &Array(arr) => !arr.is_empty(),
+            &Object(obj) => !obj.is_empty()
+        }
+}
+
+// Module defining an open variant type for comparison
+module ast {
+    // Open type - can be extended in submodules (if not sealed)
+    pub type Node is
+        | Literal { value: json.Value }
+        | Identifier { name: Text }
+        | BinaryExpr { op: Text, left: Heap<Node>, right: Heap<Node> }
+        | UnaryExpr { op: Text, operand: Heap<Node> }
+        | CallExpr { callee: Heap<Node>, args: List<Node> }
+        | MemberExpr { object: Heap<Node>, property: Text };
+
+    // Consumer must handle all known variants (open means wildcard may be needed
+    // if the type could be extended, but here we match all known variants)
+    pub fn node_type(n: &Node) -> Text =
+        match n {
+            &Literal { .. } => "literal",
+            &Identifier { .. } => "identifier",
+            &BinaryExpr { .. } => "binary",
+            &UnaryExpr { .. } => "unary",
+            &CallExpr { .. } => "call",
+            &MemberExpr { .. } => "member"
+        }
+}
+
+// Consumer module using both sealed and open types
+module consumer {
+    mount super.json.{Value, type_name, is_truthy};
+    mount super.ast.{Node, node_type};
+
+    // Pattern matching on sealed type - exhaustiveness guaranteed
+    @allow(unbounded_recursion)
+    pub fn json_to_string(v: &Value) -> Text =
+        match v {
+            &Null => "null",
+            &Boolean(true) => "true",
+            &Boolean(false) => "false",
+            &Number(n) => f"{n}",
+            &String(s) => f"\"{s}\"",
+            &Array(arr) => {
+                let items = arr.iter().map(|item| json_to_string(item)).join(", ");
+                f"[{items}]"
+            },
+            &Object(obj) => {
+                let entries = obj.iter()
+                    .map(|(k, v)| f"\"{k}\": {json_to_string(v)}")
+                    .join(", ");
+                f"{{{entries}}}"
+            }
+        }
+
+    // Combining sealed JSON with AST patterns
+    pub fn eval_literal(n: &Node) -> Maybe<Value> =
+        match n {
+            &Literal { value } => Some(value.clone()),
+            &UnaryExpr { op: "-", operand } =>
+                match eval_literal(operand) {
+                    Some(Number(n)) => Some(Number(-n)),
+                    _ => None
+                },
+            &UnaryExpr { op: "!", operand } =>
+                match eval_literal(operand) {
+                    Some(Boolean(b)) => Some(Boolean(!b)),
+                    _ => None
+                },
+            &BinaryExpr { op: "+", left, right } =>
+                match (eval_literal(left), eval_literal(right)) {
+                    (Some(Number(l)), Some(Number(r))) => Some(Number(l + r)),
+                    (Some(String(l)), Some(String(r))) => Some(String(l + &r)),
+                    _ => None
+                },
+            _ => None
+        }
+
+    // Pattern guards with sealed types
+    @allow(unbounded_recursion)
+    pub fn json_filter(v: &Value, predicate: fn(&Value) -> Bool) -> Maybe<Value> =
+        match v {
+            val if predicate(val) => Some(val.clone()),
+            &Array(arr) => {
+                let filtered: List<Value> = arr.iter()
+                    .filter_map(|item| json_filter(item, predicate))
+                    .collect();
+                if filtered.is_empty() { None } else { Some(Array(filtered)) }
+            },
+            &Object(obj) => {
+                let filtered: Map<Text, Value> = obj.iter()
+                    .filter_map(|(k, v)| json_filter(v, predicate).map(|fv| (k.clone(), fv)))
+                    .collect();
+                if filtered.is_empty() { None } else { Some(Object(filtered)) }
+            },
+            _ => None
+        }
+}
+
+// Module extending AST (demonstrating open types)
+module extended_ast {
+    mount super.ast.Node;
+
+    // Can define functions that work with Node
+    // Note: This doesn't add new variants, it just uses existing ones
+    pub fn contains_call(n: &Node) -> Bool =
+        match n {
+            &CallExpr { .. } => true,
+            &BinaryExpr { left, right, .. } =>
+                contains_call(left) || contains_call(right),
+            &UnaryExpr { operand, .. } => contains_call(operand),
+            &MemberExpr { object, .. } => contains_call(object),
+            _ => false
+        }
+}
+
+fn main() {
+    mount json.{Value, type_name, is_truthy};
+    mount ast.{Node, node_type};
+    mount consumer.{json_to_string, eval_literal};
+    mount extended_ast.contains_call;
+
+    // Test sealed JSON type
+    let json_obj = Object(Map.from([
+        ("name", String("Alice")),
+        ("age", Number(30.0)),
+        ("active", Boolean(true))
+    ]));
+
+    assert(type_name(&json_obj) == "object");
+    assert(is_truthy(&json_obj));
+
+    let json_str = json_to_string(&json_obj);
+    // Contains expected fields (order may vary)
+    assert(json_str.contains("\"name\""));
+    assert(json_str.contains("\"Alice\""));
+
+    // Test AST with JSON literals
+    let ast_node = Literal { value: Number(42.0) };
+    assert(node_type(&ast_node) == "literal");
+
+    let eval_result = eval_literal(&ast_node);
+    match eval_result {
+        Some(Number(42.0)) => (),
+        _ => panic("expected Number(42.0)")
+    }
+
+    // Test binary expr evaluation
+    let add_node = BinaryExpr {
+        op: "+",
+        left: Heap(Literal { value: Number(10.0) }),
+        right: Heap(Literal { value: Number(20.0) })
+    };
+    match eval_literal(&add_node) {
+        Some(Number(30.0)) => (),
+        _ => panic("expected Number(30.0)")
+    }
+
+    // Test extended AST function
+    let call_node = CallExpr {
+        callee: Heap(Identifier { name: "foo" }),
+        args: []
+    };
+    assert(contains_call(&call_node));
+    assert(!contains_call(&ast_node));
+}

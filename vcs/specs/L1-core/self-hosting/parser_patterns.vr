@@ -1,0 +1,352 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: self-hosting, parser, recursive-descent, ast
+// @description: Recursive descent parsing patterns for self-hosting parser
+
+type Tok is
+    | TNum(Int)
+    | TIdent(Text)
+    | TPlus
+    | TMinus
+    | TStar
+    | TLParen
+    | TRParen
+    | TLet
+    | TEq
+    | TSemi
+    | TEof;
+
+fn tok_tag(t: Tok) -> Int {
+    match t {
+        TNum(_) => 0, TIdent(_) => 1, TPlus => 2, TMinus => 3,
+        TStar => 4, TLParen => 5, TRParen => 6, TLet => 7,
+        TEq => 8, TSemi => 9, TEof => 10,
+    }
+}
+
+fn peek(tokens: List<Tok>, pos: Int) -> Int {
+    if pos >= tokens.len() { return 10; }
+    tok_tag(tokens[pos])
+}
+
+fn peek_num(tokens: List<Tok>, pos: Int) -> Int {
+    match tokens[pos] { TNum(n) => n, _ => 0 }
+}
+
+fn peek_ident(tokens: List<Tok>, pos: Int) -> Text {
+    match tokens[pos] { TIdent(s) => s, _ => "" }
+}
+
+// Flat AST node pool using parallel arrays
+fn add_node(kinds: &mut List<Int>, ints: &mut List<Int>, lefts: &mut List<Int>, rights: &mut List<Int>,
+            kind: Int, ival: Int, left: Int, right: Int) -> Int {
+    let id = kinds.len();
+    kinds.push(kind);
+    ints.push(ival);
+    lefts.push(left);
+    rights.push(right);
+    id
+}
+
+type PR is { node: Int, pos: Int };
+
+@allow(unbounded_recursion)
+fn parse_atom(tokens: List<Tok>, pos: Int,
+              kinds: &mut List<Int>, ints: &mut List<Int>,
+              lefts: &mut List<Int>, rights: &mut List<Int>,
+              strs: &mut List<Text>) -> PR {
+    let tag = peek(tokens, pos);
+    if tag == 0 {
+        let id = add_node(kinds, ints, lefts, rights, 0, peek_num(tokens, pos), 0, 0);
+        strs.push("");
+        PR { node: id, pos: pos + 1 }
+    } else if tag == 1 {
+        let id = add_node(kinds, ints, lefts, rights, 1, 0, 0, 0);
+        strs.push(peek_ident(tokens, pos));
+        PR { node: id, pos: pos + 1 }
+    } else if tag == 5 {
+        let inner = parse_expr(tokens, pos + 1, kinds, ints, lefts, rights, strs);
+        PR { node: inner.node, pos: inner.pos + 1 }
+    } else if tag == 3 {
+        let inner = parse_atom(tokens, pos + 1, kinds, ints, lefts, rights, strs);
+        let zero = add_node(kinds, ints, lefts, rights, 0, 0, 0, 0);
+        strs.push("");
+        let id = add_node(kinds, ints, lefts, rights, 2, 0, zero, inner.node);
+        strs.push("-");
+        PR { node: id, pos: inner.pos }
+    } else {
+        let id = add_node(kinds, ints, lefts, rights, 0, 0, 0, 0);
+        strs.push("");
+        PR { node: id, pos: pos + 1 }
+    }
+}
+
+@allow(unbounded_recursion)
+fn parse_term(tokens: List<Tok>, pos: Int,
+              kinds: &mut List<Int>, ints: &mut List<Int>,
+              lefts: &mut List<Int>, rights: &mut List<Int>,
+              strs: &mut List<Text>) -> PR {
+    let mut result = parse_atom(tokens, pos, kinds, ints, lefts, rights, strs);
+    let mut cur = result.pos;
+    let mut node = result.node;
+
+    while peek(tokens, cur) == 4 {
+        let right = parse_atom(tokens, cur + 1, kinds, ints, lefts, rights, strs);
+        node = add_node(kinds, ints, lefts, rights, 2, 0, node, right.node);
+        strs.push("*");
+        cur = right.pos;
+    }
+    PR { node: node, pos: cur }
+}
+
+@allow(unbounded_recursion)
+fn parse_expr(tokens: List<Tok>, pos: Int,
+              kinds: &mut List<Int>, ints: &mut List<Int>,
+              lefts: &mut List<Int>, rights: &mut List<Int>,
+              strs: &mut List<Text>) -> PR {
+    let mut result = parse_term(tokens, pos, kinds, ints, lefts, rights, strs);
+    let mut cur = result.pos;
+    let mut node = result.node;
+
+    while peek(tokens, cur) == 2 || peek(tokens, cur) == 3 {
+        let op = if peek(tokens, cur) == 2 { "+" } else { "-" };
+        let right = parse_term(tokens, cur + 1, kinds, ints, lefts, rights, strs);
+        node = add_node(kinds, ints, lefts, rights, 2, 0, node, right.node);
+        strs.push(op);
+        cur = right.pos;
+    }
+    PR { node: node, pos: cur }
+}
+
+// Use a simple fixed-size environment (up to 64 bindings)
+// Encoded as: env_data = [name0_hash, val0, name1_hash, val1, ...]
+// where name_hash is a simple hash of the variable name
+
+fn name_hash(name: Text) -> Int {
+    // Simple hash: sum of byte values * 31
+    let mut h = 0;
+    let mut i = 0;
+    let n = name.len();
+    while i < n {
+        let b = match name.byte_at(i) { Some(v) => v, None => 0, };
+        h = h * 31 + b;
+        i = i + 1;
+    }
+    h
+}
+
+@allow(unbounded_recursion)
+fn eval_node(node: Int, kinds: List<Int>, ints: List<Int>,
+             lefts: List<Int>, rights: List<Int>, strs: List<Text>,
+             env_hashes: &mut List<Int>, env_vals: &mut List<Int>) -> Int {
+    let kind = kinds[node];
+    if kind == 0 {
+        // Num
+        ints[node]
+    } else if kind == 1 {
+        // Var - look up by hash
+        let h = name_hash(strs[node]);
+        let mut i = env_hashes.len() - 1;
+        while i >= 0 {
+            if env_hashes[i] == h {
+                return env_vals[i];
+            }
+            i = i - 1;
+        }
+        0
+    } else if kind == 2 {
+        // BinOp
+        let op = strs[node];
+        let lv = eval_node(lefts[node], kinds, ints, lefts, rights, strs, env_hashes, env_vals);
+        let rv = eval_node(rights[node], kinds, ints, lefts, rights, strs, env_hashes, env_vals);
+        if op == "+" { lv + rv }
+        else if op == "-" { lv - rv }
+        else if op == "*" { lv * rv }
+        else { 0 }
+    } else if kind == 3 {
+        // Let - store hash + value
+        let h = name_hash(strs[node]);
+        let val = eval_node(lefts[node], kinds, ints, lefts, rights, strs, env_hashes, env_vals);
+        env_hashes.push(h);
+        env_vals.push(val);
+        val
+    } else {
+        0
+    }
+}
+
+fn test_parse_number() -> Int {
+    let mut kinds = List.new();
+    let mut ints = List.new();
+    let mut lefts = List.new();
+    let mut rights = List.new();
+    let mut strs = List.new();
+    let tokens = [Tok.TNum(42), Tok.TEof];
+    let r = parse_expr(tokens, 0, &mut kinds, &mut ints, &mut lefts, &mut rights, &mut strs);
+    let mut env_hashes = List.new();
+    let mut env_vals = List.new();
+    let val = eval_node(r.node, kinds, ints, lefts, rights, strs, &mut env_hashes, &mut env_vals);
+    if val != 42 {
+        print(f"FAIL parse_number: expected 42, got {val}");
+        return 1;
+    }
+    print("  parse_number: OK");
+    0
+}
+
+fn test_parse_addition() -> Int {
+    let mut kinds = List.new();
+    let mut ints = List.new();
+    let mut lefts = List.new();
+    let mut rights = List.new();
+    let mut strs = List.new();
+    let tokens = [Tok.TNum(3), Tok.TPlus, Tok.TNum(4), Tok.TEof];
+    let r = parse_expr(tokens, 0, &mut kinds, &mut ints, &mut lefts, &mut rights, &mut strs);
+    let mut env_hashes = List.new();
+    let mut env_vals = List.new();
+    let val = eval_node(r.node, kinds, ints, lefts, rights, strs, &mut env_hashes, &mut env_vals);
+    if val != 7 {
+        print(f"FAIL addition: expected 7, got {val}");
+        return 1;
+    }
+    print("  parse_addition: OK");
+    0
+}
+
+fn test_parse_precedence() -> Int {
+    let mut kinds = List.new();
+    let mut ints = List.new();
+    let mut lefts = List.new();
+    let mut rights = List.new();
+    let mut strs = List.new();
+    // 2 + 3 * 4 = 14
+    let tokens = [Tok.TNum(2), Tok.TPlus, Tok.TNum(3), Tok.TStar, Tok.TNum(4), Tok.TEof];
+    let r = parse_expr(tokens, 0, &mut kinds, &mut ints, &mut lefts, &mut rights, &mut strs);
+    let mut env_hashes = List.new();
+    let mut env_vals = List.new();
+    let val = eval_node(r.node, kinds, ints, lefts, rights, strs, &mut env_hashes, &mut env_vals);
+    if val != 14 {
+        print(f"FAIL precedence: 2+3*4 expected 14, got {val}");
+        return 1;
+    }
+    print("  parse_precedence: OK");
+    0
+}
+
+fn test_parse_parens() -> Int {
+    let mut kinds = List.new();
+    let mut ints = List.new();
+    let mut lefts = List.new();
+    let mut rights = List.new();
+    let mut strs = List.new();
+    // (2 + 3) * 4 = 20
+    let tokens = [Tok.TLParen, Tok.TNum(2), Tok.TPlus, Tok.TNum(3), Tok.TRParen, Tok.TStar, Tok.TNum(4), Tok.TEof];
+    let r = parse_expr(tokens, 0, &mut kinds, &mut ints, &mut lefts, &mut rights, &mut strs);
+    let mut env_hashes = List.new();
+    let mut env_vals = List.new();
+    let val = eval_node(r.node, kinds, ints, lefts, rights, strs, &mut env_hashes, &mut env_vals);
+    if val != 20 {
+        print(f"FAIL parens: (2+3)*4 expected 20, got {val}");
+        return 1;
+    }
+    print("  parse_parens: OK");
+    0
+}
+
+fn test_eval_let_and_var() -> Int {
+    // Build AST manually: let x = 10, then eval x + 5
+    let mut kinds = List.new();
+    let mut ints = List.new();
+    let mut lefts = List.new();
+    let mut rights = List.new();
+    let mut strs = List.new();
+
+    // Node 0: Num(10)
+    let n10 = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 0, 10, 0, 0);
+    strs.push("");
+    // Node 1: Let("x", Num(10))
+    let let_x = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 3, 0, n10, 0);
+    strs.push("x");
+    // Node 2: Var("x")
+    let var_x = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 1, 0, 0, 0);
+    strs.push("x");
+    // Node 3: Num(5)
+    let n5 = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 0, 5, 0, 0);
+    strs.push("");
+    // Node 4: BinOp("+", Var("x"), Num(5))
+    let add_node_id = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 2, 0, var_x, n5);
+    strs.push("+");
+
+    let mut env_hashes = List.new();
+    let mut env_vals = List.new();
+
+    // Eval let x = 10
+    eval_node(let_x, kinds, ints, lefts, rights, strs, &mut env_hashes, &mut env_vals);
+    // Eval x + 5
+    let val = eval_node(add_node_id, kinds, ints, lefts, rights, strs, &mut env_hashes, &mut env_vals);
+    if val != 15 {
+        print(f"FAIL eval_let_and_var: expected 15, got {val}");
+        return 1;
+    }
+    print("  eval_let_and_var: OK");
+    0
+}
+
+fn test_eval_multiple_vars() -> Int {
+    let mut kinds = List.new();
+    let mut ints = List.new();
+    let mut lefts = List.new();
+    let mut rights = List.new();
+    let mut strs = List.new();
+
+    // a=3
+    let na = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 0, 3, 0, 0);
+    strs.push("");
+    let let_a = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 3, 0, na, 0);
+    strs.push("a");
+    // b=4
+    let nb = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 0, 4, 0, 0);
+    strs.push("");
+    let let_b = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 3, 0, nb, 0);
+    strs.push("b");
+    // a*b
+    let va = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 1, 0, 0, 0);
+    strs.push("a");
+    let vb = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 1, 0, 0, 0);
+    strs.push("b");
+    let mul_id = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 2, 0, va, vb);
+    strs.push("*");
+    // +1
+    let n1 = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 0, 1, 0, 0);
+    strs.push("");
+    let add_id = add_node(&mut kinds, &mut ints, &mut lefts, &mut rights, 2, 0, mul_id, n1);
+    strs.push("+");
+
+    let mut env_hashes = List.new();
+    let mut env_vals = List.new();
+    eval_node(let_a, kinds, ints, lefts, rights, strs, &mut env_hashes, &mut env_vals);
+    eval_node(let_b, kinds, ints, lefts, rights, strs, &mut env_hashes, &mut env_vals);
+    let val = eval_node(add_id, kinds, ints, lefts, rights, strs, &mut env_hashes, &mut env_vals);
+    if val != 13 {
+        print(f"FAIL multi_vars: expected 13, got {val}");
+        return 1;
+    }
+    print("  eval_multiple_vars: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_parse_number();
+    failures = failures + test_parse_addition();
+    failures = failures + test_parse_precedence();
+    failures = failures + test_parse_parens();
+    failures = failures + test_eval_let_and_var();
+    failures = failures + test_eval_multiple_vars();
+
+    if failures == 0 {
+        print("All parser pattern tests passed");
+    }
+    failures
+}

@@ -1,0 +1,566 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: async, stream, intersperse, throttle, merge, window, debounce, sample,
+//        then, for_each_concurrent, sum, product
+// @description: Extended stream tests covering advanced combinators not tested in
+//               stream_test.vr: StreamIntersperse, StreamThen, StreamForEachConcurrent,
+//               StreamSum, StreamProduct, ThrottledStream, MergedStream, WindowedStream,
+//               DebouncedStream, SampledStream.
+
+mount core.async.stream.{
+    Stream, IntoStream, StreamExt,
+    iter, stream_once, stream_empty, stream_repeat, stream_repeat_n,
+    StreamIter, StreamMap, StreamFilter, StreamTake, StreamChain,
+    StreamIntersperse, StreamThen, StreamForEachConcurrent,
+    StreamSum, StreamProduct, SumStream, ProductStream,
+    ThrottledStream, MergedStream, WindowedStream,
+    DebouncedStream, SampledStream,
+    BufferedStream, ChunkedStream,
+};
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.async.waker.{Context, Waker, noop_waker};
+mount core.async.future.{Future, ReadyFuture};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+mount core.time.{Duration, Instant};
+
+// Helper: create a test stream from items
+type TestStream is {
+    items: List<Int>,
+    index: Int,
+};
+
+implement Stream for TestStream {
+    type Item = Int;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Int>> {
+        if self.index < self.items.len() {
+            let val = self.items[self.index];
+            self.index = self.index + 1;
+            Ready(Some(val))
+        } else {
+            Ready(None)
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.items.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+fn test_stream(items: List<Int>) -> TestStream {
+    TestStream { items: items, index: 0 }
+}
+
+// Text stream helper
+type TextStream is {
+    items: List<Text>,
+    index: Int,
+};
+
+implement Stream for TextStream {
+    type Item = Text;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Text>> {
+        if self.index < self.items.len() {
+            let val = self.items[self.index].clone();
+            self.index = self.index + 1;
+            Ready(Some(val))
+        } else {
+            Ready(None)
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.items.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+// =============================================================================
+// Section 1: StreamIntersperse
+// =============================================================================
+
+@test
+fn test_intersperse_type_exists() {
+    let stream = test_stream([1, 2, 3]);
+    let interspersed: StreamIntersperse<TestStream> = StreamIntersperse {
+        stream: stream,
+        separator: 0,
+        next_sep: false,
+        item: None,
+    };
+    // Items: 1, 0, 2, 0, 3
+    let (lo, _) = interspersed.size_hint();
+    assert(lo >= 0);
+}
+
+@test
+fn test_intersperse_empty_stream() {
+    let stream = test_stream([]);
+    let interspersed: StreamIntersperse<TestStream> = StreamIntersperse {
+        stream: stream,
+        separator: 99,
+        next_sep: false,
+        item: None,
+    };
+    let (lo, hi) = interspersed.size_hint();
+    assert_eq(lo, 0);
+}
+
+@test
+fn test_intersperse_single_item() {
+    let stream = test_stream([42]);
+    let interspersed: StreamIntersperse<TestStream> = StreamIntersperse {
+        stream: stream,
+        separator: 0,
+        next_sep: false,
+        item: None,
+    };
+    // Single item, no separator needed
+    let (lo, _) = interspersed.size_hint();
+    assert(lo >= 0);
+}
+
+@test
+fn test_intersperse_with_text() {
+    let stream = TextStream { items: ["a", "b", "c"], index: 0 };
+    let interspersed: StreamIntersperse<TextStream> = StreamIntersperse {
+        stream: stream,
+        separator: ", ",
+        next_sep: false,
+        item: None,
+    };
+    let (lo, _) = interspersed.size_hint();
+    assert(lo >= 0);
+}
+
+// =============================================================================
+// Section 2: StreamThen (async map)
+// =============================================================================
+
+@test
+fn test_stream_then_type_exists() {
+    let _: Maybe<StreamThen<TestStream, fn(Int) -> ReadyFuture<Text>, ReadyFuture<Text>>> = None;
+}
+
+@test
+fn test_stream_then_different_output_types() {
+    let _: Maybe<StreamThen<TestStream, fn(Int) -> ReadyFuture<Bool>, ReadyFuture<Bool>>> = None;
+    let _: Maybe<StreamThen<TestStream, fn(Int) -> ReadyFuture<Float>, ReadyFuture<Float>>> = None;
+}
+
+// =============================================================================
+// Section 3: StreamForEachConcurrent
+// =============================================================================
+
+@test
+fn test_for_each_concurrent_type_exists() {
+    let _: Maybe<StreamForEachConcurrent<TestStream, fn(Int) -> ReadyFuture<()>, ReadyFuture<()>>> = None;
+}
+
+// =============================================================================
+// Section 4: StreamSum / StreamProduct protocols
+// =============================================================================
+
+@test
+fn test_stream_sum_protocol_exists() {
+    let _: Maybe<StreamSum<Int>> = None;
+}
+
+@test
+fn test_stream_product_protocol_exists() {
+    let _: Maybe<StreamProduct<Int>> = None;
+}
+
+@test
+fn test_sum_stream_type_exists() {
+    let _: Maybe<SumStream<TestStream, StreamSum<Int>>> = None;
+}
+
+@test
+fn test_product_stream_type_exists() {
+    let _: Maybe<ProductStream<TestStream, StreamProduct<Int>>> = None;
+}
+
+// =============================================================================
+// Section 5: ThrottledStream
+// =============================================================================
+
+@test
+fn test_throttled_stream_type_exists() {
+    let _: Maybe<ThrottledStream<TestStream>> = None;
+}
+
+@test
+fn test_throttled_stream_construction() {
+    let stream = test_stream([1, 2, 3, 4, 5]);
+    let throttled: ThrottledStream<TestStream> = ThrottledStream {
+        stream: stream,
+        count: 10,
+        per: Duration.from_secs(1),
+        tokens: 10,
+        last_refill: Instant.now(),
+    };
+    assert_eq(throttled.count, 10);
+    assert_eq(throttled.tokens, 10);
+}
+
+@test
+fn test_throttled_stream_size_hint_passthrough() {
+    let stream = test_stream([1, 2, 3]);
+    let throttled: ThrottledStream<TestStream> = ThrottledStream {
+        stream: stream,
+        count: 5,
+        per: Duration.from_secs(1),
+        tokens: 5,
+        last_refill: Instant.now(),
+    };
+    let (lo, hi) = throttled.size_hint();
+    assert_eq(lo, 3);
+}
+
+@test
+fn test_throttled_stream_zero_tokens() {
+    let stream = test_stream([1, 2]);
+    let throttled: ThrottledStream<TestStream> = ThrottledStream {
+        stream: stream,
+        count: 5,
+        per: Duration.from_secs(1),
+        tokens: 0, // No tokens available
+        last_refill: Instant.now(),
+    };
+    assert_eq(throttled.tokens, 0);
+}
+
+// =============================================================================
+// Section 6: MergedStream
+// =============================================================================
+
+@test
+fn test_merged_stream_type_exists() {
+    let _: Maybe<MergedStream<TestStream, TestStream>> = None;
+}
+
+@test
+fn test_merged_stream_construction() {
+    let s1 = test_stream([1, 2, 3]);
+    let s2 = test_stream([4, 5, 6]);
+    let merged: MergedStream<TestStream, TestStream> = MergedStream {
+        stream1: s1,
+        stream2: s2,
+        stream1_done: false,
+        stream2_done: false,
+        prefer_first: true,
+    };
+    assert(!merged.stream1_done);
+    assert(!merged.stream2_done);
+}
+
+@test
+fn test_merged_stream_size_hint_sums() {
+    let s1 = test_stream([1, 2, 3]);
+    let s2 = test_stream([4, 5]);
+    let merged: MergedStream<TestStream, TestStream> = MergedStream {
+        stream1: s1,
+        stream2: s2,
+        stream1_done: false,
+        stream2_done: false,
+        prefer_first: true,
+    };
+    let (lo, hi) = merged.size_hint();
+    assert_eq(lo, 5); // 3 + 2
+}
+
+@test
+fn test_merged_stream_prefer_first() {
+    let s1 = test_stream([1]);
+    let s2 = test_stream([2]);
+    let merged: MergedStream<TestStream, TestStream> = MergedStream {
+        stream1: s1,
+        stream2: s2,
+        stream1_done: false,
+        stream2_done: false,
+        prefer_first: true,
+    };
+    assert(merged.prefer_first);
+}
+
+@test
+fn test_merged_stream_empty_sources() {
+    let s1 = test_stream([]);
+    let s2 = test_stream([]);
+    let merged: MergedStream<TestStream, TestStream> = MergedStream {
+        stream1: s1,
+        stream2: s2,
+        stream1_done: false,
+        stream2_done: false,
+        prefer_first: true,
+    };
+    let (lo, _) = merged.size_hint();
+    assert_eq(lo, 0);
+}
+
+@test
+fn test_merged_stream_one_empty() {
+    let s1 = test_stream([1, 2, 3]);
+    let s2 = test_stream([]);
+    let merged: MergedStream<TestStream, TestStream> = MergedStream {
+        stream1: s1,
+        stream2: s2,
+        stream1_done: false,
+        stream2_done: false,
+        prefer_first: true,
+    };
+    let (lo, _) = merged.size_hint();
+    assert_eq(lo, 3);
+}
+
+// =============================================================================
+// Section 7: WindowedStream
+// =============================================================================
+
+@test
+fn test_windowed_stream_type_exists() {
+    let _: Maybe<WindowedStream<TestStream>> = None;
+}
+
+@test
+fn test_windowed_stream_construction() {
+    let stream = test_stream([1, 2, 3, 4, 5]);
+    let windowed: WindowedStream<TestStream> = WindowedStream {
+        stream: stream,
+        duration: Duration.from_millis(100),
+        buffer: [],
+        window_start: Instant.now(),
+    };
+    assert(windowed.buffer.is_empty());
+}
+
+@test
+fn test_windowed_stream_empty_buffer() {
+    let stream = test_stream([]);
+    let windowed: WindowedStream<TestStream> = WindowedStream {
+        stream: stream,
+        duration: Duration.from_secs(1),
+        buffer: [],
+        window_start: Instant.now(),
+    };
+    assert_eq(windowed.buffer.len(), 0);
+}
+
+// =============================================================================
+// Section 8: DebouncedStream
+// =============================================================================
+
+@test
+fn test_debounced_stream_type_exists() {
+    let _: Maybe<DebouncedStream<TestStream>> = None;
+}
+
+@test
+fn test_debounced_stream_construction() {
+    let stream = test_stream([1, 2, 3]);
+    let debounced: DebouncedStream<TestStream> = DebouncedStream {
+        stream: stream,
+        duration: Duration.from_millis(50),
+        last_item: None,
+        last_time: None,
+    };
+    assert(debounced.last_item is None);
+}
+
+// =============================================================================
+// Section 9: SampledStream
+// =============================================================================
+
+@test
+fn test_sampled_stream_type_exists() {
+    let _: Maybe<SampledStream<TestStream>> = None;
+}
+
+@test
+fn test_sampled_stream_construction() {
+    let stream = test_stream([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let sampled: SampledStream<TestStream> = SampledStream {
+        stream: stream,
+        interval: Duration.from_millis(100),
+        last_sample: None,
+        next_sample_time: Instant.now(),
+    };
+    assert(sampled.last_sample is None);
+}
+
+// =============================================================================
+// Section 10: ChunkedStream (more patterns)
+// =============================================================================
+
+@test
+fn test_chunked_stream_size_hint() {
+    let stream = test_stream([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    let chunked: ChunkedStream<TestStream> = ChunkedStream {
+        stream: stream,
+        size: 3,
+        buffer: [],
+        done: false,
+    };
+    let (lo, hi) = chunked.size_hint();
+    assert_eq(lo, 3); // 9 items / 3 per chunk = 3 chunks
+}
+
+@test
+fn test_chunked_stream_size_hint_partial() {
+    let stream = test_stream([1, 2, 3, 4, 5]);
+    let chunked: ChunkedStream<TestStream> = ChunkedStream {
+        stream: stream,
+        size: 3,
+        buffer: [],
+        done: false,
+    };
+    let (lo, _) = chunked.size_hint();
+    assert_eq(lo, 1); // floor(5/3) = 1
+}
+
+@test
+fn test_chunked_stream_large_chunk_size() {
+    let stream = test_stream([1, 2]);
+    let chunked: ChunkedStream<TestStream> = ChunkedStream {
+        stream: stream,
+        size: 100,
+        buffer: [],
+        done: false,
+    };
+    let (lo, _) = chunked.size_hint();
+    assert_eq(lo, 0); // 2 items < 100 per chunk
+}
+
+@test
+fn test_chunked_stream_single_item_chunks() {
+    let stream = test_stream([1, 2, 3]);
+    let chunked: ChunkedStream<TestStream> = ChunkedStream {
+        stream: stream,
+        size: 1,
+        buffer: [],
+        done: false,
+    };
+    let (lo, _) = chunked.size_hint();
+    assert_eq(lo, 3); // 3 items / 1 per chunk = 3
+}
+
+// =============================================================================
+// Section 11: BufferedStream (more patterns)
+// =============================================================================
+
+@test
+fn test_buffered_stream_size_hint_with_buffer() {
+    let stream = test_stream([4, 5, 6]);
+    let buffered: BufferedStream<TestStream> = BufferedStream {
+        stream: stream,
+        buffer: [1, 2, 3], // 3 items already buffered
+        capacity: 10,
+        done: false,
+    };
+    let (lo, hi) = buffered.size_hint();
+    assert_eq(lo, 6); // 3 buffered + 3 remaining
+}
+
+@test
+fn test_buffered_stream_empty() {
+    let stream = test_stream([]);
+    let buffered: BufferedStream<TestStream> = BufferedStream {
+        stream: stream,
+        buffer: [],
+        capacity: 10,
+        done: false,
+    };
+    let (lo, _) = buffered.size_hint();
+    assert_eq(lo, 0);
+}
+
+@test
+fn test_buffered_stream_done_flag() {
+    let stream = test_stream([]);
+    let buffered: BufferedStream<TestStream> = BufferedStream {
+        stream: stream,
+        buffer: [1, 2],
+        capacity: 5,
+        done: true,
+    };
+    assert(buffered.done);
+    assert_eq(buffered.buffer.len(), 2);
+}
+
+@test
+fn test_buffered_stream_capacity() {
+    let stream = test_stream([1, 2, 3, 4, 5]);
+    let buffered: BufferedStream<TestStream> = BufferedStream {
+        stream: stream,
+        buffer: [],
+        capacity: 3,
+        done: false,
+    };
+    assert_eq(buffered.capacity, 3);
+}
+
+// =============================================================================
+// Section 12: Polling advanced streams
+// =============================================================================
+
+@test
+fn test_intersperse_poll_first_item() {
+    let mut stream: StreamIntersperse<TestStream> = StreamIntersperse {
+        stream: test_stream([10, 20]),
+        separator: 0,
+        next_sep: false,
+        item: None,
+    };
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let result = stream.poll_next(&mut cx);
+    assert(result.is_ready());
+}
+
+@test
+fn test_merged_stream_poll_gets_item() {
+    let mut merged: MergedStream<TestStream, TestStream> = MergedStream {
+        stream1: test_stream([1]),
+        stream2: test_stream([2]),
+        stream1_done: false,
+        stream2_done: false,
+        prefer_first: true,
+    };
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let result = merged.poll_next(&mut cx);
+    assert(result.is_ready());
+}
+
+@test
+fn test_buffered_stream_poll_fills_buffer() {
+    let mut buffered: BufferedStream<TestStream> = BufferedStream {
+        stream: test_stream([1, 2, 3]),
+        buffer: [],
+        capacity: 10,
+        done: false,
+    };
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let result = buffered.poll_next(&mut cx);
+    assert(result.is_ready());
+}
+
+@test
+fn test_chunked_stream_poll() {
+    let mut chunked: ChunkedStream<TestStream> = ChunkedStream {
+        stream: test_stream([1, 2, 3]),
+        size: 3,
+        buffer: [],
+        done: false,
+    };
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let result = chunked.poll_next(&mut cx);
+    assert(result.is_ready());
+}

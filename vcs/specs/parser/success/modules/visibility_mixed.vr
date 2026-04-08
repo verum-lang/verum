@@ -1,0 +1,185 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Mix of all visibility modifiers on functions
+pub fn pub_fn() -> Int { 1 }
+public fn public_fn() -> Int { 2 }
+internal fn internal_fn() -> Int { 3 }
+protected fn protected_fn() -> Int { 4 }
+fn private_fn() -> Int { 5 }
+
+// Mix of all visibility on types
+pub type PubType is { a: Int };
+public type PublicType is { b: Int };
+internal type InternalType is { c: Int };
+protected type ProtectedType is { d: Int };
+type PrivateType is { e: Int };
+
+// Mix of all visibility on constants
+pub const PUB_C: Int = 1;
+public const PUBLIC_C: Int = 2;
+internal const INTERNAL_C: Int = 3;
+protected const PROTECTED_C: Int = 4;
+const PRIVATE_C: Int = 5;
+
+// Mix of all visibility on modules
+pub module pub_mod {}
+public module public_mod {}
+internal module internal_mod {}
+protected module protected_mod {}
+module private_mod {}
+
+// Complex module with mixed visibility
+pub module api {
+    // Public API
+    pub type Request is { url: Text };
+    pub type Response is { status: Int, body: Text };
+
+    pub fn get(url: Text) -> Response {
+        make_request(Request { url: url })
+    }
+
+    pub fn post(url: Text, body: Text) -> Response {
+        make_request_with_body(Request { url: url }, body)
+    }
+
+    // Internal implementation
+    internal type ConnectionPool is { size: Int };
+    internal fn get_connection() -> Connection {
+        Connection { id: 1 }
+    }
+
+    internal fn make_request(req: Request) -> Response {
+        Response { status: 200, body: "" }
+    }
+
+    internal fn make_request_with_body(req: Request, body: Text) -> Response {
+        Response { status: 200, body: body }
+    }
+
+    // Protected for extensions
+    protected type Connection is { id: Int };
+    protected fn validate_connection(conn: &Connection) -> Bool {
+        conn.id > 0
+    }
+
+    // Private helpers
+    fn encode_url(url: Text) -> Text { url }
+    fn decode_response(data: &[Byte]) -> Text { "" }
+}
+
+// Implementation with mixed visibility
+pub type DataProcessor is { data: List<Int> };
+
+implement DataProcessor {
+    // Public factory
+    pub fn new() -> Self {
+        DataProcessor { data: List.new() }
+    }
+
+    // Public operations
+    pub fn process(&mut self) {
+        self.internal_validate();
+        self.protected_transform();
+        self.private_finalize();
+    }
+
+    pub fn get_result(&self) -> List<Int> {
+        self.data.clone()
+    }
+
+    // Internal operations
+    internal fn internal_validate(&self) {
+        // validation logic
+    }
+
+    internal fn internal_reset(&mut self) {
+        self.data = List.new();
+    }
+
+    // Protected operations
+    protected fn protected_transform(&mut self) {
+        // transformation logic
+    }
+
+    protected fn protected_checkpoint(&self) -> Int {
+        self.data.len()
+    }
+
+    // Private operations
+    fn private_finalize(&mut self) {
+        // finalization logic
+    }
+
+    fn private_helper(&self) -> Bool {
+        true
+    }
+}
+
+// Nested modules with visibility hierarchy
+pub module framework {
+    pub module public_layer {
+        pub type Api is { version: Int };
+        pub fn init() {}
+    }
+
+    internal module internal_layer {
+        internal type Impl is { state: Int };
+        internal fn setup() {}
+
+        pub fn exposed_from_internal() -> Int { 42 }
+    }
+
+    protected module protected_layer {
+        protected type Extension is { data: Text };
+        protected fn extend() {}
+    }
+
+    module private_layer {
+        type Secret is { key: Text };
+        fn hide() {}
+    }
+}
+
+// Default visibility (private) with explicit others
+module visibility_showcase {
+    // Default is private
+    fn default_private() -> Int { 0 }
+    type DefaultPrivate is ();
+
+    // Explicitly public
+    pub fn explicitly_public() -> Int { 1 }
+    pub type ExplicitlyPublic is ();
+
+    // Explicitly internal
+    internal fn explicitly_internal() -> Int { 2 }
+    internal type ExplicitlyInternal is ();
+
+    // Explicitly protected
+    protected fn explicitly_protected() -> Int { 3 }
+    protected type ExplicitlyProtected is ();
+}
+
+// Mixed visibility in protocol implementations
+pub type Displayable is protocol {
+    fn display(&self) -> Text;
+};
+
+pub type Entity is { id: Int, name: Text };
+
+implement Entity {
+    pub fn new(id: Int, name: Text) -> Self {
+        Entity { id: id, name: name }
+    }
+
+    internal fn validate(&self) -> Bool {
+        self.id > 0 && self.name.len() > 0
+    }
+}
+
+implement Displayable for Entity {
+    fn display(&self) -> Text {
+        f"Entity({self.id}, {self.name})"
+    }
+}

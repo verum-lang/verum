@@ -1,0 +1,23 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, panic, nested-call
+// @timeout: 5000
+// @expected-panic: Division by zero
+
+fn inner(x: Int) -> Int {
+    x / 0
+}
+
+fn middle(x: Int) -> Int {
+    inner(x)
+}
+
+fn outer(x: Int) -> Int {
+    middle(x)
+}
+
+fn main() {
+    let result = outer(42);
+    print(f"{result}");
+}

@@ -1,0 +1,95 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, gpu, matmul
+// @expected-exit: 0
+
+// GPU-style matrix multiply simulation.
+// Tests matrix multiply via functions returning List<Int>.
+
+fn matmul(a: List<Int>, b: List<Int>, m: Int, n: Int, k: Int) -> List<Int> {
+    // C[m x n] = A[m x k] * B[k x n], row-major flat arrays
+    let mut c = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut row = 0;
+    while (row < m) {
+        let mut col = 0;
+        while (col < n) {
+            let mut sum = 0;
+            let mut kk = 0;
+            while (kk < k) {
+                sum = sum + a[row * k + kk] * b[kk * n + col];
+                kk = kk + 1;
+            }
+            c[row * n + col] = sum;
+            col = col + 1;
+        }
+        row = row + 1;
+    }
+    c
+}
+
+fn transpose(mat: List<Int>, rows: Int, cols: Int) -> List<Int> {
+    let mut result = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut r = 0;
+    while (r < rows) {
+        let mut c = 0;
+        while (c < cols) {
+            result[c * rows + r] = mat[r * cols + c];
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: 2x2 * 2x2
+    // A = [[1, 2], [3, 4]], B = [[5, 6], [7, 8]]
+    // C = [[19, 22], [43, 50]]
+    let a = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b = [5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let c = matmul(a, b, 2, 2, 2);
+    assert_eq(c[0], 19);
+    assert_eq(c[1], 22);
+    assert_eq(c[2], 43);
+    assert_eq(c[3], 50);
+
+    // Test 2: 3x2 * 2x3 = 3x3
+    // A = [[1, 2], [3, 4], [5, 6]]
+    // B = [[7, 8, 9], [10, 11, 12]]
+    // C = [[27, 30, 33], [61, 68, 75], [95, 106, 117]]
+    let a2 = [1, 2, 3, 4, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b2 = [7, 8, 9, 10, 11, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let c2 = matmul(a2, b2, 3, 3, 2);
+    assert_eq(c2[0], 27);
+    assert_eq(c2[1], 30);
+    assert_eq(c2[2], 33);
+    assert_eq(c2[3], 61);
+    assert_eq(c2[4], 68);
+    assert_eq(c2[5], 75);
+    assert_eq(c2[6], 95);
+    assert_eq(c2[7], 106);
+    assert_eq(c2[8], 117);
+
+    // Test 3: Identity matrix multiply: A * I = A
+    let eye = [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let a3 = [5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let c3 = matmul(a3, eye, 2, 2, 2);
+    assert_eq(c3[0], 5);
+    assert_eq(c3[1], 6);
+    assert_eq(c3[2], 7);
+    assert_eq(c3[3], 8);
+
+    // Test 4: Transpose + multiply: (A^T * A) is symmetric
+    let at = transpose(a, 2, 2);
+    let ata = matmul(at, a, 2, 2, 2);
+    // A^T = [[1, 3], [2, 4]]
+    // A^T * A = [[10, 14], [14, 20]]
+    assert_eq(ata[0], 10);
+    assert_eq(ata[1], 14);
+    assert_eq(ata[2], 14);
+    assert_eq(ata[3], 20);
+
+    print("GPU matmul kernel: PASS");
+    0
+}

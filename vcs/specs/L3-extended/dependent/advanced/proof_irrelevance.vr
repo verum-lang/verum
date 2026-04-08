@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, proof-irrelevance, advanced
+
+/// Proof irrelevance - all proofs of the same proposition are equal
+///
+/// In proof-irrelevant type theory, the identity of a proof doesn't matter,
+/// only that a proof exists.
+
+/// Proof witness type - all instances are considered equal
+type ProofWit<T> is | PW;
+
+/// Proposition: a type that is proof-irrelevant
+type Prop is protocol {
+    type Witness;
+};
+
+/// Boolean proposition
+type TrueP is { value: Bool };
+type FalseP is { value: Bool };
+
+fn true_prop() -> TrueP { TrueP { value: true } }
+fn false_prop() -> FalseP { FalseP { value: false } }
+
+/// Conjunction (AND) of propositions
+type And<A, B> is { left: A, right: B };
+
+fn and_intro<A, B>(a: A, b: B) -> And<A, B> {
+    And { left: a, right: b }
+}
+
+fn and_left<A, B>(p: And<A, B>) -> A { p.left }
+fn and_right<A, B>(p: And<A, B>) -> B { p.right }
+
+/// Disjunction (OR) of propositions
+type Or<A, B> is | OrLeft(A) | OrRight(B);
+
+fn or_left<A, B>(a: A) -> Or<A, B> { OrLeft(a) }
+fn or_right<A, B>(b: B) -> Or<A, B> { OrRight(b) }
+
+/// Negation
+type Not<A> is { refute: fn(A) -> () };
+
+/// Proof irrelevance: any two proofs of the same type are equal
+fn proof_irrelevance<P>(p1: ProofWit<P>, p2: ProofWit<P>) -> Bool {
+    // In a proof-irrelevant system, p1 and p2 are considered identical
+    true
+}
+
+/// Squash type: erases proof content
+type Squash<T> is | Squashed;
+
+fn squash<T>(value: T) -> Squash<T> {
+    Squashed
+}
+
+fn unsquash_bool(s: Squash<Bool>) -> Bool {
+    // Can only observe existence, not content
+    true  // Something exists
+}
+
+/// Truncation: turn any type into a proposition
+type Trunc<T> is | Truncated;
+
+fn truncate<T>(value: T) -> Trunc<T> {
+    Truncated
+}
+
+/// Decidable propositions
+type Decidable<P> is | Decided(Bool);
+
+fn decide_eq(a: Int, b: Int) -> Decidable<Bool> {
+    Decided(a == b)
+}
+
+/// Proof-carrying code: value with erased proof
+type Certified<T> is {
+    value: T,
+    certified: Bool,
+};
+
+fn certify<T>(value: T) -> Certified<T> {
+    Certified { value, certified: true }
+}
+
+fn get_value<T>(c: Certified<T>) -> T {
+    c.value
+}
+
+/// Subsingleton types (at most one inhabitant)
+fn subsingleton_unit() -> Bool {
+    // Unit type has exactly one value: ()
+    true
+}
+
+/// Proof transfer between equivalent propositions
+fn transfer<A, B>(proof: ProofWit<A>, equiv: fn(A) -> B) -> ProofWit<B> {
+    match proof { PW => PW }
+}
+
+fn main() {
+    // Proof irrelevance
+    let p1: ProofWit<Int> = PW;
+    let p2: ProofWit<Int> = PW;
+    assert(proof_irrelevance(p1, p2));
+
+    // Conjunction
+    let conj = and_intro(true, 42);
+    assert(and_left(conj) == true);
+    assert(and_right(conj) == 42);
+
+    // Disjunction
+    let disj: Or<Int, Text> = or_left(42);
+    match disj {
+        OrLeft(n) => assert(n == 42),
+        OrRight(s) => {}
+    }
+
+    // Squashing
+    let s = squash(42);
+
+    // Truncation
+    let t = truncate([1, 2, 3]);
+
+    // Decidable
+    let d = decide_eq(5, 5);
+    match d {
+        Decided(b) => assert(b == true),
+    }
+
+    // Certified values
+    let cert = certify(100);
+    assert(get_value(cert) == 100);
+}

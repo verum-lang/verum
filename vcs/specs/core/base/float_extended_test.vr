@@ -1,0 +1,405 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, float, float32, float64, recip, div_euclid, rem_euclid, is_subnormal, parity
+// @description: Tests for Float/Float32/Float64 extended methods: recip, is_subnormal, div_euclid/rem_euclid, Float64 parity methods
+
+mount core.base.primitives.{Float32, Float64};
+
+// =============================================================================
+// Float - recip
+// =============================================================================
+
+@test
+fn test_float_recip_basic() {
+    let r: Float = 2.0.recip();
+    assert_eq(r, 0.5);
+}
+
+@test
+fn test_float_recip_one() {
+    let r: Float = 1.0.recip();
+    assert_eq(r, 1.0);
+}
+
+@test
+fn test_float_recip_negative() {
+    let r: Float = (-4.0).recip();
+    assert_eq(r, -0.25);
+}
+
+@test
+fn test_float_recip_large() {
+    let r: Float = 1000.0.recip();
+    assert_eq(r, 0.001);
+}
+
+@test
+fn test_float_recip_zero_inf() {
+    let r: Float = 0.0.recip();
+    assert(r.is_infinite());
+}
+
+// =============================================================================
+// Float - is_subnormal
+// =============================================================================
+
+@test
+fn test_float_is_subnormal_normal() {
+    assert(!1.0.is_subnormal());
+    assert(!(-1.0).is_subnormal());
+}
+
+@test
+fn test_float_is_subnormal_zero() {
+    assert(!0.0.is_subnormal());
+}
+
+@test
+fn test_float_is_subnormal_nan() {
+    assert(!Float.nan().is_subnormal());
+}
+
+@test
+fn test_float_is_subnormal_inf() {
+    assert(!Float.infinity().is_subnormal());
+}
+
+// =============================================================================
+// Float - div_euclid / rem_euclid
+// =============================================================================
+
+@test
+fn test_float_div_euclid_positive() {
+    let q: Float = 7.0.div_euclid(3.0);
+    assert_eq(q, 2.0);
+}
+
+@test
+fn test_float_rem_euclid_positive() {
+    let r: Float = 7.0.rem_euclid(3.0);
+    assert_eq(r, 1.0);
+}
+
+@test
+fn test_float_div_euclid_negative_dividend() {
+    let q: Float = (-7.0).div_euclid(3.0);
+    assert_eq(q, -3.0);
+}
+
+@test
+fn test_float_rem_euclid_negative_dividend() {
+    // Euclidean remainder is always non-negative
+    let r: Float = (-7.0).rem_euclid(3.0);
+    assert_eq(r, 2.0);
+}
+
+@test
+fn test_float_div_euclid_negative_divisor() {
+    let q: Float = 7.0.div_euclid(-3.0);
+    assert_eq(q, -2.0);
+}
+
+@test
+fn test_float_rem_euclid_negative_divisor() {
+    let r: Float = 7.0.rem_euclid(-3.0);
+    assert_eq(r, 1.0);
+}
+
+@test
+fn test_float_rem_euclid_both_negative() {
+    let r: Float = (-7.0).rem_euclid(-3.0);
+    assert_eq(r, 2.0);
+}
+
+@test
+fn test_float_div_euclid_exact() {
+    let q: Float = 9.0.div_euclid(3.0);
+    assert_eq(q, 3.0);
+}
+
+@test
+fn test_float_rem_euclid_exact() {
+    let r: Float = 9.0.rem_euclid(3.0);
+    assert_eq(r, 0.0);
+}
+
+// =============================================================================
+// Float64 - parity methods (clamp, fract, powi, signum, is_positive, etc.)
+// =============================================================================
+
+@test
+fn test_float64_is_positive() {
+    let a = 1.0 as Float64;
+    let b = -1.0 as Float64;
+    let c = 0.0 as Float64;
+    assert(a.is_positive());
+    assert(!b.is_positive());
+    assert(!c.is_positive());
+}
+
+@test
+fn test_float64_is_negative() {
+    let a = -1.0 as Float64;
+    let b = 1.0 as Float64;
+    assert(a.is_negative());
+    assert(!b.is_negative());
+}
+
+@test
+fn test_float64_is_zero() {
+    let a = 0.0 as Float64;
+    assert(a.is_zero());
+    let b = 1.0 as Float64;
+    assert(!b.is_zero());
+}
+
+@test
+fn test_float64_signum_positive() {
+    let a = 42.0 as Float64;
+    let s = a.signum();
+    assert(s == (1.0 as Float64));
+}
+
+@test
+fn test_float64_signum_negative() {
+    let a = -42.0 as Float64;
+    let s = a.signum();
+    assert(s == (-1.0 as Float64));
+}
+
+@test
+fn test_float64_signum_zero() {
+    let a = 0.0 as Float64;
+    let s = a.signum();
+    assert(s == (0.0 as Float64));
+}
+
+@test
+fn test_float64_fract() {
+    let a = 3.75 as Float64;
+    let f = a.fract();
+    let diff: Float = (f as Float) - 0.75;
+    let abs_diff: Float = if diff < 0.0 { 0.0 - diff } else { diff };
+    assert(abs_diff < 1.0e-10);
+}
+
+@test
+fn test_float64_clamp_in_range() {
+    let a = 5.0 as Float64;
+    let c = a.clamp(0.0 as Float64, 10.0 as Float64);
+    assert(c == (5.0 as Float64));
+}
+
+@test
+fn test_float64_clamp_below() {
+    let a = -5.0 as Float64;
+    let c = a.clamp(0.0 as Float64, 10.0 as Float64);
+    assert(c == (0.0 as Float64));
+}
+
+@test
+fn test_float64_clamp_above() {
+    let a = 15.0 as Float64;
+    let c = a.clamp(0.0 as Float64, 10.0 as Float64);
+    assert(c == (10.0 as Float64));
+}
+
+@test
+fn test_float64_powi_positive() {
+    let a = 2.0 as Float64;
+    let p = a.powi(3);
+    assert((p as Float) == 8.0);
+}
+
+@test
+fn test_float64_powi_zero() {
+    let a = 5.0 as Float64;
+    let p = a.powi(0);
+    assert((p as Float) == 1.0);
+}
+
+@test
+fn test_float64_powi_negative() {
+    let a = 2.0 as Float64;
+    let p = a.powi(-1);
+    assert((p as Float) == 0.5);
+}
+
+@test
+fn test_float64_to_degrees() {
+    let a = 3.141592653589793 as Float64;
+    let d = a.to_degrees();
+    let diff: Float = (d as Float) - 180.0;
+    let abs_diff: Float = if diff < 0.0 { 0.0 - diff } else { diff };
+    assert(abs_diff < 1.0e-10);
+}
+
+@test
+fn test_float64_to_radians() {
+    let a = 180.0 as Float64;
+    let r = a.to_radians();
+    let diff: Float = (r as Float) - 3.141592653589793;
+    let abs_diff: Float = if diff < 0.0 { 0.0 - diff } else { diff };
+    assert(abs_diff < 1.0e-10);
+}
+
+@test
+fn test_float64_to_int() {
+    let a = 42.7 as Float64;
+    assert_eq(a.to_int(), 42);
+}
+
+// =============================================================================
+// Float32 - recip, is_subnormal, div_euclid, rem_euclid
+// =============================================================================
+
+@test
+fn test_float32_recip() {
+    let a = 2.0 as Float32;
+    let r = a.recip();
+    assert(r.to_float() == 0.5);
+}
+
+@test
+fn test_float32_is_subnormal_normal() {
+    let a = 1.0 as Float32;
+    assert(!a.is_subnormal());
+}
+
+@test
+fn test_float32_div_euclid() {
+    let a = 7.0 as Float32;
+    let b = 3.0 as Float32;
+    let q = a.div_euclid(b);
+    assert(q.to_float() == 2.0);
+}
+
+@test
+fn test_float32_rem_euclid() {
+    let a = 7.0 as Float32;
+    let b = 3.0 as Float32;
+    let r = a.rem_euclid(b);
+    assert(r.to_float() == 1.0);
+}
+
+@test
+fn test_float32_rem_euclid_negative() {
+    let a = -7.0 as Float32;
+    let b = 3.0 as Float32;
+    let r = a.rem_euclid(b);
+    assert(r.to_float() == 2.0);
+}
+
+// =============================================================================
+// Float64 - recip, is_subnormal, div_euclid, rem_euclid
+// =============================================================================
+
+@test
+fn test_float64_recip() {
+    let a = 4.0 as Float64;
+    let r = a.recip();
+    assert((r as Float) == 0.25);
+}
+
+@test
+fn test_float64_is_subnormal_normal() {
+    let a = 1.0 as Float64;
+    assert(!a.is_subnormal());
+}
+
+@test
+fn test_float64_div_euclid() {
+    let a = 7.0 as Float64;
+    let b = 3.0 as Float64;
+    let q = a.div_euclid(b);
+    assert((q as Float) == 2.0);
+}
+
+@test
+fn test_float64_rem_euclid() {
+    let a = 7.0 as Float64;
+    let b = 3.0 as Float64;
+    let r = a.rem_euclid(b);
+    assert((r as Float) == 1.0);
+}
+
+@test
+fn test_float64_rem_euclid_negative() {
+    let a = -7.0 as Float64;
+    let b = 3.0 as Float64;
+    let r = a.rem_euclid(b);
+    assert((r as Float) == 2.0);
+}
+
+// =============================================================================
+// Cross-type consistency
+// =============================================================================
+
+@test
+fn test_recip_consistency() {
+    let f: Float = 5.0.recip();
+    let f32_v = (5.0 as Float32).recip();
+    let f64_v = (5.0 as Float64).recip();
+    assert_eq(f, 0.2);
+    assert(f32_v.to_float() == 0.2);
+    assert((f64_v as Float) == 0.2);
+}
+
+@test
+fn test_div_euclid_consistency() {
+    let f: Float = 7.0.div_euclid(3.0);
+    let f32_v = (7.0 as Float32).div_euclid(3.0 as Float32);
+    let f64_v = (7.0 as Float64).div_euclid(3.0 as Float64);
+    assert_eq(f, 2.0);
+    assert(f32_v.to_float() == 2.0);
+    assert((f64_v as Float) == 2.0);
+}
+
+@test
+fn test_rem_euclid_consistency() {
+    let f: Float = (-7.0).rem_euclid(3.0);
+    let f32_v = (-7.0 as Float32).rem_euclid(3.0 as Float32);
+    let f64_v = (-7.0 as Float64).rem_euclid(3.0 as Float64);
+    assert_eq(f, 2.0);
+    assert(f32_v.to_float() == 2.0);
+    assert((f64_v as Float) == 2.0);
+}
+
+// =============================================================================
+// Edge cases
+// =============================================================================
+
+@test
+fn test_float_recip_recip() {
+    // recip of recip should give back original
+    let v: Float = 3.0.recip().recip();
+    let diff: Float = v - 3.0;
+    let abs_diff: Float = if diff < 0.0 { 0.0 - diff } else { diff };
+    assert(abs_diff < 1.0e-14);
+}
+
+@test
+fn test_float_rem_euclid_always_nonnegative() {
+    // For any negative dividend, rem_euclid should be >= 0
+    let r1: Float = (-1.0).rem_euclid(5.0);
+    let r2: Float = (-3.0).rem_euclid(5.0);
+    let r3: Float = (-4.5).rem_euclid(5.0);
+    assert(r1 >= 0.0);
+    assert(r2 >= 0.0);
+    assert(r3 >= 0.0);
+}
+
+@test
+fn test_float64_signum_nan() {
+    let nan = Float64.nan();
+    let s = nan.signum();
+    assert(s.is_nan());
+}
+
+@test
+fn test_float64_clamp_nan() {
+    // NaN should pass through (NaN < x is false, NaN > x is false)
+    let nan = Float64.nan();
+    let c = nan.clamp(0.0 as Float64, 10.0 as Float64);
+    assert(c.is_nan());
+}

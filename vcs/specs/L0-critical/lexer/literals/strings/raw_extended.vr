@@ -1,0 +1,11 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, raw
+//
+// Tests that the r#"..."# raw string syntax is accepted.
+// The parser now supports both r#"..."# and """...""" raw string forms.
+
+fn test_raw_string_syntax() {
+    let raw = r#"hello world"#;
+}

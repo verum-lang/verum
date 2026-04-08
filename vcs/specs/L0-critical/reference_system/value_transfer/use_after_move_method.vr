@@ -1,0 +1,30 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, method, negative-test
+// @expect: error(MovedValueUsed)
+// NOTE: When affine types are implemented, should produce: E302 "type not found: c"
+
+/// Test use after move when affine value is consumed by method at compile time.
+/// Methods that take self by value consume the affine receiver.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-types
+
+// Affine type representing a resource that must be consumed exactly once
+type affine Consumer is {
+    data: Text,
+};
+
+implement Consumer {
+    // Method that consumes self (takes ownership of affine value)
+    fn consume(self) -> Text {
+        self.data
+    }
+}
+
+fn main() {
+    let c = Consumer { data: Text.from("owned") };
+    let result = c.consume();  // c is moved (affine type consumed)
+    print(c.data);  // COMPILE ERROR: type not found: c
+}

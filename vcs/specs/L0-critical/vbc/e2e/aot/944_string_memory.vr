@@ -1,0 +1,60 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, memory, strings
+// @expected-exit: 0
+
+// Test: String memory management — verifies that string temporaries from
+// f-string interpolation and concat are freed (no unbounded growth).
+
+fn format_many(n: Int) -> Int {
+    let mut i = 0;
+    while (i < n) {
+        let s = f"iteration={i}";
+        print(s);
+        i = i + 1;
+    }
+    0
+}
+
+fn concat_many(n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while (i < n) {
+        result = result + f"[{i}]";
+        i = i + 1;
+    }
+    result
+}
+
+fn tostring_heavy() -> Int {
+    let mut i = 0;
+    let mut total = 0;
+    while (i < 100) {
+        let s = f"x={i}, y={i * 2}, z={i * 3}";
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Test 1: Heavy f-string in loop (temporaries should be freed)
+    format_many(50);
+    print("test1 format_many: OK");
+
+    // Test 2: Concat accumulation
+    let result = concat_many(20);
+    print(f"test2 concat_many len: OK");
+
+    // Test 3: Multi-interpolation f-strings (many intermediates per iteration)
+    let total = tostring_heavy();
+    if (total != 4950) {
+        print(f"FAIL: tostring_heavy returned {total}, expected 4950");
+        return 1;
+    }
+    print("test3 tostring_heavy: OK");
+
+    print("944_string_memory: PASS");
+    0
+}

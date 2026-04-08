@@ -1,0 +1,148 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, set
+
+@test
+fn test_set_insert_contains() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    assert(s.contains(1));
+    assert(s.contains(2));
+    assert(!s.contains(99));
+}
+
+@test
+fn test_set_len() {
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_set_is_empty() {
+    let s = Set.new();
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_remove() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    let removed = s.remove(2);
+    assert(removed);
+    assert(!s.contains(2));
+    assert_eq(s.len(), 2);
+    let not_found = s.remove(99);
+    assert(!not_found);
+}
+
+@test
+fn test_set_clear() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.clear();
+    assert(s.is_empty());
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_set_no_duplicates() {
+    let mut s = Set.new();
+    s.insert(42);
+    s.insert(42);
+    s.insert(42);
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_set_union() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+    let u = a.union(b);
+    assert_eq(u.len(), 3);
+    assert(u.contains(1));
+    assert(u.contains(2));
+    assert(u.contains(3));
+}
+
+@test
+fn test_set_intersection() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+    let inter = a.intersection(b);
+    assert_eq(inter.len(), 2);
+    assert(inter.contains(2));
+    assert(inter.contains(3));
+}
+
+@test
+fn test_set_difference() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+    let diff = a.difference(b);
+    assert_eq(diff.len(), 1);
+    assert(diff.contains(1));
+}
+
+@test
+fn test_set_is_subset() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+    assert(a.is_subset(b));
+    assert(!b.is_subset(a));
+}
+
+@test
+fn test_set_is_superset() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+    assert(a.is_superset(b));
+    assert(!b.is_superset(a));
+}
+
+@test
+fn test_set_many_elements() {
+    let mut s = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        s.insert(i);
+        i = i + 1;
+    }
+    assert_eq(s.len(), 100);
+    assert(s.contains(50));
+    assert(s.contains(99));
+    assert(!s.contains(100));
+}

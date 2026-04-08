@@ -1,0 +1,100 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/lowlevel/kernel_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, intrinsics, lowlevel, kernel, entry-point, bare-metal, interrupt
+// @note: kernel module loads fine for typecheck-pass — @naked/@intrinsic declarations typecheck
+// @description: Tests for kernel/bare-metal entry point intrinsics including
+//               Linux/bare-metal start functions and interrupt handler
+//               prologue/epilogue for both x86_64 and aarch64.
+//
+// Coverage:
+// - Linux entry points: linux_x86_64_start, linux_aarch64_start
+// - Bare metal: baremetal_x86_64_start, baremetal_aarch64_start
+// - Interrupt handlers: x86_64_interrupt_prologue/epilogue
+// - Exception handlers: aarch64_exception_prologue/epilogue
+//
+// Test Strategy:
+// - Function existence verification (import resolution)
+// =============================================================================
+
+module specs.core.intrinsics.lowlevel.kernel_test;
+
+mount core.intrinsics.lowlevel.kernel.{
+    linux_x86_64_start,
+    linux_aarch64_start,
+    baremetal_x86_64_start,
+    baremetal_aarch64_start,
+    x86_64_interrupt_prologue,
+    x86_64_interrupt_epilogue,
+    x86_64_interrupt_error_prologue,
+    aarch64_exception_prologue,
+    aarch64_exception_epilogue,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Linux Entry Point Tests
+// =============================================================================
+
+@test
+fn test_linux_x86_64_start_exists() {
+    let _ = linux_x86_64_start;
+}
+
+@test
+fn test_linux_aarch64_start_exists() {
+    let _ = linux_aarch64_start;
+}
+
+// =============================================================================
+// Bare Metal Entry Point Tests
+// =============================================================================
+
+@test
+fn test_baremetal_x86_64_start_exists() {
+    let _ = baremetal_x86_64_start;
+}
+
+@test
+fn test_baremetal_aarch64_start_exists() {
+    let _ = baremetal_aarch64_start;
+}
+
+// =============================================================================
+// Interrupt/Exception Handler Tests
+// =============================================================================
+
+@test
+fn test_x86_64_interrupt_prologue_exists() {
+    let _ = x86_64_interrupt_prologue;
+}
+
+@test
+fn test_x86_64_interrupt_epilogue_exists() {
+    let _ = x86_64_interrupt_epilogue;
+}
+
+@test
+fn test_x86_64_interrupt_error_prologue_exists() {
+    let _ = x86_64_interrupt_error_prologue;
+}
+
+@test
+fn test_aarch64_exception_prologue_exists() {
+    let _ = aarch64_exception_prologue;
+}
+
+@test
+fn test_aarch64_exception_epilogue_exists() {
+    let _ = aarch64_exception_epilogue;
+}

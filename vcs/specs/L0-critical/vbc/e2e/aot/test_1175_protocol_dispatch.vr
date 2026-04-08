@@ -1,0 +1,105 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: protocol, dispatch, implement, e2e
+// @description: Test protocol (trait) definition and implementation dispatch
+
+type Printable is protocol {
+    fn display(&self) -> Text;
+};
+
+type Point is { x: Int, y: Int };
+
+implement Printable for Point {
+    fn display(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn distance_sq(&self, other: &Point) -> Int {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        dx * dx + dy * dy
+    }
+}
+
+type Counter is { value: Int };
+
+implement Counter {
+    fn new() -> Counter {
+        Counter { value: 0 }
+    }
+
+    fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+implement Printable for Counter {
+    fn display(&self) -> Text {
+        f"Counter({self.value})"
+    }
+}
+
+fn show(item: &Point) -> Text {
+    item.display()
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Struct method dispatch
+    let p1 = Point.new(3, 4);
+    let p2 = Point.new(0, 0);
+    let dist = p1.distance_sq(&p2);
+    if dist != 25 {
+        print(f"FAIL: distance_sq expected 25, got {dist}");
+        failures = failures + 1;
+    } else {
+        print("  struct_methods: OK");
+    }
+
+    // Test 2: Protocol method on struct
+    let msg = p1.display();
+    if msg != "(3, 4)" {
+        print(f"FAIL: display expected '(3, 4)', got '{msg}'");
+        failures = failures + 1;
+    } else {
+        print("  protocol_display: OK");
+    }
+
+    // Test 3: Mutable method dispatch
+    let mut c = Counter.new();
+    c.increment();
+    c.increment();
+    c.increment();
+    if c.get() != 3 {
+        print(f"FAIL: counter expected 3, got {c.get()}");
+        failures = failures + 1;
+    } else {
+        print("  mut_methods: OK");
+    }
+
+    // Test 4: Protocol on different type
+    let cmsg = c.display();
+    if cmsg != "Counter(3)" {
+        print(f"FAIL: counter display expected 'Counter(3)', got '{cmsg}'");
+        failures = failures + 1;
+    } else {
+        print("  counter_display: OK");
+    }
+
+    if failures == 0 {
+        print("All protocol dispatch tests passed");
+    }
+    failures
+}

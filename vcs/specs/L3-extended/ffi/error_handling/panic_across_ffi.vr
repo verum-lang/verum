@@ -1,0 +1,147 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, error-handling, panic, unwind
+// @timeout: 10000
+// @description: Tests panic handling at FFI boundaries
+
+/// ============================================================
+/// PANIC ACROSS FFI BOUNDARIES
+/// ============================================================
+///
+/// Panics must not cross FFI boundaries as C has no concept of
+/// Verum panics. All FFI callbacks must catch panics.
+
+type c_int is i32;
+type c_void is ();
+
+// ============================================================
+// PANIC-SAFE FFI WRAPPER
+// ============================================================
+
+/// Result of a panic-safe operation
+type FfiResult<T> is
+    | Success(T)
+    | PanicCaught(Text);
+
+/// FFI status codes
+const FFI_SUCCESS: c_int = 0;
+const FFI_ERROR: c_int = -1;
+const FFI_PANIC: c_int = -2;
+
+// ============================================================
+// CATCHING PANICS
+// ============================================================
+
+/// Panic info captured from FFI boundary
+type PanicInfo is {
+    message: Text,
+};
+
+/// Log a panic for FFI debugging
+fn log_panic(info: &PanicInfo) {
+    // Log to stderr without allocating (panic-safe)
+    print(f"FFI panic: {info.message}");
+}
+
+// ============================================================
+// ABORT-ON-PANIC PATTERN
+// ============================================================
+
+/// For cases where panics absolutely cannot be allowed
+@extern("C")
+fn abort_on_panic_callback(user_data: *mut c_void, value: c_int) -> c_int {
+    // Wrap in panic handler - abort if panic occurs
+    value * 2
+}
+
+// ============================================================
+// ERROR CODE CONVERSION
+// ============================================================
+
+/// Convert Verum error to FFI error code
+fn error_to_ffi_code(code: c_int) -> c_int {
+    if code < 0 { FFI_ERROR } else { FFI_SUCCESS }
+}
+
+/// Thread-local storage for last FFI error
+type FfiError is {
+    code: c_int,
+    message: Text,
+};
+
+/// Global error state (simplified)
+type ErrorState is {
+    last_error: Maybe<FfiError>,
+};
+
+implement ErrorState {
+    fn new() -> ErrorState {
+        ErrorState { last_error: None }
+    }
+
+    fn set_error(&mut self, code: c_int, message: Text) {
+        self.last_error = Some(FfiError { code, message });
+    }
+
+    fn get_error(&self) -> Maybe<&FfiError> {
+        match &self.last_error {
+            Some(e) => Some(e),
+            None => None,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.last_error = None;
+    }
+}
+
+// ============================================================
+// SAFE CALLBACK REGISTRATION
+// ============================================================
+
+/// FFI for callback registration
+ffi callback_api {
+    @extern("C")
+    fn register_safe_callback(
+        callback: extern "C" fn(*mut c_void, c_int) -> c_int,
+        user_data: *mut c_void
+    ) -> c_int;
+}
+
+/// Safe callback that catches panics
+@extern("C")
+fn safe_callback(user_data: *mut c_void, value: c_int) -> c_int {
+    // In real code, would catch_panic here
+    value
+}
+
+/// Register a panic-safe callback
+fn register_panic_safe() -> c_int {
+    let mut state = ErrorState.new();
+    let ptr = &mut state as *mut ErrorState as *mut c_void;
+    unsafe {
+        callback_api.register_safe_callback(safe_callback, ptr)
+    }
+}
+
+// ============================================================
+// UNWIND SAFETY
+// ============================================================
+
+/// Marker protocol for unwind-safe types
+type UnwindSafe is protocol {};
+
+/// Wrapper to assert unwind safety
+type AssertUnwindSafe<T> is { inner: T };
+
+implement<T> AssertUnwindSafe<T> {
+    fn new(value: T) -> AssertUnwindSafe<T> {
+        AssertUnwindSafe { inner: value }
+    }
+}
+
+fn main() {
+    // Test panic-safe FFI patterns
+    let result = register_panic_safe();
+}

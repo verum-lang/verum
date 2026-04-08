@@ -1,0 +1,143 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, union-find, dsu, data-structure
+// @timeout: 30000
+
+// Union-Find using single flat array (parent + rank encoded)
+// parent[i] stored in arr, rank tracked separately as another arr
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn init_parent() -> Arr8 {
+    Arr8 { v0: 0, v1: 1, v2: 2, v3: 3, v4: 4, v5: 5, v6: 6, v7: 7 }
+}
+
+fn init_rank() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+// Find root (no path compression to avoid returning two values)
+fn find_root(parent: Arr8, x: Int) -> Int {
+    let mut cur = x;
+    while get8(parent, cur) != cur {
+        cur = get8(parent, cur);
+    }
+    cur
+}
+
+fn connected(parent: Arr8, x: Int, y: Int) -> Int {
+    if find_root(parent, x) == find_root(parent, y) { 1 } else { 0 }
+}
+
+fn count_components(parent: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if find_root(parent, i) == i { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_basic() -> Int {
+    let mut parent = init_parent();
+    let mut rank = init_rank();
+    assert_eq(count_components(parent, 6), 6);
+    assert_eq(connected(parent, 0, 1), 0);
+
+    // Union(0, 1)
+    let r0 = find_root(parent, 0);
+    let r1 = find_root(parent, 1);
+    let rk0 = get8(rank, r0);
+    let rk1 = get8(rank, r1);
+    if rk0 < rk1 {
+        parent = set8(parent, r0, r1);
+    } else if rk0 > rk1 {
+        parent = set8(parent, r1, r0);
+    } else {
+        parent = set8(parent, r1, r0);
+        rank = set8(rank, r0, rk0 + 1);
+    }
+    assert_eq(connected(parent, 0, 1), 1);
+    assert_eq(count_components(parent, 6), 5);
+
+    // Union(2, 3)
+    let r2 = find_root(parent, 2);
+    let r3 = find_root(parent, 3);
+    parent = set8(parent, r3, r2);
+    rank = set8(rank, r2, get8(rank, r2) + 1);
+    assert_eq(connected(parent, 2, 3), 1);
+    assert_eq(count_components(parent, 6), 4);
+
+    // Union(0, 3) → connects {0,1} with {2,3}
+    let ra = find_root(parent, 0);
+    let rb = find_root(parent, 3);
+    if get8(rank, ra) < get8(rank, rb) {
+        parent = set8(parent, ra, rb);
+    } else {
+        parent = set8(parent, rb, ra);
+    }
+    assert_eq(connected(parent, 0, 2), 1);
+    assert_eq(connected(parent, 1, 3), 1);
+    assert_eq(count_components(parent, 6), 3);
+    1
+}
+
+fn test_chain() -> Int {
+    let mut parent = init_parent();
+
+    // Union chain: 0-1, 1-2, 2-3, 3-4
+    parent = set8(parent, 1, 0);
+    parent = set8(parent, 2, 0);
+    parent = set8(parent, 3, 0);
+    parent = set8(parent, 4, 0);
+
+    assert_eq(connected(parent, 0, 4), 1);
+    assert_eq(connected(parent, 1, 3), 1);
+    assert_eq(connected(parent, 0, 5), 0);
+    assert_eq(count_components(parent, 6), 2);
+    1
+}
+
+fn test_all_connected() -> Int {
+    let mut parent = init_parent();
+    // Connect all to node 0
+    parent = set8(parent, 1, 0);
+    parent = set8(parent, 2, 0);
+    parent = set8(parent, 3, 0);
+    parent = set8(parent, 4, 0);
+    parent = set8(parent, 5, 0);
+    parent = set8(parent, 6, 0);
+    parent = set8(parent, 7, 0);
+
+    assert_eq(count_components(parent, 8), 1);
+    assert_eq(connected(parent, 3, 7), 1);
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_chain();
+    test_all_connected();
+    print("[OK] 446_union_find_aot");
+    0
+}

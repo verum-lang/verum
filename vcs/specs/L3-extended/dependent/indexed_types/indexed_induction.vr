@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, induction
+
+/// Indexed induction - structural recursion over indexed types
+
+/// Natural number type for induction
+type PeanoNat is | PZero | PSucc(Heap<PeanoNat>);
+
+/// Length-indexed vector
+type Vect<T, N: meta Int> is
+    | VNil where N == 0
+    | VCons { head: T, tail: Vect<T, N - 1> } where N > 0;
+
+/// Induction principle for Peano naturals
+fn nat_induction<R>(
+    n: PeanoNat,
+    base: R,
+    step: fn(PeanoNat, R) -> R
+) -> R {
+    match n {
+        PZero => base,
+        PSucc(pred) => step(*pred, nat_induction(*pred, base, step)),
+    }
+}
+
+/// Addition via induction
+fn padd(a: PeanoNat, b: PeanoNat) -> PeanoNat {
+    nat_induction(a, b, |_, acc| PSucc(Heap(acc)))
+}
+
+/// Multiplication via induction
+fn pmul(a: PeanoNat, b: PeanoNat) -> PeanoNat {
+    nat_induction(a, PZero, |_, acc| padd(b, acc))
+}
+
+/// Convert Peano to Int
+fn to_int(n: PeanoNat) -> Int {
+    nat_induction(n, 0, |_, acc| acc + 1)
+}
+
+/// Convert Int to Peano
+fn from_int(n: Int) -> PeanoNat {
+    if n <= 0 { PZero }
+    else { PSucc(Heap(from_int(n - 1))) }
+}
+
+/// Induction over vectors
+fn vect_induction<T, R, N: meta Int>(
+    v: Vect<T, N>,
+    base: R,
+    step: fn(T, R) -> R
+) -> R {
+    match v {
+        VNil => base,
+        VCons { head, tail } => step(head, vect_induction(tail, base, step)),
+    }
+}
+
+/// Sum via vector induction
+fn vsum(v: Vect<Int, 3>) -> Int {
+    vect_induction(v, 0, |x, acc| x + acc)
+}
+
+/// Length via induction
+fn vlength<T, N: meta Int>(v: Vect<T, N>) -> Int {
+    vect_induction(v, 0, |_, acc| acc + 1)
+}
+
+/// Map via induction
+fn vmap<A, B, N: meta Int>(v: Vect<A, N>, f: fn(A) -> B) -> Vect<B, N> {
+    match v {
+        VNil => VNil,
+        VCons { head, tail } => VCons { head: f(head), tail: vmap(tail, f) },
+    }
+}
+
+/// Binary tree for induction
+type BinTree<T> is
+    | Leaf(T)
+    | Branch { left: Heap<BinTree<T>>, right: Heap<BinTree<T>> };
+
+/// Induction over binary trees
+fn tree_induction<T, R>(
+    tree: BinTree<T>,
+    leaf_case: fn(T) -> R,
+    branch_case: fn(R, R) -> R
+) -> R {
+    match tree {
+        Leaf(x) => leaf_case(x),
+        Branch { left, right } =>
+            branch_case(
+                tree_induction(*left, leaf_case, branch_case),
+                tree_induction(*right, leaf_case, branch_case)
+            ),
+    }
+}
+
+/// Tree size
+fn tree_size<T>(tree: BinTree<T>) -> Int {
+    tree_induction(tree, |_| 1, |l, r| l + r + 1)
+}
+
+/// Tree depth
+fn tree_depth<T>(tree: BinTree<T>) -> Int {
+    tree_induction(tree, |_| 0, |l, r| 1 + if l > r { l } else { r })
+}
+
+fn main() {
+    // Peano arithmetic via induction
+    let two = PSucc(Heap(PSucc(Heap(PZero))));
+    let three = PSucc(Heap(two));
+    assert(to_int(two) == 2);
+    assert(to_int(three) == 3);
+
+    let five = padd(two, three);
+    assert(to_int(five) == 5);
+
+    // Vector induction
+    let v = VCons { head: 10, tail: VCons { head: 20, tail: VCons { head: 30, tail: VNil } } };
+    assert(vsum(v) == 60);
+    assert(vlength(v) == 3);
+
+    // Tree induction
+    let leaf1 = Leaf(1);
+    let leaf2 = Leaf(2);
+    let tree = Branch { left: Heap(leaf1), right: Heap(leaf2) };
+    assert(tree_size(tree) == 3);  // 2 leaves + 1 branch
+    assert(tree_depth(tree) == 1);
+
+    // From/to int roundtrip
+    let n = from_int(5);
+    assert(to_int(n) == 5);
+}

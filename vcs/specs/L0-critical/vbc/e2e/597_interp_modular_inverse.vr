@@ -1,0 +1,142 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, modular_inverse, extended_euclidean, gcd, number_theory
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Fast modular inverse via extended Euclidean algorithm.
+//
+// The extended GCD computes (g, x, y) such that:
+//   a*x + b*y = g = gcd(a, b)
+// When gcd(a, m) = 1, a has a modular inverse mod m:
+//   a * x ≡ 1 (mod m)  where x is from extended GCD(a, m).
+//
+// Recursive extended GCD:
+//   extgcd(a, 0) = (a, 1, 0)
+//   extgcd(a, b) = (g, y, x - (a/b)*y)  where (g,x,y) = extgcd(b, a%b)
+//
+// The inverse is x mod m (adjusted to be positive).
+//
+// Results stored in out[3] = [g, x, y].
+
+@allow(unbounded_recursion)
+fn extgcd(a: Int, b: Int, out: [Int; 4]) {
+    if b == 0 {
+        out[0] = a;
+        out[1] = 1;
+        out[2] = 0;
+        return;
+    }
+    extgcd(b, a - (a / b) * b, out);
+    let g  = out[0];
+    let x  = out[1];
+    let y  = out[2];
+    out[0] = g;
+    out[1] = y;
+    out[2] = x - (a / b) * y;
+}
+
+// Compute gcd(a, b) iteratively.
+fn gcd_iter(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let t = x - (x / y) * y;
+        x = y;
+        y = t;
+    }
+    x
+}
+
+// Modular inverse of a mod m. Returns -1 if gcd(a,m) != 1.
+fn mod_inv(a: Int, m: Int) -> Int {
+    let mut out = [0,0,0,0];
+    extgcd(a, m, out);
+    if out[0] != 1 { return -1; }
+    // Adjust to positive
+    let x = out[1];
+    let r = x - (x / m) * m;
+    if r < 0 { r + m } else { r }
+}
+
+// Modular exponentiation: base^exp mod m.
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base - (base / m) * m;
+    let mut e = exp;
+    while e > 0 {
+        let odd = e - (e / 2) * 2;
+        if odd == 1 { result = result * b - (result * b / m) * m; }
+        b = b * b - (b * b / m) * m;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_basic_inverse() {
+    // inv(3, 7): 3*x ≡ 1 (mod 7). x=5 (3*5=15=2*7+1).
+    assert_eq(mod_inv(3, 7), 5);
+    // Verify: 3 * 5 mod 7 = 15 mod 7 = 1.
+    assert_eq(mod_pow(3, 1, 7) * 5 - (mod_pow(3, 1, 7) * 5 / 7) * 7, 1);
+
+    // inv(2, 11): 2*x ≡ 1 (mod 11). x=6 (2*6=12=11+1).
+    assert_eq(mod_inv(2, 11), 6);
+    print("basic_inverse: ok");
+}
+
+fn test_inverse_prime_mod() {
+    // For prime p, every 1 <= a < p has an inverse.
+    // inv(1, 13) = 1.
+    assert_eq(mod_inv(1, 13), 1);
+    // inv(12, 13) = 12 (since 12 ≡ -1, (-1)*(-1)=1 mod 13).
+    assert_eq(mod_inv(12, 13), 12);
+    // inv(7, 13): 7*x ≡ 1 mod 13. 7*2=14≡1. x=2.
+    assert_eq(mod_inv(7, 13), 2);
+    print("inverse_prime_mod: ok");
+}
+
+fn test_inverse_does_not_exist() {
+    // gcd(4, 8) = 4 ≠ 1: no inverse.
+    assert_eq(mod_inv(4, 8), -1);
+    // gcd(6, 9) = 3 ≠ 1: no inverse.
+    assert_eq(mod_inv(6, 9), -1);
+    // gcd(3, 3) = 3 ≠ 1: no inverse.
+    assert_eq(mod_inv(3, 3), -1);
+    print("inverse_does_not_exist: ok");
+}
+
+fn test_extended_gcd_values() {
+    // extgcd(35, 15): gcd=5. 35*1 + 15*(-2)=5.
+    let mut out = [0,0,0,0];
+    extgcd(35, 15, out);
+    assert_eq(out[0], 5);
+    // Verify: 35*out[1] + 15*out[2] = 5.
+    let check = 35 * out[1] + 15 * out[2];
+    assert_eq(check, 5);
+
+    // extgcd(12, 8): gcd=4. 12*1 + 8*(-1)=4.
+    extgcd(12, 8, out);
+    assert_eq(out[0], 4);
+    let check2 = 12 * out[1] + 8 * out[2];
+    assert_eq(check2, 4);
+    print("extended_gcd_values: ok");
+}
+
+fn test_gcd_iter() {
+    assert_eq(gcd_iter(48, 18), 6);
+    assert_eq(gcd_iter(100, 75), 25);
+    assert_eq(gcd_iter(17, 13), 1);
+    assert_eq(gcd_iter(0, 5), 5);
+    print("gcd_iter: ok");
+}
+
+fn main() -> Int {
+    test_basic_inverse();
+    test_inverse_prime_mod();
+    test_inverse_does_not_exist();
+    test_extended_gcd_values();
+    test_gcd_iter();
+    print("[OK] 597_interp_modular_inverse");
+    0
+}

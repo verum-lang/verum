@@ -1,0 +1,141 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, combinatorics, math
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests combinatorial algorithms: permutations, combinations, Catalan numbers.
+
+fn factorial(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 2;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+fn choose(n: Int, k: Int) -> Int {
+    if k > n { return 0; }
+    if k == 0 || k == n { return 1; }
+    // C(n,k) = n! / (k! * (n-k)!)
+    // Computed iteratively to avoid overflow
+    let mut result = 1;
+    let mut i = 0;
+    while i < k {
+        result = result * (n - i);
+        result = result / (i + 1);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_factorial() {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(6), 720);
+    assert_eq(factorial(10), 3628800);
+    print("factorial: ok");
+}
+
+fn test_combinations() {
+    assert_eq(choose(5, 0), 1);
+    assert_eq(choose(5, 1), 5);
+    assert_eq(choose(5, 2), 10);
+    assert_eq(choose(5, 3), 10);
+    assert_eq(choose(5, 5), 1);
+    assert_eq(choose(10, 3), 120);
+    assert_eq(choose(10, 5), 252);
+
+    // Pascal's identity: C(n,k) = C(n-1,k-1) + C(n-1,k)
+    assert_eq(choose(8, 3), choose(7, 2) + choose(7, 3));
+    print("combinations: ok");
+}
+
+fn test_pascals_triangle() {
+    // Compute row 10 of Pascal's triangle
+    let mut row = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 10;
+    let mut r = 1;
+    while r <= n {
+        let mut j = r;
+        while j > 0 {
+            row[j] = row[j] + row[j - 1];
+            j = j - 1;
+        }
+        r = r + 1;
+    }
+    // Row 10: 1, 10, 45, 120, 210, 252, 210, 120, 45, 10, 1
+    assert_eq(row[0], 1);
+    assert_eq(row[1], 10);
+    assert_eq(row[2], 45);
+    assert_eq(row[5], 252);
+    assert_eq(row[10], 1);
+
+    // Sum of row = 2^10 = 1024
+    let mut sum = 0;
+    let mut i = 0;
+    while i <= 10 {
+        sum = sum + row[i];
+        i = i + 1;
+    }
+    assert_eq(sum, 1024);
+    print("pascals_triangle: ok");
+}
+
+fn test_catalan_numbers() {
+    // Catalan numbers via DP: C(n) = sum(C(i)*C(n-1-i)) for i=0..n-1
+    let mut cat = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    cat[0] = 1;
+    cat[1] = 1;
+    let mut n = 2;
+    while n <= 10 {
+        let mut sum = 0;
+        let mut i = 0;
+        while i < n {
+            sum = sum + cat[i] * cat[n - 1 - i];
+            i = i + 1;
+        }
+        cat[n] = sum;
+        n = n + 1;
+    }
+    assert_eq(cat[2], 2);
+    assert_eq(cat[3], 5);
+    assert_eq(cat[4], 14);
+    assert_eq(cat[5], 42);
+    assert_eq(cat[6], 132);
+    assert_eq(cat[10], 16796);
+    print("catalan_numbers: ok");
+}
+
+fn test_derangements() {
+    // D(n) = (n-1) * (D(n-1) + D(n-2))
+    // D(0) = 1, D(1) = 0
+    let mut d = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    d[0] = 1;
+    d[1] = 0;
+    let mut n = 2;
+    while n <= 10 {
+        d[n] = (n - 1) * (d[n - 1] + d[n - 2]);
+        n = n + 1;
+    }
+    assert_eq(d[2], 1);
+    assert_eq(d[3], 2);
+    assert_eq(d[4], 9);
+    assert_eq(d[5], 44);
+    assert_eq(d[6], 265);
+    print("derangements: ok");
+}
+
+fn main() -> Int {
+    test_factorial();
+    test_combinations();
+    test_pascals_triangle();
+    test_catalan_numbers();
+    test_derangements();
+    print("[OK] 429_interp_combinatorics");
+    0
+}

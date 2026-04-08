@@ -1,0 +1,132 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, declarations, context-negation, context-groups, context-system
+// @timeout: 10000
+// @expect: pass
+//
+// Context Negation, Groups, and Transform Tests
+//
+// Verum's context system supports:
+// - Negation: !Context — function must NOT have this context
+// - Groups: using Name = [contexts...] — named context sets
+// - Transforms: Context.transform() — cross-cutting concerns
+// - Aliases: Context as name — local renaming
+// - Conditional: Context if condition — optional contexts
+//
+// Grammar:
+//   context_group_def = 'using' , identifier , '=' , context_list_def , ';' ;
+//   context_list_def  = '[' , context_spec , { ',' , context_spec } , ']' ;
+//   single_context_spec = [ '!' ] , context_path , [ context_alias ] , [ context_condition ] ;
+//   transformed_context = context_path , context_transform , { context_transform } , [ context_alias ] ;
+//   context_transform = '.' , identifier , [ '(' , [ transform_args ] , ')' ] ;
+
+// =============================================================================
+// Context Negation
+// =============================================================================
+
+// Pure computation: no side effects
+using Pure = [!IO, !State, !Random];
+
+// Read-only: no mutable state
+using ReadOnly = [!MutableState];
+
+// No IO
+using NoIO = [!IO];
+
+// Multiple negations
+using Sandbox = [!FileSystem, !Network, !ProcessSpawn];
+
+// =============================================================================
+// Positive Context Groups
+// =============================================================================
+
+using WebContext = [Database, Logger, Cache, Auth];
+
+using ServiceContext = [Database, Logger, Config];
+
+using TestContext = [MockDatabase, TestLogger];
+
+// Single context group
+using DbOnly = [Database];
+
+// =============================================================================
+// Mixed Positive and Negative
+// =============================================================================
+
+using SafeCompute = [!IO, !Network, MathLibrary, Logger];
+
+using RestrictedWeb = [Database, Logger, !Admin, !FileSystem];
+
+// =============================================================================
+// Context Transforms
+// =============================================================================
+
+using TransactionalWeb = [Database.transactional(), Cache.scoped(), Logger];
+
+using AuditedDb = [Database.transactional().audited()];
+
+using TimedCache = [Cache.ttl(300), Database.pooled(10)];
+
+// =============================================================================
+// Context Aliases in Functions
+// =============================================================================
+
+fn query_data() using [Database as db, Logger as log] {
+    log.info("querying");
+}
+
+fn dual_database() using [Database as primary, Database as replica] {
+    let data = primary.read();
+}
+
+// =============================================================================
+// Negation with Type Parameters
+// =============================================================================
+
+using NoState = [!State<_>];
+
+using StatefulLogged = [State<AppState>, Logger];
+
+// =============================================================================
+// Functions Using Context Groups
+// =============================================================================
+
+fn pure_add(x: Int, y: Int) -> Int using Pure {
+    x + y
+}
+
+fn handle_web_request() using WebContext {
+    let user = Database.find(1);
+    Logger.info("handled request");
+}
+
+fn safe_compute(data: List<Int>) -> Int using SafeCompute {
+    let mut sum = 0;
+    for x in data {
+        sum = sum + x;
+    }
+    Logger.debug(f"computed sum: {sum}");
+    sum
+}
+
+// =============================================================================
+// Conditional Contexts
+// =============================================================================
+
+fn maybe_log(msg: Text) using [Logger if debug_mode] {
+    Logger.info(msg);
+}
+
+// =============================================================================
+// Context Group Composition in Function Signatures
+// =============================================================================
+
+fn full_service() using [WebContext, MetricsContext] {
+    handle_web_request();
+}
+
+fn main() {
+    let result = pure_add(1, 2);
+    assert_eq(result, 3);
+}

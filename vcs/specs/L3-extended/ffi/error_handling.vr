@@ -1,0 +1,226 @@
+// @test: run
+// @tier: 3
+// @level: L3
+// @tags: ffi, error-handling
+// @expected-output: All FFI error handling tests passed
+
+/// FFI error handling patterns
+/// Demonstrates safe error handling across FFI boundary
+
+/// Error codes from C libraries (convention: negative = error)
+type CErrorCode is i32;
+
+/// Standard C errno values
+const EPERM: CErrorCode = 1;
+const ENOENT: CErrorCode = 2;
+const ESRCH: CErrorCode = 3;
+const EINTR: CErrorCode = 4;
+const EIO: CErrorCode = 5;
+const ENXIO: CErrorCode = 6;
+const E2BIG: CErrorCode = 7;
+const ENOEXEC: CErrorCode = 8;
+const EBADF: CErrorCode = 9;
+const ECHILD: CErrorCode = 10;
+const EAGAIN: CErrorCode = 11;
+const ENOMEM: CErrorCode = 12;
+const EACCES: CErrorCode = 13;
+const EFAULT: CErrorCode = 14;
+const EBUSY: CErrorCode = 16;
+const EEXIST: CErrorCode = 17;
+const ENODEV: CErrorCode = 19;
+const ENOTDIR: CErrorCode = 20;
+const EISDIR: CErrorCode = 21;
+const EINVAL: CErrorCode = 22;
+const ENFILE: CErrorCode = 23;
+const EMFILE: CErrorCode = 24;
+const ENOTTY: CErrorCode = 25;
+const EFBIG: CErrorCode = 27;
+const ENOSPC: CErrorCode = 28;
+const ESPIPE: CErrorCode = 29;
+const EROFS: CErrorCode = 30;
+const EPIPE: CErrorCode = 32;
+
+/// FFI for errno access
+ffi ErrnoAccess {
+    @extern("C")
+    fn __errno_location() -> *mut i32;  // Linux;
+
+    // Alternative for other platforms:
+    // fn __error() -> *mut i32;  // macOS/BSD
+}
+
+/// Get current errno value
+fn get_errno() -> CErrorCode {
+    unsafe { *ErrnoAccess.__errno_location() }
+}
+
+/// Set errno value
+fn set_errno(value: CErrorCode) {
+    unsafe { *ErrnoAccess.__errno_location() = value; }
+}
+
+/// Clear errno
+fn clear_errno() {
+    set_errno(0);
+}
+
+/// Verum error type for FFI errors
+type FfiError is
+    /// Permission denied
+    | PermissionDenied
+    /// File not found
+    | NotFound
+    /// I/O error
+    | IoError
+    /// Out of memory
+    | OutOfMemory
+    /// Invalid argument
+    | InvalidArgument
+    /// Resource busy
+    | Busy
+    /// Already exists
+    | AlreadyExists
+    /// No space left
+    | NoSpace
+    /// Broken pipe
+    | BrokenPipe
+    /// Unknown error with code
+    | Unknown(CErrorCode);
+
+implement FfiError {
+    /// Convert from errno
+    fn from_errno() -> FfiError {
+        // Placeholder: real impl reads errno and maps to variant
+        Unknown(0)
+    }
+
+    /// Convert to errno
+    fn to_errno(&self) -> CErrorCode {
+        match self {
+            PermissionDenied => EACCES,
+            NotFound => ENOENT,
+            IoError => EIO,
+            OutOfMemory => ENOMEM,
+            InvalidArgument => EINVAL,
+            Busy => EBUSY,
+            AlreadyExists => EEXIST,
+            NoSpace => ENOSPC,
+            BrokenPipe => EPIPE,
+            Unknown(code) => *code,
+        }
+    }
+
+    /// Get human-readable message
+    fn message(&self) -> Text {
+        match self {
+            PermissionDenied => "Permission denied",
+            NotFound => "Not found",
+            IoError => "I/O error",
+            OutOfMemory => "Out of memory",
+            InvalidArgument => "Invalid argument",
+            Busy => "Resource busy",
+            AlreadyExists => "Already exists",
+            NoSpace => "No space left on device",
+            BrokenPipe => "Broken pipe",
+            Unknown(code) => format("Unknown error: {}", code),
+        }
+    }
+}
+
+/// Result type for FFI operations
+type FfiResult<T> is Result<T, FfiError>;
+
+/// Helper macro for checking C return values
+fn check_c_result<T>(result: T, error_indicator: T) -> FfiResult<T>
+where T: Eq
+{
+    if result == error_indicator {
+        Err(Unknown(0))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Check pointer result (null = error)
+fn check_ptr<T>(ptr: *mut T) -> FfiResult<*mut T> {
+    if ptr.is_null() {
+        Err(Unknown(0))
+    } else {
+        Ok(ptr)
+    }
+}
+
+/// Check int result (negative = error)
+fn check_int(result: i32) -> FfiResult<i32> {
+    if result < 0 {
+        Err(Unknown(0))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Check ssize_t result (-1 = error)
+fn check_ssize(result: isize) -> FfiResult<usize> {
+    if result < 0 {
+        Err(Unknown(0))
+    } else {
+        Ok(result as usize)
+    }
+}
+
+/// Retry operation on EINTR
+fn retry_on_eintr<T, F>(f: F) -> FfiResult<T>
+where F: Fn() -> FfiResult<T>
+{
+    loop {
+        match f() {
+            Err(Unknown(EINTR)) => continue,
+            result => return result,
+        }
+    }
+}
+
+/// Example: Safe wrapper using error handling
+fn safe_read(fd: i32, buf: &mut [u8]) -> FfiResult<usize> {
+    // Placeholder: real impl calls POSIX read
+    Ok(0)
+}
+
+/// Example: Operation with cleanup on error
+fn safe_open_and_read(path: &str) -> FfiResult<List<u8>> {
+    // Placeholder: real impl opens file and reads
+    Ok(List.new())
+}
+
+/// Test function
+fn main() {
+    // Test error conversion
+    set_errno(ENOENT);
+    let error = Unknown(0);
+    assert((error) is (NotFound));
+    assert(error.to_errno() == ENOENT);
+
+    // Test error messages
+    assert(PermissionDenied.message() == "Permission denied");
+    assert(NotFound.message() == "Not found");
+
+    // Test check_int
+    set_errno(EINVAL);
+    let result = check_int(-1);
+    assert(result.is_err());
+    assert((result.unwrap_err()) is (InvalidArgument));
+
+    // Test check_int success
+    let result = check_int(42);
+    assert(result.is_ok());
+    assert(result.unwrap() == 42);
+
+    // Test check_ptr
+    set_errno(ENOMEM);
+    let null_ptr: *mut i32 = null as *mut i32;
+    let result = check_ptr(null_ptr);
+    assert(result.is_err());
+    assert((result.unwrap_err()) is (OutOfMemory));
+
+    print("All FFI error handling tests passed");
+}

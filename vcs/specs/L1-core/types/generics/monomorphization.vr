@@ -1,0 +1,185 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, monomorphization
+
+/// Test for monomorphization of generic functions and types.
+/// Monomorphization creates specialized versions for each concrete type.
+
+// Generic function that will be monomorphized
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Generic function with bounds
+fn clone_and_return<T: Clone>(x: T) -> T {
+    x.clone()
+}
+
+// Generic struct that will be monomorphized
+type Container<T> is {
+    value: T,
+};
+
+implement Container<T> {
+    fn new(value: T) -> Container<T> {
+        Container { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+// Generic enum that will be monomorphized
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+implement Maybe<T> {
+    fn map<U>(self, f: fn(T) -> U) -> Maybe<U> {
+        match self {
+            Some(x) => Some(f(x)),
+            None => None,
+        }
+    }
+
+    fn unwrap_or(self, default: T) -> T {
+        match self {
+            Some(x) => x,
+            None => default,
+        }
+    }
+}
+
+// Generic function with multiple type parameters
+fn pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+// Nested generic types
+type Wrapper<T> is {
+    inner: Container<T>,
+};
+
+implement Wrapper<T> {
+    fn wrap(value: T) -> Wrapper<T> {
+        Wrapper { inner: Container.new(value) }
+    }
+
+    fn unwrap(self) -> T {
+        self.inner.into_inner()
+    }
+}
+
+// Generic function using other generics
+fn map_container<T, U>(container: Container<T>, f: fn(T) -> U) -> Container<U> {
+    Container.new(f(container.into_inner()))
+}
+
+// Generic protocol for monomorphization testing
+type Processor<T> is protocol {
+    fn process(value: T) -> T;
+};
+
+// Implementation that will be monomorphized per type
+type Doubler is ();
+
+implement Processor<Int> for Doubler {
+    fn process(value: Int) -> Int {
+        value * 2
+    }
+}
+
+implement Processor<Float> for Doubler {
+    fn process(value: Float) -> Float {
+        value * 2.0
+    }
+}
+
+// Generic function calling protocol method
+fn process_value<T, P: Processor<T>>(value: T) -> T {
+    P.process(value)
+}
+
+// Type that demonstrates size differences after monomorphization
+type SizedContainer<T> is {
+    items: [T; 4],  // Fixed size array - size depends on T
+};
+
+fn main() {
+    // Each call creates a specialized version
+
+    // identity<Int>
+    let i: Int = identity(42);
+    assert(i == 42);
+
+    // identity<Text>
+    let t: Text = identity("hello");
+    assert(t == "hello");
+
+    // identity<Bool>
+    let b: Bool = identity(true);
+    assert(b == true);
+
+    // identity<List<Int>>
+    let l: List<Int> = identity([1, 2, 3]);
+    assert(l == [1, 2, 3]);
+
+    // Container<Int>
+    let ci: Container<Int> = Container.new(100);
+    assert(*ci.get() == 100);
+
+    // Container<Text>
+    let ct: Container<Text> = Container.new("world");
+    assert(*ct.get() == "world");
+
+    // Container<Container<Int>> - nested monomorphization
+    let nested: Container<Container<Int>> = Container.new(Container.new(42));
+    assert(*nested.get().get() == 42);
+
+    // Maybe<Int>
+    let mi: Maybe<Int> = Some(10);
+    let mapped: Maybe<Int> = mi.map(|x| x * 2);
+    assert(mapped.unwrap_or(0) == 20);
+
+    // Maybe<Text>
+    let mt: Maybe<Text> = Some("test");
+    let len: Maybe<Int> = mt.map(|s| s.len());
+    assert(len.unwrap_or(0) == 4);
+
+    // pair<Int, Text>
+    let p1: (Int, Text) = pair(42, "answer");
+    assert(p1.0 == 42);
+
+    // pair<Bool, Float>
+    let p2: (Bool, Float) = pair(true, 3.14);
+    assert(p2.0 == true);
+
+    // Wrapper<Int>
+    let wi: Wrapper<Int> = Wrapper.wrap(999);
+    assert(wi.unwrap() == 999);
+
+    // map_container with Int->Text
+    let c: Container<Int> = Container.new(42);
+    let mapped_c: Container<Text> = map_container(c, |n| f"{n}");
+    assert(*mapped_c.get() == "42");
+
+    // Processor<Int> via Doubler
+    let doubled_int: Int = process_value<Int, Doubler>(21);
+    assert(doubled_int == 42);
+
+    // Processor<Float> via Doubler
+    let doubled_float: Float = process_value<Float, Doubler>(10.5);
+    assert(doubled_float == 21.0);
+
+    // SizedContainer demonstrates size polymorphism
+    let sc_int: SizedContainer<Int> = SizedContainer { items: [1, 2, 3, 4] };
+    let sc_i64: SizedContainer<Int> = SizedContainer { items: [10, 20, 30, 40] };
+    assert(sc_int.items[0] == 1);
+    assert(sc_i64.items[3] == 40);
+}

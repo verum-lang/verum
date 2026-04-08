@@ -1,0 +1,132 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, pi-types, higher-order
+
+/// Higher-order dependent functions
+///
+/// This file tests dependent function types where the return type
+/// depends on function arguments or type-level computations.
+
+/// Fixed-size vector type
+type Vect<T, N: meta Int> is
+    | VNil where N == 0
+    | VCons { head: T, tail: Vect<T, N - 1> } where N > 0;
+
+/// Higher-order function: apply f N times
+fn apply_n_times<T>(f: fn(T) -> T, x: T, n: Int) -> T {
+    if n == 0 {
+        x
+    } else {
+        apply_n_times(f, f(x), n - 1)
+    }
+}
+
+/// Curried dependent function
+fn curry<A, B, C>(f: fn(A, B) -> C) -> fn(A) -> fn(B) -> C {
+    |a| |b| f(a, b)
+}
+
+/// Uncurry with dependent result
+fn uncurry<A, B, C>(f: fn(A) -> fn(B) -> C) -> fn(A, B) -> C {
+    |a, b| f(a)(b)
+}
+
+/// Dependent fold over vectors
+fn fold_vec<T, Acc, N: meta Int>(
+    v: Vect<T, N>,
+    init: Acc,
+    f: fn(Acc, T) -> Acc
+) -> Acc {
+    match v {
+        VNil => init,
+        VCons { head, tail } => fold_vec(tail, f(init, head), f),
+    }
+}
+
+/// Dependent zip with size tracking
+fn zip_vec<A, B, N: meta Int>(
+    xs: Vect<A, N>,
+    ys: Vect<B, N>
+) -> Vect<(A, B), N> {
+    match (xs, ys) {
+        (VNil, VNil) => VNil,
+        (VCons { head: x, tail: xsp }, VCons { head: y, tail: ysp }) =>
+            VCons { head: (x, y), tail: zip_vec(xsp, ysp) },
+    }
+}
+
+/// Dependent unzip preserving size
+fn unzip_vec<A, B, N: meta Int>(
+    pairs: Vect<(A, B), N>
+) -> (Vect<A, N>, Vect<B, N>) {
+    match pairs {
+        VNil => (VNil, VNil),
+        VCons { head: pair, tail: rest } => {
+            let (a_rest, b_rest) = unzip_vec(rest);
+            (
+                VCons { head: pair.0, tail: a_rest },
+                VCons { head: pair.1, tail: b_rest }
+            )
+        }
+    }
+}
+
+/// Map over vectors preserving size
+fn map_vec<A, B, N: meta Int>(v: Vect<A, N>, f: fn(A) -> B) -> Vect<B, N> {
+    match v {
+        VNil => VNil,
+        VCons { head, tail } => VCons { head: f(head), tail: map_vec(tail, f) },
+    }
+}
+
+/// Dependent function that returns a function type
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+/// Constant function
+fn const_fn<A, B>(a: A) -> fn(B) -> A {
+    |_| a
+}
+
+/// Dependent flip
+fn flip<A, B, C>(f: fn(A, B) -> C) -> fn(B, A) -> C {
+    |b, a| f(a, b)
+}
+
+/// Sized functor protocol
+type SizedFunctor is protocol {
+    type Inner;
+    fn smap<A, B>(self, f: fn(A) -> B) -> Self;
+};
+
+fn main() {
+    // Apply function n times
+    let doubled = apply_n_times(|x| x * 2, 1, 10);  // 1024
+    assert(doubled == 1024);
+
+    // Curried dependent functions
+    let curried = curry(|a: Int, b: Int| a + b);
+    let partial = curried(10);
+    let full = partial(5);
+    assert(full == 15);
+
+    // Zip and unzip
+    let v1 = VCons { head: 1, tail: VCons { head: 2, tail: VNil } };
+    let v2 = VCons { head: "a", tail: VCons { head: "b", tail: VNil } };
+    let zipped = zip_vec(v1, v2);
+
+    // Make adder factory
+    let add_3 = make_adder(3);
+    assert(add_3(10) == 13);
+
+    // Const function
+    let always_42 = const_fn.<Int, Text>(42);
+    assert(always_42("anything") == 42);
+
+    // Flip
+    let sub = |a: Int, b: Int| a - b;
+    let flipped = flip(sub);
+    assert(flipped(3, 10) == 7);  // sub(10, 3) = 7
+}

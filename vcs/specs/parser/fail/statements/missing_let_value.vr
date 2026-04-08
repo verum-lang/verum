@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, let, value, error
+// @description: Test missing value after equals in let statement
+// @expected-error: E041
+
+fn test() {
+    let x =;
+}

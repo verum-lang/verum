@@ -1,0 +1,63 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, raw, layer0
+// @description: Verify core.term.raw types and protocols parse correctly
+
+
+/// Layer 0: Raw Terminal I/O — types, protocols, and escape writer.
+/// Verifies TerminalMode, TerminalSize, CursorShape, RawTerminal protocol,
+/// EscapeWriter protocol, ClearMode, TermCapabilities, ColorProfile.
+
+mount core.term.raw.*;
+
+fn test_terminal_size() {
+    let size = TerminalSize {
+        columns: 80,
+        rows: 24,
+        pixel_width: None,
+        pixel_height: None,
+    };
+    assert_eq(size.columns, 80);
+    assert_eq(size.rows, 24);
+}
+
+fn test_cursor_shapes() {
+    let shapes = [
+        CursorShape.BlinkingBlock,
+        CursorShape.SteadyBlock,
+        CursorShape.BlinkingUnderline,
+        CursorShape.SteadyUnderline,
+        CursorShape.BlinkingBar,
+        CursorShape.SteadyBar,
+    ];
+    assert_eq(shapes.len(), 6);
+}
+
+fn test_clear_modes() {
+    let modes = [
+        ClearMode.All,
+        ClearMode.Purge,
+        ClearMode.AfterCursor,
+        ClearMode.BeforeCursor,
+        ClearMode.CurrentLine,
+        ClearMode.UntilNewLine,
+    ];
+    assert_eq(modes.len(), 6);
+}
+
+fn test_terminal_mode() {
+    let mode = TerminalMode {
+        original: TermiosState { data: [0; 60] },
+        fd: FileDesc(0),
+        is_raw: false,
+        is_alternate: false,
+    };
+    assert_eq(mode.is_raw, false);
+}
+
+fn main() {
+    test_terminal_size();
+    test_cursor_shapes();
+    test_clear_modes();
+}

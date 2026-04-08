@@ -1,0 +1,302 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, pointer, unsafe, memory
+// @description: Tests raw pointer operations for C interoperability
+
+/// ============================================================
+/// RAW POINTER HANDLING FOR FFI
+/// ============================================================
+///
+/// Raw pointers are essential for C interoperability. All raw pointer
+/// operations require unsafe blocks and explicit safety documentation.
+
+// Type definitions
+type c_char is i8;
+type c_int is i32;
+type c_size_t is usize;
+type c_void is ();
+
+// ------------------------------------------------------------
+// FFI Declarations
+// ------------------------------------------------------------
+
+ffi libc {
+    @extern("C")
+    fn malloc(size: c_size_t) -> *mut c_void;
+
+    @extern("C")
+    fn free(ptr: *mut c_void);
+
+    @extern("C")
+    fn memcpy(dest: *mut c_void, src: *const c_void, n: c_size_t) -> *mut c_void;
+
+    @extern("C")
+    fn memset(s: *mut c_void, c: c_int, n: c_size_t) -> *mut c_void;
+
+    @extern("C")
+    fn memmove(dest: *mut c_void, src: *const c_void, n: c_size_t) -> *mut c_void;
+}
+
+// ------------------------------------------------------------
+// Pointer Types
+// ------------------------------------------------------------
+
+/// Immutable raw pointer
+type RawPtr<T> is *const T;
+
+/// Mutable raw pointer
+type RawMutPtr<T> is *mut T;
+
+/// Void pointers
+type VoidPtr is *mut c_void;
+type ConstVoidPtr is *const c_void;
+
+/// Double pointers (out parameters)
+type OutPtr<T> is *mut *mut T;
+
+// ------------------------------------------------------------
+// Creating Pointers
+// ------------------------------------------------------------
+
+/// From reference to raw pointer
+fn ref_to_ptr(r: &c_int) -> *const c_int {
+    r as *const c_int
+}
+
+fn ref_mut_to_ptr(r: &mut c_int) -> *mut c_int {
+    r as *mut c_int
+}
+
+/// Null pointer constants
+fn null_const() -> *const c_void {
+    0 as *const c_void
+}
+
+fn null_mut_ptr() -> *mut c_void {
+    0 as *mut c_void
+}
+
+/// From slice to pointer
+fn slice_as_ptr(slice: &[u8]) -> *const u8 {
+    slice.as_ptr()
+}
+
+fn slice_as_mut_ptr(slice: &mut [u8]) -> *mut u8 {
+    slice.as_mut_ptr()
+}
+
+// ------------------------------------------------------------
+// Pointer Arithmetic
+// ------------------------------------------------------------
+
+/// Add offset (in elements)
+fn ptr_add(ptr: *const u8, count: usize) -> *const u8 {
+    unsafe { ptr.add(count) }
+}
+
+fn ptr_add_mut(ptr: *mut u8, count: usize) -> *mut u8 {
+    unsafe { ptr.add(count) }
+}
+
+/// Subtract offset
+fn ptr_sub(ptr: *const u8, count: usize) -> *const u8 {
+    unsafe { ptr.sub(count) }
+}
+
+/// Pointer difference
+fn ptr_diff(end: *const u8, start: *const u8) -> isize {
+    unsafe { end.offset_from(start) }
+}
+
+// ------------------------------------------------------------
+// Pointer Dereferencing
+// ------------------------------------------------------------
+
+/// Read through pointer
+fn read_ptr(ptr: *const c_int) -> c_int {
+    unsafe { *ptr }
+}
+
+/// Write through pointer
+fn write_ptr(ptr: *mut c_int, value: c_int) {
+    unsafe { *ptr = value; }
+}
+
+// ------------------------------------------------------------
+// Pointer Validity Checks
+// ------------------------------------------------------------
+
+/// Check if null (concrete type)
+fn is_ptr_null(ptr: *const c_void) -> Bool {
+    ptr.is_null()
+}
+
+fn is_mut_ptr_null(ptr: *mut c_void) -> Bool {
+    ptr.is_null()
+}
+
+// ------------------------------------------------------------
+// Pointer Casting
+// ------------------------------------------------------------
+
+/// Cast between pointer types
+fn cast_to_void(ptr: *mut u8) -> *mut c_void {
+    ptr as *mut c_void
+}
+
+fn cast_from_void(ptr: *mut c_void) -> *mut u8 {
+    ptr as *mut u8
+}
+
+/// Const to mut (use with extreme caution)
+fn const_to_mut(ptr: *const c_int) -> *mut c_int {
+    ptr as *mut c_int
+}
+
+// ------------------------------------------------------------
+// C String Handling
+// ------------------------------------------------------------
+
+/// C string length (requires null terminator)
+unsafe fn cstr_len(s: *const c_char) -> usize {
+    let mut len: usize = 0;
+    let mut ptr = s;
+    while *ptr != 0 {
+        len += 1;
+        ptr = ptr.add(1);
+    }
+    len
+}
+
+/// Copy string to buffer
+unsafe fn cstr_copy(dst: *mut c_char, src: *const c_char, max_len: usize) -> usize {
+    let mut i: usize = 0;
+    while i < max_len - 1 {
+        let c = *src.add(i);
+        *dst.add(i) = c;
+        if c == 0 {
+            return i;
+        }
+        i += 1;
+    }
+    *dst.add(i) = 0;  // Null terminate
+    i
+}
+
+// ------------------------------------------------------------
+// FFI Buffer Patterns
+// ------------------------------------------------------------
+
+/// Fill buffer with pattern
+unsafe fn fill_buffer(buf: *mut u8, len: usize, pattern: u8) {
+    if buf.is_null() || len == 0 {
+        return;
+    }
+
+    for i in 0..len {
+        *buf.add(i) = pattern;
+    }
+}
+
+// ------------------------------------------------------------
+// Out Parameter Pattern
+// ------------------------------------------------------------
+
+/// Function with out parameter
+fn get_value(out: *mut c_int) -> c_int {
+    if out.is_null() {
+        return -1;
+    }
+
+    unsafe { *out = 42; }
+    0  // Success
+}
+
+/// Function returning allocated memory
+fn alloc_buffer(size: usize, out: *mut *mut u8) -> c_int {
+    if out.is_null() || size == 0 {
+        return -1;
+    }
+
+    let ptr = unsafe { libc.malloc(size) } as *mut u8;
+    if ptr.is_null() {
+        return -2;
+    }
+
+    unsafe { *out = ptr; }
+    0
+}
+
+// ------------------------------------------------------------
+// Safe Pointer Wrapper
+// ------------------------------------------------------------
+
+/// Non-null pointer wrapper
+type NonNull<T> is {
+    ptr: *mut T,
+};
+
+implement NonNull<c_void> {
+    fn new(ptr: *mut c_void) -> Maybe<NonNull<c_void>> {
+        if ptr.is_null() {
+            None
+        } else {
+            Some(NonNull { ptr })
+        }
+    }
+
+    fn as_ptr(&self) -> *mut c_void {
+        self.ptr
+    }
+}
+
+/// Owned pointer (like Box but for FFI)
+type OwnedPtr<T> is {
+    ptr: *mut T,
+};
+
+implement OwnedPtr<c_void> {
+    fn from_raw(ptr: *mut c_void) -> Maybe<OwnedPtr<c_void>> {
+        if ptr.is_null() {
+            None
+        } else {
+            Some(OwnedPtr { ptr })
+        }
+    }
+}
+
+implement Drop for OwnedPtr<c_void> {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe {
+                libc.free(self.ptr);
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Pointer Array Handling
+// ------------------------------------------------------------
+
+/// Process array of pointers (like argv)
+unsafe fn process_string_array(
+    arr: *const *const c_char,
+    count: usize
+) -> List<Text> {
+    let mut result = List.new();
+
+    for i in 0..count {
+        let ptr = *arr.add(i);
+        if !ptr.is_null() {
+            result.push(Text.from("arg"));
+        }
+    }
+
+    result
+}
+
+fn main() {
+    // Pointer handling tests
+}

@@ -1,0 +1,122 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, cellular-automaton, simulation
+// @timeout: 10000
+
+// 1D cellular automaton (16 cells)
+type Cells16 is {
+    c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int, c12: Int, c13: Int, c14: Int, c15: Int
+};
+
+fn cell_get(c: Cells16, i: Int) -> Int {
+    if i == 0 { c.c0 } else if i == 1 { c.c1 } else if i == 2 { c.c2 }
+    else if i == 3 { c.c3 } else if i == 4 { c.c4 } else if i == 5 { c.c5 }
+    else if i == 6 { c.c6 } else if i == 7 { c.c7 } else if i == 8 { c.c8 }
+    else if i == 9 { c.c9 } else if i == 10 { c.c10 } else if i == 11 { c.c11 }
+    else if i == 12 { c.c12 } else if i == 13 { c.c13 } else if i == 14 { c.c14 }
+    else { c.c15 }
+}
+
+fn cell_set(c: Cells16, i: Int, v: Int) -> Cells16 {
+    Cells16 {
+        c0: if i == 0 { v } else { c.c0 }, c1: if i == 1 { v } else { c.c1 },
+        c2: if i == 2 { v } else { c.c2 }, c3: if i == 3 { v } else { c.c3 },
+        c4: if i == 4 { v } else { c.c4 }, c5: if i == 5 { v } else { c.c5 },
+        c6: if i == 6 { v } else { c.c6 }, c7: if i == 7 { v } else { c.c7 },
+        c8: if i == 8 { v } else { c.c8 }, c9: if i == 9 { v } else { c.c9 },
+        c10: if i == 10 { v } else { c.c10 }, c11: if i == 11 { v } else { c.c11 },
+        c12: if i == 12 { v } else { c.c12 }, c13: if i == 13 { v } else { c.c13 },
+        c14: if i == 14 { v } else { c.c14 }, c15: if i == 15 { v } else { c.c15 }
+    }
+}
+
+fn cells_zero() -> Cells16 {
+    Cells16 { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+              c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0 }
+}
+
+fn apply_rule(rule: Int, left: Int, center: Int, right: Int) -> Int {
+    let pattern = left * 4 + center * 2 + right;
+    // Extract bit 'pattern' from rule
+    let mut r = rule;
+    let mut i = 0;
+    while i < pattern {
+        r = r / 2;
+        i = i + 1;
+    }
+    r % 2
+}
+
+fn step(cells: Cells16, rule: Int, size: Int) -> Cells16 {
+    let mut next = cells_zero();
+    let mut i = 0;
+    while i < size {
+        let left = if i == 0 { 0 } else { cell_get(cells, i - 1) };
+        let center = cell_get(cells, i);
+        let right = if i == size - 1 { 0 } else { cell_get(cells, i + 1) };
+        next = cell_set(next, i, apply_rule(rule, left, center, right));
+        i = i + 1;
+    }
+    next
+}
+
+fn count_alive(cells: Cells16, size: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < size {
+        count = count + cell_get(cells, i);
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    let size = 16;
+
+    // Single cell in middle
+    let mut cells = cells_zero();
+    cells = cell_set(cells, 8, 1);
+    assert_eq(count_alive(cells, size), 1);
+
+    // Rule 90 (XOR automaton) - step from single center cell
+    let step1 = step(cells, 90, size);
+    assert_eq(cell_get(step1, 7), 1);
+    assert_eq(cell_get(step1, 8), 0);
+    assert_eq(cell_get(step1, 9), 1);
+    assert_eq(count_alive(step1, size), 2);
+
+    // Step 2 of Rule 90
+    let step2 = step(step1, 90, size);
+    assert_eq(cell_get(step2, 6), 1);
+    assert_eq(cell_get(step2, 7), 0);
+    assert_eq(cell_get(step2, 8), 0);
+    assert_eq(cell_get(step2, 9), 0);
+    assert_eq(cell_get(step2, 10), 1);
+
+    // Rule 0 kills everything
+    let dead = step(cells, 0, size);
+    assert_eq(count_alive(dead, size), 0);
+
+    // Rule 255 makes everything alive
+    let all_alive = step(cells, 255, size);
+    // Rule 255: every pattern -> 1, but only cells adjacent to alive cell
+    // Actually pattern 000 -> bit0 of 255 = 1, so all cells become alive
+    assert_eq(count_alive(all_alive, size), size);
+
+    // Multi-step simulation with Rule 30
+    let mut r30 = cells_zero();
+    r30 = cell_set(r30, 8, 1);
+    let mut gen = 0;
+    while gen < 5 {
+        r30 = step(r30, 30, size);
+        gen = gen + 1;
+    }
+    // After 5 steps, should have some cells alive
+    assert_eq(count_alive(r30, size) > 0, true);
+
+    print("DIFF_OK: cellular_automaton");
+    0
+}

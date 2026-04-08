@@ -1,0 +1,211 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: simd, multiversion, dispatch, cpu_features
+
+// Tests for @multiversion attribute for automatic CPU feature dispatch.
+// The compiler generates multiple versions of functions optimized for
+// different CPU feature sets, with runtime dispatch to the best version.
+
+// Basic multiversion with explicit feature sets
+@multiversion(
+    avx512 = "avx512f,avx512vl",
+    avx2 = "avx2,fma",
+    sse4 = "sse4.2",
+    default = "baseline"
+)
+fn dot_product(a: &List<Float32>, b: &List<Float32>) -> Float32 {
+    let mut sum: Float32 = 0.0;
+    for i in 0..a.len() {
+        sum += a[i] * b[i];
+    }
+    sum
+}
+
+// Multiversion with SIMD vectors - automatic vectorization
+@multiversion(
+    avx512 = "avx512f",
+    avx2 = "avx2",
+    default = "sse4.2"
+)
+fn vec_add(a: &Vec<Float32, 8>, b: &Vec<Float32, 8>) -> Vec<Float32, 8> {
+    a + b
+}
+
+// Multiversion for integer operations
+@multiversion(
+    avx512bw = "avx512bw,avx512vl",
+    avx2 = "avx2",
+    default = "sse4.2"
+)
+fn byte_sum(data: &List<UInt8>) -> UInt64 {
+    let mut sum: UInt64 = 0;
+    for byte in data {
+        sum += byte as UInt64;
+    }
+    sum
+}
+
+// Multiversion with ARM targets
+@multiversion(
+    sve = "sve",
+    neon = "neon",
+    default = "baseline"
+)
+fn matrix_multiply(
+    a: &List<List<Float64>>,
+    b: &List<List<Float64>>,
+    c: &mut List<List<Float64>>,
+) {
+    let rows = a.len();
+    let cols = b[0].len();
+    let inner = b.len();
+
+    for i in 0..rows {
+        for j in 0..cols {
+            let mut sum: Float64 = 0.0;
+            for k in 0..inner {
+                sum += a[i][k] * b[k][j];
+            }
+            c[i][j] = sum;
+        }
+    }
+}
+
+// Multiversion for reduction operations
+@multiversion(
+    avx512 = "avx512f",
+    avx2 = "avx2,fma",
+    default = "sse4.2"
+)
+fn sum_of_squares(data: &List<Float64>) -> Float64 {
+    let mut sum: Float64 = 0.0;
+    for x in data {
+        sum += x * x;
+    }
+    sum
+}
+
+// Multiversion with explicit implementations for different targets
+@multiversion(
+    avx512 = "avx512f,avx512vl",
+    avx2 = "avx2",
+    default = "sse4.2"
+)
+fn horizontal_sum(v: Vec<Float32, 8>) -> Float32 {
+    // The compiler will generate optimized versions:
+    // - AVX-512: vextractf32x4 + vaddps + horizontal add
+    // - AVX2: vextractf128 + vaddps + horizontal add
+    // - SSE4: series of haddps instructions
+    v.reduce_add()
+}
+
+// Complex multiversion example with multiple operations
+@multiversion(
+    avx512 = "avx512f,avx512vl,avx512dq",
+    avx2 = "avx2,fma",
+    default = "sse4.2"
+)
+fn fused_multiply_add_array(
+    a: &List<Float32>,
+    b: &List<Float32>,
+    c: &List<Float32>,
+    result: &mut List<Float32>,
+) {
+    // FMA: result = a * b + c
+    for i in 0..a.len() {
+        result[i] = a[i].fma(b[i], c[i]);
+    }
+}
+
+// Multiversion with gather/scatter operations
+@multiversion(
+    avx512 = "avx512f,avx512vl",
+    avx2 = "avx2",
+    default = "baseline"
+)
+fn indexed_lookup(
+    data: &List<Float64>,
+    indices: &List<Int32>,
+    output: &mut List<Float64>,
+) {
+    for i in 0..indices.len() {
+        output[i] = data[indices[i] as UInt];
+    }
+}
+
+fn main() {
+    // Test basic dot product
+    let a = [1.0_f32, 2.0, 3.0, 4.0];
+    let b = [5.0_f32, 6.0, 7.0, 8.0];
+    let result = dot_product(&a.to_list(), &b.to_list());
+    // Expected: 1*5 + 2*6 + 3*7 + 4*8 = 5 + 12 + 21 + 32 = 70
+    assert(result == 70.0);
+
+    // Test vector addition
+    let va = Vec::splat(1.0_f32);
+    let vb = Vec::splat(2.0_f32);
+    let vc = vec_add(&va, &vb);
+    assert(vc[0] == 3.0);
+
+    // Test horizontal sum
+    let v8: Vec<Float32, 8> = Vec::from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let hsum = horizontal_sum(v8);
+    assert(hsum == 36.0);  // 1+2+3+4+5+6+7+8 = 36
+
+    // Runtime feature detection still works
+    if cpu_has_feature(CpuFeature.AVX512F) {
+        print("Using AVX-512 optimized path");
+    } else if cpu_has_feature(CpuFeature.AVX2) {
+        print("Using AVX2 optimized path");
+    } else {
+        print("Using SSE4.2 baseline path");
+    }
+}
+
+// Test multiversion on methods
+type SimdProcessor is {
+    data: List<Float32>,
+};
+
+implement SimdProcessor {
+    @multiversion(
+        avx2 = "avx2,fma",
+        default = "sse4.2"
+    )
+    fn process(&self) -> Float32 {
+        let mut sum: Float32 = 0.0;
+        for x in &self.data {
+            sum += x;
+        }
+        sum
+    }
+
+    @multiversion(
+        avx512 = "avx512f",
+        avx2 = "avx2",
+        default = "sse4.2"
+    )
+    fn transform(&mut self, factor: Float32) {
+        for i in 0..self.data.len() {
+            self.data[i] *= factor;
+        }
+    }
+}
+
+// Cross-platform multiversion (x86 + ARM)
+@multiversion(
+    avx512 = "avx512f",
+    avx2 = "avx2",
+    sve = "sve",
+    neon = "neon",
+    default = "baseline"
+)
+fn cross_platform_sum(data: &List<Float32>) -> Float32 {
+    let mut acc: Float32 = 0.0;
+    for x in data {
+        acc += x;
+    }
+    acc
+}

@@ -1,0 +1,625 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, future, combinators
+// @description: Test future combinators - threshold finding
+
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.async.future.{
+    Future, IntoFuture, FutureExt,
+    ReadyFuture, PendingFuture,
+    MapFuture, AndThenFuture,
+    Lazy,
+    Join2, Join3, Select2,
+    ready, pending, lazy,
+    join, join3, select,
+    SelectResult, Left, Right,
+};
+mount core.async.waker.{Waker, Context, noop_waker};
+mount core.maybe.{Maybe, Some, None};
+
+@test
+fn test_map_basic() {
+    let fut: MapFuture<ReadyFuture<Int>, fn(Int) -> Int> = ready(21).map(|x| x * 2);
+}
+
+@test
+fn test_map_poll() {
+    let mut fut: MapFuture<ReadyFuture<Int>, fn(Int) -> Int> = ready(21).map(|x| x * 2);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result: Poll<Int> = fut.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+@test
+fn test_and_then_basic() {
+    let fut = ready(21).and_then(|x: Int| -> ReadyFuture<Int> { ready(x * 2) });
+}
+
+@test
+fn test_lazy_basic() {
+    let fut: Lazy<fn() -> Int, Int> = lazy(|| 42);
+}
+
+@test
+fn test_join2() {
+    let a: ReadyFuture<Int> = ready(1);
+    let b: ReadyFuture<Text> = ready("hello");
+    let joined: Join2<ReadyFuture<Int>, ReadyFuture<Text>> = join(a, b);
+}
+
+@test
+fn test_select2() {
+    let a: ReadyFuture<Int> = ready(1);
+    let b: ReadyFuture<Text> = ready("hello");
+    let sel: Select2<ReadyFuture<Int>, ReadyFuture<Text>> = select(a, b);
+}
+
+@test
+fn test_block_ready() {
+    let value: Int = ready(42).block();
+    assert_eq(value, 42);
+}
+
+@test
+fn test_ready_text() {
+    let mut fut: ReadyFuture<Text> = ready("hello");
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    assert_eq(fut.poll(&mut cx).unwrap(), "hello");
+}
+
+// =============================================================================
+// Section 2: MapFuture - Extended Coverage
+// =============================================================================
+
+@test
+fn test_map_type_change() {
+    let fut = ready(42).map(|x: Int| -> Bool { x > 10 });
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+@test
+fn test_map_to_text() {
+    let fut = ready(42).map(|x: Int| -> Text { "hello" });
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+@test
+fn test_map_to_tuple() {
+    let fut = ready(5).map(|x: Int| (x, x * 2));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+@test
+fn test_map_identity() {
+    let fut = ready(99).map(|x| x);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result: Poll<Int> = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 99);
+}
+
+@test
+fn test_map_chain_two() {
+    let fut = ready(10).map(|x| x + 5).map(|x| x * 2);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 30);
+}
+
+@test
+fn test_map_chain_three() {
+    let fut = ready(1)
+        .map(|x| x + 1)
+        .map(|x| x * 10)
+        .map(|x| x - 5);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 15);
+}
+
+@test
+fn test_map_on_text() {
+    let fut: MapFuture<ReadyFuture<Text>, fn(Text) -> Int> = ready("hello").map(|s: Text| s.len());
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 5);
+}
+
+@test
+fn test_map_on_bool() {
+    let fut = ready(true).map(|b: Bool| -> Int { if b { 1 } else { 0 } });
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 1);
+}
+
+@test
+fn test_map_on_float() {
+    let fut = ready(3.14).map(|x: Float| -> Bool { x > 3.0 });
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), true);
+}
+
+// =============================================================================
+// Section 3: AndThenFuture - Extended Coverage
+// =============================================================================
+
+@test
+fn test_and_then_poll() {
+    let mut fut = ready(21).and_then(|x: Int| -> ReadyFuture<Int> { ready(x * 2) });
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result: Poll<Int> = fut.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_and_then_type_change() {
+    let fut = ready(42).and_then(|x: Int| -> ReadyFuture<Text> { ready("hello") });
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), "hello");
+}
+
+@test
+fn test_and_then_chain_two() {
+    let fut = ready(1)
+        .and_then(|x: Int| -> ReadyFuture<Int> { ready(x + 10) })
+        .and_then(|x: Int| -> ReadyFuture<Int> { ready(x * 3) });
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 33);
+}
+
+@test
+fn test_and_then_to_bool() {
+    let fut = ready(10).and_then(|x: Int| -> ReadyFuture<Bool> { ready(x > 5) });
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), true);
+}
+
+// =============================================================================
+// Section 4: Lazy - Extended Coverage
+// =============================================================================
+
+@test
+fn test_lazy_poll() {
+    let mut fut: Lazy<fn() -> Int, Int> = lazy(|| 42);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result: Poll<Int> = fut.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_lazy_text() {
+    let mut fut = lazy(|| "hello world");
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = fut.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), "hello world");
+}
+
+@test
+fn test_lazy_bool() {
+    let mut fut = lazy(|| true);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = fut.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), true);
+}
+
+@test
+fn test_lazy_computation() {
+    let mut fut = lazy(|| 10 + 20 + 30);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = fut.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 60);
+}
+
+@test
+fn test_lazy_block() {
+    let value: Int = lazy(|| 99).block();
+    assert_eq(value, 99);
+}
+
+// =============================================================================
+// Section 5: Join2 - Extended Coverage
+// =============================================================================
+
+@test
+fn test_join2_poll() {
+    let mut joined = join(ready(10), ready(20));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = joined.poll(&mut cx);
+    assert(result.is_ready());
+    let pair = result.unwrap();
+    assert_eq(pair.0, 10);
+    assert_eq(pair.1, 20);
+}
+
+@test
+fn test_join2_different_types() {
+    let mut joined = join(ready(42), ready("hello"));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = joined.poll(&mut cx);
+    assert(result.is_ready());
+    let pair = result.unwrap();
+    assert_eq(pair.0, 42);
+    assert_eq(pair.1, "hello");
+}
+
+@test
+fn test_join2_bools() {
+    let mut joined = join(ready(true), ready(false));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = joined.poll(&mut cx);
+    assert(result.is_ready());
+    let pair = result.unwrap();
+    assert_eq(pair.0, true);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_join2_block() {
+    let pair: (Int, Text) = join(ready(5), ready("world")).block();
+    assert_eq(pair.0, 5);
+    assert_eq(pair.1, "world");
+}
+
+@test
+fn test_join2_with_map() {
+    // Join two mapped futures and verify completion
+    let a = ready(10).map(|x| x * 2);
+    let b = ready(3).map(|x| x + 7);
+    let mut joined = join(a, b);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = joined.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+// =============================================================================
+// Section 6: Join3 - Complete Coverage
+// =============================================================================
+
+@test
+fn test_join3_basic() {
+    let joined: Join3<ReadyFuture<Int>, ReadyFuture<Int>, ReadyFuture<Int>> = join3(ready(1), ready(2), ready(3));
+}
+
+@test
+fn test_join3_poll() {
+    let mut joined = join3(ready(10), ready(20), ready(30));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = joined.poll(&mut cx);
+    assert(result.is_ready());
+    let triple = result.unwrap();
+    assert_eq(triple.0, 10);
+    assert_eq(triple.1, 20);
+    assert_eq(triple.2, 30);
+}
+
+@test
+fn test_join3_different_types() {
+    let mut joined = join3(ready(42), ready("hello"), ready(true));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = joined.poll(&mut cx);
+    assert(result.is_ready());
+    let triple = result.unwrap();
+    assert_eq(triple.0, 42);
+    assert_eq(triple.1, "hello");
+    assert_eq(triple.2, true);
+}
+
+@test
+fn test_join3_block() {
+    let triple: (Int, Int, Int) = join3(ready(1), ready(2), ready(3)).block();
+    assert_eq(triple.0, 1);
+    assert_eq(triple.1, 2);
+    assert_eq(triple.2, 3);
+}
+
+@test
+fn test_join3_with_map() {
+    // Join three mapped futures and verify completion
+    let a = ready(1).map(|x| x * 10);
+    let b = ready(2).map(|x| x * 10);
+    let c = ready(3).map(|x| x * 10);
+    let mut joined = join3(a, b, c);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = joined.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+// =============================================================================
+// Section 7: Select2 - Extended Coverage
+// =============================================================================
+
+@test
+fn test_select2_poll() {
+    let mut sel = select(ready(1), ready("hello"));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = sel.poll(&mut cx);
+    assert(result.is_ready());
+    // First ready future wins (left)
+    match result.unwrap() {
+        Left(v) => assert_eq(v, 1),
+        Right(_) => panic("expected Left"),
+    }
+}
+
+@test
+fn test_select2_left_first() {
+    // When both are ready, left always wins since it's polled first
+    let mut sel = select(ready(42), ready(99));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = sel.poll(&mut cx);
+    assert(result.is_ready());
+    match result.unwrap() {
+        Left(v) => assert_eq(v, 42),
+        Right(_) => panic("expected Left"),
+    }
+}
+
+@test
+fn test_select2_with_pending_left() {
+    // When left is pending and right is ready, right wins
+    let mut sel: Select2<PendingFuture<Int>, ReadyFuture<Int>> = select(pending(), ready(77));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = sel.poll(&mut cx);
+    assert(result.is_ready());
+    match result.unwrap() {
+        Left(_) => panic("expected Right"),
+        Right(v) => assert_eq(v, 77),
+    }
+}
+
+@test
+fn test_select2_both_pending() {
+    let mut sel: Select2<PendingFuture<Int>, PendingFuture<Int>> = select(pending(), pending());
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = sel.poll(&mut cx);
+    assert(result.is_pending());
+}
+
+@test
+fn test_select2_different_types() {
+    let mut sel = select(ready("fast"), ready(42));
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = sel.poll(&mut cx);
+    assert(result.is_ready());
+    match result.unwrap() {
+        Left(v) => assert_eq(v, "fast"),
+        Right(_) => panic("expected Left"),
+    }
+}
+
+// =============================================================================
+// Section 8: block() - Extended Coverage
+// =============================================================================
+
+@test
+fn test_block_text() {
+    let value: Text = ready("test").block();
+    assert_eq(value, "test");
+}
+
+@test
+fn test_block_bool() {
+    let value: Bool = ready(true).block();
+    assert(value);
+}
+
+@test
+fn test_block_float() {
+    let value: Float = ready(2.718).block();
+    assert(value > 2.0);
+}
+
+@test
+fn test_block_zero() {
+    let value: Int = ready(0).block();
+    assert_eq(value, 0);
+}
+
+@test
+fn test_block_negative() {
+    let value: Int = ready(-42).block();
+    assert_eq(value, -42);
+}
+
+@test
+fn test_block_with_map() {
+    let value: Int = ready(10).map(|x| x * 5).block();
+    assert_eq(value, 50);
+}
+
+@test
+fn test_block_with_and_then() {
+    let value: Int = ready(3).and_then(|x: Int| -> ReadyFuture<Int> { ready(x * x) }).block();
+    assert_eq(value, 9);
+}
+
+@test
+fn test_block_join2() {
+    let pair: (Int, Int) = join(ready(1), ready(2)).block();
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, 2);
+}
+
+// =============================================================================
+// Section 9: PendingFuture - Extended Coverage
+// =============================================================================
+
+@test
+fn test_pending_poll_returns_pending() {
+    let mut fut: PendingFuture<Int> = pending();
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = fut.poll(&mut cx);
+    assert(result.is_pending());
+}
+
+@test
+fn test_pending_poll_always_pending() {
+    let mut fut: PendingFuture<Int> = pending();
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let r1 = fut.poll(&mut cx);
+    let r2 = fut.poll(&mut cx);
+    let r3 = fut.poll(&mut cx);
+    assert(r1.is_pending());
+    assert(r2.is_pending());
+    assert(r3.is_pending());
+}
+
+@test
+fn test_pending_text_type() {
+    let fut: PendingFuture<Text> = pending();
+    // Type annotation is the test - PendingFuture<Text> compiles correctly
+    let mut f = fut;
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    assert(f.poll(&mut cx).is_pending());
+}
+
+@test
+fn test_pending_bool_type() {
+    let fut: PendingFuture<Bool> = pending();
+    let mut f = fut;
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    assert(f.poll(&mut cx).is_pending());
+}
+
+// =============================================================================
+// Section 10: IntoFuture
+// =============================================================================
+
+@test
+fn test_into_future_ready() {
+    let fut: ReadyFuture<Int> = ready(42);
+    let fut2 = fut.into_future();
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut2;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_into_future_preserves_value() {
+    let value: Int = ready(100).into_future().block();
+    assert_eq(value, 100);
+}
+
+// =============================================================================
+// Section 11: Composite Patterns
+// =============================================================================
+
+@test
+fn test_map_then_and_then() {
+    let fut = ready(5)
+        .map(|x| x * 2)
+        .and_then(|x: Int| -> ReadyFuture<Int> { ready(x + 100) });
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let mut f = fut;
+    let result = f.poll(&mut cx);
+    assert(result.is_ready());
+    assert_eq(result.unwrap(), 110);
+}
+
+@test
+fn test_lazy_then_map() {
+    let value: Int = lazy(|| 7).map(|x| x * 3).block();
+    assert_eq(value, 21);
+}
+
+@test
+fn test_join2_then_map() {
+    let pair_sum: Int = join(ready(10), ready(20))
+        .map(|pair: (Int, Int)| pair.0 + pair.1)
+        .block();
+    assert_eq(pair_sum, 30);
+}
+
+@test
+fn test_select_ready_vs_pending() {
+    // Select between a ready and a pending future
+    let mut sel: Select2<ReadyFuture<Int>, PendingFuture<Int>> = select(ready(42), pending());
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result = sel.poll(&mut cx);
+    assert(result.is_ready());
+    match result.unwrap() {
+        Left(v) => assert_eq(v, 42),
+        Right(_) => panic("expected Left"),
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

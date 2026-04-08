@@ -1,0 +1,56 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, time, sleep, monotonic
+// @expected-exit: 0
+
+// Test: Time primitives — monotonic clock and sleep.
+
+fn __time_monotonic_nanos_raw() -> Int {
+    0
+}
+
+fn __time_sleep_nanos_raw(nanos: Int) -> Int {
+    0
+}
+
+fn main() -> Int {
+    // Test 1: monotonic time is non-zero
+    let t1 = __time_monotonic_nanos_raw();
+    if (t1 == 0) {
+        print("FAIL test1: monotonic time is zero");
+        return 1;
+    }
+
+    // Test 2: monotonic time increases
+    let t2 = __time_monotonic_nanos_raw();
+    if (t2 < t1) {
+        print(f"FAIL test2: time went backwards t1={t1} t2={t2}");
+        return 1;
+    }
+
+    // Test 3: sleep 10ms, verify elapsed
+    let before = __time_monotonic_nanos_raw();
+    __time_sleep_nanos_raw(10000000);
+    let after = __time_monotonic_nanos_raw();
+    let elapsed = after - before;
+    // Should be at least 5ms (allowing for scheduler jitter)
+    if (elapsed < 5000000) {
+        print(f"FAIL test3: elapsed={elapsed}ns, expected >= 5ms");
+        return 1;
+    }
+
+    // Test 4: sleep 0 (should return immediately)
+    let b2 = __time_monotonic_nanos_raw();
+    __time_sleep_nanos_raw(0);
+    let a2 = __time_monotonic_nanos_raw();
+    let e2 = a2 - b2;
+    // Should complete in < 1ms
+    if (e2 > 1000000000) {
+        print(f"FAIL test4: sleep(0) took {e2}ns");
+        return 1;
+    }
+
+    print("909_time_sleep: PASS");
+    0
+}

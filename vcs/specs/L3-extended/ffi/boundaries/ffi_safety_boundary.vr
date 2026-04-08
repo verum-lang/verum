@@ -1,0 +1,228 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, boundaries, safety
+// @description: Safety boundaries at FFI interface
+
+/// FFI safety boundaries ensure safe Verum code interfaces correctly
+/// with unsafe foreign code.
+
+/// Marker trait for types safe to pass across FFI
+protocol FfiSafe {
+    /// Type has stable layout for FFI
+    const LAYOUT: Layout;
+
+    /// Convert to FFI-safe representation
+    fn to_ffi(&self) -> Self.FfiRepr;
+
+    /// Convert from FFI representation (may fail)
+    fn from_ffi(repr: Self.FfiRepr) -> Result<Self, FfiError>;
+}
+
+/// Primitive types are FFI-safe
+implement FfiSafe for i32 {
+    type FfiRepr is i32;
+    const LAYOUT: Layout = Layout.Scalar(4, 4);
+
+    fn to_ffi(&self) -> i32 { *self }
+    fn from_ffi(repr: i32) -> Result<i32, FfiError> { Ok(repr) }
+}
+
+implement FfiSafe for f64 {
+    type FfiRepr is f64;
+    const LAYOUT: Layout = Layout.Scalar(8, 8);
+
+    fn to_ffi(&self) -> f64 { *self }
+    fn from_ffi(repr: f64) -> Result<f64, FfiError> { Ok(repr) }
+}
+
+/// Strings need special handling
+implement FfiSafe for Text {
+    type FfiRepr is CString;
+    const LAYOUT: Layout = Layout.Pointer;
+
+    fn to_ffi(&self) -> CString {
+        CString.new(self).expect("Text contains null byte")
+    }
+
+    fn from_ffi(repr: CString) -> Result<Text, FfiError> {
+        repr.to_str()
+            .map(|s| s.to_owned())
+            .map_err(|_| InvalidUtf8)
+    }
+}
+
+/// Maybe<T> maps to nullable pointer
+implement FfiSafe for Maybe<T> where T: FfiSafe {
+    type FfiRepr is *const T.FfiRepr;
+
+    fn to_ffi(&self) -> *const T.FfiRepr {
+        match self {
+            Some(v) => Heap.into_raw(Heap(v.to_ffi())),
+            None => std.ptr.null(),
+        }
+    }
+
+    fn from_ffi(repr: *const T.FfiRepr) -> Result<Maybe<T>, FfiError> {
+        if repr.is_null() {
+            Ok(None)
+        } else {
+            let derefed = unsafe { *repr };
+            match T.from_ffi(derefed) {
+                Ok(v) => Ok(Some(v)),
+                Err(e) => Err(e),
+            }
+        }
+    }
+}
+
+/// Safe wrapper for FFI calls
+fn safe_ffi_call<T, R, F>(f: F) -> Result<R, FfiError>
+where
+    F: FnOnce() -> R,
+    R: FfiSafe,
+{
+    // Set up panic handler
+    let result = std.panic.catch_unwind(std.panic.AssertUnwindSafe(f));
+
+    match result {
+        Ok(value) => Ok(value),
+        Err(_) => Err(Panic),
+    }
+}
+
+/// FFI boundary for C library
+module c_library {
+    /// Low-level unsafe declarations
+    ffi libc {
+        @extern("C")
+        fn dangerous_function(ptr: *mut i32, len: usize) -> i32;
+    }
+
+    /// Safe public interface
+    pub fn safe_function(data: &mut [i32]) -> Result<i32, FfiError> {
+        // Validate inputs
+        if data.is_empty() {
+            return Err(InvalidInput("empty slice"));
+        }
+
+        // Check alignment
+        if (data.as_ptr() as usize) % i32.alignment != 0 {
+            return Err(InvalidAlignment);
+        }
+
+        // Make the call with proper safety checks
+        let result = unsafe {
+            dangerous_function(data.as_mut_ptr(), data.len())
+        };
+
+        // Validate output
+        if result < 0 {
+            Err(NativeError(result))
+        } else {
+            Ok(result)
+        }
+    }
+}
+
+/// Resource handle with automatic cleanup
+type FfiHandle<T> is {
+    ptr: *mut T,
+    cleanup: fn(*mut T),
+};
+
+implement FfiHandle<T> {
+    /// Create a new FFI handle
+    fn new(ptr: *mut T, cleanup: fn(*mut T)) -> Result<Self, FfiError> {
+        if ptr.is_null() {
+            return Err(NullPointer);
+        }
+        Ok(Self { ptr, cleanup })
+    }
+
+    /// Access the underlying pointer (unsafe)
+    fn as_ptr(&self) -> *mut T {
+        self.ptr
+    }
+}
+
+implement Drop for FfiHandle<T> {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            (self.cleanup)(self.ptr);
+        }
+    }
+}
+
+/// Boundary checking wrapper
+type BoundedSlice<T> is {
+    ptr: *const T,
+    len: usize,
+    capacity: usize,
+};
+
+implement BoundedSlice<T> {
+    fn from_raw(ptr: *const T, len: usize, capacity: usize) -> Result<Self, FfiError> {
+        if ptr.is_null() && len > 0 {
+            return Err(NullPointer);
+        }
+        if len > capacity {
+            return Err(OutOfBounds);
+        }
+        Ok(Self { ptr, len, capacity })
+    }
+
+    fn get(&self, index: usize) -> Result<&T, FfiError> {
+        if index >= self.len {
+            return Err(OutOfBounds);
+        }
+        let ref_val: &T = unsafe { &*self.ptr.add(index) };
+        Ok(ref_val)
+    }
+}
+
+/// Callback boundary - ensure callbacks don't escape
+type FfiCallback<F> is {
+    func: F,
+    /// Prevent callback from being copied
+    _marker: PhantomData<F>,
+};
+
+implement FfiCallback<F> {
+    fn new<Args, Ret>(func: F) -> Self
+    where F: Fn(Args) -> Ret + 'static {
+        Self { func, _marker: PhantomData }
+    }
+
+    /// Convert to C function pointer (consumes self)
+    fn into_c_fn(self) -> extern "C" fn() {
+        // Implementation would box the closure and return a trampoline
+        unimplemented()
+    }
+}
+
+type FfiError is
+    | NullPointer
+    | InvalidUtf8
+    | InvalidInput(Text)
+    | InvalidAlignment
+    | OutOfBounds
+    | NativeError(i32)
+    | Panic;
+
+type Layout is
+    | Scalar(size: usize, align: usize)
+    | Pointer
+    | Struct(List<Layout>);
+
+type CString is { ptr: *const u8 };
+implement CString {
+    fn new(s: &str) -> Result<Self, ()> { Ok(Self { ptr: std.ptr.null() }) }
+    fn to_str(&self) -> Result<&str, ()> { Ok("") }
+}
+
+type PhantomData<T> is {};
+
+fn main() {
+    // Safety boundary verification
+}

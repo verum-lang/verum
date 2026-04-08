@@ -1,0 +1,297 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, patterns, match, pipeline
+// @timeout: 5000
+// @expect: pass
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies pattern matching expressions through the full pipeline
+
+// =============================================================================
+// Type definitions for pattern matching
+// =============================================================================
+
+type Shape is Circle(Float) | Rectangle { w: Float, h: Float } | Triangle { base: Float, height: Float };
+type Expr is Num(Int) | Add { left: Heap<Expr>, right: Heap<Expr> } | Neg(Heap<Expr>);
+
+// =============================================================================
+// Literal patterns
+// =============================================================================
+
+fn classify_int(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        _ => "other"
+    }
+}
+
+@test
+fn test_literal_int_patterns() {
+    assert_eq(classify_int(0), "zero");
+    assert_eq(classify_int(1), "one");
+    assert_eq(classify_int(2), "two");
+    assert_eq(classify_int(99), "other");
+    assert_eq(classify_int(-1), "other");
+}
+
+fn classify_bool(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        false => "no"
+    }
+}
+
+@test
+fn test_literal_bool_patterns() {
+    assert_eq(classify_bool(true), "yes");
+    assert_eq(classify_bool(false), "no");
+}
+
+// =============================================================================
+// Variable binding in patterns
+// =============================================================================
+
+fn extract_or_default(opt: Maybe<Int>) -> Int {
+    match opt {
+        None => 0,
+        Some(val) => val
+    }
+}
+
+@test
+fn test_variable_binding() {
+    assert_eq(extract_or_default(Some(42)), 42);
+    assert_eq(extract_or_default(Some(-5)), -5);
+    assert_eq(extract_or_default(None), 0);
+}
+
+// =============================================================================
+// Wildcard patterns
+// =============================================================================
+
+fn first_element(pair: (Int, Int)) -> Int {
+    match pair {
+        (x, _) => x
+    }
+}
+
+fn second_element(pair: (Int, Int)) -> Int {
+    match pair {
+        (_, y) => y
+    }
+}
+
+@test
+fn test_wildcard_patterns() {
+    assert_eq(first_element((10, 20)), 10);
+    assert_eq(second_element((10, 20)), 20);
+}
+
+// =============================================================================
+// Tuple patterns
+// =============================================================================
+
+fn sum_pair(pair: (Int, Int)) -> Int {
+    match pair {
+        (a, b) => a + b
+    }
+}
+
+fn classify_pair(pair: (Int, Int)) -> Text {
+    match pair {
+        (0, 0) => "origin",
+        (0, _) => "y-axis",
+        (_, 0) => "x-axis",
+        _ => "other"
+    }
+}
+
+@test
+fn test_tuple_patterns() {
+    assert_eq(sum_pair((3, 4)), 7);
+    assert_eq(sum_pair((0, 0)), 0);
+    assert_eq(sum_pair((-1, 1)), 0);
+}
+
+@test
+fn test_tuple_mixed_patterns() {
+    assert_eq(classify_pair((0, 0)), "origin");
+    assert_eq(classify_pair((0, 5)), "y-axis");
+    assert_eq(classify_pair((5, 0)), "x-axis");
+    assert_eq(classify_pair((3, 4)), "other");
+}
+
+// =============================================================================
+// Variant patterns
+// =============================================================================
+
+fn shape_name(s: Shape) -> Text {
+    match s {
+        Circle(_) => "circle",
+        Rectangle { w: _, h: _ } => "rectangle",
+        Triangle { base: _, height: _ } => "triangle"
+    }
+}
+
+fn shape_area(s: Shape) -> Float {
+    match s {
+        Circle(r) => 3.14159 * r * r,
+        Rectangle { w, h } => w * h,
+        Triangle { base, height } => 0.5 * base * height
+    }
+}
+
+@test
+fn test_variant_name() {
+    assert_eq(shape_name(Circle(5.0)), "circle");
+    assert_eq(shape_name(Rectangle { w: 3.0, h: 4.0 }), "rectangle");
+    assert_eq(shape_name(Triangle { base: 6.0, height: 3.0 }), "triangle");
+}
+
+@test
+fn test_variant_destructure() {
+    let area1 = shape_area(Rectangle { w: 3.0, h: 4.0 });
+    assert_eq(area1, 12.0);
+
+    let area2 = shape_area(Triangle { base: 6.0, height: 4.0 });
+    assert_eq(area2, 12.0);
+}
+
+// =============================================================================
+// Is-pattern checks
+// =============================================================================
+
+@test
+fn test_is_pattern_maybe() {
+    let x: Maybe<Int> = Some(42);
+    let y: Maybe<Int> = None;
+
+    assert(x is Some(_));
+    assert(y is None);
+    assert(!(x is None));
+    assert(!(y is Some(_)));
+}
+
+@test
+fn test_is_pattern_shape() {
+    let c = Circle(5.0);
+    let r = Rectangle { w: 3.0, h: 4.0 };
+
+    assert(c is Circle(_));
+    assert(r is Rectangle { w: _, h: _ });
+    assert(!(c is Rectangle { w: _, h: _ }));
+}
+
+// =============================================================================
+// Guard expressions
+// =============================================================================
+
+fn classify_number(n: Int) -> Text {
+    match n {
+        x if x < 0 => "negative",
+        0 => "zero",
+        x if x <= 10 => "small",
+        x if x <= 100 => "medium",
+        _ => "large"
+    }
+}
+
+@test
+fn test_guard_expressions() {
+    assert_eq(classify_number(-5), "negative");
+    assert_eq(classify_number(0), "zero");
+    assert_eq(classify_number(5), "small");
+    assert_eq(classify_number(10), "small");
+    assert_eq(classify_number(50), "medium");
+    assert_eq(classify_number(100), "medium");
+    assert_eq(classify_number(200), "large");
+}
+
+@test
+fn test_guard_with_maybe() {
+    fn classify_opt(opt: Maybe<Int>) -> Text {
+        match opt {
+            None => "empty",
+            Some(x) if x > 0 => "positive",
+            Some(x) if x < 0 => "negative",
+            Some(_) => "zero"
+        }
+    }
+
+    assert_eq(classify_opt(None), "empty");
+    assert_eq(classify_opt(Some(5)), "positive");
+    assert_eq(classify_opt(Some(-3)), "negative");
+    assert_eq(classify_opt(Some(0)), "zero");
+}
+
+// =============================================================================
+// Nested patterns
+// =============================================================================
+
+@test
+fn test_nested_maybe() {
+    fn unwrap_nested(opt: Maybe<Maybe<Int>>) -> Int {
+        match opt {
+            None => -1,
+            Some(None) => 0,
+            Some(Some(x)) => x
+        }
+    }
+
+    assert_eq(unwrap_nested(None), -1);
+    assert_eq(unwrap_nested(Some(None)), 0);
+    assert_eq(unwrap_nested(Some(Some(42))), 42);
+}
+
+// =============================================================================
+// Match as expression
+// =============================================================================
+
+@test
+fn test_match_as_expression() {
+    let x = 5;
+    let result = match x {
+        1 => "one",
+        2 => "two",
+        _ => "other"
+    };
+    assert_eq(result, "other");
+}
+
+@test
+fn test_match_expression_in_let() {
+    let value: Maybe<Int> = Some(10);
+    let doubled = match value {
+        Some(x) => x * 2,
+        None => 0
+    };
+    assert_eq(doubled, 20);
+}
+
+// =============================================================================
+// Multiple match arms with same body
+// =============================================================================
+
+fn is_weekday(day: Int) -> Bool {
+    match day {
+        1 => true,
+        2 => true,
+        3 => true,
+        4 => true,
+        5 => true,
+        _ => false
+    }
+}
+
+@test
+fn test_multiple_arms() {
+    assert(is_weekday(1));
+    assert(is_weekday(3));
+    assert(is_weekday(5));
+    assert(!is_weekday(6));
+    assert(!is_weekday(7));
+    assert(!is_weekday(0));
+}

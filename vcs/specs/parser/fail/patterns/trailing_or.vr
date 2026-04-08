@@ -1,0 +1,58 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, or, trailing, error
+// @description: Test trailing pipe in or-pattern
+// @expected-error: E087
+
+type Color is Red | Green | Blue;
+type Option<T> is None | Some(T);
+
+fn test_trailing_pipe_simple() {
+    let color = Red;
+
+    // Invalid: trailing pipe with no following pattern
+    match color {
+        Red | Green | => print("primary"),
+        Blue => print("blue"),
+    }
+}
+
+fn test_trailing_pipe_before_arrow() {
+    let color = Red;
+
+    // Invalid: pipe immediately followed by arrow
+    match color {
+        Red | => print("red"),
+        _ => print("other"),
+    }
+}
+
+fn test_trailing_pipe_in_nested() {
+    let opt: Option<Color> = Some(Red);
+
+    // Invalid: trailing pipe in nested pattern
+    match opt {
+        Some(Red | Green |) => print("warm"),
+        _ => print("other"),
+    }
+}
+
+fn test_multiple_trailing_pipes() {
+    let color = Red;
+
+    // Invalid: multiple trailing pipes
+    match color {
+        Red | Green || => print("colors"),
+        _ => print("other"),
+    }
+}
+
+fn test_trailing_pipe_with_guard() {
+    let value = 42;
+
+    // Invalid: trailing pipe before guard
+    match value {
+        1 | 2 | if value > 0 => print("positive"),
+        _ => print("other"),
+    }
+}

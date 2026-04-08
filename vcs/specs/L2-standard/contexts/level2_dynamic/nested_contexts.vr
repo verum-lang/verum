@@ -1,0 +1,85 @@
+// @test: run
+// @expected-stdout: Outer: InMemoryDatabase\nMiddle: InMemoryDatabase\nInner: MockDatabase\nAfter override: MockDatabase\nBack to original: InMemoryDatabase
+// @tier: 0
+// @level: L2
+// @tags: contexts, nested, scope
+// @description: Tests nested context scopes and context visibility rules
+//
+// Contexts follow lexical scoping: inner scopes can access outer contexts,
+// and inner provides can shadow outer provides.
+
+context Database {
+    fn name() -> Text;
+    fn query(sql: Text) -> Text;
+}
+
+// First implementation
+type InMemoryDatabase is {};
+
+implement Database for InMemoryDatabase {
+    fn name() -> Text {
+        "InMemoryDatabase"
+    }
+
+    fn query(sql: Text) -> Text {
+        "in-memory result for: " + sql
+    }
+}
+
+// Second implementation for override testing
+type MockDatabase is {};
+
+implement Database for MockDatabase {
+    fn name() -> Text {
+        "MockDatabase"
+    }
+
+    fn query(sql: Text) -> Text {
+        "mock result"
+    }
+}
+
+fn get_db_name() -> Text using [Database] {
+    Database.name()
+}
+
+fn outer_function() -> () using [Database] {
+    println("Outer: " + get_db_name());
+
+    // Call middle function - uses same Database context
+    middle_function();
+
+    println("Back to original: " + get_db_name());
+}
+
+fn middle_function() -> () using [Database] {
+    println("Middle: " + get_db_name());
+
+    // Nested provide shadows the outer Database
+    provide Database = MockDatabase {};
+
+    // inner_function sees the MockDatabase
+    inner_function();
+
+    // After the provide block, we're back to seeing the outer Database
+    // (provide scoping ends when function returns in this example)
+}
+
+fn inner_function() -> () using [Database] {
+    println("Inner: " + get_db_name());
+
+    // Override Database in this scope
+    provide Database = MockDatabase {};
+    println("After override: " + get_db_name());
+
+    // The override only affects code after the provide statement
+    // and within this function's scope
+}
+
+fn main() {
+    // Provide the initial Database context
+    provide Database = InMemoryDatabase {};
+
+    // Start the nested call chain
+    outer_function();
+}

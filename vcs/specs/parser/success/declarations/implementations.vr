@@ -1,0 +1,326 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, implementations, impl
+// @description: Test implementation block parsing
+
+// Basic inherent impl
+implement Point {
+    fn new(x: Float, y: Float) -> Self {
+        Point { x, y }
+    }
+
+    fn origin() -> Self {
+        Point { x: 0.0, y: 0.0 }
+    }
+
+    fn distance(&self, other: &Point) -> Float {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+}
+
+// Implement protocol for type
+implement Display for Point {
+    fn display(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+// Generic implementation
+implement<T> Container<T> {
+    fn new(value: T) -> Self {
+        Container { value, count: 1 }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+}
+
+// Implement protocol for generic type
+implement<T: Display> Display for Container<T> {
+    fn display(&self) -> Text {
+        f"Container({self.value.display()})"
+    }
+}
+
+// Implementation with multiple type parameters
+implement<K, V> Map<K, V> {
+    fn new() -> Self {
+        Map { entries: List.new() }
+    }
+}
+
+// Implementation with bounds
+implement<K: Hash + Eq, V> Map<K, V> {
+    fn get(&self, key: &K) -> Maybe<&V> {
+        self.entries.find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        self.entries.push((key, value));
+    }
+}
+
+// Implement multiple protocols
+implement Clone for Point {
+    fn clone(&self) -> Self {
+        Point { x: self.x, y: self.y }
+    }
+}
+
+implement Eq for Point {
+    fn eq(&self, other: &Self) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+// Implementation with where clause
+implement<T> List<T>
+    where type T: Clone
+{
+    fn clone_all(&self) -> List<T> {
+        self.map(|x| x.clone())
+    }
+}
+
+// Implementation with associated type
+implement Iterator for Range {
+    type Item = Int;
+
+    fn next(&mut self) -> Maybe<Self.Item> {
+        if self.current < self.end {
+            let result = self.current;
+            self.current = self.current + 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+// Implementation with associated const
+implement Bounded for Int {
+    const MIN: Self = -9223372036854775808;
+    const MAX: Self = 9223372036854775807;
+}
+
+// Implementation with default methods
+implement Default for Point {
+    fn default() -> Self {
+        Point { x: 0.0, y: 0.0 }
+    }
+}
+
+// Specialization with attribute
+@specialize
+implement Display for List<Text> {
+    fn display(&self) -> Text {
+        self.join(", ")
+    }
+}
+
+// Implementations for default protocol
+implement<T> Default for List<T> {
+    fn default() -> Self {
+        List.new()
+    }
+}
+
+// Implementation for tuple type
+implement<A, B> Display for (A, B)
+    where type A: Display,
+          type B: Display
+{
+    fn display(&self) -> Text {
+        f"({self.0.display()}, {self.1.display()})"
+    }
+}
+
+// Implementation for variant type
+implement<T> Maybe<T> {
+    fn is_some(&self) -> Bool {
+        self.match {
+            Some(_) => true,
+            None => false
+        }
+    }
+
+    fn is_none(&self) -> Bool {
+        !self.is_some()
+    }
+
+    fn unwrap(self) -> T {
+        self.match {
+            Some(v) => v,
+            None => panic("Called unwrap on None")
+        }
+    }
+
+    fn map<U>(self, f: fn(T) -> U) -> Maybe<U> {
+        self.match {
+            Some(v) => Some(f(v)),
+            None => None
+        }
+    }
+}
+
+// Implementation with async methods
+implement AsyncReader for TcpStream {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<Int, IoError> {
+        self.inner_read(buf).await
+    }
+
+    async fn read_all(&mut self) -> Result<List<u8>, IoError> {
+        let buffer = List.new();
+        loop {
+            let chunk = self.read(&mut [0; 1024]).await?;
+            if chunk == 0 { break; }
+            buffer.extend(chunk);
+        }
+        Ok(buffer)
+    }
+}
+
+// Implementation with context requirements
+implement DatabaseService for PostgresClient {
+    fn query(&self, sql: Text) -> List<Row> using [Database] {
+        Database.execute_query(sql)
+    }
+
+    fn execute(&mut self, sql: Text) -> Int using [Database, Logger] {
+        Logger.debug(f"Executing: {sql}");
+        Database.execute_update(sql)
+    }
+}
+
+// Unsafe implementation
+unsafe implement Send for UnsafeWrapper {}
+
+unsafe implement Sync for UnsafeWrapper {}
+
+// Public implementation
+pub implement PublicStruct {
+    pub fn public_method(&self) {}
+    internal fn internal_method(&self) {}
+}
+
+// Implementation with visibility on items
+implement MixedVisibility {
+    pub fn public_fn(&self) {}
+    internal fn internal_fn(&self) {}
+    protected fn protected_fn(&self) {}
+}
+
+// Implementation with associated types
+implement LendingIterator for Windows {
+    type Item = Slice<T>;
+
+    fn next(&mut self) -> Maybe<Self.Item> {
+        if self.pos + self.size <= self.data.len() {
+            let window = self.data.slice(self.pos, self.pos + self.size);
+            self.pos = self.pos + 1;
+            Some(window)
+        } else {
+            None
+        }
+    }
+}
+
+// Implementation for higher-kinded type
+implement Functor for List {
+    type F<_> = List<_>;
+
+    fn map<A, B>(fa: List<A>, f: fn(A) -> B) -> List<B> {
+        fa.into_iter().map(f).collect()
+    }
+}
+
+implement Applicative for List {
+    fn pure<A>(a: A) -> List<A> {
+        List.of(a)
+    }
+
+    fn ap<A, B>(ff: List<fn(A) -> B>, fa: List<A>) -> List<B> {
+        ff.flat_map(|f| fa.map(f))
+    }
+}
+
+implement Monad for List {
+    fn flat_map<A, B>(fa: List<A>, f: fn(A) -> List<B>) -> List<B> {
+        fa.into_iter().flat_map(f).collect()
+    }
+}
+
+// Implementation with complex where clause
+implement<K, V, I> FromIterator<(K, V)> for Map<K, V>
+    where type K: Hash + Eq,
+          type I: Iterator<Item = (K, V)>
+{
+    fn from_iter(iter: I) -> Self {
+        let map = Map.new();
+        for (k, v) in iter {
+            map.insert(k, v);
+        }
+        map
+    }
+}
+
+// Implementation with const generics
+implement<const N: Int> FixedArray<N> {
+    fn new() -> Self {
+        FixedArray { data: [0; N] }
+    }
+
+    fn len(&self) -> Int {
+        N
+    }
+}
+
+// Implementation block with attributes
+@inline(always)
+implement FastMath {
+    fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+}
+
+// Implementation with pure methods
+implement PureComputation for Calculator {
+    pure fn compute(&self, x: Int) -> Int {
+        x * x + x
+    }
+}
+
+// Empty implementation (marker trait)
+implement Copy for Point {}
+
+implement Send for SafeWrapper {}
+
+implement Sync for SafeWrapper {}
+
+// Implementation for reference type
+implement<T: Display> Display for &T {
+    fn display(&self) -> Text {
+        (*self).display()
+    }
+}
+
+// Implementation for slice type
+implement<T> [T] {
+    fn len(&self) -> Int {
+        self.internal_len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.len() == 0
+    }
+}
+
+// Implementation for array type
+implement<T, const N: Int> [T; N] {
+    fn as_slice(&self) -> &[T] {
+        &self[..]
+    }
+}

@@ -1,0 +1,20 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, strings
+// @description: Test string operations through FFI (CStr marshalling)
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_strlen(s: Text) -> Int;
+}
+
+fn main() {
+    let len1 = ffi_strlen("hello");
+    print("strlen(hello)="); print(len1); print("\n");
+    assert(len1 == 5);
+
+    print("String test passed!\n");
+}

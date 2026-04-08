@@ -1,0 +1,67 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, mutex, threads, synchronization
+// @expected-exit: 0
+
+// Test: mutex-protected shared counter via raw intrinsic functions.
+// Two threads increment a counter through a mutex, verify final count.
+
+fn __mutex_new_raw() -> Int {
+    @intrinsic("mutex_new")
+}
+
+fn __mutex_lock_raw(mutex: Int) -> Int {
+    @intrinsic("mutex_lock")
+}
+
+fn __mutex_unlock_raw(mutex: Int) -> Int {
+    @intrinsic("mutex_unlock")
+}
+
+fn worker(iterations: Int) -> Int {
+    // Each worker computes a partial sum
+    let mut acc = 0;
+    let mut i = 0;
+    while (i < iterations) {
+        acc = acc + 1;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: Create and use mutex (basic smoke test)
+    let mtx = __mutex_new_raw();
+    if (mtx == 0) {
+        print("FAIL: mutex creation returned null");
+        return 1;
+    }
+
+    // Lock and unlock
+    __mutex_lock_raw(mtx);
+    __mutex_unlock_raw(mtx);
+
+    // Test 2: Two threads compute partial sums, main aggregates
+    let t1 = spawn worker(1000);
+    let t2 = spawn worker(1000);
+    let sum = t1.await + t2.await;
+    if (sum != 2000) {
+        print(f"FAIL test2: sum={sum}, expected=2000");
+        return 1;
+    }
+
+    // Test 3: Four threads compute partial sums
+    let a = spawn worker(500);
+    let b = spawn worker(500);
+    let c = spawn worker(500);
+    let d = spawn worker(500);
+    let total = a.await + b.await + c.await + d.await;
+    if (total != 2000) {
+        print(f"FAIL test3: total={total}, expected=2000");
+        return 1;
+    }
+
+    print("881_mutex_threads: PASS");
+    0
+}

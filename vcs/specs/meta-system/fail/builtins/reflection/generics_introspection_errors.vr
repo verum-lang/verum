@@ -1,0 +1,21 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, reflection, generics, introspection, error
+// @description: Error tests for generic type introspection builtins - missing context
+// @expected-error: requires
+
+// =============================================================================
+// MISSING CONTEXT ERRORS
+// =============================================================================
+
+// Test generics_of without MetaTypes context
+// This should fail because generics_of requires MetaTypes context
+// Using func<Type>() syntax per grammar (type_args before call_args)
+meta fn test_generics_of_no_context() -> List<Type> {
+    generics_of<List<Int>>()  // ERROR: requires MetaTypes context
+}
+
+fn main() {
+    @const test_generics_of_no_context();
+}

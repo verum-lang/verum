@@ -1,0 +1,329 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, memory, smart-pointer, ownership, cbgr
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Smart pointer simulation with unique ownership tracking.
+// Models unique pointers (single owner), move semantics, and ownership transfer.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_fill(v: Int) -> Arr8 {
+    Arr8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// Ownership system
+// 8 objects max
+// values[i]: data stored in object i
+// owner[i]: id of the owning handle (-1 = no owner / freed)
+// alive[i]: 1 if object is live
+// handle_target[h]: which object handle h points to (-1 = invalid)
+// handle_valid[h]: 1 if handle is valid (not moved from)
+// Handles and objects share the same index space for simplicity.
+// =============================================================================
+
+type OwnershipSys is {
+    values: Arr8,
+    owner: Arr8,
+    alive: Arr8,
+    handle_target: Arr8,
+    handle_valid: Arr8,
+    num_objects: Int,
+    num_drops: Int,
+    num_moves: Int
+};
+
+fn own_new() -> OwnershipSys {
+    OwnershipSys {
+        values: a8_new(),
+        owner: a8_fill(-1),
+        alive: a8_new(),
+        handle_target: a8_fill(-1),
+        handle_valid: a8_new(),
+        num_objects: 0,
+        num_drops: 0,
+        num_moves: 0
+    }
+}
+
+// Create a unique pointer (allocate object, create owning handle)
+// Returns (system, handle_id)
+type OwnAllocPair is { sys: OwnershipSys, handle: Int };
+
+fn own_create(sys: OwnershipSys, val: Int) -> OwnAllocPair {
+    let id = sys.num_objects;
+    OwnAllocPair {
+        sys: OwnershipSys {
+            values: a8_set(sys.values, id, val),
+            owner: a8_set(sys.owner, id, id),
+            alive: a8_set(sys.alive, id, 1),
+            handle_target: a8_set(sys.handle_target, id, id),
+            handle_valid: a8_set(sys.handle_valid, id, 1),
+            num_objects: id + 1,
+            num_drops: sys.num_drops,
+            num_moves: sys.num_moves
+        },
+        handle: id
+    }
+}
+
+// Read value through handle (returns -1 if invalid)
+fn own_read(sys: OwnershipSys, handle: Int) -> Int {
+    if a8_get(sys.handle_valid, handle) == 0 {
+        return -1;
+    }
+    let target = a8_get(sys.handle_target, handle);
+    if a8_get(sys.alive, target) == 0 {
+        return -1;
+    }
+    a8_get(sys.values, target)
+}
+
+// Write value through handle (returns unchanged sys if invalid)
+fn own_write(sys: OwnershipSys, handle: Int, val: Int) -> OwnershipSys {
+    if a8_get(sys.handle_valid, handle) == 0 {
+        return sys;
+    }
+    let target = a8_get(sys.handle_target, handle);
+    if a8_get(sys.alive, target) == 0 {
+        return sys;
+    }
+    OwnershipSys {
+        values: a8_set(sys.values, target, val),
+        owner: sys.owner,
+        alive: sys.alive,
+        handle_target: sys.handle_target,
+        handle_valid: sys.handle_valid,
+        num_objects: sys.num_objects,
+        num_drops: sys.num_drops,
+        num_moves: sys.num_moves
+    }
+}
+
+// Move ownership from src_handle to dst_handle (new handle allocated)
+// src_handle becomes invalid after move
+type OwnMovePair is { sys: OwnershipSys, new_handle: Int };
+
+fn own_move(sys: OwnershipSys, src_handle: Int) -> OwnMovePair {
+    if a8_get(sys.handle_valid, src_handle) == 0 {
+        return OwnMovePair { sys: sys, new_handle: -1 };
+    }
+    let target = a8_get(sys.handle_target, src_handle);
+
+    // New handle reuses next object slot for handle tracking
+    let new_h = sys.num_objects;
+    OwnMovePair {
+        sys: OwnershipSys {
+            values: sys.values,
+            owner: a8_set(sys.owner, target, new_h),
+            alive: sys.alive,
+            handle_target: a8_set(a8_set(sys.handle_target, src_handle, -1), new_h, target),
+            handle_valid: a8_set(a8_set(sys.handle_valid, src_handle, 0), new_h, 1),
+            num_objects: new_h + 1,
+            num_drops: sys.num_drops,
+            num_moves: sys.num_moves + 1
+        },
+        new_handle: new_h
+    }
+}
+
+// Drop (free) an object through its handle
+fn own_drop(sys: OwnershipSys, handle: Int) -> OwnershipSys {
+    if a8_get(sys.handle_valid, handle) == 0 {
+        return sys;
+    }
+    let target = a8_get(sys.handle_target, handle);
+    OwnershipSys {
+        values: sys.values,
+        owner: a8_set(sys.owner, target, -1),
+        alive: a8_set(sys.alive, target, 0),
+        handle_target: a8_set(sys.handle_target, handle, -1),
+        handle_valid: a8_set(sys.handle_valid, handle, 0),
+        num_objects: sys.num_objects,
+        num_drops: sys.num_drops + 1,
+        num_moves: sys.num_moves
+    }
+}
+
+// Check if handle is valid
+fn own_is_valid(sys: OwnershipSys, handle: Int) -> Int {
+    a8_get(sys.handle_valid, handle)
+}
+
+// Count live objects
+fn own_live_count(sys: OwnershipSys) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < sys.num_objects {
+        if a8_get(sys.alive, i) == 1 {
+            cnt = cnt + 1;
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_create_and_read() {
+    let s0 = own_new();
+    let p = own_create(s0, 42);
+    assert_eq(own_read(p.sys, p.handle), 42);
+    assert_eq(own_is_valid(p.sys, p.handle), 1);
+    assert_eq(own_live_count(p.sys), 1);
+}
+
+fn test_write_through_handle() {
+    let s0 = own_new();
+    let p = own_create(s0, 10);
+    let s1 = own_write(p.sys, p.handle, 99);
+    assert_eq(own_read(s1, p.handle), 99);
+}
+
+fn test_drop_invalidates() {
+    let s0 = own_new();
+    let p = own_create(s0, 77);
+    let s1 = own_drop(p.sys, p.handle);
+    assert_eq(own_is_valid(s1, p.handle), 0);
+    assert_eq(own_read(s1, p.handle), -1);
+    assert_eq(own_live_count(s1), 0);
+    assert_eq(s1.num_drops, 1);
+}
+
+fn test_move_semantics() {
+    let s0 = own_new();
+    let p = own_create(s0, 100);
+    let m = own_move(p.sys, p.handle);
+
+    // Source handle is invalidated
+    assert_eq(own_is_valid(m.sys, p.handle), 0);
+    assert_eq(own_read(m.sys, p.handle), -1);
+
+    // New handle is valid and has the value
+    assert_eq(own_is_valid(m.sys, m.new_handle), 1);
+    assert_eq(own_read(m.sys, m.new_handle), 100);
+
+    assert_eq(m.sys.num_moves, 1);
+    assert_eq(own_live_count(m.sys), 1);
+}
+
+fn test_move_chain() {
+    let s0 = own_new();
+    let p = own_create(s0, 55);
+
+    // Move A -> B -> C
+    let m1 = own_move(p.sys, p.handle);
+    let m2 = own_move(m1.sys, m1.new_handle);
+
+    // Only final handle valid
+    assert_eq(own_is_valid(m2.sys, p.handle), 0);
+    assert_eq(own_is_valid(m2.sys, m1.new_handle), 0);
+    assert_eq(own_is_valid(m2.sys, m2.new_handle), 1);
+
+    assert_eq(own_read(m2.sys, m2.new_handle), 55);
+    assert_eq(m2.sys.num_moves, 2);
+}
+
+fn test_use_after_move_fails() {
+    let s0 = own_new();
+    let p = own_create(s0, 33);
+    let m = own_move(p.sys, p.handle);
+
+    // Writing to moved-from handle should be a no-op
+    let s1 = own_write(m.sys, p.handle, 999);
+    // Value unchanged through new handle
+    assert_eq(own_read(s1, m.new_handle), 33);
+}
+
+fn test_multiple_unique_objects() {
+    let s0 = own_new();
+    let p1 = own_create(s0, 10);
+    let p2 = own_create(p1.sys, 20);
+    let p3 = own_create(p2.sys, 30);
+
+    assert_eq(own_live_count(p3.sys), 3);
+    assert_eq(own_read(p3.sys, p1.handle), 10);
+    assert_eq(own_read(p3.sys, p2.handle), 20);
+    assert_eq(own_read(p3.sys, p3.handle), 30);
+
+    // Drop one
+    let s1 = own_drop(p3.sys, p2.handle);
+    assert_eq(own_live_count(s1), 2);
+    assert_eq(own_read(s1, p1.handle), 10);
+    assert_eq(own_read(s1, p2.handle), -1);
+    assert_eq(own_read(s1, p3.handle), 30);
+}
+
+fn test_double_drop_safe() {
+    let s0 = own_new();
+    let p = own_create(s0, 42);
+    let s1 = own_drop(p.sys, p.handle);
+    assert_eq(s1.num_drops, 1);
+
+    // Double drop should be safe (no-op)
+    let s2 = own_drop(s1, p.handle);
+    assert_eq(s2.num_drops, 1);  // No additional drop counted
+}
+
+fn test_move_then_drop() {
+    let s0 = own_new();
+    let p = own_create(s0, 88);
+    let m = own_move(p.sys, p.handle);
+
+    // Drop through new handle
+    let s1 = own_drop(m.sys, m.new_handle);
+    assert_eq(own_live_count(s1), 0);
+    assert_eq(s1.num_drops, 1);
+    assert_eq(s1.num_moves, 1);
+}
+
+fn main() -> Int {
+    test_create_and_read();
+    test_write_through_handle();
+    test_drop_invalidates();
+    test_move_semantics();
+    test_move_chain();
+    test_use_after_move_fails();
+    test_multiple_unique_objects();
+    test_double_drop_safe();
+    test_move_then_drop();
+    print("[OK] 336_interp_smart_ptr_sim");
+    0
+}

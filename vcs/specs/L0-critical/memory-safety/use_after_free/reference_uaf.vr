@@ -1,0 +1,25 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, use-after-free, cbgr, reference
+// @description: Tests CBGR detection of use-after-free through reference
+
+type Node is {
+    value: Int,
+    next: Maybe<Heap<Node>>,
+};
+
+fn main() {
+    let node = Heap.new(Node {
+        value: 42,
+        next: Maybe.None,
+    });
+
+    let node_ref = &node;
+
+    // Free the node
+    drop(node);
+
+    // Attempt to access through the reference
+    let _ = node_ref.value;  // CBGR detects use after free
+}

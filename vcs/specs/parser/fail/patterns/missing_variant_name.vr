@@ -1,0 +1,46 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, variant, name, error
+// @description: Test missing variant name in pattern
+// @expected-error: E088
+
+type Option<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+
+fn test_bare_parens_pattern() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: parenthesized pattern without variant name in or-pattern context
+    match opt {
+        | (x) => print("missing variant name"),
+        None => print("none"),
+    }
+}
+
+fn test_or_pattern_bare_parens() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // Invalid: bare parentheses in or-pattern
+    match result {
+        Ok(x) | (e) => print("mixed"),
+    }
+}
+
+fn test_leading_pipe_bare_pattern() {
+    let value = 42;
+
+    // Invalid: leading pipe with expression-like pattern
+    match value {
+        | (1 + 2) => print("invalid"),
+        _ => print("other"),
+    }
+}
+
+fn test_double_pipe_pattern() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: double pipe in pattern
+    match opt {
+        Some(x) || None => print("double pipe"),
+    }
+}

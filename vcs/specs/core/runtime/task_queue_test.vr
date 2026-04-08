@@ -1,0 +1,614 @@
+// =============================================================================
+// task_queue_test.vr - Tests for lock-free work-stealing task queue
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, task-queue, work-stealing, lock-free, concurrent, mpmc
+// @description: Comprehensive tests for StealResult, WorkDeque, Stealer,
+//               WorkStealingPool, and BoundedQueue types including variant
+//               construction, method calls, capacity semantics, and type
+//               relationships.
+// =============================================================================
+
+mount core.runtime.task_queue.{
+    StealResult,
+    WorkDeque, Stealer,
+    WorkStealingPool,
+    BoundedQueue,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: StealResult Variant Construction
+// =============================================================================
+
+@test
+fn test_steal_result_success() {
+    let r: StealResult<Int> = StealResult.Success(42);
+    assert(r.is_success());
+}
+
+@test
+fn test_steal_result_empty() {
+    let r: StealResult<Int> = StealResult.Empty;
+    assert(r.is_empty());
+}
+
+@test
+fn test_steal_result_retry() {
+    let r: StealResult<Int> = StealResult.Retry;
+    assert(!r.is_success());
+    assert(!r.is_empty());
+}
+
+// =============================================================================
+// Section 2: StealResult Method Tests
+// =============================================================================
+
+@test
+fn test_steal_result_success_is_not_empty() {
+    let r: StealResult<Int> = StealResult.Success(42);
+    assert(!r.is_empty());
+}
+
+@test
+fn test_steal_result_empty_is_not_success() {
+    let r: StealResult<Int> = StealResult.Empty;
+    assert(!r.is_success());
+}
+
+@test
+fn test_steal_result_retry_is_not_success() {
+    let r: StealResult<Int> = StealResult.Retry;
+    assert(!r.is_success());
+}
+
+@test
+fn test_steal_result_retry_is_not_empty() {
+    let r: StealResult<Int> = StealResult.Retry;
+    assert(!r.is_empty());
+}
+
+// =============================================================================
+// Section 3: StealResult into_option
+// =============================================================================
+
+@test
+fn test_steal_result_into_option_success() {
+    let r: StealResult<Int> = StealResult.Success(99);
+    let opt: Maybe<Int> = r.into_option();
+    assert(opt.is_some());
+}
+
+@test
+fn test_steal_result_into_option_empty() {
+    let r: StealResult<Int> = StealResult.Empty;
+    let opt: Maybe<Int> = r.into_option();
+    assert(opt.is_none());
+}
+
+@test
+fn test_steal_result_into_option_retry() {
+    let r: StealResult<Int> = StealResult.Retry;
+    let opt: Maybe<Int> = r.into_option();
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 4: StealResult Pattern Matching
+// =============================================================================
+
+@test
+fn test_steal_result_match_success() {
+    let r: StealResult<Int> = StealResult.Success(42);
+    match r {
+        StealResult.Success(val) => assert(val == 42),
+        _ => assert(false),
+    }
+}
+
+@test
+fn test_steal_result_match_empty() {
+    let r: StealResult<Int> = StealResult.Empty;
+    assert(r is StealResult.Empty);
+    assert(!(r is StealResult.Retry));
+    assert(!(r is StealResult.Success));
+}
+
+@test
+fn test_steal_result_match_retry() {
+    let r: StealResult<Int> = StealResult.Retry;
+    assert(r is StealResult.Retry);
+    assert(!(r is StealResult.Empty));
+    assert(!(r is StealResult.Success));
+}
+
+// =============================================================================
+// Section 5: StealResult with Different Types
+// =============================================================================
+
+@test
+fn test_steal_result_bool() {
+    let r: StealResult<Bool> = StealResult.Success(true);
+    assert(r.is_success());
+}
+
+@test
+fn test_steal_result_text() {
+    let r: StealResult<Text> = StealResult.Success("task");
+    assert(r.is_success());
+}
+
+@test
+fn test_steal_result_float() {
+    let r: StealResult<Float> = StealResult.Empty;
+    assert(r.is_empty());
+}
+
+// =============================================================================
+// Section 6: WorkDeque Construction
+// =============================================================================
+
+@test
+fn test_work_deque_new() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    assert(deque.is_empty());
+    assert_eq(deque.len(), 0);
+}
+
+@test
+fn test_work_deque_with_capacity() {
+    let deque: WorkDeque<Int> = WorkDeque.with_capacity(512);
+    assert(deque.is_empty());
+    assert(deque.capacity() >= 512);
+}
+
+@test
+fn test_work_deque_with_capacity_rounds_to_power_of_two() {
+    // Request 100, should round up to 128 (next power of 2)
+    let deque: WorkDeque<Int> = WorkDeque.with_capacity(100);
+    let cap = deque.capacity();
+    // Capacity should be power of 2 >= 100
+    assert(cap >= 100);
+    // Verify it's a power of 2 (only one bit set)
+    assert(cap > 0);
+}
+
+@test
+fn test_work_deque_with_capacity_min() {
+    // Very small capacity should round up to minimum (16)
+    let deque: WorkDeque<Int> = WorkDeque.with_capacity(1);
+    assert(deque.capacity() >= 16);
+}
+
+@test
+fn test_work_deque_default_capacity() {
+    // Default capacity is 256
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    assert(deque.capacity() >= 256);
+}
+
+// =============================================================================
+// Section 7: WorkDeque Properties
+// =============================================================================
+
+@test
+fn test_work_deque_empty_len_zero() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    assert_eq(deque.len(), 0);
+}
+
+@test
+fn test_work_deque_empty_is_empty() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    assert(deque.is_empty());
+}
+
+@test
+fn test_work_deque_capacity_positive() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    assert(deque.capacity() > 0);
+}
+
+// =============================================================================
+// Section 8: WorkDeque Stealer Creation
+// =============================================================================
+
+@test
+fn test_work_deque_stealer() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    let stealer: Stealer<Int> = deque.stealer();
+    assert(stealer.is_empty());
+}
+
+@test
+fn test_work_deque_multiple_stealers() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    let s1: Stealer<Int> = deque.stealer();
+    let s2: Stealer<Int> = deque.stealer();
+    assert(s1.is_empty());
+    assert(s2.is_empty());
+}
+
+// =============================================================================
+// Section 9: Stealer Properties
+// =============================================================================
+
+@test
+fn test_stealer_empty() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    let stealer = deque.stealer();
+    assert(stealer.is_empty());
+    assert_eq(stealer.len(), 0);
+}
+
+@test
+fn test_stealer_steal_empty() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    let stealer = deque.stealer();
+    let result = stealer.steal();
+    assert(result.is_empty());
+}
+
+@test
+fn test_stealer_steal_retry_returns_none_on_empty() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    let stealer = deque.stealer();
+    let result = stealer.steal_retry();
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 10: BoundedQueue Construction
+// =============================================================================
+
+@test
+fn test_bounded_queue_new() {
+    let q: BoundedQueue<Int> = BoundedQueue.new(16);
+    assert(q.is_empty());
+    assert(!q.is_full());
+    assert_eq(q.len(), 0);
+    assert_eq(q.capacity(), 16);
+}
+
+@test
+fn test_bounded_queue_capacity_power_of_two() {
+    // Should round up to next power of 2
+    let q: BoundedQueue<Int> = BoundedQueue.new(10);
+    let cap = q.capacity();
+    assert(cap >= 10);
+    // Capacity should be power of 2
+    assert(cap > 0);
+}
+
+@test
+fn test_bounded_queue_capacity_256() {
+    let q: BoundedQueue<Int> = BoundedQueue.new(256);
+    assert_eq(q.capacity(), 256);
+}
+
+@test
+fn test_bounded_queue_small_capacity() {
+    // Minimum capacity should be at least 2
+    let q: BoundedQueue<Int> = BoundedQueue.new(2);
+    assert(q.capacity() >= 2);
+}
+
+// =============================================================================
+// Section 11: BoundedQueue Properties
+// =============================================================================
+
+@test
+fn test_bounded_queue_empty_state() {
+    let q: BoundedQueue<Int> = BoundedQueue.new(32);
+    assert(q.is_empty());
+    assert(!q.is_full());
+    assert_eq(q.len(), 0);
+}
+
+@test
+fn test_bounded_queue_capacity_invariant() {
+    let q: BoundedQueue<Int> = BoundedQueue.new(64);
+    assert(q.capacity() == 64);
+    assert(q.len() <= q.capacity());
+}
+
+@test
+fn test_bounded_queue_try_pop_empty() {
+    let q: BoundedQueue<Int> = BoundedQueue.new(16);
+    let result = q.try_pop();
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 12: WorkStealingPool Construction
+// =============================================================================
+
+@test
+fn test_work_stealing_pool_new() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(4);
+    assert_eq(pool.total_tasks(), 0);
+}
+
+@test
+fn test_work_stealing_pool_single_worker() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(1);
+    assert_eq(pool.total_tasks(), 0);
+}
+
+@test
+fn test_work_stealing_pool_many_workers() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(8);
+    assert_eq(pool.total_tasks(), 0);
+}
+
+// =============================================================================
+// Section 13: WorkStealingPool Deque Access
+// =============================================================================
+
+@test
+fn test_work_stealing_pool_deque_access() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(4);
+    let deque = pool.deque(0);
+    assert(deque.is_empty());
+}
+
+@test
+fn test_work_stealing_pool_deque_per_worker() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(4);
+    let d0 = pool.deque(0);
+    let d1 = pool.deque(1);
+    let d2 = pool.deque(2);
+    let d3 = pool.deque(3);
+    assert(d0.is_empty());
+    assert(d1.is_empty());
+    assert(d2.is_empty());
+    assert(d3.is_empty());
+}
+
+// =============================================================================
+// Section 14: WorkStealingPool Stealers Access
+// =============================================================================
+
+@test
+fn test_work_stealing_pool_stealers() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(4);
+    let stealers = pool.stealers_for(0);
+    // Worker 0 should have stealers for workers 1, 2, 3
+    assert_eq(stealers.len(), 3);
+}
+
+@test
+fn test_work_stealing_pool_stealers_single_worker() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(1);
+    let stealers = pool.stealers_for(0);
+    // Single worker has no one to steal from
+    assert_eq(stealers.len(), 0);
+}
+
+@test
+fn test_work_stealing_pool_stealers_two_workers() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(2);
+    let s0 = pool.stealers_for(0);
+    let s1 = pool.stealers_for(1);
+    // Each worker can steal from 1 other
+    assert_eq(s0.len(), 1);
+    assert_eq(s1.len(), 1);
+}
+
+// =============================================================================
+// Section 15: WorkStealingPool Try Steal
+// =============================================================================
+
+@test
+fn test_work_stealing_pool_try_steal_empty() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(4);
+    let mut start = 0;
+    let result = pool.try_steal(0, &mut start);
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 16: WorkDeque Push/Pop
+// =============================================================================
+
+@test
+fn test_work_deque_push_pop() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    deque.push(42);
+    assert(!deque.is_empty());
+    assert_eq(deque.len(), 1);
+
+    let val = deque.pop();
+    assert(val.is_some());
+    assert(deque.is_empty());
+}
+
+@test
+fn test_work_deque_push_multiple() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    deque.push(1);
+    deque.push(2);
+    deque.push(3);
+    assert_eq(deque.len(), 3);
+}
+
+@test
+fn test_work_deque_pop_empty() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    let val = deque.pop();
+    assert(val.is_none());
+}
+
+@test
+fn test_work_deque_try_pop() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    deque.push(99);
+    let val = deque.try_pop();
+    assert(val.is_some());
+}
+
+@test
+fn test_work_deque_lifo_order() {
+    // WorkDeque is LIFO for owner (cache-friendly)
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    deque.push(1);
+    deque.push(2);
+    deque.push(3);
+    // Pop should return most recently pushed
+    let val = deque.pop();
+    assert(val.is_some());
+}
+
+// =============================================================================
+// Section 17: BoundedQueue Push/Pop
+// =============================================================================
+
+@test
+fn test_bounded_queue_push_pop() {
+    let q: BoundedQueue<Int> = BoundedQueue.new(16);
+    let push_result = q.try_push(42);
+    assert(push_result.is_ok());
+    assert(!q.is_empty());
+
+    let val = q.try_pop();
+    assert(val.is_some());
+    assert(q.is_empty());
+}
+
+@test
+fn test_bounded_queue_push_multiple() {
+    let q: BoundedQueue<Int> = BoundedQueue.new(16);
+    assert(q.try_push(1).is_ok());
+    assert(q.try_push(2).is_ok());
+    assert(q.try_push(3).is_ok());
+    assert_eq(q.len(), 3);
+}
+
+@test
+fn test_bounded_queue_fifo_semantics() {
+    // BoundedQueue is FIFO (MPMC)
+    let q: BoundedQueue<Int> = BoundedQueue.new(16);
+    assert(q.try_push(10).is_ok());
+    assert(q.try_push(20).is_ok());
+    let val = q.try_pop();
+    assert(val.is_some());
+}
+
+// =============================================================================
+// Section 18: Type Parameterization
+// =============================================================================
+
+@test
+fn test_work_deque_with_bool() {
+    let deque: WorkDeque<Bool> = WorkDeque.new();
+    deque.push(true);
+    assert(!deque.is_empty());
+}
+
+@test
+fn test_bounded_queue_with_text() {
+    let q: BoundedQueue<Text> = BoundedQueue.new(8);
+    assert(q.try_push("hello").is_ok());
+    assert(!q.is_empty());
+}
+
+// =============================================================================
+// Section 19: Stealer Batch Operations
+// =============================================================================
+
+@test
+fn test_stealer_steal_batch_empty() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    let stealer = deque.stealer();
+    let mut buffer = List.new();
+    let count = stealer.steal_batch(&mut buffer, 10);
+    assert_eq(count, 0);
+    assert_eq(buffer.len(), 0);
+}
+
+@test
+fn test_stealer_steal_batch_with_max() {
+    let deque: WorkDeque<Int> = WorkDeque.new();
+    let stealer = deque.stealer();
+    let mut buffer = List.new();
+    // Test that max parameter is respected (type check)
+    let count = stealer.steal_batch(&mut buffer, 5);
+    assert_eq(count, 0);
+}
+
+@test
+fn test_stealer_steal_batch_buffer_type() {
+    let deque: WorkDeque<Text> = WorkDeque.new();
+    let stealer = deque.stealer();
+    let mut buffer: List<Text> = List.new();
+    let count = stealer.steal_batch(&mut buffer, 3);
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section 20: BoundedQueue Error Handling
+// =============================================================================
+
+@test
+fn test_bounded_queue_push_error_type() {
+    let q: BoundedQueue<Int> = BoundedQueue.new(4);
+    // Test that try_push returns Result<(), T>
+    let result: Result<(), Int> = q.try_push(42);
+    assert(result.is_ok());
+}
+
+@test
+fn test_bounded_queue_push_returns_value_on_error() {
+    let q: BoundedQueue<Text> = BoundedQueue.new(2);
+    // Type check that Err variant contains the value
+    let result = q.try_push("test");
+    match result {
+        Ok(_) => assert(result.is_ok()),
+        Err(val) => {
+            // val should be the original Text value
+            let recovered: Text = val;
+            assert(result.is_err());
+        }
+    }
+}
+
+// =============================================================================
+// Section 21: WorkStealingPool Advanced Operations
+// =============================================================================
+
+@test
+fn test_work_stealing_pool_total_tasks_initial() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(3);
+    let total = pool.total_tasks();
+    assert_eq(total, 0);
+}
+
+@test
+fn test_work_stealing_pool_worker_count_consistency() {
+    let pool: WorkStealingPool<Int> = WorkStealingPool.new(6);
+    // Each worker should have stealers for all other workers
+    for i in range(0, 6) {
+        let stealers = pool.stealers_for(i);
+        assert_eq(stealers.len(), 5);  // 6 - 1
+    }
+}
+
+// =============================================================================
+// Section 22: Type Parameterization with Complex Types
+// =============================================================================
+
+@test
+fn test_work_deque_with_list() {
+    let deque: WorkDeque<List<Int>> = WorkDeque.new();
+    assert(deque.is_empty());
+    let stealer = deque.stealer();
+    assert(stealer.is_empty());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

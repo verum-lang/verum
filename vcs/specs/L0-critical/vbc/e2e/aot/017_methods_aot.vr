@@ -1,0 +1,50 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, methods, records
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT methods on record types
+
+type Point is { x: Int, y: Int };
+
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn distance_sq(self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+
+    fn translate(self, dx: Int, dy: Int) -> Point {
+        Point { x: self.x + dx, y: self.y + dy }
+    }
+
+    fn plus(self, other: Point) -> Point {
+        Point { x: self.x + other.x, y: self.y + other.y }
+    }
+}
+
+fn main() -> Int {
+    // Static constructor
+    let p = Point.new(3, 4);
+    assert_eq(p.x, 3);
+    assert_eq(p.y, 4);
+
+    // Instance method
+    assert_eq(p.distance_sq(), 25);
+
+    // Method returning record
+    let p2 = p.translate(1, -1);
+    assert_eq(p2.x, 4);
+    assert_eq(p2.y, 3);
+    assert_eq(p2.distance_sq(), 25);
+
+    // Method with record param
+    let p3 = p.plus(p2);
+    assert_eq(p3.x, 7);
+    assert_eq(p3.y, 7);
+
+    0
+}

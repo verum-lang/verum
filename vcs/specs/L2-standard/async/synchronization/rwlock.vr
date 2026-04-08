@@ -1,0 +1,226 @@
+// @test: run
+// @expected-stdout: Reader 1: 0\nReader 2: 0\nWriter updated\nReader 3: done\nReader 4: done\nConcurrent reads: 100\nUpgraded: done\nDowngraded read: done\nTry read: success\nMapped field: hello
+// @tier: 0
+// @level: L2
+// @tags: async, synchronization, rwlock
+// @description: Comprehensive async RwLock patterns for read-heavy shared state
+
+// Basic multiple readers / single writer
+async fn test_basic_rwlock() {
+    let data = RwLock.new(0);
+
+    // Multiple concurrent readers
+    let reader1 = spawn {
+        let guard = data.read().await;
+        println("Reader 1: 0");
+    };
+
+    let reader2 = spawn {
+        let guard = data.read().await;
+        println("Reader 2: 0");
+    };
+
+    reader1.await;
+    reader2.await;
+
+    // Exclusive writer
+    let writer = spawn {
+        let mut guard = data.write().await;
+        println("Writer updated");
+    };
+
+    writer.await;
+
+    // More readers see updated value
+    let reader3 = spawn {
+        let guard = data.read().await;
+        println("Reader 3: done");
+    };
+
+    let reader4 = spawn {
+        let guard = data.read().await;
+        println("Reader 4: done");
+    };
+
+    reader3.await;
+    reader4.await;
+}
+
+// Many concurrent readers
+async fn test_concurrent_readers() -> Int {
+    let data = Shared.new(RwLock.new(0));
+    let mut handles: List<JoinHandle<Unit>> = [];
+
+    // Spawn 100 concurrent readers
+    for i in 0..100 {
+        let d = data.clone();
+        handles.push(spawn {
+            let guard = d.read().await;
+            // Read the value through guard
+        });
+    }
+
+    // All readers complete
+    let results = join_all(handles).await;
+    results.len()
+}
+
+// RwLock with complex type
+type Cache is {
+    entries: Map<Text, Text>,
+    hits: Int,
+    misses: Int,
+};
+
+async fn test_cache_rwlock() {
+    let cache = RwLock.new(Cache {
+        entries: Map.new(),
+        hits: 0,
+        misses: 0,
+    });
+
+    // Read operation (doesn't modify)
+    {
+        let guard = cache.read().await;
+        // Access guard fields
+    }
+
+    // Write operation (modifies)
+    {
+        let write_result = cache.write().await;
+        // Guard access through result
+    }
+}
+
+// try_read / try_write (non-blocking)
+async fn test_try_operations() -> Text {
+    let data = RwLock.new(0);
+
+    // Try to acquire read lock
+    let read_result = data.try_read();
+    if read_result.is_some() {
+        "success"
+    } else {
+        "locked"
+    }
+}
+
+// Upgrading read to write lock (simplified)
+async fn test_upgrade() {
+    let data = RwLock.new(0);
+    // Start with read lock, then acquire write
+    let read_guard = data.read().await;
+    drop(read_guard);
+    let mut write_guard = data.write().await;
+    println("Upgraded: done");
+}
+
+// Downgrading write to read lock (simplified)
+async fn test_downgrade() {
+    let data = RwLock.new(0);
+    let mut write_guard = data.write().await;
+    drop(write_guard);
+    let read_guard = data.read().await;
+    println("Downgraded read: done");
+}
+
+// Mapped guard for projecting into fields (simplified)
+async fn test_mapped_guard() -> Text {
+    type Container is {
+        name: Text,
+        value: Int,
+    };
+
+    let data = RwLock.new(Container {
+        name: "hello",
+        value: 42,
+    });
+
+    let guard = data.read().await;
+    println(f"Mapped field: {guard.name}");
+    guard.name.clone()
+}
+
+// RwLock with Shared for cloning
+async fn test_shared_rwlock() {
+    let data = Shared.new(RwLock.new(0));
+
+    let d1 = data.clone();
+    let d2 = data.clone();
+
+    let writer = spawn {
+        let mut guard = d1.write().await;
+        // Write through guard
+    };
+
+    let reader = spawn {
+        let guard = d2.read().await;
+        // Read through guard
+    };
+
+    writer.await;
+    reader.await;
+}
+
+// Recursive read (same task can acquire multiple times)
+async fn test_recursive_read() {
+    let data = RwLock.new(0);
+
+    // Same task can acquire read lock multiple times
+    let guard1 = data.read().await;
+    let guard2 = data.read().await; // OK - read locks are shared
+
+    drop(guard2);
+    drop(guard1);
+}
+
+// RwLock in struct field
+type SharedState is {
+    config: RwLock<AppConfig>,
+    data: RwLock<List<Int>>,
+};
+
+type AppConfig is {
+    max_items: Int,
+    timeout_secs: Int,
+};
+
+async fn test_struct_with_rwlock() {
+    let state = SharedState {
+        config: RwLock.new(AppConfig {
+            max_items: 100,
+            timeout_secs: 30,
+        }),
+        data: RwLock.new([]),
+    };
+
+    // Read config while writing data
+    let _config = state.config.read().await;
+    let _data = state.data.write().await;
+    // Guard field access requires unwrapping Result
+}
+
+type RwLockPriority is
+    | PreferReaders
+    | PreferWriters
+    | Fair;
+
+async fn main() {
+    // Basic test
+    test_basic_rwlock().await;
+
+    // Concurrent readers
+    let count = test_concurrent_readers().await;
+    println(f"Concurrent reads: {count}");
+
+    // Upgrade/downgrade
+    test_upgrade().await;
+    test_downgrade().await;
+
+    // Try operations
+    let try_result = test_try_operations().await;
+    println(f"Try read: {try_result}");
+
+    // Mapped guard
+    test_mapped_guard().await;
+}

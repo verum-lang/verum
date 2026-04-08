@@ -1,0 +1,66 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: heap, recursive, tree, deep
+// @expect: pass
+
+type Tree is {
+    value: Int,
+    children: List<Heap<Tree>>,
+};
+
+implement Tree {
+    fn sum(&self) -> Int {
+        let mut total = self.value;
+        let kids = self.children;
+        let n = kids.len();
+        let mut i = 0;
+        while i < n {
+            let h = kids[i];
+            let child = *h;
+            total = total + child.sum();
+            i = i + 1;
+        }
+        total
+    }
+
+    fn depth(&self) -> Int {
+        let kids = self.children;
+        let n = kids.len();
+        if n == 0 {
+            return 1;
+        }
+        let mut max_d = 0;
+        let mut i = 0;
+        while i < n {
+            let h = kids[i];
+            let child = *h;
+            let d = child.depth();
+            if d > max_d {
+                max_d = d;
+            }
+            i = i + 1;
+        }
+        max_d + 1
+    }
+}
+
+fn main() -> Int {
+    // Build a tree:
+    //       1
+    //      / \
+    //     2   3
+    //    /
+    //   4
+    let leaf4 = Tree { value: 4, children: [] };
+    let node2 = Tree { value: 2, children: [Heap(leaf4)] };
+    let leaf3 = Tree { value: 3, children: [] };
+    let root = Tree { value: 1, children: [Heap(node2), Heap(leaf3)] };
+
+    let s = root.sum();
+    let d = root.depth();
+    print(f"sum = {s}, depth = {d}");
+    assert_eq(s, 10);
+    assert_eq(d, 3);
+    0
+}

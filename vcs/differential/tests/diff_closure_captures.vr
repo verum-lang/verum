@@ -1,0 +1,200 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, closures, captures
+// @timeout: 10000
+// @description: Closure capture semantics must produce identical values across tiers
+
+/// Closure capture differential test.
+/// Mutable captures, closures as return values, nested captures.
+
+fn main() -> Int {
+    test_immutable_captures();
+    test_mutable_captures();
+    test_closure_as_return_value();
+    test_nested_captures();
+    test_capture_in_loops();
+    test_multi_closure_shared_state();
+    0
+}
+
+/// Immutable value captures
+fn test_immutable_captures() {
+    print("=== Immutable Captures ===");
+
+    let x = 10;
+    let y = 20;
+    let z = 30;
+
+    let capture_one = |n: Int| -> Int { n + x };
+    let capture_two = |n: Int| -> Int { n + x + y };
+    let capture_all = |n: Int| -> Int { n + x + y + z };
+
+    print(f"capture_one(5) = {capture_one(5)}");
+    print(f"capture_two(5) = {capture_two(5)}");
+    print(f"capture_all(5) = {capture_all(5)}");
+
+    // Captured values don't change even if we rebind
+    let x = 999;
+    print(f"capture_one(5) after rebind = {capture_one(5)}");
+}
+
+/// Mutable closure captures
+fn test_mutable_captures() {
+    print("\n=== Mutable Captures ===");
+
+    // Counter pattern
+    let mut count = 0;
+    let increment = || {
+        count = count + 1;
+        count
+    };
+
+    print(f"inc 1 = {increment()}");
+    print(f"inc 2 = {increment()}");
+    print(f"inc 3 = {increment()}");
+    print(f"inc 4 = {increment()}");
+    print(f"inc 5 = {increment()}");
+
+    // Accumulator pattern
+    let mut total = 0;
+    let accumulate = |n: Int| -> Int {
+        total = total + n;
+        total
+    };
+
+    print(f"acc 10 = {accumulate(10)}");
+    print(f"acc 20 = {accumulate(20)}");
+    print(f"acc 30 = {accumulate(30)}");
+    print(f"total = {total}");
+}
+
+/// Closures returned from functions
+fn test_closure_as_return_value() {
+    print("\n=== Closure as Return Value ===");
+
+    // make_adder returns a closure
+    fn make_adder(n: Int) -> fn(Int) -> Int {
+        |x: Int| -> Int { x + n }
+    }
+
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    let add100 = make_adder(100);
+
+    print(f"add5(3) = {add5(3)}");
+    print(f"add10(3) = {add10(3)}");
+    print(f"add100(3) = {add100(3)}");
+
+    // make_multiplier
+    fn make_multiplier(factor: Int) -> fn(Int) -> Int {
+        |x: Int| -> Int { x * factor }
+    }
+
+    let double = make_multiplier(2);
+    let triple = make_multiplier(3);
+
+    print(f"double(7) = {double(7)}");
+    print(f"triple(7) = {triple(7)}");
+
+    // Compose returned closures
+    let result = double(add5(10));
+    print(f"double(add5(10)) = {result}");
+}
+
+/// Nested closure captures
+fn test_nested_captures() {
+    print("\n=== Nested Captures ===");
+
+    let a = 1;
+    let b = 2;
+
+    // Outer captures a, inner captures both a and b through outer
+    let outer = |x: Int| -> fn(Int) -> Int {
+        let captured_a = a;
+        |y: Int| -> Int { x + y + captured_a + b }
+    };
+
+    let inner1 = outer(10);
+    let inner2 = outer(20);
+
+    print(f"inner1(100) = {inner1(100)}");
+    print(f"inner2(100) = {inner2(100)}");
+
+    // Currying
+    fn curry_add(a: Int) -> fn(Int) -> fn(Int) -> Int {
+        |b: Int| -> fn(Int) -> Int {
+            |c: Int| -> Int { a + b + c }
+        }
+    }
+
+    let step1 = curry_add(1);
+    let step2 = step1(2);
+    let result = step2(3);
+    print(f"curry_add(1)(2)(3) = {result}");
+
+    let alt = curry_add(10)(20)(30);
+    print(f"curry_add(10)(20)(30) = {alt}");
+}
+
+/// Closures created in loops
+fn test_capture_in_loops() {
+    print("\n=== Capture in Loops ===");
+
+    // Create closures in a loop, each capturing the loop variable
+    let mut closures: List<fn() -> Int> = [];
+    let mut i = 0;
+    while i < 5 {
+        let captured_i = i;
+        closures.push(|| captured_i);
+        i = i + 1;
+    }
+
+    // Each closure should return its captured value
+    let mut j = 0;
+    while j < 5 {
+        print(f"closure[{j}]() = {closures[j]()}");
+        j = j + 1;
+    }
+
+    // Closures with accumulation in loop
+    let mut sum = 0;
+    let adder = |n: Int| {
+        sum = sum + n;
+        sum
+    };
+
+    i = 1;
+    while i <= 5 {
+        print(f"adder({i}) = {adder(i)}");
+        i = i + 1;
+    }
+}
+
+/// Multiple closures sharing mutable state
+fn test_multi_closure_shared_state() {
+    print("\n=== Multi Closure Shared State ===");
+
+    let mut state = 0;
+
+    let add = |n: Int| {
+        state = state + n;
+        state
+    };
+
+    let sub = |n: Int| {
+        state = state - n;
+        state
+    };
+
+    let get = || state;
+
+    print(f"initial = {get()}");
+    print(f"add(10) = {add(10)}");
+    print(f"add(20) = {add(20)}");
+    print(f"sub(5) = {sub(5)}");
+    print(f"get() = {get()}");
+    print(f"sub(15) = {sub(15)}");
+    print(f"final = {get()}");
+}

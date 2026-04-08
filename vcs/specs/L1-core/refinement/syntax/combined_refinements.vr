@@ -1,0 +1,176 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, syntax, combined, interoperability
+
+/// Demonstrates combining multiple refinement syntaxes in a single program.
+/// Shows interoperability between inline, lambda, and named predicates.
+
+// ============================================================================
+// Named Predicates (reusable building blocks)
+// ============================================================================
+
+/// Basic positivity check
+predicate is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+/// Non-negativity check
+predicate is_non_negative(x: Int) -> Bool {
+    x >= 0
+}
+
+/// Non-zero check
+predicate is_non_zero(x: Int) -> Bool {
+    x != 0
+}
+
+/// Bounded range check
+predicate is_bounded(x: Int, lo: Int, hi: Int) -> Bool {
+    x >= lo && x < hi
+}
+
+// ============================================================================
+// Inline refinement syntax (shorthand with implicit 'it')
+// ============================================================================
+
+/// Basic integer refinements
+type Positive is Int{> 0};
+type NonZero is Int{!= 0};
+type NonNegative is Int{>= 0};
+type Negative is Int{< 0};
+
+/// Range refinements
+type Byte is Int{>= 0 && < 256};
+type Percentage is Int{>= 0 && <= 100};
+type ValidAge is Int{>= 0 && <= 150};
+
+/// Float refinements
+type UnitInterval is Float{>= 0.0 && <= 1.0};
+type PositiveFloat is Float{> 0.0};
+type NonZeroFloat is Float{!= 0.0};
+
+/// Text refinements with inline syntax
+type NonEmptyText is Text{len(it) > 0};
+type ShortText is Text{len(it) <= 255};
+
+/// List refinements
+type NonEmptyList<T> is List<T>{len(it) > 0};
+
+// ============================================================================
+// Lambda refinement syntax (explicit closure)
+// ============================================================================
+
+/// Integer refinements with lambda
+type EvenPositive is Int where |x| x > 0 && x % 2 == 0;
+type OddPositive is Int where |x| x > 0 && x % 2 != 0;
+type ValidPort is Int where |p| p >= 1 && p <= 65535;
+type PowerOfTwo is Int where |n| n > 0 && (n & (n - 1)) == 0;
+
+/// Float refinements with lambda
+type Probability is Float where |p| p >= 0.0 && p <= 1.0;
+type Temperature is Float where |t| t >= -273.15;
+
+/// Text refinements with lambda
+type Username is Text where |s| len(s) >= 3 && len(s) <= 20;
+type StrongPassword is Text where |s| len(s) >= 12;
+
+/// List refinements with lambda
+type SmallList<T> is List<T> where |lst| len(lst) <= 100;
+type Pair<T> is List<T> where |lst| len(lst) == 2;
+type EvenLengthList<T> is List<T> where |lst| len(lst) % 2 == 0;
+
+// ============================================================================
+// Sigma refinement syntax (dependent type notation)
+// ============================================================================
+
+/// Integer refinements with sigma
+type Natural is n: Int where n >= 0;
+type SafeDivisor is d: Int where d != 0;
+type PositiveDivisor is d: Int where d > 0;
+type BoundedInt is v: Int where v >= -100 && v <= 100;
+
+/// Float refinements with sigma
+type NormalizedFloat is f: Float where f >= -1.0 && f <= 1.0;
+type SafeRatio is r: Float where r > 0.0 && r < 1.0;
+
+/// Text refinements with sigma
+type NonEmptySigma is s: Text where len(s) > 0;
+
+// ============================================================================
+// Named predicate types (type T where predicate_name)
+// ============================================================================
+
+type PositiveInt is Int where is_positive;
+type NonNegativeInt is Int where is_non_negative;
+type NonZeroInt is Int where is_non_zero;
+
+// ============================================================================
+// Mixing syntaxes within a program
+// ============================================================================
+
+/// Struct with mixed refinement styles
+type MixedStruct is {
+    inline_field: Int{> 0},
+    lambda_field: Float where |f| f >= 0.0,
+};
+
+/// Function using inline refinement types
+fn add_positive(x: Positive, y: Positive) -> Int {
+    x + y
+}
+
+/// Function using lambda refinement types
+fn clamp_to_byte(x: Int) -> Byte {
+    if x < 0 { 0 }
+    else if x > 255 { 255 }
+    else { x }
+}
+
+/// Function using named predicate type
+fn absolute(x: Int) -> NonNegativeInt {
+    if x >= 0 { x } else { -x }
+}
+
+// ============================================================================
+// Main function: demonstrating all syntaxes coexist
+// ============================================================================
+
+fn main() {
+    // Inline syntax types
+    let pos: Positive = 42;
+    let nz: NonZero = -1;
+    let byte: Byte = 200;
+    let pct: Percentage = 75;
+
+    // Lambda syntax types
+    let even_pos: EvenPositive = 4;
+    let port: ValidPort = 8080;
+    let prob: Probability = 0.5;
+    let temp: Temperature = 20.0;
+
+    // Sigma syntax types
+    let nat: Natural = 10;
+    let div: SafeDivisor = 5;
+    let bounded: BoundedInt = 50;
+
+    // Named predicate types
+    let pos_int: PositiveInt = 7;
+    let non_neg: NonNegativeInt = 0;
+
+    // Struct with mixed fields
+    let ms = MixedStruct { inline_field: 5, lambda_field: 3.14 };
+
+    // Function calls mixing styles
+    let sum = add_positive(1, 2);
+    let clamped = clamp_to_byte(300);
+    let abs = absolute(-10);
+
+    assert(pos > 0);
+    assert(byte >= 0 && byte < 256);
+    assert(pct >= 0 && pct <= 100);
+    assert(even_pos > 0 && even_pos % 2 == 0);
+    assert(sum == 3);
+    assert(clamped == 255);
+    assert(abs == 10);
+}

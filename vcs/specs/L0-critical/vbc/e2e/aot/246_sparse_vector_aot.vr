@@ -1,0 +1,199 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, sparse, vector, math
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for sparse vector operations (index-value pairs)
+
+// Sparse vector: up to 8 non-zero entries
+type SparseVec is {
+    i0: Int, v0: Int, i1: Int, v1: Int,
+    i2: Int, v2: Int, i3: Int, v3: Int,
+    i4: Int, v4: Int, i5: Int, v5: Int,
+    i6: Int, v6: Int, i7: Int, v7: Int,
+    nnz: Int  // number of non-zeros
+};
+
+fn sv_new() -> SparseVec {
+    SparseVec {
+        i0: 0, v0: 0, i1: 0, v1: 0, i2: 0, v2: 0, i3: 0, v3: 0,
+        i4: 0, v4: 0, i5: 0, v5: 0, i6: 0, v6: 0, i7: 0, v7: 0,
+        nnz: 0
+    }
+}
+
+fn sv_idx(s: SparseVec, k: Int) -> Int {
+    if k == 0 { s.i0 } else if k == 1 { s.i1 }
+    else if k == 2 { s.i2 } else if k == 3 { s.i3 }
+    else if k == 4 { s.i4 } else if k == 5 { s.i5 }
+    else if k == 6 { s.i6 } else if k == 7 { s.i7 }
+    else { -1 }
+}
+
+fn sv_val(s: SparseVec, k: Int) -> Int {
+    if k == 0 { s.v0 } else if k == 1 { s.v1 }
+    else if k == 2 { s.v2 } else if k == 3 { s.v3 }
+    else if k == 4 { s.v4 } else if k == 5 { s.v5 }
+    else if k == 6 { s.v6 } else if k == 7 { s.v7 }
+    else { 0 }
+}
+
+fn sv_set_entry(s: SparseVec, k: Int, idx: Int, val: Int) -> SparseVec {
+    SparseVec {
+        i0: if k == 0 { idx } else { s.i0 }, v0: if k == 0 { val } else { s.v0 },
+        i1: if k == 1 { idx } else { s.i1 }, v1: if k == 1 { val } else { s.v1 },
+        i2: if k == 2 { idx } else { s.i2 }, v2: if k == 2 { val } else { s.v2 },
+        i3: if k == 3 { idx } else { s.i3 }, v3: if k == 3 { val } else { s.v3 },
+        i4: if k == 4 { idx } else { s.i4 }, v4: if k == 4 { val } else { s.v4 },
+        i5: if k == 5 { idx } else { s.i5 }, v5: if k == 5 { val } else { s.v5 },
+        i6: if k == 6 { idx } else { s.i6 }, v6: if k == 6 { val } else { s.v6 },
+        i7: if k == 7 { idx } else { s.i7 }, v7: if k == 7 { val } else { s.v7 },
+        nnz: s.nnz
+    }
+}
+
+fn sv_push(s: SparseVec, idx: Int, val: Int) -> SparseVec {
+    if s.nnz >= 8 { return s; }
+    let mut s2 = sv_set_entry(s, s.nnz, idx, val);
+    SparseVec {
+        i0: s2.i0, v0: s2.v0, i1: s2.i1, v1: s2.v1,
+        i2: s2.i2, v2: s2.v2, i3: s2.i3, v3: s2.v3,
+        i4: s2.i4, v4: s2.v4, i5: s2.i5, v5: s2.v5,
+        i6: s2.i6, v6: s2.v6, i7: s2.i7, v7: s2.v7,
+        nnz: s.nnz + 1
+    }
+}
+
+// Sparse dot product
+fn sv_dot(a: SparseVec, b: SparseVec) -> Int {
+    let mut result = 0;
+    let mut ai = 0;
+    while ai < a.nnz {
+        let a_idx = sv_idx(a, ai);
+        let mut bi = 0;
+        while bi < b.nnz {
+            if sv_idx(b, bi) == a_idx {
+                result = result + sv_val(a, ai) * sv_val(b, bi);
+            }
+            bi = bi + 1;
+        }
+        ai = ai + 1;
+    }
+    result
+}
+
+// L1 norm (sum of absolute values)
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+fn sv_l1_norm(s: SparseVec) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < s.nnz {
+        sum = sum + abs_val(sv_val(s, i));
+        i = i + 1;
+    }
+    sum
+}
+
+// L2 norm squared
+fn sv_norm_sq(s: SparseVec) -> Int {
+    sv_dot(s, s)
+}
+
+// Scale
+fn sv_scale(s: SparseVec, c: Int) -> SparseVec {
+    let mut r = sv_new();
+    let mut i = 0;
+    while i < s.nnz {
+        r = sv_push(r, sv_idx(s, i), sv_val(s, i) * c);
+        i = i + 1;
+    }
+    r
+}
+
+// Sum of all values
+fn sv_sum(s: SparseVec) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < s.nnz {
+        total = total + sv_val(s, i);
+        i = i + 1;
+    }
+    total
+}
+
+fn test_basic() {
+    let mut v = sv_new();
+    v = sv_push(v, 0, 3);
+    v = sv_push(v, 5, 7);
+    v = sv_push(v, 9, -2);
+    assert_eq(v.nnz, 3);
+    assert_eq(sv_sum(v), 8);
+    assert_eq(sv_l1_norm(v), 12);
+}
+
+fn test_dot_product() {
+    // a = {0:1, 2:3, 5:2}
+    let mut a = sv_new();
+    a = sv_push(a, 0, 1);
+    a = sv_push(a, 2, 3);
+    a = sv_push(a, 5, 2);
+
+    // b = {2:4, 5:5, 7:1}
+    let mut b = sv_new();
+    b = sv_push(b, 2, 4);
+    b = sv_push(b, 5, 5);
+    b = sv_push(b, 7, 1);
+
+    // dot = 3*4 + 2*5 = 12 + 10 = 22
+    assert_eq(sv_dot(a, b), 22);
+
+    // Orthogonal vectors
+    let mut c = sv_new();
+    c = sv_push(c, 1, 5);
+    c = sv_push(c, 3, 10);
+    // a has indices {0,2,5}, c has {1,3} -> no overlap
+    assert_eq(sv_dot(a, c), 0);
+}
+
+fn test_norm() {
+    // v = {0:3, 1:4}
+    let mut v = sv_new();
+    v = sv_push(v, 0, 3);
+    v = sv_push(v, 1, 4);
+    assert_eq(sv_norm_sq(v), 25);  // 9+16
+    assert_eq(sv_l1_norm(v), 7);
+}
+
+fn test_scale() {
+    let mut v = sv_new();
+    v = sv_push(v, 0, 2);
+    v = sv_push(v, 3, 5);
+
+    let scaled = sv_scale(v, 3);
+    assert_eq(sv_val(scaled, 0), 6);
+    assert_eq(sv_val(scaled, 1), 15);
+    assert_eq(scaled.nnz, 2);
+}
+
+fn test_self_dot() {
+    let mut v = sv_new();
+    v = sv_push(v, 0, 1);
+    v = sv_push(v, 1, 2);
+    v = sv_push(v, 2, 3);
+    // norm_sq = 1+4+9 = 14
+    assert_eq(sv_dot(v, v), 14);
+    assert_eq(sv_norm_sq(v), 14);
+}
+
+fn main() -> Int {
+    test_basic();
+    test_dot_product();
+    test_norm();
+    test_scale();
+    test_self_dot();
+    print("[OK] 246_sparse_vector_aot");
+    0
+}

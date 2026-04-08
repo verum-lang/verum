@@ -1,0 +1,149 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, threading, producer-consumer, sync
+// @expected-exit: 0
+
+// Test: producer-consumer pattern with multiple threads.
+// Spawns producer threads that compute partial results,
+// then aggregates in the main thread.
+
+fn produce_squares(start: Int, count: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < start + count) {
+        acc = acc + i * i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn produce_cubes(start: Int, count: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < start + count) {
+        acc = acc + i * i * i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn fibonacci(n: Int) -> Int {
+    if (n <= 1) { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while (i <= n) {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    b
+}
+
+fn main() -> Int {
+    // Test 1: 4 producer threads computing sum of squares over disjoint ranges
+    // sum of i^2 for i in 0..99 = 99*100*199/6 = 328350
+    let p1 = spawn produce_squares(0, 25);
+    let p2 = spawn produce_squares(25, 25);
+    let p3 = spawn produce_squares(50, 25);
+    let p4 = spawn produce_squares(75, 25);
+
+    let total_sq = p1.await + p2.await + p3.await + p4.await;
+    if (total_sq != 328350) {
+        print(f"FAIL test1: sum_squares={total_sq}, expected=328350");
+        return 1;
+    }
+
+    // Test 2: mixed workloads — squares and cubes in parallel
+    // sum of i^3 for i in 0..49 = (49*50/2)^2 = 1225^2 = 1500625
+    let sq_task = spawn produce_squares(0, 100);
+    let cu_task = spawn produce_cubes(0, 50);
+
+    let sq_result = sq_task.await;
+    let cu_result = cu_task.await;
+
+    if (sq_result != 328350) {
+        print(f"FAIL test2: squares={sq_result}, expected=328350");
+        return 1;
+    }
+    if (cu_result != 1500625) {
+        print(f"FAIL test2: cubes={cu_result}, expected=1500625");
+        return 1;
+    }
+
+    // Test 3: 8-way parallel fibonacci
+    let f1 = spawn fibonacci(10);
+    let f2 = spawn fibonacci(15);
+    let f3 = spawn fibonacci(20);
+    let f4 = spawn fibonacci(25);
+    let f5 = spawn fibonacci(30);
+    let f6 = spawn fibonacci(35);
+    let f7 = spawn fibonacci(5);
+    let f8 = spawn fibonacci(8);
+
+    let r1 = f1.await;
+    let r2 = f2.await;
+    let r3 = f3.await;
+    let r4 = f4.await;
+    let r5 = f5.await;
+    let r6 = f6.await;
+    let r7 = f7.await;
+    let r8 = f8.await;
+
+    if (r1 != 55) {
+        print(f"FAIL test3: fib(10)={r1}, expected=55");
+        return 1;
+    }
+    if (r2 != 610) {
+        print(f"FAIL test3: fib(15)={r2}, expected=610");
+        return 1;
+    }
+    if (r3 != 6765) {
+        print(f"FAIL test3: fib(20)={r3}, expected=6765");
+        return 1;
+    }
+    if (r4 != 75025) {
+        print(f"FAIL test3: fib(25)={r4}, expected=75025");
+        return 1;
+    }
+    if (r5 != 832040) {
+        print(f"FAIL test3: fib(30)={r5}, expected=832040");
+        return 1;
+    }
+    if (r6 != 9227465) {
+        print(f"FAIL test3: fib(35)={r6}, expected=9227465");
+        return 1;
+    }
+    if (r7 != 5) {
+        print(f"FAIL test3: fib(5)={r7}, expected=5");
+        return 1;
+    }
+    if (r8 != 21) {
+        print(f"FAIL test3: fib(8)={r8}, expected=21");
+        return 1;
+    }
+
+    // Test 4: sequential spawn-await pattern (pipeline)
+    let stage1 = spawn produce_squares(0, 10);
+    let s1_result = stage1.await;
+    // sum of i^2 for 0..9 = 285
+    if (s1_result != 285) {
+        print(f"FAIL test4: stage1={s1_result}, expected=285");
+        return 1;
+    }
+
+    // Feed result as input to next stage
+    let stage2 = spawn fibonacci(20);
+    let s2_result = stage2.await;
+    let pipeline_result = s1_result + s2_result;
+    // 285 + 6765 = 7050
+    if (pipeline_result != 7050) {
+        print(f"FAIL test4: pipeline={pipeline_result}, expected=7050");
+        return 1;
+    }
+
+    print("875_thread_producer_consumer: PASS");
+    0
+}

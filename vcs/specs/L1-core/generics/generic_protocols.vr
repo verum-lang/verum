@@ -1,0 +1,203 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, protocols, traits, polymorphism
+//
+// Tests generic protocol implementations with type parameter scoping.
+
+// =============================================================================
+// SECTION 1: Basic Generic Protocol Implementation
+// =============================================================================
+
+/// Simple protocol for shapes
+type Area is protocol {
+    fn area(&self) -> Float;
+};
+
+/// Generic container
+type Wrapper<T> is {
+    inner: T,
+};
+
+implement<T> Wrapper<T> {
+    fn new(inner: T) -> Wrapper<T> {
+        Wrapper { inner }
+    }
+
+    fn get(&self) -> &T {
+        &self.inner
+    }
+
+    fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+// =============================================================================
+// SECTION 2: Protocol Implementation for Concrete Types
+// =============================================================================
+
+type Circle is {
+    radius: Float,
+};
+
+type Rectangle is {
+    width: Float,
+    height: Float,
+};
+
+implement Area for Circle {
+    fn area(&self) -> Float {
+        3.14159 * self.radius * self.radius
+    }
+}
+
+implement Area for Rectangle {
+    fn area(&self) -> Float {
+        self.width * self.height
+    }
+}
+
+// =============================================================================
+// SECTION 3: Protocol Used as Bound
+// =============================================================================
+
+/// Print the area of any shape
+fn describe_area<T: Area>(shape: T) -> Text {
+    let a = shape.area();
+    f"area = {a}"
+}
+
+/// Compare areas of two (possibly different) shapes
+fn larger_area<A: Area, B: Area>(a: A, b: B) -> Bool {
+    a.area() > b.area()
+}
+
+// =============================================================================
+// SECTION 4: Generic Types with Protocol Methods
+// =============================================================================
+
+/// Generic result type
+type MyResult<T, E> is
+    | MyOk(T)
+    | MyErr(E);
+
+implement<T, E> MyResult<T, E> {
+    fn is_ok(&self) -> Bool {
+        match self {
+            MyOk(_) => true,
+            MyErr(_) => false,
+        }
+    }
+
+    fn is_err(&self) -> Bool {
+        !self.is_ok()
+    }
+
+    fn map<U>(self, f: fn(T) -> U) -> MyResult<U, E> {
+        match self {
+            MyOk(t) => MyOk(f(t)),
+            MyErr(e) => MyErr(e),
+        }
+    }
+
+    fn and_then<U>(self, f: fn(T) -> MyResult<U, E>) -> MyResult<U, E> {
+        match self {
+            MyOk(t) => f(t),
+            MyErr(e) => MyErr(e),
+        }
+    }
+}
+
+// =============================================================================
+// SECTION 5: Generic Pair
+// =============================================================================
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+implement<A, B> Pair<A, B> {
+    fn new(first: A, second: B) -> Pair<A, B> {
+        Pair { first, second }
+    }
+
+    fn map_first<C>(self, f: fn(A) -> C) -> Pair<C, B> {
+        Pair { first: f(self.first), second: self.second }
+    }
+
+    fn map_second<C>(self, f: fn(B) -> C) -> Pair<A, C> {
+        Pair { first: self.first, second: f(self.second) }
+    }
+
+    fn swap(self) -> Pair<B, A> {
+        Pair { first: self.second, second: self.first }
+    }
+}
+
+// =============================================================================
+// SECTION 6: Main Test Cases
+// =============================================================================
+
+fn main() {
+    // Test Wrapper
+    let w_int = Wrapper.new(42);
+    let w_text = Wrapper.new("hello");
+    assert(*w_int.get() == 42);
+    assert(*w_text.get() == "hello");
+    assert(w_int.into_inner() == 42);
+
+    // Test Area protocol
+    let circle = Circle { radius: 5.0 };
+    let rect = Rectangle { width: 4.0, height: 6.0 };
+
+    // Area of circle ≈ 78.53
+    assert(circle.area() > 78.0);
+    assert(circle.area() < 79.0);
+
+    // Area of rect = 24.0
+    assert(rect.area() == 24.0);
+
+    // Test protocol as bound
+    assert(larger_area(circle, rect));
+
+    // Test MyResult
+    let ok_val: MyResult<Int, Text> = MyOk(42);
+    let err_val: MyResult<Int, Text> = MyErr("error");
+
+    assert(ok_val.is_ok());
+    assert(!ok_val.is_err());
+    assert(err_val.is_err());
+    assert(!err_val.is_ok());
+
+    // Test map
+    let doubled = MyOk(21).map(|x| x * 2);
+    assert(doubled.is_ok());
+    match doubled {
+        MyOk(n) => assert(n == 42),
+        MyErr(_) => unreachable(),
+    }
+
+    // Test and_then
+    let chain = MyOk(10)
+        .and_then(|x| if x > 0 { MyOk(x * 2) } else { MyErr("negative") });
+    assert(chain.is_ok());
+
+    let chain_err: MyResult<Int, Text> = MyOk(-5)
+        .and_then(|x| if x > 0 { MyOk(x * 2) } else { MyErr("negative") });
+    assert(chain_err.is_err());
+
+    // Test Pair
+    let p = Pair.new(1, "hello");
+    assert(p.first == 1);
+    assert(p.second == "hello");
+
+    let p2 = p.map_first(|n| n * 2);
+    assert(p2.first == 2);
+    assert(p2.second == "hello");
+
+    let p3 = Pair.new("x", 42).swap();
+    assert(p3.first == 42);
+    assert(p3.second == "x");
+}

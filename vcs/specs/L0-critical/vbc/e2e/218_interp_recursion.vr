@@ -1,0 +1,181 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, recursion
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: direct recursion (factorial, fibonacci),
+// mutual recursion, tail recursion
+
+// =============================================================================
+// Direct recursion — factorial
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn test_factorial() {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+    assert_eq(factorial(12), 479001600);
+}
+
+// =============================================================================
+// Direct recursion — fibonacci
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
+}
+
+fn test_fibonacci() {
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(2), 1);
+    assert_eq(fib(5), 5);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(15), 610);
+}
+
+// =============================================================================
+// Recursion — power
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn power(base: Int, exp: Int) -> Int {
+    if exp == 0 {
+        1
+    } else {
+        base * power(base, exp - 1)
+    }
+}
+
+fn test_power() {
+    assert_eq(power(2, 0), 1);
+    assert_eq(power(2, 1), 2);
+    assert_eq(power(2, 10), 1024);
+    assert_eq(power(3, 5), 243);
+    assert_eq(power(10, 3), 1000);
+}
+
+// =============================================================================
+// Recursion — sum of digits
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn sum_digits(n: Int) -> Int {
+    if n < 10 {
+        n
+    } else {
+        n % 10 + sum_digits(n / 10)
+    }
+}
+
+fn test_sum_digits() {
+    assert_eq(sum_digits(0), 0);
+    assert_eq(sum_digits(5), 5);
+    assert_eq(sum_digits(123), 6);
+    assert_eq(sum_digits(999), 27);
+    assert_eq(sum_digits(12345), 15);
+}
+
+// =============================================================================
+// Mutual recursion
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn is_even_rec(n: Int) -> Int {
+    if n == 0 {
+        1
+    } else {
+        is_odd_rec(n - 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn is_odd_rec(n: Int) -> Int {
+    if n == 0 {
+        0
+    } else {
+        is_even_rec(n - 1)
+    }
+}
+
+fn test_mutual_recursion() {
+    assert_eq(is_even_rec(0), 1);
+    assert_eq(is_even_rec(1), 0);
+    assert_eq(is_even_rec(2), 1);
+    assert_eq(is_even_rec(10), 1);
+    assert_eq(is_odd_rec(0), 0);
+    assert_eq(is_odd_rec(1), 1);
+    assert_eq(is_odd_rec(3), 1);
+    assert_eq(is_odd_rec(10), 0);
+}
+
+// =============================================================================
+// Tail recursion pattern (simulated)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn factorial_tail(n: Int, acc: Int) -> Int {
+    if n <= 1 {
+        acc
+    } else {
+        factorial_tail(n - 1, acc * n)
+    }
+}
+
+fn test_tail_recursion() {
+    assert_eq(factorial_tail(1, 1), 1);
+    assert_eq(factorial_tail(5, 1), 120);
+    assert_eq(factorial_tail(10, 1), 3628800);
+}
+
+// =============================================================================
+// Recursive GCD
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+fn test_recursive_gcd() {
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(0, 5), 5);
+    assert_eq(gcd(48, 18), 6);
+}
+
+fn main() -> Int {
+    test_factorial();
+    test_fibonacci();
+    test_power();
+    test_sum_digits();
+    test_mutual_recursion();
+    test_tail_recursion();
+    test_recursive_gcd();
+    print("[OK] 218_interp_recursion");
+    0
+}

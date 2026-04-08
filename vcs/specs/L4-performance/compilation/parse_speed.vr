@@ -1,0 +1,490 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: compilation, parser, speed, throughput
+// @description: Parser performance benchmark (target: > 100K LOC/sec)
+
+/// Parser Performance Benchmark
+///
+/// This benchmark measures the throughput of the Verum parser.
+/// Parsing is typically the fastest phase of compilation.
+///
+/// Target: > 100,000 lines of code per second
+///
+/// Parser characteristics:
+/// - Recursive descent parser
+/// - Single-pass tokenization (logos)
+/// - Zero-copy where possible
+/// - Parallel module parsing
+///
+/// Spec reference: docs/detailed/05-syntax-grammar.md
+
+const SMALL_FILE_LINES: Int = 100;
+const MEDIUM_FILE_LINES: Int = 1_000;
+const LARGE_FILE_LINES: Int = 10_000;
+const XLARGE_FILE_LINES: Int = 100_000;
+
+const TARGET_LOC_PER_SEC: Int = 100_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Parser Performance");
+
+    // Single-file parsing benchmarks
+    results.add(benchmark_small_file_parse());
+    results.add(benchmark_medium_file_parse());
+    results.add(benchmark_large_file_parse());
+    results.add(benchmark_xlarge_file_parse());
+
+    // Parser stress tests
+    results.add(benchmark_deep_nesting());
+    results.add(benchmark_wide_expressions());
+    results.add(benchmark_complex_types());
+    results.add(benchmark_many_functions());
+
+    // Parallel parsing
+    results.add(benchmark_parallel_module_parse());
+
+    results.report();
+    assert(results.all_pass(), "Parser performance below target");
+}
+
+/// Generate synthetic Verum source code
+fn generate_source(lines: Int) -> Text {
+    let mut source = Text.with_capacity(lines * 50);
+
+    // Module header
+    source.push_str("// Auto-generated benchmark source\n");
+    source.push_str("module benchmark;\n\n");
+
+    // Generate functions to reach target line count
+    let functions_needed = lines / 10;  // ~10 lines per function
+
+    for i in 0..functions_needed {
+        source.push_str(&format(
+            "fn compute_{}(x: Int, y: Int) -> Int {{\n",
+            i
+        ));
+        source.push_str("    let a = x + y;\n");
+        source.push_str("    let b = x * y;\n");
+        source.push_str("    let c = a - b;\n");
+        source.push_str("    if c > 0 {\n");
+        source.push_str("        a + b + c\n");
+        source.push_str("    } else {\n");
+        source.push_str("        a * b * c\n");
+        source.push_str("    }\n");
+        source.push_str("}\n\n");
+    }
+
+    source
+}
+
+/// Benchmark: Parse small file (~100 LOC)
+fn benchmark_small_file_parse() -> BenchmarkResult {
+    let source = generate_source(SMALL_FILE_LINES);
+    let iterations = 10_000;
+
+    // Warmup
+    for _ in 0..1_000 {
+        black_box(parse_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(parse_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_lines = SMALL_FILE_LINES * iterations;
+    let loc_per_sec = (total_lines as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "small_file_parse",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Benchmark: Parse medium file (~1K LOC)
+fn benchmark_medium_file_parse() -> BenchmarkResult {
+    let source = generate_source(MEDIUM_FILE_LINES);
+    let iterations = 1_000;
+
+    for _ in 0..100 {
+        black_box(parse_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(parse_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_lines = MEDIUM_FILE_LINES * iterations;
+    let loc_per_sec = (total_lines as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "medium_file_parse",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Benchmark: Parse large file (~10K LOC)
+fn benchmark_large_file_parse() -> BenchmarkResult {
+    let source = generate_source(LARGE_FILE_LINES);
+    let iterations = 100;
+
+    for _ in 0..10 {
+        black_box(parse_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(parse_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_lines = LARGE_FILE_LINES * iterations;
+    let loc_per_sec = (total_lines as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "large_file_parse",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Benchmark: Parse extra large file (~100K LOC)
+fn benchmark_xlarge_file_parse() -> BenchmarkResult {
+    let source = generate_source(XLARGE_FILE_LINES);
+    let iterations = 10;
+
+    for _ in 0..2 {
+        black_box(parse_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(parse_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_lines = XLARGE_FILE_LINES * iterations;
+    let loc_per_sec = (total_lines as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "xlarge_file_parse",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Generate deeply nested code
+fn generate_deep_nesting(depth: Int) -> Text {
+    let mut source = Text.from("fn deep() -> Int {\n");
+
+    for i in 0..depth {
+        let indent = "    ".repeat(i + 1);
+        source.push_str(&format("{}if true {{\n", indent));
+    }
+
+    let indent = "    ".repeat(depth + 1);
+    source.push_str(&format("{}42\n", indent));
+
+    for i in (0..depth).rev() {
+        let indent = "    ".repeat(i + 1);
+        source.push_str(&format("{}}}\n", indent));
+    }
+
+    source.push_str("}\n");
+    source
+}
+
+/// Benchmark: Deeply nested code parsing
+fn benchmark_deep_nesting() -> BenchmarkResult {
+    // Nested to depth 100 - tests parser stack
+    let source = generate_deep_nesting(100);
+    let iterations = 1_000;
+
+    for _ in 0..100 {
+        black_box(parse_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(parse_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let parses_per_sec = (iterations as Float / elapsed_ms as Float) * 1000.0;
+
+    // Target: 10K parses/sec for deep nesting
+    let target = 10_000.0;
+
+    BenchmarkResult {
+        name: "deep_nesting",
+        metric: "parses/sec",
+        value: parses_per_sec,
+        target: target,
+        passed: parses_per_sec > target,
+    }
+}
+
+/// Generate wide expression tree
+fn generate_wide_expression(width: Int) -> Text {
+    let mut expr_parts: List<Text> = List.new();
+
+    for i in 0..width {
+        expr_parts.push(format("x{}", i));
+    }
+
+    let expr = expr_parts.join(" + ");
+
+    format(
+        "fn wide(x0: Int{}) -> Int {{\n    {}\n}}\n",
+        (1..width).map(|i| format(", x{}: Int", i)).collect.<Text>(),
+        expr
+    )
+}
+
+/// Benchmark: Wide expression parsing
+fn benchmark_wide_expressions() -> BenchmarkResult {
+    // Expression with 100 terms
+    let source = generate_wide_expression(100);
+    let iterations = 1_000;
+
+    for _ in 0..100 {
+        black_box(parse_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(parse_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let parses_per_sec = (iterations as Float / elapsed_ms as Float) * 1000.0;
+
+    let target = 5_000.0;
+
+    BenchmarkResult {
+        name: "wide_expressions",
+        metric: "parses/sec",
+        value: parses_per_sec,
+        target: target,
+        passed: parses_per_sec > target,
+    }
+}
+
+/// Generate complex type signatures
+fn generate_complex_types() -> Text {
+    let mut source = Text.new();
+
+    // Generic types with bounds
+    source.push_str("fn complex<T, U, V>(");
+    source.push_str("    x: Map<Text, List<Maybe<T> >>,");
+    source.push_str("    y: Result<U, Error>,");
+    source.push_str("    z: fn(T, U) -> V using [Logger, Database]");
+    source.push_str(") -> Result<Map<T, List<V>>, Error>");
+    source.push_str("where T: Hash + Eq, U: Clone, V: Display {");
+    source.push_str("    todo()");
+    source.push_str("}");
+
+    // Refinement types
+    source.push_str("\n\ntype PositiveInt = Int{> 0};\n");
+    source.push_str("type BoundedFloat = Float{>= 0.0 && <= 1.0};\n");
+    source.push_str("type NonEmptyList<T> = List<T>{len() > 0};\n");
+
+    source
+}
+
+/// Benchmark: Complex type parsing
+fn benchmark_complex_types() -> BenchmarkResult {
+    let source = generate_complex_types();
+    let iterations = 10_000;
+
+    for _ in 0..1_000 {
+        black_box(parse_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(parse_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let parses_per_sec = (iterations as Float / elapsed_ms as Float) * 1000.0;
+
+    let target = 50_000.0;
+
+    BenchmarkResult {
+        name: "complex_types",
+        metric: "parses/sec",
+        value: parses_per_sec,
+        target: target,
+        passed: parses_per_sec > target,
+    }
+}
+
+/// Generate source with many small functions
+fn generate_many_functions(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 30);
+
+    for i in 0..count {
+        source.push_str(&format("fn f{}() {{ }}\n", i));
+    }
+
+    source
+}
+
+/// Benchmark: Many function definitions
+fn benchmark_many_functions() -> BenchmarkResult {
+    let source = generate_many_functions(1_000);
+    let iterations = 100;
+
+    for _ in 0..10 {
+        black_box(parse_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(parse_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let functions_per_sec = (1_000 * iterations) as Float / (elapsed_ms as Float / 1000.0);
+
+    let target = 100_000.0;  // 100K functions/sec
+
+    BenchmarkResult {
+        name: "many_functions",
+        metric: "funcs/sec",
+        value: functions_per_sec,
+        target: target,
+        passed: functions_per_sec > target,
+    }
+}
+
+/// Benchmark: Parallel module parsing
+fn benchmark_parallel_module_parse() -> BenchmarkResult {
+    // Generate 10 modules with 1K LOC each
+    let modules: List<Text> = (0..10)
+        .map(|i| generate_source(MEDIUM_FILE_LINES))
+        .collect();
+
+    let iterations = 10;
+
+    // Warmup
+    for _ in 0..2 {
+        modules.par_iter().for_each(|m| {
+            black_box(parse_source(m));
+        });
+    }
+
+    // Sequential baseline
+    let seq_timer = Timer.new();
+    seq_timer.start();
+
+    for _ in 0..iterations {
+        for m in modules.iter() {
+            black_box(parse_source(m));
+        }
+    }
+
+    let seq_elapsed = seq_timer.elapsed_ms();
+
+    // Parallel parsing
+    let par_timer = Timer.new();
+    par_timer.start();
+
+    for _ in 0..iterations {
+        modules.par_iter().for_each(|m| {
+            black_box(parse_source(m));
+        });
+    }
+
+    let par_elapsed = par_timer.elapsed_ms();
+
+    let speedup = seq_elapsed as Float / par_elapsed as Float;
+    let expected_speedup = (num_cpus() as Float * 0.7).min(8.0);  // 70% efficiency
+
+    BenchmarkResult {
+        name: "parallel_module_parse",
+        metric: "speedup",
+        value: speedup,
+        target: expected_speedup,
+        passed: speedup > expected_speedup,
+    }
+}
+
+/// Parse source code (compiler API)
+fn parse_source(source: &Text) -> Ast {
+    compiler.parse(source)
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

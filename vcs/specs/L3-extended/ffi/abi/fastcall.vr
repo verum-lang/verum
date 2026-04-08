@@ -1,0 +1,331 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, abi, fastcall, calling-convention, unsafe
+// @description: Tests fastcall calling convention for register-based argument passing
+
+/// ============================================================
+/// FASTCALL CALLING CONVENTION
+/// ============================================================
+///
+/// fastcall passes the first few arguments in registers for speed:
+/// - Microsoft x86: ECX, EDX for first two integer/pointer args
+/// - GCC x86: ECX, EDX (compatible with Microsoft)
+/// - x86-64: Not typically used (win64/sysv are already register-based)
+
+// ------------------------------------------------------------
+// Microsoft fastcall (x86)
+// ------------------------------------------------------------
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi fastcall_lib {
+    /// First arg in ECX
+    @extern("fastcall")
+    fn FastcallOne(a: c_int) -> c_int;
+
+    /// First two args in ECX, EDX
+    @extern("fastcall")
+    fn FastcallTwo(a: c_int, b: c_int) -> c_int;
+
+    /// First two in registers, rest on stack
+    @extern("fastcall")
+    fn FastcallMixed(
+        a: c_int,   // ECX
+        b: c_int,   // EDX
+        c: c_int,   // Stack
+        d: c_int    // Stack
+    ) -> c_int;
+
+    /// Pointers in registers
+    @extern("fastcall")
+    fn FastcallPointers(
+        p1: *const c_int,  // ECX
+        p2: *mut c_int     // EDX
+    ) -> c_int;
+}
+
+/// Export Verum function with fastcall
+@cfg(all(target_os = "windows", target_arch = "x86"))
+@export("fastcall")
+@no_mangle
+extern "fastcall" fn VerumFastcall(a: c_int, b: c_int) -> c_int {
+    a * b
+}
+
+// ------------------------------------------------------------
+// Fastcall Name Decoration
+// ------------------------------------------------------------
+
+/// Microsoft fastcall name decoration:
+/// @FunctionName@ByteCount
+///
+/// int Foo(int a)           -> @Foo@4
+/// int Foo(int a, int b)    -> @Foo@8
+/// int Foo(int a, void* b)  -> @Foo@8
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi decorated_fastcall {
+    /// Explicit decorated name
+    @extern("fastcall", name = "@MyFastcall@4")
+    fn my_fastcall(x: c_int) -> c_int;
+
+    @extern("fastcall", name = "@MyFastcall2@8")
+    fn my_fastcall2(x: c_int, y: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Floating Point in Fastcall
+// ------------------------------------------------------------
+
+/// Note: Floating point arguments do NOT go in ECX/EDX
+/// They are pushed on the stack
+
+@cfg(target_arch = "x86")
+ffi fastcall_float {
+    /// Float goes on stack, not in register
+    @extern("fastcall")
+    fn FastcallFloat(f: c_float) -> c_float;
+
+    /// Mixed: int in ECX, float on stack
+    @extern("fastcall")
+    fn FastcallMixedFloat(
+        i: c_int,      // ECX
+        f: c_float     // Stack (not EDX!)
+    ) -> c_float;
+
+    /// Int, int, then float
+    @extern("fastcall")
+    fn FastcallTwoIntFloat(
+        a: c_int,      // ECX
+        b: c_int,      // EDX
+        f: c_float     // Stack
+    ) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Struct Arguments in Fastcall
+// ------------------------------------------------------------
+
+/// Small structs that fit in registers
+@repr(C)
+type SmallPair is {
+    a: c_int,
+    b: c_int,
+};
+
+/// 8-byte struct might go in ECX:EDX
+@cfg(target_arch = "x86")
+ffi fastcall_struct {
+    /// Small struct behavior is implementation-defined
+    @extern("fastcall")
+    fn FastcallSmallStruct(s: SmallPair) -> c_int;
+
+    /// Pointer to struct in register
+    @extern("fastcall")
+    fn FastcallStructPtr(s: *const SmallPair) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Comparison: fastcall vs cdecl vs stdcall
+// ------------------------------------------------------------
+
+/// cdecl: All arguments on stack, caller cleans
+@cfg(target_arch = "x86")
+ffi cdecl_compare {
+    @extern("C")
+    fn CdeclFunction(a: c_int, b: c_int) -> c_int;
+    // PUSH b
+    // PUSH a
+    // CALL CdeclFunction
+    // ADD ESP, 8  <- caller cleans
+}
+
+/// stdcall: All arguments on stack, callee cleans
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi stdcall_compare {
+    @extern("stdcall")
+    fn StdcallFunction(a: c_int, b: c_int) -> c_int;
+    // PUSH b
+    // PUSH a
+    // CALL StdcallFunction
+    // (callee does RET 8)
+}
+
+/// fastcall: First two args in registers, callee cleans rest
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi fastcall_compare {
+    @extern("fastcall")
+    fn FastcallFunction(a: c_int, b: c_int) -> c_int;
+    // MOV ECX, a
+    // MOV EDX, b
+    // CALL FastcallFunction
+}
+
+// ------------------------------------------------------------
+// thiscall (Related Convention)
+// ------------------------------------------------------------
+
+/// thiscall is used for C++ member functions
+/// - 'thisp pointer passed in ECX
+/// - Other args on stack
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi thiscall_lib {
+    /// C++ member function
+    @extern("thiscall")
+    fn CppMethod(this: *mut CppObject, arg: c_int) -> c_int;
+}
+
+@repr(C)
+type CppObject is {
+    vtable: *const *const c_void,
+    value: c_int,
+};
+
+// ------------------------------------------------------------
+// vectorcall (Windows Extension)
+// ------------------------------------------------------------
+
+/// vectorcall optimizes for SIMD types
+/// - First 6 integer/pointer args in registers
+/// - First 6 float/SIMD args in XMM registers
+
+@cfg(all(target_os = "windows", target_arch = "x86_64"))
+ffi vectorcall_lib {
+    @extern("vectorcall")
+    fn VectorAdd(
+        a: f32x4,   // XMM0
+        b: f32x4    // XMM1
+    ) -> f32x4;     // XMM0;
+
+    @extern("vectorcall")
+    fn VectorMixed(
+        count: c_int,  // RCX
+        v1: f32x4,     // XMM0
+        v2: f32x4      // XMM1
+    ) -> f32x4;
+}
+
+@cfg(all(target_os = "windows", target_arch = "x86_64"))
+@repr(C, align(16))
+type f32x4 is {
+    values: [f32; 4],
+};
+
+// ------------------------------------------------------------
+// Register Preservation
+// ------------------------------------------------------------
+
+/// fastcall register usage:
+/// Caller-saved (volatile): EAX, ECX, EDX
+/// Callee-saved (non-volatile): EBX, ESI, EDI, EBP
+
+/// This means ECX, EDX are clobbered by fastcall functions
+
+@cfg(target_arch = "x86")
+fn demonstrate_register_clobber() {
+    let x = 10;
+    let y = 20;
+
+    // After calling fastcall function:
+    // - ECX and EDX are potentially modified
+    // - EBX, ESI, EDI are preserved
+    let result = unsafe {
+        fastcall_lib.FastcallTwo(x, y)
+    };
+}
+
+// ------------------------------------------------------------
+// Callback Types with fastcall
+// ------------------------------------------------------------
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+type FastcallCallback is extern "fastcall" fn(c_int, c_int) -> c_int;
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi callback_api {
+    @extern("fastcall")
+    fn RegisterFastcallCallback(cb: FastcallCallback) -> c_int;
+
+    @extern("fastcall")
+    fn InvokeCallback(a: c_int, b: c_int) -> c_int;
+}
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+@export("fastcall")
+@no_mangle
+extern "fastcall" fn my_callback(a: c_int, b: c_int) -> c_int {
+    a + b
+}
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+fn setup_callback() {
+    // SAFETY: Registering valid fastcall callback
+    unsafe {
+        callback_api.RegisterFastcallCallback(my_callback);
+    }
+}
+
+// ------------------------------------------------------------
+// Inline Assembly Reference
+// ------------------------------------------------------------
+
+/// How fastcall translates to assembly (x86):
+///
+/// C code:
+/// __fastcall int Add(int a, int b) { return a + b; }
+///
+/// Assembly:
+/// @Add@8:
+///     mov eax, ecx    ; a is in ECX
+///     add eax, edx    ; b is in EDX
+///     ret             ; return value in EAX
+
+/// Calling code:
+/// result = Add(5, 3);
+///
+/// Assembly:
+///     mov ecx, 5      ; first arg to ECX
+///     mov edx, 3      ; second arg to EDX
+///     call @Add@8     ; call the function
+///     ; result is in EAX
+
+// ------------------------------------------------------------
+// GCC fastcall Attribute
+// ------------------------------------------------------------
+
+/// GCC also supports fastcall via __attribute__((fastcall))
+/// Compatible with Microsoftps implementation
+
+@cfg(all(target_os = "linux", target_arch = "x86"))
+ffi gcc_fastcall {
+    /// GCC fastcall function
+    @extern("fastcall")
+    fn gcc_fastcall_function(a: c_int, b: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Performance Considerations
+// ------------------------------------------------------------
+
+/// fastcall advantages:
+/// - Faster argument passing (no memory access for first 2 args)
+/// - Reduced stack usage
+/// - Fewer cache misses
+///
+/// fastcall disadvantages:
+/// - More complex implementation
+/// - Limited to first 2 integer/pointer args
+/// - Floating point still uses stack
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_float is f32;
+type c_void is ();
+
+fn main() {
+    // fastcall tests
+}

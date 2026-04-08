@@ -1,0 +1,808 @@
+// =============================================================================
+// guardrails_test.vr - Tests for AI safety guardrails module
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, guardrails, safety, ai, filtering, agent
+// @description: Tests for GuardrailResult variants and methods, GuardrailMode
+//               variants, GuardrailChain construction, KeywordFilter,
+//               LengthGuardrail, RateLimitGuardrail, Pattern, and
+//               GuardrailBuilder types.
+// =============================================================================
+
+mount core.math.guardrails.{
+    GuardrailResult, GuardrailMode, GuardrailChain,
+    KeywordFilter, LengthGuardrail, RateLimitGuardrail,
+    Pattern, ClassificationResult, GuardrailBuilder,
+    PIIFilter, ContentClassifier, TopicGuardrail,
+    GuardedAgent, Guardrail,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: GuardrailResult Variant Construction
+// =============================================================================
+
+@test
+fn test_guardrail_result_pass() {
+    let result = GuardrailResult.Pass;
+    assert(result is GuardrailResult.Pass);
+}
+
+@test
+fn test_guardrail_result_block() {
+    let result = GuardrailResult.Block { reason: "unsafe content" };
+    assert(result is GuardrailResult.Block);
+}
+
+@test
+fn test_guardrail_result_modify() {
+    let result = GuardrailResult.Modify {
+        original: "hello world",
+        modified: "hello [REDACTED]",
+        changes: List.new(),
+    };
+    assert(result is GuardrailResult.Modify);
+}
+
+// =============================================================================
+// Section 2: GuardrailResult Methods
+// =============================================================================
+
+@test
+fn test_guardrail_result_is_pass_true() {
+    let result = GuardrailResult.Pass;
+    assert(result.is_pass());
+}
+
+@test
+fn test_guardrail_result_is_pass_false_block() {
+    let result = GuardrailResult.Block { reason: "blocked" };
+    assert(!result.is_pass());
+}
+
+@test
+fn test_guardrail_result_is_pass_false_modify() {
+    let result = GuardrailResult.Modify {
+        original: "a",
+        modified: "b",
+        changes: List.new(),
+    };
+    assert(!result.is_pass());
+}
+
+@test
+fn test_guardrail_result_is_blocked_true() {
+    let result = GuardrailResult.Block { reason: "harmful" };
+    assert(result.is_blocked());
+}
+
+@test
+fn test_guardrail_result_is_blocked_false_pass() {
+    let result = GuardrailResult.Pass;
+    assert(!result.is_blocked());
+}
+
+@test
+fn test_guardrail_result_is_blocked_false_modify() {
+    let result = GuardrailResult.Modify {
+        original: "a",
+        modified: "b",
+        changes: List.new(),
+    };
+    assert(!result.is_blocked());
+}
+
+@test
+fn test_guardrail_result_is_modified_true() {
+    let result = GuardrailResult.Modify {
+        original: "test",
+        modified: "test [REDACTED]",
+        changes: List.new(),
+    };
+    assert(result.is_modified());
+}
+
+@test
+fn test_guardrail_result_is_modified_false_pass() {
+    let result = GuardrailResult.Pass;
+    assert(!result.is_modified());
+}
+
+@test
+fn test_guardrail_result_is_modified_false_block() {
+    let result = GuardrailResult.Block { reason: "blocked" };
+    assert(!result.is_modified());
+}
+
+// =============================================================================
+// Section 3: GuardrailResult effective_text
+// =============================================================================
+
+@test
+fn test_guardrail_result_effective_text_pass() {
+    let result = GuardrailResult.Pass;
+    let original = "hello world";
+    let effective = result.effective_text(&original);
+    assert_eq(effective, "hello world");
+}
+
+@test
+fn test_guardrail_result_effective_text_block() {
+    let result = GuardrailResult.Block { reason: "unsafe" };
+    let original = "hello world";
+    let effective = result.effective_text(&original);
+    // Block returns original unchanged
+    assert_eq(effective, "hello world");
+}
+
+@test
+fn test_guardrail_result_effective_text_modify() {
+    let result = GuardrailResult.Modify {
+        original: "hello world",
+        modified: "hello [REDACTED]",
+        changes: List.new(),
+    };
+    let original = "hello world";
+    let effective = result.effective_text(&original);
+    assert_eq(effective, "hello [REDACTED]");
+}
+
+// =============================================================================
+// Section 4: GuardrailResult Match Exhaustive
+// =============================================================================
+
+@test
+fn test_guardrail_result_match_all_variants() {
+    let pass = GuardrailResult.Pass;
+    let block = GuardrailResult.Block { reason: "test" };
+    let modify = GuardrailResult.Modify {
+        original: "a",
+        modified: "b",
+        changes: List.new(),
+    };
+
+    let mut pass_count = 0;
+    let mut block_count = 0;
+    let mut modify_count = 0;
+
+    match pass {
+        GuardrailResult.Pass => pass_count = pass_count + 1,
+        GuardrailResult.Block { .. } => block_count = block_count + 1,
+        GuardrailResult.Modify { .. } => modify_count = modify_count + 1,
+    }
+    assert_eq(pass_count, 1);
+
+    match block {
+        GuardrailResult.Pass => pass_count = pass_count + 1,
+        GuardrailResult.Block { .. } => block_count = block_count + 1,
+        GuardrailResult.Modify { .. } => modify_count = modify_count + 1,
+    }
+    assert_eq(block_count, 1);
+
+    match modify {
+        GuardrailResult.Pass => pass_count = pass_count + 1,
+        GuardrailResult.Block { .. } => block_count = block_count + 1,
+        GuardrailResult.Modify { .. } => modify_count = modify_count + 1,
+    }
+    assert_eq(modify_count, 1);
+}
+
+// =============================================================================
+// Section 5: GuardrailMode Variants
+// =============================================================================
+
+@test
+fn test_guardrail_mode_strict_all() {
+    let mode = GuardrailMode.StrictAll;
+    assert(mode is GuardrailMode.StrictAll);
+}
+
+@test
+fn test_guardrail_mode_first_block() {
+    let mode = GuardrailMode.FirstBlock;
+    assert(mode is GuardrailMode.FirstBlock);
+}
+
+@test
+fn test_guardrail_mode_log_only() {
+    let mode = GuardrailMode.LogOnly;
+    assert(mode is GuardrailMode.LogOnly);
+}
+
+@test
+fn test_guardrail_mode_distinctness() {
+    let strict = GuardrailMode.StrictAll;
+    let first = GuardrailMode.FirstBlock;
+    let log = GuardrailMode.LogOnly;
+
+    assert(!(strict is GuardrailMode.FirstBlock));
+    assert(!(strict is GuardrailMode.LogOnly));
+    assert(!(first is GuardrailMode.StrictAll));
+    assert(!(first is GuardrailMode.LogOnly));
+    assert(!(log is GuardrailMode.StrictAll));
+    assert(!(log is GuardrailMode.FirstBlock));
+}
+
+@test
+fn test_guardrail_mode_match_exhaustive() {
+    let modes = [GuardrailMode.StrictAll, GuardrailMode.FirstBlock, GuardrailMode.LogOnly];
+    let mut strict_count = 0;
+    let mut first_count = 0;
+    let mut log_count = 0;
+
+    for mode in modes {
+        match mode {
+            GuardrailMode.StrictAll => strict_count = strict_count + 1,
+            GuardrailMode.FirstBlock => first_count = first_count + 1,
+            GuardrailMode.LogOnly => log_count = log_count + 1,
+        }
+    }
+    assert_eq(strict_count, 1);
+    assert_eq(first_count, 1);
+    assert_eq(log_count, 1);
+}
+
+// =============================================================================
+// Section 6: GuardrailChain Construction
+// =============================================================================
+
+@test
+fn test_guardrail_chain_new_strict() {
+    let chain = GuardrailChain.new(GuardrailMode.StrictAll);
+    assert(chain.mode is GuardrailMode.StrictAll);
+}
+
+@test
+fn test_guardrail_chain_new_first_block() {
+    let chain = GuardrailChain.new(GuardrailMode.FirstBlock);
+    assert(chain.mode is GuardrailMode.FirstBlock);
+}
+
+@test
+fn test_guardrail_chain_new_log_only() {
+    let chain = GuardrailChain.new(GuardrailMode.LogOnly);
+    assert(chain.mode is GuardrailMode.LogOnly);
+}
+
+@test
+fn test_guardrail_chain_strict_factory() {
+    let chain = GuardrailChain.strict();
+    assert(chain.mode is GuardrailMode.StrictAll);
+}
+
+@test
+fn test_guardrail_chain_first_block_factory() {
+    let chain = GuardrailChain.first_block();
+    assert(chain.mode is GuardrailMode.FirstBlock);
+}
+
+@test
+fn test_guardrail_chain_log_only_factory() {
+    let chain = GuardrailChain.log_only();
+    assert(chain.mode is GuardrailMode.LogOnly);
+}
+
+// =============================================================================
+// Section 7: Pattern Construction
+// =============================================================================
+
+@test
+fn test_pattern_new() {
+    let pattern = Pattern.new("email", "[a-zA-Z0-9]+@[a-z]+\\.[a-z]+");
+    assert_eq(pattern.name, "email");
+}
+
+@test
+fn test_pattern_fields() {
+    let pattern = Pattern {
+        name: "phone",
+        regex_str: "\\d{3}-\\d{4}",
+    };
+    assert_eq(pattern.name, "phone");
+    assert_eq(pattern.regex_str, "\\d{3}-\\d{4}");
+}
+
+// =============================================================================
+// Section 8: KeywordFilter Construction
+// =============================================================================
+
+@test
+fn test_keyword_filter_new() {
+    let filter = KeywordFilter.new(["password", "secret"]);
+    assert(filter.case_insensitive);
+}
+
+@test
+fn test_keyword_filter_case_sensitive() {
+    let filter = KeywordFilter.new(["test"]).with_case_sensitive();
+    assert(!filter.case_insensitive);
+}
+
+@test
+fn test_keyword_filter_blocked_keywords() {
+    let keywords = ["admin", "root", "sudo"];
+    let filter = KeywordFilter.new(keywords);
+    assert_eq(filter.blocked_keywords.len(), 3);
+}
+
+// =============================================================================
+// Section 9: LengthGuardrail Construction
+// =============================================================================
+
+@test
+fn test_length_guardrail_new() {
+    let guard = LengthGuardrail.new(10, 1000);
+    assert_eq(guard.min_length, 10);
+    assert_eq(guard.max_length, 1000);
+    assert(!guard.truncate_if_long);
+}
+
+@test
+fn test_length_guardrail_with_truncation() {
+    let guard = LengthGuardrail.new(0, 500).with_truncation();
+    assert(guard.truncate_if_long);
+}
+
+@test
+fn test_length_guardrail_max_only() {
+    let guard = LengthGuardrail.max_only(5000);
+    assert_eq(guard.min_length, 0);
+    assert_eq(guard.max_length, 5000);
+}
+
+@test
+fn test_length_guardrail_no_limits() {
+    let guard = LengthGuardrail.new(0, 0);
+    assert_eq(guard.min_length, 0);
+    assert_eq(guard.max_length, 0);
+}
+
+// =============================================================================
+// Section 10: RateLimitGuardrail Construction
+// =============================================================================
+
+@test
+fn test_rate_limit_guardrail_new() {
+    let guard = RateLimitGuardrail.new(100, 60);
+    assert_eq(guard.max_requests, 100);
+    assert_eq(guard.window_seconds, 60);
+}
+
+@test
+fn test_rate_limit_guardrail_high_rate() {
+    let guard = RateLimitGuardrail.new(10000, 1);
+    assert_eq(guard.max_requests, 10000);
+    assert_eq(guard.window_seconds, 1);
+}
+
+// =============================================================================
+// Section 11: ClassificationResult Construction
+// =============================================================================
+
+@test
+fn test_classification_result_new() {
+    let result = ClassificationResult.new();
+    // Empty classification result
+    let _: ClassificationResult = result;
+}
+
+// =============================================================================
+// Section 12: GuardrailBuilder Construction
+// =============================================================================
+
+@test
+fn test_guardrail_builder_new() {
+    let builder = GuardrailBuilder.new();
+    // Default mode is strict
+    assert(builder.chain.mode is GuardrailMode.StrictAll);
+}
+
+@test
+fn test_guardrail_builder_strict() {
+    let builder = GuardrailBuilder.new().strict();
+    assert(builder.chain.mode is GuardrailMode.StrictAll);
+}
+
+@test
+fn test_guardrail_builder_first_block() {
+    let builder = GuardrailBuilder.new().first_block();
+    assert(builder.chain.mode is GuardrailMode.FirstBlock);
+}
+
+@test
+fn test_guardrail_builder_log_only() {
+    let builder = GuardrailBuilder.new().log_only();
+    assert(builder.chain.mode is GuardrailMode.LogOnly);
+}
+
+@test
+fn test_guardrail_builder_build() {
+    let chain = GuardrailBuilder.new().strict().build();
+    assert(chain.mode is GuardrailMode.StrictAll);
+}
+
+// =============================================================================
+// Section 13: PIIFilter Construction
+// =============================================================================
+
+@test
+fn test_pii_filter_default() {
+    let filter = PIIFilter.default();
+    // Default PII filter has 4 built-in patterns (email, phone, ssn, credit_card)
+    assert_eq(filter.patterns.len(), 4);
+}
+
+@test
+fn test_pii_filter_default_replacement() {
+    let filter = PIIFilter.default();
+    assert_eq(filter.replacement, "[REDACTED]");
+}
+
+@test
+fn test_pii_filter_with_patterns() {
+    let mut patterns: List<Pattern> = List.new();
+    patterns.push(Pattern.new("custom_id", "ID-\\d{6}"));
+    let filter = PIIFilter.with_patterns(patterns, "[HIDDEN]");
+    assert_eq(filter.patterns.len(), 1);
+    assert_eq(filter.replacement, "[HIDDEN]");
+}
+
+@test
+fn test_pii_filter_with_patterns_empty() {
+    let patterns: List<Pattern> = List.new();
+    let filter = PIIFilter.with_patterns(patterns, "[REMOVED]");
+    assert_eq(filter.patterns.len(), 0);
+    assert_eq(filter.replacement, "[REMOVED]");
+}
+
+@test
+fn test_pii_filter_add_pattern() {
+    let mut filter = PIIFilter.default();
+    let initial_count = filter.patterns.len();
+    filter.add_pattern("ip_address", "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}");
+    assert_eq(filter.patterns.len(), initial_count + 1);
+}
+
+@test
+fn test_pii_filter_with_multiple_custom_patterns() {
+    let mut patterns: List<Pattern> = List.new();
+    patterns.push(Pattern.new("ssn", "\\d{3}-\\d{2}-\\d{4}"));
+    patterns.push(Pattern.new("dob", "\\d{4}-\\d{2}-\\d{2}"));
+    patterns.push(Pattern.new("zip", "\\d{5}(-\\d{4})?"));
+    let filter = PIIFilter.with_patterns(patterns, "***");
+    assert_eq(filter.patterns.len(), 3);
+    assert_eq(filter.replacement, "***");
+}
+
+// =============================================================================
+// Section 14: Type Existence Tests
+// =============================================================================
+
+@test
+fn test_content_classifier_type_exists() {
+    fn accept_cc(cc: &ContentClassifier) -> Bool { true }
+    let _ = accept_cc;
+}
+
+@test
+fn test_topic_guardrail_type_exists() {
+    fn accept_tg(tg: &TopicGuardrail) -> Bool { true }
+    let _ = accept_tg;
+}
+
+@test
+fn test_guarded_agent_type_exists() {
+    // GuardedAgent is generic over A: Agent
+    fn accept_ga<A: Agent>(ga: &GuardedAgent<A>) -> Bool { true }
+    let _ = accept_ga;
+}
+
+@test
+fn test_guardrail_protocol_type_exists() {
+    fn accept_g(g: &Guardrail) -> Bool { true }
+    let _ = accept_g;
+}
+
+@test
+fn test_pii_filter_type_exists() {
+    fn accept_pf(pf: &PIIFilter) -> Bool { true }
+    let _ = accept_pf;
+}
+
+// =============================================================================
+// Section 15: GuardrailResult Additional Variant Values
+// =============================================================================
+
+@test
+fn test_guardrail_result_block_empty_reason() {
+    let result = GuardrailResult.Block { reason: "" };
+    assert(result.is_blocked());
+}
+
+@test
+fn test_guardrail_result_modify_empty_changes() {
+    let result = GuardrailResult.Modify {
+        original: "original text",
+        modified: "modified text",
+        changes: List.new(),
+    };
+    assert(result.is_modified());
+}
+
+@test
+fn test_guardrail_result_modify_multiple_changes() {
+    let mut changes = List.new();
+    changes.push("removed email");
+    changes.push("removed phone");
+    changes.push("removed SSN");
+    let result = GuardrailResult.Modify {
+        original: "contact: john@test.com 555-1234 123-45-6789",
+        modified: "contact: [REDACTED] [REDACTED] [REDACTED]",
+        changes,
+    };
+    assert(result.is_modified());
+}
+
+@test
+fn test_guardrail_result_modify_empty_strings() {
+    let result = GuardrailResult.Modify {
+        original: "",
+        modified: "",
+        changes: List.new(),
+    };
+    assert(result.is_modified());
+    assert(!result.is_pass());
+    assert(!result.is_blocked());
+}
+
+// =============================================================================
+// Section 16: GuardrailResult Variant Distinctness
+// =============================================================================
+
+@test
+fn test_guardrail_result_pass_is_not_block() {
+    let result = GuardrailResult.Pass;
+    assert(!(result is GuardrailResult.Block));
+    assert(!(result is GuardrailResult.Modify));
+}
+
+@test
+fn test_guardrail_result_block_is_not_pass_or_modify() {
+    let result = GuardrailResult.Block { reason: "test" };
+    assert(!(result is GuardrailResult.Pass));
+    assert(!(result is GuardrailResult.Modify));
+}
+
+@test
+fn test_guardrail_result_modify_is_not_pass_or_block() {
+    let result = GuardrailResult.Modify {
+        original: "a",
+        modified: "b",
+        changes: List.new(),
+    };
+    assert(!(result is GuardrailResult.Pass));
+    assert(!(result is GuardrailResult.Block));
+}
+
+// =============================================================================
+// Section 17: GuardrailChain Mode Field Access
+// =============================================================================
+
+@test
+fn test_guardrail_chain_strict_mode_field() {
+    let chain = GuardrailChain.strict();
+    let mode = chain.mode;
+    assert(mode is GuardrailMode.StrictAll);
+}
+
+@test
+fn test_guardrail_chain_first_block_mode_field() {
+    let chain = GuardrailChain.first_block();
+    let mode = chain.mode;
+    assert(mode is GuardrailMode.FirstBlock);
+}
+
+@test
+fn test_guardrail_chain_log_only_mode_field() {
+    let chain = GuardrailChain.log_only();
+    let mode = chain.mode;
+    assert(mode is GuardrailMode.LogOnly);
+}
+
+@test
+fn test_guardrail_chain_empty_guardrails() {
+    let chain = GuardrailChain.new(GuardrailMode.StrictAll);
+    assert_eq(chain.guardrails.len(), 0);
+}
+
+// =============================================================================
+// Section 18: KeywordFilter Edge Cases
+// =============================================================================
+
+@test
+fn test_keyword_filter_empty_keywords() {
+    let filter = KeywordFilter.new([]);
+    assert_eq(filter.blocked_keywords.len(), 0);
+    assert(filter.case_insensitive);
+}
+
+@test
+fn test_keyword_filter_single_keyword() {
+    let filter = KeywordFilter.new(["danger"]);
+    assert_eq(filter.blocked_keywords.len(), 1);
+}
+
+@test
+fn test_keyword_filter_many_keywords() {
+    let filter = KeywordFilter.new(["a", "b", "c", "d", "e", "f", "g"]);
+    assert_eq(filter.blocked_keywords.len(), 7);
+}
+
+@test
+fn test_keyword_filter_case_sensitive_flag() {
+    let filter = KeywordFilter.new(["Test"]).with_case_sensitive();
+    assert(!filter.case_insensitive);
+    assert_eq(filter.blocked_keywords.len(), 1);
+}
+
+// =============================================================================
+// Section 19: LengthGuardrail Various Combinations
+// =============================================================================
+
+@test
+fn test_length_guardrail_equal_min_max() {
+    let guard = LengthGuardrail.new(100, 100);
+    assert_eq(guard.min_length, 100);
+    assert_eq(guard.max_length, 100);
+}
+
+@test
+fn test_length_guardrail_large_values() {
+    let guard = LengthGuardrail.new(0, 1000000);
+    assert_eq(guard.max_length, 1000000);
+    assert(!guard.truncate_if_long);
+}
+
+@test
+fn test_length_guardrail_max_only_with_truncation() {
+    let guard = LengthGuardrail.max_only(2000).with_truncation();
+    assert_eq(guard.min_length, 0);
+    assert_eq(guard.max_length, 2000);
+    assert(guard.truncate_if_long);
+}
+
+@test
+fn test_length_guardrail_small_range() {
+    let guard = LengthGuardrail.new(1, 10);
+    assert_eq(guard.min_length, 1);
+    assert_eq(guard.max_length, 10);
+    assert(!guard.truncate_if_long);
+}
+
+// =============================================================================
+// Section 20: RateLimitGuardrail Edge Cases
+// =============================================================================
+
+@test
+fn test_rate_limit_guardrail_small_window() {
+    let guard = RateLimitGuardrail.new(5, 1);
+    assert_eq(guard.max_requests, 5);
+    assert_eq(guard.window_seconds, 1);
+}
+
+@test
+fn test_rate_limit_guardrail_large_window() {
+    let guard = RateLimitGuardrail.new(1000, 3600);
+    assert_eq(guard.max_requests, 1000);
+    assert_eq(guard.window_seconds, 3600);
+}
+
+@test
+fn test_rate_limit_guardrail_empty_request_times() {
+    let guard = RateLimitGuardrail.new(10, 60);
+    assert_eq(guard.request_times.len(), 0);
+}
+
+// =============================================================================
+// Section 21: Pattern Edge Cases
+// =============================================================================
+
+@test
+fn test_pattern_empty_regex() {
+    let pattern = Pattern.new("empty", "");
+    assert_eq(pattern.name, "empty");
+    assert_eq(pattern.regex_str, "");
+}
+
+@test
+fn test_pattern_empty_name() {
+    let pattern = Pattern.new("", "\\d+");
+    assert_eq(pattern.name, "");
+    assert_eq(pattern.regex_str, "\\d+");
+}
+
+@test
+fn test_pattern_long_regex() {
+    let pattern = Pattern.new("complex", "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,63}");
+    assert_eq(pattern.name, "complex");
+}
+
+@test
+fn test_pattern_direct_construction() {
+    let pattern = Pattern { name: "test_pattern", regex_str: "abc.*xyz" };
+    assert_eq(pattern.name, "test_pattern");
+    assert_eq(pattern.regex_str, "abc.*xyz");
+}
+
+// =============================================================================
+// Section 22: ClassificationResult Type Verification
+// =============================================================================
+
+@test
+fn test_classification_result_type_annotation() {
+    let result: ClassificationResult = ClassificationResult.new();
+    let _: ClassificationResult = result;
+}
+
+// =============================================================================
+// Section 23: GuardrailBuilder Chaining
+// =============================================================================
+
+@test
+fn test_guardrail_builder_with_blocked_keywords() {
+    let builder = GuardrailBuilder.new()
+        .with_blocked_keywords(["password", "secret"]);
+    // Builder should still have strict mode (default)
+    assert(builder.chain.mode is GuardrailMode.StrictAll);
+}
+
+@test
+fn test_guardrail_builder_with_length_limits() {
+    let builder = GuardrailBuilder.new()
+        .with_length_limits(10, 5000);
+    assert(builder.chain.mode is GuardrailMode.StrictAll);
+}
+
+@test
+fn test_guardrail_builder_chain_multiple() {
+    let chain = GuardrailBuilder.new()
+        .strict()
+        .with_blocked_keywords(["forbidden"])
+        .with_length_limits(1, 10000)
+        .build();
+    assert(chain.mode is GuardrailMode.StrictAll);
+}
+
+@test
+fn test_guardrail_builder_first_block_with_keywords() {
+    let chain = GuardrailBuilder.new()
+        .first_block()
+        .with_blocked_keywords(["unsafe", "harmful"])
+        .build();
+    assert(chain.mode is GuardrailMode.FirstBlock);
+}
+
+@test
+fn test_guardrail_builder_log_only_with_length() {
+    let chain = GuardrailBuilder.new()
+        .log_only()
+        .with_length_limits(0, 1000)
+        .build();
+    assert(chain.mode is GuardrailMode.LogOnly);
+}
+
+@test
+fn test_guardrail_builder_with_pii_filter() {
+    let chain = GuardrailBuilder.new()
+        .strict()
+        .with_pii_filter()
+        .build();
+    assert(chain.mode is GuardrailMode.StrictAll);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

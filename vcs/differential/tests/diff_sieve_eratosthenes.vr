@@ -1,0 +1,192 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, sieve, eratosthenes, primes
+// @timeout: 10000
+
+type Arr32 is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int, d12: Int, d13: Int, d14: Int, d15: Int,
+    d16: Int, d17: Int, d18: Int, d19: Int, d20: Int, d21: Int, d22: Int, d23: Int,
+    d24: Int, d25: Int, d26: Int, d27: Int, d28: Int, d29: Int, d30: Int, d31: Int
+};
+
+fn get32(a: Arr32, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else if i == 7 { a.d7 } else if i == 8 { a.d8 }
+    else if i == 9 { a.d9 } else if i == 10 { a.d10 } else if i == 11 { a.d11 }
+    else if i == 12 { a.d12 } else if i == 13 { a.d13 } else if i == 14 { a.d14 }
+    else if i == 15 { a.d15 } else if i == 16 { a.d16 } else if i == 17 { a.d17 }
+    else if i == 18 { a.d18 } else if i == 19 { a.d19 } else if i == 20 { a.d20 }
+    else if i == 21 { a.d21 } else if i == 22 { a.d22 } else if i == 23 { a.d23 }
+    else if i == 24 { a.d24 } else if i == 25 { a.d25 } else if i == 26 { a.d26 }
+    else if i == 27 { a.d27 } else if i == 28 { a.d28 } else if i == 29 { a.d29 }
+    else if i == 30 { a.d30 } else { a.d31 }
+}
+
+fn set32(a: Arr32, i: Int, v: Int) -> Arr32 {
+    Arr32 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 },
+        d8: if i == 8 { v } else { a.d8 }, d9: if i == 9 { v } else { a.d9 },
+        d10: if i == 10 { v } else { a.d10 }, d11: if i == 11 { v } else { a.d11 },
+        d12: if i == 12 { v } else { a.d12 }, d13: if i == 13 { v } else { a.d13 },
+        d14: if i == 14 { v } else { a.d14 }, d15: if i == 15 { v } else { a.d15 },
+        d16: if i == 16 { v } else { a.d16 }, d17: if i == 17 { v } else { a.d17 },
+        d18: if i == 18 { v } else { a.d18 }, d19: if i == 19 { v } else { a.d19 },
+        d20: if i == 20 { v } else { a.d20 }, d21: if i == 21 { v } else { a.d21 },
+        d22: if i == 22 { v } else { a.d22 }, d23: if i == 23 { v } else { a.d23 },
+        d24: if i == 24 { v } else { a.d24 }, d25: if i == 25 { v } else { a.d25 },
+        d26: if i == 26 { v } else { a.d26 }, d27: if i == 27 { v } else { a.d27 },
+        d28: if i == 28 { v } else { a.d28 }, d29: if i == 29 { v } else { a.d29 },
+        d30: if i == 30 { v } else { a.d30 }, d31: if i == 31 { v } else { a.d31 }
+    }
+}
+
+fn ones32() -> Arr32 {
+    Arr32 {
+        d0: 1, d1: 1, d2: 1, d3: 1, d4: 1, d5: 1, d6: 1, d7: 1,
+        d8: 1, d9: 1, d10: 1, d11: 1, d12: 1, d13: 1, d14: 1, d15: 1,
+        d16: 1, d17: 1, d18: 1, d19: 1, d20: 1, d21: 1, d22: 1, d23: 1,
+        d24: 1, d25: 1, d26: 1, d27: 1, d28: 1, d29: 1, d30: 1, d31: 1
+    }
+}
+
+// Sieve of Eratosthenes for numbers 0..31
+fn sieve() -> Arr32 {
+    let mut is_prime = ones32();
+    is_prime = set32(is_prime, 0, 0); // 0 is not prime
+    is_prime = set32(is_prime, 1, 0); // 1 is not prime
+
+    let mut i = 2;
+    while i * i <= 31 {
+        if get32(is_prime, i) == 1 {
+            let mut j = i * i;
+            while j <= 31 {
+                is_prime = set32(is_prime, j, 0);
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+    is_prime
+}
+
+fn count_primes(s: Arr32, up_to: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i <= up_to {
+        count = count + get32(s, i);
+        i = i + 1;
+    }
+    count
+}
+
+fn sum_primes(s: Arr32, up_to: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 2;
+    while i <= up_to {
+        if get32(s, i) == 1 { sum = sum + i; }
+        i = i + 1;
+    }
+    sum
+}
+
+// Trial division primality (for cross-checking)
+fn is_prime_trial(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return 0; }
+        i = i + 2;
+    }
+    1
+}
+
+fn main() -> Int {
+    let s = sieve();
+
+    // Known primes up to 31: 2,3,5,7,11,13,17,19,23,29,31
+    assert_eq(get32(s, 2), 1);
+    assert_eq(get32(s, 3), 1);
+    assert_eq(get32(s, 5), 1);
+    assert_eq(get32(s, 7), 1);
+    assert_eq(get32(s, 11), 1);
+    assert_eq(get32(s, 13), 1);
+    assert_eq(get32(s, 17), 1);
+    assert_eq(get32(s, 19), 1);
+    assert_eq(get32(s, 23), 1);
+    assert_eq(get32(s, 29), 1);
+    assert_eq(get32(s, 31), 1);
+
+    // Known composites
+    assert_eq(get32(s, 0), 0);
+    assert_eq(get32(s, 1), 0);
+    assert_eq(get32(s, 4), 0);
+    assert_eq(get32(s, 6), 0);
+    assert_eq(get32(s, 8), 0);
+    assert_eq(get32(s, 9), 0);
+    assert_eq(get32(s, 10), 0);
+    assert_eq(get32(s, 15), 0);
+    assert_eq(get32(s, 25), 0);
+
+    // Count: π(10) = 4, π(20) = 8, π(30) = 10, π(31) = 11
+    assert_eq(count_primes(s, 10), 4);
+    assert_eq(count_primes(s, 20), 8);
+    assert_eq(count_primes(s, 30), 10);
+    assert_eq(count_primes(s, 31), 11);
+
+    // Sum of primes up to 10: 2+3+5+7 = 17
+    assert_eq(sum_primes(s, 10), 17);
+
+    // Cross-check sieve with trial division for all 0..31
+    let mut i = 0;
+    while i <= 31 {
+        assert_eq(get32(s, i), is_prime_trial(i));
+        i = i + 1;
+    }
+
+    // Twin primes up to 31: (3,5), (5,7), (11,13), (17,19), (29,31) = 5 pairs
+    let mut twins = 0;
+    let mut j = 2;
+    while j <= 29 {
+        if get32(s, j) == 1 {
+            if get32(s, j + 2) == 1 {
+                twins = twins + 1;
+            }
+        }
+        j = j + 1;
+    }
+    assert_eq(twins, 5);
+
+    // Goldbach check (even numbers > 2 as sum of two primes) up to 30
+    let mut valid = 1;
+    let mut e = 4;
+    while e <= 30 {
+        let mut found = 0;
+        let mut p = 2;
+        while p <= e / 2 {
+            if get32(s, p) == 1 {
+                if e - p <= 31 {
+                    if get32(s, e - p) == 1 {
+                        found = 1;
+                        p = e; // break
+                    }
+                }
+            }
+            p = p + 1;
+        }
+        if found == 0 { valid = 0; }
+        e = e + 2;
+    }
+    assert_eq(valid, 1);
+
+    print("DIFF_OK: sieve_eratosthenes");
+    0
+}

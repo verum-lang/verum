@@ -1,0 +1,338 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, btreemap, btreeset, drain
+// @description: Tests BTreeMap.drain() and BTreeSet.drain() methods
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: BTreeMap.drain() basics
+// =============================================================================
+
+@test
+fn test_btreemap_drain_empties_map() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+    assert_eq(map.len(), 3);
+    let mut drain = map.drain();
+    assert_eq(map.len(), 0);
+    assert(map.is_empty());
+}
+
+@test
+fn test_btreemap_drain_yields_all_entries() {
+    let mut map = BTreeMap.new();
+    map.insert(3, 30);
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut drain = map.drain();
+    let mut count = 0;
+    while let Some(pair) = drain.next() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_btreemap_drain_sorted_order() {
+    let mut map = BTreeMap.new();
+    map.insert(5, 50);
+    map.insert(1, 10);
+    map.insert(3, 30);
+    map.insert(2, 20);
+    map.insert(4, 40);
+    let mut drain = map.drain();
+    let first = drain.next();
+    assert(first.is_some());
+    assert_eq(first.unwrap().0, 1);
+    let second = drain.next();
+    assert(second.is_some());
+    assert_eq(second.unwrap().0, 2);
+    let third = drain.next();
+    assert(third.is_some());
+    assert_eq(third.unwrap().0, 3);
+}
+
+@test
+fn test_btreemap_drain_empty_map() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut drain = map.drain();
+    assert(drain.next().is_none());
+}
+
+@test
+fn test_btreemap_drain_single_entry() {
+    let mut map = BTreeMap.new();
+    map.insert(42, "answer");
+    let mut drain = map.drain();
+    let entry = drain.next();
+    assert(entry.is_some());
+    assert_eq(entry.unwrap().0, 42);
+    assert(drain.next().is_none());
+    assert_eq(map.len(), 0);
+}
+
+@test
+fn test_btreemap_drain_size_hint() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    let mut drain = map.drain();
+    let hint = drain.size_hint();
+    assert_eq(hint.0, 3);
+    assert_eq(hint.1, Some(3));
+    drain.next();
+    let hint2 = drain.size_hint();
+    assert_eq(hint2.0, 2);
+    assert_eq(hint2.1, Some(2));
+}
+
+@test
+fn test_btreemap_drain_map_usable_after() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    let mut drain = map.drain();
+    while let Some(_) = drain.next() {}
+    // Map should be usable after drain
+    map.insert(10, "ten");
+    assert_eq(map.len(), 1);
+    assert_eq(map.get(&10), Some(&"ten"));
+}
+
+@test
+fn test_btreemap_drain_preserves_values() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 100);
+    map.insert(2, 200);
+    let mut drain = map.drain();
+    let first = drain.next().unwrap();
+    assert_eq(first.0, 1);
+    assert_eq(first.1, 100);
+    let second = drain.next().unwrap();
+    assert_eq(second.0, 2);
+    assert_eq(second.1, 200);
+}
+
+// =============================================================================
+// Section 2: BTreeSet.drain() basics
+// =============================================================================
+
+@test
+fn test_btreeset_drain_empties_set() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2); set.insert(3);
+    assert_eq(set.len(), 3);
+    let mut drain = set.drain();
+    assert_eq(set.len(), 0);
+    assert(set.is_empty());
+}
+
+@test
+fn test_btreeset_drain_yields_all_elements() {
+    let mut set = BTreeSet.new();
+    set.insert(10); set.insert(20); set.insert(30);
+    let mut drain = set.drain();
+    let mut count = 0;
+    while let Some(_) = drain.next() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_btreeset_drain_sorted_order() {
+    let mut set = BTreeSet.new();
+    set.insert(5); set.insert(1); set.insert(3); set.insert(2); set.insert(4);
+    let mut drain = set.drain();
+    assert_eq(drain.next(), Some(1));
+    assert_eq(drain.next(), Some(2));
+    assert_eq(drain.next(), Some(3));
+    assert_eq(drain.next(), Some(4));
+    assert_eq(drain.next(), Some(5));
+    assert(drain.next().is_none());
+}
+
+@test
+fn test_btreeset_drain_empty_set() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    let mut drain = set.drain();
+    assert(drain.next().is_none());
+}
+
+@test
+fn test_btreeset_drain_single_element() {
+    let mut set = BTreeSet.new();
+    set.insert(99);
+    let mut drain = set.drain();
+    assert_eq(drain.next(), Some(99));
+    assert(drain.next().is_none());
+    assert_eq(set.len(), 0);
+}
+
+@test
+fn test_btreeset_drain_size_hint() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2); set.insert(3); set.insert(4);
+    let mut drain = set.drain();
+    let hint = drain.size_hint();
+    assert_eq(hint.0, 4);
+    assert_eq(hint.1, Some(4));
+    drain.next();
+    drain.next();
+    let hint2 = drain.size_hint();
+    assert_eq(hint2.0, 2);
+    assert_eq(hint2.1, Some(2));
+}
+
+@test
+fn test_btreeset_drain_set_usable_after() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2);
+    let mut drain = set.drain();
+    while let Some(_) = drain.next() {}
+    // Set should be usable after drain
+    set.insert(100);
+    assert_eq(set.len(), 1);
+    assert(set.contains(&100));
+}
+
+// =============================================================================
+// Section 3: Larger datasets
+// =============================================================================
+
+@test
+fn test_btreemap_drain_many_entries() {
+    let mut map = BTreeMap.new();
+    let mut i = 0;
+    while i < 50 {
+        let val = i;
+        map.insert(i, val * 10);
+        i = i + 1;
+    }
+    assert_eq(map.len(), 50);
+    let mut drain = map.drain();
+    assert_eq(map.len(), 0);
+    let mut count = 0;
+    let mut prev_key = -1;
+    while let Some(pair) = drain.next() {
+        assert(pair.0 > prev_key);  // sorted order
+        prev_key = pair.0;
+        count = count + 1;
+    }
+    assert_eq(count, 50);
+}
+
+@test
+fn test_btreeset_drain_many_elements() {
+    let mut set = BTreeSet.new();
+    let mut i = 0;
+    while i < 50 {
+        set.insert(i);
+        i = i + 1;
+    }
+    assert_eq(set.len(), 50);
+    let mut drain = set.drain();
+    assert_eq(set.len(), 0);
+    let mut count = 0;
+    let mut prev = -1;
+    while let Some(val) = drain.next() {
+        assert(val > prev);  // sorted order
+        prev = val;
+        count = count + 1;
+    }
+    assert_eq(count, 50);
+}
+
+// =============================================================================
+// Section 4: IntoIterator for drain types
+// =============================================================================
+
+@test
+fn test_btreemap_drain_into_iterator() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut drain = map.drain();
+    // Use drain in a for loop via IntoIterator
+    let mut sum = 0;
+    for pair in drain {
+        sum = sum + pair.1;
+    }
+    assert_eq(sum, 30);
+}
+
+@test
+fn test_btreeset_drain_into_iterator() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2); set.insert(3);
+    let mut drain = set.drain();
+    let mut sum = 0;
+    for val in drain {
+        sum = sum + val;
+    }
+    assert_eq(sum, 6);
+}
+
+// =============================================================================
+// Section 5: Edge cases
+// =============================================================================
+
+@test
+fn test_btreemap_drain_then_refill() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    let mut drain = map.drain();
+    while let Some(_) = drain.next() {}
+    // Refill with different data
+    map.insert(10, "x");
+    map.insert(20, "y");
+    map.insert(30, "z");
+    assert_eq(map.len(), 3);
+    assert_eq(map.get(&10), Some(&"x"));
+    assert_eq(map.get(&20), Some(&"y"));
+}
+
+@test
+fn test_btreeset_drain_then_refill() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2); set.insert(3);
+    let mut drain = set.drain();
+    while let Some(_) = drain.next() {}
+    // Refill with different data
+    set.insert(100); set.insert(200);
+    assert_eq(set.len(), 2);
+    assert(set.contains(&100));
+    assert(set.contains(&200));
+    assert(!set.contains(&1));
+}
+
+@test
+fn test_btreemap_drain_partial_consume() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    let mut drain = map.drain();
+    // Only consume one element
+    let first = drain.next();
+    assert(first.is_some());
+    // Map is already empty regardless of drain consumption
+    assert_eq(map.len(), 0);
+}
+
+@test
+fn test_btreeset_drain_partial_consume() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2); set.insert(3);
+    let mut drain = set.drain();
+    let first = drain.next();
+    assert(first.is_some());
+    assert_eq(set.len(), 0);
+}

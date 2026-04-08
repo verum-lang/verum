@@ -1,0 +1,514 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for nursery expressions (structured concurrency)
+
+// ============================================================================
+// Basic Nursery Expressions
+// ============================================================================
+
+async fn test_basic_nursery() {
+    // Simple nursery
+    nursery {
+        spawn task1();
+        spawn task2();
+    }
+
+    // Nursery with single spawn
+    nursery {
+        spawn single_task();
+    }
+
+    // Empty nursery (valid but does nothing)
+    nursery {}
+
+    // Nursery with statements
+    nursery {
+        let config = get_config();
+        spawn task_with_config(config);
+    }
+}
+
+// ============================================================================
+// Nursery with Result Collection
+// ============================================================================
+
+async fn test_nursery_results() {
+    // Collect spawn results
+    nursery {
+        let a = spawn fetch_a();
+        let b = spawn fetch_b();
+        let c = spawn fetch_c();
+    }
+
+    // Use results after nursery
+    let res = nursery {
+        let handle = spawn compute();
+        handle
+    };
+
+    // Multiple result bindings with types
+    nursery {
+        let x: TaskHandle<Int> = spawn compute_int();
+        let y: TaskHandle<Text> = spawn compute_text();
+    }
+}
+
+// ============================================================================
+// Nursery with Timeout Option
+// ============================================================================
+
+async fn test_nursery_timeout() {
+    // Simple timeout (integer milliseconds)
+    nursery(timeout: 5000) {
+        spawn long_running_task();
+    }
+
+    // Timeout with expression
+    let deadline = 10000;
+    nursery(timeout: deadline) {
+        spawn task();
+    }
+
+    // Timeout with method call
+    nursery(timeout: config.get_timeout()) {
+        spawn risky_task();
+    }
+
+    // Timeout with duration expression
+    nursery(timeout: 5 * 1000) {
+        spawn timed_task();
+    }
+}
+
+// ============================================================================
+// Nursery with on_error Option
+// ============================================================================
+
+async fn test_nursery_on_error() {
+    // Cancel all on error (default behavior)
+    nursery(on_error: cancel_all) {
+        spawn task1();
+        spawn task2();
+    }
+
+    // Wait for all tasks even if one errors
+    nursery(on_error: wait_all) {
+        spawn independent_task1();
+        spawn independent_task2();
+    }
+
+    // Fail fast - stop immediately on first error
+    nursery(on_error: fail_fast) {
+        spawn critical_task1();
+        spawn critical_task2();
+    }
+}
+
+// ============================================================================
+// Nursery with max_tasks Option
+// ============================================================================
+
+async fn test_nursery_max_tasks() {
+    // Limit concurrent tasks
+    nursery(max_tasks: 10) {
+        for i in 0..100 {
+            spawn process(i);
+        }
+    }
+
+    // Max tasks with expression
+    let concurrency = cpu_count() * 2;
+    nursery(max_tasks: concurrency) {
+        for item in items {
+            spawn handle(item);
+        }
+    }
+
+    // Max tasks of 1 (sequential execution)
+    nursery(max_tasks: 1) {
+        spawn task1();
+        spawn task2();
+        spawn task3();
+    }
+}
+
+// ============================================================================
+// Nursery with Multiple Options
+// ============================================================================
+
+async fn test_nursery_multiple_options() {
+    // Timeout and on_error
+    nursery(timeout: 5000, on_error: cancel_all) {
+        spawn risky_task();
+    }
+
+    // All three options
+    nursery(timeout: 10000, on_error: wait_all, max_tasks: 5) {
+        for i in 0..20 {
+            spawn worker(i);
+        }
+    }
+
+    // Options in different order
+    nursery(max_tasks: 3, timeout: 1000) {
+        spawn a();
+        spawn b();
+        spawn c();
+    }
+
+    // Options with complex expressions
+    nursery(
+        timeout: config.timeout_ms,
+        on_error: fail_fast,
+        max_tasks: config.parallelism
+    ) {
+        spawn configured_task();
+    }
+}
+
+// ============================================================================
+// Nursery with on_cancel Handler
+// ============================================================================
+
+async fn test_nursery_on_cancel() {
+    // Simple on_cancel handler
+    nursery {
+        spawn risky_task();
+    } on_cancel {
+        log("Nursery was cancelled");
+        cleanup();
+    }
+
+    // on_cancel with timeout
+    nursery(timeout: 5000) {
+        spawn long_task();
+    } on_cancel {
+        log("Timed out");
+        notify_timeout();
+    }
+
+    // on_cancel with complex cleanup
+    nursery {
+        spawn task();
+    } on_cancel {
+        release_resources();
+        notify_cancellation();
+        log("Cleanup complete");
+    }
+}
+
+// ============================================================================
+// Nursery with Recover Handler
+// ============================================================================
+
+async fn test_nursery_recover() {
+    // Simple recover with match arms
+    nursery {
+        spawn failing_task();
+    } recover {
+        TimeoutError => default_value,
+        TaskError(msg) => handle_error(msg),
+        _ => panic_default()
+    }
+
+    // Recover with closure syntax
+    nursery {
+        spawn risky_task();
+    } recover |e| {
+        log(f"Error: {e}");
+        fallback_value
+    }
+
+    // Recover with expression body (closure syntax)
+    nursery {
+        spawn compute();
+    } recover |e| default_for_error(e)
+
+    // Recover with specific error types
+    nursery {
+        spawn network_task();
+    } recover {
+        Timeout => retry(),
+        ConnectionRefused => use_cache(),
+        e => propagate(e)
+    }
+}
+
+// ============================================================================
+// Nursery with Both Handlers
+// ============================================================================
+
+async fn test_nursery_both_handlers() {
+    // on_cancel then recover
+    nursery {
+        spawn task();
+    } on_cancel {
+        cleanup_resources();
+    } recover {
+        Error => default_value
+    }
+
+    // Combined with options
+    nursery(timeout: 5000, on_error: cancel_all) {
+        spawn risky_task();
+    } on_cancel {
+        log("Cancelled due to timeout or error");
+    } recover {
+        TimeoutError => timeout_default(),
+        _ => generic_default()
+    }
+
+    // Complex combined handlers
+    nursery(timeout: 10000, max_tasks: 5) {
+        for url in urls {
+            spawn fetch(url);
+        }
+    } on_cancel {
+        cancel_pending_requests();
+        log("Fetch operation cancelled");
+    } recover |e| {
+        log(f"Fetch failed: {e}");
+        empty_results()
+    }
+}
+
+// ============================================================================
+// Nested Nurseries
+// ============================================================================
+
+async fn test_nested_nursery() {
+    // Simple nesting
+    nursery {
+        spawn async {
+            nursery {
+                spawn subtask1();
+                spawn subtask2();
+            }
+        };
+    }
+
+    // Nested with different options
+    nursery(timeout: 10000) {
+        spawn async {
+            nursery(max_tasks: 2) {
+                spawn inner1();
+                spawn inner2();
+                spawn inner3();
+            }
+        };
+    }
+
+    // Multiple levels of nesting
+    nursery {
+        spawn async {
+            nursery {
+                spawn async {
+                    nursery {
+                        spawn deepest_task();
+                    }
+                };
+            }
+        };
+    }
+
+    // Nested with handlers
+    nursery {
+        spawn async {
+            nursery {
+                spawn inner_task();
+            } on_cancel {
+                inner_cleanup();
+            }
+        };
+    } on_cancel {
+        outer_cleanup();
+    }
+}
+
+// ============================================================================
+// Nursery with Control Flow
+// ============================================================================
+
+async fn test_nursery_control_flow() {
+    // Conditional spawn in nursery
+    nursery {
+        if need_task_a {
+            spawn task_a();
+        }
+        if need_task_b {
+            spawn task_b();
+        }
+    }
+
+    // Loop spawn in nursery
+    nursery {
+        for i in 0..count {
+            spawn process(i);
+        }
+    }
+
+    // While spawn in nursery
+    nursery {
+        let mut i = 0;
+        while i < limit {
+            spawn worker(i);
+            i += 1;
+        }
+    }
+
+    // Match in nursery
+    nursery {
+        match mode {
+            Fast => {
+                spawn fast_worker1();
+                spawn fast_worker2();
+            },
+            Slow => {
+                spawn slow_worker();
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Nursery as Expression
+// ============================================================================
+
+async fn test_nursery_as_expression() {
+    // Nursery in let binding
+    let res = nursery {
+        let h = spawn compute();
+        h.await
+    };
+
+    // Nursery as function return
+    let final_res = nursery {
+        spawn final_computation()
+    };
+    return final_res;
+
+    // Nursery in conditional
+    let value = if parallel {
+        nursery {
+            spawn parallel_task()
+        }
+    } else {
+        sequential_task()
+    };
+
+    // Nursery in match
+    match strategy {
+        Parallel => nursery {
+            spawn a();
+            spawn b();
+        },
+        Sequential => {
+            a();
+            b();
+        }
+    };
+}
+
+// ============================================================================
+// Nursery with Async/Await Integration
+// ============================================================================
+
+async fn test_nursery_async_integration() {
+    // Await before nursery
+    let config = fetch_config().await;
+    nursery {
+        spawn task_with_config(config);
+    }
+
+    // Nursery followed by await
+    nursery {
+        spawn prepare_data();
+    }
+    let res = finalize().await;
+
+    // Nursery with await in spawn body
+    nursery {
+        spawn async {
+            let data = fetch().await;
+            process(data).await
+        };
+    }
+
+    // Select inside nursery spawn
+    nursery {
+        spawn async {
+            select {
+                msg = channel.recv().await => handle(msg),
+                _ = timeout.await => cancel()
+            }
+        };
+    }
+}
+
+// ============================================================================
+// Nursery with Context
+// ============================================================================
+
+async fn test_nursery_with_context() using [Database, Logger] {
+    // Nursery inherits parent context
+    nursery {
+        spawn async {
+            db.query().await
+        };
+    }
+
+    // Spawn with explicit context in nursery
+    nursery {
+        spawn using [Database] async {
+            database_operation().await
+        };
+        spawn using [Logger] async {
+            log_operation()
+        };
+    }
+}
+
+// ============================================================================
+// Complex Nursery Patterns
+// ============================================================================
+
+async fn test_complex_nursery_patterns() {
+    // Fan-out/fan-in pattern
+    nursery {
+        let handles = [spawn process(item) for item in items];
+        // Results collected after nursery exits
+    }
+
+    // Pipeline pattern
+    nursery {
+        let stage1 = spawn extract();
+        let stage2 = spawn transform(stage1);
+        let stage3 = spawn load(stage2);
+    }
+
+    // Worker pool pattern
+    nursery(max_tasks: worker_count) {
+        for job in job_queue {
+            spawn execute_job(job);
+        }
+    }
+
+    // Timeout with fallback pattern
+    let res = nursery(timeout: 5000) {
+        spawn primary_fetch()
+    } recover {
+        TimeoutError => nursery {
+            spawn fallback_fetch()
+        }
+    };
+
+    // Graceful degradation pattern
+    nursery(timeout: 1000, on_error: wait_all) {
+        spawn primary_service();
+        spawn backup_service();
+        spawn monitoring();
+    } recover |_| {
+        emergency_mode()
+    }
+}

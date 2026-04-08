@@ -1,0 +1,49 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, runtime, context, error
+// @description: Test that build info functions require MetaRuntime context
+// @expected-error: requires
+
+// =============================================================================
+// BUILD INFO MISSING CONTEXT TESTS
+// =============================================================================
+
+// crate_name requires MetaRuntime context
+meta fn test_crate_name_no_context() -> Text {
+    crate_name()  // ERROR: requires MetaRuntime context
+}
+
+// cog_name requires MetaRuntime context
+meta fn test_cog_name_no_context() -> Text {
+    cog_name()  // ERROR: requires MetaRuntime context
+}
+
+// module_path requires MetaRuntime context
+meta fn test_module_path_no_context() -> Text {
+    module_path()  // ERROR: requires MetaRuntime context
+}
+
+// is_debug requires MetaRuntime context
+meta fn test_is_debug_no_context() -> Bool {
+    is_debug()  // ERROR: requires MetaRuntime context
+}
+
+// is_release requires MetaRuntime context
+meta fn test_is_release_no_context() -> Bool {
+    is_release()  // ERROR: requires MetaRuntime context
+}
+
+// opt_level requires MetaRuntime context
+meta fn test_opt_level_no_context() -> Int {
+    opt_level()  // ERROR: requires MetaRuntime context
+}
+
+// compiler_version requires MetaRuntime context
+meta fn test_compiler_version_no_context() -> Text {
+    compiler_version()  // ERROR: requires MetaRuntime context
+}
+
+fn main() {
+    @const assert(text_len(test_crate_name_no_context()) > 0);
+}

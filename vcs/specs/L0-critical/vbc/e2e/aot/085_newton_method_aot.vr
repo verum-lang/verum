@@ -1,0 +1,188 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, math, iteration, newton-method
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT Newton's method and numerical algorithms using integer arithmetic
+
+// Integer square root via Newton's method
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        let mut x = n / 2;
+        let mut prev = x + 1;
+        while x < prev {
+            prev = x;
+            x = (x + n / x) / 2;
+        }
+        prev
+    }
+}
+
+// Integer cube root via Newton's method
+fn icbrt(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n <= 7 { 1 }
+    else {
+        let mut x = n / 3;
+        if x == 0 { x = 1; }
+        let mut prev = x + 1;
+        while x < prev {
+            prev = x;
+            x = (2 * x + n / (x * x)) / 3;
+        }
+        prev
+    }
+}
+
+// Fixed-point iteration: find x where f(x) = x
+fn fixed_point(start: Int, f: fn(Int) -> Int, max_iter: Int) -> Int {
+    let mut x = start;
+    let mut i = 0;
+    let mut prev = x + 1;
+    while i < max_iter && x != prev {
+        prev = x;
+        x = f(x);
+        i = i + 1;
+    }
+    x
+}
+
+// Binary search for integer root of f in [lo, hi]
+fn bisect(lo: Int, hi: Int, f: fn(Int) -> Int) -> Int {
+    let mut a = lo;
+    let mut b = hi;
+    while a < b {
+        let mid = a + (b - a) / 2;
+        if f(mid) < 0 { a = mid + 1; }
+        else { b = mid; }
+    }
+    a
+}
+
+// Greatest common divisor
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = if a < 0 { 0 - a } else { a };
+    let mut y = if b < 0 { 0 - b } else { b };
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// Power modular: base^exp mod m
+fn pow_mod(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = result * b % m;
+        }
+        e = e / 2;
+        b = b * b % m;
+    }
+    result
+}
+
+// Heron's formula for triangle area * 4 (to stay in integers)
+// area = sqrt(s*(s-a)*(s-b)*(s-c)) where s = (a+b+c)/2
+// We compute 16 * area^2 = 2s * (2s-2a) * (2s-2b) * (2s-2c)
+fn triangle_area_16sq(a: Int, b: Int, c: Int) -> Int {
+    let s2 = a + b + c;  // 2s
+    s2 * (s2 - 2*a) * (s2 - 2*b) * (s2 - 2*c)
+}
+
+fn main() -> Int {
+    // === Integer square root ===
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(25), 5);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(144), 12);
+    assert_eq(isqrt(10000), 100);
+
+    // Non-perfect squares: floor
+    assert_eq(isqrt(2), 1);
+    assert_eq(isqrt(3), 1);
+    assert_eq(isqrt(8), 2);
+    assert_eq(isqrt(15), 3);
+    assert_eq(isqrt(99), 9);
+    assert_eq(isqrt(101), 10);
+
+    // Verify: isqrt(n)^2 <= n < (isqrt(n)+1)^2
+    let mut i = 0;
+    while i <= 50 {
+        let s = isqrt(i);
+        assert(s * s <= i);
+        assert((s + 1) * (s + 1) > i);
+        i = i + 1;
+    }
+
+    // === Integer cube root ===
+    assert_eq(icbrt(0), 0);
+    assert_eq(icbrt(1), 1);
+    assert_eq(icbrt(8), 2);
+    assert_eq(icbrt(27), 3);
+    assert_eq(icbrt(64), 4);
+    assert_eq(icbrt(125), 5);
+    assert_eq(icbrt(1000), 10);
+
+    // Non-perfect cubes: floor
+    assert_eq(icbrt(7), 1);
+    assert_eq(icbrt(26), 2);
+    assert_eq(icbrt(100), 4);
+
+    // === Fixed point: x = (x + 100/x) / 2 converges to isqrt(100) = 10 ===
+    let fp = fixed_point(50, |x| (x + 100 / x) / 2, 20);
+    assert_eq(fp, 10);
+
+    // === Binary search: find smallest x where x^2 >= 144 ===
+    let root = bisect(0, 144, |x| x * x - 144);
+    assert_eq(root, 12);
+
+    // find smallest x where x^2 >= 50
+    let root2 = bisect(0, 50, |x| x * x - 50);
+    assert_eq(root2, 8);  // 8^2 = 64 >= 50, 7^2 = 49 < 50
+
+    // === GCD ===
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(0, 5), 5);
+    assert_eq(gcd(7, 7), 7);
+
+    // === Power modular ===
+    assert_eq(pow_mod(2, 10, 1000), 24);  // 1024 % 1000 = 24
+    assert_eq(pow_mod(3, 4, 100), 81);    // 81 % 100 = 81
+    assert_eq(pow_mod(2, 0, 100), 1);
+    assert_eq(pow_mod(7, 3, 10), 3);      // 343 % 10 = 3
+    assert_eq(pow_mod(5, 3, 13), 8);      // 125 % 13 = 8
+
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p) for prime p, gcd(a,p)=1
+    assert_eq(pow_mod(2, 12, 13), 1);   // 13 is prime
+    assert_eq(pow_mod(3, 16, 17), 1);   // 17 is prime
+    assert_eq(pow_mod(5, 6, 7), 1);     // 7 is prime
+
+    // === Heron's formula ===
+    // 3-4-5 right triangle: area = 6, 16*area^2 = 576
+    assert_eq(triangle_area_16sq(3, 4, 5), 576);
+
+    // Equilateral triangle side 2: area = sqrt(3), 16*area^2 = 48
+    assert_eq(triangle_area_16sq(2, 2, 2), 48);
+
+    // 5-12-13 right triangle: area = 30, 16*area^2 = 14400
+    assert_eq(triangle_area_16sq(5, 12, 13), 14400);
+
+    // Verify via isqrt: area of 3-4-5 = isqrt(576/16) = isqrt(36) = 6
+    assert_eq(isqrt(triangle_area_16sq(3, 4, 5) / 16), 6);
+
+    0
+}

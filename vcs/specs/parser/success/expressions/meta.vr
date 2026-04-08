@@ -1,0 +1,84 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, meta, quote
+// @description: Test meta and quote expression parsing
+
+fn test_meta_expressions() {
+    // Meta block
+    let a = meta {
+        2 + 2
+    };
+
+    // Unsafe block
+    let b = unsafe {
+        dangerous_operation()
+    };
+
+    // Quote expression
+    let c = quote {
+        fn generated() -> Int { 42 }
+    };
+
+    // Quote with stage
+    let d = quote(0) {
+        let x = 1;
+    };
+
+    let e = quote(1) {
+        meta fn inner() {}
+    };
+
+    // Quote interpolation
+    let name = "foo";
+    let f = quote {
+        fn $name() -> Int { 42 }
+    };
+
+    let g = quote {
+        let result = ${compute()};
+    };
+
+    // Quote repetition
+    // Note: 'field' is a keyword, so use 'fld' as the loop variable name
+    let flds = ["a", "b", "c"];
+    let h = quote {
+        $[for fld in flds {
+            let $fld: Int;
+        }]
+    };
+
+    // Lift operator
+    let i = quote {
+        let constant = lift(compile_time_value);
+    };
+
+    // Stage escape
+    let j = quote {
+        let runtime = $(stage 0){ compute() };
+    };
+}
+
+fn test_meta_functions() {
+    // Built-in meta functions
+    let a = @const 2 + 2;
+    let b = @cfg(debug);
+    let c = @stringify(expression);
+    let d = @concat(a, b);
+
+    // Location intrinsics
+    let e = @file;
+    let f = @line;
+    let g = @column;
+    let h = @module;
+    let i = @function;
+
+    // Type introspection
+    let j = @type_name(T);
+    let k = @type_fields(MyStruct);
+    let l = @is_struct(T);
+    let m = @implements(T, Clone);
+
+    // User-defined macros
+    let n = @sql_query("SELECT * FROM users");
+    let o = @html_template("<div>{content}</div>");
+}

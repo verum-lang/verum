@@ -1,0 +1,245 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, interval-scheduling, greedy, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for greedy interval scheduling (maximum non-overlapping intervals)
+// Intervals stored as parallel arrays of start/end times.
+// Algorithm: sort by end time, greedily select non-overlapping intervals.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn arr8_swap(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = arr8_get(a, i);
+    let vj = arr8_get(a, j);
+    let tmp = arr8_set(a, i, vj);
+    arr8_set(tmp, j, vi)
+}
+
+// Intervals represented as two parallel arrays (start times and end times)
+type Intervals is { starts: Arr8, ends: Arr8, count: Int };
+
+// Sort intervals by end time (selection sort on ends, carry starts along)
+fn sort_by_end(iv: Intervals) -> Intervals {
+    let mut s = iv.starts;
+    let mut e = iv.ends;
+    let n = iv.count;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if arr8_get(e, j) < arr8_get(e, min_idx) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            s = arr8_swap(s, i, min_idx);
+            e = arr8_swap(e, i, min_idx);
+        }
+        i = i + 1;
+    }
+    Intervals { starts: s, ends: e, count: n }
+}
+
+// Greedy interval scheduling: maximum number of non-overlapping intervals
+// Returns count of selected intervals
+fn max_non_overlapping(iv: Intervals) -> Int {
+    let sorted = sort_by_end(iv);
+    let n = sorted.count;
+    if n == 0 { return 0; }
+
+    let mut count = 1;
+    let mut last_end = arr8_get(sorted.ends, 0);
+    let mut i = 1;
+    while i < n {
+        let si = arr8_get(sorted.starts, i);
+        if si >= last_end {
+            count = count + 1;
+            last_end = arr8_get(sorted.ends, i);
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Also return which intervals are selected (1=selected, 0=not) via a bitmask
+fn select_non_overlapping(iv: Intervals) -> Arr8 {
+    let sorted = sort_by_end(iv);
+    let n = sorted.count;
+    let mut selected = arr8_new(n);
+    if n == 0 { return selected; }
+
+    selected = arr8_set(selected, 0, 1);
+    let mut last_end = arr8_get(sorted.ends, 0);
+    let mut i = 1;
+    while i < n {
+        let si = arr8_get(sorted.starts, i);
+        if si >= last_end {
+            selected = arr8_set(selected, i, 1);
+            last_end = arr8_get(sorted.ends, i);
+        }
+        i = i + 1;
+    }
+    selected
+}
+
+// Verify no two selected intervals overlap
+fn verify_no_overlap(iv: Intervals, selected: Arr8) -> Int {
+    let sorted = sort_by_end(iv);
+    let n = sorted.count;
+    let mut i = 0;
+    while i < n {
+        if arr8_get(selected, i) == 1 {
+            let mut j = i + 1;
+            while j < n {
+                if arr8_get(selected, j) == 1 {
+                    let end_i = arr8_get(sorted.ends, i);
+                    let start_j = arr8_get(sorted.starts, j);
+                    if start_j < end_i { return 0; }
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_basic_scheduling() {
+    // Classic example: intervals (1,4), (3,5), (0,6), (5,7), (3,8), (5,9), (6,10), (8,11), (8,12), but use 6
+    // Intervals: (1,3), (2,5), (4,7), (1,8), (5,9), (8,10)
+    let s = Arr8 { a0: 1, a1: 2, a2: 4, a3: 1, a4: 5, a5: 8, a6: 0, a7: 0, len: 6 };
+    let e = Arr8 { a0: 3, a1: 5, a2: 7, a3: 8, a4: 9, a5: 10, a6: 0, a7: 0, len: 6 };
+    let iv = Intervals { starts: s, ends: e, count: 6 };
+
+    let count = max_non_overlapping(iv);
+    // Optimal: (1,3), (4,7), (8,10) = 3
+    assert_eq(count, 3);
+}
+
+fn test_all_overlapping() {
+    // All intervals overlap each other: (0,10), (1,9), (2,8), (3,7)
+    let s = Arr8 { a0: 0, a1: 1, a2: 2, a3: 3, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let e = Arr8 { a0: 10, a1: 9, a2: 8, a3: 7, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let iv = Intervals { starts: s, ends: e, count: 4 };
+
+    let count = max_non_overlapping(iv);
+    // Can only pick 1 (the one ending earliest: (3,7))
+    assert_eq(count, 1);
+}
+
+fn test_no_overlap() {
+    // No intervals overlap: (0,1), (2,3), (4,5), (6,7), (8,9)
+    let s = Arr8 { a0: 0, a1: 2, a2: 4, a3: 6, a4: 8, a5: 0, a6: 0, a7: 0, len: 5 };
+    let e = Arr8 { a0: 1, a1: 3, a2: 5, a3: 7, a4: 9, a5: 0, a6: 0, a7: 0, len: 5 };
+    let iv = Intervals { starts: s, ends: e, count: 5 };
+
+    let count = max_non_overlapping(iv);
+    // All can be selected
+    assert_eq(count, 5);
+}
+
+fn test_touching_endpoints() {
+    // Intervals that touch: (0,2), (2,4), (4,6), (6,8)
+    // These are non-overlapping since start >= last_end
+    let s = Arr8 { a0: 0, a1: 2, a2: 4, a3: 6, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let e = Arr8 { a0: 2, a1: 4, a2: 6, a3: 8, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let iv = Intervals { starts: s, ends: e, count: 4 };
+
+    let count = max_non_overlapping(iv);
+    assert_eq(count, 4);
+}
+
+fn test_single_interval() {
+    let s = Arr8 { a0: 5, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 1 };
+    let e = Arr8 { a0: 10, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 1 };
+    let iv = Intervals { starts: s, ends: e, count: 1 };
+
+    assert_eq(max_non_overlapping(iv), 1);
+}
+
+fn test_verify_selection() {
+    // Intervals: (0,3), (1,4), (3,6), (5,8), (6,9)
+    let s = Arr8 { a0: 0, a1: 1, a2: 3, a3: 5, a4: 6, a5: 0, a6: 0, a7: 0, len: 5 };
+    let e = Arr8 { a0: 3, a1: 4, a2: 6, a3: 8, a4: 9, a5: 0, a6: 0, a7: 0, len: 5 };
+    let iv = Intervals { starts: s, ends: e, count: 5 };
+
+    let sorted = sort_by_end(iv);
+    let selected = select_non_overlapping(iv);
+    assert_eq(verify_no_overlap(sorted, selected), 1);
+
+    // Count selected
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        total = total + arr8_get(selected, i);
+        i = i + 1;
+    }
+    assert_eq(total, max_non_overlapping(iv));
+}
+
+fn test_unsorted_input() {
+    // Intervals given in random order: (5,9), (1,3), (8,10), (2,5), (4,7), (1,8)
+    let s = Arr8 { a0: 5, a1: 1, a2: 8, a3: 2, a4: 4, a5: 1, a6: 0, a7: 0, len: 6 };
+    let e = Arr8 { a0: 9, a1: 3, a2: 10, a3: 5, a4: 7, a5: 8, a6: 0, a7: 0, len: 6 };
+    let iv = Intervals { starts: s, ends: e, count: 6 };
+
+    // Same data as test_basic_scheduling, just different order
+    let count = max_non_overlapping(iv);
+    assert_eq(count, 3);
+}
+
+fn test_sort_correctness() {
+    // Verify sort_by_end actually sorts
+    let s = Arr8 { a0: 5, a1: 1, a2: 8, a3: 2, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let e = Arr8 { a0: 9, a1: 3, a2: 10, a3: 5, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let iv = Intervals { starts: s, ends: e, count: 4 };
+    let sorted = sort_by_end(iv);
+
+    // End times should be in non-decreasing order
+    assert_eq(arr8_get(sorted.ends, 0), 3);
+    assert_eq(arr8_get(sorted.ends, 1), 5);
+    assert_eq(arr8_get(sorted.ends, 2), 9);
+    assert_eq(arr8_get(sorted.ends, 3), 10);
+    // Corresponding starts should move with ends
+    assert_eq(arr8_get(sorted.starts, 0), 1);
+    assert_eq(arr8_get(sorted.starts, 1), 2);
+}
+
+fn main() -> Int {
+    test_basic_scheduling();
+    test_all_overlapping();
+    test_no_overlap();
+    test_touching_endpoints();
+    test_single_interval();
+    test_verify_selection();
+    test_unsorted_input();
+    test_sort_correctness();
+    print("[OK] 325_interval_sched_aot");
+    0
+}

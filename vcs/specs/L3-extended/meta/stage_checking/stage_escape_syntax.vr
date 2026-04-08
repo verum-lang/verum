@@ -1,0 +1,209 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, staged, stage-checking, escape, splice
+
+/// Stage Escape Syntax Tests $(stage N)
+///
+/// Validates the $(stage N) escape syntax for explicit stage control
+/// in multi-level staged metaprogramming.
+/// Spec: 17-meta-system.md Section 2.4 - Stage Coherence Rule
+
+// ============================================================
+// BASIC STAGE ESCAPE: $(stage 0)
+// ============================================================
+
+/// Stage 1 meta function using explicit stage escape
+meta fn gen_with_explicit_escape(value: Int) -> @Expr {
+    // $(stage 0) explicitly escapes to stage 0 (runtime)
+    quote {
+        fn runtime_fn() -> Int {
+            $(stage 0)(value)  // Explicit: value from stage 1 into stage 0
+        }
+    }
+}
+
+/// Compare implicit vs explicit escape (both valid)
+meta fn compare_escapes(n: Int) -> @Expr {
+    quote {
+        fn fn_implicit() -> Int { $(n) }      // Implicit escape
+        fn fn_explicit() -> Int { $(stage 0)(n) }  // Explicit escape to stage 0
+    }
+}
+
+// ============================================================
+// MULTI-LEVEL STAGE ESCAPES
+// ============================================================
+
+/// Stage 2 with escape to both stage 1 and stage 0
+meta(2) fn gen_multi_level_escape(val2: Int) -> @Expr {
+    quote(1) {
+        meta fn gen_inner(val1: Int) -> @Expr {
+            quote {
+                fn combined() -> Int {
+                    // $(stage 1)(val1) - escape from stage 1 to stage 0
+                    // $(stage 2)(val2) - escape from stage 2 to stage 0
+                    $(stage 1)(val1) + $(stage 2)(val2)
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// STAGE ESCAPE WITH EXPRESSIONS
+// ============================================================
+
+/// Escape complex expression, not just variable
+meta fn gen_with_expr_escape(a: Int, b: Int) -> @Expr {
+    quote {
+        fn computed() -> Int {
+            // Escape an expression computed at stage 1
+            $(stage 0)(a + b * 2)
+        }
+    }
+}
+
+/// Escape function call result
+meta fn gen_with_call_escape() -> @Expr {
+    let computed = compute_at_meta(10);  // Computed at stage 1
+    quote {
+        fn use_computed() -> Int {
+            $(stage 0)(computed)
+        }
+    }
+}
+
+meta fn compute_at_meta(x: Int) -> Int {
+    x * x
+}
+
+// ============================================================
+// STAGE ESCAPE WITH TYPES
+// ============================================================
+
+/// Escape type information across stages
+meta fn gen_typed_escape<T>() -> @Expr {
+    quote {
+        fn identity(x: $(stage 0)(T)) -> $(stage 0)(T) {
+            x
+        }
+    }
+}
+
+/// Escape array size into type position
+meta fn gen_array_fn(size: Int) -> @Expr {
+    quote {
+        fn first_element(arr: [Int; $(stage 0)(size)]) -> Int {
+            arr[0]
+        }
+    }
+}
+
+// ============================================================
+// CONDITIONAL STAGE ESCAPES
+// ============================================================
+
+/// Escape different values based on condition
+meta fn gen_conditional_escape(use_fast: Bool) -> @Expr {
+    let factor = if use_fast { 2 } else { 1 };
+    quote {
+        fn scale(x: Int) -> Int {
+            x * $(stage 0)(factor)
+        }
+    }
+}
+
+/// Escape based on loop index
+meta fn gen_indexed_escape(count: Int) -> List<@Expr> {
+    let mut exprs: List<@Expr> = List.new();
+    for i in 0..count {
+        let expr = quote {
+            fn fn_$(i)() -> Int {
+                $(stage 0)(i)
+            }
+        };
+        exprs.push(expr);
+    }
+    exprs
+}
+
+// ============================================================
+// STAGE ESCAPE IN NESTED QUOTES
+// ============================================================
+
+/// Stage 2 with escapes at multiple nesting levels
+meta(2) fn gen_deeply_nested(outer: Int) -> @Expr {
+    quote(1) {
+        meta fn inner(inn: Int) -> @Expr {
+            quote {
+                fn deep() -> Int {
+                    // Each escape targets a different stage
+                    $(stage 0)(inn) +    // From stage 1
+                    $(stage 1)(outer)    // From stage 2
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// STAGE ESCAPE WITH IDENTIFIERS
+// ============================================================
+
+/// Escape identifier for generating named entities
+meta fn gen_named_fn(name: @Ident) -> @Expr {
+    quote {
+        fn $(stage 0)(name)(x: Int) -> Int {
+            x
+        }
+    }
+}
+
+/// Escape both name and type
+meta fn gen_fully_dynamic<T>(name: @Ident) -> @Expr {
+    quote {
+        fn $(stage 0)(name)(x: $(stage 0)(T)) -> $(stage 0)(T) {
+            x
+        }
+    }
+}
+
+// ============================================================
+// STAGE ESCAPE WITH BLOCKS
+// ============================================================
+
+/// Escape an entire block of statements
+meta fn gen_with_block_escape(setup: @Block) -> @Expr {
+    quote {
+        fn with_setup(x: Int) -> Int {
+            $(stage 0)(setup);
+            x + 1
+        }
+    }
+}
+
+/// Escape conditional block
+meta fn gen_maybe_init(should_init: Bool) -> @Expr {
+    let init_block = if should_init {
+        @block { let _init = true; }
+    } else {
+        @block {}
+    };
+
+    quote {
+        fn maybe_initialized() {
+            $(stage 0)(init_block)
+        }
+    }
+}
+
+fn main() {
+    // Verify escape syntax compiles correctly
+    let basic = gen_with_explicit_escape(42);
+    let compare = compare_escapes(10);
+    let multi = gen_multi_level_escape(100);
+    let expr = gen_with_expr_escape(3, 4);
+    let typed = gen_typed_escape<Int>();
+    let arr = gen_array_fn(5);
+}

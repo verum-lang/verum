@@ -1,0 +1,47 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, gpu, real-opcode, event
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL GPU event management intrinsics through VBC interpreter.
+// Exercises gpu_event_create, gpu_event_record, gpu_event_sync, gpu_event_destroy.
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Create an event
+    let e1 = gpu_event_create();
+    if e1 < 0 { errors = errors + 1; }
+
+    // Test 2: Create another event (different handle)
+    let e2 = gpu_event_create();
+    if e2 < 0 { errors = errors + 1; }
+    if e1 == e2 { errors = errors + 1; }
+
+    // Test 3: Create a stream and record event on it
+    let s = gpu_stream_create();
+    let rec = gpu_event_record(e1, s);
+    if rec != 0 { errors = errors + 1; }
+
+    // Test 4: Sync event
+    let sync = gpu_event_sync(e1);
+    if sync != 0 { errors = errors + 1; }
+
+    // Test 5: Record second event
+    let rec2 = gpu_event_record(e2, s);
+    if rec2 != 0 { errors = errors + 1; }
+    let sync2 = gpu_event_sync(e2);
+    if sync2 != 0 { errors = errors + 1; }
+
+    // Test 6: Destroy events and stream
+    let de1 = gpu_event_destroy(e1);
+    if de1 != 0 { errors = errors + 1; }
+    let de2 = gpu_event_destroy(e2);
+    if de2 != 0 { errors = errors + 1; }
+    let ds = gpu_stream_destroy(s);
+    if ds != 0 { errors = errors + 1; }
+
+    errors
+}

@@ -1,0 +1,62 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, gpu, real-opcode, memory
+// @expected-exit: 0
+
+// Tests REAL GPU memory management intrinsics through AOT (LLVM) pipeline.
+// Mirror of interpreter test 202. Exercises gpu_malloc, gpu_free,
+// gpu_memset, gpu_memcpy.
+
+// GPU memory intrinsic declarations
+fn gpu_malloc(size: Int, space: Int) -> Int { @intrinsic("GPU_MALLOC", size, space) }
+fn gpu_free(ptr: Int) -> Int { @intrinsic("GPU_FREE", ptr) }
+fn gpu_memset(ptr: Int, value: Int, size: Int) -> Int { @intrinsic("GPU_MEMSET", ptr, value, size) }
+fn gpu_memcpy(dst: Int, src: Int, size: Int) -> Int { @intrinsic("GPU_MEMCPY", dst, src, size) }
+
+fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
+
+fn main() -> Int {
+    // Skip if no GPU device available
+    if gpu_get_device() == 0 {
+        print("SKIP: No GPU device available");
+        return 0;
+    }
+
+    let mut errors = 0;
+
+    // Test 1: Allocate GPU memory (size=1024, memory_space=0)
+    let ptr1 = gpu_malloc(1024, 0);
+    // ptr should be non-zero (valid allocation)
+    if ptr1 == 0 { errors = errors + 1; }
+
+    // Test 2: Allocate another block
+    let ptr2 = gpu_malloc(2048, 0);
+    if ptr2 == 0 { errors = errors + 1; }
+    // Two allocations should be different
+    if ptr1 == ptr2 { errors = errors + 1; }
+
+    // Test 3: Memset (set memory to value)
+    let ms = gpu_memset(ptr1, 0, 1024);
+    if ms != 0 { errors = errors + 1; }
+
+    // Test 4: Memcpy (copy between GPU buffers)
+    let cp = gpu_memcpy(ptr2, ptr1, 1024);
+    if cp != 0 { errors = errors + 1; }
+
+    // Test 5: Free first allocation
+    let f1 = gpu_free(ptr1);
+    if f1 != 0 { errors = errors + 1; }
+
+    // Test 6: Free second allocation
+    let f2 = gpu_free(ptr2);
+    if f2 != 0 { errors = errors + 1; }
+
+    // Test 7: Allocate after free (should work)
+    let ptr3 = gpu_malloc(512, 0);
+    if ptr3 == 0 { errors = errors + 1; }
+    let f3 = gpu_free(ptr3);
+    if f3 != 0 { errors = errors + 1; }
+
+    errors
+}

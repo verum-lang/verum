@@ -1,0 +1,244 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress
+// @timeout: 60000
+// @expected-exit: 0
+
+// Large variant matching stress: 30+ variant type with exhaustive matching
+
+type Opcode is
+    Nop
+    | Load(Int)
+    | Store(Int)
+    | AddI(Int, Int)
+    | SubI(Int, Int)
+    | MulI(Int, Int)
+    | DivI(Int, Int)
+    | ModI(Int, Int)
+    | Neg(Int)
+    | And(Int, Int)
+    | Or(Int, Int)
+    | Xor(Int, Int)
+    | Shl(Int, Int)
+    | Shr(Int, Int)
+    | CmpEq(Int, Int)
+    | CmpLt(Int, Int)
+    | CmpGt(Int, Int)
+    | CmpLe(Int, Int)
+    | CmpGe(Int, Int)
+    | CmpNe(Int, Int)
+    | JmpIf(Int)
+    | Jmp(Int)
+    | Call(Int)
+    | Ret(Int)
+    | Push(Int)
+    | Pop
+    | Dup(Int)
+    | Swap
+    | Halt
+    | Print(Int)
+    | Inc(Int)
+    | Dec(Int);
+
+fn execute(op: Opcode) -> Int {
+    match op {
+        Nop => 0,
+        Load(v) => v,
+        Store(v) => v,
+        AddI(a, b) => a + b,
+        SubI(a, b) => a - b,
+        MulI(a, b) => a * b,
+        DivI(a, b) => a / b,
+        ModI(a, b) => a % b,
+        Neg(v) => 0 - v,
+        And(a, b) => if (a != 0) { if (b != 0) { 1 } else { 0 } } else { 0 },
+        Or(a, b) => if (a != 0) { 1 } else { if (b != 0) { 1 } else { 0 } },
+        Xor(a, b) => if (a != 0) { if (b != 0) { 0 } else { 1 } } else { if (b != 0) { 1 } else { 0 } },
+        Shl(v, n) => v * fast_pow2(n),
+        Shr(v, n) => v / fast_pow2(n),
+        CmpEq(a, b) => if (a == b) { 1 } else { 0 },
+        CmpLt(a, b) => if (a < b) { 1 } else { 0 },
+        CmpGt(a, b) => if (a > b) { 1 } else { 0 },
+        CmpLe(a, b) => if (a <= b) { 1 } else { 0 },
+        CmpGe(a, b) => if (a >= b) { 1 } else { 0 },
+        CmpNe(a, b) => if (a != b) { 1 } else { 0 },
+        JmpIf(addr) => addr,
+        Jmp(addr) => addr,
+        Call(addr) => addr + 1000,
+        Ret(v) => v,
+        Push(v) => v,
+        Pop => -1,
+        Dup(v) => v * 2,
+        Swap => -2,
+        Halt => -999,
+        Print(v) => v,
+        Inc(v) => v + 1,
+        Dec(v) => v - 1,
+    }
+}
+
+fn fast_pow2(n: Int) -> Int {
+    if (n <= 0) { return 1; }
+    if (n == 1) { return 2; }
+    if (n == 2) { return 4; }
+    if (n == 3) { return 8; }
+    if (n == 4) { return 16; }
+    if (n == 5) { return 32; }
+    32
+}
+
+fn opcode_tag(op: Opcode) -> Int {
+    if (op is Nop) { return 0; }
+    if (op is Load) { return 1; }
+    if (op is Store) { return 2; }
+    if (op is AddI) { return 3; }
+    if (op is SubI) { return 4; }
+    if (op is MulI) { return 5; }
+    if (op is DivI) { return 6; }
+    if (op is ModI) { return 7; }
+    if (op is Neg) { return 8; }
+    if (op is And) { return 9; }
+    if (op is Or) { return 10; }
+    if (op is Xor) { return 11; }
+    if (op is Shl) { return 12; }
+    if (op is Shr) { return 13; }
+    if (op is CmpEq) { return 14; }
+    if (op is CmpLt) { return 15; }
+    if (op is CmpGt) { return 16; }
+    if (op is CmpLe) { return 17; }
+    if (op is CmpGe) { return 18; }
+    if (op is CmpNe) { return 19; }
+    if (op is JmpIf) { return 20; }
+    if (op is Jmp) { return 21; }
+    if (op is Call) { return 22; }
+    if (op is Ret) { return 23; }
+    if (op is Push) { return 24; }
+    if (op is Pop) { return 25; }
+    if (op is Dup) { return 26; }
+    if (op is Swap) { return 27; }
+    if (op is Halt) { return 28; }
+    if (op is Print) { return 29; }
+    if (op is Inc) { return 30; }
+    31
+}
+
+fn is_arithmetic(op: Opcode) -> Int {
+    match op {
+        AddI(_, _) => 1,
+        SubI(_, _) => 1,
+        MulI(_, _) => 1,
+        DivI(_, _) => 1,
+        ModI(_, _) => 1,
+        Neg(_) => 1,
+        Inc(_) => 1,
+        Dec(_) => 1,
+        _ => 0,
+    }
+}
+
+fn is_comparison(op: Opcode) -> Int {
+    match op {
+        CmpEq(_, _) => 1,
+        CmpLt(_, _) => 1,
+        CmpGt(_, _) => 1,
+        CmpLe(_, _) => 1,
+        CmpGe(_, _) => 1,
+        CmpNe(_, _) => 1,
+        _ => 0,
+    }
+}
+
+fn is_control_flow(op: Opcode) -> Int {
+    match op {
+        Jmp(_) => 1,
+        JmpIf(_) => 1,
+        Call(_) => 1,
+        Ret(_) => 1,
+        Halt => 1,
+        _ => 0,
+    }
+}
+
+fn main() -> Int {
+    // Test execution of all 32 opcodes
+    assert_eq(execute(Nop), 0);
+    assert_eq(execute(Load(42)), 42);
+    assert_eq(execute(Store(99)), 99);
+    assert_eq(execute(AddI(10, 20)), 30);
+    assert_eq(execute(SubI(50, 30)), 20);
+    assert_eq(execute(MulI(6, 7)), 42);
+    assert_eq(execute(DivI(100, 4)), 25);
+    assert_eq(execute(ModI(17, 5)), 2);
+    assert_eq(execute(Neg(42)), -42);
+    assert_eq(execute(And(1, 1)), 1);
+    assert_eq(execute(And(1, 0)), 0);
+    assert_eq(execute(Or(0, 1)), 1);
+    assert_eq(execute(Or(0, 0)), 0);
+    assert_eq(execute(Xor(1, 0)), 1);
+    assert_eq(execute(Xor(1, 1)), 0);
+    assert_eq(execute(Shl(1, 4)), 16);
+    assert_eq(execute(Shr(32, 3)), 4);
+    assert_eq(execute(CmpEq(5, 5)), 1);
+    assert_eq(execute(CmpEq(5, 6)), 0);
+    assert_eq(execute(CmpLt(3, 5)), 1);
+    assert_eq(execute(CmpGt(5, 3)), 1);
+    assert_eq(execute(CmpLe(5, 5)), 1);
+    assert_eq(execute(CmpGe(5, 5)), 1);
+    assert_eq(execute(CmpNe(5, 6)), 1);
+    assert_eq(execute(JmpIf(100)), 100);
+    assert_eq(execute(Jmp(200)), 200);
+    assert_eq(execute(Call(50)), 1050);
+    assert_eq(execute(Ret(7)), 7);
+    assert_eq(execute(Push(33)), 33);
+    assert_eq(execute(Pop), -1);
+    assert_eq(execute(Dup(15)), 30);
+    assert_eq(execute(Swap), -2);
+    assert_eq(execute(Halt), -999);
+    assert_eq(execute(Print(77)), 77);
+    assert_eq(execute(Inc(9)), 10);
+    assert_eq(execute(Dec(10)), 9);
+
+    // Test tags for all opcodes
+    assert_eq(opcode_tag(Nop), 0);
+    assert_eq(opcode_tag(Load(0)), 1);
+    assert_eq(opcode_tag(Store(0)), 2);
+    assert_eq(opcode_tag(AddI(0, 0)), 3);
+    assert_eq(opcode_tag(Halt), 28);
+    assert_eq(opcode_tag(Inc(0)), 30);
+    assert_eq(opcode_tag(Dec(0)), 31);
+
+    // Test classification
+    assert_eq(is_arithmetic(AddI(1, 2)), 1);
+    assert_eq(is_arithmetic(SubI(1, 2)), 1);
+    assert_eq(is_arithmetic(MulI(1, 2)), 1);
+    assert_eq(is_arithmetic(Inc(5)), 1);
+    assert_eq(is_arithmetic(Dec(5)), 1);
+    assert_eq(is_arithmetic(Nop), 0);
+    assert_eq(is_arithmetic(Load(1)), 0);
+
+    assert_eq(is_comparison(CmpEq(1, 1)), 1);
+    assert_eq(is_comparison(CmpLt(1, 2)), 1);
+    assert_eq(is_comparison(AddI(1, 2)), 0);
+
+    assert_eq(is_control_flow(Jmp(0)), 1);
+    assert_eq(is_control_flow(Call(0)), 1);
+    assert_eq(is_control_flow(Halt), 1);
+    assert_eq(is_control_flow(Nop), 0);
+
+    // Stress: execute many opcodes in sequence and accumulate
+    let mut acc = 0;
+    let mut i = 0;
+    while (i < 50) {
+        acc = acc + execute(AddI(i, i));
+        acc = acc + execute(MulI(i, 2));
+        acc = acc + execute(Inc(i));
+        i = i + 1;
+    }
+    // AddI(i,i)=2i, MulI(i,2)=2i, Inc(i)=i+1 => per iter: 5i+1
+    // sum for i=0..49: 5*49*50/2 + 50 = 6125 + 50 = 6175
+    assert_eq(acc, 6175);
+
+    print("833_stress_large_variant: PASS");
+    0
+}

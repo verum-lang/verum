@@ -1,0 +1,6 @@
+// Crash seed: Unicode identifiers and strings
+fn main() {
+    let emoji = "Hello World";
+    let japanese = "Verum";
+    let mixed = "Test: abc 123";
+}

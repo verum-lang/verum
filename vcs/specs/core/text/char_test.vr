@@ -1,0 +1,1145 @@
+// =============================================================================
+// char_test.vr - Comprehensive tests for Char utilities
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, char, unicode, core
+// @description: Comprehensive tests for Char type methods and utilities
+// =============================================================================
+
+mount core.text.{GeneralCategory, CharPattern, AnyChar, CharRange, any_of, char_range};
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Section 1: ASCII Classification Tests
+// =============================================================================
+
+@test
+fn test_char_is_ascii() {
+    assert('a'.is_ascii());
+    assert('Z'.is_ascii());
+    assert('0'.is_ascii());
+    assert(' '.is_ascii());
+    assert('\n'.is_ascii());
+    // Non-ASCII should return false (but we can't easily test without Unicode chars)
+}
+
+@test
+fn test_char_is_ascii_alphabetic() {
+    assert('a'.is_ascii_alphabetic());
+    assert('z'.is_ascii_alphabetic());
+    assert('A'.is_ascii_alphabetic());
+    assert('Z'.is_ascii_alphabetic());
+    assert('m'.is_ascii_alphabetic());
+    assert('M'.is_ascii_alphabetic());
+
+    assert(!('0'.is_ascii_alphabetic()));
+    assert(!(' '.is_ascii_alphabetic()));
+    assert(!('!'.is_ascii_alphabetic()));
+}
+
+@test
+fn test_char_is_ascii_uppercase() {
+    assert('A'.is_ascii_uppercase());
+    assert('Z'.is_ascii_uppercase());
+    assert('M'.is_ascii_uppercase());
+
+    assert(!('a'.is_ascii_uppercase()));
+    assert(!('z'.is_ascii_uppercase()));
+    assert(!('0'.is_ascii_uppercase()));
+}
+
+@test
+fn test_char_is_ascii_lowercase() {
+    assert('a'.is_ascii_lowercase());
+    assert('z'.is_ascii_lowercase());
+    assert('m'.is_ascii_lowercase());
+
+    assert(!('A'.is_ascii_lowercase()));
+    assert(!('Z'.is_ascii_lowercase()));
+    assert(!('0'.is_ascii_lowercase()));
+}
+
+@test
+fn test_char_is_ascii_digit() {
+    assert('0'.is_ascii_digit());
+    assert('5'.is_ascii_digit());
+    assert('9'.is_ascii_digit());
+
+    assert(!('a'.is_ascii_digit()));
+    assert(!(' '.is_ascii_digit()));
+    assert(!('!'.is_ascii_digit()));
+}
+
+@test
+fn test_char_is_ascii_hexdigit() {
+    // Decimal digits
+    assert('0'.is_ascii_hexdigit());
+    assert('9'.is_ascii_hexdigit());
+
+    // Lowercase hex
+    assert('a'.is_ascii_hexdigit());
+    assert('f'.is_ascii_hexdigit());
+
+    // Uppercase hex
+    assert('A'.is_ascii_hexdigit());
+    assert('F'.is_ascii_hexdigit());
+
+    // Not hex
+    assert(!('g'.is_ascii_hexdigit()));
+    assert(!('G'.is_ascii_hexdigit()));
+    assert(!(' '.is_ascii_hexdigit()));
+}
+
+@test
+fn test_char_is_ascii_alphanumeric() {
+    assert('a'.is_ascii_alphanumeric());
+    assert('Z'.is_ascii_alphanumeric());
+    assert('0'.is_ascii_alphanumeric());
+    assert('9'.is_ascii_alphanumeric());
+
+    assert(!(' '.is_ascii_alphanumeric()));
+    assert(!('!'.is_ascii_alphanumeric()));
+}
+
+@test
+fn test_char_is_ascii_whitespace() {
+    assert(' '.is_ascii_whitespace());   // space
+    assert('\t'.is_ascii_whitespace());  // tab
+    assert('\n'.is_ascii_whitespace());  // newline
+    assert('\r'.is_ascii_whitespace());  // carriage return
+
+    assert(!('a'.is_ascii_whitespace()));
+    assert(!('0'.is_ascii_whitespace()));
+}
+
+@test
+fn test_char_is_ascii_control() {
+    assert('\0'.is_ascii_control());     // NUL
+    assert('\t'.is_ascii_control());     // TAB
+    assert('\n'.is_ascii_control());     // LF
+    assert('\r'.is_ascii_control());     // CR
+
+    assert(!(' '.is_ascii_control()));    // space is not control
+    assert(!('a'.is_ascii_control()));
+}
+
+@test
+fn test_char_is_ascii_punctuation() {
+    assert('!'.is_ascii_punctuation());
+    assert('.'.is_ascii_punctuation());
+    assert(','.is_ascii_punctuation());
+    assert(';'.is_ascii_punctuation());
+    assert(':'.is_ascii_punctuation());
+    assert('?'.is_ascii_punctuation());
+    assert('@'.is_ascii_punctuation());
+    assert('['.is_ascii_punctuation());
+    assert('{'.is_ascii_punctuation());
+    assert('~'.is_ascii_punctuation());
+
+    assert(!('a'.is_ascii_punctuation()));
+    assert(!('0'.is_ascii_punctuation()));
+    assert(!(' '.is_ascii_punctuation()));
+}
+
+@test
+fn test_char_is_ascii_graphic() {
+    assert('!'.is_ascii_graphic());
+    assert('~'.is_ascii_graphic());
+    assert('a'.is_ascii_graphic());
+    assert('0'.is_ascii_graphic());
+
+    assert(!(' '.is_ascii_graphic()));   // space is not graphic
+    assert(!('\t'.is_ascii_graphic()));
+}
+
+// =============================================================================
+// Section 2: ASCII Case Conversion Tests
+// =============================================================================
+
+@test
+fn test_char_to_ascii_uppercase() {
+    assert_eq('a'.to_ascii_uppercase(), 'A');
+    assert_eq('z'.to_ascii_uppercase(), 'Z');
+    assert_eq('m'.to_ascii_uppercase(), 'M');
+
+    // Already uppercase - unchanged
+    assert_eq('A'.to_ascii_uppercase(), 'A');
+    assert_eq('Z'.to_ascii_uppercase(), 'Z');
+
+    // Non-letters - unchanged
+    assert_eq('0'.to_ascii_uppercase(), '0');
+    assert_eq('!'.to_ascii_uppercase(), '!');
+    assert_eq(' '.to_ascii_uppercase(), ' ');
+}
+
+@test
+fn test_char_to_ascii_lowercase() {
+    assert_eq('A'.to_ascii_lowercase(), 'a');
+    assert_eq('Z'.to_ascii_lowercase(), 'z');
+    assert_eq('M'.to_ascii_lowercase(), 'm');
+
+    // Already lowercase - unchanged
+    assert_eq('a'.to_ascii_lowercase(), 'a');
+    assert_eq('z'.to_ascii_lowercase(), 'z');
+
+    // Non-letters - unchanged
+    assert_eq('0'.to_ascii_lowercase(), '0');
+    assert_eq('!'.to_ascii_lowercase(), '!');
+    assert_eq(' '.to_ascii_lowercase(), ' ');
+}
+
+@test
+fn test_char_eq_ignore_ascii_case() {
+    assert('a'.eq_ignore_ascii_case(&'a'));
+    assert('a'.eq_ignore_ascii_case(&'A'));
+    assert('A'.eq_ignore_ascii_case(&'a'));
+    assert('A'.eq_ignore_ascii_case(&'A'));
+
+    assert('z'.eq_ignore_ascii_case(&'Z'));
+
+    assert(!('a'.eq_ignore_ascii_case(&'b')));
+    assert(!('A'.eq_ignore_ascii_case(&'B')));
+}
+
+// =============================================================================
+// Section 3: Digit Conversion Tests
+// =============================================================================
+
+@test
+fn test_char_is_digit() {
+    // Base 10
+    assert('0'.is_digit(10));
+    assert('9'.is_digit(10));
+    assert(!('a'.is_digit(10)));
+
+    // Base 16
+    assert('0'.is_digit(16));
+    assert('9'.is_digit(16));
+    assert('a'.is_digit(16));
+    assert('f'.is_digit(16));
+    assert('A'.is_digit(16));
+    assert('F'.is_digit(16));
+    assert(!('g'.is_digit(16)));
+
+    // Base 2
+    assert('0'.is_digit(2));
+    assert('1'.is_digit(2));
+    assert(!('2'.is_digit(2)));
+
+    // Base 36
+    assert('0'.is_digit(36));
+    assert('9'.is_digit(36));
+    assert('z'.is_digit(36));
+    assert('Z'.is_digit(36));
+}
+
+@test
+fn test_char_to_digit_base10() {
+    match '0'.to_digit(10) {
+        Maybe.Some(d) => assert_eq(d, 0),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match '5'.to_digit(10) {
+        Maybe.Some(d) => assert_eq(d, 5),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match '9'.to_digit(10) {
+        Maybe.Some(d) => assert_eq(d, 9),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match 'a'.to_digit(10) {
+        Maybe.None => {} // Expected
+        Maybe.Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_char_to_digit_base16() {
+    match '0'.to_digit(16) {
+        Maybe.Some(d) => assert_eq(d, 0),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match '9'.to_digit(16) {
+        Maybe.Some(d) => assert_eq(d, 9),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match 'a'.to_digit(16) {
+        Maybe.Some(d) => assert_eq(d, 10),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match 'f'.to_digit(16) {
+        Maybe.Some(d) => assert_eq(d, 15),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match 'A'.to_digit(16) {
+        Maybe.Some(d) => assert_eq(d, 10),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match 'F'.to_digit(16) {
+        Maybe.Some(d) => assert_eq(d, 15),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_char_from_digit() {
+    match Char.from_digit(0, 10) {
+        Maybe.Some(c) => assert_eq(c, '0'),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match Char.from_digit(5, 10) {
+        Maybe.Some(c) => assert_eq(c, '5'),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match Char.from_digit(9, 10) {
+        Maybe.Some(c) => assert_eq(c, '9'),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match Char.from_digit(10, 16) {
+        Maybe.Some(c) => assert_eq(c, 'a'),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match Char.from_digit(15, 16) {
+        Maybe.Some(c) => assert_eq(c, 'f'),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    // Invalid digit for radix
+    match Char.from_digit(10, 10) {
+        Maybe.None => {} // Expected
+        Maybe.Some(_) => panic("Expected None"),
+    }
+
+    match Char.from_digit(-1, 10) {
+        Maybe.None => {} // Expected
+        Maybe.Some(_) => panic("Expected None for negative"),
+    }
+}
+
+// =============================================================================
+// Section 4: UTF-8/UTF-16 Length Tests
+// =============================================================================
+
+@test
+fn test_char_len_utf8() {
+    // ASCII - 1 byte
+    assert_eq('a'.len_utf8(), 1);
+    assert_eq('0'.len_utf8(), 1);
+    assert_eq(' '.len_utf8(), 1);
+    assert_eq('\0'.len_utf8(), 1);
+}
+
+@test
+fn test_char_len_utf16() {
+    // BMP characters - 1 code unit
+    assert_eq('a'.len_utf16(), 1);
+    assert_eq('0'.len_utf16(), 1);
+}
+
+// =============================================================================
+// Section 5: General Category Tests
+// =============================================================================
+
+@test
+fn test_general_category_is_letter() {
+    assert(GeneralCategory.Lu.is_letter());
+    assert(GeneralCategory.Ll.is_letter());
+    assert(GeneralCategory.Lt.is_letter());
+    assert(GeneralCategory.Lm.is_letter());
+    assert(GeneralCategory.Lo.is_letter());
+
+    assert(!GeneralCategory.Nd.is_letter());
+    assert(!GeneralCategory.Sm.is_letter());
+}
+
+@test
+fn test_general_category_is_number() {
+    assert(GeneralCategory.Nd.is_number());
+    assert(GeneralCategory.Nl.is_number());
+    assert(GeneralCategory.No.is_number());
+
+    assert(!GeneralCategory.Lu.is_number());
+    assert(!GeneralCategory.Sm.is_number());
+}
+
+@test
+fn test_general_category_is_punctuation() {
+    assert(GeneralCategory.Pc.is_punctuation());
+    assert(GeneralCategory.Pd.is_punctuation());
+    assert(GeneralCategory.Ps.is_punctuation());
+    assert(GeneralCategory.Pe.is_punctuation());
+    assert(GeneralCategory.Po.is_punctuation());
+
+    assert(!GeneralCategory.Lu.is_punctuation());
+    assert(!GeneralCategory.Nd.is_punctuation());
+}
+
+@test
+fn test_general_category_is_symbol() {
+    assert(GeneralCategory.Sm.is_symbol());
+    assert(GeneralCategory.Sc.is_symbol());
+    assert(GeneralCategory.Sk.is_symbol());
+    assert(GeneralCategory.So.is_symbol());
+
+    assert(!GeneralCategory.Lu.is_symbol());
+    assert(!GeneralCategory.Nd.is_symbol());
+}
+
+@test
+fn test_general_category_is_separator() {
+    assert(GeneralCategory.Zs.is_separator());
+    assert(GeneralCategory.Zl.is_separator());
+    assert(GeneralCategory.Zp.is_separator());
+
+    assert(!GeneralCategory.Lu.is_separator());
+    assert(!GeneralCategory.Nd.is_separator());
+}
+
+@test
+fn test_general_category_is_other() {
+    assert(GeneralCategory.Cc.is_other());
+    assert(GeneralCategory.Cf.is_other());
+    assert(GeneralCategory.Cs.is_other());
+    assert(GeneralCategory.Co.is_other());
+    assert(GeneralCategory.Cn.is_other());
+
+    assert(!GeneralCategory.Lu.is_other());
+    assert(!GeneralCategory.Nd.is_other());
+}
+
+// =============================================================================
+// Section 6: CharPattern Tests
+// =============================================================================
+
+@test
+fn test_char_pattern_char() {
+    let pattern = 'a';
+    assert(pattern.matches('a'));
+    assert(!pattern.matches('b'));
+    assert(!pattern.matches('A'));
+}
+
+@test
+fn test_char_pattern_any_of() {
+    let vowels = ['a', 'e', 'i', 'o', 'u'];
+    let pattern = any_of(&vowels);
+
+    assert(pattern.matches('a'));
+    assert(pattern.matches('e'));
+    assert(pattern.matches('u'));
+    assert(!pattern.matches('b'));
+    assert(!pattern.matches('x'));
+}
+
+@test
+fn test_char_pattern_range() {
+    let digits = char_range('0', '9');
+
+    assert(digits.matches('0'));
+    assert(digits.matches('5'));
+    assert(digits.matches('9'));
+    assert(!digits.matches('a'));
+    assert(!digits.matches('!'));
+
+    let lowercase = char_range('a', 'z');
+    assert(lowercase.matches('a'));
+    assert(lowercase.matches('m'));
+    assert(lowercase.matches('z'));
+    assert(!lowercase.matches('A'));
+    assert(!lowercase.matches('0'));
+}
+
+// =============================================================================
+// Section 7: Valid Unicode Test
+// =============================================================================
+
+@test
+fn test_char_is_valid_unicode() {
+    assert('a'.is_valid_unicode());
+    assert('0'.is_valid_unicode());
+    assert(' '.is_valid_unicode());
+    // Surrogate code points are invalid, but we can't easily construct them
+}
+
+// =============================================================================
+// Section 8: Edge Cases
+// =============================================================================
+
+@test
+fn test_char_null() {
+    assert('\0'.is_ascii());
+    assert('\0'.is_ascii_control());
+    assert(!'\0'.is_ascii_graphic());
+    assert_eq('\0'.len_utf8(), 1);
+}
+
+@test
+fn test_char_newline() {
+    assert('\n'.is_ascii());
+    assert('\n'.is_ascii_whitespace());
+    assert('\n'.is_ascii_control());
+    assert(!'\n'.is_ascii_graphic());
+}
+
+@test
+fn test_char_space() {
+    assert(' '.is_ascii());
+    assert(' '.is_ascii_whitespace());
+    assert(!(' '.is_ascii_control()));
+    assert(!(' '.is_ascii_graphic()));
+    assert(!(' '.is_ascii_punctuation()));
+}
+
+@test
+fn test_char_boundary_values() {
+    // Test boundary ASCII values
+    let exclaim = '!';  // First printable (33)
+    let tilde = '~';    // Last printable before DEL (126)
+
+    assert(exclaim.is_ascii_graphic());
+    assert(exclaim.is_ascii_punctuation());
+
+    assert(tilde.is_ascii_graphic());
+    assert(tilde.is_ascii_punctuation());
+}
+
+// =============================================================================
+// Section 9: Unicode Classification Tests
+// =============================================================================
+
+@test
+fn test_char_is_alphabetic() {
+    assert('a'.is_alphabetic());
+    assert('Z'.is_alphabetic());
+    assert('m'.is_alphabetic());
+
+    assert(!('0'.is_alphabetic()));
+    assert(!(' '.is_alphabetic()));
+    assert(!('!'.is_alphabetic()));
+}
+
+@test
+fn test_char_is_numeric() {
+    assert('0'.is_numeric());
+    assert('5'.is_numeric());
+    assert('9'.is_numeric());
+
+    assert(!('a'.is_numeric()));
+    assert(!(' '.is_numeric()));
+    assert(!('!'.is_numeric()));
+}
+
+@test
+fn test_char_is_alphanumeric_unicode() {
+    assert('a'.is_alphanumeric());
+    assert('Z'.is_alphanumeric());
+    assert('0'.is_alphanumeric());
+    assert('9'.is_alphanumeric());
+
+    assert(!(' '.is_alphanumeric()));
+    assert(!('!'.is_alphanumeric()));
+    assert(!('\n'.is_alphanumeric()));
+}
+
+@test
+fn test_char_is_whitespace() {
+    assert(' '.is_whitespace());
+    assert('\t'.is_whitespace());
+    assert('\n'.is_whitespace());
+    assert('\r'.is_whitespace());
+
+    assert(!('a'.is_whitespace()));
+    assert(!('0'.is_whitespace()));
+    assert(!('!'.is_whitespace()));
+}
+
+@test
+fn test_char_is_control() {
+    assert('\0'.is_control());
+    assert('\t'.is_control());
+    assert('\n'.is_control());
+    assert('\r'.is_control());
+
+    assert(!('a'.is_control()));
+    assert(!(' '.is_control()));
+    assert(!('0'.is_control()));
+}
+
+@test
+fn test_char_is_uppercase() {
+    assert('A'.is_uppercase());
+    assert('Z'.is_uppercase());
+    assert('M'.is_uppercase());
+
+    assert(!('a'.is_uppercase()));
+    assert(!('z'.is_uppercase()));
+    assert(!('0'.is_uppercase()));
+    assert(!(' '.is_uppercase()));
+}
+
+@test
+fn test_char_is_lowercase() {
+    assert('a'.is_lowercase());
+    assert('z'.is_lowercase());
+    assert('m'.is_lowercase());
+
+    assert(!('A'.is_lowercase()));
+    assert(!('Z'.is_lowercase()));
+    assert(!('0'.is_lowercase()));
+    assert(!(' '.is_lowercase()));
+}
+
+// =============================================================================
+// Section 10: Unicode Case Conversion Tests
+// =============================================================================
+
+@test
+fn test_char_to_uppercase() {
+    assert_eq('a'.to_uppercase(), 'A');
+    assert_eq('z'.to_uppercase(), 'Z');
+    assert_eq('m'.to_uppercase(), 'M');
+
+    // Already uppercase
+    assert_eq('A'.to_uppercase(), 'A');
+    assert_eq('Z'.to_uppercase(), 'Z');
+
+    // Non-letter unchanged
+    assert_eq('0'.to_uppercase(), '0');
+    assert_eq('!'.to_uppercase(), '!');
+}
+
+@test
+fn test_char_to_lowercase() {
+    assert_eq('A'.to_lowercase(), 'a');
+    assert_eq('Z'.to_lowercase(), 'z');
+    assert_eq('M'.to_lowercase(), 'm');
+
+    // Already lowercase
+    assert_eq('a'.to_lowercase(), 'a');
+    assert_eq('z'.to_lowercase(), 'z');
+
+    // Non-letter unchanged
+    assert_eq('0'.to_lowercase(), '0');
+    assert_eq('!'.to_lowercase(), '!');
+}
+
+// =============================================================================
+// Section 11: In-Place Mutation Tests
+// =============================================================================
+
+@test
+fn test_char_make_ascii_uppercase() {
+    let mut c = 'a';
+    c.make_ascii_uppercase();
+    assert_eq(c, 'A');
+
+    let mut d = 'z';
+    d.make_ascii_uppercase();
+    assert_eq(d, 'Z');
+
+    // Already uppercase - unchanged
+    let mut e = 'A';
+    e.make_ascii_uppercase();
+    assert_eq(e, 'A');
+
+    // Non-letter - unchanged
+    let mut f = '0';
+    f.make_ascii_uppercase();
+    assert_eq(f, '0');
+}
+
+@test
+fn test_char_make_ascii_lowercase() {
+    let mut c = 'A';
+    c.make_ascii_lowercase();
+    assert_eq(c, 'a');
+
+    let mut d = 'Z';
+    d.make_ascii_lowercase();
+    assert_eq(d, 'z');
+
+    // Already lowercase - unchanged
+    let mut e = 'a';
+    e.make_ascii_lowercase();
+    assert_eq(e, 'a');
+
+    // Non-letter - unchanged
+    let mut f = '0';
+    f.make_ascii_lowercase();
+    assert_eq(f, '0');
+}
+
+// =============================================================================
+// Section 12: Escape Sequence Tests
+// =============================================================================
+
+@test
+fn test_char_escape_debug() {
+    // Normal printable chars should be themselves
+    let a_escaped: Text = 'a'.escape_debug();
+    assert_eq(a_escaped, "a");
+
+    let zero_escaped: Text = '0'.escape_debug();
+    assert_eq(zero_escaped, "0");
+}
+
+@test
+fn test_char_escape_debug_special() {
+    // Special chars should be escaped
+    let newline_escaped: Text = '\n'.escape_debug();
+    assert_eq(newline_escaped, "\\n");
+
+    let tab_escaped: Text = '\t'.escape_debug();
+    assert_eq(tab_escaped, "\\t");
+
+    let cr_escaped: Text = '\r'.escape_debug();
+    assert_eq(cr_escaped, "\\r");
+
+    let null_escaped: Text = '\0'.escape_debug();
+    assert_eq(null_escaped, "\\0");
+
+    let backslash_escaped: Text = '\\'.escape_debug();
+    assert_eq(backslash_escaped, "\\\\");
+
+    let quote_escaped: Text = '\''.escape_debug();
+    assert_eq(quote_escaped, "\\'");
+}
+
+@test
+fn test_char_escape_unicode() {
+    let a_escaped: Text = 'a'.escape_unicode();
+    // 'a' is U+0061
+    assert_eq(a_escaped, "\\u{61}");
+
+    let zero_escaped: Text = '0'.escape_unicode();
+    // '0' is U+0030
+    assert_eq(zero_escaped, "\\u{30}");
+}
+
+@test
+fn test_char_escape_default() {
+    // Printable ASCII should be unchanged
+    let a_escaped: Text = 'a'.escape_default();
+    assert_eq(a_escaped, "a");
+
+    let zero_escaped: Text = '0'.escape_default();
+    assert_eq(zero_escaped, "0");
+}
+
+@test
+fn test_char_escape_default_special() {
+    // Special chars should use symbolic escapes
+    let newline_escaped: Text = '\n'.escape_default();
+    assert_eq(newline_escaped, "\\n");
+
+    let tab_escaped: Text = '\t'.escape_default();
+    assert_eq(tab_escaped, "\\t");
+}
+
+// =============================================================================
+// Section 13: UTF Encoding Tests
+// =============================================================================
+
+@test
+fn test_char_encode_utf8_ascii() {
+    let mut buf: List<Byte> = List.new();
+    buf.push(0 as Byte);
+    buf.push(0 as Byte);
+    buf.push(0 as Byte);
+    buf.push(0 as Byte);
+
+    let len: Int = 'a'.encode_utf8(&mut buf);
+    assert_eq(len, 1);
+}
+
+@test
+fn test_char_encode_utf16_ascii() {
+    let mut buf: List<Int> = List.new();
+    buf.push(0);
+    buf.push(0);
+
+    let len: Int = 'a'.encode_utf16(&mut buf);
+    assert_eq(len, 1);
+}
+
+// =============================================================================
+// Section 14: GeneralCategory.is_mark Tests
+// =============================================================================
+
+@test
+fn test_general_category_is_mark() {
+    assert(GeneralCategory.Mn.is_mark());
+    assert(GeneralCategory.Mc.is_mark());
+    assert(GeneralCategory.Me.is_mark());
+
+    assert(!GeneralCategory.Lu.is_mark());
+    assert(!GeneralCategory.Nd.is_mark());
+    assert(!GeneralCategory.Sm.is_mark());
+    assert(!GeneralCategory.Zs.is_mark());
+}
+
+// =============================================================================
+// Section 15: Radix Edge Cases and Boundary Tests
+// =============================================================================
+
+@test
+fn test_char_to_digit_all_radixes() {
+    // Test base 2 (binary)
+    match '0'.to_digit(2) {
+        Maybe.Some(d) => assert_eq(d, 0),
+        Maybe.None => panic("Expected Some for '0' in base 2"),
+    }
+    match '1'.to_digit(2) {
+        Maybe.Some(d) => assert_eq(d, 1),
+        Maybe.None => panic("Expected Some for '1' in base 2"),
+    }
+    match '2'.to_digit(2) {
+        Maybe.None => {} // Expected
+        Maybe.Some(_) => panic("Expected None for '2' in base 2"),
+    }
+
+    // Test base 8 (octal)
+    match '7'.to_digit(8) {
+        Maybe.Some(d) => assert_eq(d, 7),
+        Maybe.None => panic("Expected Some for '7' in base 8"),
+    }
+    match '8'.to_digit(8) {
+        Maybe.None => {} // Expected
+        Maybe.Some(_) => panic("Expected None for '8' in base 8"),
+    }
+
+    // Test base 36 (maximum)
+    match 'z'.to_digit(36) {
+        Maybe.Some(d) => assert_eq(d, 35),
+        Maybe.None => panic("Expected Some for 'z' in base 36"),
+    }
+    match 'Z'.to_digit(36) {
+        Maybe.Some(d) => assert_eq(d, 35),
+        Maybe.None => panic("Expected Some for 'Z' in base 36"),
+    }
+}
+
+@test
+fn test_char_from_digit_all_radixes() {
+    // Base 2 boundaries
+    match Char.from_digit(0, 2) {
+        Maybe.Some(c) => assert_eq(c, '0'),
+        Maybe.None => panic("Expected Some for digit 0 in base 2"),
+    }
+    match Char.from_digit(1, 2) {
+        Maybe.Some(c) => assert_eq(c, '1'),
+        Maybe.None => panic("Expected Some for digit 1 in base 2"),
+    }
+    match Char.from_digit(2, 2) {
+        Maybe.None => {} // Expected
+        Maybe.Some(_) => panic("Expected None for digit 2 in base 2"),
+    }
+
+    // Base 36 boundary
+    match Char.from_digit(35, 36) {
+        Maybe.Some(c) => assert_eq(c, 'z'),
+        Maybe.None => panic("Expected Some for digit 35 in base 36"),
+    }
+    match Char.from_digit(36, 36) {
+        Maybe.None => {} // Expected
+        Maybe.Some(_) => panic("Expected None for digit 36 in base 36"),
+    }
+}
+
+// =============================================================================
+// Section 16: Case Conversion Roundtrip Tests
+// =============================================================================
+
+@test
+fn test_char_case_conversion_roundtrip() {
+    // Lowercase -> uppercase -> lowercase should be identity
+    let lower = 'a';
+    let upper_from_lower = lower.to_ascii_uppercase();
+    let back_to_lower = upper_from_lower.to_ascii_lowercase();
+    assert_eq(back_to_lower, lower);
+
+    // Same for 'z'
+    let z_lower = 'z';
+    let z_upper = z_lower.to_ascii_uppercase();
+    let z_back = z_upper.to_ascii_lowercase();
+    assert_eq(z_back, z_lower);
+
+    // Uppercase -> lowercase -> uppercase should be identity
+    let upper = 'A';
+    let lower_from_upper = upper.to_ascii_lowercase();
+    let back_to_upper = lower_from_upper.to_ascii_uppercase();
+    assert_eq(back_to_upper, upper);
+
+    // Non-letter roundtrips to itself
+    let digit = '5';
+    let digit_upper = digit.to_ascii_uppercase();
+    let digit_lower = digit_upper.to_ascii_lowercase();
+    assert_eq(digit_lower, digit);
+}
+
+@test
+fn test_char_unicode_case_conversion_roundtrip() {
+    // Unicode case conversions (ASCII fast path)
+    let lower_a = 'a';
+    let upper_a = lower_a.to_uppercase();
+    let back_lower = upper_a.to_lowercase();
+    assert_eq(back_lower, lower_a);
+
+    let upper_z = 'Z';
+    let lower_z = upper_z.to_lowercase();
+    let back_upper = lower_z.to_uppercase();
+    assert_eq(back_upper, upper_z);
+
+    // Digits unchanged through both conversions
+    let digit = '0';
+    let after_upper = digit.to_uppercase();
+    let after_lower = after_upper.to_lowercase();
+    assert_eq(after_lower, digit);
+}
+
+// =============================================================================
+// Section 17: Digit Conversion Roundtrip Tests
+// =============================================================================
+
+@test
+fn test_char_digit_roundtrip_base10() {
+    // For base 10, every valid digit should roundtrip
+    let digit_values = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    for val in &digit_values {
+        match Char.from_digit(*val, 10) {
+            Maybe.Some(c) => {
+                match c.to_digit(10) {
+                    Maybe.Some(back) => assert_eq(back, *val),
+                    Maybe.None => panic("Digit roundtrip failed"),
+                }
+            }
+            Maybe.None => panic("from_digit failed"),
+        }
+    }
+}
+
+@test
+fn test_char_digit_roundtrip_base16() {
+    // For base 16, test hex digits
+    let digit_values = [0, 5, 9, 10, 11, 15];
+
+    for val in &digit_values {
+        match Char.from_digit(*val, 16) {
+            Maybe.Some(c) => {
+                match c.to_digit(16) {
+                    Maybe.Some(back) => assert_eq(back, *val),
+                    Maybe.None => panic("Hex digit roundtrip failed"),
+                }
+            }
+            Maybe.None => panic("from_digit failed for hex"),
+        }
+    }
+
+    // Also test uppercase hex
+    match 'A'.to_digit(16) {
+        Maybe.Some(d) => {
+            match Char.from_digit(d, 16) {
+                Maybe.Some(c) => assert_eq(c, 'a'), // from_digit always lowercase
+                Maybe.None => panic("Expected Some"),
+            }
+        }
+        Maybe.None => panic("Expected Some for 'A'"),
+    }
+}
+
+// =============================================================================
+// Section 18: UTF-8 Multi-Byte Character Length Tests
+// =============================================================================
+
+@test
+fn test_char_len_utf8_boundaries() {
+    // 1-byte boundary (ASCII): 0x00 - 0x7F
+    let ascii_low = '\0';
+    assert_eq(ascii_low.len_utf8(), 1);
+
+    let ascii_high = ((0x7F) as Char);
+    assert_eq(ascii_high.len_utf8(), 1);
+
+    // 2-byte boundary: 0x80 - 0x7FF
+    let two_byte_low = ((0x80) as Char);
+    assert_eq(two_byte_low.len_utf8(), 2);
+
+    let two_byte_high = ((0x7FF) as Char);
+    assert_eq(two_byte_high.len_utf8(), 2);
+
+    // 3-byte boundary: 0x800 - 0xFFFF
+    let three_byte_low = ((0x800) as Char);
+    assert_eq(three_byte_low.len_utf8(), 3);
+
+    let three_byte_high = ((0xFFFF) as Char);
+    assert_eq(three_byte_high.len_utf8(), 3);
+
+    // 4-byte boundary: 0x10000 - 0x10FFFF
+    let four_byte_low = ((0x10000) as Char);
+    assert_eq(four_byte_low.len_utf8(), 4);
+
+    let four_byte_high = ((0x10FFFF) as Char);
+    assert_eq(four_byte_high.len_utf8(), 4);
+}
+
+@test
+fn test_char_len_utf16_boundaries() {
+    // BMP (Basic Multilingual Plane): 0x0000 - 0xFFFF requires 1 code unit
+    let bmp_low = '\0';
+    assert_eq(bmp_low.len_utf16(), 1);
+
+    let bmp_high = ((0xFFFF) as Char);
+    assert_eq(bmp_high.len_utf16(), 1);
+
+    // Supplementary planes: 0x10000 - 0x10FFFF require 2 code units (surrogate pair)
+    let supp_low = ((0x10000) as Char);
+    assert_eq(supp_low.len_utf16(), 2);
+
+    let supp_high = ((0x10FFFF) as Char);
+    assert_eq(supp_high.len_utf16(), 2);
+}
+
+// =============================================================================
+// Section 19: CharPattern Function Predicate Tests
+// =============================================================================
+
+@test
+fn test_char_pattern_function_predicate() {
+    // Test CharPattern implementation for fn(Char) -> Bool
+    let vowels_pattern = ['a', 'e', 'i', 'o', 'u'];
+    let pattern = any_of(&vowels_pattern);
+
+    // Verify vowel matching
+    assert(pattern.matches('a'));
+    assert(pattern.matches('e'));
+    assert(pattern.matches('i'));
+    assert(!pattern.matches('b'));
+    assert(!pattern.matches('x'));
+
+    // Test multiple range patterns
+    let lowercase_range = char_range('a', 'z');
+    let uppercase_range = char_range('A', 'Z');
+
+    assert(lowercase_range.matches('a'));
+    assert(lowercase_range.matches('m'));
+    assert(lowercase_range.matches('z'));
+    assert(!lowercase_range.matches('A'));
+
+    assert(uppercase_range.matches('A'));
+    assert(uppercase_range.matches('M'));
+    assert(uppercase_range.matches('Z'));
+    assert(!uppercase_range.matches('a'));
+}
+
+// =============================================================================
+// Section 20: Comprehensive ASCII Boundary Tests
+// =============================================================================
+
+@test
+fn test_char_ascii_boundary_transitions() {
+    // Test all major ASCII boundaries
+
+    // Control characters: 0-31
+    let nul = '\0';  // 0
+    assert(nul.is_ascii_control());
+    assert(!nul.is_ascii_graphic());
+
+    let us = ((31) as Char);  // Unit Separator (last control before space)
+    assert(us.is_ascii_control());
+    assert(!us.is_ascii_graphic());
+
+    // Space (32) - boundary between control and printable
+    let space = ' ';  // 32
+    assert(!space.is_ascii_control());
+    assert(!space.is_ascii_graphic());  // Space is not graphic
+    assert(space.is_ascii_whitespace());
+
+    // First printable (33) - '!'
+    let exclaim = '!';  // 33
+    assert(!exclaim.is_ascii_control());
+    assert(exclaim.is_ascii_graphic());
+    assert(exclaim.is_ascii_punctuation());
+
+    // Digit boundaries: 48-57
+    let before_digit = ((47) as Char);  // '/' (before '0')
+    assert(!before_digit.is_ascii_digit());
+    assert(before_digit.is_ascii_punctuation());
+
+    let digit_zero = '0';  // 48
+    assert(digit_zero.is_ascii_digit());
+    assert(!digit_zero.is_ascii_alphabetic());
+
+    let digit_nine = '9';  // 57
+    assert(digit_nine.is_ascii_digit());
+
+    let after_digit = ((58) as Char);  // ':' (after '9')
+    assert(!after_digit.is_ascii_digit());
+    assert(after_digit.is_ascii_punctuation());
+
+    // Uppercase boundaries: 65-90
+    let before_upper = ((64) as Char);  // '@' (before 'A')
+    assert(!before_upper.is_ascii_uppercase());
+    assert(before_upper.is_ascii_punctuation());
+
+    let upper_a = 'A';  // 65
+    assert(upper_a.is_ascii_uppercase());
+    assert(upper_a.is_ascii_alphabetic());
+
+    let upper_z = 'Z';  // 90
+    assert(upper_z.is_ascii_uppercase());
+    assert(upper_z.is_ascii_alphabetic());
+
+    let after_upper = ((91) as Char);  // '[' (after 'Z')
+    assert(!after_upper.is_ascii_uppercase());
+    assert(after_upper.is_ascii_punctuation());
+
+    // Lowercase boundaries: 97-122
+    let before_lower = ((96) as Char);  // '`' (before 'a')
+    assert(!before_lower.is_ascii_lowercase());
+    assert(before_lower.is_ascii_punctuation());
+
+    let lower_a = 'a';  // 97
+    assert(lower_a.is_ascii_lowercase());
+    assert(lower_a.is_ascii_alphabetic());
+
+    let lower_z = 'z';  // 122
+    assert(lower_z.is_ascii_lowercase());
+    assert(lower_z.is_ascii_alphabetic());
+
+    let after_lower = ((123) as Char);  // '{' (after 'z')
+    assert(!after_lower.is_ascii_lowercase());
+    assert(after_lower.is_ascii_punctuation());
+
+    // Last printable: 126 (~)
+    let tilde = '~';  // 126
+    assert(tilde.is_ascii_graphic());
+    assert(tilde.is_ascii_punctuation());
+
+    // DEL (127) - control character
+    let del = ((127) as Char);
+    assert(del.is_ascii_control());
+    assert(!del.is_ascii_graphic());
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

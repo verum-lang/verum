@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, compounds, tuples
+
+/// Test for tuple types.
+/// Tuples are fixed-size heterogeneous collections with positional access.
+
+fn divide_with_remainder(a: Int, b: Int) -> (Int, Int) {
+    (a / b, a % b)
+}
+
+fn swap_pair(p: (Int, Text)) -> (Text, Int) {
+    (p.1, p.0)
+}
+
+fn sum_pair(p: (Int, Int)) -> Int {
+    p.0 + p.1
+}
+
+fn triple_to_text(t: (Int, Float, Bool)) -> Text {
+    let n = t.0;
+    let f = t.1;
+    let b = t.2;
+    if b { f"{n} {f} yes" } else { f"{n} {f} no" }
+}
+
+fn main() {
+    // Basic tuple declaration
+    let tuple: (Int, Text, Bool) = (42, "hello", true);
+
+    // Two-element tuple (pair)
+    let pair: (Int, Int) = (10, 20);
+
+    // Empty tuple is equivalent to Unit
+    let empty: () = ();
+
+    // Nested tuples
+    let nested: ((Int, Int), (Text, Bool)) = ((1, 2), ("a", true));
+
+    // Tuple element access (0-indexed)
+    let first: Int = tuple.0;
+    let second: Text = tuple.1;
+    let third: Bool = tuple.2;
+
+    // Destructuring assignment
+    let (x, y, z) = tuple;
+    let (a, b) = pair;
+
+    // Partial destructuring with wildcards
+    let (_, middle, _) = tuple;
+    let (first_nested, _) = nested;
+
+    // Mutable tuple
+    let mut mutable_tuple: (Int, Bool) = (1, false);
+    mutable_tuple.0 = 100;
+    mutable_tuple.1 = true;
+
+    // Tuple as function return type
+    let (quotient, remainder) = divide_with_remainder(17, 5);
+
+    // Swap pair
+    let swapped = swap_pair((99, "world"));
+    assert(swapped.0 == "world");
+    assert(swapped.1 == 99);
+
+    // Sum pair
+    let s = sum_pair((30, 12));
+    assert(s == 42);
+
+    // Triple to text
+    let t_text = triple_to_text((7, 3.14, true));
+    assert(t_text == "7 3.14 yes");
+
+    // Nested tuple access
+    let n0 = nested.0;
+    let n1 = nested.1;
+    assert(n0.0 == 1);
+    assert(n0.1 == 2);
+    assert(n1.0 == "a");
+    assert(n1.1 == true);
+
+    // Tuple equality
+    let t1: (Int, Int) = (1, 2);
+    let t2: (Int, Int) = (1, 2);
+    let t3: (Int, Int) = (1, 3);
+    assert(t1 == t2);
+    assert(t1 != t3);
+
+    // Assertions
+    assert(first == 42);
+    assert(second == "hello");
+    assert(third == true);
+    assert(x == 42);
+    assert(middle == "hello");
+    assert(mutable_tuple.0 == 100);
+    assert(mutable_tuple.1 == true);
+    assert(quotient == 3);
+    assert(remainder == 2);
+    assert(a == 10);
+    assert(b == 20);
+    assert(first_nested.0 == 1);
+    assert(first_nested.1 == 2);
+
+    print("Tuple type tests passed!");
+}

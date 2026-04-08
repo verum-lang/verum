@@ -1,0 +1,195 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, interpolated, html, safe
+
+// HTML-safe interpolated strings (html"...")
+// Automatically escapes interpolated values to prevent XSS
+
+fn test_basic_html_escaping() {
+    // Basic HTML escaping
+    let user_input = "<script>alert('xss')</script>";
+    let safe_html = html"<div>{user_input}</div>";
+    // Produces: <div>&lt;script&gt;alert('xss')&lt;/script&gt;</div>
+}
+
+fn test_title_with_user_content() {
+    // Title with user content
+    let title = "Welcome & Hello";
+    let page_title = html"<title>{title}</title>";
+    // Ampersand escaped to &amp;
+}
+
+fn test_paragraph_with_user_text() {
+    // Paragraph with user text
+    let message = "User said: \"Hello World\"";
+    let paragraph = html"<p>{message}</p>";
+    // Quotes escaped to &quot;
+}
+
+fn test_multiple_interpolations() {
+    // Multiple interpolations
+    let name = "Alice";
+    let role = "Admin";
+    let user_badge = html"<span class='badge'>{name} ({role})</span>";
+}
+
+fn test_attribute_values() {
+    // Attribute values
+    let css_class = "user-card active";
+    let element_id = "user-123";
+    let div = html"<div id='{element_id}' class='{css_class}'></div>";
+}
+
+fn test_links_with_dynamic_href() {
+    // Links with dynamic href
+    let url = "https://example.com/page?id=1&sort=asc";
+    let link_text = "Click here";
+    let link = html"<a href='{url}'>{link_text}</a>";
+}
+
+fn test_form_inputs() {
+    // Form inputs
+    let field_name = "username";
+    let field_value = "john_doe";
+    let placeholder = "Enter your name";
+    let input = html"<input type='text' name='{field_name}' value='{field_value}' placeholder='{placeholder}'>";
+}
+
+fn test_preventing_script_injection() {
+    // Preventing script injection in attributes
+    let malicious_attr = "' onclick='alert(1)' x='";
+    let safe_attr = html"<button data-user='{malicious_attr}'>Click</button>";
+}
+
+fn test_image_with_alt_text() {
+    // Image with alt text
+    let image_url = "/images/photo.jpg";
+    let alt_text = "User's profile picture";
+    let img = html"<img src='{image_url}' alt='{alt_text}'>";
+}
+
+fn test_list_items() {
+    // List items
+    let items = ["Apple", "Banana & Orange", "Cherry"];
+    let list_items = items.map(|item| html"<li>{item}</li>");
+}
+
+// Struct definition
+type User is { name: Text, email: Text, status: Text };
+
+fn test_table_row() {
+    // Table row
+    let user = User { name: "Bob <Admin>", email: "bob@example.com", status: "active" };
+    let table_row = html"
+    <tr>
+        <td>{user.name}</td>
+        <td>{user.email}</td>
+        <td>{user.status}</td>
+    </tr>
+";
+}
+
+fn test_nested_html_structures() {
+    // Nested HTML structures
+    let header = "Welcome";
+    let content = "This is the <main> content area.";
+    let footer = "Copyright 2025";
+    let page = html"
+    <div class='container'>
+        <header><h1>{header}</h1></header>
+        <main>{content}</main>
+        <footer>{footer}</footer>
+    </div>
+";
+}
+
+fn test_conditional_content() {
+    let name = "Alice";
+    // Conditional content
+    let is_admin = true;
+    let admin_badge = if is_admin { html"<span class='admin'>Admin</span>" } else { html"" };
+    let user_display = html"<div>{name} {admin_badge}</div>";
+}
+
+fn test_raw_html_insertion() {
+    // Raw HTML insertion (explicit opt-in, bypasses escaping)
+    let raw_content = "<strong>Bold text</strong>";
+    let with_raw = html"<div>{@raw raw_content}</div>";
+    // Or using a specific raw marker
+}
+
+fn test_data_attributes() {
+    // Data attributes
+    let json_data = "{\"key\": \"value\"}";
+    let data_attr = html"<div data-config='{json_data}'></div>";
+}
+
+fn test_script_safe_context() {
+    // Script-safe context
+    let initial_state = "{\"user\": \"test\"}";
+    let script_safe = html"<script>const state = {initial_state};</script>";
+}
+
+fn test_css_values() {
+    // CSS values
+    let color = "#ff0000";
+    let width = "100px";
+    let style_attr = html"<div style='color: {color}; width: {width};'></div>";
+}
+
+// Template functions
+fn render_card(title: Text, body: Text) -> Html {
+    html"
+        <div class='card'>
+            <div class='card-header'>{title}</div>
+            <div class='card-body'>{body}</div>
+        </div>
+    "
+}
+
+fn test_template_functions() {
+    let card = render_card("Hello", "World content with <special> chars");
+}
+
+fn test_component_composition() {
+    let name = "Alice";
+    // Component composition
+    let header_html = html"<header><h1>Site Title</h1></header>";
+    let nav_html = html"<nav><a href='/'>Home</a></nav>";
+    let main_content = html"<p>Welcome, {name}!</p>";
+
+    let full_page = html"
+    <!DOCTYPE html>
+    <html>
+    <head><title>Page</title></head>
+    <body>
+        {header_html}
+        {nav_html}
+        <main>{main_content}</main>
+    </body>
+    </html>
+";
+}
+
+fn test_special_characters_in_contexts() {
+    // Special characters in different contexts
+    let special_chars = "< > & \" '";
+    let in_content = html"<p>{special_chars}</p>";
+    let in_single_attr = html"<div title='{special_chars}'></div>";
+    let in_double_attr = html"<div title=\"{special_chars}\"></div>";
+}
+
+fn test_numbers_in_html() {
+    // Numbers in HTML
+    let count = 42;
+    let price = 19.99;
+    let stats = html"<span class='stats'>Count: {count}, Price: ${price}</span>";
+}
+
+fn test_boolean_attributes() {
+    // Boolean attributes
+    let is_disabled = true;
+    let disabled_attr = if is_disabled { "disabled" } else { "" };
+    let button = html"<button {disabled_attr}>Submit</button>";
+}

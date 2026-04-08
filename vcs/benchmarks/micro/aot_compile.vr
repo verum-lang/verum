@@ -1,0 +1,324 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: > 50K LOC/sec
+// @tags: aot, compilation, performance
+
+/// Benchmark for AOT (Ahead-of-Time) compilation
+///
+/// AOT compilation happens before runtime, allowing for
+/// more aggressive optimizations. Measures throughput and
+/// optimization effectiveness.
+
+module benchmarks.micro.aot_compile
+
+using [Benchmark, Compiler]
+
+/// Compile single small file
+fn benchmark_aot_small_file() {
+    let compiler = Compiler.new();
+
+    let code = "
+        fn main() {
+            let x = 42;
+            let y = x * 2;
+            print(y);
+        }
+    ";
+
+    for _ in 0..1_000 {
+        let _ = compiler.compile_to_object(code);
+    }
+}
+
+/// Compile medium file (~500 LOC)
+fn benchmark_aot_medium_file() {
+    let compiler = Compiler.new();
+
+    let code = generate_code(500);
+
+    for _ in 0..100 {
+        let _ = compiler.compile_to_object(&code);
+    }
+}
+
+/// Compile large file (~5000 LOC)
+fn benchmark_aot_large_file() {
+    let compiler = Compiler.new();
+
+    let code = generate_code(5000);
+
+    for _ in 0..10 {
+        let _ = compiler.compile_to_object(&code);
+    }
+}
+
+/// Parallel compilation (multiple files)
+fn benchmark_aot_parallel() {
+    let compiler = Compiler.new().with_threads(4);
+
+    let files: List<Text> = (0..20).map(|i| {
+        text("mod file{}", i) + generate_code(250)
+    }).collect();
+
+    for _ in 0..10 {
+        let _ = compiler.compile_parallel(&files);
+    }
+}
+
+/// Incremental compilation
+fn benchmark_aot_incremental() {
+    let compiler = Compiler.new().with_incremental(true);
+
+    let original = generate_code(1000);
+    let _ = compiler.compile_to_object(&original);
+
+    // Modify small part
+    for i in 0..100 {
+        let modified = original.replace("fn fn0", &text("fn fn{}", i));
+        let _ = compiler.compile_incremental(&modified);
+    }
+}
+
+/// Optimization level comparison
+fn benchmark_aot_opt_levels() {
+    let code = generate_code(500);
+
+    // O0 - no optimization
+    let compiler_o0 = Compiler.new().with_opt_level(0);
+    let start_o0 = Instant.now();
+    for _ in 0..10 {
+        let _ = compiler_o0.compile_to_object(&code);
+    }
+    let time_o0 = start_o0.elapsed();
+
+    // O1 - basic optimization
+    let compiler_o1 = Compiler.new().with_opt_level(1);
+    let start_o1 = Instant.now();
+    for _ in 0..10 {
+        let _ = compiler_o1.compile_to_object(&code);
+    }
+    let time_o1 = start_o1.elapsed();
+
+    // O2 - full optimization
+    let compiler_o2 = Compiler.new().with_opt_level(2);
+    let start_o2 = Instant.now();
+    for _ in 0..10 {
+        let _ = compiler_o2.compile_to_object(&code);
+    }
+    let time_o2 = start_o2.elapsed();
+
+    // O3 - aggressive optimization
+    let compiler_o3 = Compiler.new().with_opt_level(3);
+    let start_o3 = Instant.now();
+    for _ in 0..10 {
+        let _ = compiler_o3.compile_to_object(&code);
+    }
+    let time_o3 = start_o3.elapsed();
+
+    // Oz - size optimization
+    let compiler_oz = Compiler.new().with_opt_level("z");
+    let start_oz = Instant.now();
+    for _ in 0..10 {
+        let _ = compiler_oz.compile_to_object(&code);
+    }
+    let time_oz = start_oz.elapsed();
+}
+
+/// LTO (Link-Time Optimization)
+fn benchmark_aot_lto() {
+    let compiler = Compiler.new().with_lto(true);
+
+    let files: List<Text> = (0..10).map(|i| {
+        text("mod file{}", i) + generate_code(100)
+    }).collect();
+
+    for _ in 0..5 {
+        let objects = compiler.compile_parallel(&files);
+        let _ = compiler.link_with_lto(&objects);
+    }
+}
+
+/// Debug info generation
+fn benchmark_aot_debug_info() {
+    let compiler_no_debug = Compiler.new().with_debug_info(false);
+    let compiler_debug = Compiler.new().with_debug_info(true);
+
+    let code = generate_code(500);
+
+    for _ in 0..20 {
+        let _ = compiler_no_debug.compile_to_object(&code);
+    }
+
+    for _ in 0..20 {
+        let _ = compiler_debug.compile_to_object(&code);
+    }
+}
+
+/// Profile-guided optimization (PGO)
+fn benchmark_aot_pgo() {
+    let compiler = Compiler.new().with_pgo_profile("profile.data");
+
+    let code = generate_code(500);
+
+    for _ in 0..20 {
+        let _ = compiler.compile_to_object(&code);
+    }
+}
+
+/// Cross-compilation
+fn benchmark_aot_cross_compile() {
+    let targets = list![
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ];
+
+    let code = generate_code(200);
+
+    for target in targets {
+        let compiler = Compiler.new().with_target(&target);
+        for _ in 0..10 {
+            let _ = compiler.compile_to_object(&code);
+        }
+    }
+}
+
+/// CBGR code generation overhead
+fn benchmark_aot_cbgr_overhead() {
+    let code_with_refs = "
+        fn process(data: &List<Int>) -> Int {
+            let mut sum = 0;
+            for item in data {
+                sum += *item;
+            }
+            sum
+        }
+    ";
+
+    let code_no_refs = "
+        fn process(data: List<Int>) -> Int {
+            let mut sum = 0;
+            for item in data {
+                sum += item;
+            }
+            sum
+        }
+    ";
+
+    let compiler = Compiler.new();
+
+    for _ in 0..1_000 {
+        let _ = compiler.compile_to_object(code_with_refs);
+    }
+
+    for _ in 0..1_000 {
+        let _ = compiler.compile_to_object(code_no_refs);
+    }
+}
+
+/// Generic instantiation
+fn benchmark_aot_generic_instantiation() {
+    let code = "
+        fn generic<T: Clone>(items: List<T>) -> List<T> {
+            items.iter().map(|x| x.clone()).collect()
+        }
+
+        fn main() {
+            let ints = generic(list![1, 2, 3]);
+            let floats = generic(list![1.0, 2.0, 3.0]);
+            let texts = generic(list![\"a\", \"b\", \"c\"]);
+        }
+    ";
+
+    let compiler = Compiler.new();
+
+    for _ in 0..100 {
+        let _ = compiler.compile_to_object(code);
+    }
+}
+
+/// Trait method devirtualization
+fn benchmark_aot_devirtualization() {
+    let code = "
+        type Drawable is protocol {
+            fn draw(&self);
+        };
+
+        type Circle is { radius: Float };
+        implement Drawable for Circle {
+            fn draw(&self) { /* ... */ }
+        }
+
+        fn draw_all(items: &[impl Drawable]) {
+            for item in items {
+                item.draw();  // Can be devirtualized
+            }
+        }
+    ";
+
+    let compiler = Compiler.new().with_opt_level(2);
+
+    for _ in 0..200 {
+        let _ = compiler.compile_to_object(code);
+    }
+}
+
+/// SIMD auto-vectorization
+fn benchmark_aot_auto_vectorization() {
+    let code = "
+        fn add_vectors(a: &[Float; 1024], b: &[Float; 1024]) -> [Float; 1024] {
+            let mut result = [0.0; 1024];
+            for i in 0..1024 {
+                result[i] = a[i] + b[i];
+            }
+            result
+        }
+    ";
+
+    let compiler = Compiler.new()
+        .with_opt_level(3)
+        .with_target_feature("avx2");
+
+    for _ in 0..200 {
+        let _ = compiler.compile_to_object(code);
+    }
+}
+
+/// Compile with all verification
+fn benchmark_aot_with_verification() {
+    let compiler = Compiler.new()
+        .with_opt_level(2)
+        .with_verification_level(4);  // Full SMT verification
+
+    let code = "
+        fn safe_divide(a: Int, b: Int where b != 0) -> Int {
+            a / b
+        }
+
+        fn bounded_access(arr: &[Int; 100], i: Int where 0 <= i && i < 100) -> Int {
+            arr[i]
+        }
+    ";
+
+    for _ in 0..50 {
+        let _ = compiler.compile_to_object(code);
+    }
+}
+
+// Helper to generate code of approximately n lines
+fn generate_code(n: Int) -> Text {
+    let mut code = text("");
+
+    for i in 0..(n / 5) {
+        code.push_str(text("
+            fn fn{}(x: Int) -> Int {{
+                let y = x + {};
+                y * 2
+            }}
+        ", i, i));
+    }
+
+    code
+}

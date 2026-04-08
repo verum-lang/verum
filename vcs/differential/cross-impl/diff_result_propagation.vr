@@ -1,0 +1,53 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, error-handling, result, question-mark
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Error handling: Result type, ? operator, early return on error
+
+fn parse_positive(n: Int) -> Result<Int, Text> {
+    if n < 0 { Err("negative") } else { Ok(n) }
+}
+
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 { Err("div_zero") } else { Ok(a / b) }
+}
+
+fn double_positive(n: Int) -> Result<Int, Text> {
+    let val = parse_positive(n)?;
+    Ok(val * 2)
+}
+
+fn chain_ops(a: Int, b: Int) -> Result<Int, Text> {
+    let x = parse_positive(a)?;
+    let y = safe_divide(x, b)?;
+    Ok(y + 1)
+}
+
+fn main() -> Int {
+    // Ok path
+    let r1 = double_positive(5);
+    assert_eq(match r1 { Ok(v) => v, Err(_) => -1 }, 10);
+
+    let r2 = double_positive(0);
+    assert_eq(match r2 { Ok(v) => v, Err(_) => -1 }, 0);
+
+    // Err path
+    let r3 = double_positive(-3);
+    assert_eq(match r3 { Ok(_) => "ok", Err(e) => e }, "negative");
+
+    // Chained ? operators
+    let r4 = chain_ops(100, 5);
+    assert_eq(match r4 { Ok(v) => v, Err(_) => -1 }, 21);
+
+    let r5 = chain_ops(-5, 2);
+    assert_eq(match r5 { Ok(_) => "ok", Err(e) => e }, "negative");
+
+    let r6 = chain_ops(100, 0);
+    assert_eq(match r6 { Ok(_) => "ok", Err(e) => e }, "div_zero");
+
+    print("diff_result_propagation: ok");
+    0
+}

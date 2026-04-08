@@ -1,0 +1,201 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, autodiff, higher-order
+// @description: Higher-order automatic differentiation
+
+/// Higher-order derivatives (Hessians, etc.) through nested differentiation.
+
+mount autodiff.{grad, jacobian, hessian, jvp, vjp};
+
+/// Second derivative (Hessian) of a scalar function
+@differentiable
+fn quadratic(x: Tensor<f32, [N]>) -> f32 {
+    // f(x) = x^T A x + b^T x + c
+    let a = Tensor.eye();  // Identity for simplicity
+    let b = Tensor.ones();
+    let c = 1.0;
+
+    x.dot(a.matmul(x)) + b.dot(x) + c
+}
+
+fn compute_hessian() {
+    let x = Tensor.zeros<f32, [3]>();
+
+    // First derivative (gradient)
+    let grad_f = grad(quadratic);
+    let g = grad_f(x);  // Shape: [3]
+
+    // Second derivative (Hessian)
+    let hess_f = hessian(quadratic);
+    let h = hess_f(x);  // Shape: [3, 3]
+
+    // Hessian-vector product (more efficient for large dimensions)
+    let v = Tensor.ones<f32, [3]>();
+    let hv = hessian_vector_product(quadratic, x, v);
+}
+
+/// Hessian-vector product via forward-over-reverse
+fn hessian_vector_product<F>(
+    f: F,
+    x: Tensor<f32, [N]>,
+    v: Tensor<f32, [N]>
+) -> Tensor<f32, [N]>
+where F: Fn(Tensor<f32, [N]>) -> f32 {
+    // HVP = d/dt [grad(f)(x + t*v)] at t=0
+    // Computed as JVP of the gradient function
+
+    let grad_f = grad(f);
+
+    // Forward-mode through reverse-mode
+    let (_, hvp) = jvp(grad_f, x, v);
+    hvp
+}
+
+/// Vector-Hessian product via reverse-over-forward
+fn vector_hessian_product<F>(
+    f: F,
+    x: Tensor<f32, [N]>,
+    v: Tensor<f32, [N]>
+) -> Tensor<f32, [N]>
+where F: Fn(Tensor<f32, [N]>) -> f32 {
+    // VHP = v^T H = (H^T v)^T = (H v)^T (H is symmetric for scalar f)
+    hessian_vector_product(f, x, v)
+}
+
+/// Third derivative via nested differentiation
+@differentiable(order = 3)
+fn cubic(x: f32) -> f32 {
+    x * x * x
+}
+
+fn third_derivative() {
+    let x = 2.0f32;
+
+    // f(x) = x^3
+    // fp(x) = 3x^2
+    // fp'(x) = 6x
+    // fp''(x) = 6
+
+    let f1 = grad(cubic);
+    let f2 = grad(f1);  // Second derivative
+    let f3 = grad(f2);  // Third derivative
+
+    assert(f1(x) == 12.0);  // 3 * 4 = 12
+    assert(f2(x) == 12.0);  // 6 * 2 = 12
+    assert(f3(x) == 6.0);   // Constant
+}
+
+/// Taylor series expansion using higher derivatives
+fn taylor_expand<F>(
+    f: F,
+    x0: f32,
+    x: f32,
+    order: Int
+) -> f32
+where F: Fn(f32) -> f32 + Differentiable {
+    let dx = x - x0;
+    let mut result = f(x0);
+    let mut factorial = 1.0;
+    let mut power = 1.0;
+    let mut current_deriv = f;
+
+    for n in 1..=order {
+        let deriv = grad(current_deriv);
+        factorial *= n as f32;
+        power *= dx;
+        result += deriv(x0) * power / factorial;
+        current_deriv = deriv;
+    }
+
+    result
+}
+
+/// Jacobian-vector product (forward mode)
+@differentiable
+fn vector_function(x: Tensor<f32, [N]>) -> Tensor<f32, [M]> {
+    // Some vector-valued function
+    Tensor.from_fn(|i| {
+        x.iter().enumerate().map(|(j, &xj)| {
+            (i as f32 + 1.0) * xj.sin()
+        }).sum()
+    })
+}
+
+fn jacobian_products() {
+    let x = Tensor.ones<f32, [3]>();
+    let v = Tensor.ones<f32, [3]>();
+
+    // Full Jacobian (expensive for large M, N)
+    let jac = jacobian(vector_function);
+    let j = jac(x);  // Shape: [M, N]
+
+    // JVP: Jacobian-vector product (forward mode)
+    // More efficient when N < M
+    let (y, jvp_result) = jvp(vector_function, x, v);
+
+    // VJP: Vector-Jacobian product (reverse mode)
+    // More efficient when M < N
+    let u = Tensor.ones<f32, [M]>();
+    let (y, vjp_fn) = vjp(vector_function, x);
+    let vjp_result = vjp_fn(u);
+}
+
+/// Fisher information matrix
+fn fisher_information<F>(
+    log_prob: F,
+    params: Tensor<f32, [P]>,
+    num_samples: Int
+) -> Tensor<f32, [P, P]>
+where F: Fn(Tensor<f32, [P]>) -> f32 {
+    // F = E[grad(log p) @ grad(log p)^T]
+    let grad_log_p = grad(log_prob);
+
+    let mut fisher = Tensor.zeros<f32, [P, P]>();
+
+    for _ in 0..num_samples {
+        let g = grad_log_p(params);
+        fisher += g.outer(g);
+    }
+
+    fisher / num_samples as f32
+}
+
+/// Natural gradient descent using Fisher information
+fn natural_gradient_step<F>(
+    loss: F,
+    params: Tensor<f32, [P]>,
+    fisher: Tensor<f32, [P, P]>,
+    lr: f32
+) -> Tensor<f32, [P]>
+where F: Fn(Tensor<f32, [P]>) -> f32 {
+    let g = grad(loss)(params);
+
+    // Natural gradient = F^{-1} g
+    let fisher_inv = fisher.pinv();  // Pseudo-inverse for stability
+    let natural_grad = fisher_inv.matmul(g);
+
+    params - lr * natural_grad
+}
+
+/// Gauss-Newton approximation to Hessian
+fn gauss_newton<F>(
+    residuals: F,
+    x: Tensor<f32, [N]>
+) -> Tensor<f32, [N, N]>
+where F: Fn(Tensor<f32, [N]>) -> Tensor<f32, [M]> {
+    // GN approximation: H ≈ J^T J
+    let jac = jacobian(residuals);
+    let j = jac(x);
+    j.transpose().matmul(j)
+}
+
+const N: Int = 3;
+const M: Int = 4;
+const P: Int = 10;
+
+fn main() {
+    compute_hessian();
+    third_derivative();
+}

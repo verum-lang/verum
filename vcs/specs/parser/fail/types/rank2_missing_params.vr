@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, rank2, params, error
+// @description: Test detection of rank-2 function type without parameter list
+// @expected-error: E018
+
+// Rank-2 function type must have parameter list
+type Transform is fn<R> -> R;

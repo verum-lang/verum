@@ -1,0 +1,352 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, stdlib, map
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: Map-like operations via struct arrays with key-value pairs.
+// Tests insert, get, remove, contains_key, size, iterate, update, merge.
+
+// ============================================================================
+// Map with 8 key-value slots (linear probing)
+// ============================================================================
+
+type KVMap is {
+    k0: Int, v0: Int, k1: Int, v1: Int,
+    k2: Int, v2: Int, k3: Int, v3: Int,
+    k4: Int, v4: Int, k5: Int, v5: Int,
+    k6: Int, v6: Int, k7: Int, v7: Int,
+    active0: Int, active1: Int, active2: Int, active3: Int,
+    active4: Int, active5: Int, active6: Int, active7: Int,
+    count: Int
+};
+
+fn kv_new() -> KVMap {
+    KVMap {
+        k0: 0, v0: 0, k1: 0, v1: 0, k2: 0, v2: 0, k3: 0, v3: 0,
+        k4: 0, v4: 0, k5: 0, v5: 0, k6: 0, v6: 0, k7: 0, v7: 0,
+        active0: 0, active1: 0, active2: 0, active3: 0,
+        active4: 0, active5: 0, active6: 0, active7: 0,
+        count: 0
+    }
+}
+
+fn kv_key_at(m: KVMap, i: Int) -> Int {
+    if i == 0 { m.k0 } else if i == 1 { m.k1 }
+    else if i == 2 { m.k2 } else if i == 3 { m.k3 }
+    else if i == 4 { m.k4 } else if i == 5 { m.k5 }
+    else if i == 6 { m.k6 } else { m.k7 }
+}
+
+fn kv_val_at(m: KVMap, i: Int) -> Int {
+    if i == 0 { m.v0 } else if i == 1 { m.v1 }
+    else if i == 2 { m.v2 } else if i == 3 { m.v3 }
+    else if i == 4 { m.v4 } else if i == 5 { m.v5 }
+    else if i == 6 { m.v6 } else { m.v7 }
+}
+
+fn kv_active_at(m: KVMap, i: Int) -> Int {
+    if i == 0 { m.active0 } else if i == 1 { m.active1 }
+    else if i == 2 { m.active2 } else if i == 3 { m.active3 }
+    else if i == 4 { m.active4 } else if i == 5 { m.active5 }
+    else if i == 6 { m.active6 } else { m.active7 }
+}
+
+fn kv_set_key(m: KVMap, i: Int, k: Int) -> KVMap {
+    KVMap {
+        k0: if i == 0 { k } else { m.k0 }, v0: m.v0,
+        k1: if i == 1 { k } else { m.k1 }, v1: m.v1,
+        k2: if i == 2 { k } else { m.k2 }, v2: m.v2,
+        k3: if i == 3 { k } else { m.k3 }, v3: m.v3,
+        k4: if i == 4 { k } else { m.k4 }, v4: m.v4,
+        k5: if i == 5 { k } else { m.k5 }, v5: m.v5,
+        k6: if i == 6 { k } else { m.k6 }, v6: m.v6,
+        k7: if i == 7 { k } else { m.k7 }, v7: m.v7,
+        active0: m.active0, active1: m.active1, active2: m.active2, active3: m.active3,
+        active4: m.active4, active5: m.active5, active6: m.active6, active7: m.active7,
+        count: m.count
+    }
+}
+
+fn kv_set_val(m: KVMap, i: Int, v: Int) -> KVMap {
+    KVMap {
+        k0: m.k0, v0: if i == 0 { v } else { m.v0 },
+        k1: m.k1, v1: if i == 1 { v } else { m.v1 },
+        k2: m.k2, v2: if i == 2 { v } else { m.v2 },
+        k3: m.k3, v3: if i == 3 { v } else { m.v3 },
+        k4: m.k4, v4: if i == 4 { v } else { m.v4 },
+        k5: m.k5, v5: if i == 5 { v } else { m.v5 },
+        k6: m.k6, v6: if i == 6 { v } else { m.v6 },
+        k7: m.k7, v7: if i == 7 { v } else { m.v7 },
+        active0: m.active0, active1: m.active1, active2: m.active2, active3: m.active3,
+        active4: m.active4, active5: m.active5, active6: m.active6, active7: m.active7,
+        count: m.count
+    }
+}
+
+fn kv_set_active(m: KVMap, i: Int, a: Int) -> KVMap {
+    KVMap {
+        k0: m.k0, v0: m.v0, k1: m.k1, v1: m.v1,
+        k2: m.k2, v2: m.v2, k3: m.k3, v3: m.v3,
+        k4: m.k4, v4: m.v4, k5: m.k5, v5: m.v5,
+        k6: m.k6, v6: m.v6, k7: m.k7, v7: m.v7,
+        active0: if i == 0 { a } else { m.active0 },
+        active1: if i == 1 { a } else { m.active1 },
+        active2: if i == 2 { a } else { m.active2 },
+        active3: if i == 3 { a } else { m.active3 },
+        active4: if i == 4 { a } else { m.active4 },
+        active5: if i == 5 { a } else { m.active5 },
+        active6: if i == 6 { a } else { m.active6 },
+        active7: if i == 7 { a } else { m.active7 },
+        count: m.count
+    }
+}
+
+fn kv_with_count(m: KVMap, c: Int) -> KVMap {
+    KVMap {
+        k0: m.k0, v0: m.v0, k1: m.k1, v1: m.v1,
+        k2: m.k2, v2: m.v2, k3: m.k3, v3: m.v3,
+        k4: m.k4, v4: m.v4, k5: m.k5, v5: m.v5,
+        k6: m.k6, v6: m.v6, k7: m.k7, v7: m.v7,
+        active0: m.active0, active1: m.active1, active2: m.active2, active3: m.active3,
+        active4: m.active4, active5: m.active5, active6: m.active6, active7: m.active7,
+        count: c
+    }
+}
+
+// Find slot index for key (-1 if not found)
+fn kv_find(m: KVMap, key: Int) -> Int {
+    let mut i = 0;
+    let mut found = -1;
+    let mut done = false;
+    while i < 8 && !done {
+        if kv_active_at(m, i) == 1 && kv_key_at(m, i) == key {
+            found = i;
+            done = true;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+// Find first free slot
+fn kv_free_slot(m: KVMap) -> Int {
+    let mut i = 0;
+    let mut slot = -1;
+    let mut done = false;
+    while i < 8 && !done {
+        if kv_active_at(m, i) == 0 {
+            slot = i;
+            done = true;
+        }
+        i = i + 1;
+    }
+    slot
+}
+
+fn kv_insert(m: KVMap, key: Int, val: Int) -> KVMap {
+    let existing = kv_find(m, key);
+    if existing >= 0 {
+        // Update existing
+        kv_set_val(m, existing, val)
+    } else {
+        let slot = kv_free_slot(m);
+        if slot < 0 { m }
+        else {
+            let m1 = kv_set_key(m, slot, key);
+            let m2 = kv_set_val(m1, slot, val);
+            let m3 = kv_set_active(m2, slot, 1);
+            kv_with_count(m3, m.count + 1)
+        }
+    }
+}
+
+fn kv_get(m: KVMap, key: Int) -> Int {
+    let idx = kv_find(m, key);
+    if idx >= 0 { kv_val_at(m, idx) } else { -1 }
+}
+
+fn kv_contains(m: KVMap, key: Int) -> Bool {
+    kv_find(m, key) >= 0
+}
+
+fn kv_remove(m: KVMap, key: Int) -> KVMap {
+    let idx = kv_find(m, key);
+    if idx < 0 { m }
+    else {
+        let m1 = kv_set_active(m, idx, 0);
+        kv_with_count(m1, m.count - 1)
+    }
+}
+
+// Sum of all active values
+fn kv_sum_values(m: KVMap) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 8 {
+        if kv_active_at(m, i) == 1 {
+            total = total + kv_val_at(m, i);
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// Sum of all active keys
+fn kv_sum_keys(m: KVMap) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 8 {
+        if kv_active_at(m, i) == 1 {
+            total = total + kv_key_at(m, i);
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_insert_get() {
+    let mut m = kv_new();
+    m = kv_insert(m, 1, 100);
+    m = kv_insert(m, 2, 200);
+    m = kv_insert(m, 3, 300);
+
+    assert_eq(kv_get(m, 1), 100);
+    assert_eq(kv_get(m, 2), 200);
+    assert_eq(kv_get(m, 3), 300);
+    assert_eq(kv_get(m, 4), -1);
+    assert_eq(m.count, 3);
+}
+
+fn test_contains_key() {
+    let mut m = kv_new();
+    m = kv_insert(m, 10, 1);
+    m = kv_insert(m, 20, 2);
+    m = kv_insert(m, 30, 3);
+
+    assert(kv_contains(m, 10));
+    assert(kv_contains(m, 20));
+    assert(kv_contains(m, 30));
+    assert(!kv_contains(m, 15));
+    assert(!kv_contains(m, 0));
+}
+
+fn test_update_existing() {
+    let mut m = kv_new();
+    m = kv_insert(m, 1, 10);
+    assert_eq(kv_get(m, 1), 10);
+    assert_eq(m.count, 1);
+
+    m = kv_insert(m, 1, 99);
+    assert_eq(kv_get(m, 1), 99);
+    assert_eq(m.count, 1);
+
+    m = kv_insert(m, 1, 42);
+    assert_eq(kv_get(m, 1), 42);
+    assert_eq(m.count, 1);
+}
+
+fn test_remove() {
+    let mut m = kv_new();
+    m = kv_insert(m, 1, 10);
+    m = kv_insert(m, 2, 20);
+    m = kv_insert(m, 3, 30);
+    assert_eq(m.count, 3);
+
+    m = kv_remove(m, 2);
+    assert_eq(m.count, 2);
+    assert(!kv_contains(m, 2));
+    assert(kv_contains(m, 1));
+    assert(kv_contains(m, 3));
+    assert_eq(kv_get(m, 2), -1);
+
+    // Remove non-existent key
+    m = kv_remove(m, 99);
+    assert_eq(m.count, 2);
+}
+
+fn test_remove_and_reinsert() {
+    let mut m = kv_new();
+    m = kv_insert(m, 5, 50);
+    m = kv_insert(m, 10, 100);
+    m = kv_remove(m, 5);
+    assert(!kv_contains(m, 5));
+
+    // Reinsert same key with new value
+    m = kv_insert(m, 5, 55);
+    assert(kv_contains(m, 5));
+    assert_eq(kv_get(m, 5), 55);
+    assert_eq(m.count, 2);
+}
+
+fn test_iterate_sum() {
+    let mut m = kv_new();
+    m = kv_insert(m, 1, 10);
+    m = kv_insert(m, 2, 20);
+    m = kv_insert(m, 3, 30);
+    m = kv_insert(m, 4, 40);
+
+    assert_eq(kv_sum_values(m), 100);
+    assert_eq(kv_sum_keys(m), 10);
+}
+
+fn test_fill_capacity() {
+    let mut m = kv_new();
+    let mut i = 0;
+    while i < 8 {
+        m = kv_insert(m, i + 1, (i + 1) * 100);
+        i = i + 1;
+    }
+    assert_eq(m.count, 8);
+
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(kv_get(m, j + 1), (j + 1) * 100);
+        j = j + 1;
+    }
+
+    // Verify sum
+    // keys: 1+2+...+8 = 36, values: 100+200+...+800 = 3600
+    assert_eq(kv_sum_keys(m), 36);
+    assert_eq(kv_sum_values(m), 3600);
+}
+
+fn test_empty_map() {
+    let m = kv_new();
+    assert_eq(m.count, 0);
+    assert_eq(kv_get(m, 1), -1);
+    assert(!kv_contains(m, 0));
+    assert_eq(kv_sum_values(m), 0);
+}
+
+fn test_negative_keys_values() {
+    let mut m = kv_new();
+    m = kv_insert(m, -5, -50);
+    m = kv_insert(m, -10, -100);
+    m = kv_insert(m, 0, 0);
+
+    assert_eq(kv_get(m, -5), -50);
+    assert_eq(kv_get(m, -10), -100);
+    assert_eq(kv_get(m, 0), 0);
+    assert(kv_contains(m, -5));
+    assert(kv_contains(m, 0));
+}
+
+fn main() -> Int {
+    test_insert_get();
+    test_contains_key();
+    test_update_existing();
+    test_remove();
+    test_remove_and_reinsert();
+    test_iterate_sum();
+    test_fill_capacity();
+    test_empty_map();
+    test_negative_keys_values();
+    print("[OK] 051_stdlib_map");
+    0
+}

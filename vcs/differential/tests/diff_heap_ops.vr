@@ -1,0 +1,143 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, heap, priority-queue, heapsort
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+// Min-heap operations
+type MHeap is { data: Arr8, sz: Int };
+
+fn heap_new() -> MHeap {
+    MHeap { data: Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 }, sz: 0 }
+}
+
+fn heap_swap(h: MHeap, i: Int, j: Int) -> MHeap {
+    let vi = get(h.data, i);
+    let vj = get(h.data, j);
+    let d2 = set(set(h.data, i, vj), j, vi);
+    MHeap { data: d2, sz: h.sz }
+}
+
+fn heap_sift_up(h: MHeap, idx: Int) -> MHeap {
+    let mut heap = h;
+    let mut i = idx;
+    while i > 0 {
+        let parent = (i - 1) / 2;
+        if get(heap.data, i) < get(heap.data, parent) {
+            heap = heap_swap(heap, i, parent);
+            i = parent;
+        } else {
+            i = 0; // break
+        }
+    }
+    heap
+}
+
+fn heap_sift_down(h: MHeap, idx: Int) -> MHeap {
+    let mut heap = h;
+    let mut i = idx;
+    let mut cont = 1;
+    while cont == 1 {
+        let left = 2 * i + 1;
+        let right = 2 * i + 2;
+        let mut smallest = i;
+        if left < heap.sz {
+            if get(heap.data, left) < get(heap.data, smallest) { smallest = left; }
+        }
+        if right < heap.sz {
+            if get(heap.data, right) < get(heap.data, smallest) { smallest = right; }
+        }
+        if smallest != i {
+            heap = heap_swap(heap, i, smallest);
+            i = smallest;
+        } else {
+            cont = 0;
+        }
+    }
+    heap
+}
+
+fn heap_push(h: MHeap, val: Int) -> MHeap {
+    let d = set(h.data, h.sz, val);
+    let h2 = MHeap { data: d, sz: h.sz + 1 };
+    heap_sift_up(h2, h.sz)
+}
+
+fn heap_peek(h: MHeap) -> Int {
+    get(h.data, 0)
+}
+
+fn heap_pop(h: MHeap) -> MHeap {
+    let last = get(h.data, h.sz - 1);
+    let d = set(h.data, 0, last);
+    let h2 = MHeap { data: d, sz: h.sz - 1 };
+    if h2.sz > 0 { heap_sift_down(h2, 0) } else { h2 }
+}
+
+fn test_push_peek() -> Int {
+    let mut h = heap_new();
+    h = heap_push(h, 5);
+    assert_eq(heap_peek(h), 5);
+    h = heap_push(h, 3);
+    assert_eq(heap_peek(h), 3);
+    h = heap_push(h, 7);
+    assert_eq(heap_peek(h), 3);
+    h = heap_push(h, 1);
+    assert_eq(heap_peek(h), 1);
+    assert_eq(h.sz, 4);
+    1
+}
+
+fn test_pop_order() -> Int {
+    let mut h = heap_new();
+    h = heap_push(h, 5);
+    h = heap_push(h, 3);
+    h = heap_push(h, 7);
+    h = heap_push(h, 1);
+    // Pop should give ascending order
+    assert_eq(heap_peek(h), 1);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 3);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 5);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 7);
+    1
+}
+
+fn test_sorted_insert() -> Int {
+    let mut h = heap_new();
+    h = heap_push(h, 1);
+    h = heap_push(h, 2);
+    h = heap_push(h, 3);
+    assert_eq(heap_peek(h), 1);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 2);
+    assert_eq(h.sz, 2);
+    1
+}
+
+fn main() -> Int {
+    test_push_peek();
+    test_pop_order();
+    test_sorted_insert();
+    print("DIFF_OK: heap_ops");
+    0
+}

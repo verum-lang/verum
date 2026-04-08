@@ -1,0 +1,202 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, skip-list, data-structure, search
+// @timeout: 30000
+
+// Simulated skip list behavior using sorted array with fast search
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Sorted list operations (maintaining sorted order in Arr8)
+
+// Binary search: find index where val should be inserted
+fn binary_search(arr: Arr8, n: Int, val: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if get8(arr, mid) < val { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+// Insert into sorted array (shift elements right)
+fn sorted_insert(arr: Arr8, n: Int, val: Int) -> Arr8 {
+    let pos = binary_search(arr, n, val);
+    // Shift elements from n-1 down to pos, right by 1
+    let mut a = arr;
+    let mut i = n;
+    while i > pos {
+        a = set8(a, i, get8(a, i - 1));
+        i = i - 1;
+    }
+    set8(a, pos, val)
+}
+
+// Search in sorted array: returns 1 if found
+fn sorted_search(arr: Arr8, n: Int, val: Int) -> Int {
+    let pos = binary_search(arr, n, val);
+    if pos < n {
+        if get8(arr, pos) == val { 1 } else { 0 }
+    } else { 0 }
+}
+
+// Delete from sorted array (shift elements left)
+fn sorted_delete(arr: Arr8, n: Int, val: Int) -> Arr8 {
+    let pos = binary_search(arr, n, val);
+    if pos < n {
+        if get8(arr, pos) == val {
+            let mut a = arr;
+            let mut i = pos;
+            while i < n - 1 {
+                a = set8(a, i, get8(a, i + 1));
+                i = i + 1;
+            }
+            set8(a, n - 1, 0) // clear last
+        } else { arr }
+    } else { arr }
+}
+
+// Count elements in range [lo, hi]
+fn count_range(arr: Arr8, n: Int, lo: Int, hi: Int) -> Int {
+    let start = binary_search(arr, n, lo);
+    let end = binary_search(arr, n, hi + 1);
+    end - start
+}
+
+// Find predecessor (largest value < val)
+fn predecessor(arr: Arr8, n: Int, val: Int) -> Int {
+    let pos = binary_search(arr, n, val);
+    if pos > 0 { get8(arr, pos - 1) }
+    else { 0 - 1 } // no predecessor
+}
+
+// Find successor (smallest value > val)
+fn successor(arr: Arr8, n: Int, val: Int) -> Int {
+    let mut pos = binary_search(arr, n, val);
+    // Skip past equal elements
+    while pos < n {
+        if get8(arr, pos) <= val { pos = pos + 1; }
+        else { pos = n + 1; } // break, found
+    }
+    if pos > n { get8(arr, pos - n - 1 + binary_search(arr, n, val)) }
+    else { 0 - 1 }
+}
+
+// Actually simpler successor
+fn succ(arr: Arr8, n: Int, val: Int) -> Int {
+    let pos = binary_search(arr, n, val + 1);
+    if pos < n { get8(arr, pos) }
+    else { 0 - 1 }
+}
+
+// Check if array is sorted
+fn is_sorted(arr: Arr8, n: Int) -> Int {
+    let mut ok = 1;
+    let mut i = 0;
+    while i < n - 1 {
+        if get8(arr, i) > get8(arr, i + 1) { ok = 0; }
+        i = i + 1;
+    }
+    ok
+}
+
+fn test_binary_search() -> Int {
+    let arr = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 0, v6: 0, v7: 0 };
+    assert_eq(binary_search(arr, 5, 10), 0);
+    assert_eq(binary_search(arr, 5, 25), 2); // insert position
+    assert_eq(binary_search(arr, 5, 50), 4);
+    assert_eq(binary_search(arr, 5, 55), 5); // past end
+    assert_eq(binary_search(arr, 5, 5), 0);  // before start
+    1
+}
+
+fn test_sorted_insert() -> Int {
+    let mut arr = zeros();
+    let mut n = 0;
+    arr = sorted_insert(arr, n, 30); n = n + 1;
+    arr = sorted_insert(arr, n, 10); n = n + 1;
+    arr = sorted_insert(arr, n, 50); n = n + 1;
+    arr = sorted_insert(arr, n, 20); n = n + 1;
+    arr = sorted_insert(arr, n, 40); n = n + 1;
+    assert_eq(is_sorted(arr, n), 1);
+    assert_eq(get8(arr, 0), 10);
+    assert_eq(get8(arr, 1), 20);
+    assert_eq(get8(arr, 2), 30);
+    assert_eq(get8(arr, 3), 40);
+    assert_eq(get8(arr, 4), 50);
+    1
+}
+
+fn test_search() -> Int {
+    let arr = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 0, v6: 0, v7: 0 };
+    assert_eq(sorted_search(arr, 5, 30), 1);
+    assert_eq(sorted_search(arr, 5, 10), 1);
+    assert_eq(sorted_search(arr, 5, 50), 1);
+    assert_eq(sorted_search(arr, 5, 25), 0);
+    assert_eq(sorted_search(arr, 5, 0), 0);
+    1
+}
+
+fn test_delete() -> Int {
+    let arr = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 0, v6: 0, v7: 0 };
+    let del = sorted_delete(arr, 5, 30);
+    assert_eq(get8(del, 0), 10);
+    assert_eq(get8(del, 1), 20);
+    assert_eq(get8(del, 2), 40);
+    assert_eq(get8(del, 3), 50);
+    assert_eq(is_sorted(del, 4), 1);
+    1
+}
+
+fn test_range() -> Int {
+    let arr = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_range(arr, 5, 20, 40), 3); // 20, 30, 40
+    assert_eq(count_range(arr, 5, 10, 50), 5); // all
+    assert_eq(count_range(arr, 5, 25, 35), 1); // only 30
+    assert_eq(count_range(arr, 5, 60, 70), 0); // none
+    1
+}
+
+fn test_pred_succ() -> Int {
+    let arr = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 0, v6: 0, v7: 0 };
+    assert_eq(predecessor(arr, 5, 30), 20);
+    assert_eq(predecessor(arr, 5, 10), 0 - 1); // no predecessor
+    assert_eq(succ(arr, 5, 30), 40);
+    assert_eq(succ(arr, 5, 50), 0 - 1); // no successor
+    assert_eq(succ(arr, 5, 25), 30);
+    1
+}
+
+fn main() -> Int {
+    test_binary_search();
+    test_sorted_insert();
+    test_search();
+    test_delete();
+    test_range();
+    test_pred_succ();
+    print("[OK] 671_skip_list_sim_aot");
+    0
+}

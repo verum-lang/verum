@@ -1,0 +1,234 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, ring-buffer, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Circular buffer (ring buffer) with 8-element capacity
+
+// ============================================================================
+// Ring buffer type
+// ============================================================================
+
+type RBuf is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    head: Int,    // index of front element
+    tail: Int,    // index of next write position
+    count: Int    // number of elements currently stored
+};
+
+fn rb_new() -> RBuf {
+    RBuf {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        head: 0, tail: 0, count: 0
+    }
+}
+
+// ============================================================================
+// Element access helpers
+// ============================================================================
+
+fn rb_get(rb: RBuf, i: Int) -> Int {
+    if i == 0 { rb.e0 } else if i == 1 { rb.e1 } else if i == 2 { rb.e2 }
+    else if i == 3 { rb.e3 } else if i == 4 { rb.e4 } else if i == 5 { rb.e5 }
+    else if i == 6 { rb.e6 } else { rb.e7 }
+}
+
+fn rb_set(rb: RBuf, i: Int, val: Int) -> RBuf {
+    RBuf {
+        e0: if i == 0 { val } else { rb.e0 },
+        e1: if i == 1 { val } else { rb.e1 },
+        e2: if i == 2 { val } else { rb.e2 },
+        e3: if i == 3 { val } else { rb.e3 },
+        e4: if i == 4 { val } else { rb.e4 },
+        e5: if i == 5 { val } else { rb.e5 },
+        e6: if i == 6 { val } else { rb.e6 },
+        e7: if i == 7 { val } else { rb.e7 },
+        head: rb.head, tail: rb.tail, count: rb.count
+    }
+}
+
+// Wrap index into [0, 8)
+fn wrap8(i: Int) -> Int {
+    i - (i / 8) * 8
+}
+
+// ============================================================================
+// Operations
+// ============================================================================
+
+fn rb_is_empty(rb: RBuf) -> Int {
+    if rb.count == 0 { 1 } else { 0 }
+}
+
+fn rb_is_full(rb: RBuf) -> Int {
+    if rb.count == 8 { 1 } else { 0 }
+}
+
+fn rb_enqueue(rb: RBuf, val: Int) -> RBuf {
+    // Enqueue at tail position
+    let updated = rb_set(rb, rb.tail, val);
+    let new_tail = wrap8(rb.tail + 1);
+    RBuf {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        head: rb.head, tail: new_tail, count: rb.count + 1
+    }
+}
+
+fn rb_dequeue(rb: RBuf) -> Int {
+    // Returns front element value
+    rb_get(rb, rb.head)
+}
+
+fn rb_after_dequeue(rb: RBuf) -> RBuf {
+    // Returns buffer with front element removed
+    let new_head = wrap8(rb.head + 1);
+    RBuf {
+        e0: rb.e0, e1: rb.e1, e2: rb.e2, e3: rb.e3,
+        e4: rb.e4, e5: rb.e5, e6: rb.e6, e7: rb.e7,
+        head: new_head, tail: rb.tail, count: rb.count - 1
+    }
+}
+
+fn rb_peek(rb: RBuf) -> Int {
+    rb_get(rb, rb.head)
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_enqueue_dequeue_basic() -> Int {
+    let mut rb = rb_new();
+    assert_eq(rb_is_empty(rb), 1);
+
+    rb = rb_enqueue(rb, 10);
+    rb = rb_enqueue(rb, 20);
+    rb = rb_enqueue(rb, 30);
+
+    assert_eq(rb.count, 3);
+    assert_eq(rb_is_empty(rb), 0);
+
+    // Dequeue should return FIFO order
+    let v1 = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v1, 10);
+
+    let v2 = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v2, 20);
+
+    let v3 = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v3, 30);
+
+    assert_eq(rb_is_empty(rb), 1);
+    0
+}
+
+@test
+fn test_peek() -> Int {
+    let mut rb = rb_new();
+    rb = rb_enqueue(rb, 42);
+    rb = rb_enqueue(rb, 99);
+    // Peek returns front without removing
+    assert_eq(rb_peek(rb), 42);
+    assert_eq(rb.count, 2);
+    // Still 42 after peek
+    assert_eq(rb_peek(rb), 42);
+    0
+}
+
+@test
+fn test_full_buffer() -> Int {
+    let mut rb = rb_new();
+    rb = rb_enqueue(rb, 1);
+    rb = rb_enqueue(rb, 2);
+    rb = rb_enqueue(rb, 3);
+    rb = rb_enqueue(rb, 4);
+    rb = rb_enqueue(rb, 5);
+    rb = rb_enqueue(rb, 6);
+    rb = rb_enqueue(rb, 7);
+    rb = rb_enqueue(rb, 8);
+    assert_eq(rb_is_full(rb), 1);
+    assert_eq(rb.count, 8);
+    // Can still dequeue
+    let v = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v, 1);
+    assert_eq(rb_is_full(rb), 0);
+    0
+}
+
+@test
+fn test_wraparound() -> Int {
+    let mut rb = rb_new();
+    // Enqueue 5 elements
+    rb = rb_enqueue(rb, 10);
+    rb = rb_enqueue(rb, 20);
+    rb = rb_enqueue(rb, 30);
+    rb = rb_enqueue(rb, 40);
+    rb = rb_enqueue(rb, 50);
+    // Dequeue 4 elements (head advances to index 4)
+    rb = rb_after_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(rb.count, 1);
+    assert_eq(rb_peek(rb), 50);
+    // Now enqueue 5 more — tail wraps around from 5->6->7->0->1
+    rb = rb_enqueue(rb, 60);
+    rb = rb_enqueue(rb, 70);
+    rb = rb_enqueue(rb, 80);
+    rb = rb_enqueue(rb, 90);
+    assert_eq(rb.count, 5);
+    // Verify FIFO order after wraparound
+    let v1 = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v1, 50);
+    let v2 = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v2, 60);
+    let v3 = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v3, 70);
+    0
+}
+
+@test
+fn test_interleaved_ops() -> Int {
+    let mut rb = rb_new();
+    rb = rb_enqueue(rb, 1);
+    rb = rb_enqueue(rb, 2);
+    let v = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v, 1);
+    rb = rb_enqueue(rb, 3);
+    rb = rb_enqueue(rb, 4);
+    assert_eq(rb.count, 3);
+    let v2 = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v2, 2);
+    let v3 = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v3, 3);
+    let v4 = rb_dequeue(rb);
+    rb = rb_after_dequeue(rb);
+    assert_eq(v4, 4);
+    assert_eq(rb_is_empty(rb), 1);
+    0
+}
+
+fn main() -> Int {
+    test_enqueue_dequeue_basic();
+    test_peek();
+    test_full_buffer();
+    test_wraparound();
+    test_interleaved_ops();
+    print("[OK] 101_ring_buffer");
+    0
+}

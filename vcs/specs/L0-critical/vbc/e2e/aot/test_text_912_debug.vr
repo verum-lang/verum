@@ -1,0 +1,23 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "Hello, World!";
+
+    // Test contains with non-empty string
+    if s.contains("World") {
+        print("contains World: yes");
+    } else {
+        print("contains World: no");
+    }
+
+    // Test contains with empty string
+    if s.contains("") {
+        print("contains empty: yes");
+    } else {
+        print("contains empty: no");
+    }
+
+    0
+}

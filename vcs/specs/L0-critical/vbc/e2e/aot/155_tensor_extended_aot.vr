@@ -1,0 +1,309 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, extended
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT tensor extended operations — creation, arithmetic, reductions
+
+// ============================================================================
+// Vec4f: 4-element float-like vector using scaled integers (x1000)
+// ============================================================================
+
+type Vec4f is { x: Int, y: Int, z: Int, w: Int };
+
+fn vec4f_new(x: Int, y: Int, z: Int, w: Int) -> Vec4f {
+    Vec4f { x: x, y: y, z: z, w: w }
+}
+
+fn vec4f_get(v: Vec4f, i: Int) -> Int {
+    if i == 0 { v.x } else if i == 1 { v.y } else if i == 2 { v.z } else { v.w }
+}
+
+fn vec4f_zeros() -> Vec4f {
+    Vec4f { x: 0, y: 0, z: 0, w: 0 }
+}
+
+fn vec4f_ones() -> Vec4f {
+    Vec4f { x: 1, y: 1, z: 1, w: 1 }
+}
+
+fn vec4f_fill(val: Int) -> Vec4f {
+    Vec4f { x: val, y: val, z: val, w: val }
+}
+
+fn vec4f_arange(start: Int, step: Int) -> Vec4f {
+    Vec4f {
+        x: start,
+        y: start + step,
+        z: start + step * 2,
+        w: start + step * 3
+    }
+}
+
+fn vec4f_add(a: Vec4f, b: Vec4f) -> Vec4f {
+    Vec4f {
+        x: a.x + b.x,
+        y: a.y + b.y,
+        z: a.z + b.z,
+        w: a.w + b.w
+    }
+}
+
+fn vec4f_sub(a: Vec4f, b: Vec4f) -> Vec4f {
+    Vec4f {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+        w: a.w - b.w
+    }
+}
+
+fn vec4f_mul(a: Vec4f, b: Vec4f) -> Vec4f {
+    Vec4f {
+        x: a.x * b.x,
+        y: a.y * b.y,
+        z: a.z * b.z,
+        w: a.w * b.w
+    }
+}
+
+fn vec4f_scale(a: Vec4f, s: Int) -> Vec4f {
+    Vec4f {
+        x: a.x * s,
+        y: a.y * s,
+        z: a.z * s,
+        w: a.w * s
+    }
+}
+
+fn vec4f_sum(a: Vec4f) -> Int {
+    a.x + a.y + a.z + a.w
+}
+
+fn vec4f_max(a: Vec4f) -> Int {
+    let mut best = a.x;
+    if a.y > best { best = a.y; }
+    if a.z > best { best = a.z; }
+    if a.w > best { best = a.w; }
+    best
+}
+
+fn vec4f_min(a: Vec4f) -> Int {
+    let mut best = a.x;
+    if a.y < best { best = a.y; }
+    if a.z < best { best = a.z; }
+    if a.w < best { best = a.w; }
+    best
+}
+
+fn vec4f_dot(a: Vec4f, b: Vec4f) -> Int {
+    a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
+}
+
+// ============================================================================
+// Test 1: zeros and ones creation
+// ============================================================================
+
+fn test_zeros_ones() {
+    let z = vec4f_zeros();
+    assert_eq(vec4f_get(z, 0), 0);
+    assert_eq(vec4f_get(z, 1), 0);
+    assert_eq(vec4f_get(z, 2), 0);
+    assert_eq(vec4f_get(z, 3), 0);
+    assert_eq(vec4f_sum(z), 0);
+
+    let o = vec4f_ones();
+    assert_eq(vec4f_get(o, 0), 1);
+    assert_eq(vec4f_get(o, 1), 1);
+    assert_eq(vec4f_get(o, 2), 1);
+    assert_eq(vec4f_get(o, 3), 1);
+    assert_eq(vec4f_sum(o), 4);
+
+    let f = vec4f_fill(7);
+    assert_eq(vec4f_get(f, 0), 7);
+    assert_eq(vec4f_get(f, 1), 7);
+    assert_eq(vec4f_get(f, 2), 7);
+    assert_eq(vec4f_get(f, 3), 7);
+    assert_eq(vec4f_sum(f), 28);
+
+    print("test_zeros_ones passed");
+}
+
+// ============================================================================
+// Test 2: arange creation
+// ============================================================================
+
+fn test_arange() {
+    // arange(0, 1) = [0, 1, 2, 3]
+    let a = vec4f_arange(0, 1);
+    assert_eq(a.x, 0);
+    assert_eq(a.y, 1);
+    assert_eq(a.z, 2);
+    assert_eq(a.w, 3);
+    assert_eq(vec4f_sum(a), 6);
+
+    // arange(10, 5) = [10, 15, 20, 25]
+    let b = vec4f_arange(10, 5);
+    assert_eq(b.x, 10);
+    assert_eq(b.y, 15);
+    assert_eq(b.z, 20);
+    assert_eq(b.w, 25);
+    assert_eq(vec4f_sum(b), 70);
+
+    // arange(-3, 2) = [-3, -1, 1, 3]
+    let c = vec4f_arange(-3, 2);
+    assert_eq(c.x, -3);
+    assert_eq(c.y, -1);
+    assert_eq(c.z, 1);
+    assert_eq(c.w, 3);
+    assert_eq(vec4f_sum(c), 0);
+
+    print("test_arange passed");
+}
+
+// ============================================================================
+// Test 3: vector addition
+// ============================================================================
+
+fn test_add() {
+    let a = vec4f_new(1, 2, 3, 4);
+    let b = vec4f_new(10, 20, 30, 40);
+    let c = vec4f_add(a, b);
+    assert_eq(c.x, 11);
+    assert_eq(c.y, 22);
+    assert_eq(c.z, 33);
+    assert_eq(c.w, 44);
+
+    // Addition with zeros is identity
+    let z = vec4f_zeros();
+    let d = vec4f_add(a, z);
+    assert_eq(d.x, 1);
+    assert_eq(d.y, 2);
+    assert_eq(d.z, 3);
+    assert_eq(d.w, 4);
+
+    // Addition is commutative
+    let e = vec4f_add(b, a);
+    assert_eq(e.x, c.x);
+    assert_eq(e.y, c.y);
+    assert_eq(e.z, c.z);
+    assert_eq(e.w, c.w);
+
+    // Subtraction: a + (-b) = a - b
+    let neg_b = vec4f_scale(b, -1);
+    let f = vec4f_add(a, neg_b);
+    let g = vec4f_sub(a, b);
+    assert_eq(f.x, g.x);
+    assert_eq(f.y, g.y);
+    assert_eq(f.z, g.z);
+    assert_eq(f.w, g.w);
+
+    print("test_add passed");
+}
+
+// ============================================================================
+// Test 4: element-wise multiplication
+// ============================================================================
+
+fn test_elementwise_mul() {
+    let a = vec4f_new(2, 3, 4, 5);
+    let b = vec4f_new(10, 20, 30, 40);
+    let c = vec4f_mul(a, b);
+    assert_eq(c.x, 20);
+    assert_eq(c.y, 60);
+    assert_eq(c.z, 120);
+    assert_eq(c.w, 200);
+
+    // Multiply by ones is identity
+    let o = vec4f_ones();
+    let d = vec4f_mul(a, o);
+    assert_eq(d.x, 2);
+    assert_eq(d.y, 3);
+    assert_eq(d.z, 4);
+    assert_eq(d.w, 5);
+
+    // Multiply by zeros is zero
+    let z = vec4f_zeros();
+    let e = vec4f_mul(a, z);
+    assert_eq(vec4f_sum(e), 0);
+
+    // Scalar multiplication matches scale
+    let f = vec4f_fill(3);
+    let g = vec4f_mul(a, f);
+    let h = vec4f_scale(a, 3);
+    assert_eq(g.x, h.x);
+    assert_eq(g.y, h.y);
+    assert_eq(g.z, h.z);
+    assert_eq(g.w, h.w);
+
+    print("test_elementwise_mul passed");
+}
+
+// ============================================================================
+// Test 5: sum reduction
+// ============================================================================
+
+fn test_sum_reduction() {
+    // Sum of arange(1, 1) = 1+2+3+4 = 10
+    let a = vec4f_arange(1, 1);
+    assert_eq(vec4f_sum(a), 10);
+
+    // Sum of negative values
+    let b = vec4f_new(-5, 3, -2, 4);
+    assert_eq(vec4f_sum(b), 0);
+
+    // Dot product as sum of element-wise mul
+    let c = vec4f_new(1, 2, 3, 4);
+    let d = vec4f_new(5, 6, 7, 8);
+    let prod = vec4f_mul(c, d);
+    let dot_via_sum = vec4f_sum(prod);
+    let dot_direct = vec4f_dot(c, d);
+    // 1*5 + 2*6 + 3*7 + 4*8 = 5 + 12 + 21 + 32 = 70
+    assert_eq(dot_via_sum, 70);
+    assert_eq(dot_direct, 70);
+    assert_eq(dot_via_sum, dot_direct);
+
+    print("test_sum_reduction passed");
+}
+
+// ============================================================================
+// Test 6: max/min reductions and combined operations
+// ============================================================================
+
+fn test_max_min_reduction() {
+    let a = vec4f_new(10, 50, 30, 20);
+    assert_eq(vec4f_max(a), 50);
+    assert_eq(vec4f_min(a), 10);
+
+    // All equal
+    let b = vec4f_fill(42);
+    assert_eq(vec4f_max(b), 42);
+    assert_eq(vec4f_min(b), 42);
+
+    // Negative values
+    let c = vec4f_new(-10, -3, -20, -1);
+    assert_eq(vec4f_max(c), -1);
+    assert_eq(vec4f_min(c), -20);
+
+    // Chain: create, add, reduce
+    let x = vec4f_arange(0, 10);   // [0, 10, 20, 30]
+    let y = vec4f_fill(5);          // [5, 5, 5, 5]
+    let z = vec4f_add(x, y);       // [5, 15, 25, 35]
+    assert_eq(vec4f_sum(z), 80);
+    assert_eq(vec4f_max(z), 35);
+    assert_eq(vec4f_min(z), 5);
+
+    print("test_max_min_reduction passed");
+}
+
+fn main() -> Int {
+    test_zeros_ones();
+    test_arange();
+    test_add();
+    test_elementwise_mul();
+    test_sum_reduction();
+    test_max_min_reduction();
+    print("ALL PASSED");
+    0
+}

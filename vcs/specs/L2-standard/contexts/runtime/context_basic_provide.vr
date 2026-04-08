@@ -1,0 +1,42 @@
+// @test: run
+// @expected-stdout: Counter value: 42
+// @tier: 0
+// @level: L2
+// @tags: contexts, provide, vbc, runtime
+// @description: Tests basic provide statement emits CtxProvide instruction correctly
+
+// A simple context for tracking a counter value
+context Counter {
+    fn get(&self) -> Int;
+    fn set(&mut self, value: Int);
+}
+
+// Concrete implementation
+type SimpleCounter is {
+    value: Int,
+};
+
+implement Counter for SimpleCounter {
+    fn get(&self) -> Int {
+        self.value
+    }
+
+    fn set(&mut self, value: Int) {
+        self.value = value;
+    }
+}
+
+// Function that uses the Counter context
+fn get_counter_value() -> Int using [Counter] {
+    Counter.get()
+}
+
+fn main() {
+    // Provide the Counter context with initial value 42
+    let counter = SimpleCounter { value: 42 };
+    provide Counter = counter;
+
+    // Call function that requires Counter context
+    let value = get_counter_value();
+    println(f"Counter value: {value}");
+}

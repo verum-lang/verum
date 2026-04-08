@@ -1,0 +1,264 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, enum, variant, destructuring
+
+// Helper types for testing enum patterns
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Color is Red | Green | Blue;
+type Shape is Circle(Float) | Rectangle(Float, Float) | Triangle(Float, Float, Float);
+type Event is Click { x: Int, y: Int } | KeyPress { key: Text, modifiers: Int } | Resize { width: Int, height: Int };
+type Message is Quit | Move { x: Int, y: Int } | Write(Text) | ChangeColor(Int, Int, Int);
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+type Point is { x: Int, y: Int };
+
+// Helper functions
+fn default() -> Int { 0 }
+fn default_inner() -> Int { 0 }
+fn default_outer() -> Int { 0 }
+fn process<T>(x: T) -> T { x }
+fn handle_error<E>(e: E) { }
+fn handle_click(x: Int, y: Int) { }
+fn handle_key(key: Text, modifiers: Int) { }
+fn handle_resize(width: Int, height: Int) { }
+fn quit() { }
+fn move_to(x: Int, y: Int) { }
+fn write(text: Text) { }
+fn change_color(r: Int, g: Int, b: Int) { }
+fn found<T>(v: T) { }
+fn not_found() { }
+fn error<E>(e: E) { }
+fn combine<A, B>(a: A, b: B) { }
+fn plot(x: Int, y: Int) { }
+fn skip() { }
+fn use_some<T>(opt: T) { }
+fn handle_none() { }
+fn success() { }
+fn failure() { }
+fn done() { }
+fn use<T>(x: T) { }
+fn format(fmt: Text, val: Int) -> Text { fmt }
+fn positive<T>(v: T) { }
+fn non_positive<T>(v: T) { }
+fn pi() -> Float { 3.14159 }
+fn heron(a: Float, b: Float, c: Float) -> Float { 0.0 }
+
+fn test_simple_enum_variant_patterns() {
+    let option: Maybe<Int> = Some(42);
+    let default_val = 0;
+
+    // Simple enum variant patterns
+    match option {
+        Some(x) => x,
+        None => default_val,
+    };
+}
+
+fn test_result_enum_patterns() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // Result enum patterns
+    match result {
+        Ok(value) => process(value),
+        Err(error) => handle_error(error),
+    };
+}
+
+fn test_unit_variant_patterns() {
+    let color = Color.Red;
+
+    // Unit variant patterns
+    match color {
+        Color.Red => "red",
+        Color.Green => "green",
+        Color.Blue => "blue",
+    };
+}
+
+fn test_tuple_variant_patterns() {
+    let shape = Shape.Circle(5.0);
+    let pi_val = 3.14159;
+
+    // Tuple variant patterns
+    match shape {
+        Shape.Circle(radius) => pi_val * radius * radius,
+        Shape.Rectangle(width, height) => width * height,
+        Shape.Triangle(a, b, c) => heron(a, b, c),
+    };
+}
+
+fn test_struct_variant_patterns() {
+    let event = Event.Click { x: 10, y: 20 };
+
+    // Struct variant patterns
+    match event {
+        Event.Click { x, y } => handle_click(x, y),
+        Event.KeyPress { key, modifiers } => handle_key(key, modifiers),
+        Event.Resize { width, height } => handle_resize(width, height),
+    };
+}
+
+fn test_mixed_variant_types() {
+    let message = Message.Quit;
+
+    // Mixed variant types
+    match message {
+        Message.Quit => quit(),
+        Message.Move { x, y } => move_to(x, y),
+        Message.Write(text) => write(text),
+        Message.ChangeColor(r, g, b) => change_color(r, g, b),
+    };
+}
+
+fn test_nested_enum_patterns() {
+    let nested_option: Maybe<Maybe<Int>> = Some(Some(42));
+    let default_inner_val = 0;
+    let default_outer_val = 0;
+
+    // Nested enum patterns
+    match nested_option {
+        Some(Some(value)) => value,
+        Some(None) => default_inner_val,
+        None => default_outer_val,
+    };
+}
+
+fn test_enum_pattern_in_if_let() {
+    let option: Maybe<Int> = Some(42);
+    let result: Result<Int, Text> = Ok(42);
+
+    // Enum pattern in if-let
+    if let Some(x) = option {
+        use(x)
+    }
+
+    if let Ok(data) = result {
+        process(data)
+    }
+}
+
+fn test_enum_pattern_in_while_let() {
+    let iter: Maybe<Int> = Some(1);
+
+    // Enum pattern in while-let
+    while let Some(item) = iter {
+        process(item);
+    }
+}
+
+fn test_enum_pattern_in_let_else() {
+    let option: Maybe<Int> = Some(42);
+
+    // Enum pattern in let-else
+    let Some(value) = option else {
+        return;
+    };
+}
+
+fn test_enum_pattern_in_for_loop() {
+    let results: List<Result<Int, Text>> = Nil;
+
+    // Enum pattern in for loop (if iterable)
+    for Ok(item) in results {
+        process(item);
+    }
+}
+
+fn test_enum_pattern_with_nested_destructuring() {
+    let result: Result<Maybe<Int>, Text> = Ok(Some(42));
+
+    // Enum pattern with nested destructuring
+    match result {
+        Ok(Some(value)) => found(value),
+        Ok(None) => not_found(),
+        Err(e) => error(e),
+    };
+}
+
+fn test_enum_pattern_with_tuple_inside() {
+    let maybe_pair: Maybe<(Int, Int)> = Some((1, 2));
+
+    // Enum pattern with tuple inside
+    match maybe_pair {
+        Some((a, b)) => combine(a, b),
+        None => default(),
+    };
+}
+
+fn test_enum_pattern_with_struct_inside() {
+    let maybe_point: Maybe<Point> = Some(Point { x: 10, y: 20 });
+
+    // Enum pattern with struct inside
+    match maybe_point {
+        Some(Point { x, y }) => plot(x, y),
+        None => skip(),
+    };
+}
+
+fn test_qualified_enum_variant() {
+    let option: Maybe<Int> = Some(42);
+    let default_val = 0;
+
+    // Qualified enum variant
+    match option {
+        Maybe.Some(x) => x,
+        Maybe.None => default_val,
+    };
+}
+
+fn test_enum_pattern_with_at_binding() {
+    let option: Maybe<Int> = Some(42);
+    let value: Result<Int, Text> = Ok(42);
+
+    // Enum pattern with @ binding
+    match option {
+        opt @ Some(_) => use_some(opt),
+        None => handle_none(),
+    };
+
+    match value {
+        v @ Ok(n) if n > 0 => positive(v),
+        Ok(n) => non_positive(n),
+        Err(e) => error(e),
+    };
+}
+
+fn test_enum_pattern_with_wildcard_payload() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // Enum pattern with wildcard payload
+    match result {
+        Ok(_) => success(),
+        Err(_) => failure(),
+    };
+}
+
+fn test_enum_pattern_with_multiple_variants() {
+    let result: Result<Int, Int> = Ok(42);
+
+    // Enum pattern with multiple variants
+    match result {
+        Ok(v) | Err(v) => process(v),
+    };
+}
+
+fn test_generic_enum_patterns() {
+    let maybe: Maybe<Int> = Some(42);
+
+    // Generic enum patterns
+    match maybe {
+        Some(n) => n,
+        None => 0,
+    };
+}
+
+fn test_recursive_enum_pattern() {
+    let list: List<Int> = Nil;
+
+    // Recursive enum pattern
+    match list {
+        Cons(head, tail) => process(head),
+        Nil => done(),
+    };
+}

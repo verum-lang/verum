@@ -1,0 +1,151 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, large-int, i64, overflow
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: large integer arithmetic near i64 max/min,
+// overflow behavior
+
+// =============================================================================
+// Large positive values
+// =============================================================================
+
+fn test_large_multiplication() {
+    assert_eq(1000000 * 1000000, 1000000000000);
+    assert_eq(100000 * 100000, 10000000000);
+}
+
+fn test_large_addition() {
+    let a = 1000000000;
+    let b = 2000000000;
+    assert_eq(a + b, 3000000000);
+    assert_eq(a + a + a + a, 4000000000);
+}
+
+fn test_large_subtraction() {
+    let a = 5000000000;
+    let b = 3000000000;
+    assert_eq(a - b, 2000000000);
+    assert_eq(b - a, -2000000000);
+}
+
+// =============================================================================
+// Large division and modulo
+// =============================================================================
+
+fn test_large_division() {
+    let big = 1000000000000;
+    assert_eq(big / 1000000, 1000000);
+    assert_eq(big / big, 1);
+    assert_eq(big % big, 0);
+}
+
+// =============================================================================
+// Powers of 2
+// =============================================================================
+
+fn test_powers_of_two() {
+    let mut val = 1;
+    let mut i = 0;
+    while i < 30 {
+        val = val * 2;
+        i = i + 1;
+    }
+    // 2^30 = 1073741824
+    assert_eq(val, 1073741824);
+}
+
+fn test_shift_large() {
+    assert_eq(1 << 10, 1024);
+    assert_eq(1 << 20, 1048576);
+    assert_eq(1 << 30, 1073741824);
+}
+
+// =============================================================================
+// Factorial with large values
+// =============================================================================
+
+fn test_large_factorial() {
+    // 12! = 479001600
+    let mut fact = 1;
+    let mut n = 1;
+    while n <= 12 {
+        fact = fact * n;
+        n = n + 1;
+    }
+    assert_eq(fact, 479001600);
+}
+
+fn test_15_factorial() {
+    // 15! = 1307674368000
+    let mut fact = 1;
+    let mut n = 1;
+    while n <= 15 {
+        fact = fact * n;
+        n = n + 1;
+    }
+    assert_eq(fact, 1307674368000);
+}
+
+// =============================================================================
+// Modular arithmetic with large numbers
+// =============================================================================
+
+fn test_large_modulo() {
+    let big = 1000000007;
+    let a = 999999999;
+    assert_eq(a % big, 999999999);
+    assert_eq((a + 8) % big, 0);
+    assert_eq((big * 2) % big, 0);
+}
+
+fn test_large_modular_power() {
+    // Compute 2^20 mod 1000000007
+    let modulus = 1000000007;
+    let mut result = 1;
+    let mut i = 0;
+    while i < 20 {
+        result = (result * 2) % modulus;
+        i = i + 1;
+    }
+    assert_eq(result, 1048576);
+}
+
+// =============================================================================
+// Chained large operations
+// =============================================================================
+
+fn test_chained_large() {
+    let a = 100000;
+    let b = a * a;
+    assert_eq(b, 10000000000);
+    let c = b / 100000;
+    assert_eq(c, 100000);
+    let d = b % 100000;
+    assert_eq(d, 0);
+}
+
+fn test_large_expression() {
+    let x = 1000000;
+    let result = x * x - x;
+    assert_eq(result, 999999000000);
+}
+
+fn main() -> Int {
+    test_large_multiplication();
+    test_large_addition();
+    test_large_subtraction();
+    test_large_division();
+    test_powers_of_two();
+    test_shift_large();
+    test_large_factorial();
+    test_15_factorial();
+    test_large_modulo();
+    test_large_modular_power();
+    test_chained_large();
+    test_large_expression();
+    print("[OK] 228_interp_large_int");
+    0
+}

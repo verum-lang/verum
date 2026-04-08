@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, where-clause, type-definition
+
+/// Where clauses on type definitions -- value_where_clause and
+/// inline_refinement on record types and simple types.
+/// Grammar: type_refinement = inline_refinement | value_where_clause ;
+
+// Inline refinement on simple type
+type Positive is Int{> 0};
+type Byte is Int{>= 0, < 256};
+type Probability is Float{>= 0.0, <= 1.0};
+
+// Value where clause on simple type
+type EvenInt is Int where self % 2 == 0;
+type OddInt is Int where self % 2 != 0;
+
+// Record type with inline refinement on the whole type
+type Point2D is { x: Float, y: Float } { x >= 0.0, y >= 0.0 };
+
+// Record type with value where clause
+type OrderedRange is { start: Int, end: Int } where self.end >= self.start;
+
+// Combining inline refinement with record
+type ValidRect is {
+    width: Int,
+    height: Int,
+} { width > 0, height > 0 };
+
+// Nested: fields themselves have refinements, and the record has one too
+type SafeDiv is {
+    numerator: Float,
+    denominator: Float{!= 0.0},
+};
+
+fn make_point(x: Float, y: Float) -> Maybe<Point2D> {
+    if x >= 0.0 && y >= 0.0 {
+        Some(Point2D { x, y })
+    } else {
+        None
+    }
+}
+
+fn range_size(r: OrderedRange) -> Int {
+    r.end - r.start
+}
+
+fn area(r: ValidRect) -> Int {
+    r.width * r.height
+}
+
+fn main() {
+    let p: Positive = 10;
+    let b: Byte = 200;
+    let prob: Probability = 0.75;
+    let even: EvenInt = 42;
+    let odd: OddInt = 7;
+
+    let pt = make_point(1.0, 2.0);
+    match pt {
+        Some(p) => assert(p.x >= 0.0),
+        None => panic("should succeed"),
+    }
+
+    let r = OrderedRange { start: 5, end: 15 };
+    assert(range_size(r) == 10);
+
+    let rect = ValidRect { width: 10, height: 5 };
+    assert(area(rect) == 50);
+
+    let div = SafeDiv { numerator: 10.0, denominator: 3.0 };
+    assert(div.denominator != 0.0);
+}

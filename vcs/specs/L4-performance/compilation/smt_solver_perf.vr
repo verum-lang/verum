@@ -1,0 +1,284 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: compilation, smt, verification, performance
+// @description: SMT solver performance (target: < 100ms simple, < 5s complex)
+
+/// SMT Solver Performance Benchmark
+///
+/// Measures the time taken by the Z3 SMT solver to verify contracts.
+/// Different contract complexities exercise different solver strategies.
+///
+/// Performance targets:
+/// - Simple arithmetic: < 10ms
+/// - Linear constraints: < 50ms
+/// - Quantified formulas: < 500ms
+/// - Complex invariants: < 5s
+/// - Timeout for undecidable: 30s
+
+/// Benchmark: Simple arithmetic contracts
+@verify(proof)
+fn simple_arithmetic_contracts() {
+    // Addition properties
+    fn add_comm(a: Int, b: Int) {
+        contract#"
+            ensures a + b == b + a;
+        "
+    }
+
+    fn add_assoc(a: Int, b: Int, c: Int) {
+        contract#"
+            ensures (a + b) + c == a + (b + c);
+        "
+    }
+
+    // Multiplication properties
+    fn mul_comm(a: Int, b: Int) {
+        contract#"
+            ensures a * b == b * a;
+        "
+    }
+
+    // These should verify in < 10ms each
+}
+
+/// Benchmark: Linear constraints
+@verify(proof)
+fn linear_constraints() {
+    fn bounded_sum(a: Int{>= 0, <= 100}, b: Int{>= 0, <= 100}) -> Int{>= 0, <= 200} {
+        contract#"
+            requires a >= 0 && a <= 100;
+            requires b >= 0 && b <= 100;
+            ensures result >= 0 && result <= 200;
+        "
+        a + b
+    }
+
+    fn clamped_value(x: Int, lo: Int, hi: Int{>= lo}) -> Int{>= lo, <= hi} {
+        contract#"
+            requires lo <= hi;
+            ensures result >= lo && result <= hi;
+        "
+        if x < lo { lo }
+        else if x > hi { hi }
+        else { x }
+    }
+
+    // Should verify in < 50ms
+}
+
+/// Benchmark: Array bounds verification
+@verify(proof)
+fn array_bounds_verification() {
+    fn safe_access<T>(arr: List<T>{len > 0}, idx: Int{>= 0}) -> Maybe<T> {
+        contract#"
+            ensures idx < arr.len() implies result.is_some();
+            ensures idx >= arr.len() implies result.is_none();
+        "
+        if idx < arr.len() {
+            Some(arr[idx])
+        } else {
+            None
+        }
+    }
+
+    fn binary_search<T: Ord>(arr: List<T>, target: T) -> Maybe<Int> {
+        contract#"
+            ensures result.is_some() implies result.unwrap() >= 0;
+            ensures result.is_some() implies result.unwrap() < arr.len();
+            ensures result.is_some() implies arr[result.unwrap()] == target;
+        "
+        // Implementation with bounds that SMT must verify
+        let mut lo = 0;
+        let mut hi = arr.len();
+
+        while lo < hi {
+            invariant lo >= 0;
+            invariant hi <= arr.len();
+            invariant lo <= hi;
+
+            let mid = lo + (hi - lo) / 2;
+            match arr[mid].cmp(&target) {
+                Ordering.Less => lo = mid + 1,
+                Ordering.Greater => hi = mid,
+                Ordering.Equal => return Some(mid),
+            }
+        }
+        None
+    }
+
+    // Should verify in < 100ms
+}
+
+/// Benchmark: Quantified formulas
+@verify(proof)
+fn quantified_verification() {
+    fn all_positive(arr: List<Int>) -> Bool {
+        contract#"
+            ensures result == forall i in 0..arr.len() => arr[i] > 0;
+        "
+        arr.iter().all(|&x| x > 0)
+    }
+
+    fn exists_zero(arr: List<Int>) -> Bool {
+        contract#"
+            ensures result == exists i in 0..arr.len() => arr[i] == 0;
+        "
+        arr.iter().any(|&x| x == 0)
+    }
+
+    fn sorted_implies_unique_min(arr: List<Int>{len > 0}) {
+        contract#"
+            requires is_sorted(arr);
+            ensures forall i in 1..arr.len() => arr[0] <= arr[i];
+        "
+    }
+
+    // Should verify in < 500ms
+}
+
+/// Benchmark: Loop invariants
+@verify(proof)
+fn loop_invariant_verification() {
+    fn sum_list(list: List<Int{>= 0}>) -> Int{>= 0} {
+        contract#"
+            ensures result == list.iter().sum();
+        "
+        let mut total = 0;
+        let mut i = 0;
+
+        while i < list.len() {
+            invariant i >= 0 && i <= list.len();
+            invariant total >= 0;
+            invariant total == list[..i].iter().sum();
+
+            total += list[i];
+            i += 1;
+        }
+
+        total
+    }
+
+    fn reverse_in_place<T>(arr: &mut List<T>) {
+        contract#"
+            modifies arr;
+            ensures arr.len() == old(arr.len());
+            ensures forall i in 0..arr.len() => arr[i] == old(arr[arr.len() - 1 - i]);
+        "
+        let n = arr.len();
+        let mut i = 0;
+
+        while i < n / 2 {
+            invariant i >= 0 && i <= n / 2;
+            invariant forall j in 0..i => arr[j] == old(arr[n - 1 - j]);
+            invariant forall j in 0..i => arr[n - 1 - j] == old(arr[j]);
+            invariant forall j in i..n-i => arr[j] == old(arr[j]);
+
+            arr.swap(i, n - 1 - i);
+            i += 1;
+        }
+    }
+
+    // Should verify in < 2s
+}
+
+/// Benchmark: Data structure invariants
+@verify(proof)
+fn data_structure_invariants() {
+    type BinaryHeap<T: Ord> is {
+        data: List<T>,
+        invariant is_heap(data),
+    };
+
+    // Heap property: parent >= children
+    fn is_heap<T: Ord>(arr: List<T>) -> Bool {
+        forall i in 0..arr.len() => {
+            let left = 2 * i + 1;
+            let right = 2 * i + 2;
+            (left >= arr.len() || arr[i] >= arr[left]) &&
+            (right >= arr.len() || arr[i] >= arr[right])
+        }
+    }
+
+    fn heap_push<T: Ord>(heap: &mut BinaryHeap<T>, value: T) {
+        contract#"
+            modifies heap.data;
+            ensures heap.data.len() == old(heap.data.len()) + 1;
+            ensures is_heap(heap.data);
+        "
+        heap.data.push(value);
+        sift_up(&mut heap.data, heap.data.len() - 1);
+    }
+
+    fn sift_up<T: Ord>(arr: &mut List<T>, mut idx: Int) {
+        contract#"
+            requires idx >= 0 && idx < arr.len();
+            modifies arr;
+            ensures is_heap(arr);
+            decreases idx;
+        "
+        while idx > 0 {
+            let parent = (idx - 1) / 2;
+            if arr[parent] >= arr[idx] {
+                break;
+            }
+            arr.swap(parent, idx);
+            idx = parent;
+        }
+    }
+
+    // Should verify in < 5s
+}
+
+/// Performance timing wrapper
+fn time_verification<F: Fn()>(name: Text, f: F) -> VerificationTiming {
+    let start = Instant.now();
+    f();
+    let elapsed = start.elapsed();
+
+    VerificationTiming {
+        name,
+        elapsed_ms: elapsed.as_millis(),
+        passed: elapsed.as_millis() < 5000,
+    }
+}
+
+fn main() {
+    println("=== SMT Solver Performance Benchmark ===\n");
+
+    let timings = [
+        time_verification("simple_arithmetic", simple_arithmetic_contracts),
+        time_verification("linear_constraints", linear_constraints),
+        time_verification("array_bounds", array_bounds_verification),
+        time_verification("quantified", quantified_verification),
+        time_verification("loop_invariants", loop_invariant_verification),
+        time_verification("data_structures", data_structure_invariants),
+    ];
+
+    for timing in timings {
+        let status = if timing.passed { "PASS" } else { "SLOW" };
+        println("[{}] {}: {}ms", status, timing.name, timing.elapsed_ms);
+    }
+}
+
+type VerificationTiming is {
+    name: Text,
+    elapsed_ms: Int,
+    passed: Bool,
+};
+
+fn is_sorted<T: Ord>(arr: List<T>) -> Bool {
+    forall i in 0..arr.len()-1 => arr[i] <= arr[i+1]
+}
+
+type Ordering is Less | Equal | Greater;
+type Instant is { nanos: Int };
+type Duration is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}

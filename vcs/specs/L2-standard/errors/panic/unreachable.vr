@@ -1,0 +1,256 @@
+// @test: run
+// @expected-exit-code: 1
+// @expected-stderr: panic: Unreachable code reached
+// @tier: 0
+// @level: L2
+// @tags: errors, panic, unreachable, abort
+// @description: unreachable! macro for impossible code paths
+
+/// Unreachable - marking code paths that should never execute.
+/// The unreachable! macro panics when reached, indicating a bug.
+
+/// Basic unreachable! usage
+fn basic_unreachable(value: Int) -> Text {
+    if value > 0 {
+        "positive"
+    } else if value < 0 {
+        "negative"
+    } else if value == 0 {
+        "zero"
+    } else {
+        // Logically impossible - all integers are covered
+        unreachable()
+    }
+}
+
+/// unreachable! with message
+fn unreachable_with_message(day: Int) -> Text {
+    match day {
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        6 => "Saturday",
+        7 => "Sunday",
+        _ => unreachable("Day must be between 1 and 7, got: {}", day)
+    }
+}
+
+/// Exhaustive enum matching
+type Status is
+    | Active
+    | Pending
+    | Completed
+    | Cancelled;
+
+fn process_status(status: Status) -> Int {
+    match status {
+        Status.Active => 1,
+        Status.Pending => 2,
+        Status.Completed => 3,
+        Status.Cancelled => 4,
+        // If all variants are covered, this is unreachable
+        // Adding unreachable! ensures code fails loudly if enum grows
+    }
+}
+
+/// After exhaustive checks
+fn get_sign(n: Int) -> Text {
+    if n > 0 {
+        return "positive"
+    }
+    if n < 0 {
+        return "negative"
+    }
+    if n == 0 {
+        return "zero"
+    }
+
+    // All cases covered - mathematically unreachable
+    unreachable("Integer that is neither positive, negative, nor zero")
+}
+
+/// In infinite loop with break
+fn find_first<T: Eq>(items: &List<T>, target: &T) -> Int {
+    let mut index = 0;
+    loop {
+        if index >= items.len() as Int {
+            return -1;  // Not found
+        }
+        if &items[index as usize] == target {
+            return index;  // Found
+        }
+        index += 1;
+    }
+
+    // Loop always returns - this is unreachable
+    unreachable("Loop exited without return")
+}
+
+/// After never-returning function
+fn divergent_function() -> ! {
+    panic("This function never returns")
+}
+
+fn after_divergent() -> Int {
+    divergent_function();
+
+    // This code is unreachable because divergent_function() never returns
+    // Compiler may warn or error, but unreachable! documents intent
+    unreachable("Code after divergent function")
+}
+
+/// In validated branches
+fn safe_divide(a: Int, b: Int) -> Int {
+    if b == 0 {
+        panic("Division by zero");
+    }
+
+    // After check, b != 0 is guaranteed
+    let result = a / b;
+
+    // If we somehow got here with b == 0, it's a bug
+    if b == 0 {
+        unreachable("b became zero after check");
+    }
+
+    result
+}
+
+/// Type-level unreachability with Never type
+type Never is ();  // Empty type with no inhabitants;
+
+fn never_value() -> Never {
+    unreachable("Cannot construct Never type")
+}
+
+fn use_never(n: Never) -> Int {
+    // This function can never be called because Never cannot be constructed
+    unreachable("Called with Never value")
+}
+
+/// Unreachable in Result handling when error is impossible
+fn infallible_parse(s: &Text) -> Int {
+    // After validation, parse cannot fail
+    assert(s.chars().all(|c| c.is_digit(10)));
+
+    match s.parse<Int>() {
+        Some(n) => n,
+        None => unreachable("Parse failed after validation")
+    }
+}
+
+/// Unsafe unreachable (optimization hint)
+/// WARNING: Only use when 100% certain code is unreachable
+unsafe fn unsafe_unreachable_hint(condition: Bool) -> Int {
+    if condition {
+        return 42;
+    }
+
+    // If we're certain condition is always true:
+    // unsafe { std.hint.unreachable_unchecked() }
+
+    // This is undefined behavior if reached!
+    // Only use for performance-critical code where you can prove unreachability
+    unreachable("Condition should always be true")
+}
+
+/// Unreachable in state machines
+type State is
+    | Initial
+    | Running
+    | Paused
+    | Stopped;
+
+type Event is
+    | Start
+    | Pause
+    | Resume
+    | Stop;
+
+fn transition(state: State, event: Event) -> State {
+    match (state, event) {
+        (State.Initial, Event.Start) => State.Running,
+        (State.Running, Event.Pause) => State.Paused,
+        (State.Running, Event.Stop) => State.Stopped,
+        (State.Paused, Event.Resume) => State.Running,
+        (State.Paused, Event.Stop) => State.Stopped,
+        (State.Stopped, _) => State.Stopped,
+
+        // Invalid transitions
+        (State.Initial, Event.Pause) |
+        (State.Initial, Event.Resume) |
+        (State.Initial, Event.Stop) |
+        (State.Running, Event.Start) |
+        (State.Running, Event.Resume) |
+        (State.Paused, Event.Start) |
+        (State.Paused, Event.Pause) => {
+            unreachable("Invalid state transition: {:?} + {:?}", state, event)
+        }
+    }
+}
+
+/// Unreachable after type narrowing
+fn process_value(value: Value) {
+    if let Value.Int(n) = value {
+        // Within this block, value is known to be Value.Int
+        println(format("Integer: {}", n));
+        return;
+    }
+
+    if let Value.Float(f) = value {
+        println(format("Float: {}", f));
+        return;
+    }
+
+    if let Value.Text(s) = value {
+        println(format("Text: {}", s));
+        return;
+    }
+
+    // If Value only has these three variants, this is unreachable
+    unreachable("Unknown value variant")
+}
+
+type Value is
+    | Int(Int)
+    | Float(Float)
+    | Text(Text);
+
+/// Documentation purpose
+fn document_impossible_case(code: Int) -> Text {
+    match code {
+        0..=99 => "Info",
+        100..=199 => "Success",
+        200..=299 => "Redirect",
+        300..=399 => "Client Error",
+        400..=499 => "Server Error",
+        500..=599 => "Extended",
+        _ => {
+            // Code should be validated before this function
+            unreachable(
+                "HTTP status code {} is outside valid range 0-599. This indicates a bug in the caller - status codes should be validated before calling this function.",
+                code
+            )
+        }
+    }
+}
+
+/// Unreachable in match with guards
+fn complex_match(x: Int, y: Int) -> Text {
+    match (x, y) {
+        (a, b) if a > 0 && b > 0 => "both positive",
+        (a, b) if a < 0 && b < 0 => "both negative",
+        (a, b) if a == 0 || b == 0 => "at least one zero",
+        (a, b) if (a > 0) != (b > 0) => "mixed signs",
+        _ => unreachable("All integer pair cases should be covered")
+    }
+}
+
+fn main() {
+    // Demonstrate unreachable being triggered
+    let status_code = 999;
+    let _ = document_impossible_case(status_code);
+    // PANICS: "Unreachable code reached: HTTP status code 999..."
+}

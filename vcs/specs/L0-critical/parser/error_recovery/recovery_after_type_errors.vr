@@ -1,0 +1,55 @@
+// @test: parse-recover
+// @tier: 0
+// @level: L0
+// @tags: parser, error-recovery, types, generics
+// @description: Tests parser recovery from malformed type annotations and generic syntax.
+
+// Test 1: Invalid generic parameter list
+fn bad_generic_1<>() -> Int {
+    42
+}
+
+// Test 2: Unclosed generic
+fn bad_generic_2<T(x: T) -> T {
+    x
+}
+
+// Valid function after generic errors
+fn good_generic<T>(x: T) -> T {
+    x
+}
+
+// Test 3: Invalid where clause
+fn bad_where<T>() -> T where {
+    panic("not implemented")
+}
+
+// Test 4: Type with trailing garbage
+type Point is { x: Int, y: Int } extra stuff;
+
+// Test 5: Protocol with invalid method
+type BadProtocol is protocol {
+    fn;
+    fn valid_method(self) -> Int;
+};
+
+// Test 6: Variant with bad payload
+type BadVariant is
+    | Good(Int)
+    | Bad(,)
+    | AlsoGood(Text);
+
+// Test 7: Invalid tuple type
+fn bad_tuple() -> (Int,, Float) {
+    (1, 2.0)
+}
+
+// Test 8: Nested invalid generics
+type BadNested is List<Map<Int,>>;
+
+// Valid code after all errors
+type ValidResult<T, E> is Ok(T) | Err(E);
+
+fn use_result() -> ValidResult<Int, Text> {
+    Ok(42)
+}

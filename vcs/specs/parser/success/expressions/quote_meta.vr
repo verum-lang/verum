@@ -1,0 +1,264 @@
+// @test: parse-pass
+// @tier: 0
+// @category: expressions
+// @level: L0
+// @tags: parser, expressions, quote, meta, staged-metaprogramming
+// @description: Comprehensive tests for quote and meta expressions
+
+// ============================================================================
+// Basic Quote Expressions
+// Grammar: 'quote' , [ quote_stage ] , '{' , token_tree , '}'
+// ============================================================================
+
+meta fn basic_quote() -> TokenStream {
+    quote { let x = 42; }
+}
+
+meta fn quote_with_identifier() -> TokenStream {
+    quote {
+        fn hello() {
+            print("Hello, World!");
+        }
+    }
+}
+
+// ============================================================================
+// Quote with Stage Specification
+// Grammar: quote_stage = '(' , stage_level , ')'
+// ============================================================================
+
+meta fn quote_stage_0() -> TokenStream {
+    quote(0) { let runtime_code = true; }
+}
+
+meta fn quote_stage_1() -> TokenStream {
+    quote(1) {
+        meta fn generated_meta() {
+            quote { inner() }
+        }
+    }
+}
+
+meta(2) fn quote_from_stage_2() -> TokenStream {
+    quote(1) {
+        meta fn stage_1_code() -> TokenStream {
+            quote(0) { runtime() }
+        }
+    }
+}
+
+// ============================================================================
+// Quote Interpolation
+// Grammar: quote_interpolation = '$' , ( identifier | '{' , expression , '}' )
+// ============================================================================
+
+meta fn interpolate_ident(name: Ident) -> TokenStream {
+    quote {
+        let $name = 42;
+    }
+}
+
+meta fn interpolate_expr(value: Expr) -> TokenStream {
+    quote {
+        let result = ${value};
+    }
+}
+
+meta fn interpolate_complex() -> TokenStream {
+    let field_name = ident("value");
+    let field_type = quote { Int };
+    let default = 0;
+
+    quote {
+        type Generated is {
+            $field_name: ${field_type} = ${default},
+        };
+    }
+}
+
+// ============================================================================
+// Quote Repetition
+// Grammar: '$' , '[' , 'for' , pattern , 'in' , expression , '{' , token_tree , '}' , ']'
+// ============================================================================
+
+meta fn quote_repetition(fields: List<Field>) -> TokenStream {
+    quote {
+        type Record is {
+            $[for field in fields {
+                $field.name: $field.ty,
+            }]
+        };
+    }
+}
+
+meta fn generate_match_arms(variants: List<Variant>) -> TokenStream {
+    quote {
+        match self {
+            $[for v in variants {
+                Self.$v.name => stringify($v.name),
+            }]
+        }
+    }
+}
+
+// ============================================================================
+// Quote Stage Escape
+// Grammar: '$' , '(' , 'stage' , stage_level , ')' , '{' , expression , '}'
+// ============================================================================
+
+meta(2) fn stage_escape_example() -> TokenStream {
+    let computed = compute_at_stage_2();
+    quote(1) {
+        // Use value computed at stage 2 in stage 1 code
+        let value = $(stage 2){ computed };
+    }
+}
+
+// ============================================================================
+// Lift Operator
+// Grammar: 'lift' , '(' , expression , ')'
+// ============================================================================
+
+meta fn lift_example(n: Int) -> TokenStream {
+    quote {
+        let array_size = lift(n);
+        let arr: [Int; lift(n * 2)] = [0; lift(n * 2)];
+    }
+}
+
+// ============================================================================
+// Meta Expressions
+// Grammar: 'meta' , block_expr
+// ============================================================================
+
+fn uses_meta_block() {
+    let compile_time_value = meta {
+        let x = 1 + 2;
+        x * 10
+    };
+}
+
+fn meta_type_computation() {
+    // Note: Type aliases require type expressions on RHS, not meta blocks.
+    // For conditional type selection, use cfg attributes on type declarations:
+    @cfg(feature_enabled)
+    type ComputedType = Int;
+
+    @cfg(not(feature_enabled))
+    type ComputedType = Float;
+
+    // Or use a meta function to select at compile-time
+    let computed_value = meta {
+        if cfg.feature_enabled {
+            42
+        } else {
+            3.14
+        }
+    };
+}
+
+// ============================================================================
+// Meta Call
+// Grammar: '@' , path , meta_call_args
+// ============================================================================
+
+fn meta_call_examples() {
+    @derive(Debug, Clone)
+    type Point is { x: Float, y: Float };
+
+    let query = @sql_query("SELECT * FROM users WHERE id = ?", user_id);
+
+    @assert(1 + 1 == 2)
+
+    @cfg(debug)
+    fn debug_only() {
+        print("Debug mode");
+    }
+}
+
+// ============================================================================
+// Complex Meta Examples
+// ============================================================================
+
+meta fn derive_builder(ty: TypeDef) -> TokenStream {
+    let type_name = ty.name;
+    let builder_name = ident(f"{type_name}Builder");
+
+    quote {
+        type $builder_name is {
+            $[for field in ty.fields {
+                $field.name: Maybe<$field.ty>,
+            }]
+        };
+
+        implement $builder_name {
+            fn new() -> Self {
+                Self {
+                    $[for field in ty.fields {
+                        $field.name: None,
+                    }]
+                }
+            }
+
+            $[for field in ty.fields {
+                fn $field.name(mut self, value: $field.ty) -> Self {
+                    self.$field.name = Some(value);
+                    self
+                }
+            }]
+
+            fn build(self) -> $type_name {
+                $type_name {
+                    $[for field in ty.fields {
+                        $field.name: self.$field.name.unwrap(),
+                    }]
+                }
+            }
+        }
+    }
+}
+
+meta fn conditional_code(flag: Bool) -> TokenStream {
+    if flag {
+        quote { fn enabled() { /* feature enabled */ } }
+    } else {
+        quote { fn disabled() { /* feature disabled */ } }
+    }
+}
+
+// ============================================================================
+// Staged Metaprogramming
+// ============================================================================
+
+meta fn stage_1_function() -> TokenStream {
+    quote {
+        fn runtime_function() {
+            let x = 42;
+            x + 1
+        }
+    }
+}
+
+meta(2) fn stage_2_function() -> TokenStream {
+    quote(1) {
+        meta fn generated_stage_1() -> TokenStream {
+            quote(0) {
+                fn deeply_generated() {
+                    print("Generated from stage 2");
+                }
+            }
+        }
+    }
+}
+
+meta(3) fn stage_3_function() -> TokenStream {
+    quote(2) {
+        meta(2) fn stage_2_generated() -> TokenStream {
+            quote(1) {
+                meta fn stage_1_generated() -> TokenStream {
+                    quote { fn runtime() { } }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,547 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, control_flow, tier-oracle
+// @timeout: 10000
+
+/// Comprehensive control flow tests for Tier 0 vs Tier 3 equivalence.
+/// Tests all control flow constructs to ensure identical behavior
+/// between the interpreter and AOT-compiled code.
+
+fn main() {
+    test_if_else();
+    test_if_else_chains();
+    test_if_expressions();
+    test_match_basic();
+    test_match_patterns();
+    test_match_guards();
+    test_while_loops();
+    test_for_loops();
+    test_loop_construct();
+    test_break_continue();
+    test_labeled_loops();
+    test_short_circuit();
+    test_nested_control_flow();
+}
+
+/// Basic if-else branching
+fn test_if_else() {
+    println("=== If-Else Basics ===");
+
+    // Simple if
+    let x = 10;
+    if x > 5 {
+        println("x > 5: true");
+    }
+
+    // If-else
+    if x > 15 {
+        println("x > 15: true");
+    } else {
+        println("x > 15: false");
+    }
+
+    // Nested if
+    if x > 0 {
+        if x > 5 {
+            println("x > 0 and x > 5");
+        } else {
+            println("x > 0 but x <= 5");
+        }
+    }
+
+    // With boolean literals
+    if true {
+        println("true branch");
+    }
+
+    if false {
+        println("this should not print");
+    } else {
+        println("false else branch");
+    }
+}
+
+/// If-else-if chains
+fn test_if_else_chains() {
+    println("\n=== If-Else Chains ===");
+
+    for score in [95, 85, 75, 65, 55] {
+        let grade = if score >= 90 {
+            "A"
+        } else if score >= 80 {
+            "B"
+        } else if score >= 70 {
+            "C"
+        } else if score >= 60 {
+            "D"
+        } else {
+            "F"
+        };
+        println(f"score {score} = {grade}");
+    }
+
+    // Multiple conditions
+    let age = 25;
+    let has_license = true;
+
+    if age >= 18 && has_license {
+        println("can drive: yes");
+    } else if age >= 18 {
+        println("can drive: needs license");
+    } else {
+        println("can drive: too young");
+    }
+}
+
+/// If as expression
+fn test_if_expressions() {
+    println("\n=== If Expressions ===");
+
+    let x = 10;
+
+    // Basic if expression
+    let result1 = if x > 5 { "greater" } else { "not greater" };
+    println(f"if expr 1: {result1}");
+
+    // If expression with blocks
+    let result2 = if x > 0 {
+        let doubled = x * 2;
+        doubled + 1
+    } else {
+        0
+    };
+    println(f"if expr 2: {result2}");
+
+    // Nested if expression
+    let result3 = if x > 0 {
+        if x > 5 {
+            "positive and > 5"
+        } else {
+            "positive and <= 5"
+        }
+    } else {
+        "non-positive"
+    };
+    println(f"if expr 3: {result3}");
+
+    // If expression in function call
+    println(f"inline: {if x % 2 == 0 { "even" } else { "odd" }}");
+}
+
+/// Basic match expressions
+fn test_match_basic() {
+    println("\n=== Match Basics ===");
+
+    // Match on integers
+    for day in 1..=8 {
+        match day {
+            1 => println(f"day {day}: Monday"),
+            2 => println(f"day {day}: Tuesday"),
+            3 => println(f"day {day}: Wednesday"),
+            4 => println(f"day {day}: Thursday"),
+            5 => println(f"day {day}: Friday"),
+            6 | 7 => println(f"day {day}: Weekend"),
+            _ => println(f"day {day}: Invalid"),
+        }
+    }
+
+    // Match as expression
+    let value = 42;
+    let category = match value {
+        0 => "zero",
+        1..=9 => "single digit",
+        10..=99 => "double digit",
+        100..=999 => "triple digit",
+        _ => "large",
+    };
+    println(f"category of {value}: {category}");
+
+    // Match on boolean
+    let flag = true;
+    match flag {
+        true => println("flag is true"),
+        false => println("flag is false"),
+    }
+}
+
+/// Pattern matching in match
+fn test_match_patterns() {
+    println("\n=== Match Patterns ===");
+
+    // Tuple patterns
+    let point = (3, 4);
+    match point {
+        (0, 0) => println("origin"),
+        (x, 0) => println(f"on x-axis at {x}"),
+        (0, y) => println(f"on y-axis at {y}"),
+        (x, y) => println(f"point at ({x}, {y})"),
+    }
+
+    // Struct patterns
+    type Point is { x: Int, y: Int };
+    let p = Point { x: 5, y: 10 };
+    match p {
+        Point { x: 0, y: 0 } => println("struct origin"),
+        Point { x, y: 0 } => println(f"struct on x-axis at {x}"),
+        Point { x: 0, y } => println(f"struct on y-axis at {y}"),
+        Point { x, y } => println(f"struct at ({x}, {y})"),
+    }
+
+    // Enum patterns
+    type Color is Red | Green | Blue | Rgb(Int, Int, Int);
+
+    let colors = [Color.Red, Color.Green, Color.Rgb(255, 128, 0)];
+    for color in colors {
+        match color {
+            Color.Red => println("color: red"),
+            Color.Green => println("color: green"),
+            Color.Blue => println("color: blue"),
+            Color.Rgb(r, g, b) => println(f"color: rgb({r}, {g}, {b})"),
+        }
+    }
+
+    // Nested patterns
+    let nested = ((1, 2), (3, 4));
+    match nested {
+        ((a, b), (c, d)) => println(f"nested: {a}, {b}, {c}, {d}"),
+    }
+
+    // Rest patterns
+    let list = [1, 2, 3, 4, 5];
+    match list {
+        [] => println("empty"),
+        [single] => println(f"single: {single}"),
+        [first, ..rest] => println(f"first: {first}, rest len: {rest.len()}"),
+    }
+}
+
+/// Match with guards
+fn test_match_guards() {
+    println("\n=== Match Guards ===");
+
+    for n in [-5, 0, 5, 10, 15, 100] {
+        match n {
+            x if x < 0 => println(f"{n}: negative"),
+            0 => println(f"{n}: zero"),
+            x if x % 2 == 0 => println(f"{n}: positive even"),
+            x if x < 10 => println(f"{n}: positive odd < 10"),
+            x if x < 50 => println(f"{n}: positive odd < 50"),
+            _ => println(f"{n}: large positive odd"),
+        }
+    }
+
+    // Complex guards
+    type Person is { name: Text, age: Int };
+    let people = [
+        Person { name: "Alice", age: 25 },
+        Person { name: "Bob", age: 17 },
+        Person { name: "Charlie", age: 65 },
+    ];
+
+    for person in people {
+        match person {
+            Person { age, .. } if age < 18 => println(f"{person.name}: minor"),
+            Person { age, .. } if age >= 65 => println(f"{person.name}: senior"),
+            Person { name, age } => println(f"{name}: adult ({age})"),
+        }
+    }
+}
+
+/// While loops
+fn test_while_loops() {
+    println("\n=== While Loops ===");
+
+    // Basic while
+    let mut i = 0;
+    while i < 5 {
+        println(f"while: {i}");
+        i = i + 1;
+    }
+
+    // While with complex condition
+    let mut x = 100;
+    let mut count = 0;
+    while x > 1 && count < 10 {
+        x = x / 2;
+        count = count + 1;
+        println(f"halving: x={x}, count={count}");
+    }
+
+    // Nested while
+    let mut a = 0;
+    while a < 3 {
+        let mut b = 0;
+        while b < 3 {
+            println(f"nested while: ({a}, {b})");
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+
+    // While let
+    let mut items = [1, 2, 3, 4, 5];
+    while let Some(item) = items.pop() {
+        println(f"while let: {item}");
+    }
+}
+
+/// For loops
+fn test_for_loops() {
+    println("\n=== For Loops ===");
+
+    // Range (exclusive)
+    for i in 0..5 {
+        println(f"range: {i}");
+    }
+
+    // Range (inclusive)
+    for i in 0..=3 {
+        println(f"inclusive: {i}");
+    }
+
+    // Reverse range
+    for i in (0..5).rev() {
+        println(f"reverse: {i}");
+    }
+
+    // Step range
+    for i in (0..10).step_by(2) {
+        println(f"step: {i}");
+    }
+
+    // Iterate over collection
+    let items = ["apple", "banana", "cherry"];
+    for item in items {
+        println(f"item: {item}");
+    }
+
+    // Enumerate
+    for (idx, item) in items.enumerate() {
+        println(f"enumerate: {idx} -> {item}");
+    }
+
+    // Nested for
+    for i in 0..3 {
+        for j in 0..3 {
+            println(f"nested for: ({i}, {j})");
+        }
+    }
+
+    // For over map
+    let scores = {"alice": 95, "bob": 87, "charlie": 92};
+    for (name, score) in scores {
+        println(f"score: {name} = {score}");
+    }
+}
+
+/// Loop construct (infinite loop with break)
+fn test_loop_construct() {
+    println("\n=== Loop Construct ===");
+
+    // Basic loop with break
+    let mut count = 0;
+    loop {
+        count = count + 1;
+        if count > 5 {
+            break;
+        }
+        println(f"loop: {count}");
+    }
+
+    // Loop as expression
+    let mut n = 0;
+    let result = loop {
+        n = n + 1;
+        if n * n > 100 {
+            break n;
+        }
+    };
+    println(f"loop result: {result}");
+
+    // Nested loop with labeled break
+    let mut found = false;
+    'outer: loop {
+        let mut inner = 0;
+        loop {
+            inner = inner + 1;
+            if inner > 3 {
+                break 'outer;
+            }
+            println(f"nested loop: {inner}");
+        }
+    }
+}
+
+/// Break and continue
+fn test_break_continue() {
+    println("\n=== Break/Continue ===");
+
+    // Break from for
+    for i in 0..10 {
+        if i == 5 {
+            println("breaking at 5");
+            break;
+        }
+        println(f"before break: {i}");
+    }
+
+    // Continue in for
+    for i in 0..10 {
+        if i % 2 == 0 {
+            continue;
+        }
+        println(f"odd: {i}");
+    }
+
+    // Break with value in while
+    let mut n = 0;
+    let found = loop {
+        n = n + 1;
+        if n == 7 {
+            break n * 10;
+        }
+    };
+    println(f"found: {found}");
+
+    // Nested break/continue
+    for i in 0..3 {
+        for j in 0..5 {
+            if j == 3 {
+                continue;
+            }
+            if j == 4 {
+                break;
+            }
+            println(f"nested: ({i}, {j})");
+        }
+    }
+}
+
+/// Labeled loops for nested control flow
+fn test_labeled_loops() {
+    println("\n=== Labeled Loops ===");
+
+    // Labeled break
+    'outer: for i in 0..5 {
+        for j in 0..5 {
+            if i * j > 6 {
+                println(f"breaking outer at ({i}, {j})");
+                break 'outer;
+            }
+            println(f"labeled: ({i}, {j})");
+        }
+    }
+
+    // Labeled continue
+    'row: for i in 0..3 {
+        for j in 0..5 {
+            if j == 2 {
+                println(f"continuing row at ({i}, {j})");
+                continue 'row;
+            }
+            println(f"continue: ({i}, {j})");
+        }
+    }
+
+    // Deeply nested labeled break
+    'level1: for a in 0..3 {
+        'level2: for b in 0..3 {
+            for c in 0..3 {
+                if a == 1 && b == 1 && c == 1 {
+                    println("breaking level2");
+                    break 'level2;
+                }
+                if a == 2 && b == 0 && c == 0 {
+                    println("breaking level1");
+                    break 'level1;
+                }
+            }
+        }
+    }
+}
+
+/// Short-circuit evaluation
+fn test_short_circuit() {
+    println("\n=== Short-Circuit Evaluation ===");
+
+    fn side_effect(label: Text, value: Bool) -> Bool {
+        println(f"evaluating: {label}");
+        value
+    }
+
+    // AND short-circuit
+    println("AND true && true:");
+    let _ = side_effect("first", true) && side_effect("second", true);
+
+    println("AND false && true:");
+    let _ = side_effect("first", false) && side_effect("second", true);
+
+    // OR short-circuit
+    println("OR false || true:");
+    let _ = side_effect("first", false) || side_effect("second", true);
+
+    println("OR true || true:");
+    let _ = side_effect("first", true) || side_effect("second", true);
+
+    // Complex short-circuit
+    println("Complex: false && (true || true):");
+    let _ = side_effect("a", false) && (side_effect("b", true) || side_effect("c", true));
+
+    println("Complex: true || (true && true):");
+    let _ = side_effect("a", true) || (side_effect("b", true) && side_effect("c", true));
+}
+
+/// Complex nested control flow
+fn test_nested_control_flow() {
+    println("\n=== Nested Control Flow ===");
+
+    // Match inside loop
+    for i in 0..5 {
+        match i {
+            0 => println("start"),
+            x if x % 2 == 0 => println(f"even: {x}"),
+            _ => println(f"odd: {i}"),
+        }
+    }
+
+    // Loop inside match
+    let mode = "count";
+    match mode {
+        "count" => {
+            for i in 1..=3 {
+                println(f"counting: {i}");
+            }
+        },
+        "reverse" => {
+            for i in (1..=3).rev() {
+                println(f"reverse: {i}");
+            }
+        },
+        _ => println("unknown mode"),
+    }
+
+    // If inside for inside while
+    let mut round = 0;
+    while round < 2 {
+        for i in 0..3 {
+            if i % 2 == 0 {
+                println(f"round {round}, even {i}");
+            } else {
+                println(f"round {round}, odd {i}");
+            }
+        }
+        round = round + 1;
+    }
+
+    // Complex expression with control flow
+    let result = (0..10)
+        .filter(|x| x % 2 == 0)
+        .map(|x| match x {
+            0 => 0,
+            2 => 10,
+            _ => x * 2,
+        })
+        .sum();
+    println(f"complex result: {result}");
+}

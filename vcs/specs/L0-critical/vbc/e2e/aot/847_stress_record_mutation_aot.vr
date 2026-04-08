@@ -1,0 +1,287 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, state-machine
+// @timeout: 60000
+// @expected-exit: 0
+
+// State machine simulation: complex FSM with 10+ states, guard conditions, output actions
+
+// States for a vending machine FSM
+// 0=Idle, 1=Coins5, 2=Coins10, 3=Coins15, 4=Coins20, 5=Coins25,
+// 6=Dispensing, 7=MakingChange, 8=OutOfStock, 9=Maintenance, 10=Error
+
+// Events: 0=Insert5, 1=Insert10, 2=Insert25, 3=SelectItem, 4=Cancel,
+//         5=ItemDispensed, 6=ChangeGiven, 7=Restock, 8=EnterMaint, 9=ExitMaint
+
+type FsmState is { state: Int, coins: Int, items: Int, output: Int };
+
+fn fsm_init(num_items: Int) -> FsmState {
+    FsmState { state: 0, coins: 0, items: num_items, output: 0 }
+}
+
+fn fsm_step(fs: FsmState, event: Int) -> FsmState {
+    let st = fs.state;
+    let coins = fs.coins;
+    let items = fs.items;
+
+    // Maintenance mode
+    if (st == 9) {
+        if (event == 9) {
+            return FsmState { state: 0, coins: 0, items: items, output: 90 }; // exit maintenance
+        }
+        return FsmState { state: 9, coins: coins, items: items, output: 0 };
+    }
+
+    // Error state: only reset via maintenance
+    if (st == 10) {
+        if (event == 8) {
+            return FsmState { state: 9, coins: 0, items: items, output: 80 };
+        }
+        return FsmState { state: 10, coins: coins, items: items, output: 0 };
+    }
+
+    // Out of stock
+    if (st == 8) {
+        if (event == 7) {
+            return FsmState { state: 0, coins: 0, items: 10, output: 70 }; // restocked
+        }
+        if (event == 4) {
+            return FsmState { state: 0, coins: 0, items: items, output: coins }; // refund
+        }
+        return FsmState { state: 8, coins: coins, items: items, output: 0 };
+    }
+
+    // Dispensing
+    if (st == 6) {
+        if (event == 5) {
+            let change = coins - 25;
+            if (change > 0) {
+                return FsmState { state: 7, coins: change, items: items - 1, output: 60 };
+            }
+            return FsmState { state: 0, coins: 0, items: items - 1, output: 60 };
+        }
+        return FsmState { state: 6, coins: coins, items: items, output: 0 };
+    }
+
+    // Making change
+    if (st == 7) {
+        if (event == 6) {
+            return FsmState { state: 0, coins: 0, items: items, output: coins }; // change amount
+        }
+        return FsmState { state: 7, coins: coins, items: items, output: 0 };
+    }
+
+    // Enter maintenance from idle
+    if (event == 8) {
+        return FsmState { state: 9, coins: 0, items: items, output: 80 };
+    }
+
+    // Cancel: refund coins
+    if (event == 4) {
+        return FsmState { state: 0, coins: 0, items: items, output: coins };
+    }
+
+    // Insert coins
+    if (event == 0) {
+        return FsmState { state: st, coins: coins + 5, items: items, output: 5 };
+    }
+    if (event == 1) {
+        return FsmState { state: st, coins: coins + 10, items: items, output: 10 };
+    }
+    if (event == 2) {
+        return FsmState { state: st, coins: coins + 25, items: items, output: 25 };
+    }
+
+    // Select item
+    if (event == 3) {
+        if (items <= 0) {
+            return FsmState { state: 8, coins: coins, items: 0, output: -1 }; // out of stock
+        }
+        if (coins >= 25) {
+            return FsmState { state: 6, coins: coins, items: items, output: 30 }; // dispensing
+        }
+        return FsmState { state: st, coins: coins, items: items, output: -2 }; // insufficient
+    }
+
+    FsmState { state: st, coins: coins, items: items, output: 0 }
+}
+
+// Simple traffic light with pedestrian button
+// 0=RedNS_GreenEW, 1=RedNS_YellowEW, 2=GreenNS_RedEW, 3=YellowNS_RedEW, 4=AllRed (pedestrian)
+fn traffic_step(state: Int, ped_button: Int) -> Int {
+    if (state == 0) {
+        if (ped_button == 1) { return 4; }
+        return 1;
+    }
+    if (state == 1) { return 2; }
+    if (state == 2) {
+        if (ped_button == 1) { return 4; }
+        return 3;
+    }
+    if (state == 3) { return 0; }
+    if (state == 4) { return 0; }  // all-red -> back to cycle
+    0
+}
+
+fn traffic_is_safe_ns(state: Int) -> Int {
+    if (state == 2) { return 1; }
+    if (state == 4) { return 1; }
+    0
+}
+
+fn traffic_is_safe_ew(state: Int) -> Int {
+    if (state == 0) { return 1; }
+    if (state == 4) { return 1; }
+    0
+}
+
+// Regex-like state machine for pattern a*b+c?
+// 0=Start, 1=ReadingA, 2=ReadingB, 3=ReadC, 4=Accept, 5=Reject
+// Input: 0=a, 1=b, 2=c, 3=end
+fn regex_step(state: Int, input: Int) -> Int {
+    if (state == 0) {
+        if (input == 0) { return 1; }  // 'a' -> ReadingA
+        if (input == 1) { return 2; }  // 'b' -> ReadingB
+        return 5;                       // reject
+    }
+    if (state == 1) {
+        if (input == 0) { return 1; }  // more 'a's
+        if (input == 1) { return 2; }  // 'b' -> ReadingB
+        return 5;
+    }
+    if (state == 2) {
+        if (input == 1) { return 2; }  // more 'b's
+        if (input == 2) { return 3; }  // 'c' -> ReadC
+        if (input == 3) { return 4; }  // end -> accept
+        return 5;
+    }
+    if (state == 3) {
+        if (input == 3) { return 4; }  // end -> accept
+        return 5;
+    }
+    state  // accept or reject stays
+}
+
+fn regex_accepts(state: Int) -> Int {
+    if (state == 4) { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    // Vending machine: normal purchase
+    let mut vm = fsm_init(5);
+    assert_eq(vm.state, 0);
+    assert_eq(vm.coins, 0);
+    assert_eq(vm.items, 5);
+
+    // Insert 10 + 10 + 5 = 25 cents
+    vm = fsm_step(vm, 1);  assert_eq(vm.coins, 10);
+    vm = fsm_step(vm, 1);  assert_eq(vm.coins, 20);
+    vm = fsm_step(vm, 0);  assert_eq(vm.coins, 25);
+
+    // Select item -> dispensing
+    vm = fsm_step(vm, 3);
+    assert_eq(vm.state, 6);
+    assert_eq(vm.output, 30);
+
+    // Item dispensed, no change needed
+    vm = fsm_step(vm, 5);
+    assert_eq(vm.state, 0);
+    assert_eq(vm.items, 4);
+
+    // Purchase with overpayment
+    vm = fsm_step(vm, 2);  // 25 cents
+    vm = fsm_step(vm, 0);  // +5 = 30
+    assert_eq(vm.coins, 30);
+    vm = fsm_step(vm, 3);  // select -> dispensing
+    assert_eq(vm.state, 6);
+    vm = fsm_step(vm, 5);  // dispensed -> making change (5 cents)
+    assert_eq(vm.state, 7);
+    assert_eq(vm.coins, 5);
+    vm = fsm_step(vm, 6);  // change given
+    assert_eq(vm.state, 0);
+    assert_eq(vm.items, 3);
+
+    // Cancel and get refund
+    vm = fsm_step(vm, 1);  // insert 10
+    vm = fsm_step(vm, 0);  // insert 5 => 15
+    assert_eq(vm.coins, 15);
+    vm = fsm_step(vm, 4);  // cancel
+    assert_eq(vm.state, 0);
+    assert_eq(vm.output, 15);
+    assert_eq(vm.coins, 0);
+
+    // Insufficient funds
+    vm = fsm_step(vm, 0);  // 5
+    vm = fsm_step(vm, 3);  // select with only 5 cents
+    assert_eq(vm.output, -2);
+    assert_eq(vm.state, 0); // stays idle
+    vm = fsm_step(vm, 4);   // cancel to reset
+
+    // Maintenance mode
+    vm = fsm_step(vm, 8);  // enter maintenance
+    assert_eq(vm.state, 9);
+    vm = fsm_step(vm, 0);  // coin insert ignored in maintenance
+    assert_eq(vm.state, 9);
+    vm = fsm_step(vm, 9);  // exit maintenance
+    assert_eq(vm.state, 0);
+
+    // Traffic light
+    let mut tl = 0;
+    let mut ns_safe = 0;
+    let mut ew_safe = 0;
+    let mut steps = 0;
+    while (steps < 20) {
+        ns_safe = ns_safe + traffic_is_safe_ns(tl);
+        ew_safe = ew_safe + traffic_is_safe_ew(tl);
+        tl = traffic_step(tl, 0);
+        steps = steps + 1;
+    }
+    assert(ns_safe > 0);
+    assert(ew_safe > 0);
+
+    // Traffic with pedestrian button
+    let mut tl2 = 0;
+    tl2 = traffic_step(tl2, 1);  // press button at state 0 -> allred
+    assert_eq(tl2, 4);
+    tl2 = traffic_step(tl2, 0);  // allred -> back to 0
+    assert_eq(tl2, 0);
+
+    // Regex: a*b+c?
+    // "ab" -> accept
+    let mut rs = 0;
+    rs = regex_step(rs, 0); // a -> ReadingA
+    rs = regex_step(rs, 1); // b -> ReadingB
+    rs = regex_step(rs, 3); // end -> Accept
+    assert_eq(regex_accepts(rs), 1);
+
+    // "aaabbc" -> accept
+    let mut rs2 = 0;
+    rs2 = regex_step(rs2, 0); rs2 = regex_step(rs2, 0); rs2 = regex_step(rs2, 0);
+    rs2 = regex_step(rs2, 1); rs2 = regex_step(rs2, 1);
+    rs2 = regex_step(rs2, 2); rs2 = regex_step(rs2, 3);
+    assert_eq(regex_accepts(rs2), 1);
+
+    // "b" -> accept
+    let mut rs3 = 0;
+    rs3 = regex_step(rs3, 1); rs3 = regex_step(rs3, 3);
+    assert_eq(regex_accepts(rs3), 1);
+
+    // "a" alone -> reject (no b)
+    let mut rs4 = 0;
+    rs4 = regex_step(rs4, 0); rs4 = regex_step(rs4, 3);
+    assert_eq(regex_accepts(rs4), 0);
+
+    // "c" alone -> reject
+    let mut rs5 = 0;
+    rs5 = regex_step(rs5, 2);
+    assert_eq(regex_accepts(rs5), 0);
+
+    // "bcc" -> reject (two c's)
+    let mut rs6 = 0;
+    rs6 = regex_step(rs6, 1); rs6 = regex_step(rs6, 2); rs6 = regex_step(rs6, 2);
+    assert_eq(regex_accepts(rs6), 0);
+
+    print("847_stress_state_machine: PASS");
+    0
+}

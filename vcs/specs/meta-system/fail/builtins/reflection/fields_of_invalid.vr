@@ -1,0 +1,67 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, reflection, fields_of, error
+// @description: Test fields_of error handling for non-record types
+// @expected-error: M003
+
+// =============================================================================
+// TYPE DEFINITIONS (top-level)
+// =============================================================================
+
+type Color is Red | Green | Blue;
+
+type Point is { x: Int, y: Int };
+
+type Record is protocol {
+    // Marker protocol for types with fields
+};
+
+// =============================================================================
+// FIELDS_OF ON NON-RECORD TYPES
+// =============================================================================
+
+// ERROR: fields_of on variant type (not a record/struct)
+meta fn test_fields_of_variant() -> List<(Text, Type)> using [MetaTypes] {
+    fields_of(Color)  // ERROR: Color is a variant, not a record
+}
+
+// =============================================================================
+// FIELDS_OF ON PRIMITIVES
+// =============================================================================
+
+// ERROR: fields_of on Int
+meta fn test_fields_of_int() -> List<(Text, Type)> using [MetaTypes] {
+    fields_of(Int)  // ERROR: Int has no fields
+}
+
+// =============================================================================
+// FIELDS_OF ON ARRAY TYPES
+// =============================================================================
+
+// ERROR: fields_of on array
+meta fn test_fields_of_array() -> List<(Text, Type)> using [MetaTypes] {
+    fields_of([Int; 5])  // ERROR: arrays have no named fields
+}
+
+// =============================================================================
+// ARITY ERRORS
+// =============================================================================
+
+// ERROR: fields_of with no arguments
+meta fn test_fields_of_no_args() -> List<(Text, Type)> using [MetaTypes] {
+    fields_of()  // ERROR: expected 1 argument
+}
+
+// =============================================================================
+// TYPE ERROR ON ARGUMENT
+// =============================================================================
+
+// ERROR: fields_of with non-type argument
+meta fn test_fields_of_non_type() -> List<(Text, Type)> using [MetaTypes] {
+    fields_of(42)  // ERROR: expected type, got Int
+}
+
+fn main() {
+    @const test_fields_of_variant();
+}

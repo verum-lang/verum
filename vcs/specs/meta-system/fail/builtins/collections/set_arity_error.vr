@@ -1,0 +1,15 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, set, errors, arity
+// @expected-error: Expected 0 arguments
+// @description: Test set_new with arguments produces arity error
+
+// set_new should take no arguments
+meta fn test_set_new_arity_error() {
+    set_new("element")  // ERROR: Expected 0 arguments, got 1
+}
+
+fn main() {
+    let _ = @const(test_set_new_arity_error());
+}

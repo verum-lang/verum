@@ -1,0 +1,304 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, parser, combinator, expression
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT parser for arithmetic expressions using iterative token processing
+
+// Token types encoded as ints: 0=num, 1=plus, 2=minus, 3=star, 4=end
+// Token stream is a flat record with up to 16 tokens
+type Tok is { kind: Int, val: Int };
+type TokStream is {
+    t0: Tok, t1: Tok, t2: Tok, t3: Tok,
+    t4: Tok, t5: Tok, t6: Tok, t7: Tok,
+    t8: Tok, t9: Tok, t10: Tok, t11: Tok,
+    t12: Tok, t13: Tok, t14: Tok, t15: Tok,
+    len: Int
+};
+
+fn tok_num(v: Int) -> Tok { Tok { kind: 0, val: v } }
+fn tok_plus() -> Tok { Tok { kind: 1, val: 0 } }
+fn tok_minus() -> Tok { Tok { kind: 2, val: 0 } }
+fn tok_star() -> Tok { Tok { kind: 3, val: 0 } }
+fn tok_end() -> Tok { Tok { kind: 4, val: 0 } }
+
+fn ts_empty() -> TokStream {
+    let e = tok_end();
+    TokStream {
+        t0: e, t1: e, t2: e, t3: e, t4: e, t5: e, t6: e, t7: e,
+        t8: e, t9: e, t10: e, t11: e, t12: e, t13: e, t14: e, t15: e,
+        len: 0,
+    }
+}
+
+fn ts_get(s: TokStream, idx: Int) -> Tok {
+    if idx >= s.len { tok_end() }
+    else if idx == 0 { s.t0 }
+    else if idx == 1 { s.t1 }
+    else if idx == 2 { s.t2 }
+    else if idx == 3 { s.t3 }
+    else if idx == 4 { s.t4 }
+    else if idx == 5 { s.t5 }
+    else if idx == 6 { s.t6 }
+    else if idx == 7 { s.t7 }
+    else if idx == 8 { s.t8 }
+    else if idx == 9 { s.t9 }
+    else if idx == 10 { s.t10 }
+    else { tok_end() }
+}
+
+fn ts_set(s: TokStream, idx: Int, t: Tok) -> TokStream {
+    TokStream {
+        t0: if idx == 0 { t } else { s.t0 },
+        t1: if idx == 1 { t } else { s.t1 },
+        t2: if idx == 2 { t } else { s.t2 },
+        t3: if idx == 3 { t } else { s.t3 },
+        t4: if idx == 4 { t } else { s.t4 },
+        t5: if idx == 5 { t } else { s.t5 },
+        t6: if idx == 6 { t } else { s.t6 },
+        t7: if idx == 7 { t } else { s.t7 },
+        t8: if idx == 8 { t } else { s.t8 },
+        t9: if idx == 9 { t } else { s.t9 },
+        t10: if idx == 10 { t } else { s.t10 },
+        t11: if idx == 11 { t } else { s.t11 },
+        t12: if idx == 12 { t } else { s.t12 },
+        t13: if idx == 13 { t } else { s.t13 },
+        t14: if idx == 14 { t } else { s.t14 },
+        t15: if idx == 15 { t } else { s.t15 },
+        len: s.len,
+    }
+}
+
+fn ts_push(s: TokStream, t: Tok) -> TokStream {
+    let s2 = ts_set(s, s.len, t);
+    TokStream {
+        t0: s2.t0, t1: s2.t1, t2: s2.t2, t3: s2.t3,
+        t4: s2.t4, t5: s2.t5, t6: s2.t6, t7: s2.t7,
+        t8: s2.t8, t9: s2.t9, t10: s2.t10, t11: s2.t11,
+        t12: s2.t12, t13: s2.t13, t14: s2.t14, t15: s2.t15,
+        len: s.len + 1,
+    }
+}
+
+// Parse result: val and position, or error flag (-9999)
+type PResult is { val: Int, pos: Int };
+
+fn p_err() -> PResult { PResult { val: -9999, pos: -1 } }
+fn p_ok(v: Int, pos: Int) -> PResult { PResult { val: v, pos: pos } }
+fn is_err(r: PResult) -> Bool { r.pos < 0 }
+
+// Parse a factor (single number)
+fn parse_factor(s: TokStream, pos: Int) -> PResult {
+    let t = ts_get(s, pos);
+    if t.kind == 0 { p_ok(t.val, pos + 1) }
+    else { p_err() }
+}
+
+// Parse a term: factor (* factor)*
+fn parse_term(s: TokStream, pos: Int) -> PResult {
+    let first = parse_factor(s, pos);
+    if is_err(first) { p_err() }
+    else {
+        let mut result = first.val;
+        let mut cur = first.pos;
+        let mut done = false;
+        while !done {
+            let op = ts_get(s, cur);
+            if op.kind == 3 {
+                // star
+                let right = parse_factor(s, cur + 1);
+                if is_err(right) { done = true; }
+                else {
+                    result = result * right.val;
+                    cur = right.pos;
+                }
+            } else {
+                done = true;
+            }
+        }
+        p_ok(result, cur)
+    }
+}
+
+// Parse expression: term ((+ | -) term)*
+fn parse_expr(s: TokStream, pos: Int) -> PResult {
+    let first = parse_term(s, pos);
+    if is_err(first) { p_err() }
+    else {
+        let mut result = first.val;
+        let mut cur = first.pos;
+        let mut done = false;
+        while !done {
+            let op = ts_get(s, cur);
+            if op.kind == 1 {
+                // plus
+                let right = parse_term(s, cur + 1);
+                if is_err(right) { done = true; }
+                else {
+                    result = result + right.val;
+                    cur = right.pos;
+                }
+            } else if op.kind == 2 {
+                // minus
+                let right = parse_term(s, cur + 1);
+                if is_err(right) { done = true; }
+                else {
+                    result = result - right.val;
+                    cur = right.pos;
+                }
+            } else {
+                done = true;
+            }
+        }
+        p_ok(result, cur)
+    }
+}
+
+fn eval(s: TokStream) -> Int {
+    let r = parse_expr(s, 0);
+    if is_err(r) { -9999 } else { r.val }
+}
+
+fn eval_full(s: TokStream) -> Int {
+    let r = parse_expr(s, 0);
+    if is_err(r) { -9999 }
+    else if r.pos == s.len { r.val }
+    else { -9999 }
+}
+
+fn main() -> Int {
+    // === Single number: "5" ===
+    let s1 = ts_push(ts_empty(), tok_num(5));
+    assert_eq(eval(s1), 5);
+    assert_eq(eval_full(s1), 5);
+
+    // === "3 + 4" = 7 ===
+    let mut s2 = ts_empty();
+    s2 = ts_push(s2, tok_num(3));
+    s2 = ts_push(s2, tok_plus());
+    s2 = ts_push(s2, tok_num(4));
+    assert_eq(eval(s2), 7);
+    assert_eq(eval_full(s2), 7);
+
+    // === "10 - 3" = 7 ===
+    let mut s3 = ts_empty();
+    s3 = ts_push(s3, tok_num(10));
+    s3 = ts_push(s3, tok_minus());
+    s3 = ts_push(s3, tok_num(3));
+    assert_eq(eval(s3), 7);
+
+    // === "6 * 7" = 42 ===
+    let mut s4 = ts_empty();
+    s4 = ts_push(s4, tok_num(6));
+    s4 = ts_push(s4, tok_star());
+    s4 = ts_push(s4, tok_num(7));
+    assert_eq(eval(s4), 42);
+
+    // === Operator precedence: "3 + 4 * 2" = 11 ===
+    let mut s5 = ts_empty();
+    s5 = ts_push(s5, tok_num(3));
+    s5 = ts_push(s5, tok_plus());
+    s5 = ts_push(s5, tok_num(4));
+    s5 = ts_push(s5, tok_star());
+    s5 = ts_push(s5, tok_num(2));
+    assert_eq(eval(s5), 11);
+
+    // === "2 * 3 + 4" = 10 ===
+    let mut s6 = ts_empty();
+    s6 = ts_push(s6, tok_num(2));
+    s6 = ts_push(s6, tok_star());
+    s6 = ts_push(s6, tok_num(3));
+    s6 = ts_push(s6, tok_plus());
+    s6 = ts_push(s6, tok_num(4));
+    assert_eq(eval(s6), 10);
+
+    // === "1 + 2 + 3 + 4" = 10 ===
+    let mut s7 = ts_empty();
+    s7 = ts_push(s7, tok_num(1));
+    s7 = ts_push(s7, tok_plus());
+    s7 = ts_push(s7, tok_num(2));
+    s7 = ts_push(s7, tok_plus());
+    s7 = ts_push(s7, tok_num(3));
+    s7 = ts_push(s7, tok_plus());
+    s7 = ts_push(s7, tok_num(4));
+    assert_eq(eval(s7), 10);
+
+    // === "2 * 3 * 4" = 24 ===
+    let mut s8 = ts_empty();
+    s8 = ts_push(s8, tok_num(2));
+    s8 = ts_push(s8, tok_star());
+    s8 = ts_push(s8, tok_num(3));
+    s8 = ts_push(s8, tok_star());
+    s8 = ts_push(s8, tok_num(4));
+    assert_eq(eval(s8), 24);
+
+    // === "2 * 3 + 4 * 5" = 26 ===
+    let mut s9 = ts_empty();
+    s9 = ts_push(s9, tok_num(2));
+    s9 = ts_push(s9, tok_star());
+    s9 = ts_push(s9, tok_num(3));
+    s9 = ts_push(s9, tok_plus());
+    s9 = ts_push(s9, tok_num(4));
+    s9 = ts_push(s9, tok_star());
+    s9 = ts_push(s9, tok_num(5));
+    assert_eq(eval(s9), 26);
+
+    // === "10 - 2 * 3" = 4 ===
+    let mut s10 = ts_empty();
+    s10 = ts_push(s10, tok_num(10));
+    s10 = ts_push(s10, tok_minus());
+    s10 = ts_push(s10, tok_num(2));
+    s10 = ts_push(s10, tok_star());
+    s10 = ts_push(s10, tok_num(3));
+    assert_eq(eval(s10), 4);
+
+    // === "1 + 2 * 3 + 4 * 5 - 6" = 21 ===
+    let mut s11 = ts_empty();
+    s11 = ts_push(s11, tok_num(1));
+    s11 = ts_push(s11, tok_plus());
+    s11 = ts_push(s11, tok_num(2));
+    s11 = ts_push(s11, tok_star());
+    s11 = ts_push(s11, tok_num(3));
+    s11 = ts_push(s11, tok_plus());
+    s11 = ts_push(s11, tok_num(4));
+    s11 = ts_push(s11, tok_star());
+    s11 = ts_push(s11, tok_num(5));
+    s11 = ts_push(s11, tok_minus());
+    s11 = ts_push(s11, tok_num(6));
+    assert_eq(eval(s11), 21);
+    assert_eq(eval_full(s11), 21);
+    assert_eq(s11.len, 11);
+
+    // === Error: empty ===
+    assert_eq(eval(ts_empty()), -9999);
+
+    // === Error: starts with operator ===
+    let mut se = ts_empty();
+    se = ts_push(se, tok_plus());
+    se = ts_push(se, tok_num(3));
+    assert_eq(eval(se), -9999);
+
+    // === "0 + 5" = 5 ===
+    let mut sz = ts_empty();
+    sz = ts_push(sz, tok_num(0));
+    sz = ts_push(sz, tok_plus());
+    sz = ts_push(sz, tok_num(5));
+    assert_eq(eval(sz), 5);
+
+    // === "7 * 1" = 7 ===
+    let mut si = ts_empty();
+    si = ts_push(si, tok_num(7));
+    si = ts_push(si, tok_star());
+    si = ts_push(si, tok_num(1));
+    assert_eq(eval(si), 7);
+
+    // === "99 * 0" = 0 ===
+    let mut sm = ts_empty();
+    sm = ts_push(sm, tok_num(99));
+    sm = ts_push(sm, tok_star());
+    sm = ts_push(sm, tok_num(0));
+    assert_eq(eval(sm), 0);
+
+    0
+}

@@ -1,0 +1,155 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, counting, sort, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for counting sort and radix-like operations
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn arr8_new(len: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: len }
+}
+
+// Counting sort for values in range [0, max_val]
+// Uses count array (max 8 distinct values)
+fn counting_sort(a: Arr8, max_val: Int) -> Arr8 {
+    // Count occurrences (max 8 buckets)
+    let mut count = arr8_new(8);
+    let mut i = 0;
+    while i < a.len {
+        let v = arr8_get(a, i);
+        if v <= 7 {
+            count = arr8_set(count, v, arr8_get(count, v) + 1);
+        }
+        i = i + 1;
+    }
+
+    // Build sorted output
+    let mut result = arr8_new(a.len);
+    let mut pos = 0;
+    let mut v = 0;
+    while v <= max_val && v <= 7 {
+        let mut c = arr8_get(count, v);
+        while c > 0 && pos < 8 {
+            result = arr8_set(result, pos, v);
+            pos = pos + 1;
+            c = c - 1;
+        }
+        v = v + 1;
+    }
+    result
+}
+
+fn is_sorted(a: Arr8) -> Bool {
+    let mut i = 1;
+    while i < a.len {
+        if arr8_get(a, i) < arr8_get(a, i - 1) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Find mode (most frequent element)
+fn find_mode(a: Arr8) -> Int {
+    let mut count = arr8_new(8);
+    let mut i = 0;
+    while i < a.len {
+        let v = arr8_get(a, i);
+        if v <= 7 {
+            count = arr8_set(count, v, arr8_get(count, v) + 1);
+        }
+        i = i + 1;
+    }
+    let mut best_val = 0;
+    let mut best_count = 0;
+    let mut v = 0;
+    while v <= 7 {
+        if arr8_get(count, v) > best_count {
+            best_count = arr8_get(count, v);
+            best_val = v;
+        }
+        v = v + 1;
+    }
+    best_val
+}
+
+// Count distinct values
+fn count_distinct(a: Arr8) -> Int {
+    let mut seen = arr8_new(8);
+    let mut i = 0;
+    while i < a.len {
+        let v = arr8_get(a, i);
+        if v <= 7 { seen = arr8_set(seen, v, 1); }
+        i = i + 1;
+    }
+    let mut count = 0;
+    let mut v = 0;
+    while v <= 7 {
+        count = count + arr8_get(seen, v);
+        v = v + 1;
+    }
+    count
+}
+
+fn test_counting_sort() {
+    let a = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 2, a6: 6, a7: 3, len: 8 };
+    let sorted = counting_sort(a, 7);
+    assert_eq(is_sorted(sorted), true);
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 1), 1);
+    assert_eq(arr8_get(sorted, 2), 2);
+    assert_eq(arr8_get(sorted, 7), 6);
+}
+
+fn test_already_sorted() {
+    let a = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let sorted = counting_sort(a, 4);
+    assert_eq(is_sorted(sorted), true);
+}
+
+fn test_all_same() {
+    let a = Arr8 { a0: 3, a1: 3, a2: 3, a3: 3, a4: 3, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sorted = counting_sort(a, 3);
+    assert_eq(arr8_get(sorted, 0), 3);
+    assert_eq(arr8_get(sorted, 4), 3);
+}
+
+fn test_mode() {
+    let a = Arr8 { a0: 1, a1: 2, a2: 2, a3: 3, a4: 2, a5: 1, a6: 0, a7: 0, len: 6 };
+    assert_eq(find_mode(a), 2);
+}
+
+fn test_distinct() {
+    let a = Arr8 { a0: 1, a1: 2, a2: 2, a3: 3, a4: 1, a5: 0, a6: 0, a7: 0, len: 5 };
+    assert_eq(count_distinct(a), 3);  // {1, 2, 3}
+}
+
+fn main() -> Int {
+    test_counting_sort();
+    test_already_sorted();
+    test_all_same();
+    test_mode();
+    test_distinct();
+    print("[OK] 279_counting_sort_aot");
+    0
+}

@@ -1,0 +1,777 @@
+// =============================================================================
+// vcs/specs/core/math/random_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, math, random, prng, rng, distributions
+// @description: Comprehensive tests for random number generation including
+//               key-based PRNG, XorShift128+, PCG generators, and distributions.
+//
+// Coverage:
+// - RandomKey: creation, splitting, fold_in
+// - XorShift128: u64, f64, bounded, bool generation
+// - PCG: u32, u64, f64 generation
+// - Uniform distribution: 01, range, int
+// - Normal distribution: standard and parameterized
+// - Exponential distribution
+// - Bernoulli distribution
+//
+// Test Strategy:
+// - Determinism: same seed produces same sequence
+// - Range bounds: outputs are within expected bounds
+// - Statistical properties: basic sanity checks
+// - Independence: split keys produce different sequences
+// =============================================================================
+
+module specs.core.math.random_test;
+
+mount core.math.random.{
+    RandomKey, XorShift128, PCG, Rng,
+    uniform_01, uniform, uniform_vec, uniform_range_vec,
+    uniform_int, uniform_int_range,
+    normal_01, normal, normal_vec, normal_vec_params, truncated_normal,
+    exponential, exponential_vec,
+    bernoulli, bernoulli_vec,
+    geometric, poisson, gamma_sample, beta_sample,
+    chi_squared, student_t, cauchy,
+    categorical, categorical_logits, multinomial,
+    permutation, shuffle_vec, choice,
+    choice_with_replacement, choice_without_replacement,
+};
+mount core.math.elementary.{abs};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// RandomKey Tests
+// =============================================================================
+
+@test
+fn test_random_key_creation() {
+    // Same seed produces same key
+    let k1 = RandomKey.new(42);
+    let k2 = RandomKey.new(42);
+    assert(k1.high == k2.high);
+    assert(k1.low == k2.low);
+
+    // Different seeds produce different keys
+    let k3 = RandomKey.new(123);
+    assert(k1.high != k3.high || k1.low != k3.low);
+
+    print("RandomKey creation tests passed");
+}
+
+@test
+fn test_random_key_splitting() {
+    let key = RandomKey.new(42);
+    let (k1, k2) = key.split();
+
+    // Split keys are different from each other
+    assert(k1.high != k2.high || k1.low != k2.low);
+
+    // Splitting is deterministic
+    let key2 = RandomKey.new(42);
+    let (k3, k4) = key2.split();
+    assert(k1.high == k3.high);
+    assert(k1.low == k3.low);
+    assert(k2.high == k4.high);
+    assert(k2.low == k4.low);
+
+    print("RandomKey splitting tests passed");
+}
+
+@test
+fn test_random_key_fold_in() {
+    let key = RandomKey.new(42);
+
+    // Folding same data produces same key
+    let folded1 = key.fold_in(100);
+    let folded2 = key.fold_in(100);
+    assert(folded1.high == folded2.high);
+    assert(folded1.low == folded2.low);
+
+    // Folding different data produces different keys
+    let folded3 = key.fold_in(200);
+    assert(folded1.high != folded3.high || folded1.low != folded3.low);
+
+    print("RandomKey fold_in tests passed");
+}
+
+// =============================================================================
+// XorShift128 Tests
+// =============================================================================
+
+@test
+fn test_xorshift128_determinism() {
+    let mut gen1 = XorShift128.new(42);
+    let mut gen2 = XorShift128.new(42);
+
+    // Same seed produces same sequence
+    for _ in 0..10 {
+        assert(gen1.next_u64() == gen2.next_u64());
+    }
+
+    // Different seeds produce different sequences
+    let mut gen3 = XorShift128.new(123);
+    let mut gen4 = XorShift128.new(42);
+    let v1 = gen3.next_u64();
+    let v2 = gen4.next_u64();
+    assert(v1 != v2);
+
+    print("XorShift128 determinism tests passed");
+}
+
+@test
+fn test_xorshift128_f64_range() {
+    let mut gen = XorShift128.new(42);
+
+    // All values should be in [0, 1)
+    for _ in 0..100 {
+        let x = gen.next_f64();
+        assert(x >= 0.0);
+        assert(x < 1.0);
+    }
+
+    print("XorShift128 f64 range tests passed");
+}
+
+@test
+fn test_xorshift128_bounded() {
+    let mut gen = XorShift128.new(42);
+
+    // Bound of 1 should always return 0
+    for _ in 0..10 {
+        let gen_copy = XorShift128.new(gen.next_u64());
+        let mut g = gen_copy;
+        assert(g.next_bounded(1) == 0);
+    }
+
+    // Values should be in [0, bound)
+    let mut gen2 = XorShift128.new(42);
+    for _ in 0..100 {
+        let bound: UInt64 = 10;
+        let x = gen2.next_bounded(bound);
+        assert(x < bound);
+    }
+
+    print("XorShift128 bounded tests passed");
+}
+
+@test
+fn test_xorshift128_bool() {
+    let mut gen = XorShift128.new(42);
+
+    // Count true/false in a sample
+    let mut true_count = 0;
+    for _ in 0..100 {
+        if gen.next_bool() {
+            true_count = true_count + 1;
+        }
+    }
+
+    // Should have roughly half true (allow wide margin for small sample)
+    assert(true_count > 20);  // At least 20% true
+    assert(true_count < 80);  // At most 80% true
+
+    print("XorShift128 bool tests passed");
+}
+
+// =============================================================================
+// PCG Tests
+// =============================================================================
+
+@test
+fn test_pcg_determinism() {
+    let mut gen1 = PCG.new(42, 0);
+    let mut gen2 = PCG.new(42, 0);
+
+    // Same seed produces same sequence
+    for _ in 0..10 {
+        assert(gen1.next_u32() == gen2.next_u32());
+    }
+
+    // Different stream produces different sequence
+    let mut gen3 = PCG.new(42, 1);
+    let mut gen4 = PCG.new(42, 0);
+    let v1 = gen3.next_u32();
+    let v2 = gen4.next_u32();
+    // Note: May still be equal by chance, so we don't assert inequality
+
+    print("PCG determinism tests passed");
+}
+
+@test
+fn test_pcg_f64_range() {
+    let mut gen = PCG.new(42, 0);
+
+    // All values should be in [0, 1)
+    for _ in 0..100 {
+        let x = gen.next_f64();
+        assert(x >= 0.0);
+        assert(x < 1.0);
+    }
+
+    print("PCG f64 range tests passed");
+}
+
+// =============================================================================
+// Uniform Distribution Tests
+// =============================================================================
+
+@test
+fn test_uniform_01() {
+    let key = RandomKey.new(42);
+
+    // Result should be in [0, 1)
+    let x = uniform_01(key);
+    assert(x >= 0.0);
+    assert(x < 1.0);
+
+    // Deterministic
+    let key2 = RandomKey.new(42);
+    let x2 = uniform_01(key2);
+    assert(x == x2);
+
+    print("uniform_01 tests passed");
+}
+
+@test
+fn test_uniform_range() {
+    let key = RandomKey.new(42);
+
+    // Test range [10.0, 20.0)
+    let x = uniform(key, 10.0, 20.0);
+    assert(x >= 10.0);
+    assert(x < 20.0);
+
+    // Test negative range
+    let key2 = RandomKey.new(123);
+    let x2 = uniform(key2, -5.0, 5.0);
+    assert(x2 >= -5.0);
+    assert(x2 < 5.0);
+
+    print("uniform range tests passed");
+}
+
+@test
+fn test_uniform_int() {
+    let key = RandomKey.new(42);
+
+    // Result should be in [0, bound)
+    let bound: UInt64 = 100;
+    let x = uniform_int(key, bound);
+    assert(x < bound);
+
+    // Bound of 1 should give 0
+    let key2 = RandomKey.new(123);
+    let x2 = uniform_int(key2, 1);
+    assert(x2 == 0);
+
+    print("uniform_int tests passed");
+}
+
+@test
+fn test_uniform_int_range() {
+    let key = RandomKey.new(42);
+
+    // Test range [10, 20)
+    let x = uniform_int_range(key, 10, 20);
+    assert(x >= 10);
+    assert(x < 20);
+
+    // Test negative range
+    let key2 = RandomKey.new(123);
+    let x2 = uniform_int_range(key2, -10, 10);
+    assert(x2 >= -10);
+    assert(x2 < 10);
+
+    print("uniform_int_range tests passed");
+}
+
+// =============================================================================
+// Normal Distribution Tests
+// =============================================================================
+
+@test
+fn test_normal_01() {
+    let key = RandomKey.new(42);
+
+    // Sample from standard normal
+    let x = normal_01(key);
+
+    // Deterministic
+    let key2 = RandomKey.new(42);
+    let x2 = normal_01(key2);
+    assert(x == x2);
+
+    // Most values should be within 4 standard deviations
+    // (probability > 99.99%)
+    assert(x > -5.0);
+    assert(x < 5.0);
+
+    print("normal_01 tests passed");
+}
+
+@test
+fn test_normal_parameterized() {
+    let key = RandomKey.new(42);
+
+    // Sample from N(100, 10)
+    let x = normal(key, 100.0, 10.0);
+
+    // Most values should be within 4 sigma of mean
+    assert(x > 60.0);
+    assert(x < 140.0);
+
+    print("normal parameterized tests passed");
+}
+
+// =============================================================================
+// Exponential Distribution Tests
+// =============================================================================
+
+@test
+fn test_exponential() {
+    let key = RandomKey.new(42);
+
+    // Sample with rate 1.0 (mean = 1.0)
+    let x = exponential(key, 1.0);
+
+    // Must be non-negative
+    assert(x >= 0.0);
+
+    // Deterministic
+    let key2 = RandomKey.new(42);
+    let x2 = exponential(key2, 1.0);
+    assert(x == x2);
+
+    // Higher rate = smaller mean
+    let key3 = RandomKey.new(123);
+    let key4 = RandomKey.new(123);
+    let low_rate = exponential(key3, 0.1);   // Mean = 10
+    let high_rate = exponential(key4, 10.0); // Mean = 0.1
+    // Can't compare directly due to randomness, but both should be non-negative
+    assert(low_rate >= 0.0);
+    assert(high_rate >= 0.0);
+
+    print("exponential tests passed");
+}
+
+// =============================================================================
+// Bernoulli Distribution Tests
+// =============================================================================
+
+@test
+fn test_bernoulli() {
+    // p = 0 should always return false
+    let mut i = 0;
+    while i < 10 {
+        let key = RandomKey.new(i as UInt64);
+        assert(!bernoulli(key, 0.0));
+        i = i + 1;
+    }
+
+    // p = 1 should always return true
+    i = 0;
+    while i < 10 {
+        let key = RandomKey.new(i as UInt64);
+        assert(bernoulli(key, 1.0));
+        i = i + 1;
+    }
+
+    // p = 0.5 should have roughly half true
+    let mut true_count = 0;
+    let base_key = RandomKey.new(42);
+    i = 0;
+    while i < 100 {
+        let key = base_key.fold_in(i as UInt64);
+        if bernoulli(key, 0.5) {
+            true_count = true_count + 1;
+        }
+        i = i + 1;
+    }
+    assert(true_count > 30);  // At least 30%
+    assert(true_count < 70);  // At most 70%
+
+    print("bernoulli tests passed");
+}
+
+// =============================================================================
+// Rng Type Tests
+// =============================================================================
+
+@test
+fn test_rng_creation() {
+    let mut rng = Rng.new(42);
+    let _ = rng;
+}
+
+@test
+fn test_rng_from_key() {
+    let key = RandomKey.new(123);
+    let mut rng = Rng.from_key(key);
+    let _ = rng;
+}
+
+@test
+fn test_rng_next_key() {
+    let mut rng = Rng.new(42);
+    let k = rng.next_key();
+    let _ = k;
+}
+
+@test
+fn test_rng_uniform_01() {
+    let mut rng = Rng.new(42);
+    let x = rng.uniform_01();
+    assert(x >= 0.0);
+    assert(x < 1.0);
+}
+
+@test
+fn test_rng_uniform_range() {
+    let mut rng = Rng.new(42);
+    let x = rng.uniform(10.0, 20.0);
+    assert(x >= 10.0);
+    assert(x < 20.0);
+}
+
+@test
+fn test_rng_normal_01() {
+    let mut rng = Rng.new(42);
+    let x = rng.normal_01();
+    assert(x > -10.0);
+    assert(x < 10.0);
+}
+
+@test
+fn test_rng_normal_params() {
+    let mut rng = Rng.new(42);
+    let x = rng.normal(100.0, 10.0);
+    assert(x > 50.0);
+    assert(x < 150.0);
+}
+
+@test
+fn test_rng_exponential() {
+    let mut rng = Rng.new(42);
+    let x = rng.exponential(1.0);
+    assert(x >= 0.0);
+}
+
+@test
+fn test_rng_bernoulli() {
+    let mut rng = Rng.new(42);
+    let b = rng.bernoulli(0.5);
+    let _ = b;
+}
+
+@test
+fn test_rng_uniform_int() {
+    let mut rng = Rng.new(42);
+    let x = rng.uniform_int(100);
+    assert(x < 100);
+}
+
+@test
+fn test_rng_permutation() {
+    let mut rng = Rng.new(42);
+    let perm = rng.permutation(5);
+    assert_eq(perm.len(), 5);
+}
+
+@test
+fn test_rng_shuffle() {
+    let mut rng = Rng.new(42);
+    let mut v = [1, 2, 3, 4, 5];
+    rng.shuffle(&mut v);
+    assert_eq(v.len(), 5);
+}
+
+// =============================================================================
+// RandomKey Extended Tests
+// =============================================================================
+
+@test
+fn test_random_key_split_n() {
+    let key = RandomKey.new(42);
+    let keys = key.split_n(5);
+    assert_eq(keys.len(), 5);
+}
+
+@test
+fn test_random_key_split_n_zero() {
+    let key = RandomKey.new(42);
+    let keys = key.split_n(0);
+    assert_eq(keys.len(), 0);
+}
+
+@test
+fn test_random_key_split_n_deterministic() {
+    let key1 = RandomKey.new(42);
+    let key2 = RandomKey.new(42);
+    let keys1 = key1.split_n(3);
+    let keys2 = key2.split_n(3);
+    assert(keys1[0].high == keys2[0].high);
+    assert(keys1[0].low == keys2[0].low);
+    assert(keys1[2].high == keys2[2].high);
+}
+
+// =============================================================================
+// XorShift128 Extended Tests
+// =============================================================================
+
+@test
+fn test_xorshift128_f32_range() {
+    let mut gen = XorShift128.new(42);
+    for _ in 0..50 {
+        let x = gen.next_f32();
+        assert(x >= (0.0 as Float32));
+        assert(x < (1.0 as Float32));
+    }
+}
+
+@test
+fn test_xorshift128_fields() {
+    let gen = XorShift128.new(42);
+    let _ = gen.s0;
+    let _ = gen.s1;
+}
+
+// =============================================================================
+// PCG Extended Tests
+// =============================================================================
+
+@test
+fn test_pcg_different_streams() {
+    let mut gen1 = PCG.new(42, 1);
+    let mut gen2 = PCG.new(42, 2);
+    let v1 = gen1.next_u64();
+    let v2 = gen2.next_u64();
+    // Different streams should (almost certainly) produce different values
+    let _ = v1;
+    let _ = v2;
+}
+
+@test
+fn test_pcg_u32_generation() {
+    let mut gen = PCG.new(42, 0);
+    let v = gen.next_u32();
+    let _ = v;
+}
+
+@test
+fn test_pcg_fields() {
+    let gen = PCG.new(42, 0);
+    let _ = gen.state;
+    let _ = gen.inc;
+}
+
+// =============================================================================
+// Vector Distribution Tests
+// =============================================================================
+
+@test
+fn test_uniform_vec_fn() {
+    let _ = uniform_vec;
+}
+
+@test
+fn test_uniform_range_vec_fn() {
+    let _ = uniform_range_vec;
+}
+
+@test
+fn test_normal_vec_fn() {
+    let _ = normal_vec;
+}
+
+@test
+fn test_normal_vec_params_fn() {
+    let _ = normal_vec_params;
+}
+
+@test
+fn test_truncated_normal_fn() {
+    let _ = truncated_normal;
+}
+
+@test
+fn test_exponential_vec_fn() {
+    let _ = exponential_vec;
+}
+
+@test
+fn test_bernoulli_vec_fn() {
+    let _ = bernoulli_vec;
+}
+
+// =============================================================================
+// Additional Distribution Function Tests
+// =============================================================================
+
+@test
+fn test_geometric_fn() {
+    let _ = geometric;
+}
+
+@test
+fn test_poisson_fn() {
+    let _ = poisson;
+}
+
+@test
+fn test_gamma_sample_fn() {
+    let _ = gamma_sample;
+}
+
+@test
+fn test_beta_sample_fn() {
+    let _ = beta_sample;
+}
+
+@test
+fn test_chi_squared_fn() {
+    let _ = chi_squared;
+}
+
+@test
+fn test_student_t_fn() {
+    let _ = student_t;
+}
+
+@test
+fn test_cauchy_fn() {
+    let _ = cauchy;
+}
+
+// =============================================================================
+// Categorical Distribution Tests
+// =============================================================================
+
+@test
+fn test_categorical_fn() {
+    let _ = categorical;
+}
+
+@test
+fn test_categorical_logits_fn() {
+    let _ = categorical_logits;
+}
+
+@test
+fn test_multinomial_fn() {
+    let _ = multinomial;
+}
+
+// =============================================================================
+// Shuffling and Choice Tests
+// =============================================================================
+
+@test
+fn test_permutation_basic() {
+    let key = RandomKey.new(42);
+    let perm = permutation(key, 10);
+    assert_eq(perm.len(), 10);
+}
+
+@test
+fn test_permutation_small() {
+    let key = RandomKey.new(42);
+    let perm = permutation(key, 1);
+    assert_eq(perm.len(), 1);
+    assert_eq(perm[0], 0);
+}
+
+@test
+fn test_shuffle_vec_fn() {
+    let _ = shuffle_vec;
+}
+
+@test
+fn test_choice_fn() {
+    let _ = choice;
+}
+
+@test
+fn test_choice_with_replacement_fn() {
+    let _ = choice_with_replacement;
+}
+
+@test
+fn test_choice_without_replacement_fn() {
+    let _ = choice_without_replacement;
+}
+
+// =============================================================================
+// RandomKey Field Access Tests
+// =============================================================================
+
+@test
+fn test_random_key_fields() {
+    let key = RandomKey.new(42);
+    let h = key.high;
+    let l = key.low;
+    assert(h != 0 || l != 0);
+}
+
+// =============================================================================
+// Additional Edge Case Tests
+// =============================================================================
+
+@test
+fn test_uniform_01_multiple_keys() {
+    // Different keys produce different values (with very high probability)
+    let k1 = RandomKey.new(1);
+    let k2 = RandomKey.new(2);
+    let k3 = RandomKey.new(3);
+    let x1 = uniform_01(k1);
+    let x2 = uniform_01(k2);
+    let x3 = uniform_01(k3);
+    // At least two of three should differ
+    assert(x1 != x2 || x2 != x3);
+}
+
+@test
+fn test_xorshift128_sequence_length() {
+    let mut gen = XorShift128.new(42);
+    // Generate a long sequence without issues
+    for _ in 0..1000 {
+        let v = gen.next_u64();
+        let _ = v;
+    }
+    // Should still produce valid f64
+    let x = gen.next_f64();
+    assert(x >= 0.0);
+    assert(x < 1.0);
+}
+
+@test
+fn test_pcg_u64_generation() {
+    let mut gen = PCG.new(42, 0);
+    let v = gen.next_u64();
+    let _ = v;
+    // Deterministic
+    let mut gen2 = PCG.new(42, 0);
+    let v2 = gen2.next_u64();
+    assert(v == v2);
+}
+
+@test
+fn test_random_key_fold_in_chain() {
+    // Chaining fold_in produces unique keys
+    let base = RandomKey.new(42);
+    let k1 = base.fold_in(1);
+    let k2 = k1.fold_in(2);
+    let k3 = k2.fold_in(3);
+    // All should be different
+    assert(k1.high != k2.high || k1.low != k2.low);
+    assert(k2.high != k3.high || k2.low != k3.low);
+}

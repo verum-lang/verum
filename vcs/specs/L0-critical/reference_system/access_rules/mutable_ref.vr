@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @was-skip: fixed by adding collection methods and indexing
+// @tags: reference_system, cbgr, access_rules, mutable
+
+/// Test mutable referencing semantics.
+/// Only one mutable reference is allowed at a time.
+/// The borrowed value can be mutated through the reference.
+/// Spec: 04-memory-model.md#aliasing-rules
+/// Key property: Exclusive mutable access prevents data races.
+
+fn modify_text(s: &mut Text) {
+    s.push_str(" modified");
+}
+
+fn increment_field(p: &mut Point) {
+    p.x += 1;
+    p.y += 1;
+}
+
+fn double_all(items: &mut List<Int>) {
+    for i in 0..items.len() {
+        items[i] *= 2;
+    }
+}
+
+fn main() {
+    // Basic mutable reference
+    let mut data = Text.from("hello");
+    let ref1 = &mut data;
+    ref1.push_str(" world");
+    // After borrow ends, data can be accessed
+    print(data);  // "hello world"
+
+    // Mutable borrow allows mutation
+    let mut value = 42;
+    let ref_val = &mut value;
+    *ref_val = 100;
+    assert(value == 100);
+
+    // Pass mutable reference to function
+    let mut message = Text.from("original");
+    modify_text(&mut message);
+    print(message);  // "original modified"
+
+    // Mutable borrow of struct
+    let mut point = Point { x: 0, y: 0 };
+    increment_field(&mut point);
+    assert(point.x == 1);
+    assert(point.y == 1);
+
+    // Mutable borrow of collection
+    let mut numbers = [1, 2, 3, 4, 5];
+    double_all(&mut numbers);
+    assert(numbers[0] == 2);
+    assert(numbers[4] == 10);
+
+    // Sequential mutable references (non-overlapping)
+    let mut text = Text.from("seq");
+    {
+        let ref1 = &mut text;
+        ref1.push_str("1");
+    }
+    // First borrow ended
+    {
+        let ref2 = &mut text;
+        ref2.push_str("2");
+    }
+    print(text);  // "seq12"
+
+    // Mutable borrow of nested field
+    let mut container = Container {
+        value: Text.from("nested"),
+        count: 0,
+    };
+    let ref_value = &mut container.value;
+    ref_value.push_str(" mutation");
+    // After borrow ends
+    print(container.value);
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Container is {
+    value: Text,
+    count: Int,
+};

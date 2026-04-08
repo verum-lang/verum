@@ -1,0 +1,243 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, regex, pattern-matching, nfa
+// @timeout: 30000
+
+// Simple regex-like pattern matching on integer-encoded strings
+// Characters: a=1, b=2, c=3, d=4, *=10 (wildcard)
+// Uses Arr4 struct but avoids passing it to nested function calls
+// (AOT struct-as-param-to-nested-call corruption workaround).
+
+type Arr4 is { v0: Int, v1: Int, v2: Int, v3: Int };
+
+fn get4(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else { a.v3 }
+}
+
+fn zeros4() -> Arr4 { Arr4 { v0: 0, v1: 0, v2: 0, v3: 0 } }
+
+// String length (0-terminated, max 4) -- inline field access
+fn slen(s: Arr4) -> Int {
+    if s.v0 == 0 { return 0; }
+    if s.v1 == 0 { return 1; }
+    if s.v2 == 0 { return 2; }
+    if s.v3 == 0 { return 3; }
+    4
+}
+
+// Exact match -- inline all field access
+fn str_eq(a: Arr4, b: Arr4) -> Int {
+    let la = slen(a);
+    let lb = slen(b);
+    if la != lb { return 0; }
+    if la >= 1 {
+        if a.v0 != b.v0 { return 0; }
+    }
+    if la >= 2 {
+        if a.v1 != b.v1 { return 0; }
+    }
+    if la >= 3 {
+        if a.v2 != b.v2 { return 0; }
+    }
+    if la >= 4 {
+        if a.v3 != b.v3 { return 0; }
+    }
+    1
+}
+
+// Simple pattern match: literal or * (10) matches any char
+fn match_simple(pat: Arr4, plen: Int, txt: Arr4, tlen: Int) -> Int {
+    if plen != tlen { return 0; }
+    if plen >= 1 {
+        let pc = pat.v0;
+        if pc != 10 {
+            if pc != txt.v0 { return 0; }
+        }
+    }
+    if plen >= 2 {
+        let pc = pat.v1;
+        if pc != 10 {
+            if pc != txt.v1 { return 0; }
+        }
+    }
+    if plen >= 3 {
+        let pc = pat.v2;
+        if pc != 10 {
+            if pc != txt.v2 { return 0; }
+        }
+    }
+    if plen >= 4 {
+        let pc = pat.v3;
+        if pc != 10 {
+            if pc != txt.v3 { return 0; }
+        }
+    }
+    1
+}
+
+// Glob match: if last pattern char is 10 (*), match prefix then any suffix
+fn match_glob(pat: Arr4, plen: Int, txt: Arr4, tlen: Int) -> Int {
+    if plen == 0 {
+        if tlen == 0 { return 1; }
+        return 0;
+    }
+    // Check if last pattern char is wildcard
+    let mut last = 0;
+    if plen == 1 { last = pat.v0; }
+    if plen == 2 { last = pat.v1; }
+    if plen == 3 { last = pat.v2; }
+    if plen == 4 { last = pat.v3; }
+    if last == 10 {
+        // Match prefix (plen-1 chars) then any suffix
+        let prefix_len = plen - 1;
+        if tlen < prefix_len { return 0; }
+        if prefix_len >= 1 {
+            if pat.v0 != txt.v0 { return 0; }
+        }
+        if prefix_len >= 2 {
+            if pat.v1 != txt.v1 { return 0; }
+        }
+        if prefix_len >= 3 {
+            if pat.v2 != txt.v2 { return 0; }
+        }
+        return 1;
+    }
+    match_simple(pat, plen, txt, tlen)
+}
+
+// Count occurrences of a char
+fn char_count(s: Arr4, len: Int, ch: Int) -> Int {
+    let mut count = 0;
+    if len >= 1 {
+        if s.v0 == ch { count = count + 1; }
+    }
+    if len >= 2 {
+        if s.v1 == ch { count = count + 1; }
+    }
+    if len >= 3 {
+        if s.v2 == ch { count = count + 1; }
+    }
+    if len >= 4 {
+        if s.v3 == ch { count = count + 1; }
+    }
+    count
+}
+
+// Find first occurrence of char, return index or -1
+fn char_find(s: Arr4, len: Int, ch: Int) -> Int {
+    if len >= 1 {
+        if s.v0 == ch { return 0; }
+    }
+    if len >= 2 {
+        if s.v1 == ch { return 1; }
+    }
+    if len >= 3 {
+        if s.v2 == ch { return 2; }
+    }
+    if len >= 4 {
+        if s.v3 == ch { return 3; }
+    }
+    0 - 1
+}
+
+// Reverse a string
+fn str_rev(s: Arr4, len: Int) -> Arr4 {
+    if len == 1 { return Arr4 { v0: s.v0, v1: 0, v2: 0, v3: 0 }; }
+    if len == 2 { return Arr4 { v0: s.v1, v1: s.v0, v2: 0, v3: 0 }; }
+    if len == 3 { return Arr4 { v0: s.v2, v1: s.v1, v2: s.v0, v3: 0 }; }
+    if len == 4 { return Arr4 { v0: s.v3, v1: s.v2, v2: s.v1, v3: s.v0 }; }
+    zeros4()
+}
+
+// Is palindrome?
+fn is_palindrome(s: Arr4, len: Int) -> Int {
+    let r = str_rev(s, len);
+    str_eq(s, r)
+}
+
+fn test_slen() -> Int {
+    let empty = zeros4();
+    assert_eq(slen(empty), 0);
+    let abc = Arr4 { v0: 1, v1: 2, v2: 3, v3: 0 };
+    assert_eq(slen(abc), 3);
+    1
+}
+
+fn test_str_eq() -> Int {
+    let a = Arr4 { v0: 1, v1: 2, v2: 3, v3: 0 };
+    let b = Arr4 { v0: 1, v1: 2, v2: 3, v3: 0 };
+    let c = Arr4 { v0: 1, v1: 2, v2: 4, v3: 0 };
+    assert_eq(str_eq(a, b), 1);
+    assert_eq(str_eq(a, c), 0);
+    1
+}
+
+fn test_simple_match() -> Int {
+    // Pattern "abc" matches "abc"
+    let pat = Arr4 { v0: 1, v1: 2, v2: 3, v3: 0 };
+    let txt = Arr4 { v0: 1, v1: 2, v2: 3, v3: 0 };
+    assert_eq(match_simple(pat, 3, txt, 3), 1);
+    // Pattern "a*c" matches "abc" (wildcard)
+    let pat2 = Arr4 { v0: 1, v1: 10, v2: 3, v3: 0 };
+    assert_eq(match_simple(pat2, 3, txt, 3), 1);
+    // Pattern "a*c" matches "adc"
+    let txt2 = Arr4 { v0: 1, v1: 4, v2: 3, v3: 0 };
+    assert_eq(match_simple(pat2, 3, txt2, 3), 1);
+    // Different length doesn't match
+    let short = Arr4 { v0: 1, v1: 2, v2: 0, v3: 0 };
+    assert_eq(match_simple(pat, 3, short, 2), 0);
+    1
+}
+
+fn test_glob_match() -> Int {
+    // "ab*" matches "abc", "abcd", "ab"
+    let pat = Arr4 { v0: 1, v1: 2, v2: 10, v3: 0 };
+    let t1 = Arr4 { v0: 1, v1: 2, v2: 3, v3: 0 };
+    let t2 = Arr4 { v0: 1, v1: 2, v2: 3, v3: 4 };
+    let t3 = Arr4 { v0: 1, v1: 2, v2: 0, v3: 0 };
+    assert_eq(match_glob(pat, 3, t1, 3), 1);
+    assert_eq(match_glob(pat, 3, t2, 4), 1);
+    assert_eq(match_glob(pat, 3, t3, 2), 1);
+    // "ab*" doesn't match "ba"
+    let t4 = Arr4 { v0: 2, v1: 1, v2: 0, v3: 0 };
+    assert_eq(match_glob(pat, 3, t4, 2), 0);
+    1
+}
+
+fn test_char_ops() -> Int {
+    let s = Arr4 { v0: 1, v1: 2, v2: 1, v3: 3 };
+    assert_eq(char_count(s, 4, 1), 2); // 'a' appears 2 times in 4 chars
+    assert_eq(char_count(s, 4, 2), 1); // 'b' once
+    assert_eq(char_count(s, 4, 4), 0); // 'd' not present
+    assert_eq(char_find(s, 4, 2), 1);  // 'b' at index 1
+    assert_eq(char_find(s, 4, 4), 0 - 1); // 'd' not found
+    1
+}
+
+fn test_palindrome() -> Int {
+    // "aba" is palindrome
+    let p = Arr4 { v0: 1, v1: 2, v2: 1, v3: 0 };
+    assert_eq(is_palindrome(p, 3), 1);
+    // "abba" is palindrome
+    let p2 = Arr4 { v0: 1, v1: 2, v2: 2, v3: 1 };
+    assert_eq(is_palindrome(p2, 4), 1);
+    // "abc" is not
+    let p3 = Arr4 { v0: 1, v1: 2, v2: 3, v3: 0 };
+    assert_eq(is_palindrome(p3, 3), 0);
+    // Single char is palindrome
+    let p4 = Arr4 { v0: 1, v1: 0, v2: 0, v3: 0 };
+    assert_eq(is_palindrome(p4, 1), 1);
+    1
+}
+
+fn main() -> Int {
+    test_slen();
+    test_str_eq();
+    test_simple_match();
+    test_glob_match();
+    test_char_ops();
+    test_palindrome();
+    print("[OK] 606_regex_match_aot");
+    0
+}

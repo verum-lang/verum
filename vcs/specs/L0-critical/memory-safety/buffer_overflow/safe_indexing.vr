@@ -1,0 +1,57 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-check, safe-pattern
+// @description: Tests safe alternatives to direct array indexing
+
+fn main() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Safe indexing using get() returns Maybe<T>
+    let safe_result = arr.get(10);
+    match safe_result {
+        Maybe.Some(val) => println(f"Found: {val}"),
+        Maybe.None => println("Index out of bounds - handled safely"),
+    }
+
+    // Safe indexing with valid index
+    let valid_result = arr.get(2);
+    match valid_result {
+        Maybe.Some(v) => assert(v == 3),
+        Maybe.None => assert(false),
+    }
+
+    // Using get_or() with default value
+    let default_result = arr.get_or(100, 0);
+    assert(default_result == 0);
+
+    // Using first() and last() - also safe
+    let first = arr.first();
+    match first {
+        Maybe.Some(v) => assert(v == 1),
+        Maybe.None => assert(false),
+    }
+
+    let last = arr.last();
+    match last {
+        Maybe.Some(v) => assert(v == 5),
+        Maybe.None => assert(false),
+    }
+
+    // Empty array handling
+    let empty: List<Int> = [];
+    match empty.first() {
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
+    }
+    match empty.last() {
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
+    }
+    match empty.get(0) {
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
+    }
+
+    println("All safe indexing tests passed");
+}

@@ -1,0 +1,133 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: sum-types, variants, enum, match
+// @description: Test sum type (enum) patterns with various payloads
+
+type Result2 is Ok2(Int) | Err2(Int);
+
+fn safe_sqrt(n: Int) -> Result2 {
+    if n < 0 {
+        Err2(-1)
+    } else {
+        // Integer square root approximation
+        let mut x = 0;
+        while x * x <= n {
+            x = x + 1;
+        }
+        Ok2(x - 1)
+    }
+}
+
+fn test_result_type() -> Int {
+    let r1 = safe_sqrt(25);
+    let v1 = match r1 { Ok2(v) => v, Err2(_) => -1 };
+    if v1 != 5 {
+        print(f"FAIL result: sqrt(25)={v1}");
+        return 1;
+    }
+    let r2 = safe_sqrt(-4);
+    let is_err = match r2 { Ok2(_) => false, Err2(_) => true };
+    if !is_err {
+        print("FAIL result: sqrt(-4) should be Err");
+        return 1;
+    }
+    print("  result_type: OK");
+    0
+}
+
+type Token2 is Number2(Int) | Plus2 | Minus2 | Star2 | Eof2;
+
+fn token_precedence(t: Token2) -> Int {
+    match t {
+        Plus2 => 1,
+        Minus2 => 1,
+        Star2 => 2,
+        Number2(_) => 0,
+        Eof2 => -1,
+    }
+}
+
+fn test_token() -> Int {
+    if token_precedence(Plus2) != 1 {
+        print("FAIL token: Plus");
+        return 1;
+    }
+    if token_precedence(Star2) != 2 {
+        print("FAIL token: Star");
+        return 1;
+    }
+    if token_precedence(Number2(42)) != 0 {
+        print("FAIL token: Number");
+        return 1;
+    }
+    print("  token: OK");
+    0
+}
+
+type LinkedList is Nil2 | Cons2(Int, Heap<LinkedList>);
+
+fn list_sum(lst: LinkedList) -> Int {
+    match lst {
+        Nil2 => 0,
+        Cons2(val, _) => val,
+    }
+}
+
+fn test_linked_list() -> Int {
+    let empty = Nil2;
+    if list_sum(empty) != 0 {
+        print("FAIL linked: empty sum");
+        return 1;
+    }
+    let single = Cons2(42, Heap(Nil2));
+    if list_sum(single) != 42 {
+        print("FAIL linked: single");
+        return 1;
+    }
+    print("  linked_list: OK");
+    0
+}
+
+type Weekday is Mon | Tue | Wed | Thu | Fri | Sat | Sun;
+
+fn is_weekend(d: Weekday) -> Bool {
+    match d {
+        Sat => true,
+        Sun => true,
+        Mon => false,
+        Tue => false,
+        Wed => false,
+        Thu => false,
+        Fri => false,
+    }
+}
+
+fn test_weekday() -> Int {
+    if !is_weekend(Sat) {
+        print("FAIL weekday: Sat");
+        return 1;
+    }
+    if is_weekend(Mon) {
+        print("FAIL weekday: Mon");
+        return 1;
+    }
+    print("  weekday: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Sum Type Tests:");
+    let mut failures = 0;
+    failures = failures + test_result_type();
+    failures = failures + test_token();
+    failures = failures + test_linked_list();
+    failures = failures + test_weekday();
+
+    if failures == 0 {
+        print("All sum type tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

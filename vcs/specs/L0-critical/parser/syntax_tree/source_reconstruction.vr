@@ -1,0 +1,240 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, syntax-tree, lossless, source-reconstruction, events, trivia
+// @description: Test that source can be exactly reconstructed from syntax tree via event-based parsing
+
+// ============================================================================
+// SECTION 1: Basic Formatting Preservation
+// ============================================================================
+
+// Test basic formatting preservation
+fn    spaced_declaration   (   )   {   }
+
+// Test unusual spacing
+fn unusual_spacing(a:Int,b  :  Int,  c:Int) ->Int{a+b+c}
+
+// ============================================================================
+// SECTION 2: Alignment Preservation
+// ============================================================================
+
+// Test alignment preservation
+type Config is {
+    name:     Text,     // Name field
+    value:    Int,      // Value field
+    enabled:  Bool,     // Enabled flag
+};
+
+// Test column alignment in parameters
+fn column_aligned(
+    first_param:     Int,
+    second_param:    Text,
+    third_param:     Bool,
+    fourth_param:    Float
+) { }
+
+// ============================================================================
+// SECTION 3: Indentation Styles
+// ============================================================================
+
+// Test indentation styles (mixed tabs/spaces)
+fn mixed_indent() {
+	let tab_indent = 1;
+    let space_indent = 2;
+}
+
+// Test pure tab indentation
+fn tab_only_indent() {
+	let level1 = 1;
+		let level2 = 2;
+			let level3 = 3;
+}
+
+// Test pure space indentation
+fn space_only_indent() {
+    let level1 = 1;
+        let level2 = 2;
+            let level3 = 3;
+}
+
+// ============================================================================
+// SECTION 4: Comment Positioning
+// ============================================================================
+
+// Test comment positioning
+fn comments_positioned() {
+    // Leading comment
+    let x = 1;  // Trailing comment
+    /* Block */ let y = 2; /* After */
+}
+
+// Test doc comments
+/// This is a doc comment that must be preserved
+/// Including multiple lines
+fn doc_commented() { }
+
+// Test nested block comments
+fn nested_comments() {
+    /* outer /* inner */ end */
+    let x = 1;
+}
+
+// ============================================================================
+// SECTION 5: Multi-line Strings
+// ============================================================================
+
+// Test multi-line strings
+fn multiline_content() {
+    let msg = "line 1
+line 2
+line 3";
+}
+
+// Test multi-line string with indentation
+fn multiline_indented() {
+    let msg = "first line
+        indented second line
+            more indented third line";
+}
+
+// ============================================================================
+// SECTION 6: Nested Structures
+// ============================================================================
+
+// Test nested structures
+fn deeply_nested() {
+    {
+        {
+            {
+                let deep = 1;
+            }
+        }
+    }
+}
+
+// Test nested with mixed formatting
+fn nested_mixed() {
+    {let a=1;{  let b = 2;  {
+        let c = 3;
+    }}}
+}
+
+// ============================================================================
+// SECTION 7: Trailing Whitespace and Blank Lines
+// ============================================================================
+
+// Test trailing whitespace and blank lines
+fn trailing_content() {
+    let a = 1;
+
+    let b = 2;
+
+
+    let c = 3;
+}
+
+// Test multiple blank lines preserved
+fn multiple_blanks() {
+    let first = 1;
+
+
+
+    let second = 2;
+}
+
+// ============================================================================
+// SECTION 8: Operator Spacing
+// ============================================================================
+
+// Test operator spacing
+fn operators_spaced() {
+    let a = 1+2;
+    let b = 3 + 4;
+    let c = 5  +  6;
+}
+
+// Test various operator spacing
+fn operator_spacing_variations() {
+    let eq1=1;
+    let eq2 = 2;
+    let eq3  =  3;
+    let plus1 = 1+2;
+    let plus2 = 1 +2;
+    let plus3 = 1+ 2;
+    let plus4 = 1 + 2;
+}
+
+// ============================================================================
+// SECTION 9: Event-Based Roundtrip
+// ============================================================================
+
+// Test that events preserve all source information
+fn event_roundtrip() {
+    // Comment preserved through events
+    let x = 1;  // Trailing preserved
+    let y = 2;
+}
+
+// Test complex event sequence preserves formatting
+fn event_complex_roundtrip(input: Maybe<Int>) -> Int {
+    match input {
+        Some(n) if n > 0 => n * 2,  // Positive case
+        Some(n) => -n,               // Negative case
+        None => 0,                   // Default case
+    }
+}
+
+// ============================================================================
+// SECTION 10: Trivia in Event Processing
+// ============================================================================
+
+// Test that event processing preserves trivia
+fn event_trivia_preservation() {
+    /* A */ let /* B */ x /* C */ = /* D */ 1 /* E */ ; /* F */
+}
+
+// Test newline trivia through events
+fn event_newline_trivia() {
+    let a = 1;
+
+    // Gap preserved
+
+    let b = 2;
+}
+
+// ============================================================================
+// SECTION 11: GreenTreeSink Roundtrip
+// ============================================================================
+
+// Test GreenTreeSink produces text()-able tree
+fn green_sink_roundtrip() {
+    let x = 1;  // green.text() should match original
+}
+
+// Test TextTreeSink output format
+fn text_sink_roundtrip() {
+    let x = 1;  // TextTreeSink shows tree structure
+}
+
+// ============================================================================
+// SECTION 12: Edge Cases
+// ============================================================================
+
+// Test empty function
+fn empty_function() { }
+
+// Test single expression body
+fn single_expr() -> Int {
+    42
+}
+
+// Test chained methods with spacing
+fn chained_spacing() {
+    let x = a.b.c  .  d  .  e();
+}
+
+// Test unicode content preserved
+fn unicode_preserved() {
+    let greeting = "Hello, World!";  // Should preserve unicode
+    let emoji_free = "text";  // No emojis as per guidelines
+}

@@ -1,0 +1,282 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, sum-type, state-machine, match, parser
+// @description: Sum type state machines — critical for parser/lexer state management
+
+type TokenKind is
+    | Ident(Text)
+    | Number(Int)
+    | LParen
+    | RParen
+    | Plus
+    | Minus
+    | Star
+    | Equals
+    | Eof;
+
+type LexerState is
+    | Ready
+    | InIdent(Text)
+    | InNumber(Int)
+    | Done;
+
+fn is_alpha(c: Int) -> Bool {
+    (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95
+}
+
+fn is_digit(c: Int) -> Bool {
+    c >= 48 && c <= 57
+}
+
+fn char_to_text(c: Int) -> Text {
+    // Build single character text from byte value
+    if c == 43 { return "+"; }
+    if c == 45 { return "-"; }
+    if c == 42 { return "*"; }
+    if c == 61 { return "="; }
+    if c == 40 { return "("; }
+    if c == 41 { return ")"; }
+    "?"
+}
+
+@allow(unbounded_recursion)
+fn step_lexer(state: LexerState, c: Int, tokens: &mut List<TokenKind>) -> LexerState {
+    match state {
+        Ready => {
+            if is_alpha(c) {
+                LexerState.InIdent(char_to_text(c))
+            } else if is_digit(c) {
+                LexerState.InNumber(c - 48)
+            } else if c == 40 {
+                tokens.push(TokenKind.LParen);
+                LexerState.Ready
+            } else if c == 41 {
+                tokens.push(TokenKind.RParen);
+                LexerState.Ready
+            } else if c == 43 {
+                tokens.push(TokenKind.Plus);
+                LexerState.Ready
+            } else if c == 45 {
+                tokens.push(TokenKind.Minus);
+                LexerState.Ready
+            } else if c == 42 {
+                tokens.push(TokenKind.Star);
+                LexerState.Ready
+            } else if c == 61 {
+                tokens.push(TokenKind.Equals);
+                LexerState.Ready
+            } else {
+                // whitespace or unknown — stay ready
+                LexerState.Ready
+            }
+        }
+        InIdent(acc) => {
+            if is_alpha(c) || is_digit(c) {
+                LexerState.InIdent(acc + char_to_text(c))
+            } else {
+                tokens.push(TokenKind.Ident(acc));
+                // Re-process current char
+                step_lexer(LexerState.Ready, c, tokens)
+            }
+        }
+        InNumber(acc) => {
+            if is_digit(c) {
+                LexerState.InNumber(acc * 10 + (c - 48))
+            } else {
+                tokens.push(TokenKind.Number(acc));
+                step_lexer(LexerState.Ready, c, tokens)
+            }
+        }
+        Done => {
+            LexerState.Done
+        }
+    }
+}
+
+fn flush_state(state: LexerState, tokens: &mut List<TokenKind>) {
+    match state {
+        InIdent(acc) => {
+            tokens.push(TokenKind.Ident(acc));
+        }
+        InNumber(acc) => {
+            tokens.push(TokenKind.Number(acc));
+        }
+        _ => {}
+    }
+    tokens.push(TokenKind.Eof);
+}
+
+fn token_kind_tag(tok: TokenKind) -> Int {
+    match tok {
+        Ident(_) => 0,
+        Number(_) => 1,
+        LParen => 2,
+        RParen => 3,
+        Plus => 4,
+        Minus => 5,
+        Star => 6,
+        Equals => 7,
+        Eof => 8,
+    }
+}
+
+fn test_basic_state_transitions() -> Int {
+    let mut tokens = List.new();
+    let mut state = LexerState.Ready;
+
+    // Lex "1+2"
+    let input = "1+2";
+    let mut i = 0;
+    while i < input.len() {
+        state = step_lexer(state, match input.byte_at(i) { Some(v) => v, None => 0, }, &mut tokens);
+        i = i + 1;
+    }
+    flush_state(state, &mut tokens);
+
+    // Expect: Number(1), Plus, Number(2), Eof
+    if tokens.len() != 4 {
+        print(f"FAIL basic: expected 4 tokens, got {tokens.len()}");
+        return 1;
+    }
+    if token_kind_tag(tokens[0]) != 1 {
+        print("FAIL basic: token 0 should be Number");
+        return 1;
+    }
+    if token_kind_tag(tokens[1]) != 4 {
+        print("FAIL basic: token 1 should be Plus");
+        return 1;
+    }
+    if token_kind_tag(tokens[2]) != 1 {
+        print("FAIL basic: token 2 should be Number");
+        return 1;
+    }
+    if token_kind_tag(tokens[3]) != 8 {
+        print("FAIL basic: token 3 should be Eof");
+        return 1;
+    }
+    print("  basic_state_transitions: OK");
+    0
+}
+
+fn test_variant_matching() -> Int {
+    let tok = TokenKind.Number(42);
+    let val = match tok {
+        Number(n) => n,
+        _ => -1,
+    };
+    if val != 42 {
+        print(f"FAIL variant match: expected 42, got {val}");
+        return 1;
+    }
+
+    let tok2 = TokenKind.Ident("foo");
+    let name = match tok2 {
+        Ident(s) => s,
+        _ => "unknown",
+    };
+    if name != "foo" {
+        print(f"FAIL ident match: expected 'foo', got '{name}'");
+        return 1;
+    }
+
+    print("  variant_matching: OK");
+    0
+}
+
+fn test_nested_match() -> Int {
+    // Simulate precedence check via nested match
+    let op1 = TokenKind.Plus;
+    let op2 = TokenKind.Star;
+
+    let prec1 = match op1 {
+        Plus => 1,
+        Minus => 1,
+        Star => 2,
+        _ => 0,
+    };
+    let prec2 = match op2 {
+        Plus => 1,
+        Minus => 1,
+        Star => 2,
+        _ => 0,
+    };
+
+    if prec1 >= prec2 {
+        print(f"FAIL nested_match: + precedence ({prec1}) should be < * ({prec2})");
+        return 1;
+    }
+    print("  nested_match: OK");
+    0
+}
+
+fn test_state_machine_ident() -> Int {
+    let mut tokens = List.new();
+    let mut state = LexerState.Ready;
+
+    let input = "abc 123";
+    let mut i = 0;
+    while i < input.len() {
+        state = step_lexer(state, match input.byte_at(i) { Some(v) => v, None => 0, }, &mut tokens);
+        i = i + 1;
+    }
+    flush_state(state, &mut tokens);
+
+    // Expect: Ident("?"), Number(123), Eof
+    // Note: char_to_text returns "?" for alpha — we're testing state transitions not char conversion
+    if tokens.len() != 3 {
+        print(f"FAIL ident: expected 3 tokens, got {tokens.len()}");
+        return 1;
+    }
+    if token_kind_tag(tokens[0]) != 0 {
+        print("FAIL ident: token 0 should be Ident");
+        return 1;
+    }
+    if token_kind_tag(tokens[1]) != 1 {
+        print("FAIL ident: token 1 should be Number");
+        return 1;
+    }
+    print("  state_machine_ident: OK");
+    0
+}
+
+fn test_exhaustive_match() -> Int {
+    // Ensure all variants are handled
+    let variants = [
+        TokenKind.Ident("x"),
+        TokenKind.Number(0),
+        TokenKind.LParen,
+        TokenKind.RParen,
+        TokenKind.Plus,
+        TokenKind.Minus,
+        TokenKind.Star,
+        TokenKind.Equals,
+        TokenKind.Eof,
+    ];
+
+    let mut i = 0;
+    while i < variants.len() {
+        let tag = token_kind_tag(variants[i]);
+        if tag != i {
+            print(f"FAIL exhaustive: variant {i} has tag {tag}");
+            return 1;
+        }
+        i = i + 1;
+    }
+    print("  exhaustive_match: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_basic_state_transitions();
+    failures = failures + test_variant_matching();
+    failures = failures + test_nested_match();
+    failures = failures + test_state_machine_ident();
+    failures = failures + test_exhaustive_match();
+
+    if failures == 0 {
+        print("All enum state machine tests passed");
+    }
+    failures
+}

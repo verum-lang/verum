@@ -1,0 +1,165 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, types
+
+// Type-related keyword tests
+
+// The 'type' keyword for type definitions
+type SimpleAlias is Int;
+
+// Record type definition
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+// Variant type definition (sum type)
+type Maybe<T> is None | Some(T);
+
+type Result<T, E> is
+    Ok(T)
+    | Err(E);
+
+type Tree<T> is
+    Leaf(T)
+    | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>>, value: T };
+
+// Protocol definition
+type Comparable is protocol {
+    fn compare(&self, other: &Self) -> Ordering;
+};
+
+// Newtype pattern
+type UserId is (Int);
+type Email is (Text);
+
+// Unit type
+type Unit is ();
+
+// Tuple struct equivalent
+type Pair<A, B> is (A, B);
+type Triple<A, B, C> is (A, B, C);
+
+// Generic type definitions
+type Container<T> is {
+    data: List<T>,
+    size: usize,
+};
+
+type Map<K, V> is {
+    entries: List<(K, V)>,
+};
+
+// Type with constraints
+type PositiveInt is Int;
+
+type NonEmptyList<T> is List<T>;
+
+// Affine type (move semantics)
+type affine Handle is {
+    inner: RawHandle,
+};
+
+// Type with visibility
+pub type PublicType is { data: Int };
+type InternalType is { data: Int };
+
+// Associated type usage
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// Implement keyword for implementations
+implement Comparable for Int {
+    fn compare(&self, other: &Self) -> Ordering {
+        if self < other { Ordering.Less }
+        else if self > other { Ordering.Greater }
+        else { Ordering.Equal }
+    }
+}
+
+// Implement protocol for type
+implement Iterator for Range<Int> {
+    type Item is Int;
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+}
+
+// Context definition
+context Database {
+    fn query(sql: Text) -> Result<Rows, DbError>;
+    fn execute(sql: Text) -> Result<usize, DbError>;
+}
+
+// Using keyword for context requirements
+fn fetch_users() -> List<User> using [Database] {
+    Database.query("SELECT * FROM users")
+        .unwrap()
+        .map(|row| User.from_row(row))
+}
+
+// Meta keyword for compile-time
+meta fn const_len<const N: Int>() -> Int {
+    N
+}
+
+// Protocol extension
+type Ordered is protocol extends Comparable {
+    fn lt(&self, other: &Self) -> Bool {
+        self.compare(other) == Ordering.Less
+    }
+};
+
+// Default implementations in protocol
+type Default is protocol {
+    fn default() -> Self;
+};
+
+// Higher-kinded type placeholder
+type Functor is protocol {
+    type F<_>;
+    fn map<A, B>(self: Self.F<A>, f: fn(A) -> B) -> Self.F<B>;
+};
+
+// GenRef for generation-aware references
+type LendingIterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<GenRef<Self.Item>>;
+};
+
+// Type bounds in generics
+fn sort<T: Comparable>(list: &mut List<T>) {
+    // Implementation
+}
+
+// Multiple type bounds
+fn format_and_compare<T: Display + Comparable>(a: T, b: T) -> Text {
+    f"{a} vs {b}: {a.compare(b)}"
+}
+
+// Where clause for type constraints
+fn complex_generic<T, U>(a: T, b: U) -> Text
+where type T: Display + Clone,
+      type U: Debug
+{
+    f"a = {a}, b = {b:?}"
+}
+
+// Type aliases in impl
+implement Container<Int> {
+    type Element is Int;
+
+    fn first(&self) -> Maybe<Int> {
+        self.data.first()
+    }
+}

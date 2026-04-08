@@ -1,0 +1,387 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, knapsack, dynamic-programming
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: 0/1 knapsack problem with DP
+
+// =============================================================================
+// Item arrays (weights and values, up to 6 items)
+// =============================================================================
+
+type Arr6 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int };
+
+fn arr6_new() -> Arr6 {
+    Arr6 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0 }
+}
+
+fn arr6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else { 0 }
+}
+
+fn arr6_set(a: Arr6, i: Int, val: Int) -> Arr6 {
+    Arr6 {
+        a0: if i == 0 { val } else { a.a0 },
+        a1: if i == 1 { val } else { a.a1 },
+        a2: if i == 2 { val } else { a.a2 },
+        a3: if i == 3 { val } else { a.a3 },
+        a4: if i == 4 { val } else { a.a4 },
+        a5: if i == 5 { val } else { a.a5 }
+    }
+}
+
+// =============================================================================
+// 1D DP array (capacity up to 16)
+// =============================================================================
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr16_new() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else if i == 15 { a.a15 }
+    else { 0 }
+}
+
+fn arr16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { val } else { a.a0 },
+        a1: if i == 1 { val } else { a.a1 },
+        a2: if i == 2 { val } else { a.a2 },
+        a3: if i == 3 { val } else { a.a3 },
+        a4: if i == 4 { val } else { a.a4 },
+        a5: if i == 5 { val } else { a.a5 },
+        a6: if i == 6 { val } else { a.a6 },
+        a7: if i == 7 { val } else { a.a7 },
+        a8: if i == 8 { val } else { a.a8 },
+        a9: if i == 9 { val } else { a.a9 },
+        a10: if i == 10 { val } else { a.a10 },
+        a11: if i == 11 { val } else { a.a11 },
+        a12: if i == 12 { val } else { a.a12 },
+        a13: if i == 13 { val } else { a.a13 },
+        a14: if i == 14 { val } else { a.a14 },
+        a15: if i == 15 { val } else { a.a15 }
+    }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// =============================================================================
+// 0/1 Knapsack using 1D DP (space-optimized)
+// weights: item weights, values: item values, n: number of items, cap: capacity
+// =============================================================================
+
+fn knapsack(weights: Arr6, values: Arr6, n: Int, cap: Int) -> Int {
+    let mut dp = arr16_new();
+    // For each item
+    let mut i = 0;
+    while i < n {
+        let wi = arr6_get(weights, i);
+        let vi = arr6_get(values, i);
+        // Traverse capacity from cap down to wi (to avoid reusing item)
+        let mut w = cap;
+        while w >= wi {
+            let without = arr16_get(dp, w);
+            let with_item = arr16_get(dp, w - wi) + vi;
+            dp = arr16_set(dp, w, max_val(without, with_item));
+            w = w - 1;
+        }
+        i = i + 1;
+    }
+    arr16_get(dp, cap)
+}
+
+// =============================================================================
+// Knapsack with solution tracing (which items were selected)
+// Uses 2D DP via repeated 1D rows
+// Returns a bitmask of selected items
+// =============================================================================
+
+type KnapsackResult is { best_val: Int, selected: Arr6 };
+
+fn knapsack_trace(weights: Arr6, values: Arr6, n: Int, cap: Int) -> KnapsackResult {
+    // Build 2D DP table using array of rows
+    // dp_prev = previous row, dp_curr = current row
+    let mut dp_prev = arr16_new();
+    let mut dp_curr = arr16_new();
+
+    // Store all rows for traceback (up to 6 items, store each row)
+    // We need (n+1) rows. Use 7 Arr16s stored in fields.
+    // For simplicity, just recompute during traceback.
+
+    // Forward pass: standard 1D knapsack
+    let best = knapsack(weights, values, n, cap);
+
+    // Traceback: determine which items are included
+    // Recompute using 2D approach with stored rows
+    // row_i stores dp[i][0..cap]
+    let mut row0 = arr16_new();
+    let mut row1 = arr16_new();
+    let mut row2 = arr16_new();
+    let mut row3 = arr16_new();
+    let mut row4 = arr16_new();
+    let mut row5 = arr16_new();
+    let mut row6 = arr16_new();
+
+    // Fill row by row
+    let mut i = 0;
+    while i < n {
+        let wi = arr6_get(weights, i);
+        let vi = arr6_get(values, i);
+        let prev = if i == 0 { row0 }
+                   else if i == 1 { row1 }
+                   else if i == 2 { row2 }
+                   else if i == 3 { row3 }
+                   else if i == 4 { row4 }
+                   else { row5 };
+        let mut curr = prev;
+        let mut w = cap;
+        while w >= wi {
+            let without = arr16_get(prev, w);
+            let with_item = arr16_get(prev, w - wi) + vi;
+            if with_item > without {
+                curr = arr16_set(curr, w, with_item);
+            }
+            w = w - 1;
+        }
+        // Store curr in the right row slot
+        if i == 0 { row1 = curr; }
+        else if i == 1 { row2 = curr; }
+        else if i == 2 { row3 = curr; }
+        else if i == 3 { row4 = curr; }
+        else if i == 4 { row5 = curr; }
+        else { row6 = curr; }
+        i = i + 1;
+    }
+
+    // Traceback
+    let mut sel = arr6_new();
+    let mut w = cap;
+    let mut j = n - 1;
+    while j >= 0 {
+        let curr_row = if j == 0 { row1 }
+                       else if j == 1 { row2 }
+                       else if j == 2 { row3 }
+                       else if j == 3 { row4 }
+                       else if j == 4 { row5 }
+                       else { row6 };
+        let prev_row = if j == 0 { row0 }
+                       else if j == 1 { row1 }
+                       else if j == 2 { row2 }
+                       else if j == 3 { row3 }
+                       else if j == 4 { row4 }
+                       else { row5 };
+        if arr16_get(curr_row, w) != arr16_get(prev_row, w) {
+            sel = arr6_set(sel, j, 1);
+            w = w - arr6_get(weights, j);
+        }
+        j = j - 1;
+    }
+
+    KnapsackResult { best_val: best, selected: sel }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_basic_knapsack() {
+    // Items: (weight, value) = (2,3), (3,4), (4,5), (5,6)
+    // Capacity = 8
+    let mut wt = arr6_new();
+    wt = arr6_set(wt, 0, 2);
+    wt = arr6_set(wt, 1, 3);
+    wt = arr6_set(wt, 2, 4);
+    wt = arr6_set(wt, 3, 5);
+
+    let mut val = arr6_new();
+    val = arr6_set(val, 0, 3);
+    val = arr6_set(val, 1, 4);
+    val = arr6_set(val, 2, 5);
+    val = arr6_set(val, 3, 6);
+
+    // Best: items 0+1+2 (weight=9 too heavy), or 0+1 (weight=5, val=7),
+    // or 0+3 (weight=7, val=9), or 1+3 (weight=8, val=10), or 1+2 (weight=7, val=9)
+    // Best is item 1+3: weight=8, value=10
+    let result = knapsack(wt, val, 4, 8);
+    assert_eq(result, 10);
+}
+
+fn test_classic_knapsack() {
+    // Classic example: items (1,1), (3,4), (4,5), (5,7)
+    // Capacity = 7
+    let mut wt = arr6_new();
+    wt = arr6_set(wt, 0, 1);
+    wt = arr6_set(wt, 1, 3);
+    wt = arr6_set(wt, 2, 4);
+    wt = arr6_set(wt, 3, 5);
+
+    let mut val = arr6_new();
+    val = arr6_set(val, 0, 1);
+    val = arr6_set(val, 1, 4);
+    val = arr6_set(val, 2, 5);
+    val = arr6_set(val, 3, 7);
+
+    // Best: items 1+2 (weight=7, val=9) or 0+3 (weight=6, val=8)
+    // or 0+1+2 (weight=8, too heavy), 0+1 (weight=4, val=5)
+    // Best: items 1+2: weight=7, value=9
+    let result = knapsack(wt, val, 4, 7);
+    assert_eq(result, 9);
+}
+
+fn test_single_item_fits() {
+    let mut wt = arr6_new();
+    wt = arr6_set(wt, 0, 5);
+    let mut val = arr6_new();
+    val = arr6_set(val, 0, 10);
+    assert_eq(knapsack(wt, val, 1, 5), 10);
+    assert_eq(knapsack(wt, val, 1, 10), 10);
+}
+
+fn test_single_item_no_fit() {
+    let mut wt = arr6_new();
+    wt = arr6_set(wt, 0, 5);
+    let mut val = arr6_new();
+    val = arr6_set(val, 0, 10);
+    assert_eq(knapsack(wt, val, 1, 4), 0);
+    assert_eq(knapsack(wt, val, 1, 0), 0);
+}
+
+fn test_all_items_fit() {
+    let mut wt = arr6_new();
+    wt = arr6_set(wt, 0, 1);
+    wt = arr6_set(wt, 1, 2);
+    wt = arr6_set(wt, 2, 3);
+    let mut val = arr6_new();
+    val = arr6_set(val, 0, 10);
+    val = arr6_set(val, 1, 20);
+    val = arr6_set(val, 2, 30);
+    // All fit in capacity 6
+    assert_eq(knapsack(wt, val, 3, 6), 60);
+    // All fit in capacity 10
+    assert_eq(knapsack(wt, val, 3, 10), 60);
+}
+
+fn test_zero_capacity() {
+    let mut wt = arr6_new();
+    wt = arr6_set(wt, 0, 1);
+    let mut val = arr6_new();
+    val = arr6_set(val, 0, 100);
+    assert_eq(knapsack(wt, val, 1, 0), 0);
+}
+
+fn test_five_items() {
+    // (weight, value): (2,6), (2,10), (3,12), (7,13), (1,5)
+    // Capacity = 10
+    let mut wt = arr6_new();
+    wt = arr6_set(wt, 0, 2);
+    wt = arr6_set(wt, 1, 2);
+    wt = arr6_set(wt, 2, 3);
+    wt = arr6_set(wt, 3, 7);
+    wt = arr6_set(wt, 4, 1);
+
+    let mut val = arr6_new();
+    val = arr6_set(val, 0, 6);
+    val = arr6_set(val, 1, 10);
+    val = arr6_set(val, 2, 12);
+    val = arr6_set(val, 3, 13);
+    val = arr6_set(val, 4, 5);
+
+    // Best: items 0,1,2,4 (weight=2+2+3+1=8, value=6+10+12+5=33)
+    let result = knapsack(wt, val, 5, 10);
+    assert_eq(result, 33);
+}
+
+fn test_traceback() {
+    let mut wt = arr6_new();
+    wt = arr6_set(wt, 0, 2);
+    wt = arr6_set(wt, 1, 3);
+    wt = arr6_set(wt, 2, 4);
+    wt = arr6_set(wt, 3, 5);
+
+    let mut val = arr6_new();
+    val = arr6_set(val, 0, 3);
+    val = arr6_set(val, 1, 4);
+    val = arr6_set(val, 2, 5);
+    val = arr6_set(val, 3, 6);
+
+    let r = knapsack_trace(wt, val, 4, 8);
+    assert_eq(r.best_val, 10);
+    // Items 1 and 3 selected
+    assert_eq(arr6_get(r.selected, 1), 1);
+    assert_eq(arr6_get(r.selected, 3), 1);
+    // Verify total weight
+    let total_weight = arr6_get(r.selected, 0) * arr6_get(wt, 0)
+                     + arr6_get(r.selected, 1) * arr6_get(wt, 1)
+                     + arr6_get(r.selected, 2) * arr6_get(wt, 2)
+                     + arr6_get(r.selected, 3) * arr6_get(wt, 3);
+    assert(total_weight <= 8);
+}
+
+fn test_increasing_capacity() {
+    // Same items, increasing capacity should give >= previous result
+    let mut wt = arr6_new();
+    wt = arr6_set(wt, 0, 2);
+    wt = arr6_set(wt, 1, 3);
+    wt = arr6_set(wt, 2, 5);
+    let mut val = arr6_new();
+    val = arr6_set(val, 0, 4);
+    val = arr6_set(val, 1, 5);
+    val = arr6_set(val, 2, 8);
+
+    let mut prev = 0;
+    let mut c = 0;
+    while c <= 10 {
+        let curr = knapsack(wt, val, 3, c);
+        assert(curr >= prev);
+        prev = curr;
+        c = c + 1;
+    }
+}
+
+fn main() -> Int {
+    test_basic_knapsack();
+    test_classic_knapsack();
+    test_single_item_fits();
+    test_single_item_no_fit();
+    test_all_items_fit();
+    test_zero_capacity();
+    test_five_items();
+    test_traceback();
+    test_increasing_capacity();
+    print("[OK] 248_interp_knapsack");
+    0
+}

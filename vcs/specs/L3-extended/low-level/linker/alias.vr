@@ -1,0 +1,81 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, linker, alias, symbols
+// @description: Symbol aliasing tests for backwards compatibility and ABI control
+
+/// The original implementation
+fn original_implementation() -> Int {
+    42
+}
+
+/// Symbol alias to the original
+/// Used for backwards compatibility when renaming APIs
+@alias(original_implementation)
+fn legacy_api_name() -> Int;
+
+/// Another example: versioned symbol
+fn calculate_v2(x: Int, y: Int) -> Int {
+    x * y + x
+}
+
+/// Alias for version 1 compatibility
+@alias(calculate_v2)
+fn calculate(x: Int, y: Int) -> Int;
+
+/// Global variable aliasing
+let CURRENT_VERSION: Int = 2;
+
+/// Alias for legacy code expecting old name
+@alias(CURRENT_VERSION)
+let VERSION: Int = CURRENT_VERSION;
+
+/// Weak alias - can be overridden
+@weak
+@alias(original_implementation)
+fn overridable_hook() -> Int;
+
+/// Internal implementation with external alias
+@linkage(internal)
+fn internal_impl() -> Int {
+    100
+}
+
+/// Export under different name
+@alias(internal_impl)
+@linkage(external)
+fn exported_name() -> Int;
+
+/// C ABI compatible alias
+@export("C")
+fn verum_strlen(s: &[Byte]) -> Int {
+    // Verum implementation
+    s.len()
+}
+
+/// Alias with C naming convention
+@alias(verum_strlen)
+@export("C", name = "strlen")
+fn c_strlen(s: &[Byte]) -> Int;
+
+fn main() {
+    // Both names call the same function
+    let a = original_implementation();
+    let b = legacy_api_name();
+    assert(a == b);
+    assert(a == 42);
+
+    // Versioned API
+    let c = calculate_v2(3, 4);
+    let d = calculate(3, 4);
+    assert(c == d);
+    assert(c == 15);
+
+    // Global alias
+    assert(CURRENT_VERSION == 2);
+    assert(VERSION == 2);
+
+    // Internal with external alias
+    let e = exported_name();
+    assert(e == 100);
+}

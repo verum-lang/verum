@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test UInt16 type constants (MIN, MAX, BITS)
+
+fn main() {
+    // Test UInt16.MIN
+    assert_eq(UInt16.MIN(), 0);
+
+    // Test UInt16.MAX (2^16 - 1 = 65535)
+    assert_eq(UInt16.MAX(), 65535);
+
+    // Test UInt16.BITS
+    assert_eq(UInt16.BITS(), 16);
+
+    // Test u16 alias (FFI compatibility)
+    assert_eq(u16.MIN(), 0);
+    assert_eq(u16.MAX(), 65535);
+    assert_eq(u16.BITS(), 16);
+}

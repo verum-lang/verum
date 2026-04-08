@@ -1,0 +1,309 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, binary-tree, bst, data-structure
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: array-based binary search tree.
+// Index 0 = root, left child of i = 2*i+1, right child = 2*i+2.
+// Empty slots marked with sentinel value -999999.
+
+// =============================================================================
+// Array storage for tree (16 slots = depth up to 3)
+// =============================================================================
+
+type Tree16 is { v0: Int, v1: Int, v2: Int, v3: Int,
+                 v4: Int, v5: Int, v6: Int, v7: Int,
+                 v8: Int, v9: Int, v10: Int, v11: Int,
+                 v12: Int, v13: Int, v14: Int, v15: Int };
+
+fn tree_get(t: Tree16, i: Int) -> Int {
+    if i == 0 { t.v0 } else if i == 1 { t.v1 }
+    else if i == 2 { t.v2 } else if i == 3 { t.v3 }
+    else if i == 4 { t.v4 } else if i == 5 { t.v5 }
+    else if i == 6 { t.v6 } else if i == 7 { t.v7 }
+    else if i == 8 { t.v8 } else if i == 9 { t.v9 }
+    else if i == 10 { t.v10 } else if i == 11 { t.v11 }
+    else if i == 12 { t.v12 } else if i == 13 { t.v13 }
+    else if i == 14 { t.v14 } else { t.v15 }
+}
+
+fn tree_set(t: Tree16, i: Int, val: Int) -> Tree16 {
+    Tree16 {
+        v0: if i == 0 { val } else { t.v0 },
+        v1: if i == 1 { val } else { t.v1 },
+        v2: if i == 2 { val } else { t.v2 },
+        v3: if i == 3 { val } else { t.v3 },
+        v4: if i == 4 { val } else { t.v4 },
+        v5: if i == 5 { val } else { t.v5 },
+        v6: if i == 6 { val } else { t.v6 },
+        v7: if i == 7 { val } else { t.v7 },
+        v8: if i == 8 { val } else { t.v8 },
+        v9: if i == 9 { val } else { t.v9 },
+        v10: if i == 10 { val } else { t.v10 },
+        v11: if i == 11 { val } else { t.v11 },
+        v12: if i == 12 { val } else { t.v12 },
+        v13: if i == 13 { val } else { t.v13 },
+        v14: if i == 14 { val } else { t.v14 },
+        v15: if i == 15 { val } else { t.v15 }
+    }
+}
+
+fn empty_val() -> Int { -999999 }
+
+fn tree_empty() -> Tree16 {
+    let e = -999999;
+    Tree16 { v0: e, v1: e, v2: e, v3: e, v4: e, v5: e, v6: e, v7: e,
+             v8: e, v9: e, v10: e, v11: e, v12: e, v13: e, v14: e, v15: e }
+}
+
+fn left_child(i: Int) -> Int { 2 * i + 1 }
+fn right_child(i: Int) -> Int { 2 * i + 2 }
+
+// =============================================================================
+// BST insert (iterative)
+// =============================================================================
+
+fn bst_insert(t: Tree16, val: Int) -> Tree16 {
+    // If tree is empty at root
+    if tree_get(t, 0) == empty_val() {
+        return tree_set(t, 0, val);
+    }
+    let mut idx = 0;
+    let mut done = false;
+    let mut result = t;
+    while !done {
+        let cur = tree_get(result, idx);
+        if val < cur {
+            let li = left_child(idx);
+            if li >= 16 {
+                done = true;
+            } else if tree_get(result, li) == empty_val() {
+                result = tree_set(result, li, val);
+                done = true;
+            } else {
+                idx = li;
+            }
+        } else if val > cur {
+            let ri = right_child(idx);
+            if ri >= 16 {
+                done = true;
+            } else if tree_get(result, ri) == empty_val() {
+                result = tree_set(result, ri, val);
+                done = true;
+            } else {
+                idx = ri;
+            }
+        } else {
+            // Duplicate, ignore
+            done = true;
+        }
+    }
+    result
+}
+
+// =============================================================================
+// BST search
+// =============================================================================
+
+fn bst_search(t: Tree16, val: Int) -> Bool {
+    let mut idx = 0;
+    while idx < 16 {
+        let cur = tree_get(t, idx);
+        if cur == empty_val() {
+            return false;
+        }
+        if val == cur {
+            return true;
+        } else if val < cur {
+            idx = left_child(idx);
+        } else {
+            idx = right_child(idx);
+        }
+    }
+    false
+}
+
+// =============================================================================
+// Count nodes (non-empty slots reachable from root)
+// =============================================================================
+
+fn count_nodes_at(t: Tree16, idx: Int) -> Int {
+    if idx >= 16 { return 0; }
+    if tree_get(t, idx) == empty_val() { return 0; }
+    // Count this node + left subtree + right subtree
+    // Use iterative BFS-like counting
+    1
+}
+
+fn bst_count(t: Tree16) -> Int {
+    // Count all non-empty slots
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < 16 {
+        if tree_get(t, i) != empty_val() {
+            cnt = cnt + 1;
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+// =============================================================================
+// Find min and max in BST
+// =============================================================================
+
+fn bst_min(t: Tree16) -> Int {
+    let mut idx = 0;
+    let mut res = tree_get(t, 0);
+    while idx < 16 {
+        let cur = tree_get(t, idx);
+        if cur == empty_val() {
+            return res;
+        }
+        res = cur;
+        idx = left_child(idx);
+    }
+    res
+}
+
+fn bst_max(t: Tree16) -> Int {
+    let mut idx = 0;
+    let mut res = tree_get(t, 0);
+    while idx < 16 {
+        let cur = tree_get(t, idx);
+        if cur == empty_val() {
+            return res;
+        }
+        res = cur;
+        idx = right_child(idx);
+    }
+    res
+}
+
+// =============================================================================
+// In-order traversal sum (left, root, right) — iterative stack-based
+// For verification: in-order traversal of BST visits nodes in sorted order
+// =============================================================================
+
+fn bst_sum(t: Tree16) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 16 {
+        let v = tree_get(t, i);
+        if v != empty_val() {
+            total = total + v;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_empty_tree() {
+    let t = tree_empty();
+    assert_eq(bst_count(t), 0);
+    assert_eq(bst_search(t, 5), false);
+}
+
+fn test_single_insert() {
+    let t = bst_insert(tree_empty(), 10);
+    assert_eq(bst_count(t), 1);
+    assert_eq(tree_get(t, 0), 10);
+    assert_eq(bst_search(t, 10), true);
+    assert_eq(bst_search(t, 5), false);
+}
+
+fn test_balanced_insert() {
+    // Insert 5, then 3, then 7 — creates balanced tree
+    let mut t = tree_empty();
+    t = bst_insert(t, 5);
+    t = bst_insert(t, 3);
+    t = bst_insert(t, 7);
+    assert_eq(bst_count(t), 3);
+    assert_eq(tree_get(t, 0), 5);  // root
+    assert_eq(tree_get(t, 1), 3);  // left child
+    assert_eq(tree_get(t, 2), 7);  // right child
+    assert_eq(bst_search(t, 5), true);
+    assert_eq(bst_search(t, 3), true);
+    assert_eq(bst_search(t, 7), true);
+    assert_eq(bst_search(t, 4), false);
+}
+
+fn test_deeper_tree() {
+    // Insert: 10, 5, 15, 3, 7, 12, 20
+    let mut t = tree_empty();
+    t = bst_insert(t, 10);
+    t = bst_insert(t, 5);
+    t = bst_insert(t, 15);
+    t = bst_insert(t, 3);
+    t = bst_insert(t, 7);
+    t = bst_insert(t, 12);
+    t = bst_insert(t, 20);
+    assert_eq(bst_count(t), 7);
+    // Structure:
+    //        10 (0)
+    //       /    \
+    //     5(1)  15(2)
+    //    / \    / \
+    //  3(3) 7(4) 12(5) 20(6)
+    assert_eq(tree_get(t, 0), 10);
+    assert_eq(tree_get(t, 1), 5);
+    assert_eq(tree_get(t, 2), 15);
+    assert_eq(tree_get(t, 3), 3);
+    assert_eq(tree_get(t, 4), 7);
+    assert_eq(tree_get(t, 5), 12);
+    assert_eq(tree_get(t, 6), 20);
+
+    // Search tests
+    assert_eq(bst_search(t, 10), true);
+    assert_eq(bst_search(t, 3), true);
+    assert_eq(bst_search(t, 20), true);
+    assert_eq(bst_search(t, 8), false);
+    assert_eq(bst_search(t, 0), false);
+}
+
+fn test_min_max() {
+    let mut t = tree_empty();
+    t = bst_insert(t, 10);
+    t = bst_insert(t, 5);
+    t = bst_insert(t, 15);
+    t = bst_insert(t, 3);
+    t = bst_insert(t, 7);
+    assert_eq(bst_min(t), 3);
+    assert_eq(bst_max(t), 15);
+}
+
+fn test_sum() {
+    let mut t = tree_empty();
+    t = bst_insert(t, 10);
+    t = bst_insert(t, 5);
+    t = bst_insert(t, 15);
+    // Sum: 10 + 5 + 15 = 30
+    assert_eq(bst_sum(t), 30);
+}
+
+fn test_duplicate_insert() {
+    let mut t = tree_empty();
+    t = bst_insert(t, 5);
+    t = bst_insert(t, 5);  // duplicate
+    t = bst_insert(t, 5);  // duplicate
+    assert_eq(bst_count(t), 1);
+    assert_eq(tree_get(t, 0), 5);
+}
+
+fn main() -> Int {
+    test_empty_tree();
+    test_single_insert();
+    test_balanced_insert();
+    test_deeper_tree();
+    test_min_max();
+    test_sum();
+    test_duplicate_insert();
+    print("[OK] 232_interp_binary_tree");
+    0
+}

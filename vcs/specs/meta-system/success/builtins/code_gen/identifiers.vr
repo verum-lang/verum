@@ -1,0 +1,77 @@
+// @test: meta-pass
+// @level: L1
+// @description: Tests identifier manipulation builtin functions
+// @tags: meta-system, builtins, code_gen, identifiers
+
+// Test concat_idents - concatenate identifier parts
+meta fn test_concat_idents() -> Bool {
+    let ident = concat_idents("foo", "_", "bar");
+    let check1 = ident == "foo_bar";
+
+    let ident2 = concat_idents("get", "Value");
+    let check2 = ident2 == "getValue";
+
+    let ident3 = concat_idents("PREFIX_", "name", "_SUFFIX");
+    let check3 = ident3 == "PREFIX_name_SUFFIX";
+
+    check1 && check2 && check3
+}
+
+// Test format_ident - format identifier with substitutions
+meta fn test_format_ident() -> Bool {
+    let ident = format_ident("get_{}", "value");
+    let check1 = ident == "get_value";
+
+    let ident2 = format_ident("{}_{}", "foo", "bar");
+    let check2 = ident2 == "foo_bar";
+
+    let ident3 = format_ident("test_{}_{}", "module", "function");
+    let check3 = ident3 == "test_module_function";
+
+    check1 && check2 && check3
+}
+
+// Test identifier with numbers
+meta fn test_ident_with_numbers() -> Bool {
+    let ident = concat_idents("field", "_", "1");
+    let check1 = ident == "field_1";
+
+    let ident2 = format_ident("item_{}", "42");
+    let check2 = ident2 == "item_42";
+
+    check1 && check2
+}
+
+// Test empty parts
+meta fn test_empty_parts() -> Bool {
+    let ident = concat_idents("prefix", "", "suffix");
+    ident == "prefixsuffix"
+}
+
+// Test single part
+meta fn test_single_part() -> Bool {
+    let ident = concat_idents("solo");
+    ident == "solo"
+}
+
+// Test format_ident edge cases
+meta fn test_format_ident_edge_cases() -> Bool {
+    // No placeholders
+    let ident = format_ident("literal_name");
+    let check1 = ident == "literal_name";
+
+    // Multiple same placeholders
+    let ident2 = format_ident("{0}_{0}", "repeat");
+    let check2 = ident2 == "repeat_repeat";
+
+    check1 && check2
+}
+
+fn main() {
+    @const assert(test_concat_idents());
+    @const assert(test_format_ident());
+    @const assert(test_ident_with_numbers());
+    @const assert(test_empty_parts());
+    @const assert(test_single_part());
+    @const assert(test_format_ident_edge_cases());
+}

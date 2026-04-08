@@ -1,0 +1,187 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, gpu, device
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU device management simulation — create, activate, query properties, memory tracking
+
+// ============================================================================
+// GpuDevice: Simulated GPU device state
+// ============================================================================
+
+type GpuDevice is {
+    id: Int,
+    active: Int,
+    memory_total: Int,
+    memory_used: Int,
+    compute_units: Int
+};
+
+fn device_create(dev_id: Int, total_mem: Int, units: Int) -> GpuDevice {
+    GpuDevice {
+        id: dev_id,
+        active: 0,
+        memory_total: total_mem,
+        memory_used: 0,
+        compute_units: units
+    }
+}
+
+fn device_activate(d: GpuDevice) -> GpuDevice {
+    GpuDevice {
+        id: d.id, active: 1,
+        memory_total: d.memory_total,
+        memory_used: d.memory_used,
+        compute_units: d.compute_units
+    }
+}
+
+fn device_deactivate(d: GpuDevice) -> GpuDevice {
+    GpuDevice {
+        id: d.id, active: 0,
+        memory_total: d.memory_total,
+        memory_used: d.memory_used,
+        compute_units: d.compute_units
+    }
+}
+
+fn device_free_memory(d: GpuDevice) -> Int {
+    d.memory_total - d.memory_used
+}
+
+fn device_use_memory(d: GpuDevice, amount: Int) -> GpuDevice {
+    GpuDevice {
+        id: d.id, active: d.active,
+        memory_total: d.memory_total,
+        memory_used: d.memory_used + amount,
+        compute_units: d.compute_units
+    }
+}
+
+fn device_release_memory(d: GpuDevice, amount: Int) -> GpuDevice {
+    let new_used = d.memory_used - amount;
+    let clamped = if new_used < 0 { 0 } else { new_used };
+    GpuDevice {
+        id: d.id, active: d.active,
+        memory_total: d.memory_total,
+        memory_used: clamped,
+        compute_units: d.compute_units
+    }
+}
+
+// ============================================================================
+// Test 1: Device creation
+// ============================================================================
+
+@test
+fn test_device_creation() {
+    let d = device_create(0, 8192, 64);
+    assert_eq(d.id, 0);
+    assert_eq(d.active, 0);
+    assert_eq(d.memory_total, 8192);
+    assert_eq(d.memory_used, 0);
+    assert_eq(d.compute_units, 64);
+    assert_eq(device_free_memory(d), 8192);
+    print("  test_device_creation: ok");
+}
+
+// ============================================================================
+// Test 2: Activation toggle
+// ============================================================================
+
+@test
+fn test_activation() {
+    let d = device_create(1, 4096, 32);
+    assert_eq(d.active, 0);
+
+    let d1 = device_activate(d);
+    assert_eq(d1.active, 1);
+    assert_eq(d1.id, 1);
+
+    let d2 = device_deactivate(d1);
+    assert_eq(d2.active, 0);
+
+    // Re-activate
+    let d3 = device_activate(d2);
+    assert_eq(d3.active, 1);
+    print("  test_activation: ok");
+}
+
+// ============================================================================
+// Test 3: Memory tracking
+// ============================================================================
+
+@test
+fn test_memory_tracking() {
+    let d = device_create(0, 1000, 16);
+    assert_eq(device_free_memory(d), 1000);
+
+    let d1 = device_use_memory(d, 300);
+    assert_eq(d1.memory_used, 300);
+    assert_eq(device_free_memory(d1), 700);
+
+    let d2 = device_use_memory(d1, 200);
+    assert_eq(d2.memory_used, 500);
+    assert_eq(device_free_memory(d2), 500);
+
+    let d3 = device_release_memory(d2, 100);
+    assert_eq(d3.memory_used, 400);
+    assert_eq(device_free_memory(d3), 600);
+    print("  test_memory_tracking: ok");
+}
+
+// ============================================================================
+// Test 4: Multiple devices
+// ============================================================================
+
+@test
+fn test_multiple_devices() {
+    let d0 = device_create(0, 8192, 64);
+    let d1 = device_create(1, 4096, 32);
+    let d2 = device_create(2, 16384, 128);
+
+    assert_eq(d0.id, 0);
+    assert_eq(d1.id, 1);
+    assert_eq(d2.id, 2);
+
+    let d0a = device_activate(d0);
+    let d2a = device_activate(d2);
+    assert_eq(d0a.active, 1);
+    assert_eq(d1.active, 0);
+    assert_eq(d2a.active, 1);
+
+    // Total memory across devices
+    let total = d0.memory_total + d1.memory_total + d2.memory_total;
+    assert_eq(total, 28672);
+    print("  test_multiple_devices: ok");
+}
+
+// ============================================================================
+// Test 5: Memory release clamp
+// ============================================================================
+
+@test
+fn test_memory_release_clamp() {
+    let d = device_create(0, 1000, 8);
+    let d1 = device_use_memory(d, 100);
+    // Release more than used: clamp to 0
+    let d2 = device_release_memory(d1, 500);
+    assert_eq(d2.memory_used, 0);
+    assert_eq(device_free_memory(d2), 1000);
+    print("  test_memory_release_clamp: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_device_creation();
+    test_activation();
+    test_memory_tracking();
+    test_multiple_devices();
+    test_memory_release_clamp();
+    print("[OK] 137_gpu_opcode_device");
+    0
+}

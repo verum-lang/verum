@@ -1,0 +1,66 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, unop
+// @expected-exit: 0
+
+// Tests REAL tensor unary operations through AOT pipeline.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_unop(t: Int, op: Int) -> Int { @intrinsic("TENSOR_UNOP", t, op) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    // Handle -0.0 vs 0.0: both have expected_val=0 but different bit patterns.
+    // In IEEE 754, -0.0 == 0.0, so treat both as equal when expected is 0.
+    if a == b { 0 }
+    else if expected_val == 0 && (a == 0 || a == -9223372036854775808) { 0 }
+    else { 1 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    let t = tensor_new(4, 1);
+    let t = tensor_set_scalar(t, 0, 4);
+    let t = tensor_set_scalar(t, 1, -3);
+    let t = tensor_set_scalar(t, 2, 0);
+    let t = tensor_set_scalar(t, 3, 9);
+
+    let neg = tensor_unop(t, 0);
+    errors = errors + check_val(neg, 0, -4);
+    errors = errors + check_val(neg, 1, 3);
+    errors = errors + check_val(neg, 2, 0);
+
+    let ab = tensor_unop(t, 1);
+    errors = errors + check_val(ab, 0, 4);
+    errors = errors + check_val(ab, 1, 3);
+
+    let relu = tensor_unop(t, 10);
+    errors = errors + check_val(relu, 0, 4);
+    errors = errors + check_val(relu, 1, 0);
+    errors = errors + check_val(relu, 3, 9);
+
+    let sq = tensor_new(2, 1);
+    let sq = tensor_set_scalar(sq, 0, 4);
+    let sq = tensor_set_scalar(sq, 1, 9);
+    let sqr = tensor_unop(sq, 2);
+    errors = errors + check_val(sqr, 0, 2);
+    errors = errors + check_val(sqr, 1, 3);
+
+    let z = tensor_fill(1, 0, 1);
+    let exp_z = tensor_unop(z, 3);
+    errors = errors + check_val(exp_z, 0, 1);
+
+    let one = tensor_fill(1, 1, 1);
+    let log_one = tensor_unop(one, 4);
+    errors = errors + check_val(log_one, 0, 0);
+
+    errors
+}

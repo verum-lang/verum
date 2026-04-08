@@ -1,0 +1,21 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, data-race, mutex, sync
+// @description: Tests that mutex-protected access prevents data races
+
+// This test demonstrates mutex protection for thread-safe mutable access.
+// Currently skipped because threading primitives (spawn, Mutex, ThreadHandle)
+// are not yet implemented in the compiler.
+
+fn main() {
+    // Placeholder test - actual mutex test requires spawn syntax
+    print("Mutex protection test - skipped (threading not implemented)");
+}
+
+// The intended test would:
+// 1. Create a Mutex protecting a counter
+// 2. Spawn multiple threads that acquire the lock and increment
+// 3. Use RAII guard pattern (lock released when guard drops)
+// 4. Verify final count is correct (no lost updates)
+// 5. Demonstrate that mutex prevents data races

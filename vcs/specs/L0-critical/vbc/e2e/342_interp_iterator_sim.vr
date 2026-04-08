@@ -1,0 +1,440 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, iterator, protocol, filter, map, take, skip
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Iterator simulation — next/has_next protocol,
+// filter, map, take, skip using record-based state machines.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Iterator over array: record holding data + cursor
+// =============================================================================
+
+type ArrayIter is { data: Arr8, len: Int, cursor: Int };
+
+type IterNext is { value: Int, has_value: Int, iter: ArrayIter };
+
+fn iter_new(data: Arr8, len: Int) -> ArrayIter {
+    ArrayIter { data: data, len: len, cursor: 0 }
+}
+
+fn iter_has_next(it: ArrayIter) -> Int {
+    if it.cursor < it.len { 1 } else { 0 }
+}
+
+fn iter_next(it: ArrayIter) -> IterNext {
+    if it.cursor >= it.len {
+        IterNext { value: 0, has_value: 0, iter: it }
+    } else {
+        let v = a8_get(it.data, it.cursor);
+        IterNext {
+            value: v,
+            has_value: 1,
+            iter: ArrayIter { data: it.data, len: it.len, cursor: it.cursor + 1 }
+        }
+    }
+}
+
+// Reset iterator to beginning
+fn iter_reset(it: ArrayIter) -> ArrayIter {
+    ArrayIter { data: it.data, len: it.len, cursor: 0 }
+}
+
+// =============================================================================
+// Collect: drain iterator into buffer
+// =============================================================================
+
+type BufArr is { data: Arr8, len: Int };
+
+fn buf_new() -> BufArr {
+    BufArr { data: a8_zeros(), len: 0 }
+}
+
+fn buf_push(b: BufArr, val: Int) -> BufArr {
+    BufArr { data: a8_set(b.data, b.len, val), len: b.len + 1 }
+}
+
+fn buf_get(b: BufArr, i: Int) -> Int {
+    a8_get(b.data, i)
+}
+
+fn iter_collect(it: ArrayIter) -> BufArr {
+    let mut buf = buf_new();
+    let mut cur = it;
+    while iter_has_next(cur) == 1 {
+        let nx = iter_next(cur);
+        buf = buf_push(buf, nx.value);
+        cur = nx.iter;
+    }
+    buf
+}
+
+// =============================================================================
+// Iterator operations: map, filter, take, skip, fold
+// Implemented as functions that consume and produce BufArr via intermediate iteration
+// =============================================================================
+
+fn iter_map_collect(it: ArrayIter, f: fn(Int) -> Int) -> BufArr {
+    let mut buf = buf_new();
+    let mut cur = it;
+    while iter_has_next(cur) == 1 {
+        let nx = iter_next(cur);
+        buf = buf_push(buf, f(nx.value));
+        cur = nx.iter;
+    }
+    buf
+}
+
+fn iter_filter_collect(it: ArrayIter, pred: fn(Int) -> Int) -> BufArr {
+    let mut buf = buf_new();
+    let mut cur = it;
+    while iter_has_next(cur) == 1 {
+        let nx = iter_next(cur);
+        if pred(nx.value) == 1 {
+            buf = buf_push(buf, nx.value);
+        }
+        cur = nx.iter;
+    }
+    buf
+}
+
+fn iter_take_collect(it: ArrayIter, n: Int) -> BufArr {
+    let mut buf = buf_new();
+    let mut cur = it;
+    let mut taken = 0;
+    while iter_has_next(cur) == 1 && taken < n {
+        let nx = iter_next(cur);
+        buf = buf_push(buf, nx.value);
+        cur = nx.iter;
+        taken = taken + 1;
+    }
+    buf
+}
+
+fn iter_skip_collect(it: ArrayIter, n: Int) -> BufArr {
+    let mut cur = it;
+    let mut skipped = 0;
+    while iter_has_next(cur) == 1 && skipped < n {
+        let nx = iter_next(cur);
+        cur = nx.iter;
+        skipped = skipped + 1;
+    }
+    iter_collect(cur)
+}
+
+fn iter_fold(it: ArrayIter, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut cur = it;
+    while iter_has_next(cur) == 1 {
+        let nx = iter_next(cur);
+        acc = f(acc, nx.value);
+        cur = nx.iter;
+    }
+    acc
+}
+
+fn iter_count(it: ArrayIter) -> Int {
+    let mut cnt = 0;
+    let mut cur = it;
+    while iter_has_next(cur) == 1 {
+        let nx = iter_next(cur);
+        cur = nx.iter;
+        cnt = cnt + 1;
+    }
+    cnt
+}
+
+// =============================================================================
+// Transform functions and predicates
+// =============================================================================
+
+fn dbl(x: Int) -> Int { x * 2 }
+fn sqr(x: Int) -> Int { x * x }
+fn inc(x: Int) -> Int { x + 1 }
+
+fn is_even(x: Int) -> Int { if x % 2 == 0 { 1 } else { 0 } }
+fn is_positive(x: Int) -> Int { if x > 0 { 1 } else { 0 } }
+fn is_gt_3(x: Int) -> Int { if x > 3 { 1 } else { 0 } }
+
+fn add_vals(a: Int, b: Int) -> Int { a + b }
+fn mul_vals(a: Int, b: Int) -> Int { a * b }
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_basic_iteration() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 10);
+    arr = a8_set(arr, 1, 20);
+    arr = a8_set(arr, 2, 30);
+
+    let it = iter_new(arr, 3);
+    assert_eq(iter_has_next(it), 1);
+
+    let n1 = iter_next(it);
+    assert_eq(n1.value, 10);
+    assert_eq(n1.has_value, 1);
+
+    let n2 = iter_next(n1.iter);
+    assert_eq(n2.value, 20);
+
+    let n3 = iter_next(n2.iter);
+    assert_eq(n3.value, 30);
+
+    let n4 = iter_next(n3.iter);
+    assert_eq(n4.has_value, 0);
+}
+
+fn test_collect() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 5);
+    arr = a8_set(arr, 1, 10);
+    arr = a8_set(arr, 2, 15);
+
+    let it = iter_new(arr, 3);
+    let buf = iter_collect(it);
+    assert_eq(buf.len, 3);
+    assert_eq(buf_get(buf, 0), 5);
+    assert_eq(buf_get(buf, 1), 10);
+    assert_eq(buf_get(buf, 2), 15);
+}
+
+fn test_map() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 3);
+    arr = a8_set(arr, 3, 4);
+
+    let it = iter_new(arr, 4);
+    let result = iter_map_collect(it, dbl);
+    assert_eq(result.len, 4);
+    assert_eq(buf_get(result, 0), 2);
+    assert_eq(buf_get(result, 1), 4);
+    assert_eq(buf_get(result, 2), 6);
+    assert_eq(buf_get(result, 3), 8);
+}
+
+fn test_filter() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 3);
+    arr = a8_set(arr, 3, 4);
+    arr = a8_set(arr, 4, 5);
+    arr = a8_set(arr, 5, 6);
+
+    let it = iter_new(arr, 6);
+    let result = iter_filter_collect(it, is_even);
+    assert_eq(result.len, 3);
+    assert_eq(buf_get(result, 0), 2);
+    assert_eq(buf_get(result, 1), 4);
+    assert_eq(buf_get(result, 2), 6);
+}
+
+fn test_take() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 10);
+    arr = a8_set(arr, 1, 20);
+    arr = a8_set(arr, 2, 30);
+    arr = a8_set(arr, 3, 40);
+    arr = a8_set(arr, 4, 50);
+
+    let it = iter_new(arr, 5);
+    let result = iter_take_collect(it, 3);
+    assert_eq(result.len, 3);
+    assert_eq(buf_get(result, 0), 10);
+    assert_eq(buf_get(result, 1), 20);
+    assert_eq(buf_get(result, 2), 30);
+}
+
+fn test_skip() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 10);
+    arr = a8_set(arr, 1, 20);
+    arr = a8_set(arr, 2, 30);
+    arr = a8_set(arr, 3, 40);
+    arr = a8_set(arr, 4, 50);
+
+    let it = iter_new(arr, 5);
+    let result = iter_skip_collect(it, 2);
+    assert_eq(result.len, 3);
+    assert_eq(buf_get(result, 0), 30);
+    assert_eq(buf_get(result, 1), 40);
+    assert_eq(buf_get(result, 2), 50);
+}
+
+fn test_fold_sum() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 3);
+    arr = a8_set(arr, 3, 4);
+    arr = a8_set(arr, 4, 5);
+
+    let it = iter_new(arr, 5);
+    let total = iter_fold(it, 0, add_vals);
+    assert_eq(total, 15);
+}
+
+fn test_fold_product() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 3);
+    arr = a8_set(arr, 3, 4);
+
+    let it = iter_new(arr, 4);
+    let prod = iter_fold(it, 1, mul_vals);
+    assert_eq(prod, 24);
+}
+
+fn test_count() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 10);
+    arr = a8_set(arr, 1, 20);
+    arr = a8_set(arr, 2, 30);
+
+    let it = iter_new(arr, 3);
+    assert_eq(iter_count(it), 3);
+
+    let empty = iter_new(a8_zeros(), 0);
+    assert_eq(iter_count(empty), 0);
+}
+
+fn test_map_filter_chain() {
+    // [1,2,3,4,5] -> square -> filter >3 -> collect
+    // [1,4,9,16,25] -> [4,9,16,25]
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 3);
+    arr = a8_set(arr, 3, 4);
+    arr = a8_set(arr, 4, 5);
+
+    let it = iter_new(arr, 5);
+    let mapped = iter_map_collect(it, sqr);
+    // Now create new iterator over the mapped buffer
+    let it2 = iter_new(mapped.data, mapped.len);
+    let filtered = iter_filter_collect(it2, is_gt_3);
+    assert_eq(filtered.len, 4);
+    assert_eq(buf_get(filtered, 0), 4);
+    assert_eq(buf_get(filtered, 1), 9);
+    assert_eq(buf_get(filtered, 2), 16);
+    assert_eq(buf_get(filtered, 3), 25);
+}
+
+fn test_take_skip_complement() {
+    // take(3) + skip(3) should give the whole array
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 10);
+    arr = a8_set(arr, 1, 20);
+    arr = a8_set(arr, 2, 30);
+    arr = a8_set(arr, 3, 40);
+    arr = a8_set(arr, 4, 50);
+
+    let it1 = iter_new(arr, 5);
+    let first_part = iter_take_collect(it1, 3);
+    assert_eq(first_part.len, 3);
+
+    let it2 = iter_new(arr, 5);
+    let second_part = iter_skip_collect(it2, 3);
+    assert_eq(second_part.len, 2);
+
+    // Total elements = 3 + 2 = 5
+    assert_eq(first_part.len + second_part.len, 5);
+    assert_eq(buf_get(first_part, 2), 30);
+    assert_eq(buf_get(second_part, 0), 40);
+}
+
+fn test_empty_iterator() {
+    let it = iter_new(a8_zeros(), 0);
+    assert_eq(iter_has_next(it), 0);
+
+    let nx = iter_next(it);
+    assert_eq(nx.has_value, 0);
+
+    let collected = iter_collect(it);
+    assert_eq(collected.len, 0);
+
+    let mapped = iter_map_collect(it, dbl);
+    assert_eq(mapped.len, 0);
+
+    let taken = iter_take_collect(it, 5);
+    assert_eq(taken.len, 0);
+}
+
+fn test_take_more_than_available() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 42);
+    arr = a8_set(arr, 1, 99);
+
+    let it = iter_new(arr, 2);
+    let result = iter_take_collect(it, 10);
+    assert_eq(result.len, 2);
+    assert_eq(buf_get(result, 0), 42);
+    assert_eq(buf_get(result, 1), 99);
+}
+
+fn test_skip_all() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 3);
+
+    let it = iter_new(arr, 3);
+    let result = iter_skip_collect(it, 10);
+    assert_eq(result.len, 0);
+}
+
+fn main() -> Int {
+    test_basic_iteration();
+    test_collect();
+    test_map();
+    test_filter();
+    test_take();
+    test_skip();
+    test_fold_sum();
+    test_fold_product();
+    test_count();
+    test_map_filter_chain();
+    test_take_skip_complement();
+    test_empty_iterator();
+    test_take_more_than_available();
+    test_skip_all();
+    print("[OK] 342_interp_iterator_sim");
+    0
+}

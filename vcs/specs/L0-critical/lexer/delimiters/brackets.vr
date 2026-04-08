@@ -1,0 +1,199 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, delimiters, brackets
+
+// Bracket delimiters: () [] {} <>
+
+// Parentheses () - grouping, function calls, tuples
+fn test_parentheses() {
+    // Grouping in expressions
+    let grouped = (1 + 2) * 3;
+    let complex = ((1 + 2) * (3 + 4)) / 5;
+    let nested = (((1)));
+    let precedence = 2 * (3 + 4);
+
+    // Empty parentheses (unit type)
+    let unit: () = ();
+
+    // Tuples
+    let pair = (1, 2);
+    let triple = (1, 2, 3);
+    let quad = (1, 2, 3, 4);
+    let mixed = (1, "hello", true, 3.14);
+    let nested_tuple = ((1, 2), (3, 4));
+    let single_trailing = (42,);  // Single element tuple with trailing comma
+
+    // Function calls
+    let result = function();
+    let with_args = function(1, 2, 3);
+    let method_call = object.method();
+    let chained = object.method1().method2();
+
+    // Destructuring with parentheses
+    let (a, b) = (1, 2);
+    let (first, second, third) = triple;
+    let ((x1, y1), (x2, y2)) = nested_tuple;
+}
+
+// Function definitions
+fn no_params() -> Int { 42 }
+fn one_param(x: Int) -> Int { x }
+fn multi_params(x: Int, y: Int, z: Int) -> Int { x + y + z }
+fn with_trailing(a: Int, b: Int,) -> Int { a + b }
+
+// Square brackets [] - arrays, indexing, attributes
+fn test_square_brackets() {
+    // Array literals
+    let empty_arr: List<Int> = [];
+    let numbers = [1, 2, 3, 4, 5];
+    let strings = ["a", "b", "c"];
+    let nested_arr = [[1, 2], [3, 4], [5, 6]];
+    let with_trailing = [1, 2, 3,];
+
+    // Array indexing
+    let first = numbers[0];
+    let last = numbers[4];
+    let nested_val = nested_arr[0][1];
+
+    // Slice indexing
+    let slice = numbers[1..4];
+    let from_start = numbers[..3];
+    let to_end = numbers[2..];
+
+    // Array in expressions
+    let arr_sum = numbers[0] + numbers[1];
+    let arr_prod = numbers[2] * numbers[3];
+}
+
+// Array types
+type IntArray is [Int];
+type Matrix is [[Int]];
+type FixedArray is [Int; 5];
+
+// Attributes use @ syntax in Verum
+@derive(Debug, Clone)
+type Annotated is { value: Int };
+
+@test
+fn test_function() { }
+
+@inline
+@must_use
+fn annotated_function() -> Int { 42 }
+
+// Context dependencies
+fn with_context() using [Database, Logger] { }
+
+// Curly braces {} - blocks, structs, maps
+fn test_curly_braces() {
+    // Code blocks
+    let block_result = {
+        let temp = 10;
+        temp * 2
+    };
+
+    let nested_block = {
+        let outer = {
+            let inner = 5;
+            inner
+        };
+        outer + 1
+    };
+
+    // Struct literals
+    let point = Point { x: 10, y: 20 };
+    let point2 = Point { x: 1, y: 2, };
+
+    // Anonymous structs/records
+    let record = { name: "Alice", age: 30 };
+    let nested_record = { user: { name: "Bob" }, active: true };
+
+    // Map literals
+    let empty_map: Map<Text, Int> = {};
+    let map = { "one": 1, "two": 2, "three": 3 };
+    let map_trailing = { "a": 1, "b": 2, };
+}
+
+// Struct types
+type Point is { x: Int, y: Int };
+
+// Control flow blocks
+fn test_control_flow() {
+    let condition = true;
+    let done = false;
+    let value = 1;
+
+    if condition {
+        do_something();
+    }
+
+    if condition {
+        branch_a();
+    } else {
+        branch_b();
+    }
+
+    while condition {
+        loop_body();
+    }
+
+    for item in collection {
+        process(item);
+    }
+
+    loop {
+        if done { break; }
+    }
+
+    // Match arms
+    match value {
+        1 => { first_case() }
+        2 => { second_case() }
+        _ => { default_case() }
+    }
+
+    // Closure bodies
+    let closure = |x| { x * 2 };
+    let multi_line_closure = |x| {
+        let temp = x * 2;
+        temp + 1
+    };
+}
+
+// Angle brackets <> - generics, comparison
+
+// Generic type parameters
+type Container<T> is { value: T };
+type Pair<T, U> is { first: T, second: U };
+type Triple<A, B, C> is { a: A, b: B, c: C };
+
+// Generic function
+fn identity<T>(x: T) -> T { x }
+fn swap<T, U>(pair: (T, U)) -> (U, T) { (pair.1, pair.0) }
+
+// Generic with constraints
+fn display<T: Display>(item: T) { print(item); }
+fn compare<T: Ord + Eq>(a: T, b: T) -> Bool { a == b }
+
+// Generic instantiation and comparisons
+fn test_generics_and_comparison() {
+    // Generic type instantiation
+    let container: Container<Int> = Container { value: 42 };
+    let pair: Pair<Int, Text> = Pair { first: 1, second: "one" };
+
+    // Comparison operators (also use < >)
+    let less = 1 < 2;
+    let greater = 2 > 1;
+    let less_eq = 1 <= 1;
+    let greater_eq = 2 >= 2;
+
+    // Mixed brackets
+    let complex_type: Map<Text, List<(Int, Int)>> = {};
+    let nested_generic: Container<Container<Int>> = Container { value: Container { value: 42 } };
+
+    // Bracket combinations
+    let arr_of_tuples: [(Int, Int)] = [(1, 2), (3, 4)];
+    let map_of_arrays: Map<Text, [Int]> = { "nums": [1, 2, 3] };
+    let tuple_with_arr = ([1, 2], [3, 4]);
+}

@@ -1,0 +1,208 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, zigzag, encoding, protobuf, varint
+// @timeout: 10000
+
+// Zigzag encoding maps signed integers to unsigned integers so that
+// small absolute values have small encoded values:
+//   0 -> 0, -1 -> 1, 1 -> 2, -2 -> 3, 2 -> 4, -3 -> 5, 3 -> 6, ...
+// Formula: encode(n) = (n << 1) ^ (n >> 63) [for 64-bit]
+//          decode(n) = (n >>> 1) ^ -(n & 1)  [unsigned right shift]
+// We use integer arithmetic equivalents since Verum uses signed Int.
+
+// Zigzag encode: signed -> unsigned-like Int
+fn zigzag_encode(n: Int) -> Int {
+    if n >= 0 {
+        n * 2
+    } else {
+        (0 - n) * 2 - 1
+    }
+}
+
+// Zigzag decode: unsigned-like Int -> signed
+fn zigzag_decode(n: Int) -> Int {
+    if n % 2 == 0 {
+        n / 2
+    } else {
+        0 - (n + 1) / 2
+    }
+}
+
+// Count how many bytes a varint encoding would need
+// (7 bits per byte, MSB is continuation flag)
+fn varint_byte_count(val: Int) -> Int {
+    if val == 0 { return 1; }
+    let mut v = val;
+    let mut count = 0;
+    while v > 0 {
+        v = v / 128;
+        count = count + 1;
+    }
+    count
+}
+
+// Encode value into varint bytes in an Arr8, return count of bytes used
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Encode a non-negative value as varint bytes into Arr8, return (bytes_arr, byte_count)
+// Each byte stores 7 bits of data; bit 7 (value >= 128) means "more bytes follow"
+fn varint_encode_arr(val: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut v = val;
+    let mut i = 0;
+    // v == 0 case: result is all zeros, byte 0 is already 0, which is correct
+    while v > 0 {
+        let byte_val = v % 128;
+        v = v / 128;
+        if v > 0 {
+            // Set continuation bit (add 128)
+            result = set(result, i, byte_val + 128);
+        } else {
+            result = set(result, i, byte_val);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Decode varint bytes from Arr8 back to value
+fn varint_decode_arr(arr: Arr8, n_bytes: Int) -> Int {
+    let mut result = 0;
+    let mut multiplier = 1;
+    let mut i = 0;
+    while i < n_bytes {
+        let byte_val = get(arr, i) % 128;
+        result = result + byte_val * multiplier;
+        multiplier = multiplier * 128;
+        i = i + 1;
+    }
+    result
+}
+
+// Full signed varint: zigzag encode, then varint encode, then decode and zigzag decode
+fn roundtrip(n: Int) -> Int {
+    let encoded = zigzag_encode(n);
+    let bytes = varint_encode_arr(encoded);
+    let bc = varint_byte_count(encoded);
+    let decoded_unsigned = varint_decode_arr(bytes, bc);
+    zigzag_decode(decoded_unsigned)
+}
+
+fn test_zigzag_basic() -> Int {
+    // Core zigzag mapping
+    assert_eq(zigzag_encode(0), 0);
+    assert_eq(zigzag_encode(-1), 1);
+    assert_eq(zigzag_encode(1), 2);
+    assert_eq(zigzag_encode(-2), 3);
+    assert_eq(zigzag_encode(2), 4);
+    assert_eq(zigzag_encode(-3), 5);
+    1
+}
+
+fn test_zigzag_more() -> Int {
+    assert_eq(zigzag_encode(3), 6);
+    assert_eq(zigzag_encode(-100), 199);
+    assert_eq(zigzag_encode(100), 200);
+    assert_eq(zigzag_encode(-1000), 1999);
+    assert_eq(zigzag_encode(1000), 2000);
+    1
+}
+
+fn test_zigzag_decode() -> Int {
+    assert_eq(zigzag_decode(0), 0);
+    assert_eq(zigzag_decode(1), -1);
+    assert_eq(zigzag_decode(2), 1);
+    assert_eq(zigzag_decode(3), -2);
+    assert_eq(zigzag_decode(4), 2);
+    assert_eq(zigzag_decode(5), -3);
+    1
+}
+
+fn test_roundtrip_positive() -> Int {
+    // Zigzag encode then decode should be identity
+    assert_eq(zigzag_decode(zigzag_encode(0)), 0);
+    assert_eq(zigzag_decode(zigzag_encode(1)), 1);
+    assert_eq(zigzag_decode(zigzag_encode(42)), 42);
+    assert_eq(zigzag_decode(zigzag_encode(1000)), 1000);
+    assert_eq(zigzag_decode(zigzag_encode(999999)), 999999);
+    1
+}
+
+fn test_roundtrip_negative() -> Int {
+    assert_eq(zigzag_decode(zigzag_encode(-1)), -1);
+    assert_eq(zigzag_decode(zigzag_encode(-2)), -2);
+    assert_eq(zigzag_decode(zigzag_encode(-42)), -42);
+    assert_eq(zigzag_decode(zigzag_encode(-1000)), -1000);
+    assert_eq(zigzag_decode(zigzag_encode(-999999)), -999999);
+    1
+}
+
+fn test_varint_byte_count() -> Int {
+    // 0 needs 1 byte
+    assert_eq(varint_byte_count(0), 1);
+    // 1-127 need 1 byte
+    assert_eq(varint_byte_count(1), 1);
+    assert_eq(varint_byte_count(127), 1);
+    // 128-16383 need 2 bytes
+    assert_eq(varint_byte_count(128), 2);
+    assert_eq(varint_byte_count(16383), 2);
+    // 16384+ need 3 bytes
+    assert_eq(varint_byte_count(16384), 3);
+    1
+}
+
+fn test_varint_roundtrip() -> Int {
+    // Full roundtrip through zigzag + varint
+    assert_eq(roundtrip(0), 0);
+    assert_eq(roundtrip(1), 1);
+    assert_eq(roundtrip(-1), -1);
+    assert_eq(roundtrip(100), 100);
+    assert_eq(roundtrip(-100), -100);
+    assert_eq(roundtrip(10000), 10000);
+    1
+}
+
+fn test_monotonic_property() -> Int {
+    // Zigzag encoding preserves the property that small absolute values
+    // map to small encoded values
+    let e0 = zigzag_encode(0);
+    let e1 = zigzag_encode(1);
+    let en1 = zigzag_encode(-1);
+    let e100 = zigzag_encode(100);
+    // |0| < |1| and encode(0) < encode(1) in unsigned sense
+    assert(e0 < e1);
+    assert(en1 < e1);
+    assert(e1 < e100);
+    1
+}
+
+fn main() -> Int {
+    test_zigzag_basic();
+    test_zigzag_more();
+    test_zigzag_decode();
+    test_roundtrip_positive();
+    test_roundtrip_negative();
+    test_varint_byte_count();
+    test_varint_roundtrip();
+    test_monotonic_property();
+    print("DIFF_OK: zigzag_encoding");
+    0
+}

@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, select, channel, error
+// @description: Test invalid select channel receive syntax
+// @expected-error: E018
+
+async fn test(rx: Receiver<Int>) {
+    select {
+        // Invalid channel receive syntax
+        rx <- msg => process(msg),
+    }
+}

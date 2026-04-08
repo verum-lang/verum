@@ -1,0 +1,626 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 2ns direct call, < 5ns indirect call
+// @tags: function, call, performance, micro
+
+/// Function Call Overhead Benchmark
+///
+/// Measures the overhead of various function call patterns in Verum:
+/// - Direct function calls
+/// - Indirect calls through function pointers
+/// - Virtual dispatch (protocol methods)
+/// - Generic function calls
+/// - Recursive function calls
+///
+/// Targets:
+/// - Direct call: < 2ns
+/// - Indirect call: < 5ns
+/// - Virtual dispatch: < 10ns
+/// - Generic monomorphized: = direct call
+/// - Recursive: < 3ns per call + stack overhead
+
+module vcs.benchmarks.micro.function_call
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Simple function for direct call testing
+fn simple_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+/// Function with more parameters
+fn multi_param(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> Int {
+    a + b + c + d + e + f
+}
+
+/// Generic function (should be monomorphized)
+fn generic_add<T: Add>(a: T, b: T) -> T {
+    a + b
+}
+
+/// Inline-hinted function
+@inline
+fn inline_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+/// No-inline function
+@no_inline
+fn noinline_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+/// Recursive function
+fn recursive_sum(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else {
+        n + recursive_sum(n - 1)
+    }
+}
+
+/// Tail-recursive function
+fn tail_recursive_sum(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        tail_recursive_sum(n - 1, acc + n)
+    }
+}
+
+/// Protocol for virtual dispatch testing
+type Addable is protocol {
+    fn add(&self, other: Int) -> Int;
+};
+
+/// Implementation type for protocol
+type IntWrapper is {
+    value: Int,
+};
+
+implement Addable for IntWrapper {
+    fn add(&self, other: Int) -> Int {
+        self.value + other
+    }
+}
+
+/// Another implementation for polymorphism testing
+type DoubleWrapper is {
+    value: Int,
+};
+
+implement Addable for DoubleWrapper {
+    fn add(&self, other: Int) -> Int {
+        self.value * 2 + other
+    }
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Function Call Overhead");
+
+    // Direct call benchmarks
+    results.add(benchmark_direct_call());
+    results.add(benchmark_direct_call_2params());
+    results.add(benchmark_direct_call_6params());
+
+    // Inline benchmarks
+    results.add(benchmark_inline_call());
+    results.add(benchmark_noinline_call());
+
+    // Generic function benchmarks
+    results.add(benchmark_generic_call());
+    results.add(benchmark_generic_call_float());
+
+    // Indirect call benchmarks
+    results.add(benchmark_function_pointer());
+    results.add(benchmark_closure_call());
+    results.add(benchmark_closure_with_capture());
+
+    // Virtual dispatch benchmarks
+    results.add(benchmark_virtual_dispatch());
+    results.add(benchmark_virtual_dispatch_polymorphic());
+
+    // Recursive call benchmarks
+    results.add(benchmark_recursive_call());
+    results.add(benchmark_tail_recursive_call());
+
+    // Call chain benchmarks
+    results.add(benchmark_call_chain());
+    results.add(benchmark_deep_call_chain());
+
+    results.report();
+    assert(results.all_pass(), "Function call performance below target");
+}
+
+/// Benchmark direct function call
+fn benchmark_direct_call() -> BenchmarkResult {
+    let mut sum: Int = 0;
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        sum += simple_add(i, i + 1);
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += simple_add(i, i + 1);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "direct_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 2.0,
+        passed: per_call_ns < 2.0,
+    }
+}
+
+/// Benchmark 2-parameter direct call
+fn benchmark_direct_call_2params() -> BenchmarkResult {
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += simple_add(i, 1);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "direct_call_2params",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 2.0,
+        passed: per_call_ns < 2.0,
+    }
+}
+
+/// Benchmark 6-parameter direct call
+fn benchmark_direct_call_6params() -> BenchmarkResult {
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += multi_param(i, 1, 2, 3, 4, 5);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "direct_call_6params",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 3.0,  // Slightly higher due to more params
+        passed: per_call_ns < 3.0,
+    }
+}
+
+/// Benchmark inline function call
+fn benchmark_inline_call() -> BenchmarkResult {
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += inline_add(i, 1);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "inline_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 1.0,  // Should be nearly zero due to inlining
+        passed: per_call_ns < 1.0,
+    }
+}
+
+/// Benchmark no-inline function call
+fn benchmark_noinline_call() -> BenchmarkResult {
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += noinline_add(i, 1);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "noinline_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 3.0,
+        passed: per_call_ns < 3.0,
+    }
+}
+
+/// Benchmark generic function call (Int)
+fn benchmark_generic_call() -> BenchmarkResult {
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += generic_add(i, 1);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "generic_call_int",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 2.0,  // Should be same as direct after monomorphization
+        passed: per_call_ns < 2.0,
+    }
+}
+
+/// Benchmark generic function call (Float)
+fn benchmark_generic_call_float() -> BenchmarkResult {
+    let mut sum: Float = 0.0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += generic_add(i as Float, 1.0);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "generic_call_float",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 2.0,
+        passed: per_call_ns < 2.0,
+    }
+}
+
+/// Benchmark function pointer call
+fn benchmark_function_pointer() -> BenchmarkResult {
+    let func: fn(Int, Int) -> Int = simple_add;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += func(i, 1);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "function_pointer",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 5.0,
+        passed: per_call_ns < 5.0,
+    }
+}
+
+/// Benchmark closure call (no capture)
+fn benchmark_closure_call() -> BenchmarkResult {
+    let closure = |a: Int, b: Int| -> Int { a + b };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i, 1);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_no_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 3.0,
+        passed: per_call_ns < 3.0,
+    }
+}
+
+/// Benchmark closure call with capture
+fn benchmark_closure_with_capture() -> BenchmarkResult {
+    let captured_value = 100;
+    let closure = |a: Int| -> Int { a + captured_value };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_with_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 4.0,
+        passed: per_call_ns < 4.0,
+    }
+}
+
+/// Benchmark virtual dispatch (monomorphic)
+fn benchmark_virtual_dispatch() -> BenchmarkResult {
+    let wrapper = IntWrapper { value: 42 };
+    let addable: &Addable = &wrapper;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += addable.add(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "virtual_dispatch_mono",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 10.0,
+        passed: per_call_ns < 10.0,
+    }
+}
+
+/// Benchmark virtual dispatch (polymorphic)
+fn benchmark_virtual_dispatch_polymorphic() -> BenchmarkResult {
+    let wrapper1 = IntWrapper { value: 42 };
+    let wrapper2 = DoubleWrapper { value: 21 };
+    let addables: List<&Addable> = list![&wrapper1, &wrapper2];
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 2) {
+        for addable in addables.iter() {
+            sum += addable.add(i);
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "virtual_dispatch_poly",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 12.0,  // Slightly higher due to polymorphism
+        passed: per_call_ns < 12.0,
+    }
+}
+
+/// Benchmark recursive function call
+fn benchmark_recursive_call() -> BenchmarkResult {
+    let mut sum: Int = 0;
+    let depth = 10;  // Reasonable recursion depth
+    let iterations = BENCHMARK_ITERATIONS / depth;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        sum += recursive_sum(depth);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let total_calls = iterations * depth;
+    let per_call_ns = elapsed_ns as Float / total_calls as Float;
+
+    BenchmarkResult {
+        name: "recursive_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 5.0,
+        passed: per_call_ns < 5.0,
+    }
+}
+
+/// Benchmark tail-recursive function call
+fn benchmark_tail_recursive_call() -> BenchmarkResult {
+    let mut sum: Int = 0;
+    let depth = 100;  // Can go deeper with tail recursion
+    let iterations = BENCHMARK_ITERATIONS / depth;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        sum += tail_recursive_sum(depth, 0);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let total_calls = iterations * depth;
+    let per_call_ns = elapsed_ns as Float / total_calls as Float;
+
+    BenchmarkResult {
+        name: "tail_recursive_call",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 2.0,  // Should be optimized to loop
+        passed: per_call_ns < 2.0,
+    }
+}
+
+/// Benchmark function call chain
+fn benchmark_call_chain() -> BenchmarkResult {
+    fn level1(x: Int) -> Int { level2(x + 1) }
+    fn level2(x: Int) -> Int { level3(x + 1) }
+    fn level3(x: Int) -> Int { x + 1 }
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += level1(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_chain_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "call_chain_3_deep",
+        metric: "ns/chain",
+        value: per_chain_ns,
+        target: 6.0,  // 3 calls at ~2ns each
+        passed: per_chain_ns < 6.0,
+    }
+}
+
+/// Benchmark deep function call chain
+fn benchmark_deep_call_chain() -> BenchmarkResult {
+    fn l1(x: Int) -> Int { l2(x + 1) }
+    fn l2(x: Int) -> Int { l3(x + 1) }
+    fn l3(x: Int) -> Int { l4(x + 1) }
+    fn l4(x: Int) -> Int { l5(x + 1) }
+    fn l5(x: Int) -> Int { l6(x + 1) }
+    fn l6(x: Int) -> Int { l7(x + 1) }
+    fn l7(x: Int) -> Int { l8(x + 1) }
+    fn l8(x: Int) -> Int { l9(x + 1) }
+    fn l9(x: Int) -> Int { l10(x + 1) }
+    fn l10(x: Int) -> Int { x + 1 }
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 10) {
+        sum += l1(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let total_calls = (BENCHMARK_ITERATIONS / 10) * 10;
+    let per_call_ns = elapsed_ns as Float / total_calls as Float;
+
+    BenchmarkResult {
+        name: "call_chain_10_deep",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 3.0,
+        passed: per_call_ns < 3.0,
+    }
+}
+
+// Benchmark infrastructure types
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

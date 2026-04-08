@@ -1,0 +1,65 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, sigma-types, construction, error
+// @expected-error: E400 "Type mismatch"
+
+/// Sigma type construction - failure cases
+///
+/// These tests verify that dependent pair construction properly validates
+/// the relationship between components.
+
+/// Dependent pair type
+type DepPair<A, B> is {
+    fst: A,
+    snd: B,
+};
+
+/// Sized collection
+type SizedVec<T> is {
+    len: Int,
+    data: List<T>,
+};
+
+/// ERROR: Construct pair with wrong second component type
+fn construct_wrong() -> DepPair<Int, Text> {
+    DepPair {
+        fst: 42,
+        snd: 123,  // ERROR: Int != Text
+    }
+}
+
+/// ERROR: Construct sized vec with wrong data type
+fn sized_wrong() -> SizedVec<Int> {
+    SizedVec {
+        len: 3,
+        data: "not a list",  // ERROR: Text != List<Int>
+    }
+}
+
+/// Positive type
+type Positive is {
+    value: Int,
+};
+
+/// ERROR: Return wrong type from constructor
+fn mk_positive_wrong(n: Int) -> Positive {
+    n  // ERROR: Int != Positive
+}
+
+/// Matrix type
+type Matrix<T, Rows: meta Int, Cols: meta Int> is {
+    data: [T; Rows * Cols],
+};
+
+/// ERROR: Construct matrix with wrong element types
+fn mat_wrong() -> Matrix<Int, 2, 2> {
+    Matrix { data: [1.0, 2.0, 3.0, 4.0] }  // ERROR: Float != Int
+}
+
+fn main() {
+    let _ = construct_wrong();
+    let _ = sized_wrong();
+    let _ = mk_positive_wrong(42);
+    let _ = mat_wrong();
+}

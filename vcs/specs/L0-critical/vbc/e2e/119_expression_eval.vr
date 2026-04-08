@@ -1,0 +1,282 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, stack, postfix
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Stack-based postfix (reverse Polish notation) expression evaluator
+
+// ============================================================================
+// Stack: fixed-size stack of 16 Ints
+// ============================================================================
+
+type Stack is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    s8: Int, s9: Int, s10: Int, s11: Int,
+    s12: Int, s13: Int, s14: Int, s15: Int,
+    top: Int
+};
+
+fn stack_new() -> Stack {
+    Stack {
+        s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0, s7: 0,
+        s8: 0, s9: 0, s10: 0, s11: 0, s12: 0, s13: 0, s14: 0, s15: 0,
+        top: 0
+    }
+}
+
+fn stack_get(s: Stack, i: Int) -> Int {
+    if i == 0 { s.s0 } else if i == 1 { s.s1 } else if i == 2 { s.s2 }
+    else if i == 3 { s.s3 } else if i == 4 { s.s4 } else if i == 5 { s.s5 }
+    else if i == 6 { s.s6 } else if i == 7 { s.s7 } else if i == 8 { s.s8 }
+    else if i == 9 { s.s9 } else if i == 10 { s.s10 } else if i == 11 { s.s11 }
+    else if i == 12 { s.s12 } else if i == 13 { s.s13 } else if i == 14 { s.s14 }
+    else { s.s15 }
+}
+
+fn stack_set(s: Stack, i: Int, val: Int) -> Stack {
+    Stack {
+        s0: if i == 0 { val } else { s.s0 },
+        s1: if i == 1 { val } else { s.s1 },
+        s2: if i == 2 { val } else { s.s2 },
+        s3: if i == 3 { val } else { s.s3 },
+        s4: if i == 4 { val } else { s.s4 },
+        s5: if i == 5 { val } else { s.s5 },
+        s6: if i == 6 { val } else { s.s6 },
+        s7: if i == 7 { val } else { s.s7 },
+        s8: if i == 8 { val } else { s.s8 },
+        s9: if i == 9 { val } else { s.s9 },
+        s10: if i == 10 { val } else { s.s10 },
+        s11: if i == 11 { val } else { s.s11 },
+        s12: if i == 12 { val } else { s.s12 },
+        s13: if i == 13 { val } else { s.s13 },
+        s14: if i == 14 { val } else { s.s14 },
+        s15: if i == 15 { val } else { s.s15 },
+        top: s.top
+    }
+}
+
+fn stack_push(s: Stack, val: Int) -> Stack {
+    let idx = s.top;
+    let updated = stack_set(s, idx, val);
+    Stack {
+        s0: updated.s0, s1: updated.s1, s2: updated.s2, s3: updated.s3,
+        s4: updated.s4, s5: updated.s5, s6: updated.s6, s7: updated.s7,
+        s8: updated.s8, s9: updated.s9, s10: updated.s10, s11: updated.s11,
+        s12: updated.s12, s13: updated.s13, s14: updated.s14, s15: updated.s15,
+        top: idx + 1
+    }
+}
+
+fn stack_peek(s: Stack) -> Int {
+    stack_get(s, s.top - 1)
+}
+
+fn stack_pop_val(s: Stack) -> Int {
+    stack_get(s, s.top - 1)
+}
+
+fn stack_pop(s: Stack) -> Stack {
+    Stack {
+        s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3,
+        s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7,
+        s8: s.s8, s9: s.s9, s10: s.s10, s11: s.s11,
+        s12: s.s12, s13: s.s13, s14: s.s14, s15: s.s15,
+        top: s.top - 1
+    }
+}
+
+// ============================================================================
+// Expression array: tokens (positive = operand, negative = operator)
+// Operators: -1 = add, -2 = sub, -3 = mul, -4 = div
+// ============================================================================
+
+type Expr16 is {
+    t0: Int, t1: Int, t2: Int, t3: Int,
+    t4: Int, t5: Int, t6: Int, t7: Int,
+    t8: Int, t9: Int, t10: Int, t11: Int,
+    t12: Int, t13: Int, t14: Int, t15: Int,
+    len: Int
+};
+
+fn expr_new() -> Expr16 {
+    Expr16 {
+        t0: 0, t1: 0, t2: 0, t3: 0, t4: 0, t5: 0, t6: 0, t7: 0,
+        t8: 0, t9: 0, t10: 0, t11: 0, t12: 0, t13: 0, t14: 0, t15: 0,
+        len: 0
+    }
+}
+
+fn expr_get(e: Expr16, i: Int) -> Int {
+    if i == 0 { e.t0 } else if i == 1 { e.t1 } else if i == 2 { e.t2 }
+    else if i == 3 { e.t3 } else if i == 4 { e.t4 } else if i == 5 { e.t5 }
+    else if i == 6 { e.t6 } else if i == 7 { e.t7 } else if i == 8 { e.t8 }
+    else if i == 9 { e.t9 } else if i == 10 { e.t10 } else if i == 11 { e.t11 }
+    else if i == 12 { e.t12 } else if i == 13 { e.t13 } else if i == 14 { e.t14 }
+    else { e.t15 }
+}
+
+fn expr_set(e: Expr16, i: Int, val: Int) -> Expr16 {
+    Expr16 {
+        t0: if i == 0 { val } else { e.t0 },
+        t1: if i == 1 { val } else { e.t1 },
+        t2: if i == 2 { val } else { e.t2 },
+        t3: if i == 3 { val } else { e.t3 },
+        t4: if i == 4 { val } else { e.t4 },
+        t5: if i == 5 { val } else { e.t5 },
+        t6: if i == 6 { val } else { e.t6 },
+        t7: if i == 7 { val } else { e.t7 },
+        t8: if i == 8 { val } else { e.t8 },
+        t9: if i == 9 { val } else { e.t9 },
+        t10: if i == 10 { val } else { e.t10 },
+        t11: if i == 11 { val } else { e.t11 },
+        t12: if i == 12 { val } else { e.t12 },
+        t13: if i == 13 { val } else { e.t13 },
+        t14: if i == 14 { val } else { e.t14 },
+        t15: if i == 15 { val } else { e.t15 },
+        len: e.len
+    }
+}
+
+fn expr_push(e: Expr16, val: Int) -> Expr16 {
+    let idx = e.len;
+    let updated = expr_set(e, idx, val);
+    Expr16 {
+        t0: updated.t0, t1: updated.t1, t2: updated.t2, t3: updated.t3,
+        t4: updated.t4, t5: updated.t5, t6: updated.t6, t7: updated.t7,
+        t8: updated.t8, t9: updated.t9, t10: updated.t10, t11: updated.t11,
+        t12: updated.t12, t13: updated.t13, t14: updated.t14, t15: updated.t15,
+        len: idx + 1
+    }
+}
+
+// ============================================================================
+// Evaluator: process tokens left to right
+// Positive values (>=0) are pushed onto stack
+// Negative values are operators: -1=add, -2=sub, -3=mul, -4=div
+// ============================================================================
+
+fn eval_postfix(expr: Expr16) -> Int {
+    let mut stk = stack_new();
+    let mut i = 0;
+    while i < expr.len {
+        let token = expr_get(expr, i);
+        if token >= 0 {
+            stk = stack_push(stk, token);
+        } else {
+            // Pop two operands: b (top), a (second)
+            let b_val = stack_pop_val(stk);
+            stk = stack_pop(stk);
+            let a_val = stack_pop_val(stk);
+            stk = stack_pop(stk);
+            let result = if token == -1 { a_val + b_val }
+                         else if token == -2 { a_val - b_val }
+                         else if token == -3 { a_val * b_val }
+                         else { a_val / b_val };
+            stk = stack_push(stk, result);
+        }
+        i = i + 1;
+    }
+    stack_peek(stk)
+}
+
+// ============================================================================
+// Test 1: Simple addition — "3 4 +" = 7
+// ============================================================================
+
+@test
+fn test_simple_add() {
+    let mut e = expr_new();
+    e = expr_push(e, 3);
+    e = expr_push(e, 4);
+    e = expr_push(e, -1);  // add
+    assert_eq(eval_postfix(e), 7);
+
+    print("  test_simple_add: ok");
+}
+
+// ============================================================================
+// Test 2: "5 1 2 + 4 * + 3 -" = 14
+// Explanation: 1+2=3, 3*4=12, 5+12=17, 17-3=14
+// ============================================================================
+
+@test
+fn test_complex_expression() {
+    let mut e = expr_new();
+    e = expr_push(e, 5);
+    e = expr_push(e, 1);
+    e = expr_push(e, 2);
+    e = expr_push(e, -1);   // add: 1+2=3
+    e = expr_push(e, 4);
+    e = expr_push(e, -3);   // mul: 3*4=12
+    e = expr_push(e, -1);   // add: 5+12=17
+    e = expr_push(e, 3);
+    e = expr_push(e, -2);   // sub: 17-3=14
+    assert_eq(eval_postfix(e), 14);
+
+    print("  test_complex_expression: ok");
+}
+
+// ============================================================================
+// Test 3: Multiplication and division — "6 2 * 4 /" = 3
+// ============================================================================
+
+@test
+fn test_mul_div() {
+    let mut e = expr_new();
+    e = expr_push(e, 6);
+    e = expr_push(e, 2);
+    e = expr_push(e, -3);   // mul: 6*2=12
+    e = expr_push(e, 4);
+    e = expr_push(e, -4);   // div: 12/4=3
+    assert_eq(eval_postfix(e), 3);
+
+    print("  test_mul_div: ok");
+}
+
+// ============================================================================
+// Test 4: Single value expression
+// ============================================================================
+
+@test
+fn test_single_value() {
+    let mut e = expr_new();
+    e = expr_push(e, 42);
+    assert_eq(eval_postfix(e), 42);
+
+    print("  test_single_value: ok");
+}
+
+// ============================================================================
+// Test 5: "2 3 + 4 5 + *" = (2+3)*(4+5) = 5*9 = 45
+// ============================================================================
+
+@test
+fn test_two_subexpressions() {
+    let mut e = expr_new();
+    e = expr_push(e, 2);
+    e = expr_push(e, 3);
+    e = expr_push(e, -1);   // add: 2+3=5
+    e = expr_push(e, 4);
+    e = expr_push(e, 5);
+    e = expr_push(e, -1);   // add: 4+5=9
+    e = expr_push(e, -3);   // mul: 5*9=45
+    assert_eq(eval_postfix(e), 45);
+
+    print("  test_two_subexpressions: ok");
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_simple_add();
+    test_complex_expression();
+    test_mul_div();
+    test_single_value();
+    test_two_subexpressions();
+    print("[OK] 119_expression_eval");
+    0
+}

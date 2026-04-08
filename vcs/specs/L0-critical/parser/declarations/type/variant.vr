@@ -1,0 +1,87 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, variant, enum, sum
+
+// Simple variant type (Option/Maybe)
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+// Variant without data (simple enum)
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+// Variant with different payloads
+type Shape is
+    | Circle(Float)
+    | Rectangle(Float, Float)
+    | Triangle(Float, Float, Float);
+
+// Variant with named fields
+type Event is
+    | Click { x: Int, y: Int }
+    | KeyPress { key: Text, modifiers: List<Text> }
+    | Resize { width: Int, height: Int };
+
+// Result type variant
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// Variant with generic constraints
+type Validated<T: Validate> is
+    | Valid(T)
+    | Invalid(List<Error>);
+
+// Variant mixing unit and tuple variants
+type Token is
+    | Eof
+    | Identifier(Text)
+    | Number(Int)
+    | Operator(Text);
+
+// Recursive variant type
+type List<T> is
+    | Cons(T, List<T>)
+    | Nil;
+
+// Variant for AST nodes
+type Expr is
+    | Literal(Int)
+    | Variable(Text)
+    | Binary { op: Text, left: Expr, right: Expr }
+    | Call { func: Text, args: List<Expr> };
+
+// Variant with complex nested types
+type Message is
+    | Text(Text)
+    | Image { url: Text, dimensions: (Int, Int) }
+    | File { name: Text, data: List<Byte>, metadata: Map<Text, Text> };
+
+// Single-variant type (newtype-like)
+type Wrapper<T> is
+    | Wrap(T);
+
+// Variant with many options
+type Weekday is
+    | Monday
+    | Tuesday
+    | Wednesday
+    | Thursday
+    | Friday
+    | Saturday
+    | Sunday;
+
+// Variant with trailing pipe
+type Status is
+    | Pending
+    | Running
+    | Completed
+    | Failed
+    ;
+
+// Variant inline syntax (if supported)
+type SimpleResult<T> is | Ok(T) | Err(Text);

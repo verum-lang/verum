@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, attributes, missing-name, error
+// @description: Test missing attribute name after @ symbol
+// @expected-error: E013
+
+@(Debug)
+type Foo is { x: Int };

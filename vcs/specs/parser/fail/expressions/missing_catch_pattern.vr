@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, try, recover, pattern, error
+// @description: Recover block with match arms missing pattern
+// @expected-error: E087
+
+fn test() {
+    try {
+        fallible();
+    } recover {
+        => "default"  // Missing pattern before =>
+    }
+}

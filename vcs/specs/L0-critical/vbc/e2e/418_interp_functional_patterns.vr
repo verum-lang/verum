@@ -1,0 +1,169 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, functional, patterns
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests functional programming patterns: map, filter, reduce,
+// higher-order functions, function pipelines.
+
+fn* range(start: Int, end_excl: Int) -> Int {
+    let mut i = start;
+    while i < end_excl {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn map_array(arr: List<Int>, n: Int, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < n {
+        result[i] = f(arr[i]);
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_count(arr: List<Int>, n: Int, pred: fn(Int) -> Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if pred(arr[i]) == 1 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn reduce(arr: List<Int>, n: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < n {
+        acc = f(acc, arr[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_map() {
+    let arr = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0];
+    let doubled = map_array(arr, 5, |x| x * 2);
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[1], 4);
+    assert_eq(doubled[2], 6);
+    assert_eq(doubled[3], 8);
+    assert_eq(doubled[4], 10);
+
+    let squared = map_array(arr, 5, |x| x * x);
+    assert_eq(squared[0], 1);
+    assert_eq(squared[4], 25);
+    print("map: ok");
+}
+
+fn test_filter_count() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let even_count = filter_count(arr, 10, |x| if x % 2 == 0 { 1 } else { 0 });
+    assert_eq(even_count, 5);
+
+    let gt5_count = filter_count(arr, 10, |x| if x > 5 { 1 } else { 0 });
+    assert_eq(gt5_count, 5);
+
+    let prime_count = filter_count(arr, 10, |x| {
+        if x < 2 { return 0; }
+        if x < 4 { return 1; }
+        if x % 2 == 0 { return 0; }
+        let mut d = 3;
+        while d * d <= x {
+            if x % d == 0 { return 0; }
+            d = d + 2;
+        }
+        1
+    });
+    assert_eq(prime_count, 4); // 2, 3, 5, 7
+    print("filter_count: ok");
+}
+
+fn test_reduce() {
+    let arr = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0];
+    let sum = reduce(arr, 5, 0, |acc, x| acc + x);
+    assert_eq(sum, 15);
+
+    let product = reduce(arr, 5, 1, |acc, x| acc * x);
+    assert_eq(product, 120);
+
+    let mx = reduce(arr, 5, arr[0], |acc, x| if x > acc { x } else { acc });
+    assert_eq(mx, 5);
+    print("reduce: ok");
+}
+
+fn test_pipeline() {
+    // Simulate: range(1,11) |> map(x*x) |> filter(>10) |> sum
+    let mut sum = 0;
+    for i in range(1, 11) {
+        let sq = i * i;
+        if sq > 10 {
+            sum = sum + sq;
+        }
+    }
+    // Squares > 10: 16, 25, 36, 49, 64, 81, 100
+    // Sum: 371
+    assert_eq(sum, 371);
+    print("pipeline: ok");
+}
+
+fn test_compose_pipeline() {
+    // f(x) = x + 1, g(x) = x * 2, h(x) = x - 3
+    // Pipeline: h(g(f(x)))
+    let f = |x: Int| -> Int { x + 1 };
+    let g = |x: Int| -> Int { x * 2 };
+    let h = |x: Int| -> Int { x - 3 };
+
+    let result = h(g(f(5)));
+    // f(5)=6, g(6)=12, h(12)=9
+    assert_eq(result, 9);
+
+    // Apply pipeline in loop
+    let mut total = 0;
+    for i in range(0, 5) {
+        total = total + h(g(f(i)));
+    }
+    // i=0: h(g(f(0))) = h(g(1)) = h(2) = -1
+    // i=1: h(g(f(1))) = h(g(2)) = h(4) = 1
+    // i=2: h(g(f(2))) = h(g(3)) = h(6) = 3
+    // i=3: h(g(f(3))) = h(g(4)) = h(8) = 5
+    // i=4: h(g(f(4))) = h(g(5)) = h(10) = 7
+    // Total: -1+1+3+5+7 = 15
+    assert_eq(total, 15);
+    print("compose_pipeline: ok");
+}
+
+fn test_accumulate_pattern() {
+    // Running total with generator
+    let mut running_sum = 0;
+    let mut count_above_10 = 0;
+    for i in range(1, 11) {
+        running_sum = running_sum + i;
+        if running_sum > 10 {
+            count_above_10 = count_above_10 + 1;
+        }
+    }
+    assert_eq(running_sum, 55);
+    // Running sums: 1,3,6,10,15,21,28,36,45,55
+    // Above 10: 15,21,28,36,45,55 = 6
+    assert_eq(count_above_10, 6);
+    print("accumulate_pattern: ok");
+}
+
+fn main() -> Int {
+    test_map();
+    test_filter_count();
+    test_reduce();
+    test_pipeline();
+    test_compose_pipeline();
+    test_accumulate_pattern();
+    print("[OK] 418_interp_functional_patterns");
+    0
+}

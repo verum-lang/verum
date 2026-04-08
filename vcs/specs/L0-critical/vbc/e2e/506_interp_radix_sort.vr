@@ -1,0 +1,192 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, radix_sort, counting_sort, sorting, algorithms
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Radix sort (LSD) using counting sort as a subroutine.
+//
+// Algorithm:
+//   For each digit position d (0 = least significant):
+//     1. Counting sort: count occurrences of each digit (0-9 in base 10).
+//     2. Compute prefix sums to get output positions.
+//     3. Build output array in stable order.
+//     4. Copy output back to input.
+//
+// Input: non-negative integers. We use base 10, up to 4 digits (max 9999).
+// Array size: fixed at 12 elements.
+
+// Extract digit at position d (0=units, 1=tens, 2=hundreds, 3=thousands).
+fn digit_at(n: Int, d: Int) -> Int {
+    let mut div = 1;
+    let mut i = 0;
+    while i < d { div = div * 10; i = i + 1; }
+    (n / div) % 10
+}
+
+// Counting sort by digit position d on arr[0..n-1], output to out[0..n-1].
+fn counting_sort_digit(arr: [Int; 12], n: Int, d: Int, out: [Int; 12]) {
+    // count[0..9]
+    let mut count = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Count each digit
+    let mut i = 0;
+    while i < n {
+        let dg = digit_at(arr[i], d);
+        count[dg] = count[dg] + 1;
+        i = i + 1;
+    }
+
+    // Prefix sums (cumulative counts)
+    let mut j = 1;
+    while j < 10 {
+        count[j] = count[j] + count[j - 1];
+        j = j + 1;
+    }
+
+    // Build output from right to left for stability
+    let mut k = n - 1;
+    while k >= 0 {
+        let dg = digit_at(arr[k], d);
+        count[dg] = count[dg] - 1;
+        out[count[dg]] = arr[k];
+        k = k - 1;
+    }
+}
+
+// Radix sort: sort arr[0..n-1] in place using 4 passes (units through thousands).
+fn radix_sort(arr: [Int; 12], n: Int, out: [Int; 12]) {
+    // We alternate between arr and out across passes.
+    // Pass 0 (units): arr -> out
+    counting_sort_digit(arr, n, 0, out);
+    // Pass 1 (tens): out -> arr
+    counting_sort_digit(out, n, 1, arr);
+    // Pass 2 (hundreds): arr -> out
+    counting_sort_digit(arr, n, 2, out);
+    // Pass 3 (thousands): out -> arr (final result in arr)
+    counting_sort_digit(out, n, 3, arr);
+    // Copy final sorted result to out
+    let mut i = 0;
+    while i < n { out[i] = arr[i]; i = i + 1; }
+}
+
+fn is_sorted(arr: [Int; 12], n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if arr[i] < arr[i - 1] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_basic_sort() {
+    let mut arr = [170, 45, 75, 90, 2, 802, 24, 66, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 8;
+    radix_sort(arr, n, out);
+    // Expected: [2, 24, 45, 66, 75, 90, 170, 802]
+    assert_eq(out[0], 2);
+    assert_eq(out[1], 24);
+    assert_eq(out[2], 45);
+    assert_eq(out[3], 66);
+    assert_eq(out[4], 75);
+    assert_eq(out[5], 90);
+    assert_eq(out[6], 170);
+    assert_eq(out[7], 802);
+    assert_eq(is_sorted(out, n), 1);
+    print("radix_sort_basic: ok");
+}
+
+fn test_already_sorted() {
+    let mut arr = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 10;
+    radix_sort(arr, n, out);
+    assert_eq(is_sorted(out, n), 1);
+    assert_eq(out[0], 1);
+    assert_eq(out[9], 19);
+    print("radix_sort_already_sorted: ok");
+}
+
+fn test_reverse_sorted() {
+    let mut arr = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 10;
+    radix_sort(arr, n, out);
+    assert_eq(is_sorted(out, n), 1);
+    assert_eq(out[0], 10);
+    assert_eq(out[9], 100);
+    print("radix_sort_reverse: ok");
+}
+
+fn test_duplicates() {
+    // [5,3,5,1,3,5,2,1,0,0,0,0] with n=8
+    let mut arr = [5, 3, 5, 1, 3, 5, 2, 1, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 8;
+    radix_sort(arr, n, out);
+    // Sorted: [1,1,2,3,3,5,5,5]
+    assert_eq(out[0], 1);
+    assert_eq(out[1], 1);
+    assert_eq(out[2], 2);
+    assert_eq(out[3], 3);
+    assert_eq(out[4], 3);
+    assert_eq(out[5], 5);
+    assert_eq(out[6], 5);
+    assert_eq(out[7], 5);
+    assert_eq(is_sorted(out, n), 1);
+    print("radix_sort_duplicates: ok");
+}
+
+fn test_large_values() {
+    // Values up to 9999
+    let mut arr = [9999, 1234, 5678, 4321, 8765, 1111, 9876, 2468, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 8;
+    radix_sort(arr, n, out);
+    // Sorted: [1111, 1234, 2468, 4321, 5678, 8765, 9876, 9999]
+    assert_eq(out[0], 1111);
+    assert_eq(out[1], 1234);
+    assert_eq(out[2], 2468);
+    assert_eq(out[3], 4321);
+    assert_eq(out[4], 5678);
+    assert_eq(out[5], 8765);
+    assert_eq(out[6], 9876);
+    assert_eq(out[7], 9999);
+    assert_eq(is_sorted(out, n), 1);
+    print("radix_sort_large: ok");
+}
+
+fn test_digit_extraction() {
+    // digit_at(1234, 0) = 4 (units)
+    // digit_at(1234, 1) = 3 (tens)
+    // digit_at(1234, 2) = 2 (hundreds)
+    // digit_at(1234, 3) = 1 (thousands)
+    assert_eq(digit_at(1234, 0), 4);
+    assert_eq(digit_at(1234, 1), 3);
+    assert_eq(digit_at(1234, 2), 2);
+    assert_eq(digit_at(1234, 3), 1);
+
+    // digit_at(50, 0) = 0, digit_at(50, 1) = 5
+    assert_eq(digit_at(50, 0), 0);
+    assert_eq(digit_at(50, 1), 5);
+    assert_eq(digit_at(50, 2), 0);
+
+    // digit_at(7, 0) = 7
+    assert_eq(digit_at(7, 0), 7);
+    assert_eq(digit_at(7, 1), 0);
+
+    print("radix_digit_extraction: ok");
+}
+
+fn main() -> Int {
+    test_digit_extraction();
+    test_basic_sort();
+    test_already_sorted();
+    test_reverse_sorted();
+    test_duplicates();
+    test_large_values();
+    print("[OK] 506_interp_radix_sort");
+    0
+}

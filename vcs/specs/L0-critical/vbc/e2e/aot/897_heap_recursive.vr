@@ -1,0 +1,62 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, heap, recursive, pattern-matching
+// @expected-exit: 0
+
+// Test: Heap-allocated recursive sum types (linked list).
+
+type IntList is Nil | Cons(Int, Heap<IntList>);
+
+@allow(unbounded_recursion)
+fn list_sum(lst: IntList) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(head, tail) => head + list_sum(*tail),
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_len(lst: IntList) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(head, tail) => 1 + list_len(*tail),
+    }
+}
+
+fn main() -> Int {
+    // Test 1: empty list
+    let empty = Nil;
+    let s0 = list_sum(empty);
+    if (s0 != 0) {
+        print(f"FAIL test1: sum(Nil)={s0}");
+        return 1;
+    }
+
+    // Test 2: single element
+    let one = Cons(42, Heap(Nil));
+    let s1 = list_sum(one);
+    if (s1 != 42) {
+        print(f"FAIL test2: sum(42)={s1}");
+        return 1;
+    }
+
+    // Test 3: multiple elements
+    let lst = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    let s3 = list_sum(lst);
+    if (s3 != 6) {
+        print(f"FAIL test3: sum(1,2,3)={s3}");
+        return 1;
+    }
+
+    // Test 4: length
+    let lst2 = Cons(10, Heap(Cons(20, Heap(Cons(30, Heap(Cons(40, Heap(Nil))))))));
+    let len = list_len(lst2);
+    if (len != 4) {
+        print(f"FAIL test4: len={len}");
+        return 1;
+    }
+
+    print("897_heap_recursive: PASS");
+    0
+}

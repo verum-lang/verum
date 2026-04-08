@@ -1,0 +1,228 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, trie, prefix-tree, search
+// @timeout: 30000
+
+// Trie simulation using bitmask-encoded nodes
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Simplified trie: keys are sequences of digits 0-3 (4 possible children)
+// Each node stores: children_mask (4 bits) + is_end flag (bit 4)
+// We store up to 8 nodes in the trie
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn has_bit(mask: Int, k: Int) -> Int { (mask / pow2(k)) % 2 }
+fn set_bit(mask: Int, k: Int) -> Int { if has_bit(mask, k) == 1 { mask } else { mask + pow2(k) } }
+
+// Trie nodes: each node = children_mask(4 bits) | is_end(bit 4) | child_indices(packed)
+// Simplification: store child_index for digit d in a separate array
+// trie_nodes[i] = is_end flag (0 or 1)
+// trie_children[i*4 + d] = child node index (-1 = no child)
+
+type Trie is {
+    is_end: Arr8,        // is_end[node_id] = 0 or 1
+    children: Arr8,      // children[node_id * 4 + digit] = child_id or -1 (limited to 2 nodes)
+    count: Int           // number of nodes allocated
+};
+
+// Since we can only store 8 entries per Arr8, use a simplified structure
+// Max 2 digits per key, max 8 nodes
+// children2[node_id] = packed child indices: c0 + c1*10 + c2*100 + c3*1000 (-1→9)
+
+fn pack_children(c0: Int, c1: Int, c2: Int, c3: Int) -> Int {
+    let p0 = if c0 < 0 { 9 } else { c0 };
+    let p1 = if c1 < 0 { 9 } else { c1 };
+    let p2 = if c2 < 0 { 9 } else { c2 };
+    let p3 = if c3 < 0 { 9 } else { c3 };
+    p0 + p1 * 10 + p2 * 100 + p3 * 1000
+}
+
+fn get_child(packed: Int, digit: Int) -> Int {
+    let val = (packed / pow2_10(digit)) % 10;
+    if val == 9 { -1 } else { val }
+}
+
+fn pow2_10(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 10; i = i + 1; }
+    r
+}
+
+fn set_child(packed: Int, digit: Int, child: Int) -> Int {
+    let c = if child < 0 { 9 } else { child };
+    let old = (packed / pow2_10(digit)) % 10;
+    packed - old * pow2_10(digit) + c * pow2_10(digit)
+}
+
+type SimpleTrie is {
+    is_end: Arr8,
+    children: Arr8,  // children[node_id] = packed children
+    count: Int
+};
+
+fn new_trie() -> SimpleTrie {
+    let no_children = pack_children(-1, -1, -1, -1); // 9999
+    SimpleTrie {
+        is_end: zeros(),
+        children: Arr8 { v0: no_children, v1: no_children, v2: no_children, v3: no_children,
+                         v4: no_children, v5: no_children, v6: no_children, v7: no_children },
+        count: 1 // root is node 0
+    }
+}
+
+// Insert key (as Arr8 of digits, length n)
+fn trie_insert(t: SimpleTrie, key: Arr8, n: Int) -> SimpleTrie {
+    let mut trie = t;
+    let mut node = 0;
+    let mut i = 0;
+    while i < n {
+        let digit = get8(key, i);
+        let ch = get_child(get8(trie.children, node), digit);
+        if ch < 0 {
+            // Create new node
+            let new_node = trie.count;
+            let packed = set_child(get8(trie.children, node), digit, new_node);
+            trie = SimpleTrie {
+                is_end: trie.is_end,
+                children: set8(trie.children, node, packed),
+                count: trie.count + 1
+            };
+            // Initialize new node
+            let no_children = pack_children(-1, -1, -1, -1);
+            trie = SimpleTrie {
+                is_end: trie.is_end,
+                children: set8(trie.children, new_node, no_children),
+                count: trie.count
+            };
+            node = new_node;
+        } else {
+            node = ch;
+        }
+        i = i + 1;
+    }
+    // Mark end
+    SimpleTrie {
+        is_end: set8(trie.is_end, node, 1),
+        children: trie.children,
+        count: trie.count
+    }
+}
+
+// Search for exact key
+fn trie_search(t: SimpleTrie, key: Arr8, n: Int) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    while i < n {
+        let digit = get8(key, i);
+        let ch = get_child(get8(t.children, node), digit);
+        if ch < 0 { return 0; }
+        node = ch;
+        i = i + 1;
+    }
+    get8(t.is_end, node)
+}
+
+// Check if any key starts with given prefix
+fn trie_has_prefix(t: SimpleTrie, prefix: Arr8, n: Int) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    while i < n {
+        let digit = get8(prefix, i);
+        let ch = get_child(get8(t.children, node), digit);
+        if ch < 0 { return 0; }
+        node = ch;
+        i = i + 1;
+    }
+    1
+}
+
+fn test_empty_trie() -> Int {
+    let t = new_trie();
+    let key = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(trie_search(t, key, 1), 0);
+    1
+}
+
+fn test_single_insert() -> Int {
+    let mut t = new_trie();
+    // Insert key [1, 2]
+    let key = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    t = trie_insert(t, key, 2);
+    assert_eq(trie_search(t, key, 2), 1);
+
+    // Prefix [1] exists but is not a complete key
+    let prefix = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(trie_search(t, prefix, 1), 0);
+    assert_eq(trie_has_prefix(t, prefix, 1), 1);
+    1
+}
+
+fn test_multiple_insert() -> Int {
+    let mut t = new_trie();
+    // Insert [1, 0] and [1, 2]
+    let k1 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let k2 = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    t = trie_insert(t, k1, 2);
+    t = trie_insert(t, k2, 2);
+
+    assert_eq(trie_search(t, k1, 2), 1);
+    assert_eq(trie_search(t, k2, 2), 1);
+
+    // [1, 3] not inserted
+    let k3 = Arr8 { v0: 1, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(trie_search(t, k3, 2), 0);
+    1
+}
+
+fn test_prefix_search() -> Int {
+    let mut t = new_trie();
+    let k1 = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    t = trie_insert(t, k1, 2);
+
+    // Prefix [0] exists
+    let p = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(trie_has_prefix(t, p, 1), 1);
+
+    // Prefix [2] doesn't exist
+    let p2 = Arr8 { v0: 2, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(trie_has_prefix(t, p2, 1), 0);
+    1
+}
+
+fn main() -> Int {
+    test_empty_trie();
+    test_single_insert();
+    test_multiple_insert();
+    test_prefix_search();
+    print("[OK] 551_trie_aot");
+    0
+}

@@ -1,0 +1,51 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, type_props, size_of, align_of, error
+// @description: Test type property functions with invalid inputs
+// @expected-error: M003
+
+// =============================================================================
+// SIZE_OF ON UNSIZED TYPES
+// =============================================================================
+
+// ERROR: size_of on unsized slice
+meta fn test_size_of_slice() -> UInt using [MetaTypes] {
+    size_of([Int])  // ERROR: unsized type has no static size
+}
+
+// =============================================================================
+// TYPE PROPS ARITY ERRORS
+// =============================================================================
+
+// ERROR: size_of with no arguments
+meta fn test_size_of_no_args() -> UInt using [MetaTypes] {
+    size_of()  // ERROR: expected 1 type argument
+}
+
+// ERROR: size_of with too many arguments
+meta fn test_size_of_too_many() -> UInt using [MetaTypes] {
+    size_of(Int, Bool)  // ERROR: expected 1 type argument
+}
+
+// =============================================================================
+// TYPE PROPS ON NON-TYPE VALUES
+// =============================================================================
+
+// ERROR: size_of with value instead of type
+meta fn test_size_of_value() -> UInt using [MetaTypes] {
+    size_of(42)  // ERROR: expected type, got Int value
+}
+
+// =============================================================================
+// MISSING CONTEXT ERRORS
+// =============================================================================
+
+// ERROR: size_of without MetaTypes
+meta fn test_size_of_no_context() -> UInt {
+    size_of(Int)  // ERROR: requires MetaTypes
+}
+
+fn main() {
+    @const test_size_of_slice();
+}

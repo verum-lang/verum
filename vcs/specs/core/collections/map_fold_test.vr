@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, map, fold, for_each
+// @description: Tests for Map fold and for_each methods
+
+mount core.collections.map.{Map};
+
+// =============================================================================
+// fold tests
+// =============================================================================
+
+@test
+fn test_map_fold_sum_values() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let total = m.fold(0, |acc, _k, v| acc + *v);
+    assert_eq(total, 60);
+}
+
+@test
+fn test_map_fold_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let result = m.fold(42, |acc, _k, v| acc + *v);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_map_fold_count() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let count = m.fold(0, |acc, _k, _v| acc + 1);
+    assert_eq(count, 2);
+}
+
+@test
+fn test_map_fold_product() {
+    let mut m = Map.new();
+    m.insert(1, 2);
+    m.insert(2, 3);
+    m.insert(3, 4);
+
+    let product = m.fold(1, |acc, _k, v| acc * *v);
+    assert_eq(product, 24);
+}
+
+// =============================================================================
+// for_each tests
+// =============================================================================
+
+@test
+fn test_map_for_each_basic() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let mut sum = 0;
+    m.for_each(|_k, v| { sum = sum + *v; });
+    assert_eq(sum, 60);
+}
+
+@test
+fn test_map_for_each_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let mut count = 0;
+    m.for_each(|_k, _v| { count = count + 1; });
+    assert_eq(count, 0);
+}
+
+@test
+fn test_map_for_each_counts() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let mut count = 0;
+    m.for_each(|_k, _v| { count = count + 1; });
+    assert_eq(count, 2);
+}

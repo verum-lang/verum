@@ -1,0 +1,124 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: generic, collection, stack, queue, e2e
+// @description: Test generic data structures built from List
+
+type Stack<T> is { items: List<T> };
+
+implement Stack<T> {
+    fn new() -> Stack<T> {
+        Stack { items: List.new() }
+    }
+
+    fn push(&mut self, item: T) {
+        self.items.push(item);
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        if self.items.len() == 0 {
+            None
+        } else {
+            let idx = self.items.len() - 1;
+            let val = self.items[idx];
+            self.items.pop();
+            Some(val)
+        }
+    }
+
+    fn peek(&self) -> Maybe<T> {
+        if self.items.len() == 0 {
+            None
+        } else {
+            Some(self.items[self.items.len() - 1])
+        }
+    }
+
+    fn size(&self) -> Int {
+        self.items.len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.items.len() == 0
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    let mut s = Stack.new();
+
+    // Test 1: Empty stack
+    if !s.is_empty() {
+        print("FAIL 1: should be empty");
+        f = f + 1;
+    } else {
+        print("  empty_stack: OK");
+    }
+
+    // Test 2: Push and size
+    s.push(10);
+    s.push(20);
+    s.push(30);
+    if s.size() != 3 {
+        print(f"FAIL 2: size = {s.size()}");
+        f = f + 1;
+    } else {
+        print("  push_size: OK");
+    }
+
+    // Test 3: Peek
+    match s.peek() {
+        Some(v) => {
+            if v != 30 {
+                print(f"FAIL 3: peek = {v}");
+                f = f + 1;
+            } else {
+                print("  peek: OK");
+            }
+        }
+        None => {
+            print("FAIL 3: peek returned None");
+            f = f + 1;
+        }
+    }
+
+    // Test 4: Pop
+    match s.pop() {
+        Some(v) => {
+            if v != 30 {
+                print(f"FAIL 4: pop = {v}");
+                f = f + 1;
+            } else {
+                print("  pop: OK");
+            }
+        }
+        None => {
+            print("FAIL 4: pop returned None");
+            f = f + 1;
+        }
+    }
+
+    // Test 5: Size after pop
+    if s.size() != 2 {
+        print(f"FAIL 5: size after pop = {s.size()}");
+        f = f + 1;
+    } else {
+        print("  size_after_pop: OK");
+    }
+
+    // Test 6: Pop remaining
+    s.pop();
+    s.pop();
+    if !s.is_empty() {
+        print("FAIL 6: should be empty after all pops");
+        f = f + 1;
+    } else {
+        print("  empty_after_pops: OK");
+    }
+
+    if f == 0 {
+        print("All generic collection tests passed");
+    }
+    f
+}

@@ -1,0 +1,110 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, bit-counting, popcount, leading-zeros
+// @timeout: 10000
+
+fn popcount(n: Int) -> Int {
+    let mut count = 0;
+    let mut v = n;
+    while v > 0 { count = count + v % 2; v = v / 2; }
+    count
+}
+
+fn count_trailing_zeros(n: Int) -> Int {
+    if n == 0 { return -1; }
+    let mut count = 0;
+    let mut v = n;
+    while v % 2 == 0 { count = count + 1; v = v / 2; }
+    count
+}
+
+fn highest_bit_pos(n: Int) -> Int {
+    if n == 0 { return -1; }
+    let mut pos = 0;
+    let mut v = n;
+    while v > 1 { pos = pos + 1; v = v / 2; }
+    pos
+}
+
+fn is_power_of_2(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if popcount(n) == 1 { 1 } else { 0 }
+}
+
+fn next_power_of_2(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut p = 1;
+    while p < n { p = p * 2; }
+    p
+}
+
+fn reverse_bits_8(n: Int) -> Int {
+    let mut result = 0;
+    let mut v = n;
+    let mut i = 0;
+    while i < 8 {
+        result = result * 2 + v % 2;
+        v = v / 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(1023), 10);
+    assert_eq(popcount(128), 1);
+    1
+}
+
+fn test_trailing() -> Int {
+    assert_eq(count_trailing_zeros(1), 0);
+    assert_eq(count_trailing_zeros(2), 1);
+    assert_eq(count_trailing_zeros(8), 3);
+    assert_eq(count_trailing_zeros(12), 2);
+    assert_eq(count_trailing_zeros(16), 4);
+    1
+}
+
+fn test_highest() -> Int {
+    assert_eq(highest_bit_pos(1), 0);
+    assert_eq(highest_bit_pos(2), 1);
+    assert_eq(highest_bit_pos(7), 2);
+    assert_eq(highest_bit_pos(8), 3);
+    assert_eq(highest_bit_pos(255), 7);
+    1
+}
+
+fn test_power_of_2() -> Int {
+    assert_eq(is_power_of_2(1), 1);
+    assert_eq(is_power_of_2(2), 1);
+    assert_eq(is_power_of_2(3), 0);
+    assert_eq(is_power_of_2(64), 1);
+    assert_eq(next_power_of_2(5), 8);
+    assert_eq(next_power_of_2(8), 8);
+    1
+}
+
+fn test_reverse() -> Int {
+    assert_eq(reverse_bits_8(0), 0);
+    assert_eq(reverse_bits_8(255), 255);
+    assert_eq(reverse_bits_8(1), 128);
+    assert_eq(reverse_bits_8(128), 1);
+    assert_eq(reverse_bits_8(reverse_bits_8(42)), 42);
+    1
+}
+
+fn main() -> Int {
+    test_popcount();
+    test_trailing();
+    test_highest();
+    test_power_of_2();
+    test_reverse();
+    print("DIFF_OK: bit_counting");
+    0
+}

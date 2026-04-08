@@ -1,0 +1,31 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, float, debug
+// @description: Debug if-else return
+
+fn simple_if(x: Float) -> Bool {
+    if x < 0.0 {
+        true
+    } else {
+        false
+    }
+}
+
+fn main() {
+    print("testing simple_if\n");
+
+    let r1 = simple_if(-1.0);
+    print("simple_if(-1.0) = ");
+    print(r1);
+    print("\n");
+
+    let r2 = simple_if(1.0);
+    print("simple_if(1.0) = ");
+    print(r2);
+    print("\n");
+
+    print("done\n");
+}

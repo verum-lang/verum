@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, range, bounds, error
+// @description: Range operator with no bounds at all
+// @expected-error: E018
+
+fn test() {
+    let x = ..;  // Unbounded range needs context
+    for i in .. { }  // Can't iterate over unbounded range
+}

@@ -1,0 +1,28 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: lexer, lossless, trivia, newlines
+// @description: Test that newlines are preserved during lexing
+
+fn single_newline() { }
+
+fn double_newline() { }
+
+
+fn triple_newline() { }
+
+
+
+fn many_newlines() { }
+
+
+
+
+fn with_content() {
+    let a = 1;
+
+    let b = 2;
+
+
+    let c = 3;
+}

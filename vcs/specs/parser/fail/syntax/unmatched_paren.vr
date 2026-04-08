@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, parens, error
+// @description: Test unmatched parenthesis detection
+// @expected-error: E012
+
+fn test_unmatched() {
+    let x = (1 + 2;
+    let y = foo(a, b;
+}

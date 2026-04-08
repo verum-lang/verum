@@ -1,0 +1,304 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, leak-detection, cbgr, comprehensive
+
+/// Comprehensive memory leak detection tests.
+/// Verum's ownership system prevents most leaks statically.
+/// CBGR runtime provides additional leak detection.
+/// Spec: 26-cbgr-implementation.md#leak-detection
+
+mount core.panic;
+
+fn main() {
+    test_automatic_cleanup();
+    test_scope_based_deallocation();
+    test_collection_cleanup();
+    test_cycle_detection();
+    test_weak_reference_cleanup();
+    test_defer_cleanup();
+    test_leak_detection_api();
+
+    print("All memory leak detection tests passed!");
+}
+
+/// Test automatic cleanup via Drop
+fn test_automatic_cleanup() {
+    let initial_allocs = Runtime.allocation_count();
+
+    {
+        // Allocate within scope
+        let a = Heap.new(Text.from("will be dropped"));
+        let b = Heap.new([1, 2, 3, 4, 5]);
+        let c = Heap.new(Map.from([("key", 42)]));
+
+        let during_allocs = Runtime.allocation_count();
+        assert(during_allocs > initial_allocs);
+
+        // All dropped when scope ends
+    }
+
+    // Verify all deallocated
+    let final_allocs = Runtime.allocation_count();
+    assert(final_allocs == initial_allocs);
+}
+
+/// Test scope-based deallocation
+fn test_scope_based_deallocation() {
+    let initial = Runtime.heap_size();
+
+    fn inner_scope() {
+        let large: Heap<[Byte; 1_000_000]> = Heap.new([0; 1_000_000]);  // 1MB allocation
+        let during = Runtime.heap_size();
+        assert(during >= initial + 1_000_000);
+        // large dropped here
+    }
+
+    inner_scope();
+
+    // Memory returned to allocator
+    let after = Runtime.heap_size();
+    assert(after < initial + 1_000_000);
+}
+
+/// Test collection cleanup
+fn test_collection_cleanup() {
+    let initial = Runtime.allocation_count();
+
+    {
+        let mut list: List<Heap<Text>> = List.new();
+
+        // Add many heap allocations to list
+        for i in 0..100 {
+            list.push(Heap.new(Text.from("item " + i.to_string())));
+        }
+
+        let during = Runtime.allocation_count();
+        assert(during >= initial + 100);
+
+        // Clear list - should drop all items
+        list.clear();
+
+        let after_clear = Runtime.allocation_count();
+        assert(after_clear < during);
+
+        // List itself dropped at scope end
+    }
+
+    let final_count = Runtime.allocation_count();
+    assert(final_count == initial);
+}
+
+/// Test cycle detection and prevention
+fn test_cycle_detection() {
+    // Verum prevents reference cycles through ownership
+    // Shared<T> uses weak references to break cycles
+
+    type Node is {
+        value: Int,
+        next: Maybe<Shared<Node>>,
+        prev: Maybe<Weak<Node>>,  // Weak to prevent cycle
+    };
+
+    let initial = Runtime.allocation_count();
+
+    {
+        // Create linked list with weak back-references
+        let node1 = Shared.new(Node { value: 1, next: Maybe.None, prev: Maybe.None });
+        let node2 = Shared.new(Node { value: 2, next: Maybe.None, prev: Maybe.None });
+        let node3 = Shared.new(Node { value: 3, next: Maybe.None, prev: Maybe.None });
+
+        // Set up forward links (strong)
+        node1.borrow_mut().next = Maybe.Some(node2.clone());
+        node2.borrow_mut().next = Maybe.Some(node3.clone());
+
+        // Set up back links (weak - doesn't keep alive)
+        node2.borrow_mut().prev = Maybe.Some(Shared.downgrade(&node1));
+        node3.borrow_mut().prev = Maybe.Some(Shared.downgrade(&node2));
+
+        // All nodes accessible
+        assert(node1.borrow().next.is_some());
+        assert(node3.borrow().prev.as_ref().unwrap().upgrade().is_some());
+
+        // Nodes dropped at scope end - no cycle to prevent cleanup
+    }
+
+    let final_count = Runtime.allocation_count();
+    assert(final_count == initial);
+}
+
+/// Test weak reference cleanup
+fn test_weak_reference_cleanup() {
+    let weak_ref: Weak<Int>;
+
+    {
+        let strong = Shared.new(42);
+        weak_ref = Shared.downgrade(&strong);
+
+        // Weak can be upgraded while strong exists
+        assert(weak_ref.upgrade().is_some());
+        assert(*weak_ref.upgrade().unwrap() == 42);
+
+        // strong dropped here
+    }
+
+    // Weak cannot be upgraded after strong is gone
+    assert(weak_ref.upgrade().is_none());
+
+    // No leak - weak ref doesn't keep data alive
+}
+
+/// Test defer for cleanup
+fn test_defer_cleanup() {
+    let cleanup_ran = Shared.new(false);
+
+    {
+        let cleanup_flag = cleanup_ran.clone();
+
+        defer {
+            *cleanup_flag.borrow_mut() = true;
+        }
+
+        // Some work that might panic
+        let _ = 1 + 2;
+
+        // defer runs at end of scope
+    }
+
+    assert(*cleanup_ran.borrow());
+}
+
+/// Test defer cleanup even on panic
+fn test_defer_cleanup_on_panic() {
+    let cleanup_ran = Shared.new(false);
+
+    let result = panic.catch_unwind(|| {
+        let cleanup_flag = cleanup_ran.clone();
+
+        defer {
+            *cleanup_flag.borrow_mut() = true;
+        }
+
+        panic("intentional panic");
+    });
+
+    // Panic was caught
+    assert(result.is_err());
+
+    // Defer still ran
+    assert(*cleanup_ran.borrow());
+}
+
+/// Test leak detection API
+fn test_leak_detection_api() {
+    // Enable leak checking
+    Runtime.enable_leak_check();
+
+    let baseline = Runtime.allocation_count();
+
+    {
+        let a = Heap.new(42);
+        let b = Heap.new(Text.from("test"));
+
+        // Normal usage
+        let _ = *a + 1;
+        let _ = b.len();
+    }
+
+    // Check for leaks since baseline
+    let leaks = Runtime.check_leaks_since(baseline);
+    assert(leaks.is_empty());
+}
+
+/// Test intentional leak detection
+fn test_intentional_leak_caught() {
+    Runtime.enable_leak_check();
+    let baseline = Runtime.allocation_count();
+
+    {
+        let leaked = Heap.new(42);
+
+        // Intentionally leak by converting to raw pointer
+        // and "forgetting" to drop
+        unsafe {
+            let ptr = Heap.into_raw(leaked);
+            // Don't call Heap.from_raw to restore ownership
+            // This is a leak!
+            std.mem.forget(ptr);
+        }
+    }
+
+    // Leak detector should find it
+    let leaks = Runtime.check_leaks_since(baseline);
+    assert(leaks.len() == 1);
+
+    // Clean up the leak for test hygiene
+    Runtime.force_cleanup_leaks();
+}
+
+/// Test that Drop is called in correct order
+fn test_drop_order() {
+    let order = Shared.new(List.new());
+
+    type Tracked is {
+        id: Int,
+        order: Shared<List<Int>>,
+    };
+
+    implement Drop for Tracked {
+        fn drop(&mut self) {
+            self.order.borrow_mut().push(self.id);
+        }
+    }
+
+    {
+        let _a = Tracked { id: 1, order: order.clone() };
+        let _b = Tracked { id: 2, order: order.clone() };
+        let _c = Tracked { id: 3, order: order.clone() };
+
+        // Dropped in reverse order: c, b, a
+    }
+
+    let drop_order = order.borrow();
+    assert(*drop_order == [3, 2, 1]);
+}
+
+/// Test nested struct drop order
+fn test_nested_drop_order() {
+    let order = Shared.new(List.new());
+
+    type Outer is {
+        id: Int,
+        inner: Inner,
+        order: Shared<List<Int>>,
+    };
+
+    type Inner is {
+        id: Int,
+        order: Shared<List<Int>>,
+    };
+
+    implement Drop for Outer {
+        fn drop(&mut self) {
+            self.order.borrow_mut().push(self.id);
+        }
+    }
+
+    implement Drop for Inner {
+        fn drop(&mut self) {
+            self.order.borrow_mut().push(self.id);
+        }
+    }
+
+    {
+        let _ = Outer {
+            id: 1,
+            inner: Inner { id: 2, order: order.clone() },
+            order: order.clone(),
+        };
+        // Outer dropped first, then Inner
+    }
+
+    let drop_order = order.borrow();
+    assert(*drop_order == [1, 2]);
+}

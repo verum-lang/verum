@@ -1,0 +1,292 @@
+// @test: differential
+// @tier: 0
+// @level: L2
+// @tags: differential, collections
+// @timeout: 10000
+// @expected-exit: 0
+
+/// L2-Standard: Collections
+///
+/// This test verifies that stack push/pop/peek, fixed-size map with
+/// linear search, and set membership produce identical results across
+/// interpreter (Tier 0) and AOT compiler (Tier 3).
+
+// ============================================================================
+// Stack (capacity 8)
+// ============================================================================
+
+type Stack8 is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    top: Int
+};
+
+fn stk_new() -> Stack8 {
+    Stack8 { s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0, s7: 0, top: 0 }
+}
+
+fn stk_get(s: Stack8, i: Int) -> Int {
+    if i == 0 { s.s0 } else if i == 1 { s.s1 }
+    else if i == 2 { s.s2 } else if i == 3 { s.s3 }
+    else if i == 4 { s.s4 } else if i == 5 { s.s5 }
+    else if i == 6 { s.s6 } else { s.s7 }
+}
+
+fn stk_push(s: Stack8, val: Int) -> Stack8 {
+    let i = s.top;
+    Stack8 {
+        s0: if i == 0 { val } else { s.s0 },
+        s1: if i == 1 { val } else { s.s1 },
+        s2: if i == 2 { val } else { s.s2 },
+        s3: if i == 3 { val } else { s.s3 },
+        s4: if i == 4 { val } else { s.s4 },
+        s5: if i == 5 { val } else { s.s5 },
+        s6: if i == 6 { val } else { s.s6 },
+        s7: if i == 7 { val } else { s.s7 },
+        top: s.top + 1
+    }
+}
+
+fn stk_pop(s: Stack8) -> Stack8 {
+    Stack8 {
+        s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3,
+        s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7,
+        top: s.top - 1
+    }
+}
+
+fn stk_peek(s: Stack8) -> Int {
+    stk_get(s, s.top - 1)
+}
+
+fn stk_size(s: Stack8) -> Int { s.top }
+
+// ============================================================================
+// Fixed-size map with linear search (capacity 8 key-value pairs)
+// ============================================================================
+
+type MapEntry is { key: Int, val: Int };
+
+type FlatMap8 is {
+    k0: Int, v0: Int, k1: Int, v1: Int,
+    k2: Int, v2: Int, k3: Int, v3: Int,
+    k4: Int, v4: Int, k5: Int, v5: Int,
+    k6: Int, v6: Int, k7: Int, v7: Int,
+    len: Int
+};
+
+fn fmap_new() -> FlatMap8 {
+    FlatMap8 {
+        k0: 0, v0: 0, k1: 0, v1: 0, k2: 0, v2: 0, k3: 0, v3: 0,
+        k4: 0, v4: 0, k5: 0, v5: 0, k6: 0, v6: 0, k7: 0, v7: 0,
+        len: 0
+    }
+}
+
+fn fmap_key(m: FlatMap8, i: Int) -> Int {
+    if i == 0 { m.k0 } else if i == 1 { m.k1 }
+    else if i == 2 { m.k2 } else if i == 3 { m.k3 }
+    else if i == 4 { m.k4 } else if i == 5 { m.k5 }
+    else if i == 6 { m.k6 } else { m.k7 }
+}
+
+fn fmap_val(m: FlatMap8, i: Int) -> Int {
+    if i == 0 { m.v0 } else if i == 1 { m.v1 }
+    else if i == 2 { m.v2 } else if i == 3 { m.v3 }
+    else if i == 4 { m.v4 } else if i == 5 { m.v5 }
+    else if i == 6 { m.v6 } else { m.v7 }
+}
+
+fn fmap_find(m: FlatMap8, key: Int) -> Int {
+    let mut i = 0;
+    let mut found = -1;
+    while i < m.len {
+        if fmap_key(m, i) == key {
+            found = i;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+fn fmap_set_at(m: FlatMap8, idx: Int, key: Int, val: Int) -> FlatMap8 {
+    FlatMap8 {
+        k0: if idx == 0 { key } else { m.k0 }, v0: if idx == 0 { val } else { m.v0 },
+        k1: if idx == 1 { key } else { m.k1 }, v1: if idx == 1 { val } else { m.v1 },
+        k2: if idx == 2 { key } else { m.k2 }, v2: if idx == 2 { val } else { m.v2 },
+        k3: if idx == 3 { key } else { m.k3 }, v3: if idx == 3 { val } else { m.v3 },
+        k4: if idx == 4 { key } else { m.k4 }, v4: if idx == 4 { val } else { m.v4 },
+        k5: if idx == 5 { key } else { m.k5 }, v5: if idx == 5 { val } else { m.v5 },
+        k6: if idx == 6 { key } else { m.k6 }, v6: if idx == 6 { val } else { m.v6 },
+        k7: if idx == 7 { key } else { m.k7 }, v7: if idx == 7 { val } else { m.v7 },
+        len: m.len
+    }
+}
+
+fn fmap_insert(m: FlatMap8, key: Int, val: Int) -> FlatMap8 {
+    let existing = fmap_find(m, key);
+    if existing >= 0 {
+        fmap_set_at(m, existing, key, val)
+    } else {
+        let idx = m.len;
+        let updated = fmap_set_at(m, idx, key, val);
+        FlatMap8 {
+            k0: updated.k0, v0: updated.v0, k1: updated.k1, v1: updated.v1,
+            k2: updated.k2, v2: updated.v2, k3: updated.k3, v3: updated.v3,
+            k4: updated.k4, v4: updated.v4, k5: updated.k5, v5: updated.v5,
+            k6: updated.k6, v6: updated.v6, k7: updated.k7, v7: updated.v7,
+            len: m.len + 1
+        }
+    }
+}
+
+fn fmap_get(m: FlatMap8, key: Int) -> Int {
+    let idx = fmap_find(m, key);
+    if idx >= 0 { fmap_val(m, idx) } else { -1 }
+}
+
+fn fmap_contains(m: FlatMap8, key: Int) -> Bool {
+    fmap_find(m, key) >= 0
+}
+
+// ============================================================================
+// Bit-set for membership (integers 0..15)
+// ============================================================================
+
+fn bitset_empty() -> Int { 0 }
+
+fn bitset_add(s: Int, elem: Int) -> Int {
+    s | (1 << elem)
+}
+
+fn bitset_has(s: Int, elem: Int) -> Bool {
+    (s >> elem) & 1 == 1
+}
+
+fn bitset_remove(s: Int, elem: Int) -> Int {
+    s & (!(1 << elem))
+}
+
+fn bitset_count(s: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < 16 {
+        if bitset_has(s, i) { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+fn bitset_intersect(a: Int, b: Int) -> Int { a & b }
+fn bitset_union(a: Int, b: Int) -> Int { a | b }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_stack() {
+    let mut s = stk_new();
+    s = stk_push(s, 10);
+    s = stk_push(s, 20);
+    s = stk_push(s, 30);
+    assert_eq(stk_size(s), 3);
+    assert_eq(stk_peek(s), 30);
+    print("stack_peek=30");
+
+    s = stk_pop(s);
+    assert_eq(stk_peek(s), 20);
+    s = stk_pop(s);
+    assert_eq(stk_peek(s), 10);
+    print("stack_after_pop=10");
+
+    // Push more after pop
+    s = stk_push(s, 99);
+    assert_eq(stk_peek(s), 99);
+    assert_eq(stk_size(s), 2);
+    print("stack_repush=99");
+
+    // Sum via stack
+    let mut sum_stk = stk_new();
+    let mut i = 1;
+    while i <= 5 {
+        sum_stk = stk_push(sum_stk, i);
+        i = i + 1;
+    }
+    let mut total = 0;
+    while stk_size(sum_stk) > 0 {
+        total = total + stk_peek(sum_stk);
+        sum_stk = stk_pop(sum_stk);
+    }
+    assert_eq(total, 15);
+    print("stack_sum=15");
+}
+
+fn test_map() {
+    let mut m = fmap_new();
+    m = fmap_insert(m, 100, 10);
+    m = fmap_insert(m, 200, 20);
+    m = fmap_insert(m, 300, 30);
+
+    assert_eq(fmap_get(m, 100), 10);
+    assert_eq(fmap_get(m, 200), 20);
+    assert_eq(fmap_get(m, 300), 30);
+    assert_eq(fmap_get(m, 999), -1);
+    print("map_get_100=10");
+    print("map_get_200=20");
+
+    assert(fmap_contains(m, 200));
+    assert(!fmap_contains(m, 400));
+    assert_eq(m.len, 3);
+    print("map_size=3");
+
+    // Update existing key
+    m = fmap_insert(m, 200, 42);
+    assert_eq(fmap_get(m, 200), 42);
+    assert_eq(m.len, 3);
+    print("map_update=42");
+
+    // Insert more
+    m = fmap_insert(m, 400, 40);
+    m = fmap_insert(m, 500, 50);
+    assert_eq(m.len, 5);
+    assert_eq(fmap_get(m, 500), 50);
+    print("map_size_final=5");
+}
+
+fn test_set() {
+    let mut s = bitset_empty();
+    s = bitset_add(s, 1);
+    s = bitset_add(s, 3);
+    s = bitset_add(s, 5);
+    s = bitset_add(s, 7);
+    assert_eq(bitset_count(s), 4);
+    assert(bitset_has(s, 3));
+    assert(!bitset_has(s, 4));
+    print("set_count=4");
+
+    // Remove
+    s = bitset_remove(s, 3);
+    assert(!bitset_has(s, 3));
+    assert_eq(bitset_count(s), 3);
+    print("set_after_remove=3");
+
+    // Intersection and union
+    let a = bitset_add(bitset_add(bitset_add(bitset_empty(), 1), 2), 3);
+    let b = bitset_add(bitset_add(bitset_add(bitset_empty(), 2), 3), 4);
+    let inter = bitset_intersect(a, b);
+    let uni = bitset_union(a, b);
+    assert_eq(bitset_count(inter), 2);
+    assert(bitset_has(inter, 2));
+    assert(bitset_has(inter, 3));
+    assert_eq(bitset_count(uni), 4);
+    print("set_intersect=2");
+    print("set_union=4");
+}
+
+fn main() -> Int {
+    test_stack();
+    test_map();
+    test_set();
+    print("PASS: collections");
+    0
+}

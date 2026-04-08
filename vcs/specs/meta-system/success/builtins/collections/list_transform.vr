@@ -1,0 +1,137 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, list, map, filter, fold
+// @description: Test list transformation operations (list_map, list_filter, list_fold)
+
+// =============================================================================
+// LIST_MAP TESTS
+// =============================================================================
+
+// Test list_map with simple function
+meta fn test_list_map_double() -> List<Int> {
+    list_map([1, 2, 3], |x| x * 2)  // Should be [2, 4, 6]
+}
+
+// Test list_map with empty list
+meta fn test_list_map_empty() -> List<Int> {
+    list_map([], |x| x * 2)  // Should be []
+}
+
+// Test list_map with single element
+meta fn test_list_map_single() -> List<Int> {
+    list_map([5], |x| x + 10)  // Should be [15]
+}
+
+// Test list_map with type conversion
+meta fn test_list_map_to_text() -> List<Text> {
+    list_map([1, 2, 3], |x| int_to_text(x))  // Should be ["1", "2", "3"]
+}
+
+// =============================================================================
+// LIST_FILTER TESTS
+// =============================================================================
+
+// Test list_filter with predicate
+meta fn test_list_filter_positive() -> List<Int> {
+    list_filter([1, -2, 3, -4, 5], |x| x > 0)  // Should be [1, 3, 5]
+}
+
+// Test list_filter all pass
+meta fn test_list_filter_all() -> List<Int> {
+    list_filter([2, 4, 6], |x| x > 0)  // Should be [2, 4, 6]
+}
+
+// Test list_filter none pass
+meta fn test_list_filter_none() -> List<Int> {
+    list_filter([1, 2, 3], |x| x > 10)  // Should be []
+}
+
+// Test list_filter empty list
+meta fn test_list_filter_empty() -> List<Int> {
+    list_filter([], |x| x > 0)  // Should be []
+}
+
+// Test list_filter even numbers
+meta fn test_list_filter_even() -> List<Int> {
+    list_filter([1, 2, 3, 4, 5, 6], |x| x % 2 == 0)  // Should be [2, 4, 6]
+}
+
+// =============================================================================
+// LIST_FOLD TESTS
+// =============================================================================
+
+// Test list_fold for sum
+meta fn test_list_fold_sum() -> Int {
+    list_fold([1, 2, 3, 4], 0, |acc, x| acc + x)  // Should be 10
+}
+
+// Test list_fold for product
+meta fn test_list_fold_product() -> Int {
+    list_fold([1, 2, 3, 4], 1, |acc, x| acc * x)  // Should be 24
+}
+
+// Test list_fold with empty list
+meta fn test_list_fold_empty() -> Int {
+    list_fold([], 42, |acc, x| acc + x)  // Should be 42 (initial value)
+}
+
+// Test list_fold for max
+meta fn test_list_fold_max() -> Int {
+    list_fold([3, 1, 4, 1, 5], 0, |acc, x| max(acc, x))  // Should be 5
+}
+
+// Test list_fold for counting
+meta fn test_list_fold_count() -> Int {
+    list_fold([1, 2, 3, 4, 5], 0, |acc, _| acc + 1)  // Should be 5
+}
+
+// =============================================================================
+// COMBINED TRANSFORMATION TESTS
+// =============================================================================
+
+// Test map then filter
+meta fn test_map_then_filter() -> List<Int> {
+    let doubled = list_map([1, 2, 3, 4, 5], |x| x * 2);
+    list_filter(doubled, |x| x > 5)  // Should be [6, 8, 10]
+}
+
+// Test filter then map
+meta fn test_filter_then_map() -> List<Int> {
+    let positive = list_filter([-1, 2, -3, 4], |x| x > 0);
+    list_map(positive, |x| x * 10)  // Should be [20, 40]
+}
+
+// Test map then fold (sum of squares)
+meta fn test_map_then_fold() -> Int {
+    let squares = list_map([1, 2, 3], |x| x * x);
+    list_fold(squares, 0, |acc, x| acc + x)  // Should be 14
+}
+
+// Main test function
+fn main() {
+    // map tests
+    assert_eq(@const(test_list_map_double()), [2, 4, 6]);
+    assert_eq(@const(test_list_map_empty()), []);
+    assert_eq(@const(test_list_map_single()), [15]);
+    assert_eq(@const(test_list_map_to_text()), ["1", "2", "3"]);
+
+    // filter tests
+    assert_eq(@const(test_list_filter_positive()), [1, 3, 5]);
+    assert_eq(@const(test_list_filter_all()), [2, 4, 6]);
+    assert_eq(@const(test_list_filter_none()), []);
+    assert_eq(@const(test_list_filter_empty()), []);
+    assert_eq(@const(test_list_filter_even()), [2, 4, 6]);
+
+    // fold tests
+    assert_eq(@const(test_list_fold_sum()), 10);
+    assert_eq(@const(test_list_fold_product()), 24);
+    assert_eq(@const(test_list_fold_empty()), 42);
+    assert_eq(@const(test_list_fold_max()), 5);
+    assert_eq(@const(test_list_fold_count()), 5);
+
+    // combined tests
+    assert_eq(@const(test_map_then_filter()), [6, 8, 10]);
+    assert_eq(@const(test_filter_then_map()), [20, 40]);
+    assert_eq(@const(test_map_then_fold()), 14);
+}

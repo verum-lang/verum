@@ -1,0 +1,322 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, dp, knapsack
+// @timeout: 50000
+// @expected-exit: 0
+// @description: 0/1 Knapsack problem via bottom-up DP with fixed-size items and flat 2D table
+
+// ============================================================================
+// Items: 4 items with weight and value
+// ============================================================================
+
+type Item is {
+    weight: Int,
+    value: Int
+};
+
+fn item_weight(idx: Int) -> Int {
+    // Item 0: weight=1, value=1
+    // Item 1: weight=3, value=4
+    // Item 2: weight=4, value=5
+    // Item 3: weight=5, value=7
+    if idx == 0 { 1 }
+    else if idx == 1 { 3 }
+    else if idx == 2 { 4 }
+    else { 5 }
+}
+
+fn item_value(idx: Int) -> Int {
+    if idx == 0 { 1 }
+    else if idx == 1 { 4 }
+    else if idx == 2 { 5 }
+    else { 7 }
+}
+
+// ============================================================================
+// Flat DP table: (num_items+1) x (capacity+1)
+// For 4 items, capacity 7: 5 x 8 = 40 cells
+// ============================================================================
+
+type DpTable is {
+    c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int, c12: Int, c13: Int, c14: Int, c15: Int,
+    c16: Int, c17: Int, c18: Int, c19: Int, c20: Int, c21: Int, c22: Int, c23: Int,
+    c24: Int, c25: Int, c26: Int, c27: Int, c28: Int, c29: Int, c30: Int, c31: Int,
+    c32: Int, c33: Int, c34: Int, c35: Int, c36: Int, c37: Int, c38: Int, c39: Int
+};
+
+fn dp_new() -> DpTable {
+    DpTable {
+        c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        c16: 0, c17: 0, c18: 0, c19: 0, c20: 0, c21: 0, c22: 0, c23: 0,
+        c24: 0, c25: 0, c26: 0, c27: 0, c28: 0, c29: 0, c30: 0, c31: 0,
+        c32: 0, c33: 0, c34: 0, c35: 0, c36: 0, c37: 0, c38: 0, c39: 0
+    }
+}
+
+fn dp_get(t: DpTable, idx: Int) -> Int {
+    if idx == 0 { t.c0 } else if idx == 1 { t.c1 } else if idx == 2 { t.c2 }
+    else if idx == 3 { t.c3 } else if idx == 4 { t.c4 } else if idx == 5 { t.c5 }
+    else if idx == 6 { t.c6 } else if idx == 7 { t.c7 } else if idx == 8 { t.c8 }
+    else if idx == 9 { t.c9 } else if idx == 10 { t.c10 } else if idx == 11 { t.c11 }
+    else if idx == 12 { t.c12 } else if idx == 13 { t.c13 } else if idx == 14 { t.c14 }
+    else if idx == 15 { t.c15 } else if idx == 16 { t.c16 } else if idx == 17 { t.c17 }
+    else if idx == 18 { t.c18 } else if idx == 19 { t.c19 } else if idx == 20 { t.c20 }
+    else if idx == 21 { t.c21 } else if idx == 22 { t.c22 } else if idx == 23 { t.c23 }
+    else if idx == 24 { t.c24 } else if idx == 25 { t.c25 } else if idx == 26 { t.c26 }
+    else if idx == 27 { t.c27 } else if idx == 28 { t.c28 } else if idx == 29 { t.c29 }
+    else if idx == 30 { t.c30 } else if idx == 31 { t.c31 } else if idx == 32 { t.c32 }
+    else if idx == 33 { t.c33 } else if idx == 34 { t.c34 } else if idx == 35 { t.c35 }
+    else if idx == 36 { t.c36 } else if idx == 37 { t.c37 } else if idx == 38 { t.c38 }
+    else { t.c39 }
+}
+
+fn dp_set(t: DpTable, idx: Int, val: Int) -> DpTable {
+    DpTable {
+        c0: if idx == 0 { val } else { t.c0 },
+        c1: if idx == 1 { val } else { t.c1 },
+        c2: if idx == 2 { val } else { t.c2 },
+        c3: if idx == 3 { val } else { t.c3 },
+        c4: if idx == 4 { val } else { t.c4 },
+        c5: if idx == 5 { val } else { t.c5 },
+        c6: if idx == 6 { val } else { t.c6 },
+        c7: if idx == 7 { val } else { t.c7 },
+        c8: if idx == 8 { val } else { t.c8 },
+        c9: if idx == 9 { val } else { t.c9 },
+        c10: if idx == 10 { val } else { t.c10 },
+        c11: if idx == 11 { val } else { t.c11 },
+        c12: if idx == 12 { val } else { t.c12 },
+        c13: if idx == 13 { val } else { t.c13 },
+        c14: if idx == 14 { val } else { t.c14 },
+        c15: if idx == 15 { val } else { t.c15 },
+        c16: if idx == 16 { val } else { t.c16 },
+        c17: if idx == 17 { val } else { t.c17 },
+        c18: if idx == 18 { val } else { t.c18 },
+        c19: if idx == 19 { val } else { t.c19 },
+        c20: if idx == 20 { val } else { t.c20 },
+        c21: if idx == 21 { val } else { t.c21 },
+        c22: if idx == 22 { val } else { t.c22 },
+        c23: if idx == 23 { val } else { t.c23 },
+        c24: if idx == 24 { val } else { t.c24 },
+        c25: if idx == 25 { val } else { t.c25 },
+        c26: if idx == 26 { val } else { t.c26 },
+        c27: if idx == 27 { val } else { t.c27 },
+        c28: if idx == 28 { val } else { t.c28 },
+        c29: if idx == 29 { val } else { t.c29 },
+        c30: if idx == 30 { val } else { t.c30 },
+        c31: if idx == 31 { val } else { t.c31 },
+        c32: if idx == 32 { val } else { t.c32 },
+        c33: if idx == 33 { val } else { t.c33 },
+        c34: if idx == 34 { val } else { t.c34 },
+        c35: if idx == 35 { val } else { t.c35 },
+        c36: if idx == 36 { val } else { t.c36 },
+        c37: if idx == 37 { val } else { t.c37 },
+        c38: if idx == 38 { val } else { t.c38 },
+        c39: if idx == 39 { val } else { t.c39 }
+    }
+}
+
+// dp[i][w] stored at index i * (cap+1) + w
+fn dp_idx(i: Int, w: Int, cap_plus1: Int) -> Int {
+    i * cap_plus1 + w
+}
+
+// ============================================================================
+// 0/1 Knapsack: n items, capacity cap
+// Returns the maximum value achievable
+// ============================================================================
+
+fn knapsack(n: Int, cap: Int) -> Int {
+    let cap1 = cap + 1;
+    let mut dp = dp_new();
+    // dp[0][w] = 0 for all w (already initialized)
+
+    let mut i = 1;
+    while i <= n {
+        let w_item = item_weight(i - 1);
+        let v_item = item_value(i - 1);
+        let mut w = 0;
+        while w <= cap {
+            let without = dp_get(dp, dp_idx(i - 1, w, cap1));
+            if w_item <= w {
+                let with_it = dp_get(dp, dp_idx(i - 1, w - w_item, cap1)) + v_item;
+                if with_it > without {
+                    dp = dp_set(dp, dp_idx(i, w, cap1), with_it);
+                } else {
+                    dp = dp_set(dp, dp_idx(i, w, cap1), without);
+                }
+            } else {
+                dp = dp_set(dp, dp_idx(i, w, cap1), without);
+            }
+            w = w + 1;
+        }
+        i = i + 1;
+    }
+
+    dp_get(dp, dp_idx(n, cap, cap1))
+}
+
+// ============================================================================
+// Knapsack with item selection traceback
+// Returns a bitmask of selected items (bit i = item i selected)
+// ============================================================================
+
+fn knapsack_with_items(n: Int, cap: Int) -> Int {
+    let cap1 = cap + 1;
+    let mut dp = dp_new();
+
+    let mut i = 1;
+    while i <= n {
+        let w_item = item_weight(i - 1);
+        let v_item = item_value(i - 1);
+        let mut w = 0;
+        while w <= cap {
+            let without = dp_get(dp, dp_idx(i - 1, w, cap1));
+            if w_item <= w {
+                let with_it = dp_get(dp, dp_idx(i - 1, w - w_item, cap1)) + v_item;
+                if with_it > without {
+                    dp = dp_set(dp, dp_idx(i, w, cap1), with_it);
+                } else {
+                    dp = dp_set(dp, dp_idx(i, w, cap1), without);
+                }
+            } else {
+                dp = dp_set(dp, dp_idx(i, w, cap1), without);
+            }
+            w = w + 1;
+        }
+        i = i + 1;
+    }
+
+    // Traceback: determine which items were selected
+    let mut selected = 0;
+    let mut rem_w = cap;
+    let mut j = n;
+    while j > 0 {
+        let cur = dp_get(dp, dp_idx(j, rem_w, cap1));
+        let prev = dp_get(dp, dp_idx(j - 1, rem_w, cap1));
+        if cur != prev {
+            // Item j-1 was selected
+            // Set bit (j-1) in selected: selected += 2^(j-1)
+            let mut bit = 1;
+            let mut k = 0;
+            while k < j - 1 {
+                bit = bit * 2;
+                k = k + 1;
+            }
+            selected = selected + bit;
+            rem_w = rem_w - item_weight(j - 1);
+        }
+        j = j - 1;
+    }
+
+    selected
+}
+
+// ============================================================================
+// Test 1: Optimal value for capacity 7
+// Items: (w=1,v=1), (w=3,v=4), (w=4,v=5), (w=5,v=7)
+// Best: items 1+2 (w=3+4=7, v=4+5=9) or items 0+1+2 (w=1+3+4=8>7, no)
+// Actually: items 1+2: w=7, v=9. Items 0+3: w=6, v=8. Items 0+1: w=4, v=5.
+// Best is items 1+2 = 9
+// ============================================================================
+
+@test
+fn test_knapsack_cap7() {
+    let result = knapsack(4, 7);
+    assert_eq(result, 9);
+
+    print("  test_knapsack_cap7: ok");
+}
+
+// ============================================================================
+// Test 2: Item selection traceback
+// ============================================================================
+
+@test
+fn test_item_selection() {
+    let mask = knapsack_with_items(4, 7);
+    // Items 1 and 2 selected: bitmask = 0b0110 = 6
+    assert_eq(mask, 6);
+
+    // Verify: item 1 weight + item 2 weight = 3 + 4 = 7 (exactly capacity)
+    // item 1 value + item 2 value = 4 + 5 = 9
+
+    print("  test_item_selection: ok");
+}
+
+// ============================================================================
+// Test 3: Small capacity (only lightest item fits)
+// ============================================================================
+
+@test
+fn test_small_capacity() {
+    // Capacity 1: only item 0 (w=1, v=1) fits
+    assert_eq(knapsack(4, 1), 1);
+
+    // Capacity 2: still only item 0
+    assert_eq(knapsack(4, 2), 1);
+
+    // Capacity 3: item 1 (w=3, v=4) is better than item 0
+    assert_eq(knapsack(4, 3), 4);
+
+    // Capacity 0: nothing fits
+    assert_eq(knapsack(4, 0), 0);
+
+    print("  test_small_capacity: ok");
+}
+
+// ============================================================================
+// Test 4: Incremental capacity values
+// ============================================================================
+
+@test
+fn test_incremental_capacity() {
+    // cap=4: item 1 (w=3,v=4) + item 0 (w=1,v=1) = 5, or item 2 (w=4,v=5). Best=5
+    assert_eq(knapsack(4, 4), 5);
+
+    // cap=5: item 3 (w=5,v=7) alone=7, or item 1+item 0 (w=4,v=5). Best=7
+    assert_eq(knapsack(4, 5), 7);
+
+    // cap=6: item 3(w=5,v=7)+item 0(w=1,v=1)=8, or item 1(w=3,v=4)+item 0(w=1,v=1)=5+nothing. Best=8
+    assert_eq(knapsack(4, 6), 8);
+
+    print("  test_incremental_capacity: ok");
+}
+
+// ============================================================================
+// Test 5: Using only a subset of items
+// ============================================================================
+
+@test
+fn test_subset_items() {
+    // Use only first 2 items, cap=7
+    // Items: (w=1,v=1), (w=3,v=4)
+    // Best: both (w=4, v=5)
+    assert_eq(knapsack(2, 7), 5);
+
+    // Use only first 1 item, cap=7
+    assert_eq(knapsack(1, 7), 1);
+
+    // Use only first 3 items, cap=7
+    // Items: (w=1,v=1), (w=3,v=4), (w=4,v=5)
+    // Best: items 1+2 (w=7, v=9) or items 0+1 (w=4, v=5) or items 0+2 (w=5, v=6)
+    assert_eq(knapsack(3, 7), 9);
+
+    print("  test_subset_items: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_knapsack_cap7();
+    test_item_selection();
+    test_small_capacity();
+    test_incremental_capacity();
+    test_subset_items();
+    print("[OK] 111_knapsack");
+    0
+}

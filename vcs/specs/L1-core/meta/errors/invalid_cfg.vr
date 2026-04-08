@@ -1,0 +1,16 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: meta, cfg, errors
+// @timeout: 5000
+
+/// Tests that invalid @cfg usage is rejected.
+
+// @cfg with invalid condition syntax
+@cfg()
+fn empty_cfg() {
+    print("should not compile");
+}
+
+fn main() {
+    print("Invalid cfg error tests");
+}

@@ -1,0 +1,350 @@
+// @test: run
+// @expected-stdout: Mapped: 84\nChained: 126\nAlternative: 42\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, result, combinators, functional
+// @description: Result combinators - map, and_then, or_else and more
+
+/// Result combinators - functional error handling.
+/// Chainable operations for transforming and composing Results.
+
+type ComputeError is
+    | DivisionByZero
+    | Overflow
+    | InvalidInput(Text)
+    | OutOfRange(Int, Int, Int);  // value, min, max
+
+/// map - transform Ok value, preserve Err
+fn map_examples() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // Simple map
+    let doubled = result.map(|n| n * 2);
+    assert_eq(doubled.unwrap(), 84);
+
+    // Map to different type
+    let as_string = result.map(|n| format("Value: {}", n));
+    assert_eq(as_string.unwrap(), "Value: 42");
+
+    // Map preserves Err
+    let error: Result<Int, Text> = Err("failed");
+    let still_error = error.map(|n| n * 2);
+    assert(still_error.is_err());
+
+    // Chained maps
+    let processed = Ok(10)
+        .map(|n| n + 5)
+        .map(|n| n * 2)
+        .map(|n| n.to_text());
+    assert_eq(processed.unwrap(), "30");
+}
+
+/// map_err - transform Err value, preserve Ok
+fn map_err_examples() {
+    let result: Result<Int, Text> = Err("error message");
+
+    // Transform error type
+    let with_length: Result<Int, Int> = result.map_err(|e| e.len() as Int);
+    assert_eq(with_length.unwrap_err(), 13);
+
+    // Add context
+    let with_context = result.map_err(|e| format("Operation failed: {}", e));
+    assert_eq(with_context.unwrap_err(), "Operation failed: error message");
+
+    // map_err preserves Ok
+    let success: Result<Int, Text> = Ok(42);
+    let still_success = success.map_err(|e| e.to_uppercase());
+    assert_eq(still_success.unwrap(), 42);
+
+    // Chained map_err
+    let enhanced = Err("error")
+        .map_err(|e| format("[{}]", e))
+        .map_err(|e| format("Context: {}", e));
+    assert_eq(enhanced.unwrap_err(), "Context: [error]");
+}
+
+/// and_then - chain Result-returning operations
+fn and_then_examples() {
+    fn double(n: Int) -> Result<Int, Text> {
+        Ok(n * 2)
+    }
+
+    fn validate_positive(n: Int) -> Result<Int, Text> {
+        if n > 0 {
+            Ok(n)
+        } else {
+            Err("Number must be positive")
+        }
+    }
+
+    fn validate_small(n: Int) -> Result<Int, Text> {
+        if n < 1000 {
+            Ok(n)
+        } else {
+            Err("Number too large")
+        }
+    }
+
+    // Chain operations - break into steps to help type inference
+    let initial: Result<Int, Text> = Ok(21);
+    let doubled = initial.and_then(|n| double(n));
+    let validated = doubled.and_then(|n| validate_positive(n));
+    let result = validated.and_then(|n| validate_small(n));
+    assert_eq(result.unwrap(), 42);
+
+    // Chain stops at first Err
+    let base: Result<Int, Text> = Ok(-5);
+    let stops_early = base
+        .and_then(|n| validate_positive(n))  // Returns Err
+        .and_then(|n| double(n));  // Never called
+    assert(stops_early.is_err());
+
+    // Err propagates through
+    let error: Result<Int, Text> = Err("initial error");
+    let still_error = error.and_then(|n| double(n));
+    assert_eq(still_error.unwrap_err(), "initial error");
+}
+
+/// or_else - provide alternative on Err
+fn or_else_examples() {
+    fn fallback(e: Text) -> Result<Int, Text> {
+        if e == "recoverable" {
+            Ok(0)
+        } else {
+            Err(format("unrecoverable: {}", e))
+        }
+    }
+
+    // Recovery from error
+    let recovered = Err("recoverable").or_else(|e| fallback(e));
+    assert_eq(recovered.unwrap(), 0);
+
+    // Error transformation
+    let transformed = Err("fatal").or_else(|e| fallback(e));
+    assert_eq(transformed.unwrap_err(), "unrecoverable: fatal");
+
+    // Ok passes through
+    let success: Result<Int, Text> = Ok(42);
+    let still_success = success.or_else(|e| fallback(e));
+    assert_eq(still_success.unwrap(), 42);
+
+    // Chain fallbacks
+    fn try_primary() -> Result<Int, Text> { Err("primary") }
+    fn try_secondary() -> Result<Int, Text> { Err("secondary") }
+    fn try_tertiary() -> Result<Int, Text> { Ok(42) }
+
+    let result = try_primary()
+        .or_else(|_| try_secondary())
+        .or_else(|_| try_tertiary());
+    assert_eq(result.unwrap(), 42);
+}
+
+/// or - provide alternative Result
+fn or_examples() {
+    let primary: Result<Int, Text> = Err("failed");
+    let backup: Result<Int, Text> = Ok(42);
+
+    // Use backup on error
+    let result = primary.or(backup);
+    assert_eq(result.unwrap(), 42);
+
+    // First success wins
+    let first_ok: Result<Int, Text> = Ok(1);
+    let second_ok: Result<Int, Text> = Ok(2);
+    let result = first_ok.or(second_ok);
+    assert_eq(result.unwrap(), 1);
+
+    // Chain multiple alternatives
+    let a: Result<Int, Text> = Err("a");
+    let b: Result<Int, Text> = Err("b");
+    let c: Result<Int, Text> = Ok(42);
+    let result = a.or(b).or(c);
+    assert_eq(result.unwrap(), 42);
+}
+
+/// and - require both to succeed
+fn and_examples() {
+    let first: Result<Int, Text> = Ok(1);
+    let second: Result<Text, Text> = Ok("two");
+
+    // Both must succeed, returns second
+    let result = first.and(second);
+    assert_eq(result.unwrap(), "two");
+
+    // First Err stops evaluation
+    let error: Result<Int, Text> = Err("first failed");
+    let success: Result<Text, Text> = Ok("second");
+    let result = error.and(success);
+    assert_eq(result.unwrap_err(), "first failed");
+
+    // Second Err also fails
+    let first_ok: Result<Int, Text> = Ok(1);
+    let second_err: Result<Text, Text> = Err("second failed");
+    let result = first_ok.and(second_err);
+    assert_eq(result.unwrap_err(), "second failed");
+}
+
+/// unwrap_or_default - use Default trait
+fn unwrap_or_default_examples() {
+    let success: Result<Int, Text> = Ok(42);
+    let failure: Result<Int, Text> = Err("error");
+
+    // Ok unwraps normally
+    assert_eq(success.unwrap_or_default(), 42);
+
+    // Err uses Default
+    assert_eq(failure.unwrap_or_default(), 0);  // Int.default() = 0
+
+    // Works with any Default type
+    let empty_list: Result<List<Int>, Text> = Err("no list");
+    assert_eq(empty_list.unwrap_or_default(), []);
+}
+
+/// flatten - unwrap nested Results
+fn flatten_examples() {
+    let nested: Result<Result<Int, Text>, Text> = Ok(Ok(42));
+    let flat = nested.flatten();
+    assert_eq(flat.unwrap(), 42);
+
+    // Outer Ok, inner Err
+    let inner_err: Result<Result<Int, Text>, Text> = Ok(Err("inner error"));
+    let flat = inner_err.flatten();
+    assert_eq(flat.unwrap_err(), "inner error");
+
+    // Outer Err
+    let outer_err: Result<Result<Int, Text>, Text> = Err("outer error");
+    let flat = outer_err.flatten();
+    assert_eq(flat.unwrap_err(), "outer error");
+}
+
+/// transpose - swap Result<Maybe<T>, E> to Maybe<Result<T, E>>
+// NOTE: transpose() method not yet implemented in compiler
+fn transpose_examples() {
+    // Manual transpose implementation
+    let some_ok: Result<Maybe<Int>, Text> = Ok(Some(42));
+    let transposed: Maybe<Result<Int, Text>> = match some_ok {
+        Ok(Some(v)) => Some(Ok(v)),
+        Ok(None) => None,
+        Err(e) => Some(Err(e)),
+    };
+    assert_eq(transposed, Some(Ok(42)));
+}
+
+/// Practical combinator patterns
+fn practical_patterns() {
+    // Validation chain
+    fn validate_username(name: &Text) -> Result<Text, ComputeError> {
+        let base: Result<Text, ComputeError> = Ok(name.clone());
+        base
+            .and_then(|n| check_length(&n, 3, 20))
+            .and_then(|n| check_chars(&n))
+            .and_then(|n| check_reserved(&n))
+    }
+
+    fn check_length(s: &Text, min: Int, max: Int) -> Result<Text, ComputeError> {
+        let len = s.len() as Int;
+        if len >= min && len <= max {
+            Ok(s.clone())
+        } else {
+            Err(ComputeError.OutOfRange(len, min, max))
+        }
+    }
+
+    fn check_chars(s: &Text) -> Result<Text, ComputeError> {
+        if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            Ok(s.clone())
+        } else {
+            Err(ComputeError.InvalidInput("Invalid characters"))
+        }
+    }
+
+    fn check_reserved(s: &Text) -> Result<Text, ComputeError> {
+        let reserved = ["admin", "root", "system"];
+        if reserved.contains(&s.to_lowercase()) {
+            Err(ComputeError.InvalidInput("Reserved name"))
+        } else {
+            Ok(s.clone())
+        }
+    }
+
+    // Data transformation pipeline
+    fn process_data(input: &Text) -> Result<Int, ComputeError> {
+        parse_input(input)
+            .map(|n| n * 2)
+            .and_then(|n| validate_range(n, 0, 1000))
+            .map(|n| n + 10)
+    }
+
+    fn parse_input(s: &Text) -> Result<Int, ComputeError> {
+        if s == "42" { Ok(42) }
+        else { Err(ComputeError.InvalidInput("Not a number")) }
+    }
+
+    fn validate_range(n: Int, min: Int, max: Int) -> Result<Int, ComputeError> {
+        if n >= min && n <= max {
+            Ok(n)
+        } else {
+            Err(ComputeError.OutOfRange(n, min, max))
+        }
+    }
+
+    // Error recovery with fallback chain
+    fn get_data() -> Result<Int, Text> {
+        try_cache()
+            .or_else(|_| try_database())
+            .or_else(|_| try_remote())
+            .or_else(|_| Ok(0))  // Final fallback
+    }
+
+    fn try_cache() -> Result<Int, Text> { Err("cache miss") }
+    fn try_database() -> Result<Int, Text> { Err("db error") }
+    fn try_remote() -> Result<Int, Text> { Ok(42) }
+}
+
+/// Combining multiple Results
+fn combining_results() {
+    fn combine_two<A, B, E>(
+        a: Result<A, E>,
+        b: Result<B, E>
+    ) -> Result<(A, B), E> {
+        Ok((a?, b?))
+    }
+
+    fn combine_three<A, B, C, E>(
+        a: Result<A, E>,
+        b: Result<B, E>,
+        c: Result<C, E>
+    ) -> Result<(A, B, C), E> {
+        Ok((a?, b?, c?))
+    }
+
+    // Using map and and_then
+    fn zip_results<A, B, E>(
+        a: Result<A, E>,
+        b: Result<B, E>
+    ) -> Result<(A, B), E> {
+        a.and_then(|av| b.map(|bv| (av, bv)))
+    }
+
+    let result = zip_results(Ok(1), Ok(2));
+    assert_eq(result.unwrap(), (1, 2));
+}
+
+fn main() {
+    // map example
+    let mapped = Ok(42).map(|n| n * 2);
+    println(format("Mapped: {}", mapped.unwrap()));
+
+    // and_then example
+    let chained = Ok(42)
+        .and_then(|n| Ok(n * 2))
+        .and_then(|n| Ok(n + 42));
+    println(format("Chained: {}", chained.unwrap()));
+
+    // or_else example
+    let alternative = Err("failed")
+        .or_else(|_: Text| Ok(42));
+    println(format("Alternative: {}", alternative.unwrap()));
+
+    println("Operation completed");
+}

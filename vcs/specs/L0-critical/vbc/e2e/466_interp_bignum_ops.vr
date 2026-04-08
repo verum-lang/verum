@@ -1,0 +1,325 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, bignum, arithmetic, multi_digit, addition, multiplication
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Big number arithmetic using digit arrays (base 10).
+// Each number stored as array: num[0] = number of digits (least significant first).
+// Example: 12345 stored as [5, 5, 4, 3, 2, 1, 0, 0, ...]
+//   num[0]=5 digits, num[1]=5 (units), num[2]=4 (tens), ..., num[5]=1 (ten-thousands).
+
+// Initialize bignum from an integer value (fits in a few digits).
+fn bignum_from_int(val: Int, out: [Int; 20]) {
+    if val == 0 {
+        out[0] = 1;
+        out[1] = 0;
+    } else {
+        let mut v = val;
+        let mut n = 0;
+        while v > 0 {
+            n = n + 1;
+            out[n] = v % 10;
+            v = v / 10;
+        }
+        out[0] = n;
+    }
+}
+
+// Convert bignum to integer (assumes it fits).
+fn bignum_to_int(num: [Int; 20]) -> Int {
+    let n = num[0];
+    let mut result = 0;
+    let mut base = 1;
+    let mut i = 1;
+    while i <= n {
+        result = result + num[i] * base;
+        base = base * 10;
+        i = i + 1;
+    }
+    result
+}
+
+// Add two bignums a and b, store result in out.
+fn bignum_add(a: [Int; 20], b: [Int; 20], out: [Int; 20]) {
+    let an = a[0];
+    let bn = b[0];
+    let max_n = if an > bn { an } else { bn };
+    let mut carry = 0;
+    let mut i = 1;
+    let mut rn = 0;
+    while i <= max_n + 1 {
+        let av = if i <= an { a[i] } else { 0 };
+        let bv = if i <= bn { b[i] } else { 0 };
+        let s = av + bv + carry;
+        out[i] = s % 10;
+        carry = s / 10;
+        rn = rn + 1;
+        i = i + 1;
+    }
+    // Remove leading zero if no carry on last position
+    // The loop ran to max_n+1; trim trailing zeros
+    let mut actual_n = max_n + 1;
+    while actual_n > 1 && out[actual_n] == 0 {
+        actual_n = actual_n - 1;
+    }
+    out[0] = actual_n;
+}
+
+// Subtract b from a (assumes a >= b), store in out.
+fn bignum_sub(a: [Int; 20], b: [Int; 20], out: [Int; 20]) {
+    let an = a[0];
+    let bn = b[0];
+    let mut borrow = 0;
+    let mut i = 1;
+    while i <= an {
+        let av = a[i];
+        let bv = if i <= bn { b[i] } else { 0 };
+        let mut d = av - bv - borrow;
+        if d < 0 {
+            d = d + 10;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        out[i] = d;
+        i = i + 1;
+    }
+    // Trim leading zeros
+    let mut rn = an;
+    while rn > 1 && out[rn] == 0 {
+        rn = rn - 1;
+    }
+    out[0] = rn;
+}
+
+// Multiply bignum a by single digit d, store in out.
+fn bignum_mul_digit(a: [Int; 20], d: Int, out: [Int; 20]) {
+    let an = a[0];
+    let mut carry = 0;
+    let mut i = 1;
+    while i <= an {
+        let p = a[i] * d + carry;
+        out[i] = p % 10;
+        carry = p / 10;
+        i = i + 1;
+    }
+    if carry > 0 {
+        out[an + 1] = carry;
+        out[0] = an + 1;
+    } else {
+        let mut rn = an;
+        while rn > 1 && out[rn] == 0 { rn = rn - 1; }
+        out[0] = rn;
+    }
+}
+
+// Multiply two bignums a and b, store in out (out must be large enough).
+fn bignum_mul(a: [Int; 20], b: [Int; 20], out: [Int; 20]) {
+    let an = a[0];
+    let bn = b[0];
+    // Zero out result
+    let mut i = 0;
+    while i < 20 { out[i] = 0; i = i + 1; }
+
+    i = 1;
+    while i <= an {
+        let ai = a[i];
+        let mut carry = 0;
+        let mut j = 1;
+        while j <= bn {
+            let bj = b[j];
+            let prod = ai * bj + out[i + j - 1] + carry;
+            out[i + j - 1] = prod % 10;
+            carry = prod / 10;
+            j = j + 1;
+        }
+        if carry > 0 {
+            out[i + bn] = out[i + bn] + carry;
+        }
+        i = i + 1;
+    }
+
+    // Compute actual digit count
+    let mut rn = an + bn;
+    while rn > 1 && out[rn] == 0 { rn = rn - 1; }
+    out[0] = rn;
+}
+
+fn test_bignum_from_to_int() {
+    let mut n = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    bignum_from_int(12345, n);
+    // digits: 5,4,3,2,1 (LSB first)
+    assert_eq(n[0], 5);
+    assert_eq(n[1], 5);
+    assert_eq(n[2], 4);
+    assert_eq(n[3], 3);
+    assert_eq(n[4], 2);
+    assert_eq(n[5], 1);
+    assert_eq(bignum_to_int(n), 12345);
+
+    bignum_from_int(0, n);
+    assert_eq(n[0], 1);
+    assert_eq(n[1], 0);
+    assert_eq(bignum_to_int(n), 0);
+
+    bignum_from_int(1000, n);
+    assert_eq(n[0], 4);
+    assert_eq(n[1], 0);
+    assert_eq(n[2], 0);
+    assert_eq(n[3], 0);
+    assert_eq(n[4], 1);
+    assert_eq(bignum_to_int(n), 1000);
+
+    print("bignum_from_to_int: ok");
+}
+
+fn test_bignum_add() {
+    let mut a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut b = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // 123 + 456 = 579
+    bignum_from_int(123, a);
+    bignum_from_int(456, b);
+    bignum_add(a, b, out);
+    assert_eq(bignum_to_int(out), 579);
+
+    // 999 + 1 = 1000 (carry propagation)
+    bignum_from_int(999, a);
+    bignum_from_int(1, b);
+    bignum_add(a, b, out);
+    assert_eq(bignum_to_int(out), 1000);
+
+    // 9999 + 9999 = 19998
+    bignum_from_int(9999, a);
+    bignum_from_int(9999, b);
+    bignum_add(a, b, out);
+    assert_eq(bignum_to_int(out), 19998);
+
+    // 0 + 0 = 0
+    bignum_from_int(0, a);
+    bignum_from_int(0, b);
+    bignum_add(a, b, out);
+    assert_eq(bignum_to_int(out), 0);
+
+    print("bignum_add: ok");
+}
+
+fn test_bignum_sub() {
+    let mut a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut b = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // 579 - 456 = 123
+    bignum_from_int(579, a);
+    bignum_from_int(456, b);
+    bignum_sub(a, b, out);
+    assert_eq(bignum_to_int(out), 123);
+
+    // 1000 - 1 = 999 (borrow propagation)
+    bignum_from_int(1000, a);
+    bignum_from_int(1, b);
+    bignum_sub(a, b, out);
+    assert_eq(bignum_to_int(out), 999);
+
+    // 5000 - 2500 = 2500
+    bignum_from_int(5000, a);
+    bignum_from_int(2500, b);
+    bignum_sub(a, b, out);
+    assert_eq(bignum_to_int(out), 2500);
+
+    // 42 - 42 = 0
+    bignum_from_int(42, a);
+    bignum_from_int(42, b);
+    bignum_sub(a, b, out);
+    assert_eq(bignum_to_int(out), 0);
+
+    print("bignum_sub: ok");
+}
+
+fn test_bignum_mul() {
+    let mut a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut b = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // 12 * 34 = 408
+    bignum_from_int(12, a);
+    bignum_from_int(34, b);
+    bignum_mul(a, b, out);
+    assert_eq(bignum_to_int(out), 408);
+
+    // 99 * 99 = 9801
+    bignum_from_int(99, a);
+    bignum_from_int(99, b);
+    bignum_mul(a, b, out);
+    assert_eq(bignum_to_int(out), 9801);
+
+    // 123 * 456 = 56088
+    bignum_from_int(123, a);
+    bignum_from_int(456, b);
+    bignum_mul(a, b, out);
+    assert_eq(bignum_to_int(out), 56088);
+
+    // Multiply by single digit using mul_digit: 12345 * 3 = 37035
+    bignum_from_int(12345, a);
+    bignum_mul_digit(a, 3, out);
+    assert_eq(bignum_to_int(out), 37035);
+
+    print("bignum_mul: ok");
+}
+
+fn test_bignum_chain() {
+    // Compute 11^4 = 14641 using repeated multiplication
+    let mut base = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut acc  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    bignum_from_int(11, base);
+    bignum_from_int(1, acc);  // acc = 1
+
+    // acc *= 11 four times
+    bignum_mul(acc, base, tmp);
+    let mut k = 0;
+    while k < 20 { acc[k] = tmp[k]; k = k + 1; }
+    // acc = 11
+
+    bignum_mul(acc, base, tmp);
+    k = 0; while k < 20 { acc[k] = tmp[k]; k = k + 1; }
+    // acc = 121
+
+    bignum_mul(acc, base, tmp);
+    k = 0; while k < 20 { acc[k] = tmp[k]; k = k + 1; }
+    // acc = 1331
+
+    bignum_mul(acc, base, tmp);
+    k = 0; while k < 20 { acc[k] = tmp[k]; k = k + 1; }
+    // acc = 14641
+
+    assert_eq(bignum_to_int(acc), 14641);
+
+    // Also verify: 100 + 200 + 300 = 600 with three adds
+    let mut x = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut y = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    bignum_from_int(100, x);
+    bignum_from_int(200, y);
+    bignum_add(x, y, r);                     // r = 300
+    let mut z = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    bignum_from_int(300, z);
+    bignum_add(r, z, x);                     // x = 600
+    assert_eq(bignum_to_int(x), 600);
+
+    print("bignum_chain: ok");
+}
+
+fn main() -> Int {
+    test_bignum_from_to_int();
+    test_bignum_add();
+    test_bignum_sub();
+    test_bignum_mul();
+    test_bignum_chain();
+    print("[OK] 466_interp_bignum_ops");
+    0
+}

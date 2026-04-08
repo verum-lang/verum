@@ -1,0 +1,33 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, structs, negative-test
+
+// Partial move tracking now implemented - accessing a moved field should fail
+
+/// Test use after move for affine struct field access at compile time.
+/// When an affine struct field is moved out, that specific field cannot be accessed again.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-partial-move
+
+// Affine resource type
+type affine Resource is {
+    handle: Int,
+};
+
+// Container with affine field
+type Container is {
+    resource: Resource,
+    value: Int,
+};
+
+fn main() {
+    let container = Container {
+        resource: Resource { handle: 42 },
+        value: 100,
+    };
+
+    let res = container.resource;  // Move affine field out
+    print(container.resource.handle);  // COMPILE ERROR: type not found: container.resource
+}

@@ -1,0 +1,466 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, expressions, pattern, is, operator, pattern-testing
+// @timeout: 5000
+
+// ============================================================================
+// IS OPERATOR: Pattern Testing Expression Tests
+// ============================================================================
+// The `is` operator tests patterns. When used in if conditions with unit
+// patterns followed by a block, parentheses are required to prevent parser
+// ambiguity with struct literals.
+// Syntax: expression `is` pattern
+// Negation: expression `is` `not` pattern
+// ============================================================================
+
+// --- Helper Types ---
+
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Status is Pending | Active | Complete | Failed(Text);
+type Tree<T> is Leaf(T) | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+type Point is { x: Int, y: Int };
+type Command is Start | Stop | Pause | Resume | Reset(Int);
+type HttpStatus is HttpOk | NotFound | ServerError(Int);
+type Empty is ();
+
+// --- Helper Functions ---
+
+fn use_value<T>(x: T) { }
+fn process<T>(x: T) { }
+fn poll() { }
+fn handle_pending() { }
+fn handle_active() { }
+fn handle_complete() { }
+fn handle_failure(msg: Text) { }
+fn reject() { }
+fn do_log(msg: Text) { }
+
+// ============================================================================
+// Section 1: Basic Pattern Testing with is as Expression
+// ============================================================================
+
+fn test_basic_is_as_expression() {
+    let value: Maybe<Int> = Some(42);
+
+    // is as boolean expression (no parentheses needed)
+    let has_some: Bool = value is Some(_);
+    let is_none: Bool = value is None;
+
+    use_value(has_some);
+    use_value(is_none);
+}
+
+fn test_is_not_as_expression() {
+    let value: Maybe<Int> = Some(42);
+
+    // Negated is as expression
+    let not_none: Bool = value is not None;
+    let not_some: Bool = value is not Some(_);
+
+    use_value(not_none);
+    use_value(not_some);
+}
+
+// ============================================================================
+// Section 2: Is in If Conditions (parentheses required for disambiguation)
+// ============================================================================
+
+fn test_is_in_if_with_parens() {
+    let value: Maybe<Int> = Some(42);
+
+    // Parentheses prevent parser confusion with struct literal syntax
+    if (value is Some(_)) {
+        do_log("has value");
+    }
+
+    let empty: Maybe<Int> = None;
+    if (empty is None) {
+        do_log("is none");
+    }
+}
+
+fn test_is_not_in_if_with_parens() {
+    let value: Maybe<Int> = Some(42);
+
+    // Negated pattern test with parentheses
+    if (value is not None) {
+        do_log("has value");
+    }
+}
+
+fn test_is_with_binding_in_if() {
+    let value: Maybe<Int> = Some(42);
+
+    // Pattern test with binding - parentheses required
+    if (value is Some(x)) {
+        use_value(x);
+    }
+}
+
+fn test_is_in_if_else_chain() {
+    let status: Status = Complete;
+
+    // Chained if-else with is - parentheses required
+    if (status is Pending) {
+        handle_pending();
+    } else if (status is Active) {
+        handle_active();
+    } else if (status is Complete) {
+        handle_complete();
+    } else if (status is Failed(msg)) {
+        handle_failure(msg);
+    }
+}
+
+fn test_is_combined_with_boolean() {
+    let value: Maybe<Int> = Some(42);
+    let threshold = 10;
+
+    // is combined with boolean conditions
+    if (value is Some(x)) && x > threshold {
+        do_log("large value");
+    }
+
+    let other: Maybe<Int> = Some(10);
+    if (value is Some(_)) && (other is Some(_)) {
+        do_log("both have values");
+    }
+}
+
+// ============================================================================
+// Section 3: In While Loops
+// ============================================================================
+
+fn test_is_in_while_loop() {
+    let mut state: Status = Pending;
+
+    // While with is pattern - parentheses required
+    while (state is Pending) {
+        poll();
+        state = Active;
+    }
+}
+
+fn test_is_not_in_while_loop() {
+    let mut status: Status = Pending;
+
+    // While with negated is - parentheses required
+    while (status is not Complete) {
+        poll();
+        status = Complete;
+    }
+}
+
+fn test_is_in_while_with_binding() {
+    let mut queue: Maybe<Int> = Some(5);
+
+    // While with binding pattern
+    while (queue is Some(item)) {
+        process(item);
+        queue = None;
+    }
+}
+
+// ============================================================================
+// Section 4: With Various Patterns
+// ============================================================================
+
+fn test_is_with_literal_pattern() {
+    let number = 42;
+
+    // Test against literal values
+    let is_42: Bool = number is 42;
+    use_value(is_42);
+
+    let flag = true;
+    let is_true: Bool = flag is true;
+    use_value(is_true);
+}
+
+fn test_is_with_wildcard() {
+    let value: Maybe<Int> = Some(10);
+
+    // Wildcard pattern always matches
+    let matches_any: Bool = value is _;
+    use_value(matches_any);
+
+    // Wildcard inside variant
+    let has_some: Bool = value is Some(_);
+    use_value(has_some);
+}
+
+fn test_is_with_tuple_pattern() {
+    let pair: Maybe<(Int, Int)> = Some((1, 2));
+
+    // Tuple pattern in is
+    if (pair is Some((a, b))) {
+        let sum = a + b;
+        use_value(sum);
+    }
+}
+
+fn test_is_with_struct_pattern() {
+    let wrapped: Maybe<Point> = Some(Point { x: 10, y: 20 });
+
+    // Struct pattern in is
+    if (wrapped is Some(Point { x, y })) {
+        let distance = x * x + y * y;
+        use_value(distance);
+    }
+}
+
+fn test_is_nested_pattern() {
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+
+    // Nested pattern
+    if (nested is Some(Some(inner))) {
+        use_value(inner);
+    }
+}
+
+// ============================================================================
+// Section 5: In Match Guards
+// ============================================================================
+
+fn test_is_in_match_guard() {
+    let data: Maybe<Int> = Some(100);
+
+    // is in match guard with if
+    match data {
+        Some(x) if x > 0 => do_log("positive"),
+        Some(_) => do_log("non-positive"),
+        None => do_log("none"),
+    };
+}
+
+fn test_is_in_match_guard_with_binding() {
+    let wrapped: Maybe<Result<Int, Text>> = Some(Ok(42));
+
+    // is in guard checking inner type
+    match wrapped {
+        Some(inner) if (inner is Ok(n)) => use_value(n),
+        Some(inner) if (inner is Err(_)) => do_log("inner error"),
+        None => do_log("none"),
+    };
+}
+
+// ============================================================================
+// Section 6: Complex Nested Patterns
+// ============================================================================
+
+fn test_is_deeply_nested() {
+    let deep: Maybe<Maybe<Maybe<Int>>> = Some(Some(Some(42)));
+
+    // Deeply nested pattern
+    if (deep is Some(Some(Some(x)))) {
+        use_value(x);
+    }
+}
+
+fn test_is_nested_result_option() {
+    let complex: Result<Maybe<Int>, Text> = Ok(Some(42));
+
+    // Nested Result and Option
+    if (complex is Ok(Some(x))) {
+        use_value(x);
+    }
+
+    if (complex is Ok(None)) {
+        do_log("ok but empty");
+    }
+
+    if (complex is Err(msg)) {
+        do_log(msg);
+    }
+}
+
+fn test_is_tree_pattern() {
+    let tree: Tree<Int> = Leaf(42);
+
+    // Tree pattern matching
+    if (tree is Leaf(value)) {
+        use_value(value);
+    }
+
+    if (tree is Node { left, right }) {
+        use_value(left);
+        use_value(right);
+    }
+}
+
+fn test_is_slice_patterns() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Slice pattern matching
+    if (arr is [1, 2, ..]) {
+        do_log("starts with 1, 2");
+    }
+
+    if (arr is [.., 4, 5]) {
+        do_log("ends with 4, 5");
+    }
+
+    if (arr is [first, .., last]) {
+        use_value(first);
+        use_value(last);
+    }
+}
+
+// ============================================================================
+// Section 7: Expression Context Usage
+// ============================================================================
+
+fn test_is_in_boolean_operations() {
+    let a: Maybe<Int> = Some(1);
+    let b: Maybe<Int> = None;
+
+    // Combining is with boolean operators
+    let both_have_values = (a is Some(_)) && (b is Some(_));
+    let either_has_value = (a is Some(_)) || (b is Some(_));
+    let a_has_but_b_doesnt = (a is Some(_)) && (b is not Some(_));
+
+    use_value(both_have_values);
+    use_value(either_has_value);
+    use_value(a_has_but_b_doesnt);
+}
+
+fn test_is_in_function_argument() {
+    fn expects_bool(b: Bool) { }
+
+    let value: Maybe<Int> = Some(42);
+
+    // is result passed to function
+    expects_bool(value is Some(_));
+    expects_bool(value is not None);
+}
+
+fn test_is_in_assert() {
+    let value: Maybe<Int> = Some(42);
+
+    // is in assertion
+    assert(value is Some(_));
+    assert(value is not None);
+}
+
+fn test_is_in_return() -> Bool {
+    let value: Maybe<Int> = Some(42);
+
+    // is as return expression
+    return value is Some(_);
+}
+
+fn test_is_in_array_literal() {
+    let a: Maybe<Int> = Some(1);
+    let b: Maybe<Int> = None;
+    let c: Maybe<Int> = Some(3);
+
+    // is results in array
+    let checks = [a is Some(_), b is Some(_), c is Some(_)];
+    use_value(checks);
+}
+
+// ============================================================================
+// Section 8: Edge Cases
+// ============================================================================
+
+fn test_is_with_unit_type() {
+    let unit: Empty = ();
+
+    // Unit type pattern - must use parentheses in if
+    let is_unit: Bool = unit is ();
+    use_value(is_unit);
+}
+
+fn test_is_with_range_pattern() {
+    let number = 42;
+
+    // Range patterns as expressions
+    let in_range: Bool = number is 1..=100;
+    let in_first_half: Bool = number is 0..50;
+
+    use_value(in_range);
+    use_value(in_first_half);
+}
+
+fn test_is_with_at_binding() {
+    let value: Maybe<Int> = Some(42);
+
+    // @ binding in is pattern
+    if (value is opt @ Some(_)) {
+        use_value(opt);
+    }
+}
+
+fn test_is_with_ref_pattern() {
+    let value: Maybe<Int> = Some(42);
+
+    // ref pattern in is
+    if (value is Some(ref x)) {
+        use_value(x);
+    }
+}
+
+fn test_is_with_mut_binding() {
+    let mut value: Maybe<Int> = Some(42);
+
+    // mut binding in is pattern
+    if (value is Some(mut x)) {
+        x = x + 1;
+        use_value(x);
+    }
+}
+
+fn test_is_parenthesized() {
+    let value: Maybe<Int> = Some(42);
+
+    // Parenthesized is expression
+    let result = (value is Some(_));
+    use_value(result);
+
+    // Complex parenthesized
+    let complex = ((value is Some(_)) && (value is not None));
+    use_value(complex);
+}
+
+// ============================================================================
+// Section 9: Interaction with Other Language Features
+// ============================================================================
+
+fn test_is_with_pipeline() {
+    let value: Maybe<Int> = Some(42);
+
+    // is after pipeline
+    let result = value |> (|v| v is Some(_));
+    use_value(result);
+}
+
+fn test_is_in_closure() {
+    let predicate = |x: Maybe<Int>| x is Some(_);
+
+    let value: Maybe<Int> = Some(42);
+    let result = predicate(value);
+    use_value(result);
+}
+
+fn test_is_in_for_loop_body() {
+    let items = [Some(1), None, Some(3), Some(4)];
+
+    // is used within for loop body
+    for item in items {
+        if (item is Some(x)) {
+            use_value(x);
+        }
+    }
+}
+
+fn test_is_generic() {
+    fn check_some<T>(opt: Maybe<T>) -> Bool {
+        opt is Some(_)
+    }
+
+    let value: Maybe<Int> = Some(42);
+    let result = check_some(value);
+    use_value(result);
+}

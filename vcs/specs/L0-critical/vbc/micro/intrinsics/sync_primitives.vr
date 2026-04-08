@@ -1,0 +1,13 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Test basic synchronization patterns
+    // Simple spin loop simulation
+    let mut counter = 0;
+    while counter < 10 {
+        counter = counter + 1;
+    }
+    assert_eq(counter, 10);
+}

@@ -1,0 +1,128 @@
+// @test: run
+// Comprehensive test — exercises many language features together
+
+type Direction is North | South | East | West;
+
+type Position is { x: Int, y: Int };
+
+implement Position {
+    fn new(x: Int, y: Int) -> Position {
+        Position { x: x, y: y }
+    }
+
+    fn move_dir(&self, dir: Direction, steps: Int) -> Position {
+        match dir {
+            North => Position { x: self.x, y: self.y + steps },
+            South => Position { x: self.x, y: self.y - steps },
+            East => Position { x: self.x + steps, y: self.y },
+            West => Position { x: self.x - steps, y: self.y },
+        }
+    }
+
+    fn distance_to(&self, other: Position) -> Int {
+        let mut dx = self.x - other.x;
+        let mut dy = self.y - other.y;
+        if (dx < 0) { dx = 0 - dx; }
+        if (dy < 0) { dy = 0 - dy; }
+        dx + dy
+    }
+}
+
+type Command is
+    Move { dir: Direction, steps: Int }
+  | Turn(Direction)
+  | Wait;
+
+fn execute(pos: Position, cmd: Command) -> Position {
+    match cmd {
+        Move { dir, steps } => pos.move_dir(dir, steps),
+        Turn(_) => pos,
+        Wait => pos,
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Position creation and movement
+    let start = Position.new(0, 0);
+    let p1 = start.move_dir(North, 5);
+    if (p1.x != 0 || p1.y != 5) {
+        print(f"FAIL test1: p1=({p1.x},{p1.y})");
+        return 1;
+    }
+    print("test1 movement: OK");
+
+    // Test 2: Chain movements
+    let p2 = start.move_dir(East, 3).move_dir(North, 4);
+    if (p2.x != 3 || p2.y != 4) {
+        print(f"FAIL test2: p2=({p2.x},{p2.y})");
+        return 1;
+    }
+    print("test2 chain: OK");
+
+    // Test 3: Manhattan distance
+    let a = Position.new(1, 1);
+    let b = Position.new(4, 5);
+    let dist = a.distance_to(b);
+    if (dist != 7) {
+        print(f"FAIL test3: dist = {dist}");
+        return 1;
+    }
+    print("test3 distance: OK");
+
+    // Test 4: Command execution
+    let pos = Position.new(0, 0);
+    let cmd1 = Move { dir: East, steps: 10 };
+    let cmd2 = Move { dir: North, steps: 5 };
+    let cmd3 = Wait;
+    let p3 = execute(execute(execute(pos, cmd1), cmd2), cmd3);
+    if (p3.x != 10 || p3.y != 5) {
+        print(f"FAIL test4: p3=({p3.x},{p3.y})");
+        return 1;
+    }
+    print("test4 commands: OK");
+
+    // Test 5: Command list processing
+    let commands = [
+        Move { dir: North, steps: 3 },
+        Move { dir: East, steps: 4 },
+        Move { dir: South, steps: 1 },
+        Move { dir: West, steps: 2 },
+    ];
+    let mut current = Position.new(0, 0);
+    let mut i = 0;
+    while i < commands.len() {
+        current = execute(current, commands[i]);
+        i = i + 1;
+    }
+    // (0,0) -> (0,3) -> (4,3) -> (4,2) -> (2,2)
+    if (current.x != 2 || current.y != 2) {
+        print(f"FAIL test5: final=({current.x},{current.y})");
+        return 1;
+    }
+    print("test5 command list: OK");
+
+    // Test 6: Map tracking visited positions
+    let mut visited = Set.new();
+    let mut pos6 = Position.new(0, 0);
+    let moves = [North, East, South, West, North];
+    let mut j = 0;
+    while j < moves.len() {
+        // Encode position as unique int: x*10000 + y
+        let key = pos6.x * 10000 + pos6.y;
+        visited.insert(key);
+        pos6 = pos6.move_dir(moves[j], 1);
+        j = j + 1;
+    }
+    // Add final position
+    visited.insert(pos6.x * 10000 + pos6.y);
+    // Positions visited: (0,0), (0,1), (1,1), (1,0), (0,0), (0,1)
+    // Unique: (0,0), (0,1), (1,1), (1,0) = 4
+    if (visited.len() != 4) {
+        print(f"FAIL test6: unique positions = {visited.len()}");
+        return 1;
+    }
+    print("test6 visited set: OK");
+
+    print("1040_comprehensive: PASS");
+    0
+}

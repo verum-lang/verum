@@ -1,0 +1,241 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, product-rule, quotient-rule
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Product and quotient rules
+// Product rule: d/dx[f(x)*g(x)] = f'(x)*g(x) + f(x)*g'(x)
+// Quotient rule: d/dx[f(x)/g(x)] = (f'(x)*g(x) - f(x)*g'(x)) / g(x)^2
+// Uses integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn sdiv(a: Int, b: Int) -> Int {
+    (a * scale()) / b
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Functions and their derivatives
+// =============================================================================
+
+// f(x) = x^2, f'(x) = 2x
+fn f_sq(x: Int) -> Int { smul(x, x) }
+fn f_sq_d(x: Int) -> Int { 2 * x }
+
+// g(x) = x + 1 (scaled: x + 1000), g'(x) = 1 (scaled: 1000)
+fn g_inc(x: Int) -> Int { x + scale() }
+fn g_inc_d(x: Int) -> Int { scale() }
+
+// h(x) = 3x + 2 (scaled: 3x + 2000), h'(x) = 3 (scaled: 3000)
+fn h_lin(x: Int) -> Int { 3 * x + 2 * scale() }
+fn h_lin_d(x: Int) -> Int { 3 * scale() }
+
+// p(x) = x^3, p'(x) = 3x^2
+fn p_cube(x: Int) -> Int { smul(smul(x, x), x) }
+fn p_cube_d(x: Int) -> Int { 3 * smul(x, x) }
+
+// =============================================================================
+// Product rule: d/dx[f*g] = f'*g + f*g'
+// =============================================================================
+
+fn product_rule(f_val: Int, f_deriv: Int, g_val: Int, g_deriv: Int) -> Int {
+    smul(f_deriv, g_val) + smul(f_val, g_deriv)
+}
+
+fn test_product_rule_basic() {
+    // d/dx[x^2 * (x+1)] = 2x*(x+1) + x^2*1 = 3x^2 + 2x
+    let x = 2 * scale();
+
+    let fv = f_sq(x);       // 4000
+    let fd = f_sq_d(x);     // 4000
+    let gv = g_inc(x);      // 3000
+    let gd = g_inc_d(x);    // 1000
+
+    let pr = product_rule(fv, fd, gv, gd);
+    // 4000*3000/1000 + 4000*1000/1000 = 12000 + 4000 = 16000
+
+    // Expected: 3*(2^2) + 2*2 = 12+4 = 16 => 16000
+    assert_eq(pr, 16 * scale());
+}
+
+fn test_product_rule_at_zero() {
+    // d/dx[x^2 * (x+1)] at x=0 = 0
+    let x = 0;
+    let pr = product_rule(f_sq(x), f_sq_d(x), g_inc(x), g_inc_d(x));
+    // f(0)=0, f'(0)=0, g(0)=1000, g'(0)=1000
+    // 0*1000/1000 + 0*1000/1000 = 0
+    assert_eq(pr, 0);
+}
+
+fn test_product_rule_at_one() {
+    // d/dx[x^2 * (x+1)] at x=1 = 3+2 = 5
+    let x = scale();
+    let pr = product_rule(f_sq(x), f_sq_d(x), g_inc(x), g_inc_d(x));
+    // f(1)=1000, f'(1)=2000, g(1)=2000, g'(1)=1000
+    // 2000*2000/1000 + 1000*1000/1000 = 4000 + 1000 = 5000
+    assert_eq(pr, 5 * scale());
+}
+
+fn test_product_rule_two_linears() {
+    // d/dx[(x+1) * (3x+2)] = 1*(3x+2) + (x+1)*3 = 6x+5
+    let x = 3 * scale(); // x=3
+
+    let fv = g_inc(x);   // 4000
+    let fd = g_inc_d(x);  // 1000
+    let gv = h_lin(x);   // 11000
+    let gd = h_lin_d(x);  // 3000
+
+    let pr = product_rule(fv, fd, gv, gd);
+    // 1000*11000/1000 + 4000*3000/1000 = 11000 + 12000 = 23000
+
+    // Expected: 6*3+5 = 23 => 23000
+    assert_eq(pr, 23 * scale());
+}
+
+fn test_product_rule_numerical() {
+    // Verify product rule against numerical differentiation
+    let x = 2 * scale();
+    let h = 1;
+
+    // Product: x^2 * (x+1)
+    let prod_at = smul(f_sq(x), g_inc(x));
+    let prod_plus = smul(f_sq(x + h), g_inc(x + h));
+    let prod_minus = smul(f_sq(x - h), g_inc(x - h));
+    let num = sdiv(prod_plus - prod_minus, 2 * h);
+
+    let analytic = product_rule(f_sq(x), f_sq_d(x), g_inc(x), g_inc_d(x));
+    assert_eq(within_tol(num, analytic, 50), 1);
+}
+
+// =============================================================================
+// Quotient rule: d/dx[f/g] = (f'*g - f*g') / g^2
+// =============================================================================
+
+fn quotient_rule(f_val: Int, f_deriv: Int, g_val: Int, g_deriv: Int) -> Int {
+    let numer = smul(f_deriv, g_val) - smul(f_val, g_deriv);
+    sdiv(numer, smul(g_val, g_val))
+}
+
+fn test_quotient_rule_basic() {
+    // d/dx[x^2 / (x+1)] = (2x*(x+1) - x^2*1) / (x+1)^2 = (x^2+2x)/(x+1)^2
+    let x = 2 * scale();
+
+    let fv = f_sq(x);    // 4000
+    let fd = f_sq_d(x);  // 4000
+    let gv = g_inc(x);   // 3000
+    let gd = g_inc_d(x); // 1000
+
+    let qr = quotient_rule(fv, fd, gv, gd);
+    // numer = 4000*3000/1000 - 4000*1000/1000 = 12000 - 4000 = 8000
+    // denom = 3000*3000/1000 = 9000
+    // result = 8000*1000/9000 = 888
+
+    // Expected: (4+4)/9 = 8/9 ≈ 0.888 => scaled 888
+    assert_eq(within_tol(qr, 888, 5), 1);
+}
+
+fn test_quotient_rule_at_one() {
+    // d/dx[x^2/(x+1)] at x=1 = (1+2)/(2)^2 = 3/4 = 0.75 => 750
+    let x = scale();
+    let qr = quotient_rule(f_sq(x), f_sq_d(x), g_inc(x), g_inc_d(x));
+    assert_eq(within_tol(qr, 750, 5), 1);
+}
+
+fn test_quotient_constant_numerator() {
+    // d/dx[1000/(x+1)] where f(x)=1000 (constant 1 scaled), f'(x)=0
+    // = (0*(x+1) - 1000*1) / (x+1)^2 = -1000/(x+1)^2
+    let x = scale(); // x=1
+    let fv = scale(); // f=1.0
+    let fd = 0;       // f'=0
+    let gv = g_inc(x); // 2000
+    let gd = g_inc_d(x); // 1000
+
+    let qr = quotient_rule(fv, fd, gv, gd);
+    // numer = 0 - 1000*1000/1000 = -1000
+    // denom = 2000*2000/1000 = 4000
+    // result = -1000*1000/4000 = -250
+
+    // Expected: -1/(1+1)^2 = -1/4 = -0.25 => -250
+    assert_eq(within_tol(qr, -250, 5), 1);
+}
+
+// =============================================================================
+// Combined product + chain rule
+// =============================================================================
+
+fn test_product_chain_combined() {
+    // d/dx[x^2 * (3x+2)^2]
+    // Let u=x^2, v=(3x+2)^2
+    // u' = 2x, v' = 2*(3x+2)*3 = 6(3x+2)
+    // Product rule: u'v + uv'
+    let x = 1 * scale();
+
+    let u = f_sq(x);    // 1000
+    let ud = f_sq_d(x); // 2000
+
+    // v = (3x+2)^2
+    let inner = h_lin(x); // 3*1000+2000 = 5000
+    let v = smul(inner, inner); // 5000*5000/1000 = 25000
+
+    // v' = 6*(3x+2) = 6*5 = 30 scaled: uses chain rule
+    let vd = 6 * inner; // 6*5000 = 30000
+
+    let result = product_rule(u, ud, v, vd);
+    // u'd * v + u * v'd = 2000*25000/1000 + 1000*30000/1000 = 50000 + 30000 = 80000
+
+    // Expected: at x=1: 2*1*25 + 1*30 = 50+30 = 80 => 80000
+    assert_eq(result, 80 * scale());
+}
+
+fn test_multiple_product() {
+    // d/dx[f*g*h] = f'*g*h + f*g'*h + f*g*h'
+    // f=x, g=x+1, h=x+2
+    // d/dx = 1*(x+1)*(x+2) + x*1*(x+2) + x*(x+1)*1
+    // = (x+1)(x+2) + x(x+2) + x(x+1)
+    // At x=2: 3*4 + 2*4 + 2*3 = 12+8+6 = 26
+    let x = 2 * scale();
+
+    let fv = x;         // 2000
+    let fd = scale();   // 1000
+    let gv = x + scale(); // 3000
+    let gd = scale();    // 1000
+    let hv = x + 2 * scale(); // 4000
+    let hd = scale();    // 1000
+
+    // f'gh + fg'h + fgh'
+    let term1 = smul(smul(fd, gv), hv); // 1000*3000/1000=3000, 3000*4000/1000=12000
+    let term2 = smul(smul(fv, gd), hv); // 2000*1000/1000=2000, 2000*4000/1000=8000
+    let term3 = smul(smul(fv, gv), hd); // 2000*3000/1000=6000, 6000*1000/1000=6000
+    let result = term1 + term2 + term3;
+
+    assert_eq(result, 26 * scale());
+}
+
+fn main() -> Int {
+    test_product_rule_basic();
+    test_product_rule_at_zero();
+    test_product_rule_at_one();
+    test_product_rule_two_linears();
+    test_product_rule_numerical();
+    test_quotient_rule_basic();
+    test_quotient_rule_at_one();
+    test_quotient_constant_numerator();
+    test_product_chain_combined();
+    test_multiple_product();
+    print("[OK] 378_interp_autodiff_product_rule");
+    0
+}

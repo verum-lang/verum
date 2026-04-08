@@ -1,0 +1,97 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: protocol, dispatch, polymorphism, e2e
+// @description: Test protocol-based dispatch with multiple implementations
+
+type Shape is protocol {
+    fn area(&self) -> Int;
+    fn perimeter(&self) -> Int;
+};
+
+type Circle is { radius: Int };
+type Rect is { width: Int, height: Int };
+type Square is { side: Int };
+
+implement Shape for Circle {
+    fn area(&self) -> Int {
+        // Approximate: 3 * r^2
+        3 * self.radius * self.radius
+    }
+    fn perimeter(&self) -> Int {
+        // Approximate: 6 * r
+        6 * self.radius
+    }
+}
+
+implement Shape for Rect {
+    fn area(&self) -> Int {
+        self.width * self.height
+    }
+    fn perimeter(&self) -> Int {
+        2 * (self.width + self.height)
+    }
+}
+
+implement Shape for Square {
+    fn area(&self) -> Int {
+        self.side * self.side
+    }
+    fn perimeter(&self) -> Int {
+        4 * self.side
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Circle
+    let c = Circle { radius: 5 };
+    if c.area() != 75 {
+        print(f"FAIL 1: circle area = {c.area()}");
+        f = f + 1;
+    } else if c.perimeter() != 30 {
+        print(f"FAIL 1: circle perim = {c.perimeter()}");
+        f = f + 1;
+    } else {
+        print("  circle: OK");
+    }
+
+    // Test 2: Rectangle
+    let r = Rect { width: 4, height: 6 };
+    if r.area() != 24 {
+        print(f"FAIL 2: rect area = {r.area()}");
+        f = f + 1;
+    } else if r.perimeter() != 20 {
+        print(f"FAIL 2: rect perim = {r.perimeter()}");
+        f = f + 1;
+    } else {
+        print("  rect: OK");
+    }
+
+    // Test 3: Square
+    let s = Square { side: 7 };
+    if s.area() != 49 {
+        print(f"FAIL 3: square area = {s.area()}");
+        f = f + 1;
+    } else if s.perimeter() != 28 {
+        print(f"FAIL 3: square perim = {s.perimeter()}");
+        f = f + 1;
+    } else {
+        print("  square: OK");
+    }
+
+    // Test 4: Compare areas
+    let total_area = c.area() + r.area() + s.area();
+    if total_area != 148 {
+        print(f"FAIL 4: total area = {total_area}");
+        f = f + 1;
+    } else {
+        print("  total_area: OK");
+    }
+
+    if f == 0 {
+        print("All trait dispatch tests passed");
+    }
+    f
+}

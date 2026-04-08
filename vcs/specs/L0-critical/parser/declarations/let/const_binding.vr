@@ -1,0 +1,39 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, const, binding
+// NOTE: Verum uses `const` NOT `let const`. The syntax is:
+// const_decl = 'const' , identifier , ':' , type_expr , '=' , expr , ';' ;
+
+// Simple const binding with type annotation (required in Verum)
+const PI: Float = 3.14159;
+
+// Const binding with explicit type
+const E: Float = 2.71828;
+
+// Const binding with integer
+const MAX_SIZE: Int = 1024;
+const MIN_VALUE: Int = -100;
+
+// Const binding with text literal
+const APP_NAME: Text = "Verum Application";
+const VERSION: Text = "1.0.0";
+
+// Const binding with boolean
+const ENABLED: Bool = true;
+const DEBUG_MODE: Bool = false;
+
+// Const binding with computed expression (compile-time)
+const DOUBLE_PI: Float = PI * 2.0;
+const BUFFER_SIZE: Int = MAX_SIZE * 2;
+
+// Const binding with tuple
+const ORIGIN: (Float, Float) = (0.0, 0.0);
+
+// Multiple const bindings for configuration
+const HTTP_PORT: Int = 8080;
+const HTTPS_PORT: Int = 443;
+const MAX_CONNECTIONS: Int = 100;
+
+// Const binding with array literal
+const PRIMES: [Int; 6] = [2, 3, 5, 7, 11, 13];

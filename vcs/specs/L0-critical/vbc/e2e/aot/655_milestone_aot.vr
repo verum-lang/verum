@@ -1,0 +1,233 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, bit-manipulation, twos-complement
+// @timeout: 30000
+
+// Milestone 655: Bit manipulation tricks
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(val: Int, pos: Int) -> Int { (val / pow2(pos)) % 2 }
+
+// Set bit at position
+fn set_bit(val: Int, pos: Int) -> Int {
+    if get_bit(val, pos) == 0 { val + pow2(pos) }
+    else { val }
+}
+
+// Clear bit at position
+fn clear_bit(val: Int, pos: Int) -> Int {
+    if get_bit(val, pos) == 1 { val - pow2(pos) }
+    else { val }
+}
+
+// Toggle bit at position
+fn toggle_bit(val: Int, pos: Int) -> Int {
+    if get_bit(val, pos) == 1 { val - pow2(pos) }
+    else { val + pow2(pos) }
+}
+
+// Count set bits (popcount) for values < 2^16
+fn popcount(val: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(val, i) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Highest set bit position (-1 if val == 0)
+fn highest_bit(val: Int) -> Int {
+    let mut pos = 0 - 1;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(val, i) == 1 { pos = i; }
+        i = i + 1;
+    }
+    pos
+}
+
+// Lowest set bit position (-1 if val == 0)
+fn lowest_bit(val: Int) -> Int {
+    if val == 0 { 0 - 1 }
+    else {
+        let mut i = 0;
+        let mut found = 0;
+        while found == 0 {
+            if get_bit(val, i) == 1 { found = 1; }
+            else { i = i + 1; }
+        }
+        i
+    }
+}
+
+// XOR
+fn xor_val(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) != get_bit(b, i) {
+            result = result + pow2(i);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// AND
+fn and_val(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) == 1 {
+            if get_bit(b, i) == 1 {
+                result = result + pow2(i);
+            }
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// OR
+fn or_val(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) == 1 { result = result + pow2(i); }
+        else if get_bit(b, i) == 1 { result = result + pow2(i); }
+        i = i + 1;
+    }
+    result
+}
+
+// Is power of 2? (exactly one bit set)
+fn is_power_of_2(val: Int) -> Int {
+    if val <= 0 { 0 }
+    else if popcount(val) == 1 { 1 }
+    else { 0 }
+}
+
+// Next power of 2 >= val
+fn next_power_of_2(val: Int) -> Int {
+    if val <= 1 { 1 }
+    else {
+        let mut p = 1;
+        while p < val { p = p * 2; }
+        p
+    }
+}
+
+// Reverse bits (8-bit)
+fn reverse_bits_8(val: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 8 {
+        if get_bit(val, i) == 1 {
+            result = result + pow2(7 - i);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_get_set_clear() -> Int {
+    assert_eq(get_bit(5, 0), 1); // 5 = 101
+    assert_eq(get_bit(5, 1), 0);
+    assert_eq(get_bit(5, 2), 1);
+    assert_eq(set_bit(5, 1), 7); // 101 -> 111
+    assert_eq(set_bit(5, 0), 5); // already set
+    assert_eq(clear_bit(5, 2), 1); // 101 -> 001
+    assert_eq(clear_bit(5, 1), 5); // already clear
+    assert_eq(toggle_bit(5, 1), 7); // 101 -> 111
+    assert_eq(toggle_bit(5, 0), 4); // 101 -> 100
+    1
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);  // 111
+    assert_eq(popcount(255), 8); // 11111111
+    assert_eq(popcount(256), 1); // 100000000
+    assert_eq(popcount(1023), 10); // 10 ones
+    1
+}
+
+fn test_highest_lowest() -> Int {
+    assert_eq(highest_bit(1), 0);
+    assert_eq(highest_bit(8), 3);   // 1000
+    assert_eq(highest_bit(255), 7);
+    assert_eq(highest_bit(0), 0 - 1);
+    assert_eq(lowest_bit(8), 3);  // 1000
+    assert_eq(lowest_bit(12), 2); // 1100
+    assert_eq(lowest_bit(1), 0);
+    assert_eq(lowest_bit(0), 0 - 1);
+    1
+}
+
+fn test_logic_ops() -> Int {
+    // XOR
+    assert_eq(xor_val(5, 3), 6); // 101 ^ 011 = 110
+    assert_eq(xor_val(7, 7), 0); // self-cancel
+    // AND
+    assert_eq(and_val(5, 3), 1); // 101 & 011 = 001
+    assert_eq(and_val(15, 6), 6); // 1111 & 0110 = 0110
+    // OR
+    assert_eq(or_val(5, 3), 7); // 101 | 011 = 111
+    assert_eq(or_val(8, 4), 12); // 1000 | 0100 = 1100
+    // De Morgan's: NOT(A AND B) = NOT(A) OR NOT(B) for 4-bit
+    // Using XOR with 15 as NOT for 4 bits
+    let a = 5;
+    let b = 3;
+    let not_a = xor_val(a, 15);
+    let not_b = xor_val(b, 15);
+    let not_and = xor_val(and_val(a, b), 15);
+    assert_eq(not_and, or_val(not_a, not_b));
+    1
+}
+
+fn test_power_of_2() -> Int {
+    assert_eq(is_power_of_2(1), 1);
+    assert_eq(is_power_of_2(2), 1);
+    assert_eq(is_power_of_2(4), 1);
+    assert_eq(is_power_of_2(8), 1);
+    assert_eq(is_power_of_2(3), 0);
+    assert_eq(is_power_of_2(6), 0);
+    assert_eq(is_power_of_2(0), 0);
+    assert_eq(next_power_of_2(1), 1);
+    assert_eq(next_power_of_2(3), 4);
+    assert_eq(next_power_of_2(5), 8);
+    assert_eq(next_power_of_2(8), 8);
+    assert_eq(next_power_of_2(9), 16);
+    1
+}
+
+fn test_reverse_bits() -> Int {
+    assert_eq(reverse_bits_8(1), 128);   // 00000001 -> 10000000
+    assert_eq(reverse_bits_8(128), 1);   // 10000000 -> 00000001
+    assert_eq(reverse_bits_8(255), 255); // all ones stays all ones
+    assert_eq(reverse_bits_8(0), 0);
+    assert_eq(reverse_bits_8(3), 192);   // 00000011 -> 11000000
+    // Double reverse = identity
+    assert_eq(reverse_bits_8(reverse_bits_8(42)), 42);
+    1
+}
+
+fn main() -> Int {
+    test_get_set_clear();
+    test_popcount();
+    test_highest_lowest();
+    test_logic_ops();
+    test_power_of_2();
+    test_reverse_bits();
+    print("[OK] 655_milestone_aot");
+    0
+}

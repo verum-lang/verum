@@ -1,0 +1,302 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, partial-application, closures
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: partial application via closures — specializing
+// functions by capturing some arguments, various arities and nesting
+
+// =============================================================================
+// Basic binary function partial application
+// =============================================================================
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn subtract(a: Int, b: Int) -> Int {
+    a - b
+}
+
+fn partial_add_left(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { add(n, x) }
+}
+
+fn partial_mul_left(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { multiply(n, x) }
+}
+
+fn test_partial_add() {
+    let add5 = partial_add_left(5);
+    let add10 = partial_add_left(10);
+    let add0 = partial_add_left(0);
+
+    assert_eq(add5(3), 8);
+    assert_eq(add5(0), 5);
+    assert_eq(add5(-5), 0);
+    assert_eq(add10(20), 30);
+    assert_eq(add0(42), 42);
+}
+
+fn test_partial_multiply() {
+    let times3 = partial_mul_left(3);
+    let times10 = partial_mul_left(10);
+
+    assert_eq(times3(7), 21);
+    assert_eq(times3(0), 0);
+    assert_eq(times3(-2), -6);
+    assert_eq(times10(100), 1000);
+}
+
+// =============================================================================
+// Partial application from the right
+// =============================================================================
+
+fn partial_sub_right(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { subtract(x, n) }
+}
+
+fn partial_sub_left(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { subtract(n, x) }
+}
+
+fn test_partial_sub_right() {
+    let minus5 = partial_sub_right(5);
+    assert_eq(minus5(10), 5);
+    assert_eq(minus5(5), 0);
+    assert_eq(minus5(3), -2);
+}
+
+fn test_partial_sub_left() {
+    let from100 = partial_sub_left(100);
+    assert_eq(from100(30), 70);
+    assert_eq(from100(100), 0);
+    assert_eq(from100(0), 100);
+}
+
+// =============================================================================
+// Partial application of ternary functions
+// =============================================================================
+
+fn clamp(val: Int, lo: Int, hi: Int) -> Int {
+    if val < lo {
+        lo
+    } else if val > hi {
+        hi
+    } else {
+        val
+    }
+}
+
+fn partial_clamp(lo: Int, hi: Int) -> fn(Int) -> Int {
+    |val: Int| -> Int { clamp(val, lo, hi) }
+}
+
+fn test_partial_clamp() {
+    let clamp_0_100 = partial_clamp(0, 100);
+    assert_eq(clamp_0_100(50), 50);
+    assert_eq(clamp_0_100(-10), 0);
+    assert_eq(clamp_0_100(200), 100);
+    assert_eq(clamp_0_100(0), 0);
+    assert_eq(clamp_0_100(100), 100);
+
+    let clamp_neg10_10 = partial_clamp(-10, 10);
+    assert_eq(clamp_neg10_10(0), 0);
+    assert_eq(clamp_neg10_10(-50), -10);
+    assert_eq(clamp_neg10_10(50), 10);
+}
+
+// =============================================================================
+// Partial application via inline closures
+// =============================================================================
+
+fn test_inline_partial() {
+    let add5 = |x: Int| -> Int { add(x, 5) };
+    let mul7 = |x: Int| -> Int { multiply(x, 7) };
+
+    assert_eq(add5(3), 8);
+    assert_eq(mul7(6), 42);
+
+    // Chaining partial applications
+    assert_eq(add5(mul7(3)), 26);
+    assert_eq(mul7(add5(1)), 42);
+}
+
+// =============================================================================
+// Partial application with different return types of computation
+// =============================================================================
+
+fn weighted_sum(a: Int, w1: Int, b: Int, w2: Int) -> Int {
+    a * w1 + b * w2
+}
+
+fn make_weighted_adder(w1: Int, w2: Int) -> fn(Int, Int) -> Int {
+    |a: Int, b: Int| -> Int { weighted_sum(a, w1, b, w2) }
+}
+
+fn test_weighted_adder() {
+    let equal_weights = make_weighted_adder(1, 1);
+    assert_eq(equal_weights(3, 4), 7);
+
+    let double_first = make_weighted_adder(2, 1);
+    assert_eq(double_first(3, 4), 10);
+
+    let triple_second = make_weighted_adder(1, 3);
+    assert_eq(triple_second(3, 4), 15);
+}
+
+// =============================================================================
+// Nested partial application (currying-like)
+// =============================================================================
+
+fn curry_add() -> fn(Int) -> fn(Int) -> Int {
+    |a: Int| -> fn(Int) -> Int {
+        |b: Int| -> Int { a + b }
+    }
+}
+
+fn curry_mul() -> fn(Int) -> fn(Int) -> Int {
+    |a: Int| -> fn(Int) -> Int {
+        |b: Int| -> Int { a * b }
+    }
+}
+
+fn test_curried_add() {
+    let curried = curry_add();
+    let add3 = curried(3);
+    let add10 = curried(10);
+
+    assert_eq(add3(7), 10);
+    assert_eq(add3(0), 3);
+    assert_eq(add10(5), 15);
+
+    // Immediate application
+    assert_eq(curry_add()(4)(5), 9);
+}
+
+fn test_curried_mul() {
+    let curried = curry_mul();
+    let times5 = curried(5);
+    assert_eq(times5(6), 30);
+    assert_eq(times5(0), 0);
+    assert_eq(curry_mul()(7)(8), 56);
+}
+
+// =============================================================================
+// Partial application in loop
+// =============================================================================
+
+fn test_partial_in_loop() {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        let adder = partial_add_left(i * 10);
+        sum = sum + adder(i);
+        i = i + 1;
+    }
+    // i=0: add(0,0)=0; i=1: add(10,1)=11; i=2: add(20,2)=22;
+    // i=3: add(30,3)=33; i=4: add(40,4)=44
+    // total = 0+11+22+33+44 = 110
+    assert_eq(sum, 110);
+}
+
+// =============================================================================
+// Partial application with predicate functions
+// =============================================================================
+
+fn is_divisible(n: Int, d: Int) -> Int {
+    if n % d == 0 { 1 } else { 0 }
+}
+
+fn make_divisibility_check(d: Int) -> fn(Int) -> Int {
+    |n: Int| -> Int { is_divisible(n, d) }
+}
+
+fn test_divisibility_partial() {
+    let is_even = make_divisibility_check(2);
+    let is_div3 = make_divisibility_check(3);
+    let is_div5 = make_divisibility_check(5);
+
+    assert_eq(is_even(4), 1);
+    assert_eq(is_even(7), 0);
+    assert_eq(is_div3(9), 1);
+    assert_eq(is_div3(10), 0);
+    assert_eq(is_div5(25), 1);
+    assert_eq(is_div5(13), 0);
+}
+
+fn test_count_with_partial_predicate() {
+    let is_even = make_divisibility_check(2);
+    let mut count = 0;
+    let mut i = 0;
+    while i < 20 {
+        if is_even(i) != 0 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(count, 10);
+}
+
+// =============================================================================
+// Partial application for comparison
+// =============================================================================
+
+fn compare_to(threshold: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { if x > threshold { 1 } else if x == threshold { 0 } else { -1 } }
+}
+
+fn test_compare_partial() {
+    let cmp50 = compare_to(50);
+    assert_eq(cmp50(100), 1);
+    assert_eq(cmp50(50), 0);
+    assert_eq(cmp50(10), -1);
+
+    let cmp0 = compare_to(0);
+    assert_eq(cmp0(1), 1);
+    assert_eq(cmp0(0), 0);
+    assert_eq(cmp0(-1), -1);
+}
+
+// =============================================================================
+// Combining multiple partial applications
+// =============================================================================
+
+fn test_combined_partials() {
+    let add10 = partial_add_left(10);
+    let times3 = partial_mul_left(3);
+    let minus5 = partial_sub_right(5);
+
+    // Pipeline: 4 -> times3(4)=12 -> add10(12)=22 -> minus5(22)=17
+    let val = minus5(add10(times3(4)));
+    assert_eq(val, 17);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_partial_add();
+    test_partial_multiply();
+    test_partial_sub_right();
+    test_partial_sub_left();
+    test_partial_clamp();
+    test_inline_partial();
+    test_weighted_adder();
+    test_curried_add();
+    test_curried_mul();
+    test_partial_in_loop();
+    test_divisibility_partial();
+    test_count_with_partial_predicate();
+    test_compare_partial();
+    test_combined_partials();
+    print("[OK] 263_interp_partial_app");
+    0
+}

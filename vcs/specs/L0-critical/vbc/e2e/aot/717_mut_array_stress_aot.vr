@@ -1,0 +1,66 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, mutable, arrays, stress, aliasing
+// @expected-exit: 0
+
+type Vec3 is { x: Int, y: Int, z: Int };
+
+fn make_vec(a: Int, b: Int, c: Int) -> Vec3 {
+    Vec3 { x: a, y: b, z: c }
+}
+
+fn main() -> Int {
+    // Multiple mutable records with conditional mutation
+    let mut v1 = make_vec(1, 2, 3);
+    let mut v2 = make_vec(4, 5, 6);
+    let mut v3 = make_vec(7, 8, 9);
+
+    // Conditional mutations (forces multi-block alloca mode)
+    if (v1.x < 10) {
+        v1.x = v1.x + 100;
+        v2.y = v2.y + 200;
+    }
+
+    if (v3.z > 5) {
+        v3.z = v3.z + 300;
+    }
+
+    // Verify
+    assert_eq(v1.x, 101);
+    assert_eq(v1.y, 2);
+    assert_eq(v2.x, 4);
+    assert_eq(v2.y, 205);
+    assert_eq(v3.z, 309);
+
+    // Multiple mutable lists with conditional access
+    let mut a = [1, 2, 3, 4, 5];
+    let mut b = [10, 20, 30, 40, 50];
+
+    if (a[0] < 10) {
+        a[0] = a[0] + 100;
+        b[0] = b[0] + 1000;
+    }
+
+    assert_eq(a[0], 101);
+    assert_eq(a[1], 2);
+    assert_eq(b[0], 1010);
+    assert_eq(b[1], 20);
+
+    // Swap pattern
+    let mut x = [1, 2, 3];
+    let mut y = [4, 5, 6];
+    let tmp = x[0];
+    x[0] = y[0];
+    y[0] = tmp;
+    assert_eq(x[0], 4);
+    assert_eq(y[0], 1);
+
+    print(v1.x);
+    print(v2.y);
+    print(v3.z);
+    print(a[0]);
+    print(b[0]);
+
+    0
+}

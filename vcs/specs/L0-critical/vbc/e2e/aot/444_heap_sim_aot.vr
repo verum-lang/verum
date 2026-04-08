@@ -1,0 +1,179 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, heap, priority-queue, data-structure
+// @timeout: 30000
+
+// Min-heap simulation using array (max 8 elements)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+type MinHp is { data: Arr8, sz: Int };
+
+fn new_heap() -> MinHp {
+    MinHp { data: new_arr8(), sz: 0 }
+}
+
+fn parent(i: Int) -> Int { (i - 1) / 2 }
+fn left_child(i: Int) -> Int { 2 * i + 1 }
+fn right_child(i: Int) -> Int { 2 * i + 2 }
+
+fn swap_hp(h: MinHp, i: Int, j: Int) -> MinHp {
+    let vi = get8(h.data, i);
+    let vj = get8(h.data, j);
+    let d = set8(h.data, i, vj);
+    let d2 = set8(d, j, vi);
+    MinHp { data: d2, sz: h.sz }
+}
+
+fn sift_up(h: MinHp, idx: Int) -> MinHp {
+    let mut hp = h;
+    let mut i = idx;
+    while i > 0 {
+        let p = parent(i);
+        if get8(hp.data, i) < get8(hp.data, p) {
+            hp = swap_hp(hp, i, p);
+            i = p;
+        } else {
+            i = 0; // break (set to 0 to exit, won't enter while again since 0 > 0 is false)
+            i = -1;
+        }
+    }
+    hp
+}
+
+fn sift_down(h: MinHp, idx: Int) -> MinHp {
+    let mut hp = h;
+    let mut i = idx;
+    let mut cont = 1;
+    while cont == 1 {
+        let l = left_child(i);
+        let r = right_child(i);
+        let mut smallest = i;
+        if l < hp.sz {
+            if get8(hp.data, l) < get8(hp.data, smallest) {
+                smallest = l;
+            }
+        }
+        if r < hp.sz {
+            if get8(hp.data, r) < get8(hp.data, smallest) {
+                smallest = r;
+            }
+        }
+        if smallest != i {
+            hp = swap_hp(hp, i, smallest);
+            i = smallest;
+        } else {
+            cont = 0;
+        }
+    }
+    hp
+}
+
+fn heap_push(h: MinHp, val: Int) -> MinHp {
+    let idx = h.sz;
+    let d = set8(h.data, idx, val);
+    let hp = MinHp { data: d, sz: h.sz + 1 };
+    sift_up(hp, idx)
+}
+
+fn heap_peek(h: MinHp) -> Int {
+    get8(h.data, 0)
+}
+
+fn heap_pop(h: MinHp) -> MinHp {
+    let last_idx = h.sz - 1;
+    let last_val = get8(h.data, last_idx);
+    let d = set8(h.data, 0, last_val);
+    let hp = MinHp { data: d, sz: h.sz - 1 };
+    if hp.sz > 0 { sift_down(hp, 0) } else { hp }
+}
+
+fn test_heap_basic() -> Int {
+    let mut h = new_heap();
+    h = heap_push(h, 5);
+    h = heap_push(h, 3);
+    h = heap_push(h, 7);
+    h = heap_push(h, 1);
+
+    assert_eq(h.sz, 4);
+    assert_eq(heap_peek(h), 1); // min is 1
+
+    h = heap_pop(h);
+    assert_eq(h.sz, 3);
+    assert_eq(heap_peek(h), 3); // next min is 3
+
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 5);
+
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 7);
+    1
+}
+
+fn test_heap_sorted_extract() -> Int {
+    let mut h = new_heap();
+    h = heap_push(h, 42);
+    h = heap_push(h, 17);
+    h = heap_push(h, 99);
+    h = heap_push(h, 5);
+    h = heap_push(h, 23);
+
+    // Extract all in sorted order
+    assert_eq(heap_peek(h), 5);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 17);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 23);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 42);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 99);
+    h = heap_pop(h);
+    assert_eq(h.sz, 0);
+    1
+}
+
+fn test_heap_duplicates() -> Int {
+    let mut h = new_heap();
+    h = heap_push(h, 3);
+    h = heap_push(h, 3);
+    h = heap_push(h, 3);
+
+    assert_eq(heap_peek(h), 3);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 3);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 3);
+    1
+}
+
+fn main() -> Int {
+    test_heap_basic();
+    test_heap_sorted_extract();
+    test_heap_duplicates();
+    print("[OK] 444_heap_sim_aot");
+    0
+}

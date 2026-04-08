@@ -1,0 +1,318 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, convex-hull, jarvis-march, computational-geometry
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for convex hull using Jarvis march (gift wrapping) on integer points.
+// Also includes cross product, orientation, and area computation.
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 } else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 } else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 } else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 } else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 } else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+// Points stored as parallel arrays: xs[i], ys[i]
+// Cross product of vectors (p1->p2) x (p1->p3)
+// Positive = counter-clockwise, Negative = clockwise, 0 = collinear
+fn cross(px1: Int, py1: Int, px2: Int, py2: Int, px3: Int, py3: Int) -> Int {
+    (px2 - px1) * (py3 - py1) - (py2 - py1) * (px3 - px1)
+}
+
+// Squared distance between two points
+fn dist_sq(px1: Int, py1: Int, px2: Int, py2: Int) -> Int {
+    let dx = px2 - px1;
+    let dy = py2 - py1;
+    dx * dx + dy * dy
+}
+
+// Orientation: 0=collinear, 1=clockwise, 2=counter-clockwise
+fn orientation(px1: Int, py1: Int, px2: Int, py2: Int, px3: Int, py3: Int) -> Int {
+    let cp = cross(px1, py1, px2, py2, px3, py3);
+    if cp == 0 { 0 }
+    else if cp < 0 { 1 }
+    else { 2 }
+}
+
+// Find index of leftmost (lowest x, then lowest y) point
+fn find_leftmost(xs: Arr16, ys: Arr16, n: Int) -> Int {
+    let mut best = 0;
+    let mut i = 1;
+    while i < n {
+        if a16_get(xs, i) < a16_get(xs, best) {
+            best = i;
+        } else if a16_get(xs, i) == a16_get(xs, best) {
+            if a16_get(ys, i) < a16_get(ys, best) {
+                best = i;
+            }
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// Jarvis march / gift wrapping convex hull
+// Returns hull as indices in hull_idx array, and hull size
+// hull_xs, hull_ys contain the hull points
+type HullOutput is {
+    hull_xs: Arr16,
+    hull_ys: Arr16,
+    hull_size: Int
+};
+
+fn jarvis_hull(xs: Arr16, ys: Arr16, n: Int) -> HullOutput {
+    let mut hull_xs = a16_zero();
+    let mut hull_ys = a16_zero();
+
+    if n < 3 {
+        // Degenerate: return all points as hull
+        let mut i = 0;
+        while i < n {
+            hull_xs = a16_set(hull_xs, i, a16_get(xs, i));
+            hull_ys = a16_set(hull_ys, i, a16_get(ys, i));
+            i = i + 1;
+        }
+        return HullOutput { hull_xs: hull_xs, hull_ys: hull_ys, hull_size: n };
+    }
+
+    let start = find_leftmost(xs, ys, n);
+    let mut hull_count = 0;
+    let mut current = start;
+
+    // Do-while loop: keep wrapping until we return to start
+    let mut done = 0;
+    while done == 0 {
+        hull_xs = a16_set(hull_xs, hull_count, a16_get(xs, current));
+        hull_ys = a16_set(hull_ys, hull_count, a16_get(ys, current));
+        hull_count = hull_count + 1;
+
+        // Find the most counter-clockwise point from current
+        let mut candidate = 0;
+        let mut j = 1;
+        while j < n {
+            let o = orientation(
+                a16_get(xs, current), a16_get(ys, current),
+                a16_get(xs, candidate), a16_get(ys, candidate),
+                a16_get(xs, j), a16_get(ys, j)
+            );
+            if o == 2 {
+                // j is more counter-clockwise
+                candidate = j;
+            } else if o == 0 {
+                // Collinear: pick the farther point
+                let d_cand = dist_sq(
+                    a16_get(xs, current), a16_get(ys, current),
+                    a16_get(xs, candidate), a16_get(ys, candidate)
+                );
+                let d_j = dist_sq(
+                    a16_get(xs, current), a16_get(ys, current),
+                    a16_get(xs, j), a16_get(ys, j)
+                );
+                if d_j > d_cand {
+                    candidate = j;
+                }
+            }
+            j = j + 1;
+        }
+
+        current = candidate;
+        if current == start {
+            done = 1;
+        }
+        // Safety: hull can't have more points than n
+        if hull_count >= n {
+            done = 1;
+        }
+    }
+
+    HullOutput { hull_xs: hull_xs, hull_ys: hull_ys, hull_size: hull_count }
+}
+
+// Compute 2x area of convex polygon using shoelace formula
+fn twice_area(xs: Arr16, ys: Arr16, n: Int) -> Int {
+    let mut area2 = 0;
+    let mut i = 0;
+    while i < n {
+        let j = (i + 1) % n;
+        area2 = area2 + a16_get(xs, i) * a16_get(ys, j);
+        area2 = area2 - a16_get(xs, j) * a16_get(ys, i);
+        i = i + 1;
+    }
+    if area2 < 0 { 0 - area2 } else { area2 }
+}
+
+// ---- Tests ----
+
+fn test_orientation_basic() {
+    // Counter-clockwise
+    assert_eq(orientation(0, 0, 1, 0, 0, 1), 2);
+    // Clockwise
+    assert_eq(orientation(0, 0, 0, 1, 1, 0), 1);
+    // Collinear
+    assert_eq(orientation(0, 0, 1, 1, 2, 2), 0);
+}
+
+fn test_cross_product() {
+    assert_eq(cross(0, 0, 1, 0, 0, 1), 1);   // unit square corner -> positive
+    assert_eq(cross(0, 0, 0, 1, 1, 0), -1);   // opposite -> negative
+    assert_eq(cross(0, 0, 2, 2, 4, 4), 0);    // collinear
+}
+
+fn test_square_hull() {
+    // Square: (0,0), (1,0), (1,1), (0,1)
+    let mut xs = a16_zero();
+    let mut ys = a16_zero();
+    xs = a16_set(xs, 0, 0); ys = a16_set(ys, 0, 0);
+    xs = a16_set(xs, 1, 1); ys = a16_set(ys, 1, 0);
+    xs = a16_set(xs, 2, 1); ys = a16_set(ys, 2, 1);
+    xs = a16_set(xs, 3, 0); ys = a16_set(ys, 3, 1);
+
+    let hull = jarvis_hull(xs, ys, 4);
+    assert_eq(hull.hull_size, 4);
+    // 2*area of unit square = 2
+    assert_eq(twice_area(hull.hull_xs, hull.hull_ys, hull.hull_size), 2);
+}
+
+fn test_triangle_hull() {
+    // Triangle: (0,0), (4,0), (2,3)
+    let mut xs = a16_zero();
+    let mut ys = a16_zero();
+    xs = a16_set(xs, 0, 0); ys = a16_set(ys, 0, 0);
+    xs = a16_set(xs, 1, 4); ys = a16_set(ys, 1, 0);
+    xs = a16_set(xs, 2, 2); ys = a16_set(ys, 2, 3);
+
+    let hull = jarvis_hull(xs, ys, 3);
+    assert_eq(hull.hull_size, 3);
+    // 2*area = |0*(0-3) + 4*(3-0) + 2*(0-0)| = |0 + 12 + 0| = 12
+    assert_eq(twice_area(hull.hull_xs, hull.hull_ys, hull.hull_size), 12);
+}
+
+fn test_interior_point() {
+    // Triangle with an interior point
+    // Triangle: (0,0), (6,0), (3,6), Interior: (3,2)
+    let mut xs = a16_zero();
+    let mut ys = a16_zero();
+    xs = a16_set(xs, 0, 0); ys = a16_set(ys, 0, 0);
+    xs = a16_set(xs, 1, 6); ys = a16_set(ys, 1, 0);
+    xs = a16_set(xs, 2, 3); ys = a16_set(ys, 2, 6);
+    xs = a16_set(xs, 3, 3); ys = a16_set(ys, 3, 2); // interior
+
+    let hull = jarvis_hull(xs, ys, 4);
+    assert_eq(hull.hull_size, 3); // Interior point excluded
+}
+
+fn test_pentagon_with_interior() {
+    // Pentagon: (0,2), (2,0), (4,0), (6,2), (3,5) + interior (3,2)
+    let mut xs = a16_zero();
+    let mut ys = a16_zero();
+    xs = a16_set(xs, 0, 0); ys = a16_set(ys, 0, 2);
+    xs = a16_set(xs, 1, 2); ys = a16_set(ys, 1, 0);
+    xs = a16_set(xs, 2, 4); ys = a16_set(ys, 2, 0);
+    xs = a16_set(xs, 3, 6); ys = a16_set(ys, 3, 2);
+    xs = a16_set(xs, 4, 3); ys = a16_set(ys, 4, 5);
+    xs = a16_set(xs, 5, 3); ys = a16_set(ys, 5, 2); // interior
+
+    let hull = jarvis_hull(xs, ys, 6);
+    assert_eq(hull.hull_size, 5); // Pentagon, interior excluded
+}
+
+fn test_collinear_points() {
+    // All collinear: (0,0), (1,1), (2,2), (3,3)
+    // Hull should have 2 points (endpoints)
+    let mut xs = a16_zero();
+    let mut ys = a16_zero();
+    xs = a16_set(xs, 0, 0); ys = a16_set(ys, 0, 0);
+    xs = a16_set(xs, 1, 1); ys = a16_set(ys, 1, 1);
+    xs = a16_set(xs, 2, 2); ys = a16_set(ys, 2, 2);
+    xs = a16_set(xs, 3, 3); ys = a16_set(ys, 3, 3);
+
+    let hull = jarvis_hull(xs, ys, 4);
+    // Degenerate hull, should wrap around the line
+    // hull_size = 2 (the two endpoints: leftmost -> rightmost -> back)
+    assert_eq(hull.hull_size, 2);
+}
+
+fn test_two_points() {
+    let mut xs = a16_zero();
+    let mut ys = a16_zero();
+    xs = a16_set(xs, 0, 0); ys = a16_set(ys, 0, 0);
+    xs = a16_set(xs, 1, 5); ys = a16_set(ys, 1, 5);
+
+    let hull = jarvis_hull(xs, ys, 2);
+    assert_eq(hull.hull_size, 2);
+}
+
+fn test_hull_area_rectangle() {
+    // Rectangle (0,0), (10,0), (10,5), (0,5)
+    let mut xs = a16_zero();
+    let mut ys = a16_zero();
+    xs = a16_set(xs, 0, 0);  ys = a16_set(ys, 0, 0);
+    xs = a16_set(xs, 1, 10); ys = a16_set(ys, 1, 0);
+    xs = a16_set(xs, 2, 10); ys = a16_set(ys, 2, 5);
+    xs = a16_set(xs, 3, 0);  ys = a16_set(ys, 3, 5);
+
+    let hull = jarvis_hull(xs, ys, 4);
+    assert_eq(hull.hull_size, 4);
+    // 2 * area = 2 * 50 = 100
+    assert_eq(twice_area(hull.hull_xs, hull.hull_ys, hull.hull_size), 100);
+}
+
+fn test_dist_sq() {
+    assert_eq(dist_sq(0, 0, 3, 4), 25);
+    assert_eq(dist_sq(1, 1, 4, 5), 25);
+    assert_eq(dist_sq(0, 0, 0, 0), 0);
+}
+
+fn test_shoelace_known() {
+    // Triangle (0,0), (3,0), (0,4) -> area = 6, 2*area = 12
+    let mut xs = a16_zero();
+    let mut ys = a16_zero();
+    xs = a16_set(xs, 0, 0); ys = a16_set(ys, 0, 0);
+    xs = a16_set(xs, 1, 3); ys = a16_set(ys, 1, 0);
+    xs = a16_set(xs, 2, 0); ys = a16_set(ys, 2, 4);
+    assert_eq(twice_area(xs, ys, 3), 12);
+}
+
+fn main() -> Int {
+    test_orientation_basic();
+    test_cross_product();
+    test_square_hull();
+    test_triangle_hull();
+    test_interior_point();
+    test_pentagon_with_interior();
+    test_collinear_points();
+    test_two_points();
+    test_hull_area_rectangle();
+    test_dist_sq();
+    test_shoelace_known();
+    print("[OK] 388_convex_hull_aot");
+    0
+}

@@ -1,0 +1,200 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, bit-manipulation, advanced
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for advanced bit manipulation algorithms
+
+fn bnot(x: Int) -> Int { !x }
+
+// Count set bits (population count)
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 {
+        count = count + (x & 1);
+        x = x >> 1;
+    }
+    count
+}
+
+// Find lowest set bit
+fn lowest_set_bit(n: Int) -> Int {
+    if n == 0 { 0 }
+    else { n & (-n) }
+}
+
+// Clear lowest set bit
+fn clear_lowest_bit(n: Int) -> Int {
+    n & (n - 1)
+}
+
+// Check if power of 2
+fn is_pow2(n: Int) -> Bool {
+    if n <= 0 { return false; }
+    (n & (n - 1)) == 0
+}
+
+// Next power of 2 >= n
+fn next_pow2(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut p = 1;
+    while p < n {
+        p = p << 1;
+    }
+    p
+}
+
+// Count leading zeros (for positive ints up to 2^20)
+fn clz(n: Int) -> Int {
+    if n == 0 { return 20; }
+    let mut count = 0;
+    let mut mask = 1 << 19;  // Start from bit 19
+    while mask > 0 {
+        if (n & mask) != 0 { return count; }
+        count = count + 1;
+        mask = mask >> 1;
+    }
+    count
+}
+
+// Count trailing zeros
+fn ctz(n: Int) -> Int {
+    if n == 0 { return 20; }
+    let mut count = 0;
+    let mut x = n;
+    while (x & 1) == 0 {
+        count = count + 1;
+        x = x >> 1;
+    }
+    count
+}
+
+// Reverse bits of a byte (8-bit)
+fn reverse_byte(b: Int) -> Int {
+    let mut result = 0;
+    let mut x = b & 255;
+    let mut i = 0;
+    while i < 8 {
+        result = (result << 1) | (x & 1);
+        x = x >> 1;
+        i = i + 1;
+    }
+    result
+}
+
+// Extract bit field: bits [start..start+width)
+fn extract_bits(val: Int, start: Int, width: Int) -> Int {
+    (val >> start) & ((1 << width) - 1)
+}
+
+// Set bit at position
+fn set_bit(val: Int, pos: Int) -> Int {
+    val | (1 << pos)
+}
+
+// Clear bit at position
+fn clear_bit(val: Int, pos: Int) -> Int {
+    val & bnot(1 << pos)
+}
+
+// Toggle bit at position
+fn toggle_bit(val: Int, pos: Int) -> Int {
+    val ^ (1 << pos)
+}
+
+// Test bit at position
+fn test_bit(val: Int, pos: Int) -> Bool {
+    ((val >> pos) & 1) == 1
+}
+
+fn test_popcount() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(1023), 10);
+    assert_eq(popcount(0b10101010), 4);
+}
+
+fn test_lowest_set_bit() {
+    assert_eq(lowest_set_bit(0), 0);
+    assert_eq(lowest_set_bit(1), 1);
+    assert_eq(lowest_set_bit(12), 4);    // 1100 -> lowest = 0100
+    assert_eq(lowest_set_bit(80), 16);   // 1010000 -> lowest = 10000
+    assert_eq(lowest_set_bit(128), 128);
+}
+
+fn test_clear_lowest() {
+    assert_eq(clear_lowest_bit(0), 0);
+    assert_eq(clear_lowest_bit(1), 0);
+    assert_eq(clear_lowest_bit(12), 8);  // 1100 -> 1000
+    assert_eq(clear_lowest_bit(7), 6);   // 111 -> 110
+}
+
+fn test_power_of_2() {
+    assert_eq(is_pow2(1), true);
+    assert_eq(is_pow2(2), true);
+    assert_eq(is_pow2(4), true);
+    assert_eq(is_pow2(1024), true);
+    assert_eq(is_pow2(3), false);
+    assert_eq(is_pow2(6), false);
+    assert_eq(is_pow2(0), false);
+
+    assert_eq(next_pow2(1), 1);
+    assert_eq(next_pow2(3), 4);
+    assert_eq(next_pow2(5), 8);
+    assert_eq(next_pow2(8), 8);
+    assert_eq(next_pow2(9), 16);
+}
+
+fn test_leading_trailing() {
+    assert_eq(ctz(1), 0);
+    assert_eq(ctz(2), 1);
+    assert_eq(ctz(8), 3);
+    assert_eq(ctz(16), 4);
+    assert_eq(ctz(12), 2);  // 1100
+
+    assert_eq(clz(1 << 19), 0);
+    assert_eq(clz(1), 19);
+    assert_eq(clz(2), 18);
+    assert_eq(clz(1024), 9); // bit 10 set, 20-11=9 leading zeros
+}
+
+fn test_reverse_byte() {
+    assert_eq(reverse_byte(0), 0);
+    assert_eq(reverse_byte(255), 255);
+    assert_eq(reverse_byte(1), 128);   // 00000001 -> 10000000
+    assert_eq(reverse_byte(128), 1);   // 10000000 -> 00000001
+    assert_eq(reverse_byte(0b11001010), 0b01010011);
+}
+
+fn test_bit_field_ops() {
+    // Extract bits
+    assert_eq(extract_bits(0xFF, 0, 4), 15);   // lower nibble
+    assert_eq(extract_bits(0xFF, 4, 4), 15);   // upper nibble
+    assert_eq(extract_bits(0b11010110, 1, 3), 0b011);  // bits 1-3
+
+    // Set/clear/toggle/test
+    assert_eq(set_bit(0, 3), 8);
+    assert_eq(clear_bit(15, 2), 11);    // 1111 -> 1011
+    assert_eq(toggle_bit(10, 1), 8);    // 1010 -> 1000
+    assert_eq(toggle_bit(10, 2), 14);   // 1010 -> 1110
+    assert_eq(test_bit(10, 1), true);   // 1010, bit 1 set
+    assert_eq(test_bit(10, 2), false);  // 1010, bit 2 not set
+    assert_eq(test_bit(10, 3), true);   // 1010, bit 3 set
+}
+
+fn main() -> Int {
+    test_popcount();
+    test_lowest_set_bit();
+    test_clear_lowest();
+    test_power_of_2();
+    test_leading_trailing();
+    test_reverse_byte();
+    test_bit_field_ops();
+    print("[OK] 218_bit_manipulation_aot");
+    0
+}

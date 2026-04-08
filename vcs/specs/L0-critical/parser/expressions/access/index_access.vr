@@ -1,0 +1,226 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, access, index
+
+// Index access expressions
+
+// Helper functions
+fn calculate_index() -> Int {
+    2
+}
+
+fn process(x: Int) { }
+
+fn handle_zero() { }
+
+fn handle_positive(n: Int) { }
+
+fn handle_negative(n: Int) { }
+
+fn get_array() -> List<Int> {
+    [1, 2, 3]
+}
+
+// Matrix type alias
+type Matrix is List<List<Float>>;
+
+// Array indexing
+fn test_array_indexing() {
+    let arr = [10, 20, 30, 40, 50];
+    let first = arr[0];
+    let last = arr[4];
+    let middle = arr[2];
+}
+
+// Index with expression
+fn test_index_with_expression() {
+    let arr = [10, 20, 30, 40, 50];
+    let i = 2;
+    let at_i = arr[i];
+    let computed = arr[i + 1];
+    let dynamic = arr[calculate_index()];
+}
+
+// Negative indexing (if supported)
+fn test_negative_indexing() {
+    let arr = [10, 20, 30, 40, 50];
+    let last_elem = arr[-1];
+    let second_last = arr[-2];
+}
+
+// Nested array indexing
+fn test_nested_array_indexing() {
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    let element = matrix[1][2];
+    let row = matrix[0];
+    let row_idx = 0;
+    let col_idx = 1;
+    let cell = matrix[row_idx][col_idx];
+}
+
+// String indexing
+fn test_string_indexing() {
+    let s = "hello";
+    let char_val = s[0];
+    let last_char = s[s.len() - 1];
+}
+
+// Map indexing
+fn test_map_indexing() {
+    let map = Map.from([("a", 1), ("b", 2), ("c", 3)]);
+    let a_value = map["a"];
+    let b_value = map["b"];
+}
+
+// Index with variable key
+fn test_index_with_variable_key() {
+    let map = Map.from([("a", 1), ("b", 2), ("c", 3)]);
+    let key = "c";
+    let c_value = map[key];
+}
+
+// Mutable index access
+fn test_mutable_index_access() {
+    let mut arr = [1, 2, 3];
+    arr[0] = 100;
+    arr[1] += 10;
+    arr[2] *= 2;
+}
+
+// Index with compound assignment
+fn test_index_compound_assignment() {
+    let mut arr = [10, 20, 30];
+    arr[0] += 5;
+    arr[1] -= 3;
+    arr[2] *= 2;
+    arr[0] /= 2;
+    arr[1] %= 3;
+}
+
+// Index access in expressions
+fn test_index_in_expressions() {
+    let arr = [1, 2, 3];
+    let sum = arr[0] + arr[1] + arr[2];
+    let product = arr[0] * arr[1];
+}
+
+// Chained index access
+fn test_chained_index_access() {
+    let data = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+    let i = 0;
+    let j = 1;
+    let k = 0;
+    let value = data[i][j][k];
+}
+
+// Index with method calls
+fn test_index_with_method_calls() {
+    let arr = ["hello", "world"];
+    let len = arr[0].len();
+    let upper = arr[0].to_uppercase();
+}
+
+// Index in conditions
+fn test_index_in_conditions() {
+    let arr = [10, 20, 30];
+    let i = 0;
+    let threshold = 5;
+    if arr[i] > threshold {
+        process(arr[i]);
+    }
+
+    let mut idx = 0;
+    let target = 25;
+    while arr[idx] != target && idx < arr.len() - 1 {
+        idx += 1;
+    }
+}
+
+// Index in match (simplified - removed guard patterns for now)
+fn test_index_in_match() {
+    let arr = [0, 5, -3];
+    let index = 1;
+    match arr[index] {
+        0 => handle_zero(),
+        _ => handle_positive(arr[index]),
+    }
+}
+
+// Safe indexing (returns Maybe)
+fn test_safe_indexing() {
+    let arr = [1, 2, 3];
+    let safe = arr.get(10);
+    let with_default = arr.get(10).unwrap_or(0);
+}
+
+// Range indexing (slicing)
+fn test_range_indexing() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice = arr[1..4];
+    let from_start = arr[..3];
+    let to_end = arr[2..];
+    let full = arr[..];
+    let inclusive = arr[1..=3];
+}
+
+// Indexing on expression result
+fn test_indexing_on_expression() {
+    let value = get_array()[0];
+    let arr = [1, 2, 3];
+    let mapped = arr.map(|x| x * 2)[0];
+}
+
+// Index on reference
+fn sum_first_two(arr: &List<Int>) -> Int {
+    arr[0] + arr[1]
+}
+
+// Index on boxed collection
+fn test_index_on_boxed() {
+    let boxed = Heap([1, 2, 3]);
+    let first = boxed[0];
+}
+
+// Multi-dimensional indexing (matrices/tensors)
+fn test_multidimensional_indexing() {
+    let m: Matrix = [[1.0, 2.0], [3.0, 4.0]];
+    let element = m[0][1];
+}
+
+// Index with tuple (multi-key maps)
+fn test_tuple_index() {
+    let multi_map: Map<(Int, Int), Text> = Map.new();
+    let value = multi_map[(1, 2)];
+}
+
+// Generic indexing
+fn get_first<T>(arr: List<T>) -> T {
+    arr[0]
+}
+
+// Bounds checking examples
+fn safe_access(arr: List<Int>, i: Int) -> Maybe<Int> {
+    if i >= 0 && i < arr.len() {
+        Some(arr[i])
+    } else {
+        None
+    }
+}
+
+// Index in loop
+fn test_index_in_loop() {
+    let arr = [1, 2, 3, 4, 5];
+    for i in 0..arr.len() {
+        process(arr[i]);
+    }
+}
+
+// Parallel index access
+fn test_parallel_index_access() {
+    let arr1 = [1, 2, 3];
+    let arr2 = [10, 20, 30];
+    let arr3 = [100, 200, 300];
+    let i = 0;
+    let result = arr1[i] + arr2[i] + arr3[i];
+}

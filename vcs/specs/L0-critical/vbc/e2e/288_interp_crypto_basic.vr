@@ -1,0 +1,494 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, crypto, hash, xor
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: basic crypto primitives — XOR cipher (encrypt/decrypt
+// roundtrip), simple hash function (DJB2-like), checksum (CRC-like polynomial).
+
+// =============================================================================
+// Array record infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// =============================================================================
+// XOR cipher: encrypt and decrypt with a key
+// =============================================================================
+
+fn xor_cipher(data: Arr8, len: Int, key: Arr8, key_len: Int) -> Arr8 {
+    let mut out = data;
+    let mut i = 0;
+    while i < len {
+        let data_byte = arr8_get(data, i);
+        let key_byte = arr8_get(key, i % key_len);
+        out = arr8_set(out, i, data_byte ^ key_byte);
+        i = i + 1;
+    }
+    out
+}
+
+fn test_xor_encrypt_decrypt() {
+    // Message: [72, 101, 108, 108, 111] (Hello as ASCII values)
+    let msg = Arr8 { e0: 72, e1: 101, e2: 108, e3: 108, e4: 111, e5: 0, e6: 0, e7: 0 };
+    let key = Arr8 { e0: 42, e1: 137, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+
+    // Encrypt
+    let encrypted = xor_cipher(msg, 5, key, 2);
+    // Verify encrypted != original
+    assert(arr8_get(encrypted, 0) != arr8_get(msg, 0));
+
+    // Decrypt: XOR with same key
+    let decrypted = xor_cipher(encrypted, 5, key, 2);
+    // Verify roundtrip
+    assert_eq(arr8_get(decrypted, 0), 72);
+    assert_eq(arr8_get(decrypted, 1), 101);
+    assert_eq(arr8_get(decrypted, 2), 108);
+    assert_eq(arr8_get(decrypted, 3), 108);
+    assert_eq(arr8_get(decrypted, 4), 111);
+}
+
+fn test_xor_identity() {
+    // XOR with zero key should give original
+    let msg = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let zero_key = arr8_zeros();
+    let encrypted = xor_cipher(msg, 5, zero_key, 1);
+    assert_eq(arr8_get(encrypted, 0), 1);
+    assert_eq(arr8_get(encrypted, 1), 2);
+    assert_eq(arr8_get(encrypted, 2), 3);
+}
+
+fn test_xor_self_inverse() {
+    // XOR with all-ones key twice = identity
+    let msg = Arr8 { e0: 123, e1: 45, e2: 67, e3: 89, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let key = Arr8 { e0: 255, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let enc = xor_cipher(msg, 4, key, 1);
+    let dec = xor_cipher(enc, 4, key, 1);
+    assert_eq(arr8_get(dec, 0), 123);
+    assert_eq(arr8_get(dec, 1), 45);
+    assert_eq(arr8_get(dec, 2), 67);
+    assert_eq(arr8_get(dec, 3), 89);
+}
+
+fn test_xor_repeating_key() {
+    // Key repeats cyclically
+    let msg = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 0, e7: 0 };
+    let key = Arr8 { e0: 5, e1: 10, e2: 15, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let enc = xor_cipher(msg, 6, key, 3);
+    let dec = xor_cipher(enc, 6, key, 3);
+    let mut i = 0;
+    while i < 6 {
+        assert_eq(arr8_get(dec, i), arr8_get(msg, i));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// DJB2-like hash function on integer arrays
+// =============================================================================
+
+// mask to keep values in 32-bit range
+fn mask32(x: Int) -> Int {
+    x & 4294967295  // 0xFFFFFFFF
+}
+
+fn djb2_hash(data: Arr8, len: Int) -> Int {
+    let mut hash = 5381;
+    let mut i = 0;
+    while i < len {
+        let val = arr8_get(data, i);
+        // hash = hash * 33 + val (DJB2 formula)
+        hash = mask32(hash * 33 + val);
+        i = i + 1;
+    }
+    hash
+}
+
+fn test_djb2_deterministic() {
+    let data = Arr8 { e0: 72, e1: 101, e2: 108, e3: 108, e4: 111, e5: 0, e6: 0, e7: 0 };
+    let h1 = djb2_hash(data, 5);
+    let h2 = djb2_hash(data, 5);
+    // Same input -> same hash
+    assert_eq(h1, h2);
+}
+
+fn test_djb2_different_inputs() {
+    let data1 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let data2 = Arr8 { e0: 3, e1: 2, e2: 1, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let h1 = djb2_hash(data1, 3);
+    let h2 = djb2_hash(data2, 3);
+    // Different input -> (very likely) different hash
+    assert(h1 != h2);
+}
+
+fn test_djb2_empty() {
+    let data = arr8_zeros();
+    let h = djb2_hash(data, 0);
+    // Empty data -> initial hash value
+    assert_eq(h, 5381);
+}
+
+fn test_djb2_single_element() {
+    let data1 = Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let data2 = Arr8 { e0: 1, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let h1 = djb2_hash(data1, 1);
+    let h2 = djb2_hash(data2, 1);
+    // 5381 * 33 + 0 = 177573
+    assert_eq(h1, 177573);
+    // 5381 * 33 + 1 = 177574
+    assert_eq(h2, 177574);
+}
+
+fn test_djb2_avalanche() {
+    // Small change in input should cause big change in hash
+    let data1 = Arr8 { e0: 100, e1: 200, e2: 50, e3: 75, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let data2 = Arr8 { e0: 100, e1: 200, e2: 51, e3: 75, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let h1 = djb2_hash(data1, 4);
+    let h2 = djb2_hash(data2, 4);
+    assert(h1 != h2);
+    // The difference should be significant (not just +1)
+    let diff = h1 - h2;
+    let abs_diff = if diff < 0 { -diff } else { diff };
+    assert(abs_diff > 1);
+}
+
+// =============================================================================
+// Simple FNV-1a-like hash
+// =============================================================================
+
+fn fnv_hash(data: Arr8, len: Int) -> Int {
+    let mut hash = 2166136261;  // FNV offset basis (32-bit)
+    let fnv_prime = 16777619;
+    let mut i = 0;
+    while i < len {
+        let val = arr8_get(data, i);
+        hash = hash ^ val;
+        hash = mask32(hash * fnv_prime);
+        i = i + 1;
+    }
+    hash
+}
+
+fn test_fnv_deterministic() {
+    let data = Arr8 { e0: 10, e1: 20, e2: 30, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let h1 = fnv_hash(data, 3);
+    let h2 = fnv_hash(data, 3);
+    assert_eq(h1, h2);
+}
+
+fn test_fnv_different_from_djb2() {
+    let data = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let h_djb2 = djb2_hash(data, 3);
+    let h_fnv = fnv_hash(data, 3);
+    // Different algorithms -> different hashes
+    assert(h_djb2 != h_fnv);
+}
+
+fn test_fnv_different_inputs() {
+    let d1 = Arr8 { e0: 5, e1: 10, e2: 15, e3: 20, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let d2 = Arr8 { e0: 5, e1: 10, e2: 15, e3: 21, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let h1 = fnv_hash(d1, 4);
+    let h2 = fnv_hash(d2, 4);
+    assert(h1 != h2);
+}
+
+// =============================================================================
+// Simple checksum (additive + positional)
+// =============================================================================
+
+fn simple_checksum(data: Arr8, len: Int) -> Int {
+    // Fletcher-like checksum using two running sums
+    let mut sum1 = 0;
+    let mut sum2 = 0;
+    let mut i = 0;
+    while i < len {
+        sum1 = (sum1 + arr8_get(data, i)) % 255;
+        sum2 = (sum2 + sum1) % 255;
+        i = i + 1;
+    }
+    sum1 * 256 + sum2
+}
+
+fn test_checksum_basic() {
+    let data = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let cs = simple_checksum(data, 4);
+    assert(cs > 0);
+}
+
+fn test_checksum_deterministic() {
+    let data = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 0, e6: 0, e7: 0 };
+    let cs1 = simple_checksum(data, 5);
+    let cs2 = simple_checksum(data, 5);
+    assert_eq(cs1, cs2);
+}
+
+fn test_checksum_order_matters() {
+    // Checksum should detect reordering
+    let d1 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let d2 = Arr8 { e0: 3, e1: 2, e2: 1, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let cs1 = simple_checksum(d1, 3);
+    let cs2 = simple_checksum(d2, 3);
+    assert(cs1 != cs2);
+}
+
+fn test_checksum_single_bit_change() {
+    let d1 = Arr8 { e0: 100, e1: 200, e2: 50, e3: 75, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let d2 = Arr8 { e0: 100, e1: 201, e2: 50, e3: 75, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let cs1 = simple_checksum(d1, 4);
+    let cs2 = simple_checksum(d2, 4);
+    assert(cs1 != cs2);
+}
+
+// =============================================================================
+// CRC-like polynomial check
+// Using polynomial division with a simple generator polynomial
+// =============================================================================
+
+fn crc8_naive(data: Arr8, len: Int) -> Int {
+    // Simple CRC-8 using polynomial 0x07 (x^8 + x^2 + x + 1)
+    let poly = 7;  // 0x07
+    let mut crc = 0;
+    let mut i = 0;
+    while i < len {
+        crc = crc ^ arr8_get(data, i);
+        let mut bit = 0;
+        while bit < 8 {
+            if (crc & 128) != 0 {
+                crc = ((crc * 2) & 255) ^ poly;
+            } else {
+                crc = (crc * 2) & 255;
+            }
+            bit = bit + 1;
+        }
+        i = i + 1;
+    }
+    crc
+}
+
+fn test_crc8_deterministic() {
+    let data = Arr8 { e0: 72, e1: 101, e2: 108, e3: 108, e4: 111, e5: 0, e6: 0, e7: 0 };
+    let c1 = crc8_naive(data, 5);
+    let c2 = crc8_naive(data, 5);
+    assert_eq(c1, c2);
+}
+
+fn test_crc8_different_data() {
+    let d1 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let d2 = Arr8 { e0: 1, e1: 2, e2: 4, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let c1 = crc8_naive(d1, 3);
+    let c2 = crc8_naive(d2, 3);
+    assert(c1 != c2);
+}
+
+fn test_crc8_range() {
+    // CRC8 should be in [0, 255]
+    let data = Arr8 { e0: 42, e1: 137, e2: 0, e3: 255, e4: 128, e5: 0, e6: 0, e7: 0 };
+    let c = crc8_naive(data, 5);
+    assert(c >= 0);
+    assert(c < 256);
+}
+
+fn test_crc8_empty() {
+    let data = arr8_zeros();
+    let c = crc8_naive(data, 0);
+    assert_eq(c, 0);
+}
+
+// =============================================================================
+// Hash table simulation: separate chaining with simple hash
+// =============================================================================
+
+// Simulate a hash table with 4 buckets using counts
+type HashCounts is { b0: Int, b1: Int, b2: Int, b3: Int };
+
+fn hash_bucket(key: Int) -> Int {
+    // Simple hash: key mod 4
+    let k = if key < 0 { -key } else { key };
+    k % 4
+}
+
+fn test_hash_distribution() {
+    let mut counts = HashCounts { b0: 0, b1: 0, b2: 0, b3: 0 };
+
+    // Insert 20 keys
+    let mut i = 0;
+    while i < 20 {
+        let bucket = hash_bucket(i * 7 + 3);  // Spread keys around
+        if bucket == 0 { counts = HashCounts { b0: counts.b0 + 1, b1: counts.b1, b2: counts.b2, b3: counts.b3 }; }
+        else if bucket == 1 { counts = HashCounts { b0: counts.b0, b1: counts.b1 + 1, b2: counts.b2, b3: counts.b3 }; }
+        else if bucket == 2 { counts = HashCounts { b0: counts.b0, b1: counts.b1, b2: counts.b2 + 1, b3: counts.b3 }; }
+        else { counts = HashCounts { b0: counts.b0, b1: counts.b1, b2: counts.b2, b3: counts.b3 + 1 }; }
+        i = i + 1;
+    }
+
+    // Total should be 20
+    assert_eq(counts.b0 + counts.b1 + counts.b2 + counts.b3, 20);
+    // Each bucket should have at least 1 (with the hash function above)
+    assert(counts.b0 > 0);
+    assert(counts.b1 > 0);
+    assert(counts.b2 > 0);
+    assert(counts.b3 > 0);
+}
+
+// =============================================================================
+// Simple PRNG (linear congruential generator)
+// =============================================================================
+
+fn lcg_next(seed: Int) -> Int {
+    // LCG: next = (a * seed + c) mod m
+    // Using a=1103515245, c=12345, m=2^31 (2147483648)
+    let a = 1103515245;
+    let c = 12345;
+    let m = 2147483648;
+    let next_val = (a * seed + c) % m;
+    if next_val < 0 { next_val + m } else { next_val }
+}
+
+fn test_prng_deterministic() {
+    let s1 = lcg_next(42);
+    let s2 = lcg_next(42);
+    assert_eq(s1, s2);
+}
+
+fn test_prng_different_seeds() {
+    let s1 = lcg_next(1);
+    let s2 = lcg_next(2);
+    assert(s1 != s2);
+}
+
+fn test_prng_sequence() {
+    // Generate a sequence and verify it's non-trivial
+    let mut seed = 12345;
+    let mut all_same = 1;
+    let first = lcg_next(seed);
+    seed = first;
+    let mut i = 0;
+    while i < 10 {
+        seed = lcg_next(seed);
+        if seed != first {
+            all_same = 0;
+        }
+        i = i + 1;
+    }
+    // Sequence should not be all the same value
+    assert_eq(all_same, 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_xor_encrypt_decrypt();
+    test_xor_identity();
+    test_xor_self_inverse();
+    test_xor_repeating_key();
+    test_djb2_deterministic();
+    test_djb2_different_inputs();
+    test_djb2_empty();
+    test_djb2_single_element();
+    test_djb2_avalanche();
+    test_fnv_deterministic();
+    test_fnv_different_from_djb2();
+    test_fnv_different_inputs();
+    test_checksum_basic();
+    test_checksum_deterministic();
+    test_checksum_order_matters();
+    test_checksum_single_bit_change();
+    test_crc8_deterministic();
+    test_crc8_different_data();
+    test_crc8_range();
+    test_crc8_empty();
+    test_hash_distribution();
+    test_prng_deterministic();
+    test_prng_different_seeds();
+    test_prng_sequence();
+    print("[OK] 288_interp_crypto_basic");
+    0
+}

@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, continue, value, error
+// @description: Test continue with value (not allowed)
+// @expected-error: E049
+
+fn test() {
+    loop {
+        continue 5;
+    }
+}

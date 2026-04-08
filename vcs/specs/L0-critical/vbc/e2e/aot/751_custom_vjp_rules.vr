@@ -1,0 +1,173 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, autodiff, custom-vjp, backward
+// @expected-exit: 0
+
+// Tests custom VJP (Vector-Jacobian Product) rules.
+// Verifies that custom backward functions correctly propagate gradients.
+// Uses integer arithmetic to simulate gradient computation patterns.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Custom VJP for ReLU: f(x) = max(0, x)
+// Forward: y = max(0, x)
+// Backward: dy/dx = 1 if x > 0, else 0
+fn relu(x: Int) -> Int {
+    if (x > 0) { x } else { 0 }
+}
+
+fn relu_vjp(x: Int, grad_out: Int) -> Int {
+    if (x > 0) { grad_out } else { 0 }
+}
+
+// Custom VJP for clamp: f(x) = clamp(x, lo, hi)
+// Forward: y = min(max(x, lo), hi)
+// Backward: dy/dx = 1 if lo <= x <= hi, else 0
+fn clamp_val(x: Int, lo: Int, hi: Int) -> Int {
+    if (x < lo) { lo } else if (x > hi) { hi } else { x }
+}
+
+fn clamp_vjp(x: Int, lo: Int, hi: Int, grad_out: Int) -> Int {
+    if (x < lo) { 0 } else if (x > hi) { 0 } else { grad_out }
+}
+
+// Custom VJP for absolute value
+// Forward: y = |x|
+// Backward: dy/dx = sign(x) = 1 if x > 0, -1 if x < 0, 0 if x == 0
+fn abs_vjp(x: Int, grad_out: Int) -> Int {
+    if (x > 0) { grad_out } else if (x < 0) { 0 - grad_out } else { 0 }
+}
+
+// Custom VJP for softplus approximation (integer): f(x) = x if x > 0, else 0
+// (Simplified softplus for integer domain)
+fn softplus_int(x: Int) -> Int {
+    if (x > 0) { x } else { 0 }
+}
+
+fn softplus_vjp(x: Int, grad_out: Int) -> Int {
+    // Derivative of softplus ≈ sigmoid ≈ step function in integer domain
+    if (x > 0) { grad_out } else { 0 }
+}
+
+// Custom VJP for piecewise: f(x) = x^2 if x >= 0, else -x^2
+fn piecewise(x: Int) -> Int {
+    if (x >= 0) { x * x } else { 0 - x * x }
+}
+
+fn piecewise_vjp(x: Int, grad_out: Int) -> Int {
+    // f'(x) = 2x if x >= 0, else -2x = 2|x| with sign
+    // Actually: f'(x) = 2x for x >= 0, f'(x) = -2x for x < 0
+    // Both cases: f'(x) = 2*abs(x) * sign(original)
+    // Simpler: f'(x) = 2x when x >= 0, -2x when x < 0
+    if (x >= 0) { 2 * x * grad_out } else { (0 - 2 * x) * grad_out }
+}
+
+// Leaky ReLU: f(x) = x if x > 0, else alpha*x (alpha=1/10 scaled)
+fn leaky_relu(x: Int, alpha_num: Int, alpha_den: Int) -> Int {
+    if (x > 0) { x } else { x * alpha_num / alpha_den }
+}
+
+fn leaky_relu_vjp(x: Int, alpha_num: Int, alpha_den: Int, grad_out: Int) -> Int {
+    if (x > 0) { grad_out } else { grad_out * alpha_num / alpha_den }
+}
+
+fn main() -> Int {
+    // Test 1: ReLU VJP - positive input
+    assert_eq(relu(5), 5);
+    assert_eq(relu_vjp(5, 1), 1);    // Gradient passes through
+    assert_eq(relu_vjp(5, 3), 3);    // Scales with upstream gradient
+
+    // Test 2: ReLU VJP - negative input (gradient blocked)
+    assert_eq(relu(-3), 0);
+    assert_eq(relu_vjp(-3, 1), 0);   // Gradient blocked
+    assert_eq(relu_vjp(-3, 100), 0); // No matter how large
+
+    // Test 3: ReLU VJP - zero input (boundary)
+    assert_eq(relu(0), 0);
+    assert_eq(relu_vjp(0, 1), 0);    // Zero is on the "off" side
+
+    // Test 4: Clamp VJP
+    assert_eq(clamp_val(5, 0, 10), 5);
+    assert_eq(clamp_vjp(5, 0, 10, 1), 1);    // In range: gradient passes
+    assert_eq(clamp_val(-3, 0, 10), 0);
+    assert_eq(clamp_vjp(-3, 0, 10, 1), 0);   // Below: gradient blocked
+    assert_eq(clamp_val(15, 0, 10), 10);
+    assert_eq(clamp_vjp(15, 0, 10, 1), 0);   // Above: gradient blocked
+
+    // Test 5: Absolute value VJP
+    assert_eq(abs_val(7), 7);
+    assert_eq(abs_vjp(7, 1), 1);      // Positive: pass through
+    assert_eq(abs_val(-4), 4);
+    assert_eq(abs_vjp(-4, 1), -1);    // Negative: negate gradient
+    assert_eq(abs_vjp(0, 1), 0);      // Zero: no gradient
+
+    // Test 6: Chain rule with ReLU
+    // f(x) = relu(x^2 - 4), grad: relu_vjp(x^2-4, 1) * 2x
+    // At x=3: relu(9-4)=5, grad: relu_vjp(5, 1) * 6 = 1 * 6 = 6
+    let x = 3;
+    let inner = x * x - 4;
+    let fwd = relu(inner);
+    assert_eq(fwd, 5);
+    let grad = relu_vjp(inner, 1) * 2 * x;
+    assert_eq(grad, 6);
+
+    // At x=1: relu(1-4)=0, grad: relu_vjp(-3, 1) * 2 = 0 * 2 = 0
+    let x2 = 1;
+    let inner2 = x2 * x2 - 4;
+    assert_eq(relu(inner2), 0);
+    let grad2 = relu_vjp(inner2, 1) * 2 * x2;
+    assert_eq(grad2, 0);
+
+    // Test 7: Piecewise function VJP
+    assert_eq(piecewise(3), 9);
+    assert_eq(piecewise_vjp(3, 1), 6);    // 2*3 = 6
+    assert_eq(piecewise(-2), -4);
+    assert_eq(piecewise_vjp(-2, 1), 4);   // -2*(-2) = 4
+
+    // Test 8: Leaky ReLU VJP
+    // alpha = 1/10
+    assert_eq(leaky_relu(10, 1, 10), 10);
+    assert_eq(leaky_relu_vjp(10, 1, 10, 10), 10);   // Pass through
+    assert_eq(leaky_relu(-100, 1, 10), -10);         // Leaky: -100/10 = -10
+    assert_eq(leaky_relu_vjp(-100, 1, 10, 10), 1);   // Leak gradient: 10/10 = 1
+
+    // Test 9: Composition of custom VJPs
+    // f(x) = relu(clamp(x, -5, 5))
+    // Backward: relu_vjp(clamp(x, -5, 5), clamp_vjp(x, -5, 5, grad_out))
+    // At x=3: clamp(3,-5,5)=3, relu(3)=3
+    //   grad: relu_vjp(3, clamp_vjp(3,-5,5,1)) = relu_vjp(3, 1) = 1
+    let comp = relu(clamp_val(3, -5, 5));
+    assert_eq(comp, 3);
+    let comp_grad = relu_vjp(clamp_val(3, -5, 5), clamp_vjp(3, -5, 5, 1));
+    assert_eq(comp_grad, 1);
+
+    // At x=-3: clamp(-3,-5,5)=-3, relu(-3)=0
+    //   grad: relu_vjp(-3, clamp_vjp(-3,-5,5,1)) = relu_vjp(-3, 1) = 0
+    let comp2 = relu(clamp_val(-3, -5, 5));
+    assert_eq(comp2, 0);
+    let comp_grad2 = relu_vjp(clamp_val(-3, -5, 5), clamp_vjp(-3, -5, 5, 1));
+    assert_eq(comp_grad2, 0);
+
+    // At x=8: clamp(8,-5,5)=5, relu(5)=5
+    //   grad: relu_vjp(5, clamp_vjp(8,-5,5,1)) = relu_vjp(5, 0) = 0
+    let comp3 = relu(clamp_val(8, -5, 5));
+    assert_eq(comp3, 5);
+    let comp_grad3 = relu_vjp(clamp_val(8, -5, 5), clamp_vjp(8, -5, 5, 1));
+    assert_eq(comp_grad3, 0);
+
+    // Test 10: VJP gradient accumulation
+    // y = relu(x) + relu(x) at x=5
+    // dy/dx = relu_vjp(5,1) + relu_vjp(5,1) = 2
+    let acc_grad = relu_vjp(5, 1) + relu_vjp(5, 1);
+    assert_eq(acc_grad, 2);
+    // y = relu(x) + relu(x) at x=-5
+    // dy/dx = relu_vjp(-5,1) + relu_vjp(-5,1) = 0
+    let acc_grad2 = relu_vjp(-5, 1) + relu_vjp(-5, 1);
+    assert_eq(acc_grad2, 0);
+
+    print("Custom VJP rules: PASS");
+    0
+}

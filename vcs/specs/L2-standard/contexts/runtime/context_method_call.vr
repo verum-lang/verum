@@ -1,0 +1,62 @@
+// @test: run
+// @expected-stdout: [INFO] Application started\n[DEBUG] Processing data: test\n[ERROR] Validation failed
+// @tier: 0
+// @level: L2
+// @tags: contexts, using, method-call, vbc, runtime
+// @description: Tests that method calls on contexts (Logger.info()) emit CtxGet instruction
+
+// Logger context declaration
+context Logger {
+    fn debug(&self, message: Text);
+    fn info(&self, message: Text);
+    fn error(&self, message: Text);
+}
+
+// Concrete logger implementation
+type ConsoleLogger is {
+    prefix: Text,
+};
+
+implement Logger for ConsoleLogger {
+    fn debug(&self, message: Text) {
+        println(f"[DEBUG] {message}");
+    }
+
+    fn info(&self, message: Text) {
+        println(f"[INFO] {message}");
+    }
+
+    fn error(&self, message: Text) {
+        println(f"[ERROR] {message}");
+    }
+}
+
+// Function using Logger context with direct method calls
+// This should emit CtxGet to retrieve Logger, then CallM on the result
+fn log_startup() using [Logger] {
+    Logger.info("Application started");
+}
+
+fn process_data(data: Text) using [Logger] {
+    Logger.debug(f"Processing data: {data}");
+}
+
+fn report_error(error: Text) using [Logger] {
+    Logger.error(error);
+}
+
+// Composed function that calls multiple context-using functions
+fn application_flow() using [Logger] {
+    log_startup();
+    process_data("test");
+    report_error("Validation failed");
+}
+
+fn main() {
+    // Provide the Logger context
+    let logger = ConsoleLogger { prefix: "APP" };
+    provide Logger = logger;
+
+    // Execute application flow that uses Logger in multiple ways
+    application_flow();
+}

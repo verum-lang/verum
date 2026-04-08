@@ -1,0 +1,121 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L0
+// @tags: parser, syntax-tree, error-recovery, structured, events, markers
+// @description: Test structured error recovery - parser should continue after errors, event-based error handling
+// @expected-error-count: 4
+
+// ============================================================================
+// SECTION 1: Basic Error Recovery
+// ============================================================================
+
+// Missing type annotation - should recover and parse rest
+fn missing_type(x) {
+    let result = x + 1;
+    result
+}
+
+// Unclosed parenthesis - should create ERROR node and continue
+fn unclosed_paren(a: Int, b: Int {
+    a + b
+}
+
+// Invalid operator - should create ERROR node
+fn invalid_operator() {
+    let x = 1 @@ 2;  // @@ is not a valid operator
+}
+
+// Missing expression after operator - should create ERROR node
+fn missing_expr() {
+    let x = 1 +;
+}
+
+// Valid function after errors - should parse correctly
+fn valid_after_errors() {
+    let x = 1;
+    let y = 2;
+    x + y
+}
+
+// ============================================================================
+// SECTION 2: Event-Based Error Recording
+// ============================================================================
+
+// Test that Error events include descriptive messages
+fn error_event_messages() {
+    let valid = 1;
+    // Parser should emit Error event with clear message
+}
+
+// Test that Error events don't prevent subsequent parsing
+fn error_event_continuation() {
+    let before = 1;
+    // Error occurs here
+    let after = 2;  // Should still parse
+}
+
+// ============================================================================
+// SECTION 3: Marker Handling with Errors
+// ============================================================================
+
+// Test that markers are properly abandoned on error
+fn marker_abandon_on_error() {
+    let x = 1;
+    // Marker started but abandoned due to error
+}
+
+// Test that completed markers before error remain valid
+fn marker_complete_before_error() {
+    let completed = 1;  // This marker completes
+    // Error after the completed statement
+}
+
+// ============================================================================
+// SECTION 4: Recovery Context Sets
+// ============================================================================
+
+// Test recovery using item recovery set
+fn item_recovery_test() {
+    let x = 1;
+}
+
+// Test recovery using statement recovery set
+fn stmt_recovery_test() {
+    let a = 1;
+    let b = 2;
+}
+
+// Test recovery using expression recovery set
+fn expr_recovery_test() {
+    let x = 1 + 2;
+}
+
+// ============================================================================
+// SECTION 5: Error Node Creation
+// ============================================================================
+
+// Test that ERROR nodes contain skipped tokens
+fn error_node_content() {
+    let valid = 1;
+    // Skipped tokens should be in ERROR node
+}
+
+// Test that ERROR nodes have proper spans
+fn error_node_spans() {
+    let x = 1;
+    // ERROR node span should cover skipped content
+}
+
+// ============================================================================
+// SECTION 6: Sink Error Collection
+// ============================================================================
+
+// Test that GreenTreeSink collects errors
+fn sink_error_collection() {
+    let x = 1;
+}
+
+// Test that StatsSink counts errors
+fn stats_error_count() {
+    let x = 1;
+}

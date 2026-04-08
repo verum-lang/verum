@@ -1,0 +1,130 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, marks, nested
+// @description: Mark flip behavior in nested quotes
+
+// =============================================================================
+// MARK FLIP BEHAVIOR
+// =============================================================================
+// When a quote is nested inside another quote, marks are "flipped" (toggled).
+// This ensures that bindings from the outer quote are accessible in the inner
+// quote body while maintaining hygiene.
+
+// =============================================================================
+// SINGLE QUOTE WITH LOCAL BINDINGS
+// =============================================================================
+
+meta fn single_quote_test() -> TokenStream {
+    let outer_val = 100;
+
+    quote {
+        // This binding is introduced at stage 0
+        let x = ${outer_val};
+
+        // Local bindings within the same quote
+        let y = 200;
+
+        // Both are accessible
+        x + y
+    }
+}
+
+// =============================================================================
+// META FUNCTION COMPOSITION
+// =============================================================================
+// Demonstrate that meta functions can call each other and combine tokens
+
+meta fn generate_addition(a: Int, b: Int) -> TokenStream {
+    quote {
+        ${a} + ${b}
+    }
+}
+
+meta fn generate_multiplication(a: Int, b: Int) -> TokenStream {
+    quote {
+        ${a} * ${b}
+    }
+}
+
+meta fn combined_expression() -> TokenStream {
+    let add_result = 5;
+    let mul_result = 10;
+
+    quote {
+        let sum = ${add_result};
+        let product = ${mul_result};
+        sum + product
+    }
+}
+
+// =============================================================================
+// NESTED QUOTE LITERALS
+// =============================================================================
+// When quote appears inside another quote, it produces a TokenStream value
+
+meta fn outer_with_nested_quote() -> TokenStream {
+    quote {
+        // This is stage 0 code
+        let x = 42;
+
+        // This quote literal will be evaluated at stage 0 to produce a TokenStream
+        let inner_tokens = quote {
+            let y = 100;
+            y * 2
+        };
+
+        x
+    }
+}
+
+// =============================================================================
+// DOUBLE NESTING WITH EXPLICIT STAGES
+// =============================================================================
+
+meta(2) fn stage2_function() -> TokenStream {
+    let stage2_val = 1000;
+
+    quote(1) {
+        // This generates stage 1 code (meta code)
+        meta fn generated_meta() -> TokenStream {
+            let stage1_val = 100;
+
+            quote(0) {
+                // This generates stage 0 code (runtime code)
+                let stage0_val = 10;
+
+                // Using splice to bring in values from higher stages
+                ${stage2_val} + ${stage1_val} + stage0_val
+            }
+        }
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+meta fn test_single_quote() -> Int {
+    let _tokens = single_quote_test();
+    1
+}
+
+meta fn test_combined() -> Int {
+    let _tokens = combined_expression();
+    1
+}
+
+meta fn test_nested_quote() -> Int {
+    let _tokens = outer_with_nested_quote();
+    1
+}
+
+// Combined test for test runner
+meta fn test_all_mark_flip() -> Int {
+    test_single_quote() + test_combined() + test_nested_quote()
+}
+
+fn main() {
+    // Meta tests are evaluated at compile time
+}

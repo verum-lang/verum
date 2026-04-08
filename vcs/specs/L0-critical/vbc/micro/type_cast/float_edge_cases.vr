@@ -1,0 +1,25 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Very small positive
+    let f1: Float = 0.001;
+    let i1: Int = f1 as Int;
+    assert_eq(i1, 0);
+
+    // Just under 1
+    let f2: Float = 0.999999;
+    let i2: Int = f2 as Int;
+    assert_eq(i2, 0);
+
+    // Negative fractional
+    let f3: Float = -2.5;
+    let i3: Int = f3 as Int;
+    assert_eq(i3, -2);  // Truncate toward zero, not floor
+
+    // Large float
+    let f4: Float = 123456.789;
+    let i4: Int = f4 as Int;
+    assert_eq(i4, 123456);
+}

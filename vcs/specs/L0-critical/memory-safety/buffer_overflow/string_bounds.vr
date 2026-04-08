@@ -1,0 +1,10 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-check, string
+// @description: Tests that string character access beyond bounds causes a panic
+
+fn main() {
+    let text = "Hello";
+    let _ = text.char_at(100);  // Panic: String index out of bounds
+}

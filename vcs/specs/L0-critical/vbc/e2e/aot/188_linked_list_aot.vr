@@ -1,0 +1,118 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, data-structures, linked-list
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for simulated linked list using record arrays
+
+// Simulated linked list with fixed max 8 nodes
+// Each node has a value and next index (-1 = null)
+type NodePool is {
+    v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int,
+    n0: Int, n1: Int, n2: Int, n3: Int, n4: Int, n5: Int, n6: Int, n7: Int,
+    size: Int
+};
+
+fn pool_new() -> NodePool {
+    NodePool {
+        v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        n0: -1, n1: -1, n2: -1, n3: -1, n4: -1, n5: -1, n6: -1, n7: -1,
+        size: 0
+    }
+}
+
+fn get_val(p: NodePool, i: Int) -> Int {
+    if i == 0 { p.v0 } else if i == 1 { p.v1 }
+    else if i == 2 { p.v2 } else if i == 3 { p.v3 }
+    else if i == 4 { p.v4 } else if i == 5 { p.v5 }
+    else if i == 6 { p.v6 } else { p.v7 }
+}
+
+fn get_next(p: NodePool, i: Int) -> Int {
+    if i == 0 { p.n0 } else if i == 1 { p.n1 }
+    else if i == 2 { p.n2 } else if i == 3 { p.n3 }
+    else if i == 4 { p.n4 } else if i == 5 { p.n5 }
+    else if i == 6 { p.n6 } else { p.n7 }
+}
+
+fn list_length(p: NodePool, head: Int) -> Int {
+    let mut count = 0;
+    let mut cur = head;
+    while cur >= 0 {
+        count = count + 1;
+        cur = get_next(p, cur);
+    }
+    count
+}
+
+fn list_sum(p: NodePool, head: Int) -> Int {
+    let mut total = 0;
+    let mut cur = head;
+    while cur >= 0 {
+        total = total + get_val(p, cur);
+        cur = get_next(p, cur);
+    }
+    total
+}
+
+fn list_contains(p: NodePool, head: Int, target: Int) -> Bool {
+    let mut cur = head;
+    while cur >= 0 {
+        if get_val(p, cur) == target { return true; }
+        cur = get_next(p, cur);
+    }
+    false
+}
+
+fn main() -> Int {
+    // Build a linked list: 10 -> 20 -> 30 -> 40
+    // Manually set up the node pool
+    let p = NodePool {
+        v0: 10, v1: 20, v2: 30, v3: 40, v4: 0, v5: 0, v6: 0, v7: 0,
+        n0: 1, n1: 2, n2: 3, n3: -1, n4: -1, n5: -1, n6: -1, n7: -1,
+        size: 4
+    };
+    let head = 0;
+
+    // Length
+    assert_eq(list_length(p, head), 4);
+
+    // Sum
+    assert_eq(list_sum(p, head), 100);
+
+    // Contains
+    assert_eq(list_contains(p, head, 10), true);
+    assert_eq(list_contains(p, head, 30), true);
+    assert_eq(list_contains(p, head, 40), true);
+    assert_eq(list_contains(p, head, 50), false);
+    assert_eq(list_contains(p, head, 0), false);
+
+    // Single element list (node 5 only)
+    let p2 = NodePool {
+        v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 99, v6: 0, v7: 0,
+        n0: -1, n1: -1, n2: -1, n3: -1, n4: -1, n5: -1, n6: -1, n7: -1,
+        size: 1
+    };
+    assert_eq(list_length(p2, 5), 1);
+    assert_eq(list_sum(p2, 5), 99);
+
+    // Empty list
+    assert_eq(list_length(p, -1), 0);
+    assert_eq(list_sum(p, -1), 0);
+    assert_eq(list_contains(p, -1, 10), false);
+
+    // Reversed order: 40 -> 30 -> 20 -> 10
+    let p3 = NodePool {
+        v0: 10, v1: 20, v2: 30, v3: 40, v4: 0, v5: 0, v6: 0, v7: 0,
+        n0: -1, n1: 0, n2: 1, n3: 2, n4: -1, n5: -1, n6: -1, n7: -1,
+        size: 4
+    };
+    assert_eq(list_length(p3, 3), 4);
+    assert_eq(list_sum(p3, 3), 100);
+    assert_eq(get_val(p3, 3), 40);  // First element
+
+    print("[OK] 188_linked_list_aot");
+    0
+}

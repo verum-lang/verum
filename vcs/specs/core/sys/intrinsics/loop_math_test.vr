@@ -1,0 +1,30 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Loop with math operations
+
+module test.stdlib.sys.intrinsics.loop_math_test;
+
+mount core.intrinsics.{sin_f64, cos_f64};
+
+fn main() {
+    print("Testing loop with math...");
+
+    let angles: List<Float64> = [0.0, 0.5];
+    for angle in angles {
+        print(f"Testing angle = {angle}");
+        let s = sin_f64(angle);
+        print(f"  sin = {s}");
+        let c = cos_f64(angle);
+        print(f"  cos = {c}");
+        let s2 = s * s;
+        print(f"  sin^2 = {s2}");
+        let c2 = c * c;
+        print(f"  cos^2 = {c2}");
+        let sum = s2 + c2;
+        print(f"  sum = {sum}");
+    }
+
+    print("All tests passed!");
+}

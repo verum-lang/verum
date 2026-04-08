@@ -1,0 +1,172 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L0
+// @tags: parser, declarations, fn, function, pure, invalid, error, v2.12
+
+// ============================================================================
+// Verum v2.12 - Invalid Pure Function Combinations
+// Grammar: function_modifiers = [ 'pure' ] , [ 'meta' ] , [ 'async' ] , [ 'unsafe' ] | epsilon ;
+//
+// VALID combinations with pure:
+// - pure fn (basic pure function)
+// - pure meta fn (compile-time pure computations)
+// - pure async fn (pure computation with async control flow)
+// - pure meta async fn (compile-time async pure computations)
+//
+// INVALID combinations:
+// - pure unsafe (unsafe can have arbitrary side effects that violate purity)
+// - Any combination with unsafe and pure together
+// - Invalid modifier ordering (grammar specifies order)
+// - Duplicate modifiers
+// - Invalid placement of pure keyword
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// ERROR: pure + unsafe is invalid
+// Unsafe functions can have arbitrary side effects that violate purity
+// ----------------------------------------------------------------------------
+
+// ERROR: Basic pure unsafe combination
+pure unsafe fn pure_unsafe_invalid() { }
+
+// ERROR: Pure unsafe with pointer operations
+pure unsafe fn pure_unsafe_deref(ptr: *Int) -> Int {
+    *ptr
+}
+
+// ERROR: Pure unsafe with return type
+pure unsafe fn pure_unsafe_read() -> Int {
+    raw_memory_read()
+}
+
+// ERROR: Pure unsafe with parameters
+pure unsafe fn pure_unsafe_write(ptr: *mut Int, value: Int) {
+    *ptr = value;
+}
+
+// ERROR: Unsafe pure (reversed order still invalid)
+unsafe pure fn unsafe_pure_invalid() { }
+
+// ERROR: Pure unsafe with generics
+pure unsafe fn pure_unsafe_generic<T>(ptr: *T) -> T {
+    *ptr
+}
+
+// ERROR: Public pure unsafe
+public pure unsafe fn pub_pure_unsafe() { }
+
+// ERROR: Pure unsafe with unsafe references
+pure unsafe fn pure_unsafe_ref(r: &unsafe Int) -> Int {
+    *r
+}
+
+// ERROR: Pure unsafe with meta
+pure meta unsafe fn pure_meta_unsafe() { }
+
+// ERROR: Pure async unsafe (async is fine, unsafe is not)
+pure async unsafe fn pure_async_unsafe() { }
+
+// ERROR: Pure unsafe async
+pure unsafe async fn pure_unsafe_async() { }
+
+// ERROR: All other orderings with unsafe + pure
+async pure unsafe fn async_pure_unsafe() { }
+async unsafe pure fn async_unsafe_pure() { }
+unsafe pure async fn unsafe_pure_async() { }
+unsafe async pure fn unsafe_async_pure() { }
+meta pure unsafe fn meta_pure_unsafe() { }
+meta unsafe pure fn meta_unsafe_pure() { }
+
+// ----------------------------------------------------------------------------
+// ERROR: Invalid modifier ordering
+// Grammar: function_modifiers = [ 'pure' ] , [ 'meta' ] , [ 'async' ] , [ 'unsafe' ]
+// Pure must come first, then meta, then async, then unsafe
+// ----------------------------------------------------------------------------
+
+// ERROR: meta before pure
+meta pure fn meta_pure_wrong_order() { }
+
+// ERROR: async before pure
+async pure fn async_pure_wrong_order() { }
+
+// ERROR: async before meta
+pure async meta fn async_before_meta() { }
+
+// ----------------------------------------------------------------------------
+// ERROR: Duplicate modifiers
+// ----------------------------------------------------------------------------
+
+// ERROR: Duplicate pure modifier
+pure pure fn double_pure() { }
+
+// ERROR: Pure with duplicate async
+pure async async fn pure_double_async() { }
+
+// ERROR: Pure with duplicate meta
+pure meta meta fn pure_double_meta() { }
+
+// ERROR: Multiple duplicates
+pure pure async fn triple_error() { }
+
+// ----------------------------------------------------------------------------
+// ERROR: Invalid pure placement
+// ----------------------------------------------------------------------------
+
+// ERROR: Pure after fn keyword
+fn pure invalid_placement() { }
+
+// ERROR: Pure inside parameter list
+fn invalid_param(pure x: Int) { }
+
+// ERROR: Pure as return type modifier
+fn pure_return() -> pure Int { 42 }
+
+// ERROR: Pure between fn and name
+fn pure_middle pure() { }
+
+// ----------------------------------------------------------------------------
+// ERROR: Pure in invalid syntactic contexts
+// ----------------------------------------------------------------------------
+
+// ERROR: Pure on standalone closure expression
+let closure = pure |x| x + 1;
+
+// ERROR: Pure on async block (blocks don't take modifiers)
+let block = pure async { 42 };
+
+// ERROR: Pure on regular block
+let block2 = pure { 42 };
+
+// ----------------------------------------------------------------------------
+// ERROR: Malformed pure declarations
+// ----------------------------------------------------------------------------
+
+// ERROR: Pure without fn keyword
+pure identifier() { }
+
+// ERROR: Pure with invalid punctuation
+pure! fn bang_pure() { }
+
+// ERROR: Pure as function name (keyword cannot be identifier)
+fn pure() { }
+
+// ERROR: Missing function name after pure fn
+pure fn () { }
+
+// ERROR: Pure with semicolon before fn
+pure; fn semicolon_before() { }
+
+// ERROR: Pure with comma before fn
+pure, fn comma_before() { }
+
+// ERROR: Pure with dot before fn
+pure. fn dot_before() { }
+
+// ERROR: Pure in wrong declaration type
+pure type PureType is Int;
+
+// ERROR: Pure on let binding
+pure let x = 42;
+
+// ERROR: Pure on const
+pure const C = 42;

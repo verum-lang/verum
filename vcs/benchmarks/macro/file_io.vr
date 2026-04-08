@@ -1,0 +1,375 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: > 500 MB/s sequential, > 100K IOPS random
+// @tags: file, io, async, performance
+
+/// File I/O Benchmark
+///
+/// Tests realistic file operations:
+/// - Sequential read/write
+/// - Random access
+/// - Buffered I/O
+/// - Memory-mapped files
+/// - Async I/O
+
+module benchmarks.macro.file_io
+
+using [Benchmark, Fs, Async]
+
+/// Sequential write (small chunks)
+fn benchmark_file_write_small_chunks() {
+    let path = temp_file_path();
+    let data = "Hello World! ".repeat(100);  // ~1.3KB per write
+
+    let file = File.create(&path)?;
+    let mut writer = BufWriter.new(file);
+
+    for _ in 0..100_000 {
+        writer.write_all(data.as_bytes())?;
+    }
+
+    writer.flush()?;
+    remove_file(&path)?;
+}
+
+/// Sequential write (large chunks)
+fn benchmark_file_write_large_chunks() {
+    let path = temp_file_path();
+    let data = "X".repeat(1_000_000);  // 1MB per write
+
+    let file = File.create(&path)?;
+    let mut writer = BufWriter.with_capacity(1_000_000, file);
+
+    for _ in 0..100 {
+        writer.write_all(data.as_bytes())?;
+    }
+
+    writer.flush()?;
+    remove_file(&path)?;
+}
+
+/// Sequential read (small chunks)
+fn benchmark_file_read_small_chunks() {
+    // Create test file
+    let path = temp_file_path();
+    let data = "Hello World! ".repeat(1_000_000);
+    write_file(&path, &data)?;
+
+    // Benchmark reading
+    let file = File.open(&path)?;
+    let mut reader = BufReader.new(file);
+    let mut buffer = [0u8; 1024];
+
+    loop {
+        let n = reader.read(&mut buffer)?;
+        if n == 0 { break; }
+    }
+
+    remove_file(&path)?;
+}
+
+/// Sequential read (large chunks)
+fn benchmark_file_read_large_chunks() {
+    let path = temp_file_path();
+    let data = "X".repeat(100_000_000);  // 100MB
+    write_file(&path, &data)?;
+
+    let file = File.open(&path)?;
+    let mut reader = BufReader.with_capacity(1_000_000, file);
+    let mut buffer = [0u8; 1_000_000];
+
+    loop {
+        let n = reader.read(&mut buffer)?;
+        if n == 0 { break; }
+    }
+
+    remove_file(&path)?;
+}
+
+/// Read entire file
+fn benchmark_file_read_all() {
+    let path = temp_file_path();
+    let data = "Test content.\n".repeat(100_000);
+    write_file(&path, &data)?;
+
+    for _ in 0..100 {
+        let content = read_to_string(&path)?;
+        let _ = content.len();
+    }
+
+    remove_file(&path)?;
+}
+
+/// Line-by-line reading
+fn benchmark_file_read_lines() {
+    let path = temp_file_path();
+    let data = (0..100_000).map(|i| text("Line {}\n", i)).collect<Text>();
+    write_file(&path, &data)?;
+
+    for _ in 0..10 {
+        let file = File.open(&path)?;
+        let reader = BufReader.new(file);
+
+        for line in reader.lines() {
+            let _ = line?.len();
+        }
+    }
+
+    remove_file(&path)?;
+}
+
+/// Random access read
+fn benchmark_file_random_read() {
+    let path = temp_file_path();
+    let size = 100_000_000;  // 100MB
+    let data = "X".repeat(size);
+    write_file(&path, &data)?;
+
+    let file = File.open(&path)?;
+    let mut buffer = [0u8; 4096];
+    let mut rng = Random.new();
+
+    for _ in 0..10_000 {
+        let offset = rng.gen_range(0, size - 4096);
+        file.seek(SeekFrom.Start(offset as u64))?;
+        file.read(&mut buffer)?;
+    }
+
+    remove_file(&path)?;
+}
+
+/// Random access write
+fn benchmark_file_random_write() {
+    let path = temp_file_path();
+    let size = 100_000_000;
+
+    // Pre-allocate file
+    let file = File.create(&path)?;
+    file.set_len(size as u64)?;
+
+    let data = [0x42u8; 4096];
+    let mut rng = Random.new();
+
+    for _ in 0..10_000 {
+        let offset = rng.gen_range(0, size - 4096);
+        file.seek(SeekFrom.Start(offset as u64))?;
+        file.write_all(&data)?;
+    }
+
+    remove_file(&path)?;
+}
+
+/// Memory-mapped read
+fn benchmark_file_mmap_read() {
+    let path = temp_file_path();
+    let data = "X".repeat(100_000_000);
+    write_file(&path, &data)?;
+
+    let file = File.open(&path)?;
+    let mmap = unsafe { Mmap.map(&file)? };
+
+    // Sequential access
+    for _ in 0..10 {
+        let mut sum: u64 = 0;
+        for byte in mmap.iter() {
+            sum += *byte as u64;
+        }
+        let _ = sum;
+    }
+
+    remove_file(&path)?;
+}
+
+/// Memory-mapped write
+fn benchmark_file_mmap_write() {
+    let path = temp_file_path();
+
+    let size = 100_000_000;
+    let file = OpenOptions.new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&path)?;
+    file.set_len(size as u64)?;
+
+    let mut mmap = unsafe { MmapMut.map_mut(&file)? };
+
+    for i in 0..size {
+        mmap[i] = (i % 256) as u8;
+    }
+
+    mmap.flush()?;
+    remove_file(&path)?;
+}
+
+/// Async file read
+fn benchmark_file_async_read() async {
+    let path = temp_file_path();
+    let data = "Async content.\n".repeat(100_000);
+    write_file(&path, &data)?;
+
+    for _ in 0..100 {
+        let content = async_read_to_string(&path).await?;
+        let _ = content.len();
+    }
+
+    remove_file(&path)?;
+}
+
+/// Async file write
+fn benchmark_file_async_write() async {
+    let path = temp_file_path();
+    let data = "Async write test.\n".repeat(10_000);
+
+    for _ in 0..100 {
+        async_write(&path, &data).await?;
+    }
+
+    remove_file(&path)?;
+}
+
+/// Concurrent file operations
+fn benchmark_file_concurrent() async {
+    let base_path = temp_dir_path();
+    create_dir_all(&base_path)?;
+
+    let handles: List<_> = (0..10).map(|i| {
+        let path = text("{}/file_{}.txt", base_path, i);
+        spawn async move {
+            for j in 0..100 {
+                let content = text("Worker {} iteration {}\n", i, j).repeat(1000);
+                async_write(&path, &content).await?;
+                let read = async_read_to_string(&path).await?;
+                assert(read.len() > 0);
+            }
+            Ok.<(), Error>(())
+        }
+    }).collect();
+
+    for h in handles {
+        h.await?;
+    }
+
+    remove_dir_all(&base_path)?;
+}
+
+/// File metadata operations
+fn benchmark_file_metadata() {
+    let path = temp_file_path();
+    write_file(&path, "test")?;
+
+    for _ in 0..100_000 {
+        let metadata = metadata(&path)?;
+        let _ = metadata.len();
+        let _ = metadata.is_file();
+        let _ = metadata.modified()?;
+    }
+
+    remove_file(&path)?;
+}
+
+/// Directory listing
+fn benchmark_file_readdir() {
+    let base_path = temp_dir_path();
+    create_dir_all(&base_path)?;
+
+    // Create many files
+    for i in 0..1000 {
+        write_file(&text("{}/file_{}.txt", base_path, i), "content")?;
+    }
+
+    for _ in 0..100 {
+        let entries: List<_> = read_dir(&base_path)?.collect();
+        assert(entries.len() == 1000);
+    }
+
+    remove_dir_all(&base_path)?;
+}
+
+/// Recursive directory walk
+fn benchmark_file_walk_dir() {
+    let base_path = temp_dir_path();
+
+    // Create directory tree
+    for i in 0..10 {
+        let dir = text("{}/dir_{}", base_path, i);
+        create_dir_all(&dir)?;
+        for j in 0..100 {
+            write_file(&text("{}/file_{}.txt", dir, j), "content")?;
+        }
+    }
+
+    for _ in 0..10 {
+        let count = walk_dir(&base_path)
+            .filter(|e| e.is_file())
+            .count();
+        assert(count == 1000);
+    }
+
+    remove_dir_all(&base_path)?;
+}
+
+/// File copy
+fn benchmark_file_copy() {
+    let src_path = temp_file_path();
+    let dst_path = temp_file_path();
+    let data = "X".repeat(10_000_000);  // 10MB
+    write_file(&src_path, &data)?;
+
+    for _ in 0..100 {
+        copy(&src_path, &dst_path)?;
+    }
+
+    remove_file(&src_path)?;
+    remove_file(&dst_path)?;
+}
+
+/// File rename
+fn benchmark_file_rename() {
+    let base_path = temp_dir_path();
+    create_dir_all(&base_path)?;
+
+    for i in 0..10_000 {
+        let old_path = text("{}/file_{}.txt", base_path, i);
+        let new_path = text("{}/renamed_{}.txt", base_path, i);
+        write_file(&old_path, "content")?;
+        rename(&old_path, &new_path)?;
+    }
+
+    remove_dir_all(&base_path)?;
+}
+
+/// Buffered vs unbuffered comparison
+fn benchmark_file_buffering() {
+    let path = temp_file_path();
+    let data = "X";
+
+    // Unbuffered (very slow)
+    {
+        let file = File.create(&path)?;
+        for _ in 0..10_000 {
+            file.write_all(data.as_bytes())?;
+        }
+    }
+
+    // Buffered (fast)
+    {
+        let file = File.create(&path)?;
+        let mut writer = BufWriter.new(file);
+        for _ in 0..10_000 {
+            writer.write_all(data.as_bytes())?;
+        }
+        writer.flush()?;
+    }
+
+    remove_file(&path)?;
+}
+
+fn temp_file_path() -> Text {
+    text("/tmp/verum_bench_{}", Random.new().gen<u64>())
+}
+
+fn temp_dir_path() -> Text {
+    text("/tmp/verum_bench_dir_{}", Random.new().gen<u64>())
+}

@@ -1,0 +1,32 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "hello world";
+    let n = "world";
+
+    let self_bytes = s.as_bytes();
+    let needle_bytes = n.as_bytes();
+    let nlen = needle_bytes.len();
+    print(f"nlen={nlen}");
+
+    // Full 5-byte comparison at i=6
+    let mut found = true;
+    for j in range(0, nlen) {
+        let x = self_bytes[6 + j];
+        let y = needle_bytes[j];
+        print(f"j={j} x={x} y={y}");
+        if x != y {
+            found = false;
+            break;
+        }
+    }
+    if found {
+        print("found at 6");
+    } else {
+        print("not found at 6");
+    }
+
+    0
+}

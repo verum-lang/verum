@@ -1,0 +1,25 @@
+// @test: parser
+// @tier: 0
+// @level: L0
+// @tags: parser, hkt, syntax, advanced-type-syntax
+// @expect: pass
+// @description: Parser tests for HKT syntax
+// @spec: 03-type-system.md Section 13 grammar extensions
+
+// HKT parameter with single placeholder
+fn test1<F<_>>(x: F<Int>) {}
+
+// HKT parameter with bounds
+fn test2<F<_>: Functor>(x: F<Int>) {}
+
+// HKT parameter with multiple placeholders
+fn test3<F<_, _>>(x: F<Int, Text>) {}
+
+// HKT in protocol
+type Proto is protocol {
+    type Container<_>;
+    fn get<T>() -> Self.Container<T>;
+};
+
+// HKT with multiple bounds
+fn test4<F<_>: Functor + Monad>(x: F<Int>) {}

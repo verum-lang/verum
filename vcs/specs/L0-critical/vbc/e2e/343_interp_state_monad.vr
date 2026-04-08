@@ -1,0 +1,359 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, state-monad, threading, functional
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: State monad simulation — get/put/modify through
+// record threading. The state is explicitly passed through and returned
+// from every operation, simulating monadic state threading.
+
+// =============================================================================
+// State type: holds a named integer counter and a log (array of entries)
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// State record with a counter, accumulator, and log
+type MonadState is {
+    counter: Int,
+    accum: Int,
+    log_data: Arr8,
+    log_len: Int
+};
+
+// Result of a state operation: a value and the new state
+type StateResult is { value: Int, state: MonadState };
+
+fn state_new() -> MonadState {
+    MonadState { counter: 0, accum: 0, log_data: a8_zeros(), log_len: 0 }
+}
+
+// =============================================================================
+// Core monadic operations
+// =============================================================================
+
+// get: read the counter, return it as value
+fn state_get(s: MonadState) -> StateResult {
+    StateResult { value: s.counter, state: s }
+}
+
+// put: set the counter to a new value
+fn state_put(s: MonadState, val: Int) -> StateResult {
+    StateResult {
+        value: 0,
+        state: MonadState {
+            counter: val,
+            accum: s.accum,
+            log_data: s.log_data,
+            log_len: s.log_len
+        }
+    }
+}
+
+// modify: apply a function to the counter
+fn state_modify(s: MonadState, f: fn(Int) -> Int) -> StateResult {
+    let new_counter = f(s.counter);
+    StateResult {
+        value: s.counter,
+        state: MonadState {
+            counter: new_counter,
+            accum: s.accum,
+            log_data: s.log_data,
+            log_len: s.log_len
+        }
+    }
+}
+
+// get_accum: read the accumulator
+fn state_get_accum(s: MonadState) -> StateResult {
+    StateResult { value: s.accum, state: s }
+}
+
+// modify_accum: apply function to accumulator
+fn state_modify_accum(s: MonadState, f: fn(Int) -> Int) -> StateResult {
+    let new_accum = f(s.accum);
+    StateResult {
+        value: s.accum,
+        state: MonadState {
+            counter: s.counter,
+            accum: new_accum,
+            log_data: s.log_data,
+            log_len: s.log_len
+        }
+    }
+}
+
+// log: append a value to the log
+fn state_log(s: MonadState, entry: Int) -> StateResult {
+    let new_log = a8_set(s.log_data, s.log_len, entry);
+    StateResult {
+        value: s.log_len,
+        state: MonadState {
+            counter: s.counter,
+            accum: s.accum,
+            log_data: new_log,
+            log_len: s.log_len + 1
+        }
+    }
+}
+
+// get_log: read a log entry
+fn state_get_log(s: MonadState, idx: Int) -> Int {
+    a8_get(s.log_data, idx)
+}
+
+// =============================================================================
+// Modifier functions
+// =============================================================================
+
+fn inc(x: Int) -> Int { x + 1 }
+fn dec(x: Int) -> Int { x - 1 }
+fn dbl(x: Int) -> Int { x * 2 }
+fn add_10(x: Int) -> Int { x + 10 }
+fn sqr(x: Int) -> Int { x * x }
+
+// =============================================================================
+// Compound operations built from primitives
+// =============================================================================
+
+// Increment counter and log the new value
+fn inc_and_log(s: MonadState) -> StateResult {
+    let r1 = state_modify(s, inc);
+    let r2 = state_get(r1.state);
+    state_log(r2.state, r2.value)
+}
+
+// Add counter value to accumulator
+fn add_counter_to_accum(s: MonadState) -> StateResult {
+    let r = state_get(s);
+    let counter_val = r.value;
+    let new_accum = s.accum + counter_val;
+    StateResult {
+        value: new_accum,
+        state: MonadState {
+            counter: s.counter,
+            accum: new_accum,
+            log_data: s.log_data,
+            log_len: s.log_len
+        }
+    }
+}
+
+// Repeat a state operation n times
+fn repeat_inc_and_log(s: MonadState, n: Int) -> MonadState {
+    let mut cur = s;
+    let mut i = 0;
+    while i < n {
+        let r = inc_and_log(cur);
+        cur = r.state;
+        i = i + 1;
+    }
+    cur
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_get_put() {
+    let s = state_new();
+    let r = state_get(s);
+    assert_eq(r.value, 0);
+
+    let r2 = state_put(r.state, 42);
+    let r3 = state_get(r2.state);
+    assert_eq(r3.value, 42);
+}
+
+fn test_modify() {
+    let s = state_new();
+    let r1 = state_put(s, 5);
+    let r2 = state_modify(r1.state, dbl);
+    assert_eq(r2.value, 5);  // old value returned
+    let r3 = state_get(r2.state);
+    assert_eq(r3.value, 10);  // new value is 5*2
+}
+
+fn test_chain_modify() {
+    let s = state_new();
+    let r1 = state_put(s, 3);
+    let r2 = state_modify(r1.state, dbl);    // 6
+    let r3 = state_modify(r2.state, inc);    // 7
+    let r4 = state_modify(r3.state, sqr);    // 49
+    let r5 = state_get(r4.state);
+    assert_eq(r5.value, 49);
+}
+
+fn test_logging() {
+    let s = state_new();
+    let r1 = state_log(s, 100);
+    assert_eq(r1.value, 0);  // log index
+
+    let r2 = state_log(r1.state, 200);
+    assert_eq(r2.value, 1);
+
+    let r3 = state_log(r2.state, 300);
+    assert_eq(r3.value, 2);
+
+    assert_eq(r3.state.log_len, 3);
+    assert_eq(state_get_log(r3.state, 0), 100);
+    assert_eq(state_get_log(r3.state, 1), 200);
+    assert_eq(state_get_log(r3.state, 2), 300);
+}
+
+fn test_inc_and_log() {
+    let s = state_new();
+    // counter starts at 0
+    let r1 = inc_and_log(s);
+    // counter should be 1, log should have [1]
+    assert_eq(r1.state.counter, 1);
+    assert_eq(r1.state.log_len, 1);
+    assert_eq(state_get_log(r1.state, 0), 1);
+
+    let r2 = inc_and_log(r1.state);
+    assert_eq(r2.state.counter, 2);
+    assert_eq(state_get_log(r2.state, 1), 2);
+}
+
+fn test_repeat() {
+    let s = state_new();
+    let final_state = repeat_inc_and_log(s, 5);
+    assert_eq(final_state.counter, 5);
+    assert_eq(final_state.log_len, 5);
+    assert_eq(state_get_log(final_state, 0), 1);
+    assert_eq(state_get_log(final_state, 1), 2);
+    assert_eq(state_get_log(final_state, 2), 3);
+    assert_eq(state_get_log(final_state, 3), 4);
+    assert_eq(state_get_log(final_state, 4), 5);
+}
+
+fn test_accumulator() {
+    let s = state_new();
+    let r1 = state_put(s, 10);
+    let r2 = add_counter_to_accum(r1.state);
+    assert_eq(r2.value, 10);
+
+    let r3 = state_put(r2.state, 20);
+    let r4 = add_counter_to_accum(r3.state);
+    assert_eq(r4.value, 30);  // 10 + 20
+
+    let r5 = state_get_accum(r4.state);
+    assert_eq(r5.value, 30);
+}
+
+fn test_accumulate_loop() {
+    // Sum numbers 1 through 5 using state monad pattern
+    let mut s = state_new();
+    let mut i = 1;
+    while i <= 5 {
+        let r1 = state_put(s, i);
+        let r2 = add_counter_to_accum(r1.state);
+        s = r2.state;
+        i = i + 1;
+    }
+    let r = state_get_accum(s);
+    assert_eq(r.value, 15);  // 1+2+3+4+5
+}
+
+fn test_state_independence() {
+    // Branching: same initial state, two different paths
+    let s = state_new();
+    let r0 = state_put(s, 10);
+
+    // Path A: double
+    let ra = state_modify(r0.state, dbl);
+    let ra_val = state_get(ra.state);
+
+    // Path B: add 10
+    let rb = state_modify(r0.state, add_10);
+    let rb_val = state_get(rb.state);
+
+    assert_eq(ra_val.value, 20);
+    assert_eq(rb_val.value, 20);
+    // Both paths started from same state but have independent results
+}
+
+fn test_complex_workflow() {
+    // Simulate: start at 1, double 3 times, log each step, accumulate
+    let mut s = state_new();
+    let r0 = state_put(s, 1);
+    s = r0.state;
+
+    let mut i = 0;
+    while i < 3 {
+        let r1 = state_modify(s, dbl);
+        let r2 = state_get(r1.state);
+        let r3 = state_log(r2.state, r2.value);
+        let r4 = add_counter_to_accum(r3.state);
+        s = r4.state;
+        i = i + 1;
+    }
+
+    // Counter: 1->2->4->8
+    assert_eq(s.counter, 8);
+    // Log: [2, 4, 8]
+    assert_eq(s.log_len, 3);
+    assert_eq(state_get_log(s, 0), 2);
+    assert_eq(state_get_log(s, 1), 4);
+    assert_eq(state_get_log(s, 2), 8);
+    // Accum: 2+4+8 = 14
+    assert_eq(s.accum, 14);
+}
+
+fn test_modify_chain_with_logging() {
+    let s = state_new();
+    let r1 = state_put(s, 100);
+    let r2 = state_log(r1.state, 100);
+    let r3 = state_modify(r2.state, dec);   // 99
+    let r4 = state_log(r3.state, 99);
+    let r5 = state_modify(r4.state, dec);   // 98
+    let r6 = state_log(r5.state, 98);
+
+    assert_eq(r6.state.counter, 98);
+    assert_eq(r6.state.log_len, 3);
+    assert_eq(state_get_log(r6.state, 0), 100);
+    assert_eq(state_get_log(r6.state, 1), 99);
+    assert_eq(state_get_log(r6.state, 2), 98);
+}
+
+fn main() -> Int {
+    test_get_put();
+    test_modify();
+    test_chain_modify();
+    test_logging();
+    test_inc_and_log();
+    test_repeat();
+    test_accumulator();
+    test_accumulate_loop();
+    test_state_independence();
+    test_complex_workflow();
+    test_modify_chain_with_logging();
+    print("[OK] 343_interp_state_monad");
+    0
+}

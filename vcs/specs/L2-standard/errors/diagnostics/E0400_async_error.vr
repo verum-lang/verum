@@ -1,0 +1,166 @@
+// @test: typecheck-fail
+// @expected-error: E0400
+// @tier: 0
+// @level: L2
+// @tags: errors, diagnostics, async
+// @description: Async-related errors E0400
+
+/// Error E0400: Async safety violation
+/// Occurs when async code violates safety rules.
+
+fn await_outside_async() {
+    let future = async { 42 };
+
+    // E0400: Cannot use `.await` outside of async context
+    let result = future.await;  // Error
+}
+
+fn non_send_across_await() {
+    type NotSend is {
+        ptr: *mut Int,  // Raw pointers are !Send
+    };
+
+    async fn bad_async() {
+        let ns = NotSend { ptr: null_mut() };
+
+        // E0400: `NotSend` cannot be held across await point
+        some_async_operation().await;
+
+        use_not_send(&ns);  // ns is used after await
+    }
+}
+
+fn reference_across_await() {
+    async fn bad_borrow() {
+        let mut x = 5;
+        let r = &mut x;
+
+        // E0400: Mutable reference held across await point
+        some_async_operation().await;
+
+        *r = 10;  // r used after await
+    }
+}
+
+fn non_sync_shared() {
+    type NotSync is {
+        cell: Cell<Int>,  // Cell is !Sync
+    };
+
+    fn share_not_sync() {
+        let ns = NotSync { cell: Cell.new(0) };
+        let ns_ref = &ns;
+
+        // E0400: Cannot share `&NotSync` across threads
+        spawn {
+            let _ = ns_ref.cell.get();  // Error: NotSync is !Sync
+        };
+    }
+}
+
+fn blocking_in_async() {
+    async fn bad_blocking() {
+        // E0400: Blocking operation in async context
+        std.thread.sleep(Duration.from_secs(1));  // Error
+        // Use tokio.time.sleep instead
+    }
+
+    async fn blocking_io() {
+        // E0400: Blocking I/O in async context
+        let file = std.fs.File.open("file.txt");  // Error
+        // Use tokio.fs.File instead
+    }
+}
+
+fn forget_await() {
+    async fn forgotten_await() {
+        let future = some_async_operation();
+
+        // E0400: Future created but never awaited
+        // This is usually a mistake
+    }  // future dropped without being polled
+}
+
+fn async_recursion_without_box() {
+    // E0400: Recursive async function needs boxing
+    async fn recursive(n: Int) -> Int {
+        if n == 0 {
+            0
+        } else {
+            // Error: recursive async call creates infinite-size future
+            1 + recursive(n - 1).await
+        }
+    }
+
+    // Fixed version:
+    fn recursive_fixed(n: Int) -> BoxFuture<Int> {
+        Heap.pin(async move {
+            if n == 0 {
+                0
+            } else {
+                1 + recursive_fixed(n - 1).await
+            }
+        })
+    }
+}
+
+fn mixed_executor() {
+    async fn tokio_future() {
+        // Using tokio runtime
+        tokio.spawn(async {});
+    }
+
+    async fn async_std_future() {
+        // E0400: Cannot mix async runtimes
+        // tokio.spawn requires tokio runtime
+        tokio.spawn(async {});  // Error if running on async-std
+    }
+}
+
+fn detached_spawn_without_handle() {
+    async fn spawn_without_join() {
+        // E0400: Spawned task without handling result
+        spawn {
+            might_panic().await;
+        };
+        // If the spawned task panics, error is silently dropped
+    }
+}
+
+async fn some_async_operation() {}
+async fn might_panic() {}
+fn use_not_send<T>(t: &T) {}
+fn null_mut<T>() -> *mut T { 0 as *mut T }
+
+type Cell<T> is { value: T };
+implement Cell<T> {
+    fn new(value: T) -> Self { Self { value } }
+    fn get(&self) -> T where T: Copy { self.value }
+}
+
+type Duration is {};
+implement Duration {
+    fn from_secs(secs: Int) -> Self { Self {} }
+}
+
+type BoxFuture<T> is Heap<Future<Output = T>>;
+
+// Expected error message format:
+// error[E0400]: cannot hold `NotSend` across an await point
+//   --> async_error.vr:22:9
+//    |
+// 20 |         let ns = NotSend { ptr: null_mut() };
+//    |             -- has type `NotSend` which is not `Send`
+// 21 |
+// 22 |         some_async_operation().await;
+//    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ await occurs here
+// 23 |
+// 24 |         use_not_send(&ns);
+//    |                      --- value used after await
+//    |
+//    = note: `NotSend` is not `Send` because it contains `*mut Int`
+//    = help: consider wrapping in `Arc<Mutex<...>>` for shared access
+
+fn main() {
+    // This file should not compile
+}

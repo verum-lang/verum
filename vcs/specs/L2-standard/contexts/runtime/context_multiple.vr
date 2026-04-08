@@ -1,0 +1,73 @@
+// @test: run
+// @expected-stdout: [LOG] Starting operation\nMetrics: counter=1\n[LOG] Operation completed\nMetrics: counter=2
+// @tier: 0
+// @level: L2
+// @tags: contexts, using, multiple, vbc, runtime
+// @description: Tests multiple contexts in using clause work correctly together
+
+// Logger context
+context Logger {
+    fn log(&self, message: Text);
+}
+
+// Metrics context
+context Metrics {
+    fn increment(&mut self);
+    fn get_counter(&self) -> Int;
+}
+
+// Concrete implementations
+type SimpleLogger is ();
+
+implement Logger for SimpleLogger {
+    fn log(&self, message: Text) {
+        println(f"[LOG] {message}");
+    }
+}
+
+type SimpleMetrics is {
+    counter: Int,
+};
+
+implement Metrics for SimpleMetrics {
+    fn increment(&mut self) {
+        self.counter = self.counter + 1;
+    }
+
+    fn get_counter(&self) -> Int {
+        self.counter
+    }
+}
+
+// Function using multiple contexts
+fn do_operation() using [Logger, Metrics] {
+    Logger.log("Starting operation");
+    Metrics.increment();
+    let count = Metrics.get_counter();
+    println(f"Metrics: counter={count}");
+}
+
+// Another function using the same contexts
+fn finish_operation() using [Logger, Metrics] {
+    Logger.log("Operation completed");
+    Metrics.increment();
+    let count = Metrics.get_counter();
+    println(f"Metrics: counter={count}");
+}
+
+// Orchestrator that calls both functions
+fn run_operations() using [Logger, Metrics] {
+    do_operation();
+    finish_operation();
+}
+
+fn main() {
+    // Provide both contexts
+    let logger = SimpleLogger;
+    let metrics = SimpleMetrics { counter: 0 };
+
+    provide Logger = logger;
+    provide Metrics = metrics;
+
+    run_operations();
+}

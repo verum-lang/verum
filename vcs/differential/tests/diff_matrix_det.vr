@@ -1,0 +1,75 @@
+// @test: differential
+
+// @level: L0
+// @tags: differential, matrix, determinant, linear-algebra
+// @timeout: 30000
+
+// Differential test: 2x2 and 3x3 matrix operations
+
+// 2x2 matrix stored as 4 values
+fn det2(a: Int, b: Int, c: Int, d: Int) -> Int {
+    a * d - b * c
+}
+
+// 3x3 determinant using cofactor expansion
+fn det3(a0: Int, a1: Int, a2: Int,
+        b0: Int, b1: Int, b2: Int,
+        c0: Int, c1: Int, c2: Int) -> Int {
+    a0 * (b1 * c2 - b2 * c1) - a1 * (b0 * c2 - b2 * c0) + a2 * (b0 * c1 - b1 * c0)
+}
+
+// 2x2 matrix multiply: result element (i,j)
+fn mul2_00(a0: Int, a1: Int, b0: Int, b2: Int) -> Int { a0 * b0 + a1 * b2 }
+fn mul2_01(a0: Int, a1: Int, b1: Int, b3: Int) -> Int { a0 * b1 + a1 * b3 }
+fn mul2_10(a2: Int, a3: Int, b0: Int, b2: Int) -> Int { a2 * b0 + a3 * b2 }
+fn mul2_11(a2: Int, a3: Int, b1: Int, b3: Int) -> Int { a2 * b1 + a3 * b3 }
+
+// Trace of 2x2
+fn trace2(a: Int, d: Int) -> Int { a + d }
+
+fn main() -> Int {
+    // 2x2 identity det = 1
+    assert_eq(det2(1, 0, 0, 1), 1);
+
+    // 2x2 [[2,3],[1,4]] det = 8-3 = 5
+    assert_eq(det2(2, 3, 1, 4), 5);
+
+    // 2x2 [[3,7],[1,2]] det = 6-7 = -1
+    assert_eq(det2(3, 7, 1, 2), -1);
+
+    // Singular: det = 0
+    assert_eq(det2(2, 4, 1, 2), 0);
+
+    // 3x3 identity det = 1
+    assert_eq(det3(1,0,0, 0,1,0, 0,0,1), 1);
+
+    // 3x3 [[1,2,3],[4,5,6],[7,8,9]] det = 0 (singular)
+    assert_eq(det3(1,2,3, 4,5,6, 7,8,9), 0);
+
+    // 3x3 [[2,1,1],[1,3,2],[1,0,0]] det = -1
+    assert_eq(det3(2,1,1, 1,3,2, 1,0,0), -1);
+
+    // 3x3 [[1,0,2],[3,1,0],[0,2,1]] det = 1*(1-0) - 0 + 2*(6-0) = 1+12 = 13
+    assert_eq(det3(1,0,2, 3,1,0, 0,2,1), 13);
+
+    // 2x2 multiply: [[1,2],[3,4]] * [[5,6],[7,8]]
+    // = [[1*5+2*7, 1*6+2*8],[3*5+4*7, 3*6+4*8]]
+    // = [[19,22],[43,50]]
+    assert_eq(mul2_00(1,2, 5,7), 19);
+    assert_eq(mul2_01(1,2, 6,8), 22);
+    assert_eq(mul2_10(3,4, 5,7), 43);
+    assert_eq(mul2_11(3,4, 6,8), 50);
+
+    // det(AB) = det(A)*det(B)
+    let da = det2(1, 2, 3, 4); // -2
+    let db = det2(5, 6, 7, 8); // -2
+    let dab = det2(19, 22, 43, 50); // 950-946 = 4
+    assert_eq(dab, da * db); // 4 = (-2)*(-2)
+
+    // Trace
+    assert_eq(trace2(1, 4), 5);
+    assert_eq(trace2(5, 8), 13);
+
+    print("[OK] diff_matrix_det");
+    0
+}

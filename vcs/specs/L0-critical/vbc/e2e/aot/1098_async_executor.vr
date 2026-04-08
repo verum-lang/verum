@@ -1,0 +1,276 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: async, executor, cooperative, future, poll
+// @expect: pass
+
+// Test cooperative async executor behavior using explicit state machines.
+// Each "task" is a future that yields a fixed number of times before completing.
+// The executor polls tasks round-robin, demonstrating cooperative scheduling.
+
+// --- Poll type (mirrors core/async/poll.vr) ---
+type PollResult is
+    | PollReady(Int)
+    | PollPending;
+
+// --- A counting future: yields `yields_remaining` times, then completes ---
+type CountingFuture is {
+    id: Int,
+    yields_remaining: Int,
+    result: Int,
+};
+
+fn make_future(id: Int, yields: Int, result: Int) -> CountingFuture {
+    CountingFuture {
+        id: id,
+        yields_remaining: yields,
+        result: result,
+    }
+}
+
+fn poll_future(f: CountingFuture) -> (PollResult, CountingFuture) {
+    if f.yields_remaining <= 0 {
+        return (PollReady(f.result), f);
+    }
+    let updated = CountingFuture {
+        id: f.id,
+        yields_remaining: f.yields_remaining - 1,
+        result: f.result,
+    };
+    (PollPending, updated)
+}
+
+// --- Task entry for the executor ---
+type TaskEntry is {
+    future: CountingFuture,
+    completed: Bool,
+    result: Int,
+};
+
+// --- Test: immediate completion (zero yields) ---
+fn test_immediate() {
+    let f = make_future(1, 0, 42);
+    let (poll, _f2) = poll_future(f);
+    match poll {
+        PollReady(val) => {
+            assert_eq(val, 42);
+            print("test_immediate: PASS");
+        }
+        PollPending => {
+            print("test_immediate: FAIL - expected Ready");
+            assert_eq(0, 1);
+        }
+    }
+}
+
+// --- Test: single task with multiple yields ---
+fn test_single_yield() {
+    let mut f = make_future(1, 3, 100);
+    let mut polls = 0;
+    let mut done = false;
+    let mut final_val = 0;
+
+    while !done {
+        let (poll, updated) = poll_future(f);
+        f = updated;
+        polls = polls + 1;
+        match poll {
+            PollReady(val) => {
+                done = true;
+                final_val = val;
+            }
+            PollPending => {}
+        }
+    }
+    assert_eq(final_val, 100);
+    // 3 yields + 1 final ready = 4 polls
+    assert_eq(polls, 4);
+    print("test_single_yield: PASS");
+}
+
+// --- Test: cooperative round-robin scheduling ---
+fn test_cooperative() {
+    // Three tasks with different yield counts
+    let mut tasks: List<TaskEntry> = [
+        TaskEntry { future: make_future(1, 2, 10), completed: false, result: 0 },
+        TaskEntry { future: make_future(2, 1, 20), completed: false, result: 0 },
+        TaskEntry { future: make_future(3, 0, 30), completed: false, result: 0 },
+    ];
+
+    let mut tick_count = 0;
+    let mut total_polls = 0;
+    let mut total_completions = 0;
+
+    // Run until all tasks complete
+    let mut all_done = false;
+    while !all_done {
+        tick_count = tick_count + 1;
+
+        // Poll each non-completed task once per tick (round-robin)
+        let mut i = 0;
+        let n = tasks.len();
+        while i < n {
+            let entry = tasks[i];
+            if !entry.completed {
+                let (poll, updated_future) = poll_future(entry.future);
+                total_polls = total_polls + 1;
+                match poll {
+                    PollReady(val) => {
+                        tasks[i] = TaskEntry {
+                            future: updated_future,
+                            completed: true,
+                            result: val,
+                        };
+                        total_completions = total_completions + 1;
+                    }
+                    PollPending => {
+                        tasks[i] = TaskEntry {
+                            future: updated_future,
+                            completed: false,
+                            result: 0,
+                        };
+                    }
+                }
+            }
+            i = i + 1;
+        }
+
+        // Check if all done
+        all_done = true;
+        let mut j = 0;
+        while j < n {
+            let e = tasks[j];
+            if !e.completed {
+                all_done = false;
+            }
+            j = j + 1;
+        }
+    }
+
+    // Verify results
+    let r0 = tasks[0];
+    let r1 = tasks[1];
+    let r2 = tasks[2];
+    assert_eq(r0.result, 10);
+    assert_eq(r1.result, 20);
+    assert_eq(r2.result, 30);
+
+    // Task C(0 yields) completes tick 1, B(1 yield) tick 2, A(2 yields) tick 3
+    assert_eq(tick_count, 3);
+    assert_eq(total_completions, 3);
+    // Tick 1: poll A(pend), B(pend), C(ready) = 3
+    // Tick 2: poll A(pend), B(ready) = 2
+    // Tick 3: poll A(ready) = 1
+    // Total: 6
+    assert_eq(total_polls, 6);
+    print("test_cooperative: PASS");
+}
+
+// --- Test: block_on semantics ---
+fn block_on_future(future: CountingFuture) -> Int {
+    let mut f = future;
+    let mut done = false;
+    let mut val = 0;
+    while !done {
+        let (poll, updated) = poll_future(f);
+        f = updated;
+        match poll {
+            PollReady(v) => {
+                done = true;
+                val = v;
+            }
+            PollPending => {}
+        }
+    }
+    val
+}
+
+fn test_block_on() {
+    let val = block_on_future(make_future(1, 5, 999));
+    assert_eq(val, 999);
+    print("test_block_on: PASS");
+}
+
+// --- Test: many tasks ---
+fn test_many_tasks() {
+    let mut tasks: List<TaskEntry> = [];
+    let mut i = 0;
+    while i < 10 {
+        let entry = TaskEntry {
+            future: make_future(i, i, i * 10),
+            completed: false,
+            result: 0,
+        };
+        tasks.push(entry);
+        i = i + 1;
+    }
+
+    let mut all_done = false;
+    let mut completions = 0;
+    let mut ticks = 0;
+    while !all_done {
+        ticks = ticks + 1;
+        let mut k = 0;
+        let n = tasks.len();
+        while k < n {
+            let entry = tasks[k];
+            if !entry.completed {
+                let (poll, updated) = poll_future(entry.future);
+                match poll {
+                    PollReady(val) => {
+                        tasks[k] = TaskEntry {
+                            future: updated,
+                            completed: true,
+                            result: val,
+                        };
+                        completions = completions + 1;
+                    }
+                    PollPending => {
+                        tasks[k] = TaskEntry {
+                            future: updated,
+                            completed: false,
+                            result: 0,
+                        };
+                    }
+                }
+            }
+            k = k + 1;
+        }
+
+        all_done = true;
+        let mut m = 0;
+        while m < n {
+            let e = tasks[m];
+            if !e.completed {
+                all_done = false;
+            }
+            m = m + 1;
+        }
+    }
+
+    // Verify results
+    let mut sum = 0;
+    let mut j = 0;
+    while j < 10 {
+        let r = tasks[j];
+        assert_eq(r.result, j * 10);
+        sum = sum + r.result;
+        j = j + 1;
+    }
+    // sum = 0+10+20+...+90 = 450
+    assert_eq(sum, 450);
+    assert_eq(completions, 10);
+    // Last task yields 9 times => needs 10 ticks
+    assert_eq(ticks, 10);
+    print("test_many_tasks: PASS");
+}
+
+fn main() -> Int {
+    test_immediate();
+    test_single_yield();
+    test_cooperative();
+    test_block_on();
+    test_many_tasks();
+    print("All async executor tests passed");
+    0
+}

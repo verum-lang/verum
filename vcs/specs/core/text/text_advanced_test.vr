@@ -1,0 +1,889 @@
+// =============================================================================
+// text_advanced_test.vr - Advanced tests for Text type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, iterator, sso, utf8, unicode, core
+// @description: Advanced tests covering iterators, SSO boundary conditions,
+//               UTF-8 edge cases, multi-byte Unicode, and error handling.
+//
+// Coverage:
+// - ByteIter iterator
+// - CharIndices iterator
+// - Lines iterator
+// - SSO threshold (23 bytes)
+// - UTF-8 multi-byte characters
+// - UTF-8 validation edge cases
+// - Error handling (Utf8Error, ParseError)
+// - Memory and capacity operations
+// =============================================================================
+
+module specs.core.text.text_advanced_test;
+
+mount core.text.{Text, Utf8Error, ParseError, Chars, ByteIter, CharIndices, Lines};
+mount core.collections.List;
+mount core.base.maybe.{Maybe};
+mount core.base.result.{Result};
+
+// =============================================================================
+// Constants for testing
+// =============================================================================
+
+// SSO capacity is 23 bytes - strings <= 23 bytes stored inline
+const SSO_CAPACITY: Int = 23;
+
+// =============================================================================
+// Section 1: ByteIter Tests
+// =============================================================================
+
+@test
+fn test_byte_iter_ascii() {
+    let s: Text = "hello";
+    let mut bytes: List<Byte> = List.new();
+
+    for b in s.bytes() {
+        bytes.push(b);
+    }
+
+    assert_eq(bytes.len(), 5);
+    assert_eq(bytes[0], 104);  // 'h'
+    assert_eq(bytes[1], 101);  // 'e'
+    assert_eq(bytes[2], 108);  // 'l'
+    assert_eq(bytes[3], 108);  // 'l'
+    assert_eq(bytes[4], 111);  // 'o'
+
+    print("ByteIter ASCII test passed");
+}
+
+@test
+fn test_byte_iter_empty() {
+    let s: Text = "";
+    let mut count = 0;
+
+    for _ in s.bytes() {
+        count = count + 1;
+    }
+
+    assert_eq(count, 0);
+    print("ByteIter empty test passed");
+}
+
+@test
+fn test_byte_iter_utf8_multibyte() {
+    // UTF-8 encoding tests
+    // "cafe" with accent: "café" - 'é' is 2 bytes (0xC3 0xA9)
+    let s: Text = "cafe\u{0301}";  // cafe + combining acute accent
+    let mut bytes: List<Byte> = List.new();
+
+    for b in s.bytes() {
+        bytes.push(b);
+    }
+
+    // Should be more than 4 bytes due to multi-byte sequence
+    assert(bytes.len() > 4);
+    print("ByteIter UTF-8 multibyte test passed");
+}
+
+@test
+fn test_byte_at_valid() {
+    let s: Text = "hello";
+
+    match s.byte_at(0) {
+        Maybe.Some(b) => assert_eq(b, 104),  // 'h'
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match s.byte_at(4) {
+        Maybe.Some(b) => assert_eq(b, 111),  // 'o'
+        Maybe.None => panic("Expected Some"),
+    }
+
+    print("byte_at valid test passed");
+}
+
+@test
+fn test_byte_at_out_of_bounds() {
+    let s: Text = "hello";
+
+    match s.byte_at(5) {
+        Maybe.None => {}  // Expected
+        Maybe.Some(_) => panic("Expected None for out of bounds"),
+    }
+
+    match s.byte_at(100) {
+        Maybe.None => {}  // Expected
+        Maybe.Some(_) => panic("Expected None for far out of bounds"),
+    }
+
+    print("byte_at out of bounds test passed");
+}
+
+// =============================================================================
+// Section 2: CharIndices Iterator Tests
+// =============================================================================
+
+@test
+fn test_char_indices_ascii() {
+    let s: Text = "abc";
+    let mut indices: List<Int> = List.new();
+    let mut chars: List<Char> = List.new();
+
+    for (idx, ch) in s.char_indices() {
+        indices.push(idx);
+        chars.push(ch);
+    }
+
+    assert_eq(indices.len(), 3);
+    assert_eq(chars.len(), 3);
+
+    // For ASCII, byte index equals char index
+    assert_eq(indices[0], 0);
+    assert_eq(indices[1], 1);
+    assert_eq(indices[2], 2);
+
+    assert_eq(chars[0], 'a');
+    assert_eq(chars[1], 'b');
+    assert_eq(chars[2], 'c');
+
+    print("CharIndices ASCII test passed");
+}
+
+@test
+fn test_char_indices_empty() {
+    let s: Text = "";
+    let mut count = 0;
+
+    for _ in s.char_indices() {
+        count = count + 1;
+    }
+
+    assert_eq(count, 0);
+    print("CharIndices empty test passed");
+}
+
+@test
+fn test_char_indices_single() {
+    let s: Text = "x";
+    let mut found = false;
+
+    for (idx, ch) in s.char_indices() {
+        assert_eq(idx, 0);
+        assert_eq(ch, 'x');
+        found = true;
+    }
+
+    assert(found);
+    print("CharIndices single test passed");
+}
+
+// =============================================================================
+// Section 3: Lines Iterator Tests
+// =============================================================================
+
+@test
+fn test_lines_basic() {
+    let s: Text = "line1\nline2\nline3";
+    let mut lines: List<Text> = List.new();
+
+    for line in s.lines() {
+        lines.push(line);
+    }
+
+    assert_eq(lines.len(), 3);
+    assert_eq(lines[0], "line1");
+    assert_eq(lines[1], "line2");
+    assert_eq(lines[2], "line3");
+
+    print("Lines basic test passed");
+}
+
+@test
+fn test_lines_crlf() {
+    let s: Text = "line1\r\nline2\r\nline3";
+    let mut lines: List<Text> = List.new();
+
+    for line in s.lines() {
+        lines.push(line);
+    }
+
+    assert_eq(lines.len(), 3);
+    assert_eq(lines[0], "line1");
+    assert_eq(lines[1], "line2");
+    assert_eq(lines[2], "line3");
+
+    print("Lines CRLF test passed");
+}
+
+@test
+fn test_lines_empty() {
+    let s: Text = "";
+    let mut count = 0;
+
+    for _ in s.lines() {
+        count = count + 1;
+    }
+
+    assert_eq(count, 0);
+    print("Lines empty test passed");
+}
+
+@test
+fn test_lines_single_line() {
+    let s: Text = "hello";
+    let mut lines: List<Text> = List.new();
+
+    for line in s.lines() {
+        lines.push(line);
+    }
+
+    assert_eq(lines.len(), 1);
+    assert_eq(lines[0], "hello");
+
+    print("Lines single line test passed");
+}
+
+@test
+fn test_lines_trailing_newline() {
+    let s: Text = "line1\nline2\n";
+    let mut lines: List<Text> = List.new();
+
+    for line in s.lines() {
+        lines.push(line);
+    }
+
+    // Trailing newline should not produce empty line
+    assert_eq(lines.len(), 2);
+    assert_eq(lines[0], "line1");
+    assert_eq(lines[1], "line2");
+
+    print("Lines trailing newline test passed");
+}
+
+@test
+fn test_lines_empty_lines() {
+    let s: Text = "line1\n\nline3";
+    let mut lines: List<Text> = List.new();
+
+    for line in s.lines() {
+        lines.push(line);
+    }
+
+    assert_eq(lines.len(), 3);
+    assert_eq(lines[0], "line1");
+    assert_eq(lines[1], "");      // Empty line
+    assert_eq(lines[2], "line3");
+
+    print("Lines empty lines test passed");
+}
+
+// =============================================================================
+// Section 4: SSO (Small String Optimization) Tests
+// =============================================================================
+
+@test
+fn test_sso_below_threshold() {
+    // Strings <= 23 bytes should use inline storage
+    let small: Text = "12345678901234567890123";  // Exactly 23 bytes
+    assert_eq(small.len(), SSO_CAPACITY);
+
+    // Verify operations still work
+    assert_eq(small.char_at(0), Maybe.Some('1'));
+    assert_eq(small.char_at(22), Maybe.Some('3'));
+
+    print("SSO below threshold test passed");
+}
+
+@test
+fn test_sso_at_threshold() {
+    // Exactly at SSO threshold
+    let exactly: Text = "12345678901234567890123";  // 23 bytes
+    assert_eq(exactly.len(), 23);
+    assert(!exactly.is_empty());
+
+    // Test operations at boundary
+    let trimmed = exactly.trim();
+    assert_eq(trimmed.len(), 23);
+
+    print("SSO at threshold test passed");
+}
+
+@test
+fn test_sso_above_threshold() {
+    // Strings > 23 bytes should use heap storage
+    let large: Text = "123456789012345678901234";  // 24 bytes
+    assert_eq(large.len(), 24);
+
+    // Verify operations still work correctly after heap allocation
+    assert_eq(large.char_at(0), Maybe.Some('1'));
+    assert_eq(large.char_at(23), Maybe.Some('4'));
+    assert(large.starts_with(&"123"));
+    assert(large.ends_with(&"234"));
+
+    print("SSO above threshold test passed");
+}
+
+@test
+fn test_sso_transition_via_concat() {
+    // Start with small string
+    let small: Text = "hello";  // 5 bytes, inline
+    assert_eq(small.len(), 5);
+
+    // Concatenate to grow beyond SSO threshold
+    let grown = small + " world, this is a long string that exceeds SSO";
+    assert(grown.len() > SSO_CAPACITY);
+
+    // Verify content integrity after transition
+    assert(grown.starts_with(&"hello"));
+
+    print("SSO transition via concat test passed");
+}
+
+@test
+fn test_sso_repeated_concat() {
+    let mut s: Text = "";
+
+    // Build up string character by character
+    for i in 0..30 {
+        s = s + "x";
+    }
+
+    assert_eq(s.len(), 30);
+    assert(s.len() > SSO_CAPACITY);  // Should have transitioned to heap
+
+    // Verify all characters are correct
+    for (idx, ch) in s.char_indices() {
+        assert_eq(ch, 'x');
+    }
+
+    print("SSO repeated concat test passed");
+}
+
+// =============================================================================
+// Section 5: nth_char Tests
+// =============================================================================
+
+@test
+fn test_nth_char_valid() {
+    let s: Text = "hello";
+
+    match s.nth_char(0) {
+        Maybe.Some(c) => assert_eq(c, 'h'),
+        Maybe.None => panic("Expected Some for nth_char(0)"),
+    }
+
+    match s.nth_char(2) {
+        Maybe.Some(c) => assert_eq(c, 'l'),
+        Maybe.None => panic("Expected Some for nth_char(2)"),
+    }
+
+    match s.nth_char(4) {
+        Maybe.Some(c) => assert_eq(c, 'o'),
+        Maybe.None => panic("Expected Some for nth_char(4)"),
+    }
+
+    print("nth_char valid test passed");
+}
+
+@test
+fn test_nth_char_out_of_bounds() {
+    let s: Text = "hello";
+
+    match s.nth_char(5) {
+        Maybe.None => {}  // Expected
+        Maybe.Some(_) => panic("Expected None for nth_char(5)"),
+    }
+
+    match s.nth_char(100) {
+        Maybe.None => {}  // Expected
+        Maybe.Some(_) => panic("Expected None for nth_char(100)"),
+    }
+
+    print("nth_char out of bounds test passed");
+}
+
+@test
+fn test_nth_char_empty() {
+    let s: Text = "";
+
+    match s.nth_char(0) {
+        Maybe.None => {}  // Expected
+        Maybe.Some(_) => panic("Expected None for empty string"),
+    }
+
+    print("nth_char empty test passed");
+}
+
+// =============================================================================
+// Section 6: char_count Tests
+// =============================================================================
+
+@test
+fn test_char_count_ascii() {
+    let s: Text = "hello";
+    assert_eq(s.char_count(), 5);
+    assert_eq(s.len(), 5);  // For ASCII, char_count == len
+
+    print("char_count ASCII test passed");
+}
+
+@test
+fn test_char_count_empty() {
+    let s: Text = "";
+    assert_eq(s.char_count(), 0);
+
+    print("char_count empty test passed");
+}
+
+// =============================================================================
+// Section 7: Capacity and Memory Tests
+// =============================================================================
+
+@test
+fn test_with_capacity() {
+    let s: Text = Text.with_capacity(100);
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+    assert(s.capacity() >= 100);
+
+    print("with_capacity test passed");
+}
+
+@test
+fn test_capacity_after_operations() {
+    let mut s: Text = Text.with_capacity(50);
+
+    // Push some content
+    s.push_str(&"hello");
+    assert_eq(s.len(), 5);
+    assert(s.capacity() >= 50);  // Capacity should still be >= initial
+
+    print("capacity after operations test passed");
+}
+
+// =============================================================================
+// Section 8: Push Operations Tests
+// =============================================================================
+
+@test
+fn test_push_char() {
+    let mut s: Text = "";
+    s.push('h');
+    s.push('i');
+
+    assert_eq(s, "hi");
+    assert_eq(s.len(), 2);
+
+    print("push char test passed");
+}
+
+@test
+fn test_push_str() {
+    let mut s: Text = "hello";
+    s.push_str(&" world");
+
+    assert_eq(s, "hello world");
+
+    print("push_str test passed");
+}
+
+@test
+fn test_push_repeatedly() {
+    let mut s: Text = "";
+
+    for _ in 0..50 {
+        s.push('a');
+    }
+
+    assert_eq(s.len(), 50);
+    assert_eq(s.char_count(), 50);
+
+    // Verify all characters are 'a'
+    for ch in s.chars() {
+        assert_eq(ch, 'a');
+    }
+
+    print("push repeatedly test passed");
+}
+
+// =============================================================================
+// Section 9: Parse Error Handling Tests
+// =============================================================================
+
+@test
+fn test_parse_int_error_message() {
+    let s: Text = "not_a_number";
+
+    match s.parse_int() {
+        Result.Err(e) => {
+            // ParseError should have a message
+            let msg = e.message;
+            assert(!msg.is_empty());
+        }
+        Result.Ok(_) => panic("Expected parse error"),
+    }
+
+    print("parse_int error message test passed");
+}
+
+@test
+fn test_parse_int_empty() {
+    let s: Text = "";
+
+    match s.parse_int() {
+        Result.Err(_) => {}  // Expected
+        Result.Ok(_) => panic("Expected error for empty string"),
+    }
+
+    print("parse_int empty test passed");
+}
+
+@test
+fn test_parse_int_whitespace() {
+    let s: Text = "  42  ";
+
+    // Parsing with whitespace - behavior depends on implementation
+    // Most implementations trim before parsing
+    match s.trim().parse_int() {
+        Result.Ok(n) => assert_eq(n, 42),
+        Result.Err(_) => panic("Expected Ok for trimmed string"),
+    }
+
+    print("parse_int whitespace test passed");
+}
+
+@test
+fn test_parse_float_error() {
+    let s: Text = "not.a.float";
+
+    match s.parse_float() {
+        Result.Err(_) => {}  // Expected
+        Result.Ok(_) => panic("Expected parse error"),
+    }
+
+    print("parse_float error test passed");
+}
+
+@test
+fn test_parse_bool() {
+    let t: Text = "true";
+    let f: Text = "false";
+    let invalid: Text = "maybe";
+
+    match t.parse_bool() {
+        Result.Ok(b) => assert(b),
+        Result.Err(_) => panic("Expected Ok(true)"),
+    }
+
+    match f.parse_bool() {
+        Result.Ok(b) => assert(!b),
+        Result.Err(_) => panic("Expected Ok(false)"),
+    }
+
+    match invalid.parse_bool() {
+        Result.Err(_) => {}  // Expected
+        Result.Ok(_) => panic("Expected error for 'maybe'"),
+    }
+
+    print("parse_bool test passed");
+}
+
+// =============================================================================
+// Section 10: from_utf8 Validation Tests
+// =============================================================================
+
+@test
+fn test_from_utf8_valid_ascii() {
+    let bytes: [Byte; 5] = [104, 101, 108, 108, 111];  // "hello"
+
+    match Text.from_utf8(&bytes) {
+        Result.Ok(s) => assert_eq(s, "hello"),
+        Result.Err(_) => panic("Expected Ok for valid ASCII"),
+    }
+
+    print("from_utf8 valid ASCII test passed");
+}
+
+@test
+fn test_from_utf8_empty() {
+    let bytes: [Byte; 0] = [];
+
+    match Text.from_utf8(&bytes) {
+        Result.Ok(s) => assert(s.is_empty()),
+        Result.Err(_) => panic("Expected Ok for empty bytes"),
+    }
+
+    print("from_utf8 empty test passed");
+}
+
+@test
+fn test_from_utf8_invalid_continuation() {
+    // Invalid: continuation byte without start byte
+    let bytes: [Byte; 1] = [0x80];  // 10xxxxxx - continuation byte alone
+
+    match Text.from_utf8(&bytes) {
+        Result.Err(e) => {
+            // Should report error at position 0
+            assert_eq(e.valid_up_to, 0);
+        }
+        Result.Ok(_) => panic("Expected Utf8Error for invalid continuation"),
+    }
+
+    print("from_utf8 invalid continuation test passed");
+}
+
+@test
+fn test_from_utf8_truncated_sequence() {
+    // Truncated 2-byte sequence: starts with 110xxxxx but no continuation
+    let bytes: [Byte; 1] = [0xC3];  // Start of 2-byte sequence
+
+    match Text.from_utf8(&bytes) {
+        Result.Err(_) => {}  // Expected
+        Result.Ok(_) => panic("Expected Utf8Error for truncated sequence"),
+    }
+
+    print("from_utf8 truncated sequence test passed");
+}
+
+// =============================================================================
+// Section 11: Join Tests
+// =============================================================================
+
+@test
+fn test_join_basic() {
+    let parts: [Text; 3] = ["a", "b", "c"];
+    let sep: Text = ",";
+
+    let joined = Text.join(&parts, &sep);
+    assert_eq(joined, "a,b,c");
+
+    print("join basic test passed");
+}
+
+@test
+fn test_join_empty_sep() {
+    let parts: [Text; 3] = ["a", "b", "c"];
+    let sep: Text = "";
+
+    let joined = Text.join(&parts, &sep);
+    assert_eq(joined, "abc");
+
+    print("join empty separator test passed");
+}
+
+@test
+fn test_join_single_element() {
+    let parts: [Text; 1] = ["only"];
+    let sep: Text = ",";
+
+    let joined = Text.join(&parts, &sep);
+    assert_eq(joined, "only");
+
+    print("join single element test passed");
+}
+
+@test
+fn test_join_empty_parts() {
+    let parts: [Text; 0] = [];
+    let sep: Text = ",";
+
+    let joined = Text.join(&parts, &sep);
+    assert_eq(joined, "");
+
+    print("join empty parts test passed");
+}
+
+// =============================================================================
+// Section 12: find_char Tests
+// =============================================================================
+
+@test
+fn test_find_char_found() {
+    let s: Text = "hello";
+
+    match s.find_char('e') {
+        Maybe.Some(idx) => assert_eq(idx, 1),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match s.find_char('h') {
+        Maybe.Some(idx) => assert_eq(idx, 0),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match s.find_char('o') {
+        Maybe.Some(idx) => assert_eq(idx, 4),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    print("find_char found test passed");
+}
+
+@test
+fn test_find_char_not_found() {
+    let s: Text = "hello";
+
+    match s.find_char('x') {
+        Maybe.None => {}  // Expected
+        Maybe.Some(_) => panic("Expected None"),
+    }
+
+    print("find_char not found test passed");
+}
+
+@test
+fn test_find_char_first_occurrence() {
+    let s: Text = "hello";  // 'l' appears twice
+
+    match s.find_char('l') {
+        Maybe.Some(idx) => assert_eq(idx, 2),  // First 'l'
+        Maybe.None => panic("Expected Some"),
+    }
+
+    print("find_char first occurrence test passed");
+}
+
+// =============================================================================
+// Section 13: as_bytes and as_ptr Tests
+// =============================================================================
+
+@test
+fn test_as_bytes() {
+    let s: Text = "hi";
+    let bytes = s.as_bytes();
+
+    assert_eq(bytes.len(), 2);
+    assert_eq(bytes[0], 104);  // 'h'
+    assert_eq(bytes[1], 105);  // 'i'
+
+    print("as_bytes test passed");
+}
+
+@test
+fn test_as_bytes_empty() {
+    let s: Text = "";
+    let bytes = s.as_bytes();
+
+    assert_eq(bytes.len(), 0);
+
+    print("as_bytes empty test passed");
+}
+
+// =============================================================================
+// Section 14: Clone and Default Tests
+// =============================================================================
+
+@test
+fn test_text_clone() {
+    let original: Text = "hello world";
+    let cloned = original.clone();
+
+    assert_eq(cloned, original);
+    assert_eq(cloned.len(), original.len());
+
+    print("Text clone test passed");
+}
+
+@test
+fn test_text_default() {
+    let default_text: Text = Text.default();
+
+    assert(default_text.is_empty());
+    assert_eq(default_text.len(), 0);
+    assert_eq(default_text, "");
+
+    print("Text default test passed");
+}
+
+// =============================================================================
+// Section 15: Hash Tests
+// =============================================================================
+
+@test
+fn test_text_hash_equal() {
+    let a: Text = "hello";
+    let b: Text = "hello";
+
+    // Equal strings should have equal hashes
+    assert_eq(a.hash(), b.hash());
+
+    print("Text hash equal test passed");
+}
+
+@test
+fn test_text_hash_different() {
+    let a: Text = "hello";
+    let b: Text = "world";
+
+    // Different strings should (very likely) have different hashes
+    // Note: hash collisions are possible but extremely unlikely for these strings
+    assert(a.hash() != b.hash());
+
+    print("Text hash different test passed");
+}
+
+// =============================================================================
+// Section 16: Additional Text Tests
+// =============================================================================
+
+@test
+fn test_text_replace_all_occurrences() {
+    let s: Text = "aaa";
+    let result = s.replace("a", "b");
+    assert_eq(result, "bbb");
+}
+
+@test
+fn test_text_split_whitespace_multiple() {
+    let s: Text = "a  b  c";
+    let parts: List<Text> = s.split_whitespace();
+    assert_eq(parts.len(), 3);
+}
+
+@test
+fn test_text_contains_empty() {
+    let s: Text = "hello";
+    assert(s.contains(""));
+}
+
+@test
+fn test_text_starts_with_self() {
+    let s: Text = "hello";
+    assert(s.starts_with("hello"));
+}
+
+@test
+fn test_text_ends_with_self() {
+    let s: Text = "hello";
+    assert(s.ends_with("hello"));
+}
+
+@test
+fn test_text_trim_no_whitespace() {
+    let s: Text = "hello";
+    assert_eq(s.trim(), "hello");
+}
+
+@test
+fn test_text_concat_empty() {
+    let a: Text = "hello";
+    let b: Text = "";
+    let result = a.concat(b);
+    assert_eq(result, "hello");
+}
+
+@test
+fn test_text_len_after_concat() {
+    let a: Text = "hello";
+    let b: Text = " world";
+    let result = a.concat(b);
+    assert_eq(result.len(), 11);
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

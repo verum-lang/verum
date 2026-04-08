@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, semicolon, error
+// @description: Test missing semicolon detection
+// @expected-error: E010
+
+fn test_missing_semicolon() {
+    let x = 42
+    let y = 43;
+}

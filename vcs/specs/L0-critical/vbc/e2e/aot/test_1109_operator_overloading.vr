@@ -1,0 +1,146 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: operator-overloading, implement, add, sub, mul, eq
+// @description: Test operator overloading via implement blocks
+
+type Vec2 is { x: Int, y: Int };
+
+implement Vec2 {
+    fn new(x: Int, y: Int) -> Vec2 {
+        Vec2 { x: x, y: y }
+    }
+
+    fn add(&self, other: Vec2) -> Vec2 {
+        Vec2 { x: self.x + other.x, y: self.y + other.y }
+    }
+
+    fn sub(&self, other: Vec2) -> Vec2 {
+        Vec2 { x: self.x - other.x, y: self.y - other.y }
+    }
+
+    fn mul(&self, other: Vec2) -> Vec2 {
+        Vec2 { x: self.x * other.x, y: self.y * other.y }
+    }
+
+    fn eq(&self, other: Vec2) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+fn test_vec2_add() -> Int {
+    let a = Vec2.new(3, 4);
+    let b = Vec2.new(1, 2);
+    let c = a + b;
+    if c.x != 4 || c.y != 6 {
+        print(f"FAIL vec2_add: ({c.x}, {c.y}), expected (4, 6)");
+        return 1;
+    }
+    print("  vec2_add: OK");
+    0
+}
+
+fn test_vec2_sub() -> Int {
+    let a = Vec2.new(10, 20);
+    let b = Vec2.new(3, 5);
+    let c = a - b;
+    if c.x != 7 || c.y != 15 {
+        print(f"FAIL vec2_sub: ({c.x}, {c.y}), expected (7, 15)");
+        return 1;
+    }
+    print("  vec2_sub: OK");
+    0
+}
+
+fn test_vec2_mul() -> Int {
+    let a = Vec2.new(3, 4);
+    let b = Vec2.new(2, 5);
+    let c = a * b;
+    if c.x != 6 || c.y != 20 {
+        print(f"FAIL vec2_mul: ({c.x}, {c.y}), expected (6, 20)");
+        return 1;
+    }
+    print("  vec2_mul: OK");
+    0
+}
+
+fn test_vec2_eq() -> Int {
+    let a = Vec2.new(3, 4);
+    let b = Vec2.new(3, 4);
+    let c = Vec2.new(1, 2);
+    if !(a == b) {
+        print("FAIL vec2_eq: (3,4) should equal (3,4)");
+        return 1;
+    }
+    if a == c {
+        print("FAIL vec2_eq: (3,4) should not equal (1,2)");
+        return 1;
+    }
+    print("  vec2_eq: OK");
+    0
+}
+
+fn test_chained_ops() -> Int {
+    let a = Vec2.new(1, 2);
+    let b = Vec2.new(3, 4);
+    let c = Vec2.new(5, 6);
+    // (a + b) should be (4, 6)
+    let sum = a + b;
+    if sum.x != 4 || sum.y != 6 {
+        print(f"FAIL chained: sum=({sum.x}, {sum.y})");
+        return 1;
+    }
+    print("  chained_ops: OK");
+    0
+}
+
+type Money is { cents: Int };
+
+implement Money {
+    fn new(cents: Int) -> Money {
+        Money { cents: cents }
+    }
+
+    fn add(&self, other: Money) -> Money {
+        Money { cents: self.cents + other.cents }
+    }
+
+    fn sub(&self, other: Money) -> Money {
+        Money { cents: self.cents - other.cents }
+    }
+}
+
+fn test_money() -> Int {
+    let a = Money.new(500);
+    let b = Money.new(350);
+    let total = a + b;
+    if total.cents != 850 {
+        print(f"FAIL money_add: {total.cents}, expected 850");
+        return 1;
+    }
+    let diff = a - b;
+    if diff.cents != 150 {
+        print(f"FAIL money_sub: {diff.cents}, expected 150");
+        return 1;
+    }
+    print("  money: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Operator Overloading Tests:");
+    let mut failures = 0;
+    failures = failures + test_vec2_add();
+    failures = failures + test_vec2_sub();
+    failures = failures + test_vec2_mul();
+    failures = failures + test_vec2_eq();
+    failures = failures + test_chained_ops();
+    failures = failures + test_money();
+
+    if failures == 0 {
+        print("All operator overloading tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

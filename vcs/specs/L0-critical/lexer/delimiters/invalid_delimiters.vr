@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, delimiters, invalid, negative
+
+// Invalid delimiter usage - should fail to parse
+
+// Mismatched brackets in a function
+fn test_mismatched() {
+    let mismatched1 = (1, 2, 3];
+}

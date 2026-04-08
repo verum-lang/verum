@@ -1,0 +1,220 @@
+// @test: meta-pass
+// @level: L2
+// @tier: 0
+// @tags: meta, quote, hygiene, staging, multi-stage
+// @description: Tests multi-stage quote expansion with stage-aware hygiene
+
+// =============================================================================
+// STAGE ANNOTATIONS
+// =============================================================================
+
+// Default stage (1) quote generates stage 0 code
+meta fn stage_default() -> TokenStream {
+    quote { 42 }  // Generates runtime (stage 0) code
+}
+
+// Explicit stage 0 annotation
+meta fn stage_explicit_0() -> TokenStream {
+    quote(0) {
+        let x = 100;
+        x * 2
+    }
+}
+
+// Stage 1 generates meta code
+meta(2) fn stage_1_generator() -> TokenStream {
+    quote(1) {
+        meta fn generated_meta() -> Int {
+            42
+        }
+    }
+}
+
+// =============================================================================
+// LIFT EXPRESSIONS
+// =============================================================================
+
+// Lift evaluates at definition stage, embeds result
+meta fn lift_basic() -> TokenStream {
+    let computed = 21 * 2;
+    quote {
+        let x = lift(computed);  // Embeds 42
+    }
+}
+
+// Lift with expressions
+meta fn lift_expression() -> TokenStream {
+    let a = 10;
+    let b = 20;
+    quote {
+        let sum = lift(a + b);  // Embeds 30
+    }
+}
+
+// Lift type preservation
+meta fn lift_preserves_type() -> TokenStream {
+    let text: Text = "hello";
+    let num: Int = 42;
+    let flag: Bool = true;
+
+    quote {
+        let t = lift(text);  // Text value
+        let n = lift(num);   // Int value
+        let f = lift(flag);  // Bool value
+    }
+}
+
+// =============================================================================
+// STAGE ESCAPE
+// =============================================================================
+
+// Stage escape for specific stage evaluation
+meta(2) fn stage_escape_basic() -> TokenStream {
+    quote {
+        let x = $(stage 2) { compute_at_stage_2() };
+    }
+}
+
+// Nested stage escapes
+meta(3) fn stage_escape_nested() -> TokenStream {
+    quote {
+        $(stage 3) {
+            // This runs at stage 3
+            let result = deep_compute();
+        }
+
+        $(stage 2) {
+            // This runs at stage 2
+            let mid = mid_compute();
+        }
+    }
+}
+
+// =============================================================================
+// CROSS-STAGE HYGIENE
+// =============================================================================
+
+// Variables at different stages are distinct
+meta(2) fn cross_stage_isolation() -> Bool {
+    let x = "stage2";
+
+    let code = quote(1) {
+        let x = "stage1";  // Distinct from stage 2 x
+
+        let inner = quote(0) {
+            let x = "stage0";  // Distinct from stage 1 x
+        };
+    };
+
+    x == "stage2"
+}
+
+// Lift respects stage boundaries
+meta fn lift_stage_boundary() -> TokenStream {
+    let stage1_val = 100;
+
+    quote {
+        // Cannot directly reference stage1_val here
+        // Must use lift to cross stage boundary
+        let val = lift(stage1_val);
+    }
+}
+
+// =============================================================================
+// STAGE-AWARE GENSYM
+// =============================================================================
+
+// Gensym creates stage-local unique names
+meta fn gensym_staged() -> TokenStream {
+    let temp = gensym("tmp");
+
+    quote {
+        let $temp = compute();
+        use_value($temp);
+    }
+}
+
+// Multiple gensyms in nested stages
+meta(2) fn gensym_multi_stage() -> TokenStream {
+    let outer_sym = gensym("outer");
+
+    quote(1) {
+        let $outer_sym = 1;
+
+        meta fn inner_fn() -> TokenStream {
+            let inner_sym = gensym("inner");
+            quote {
+                let $inner_sym = 2;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// PRACTICAL EXAMPLES
+// =============================================================================
+
+// Derive-like pattern with staging
+meta fn derive_debug() -> TokenStream {
+    let type_name = ident("MyType");
+    let fields = [ident("a"), ident("b")];
+
+    quote {
+        implement Debug for $type_name {
+            fn fmt(&self, f: &mut Formatter) -> FmtResult {
+                f.debug_struct(stringify($type_name))
+                    $[for field in fields {
+                        .field(stringify($field), &self.$field)
+                    }]
+                    .finish()
+            }
+        }
+    }
+}
+
+// Stage-aware builder pattern
+meta(2) fn stage_aware_builder() -> TokenStream {
+    let methods = ["set_a", "set_b", "set_c"];
+
+    quote(1) {
+        meta fn generate_builder() -> TokenStream {
+            let method_names = lift(methods);
+
+            quote {
+                implement Builder {
+                    $[for m in method_names {
+                        fn $m(mut self, val: Int) -> Self {
+                            self.$m = val;
+                            self
+                        }
+                    }]
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn main() {
+    // Stage annotations work
+    @const assert(!stage_default().is_empty());
+    @const assert(!stage_explicit_0().is_empty());
+
+    // Lift works
+    @const assert(!lift_basic().is_empty());
+    @const assert(!lift_expression().is_empty());
+    @const assert(!lift_preserves_type().is_empty());
+
+    // Cross-stage hygiene
+    @const assert(cross_stage_isolation());
+    @const assert(!lift_stage_boundary().is_empty());
+
+    // Staged gensym
+    @const assert(!gensym_staged().is_empty());
+
+    // Practical patterns
+    @const assert(!derive_debug().is_empty());
+}

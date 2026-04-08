@@ -1,0 +1,110 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, comprehensions, errors, regression
+// @description: L0-critical regression tests for invalid comprehension syntax.
+//               Detailed error tests are in vcs/specs/parser/fail/comprehensions/
+
+// ============================================================================
+// LIST COMPREHENSION ERRORS
+// ============================================================================
+
+fn test_list_missing_for() {
+    let bad = [x * 2 x in items];  // ERROR: expected 'for'
+}
+
+fn test_list_missing_in() {
+    let bad = [x * 2 for x items];  // ERROR: expected 'in'
+}
+
+fn test_list_empty() {
+    let bad = [for x in items];  // ERROR: expected expression
+}
+
+// ============================================================================
+// MAP COMPREHENSION ERRORS
+// ============================================================================
+
+fn test_map_missing_colon() {
+    let bad = {k v for (k, v) in pairs};  // ERROR: expected ':'
+}
+
+fn test_map_missing_for() {
+    let bad = {k: v (k, v) in pairs};  // ERROR: expected 'for'
+}
+
+fn test_map_empty() {
+    let bad = {for x in items};  // ERROR: expected expression
+}
+
+// ============================================================================
+// SET COMPREHENSION ERRORS
+// ============================================================================
+
+fn test_set_missing_brace() {
+    let bad = set x for x in items};  // ERROR: expected '{'
+}
+
+fn test_set_missing_for() {
+    let bad = set{x x in items};  // ERROR: expected 'for'
+}
+
+fn test_set_empty() {
+    let bad = set{for x in items};  // ERROR: expected expression
+}
+
+// ============================================================================
+// GENERATOR EXPRESSION ERRORS
+// ============================================================================
+
+fn test_gen_missing_brace() {
+    let bad = gen x for x in items};  // ERROR: expected '{'
+}
+
+fn test_gen_missing_for() {
+    let bad = gen{x x in items};  // ERROR: expected 'for'
+}
+
+fn test_gen_empty() {
+    let bad = gen{for x in items};  // ERROR: expected expression
+}
+
+// ============================================================================
+// STREAM COMPREHENSION ERRORS
+// ============================================================================
+
+fn test_stream_missing_bracket() {
+    let bad = stream x for x in items];  // ERROR: expected '['
+}
+
+fn test_stream_missing_for() {
+    let bad = stream[x x in items];  // ERROR: expected 'for'
+}
+
+// ============================================================================
+// CLAUSE ERRORS (CROSS-CUTTING)
+// ============================================================================
+
+fn test_where_instead_of_if() {
+    let bad = [x for x in items where x > 0];  // ERROR: 'where' not valid
+}
+
+fn test_let_without_equals() {
+    let bad = [y for x in items let y x * 2];  // ERROR: expected '='
+}
+
+fn test_if_without_condition() {
+    let bad = [x for x in items if];  // ERROR: expected expression
+}
+
+// ============================================================================
+// SYNTAX CONFUSION
+// ============================================================================
+
+fn test_list_with_colon() {
+    let bad = [k: v for (k, v) in pairs];  // ERROR: ':' invalid in list
+}
+
+fn test_double_in() {
+    let bad = [x for x in in items];  // ERROR: unexpected 'in'
+}

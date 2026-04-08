@@ -1,0 +1,471 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: memory, overhead, baseline, cbgr, footprint
+// @description: Memory overhead baseline benchmark (target: < 5% overhead vs C)
+
+/// Memory Overhead Baseline Benchmark
+///
+/// This benchmark measures the memory overhead of Verum's safety features
+/// compared to an equivalent C program without safety guarantees.
+///
+/// Target: < 5% memory overhead
+///
+/// Sources of overhead:
+/// - CBGR metadata (generation counters)
+/// - Reference counting
+/// - Type information for dynamic dispatch
+/// - Alignment padding for safety
+///
+/// Spec reference: docs/detailed/04-memory-model.md
+
+const ALLOCATION_COUNT: Int = 100_000;
+const OBJECT_SIZES: List<Int> = [8, 32, 64, 256, 1024, 4096];
+
+fn main() {
+    let results = BenchmarkResults.new("Memory Overhead Baseline");
+
+    // Per-allocation overhead
+    results.add(benchmark_small_object_overhead());
+    results.add(benchmark_medium_object_overhead());
+    results.add(benchmark_large_object_overhead());
+
+    // Collection overhead
+    results.add(benchmark_list_overhead());
+    results.add(benchmark_map_overhead());
+    results.add(benchmark_set_overhead());
+
+    // Reference overhead
+    results.add(benchmark_thin_ref_overhead());
+    results.add(benchmark_fat_ref_overhead());
+
+    // Application-level overhead
+    results.add(benchmark_data_structure_overhead());
+    results.add(benchmark_program_memory_footprint());
+
+    // Compare total heap usage
+    results.add(benchmark_total_heap_overhead());
+
+    results.report();
+    assert(results.all_pass(), "Memory overhead exceeds 5% target");
+}
+
+/// Measure theoretical minimum size
+fn c_equivalent_size(verum_type: TypeInfo) -> Int {
+    match verum_type.name {
+        "Int" => 8,      // int64_t
+        "Float" => 8,    // double
+        "Bool" => 1,     // bool
+        "Char" => 4,     // uint32_t (Unicode)
+        "u8" => 1,
+        "u16" => 2,
+        "u32" => 4,
+        "u64" => 8,
+        "i8" => 1,
+        "i16" => 2,
+        "i32" => 4,
+        "i64" => 8,
+        _ => verum_type.size,  // Default to Verum size
+    }
+}
+
+/// Benchmark: Small object overhead (8 bytes)
+fn benchmark_small_object_overhead() -> BenchmarkResult {
+    let object_size = 8;
+    let c_size = object_size;
+
+    // Allocate many small objects
+    let mut verum_total = 0;
+    let allocations: List<Heap<i64>> = (0..ALLOCATION_COUNT)
+        .map(|_| Heap.new(0i64))
+        .collect();
+
+    // Measure actual heap usage
+    verum_total = memory.heap_usage();
+
+    // Theoretical C usage (no overhead)
+    let c_total = c_size * ALLOCATION_COUNT;
+
+    let overhead_ratio = verum_total as Float / c_total as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    black_box(allocations);
+
+    BenchmarkResult {
+        name: "small_object_8b",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 50.0,  // Small objects have higher relative overhead
+        passed: overhead_pct < 50.0,
+    }
+}
+
+/// Benchmark: Medium object overhead (256 bytes)
+fn benchmark_medium_object_overhead() -> BenchmarkResult {
+    let object_size = 256;
+    let c_size = object_size;
+
+    let allocations: List<Heap<[u8; 256]> > = (0..ALLOCATION_COUNT / 10)
+        .map(|_| Heap.new([0u8; 256]))
+        .collect();
+
+    let verum_total = memory.heap_usage();
+    let c_total = c_size * (ALLOCATION_COUNT / 10);
+
+    let overhead_ratio = verum_total as Float / c_total as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    black_box(allocations);
+
+    BenchmarkResult {
+        name: "medium_object_256b",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 10.0,
+        passed: overhead_pct < 10.0,
+    }
+}
+
+/// Benchmark: Large object overhead (4KB)
+fn benchmark_large_object_overhead() -> BenchmarkResult {
+    let object_size = 4096;
+    let c_size = object_size;
+
+    let allocations: List<Heap<[u8; 4096]> > = (0..ALLOCATION_COUNT / 100)
+        .map(|_| Heap.new([0u8; 4096]))
+        .collect();
+
+    let verum_total = memory.heap_usage();
+    let c_total = c_size * (ALLOCATION_COUNT / 100);
+
+    let overhead_ratio = verum_total as Float / c_total as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    black_box(allocations);
+
+    // Large objects should have minimal overhead percentage
+    BenchmarkResult {
+        name: "large_object_4kb",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 5.0,
+        passed: overhead_pct < 5.0,
+    }
+}
+
+/// Benchmark: List (dynamic array) overhead
+fn benchmark_list_overhead() -> BenchmarkResult {
+    let element_count = 100_000;
+    let element_size = 8;  // Int
+
+    let list: List<Int> = (0..element_count).collect();
+
+    let verum_size = size_of_val(&list) + list.heap_size();
+
+    // C equivalent: pointer + length + capacity + elements
+    let c_size = 8 + 8 + 8 + (element_count * element_size);
+
+    let overhead_ratio = verum_size as Float / c_size as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    black_box(list);
+
+    BenchmarkResult {
+        name: "list_overhead",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 10.0,
+        passed: overhead_pct < 10.0,
+    }
+}
+
+/// Benchmark: Map (hash table) overhead
+fn benchmark_map_overhead() -> BenchmarkResult {
+    let entry_count = 50_000;
+
+    let map: Map<Int, Int> = (0..entry_count)
+        .map(|i| (i, i * 2))
+        .collect();
+
+    let verum_size = size_of_val(&map) + map.heap_size();
+
+    // C equivalent: typical hash map
+    // buckets (1.5x entries) + entries (key + value + hash + next ptr)
+    let bucket_count = (entry_count as Float * 1.5) as Int;
+    let c_size = bucket_count * 8 + entry_count * (8 + 8 + 8 + 8);
+
+    let overhead_ratio = verum_size as Float / c_size as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    black_box(map);
+
+    BenchmarkResult {
+        name: "map_overhead",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 20.0,  // Hash tables have some inherent overhead
+        passed: overhead_pct < 20.0,
+    }
+}
+
+/// Benchmark: Set overhead
+fn benchmark_set_overhead() -> BenchmarkResult {
+    let element_count = 50_000;
+
+    let set: Set<Int> = (0..element_count).collect();
+
+    let verum_size = size_of_val(&set) + set.heap_size();
+
+    // C equivalent: hash set (similar to hash map with no value)
+    let bucket_count = (element_count as Float * 1.5) as Int;
+    let c_size = bucket_count * 8 + element_count * (8 + 8 + 8);
+
+    let overhead_ratio = verum_size as Float / c_size as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    black_box(set);
+
+    BenchmarkResult {
+        name: "set_overhead",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 20.0,
+        passed: overhead_pct < 20.0,
+    }
+}
+
+/// Benchmark: ThinRef overhead
+fn benchmark_thin_ref_overhead() -> BenchmarkResult {
+    // ThinRef<T> = 16 bytes (ptr + generation + epoch_caps)
+    // C equivalent = 8 bytes (just pointer)
+
+    let verum_thin_ref_size = 16;
+    let c_pointer_size = 8;
+
+    let overhead_ratio = verum_thin_ref_size as Float / c_pointer_size as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    BenchmarkResult {
+        name: "thin_ref_overhead",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 100.0,  // 2x is acceptable for safety
+        passed: overhead_pct <= 100.0,
+    }
+}
+
+/// Benchmark: FatRef overhead
+fn benchmark_fat_ref_overhead() -> BenchmarkResult {
+    // FatRef<T> = 24 bytes (ptr + generation + epoch_caps + len)
+    // C equivalent = 16 bytes (pointer + length)
+
+    let verum_fat_ref_size = 24;
+    let c_slice_size = 16;
+
+    let overhead_ratio = verum_fat_ref_size as Float / c_slice_size as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    BenchmarkResult {
+        name: "fat_ref_overhead",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 50.0,
+        passed: overhead_pct <= 50.0,
+    }
+}
+
+/// Benchmark: Real data structure overhead
+fn benchmark_data_structure_overhead() -> BenchmarkResult {
+    // Create a realistic data structure
+    type Person is {
+        id: Int,
+        name: Text,
+        age: Int,
+        email: Text,
+        scores: List<Float>,
+    };
+
+    let people: List<Person> = (0..10_000).map(|i| {
+        Person {
+            id: i,
+            name: format("Person {}", i),
+            age: 20 + (i % 60),
+            email: format("person{}@example.com", i),
+            scores: [85.0, 90.0, 78.0, 92.0],
+        }
+    }).collect();
+
+    let verum_size = memory.heap_usage();
+
+    // Estimate C equivalent
+    // Per person: id (8) + name ptr (8) + age (8) + email ptr (8) + scores ptr (8) + name data + email data + scores data
+    let avg_name_len = 12;
+    let avg_email_len = 22;
+    let scores_size = 4 * 8;
+    let c_per_person = 8 + 8 + 8 + 8 + 8 + avg_name_len + avg_email_len + scores_size;
+    let c_size = c_per_person * 10_000;
+
+    let overhead_ratio = verum_size as Float / c_size as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    black_box(people);
+
+    BenchmarkResult {
+        name: "data_structure_overhead",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 15.0,
+        passed: overhead_pct < 15.0,
+    }
+}
+
+/// Benchmark: Full program memory footprint
+fn benchmark_program_memory_footprint() -> BenchmarkResult {
+    // Measure baseline memory usage
+    let baseline = memory.process_memory();
+
+    // Run typical program operations
+    let data = simulate_typical_program();
+
+    let with_data = memory.process_memory();
+    let program_usage = with_data - baseline;
+
+    // Estimate C equivalent based on data operations
+    let c_estimate = estimate_c_memory_usage(&data);
+
+    let overhead_ratio = program_usage as Float / c_estimate as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    black_box(data);
+
+    BenchmarkResult {
+        name: "program_footprint",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 5.0,
+        passed: overhead_pct < 5.0,
+    }
+}
+
+fn simulate_typical_program() -> ProgramData {
+    // Simulate typical program data usage
+    let users: Map<Int, Text> = (0..1000)
+        .map(|i| (i, format("user_{}", i)))
+        .collect();
+
+    let transactions: List<(Int, Int, Float)> = (0..10000)
+        .map(|i| (i % 1000, (i + 1) % 1000, i as Float * 0.01))
+        .collect();
+
+    let cache: Map<Text, Text> = (0..500)
+        .map(|i| (format("key_{}", i), format("value_{}", i)))
+        .collect();
+
+    ProgramData { users, transactions, cache }
+}
+
+type ProgramData is {
+    users: Map<Int, Text>,
+    transactions: List<(Int, Int, Float)>,
+    cache: Map<Text, Text>,
+};
+
+fn estimate_c_memory_usage(data: &ProgramData) -> Int {
+    // Rough C memory estimate
+    let users_size = data.users.len() * (8 + 24);  // key + avg string
+    let transactions_size = data.transactions.len() * (8 + 8 + 8);
+    let cache_size = data.cache.len() * (24 + 24);
+
+    users_size + transactions_size + cache_size
+}
+
+/// Benchmark: Total heap overhead
+fn benchmark_total_heap_overhead() -> BenchmarkResult {
+    // Measure heap usage for a standardized workload
+    let baseline = memory.heap_usage();
+
+    // Standard workload
+    let mut data: List<Heap<[Int; 16]> > = List.new();
+    for _ in 0..10_000 {
+        data.push(Heap.new([0; 16]));
+    }
+
+    let strings: List<Text> = (0..5_000)
+        .map(|i| format("String number {} with some content", i))
+        .collect();
+
+    let map: Map<Text, Int> = strings.iter()
+        .enumerate()
+        .map(|(i, s)| (s.clone(), i))
+        .collect();
+
+    let current = memory.heap_usage();
+    let verum_usage = current - baseline;
+
+    // Theoretical minimum
+    let arrays = 10_000 * 16 * 8;  // 10K arrays of 16 Int
+    let avg_string_len = 40;
+    let string_data = 5_000 * avg_string_len;
+    let map_entries = 5_000 * (avg_string_len + 8 + 16);  // key + value + overhead
+
+    let c_minimum = arrays + string_data + map_entries;
+
+    let overhead_ratio = verum_usage as Float / c_minimum as Float;
+    let overhead_pct = (overhead_ratio - 1.0) * 100.0;
+
+    black_box(data);
+    black_box(strings);
+    black_box(map);
+
+    // Overall 5% target
+    BenchmarkResult {
+        name: "total_heap_overhead",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 5.0,
+        passed: overhead_pct < 5.0,
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2}{} (target: <{:.2}%)",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

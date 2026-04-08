@@ -1,0 +1,78 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, refinement, dependent
+
+// Simple refinement - positive integer
+type Positive is Int{> 0};
+
+// Refinement - non-negative
+type Natural is Int{>= 0};
+
+// Refinement - negative
+type Negative is Int{< 0};
+
+// Refinement - bounded range
+type Percentage is Int{>= 0 && <= 100};
+
+// Refinement - exact value
+type Zero is Int{== 0};
+
+// Refinement - not equal
+type NonZero is Int{!= 0};
+
+// Refinement on Float
+type UnitInterval is Float{>= 0.0 && <= 1.0};
+
+// Refinement with modulo
+type Even is Int{self % 2 == 0};
+type Odd is Int{self % 2 != 0};
+
+// Refinement on Text (length)
+type NonEmptyText is Text{len(self) > 0};
+type ShortText is Text{len(self) <= 100};
+
+// Refinement on List (length)
+type NonEmptyList<T> is List<T>{len(self) > 0};
+type BoundedList<T> is List<T>{len(self) <= 1000};
+
+// Compound refinement
+type ValidAge is Int{>= 0 && <= 150};
+type ValidPort is Int{>= 1 && <= 65535};
+
+// Refinement composition
+type PositiveEven is Int{> 0 && self % 2 == 0};
+
+// Bounded integer with meta parameter
+// Note: const generic parameters require meta syntax
+type BoundedInt<MAX: meta Int> is Int{>= 0 && self < MAX};
+
+// Refinement asserting property
+type Normalized is Float{abs(self) <= 1.0};
+
+// Simple refinement for positive float
+type PositiveFloat is Float{> 0.0};
+
+// Non-negative float
+type NonNegativeFloat is Float{>= 0.0};
+
+// Byte range (0-255)
+type Byte is Int{>= 0 && <= 255};
+
+// ASCII character range
+type AsciiCode is Int{>= 0 && <= 127};
+
+// Small positive integer
+type SmallPositive is Int{> 0 && <= 10};
+
+// Unsigned-like refinement
+type Unsigned is Int{>= 0};
+
+// Power of two check (simple approximation)
+type PowerOfTwo is Int{> 0 && self % 2 == 0};
+
+// Non-empty and bounded
+type ReasonableList<T> is List<T>{len(self) > 0 && len(self) <= 100};
+
+// Text with length bounds
+type ValidIdentifier is Text{len(self) >= 1 && len(self) <= 64};

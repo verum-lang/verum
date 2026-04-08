@@ -1,0 +1,145 @@
+// @test: run
+// @level: L0
+// @description: Parallel map-reduce with multiple worker threads
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Parallel sum of squares using 4 worker threads
+    // Each worker computes partial sum, sends result via channel
+    let results = Channel.new(10);
+
+    // Worker 1: sum of squares 1..25
+    let w1 = spawn {
+        let mut s = 0;
+        let mut i = 1;
+        while (i <= 25) {
+            s = s + i * i;
+            i = i + 1;
+        }
+        results.send(s);
+        s
+    };
+
+    // Worker 2: sum of squares 26..50
+    let w2 = spawn {
+        let mut s = 0;
+        let mut i = 26;
+        while (i <= 50) {
+            s = s + i * i;
+            i = i + 1;
+        }
+        results.send(s);
+        s
+    };
+
+    // Worker 3: sum of squares 51..75
+    let w3 = spawn {
+        let mut s = 0;
+        let mut i = 51;
+        while (i <= 75) {
+            s = s + i * i;
+            i = i + 1;
+        }
+        results.send(s);
+        s
+    };
+
+    // Worker 4: sum of squares 76..100
+    let w4 = spawn {
+        let mut s = 0;
+        let mut i = 76;
+        while (i <= 100) {
+            s = s + i * i;
+            i = i + 1;
+        }
+        results.send(s);
+        s
+    };
+
+    // Wait for all workers
+    w1.await;
+    w2.await;
+    w3.await;
+    w4.await;
+
+    // Reduce: sum all partial results
+    let mut total = 0;
+    let mut count = 0;
+    while (count < 4) {
+        match results.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        }
+        count = count + 1;
+    }
+
+    // Sum of squares 1..100 = 100*101*201/6 = 338350
+    if (total != 338350) {
+        print(f"FAIL test1: expected 338350, got {total}");
+        return 1;
+    }
+    print(f"Test 1 PASS: parallel sum of squares = {total}");
+
+    // Test 2: Pipeline pattern — producer → transformer → consumer
+    let raw_data = Channel.new(20);
+    let transformed = Channel.new(20);
+
+    // Producer: sends raw numbers
+    let producer = spawn {
+        let mut i = 1;
+        while (i <= 10) {
+            raw_data.send(i);
+            i = i + 1;
+        }
+        raw_data.send(0);  // sentinel
+        10
+    };
+
+    // Transformer: doubles each value
+    let transformer = spawn {
+        let mut running = true;
+        while (running) {
+            match raw_data.recv() {
+                Some(v) => {
+                    if (v == 0) {
+                        transformed.send(0);  // forward sentinel
+                        running = false;
+                    } else {
+                        transformed.send(v * 2);
+                    }
+                }
+                None => { running = false; }
+            }
+        }
+        0
+    };
+
+    // Consumer: sums transformed values
+    let mut pipeline_sum = 0;
+    let mut pipe_running = true;
+    while (pipe_running) {
+        match transformed.recv() {
+            Some(v) => {
+                if (v == 0) {
+                    pipe_running = false;
+                } else {
+                    pipeline_sum = pipeline_sum + v;
+                }
+            }
+            None => { pipe_running = false; }
+        }
+    }
+
+    producer.await;
+    transformer.await;
+
+    // 2*(1+2+...+10) = 2*55 = 110
+    if (pipeline_sum != 110) {
+        print(f"FAIL test2: expected 110, got {pipeline_sum}");
+        return 1;
+    }
+    print(f"Test 2 PASS: pipeline sum = {pipeline_sum}");
+
+    print("All parallel map-reduce tests passed");
+    0
+}

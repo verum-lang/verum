@@ -1,0 +1,254 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, hamming, error-correction, encoding
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Hamming(7,4) code: encode 4 data bits into 7 bits with
+// single-bit error detection and correction
+
+// Hamming(7,4): 4 data bits, 3 parity bits
+// Bit positions (1-indexed): 1,2,3,4,5,6,7
+// Parity bits at positions 1, 2, 4 (powers of 2)
+// Data bits at positions 3, 5, 6, 7
+//
+// Layout: [p1, p2, d1, p4, d2, d3, d4]
+// p1 covers positions with bit 0 set: 1,3,5,7 -> p1,d1,d2,d4
+// p2 covers positions with bit 1 set: 2,3,6,7 -> p2,d1,d3,d4
+// p4 covers positions with bit 2 set: 4,5,6,7 -> p4,d2,d3,d4
+
+fn get_bit(val: Int, pos: Int) -> Int {
+    (val >> pos) & 1
+}
+
+fn set_bit(val: Int, pos: Int, b_val: Int) -> Int {
+    if b_val == 1 {
+        val | (1 << pos)
+    } else {
+        val & (0x7FFFFFFF ^ (1 << pos))
+    }
+}
+
+// Extract 7-bit codeword bit at 1-indexed position
+fn cw_bit(codeword: Int, pos_1: Int) -> Int {
+    get_bit(codeword, pos_1 - 1)
+}
+
+fn cw_set_bit(codeword: Int, pos_1: Int, b_val: Int) -> Int {
+    set_bit(codeword, pos_1 - 1, b_val)
+}
+
+// Encode 4 data bits (d1,d2,d3,d4 in bits 0-3) into 7-bit Hamming codeword
+fn hamming_encode(data: Int) -> Int {
+    let d1 = get_bit(data, 0);
+    let d2 = get_bit(data, 1);
+    let d3 = get_bit(data, 2);
+    let d4 = get_bit(data, 3);
+
+    // Parity calculations (even parity)
+    let p1 = (d1 + d2 + d4) % 2;    // pos 1: covers 1,3,5,7 (d1=pos3, d2=pos5, d4=pos7)
+    let p2 = (d1 + d3 + d4) % 2;    // pos 2: covers 2,3,6,7 (d1=pos3, d3=pos6, d4=pos7)
+    let p4 = (d2 + d3 + d4) % 2;    // pos 4: covers 4,5,6,7 (d2=pos5, d3=pos6, d4=pos7)
+
+    // Build codeword: positions 1-7 -> bits 0-6
+    let mut cw = 0;
+    cw = cw_set_bit(cw, 1, p1);
+    cw = cw_set_bit(cw, 2, p2);
+    cw = cw_set_bit(cw, 3, d1);
+    cw = cw_set_bit(cw, 4, p4);
+    cw = cw_set_bit(cw, 5, d2);
+    cw = cw_set_bit(cw, 6, d3);
+    cw = cw_set_bit(cw, 7, d4);
+    cw
+}
+
+// Compute syndrome (0 = no error, otherwise indicates error position 1-7)
+fn hamming_syndrome(codeword: Int) -> Int {
+    let s1 = (cw_bit(codeword, 1) + cw_bit(codeword, 3) + cw_bit(codeword, 5) + cw_bit(codeword, 7)) % 2;
+    let s2 = (cw_bit(codeword, 2) + cw_bit(codeword, 3) + cw_bit(codeword, 6) + cw_bit(codeword, 7)) % 2;
+    let s4 = (cw_bit(codeword, 4) + cw_bit(codeword, 5) + cw_bit(codeword, 6) + cw_bit(codeword, 7)) % 2;
+    s1 + s2 * 2 + s4 * 4
+}
+
+// Correct single-bit error: flip the bit at syndrome position
+fn hamming_correct(codeword: Int) -> Int {
+    let syn = hamming_syndrome(codeword);
+    if syn == 0 { return codeword; }
+    // Flip bit at position syn (1-indexed)
+    let current = cw_bit(codeword, syn);
+    let flipped = if current == 0 { 1 } else { 0 };
+    cw_set_bit(codeword, syn, flipped)
+}
+
+// Decode: extract 4 data bits from (possibly corrected) codeword
+fn hamming_decode(codeword: Int) -> Int {
+    let corrected = hamming_correct(codeword);
+    let d1 = cw_bit(corrected, 3);
+    let d2 = cw_bit(corrected, 5);
+    let d3 = cw_bit(corrected, 6);
+    let d4 = cw_bit(corrected, 7);
+    d1 | (d2 << 1) | (d3 << 2) | (d4 << 3)
+}
+
+// Introduce single-bit error at position (1-indexed)
+fn flip_bit(codeword: Int, pos_1: Int) -> Int {
+    let current = cw_bit(codeword, pos_1);
+    let flipped = if current == 0 { 1 } else { 0 };
+    cw_set_bit(codeword, pos_1, flipped)
+}
+
+// Count number of 1-bits in a 7-bit codeword
+fn cw_popcount(cw: Int) -> Int {
+    let mut x = cw & 0x7F;
+    let mut count = 0;
+    while x > 0 { count = count + (x & 1); x = x >> 1; }
+    count
+}
+
+// Hamming distance between two codewords
+fn hamming_distance(a: Int, b_val: Int) -> Int {
+    cw_popcount(a ^ b_val)
+}
+
+fn test_encode_decode_all() {
+    // Test all 16 possible 4-bit data values
+    let mut data = 0;
+    while data < 16 {
+        let cw = hamming_encode(data);
+        let decoded = hamming_decode(cw);
+        assert_eq(decoded, data);
+        data = data + 1;
+    }
+}
+
+fn test_syndrome_clean() {
+    // Clean codewords should have syndrome 0
+    let mut data = 0;
+    while data < 16 {
+        let cw = hamming_encode(data);
+        assert_eq(hamming_syndrome(cw), 0);
+        data = data + 1;
+    }
+}
+
+fn test_single_bit_correction() {
+    // For each data value, corrupt each bit position and verify correction
+    let mut data = 0;
+    while data < 16 {
+        let cw = hamming_encode(data);
+        let mut pos = 1;
+        while pos <= 7 {
+            let corrupted = flip_bit(cw, pos);
+            // Syndrome should indicate the error position
+            assert_eq(hamming_syndrome(corrupted), pos);
+            // Decoding should recover original data
+            let recovered = hamming_decode(corrupted);
+            assert_eq(recovered, data);
+            pos = pos + 1;
+        }
+        data = data + 1;
+    }
+}
+
+fn test_specific_encodings() {
+    // data=0b0000 (0): all parity bits 0 -> codeword 0b0000000 = 0
+    assert_eq(hamming_encode(0), 0);
+
+    // data=0b1111 (15): d1=1,d2=1,d3=1,d4=1
+    // p1 = (1+1+1)%2 = 1, p2 = (1+1+1)%2 = 1, p4 = (1+1+1)%2 = 1
+    // cw = [1,1,1,1,1,1,1] = 0x7F = 127
+    assert_eq(hamming_encode(15), 127);
+
+    // data=0b0001 (1): d1=1, d2=0, d3=0, d4=0
+    // p1=(1+0+0)%2=1, p2=(1+0+0)%2=1, p4=(0+0+0)%2=0
+    // cw = [1,1,1,0,0,0,0] = 0b0000111 = 7
+    assert_eq(hamming_encode(1), 7);
+}
+
+fn test_minimum_distance() {
+    // Hamming(7,4) has minimum distance 3
+    // Verify minimum distance between valid codewords is at least 3
+    let mut min_dist = 100;
+    let mut i = 0;
+    while i < 16 {
+        let cw_i = hamming_encode(i);
+        let mut j = i + 1;
+        while j < 16 {
+            let cw_j = hamming_encode(j);
+            let dist = hamming_distance(cw_i, cw_j);
+            if dist < min_dist { min_dist = dist; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(min_dist, 3);
+}
+
+fn test_codeword_weight() {
+    // The all-ones codeword encodes 0b1111=15
+    assert_eq(cw_popcount(hamming_encode(15)), 7);
+    // The all-zeros codeword encodes 0b0000=0
+    assert_eq(cw_popcount(hamming_encode(0)), 0);
+}
+
+fn test_parity_check() {
+    // For any valid codeword, the overall parity (XOR of all bits) should match
+    // the number of 1-bits (mod 2)
+    let mut data = 0;
+    while data < 16 {
+        let cw = hamming_encode(data);
+        let weight = cw_popcount(cw);
+        // Valid Hamming(7,4) codewords have even weight (the code is a subspace)
+        // Actually not necessarily - but syndrome should be 0
+        assert_eq(hamming_syndrome(cw), 0);
+        data = data + 1;
+    }
+}
+
+fn test_double_bit_detection() {
+    // With 2-bit errors, syndrome != 0 (error detected but miscorrected)
+    // This shows the limitation: Hamming(7,4) detects but cannot correctly fix 2-bit errors
+    let cw = hamming_encode(5);  // data = 0b0101
+
+    // Flip bits at positions 1 and 2
+    let corrupted = flip_bit(flip_bit(cw, 1), 2);
+    let syn = hamming_syndrome(corrupted);
+    // Syndrome will be non-zero (error detected)
+    // syndrome = XOR of the two error positions = 1 XOR 2 = 3
+    assert_eq(syn, 3);
+
+    // Flip bits at positions 3 and 5
+    let corrupted2 = flip_bit(flip_bit(cw, 3), 5);
+    let syn2 = hamming_syndrome(corrupted2);
+    // 3 XOR 5 = 6
+    assert_eq(syn2, 6);
+}
+
+fn test_encode_then_corrupt_and_recover() {
+    // Practical scenario: encode message, corrupt a bit, decode
+    let message = 10;  // 0b1010 -> d1=0, d2=1, d3=0, d4=1
+    let encoded = hamming_encode(message);
+    let corrupted = flip_bit(encoded, 4);  // Corrupt parity bit at pos 4
+    let decoded = hamming_decode(corrupted);
+    assert_eq(decoded, message);
+
+    // Corrupt data bit at position 6
+    let corrupted2 = flip_bit(encoded, 6);
+    let decoded2 = hamming_decode(corrupted2);
+    assert_eq(decoded2, message);
+}
+
+fn main() -> Int {
+    test_encode_decode_all();
+    test_syndrome_clean();
+    test_single_bit_correction();
+    test_specific_encodings();
+    test_minimum_distance();
+    test_codeword_weight();
+    test_parity_check();
+    test_double_bit_detection();
+    test_encode_then_corrupt_and_recover();
+    print("[OK] 296_hamming_code_aot");
+    0
+}

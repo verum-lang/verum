@@ -1,0 +1,141 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: embedded, stack-allocator, no-heap
+// @expect: pass
+
+// Stack allocator for embedded/bare-metal targets.
+// Uses a fixed buffer — no heap allocation needed.
+
+type BumpAllocator is {
+    buffer_ptr: Int,
+    capacity: Int,
+    offset: Int,
+};
+
+implement BumpAllocator {
+    fn new(buffer: Int, size: Int) -> BumpAllocator {
+        BumpAllocator {
+            buffer_ptr: buffer,
+            capacity: size,
+            offset: 0,
+        }
+    }
+
+    fn alloc(&mut self, size: Int, align: Int) -> Int {
+        let mask = align - 1;
+        let aligned_offset = (self.offset + mask) & (~mask);
+        let new_offset = aligned_offset + size;
+        if new_offset > self.capacity {
+            return 0;
+        }
+        self.offset = new_offset;
+        self.buffer_ptr + aligned_offset
+    }
+
+    fn reset(&mut self) {
+        self.offset = 0;
+    }
+
+    fn remaining(&self) -> Int {
+        self.capacity - self.offset
+    }
+
+    fn used(&self) -> Int {
+        self.offset
+    }
+}
+
+fn test_basic_alloc() -> Int {
+    // Simulate a 256-byte buffer at address 4096 (page-aligned)
+    let mut alloc = BumpAllocator.new(4096, 256);
+
+    // Initially: 256 remaining, 0 used
+    assert_eq(alloc.remaining(), 256);
+    assert_eq(alloc.used(), 0);
+
+    // Allocate 32 bytes, 8-byte aligned
+    let p1 = alloc.alloc(32, 8);
+    assert_eq(p1, 4096);  // First alloc at base
+    assert_eq(alloc.used(), 32);
+    assert_eq(alloc.remaining(), 224);
+
+    // Allocate 16 bytes, 16-byte aligned (already aligned after 32)
+    let p2 = alloc.alloc(16, 16);
+    assert_eq(p2, 4128);  // 4096 + 32 = 4128 (already 16-aligned)
+    assert_eq(alloc.used(), 48);
+
+    // Allocate 64 bytes, 8-byte aligned
+    let p3 = alloc.alloc(64, 8);
+    assert_eq(p3, 4144);  // 4096 + 48 = 4144
+    assert_eq(alloc.used(), 112);
+    assert_eq(alloc.remaining(), 144);
+
+    0
+}
+
+fn test_alignment_padding() -> Int {
+    // Buffer at address 4096
+    let mut alloc = BumpAllocator.new(4096, 256);
+
+    // Allocate 3 bytes (odd size), 1-byte aligned
+    let p1 = alloc.alloc(3, 1);
+    assert_eq(p1, 4096);
+    assert_eq(alloc.used(), 3);
+
+    // Next alloc needs 8-byte alignment — should skip to offset 8
+    let p2 = alloc.alloc(8, 8);
+    assert_eq(p2, 4104);  // 4096 + 8 (aligned up from 3)
+    assert_eq(alloc.used(), 16);  // offset = 8 + 8 = 16
+
+    0
+}
+
+fn test_exhaustion() -> Int {
+    let mut alloc = BumpAllocator.new(4096, 64);
+
+    // Allocate 32 bytes — should succeed
+    let p1 = alloc.alloc(32, 8);
+    assert_eq(p1, 4096);
+
+    // Allocate another 32 bytes — should succeed (exactly fills)
+    let p2 = alloc.alloc(32, 8);
+    assert_eq(p2, 4128);
+    assert_eq(alloc.remaining(), 0);
+
+    // Next allocation should fail (return 0)
+    let p3 = alloc.alloc(1, 1);
+    assert_eq(p3, 0);
+
+    0
+}
+
+fn test_reset() -> Int {
+    let mut alloc = BumpAllocator.new(4096, 128);
+
+    // Fill some space
+    let p1 = alloc.alloc(64, 8);
+    assert_eq(p1, 4096);
+    assert_eq(alloc.used(), 64);
+
+    // Reset — back to full capacity
+    alloc.reset();
+    assert_eq(alloc.used(), 0);
+    assert_eq(alloc.remaining(), 128);
+
+    // Can allocate from the beginning again
+    let p2 = alloc.alloc(32, 8);
+    assert_eq(p2, 4096);  // Same address as p1
+
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_basic_alloc();
+    let r2 = test_alignment_padding();
+    let r3 = test_exhaustion();
+    let r4 = test_reset();
+
+    print("All embedded stack allocator tests passed");
+    r1 + r2 + r3 + r4
+}

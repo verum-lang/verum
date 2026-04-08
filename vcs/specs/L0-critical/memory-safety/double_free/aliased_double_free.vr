@@ -1,0 +1,18 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, double-free, cbgr, alias
+// @description: Tests CBGR detection of double-free through aliased pointers
+
+fn main() {
+    let data = Heap.new(42);
+
+    // Create an alias (in unsafe code, would be raw pointer)
+    // In safe Verum, this pattern is prevented at compile time,
+    // but here we test CBGR's runtime detection
+    let alias = data;  // Move semantics - original invalidated
+
+    // In a scenario where both could be freed:
+    drop(data);  // This would already be a compile error due to move
+    drop(alias);  // Double free detected by CBGR
+}

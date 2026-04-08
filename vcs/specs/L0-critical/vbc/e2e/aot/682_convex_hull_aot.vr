@@ -1,0 +1,272 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, convex-hull, geometry, computational
+// @timeout: 30000
+
+// Convex hull operations on 2D integer points
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Points encoded as x * 100 + y (both in [0,99])
+fn make_pt(x: Int, y: Int) -> Int { x * 100 + y }
+fn pt_x(p: Int) -> Int { p / 100 }
+fn pt_y(p: Int) -> Int { p % 100 }
+
+// Cross product of vectors (p1->p2) x (p1->p3)
+fn cross(p1: Int, p2: Int, p3: Int) -> Int {
+    let ax = pt_x(p2) - pt_x(p1);
+    let ay = pt_y(p2) - pt_y(p1);
+    let bx = pt_x(p3) - pt_x(p1);
+    let b_y = pt_y(p3) - pt_y(p1);
+    ax * b_y - ay * bx
+}
+
+// Distance squared between two points
+fn dist_sq(p1: Int, p2: Int) -> Int {
+    let dx = pt_x(p1) - pt_x(p2);
+    let dy = pt_y(p1) - pt_y(p2);
+    dx * dx + dy * dy
+}
+
+// Sort points by x, then y (insertion sort)
+fn sort_points(pts: Arr8, n: Int) -> Arr8 {
+    let mut a = pts;
+    let mut i = 1;
+    while i < n {
+        let key = get8(a, i);
+        let kx = pt_x(key);
+        let ky = pt_y(key);
+        let mut j = i;
+        let mut pos = i;
+        while j > 0 {
+            let prev = get8(a, j - 1);
+            let px = pt_x(prev);
+            let py = pt_y(prev);
+            let should_swap = if px > kx { 1 }
+                else if px == kx { if py > ky { 1 } else { 0 } }
+                else { 0 };
+            if should_swap == 1 {
+                a = set8(a, j, prev);
+                j = j - 1;
+                pos = j;
+            } else {
+                j = 0;
+            }
+        }
+        a = set8(a, pos, key);
+        i = i + 1;
+    }
+    a
+}
+
+// Convex hull using Andrew's monotone chain
+// Returns number of hull points, hull stored in result array
+fn convex_hull(pts: Arr8, n: Int) -> Arr8 {
+    let sorted = sort_points(pts, n);
+    let mut hull = zeros();
+    let mut k = 0;
+
+    // Lower hull
+    let mut i = 0;
+    while i < n {
+        let pi = get8(sorted, i);
+        let mut done = 0;
+        while done == 0 {
+            if k >= 2 {
+                if cross(get8(hull, k - 2), get8(hull, k - 1), pi) <= 0 {
+                    k = k - 1;
+                } else { done = 1; }
+            } else { done = 1; }
+        }
+        hull = set8(hull, k, pi);
+        k = k + 1;
+        i = i + 1;
+    }
+
+    // Upper hull
+    let lower_size = k + 1;
+    i = n - 2;
+    let mut going = 1;
+    while going == 1 {
+        if i < 0 { going = 0; }
+        else {
+            let pi = get8(sorted, i);
+            let mut done = 0;
+            while done == 0 {
+                if k >= lower_size {
+                    if cross(get8(hull, k - 2), get8(hull, k - 1), pi) <= 0 {
+                        k = k - 1;
+                    } else { done = 1; }
+                } else { done = 1; }
+            }
+            hull = set8(hull, k, pi);
+            k = k + 1;
+            i = i - 1;
+        }
+    }
+    // k - 1 is the hull size (last point duplicates first)
+    hull
+}
+
+fn hull_size(pts: Arr8, n: Int) -> Int {
+    let sorted = sort_points(pts, n);
+    let mut hull = zeros();
+    let mut k = 0;
+    let mut i = 0;
+    while i < n {
+        let pi = get8(sorted, i);
+        let mut done = 0;
+        while done == 0 {
+            if k >= 2 {
+                if cross(get8(hull, k - 2), get8(hull, k - 1), pi) <= 0 { k = k - 1; }
+                else { done = 1; }
+            } else { done = 1; }
+        }
+        hull = set8(hull, k, pi);
+        k = k + 1;
+        i = i + 1;
+    }
+    let lower_size = k + 1;
+    i = n - 2;
+    let mut going = 1;
+    while going == 1 {
+        if i < 0 { going = 0; }
+        else {
+            let pi = get8(sorted, i);
+            let mut done = 0;
+            while done == 0 {
+                if k >= lower_size {
+                    if cross(get8(hull, k - 2), get8(hull, k - 1), pi) <= 0 { k = k - 1; }
+                    else { done = 1; }
+                } else { done = 1; }
+            }
+            hull = set8(hull, k, pi);
+            k = k + 1;
+            i = i - 1;
+        }
+    }
+    k - 1
+}
+
+// Area of polygon (using shoelace formula, returns 2*area to stay integer)
+fn polygon_area_2x(pts: Arr8, n: Int) -> Int {
+    let mut area = 0;
+    let mut i = 0;
+    while i < n {
+        let j = (i + 1) % n;
+        let pi = get8(pts, i);
+        let pj = get8(pts, j);
+        area = area + pt_x(pi) * pt_y(pj) - pt_x(pj) * pt_y(pi);
+        i = i + 1;
+    }
+    abs_val(area)
+}
+
+fn test_cross_product() -> Int {
+    let a = make_pt(0, 0);
+    let b = make_pt(1, 0);
+    let c = make_pt(0, 1);
+    // (0,0)->(1,0) x (0,0)->(0,1) = 1*1 - 0*0 = 1 (counter-clockwise)
+    assert_eq(cross(a, b, c), 1);
+    // Clockwise
+    assert_eq(cross(a, c, b), 0 - 1);
+    // Collinear
+    let d = make_pt(2, 0);
+    assert_eq(cross(a, b, d), 0);
+    1
+}
+
+fn test_triangle_hull() -> Int {
+    // Triangle: already convex
+    let mut pts = zeros();
+    pts = set8(pts, 0, make_pt(0, 0));
+    pts = set8(pts, 1, make_pt(4, 0));
+    pts = set8(pts, 2, make_pt(2, 3));
+    assert_eq(hull_size(pts, 3), 3);
+    1
+}
+
+fn test_square_hull() -> Int {
+    // Square: all 4 points on hull
+    let mut pts = zeros();
+    pts = set8(pts, 0, make_pt(0, 0));
+    pts = set8(pts, 1, make_pt(4, 0));
+    pts = set8(pts, 2, make_pt(4, 4));
+    pts = set8(pts, 3, make_pt(0, 4));
+    assert_eq(hull_size(pts, 4), 4);
+    1
+}
+
+fn test_interior_point() -> Int {
+    // 4 corners + 1 interior point
+    let mut pts = zeros();
+    pts = set8(pts, 0, make_pt(0, 0));
+    pts = set8(pts, 1, make_pt(4, 0));
+    pts = set8(pts, 2, make_pt(4, 4));
+    pts = set8(pts, 3, make_pt(0, 4));
+    pts = set8(pts, 4, make_pt(2, 2)); // interior
+    assert_eq(hull_size(pts, 5), 4); // interior point excluded
+    1
+}
+
+fn test_collinear() -> Int {
+    // All collinear: hull is 2 endpoints
+    let mut pts = zeros();
+    pts = set8(pts, 0, make_pt(0, 0));
+    pts = set8(pts, 1, make_pt(1, 1));
+    pts = set8(pts, 2, make_pt(2, 2));
+    pts = set8(pts, 3, make_pt(3, 3));
+    let sz = hull_size(pts, 4);
+    assert_eq(sz, 2); // just the two endpoints
+    1
+}
+
+fn test_polygon_area() -> Int {
+    // Triangle (0,0), (4,0), (0,3): area = 6, 2*area = 12
+    let mut tri = zeros();
+    tri = set8(tri, 0, make_pt(0, 0));
+    tri = set8(tri, 1, make_pt(4, 0));
+    tri = set8(tri, 2, make_pt(0, 3));
+    assert_eq(polygon_area_2x(tri, 3), 12);
+    // Square (0,0),(2,0),(2,2),(0,2): area = 4, 2*area = 8
+    let mut sq = zeros();
+    sq = set8(sq, 0, make_pt(0, 0));
+    sq = set8(sq, 1, make_pt(2, 0));
+    sq = set8(sq, 2, make_pt(2, 2));
+    sq = set8(sq, 3, make_pt(0, 2));
+    assert_eq(polygon_area_2x(sq, 4), 8);
+    1
+}
+
+fn main() -> Int {
+    test_cross_product();
+    test_triangle_hull();
+    test_square_hull();
+    test_interior_point();
+    test_collinear();
+    test_polygon_area();
+    print("[OK] 682_convex_hull_aot");
+    0
+}

@@ -1,0 +1,525 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: compilation, parallel, scaling, throughput
+// @description: Parallel compilation performance benchmark (target: > 4x speedup on 8 cores)
+
+/// Parallel Compilation Performance Benchmark
+///
+/// This benchmark measures the scalability of parallel compilation.
+/// Parallel compilation distributes work across multiple CPU cores.
+///
+/// Target: > 4x speedup on 8 cores (50%+ efficiency)
+///
+/// Parallelization strategies:
+/// - Module-level parallelism (independent modules)
+/// - Function-level parallelism (within modules)
+/// - Pipeline parallelism (parse -> typecheck -> codegen)
+/// - Work stealing for load balancing
+///
+/// Spec reference: docs/detailed/28-implementation-roadmap.md
+
+const SMALL_PROJECT_MODULES: Int = 20;
+const MEDIUM_PROJECT_MODULES: Int = 100;
+const LARGE_PROJECT_MODULES: Int = 500;
+const LOC_PER_MODULE: Int = 500;
+
+fn main() {
+    let results = BenchmarkResults.new("Parallel Compilation Performance");
+
+    // Core scaling benchmarks
+    results.add(benchmark_scaling_1_core());
+    results.add(benchmark_scaling_2_cores());
+    results.add(benchmark_scaling_4_cores());
+    results.add(benchmark_scaling_8_cores());
+    results.add(benchmark_scaling_16_cores());
+
+    // Project size impact
+    results.add(benchmark_small_project_parallel());
+    results.add(benchmark_medium_project_parallel());
+    results.add(benchmark_large_project_parallel());
+
+    // Parallelization strategies
+    results.add(benchmark_module_level_parallel());
+    results.add(benchmark_pipeline_parallel());
+    results.add(benchmark_work_stealing_efficiency());
+
+    // Overhead analysis
+    results.add(benchmark_parallel_overhead());
+    results.add(benchmark_synchronization_cost());
+
+    results.report();
+    results.export_scaling_chart("/tmp/parallel_scaling.json");
+
+    assert(results.all_pass(), "Parallel compilation below target efficiency");
+}
+
+/// Generate a project with specified modules
+fn generate_project(module_count: Int) -> List<ModuleSource> {
+    let mut modules: List<ModuleSource> = List.new();
+
+    // Create independent modules for maximum parallelism
+    for i in 0..module_count {
+        let functions_per_module = LOC_PER_MODULE / 10;
+        let mut source = format("module mod_{};\n\n", i);
+
+        for j in 0..functions_per_module {
+            source.push_str(&format("
+fn compute_{}_{}(x: Int, y: Int) -> Int {{
+    let a = x + y;
+    let b = x * y;
+    let c = a - b;
+    let d = (a + b) * c;
+    if d > 0 {{ a + b + c + d }} else {{ a * b * c }}
+}}
+", i, j));
+        }
+
+        modules.push(ModuleSource {
+            name: format("mod_{}", i),
+            source: source,
+            dependencies: [],
+        });
+    }
+
+    modules
+}
+
+/// Run compilation with specified thread count
+fn compile_with_threads(modules: &List<ModuleSource>, threads: Int) -> Int {
+    let timer = Timer.new();
+    timer.start();
+
+    compiler.parallel_build(modules, threads);
+
+    timer.elapsed_ms()
+}
+
+/// Benchmark: Single-threaded baseline
+fn benchmark_scaling_1_core() -> BenchmarkResult {
+    let modules = generate_project(MEDIUM_PROJECT_MODULES);
+    let iterations = 3;
+
+    let mut total_ms = 0;
+    for _ in 0..iterations {
+        total_ms += compile_with_threads(&modules, 1);
+    }
+
+    let avg_ms = total_ms as Float / iterations as Float;
+
+    // Establish baseline
+    BenchmarkResult {
+        name: "1_core_baseline",
+        metric: "ms",
+        value: avg_ms,
+        target: f64.MAX,  // No target for baseline
+        passed: true,
+        extra: Some(("baseline_ms", avg_ms)),
+    }
+}
+
+/// Benchmark: 2-core scaling
+fn benchmark_scaling_2_cores() -> BenchmarkResult {
+    let modules = generate_project(MEDIUM_PROJECT_MODULES);
+    let iterations = 3;
+
+    // Get baseline
+    let baseline_ms = compile_with_threads(&modules, 1) as Float;
+
+    let mut total_ms = 0;
+    for _ in 0..iterations {
+        total_ms += compile_with_threads(&modules, 2);
+    }
+
+    let avg_ms = total_ms as Float / iterations as Float;
+    let speedup = baseline_ms / avg_ms;
+    let efficiency = speedup / 2.0;
+
+    // Target: 80% efficiency with 2 cores
+    let target_efficiency = 0.8;
+
+    BenchmarkResult {
+        name: "2_core_scaling",
+        metric: "speedup",
+        value: speedup,
+        target: 2.0 * target_efficiency,
+        passed: efficiency > target_efficiency,
+    }
+}
+
+/// Benchmark: 4-core scaling
+fn benchmark_scaling_4_cores() -> BenchmarkResult {
+    let modules = generate_project(MEDIUM_PROJECT_MODULES);
+    let iterations = 3;
+
+    let baseline_ms = compile_with_threads(&modules, 1) as Float;
+
+    let mut total_ms = 0;
+    for _ in 0..iterations {
+        total_ms += compile_with_threads(&modules, 4);
+    }
+
+    let avg_ms = total_ms as Float / iterations as Float;
+    let speedup = baseline_ms / avg_ms;
+    let efficiency = speedup / 4.0;
+
+    // Target: 70% efficiency with 4 cores
+    let target_efficiency = 0.7;
+
+    BenchmarkResult {
+        name: "4_core_scaling",
+        metric: "speedup",
+        value: speedup,
+        target: 4.0 * target_efficiency,
+        passed: efficiency > target_efficiency,
+    }
+}
+
+/// Benchmark: 8-core scaling
+fn benchmark_scaling_8_cores() -> BenchmarkResult {
+    let modules = generate_project(MEDIUM_PROJECT_MODULES);
+    let iterations = 3;
+
+    let baseline_ms = compile_with_threads(&modules, 1) as Float;
+
+    let mut total_ms = 0;
+    for _ in 0..iterations {
+        total_ms += compile_with_threads(&modules, 8);
+    }
+
+    let avg_ms = total_ms as Float / iterations as Float;
+    let speedup = baseline_ms / avg_ms;
+    let efficiency = speedup / 8.0;
+
+    // Target: 50% efficiency with 8 cores
+    let target_efficiency = 0.5;
+
+    BenchmarkResult {
+        name: "8_core_scaling",
+        metric: "speedup",
+        value: speedup,
+        target: 8.0 * target_efficiency,
+        passed: efficiency > target_efficiency,
+    }
+}
+
+/// Benchmark: 16-core scaling
+fn benchmark_scaling_16_cores() -> BenchmarkResult {
+    let modules = generate_project(MEDIUM_PROJECT_MODULES);
+    let iterations = 3;
+
+    let baseline_ms = compile_with_threads(&modules, 1) as Float;
+
+    let mut total_ms = 0;
+    for _ in 0..iterations {
+        total_ms += compile_with_threads(&modules, 16);
+    }
+
+    let avg_ms = total_ms as Float / iterations as Float;
+    let speedup = baseline_ms / avg_ms;
+    let efficiency = speedup / 16.0;
+
+    // Target: 35% efficiency with 16 cores
+    let target_efficiency = 0.35;
+
+    BenchmarkResult {
+        name: "16_core_scaling",
+        metric: "speedup",
+        value: speedup,
+        target: 16.0 * target_efficiency,
+        passed: efficiency > target_efficiency,
+    }
+}
+
+/// Benchmark: Small project parallelism
+fn benchmark_small_project_parallel() -> BenchmarkResult {
+    let modules = generate_project(SMALL_PROJECT_MODULES);
+    let threads = num_cpus().min(8);
+
+    let baseline_ms = compile_with_threads(&modules, 1) as Float;
+    let parallel_ms = compile_with_threads(&modules, threads) as Float;
+
+    let speedup = baseline_ms / parallel_ms;
+
+    // Small projects have less parallelism opportunity
+    let target = threads as Float * 0.4;
+
+    BenchmarkResult {
+        name: "small_project_parallel",
+        metric: "speedup",
+        value: speedup,
+        target: target,
+        passed: speedup > target,
+    }
+}
+
+/// Benchmark: Medium project parallelism
+fn benchmark_medium_project_parallel() -> BenchmarkResult {
+    let modules = generate_project(MEDIUM_PROJECT_MODULES);
+    let threads = num_cpus().min(8);
+
+    let baseline_ms = compile_with_threads(&modules, 1) as Float;
+    let parallel_ms = compile_with_threads(&modules, threads) as Float;
+
+    let speedup = baseline_ms / parallel_ms;
+    let target = threads as Float * 0.5;
+
+    BenchmarkResult {
+        name: "medium_project_parallel",
+        metric: "speedup",
+        value: speedup,
+        target: target,
+        passed: speedup > target,
+    }
+}
+
+/// Benchmark: Large project parallelism
+fn benchmark_large_project_parallel() -> BenchmarkResult {
+    let modules = generate_project(LARGE_PROJECT_MODULES);
+    let threads = num_cpus().min(8);
+
+    let baseline_ms = compile_with_threads(&modules, 1) as Float;
+    let parallel_ms = compile_with_threads(&modules, threads) as Float;
+
+    let speedup = baseline_ms / parallel_ms;
+
+    // Large projects should scale better
+    let target = threads as Float * 0.6;
+
+    BenchmarkResult {
+        name: "large_project_parallel",
+        metric: "speedup",
+        value: speedup,
+        target: target,
+        passed: speedup > target,
+    }
+}
+
+/// Benchmark: Module-level parallelism strategy
+fn benchmark_module_level_parallel() -> BenchmarkResult {
+    let modules = generate_project(MEDIUM_PROJECT_MODULES);
+    let threads = 8;
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Compile modules in parallel (parse + typecheck + codegen together)
+    compiler.module_parallel_build(&modules, threads);
+
+    let elapsed_ms = timer.elapsed_ms();
+
+    // Measure utilization
+    let stats = compiler.get_build_stats();
+    let utilization = stats.cpu_utilization;
+
+    // Target: 60% CPU utilization
+    let target = 0.6;
+
+    BenchmarkResult {
+        name: "module_level_parallel",
+        metric: "utilization",
+        value: utilization,
+        target: target,
+        passed: utilization > target,
+    }
+}
+
+/// Benchmark: Pipeline parallelism strategy
+fn benchmark_pipeline_parallel() -> BenchmarkResult {
+    let modules = generate_project(MEDIUM_PROJECT_MODULES);
+    let threads = 8;
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Pipeline: parse all -> typecheck all -> codegen all
+    compiler.pipeline_parallel_build(&modules, threads);
+
+    let elapsed_ms = timer.elapsed_ms();
+
+    let stats = compiler.get_build_stats();
+    let pipeline_efficiency = stats.pipeline_efficiency;
+
+    // Target: 50% pipeline efficiency
+    let target = 0.5;
+
+    BenchmarkResult {
+        name: "pipeline_parallel",
+        metric: "efficiency",
+        value: pipeline_efficiency,
+        target: target,
+        passed: pipeline_efficiency > target,
+    }
+}
+
+/// Benchmark: Work stealing load balancing
+fn benchmark_work_stealing_efficiency() -> BenchmarkResult {
+    // Create project with uneven module sizes
+    let mut modules: List<ModuleSource> = List.new();
+
+    // Mix of small and large modules
+    for i in 0..50 {
+        let loc = if i % 5 == 0 { 2000 } else { 200 };  // 10x size difference
+        let functions = loc / 10;
+
+        let mut source = format("module uneven_{};\n\n", i);
+        for j in 0..functions {
+            source.push_str(&format("fn f_{}_{}(x: Int) -> Int {{ x * 2 }}\n", i, j));
+        }
+
+        modules.push(ModuleSource {
+            name: format("uneven_{}", i),
+            source: source,
+            dependencies: [],
+        });
+    }
+
+    let threads = 8;
+
+    // With work stealing
+    let timer_ws = Timer.new();
+    timer_ws.start();
+    compiler.work_stealing_build(&modules, threads);
+    let ws_ms = timer_ws.elapsed_ms();
+
+    // Without work stealing (static partitioning)
+    let timer_static = Timer.new();
+    timer_static.start();
+    compiler.static_parallel_build(&modules, threads);
+    let static_ms = timer_static.elapsed_ms();
+
+    let improvement = static_ms as Float / ws_ms as Float;
+
+    // Work stealing should improve uneven workloads
+    let target = 1.2;  // 20% improvement
+
+    BenchmarkResult {
+        name: "work_stealing_efficiency",
+        metric: "improvement",
+        value: improvement,
+        target: target,
+        passed: improvement > target,
+    }
+}
+
+/// Benchmark: Parallel overhead measurement
+fn benchmark_parallel_overhead() -> BenchmarkResult {
+    // Very small workload to measure overhead
+    let modules = generate_project(10);
+
+    let serial_ms = compile_with_threads(&modules, 1) as Float;
+    let parallel_ms = compile_with_threads(&modules, num_cpus()) as Float;
+
+    // For tiny workloads, parallel may be slower due to overhead
+    let overhead_ratio = parallel_ms / serial_ms;
+
+    // Parallel overhead should be bounded
+    let target = 2.0;  // No more than 2x slower for tiny workloads
+
+    BenchmarkResult {
+        name: "parallel_overhead",
+        metric: "ratio",
+        value: overhead_ratio,
+        target: target,
+        passed: overhead_ratio < target,
+    }
+}
+
+/// Benchmark: Synchronization cost
+fn benchmark_synchronization_cost() -> BenchmarkResult {
+    let modules = generate_project(MEDIUM_PROJECT_MODULES);
+    let threads = 8;
+
+    let stats = compiler.parallel_build_detailed(&modules, threads);
+
+    let sync_percentage = stats.synchronization_time_ms as Float /
+                          stats.total_time_ms as Float * 100.0;
+
+    // Synchronization should be < 10% of total time
+    let target = 10.0;
+
+    BenchmarkResult {
+        name: "synchronization_cost",
+        metric: "%",
+        value: sync_percentage,
+        target: target,
+        passed: sync_percentage < target,
+    }
+}
+
+type ModuleSource is {
+    name: Text,
+    source: Text,
+    dependencies: List<Text>,
+};
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+    extra: Maybe<(Text, Float)>,
+};
+
+implement BenchmarkResult {
+    fn new(name: Text, metric: Text, value: Float, target: Float, passed: Bool) -> Self {
+        Self { name, metric, value, target, passed, extra: None }
+    }
+}
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+
+    fn export_scaling_chart(self, path: Text) {
+        let json = Json.object();
+        json.set("suite", self.suite_name);
+
+        let scaling_data = Json.array();
+        for result in self.results {
+            if result.name.contains("core") {
+                let cores = result.name.extract_number();
+                let data_point = Json.object();
+                data_point.set("cores", cores);
+                data_point.set("speedup", result.value);
+                data_point.set("ideal", cores as Float);
+                scaling_data.push(data_point);
+            }
+        }
+        json.set("scaling", scaling_data);
+
+        File.write(path, json.to_string_pretty());
+        println("Scaling chart exported to {}", path);
+    }
+}

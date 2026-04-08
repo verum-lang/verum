@@ -1,0 +1,761 @@
+// =============================================================================
+// iterator_adapters_comprehensive_test.vr - Comprehensive adapter semantics
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, base, iterator, adapters, comprehensive
+// @description: Tests for all iterator adapter types focusing on core semantics,
+//               edge cases, and exhaustion behavior.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.{List};
+
+// =============================================================================
+// SECTION 1: ScanIter — stateful transformation
+// =============================================================================
+
+@test
+fn test_scan_basic_accumulation() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let mut iter = data.iter().scan(0, |state, x| {
+        *state = *state + *x;
+        Some(*state)
+    });
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), Some(6));
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next(), Some(15));
+    assert(iter.next() is None);
+}
+
+@test
+fn test_scan_early_termination() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let mut iter = data.iter().scan(0, |state, x| {
+        *state = *state + *x;
+        if *state > 5 {
+            None
+        } else {
+            Some(*state)
+        }
+    });
+    // 1, 3, 6(>5) → stops
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Some(3));
+    assert(iter.next() is None);
+}
+
+@test
+fn test_scan_state_mutation() {
+    let data: List<Int> = [10, 20, 30];
+    let mut iter = data.iter().scan(0, |max, x| {
+        if *x > *max {
+            *max = *x;
+        }
+        Some(*max)
+    });
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next(), Some(20));
+    assert_eq(iter.next(), Some(30));
+    assert(iter.next() is None);
+}
+
+@test
+fn test_scan_empty_input() {
+    let data: List<Int> = [];
+    let mut iter = data.iter().scan(0, |state, x| {
+        *state = *state + *x;
+        Some(*state)
+    });
+    assert(iter.next() is None);
+}
+
+@test
+fn test_scan_immediate_none() {
+    let data: List<Int> = [1, 2, 3];
+    let mut iter = data.iter().scan(0, |_state, _x| {
+        let none: Maybe<Int> = None;
+        none
+    });
+    assert(iter.next() is None);
+}
+
+@test
+fn test_scan_count() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let count = data.iter().scan(0, |state, x| {
+        *state = *state + *x;
+        Some(*state)
+    }).count();
+    assert_eq(count, 5);
+}
+
+// =============================================================================
+// SECTION 2: CycleIter — infinite repetition
+// =============================================================================
+
+@test
+fn test_cycle_basic() {
+    let data: List<Int> = [1, 2, 3];
+    let mut iter = data.iter().cycle();
+    assert_eq(*iter.next().unwrap(), 1);
+    assert_eq(*iter.next().unwrap(), 2);
+    assert_eq(*iter.next().unwrap(), 3);
+    assert_eq(*iter.next().unwrap(), 1);
+    assert_eq(*iter.next().unwrap(), 2);
+    assert_eq(*iter.next().unwrap(), 3);
+    assert_eq(*iter.next().unwrap(), 1);
+}
+
+@test
+fn test_cycle_single_element() {
+    let data: List<Int> = [42];
+    let mut iter = data.iter().cycle();
+    assert_eq(*iter.next().unwrap(), 42);
+    assert_eq(*iter.next().unwrap(), 42);
+    assert_eq(*iter.next().unwrap(), 42);
+}
+
+@test
+fn test_cycle_take_count() {
+    let data: List<Int> = [1, 2];
+    let count = data.iter().cycle().take(7).count();
+    assert_eq(count, 7);
+}
+
+@test
+fn test_cycle_take_100() {
+    let data: List<Int> = [10, 20];
+    let count = data.iter().cycle().take(100).count();
+    assert_eq(count, 100);
+}
+
+// =============================================================================
+// SECTION 3: ChunksIter — grouping into fixed-size chunks
+// =============================================================================
+
+@test
+fn test_chunks_basic() {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6];
+    let mut chunks = data.iter().chunks(2);
+    let c1 = chunks.next();
+    assert(c1.is_some());
+    let c2 = chunks.next();
+    assert(c2.is_some());
+    let c3 = chunks.next();
+    assert(c3.is_some());
+    assert(chunks.next() is None);
+}
+
+@test
+fn test_chunks_incomplete_last() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let count = data.iter().chunks(2).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_chunks_size_one() {
+    let data: List<Int> = [1, 2, 3];
+    let count = data.iter().chunks(1).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_chunks_size_larger_than_input() {
+    let data: List<Int> = [1, 2, 3];
+    let count = data.iter().chunks(10).count();
+    assert_eq(count, 1);
+}
+
+@test
+fn test_chunks_empty() {
+    let data: List<Int> = [];
+    let count = data.iter().chunks(3).count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_chunks_exact_division() {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let count = data.iter().chunks(3).count();
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// SECTION 4: WindowsIter — sliding windows
+// =============================================================================
+
+@test
+fn test_windows_basic() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let mut windows = data.iter().windows(3);
+    let w1 = windows.next();
+    assert(w1.is_some());
+    let w2 = windows.next();
+    assert(w2.is_some());
+    let w3 = windows.next();
+    assert(w3.is_some());
+    assert(windows.next() is None);
+}
+
+@test
+fn test_windows_size_one() {
+    let data: List<Int> = [1, 2, 3];
+    let count = data.iter().windows(1).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_windows_size_equals_length() {
+    let data: List<Int> = [1, 2, 3];
+    let count = data.iter().windows(3).count();
+    assert_eq(count, 1);
+}
+
+@test
+fn test_windows_size_larger_than_input() {
+    let data: List<Int> = [1, 2];
+    let count = data.iter().windows(5).count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_windows_empty_input() {
+    let data: List<Int> = [];
+    let count = data.iter().windows(3).count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_windows_count() {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6, 7];
+    let count = data.iter().windows(3).count();
+    assert_eq(count, 5);
+}
+
+// =============================================================================
+// SECTION 5: InterleaveIter — alternating elements
+// =============================================================================
+
+@test
+fn test_interleave_equal_length() {
+    let a: List<Int> = [1, 3, 5];
+    let b: List<Int> = [2, 4, 6];
+    let mut iter = a.iter().interleave(b.iter());
+    assert_eq(*iter.next().unwrap(), 1);
+    assert_eq(*iter.next().unwrap(), 2);
+    assert_eq(*iter.next().unwrap(), 3);
+    assert_eq(*iter.next().unwrap(), 4);
+    assert_eq(*iter.next().unwrap(), 5);
+    assert_eq(*iter.next().unwrap(), 6);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_interleave_first_longer() {
+    let a: List<Int> = [1, 3, 5, 7];
+    let b: List<Int> = [2, 4];
+    let count = a.iter().interleave(b.iter()).count();
+    assert_eq(count, 6);
+}
+
+@test
+fn test_interleave_second_longer() {
+    let a: List<Int> = [1];
+    let b: List<Int> = [2, 4, 6];
+    let count = a.iter().interleave(b.iter()).count();
+    assert_eq(count, 4);
+}
+
+@test
+fn test_interleave_one_empty() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [];
+    let count = a.iter().interleave(b.iter()).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_interleave_both_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+    let count = a.iter().interleave(b.iter()).count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_interleave_count() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [10, 20, 30, 40];
+    let count = a.iter().interleave(b.iter()).count();
+    assert_eq(count, 7);
+}
+
+// =============================================================================
+// SECTION 6: FlatMapIter — map then flatten
+// =============================================================================
+
+fn duplicate_val(x: &Int) -> List<Int> {
+    let mut out: List<Int> = [];
+    out.push(*x);
+    out.push(*x * 10);
+    out
+}
+
+@test
+fn test_flat_map_basic() {
+    let data: List<Int> = [1, 2, 3];
+    let count = data.iter().flat_map(|x| duplicate_val(x).into_iter()).count();
+    assert_eq(count, 6);
+}
+
+@test
+fn test_flat_map_empty_input() {
+    let data: List<Int> = [];
+    let count = data.iter().flat_map(|x| duplicate_val(x).into_iter()).count();
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// SECTION 7: FlattenIter — flatten nested iterators
+// =============================================================================
+
+@test
+fn test_flatten_basic() {
+    let mut data: List<List<Int>> = [];
+    data.push([1, 2]);
+    data.push([3, 4]);
+    data.push([5, 6]);
+    let count = data.into_iter().flatten().count();
+    assert_eq(count, 6);
+}
+
+@test
+fn test_flatten_with_empty_inner() {
+    let mut data: List<List<Int>> = [];
+    data.push([1, 2]);
+    data.push([]);
+    data.push([3]);
+    let count = data.into_iter().flatten().count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_flatten_all_empty_inner() {
+    let mut data: List<List<Int>> = [];
+    data.push([]);
+    data.push([]);
+    let count = data.into_iter().flatten().count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_flatten_empty_outer() {
+    let data: List<List<Int>> = [];
+    let count = data.into_iter().flatten().count();
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// SECTION 8: IntersperseIter — insert separator between elements
+// =============================================================================
+
+@test
+fn test_intersperse_basic() {
+    let data: List<Int> = [1, 2, 3];
+    let result: List<Int> = data.iter().map(|x| *x).intersperse(0).collect();
+    assert_eq(result.len(), 5);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 0);
+    assert_eq(result[2], 2);
+    assert_eq(result[3], 0);
+    assert_eq(result[4], 3);
+}
+
+@test
+fn test_intersperse_single() {
+    let data: List<Int> = [42];
+    let result: List<Int> = data.iter().map(|x| *x).intersperse(0).collect();
+    assert_eq(result.len(), 1);
+    assert_eq(result[0], 42);
+}
+
+@test
+fn test_intersperse_empty() {
+    let data: List<Int> = [];
+    let result: List<Int> = data.iter().map(|x| *x).intersperse(0).collect();
+    assert(result.is_empty());
+}
+
+@test
+fn test_intersperse_two_elements() {
+    let data: List<Int> = [1, 2];
+    let result: List<Int> = data.iter().map(|x| *x).intersperse(99).collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 99);
+    assert_eq(result[2], 2);
+}
+
+@test
+fn test_intersperse_count() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let count = data.iter().map(|x| *x).intersperse(0).count();
+    assert_eq(count, 9);
+}
+
+// =============================================================================
+// SECTION 9: MapWhileIter — map while predicate holds
+// =============================================================================
+
+@test
+fn test_map_while_basic() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let mut iter = data.iter().map_while(|x| {
+        if *x < 4 {
+            Some(*x * 2)
+        } else {
+            None
+        }
+    });
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next(), Some(6));
+    assert(iter.next() is None);
+}
+
+@test
+fn test_map_while_all_pass() {
+    let data: List<Int> = [1, 2, 3];
+    let mut iter = data.iter().map_while(|x| Some(*x * 10));
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next(), Some(20));
+    assert_eq(iter.next(), Some(30));
+    assert(iter.next() is None);
+}
+
+@test
+fn test_map_while_none_immediately() {
+    let data: List<Int> = [1, 2, 3];
+    let mut iter = data.iter().map_while(|_x| {
+        let none: Maybe<Int> = None;
+        none
+    });
+    assert(iter.next() is None);
+}
+
+@test
+fn test_map_while_count() {
+    let data: List<Int> = [1, 2, 3, 10, 5];
+    let count = data.iter().map_while(|x| {
+        if *x < 10 {
+            Some(*x)
+        } else {
+            None
+        }
+    }).count();
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// SECTION 10: TakeWhileIter — take while predicate is true
+// =============================================================================
+
+@test
+fn test_take_while_basic() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let count = data.iter().take_while(|x| *x < 4).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_take_while_all_pass() {
+    let data: List<Int> = [1, 2, 3];
+    let count = data.iter().take_while(|x| *x < 100).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_take_while_none_pass() {
+    let data: List<Int> = [10, 20, 30];
+    let count = data.iter().take_while(|x| *x < 5).count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_take_while_empty() {
+    let data: List<Int> = [];
+    let count = data.iter().take_while(|x| *x < 100).count();
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// SECTION 11: SkipWhileIter — skip while predicate is true
+// =============================================================================
+
+@test
+fn test_skip_while_basic() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let count = data.iter().skip_while(|x| *x < 3).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_skip_while_none_skipped() {
+    let data: List<Int> = [10, 20, 30];
+    let count = data.iter().skip_while(|x| *x < 5).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_skip_while_all_skipped() {
+    let data: List<Int> = [1, 2, 3];
+    let count = data.iter().skip_while(|x| *x < 100).count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_skip_while_does_not_reskip() {
+    let data: List<Int> = [1, 2, 5, 1, 3];
+    // Skips 1, 2; then 5, 1, 3 all pass (no re-checking)
+    let count = data.iter().skip_while(|x| *x < 5).count();
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// SECTION 12: StepByIter — skip every N elements
+// =============================================================================
+
+@test
+fn test_step_by_basic() {
+    let data: List<Int> = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let mut iter = data.iter().step_by(3);
+    // indices 0, 3, 6, 9
+    assert_eq(*iter.next().unwrap(), 0);
+    assert_eq(*iter.next().unwrap(), 3);
+    assert_eq(*iter.next().unwrap(), 6);
+    assert_eq(*iter.next().unwrap(), 9);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_step_by_two() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let mut iter = data.iter().step_by(2);
+    assert_eq(*iter.next().unwrap(), 1);
+    assert_eq(*iter.next().unwrap(), 3);
+    assert_eq(*iter.next().unwrap(), 5);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_step_by_one() {
+    let data: List<Int> = [1, 2, 3];
+    let count = data.iter().step_by(1).count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_step_by_larger_than_input() {
+    let data: List<Int> = [1, 2, 3];
+    let mut iter = data.iter().step_by(10);
+    assert_eq(*iter.next().unwrap(), 1);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_step_by_empty() {
+    let data: List<Int> = [];
+    let count = data.iter().step_by(3).count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_step_by_count() {
+    let data: List<Int> = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let count = data.iter().step_by(4).count();
+    assert_eq(count, 3);  // indices 0, 4, 8
+}
+
+// =============================================================================
+// SECTION 13: DedupIter — remove consecutive duplicates
+// =============================================================================
+
+@test
+fn test_dedup_iter_basic() {
+    let data: List<Int> = [1, 1, 2, 2, 3, 3];
+    let count = data.iter().dedup().count();
+    assert_eq(count, 3);
+}
+
+@test
+fn test_dedup_iter_no_duplicates() {
+    let data: List<Int> = [1, 2, 3, 4];
+    let count = data.iter().dedup().count();
+    assert_eq(count, 4);
+}
+
+@test
+fn test_dedup_iter_all_same() {
+    let data: List<Int> = [5, 5, 5, 5, 5];
+    let count = data.iter().dedup().count();
+    assert_eq(count, 1);
+}
+
+@test
+fn test_dedup_iter_non_consecutive() {
+    let data: List<Int> = [1, 2, 1, 2, 1];
+    let count = data.iter().dedup().count();
+    assert_eq(count, 5);  // No consecutive dups
+}
+
+@test
+fn test_dedup_iter_empty() {
+    let data: List<Int> = [];
+    let count = data.iter().dedup().count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_dedup_iter_single() {
+    let data: List<Int> = [42];
+    let count = data.iter().dedup().count();
+    assert_eq(count, 1);
+}
+
+@test
+fn test_dedup_iter_complex_pattern() {
+    let data: List<Int> = [1, 1, 2, 3, 3, 3, 4, 4, 5];
+    let count = data.iter().dedup().count();
+    assert_eq(count, 5);
+}
+
+// =============================================================================
+// SECTION 14: FilterMapIter — filter and transform simultaneously
+// =============================================================================
+
+@test
+fn test_filter_map_basic() {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6];
+    let mut iter = data.iter().filter_map(|x| {
+        if *x % 2 == 0 {
+            Some(*x * 2)
+        } else {
+            None
+        }
+    });
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next(), Some(8));
+    assert_eq(iter.next(), Some(12));
+    assert(iter.next() is None);
+}
+
+@test
+fn test_filter_map_all_some() {
+    let data: List<Int> = [1, 2, 3];
+    let mut iter = data.iter().filter_map(|x| Some(*x * 10));
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next(), Some(20));
+    assert_eq(iter.next(), Some(30));
+    assert(iter.next() is None);
+}
+
+@test
+fn test_filter_map_all_none() {
+    let data: List<Int> = [1, 2, 3];
+    let mut iter = data.iter().filter_map(|_x| {
+        let none: Maybe<Int> = None;
+        none
+    });
+    assert(iter.next() is None);
+}
+
+@test
+fn test_filter_map_count() {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let count = data.iter().filter_map(|x| {
+        if *x % 3 == 0 { Some(*x) } else { None }
+    }).count();
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// SECTION 15: IntersperseWithIter — intersperse with lazy separator
+// =============================================================================
+
+@test
+fn test_intersperse_with_count() {
+    let data: List<Int> = [1, 2, 3];
+    let sep = 0;
+    let count = data.iter().intersperse_with(|| &sep).count();
+    assert_eq(count, 5);
+}
+
+@test
+fn test_intersperse_with_empty() {
+    let data: List<Int> = [];
+    let sep = 0;
+    let count = data.iter().intersperse_with(|| &sep).count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_intersperse_with_single() {
+    let data: List<Int> = [42];
+    let sep = 0;
+    let count = data.iter().intersperse_with(|| &sep).count();
+    assert_eq(count, 1);
+}
+
+// =============================================================================
+// SECTION 16: Adapter chaining
+// =============================================================================
+
+@test
+fn test_chain_filter_map() {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let result: List<Int> = data.iter()
+        .filter(|x| *x % 2 == 0)
+        .map(|x| *x * 3)
+        .collect();
+    assert_eq(result.len(), 5);
+    assert_eq(result[0], 6);
+    assert_eq(result[1], 12);
+    assert_eq(result[2], 18);
+    assert_eq(result[3], 24);
+    assert_eq(result[4], 30);
+}
+
+@test
+fn test_take_skip_combo() {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let count = data.iter().skip(2).take(5).count();
+    assert_eq(count, 5);
+}
+
+@test
+fn test_enumerate_count() {
+    let data: List<Int> = [10, 20, 30, 40, 50];
+    let count = data.iter().enumerate().count();
+    assert_eq(count, 5);
+}
+
+@test
+fn test_chain_two_iterators() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [4, 5, 6];
+    let count = a.iter().chain(b.iter()).count();
+    assert_eq(count, 6);
+}
+
+@test
+fn test_zip_shorter_determines_length() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [10, 20];
+    let count = a.iter().zip(b.iter()).count();
+    assert_eq(count, 2);
+}

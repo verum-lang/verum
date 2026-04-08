@@ -1,0 +1,434 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, interpreter-vs-aot, error-handling, tagged-union, propagation
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential error handling test: verifies interpreter and AOT produce identical
+// results for error simulation using tagged unions (tag=0 for Ok, tag=1 for Err),
+// propagation patterns, and default-on-error strategies.
+
+// ============================================================================
+// Tagged result type: tag=0 means Ok (value in `val`), tag=1 means Err (code in `err`)
+// ============================================================================
+
+type Outcome is { tag: Int, val: Int, err: Int };
+
+fn ok(v: Int) -> Outcome {
+    Outcome { tag: 0, val: v, err: 0 }
+}
+
+fn err(code: Int) -> Outcome {
+    Outcome { tag: 1, val: 0, err: code }
+}
+
+fn is_ok(r: Outcome) -> Bool {
+    r.tag == 0
+}
+
+fn is_err(r: Outcome) -> Bool {
+    r.tag == 1
+}
+
+fn unwrap_or(r: Outcome, default_val: Int) -> Int {
+    if r.tag == 0 { r.val } else { default_val }
+}
+
+fn map_outcome(r: Outcome, add_val: Int) -> Outcome {
+    if r.tag == 0 {
+        ok(r.val + add_val)
+    } else {
+        r
+    }
+}
+
+fn test_basic_outcome() {
+    let good = ok(42);
+    assert(is_ok(good));
+    assert(!is_err(good));
+    assert_eq(good.val, 42);
+    assert_eq(unwrap_or(good, 0), 42);
+
+    let bad = err(404);
+    assert(!is_ok(bad));
+    assert(is_err(bad));
+    assert_eq(bad.err, 404);
+    assert_eq(unwrap_or(bad, 0 - 1), 0 - 1);
+
+    // Map on Ok
+    let mapped = map_outcome(good, 10);
+    assert(is_ok(mapped));
+    assert_eq(mapped.val, 52);
+
+    // Map on Err (should pass through)
+    let mapped_err = map_outcome(bad, 10);
+    assert(is_err(mapped_err));
+    assert_eq(mapped_err.err, 404);
+
+    print("basic_outcome: ok");
+}
+
+// ============================================================================
+// Safe arithmetic with error propagation
+// ============================================================================
+
+fn safe_div(a: Int, b: Int) -> Outcome {
+    if b == 0 { err(1) } // error code 1 = division by zero
+    else { ok(a / b) }
+}
+
+fn safe_mod(a: Int, b: Int) -> Outcome {
+    if b == 0 { err(1) }
+    else { ok(a % b) }
+}
+
+fn safe_sqrt_int(n: Int) -> Outcome {
+    if n < 0 { err(2) } // error code 2 = negative input
+    else {
+        if n == 0 { ok(0) }
+        else {
+            let mut x = n;
+            let mut y = (x + 1) / 2;
+            while y < x {
+                x = y;
+                y = (x + n / x) / 2;
+            }
+            ok(x)
+        }
+    }
+}
+
+fn test_safe_arithmetic() {
+    // Safe division
+    let r1 = safe_div(10, 3);
+    assert(is_ok(r1));
+    assert_eq(r1.val, 3);
+
+    let r2 = safe_div(10, 0);
+    assert(is_err(r2));
+    assert_eq(r2.err, 1);
+
+    let r3 = safe_div(0, 5);
+    assert(is_ok(r3));
+    assert_eq(r3.val, 0);
+
+    // Safe mod
+    let r4 = safe_mod(10, 3);
+    assert(is_ok(r4));
+    assert_eq(r4.val, 1);
+
+    let r5 = safe_mod(10, 0);
+    assert(is_err(r5));
+    assert_eq(r5.err, 1);
+
+    // Safe sqrt
+    let r6 = safe_sqrt_int(25);
+    assert(is_ok(r6));
+    assert_eq(r6.val, 5);
+
+    let r7 = safe_sqrt_int(0);
+    assert(is_ok(r7));
+    assert_eq(r7.val, 0);
+
+    let r8 = safe_sqrt_int(0 - 4);
+    assert(is_err(r8));
+    assert_eq(r8.err, 2);
+
+    print("safe_arithmetic: ok");
+}
+
+// ============================================================================
+// Error propagation chains: if any step fails, the whole chain fails
+// ============================================================================
+
+// Chain: compute (a / b) + c, propagating errors
+fn chain_div_add(a: Int, b: Int, c: Int) -> Outcome {
+    let step1 = safe_div(a, b);
+    if is_err(step1) {
+        step1
+    } else {
+        ok(step1.val + c)
+    }
+}
+
+// Chain: compute sqrt(a / b), propagating errors
+fn chain_div_sqrt(a: Int, b: Int) -> Outcome {
+    let step1 = safe_div(a, b);
+    if is_err(step1) {
+        step1
+    } else {
+        safe_sqrt_int(step1.val)
+    }
+}
+
+// Multi-step chain: ((a / b) % c) + d
+fn chain_div_mod_add(a: Int, b: Int, c: Int, d: Int) -> Outcome {
+    let step1 = safe_div(a, b);
+    if is_err(step1) {
+        step1
+    } else {
+        let step2 = safe_mod(step1.val, c);
+        if is_err(step2) {
+            step2
+        } else {
+            ok(step2.val + d)
+        }
+    }
+}
+
+fn test_error_propagation() {
+    // Successful chain
+    let r1 = chain_div_add(10, 2, 3);
+    assert(is_ok(r1));
+    assert_eq(r1.val, 8); // (10/2) + 3
+
+    // Division fails -> whole chain fails
+    let r2 = chain_div_add(10, 0, 3);
+    assert(is_err(r2));
+    assert_eq(r2.err, 1);
+
+    // sqrt(100 / 4) = sqrt(25) = 5
+    let r3 = chain_div_sqrt(100, 4);
+    assert(is_ok(r3));
+    assert_eq(r3.val, 5);
+
+    // Division by zero in chain
+    let r4 = chain_div_sqrt(100, 0);
+    assert(is_err(r4));
+    assert_eq(r4.err, 1);
+
+    // Result of division is negative, sqrt fails
+    // -100 / 10 = -10, sqrt(-10) fails
+    let r5 = chain_div_sqrt(0 - 100, 10);
+    assert(is_err(r5));
+    assert_eq(r5.err, 2); // negative input error
+
+    // Multi-step: (100 / 5) % 7 + 3 = 20 % 7 + 3 = 6 + 3 = 9
+    let r6 = chain_div_mod_add(100, 5, 7, 3);
+    assert(is_ok(r6));
+    assert_eq(r6.val, 9);
+
+    // Multi-step: division fails
+    let r7 = chain_div_mod_add(100, 0, 7, 3);
+    assert(is_err(r7));
+    assert_eq(r7.err, 1);
+
+    // Multi-step: mod fails (mod by 0)
+    let r8 = chain_div_mod_add(100, 5, 0, 3);
+    assert(is_err(r8));
+    assert_eq(r8.err, 1);
+
+    print("error_propagation: ok");
+}
+
+// ============================================================================
+// Default value / fallback patterns
+// ============================================================================
+
+fn div_or_default(a: Int, b: Int, default_val: Int) -> Int {
+    unwrap_or(safe_div(a, b), default_val)
+}
+
+fn sqrt_or_zero(n: Int) -> Int {
+    unwrap_or(safe_sqrt_int(n), 0)
+}
+
+fn test_default_values() {
+    assert_eq(div_or_default(10, 3, 0), 3);
+    assert_eq(div_or_default(10, 0, 999), 999);
+    assert_eq(div_or_default(0, 5, 999), 0);
+
+    assert_eq(sqrt_or_zero(16), 4);
+    assert_eq(sqrt_or_zero(0), 0);
+    assert_eq(sqrt_or_zero(0 - 1), 0);
+
+    print("default_values: ok");
+}
+
+// ============================================================================
+// Accumulate outcomes: process a series of operations, counting successes/failures
+// ============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+type BatchOutcome is { successes: Int, failures: Int, sum_ok: Int };
+
+// Divide `numerator` by each element of `divisors`. Accumulate results.
+fn batch_divide(numerator: Int, divisors: Arr8, n: Int) -> BatchOutcome {
+    let mut successes = 0;
+    let mut failures = 0;
+    let mut sum_ok = 0;
+    let mut i = 0;
+    while i < n {
+        let d = arr8_get(divisors, i);
+        let r = safe_div(numerator, d);
+        if is_ok(r) {
+            successes = successes + 1;
+            sum_ok = sum_ok + r.val;
+        } else {
+            failures = failures + 1;
+        }
+        i = i + 1;
+    }
+    BatchOutcome { successes: successes, failures: failures, sum_ok: sum_ok }
+}
+
+fn test_batch_operations() {
+    // Divide 100 by [2, 0, 5, 0, 10, 3, 0, 4]
+    let divisors = Arr8 { e0: 2, e1: 0, e2: 5, e3: 0, e4: 10, e5: 3, e6: 0, e7: 4 };
+    let result = batch_divide(100, divisors, 8);
+
+    // Successes: 2, 5, 10, 3, 4 -> 5 successes
+    assert_eq(result.successes, 5);
+    // Failures: 3 zeros
+    assert_eq(result.failures, 3);
+    assert_eq(result.successes + result.failures, 8);
+    // Sum: 100/2 + 100/5 + 100/10 + 100/3 + 100/4 = 50 + 20 + 10 + 33 + 25 = 138
+    assert_eq(result.sum_ok, 138);
+
+    // All valid divisors
+    let good_divisors = Arr8 { e0: 1, e1: 2, e2: 4, e3: 5, e4: 10, e5: 20, e6: 25, e7: 50 };
+    let r2 = batch_divide(100, good_divisors, 8);
+    assert_eq(r2.successes, 8);
+    assert_eq(r2.failures, 0);
+    // 100 + 50 + 25 + 20 + 10 + 5 + 4 + 2 = 216
+    assert_eq(r2.sum_ok, 216);
+
+    // All zeros
+    let zeros = Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let r3 = batch_divide(100, zeros, 8);
+    assert_eq(r3.successes, 0);
+    assert_eq(r3.failures, 8);
+    assert_eq(r3.sum_ok, 0);
+
+    print("batch_operations: ok");
+}
+
+// ============================================================================
+// "or_else" / fallback chain: try multiple operations until one succeeds
+// ============================================================================
+
+fn try_first_valid_divisor(numerator: Int, d1: Int, d2: Int, d3: Int) -> Outcome {
+    let r1 = safe_div(numerator, d1);
+    if is_ok(r1) {
+        r1
+    } else {
+        let r2 = safe_div(numerator, d2);
+        if is_ok(r2) {
+            r2
+        } else {
+            safe_div(numerator, d3)
+        }
+    }
+}
+
+fn test_fallback_chain() {
+    // First succeeds
+    let r1 = try_first_valid_divisor(100, 5, 0, 0);
+    assert(is_ok(r1));
+    assert_eq(r1.val, 20);
+
+    // First fails, second succeeds
+    let r2 = try_first_valid_divisor(100, 0, 4, 0);
+    assert(is_ok(r2));
+    assert_eq(r2.val, 25);
+
+    // First two fail, third succeeds
+    let r3 = try_first_valid_divisor(100, 0, 0, 10);
+    assert(is_ok(r3));
+    assert_eq(r3.val, 10);
+
+    // All fail
+    let r4 = try_first_valid_divisor(100, 0, 0, 0);
+    assert(is_err(r4));
+    assert_eq(r4.err, 1);
+
+    print("fallback_chain: ok");
+}
+
+// ============================================================================
+// Validated computation: range checking before arithmetic
+// ============================================================================
+
+fn validated_add(a: Int, b: Int, min_val: Int, max_val: Int) -> Outcome {
+    let sum = a + b;
+    if sum < min_val {
+        err(3) // underflow
+    } else if sum > max_val {
+        err(4) // overflow
+    } else {
+        ok(sum)
+    }
+}
+
+fn validated_sub(a: Int, b: Int, min_val: Int, max_val: Int) -> Outcome {
+    let diff = a - b;
+    if diff < min_val {
+        err(3)
+    } else if diff > max_val {
+        err(4)
+    } else {
+        ok(diff)
+    }
+}
+
+fn test_validated_arithmetic() {
+    // Within range [0, 100]
+    let r1 = validated_add(50, 30, 0, 100);
+    assert(is_ok(r1));
+    assert_eq(r1.val, 80);
+
+    // Overflow
+    let r2 = validated_add(50, 60, 0, 100);
+    assert(is_err(r2));
+    assert_eq(r2.err, 4);
+
+    // Underflow
+    let r3 = validated_sub(10, 20, 0, 100);
+    assert(is_err(r3));
+    assert_eq(r3.err, 3);
+
+    // Exactly at boundary
+    let r4 = validated_add(50, 50, 0, 100);
+    assert(is_ok(r4));
+    assert_eq(r4.val, 100);
+
+    let r5 = validated_sub(50, 50, 0, 100);
+    assert(is_ok(r5));
+    assert_eq(r5.val, 0);
+
+    // Negative range [-50, 50]
+    let r6 = validated_add(0 - 30, 0 - 10, 0 - 50, 50);
+    assert(is_ok(r6));
+    assert_eq(r6.val, 0 - 40);
+
+    let r7 = validated_add(0 - 30, 0 - 30, 0 - 50, 50);
+    assert(is_err(r7));
+    assert_eq(r7.err, 3); // -60 < -50 = underflow
+
+    print("validated_arithmetic: ok");
+}
+
+fn main() -> Int {
+    test_basic_outcome();
+    test_safe_arithmetic();
+    test_error_propagation();
+    test_default_values();
+    test_batch_operations();
+    test_fallback_chain();
+    test_validated_arithmetic();
+    print("[OK] 044_differential_error_handling");
+    0
+}

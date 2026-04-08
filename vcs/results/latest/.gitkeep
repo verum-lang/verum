@@ -1,0 +1,12 @@
+# Latest test results directory
+# This directory contains the results from the most recent test run
+# Files are overwritten on each run
+
+# Contents:
+# - summary.json       : Overall run summary
+# - l0-results.json   : L0 (Critical) test results
+# - l1-results.json   : L1 (Core) test results
+# - l2-results.json   : L2 (Standard) test results
+# - l3-results.json   : L3 (Extended) test results
+# - l4-results.json   : L4 (Performance) test results
+# - differential-results.json : Differential test results

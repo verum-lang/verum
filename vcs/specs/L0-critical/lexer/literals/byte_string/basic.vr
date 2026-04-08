@@ -1,0 +1,58 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, byte-string
+
+// Basic byte string literal syntax (b"...")
+
+fn test_empty_byte_string() {
+    let bs = b"";
+}
+
+fn test_ascii_byte_string() {
+    let bs = b"hello";
+    let bs2 = b"Hello World";
+    let bs3 = b"ASCII text with spaces";
+}
+
+fn test_single_char_byte_string() {
+    let a = b"a";
+    let z = b"Z";
+    let digit = b"7";
+}
+
+fn test_byte_string_with_newline() {
+    let newline = b"\n";
+    let crlf = b"\r\n";
+}
+
+fn test_byte_string_with_tab() {
+    let tab = b"\t";
+    let tabs = b"\t\t\t";
+}
+
+fn test_byte_string_with_null() {
+    let null = b"\0";
+    let null_terminated = b"string\0";
+}
+
+fn test_byte_string_escape_sequences() {
+    let backslash = b"\\";
+    let dquote = b"\"";
+    let all_escapes = b"\n\r\t\0\\\"\x00";
+}
+
+fn test_byte_string_hex_escapes() {
+    let hex = b"\x00\x01\x02\x03";
+    let uppercase_hex = b"\xAB\xCD\xEF";
+    let lowercase_hex = b"\xab\xcd\xef";
+    let mixed_hex = b"\xaB\xcD\xeF";
+    let max_hex = b"\xFF\xff";
+}
+
+fn test_byte_string_mixed_content() {
+    let mixed = b"A\x42C\x44E";  // ABCDE
+    let header = b"\x89PNG\r\n\x1a\n";  // PNG magic
+}
+
+fn main() {}

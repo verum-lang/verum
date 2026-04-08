@@ -1,0 +1,281 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @level: L0
+// @tags: parser, patterns, stream, iterator, lazy
+// @description: Comprehensive tests for stream pattern matching
+
+// ============================================================================
+// Basic Stream Patterns
+// Grammar: stream_pattern = 'stream' , '[' , stream_pattern_elements , ']'
+// ============================================================================
+
+fn test_stream_head() {
+    let s = stream[1, 2, 3, ...];
+
+    match s {
+        stream[head, ...rest] => {
+            print(f"Head: {head}");
+            print(f"Rest: {rest}");
+        },
+    }
+}
+
+fn test_stream_two_elements() {
+    match data_stream {
+        stream[first, second, ...rest] => {
+            process_pair(first, second);
+            continue_with(rest);
+        },
+    }
+}
+
+fn test_stream_three_elements() {
+    match items {
+        stream[a, b, c, ...rest] => {
+            handle_triple(a, b, c);
+        },
+    }
+}
+
+// ============================================================================
+// Empty Stream Pattern
+// ============================================================================
+
+fn test_empty_stream() {
+    match maybe_stream {
+        stream[] => print("Empty stream"),
+        stream[x, ...xs] => print(f"Has elements: {x}"),
+    }
+}
+
+fn test_stream_exhausted() {
+    fn consume(s: Stream<Int>) {
+        match s {
+            stream[] => (),
+            stream[x, ...rest] => {
+                process(x);
+                consume(rest);
+            },
+        }
+    }
+}
+
+// ============================================================================
+// Capture Entire Stream
+// ============================================================================
+
+fn test_capture_all() {
+    match input {
+        stream[first, ...rest] => {
+            // Capture head and rest separately
+            process(first);
+            for item in rest {
+                process(item);
+            }
+        },
+        stream[] => {
+            // Empty stream case
+        },
+    }
+}
+
+// ============================================================================
+// Stream Patterns in Functions
+// ============================================================================
+
+fn head<T>(stream[x, ..._]: Stream<T>) -> Maybe<T> {
+    Some(x)
+}
+
+fn tail<T>(stream[_, ...rest]: Stream<T>) -> Stream<T> {
+    rest
+}
+
+fn take_two<T>(stream[a, b, ..._]: Stream<T>) -> (T, T) {
+    (a, b)
+}
+
+fn skip_first<T>(stream[_, ...rest]: Stream<T>) -> Stream<T> {
+    rest
+}
+
+// ============================================================================
+// Stream Patterns with Nested Patterns
+// ============================================================================
+
+fn test_stream_with_tuple_elements() {
+    let pairs = stream[(1, "a"), (2, "b"), (3, "c"), ...];
+
+    match pairs {
+        stream[(n, s), ...rest] => {
+            print(f"First pair: {n}, {s}");
+        },
+    }
+}
+
+fn test_stream_with_variant_elements() {
+    let results = stream[Ok(1), Err("oops"), Ok(3), ...];
+
+    match results {
+        stream[Ok(first), ...rest] => {
+            print(f"First success: {first}");
+        },
+        stream[Err(e), ...rest] => {
+            print(f"First failure: {e}");
+        },
+    }
+}
+
+fn test_stream_with_record_elements() {
+    match user_stream {
+        stream[User { name, age }, ...rest] if age >= 18 => {
+            print(f"Adult: {name}");
+        },
+        stream[User { name, .. }, ...rest] => {
+            print(f"Minor: {name}");
+        },
+    }
+}
+
+// ============================================================================
+// Stream Patterns in Match Expressions
+// ============================================================================
+
+fn process_stream(s: Stream<Int>) -> Int {
+    match s {
+        stream[] => 0,
+        stream[x] => x,
+        stream[x, y, ...rest] => x + y + process_stream(rest),
+    }
+}
+
+fn find_pattern(s: Stream<Int>) -> Bool {
+    match s {
+        stream[] => false,
+        stream[1, 2, 3, ..._] => true,
+        stream[_, ...rest] => find_pattern(rest),
+    }
+}
+
+// ============================================================================
+// Stream Patterns with Guards
+// ============================================================================
+
+fn test_stream_guard() {
+    match numbers {
+        stream[x, ...rest] if x > 0 => {
+            print("Starts with positive");
+        },
+        stream[x, ...rest] if x < 0 => {
+            print("Starts with negative");
+        },
+        stream[_, ...rest] => {
+            print("Starts with zero");
+        },
+    }
+}
+
+fn test_stream_complex_guard() {
+    match data {
+        stream[a, b, ...rest] if a + b > 10 => {
+            print("Sum of first two > 10");
+        },
+        stream[a, b, c, ...rest] if a < b && b < c => {
+            print("Ascending start");
+        },
+        stream[first, ...rest] => {
+            print("Other pattern");
+        },
+        stream[] => {
+            print("Empty stream");
+        },
+    }
+}
+
+// ============================================================================
+// Stream Patterns for Different Types
+// ============================================================================
+
+fn test_text_stream() {
+    let chars = stream['h', 'e', 'l', 'l', 'o', ...];
+
+    match chars {
+        stream[first, ...rest] => {
+            print(f"First char: {first}");
+        },
+    }
+}
+
+fn test_byte_stream() {
+    match byte_stream {
+        stream[0xFF, 0xFE, ...rest] => {
+            print("UTF-16 BOM detected");
+        },
+        stream[0xEF, 0xBB, 0xBF, ...rest] => {
+            print("UTF-8 BOM detected");
+        },
+        stream[b, ...rest] => {
+            print("No BOM");
+        },
+        stream[] => {
+            print("Empty stream");
+        },
+    }
+}
+
+// ============================================================================
+// Async Stream Patterns
+// ============================================================================
+
+async fn process_async_stream(s: AsyncStream<Data>) {
+    for await item in s {
+        match item {
+            Data.Complete(value) => process(value),
+            Data.Partial(chunk) => buffer(chunk),
+            Data.End => break,
+        }
+    }
+}
+
+// ============================================================================
+// Practical Examples
+// ============================================================================
+
+fn parse_command(tokens: Stream<Token>) -> Command {
+    match tokens {
+        stream[Token.Keyword("get"), Token.Ident(name), ...rest] => {
+            Command.Get { name }
+        },
+        stream[Token.Keyword("set"), Token.Ident(name), Token.Equals, value, ...rest] => {
+            Command.Set { name, value }
+        },
+        stream[Token.Keyword("help"), ..._] => {
+            Command.Help
+        },
+        stream[first, ...rest] => {
+            Command.Unknown([first].concat(rest.collect()))
+        },
+        stream[] => {
+            Command.Unknown([])
+        },
+    }
+}
+
+fn tokenize(chars: Stream<Char>) -> Stream<Token> {
+    match chars {
+        stream[] => Stream.empty(),
+        stream[c, ...rest] if c.is_whitespace() => tokenize(rest),
+        stream[c, ...rest] if c.is_digit() => {
+            let (num, remaining) = parse_number(chars);
+            Stream.cons(Token.Number(num), tokenize(remaining))
+        },
+        stream[c, ...rest] if c.is_alphabetic() => {
+            let (ident, remaining) = parse_identifier(chars);
+            Stream.cons(Token.Ident(ident), tokenize(remaining))
+        },
+        stream[c, ...rest] => {
+            Stream.cons(Token.Symbol(c), tokenize(rest))
+        },
+    }
+}

@@ -1,0 +1,33 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, tier1, checked
+// @description: Tests Tier 1 checked references (&checked T) with compile-time verification
+
+fn get_first<T>(list: &checked List<T>) -> &checked T {
+    // Compiler proves list is non-empty and reference is valid
+    &list[0]
+}
+
+fn process_data(data: &checked Int) -> Int {
+    // Tier 1: &checked T - compile-time proven safe (0ns overhead)
+    *data * 2
+}
+
+fn main() {
+    let items: List<Int> = [10, 20, 30];
+
+    // Checked reference - compiler verifies safety
+    let checked_ref: &checked List<Int> = &checked items;
+
+    // No runtime check needed - safety proven at compile time
+    let first = get_first(checked_ref);
+    assert(*first == 10);
+
+    let value = 42;
+    let checked_val: &checked Int = &checked value;
+    let result = process_data(checked_val);
+    assert(result == 84);
+
+    print("Tier 1 checked reference test passed");
+}

@@ -1,0 +1,158 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: env, vars, platform, split_paths
+// @description: Tests for extended env module: vars, platform constants, split_paths
+
+mount core.base.env.{
+    vars, vars_list, Vars,
+    os_name, arch, os_family, split_paths,
+    var, var_opt, home_dir, temp_dir, shell, locale, user, path,
+    args, args_count, arg, args_os,
+    VarError,
+};
+mount core.collections.list.{List};
+
+// =============================================================================
+// vars / vars_list
+// =============================================================================
+
+@test
+fn test_vars_returns_iterator() {
+    let mut iter = vars();
+    let _: Vars = iter;
+    // Just verify it compiles
+    let _ = iter.next();
+}
+
+@test
+fn test_vars_list_returns_list() {
+    let env_vars = vars_list();
+    let _: List<(Text, Text)> = env_vars;
+}
+
+// =============================================================================
+// Platform Constants
+// =============================================================================
+
+@test
+fn test_os_name() {
+    let os = os_name();
+    assert(os.len() > 0);
+    // Should be one of the known values
+    assert(os == "macos" || os == "linux" || os == "windows");
+}
+
+@test
+fn test_arch() {
+    let architecture = arch();
+    assert(architecture.len() > 0);
+    assert(architecture == "aarch64" || architecture == "x86_64" || architecture == "x86");
+}
+
+@test
+fn test_os_family() {
+    let family = os_family();
+    assert(family.len() > 0);
+    assert(family == "unix" || family == "windows");
+}
+
+@test
+fn test_platform_consistency() {
+    // macOS and Linux are Unix family
+    let os = os_name();
+    let family = os_family();
+    if os == "macos" || os == "linux" {
+        assert_eq(family, "unix");
+    }
+    if os == "windows" {
+        assert_eq(family, "windows");
+    }
+}
+
+// =============================================================================
+// split_paths
+// =============================================================================
+
+@test
+fn test_split_paths_basic() {
+    let parts = split_paths(&"/usr/bin:/usr/local/bin:/home/user/bin");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "/usr/bin");
+    assert_eq(parts[1], "/usr/local/bin");
+    assert_eq(parts[2], "/home/user/bin");
+}
+
+@test
+fn test_split_paths_single() {
+    let parts = split_paths(&"/usr/bin");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "/usr/bin");
+}
+
+@test
+fn test_split_paths_empty() {
+    let parts = split_paths(&"");
+    // Empty string split should return 1 element (empty string)
+    assert(parts.len() <= 1);
+}
+
+@test
+fn test_split_paths_with_trailing_sep() {
+    let parts = split_paths(&"/a:/b:");
+    // Trailing separator may produce an empty final element
+    assert(parts.len() >= 2);
+    assert_eq(parts[0], "/a");
+    assert_eq(parts[1], "/b");
+}
+
+// =============================================================================
+// Existing functions - regression tests
+// =============================================================================
+
+@test
+fn test_temp_dir_not_empty() {
+    let tmp = temp_dir();
+    assert(tmp.len() > 0);
+}
+
+@test
+fn test_home_dir_type() {
+    let _: Maybe<Text> = home_dir();
+}
+
+@test
+fn test_user_type() {
+    let _: Maybe<Text> = user();
+}
+
+@test
+fn test_shell_type() {
+    let _: Maybe<Text> = shell();
+}
+
+@test
+fn test_locale_type() {
+    let _: Maybe<Text> = locale();
+}
+
+@test
+fn test_path_type() {
+    let _: Maybe<Text> = path();
+}
+
+@test
+fn test_var_not_found() {
+    let result = var(&"__NONEXISTENT_VAR_FOR_TEST_99999__");
+    assert(result.is_err());
+}
+
+@test
+fn test_var_opt_not_found() {
+    let result = var_opt(&"__NONEXISTENT_VAR_FOR_TEST_99999__");
+    assert(result.is_none());
+}
+
+@test
+fn test_args_count_nonneg() {
+    assert(args_count() >= 0);
+}

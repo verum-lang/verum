@@ -1,0 +1,96 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, arithmetic, float, basic, ieee754
+// @timeout: 5000
+// @expect: pass
+//
+// Test: Basic floating-point arithmetic
+// Verifies IEEE 754 compliant floating-point arithmetic
+
+fn test_add_basic() {
+    assert_eq(0.0 + 0.0, 0.0);
+    assert_eq(1.0 + 0.0, 1.0);
+    assert_eq(0.0 + 1.0, 1.0);
+    assert_eq(1.0 + 1.0, 2.0);
+    assert_eq(1.5 + 2.5, 4.0);
+}
+
+fn test_add_negative() {
+    assert_eq(-1.0 + 1.0, 0.0);
+    assert_eq(-1.0 + -1.0, -2.0);
+    assert_eq(-2.5 + 1.5, -1.0);
+}
+
+fn test_sub_basic() {
+    assert_eq(1.0 - 0.0, 1.0);
+    assert_eq(1.0 - 1.0, 0.0);
+    assert_eq(5.5 - 2.5, 3.0);
+}
+
+fn test_sub_negative() {
+    assert_eq(-1.0 - 1.0, -2.0);
+    assert_eq(-1.0 - -1.0, 0.0);
+    assert_eq(1.0 - -1.0, 2.0);
+}
+
+fn test_mul_basic() {
+    assert_eq(0.0 * 1.0, 0.0);
+    assert_eq(1.0 * 1.0, 1.0);
+    assert_eq(2.0 * 3.0, 6.0);
+    assert_eq(0.5 * 2.0, 1.0);
+}
+
+fn test_mul_negative() {
+    assert_eq(-1.0 * 1.0, -1.0);
+    assert_eq(1.0 * -1.0, -1.0);
+    assert_eq(-1.0 * -1.0, 1.0);
+    assert_eq(-2.5 * 4.0, -10.0);
+}
+
+fn test_div_basic() {
+    assert_eq(1.0 / 1.0, 1.0);
+    assert_eq(6.0 / 2.0, 3.0);
+    assert_eq(5.0 / 2.0, 2.5);
+    assert_eq(1.0 / 4.0, 0.25);
+}
+
+fn test_div_negative() {
+    assert_eq(-6.0 / 2.0, -3.0);
+    assert_eq(6.0 / -2.0, -3.0);
+    assert_eq(-6.0 / -2.0, 3.0);
+}
+
+fn test_mod_float() {
+    assert_eq(5.5 % 2.0, 1.5);
+    assert_eq(5.5 % 2.5, 0.5);
+    assert_eq(-5.5 % 2.0, -1.5);
+    assert_eq(5.5 % -2.0, 1.5);
+}
+
+fn test_infinity_basic() {
+    let pos_inf: Float = 1.0 / 0.0;
+    let neg_inf: Float = -1.0 / 0.0;
+
+    // Check infinity is larger than any finite number
+    assert(pos_inf > 1e308);
+    assert(neg_inf < -1e308);
+
+    // Infinity + finite = infinity
+    assert_eq(pos_inf + 1.0, pos_inf);
+    assert_eq(neg_inf + 1.0, neg_inf);
+}
+
+fn main() {
+    test_add_basic();
+    test_add_negative();
+    test_sub_basic();
+    test_sub_negative();
+    test_mul_basic();
+    test_mul_negative();
+    test_div_basic();
+    test_div_negative();
+    test_mod_float();
+    test_infinity_basic();
+    print("003_float_basic: PASSED");
+}

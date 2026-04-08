@@ -1,0 +1,218 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, roman, numerals, conversion
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Roman numeral encoding/decoding (integer-encoded)
+
+// Roman digit values: I=1, V=5, X=10, L=50, C=100, D=500, M=1000
+// Encoded as integers: 1,5,10,50,100,500,1000
+
+// Decode a sequence of roman digit values
+// Arr8 of roman digit values, read right-to-left
+type RomanStr is {
+    r0: Int, r1: Int, r2: Int, r3: Int,
+    r4: Int, r5: Int, r6: Int, r7: Int,
+    len: Int
+};
+
+fn rs_get(r: RomanStr, i: Int) -> Int {
+    if i == 0 { r.r0 } else if i == 1 { r.r1 }
+    else if i == 2 { r.r2 } else if i == 3 { r.r3 }
+    else if i == 4 { r.r4 } else if i == 5 { r.r5 }
+    else if i == 6 { r.r6 } else { r.r7 }
+}
+
+fn roman_decode(r: RomanStr) -> Int {
+    let mut total = 0;
+    let mut prev = 0;
+    let mut i = r.len - 1;
+    while i >= 0 {
+        let val = rs_get(r, i);
+        if val < prev {
+            total = total - val;
+        } else {
+            total = total + val;
+        }
+        prev = val;
+        i = i - 1;
+    }
+    total
+}
+
+// Encode integer to roman (returns digit count and fills array)
+// We encode into an Arr8, returns RomanStr
+fn roman_encode(n: Int) -> RomanStr {
+    let mut result = RomanStr { r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0, len: 0 };
+    let mut val = n;
+    let mut idx = 0;
+
+    // M = 1000
+    while val >= 1000 && idx < 8 {
+        result = rs_set(result, idx, 1000);
+        idx = idx + 1;
+        val = val - 1000;
+    }
+    // CM = 900
+    if val >= 900 && idx + 1 < 8 {
+        result = rs_set(result, idx, 100);
+        result = rs_set(result, idx + 1, 1000);
+        idx = idx + 2;
+        val = val - 900;
+    }
+    // D = 500
+    if val >= 500 && idx < 8 {
+        result = rs_set(result, idx, 500);
+        idx = idx + 1;
+        val = val - 500;
+    }
+    // CD = 400
+    if val >= 400 && idx + 1 < 8 {
+        result = rs_set(result, idx, 100);
+        result = rs_set(result, idx + 1, 500);
+        idx = idx + 2;
+        val = val - 400;
+    }
+    // C = 100
+    while val >= 100 && idx < 8 {
+        result = rs_set(result, idx, 100);
+        idx = idx + 1;
+        val = val - 100;
+    }
+    // XC = 90
+    if val >= 90 && idx + 1 < 8 {
+        result = rs_set(result, idx, 10);
+        result = rs_set(result, idx + 1, 100);
+        idx = idx + 2;
+        val = val - 90;
+    }
+    // L = 50
+    if val >= 50 && idx < 8 {
+        result = rs_set(result, idx, 50);
+        idx = idx + 1;
+        val = val - 50;
+    }
+    // XL = 40
+    if val >= 40 && idx + 1 < 8 {
+        result = rs_set(result, idx, 10);
+        result = rs_set(result, idx + 1, 50);
+        idx = idx + 2;
+        val = val - 40;
+    }
+    // X = 10
+    while val >= 10 && idx < 8 {
+        result = rs_set(result, idx, 10);
+        idx = idx + 1;
+        val = val - 10;
+    }
+    // IX = 9
+    if val >= 9 && idx + 1 < 8 {
+        result = rs_set(result, idx, 1);
+        result = rs_set(result, idx + 1, 10);
+        idx = idx + 2;
+        val = val - 9;
+    }
+    // V = 5
+    if val >= 5 && idx < 8 {
+        result = rs_set(result, idx, 5);
+        idx = idx + 1;
+        val = val - 5;
+    }
+    // IV = 4
+    if val >= 4 && idx + 1 < 8 {
+        result = rs_set(result, idx, 1);
+        result = rs_set(result, idx + 1, 5);
+        idx = idx + 2;
+        val = val - 4;
+    }
+    // I = 1
+    while val >= 1 && idx < 8 {
+        result = rs_set(result, idx, 1);
+        idx = idx + 1;
+        val = val - 1;
+    }
+
+    RomanStr { r0: result.r0, r1: result.r1, r2: result.r2, r3: result.r3,
+               r4: result.r4, r5: result.r5, r6: result.r6, r7: result.r7, len: idx }
+}
+
+fn rs_set(r: RomanStr, i: Int, v: Int) -> RomanStr {
+    RomanStr {
+        r0: if i == 0 { v } else { r.r0 }, r1: if i == 1 { v } else { r.r1 },
+        r2: if i == 2 { v } else { r.r2 }, r3: if i == 3 { v } else { r.r3 },
+        r4: if i == 4 { v } else { r.r4 }, r5: if i == 5 { v } else { r.r5 },
+        r6: if i == 6 { v } else { r.r6 }, r7: if i == 7 { v } else { r.r7 },
+        len: r.len
+    }
+}
+
+fn test_decode_simple() {
+    // III = 3
+    let r = RomanStr { r0: 1, r1: 1, r2: 1, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0, len: 3 };
+    assert_eq(roman_decode(r), 3);
+
+    // VII = 7
+    let r2 = RomanStr { r0: 5, r1: 1, r2: 1, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0, len: 3 };
+    assert_eq(roman_decode(r2), 7);
+}
+
+fn test_decode_subtractive() {
+    // IV = 4
+    let r = RomanStr { r0: 1, r1: 5, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0, len: 2 };
+    assert_eq(roman_decode(r), 4);
+
+    // IX = 9
+    let r2 = RomanStr { r0: 1, r1: 10, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0, len: 2 };
+    assert_eq(roman_decode(r2), 9);
+
+    // XL = 40
+    let r3 = RomanStr { r0: 10, r1: 50, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0, len: 2 };
+    assert_eq(roman_decode(r3), 40);
+}
+
+fn test_roundtrip() {
+    // Encode then decode should give same number
+    let tests = [1, 4, 9, 14, 42, 99];
+
+    let enc1 = roman_encode(1);
+    assert_eq(roman_decode(enc1), 1);
+
+    let enc4 = roman_encode(4);
+    assert_eq(roman_decode(enc4), 4);
+
+    let enc9 = roman_encode(9);
+    assert_eq(roman_decode(enc9), 9);
+
+    let enc14 = roman_encode(14);
+    assert_eq(roman_decode(enc14), 14);
+
+    let enc42 = roman_encode(42);
+    assert_eq(roman_decode(enc42), 42);
+
+    let enc99 = roman_encode(99);
+    assert_eq(roman_decode(enc99), 99);
+}
+
+fn test_encode_known() {
+    // 4 = IV: [1, 5]
+    let r = roman_encode(4);
+    assert_eq(r.len, 2);
+    assert_eq(rs_get(r, 0), 1);
+    assert_eq(rs_get(r, 1), 5);
+
+    // 8 = VIII: [5, 1, 1, 1]
+    let r2 = roman_encode(8);
+    assert_eq(r2.len, 4);
+    assert_eq(rs_get(r2, 0), 5);
+}
+
+fn main() -> Int {
+    test_decode_simple();
+    test_decode_subtractive();
+    test_roundtrip();
+    test_encode_known();
+    print("[OK] 269_roman_numerals_aot");
+    0
+}

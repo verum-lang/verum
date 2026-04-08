@@ -1,0 +1,171 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, struct-layout, repr-c
+
+/// Struct layout control for FFI
+/// Demonstrates @repr(C) and related layout attributes
+
+/// C-compatible type with guaranteed layout
+@repr(C)
+type Point is {
+    x: f64,
+    y: f64,
+};
+
+/// Packed type for binary protocols
+@repr(C, packed)
+type PackedHeader is {
+    magic: u32,
+    version: u16,
+    flags: u16,
+    length: u64,
+};
+
+/// Aligned type for SIMD operations
+@repr(C, align(16))
+type AlignedVector is {
+    data: [f32; 4],
+};
+
+/// Sum type with C-compatible representation
+@repr(C)
+type CEnum is
+    | First = 0
+    | Second = 1
+    | Third = 2;
+
+/// Sum type with specific integer type
+@repr(u8)
+type SmallEnum is
+    | A = 0
+    | B = 1
+    | C = 2;
+
+/// Union type (C-style)
+@repr(C)
+type IntOrFloat is union {
+    i: i32,
+    f: f32,
+};
+
+/// Complex nested type
+@repr(C)
+type ComplexStruct is {
+    header: PackedHeader,
+    points: [Point; 8],
+    flags: u32,
+    padding: [u8; 4],  // Explicit padding for alignment
+};
+
+/// Type matching Cps sockaddr_in
+@repr(C)
+type SockAddrIn is {
+    sin_family: u16,
+    sin_port: u16,
+    sin_addr: InAddr,
+    sin_zero: [u8; 8],
+};
+
+@repr(C)
+type InAddr is {
+    s_addr: u32,
+};
+
+/// Type matching Cps stat
+@repr(C)
+type Stat is {
+    st_dev: u64,
+    st_ino: u64,
+    st_mode: u32,
+    st_nlink: u32,
+    st_uid: u32,
+    st_gid: u32,
+    st_rdev: u64,
+    st_size: i64,
+    st_blksize: i64,
+    st_blocks: i64,
+    st_atime: i64,
+    st_atime_nsec: i64,
+    st_mtime: i64,
+    st_mtime_nsec: i64,
+    st_ctime: i64,
+    st_ctime_nsec: i64,
+};
+
+/// Bitfield type (using explicit bit manipulation)
+@repr(C)
+type BitFlags is {
+    // Stored as u32, but accessed as individual bits
+    flags: u32,
+};
+
+implement BitFlags {
+    const FLAG_A: u32 = 1 << 0;
+    const FLAG_B: u32 = 1 << 1;
+    const FLAG_C: u32 = 1 << 2;
+    const FLAG_D: u32 = 1 << 3;
+
+    fn has_flag_a(&self) -> Bool {
+        (self.flags & Self.FLAG_A) != 0
+    }
+
+    fn set_flag_a(&mut self, value: Bool) {
+        if value {
+            self.flags |= Self.FLAG_A;
+        } else {
+            self.flags &= (0xFFFFFFFF ^ Self.FLAG_A);
+        }
+    }
+}
+
+/// Generic type with C layout
+@repr(C)
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+/// Verify type sizes at compile time
+// @const_assert(Point.size == 16);
+// @const_assert(PackedHeader.size == 16);
+// @const_assert(AlignedVector.alignment == 16);
+// @const_assert(CEnum.size == i32.size);
+// @const_assert(SmallEnum.size == 1);
+
+/// FFI function using C-layout types
+ffi Geometry {
+    @extern("C")
+    fn compute_distance(p1: *const Point, p2: *const Point) -> f64;
+
+    @extern("C")
+    fn transform_points(points: *mut Point, count: usize, matrix: *const Matrix4x4);
+}
+
+@repr(C, align(16))
+type Matrix4x4 is {
+    m: [[f32; 4]; 4],
+};
+
+/// Platform-specific layout
+@cfg(target_pointer_width = "64")
+@repr(C)
+type PlatformStruct is {
+    ptr: *mut u8,
+    len: usize,
+    cap: usize,
+};
+
+@cfg(target_pointer_width = "32")
+@repr(C)
+type PlatformStruct is {
+    ptr: *mut u8,
+    len: u32,
+    cap: u32,
+};
+
+/// Transparent wrapper (same layout as inner type)
+@repr(transparent)
+type Wrapper<T> is {
+    inner: T,
+};

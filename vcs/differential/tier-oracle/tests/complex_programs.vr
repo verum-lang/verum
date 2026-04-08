@@ -1,0 +1,845 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, complex, tier-oracle, integration
+// @timeout: 60000
+
+/// Complex programs that exercise multiple language features together.
+/// These tests ensure that the interpreter and AOT compiler produce
+/// identical results for realistic, multi-feature programs.
+
+fn main() {
+    test_quicksort();
+    test_binary_tree();
+    test_graph_traversal();
+    test_expression_evaluator();
+    test_state_machine();
+    test_parser_combinator();
+    test_memoization();
+    test_concurrent_simulation();
+}
+
+// =============================================================================
+// Test 1: Quicksort with various pivot strategies
+// =============================================================================
+
+fn test_quicksort() {
+    println("=== Quicksort ===");
+
+    let arr = [64, 34, 25, 12, 22, 11, 90, 5, 77, 33, 1, 99, 45, 67, 23];
+
+    // Quicksort with first element as pivot
+    let sorted1 = quicksort(arr.clone(), |a| a[0]);
+    println(f"sorted (first pivot): {sorted1}");
+
+    // Quicksort with middle element as pivot
+    let sorted2 = quicksort(arr.clone(), |a| a[a.len() / 2]);
+    println(f"sorted (middle pivot): {sorted2}");
+
+    // Quicksort with median of three
+    let sorted3 = quicksort(arr.clone(), |a| {
+        let first = a[0];
+        let middle = a[a.len() / 2];
+        let last = a[a.len() - 1];
+        median_of_three(first, middle, last)
+    });
+    println(f"sorted (median-of-3): {sorted3}");
+
+    // Verify all produce same result
+    println(f"all equal: {sorted1 == sorted2 && sorted2 == sorted3}");
+}
+
+fn quicksort<T: Ord>(arr: List<T>, choose_pivot: Fn(List<T>) -> T) -> List<T> {
+    if arr.len() <= 1 {
+        return arr;
+    }
+
+    let pivot = choose_pivot(arr.clone());
+    let less = arr.filter(|x| x < pivot);
+    let equal = arr.filter(|x| x == pivot);
+    let greater = arr.filter(|x| x > pivot);
+
+    let sorted_less = quicksort(less, choose_pivot);
+    let sorted_greater = quicksort(greater, choose_pivot);
+
+    sorted_less.concat(equal).concat(sorted_greater)
+}
+
+fn median_of_three<T: Ord>(a: T, b: T, c: T) -> T {
+    if (a <= b && b <= c) || (c <= b && b <= a) {
+        b
+    } else if (b <= a && a <= c) || (c <= a && a <= b) {
+        a
+    } else {
+        c
+    }
+}
+
+// =============================================================================
+// Test 2: Binary Tree with various traversals
+// =============================================================================
+
+type BinaryTree<T> is Empty | Node { value: T, left: Heap<BinaryTree<T>>, right: Heap<BinaryTree<T>> };
+
+fn test_binary_tree() {
+    println("\n=== Binary Tree ===");
+
+    // Build a tree:
+    //        4
+    //       / \
+    //      2   6
+    //     / \ / \
+    //    1  3 5  7
+
+    let tree = BinaryTree.Node {
+        value: 4,
+        left: Heap(BinaryTree.Node {
+            value: 2,
+            left: Heap(BinaryTree.Node { value: 1, left: Heap(BinaryTree.Empty), right: Heap(BinaryTree.Empty) }),
+            right: Heap(BinaryTree.Node { value: 3, left: Heap(BinaryTree.Empty), right: Heap(BinaryTree.Empty) }),
+        }),
+        right: Heap(BinaryTree.Node {
+            value: 6,
+            left: Heap(BinaryTree.Node { value: 5, left: Heap(BinaryTree.Empty), right: Heap(BinaryTree.Empty) }),
+            right: Heap(BinaryTree.Node { value: 7, left: Heap(BinaryTree.Empty), right: Heap(BinaryTree.Empty) }),
+        }),
+    };
+
+    println(f"inorder:    {inorder(tree.clone())}");
+    println(f"preorder:   {preorder(tree.clone())}");
+    println(f"postorder:  {postorder(tree.clone())}");
+    println(f"levelorder: {levelorder(tree.clone())}");
+
+    println(f"height: {height(tree.clone())}");
+    println(f"size:   {size(tree.clone())}");
+    println(f"sum:    {tree_sum(tree.clone())}");
+
+    // Search
+    println(f"contains 5: {contains(tree.clone(), 5)}");
+    println(f"contains 8: {contains(tree.clone(), 8)}");
+
+    // Min/Max
+    println(f"min: {tree_min(tree.clone())}");
+    println(f"max: {tree_max(tree.clone())}");
+}
+
+fn inorder<T>(tree: BinaryTree<T>) -> List<T> {
+    match tree {
+        BinaryTree.Empty => [],
+        BinaryTree.Node { value, left, right } => {
+            inorder(*left).concat([value]).concat(inorder(*right))
+        }
+    }
+}
+
+fn preorder<T>(tree: BinaryTree<T>) -> List<T> {
+    match tree {
+        BinaryTree.Empty => [],
+        BinaryTree.Node { value, left, right } => {
+            [value].concat(preorder(*left)).concat(preorder(*right))
+        }
+    }
+}
+
+fn postorder<T>(tree: BinaryTree<T>) -> List<T> {
+    match tree {
+        BinaryTree.Empty => [],
+        BinaryTree.Node { value, left, right } => {
+            postorder(*left).concat(postorder(*right)).concat([value])
+        }
+    }
+}
+
+fn levelorder<T>(tree: BinaryTree<T>) -> List<T> {
+    let mut result = [];
+    let mut queue = [tree];
+
+    while !queue.is_empty() {
+        let current = queue.pop_front();
+        match current {
+            BinaryTree.Empty => {},
+            BinaryTree.Node { value, left, right } => {
+                result.push(value);
+                queue.push(*left);
+                queue.push(*right);
+            }
+        }
+    }
+
+    result
+}
+
+fn height<T>(tree: BinaryTree<T>) -> Int {
+    match tree {
+        BinaryTree.Empty => 0,
+        BinaryTree.Node { left, right, .. } => {
+            1 + max(height(*left), height(*right))
+        }
+    }
+}
+
+fn size<T>(tree: BinaryTree<T>) -> Int {
+    match tree {
+        BinaryTree.Empty => 0,
+        BinaryTree.Node { left, right, .. } => 1 + size(*left) + size(*right)
+    }
+}
+
+fn tree_sum(tree: BinaryTree<Int>) -> Int {
+    match tree {
+        BinaryTree.Empty => 0,
+        BinaryTree.Node { value, left, right } => value + tree_sum(*left) + tree_sum(*right)
+    }
+}
+
+fn contains<T: Eq>(tree: BinaryTree<T>, target: T) -> Bool {
+    match tree {
+        BinaryTree.Empty => false,
+        BinaryTree.Node { value, left, right } => {
+            value == target || contains(*left, target) || contains(*right, target)
+        }
+    }
+}
+
+fn tree_min(tree: BinaryTree<Int>) -> Maybe<Int> {
+    match tree {
+        BinaryTree.Empty => None,
+        BinaryTree.Node { value, left, right } => {
+            let left_min = tree_min(*left);
+            let right_min = tree_min(*right);
+
+            let min_val = match (left_min, right_min) {
+                (None, None) => value,
+                (Some(l), None) => min(value, l),
+                (None, Some(r)) => min(value, r),
+                (Some(l), Some(r)) => min(value, min(l, r)),
+            };
+
+            Some(min_val)
+        }
+    }
+}
+
+fn tree_max(tree: BinaryTree<Int>) -> Maybe<Int> {
+    match tree {
+        BinaryTree.Empty => None,
+        BinaryTree.Node { value, left, right } => {
+            let left_max = tree_max(*left);
+            let right_max = tree_max(*right);
+
+            let max_val = match (left_max, right_max) {
+                (None, None) => value,
+                (Some(l), None) => max(value, l),
+                (None, Some(r)) => max(value, r),
+                (Some(l), Some(r)) => max(value, max(l, r)),
+            };
+
+            Some(max_val)
+        }
+    }
+}
+
+// =============================================================================
+// Test 3: Graph Traversal (BFS and DFS)
+// =============================================================================
+
+type Graph is {
+    vertices: Int,
+    edges: Map<Int, List<Int>>,
+};
+
+fn test_graph_traversal() {
+    println("\n=== Graph Traversal ===");
+
+    // Build a graph:
+    //   0 --- 1 --- 2
+    //   |     |     |
+    //   3 --- 4 --- 5
+    //         |
+    //         6
+
+    let mut graph = Graph {
+        vertices: 7,
+        edges: Map.new(),
+    };
+
+    add_edge(&mut graph, 0, 1);
+    add_edge(&mut graph, 0, 3);
+    add_edge(&mut graph, 1, 2);
+    add_edge(&mut graph, 1, 4);
+    add_edge(&mut graph, 2, 5);
+    add_edge(&mut graph, 3, 4);
+    add_edge(&mut graph, 4, 5);
+    add_edge(&mut graph, 4, 6);
+
+    println(f"BFS from 0: {bfs(&graph, 0)}");
+    println(f"DFS from 0: {dfs(&graph, 0)}");
+
+    println(f"path 0->5: {find_path(&graph, 0, 5)}");
+    println(f"path 0->6: {find_path(&graph, 0, 6)}");
+
+    println(f"shortest distance 0->5: {shortest_distance(&graph, 0, 5)}");
+    println(f"shortest distance 0->6: {shortest_distance(&graph, 0, 6)}");
+}
+
+fn add_edge(graph: &mut Graph, from: Int, to: Int) {
+    graph.edges.entry(from).or_insert([]).push(to);
+    graph.edges.entry(to).or_insert([]).push(from);
+}
+
+fn bfs(graph: &Graph, start: Int) -> List<Int> {
+    let mut visited = Set.new();
+    let mut result = [];
+    let mut queue = [start];
+
+    while !queue.is_empty() {
+        let node = queue.pop_front();
+        if !visited.contains(node) {
+            visited.insert(node);
+            result.push(node);
+
+            if let Some(neighbors) = graph.edges.get(&node) {
+                for neighbor in neighbors {
+                    if !visited.contains(neighbor) {
+                        queue.push(neighbor);
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+fn dfs(graph: &Graph, start: Int) -> List<Int> {
+    let mut visited = Set.new();
+    let mut result = [];
+    dfs_helper(graph, start, &mut visited, &mut result);
+    result
+}
+
+fn dfs_helper(graph: &Graph, node: Int, visited: &mut Set<Int>, result: &mut List<Int>) {
+    if visited.contains(node) {
+        return;
+    }
+
+    visited.insert(node);
+    result.push(node);
+
+    if let Some(neighbors) = graph.edges.get(&node) {
+        for neighbor in neighbors {
+            dfs_helper(graph, neighbor, visited, result);
+        }
+    }
+}
+
+fn find_path(graph: &Graph, start: Int, end: Int) -> Maybe<List<Int>> {
+    let mut visited = Set.new();
+    let mut parent = Map.new();
+    let mut queue = [start];
+    visited.insert(start);
+
+    while !queue.is_empty() {
+        let node = queue.pop_front();
+
+        if node == end {
+            // Reconstruct path
+            let mut path = [end];
+            let mut current = end;
+            while current != start {
+                current = parent.get(&current).unwrap();
+                path.push(current);
+            }
+            return Some(path.reverse());
+        }
+
+        if let Some(neighbors) = graph.edges.get(&node) {
+            for neighbor in neighbors {
+                if !visited.contains(neighbor) {
+                    visited.insert(neighbor);
+                    parent.insert(neighbor, node);
+                    queue.push(neighbor);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn shortest_distance(graph: &Graph, start: Int, end: Int) -> Maybe<Int> {
+    find_path(graph, start, end).map(|path| path.len() - 1)
+}
+
+// =============================================================================
+// Test 4: Expression Evaluator
+// =============================================================================
+
+type Expr is
+    Num(Float) |
+    Var(Text) |
+    Add(Heap<Expr>, Heap<Expr>) |
+    Sub(Heap<Expr>, Heap<Expr>) |
+    Mul(Heap<Expr>, Heap<Expr>) |
+    Div(Heap<Expr>, Heap<Expr>) |
+    Pow(Heap<Expr>, Heap<Expr>) |
+    Neg(Heap<Expr>) |
+    Call(Text, List<Expr>);
+
+fn test_expression_evaluator() {
+    println("\n=== Expression Evaluator ===");
+
+    let env = Map.from([
+        ("x", 3.0),
+        ("y", 4.0),
+        ("pi", 3.14159265358979),
+        ("e", 2.71828182845905),
+    ]);
+
+    // 2 + 3 * 4 = 14
+    let expr1 = Expr.Add(
+        Heap(Expr.Num(2.0)),
+        Heap(Expr.Mul(Heap(Expr.Num(3.0)), Heap(Expr.Num(4.0))))
+    );
+    println(f"2 + 3 * 4 = {eval(expr1, &env)}");
+
+    // x^2 + y^2 = 25
+    let expr2 = Expr.Add(
+        Heap(Expr.Pow(Heap(Expr.Var("x")), Heap(Expr.Num(2.0)))),
+        Heap(Expr.Pow(Heap(Expr.Var("y")), Heap(Expr.Num(2.0))))
+    );
+    println(f"x^2 + y^2 = {eval(expr2, &env)}");
+
+    // sqrt(x^2 + y^2) = 5
+    let expr3 = Expr.Call("sqrt", [
+        Expr.Add(
+            Heap(Expr.Pow(Heap(Expr.Var("x")), Heap(Expr.Num(2.0)))),
+            Heap(Expr.Pow(Heap(Expr.Var("y")), Heap(Expr.Num(2.0))))
+        )
+    ]);
+    println(f"sqrt(x^2 + y^2) = {eval(expr3, &env)}");
+
+    // sin(pi/6)^2 + cos(pi/6)^2 = 1
+    let pi_6 = Expr.Div(Heap(Expr.Var("pi")), Heap(Expr.Num(6.0)));
+    let expr4 = Expr.Add(
+        Heap(Expr.Pow(Heap(Expr.Call("sin", [pi_6.clone()])), Heap(Expr.Num(2.0)))),
+        Heap(Expr.Pow(Heap(Expr.Call("cos", [pi_6])), Heap(Expr.Num(2.0))))
+    );
+    println(f"sin(pi/6)^2 + cos(pi/6)^2 = {eval(expr4, &env)}");
+}
+
+fn eval(expr: Expr, env: &Map<Text, Float>) -> Float {
+    match expr {
+        Expr.Num(n) => n,
+        Expr.Var(name) => env.get(&name).unwrap_or(0.0),
+        Expr.Add(l, r) => eval(*l, env) + eval(*r, env),
+        Expr.Sub(l, r) => eval(*l, env) - eval(*r, env),
+        Expr.Mul(l, r) => eval(*l, env) * eval(*r, env),
+        Expr.Div(l, r) => eval(*l, env) / eval(*r, env),
+        Expr.Pow(l, r) => eval(*l, env).pow(eval(*r, env)),
+        Expr.Neg(e) => -eval(*e, env),
+        Expr.Call(name, args) => {
+            let evaluated_args: List<Float> = args.map(|a| eval(a, env));
+            call_builtin(&name, evaluated_args)
+        }
+    }
+}
+
+fn call_builtin(name: &Text, args: List<Float>) -> Float {
+    match name.as_str() {
+        "sqrt" => args[0].sqrt(),
+        "sin" => args[0].sin(),
+        "cos" => args[0].cos(),
+        "tan" => args[0].tan(),
+        "log" => args[0].ln(),
+        "exp" => args[0].exp(),
+        "abs" => args[0].abs(),
+        "floor" => args[0].floor(),
+        "ceil" => args[0].ceil(),
+        "min" => args[0].min(args[1]),
+        "max" => args[0].max(args[1]),
+        _ => 0.0,
+    }
+}
+
+// =============================================================================
+// Test 5: State Machine
+// =============================================================================
+
+type State is Initial | Running | Paused | Completed | Failed(Text);
+
+type Event is Start | Pause | Resume | Complete | Error(Text) | Reset;
+
+fn test_state_machine() {
+    println("\n=== State Machine ===");
+
+    let mut state = State.Initial;
+    let events = [
+        Event.Start,
+        Event.Pause,
+        Event.Resume,
+        Event.Error("network failure"),
+        Event.Reset,
+        Event.Start,
+        Event.Complete,
+    ];
+
+    println(f"initial state: {format_state(&state)}");
+
+    for event in events {
+        println(f"event: {format_event(&event)}");
+        state = transition(state, event);
+        println(f"  -> {format_state(&state)}");
+    }
+}
+
+fn transition(state: State, event: Event) -> State {
+    match (state, event) {
+        (State.Initial, Event.Start) => State.Running,
+        (State.Initial, _) => State.Initial,
+
+        (State.Running, Event.Pause) => State.Paused,
+        (State.Running, Event.Complete) => State.Completed,
+        (State.Running, Event.Error(msg)) => State.Failed(msg),
+        (State.Running, _) => State.Running,
+
+        (State.Paused, Event.Resume) => State.Running,
+        (State.Paused, Event.Reset) => State.Initial,
+        (State.Paused, _) => State.Paused,
+
+        (State.Completed, Event.Reset) => State.Initial,
+        (State.Completed, _) => State.Completed,
+
+        (State.Failed(_), Event.Reset) => State.Initial,
+        (State.Failed(msg), _) => State.Failed(msg),
+    }
+}
+
+fn format_state(state: &State) -> Text {
+    match state {
+        State.Initial => "Initial",
+        State.Running => "Running",
+        State.Paused => "Paused",
+        State.Completed => "Completed",
+        State.Failed(msg) => f"Failed({msg})",
+    }
+}
+
+fn format_event(event: &Event) -> Text {
+    match event {
+        Event.Start => "Start",
+        Event.Pause => "Pause",
+        Event.Resume => "Resume",
+        Event.Complete => "Complete",
+        Event.Error(msg) => f"Error({msg})",
+        Event.Reset => "Reset",
+    }
+}
+
+// =============================================================================
+// Test 6: Parser Combinator
+// =============================================================================
+
+type ParseResult<T> is {
+    value: T,
+    remaining: Text,
+};
+
+fn test_parser_combinator() {
+    println("\n=== Parser Combinator ===");
+
+    // Parse simple arithmetic expressions
+    let inputs = [
+        "123",
+        "3+4",
+        "10-5*2",
+        "(2+3)*4",
+        "100/5/2",
+    ];
+
+    for input in inputs {
+        match parse_expr(input) {
+            Some(result) => {
+                println(f"'{input}' = {result}");
+            },
+            None => {
+                println(f"'{input}' = parse error");
+            }
+        }
+    }
+}
+
+fn parse_expr(input: &Text) -> Maybe<Int> {
+    parse_additive(input.trim()).map(|r| r.value)
+}
+
+fn parse_additive(input: Text) -> Maybe<ParseResult<Int>> {
+    let mut result = parse_multiplicative(input)?;
+
+    while !result.remaining.is_empty() {
+        let remaining = result.remaining.trim();
+
+        if remaining.starts_with('+') {
+            let next = parse_multiplicative(remaining[1..].trim())?;
+            result = ParseResult {
+                value: result.value + next.value,
+                remaining: next.remaining,
+            };
+        } else if remaining.starts_with('-') {
+            let next = parse_multiplicative(remaining[1..].trim())?;
+            result = ParseResult {
+                value: result.value - next.value,
+                remaining: next.remaining,
+            };
+        } else {
+            break;
+        }
+    }
+
+    Some(result)
+}
+
+fn parse_multiplicative(input: Text) -> Maybe<ParseResult<Int>> {
+    let mut result = parse_primary(input)?;
+
+    while !result.remaining.is_empty() {
+        let remaining = result.remaining.trim();
+
+        if remaining.starts_with('*') {
+            let next = parse_primary(remaining[1..].trim())?;
+            result = ParseResult {
+                value: result.value * next.value,
+                remaining: next.remaining,
+            };
+        } else if remaining.starts_with('/') {
+            let next = parse_primary(remaining[1..].trim())?;
+            result = ParseResult {
+                value: result.value / next.value,
+                remaining: next.remaining,
+            };
+        } else {
+            break;
+        }
+    }
+
+    Some(result)
+}
+
+fn parse_primary(input: Text) -> Maybe<ParseResult<Int>> {
+    let input = input.trim();
+
+    if input.starts_with('(') {
+        let inner = parse_additive(input[1..].trim())?;
+        let remaining = inner.remaining.trim();
+        if remaining.starts_with(')') {
+            return Some(ParseResult {
+                value: inner.value,
+                remaining: remaining[1..].to_text(),
+            });
+        }
+        return None;
+    }
+
+    parse_number(input)
+}
+
+fn parse_number(input: Text) -> Maybe<ParseResult<Int>> {
+    let mut end = 0;
+    for (i, c) in input.char_indices() {
+        if c.is_ascii_digit() {
+            end = i + 1;
+        } else {
+            break;
+        }
+    }
+
+    if end == 0 {
+        return None;
+    }
+
+    let num_str = input[..end].to_text();
+    let value = num_str.parse<Int>()?;
+
+    Some(ParseResult {
+        value,
+        remaining: input[end..].to_text(),
+    })
+}
+
+// =============================================================================
+// Test 7: Memoization
+// =============================================================================
+
+fn test_memoization() {
+    println("\n=== Memoization ===");
+
+    // Fibonacci with memoization
+    let mut memo = Map.new();
+
+    for n in [10, 20, 30, 35] {
+        let result = fib_memo(n, &mut memo);
+        println(f"fib({n}) = {result}");
+    }
+
+    println(f"memo cache size: {memo.len()}");
+
+    // Coin change with memoization
+    let coins = [1, 5, 10, 25];
+    let amounts = [11, 30, 67, 100];
+
+    for amount in amounts {
+        let mut memo = Map.new();
+        let result = coin_change(amount, &coins, &mut memo);
+        println(f"coin_change({amount}) = {result}");
+    }
+}
+
+fn fib_memo(n: Int, memo: &mut Map<Int, Int>) -> Int {
+    if n <= 1 {
+        return n;
+    }
+
+    if let Some(cached) = memo.get(&n) {
+        return *cached;
+    }
+
+    let result = fib_memo(n - 1, memo) + fib_memo(n - 2, memo);
+    memo.insert(n, result);
+    result
+}
+
+fn coin_change(amount: Int, coins: &List<Int>, memo: &mut Map<Int, Maybe<Int>>) -> Maybe<Int> {
+    if amount == 0 {
+        return Some(0);
+    }
+
+    if amount < 0 {
+        return None;
+    }
+
+    if let Some(cached) = memo.get(&amount) {
+        return *cached;
+    }
+
+    let mut min_coins: Maybe<Int> = None;
+
+    for coin in coins {
+        if let Some(sub_result) = coin_change(amount - coin, coins, memo) {
+            let total = sub_result + 1;
+            min_coins = match min_coins {
+                None => Some(total),
+                Some(current) => Some(min(current, total)),
+            };
+        }
+    }
+
+    memo.insert(amount, min_coins);
+    min_coins
+}
+
+// =============================================================================
+// Test 8: Concurrent Simulation (Deterministic)
+// =============================================================================
+
+type SimulationState is {
+    time: Int,
+    entities: Map<Int, Entity>,
+    events: List<SimEvent>,
+};
+
+type Entity is {
+    id: Int,
+    position: (Float, Float),
+    velocity: (Float, Float),
+};
+
+type SimEvent is {
+    time: Int,
+    entity_id: Int,
+    action: Text,
+};
+
+fn test_concurrent_simulation() {
+    println("\n=== Concurrent Simulation ===");
+
+    let mut state = SimulationState {
+        time: 0,
+        entities: Map.from([
+            (0, Entity { id: 0, position: (0.0, 0.0), velocity: (1.0, 0.5) }),
+            (1, Entity { id: 1, position: (10.0, 10.0), velocity: (-0.5, 0.25) }),
+            (2, Entity { id: 2, position: (5.0, 0.0), velocity: (0.0, 1.0) }),
+        ]),
+        events: [],
+    };
+
+    // Run simulation for 10 steps
+    for step in 0..10 {
+        state = simulate_step(state);
+
+        if step % 3 == 0 {
+            println(f"Step {step}:");
+            for (id, entity) in &state.entities {
+                println(f"  Entity {id}: pos=({entity.position.0:.2}, {entity.position.1:.2})");
+            }
+        }
+    }
+
+    println(f"Final time: {state.time}");
+    println(f"Total events: {state.events.len()}");
+}
+
+fn simulate_step(mut state: SimulationState) -> SimulationState {
+    state.time += 1;
+
+    // Update all entities deterministically (sorted by ID)
+    let mut entity_ids: List<Int> = state.entities.keys().collect();
+    entity_ids.sort();
+
+    for id in entity_ids {
+        if let Some(entity) = state.entities.get_mut(&id) {
+            // Update position
+            let new_x = entity.position.0 + entity.velocity.0;
+            let new_y = entity.position.1 + entity.velocity.1;
+
+            // Bounce off boundaries [0, 20]
+            let (new_x, vx) = if new_x < 0.0 || new_x > 20.0 {
+                state.events.push(SimEvent {
+                    time: state.time,
+                    entity_id: id,
+                    action: "bounce_x",
+                });
+                (new_x.clamp(0.0, 20.0), -entity.velocity.0)
+            } else {
+                (new_x, entity.velocity.0)
+            };
+
+            let (new_y, vy) = if new_y < 0.0 || new_y > 20.0 {
+                state.events.push(SimEvent {
+                    time: state.time,
+                    entity_id: id,
+                    action: "bounce_y",
+                });
+                (new_y.clamp(0.0, 20.0), -entity.velocity.1)
+            } else {
+                (new_y, entity.velocity.1)
+            };
+
+            entity.position = (new_x, new_y);
+            entity.velocity = (vx, vy);
+        }
+    }
+
+    state
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+fn min<T: Ord>(a: T, b: T) -> T {
+    if a <= b { a } else { b }
+}
+
+fn max<T: Ord>(a: T, b: T) -> T {
+    if a >= b { a } else { b }
+}

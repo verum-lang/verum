@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, active-pattern
+// @description: Active patterns with exhaustiveness checking
+
+type Maybe<T> is None | Some(T);
+
+// Define active pattern for Even/Odd classification
+pattern Even(n: Int) -> Maybe<Int> =
+    if n % 2 == 0 { Some(n / 2) } else { None };
+
+pattern Odd(n: Int) -> Maybe<Int> =
+    if n % 2 != 0 { Some((n - 1) / 2) } else { None };
+
+// Active pattern exhaustiveness with wildcard fallback
+fn classify_parity(n: Int) -> Text =
+    match n {
+        Even(half) => f"even, half is {half}",
+        Odd(half) => f"odd, half-minus-one is {half}",
+        _ => "unreachable"  // fallback for safety
+    };
+
+// Complete active patterns (total coverage)
+pattern Positive(n: Int) -> Maybe<Int> =
+    if n > 0 { Some(n) } else { None };
+
+pattern NonPositive(n: Int) -> Maybe<Int> =
+    if n <= 0 { Some(n) } else { None };
+
+// Using complete active patterns
+fn sign_analysis(n: Int) -> Text =
+    match n {
+        Positive(x) => f"positive: {x}",
+        NonPositive(x) if x == 0 => "zero",
+        NonPositive(x) => f"negative: {x}"
+    };
+
+// Active pattern with multiple returns
+pattern Fizz(n: Int) -> Maybe<()> =
+    if n % 3 == 0 { Some(()) } else { None };
+
+pattern Buzz(n: Int) -> Maybe<()> =
+    if n % 5 == 0 { Some(()) } else { None };
+
+fn fizzbuzz(n: Int) -> Text =
+    match n {
+        Fizz(_) & Buzz(_) => "fizzbuzz",
+        Fizz(_) => "fizz",
+        Buzz(_) => "buzz",
+        _ => n.to_string()
+    };
+
+// Parameterized active pattern
+pattern DivisibleBy(n: Int, d: Int) -> Maybe<Int> =
+    if n % d == 0 { Some(n / d) } else { None };
+
+fn divisibility_check(n: Int) -> Text =
+    match n {
+        DivisibleBy(2, q) => f"divisible by 2: quotient {q}",
+        DivisibleBy(3, q) => f"divisible by 3: quotient {q}",
+        _ => "not divisible by 2 or 3"
+    };
+
+fn main() {
+    assert(classify_parity(10) == "even, half is 5");
+    assert(classify_parity(7) == "odd, half-minus-one is 3");
+    assert(sign_analysis(5) == "positive: 5");
+    assert(sign_analysis(0) == "zero");
+    assert(fizzbuzz(15) == "fizzbuzz");
+    assert(fizzbuzz(9) == "fizz");
+    assert(divisibility_check(12) == "divisible by 2: quotient 6");
+}

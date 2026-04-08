@@ -1,0 +1,99 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, tactics, auto
+// @timeout: 10000
+// @description: Automatic proof tactic for simple properties
+
+/// The auto tactic tries common proof strategies automatically
+
+// Simple arithmetic that auto can handle
+@verify(proof)
+fn abs(x: Int) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result == x || result == -x;
+    ";
+    if x >= 0 { x } else { -x }
+}
+
+// Boolean logic - auto handles propositional logic
+@verify(proof)
+fn implies(a: Bool, b: Bool) -> Bool {
+    contract#"
+        ensures result == (!a || b);
+    ";
+    !a || b
+}
+
+// Simple list property
+@verify(proof)
+fn is_empty<T>(list: &List<T>) -> Bool {
+    contract#"
+        ensures result == (list.len() == 0);
+    ";
+    list.len() == 0
+}
+
+// Conditional with clear branches
+@verify(proof)
+fn max(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result >= a && result >= b;
+        ensures result == a || result == b;
+    ";
+    if a >= b { a } else { b }
+}
+
+// Simple loop invariant
+@verify(proof)
+fn sum_to_n(n: Int) -> Int {
+    contract#"
+        requires n >= 0;
+        ensures result == n * (n + 1) / 2;
+    ";
+    let mut sum = 0;
+    let mut i = 0;
+
+    while i <= n
+        invariant sum == i * (i + 1) / 2
+        invariant i <= n + 1
+    {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    sum
+}
+
+// Match exhaustiveness
+@verify(proof)
+fn option_value<T: Default>(opt: Maybe<T>) -> T {
+    contract#"
+        ensures opt.is_some() implies result == opt.unwrap();
+        ensures opt.is_none() implies result == T.default();
+    ";
+    match opt {
+        Some(v) => v,
+        None => T.default(),
+    }
+}
+
+// Transitivity
+@verify(proof)
+fn transitive_order(a: Int, b: Int, c: Int) -> Bool {
+    contract#"
+        requires a < b && b < c;
+        ensures result == true;
+        ensures a < c;
+    ";
+    a < c
+}
+
+fn main() {
+    // Test cases
+    assert(abs(-5) == 5);
+    assert(abs(5) == 5);
+    assert(max(3, 7) == 7);
+    assert(sum_to_n(10) == 55);
+}

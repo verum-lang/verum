@@ -1,0 +1,44 @@
+// @test: parse
+// @level: L0
+// @tags: parser, operators, is, pattern-test
+// @description: Test 'is' pattern test operator parsing
+
+fn test_is_operator() {
+    // Basic pattern test
+    let a = value is Some(x);
+    let b = value is None;
+    let c = result is Ok(v);
+    let d = result is Err(e);
+
+    // Negated pattern test
+    let e = value is not None;
+    let f = result is not Err(_);
+
+    // Type test patterns
+    let g = x is Int;
+    let h = value is Text;
+
+    // In if conditions
+    if value is Some(x) {
+        use(x);
+    }
+
+    if result is not Err(_) {
+        proceed();
+    }
+
+    // In while loops
+    while result is Pending {
+        poll();
+    }
+
+    // Combined with logical operators
+    let i = value is Some(x) && x > 0;
+    let j = a is None || b is None;
+
+    // In match guards
+    match data {
+        x if x is Valid => process(x),
+        _ => default()
+    }
+}

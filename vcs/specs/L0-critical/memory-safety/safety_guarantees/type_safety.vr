@@ -1,0 +1,289 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, safety-guarantees, type-safety, critical
+// @description: Core safety guarantee - type safety prevents memory reinterpretation
+
+/// SAFETY GUARANTEE: Type Safety
+///
+/// Verum's type system prevents type confusion vulnerabilities through:
+/// 1. Strong static typing with no implicit conversions
+/// 2. Nominal typing - structurally similar types are distinct
+/// 3. Generic type enforcement - List<Int> != List<Text>
+/// 4. Variant/enum type safety - discriminated unions
+/// 5. Safe casting with explicit conversion functions
+/// 6. No unsafe type punning in safe code
+///
+/// This prevents:
+/// - Type confusion vulnerabilities
+/// - Memory reinterpretation attacks
+/// - Data corruption from type mismatches
+/// - Information disclosure through type coercion
+
+fn main() {
+    test_strong_typing();
+    test_nominal_typing();
+    test_generic_safety();
+    test_variant_safety();
+    test_safe_conversions();
+    test_newtype_pattern();
+}
+
+/// Strong typing prevents implicit conversions
+fn test_strong_typing() {
+    // Each type is distinct
+    let int_val: Int = 42;
+    let float_val: Float = 3.14;
+    let bool_val: Bool = true;
+    let text_val: Text = Text.from("hello");
+
+    // Cannot mix types without explicit conversion
+    // let bad: Int = float_val;  // ERROR: type mismatch
+    // let bad: Bool = int_val;   // ERROR: no implicit truthiness
+    // let bad: Int = text_val;   // ERROR: type mismatch
+
+    // Explicit conversions are clear
+    let truncated: Int = float_val as Int;  // Explicit: 3
+    let as_text: Text = int_val.to_string();  // Explicit
+
+    assert(truncated == 3);
+    assert(as_text == "42");
+
+    // Numeric operations maintain types
+    let sum: Int = int_val + 10;  // Int + Int = Int
+    let product: Float = float_val * 2.0;  // Float * Float = Float
+
+    // Cannot mix numeric types without conversion
+    // let mixed = int_val + float_val;  // ERROR: Int + Float
+    let mixed: Float = (int_val as Float) + float_val;  // OK
+    assert(mixed == 45.14);
+}
+
+/// Nominal typing - structurally identical types are distinct
+fn test_nominal_typing() {
+    // These types have identical memory layout but are distinct types
+    type UserId is { value: Int };
+    type OrderId is { value: Int };
+
+    let user_id = UserId { value: 42 };
+    let order_id = OrderId { value: 42 };
+
+    // Cannot interchange them despite identical structure
+    // let wrong: UserId = order_id;  // ERROR: type mismatch
+    // process_user(order_id);        // ERROR: expected UserId
+
+    fn process_user(id: UserId) {
+        print(f"Processing user: {id.value}");
+    }
+
+    fn process_order(id: OrderId) {
+        print(f"Processing order: {id.value}");
+    }
+
+    // Must use correct type
+    process_user(user_id);
+    process_order(order_id);
+
+    // Explicit conversion if truly needed
+    fn user_to_order(u: UserId) -> OrderId {
+        OrderId { value: u.value }
+    }
+}
+
+/// Generic types enforce parameter types
+fn test_generic_safety() {
+    let int_list: List<Int> = [1, 2, 3];
+    let text_list: List<Text> = [
+        Text.from("a"),
+        Text.from("b"),
+    ];
+
+    // Cannot mix generic instantiations
+    // let wrong: List<Int> = text_list;  // ERROR
+
+    // Functions are type-specific
+    fn sum_ints(list: &List<Int>) -> Int {
+        list.iter().sum()
+    }
+
+    let total = sum_ints(&int_list);  // OK
+    assert(total == 6);
+
+    // sum_ints(&text_list);  // ERROR: expected List<Int>
+
+    // Map preserves key/value types
+    let scores: Map<Text, Int> = Map.new();
+    // Cannot get wrong value type
+    // let wrong: Text = scores.get("key");  // ERROR: returns Maybe<&Int>
+
+    // Generic function maintains type relationships
+    fn first_element<T>(list: &List<T>) -> Maybe<&T> {
+        list.first()
+    }
+
+    let first_int: Maybe<&Int> = first_element(&int_list);
+    let first_text: Maybe<&Text> = first_element(&text_list);
+
+    // Type flows through correctly
+    assert(*first_int.unwrap() == 1);
+    assert(*first_text.unwrap() == "a");
+}
+
+/// Variant (enum) types are safely discriminated
+fn test_variant_safety() {
+    type Value is
+        Integer(Int)
+        | Floating(Float)
+        | TextVal(Text)
+        | Boolean(Bool);
+
+    let val1 = Value.Integer(42);
+    let val2 = Value.TextVal(Text.from("hello"));
+
+    // Cannot directly access variant data
+    // let wrong = val1.0;  // ERROR: must pattern match
+
+    // Pattern matching extracts data safely
+    match val1 {
+        Value.Integer(n) => assert(n == 42),
+        Value.Floating(f) => panic("wrong variant"),
+        Value.TextVal(t) => panic("wrong variant"),
+        Value.Boolean(b) => panic("wrong variant"),
+    }
+
+    // Cannot confuse variants
+    fn expect_integer(v: Value) -> Int {
+        match v {
+            Value.Integer(n) => n,
+            _ => panic("expected integer"),
+        }
+    }
+
+    let n = expect_integer(val1);
+    assert(n == 42);
+
+    // Discriminant prevents type confusion
+    fn process_value(v: Value) -> Text {
+        match v {
+            Value.Integer(n) => format("int: {}", n),
+            Value.Floating(f) => format("float: {}", f),
+            Value.TextVal(t) => format("text: {}", t),
+            Value.Boolean(b) => format("bool: {}", b),
+        }
+    }
+
+    assert(process_value(val1) == "int: 42");
+    assert(process_value(val2) == "text: hello");
+}
+
+/// Safe conversions are explicit and checked
+fn test_safe_conversions() {
+    // Numeric widening is safe
+    let small: u8 = 42;
+    let large: u64 = small as u64;  // Lossless
+    assert(large == 42);
+
+    // Narrowing requires explicit cast (may truncate)
+    let big: u64 = 300;
+    let narrowed: u8 = big as u8;  // Truncates to 44
+
+    // Safe parsing returns Result
+    let parse_result: Result<Int, ParseError> = "42".parse();
+    match parse_result {
+        Ok(n) => assert(n == 42),
+        Err(_) => panic("parse failed"),
+    }
+
+    let bad_parse: Result<Int, ParseError> = "abc".parse();
+    assert(bad_parse.is_err());
+
+    // Protocol-based conversion
+    type From<T> is protocol {
+        fn from(value: T) -> Self;
+    };
+
+    type Into<T> is protocol {
+        fn into(self) -> T;
+    };
+
+    // Implement for specific conversions
+    implement From<u8> for Int {
+        fn from(value: u8) -> Int {
+            value as Int
+        }
+    }
+
+    let byte: u8 = 10;
+    let int: Int = Int.from(byte);  // Explicit conversion
+    assert(int == 10);
+}
+
+/// Newtype pattern for domain-specific types
+fn test_newtype_pattern() {
+    // Newtypes create distinct types from underlying type
+    type Meters is (Float);
+    type Feet is (Float);
+    type Seconds is (Float);
+    type Meters_Per_Second is (Float);
+
+    let distance = Meters(100.0);
+    let time = Seconds(10.0);
+
+    // Cannot accidentally mix units
+    // let wrong = distance.0 + time.0;  // Logically wrong!
+
+    // Proper conversion functions
+    fn meters_to_feet(m: Meters) -> Feet {
+        Feet(m.0 * 3.28084)
+    }
+
+    fn calculate_speed(dist: Meters, time: Seconds) -> Meters_Per_Second {
+        Meters_Per_Second(dist.0 / time.0)
+    }
+
+    let speed = calculate_speed(distance, time);
+    assert(speed.0 == 10.0);
+
+    // Type-safe API prevents unit confusion
+    type PhysicsEngine is ();
+
+    implement PhysicsEngine {
+        fn apply_velocity(pos: Meters, vel: Meters_Per_Second, dt: Seconds) -> Meters {
+            Meters(pos.0 + vel.0 * dt.0)
+        }
+    }
+
+    let new_pos = PhysicsEngine.apply_velocity(
+        Meters(0.0),
+        Meters_Per_Second(10.0),
+        Seconds(1.0)
+    );
+    assert(new_pos.0 == 10.0);
+
+    // Cannot pass wrong unit type
+    // PhysicsEngine.apply_velocity(Feet(0.0), ...)  // ERROR
+}
+
+/// Demonstrate safe transmute is not available in safe code
+fn demonstrate_no_unsafe_punning() {
+    let int_val: Int = 42;
+
+    // In safe Verum, cannot reinterpret bits as different type
+    // let float_bits: Float = transmute(int_val);  // ERROR: unsafe
+
+    // Safe bit-level operations use explicit methods
+    let bits: u64 = int_val.to_bits();
+    let back: Int = Int.from_bits(bits);
+    assert(back == int_val);
+
+    // Float bit manipulation
+    let f: Float = 1.0;
+    let float_bits: u64 = f.to_bits();
+    let reconstructed: Float = Float.from_bits(float_bits);
+    assert(reconstructed == 1.0);
+}
+
+// Error type for parsing
+type ParseError is {
+    message: Text,
+};

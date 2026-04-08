@@ -1,0 +1,43 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "hello world";
+    let n = "world";
+
+    // Manual implementation of find
+    let self_bytes = s.as_bytes();
+    let needle_bytes = n.as_bytes();
+
+    let slen = self_bytes.len();
+    let nlen = needle_bytes.len();
+
+    let end = slen - nlen + 1;
+    let mut result = -1;
+
+    for i in range(0, end) {
+        let mut found = true;
+        for j in range(0, nlen) {
+            let a = self_bytes[i + j];
+            let b = needle_bytes[j];
+            if a != b {
+                found = false;
+                break;
+            }
+        }
+        if found {
+            result = i;
+            break;
+        }
+    }
+    print(f"manual_find={result}");
+
+    // Now call compiled find (returns Maybe<Int>)
+    match s.find(n) {
+        Some(idx) => print(f"find: found at {idx}"),
+        None => print("find: not found"),
+    }
+
+    0
+}

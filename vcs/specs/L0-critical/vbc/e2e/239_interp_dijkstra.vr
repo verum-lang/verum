@@ -1,0 +1,262 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, dijkstra, shortest-path, graph
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: simplified Dijkstra's algorithm on small weighted graphs.
+// Uses adjacency matrix with weights (0 = no edge).
+// Linear scan instead of priority queue (O(V^2) version).
+
+// =============================================================================
+// Array utilities (8 elements)
+// =============================================================================
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int,
+               v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 } else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn a8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { val } else { a.v0 },
+        v1: if i == 1 { val } else { a.v1 },
+        v2: if i == 2 { val } else { a.v2 },
+        v3: if i == 3 { val } else { a.v3 },
+        v4: if i == 4 { val } else { a.v4 },
+        v5: if i == 5 { val } else { a.v5 },
+        v6: if i == 6 { val } else { a.v6 },
+        v7: if i == 7 { val } else { a.v7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+// Weighted graph: 8 rows. weight[i][j] = cost of edge i->j, 0 means no edge
+type WGraph is {
+    r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8,
+    r4: Arr8, r5: Arr8, r6: Arr8, r7: Arr8,
+    num_nodes: Int
+};
+
+fn wg_edge(g: WGraph, from: Int, to: Int) -> Int {
+    if from == 0 { a8_get(g.r0, to) }
+    else if from == 1 { a8_get(g.r1, to) }
+    else if from == 2 { a8_get(g.r2, to) }
+    else if from == 3 { a8_get(g.r3, to) }
+    else if from == 4 { a8_get(g.r4, to) }
+    else if from == 5 { a8_get(g.r5, to) }
+    else if from == 6 { a8_get(g.r6, to) }
+    else { a8_get(g.r7, to) }
+}
+
+// =============================================================================
+// Dijkstra's algorithm (O(V^2) with linear scan)
+// Returns dist array: dist[i] = shortest distance from source to i
+// Uses 999999 as infinity
+// =============================================================================
+
+fn inf_val() -> Int { 999999 }
+
+fn dijkstra(g: WGraph, source: Int) -> Arr8 {
+    let big = 999999;
+    let mut dist = Arr8 { v0: big, v1: big, v2: big, v3: big,
+                          v4: big, v5: big, v6: big, v7: big };
+    let mut processed = a8_zeros();  // 0 = not processed, 1 = processed
+
+    dist = a8_set(dist, source, 0);
+
+    let mut iteration = 0;
+    while iteration < g.num_nodes {
+        // Find unprocessed node with minimum distance
+        let mut min_dist = big + 1;
+        let mut min_node = -1;
+        let mut i = 0;
+        while i < g.num_nodes {
+            if a8_get(processed, i) == 0 {
+                let d = a8_get(dist, i);
+                if d < min_dist {
+                    min_dist = d;
+                    min_node = i;
+                }
+            }
+            i = i + 1;
+        }
+
+        if min_node == -1 {
+            // No more reachable nodes
+            return dist;
+        }
+
+        // Process this node
+        processed = a8_set(processed, min_node, 1);
+
+        // Relax edges
+        let mut nb = 0;
+        while nb < g.num_nodes {
+            let w = wg_edge(g, min_node, nb);
+            if w > 0 {
+                let new_dist = a8_get(dist, min_node) + w;
+                if new_dist < a8_get(dist, nb) {
+                    dist = a8_set(dist, nb, new_dist);
+                }
+            }
+            nb = nb + 1;
+        }
+
+        iteration = iteration + 1;
+    }
+    dist
+}
+
+// =============================================================================
+// Test graphs
+// =============================================================================
+
+// Graph 1: Simple triangle
+//   0 --4--> 1 --3--> 2
+//   |                  ^
+//   +-------10---------+
+// Shortest 0->2: 0->1->2 = 7 (not direct 10)
+fn make_triangle() -> WGraph {
+    let z = a8_zeros();
+    let r0 = Arr8 { v0: 0, v1: 4, v2: 10, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r1 = Arr8 { v0: 0, v1: 0, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    WGraph { r0: r0, r1: r1, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z, num_nodes: 3 }
+}
+
+// Graph 2: Classic Dijkstra example with 5 nodes
+//   0 --1--> 1 --3--> 3
+//   |        |        ^
+//   4        2        1
+//   v        v        |
+//   2 --5--> 4 -------+
+// Edges: 0->1:1, 0->2:4, 1->2:2, 1->3:3, 2->4:5, 4->3:1
+fn make_classic_graph() -> WGraph {
+    let z = a8_zeros();
+    let r0 = Arr8 { v0: 0, v1: 1, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r1 = Arr8 { v0: 0, v1: 0, v2: 2, v3: 3, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r2 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let r3 = a8_zeros();
+    let r4 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    WGraph { r0: r0, r1: r1, r2: r2, r3: r3, r4: r4, r5: z, r6: z, r7: z, num_nodes: 5 }
+}
+
+// Graph 3: Undirected weighted (symmetric matrix)
+//   0 --2-- 1 --3-- 2
+//   |               |
+//   5               1
+//   |               |
+//   3 ------4------ 4
+fn make_undirected() -> WGraph {
+    let z = a8_zeros();
+    let r0 = Arr8 { v0: 0, v1: 2, v2: 0, v3: 5, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r1 = Arr8 { v0: 2, v1: 0, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r2 = Arr8 { v0: 0, v1: 3, v2: 0, v3: 0, v4: 1, v5: 0, v6: 0, v7: 0 };
+    let r3 = Arr8 { v0: 5, v1: 0, v2: 0, v3: 0, v4: 4, v5: 0, v6: 0, v7: 0 };
+    let r4 = Arr8 { v0: 0, v1: 0, v2: 1, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    WGraph { r0: r0, r1: r1, r2: r2, r3: r3, r4: r4, r5: z, r6: z, r7: z, num_nodes: 5 }
+}
+
+// Graph 4: Single node
+fn make_single() -> WGraph {
+    let z = a8_zeros();
+    WGraph { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z, num_nodes: 1 }
+}
+
+// Graph 5: Disconnected — 0->1 and 2->3 (no path 0 to 2)
+fn make_disconn_weighted() -> WGraph {
+    let z = a8_zeros();
+    let r0 = Arr8 { v0: 0, v1: 5, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r2 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 7, v4: 0, v5: 0, v6: 0, v7: 0 };
+    WGraph { r0: r0, r1: z, r2: r2, r3: z, r4: z, r5: z, r6: z, r7: z, num_nodes: 4 }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_triangle() {
+    let g = make_triangle();
+    let dist = dijkstra(g, 0);
+    assert_eq(a8_get(dist, 0), 0);
+    assert_eq(a8_get(dist, 1), 4);
+    assert_eq(a8_get(dist, 2), 7);  // 0->1->2 = 4+3 = 7 (not direct 10)
+}
+
+fn test_classic_dijkstra() {
+    let g = make_classic_graph();
+    let dist = dijkstra(g, 0);
+    assert_eq(a8_get(dist, 0), 0);
+    assert_eq(a8_get(dist, 1), 1);   // 0->1 = 1
+    assert_eq(a8_get(dist, 2), 3);   // 0->1->2 = 1+2 = 3
+    assert_eq(a8_get(dist, 3), 4);   // 0->1->3 = 1+3 = 4
+    assert_eq(a8_get(dist, 4), 8);   // 0->1->2->4 = 1+2+5 = 8
+}
+
+fn test_undirected() {
+    let g = make_undirected();
+    let dist = dijkstra(g, 0);
+    assert_eq(a8_get(dist, 0), 0);
+    assert_eq(a8_get(dist, 1), 2);   // 0->1 = 2
+    assert_eq(a8_get(dist, 2), 5);   // 0->1->2 = 2+3 = 5
+    assert_eq(a8_get(dist, 3), 5);   // 0->3 = 5
+    assert_eq(a8_get(dist, 4), 6);   // 0->1->2->4 = 2+3+1 = 6
+
+    // Dijkstra from node 4
+    let dist4 = dijkstra(g, 4);
+    assert_eq(a8_get(dist4, 4), 0);
+    assert_eq(a8_get(dist4, 2), 1);  // 4->2 = 1
+    assert_eq(a8_get(dist4, 3), 4);  // 4->3 = 4
+    assert_eq(a8_get(dist4, 1), 4);  // 4->2->1 = 1+3 = 4
+    assert_eq(a8_get(dist4, 0), 6);  // 4->2->1->0 = 1+3+2 = 6
+}
+
+fn test_single_node() {
+    let g = make_single();
+    let dist = dijkstra(g, 0);
+    assert_eq(a8_get(dist, 0), 0);
+}
+
+fn test_disconnected() {
+    let g = make_disconn_weighted();
+    let dist = dijkstra(g, 0);
+    assert_eq(a8_get(dist, 0), 0);
+    assert_eq(a8_get(dist, 1), 5);
+    assert_eq(a8_get(dist, 2), 999999);  // Unreachable
+    assert_eq(a8_get(dist, 3), 999999);  // Unreachable
+}
+
+fn test_from_different_sources() {
+    let g = make_triangle();
+    // From node 1
+    let dist1 = dijkstra(g, 1);
+    assert_eq(a8_get(dist1, 0), 999999);  // No edge back to 0
+    assert_eq(a8_get(dist1, 1), 0);
+    assert_eq(a8_get(dist1, 2), 3);
+
+    // From node 2 (sink, no outgoing edges)
+    let dist2 = dijkstra(g, 2);
+    assert_eq(a8_get(dist2, 0), 999999);
+    assert_eq(a8_get(dist2, 1), 999999);
+    assert_eq(a8_get(dist2, 2), 0);
+}
+
+fn main() -> Int {
+    test_triangle();
+    test_classic_dijkstra();
+    test_undirected();
+    test_single_node();
+    test_disconnected();
+    test_from_different_sources();
+    print("[OK] 239_interp_dijkstra");
+    0
+}

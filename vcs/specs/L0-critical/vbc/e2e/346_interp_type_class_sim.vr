@@ -1,0 +1,442 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, type-class, dispatch, polymorphism, vtable
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Type class simulation — dispatch table records for
+// polymorphic behavior. Each "type class instance" is a record of function
+// pointers that implements a protocol (Eq, Ord, Show, Monoid, etc.).
+
+// =============================================================================
+// Eq "type class": equality comparison
+// =============================================================================
+
+type EqInstance is { eq_fn: fn(Int, Int) -> Int };
+
+fn eq_default_fn(a: Int, b: Int) -> Int {
+    if a == b { 1 } else { 0 }
+}
+
+fn eq_default() -> EqInstance {
+    EqInstance { eq_fn: eq_default_fn }
+}
+
+// Eq with modular equality (mod N)
+fn eq_mod3_fn(a: Int, b: Int) -> Int {
+    if a % 3 == b % 3 { 1 } else { 0 }
+}
+
+fn eq_mod3() -> EqInstance {
+    EqInstance { eq_fn: eq_mod3_fn }
+}
+
+fn instance_eq(inst: EqInstance, a: Int, b: Int) -> Int {
+    let f = inst.eq_fn;
+    f(a, b)
+}
+
+// =============================================================================
+// Ord "type class": ordering comparison
+// Returns: -1 (less), 0 (equal), 1 (greater)
+// =============================================================================
+
+type OrdInstance is { cmp_fn: fn(Int, Int) -> Int };
+
+fn ord_default_fn(a: Int, b: Int) -> Int {
+    if a < b { -1 }
+    else if a == b { 0 }
+    else { 1 }
+}
+
+fn ord_default() -> OrdInstance {
+    OrdInstance { cmp_fn: ord_default_fn }
+}
+
+// Reverse order
+fn ord_reverse_fn(a: Int, b: Int) -> Int {
+    if a < b { 1 }
+    else if a == b { 0 }
+    else { -1 }
+}
+
+fn ord_reverse() -> OrdInstance {
+    OrdInstance { cmp_fn: ord_reverse_fn }
+}
+
+// Order by absolute value
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+fn ord_abs_fn(a: Int, b: Int) -> Int {
+    let aa = abs_val(a);
+    let ba = abs_val(b);
+    if aa < ba { -1 }
+    else if aa == ba { 0 }
+    else { 1 }
+}
+
+fn ord_abs() -> OrdInstance {
+    OrdInstance { cmp_fn: ord_abs_fn }
+}
+
+fn instance_cmp(inst: OrdInstance, a: Int, b: Int) -> Int {
+    let f = inst.cmp_fn;
+    f(a, b)
+}
+
+fn instance_lt(inst: OrdInstance, a: Int, b: Int) -> Int {
+    if instance_cmp(inst, a, b) == -1 { 1 } else { 0 }
+}
+
+fn instance_gt(inst: OrdInstance, a: Int, b: Int) -> Int {
+    if instance_cmp(inst, a, b) == 1 { 1 } else { 0 }
+}
+
+// =============================================================================
+// Monoid "type class": associative binary op with identity
+// =============================================================================
+
+type MonoidInstance is { empty_val: Int, combine_fn: fn(Int, Int) -> Int };
+
+fn add_fn(a: Int, b: Int) -> Int { a + b }
+fn mul_fn(a: Int, b: Int) -> Int { a * b }
+fn max_fn(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_fn(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+fn monoid_sum() -> MonoidInstance {
+    MonoidInstance { empty_val: 0, combine_fn: add_fn }
+}
+
+fn monoid_product() -> MonoidInstance {
+    MonoidInstance { empty_val: 1, combine_fn: mul_fn }
+}
+
+fn monoid_max() -> MonoidInstance {
+    // Using 0 as min possible for this test scenario
+    MonoidInstance { empty_val: 0, combine_fn: max_fn }
+}
+
+fn monoid_min() -> MonoidInstance {
+    // Using large value as identity
+    MonoidInstance { empty_val: 999999, combine_fn: min_fn }
+}
+
+fn instance_empty(inst: MonoidInstance) -> Int {
+    inst.empty_val
+}
+
+fn instance_combine(inst: MonoidInstance, a: Int, b: Int) -> Int {
+    let f = inst.combine_fn;
+    f(a, b)
+}
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Generic algorithms using type class instances
+// =============================================================================
+
+// Generic fold using Monoid
+fn fold_with_monoid(arr: Arr8, n: Int, m: MonoidInstance) -> Int {
+    let mut acc = instance_empty(m);
+    let mut i = 0;
+    while i < n {
+        acc = instance_combine(m, acc, a8_get(arr, i));
+        i = i + 1;
+    }
+    acc
+}
+
+// Generic sort using Ord (insertion sort)
+fn sort_with_ord(arr: Arr8, n: Int, ord: OrdInstance) -> Arr8 {
+    let mut a = arr;
+    let mut i = 1;
+    while i < n {
+        let key = a8_get(a, i);
+        let mut j = i - 1;
+        let mut done = 0;
+        while j >= 0 && done == 0 {
+            if instance_gt(ord, a8_get(a, j), key) == 1 {
+                a = a8_set(a, j + 1, a8_get(a, j));
+                j = j - 1;
+            } else {
+                done = 1;
+            }
+        }
+        a = a8_set(a, j + 1, key);
+        i = i + 1;
+    }
+    a
+}
+
+// Count elements equal to target using Eq instance
+fn count_eq(arr: Arr8, n: Int, target: Int, eq: EqInstance) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n {
+        if instance_eq(eq, a8_get(arr, i), target) == 1 {
+            cnt = cnt + 1;
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+// Find minimum using Ord instance
+fn find_min_with_ord(arr: Arr8, n: Int, ord: OrdInstance) -> Int {
+    let mut best = a8_get(arr, 0);
+    let mut i = 1;
+    while i < n {
+        let v = a8_get(arr, i);
+        if instance_lt(ord, v, best) == 1 {
+            best = v;
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_eq_default() {
+    let eq = eq_default();
+    assert_eq(instance_eq(eq, 5, 5), 1);
+    assert_eq(instance_eq(eq, 5, 3), 0);
+    assert_eq(instance_eq(eq, 0, 0), 1);
+}
+
+fn test_eq_modular() {
+    let eq = eq_mod3();
+    assert_eq(instance_eq(eq, 1, 4), 1);   // 1%3==1, 4%3==1
+    assert_eq(instance_eq(eq, 2, 5), 1);   // 2%3==2, 5%3==2
+    assert_eq(instance_eq(eq, 1, 2), 0);   // 1%3==1, 2%3==2
+    assert_eq(instance_eq(eq, 9, 12), 1);  // 9%3==0, 12%3==0
+}
+
+fn test_ord_default() {
+    let ord = ord_default();
+    assert_eq(instance_cmp(ord, 3, 5), -1);
+    assert_eq(instance_cmp(ord, 5, 5), 0);
+    assert_eq(instance_cmp(ord, 7, 2), 1);
+    assert_eq(instance_lt(ord, 3, 5), 1);
+    assert_eq(instance_gt(ord, 7, 2), 1);
+}
+
+fn test_ord_reverse() {
+    let ord = ord_reverse();
+    assert_eq(instance_cmp(ord, 3, 5), 1);   // reversed!
+    assert_eq(instance_cmp(ord, 7, 2), -1);  // reversed!
+    assert_eq(instance_lt(ord, 5, 3), 1);    // 5 "less than" 3 in reverse
+}
+
+fn test_ord_abs() {
+    let ord = ord_abs();
+    assert_eq(instance_cmp(ord, -5, 3), 1);   // |-5|=5 > |3|=3
+    assert_eq(instance_cmp(ord, -2, 2), 0);   // |-2|=2 == |2|=2
+    assert_eq(instance_cmp(ord, 1, -3), -1);  // |1|=1 < |-3|=3
+}
+
+fn test_monoid_sum() {
+    let m = monoid_sum();
+    assert_eq(instance_empty(m), 0);
+    assert_eq(instance_combine(m, 3, 4), 7);
+
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 3);
+    arr = a8_set(arr, 3, 4);
+    arr = a8_set(arr, 4, 5);
+    assert_eq(fold_with_monoid(arr, 5, m), 15);
+}
+
+fn test_monoid_product() {
+    let m = monoid_product();
+    assert_eq(instance_empty(m), 1);
+    assert_eq(instance_combine(m, 3, 4), 12);
+
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 3);
+    arr = a8_set(arr, 3, 4);
+    assert_eq(fold_with_monoid(arr, 4, m), 24);
+}
+
+fn test_monoid_max() {
+    let m = monoid_max();
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 5);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 8);
+    arr = a8_set(arr, 3, 1);
+    arr = a8_set(arr, 4, 9);
+    assert_eq(fold_with_monoid(arr, 5, m), 9);
+}
+
+fn test_monoid_min() {
+    let m = monoid_min();
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 5);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 8);
+    arr = a8_set(arr, 3, 1);
+    arr = a8_set(arr, 4, 9);
+    assert_eq(fold_with_monoid(arr, 5, m), 1);
+}
+
+fn test_sort_ascending() {
+    let ord = ord_default();
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 5);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 8);
+    arr = a8_set(arr, 3, 1);
+    arr = a8_set(arr, 4, 4);
+
+    let sorted = sort_with_ord(arr, 5, ord);
+    assert_eq(a8_get(sorted, 0), 1);
+    assert_eq(a8_get(sorted, 1), 2);
+    assert_eq(a8_get(sorted, 2), 4);
+    assert_eq(a8_get(sorted, 3), 5);
+    assert_eq(a8_get(sorted, 4), 8);
+}
+
+fn test_sort_descending() {
+    let ord = ord_reverse();
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 5);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 8);
+    arr = a8_set(arr, 3, 1);
+    arr = a8_set(arr, 4, 4);
+
+    let sorted = sort_with_ord(arr, 5, ord);
+    assert_eq(a8_get(sorted, 0), 8);
+    assert_eq(a8_get(sorted, 1), 5);
+    assert_eq(a8_get(sorted, 2), 4);
+    assert_eq(a8_get(sorted, 3), 2);
+    assert_eq(a8_get(sorted, 4), 1);
+}
+
+fn test_sort_by_abs() {
+    let ord = ord_abs();
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, -5);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, -1);
+    arr = a8_set(arr, 3, 3);
+
+    let sorted = sort_with_ord(arr, 4, ord);
+    // By abs: 1, 2, 3, 5
+    assert_eq(abs_val(a8_get(sorted, 0)), 1);
+    assert_eq(abs_val(a8_get(sorted, 1)), 2);
+    assert_eq(abs_val(a8_get(sorted, 2)), 3);
+    assert_eq(abs_val(a8_get(sorted, 3)), 5);
+}
+
+fn test_count_with_eq() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 3);
+    arr = a8_set(arr, 3, 2);
+    arr = a8_set(arr, 4, 2);
+    arr = a8_set(arr, 5, 1);
+
+    let eq = eq_default();
+    assert_eq(count_eq(arr, 6, 2, eq), 3);
+    assert_eq(count_eq(arr, 6, 1, eq), 2);
+    assert_eq(count_eq(arr, 6, 5, eq), 0);
+}
+
+fn test_count_with_mod_eq() {
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 1);
+    arr = a8_set(arr, 1, 4);
+    arr = a8_set(arr, 2, 7);
+    arr = a8_set(arr, 3, 2);
+    arr = a8_set(arr, 4, 5);
+
+    // Count elements equivalent to 1 mod 3 => 1, 4, 7 => 3
+    let eq = eq_mod3();
+    assert_eq(count_eq(arr, 5, 1, eq), 3);
+    // equivalent to 2 mod 3 => 2, 5 => 2
+    assert_eq(count_eq(arr, 5, 2, eq), 2);
+}
+
+fn test_find_min_default() {
+    let ord = ord_default();
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 5);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 8);
+    arr = a8_set(arr, 3, 1);
+    arr = a8_set(arr, 4, 4);
+
+    assert_eq(find_min_with_ord(arr, 5, ord), 1);
+}
+
+fn test_find_min_reverse() {
+    // With reverse ord, "min" is actually the largest
+    let ord = ord_reverse();
+    let mut arr = a8_zeros();
+    arr = a8_set(arr, 0, 5);
+    arr = a8_set(arr, 1, 2);
+    arr = a8_set(arr, 2, 8);
+    arr = a8_set(arr, 3, 1);
+
+    assert_eq(find_min_with_ord(arr, 4, ord), 8);
+}
+
+fn main() -> Int {
+    test_eq_default();
+    test_eq_modular();
+    test_ord_default();
+    test_ord_reverse();
+    test_ord_abs();
+    test_monoid_sum();
+    test_monoid_product();
+    test_monoid_max();
+    test_monoid_min();
+    test_sort_ascending();
+    test_sort_descending();
+    test_sort_by_abs();
+    test_count_with_eq();
+    test_count_with_mod_eq();
+    test_find_min_default();
+    test_find_min_reverse();
+    print("[OK] 346_interp_type_class_sim");
+    0
+}

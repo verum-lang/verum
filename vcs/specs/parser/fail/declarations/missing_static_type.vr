@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, static, error
+// @description: Test missing static type annotation detection
+// @expected-error: E067
+
+static X = 5;
+
+static mut COUNTER = 0;
+
+static CONFIG = { debug: true };
+
+public static INSTANCE = None;

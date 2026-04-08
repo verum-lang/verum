@@ -1,0 +1,176 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, text, string, format
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Text literals, concatenation via +, f-string
+// interpolation, comparison
+
+// =============================================================================
+// Text literals and equality
+// =============================================================================
+
+fn test_text_literals() {
+    let a = "hello";
+    let b = "world";
+    assert_eq(a, "hello");
+    assert_eq(b, "world");
+    assert(a != b);
+}
+
+fn test_empty_text() {
+    let empty = "";
+    assert_eq(empty, "");
+    assert(empty != "x");
+}
+
+fn test_text_equality() {
+    let a = "test";
+    let b = "test";
+    assert(a == b);
+    assert_eq(a, b);
+}
+
+fn test_text_case_sensitive() {
+    assert("abc" != "ABC");
+    assert("Hello" != "hello");
+    assert("A" != "a");
+}
+
+// =============================================================================
+// Text concatenation
+// =============================================================================
+
+fn test_concat_basic() {
+    let a = "hello";
+    let b = " world";
+    let c = a + b;
+    assert_eq(c, "hello world");
+}
+
+fn test_concat_empty() {
+    let a = "hello";
+    let empty = "";
+    assert_eq(a + empty, "hello");
+    assert_eq(empty + a, "hello");
+}
+
+fn test_concat_multiple() {
+    let result = "one" + " " + "two" + " " + "three";
+    assert_eq(result, "one two three");
+}
+
+fn test_concat_single_chars() {
+    let result = "a" + "b" + "c" + "d" + "e";
+    assert_eq(result, "abcde");
+}
+
+// =============================================================================
+// Format string interpolation
+// =============================================================================
+
+fn test_fstring_int() {
+    let x = 42;
+    let s = f"value is {x}";
+    assert_eq(s, "value is 42");
+}
+
+fn test_fstring_multiple() {
+    let a = 1;
+    let b = 2;
+    let s = f"{a} + {b} = {a + b}";
+    assert_eq(s, "1 + 2 = 3");
+}
+
+fn test_fstring_text() {
+    let name = "Alice";
+    let s = f"Hello, {name}!";
+    assert_eq(s, "Hello, Alice!");
+}
+
+fn test_fstring_expression() {
+    let x = 10;
+    let s = f"double is {x * 2}";
+    assert_eq(s, "double is 20");
+}
+
+fn test_fstring_zero_negative() {
+    let n = 0;
+    let s1 = f"n={n}";
+    assert_eq(s1, "n=0");
+
+    let m = -5;
+    let s2 = f"m={m}";
+    assert_eq(s2, "m=-5");
+}
+
+// =============================================================================
+// Text comparison
+// =============================================================================
+
+fn test_text_comparison_eq() {
+    assert("abc" == "abc");
+    assert("" == "");
+    assert_eq("hello" == "hello", true);
+    assert_eq("hello" == "world", false);
+}
+
+fn test_text_comparison_ne() {
+    assert("abc" != "def");
+    assert("a" != "A");
+    assert("hello" != "hello!");
+    assert_eq("same" != "same", false);
+}
+
+// =============================================================================
+// Text in functions
+// =============================================================================
+
+fn greet(name: Text) -> Text {
+    f"Hello, {name}!"
+}
+
+fn test_text_function() {
+    assert_eq(greet("World"), "Hello, World!");
+    assert_eq(greet("Verum"), "Hello, Verum!");
+}
+
+fn repeat_text(s: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < n {
+        result = result + s;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_text_in_loop() {
+    assert_eq(repeat_text("ab", 3), "ababab");
+    assert_eq(repeat_text("x", 5), "xxxxx");
+    assert_eq(repeat_text("hi", 0), "");
+}
+
+fn main() -> Int {
+    test_text_literals();
+    test_empty_text();
+    test_text_equality();
+    test_text_case_sensitive();
+    test_concat_basic();
+    test_concat_empty();
+    test_concat_multiple();
+    test_concat_single_chars();
+    test_fstring_int();
+    test_fstring_multiple();
+    test_fstring_text();
+    test_fstring_expression();
+    test_fstring_zero_negative();
+    test_text_comparison_eq();
+    test_text_comparison_ne();
+    test_text_function();
+    test_text_in_loop();
+    print("[OK] 227_interp_string_basic");
+    0
+}

@@ -1,0 +1,199 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, base, int128, uint128, methods, consistency
+// @description: Tests Int128/UInt128 methods that were previously missing
+//               for consistency with other sized types: abs_diff, ilog10,
+//               next_power_of_two (UInt128 only)
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: UInt128.abs_diff
+// =============================================================================
+
+@test
+fn test_uint128_abs_diff_basic() {
+    let a = 10 as UInt128;
+    let b = 3 as UInt128;
+    assert_eq(a.abs_diff(b), 7);
+    assert_eq(b.abs_diff(a), 7);
+}
+
+@test
+fn test_uint128_abs_diff_equal() {
+    let a = 42 as UInt128;
+    assert_eq(a.abs_diff(a), 0);
+}
+
+@test
+fn test_uint128_abs_diff_zero() {
+    let a = 100 as UInt128;
+    let b = 0 as UInt128;
+    assert_eq(a.abs_diff(b), 100);
+    assert_eq(b.abs_diff(a), 100);
+}
+
+// =============================================================================
+// Section 2: UInt128.ilog10
+// =============================================================================
+
+@test
+fn test_uint128_ilog10_powers() {
+    assert_eq((1 as UInt128).ilog10(), 0);
+    assert_eq((10 as UInt128).ilog10(), 1);
+    assert_eq((100 as UInt128).ilog10(), 2);
+    assert_eq((1000 as UInt128).ilog10(), 3);
+}
+
+@test
+fn test_uint128_ilog10_non_powers() {
+    assert_eq((5 as UInt128).ilog10(), 0);
+    assert_eq((99 as UInt128).ilog10(), 1);
+    assert_eq((999 as UInt128).ilog10(), 2);
+    assert_eq((9999 as UInt128).ilog10(), 3);
+}
+
+@test
+fn test_uint128_ilog10_large() {
+    assert_eq((1000000 as UInt128).ilog10(), 6);
+}
+
+// =============================================================================
+// Section 3: UInt128.next_power_of_two
+// =============================================================================
+
+@test
+fn test_uint128_next_power_of_two_exact() {
+    assert_eq((1 as UInt128).next_power_of_two(), 1 as UInt128);
+    assert_eq((2 as UInt128).next_power_of_two(), 2 as UInt128);
+    assert_eq((4 as UInt128).next_power_of_two(), 4 as UInt128);
+    assert_eq((8 as UInt128).next_power_of_two(), 8 as UInt128);
+}
+
+@test
+fn test_uint128_next_power_of_two_non_exact() {
+    assert_eq((3 as UInt128).next_power_of_two(), 4 as UInt128);
+    assert_eq((5 as UInt128).next_power_of_two(), 8 as UInt128);
+    assert_eq((7 as UInt128).next_power_of_two(), 8 as UInt128);
+    assert_eq((9 as UInt128).next_power_of_two(), 16 as UInt128);
+}
+
+@test
+fn test_uint128_next_power_of_two_zero() {
+    assert_eq((0 as UInt128).next_power_of_two(), 1 as UInt128);
+}
+
+@test
+fn test_uint128_next_power_of_two_large() {
+    assert_eq((100 as UInt128).next_power_of_two(), 128 as UInt128);
+    assert_eq((1000 as UInt128).next_power_of_two(), 1024 as UInt128);
+}
+
+// =============================================================================
+// Section 4: Int128.abs_diff
+// =============================================================================
+
+@test
+fn test_int128_abs_diff_positive() {
+    let a = 10 as Int128;
+    let b = 3 as Int128;
+    assert_eq(a.abs_diff(b), 7);
+    assert_eq(b.abs_diff(a), 7);
+}
+
+@test
+fn test_int128_abs_diff_negative() {
+    let a = -5 as Int128;
+    let b = -15 as Int128;
+    assert_eq(a.abs_diff(b), 10);
+}
+
+@test
+fn test_int128_abs_diff_mixed() {
+    let a = 5 as Int128;
+    let b = -5 as Int128;
+    assert_eq(a.abs_diff(b), 10);
+    assert_eq(b.abs_diff(a), 10);
+}
+
+@test
+fn test_int128_abs_diff_equal() {
+    let a = 42 as Int128;
+    assert_eq(a.abs_diff(a), 0);
+}
+
+@test
+fn test_int128_abs_diff_zero() {
+    let a = 100 as Int128;
+    let b = 0 as Int128;
+    assert_eq(a.abs_diff(b), 100);
+}
+
+// =============================================================================
+// Section 5: Int128.ilog10
+// =============================================================================
+
+@test
+fn test_int128_ilog10_powers() {
+    assert_eq((1 as Int128).ilog10(), 0);
+    assert_eq((10 as Int128).ilog10(), 1);
+    assert_eq((100 as Int128).ilog10(), 2);
+    assert_eq((1000 as Int128).ilog10(), 3);
+}
+
+@test
+fn test_int128_ilog10_non_powers() {
+    assert_eq((5 as Int128).ilog10(), 0);
+    assert_eq((99 as Int128).ilog10(), 1);
+    assert_eq((12345 as Int128).ilog10(), 4);
+}
+
+@test
+fn test_int128_ilog10_large() {
+    assert_eq((1000000 as Int128).ilog10(), 6);
+}
+
+// =============================================================================
+// Section 6: Cross-type consistency
+// =============================================================================
+
+@test
+fn test_abs_diff_consistency_uint128_vs_uint64() {
+    let a128 = 100 as UInt128;
+    let b128 = 37 as UInt128;
+    let a64 = 100 as UInt64;
+    let b64 = 37 as UInt64;
+    assert_eq(a128.abs_diff(b128), a64.abs_diff(b64));
+}
+
+@test
+fn test_abs_diff_consistency_int128_vs_int64() {
+    let a128 = 50 as Int128;
+    let b128 = -30 as Int128;
+    let a64 = 50 as Int64;
+    let b64 = -30 as Int64;
+    assert_eq(a128.abs_diff(b128), a64.abs_diff(b64));
+}
+
+@test
+fn test_ilog10_consistency_uint128_vs_uint64() {
+    let a128 = 1000 as UInt128;
+    let a64 = 1000 as UInt64;
+    assert_eq(a128.ilog10(), a64.ilog10());
+}
+
+@test
+fn test_ilog10_consistency_int128_vs_int64() {
+    let a128 = 1000 as Int128;
+    let a64 = 1000 as Int64;
+    assert_eq(a128.ilog10(), a64.ilog10());
+}
+
+@test
+fn test_next_power_of_two_consistency_uint128_vs_uint64() {
+    let a128 = 100 as UInt128;
+    let a64 = 100 as UInt64;
+    assert_eq(a128.next_power_of_two().to_int(), a64.next_power_of_two().to_int());
+}

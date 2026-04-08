@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, tuple, comma, error
+// @description: Test detection of empty tuple with trailing comma
+// @expected-error: E018
+
+// Empty tuple with comma is invalid - use () for unit type
+fn test(x: (,)) {}

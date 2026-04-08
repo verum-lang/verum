@@ -1,0 +1,122 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, calls, method
+
+fn test_simple_method_calls() {
+    // Simple method call with no arguments
+    obj.method();
+    list.clear();
+    connection.close();
+}
+
+fn test_single_argument_method() {
+    // Method call with single argument
+    list.push(item);
+    map.get(key);
+    builder.set_name("test");
+}
+
+fn test_multiple_argument_method() {
+    // Method call with multiple arguments
+    map.insert(key, value);
+    buffer.write(data, offset, length);
+    point.translate(dx, dy);
+}
+
+fn test_trailing_comma_method() {
+    // Method call with trailing comma
+    config.configure(
+        option1,
+        option2,
+        option3,
+    );
+}
+
+fn test_method_on_literal() {
+    // Method call on literal
+    "hello".len();
+    [1, 2, 3].iter();
+    42.to_string();
+}
+
+fn test_method_on_expression() {
+    // Method call on expression result
+    (a + b).abs();
+    (x * y).sqrt();
+    get_value().process();
+}
+
+fn test_chained_methods() {
+    // Chained method calls
+    text.trim().to_lowercase().split(" ");
+    list.filter(pred).map(transform).collect();
+    builder.name("test").age(25).build();
+}
+
+fn test_method_with_type_args() {
+    // Method with type arguments
+    list.into<Set<Int>>();
+    value.cast<Float>();
+    result.unwrap_or<Default>();
+}
+
+fn test_method_on_reference() {
+    // Method on reference
+    (&obj).method();
+    (&mut list).push(item);
+}
+
+fn test_method_receiver_variations() {
+    // Method with receiver type variations
+    value.method();           // self
+    value.immut_method();     // &self
+    value.mut_method();       // &mut self
+}
+
+fn test_builder_pattern() {
+    // Method returning self for chaining
+    builder
+        .with_name("Alice")
+        .with_age(30)
+        .with_email("alice@example.com")
+        .build();
+}
+
+fn test_method_in_expressions() {
+    // Method call in expressions
+    let len = list.len();
+    let doubled = value.double();
+    let valid = obj.is_valid() && other.is_ready();
+}
+
+fn test_method_with_closure() {
+    // Method call with closure argument
+    list.map(|x| x * 2);
+    items.filter(|item| item.active);
+    collection.fold(0, |acc, x| acc + x);
+}
+
+fn test_async_method() {
+    // Async method call
+    let data = client.fetch().await;
+    let result = service.process(request).await;
+}
+
+fn test_method_on_smart_pointer() {
+    // Method on smart pointer/wrapper
+    boxed.as_ref().method();
+    rc.borrow().read_only_method();
+    arc.lock().mutable_method();
+}
+
+fn test_optional_chaining() {
+    // Optional chaining
+    maybe_obj?.method();
+    optional?.field?.nested_method();
+}
+
+// NOTE: Named arguments (name: value) are not currently in the grammar
+// fn test_method_with_default_args() {
+//     obj.configure(timeout: 1000);
+// }

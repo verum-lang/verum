@@ -1,0 +1,217 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, number-base, conversion, representation
+// @timeout: 30000
+
+// Number base conversion and representation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Convert number to base representation (LSB first, returns digit count)
+type BaseResult is { digits: Arr8, len: Int };
+
+fn to_base(n: Int, base: Int) -> BaseResult {
+    if n == 0 { return BaseResult { digits: zeros(), len: 1 }; }
+    let mut digits = zeros();
+    let mut x = n;
+    let mut i = 0;
+    while x > 0 {
+        if i < 8 { digits = set8(digits, i, x % base); }
+        x = x / base;
+        i = i + 1;
+    }
+    BaseResult { digits: digits, len: i }
+}
+
+// Convert from base representation to number (LSB first)
+fn from_base(digits: Arr8, len: Int, base: Int) -> Int {
+    let mut result = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < len {
+        result = result + get8(digits, i) * power;
+        power = power * base;
+        i = i + 1;
+    }
+    result
+}
+
+// Count digits in a given base
+fn digit_count(n: Int, base: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 { x = x / base; count = count + 1; }
+    count
+}
+
+// Sum of digits in a given base
+fn digit_sum(n: Int, base: Int) -> Int {
+    let mut x = n;
+    let mut sum = 0;
+    while x > 0 {
+        sum = sum + x % base;
+        x = x / base;
+    }
+    sum
+}
+
+// Check if number is palindrome in given base
+fn is_palindrome_base(n: Int, base: Int) -> Int {
+    let br = to_base(n, base);
+    let mut i = 0;
+    while i < br.len / 2 {
+        if get8(br.digits, i) != get8(br.digits, br.len - 1 - i) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Digital root: repeatedly sum digits until single digit
+fn digital_root(n: Int, base: Int) -> Int {
+    let mut x = n;
+    while x >= base {
+        x = digit_sum(x, base);
+    }
+    x
+}
+
+// Convert between bases (up to base 8 to fit in Arr8)
+fn convert_base(n: Int, from: Int, to: Int) -> BaseResult {
+    // First convert to decimal, then to target base
+    to_base(n, to)
+}
+
+fn test_binary() -> Int {
+    // 13 = 1101 in binary
+    let br = to_base(13, 2);
+    assert_eq(br.len, 4);
+    assert_eq(get8(br.digits, 0), 1); // LSB
+    assert_eq(get8(br.digits, 1), 0);
+    assert_eq(get8(br.digits, 2), 1);
+    assert_eq(get8(br.digits, 3), 1); // MSB
+
+    assert_eq(from_base(br.digits, br.len, 2), 13);
+    assert_eq(digit_count(13, 2), 4);
+    assert_eq(digit_sum(13, 2), 3); // three 1-bits
+    1
+}
+
+fn test_octal() -> Int {
+    // 255 = 377 in octal
+    let br = to_base(255, 8);
+    assert_eq(br.len, 3);
+    assert_eq(get8(br.digits, 0), 7);
+    assert_eq(get8(br.digits, 1), 7);
+    assert_eq(get8(br.digits, 2), 3);
+
+    assert_eq(from_base(br.digits, br.len, 8), 255);
+    1
+}
+
+fn test_base3() -> Int {
+    // 42 in base 3: 42 = 1*27 + 1*9 + 2*3 + 0 = 1120
+    let br = to_base(42, 3);
+    assert_eq(br.len, 4);
+    assert_eq(get8(br.digits, 0), 0); // LSB
+    assert_eq(get8(br.digits, 1), 2);
+    assert_eq(get8(br.digits, 2), 1);
+    assert_eq(get8(br.digits, 3), 1);
+    assert_eq(from_base(br.digits, br.len, 3), 42);
+    1
+}
+
+fn test_roundtrip() -> Int {
+    // Round-trip through various bases
+    let mut i = 1;
+    while i < 50 {
+        let b2 = to_base(i, 2);
+        assert_eq(from_base(b2.digits, b2.len, 2), i);
+
+        let b5 = to_base(i, 5);
+        assert_eq(from_base(b5.digits, b5.len, 5), i);
+
+        let b7 = to_base(i, 7);
+        assert_eq(from_base(b7.digits, b7.len, 7), i);
+
+        i = i + 1;
+    }
+    1
+}
+
+fn test_palindrome() -> Int {
+    // 7 in binary = 111, palindrome
+    assert_eq(is_palindrome_base(7, 2), 1);
+    // 5 in binary = 101, palindrome
+    assert_eq(is_palindrome_base(5, 2), 1);
+    // 6 in binary = 110, not palindrome
+    assert_eq(is_palindrome_base(6, 2), 0);
+    // 121 in base 10 = {1,2,1} LSB first, palindrome
+    assert_eq(is_palindrome_base(121, 10), 1);
+    // 123 in base 10, not palindrome
+    assert_eq(is_palindrome_base(123, 10), 0);
+    1
+}
+
+fn test_digital_root() -> Int {
+    // digital_root(942, 10): 9+4+2=15, 1+5=6
+    assert_eq(digital_root(942, 10), 6);
+    // digital_root(0, 10) = 0
+    assert_eq(digital_root(0, 10), 0);
+    // digital_root(9, 10) = 9
+    assert_eq(digital_root(9, 10), 9);
+    // digital_root(15, 2): binary 1111, sum=4, binary 100, sum=1
+    assert_eq(digital_root(15, 2), 1);
+    1
+}
+
+fn test_digit_sum() -> Int {
+    assert_eq(digit_sum(123, 10), 6);
+    assert_eq(digit_sum(999, 10), 27);
+    assert_eq(digit_sum(255, 2), 8); // binary 11111111
+    assert_eq(digit_sum(100, 10), 1);
+    1
+}
+
+fn test_zero() -> Int {
+    let br = to_base(0, 2);
+    assert_eq(br.len, 1);
+    assert_eq(get8(br.digits, 0), 0);
+    assert_eq(from_base(br.digits, br.len, 2), 0);
+    assert_eq(digit_count(0, 10), 1);
+    1
+}
+
+fn main() -> Int {
+    test_binary();
+    test_octal();
+    test_base3();
+    test_roundtrip();
+    test_palindrome();
+    test_digital_root();
+    test_digit_sum();
+    test_zero();
+    print("[OK] 498_number_base_aot");
+    0
+}

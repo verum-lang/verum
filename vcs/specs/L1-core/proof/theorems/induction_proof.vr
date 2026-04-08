@@ -1,0 +1,32 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, theorem, induction
+// @timeout: 5000
+
+/// Proofs by induction and cases.
+
+// Theorem proved by induction
+theorem sum_formula(n: Int)
+    requires n >= 0
+    proof by induction(n);
+
+// Theorem proved by cases
+theorem abs_nonneg(x: Int)
+    proof by cases(x);
+
+// Structured induction proof
+theorem power_positive(base: Int, exp: Int)
+    requires base > 0
+    requires exp >= 0
+    proof {
+        have h1: base > 0 by assumption;
+        show base > 0 by induction(exp);
+    };
+
+// Theorem with unfold tactic
+theorem unfold_def(x: Int)
+    proof by unfold(x);
+
+fn main() {
+    print("Induction proof tests parsed");
+}

@@ -1,0 +1,217 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, simd, intrinsics
+// @description: SIMD intrinsics for vector operations
+
+/// SIMD (Single Instruction, Multiple Data) operations
+/// for high-performance vectorized computation.
+
+mount std.simd.{f32x4, f32x8, i32x4, i32x8, mask32x4, mask32x8};
+
+/// Basic SIMD arithmetic
+fn simd_arithmetic() {
+    let a = f32x4.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = f32x4.from_array([5.0, 6.0, 7.0, 8.0]);
+
+    // Element-wise operations
+    let sum = a + b;           // [6.0, 8.0, 10.0, 12.0]
+    let diff = a - b;          // [-4.0, -4.0, -4.0, -4.0]
+    let product = a * b;       // [5.0, 12.0, 21.0, 32.0]
+    let quotient = a / b;      // [0.2, 0.33, 0.43, 0.5]
+
+    // Fused multiply-add
+    let fma = a.mul_add(b, a); // a * b + a
+
+    // Negation
+    let neg = -a;              // [-1.0, -2.0, -3.0, -4.0]
+
+    // Absolute value
+    let abs_val = a.abs();
+}
+
+/// SIMD comparisons
+fn simd_comparisons() {
+    let a = f32x4.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = f32x4.from_array([2.0, 2.0, 2.0, 2.0]);
+
+    // Element-wise comparisons return masks
+    let lt: mask32x4 = a.simd_lt(b);    // [true, false, false, false]
+    let le: mask32x4 = a.simd_le(b);    // [true, true, false, false]
+    let gt: mask32x4 = a.simd_gt(b);    // [false, false, true, true]
+    let ge: mask32x4 = a.simd_ge(b);    // [false, true, true, true]
+    let eq: mask32x4 = a.simd_eq(b);    // [false, true, false, false]
+    let ne: mask32x4 = a.simd_ne(b);    // [true, false, true, true]
+
+    // Use mask for selection
+    let selected = lt.select(a, b);  // [1.0, 2.0, 2.0, 2.0]
+}
+
+/// SIMD horizontal operations
+fn simd_horizontal() {
+    let v = f32x4.from_array([1.0, 2.0, 3.0, 4.0]);
+
+    // Reduce to single value
+    let sum = v.reduce_sum();          // 10.0
+    let product = v.reduce_product();   // 24.0
+    let max_val = v.reduce_max();       // 4.0
+    let min_val = v.reduce_min();       // 1.0
+
+    // Horizontal operations
+    // Note: these are typically less efficient than vertical ops
+}
+
+/// SIMD shuffles and permutations
+fn simd_shuffle() {
+    let a = f32x4.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = f32x4.from_array([5.0, 6.0, 7.0, 8.0]);
+
+    // Swizzle - rearrange within single vector
+    let swizzled = simd_swizzle(a, [3, 2, 1, 0]);  // [4.0, 3.0, 2.0, 1.0]
+
+    // Shuffle - select from two vectors
+    let shuffled = simd_swizzle(a, b, [0, 5, 2, 7]);  // [1.0, 6.0, 3.0, 8.0]
+
+    // Rotate
+    let rotated = simd_swizzle(a, [1, 2, 3, 0]);  // [2.0, 3.0, 4.0, 1.0]
+
+    // Broadcast single element
+    let broadcast = f32x4.splat(a[0]);  // [1.0, 1.0, 1.0, 1.0]
+
+    // Interleave
+    let lo = simd_swizzle(a, b, [0, 4, 1, 5]);  // [1.0, 5.0, 2.0, 6.0]
+    let hi = simd_swizzle(a, b, [2, 6, 3, 7]);  // [3.0, 7.0, 4.0, 8.0]
+}
+
+/// SIMD load/store operations
+fn simd_memory(data: &[f32], output: &mut [f32]) {
+    // Aligned load (data must be 16/32 byte aligned)
+    let v = f32x4.from_slice(data);
+
+    // Unaligned load
+    let v_unaligned = f32x4.from_slice_unaligned(&data[1..]);
+
+    // Process
+    let result = v * f32x4.splat(2.0);
+
+    // Aligned store
+    result.copy_to_slice(output);
+
+    // Unaligned store
+    result.copy_to_slice_unaligned(&mut output[1..]);
+
+    // Gather - load from non-contiguous memory
+    let indices = i32x4.from_array([0, 2, 4, 6]);
+    // let gathered = f32x4.gather(data, indices);
+
+    // Scatter - store to non-contiguous memory
+    // result.scatter(output, indices);
+}
+
+/// SIMD masked operations
+fn simd_masked(data: &[f32]) {
+    let v = f32x4.from_slice(data);
+    let threshold = f32x4.splat(0.5);
+
+    // Create mask
+    let mask = v.simd_gt(threshold);
+
+    // Masked load (only load where mask is true)
+    // let masked_load = f32x4.masked_load(mask, data, f32x4.splat(0.0));
+
+    // Masked arithmetic
+    let doubled = v + v;
+    let result = mask.select(doubled, v);  // Double only where > 0.5
+
+    // Count true elements
+    let count = mask.to_bitmask().count_ones();
+}
+
+/// SIMD math functions
+fn simd_math() {
+    let v = f32x4.from_array([0.25, 0.5, 0.75, 1.0]);
+
+    // Trigonometric (may use scalar fallback)
+    // let sin_v = v.sin();
+    // let cos_v = v.cos();
+
+    // Exponential/logarithmic
+    // let exp_v = v.exp();
+    // let log_v = v.ln();
+
+    // Power
+    // let sqrt_v = v.sqrt();
+    // let pow_v = v.powf(f32x4.splat(2.0));
+
+    // Rounding
+    let floor_v = v.floor();
+    let ceil_v = v.ceil();
+    let round_v = v.round();
+    let trunc_v = v.trunc();
+
+    // Min/Max
+    let a = f32x4.from_array([1.0, 4.0, 2.0, 3.0]);
+    let b = f32x4.from_array([3.0, 2.0, 4.0, 1.0]);
+    let min_v = a.simd_min(b);  // [1.0, 2.0, 2.0, 1.0]
+    let max_v = a.simd_max(b);  // [3.0, 4.0, 4.0, 3.0]
+
+    // Clamp
+    let lo = f32x4.splat(0.0);
+    let hi = f32x4.splat(1.0);
+    let clamped = v.simd_clamp(lo, hi);
+}
+
+/// SIMD integer operations
+fn simd_integer() {
+    let a = i32x4.from_array([1, 2, 3, 4]);
+    let b = i32x4.from_array([5, 6, 7, 8]);
+
+    // Arithmetic
+    let sum = a + b;
+    let diff = a - b;
+
+    // Bitwise
+    let and = a & b;
+    let or = a | b;
+    let xor = a ^ b;
+    let not = !a;
+
+    // Shifts
+    let shl = a << i32x4.splat(1);
+    let shr = a >> i32x4.splat(1);
+
+    // Saturating arithmetic
+    let sat_add = a.saturating_add(b);
+    let sat_sub = a.saturating_sub(b);
+}
+
+/// Vectorized dot product
+fn simd_dot_product(a: &[f32], b: &[f32]) -> f32 {
+    assert(a.len() == b.len());
+
+    let mut sum = f32x4.splat(0.0);
+    let chunks = a.len() / 4;
+
+    for i in 0..chunks {
+        let va = f32x4.from_slice(&a[i * 4..]);
+        let vb = f32x4.from_slice(&b[i * 4..]);
+        sum = va.mul_add(vb, sum);
+    }
+
+    // Handle remainder
+    let mut result = sum.reduce_sum();
+    for i in (chunks * 4)..a.len() {
+        result += a[i] * b[i];
+    }
+
+    result
+}
+
+fn main() {
+    let a = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let b = [8.0f32, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0];
+
+    let dot = simd_dot_product(&a, &b);
+    assert(dot == 120.0);
+}

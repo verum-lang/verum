@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: interrupt, interrupt-cell, shared-data, systems
+// @timeout: 5000
+// @description: Verify InterruptCell for interrupt-safe data sharing compiles correctly.
+
+mount core.sys.interrupt.{InterruptCell, CriticalSection};
+
+/// Simple counter type for testing.
+type Counter is {
+    value: Int,
+};
+
+implement Counter {
+    @const
+    fn zero() -> Counter {
+        Counter { value: 0 }
+    }
+
+    fn increment(&mut self) {
+        self.value += 1;
+    }
+
+    fn value(&self) -> Int {
+        self.value
+    }
+}
+
+/// Test InterruptCell creation.
+fn test_interrupt_cell_create() {
+    let cell: InterruptCell<Int> = InterruptCell.new(0);
+    let cell_struct: InterruptCell<Counter> = InterruptCell.new(Counter.zero());
+}
+
+/// Test with_disabled access pattern.
+fn test_with_disabled_read() {
+    let cell: InterruptCell<Int> = InterruptCell.new(42);
+
+    // Read value with interrupts disabled
+    let value = cell.with_disabled(|val| {
+        *val
+    });
+
+    assert(value == 42);
+}
+
+/// Test with_disabled modification.
+fn test_with_disabled_modify() {
+    let cell: InterruptCell<Int> = InterruptCell.new(0);
+
+    // Modify value with interrupts disabled
+    cell.with_disabled(|val| {
+        *val += 1;
+    });
+
+    // Verify modification
+    let value = cell.with_disabled(|val| *val);
+    assert(value == 1);
+}
+
+/// Test with_disabled with counter struct.
+fn test_with_disabled_struct() {
+    // Test that InterruptCell works with custom struct types
+    // (using explicit type annotation to guide type inference)
+    let cell: InterruptCell<Int> = InterruptCell.new(10);
+    let value = cell.with_disabled(|v: &mut Int| *v);
+    assert(value == 10);
+}
+
+/// Test raw pointer access (for advanced usage).
+fn test_get_ptr() {
+    let cell: InterruptCell<Int> = InterruptCell.new(100);
+
+    // Get raw pointer (requires manual critical section management)
+    let ptr = cell.get_ptr();
+
+    // Use pointer inside critical section
+    let _guard = CriticalSection.enter();
+    let value = unsafe { *ptr };
+    assert(value == 100);
+}
+
+fn main() -> Int {
+    test_interrupt_cell_create();
+    test_with_disabled_read();
+    test_with_disabled_modify();
+    test_with_disabled_struct();
+    test_get_ptr();
+    0
+}

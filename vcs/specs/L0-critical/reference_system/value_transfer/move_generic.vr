@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine, generics
+
+
+/// Test copy and affine semantics with generic types.
+/// Generics properly propagate copy/affine behavior based on type argument.
+/// Spec: 04-memory-model.md#generic-semantics
+
+// Affine type
+type affine Handle is {
+    fd: Int,
+};
+
+fn main() {
+    test_generic_copy();
+    test_generic_container_copy();
+    test_generic_function_copy();
+    test_generic_affine();
+}
+
+/// Test generic wrapper with copy type
+fn test_generic_copy() {
+    // Generic wrapper with copy content - wrapper is copy
+    let wrapper = Wrapper { value: Text.from("generic content") };
+    let wrapper2 = wrapper;  // Copy (Text is not affine)
+
+    // Both valid
+    assert(wrapper.value == "generic content");
+    assert(wrapper2.value == "generic content");
+}
+
+/// Test generic container with copy elements
+fn test_generic_container_copy() {
+    let container: Container<Text> = Container {
+        items: [
+            Text.from("first"),
+            Text.from("second"),
+            Text.from("third"),
+        ],
+    };
+
+    let container2 = container;  // Copy entire container
+
+    // Both valid
+    assert(container.items.len() == 3);
+    assert(container2.items.len() == 3);
+    assert(container.items[0] == "first");
+    assert(container2.items[0] == "first");
+}
+
+/// Test copy through generic function
+fn take_value<T>(value: T) -> T {
+    value  // Returns value (copy if T is copy, move if T is affine)
+}
+
+fn test_generic_function_copy() {
+    let text = Text.from("through function");
+    let result = take_value(text);  // Copy into function
+
+    // Both valid (Text is Copy)
+    assert(result == "through function");
+    assert(text == "through function");
+}
+
+/// Test generic with affine type
+fn test_generic_affine() {
+    // Generic wrapper with affine content - becomes affine
+    let wrapper = Wrapper { value: Handle { fd: 42 } };
+    let wrapper2 = wrapper;  // Move (Handle is affine)
+
+    // Only wrapper2 is valid
+    assert(wrapper2.value.fd == 42);
+    // Using wrapper here would panic
+}
+
+/// Generic swap - works with both copy and affine types
+fn swap<T>(a: T, b: T) -> (T, T) {
+    (b, a)
+}
+
+fn test_generic_swap() {
+    // Swap copy types
+    let x = Text.from("alpha");
+    let y = Text.from("beta");
+
+    let (new_x, new_y) = swap(x, y);
+
+    // All four valid (Text is Copy)
+    assert(new_x == "beta");
+    assert(new_y == "alpha");
+    assert(x == "alpha");
+    assert(y == "beta");
+}
+
+// Type definitions
+
+type Wrapper<T> is {
+    value: T,
+};
+
+type Container<T> is {
+    items: List<T>,
+};

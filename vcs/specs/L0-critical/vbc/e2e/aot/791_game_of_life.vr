@@ -1,0 +1,134 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, cellular_automata
+// @expected-exit: 0
+
+// 1D elementary cellular automaton simulation
+// Uses 16-cell grid with periodic boundary conditions
+
+fn apply_rule(left: Int, center: Int, right: Int, rule_num: Int) -> Int {
+    // Neighborhood index = left*4 + center*2 + right
+    let idx = left * 4 + center * 2 + right;
+    // Check if bit idx is set in rule_num
+    let shifted = rule_num / pow2(idx);
+    shifted % 2
+}
+
+fn pow2(n: Int) -> Int {
+    if (n == 0) { return 1; }
+    if (n == 1) { return 2; }
+    if (n == 2) { return 4; }
+    if (n == 3) { return 8; }
+    if (n == 4) { return 16; }
+    if (n == 5) { return 32; }
+    if (n == 6) { return 64; }
+    if (n == 7) { return 128; }
+    256
+}
+
+fn get_cell(grid: List<Int>, i: Int, size: Int) -> Int {
+    // Periodic boundary
+    let idx = (i + size) % size;
+    grid[idx]
+}
+
+fn step_automaton(grid: List<Int>, size: Int, rule_num: Int) -> List<Int> {
+    let mut result = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < size) {
+        let left = get_cell(grid, i - 1, size);
+        let center = get_cell(grid, i, size);
+        let right = get_cell(grid, i + 1, size);
+        result[i] = apply_rule(left, center, right, rule_num);
+        i = i + 1;
+    }
+    result
+}
+
+fn population_count(grid: List<Int>, size: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while (i < size) {
+        count = count + grid[i];
+        i = i + 1;
+    }
+    count
+}
+
+fn grids_equal(a: List<Int>, b: List<Int>, size: Int) -> Int {
+    let mut i = 0;
+    while (i < size) {
+        if (a[i] != b[i]) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn main() -> Int {
+    let size = 16;
+
+    // Start with single cell in center (index 8)
+    let grid0 = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+
+    // Test 1: Initial population count is 1
+    assert_eq(population_count(grid0, size), 1);
+
+    // Test 2: Rule 30 - one step from single cell
+    // Neighbors of cell 8: left=0, center=1, right=0 -> rule30 bit 2 = 1
+    // Neighbors of cell 7: left=0, center=0, right=1 -> rule30 bit 1 = 1
+    // Neighbors of cell 9: left=1, center=0, right=0 -> rule30 bit 4 = 1
+    // Rule 30 = 00011110 in binary
+    let grid1_r30 = step_automaton(grid0, size, 30);
+    // Cells 7,8,9 should be 1,1,1
+    assert_eq(grid1_r30[7] + grid1_r30[8] + grid1_r30[9], 3);
+
+    // Test 3: Rule 30 population after 1 step = 3
+    assert_eq(population_count(grid1_r30, size), 3);
+
+    // Test 4: Rule 90 (XOR rule) - one step from single cell
+    // Rule 90 = 01011010 in binary
+    // Neighbors of cell 7: 0,0,1 -> bit 1 = 1 (rule90 bit1=1)
+    // Neighbors of cell 8: 0,1,0 -> bit 2 = 0 (rule90 bit2=0)
+    // Neighbors of cell 9: 1,0,0 -> bit 4 = 1 (rule90 bit4=1)
+    let grid1_r90 = step_automaton(grid0, size, 90);
+    assert_eq(grid1_r90[7] + grid1_r90[8] + grid1_r90[9], 2);
+
+    // Test 5: Rule 90 cell 8 should be 0 (XOR of neighbors)
+    assert_eq(grid1_r90[8], 0);
+
+    // Test 6: Rule 110 - one step from single cell
+    // Rule 110 = 01101110 in binary
+    // Cell 7: neighborhood 001 -> bit1 = 1
+    // Cell 8: neighborhood 010 -> bit2 = 1
+    // Cell 9: neighborhood 100 -> bit4 = 0
+    let grid1_r110 = step_automaton(grid0, size, 110);
+    assert_eq(grid1_r110[7], 1);
+
+    // Test 7: Rule 110 cell 8 should be 1
+    assert_eq(grid1_r110[8], 1);
+
+    // Test 8: Two steps of Rule 90 from single cell
+    let grid2_r90 = step_automaton(grid1_r90, size, 90);
+    // After step 1: cells 7,9 are 1 (cell 8 is 0)
+    // Step 2 from [..0,1,0,1,0..]:
+    // Cell 6: (0,0,1) -> idx=1 -> bit1=1
+    // Cell 7: (0,1,0) -> idx=2 -> bit2=0
+    // Cell 8: (1,0,1) -> idx=5 -> bit5=0
+    // Cell 9: (0,1,0) -> idx=2 -> bit2=0
+    // Cell 10: (1,0,0) -> idx=4 -> bit4=1
+    // So cells 6 and 10 are 1
+    assert_eq(grid2_r90[6] + grid2_r90[10], 2);
+
+    // Test 9: Rule 90 step 2 population = 2
+    assert_eq(population_count(grid2_r90, size), 2);
+
+    // Test 10: All-zero grid stays all-zero under any rule with bit0=0
+    // Rule 30 bit0 = 0, so neighborhood 000 -> 0
+    let zero_grid = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let stepped_zero = step_automaton(zero_grid, size, 30);
+    assert_eq(population_count(stepped_zero, size), 0);
+
+    print("791_game_of_life: PASS");
+    0
+}

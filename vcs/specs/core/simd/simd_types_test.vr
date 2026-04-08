@@ -1,0 +1,551 @@
+// =============================================================================
+// simd_types_test.vr - Tests for SIMD type definitions
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: simd, types, vectors, portable, core
+// @description: Tests for SIMD type imports and basic type checking
+// =============================================================================
+
+// Import basic types - these should resolve successfully
+mount core.simd.SimdElement;
+mount core.simd.Vec;
+mount core.simd.Mask;
+
+// Import type aliases
+mount core.simd.{
+    Vec4f, Vec2d, Vec4i, Vec2l, Vec16b, Vec8s,
+    Vec8f, Vec4d, Vec8i, Vec4l, Vec32b, Vec16s,
+    Vec16f, Vec8d, Vec16i, Vec8l, Vec64b, Vec32s,
+    Mask4, Mask8, Mask16,
+};
+
+// Import platform constants
+mount core.simd.{HAS_SSE42, HAS_AVX, HAS_AVX2, HAS_AVX512, HAS_NEON};
+
+// =============================================================================
+// SECTION 1: Basic Import Verification
+// =============================================================================
+
+// Test that SimdElement protocol can be imported
+@test
+fn test_simd_element_import() {
+    // SimdElement protocol import verified — compilation is the test
+    fn accept_element(v: &Vec4f) -> Bool { true }
+    let _ = accept_element;
+}
+
+// =============================================================================
+// SECTION 2: Vec Type Import Tests
+// =============================================================================
+
+// Test 128-bit vector type imports
+@test
+fn test_vec4f_import() {
+    fn accept(v: &Vec4f) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec2d_import() {
+    fn accept(v: &Vec2d) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec4i_import() {
+    fn accept(v: &Vec4i) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec2l_import() {
+    fn accept(v: &Vec2l) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec16b_import() {
+    fn accept(v: &Vec16b) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec8s_import() {
+    fn accept(v: &Vec8s) -> Bool { true }
+    let _ = accept;
+}
+
+// Test 256-bit vector type imports
+@test
+fn test_vec8f_import() {
+    fn accept(v: &Vec8f) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec4d_import() {
+    fn accept(v: &Vec4d) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec8i_import() {
+    fn accept(v: &Vec8i) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec4l_import() {
+    fn accept(v: &Vec4l) -> Bool { true }
+    let _ = accept;
+}
+
+// Test 512-bit vector type imports
+@test
+fn test_vec16f_import() {
+    fn accept(v: &Vec16f) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec8d_import() {
+    fn accept(v: &Vec8d) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec16i_import() {
+    fn accept(v: &Vec16i) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec8l_import() {
+    fn accept(v: &Vec8l) -> Bool { true }
+    let _ = accept;
+}
+
+// =============================================================================
+// SECTION 3: Mask Type Import Tests
+// =============================================================================
+
+@test
+fn test_mask4_import() {
+    fn accept(m: &Mask4) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_mask8_import() {
+    fn accept(m: &Mask8) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_mask16_import() {
+    fn accept(m: &Mask16) -> Bool { true }
+    let _ = accept;
+}
+
+// =============================================================================
+// SECTION 4: Platform Constants Import Tests
+// =============================================================================
+
+@test
+fn test_platform_constants_import() {
+    // Platform detection constants — verify imports resolve
+    let _ = HAS_SSE42;
+    let _ = HAS_AVX;
+    let _ = HAS_AVX2;
+    let _ = HAS_AVX512;
+    let _ = HAS_NEON;
+}
+
+// =============================================================================
+// SECTION 5: Extended Vec Type Alias Import Tests
+// =============================================================================
+
+@test
+fn test_vec32b_import() {
+    fn accept(v: &Vec32b) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec16s_import() {
+    fn accept(v: &Vec16s) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec64b_import() {
+    fn accept(v: &Vec64b) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_vec32s_import() {
+    fn accept(v: &Vec32s) -> Bool { true }
+    let _ = accept;
+}
+
+// =============================================================================
+// SECTION 6: Vec Type Alias Instantiation Tests
+// =============================================================================
+
+@test
+fn test_vec4f_instantiation() {
+    let v = Vec4f.splat(0.0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 0.0);
+    print("Vec4f instantiation test passed");
+}
+
+@test
+fn test_vec2d_instantiation() {
+    let v = Vec2d.splat(0.0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 0.0);
+    print("Vec2d instantiation test passed");
+}
+
+@test
+fn test_vec4i_instantiation() {
+    let v = Vec4i.splat(0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 0);
+    print("Vec4i instantiation test passed");
+}
+
+@test
+fn test_vec2l_instantiation() {
+    let v = Vec2l.splat(0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 0);
+    print("Vec2l instantiation test passed");
+}
+
+@test
+fn test_vec8f_instantiation() {
+    let v = Vec8f.splat(1.0);
+    let arr = v.to_array();
+    assert_eq(arr[7], 1.0);
+    print("Vec8f instantiation test passed");
+}
+
+@test
+fn test_vec4d_instantiation() {
+    let v = Vec4d.splat(2.0);
+    let arr = v.to_array();
+    assert_eq(arr[3], 2.0);
+    print("Vec4d instantiation test passed");
+}
+
+@test
+fn test_vec8i_instantiation() {
+    let v = Vec8i.splat(7);
+    let arr = v.to_array();
+    assert_eq(arr[7], 7);
+    print("Vec8i instantiation test passed");
+}
+
+@test
+fn test_vec4l_instantiation() {
+    let v = Vec4l.splat(42);
+    let arr = v.to_array();
+    assert_eq(arr[3], 42);
+    print("Vec4l instantiation test passed");
+}
+
+// =============================================================================
+// SECTION 7: Mask Type Instantiation Tests
+// =============================================================================
+
+@test
+fn test_mask4_instantiation() {
+    let m = Mask4.all();
+    assert(m.all_active());
+    print("Mask4 instantiation test passed");
+}
+
+@test
+fn test_mask8_instantiation() {
+    let m = Mask8.none();
+    assert(!m.any());
+    print("Mask8 instantiation test passed");
+}
+
+@test
+fn test_mask16_instantiation() {
+    let m = Mask16.all();
+    assert_eq(m.count(), 16);
+    print("Mask16 instantiation test passed");
+}
+
+// =============================================================================
+// SECTION 8: Vec Generic Type Equivalence Tests
+// =============================================================================
+
+@test
+fn test_vec4f_generic_equiv() {
+    // Vec4f should be interchangeable with Vec<Float32, 4>
+    let v1 = Vec4f.splat(3.14);
+    let arr = v1.to_array();
+    assert_eq(arr[0], 3.14);
+    print("Vec4f generic equivalence test passed");
+}
+
+@test
+fn test_vec4i_generic_equiv() {
+    let v1 = Vec4i.splat(42);
+    let arr = v1.to_array();
+    assert_eq(arr[0], 42);
+    print("Vec4i generic equivalence test passed");
+}
+
+@test
+fn test_vec2d_generic_equiv() {
+    let v1 = Vec2d.splat(2.718);
+    let arr = v1.to_array();
+    assert_eq(arr[0], 2.718);
+    print("Vec2d generic equivalence test passed");
+}
+
+// =============================================================================
+// SECTION 9: Splat with Various Values
+// =============================================================================
+
+@test
+fn test_vec4f_splat_negative() {
+    let v = Vec4f.splat(-1.5);
+    let arr = v.to_array();
+    assert_eq(arr[0], -1.5);
+    assert_eq(arr[3], -1.5);
+}
+
+@test
+fn test_vec4i_splat_negative() {
+    let v = Vec4i.splat(-42);
+    let arr = v.to_array();
+    assert_eq(arr[0], -42);
+    assert_eq(arr[3], -42);
+}
+
+@test
+fn test_vec2d_splat_large() {
+    let v = Vec2d.splat(1000000.5);
+    let arr = v.to_array();
+    assert_eq(arr[0], 1000000.5);
+    assert_eq(arr[1], 1000000.5);
+}
+
+@test
+fn test_vec2l_splat_negative() {
+    let v = Vec2l.splat(-100);
+    let arr = v.to_array();
+    assert_eq(arr[0], -100);
+    assert_eq(arr[1], -100);
+}
+
+@test
+fn test_mask4_none_count() {
+    let m = Mask4.none();
+    assert_eq(m.count(), 0);
+    assert(!m.any());
+}
+
+@test
+fn test_mask8_all_count() {
+    let m = Mask8.all();
+    assert_eq(m.count(), 8);
+    assert(m.all_active());
+}
+
+@test
+fn test_mask16_none_count() {
+    let m = Mask16.none();
+    assert_eq(m.count(), 0);
+    assert(!m.all_active());
+}
+
+@test
+fn test_vec4f_splat_zero() {
+    let v = Vec4f.splat(0.0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 0.0);
+    assert_eq(arr[1], 0.0);
+    assert_eq(arr[2], 0.0);
+    assert_eq(arr[3], 0.0);
+}
+
+@test
+fn test_vec4i_splat_one() {
+    let v = Vec4i.splat(1);
+    let arr = v.to_array();
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 1);
+    assert_eq(arr[2], 1);
+    assert_eq(arr[3], 1);
+}
+
+@test
+fn test_mask4_all_count() {
+    let m = Mask4.all();
+    assert_eq(m.count(), 4);
+}
+
+// =============================================================================
+// SECTION 10: From Array Tests
+// =============================================================================
+
+@test
+fn test_vec4f_from_array_values() {
+    let arr = [1.0, 2.0, 3.0, 4.0];
+    let v = Vec4f.from_array(arr);
+    let out = v.to_array();
+    assert_eq(out[0], 1.0);
+    assert_eq(out[1], 2.0);
+    assert_eq(out[2], 3.0);
+    assert_eq(out[3], 4.0);
+}
+
+@test
+fn test_vec4i_from_array_values() {
+    let arr = [10, 20, 30, 40];
+    let v = Vec4i.from_array(arr);
+    let out = v.to_array();
+    assert_eq(out[0], 10);
+    assert_eq(out[3], 40);
+}
+
+@test
+fn test_vec2d_from_array_values() {
+    let arr = [1.5, 2.5];
+    let v = Vec2d.from_array(arr);
+    let out = v.to_array();
+    assert_eq(out[0], 1.5);
+    assert_eq(out[1], 2.5);
+}
+
+@test
+fn test_vec2l_from_array_values() {
+    let arr = [100, 200];
+    let v = Vec2l.from_array(arr);
+    let out = v.to_array();
+    assert_eq(out[0], 100);
+    assert_eq(out[1], 200);
+}
+
+// =============================================================================
+// SECTION 11: Mask NOT Operation Tests
+// =============================================================================
+
+@test
+fn test_mask4_not_all() {
+    let m = Mask4.all();
+    let n = m.not();
+    assert_eq(n.count(), 0);
+    assert(!n.any());
+}
+
+@test
+fn test_mask8_not_none() {
+    let m = Mask8.none();
+    let n = m.not();
+    assert_eq(n.count(), 8);
+    assert(n.all_active());
+}
+
+@test
+fn test_mask16_not_all() {
+    let m = Mask16.all();
+    let n = m.not();
+    assert_eq(n.count(), 0);
+    assert(!n.any());
+}
+
+@test
+fn test_vec4f_splat_large_value() {
+    let v = Vec4f.splat(1000000.0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 1000000.0);
+    assert_eq(arr[3], 1000000.0);
+}
+
+// =============================================================================
+// SECTION 12: Additional Type Compatibility Tests
+// =============================================================================
+
+@test
+fn test_vec16b_instantiation() {
+    let v = Vec16b.splat(255);
+    let arr = v.to_array();
+    assert_eq(arr[0], 255);
+    assert_eq(arr[15], 255);
+}
+
+@test
+fn test_vec8s_instantiation() {
+    let v = Vec8s.splat(32767);
+    let arr = v.to_array();
+    assert_eq(arr[0], 32767);
+    assert_eq(arr[7], 32767);
+}
+
+@test
+fn test_vec32b_instantiation() {
+    let v = Vec32b.splat(128);
+    let arr = v.to_array();
+    assert_eq(arr[0], 128);
+    assert_eq(arr[31], 128);
+}
+
+@test
+fn test_vec16s_instantiation() {
+    let v = Vec16s.splat(-100);
+    let arr = v.to_array();
+    assert_eq(arr[0], -100);
+    assert_eq(arr[15], -100);
+}
+
+@test
+fn test_vec64b_instantiation() {
+    let v = Vec64b.splat(42);
+    let arr = v.to_array();
+    assert_eq(arr[0], 42);
+    assert_eq(arr[63], 42);
+}
+
+@test
+fn test_vec32s_instantiation() {
+    let v = Vec32s.splat(1000);
+    let arr = v.to_array();
+    assert_eq(arr[0], 1000);
+    assert_eq(arr[31], 1000);
+}
+
+@test
+fn test_vec16i_instantiation() {
+    let v = Vec16i.splat(-12345);
+    let arr = v.to_array();
+    assert_eq(arr[0], -12345);
+    assert_eq(arr[15], -12345);
+}
+
+@test
+fn test_vec8l_instantiation() {
+    let v = Vec8l.splat(999999);
+    let arr = v.to_array();
+    assert_eq(arr[0], 999999);
+    assert_eq(arr[7], 999999);
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

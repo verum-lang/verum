@@ -1,0 +1,265 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, advanced
+// @timeout: 15000
+// @expected-exit: 0
+//
+// CBGR advanced reference test: Iterator-like patterns.
+// Manual iterator simulation with mutable state, next/has_next patterns,
+// map-accumulate through refs, and scan-style operations.
+// NOTE: Uses separate check + advance to avoid scope-based borrow conflicts.
+
+// ============================================================================
+// Type definitions
+// ============================================================================
+
+type RangeIter is { current: Int, stop: Int, step_size: Int };
+type Accum is { sum: Int, product: Int, count: Int };
+type RunningStats is { total: Int, count: Int, sq_total: Int };
+
+// ============================================================================
+// Range iterator functions (value-based check to avoid borrow conflict)
+// ============================================================================
+
+fn range_new(start: Int, stop: Int, step_size: Int) -> RangeIter {
+    RangeIter { current: start, stop: stop, step_size: step_size }
+}
+
+fn range_has_next_val(current: Int, stop: Int, step_size: Int) -> Bool {
+    if step_size > 0 { current < stop }
+    else { current > stop }
+}
+
+fn range_next(it: &mut RangeIter) -> Int {
+    let val = (*it).current;
+    (*it).current = (*it).current + (*it).step_size;
+    val
+}
+
+fn range_peek_val(iter: RangeIter) -> Int {
+    let v = iter.current;
+    v
+}
+
+fn range_remaining_val(cur: Int, stop: Int, stp: Int) -> Int {
+    if stp > 0 {
+        let diff = stop - cur;
+        if diff <= 0 { return 0; }
+        let numer = diff + stp - 1;
+        let res = numer / stp;
+        return res;
+    }
+    let diff = cur - stop;
+    if diff <= 0 { return 0; }
+    let abs_step = 0 - stp;
+    let numer = diff + abs_step - 1;
+    numer / abs_step
+}
+
+// ============================================================================
+// Accumulator functions
+// ============================================================================
+
+fn accum_new() -> Accum {
+    Accum { sum: 0, product: 1, count: 0 }
+}
+
+fn accum_feed(a: &mut Accum, val: Int) {
+    (*a).sum = (*a).sum + val;
+    (*a).product = (*a).product * val;
+    (*a).count = (*a).count + 1;
+}
+
+fn accum_mean(a: &Accum) -> Int {
+    if (*a).count == 0 { return 0; }
+    (*a).sum / (*a).count
+}
+
+// ============================================================================
+// Running stats
+// ============================================================================
+
+fn rstats_new() -> RunningStats {
+    RunningStats { total: 0, count: 0, sq_total: 0 }
+}
+
+fn rstats_add(s: &mut RunningStats, val: Int) {
+    (*s).total = (*s).total + val;
+    (*s).sq_total = (*s).sq_total + val * val;
+    (*s).count = (*s).count + 1;
+}
+
+fn rstats_mean(s: &RunningStats) -> Int {
+    if (*s).count == 0 { return 0; }
+    (*s).total / (*s).count
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_range_basic() {
+    let mut it = range_new(0, 5, 1);
+    assert_eq(range_has_next_val(it.current, it.stop, it.step_size), true);
+    assert_eq(range_remaining_val(it.current, it.stop, it.step_size), 5);
+    let v0 = range_next(&mut it);
+    assert_eq(v0, 0);
+    let v1 = range_next(&mut it);
+    assert_eq(v1, 1);
+    assert_eq(range_remaining_val(it.current, it.stop, it.step_size), 3);
+}
+
+fn test_range_collect_sum() {
+    let mut it = range_new(1, 11, 1);
+    let mut total = 0;
+    while range_has_next_val(it.current, it.stop, it.step_size) {
+        total = total + range_next(&mut it);
+    }
+    assert_eq(total, 55);
+}
+
+fn test_range_step_2() {
+    let mut it = range_new(0, 10, 2);
+    let mut total = 0;
+    let mut cnt = 0;
+    while range_has_next_val(it.current, it.stop, it.step_size) {
+        total = total + range_next(&mut it);
+        cnt = cnt + 1;
+    }
+    assert_eq(cnt, 5); // 0,2,4,6,8
+    assert_eq(total, 20);
+}
+
+fn test_range_negative_step() {
+    let mut it = range_new(10, 0, -2);
+    let mut total = 0;
+    let mut cnt = 0;
+    while range_has_next_val(it.current, it.stop, it.step_size) {
+        total = total + range_next(&mut it);
+        cnt = cnt + 1;
+    }
+    assert_eq(cnt, 5); // 10,8,6,4,2
+    assert_eq(total, 30);
+}
+
+fn test_range_peek() {
+    let mut it = range_new(100, 200, 10);
+    assert_eq(range_peek_val(it), 100);
+    range_next(&mut it);
+    assert_eq(range_peek_val(it), 110);
+}
+
+fn test_count_iterator() {
+    let mut pos = 0;
+    let limit = 5;
+    let mut total = 0;
+    while pos < limit {
+        total = total + pos;
+        pos = pos + 1;
+    }
+    assert_eq(total, 10); // 0+1+2+3+4
+}
+
+fn test_accum_basic() {
+    let mut ac = accum_new();
+    accum_feed(&mut ac, 2);
+    accum_feed(&mut ac, 3);
+    accum_feed(&mut ac, 5);
+    assert_eq(ac.sum, 10);
+    assert_eq(ac.product, 30);
+    assert_eq(ac.count, 3);
+    assert_eq(accum_mean(&ac), 3);
+}
+
+fn test_accum_with_range() {
+    let mut it = range_new(1, 6, 1);
+    let mut ac = accum_new();
+    while range_has_next_val(it.current, it.stop, it.step_size) {
+        accum_feed(&mut ac, range_next(&mut it));
+    }
+    assert_eq(ac.sum, 15);
+    assert_eq(ac.product, 120);
+    assert_eq(ac.count, 5);
+    assert_eq(accum_mean(&ac), 3);
+}
+
+fn test_running_stats() {
+    let mut rs = rstats_new();
+    rstats_add(&mut rs, 2);
+    rstats_add(&mut rs, 4);
+    rstats_add(&mut rs, 4);
+    rstats_add(&mut rs, 4);
+    rstats_add(&mut rs, 5);
+    rstats_add(&mut rs, 5);
+    rstats_add(&mut rs, 7);
+    rstats_add(&mut rs, 9);
+    assert_eq(rs.total, 40);
+    assert_eq(rs.count, 8);
+    assert_eq(rstats_mean(&rs), 5);
+}
+
+fn test_scan_pattern() {
+    let mut it = range_new(1, 6, 1);
+    let mut running_sum = 0;
+    let mut last_sum = 0;
+    while range_has_next_val(it.current, it.stop, it.step_size) {
+        running_sum = running_sum + range_next(&mut it);
+        last_sum = running_sum;
+    }
+    assert_eq(last_sum, 15);
+}
+
+fn test_filter_count() {
+    let mut it = range_new(1, 21, 1);
+    let mut even_count = 0;
+    while range_has_next_val(it.current, it.stop, it.step_size) {
+        let val = range_next(&mut it);
+        if val % 2 == 0 {
+            even_count = even_count + 1;
+        }
+    }
+    assert_eq(even_count, 10);
+}
+
+fn test_map_accumulate() {
+    let mut it = range_new(1, 6, 1);
+    let mut sq_sum = 0;
+    while range_has_next_val(it.current, it.stop, it.step_size) {
+        let val = range_next(&mut it);
+        sq_sum = sq_sum + val * val;
+    }
+    assert_eq(sq_sum, 55); // 1+4+9+16+25
+}
+
+fn test_double_range() {
+    // Two iterators concurrently
+    let mut it1 = range_new(1, 4, 1);
+    let mut it2 = range_new(10, 40, 10);
+    let mut combined = 0;
+    while range_has_next_val(it1.current, it1.stop, it1.step_size) {
+        let v1 = range_next(&mut it1);
+        let v2 = range_next(&mut it2);
+        combined = combined + v1 * v2;
+    }
+    // 1*10 + 2*20 + 3*30 = 10+40+90 = 140
+    assert_eq(combined, 140);
+}
+
+fn main() -> Int {
+    test_range_basic();
+    test_range_collect_sum();
+    test_range_step_2();
+    test_range_negative_step();
+    test_range_peek();
+    test_count_iterator();
+    test_accum_basic();
+    test_accum_with_range();
+    test_running_stats();
+    test_scan_pattern();
+    test_filter_count();
+    test_map_accumulate();
+    test_double_range();
+    print("[OK] 363_interp_cbgr_ref_tree");
+    0
+}

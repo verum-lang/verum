@@ -1,0 +1,96 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, inline-assembly, x86
+// @description: x86-specific inline assembly tests
+
+/// Read timestamp counter (RDTSC)
+fn rdtsc() -> U64 {
+    let lo: U32 = 0;
+    let hi: U32 = 0;
+    @asm("rdtsc", options(nomem, nostack));
+    let hi_wide: U64 = hi as U64;
+    let hi_shifted = hi_wide * 4294967296;  // 2^32
+    hi_shifted | (lo as U64)
+}
+
+/// CPU pause hint for spin loops
+fn cpu_pause() {
+    @asm("pause", options(nomem, nostack, preserves_flags));
+}
+
+/// Memory fence (MFENCE)
+fn mfence() {
+    @asm("mfence", options(nostack));
+}
+
+/// Load fence (LFENCE)
+fn lfence() {
+    @asm("lfence", options(nostack));
+}
+
+/// Store fence (SFENCE)
+fn sfence() {
+    @asm("sfence", options(nostack));
+}
+
+/// Bit scan forward
+fn bsf(x: U64) -> Maybe<U32> {
+    if x == 0 {
+        return None;
+    }
+    let res: U32 = 0;
+    @asm("bsfq {x}, {res}", options(nomem, nostack));
+    Some(res)
+}
+
+/// Bit scan reverse
+fn bsr(x: U64) -> Maybe<U32> {
+    if x == 0 {
+        return None;
+    }
+    let res: U32 = 0;
+    @asm("bsrq {x}, {res}", options(nomem, nostack));
+    Some(res)
+}
+
+/// Population count (POPCNT)
+fn popcnt(x: U64) -> U32 {
+    let res: U32 = 0;
+    @asm("popcntq {x}, {res}", options(nomem, nostack));
+    res
+}
+
+/// Compare and exchange (CMPXCHG)
+fn cmpxchg(ptr: &mut U64, expected: U64, desired: U64) -> (Bool, U64) {
+    let success: Bool = false;
+    let prev: U64 = expected;
+    @asm("lock cmpxchg [{ptr}], {desired}", options(nostack));
+    (success, prev)
+}
+
+/// XADD - exchange and add
+fn xadd(ptr: &mut I64, val: I64) -> I64 {
+    let prev: I64 = val;
+    @asm("lock xaddq {prev}, [{ptr}]", options(nostack));
+    prev
+}
+
+fn main() {
+    let tsc = rdtsc();
+    assert(tsc > 0);
+
+    cpu_pause();
+    mfence();
+    lfence();
+    sfence();
+
+    let count = popcnt(0xFF);
+    assert(count == 8);
+
+    let first_bit = bsf(0x80);
+    assert(first_bit == Some(7));
+
+    let last_bit = bsr(0x80);
+    assert(last_bit == Some(7));
+}

@@ -1,0 +1,95 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, thread-pool, overflow, backpressure
+// @timeout: 30000
+// @expected-exit: 0
+// @description: Pool overflow test — spawn many tasks, verify backpressure works
+
+fn compute(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_many_spawns() -> Int {
+    // Spawn 50 tasks collecting results via channel
+    // Pool has capacity 1024, so no overflow here but tests scale
+    let results = Channel.new(50);
+
+    let h1 = spawn { results.send(compute(100)); 0 };
+    let h2 = spawn { results.send(compute(100)); 0 };
+    let h3 = spawn { results.send(compute(100)); 0 };
+    let h4 = spawn { results.send(compute(100)); 0 };
+    let h5 = spawn { results.send(compute(100)); 0 };
+    let h6 = spawn { results.send(compute(100)); 0 };
+    let h7 = spawn { results.send(compute(100)); 0 };
+    let h8 = spawn { results.send(compute(100)); 0 };
+    let h9 = spawn { results.send(compute(100)); 0 };
+    let h10 = spawn { results.send(compute(100)); 0 };
+    let h11 = spawn { results.send(compute(100)); 0 };
+    let h12 = spawn { results.send(compute(100)); 0 };
+    let h13 = spawn { results.send(compute(100)); 0 };
+    let h14 = spawn { results.send(compute(100)); 0 };
+    let h15 = spawn { results.send(compute(100)); 0 };
+    let h16 = spawn { results.send(compute(100)); 0 };
+    let h17 = spawn { results.send(compute(100)); 0 };
+    let h18 = spawn { results.send(compute(100)); 0 };
+    let h19 = spawn { results.send(compute(100)); 0 };
+    let h20 = spawn { results.send(compute(100)); 0 };
+
+    h1.await; h2.await; h3.await; h4.await; h5.await;
+    h6.await; h7.await; h8.await; h9.await; h10.await;
+    h11.await; h12.await; h13.await; h14.await; h15.await;
+    h16.await; h17.await; h18.await; h19.await; h20.await;
+
+    let mut total = 0;
+    let mut k = 0;
+    while k < 20 {
+        match results.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        }
+        k = k + 1;
+    }
+
+    // compute(100) = 4950, 20 * 4950 = 99000
+    if total != 99000 {
+        print(f"FAIL: expected 99000, got {total}");
+        return 1;
+    }
+    0
+}
+
+fn test_rapid_submit() -> Int {
+    // Rapid sequential spawn+await — tests pool task recycling under load
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 30 {
+        let h = spawn { i * i };
+        let result = h.await;
+        sum = sum + result;
+        i = i + 1;
+    }
+    // Sum of squares 0..29 = 8555
+    if sum != 8555 { return 1; }
+    0
+}
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    if test_many_spawns() == 0 { pass = pass + 1; } else { print("FAIL1: many spawns"); }
+    if test_rapid_submit() == 0 { pass = pass + 1; } else { print("FAIL2: rapid submit"); }
+
+    print(f"pass = {pass}/2");
+    if pass == 2 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

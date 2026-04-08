@@ -1,0 +1,579 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, function_calls, tier-oracle
+// @timeout: 15000
+
+/// Comprehensive function call tests for Tier 0 vs Tier 3 equivalence.
+/// Tests function calling semantics, recursion, closures, and higher-order
+/// functions to ensure identical behavior across execution tiers.
+
+fn main() {
+    test_basic_calls();
+    test_parameters();
+    test_return_values();
+    test_recursion();
+    test_mutual_recursion();
+    test_tail_recursion();
+    test_closures();
+    test_higher_order();
+    test_generic_functions();
+    test_methods();
+    test_default_parameters();
+    test_variadic_functions();
+    test_call_order();
+}
+
+/// Basic function calls
+fn test_basic_calls() {
+    println("=== Basic Calls ===");
+
+    // Simple function
+    fn greet() {
+        println("Hello!");
+    }
+    greet();
+
+    // Function with return
+    fn get_number() -> Int {
+        42
+    }
+    println(f"get_number() = {get_number()}");
+
+    // Nested function calls
+    fn double(x: Int) -> Int { x * 2 }
+    fn add_one(x: Int) -> Int { x + 1 }
+
+    let result = double(add_one(double(5)));
+    println(f"double(add_one(double(5))) = {result}");
+
+    // Function as last expression
+    fn compute() -> Int {
+        let a = 10;
+        let b = 20;
+        a + b
+    }
+    println(f"compute() = {compute()}");
+}
+
+/// Parameter passing
+fn test_parameters() {
+    println("\n=== Parameters ===");
+
+    // Single parameter
+    fn square(x: Int) -> Int {
+        x * x
+    }
+    println(f"square(7) = {square(7)}");
+
+    // Multiple parameters
+    fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+    println(f"add(3, 4) = {add(3, 4)}");
+
+    // Many parameters
+    fn sum_all(a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
+        a + b + c + d + e
+    }
+    println(f"sum_all(1,2,3,4,5) = {sum_all(1, 2, 3, 4, 5)}");
+
+    // Different types
+    fn format_person(name: Text, age: Int, active: Bool) -> Text {
+        f"{name}, age {age}, active: {active}"
+    }
+    println(f"format_person = {format_person("Alice", 30, true)}");
+
+    // Pass by value (copy semantics for primitives)
+    fn try_modify(mut x: Int) {
+        x = x + 100;
+        println(f"inside: x = {x}");
+    }
+    let original = 5;
+    try_modify(original);
+    println(f"after: original = {original}");
+
+    // Pass by reference
+    fn modify_ref(x: &mut Int) {
+        *x = *x + 100;
+    }
+    let mut value = 5;
+    modify_ref(&mut value);
+    println(f"after modify_ref: value = {value}");
+}
+
+/// Return values
+fn test_return_values() {
+    println("\n=== Return Values ===");
+
+    // Explicit return
+    fn explicit_return(x: Int) -> Int {
+        if x < 0 {
+            return 0;
+        }
+        x * 2
+    }
+    println(f"explicit_return(-5) = {explicit_return(-5)}");
+    println(f"explicit_return(5) = {explicit_return(5)}");
+
+    // Tuple return
+    fn div_rem(a: Int, b: Int) -> (Int, Int) {
+        (a / b, a % b)
+    }
+    let (q, r) = div_rem(17, 5);
+    println(f"div_rem(17, 5) = ({q}, {r})");
+
+    // Struct return
+    type Point is { x: Int, y: Int };
+    fn make_point(x: Int, y: Int) -> Point {
+        Point { x, y }
+    }
+    let p = make_point(3, 4);
+    println(f"make_point(3, 4) = ({p.x}, {p.y})");
+
+    // Option return
+    fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+        if b == 0 { None } else { Some(a / b) }
+    }
+    println(f"safe_divide(10, 2) = {safe_divide(10, 2)}");
+    println(f"safe_divide(10, 0) = {safe_divide(10, 0)}");
+
+    // Unit return
+    fn do_nothing() -> () {
+        let _ = 42;
+    }
+    do_nothing();
+    println("do_nothing() completed");
+}
+
+/// Simple recursion
+fn test_recursion() {
+    println("\n=== Recursion ===");
+
+    // Factorial
+    fn factorial(n: Int) -> Int {
+        if n <= 1 { 1 } else { n * factorial(n - 1) }
+    }
+    for i in 0..=10 {
+        println(f"factorial({i}) = {factorial(i)}");
+    }
+
+    // Fibonacci
+    fn fib(n: Int) -> Int {
+        match n {
+            0 => 0,
+            1 => 1,
+            _ => fib(n - 1) + fib(n - 2),
+        }
+    }
+    for i in 0..=15 {
+        println(f"fib({i}) = {fib(i)}");
+    }
+
+    // Sum of list
+    fn sum_list(list: List<Int>) -> Int {
+        match list {
+            [] => 0,
+            [head, ..tail] => head + sum_list(tail),
+        }
+    }
+    let nums = [1, 2, 3, 4, 5];
+    println(f"sum_list([1..5]) = {sum_list(nums)}");
+
+    // Deep recursion (moderate depth)
+    fn count_down(n: Int) -> Int {
+        if n == 0 { 0 } else { 1 + count_down(n - 1) }
+    }
+    println(f"count_down(100) = {count_down(100)}");
+}
+
+/// Mutual recursion
+fn test_mutual_recursion() {
+    println("\n=== Mutual Recursion ===");
+
+    // Even/odd check via mutual recursion
+    fn is_even(n: Int) -> Bool {
+        if n == 0 { true } else { is_odd(n - 1) }
+    }
+
+    fn is_odd(n: Int) -> Bool {
+        if n == 0 { false } else { is_even(n - 1) }
+    }
+
+    for i in 0..10 {
+        println(f"{i}: even={is_even(i)}, odd={is_odd(i)}");
+    }
+
+    // Hofstadter Male-Female sequence
+    fn male(n: Int) -> Int {
+        if n == 0 { 0 } else { n - female(male(n - 1)) }
+    }
+
+    fn female(n: Int) -> Int {
+        if n == 0 { 1 } else { n - male(female(n - 1)) }
+    }
+
+    for i in 0..10 {
+        println(f"M({i})={male(i)}, F({i})={female(i)}");
+    }
+}
+
+/// Tail call optimization
+fn test_tail_recursion() {
+    println("\n=== Tail Recursion ===");
+
+    // Tail-recursive factorial
+    fn factorial_tail(n: Int, acc: Int) -> Int {
+        if n <= 1 { acc } else { factorial_tail(n - 1, n * acc) }
+    }
+    println(f"factorial_tail(10, 1) = {factorial_tail(10, 1)}");
+    println(f"factorial_tail(20, 1) = {factorial_tail(20, 1)}");
+
+    // Tail-recursive sum
+    fn sum_tail(list: List<Int>, acc: Int) -> Int {
+        match list {
+            [] => acc,
+            [head, ..tail] => sum_tail(tail, acc + head),
+        }
+    }
+    let nums = (1..=100).collect<List<Int>>();
+    println(f"sum_tail(1..100) = {sum_tail(nums, 0)}");
+
+    // Tail-recursive fibonacci
+    fn fib_tail(n: Int, a: Int, b: Int) -> Int {
+        if n == 0 { a }
+        else if n == 1 { b }
+        else { fib_tail(n - 1, b, a + b) }
+    }
+    println(f"fib_tail(30) = {fib_tail(30, 0, 1)}");
+
+    // Deep tail recursion (should not overflow with TCO)
+    fn count_tail(n: Int, acc: Int) -> Int {
+        if n == 0 { acc } else { count_tail(n - 1, acc + 1) }
+    }
+    println(f"count_tail(1000) = {count_tail(1000, 0)}");
+}
+
+/// Closures
+fn test_closures() {
+    println("\n=== Closures ===");
+
+    // Basic closure
+    let add_one = |x| x + 1;
+    println(f"add_one(5) = {add_one(5)}");
+
+    // Closure capturing variable
+    let multiplier = 10;
+    let multiply = |x| x * multiplier;
+    println(f"multiply(7) = {multiply(7)}");
+
+    // Mutable capture
+    let mut counter = 0;
+    let increment = || {
+        counter = counter + 1;
+        counter
+    };
+    println(f"increment() = {increment()}");
+    println(f"increment() = {increment()}");
+    println(f"increment() = {increment()}");
+
+    // Closure returning closure
+    fn make_adder(n: Int) -> impl Fn(Int) -> Int {
+        |x| x + n
+    }
+    let add_5 = make_adder(5);
+    let add_10 = make_adder(10);
+    println(f"add_5(3) = {add_5(3)}");
+    println(f"add_10(3) = {add_10(3)}");
+
+    // Closure in loop
+    let closures = (0..5).map(|i| {
+        let captured = i * 10;
+        move || captured
+    }).collect<List<_>>();
+
+    for (idx, closure) in closures.enumerate() {
+        println(f"closure[{idx}]() = {closure()}");
+    }
+
+    // Multi-argument closure
+    let compute = |a, b, c| a * b + c;
+    println(f"compute(2, 3, 4) = {compute(2, 3, 4)}");
+}
+
+/// Higher-order functions
+fn test_higher_order() {
+    println("\n=== Higher-Order Functions ===");
+
+    // Function as parameter
+    fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+        f(x)
+    }
+    fn double(x: Int) -> Int { x * 2 }
+    println(f"apply(double, 21) = {apply(double, 21)}");
+
+    // Closure as parameter
+    fn apply_closure<F: Fn(Int) -> Int>(f: F, x: Int) -> Int {
+        f(x)
+    }
+    println(f"apply_closure(|x| x*3, 14) = {apply_closure(|x| x * 3, 14)}");
+
+    // Map
+    let nums = [1, 2, 3, 4, 5];
+    let doubled = nums.map(|x| x * 2);
+    println(f"map double: {doubled}");
+
+    // Filter
+    let evens = nums.filter(|x| x % 2 == 0);
+    println(f"filter even: {evens}");
+
+    // Fold/reduce
+    let sum = nums.fold(0, |acc, x| acc + x);
+    println(f"fold sum: {sum}");
+
+    let product = nums.fold(1, |acc, x| acc * x);
+    println(f"fold product: {product}");
+
+    // Chained operations
+    let result = (1..=10)
+        .filter(|x| x % 2 == 1)
+        .map(|x| x * x)
+        .fold(0, |acc, x| acc + x);
+    println(f"sum of odd squares 1-10: {result}");
+
+    // Function composition
+    fn compose<A, B, C>(f: fn(B) -> C, g: fn(A) -> B) -> impl Fn(A) -> C {
+        move |x| f(g(x))
+    }
+    let triple = |x| x * 3;
+    let add_one = |x: Int| x + 1;
+    let triple_then_add = compose(add_one, triple);
+    println(f"triple_then_add(5) = {triple_then_add(5)}");
+}
+
+/// Generic functions
+fn test_generic_functions() {
+    println("\n=== Generic Functions ===");
+
+    // Simple generic
+    fn identity<T>(x: T) -> T {
+        x
+    }
+    println(f"identity(42) = {identity(42)}");
+    println(f"identity(\"hello\") = {identity("hello")}");
+
+    // Generic with constraint
+    fn max<T: Ord>(a: T, b: T) -> T {
+        if a > b { a } else { b }
+    }
+    println(f"max(3, 7) = {max(3, 7)}");
+    println(f"max(\"apple\", \"banana\") = {max("apple", "banana")}");
+
+    // Generic pair
+    fn swap<A, B>(pair: (A, B)) -> (B, A) {
+        (pair.1, pair.0)
+    }
+    let swapped = swap((1, "one"));
+    println(f"swap((1, \"one\")) = ({swapped.0}, {swapped.1})");
+
+    // Generic collection operations
+    fn first<T>(list: List<T>) -> Maybe<T> {
+        match list {
+            [] => None,
+            [head, ..] => Some(head),
+        }
+    }
+    println(f"first([1,2,3]) = {first([1, 2, 3])}");
+    println(f"first([]) = {first<Int>([])}");
+
+    // Generic with multiple constraints
+    fn print_pair<A: Display, B: Display>(pair: (A, B)) {
+        println(f"pair: ({pair.0}, {pair.1})");
+    }
+    print_pair((42, "answer"));
+}
+
+/// Method calls
+fn test_methods() {
+    println("\n=== Methods ===");
+
+    // Struct with methods
+    type Counter is {
+        value: Int,
+    };
+
+    implement Counter {
+        fn new() -> Counter {
+            Counter { value: 0 }
+        }
+
+        fn get(&self) -> Int {
+            self.value
+        }
+
+        fn increment(&mut self) {
+            self.value = self.value + 1;
+        }
+
+        fn add(&mut self, n: Int) {
+            self.value = self.value + n;
+        }
+
+        fn reset(&mut self) {
+            self.value = 0;
+        }
+    }
+
+    let mut counter = Counter.new();
+    println(f"initial: {counter.get()}");
+    counter.increment();
+    println(f"after increment: {counter.get()}");
+    counter.add(10);
+    println(f"after add(10): {counter.get()}");
+    counter.reset();
+    println(f"after reset: {counter.get()}");
+
+    // Method chaining
+    type Builder is {
+        parts: List<Text>,
+    };
+
+    implement Builder {
+        fn new() -> Builder {
+            Builder { parts: [] }
+        }
+
+        fn add(mut self, part: Text) -> Builder {
+            self.parts.push(part);
+            self
+        }
+
+        fn build(self) -> Text {
+            self.parts.join(" ")
+        }
+    }
+
+    let result = Builder.new()
+        .add("Hello")
+        .add("World")
+        .add("!")
+        .build();
+    println(f"builder result: {result}");
+}
+
+/// Default parameters
+fn test_default_parameters() {
+    println("\n=== Default Parameters ===");
+
+    // Function with defaults
+    fn greet(name: Text, greeting: Text = "Hello") -> Text {
+        f"{greeting}, {name}!"
+    }
+    println(greet("Alice"));
+    println(greet("Bob", "Hi"));
+
+    // Multiple defaults
+    fn format_number(n: Int, width: Int = 0, fill: Text = " ") -> Text {
+        let s = f"{n}";
+        let padding = width - s.len();
+        if padding <= 0 { s }
+        else { fill.repeat(padding) + s }
+    }
+    println(f"format_number(42) = \"{format_number(42)}\"");
+    println(f"format_number(42, 5) = \"{format_number(42, 5)}\"");
+    println(f"format_number(42, 5, \"0\") = \"{format_number(42, 5, "0")}\"");
+
+    // Named arguments with defaults
+    fn create_user(name: Text, age: Int = 0, active: Bool = true) -> Text {
+        f"User({name}, {age}, {active})"
+    }
+    println(create_user("Alice"));
+    println(create_user("Bob", age: 25));
+    println(create_user("Charlie", active: false, age: 30));
+}
+
+/// Variadic functions
+fn test_variadic_functions() {
+    println("\n=== Variadic Functions ===");
+
+    // Variadic sum
+    fn sum(..args: Int) -> Int {
+        args.fold(0, |acc, x| acc + x)
+    }
+    println(f"sum() = {sum()}");
+    println(f"sum(1) = {sum(1)}");
+    println(f"sum(1, 2, 3) = {sum(1, 2, 3)}");
+    println(f"sum(1, 2, 3, 4, 5) = {sum(1, 2, 3, 4, 5)}");
+
+    // Variadic max
+    fn max_of(..args: Int) -> Maybe<Int> {
+        args.max()
+    }
+    println(f"max_of() = {max_of()}");
+    println(f"max_of(5) = {max_of(5)}");
+    println(f"max_of(3, 1, 4, 1, 5, 9) = {max_of(3, 1, 4, 1, 5, 9)}");
+
+    // Mixed parameters with variadic
+    fn log(level: Text, ..messages: Text) {
+        for msg in messages {
+            println(f"[{level}] {msg}");
+        }
+    }
+    log("INFO", "Starting", "Processing", "Done");
+}
+
+/// Evaluation order of arguments
+fn test_call_order() {
+    println("\n=== Call Order ===");
+
+    let mut seq = [];
+
+    fn record(list: &mut List<Int>, value: Int) -> Int {
+        list.push(value);
+        value
+    }
+
+    fn three_args(a: Int, b: Int, c: Int) -> (Int, Int, Int) {
+        (a, b, c)
+    }
+
+    // Arguments evaluated left-to-right
+    seq.clear();
+    let result = three_args(
+        record(&mut seq, 1),
+        record(&mut seq, 2),
+        record(&mut seq, 3),
+    );
+    println(f"three_args result: {result}");
+    println(f"evaluation order: {seq}");
+
+    // Nested calls
+    seq.clear();
+    fn outer(a: Int, b: Int) -> Int { a + b }
+    fn inner(x: Int) -> Int { x * 10 }
+
+    let result = outer(
+        record(&mut seq, 1) + inner(record(&mut seq, 2)),
+        record(&mut seq, 3) + inner(record(&mut seq, 4)),
+    );
+    println(f"nested result: {result}");
+    println(f"nested order: {seq}");
+
+    // Method receiver vs arguments
+    type Obj is { value: Int };
+    implement Obj {
+        fn method(&self, x: Int) -> Int {
+            self.value + x
+        }
+    }
+
+    seq.clear();
+    fn make_obj(list: &mut List<Int>, v: Int) -> Obj {
+        list.push(v);
+        Obj { value: v }
+    }
+
+    let result = make_obj(&mut seq, 1).method(record(&mut seq, 2));
+    println(f"method result: {result}");
+    println(f"method order: {seq}");
+}

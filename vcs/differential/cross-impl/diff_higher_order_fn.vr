@@ -1,0 +1,65 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, higher-order, closures, function-types
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Higher-order functions: function arguments, closures, composition
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let square = |x: Int| -> Int { x * x };
+
+    // apply
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(inc, 5), 6);
+    assert_eq(apply(square, 5), 25);
+
+    // apply_twice
+    assert_eq(apply_twice(double, 3), 12);
+    assert_eq(apply_twice(inc, 10), 12);
+
+    // compose
+    assert_eq(compose(double, inc, 5), 12);   // double(inc(5)) = 12
+    assert_eq(compose(inc, double, 5), 11);   // inc(double(5)) = 11
+    assert_eq(compose(square, inc, 3), 16);   // square(inc(3)) = 16
+
+    // fold
+    let add = |acc: Int, x: Int| -> Int { acc + x };
+    assert_eq(fold_range(0, 10, 0, add), 45);
+
+    let mul = |acc: Int, x: Int| -> Int { acc * x };
+    assert_eq(fold_range(1, 6, 1, mul), 120);
+
+    // Closure with capture
+    let offset = 100;
+    let add_offset = |x: Int| -> Int { x + offset };
+    assert_eq(apply(add_offset, 42), 142);
+
+    print("diff_higher_order_fn: ok");
+    0
+}

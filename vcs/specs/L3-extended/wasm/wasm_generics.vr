@@ -1,0 +1,72 @@
+// @test: run
+// @level: L3
+// @tier: 2
+// @tags: wasm, generics, cross-compilation
+// @expected-exit: 0
+// @description: Generic types and functions under WASM
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+type Maybe<T> is None | Some(T);
+
+implement<A, B> Pair<A, B> {
+    fn new(a: A, b: B) -> Pair<A, B> {
+        Pair { first: a, second: b }
+    }
+}
+
+fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+fn map_maybe<T, U>(m: Maybe<T>, f: fn(T) -> U) -> Maybe<U> {
+    match m {
+        None => None,
+        Some(v) => Some(f(v)),
+    }
+}
+
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        None => default,
+        Some(v) => v,
+    }
+}
+
+fn max_of<T>(a: T, b: T, greater: fn(T, T) -> Bool) -> T {
+    if greater(a, b) { a } else { b }
+}
+
+fn main() -> Int {
+    // Pair
+    let p = Pair.new(10, 20);
+    assert_eq(p.first, 10);
+    assert_eq(p.second, 20);
+
+    let swapped = swap(p);
+    assert_eq(swapped.first, 20);
+    assert_eq(swapped.second, 10);
+
+    // Maybe
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    assert_eq(unwrap_or(some_val, 0), 42);
+    assert_eq(unwrap_or(none_val, 99), 99);
+
+    // map_maybe
+    let doubled = map_maybe(Some(21), |x| x * 2);
+    assert_eq(unwrap_or(doubled, 0), 42);
+
+    let mapped_none = map_maybe(none_val, |x| x * 2);
+    assert_eq(unwrap_or(mapped_none, -1), -1);
+
+    // Generic comparison
+    let bigger = max_of(10, 20, |a, b| a > b);
+    assert_eq(bigger, 20);
+
+    0
+}

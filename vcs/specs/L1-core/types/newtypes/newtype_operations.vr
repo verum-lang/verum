@@ -1,0 +1,128 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, newtypes, operations, methods
+
+/// Test for operations on newtypes.
+/// Newtypes can implement protocols and have methods defined via implement blocks.
+
+// Define newtypes
+type Meters is (Float);
+type Seconds is (Float);
+type MetersPerSecond is (Float);
+
+type Counter is (Int);
+type Temperature is (Float);
+
+// Implement methods on newtype
+implement Counter {
+    fn new() -> Counter {
+        Counter(0)
+    }
+
+    fn increment(&self) -> Counter {
+        let Counter(n) = self;
+        Counter(*n + 1)
+    }
+
+    fn decrement(&self) -> Counter {
+        let Counter(n) = self;
+        Counter(*n - 1)
+    }
+
+    fn value(&self) -> Int {
+        let Counter(n) = self;
+        *n
+    }
+
+    fn add(&self, other: &Counter) -> Counter {
+        let Counter(a) = self;
+        let Counter(b) = other;
+        Counter(*a + *b)
+    }
+}
+
+// Implement methods on Temperature
+implement Temperature {
+    fn celsius_to_fahrenheit(&self) -> Temperature {
+        let Temperature(c) = self;
+        Temperature(*c * 9.0 / 5.0 + 32.0)
+    }
+
+    fn fahrenheit_to_celsius(&self) -> Temperature {
+        let Temperature(f) = self;
+        Temperature((*f - 32.0) * 5.0 / 9.0)
+    }
+
+    fn is_freezing(&self) -> Bool {
+        let Temperature(t) = self;
+        *t <= 0.0
+    }
+}
+
+// Functions operating on newtypes
+fn calculate_speed(distance: Meters, time: Seconds) -> MetersPerSecond {
+    let Meters(d) = distance;
+    let Seconds(t) = time;
+    MetersPerSecond(d / t)
+}
+
+fn add_distances(a: Meters, b: Meters) -> Meters {
+    let Meters(x) = a;
+    let Meters(y) = b;
+    Meters(x + y)
+}
+
+fn scale_distance(distance: Meters, factor: Float) -> Meters {
+    let Meters(d) = distance;
+    Meters(d * factor)
+}
+
+fn main() {
+    // Counter operations
+    let counter: Counter = Counter.new();
+    assert(counter.value() == 0);
+
+    let counter2: Counter = counter.increment();
+    assert(counter2.value() == 1);
+
+    let counter3: Counter = counter2.increment().increment();
+    assert(counter3.value() == 3);
+
+    let counter4: Counter = counter3.decrement();
+    assert(counter4.value() == 2);
+
+    let sum: Counter = counter2.add(&counter3);
+    assert(sum.value() == 4);
+
+    // Temperature operations
+    let celsius: Temperature = Temperature(100.0);
+    let fahrenheit: Temperature = celsius.celsius_to_fahrenheit();
+    let Temperature(f_value) = fahrenheit;
+    assert(f_value == 212.0);
+
+    let back_to_c: Temperature = fahrenheit.fahrenheit_to_celsius();
+    let Temperature(c_value) = back_to_c;
+    assert((c_value - 100.0).abs() < 0.001);
+
+    let freezing: Temperature = Temperature(-5.0);
+    assert(freezing.is_freezing() == true);
+
+    let warm: Temperature = Temperature(25.0);
+    assert(warm.is_freezing() == false);
+
+    // Distance and speed calculations
+    let distance: Meters = Meters(100.0);
+    let time: Seconds = Seconds(10.0);
+    let speed: MetersPerSecond = calculate_speed(distance, time);
+    let MetersPerSecond(speed_value) = speed;
+    assert(speed_value == 10.0);
+
+    let total: Meters = add_distances(Meters(50.0), Meters(75.0));
+    let Meters(total_value) = total;
+    assert(total_value == 125.0);
+
+    let scaled: Meters = scale_distance(Meters(10.0), 3.0);
+    let Meters(scaled_value) = scaled;
+    assert(scaled_value == 30.0);
+}

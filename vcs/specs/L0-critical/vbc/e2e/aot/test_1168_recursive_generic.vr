@@ -1,0 +1,123 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: recursive, generic, heap, sum-type
+// @description: Test recursive generic data structures with Heap
+
+type BTree is BLeaf(Int) | BNode(Heap<BTree>, Int, Heap<BTree>);
+
+@allow(unbounded_recursion)
+fn btree_sum(t: BTree) -> Int {
+    match t {
+        BLeaf(v) => v,
+        BNode(left, v, right) => btree_sum(*left) + v + btree_sum(*right),
+    }
+}
+
+@allow(unbounded_recursion)
+fn btree_depth(t: BTree) -> Int {
+    match t {
+        BLeaf(_) => 1,
+        BNode(left, _, right) => {
+            let ld = btree_depth(*left);
+            let rd = btree_depth(*right);
+            if ld > rd { ld + 1 } else { rd + 1 }
+        },
+    }
+}
+
+@allow(unbounded_recursion)
+fn btree_count(t: BTree) -> Int {
+    match t {
+        BLeaf(_) => 1,
+        BNode(left, _, right) => btree_count(*left) + 1 + btree_count(*right),
+    }
+}
+
+fn test_btree() -> Int {
+    //       5
+    //      / \
+    //     3   8
+    //    / \   \
+    //   1   4   9
+    let tree = BNode(
+        Heap(BNode(
+            Heap(BLeaf(1)),
+            3,
+            Heap(BLeaf(4)),
+        )),
+        5,
+        Heap(BNode(
+            Heap(BLeaf(7)),
+            8,
+            Heap(BLeaf(9)),
+        )),
+    );
+
+    let sum = btree_sum(tree);
+    // 1 + 3 + 4 + 5 + 7 + 8 + 9 = 37
+    if sum != 37 {
+        print(f"FAIL btree_sum: {sum}, expected 37");
+        return 1;
+    }
+    print("  btree_sum: OK");
+    0
+}
+
+fn test_btree_depth() -> Int {
+    let deep = BNode(
+        Heap(BNode(
+            Heap(BNode(
+                Heap(BLeaf(1)),
+                2,
+                Heap(BLeaf(3)),
+            )),
+            4,
+            Heap(BLeaf(5)),
+        )),
+        6,
+        Heap(BLeaf(7)),
+    );
+    let d = btree_depth(deep);
+    // depth: 6 -> 4 -> 2 -> 1 = 4
+    if d != 4 {
+        print(f"FAIL btree_depth: {d}, expected 4");
+        return 1;
+    }
+    print("  btree_depth: OK");
+    0
+}
+
+fn test_btree_count() -> Int {
+    let tree = BNode(
+        Heap(BLeaf(1)),
+        2,
+        Heap(BNode(
+            Heap(BLeaf(3)),
+            4,
+            Heap(BLeaf(5)),
+        )),
+    );
+    let c = btree_count(tree);
+    if c != 5 {
+        print(f"FAIL btree_count: {c}, expected 5");
+        return 1;
+    }
+    print("  btree_count: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Recursive Generic Tests:");
+    let mut failures = 0;
+    failures = failures + test_btree();
+    failures = failures + test_btree_depth();
+    failures = failures + test_btree_count();
+
+    if failures == 0 {
+        print("All recursive generic tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

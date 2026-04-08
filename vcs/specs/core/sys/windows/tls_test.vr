@@ -1,0 +1,400 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/windows/tls_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, windows, tls, thread-local
+// @description: Tests for Windows TLS and context system.
+//
+// Coverage:
+// - ThreadControlBlock, ContextSlots, ContextEntry: TLS types
+// - TlsError: Error types
+// - init_tls_index, init_main_thread_tls: TLS initialization
+// - get_current_tcb, get_context_slots: TCB access
+// - ctx_get, ctx_set, ctx_clear: Context operations
+// - ctx_push, ctx_pop, ctx_depth: Context stack operations
+// - get_errno, set_errno: Thread-local errno
+// - Constants (MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, etc.)
+//
+// Test Strategy:
+// - Test context operations on initialized TLS
+// - Verify errno operations
+// - Test context stack push/pop
+//
+// Platform: Windows x86_64
+// =============================================================================
+
+@cfg(target_os = "windows")
+module test.stdlib.sys.windows.tls_test;
+
+mount core.sys.windows.tls.{
+    TlsError,
+    ThreadControlBlock,
+    ContextEntry,
+    ContextSlots,
+
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    TCB_MAGIC,
+    DEFAULT_STACK_SIZE,
+    GUARD_PAGE_SIZE,
+
+    init_tls_index,
+    init_main_thread_tls,
+    create_thread_tls,
+    cleanup_thread_tls,
+
+    get_current_tcb,
+    get_context_slots,
+    set_context_slots,
+    get_errno,
+    set_errno,
+    get_tid_fast,
+    check_stack_guard,
+    is_tls_initialized,
+    get_user_data,
+    set_user_data,
+
+    ctx_get,
+    ctx_get_mut,
+    ctx_set,
+    ctx_clear,
+    ctx_push,
+    ctx_pop,
+    ctx_depth,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// TLS Constants Tests
+// =============================================================================
+
+@test
+fn test_tls_constants() {
+    // Context slot limits
+    assert(MAX_CONTEXT_SLOTS == 256);
+    assert(CONTEXT_STACK_DEPTH == 8);
+
+    // TCB magic should be non-zero
+    assert(TCB_MAGIC != 0);
+
+    // Stack constants
+    assert(DEFAULT_STACK_SIZE > 0);
+    assert(GUARD_PAGE_SIZE > 0);
+
+    print("TLS constants tests passed");
+}
+
+// =============================================================================
+// TLS Initialized Tests
+// =============================================================================
+
+@test
+fn test_tls_initialized() {
+    // Check if TLS is initialized
+    let initialized = is_tls_initialized();
+
+    if initialized {
+        print("TLS is initialized");
+
+        // Get current TCB
+        let tcb_result = get_current_tcb();
+        assert(tcb_result is Some);
+
+        // Get context slots
+        let slots_result = get_context_slots();
+        assert(slots_result is Some);
+    } else {
+        print("TLS not initialized (expected in minimal environment)");
+    }
+}
+
+// =============================================================================
+// Errno Operations Tests
+// =============================================================================
+
+@test
+fn test_errno_operations() {
+    // Save original
+    let original = get_errno();
+
+    // Set and get
+    set_errno(42);
+    assert(get_errno() == 42);
+
+    set_errno(100);
+    assert(get_errno() == 100);
+
+    set_errno(0);
+    assert(get_errno() == 0);
+
+    // Restore
+    set_errno(original);
+    assert(get_errno() == original);
+
+    // Multiple reads
+    set_errno(77);
+    let r1 = get_errno();
+    let r2 = get_errno();
+    let r3 = get_errno();
+    assert(r1 == 77);
+    assert(r2 == 77);
+    assert(r3 == 77);
+
+    set_errno(original);
+
+    print("Errno operations tests passed");
+}
+
+// =============================================================================
+// Fast Thread ID Tests
+// =============================================================================
+
+@test
+fn test_tid_fast() {
+    // Get thread ID
+    let tid = get_tid_fast();
+
+    // TID should be positive
+    assert(tid > 0);
+
+    // Multiple calls return same TID
+    let tid2 = get_tid_fast();
+    let tid3 = get_tid_fast();
+    assert(tid == tid2);
+    assert(tid == tid3);
+
+    // Should match GetCurrentThreadId
+    mount core.sys.windows.kernel32.{GetCurrentThreadId};
+    let kernel_tid = GetCurrentThreadId();
+    assert(tid == kernel_tid as Int);
+
+    print(f"Fast TID: {tid}");
+}
+
+// =============================================================================
+// Context Operations Tests
+// =============================================================================
+
+@test
+fn test_context_operations() {
+    // Set a value
+    ctx_set(0, 42);
+
+    // Get the value
+    let value: Maybe<Int> = ctx_get(0);
+    assert(value is Some);
+    assert(value.unwrap() == 42);
+
+    // Update
+    ctx_set(0, 100);
+    let updated: Maybe<Int> = ctx_get(0);
+    assert(updated.unwrap() == 100);
+
+    // Clear
+    ctx_clear<Int>(0);
+    let cleared: Maybe<Int> = ctx_get(0);
+    assert(cleared is None);
+
+    // Multiple slots
+    ctx_set(1, 111);
+    ctx_set(2, 222);
+    ctx_set(3, 333);
+
+    let v1: Maybe<Int> = ctx_get(1);
+    let v2: Maybe<Int> = ctx_get(2);
+    let v3: Maybe<Int> = ctx_get(3);
+
+    assert(v1.unwrap() == 111);
+    assert(v2.unwrap() == 222);
+    assert(v3.unwrap() == 333);
+
+    // Clean up
+    ctx_clear<Int>(1);
+    ctx_clear<Int>(2);
+    ctx_clear<Int>(3);
+
+    print("Context operations tests passed");
+}
+
+// =============================================================================
+// Context Stack Tests
+// =============================================================================
+
+@test
+fn test_context_stack() {
+    // Clear slot 10
+    ctx_clear<Int>(10);
+
+    // Push values
+    ctx_push(10, 1);
+    let v1: Maybe<Int> = ctx_get(10);
+    assert(v1.unwrap() == 1);
+
+    ctx_push(10, 2);
+    let v2: Maybe<Int> = ctx_get(10);
+    assert(v2.unwrap() == 2);
+
+    ctx_push(10, 3);
+    let v3: Maybe<Int> = ctx_get(10);
+    assert(v3.unwrap() == 3);
+
+    // Pop values
+    let popped1: Maybe<Int> = ctx_pop(10);
+    assert(popped1.unwrap() == 3);
+    let after1: Maybe<Int> = ctx_get(10);
+    assert(after1.unwrap() == 2);
+
+    let popped2: Maybe<Int> = ctx_pop(10);
+    assert(popped2.unwrap() == 2);
+    let after2: Maybe<Int> = ctx_get(10);
+    assert(after2.unwrap() == 1);
+
+    let popped3: Maybe<Int> = ctx_pop(10);
+    assert(popped3.unwrap() == 1);
+    let after3: Maybe<Int> = ctx_get(10);
+    assert(after3 is None);
+
+    // Pop from empty
+    let popped4: Maybe<Int> = ctx_pop(10);
+    assert(popped4 is None);
+
+    print("Context stack tests passed");
+}
+
+// =============================================================================
+// Context Depth Tests
+// =============================================================================
+
+@test
+fn test_context_depth() {
+    // Clear slot 20
+    ctx_clear<Int>(20);
+
+    // Initial depth is 0
+    let depth0 = ctx_depth<Int>(20);
+    assert(depth0 == 0);
+
+    // Push increases depth
+    ctx_push(20, 100);
+    assert(ctx_depth<Int>(20) == 1);
+
+    ctx_push(20, 200);
+    assert(ctx_depth<Int>(20) == 2);
+
+    ctx_push(20, 300);
+    assert(ctx_depth<Int>(20) == 3);
+
+    // Pop decreases depth
+    let _ = ctx_pop<Int>(20);
+    assert(ctx_depth<Int>(20) == 2);
+
+    // Clear resets depth
+    ctx_clear<Int>(20);
+    assert(ctx_depth<Int>(20) == 0);
+
+    print("Context depth tests passed");
+}
+
+// =============================================================================
+// User Data Tests
+// =============================================================================
+
+@test
+fn test_user_data() {
+    // Set user data
+    set_user_data(0xDEADBEEF);
+    assert(get_user_data() == 0xDEADBEEF);
+
+    // Update
+    set_user_data(0xCAFEBABE);
+    assert(get_user_data() == 0xCAFEBABE);
+
+    // Clear
+    set_user_data(0);
+    assert(get_user_data() == 0);
+
+    print("User data tests passed");
+}
+
+// =============================================================================
+// TlsError Type Tests
+// =============================================================================
+
+@test
+fn test_tls_error_types() {
+    // Create variants
+    let alloc_err = TlsError.TlsAllocFailed { code: 8 };
+    let set_err = TlsError.TlsSetValueFailed { code: 6 };
+    let mem_err = TlsError.AllocationFailed { size: 4096 };
+    let slot_err = TlsError.SlotExhausted { max: 256 };
+    let not_init = TlsError.NotInitialized;
+    let stack_err = TlsError.StackOverflow { slot: 10, depth: 8 };
+
+    // Pattern matching
+    match alloc_err {
+        TlsError.TlsAllocFailed { code } => {
+            assert(code == 8);
+        }
+        _ => assert(false),
+    }
+
+    match set_err {
+        TlsError.TlsSetValueFailed { code } => {
+            assert(code == 6);
+        }
+        _ => assert(false),
+    }
+
+    match mem_err {
+        TlsError.AllocationFailed { size } => {
+            assert(size == 4096);
+        }
+        _ => assert(false),
+    }
+
+    match slot_err {
+        TlsError.SlotExhausted { max } => {
+            assert(max == 256);
+        }
+        _ => assert(false),
+    }
+
+    match not_init {
+        TlsError.NotInitialized => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match stack_err {
+        TlsError.StackOverflow { slot, depth } => {
+            assert(slot == 10);
+            assert(depth == 8);
+        }
+        _ => assert(false),
+    }
+
+    print("TlsError type tests passed");
+}
+
+// =============================================================================
+// Stack Guard Tests
+// =============================================================================
+
+@test
+fn test_stack_guard() {
+    // Check stack guard
+    let guard_ok = check_stack_guard();
+
+    // Should be valid in normal operation
+    assert(guard_ok);
+
+    print("Stack guard tests passed");
+}

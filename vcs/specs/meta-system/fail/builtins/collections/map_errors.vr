@@ -1,0 +1,19 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, map, errors
+// @expected-error: Type mismatch
+// @description: Test map operations with invalid types produce errors
+
+// =============================================================================
+// TYPE MISMATCH ERRORS
+// =============================================================================
+
+// map_len with non-map argument
+meta fn test_map_len_type_error() -> Int {
+    map_len(42)  // ERROR: Expected Map, got Int
+}
+
+fn main() {
+    let _ = @const(test_map_len_type_error());
+}

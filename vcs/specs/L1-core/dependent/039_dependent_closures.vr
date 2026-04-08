@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, closures
+
+/// Dependent types with closures and higher-order functions --
+/// refinement constraints flowing through function parameters
+/// and closure captures.
+
+type Positive is Int{> 0};
+type Natural is Int{>= 0};
+
+// Higher-order function with refined callback
+fn map_positive(xs: List<Int>, f: fn(Positive) -> Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    for x in xs {
+        if x > 0 {
+            result.push(f(x));
+        }
+    }
+    result
+}
+
+// Closure returning refined type
+fn make_clamper(lo: Int, hi: Int) -> fn(Int) -> Int {
+    |x| {
+        if x < lo { lo }
+        else if x > hi { hi }
+        else { x }
+    }
+}
+
+// Higher-order with ensures
+fn fold_positive(
+    xs: List<Positive>,
+    init: Natural,
+    f: fn(Natural, Positive) -> Natural
+) -> Natural {
+    let mut acc = init;
+    for x in xs {
+        acc = f(acc, x);
+    }
+    acc
+}
+
+// Predicate as closure for filtering
+fn filter_by<T>(xs: List<T>, pred: fn(&T) -> Bool) -> List<T> {
+    let mut result: List<T> = [];
+    for x in xs {
+        if pred(&x) {
+            result.push(x);
+        }
+    }
+    result
+}
+
+// Closure capturing refined value
+fn make_bounded_adder(max: Positive) -> fn(Natural) -> Natural {
+    |x| {
+        if x + 1 > max { max } else { x + 1 }
+    }
+}
+
+// Composing refined functions
+fn compose_safe<A, B, C>(
+    f: fn(A) -> Maybe<B>,
+    g: fn(B) -> Maybe<C>
+) -> fn(A) -> Maybe<C> {
+    |a| {
+        match f(a) {
+            Some(b) => g(b),
+            None => None,
+        }
+    }
+}
+
+fn parse_positive(s: Text) -> Maybe<Positive> {
+    match s.parse_int() {
+        Ok(n) if n > 0 => Some(n),
+        _ => None,
+    }
+}
+
+fn positive_to_byte(n: Positive) -> Maybe<Int{>= 0, < 256}> {
+    if n < 256 { Some(n) } else { None }
+}
+
+fn main() {
+    let doubled = map_positive([1, -2, 3, -4, 5], |x| x * 2);
+    assert(doubled == [2, 6, 10]);
+
+    let clamp = make_clamper(0, 100);
+    assert(clamp(-10) == 0);
+    assert(clamp(50) == 50);
+    assert(clamp(200) == 100);
+
+    let positives: List<Positive> = [1, 2, 3, 4, 5];
+    let total = fold_positive(positives, 0, |acc, x| acc + x);
+    assert(total == 15);
+
+    let evens = filter_by([1, 2, 3, 4, 5, 6], |x| *x % 2 == 0);
+    assert(evens == [2, 4, 6]);
+
+    let adder = make_bounded_adder(5);
+    assert(adder(3) == 4);
+    assert(adder(5) == 5);  // Clamped at max
+
+    let parse_byte = compose_safe(parse_positive, positive_to_byte);
+    assert(parse_byte("42") == Some(42));
+    assert(parse_byte("999") == None);
+    assert(parse_byte("-1") == None);
+}

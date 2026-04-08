@@ -1,0 +1,26 @@
+// @test: run-interpreter-panic
+// @expected-panic: CBGR use-after-free detected
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, dangling, collections, runtime, negative-test
+
+/// Test storing dangling reference in collection - detected at runtime via CBGR.
+/// The collection holds a reference, but the target goes out of scope.
+/// CBGR detects the dangling reference when dereferenced.
+/// Spec: 26-cbgr-implementation.md#dangling-prevention
+
+fn main() {
+    let mut refs: List<&Int> = List.new();
+
+    {
+        let local = 42;
+        refs.push(&local);  // Reference stored - CBGR tracks generation
+    }
+    // local is dropped, generation bumped
+
+    for r in refs {
+        // CBGR detects generation mismatch at runtime
+        // r is &Int, *r dereferences and triggers CBGR check
+        print(*r);  // PANIC: generation mismatch (local no longer exists)
+    }
+}

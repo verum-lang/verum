@@ -1,0 +1,228 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, metaprogramming, compile-time
+// @description: Test meta function definitions and compile-time metaprogramming
+
+// ============================================================================
+// META FUNCTION MODIFIER (on regular functions)
+// Grammar: function_modifiers include 'meta' [ '(' stage_level ')' ]
+// ============================================================================
+
+// Basic meta function (Stage 1 - compile-time execution)
+meta fn derive_clone<T>() -> TokenStream {
+    TokenStream.new()
+}
+
+// Explicit stage 1
+meta(1) fn stage1_function() -> TokenStream {
+    TokenStream.new()
+}
+
+// Stage 2 meta function (generates meta code)
+meta(2) fn derive_derive() -> TokenStream {
+    TokenStream.new()
+}
+
+// Stage 3 meta function (generates stage 2 code)
+meta(3) fn meta_meta_gen() -> TokenStream {
+    TokenStream.new()
+}
+
+// ============================================================================
+// META CALLS AS ATTRIBUTES
+// Grammar: attribute = '@' identifier [ '(' argument_list ')' ]
+// ============================================================================
+
+// Simple attribute-like meta calls
+@sql_query("SELECT * FROM users")
+fn uses_sql() {}
+
+@regex("""^\d+$""")
+fn uses_regex() {}
+
+@json(encoding = "utf-8")
+fn uses_json() {}
+
+// ============================================================================
+// BUILT-IN META ATTRIBUTES
+// ============================================================================
+
+// @const - compile-time evaluation
+@const
+fn compute_at_compile_time() -> Int {
+    1024 * 1024
+}
+
+// @cfg - conditional compilation
+@cfg(target_os = "linux")
+fn linux_only() {}
+
+@cfg(feature = "experimental")
+fn experimental_feature() {}
+
+@cfg(debug)
+fn debug_only() {}
+
+@cfg(not(release))
+fn debug_or_test() {}
+
+// @deprecated
+@deprecated("Use new_function instead")
+fn old_function() {}
+
+// @inline
+@inline
+fn inlined() {}
+
+@inline(always)
+fn always_inline() {}
+
+@inline(never)
+fn never_inline() {}
+
+// @must_use
+@must_use
+fn important_result() -> Int { 42 }
+
+// @cold / @hot
+@cold
+fn rarely_used() {}
+
+@hot
+fn frequently_used() {}
+
+// ============================================================================
+// COMBINED MODIFIERS WITH META
+// ============================================================================
+
+// All modifiers combined
+pure meta fn pure_meta_function() -> TokenStream {
+    TokenStream.new()
+}
+
+// Meta async (correct order: pure -> meta -> async -> unsafe)
+meta async fn meta_async_function() -> TokenStream {
+    TokenStream.new()
+}
+
+// Multiple stage with modifiers
+pure meta(2) fn pure_stage2() -> TokenStream {
+    TokenStream.new()
+}
+
+// ============================================================================
+// META WITH VISIBILITY
+// ============================================================================
+
+pub meta fn public_meta() -> TokenStream {
+    TokenStream.new()
+}
+
+internal meta fn internal_meta() -> TokenStream {
+    TokenStream.new()
+}
+
+// ============================================================================
+// META FUNCTION WITH GENERICS
+// ============================================================================
+
+meta fn generic_meta<T>() -> TokenStream {
+    TokenStream.new()
+}
+
+meta fn bounded_meta<T: Clone + Debug>() -> TokenStream {
+    TokenStream.new()
+}
+
+meta fn multi_generic<A, B, C>() -> TokenStream {
+    TokenStream.new()
+}
+
+// ============================================================================
+// META FUNCTION WITH PARAMETERS
+// ============================================================================
+
+meta fn meta_with_params(input: TokenStream) -> TokenStream {
+    input
+}
+
+meta fn meta_with_multiple_params(a: TokenStream, b: Text) -> TokenStream {
+    a
+}
+
+// ============================================================================
+// META ATTRIBUTES ON TYPES
+// ============================================================================
+
+@derive(Clone, Debug)
+type DerivedType is { x: Int };
+
+@repr(C)
+type CLayout is { a: i32, b: i32 };
+
+@derive(Clone, Debug, Eq, Hash)
+type FullyDerived is { id: Int, name: Text };
+
+// ============================================================================
+// META ATTRIBUTES ON IMPLEMENTATIONS
+// ============================================================================
+
+@specialize
+implement Clone for Int {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+// ============================================================================
+// COMPILE-TIME CONSTANTS WITH META
+// ============================================================================
+
+const COMPILE_TIME: Int = 42;
+const COMPUTED: Int = COMPILE_TIME * 2;
+
+// Static with initialization
+static INSTANCE_COUNT: Int = 0;
+
+// ============================================================================
+// TYPE INTROSPECTION (as attributes)
+// ============================================================================
+
+@test
+fn test_function() {
+    assert(true);
+}
+
+@benchmark
+fn bench_function() {
+    // Benchmark code
+}
+
+// ============================================================================
+// SOURCE LOCATION ATTRIBUTES
+// ============================================================================
+
+@track_caller
+fn tracked_function() {
+    // Function that tracks its caller location
+}
+
+// ============================================================================
+// ATTRIBUTE COMBINATIONS
+// ============================================================================
+
+@inline
+@must_use
+@cold
+fn multiple_attrs() -> Int { 42 }
+
+@cfg(feature = "logging")
+@deprecated("Use new_log instead")
+fn old_log(msg: Text) {}
+
+@derive(Clone, Debug)
+@repr(C)
+@cfg(target_os = "linux")
+type LinuxStruct is { fd: Int32 };

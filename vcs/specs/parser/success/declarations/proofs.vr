@@ -1,0 +1,218 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, proofs, theorems, lemmas, axioms
+// @description: Test proof-related declaration parsing
+
+// Basic axiom - must have return type
+axiom reflexivity<T: Eq>(x: T) -> Bool;
+
+// Axiom with type constraint
+axiom transitivity<T: Ord>(a: T, b: T, c: T) -> Bool;
+
+// Axiom with multiple parameters
+axiom associativity<T: Add>(x: T, y: T, z: T) -> Bool;
+
+// Basic theorem with simple proof
+theorem identity_law<T>(x: T) -> Bool
+    requires true
+    ensures result == true
+    proof by auto
+
+// Theorem with multiple requires (comma-separated)
+theorem positive_sum(a: Int, b: Int) -> Bool
+    requires a > 0, b > 0
+    ensures result == (a + b > 0)
+    proof by auto
+
+// Theorem with complex proof body
+theorem list_length<T>(list: List<T>) -> Bool
+    requires list.len() >= 0
+    ensures result == (list.len() >= 0)
+    proof {
+        have h1: list.len() >= 0 by assumption;
+        show list.len() >= 0 by h1;
+    }
+
+// Theorem with term proof
+theorem simple_arithmetic(x: Int) -> Bool
+    ensures result == (x + 0 == x)
+    proof = x + 0 == x
+
+// Lemma declaration
+lemma helper_lemma(n: Int) -> Bool
+    requires n >= 0
+    ensures result == (n * 2 >= 0)
+    proof by omega
+
+// Lemma with structured proof
+lemma sum_commutative<T: Add + CommutativeAdd>(a: T, b: T) -> Bool
+    ensures result == (a + b == b + a)
+    proof {
+        have h: a + b == b + a by simp;
+        show a + b == b + a by h;
+    }
+
+// Corollary from theorem - simpler form
+corollary double_positive(n: Int) -> Bool
+    requires n > 0
+    proof by auto
+
+// Tactic declaration - simple form
+tactic my_tactic(goal: Expr) {
+    simp;
+    auto;
+}
+
+// Theorem with multiple tactics
+theorem complex_theorem<T: Ord>(list: List<T>) -> Bool
+    requires list.len() > 0
+    ensures result == list.is_sorted() || !list.is_sorted()
+    proof by simp; auto
+
+// Theorem with calculational proof
+theorem calc_example(x: Int, y: Int) -> Bool
+    ensures result == (x + y == y + x)
+    proof {
+        calc {
+            x + y
+            == { by simp } y + x
+        };
+        show x + y == y + x by trivial;
+    }
+
+// Theorem with obtain
+theorem exists_witness(n: Int) -> Bool
+    requires n > 0
+    proof {
+        obtain m from n - 1;
+        have h: m < n by omega;
+        show true by h;
+    }
+
+// Theorem with induction
+theorem sum_formula(n: Int) -> Bool
+    requires n >= 0
+    ensures result == (sum(0, n) == n * (n + 1) / 2)
+    proof by induction(n)
+
+// Theorem with cases
+theorem abs_positive(x: Int) -> Bool
+    ensures result == (abs(x) >= 0)
+    proof by cases(x)
+
+// Theorem with contradiction
+theorem no_negative_square(x: Int) -> Bool
+    ensures result == (x * x >= 0)
+    proof by contradiction
+
+// Generic theorem
+theorem generic_identity<A: Eq, B: Eq>(a: A, b: B) -> Bool
+    requires a == a
+    ensures result == (b == b)
+    proof by simp
+
+// Theorem with multiple type parameters
+theorem pair_equality<A: Eq, B: Eq>(p1: (A, B), p2: (A, B)) -> Bool
+    requires p1.0 == p2.0, p1.1 == p2.1
+    ensures result == (p1 == p2)
+    proof by auto
+
+// Public theorem
+pub theorem public_theorem(x: Int) -> Bool
+    ensures result == (x == x)
+    proof by trivial
+
+// Theorem with structured proof using single justifications
+theorem rewrite_example(a: Int, b: Int, c: Int) -> Bool
+    requires a == b, b == c
+    ensures result == (a == c)
+    proof {
+        have h1: a == b by assumption;
+        have h2: b == c by assumption;
+        show a == c by h1;
+    }
+
+// Theorem with apply tactic
+theorem apply_example<T: Ord>(a: T, b: T) -> Bool
+    requires a < b
+    ensures result == (a <= b)
+    proof {
+        have h: a < b by assumption;
+        show a <= b by h;
+    }
+
+// Theorem with intro/intros
+theorem intro_example(p: Bool, q: Bool) -> Bool
+    requires p && q
+    ensures result == (p || q)
+    proof {
+        have p_proof: p by assumption;
+        have q_proof: q by assumption;
+        show p || q by p_proof;
+    }
+
+// Theorem with exact
+theorem exact_example(p: Bool) -> Bool
+    requires p
+    ensures result == p
+    proof {
+        show p by assumption;
+    }
+
+// Complex theorem with all features
+theorem complete_example<T: Ord + Clone>(list: List<T>, x: T, y: T) -> Bool
+    requires list.len() > 0, x < y, list.contains(x)
+    proof {
+        have h1: x < y by assumption;
+        have h2: list.contains(x) by assumption;
+        obtain z from x;
+        have h3: z >= x by trivial;
+        have h4: list.contains(z) by h2;
+        show true by h3;
+    }
+
+// Theorem with SMT solver
+theorem smt_example(a: Int, b: Int, c: Int) -> Bool
+    requires a > b, b > c
+    ensures result == (a > c)
+    proof by smt
+
+// Theorem with ring tactic (for algebraic properties)
+theorem ring_example(x: Int, y: Int) -> Bool
+    ensures result == ((x + y) * (x + y) == x*x + 2*x*y + y*y)
+    proof by ring
+
+// Theorem with field tactic (for field properties)
+theorem field_example(x: Float, y: Float) -> Bool
+    requires y != 0.0
+    ensures result == (x / y * y == x)
+    proof by field
+
+// Forall expression in specification - single variable
+theorem forall_example<T: Eq>(list: List<T>) -> Bool
+    ensures result == (forall x: T => list.count(x) > 0)
+    proof by auto
+
+// Exists expression in specification
+theorem exists_example<T>(list: List<T>) -> Bool
+    requires list.len() > 0
+    ensures result == (exists x: T => list.contains(x))
+    proof by auto
+
+// Multiple lemmas building to theorem
+lemma step1(n: Int) -> Bool
+    requires n >= 0
+    proof by auto
+
+lemma step2(n: Int) -> Bool
+    requires n >= 0
+    proof by auto
+
+theorem final_theorem(n: Int) -> Bool
+    requires n >= 0
+    ensures result == true
+    proof {
+        have h1: true by step1;
+        have h2: true by step2;
+        show true by h1;
+    }

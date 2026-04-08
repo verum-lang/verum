@@ -1,0 +1,65 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, nested-calls
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT nested function calls, multi-expression chains
+
+fn double(x: Int) -> Int { x * 2 }
+fn triple(x: Int) -> Int { x * 3 }
+fn add(a: Int, b: Int) -> Int { a + b }
+fn sub(a: Int, b: Int) -> Int { a - b }
+
+fn apply_twice(x: Int, f_kind: Int) -> Int {
+    // f_kind: 0=double, 1=triple
+    if f_kind == 0 {
+        double(double(x))
+    } else {
+        triple(triple(x))
+    }
+}
+
+fn compose_add_mul(a: Int, b: Int, c: Int) -> Int {
+    // (a + b) * c
+    let sum = add(a, b);
+    sum * c
+}
+
+fn collatz_steps(n: Int) -> Int {
+    let mut val = n;
+    let mut steps = 0;
+    while val != 1 {
+        if val % 2 == 0 {
+            val = val / 2;
+        } else {
+            val = val * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn main() -> Int {
+    // Basic nested
+    assert_eq(double(triple(2)), 12);
+    assert_eq(triple(double(2)), 12);
+    assert_eq(add(double(3), triple(4)), 18);
+    assert_eq(sub(triple(10), double(10)), 10);
+
+    // apply_twice
+    assert_eq(apply_twice(3, 0), 12);  // double(double(3)) = 12
+    assert_eq(apply_twice(2, 1), 18);  // triple(triple(2)) = 18
+
+    // compose
+    assert_eq(compose_add_mul(3, 4, 5), 35);
+    assert_eq(compose_add_mul(0, 0, 100), 0);
+
+    // collatz conjecture
+    assert_eq(collatz_steps(1), 0);
+    assert_eq(collatz_steps(2), 1);
+    assert_eq(collatz_steps(3), 7);
+    assert_eq(collatz_steps(27), 111);
+
+    0
+}

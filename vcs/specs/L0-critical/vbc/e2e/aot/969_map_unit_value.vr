@@ -1,0 +1,14 @@
+fn main() -> Int {
+    // Test Map with Int value (should work)
+    let mut m = Map.new();
+    m.insert(10, 100);
+    print(f"int map: len={m.len()}");
+
+    // Test Map with Int value 0 (simulating unit)
+    let mut m2 = Map.new();
+    m2.insert(10, 0);
+    print(f"zero map: len={m2.len()}");
+
+    print("969_map_unit_value: PASS");
+    0
+}

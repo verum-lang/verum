@@ -1,0 +1,200 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, reservoir_sampling, randomized_algorithms, selection
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Reservoir sampling simulation.
+// Algorithm R: sample k items from a stream of n items uniformly at random.
+// Deterministic version: uses a linear congruential generator (LCG) as the
+// "random" source, so results are reproducible and verifiable.
+//
+// LCG: next = (a * prev + c) % m
+// We use a=1664525, c=1013904223, m=2^32 (approximated with mod 4294967296).
+// For integer-range purposes we use mod 100000 to keep values manageable.
+
+fn lcg_next(state: Int, a: Int, c: Int, modv: Int) -> Int {
+    (a * state + c) % modv
+}
+
+// Reservoir sample k items from data[0..n-1].
+// Fills reservoir[0..k-1] with sampled indices (not values).
+// Uses the LCG starting from seed for random decisions.
+fn reservoir_sample(
+    data:      [Int; 32],
+    n:         Int,
+    k:         Int,
+    seed:      Int,
+    reservoir: [Int; 16]
+) {
+    // Fill reservoir with first k items
+    let mut i = 0;
+    while i < k {
+        reservoir[i] = i;
+        i = i + 1;
+    }
+    // Process remaining items
+    let a    = 1664525;
+    let c    = 1013904223;
+    let modv = 100000;
+    let mut rng = seed;
+    i = k;
+    while i < n {
+        // Generate random j in [0, i]
+        rng = lcg_next(rng, a, c, modv);
+        let j = rng % (i + 1);
+        if j < k {
+            // Replace reservoir[j] with current item i
+            reservoir[j] = i;
+        }
+        i = i + 1;
+    }
+}
+
+// Count how many reservoir entries have values in range [lo, hi].
+fn count_in_range(reservoir: [Int; 16], k: Int, lo: Int, hi: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < k {
+        if reservoir[i] >= lo && reservoir[i] <= hi { cnt = cnt + 1; }
+        i = i + 1;
+    }
+    cnt
+}
+
+// Check all reservoir entries are distinct (no duplicates).
+fn all_distinct(reservoir: [Int; 16], k: Int) -> Int {
+    let mut i = 0;
+    while i < k {
+        let mut j = i + 1;
+        while j < k {
+            if reservoir[i] == reservoir[j] { return 0; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+// Check all reservoir entries are valid indices (in [0, n-1]).
+fn all_valid(reservoir: [Int; 16], k: Int, n: Int) -> Int {
+    let mut i = 0;
+    while i < k {
+        if reservoir[i] < 0 || reservoir[i] >= n { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_reservoir_basic() {
+    // k=3 from n=10, verify k entries, all distinct, all valid.
+    let mut data = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut res  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(data, 10, 3, 42, res);
+    assert_eq(all_valid(res, 3, 10), 1);
+    assert_eq(all_distinct(res, 3), 1);
+    print("reservoir_basic: ok");
+}
+
+fn test_reservoir_k_equals_n() {
+    // k=n: reservoir must contain all indices 0..n-1.
+    let mut data = [0, 1, 2, 3, 4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut res  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(data, 8, 8, 123, res);
+    // All 8 indices 0..7 must appear exactly once
+    assert_eq(all_distinct(res, 8), 1);
+    assert_eq(all_valid(res, 8, 8), 1);
+    // Since k=n, reservoir is initialized to [0,1,...,7] and no replacements happen
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(res[i], i);
+        i = i + 1;
+    }
+    print("reservoir_k_equals_n: ok");
+}
+
+fn test_reservoir_k_equals_1() {
+    // k=1: always select exactly one item from n=20.
+    let mut data = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+                    10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut res  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    reservoir_sample(data, 20, 1, 999, res);
+    assert_eq(all_valid(res, 1, 20), 1);
+    assert_eq(all_distinct(res, 1), 1);
+    print(f"reservoir_k_equals_1: selected={res[0]} valid ok");
+}
+
+fn test_reservoir_multiple_runs() {
+    // Run with different seeds and verify different selections occur.
+    let mut data = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut res1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut res2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut res3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    reservoir_sample(data, 16, 4, 7,   res1);
+    reservoir_sample(data, 16, 4, 777, res2);
+    reservoir_sample(data, 16, 4, 1,   res3);
+
+    // Each run: valid and distinct
+    assert_eq(all_valid(res1, 4, 16), 1);
+    assert_eq(all_distinct(res1, 4), 1);
+    assert_eq(all_valid(res2, 4, 16), 1);
+    assert_eq(all_distinct(res2, 4), 1);
+    assert_eq(all_valid(res3, 4, 16), 1);
+    assert_eq(all_distinct(res3, 4), 1);
+
+    print("reservoir_multiple_runs: ok");
+}
+
+fn test_reservoir_coverage() {
+    // Run many single samples (k=1) and check that different items get selected.
+    // Simulate 8 runs with 8 different seeds on n=8 items.
+    // At least 2 distinct selections expected.
+    let mut data = [0, 1, 2, 3, 4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut res  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let seeds    = [1, 10, 100, 1000, 5, 50, 500, 5000];
+    let mut selections = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    let mut s = 0;
+    while s < 8 {
+        reservoir_sample(data, 8, 1, seeds[s], res);
+        selections[s] = res[0];
+        assert(res[0] >= 0);
+        assert(res[0] < 8);
+        s = s + 1;
+    }
+
+    // Count distinct selections
+    let mut distinct = 0;
+    let mut i = 0;
+    while i < 8 {
+        let mut found = 0;
+        let mut j = 0;
+        while j < i {
+            if selections[j] == selections[i] { found = 1; }
+            j = j + 1;
+        }
+        if found == 0 { distinct = distinct + 1; }
+        i = i + 1;
+    }
+    // With 8 different seeds over 8 items, expect at least 2 distinct selections
+    assert(distinct >= 2);
+    print(f"reservoir_coverage: distinct_selections={distinct} (>=2) ok");
+}
+
+fn main() -> Int {
+    test_reservoir_basic();
+    test_reservoir_k_equals_n();
+    test_reservoir_k_equals_1();
+    test_reservoir_multiple_runs();
+    test_reservoir_coverage();
+    print("[OK] 489_interp_reservoir_sampling");
+    0
+}

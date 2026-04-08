@@ -1,0 +1,181 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress
+// @timeout: 60000
+// @expected-exit: 0
+
+// Register pressure stress: 50+ local variables in one function, complex expressions
+
+// Function with 50 locals, all used simultaneously
+fn fifty_locals() -> Int {
+    let v01 = 1;  let v02 = 2;  let v03 = 3;  let v04 = 4;  let v05 = 5;
+    let v06 = 6;  let v07 = 7;  let v08 = 8;  let v09 = 9;  let v10 = 10;
+    let v11 = 11; let v12 = 12; let v13 = 13; let v14 = 14; let v15 = 15;
+    let v16 = 16; let v17 = 17; let v18 = 18; let v19 = 19; let v20 = 20;
+    let v21 = 21; let v22 = 22; let v23 = 23; let v24 = 24; let v25 = 25;
+    let v26 = 26; let v27 = 27; let v28 = 28; let v29 = 29; let v30 = 30;
+    let v31 = 31; let v32 = 32; let v33 = 33; let v34 = 34; let v35 = 35;
+    let v36 = 36; let v37 = 37; let v38 = 38; let v39 = 39; let v40 = 40;
+    let v41 = 41; let v42 = 42; let v43 = 43; let v44 = 44; let v45 = 45;
+    let v46 = 46; let v47 = 47; let v48 = 48; let v49 = 49; let v50 = 50;
+
+    v01 + v02 + v03 + v04 + v05 + v06 + v07 + v08 + v09 + v10 +
+    v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 +
+    v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 +
+    v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 +
+    v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 + v50
+}
+
+// 20 intermediate results all used later
+fn many_intermediates(x: Int) -> Int {
+    let t01 = x + 1;
+    let t02 = t01 * 2;
+    let t03 = t02 + t01;
+    let t04 = t03 * t01;
+    let t05 = t04 - t02;
+    let t06 = t05 + t03;
+    let t07 = t06 * 2;
+    let t08 = t07 - t04;
+    let t09 = t08 + t05;
+    let t10 = t09 * t01;
+    let t11 = t10 - t07;
+    let t12 = t11 + t08;
+    let t13 = t12 * 2;
+    let t14 = t13 - t09;
+    let t15 = t14 + t10;
+    let t16 = t15 - t11;
+    let t17 = t16 + t12;
+    let t18 = t17 * 2;
+    let t19 = t18 - t13;
+    let t20 = t19 + t14;
+    t01 + t02 + t03 + t04 + t05 + t06 + t07 + t08 + t09 + t10 +
+    t11 + t12 + t13 + t14 + t15 + t16 + t17 + t18 + t19 + t20
+}
+
+// Variables survive across loop
+fn verify_retention() -> Int {
+    let v01 = 100;  let v02 = 200;  let v03 = 300;  let v04 = 400;
+    let v05 = 500;  let v06 = 600;  let v07 = 700;  let v08 = 800;
+    let v09 = 900;  let v10 = 1000; let v11 = 1100; let v12 = 1200;
+    let v13 = 1300; let v14 = 1400; let v15 = 1500;
+
+    let mut tmp = 0;
+    let mut i = 0;
+    while (i < 50) {
+        tmp = tmp + i * i;
+        i = i + 1;
+    }
+
+    let sum = v01 + v02 + v03 + v04 + v05 + v06 + v07 + v08 +
+              v09 + v10 + v11 + v12 + v13 + v14 + v15;
+    sum + tmp
+}
+
+// 20 mutable variables with cross-referencing updates
+fn mutable_pressure() -> Int {
+    let mut m01 = 1;  let mut m02 = 2;  let mut m03 = 3;  let mut m04 = 4;
+    let mut m05 = 5;  let mut m06 = 6;  let mut m07 = 7;  let mut m08 = 8;
+    let mut m09 = 9;  let mut m10 = 10; let mut m11 = 11; let mut m12 = 12;
+    let mut m13 = 13; let mut m14 = 14; let mut m15 = 15; let mut m16 = 16;
+    let mut m17 = 17; let mut m18 = 18; let mut m19 = 19; let mut m20 = 20;
+
+    // Round 1: evens += odds
+    m02 = m02 + m01;  m04 = m04 + m03;  m06 = m06 + m05;
+    m08 = m08 + m07;  m10 = m10 + m09;  m12 = m12 + m11;
+    m14 = m14 + m13;  m16 = m16 + m15;  m18 = m18 + m17;
+    m20 = m20 + m19;
+
+    // Round 2: odds += evens
+    m01 = m01 + m02;  m03 = m03 + m04;  m05 = m05 + m06;
+    m07 = m07 + m08;  m09 = m09 + m10;  m11 = m11 + m12;
+    m13 = m13 + m14;  m15 = m15 + m16;  m17 = m17 + m18;
+    m19 = m19 + m20;
+
+    m01 + m02 + m03 + m04 + m05 + m06 + m07 + m08 + m09 + m10 +
+    m11 + m12 + m13 + m14 + m15 + m16 + m17 + m18 + m19 + m20
+}
+
+fn ten_params(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, j: Int, k: Int) -> Int {
+    a + b + c + d + e + f + g + h + j + k
+}
+
+fn eight_params_complex(p1: Int, p2: Int, p3: Int, p4: Int, p5: Int, p6: Int, p7: Int, p8: Int) -> Int {
+    let t1 = p1 * p2;
+    let t2 = p3 * p4;
+    let t3 = p5 * p6;
+    let t4 = p7 * p8;
+    let t5 = t1 + t2;
+    let t6 = t3 + t4;
+    let t7 = t5 * t6;
+    t7 + p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8
+}
+
+// Complex expression with many subexpressions alive simultaneously
+fn complex_expr(x: Int) -> Int {
+    let a = x * x;
+    let b = a + x;
+    let c = b * 2;
+    let d = c - a;
+    let e = d + b;
+    let f = e * c;
+    let g = f - d;
+    let h = g + e;
+    let j = h * 2;
+    let k = j - f;
+    // Use all of them in a cross-referencing expression
+    a + b + c + d + e + f + g + h + j + k
+}
+
+fn main() -> Int {
+    // 50 locals sum: 50*51/2 = 1275
+    assert_eq(fifty_locals(), 1275);
+
+    // Many intermediates: verify deterministic
+    let mi1 = many_intermediates(1);
+    let mi1b = many_intermediates(1);
+    assert_eq(mi1, mi1b);
+    let mi0 = many_intermediates(0);
+    let mi0b = many_intermediates(0);
+    assert_eq(mi0, mi0b);
+
+    // Retention: 12000 + sum(i^2 for i=0..49) = 12000 + 40425 = 52425
+    assert_eq(verify_retention(), 52425);
+
+    // Mutable pressure:
+    // After R1: evens = 3,7,11,15,19,23,27,31,35,39; odds unchanged
+    // After R2: odds = 4,10,16,22,28,34,40,46,52,58
+    // odds total = 310, evens total = 210 => 520
+    assert_eq(mutable_pressure(), 520);
+
+    // 10 parameters
+    assert_eq(ten_params(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), 55);
+    assert_eq(ten_params(10, 20, 30, 40, 50, 60, 70, 80, 90, 100), 550);
+
+    // 8-param complex
+    assert_eq(eight_params_complex(1, 2, 3, 4, 5, 6, 7, 8), 1240);
+
+    // Complex expression deterministic
+    let ce5 = complex_expr(5);
+    let ce5b = complex_expr(5);
+    assert_eq(ce5, ce5b);
+
+    // Loop with many live variables
+    let mut sum = 0;
+    let base1 = 10; let base2 = 20; let base3 = 30; let base4 = 40; let base5 = 50;
+    let mut i = 0;
+    while (i < 100) {
+        let local1 = base1 + i;
+        let local2 = base2 + i * 2;
+        let local3 = base3 + i * 3;
+        let local4 = base4 + i * 4;
+        let local5 = base5 + i * 5;
+        sum = sum + local1 + local2 + local3 + local4 + local5;
+        i = i + 1;
+    }
+    // sum = sum over i=0..99 of (150 + 15i) = 150*100 + 15*4950 = 15000 + 74250 = 89250
+    assert_eq(sum, 89250);
+
+    print("835_stress_register_pressure: PASS");
+    0
+}

@@ -1,0 +1,58 @@
+// @test: parse
+// @level: L1
+// @tags: meta, const, compile-time, meta-functions
+// @timeout: 5000
+
+/// Built-in meta-level functions.
+/// Grammar: meta_function = '@' meta_function_name ['(' [argument_list] ')']
+///          meta_function_name = 'const' | 'error' | 'warning' | 'stringify' | 'concat'
+///                             | 'cfg' | 'file' | 'line' | 'column' | 'module' | 'function'
+
+// Source location meta functions
+fn test_source_location() {
+    let file = @file();
+    let line = @line();
+    let col = @column();
+    let mod_name = @module();
+    let func_name = @function();
+    print(f"Location: {file}:{line}:{col} in {mod_name}::{func_name}");
+}
+
+// Stringify — convert tokens to text
+fn test_stringify() {
+    let s = @stringify(1 + 2 * 3);
+    // s should be "1 + 2 * 3"
+    print(f"Expression: {s}");
+}
+
+// Concat — concatenate identifiers/tokens
+fn test_concat() {
+    let combined = @concat("hello", "_", "world");
+    print(f"Combined: {combined}");
+}
+
+// Const evaluation
+fn test_const_eval() {
+    let val = @const(10 * 20 + 5);
+    assert_eq(val, 205);
+}
+
+// Compile-time error (should be inside @cfg false block to not fire)
+@cfg(never)
+fn never_compiled() {
+    @error("This function should never be compiled");
+}
+
+// Compile-time warning
+@cfg(debug)
+fn debug_only() {
+    @warning("This function is debug-only");
+}
+
+fn main() {
+    test_source_location();
+    test_stringify();
+    test_concat();
+    test_const_eval();
+    print("Meta functions tests parsed");
+}

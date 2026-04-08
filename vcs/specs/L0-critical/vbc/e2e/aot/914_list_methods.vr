@@ -1,0 +1,149 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, methods, insert, remove, clear, reverse, sort, contains
+// @expected-exit: 0
+
+// Test: List mutation methods — insert, remove, clear, reverse, sort, contains
+
+fn main() -> Int {
+    // Build a list manually
+    let mut arr = List.new();
+    arr.push(10);
+    arr.push(20);
+    arr.push(30);
+    arr.push(40);
+    arr.push(50);
+
+    // Test 1: len
+    if (arr.len() != 5) {
+        print(f"FAIL t1: len={arr.len()}");
+        return 1;
+    }
+
+    // Test 2: contains
+    if (arr.contains(30) != true) {
+        print("FAIL t2a: contains(30)");
+        return 1;
+    }
+    if (arr.contains(99) != false) {
+        print("FAIL t2b: contains(99) should be false");
+        return 1;
+    }
+
+    // Test 3: insert at index
+    arr.insert(2, 25);
+    // Now: [10, 20, 25, 30, 40, 50]
+    if (arr.len() != 6) {
+        print(f"FAIL t3a: len after insert={arr.len()}");
+        return 1;
+    }
+    if (arr[2] != 25) {
+        print(f"FAIL t3b: arr[2]={arr[2]}");
+        return 1;
+    }
+    if (arr[3] != 30) {
+        print(f"FAIL t3c: arr[3]={arr[3]}");
+        return 1;
+    }
+
+    // Test 4: remove at index
+    let removed = arr.remove(2);
+    // Now back to: [10, 20, 30, 40, 50]
+    if (removed != 25) {
+        print(f"FAIL t4a: removed={removed}");
+        return 1;
+    }
+    if (arr.len() != 5) {
+        print(f"FAIL t4b: len after remove={arr.len()}");
+        return 1;
+    }
+
+    // Test 5: reverse
+    arr.reverse();
+    // Now: [50, 40, 30, 20, 10]
+    if (arr[0] != 50) {
+        print(f"FAIL t5a: arr[0]={arr[0]}");
+        return 1;
+    }
+    if (arr[4] != 10) {
+        print(f"FAIL t5b: arr[4]={arr[4]}");
+        return 1;
+    }
+
+    // Test 6: sort
+    arr.sort();
+    // Now: [10, 20, 30, 40, 50]
+    if (arr[0] != 10) {
+        print(f"FAIL t6a: arr[0]={arr[0]}");
+        return 1;
+    }
+    if (arr[2] != 30) {
+        print(f"FAIL t6b: arr[2]={arr[2]}");
+        return 1;
+    }
+    if (arr[4] != 50) {
+        print(f"FAIL t6c: arr[4]={arr[4]}");
+        return 1;
+    }
+
+    // Test 7: clear
+    arr.clear();
+    if (arr.len() != 0) {
+        print(f"FAIL t7: len after clear={arr.len()}");
+        return 1;
+    }
+
+    // Test 8: push after clear, verify list still works
+    arr.push(100);
+    arr.push(200);
+    if (arr.len() != 2) {
+        print(f"FAIL t8a: len after repush={arr.len()}");
+        return 1;
+    }
+    if (arr[0] != 100) {
+        print(f"FAIL t8b: arr[0]={arr[0]}");
+        return 1;
+    }
+    if (arr[1] != 200) {
+        print(f"FAIL t8c: arr[1]={arr[1]}");
+        return 1;
+    }
+
+    // Test 9: multiple inserts at beginning
+    let mut front = List.new();
+    front.push(3);
+    front.insert(0, 2);
+    front.insert(0, 1);
+    // [1, 2, 3]
+    if (front[0] != 1) {
+        print(f"FAIL t9a: front[0]={front[0]}");
+        return 1;
+    }
+    if (front[1] != 2) {
+        print(f"FAIL t9b: front[1]={front[1]}");
+        return 1;
+    }
+    if (front[2] != 3) {
+        print(f"FAIL t9c: front[2]={front[2]}");
+        return 1;
+    }
+
+    // Test 10: sort already sorted list (no-op)
+    let mut already = List.new();
+    already.push(1);
+    already.push(2);
+    already.push(3);
+    already.sort();
+    if (already[0] != 1) {
+        print(f"FAIL t10a: already[0]={already[0]}");
+        return 1;
+    }
+    if (already[2] != 3) {
+        print(f"FAIL t10b: already[2]={already[2]}");
+        return 1;
+    }
+
+    print("914_list_methods: PASS");
+    0
+}

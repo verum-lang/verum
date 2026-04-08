@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, assignment, compound, error
+// @description: Test invalid compound assignment operator
+// @expected-error: E047
+
+fn test() {
+    let x = 5;
+    x +== 5;
+}

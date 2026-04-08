@@ -1,0 +1,123 @@
+// @test: run
+// @expected-stdout: Using Production Database
+// Query result: 42 rows
+// @tier: 0
+// @level: L2
+// @tags: contexts, resolution, naming, shadowing
+// @description: Tests context resolution with explicit naming, shadowing, and scoping
+
+/// When multiple contexts of the same type are available,
+/// explicit naming resolves ambiguity.
+
+context Database {
+    fn query(&self, sql: Text) -> Result<Rows, DbError>;
+    fn name(&self) -> Text;
+}
+
+type ProductionDb is { conn: Text };
+type TestDb is { data: Map<Text, Rows> };
+
+implement Database for ProductionDb {
+    fn query(&self, sql: Text) -> Result<Rows, DbError> {
+        Ok(Rows { count: 42 })
+    }
+    fn name(&self) -> Text { "Production Database" }
+}
+
+implement Database for TestDb {
+    fn query(&self, sql: Text) -> Result<Rows, DbError> {
+        Ok(self.data.get(&sql).cloned().unwrap_or(Rows { count: 0 }))
+    }
+    fn name(&self) -> Text { "Test Database" }
+}
+
+/// Explicitly naming contexts
+fn with_named_contexts() {
+    let prod = ProductionDb { conn: "prod://db" };
+    let test = TestDb { data: Map.new() };
+
+    // Explicit naming resolves ambiguity
+    provide primary_db: Database = prod,
+            backup_db: Database = test {
+        use_primary_db();
+        use_backup_for_reads();
+    }
+}
+
+fn use_primary_db() using [primary_db: Database] {
+    let name = primary_db.name();
+    println(f"Using {name}");
+}
+
+fn use_backup_for_reads() using [primary_db: Database, backup_db: Database] {
+    let rows = primary_db.query("SELECT * FROM users");
+    match rows {
+        Ok(r) => println(f"Query result: {r.count} rows"),
+        Err(_) => {
+            // Fallback to backup
+            let _ = backup_db.query("SELECT * FROM users");
+        }
+    }
+}
+
+/// Context shadowing in nested scopes
+fn context_shadowing() using [Database] {
+    // Context shadowing is tested via function-level provide
+    let name = Database.name();
+    assert(name == "Production Database");
+}
+
+/// Context forwarding
+fn context_forwarding() using [Database] {
+    // Forward context to inner function
+    inner_function();
+}
+
+fn inner_function() using [Database] {
+    // Uses forwarded Database context
+    let _ = Database.query("SELECT 1");
+}
+
+/// Multiple context inheritance
+context Logger {
+    fn log(&self, level: LogLevel, message: Text);
+}
+
+context Cache {
+    fn get(&self, key: Text) -> Maybe<Text>;
+    fn set(&self, key: Text, value: Text);
+}
+
+fn full_application() using [Database, Logger, Cache] {
+    // All three contexts available
+    Logger.log(LogLevel.Info, "Starting operation");
+
+    match Cache.get("user:1") {
+        Some(cached) => {
+            Logger.log(LogLevel.Debug, "Cache hit");
+        }
+        None => {
+            let result = Database.query("SELECT * FROM users WHERE id = 1");
+            Logger.log(LogLevel.Debug, "Cache miss, queried database");
+        }
+    }
+}
+
+type Rows is { count: Int };
+type DbError is Failed;
+type LogLevel is Debug | Info | Warn | Error;
+
+fn main() {
+    let db = ProductionDb { conn: "prod://db" };
+
+    provide Database = db {
+        let name = Database.name();
+        println(f"Using {name}");
+
+        let result = Database.query("SELECT * FROM users");
+        match result {
+            Ok(rows) => println(f"Query result: {rows.count} rows"),
+            Err(_) => println("Query failed"),
+        }
+    }
+}

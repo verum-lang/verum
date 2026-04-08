@@ -1,0 +1,125 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, integers, negative, bounds, edge-cases
+
+// Negative integer literal tests and boundary conditions
+
+fn test_negative_decimal_integers() {
+    // Negative decimal integers
+    let neg_one = -1;
+    let neg_ten = -10;
+    let neg_hundred = -100;
+    let neg_thousand = -1000;
+    let neg_million = -1000000;
+}
+
+fn test_negative_boundary_values() {
+    // Negative boundary values for signed types
+    let min_i8: Int = -128;
+    let min_i16: Int = -32768;
+    let min_i32: Int = -2147483648;
+}
+
+fn test_negative_with_underscores() {
+    // Negative with underscores
+    let neg_formatted = -1_000_000;
+    let neg_grouped = -123_456_789;
+}
+
+fn test_negative_hex() {
+    // Negative hex (negation of hex literal)
+    let neg_hex = -0xFF;
+    let neg_hex_large = -0xFFFFFFFF;
+    let neg_hex_formatted = -0xFF_FF_FF_FF;
+}
+
+fn test_negative_binary() {
+    // Negative binary
+    let neg_bin = -0b1111;
+    let neg_bin_byte = -0b11111111;
+    let neg_bin_formatted = -0b1111_0000;
+}
+
+fn test_negative_octal() {
+    // Negative octal
+    let neg_oct = -0o777;
+    let neg_oct_perms = -0o755;
+    let neg_oct_large = -0o77777777;
+}
+
+fn test_double_negative() {
+    // Double negative (parsed as -(-value))
+    let double_neg = --42;
+    let triple_neg = ---42;
+}
+
+fn test_negative_in_expressions() {
+    // Negative in expressions
+    let neg_sum = -10 + -20;
+    let neg_product = -5 * -6;
+    let neg_difference = -100 - -50;
+    let neg_quotient = -20 / -4;
+}
+
+fn test_negative_in_comparisons() {
+    // Negative in comparisons
+    let less_than_zero = -5 < 0;
+    let compare_negs = -10 < -5;
+    let neg_equals = -42 == -42;
+}
+
+fn test_negative_in_arrays() {
+    // Negative in arrays
+    let negatives = [-1, -2, -3, -4, -5];
+    let mixed = [-100, -50, 0, 50, 100];
+    let neg_powers = [-1, -2, -4, -8, -16, -32];
+}
+
+fn test_negative_in_ranges() {
+    // Negative in ranges
+    let neg_range = -10..-1;
+    let neg_inclusive = -5..=0;
+}
+
+// Negative as function arguments
+fn negate(x: Int) -> Int { -x }
+
+fn test_function_with_negative() {
+    let result = negate(-42);
+}
+
+// Negative in struct initialization
+type Offset is {
+    x: Int,
+    y: Int,
+};
+
+fn test_negative_in_struct() {
+    let offset = Offset {
+        x: -10,
+        y: -20,
+    };
+}
+
+// Negative constants
+const NEG_ONE: Int = -1;
+
+fn test_unary_minus_precedence() {
+    // Unary minus precedence
+    let neg_mul = -2 * 3;
+    let mul_neg = 2 * -3;
+    let neg_div = -10 / 2;
+}
+
+fn test_chained_unary_operations() {
+    // Chained unary operations
+    let complex_neg = -(10 + 20);
+}
+
+fn test_negative_zero() {
+    // Negative zero (should equal zero)
+    let neg_zero = -0;
+    let neg_zero_hex = -0x0;
+    let neg_zero_bin = -0b0;
+}

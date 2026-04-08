@@ -1,0 +1,121 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, incremental, text-edit, insert, delete, replace
+// @description: Tests TextEdit operations (insert, delete, replace) for incremental parsing.
+//              Verifies that edits are correctly applied and result in valid reparsing.
+
+// ============================================================================
+// Base source for incremental tests - this file serves as both documentation
+// and test fixture. Each test describes an edit operation and expected result.
+// ============================================================================
+
+// Test 1: Single character insertion
+// Edit: Insert 'x' at position 0 of identifier 'foo'
+// Result: 'xfoo' should become new identifier
+fn foo() -> Int {
+    42
+}
+
+// Test 2: Single character deletion
+// Edit: Delete first character of 'hello'
+// Result: 'ello' should be the remaining text
+fn greet() {
+    print("hello");
+}
+
+// Test 3: Word replacement
+// Edit: Replace 'bar' with 'baz'
+// Result: Function name should change from 'bar' to 'baz'
+fn bar() -> Int {
+    100
+}
+
+// Test 4: Insert at end of line
+// Edit: Insert ';' at end of expression statement
+// Result: Statement should become valid
+fn needs_semicolon() {
+    let x = 42
+}
+
+// Test 5: Delete semicolon
+// Edit: Delete the ';' from statement
+// Result: Parser should handle missing semicolon
+fn has_semicolon() {
+    let y = 10;
+}
+
+// Test 6: Multi-character insertion
+// Edit: Insert ' + 10' after '42'
+// Result: Expression becomes '42 + 10'
+fn add_to_expression() -> Int {
+    42
+}
+
+// Test 7: Replace expression
+// Edit: Replace '1 + 2' with '10 * 20'
+// Result: Expression value changes
+fn replace_expr() -> Int {
+    1 + 2
+}
+
+// Test 8: Insert new statement
+// Edit: Insert 'let z = 0;' between existing statements
+// Result: Three statements instead of two
+fn insert_statement() {
+    let x = 1;
+    let y = 2;
+}
+
+// Test 9: Delete statement
+// Edit: Delete 'let middle = 2;' line
+// Result: Two statements instead of three
+fn delete_statement() {
+    let first = 1;
+    let middle = 2;
+    let last = 3;
+}
+
+// Test 10: Replace type annotation
+// Edit: Replace 'Int' with 'Float'
+// Result: Parameter type changes
+fn change_type(x: Int) -> Int {
+    x
+}
+
+// Test 11: Insert function parameter
+// Edit: Insert ', c: Int' after 'b: Int'
+// Result: Function has three parameters
+fn add_param(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Test 12: Delete function parameter
+// Edit: Delete ', b: Int' from parameter list
+// Result: Function has one parameter
+fn remove_param(a: Int, b: Int) -> Int {
+    a
+}
+
+// Test 13: Insert generic parameter
+// Edit: Insert '<T>' after function name
+// Result: Function becomes generic
+fn make_generic(x: Int) -> Int {
+    x
+}
+
+// Test 14: Replace function body
+// Edit: Replace entire body with '{ 0 }'
+// Result: Function returns 0
+fn replace_body() -> Int {
+    let x = 1;
+    let y = 2;
+    x + y
+}
+
+// Test 15: Insert comment
+// Edit: Insert '// comment\n' before statement
+// Result: Comment preserved in trivia, statement unchanged
+fn add_comment() {
+    let x = 42;
+}

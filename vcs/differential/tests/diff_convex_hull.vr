@@ -1,0 +1,205 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, convex-hull, geometry, algorithm
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Cross product of vectors (p1-p0) x (p2-p0)
+fn cross_product(px: Arr8, py: Arr8, p0: Int, p1: Int, p2: Int) -> Int {
+    let ax = get(px, p1) - get(px, p0);
+    let ay = get(py, p1) - get(py, p0);
+    let bx = get(px, p2) - get(px, p0);
+    let by_val = get(py, p2) - get(py, p0);
+    ax * by_val - ay * bx
+}
+
+// Sort point indices by x, then by y (selection sort)
+fn sort_points(px: Arr8, py: Arr8, n: Int) -> Arr8 {
+    let mut idx = zeros();
+    let mut i = 0;
+    while i < n { idx = set(idx, i, i); i = i + 1; }
+
+    let mut i2 = 0;
+    while i2 < n - 1 {
+        let mut min_j = i2;
+        let mut j = i2 + 1;
+        while j < n {
+            let mj = get(idx, min_j);
+            let jj = get(idx, j);
+            if get(px, jj) < get(px, mj) {
+                min_j = j;
+            } else if get(px, jj) == get(px, mj) {
+                if get(py, jj) < get(py, mj) { min_j = j; }
+            }
+            j = j + 1;
+        }
+        if min_j != i2 {
+            let tmp = get(idx, i2);
+            idx = set(idx, i2, get(idx, min_j));
+            idx = set(idx, min_j, tmp);
+        }
+        i2 = i2 + 1;
+    }
+    idx
+}
+
+// Convex hull size (Andrew's monotone chain) — returns number of hull vertices
+fn hull_size(px: Arr8, py: Arr8, n: Int) -> Int {
+    if n <= 2 { return n; }
+    let sorted = sort_points(px, py, n);
+    let mut hull = zeros();
+    let mut k = 0;
+
+    // Lower hull
+    let mut i = 0;
+    while i < n {
+        let pi = get(sorted, i);
+        let mut check = 1;
+        while check == 1 {
+            if k >= 2 {
+                if cross_product(px, py, get(hull, k - 2), get(hull, k - 1), pi) <= 0 {
+                    k = k - 1;
+                } else { check = 0; }
+            } else { check = 0; }
+        }
+        hull = set(hull, k, pi);
+        k = k + 1;
+        i = i + 1;
+    }
+
+    // Upper hull
+    let lower_k = k + 1;
+    let mut i2 = n - 2;
+    let mut done = 0;
+    while done == 0 {
+        if i2 < 0 { done = 1; }
+        else {
+            let pi = get(sorted, i2);
+            let mut check = 1;
+            while check == 1 {
+                if k >= lower_k {
+                    if cross_product(px, py, get(hull, k - 2), get(hull, k - 1), pi) <= 0 {
+                        k = k - 1;
+                    } else { check = 0; }
+                } else { check = 0; }
+            }
+            hull = set(hull, k, pi);
+            k = k + 1;
+            i2 = i2 - 1;
+        }
+    }
+    k - 1
+}
+
+// Area of polygon (Shoelace formula, returns 2*area)
+// hull_indices: point indices in hull order
+fn polygon_area_2x(px: Arr8, py: Arr8, n: Int) -> Int {
+    if n <= 2 { return n; }
+    let sorted = sort_points(px, py, n);
+    let mut hull = zeros();
+    let mut k = 0;
+    let mut i = 0;
+    while i < n {
+        let pi = get(sorted, i);
+        let mut check = 1;
+        while check == 1 {
+            if k >= 2 {
+                if cross_product(px, py, get(hull, k - 2), get(hull, k - 1), pi) <= 0 {
+                    k = k - 1;
+                } else { check = 0; }
+            } else { check = 0; }
+        }
+        hull = set(hull, k, pi);
+        k = k + 1;
+        i = i + 1;
+    }
+    let lower_k = k + 1;
+    let mut i2 = n - 2;
+    let mut done = 0;
+    while done == 0 {
+        if i2 < 0 { done = 1; }
+        else {
+            let pi = get(sorted, i2);
+            let mut check = 1;
+            while check == 1 {
+                if k >= lower_k {
+                    if cross_product(px, py, get(hull, k - 2), get(hull, k - 1), pi) <= 0 {
+                        k = k - 1;
+                    } else { check = 0; }
+                } else { check = 0; }
+            }
+            hull = set(hull, k, pi);
+            k = k + 1;
+            i2 = i2 - 1;
+        }
+    }
+    let hs = k - 1;
+
+    let mut area = 0;
+    let mut idx = 0;
+    while idx < hs {
+        let j = (idx + 1) % hs;
+        let hi = get(hull, idx);
+        let hj = get(hull, j);
+        area = area + get(px, hi) * get(py, hj) - get(px, hj) * get(py, hi);
+        idx = idx + 1;
+    }
+    if area < 0 { -area } else { area }
+}
+
+fn main() -> Int {
+    // Triangle: (0,0), (4,0), (2,3) — all on hull
+    let mut px1 = zeros(); px1 = set(set(set(px1, 0, 0), 1, 4), 2, 2);
+    let mut py1 = zeros(); py1 = set(set(set(py1, 0, 0), 1, 0), 2, 3);
+    assert_eq(hull_size(px1, py1, 3), 3);
+    assert_eq(polygon_area_2x(px1, py1, 3), 12); // area = 6, 2x = 12
+
+    // Square with interior point: (0,0), (4,0), (4,4), (0,4), (2,2)
+    let mut px2 = zeros();
+    px2 = set(set(set(set(set(px2, 0, 0), 1, 4), 2, 4), 3, 0), 4, 2);
+    let mut py2 = zeros();
+    py2 = set(set(set(set(set(py2, 0, 0), 1, 0), 2, 4), 3, 4), 4, 2);
+    assert_eq(hull_size(px2, py2, 5), 4); // Interior point excluded
+    assert_eq(polygon_area_2x(px2, py2, 5), 32); // area=16, 2x=32
+
+    // Cross product tests
+    let mut cpx = zeros(); cpx = set(set(set(cpx, 0, 0), 1, 1), 2, 0);
+    let mut cpy = zeros(); cpy = set(set(set(cpy, 0, 0), 1, 0), 2, 1);
+    assert_eq(cross_product(cpx, cpy, 0, 1, 2), 1);  // unit vectors, positive
+    assert_eq(cross_product(cpx, cpy, 0, 2, 1), -1); // reversed, negative
+
+    // Collinear points: (0,0), (1,0), (2,0)
+    let mut px3 = zeros(); px3 = set(set(set(px3, 0, 0), 1, 1), 2, 2);
+    let py3 = zeros();
+    assert_eq(hull_size(px3, py3, 3), 2); // Degenerate
+
+    // Two points
+    let mut px4 = zeros(); px4 = set(set(px4, 0, 1), 1, 5);
+    let mut py4 = zeros(); py4 = set(set(py4, 0, 2), 1, 7);
+    assert_eq(hull_size(px4, py4, 2), 2);
+
+    // Single point
+    assert_eq(hull_size(px4, py4, 1), 1);
+
+    print("DIFF_OK: convex_hull");
+    0
+}

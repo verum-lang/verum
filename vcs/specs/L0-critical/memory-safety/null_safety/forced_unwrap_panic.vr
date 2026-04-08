@@ -1,0 +1,42 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, maybe, panic, runtime-check
+// @description: Tests that unwrap() on None causes a controlled panic
+
+/// While Verum has no null, unwrap() on None is still a programmer error.
+/// Unlike null pointer dereference (undefined behavior), this is a
+/// CONTROLLED panic with:
+/// - Clear error message
+/// - Stack trace
+/// - No memory corruption
+/// - No undefined behavior
+///
+/// This test verifies that the runtime correctly detects and panics
+/// on unwrap of None, providing safety even for programmer errors.
+
+fn find_user(id: Int) -> Maybe<Text> {
+    // Simulated database lookup
+    match id {
+        1 => Maybe.Some("Alice"),
+        2 => Maybe.Some("Bob"),
+        3 => Maybe.Some("Charlie"),
+        _ => Maybe.None,  // User not found
+    }
+}
+
+fn main() {
+    // This will succeed
+    let user1 = find_user(1).unwrap();
+    print(f"Found user: {user1}");
+
+    // This will panic - user 999 does not exist
+    let user_missing = find_user(999);
+
+    // DANGER: forced unwrap on None
+    // This is a controlled panic, NOT undefined behavior
+    let name = user_missing.unwrap();  // PANIC: Called unwrap() on a None value
+
+    // This line is never reached
+    print(f"This should not print: {name}");
+}

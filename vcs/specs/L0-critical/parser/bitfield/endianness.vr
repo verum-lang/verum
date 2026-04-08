@@ -1,0 +1,51 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: bitfield, parser, endianness, low-level
+// @timeout: 5000
+// @description: Test @endian attribute for byte order specification
+//
+// Spec: docs/architecture/low-level-features.md - Bitfield System
+
+/// Little-endian (default) bitfield - native x86/ARM order.
+@bitfield
+@endian(little)
+type LittleEndianWord is {
+    @bits(16) low: UInt,
+    @bits(16) high: UInt,
+};
+
+/// Big-endian bitfield - network byte order (RFC 791).
+@bitfield
+@endian(big)
+type BigEndianWord is {
+    @bits(16) high: UInt,
+    @bits(16) low: UInt,
+};
+
+/// Native-endian bitfield - platform-dependent order.
+@bitfield
+@endian(native)
+type NativeWord is {
+    @bits(32) value: UInt,
+};
+
+/// Without explicit @endian - defaults to little-endian.
+@bitfield
+type DefaultEndianWord is {
+    @bits(8) byte0: UInt,
+    @bits(8) byte1: UInt,
+    @bits(8) byte2: UInt,
+    @bits(8) byte3: UInt,
+};
+
+/// Field-level endianness (for mixed layouts).
+@bitfield
+type MixedEndianPacket is {
+    @bits(16) @endian(big) length: UInt,
+    @bits(16) @endian(little) checksum: UInt,
+};
+
+fn main() -> Int {
+    0
+}

@@ -1,0 +1,245 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, interval, merge, sweep-line
+// @timeout: 30000
+
+// Interval operations: merge overlapping, find intersections, coverage
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+// Intervals stored as packed: start * 100 + end (both in [0,99])
+fn make_interval(start: Int, end: Int) -> Int { start * 100 + end }
+fn interval_start(iv: Int) -> Int { iv / 100 }
+fn interval_end(iv: Int) -> Int { iv % 100 }
+
+// Check if two intervals overlap
+fn overlaps(a: Int, b: Int) -> Int {
+    let a_start = interval_start(a);
+    let a_end = interval_end(a);
+    let b_start = interval_start(b);
+    let b_end = interval_end(b);
+    if a_start <= b_end {
+        if b_start <= a_end { 1 } else { 0 }
+    } else { 0 }
+}
+
+// Merge two overlapping intervals
+fn merge_two(a: Int, b: Int) -> Int {
+    make_interval(min2(interval_start(a), interval_start(b)),
+                  max2(interval_end(a), interval_end(b)))
+}
+
+// Intersection of two intervals (returns 0 if no intersection)
+fn intersect_two(a: Int, b: Int) -> Int {
+    let start = max2(interval_start(a), interval_start(b));
+    let end = min2(interval_end(a), interval_end(b));
+    if start <= end { make_interval(start, end) }
+    else { 0 }
+}
+
+// Length of interval
+fn interval_len(iv: Int) -> Int {
+    interval_end(iv) - interval_start(iv)
+}
+
+// Total coverage of non-overlapping intervals in sorted array
+fn total_coverage(intervals: Arr8, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        total = total + interval_len(get8(intervals, i));
+        i = i + 1;
+    }
+    total
+}
+
+// Insertion sort intervals by start
+fn sort_intervals(arr: Arr8, n: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = 1;
+    while i < n {
+        let key = get8(a, i);
+        let key_start = interval_start(key);
+        let mut j = i;
+        let mut pos = i;
+        while j > 0 {
+            if interval_start(get8(a, j - 1)) > key_start {
+                a = set8(a, j, get8(a, j - 1));
+                j = j - 1;
+                pos = j;
+            } else {
+                j = 0;
+            }
+        }
+        a = set8(a, pos, key);
+        i = i + 1;
+    }
+    a
+}
+
+// Merge overlapping intervals (assumes sorted by start), returns count in result
+// Returns packed: merged_count * 100000 (use separate fn to get merged array)
+fn merge_intervals(sorted: Arr8, n: Int) -> Arr8 {
+    if n == 0 { zeros() }
+    else {
+        let mut result = zeros();
+        result = set8(result, 0, get8(sorted, 0));
+        let mut count = 1;
+        let mut i = 1;
+        while i < n {
+            let cur = get8(sorted, i);
+            let last = get8(result, count - 1);
+            if interval_start(cur) <= interval_end(last) {
+                // Overlapping or adjacent: merge
+                result = set8(result, count - 1, merge_two(last, cur));
+            } else {
+                result = set8(result, count, cur);
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        result
+    }
+}
+
+fn merge_count(sorted: Arr8, n: Int) -> Int {
+    if n == 0 { 0 }
+    else {
+        let mut count = 1;
+        let mut last_end = interval_end(get8(sorted, 0));
+        let mut i = 1;
+        while i < n {
+            let cur = get8(sorted, i);
+            if interval_start(cur) <= last_end {
+                last_end = max2(last_end, interval_end(cur));
+            } else {
+                count = count + 1;
+                last_end = interval_end(cur);
+            }
+            i = i + 1;
+        }
+        count
+    }
+}
+
+// Check if point is inside any interval
+fn point_in_intervals(intervals: Arr8, n: Int, pt: Int) -> Int {
+    let mut found = 0;
+    let mut i = 0;
+    while i < n {
+        let iv = get8(intervals, i);
+        if pt >= interval_start(iv) {
+            if pt <= interval_end(iv) { found = 1; }
+        }
+        i = i + 1;
+    }
+    found
+}
+
+fn test_basics() -> Int {
+    let a = make_interval(1, 5);
+    let b = make_interval(3, 8);
+    assert_eq(interval_start(a), 1);
+    assert_eq(interval_end(a), 5);
+    assert_eq(interval_len(a), 4);
+    assert_eq(overlaps(a, b), 1);
+    let m = merge_two(a, b);
+    assert_eq(interval_start(m), 1);
+    assert_eq(interval_end(m), 8);
+    let inter = intersect_two(a, b);
+    assert_eq(interval_start(inter), 3);
+    assert_eq(interval_end(inter), 5);
+    // Non-overlapping
+    let c = make_interval(10, 15);
+    assert_eq(overlaps(a, c), 0);
+    assert_eq(intersect_two(a, c), 0);
+    1
+}
+
+fn test_merge_intervals() -> Int {
+    // Intervals: [1,3], [2,6], [8,10], [9,12]
+    let mut arr = zeros();
+    arr = set8(arr, 0, make_interval(1, 3));
+    arr = set8(arr, 1, make_interval(2, 6));
+    arr = set8(arr, 2, make_interval(8, 10));
+    arr = set8(arr, 3, make_interval(9, 12));
+    let sorted = sort_intervals(arr, 4);
+    assert_eq(merge_count(sorted, 4), 2); // [1,6] and [8,12]
+    let merged = merge_intervals(sorted, 4);
+    assert_eq(interval_start(get8(merged, 0)), 1);
+    assert_eq(interval_end(get8(merged, 0)), 6);
+    assert_eq(interval_start(get8(merged, 1)), 8);
+    assert_eq(interval_end(get8(merged, 1)), 12);
+    1
+}
+
+fn test_all_overlap() -> Int {
+    // All intervals overlap: [1,5], [2,6], [3,7]
+    let mut arr = zeros();
+    arr = set8(arr, 0, make_interval(1, 5));
+    arr = set8(arr, 1, make_interval(2, 6));
+    arr = set8(arr, 2, make_interval(3, 7));
+    let sorted = sort_intervals(arr, 3);
+    assert_eq(merge_count(sorted, 3), 1); // single [1,7]
+    let merged = merge_intervals(sorted, 3);
+    assert_eq(interval_start(get8(merged, 0)), 1);
+    assert_eq(interval_end(get8(merged, 0)), 7);
+    1
+}
+
+fn test_no_overlap() -> Int {
+    // No overlaps: [1,2], [4,5], [7,8]
+    let mut arr = zeros();
+    arr = set8(arr, 0, make_interval(1, 2));
+    arr = set8(arr, 1, make_interval(4, 5));
+    arr = set8(arr, 2, make_interval(7, 8));
+    let sorted = sort_intervals(arr, 3);
+    assert_eq(merge_count(sorted, 3), 3);
+    assert_eq(total_coverage(sorted, 3), 3); // each has length 1
+    1
+}
+
+fn test_point_query() -> Int {
+    let mut arr = zeros();
+    arr = set8(arr, 0, make_interval(1, 5));
+    arr = set8(arr, 1, make_interval(10, 15));
+    assert_eq(point_in_intervals(arr, 2, 3), 1);
+    assert_eq(point_in_intervals(arr, 2, 7), 0);
+    assert_eq(point_in_intervals(arr, 2, 12), 1);
+    assert_eq(point_in_intervals(arr, 2, 20), 0);
+    1
+}
+
+fn main() -> Int {
+    test_basics();
+    test_merge_intervals();
+    test_all_overlap();
+    test_no_overlap();
+    test_point_query();
+    print("[OK] 672_interval_merge_aot");
+    0
+}

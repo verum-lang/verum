@@ -1,0 +1,276 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, bloom-filter, hash, probabilistic, bitarray
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Bloom filter simulation using a 256-bit array (Arr32).
+// Three hash functions: h1=val%256, h2=(val*7+13)%256, h3=(val*31+17)%256.
+// Tests insertions, membership queries, false positive rate.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Arr32: 32 integer slots using 4 Arr8 blocks
+type Arr32 is { b0: Arr8, b1: Arr8, b2: Arr8, b3: Arr8 };
+
+fn a32_zero() -> Arr32 {
+    Arr32 { b0: a8_zero(), b1: a8_zero(), b2: a8_zero(), b3: a8_zero() }
+}
+
+fn a32_get(a: Arr32, i: Int) -> Int {
+    if i < 8 { a8_get(a.b0, i) }
+    else if i < 16 { a8_get(a.b1, i - 8) }
+    else if i < 24 { a8_get(a.b2, i - 16) }
+    else { a8_get(a.b3, i - 24) }
+}
+
+fn a32_set(a: Arr32, i: Int, v: Int) -> Arr32 {
+    if i < 8 {
+        Arr32 { b0: a8_set(a.b0, i, v), b1: a.b1, b2: a.b2, b3: a.b3 }
+    } else if i < 16 {
+        Arr32 { b0: a.b0, b1: a8_set(a.b1, i - 8, v), b2: a.b2, b3: a.b3 }
+    } else if i < 24 {
+        Arr32 { b0: a.b0, b1: a.b1, b2: a8_set(a.b2, i - 16, v), b3: a.b3 }
+    } else {
+        Arr32 { b0: a.b0, b1: a.b1, b2: a.b2, b3: a8_set(a.b3, i - 24, v) }
+    }
+}
+
+// 256 bits stored as 32 bytes (each byte is an Int 0-255)
+// Bit position p maps to byte p/8, bit p%8
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n {
+        r = r * 2;
+        i = i + 1;
+    }
+    r
+}
+
+fn get_bit(bits: Arr32, pos: Int) -> Int {
+    let byte_idx = pos / 8;
+    let bit_idx = pos % 8;
+    let byte_val = a32_get(bits, byte_idx);
+    let shifted = byte_val / pow2(bit_idx);
+    shifted % 2
+}
+
+fn set_bit(bits: Arr32, pos: Int) -> Arr32 {
+    let byte_idx = pos / 8;
+    let bit_idx = pos % 8;
+    let byte_val = a32_get(bits, byte_idx);
+    let mask = pow2(bit_idx);
+    // Check if already set
+    let cur = (byte_val / mask) % 2;
+    if cur == 0 {
+        a32_set(bits, byte_idx, byte_val + mask)
+    } else {
+        bits
+    }
+}
+
+// Hash functions (all return value in [0, 256))
+fn bloom_h1(val: Int) -> Int {
+    abs_val(val % 256)
+}
+
+fn bloom_h2(val: Int) -> Int {
+    abs_val((val * 7 + 13) % 256)
+}
+
+fn bloom_h3(val: Int) -> Int {
+    abs_val((val * 31 + 17) % 256)
+}
+
+// Insert value into bloom filter
+fn bloom_insert(bits: Arr32, val: Int) -> Arr32 {
+    let mut b = bits;
+    b = set_bit(b, bloom_h1(val));
+    b = set_bit(b, bloom_h2(val));
+    b = set_bit(b, bloom_h3(val));
+    b
+}
+
+// Check if value might be in the filter (1=maybe, 0=definitely not)
+fn bloom_query(bits: Arr32, val: Int) -> Int {
+    if get_bit(bits, bloom_h1(val)) == 0 { return 0; }
+    if get_bit(bits, bloom_h2(val)) == 0 { return 0; }
+    if get_bit(bits, bloom_h3(val)) == 0 { return 0; }
+    1
+}
+
+// Count number of set bits in the 256-bit array
+fn bloom_popcount(bits: Arr32) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 256 {
+        count = count + get_bit(bits, i);
+        i = i + 1;
+    }
+    count
+}
+
+// ========== Tests ==========
+
+fn test_empty() -> Int {
+    let b = a32_zero();
+    assert_eq(bloom_query(b, 0), 0);
+    assert_eq(bloom_query(b, 42), 0);
+    assert_eq(bloom_query(b, 255), 0);
+    assert_eq(bloom_popcount(b), 0);
+    0
+}
+
+fn test_single_insert() -> Int {
+    let mut b = a32_zero();
+    b = bloom_insert(b, 42);
+    assert_eq(bloom_query(b, 42), 1);
+    // Popcount should be at most 3 (3 hash functions)
+    assert(bloom_popcount(b) <= 3);
+    assert(bloom_popcount(b) > 0);
+    0
+}
+
+fn test_multiple_inserts() -> Int {
+    let mut b = a32_zero();
+    b = bloom_insert(b, 10);
+    b = bloom_insert(b, 50);
+    b = bloom_insert(b, 100);
+    b = bloom_insert(b, 200);
+    // No false negatives: all inserted values must be found
+    assert_eq(bloom_query(b, 10), 1);
+    assert_eq(bloom_query(b, 50), 1);
+    assert_eq(bloom_query(b, 100), 1);
+    assert_eq(bloom_query(b, 200), 1);
+    0
+}
+
+fn test_idempotent() -> Int {
+    let mut b = a32_zero();
+    b = bloom_insert(b, 77);
+    let pc1 = bloom_popcount(b);
+    b = bloom_insert(b, 77);
+    let pc2 = bloom_popcount(b);
+    assert_eq(pc1, pc2);
+    0
+}
+
+fn test_false_positive_rate() -> Int {
+    // Insert 5 values, check 50 non-inserted values
+    let mut b = a32_zero();
+    b = bloom_insert(b, 1);
+    b = bloom_insert(b, 2);
+    b = bloom_insert(b, 3);
+    b = bloom_insert(b, 4);
+    b = bloom_insert(b, 5);
+    let mut fp = 0;
+    let mut i = 1000;
+    while i < 1050 {
+        fp = fp + bloom_query(b, i);
+        i = i + 1;
+    }
+    // With 256 bits, 3 hashes, 5 insertions, FP rate should be very low
+    assert(fp < 20);
+    0
+}
+
+fn test_hash_values() -> Int {
+    // Verify hash functions produce values in range
+    assert(bloom_h1(42) >= 0);
+    assert(bloom_h1(42) < 256);
+    assert(bloom_h2(42) >= 0);
+    assert(bloom_h2(42) < 256);
+    assert(bloom_h3(42) >= 0);
+    assert(bloom_h3(42) < 256);
+    0
+}
+
+fn test_hash_distinct() -> Int {
+    // Different hash functions should produce different values for most inputs
+    let h1 = bloom_h1(100);
+    let h2 = bloom_h2(100);
+    let h3 = bloom_h3(100);
+    // At least two of three should differ
+    let same_count = if h1 == h2 { 1 } else { 0 } + if h2 == h3 { 1 } else { 0 } + if h1 == h3 { 1 } else { 0 };
+    assert(same_count < 3);
+    0
+}
+
+fn test_bit_ops() -> Int {
+    let mut b = a32_zero();
+    b = set_bit(b, 0);
+    assert_eq(get_bit(b, 0), 1);
+    assert_eq(get_bit(b, 1), 0);
+    b = set_bit(b, 255);
+    assert_eq(get_bit(b, 255), 1);
+    assert_eq(get_bit(b, 254), 0);
+    0
+}
+
+fn test_bit_middle() -> Int {
+    let mut b = a32_zero();
+    b = set_bit(b, 128);
+    assert_eq(get_bit(b, 128), 1);
+    assert_eq(get_bit(b, 127), 0);
+    assert_eq(get_bit(b, 129), 0);
+    assert_eq(bloom_popcount(b), 1);
+    0
+}
+
+fn test_many_inserts() -> Int {
+    let mut b = a32_zero();
+    let mut i = 0;
+    while i < 20 {
+        b = bloom_insert(b, i * 13);
+        i = i + 1;
+    }
+    // All inserted values must be found
+    i = 0;
+    let mut found = 0;
+    while i < 20 {
+        found = found + bloom_query(b, i * 13);
+        i = i + 1;
+    }
+    assert_eq(found, 20);
+    0
+}
+
+fn main() -> Int {
+    test_empty();
+    test_single_insert();
+    test_multiple_inserts();
+    test_idempotent();
+    test_false_positive_rate();
+    test_hash_values();
+    test_hash_distinct();
+    test_bit_ops();
+    test_bit_middle();
+    test_many_inserts();
+    print("[OK] 401_bloom_filter_aot");
+    0
+}

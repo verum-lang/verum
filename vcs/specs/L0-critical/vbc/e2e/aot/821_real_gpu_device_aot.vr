@@ -1,0 +1,52 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, gpu, real-opcode, device
+// @expected-exit: 0
+
+// Tests REAL GPU device management intrinsics through AOT (LLVM) pipeline.
+// Mirror of interpreter test 201. Exercises gpu_get_device, gpu_set_device,
+// gpu_device_reset.
+
+// GPU device intrinsic declarations
+fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
+fn gpu_set_device(device: Int) -> Int { @intrinsic("GPU_SET_DEVICE", device) }
+fn gpu_device_reset() -> Int { @intrinsic("GPU_DEVICE_RESET") }
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Get current device (should return 0, the default)
+    let dev = gpu_get_device();
+    if dev != 0 { errors = errors + 1; }
+
+    // Test 2: Set device to 0 (should succeed, return 0)
+    let status = gpu_set_device(0);
+    if status != 0 { errors = errors + 1; }
+
+    // Test 3: Get device again after set (still 0)
+    let dev2 = gpu_get_device();
+    if dev2 != 0 { errors = errors + 1; }
+
+    // Test 4: Device reset (should succeed, return 0)
+    let rst = gpu_device_reset();
+    if rst != 0 { errors = errors + 1; }
+
+    // Test 5: Device still works after reset
+    let dev3 = gpu_get_device();
+    if dev3 != 0 { errors = errors + 1; }
+
+    // Test 6: Set and get round-trip
+    let s2 = gpu_set_device(0);
+    if s2 != 0 { errors = errors + 1; }
+    let dev4 = gpu_get_device();
+    if dev4 != 0 { errors = errors + 1; }
+
+    // Test 7: Multiple resets don't crash
+    let r1 = gpu_device_reset();
+    let r2 = gpu_device_reset();
+    if r1 != 0 { errors = errors + 1; }
+    if r2 != 0 { errors = errors + 1; }
+
+    errors
+}

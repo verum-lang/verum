@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, variant, error
+// @description: Test invalid variant syntax detection
+// @expected-error: E048
+
+type Bad is | | Empty;
+
+type Wrong is 123 | Named;
+
+type Incomplete is Some( | None;
+
+type Malformed is Ok(T | Err(E);

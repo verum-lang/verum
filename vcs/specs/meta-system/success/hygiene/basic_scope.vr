@@ -1,0 +1,72 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, scope, isolation
+// @description: Test basic scope isolation in meta functions
+
+// =============================================================================
+// SCOPE ISOLATION
+// =============================================================================
+
+// Variables in different meta functions are isolated
+meta fn scope_a() -> Int {
+    let x = 10;
+    x
+}
+
+meta fn scope_b() -> Int {
+    let x = 20;
+    x
+}
+
+// Nested scopes work correctly
+meta fn nested_scope() -> Int {
+    let x = 1;
+    let result = {
+        let x = 2;
+        x
+    };
+    x + result
+}
+
+// =============================================================================
+// PARAMETER SHADOWING
+// =============================================================================
+
+meta fn outer_scope(x: Int) -> Int {
+    let inner = {
+        let x = x * 2;
+        x
+    };
+    x + inner
+}
+
+// =============================================================================
+// BLOCK SCOPING
+// =============================================================================
+
+meta fn block_isolation() -> Int {
+    let a = {
+        let temp = 10;
+        temp * 2
+    };
+    let b = {
+        let temp = 5;  // Different temp, same name
+        temp * 3
+    };
+    a + b
+}
+
+// Main test function
+fn main() {
+    // Scope isolation tests
+    @const assert_eq(scope_a(), 10);
+    @const assert_eq(scope_b(), 20);
+    @const assert_eq(nested_scope(), 3);
+
+    // Parameter shadowing
+    @const assert_eq(outer_scope(5), 15);
+
+    // Block isolation
+    @const assert_eq(block_isolation(), 35);
+}

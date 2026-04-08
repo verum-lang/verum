@@ -1,0 +1,106 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: recursion, stack, depth
+// @description: Test recursive function patterns
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+@allow(unbounded_recursion)
+fn power(base: Int, exp: Int) -> Int {
+    if exp == 0 { 1 } else { base * power(base, exp - 1) }
+}
+
+fn test_factorial() -> Int {
+    if factorial(0) != 1 {
+        print("FAIL factorial(0)");
+        return 1;
+    }
+    if factorial(5) != 120 {
+        print(f"FAIL factorial(5)={factorial(5)}");
+        return 1;
+    }
+    if factorial(10) != 3628800 {
+        print(f"FAIL factorial(10)={factorial(10)}");
+        return 1;
+    }
+    print("  factorial: OK");
+    0
+}
+
+fn test_power() -> Int {
+    if power(2, 0) != 1 {
+        print("FAIL power(2,0)");
+        return 1;
+    }
+    if power(2, 10) != 1024 {
+        print(f"FAIL power(2,10)={power(2,10)}");
+        return 1;
+    }
+    if power(3, 5) != 243 {
+        print(f"FAIL power(3,5)={power(3,5)}");
+        return 1;
+    }
+    print("  power: OK");
+    0
+}
+
+@allow(unbounded_recursion)
+fn sum_digits(n: Int) -> Int {
+    if n < 10 { n } else { n % 10 + sum_digits(n / 10) }
+}
+
+fn test_sum_digits() -> Int {
+    if sum_digits(123) != 6 {
+        print(f"FAIL sum_digits(123)={sum_digits(123)}");
+        return 1;
+    }
+    if sum_digits(9999) != 36 {
+        print(f"FAIL sum_digits(9999)={sum_digits(9999)}");
+        return 1;
+    }
+    print("  sum_digits: OK");
+    0
+}
+
+// Tail-recursive accumulating pattern
+@allow(unbounded_recursion)
+fn fib_tail(n: Int, a: Int, b: Int) -> Int {
+    if n == 0 { a } else { fib_tail(n - 1, b, a + b) }
+}
+
+fn test_fib_tail() -> Int {
+    if fib_tail(0, 0, 1) != 0 {
+        print("FAIL fib_tail(0)");
+        return 1;
+    }
+    if fib_tail(10, 0, 1) != 55 {
+        print(f"FAIL fib_tail(10)={fib_tail(10, 0, 1)}");
+        return 1;
+    }
+    if fib_tail(20, 0, 1) != 6765 {
+        print(f"FAIL fib_tail(20)={fib_tail(20, 0, 1)}");
+        return 1;
+    }
+    print("  fib_tail: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Recursion Tests:");
+    let mut failures = 0;
+    failures = failures + test_factorial();
+    failures = failures + test_power();
+    failures = failures + test_sum_digits();
+    failures = failures + test_fib_tail();
+
+    if failures == 0 {
+        print("All recursion tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

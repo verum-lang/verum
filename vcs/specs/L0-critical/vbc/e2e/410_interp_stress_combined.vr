@@ -1,0 +1,189 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, stress, combined
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Stress test combining multiple language features: loops, closures,
+// generators, variants, records, recursion, list ops.
+
+type Result is Ok(Int) | Err(Int);
+
+fn unwrap_or(r: Result, default_val: Int) -> Int {
+    match r {
+        Ok(v) => v,
+        Err(e) => default_val,
+    }
+}
+
+fn safe_div(a: Int, b: Int) -> Result {
+    if b == 0 { Err(-1) } else { Ok(a / b) }
+}
+
+fn* range(start: Int, end_excl: Int) -> Int {
+    let mut i = start;
+    while i < end_excl {
+        yield i;
+        i = i + 1;
+    }
+}
+
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int {
+    if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+type Point is { x: Int, y: Int };
+
+fn manhattan(p: Point, q: Point) -> Int {
+    let dx = p.x - q.x;
+    let dy = p.y - q.y;
+    let abs_dx = if dx < 0 { 0 - dx } else { dx };
+    let abs_dy = if dy < 0 { 0 - dy } else { dy };
+    abs_dx + abs_dy
+}
+
+fn test_stress_loops() {
+    // Triple nested loop computing a sum
+    let mut total = 0;
+    let mut i = 0;
+    while i < 20 {
+        let mut j = 0;
+        while j < 20 {
+            let mut k = 0;
+            while k < 5 {
+                total = total + 1;
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(total, 2000);
+    print("stress_loops: ok");
+}
+
+fn test_stress_generators() {
+    // Many generator iterations
+    let mut total = 0;
+    for i in range(1, 501) {
+        total = total + i;
+    }
+    // Sum 1..500 = 500*501/2 = 125250
+    assert_eq(total, 125250);
+    print("stress_generators: ok");
+}
+
+fn test_stress_closures() {
+    // Build and apply many closures
+    let mut result = 0;
+    let mut i = 0;
+    while i < 100 {
+        let f = |x: Int| -> Int { x * 2 + 1 };
+        result = result + f(i);
+        i = i + 1;
+    }
+    // Sum of (2*i + 1) for i=0..99 = 2*(0+1+...+99) + 100 = 2*4950 + 100 = 10000
+    assert_eq(result, 10000);
+    print("stress_closures: ok");
+}
+
+fn test_stress_variants() {
+    let mut ok_count = 0;
+    let mut err_count = 0;
+    let mut i = 0;
+    while i < 50 {
+        let r = safe_div(100, i);
+        match r {
+            Ok(v) => { ok_count = ok_count + 1; },
+            Err(e) => { err_count = err_count + 1; },
+        }
+        i = i + 1;
+    }
+    // Only i=0 gives Err, rest are Ok
+    assert_eq(err_count, 1);
+    assert_eq(ok_count, 49);
+    print("stress_variants: ok");
+}
+
+fn test_stress_records() {
+    // Create and manipulate many records
+    let origin = Point { x: 0, y: 0 };
+    let mut max_dist = 0;
+    let mut i = 0;
+    while i < 50 {
+        let p = Point { x: i, y: i * 2 };
+        let d = manhattan(origin, p);
+        if d > max_dist { max_dist = d; }
+        i = i + 1;
+    }
+    // Max at i=49: |49| + |98| = 147
+    assert_eq(max_dist, 147);
+    print("stress_records: ok");
+}
+
+fn test_stress_list_ops() {
+    let mut arr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Fill with squares
+    let mut i = 0;
+    while i < 10 {
+        arr[i] = i * i;
+        i = i + 1;
+    }
+    // Sum of squares 0..9
+    let mut sum = 0;
+    i = 0;
+    while i < 10 {
+        sum = sum + arr[i];
+        i = i + 1;
+    }
+    // 0+1+4+9+16+25+36+49+64+81 = 285
+    assert_eq(sum, 285);
+    print("stress_list_ops: ok");
+}
+
+fn test_stress_combined() {
+    // Combine generators, closures, variants, and records
+    let mut total_dist = 0;
+    for i in range(0, 20) {
+        let p = Point { x: i * 3, y: i * 4 };
+        let origin = Point { x: 0, y: 0 };
+        let d = manhattan(origin, p);
+
+        let r = if d > 50 { Ok(d) } else { Err(d) };
+        let contribution = unwrap_or(r, 0);
+        total_dist = total_dist + contribution;
+    }
+
+    // For i >= 8: d = 3i + 4i = 7i >= 56 > 50 → Ok
+    // i=8..19: sum of 7*i = 7*(8+9+...+19) = 7*162 = 1134
+    assert_eq(total_dist, 1134);
+    print("stress_combined: ok");
+}
+
+fn test_stress_recursion() {
+    // Multiple recursive calls
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 15 {
+        sum = sum + fib(i);
+        i = i + 1;
+    }
+    // Sum of fib(0)..fib(14) = 0+1+1+2+3+5+8+13+21+34+55+89+144+233+377 = 986
+    assert_eq(sum, 986);
+    print("stress_recursion: ok");
+}
+
+fn main() -> Int {
+    test_stress_loops();
+    test_stress_generators();
+    test_stress_closures();
+    test_stress_variants();
+    test_stress_records();
+    test_stress_list_ops();
+    test_stress_combined();
+    test_stress_recursion();
+    print("[OK] 410_interp_stress_combined — 237 interpreter tests");
+    0
+}

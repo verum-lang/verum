@@ -1,0 +1,29 @@
+// @test: run-interpreter-panic
+// @expected-panic: CBGR use-after-free detected
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, dangling, structs, runtime, negative-test
+
+/// Test storing reference that outlives its target - detected at runtime via CBGR.
+/// The struct holds a reference, but the target goes out of scope.
+/// CBGR detects the dangling reference when dereferenced.
+/// Spec: 26-cbgr-implementation.md#dangling-prevention
+
+type Holder is {
+    value: &Int,
+};
+
+fn main() {
+    let holder: Holder;
+
+    {
+        let local = 42;
+        holder = Holder {
+            value: &local,  // Reference stored - CBGR tracks generation
+        };
+    }
+    // local is dropped, generation bumped
+
+    // CBGR detects generation mismatch at runtime
+    print(*holder.value);  // PANIC: generation mismatch (local no longer exists)
+}

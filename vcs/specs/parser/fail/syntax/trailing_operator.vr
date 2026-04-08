@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, operator, error
+// @description: Test trailing operator detection
+// @expected-error: E018
+
+fn test_trailing_operator() {
+    let a = 1 +;
+    let b = x &&;
+    let c = y |;
+}

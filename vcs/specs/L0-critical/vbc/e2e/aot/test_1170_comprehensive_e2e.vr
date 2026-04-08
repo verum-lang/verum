@@ -1,0 +1,149 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: comprehensive, e2e, integration, all-features
+// @description: End-to-end test combining all major language features
+
+type Priority2 is P_Low | P_Medium | P_High;
+
+type Task4 is { name: Text, priority: Priority2, done: Bool };
+
+implement Task4 {
+    fn create(name: Text, pri: Priority2) -> Task4 {
+        Task4 { name: name, priority: pri, done: false }
+    }
+
+    fn priority_value(&self) -> Int {
+        match self.priority {
+            P_Low => 1,
+            P_Medium => 2,
+            P_High => 3,
+        }
+    }
+}
+
+fn test_task_priority() -> Int {
+    let mut tasks = List.new();
+    tasks.push(Task4.create("email", P_Low));
+    tasks.push(Task4.create("deploy", P_High));
+    tasks.push(Task4.create("review", P_Medium));
+    tasks.push(Task4.create("hotfix", P_High));
+
+    let mut high_count = 0;
+    let mut total_priority = 0;
+    let mut i = 0;
+    while i < tasks.len() {
+        total_priority = total_priority + tasks[i].priority_value();
+        if tasks[i].priority_value() == 3 {
+            high_count = high_count + 1;
+        }
+        i = i + 1;
+    }
+    // 1 + 3 + 2 + 3 = 9
+    if total_priority != 9 {
+        print(f"FAIL priority_total: {total_priority}");
+        return 1;
+    }
+    if high_count != 2 {
+        print(f"FAIL high_count: {high_count}");
+        return 1;
+    }
+    print("  task_priority: OK");
+    0
+}
+
+fn test_combined_features() -> Int {
+    // Generics + closures + collections + comprehensions
+    let data = [i * i for i in 1..=10];
+    // [1, 4, 9, 16, 25, 36, 49, 64, 81, 100]
+
+    if data.len() != 10 {
+        print(f"FAIL combined_len: {data.len()}");
+        return 1;
+    }
+
+    // Filter: keep squares > 20
+    let big = [x for x in data if x > 20];
+    // [25, 36, 49, 64, 81, 100] = 6 items
+    if big.len() != 6 {
+        print(f"FAIL combined_filter: {big.len()}");
+        return 1;
+    }
+
+    // Sum using fold-like pattern
+    let mut total = 0;
+    let mut i = 0;
+    while i < big.len() {
+        total = total + big[i];
+        i = i + 1;
+    }
+    // 25+36+49+64+81+100 = 355
+    if total != 355 {
+        print(f"FAIL combined_sum: {total}, expected 355");
+        return 1;
+    }
+
+    print("  combined_features: OK");
+    0
+}
+
+fn test_map_categorize() -> Int {
+    let mut categories = Map.new();
+
+    for i in 1..=20 {
+        let cat = if i % 2 == 0 { "even" } else { "odd" };
+        if categories.contains_key(cat) {
+            categories.insert(cat, categories.get(cat) + 1);
+        } else {
+            categories.insert(cat, 1);
+        }
+    }
+
+    if categories.get("even") != 10 || categories.get("odd") != 10 {
+        print("FAIL categorize");
+        return 1;
+    }
+    print("  map_categorize: OK");
+    0
+}
+
+fn test_maybe_chain() -> Int {
+    let a: Maybe<Int> = Some(10);
+    let b: Maybe<Int> = None;
+
+    let val_a = a ?? 0;
+    let val_b = b ?? 42;
+
+    if val_a != 10 || val_b != 42 {
+        print(f"FAIL maybe_chain: {val_a}, {val_b}");
+        return 1;
+    }
+
+    // if-let with Maybe
+    let mut result = 0;
+    if let Some(x) = a {
+        result = x * 2;
+    }
+    if result != 20 {
+        print(f"FAIL if_let_chain: {result}");
+        return 1;
+    }
+    print("  maybe_chain: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Comprehensive E2E Tests:");
+    let mut failures = 0;
+    failures = failures + test_task_priority();
+    failures = failures + test_combined_features();
+    failures = failures + test_map_categorize();
+    failures = failures + test_maybe_chain();
+
+    if failures == 0 {
+        print("All comprehensive e2e tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

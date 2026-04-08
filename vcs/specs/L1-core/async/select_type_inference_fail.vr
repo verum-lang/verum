@@ -1,0 +1,124 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, async, select, type-inference, errors
+// @description: Test select expression type checking errors
+
+/// Failure tests for select expression type inference.
+/// These tests verify that the type checker correctly catches errors.
+/// Spec: grammar/verum.ebnf - select expression
+
+// === Type Definitions (needed for some failure tests) ===
+
+type Maybe<T> is
+    | None
+    | Some(T);
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// === Helper functions ===
+
+async fn some_int(v: Int) -> Maybe<Int> {
+    Some(v)
+}
+
+async fn ok_int(v: Int) -> Result<Int, Text> {
+    Ok(v)
+}
+
+//------------------------------------------------------------------------------
+// FAILURE TESTS
+//------------------------------------------------------------------------------
+
+// @expected-error: E340 "Branch type mismatch in select"
+// ERROR: Branches have incompatible types
+async fn mismatched_branch_types() -> Int {
+    let task_a = async { 42 };
+    let task_b = async { "hello" };  // Text, not Int
+
+    select {
+        v = task_a.await => v,  // Returns Int
+        v = task_b.await => v,  // ERROR: Returns Text, but expected Int
+    }
+}
+
+// @expected-error: E341 "Cannot unify branch types"
+// ERROR: No common supertype for branches
+async fn no_common_type() -> _ {
+    // Branches have incompatible types - Maybe<Int> vs Result<Int, Text>
+    select {
+        v = some_int(42).await => v,  // Maybe<Int>
+        v = ok_int(42).await => v,    // ERROR: Result<Int, Text> has no common type with Maybe<Int>
+    }
+}
+
+// @expected-error: E342 "Guard must be Bool"
+// ERROR: Guard expression is not Bool
+async fn guard_not_bool() {
+    let task_a = async { 42 };
+
+    select {
+        v = task_a.await if v + 1 => v,  // ERROR: v + 1 is Int, not Bool
+    }
+}
+
+// @expected-error: E343 "Guard uses undefined variable"
+// ERROR: Guard references variable not bound by pattern
+async fn guard_undefined_var() {
+    let task = async { 42 };
+
+    select {
+        v = task.await if x > 0 => v,  // ERROR: x is not defined
+    }
+}
+
+// @expected-error: E344 "Pattern type mismatch in select"
+// ERROR: Pattern doesn't match future output type
+async fn pattern_type_mismatch() -> Int {
+    let task = async { 42 };  // Produces Int, not Maybe<Int>
+
+    select {
+        Some(x) = task.await => x,  // ERROR: Cannot match Some against Int
+    }
+}
+
+// @expected-error: E346 "Default branch type mismatch"
+// ERROR: Default branch type differs from other branches
+async fn default_type_mismatch() -> Int {
+    let task = async { 42 };
+
+    select {
+        v = task.await => v,
+        else => "not ready",  // ERROR: Text, but other branches return Int
+    }
+}
+
+// @expected-error: E347 "Non-async expression in select"
+// ERROR: select branches must be futures
+async fn non_async_in_select() -> Int {
+    let not_a_future = 42;  // Just an Int, not a Future
+
+    select {
+        v = not_a_future.await => v,  // ERROR: not_a_future is not a Future (Int has no .await)
+    }
+}
+
+// @expected-error: E351 "Guard type error with pattern binding"
+// ERROR: Using pattern binding with wrong type in guard
+async fn guard_wrong_type_usage() {
+    select {
+        Some(n) = some_int(42).await if n.len() > 0 => n,  // ERROR: n is Int, has no len()
+    }
+}
+
+// @expected-error: E352 "select expression in non-async context"
+// ERROR: select used outside async function
+fn sync_select() -> Int {
+    let task = async { 42 };
+
+    select {
+        v = task.await => v,  // ERROR: select requires async context
+    }
+}

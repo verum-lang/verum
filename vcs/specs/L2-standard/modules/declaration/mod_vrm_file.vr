@@ -1,0 +1,148 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, declaration, mod-vr
+
+/// mod.vr file as directory module entry point.
+/// This file demonstrates the convention where `mod.vr` serves as the
+/// entry point for a directory module, similar to `index.js` in Node.js.
+///
+/// Project structure:
+/// ```
+/// src/
+///   main.vr              <- imports from directory modules
+///   auth/                <- directory module
+///     mod.vr             <- THIS FILE - entry point, re-exports public API
+///     strategies/        <- nested directory module
+///       mod.vr           <- nested entry point
+///       oauth.vr
+///       jwt.vr
+///       basic.vr
+///     middleware.vr
+///     session.vr
+///     types.vr
+/// ```
+
+// ============================================================================
+// This would be auth/mod.vr - the module entry point
+// ============================================================================
+
+/// Declare submodules (both file-based and directory-based)
+module strategies;
+module middleware;
+module session;
+module types;
+
+// Re-export public API - users only need `mount auth.{...}`
+pub mount types.{User, Session, Credentials, AuthError};
+pub mount session.{create_session, validate_session, destroy_session};
+pub mount middleware.{require_auth, AuthMiddleware};
+pub mount strategies.{Strategy, authenticate};
+
+/// High-level authentication function using configured strategy
+pub fn login(credentials: Credentials) -> Result<Session, AuthError> {
+    let strategy = strategies.get_default_strategy();
+    let user = authenticate(strategy, credentials)?;
+    create_session(user)
+}
+
+pub fn logout(session: &Session) -> Result<(), AuthError> {
+    destroy_session(session)
+}
+
+// ============================================================================
+// This would be auth/strategies/mod.vr - nested directory entry point
+// ============================================================================
+// module oauth;
+// module jwt;
+// module basic;
+//
+// pub mount oauth.OAuthStrategy;
+// pub mount jwt.JwtStrategy;
+// pub mount basic.BasicStrategy;
+//
+// pub type Strategy is enum {
+//     OAuth(OAuthStrategy),
+//     Jwt(JwtStrategy),
+//     Basic(BasicStrategy)
+// };
+//
+// pub fn authenticate(strategy: Strategy, creds: Credentials) -> Result<User, AuthError> {
+//     match strategy {
+//         OAuth(s) -> s.authenticate(creds),
+//         Jwt(s) -> s.authenticate(creds),
+//         Basic(s) -> s.authenticate(creds)
+//     }
+// }
+//
+// pub fn get_default_strategy() -> Strategy {
+//     Strategy.Jwt(JwtStrategy.default())
+// }
+// ============================================================================
+
+// ============================================================================
+// This would be auth/types.vr
+// ============================================================================
+// pub type User is {
+//     id: Text,
+//     username: Text,
+//     email: Text,
+//     roles: List<Text>
+// };
+//
+// pub type Session is {
+//     id: Text,
+//     user_id: Text,
+//     created_at: Timestamp,
+//     expires_at: Timestamp,
+//     data: Map<Text, Any>
+// };
+//
+// pub type Credentials is enum {
+//     UsernamePassword { username: Text, password: Text },
+//     Token { token: Text },
+//     OAuth { provider: Text, code: Text }
+// };
+//
+// pub type AuthError is enum {
+//     InvalidCredentials,
+//     SessionExpired,
+//     InsufficientPermissions,
+//     AccountLocked,
+//     NetworkError(Text)
+// };
+// ============================================================================
+
+// ============================================================================
+// Example main.vr using the directory module
+// ============================================================================
+
+fn main() {
+    // Clean mount from directory module - mod.vr handles re-exports
+    mount auth.{login, logout, User, Session, Credentials, AuthError};
+    mount auth.middleware.require_auth;
+
+    let credentials = Credentials.UsernamePassword {
+        username: "alice",
+        password: "secret123"
+    };
+
+    match login(credentials) {
+        Ok(session) => {
+            // User is authenticated
+            println("Logged in with session: {}", session.id);
+
+            // Later...
+            logout(&session);
+        },
+        Err(AuthError.InvalidCredentials) => {
+            println("Invalid username or password");
+        },
+        Err(AuthError.AccountLocked) => {
+            println("Account is locked");
+        },
+        Err(e) => {
+            println("Authentication failed: {:?}", e);
+        }
+    }
+}

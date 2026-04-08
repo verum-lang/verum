@@ -1,0 +1,536 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: math, ssm, mamba, jamba, moe, expert, router, constructor, methods
+// @description: Extended SSM tests covering constructors, method calls, and
+//               builder patterns for StateSpaceKernel, S4Layer, MambaBlock,
+//               BiMambaBlock, Mamba, Jamba, Expert, Router, MoELayer,
+//               MoETransformerBlock. Complements ssm_test.vr which only tests
+//               type existence and enum variants.
+
+mount core.math.ssm.{
+    DiscretizationMethod, ZeroOrderHold, Bilinear, Euler,
+    RoutingStrategy, BalanceLoss, Activation,
+    StateSpaceKernel, S4Layer, MambaBlock, BiMambaBlock, Mamba,
+    JambaLayer, Jamba,
+    Expert, Router, MoELayer, MoETransformerBlock,
+};
+mount core.math.tensor.{DynTensor, zeros, randn};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: StateSpaceKernel constructors and methods
+// =============================================================================
+
+@test
+fn test_ssm_kernel_hippo_init() {
+    let kernel: StateSpaceKernel<64, 16> = StateSpaceKernel.hippo_init();
+    assert(kernel.method is ZeroOrderHold);
+}
+
+@test
+fn test_ssm_kernel_has_a_matrix() {
+    let kernel: StateSpaceKernel<32, 8> = StateSpaceKernel.hippo_init();
+    // A matrix should be [N, N] = [8, 8]
+    let shape = kernel.A.shape();
+    assert_eq(shape.len(), 2);
+}
+
+@test
+fn test_ssm_kernel_has_b_matrix() {
+    let kernel: StateSpaceKernel<32, 8> = StateSpaceKernel.hippo_init();
+    // B matrix should be [N, D] = [8, 32]
+    let shape = kernel.B.shape();
+    assert_eq(shape.len(), 2);
+}
+
+@test
+fn test_ssm_kernel_has_c_matrix() {
+    let kernel: StateSpaceKernel<32, 8> = StateSpaceKernel.hippo_init();
+    // C matrix should be [D, N] = [32, 8]
+    let shape = kernel.C.shape();
+    assert_eq(shape.len(), 2);
+}
+
+@test
+fn test_ssm_kernel_skip_connection_optional() {
+    let kernel: StateSpaceKernel<32, 8> = StateSpaceKernel.hippo_init();
+    // D (skip connection) should be Some
+    assert(kernel.D is Some);
+}
+
+@test
+fn test_ssm_kernel_discretize() {
+    let kernel: StateSpaceKernel<32, 8> = StateSpaceKernel.hippo_init();
+    let dt = randn(&[1 as USize]);
+    let (a_bar, b_bar) = kernel.discretize(&dt);
+    // Discretized matrices should have shape
+    let a_shape = a_bar.shape();
+    assert(a_shape.len() > 0);
+}
+
+@test
+fn test_ssm_kernel_different_dimensions() {
+    let k1: StateSpaceKernel<128, 32> = StateSpaceKernel.hippo_init();
+    let k2: StateSpaceKernel<16, 4> = StateSpaceKernel.hippo_init();
+    assert(k1.A.shape().len() == 2);
+    assert(k2.A.shape().len() == 2);
+}
+
+// =============================================================================
+// Section 2: S4Layer constructors and methods
+// =============================================================================
+
+@test
+fn test_s4_layer_dplr_init() {
+    let layer: S4Layer<64, 16> = S4Layer.dplr_init();
+    // Lambda should be [N] = [16] (diagonal eigenvalues)
+    let shape = layer.Lambda.shape();
+    assert(shape.len() > 0);
+}
+
+@test
+fn test_s4_layer_compute_kernel() {
+    let layer: S4Layer<32, 8> = S4Layer.dplr_init();
+    let k = layer.compute_kernel(128 as USize);
+    // Kernel should have some shape
+    let shape = k.shape();
+    assert(shape.len() > 0);
+}
+
+@test
+fn test_s4_layer_different_dims() {
+    let l1: S4Layer<128, 32> = S4Layer.dplr_init();
+    let l2: S4Layer<16, 4> = S4Layer.dplr_init();
+    // B is [N, D] - should be 2D
+    assert(l1.B.shape().len() == 2);
+    assert(l2.B.shape().len() == 2);
+}
+
+// =============================================================================
+// Section 3: MambaBlock constructors
+// =============================================================================
+
+@test
+fn test_mamba_block_new() {
+    let block: MambaBlock<64, 16> = MambaBlock.new(2 as USize, 4 as USize);
+    assert_eq(block.expand, 128 as USize); // D * expand_factor = 64 * 2
+}
+
+@test
+fn test_mamba_block_expand_factor_1() {
+    let block: MambaBlock<32, 8> = MambaBlock.new(1 as USize, 4 as USize);
+    assert_eq(block.expand, 32 as USize); // D * 1 = 32
+}
+
+@test
+fn test_mamba_block_expand_factor_4() {
+    let block: MambaBlock<16, 4> = MambaBlock.new(4 as USize, 3 as USize);
+    assert_eq(block.expand, 64 as USize); // D * 4 = 16 * 4
+}
+
+@test
+fn test_mamba_block_has_projections() {
+    let block: MambaBlock<64, 16> = MambaBlock.new(2 as USize, 4 as USize);
+    // in_proj, x_proj, dt_proj, out_proj should all exist
+    let _ = block.in_proj;
+    let _ = block.x_proj;
+    let _ = block.dt_proj;
+    let _ = block.out_proj;
+}
+
+@test
+fn test_mamba_block_has_a_log() {
+    let block: MambaBlock<64, 16> = MambaBlock.new(2 as USize, 4 as USize);
+    // A_log should be [expand, N] = [128, 16]
+    let shape = block.A_log.shape();
+    assert_eq(shape.len(), 2);
+}
+
+@test
+fn test_mamba_block_has_d_skip() {
+    let block: MambaBlock<64, 16> = MambaBlock.new(2 as USize, 4 as USize);
+    // D (skip) should be [expand] = [128]
+    let shape = block.D.shape();
+    assert_eq(shape.len(), 1);
+}
+
+// =============================================================================
+// Section 4: BiMambaBlock constructors
+// =============================================================================
+
+@test
+fn test_bi_mamba_block_new() {
+    let block: BiMambaBlock<64, 16> = BiMambaBlock.new(2 as USize, 4 as USize);
+    // Should have forward and backward Mamba blocks
+    assert_eq(block.forward_mamba.expand, 128 as USize);
+    assert_eq(block.backward_mamba.expand, 128 as USize);
+}
+
+@test
+fn test_bi_mamba_block_has_merge_proj() {
+    let block: BiMambaBlock<32, 8> = BiMambaBlock.new(2 as USize, 4 as USize);
+    let _ = block.merge_proj;
+}
+
+@test
+fn test_bi_mamba_block_different_dims() {
+    let b1: BiMambaBlock<128, 32> = BiMambaBlock.new(2 as USize, 4 as USize);
+    let b2: BiMambaBlock<16, 4> = BiMambaBlock.new(1 as USize, 3 as USize);
+    assert_eq(b1.forward_mamba.expand, 256 as USize);
+    assert_eq(b2.forward_mamba.expand, 16 as USize);
+}
+
+// =============================================================================
+// Section 5: Mamba model constructors
+// =============================================================================
+
+@test
+fn test_mamba_new() {
+    let model: Mamba<64, 16> = Mamba.new(32000 as USize, 6 as USize, 2 as USize, 4 as USize);
+    // 6 layers
+    assert_eq(model.layers.len(), 6);
+}
+
+@test
+fn test_mamba_new_single_layer() {
+    let model: Mamba<32, 8> = Mamba.new(1000 as USize, 1 as USize, 2 as USize, 4 as USize);
+    assert_eq(model.layers.len(), 1);
+}
+
+@test
+fn test_mamba_has_embedding() {
+    let model: Mamba<64, 16> = Mamba.new(32000 as USize, 4 as USize, 2 as USize, 4 as USize);
+    let _ = model.embedding;
+}
+
+@test
+fn test_mamba_has_norm_and_head() {
+    let model: Mamba<64, 16> = Mamba.new(32000 as USize, 4 as USize, 2 as USize, 4 as USize);
+    let _ = model.norm_f;
+    let _ = model.lm_head;
+}
+
+// =============================================================================
+// Section 6: JambaLayer constructors
+// =============================================================================
+
+@test
+fn test_jamba_layer_mamba_only_constructor() {
+    let layer: JambaLayer<64, 16> = JambaLayer.mamba_only(2 as USize, 4 as USize);
+    assert(layer is JambaLayer.MambaOnly);
+}
+
+@test
+fn test_jamba_layer_hybrid_constructor() {
+    let layer: JambaLayer<64, 16> = JambaLayer.hybrid(2 as USize, 8 as USize);
+    assert(layer is JambaLayer.Hybrid);
+}
+
+@test
+fn test_jamba_layer_mamba_only_different_params() {
+    let l1: JambaLayer<32, 8> = JambaLayer.mamba_only(1 as USize, 3 as USize);
+    let l2: JambaLayer<128, 32> = JambaLayer.mamba_only(4 as USize, 7 as USize);
+    assert(l1 is JambaLayer.MambaOnly);
+    assert(l2 is JambaLayer.MambaOnly);
+}
+
+@test
+fn test_jamba_layer_hybrid_different_heads() {
+    let l1: JambaLayer<64, 16> = JambaLayer.hybrid(2 as USize, 4 as USize);
+    let l2: JambaLayer<64, 16> = JambaLayer.hybrid(2 as USize, 16 as USize);
+    assert(l1 is JambaLayer.Hybrid);
+    assert(l2 is JambaLayer.Hybrid);
+}
+
+// =============================================================================
+// Section 7: Jamba model constructors
+// =============================================================================
+
+@test
+fn test_jamba_new() {
+    let model: Jamba<64, 16> = Jamba.new(32000 as USize, 6 as USize, 8 as USize, 2 as USize, 3 as USize);
+    assert_eq(model.layers.len(), 6);
+}
+
+@test
+fn test_jamba_has_embedding_and_head() {
+    let model: Jamba<64, 16> = Jamba.new(1000 as USize, 4 as USize, 4 as USize, 2 as USize, 2 as USize);
+    let _ = model.embedding;
+    let _ = model.norm_f;
+    let _ = model.lm_head;
+}
+
+@test
+fn test_jamba_attention_ratio_interleaves_layers() {
+    // With attention_ratio=2, every 2nd layer should be hybrid
+    let model: Jamba<64, 16> = Jamba.new(1000 as USize, 4 as USize, 4 as USize, 2 as USize, 2 as USize);
+    // Layer 0: mamba_only (0 % 2 != 1)
+    // Layer 1: hybrid (1 % 2 == 1)
+    // Layer 2: mamba_only (2 % 2 != 1)
+    // Layer 3: hybrid (3 % 2 == 1)
+    assert_eq(model.layers.len(), 4);
+}
+
+@test
+fn test_jamba_single_layer() {
+    let model: Jamba<32, 8> = Jamba.new(1000 as USize, 1 as USize, 4 as USize, 2 as USize, 1 as USize);
+    assert_eq(model.layers.len(), 1);
+}
+
+// =============================================================================
+// Section 8: Expert constructors
+// =============================================================================
+
+@test
+fn test_expert_new_gelu() {
+    let expert: Expert<64, 256> = Expert.new(Activation.GELU);
+    assert(expert.activation is GELU);
+}
+
+@test
+fn test_expert_new_silu() {
+    let expert: Expert<64, 256> = Expert.new(Activation.SiLU);
+    assert(expert.activation is SiLU);
+}
+
+@test
+fn test_expert_new_relu() {
+    let expert: Expert<32, 128> = Expert.new(Activation.ReLU);
+    assert(expert.activation is ReLU);
+}
+
+@test
+fn test_expert_has_projections() {
+    let expert: Expert<64, 256> = Expert.new(Activation.GELU);
+    // w1: D -> H, w2: H -> D
+    let _ = expert.w1;
+    let _ = expert.w2;
+}
+
+@test
+fn test_expert_different_hidden_sizes() {
+    let e1: Expert<64, 128> = Expert.new(Activation.GELU);
+    let e2: Expert<64, 512> = Expert.new(Activation.GELU);
+    assert(e1.activation is GELU);
+    assert(e2.activation is GELU);
+}
+
+// =============================================================================
+// Section 9: Router constructors
+// =============================================================================
+
+@test
+fn test_router_new_topk() {
+    let router: Router<64, 8> = Router.new(RoutingStrategy.TopK { k: 2 as USize }, 0.1);
+    assert(router.strategy is RoutingStrategy.TopK);
+}
+
+@test
+fn test_router_new_expert_choice() {
+    let router: Router<64, 8> = Router.new(RoutingStrategy.ExpertChoice { k: 4 as USize }, 0.05);
+    assert(router.strategy is RoutingStrategy.ExpertChoice);
+}
+
+@test
+fn test_router_new_soft_moe() {
+    let router: Router<32, 4> = Router.new(RoutingStrategy.SoftMoE, 0.0);
+    assert(router.strategy is RoutingStrategy.SoftMoE);
+}
+
+@test
+fn test_router_noise_std() {
+    let router: Router<64, 8> = Router.new(RoutingStrategy.TopK { k: 2 as USize }, 0.1);
+    assert_eq(router.noise_std, 0.1);
+}
+
+@test
+fn test_router_zero_noise() {
+    let router: Router<64, 8> = Router.new(RoutingStrategy.TopK { k: 2 as USize }, 0.0);
+    assert_eq(router.noise_std, 0.0);
+}
+
+@test
+fn test_router_has_gate() {
+    let router: Router<64, 8> = Router.new(RoutingStrategy.TopK { k: 2 as USize }, 0.1);
+    // gate is a Linear layer: D -> E
+    let _ = router.gate;
+}
+
+// =============================================================================
+// Section 10: MoELayer constructors
+// =============================================================================
+
+@test
+fn test_moe_layer_new_topk() {
+    let moe: MoELayer<64, 256, 8> = MoELayer.new(
+        RoutingStrategy.TopK { k: 2 as USize },
+        Activation.GELU,
+        BalanceLoss.Auxiliary { coefficient: 0.01 },
+        1.25,
+    );
+    assert_eq(moe.experts.len(), 8); // E = 8 experts
+}
+
+@test
+fn test_moe_layer_new_expert_choice() {
+    let moe: MoELayer<32, 128, 4> = MoELayer.new(
+        RoutingStrategy.ExpertChoice { k: 2 as USize },
+        Activation.SiLU,
+        BalanceLoss.ZLoss { coefficient: 0.001 },
+        1.5,
+    );
+    assert_eq(moe.experts.len(), 4); // E = 4 experts
+}
+
+@test
+fn test_moe_layer_capacity_factor() {
+    let moe: MoELayer<64, 256, 8> = MoELayer.new(
+        RoutingStrategy.TopK { k: 2 as USize },
+        Activation.GELU,
+        BalanceLoss.Auxiliary { coefficient: 0.01 },
+        1.25,
+    );
+    assert_eq(moe.capacity_factor, 1.25);
+}
+
+@test
+fn test_moe_layer_get_aux_loss_initial() {
+    let moe: MoELayer<64, 256, 8> = MoELayer.new(
+        RoutingStrategy.TopK { k: 2 as USize },
+        Activation.GELU,
+        BalanceLoss.Auxiliary { coefficient: 0.01 },
+        1.25,
+    );
+    // Initial aux loss should be 0.0 (no forward pass yet)
+    let loss = moe.get_aux_loss();
+    assert_eq(loss, 0.0);
+}
+
+@test
+fn test_moe_layer_combined_loss() {
+    let moe: MoELayer<64, 256, 8> = MoELayer.new(
+        RoutingStrategy.TopK { k: 2 as USize },
+        Activation.GELU,
+        BalanceLoss.Combined { aux: 0.01, z: 0.001 },
+        1.25,
+    );
+    let loss = moe.get_aux_loss();
+    assert_eq(loss, 0.0); // No forward pass yet
+}
+
+@test
+fn test_moe_layer_different_expert_counts() {
+    let m1: MoELayer<64, 256, 4> = MoELayer.new(
+        RoutingStrategy.TopK { k: 1 as USize }, Activation.GELU,
+        BalanceLoss.Auxiliary { coefficient: 0.01 }, 1.0,
+    );
+    let m2: MoELayer<64, 256, 16> = MoELayer.new(
+        RoutingStrategy.TopK { k: 2 as USize }, Activation.GELU,
+        BalanceLoss.Auxiliary { coefficient: 0.01 }, 1.0,
+    );
+    assert_eq(m1.experts.len(), 4);
+    assert_eq(m2.experts.len(), 16);
+}
+
+// =============================================================================
+// Section 11: MoETransformerBlock constructors
+// =============================================================================
+
+@test
+fn test_moe_transformer_block_new() {
+    let block: MoETransformerBlock<64, 256, 8> = MoETransformerBlock.new(8 as USize, 2 as USize, Activation.GELU);
+    // Should have attention and MoE components
+    let _ = block.attn;
+    let _ = block.moe;
+}
+
+@test
+fn test_moe_transformer_block_aux_loss() {
+    let block: MoETransformerBlock<64, 256, 8> = MoETransformerBlock.new(8 as USize, 2 as USize, Activation.GELU);
+    let loss = block.aux_loss();
+    assert_eq(loss, 0.0); // No forward pass yet
+}
+
+@test
+fn test_moe_transformer_block_has_norms() {
+    let block: MoETransformerBlock<64, 256, 8> = MoETransformerBlock.new(4 as USize, 2 as USize, Activation.SiLU);
+    let _ = block.ln1;
+    let _ = block.ln2;
+}
+
+@test
+fn test_moe_transformer_block_different_heads() {
+    let b1: MoETransformerBlock<64, 256, 8> = MoETransformerBlock.new(4 as USize, 2 as USize, Activation.GELU);
+    let b2: MoETransformerBlock<64, 256, 8> = MoETransformerBlock.new(16 as USize, 2 as USize, Activation.GELU);
+    let _ = b1.attn;
+    let _ = b2.attn;
+}
+
+@test
+fn test_moe_transformer_block_different_activations() {
+    let b1: MoETransformerBlock<64, 256, 8> = MoETransformerBlock.new(8 as USize, 2 as USize, Activation.GELU);
+    let b2: MoETransformerBlock<64, 256, 8> = MoETransformerBlock.new(8 as USize, 2 as USize, Activation.SiLU);
+    let b3: MoETransformerBlock<64, 256, 8> = MoETransformerBlock.new(8 as USize, 2 as USize, Activation.ReLU);
+    let _ = b1.aux_loss();
+    let _ = b2.aux_loss();
+    let _ = b3.aux_loss();
+}
+
+// =============================================================================
+// Section 12: Cross-type integration patterns
+// =============================================================================
+
+@test
+fn test_mamba_block_in_list() {
+    let blocks: List<MambaBlock<32, 8>> = [
+        MambaBlock.new(2 as USize, 4 as USize),
+        MambaBlock.new(2 as USize, 4 as USize),
+        MambaBlock.new(2 as USize, 4 as USize),
+    ];
+    assert_eq(blocks.len(), 3);
+}
+
+@test
+fn test_expert_in_list_different_activations() {
+    let experts: List<Expert<64, 256>> = [
+        Expert.new(Activation.GELU),
+        Expert.new(Activation.SiLU),
+        Expert.new(Activation.ReLU),
+    ];
+    assert_eq(experts.len(), 3);
+}
+
+@test
+fn test_jamba_layers_in_list() {
+    let layers: List<JambaLayer<64, 16>> = [
+        JambaLayer.mamba_only(2 as USize, 4 as USize),
+        JambaLayer.hybrid(2 as USize, 8 as USize),
+        JambaLayer.mamba_only(2 as USize, 4 as USize),
+    ];
+    assert_eq(layers.len(), 3);
+    assert(layers[0] is JambaLayer.MambaOnly);
+    assert(layers[1] is JambaLayer.Hybrid);
+}
+
+@test
+fn test_moe_layer_has_router() {
+    let moe: MoELayer<64, 256, 8> = MoELayer.new(
+        RoutingStrategy.TopK { k: 2 as USize }, Activation.GELU,
+        BalanceLoss.Auxiliary { coefficient: 0.01 }, 1.0,
+    );
+    // Access router's strategy
+    assert(moe.router.strategy is RoutingStrategy.TopK);
+}
+
+@test
+fn test_mamba_block_expand_consistent() {
+    // Verify expand = D * expand_factor for various configurations
+    let b1: MambaBlock<32, 8> = MambaBlock.new(2 as USize, 4 as USize);
+    assert_eq(b1.expand, 64 as USize);
+
+    let b2: MambaBlock<64, 16> = MambaBlock.new(3 as USize, 4 as USize);
+    assert_eq(b2.expand, 192 as USize);
+
+    let b3: MambaBlock<128, 32> = MambaBlock.new(1 as USize, 4 as USize);
+    assert_eq(b3.expand, 128 as USize);
+}

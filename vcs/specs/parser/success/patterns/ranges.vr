@@ -1,0 +1,463 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for range patterns
+
+// Grammar Reference:
+// range_pattern = literal_expr , range_op , [ literal_expr ]
+//               | range_op , literal_expr ;
+// range_op = '..' | '..=' ;
+
+// ============================================================================
+// SECTION 1: Exclusive Range Patterns (..)
+// ============================================================================
+
+fn test_exclusive_ranges() {
+    // Basic exclusive ranges
+    match n {
+        0..10 => single_digit(),
+        10..100 => double_digit(),
+        100..1000 => triple_digit(),
+        _ => other()
+    }
+
+    // Small ranges
+    match x {
+        0..1 => zero(),
+        1..2 => one(),
+        2..3 => two(),
+        _ => other()
+    }
+
+    // Large ranges
+    match big {
+        0..1000000 => under_million(),
+        1000000..1000000000 => millions(),
+        _ => billions()
+    }
+}
+
+// ============================================================================
+// SECTION 2: Inclusive Range Patterns (..=)
+// ============================================================================
+
+fn test_inclusive_ranges() {
+    // Basic inclusive ranges
+    match n {
+        0..=9 => single_digit(),
+        10..=99 => double_digit(),
+        100..=999 => triple_digit(),
+        _ => other()
+    }
+
+    // Single-value inclusive range
+    match x {
+        0..=0 => just_zero(),
+        1..=1 => just_one(),
+        _ => other()
+    }
+
+    // Boundary-inclusive examples
+    match score {
+        0..=59 => failing(),
+        60..=69 => d_grade(),
+        70..=79 => c_grade(),
+        80..=89 => b_grade(),
+        90..=100 => a_grade(),
+        _ => invalid()
+    }
+}
+
+// ============================================================================
+// SECTION 3: Open-Ended Range Patterns
+// ============================================================================
+
+fn test_open_ranges() {
+    // From start (..n)
+    match x {
+        ..0 => negative(),
+        0 => zero(),
+        1.. => positive()
+    }
+
+    // Just lower bound (n..)
+    match age {
+        ..18 => minor(),
+        18..65 => working_age(),
+        65.. => retired()
+    }
+
+    // Just upper bound (..n and ..=n)
+    match temp {
+        ..0 => freezing(),
+        0..=100 => normal(),
+        100.. => boiling()
+    }
+}
+
+// ============================================================================
+// SECTION 4: Negative Number Ranges
+// ============================================================================
+
+fn test_negative_ranges() {
+    // Negative to positive - use guards since patterns don't support negative literals
+    match n {
+        x if x >= -100 && x < -1 => negative(),
+        x if x >= -1 && x < 0 => almost_zero(),
+        0 => zero(),
+        0..1 => almost_one(),
+        1..100 => positive(),
+        _ => other()
+    }
+
+    // All negative - use guards
+    match n {
+        x if x >= -1000 && x < -100 => very_negative(),
+        x if x >= -100 && x < -10 => moderately_negative(),
+        x if x >= -10 && x < -1 => slightly_negative(),
+        _ => not_very_negative()
+    }
+
+    // Mixed negative and positive
+    match n {
+        x if x >= -10 && x <= -1 => negative_single_digit(),
+        0..=9 => positive_single_digit(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 5: Character Range Patterns
+// ============================================================================
+
+fn test_char_ranges() {
+    // Lowercase letters
+    match c {
+        'a'..='z' => lowercase(),
+        'A'..='Z' => uppercase(),
+        _ => not_letter()
+    }
+
+    // Digits
+    match c {
+        '0'..='9' => digit(),
+        _ => not_digit()
+    }
+
+    // Specific letter ranges
+    match c {
+        'a'..='f' => hex_lower(),
+        'A'..='F' => hex_upper(),
+        '0'..='9' => hex_digit(),
+        _ => not_hex()
+    }
+
+    // Multiple character classes
+    match c {
+        'a'..='z' => lowercase(),
+        'A'..='Z' => uppercase(),
+        '0'..='9' => digit(),
+        ' ' | '\t' | '\n' => whitespace(),
+        _ => other()
+    }
+
+    // Exclusive char ranges
+    match c {
+        'a'..'z' => lowercase_not_z(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 6: Floating Point Range Patterns
+// ============================================================================
+
+fn test_float_ranges() {
+    // Basic float ranges - use guards for float comparisons
+    match f {
+        x if x >= 0.0 && x < 1.0 => unit_interval(),
+        x if x >= 1.0 && x < 10.0 => single_digit(),
+        _ => other()
+    }
+
+    // Negative floats - use guards
+    match f {
+        x if x >= -1.0 && x < 0.0 => negative_unit(),
+        x if x >= 0.0 && x < 1.0 => positive_unit(),
+        _ => outside_unit()
+    }
+
+    // Inclusive float ranges - use guards
+    match f {
+        x if x >= 0.0 && x <= 1.0 => closed_unit(),
+        _ => outside()
+    }
+}
+
+// ============================================================================
+// SECTION 7: Range Patterns with @ Bindings
+// ============================================================================
+
+fn test_ranges_with_at() {
+    // Bind value matching range
+    match n {
+        small @ 0..10 => handle_small(small),
+        medium @ 10..100 => handle_medium(medium),
+        large @ _ => handle_large(large)
+    }
+
+    // @ with inclusive range
+    match x {
+        unit @ 0..=1 => unit_value(unit),
+        _ => other()
+    }
+
+    // @ with char range
+    match c {
+        lower @ 'a'..='z' => handle_lower(lower),
+        upper @ 'A'..='Z' => handle_upper(upper),
+        other @ _ => handle_other(other)
+    }
+}
+
+// ============================================================================
+// SECTION 8: Range Patterns in Tuples
+// ============================================================================
+
+fn test_ranges_in_tuples() {
+    // Range in tuple
+    match pair {
+        (0..10, 0..10) => small_pair(),
+        (10..100, 10..100) => medium_pair(),
+        (x, y) => other(x, y)
+    }
+
+    // Mixed
+    match point {
+        (0..=255, 0..=255) => valid_byte_pair(),
+        _ => invalid()
+    }
+
+    // With identifiers
+    match coord {
+        (x @ 0..10, y @ 0..10) => quadrant_one(x, y),
+        _ => outside()
+    }
+}
+
+// ============================================================================
+// SECTION 9: Range Patterns in Arrays
+// ============================================================================
+
+fn test_ranges_in_arrays() {
+    // Range in array elements
+    match arr {
+        [0..10, 0..10, 0..10] => all_small(),
+        [a, b, c] => other(a, b, c)
+    }
+
+    // With rest
+    match arr {
+        [0..10, ..] => starts_small(),
+        [.., 0..10] => ends_small(),
+        _ => no_small()
+    }
+}
+
+// ============================================================================
+// SECTION 10: Range Patterns in Records
+// ============================================================================
+
+fn test_ranges_in_records() {
+    // Range as field value
+    match point {
+        Point { x: 0..10, y: 0..10 } => near_origin(),
+        Point { x: 0..10, y } => on_left(y),
+        Point { x, y: 0..10 } => on_bottom(x),
+        Point { x, y } => far(x, y)
+    }
+
+    // Inclusive in record
+    match color {
+        RGB { red: 0..=255, green: 0..=255, blue: 0..=255 } => valid(),
+        _ => invalid()
+    }
+}
+
+// ============================================================================
+// SECTION 11: Range Patterns in Variants
+// ============================================================================
+
+fn test_ranges_in_variants() {
+    // Range inside variant
+    match option {
+        Some(0..10) => small_value(),
+        Some(10..100) => medium_value(),
+        Some(n) => large_value(n),
+        None => no_value()
+    }
+
+    // Inclusive inside variant
+    match result {
+        Ok(0..=100) => valid_percentage(),
+        Ok(n) => invalid_percentage(n),
+        Err(e) => error(e)
+    }
+
+    // With binding
+    match option {
+        Some(small @ 0..10) => handle_small(small),
+        Some(n) => handle_other(n),
+        None => handle_none()
+    }
+}
+
+// ============================================================================
+// SECTION 12: Range Patterns with Or Patterns
+// ============================================================================
+
+fn test_ranges_with_or() {
+    // Multiple ranges
+    match n {
+        0..10 | 20..30 | 40..50 => specific_decades(),
+        _ => other()
+    }
+
+    // Range or literal
+    match n {
+        0 | 1..10 => small(),
+        10 | 20..100 => medium_ish(),
+        _ => other()
+    }
+
+    // Char ranges with or
+    match c {
+        'a'..='z' | 'A'..='Z' => letter(),
+        '0'..='9' => digit(),
+        '_' | '-' => connector(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 13: Range Patterns with Guards
+// ============================================================================
+
+fn test_ranges_with_guards() {
+    // Guard on range match
+    match n {
+        x @ 0..100 if x % 2 == 0 => even_small(x),
+        x @ 0..100 => odd_small(x),
+        x => large(x)
+    }
+
+    // Complex guard
+    match score {
+        s @ 90..=100 if bonus_applied => a_plus(s),
+        s @ 90..=100 => a_grade(s),
+        s @ 80..90 if bonus_applied => a_grade(s),
+        s @ 80..90 => b_grade(s),
+        s => other_grade(s)
+    }
+}
+
+// ============================================================================
+// SECTION 14: Complex Range Patterns
+// ============================================================================
+
+fn test_complex_ranges() {
+    // Nested with all features
+    match data {
+        Some((x @ 0..10, y @ 0..10)) if x == y => diagonal_near_origin(x),
+        Some((x @ 0..10, y)) => left_column(x, y),
+        Some((x, y @ 0..10)) => bottom_row(x, y),
+        Some((x, y)) => general(x, y),
+        None => empty()
+    }
+
+    // Multiple ranges in record
+    match rect {
+        Rect {
+            x: 0..100,
+            y: 0..100,
+            width: 10..50,
+            height: 10..50
+        } => small_centered(),
+        Rect { x, y, width, height } => other(x, y, width, height)
+    }
+}
+
+// ============================================================================
+// SECTION 15: Edge Cases
+// ============================================================================
+
+fn test_edge_cases() {
+    // Adjacent ranges
+    match n {
+        0..10 => first(),
+        10..20 => second(),  // 10 starts here
+        20..30 => third(),
+        _ => other()
+    }
+
+    // Overlapping (later patterns never match - parser should accept)
+    match n {
+        0..100 => broad(),
+        50..60 => narrow(),  // Would never match but syntactically valid
+        _ => other()
+    }
+
+    // Single inclusive range
+    match n {
+        0..=0 => exactly_zero(),
+        _ => not_zero()
+    }
+
+    // Large numbers in ranges
+    match n {
+        0..9223372036854775807 => most_positive(),
+        _ => near_max()
+    }
+}
+
+// ============================================================================
+// SECTION 16: Practical Examples
+// ============================================================================
+
+fn test_practical_ranges() {
+    // HTTP status codes
+    match status {
+        100..200 => informational(),
+        200..300 => success(),
+        300..400 => redirect(),
+        400..500 => client_error(),
+        500..600 => server_error(),
+        _ => unknown_status()
+    }
+
+    // ASCII character classes
+    match byte {
+        0..32 => control(),
+        32..=126 => printable(),
+        127 => delete(),
+        128..=255 => extended(),
+        _ => invalid()
+    }
+
+    // Port numbers
+    match port {
+        0..1024 => privileged(),
+        1024..49152 => registered(),
+        49152..=65535 => dynamic(),
+        _ => invalid()
+    }
+
+    // Temperature ranges
+    match temp_f {
+        ..32 => freezing(),
+        32..=50 => cold(),
+        50..=70 => mild(),
+        70..=85 => warm(),
+        85.. => hot()
+    }
+}

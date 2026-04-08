@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, context, alias, error
+// @description: Test detection of invalid alias syntax (as without identifier)
+// @expected-error: E018
+
+// Alias requires identifier after 'as'
+type Callback is fn() using [Database as];

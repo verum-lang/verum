@@ -1,0 +1,215 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, debugging, trace, enter, exit, value, assert
+// @description: Advanced tests for meta_trace_* enter/exit/value/assert
+
+// =============================================================================
+// TRACE ENTER/EXIT TESTS
+// =============================================================================
+
+// Test trace enter increases depth
+meta fn test_trace_enter() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    let before = meta_trace_depth();
+    meta_trace_enter("test_function");
+    let during = meta_trace_depth();
+    meta_trace_exit("test_function");
+    let after = meta_trace_depth();
+
+    meta_trace_off();
+
+    during > before && after == before
+}
+
+// Test nested enter/exit
+meta fn test_trace_nested_enter_exit() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_enter("outer");
+    meta_trace_log("in outer");
+    meta_trace_enter("inner");
+    meta_trace_log("in inner");
+    meta_trace_exit("inner");
+    meta_trace_log("back to outer");
+    meta_trace_exit("outer");
+
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "outer") &&
+    text_contains(output, "inner")
+}
+
+// Test enter/exit produces indented output
+meta fn test_trace_indentation() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_enter("level1");
+    meta_trace_log("at level 1");
+    meta_trace_enter("level2");
+    meta_trace_log("at level 2");
+    meta_trace_exit("level2");
+    meta_trace_exit("level1");
+
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_len(output) > 0  // Just verify output was produced
+}
+
+// =============================================================================
+// TRACE VALUE TESTS
+// =============================================================================
+
+// Test trace_value with integer
+meta fn test_trace_value_int() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_value("x", 42);
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "x") && text_contains(output, "42")
+}
+
+// Test trace_value with text
+meta fn test_trace_value_text() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_value("message", "hello");
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "message") && text_contains(output, "hello")
+}
+
+// Test trace_value with bool
+meta fn test_trace_value_bool() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_value("flag", true);
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "flag") && text_contains(output, "true")
+}
+
+// Test trace_value with array
+meta fn test_trace_value_array() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_value("numbers", [1, 2, 3]);
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "numbers")
+}
+
+// =============================================================================
+// TRACE ASSERT TESTS (PASSING CASES)
+// =============================================================================
+
+// Test trace_assert with passing condition
+meta fn test_trace_assert_pass() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_assert(true, "this should pass");
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "ASSERT OK")
+}
+
+// Test trace_assert with computed condition
+meta fn test_trace_assert_computed() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    let x = 5;
+    let y = 3;
+    meta_trace_assert(x > y, "x should be greater than y");
+
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "ASSERT OK")
+}
+
+// =============================================================================
+// COMBINED WORKFLOW TESTS
+// =============================================================================
+
+// Test complete debugging workflow
+meta fn test_complete_workflow() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_enter("calculate");
+    meta_trace_value("input", 10);
+
+    let result = 10 * 2;
+    meta_trace_value("result", result);
+
+    meta_trace_assert(result == 20, "result should be 20");
+
+    meta_trace_exit("calculate");
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "calculate") &&
+    text_contains(output, "input") &&
+    text_contains(output, "result") &&
+    text_contains(output, "ASSERT OK")
+}
+
+// Test multiple enter/exit pairs
+meta fn test_multiple_scopes() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+
+    meta_trace_enter("scope_a");
+    meta_trace_log("in a");
+    meta_trace_exit("scope_a");
+
+    meta_trace_enter("scope_b");
+    meta_trace_log("in b");
+    meta_trace_exit("scope_b");
+
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "scope_a") &&
+    text_contains(output, "scope_b") &&
+    text_contains(output, "in a") &&
+    text_contains(output, "in b")
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Enter/exit tests
+    @const assert(test_trace_enter());
+    @const assert(test_trace_nested_enter_exit());
+    @const assert(test_trace_indentation());
+
+    // Value tests
+    @const assert(test_trace_value_int());
+    @const assert(test_trace_value_text());
+    @const assert(test_trace_value_bool());
+    @const assert(test_trace_value_array());
+
+    // Assert tests (passing)
+    @const assert(test_trace_assert_pass());
+    @const assert(test_trace_assert_computed());
+
+    // Combined workflow tests
+    @const assert(test_complete_workflow());
+    @const assert(test_multiple_scopes());
+}

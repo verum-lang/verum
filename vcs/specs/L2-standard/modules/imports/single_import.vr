@@ -1,0 +1,169 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, imports, single
+
+/// Single link - importing one item at a time.
+/// The basic form: `link module.path.Item;`
+
+// Single imports from standard library
+mount core.collections.Map;
+mount core.collections.List;
+mount core.collections.Set;
+mount core.io.File;
+mount core.io.Read;
+mount core.io.Write;
+
+// Single imports from hypothetical modules
+mount math.trigonometry.sin;
+mount math.trigonometry.cos;
+mount math.constants.PI;
+mount math.constants.E;
+
+// Import types
+mount data.models.User;
+mount data.models.Product;
+mount data.models.Order;
+
+// Import traits
+mount traits.serialization.Serialize;
+mount traits.serialization.Deserialize;
+
+// Import constants
+mount config.settings.MAX_CONNECTIONS;
+mount config.settings.TIMEOUT_MS;
+
+// Import functions - moved below module definition (see utils module below)
+
+module math {
+    pub module trigonometry {
+        pub fn sin(x: Float) -> Float {
+            // Implementation
+            0.0
+        }
+
+        pub fn cos(x: Float) -> Float {
+            // Implementation
+            1.0
+        }
+
+        pub fn tan(x: Float) -> Float {
+            sin(x) / cos(x)
+        }
+    }
+
+    pub module constants {
+        pub const PI: Float = 3.14159265358979;
+        pub const E: Float = 2.71828182845904;
+        pub const TAU: Float = 6.28318530717958;
+    }
+}
+
+module data {
+    pub module models {
+        pub type User is {
+            id: Int,
+            name: Text,
+            email: Text
+        };
+
+        pub type Product is {
+            id: Int,
+            name: Text,
+            price: Float
+        };
+
+        pub type Order is {
+            id: Int,
+            user_id: Int,
+            products: List<Product>,
+            total: Float
+        };
+    }
+}
+
+module traits {
+    pub module serialization {
+        pub type Serialize is protocol {
+            fn to_bytes(&self) -> Bytes;
+            fn to_json(&self) -> Text;
+        }
+
+        pub type Deserialize is protocol {
+            fn from_bytes(data: &Bytes) -> Result<Self, DeserializeError>;
+            fn from_json(json: &Text) -> Result<Self, DeserializeError>;
+        }
+
+        pub type DeserializeError is
+            | InvalidFormat
+            | MissingField(Text)
+            | TypeMismatch { expected: Text, found: Text };
+    }
+}
+
+module config {
+    pub module settings {
+        pub const MAX_CONNECTIONS: Int = 100;
+        pub const TIMEOUT_MS: Int = 30000;
+        pub const BUFFER_SIZE: Int = 8192;
+    }
+}
+
+module utils {
+    pub module helpers {
+        pub fn format_date(timestamp: Int) -> Text {
+            "2024-01-01"  // Simplified
+        }
+
+        pub fn parse_json(input: &Text) -> Result<Map<Text, Text>, Text> {
+            Ok(Map.new())  // Simplified
+        }
+    }
+}
+
+// mount utils.helpers.format_date;  // Commented: local module forward-ref not resolved
+// mount utils.helpers.parse_json;
+
+fn main() {
+    // Use single-imported items
+
+    // Types
+    let user = User { id: 1, name: "Alice", email: "alice@example.com" };
+    let product = Product { id: 100, name: "Widget", price: 29.99 };
+
+    // Constants
+    let circumference = 2.0 * PI * 5.0;
+    let timeout = TIMEOUT_MS;
+
+    // Functions
+    let angle = PI / 4.0;
+    let sine_value = sin(angle);
+    let cosine_value = cos(angle);
+
+    // let formatted = format_date(1704067200);  // Requires utils.helpers mount
+
+    // Collections (from std)
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("key", 42);
+
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+
+    let mut set: Set<Text> = Set.new();
+    set.insert("unique");
+
+    // Using traits
+    implement Serialize for User {
+        fn to_bytes(&self) -> Bytes {
+            Bytes.from_text(&self.to_json())
+        }
+
+        fn to_json(&self) -> Text {
+            format("{{\"id\":{},\"name\":\"{}\",\"email\":\"{}\"}}",
+                    self.id, self.name, self.email)
+        }
+    }
+
+    let user_json = user.to_json();
+}

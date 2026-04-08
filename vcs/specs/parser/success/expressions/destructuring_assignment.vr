@@ -1,0 +1,246 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, destructuring, assignment, unified-destructuring
+// @description: Comprehensive tests for destructuring assignment expressions
+// Spec: docs/architecture/new-features.md - Cluster 1: Unified Destructuring System
+
+// =============================================================================
+// Tuple Destructuring Assignment
+// =============================================================================
+
+fn test_tuple_destructuring() {
+    let mut a = 1;
+    let mut b = 2;
+
+    // Simple tuple swap
+    (a, b) = (b, a);
+
+    // Three-element tuple
+    let mut x = 0;
+    let mut y = 0;
+    let mut z = 0;
+    (x, y, z) = (1, 2, 3);
+
+    // With function return
+    (a, b) = get_pair();
+
+    // With expressions on right side
+    (x, y) = (a + 1, b * 2);
+
+    // Nested tuple access
+    (a, b) = point.coords;
+}
+
+// =============================================================================
+// Array Destructuring Assignment
+// =============================================================================
+
+fn test_array_destructuring() {
+    let mut first = 0;
+    let mut second = 0;
+
+    // Simple array destructuring
+    [first, second] = get_pair_array();
+
+    // With rest pattern
+    let mut head = 0;
+    let mut tail: List<Int> = List::new();
+    [head, ..tail] = items;
+
+    // Extract first two elements
+    [first, second, ..] = many_items;
+
+    // Single element extraction
+    let mut only = 0;
+    [only] = single_item_array;
+}
+
+// =============================================================================
+// Record Destructuring Assignment
+// =============================================================================
+
+fn test_record_destructuring() {
+    let mut x = 0;
+    let mut y = 0;
+
+    // Simple record destructuring
+    Point { x, y } = compute_point();
+
+    // With field renaming
+    let mut px = 0;
+    let mut py = 0;
+    Point { x: px, y: py } = another_point();
+
+    // With rest pattern (ignore remaining fields)
+    Config { timeout, .. } = load_config();
+
+    // Complex type
+    let mut name = "";
+    let mut age = 0;
+    Person { name, age } = get_person();
+}
+
+// =============================================================================
+// Compound Destructuring Assignment
+// =============================================================================
+
+fn test_compound_destructuring() {
+    let mut x = 10;
+    let mut y = 20;
+
+    // Add to both coordinates
+    (x, y) += (5, 10);
+
+    // Subtract from both
+    (x, y) -= (2, 3);
+
+    // Multiply both
+    (x, y) *= (2, 2);
+
+    // Array compound
+    let mut a = 1;
+    let mut b = 2;
+    [a, b] += [10, 20];
+
+    // Bitwise compound
+    let mut flags1 = 0xFF;
+    let mut flags2 = 0x0F;
+    (flags1, flags2) &= (0xF0, 0xFF);
+    (flags1, flags2) |= (0x01, 0x02);
+
+    // Shift compound
+    (a, b) <<= (1, 2);
+    (a, b) >>= (1, 1);
+}
+
+// =============================================================================
+// Nested Destructuring Assignment
+// =============================================================================
+
+fn test_nested_destructuring() {
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+
+    // Nested tuples
+    ((a, b), c) = nested_tuple();
+
+    // Deeply nested
+    let mut d = 0;
+    (((a, b), c), d) = very_nested();
+
+    // Mixed nesting
+    let mut x = 0;
+    let mut y = 0;
+    let mut z = 0;
+    (Point { x, y }, z) = get_point_with_z();
+
+    // Array in tuple
+    let mut first = 0;
+    let mut second = 0;
+    let mut third = 0;
+    ([first, second], third) = array_and_value();
+
+    // Tuple in array - extract from pair array
+    let mut p1 = (0, 0);
+    let mut p2 = (0, 0);
+    [p1, p2] = get_point_pairs();
+}
+
+// =============================================================================
+// Destructuring in Expressions
+// =============================================================================
+
+fn test_destructuring_in_expressions() {
+    let mut x = 0;
+    let mut y = 0;
+
+    // In block expression
+    let result = {
+        (x, y) = (1, 2);
+        x + y
+    };
+
+    // Chained with other operations
+    let mut a = 0;
+    let mut b = 0;
+    (a, b) = (1, 2);
+    let sum = a + b;
+
+    // In conditional block
+    if condition {
+        (x, y) = (10, 20);
+    } else {
+        (x, y) = (0, 0);
+    };
+
+    // In loop
+    let mut i = 0;
+    let mut j = 0;
+    while i < 10 {
+        (i, j) = (i + 1, j + i);
+    };
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+fn test_destructuring_edge_cases() {
+    // Single element tuple (with trailing comma)
+    let mut single = 0;
+    (single,) = (42,);
+
+    // Empty record destructuring (just rest)
+    Config { .. } = get_config();
+
+    // Parenthesized destructuring target
+    let mut a = 0;
+    let mut b = 0;
+    ((a, b)) = ((1, 2));
+
+    // With type annotations on variables (declared earlier)
+    let mut typed_a: Int = 0;
+    let mut typed_b: Float = 0.0;
+    (typed_a, typed_b) = (42, 3.14);
+
+    // Destructuring mutable references
+    let mut ref_a = &mut 0;
+    let mut ref_b = &mut 0;
+    (ref_a, ref_b) = get_mut_refs();
+}
+
+// =============================================================================
+// Real-world Patterns
+// =============================================================================
+
+fn test_real_world_patterns() {
+    // Coordinate transformation
+    let mut x = 0.0;
+    let mut y = 0.0;
+    (x, y) = rotate_point(x, y, angle);
+
+    // State update
+    let mut state = State::new();
+    let mut events: List<Event> = List::new();
+    (state, events) = update(state, action);
+
+    // Parse result handling
+    let mut value = 0;
+    let mut remaining = "";
+    (value, remaining) = parse_int(input);
+
+    // Multiple return values
+    let mut min = 0;
+    let mut max = 0;
+    (min, max) = find_min_max(data);
+
+    // Swap in sorting algorithm
+    let mut i = 0;
+    let mut j = 0;
+    while i < j {
+        (items[i], items[j]) = (items[j], items[i]);
+        i += 1;
+        j -= 1;
+    };
+}

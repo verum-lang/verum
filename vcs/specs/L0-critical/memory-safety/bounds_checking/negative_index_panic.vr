@@ -1,0 +1,13 @@
+// @test: run-interpreter-panic
+// @expected-panic: Index out of bounds
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-checking, negative-index, panic
+// @description: Tests that negative list indexing causes a controlled panic
+
+fn main() {
+    let items = [1, 2, 3, 4, 5];
+    let neg_idx = -1;
+    let val = items[neg_idx];
+    print(f"{val}");
+}

@@ -1,0 +1,126 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, expression, tree, variants
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests expression tree evaluation using variant types.
+
+type Op is Plus | Minus | Times | Divide;
+
+fn apply_op(op: Op, a: Int, b: Int) -> Int {
+    match op {
+        Plus => a + b,
+        Minus => a - b,
+        Times => a * b,
+        Divide => if b != 0 { a / b } else { 0 },
+    }
+}
+
+fn op_name(op: Op) -> Text {
+    match op {
+        Plus => "+",
+        Minus => "-",
+        Times => "*",
+        Divide => "/",
+    }
+}
+
+type Token is TNum(Int) | TOp(Op);
+
+fn test_basic_eval() {
+    assert_eq(apply_op(Plus, 10, 20), 30);
+    assert_eq(apply_op(Minus, 30, 12), 18);
+    assert_eq(apply_op(Times, 7, 6), 42);
+    assert_eq(apply_op(Divide, 100, 3), 33);
+    assert_eq(apply_op(Divide, 10, 0), 0);
+    print("basic_eval: ok");
+}
+
+fn test_postfix_eval() {
+    // Evaluate: 3 4 + 5 * 2 - = ((3+4)*5)-2 = 33
+    // Using stack-based evaluation
+    let mut stack_arr = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sp = 0;
+
+    // Push 3
+    stack_arr[sp] = 3; sp = sp + 1;
+    // Push 4
+    stack_arr[sp] = 4; sp = sp + 1;
+    // Apply +
+    sp = sp - 1; let b1 = stack_arr[sp];
+    sp = sp - 1; let a1 = stack_arr[sp];
+    stack_arr[sp] = apply_op(Plus, a1, b1); sp = sp + 1;
+    // Push 5
+    stack_arr[sp] = 5; sp = sp + 1;
+    // Apply *
+    sp = sp - 1; let b2 = stack_arr[sp];
+    sp = sp - 1; let a2 = stack_arr[sp];
+    stack_arr[sp] = apply_op(Times, a2, b2); sp = sp + 1;
+    // Push 2
+    stack_arr[sp] = 2; sp = sp + 1;
+    // Apply -
+    sp = sp - 1; let b3 = stack_arr[sp];
+    sp = sp - 1; let a3 = stack_arr[sp];
+    stack_arr[sp] = apply_op(Minus, a3, b3); sp = sp + 1;
+
+    sp = sp - 1;
+    assert_eq(stack_arr[sp], 33);
+    print("postfix_eval: ok");
+}
+
+fn test_evaluate_all_ops() {
+    // Evaluate 10 op 3 for all operations
+    let a = 10;
+    let b = 3;
+    let results = [
+        apply_op(Plus, a, b),
+        apply_op(Minus, a, b),
+        apply_op(Times, a, b),
+        apply_op(Divide, a, b),
+    ];
+    assert_eq(results[0], 13);
+    assert_eq(results[1], 7);
+    assert_eq(results[2], 30);
+    assert_eq(results[3], 3);
+    print("evaluate_all_ops: ok");
+}
+
+fn test_chained_operations() {
+    // Evaluate: ((1 + 2) * (3 + 4)) - (5 * 6) = 21 - 30 = -9
+    let left = apply_op(Times, apply_op(Plus, 1, 2), apply_op(Plus, 3, 4));
+    let right = apply_op(Times, 5, 6);
+    let result = apply_op(Minus, left, right);
+    assert_eq(left, 21);
+    assert_eq(right, 30);
+    assert_eq(result, -9);
+    print("chained_operations: ok");
+}
+
+fn test_expression_loop() {
+    // Apply alternating +3 and *2, starting from 1, 10 times
+    let mut val = 1;
+    let mut i = 0;
+    while i < 10 {
+        if i % 2 == 0 {
+            val = apply_op(Plus, val, 3);
+        } else {
+            val = apply_op(Times, val, 2);
+        }
+        i = i + 1;
+    }
+    // 1 → +3=4 → *2=8 → +3=11 → *2=22 → +3=25 → *2=50 → +3=53 → *2=106 → +3=109 → *2=218
+    assert_eq(val, 218);
+    print("expression_loop: ok");
+}
+
+fn main() -> Int {
+    test_basic_eval();
+    test_postfix_eval();
+    test_evaluate_all_ops();
+    test_chained_operations();
+    test_expression_loop();
+    print("[OK] 434_interp_expression_tree");
+    0
+}

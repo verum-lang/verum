@@ -1,0 +1,284 @@
+// =============================================================================
+// vcs/specs/stdlib/meta/lift_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L3
+// @tags: stdlib, meta, lift, staged, quote, metaprogramming
+// @note: Lift operator — types and imports resolve for typecheck
+// @description: Comprehensive tests for the lift operator which provides syntactic
+//               sugar for stage escapes in staged metaprogramming.
+//
+// The lift(expr) operator is equivalent to $(stage current){ expr }, allowing
+// compile-time values to be "lifted" into generated code at the current stage.
+//
+// Coverage:
+// - Basic lift of literals
+// - Lift of variables
+// - Lift of computed expressions
+// - Lift in nested quotes
+// - Lift with different types
+// - Lift interaction with stage escapes
+// - Multiple lifts in single quote
+//
+// Test Strategy:
+// - Verify generated code produces correct runtime values
+// - Test various expression types within lift
+// - Test lift at different nesting levels
+// - Compare lift semantics with explicit stage escape
+// =============================================================================
+
+module test.stdlib.meta.lift_test;
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Basic Lift Tests
+// =============================================================================
+
+/// Test lifting a literal value
+meta fn lift_literal_42() -> Ast {
+    let value = 42;
+    quote {
+        lift(value)
+    }
+}
+
+@test
+fn test_lift_literal() {
+    let result = @lift_literal_42();
+    assert_eq(result, 42);
+    print("lift_literal test passed");
+}
+
+/// Test lifting a variable
+meta fn lift_variable(x: Int) -> Ast {
+    quote {
+        lift(x) + 1
+    }
+}
+
+@test
+fn test_lift_variable() {
+    let result = @lift_variable(10);
+    assert_eq(result, 11);
+    print("lift_variable test passed");
+}
+
+/// Test lifting a computed expression
+meta fn lift_computation() -> Ast {
+    let a = 10;
+    let b = 5;
+    let computed = a * b + 3;
+    quote {
+        lift(computed)
+    }
+}
+
+@test
+fn test_lift_computation() {
+    let result = @lift_computation();
+    assert_eq(result, 53);
+    print("lift_computation test passed");
+}
+
+// =============================================================================
+// Type-Specific Lift Tests
+// =============================================================================
+
+/// Test lifting a string value
+meta fn lift_text_value(msg: Text) -> Ast {
+    quote {
+        lift(msg)
+    }
+}
+
+@test
+fn test_lift_string() {
+    let result = @lift_text_value("hello");
+    assert_eq(result, "hello");
+    print("lift_string test passed");
+}
+
+// =============================================================================
+// Multiple Lifts Tests
+// =============================================================================
+
+/// Test multiple lifts in the same quote block
+meta fn lift_multiple_values() -> Ast {
+    let x = 10;
+    let y = 20;
+    let z = 30;
+    quote {
+        lift(x) + lift(y) + lift(z)
+    }
+}
+
+@test
+fn test_lift_multiple() {
+    let result = @lift_multiple_values();
+    assert_eq(result, 60);
+    print("lift_multiple test passed");
+}
+
+// =============================================================================
+// Nested Quote Tests
+// =============================================================================
+
+/// Test lift in nested quote (multi-stage)
+meta(2) fn lift_in_nested_quote() -> Ast {
+    let outer_value = 100;
+    quote(1) {
+        let inner_value = lift(outer_value);
+        quote {
+            inner_value * 2
+        }
+    }
+}
+
+@test
+fn test_lift_nested() {
+    let result = @lift_in_nested_quote();
+    assert_eq(result, 200);
+    print("lift_nested test passed");
+}
+
+// =============================================================================
+// Lift in Complex Expressions
+// =============================================================================
+
+/// Test lift as part of a larger expression
+meta fn lift_in_binary_op() -> Ast {
+    let multiplier = 3;
+    quote {
+        (5 + lift(multiplier)) * 2
+    }
+}
+
+@test
+fn test_lift_in_expression() {
+    let result = @lift_in_binary_op();
+    assert_eq(result, 16);  // (5 + 3) * 2 = 16
+    print("lift_in_expression test passed");
+}
+
+/// Test lift with a function call at meta-time
+meta fn lift_with_fn() -> Ast {
+    fn double(n: Int) -> Int { n * 2 }
+    let doubled = double(21);
+    quote {
+        lift(doubled)
+    }
+}
+
+@test
+fn test_lift_with_function_call() {
+    let result = @lift_with_fn();
+    assert_eq(result, 42);
+    print("lift_with_function_call test passed");
+}
+
+// =============================================================================
+// Lift with Structured Data
+// =============================================================================
+
+/// Test lifting a record value
+type Point is { x: Int, y: Int };
+
+meta fn lift_point() -> Ast {
+    let p = Point { x: 10, y: 20 };
+    quote {
+        let point = lift(p);
+        point.x + point.y
+    }
+}
+
+@test
+fn test_lift_record() {
+    let result = @lift_point();
+    assert_eq(result, 30);
+    print("lift_record test passed");
+}
+
+/// Test lifting a list
+meta fn lift_list_values() -> Ast {
+    let nums = [1, 2, 3, 4, 5];
+    let sum = nums.iter().sum();
+    quote {
+        lift(sum)
+    }
+}
+
+@test
+fn test_lift_list() {
+    let result = @lift_list_values();
+    assert_eq(result, 15);
+    print("lift_list test passed");
+}
+
+// =============================================================================
+// Equivalence Tests
+// =============================================================================
+
+/// Demonstrate that lift(x) is equivalent to $(stage current){ x }
+meta fn using_lift(val: Int) -> Ast {
+    quote {
+        lift(val)
+    }
+}
+
+meta fn using_stage_escape(val: Int) -> Ast {
+    quote {
+        $(stage 0){ val }
+    }
+}
+
+@test
+fn test_lift_equivalence_to_stage_escape() {
+    // Both should produce the same result
+    let lift_result = @using_lift(42);
+    let escape_result = @using_stage_escape(42);
+
+    assert_eq(lift_result, escape_result);
+    assert_eq(lift_result, 42);
+
+    print("lift_equivalence test passed");
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+/// Test lift of zero
+meta fn lift_zero() -> Ast {
+    let zero = 0;
+    quote { lift(zero) }
+}
+
+/// Test lift of negative number
+meta fn lift_negative() -> Ast {
+    let neg = -42;
+    quote { lift(neg) }
+}
+
+/// Test lift of boolean
+meta fn lift_bool(flag: Bool) -> Ast {
+    quote {
+        if lift(flag) { 1 } else { 0 }
+    }
+}
+
+@test
+fn test_edge_cases() {
+    assert_eq(@lift_zero(), 0);
+    assert_eq(@lift_negative(), -42);
+    assert_eq(@lift_bool(true), 1);
+    assert_eq(@lift_bool(false), 0);
+    print("edge_cases test passed");
+}

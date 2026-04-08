@@ -1,0 +1,208 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, paths, relative, super
+
+/// Relative paths - paths that navigate from the current module.
+/// The form: `super.module.Item` or `super.super.module.Item`
+///
+/// Relative paths use `super` to navigate to parent modules,
+/// allowing flexible module organization and refactoring.
+
+module framework {
+    pub module core {
+        pub type Error is
+    | NotFound
+    | InvalidInput
+    | InternalError(Text);
+
+        pub type Context is {
+            request_id: Text,
+            user_id: Maybe<Int>,
+        };
+
+        pub const VERSION: Text = "1.0.0";
+
+        pub fn create_context() -> Context {
+            Context {
+                request_id: "ctx-12345",
+                user_id: None
+            }
+        }
+
+        pub module types {
+            // Use super to access parent module items
+            pub type Request is {
+                context: super.Context,
+                path: Text,
+                method: Text
+            };
+
+            pub type Response is {
+                status: Int,
+                body: Text,
+                // Reference parent's Context type via super
+                context: super.Context
+            };
+
+            pub fn make_request(path: Text, method: Text) -> Request {
+                // Use super to call parent function
+                let ctx = super.create_context();
+                Request { context: ctx, path, method }
+            }
+
+            pub fn ok_response(body: Text, ctx: super.Context) -> Response {
+                Response { status: 200, body, context: ctx }
+            }
+
+            pub fn error_response(err: super.Error, ctx: super.Context) -> Response {
+                let status = match err {
+                    NotFound => 404,
+                    InvalidInput => 400,
+                    InternalError(_) => 500
+                };
+                Response { status, body: "error", context: ctx }
+            }
+
+            pub module nested {
+                // Double super to reach grandparent (core)
+                pub fn get_version() -> Text {
+                    super.super.VERSION.clone()
+                }
+
+                pub fn create_error_response(msg: Text) -> super.Response {
+                    // Access sibling through super
+                    let ctx = super.super.create_context();
+                    let err = super.super.Error.InternalError(msg);
+                    super.error_response(err, ctx)
+                }
+            }
+        }
+    }
+
+    pub module router {
+        // Use super to access sibling module
+        mount super.core.types.{Request, Response};
+
+        pub type Router is {
+            routes: List<Route>
+        };
+
+        pub type Route is {
+            path: Text,
+            handler: fn(Request) -> Response
+        };
+
+        pub fn new_router() -> Router {
+            Router { routes: List.new() }
+        }
+
+        pub fn add_route(router: &mut Router, path: Text, handler: fn(Request) -> Response) {
+            router.routes.push(Route { path, handler });
+        }
+
+        pub fn handle(router: &Router, req: Request) -> Response {
+            for route in &router.routes {
+                if route.path == req.path {
+                    return (route.handler)(req);
+                }
+            }
+            // Use super to access core.Error
+            let ctx = super.core.create_context();
+            super.core.types.error_response(super.core.Error.NotFound, ctx)
+        }
+    }
+
+    pub module handlers {
+        mount super.core.types.{Request, Response, ok_response, error_response};
+        mount super.core.{Error, Context, create_context};
+
+        pub fn home_handler(req: Request) -> Response {
+            ok_response("Welcome!", req.context)
+        }
+
+        pub fn user_handler(req: Request) -> Response {
+            // Access sibling module via super
+            match super.services.user.get_user(1) {
+                Some(user) => {
+                    ok_response(user.name, req.context)
+                },
+                None => error_response(Error.NotFound, req.context)
+            }
+        }
+    }
+
+    pub module services {
+        pub module user {
+            pub type User is {
+                id: Int,
+                name: Text,
+                is_admin: Bool
+            };
+
+            pub fn get_user(id: Int) -> Maybe<User> {
+                if id > 0 {
+                    Some(User { id, name: "Test User", is_admin: id == 1 })
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+fn main() {
+    mount framework.core.types.{Request, Response, make_request, ok_response};
+    mount framework.router.{new_router, add_route, handle};
+    mount framework.handlers.home_handler;
+
+    // Create router
+    let mut router = new_router();
+    add_route(&mut router, "/", home_handler);
+
+    // Create request
+    let req = make_request("/", "GET");
+
+    // Handle request
+    let response = handle(&router, req);
+
+    // Access nested functionality that uses super extensively
+    mount framework.core.types.nested.{get_version, create_error_response};
+
+    let version = get_version();
+    let error_resp = create_error_response("Something went wrong");
+}
+
+// Demonstrate super in trait implementations
+module trait_super_example {
+    pub module base {
+        pub type Handler is protocol {
+            fn handle(&self) -> Text;
+        };
+
+        pub type DefaultHandler is {};
+    }
+
+    pub module impl_module {
+        mount super.base.Handler;
+
+        pub type MyHandler is {
+            name: Text
+        };
+
+        // Implement trait accessed via super
+        implement Handler for MyHandler {
+            fn handle(&self) -> Text {
+                format("Handled by {}", self.name)
+            }
+        }
+
+        // Also implement for parent's type
+        mount super.base.DefaultHandler;
+        implement Handler for DefaultHandler {
+            fn handle(&self) -> Text {
+                "Default handler"
+            }
+        }
+    }
+}

@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @tier: 2
+// @level: L1
+// @tags: types, collections, map
+// @timeout: 30000
+// @description: Tests Map<K, V> collection type operations
+
+fn main() -> Int {
+    // Map creation and insert
+    let mut ages: Map<Text, Int> = Map.new();
+    ages.insert("alice", 30);
+    ages.insert("bob", 25);
+    ages.insert("charlie", 35);
+
+    // len
+    if (ages.len() != 3) { print(f"FAIL: len={ages.len()}"); return 1; }
+
+    // contains_key
+    if (!ages.contains_key("alice")) { print("FAIL: contains_key alice"); return 1; }
+    if (ages.contains_key("unknown")) { print("FAIL: contains_key unknown"); return 1; }
+
+    // insert more, update existing
+    ages.insert("alice", 31);
+    if (ages.len() != 3) { print(f"FAIL: len after update={ages.len()}"); return 1; }
+
+    // remove
+    ages.remove("charlie");
+    if (ages.len() != 2) { print(f"FAIL: len after remove={ages.len()}"); return 1; }
+    if (ages.contains_key("charlie")) { print("FAIL: charlie still exists"); return 1; }
+
+    // Map with integer keys
+    let mut index_map: Map<Int, Text> = Map.new();
+    index_map.insert(1, "one");
+    index_map.insert(2, "two");
+    index_map.insert(3, "three");
+    if (index_map.len() != 3) { print(f"FAIL: index_map len={index_map.len()}"); return 1; }
+    if (!index_map.contains_key(2)) { print("FAIL: index_map contains 2"); return 1; }
+
+    // Multiple inserts and removes
+    let mut m: Map<Text, Int> = Map.new();
+    let mut i = 0;
+    while i < 10 {
+        m.insert(f"key_{i}", i * 10);
+        i = i + 1;
+    }
+    if (m.len() != 10) { print(f"FAIL: bulk insert len={m.len()}"); return 1; }
+
+    m.remove("key_5");
+    m.remove("key_7");
+    if (m.len() != 8) { print(f"FAIL: bulk remove len={m.len()}"); return 1; }
+
+    print("Map tests passed!");
+    0
+}

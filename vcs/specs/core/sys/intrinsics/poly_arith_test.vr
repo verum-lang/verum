@@ -1,0 +1,39 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @description: Test polymorphic arithmetic and overflow intrinsics
+
+module test.stdlib.sys.intrinsics.poly_arith_test;
+
+mount core.intrinsics.{add_overflow, sub_overflow, mul_overflow};
+
+fn main() {
+    // Test integer addition with overflow detection
+    let (add_result, add_overflow_flag) = add_overflow(10, 20);
+    assert(add_result == 30);
+    assert(!add_overflow_flag);
+
+    // Test integer subtraction with overflow detection
+    let (sub_result, sub_overflow_flag) = sub_overflow(30, 10);
+    assert(sub_result == 20);
+    assert(!sub_overflow_flag);
+
+    // Test integer multiplication with overflow detection
+    let (mul_result, mul_overflow_flag) = mul_overflow(6, 7);
+    assert(mul_result == 42);
+    assert(!mul_overflow_flag);
+
+    // Test a case that causes overflow (not testing actual overflow on small numbers)
+    // This verifies the tuple unpacking works correctly
+    let (zero_result, zero_flag) = add_overflow(0, 0);
+    assert(zero_result == 0);
+    assert(!zero_flag);
+
+    // Test negative numbers
+    let (neg_result, neg_flag) = add_overflow(-5, 10);
+    assert(neg_result == 5);
+    assert(!neg_flag);
+
+    // Print success indicator using simple print
+    print("Polymorphic arithmetic tests passed");
+}

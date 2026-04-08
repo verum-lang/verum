@@ -1,0 +1,138 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, staged, stage-checking, basic
+
+/// Basic Stage Level Tests
+///
+/// Validates that stage levels are correctly tracked for functions
+/// and that valid stage patterns compile without errors.
+/// Spec: 17-meta-system.md Section 2.4 - Stage Coherence Rule
+
+// ============================================================
+// STAGE 0: RUNTIME FUNCTIONS
+// ============================================================
+
+/// Runtime function (stage 0) - executes at runtime
+fn runtime_add(x: Int, y: Int) -> Int {
+    x + y
+}
+
+/// Another runtime function
+fn runtime_multiply(x: Int, y: Int) -> Int {
+    x * y
+}
+
+/// Runtime functions can call other runtime functions
+fn runtime_combined(a: Int, b: Int, c: Int) -> Int {
+    runtime_add(a, runtime_multiply(b, c))
+}
+
+// ============================================================
+// STAGE 1: META FUNCTIONS (compile-time)
+// ============================================================
+
+/// Meta function (stage 1) - executes at compile time
+meta fn meta_double(x: Int) -> Int {
+    x * 2
+}
+
+/// Meta function calling another meta function
+meta fn meta_quadruple(x: Int) -> Int {
+    meta_double(meta_double(x))
+}
+
+/// Meta function with conditional logic
+meta fn meta_abs(x: Int) -> Int {
+    if x < 0 { 0 - x }
+    else { x }
+}
+
+// Verify meta functions work in const context
+const DOUBLED: Int = meta_double(21);
+const QUADRUPLED: Int = meta_quadruple(10);
+const ABSOLUTE: Int = meta_abs(-42);
+
+// ============================================================
+// STAGE 1 USING QUOTE TO GENERATE STAGE 0 CODE
+// ============================================================
+
+/// Meta function that generates runtime code via quote
+/// Stage 1 can generate Stage 0 code - this is the essence of staged metaprogramming
+meta fn generate_increment() -> @Expr {
+    quote {
+        fn increment(x: Int) -> Int {
+            x + 1
+        }
+    }
+}
+
+/// Meta function using quote with splicing
+meta fn generate_add_n(n: Int) -> @Expr {
+    quote {
+        fn add_n(x: Int) -> Int {
+            x + $(n)
+        }
+    }
+}
+
+// ============================================================
+// RECURSIVE META FUNCTIONS (same stage)
+// ============================================================
+
+/// Recursive meta function - calls itself at same stage level
+@allow(unbounded_recursion)
+meta fn meta_factorial(n: UInt64) -> UInt64 {
+    if n <= 1 { 1 }
+    else { n * meta_factorial(n - 1) }
+}
+
+@allow(unbounded_recursion)
+meta fn meta_fibonacci(n: UInt64) -> UInt64 {
+    if n <= 1 { n }
+    else { meta_fibonacci(n - 1) + meta_fibonacci(n - 2) }
+}
+
+const FACT_6: UInt64 = meta_factorial(6);   // 720
+const FIB_10: UInt64 = meta_fibonacci(10);  // 55
+
+// ============================================================
+// GENERIC META FUNCTIONS
+// ============================================================
+
+/// Generic meta function at stage 1
+meta fn meta_identity<T>(x: T) -> T {
+    x
+}
+
+/// Generic meta function with constraint
+meta fn meta_compare<T: Eq>(a: T, b: T) -> Bool {
+    a == b
+}
+
+const ID_RESULT: Int = meta_identity(42);
+const COMPARE_RESULT: Bool = meta_compare(10, 10);
+
+// ============================================================
+// HIGHER-ORDER META FUNCTIONS
+// ============================================================
+
+/// Meta function taking another meta function as parameter
+meta fn meta_apply_twice<T>(f: fn(T) -> T, x: T) -> T {
+    f(f(x))
+}
+
+const TWICE_DOUBLED: Int = meta_apply_twice(meta_double, 5);  // 20
+
+fn main() {
+    // Runtime calls work as expected
+    let result = runtime_combined(1, 2, 3);
+    assert(result == 7);
+
+    // Const values computed at compile time
+    assert(DOUBLED == 42);
+    assert(QUADRUPLED == 40);
+    assert(ABSOLUTE == 42);
+    assert(FACT_6 == 720);
+    assert(FIB_10 == 55);
+}

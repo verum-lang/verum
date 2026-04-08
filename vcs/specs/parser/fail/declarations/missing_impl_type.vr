@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, impl, error
+// @description: Test missing impl type detection
+// @expected-error: E054
+
+implement {
+    fn foo(&self) {}
+}
+
+implement for Int {}
+
+implement<T> { fn bar() {} }

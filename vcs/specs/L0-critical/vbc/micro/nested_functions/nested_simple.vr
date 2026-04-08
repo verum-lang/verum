@@ -1,0 +1,15 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn inner() -> Int {
+        return 42;
+    }
+
+    let result = inner();
+    assert_eq(result, 42);
+}

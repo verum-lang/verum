@@ -1,0 +1,89 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: modules, declarations, basic
+
+/// Basic module declaration tests.
+/// Verifies fundamental module syntax is parsed correctly.
+
+// Simple module with items
+module math {
+    pub fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    pub fn sub(a: Int, b: Int) -> Int {
+        a - b
+    }
+
+    pub const PI: Float = 3.14159;
+}
+
+// Nested modules
+module outer {
+    pub module inner {
+        pub fn hello() -> Text {
+            "Hello from inner"
+        }
+
+        pub module deep {
+            pub fn world() -> Text {
+                "Hello from deep"
+            }
+        }
+    }
+}
+
+// Module with type definitions
+module types {
+    pub type Point is {
+        x: Float,
+        y: Float
+    };
+
+    pub type Color is
+        | Red
+        | Green
+        | Blue
+        | Custom { r: Int, g: Int, b: Int };
+
+    pub type Maybe<T> is
+        | None
+        | Some(T);
+}
+
+// Module with protocols
+module protocols {
+    pub type Printable is protocol {
+        fn to_string(&self) -> Text;
+    };
+
+    pub type Comparable<T> is protocol {
+        fn compare(&self, other: &T) -> Int;
+    };
+}
+
+// Empty module (valid)
+module empty {}
+
+// Module with visibility modifiers
+module visibility_test {
+    // Private by default
+    fn private_fn() -> Int { 42 }
+
+    // Public
+    pub fn public_fn() -> Int { 100 }
+
+    // Public within cog
+    pub(cog) fn cog_fn() -> Int { 200 }
+
+    // Public to parent
+    pub(super) fn super_fn() -> Int { 300 }
+}
+
+fn main() -> Int {
+    // Note: Module access from main requires module resolution integration
+    // which is not yet complete. This test verifies parsing only.
+    // Module usage tests are in separate typecheck-pass tests when resolution is ready.
+    0
+}

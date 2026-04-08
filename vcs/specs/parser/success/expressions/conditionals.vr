@@ -1,0 +1,421 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, conditionals, if, match
+// @description: Test if and match expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// IF EXPRESSIONS (Section 2.12 - if_expr)
+// =============================================================================
+
+fn test_basic_if() {
+    let a = if true { 1 } else { 2 };
+    let b = if condition { value };
+    let c = if x > 0 { "positive" } else { "non-positive" };
+}
+
+fn test_if_else_chain() {
+    let a = if x > 0 {
+        "positive"
+    } else if x < 0 {
+        "negative"
+    } else {
+        "zero"
+    };
+
+    let b = if a == 1 {
+        "one"
+    } else if a == 2 {
+        "two"
+    } else if a == 3 {
+        "three"
+    } else if a == 4 {
+        "four"
+    } else {
+        "other"
+    };
+}
+
+fn test_if_without_else() {
+    // Returns unit type
+    if condition {
+        do_something();
+    }
+
+    if x > threshold {
+        alert();
+        log_warning();
+    }
+}
+
+fn test_nested_if() {
+    let a = if outer {
+        if inner {
+            1
+        } else {
+            2
+        }
+    } else {
+        3
+    };
+}
+
+// =============================================================================
+// IF-LET CONDITIONS (Section 2.12 - let_condition)
+// =============================================================================
+
+fn test_if_let() {
+    if let Some(x) = maybe_value {
+        use(x);
+    }
+
+    if let Ok(result) = try_compute() {
+        process(result);
+    }
+
+    let a = if let Some(v) = option {
+        v
+    } else {
+        default
+    };
+}
+
+fn test_if_let_patterns() {
+    if let (a, b) = pair {
+        combine(a, b);
+    }
+
+    if let Point { x, y } = point {
+        draw(x, y);
+    }
+
+    if let [first, second, ..rest] = slice {
+        process(first, second);
+    }
+}
+
+fn test_if_let_chained() {
+    // Multiple let conditions with &&
+    if let Some(x) = opt1 && let Some(y) = opt2 {
+        combine(x, y);
+    }
+
+    // Let condition followed by expression condition
+    // Note: Expression conditions must come last in the chain
+    if let Some(a) = first && a > 0 {
+        use_positive(a);
+    }
+
+    // Multiple let conditions
+    if let Ok(data) = fetch() && let Some(value) = data.get() {
+        process(value);
+    }
+}
+
+fn test_if_condition_combinations() {
+    // Expression condition
+    if x > 0 && y > 0 {
+        quadrant_one();
+    }
+
+    // Let condition followed by expression
+    if let Some(x) = opt && x > threshold {
+        handle(x);
+    }
+
+    // Multiple conditions
+    if condition1 && condition2 && condition3 {
+        all_true();
+    }
+}
+
+// =============================================================================
+// MATCH EXPRESSIONS (Section 2.12 - match_expr)
+// =============================================================================
+
+fn test_basic_match() {
+    let a = match x {
+        0 => "zero",
+        1 => "one",
+        _ => "other"
+    };
+}
+
+fn test_match_with_patterns() {
+    let a = match value {
+        Some(x) => x,
+        None => default
+    };
+
+    let b = match result {
+        Ok(v) => v,
+        Err(e) => handle_error(e)
+    };
+
+    let c = match point {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x: 0, y } => "y-axis",
+        Point { x, y: 0 } => "x-axis",
+        Point { x, y } => "other"
+    };
+}
+
+fn test_match_with_or_patterns() {
+    let a = match n {
+        0 | 1 => "binary",
+        2 | 3 | 5 | 7 => "small prime",
+        _ => "other"
+    };
+
+    let b = match opt {
+        Some(0) | Some(1) => "zero or one",
+        Some(n) => "other number",
+        None => "nothing"
+    };
+}
+
+fn test_match_with_guards() {
+    // Using 'if' guard
+    let a = match n {
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        _ => "zero"
+    };
+
+    // Using 'where' guard (Verum-style)
+    let b = match n {
+        x where x > 100 => "large",
+        x where x > 10 => "medium",
+        _ => "small"
+    };
+
+    // Complex guards
+    let c = match value {
+        Some(x) if x > 0 && x < 100 => "in range",
+        Some(x) if is_prime(x) => "prime",
+        Some(_) => "other",
+        None => "none"
+    };
+}
+
+fn test_match_with_bindings() {
+    let a = match opt {
+        Some(inner @ Some(_)) => use_inner(inner),
+        Some(None) => handle_none(),
+        None => outer_none()
+    };
+
+    let b = match value {
+        x @ 1..=10 => small(x),
+        x @ 11..=100 => medium(x),
+        x => large(x)
+    };
+}
+
+fn test_match_with_blocks() {
+    let a = match result {
+        Ok(v) => {
+            log_success();
+            process(v);
+            v
+        },
+        Err(e) => {
+            log_error(e);
+            recover(e)
+        }
+    };
+}
+
+fn test_match_tuple() {
+    let a = match (x, y) {
+        (0, 0) => "origin",
+        (0, _) => "y-axis",
+        (_, 0) => "x-axis",
+        (x, y) if x == y => "diagonal",
+        _ => "other"
+    };
+}
+
+fn test_match_array() {
+    let a = match arr {
+        [] => "empty",
+        [x] => "single",
+        [x, y] => "pair",
+        [x, y, z] => "triple",
+        _ => "many"
+    };
+
+    let b = match slice {
+        [first, ..rest] => process_first(first, rest),
+        [] => empty_case()
+    };
+}
+
+// =============================================================================
+// METHOD-STYLE MATCH (Section 2.12 - match_expr)
+// =============================================================================
+
+fn test_method_match() {
+    // match as postfix method
+    let a = value.match {
+        Some(x) => x,
+        None => default
+    };
+
+    let b = result.match {
+        Ok(v) => process(v),
+        Err(e) => handle(e)
+    };
+
+    // Chained with other methods
+    let c = data.transform().match {
+        Valid(v) => v,
+        Invalid(e) => recover(e)
+    };
+}
+
+// =============================================================================
+// MATCH WITH RANGE PATTERNS
+// =============================================================================
+
+fn test_match_ranges() {
+    let a = match n {
+        0..=9 => "single digit",
+        10..=99 => "double digit",
+        100..=999 => "triple digit",
+        _ => "large"
+    };
+
+    let b = match ch {
+        'a'..='z' => "lowercase",
+        'A'..='Z' => "uppercase",
+        '0'..='9' => "digit",
+        _ => "other"
+    };
+}
+
+// =============================================================================
+// MATCH WITH LITERAL PATTERNS
+// =============================================================================
+
+fn test_match_literals() {
+    let a = match value {
+        42 => "the answer",
+        0 => "zero",
+        -1 => "minus one",
+        _ => "other"
+    };
+
+    let b = match ch {
+        '\n' => "newline",
+        '\t' => "tab",
+        ' ' => "space",
+        _ => "other"
+    };
+
+    let c = match text {
+        "hello" => "greeting",
+        "bye" => "farewell",
+        _ => "unknown"
+    };
+
+    let d = match flag {
+        true => "yes",
+        false => "no"
+    };
+}
+
+// =============================================================================
+// NESTED CONDITIONALS
+// =============================================================================
+
+fn test_nested_conditionals() {
+    let a = if condition {
+        match x {
+            0 => "zero",
+            _ => "nonzero"
+        }
+    } else {
+        match y {
+            1 => "one",
+            _ => "not one"
+        }
+    };
+
+    let b = match outer {
+        Some(inner) => if inner > 0 {
+            "positive"
+        } else {
+            "non-positive"
+        },
+        None => "none"
+    };
+}
+
+// =============================================================================
+// MATCH EXHAUSTIVENESS
+// =============================================================================
+
+fn test_exhaustive_match() {
+    // Boolean exhaustive
+    let a = match flag {
+        true => 1,
+        false => 0
+    };
+
+    // Enum-like exhaustive (with wildcard)
+    let b = match option {
+        Some(v) => v,
+        None => default
+    };
+
+    // With wildcard catch-all
+    let c = match n {
+        0 => "zero",
+        1 => "one",
+        _ => "many"
+    };
+}
+
+// =============================================================================
+// COMPLEX MATCH PATTERNS
+// =============================================================================
+
+fn test_complex_patterns() {
+    let a = match complex {
+        Container { data: Some(Inner { value: v, .. }), .. } if v > 0 => v,
+        Container { data: None, .. } => 0,
+        _ => -1
+    };
+
+    let b = match tree {
+        Node { left: Leaf(l), right: Leaf(r) } => l + r,
+        Node { left, right: Leaf(r) } => traverse(left) + r,
+        Node { left: Leaf(l), right } => l + traverse(right),
+        Node { left, right } => traverse(left) + traverse(right),
+        Leaf(v) => v
+    };
+}
+
+// =============================================================================
+// MATCH WITH TYPE TEST PATTERNS
+// =============================================================================
+
+fn test_type_test_match() {
+    let a = match value {
+        x is Int => "integer",
+        x is Text => "text",
+        x is Bool => "boolean",
+        _ => "unknown"
+    };
+}
+
+// =============================================================================
+// MATCH WITH ATTRIBUTES
+// =============================================================================
+
+fn test_match_with_attributes() {
+    let a = match result {
+        @cold Err(e) => handle_error(e),
+        @hot Ok(v) => process(v)
+    };
+}

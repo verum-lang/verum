@@ -1,0 +1,94 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, sleep, timer, threads, concurrency
+// @expected-exit: 0
+
+// Test: Sleep + timer integration with threads.
+// Spawns workers with different sleep durations, verifies ordering and elapsed time.
+
+fn __time_monotonic_nanos_raw() -> Int {
+    0
+}
+
+fn __time_sleep_nanos_raw(nanos: Int) -> Int {
+    0
+}
+
+fn timed_work(iterations: Int) -> Int {
+    // Compute sum to simulate work
+    let mut acc = 0;
+    let mut i = 0;
+    while (i < iterations) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: Time a computation
+    let t_start = __time_monotonic_nanos_raw();
+    let result = timed_work(10000);
+    let t_end = __time_monotonic_nanos_raw();
+    let elapsed = t_end - t_start;
+
+    // Result should be sum(0..9999) = 49995000
+    if (result != 49995000) {
+        print(f"FAIL test1: result={result} expected 49995000");
+        return 1;
+    }
+    // Elapsed should be positive
+    if (elapsed <= 0) {
+        print(f"FAIL test1b: elapsed={elapsed} expected > 0");
+        return 1;
+    }
+
+    // Test 2: Sleep in between two timed sections
+    let b1 = __time_monotonic_nanos_raw();
+    let w1 = timed_work(1000);
+    let mid = __time_monotonic_nanos_raw();
+    __time_sleep_nanos_raw(5000000); // 5ms
+    let b2 = __time_monotonic_nanos_raw();
+    let w2 = timed_work(1000);
+    let a2 = __time_monotonic_nanos_raw();
+
+    // Both work results should be sum(0..999) = 499500
+    if (w1 != 499500) {
+        print(f"FAIL test2a: w1={w1}");
+        return 1;
+    }
+    if (w2 != 499500) {
+        print(f"FAIL test2b: w2={w2}");
+        return 1;
+    }
+    // Sleep gap should be at least 2ms
+    let sleep_gap = b2 - mid;
+    if (sleep_gap < 2000000) {
+        print(f"FAIL test2c: sleep_gap={sleep_gap}ns expected >= 2ms");
+        return 1;
+    }
+
+    // Test 3: Timed parallel workers
+    let par_start = __time_monotonic_nanos_raw();
+    let t1 = spawn timed_work(5000);
+    let t2 = spawn timed_work(5000);
+    let t3 = spawn timed_work(5000);
+    let t4 = spawn timed_work(5000);
+    let total = t1.await + t2.await + t3.await + t4.await;
+    let par_end = __time_monotonic_nanos_raw();
+
+    // Each worker: sum(0..4999) = 12497500. Total = 49990000
+    if (total != 49990000) {
+        print(f"FAIL test3: total={total} expected 49990000");
+        return 1;
+    }
+    let par_elapsed = par_end - par_start;
+    if (par_elapsed <= 0) {
+        print(f"FAIL test3b: parallel elapsed={par_elapsed}");
+        return 1;
+    }
+
+    print("929_sleep_timer: PASS");
+    0
+}

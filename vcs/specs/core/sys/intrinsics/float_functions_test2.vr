@@ -1,0 +1,81 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Test each function group
+
+module test.stdlib.sys.intrinsics.float_functions_test2;
+
+mount core.intrinsics.{
+    // Float64 basic
+    sqrt_f64, abs_f64, floor_f64, ceil_f64, round_f64, trunc_f64,
+    // Float64 trigonometric
+    sin_f64, cos_f64, tan_f64, asin_f64, acos_f64, atan_f64, atan2_f64,
+    // Float64 hyperbolic
+    sinh_f64, cosh_f64, tanh_f64, asinh_f64, acosh_f64, atanh_f64,
+    // Float64 exponential/log
+    exp_f64, exp2_f64, expm1_f64, log_f64, log2_f64, log10_f64, log1p_f64,
+    pow_f64, powi_f64, cbrt_f64,
+    // Float64 special
+    hypot_f64, fma_f64, copysign_f64, minnum_f64, maxnum_f64,
+    // Float64 bit operations
+    f64_to_bits, f64_from_bits, f64_infinity, f64_neg_infinity, f64_nan,
+};
+
+fn main() {
+    print("Testing inverse trigonometry...");
+    let asin_result = asin_f64(0.5);
+    print(f"asin(0.5) = {asin_result}");
+    let acos_result = acos_f64(0.5);
+    print(f"acos(0.5) = {acos_result}");
+    let atan_result = atan_f64(1.0);
+    print(f"atan(1.0) = {atan_result}");
+    let atan2_result = atan2_f64(1.0, 1.0);
+    print(f"atan2(1.0, 1.0) = {atan2_result}");
+
+    print("Testing hyperbolic...");
+    let sinh_result = sinh_f64(0.0);
+    print(f"sinh(0) = {sinh_result}");
+    let cosh_result = cosh_f64(0.0);
+    print(f"cosh(0) = {cosh_result}");
+    let tanh_result = tanh_f64(0.0);
+    print(f"tanh(0) = {tanh_result}");
+    let asinh_result = asinh_f64(0.0);
+    print(f"asinh(0) = {asinh_result}");
+    let acosh_result = acosh_f64(1.0);
+    print(f"acosh(1) = {acosh_result}");
+    let atanh_result = atanh_f64(0.0);
+    print(f"atanh(0) = {atanh_result}");
+
+    print("Testing exp/log extended...");
+    let exp2_result = exp2_f64(3.0);
+    print(f"exp2(3) = {exp2_result}");
+    let expm1_result = expm1_f64(0.0);
+    print(f"expm1(0) = {expm1_result}");
+    let log2_result = log2_f64(8.0);
+    print(f"log2(8) = {log2_result}");
+    let log10_result = log10_f64(100.0);
+    print(f"log10(100) = {log10_result}");
+    let log1p_result = log1p_f64(0.0);
+    print(f"log1p(0) = {log1p_result}");
+    let cbrt_result = cbrt_f64(8.0);
+    print(f"cbrt(8) = {cbrt_result}");
+
+    print("Testing special...");
+    let hypot_result = hypot_f64(3.0, 4.0);
+    print(f"hypot(3, 4) = {hypot_result}");
+    let fma_result = fma_f64(2.0, 3.0, 1.0);
+    print(f"fma(2, 3, 1) = {fma_result}");
+    let copysign_result = copysign_f64(1.0, -1.0);
+    print(f"copysign(1, -1) = {copysign_result}");
+    let minnum_result = minnum_f64(2.0, 3.0);
+    print(f"minnum(2, 3) = {minnum_result}");
+    let maxnum_result = maxnum_f64(2.0, 3.0);
+    print(f"maxnum(2, 3) = {maxnum_result}");
+
+    print("Testing bit operations...");
+    let to_bits_result = f64_to_bits(1.0);
+    print(f"f64_to_bits(1.0) = {to_bits_result}");
+
+    print("All tests passed!");
+}

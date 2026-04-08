@@ -1,0 +1,101 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, closures, capture, higher-order
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for closure capture patterns and higher-order function composition
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+fn apply2(f: fn(Int, Int) -> Int, a: Int, b: Int) -> Int { f(a, b) }
+
+fn twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn thrice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(f(x)))
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn flip(f: fn(Int, Int) -> Int, a: Int, b: Int) -> Int {
+    f(b, a)
+}
+
+fn test_basic_closures() {
+    let double = |x: Int| -> Int { x * 2 };
+    let square = |x: Int| -> Int { x * x };
+    let inc = |x: Int| -> Int { x + 1 };
+    let dec = |x: Int| -> Int { x - 1 };
+
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(square, 4), 16);
+    assert_eq(apply(inc, 99), 100);
+    assert_eq(apply(dec, 100), 99);
+}
+
+fn test_repeated_application() {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+
+    // twice(double, 3) = double(double(3)) = double(6) = 12
+    assert_eq(twice(double, 3), 12);
+    // thrice(inc, 0) = inc(inc(inc(0))) = 3
+    assert_eq(thrice(inc, 0), 3);
+    // thrice(double, 1) = double(double(double(1))) = 8
+    assert_eq(thrice(double, 1), 8);
+}
+
+fn test_composition() {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let square = |x: Int| -> Int { x * x };
+
+    // compose(double, inc, 5) = double(inc(5)) = double(6) = 12
+    assert_eq(compose(double, inc, 5), 12);
+    // compose(inc, double, 5) = inc(double(5)) = inc(10) = 11
+    assert_eq(compose(inc, double, 5), 11);
+    // compose(square, inc, 3) = square(inc(3)) = square(4) = 16
+    assert_eq(compose(square, inc, 3), 16);
+}
+
+fn test_binary_closures() {
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let mul = |a: Int, b: Int| -> Int { a * b };
+    let sub = |a: Int, b: Int| -> Int { a - b };
+
+    assert_eq(apply2(add, 3, 4), 7);
+    assert_eq(apply2(mul, 3, 4), 12);
+    assert_eq(apply2(sub, 10, 3), 7);
+
+    // flip: swap arguments
+    assert_eq(flip(sub, 3, 10), 7);  // sub(10, 3) = 7
+    assert_eq(flip(sub, 10, 3), -7); // sub(3, 10) = -7
+}
+
+fn test_predicate_closures() {
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    let is_positive = |x: Int| -> Bool { x > 0 };
+    let is_zero = |x: Int| -> Bool { x == 0 };
+
+    assert_eq(is_even(4), true);
+    assert_eq(is_even(5), false);
+    assert_eq(is_positive(1), true);
+    assert_eq(is_positive(-1), false);
+    assert_eq(is_zero(0), true);
+    assert_eq(is_zero(1), false);
+}
+
+fn main() -> Int {
+    test_basic_closures();
+    test_repeated_application();
+    test_composition();
+    test_binary_closures();
+    test_predicate_closures();
+    print("[OK] 211_closure_capture_aot");
+    0
+}

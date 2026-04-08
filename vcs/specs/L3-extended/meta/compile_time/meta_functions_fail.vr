@@ -1,0 +1,258 @@
+// @test: typecheck-fail
+// @expected-error: Meta function error
+// @tier: 3
+// @level: L3
+// @tags: meta, compile-time, meta-functions, error
+
+/// Meta function failure cases
+///
+/// These tests verify proper error handling for invalid
+/// meta function definitions and usages.
+
+// ============================================================
+// SANDBOX VIOLATIONS IN META FUNCTIONS
+// ============================================================
+
+// ERROR: File IO in meta function
+meta fn read_file_meta() -> Text {
+    // ERROR: Cannot perform file IO in meta context
+    std.fs.read_to_string("/etc/passwd")
+}
+
+// ERROR: Network in meta function
+meta fn fetch_meta() -> Text {
+    // ERROR: Cannot perform network operations in meta context
+    http.get("https://example.com").text()
+}
+
+// ERROR: Random in meta function
+meta fn random_meta() -> UInt64 {
+    // ERROR: Random is non-deterministic, forbidden in meta context
+    rand.random<UInt64>()
+}
+
+// ERROR: System time in meta function
+meta fn now_meta() -> UInt64 {
+    // ERROR: Time access is non-deterministic, forbidden in meta context
+    std.time.now().timestamp()
+}
+
+// ERROR: Environment variables
+meta fn env_meta() -> Text {
+    // ERROR: Environment access forbidden in meta context
+    std.env.var("HOME").unwrap_or_default()
+}
+
+// ============================================================
+// RESOURCE LIMIT VIOLATIONS
+// ============================================================
+
+// ERROR: Infinite recursion
+meta fn infinite_recursion(n: UInt64) -> UInt64 {
+    // ERROR: Recursion depth exceeded in meta context
+    infinite_recursion(n + 1)
+}
+
+// ERROR: Infinite loop
+meta fn infinite_loop() -> UInt64 {
+    // ERROR: Execution time limit exceeded in meta context
+    loop {
+        // Never terminates
+    }
+}
+
+// ERROR: Excessive memory allocation
+meta fn huge_alloc() -> List<UInt8> {
+    // ERROR: Memory limit exceeded in meta context
+    List.filled(10_000_000_000, 0UInt8)
+}
+
+// ERROR: Stack overflow
+meta fn stack_overflow(depth: UInt64) -> UInt64 {
+    // ERROR: Stack overflow in meta context
+    stack_overflow(depth + 1) + 1
+}
+
+// ============================================================
+// TYPE ERRORS IN META FUNCTIONS
+// ============================================================
+
+// ERROR: Return type mismatch
+meta fn wrong_return() -> Text {
+    // ERROR: Expected Text, found Int
+    42
+}
+
+// ERROR: Parameter type mismatch
+meta fn typed_meta(x: Text) -> Text {
+    x.to_uppercase()
+}
+
+const WRONG_ARG: Text = typed_meta(123);  // ERROR: Expected Text, got Int
+
+// ERROR: Generic constraint not satisfied
+meta fn bounded_meta<T: Clone>(x: T) -> T {
+    x.clone()
+}
+
+type NonClone is intrinsic;
+const BAD_CLONE: NonClone = bounded_meta(NonClone {});  // ERROR: NonClone doesn't implement Clone
+
+// ============================================================
+// INVALID META FUNCTION DEFINITIONS
+// ============================================================
+
+// ERROR: Meta function cannot be async
+meta async fn async_meta() -> Int {
+    // ERROR: Meta functions cannot be async
+    42
+}
+
+// ERROR: Meta function cannot use await
+meta fn with_await() -> Int {
+    // ERROR: Cannot await in meta context
+    let result = some_async_fn().await;
+    result
+}
+
+// ERROR: Meta function cannot have self parameter
+type MetaType is {};
+
+implement MetaType {
+    // ERROR: Meta functions cannot be methods
+    meta fn method(self) -> Int {
+        42
+    }
+}
+
+// ============================================================
+// EVALUATION ERRORS
+// ============================================================
+
+// ERROR: Division by zero at compile time
+meta fn div_zero() -> Int {
+    // ERROR: Division by zero in meta context
+    100 / 0
+}
+
+const DIV_RESULT: Int = div_zero();
+
+// ERROR: Overflow at compile time
+meta fn overflow_add() -> UInt8 {
+    // ERROR: Arithmetic overflow in meta context
+    255UInt8 + 1
+}
+
+const OVERFLOW: UInt8 = overflow_add();
+
+// ERROR: Index out of bounds
+meta fn out_of_bounds() -> Int {
+    let arr = [1, 2, 3];
+    // ERROR: Index 10 out of bounds for array of length 3
+    arr[10]
+}
+
+const OOB: Int = out_of_bounds();
+
+// ERROR: Unwrap of None
+meta fn unwrap_none() -> Int {
+    let opt: Maybe<Int> = None;
+    // ERROR: Called unwrap on None in meta context
+    opt.unwrap()
+}
+
+const NONE: Int = unwrap_none();
+
+// ERROR: Panic in meta function
+meta fn meta_panic() -> Int {
+    // ERROR: Meta function panicked
+    panic("Intentional panic")
+}
+
+const PANIC: Int = meta_panic();
+
+// ============================================================
+// UNSAFE IN META CONTEXT
+// ============================================================
+
+// ERROR: Unsafe block in meta function
+meta fn unsafe_meta() -> Int {
+    // ERROR: Cannot use unsafe in meta context
+    unsafe {
+        let ptr = 0x12345678 as *const Int;
+        *ptr
+    }
+}
+
+// ERROR: Raw pointer operations
+meta fn ptr_meta(ptr: *const Int) -> Int {
+    // ERROR: Cannot dereference raw pointers in meta context
+    unsafe { *ptr }
+}
+
+// ERROR: Transmute in meta function
+meta fn transmute_meta(x: UInt64) -> Float64 {
+    // ERROR: Cannot transmute in meta context
+    unsafe { std.mem.transmute(x) }
+}
+
+// ============================================================
+// MUTABLE STATE VIOLATIONS
+// ============================================================
+
+static mut GLOBAL: Int = 0;
+
+// ERROR: Accessing mutable static
+meta fn access_static() -> Int {
+    // ERROR: Cannot access mutable static in meta context
+    unsafe { GLOBAL }
+}
+
+// ERROR: Modifying static
+meta fn modify_static() {
+    // ERROR: Cannot modify static in meta context
+    unsafe { GLOBAL = 42; }
+}
+
+// ============================================================
+// CLOSURE CAPTURE ISSUES
+// ============================================================
+
+// ERROR: Capturing mutable reference
+meta fn mutable_capture() -> Int {
+    let mut x = 0;
+    // ERROR: Cannot capture mutable reference in meta closure
+    let f = || { x += 1; x };
+    f()
+}
+
+// ERROR: Non-const capture in const context
+fn runtime_value() -> Int { 42 }
+
+meta fn capture_runtime() -> Int {
+    // ERROR: Cannot capture runtime value in meta context
+    let val = runtime_value();
+    val
+}
+
+// ============================================================
+// CONST CONTEXT ESCAPE
+// ============================================================
+
+// ERROR: Using runtime function in const
+fn not_const(x: Int) -> Int {
+    x + 1
+}
+
+const BAD_CONST: Int = not_const(41);  // ERROR: not_const is not a const/meta fn
+
+// ERROR: Using mutable reference in const
+meta fn const_with_mut(x: &mut Int) -> Int {
+    // ERROR: Const fn cannot take mutable references
+    *x += 1;
+    *x
+}
+
+fn main() {
+    // All compile-time evaluations above should fail
+}

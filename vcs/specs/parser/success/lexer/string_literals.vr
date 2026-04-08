@@ -1,0 +1,467 @@
+// @test: parse-pass
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, strings
+// @description: Comprehensive tests for string literal parsing per grammar/verum.ebnf
+//
+// Simplified Literal Architecture (v6.0):
+//   - Plain strings: "..." with escape processing (\n, \t, etc.)
+//   - Raw multiline strings: """...""" - both raw AND multiline (no escapes)
+//   - NOTE: The old r#"..."# syntax has been REMOVED
+//
+// Grammar productions tested:
+//   string_lit = plain_string | raw_multiline
+//   plain_string = '"' , { string_char | escape_seq } , '"'
+//   raw_multiline = '"""' , { any_char } , '"""'  (no escape processing)
+//   byte_string_lit = 'b' , '"' , { byte_string_char | byte_escape_seq } , '"'
+//   interpolated_string = interpolated_prefix , '"' , { string_char | interpolation } , '"'
+
+fn test_plain_strings_empty() {
+    // Empty string
+    let a = "";
+}
+
+fn test_plain_strings_simple() {
+    // Single character
+    let a = "a";
+    let b = "Z";
+    let c = "0";
+    let d = " ";
+    let e = "_";
+
+    // Simple words
+    let f = "hello";
+    let g = "world";
+    let h = "Hello World";
+
+    // Numbers in strings
+    let i = "123";
+    let j = "3.14";
+    let k = "1e10";
+
+    // Mixed content
+    let l = "abc123";
+    let m = "user@example.com";
+    let n = "https://example.com";
+}
+
+fn test_plain_strings_special_chars() {
+    // Punctuation
+    let a = "!";
+    let b = "@";
+    let c = "#";
+    let d = "$";
+    let e = "%";
+    let f = "^";
+    let g = "&";
+    let h = "*";
+    let i = "(";
+    let j = ")";
+    let k = "-";
+    let l = "+";
+    let m = "=";
+    let n = "[";
+    let o = "]";
+    let p = "{";
+    let q = "}";
+    let r = "|";
+    let s = ";";
+    let t = ":";
+    let u = "<";
+    let v = ">";
+    let w = ",";
+    let x = ".";
+    let y = "/";
+    let z = "?";
+
+    // Mixed punctuation
+    let aa = "Hello, World!";
+    let ab = "foo: bar";
+    let ac = "a=b+c";
+    let ad = "[1, 2, 3]";
+    let ae = "{key: value}";
+}
+
+fn test_plain_strings_unicode() {
+    // Latin extended
+    let a = "cafe";
+    let b = "resume";
+    let c = "naive";
+
+    // Greek
+    let d = "alpha beta gamma";
+
+    // Cyrillic
+    let e = "privet";
+
+    // CJK
+    let f = "nihao";
+    let g = "konnichiwa";
+    let h = "annyeonghaseyo";
+
+    // Emoji (as raw Unicode)
+    let i = "smile face here";
+
+    // Mathematical symbols
+    let j = "x squared";
+
+    // Arrows and symbols
+    let k = "arrow right";
+}
+
+fn test_multiline_strings_basic() {
+    // Simple multiline
+    let a = """
+        hello
+    """;
+
+    // Multiple lines
+    let b = """
+        line one
+        line two
+        line three
+    """;
+
+    // Empty multiline
+    let c = """
+    """;
+
+    // Single line in multiline
+    let d = """hello""";
+}
+
+fn test_multiline_strings_content() {
+    // With leading whitespace
+    let a = """
+        indented content
+            more indented
+        back to first level
+    """;
+
+    // With special characters
+    let b = """
+        This has "quotes" inside!
+        And 'single quotes' too.
+        Plus: colons, commas, and more.
+    """;
+
+    // JSON-like content
+    let c = """
+        {
+            "name": "test",
+            "value": 42,
+            "nested": {
+                "key": "value"
+            }
+        }
+    """;
+
+    // Code-like content
+    let d = """
+        fn example() {
+            let x = 42;
+            return x * 2;
+        }
+    """;
+
+    // SQL-like content
+    let e = """
+        SELECT *
+        FROM users
+        WHERE age > 18
+        ORDER BY name ASC
+    """;
+}
+
+fn test_multiline_strings_whitespace() {
+    // Tabs and spaces
+    let a = """
+	tab here
+        spaces here
+    """;
+
+    // Multiple blank lines
+    let b = """
+        line one
+
+
+        line four after blanks
+    """;
+
+    // Trailing whitespace
+    let c = """
+        trailing spaces
+        more content
+    """;
+}
+
+fn test_raw_multiline_strings_basic() {
+    // Simple raw multiline string (triple-quoted = raw = multiline)
+    let a = """raw string""";
+
+    // Empty raw multiline string
+    let b = """""";
+
+    // Single character
+    let c = """a""";
+
+    // With content that would be escape sequences in plain strings
+    // NOTE: In triple-quoted strings, \n is preserved literally, NOT as newline
+    let d = """no\nescape\there""";
+    let e = """backslash\\double""";
+    let f = """null\0here""";
+    let g = """tab\there""";
+}
+
+fn test_raw_multiline_strings_with_quotes() {
+    // Triple-quoted strings can contain regular quotes
+    let a = """contains "quotes" inside""";
+    let b = """contains 'single quotes' too""";
+    let c = """contains "multiple" "quoted" "sections" here""";
+
+    // Can contain hash characters
+    let d = """contains # hashes ## and ### more""";
+
+    // Mixed quotes and special characters
+    let e = """lots of "special" #chars# here""";
+    let f = """combination: "quotes" and #hashes# together""";
+}
+
+fn test_raw_multiline_strings_special_content() {
+    // Regex patterns (no escaping needed - backslashes preserved)
+    let a = """[a-z]+""";
+    let b = """\d{4}-\d{2}-\d{2}""";
+    let c = """^https?://[^\s]+$""";
+    let d = """(\w+)@(\w+)\.(\w+)""";
+
+    // File paths (backslashes preserved)
+    let e = """C:\Users\name\Documents""";
+    let f = """/usr/local/bin""";
+    let g = """\\server\share\folder""";
+
+    // SQL with quotes (quotes preserved)
+    let h = """SELECT * FROM "table" WHERE name = 'value'""";
+
+    // JSON (quotes and backslashes preserved)
+    let i = """{"key": "value", "number": 42}""";
+}
+
+fn test_byte_strings_basic() {
+    // Simple byte strings
+    let a = b"hello";
+    let b_var = b"world";
+    let c = b"";
+
+    // ASCII characters
+    let d = b"abcdefghijklmnopqrstuvwxyz";
+    let e = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let f = b"0123456789";
+
+    // Printable ASCII
+    let g = b" !#$%&'()*+,-./:;<=>?@[]^_`{|}~";
+}
+
+fn test_byte_strings_escapes() {
+    // Basic escape sequences
+    let a = b"newline\n";
+    let b_var = b"carriage\r";
+    let c = b"tab\t";
+    let d = b"null\0";
+    let e = b"backslash\\";
+    let f = b"quote\"";
+    let g = b"apostrophe\'";
+
+    // Hex escapes
+    let h = b"\x00";
+    let i = b"\xFF";
+    let j = b"\x41";
+    let k = b"\x7F";
+    let l = b"\x00\x01\x02\x03";
+
+    // Mixed
+    let m = b"text\x00with\nnull\tand\ttabs";
+    let n = b"hex: \x48\x65\x6c\x6c\x6f";
+}
+
+fn test_byte_strings_binary_data() {
+    // Binary-looking data
+    let a = b"\x00\x01\x02\x03\x04\x05";
+    let b_var = b"\xFF\xFE\xFD\xFC\xFB\xFA";
+    let c = b"\x89PNG\r\n\x1a\n";  // PNG header-like
+    let d = b"GIF89a";             // GIF header
+    let e = b"\x25PDF";            // PDF header-like
+}
+
+fn test_interpolated_strings_basic() {
+    let name = "World";
+    let x = 42;
+    let y = 3.14;
+
+    // Simple interpolation
+    let a = f"Hello";
+    let b = f"Hello {name}";
+    let c = f"Value: {x}";
+    let d = f"Pi is {y}";
+
+    // Multiple interpolations
+    let e = f"x = {x}, y = {y}";
+    let f_var = f"{name} has {x} items";
+
+    // Adjacent interpolations
+    let g = f"{x}{y}";
+    let h = f"{name}{x}{y}";
+}
+
+fn test_interpolated_strings_expressions() {
+    let x = 10;
+    let y = 5;
+    let name = "test";
+
+    // Arithmetic expressions
+    let a = f"sum = {x + y}";
+    let b = f"diff = {x - y}";
+    let c = f"prod = {x * y}";
+    let d = f"quot = {x / y}";
+
+    // Method calls
+    let e = f"length = {name.len()}";
+
+    // Function calls
+    let f_var = f"computed = {compute(x)}";
+
+    // Complex expressions
+    let g = f"complex = {(x + y) * 2}";
+}
+
+fn test_interpolated_strings_format_specs() {
+    let x = 42;
+    let y = 3.14159;
+    let name = "test";
+
+    // Width specifiers
+    let a = f"{x:5}";
+    let b = f"{x:10}";
+
+    // Alignment
+    let c = f"{name:>10}";   // right align
+    let d = f"{name:<10}";   // left align
+    let e = f"{name:^10}";   // center align
+
+    // Precision for floats
+    let f_var = f"{y:.2}";
+    let g = f"{y:.4}";
+    let h = f"{y:.10}";
+
+    // Fill and width
+    let i = f"{x:08}";       // zero-fill
+
+    // Sign specifiers
+    let j = f"{x:+}";
+
+    // Combined
+    let k = f"{y:+10.2}";
+}
+
+fn test_interpolated_strings_nested() {
+    let items = [1, 2, 3];
+    let map_var = {"key": "value"};
+
+    // Array indexing
+    let a = f"first = {items[0]}";
+
+    // Struct field access
+    let b = f"value = {map_var.key}";
+
+    // Nested braces (literal braces)
+    let c = f"braces: {{}}";
+    let d = f"open: {{, close: }}";
+}
+
+fn test_string_escapes_in_plain() {
+    // All standard escape sequences
+    let a = "\n";     // newline
+    let b = "\r";     // carriage return
+    let c = "\t";     // tab
+    let d = "\0";     // null
+    let e = "\\";     // backslash
+    let f_var = "\""; // double quote
+    let g = "\'";     // single quote
+
+    // Additional escapes per grammar
+    let h = "\a";     // bell/alert
+    let i = "\b";     // backspace (note: 'b' is used for byte strings prefix)
+    let j = "\f";     // form feed
+    let k = "\v";     // vertical tab
+
+    // Hex escapes
+    let l = "\x00";
+    let m = "\x41";   // 'A'
+    let n = "\xFF";
+
+    // Unicode escapes
+    let o = "\u{0}";
+    let p = "\u{41}";     // 'A'
+    let q = "\u{1F600}";  // emoji
+    let r = "\u{10FFFF}"; // max Unicode
+}
+
+fn test_string_combinations() {
+    // Plain followed by raw multiline
+    let plain = "plain";
+    let raw = """raw""";
+
+    // Multiline followed by byte
+    let multi = """
+        multiline
+    """;
+    let bytes = b"bytes";
+
+    // Interpolated with escapes
+    let x = 42;
+    let combined = f"value\t{x}\n";
+
+    // Array of different string types
+    let strings = ["plain", """raw multiline""", f"format {x}"];
+}
+
+fn test_long_strings() {
+    // Very long plain string
+    let a = "This is a very long string that contains a lot of characters and keeps going for quite a while to test the parser handling of lengthy content";
+
+    // Very long multiline
+    let b = """
+        This is a very long multiline string.
+        It spans many lines and contains lots of content.
+        Line after line after line.
+        We want to make sure the parser handles this correctly.
+        Even more content here to really test things.
+        And yet another line for good measure.
+        This should be sufficient for testing purposes.
+    """;
+
+    // Long raw multiline string (triple-quoted = raw = multiline)
+    let c = """This is a very long raw string that contains \n characters that are NOT escape sequences and just regular backslash-n text""";
+}
+
+fn test_empty_and_whitespace() {
+    // Empty strings
+    let a = "";             // empty plain string
+    let b = """""";         // empty triple-quoted (raw multiline) string
+    let c = """
+    """;
+    let d = b"";
+    let e = f"";
+
+    // Whitespace only
+    let f_var = " ";
+    let g = "   ";
+    let h = "\t";
+    let i = "\n";
+    let j = "  \t  \n  ";
+}
+
+// Helper for expression tests
+fn compute(x: Int) -> Int {
+    x * 2
+}

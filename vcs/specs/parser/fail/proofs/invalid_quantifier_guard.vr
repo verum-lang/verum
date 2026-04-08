@@ -1,0 +1,176 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, quantifiers, guard, where, error
+// @description: Test invalid quantifier guard syntax with 'where' keyword
+// @expected-error: E018
+
+// ============================================================================
+// Invalid: Malformed 'where' guard expression
+// ============================================================================
+
+fn test_where_comma_instead_of_dot() {
+    // Invalid: comma instead of dot after guard
+    let invalid = forall x: Int where x > 0, x < 100;
+}
+
+fn test_where_arrow_instead_of_dot() {
+    // Invalid: arrow instead of dot after guard
+    let invalid = forall x: Int where x > 0 => x >= 0;
+}
+
+fn test_where_colon_instead_of_dot() {
+    // Invalid: colon instead of dot after guard
+    let invalid = forall x: Int where x > 0: x >= 0;
+}
+
+// ============================================================================
+// Invalid: Guard with incomplete expressions
+// ============================================================================
+
+fn test_guard_unclosed_comparison() {
+    // Invalid: incomplete comparison
+    let invalid = forall n: Int where n > . n >= 0;
+}
+
+fn test_guard_unclosed_and() {
+    // Invalid: incomplete logical and
+    let invalid = forall x: Int where x > 0 && . x >= 0;
+}
+
+fn test_guard_unclosed_or() {
+    // Invalid: incomplete logical or
+    let invalid = forall x: Int where x > 0 || . x >= 0;
+}
+
+fn test_guard_unclosed_paren() {
+    // Invalid: unclosed parenthesis in guard
+    let invalid = forall n: Int where (n > 0 . n >= 0;
+}
+
+// ============================================================================
+// Invalid: 'where' used incorrectly
+// ============================================================================
+
+fn test_where_without_binding() {
+    // Invalid: 'where' without preceding binding
+    let invalid = forall where x > 0 . true;
+}
+
+fn test_where_after_body() {
+    // Invalid: 'where' after the body expression
+    let invalid = forall x: Int . x > 0 where x < 100;
+}
+
+fn test_where_before_type() {
+    // Invalid: 'where' before type annotation
+    let invalid = forall x where x > 0: Int . x >= 0;
+}
+
+fn test_where_before_in() {
+    let items = [1, 2, 3];
+    // Invalid: 'where' must come after 'in'
+    let invalid = forall x: Int where x > 0 in items . x >= 0;
+}
+
+// ============================================================================
+// Invalid: Multiple 'where' clauses
+// ============================================================================
+
+fn test_double_where_clause() {
+    // Invalid: cannot have multiple 'where' on same binding
+    let invalid = forall x: Int where x > 0 where x < 100 . x >= 0;
+}
+
+fn test_triple_where_clause() {
+    // Invalid: three 'where' clauses
+    let invalid = forall n: Int where n > 0 where n < 100 where n != 50 . n > 0;
+}
+
+// ============================================================================
+// Invalid: 'where' with invalid expressions
+// ============================================================================
+
+fn test_where_empty_expression() {
+    // Invalid: 'where' with no expression
+    let invalid = forall x: Int where . x > 0;
+}
+
+fn test_where_just_keyword() {
+    // Invalid: 'where' followed by another keyword
+    let invalid = forall x: Int where if . x > 0;
+}
+
+fn test_where_operator_only() {
+    // Invalid: 'where' followed by just an operator
+    let invalid = forall x: Int where + . x > 0;
+}
+
+// ============================================================================
+// Invalid: Exists with guard errors
+// ============================================================================
+
+fn test_exists_where_empty() {
+    // Invalid: 'where' without guard expression
+    let invalid = exists x: Int where . x == 42;
+}
+
+fn test_exists_where_no_body() {
+    // Invalid: guard without body
+    let invalid = exists n: Int where n > 0;
+}
+
+fn test_exists_double_where() {
+    // Invalid: double 'where' clause
+    let invalid = exists x: Int where x > 0 where x < 100 . x == 50;
+}
+
+// ============================================================================
+// Invalid: Guard with domain combination errors
+// ============================================================================
+
+fn test_guard_between_in_and_dot() {
+    let items = [1, 2, 3];
+    // This should parse correctly: guard after domain
+    // Testing malformed version:
+    let invalid = forall x in where x > 0 items . x >= 0;
+}
+
+fn test_in_in_guard() {
+    let items = [1, 2, 3];
+    // Invalid: 'in' inside guard expression as keyword
+    let invalid = forall x: Int where x in . x >= 0;
+}
+
+// ============================================================================
+// Invalid: Multiple binding guard errors
+// ============================================================================
+
+fn test_guard_spans_bindings() {
+    // Invalid: guard expression spanning multiple bindings without comma
+    let invalid = forall x: Int where x > 0 y: Int where y > 0 . x + y > 0;
+}
+
+fn test_mixed_guard_no_comma() {
+    let items = [1, 2, 3];
+    // Invalid: missing comma between guarded bindings
+    let invalid = forall x in items where x > 0 y: Int . x + y > 0;
+}
+
+// ============================================================================
+// Invalid: Special cases
+// ============================================================================
+
+fn test_where_as_variable() {
+    // Invalid: 'where' is a keyword, can't be used as variable
+    let invalid = forall where: Int . where > 0;
+}
+
+fn test_guard_assignment() {
+    // Invalid: assignment in guard (not a boolean expression)
+    let invalid = forall x: Int where y = 5 . x > 0;
+}
+
+fn test_guard_statement() {
+    // Invalid: statement instead of expression in guard
+    let invalid = forall x: Int where let y = x . x > 0;
+}

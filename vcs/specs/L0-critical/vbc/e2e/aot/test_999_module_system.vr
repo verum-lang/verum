@@ -1,0 +1,301 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: module, type, implement, protocol, method-dispatch
+// @description: Module system test — type definitions, implement blocks, protocol-like patterns, method dispatch
+
+type Animal is
+    | Dog(Text)
+    | Cat(Text)
+    | Bird(Text, Bool);
+
+type Stats is {
+    name: Text,
+    legs: Int,
+    can_fly: Bool,
+};
+
+implement Stats {
+    fn new(name: Text, legs: Int, can_fly: Bool) -> Stats {
+        Stats { name: name, legs: legs, can_fly: can_fly }
+    }
+
+    fn describe(&self) -> Text {
+        if self.can_fly {
+            f"{self.name}: {self.legs} legs, can fly"
+        } else {
+            f"{self.name}: {self.legs} legs, cannot fly"
+        }
+    }
+
+    fn is_biped(&self) -> Bool {
+        self.legs == 2
+    }
+}
+
+fn animal_stats(a: Animal) -> Stats {
+    match a {
+        Dog(name) => Stats.new(name, 4, false),
+        Cat(name) => Stats.new(name, 4, false),
+        Bird(name, can_fly) => Stats.new(name, 2, can_fly),
+    }
+}
+
+fn animal_sound(a: Animal) -> Text {
+    match a {
+        Dog(_) => "woof",
+        Cat(_) => "meow",
+        Bird(_, _) => "tweet",
+    }
+}
+
+// Stack data structure with implement block
+type Stack is {
+    data: List<Int>,
+};
+
+implement Stack {
+    fn new() -> Stack {
+        Stack { data: List.new() }
+    }
+
+    fn push(&mut self, val: Int) {
+        self.data.push(val);
+    }
+
+    fn pop(&mut self) -> Int {
+        if self.data.len() == 0 {
+            return -1;
+        }
+        let last = self.data[self.data.len() - 1];
+        // Manual pop by rebuilding
+        let mut new_data = List.new();
+        let mut i = 0;
+        while i < self.data.len() - 1 {
+            new_data.push(self.data[i]);
+            i = i + 1;
+        }
+        self.data = new_data;
+        last
+    }
+
+    fn peek(&self) -> Int {
+        if self.data.len() == 0 {
+            return -1;
+        }
+        self.data[self.data.len() - 1]
+    }
+
+    fn size(&self) -> Int {
+        self.data.len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.data.len() == 0
+    }
+}
+
+// Builder pattern
+type Config is {
+    host: Text,
+    port: Int,
+    retries: Int,
+    verbose: Bool,
+};
+
+implement Config {
+    fn default() -> Config {
+        Config { host: "localhost", port: 8080, retries: 3, verbose: false }
+    }
+
+    fn with_host(self, host: Text) -> Config {
+        Config { host: host, port: self.port, retries: self.retries, verbose: self.verbose }
+    }
+
+    fn with_port(self, port: Int) -> Config {
+        Config { host: self.host, port: port, retries: self.retries, verbose: self.verbose }
+    }
+
+    fn with_retries(self, retries: Int) -> Config {
+        Config { host: self.host, port: self.port, retries: retries, verbose: self.verbose }
+    }
+
+    fn with_verbose(self, verbose: Bool) -> Config {
+        Config { host: self.host, port: self.port, retries: self.retries, verbose: verbose }
+    }
+
+    fn summary(&self) -> Text {
+        f"{self.host}:{self.port} retries={self.retries}"
+    }
+}
+
+fn test_sum_types_and_methods() -> Int {
+    let dog = Animal.Dog("Rex");
+    let cat = Animal.Cat("Whiskers");
+    let bird = Animal.Bird("Tweety", true);
+
+    let dog_stats = animal_stats(dog);
+    if dog_stats.legs != 4 {
+        print(f"FAIL dog legs: expected 4, got {dog_stats.legs}");
+        return 1;
+    }
+    if dog_stats.can_fly {
+        print("FAIL dog can_fly should be false");
+        return 1;
+    }
+
+    let bird_stats = animal_stats(bird);
+    if !bird_stats.is_biped() {
+        print("FAIL bird should be biped");
+        return 1;
+    }
+    if !bird_stats.can_fly {
+        print("FAIL bird should fly");
+        return 1;
+    }
+
+    let desc = bird_stats.describe();
+    if desc != "Tweety: 2 legs, can fly" {
+        print(f"FAIL bird desc: '{desc}'");
+        return 1;
+    }
+
+    print("  sum_types_and_methods: OK");
+    0
+}
+
+fn test_animal_sounds() -> Int {
+    let animals = [
+        Animal.Dog("Spot"),
+        Animal.Cat("Felix"),
+        Animal.Bird("Robin", true),
+    ];
+    let expected = ["woof", "meow", "tweet"];
+
+    let mut i = 0;
+    while i < animals.len() {
+        let sound = animal_sound(animals[i]);
+        if sound != expected[i] {
+            print(f"FAIL sound[{i}]: expected '{expected[i]}', got '{sound}'");
+            return 1;
+        }
+        i = i + 1;
+    }
+
+    print("  animal_sounds: OK");
+    0
+}
+
+fn test_stack() -> Int {
+    let mut stack = Stack.new();
+
+    if !stack.is_empty() {
+        print("FAIL: new stack should be empty");
+        return 1;
+    }
+
+    stack.push(10);
+    stack.push(20);
+    stack.push(30);
+
+    if stack.size() != 3 {
+        print(f"FAIL stack size: expected 3, got {stack.size()}");
+        return 1;
+    }
+
+    let top = stack.peek();
+    if top != 30 {
+        print(f"FAIL peek: expected 30, got {top}");
+        return 1;
+    }
+
+    let popped = stack.pop();
+    if popped != 30 {
+        print(f"FAIL pop: expected 30, got {popped}");
+        return 1;
+    }
+
+    if stack.size() != 2 {
+        print(f"FAIL after pop: expected size 2, got {stack.size()}");
+        return 1;
+    }
+
+    let popped2 = stack.pop();
+    if popped2 != 20 {
+        print(f"FAIL pop2: expected 20, got {popped2}");
+        return 1;
+    }
+
+    print("  stack: OK");
+    0
+}
+
+fn test_builder_pattern() -> Int {
+    let cfg = Config.default()
+        .with_host("example.com")
+        .with_port(3000)
+        .with_retries(5);
+
+    if cfg.host != "example.com" {
+        print(f"FAIL host: '{cfg.host}'");
+        return 1;
+    }
+    if cfg.port != 3000 {
+        print(f"FAIL port: {cfg.port}");
+        return 1;
+    }
+    if cfg.retries != 5 {
+        print(f"FAIL retries: {cfg.retries}");
+        return 1;
+    }
+
+    let summary = cfg.summary();
+    if summary != "example.com:3000 retries=5" {
+        print(f"FAIL summary: '{summary}'");
+        return 1;
+    }
+
+    print("  builder_pattern: OK");
+    0
+}
+
+fn test_method_dispatch() -> Int {
+    // Multiple types with similar methods, dispatch by type
+    let stats1 = Stats.new("A", 4, false);
+    let stats2 = Stats.new("B", 2, true);
+
+    let d1 = stats1.describe();
+    let d2 = stats2.describe();
+
+    if d1 == d2 {
+        print("FAIL: different stats should have different descriptions");
+        return 1;
+    }
+
+    if stats1.is_biped() {
+        print("FAIL: 4-legged should not be biped");
+        return 1;
+    }
+
+    if !stats2.is_biped() {
+        print("FAIL: 2-legged should be biped");
+        return 1;
+    }
+
+    print("  method_dispatch: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_sum_types_and_methods();
+    failures = failures + test_animal_sounds();
+    failures = failures + test_stack();
+    failures = failures + test_builder_pattern();
+    failures = failures + test_method_dispatch();
+
+    if failures == 0 {
+        print("All module system tests passed");
+    }
+    failures
+}

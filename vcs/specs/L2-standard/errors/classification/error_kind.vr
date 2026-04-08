@@ -1,0 +1,342 @@
+// @test: run
+// @expected-stdout: All ErrorKind classification tests passed!
+// @tier: 0
+// @level: L2
+// @tags: errors, classification, error-kind, expected, unexpected, fatal
+// @description: Tests for Error Kind Classification
+//
+// Spec: docs/detailed/20-error-handling.md Section 2.5.3 - Error Kind Classification
+// Classifies errors by handling strategy: Expected (inline), Unexpected (supervisor), Fatal (terminate).
+
+// ============================================================================
+// ErrorKind Type - Classification for handling strategy
+// ============================================================================
+
+type ErrorKind<E> is
+    /// Handle inline - expected business error
+    | Expected(E)
+
+    /// Propagate to supervisor - unexpected but recoverable
+    | Unexpected(E)
+
+    /// Terminate supervision tree - unrecoverable
+    | Fatal(E);
+
+implement<E> ErrorKind<E> {
+    fn is_expected(&self) -> Bool {
+        match self {
+            ErrorKind.Expected(_) => true,
+            _ => false,
+        }
+    }
+
+    fn is_unexpected(&self) -> Bool {
+        match self {
+            ErrorKind.Unexpected(_) => true,
+            _ => false,
+        }
+    }
+
+    fn is_fatal(&self) -> Bool {
+        match self {
+            ErrorKind.Fatal(_) => true,
+            _ => false,
+        }
+    }
+
+    fn error(&self) -> &E {
+        match self {
+            ErrorKind.Expected(e) => e,
+            ErrorKind.Unexpected(e) => e,
+            ErrorKind.Fatal(e) => e,
+        }
+    }
+
+    fn map<F>(self, f: fn(E) -> F) -> ErrorKind<F> {
+        match self {
+            ErrorKind.Expected(e) => ErrorKind.Expected(f(e)),
+            ErrorKind.Unexpected(e) => ErrorKind.Unexpected(f(e)),
+            ErrorKind.Fatal(e) => ErrorKind.Fatal(f(e)),
+        }
+    }
+}
+
+// ============================================================================
+// Classifiable Protocol
+// ============================================================================
+
+type Classifiable is protocol {
+    fn classify(&self) -> ErrorKind<Self>;
+};
+
+// ============================================================================
+// IOError Type with Classification
+// ============================================================================
+
+type IOError is
+    | NotFound(Text)
+    | PermissionDenied(Text)
+    | ConnectionReset
+    | Timeout
+    | OutOfMemory
+    | StorageFull;
+
+implement Classifiable for IOError {
+    fn classify(&self) -> ErrorKind<Self> {
+        match self {
+            // Expected - handle inline
+            IOError.NotFound(_) => ErrorKind.Expected(self.clone()),
+            IOError.PermissionDenied(_) => ErrorKind.Expected(self.clone()),
+
+            // Unexpected - let supervisor handle
+            IOError.ConnectionReset => ErrorKind.Unexpected(self.clone()),
+            IOError.Timeout => ErrorKind.Unexpected(self.clone()),
+
+            // Fatal - terminate tree
+            IOError.OutOfMemory => ErrorKind.Fatal(self.clone()),
+            IOError.StorageFull => ErrorKind.Fatal(self.clone()),
+        }
+    }
+}
+
+// ============================================================================
+// DatabaseError Type with Classification
+// ============================================================================
+
+type DatabaseError is
+    | RecordNotFound(Int)
+    | UniqueViolation(Text)
+    | ConnectionLost
+    | CorruptedData(Text);
+
+implement Classifiable for DatabaseError {
+    fn classify(&self) -> ErrorKind<Self> {
+        match self {
+            // Expected business errors
+            DatabaseError.RecordNotFound(_) => ErrorKind.Expected(self.clone()),
+            DatabaseError.UniqueViolation(_) => ErrorKind.Expected(self.clone()),
+
+            // Unexpected - connection issues
+            DatabaseError.ConnectionLost => ErrorKind.Unexpected(self.clone()),
+
+            // Fatal - data corruption
+            DatabaseError.CorruptedData(_) => ErrorKind.Fatal(self.clone()),
+        }
+    }
+}
+
+// ============================================================================
+// Application Error with mixed classifications
+// ============================================================================
+
+type AppError is
+    | IO(IOError)
+    | Database(DatabaseError)
+    | Validation(Text)
+    | Internal(Text);
+
+implement Classifiable for AppError {
+    fn classify(&self) -> ErrorKind<Self> {
+        match self {
+            AppError.IO(io_err) => {
+                // Delegate to IOError classification, then wrap
+                match io_err.classify() {
+                    ErrorKind.Expected(_) => ErrorKind.Expected(self.clone()),
+                    ErrorKind.Unexpected(_) => ErrorKind.Unexpected(self.clone()),
+                    ErrorKind.Fatal(_) => ErrorKind.Fatal(self.clone()),
+                }
+            }
+            AppError.Database(db_err) => {
+                match db_err.classify() {
+                    ErrorKind.Expected(_) => ErrorKind.Expected(self.clone()),
+                    ErrorKind.Unexpected(_) => ErrorKind.Unexpected(self.clone()),
+                    ErrorKind.Fatal(_) => ErrorKind.Fatal(self.clone()),
+                }
+            }
+            AppError.Validation(_) => ErrorKind.Expected(self.clone()),
+            AppError.Internal(_) => ErrorKind.Unexpected(self.clone()),
+        }
+    }
+}
+
+// ============================================================================
+// Handler that uses classification
+// ============================================================================
+
+type HandlingResult is
+    | Handled(Text)
+    | Propagated(Text)
+    | Terminated(Text);
+
+fn handle_classified<E: Classifiable + Clone>(
+    result: Result<Int, E>,
+    inline_handler: fn(&E) -> Int,
+) -> HandlingResult {
+    match result {
+        Ok(_) => HandlingResult.Handled("success"),
+        Err(e) => {
+            match e.classify() {
+                ErrorKind.Expected(err) => {
+                    let _ = inline_handler(&err);
+                    HandlingResult.Handled("handled inline")
+                }
+                ErrorKind.Unexpected(_) => {
+                    HandlingResult.Propagated("propagated to supervisor")
+                }
+                ErrorKind.Fatal(_) => {
+                    HandlingResult.Terminated("terminated tree")
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_io_error_classification() {
+    // Expected errors
+    let not_found = IOError.NotFound("file.txt");
+    assert(not_found.classify().is_expected());
+
+    let permission = IOError.PermissionDenied("/root/secret");
+    assert(permission.classify().is_expected());
+
+    // Unexpected errors
+    let reset = IOError.ConnectionReset;
+    assert(reset.classify().is_unexpected());
+
+    let timeout = IOError.Timeout;
+    assert(timeout.classify().is_unexpected());
+
+    // Fatal errors
+    let oom = IOError.OutOfMemory;
+    assert(oom.classify().is_fatal());
+
+    let storage = IOError.StorageFull;
+    assert(storage.classify().is_fatal());
+}
+
+fn test_database_error_classification() {
+    // Expected
+    let not_found = DatabaseError.RecordNotFound(42);
+    assert(not_found.classify().is_expected());
+
+    let unique = DatabaseError.UniqueViolation("email");
+    assert(unique.classify().is_expected());
+
+    // Unexpected
+    let lost = DatabaseError.ConnectionLost;
+    assert(lost.classify().is_unexpected());
+
+    // Fatal
+    let corrupt = DatabaseError.CorruptedData("users table");
+    assert(corrupt.classify().is_fatal());
+}
+
+fn test_app_error_classification() {
+    // IO errors propagate classification
+    let io_expected = AppError.IO(IOError.NotFound("file"));
+    assert(io_expected.classify().is_expected());
+
+    let io_fatal = AppError.IO(IOError.OutOfMemory);
+    assert(io_fatal.classify().is_fatal());
+
+    // Database errors propagate classification
+    let db_expected = AppError.Database(DatabaseError.RecordNotFound(1));
+    assert(db_expected.classify().is_expected());
+
+    let db_fatal = AppError.Database(DatabaseError.CorruptedData("table"));
+    assert(db_fatal.classify().is_fatal());
+
+    // Direct app errors
+    let validation = AppError.Validation("bad input");
+    assert(validation.classify().is_expected());
+
+    let internal = AppError.Internal("something went wrong");
+    assert(internal.classify().is_unexpected());
+}
+
+fn test_classification_based_handling() {
+    let inline_handler = |e: &IOError| -> Int {
+        match e {
+            IOError.NotFound(_) => -1,
+            IOError.PermissionDenied(_) => -2,
+            _ => -99,
+        }
+    };
+
+    // Expected error -> handled inline
+    let expected_err: Result<Int, IOError> = Err(IOError.NotFound("test"));
+    let result1 = handle_classified(expected_err, inline_handler);
+    match result1 {
+        HandlingResult.Handled(msg) => assert_eq(msg, "handled inline"),
+        _ => panic("Expected Handled"),
+    }
+
+    // Unexpected error -> propagated
+    let unexpected_err: Result<Int, IOError> = Err(IOError.ConnectionReset);
+    let result2 = handle_classified(unexpected_err, inline_handler);
+    match result2 {
+        HandlingResult.Propagated(_) => { /* OK */ }
+        _ => panic("Expected Propagated"),
+    }
+
+    // Fatal error -> terminated
+    let fatal_err: Result<Int, IOError> = Err(IOError.OutOfMemory);
+    let result3 = handle_classified(fatal_err, inline_handler);
+    match result3 {
+        HandlingResult.Terminated(_) => { /* OK */ }
+        _ => panic("Expected Terminated"),
+    }
+}
+
+fn test_error_kind_map() {
+    let expected: ErrorKind<Int> = ErrorKind.Expected(42);
+    let mapped = expected.map(|x| x * 2);
+
+    match mapped {
+        ErrorKind.Expected(v) => assert_eq(v, 84),
+        _ => panic("Expected ErrorKind.Expected"),
+    }
+
+    let unexpected: ErrorKind<Int> = ErrorKind.Unexpected(10);
+    let mapped2 = unexpected.map(|x| x + 5);
+
+    match mapped2 {
+        ErrorKind.Unexpected(v) => assert_eq(v, 15),
+        _ => panic("Expected ErrorKind.Unexpected"),
+    }
+}
+
+fn test_error_kind_accessors() {
+    let expected: ErrorKind<Text> = ErrorKind.Expected("hello");
+
+    assert(expected.is_expected());
+    assert(!expected.is_unexpected());
+    assert(!expected.is_fatal());
+    assert_eq(expected.error(), &"hello");
+
+    let fatal: ErrorKind<Text> = ErrorKind.Fatal("crash");
+
+    assert(!fatal.is_expected());
+    assert(!fatal.is_unexpected());
+    assert(fatal.is_fatal());
+    assert_eq(fatal.error(), &"crash");
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    test_io_error_classification();
+    test_database_error_classification();
+    test_app_error_classification();
+    test_classification_based_handling();
+    test_error_kind_map();
+    test_error_kind_accessors();
+
+    print("All ErrorKind classification tests passed!");
+}

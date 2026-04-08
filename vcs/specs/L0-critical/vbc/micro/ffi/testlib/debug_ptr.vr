@@ -1,0 +1,27 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, debug
+// @description: Debug pointer test
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_deref_i32(ptr: &Int32) -> Int32;
+}
+
+fn main() {
+    let x: Int32 = 42;
+    print("x="); print(x); print("\n");
+
+    let result = ffi_deref_i32(&x);
+    print("deref(&x)="); print(result); print("\n");
+
+    if result == 42 {
+        print("PASS\n");
+    } else {
+        print("FAIL: expected 42, got "); print(result); print("\n");
+    }
+
+    assert(result == 42);
+}

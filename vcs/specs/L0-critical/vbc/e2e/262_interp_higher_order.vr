@@ -1,0 +1,297 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, higher-order, functions
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: higher-order functions — apply, compose, twice,
+// fold, map-like patterns, function chaining
+
+// =============================================================================
+// Core higher-order combinators
+// =============================================================================
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply2(f: fn(Int, Int) -> Int, a: Int, b: Int) -> Int {
+    f(a, b)
+}
+
+fn twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn thrice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(f(x)))
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn test_apply() {
+    let inc = |x: Int| -> Int { x + 1 };
+    let double = |x: Int| -> Int { x * 2 };
+    let negate = |x: Int| -> Int { -x };
+
+    assert_eq(apply(inc, 10), 11);
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(negate, 7), -7);
+    assert_eq(apply(inc, -1), 0);
+    assert_eq(apply(double, 0), 0);
+}
+
+fn test_apply2() {
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let mul = |a: Int, b: Int| -> Int { a * b };
+    let sub = |a: Int, b: Int| -> Int { a - b };
+
+    assert_eq(apply2(add, 3, 4), 7);
+    assert_eq(apply2(mul, 6, 7), 42);
+    assert_eq(apply2(sub, 10, 3), 7);
+    assert_eq(apply2(add, -5, 5), 0);
+}
+
+fn test_twice() {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+
+    // twice(double, 3) = double(double(3)) = double(6) = 12
+    assert_eq(twice(double, 3), 12);
+    // twice(inc, 10) = inc(inc(10)) = inc(11) = 12
+    assert_eq(twice(inc, 10), 12);
+    // twice(double, 1) = double(double(1)) = double(2) = 4
+    assert_eq(twice(double, 1), 4);
+}
+
+fn test_thrice() {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+
+    // thrice(double, 1) = double(double(double(1))) = 2 -> 4 -> 8
+    assert_eq(thrice(double, 1), 8);
+    // thrice(inc, 0) = 1 -> 2 -> 3
+    assert_eq(thrice(inc, 0), 3);
+}
+
+fn test_compose() {
+    let inc = |x: Int| -> Int { x + 1 };
+    let double = |x: Int| -> Int { x * 2 };
+
+    let inc_then_double = compose(double, inc);
+    // inc(3)=4, double(4)=8
+    assert_eq(inc_then_double(3), 8);
+
+    let double_then_inc = compose(inc, double);
+    // double(3)=6, inc(6)=7
+    assert_eq(double_then_inc(3), 7);
+}
+
+fn test_compose_chain() {
+    let add1 = |x: Int| -> Int { x + 1 };
+    let mul3 = |x: Int| -> Int { x * 3 };
+    let sub2 = |x: Int| -> Int { x - 2 };
+
+    // (sub2 o mul3 o add1)(4) = sub2(mul3(add1(4))) = sub2(mul3(5)) = sub2(15) = 13
+    let chained = compose(sub2, compose(mul3, add1));
+    assert_eq(chained(4), 13);
+}
+
+// =============================================================================
+// Fold / reduce pattern
+// =============================================================================
+
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_fold_sum() {
+    let sum = fold_range(1, 11, 0, |acc: Int, x: Int| -> Int { acc + x });
+    // 1+2+...+10 = 55
+    assert_eq(sum, 55);
+}
+
+fn test_fold_product() {
+    let product = fold_range(1, 7, 1, |acc: Int, x: Int| -> Int { acc * x });
+    // 6! = 720
+    assert_eq(product, 720);
+}
+
+fn test_fold_max() {
+    // Find max in sequence 0..10 (it's 9)
+    let max_val = fold_range(0, 10, -1, |acc: Int, x: Int| -> Int {
+        if x > acc { x } else { acc }
+    });
+    assert_eq(max_val, 9);
+}
+
+fn test_fold_count_evens() {
+    let count = fold_range(0, 20, 0, |acc: Int, x: Int| -> Int {
+        if x % 2 == 0 { acc + 1 } else { acc }
+    });
+    // 0,2,4,6,8,10,12,14,16,18 = 10 even numbers
+    assert_eq(count, 10);
+}
+
+fn test_fold_sum_of_squares() {
+    let sum_sq = fold_range(1, 6, 0, |acc: Int, x: Int| -> Int { acc + x * x });
+    // 1+4+9+16+25 = 55
+    assert_eq(sum_sq, 55);
+}
+
+// =============================================================================
+// Map-like pattern using fold
+// =============================================================================
+
+fn transform_and_sum(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
+    let mut total = 0;
+    let mut i = start;
+    while i < end {
+        total = total + f(i);
+        i = i + 1;
+    }
+    total
+}
+
+fn test_transform_and_sum() {
+    let double = |x: Int| -> Int { x * 2 };
+    // sum of double(0..5) = 0+2+4+6+8 = 20
+    assert_eq(transform_and_sum(0, 5, double), 20);
+
+    let square = |x: Int| -> Int { x * x };
+    // sum of square(1..5) = 1+4+9+16 = 30
+    assert_eq(transform_and_sum(1, 5, square), 30);
+}
+
+// =============================================================================
+// Filter-like pattern
+// =============================================================================
+
+fn count_matching(start: Int, end: Int, pred: fn(Int) -> Int) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) != 0 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_count_matching() {
+    let is_positive = |x: Int| -> Int { if x > 0 { 1 } else { 0 } };
+    assert_eq(count_matching(-5, 6, is_positive), 5);
+
+    let is_divisible_by_3 = |x: Int| -> Int { if x % 3 == 0 { 1 } else { 0 } };
+    // 0,3,6,9 in [0..10)
+    assert_eq(count_matching(0, 10, is_divisible_by_3), 4);
+}
+
+// =============================================================================
+// Functions returning functions
+// =============================================================================
+
+fn make_checker(threshold: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { if x >= threshold { 1 } else { 0 } }
+}
+
+fn test_make_checker() {
+    let is_adult = make_checker(18);
+    assert_eq(is_adult(17), 0);
+    assert_eq(is_adult(18), 1);
+    assert_eq(is_adult(25), 1);
+
+    let is_large = make_checker(1000);
+    assert_eq(is_large(500), 0);
+    assert_eq(is_large(1000), 1);
+    assert_eq(is_large(9999), 1);
+}
+
+// =============================================================================
+// Apply n times
+// =============================================================================
+
+fn apply_n(f: fn(Int) -> Int, x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_apply_n() {
+    let inc = |x: Int| -> Int { x + 1 };
+    assert_eq(apply_n(inc, 0, 10), 10);
+    assert_eq(apply_n(inc, 100, 0), 100);
+
+    let double = |x: Int| -> Int { x * 2 };
+    // 1 -> 2 -> 4 -> 8 -> 16 -> 32
+    assert_eq(apply_n(double, 1, 5), 32);
+}
+
+// =============================================================================
+// Higher-order with binary functions
+// =============================================================================
+
+fn accumulate(start: Int, end: Int, init: Int, combine: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = combine(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_accumulate() {
+    // Sum
+    let sum = accumulate(1, 6, 0, |a: Int, b: Int| -> Int { a + b });
+    assert_eq(sum, 15);
+
+    // Product
+    let prod = accumulate(1, 6, 1, |a: Int, b: Int| -> Int { a * b });
+    assert_eq(prod, 120);
+
+    // XOR
+    let xor = accumulate(0, 8, 0, |a: Int, b: Int| -> Int { a ^ b });
+    // 0^0^1^2^3^4^5^6^7 = 0^1^2^3^4^5^6^7
+    // = (0^1)^(2^3)^(4^5)^(6^7) = 1^1^1^1 = 0
+    assert_eq(xor, 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_apply();
+    test_apply2();
+    test_twice();
+    test_thrice();
+    test_compose();
+    test_compose_chain();
+    test_fold_sum();
+    test_fold_product();
+    test_fold_max();
+    test_fold_count_evens();
+    test_fold_sum_of_squares();
+    test_transform_and_sum();
+    test_count_matching();
+    test_make_checker();
+    test_apply_n();
+    test_accumulate();
+    print("[OK] 262_interp_higher_order");
+    0
+}

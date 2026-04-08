@@ -1,0 +1,78 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, tcp, networking, loopback
+// @expected-exit: 0
+
+// Test: TCP loopback echo — server thread accepts connection, echoes data back.
+
+mount core.*;
+
+fn tcp_listen(port: Int) -> Int { 0 }
+fn tcp_accept(listen_fd: Int) -> Int { 0 }
+fn tcp_connect(host: Text, port: Int) -> Int { 0 }
+fn tcp_send(fd: Int, data: Text) -> Int { 0 }
+fn tcp_recv(fd: Int) -> Text { "" }
+fn tcp_close(fd: Int) -> Int { 0 }
+fn __time_sleep_nanos_raw(nanos: Int) -> Int { 0 }
+
+fn echo_server(port: Int) -> Int {
+    let listen_fd = tcp_listen(port);
+    if listen_fd < 0 {
+        print(f"FAIL: tcp_listen returned {listen_fd}");
+        return 1;
+    }
+
+    let client_fd = tcp_accept(listen_fd);
+    if client_fd < 0 {
+        print(f"FAIL: tcp_accept returned {client_fd}");
+        tcp_close(listen_fd);
+        return 1;
+    }
+
+    let data = tcp_recv(client_fd);
+    let sent = tcp_send(client_fd, data);
+    tcp_close(client_fd);
+    tcp_close(listen_fd);
+    0
+}
+
+fn main() -> Int {
+    let port = 19885;
+
+    let server = spawn echo_server(port);
+    __time_sleep_nanos_raw(200000000);
+
+    let fd = tcp_connect("127.0.0.1", port);
+    if fd < 0 {
+        print(f"FAIL: tcp_connect returned {fd}");
+        return 1;
+    }
+
+    let msg = "Hello TCP from Verum!";
+    let sent = tcp_send(fd, msg);
+    if sent <= 0 {
+        print(f"FAIL: tcp_send returned {sent}");
+        tcp_close(fd);
+        return 1;
+    }
+
+    __time_sleep_nanos_raw(100000000);
+
+    let response = tcp_recv(fd);
+    tcp_close(fd);
+
+    let server_result = server.await;
+    if server_result != 0 {
+        print(f"FAIL: server returned {server_result}");
+        return 1;
+    }
+
+    if response == msg {
+        print("885_tcp_loopback: PASS");
+        0
+    } else {
+        print(f"FAIL: expected '{msg}', got '{response}'");
+        1
+    }
+}

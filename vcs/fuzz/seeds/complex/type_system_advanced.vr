@@ -1,0 +1,212 @@
+// Complex: Advanced type system features
+// Tests dependent types, refinements, and compile-time verification
+
+use verum_core.base.{List, Maybe, Text}
+
+// Dependent function types (Pi types)
+fn replicate<T, N: meta usize>(value: T) -> [T; N] {
+    let mut result = [];
+    for _ in 0..N {
+        result.push(value.clone());
+    }
+    result
+}
+
+// Length-indexed vectors
+type SizedArray<T, N: meta usize> is [T; N];
+
+fn concat<T, N: meta usize, M: meta usize>(
+    a: SizedArray<T, N>,
+    b: SizedArray<T, M>
+) -> SizedArray<T, N + M> {
+    let mut result = [];
+    for item in a { result.push(item); }
+    for item in b { result.push(item); }
+    result
+}
+
+fn head<T, N: meta usize>(
+    v: SizedArray<T, N>
+) -> T
+where
+    meta N > 0
+{
+    v[0]
+}
+
+fn tail<T, N: meta usize>(
+    v: SizedArray<T, N>
+) -> SizedArray<T, N - 1>
+where
+    meta N > 0
+{
+    v[1..]
+}
+
+// Sigma types (dependent pairs)
+type NonEmpty<T> is (n: usize, v: SizedArray<T, n>) where n > 0;
+
+fn from_list<T>(list: List<T>) -> Maybe<NonEmpty<T>> {
+    if list.is_empty() {
+        None
+    } else {
+        Some((list.len(), list.into_vec()))
+    }
+}
+
+// Refinement types with proofs
+type Sorted<T: Ord> is List<T> where forall i. i < len - 1 => self[i] <= self[i+1];
+
+fn merge<T: Ord>(a: Sorted<T>, b: Sorted<T>) -> Sorted<T> {
+    // Proof that result is sorted follows from merge algorithm
+    let mut result = [];
+    let mut i = 0;
+    let mut j = 0;
+
+    while i < a.len() && j < b.len() {
+        if a[i] <= b[j] {
+            result.push(a[i]);
+            i = i + 1;
+        } else {
+            result.push(b[j]);
+            j = j + 1;
+        }
+    }
+
+    while i < a.len() {
+        result.push(a[i]);
+        i = i + 1;
+    }
+
+    while j < b.len() {
+        result.push(b[j]);
+        j = j + 1;
+    }
+
+    result
+}
+
+// State machine types
+type DoorState is
+    Open |
+    Closed |
+    Locked;
+
+type Door<S: DoorState> is {
+    _state: PhantomData<S>,
+};
+
+implement Door<Closed> {
+    fn open(self) -> Door<Open> {
+        Door { _state: PhantomData }
+    }
+
+    fn lock(self) -> Door<Locked> {
+        Door { _state: PhantomData }
+    }
+}
+
+implement Door<Open> {
+    fn close(self) -> Door<Closed> {
+        Door { _state: PhantomData }
+    }
+}
+
+implement Door<Locked> {
+    fn unlock(self) -> Door<Closed> {
+        Door { _state: PhantomData }
+    }
+}
+
+// Type-level natural numbers
+type Zero is {};
+type Succ<N> is { pred: N };
+
+type One is Succ<Zero>;
+type Two is Succ<One>;
+type Three is Succ<Two>;
+
+// Type-level list
+type Nil is {};
+type Cons<H, T> is { head: H, tail: T };
+
+// Type-safe heterogeneous list
+type HList<Types> is match Types {
+    Nil => (),
+    Cons<H, T> => (H, HList<T>),
+};
+
+// Type-level append
+type Append<A, B> is match A {
+    Nil => B,
+    Cons<H, T> => Cons<H, Append<T, B>>,
+};
+
+// Proof terms
+fn refl<T, a: T>() -> Eq<T, a, a> {
+    Refl
+}
+
+fn symm<T, a: T, b: T>(proof: Eq<T, a, b>) -> Eq<T, b, a> {
+    match proof {
+        Refl => Refl
+    }
+}
+
+fn trans<T, a: T, b: T, c: T>(
+    ab: Eq<T, a, b>,
+    bc: Eq<T, b, c>
+) -> Eq<T, a, c> {
+    match (ab, bc) {
+        (Refl, Refl) => Refl
+    }
+}
+
+// Indexed monad for resource tracking
+protocol IndexedMonad<I, O, A> {
+    fn pure(a: A) -> Self where I == O;
+    fn bind<B, O2>(self, f: function(A) -> IndexedMonad<O, O2, B>) -> IndexedMonad<I, O2, B>;
+}
+
+// Linear types simulation
+type Linear<T> is T where consumed_exactly_once;
+
+fn use_once(resource: Linear<Resource>) -> Result {
+    // resource must be used exactly once
+    resource.process()
+}
+
+// Session types for protocol safety
+type SessionSend<T, S> is { _marker: PhantomData<(T, S)> };
+type SessionRecv<T, S> is { _marker: PhantomData<(T, S)> };
+type SessionEnd is {};
+
+fn send<T, S>(chan: SessionSend<T, S>, value: T) -> S {
+    // Protocol continues with S
+    chan.send(value)
+}
+
+fn recv<T, S>(chan: SessionRecv<T, S>) -> (T, S) {
+    chan.receive()
+}
+
+fn main() {
+    // Length-indexed vectors
+    let v3: SizedArray<Int, 3> = [1, 2, 3];
+    let v2: SizedArray<Int, 2> = [4, 5];
+    let v5: SizedArray<Int, 5> = concat(v3, v2);
+
+    let first = head(v5);
+    let rest = tail(v5);
+
+    // State machine
+    let door = Door<Closed> { _state: PhantomData };
+    let open_door = door.open();
+    let closed_door = open_door.close();
+    let locked_door = closed_door.lock();
+    let unlocked_door = locked_door.unlock();
+
+    // Proofs
+    let eq: Eq<Int, 1, 1> = refl();
+    let symm_eq = symm(eq);
+}

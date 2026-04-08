@@ -1,0 +1,191 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine, async, context
+
+/// Test copy and affine semantics in async contexts and with context dependencies.
+/// Regular types are copied across async boundaries (Copy semantics).
+/// Affine types are consumed when passed to async blocks.
+/// Spec: 04-memory-model.md#async-ownership
+/// Spec: 16-context-system.md#ownership-in-async
+
+// Affine type for testing move semantics
+type affine Connection is {
+    id: Int,
+    active: Bool,
+};
+
+fn main() {
+    test_copy_into_async();
+    test_copy_from_async();
+    test_copy_across_await();
+    test_copy_with_context();
+    test_affine_in_async();
+    test_spawn_copy();
+    structured_concurrency_copies();
+}
+
+/// Test copying values into async blocks
+async fn test_copy_into_async() {
+    let data = Text.from("async data");
+
+    // Copy into async block (Text is Copy)
+    let future = async {
+        print(data);
+        data.len()
+    };
+
+    // data is STILL valid (Text is Copy)
+    print(data);
+
+    // Execute the future
+    let result = future.await;
+    assert(result == 10);
+}
+
+/// Test copying values out of async blocks
+async fn test_copy_from_async() {
+    let future = async {
+        // Create value inside async
+        let created = Text.from("created in async");
+        created  // Copy out as return value
+    };
+
+    // Value is copied out of async block
+    let result = future.await;
+    assert(result == "created in async");
+}
+
+/// Test copies across await points
+async fn test_copy_across_await() {
+    let data = Text.from("across await");
+
+    // Use data before await
+    let len_before = data.len();
+
+    // Simulate async operation
+    yield_now().await;
+
+    // data is still valid after await (Text is Copy)
+    let len_after = data.len();
+
+    assert(len_before == len_after);
+    assert(data == "across await");
+}
+
+/// Context for testing
+context Database {
+    fn query(&self, q: Text) -> List<Row>;
+}
+
+type Row is {
+    id: Int,
+    data: Text,
+};
+
+/// Test copies with context system
+fn test_copy_with_context() {
+    // Data that will be copied (Text is Copy)
+    let query_text = Text.from("SELECT * FROM users");
+
+    // Function that takes a copy with context
+    fn execute_query(q: Text) -> List<Row>
+        using Database
+    {
+        // q is copied into this function (Text is Copy)
+        Database.query(q)
+    }
+
+    // With a provided context
+    provide Database = MockDatabase {};
+
+    // query_text is copied into execute_query
+    let results = execute_query(query_text);
+    // query_text is STILL valid
+    assert(query_text == "SELECT * FROM users");
+}
+
+/// Mock database for testing
+type MockDatabase is {};
+
+implement Database for MockDatabase {
+    fn query(&self, q: Text) -> List<Row> {
+        [Row { id: 1, data: Text.from("mock") }]
+    }
+}
+
+/// Test affine types in async - affine values are consumed
+async fn test_affine_in_async() {
+    let conn = Connection { id: 1, active: true };
+
+    // Affine type is consumed when passed to async block
+    // The compiler tracks that conn is used exactly once
+    let handle = spawn async {
+        // conn is consumed by this spawned task (Connection is affine)
+        assert(conn.active);
+        conn.id
+    };
+
+    // conn is NO LONGER valid (consumed by async block)
+    // print(conn.id);  // Would be a compile error - use after consume
+
+    let result = handle.await;
+    assert(result == 1);
+}
+
+/// Test value copy in spawned tasks
+async fn test_spawn_copy() {
+    let data = [1, 2, 3, 4, 5];
+
+    // Spawn copies the data (List is Copy)
+    let handle = spawn async {
+        let sum = data.iter().sum();
+        sum
+    };
+
+    // data is STILL valid (List is Copy)
+    assert(data.len() == 5);
+
+    let result = handle.await;
+    assert(result == 15);
+}
+
+/// Test ownership with structured concurrency
+async fn structured_concurrency_copies() {
+    let items = [
+        Text.from("a"),
+        Text.from("b"),
+        Text.from("c"),
+    ];
+
+    // Each item is copied to a different task (Text is Copy)
+    let futures = items.iter()
+        .map(|item| async {
+            // item is copied into this closure (Text is Copy)
+            process_item(item).await
+        })
+        .collect<List<_>>();
+
+    // items is STILL valid
+    assert(items.len() == 3);
+
+    // Wait for all futures
+    let results = join_futures(futures).await;
+    assert(results.len() == 3);
+}
+
+async fn process_item(item: Text) -> Int {
+    item.len()
+}
+
+/// Helper function
+async fn yield_now() {
+    // Yield control back to executor
+}
+
+// Helper that joins multiple futures (simplified version)
+async fn join_futures<T>(futures: List<T>) -> List<T> {
+    // In real implementation, this would await each future
+    // Simplified here to avoid impl Trait syntax
+    futures
+}

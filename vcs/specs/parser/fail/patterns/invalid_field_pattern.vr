@@ -1,0 +1,48 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, record, field, error
+// @description: Test invalid field pattern syntax (using = instead of :)
+// @expected-error: E076
+
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int };
+
+fn test_equals_instead_of_colon() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: using = instead of : for field binding
+    match p {
+        Point { x = val } => print("wrong syntax"),
+        _ => print("other"),
+    }
+}
+
+fn test_multiple_equals() {
+    let person = Person { name: "Alice", age: 30 };
+
+    // Invalid: using = for multiple fields
+    match person {
+        Person { name = n, age = a } => print("wrong syntax"),
+        _ => print("other"),
+    }
+}
+
+fn test_arrow_instead_of_colon() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: using => instead of : for field binding
+    match p {
+        Point { x => val } => print("wrong syntax"),
+        _ => print("other"),
+    }
+}
+
+fn test_double_colon_field() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: using :: instead of :
+    match p {
+        Point { x:: val } => print("wrong syntax"),
+        _ => print("other"),
+    }
+}

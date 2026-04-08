@@ -1,0 +1,106 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, build_assets, context, error
+// @description: Test that build assets functions require BuildAssets context
+// @expected-error: M201
+
+// =============================================================================
+// LOAD_TEXT WITHOUT CONTEXT
+// =============================================================================
+
+// ERROR: load_text requires BuildAssets context
+meta fn test_load_text_no_context() -> Text {
+    load_text("config.toml")  // ERROR: no BuildAssets context
+}
+
+// =============================================================================
+// INCLUDE_STR WITHOUT CONTEXT
+// =============================================================================
+
+// ERROR: include_str requires BuildAssets context
+meta fn test_include_str_no_context() -> Text {
+    include_str("template.html")  // ERROR: no BuildAssets context
+}
+
+// =============================================================================
+// INCLUDE_BYTES WITHOUT CONTEXT
+// =============================================================================
+
+// ERROR: include_bytes requires BuildAssets context
+meta fn test_include_bytes_no_context() -> Bytes {
+    include_bytes("icon.png")  // ERROR: no BuildAssets context
+}
+
+// =============================================================================
+// ASSET_EXISTS WITHOUT CONTEXT
+// =============================================================================
+
+// ERROR: asset_exists requires BuildAssets context
+meta fn test_asset_exists_no_context() -> Bool {
+    asset_exists("file.txt")  // ERROR: no BuildAssets context
+}
+
+// =============================================================================
+// ASSET_LIST_DIR WITHOUT CONTEXT
+// =============================================================================
+
+// ERROR: asset_list_dir requires BuildAssets context
+meta fn test_list_dir_no_context() -> [Text] {
+    asset_list_dir(".")  // ERROR: no BuildAssets context
+}
+
+// =============================================================================
+// ASSET_METADATA WITHOUT CONTEXT
+// =============================================================================
+
+// ERROR: asset_metadata requires BuildAssets context
+meta fn test_metadata_no_context() -> (UInt, UInt, Bool, Bool, Bool) {
+    asset_metadata("file.txt")  // ERROR: no BuildAssets context
+}
+
+// =============================================================================
+// WRONG CONTEXT TYPE
+// =============================================================================
+
+// ERROR: MetaTypes is not BuildAssets
+meta fn test_load_with_wrong_context() -> Text using [MetaTypes] {
+    load_text("config.toml")  // ERROR: MetaTypes doesn't provide BuildAssets
+}
+
+// ERROR: MetaRuntime is not BuildAssets
+meta fn test_exists_with_wrong_context() -> Bool using [MetaRuntime] {
+    asset_exists("file.txt")  // ERROR: MetaRuntime doesn't provide BuildAssets
+}
+
+// ERROR: CompileDiag is not BuildAssets
+meta fn test_list_with_wrong_context() -> [Text] using [CompileDiag] {
+    asset_list_dir(".")  // ERROR: CompileDiag doesn't provide BuildAssets
+}
+
+// =============================================================================
+// NESTED CONTEXT MISSING
+// =============================================================================
+
+// Inner function without context
+meta fn load_file_inner(path: Text) -> Text {
+    load_text(path)  // ERROR: no context
+}
+
+// Outer function has context but inner doesn't
+meta fn outer_load() -> Text using [BuildAssets] {
+    load_file_inner("config.toml")  // ERROR: inner function lacks context
+}
+
+// =============================================================================
+// MULTIPLE CONTEXTS MISSING BUILDASSETS
+// =============================================================================
+
+// ERROR: Having MetaTypes + MetaRuntime doesn't give BuildAssets
+meta fn test_combined_wrong_contexts() -> Text using [MetaTypes, MetaRuntime] {
+    load_text("file.txt")  // ERROR: BuildAssets not in context list
+}
+
+fn main() {
+    @const test_load_text_no_context();
+}

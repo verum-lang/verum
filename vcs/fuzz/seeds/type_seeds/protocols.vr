@@ -1,0 +1,215 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, protocols, traits
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// Protocols - Type System Protocol Test Seed
+// Tests protocol definitions and implementations
+// =============================================================================
+
+// Empty protocol
+type Marker is protocol {};
+
+// Simple protocol with method
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+// Protocol with multiple methods
+type Comparable is protocol {
+    fn compare(&self, other: &Self) -> Ordering;
+    fn less_than(&self, other: &Self) -> Bool;
+    fn greater_than(&self, other: &Self) -> Bool;
+};
+
+// Protocol with associated types
+type Iterator is protocol {
+    type Item;
+
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// Protocol with associated constants
+type Bounded is protocol {
+    const MIN: Self;
+    const MAX: Self;
+};
+
+// Protocol with default implementations
+type Stringify is protocol {
+    fn to_string(&self) -> Text;
+
+    fn debug_string(&self) -> Text {
+        f"Debug({self.to_string()})"
+    }
+};
+
+// Generic protocol
+type Container is protocol {
+    type Item;
+
+    fn len(&self) -> Int;
+    fn is_empty(&self) -> Bool { self.len() == 0 }
+    fn contains(&self, item: &Self.Item) -> Bool;
+};
+
+// Protocol with generic methods
+type Mappable is protocol {
+    type Item;
+
+    fn map<U>(&self, f: fn(Self.Item) -> U) -> Self where type Self.Item = U;
+};
+
+// Protocol with bounds on associated types
+type SortedContainer is protocol {
+    type Item: Ord;
+
+    fn min(&self) -> Maybe<&Self.Item>;
+    fn max(&self) -> Maybe<&Self.Item>;
+};
+
+// Protocol extension (inheritance)
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type DeepClone is protocol extends Clone {
+    fn deep_clone(&self) -> Self;
+};
+
+// Multiple protocol extension
+type FullyComparable is protocol extends Eq + Ord + Hash {};
+
+// Async protocol
+type AsyncIterator is protocol {
+    type Item;
+
+    async fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type AsyncRead is protocol {
+    async fn read(&mut self, buf: &mut [U8]) -> Result<Int, Error>;
+};
+
+// Protocol with GATs (Generic Associated Types)
+type Lending is protocol {
+    type Item<T>;
+
+    fn lend<T>(&self) -> Self.Item<T>;
+};
+
+type StreamingIterator is protocol {
+    type Item<T>;
+
+    fn next<T>(&mut self) -> Maybe<GenRef<Self.Item<T>>>;
+};
+
+// Protocol with negative bounds
+type ThreadSafe is protocol extends Send + !Sync {};
+
+// Protocol with refinements
+type NonNegativeOps is protocol {
+    fn abs(&self) -> Self {>= 0};
+    fn squared(&self) -> Self {>= 0};
+};
+
+// Higher-kinded protocol
+type Functor is protocol {
+    type F<_>;
+
+    fn map<A, B>(self: Self.F<A>, f: fn(A) -> B) -> Self.F<B>;
+};
+
+type Monad is protocol extends Functor {
+    fn pure<A>(a: A) -> Self.F<A>;
+    fn flat_map<A, B>(self: Self.F<A>, f: fn(A) -> Self.F<B>) -> Self.F<B>;
+};
+
+// Implementations
+type Point is { x: Int, y: Int };
+
+implement Display for Point {
+    fn display(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+implement Clone for Point {
+    fn clone(&self) -> Self {
+        Point { x: self.x, y: self.y }
+    }
+}
+
+implement Eq for Point {
+    fn eq(&self, other: &Self) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+// Generic implementation
+implement<T> Clone for Maybe<T> where type T: Clone {
+    fn clone(&self) -> Self {
+        match self {
+            None => None,
+            Some(v) => Some(v.clone()),
+        }
+    }
+}
+
+// Blanket implementation
+implement<T> Display for T where type T: Debug {
+    fn display(&self) -> Text {
+        self.debug()
+    }
+}
+
+// Conditional implementation
+implement<T> Ord for List<T> where type T: Ord {
+    fn compare(&self, other: &Self) -> Ordering {
+        // Lexicographic comparison
+        for (a, b) in self.iter().zip(other.iter()) {
+            match a.compare(b) {
+                Ordering.Equal => continue,
+                ord => return ord,
+            }
+        }
+        self.len().compare(other.len())
+    }
+}
+
+// Specialization
+implement<T> Clone for List<T> where type T: Clone {
+    default fn clone(&self) -> Self {
+        self.iter().map(|x| x.clone()).collect()
+    }
+}
+
+@specialize
+implement Clone for List<Int> {
+    fn clone(&self) -> Self {
+        // Optimized for Int
+        self.copy()
+    }
+}
+
+// Protocol object type
+fn polymorphic(item: &Display) -> Text {
+    item.display()
+}
+
+fn multi_protocol(item: &Display + Debug + Clone) -> Text {
+    item.display()
+}
+
+// Protocol with complex bounds
+type ComplexProtocol<T, U> is protocol
+where type T: Clone + Debug + Send
+where type U: Hash + Eq
+{
+    type Output: Display;
+
+    fn process(&self, t: T, u: U) -> Self.Output;
+};

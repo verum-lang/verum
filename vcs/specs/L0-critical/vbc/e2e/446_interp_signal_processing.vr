@@ -1,0 +1,265 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, signal_processing, moving_average, convolution
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests moving average, convolution, and peak detection on integer arrays.
+
+fn test_simple_moving_average() {
+    // SMA of window size 3 over signal [10, 20, 30, 40, 50, 60, 70]
+    // SMA[2] = (10+20+30)/3 = 20
+    // SMA[3] = (20+30+40)/3 = 30
+    // SMA[4] = (30+40+50)/3 = 40
+    // SMA[5] = (40+50+60)/3 = 50
+    // SMA[6] = (50+60+70)/3 = 60
+    let signal = [10, 20, 30, 40, 50, 60, 70];
+    let n = 7;
+    let window = 3;
+    let mut sma = [0, 0, 0, 0, 0, 0, 0];
+
+    let mut i = window - 1;
+    while i < n {
+        let mut sum = 0;
+        let mut j = 0;
+        while j < window {
+            sum = sum + signal[i - j];
+            j = j + 1;
+        }
+        sma[i] = sum / window;
+        i = i + 1;
+    }
+
+    assert_eq(sma[2], 20);
+    assert_eq(sma[3], 30);
+    assert_eq(sma[4], 40);
+    assert_eq(sma[5], 50);
+    assert_eq(sma[6], 60);
+
+    print("simple_moving_average: ok");
+}
+
+fn test_weighted_moving_average() {
+    // WMA: weights [1, 2, 3] (most recent has highest weight, total=6)
+    // Signal: [5, 10, 15, 20, 25]
+    // WMA[2] = (1*5 + 2*10 + 3*15) / 6 = (5+20+45)/6 = 70/6 = 11 (integer)
+    // WMA[3] = (1*10 + 2*15 + 3*20) / 6 = (10+30+60)/6 = 100/6 = 16 (integer)
+    // WMA[4] = (1*15 + 2*20 + 3*25) / 6 = (15+40+75)/6 = 130/6 = 21 (integer)
+    let signal = [5, 10, 15, 20, 25];
+    let n = 5;
+    let weights = [1, 2, 3]; // oldest to most recent
+    let w_sum = 6;
+    let window = 3;
+    let mut wma = [0, 0, 0, 0, 0];
+
+    let mut i = window - 1;
+    while i < n {
+        let mut sum = 0;
+        let mut j = 0;
+        while j < window {
+            sum = sum + signal[i - (window - 1 - j)] * weights[j];
+            j = j + 1;
+        }
+        wma[i] = sum / w_sum;
+        i = i + 1;
+    }
+
+    assert_eq(wma[2], 11); // 70/6 = 11
+    assert_eq(wma[3], 16); // 100/6 = 16
+    assert_eq(wma[4], 21); // 130/6 = 21
+
+    print("weighted_moving_average: ok");
+}
+
+fn test_convolution() {
+    // Discrete convolution of signal with kernel
+    // Signal: [1, 2, 3, 4, 5]
+    // Kernel: [1, 0, -1] (edge detection)
+    // Valid convolution (no padding): output length = n - k + 1 = 5-3+1 = 3
+    // out[0] = 1*1 + 2*0 + 3*(-1) = 1-3 = -2
+    // out[1] = 2*1 + 3*0 + 4*(-1) = 2-4 = -2
+    // out[2] = 3*1 + 4*0 + 5*(-1) = 3-5 = -2
+    let signal = [1, 2, 3, 4, 5];
+    let n = 5;
+    let kernel = [1, 0, -1];
+    let k = 3;
+    let out_len = n - k + 1;
+    let mut output = [0, 0, 0];
+
+    let mut i = 0;
+    while i < out_len {
+        let mut sum = 0;
+        let mut j = 0;
+        while j < k {
+            sum = sum + signal[i + j] * kernel[j];
+            j = j + 1;
+        }
+        output[i] = sum;
+        i = i + 1;
+    }
+
+    assert_eq(output[0], -2);
+    assert_eq(output[1], -2);
+    assert_eq(output[2], -2);
+
+    // Gaussian-like smoothing kernel [1, 2, 1] (sum=4)
+    // Signal: [4, 8, 12, 8, 4]
+    // out[0] = (4*1 + 8*2 + 12*1)/4 = (4+16+12)/4 = 32/4 = 8
+    // out[1] = (8*1 + 12*2 + 8*1)/4 = (8+24+8)/4 = 40/4 = 10
+    // out[2] = (12*1 + 8*2 + 4*1)/4 = (12+16+4)/4 = 32/4 = 8
+    let sig2 = [4, 8, 12, 8, 4];
+    let gauss = [1, 2, 1];
+    let mut smooth = [0, 0, 0];
+    i = 0;
+    while i < 3 {
+        let mut s = 0;
+        let mut j = 0;
+        while j < 3 {
+            s = s + sig2[i + j] * gauss[j];
+            j = j + 1;
+        }
+        smooth[i] = s / 4;
+        i = i + 1;
+    }
+    assert_eq(smooth[0], 8);
+    assert_eq(smooth[1], 10);
+    assert_eq(smooth[2], 8);
+
+    print("convolution: ok");
+}
+
+fn test_peak_detection() {
+    // Detect local maxima: signal[i] > signal[i-1] && signal[i] > signal[i+1]
+    let signal = [3, 7, 5, 10, 2, 8, 4, 6, 1];
+    let n = 9;
+    let mut peaks = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut peak_count = 0;
+
+    let mut i = 1;
+    while i < n - 1 {
+        if signal[i] > signal[i - 1] && signal[i] > signal[i + 1] {
+            peaks[peak_count] = i;
+            peak_count = peak_count + 1;
+        }
+        i = i + 1;
+    }
+
+    // Peaks at:
+    // i=1: 7 > 3 and 7 > 5 -> YES
+    // i=2: 5 < 7 -> NO
+    // i=3: 10 > 5 and 10 > 2 -> YES
+    // i=4: 2 < 10 -> NO
+    // i=5: 8 > 2 and 8 > 4 -> YES
+    // i=6: 4 < 8 -> NO
+    // i=7: 6 > 4 and 6 > 1 -> YES
+    assert_eq(peak_count, 4);
+    assert_eq(peaks[0], 1);
+    assert_eq(peaks[1], 3);
+    assert_eq(peaks[2], 5);
+    assert_eq(peaks[3], 7);
+
+    // Find maximum peak value
+    let mut max_peak_val = 0;
+    let mut k = 0;
+    while k < peak_count {
+        let pv = signal[peaks[k]];
+        if pv > max_peak_val { max_peak_val = pv; }
+        k = k + 1;
+    }
+    assert_eq(max_peak_val, 10);
+
+    print("peak_detection: ok");
+}
+
+fn test_difference_and_energy() {
+    // First-order difference (derivative approximation)
+    // diff[i] = signal[i+1] - signal[i]
+    let signal = [2, 5, 3, 8, 6, 9, 1];
+    let n = 7;
+    let mut diff = [0, 0, 0, 0, 0, 0];
+    let diff_n = n - 1;
+
+    let mut i = 0;
+    while i < diff_n {
+        diff[i] = signal[i + 1] - signal[i];
+        i = i + 1;
+    }
+    // diff = [3, -2, 5, -2, 3, -8]
+    assert_eq(diff[0], 3);
+    assert_eq(diff[1], -2);
+    assert_eq(diff[2], 5);
+    assert_eq(diff[3], -2);
+    assert_eq(diff[4], 3);
+    assert_eq(diff[5], -8);
+
+    // Signal energy = sum of squares
+    let mut energy = 0;
+    i = 0;
+    while i < n {
+        energy = energy + signal[i] * signal[i];
+        i = i + 1;
+    }
+    // 4+25+9+64+36+81+1 = 220
+    assert_eq(energy, 220);
+
+    // Difference energy
+    let mut diff_energy = 0;
+    i = 0;
+    while i < diff_n {
+        diff_energy = diff_energy + diff[i] * diff[i];
+        i = i + 1;
+    }
+    // 9+4+25+4+9+64 = 115
+    assert_eq(diff_energy, 115);
+
+    print("difference_and_energy: ok");
+}
+
+fn test_threshold_crossing() {
+    // Count threshold crossings in a signal
+    let signal = [1, 3, 7, 5, 9, 4, 2, 8, 6, 3];
+    let n = 10;
+    let threshold = 5;
+    let mut crossings = 0;
+    let mut above_prev = if signal[0] >= threshold { 1 } else { 0 };
+
+    let mut i = 1;
+    while i < n {
+        let above_cur = if signal[i] >= threshold { 1 } else { 0 };
+        if above_cur != above_prev {
+            crossings = crossings + 1;
+            above_prev = above_cur;
+        }
+        i = i + 1;
+    }
+
+    // Signal vs threshold 5:
+    // 1(below), 3(below), 7(above)=crossing, 5(above), 9(above), 4(below)=crossing,
+    // 2(below), 8(above)=crossing, 6(above), 3(below)=crossing
+    // Count: 4 crossings
+    assert_eq(crossings, 4);
+
+    // Count samples above threshold
+    let mut above_count = 0;
+    i = 0;
+    while i < n {
+        if signal[i] >= threshold { above_count = above_count + 1; }
+        i = i + 1;
+    }
+    // 7, 5, 9, 8, 6 = 5 samples
+    assert_eq(above_count, 5);
+
+    print("threshold_crossing: ok");
+}
+
+fn main() -> Int {
+    test_simple_moving_average();
+    test_weighted_moving_average();
+    test_convolution();
+    test_peak_detection();
+    test_difference_and_energy();
+    test_threshold_crossing();
+    print("[OK] 446_interp_signal_processing");
+    0
+}

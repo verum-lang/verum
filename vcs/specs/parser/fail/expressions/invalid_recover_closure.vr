@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, try, recover, closure, error
+// @description: Recover with malformed closure syntax
+// @expected-error: E075
+
+fn test() {
+    try {
+        fallible();
+    } recover |e { default() }  // Missing closing |
+}

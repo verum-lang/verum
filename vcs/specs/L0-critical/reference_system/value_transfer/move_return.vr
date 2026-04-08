@@ -1,0 +1,157 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine, return
+
+/// Test copy and affine semantics on function returns.
+/// Values are copied out of functions for Copy types.
+/// Affine types are moved out on return.
+/// Spec: 04-memory-model.md#function-return
+
+// Affine type
+type affine Handle is {
+    fd: Int,
+    name: Text,
+};
+
+fn main() {
+    test_simple_return_copy();
+    test_tuple_return_copy();
+    test_conditional_return_copy();
+    test_early_return_copy();
+    test_factory_pattern();
+    test_affine_return();
+}
+
+/// Test simple return copies value
+fn create_text() -> Text {
+    let local = Text.from("created locally");
+    local  // Copied out on return (Text is Copy)
+}
+
+fn test_simple_return_copy() {
+    let result = create_text();
+    assert(result == "created locally");
+}
+
+/// Test tuple return copies all components
+fn create_pair() -> (Text, List<Int>) {
+    let text = Text.from("first");
+    let list = [1, 2, 3];
+    (text, list)  // Both copied into tuple, tuple returned
+}
+
+fn test_tuple_return_copy() {
+    let (text, list) = create_pair();
+    assert(text == "first");
+    assert(list.len() == 3);
+}
+
+/// Test conditional return - both branches return copies
+fn conditional_create(flag: Bool) -> Text {
+    if flag {
+        Text.from("true branch")
+    } else {
+        Text.from("false branch")
+    }
+}
+
+fn test_conditional_return_copy() {
+    let result1 = conditional_create(true);
+    let result2 = conditional_create(false);
+
+    assert(result1 == "true branch");
+    assert(result2 == "false branch");
+}
+
+/// Test early return with copy
+fn early_return_example(value: Maybe<Text>) -> Text {
+    let text = match value {
+        Some(t) => t,  // Copy out of Maybe
+        None => return Text.from("early exit"),  // Copy on early return
+    };
+
+    text + " processed"
+}
+
+fn test_early_return_copy() {
+    let result1 = early_return_example(Some(Text.from("input")));
+    let result2 = early_return_example(None);
+
+    assert(result1 == "input processed");
+    assert(result2 == "early exit");
+}
+
+/// Factory pattern - construct and return
+type Builder is {
+    name: Text,
+    value: Int,
+};
+
+implement Builder {
+    fn new(name: Text) -> Self {
+        Builder { name: name, value: 0 }
+    }
+
+    fn with_value(self, value: Int) -> Self {
+        Builder { name: self.name, value: value }
+    }
+
+    fn build(self) -> Product {
+        Product {
+            name: self.name,
+            value: self.value,
+        }
+    }
+}
+
+type Product is {
+    name: Text,
+    value: Int,
+};
+
+fn test_factory_pattern() {
+    let product = Builder.new(Text.from("widget"))
+        .with_value(42)
+        .build();
+
+    assert(product.name == "widget");
+    assert(product.value == 42);
+}
+
+/// Test returning from nested blocks
+fn nested_block_return() -> Text {
+    let result = {
+        let inner = {
+            Text.from("deeply nested")
+        };
+        inner + " modified"
+    };
+    result
+}
+
+fn test_nested_return() {
+    let result = nested_block_return();
+    assert(result == "deeply nested modified");
+}
+
+/// Test affine type return - moved out
+fn create_handle() -> Handle {
+    let local = Handle { fd: 42, name: Text.from("file") };
+    local  // Moved out on return (Handle is affine)
+}
+
+fn test_affine_return() {
+    let h1 = create_handle();
+    assert(h1.fd == 42);
+
+    // Can chain affine returns
+    let h2 = create_handle();
+    let h3 = pass_through_handle(h2);  // h2 moved
+    assert(h3.fd == 42);
+    // h2 is no longer valid
+}
+
+fn pass_through_handle(h: Handle) -> Handle {
+    h  // Move in, move out
+}

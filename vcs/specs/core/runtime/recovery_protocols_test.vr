@@ -1,0 +1,239 @@
+// =============================================================================
+// recovery_protocols_test.vr - Tests for recovery type Clone/Debug/Eq
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, recovery, clone, debug, protocols, core
+// @description: Tests for Clone, Debug, and Eq on recovery types
+// =============================================================================
+
+mount core.runtime.recovery.{
+    BackoffStrategy,
+    CircuitState,
+    JitterConfig,
+    CircuitBreakerConfig,
+    ErrorPredicate,
+    RetryConfig,
+    RetryPredicate,
+    RecoveryStrategy,
+};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CircuitState Eq
+// =============================================================================
+
+@test
+fn test_circuit_state_eq_closed() {
+    let a = CircuitState.Closed;
+    let b = CircuitState.Closed;
+    assert(a == b);
+}
+
+@test
+fn test_circuit_state_eq_open() {
+    let a = CircuitState.Open;
+    let b = CircuitState.Open;
+    assert(a == b);
+}
+
+@test
+fn test_circuit_state_eq_half_open() {
+    let a = CircuitState.HalfOpen;
+    let b = CircuitState.HalfOpen;
+    assert(a == b);
+}
+
+@test
+fn test_circuit_state_neq() {
+    let a = CircuitState.Closed;
+    let b = CircuitState.Open;
+    assert(a != b);
+}
+
+@test
+fn test_circuit_state_neq_half_open() {
+    let a = CircuitState.Open;
+    let b = CircuitState.HalfOpen;
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 2: BackoffStrategy Clone
+// =============================================================================
+
+@test
+fn test_clone_backoff_fixed() {
+    let orig = BackoffStrategy.Fixed { delay_ms: 100 };
+    let cloned = orig.clone();
+    assert_eq(cloned.calculate_delay_ms(0), 100 as UInt64);
+}
+
+@test
+fn test_clone_backoff_linear() {
+    let orig = BackoffStrategy.Linear { base_ms: 50, increment_ms: 25, max_ms: 200 };
+    let cloned = orig.clone();
+    assert_eq(cloned.calculate_delay_ms(0), 50 as UInt64);
+}
+
+@test
+fn test_clone_backoff_exponential() {
+    let orig = BackoffStrategy.Exponential { base_ms: 100, max_ms: 5000, multiplier: 2 };
+    let cloned = orig.clone();
+    assert_eq(cloned.calculate_delay_ms(0), 100 as UInt64);
+}
+
+@test
+fn test_clone_backoff_none() {
+    let orig = BackoffStrategy.None;
+    let cloned = orig.clone();
+    assert_eq(cloned.calculate_delay_ms(0), 0 as UInt64);
+}
+
+// =============================================================================
+// Section 3: JitterConfig Clone
+// =============================================================================
+
+@test
+fn test_clone_jitter_none() {
+    let orig = JitterConfig.None;
+    let cloned = orig.clone();
+    // None jitter returns delay unchanged
+    assert_eq(cloned.apply(100), 100 as UInt64);
+}
+
+@test
+fn test_clone_jitter_proportional() {
+    let orig = JitterConfig.Proportional(10);
+    let cloned = orig.clone();
+    // Proportional jitter returns value in range [90, 110]
+    let result = cloned.apply(100);
+    assert(result >= 90 as UInt64);
+    assert(result <= 110 as UInt64);
+}
+
+@test
+fn test_clone_jitter_fixed() {
+    let orig = JitterConfig.Fixed(5);
+    let cloned = orig.clone();
+    let result = cloned.apply(100);
+    assert(result >= 95 as UInt64);
+    assert(result <= 105 as UInt64);
+}
+
+@test
+fn test_clone_jitter_full() {
+    let orig = JitterConfig.Full;
+    let cloned = orig.clone();
+    let result = cloned.apply(100);
+    assert(result <= 100 as UInt64);
+}
+
+// =============================================================================
+// Section 4: RetryPredicate Clone
+// =============================================================================
+
+@test
+fn test_clone_retry_predicate_all() {
+    let orig = RetryPredicate.AllErrors;
+    let cloned = orig.clone();
+    assert(cloned is RetryPredicate.AllErrors);
+}
+
+@test
+fn test_clone_retry_predicate_transient() {
+    let orig = RetryPredicate.TransientOnly;
+    let cloned = orig.clone();
+    assert(cloned is RetryPredicate.TransientOnly);
+}
+
+// =============================================================================
+// Section 5: RetryConfig Clone
+// =============================================================================
+
+@test
+fn test_clone_retry_config() {
+    let orig = RetryConfig {
+        max_attempts: 3,
+        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    let cloned = orig.clone();
+    assert_eq(cloned.max_attempts, 3);
+}
+
+// =============================================================================
+// Section 6: RecoveryStrategy Clone
+// =============================================================================
+
+@test
+fn test_clone_recovery_none() {
+    let orig = RecoveryStrategy.None;
+    let cloned = orig.clone();
+    assert(cloned is RecoveryStrategy.None);
+}
+
+@test
+fn test_clone_recovery_supervision() {
+    let orig = RecoveryStrategy.Supervision;
+    let cloned = orig.clone();
+    assert(cloned is RecoveryStrategy.Supervision);
+}
+
+@test
+fn test_clone_recovery_retry() {
+    let orig = RecoveryStrategy.retry(3);
+    let cloned = orig.clone();
+    assert(cloned is RecoveryStrategy.Retry);
+}
+
+@test
+fn test_clone_recovery_circuit_breaker() {
+    let orig = RecoveryStrategy.circuit_breaker(5);
+    let cloned = orig.clone();
+    assert(cloned is RecoveryStrategy.UseBreaker);
+}
+
+@test
+fn test_clone_recovery_composed() {
+    let mut strategies: List<RecoveryStrategy> = [];
+    strategies.push(RecoveryStrategy.None);
+    strategies.push(RecoveryStrategy.Supervision);
+    let orig = RecoveryStrategy.Composed(strategies);
+    let cloned = orig.clone();
+    assert(cloned is RecoveryStrategy.Composed);
+}
+
+// =============================================================================
+// Section 7: ErrorPredicate Clone
+// =============================================================================
+
+@test
+fn test_clone_error_predicate_all() {
+    let orig = ErrorPredicate.AllErrors;
+    let cloned = orig.clone();
+    assert(cloned is ErrorPredicate.AllErrors);
+}
+
+// =============================================================================
+// Section 8: CircuitBreakerConfig Clone
+// =============================================================================
+
+@test
+fn test_clone_circuit_breaker_config() {
+    let orig = CircuitBreakerConfig {
+        failure_threshold: 5,
+        required_successes: 3,
+        timeout_ms: 60000,
+        error_predicate: ErrorPredicate.AllErrors,
+    };
+    let cloned = orig.clone();
+    assert_eq(cloned.failure_threshold, 5 as UInt16);
+    assert_eq(cloned.required_successes, 3 as UInt16);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

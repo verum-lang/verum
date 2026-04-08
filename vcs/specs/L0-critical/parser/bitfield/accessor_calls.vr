@@ -1,0 +1,39 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: bitfield, parser, accessors
+// @timeout: 5000
+// @description: Test bitfield accessor method call syntax
+//
+// Spec: docs/architecture/low-level-features.md - Bitfield Semantics
+
+/// Simple 8-bit flags with accessor calls.
+@bitfield
+type Flags is {
+    @bits(1) enabled: Bool,
+    @bits(1) ready: Bool,
+    @bits(2) mode: UInt,
+    @bits(4) reserved: UInt,
+};
+
+/// Test getter and setter syntax (parsing only).
+fn test_accessor_syntax() -> Int {
+    let flags = Flags { enabled: true, ready: false, mode: 0, reserved: 0 };
+
+    // Getter calls - should parse as method calls
+    let is_enabled = flags.enabled();
+    let is_ready = flags.ready();
+    let current_mode = flags.mode();
+
+    // Setter calls on mutable reference
+    let mut mutable_flags = Flags { enabled: false, ready: true, mode: 1, reserved: 0 };
+    mutable_flags.set_enabled(true);
+    mutable_flags.set_ready(false);
+    mutable_flags.set_mode(2);
+
+    0
+}
+
+fn main() -> Int {
+    test_accessor_syntax()
+}

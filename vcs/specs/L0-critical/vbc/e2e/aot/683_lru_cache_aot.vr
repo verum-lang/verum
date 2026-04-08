@@ -1,0 +1,285 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, lru-cache, data-structure, eviction
+// @timeout: 30000
+
+// LRU cache simulation with capacity 4
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// LRU cache: keys[0..3] and values[0..3]
+// Order: index 0 = most recently used, index 3 = least recently used
+// Size tracked separately. Empty key = -1
+fn empty_cache() -> Arr8 {
+    Arr8 { v0: 0-1, v1: 0-1, v2: 0-1, v3: 0-1, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+// Find key in cache, return index or -1
+fn cache_find(keys: Arr8, size: Int, key: Int) -> Int {
+    let mut found = 0 - 1;
+    let mut i = 0;
+    while i < size {
+        if get8(keys, i) == key { found = i; }
+        i = i + 1;
+    }
+    found
+}
+
+// Move item at index to front (shift others right)
+fn move_to_front_keys(keys: Arr8, idx: Int) -> Arr8 {
+    let key = get8(keys, idx);
+    let mut k = keys;
+    let mut i = idx;
+    while i > 0 {
+        k = set8(k, i, get8(k, i - 1));
+        i = i - 1;
+    }
+    set8(k, 0, key)
+}
+
+fn move_to_front_vals(vals: Arr8, idx: Int) -> Arr8 {
+    let val = get8(vals, idx);
+    let mut v = vals;
+    let mut i = idx;
+    while i > 0 {
+        v = set8(v, i, get8(v, i - 1));
+        i = i - 1;
+    }
+    set8(v, 0, val)
+}
+
+// Get from cache: returns value or -1 if miss
+// Also updates order (moves to front)
+// Returns packed: value * 100 + hit (hit=1 or 0)
+fn cache_get_result(keys: Arr8, size: Int, key: Int) -> Int {
+    let idx = cache_find(keys, size, key);
+    if idx >= 0 {
+        let val = get8(keys, idx); // we need vals array too
+        idx * 100 + 1 // return index*100 + hit
+    } else {
+        0 // miss
+    }
+}
+
+// Simplified: separate get/put with explicit state management
+
+// Put into cache, returns new size
+// keys and vals are updated in place (caller manages)
+fn cache_put_size(keys: Arr8, size: Int, key: Int, cap: Int) -> Int {
+    let idx = cache_find(keys, size, key);
+    if idx >= 0 { size } // already present, just reorder
+    else if size < cap { size + 1 } // add new
+    else { size } // evict LRU and add
+}
+
+fn cache_put_keys(keys: Arr8, vals: Arr8, size: Int, key: Int, val: Int, cap: Int) -> Arr8 {
+    let idx = cache_find(keys, size, key);
+    if idx >= 0 {
+        // Move to front
+        let k = move_to_front_keys(keys, idx);
+        k
+    } else if size < cap {
+        // Shift all right, insert at front
+        let mut k = keys;
+        let mut i = size;
+        while i > 0 {
+            k = set8(k, i, get8(k, i - 1));
+            i = i - 1;
+        }
+        set8(k, 0, key)
+    } else {
+        // Evict LRU (last), shift right, insert at front
+        let mut k = keys;
+        let mut i = cap - 1;
+        while i > 0 {
+            k = set8(k, i, get8(k, i - 1));
+            i = i - 1;
+        }
+        set8(k, 0, key)
+    }
+}
+
+fn cache_put_vals(keys: Arr8, vals: Arr8, size: Int, key: Int, val: Int, cap: Int) -> Arr8 {
+    let idx = cache_find(keys, size, key);
+    if idx >= 0 {
+        let v = move_to_front_vals(vals, idx);
+        set8(v, 0, val) // update value
+    } else if size < cap {
+        let mut v = vals;
+        let mut i = size;
+        while i > 0 {
+            v = set8(v, i, get8(v, i - 1));
+            i = i - 1;
+        }
+        set8(v, 0, val)
+    } else {
+        let mut v = vals;
+        let mut i = cap - 1;
+        while i > 0 {
+            v = set8(v, i, get8(v, i - 1));
+            i = i - 1;
+        }
+        set8(v, 0, val)
+    }
+}
+
+// Get value for key, or -1 if not in cache
+fn cache_get_val(keys: Arr8, vals: Arr8, size: Int, key: Int) -> Int {
+    let idx = cache_find(keys, size, key);
+    if idx >= 0 { get8(vals, idx) }
+    else { 0 - 1 }
+}
+
+fn test_basic() -> Int {
+    let cap = 4;
+    let mut keys = empty_cache();
+    let mut vals = zeros();
+    let mut size = 0;
+
+    // Put (1, 10)
+    // Compute new size before keys are updated
+    let new_size = cache_put_size(keys, size, 1, cap);
+    vals = cache_put_vals(keys, vals, size, 1, 10, cap);
+    keys = cache_put_keys(keys, vals, size, 1, 10, cap);
+    size = new_size;
+
+    // Put (2, 20)
+    // Compute new size before keys are updated
+    let new_size = cache_put_size(keys, size, 2, cap);
+    vals = cache_put_vals(keys, vals, size, 2, 20, cap);
+    keys = cache_put_keys(keys, vals, size, 2, 20, cap);
+    size = new_size;
+
+    assert_eq(size, 2);
+    assert_eq(cache_get_val(keys, vals, size, 1), 10);
+    assert_eq(cache_get_val(keys, vals, size, 2), 20);
+    assert_eq(cache_get_val(keys, vals, size, 3), 0 - 1); // miss
+    1
+}
+
+fn test_eviction() -> Int {
+    let cap = 4;
+    let mut keys = empty_cache();
+    let mut vals = zeros();
+    let mut size = 0;
+
+    // Fill cache: 1, 2, 3, 4
+    let mut i = 1;
+    while i <= 4 {
+        // Compute new size before keys are updated
+        let new_size = cache_put_size(keys, size, i, cap);
+        vals = cache_put_vals(keys, vals, size, i, i * 10, cap);
+        keys = cache_put_keys(keys, vals, size, i, i * 10, cap);
+        size = new_size;
+        i = i + 1;
+    }
+    assert_eq(size, 4);
+    // MRU order: 4, 3, 2, 1 (4 is most recent)
+
+    // Put 5: should evict 1 (LRU)
+    // Compute new size before keys are updated
+    let new_size = cache_put_size(keys, size, 5, cap);
+    vals = cache_put_vals(keys, vals, size, 5, 50, cap);
+    keys = cache_put_keys(keys, vals, size, 5, 50, cap);
+    size = new_size;
+
+    assert_eq(cache_get_val(keys, vals, size, 5), 50);
+    assert_eq(cache_get_val(keys, vals, size, 1), 0 - 1); // evicted
+    assert_eq(cache_get_val(keys, vals, size, 2), 20); // still there
+    1
+}
+
+fn test_access_refreshes() -> Int {
+    let cap = 4;
+    let mut keys = empty_cache();
+    let mut vals = zeros();
+    let mut size = 0;
+
+    // Fill: 1, 2, 3, 4
+    let mut i = 1;
+    while i <= 4 {
+        // Compute new size before keys are updated
+        let new_size = cache_put_size(keys, size, i, cap);
+        vals = cache_put_vals(keys, vals, size, i, i * 10, cap);
+        keys = cache_put_keys(keys, vals, size, i, i * 10, cap);
+        size = new_size;
+        i = i + 1;
+    }
+    // Order: 4, 3, 2, 1
+
+    // Access key 1 (moves to front)
+    // Compute new size before keys are updated
+    let new_size = cache_put_size(keys, size, 1, cap);
+    vals = cache_put_vals(keys, vals, size, 1, 10, cap);
+    keys = cache_put_keys(keys, vals, size, 1, 10, cap);
+    size = new_size;
+    // Order: 1, 4, 3, 2
+
+    // Put 5: should evict 2 (now LRU)
+    // Compute new size before keys are updated
+    let new_size = cache_put_size(keys, size, 5, cap);
+    vals = cache_put_vals(keys, vals, size, 5, 50, cap);
+    keys = cache_put_keys(keys, vals, size, 5, 50, cap);
+    size = new_size;
+
+    assert_eq(cache_get_val(keys, vals, size, 1), 10); // refreshed, still here
+    assert_eq(cache_get_val(keys, vals, size, 2), 0 - 1); // evicted
+    assert_eq(cache_get_val(keys, vals, size, 5), 50);
+    1
+}
+
+fn test_update_value() -> Int {
+    let cap = 4;
+    let mut keys = empty_cache();
+    let mut vals = zeros();
+    let mut size = 0;
+
+    // Compute new size before keys are updated
+    let new_size = cache_put_size(keys, size, 1, cap);
+    vals = cache_put_vals(keys, vals, size, 1, 10, cap);
+    keys = cache_put_keys(keys, vals, size, 1, 10, cap);
+    size = new_size;
+
+    assert_eq(cache_get_val(keys, vals, size, 1), 10);
+
+    // Update value for same key
+    // Compute new size before keys are updated
+    let new_size = cache_put_size(keys, size, 1, cap);
+    vals = cache_put_vals(keys, vals, size, 1, 99, cap);
+    keys = cache_put_keys(keys, vals, size, 1, 99, cap);
+    size = new_size;
+
+    assert_eq(cache_get_val(keys, vals, size, 1), 99);
+    assert_eq(size, 1); // no duplicate
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_eviction();
+    test_access_refreshes();
+    test_update_value();
+    print("[OK] 683_lru_cache_aot");
+    0
+}

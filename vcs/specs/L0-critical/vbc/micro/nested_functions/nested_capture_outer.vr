@@ -1,0 +1,60 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, arguments
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    // Test nested functions with explicit arguments (no closure capture)
+    fn add_offset(x: Int, offset: Int) -> Int {
+        fn do_add(val: Int, off: Int) -> Int {
+            return val + off;
+        }
+        return do_add(x, offset);
+    }
+
+    fn multiply_by(x: Int, factor: Int) -> Int {
+        fn do_multiply(val: Int, fac: Int) -> Int {
+            return val * fac;
+        }
+        return do_multiply(x, factor);
+    }
+
+    fn combined_operation(x: Int, offset: Int, factor: Int) -> Int {
+        // First multiply, then add offset
+        let multiplied = multiply_by(x, factor);
+        return add_offset(multiplied, offset);
+    }
+
+    assert_eq(add_offset(5, 100), 105);
+    assert_eq(add_offset(0, 100), 100);
+
+    assert_eq(multiply_by(7, 3), 21);
+    assert_eq(multiply_by(10, 3), 30);
+
+    // combined(5, 100, 3) = add_offset(multiply_by(5, 3), 100) = add_offset(15, 100) = 115
+    assert_eq(combined_operation(5, 100, 3), 115);
+    // combined(10, 100, 3) = add_offset(multiply_by(10, 3), 100) = add_offset(30, 100) = 130
+    assert_eq(combined_operation(10, 100, 3), 130);
+
+    // Test complex argument passing
+    fn complex_calc(a: Int, b: Int, c: Int, d: Int) -> Int {
+        fn step1(x: Int, y: Int) -> Int {
+            fn add(m: Int, n: Int) -> Int {
+                return m + n;
+            }
+            return add(x, y);
+        }
+        fn step2(x: Int, y: Int) -> Int {
+            fn sub(m: Int, n: Int) -> Int {
+                return m - n;
+            }
+            return sub(x, y);
+        }
+        return step1(a, b) * step2(c, d);
+    }
+
+    // complex_calc(2, 3, 10, 5) = step1(2, 3) * step2(10, 5) = 5 * 5 = 25
+    assert_eq(complex_calc(2, 3, 10, 5), 25);
+}

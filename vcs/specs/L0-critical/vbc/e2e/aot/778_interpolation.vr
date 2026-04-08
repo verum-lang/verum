@@ -1,0 +1,114 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, interpolation, polynomial, horner, lerp
+// @expected-exit: 0
+
+// Tests linear interpolation, polynomial evaluation, and Horner's method.
+// Uses scaled integers (multiply by 1000) to simulate fixed-point arithmetic.
+
+fn lerp_scaled(a: Int, b_val: Int, t_num: Int, t_den: Int) -> Int {
+    // Linear interpolation: a + (b - a) * t_num / t_den
+    a + (b_val - a) * t_num / t_den
+}
+
+fn poly_eval(coeffs: List<Int>, n: Int, x: Int) -> Int {
+    // Evaluate polynomial: coeffs[0] + coeffs[1]*x + coeffs[2]*x^2 + ...
+    let mut result = 0;
+    let mut x_pow = 1;
+    let mut i = 0;
+    while (i < n) {
+        result = result + coeffs[i] * x_pow;
+        x_pow = x_pow * x;
+        i = i + 1;
+    }
+    result
+}
+
+fn horner_eval(coeffs: List<Int>, n: Int, x: Int) -> Int {
+    // Horner's method: ((a_n * x + a_{n-1}) * x + ...) * x + a_0
+    // coeffs stored as [a_0, a_1, ..., a_n] (ascending degree)
+    let mut result = coeffs[n - 1];
+    let mut i = n - 2;
+    while (i >= 0) {
+        result = result * x + coeffs[i];
+        i = i - 1;
+    }
+    result
+}
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn main() -> Int {
+    // Test 1: Basic linear interpolation
+    // lerp(0, 100, 0.5) = 50
+    assert_eq(lerp_scaled(0, 100, 1, 2), 50);
+
+    // Test 2: lerp at endpoints
+    // lerp(10, 50, 0/1) = 10, lerp(10, 50, 1/1) = 50
+    assert_eq(lerp_scaled(10, 50, 0, 1), 10);
+    assert_eq(lerp_scaled(10, 50, 1, 1), 50);
+
+    // Test 3: lerp at quarter points
+    // lerp(0, 100, 1/4) = 25, lerp(0, 100, 3/4) = 75
+    assert_eq(lerp_scaled(0, 100, 1, 4), 25);
+    assert_eq(lerp_scaled(0, 100, 3, 4), 75);
+
+    // Test 4: Polynomial evaluation of p(x) = 3x^2 + 2x + 1
+    // coeffs = [1, 2, 3] (a_0=1, a_1=2, a_2=3)
+    // p(0) = 1, p(1) = 6, p(2) = 17, p(3) = 34
+    let coeffs = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(poly_eval(coeffs, 3, 0), 1);
+    assert_eq(poly_eval(coeffs, 3, 1), 6);
+    assert_eq(poly_eval(coeffs, 3, 2), 17);
+    assert_eq(poly_eval(coeffs, 3, 3), 34);
+
+    // Test 5: Horner's method gives same result as direct evaluation
+    assert_eq(horner_eval(coeffs, 3, 0), 1);
+    assert_eq(horner_eval(coeffs, 3, 1), 6);
+    assert_eq(horner_eval(coeffs, 3, 2), 17);
+    assert_eq(horner_eval(coeffs, 3, 3), 34);
+
+    // Test 6: Higher degree polynomial p(x) = x^4 - 2x^3 + x^2 - 3x + 5
+    // coeffs = [5, -3, 1, -2, 1]
+    // p(0) = 5
+    // p(1) = 1 - 2 + 1 - 3 + 5 = 2
+    // p(2) = 16 - 16 + 4 - 6 + 5 = 3
+    let coeffs2 = [5, -3, 1, -2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(horner_eval(coeffs2, 5, 0), 5);
+    assert_eq(horner_eval(coeffs2, 5, 1), 2);
+    assert_eq(horner_eval(coeffs2, 5, 2), 3);
+
+    // Test 7: Horner == poly_eval for higher degree too
+    assert_eq(poly_eval(coeffs2, 5, 2), horner_eval(coeffs2, 5, 2));
+    assert_eq(poly_eval(coeffs2, 5, 3), horner_eval(coeffs2, 5, 3));
+
+    // Test 8: Piecewise linear interpolation
+    // Points: (0, 0), (10, 100), (20, 50)
+    // At x=5 (between 0 and 10): lerp(0, 100, 5/10) = 50
+    // At x=15 (between 10 and 20): lerp(100, 50, 5/10) = 75
+    let px = [0, 10, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let py = [0, 100, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let val_5 = lerp_scaled(py[0], py[1], 5, 10);
+    assert_eq(val_5, 50);
+    let val_15 = lerp_scaled(py[1], py[2], 5, 10);
+    assert_eq(val_15, 75);
+
+    // Test 9: Polynomial p(x) = (x-1)(x-2)(x-3) = x^3 - 6x^2 + 11x - 6
+    // coeffs = [-6, 11, -6, 1]
+    // Roots: p(1) = 0, p(2) = 0, p(3) = 0
+    let coeffs3 = [-6, 11, -6, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(horner_eval(coeffs3, 4, 1), 0);
+    assert_eq(horner_eval(coeffs3, 4, 2), 0);
+    assert_eq(horner_eval(coeffs3, 4, 3), 0);
+
+    // Test 10: Polynomial at non-root
+    // p(0) = -6, p(4) = 64 - 96 + 44 - 6 = 6
+    assert_eq(horner_eval(coeffs3, 4, 0), -6);
+    assert_eq(horner_eval(coeffs3, 4, 4), 6);
+
+    print("Interpolation: PASS");
+    0
+}

@@ -1,0 +1,9 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let list = [1, 2, 3];
+    for x in list {
+    }
+}

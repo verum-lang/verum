@@ -1,0 +1,87 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, gpu, real-opcode, pipeline
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests full GPU pipeline: alloc → memset → copy → sync → free.
+// Validates the complete lifecycle of GPU resource management.
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // --- Full Pipeline Test ---
+    // 1. Create stream
+    let stream = gpu_stream_create();
+    if stream < 0 { errors = errors + 1; }
+
+    // 2. Create events for timing
+    let start_event = gpu_event_create();
+    let end_event = gpu_event_create();
+    if start_event < 0 { errors = errors + 1; }
+    if end_event < 0 { errors = errors + 1; }
+
+    // 3. Allocate source and destination buffers
+    let src = gpu_malloc(4096, 0);
+    let dst = gpu_malloc(4096, 0);
+    if src == 0 { errors = errors + 1; }
+    if dst == 0 { errors = errors + 1; }
+
+    // 4. Record start event
+    let rec1 = gpu_event_record(start_event, stream);
+    if rec1 != 0 { errors = errors + 1; }
+
+    // 5. Initialize source with memset
+    let ms = gpu_memset(src, 42, 4096);
+    if ms != 0 { errors = errors + 1; }
+
+    // 6. Copy source to destination
+    let cp = gpu_memcpy(dst, src, 4096);
+    if cp != 0 { errors = errors + 1; }
+
+    // 7. Record end event
+    let rec2 = gpu_event_record(end_event, stream);
+    if rec2 != 0 { errors = errors + 1; }
+
+    // 8. Sync stream
+    let sync = gpu_sync(stream);
+    if sync != 0 { errors = errors + 1; }
+
+    // 9. Sync events
+    let se1 = gpu_event_sync(start_event);
+    let se2 = gpu_event_sync(end_event);
+    if se1 != 0 { errors = errors + 1; }
+    if se2 != 0 { errors = errors + 1; }
+
+    // 10. Cleanup: free memory
+    let f1 = gpu_free(src);
+    let f2 = gpu_free(dst);
+    if f1 != 0 { errors = errors + 1; }
+    if f2 != 0 { errors = errors + 1; }
+
+    // 11. Destroy events
+    let de1 = gpu_event_destroy(start_event);
+    let de2 = gpu_event_destroy(end_event);
+    if de1 != 0 { errors = errors + 1; }
+    if de2 != 0 { errors = errors + 1; }
+
+    // 12. Destroy stream
+    let ds = gpu_stream_destroy(stream);
+    if ds != 0 { errors = errors + 1; }
+
+    // --- Second pipeline: managed memory ---
+    let managed = gpu_malloc_managed(2048);
+    if managed == 0 { errors = errors + 1; }
+
+    let pf = gpu_prefetch(managed, 2048, 0);
+    if pf != 0 { errors = errors + 1; }
+
+    let ms2 = gpu_memset(managed, 0, 2048);
+    if ms2 != 0 { errors = errors + 1; }
+
+    let fm = gpu_free(managed);
+    if fm != 0 { errors = errors + 1; }
+
+    errors
+}

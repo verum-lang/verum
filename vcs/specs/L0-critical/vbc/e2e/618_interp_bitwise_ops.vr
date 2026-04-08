@@ -1,0 +1,124 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, bitwise, bit-manipulation
+// @timeout: 50000
+// @expected-exit: 0
+
+fn test_basic_bitwise() {
+    // AND
+    assert_eq(0xFF & 0x0F, 0x0F);
+    assert_eq(12 & 10, 8);   // 1100 & 1010 = 1000
+
+    // OR
+    assert_eq(0xF0 | 0x0F, 0xFF);
+    assert_eq(12 | 10, 14);  // 1100 | 1010 = 1110
+
+    // XOR
+    assert_eq(0xFF ^ 0x0F, 0xF0);
+    assert_eq(12 ^ 10, 6);   // 1100 ^ 1010 = 0110
+    print("  test_basic_bitwise: ok");
+}
+
+fn test_shift_ops() {
+    assert_eq(1 << 0, 1);
+    assert_eq(1 << 1, 2);
+    assert_eq(1 << 8, 256);
+    assert_eq(1 << 10, 1024);
+
+    assert_eq(256 >> 4, 16);
+    assert_eq(1024 >> 10, 1);
+    assert_eq(255 >> 1, 127);
+    print("  test_shift_ops: ok");
+}
+
+fn test_power_of_two() {
+    // Check power of two: n & (n-1) == 0
+    let mut i = 1;
+    let mut count = 0;
+    while i <= 256 {
+        if (i & (i - 1)) == 0 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    // Powers of 2 in 1-256: 1,2,4,8,16,32,64,128,256 = 9
+    assert_eq(count, 9);
+    print("  test_power_of_two: ok");
+}
+
+fn count_set_bits(n: Int) -> Int {
+    let mut count = 0;
+    let mut val = n;
+    while val > 0 {
+        count = count + (val & 1);
+        val = val >> 1;
+    }
+    count
+}
+
+fn test_popcount() {
+    assert_eq(count_set_bits(0), 0);
+    assert_eq(count_set_bits(1), 1);
+    assert_eq(count_set_bits(7), 3);    // 111
+    assert_eq(count_set_bits(255), 8);  // 11111111
+    assert_eq(count_set_bits(1023), 10); // 1111111111
+    print("  test_popcount: ok");
+}
+
+fn test_bit_extraction() {
+    let packed = 0xABCD;
+
+    // Extract nibbles
+    let n0 = packed & 0xF;         // D = 13
+    let n1 = (packed >> 4) & 0xF;  // C = 12
+    let n2 = (packed >> 8) & 0xF;  // B = 11
+    let n3 = (packed >> 12) & 0xF; // A = 10
+
+    assert_eq(n0, 13);
+    assert_eq(n1, 12);
+    assert_eq(n2, 11);
+    assert_eq(n3, 10);
+    print("  test_bit_extraction: ok");
+}
+
+fn test_bit_packing() {
+    // Pack four 8-bit values into one integer
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let d = 40;
+
+    let packed = a | (b << 8) | (c << 16) | (d << 24);
+
+    assert_eq(packed & 0xFF, 10);
+    assert_eq((packed >> 8) & 0xFF, 20);
+    assert_eq((packed >> 16) & 0xFF, 30);
+    assert_eq((packed >> 24) & 0xFF, 40);
+    print("  test_bit_packing: ok");
+}
+
+fn test_xor_swap() {
+    let mut a = 42;
+    let mut b = 99;
+
+    a = a ^ b;
+    b = a ^ b;
+    a = a ^ b;
+
+    assert_eq(a, 99);
+    assert_eq(b, 42);
+    print("  test_xor_swap: ok");
+}
+
+fn main() -> Int {
+    test_basic_bitwise();
+    test_shift_ops();
+    test_power_of_two();
+    test_popcount();
+    test_bit_extraction();
+    test_bit_packing();
+    test_xor_swap();
+    print("[OK] 618_interp_bitwise_ops");
+    0
+}

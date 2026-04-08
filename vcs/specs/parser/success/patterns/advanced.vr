@@ -1,0 +1,128 @@
+// @test: parse
+// @level: L0
+// @tags: parser, patterns, advanced
+// @description: Test advanced pattern parsing (or, and, range, guard, active)
+
+fn test_or_patterns() {
+    match x {
+        0 | 1 | 2 => small(),
+        3 | 4 | 5 => medium(),
+        _ => large()
+    }
+
+    match option {
+        Some(0) | Some(1) => special(),
+        Some(n) => normal(n),
+        None => none()
+    }
+
+    let (0 | 1) = value;
+}
+
+fn test_and_patterns() {
+    match x {
+        Even() & Positive() => even_positive(),
+        Odd() & Negative() => odd_negative(),
+        _ => other()
+    }
+}
+
+fn test_range_patterns() {
+    match n {
+        0..10 => single_digit(),
+        10..100 => double_digit(),
+        100..=999 => triple_digit(),
+        _ => large()
+    }
+
+    match c {
+        'a'..='z' => lowercase(),
+        'A'..='Z' => uppercase(),
+        '0'..='9' => digit(),
+        _ => other()
+    }
+
+    match x {
+        ..0 => negative(),
+        0 => zero(),
+        1.. => positive()
+    }
+}
+
+fn test_guard_patterns() {
+    // If guard
+    match x {
+        n if n > 0 => positive(n),
+        n if n < 0 => negative(n),
+        _ => zero()
+    }
+
+    // Where guard
+    match value {
+        Some(x) where x > threshold => high(x),
+        Some(x) where x < threshold => low(x),
+        Some(x) => medium(x),
+        None => none()
+    }
+
+    // Complex guards
+    match point {
+        Point { x, y } if x == y => diagonal(x),
+        Point { x, y } if x > y => upper(x, y),
+        Point { x, y } => lower(x, y)
+    }
+}
+
+fn test_binding_patterns() {
+    // @ binding
+    match option {
+        opt @ Some(_) => use_opt(opt),
+        None => none()
+    }
+
+    match list {
+        all @ [first, ..rest] => use_all(all, first, rest),
+        [] => empty()
+    }
+
+    // Nested binding
+    match nested {
+        outer @ (inner @ (a, b), c) => use(outer, inner, a, b, c)
+    }
+}
+
+fn test_type_test_patterns() {
+    match value {
+        x is Int => handle_int(x),
+        s is Text => handle_text(s),
+        _ => handle_other()
+    }
+}
+
+fn test_active_patterns() {
+    match n {
+        Even() => even(),
+        Odd() => odd()
+    }
+
+    match x {
+        InRange(0, 100)() => in_range(),
+        _ => out_of_range()
+    }
+
+    match s {
+        ParseInt() => parsed(),
+        _ => not_number()
+    }
+}
+
+fn test_stream_patterns() {
+    match stream {
+        stream[first, second, ...rest] => has_two(first, second, rest),
+        stream[only, ...rest] => has_one(only, rest),
+        stream[] => empty()
+    }
+
+    let stream[head, ...tail] = input_stream;
+    let stream[...all] = entire_stream;
+}

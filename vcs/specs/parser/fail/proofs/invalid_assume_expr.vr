@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, assume, error
+// @description: Test invalid assume expression with empty parentheses
+// @expected-error: E027
+
+fn test() {
+    assume();
+}

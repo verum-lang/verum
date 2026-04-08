@@ -1,0 +1,19 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: error, implement, method
+// @expect: error(MethodNotFound)
+// @description: Error test for method not found on user type
+// @spec: 03-type-system.md Section 14 - Method resolution
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+// No implement block for Point
+
+fn test_method_not_found() {
+    let p = Point { x: 1.0, y: 2.0 };
+    let d = p.distance();  // ERROR: method `distance` not found for type `Point`
+}

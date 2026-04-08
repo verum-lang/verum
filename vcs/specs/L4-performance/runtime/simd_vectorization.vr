@@ -1,0 +1,295 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: runtime, simd, vectorization, performance
+// @description: SIMD auto-vectorization performance (target: > 4x speedup with SIMD)
+
+/// SIMD Vectorization Performance Benchmark
+///
+/// Measures the speedup achieved through SIMD vectorization,
+/// both automatic (compiler) and explicit (intrinsics).
+///
+/// Targets:
+/// - 4x speedup for f32 operations (128-bit SIMD)
+/// - 8x speedup for f32 with AVX (256-bit SIMD)
+/// - 2x speedup for f64 operations (128-bit SIMD)
+
+const ARRAY_SIZE: Int = 1024 * 1024;  // 1M elements
+const ITERATIONS: Int = 100;
+
+/// Scalar baseline: element-by-element addition
+fn benchmark_scalar_add() -> BenchmarkResult {
+    let mut a: List<f32> = (0..ARRAY_SIZE).map(|i| i as f32).collect();
+    let b: List<f32> = (0..ARRAY_SIZE).map(|i| (i * 2) as f32).collect();
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        for i in 0..ARRAY_SIZE {
+            a[i] = a[i] + b[i];
+        }
+        black_box(&a);
+    }
+
+    let elapsed = start.elapsed();
+    let elements = ARRAY_SIZE * ITERATIONS;
+
+    BenchmarkResult {
+        name: "scalar_add",
+        elements_per_sec: elements as f64 / elapsed.as_secs_f64(),
+        speedup: 1.0,
+        is_baseline: true,
+    }
+}
+
+/// Auto-vectorized addition
+@target_feature(enable = "avx2")
+fn benchmark_auto_vectorized_add() -> BenchmarkResult {
+    let mut a: List<f32> = (0..ARRAY_SIZE).map(|i| i as f32).collect();
+    let b: List<f32> = (0..ARRAY_SIZE).map(|i| (i * 2) as f32).collect();
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        // Compiler should auto-vectorize this simple loop
+        a.iter_mut().zip(b.iter()).for_each(|(ai, bi)| {
+            *ai = *ai + *bi;
+        });
+        black_box(&a);
+    }
+
+    let elapsed = start.elapsed();
+    let elements = ARRAY_SIZE * ITERATIONS;
+
+    BenchmarkResult {
+        name: "auto_vectorized_add",
+        elements_per_sec: elements as f64 / elapsed.as_secs_f64(),
+        speedup: 0.0,  // Calculated after
+        is_baseline: false,
+    }
+}
+
+/// Explicit SIMD addition using intrinsics
+@target_feature(enable = "avx2")
+fn benchmark_explicit_simd_add() -> BenchmarkResult {
+    mount std.simd.f32x8;
+
+    let mut a: List<f32> = (0..ARRAY_SIZE).map(|i| i as f32).collect();
+    let b: List<f32> = (0..ARRAY_SIZE).map(|i| (i * 2) as f32).collect();
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        let chunks = ARRAY_SIZE / 8;
+        for i in 0..chunks {
+            let idx = i * 8;
+            let va = f32x8.from_slice(&a[idx..]);
+            let vb = f32x8.from_slice(&b[idx..]);
+            let sum = va + vb;
+            sum.copy_to_slice(&mut a[idx..]);
+        }
+        black_box(&a);
+    }
+
+    let elapsed = start.elapsed();
+    let elements = ARRAY_SIZE * ITERATIONS;
+
+    BenchmarkResult {
+        name: "explicit_simd_add",
+        elements_per_sec: elements as f64 / elapsed.as_secs_f64(),
+        speedup: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Dot product - scalar
+fn benchmark_scalar_dot() -> BenchmarkResult {
+    let a: List<f32> = (0..ARRAY_SIZE).map(|i| i as f32 * 0.001).collect();
+    let b: List<f32> = (0..ARRAY_SIZE).map(|i| (i * 2) as f32 * 0.001).collect();
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        let mut sum = 0.0f32;
+        for i in 0..ARRAY_SIZE {
+            sum += a[i] * b[i];
+        }
+        black_box(sum);
+    }
+
+    let elapsed = start.elapsed();
+    let elements = ARRAY_SIZE * ITERATIONS;
+
+    BenchmarkResult {
+        name: "scalar_dot_product",
+        elements_per_sec: elements as f64 / elapsed.as_secs_f64(),
+        speedup: 1.0,
+        is_baseline: true,
+    }
+}
+
+/// Dot product - SIMD
+@target_feature(enable = "avx2")
+fn benchmark_simd_dot() -> BenchmarkResult {
+    mount std.simd.f32x8;
+
+    let a: List<f32> = (0..ARRAY_SIZE).map(|i| i as f32 * 0.001).collect();
+    let b: List<f32> = (0..ARRAY_SIZE).map(|i| (i * 2) as f32 * 0.001).collect();
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        let chunks = ARRAY_SIZE / 8;
+        let mut sum_vec = f32x8.splat(0.0);
+
+        for i in 0..chunks {
+            let idx = i * 8;
+            let va = f32x8.from_slice(&a[idx..]);
+            let vb = f32x8.from_slice(&b[idx..]);
+            sum_vec = va.mul_add(vb, sum_vec);
+        }
+
+        let sum = sum_vec.reduce_sum();
+        black_box(sum);
+    }
+
+    let elapsed = start.elapsed();
+    let elements = ARRAY_SIZE * ITERATIONS;
+
+    BenchmarkResult {
+        name: "simd_dot_product",
+        elements_per_sec: elements as f64 / elapsed.as_secs_f64(),
+        speedup: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Matrix multiplication (small) - scalar
+fn benchmark_scalar_matmul() -> BenchmarkResult {
+    const N: Int = 128;
+    let a: [[f32; N]; N] = [[1.0; N]; N];
+    let b: [[f32; N]; N] = [[1.0; N]; N];
+    let mut c: [[f32; N]; N] = [[0.0; N]; N];
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        for i in 0..N {
+            for j in 0..N {
+                let mut sum = 0.0f32;
+                for k in 0..N {
+                    sum += a[i][k] * b[k][j];
+                }
+                c[i][j] = sum;
+            }
+        }
+        black_box(&c);
+    }
+
+    let elapsed = start.elapsed();
+    let ops = N * N * N * ITERATIONS;  // O(N^3)
+
+    BenchmarkResult {
+        name: "scalar_matmul_128x128",
+        elements_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        speedup: 1.0,
+        is_baseline: true,
+    }
+}
+
+/// Matrix multiplication - blocked SIMD
+@target_feature(enable = "avx2")
+fn benchmark_simd_matmul() -> BenchmarkResult {
+    mount std.simd.f32x8;
+
+    const N: Int = 128;
+    const BLOCK: Int = 8;
+
+    let a: [[f32; N]; N] = [[1.0; N]; N];
+    let b: [[f32; N]; N] = [[1.0; N]; N];
+    let mut c: [[f32; N]; N] = [[0.0; N]; N];
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        // Blocked matrix multiply with SIMD
+        for i in 0..N {
+            for j in (0..N).step_by(BLOCK) {
+                let mut sum = f32x8.splat(0.0);
+                for k in 0..N {
+                    let a_val = f32x8.splat(a[i][k]);
+                    let b_row = f32x8.from_slice(&b[k][j..]);
+                    sum = a_val.mul_add(b_row, sum);
+                }
+                sum.copy_to_slice(&mut c[i][j..]);
+            }
+        }
+        black_box(&c);
+    }
+
+    let elapsed = start.elapsed();
+    let ops = N * N * N * ITERATIONS;
+
+    BenchmarkResult {
+        name: "simd_matmul_128x128",
+        elements_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        speedup: 0.0,
+        is_baseline: false,
+    }
+}
+
+fn main() {
+    println("=== SIMD Vectorization Performance ===\n");
+
+    let add_scalar = benchmark_scalar_add();
+    let add_auto = benchmark_auto_vectorized_add();
+    let add_explicit = benchmark_explicit_simd_add();
+
+    let dot_scalar = benchmark_scalar_dot();
+    let dot_simd = benchmark_simd_dot();
+
+    let matmul_scalar = benchmark_scalar_matmul();
+    let matmul_simd = benchmark_simd_matmul();
+
+    println("Vector Addition:");
+    println("  Scalar:     {:.2}M elem/sec", add_scalar.elements_per_sec / 1e6);
+    println("  Auto SIMD:  {:.2}M elem/sec ({:.1}x)",
+            add_auto.elements_per_sec / 1e6,
+            add_auto.elements_per_sec / add_scalar.elements_per_sec);
+    println("  Explicit:   {:.2}M elem/sec ({:.1}x)",
+            add_explicit.elements_per_sec / 1e6,
+            add_explicit.elements_per_sec / add_scalar.elements_per_sec);
+
+    println("\nDot Product:");
+    println("  Scalar: {:.2}M elem/sec", dot_scalar.elements_per_sec / 1e6);
+    println("  SIMD:   {:.2}M elem/sec ({:.1}x)",
+            dot_simd.elements_per_sec / 1e6,
+            dot_simd.elements_per_sec / dot_scalar.elements_per_sec);
+
+    println("\nMatrix Multiply (128x128):");
+    println("  Scalar: {:.2}M ops/sec", matmul_scalar.elements_per_sec / 1e6);
+    println("  SIMD:   {:.2}M ops/sec ({:.1}x)",
+            matmul_simd.elements_per_sec / 1e6,
+            matmul_simd.elements_per_sec / matmul_scalar.elements_per_sec);
+}
+
+type BenchmarkResult is {
+    name: Text,
+    elements_per_sec: f64,
+    speedup: f64,
+    is_baseline: Bool,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_secs_f64(&self) -> f64 { self.nanos as f64 / 1e9 }
+}
+
+fn black_box<T>(x: T) -> T { x }

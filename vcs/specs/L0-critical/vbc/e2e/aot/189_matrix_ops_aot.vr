@@ -1,0 +1,138 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, matrix, linear-algebra
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for matrix operations using flat arrays in records
+
+// 2x2 matrix as flat struct
+type Mat2 is { m00: Int, m01: Int, m10: Int, m11: Int };
+
+fn mat2_new(a: Int, b: Int, c: Int, d: Int) -> Mat2 {
+    Mat2 { m00: a, m01: b, m10: c, m11: d }
+}
+
+fn mat2_identity() -> Mat2 {
+    mat2_new(1, 0, 0, 1)
+}
+
+fn mat2_add(a: Mat2, b: Mat2) -> Mat2 {
+    Mat2 {
+        m00: a.m00 + b.m00, m01: a.m01 + b.m01,
+        m10: a.m10 + b.m10, m11: a.m11 + b.m11
+    }
+}
+
+fn mat2_mul(a: Mat2, b: Mat2) -> Mat2 {
+    Mat2 {
+        m00: a.m00 * b.m00 + a.m01 * b.m10,
+        m01: a.m00 * b.m01 + a.m01 * b.m11,
+        m10: a.m10 * b.m00 + a.m11 * b.m10,
+        m11: a.m10 * b.m01 + a.m11 * b.m11
+    }
+}
+
+fn mat2_det(m: Mat2) -> Int {
+    m.m00 * m.m11 - m.m01 * m.m10
+}
+
+fn mat2_trace(m: Mat2) -> Int {
+    m.m00 + m.m11
+}
+
+fn mat2_transpose(m: Mat2) -> Mat2 {
+    Mat2 { m00: m.m00, m01: m.m10, m10: m.m01, m11: m.m11 }
+}
+
+fn mat2_scale(m: Mat2, s: Int) -> Mat2 {
+    Mat2 {
+        m00: m.m00 * s, m01: m.m01 * s,
+        m10: m.m10 * s, m11: m.m11 * s
+    }
+}
+
+fn test_basic_ops() {
+    let a = mat2_new(1, 2, 3, 4);
+    let b = mat2_new(5, 6, 7, 8);
+
+    // Add
+    let c = mat2_add(a, b);
+    assert_eq(c.m00, 6);
+    assert_eq(c.m01, 8);
+    assert_eq(c.m10, 10);
+    assert_eq(c.m11, 12);
+
+    // Determinant
+    assert_eq(mat2_det(a), -2);    // 1*4 - 2*3 = -2
+    assert_eq(mat2_det(b), -2);    // 5*8 - 6*7 = -2
+
+    // Trace
+    assert_eq(mat2_trace(a), 5);
+    assert_eq(mat2_trace(b), 13);
+}
+
+fn test_multiply() {
+    let a = mat2_new(1, 2, 3, 4);
+    let b = mat2_new(5, 6, 7, 8);
+
+    let c = mat2_mul(a, b);
+    assert_eq(c.m00, 19);   // 1*5 + 2*7
+    assert_eq(c.m01, 22);   // 1*6 + 2*8
+    assert_eq(c.m10, 43);   // 3*5 + 4*7
+    assert_eq(c.m11, 50);   // 3*6 + 4*8
+
+    // Identity multiply
+    let id = mat2_identity();
+    let ai = mat2_mul(a, id);
+    assert_eq(ai.m00, 1);
+    assert_eq(ai.m01, 2);
+    assert_eq(ai.m10, 3);
+    assert_eq(ai.m11, 4);
+}
+
+fn test_transpose() {
+    let a = mat2_new(1, 2, 3, 4);
+    let t = mat2_transpose(a);
+    assert_eq(t.m00, 1);
+    assert_eq(t.m01, 3);
+    assert_eq(t.m10, 2);
+    assert_eq(t.m11, 4);
+
+    // Transpose of transpose = original
+    let tt = mat2_transpose(t);
+    assert_eq(tt.m00, 1);
+    assert_eq(tt.m01, 2);
+}
+
+fn test_matrix_power() {
+    // Matrix exponentiation (integer powers)
+    let a = mat2_new(1, 1, 1, 0);  // Fibonacci matrix
+
+    // a^2
+    let a2 = mat2_mul(a, a);
+    assert_eq(a2.m00, 2);
+    assert_eq(a2.m01, 1);
+    assert_eq(a2.m10, 1);
+    assert_eq(a2.m11, 1);
+
+    // a^3 = a^2 * a
+    let a3 = mat2_mul(a2, a);
+    assert_eq(a3.m00, 3);
+    assert_eq(a3.m01, 2);
+
+    // a^4 = a^3 * a
+    let a4 = mat2_mul(a3, a);
+    assert_eq(a4.m00, 5);
+    assert_eq(a4.m01, 3);
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_multiply();
+    test_transpose();
+    test_matrix_power();
+    print("[OK] 189_matrix_ops_aot");
+    0
+}

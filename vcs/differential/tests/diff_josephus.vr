@@ -1,0 +1,108 @@
+// @test: differential
+
+// @level: L0
+// @tags: differential, josephus, simulation, math
+// @timeout: 30000
+
+// Josephus problem: n people in a circle, every k-th person eliminated
+
+// Classic Josephus recurrence: J(1,k)=0, J(n,k) = (J(n-1,k)+k) % n
+fn josephus(n: Int, k: Int) -> Int {
+    let mut pos = 0;
+    let mut i = 2;
+    while i <= n {
+        pos = (pos + k) % i;
+        i = i + 1;
+    }
+    pos
+}
+
+// Simulation with bitmask (up to 16 people)
+fn josephus_sim(n: Int, k: Int) -> Int {
+    let mut alive = 0;
+    let mut i = 0;
+    while i < n {
+        let mut mask = 1;
+        let mut j = 0;
+        while j < i { mask = mask * 2; j = j + 1; }
+        alive = alive + mask;
+        i = i + 1;
+    }
+
+    let mut eliminated = 0;
+    let mut cur = n - 1; // start before person 0 so first step reaches person 0
+    while eliminated < n - 1 {
+        let mut count = 0;
+        while count < k {
+            let mut found = 0;
+            while found == 0 {
+                cur = (cur + 1) % n;
+                let mut mask = 1;
+                let mut j = 0;
+                while j < cur { mask = mask * 2; j = j + 1; }
+                if (alive / mask) % 2 == 1 { found = 1; }
+            }
+            count = count + 1;
+        }
+        let mut mask = 1;
+        let mut j = 0;
+        while j < cur { mask = mask * 2; j = j + 1; }
+        alive = alive - mask;
+        eliminated = eliminated + 1;
+    }
+    let mut survivor = 0;
+    let mut m = 0;
+    while m < n {
+        let mut mask = 1;
+        let mut j = 0;
+        while j < m { mask = mask * 2; j = j + 1; }
+        if (alive / mask) % 2 == 1 { survivor = m; }
+        m = m + 1;
+    }
+    survivor
+}
+
+// Josephus k=2 closed form: J(n)=2*L where n=2^m+L
+fn josephus_k2(n: Int) -> Int {
+    let mut p = 1;
+    while p * 2 <= n { p = p * 2; }
+    let l = n - p;
+    2 * l
+}
+
+fn test_josephus_recurrence() -> Int {
+    assert_eq(josephus(1, 2), 0);
+    assert_eq(josephus(2, 2), 0);
+    assert_eq(josephus(3, 2), 2);
+    assert_eq(josephus(5, 2), 2);
+    assert_eq(josephus(7, 2), 6);
+    assert_eq(josephus(10, 2), 4);
+    assert_eq(josephus(3, 3), 1);
+    assert_eq(josephus(5, 3), 3);
+    1
+}
+
+fn test_simulation_matches() -> Int {
+    assert_eq(josephus_sim(3, 2), josephus(3, 2));
+    assert_eq(josephus_sim(5, 2), josephus(5, 2));
+    assert_eq(josephus_sim(7, 2), josephus(7, 2));
+    assert_eq(josephus_sim(5, 3), josephus(5, 3));
+    1
+}
+
+fn test_k2_closed_form() -> Int {
+    assert_eq(josephus_k2(1), josephus(1, 2));
+    assert_eq(josephus_k2(3), josephus(3, 2));
+    assert_eq(josephus_k2(5), josephus(5, 2));
+    assert_eq(josephus_k2(7), josephus(7, 2));
+    assert_eq(josephus_k2(10), josephus(10, 2));
+    1
+}
+
+fn main() -> Int {
+    test_josephus_recurrence();
+    test_simulation_matches();
+    test_k2_closed_form();
+    print("[OK] diff_josephus");
+    0
+}

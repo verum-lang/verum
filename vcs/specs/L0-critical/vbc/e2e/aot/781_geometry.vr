@@ -1,0 +1,146 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, geometry, distance, area, perimeter, cross-product
+// @expected-exit: 0
+
+// Tests distance, area, perimeter, cross product, and convex hull orientation.
+// Uses integer coordinates; distances squared to avoid sqrt.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn dist_sq(x1: Int, y1: Int, x2: Int, y2: Int) -> Int {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    dx * dx + dy * dy
+}
+
+fn cross_product(ax: Int, ay: Int, bx: Int, by_val: Int) -> Int {
+    // 2D cross product: a x b = ax*by - ay*bx
+    ax * by_val - ay * bx
+}
+
+fn triangle_area_2x(x1: Int, y1: Int, x2: Int, y2: Int, x3: Int, y3: Int) -> Int {
+    // Twice the signed area of triangle using cross product (shoelace)
+    // 2A = |(x2-x1)(y3-y1) - (x3-x1)(y2-y1)|
+    let v = (x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1);
+    abs_val(v)
+}
+
+fn orientation(px: Int, py: Int, qx: Int, qy: Int, rx: Int, ry: Int) -> Int {
+    // Returns: positive=counterclockwise, negative=clockwise, 0=collinear
+    // val = (qx - px)*(ry - py) - (qy - py)*(rx - px)
+    (qx - px) * (ry - py) - (qy - py) * (rx - px)
+}
+
+fn manhattan_dist(x1: Int, y1: Int, x2: Int, y2: Int) -> Int {
+    abs_val(x2 - x1) + abs_val(y2 - y1)
+}
+
+fn main() -> Int {
+    // Test 1: Euclidean distance squared
+    // Distance from (0,0) to (3,4): d^2 = 9 + 16 = 25, d = 5
+    assert_eq(dist_sq(0, 0, 3, 4), 25);
+    // Distance from (1,2) to (4,6): d^2 = 9 + 16 = 25
+    assert_eq(dist_sq(1, 2, 4, 6), 25);
+
+    // Test 2: Manhattan distance
+    // From (0,0) to (3,4): |3| + |4| = 7
+    // From (1, -2) to (-3, 5): |−4| + |7| = 11
+    assert_eq(manhattan_dist(0, 0, 3, 4), 7);
+    assert_eq(manhattan_dist(1, -2, -3, 5), 11);
+
+    // Test 3: Cross product
+    // (1,0) x (0,1) = 1 (CCW)
+    // (0,1) x (1,0) = -1 (CW)
+    assert_eq(cross_product(1, 0, 0, 1), 1);
+    assert_eq(cross_product(0, 1, 1, 0), -1);
+
+    // Test 4: Triangle area
+    // Triangle (0,0), (4,0), (0,3): area = 6, 2*area = 12
+    assert_eq(triangle_area_2x(0, 0, 4, 0, 0, 3), 12);
+    // Triangle (1,1), (5,1), (3,4): area = (5-1)*(4-1) - (3-1)*(1-1) ... use shoelace
+    // 2A = |(5-1)(4-1) - (3-1)(1-1)| = |4*3 - 2*0| = 12
+    assert_eq(triangle_area_2x(1, 1, 5, 1, 3, 4), 12);
+
+    // Test 5: Collinear points
+    // Points (0,0), (2,2), (4,4) are collinear -> area = 0
+    assert_eq(triangle_area_2x(0, 0, 2, 2, 4, 4), 0);
+    assert_eq(orientation(0, 0, 2, 2, 4, 4), 0);
+
+    // Test 6: Orientation (convex hull building block)
+    // (0,0), (4,0), (2,3) -> CCW (positive)
+    let o1 = orientation(0, 0, 4, 0, 2, 3);
+    assert(o1 > 0);
+    // (0,0), (4,0), (2,-3) -> CW (negative)
+    let o2 = orientation(0, 0, 4, 0, 2, -3);
+    assert(o2 < 0);
+
+    // Test 7: Rectangle perimeter and area
+    // Rectangle with corners (0,0), (5,0), (5,3), (0,3)
+    // Perimeter = 2*(5+3) = 16
+    // Area = 5*3 = 15
+    let width = 5;
+    let height = 3;
+    let perimeter = 2 * (width + height);
+    let area = width * height;
+    assert_eq(perimeter, 16);
+    assert_eq(area, 15);
+
+    // Test 8: Polygon area using shoelace formula (quadrilateral)
+    // Vertices: (0,0), (4,0), (4,3), (0,3) (rectangle)
+    // 2A = |x0(y1-y3) + x1(y2-y0) + x2(y3-y1) + x3(y0-y2)|
+    //    = |0(0-3) + 4(3-0) + 4(3-0) + 0(0-3)|
+    //    = |0 + 12 + 12 + 0| = 24
+    // But standard shoelace:
+    // 2A = |sum(xi*y(i+1) - x(i+1)*yi)|
+    // = |(0*0 - 4*0) + (4*3 - 4*0) + (4*3 - 0*3) + (0*0 - 0*3)|
+    // = |0 + 12 + 12 + 0| = 24
+    // A = 12. For a 4x3 rectangle, A = 12. Confirmed.
+    let qx = [0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let qy = [0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nv = 4;
+    let mut shoelace_sum = 0;
+    let mut i = 0;
+    while (i < nv) {
+        let next = (i + 1) % nv;
+        shoelace_sum = shoelace_sum + qx[i] * qy[next] - qx[next] * qy[i];
+        i = i + 1;
+    }
+    let poly_area_2x = abs_val(shoelace_sum);
+    assert_eq(poly_area_2x, 24);
+
+    // Test 9: Point inside triangle test using orientation
+    // Triangle: (0,0), (10,0), (0,10). Point (2,2) should be inside.
+    // All orientations should be same sign (CCW or all CW)
+    let oa = orientation(0, 0, 10, 0, 2, 2);   // should be positive (CCW)
+    let ob = orientation(10, 0, 0, 10, 2, 2);   // should be positive (CCW)
+    let oc = orientation(0, 10, 0, 0, 2, 2);    // should be positive (CCW)
+    // oa = (10-0)*(2-0) - (0-0)*(2-0) = 20
+    assert_eq(oa, 20);
+    // ob = (0-10)*(2-0) - (10-0)*(2-10) = -20 - (-80) = -20 + 80 = 60
+    assert_eq(ob, 60);
+    // oc = (0-0)*(2-0) - (0-10)*(2-0) = 0 - (-20) = 20
+    // Wait: oc = (0-0)*(2-10) - (0-10)*(2-0) = 0 - (-20) = 20
+    assert_eq(oc, 20);
+    // All positive => inside
+    assert(oa > 0);
+    assert(ob > 0);
+    assert(oc > 0);
+
+    // Test 10: Distance properties - triangle inequality
+    // d(A,B) + d(B,C) >= d(A,C)
+    // A=(0,0), B=(3,0), C=(3,4)
+    // d(A,B)^2 = 9, d(B,C)^2 = 16, d(A,C)^2 = 25
+    // d(A,B) = 3, d(B,C) = 4, d(A,C) = 5
+    // 3 + 4 = 7 >= 5 ✓ (this is a right triangle: 3^2 + 4^2 = 5^2)
+    let dab_sq = dist_sq(0, 0, 3, 0);
+    let dbc_sq = dist_sq(3, 0, 3, 4);
+    let dac_sq = dist_sq(0, 0, 3, 4);
+    assert_eq(dab_sq + dbc_sq, dac_sq);  // Pythagorean theorem
+
+    print("Geometry: PASS");
+    0
+}

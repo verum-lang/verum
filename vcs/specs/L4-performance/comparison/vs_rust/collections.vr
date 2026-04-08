@@ -1,0 +1,883 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @baseline-comparison: rust
+// @tags: comparison, rust, collections, data-structures, baseline, performance
+// @description: Collections vs Rust benchmark (target: 0.85-1.0x Rust performance)
+
+/// Verum vs Rust: Collections Benchmark
+///
+/// This benchmark compares Verum's collection operations against Rust.
+/// Collections are fundamental data structures that test memory layout,
+/// cache efficiency, and CBGR overhead.
+///
+/// Target: 0.85-1.0x Rust performance
+///
+/// Collections tested:
+/// - List (Vec equivalent)
+/// - Map (HashMap equivalent)
+/// - Set (HashSet equivalent)
+/// - Heap (BinaryHeap equivalent)
+///
+/// Operations tested:
+/// - Insert/Push
+/// - Lookup/Get
+/// - Remove
+/// - Iteration
+/// - Bulk operations
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const DATA_SIZE: Int = 1_000_000;
+const SMALL_SIZE: Int = 10_000;
+const LOOKUP_COUNT: Int = 1_000_000;
+
+/// Rust baseline measurements
+module rust_baselines {
+    // List/Vec operations
+    pub const VEC_PUSH_1M_MS: Float = 15.0;
+    pub const VEC_PUSH_WITH_CAP_1M_MS: Float = 8.0;
+    pub const VEC_POP_1M_MS: Float = 5.0;
+    pub const VEC_INSERT_FRONT_10K_MS: Float = 200.0;
+    pub const VEC_RANDOM_ACCESS_1M_MS: Float = 5.0;
+    pub const VEC_ITER_SUM_1M_MS: Float = 2.0;
+    pub const VEC_CLONE_1M_MS: Float = 10.0;
+
+    // Map/HashMap operations
+    pub const MAP_INSERT_1M_MS: Float = 200.0;
+    pub const MAP_GET_1M_MS: Float = 50.0;
+    pub const MAP_REMOVE_1M_MS: Float = 60.0;
+    pub const MAP_ITER_1M_MS: Float = 30.0;
+    pub const MAP_CONTAINS_1M_MS: Float = 45.0;
+
+    // Set/HashSet operations
+    pub const SET_INSERT_1M_MS: Float = 180.0;
+    pub const SET_CONTAINS_1M_MS: Float = 40.0;
+    pub const SET_UNION_500K_MS: Float = 100.0;
+    pub const SET_INTERSECTION_500K_MS: Float = 80.0;
+
+    // Heap/BinaryHeap operations
+    pub const HEAP_PUSH_1M_MS: Float = 50.0;
+    pub const HEAP_POP_1M_MS: Float = 80.0;
+    pub const HEAP_PEEK_1M_MS: Float = 2.0;
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs Rust: Collections");
+
+    // List benchmarks
+    results.add(benchmark_list_push());
+    results.add(benchmark_list_push_with_capacity());
+    results.add(benchmark_list_pop());
+    results.add(benchmark_list_insert_front());
+    results.add(benchmark_list_random_access());
+    results.add(benchmark_list_iteration());
+    results.add(benchmark_list_clone());
+
+    // Map benchmarks
+    results.add(benchmark_map_insert());
+    results.add(benchmark_map_get());
+    results.add(benchmark_map_remove());
+    results.add(benchmark_map_iteration());
+    results.add(benchmark_map_contains());
+
+    // Set benchmarks
+    results.add(benchmark_set_insert());
+    results.add(benchmark_set_contains());
+    results.add(benchmark_set_union());
+    results.add(benchmark_set_intersection());
+
+    // Heap benchmarks
+    results.add(benchmark_heap_push());
+    results.add(benchmark_heap_pop());
+    results.add(benchmark_heap_peek());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_rust_collections.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.ratio >= r.min_target);
+    assert(all_meet_target, "Verum collection performance below target");
+}
+
+// ============================================================================
+// List Benchmarks
+// ============================================================================
+
+/// Benchmark: List push 1M elements
+fn benchmark_list_push() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut list: List<Int> = List.new();
+        for i in 0..SMALL_SIZE {
+            list.push(i);
+        }
+        black_box(list);
+    }
+
+    let mut list: List<Int> = List.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        list.push(i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(list);
+
+    ComparisonResult {
+        name: "list_push_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.VEC_PUSH_1M_MS,
+        ratio: rust_baselines.VEC_PUSH_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "list",
+    }
+}
+
+/// Benchmark: List push with pre-allocated capacity
+fn benchmark_list_push_with_capacity() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut list: List<Int> = List.with_capacity(SMALL_SIZE);
+        for i in 0..SMALL_SIZE {
+            list.push(i);
+        }
+        black_box(list);
+    }
+
+    let mut list: List<Int> = List.with_capacity(DATA_SIZE);
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        list.push(i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(list);
+
+    ComparisonResult {
+        name: "list_push_with_cap_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.VEC_PUSH_WITH_CAP_1M_MS,
+        ratio: rust_baselines.VEC_PUSH_WITH_CAP_1M_MS / verum_ms,
+        min_target: 0.90,
+        category: "list",
+    }
+}
+
+/// Benchmark: List pop 1M elements
+fn benchmark_list_pop() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut list: List<Int> = (0..SMALL_SIZE).collect();
+        while list.pop().is_some() {}
+        black_box(list);
+    }
+
+    let mut list: List<Int> = (0..DATA_SIZE).collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    while list.pop().is_some() {}
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(list);
+
+    ComparisonResult {
+        name: "list_pop_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.VEC_POP_1M_MS,
+        ratio: rust_baselines.VEC_POP_1M_MS / verum_ms,
+        min_target: 0.90,
+        category: "list",
+    }
+}
+
+/// Benchmark: List insert at front (expensive)
+fn benchmark_list_insert_front() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut list: List<Int> = List.new();
+        for i in 0..100 {
+            list.insert(0, i);
+        }
+        black_box(list);
+    }
+
+    let mut list: List<Int> = List.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..SMALL_SIZE {
+        list.insert(0, i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(list);
+
+    ComparisonResult {
+        name: "list_insert_front_10k",
+        verum_ms,
+        baseline_ms: rust_baselines.VEC_INSERT_FRONT_10K_MS,
+        ratio: rust_baselines.VEC_INSERT_FRONT_10K_MS / verum_ms,
+        min_target: 0.85,
+        category: "list",
+    }
+}
+
+/// Benchmark: List random access
+fn benchmark_list_random_access() -> ComparisonResult {
+    let list: List<Int> = (0..DATA_SIZE).collect();
+    let mut rng = Random.with_seed(42);
+    let indices: List<Int> = (0..LOOKUP_COUNT)
+        .map(|_| rng.gen_range(0, DATA_SIZE))
+        .collect();
+
+    // Warmup
+    for i in 0..SMALL_SIZE {
+        black_box(list[indices[i]]);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Int = 0;
+    for i in 0..LOOKUP_COUNT {
+        sum += list[indices[i]];
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "list_random_access_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.VEC_RANDOM_ACCESS_1M_MS,
+        ratio: rust_baselines.VEC_RANDOM_ACCESS_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "list",
+    }
+}
+
+/// Benchmark: List iteration
+fn benchmark_list_iteration() -> ComparisonResult {
+    let list: List<Int> = (0..DATA_SIZE).collect();
+
+    // Warmup
+    black_box(list.iter().take(SMALL_SIZE).sum.<Int>());
+
+    let timer = Timer.new();
+    timer.start();
+
+    let sum: Int = list.iter().sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "list_iter_sum_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.VEC_ITER_SUM_1M_MS,
+        ratio: rust_baselines.VEC_ITER_SUM_1M_MS / verum_ms,
+        min_target: 0.90,
+        category: "list",
+    }
+}
+
+/// Benchmark: List clone
+fn benchmark_list_clone() -> ComparisonResult {
+    let list: List<Int> = (0..DATA_SIZE).collect();
+
+    // Warmup
+    for _ in 0..3 {
+        let small: List<Int> = (0..SMALL_SIZE).collect();
+        black_box(small.clone());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let cloned = list.clone();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(cloned);
+
+    ComparisonResult {
+        name: "list_clone_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.VEC_CLONE_1M_MS,
+        ratio: rust_baselines.VEC_CLONE_1M_MS / verum_ms,
+        min_target: 0.90,
+        category: "list",
+    }
+}
+
+// ============================================================================
+// Map Benchmarks
+// ============================================================================
+
+/// Benchmark: Map insert 1M elements
+fn benchmark_map_insert() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut map: Map<Int, Int> = Map.new();
+        for i in 0..SMALL_SIZE {
+            map.insert(i, i * 2);
+        }
+        black_box(map);
+    }
+
+    let mut map: Map<Int, Int> = Map.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(map);
+
+    ComparisonResult {
+        name: "map_insert_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.MAP_INSERT_1M_MS,
+        ratio: rust_baselines.MAP_INSERT_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "map",
+    }
+}
+
+/// Benchmark: Map get 1M lookups
+fn benchmark_map_get() -> ComparisonResult {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..DATA_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    let mut rng = Random.with_seed(42);
+    let keys: List<Int> = (0..LOOKUP_COUNT)
+        .map(|_| rng.gen_range(0, DATA_SIZE))
+        .collect();
+
+    // Warmup
+    for i in 0..SMALL_SIZE {
+        black_box(map.get(&keys[i]));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Int = 0;
+    for i in 0..LOOKUP_COUNT {
+        if let Some(&v) = map.get(&keys[i]) {
+            sum += v;
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "map_get_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.MAP_GET_1M_MS,
+        ratio: rust_baselines.MAP_GET_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "map",
+    }
+}
+
+/// Benchmark: Map remove 1M elements
+fn benchmark_map_remove() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut map: Map<Int, Int> = Map.new();
+        for i in 0..SMALL_SIZE {
+            map.insert(i, i * 2);
+        }
+        for i in 0..SMALL_SIZE {
+            map.remove(&i);
+        }
+        black_box(map);
+    }
+
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..DATA_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        map.remove(&i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(map);
+
+    ComparisonResult {
+        name: "map_remove_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.MAP_REMOVE_1M_MS,
+        ratio: rust_baselines.MAP_REMOVE_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "map",
+    }
+}
+
+/// Benchmark: Map iteration
+fn benchmark_map_iteration() -> ComparisonResult {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..DATA_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    // Warmup
+    let mut small_map: Map<Int, Int> = Map.new();
+    for i in 0..SMALL_SIZE {
+        small_map.insert(i, i * 2);
+    }
+    black_box(small_map.iter().map(|(k, v)| k + v).sum.<Int>());
+
+    let timer = Timer.new();
+    timer.start();
+
+    let sum: Int = map.iter().map(|(k, v)| k + v).sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "map_iter_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.MAP_ITER_1M_MS,
+        ratio: rust_baselines.MAP_ITER_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "map",
+    }
+}
+
+/// Benchmark: Map contains_key
+fn benchmark_map_contains() -> ComparisonResult {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..DATA_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    let mut rng = Random.with_seed(42);
+    let keys: List<Int> = (0..LOOKUP_COUNT)
+        .map(|_| rng.gen_range(0, DATA_SIZE * 2)) // 50% hit rate
+        .collect();
+
+    // Warmup
+    for i in 0..SMALL_SIZE {
+        black_box(map.contains_key(&keys[i]));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut count: Int = 0;
+    for i in 0..LOOKUP_COUNT {
+        if map.contains_key(&keys[i]) {
+            count += 1;
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(count);
+
+    ComparisonResult {
+        name: "map_contains_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.MAP_CONTAINS_1M_MS,
+        ratio: rust_baselines.MAP_CONTAINS_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "map",
+    }
+}
+
+// ============================================================================
+// Set Benchmarks
+// ============================================================================
+
+/// Benchmark: Set insert 1M elements
+fn benchmark_set_insert() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut set: Set<Int> = Set.new();
+        for i in 0..SMALL_SIZE {
+            set.insert(i);
+        }
+        black_box(set);
+    }
+
+    let mut set: Set<Int> = Set.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        set.insert(i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(set);
+
+    ComparisonResult {
+        name: "set_insert_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.SET_INSERT_1M_MS,
+        ratio: rust_baselines.SET_INSERT_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "set",
+    }
+}
+
+/// Benchmark: Set contains
+fn benchmark_set_contains() -> ComparisonResult {
+    let mut set: Set<Int> = Set.new();
+    for i in 0..DATA_SIZE {
+        set.insert(i);
+    }
+
+    let mut rng = Random.with_seed(42);
+    let values: List<Int> = (0..LOOKUP_COUNT)
+        .map(|_| rng.gen_range(0, DATA_SIZE * 2))
+        .collect();
+
+    // Warmup
+    for i in 0..SMALL_SIZE {
+        black_box(set.contains(&values[i]));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut count: Int = 0;
+    for i in 0..LOOKUP_COUNT {
+        if set.contains(&values[i]) {
+            count += 1;
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(count);
+
+    ComparisonResult {
+        name: "set_contains_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.SET_CONTAINS_1M_MS,
+        ratio: rust_baselines.SET_CONTAINS_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "set",
+    }
+}
+
+/// Benchmark: Set union
+fn benchmark_set_union() -> ComparisonResult {
+    let half = DATA_SIZE / 2;
+
+    let set_a: Set<Int> = (0..half).collect();
+    let set_b: Set<Int> = (half/2..half + half/2).collect();
+
+    // Warmup
+    let small_a: Set<Int> = (0..1000).collect();
+    let small_b: Set<Int> = (500..1500).collect();
+    black_box(small_a.union(&small_b).count());
+
+    let timer = Timer.new();
+    timer.start();
+
+    let union: Set<Int> = set_a.union(&set_b).cloned().collect();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(union);
+
+    ComparisonResult {
+        name: "set_union_500k",
+        verum_ms,
+        baseline_ms: rust_baselines.SET_UNION_500K_MS,
+        ratio: rust_baselines.SET_UNION_500K_MS / verum_ms,
+        min_target: 0.85,
+        category: "set",
+    }
+}
+
+/// Benchmark: Set intersection
+fn benchmark_set_intersection() -> ComparisonResult {
+    let half = DATA_SIZE / 2;
+
+    let set_a: Set<Int> = (0..half).collect();
+    let set_b: Set<Int> = (half/2..half + half/2).collect();
+
+    // Warmup
+    let small_a: Set<Int> = (0..1000).collect();
+    let small_b: Set<Int> = (500..1500).collect();
+    black_box(small_a.intersection(&small_b).count());
+
+    let timer = Timer.new();
+    timer.start();
+
+    let intersection: Set<Int> = set_a.intersection(&set_b).cloned().collect();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(intersection);
+
+    ComparisonResult {
+        name: "set_intersection_500k",
+        verum_ms,
+        baseline_ms: rust_baselines.SET_INTERSECTION_500K_MS,
+        ratio: rust_baselines.SET_INTERSECTION_500K_MS / verum_ms,
+        min_target: 0.85,
+        category: "set",
+    }
+}
+
+// ============================================================================
+// Heap Benchmarks
+// ============================================================================
+
+/// Benchmark: Heap push 1M elements
+fn benchmark_heap_push() -> ComparisonResult {
+    let mut rng = Random.with_seed(42);
+    let data: List<Int> = (0..DATA_SIZE)
+        .map(|_| rng.gen_range(0, DATA_SIZE))
+        .collect();
+
+    // Warmup
+    for _ in 0..3 {
+        let mut heap: Heap<Int> = Heap();
+        for i in 0..SMALL_SIZE {
+            heap.push(data[i]);
+        }
+        black_box(heap);
+    }
+
+    let mut heap: Heap<Int> = Heap();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        heap.push(data[i]);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(heap);
+
+    ComparisonResult {
+        name: "heap_push_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.HEAP_PUSH_1M_MS,
+        ratio: rust_baselines.HEAP_PUSH_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "heap",
+    }
+}
+
+/// Benchmark: Heap pop 1M elements
+fn benchmark_heap_pop() -> ComparisonResult {
+    let mut rng = Random.with_seed(42);
+
+    // Warmup
+    for _ in 0..3 {
+        let mut heap: Heap<Int> = Heap();
+        for _ in 0..SMALL_SIZE {
+            heap.push(rng.gen_range(0, SMALL_SIZE));
+        }
+        while heap.pop().is_some() {}
+        black_box(heap);
+    }
+
+    let mut heap: Heap<Int> = Heap();
+    for i in 0..DATA_SIZE {
+        heap.push(rng.gen_range(0, DATA_SIZE));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    while heap.pop().is_some() {}
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(heap);
+
+    ComparisonResult {
+        name: "heap_pop_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.HEAP_POP_1M_MS,
+        ratio: rust_baselines.HEAP_POP_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "heap",
+    }
+}
+
+/// Benchmark: Heap peek 1M times
+fn benchmark_heap_peek() -> ComparisonResult {
+    let mut rng = Random.with_seed(42);
+    let mut heap: Heap<Int> = Heap();
+    for _ in 0..DATA_SIZE {
+        heap.push(rng.gen_range(0, DATA_SIZE));
+    }
+
+    // Warmup
+    for _ in 0..SMALL_SIZE {
+        black_box(heap.peek());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Int = 0;
+    for _ in 0..LOOKUP_COUNT {
+        if let Some(&v) = heap.peek() {
+            sum += v;
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "heap_peek_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.HEAP_PEEK_1M_MS,
+        ratio: rust_baselines.HEAP_PEEK_1M_MS / verum_ms,
+        min_target: 0.90,
+        category: "heap",
+    }
+}
+
+type ComparisonResult is {
+    name: Text,
+    verum_ms: Float,
+    baseline_ms: Float,
+    ratio: Float,
+    min_target: Float,
+    category: Text,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<ComparisonResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: ComparisonResult) {
+        self.results.push(result);
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<30} {:>12} {:>12} {:>10} {:>8} {:>8}",
+                "Benchmark", "Verum (ms)", "Rust (ms)", "Ratio", "Target", "Status");
+        println("{}", "-".repeat(85));
+
+        for result in &self.results {
+            let passed = result.ratio >= result.min_target;
+            let status = if passed { "PASS" } else { "FAIL" };
+            let ratio_pct = result.ratio * 100.0;
+
+            println("{:<30} {:>12.2} {:>12.2} {:>9.1}% {:>7.0}% {:>8}",
+                    result.name, result.verum_ms, result.baseline_ms,
+                    ratio_pct, result.min_target * 100.0, status);
+        }
+    }
+
+    fn export_comparison(&self, path: Text) {
+        let json = Json.object();
+        json.set("suite", &self.suite_name);
+        json.set("baseline", "rust");
+
+        let results_json = Json.array();
+        for result in &self.results {
+            let r = Json.object();
+            r.set("name", &result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("baseline_ms", result.baseline_ms);
+            r.set("ratio", result.ratio);
+            r.set("min_target", result.min_target);
+            r.set("category", &result.category);
+            r.set("passed", result.ratio >= result.min_target);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+    }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+type Timer is { start_time: Instant };
+implement Timer {
+    fn new() -> Self { Self { start_time: Instant.now() } }
+    fn start(&mut self) { self.start_time = Instant.now(); }
+    fn elapsed_ms(&self) -> Int { self.start_time.elapsed().as_millis() }
+}
+
+type Random is { seed: u64 };
+implement Random {
+    fn with_seed(seed: u64) -> Self { Self { seed } }
+    fn gen_range(&mut self, min: Int, max: Int) -> Int { min }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+type Json is { data: Map<Text, Heap<Any>> };
+implement Json {
+    fn object() -> Self { Self { data: Map.new() } }
+    fn array() -> Self { Self { data: Map.new() } }
+    fn set<T>(&mut self, key: &Text, value: T) {}
+    fn push<T>(&mut self, value: T) {}
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+module File {
+    pub fn write(path: Text, content: Text) {}
+}

@@ -1,0 +1,152 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @was-skip: Result type now implemented
+// @tags: reference_system, cbgr, copy-semantics, affine, maybe, result
+
+/// Test copy and affine semantics with Maybe and Result types.
+/// These wrapper types properly propagate copy/affine semantics.
+/// Spec: 04-memory-model.md#wrapper-types
+
+// Affine resource type
+type affine Handle is {
+    fd: Int,
+};
+
+// Maybe wrapper for Handle (affine type) - using different variant names to avoid collision
+type MaybeHandle is HasHandle(Handle) | NoHandle;
+
+fn main() {
+    test_maybe_copy();
+    test_result_copy();
+    test_maybe_unwrap_copy();
+    test_nested_maybe_copy();
+    test_maybe_affine();
+}
+
+/// Test copying Maybe<T> where T is Copy
+fn test_maybe_copy() {
+    let opt1: Maybe<Text> = Some(Text.from("optional"));
+    let opt2 = opt1;  // Copy the Maybe (Text is Copy)
+
+    // Both valid
+    match opt1 {
+        Some(s) => assert(s == "optional"),
+        None => panic("Expected Some"),
+    }
+    match opt2 {
+        Some(s) => assert(s == "optional"),
+        None => panic("Expected Some"),
+    }
+}
+
+/// Test copying Result<T, E> where T and E are Copy
+fn test_result_copy() {
+    let res1: Result<Text, Error> = Ok(Text.from("success"));
+    let res2 = res1;  // Copy the Result
+
+    // Both valid
+    match res1 {
+        Ok(s) => assert(s == "success"),
+        Err(_) => panic("Expected Ok"),
+    }
+    match res2 {
+        Ok(s) => assert(s == "success"),
+        Err(_) => panic("Expected Ok"),
+    }
+
+    // Error variant
+    let err1: Result<Int, Text> = Err(Text.from("failure"));
+    let err2 = err1;  // Copy
+
+    // Both valid
+    match err1 {
+        Ok(_) => panic("Expected Err"),
+        Err(e) => assert(e == "failure"),
+    }
+    match err2 {
+        Ok(_) => panic("Expected Err"),
+        Err(e) => assert(e == "failure"),
+    }
+}
+
+/// Test copy during unwrap operations
+fn test_maybe_unwrap_copy() {
+    let opt: Maybe<Text> = Some(Text.from("unwrapped"));
+
+    // unwrap copies the inner value (Text is Copy)
+    let value = opt.unwrap();
+
+    assert(value == "unwrapped");
+    // opt is still valid (Maybe<Text> is Copy)
+    assert(opt == Some(Text.from("unwrapped")));
+}
+
+/// Test nested Maybe copies
+fn test_nested_maybe_copy() {
+    let nested: Maybe<Maybe<Text>> = Some(Some(Text.from("deep")));
+    let copied = nested;
+
+    // Both valid
+    match nested {
+        Some(inner) => match inner {
+            Some(s) => assert(s == "deep"),
+            None => panic("Expected inner Some"),
+        },
+        None => panic("Expected outer Some"),
+    }
+    match copied {
+        Some(inner) => match inner {
+            Some(s) => assert(s == "deep"),
+            None => panic("Expected inner Some"),
+        },
+        None => panic("Expected outer Some"),
+    }
+}
+
+/// Test Maybe with affine content - becomes affine
+fn test_maybe_affine() {
+    let opt1 = MaybeHandle.HasHandle(Handle { fd: 42 });
+    let opt2 = opt1;  // Move (Handle is affine)
+
+    // Only opt2 is valid
+    match opt2 {
+        MaybeHandle.HasHandle(h) => assert(h.fd == 42),
+        MaybeHandle.NoHandle => panic("Expected Some"),
+    }
+    // Using opt1 here would panic
+}
+
+/// Test copy in pattern matching
+fn test_match_copy() {
+    let opt: Maybe<Text> = Some(Text.from("matched"));
+
+    let result = match opt {
+        Some(s) => s,  // s is copied out
+        None => Text.from("default"),
+    };
+
+    assert(result == "matched");
+    // opt is still valid (Maybe<Text> is Copy)
+    assert(opt == Some(Text.from("matched")));
+}
+
+/// Test copying into Maybe
+fn wrap_in_maybe<T>(value: T) -> Maybe<T> {
+    Some(value)  // Value is copied into Some (if Copy)
+}
+
+fn test_copy_into_maybe() {
+    let text = Text.from("wrapped");
+    let wrapped = wrap_in_maybe(text);  // text is copied
+
+    // Both valid
+    assert(text == "wrapped");
+    assert(wrapped.is_some());
+}
+
+// Type definitions
+
+type Error is {
+    message: Text,
+};

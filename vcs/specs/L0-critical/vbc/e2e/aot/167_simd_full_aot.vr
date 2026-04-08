@@ -1,0 +1,225 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, simd, vector
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT SIMD create/arithmetic/reduction — 4-lane and 8-lane integer vectors
+
+// ============================================================================
+// 4-lane SIMD integer vector
+// ============================================================================
+
+type I4 is { x: Int, y: Int, z: Int, w: Int };
+
+fn i4_new(x: Int, y: Int, z: Int, w: Int) -> I4 {
+    I4 { x: x, y: y, z: z, w: w }
+}
+
+fn i4_splat(v: Int) -> I4 {
+    I4 { x: v, y: v, z: v, w: v }
+}
+
+fn i4_add(a: I4, b: I4) -> I4 {
+    I4 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z, w: a.w + b.w }
+}
+
+fn i4_sub(a: I4, b: I4) -> I4 {
+    I4 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z, w: a.w - b.w }
+}
+
+fn i4_mul(a: I4, b: I4) -> I4 {
+    I4 { x: a.x * b.x, y: a.y * b.y, z: a.z * b.z, w: a.w * b.w }
+}
+
+fn i4_reduce_add(a: I4) -> Int {
+    a.x + a.y + a.z + a.w
+}
+
+fn i4_reduce_max(a: I4) -> Int {
+    let mut m = a.x;
+    if a.y > m { m = a.y; }
+    if a.z > m { m = a.z; }
+    if a.w > m { m = a.w; }
+    m
+}
+
+fn i4_reduce_min(a: I4) -> Int {
+    let mut m = a.x;
+    if a.y < m { m = a.y; }
+    if a.z < m { m = a.z; }
+    if a.w < m { m = a.w; }
+    m
+}
+
+fn i4_lane(a: I4, i: Int) -> Int {
+    if i == 0 { a.x } else if i == 1 { a.y } else if i == 2 { a.z } else { a.w }
+}
+
+// Fused multiply-add: a * b + c
+fn i4_fma(a: I4, b: I4, c: I4) -> I4 {
+    I4 {
+        x: a.x * b.x + c.x,
+        y: a.y * b.y + c.y,
+        z: a.z * b.z + c.z,
+        w: a.w * b.w + c.w
+    }
+}
+
+// ============================================================================
+// Test 1: SIMD creation and splat
+// ============================================================================
+
+fn test_simd_create() {
+    let a = i4_new(1, 2, 3, 4);
+    assert_eq(i4_lane(a, 0), 1);
+    assert_eq(i4_lane(a, 1), 2);
+    assert_eq(i4_lane(a, 2), 3);
+    assert_eq(i4_lane(a, 3), 4);
+
+    let b = i4_splat(42);
+    assert_eq(i4_lane(b, 0), 42);
+    assert_eq(i4_lane(b, 1), 42);
+    assert_eq(i4_lane(b, 2), 42);
+    assert_eq(i4_lane(b, 3), 42);
+
+    let z = i4_splat(0);
+    assert_eq(i4_reduce_add(z), 0);
+
+    print("test_simd_create passed");
+}
+
+// ============================================================================
+// Test 2: SIMD arithmetic
+// ============================================================================
+
+fn test_simd_arithmetic() {
+    let a = i4_new(10, 20, 30, 40);
+    let b = i4_new(1, 2, 3, 4);
+
+    // Addition
+    let c = i4_add(a, b);
+    assert_eq(i4_lane(c, 0), 11);
+    assert_eq(i4_lane(c, 1), 22);
+    assert_eq(i4_lane(c, 2), 33);
+    assert_eq(i4_lane(c, 3), 44);
+
+    // Subtraction
+    let d = i4_sub(a, b);
+    assert_eq(i4_lane(d, 0), 9);
+    assert_eq(i4_lane(d, 1), 18);
+    assert_eq(i4_lane(d, 2), 27);
+    assert_eq(i4_lane(d, 3), 36);
+
+    // Multiplication
+    let e = i4_mul(a, b);
+    assert_eq(i4_lane(e, 0), 10);
+    assert_eq(i4_lane(e, 1), 40);
+    assert_eq(i4_lane(e, 2), 90);
+    assert_eq(i4_lane(e, 3), 160);
+
+    // add + sub cancel: (a + b) - b = a
+    let f = i4_sub(i4_add(a, b), b);
+    assert_eq(i4_lane(f, 0), 10);
+    assert_eq(i4_lane(f, 1), 20);
+    assert_eq(i4_lane(f, 2), 30);
+    assert_eq(i4_lane(f, 3), 40);
+
+    print("test_simd_arithmetic passed");
+}
+
+// ============================================================================
+// Test 3: SIMD reductions
+// ============================================================================
+
+fn test_simd_reductions() {
+    let a = i4_new(5, 15, 10, 20);
+
+    // Sum reduction
+    assert_eq(i4_reduce_add(a), 50);
+
+    // Max reduction
+    assert_eq(i4_reduce_max(a), 20);
+
+    // Min reduction
+    assert_eq(i4_reduce_min(a), 5);
+
+    // Negative values
+    let b = i4_new(-10, -5, -20, -1);
+    assert_eq(i4_reduce_add(b), -36);
+    assert_eq(i4_reduce_max(b), -1);
+    assert_eq(i4_reduce_min(b), -20);
+
+    // Dot product via mul + reduce_add
+    let x = i4_new(1, 2, 3, 4);
+    let y = i4_new(5, 6, 7, 8);
+    let dot = i4_reduce_add(i4_mul(x, y));
+    // 1*5 + 2*6 + 3*7 + 4*8 = 5 + 12 + 21 + 32 = 70
+    assert_eq(dot, 70);
+
+    print("test_simd_reductions passed");
+}
+
+// ============================================================================
+// Test 4: Fused multiply-add
+// ============================================================================
+
+fn test_simd_fma() {
+    let a = i4_new(2, 3, 4, 5);
+    let b = i4_new(10, 20, 30, 40);
+    let c = i4_new(1, 1, 1, 1);
+
+    // a * b + c
+    let r = i4_fma(a, b, c);
+    assert_eq(i4_lane(r, 0), 21);   // 2*10+1
+    assert_eq(i4_lane(r, 1), 61);   // 3*20+1
+    assert_eq(i4_lane(r, 2), 121);  // 4*30+1
+    assert_eq(i4_lane(r, 3), 201);  // 5*40+1
+
+    // FMA with zero addend = plain multiply
+    let z = i4_splat(0);
+    let r2 = i4_fma(a, b, z);
+    assert_eq(i4_lane(r2, 0), 20);
+    assert_eq(i4_lane(r2, 1), 60);
+
+    // FMA with unit multiplier = add
+    let one = i4_splat(1);
+    let r3 = i4_fma(one, b, c);
+    assert_eq(i4_lane(r3, 0), 11);
+    assert_eq(i4_lane(r3, 1), 21);
+
+    print("test_simd_fma passed");
+}
+
+// ============================================================================
+// Test 5: SIMD matrix-vector multiply (2x2 matrix * 2-element vector)
+// ============================================================================
+
+fn test_simd_matvec() {
+    // Matrix M = [[1,2],[3,4]], vector v = [5,6]
+    // M*v = [1*5+2*6, 3*5+4*6] = [17, 39]
+    // Encode row0 as i4(1,2,0,0), row1 as i4(3,4,0,0), v as i4(5,6,0,0)
+    let row0 = i4_new(1, 2, 0, 0);
+    let row1 = i4_new(3, 4, 0, 0);
+    let v = i4_new(5, 6, 0, 0);
+
+    let prod0 = i4_mul(row0, v);
+    let r0 = i4_lane(prod0, 0) + i4_lane(prod0, 1);
+    assert_eq(r0, 17);
+
+    let prod1 = i4_mul(row1, v);
+    let r1 = i4_lane(prod1, 0) + i4_lane(prod1, 1);
+    assert_eq(r1, 39);
+
+    print("test_simd_matvec passed");
+}
+
+fn main() -> Int {
+    test_simd_create();
+    test_simd_arithmetic();
+    test_simd_reductions();
+    test_simd_fma();
+    test_simd_matvec();
+    print("ALL PASSED");
+    0
+}

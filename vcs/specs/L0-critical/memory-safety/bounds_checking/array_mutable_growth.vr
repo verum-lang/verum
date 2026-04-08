@@ -1,0 +1,87 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, bounds-checking, mutable-arrays, dynamic
+// @description: Tests that mutable lists can grow without static bounds errors
+
+/// Mutable lists (List<T>) are dynamic collections.
+/// They can grow via push() and shrink via pop().
+/// Static bounds checking does NOT apply to dynamic lists.
+/// Note: Array literals [1, 2, 3] produce fixed-size arrays [T; N].
+/// Use List.from([...]) for dynamic lists.
+
+fn main() {
+    test_list_growth();
+    test_list_modification();
+    test_push_pop_sequence();
+}
+
+/// Test that push extends list and allows larger indices
+fn test_list_growth() {
+    let mut arr = List.from([1, 2, 3]);  // Dynamic list
+
+    // Initial access
+    let a = arr[0];
+    let b = arr[1];
+    let c = arr[2];
+
+    // Grow the list
+    arr.push(4);
+    arr.push(5);
+
+    // Access new elements
+    let d = arr[3];
+    let e = arr[4];
+
+    assert(d == 4);
+    assert(e == 5);
+}
+
+/// Test list modification via mutable reference
+fn test_list_modification() {
+    let mut data = List.from([10, 20, 30]);
+    let data_ref = &mut data;
+
+    // Modify through reference
+    data_ref[0] = 100;
+    data_ref.push(40);
+    data_ref.push(50);
+
+    // Access via original after borrow ends
+    assert(data[0] == 100);
+    assert(data[3] == 40);
+    assert(data[4] == 50);
+    assert(data.len() == 5);
+}
+
+/// Test push/pop sequence
+fn test_push_pop_sequence() {
+    let mut stack = List.from([1]);  // Start with one element
+
+    stack.push(2);
+    stack.push(3);
+
+    assert(stack.len() == 3);
+    assert(stack[2] == 3);
+
+    // pop() returns Maybe<T>
+    let top = stack.pop();
+    match top {
+        Some(val) => assert(val == 3),
+        None => panic("stack should not be empty"),
+    }
+    assert(stack.len() == 2);
+
+    // Continue pushing after pop
+    stack.push(10);
+    stack.push(20);
+    assert(stack.len() == 4);
+    assert(stack[3] == 20);
+
+    // Multiple pops
+    let a = stack.pop().unwrap();
+    let b = stack.pop().unwrap();
+    assert(a == 20);
+    assert(b == 10);
+    assert(stack.len() == 2);
+}

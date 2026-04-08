@@ -4898,7 +4898,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5614,7 +5613,6 @@ dependencies = [
  "verum_types",
  "wait-timeout",
  "walkdir",
- "windows-sys 0.59.0",
 ]
 
 [[package]]

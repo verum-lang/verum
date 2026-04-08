@@ -1,0 +1,448 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for reference patterns (&x, &mut x)
+
+// Grammar Reference:
+// reference_pattern = '&' , [ 'mut' ] , pattern ;
+
+// ============================================================================
+// SECTION 1: Basic Immutable Reference Patterns
+// ============================================================================
+
+fn test_basic_ref_patterns() {
+    // Simple reference pattern
+    let &x = &value;
+    let &val = reference;
+
+    // Reference to specific values
+    match ref_value {
+        &0 => zero(),
+        &1 => one(),
+        &n => other(n)
+    }
+
+    // Reference in match
+    match option {
+        &Some(x) => has_value(x),
+        &None => no_value()
+    }
+}
+
+// ============================================================================
+// SECTION 2: Mutable Reference Patterns
+// ============================================================================
+
+fn test_mut_ref_patterns() {
+    // Simple mutable reference pattern
+    let &mut x = &mut value;
+    let &mut val = mut_reference;
+
+    // Mutable reference in match - use guard for literal check
+    match mut_ref {
+        &mut n if n == 0 => zero(),
+        &mut n => other(n)
+    }
+
+    // With variants
+    match option_ref {
+        &mut Some(x) => has_value(x),
+        &mut None => no_value()
+    }
+}
+
+// ============================================================================
+// SECTION 3: Nested Reference Patterns
+// ============================================================================
+
+fn test_nested_ref_patterns() {
+    // Reference to reference - need parentheses to disambiguate from &&
+    let &(&x) = double_ref;
+    let &(&(&x)) = triple_ref;
+
+    // Mixed reference levels - need parentheses
+    let &(&mut x) = ref_to_mut_ref;
+    let &mut (&x) = mut_ref_to_ref;
+    let &mut (&mut x) = mut_ref_to_mut_ref;
+
+    // Deep nesting - need parentheses
+    let &(&(&(&x))) = quad_ref;
+}
+
+// ============================================================================
+// SECTION 4: Reference Patterns with Tuples
+// ============================================================================
+
+fn test_ref_with_tuples() {
+    // Reference to tuple
+    let &(a, b) = tuple_ref;
+    let &(x, y, z) = triple_ref;
+
+    // Mutable reference to tuple
+    let &mut (a, b) = mut_tuple_ref;
+
+    // Reference inside tuple elements
+    match pair {
+        (&a, &b) => both_refs(a, b),
+        _ => other()
+    }
+
+    // Mixed
+    let &(a, &b) = nested;
+    let &(&a, b) = nested;
+}
+
+// ============================================================================
+// SECTION 5: Reference Patterns with Arrays
+// ============================================================================
+
+fn test_ref_with_arrays() {
+    // Reference to array
+    let &[a, b, c] = array_ref;
+    let &[first, ..rest] = array_ref;
+
+    // Mutable reference to array
+    let &mut [a, b, c] = mut_array_ref;
+    let &mut [head, ..tail] = mut_array_ref;
+
+    // Reference inside array elements
+    match arr {
+        [&a, &b] => both_refs(a, b),
+        _ => other()
+    }
+
+    // With wildcards
+    let &[_, b, _] = array_ref;
+}
+
+// ============================================================================
+// SECTION 6: Reference Patterns with Records
+// ============================================================================
+
+fn test_ref_with_records() {
+    // Reference to record
+    let &Point { x, y } = point_ref;
+    let &Person { name, age, .. } = person_ref;
+
+    // Mutable reference to record
+    let &mut Point { x, y } = mut_point_ref;
+
+    // Reference in field patterns
+    match point {
+        Point { x: &px, y: &py } => both_refs(px, py),
+        _ => other()
+    }
+
+    // Nested
+    let &Point { x: &inner_x, y } = nested_ref;
+}
+
+// ============================================================================
+// SECTION 7: Reference Patterns with Variants
+// ============================================================================
+
+fn test_ref_with_variants() {
+    // Reference to option
+    let &Some(x) = some_ref;
+    let &None = none_ref;
+
+    // Mutable reference to result
+    let &mut Ok(x) = ok_ref;
+    let &mut Err(e) = err_ref;
+
+    // In match
+    match option_ref {
+        &Some(ref inner) => borrow_inner(inner),
+        &None => no_inner()
+    }
+
+    // Nested variants
+    let &Some(&Some(x)) = nested_option_ref;
+}
+
+// ============================================================================
+// SECTION 8: Reference Patterns with @ Bindings
+// ============================================================================
+
+fn test_ref_with_at() {
+    // @ on reference pattern
+    match value {
+        whole @ &inner => use_both(whole, inner)
+    }
+
+    // @ inside reference
+    let &(all @ (a, b)) = nested_ref;
+
+    // Complex @ with references
+    match data {
+        outer @ &Some(inner @ &value) => all_three(outer, inner, value),
+        &None => none()
+    }
+}
+
+// ============================================================================
+// SECTION 9: Reference Patterns in Match Arms
+// ============================================================================
+
+fn test_refs_in_match() {
+    // Basic reference matching
+    match reference {
+        &0 => zero_ref(),
+        &1 => one_ref(),
+        &n if n > 0 => positive_ref(n),
+        &n => negative_ref(n)
+    }
+
+    // With variants
+    match option_ref {
+        &Some(x) if x > 0 => positive_some(x),
+        &Some(x) => other_some(x),
+        &None => none()
+    }
+
+    // Mutable reference matching - use guard for literal check
+    match mut_ref {
+        &mut n if n == 0 => zero_mut(),
+        &mut n => other_mut(n)
+    }
+}
+
+// ============================================================================
+// SECTION 10: Reference Patterns in Function Parameters
+// ============================================================================
+
+fn borrow_point(point_ref: &Point) -> Int {
+    let Point { x, y } = *point_ref;
+    x + y
+}
+
+fn mut_borrow(point_ref: &mut Point) {
+    point_ref.x = point_ref.x + 1;
+    point_ref.y = point_ref.y + 1
+}
+
+fn borrow_pair(pair_ref: &(Int, Int)) -> Int {
+    let (a, b) = *pair_ref;
+    a * b
+}
+
+fn borrow_array(arr_ref: &[Int]) -> Int {
+    arr_ref[0]
+}
+
+// ============================================================================
+// SECTION 11: Reference Patterns in For Loops
+// ============================================================================
+
+fn test_refs_in_loops() {
+    // Borrow in loop
+    for &x in references {
+        process(x)
+    }
+
+    // Mutable borrow in loop
+    for &mut x in mut_references {
+        modify(x)
+    }
+
+    // Destructure borrowed tuple
+    for &(a, b) in pair_refs {
+        process(a, b)
+    }
+
+    // Borrow record in loop
+    for &Point { x, y } in point_refs {
+        plot(x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 12: Reference Patterns in If-Let
+// ============================================================================
+
+fn test_refs_in_if_let() {
+    // Basic if-let with reference
+    if let &Some(x) = option_ref {
+        use(x)
+    }
+
+    // Mutable reference in if-let
+    if let &mut Some(x) = mut_option_ref {
+        modify(x)
+    }
+
+    // Nested
+    if let &Some(&inner) = nested_ref {
+        use(inner)
+    }
+}
+
+// ============================================================================
+// SECTION 13: Reference Patterns in While-Let
+// ============================================================================
+
+fn test_refs_in_while_let() {
+    // While-let with reference
+    while let &Some(x) = get_ref() {
+        process(x)
+    }
+
+    // With mutable reference
+    while let &mut Some(x) = get_mut_ref() {
+        modify(x)
+    }
+}
+
+// ============================================================================
+// SECTION 14: Reference vs ref Keyword
+// ============================================================================
+
+fn test_ref_vs_reference() {
+    // Reference pattern (&x): dereferences the value
+    let &x = &value;  // x is the dereferenced value
+
+    // ref keyword: creates a reference to the value
+    let ref x = value;  // x is a reference
+
+    // Both can appear together
+    match &data {
+        &Some(ref inner) => borrow_inner(inner),  // inner is &T
+        &None => none()
+    }
+
+    // Mutable versions
+    let &mut x = &mut value;  // x is dereferenced mut value
+    let ref mut x = value;    // x is &mut reference
+
+    // Combined
+    match &mut data {
+        &mut Some(ref mut inner) => modify_inner(inner),
+        &mut None => none()
+    }
+}
+
+// ============================================================================
+// SECTION 15: Reference Patterns with Literals
+// ============================================================================
+
+fn test_refs_with_literals() {
+    // Reference to literal
+    match ref_int {
+        &0 => zero(),
+        &1 => one(),
+        &42 => answer(),
+        &n => other(n)
+    }
+
+    // Reference to bool
+    match ref_bool {
+        &true => is_true(),
+        &false => is_false()
+    }
+
+    // Reference to char
+    match ref_char {
+        &'a' => is_a(),
+        &'b' => is_b(),
+        &c => other(c)
+    }
+}
+
+// ============================================================================
+// SECTION 16: Reference Patterns with Ranges
+// ============================================================================
+
+fn test_refs_with_ranges() {
+    // Reference to value in range
+    match ref_int {
+        &(0..10) => small(),
+        &(10..100) => medium(),
+        &n => large(n)
+    }
+
+    // With binding
+    match ref_int {
+        &(small @ 0..10) => handle_small(small),
+        &n => handle_other(n)
+    }
+}
+
+// ============================================================================
+// SECTION 17: Complex Reference Patterns
+// ============================================================================
+
+fn test_complex_refs() {
+    // Multiple levels and types
+    let &(
+        a,
+        &Point { x, y },
+        &mut [first, ..rest],
+        &Some(inner)
+    ) = complex_ref;
+
+    // In match with guards
+    match data {
+        &Some(&Point { x, y }) if x == y => diagonal(x),
+        &Some(&Point { x: 0, y }) => on_y_axis(y),
+        &Some(&Point { x, y: 0 }) => on_x_axis(x),
+        &Some(&Point { x, y }) => general(x, y),
+        &None => none()
+    }
+
+    // Deeply nested - need parentheses
+    match nested {
+        &(&(&(&(&x)))) => very_deep(x),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 18: Edge Cases
+// ============================================================================
+
+fn test_edge_cases() {
+    // Reference to unit
+    let &() = unit_ref;
+
+    // Reference to empty tuple (same as unit)
+    let &() = empty_ref;
+
+    // Reference to single-element tuple
+    let &(x,) = single_ref;
+
+    // Reference to empty array
+    let &[] = empty_array_ref;
+
+    // Reference to empty record
+    let &Marker {} = marker_ref;
+
+    // Many &mut &mut &mut
+    let &mut &mut &mut x = deeply_mut;
+}
+
+// ============================================================================
+// SECTION 19: Practical Examples
+// ============================================================================
+
+fn test_practical_refs() {
+    // Borrowing from iterator
+    for &item in collection.iter() {
+        read_only(item)
+    }
+
+    // Modifying through iterator
+    for &mut item in collection.iter_mut() {
+        modify(item)
+    }
+
+    // Finding in collection
+    if let &Some(found) = collection.find(predicate) {
+        use(found)
+    }
+
+    // Destructuring borrowed option
+    match borrowed_option {
+        &Some(ref value) => borrow_value(value),
+        &None => handle_none()
+    }
+}

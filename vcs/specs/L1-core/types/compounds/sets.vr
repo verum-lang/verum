@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L1
+// @tags: types, compounds, sets
+
+/// Test for Set<T> type.
+/// Set is an unordered collection of unique elements (semantic equivalent of HashSet).
+
+fn main() {
+    // Set creation
+    let set: Set<Int> = Set.new();
+
+    // Set with initial values using macro
+    let numbers: Set<Int> = {1, 2, 3, 4, 5};
+
+    // Set from iterator (duplicates removed)
+    let from_list: Set<Int> = [1, 2, 2, 3, 3, 3].into_iter().collect();
+
+    // Set with capacity hint
+    let with_capacity: Set<Text> = Set.with_capacity(100);
+
+    // Mutable operations
+    let mut mutable_set: Set<Int> = Set.new();
+    let inserted1: Bool = mutable_set.insert(1);  // true (new element)
+    let inserted2: Bool = mutable_set.insert(1);  // false (already exists)
+    mutable_set.insert(2);
+    mutable_set.insert(3);
+    let removed: Bool = mutable_set.remove(&2);
+
+    // Set properties
+    let length: Int = numbers.len();
+    let is_empty: Bool = set.is_empty();
+    let contains: Bool = numbers.contains(&3);
+
+    // Set operations
+    let set_a: Set<Int> = {1, 2, 3, 4};
+    let set_b: Set<Int> = {3, 4, 5, 6};
+
+    // Union: elements in either set
+    let union: Set<Int> = set_a.union(&set_b).copied().collect();
+
+    // Intersection: elements in both sets
+    let intersection: Set<Int> = set_a.intersection(&set_b).copied().collect();
+
+    // Difference: elements in A but not in B
+    let difference: Set<Int> = set_a.difference(&set_b).copied().collect();
+
+    // Symmetric difference: elements in either but not both
+    let symmetric_diff: Set<Int> = set_a.symmetric_difference(&set_b).copied().collect();
+
+    // Subset and superset checks
+    let small: Set<Int> = {1, 2};
+    let large: Set<Int> = {1, 2, 3, 4, 5};
+    let is_subset: Bool = small.is_subset(&large);
+    let is_superset: Bool = large.is_superset(&small);
+    let is_disjoint: Bool = {1, 2}.is_disjoint(&{3, 4});
+
+    // Iteration
+    let mut sum: Int = 0;
+    for elem in numbers.iter() {
+        sum = sum + *elem;
+    }
+
+    // Conversion to sorted list
+    let sorted: List<Int> = numbers.iter().copied().sorted().collect();
+
+    // Clearing set
+    let mut to_clear: Set<Int> = {1, 2, 3};
+    to_clear.clear();
+
+    // Assertions
+    assert(length == 5);
+    assert(is_empty == true);
+    assert(contains == true);
+    assert(inserted1 == true);
+    assert(inserted2 == false);
+    assert(removed == true);
+    assert(from_list.len() == 3);
+    assert(union == {1, 2, 3, 4, 5, 6});
+    assert(intersection == {3, 4});
+    assert(difference == {1, 2});
+    assert(symmetric_diff == {1, 2, 5, 6});
+    assert(is_subset == true);
+    assert(is_superset == true);
+    assert(is_disjoint == true);
+    assert(sum == 15);
+    assert(to_clear.is_empty());
+}

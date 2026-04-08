@@ -1,0 +1,442 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, protocols, errors
+// @expected-error: E400
+// @description: Protocol-related typecheck failures
+
+/// Test for protocol-related typecheck failures.
+/// These examples should fail typechecking with protocol-related errors.
+
+// ============================================================================
+// Protocol definitions for testing
+// ============================================================================
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+type Ord is protocol {
+    fn cmp(&self, other: &Self) -> Ordering;
+};
+
+type Hash is protocol {
+    fn hash(&self) -> Int;
+};
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type Debug is protocol {
+    fn debug(&self) -> Text;
+};
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type Add is protocol {
+    type Output;
+    fn add(&self, other: &Self) -> Self.Output;
+};
+
+type Serializable is protocol {
+    fn serialize(&self) -> List<Int>;
+};
+
+type Base is protocol {
+    fn base_method(&self);
+};
+
+type Extended is protocol extends Base {
+    fn extended_method(&self);
+};
+
+// ============================================================================
+// Types that DON'T implement protocols
+// ============================================================================
+
+type NoProtocols is {
+    value: Int,
+};
+
+type PartialImpl is {
+    data: Text,
+};
+
+// Only implements Clone, not others
+implement Clone for PartialImpl {
+    fn clone(&self) -> PartialImpl {
+        PartialImpl { data: self.data.clone() }
+    }
+}
+
+// ============================================================================
+// ERROR: Missing required protocol methods in implementation
+// ============================================================================
+
+type IncompleteClone is {
+    x: Int,
+};
+
+implement Clone for IncompleteClone {
+    // ERROR: Missing fn clone(&self) -> Self
+}
+
+type IncompleteEq is {
+    x: Int,
+};
+
+implement Eq for IncompleteEq {
+    // ERROR: Missing fn eq(&self, other: &Self) -> Bool
+}
+
+// ============================================================================
+// ERROR: Wrong method signature in implementation
+// ============================================================================
+
+type WrongSignature is {
+    value: Int,
+};
+
+implement Clone for WrongSignature {
+    // ERROR: Wrong return type - should return Self, not Int
+    fn clone(&self) -> Int {
+        self.value
+    }
+}
+
+implement Eq for WrongSignature {
+    // ERROR: Wrong parameter type
+    fn eq(&self, other: Int) -> Bool {
+        self.value == other
+    }
+}
+
+implement Display for WrongSignature {
+    // ERROR: Wrong return type - should return Text, not Int
+    fn display(&self) -> Int {
+        self.value
+    }
+}
+
+// ============================================================================
+// ERROR: Using protocol method on non-implementing type
+// ============================================================================
+
+fn main_errors() {
+    let no_proto = NoProtocols { value: 42 };
+
+    // ERROR: NoProtocols doesn't implement Clone
+    let cloned = no_proto.clone();
+
+    // ERROR: NoProtocols doesn't implement Eq
+    let equal = no_proto.eq(&no_proto);
+
+    // ERROR: NoProtocols doesn't implement Display
+    let text = no_proto.display();
+
+    // ERROR: NoProtocols doesn't implement Hash
+    let h = no_proto.hash();
+}
+
+// ============================================================================
+// ERROR: Protocol bound not satisfied in generic function
+// ============================================================================
+
+fn needs_clone<T: Clone>(x: T) -> T {
+    x.clone()
+}
+
+fn needs_eq<T: Eq>(a: T, b: T) -> Bool {
+    a.eq(&b)
+}
+
+fn needs_display<T: Display>(x: T) -> Text {
+    x.display()
+}
+
+fn bound_errors() {
+    let no_proto = NoProtocols { value: 42 };
+
+    // ERROR: NoProtocols doesn't implement Clone
+    needs_clone(no_proto);
+
+    // ERROR: NoProtocols doesn't implement Eq
+    needs_eq(NoProtocols { value: 1 }, NoProtocols { value: 2 });
+
+    // ERROR: NoProtocols doesn't implement Display
+    needs_display(NoProtocols { value: 42 });
+}
+
+// ============================================================================
+// ERROR: Multiple bounds not all satisfied
+// ============================================================================
+
+fn needs_clone_eq<T: Clone + Eq>(x: T) -> Bool {
+    let y = x.clone();
+    x.eq(&y)
+}
+
+fn needs_all<T: Clone + Eq + Hash + Display>(x: T) {
+    let _ = x.clone();
+    let _ = x.eq(&x);
+    let _ = x.hash();
+    let _ = x.display();
+}
+
+fn multiple_bound_errors() {
+    let partial = PartialImpl { data: "test" };
+
+    // ERROR: PartialImpl has Clone but not Eq
+    needs_clone_eq(partial);
+
+    // ERROR: NoProtocols has none of the required protocols
+    needs_all(NoProtocols { value: 42 });
+}
+
+// ============================================================================
+// ERROR: Associated type mismatch
+// ============================================================================
+
+type WrongIterator is {
+    current: Int,
+};
+
+implement Iterator for WrongIterator {
+    type Item is Int;
+
+    // ERROR: Return type doesn't match Maybe<Self.Item>
+    fn next(&mut self) -> Text {
+        "wrong"
+    }
+}
+
+type WrongAdd is {
+    value: Int,
+};
+
+implement Add for WrongAdd {
+    type Output is Int;
+
+    // ERROR: Return type doesn't match Self.Output
+    fn add(&self, other: &WrongAdd) -> Text {
+        "wrong"
+    }
+}
+
+// ============================================================================
+// ERROR: Protocol bound on generic type not satisfied
+// ============================================================================
+
+type Container<T: Clone> is {
+    value: T,
+};
+
+type SortedList<T: Ord> is {
+    items: List<T>,
+};
+
+type Set<T: Hash + Eq> is {
+    items: Set<T>,
+};
+
+fn generic_type_errors() {
+    // ERROR: NoProtocols doesn't implement Clone
+    let container: Container<NoProtocols> = Container {
+        value: NoProtocols { value: 42 },
+    };
+
+    // ERROR: NoProtocols doesn't implement Ord
+    let sorted: SortedList<NoProtocols> = SortedList {
+        items: [],
+    };
+
+    // ERROR: NoProtocols doesn't implement Hash + Eq
+    let hash_set: Set<NoProtocols> = HashSet {
+        items: [],
+    };
+}
+
+// ============================================================================
+// ERROR: Implementing extended protocol without base
+// ============================================================================
+
+type NoBase is {
+    value: Int,
+};
+
+// ERROR: NoBase doesn't implement Base, can't implement Extended
+implement Extended for NoBase {
+    fn extended_method(&self) {
+        print("extended");
+    }
+    // Missing: fn base_method(&self) from Base protocol
+}
+
+// ============================================================================
+// ERROR: Conflicting implementations
+// ============================================================================
+
+type Conflicting is {
+    value: Int,
+};
+
+implement Clone for Conflicting {
+    fn clone(&self) -> Conflicting {
+        Conflicting { value: self.value }
+    }
+}
+
+// ERROR: Duplicate implementation
+implement Clone for Conflicting {
+    fn clone(&self) -> Conflicting {
+        Conflicting { value: self.value * 2 }
+    }
+}
+
+// ============================================================================
+// ERROR: Blanket impl conflicts
+// ============================================================================
+
+// Blanket implementation for all T: Clone
+implement<T: Clone> Display for T {
+    fn display(&self) -> Text {
+        "default"
+    }
+}
+
+type AlreadyDisplay is {
+    text: Text,
+};
+
+implement Clone for AlreadyDisplay {
+    fn clone(&self) -> AlreadyDisplay {
+        AlreadyDisplay { text: self.text.clone() }
+    }
+}
+
+// ERROR: Conflicting with blanket impl - AlreadyDisplay: Clone
+// so it already has Display from blanket
+implement Display for AlreadyDisplay {
+    fn display(&self) -> Text {
+        self.text.clone()
+    }
+}
+
+// ============================================================================
+// ERROR: Self type mismatch in protocol methods
+// ============================================================================
+
+type SelfMismatch is {
+    value: Int,
+};
+
+type OtherType is {
+    value: Int,
+};
+
+implement Clone for SelfMismatch {
+    // ERROR: Returns OtherType instead of Self (SelfMismatch)
+    fn clone(&self) -> OtherType {
+        OtherType { value: self.value }
+    }
+}
+
+// ============================================================================
+// ERROR: Extra methods in protocol implementation (not allowed)
+// ============================================================================
+
+type ExtraMethods is {
+    value: Int,
+};
+
+implement Clone for ExtraMethods {
+    fn clone(&self) -> ExtraMethods {
+        ExtraMethods { value: self.value }
+    }
+
+    // ERROR: extra_method is not part of Clone protocol
+    // (Note: This may be allowed in some languages, but flagged as error here)
+    fn extra_method(&self) -> Int {
+        self.value
+    }
+}
+
+// ============================================================================
+// ERROR: Using associated type from wrong protocol
+// ============================================================================
+
+fn use_wrong_associated<T: Clone>(x: T) -> T.Item {
+    // ERROR: Clone doesn't have associated type Item
+    // Item is from Iterator protocol
+    x.clone()
+}
+
+fn access_nonexistent_assoc<T: Display>(x: T) -> T.Output {
+    // ERROR: Display doesn't have associated type Output
+    // Output is from Add protocol
+    x.display()
+}
+
+// ============================================================================
+// ERROR: Protocol object without object-safe protocol
+// ============================================================================
+
+type NotObjectSafe is protocol {
+    fn make() -> Self;  // Returns Self - not object-safe
+    fn clone(&self) -> Self;  // Returns Self - not object-safe
+};
+
+fn use_protocol_object(obj: &NotObjectSafe) {
+    // ERROR: NotObjectSafe is not object-safe because it has methods
+    // that return Self, which has unknown size at runtime
+    // Note: Verum uses &Protocol syntax, not &dyn Protocol
+    let made = NotObjectSafe.make();
+    let cloned = obj.clone();
+}
+
+// ============================================================================
+// ERROR: Async mismatch in protocol implementation
+// ============================================================================
+
+type AsyncProtocol is protocol {
+    async fn async_method(&self) -> Int;
+};
+
+type AsyncMismatch is {
+    value: Int,
+};
+
+implement AsyncProtocol for AsyncMismatch {
+    // ERROR: Protocol requires async, but implementation is sync
+    fn async_method(&self) -> Int {
+        self.value
+    }
+}
+
+// ============================================================================
+// ERROR: Missing where clause constraints
+// ============================================================================
+
+type ConstrainedProtocol is protocol {
+    fn method<T>(&self, x: T) -> T
+    where type T: Clone;
+};
+
+type MissingConstraint is {
+    value: Int,
+};
+
+implement ConstrainedProtocol for MissingConstraint {
+    // ERROR: Missing where type T: Clone constraint from protocol
+    fn method<T>(&self, x: T) -> T {
+        x  // Can't use x.clone() without Clone bound
+    }
+}

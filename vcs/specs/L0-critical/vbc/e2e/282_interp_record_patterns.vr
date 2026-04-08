@@ -1,0 +1,416 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, records, patterns
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: complex record usage — records with many fields (8+),
+// nested records, record update patterns, passing records to/from functions.
+
+// =============================================================================
+// Record with 8 fields
+// =============================================================================
+
+type Particle is {
+    px: Int, py: Int, pz: Int,
+    vx: Int, vy: Int, vz: Int,
+    mass: Int, charge: Int
+};
+
+fn make_particle(px: Int, py: Int, pz: Int, vx: Int, vy: Int, vz: Int, mass: Int, charge: Int) -> Particle {
+    Particle { px: px, py: py, pz: pz, vx: vx, vy: vy, vz: vz, mass: mass, charge: charge }
+}
+
+fn test_8_field_record() {
+    let p = make_particle(1, 2, 3, 4, 5, 6, 10, -1);
+    assert_eq(p.px, 1);
+    assert_eq(p.py, 2);
+    assert_eq(p.pz, 3);
+    assert_eq(p.vx, 4);
+    assert_eq(p.vy, 5);
+    assert_eq(p.vz, 6);
+    assert_eq(p.mass, 10);
+    assert_eq(p.charge, -1);
+}
+
+// =============================================================================
+// Record with 8 fields
+// =============================================================================
+
+type Config is {
+    width: Int, height: Int, depth: Int,
+    fps: Int, quality: Int,
+    audio: Int, video: Int,
+    network: Int
+};
+
+fn test_8_field_config() {
+    let cfg = Config {
+        width: 1920, height: 1080, depth: 32,
+        fps: 60, quality: 90,
+        audio: 1, video: 1,
+        network: 0
+    };
+    assert_eq(cfg.width, 1920);
+    assert_eq(cfg.height, 1080);
+    assert_eq(cfg.depth, 32);
+    assert_eq(cfg.fps, 60);
+    assert_eq(cfg.quality, 90);
+    assert_eq(cfg.audio, 1);
+    assert_eq(cfg.video, 1);
+    assert_eq(cfg.network, 0);
+}
+
+fn total_pixels(cfg: Config) -> Int {
+    cfg.width * cfg.height
+}
+
+fn test_record_method_like() {
+    let cfg = Config {
+        width: 1920, height: 1080, depth: 32,
+        fps: 60, quality: 90,
+        audio: 1, video: 1,
+        network: 0
+    };
+    assert_eq(total_pixels(cfg), 2073600);
+}
+
+// =============================================================================
+// Nested records (record containing record)
+// =============================================================================
+
+type Vec2 is { x: Int, y: Int };
+type Rect is { origin: Vec2, size: Vec2 };
+type Layout is { header: Rect, body: Rect, footer: Rect };
+
+fn make_vec2(x: Int, y: Int) -> Vec2 {
+    Vec2 { x: x, y: y }
+}
+
+fn make_rect(ox: Int, oy: Int, w: Int, h: Int) -> Rect {
+    Rect { origin: make_vec2(ox, oy), size: make_vec2(w, h) }
+}
+
+fn rect_area(r: Rect) -> Int {
+    r.size.x * r.size.y
+}
+
+fn rect_right(r: Rect) -> Int {
+    r.origin.x + r.size.x
+}
+
+fn rect_bottom(r: Rect) -> Int {
+    r.origin.y + r.size.y
+}
+
+fn test_nested_record_access() {
+    let r = make_rect(10, 20, 100, 50);
+    assert_eq(r.origin.x, 10);
+    assert_eq(r.origin.y, 20);
+    assert_eq(r.size.x, 100);
+    assert_eq(r.size.y, 50);
+    assert_eq(rect_area(r), 5000);
+    assert_eq(rect_right(r), 110);
+    assert_eq(rect_bottom(r), 70);
+}
+
+fn test_deeply_nested_layout() {
+    let layout = Layout {
+        header: make_rect(0, 0, 800, 60),
+        body: make_rect(0, 60, 800, 500),
+        footer: make_rect(0, 560, 800, 40)
+    };
+    assert_eq(layout.header.origin.x, 0);
+    assert_eq(layout.header.origin.y, 0);
+    assert_eq(layout.header.size.x, 800);
+    assert_eq(layout.header.size.y, 60);
+    assert_eq(rect_area(layout.header), 48000);
+    assert_eq(rect_area(layout.body), 400000);
+    assert_eq(rect_area(layout.footer), 32000);
+    // Total area
+    let total = rect_area(layout.header) + rect_area(layout.body) + rect_area(layout.footer);
+    assert_eq(total, 480000);
+}
+
+// =============================================================================
+// Three-level nesting
+// =============================================================================
+
+type Color is { r: Int, g: Int, b: Int };
+type StyledRect is { bounds: Rect, bg: Color };
+
+fn test_three_level_nested() {
+    let styled = StyledRect {
+        bounds: make_rect(5, 5, 200, 100),
+        bg: Color { r: 255, g: 128, b: 0 }
+    };
+    assert_eq(styled.bounds.origin.x, 5);
+    assert_eq(styled.bounds.size.x, 200);
+    assert_eq(styled.bg.r, 255);
+    assert_eq(styled.bg.g, 128);
+    assert_eq(styled.bg.b, 0);
+    assert_eq(rect_area(styled.bounds), 20000);
+}
+
+// =============================================================================
+// Record update patterns (create new from old with modified fields)
+// =============================================================================
+
+fn translate_vec2(v: Vec2, dx: Int, dy: Int) -> Vec2 {
+    Vec2 { x: v.x + dx, y: v.y + dy }
+}
+
+fn scale_vec2(v: Vec2, factor: Int) -> Vec2 {
+    Vec2 { x: v.x * factor, y: v.y * factor }
+}
+
+fn move_rect(r: Rect, dx: Int, dy: Int) -> Rect {
+    Rect { origin: translate_vec2(r.origin, dx, dy), size: r.size }
+}
+
+fn resize_rect(r: Rect, new_w: Int, new_h: Int) -> Rect {
+    Rect { origin: r.origin, size: make_vec2(new_w, new_h) }
+}
+
+fn test_update_vec2() {
+    let orig = make_vec2(10, 20);
+    let moved = translate_vec2(orig, 5, -3);
+    assert_eq(moved.x, 15);
+    assert_eq(moved.y, 17);
+    // original unchanged (value semantics)
+    assert_eq(orig.x, 10);
+    assert_eq(orig.y, 20);
+}
+
+fn test_update_rect() {
+    let orig = make_rect(0, 0, 100, 50);
+    let moved = move_rect(orig, 10, 20);
+    assert_eq(moved.origin.x, 10);
+    assert_eq(moved.origin.y, 20);
+    assert_eq(moved.size.x, 100);
+    assert_eq(moved.size.y, 50);
+
+    let resized = resize_rect(orig, 200, 100);
+    assert_eq(resized.origin.x, 0);
+    assert_eq(resized.origin.y, 0);
+    assert_eq(resized.size.x, 200);
+    assert_eq(resized.size.y, 100);
+}
+
+fn test_chain_updates() {
+    let r = make_rect(0, 0, 50, 50);
+    let r2 = move_rect(r, 10, 10);
+    let r3 = resize_rect(r2, 100, 100);
+    let r4 = move_rect(r3, -5, -5);
+    assert_eq(r4.origin.x, 5);
+    assert_eq(r4.origin.y, 5);
+    assert_eq(r4.size.x, 100);
+    assert_eq(r4.size.y, 100);
+}
+
+// =============================================================================
+// Passing records to/from functions extensively
+// =============================================================================
+
+fn particle_energy(p: Particle) -> Int {
+    // Kinetic energy = 0.5 * mass * v^2 (integer approx)
+    let v_sq = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
+    (p.mass * v_sq) / 2
+}
+
+fn advance_particle(p: Particle, dt: Int) -> Particle {
+    Particle {
+        px: p.px + p.vx * dt,
+        py: p.py + p.vy * dt,
+        pz: p.pz + p.vz * dt,
+        vx: p.vx,
+        vy: p.vy,
+        vz: p.vz,
+        mass: p.mass,
+        charge: p.charge
+    }
+}
+
+fn apply_force(p: Particle, fx: Int, fy: Int, fz: Int) -> Particle {
+    // acceleration = force / mass (integer)
+    let ax = fx / p.mass;
+    let ay = fy / p.mass;
+    let az = fz / p.mass;
+    Particle {
+        px: p.px, py: p.py, pz: p.pz,
+        vx: p.vx + ax, vy: p.vy + ay, vz: p.vz + az,
+        mass: p.mass, charge: p.charge
+    }
+}
+
+fn test_particle_physics() {
+    let p = make_particle(0, 0, 0, 1, 2, 3, 10, -1);
+    let energy = particle_energy(p);
+    // v^2 = 1+4+9 = 14, energy = 10*14/2 = 70
+    assert_eq(energy, 70);
+}
+
+fn test_advance_particle() {
+    let p = make_particle(0, 0, 0, 3, 4, 5, 10, 1);
+    let p2 = advance_particle(p, 2);
+    assert_eq(p2.px, 6);
+    assert_eq(p2.py, 8);
+    assert_eq(p2.pz, 10);
+    assert_eq(p2.vx, 3);
+    assert_eq(p2.vy, 4);
+    assert_eq(p2.vz, 5);
+}
+
+fn test_particle_simulation() {
+    let mut p = make_particle(0, 0, 0, 0, 0, 0, 10, 1);
+    // Apply force and advance multiple steps
+    p = apply_force(p, 10, 20, 0);  // ax=1, ay=2
+    assert_eq(p.vx, 1);
+    assert_eq(p.vy, 2);
+
+    p = advance_particle(p, 1);
+    assert_eq(p.px, 1);
+    assert_eq(p.py, 2);
+
+    p = advance_particle(p, 1);
+    assert_eq(p.px, 2);
+    assert_eq(p.py, 4);
+}
+
+// =============================================================================
+// Record arrays via record-of-records
+// =============================================================================
+
+type PointArray is { p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2 };
+
+fn point_array_get(arr: PointArray, idx: Int) -> Vec2 {
+    if idx == 0 { arr.p0 }
+    else if idx == 1 { arr.p1 }
+    else if idx == 2 { arr.p2 }
+    else { arr.p3 }
+}
+
+fn test_record_of_records() {
+    let pts = PointArray {
+        p0: make_vec2(0, 0),
+        p1: make_vec2(10, 0),
+        p2: make_vec2(10, 10),
+        p3: make_vec2(0, 10)
+    };
+
+    // Calculate perimeter of a square
+    let mut perimeter = 0;
+    let mut i = 0;
+    while i < 4 {
+        let curr = point_array_get(pts, i);
+        let next = point_array_get(pts, (i + 1) % 4);
+        let dx = next.x - curr.x;
+        let dy = next.y - curr.y;
+        // Manhattan distance for simplicity
+        let dist = if dx < 0 { -dx } else { dx };
+        let dist_y = if dy < 0 { -dy } else { dy };
+        perimeter = perimeter + dist + dist_y;
+        i = i + 1;
+    }
+    // Square with side 10: perimeter = 40
+    assert_eq(perimeter, 40);
+}
+
+// =============================================================================
+// Records in loops with accumulation
+// =============================================================================
+
+fn test_records_in_loop() {
+    let mut sum_x = 0;
+    let mut sum_y = 0;
+    let mut i = 0;
+    while i < 10 {
+        let v = make_vec2(i * 2, i * 3);
+        sum_x = sum_x + v.x;
+        sum_y = sum_y + v.y;
+        i = i + 1;
+    }
+    // sum_x = 2*(0+1+2+...+9) = 2*45 = 90
+    assert_eq(sum_x, 90);
+    // sum_y = 3*(0+1+2+...+9) = 3*45 = 135
+    assert_eq(sum_y, 135);
+}
+
+// =============================================================================
+// Records with boolean-like fields (using Int)
+// =============================================================================
+
+type Flags is {
+    readable: Int, writable: Int, executable: Int,
+    hidden: Int, system: Int, archive: Int,
+    compressed: Int, encrypted: Int
+};
+
+fn count_set_flags(f: Flags) -> Int {
+    f.readable + f.writable + f.executable +
+    f.hidden + f.system + f.archive +
+    f.compressed + f.encrypted
+}
+
+fn test_flag_record() {
+    let f = Flags {
+        readable: 1, writable: 1, executable: 0,
+        hidden: 0, system: 0, archive: 1,
+        compressed: 1, encrypted: 0
+    };
+    assert_eq(count_set_flags(f), 4);
+    assert_eq(f.readable, 1);
+    assert_eq(f.executable, 0);
+}
+
+// =============================================================================
+// Record equality comparison
+// =============================================================================
+
+fn vec2_eq(a: Vec2, b: Vec2) -> Int {
+    if a.x == b.x && a.y == b.y { 1 } else { 0 }
+}
+
+fn rect_eq(a: Rect, b: Rect) -> Int {
+    if vec2_eq(a.origin, b.origin) == 1 && vec2_eq(a.size, b.size) == 1 { 1 } else { 0 }
+}
+
+fn test_record_equality() {
+    let a = make_vec2(3, 4);
+    let b = make_vec2(3, 4);
+    let c = make_vec2(3, 5);
+    assert_eq(vec2_eq(a, b), 1);
+    assert_eq(vec2_eq(a, c), 0);
+
+    let r1 = make_rect(0, 0, 100, 50);
+    let r2 = make_rect(0, 0, 100, 50);
+    let r3 = make_rect(1, 0, 100, 50);
+    assert_eq(rect_eq(r1, r2), 1);
+    assert_eq(rect_eq(r1, r3), 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_8_field_record();
+    test_8_field_config();
+    test_record_method_like();
+    test_nested_record_access();
+    test_deeply_nested_layout();
+    test_three_level_nested();
+    test_update_vec2();
+    test_update_rect();
+    test_chain_updates();
+    test_particle_physics();
+    test_advance_particle();
+    test_particle_simulation();
+    test_record_of_records();
+    test_records_in_loop();
+    test_flag_record();
+    test_record_equality();
+    print("[OK] 282_interp_record_patterns");
+    0
+}

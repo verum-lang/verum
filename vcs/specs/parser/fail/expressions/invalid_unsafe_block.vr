@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, unsafe, block, error
+// @description: Unsafe keyword without block body
+// @expected-error: E018
+
+fn test() {
+    unsafe let x = ptr;  // Unsafe requires block
+}

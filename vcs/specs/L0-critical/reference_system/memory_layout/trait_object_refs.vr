@@ -1,0 +1,254 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, trait-objects
+
+/// Test trait object reference types and their memory layout.
+/// Trait objects are fat references containing pointer + vtable.
+/// CBGR adds generation and epoch for safety.
+
+type Drawable is protocol {
+    fn draw(&self);
+    fn area(&self) -> Float;
+};
+
+type Printable is protocol {
+    fn print(&self) -> Text;
+};
+
+type Named is protocol {
+    fn name(&self) -> &Text;
+};
+
+fn main() {
+    test_trait_object_creation();
+    test_trait_object_dispatch();
+    test_multiple_traits();
+    test_trait_object_collections();
+    test_mutable_trait_objects();
+}
+
+fn test_trait_object_creation() {
+    // Protocol object from concrete type
+    let circle = Circle { radius: 5.0 };
+    let drawable: &Drawable = &circle;
+
+    // Method dispatch through vtable
+    drawable.draw();
+    let area = drawable.area();
+    assert(area > 78.0 && area < 79.0);  // pi * 25
+
+    // Different concrete type, same protocol
+    let rect = Rectangle { width: 4.0, height: 3.0 };
+    let drawable2: &Drawable = &rect;
+
+    drawable2.draw();
+    assert(drawable2.area() == 12.0);
+}
+
+fn test_trait_object_dispatch() {
+    // Polymorphic function using protocol object
+    fn describe_shape(shape: &Drawable) -> Text {
+        shape.draw();
+        let area = shape.area();
+        "Shape with area: " + area.to_string()
+    }
+
+    let circle = Circle { radius: 2.0 };
+    let rect = Rectangle { width: 3.0, height: 4.0 };
+
+    let desc1 = describe_shape(&circle);
+    let desc2 = describe_shape(&rect);
+
+    // Different concrete types, same interface
+    print(desc1);
+    print(desc2);
+}
+
+fn test_multiple_traits() {
+    // Object implementing multiple protocols
+    let entity = Entity {
+        id: 42,
+        label: Text.from("Player"),
+    };
+
+    // As different protocol objects
+    let printable: &Printable = &entity;
+    let named: &Named = &entity;
+
+    let text = printable.print();
+    let name = named.name();
+
+    assert(text == "Entity(42)");
+    assert(name == "Player");
+}
+
+fn test_trait_object_collections() {
+    // Collection of protocol objects
+    let shapes: List<Heap<Drawable>> = [
+        Heap(Circle { radius: 1.0 }),
+        Heap(Rectangle { width: 2.0, height: 2.0 }),
+        Heap(Circle { radius: 3.0 }),
+    ];
+
+    // Iterate over trait objects
+    let mut total_area = 0.0;
+    for shape in &shapes {
+        shape.draw();
+        total_area += shape.area();
+    }
+
+}
+
+// Protocol for mutable trait object test
+type Resizable is protocol {
+    fn resize(&mut self, factor: Float);
+    fn size(&self) -> Float;
+};
+
+implement Resizable for Circle {
+    fn resize(&mut self, factor: Float) {
+        self.radius *= factor;
+    }
+    fn size(&self) -> Float {
+        self.radius
+    }
+}
+
+fn test_mutable_trait_objects() {
+    let mut circle = Circle { radius: 5.0 };
+
+    // Mutable protocol object reference
+    let resizable: &mut Resizable = &mut circle;
+
+    assert(resizable.size() == 5.0);
+    resizable.resize(2.0);
+    assert(resizable.size() == 10.0);
+}
+
+/// Protocol object reference layout verification
+fn verify_trait_object_layout() {
+    let circle = Circle { radius: 1.0 };
+    let trait_ref: &Drawable = &circle;
+
+    // FatRef layout for protocol object:
+    // ptr: 8 bytes (pointer to data)
+    // generation: 4 bytes
+    // epoch_caps: 4 bytes
+    // vtable: 8 bytes (pointer to vtable)
+
+    assert((&Drawable).size == 24);
+
+    // Vtable contains:
+    // - destructor pointer
+    // - size and alignment
+    // - method pointers for trait
+}
+
+/// Show vtable structure
+fn vtable_structure() {
+    // Conceptual vtable for Drawable:
+    // struct DrawableVTable {
+    //     drop: fn(*mut ()),
+    //     size: Int,
+    //     align: Int,
+    //     draw: fn(*const ()),
+    //     area: fn(*const ()) -> Float,
+    // }
+
+    // Each concrete type has its own vtable
+    // Compiler generates vtables at compile time
+
+    let circle = Circle { radius: 1.0 };
+    let rect = Rectangle { width: 1.0, height: 1.0 };
+
+    let circle_trait: &Drawable = &circle;
+    let rect_trait: &Drawable = &rect;
+
+    // Different vtable pointers
+    let circle_vtable = vtable_of_drawable(circle_trait);
+    let rect_vtable = vtable_of_drawable(rect_trait);
+
+    assert(circle_vtable != rect_vtable);
+}
+
+/// Object safety considerations
+fn object_safety() {
+    // Object-safe protocols can be used as trait objects
+
+    // Object safe:
+    type Safe is protocol {
+        fn method(&self);
+        fn sized_return(&self) -> Int;
+    };
+
+    // NOT object safe (has Self in return):
+    // type NotSafe is protocol {
+    //     fn clone(&self) -> Self;  // Can't put in vtable
+    // };
+
+    // NOT object safe (has generic method):
+    // type NotSafe2 is protocol {
+    //     fn process<T>(&self, value: T);  // Can't put in vtable
+    // };
+
+    // NOT object safe (requires Sized):
+    // type NotSafe3 is protocol: Sized {
+    //     fn method(&self);
+    // };
+}
+
+// Concrete types
+type Circle is {
+    radius: Float,
+};
+
+implement Drawable for Circle {
+    fn draw(&self) {
+        print("Drawing circle with radius " + self.radius.to_string());
+    }
+
+    fn area(&self) -> Float {
+        3.14159 * self.radius * self.radius
+    }
+}
+
+type Rectangle is {
+    width: Float,
+    height: Float,
+};
+
+implement Drawable for Rectangle {
+    fn draw(&self) {
+        print("Drawing rectangle " + self.width.to_string() + "x" + self.height.to_string());
+    }
+
+    fn area(&self) -> Float {
+        self.width * self.height
+    }
+}
+
+type Entity is {
+    id: Int,
+    label: Text,
+};
+
+implement Printable for Entity {
+    fn print(&self) -> Text {
+        "Entity(" + self.id.to_string() + ")"
+    }
+}
+
+implement Named for Entity {
+    fn name(&self) -> &Text {
+        &self.label
+    }
+}
+
+// Helper to get vtable pointer (implementation detail)
+// Note: This uses unsafe internals - for illustration only
+fn vtable_of_drawable(r: &Drawable) -> Int {
+    // Extract vtable pointer from fat pointer
+    // In real code, this would use unsafe transmute
+    0  // Placeholder for vtable address
+}

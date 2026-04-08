@@ -1,0 +1,142 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine
+
+/// Test distinction between Copy (default) and Affine (move) types.
+/// In Verum:
+/// - ALL types are Copy by default (can be used after assignment)
+/// - Only types declared with `type affine` have move semantics
+/// Spec: 04-memory-model.md#copy-vs-affine
+
+// Affine type - connections can only have one owner
+type affine Connection is {
+    id: Int,
+    active: Bool,
+};
+
+fn close_connection(conn: Connection) {
+    // Connection is consumed here
+    print(conn.id);
+}
+
+fn main() {
+    test_copy_primitives();
+    test_copy_arrays();
+    test_copy_tuples();
+    test_copy_heap_types();
+    test_copy_structs();
+    test_affine_types();
+}
+
+/// Primitives are Copy (as expected)
+fn test_copy_primitives() {
+    // All primitives have copy semantics
+    let i: Int = 42;
+    let j = i;
+    assert(i == 42);  // i still valid
+    assert(j == 42);
+
+    let f: Float = 3.14;
+    let g = f;
+    assert(f == 3.14);
+    assert(g == 3.14);
+
+    let b: Bool = true;
+    let c = b;
+    assert(b == true);
+    assert(c == true);
+
+    let ch: Char = 'A';
+    let ch2 = ch;
+    assert(ch == 'A');
+    assert(ch2 == 'A');
+}
+
+/// Fixed-size arrays are Copy
+fn test_copy_arrays() {
+    let arr1: [Int; 5] = [1, 2, 3, 4, 5];
+    let arr2 = arr1;
+
+    assert(arr1[0] == 1);  // arr1 still valid
+    assert(arr2[0] == 1);
+
+    // Nested arrays
+    let nested: [[Int; 2]; 3] = [[1, 2], [3, 4], [5, 6]];
+    let nested2 = nested;
+
+    assert(nested[0][0] == 1);
+    assert(nested2[0][0] == 1);
+}
+
+/// Tuples are Copy
+fn test_copy_tuples() {
+    let t1: (Int, Float, Bool) = (42, 3.14, true);
+    let t2 = t1;
+
+    assert(t1.0 == 42);  // t1 still valid
+    assert(t2.0 == 42);
+}
+
+/// Heap-allocated types (Text, List, Map) are ALSO Copy in Verum
+fn test_copy_heap_types() {
+    // Text is Copy in Verum (NOT like Rust's String)
+    let s1 = Text.from("hello");
+    let s2 = s1;
+
+    // Both valid
+    assert(s1 == "hello");
+    assert(s2 == "hello");
+
+    // List is Copy in Verum (NOT like Rust's Vec)
+    let l1 = [1, 2, 3];
+    let l2 = l1;
+
+    // Both valid
+    assert(l1.len() == 3);
+    assert(l2.len() == 3);
+}
+
+/// Custom structs are Copy by default
+fn test_copy_structs() {
+    type Container is {
+        name: Text,
+        count: Int,
+    };
+
+    let c1 = Container {
+        name: Text.from("container"),
+        count: 42,
+    };
+
+    let c2 = c1;
+
+    // Both valid - Container is Copy by default
+    assert(c1.name == "container");
+    assert(c2.name == "container");
+}
+
+/// Affine types have move semantics
+fn test_affine_types() {
+    // Affine types MUST be declared with `type affine`
+    type affine FileHandle is {
+        fd: Int,
+    };
+
+    let h1 = FileHandle { fd: 42 };
+    let h2 = h1;  // h1 is MOVED (FileHandle is affine)
+
+    // Only h2 is valid now
+    assert(h2.fd == 42);
+    // Using h1 here would panic: "use of moved affine value"
+
+    // Affine types are useful for:
+    // - File handles that must be closed exactly once
+    // - Database connections
+    // - Unique capabilities
+    // - Any resource with single-owner semantics
+
+    let conn = Connection { id: 1, active: true };
+    close_connection(conn);  // conn is moved
+    // Using conn here would panic
+}

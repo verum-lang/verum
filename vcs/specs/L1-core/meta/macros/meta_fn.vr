@@ -1,0 +1,58 @@
+// @test: parse
+// @level: L1
+// @tags: meta, macros, meta-fn, compile-time
+// @timeout: 5000
+
+/// Meta functions — compile-time execution.
+/// Grammar: function_modifiers = ['pure'] [meta_modifier] ['async'] ['unsafe']
+///          meta_modifier = 'meta' ['(' stage_level ')']
+
+// Basic meta function
+meta fn compile_time_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Meta function that generates types
+meta fn make_pair_type(a_type: Text, b_type: Text) {
+    quote {
+        type Pair is {
+            first: $a_type,
+            second: $b_type,
+        };
+    }
+}
+
+// Pure meta function (no side effects at compile time)
+pure meta fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+// Meta function with generic parameter
+meta fn identity_gen<T>() {
+    quote {
+        fn identity(x: T) -> T { x }
+    }
+}
+
+// Meta function using type introspection
+meta fn auto_debug<T>() {
+    let fields = @type_fields(T);
+    let name = @type_name(T);
+    quote {
+        implement Debug for $name {
+            fn debug(&self) -> Text {
+                let mut result = f"${name} {{ ";
+                $[for (fname, _ftype) in fields {
+                    result = result + f"$fname: {self.$fname}, ";
+                }]
+                result + "}"
+            }
+        }
+    }
+}
+
+fn main() {
+    const FACT_10: Int = factorial(10);
+    assert_eq(FACT_10, 3628800);
+    print("Meta fn tests parsed");
+}

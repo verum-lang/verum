@@ -1,0 +1,443 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L2
+// @tags: lsp, document-symbols, outline, navigation
+// @expect: pass
+// @description: Tests document symbol extraction for outline view and navigation.
+//              Verifies correct symbol hierarchy, kinds, and ranges.
+
+// ============================================================================
+// This file tests document symbol generation for the outline view.
+// Each declaration should appear with correct kind, name, and containment.
+// ============================================================================
+
+// Test 1: Top-level function symbols
+// Expected: Symbol kind = Function, name = "simple_function"
+fn simple_function() {
+    42
+}
+
+// Expected: Symbol kind = Function, name = "function_with_params"
+fn function_with_params(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Test 2: Type definition symbols
+// Expected: Symbol kind = Struct/Class, name = "RecordType"
+// Children: field symbols
+type RecordType is {
+    field_one: Int,    // Child: Symbol kind = Field
+    field_two: Text,   // Child: Symbol kind = Field
+    field_three: Bool, // Child: Symbol kind = Field
+};
+
+// Test 3: Sum type (variant) symbols
+// Expected: Symbol kind = Enum, name = "VariantType"
+// Children: variant symbols
+type VariantType is
+    | FirstVariant           // Child: Symbol kind = EnumMember
+    | SecondVariant(Int)     // Child: Symbol kind = EnumMember
+    | ThirdVariant { x: Int, y: Int }; // Child: Symbol kind = EnumMember
+
+// Test 4: Protocol symbols
+// Expected: Symbol kind = Interface, name = "ProtocolSymbol"
+// Children: method signatures
+type ProtocolSymbol is protocol {
+    fn required_method(self) -> Int;     // Child: Symbol kind = Method
+    fn another_method(self, x: Int);     // Child: Symbol kind = Method
+    type AssociatedType;                 // Child: Symbol kind = TypeParameter
+};
+
+// Test 5: Implementation block symbols
+// Expected: Symbol kind = Class/Namespace, name = "implement RecordType"
+// Children: implemented methods
+implement RecordType {
+    fn new() -> Self {                   // Child: Symbol kind = Method
+        Self {
+            field_one: 0,
+            field_two: "",
+            field_three: false,
+        }
+    }
+
+    fn get_field_one(&self) -> Int {     // Child: Symbol kind = Method
+        self.field_one
+    }
+
+    fn set_field_one(&mut self, value: Int) { // Child: Symbol kind = Method
+        self.field_one = value;
+    }
+}
+
+// Test 6: Protocol implementation symbols
+// Expected: Symbol kind = Class, name = "implement ProtocolSymbol for RecordType"
+implement ProtocolSymbol for RecordType {
+    fn required_method(self) -> Int {    // Child: Method
+        self.field_one
+    }
+
+    fn another_method(self, x: Int) {    // Child: Method
+        self.field_one = x;
+    }
+
+    type AssociatedType is Int;          // Child: TypeParameter;
+}
+
+// Test 7: Context symbols
+// Expected: Symbol kind = Interface/Module, name = "DatabaseContext"
+// Children: context methods
+context DatabaseContext {
+    fn query(self, sql: Text) -> List<Int>;    // Child: Method
+    fn execute(self, sql: Text) -> Bool;       // Child: Method
+    fn transaction(self, f: fn() -> Bool);     // Child: Method
+}
+
+// Test 8: Constant symbols
+// Expected: Symbol kind = Constant, name = "CONSTANT_VALUE"
+const CONSTANT_VALUE: Int = 42;
+
+// Expected: Symbol kind = Constant, name = "PI_VALUE"
+const PI_VALUE: Float = 3.14159;
+
+// Test 9: Static symbols
+// Expected: Symbol kind = Variable (static), name = "STATIC_COUNTER"
+static mut STATIC_COUNTER: Int = 0;
+
+// Test 10: Generic type symbols
+// Expected: Symbol kind = Struct, name = "GenericContainer<T>"
+// Note: Type parameter should be indicated
+type GenericContainer<T> is {
+    value: T,                   // Child: Field
+    metadata: Text,             // Child: Field
+};
+
+// Test 11: Nested type symbols (generics with constraints)
+// Expected: Name includes constraint info
+type ConstrainedContainer<T> is {
+    value: T,
+} where type T: Clone;
+
+// Test 12: Module symbols
+// Expected: Symbol kind = Module, name = "inner_module"
+// Children: all declarations within module
+module inner_module {
+    fn module_function() -> Int {        // Child: Function
+        42
+    }
+
+    type ModuleType is {                 // Child: Struct
+        data: Int,
+    };
+
+    const MODULE_CONST: Int = 100;       // Child: Constant
+}
+
+// Test 13: Import symbols
+// Expected: Symbol kind = Module/Import, tracks imported items
+mount core.collections.List;
+mount core.collections.Map;
+mount core.io.print;
+
+// Test 14: Async function symbols
+// Expected: Symbol kind = Function, with async modifier indication
+async fn async_function() -> Int {
+    42
+}
+
+// Test 15: Generator function symbols
+// Expected: Symbol kind = Function, with generator indication (fn*)
+fn* generator_function() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+// Test 16: Function with context clause
+// Expected: Shows context requirements in symbol detail
+fn context_aware_function() -> Int using [DatabaseContext] {
+    42
+}
+
+// Test 17: Attributed symbols
+// Expected: Attributes shown in symbol detail or as decorators
+@derive(Clone, Debug)
+type DerivedType is {
+    value: Int,
+};
+
+@verify(runtime)
+fn verified_function(x: Int{> 0}) -> Int {
+    x
+}
+
+// Test 18: Complex nested structure
+// Expected: Full hierarchy preserved
+type OuterType is {
+    inner_record: InnerRecord,
+};
+
+type InnerRecord is {
+    deep_field: DeepType,
+};
+
+type DeepType is {
+    value: Int,
+};
+
+implement OuterType {
+    fn get_deep_value(&self) -> Int {
+        self.inner_record.deep_field.value
+    }
+}
+
+// Test 19: Multiple implementations
+// Each impl block should appear separately
+type MultiImpl is {
+    x: Int,
+    y: Int,
+};
+
+implement MultiImpl {
+    fn from_x(x: Int) -> Self {
+        Self { x: x, y: 0 }
+    }
+}
+
+implement MultiImpl {
+    fn from_y(y: Int) -> Self {
+        Self { x: 0, y: y }
+    }
+}
+
+implement MultiImpl {
+    fn sum(&self) -> Int {
+        self.x + self.y
+    }
+}
+
+// Test 20: Protocol with associated types and GATs
+type AdvancedProtocol is protocol {
+    type Item;                           // Associated type
+    type Container<T>;                   // GAT
+    fn process(self) -> Self.Item;
+    async fn async_process(self) -> Self.Item;
+};
+
+// Test 21: FFI block symbols
+// Expected: Symbol kind = Namespace/Module, name = "CLibrary"
+ffi CLibrary {
+    @extern("C")
+    fn external_function(x: Int) -> Int;
+
+    @extern("C")
+    fn another_external(data: *const Int) -> Bool;
+}
+
+// Test 22: Symbol ranges
+// Each symbol should have accurate start/end positions
+fn function_with_range() -> Int {
+    // Symbol range should cover entire function
+    // from 'fn' to closing '}'
+    let x = 1;
+    let y = 2;
+    x + y
+}
+
+// Test 23: Documented symbols
+// Documentation should be associated with symbol
+/// This function is well documented.
+///
+/// It does important things.
+fn documented_function() -> Int {
+    42
+}
+
+/// A documented type.
+type DocumentedType is {
+    /// A documented field.
+    documented_field: Int,
+};
+
+// Test 24: Empty structures
+// Should still appear in outline
+type EmptyRecord is {};
+
+type EmptyProtocol is protocol {};
+
+implement EmptyRecord {}
+
+// Test 25: Complex function signatures
+fn complex_signature<T, U>(
+    param1: T,
+    param2: U,
+    param3: fn(T) -> U,
+) -> Result<U, Text>
+where T: Clone,
+      U: Debug
+{
+    Ok(param3(param1))
+}
+
+// Test 26: Closure bindings (may or may not appear)
+fn contains_closures() {
+    // Local closures might not appear in document symbols
+    // but the containing function should
+    let add = |a, b| a + b;
+    let mul = |a, b| a * b;
+    add(1, 2) + mul(3, 4)
+}
+
+// Test 27: Match expressions with bindings
+fn contains_match(opt: Maybe<Int>) -> Int {
+    // Bindings inside match are local, not symbols
+    match opt {
+        Some(value) => value,
+        None => 0,
+    }
+}
+
+// Test 28: Symbol selection ranges
+// Selection range should highlight just the name
+type SelectionRangeTest is {  // Selection range: "SelectionRangeTest"
+    field: Int,               // Selection range: "field"
+};
+
+fn selection_range_function() -> Int {  // Selection range: "selection_range_function"
+    42
+}
+
+// Test 29: Symbols with special characters (if allowed)
+// Test proper escaping in symbol names
+type Type_With_Underscores is { value: Int };
+
+// Test 30: Order of symbols in outline
+// Symbols should appear in source order or grouped by kind
+// depending on LSP client preferences
+fn z_function() -> Int { 1 }
+fn a_function() -> Int { 2 }
+fn m_function() -> Int { 3 }
+
+type ZType is { z: Int };
+type AType is { a: Int };
+type MType is { m: Int };
+
+// ============================================================================
+// Hierarchy Tests
+// ============================================================================
+
+// Test 31: Deeply nested module hierarchy
+module level_one {
+    module level_two {
+        module level_three {
+            fn deeply_nested() -> Int {
+                42
+            }
+
+            type DeepType is {
+                value: Int,
+            };
+        }
+    }
+}
+
+// Test 32: Type with many children
+type ManyFields is {
+    field_01: Int,
+    field_02: Int,
+    field_03: Int,
+    field_04: Int,
+    field_05: Int,
+    field_06: Int,
+    field_07: Int,
+    field_08: Int,
+    field_09: Int,
+    field_10: Int,
+};
+
+// Test 33: Protocol with many methods
+type ManyMethods is protocol {
+    fn method_01(self);
+    fn method_02(self);
+    fn method_03(self);
+    fn method_04(self);
+    fn method_05(self);
+    fn method_06(self);
+    fn method_07(self);
+    fn method_08(self);
+    fn method_09(self);
+    fn method_10(self);
+};
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Test 34: Symbol after syntax error
+fn before_error() -> Int { 1 }
+
+fn with_error() -> Int {
+    let x =   // Incomplete
+}
+
+fn after_error() -> Int { 3 }  // Should still appear
+
+// Test 35: Very long symbol names
+fn this_is_a_very_long_function_name_that_tests_how_the_outline_handles_long_names() -> Int {
+    42
+}
+
+type ThisIsAVeryLongTypeNameThatTestsHowTheOutlineHandlesLongNames is {
+    this_is_a_very_long_field_name: Int,
+};
+
+// Test 36: Unicode in symbol names (if supported)
+// Verum uses ASCII identifiers, so this tests edge handling
+
+// Test 37: Anonymous/unnamed constructs
+fn uses_anonymous() {
+    // Anonymous closure - might not appear in symbols
+    let f = |x| x + 1;
+
+    // Struct literal - not a symbol
+    let point = Point { x: 1, y: 2 };
+    f(point.x)
+}
+
+type Point is { x: Int, y: Int };
+
+// Test 38: Multiple items on conceptually related lines
+type A1 is { v: Int }; type A2 is { v: Int }; type A3 is { v: Int };
+
+// Test 39: Symbols with refinement types
+type RefinedField is {
+    positive: Int{> 0},
+    percentage: Int{>= 0, <= 100},
+};
+
+fn takes_refined(x: Int{> 0}) -> Int{>= 0} {
+    x
+}
+
+// Test 40: Context group symbols
+using StandardContexts = [DatabaseContext, LoggerContext];
+
+context LoggerContext {
+    fn log(self, msg: Text);
+    fn error(self, msg: Text);
+}
+
+// ============================================================================
+// Symbol Kind Summary
+// Expected symbol kinds for this file:
+// - Function: simple_function, function_with_params, etc.
+// - Struct/Class: RecordType, VariantType, GenericContainer, etc.
+// - Enum: VariantType (sum types)
+// - EnumMember: FirstVariant, SecondVariant, etc.
+// - Interface: ProtocolSymbol, DatabaseContext, etc.
+// - Method: all methods in impl blocks and protocols
+// - Field: all struct fields
+// - Constant: CONSTANT_VALUE, PI_VALUE, etc.
+// - Variable: STATIC_COUNTER
+// - Module: inner_module, level_one, etc.
+// - TypeParameter: generic type parameters, associated types
+// ============================================================================

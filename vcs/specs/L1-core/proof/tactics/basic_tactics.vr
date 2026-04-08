@@ -1,0 +1,54 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, tactics
+// @timeout: 5000
+
+/// Tactic declarations and built-in tactic usage.
+/// Grammar: tactic_decl = 'tactic' identifier '(' [param_list] ')' block_expr
+///          tactic_name = 'auto' | 'simp' | 'ring' | 'field' | 'omega' | 'blast'
+///                      | 'smt' | 'trivial' | 'assumption' | 'contradiction'
+///                      | 'induction' | 'cases' | 'rewrite' | 'unfold'
+///                      | 'apply' | 'exact' | 'intro' | 'intros' | identifier
+
+// Custom tactic declaration
+tactic my_simplify() {
+    simp;
+    auto
+}
+
+// Tactic with parameters
+tactic induct_on(var: Int) {
+    induction(var);
+    auto
+}
+
+// Theorems using various built-in tactics
+theorem by_auto(x: Int)
+    requires x > 0
+    proof by auto;
+
+theorem by_simp(x: Int, y: Int)
+    proof by simp;
+
+theorem by_omega(a: Int, b: Int)
+    requires a > 0, b > 0
+    proof by omega;
+
+theorem by_ring(a: Int, b: Int)
+    proof by ring;
+
+theorem by_smt(x: Int)
+    requires x >= 0
+    proof by smt;
+
+theorem by_trivial()
+    proof by trivial;
+
+// Chained tactics: tactic_expr = tactic_expr ';' tactic_expr
+theorem by_chain(x: Int)
+    requires x > 0
+    proof by simp; omega;
+
+fn main() {
+    print("Tactic tests parsed");
+}

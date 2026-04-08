@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, provide, context, error
+// @description: Test provide statement with missing value
+// @expected-error: E044
+
+fn test() {
+    provide;
+}

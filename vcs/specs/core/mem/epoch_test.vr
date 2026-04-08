@@ -1,0 +1,1171 @@
+// =============================================================================
+// VCS Test Suite: stdlib/mem/epoch.vr - Epoch Management Tests
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: mem, cbgr, epoch, callback, wraparound, cache
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for the global epoch management system that handles generation
+// counter wraparound and cache invalidation.
+//
+// =============================================================================
+
+mount core.mem.epoch.{
+    EpochManager, EpochCache, EpochCallback, RevocationCallback,
+    GLOBAL_EPOCH,  // Note: THREAD_EPOCH_CACHE is not public
+    DEFAULT_SYNC_INTERVAL, EPOCH_MAX,
+    current_epoch, wraparound_count, cached_epoch, invalidate_epoch_cache,
+    register_epoch_callback, unregister_epoch_callback,
+    register_revocation_callback, unregister_revocation_callback,
+    get_thread_epoch_cache,
+};
+
+// =============================================================================
+// Constant Tests
+// =============================================================================
+
+@test
+fn test_default_sync_interval() {
+    // Default should be 1000 checks between epoch reloads
+    assert_eq(DEFAULT_SYNC_INTERVAL, 1000);
+}
+
+@test
+fn test_epoch_max() {
+    // Epoch is 16-bit
+    assert_eq(EPOCH_MAX, 0xFFFF as UInt16);
+}
+
+// =============================================================================
+// EpochManager Basic Tests
+// =============================================================================
+
+@test
+fn test_epoch_manager_initial_state() {
+    let manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    assert_eq(manager.current_epoch(), 0);
+    assert_eq(manager.wraparound_count(), 0);
+}
+
+@test
+fn test_global_epoch_exists() {
+    // GLOBAL_EPOCH should be accessible
+    let epoch = current_epoch();
+    // Just verify it doesn't panic
+    assert(epoch >= 0);
+}
+
+@test
+fn test_current_epoch_returns_valid() {
+    let epoch = current_epoch();
+
+    // Epoch should be a valid 64-bit value
+    // (16-bit epoch stored in 64-bit field for atomics)
+    assert(epoch <= 0xFFFFFFFFFFFFFFFF as UInt64);
+}
+
+// =============================================================================
+// Epoch Increment Tests
+// =============================================================================
+
+@test
+fn test_increment_epoch_returns_new_value() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let new_epoch = manager.increment_epoch();
+    assert_eq(new_epoch, 1);
+    assert_eq(manager.current_epoch(), 1);
+}
+
+@test
+fn test_increment_epoch_increases_wraparound_count() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    manager.increment_epoch();
+
+    assert_eq(manager.wraparound_count(), 1);
+}
+
+@test
+fn test_on_wraparound_increments_epoch() {
+    let mut manager = EpochManager {
+        epoch: 5,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    manager.on_wraparound();
+
+    assert_eq(manager.current_epoch(), 6);
+}
+
+@test
+fn test_multiple_increments() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let mut i = 0;
+    while i < 100 {
+        let new_epoch = manager.increment_epoch();
+        assert_eq(new_epoch, (i + 1) as UInt64);
+        i = i + 1;
+    }
+
+    assert_eq(manager.current_epoch(), 100);
+    assert_eq(manager.wraparound_count(), 100);
+}
+
+// =============================================================================
+// EpochCache Tests
+// =============================================================================
+
+@test
+fn test_epoch_cache_new() {
+    let cache = EpochCache.new(500);
+
+    assert_eq(cache.sync_interval, 500);
+    assert_eq(cache.checks_since_sync, 0);
+}
+
+@test
+fn test_epoch_cache_default() {
+    let cache = EpochCache.default();
+
+    assert_eq(cache.sync_interval, DEFAULT_SYNC_INTERVAL);
+}
+
+@test
+fn test_epoch_cache_get_increments_checks() {
+    let mut cache = EpochCache {
+        cached_epoch: 0,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    cache.get();
+    // Note: get() increments checks_since_sync before comparing
+    assert(cache.checks_since_sync >= 1);
+}
+
+@test
+fn test_epoch_cache_sync_resets_counter() {
+    let mut cache = EpochCache {
+        cached_epoch: 0,
+        checks_since_sync: 500,
+        sync_interval: 1000,
+    };
+
+    cache.sync();
+
+    assert_eq(cache.checks_since_sync, 0);
+}
+
+@test
+fn test_epoch_cache_invalidate_forces_sync() {
+    let mut cache = EpochCache {
+        cached_epoch: 0,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    cache.invalidate();
+
+    // After invalidate, checks_since_sync should be >= sync_interval
+    // so next get() triggers sync
+    assert_eq(cache.checks_since_sync, cache.sync_interval);
+}
+
+@test
+fn test_epoch_cache_check_matching() {
+    let mut cache = EpochCache {
+        cached_epoch: 42,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    // Check with matching epoch (truncated to 16 bits)
+    assert(cache.check(42 as UInt16));
+}
+
+@test
+fn test_epoch_cache_check_non_matching() {
+    let mut cache = EpochCache {
+        cached_epoch: 42,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    // Check with non-matching epoch
+    assert(!cache.check(99 as UInt16));
+}
+
+@test
+fn test_epoch_cache_periodic_sync() {
+    let mut cache = EpochCache {
+        cached_epoch: 0,
+        checks_since_sync: 0,
+        sync_interval: 10,
+    };
+
+    // Perform many gets
+    for _ in 0..25 {
+        cache.get();
+    }
+
+    // After 25 gets with sync_interval=10, should have synced at least twice
+    // checks_since_sync should be between 0 and 9
+    assert(cache.checks_since_sync < 10);
+}
+
+// =============================================================================
+// Thread-Local Cache Tests
+// =============================================================================
+
+@test
+fn test_get_thread_epoch_cache() {
+    let cache = get_thread_epoch_cache();
+
+    // Should return a valid cache
+    assert_eq(cache.sync_interval, DEFAULT_SYNC_INTERVAL);
+}
+
+@test
+fn test_cached_epoch_returns_value() {
+    let epoch = cached_epoch();
+
+    // Should return a valid epoch
+    assert(epoch >= 0);
+}
+
+@test
+fn test_invalidate_epoch_cache_function() {
+    invalidate_epoch_cache();
+
+    let cache = get_thread_epoch_cache();
+    // After invalidation, next get should sync
+    assert_eq(cache.checks_since_sync, cache.sync_interval);
+}
+
+// =============================================================================
+// Callback Registration Tests
+// =============================================================================
+
+@test
+fn test_register_epoch_callback_returns_unique_id() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    // Define callback (captures nothing)
+    let cb1: EpochCallback = |_epoch| { () };
+    let cb2: EpochCallback = |_epoch| { () };
+
+    let id1 = manager.register_callback(cb1);
+    let id2 = manager.register_callback(cb2);
+
+    assert(id1 != id2);
+}
+
+@test
+fn test_unregister_epoch_callback_removes() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb: EpochCallback = |_epoch| { () };
+    let id = manager.register_callback(cb);
+
+    // Unregister should return true
+    let result = manager.unregister_callback(id);
+    assert(result);
+}
+
+@test
+fn test_unregister_nonexistent_returns_false() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    // Try to unregister ID that was never registered
+    let result = manager.unregister_callback(99999);
+    assert(!result);
+}
+
+@test
+fn test_double_unregister_returns_false() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb: EpochCallback = |_epoch| { () };
+    let id = manager.register_callback(cb);
+
+    let first = manager.unregister_callback(id);
+    let second = manager.unregister_callback(id);
+
+    assert(first);
+    assert(!second);
+}
+
+// =============================================================================
+// Revocation Callback Tests
+// =============================================================================
+
+@test
+fn test_register_revocation_callback() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+
+    let id = manager.register_revocation_callback(cb);
+
+    // ID should be 0 (first registration)
+    assert_eq(id, 0);
+}
+
+@test
+fn test_unregister_revocation_callback() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+
+    let id = manager.register_revocation_callback(cb);
+    let result = manager.unregister_revocation_callback(id);
+
+    assert(result);
+}
+
+// =============================================================================
+// Global Function Tests
+// =============================================================================
+
+@test
+fn test_global_wraparound_count() {
+    let count = wraparound_count();
+
+    // Should be >= 0
+    assert(count >= 0);
+}
+
+// =============================================================================
+// Epoch Truncation Tests
+// =============================================================================
+
+@test
+fn test_epoch_16bit_truncation() {
+    let mut cache = EpochCache {
+        cached_epoch: 0x10042 as UInt64,  // More than 16 bits
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    // Check should compare only lower 16 bits
+    assert(cache.check(0x0042 as UInt16));
+}
+
+@test
+fn test_epoch_max_truncation() {
+    let mut cache = EpochCache {
+        cached_epoch: 0xFFFF as UInt64,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    assert(cache.check(0xFFFF as UInt16));
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_zero_sync_interval_cache() {
+    // Zero sync interval means sync on every get
+    let mut cache = EpochCache {
+        cached_epoch: 0,
+        checks_since_sync: 0,
+        sync_interval: 0,
+    };
+
+    // Should not panic
+    cache.get();
+}
+
+@test
+fn test_very_large_sync_interval() {
+    let mut cache = EpochCache {
+        cached_epoch: 0,
+        checks_since_sync: 0,
+        sync_interval: 1_000_000,
+    };
+
+    // Many gets without syncing
+    for _ in 0..1000 {
+        cache.get();
+    }
+
+    // Should not have synced yet
+    assert(cache.checks_since_sync <= 1000);
+}
+
+@test
+fn test_epoch_counter_overflow_handling() {
+    let mut cache = EpochCache {
+        cached_epoch: 0xFFFFFFFFFFFFFFFF as UInt64,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    // Should handle max value without panic
+    let epoch = cache.get();
+    assert(epoch > 0);
+}
+
+// =============================================================================
+// Performance Characteristic Tests
+// =============================================================================
+
+@test
+fn test_cache_hit_is_fast_path() {
+    // This is more of a documentation test - verifying the design
+    let mut cache = EpochCache.default();
+
+    // First get syncs with global
+    cache.sync();
+    let epoch1 = cache.cached_epoch;
+
+    // Subsequent gets should use cached value (no atomic load from global)
+    for _ in 0..100 {
+        let epoch = cache.get();
+        // Should return the cached value (may sync, but still valid)
+        assert(epoch >= epoch1);
+    }
+}
+
+@test
+fn test_cache_invalidation_affects_next_get() {
+    let mut cache = EpochCache {
+        cached_epoch: 42,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    cache.invalidate();
+
+    // Next get should trigger sync
+    let _epoch = cache.get();
+
+    // After sync, checks_since_sync should be low
+    assert(cache.checks_since_sync <= 1);
+}
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+
+@test
+fn test_epoch_callback_notification_flow() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    // We can't easily test callback invocation without shared mutable state,
+    // but we can test the registration flow
+    // Closure that takes epoch and does nothing (comment inside closure not supported)
+    let cb: EpochCallback = |_epoch| { () };
+
+    let id = manager.register_callback(cb);
+
+    // Increment epoch (triggers callbacks)
+    manager.increment_epoch();
+
+    // Callback was called (we can't verify easily, but no panic is good)
+
+    // Cleanup
+    manager.unregister_callback(id);
+}
+
+@test
+fn test_epoch_and_cache_interaction() {
+    // This tests the typical usage pattern:
+    // 1. Thread gets epoch from cache
+    // 2. Uses epoch for CBGR validation
+    // 3. Cache periodically syncs with global
+
+    let mut cache = EpochCache.default();
+
+    // Simulate typical access pattern
+    for _ in 0..2000 {
+        let epoch = cache.get();
+        // Use epoch for validation...
+        assert(epoch >= 0);
+    }
+
+    // After 2000 accesses with sync_interval=1000, should have synced at least once
+    // This is verified by checks_since_sync being < sync_interval
+    assert(cache.checks_since_sync < cache.sync_interval);
+}
+
+// =============================================================================
+// Additional Manager Tests
+// =============================================================================
+
+@test
+fn test_multiple_callbacks_unique_ids() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb1: EpochCallback = |_epoch| { () };
+    let cb2: EpochCallback = |_epoch| { () };
+    let cb3: EpochCallback = |_epoch| { () };
+
+    let id1 = manager.register_callback(cb1);
+    let id2 = manager.register_callback(cb2);
+    let id3 = manager.register_callback(cb3);
+
+    // All IDs should be distinct
+    assert(id1 != id2);
+    assert(id2 != id3);
+    assert(id1 != id3);
+}
+
+@test
+fn test_revocation_callback_double_unregister() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+    let id = manager.register_revocation_callback(cb);
+
+    let first = manager.unregister_revocation_callback(id);
+    let second = manager.unregister_revocation_callback(id);
+
+    assert(first);
+    assert(!second);
+}
+
+@test
+fn test_unregister_revocation_nonexistent() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let result = manager.unregister_revocation_callback(99999);
+    assert(!result);
+}
+
+@test
+fn test_manager_nonzero_initial_epoch() {
+    let mut manager = EpochManager {
+        epoch: 100,
+        wraparounds: 5,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    assert_eq(manager.current_epoch(), 100);
+    assert_eq(manager.wraparound_count(), 5);
+
+    let new_epoch = manager.increment_epoch();
+    assert_eq(new_epoch, 101);
+    assert_eq(manager.wraparound_count(), 6);
+}
+
+@test
+fn test_multiple_on_wraparound() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    manager.on_wraparound();
+    manager.on_wraparound();
+    manager.on_wraparound();
+
+    assert_eq(manager.current_epoch(), 3);
+}
+
+@test
+fn test_epoch_cache_check_zero_epoch() {
+    let mut cache = EpochCache {
+        cached_epoch: 0,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    assert(cache.check(0 as UInt16));
+    assert(!cache.check(1 as UInt16));
+}
+
+@test
+fn test_epoch_cache_sync_interval_one() {
+    // Sync on every get
+    let mut cache = EpochCache {
+        cached_epoch: 0,
+        checks_since_sync: 0,
+        sync_interval: 1,
+    };
+
+    for _ in 0..10 {
+        cache.get();
+    }
+    // Should sync frequently
+    assert(cache.checks_since_sync <= 1);
+}
+
+@test
+fn test_register_unregister_multiple_callbacks() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb1: EpochCallback = |_epoch| { () };
+    let cb2: EpochCallback = |_epoch| { () };
+    let cb3: EpochCallback = |_epoch| { () };
+
+    let id1 = manager.register_callback(cb1);
+    let id2 = manager.register_callback(cb2);
+    let id3 = manager.register_callback(cb3);
+
+    // Unregister middle one
+    assert(manager.unregister_callback(id2));
+    // First and third should still unregister
+    assert(manager.unregister_callback(id1));
+    assert(manager.unregister_callback(id3));
+    // All gone now
+    assert(!manager.unregister_callback(id1));
+}
+
+@test
+fn test_revocation_callbacks_unique_ids() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb1: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+    let cb2: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+
+    let id1 = manager.register_revocation_callback(cb1);
+    let id2 = manager.register_revocation_callback(cb2);
+
+    assert(id1 != id2);
+}
+
+@test
+fn test_epoch_cache_invalidate_then_get_resets() {
+    let mut cache = EpochCache {
+        cached_epoch: 50,
+        checks_since_sync: 500,
+        sync_interval: 1000,
+    };
+
+    cache.invalidate();
+    assert_eq(cache.checks_since_sync, cache.sync_interval);
+
+    // After get, should have synced
+    let _epoch = cache.get();
+    assert(cache.checks_since_sync <= 1);
+}
+
+@test
+fn test_epoch_cache_new_various_intervals() {
+    let cache1 = EpochCache.new(1);
+    assert_eq(cache1.sync_interval, 1);
+
+    let cache2 = EpochCache.new(100);
+    assert_eq(cache2.sync_interval, 100);
+
+    let cache3 = EpochCache.new(1_000_000);
+    assert_eq(cache3.sync_interval, 1_000_000);
+}
+
+// =============================================================================
+// Additional Tests
+// =============================================================================
+
+@test
+fn test_epoch_callback_type_as_parameter() {
+    fn accept_callback(cb: EpochCallback) -> Bool { true }
+    let _ = accept_callback;
+}
+
+@test
+fn test_revocation_callback_type_as_parameter() {
+    fn accept_callback(cb: RevocationCallback) -> Bool { true }
+    let _ = accept_callback;
+}
+
+@test
+fn test_epoch_cache_repeated_invalidate_sync() {
+    let mut cache = EpochCache {
+        cached_epoch: 0,
+        checks_since_sync: 0,
+        sync_interval: 100,
+    };
+
+    let mut i = 0;
+    while i < 5 {
+        cache.invalidate();
+        assert_eq(cache.checks_since_sync, cache.sync_interval);
+        cache.sync();
+        assert_eq(cache.checks_since_sync, 0);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_epoch_manager_both_callback_types() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb: EpochCallback = |_epoch| { () };
+    let rcb: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+
+    let id1 = manager.register_callback(cb);
+    let id2 = manager.register_revocation_callback(rcb);
+
+    assert(id1 >= 0);
+    assert(id2 >= 0);
+
+    assert(manager.unregister_callback(id1));
+    assert(manager.unregister_revocation_callback(id2));
+}
+
+@test
+fn test_epoch_cache_check_boundary_values() {
+    let mut cache = EpochCache {
+        cached_epoch: 0xFFFF as UInt64,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    assert(cache.check(0xFFFF as UInt16));
+    assert(!cache.check(0 as UInt16));
+    assert(!cache.check(0xFFFE as UInt16));
+}
+
+@test
+fn test_epoch_manager_increment_then_on_wraparound() {
+    let mut manager = EpochManager {
+        epoch: 10,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    manager.increment_epoch();
+    assert_eq(manager.current_epoch(), 11);
+
+    manager.on_wraparound();
+    assert_eq(manager.current_epoch(), 12);
+}
+
+@test
+fn test_epoch_cache_two_caches_independent() {
+    let mut cache1 = EpochCache.new(100);
+    let mut cache2 = EpochCache.new(500);
+
+    let mut i = 0;
+    while i < 50 {
+        cache1.get();
+        cache2.get();
+        i = i + 1;
+    }
+
+    assert(cache1.checks_since_sync <= 50);
+    assert(cache2.checks_since_sync <= 50);
+}
+
+@test
+fn test_epoch_manager_sequential_callback_ids_grow() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb1: EpochCallback = |_epoch| { () };
+    let cb2: EpochCallback = |_epoch| { () };
+    let cb3: EpochCallback = |_epoch| { () };
+
+    let id1 = manager.register_callback(cb1);
+    let id2 = manager.register_callback(cb2);
+    let id3 = manager.register_callback(cb3);
+
+    // IDs should be strictly increasing
+    assert(id1 < id2);
+    assert(id2 < id3);
+}
+
+@test
+fn test_epoch_cache_sync_preserves_interval() {
+    let mut cache = EpochCache.new(42);
+    cache.sync();
+    assert_eq(cache.sync_interval, 42);
+    assert_eq(cache.checks_since_sync, 0);
+
+    cache.invalidate();
+    assert_eq(cache.sync_interval, 42);
+
+    let _ = cache.get();
+    assert_eq(cache.sync_interval, 42);
+}
+
+@test
+fn test_revocation_callbacks_sequential_ids() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb1: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+    let cb2: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+    let cb3: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+
+    let id1 = manager.register_revocation_callback(cb1);
+    let id2 = manager.register_revocation_callback(cb2);
+    let id3 = manager.register_revocation_callback(cb3);
+
+    // IDs should be strictly increasing
+    assert(id1 < id2);
+    assert(id2 < id3);
+    assert_eq(id1, 0);
+    assert_eq(id2, 1);
+    assert_eq(id3, 2);
+}
+
+@test
+fn test_mixed_callback_registration_order() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let epoch_cb: EpochCallback = |_epoch| { () };
+    let revoc_cb: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+
+    // Register in mixed order
+    let id1 = manager.register_callback(epoch_cb);
+    let id2 = manager.register_revocation_callback(revoc_cb);
+    let id3 = manager.register_callback(|_epoch| { () });
+    let id4 = manager.register_revocation_callback(|_ptr, _old_gen, _new_gen, _epoch| { () });
+
+    // Epoch callback IDs are independent from revocation callback IDs
+    assert_eq(id1, 0);
+    assert_eq(id2, 0);
+    assert_eq(id3, 1);
+    assert_eq(id4, 1);
+}
+
+@test
+fn test_epoch_manager_with_preexisting_callback_ids() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 100,
+        next_revocation_id: 200,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let epoch_cb: EpochCallback = |_epoch| { () };
+    let revoc_cb: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+
+    let id1 = manager.register_callback(epoch_cb);
+    let id2 = manager.register_revocation_callback(revoc_cb);
+
+    // Should start from the preexisting values
+    assert_eq(id1, 100);
+    assert_eq(id2, 200);
+}
+
+@test
+fn test_epoch_cache_check_with_high_epoch() {
+    let mut cache = EpochCache {
+        cached_epoch: 0xABCD1234 as UInt64,
+        checks_since_sync: 0,
+        sync_interval: 1000,
+    };
+
+    // Check truncates to lower 16 bits
+    assert(cache.check(0x1234 as UInt16));
+    assert(!cache.check(0xABCD as UInt16));
+    assert(!cache.check(0x0000 as UInt16));
+}
+
+@test
+fn test_epoch_cache_multiple_invalidate_cycles() {
+    let mut cache = EpochCache.new(100);
+
+    let mut i = 0;
+    while i < 10 {
+        cache.invalidate();
+        let _epoch = cache.get();
+        assert(cache.checks_since_sync <= 1);
+
+        // Do some gets
+        let mut j = 0;
+        while j < 50 {
+            cache.get();
+            j = j + 1;
+        }
+
+        i = i + 1;
+    }
+}
+
+@test
+fn test_epoch_manager_increment_then_wraparound_count_consistent() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let mut expected_count = 0;
+    let mut i = 0;
+    while i < 20 {
+        let new_epoch = manager.increment_epoch();
+        expected_count = expected_count + 1;
+        assert_eq(new_epoch, (i + 1) as UInt64);
+        assert_eq(manager.wraparound_count(), expected_count);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_unregister_multiple_revocation_callbacks_in_order() {
+    let mut manager = EpochManager {
+        epoch: 0,
+        wraparounds: 0,
+        callbacks: List.new(),
+        revocation_callbacks: List.new(),
+        next_callback_id: 0,
+        next_revocation_id: 0,
+        callbacks_lock: 0,
+        revocation_lock: 0,
+    };
+
+    let cb1: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+    let cb2: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+    let cb3: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+    let cb4: RevocationCallback = |_ptr, _old_gen, _new_gen, _epoch| { () };
+
+    let id1 = manager.register_revocation_callback(cb1);
+    let id2 = manager.register_revocation_callback(cb2);
+    let id3 = manager.register_revocation_callback(cb3);
+    let id4 = manager.register_revocation_callback(cb4);
+
+    // Unregister first and last
+    assert(manager.unregister_revocation_callback(id1));
+    assert(manager.unregister_revocation_callback(id4));
+
+    // Middle two should still be present
+    assert(manager.unregister_revocation_callback(id2));
+    assert(manager.unregister_revocation_callback(id3));
+
+    // All should be gone now
+    assert(!manager.unregister_revocation_callback(id1));
+    assert(!manager.unregister_revocation_callback(id2));
+}
+
+@test
+fn test_epoch_cache_check_after_multiple_gets() {
+    let mut cache = EpochCache {
+        cached_epoch: 42,
+        checks_since_sync: 0,
+        sync_interval: 50,
+    };
+
+    // Do many gets
+    let mut i = 0;
+    while i < 100 {
+        let _epoch = cache.get();
+        i = i + 1;
+    }
+
+    // After many gets, check should still work with proper epoch
+    // Note: epoch may have synced, so we check against current cached value
+    let current_epoch_truncated = (cache.cached_epoch as UInt16);
+    assert(cache.check(current_epoch_truncated));
+}

@@ -1,0 +1,174 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, pattern, matching, dispatch
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for pattern-matching-like dispatch using if-else chains
+
+// Simulated tagged union: tag=0 for Int, tag=1 for Bool, tag=2 for Pair
+type Tagged is { tag: Int, val1: Int, val2: Int };
+
+fn make_int_val(v: Int) -> Tagged {
+    Tagged { tag: 0, val1: v, val2: 0 }
+}
+
+fn make_bool_val(v: Int) -> Tagged {
+    Tagged { tag: 1, val1: v, val2: 0 }
+}
+
+fn make_pair_val(a: Int, b: Int) -> Tagged {
+    Tagged { tag: 2, val1: a, val2: b }
+}
+
+fn tagged_to_string_tag(t: Tagged) -> Int {
+    // Returns tag for type identification
+    t.tag
+}
+
+fn tagged_eq(a: Tagged, b: Tagged) -> Bool {
+    if a.tag != b.tag { return false; }
+    if a.tag == 2 {
+        a.val1 == b.val1 && a.val2 == b.val2
+    } else {
+        a.val1 == b.val1
+    }
+}
+
+// Apply operation based on tag
+fn tagged_apply(t: Tagged, op: Int) -> Tagged {
+    // op: 0=negate, 1=double, 2=swap(pair)
+    if t.tag == 0 {
+        // Int
+        if op == 0 { make_int_val(-t.val1) }
+        else if op == 1 { make_int_val(t.val1 * 2) }
+        else { t }
+    } else if t.tag == 1 {
+        // Bool
+        if op == 0 {
+            // Negate bool: 1->0, 0->1
+            let neg = if t.val1 == 0 { 1 } else { 0 };
+            make_bool_val(neg)
+        }
+        else { t }
+    } else {
+        // Pair
+        if op == 2 { make_pair_val(t.val2, t.val1) }
+        else if op == 1 {
+            make_pair_val(t.val1 * 2, t.val2 * 2)
+        }
+        else { t }
+    }
+}
+
+// Simulated Option type: tag=0 for None, tag=1 for Some
+type Option is { tag: Int, val: Int };
+
+fn none() -> Option { Option { tag: 0, val: 0 } }
+fn some(v: Int) -> Option { Option { tag: 1, val: v } }
+fn is_some(o: Option) -> Bool { o.tag == 1 }
+fn is_none(o: Option) -> Bool { o.tag == 0 }
+fn unwrap_or(o: Option, def: Int) -> Int {
+    if o.tag == 1 { o.val } else { def }
+}
+
+fn option_map(o: Option, f: fn(Int) -> Int) -> Option {
+    if o.tag == 1 { some(f(o.val)) } else { none() }
+}
+
+fn option_and_then(o: Option, f: fn(Int) -> Option) -> Option {
+    if o.tag == 1 { f(o.val) } else { none() }
+}
+
+// Safe division
+fn safe_div(a: Int, b: Int) -> Option {
+    if b == 0 { none() } else { some(a / b) }
+}
+
+fn test_tagged_union() {
+    let i = make_int_val(42);
+    let b = make_bool_val(1);
+    let p = make_pair_val(3, 7);
+
+    assert_eq(i.tag, 0);
+    assert_eq(b.tag, 1);
+    assert_eq(p.tag, 2);
+
+    // Apply negate
+    let ni = tagged_apply(i, 0);
+    assert_eq(ni.val1, -42);
+
+    // Apply double
+    let di = tagged_apply(i, 1);
+    assert_eq(di.val1, 84);
+
+    // Negate bool
+    let nb = tagged_apply(b, 0);
+    assert_eq(nb.val1, 0);
+
+    // Swap pair
+    let sp = tagged_apply(p, 2);
+    assert_eq(sp.val1, 7);
+    assert_eq(sp.val2, 3);
+}
+
+fn test_tagged_eq() {
+    assert_eq(tagged_eq(make_int_val(5), make_int_val(5)), true);
+    assert_eq(tagged_eq(make_int_val(5), make_int_val(6)), false);
+    assert_eq(tagged_eq(make_int_val(5), make_bool_val(5)), false);  // Different tags
+    assert_eq(tagged_eq(make_pair_val(1, 2), make_pair_val(1, 2)), true);
+    assert_eq(tagged_eq(make_pair_val(1, 2), make_pair_val(2, 1)), false);
+}
+
+fn test_option() {
+    let s = some(42);
+    let n = none();
+
+    assert_eq(is_some(s), true);
+    assert_eq(is_none(s), false);
+    assert_eq(is_some(n), false);
+    assert_eq(is_none(n), true);
+
+    assert_eq(unwrap_or(s, 0), 42);
+    assert_eq(unwrap_or(n, 99), 99);
+}
+
+fn test_option_map() {
+    let double = |x: Int| -> Int { x * 2 };
+
+    let s = option_map(some(21), double);
+    assert_eq(is_some(s), true);
+    assert_eq(s.val, 42);
+
+    let n = option_map(none(), double);
+    assert_eq(is_none(n), true);
+}
+
+fn test_option_chain() {
+    // Chain safe_div operations
+    let r1 = safe_div(100, 5);
+    assert_eq(unwrap_or(r1, -1), 20);
+
+    let r2 = safe_div(100, 0);
+    assert_eq(is_none(r2), true);
+    assert_eq(unwrap_or(r2, -1), -1);
+
+    // And-then chaining
+    let halver = |x: Int| -> Option { safe_div(x, 2) };
+    let r3 = option_and_then(some(100), halver);
+    assert_eq(unwrap_or(r3, -1), 50);
+
+    let r4 = option_and_then(none(), halver);
+    assert_eq(is_none(r4), true);
+}
+
+fn main() -> Int {
+    test_tagged_union();
+    test_tagged_eq();
+    test_option();
+    test_option_map();
+    test_option_chain();
+    print("[OK] 219_pattern_matching_aot");
+    0
+}

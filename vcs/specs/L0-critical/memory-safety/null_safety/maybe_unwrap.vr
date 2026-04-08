@@ -1,0 +1,20 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, maybe
+// @description: Tests that unwrapping None causes a panic
+
+fn find_element(list: List<Int>, target: Int) -> Maybe<Int> {
+    for elem in list {
+        if elem == target {
+            return Maybe.Some(elem);
+        }
+    }
+    Maybe.None
+}
+
+fn main() {
+    let numbers = [1, 2, 3, 4, 5];
+    let result = find_element(numbers, 99);  // Returns None
+    let _ = result.unwrap();  // Panic: Unwrap on None
+}

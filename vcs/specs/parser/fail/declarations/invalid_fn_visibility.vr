@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, visibility, error
+// @description: Test invalid function visibility modifier detection
+// @expected-error: E033
+
+// Invalid visibility modifiers
+private fn foo() {}
+
+export fn bar() {}
+
+extern fn baz() {}

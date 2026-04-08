@@ -1,0 +1,168 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, ring, buffer, queue
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for ring buffer (circular queue)
+
+type Ring8 is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    head: Int, tail: Int, count: Int
+};
+
+fn ring_new() -> Ring8 {
+    Ring8 {
+        d0: 0, d1: 0, d2: 0, d3: 0,
+        d4: 0, d5: 0, d6: 0, d7: 0,
+        head: 0, tail: 0, count: 0
+    }
+}
+
+fn ring_get(r: Ring8, i: Int) -> Int {
+    if i == 0 { r.d0 } else if i == 1 { r.d1 }
+    else if i == 2 { r.d2 } else if i == 3 { r.d3 }
+    else if i == 4 { r.d4 } else if i == 5 { r.d5 }
+    else if i == 6 { r.d6 } else if i == 7 { r.d7 }
+    else { 0 }
+}
+
+fn ring_set_slot(r: Ring8, i: Int, v: Int) -> Ring8 {
+    Ring8 {
+        d0: if i == 0 { v } else { r.d0 }, d1: if i == 1 { v } else { r.d1 },
+        d2: if i == 2 { v } else { r.d2 }, d3: if i == 3 { v } else { r.d3 },
+        d4: if i == 4 { v } else { r.d4 }, d5: if i == 5 { v } else { r.d5 },
+        d6: if i == 6 { v } else { r.d6 }, d7: if i == 7 { v } else { r.d7 },
+        head: r.head, tail: r.tail, count: r.count
+    }
+}
+
+fn ring_is_empty(r: Ring8) -> Bool { r.count == 0 }
+fn ring_is_full(r: Ring8) -> Bool { r.count == 8 }
+fn ring_size(r: Ring8) -> Int { r.count }
+
+fn ring_push(r: Ring8, v: Int) -> Ring8 {
+    if r.count == 8 { return r; }
+    let mut r2 = ring_set_slot(r, r.tail, v);
+    Ring8 {
+        d0: r2.d0, d1: r2.d1, d2: r2.d2, d3: r2.d3,
+        d4: r2.d4, d5: r2.d5, d6: r2.d6, d7: r2.d7,
+        head: r.head, tail: (r.tail + 1) % 8, count: r.count + 1
+    }
+}
+
+fn ring_front(r: Ring8) -> Int {
+    ring_get(r, r.head)
+}
+
+fn ring_pop(r: Ring8) -> Ring8 {
+    if r.count == 0 { return r; }
+    Ring8 {
+        d0: r.d0, d1: r.d1, d2: r.d2, d3: r.d3,
+        d4: r.d4, d5: r.d5, d6: r.d6, d7: r.d7,
+        head: (r.head + 1) % 8, tail: r.tail, count: r.count - 1
+    }
+}
+
+// Sum all elements in the ring
+fn ring_sum(r: Ring8) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    let mut idx = r.head;
+    while i < r.count {
+        s = s + ring_get(r, idx);
+        idx = (idx + 1) % 8;
+        i = i + 1;
+    }
+    s
+}
+
+fn test_basic_ops() {
+    let mut r = ring_new();
+    assert_eq(ring_is_empty(r), true);
+    assert_eq(ring_size(r), 0);
+
+    r = ring_push(r, 10);
+    r = ring_push(r, 20);
+    r = ring_push(r, 30);
+    assert_eq(ring_size(r), 3);
+    assert_eq(ring_is_empty(r), false);
+    assert_eq(ring_front(r), 10);
+
+    r = ring_pop(r);
+    assert_eq(ring_front(r), 20);
+    assert_eq(ring_size(r), 2);
+}
+
+fn test_wraparound() {
+    let mut r = ring_new();
+    // Fill 6 elements
+    let mut i = 0;
+    while i < 6 {
+        r = ring_push(r, i * 10);
+        i = i + 1;
+    }
+    // Pop 4
+    let mut j = 0;
+    while j < 4 {
+        r = ring_pop(r);
+        j = j + 1;
+    }
+    // Now head=4, count=2, elements are [40, 50]
+    assert_eq(ring_size(r), 2);
+    assert_eq(ring_front(r), 40);
+
+    // Push 5 more to wrap around
+    r = ring_push(r, 60);
+    r = ring_push(r, 70);
+    r = ring_push(r, 80);
+    r = ring_push(r, 90);
+    r = ring_push(r, 100);
+    assert_eq(ring_size(r), 7);
+    assert_eq(ring_front(r), 40);
+}
+
+fn test_full_buffer() {
+    let mut r = ring_new();
+    let mut i = 0;
+    while i < 8 {
+        r = ring_push(r, i + 1);
+        i = i + 1;
+    }
+    assert_eq(ring_is_full(r), true);
+    assert_eq(ring_size(r), 8);
+
+    // Push on full buffer is no-op
+    r = ring_push(r, 999);
+    assert_eq(ring_size(r), 8);
+    assert_eq(ring_front(r), 1);
+
+    // Sum: 1+2+...+8 = 36
+    assert_eq(ring_sum(r), 36);
+}
+
+fn test_pop_all() {
+    let mut r = ring_new();
+    r = ring_push(r, 5);
+    r = ring_push(r, 10);
+    r = ring_push(r, 15);
+
+    let mut total = 0;
+    while ring_size(r) > 0 {
+        total = total + ring_front(r);
+        r = ring_pop(r);
+    }
+    assert_eq(total, 30);
+    assert_eq(ring_is_empty(r), true);
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_wraparound();
+    test_full_buffer();
+    test_pop_all();
+    print("[OK] 243_ring_buffer_aot");
+    0
+}

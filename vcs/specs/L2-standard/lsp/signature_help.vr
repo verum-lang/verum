@@ -1,0 +1,568 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L2
+// @tags: lsp, signature-help, function-hints, parameter-info
+// @expect: pass
+// @description: Tests signature help/parameter hints for function calls.
+//              Verifies correct signature display, active parameter, and overloads.
+
+// ============================================================================
+// This file tests signature help triggered during function calls.
+// Each call site documents expected signature information.
+// ============================================================================
+
+// Test 1: Basic function signature help
+/// Adds two integers together.
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn test_basic_signature() {
+    // Typing 'add(' should show:
+    //   add(a: Int, b: Int) -> Int
+    //   Active: parameter 0 (a: Int)
+    // Typing 'add(1, ' should show:
+    //   add(a: Int, b: Int) -> Int
+    //   Active: parameter 1 (b: Int)
+    let result = add(1, 2);
+    result
+}
+
+// Test 2: Function with many parameters
+/// Processes data with multiple configuration options.
+fn process_data(
+    input: Text,
+    count: Int,
+    threshold: Float,
+    enabled: Bool,
+    callback: fn(Int) -> Bool,
+) -> Result<Int, Text> {
+    Ok(count)
+}
+
+fn test_many_params() {
+    // Each comma should advance the active parameter:
+    // process_data( -> active: input
+    // process_data("x", -> active: count
+    // process_data("x", 1, -> active: threshold
+    // process_data("x", 1, 0.5, -> active: enabled
+    // process_data("x", 1, 0.5, true, -> active: callback
+    let result = process_data("data", 10, 0.5, true, |x| x > 0);
+    result
+}
+
+// Test 3: Function with no parameters
+/// Returns a constant value.
+fn no_params() -> Int {
+    42
+}
+
+fn test_no_params() {
+    // Typing 'no_params(' should show:
+    //   no_params() -> Int
+    //   No active parameter (empty parameter list)
+    let result = no_params();
+    result
+}
+
+// Test 4: Method signature help
+type Calculator is {
+    value: Float,
+};
+
+implement Calculator {
+    /// Creates a new calculator with initial value.
+    fn new(initial: Float) -> Self {
+        Self { value: initial }
+    }
+
+    /// Adds a number to the current value.
+    fn add(&mut self, amount: Float) -> Float {
+        self.value = self.value + amount;
+        self.value
+    }
+
+    /// Multiplies current value by a factor.
+    fn multiply(&self, factor: Float) -> Float {
+        self.value * factor
+    }
+
+    /// Applies operation to current and another value.
+    fn combine(&self, other: &Calculator, op: fn(Float, Float) -> Float) -> Float {
+        op(self.value, other.value)
+    }
+}
+
+fn test_method_signature() {
+    // Calculator.new( -> new(initial: Float) -> Calculator
+    let mut calc = Calculator.new(10.0);
+
+    // calc.add( -> add(&mut self, amount: Float) -> Float
+    // Note: 'self' parameter might be hidden or shown as implicit
+    calc.add(5.0);
+
+    // calc.multiply( -> multiply(&self, factor: Float) -> Float
+    calc.multiply(2.0);
+
+    // calc.combine( -> combine(&self, other: &Calculator, op: fn(Float, Float) -> Float)
+    let other = Calculator.new(20.0);
+    calc.combine(&other, |a, b| a + b)
+}
+
+// Test 5: Generic function signature help
+/// Wraps a value in a container.
+fn wrap<T>(value: T) -> Container<T> {
+    Container { value: value }
+}
+
+type Container<T> is {
+    value: T,
+};
+
+/// Transforms container contents.
+fn transform<T, U>(container: Container<T>, f: fn(T) -> U) -> Container<U> {
+    Container { value: f(container.value) }
+}
+
+fn test_generic_signature() {
+    // wrap( -> wrap<T>(value: T) -> Container<T>
+    // Type parameter might be shown or inferred
+    let c = wrap(42);
+
+    // transform( -> transform<T, U>(container: Container<T>, f: fn(T) -> U) -> Container<U>
+    let transformed = transform(c, |x| x.to_text());
+    transformed
+}
+
+// Test 6: Function with optional/default parameters (if supported)
+/// Greets a person with optional formality.
+fn greet(name: Text, formal: Bool) -> Text {
+    if formal {
+        f"Hello, {name}."
+    } else {
+        f"Hi, {name}!"
+    }
+}
+
+fn test_optional_params() {
+    // Shows all parameters including optional ones
+    // greet( -> greet(name: Text, formal: Bool) -> Text
+    greet("Alice", true)
+}
+
+// Test 7: Closure parameter signature help
+fn map_values(list: List<Int>, mapper: fn(Int) -> Int) -> List<Int> {
+    list.map(mapper)
+}
+
+fn test_closure_param() {
+    // map_values(list, -> mapper: fn(Int) -> Int shown
+    let nums = [1, 2, 3];
+    map_values(nums, |x| x * 2)
+}
+
+// Test 8: Nested function calls
+fn outer_fn(x: Int) -> Int { x }
+fn inner_fn(a: Int, b: Int) -> Int { a + b }
+
+fn test_nested_calls() {
+    // outer_fn(inner_fn( -> shows inner_fn signature
+    // Active signature depends on cursor position
+    let result = outer_fn(inner_fn(1, 2));
+    result
+}
+
+// Test 9: Protocol method signatures
+type Serializable is protocol {
+    /// Serializes to text format.
+    fn serialize(&self) -> Text;
+
+    /// Deserializes from text.
+    fn deserialize(data: Text) -> Self;
+};
+
+implement Serializable for Calculator {
+    fn serialize(&self) -> Text {
+        self.value.to_text()
+    }
+
+    fn deserialize(data: Text) -> Self {
+        Self { value: data.parse_float() }
+    }
+}
+
+fn test_protocol_method_signature(s: &dyn Serializable) {
+    // s.serialize( -> serialize(&self) -> Text
+    // Protocol method signatures should display correctly
+    s.serialize()
+}
+
+// Test 10: Context-aware functions
+context Logger {
+    fn log(self, level: Int, message: Text);
+    fn debug(self, message: Text);
+}
+
+fn log_message(level: Int, message: Text) using [Logger] {
+    // Signature should show context requirement
+    // log_message(level: Int, message: Text) using [Logger]
+}
+
+fn test_context_signature() {
+    provide Logger = ConsoleLogger;
+    // log_message( -> shows signature with using clause
+    log_message(1, "test")
+}
+
+context ConsoleLogger {
+    fn log(self, level: Int, message: Text);
+    fn debug(self, message: Text);
+}
+
+// Test 11: Async function signatures
+/// Fetches data asynchronously.
+async fn fetch_data(url: Text, timeout: Int) -> Result<Text, Text> {
+    Ok(url)
+}
+
+async fn test_async_signature() {
+    // fetch_data( -> async fn fetch_data(url: Text, timeout: Int) -> Result<Text, Text>
+    // Async marker should be visible in signature
+    let result = fetch_data("https://example.com", 5000).await;
+    result
+}
+
+// Test 12: Function with refinement types
+/// Divides two numbers, denominator must be non-zero.
+fn safe_divide(numerator: Float, denominator: Float{!= 0.0}) -> Float {
+    numerator / denominator
+}
+
+fn test_refinement_signature() {
+    // safe_divide( -> safe_divide(numerator: Float, denominator: Float{!= 0.0}) -> Float
+    // Refinement should be visible in signature
+    safe_divide(10.0, 2.0)
+}
+
+// Test 13: Variadic-like patterns (List parameter)
+/// Sums all numbers in a list.
+fn sum_all(numbers: List<Int>) -> Int {
+    numbers.fold(0, |acc, x| acc + x)
+}
+
+fn test_list_param_signature() {
+    // sum_all( -> sum_all(numbers: List<Int>) -> Int
+    sum_all([1, 2, 3, 4, 5])
+}
+
+// Test 14: Function type parameters
+/// Applies function twice.
+fn apply_twice<T>(value: T, f: fn(T) -> T) -> T {
+    f(f(value))
+}
+
+fn test_function_type_param() {
+    // apply_twice( -> apply_twice<T>(value: T, f: fn(T) -> T) -> T
+    // Second param shows function signature
+    apply_twice(5, |x| x * 2)
+}
+
+// Test 15: Associated type in signature
+type IteratorProtocol is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+fn collect_first<I>(iter: &mut I, count: Int) -> List<I.Item>
+where I: IteratorProtocol
+{
+    // Signature shows associated type
+    []
+}
+
+fn test_associated_type_signature() {
+    // collect_first( -> collect_first<I>(iter: &mut I, count: Int) -> List<I.Item>
+    // Associated type shown in return type
+    42
+}
+
+// Test 16: Overloaded-like functions (different arities)
+// Verum doesn't have true overloading, but test disambiguation
+fn process(x: Int) -> Int { x }
+fn process_pair(x: Int, y: Int) -> Int { x + y }
+fn process_triple(x: Int, y: Int, z: Int) -> Int { x + y + z }
+
+fn test_similar_functions() {
+    // Each function shows its own signature
+    process(1);
+    process_pair(1, 2);
+    process_triple(1, 2, 3)
+}
+
+// Test 17: Constructor signature help
+type Person is {
+    name: Text,
+    age: Int,
+    email: Text,
+};
+
+fn test_constructor_signature() {
+    // Person { -> shows field hints
+    // Person { name: ..., age: ..., email: ... }
+    // Each field might show type when cursor is in that position
+    let p = Person {
+        name: "Alice",
+        age: 30,
+        email: "alice@example.com",
+    };
+    p
+}
+
+// Test 18: Tuple construction
+fn takes_tuple(t: (Int, Text, Bool)) -> Int {
+    t.0
+}
+
+fn test_tuple_signature() {
+    // takes_tuple( -> takes_tuple(t: (Int, Text, Bool)) -> Int
+    takes_tuple((1, "hello", true))
+}
+
+// Test 19: Documentation in signature help
+/// Calculates the factorial of a number.
+///
+/// # Arguments
+/// * `n` - The number to calculate factorial for. Must be non-negative.
+///
+/// # Returns
+/// The factorial of n.
+///
+/// # Example
+/// ```
+/// factorial(5)  // Returns 120
+/// ```
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+fn test_doc_in_signature() {
+    // factorial( should show documentation alongside signature
+    // Docs help understand parameter meaning
+    factorial(5)
+}
+
+// Test 20: Self parameter in methods
+implement Person {
+    fn introduce(&self) -> Text {
+        f"I am {self.name}"
+    }
+
+    fn have_birthday(&mut self) {
+        self.age = self.age + 1;
+    }
+
+    fn create(name: Text, age: Int, email: Text) -> Self {
+        Self { name: name, age: age, email: email }
+    }
+}
+
+fn test_self_parameter() {
+    let mut p = Person.create("Bob", 25, "bob@example.com");
+
+    // p.introduce( -> introduce(&self) -> Text
+    // &self is implicit receiver, might not be shown as parameter
+    p.introduce();
+
+    // p.have_birthday( -> have_birthday(&mut self)
+    p.have_birthday()
+}
+
+// Test 21: Multiple signature help triggers
+fn multi_param(a: Int, b: Text, c: Float, d: Bool) -> Int {
+    a
+}
+
+fn test_retrigger() {
+    // Signature help should retrigger on each comma:
+    multi_param(
+        1,        // Active: a -> b
+        "text",   // Active: b -> c
+        3.14,     // Active: c -> d
+        true,     // Active: d
+    )
+}
+
+// Test 22: Signature help in complex expressions
+fn test_complex_expression() {
+    let result = add(
+        add(1, 2),    // Inner add( shows add's signature
+        add(3, 4),    // This add( also shows signature
+    );
+    result
+}
+
+// Test 23: Signature help with type inference
+fn infer_return<T>(value: T) -> T {
+    value
+}
+
+fn test_inferred_signature() {
+    // infer_return( -> infer_return<T>(value: T) -> T
+    // T might be shown as inferred type after providing argument
+    let x: Int = infer_return(42);
+    x
+}
+
+// Test 24: Builtin function signatures
+fn test_builtin_signatures() {
+    // print( -> print(message: Text)
+    print("hello");
+
+    // assert( -> assert(condition: Bool)
+    assert(true);
+
+    // panic( -> panic(message: Text) -> !
+    // panic("error");
+    42
+}
+
+// Test 25: Higher-order function signatures
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |a| g(f(a))
+}
+
+fn test_higher_order_signature() {
+    // compose( -> compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C
+    let double = |x: Int| x * 2;
+    let to_text = |x: Int| x.to_text();
+    let composed = compose(double, to_text);
+    composed(5)
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Test 26: Empty parentheses position
+fn test_empty_paren_position() {
+    // Cursor right after ( should show first parameter
+    // Cursor right before ) should show last parameter (or none if complete)
+    add(1, 2)
+}
+
+// Test 27: Signature help after error
+fn test_after_error() {
+    // Even with syntax errors, signature help should work
+    let x = add(1,   // Incomplete, but add's signature shown
+    42
+}
+
+// Test 28: Very long signatures
+fn very_long_signature(
+    parameter_with_long_name_one: Int,
+    parameter_with_long_name_two: Text,
+    parameter_with_long_name_three: Bool,
+    parameter_with_long_name_four: Float,
+    parameter_with_long_name_five: List<Int>,
+) -> Result<Map<Text, Int>, Text> {
+    Ok({})
+}
+
+fn test_long_signature() {
+    // Long signatures should be displayed readably
+    // Might wrap or truncate
+    very_long_signature(1, "text", true, 1.0, [])
+}
+
+// Test 29: Signature help persistence
+fn test_persistence() {
+    // Signature help should remain visible while typing
+    // and update active parameter as user types
+    add(
+        1  // Still shows signature, active on first param
+        ,  // Comma triggers update to second param
+        2  // Still shows signature, active on second param
+    )
+}
+
+// Test 30: Signature help dismissal
+fn test_dismissal() {
+    // Signature help should dismiss when:
+    // - Closing paren is typed
+    // - Cursor moves outside call
+    // - Escape is pressed
+    add(1, 2);  // After ), signature help should dismiss
+    42
+}
+
+// Test 31: Generic constraints in signature
+fn constrained_generic<T>(value: T) -> T
+where T: Clone + Debug
+{
+    value.clone()
+}
+
+fn test_constrained_signature() {
+    // Should show: constrained_generic<T>(value: T) -> T where T: Clone + Debug
+    // Constraints help user understand requirements
+    constrained_generic(42)
+}
+
+// Test 32: Context requirements shown in signature
+fn with_multiple_contexts(x: Int) -> Int using [Logger, DatabaseCtx] {
+    x
+}
+
+context DatabaseCtx {
+    fn query(self, sql: Text) -> List<Int>;
+}
+
+fn test_context_in_signature() {
+    provide Logger = ConsoleLogger;
+    provide DatabaseCtx = MockDb;
+    // Signature shows: with_multiple_contexts(x: Int) -> Int using [Logger, DatabaseCtx]
+    with_multiple_contexts(42)
+}
+
+context MockDb {
+    fn query(self, sql: Text) -> List<Int>;
+}
+
+// Test 33: Throws clause in signature
+fn may_throw(x: Int) throws(ParseError) -> Int {
+    x
+}
+
+type ParseError is {
+    message: Text,
+};
+
+fn test_throws_signature() {
+    // Signature shows: may_throw(x: Int) throws(ParseError) -> Int
+    try {
+        may_throw(42)
+    } recover |e| {
+        0
+    }
+}
+
+// Test 34: Return type with refinement
+fn returns_positive(x: Int) -> Int{> 0} {
+    if x > 0 { x } else { 1 }
+}
+
+fn test_return_refinement_signature() {
+    // Signature shows: returns_positive(x: Int) -> Int{> 0}
+    returns_positive(42)
+}
+
+// Test 35: Signature for chained methods
+fn test_chained_method_signatures() {
+    let list = [1, 2, 3, 4, 5];
+
+    // Each method in chain should show its signature when cursor is in its parens
+    list
+        .map(|x| x * 2)      // map signature
+        .filter(|x| x > 2)   // filter signature
+        .fold(0, |a, x| a + x) // fold signature
+}

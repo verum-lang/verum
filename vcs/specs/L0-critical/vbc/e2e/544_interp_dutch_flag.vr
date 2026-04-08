@@ -1,0 +1,143 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, dutch_flag, three_way_partition, sorting, in_place
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Dutch National Flag problem (Dijkstra):
+// Partition an array of values (0, 1, 2) in-place into three sections:
+//   [0...0 | 1...1 | 2...2]
+// in a single linear scan using three pointers: lo, mid, hi.
+// Also generalises to partition around a pivot using the same approach.
+
+// Three-way partition: rearranges a[0..n) so all 0s come first, then 1s, then 2s.
+// Uses the DNF algorithm with three pointers.
+fn dutch_flag(a: [Int; 16], n: Int) {
+    let mut lo  = 0;
+    let mut mid = 0;
+    let mut hi  = n - 1;
+    while mid <= hi {
+        if a[mid] == 0 {
+            let t = a[lo]; a[lo] = a[mid]; a[mid] = t;
+            lo = lo + 1;
+            mid = mid + 1;
+        } else if a[mid] == 1 {
+            mid = mid + 1;
+        } else {
+            let t = a[mid]; a[mid] = a[hi]; a[hi] = t;
+            hi = hi - 1;
+        }
+    }
+}
+
+// Count occurrences of val in a[0..n).
+fn count_val(a: [Int; 16], n: Int, val: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n {
+        if a[i] == val { cnt = cnt + 1; }
+        i = i + 1;
+    }
+    cnt
+}
+
+// Verify DNF invariant: all 0s before 1s before 2s.
+fn is_dutch_sorted(a: [Int; 16], n: Int) -> Int {
+    let mut phase = 0;   // 0 = in 0s, 1 = in 1s, 2 = in 2s
+    let mut i = 0;
+    while i < n {
+        if a[i] < phase { return 0; }
+        if a[i] > phase { phase = a[i]; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_all_mixed() {
+    // [2,0,1,0,2,1,0,2,1,0]: 4 zeros, 3 ones, 3 twos
+    let mut a = [2, 0, 1, 0, 2, 1, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(a, 10);
+    assert_eq(is_dutch_sorted(a, 10), 1);
+    assert_eq(count_val(a, 10, 0), 4);
+    assert_eq(count_val(a, 10, 1), 3);
+    assert_eq(count_val(a, 10, 2), 3);
+    print("all_mixed: ok");
+}
+
+fn test_already_sorted() {
+    // [0,0,1,1,2,2]: already sorted, should remain sorted.
+    let mut a = [0, 0, 1, 1, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(a, 6);
+    assert_eq(is_dutch_sorted(a, 6), 1);
+    assert_eq(a[0], 0);
+    assert_eq(a[2], 1);
+    assert_eq(a[4], 2);
+    print("already_sorted: ok");
+}
+
+fn test_reverse_sorted() {
+    // [2,2,1,1,0,0]
+    let mut a = [2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(a, 6);
+    assert_eq(is_dutch_sorted(a, 6), 1);
+    assert_eq(count_val(a, 6, 0), 2);
+    assert_eq(count_val(a, 6, 1), 2);
+    assert_eq(count_val(a, 6, 2), 2);
+    print("reverse_sorted: ok");
+}
+
+fn test_single_color_arrays() {
+    // All zeros.
+    let mut a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(a, 8);
+    assert_eq(is_dutch_sorted(a, 8), 1);
+    assert_eq(count_val(a, 8, 0), 8);
+
+    // All twos.
+    let mut b = [2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(b, 6);
+    assert_eq(is_dutch_sorted(b, 6), 1);
+    assert_eq(count_val(b, 6, 2), 6);
+
+    // All ones.
+    let mut c = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(c, 4);
+    assert_eq(is_dutch_sorted(c, 4), 1);
+    assert_eq(count_val(c, 4, 1), 4);
+
+    print("single_color_arrays: ok");
+}
+
+fn test_two_element_cases() {
+    // [2, 0]: should become [0, 2].
+    let mut a = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(a, 2);
+    assert_eq(a[0], 0);
+    assert_eq(a[1], 2);
+
+    // [1, 0]: should become [0, 1].
+    let mut b = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(b, 2);
+    assert_eq(b[0], 0);
+    assert_eq(b[1], 1);
+
+    // [2, 1, 0]: should become [0, 1, 2].
+    let mut c = [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(c, 3);
+    assert_eq(c[0], 0);
+    assert_eq(c[1], 1);
+    assert_eq(c[2], 2);
+
+    print("two_element_cases: ok");
+}
+
+fn main() -> Int {
+    test_all_mixed();
+    test_already_sorted();
+    test_reverse_sorted();
+    test_single_color_arrays();
+    test_two_element_cases();
+    print("[OK] 544_interp_dutch_flag");
+    0
+}

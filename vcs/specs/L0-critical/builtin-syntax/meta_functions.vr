@@ -1,0 +1,51 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: builtin-syntax, meta, compile-time
+// @timeout: 5000
+//
+// Tests meta-level functions with @ prefix.
+// Spec: grammar/verum.ebnf Section 2.20.6 - Meta-Level Functions
+
+// Compile-time constant evaluation
+const LOOKUP_TABLE: [Int; 10] = @const compute_table();
+
+fn compute_table() -> [Int; 10] {
+    [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
+}
+
+fn main() -> Int {
+    // Source location meta functions
+    let file: Text = @file;
+    let line: Int = @line;
+    let column: Int = @column;
+
+    print(f"Running from {file}:{line}:{column}");
+
+    // Configuration check (NOT cfg!())
+    if @cfg(debug_mode) {
+        print("Debug mode enabled");
+    }
+
+    // Module and function names
+    let module_name: Text = @module;
+    let func_name: Text = @function;
+
+    print(f"In module: {module_name}, function: {func_name}");
+
+    // Compile-time string operations
+    let combined: Text = @concat("Hello", ", ", "World");
+    let stringified: Text = @stringify(some_identifier);
+
+    0
+}
+
+// Example with compile-time error (commented out as it would fail)
+// fn invalid_config() {
+//     @error("This configuration is not supported");
+// }
+
+// Example with compile-time warning
+fn deprecated_api() {
+    @warning("This API is deprecated, use new_api() instead");
+}

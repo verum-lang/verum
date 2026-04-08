@@ -1,0 +1,162 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, imports, rename, alias
+
+/// Import renaming - importing items with custom local names.
+/// Uses type aliases and local bindings to rename imports.
+
+// Module definitions
+module io_module {
+    pub type IoError is
+        | NotFound
+        | PermissionDenied
+        | UnexpectedEof
+        | Other(Text);
+
+    pub fn read_file(path: &Text) -> Result<Bytes, IoError> {
+        Ok(Bytes.empty())
+    }
+}
+
+module net_module {
+    pub type NetError is
+        | ConnectionRefused
+        | Timeout
+        | DnsError
+        | Other(Text);
+
+    pub fn connect(addr: &Text) -> Result<Connection, NetError> {
+        Ok(Connection { addr: addr.clone() })
+    }
+
+    pub type Connection is {
+        addr: Text
+    };
+}
+
+module crypto {
+    pub module hash {
+        pub fn sha256(data: &Bytes) -> Bytes {
+            Bytes.empty()
+        }
+    }
+}
+
+module long_names {
+    pub module deeply {
+        pub module nested {
+            pub type VeryLongTypeName is {
+                field1: Int,
+                field2: Text
+            };
+        }
+    }
+}
+
+module database {
+    pub type DbConnection is {
+        url: Text,
+        pool_size: Int
+    };
+
+    pub type Transaction is {
+        id: Int,
+        conn_url: Text
+    };
+
+    pub type Query is {
+        sql: Text,
+        params: List<Any>
+    };
+
+    pub type DbResult<T> is
+        | Success(T)
+        | Failure(Text);
+}
+
+// Consumer that uses renamed type aliases
+module consumer {
+    mount io_module.{IoError, read_file};
+    mount net_module.{NetError, connect};
+
+    pub fn process() -> Result<(), Text> {
+        let file_result = read_file("config.txt");
+        match file_result {
+            Err(_) => return Err("File error"),
+            Ok(_) => {}
+        }
+
+        let net_result = connect("api.example.com:443");
+        match net_result {
+            Err(_) => return Err("Network error"),
+            Ok(_) => {}
+        }
+
+        Ok(())
+    }
+
+    pub fn classify_io_error(e: IoError) -> Text =
+        match e {
+            NotFound => "not found",
+            PermissionDenied => "permission denied",
+            UnexpectedEof => "unexpected eof",
+            Other(msg) => msg
+        }
+
+    pub fn classify_net_error(e: NetError) -> Text =
+        match e {
+            ConnectionRefused => "connection refused",
+            Timeout => "timeout",
+            DnsError => "dns error",
+            Other(msg) => msg
+        }
+}
+
+// Consumer with type aliases for short names
+module short_names {
+    mount long_names.deeply.nested.VeryLongTypeName;
+    mount database.{DbConnection, Transaction, Query, DbResult};
+
+    // Type aliases for brevity
+    type Short = VeryLongTypeName;
+    type Conn = DbConnection;
+    type Tx = Transaction;
+    type Q = Query;
+
+    pub fn create_short() -> Short {
+        Short { field1: 42, field2: "test" }
+    }
+
+    pub fn create_connection(url: Text) -> Conn {
+        Conn { url, pool_size: 10 }
+    }
+
+    pub fn make_query(sql: Text) -> Q {
+        Q { sql, params: List.new() }
+    }
+}
+
+fn main() {
+    mount consumer.{process, classify_io_error, classify_net_error};
+    mount short_names.{create_short, create_connection, make_query};
+
+    // Test process
+    let result = process();
+
+    // Test short names
+    let s = create_short();
+    assert(s.field1 == 42);
+
+    let conn = create_connection("postgres://localhost/db");
+    assert(conn.pool_size == 10);
+
+    let q = make_query("SELECT 1");
+    assert(q.sql == "SELECT 1");
+
+    // Test error classification
+    mount io_module.IoError;
+    mount net_module.NetError;
+    assert(classify_io_error(NotFound) == "not found");
+    assert(classify_net_error(Timeout) == "timeout");
+}

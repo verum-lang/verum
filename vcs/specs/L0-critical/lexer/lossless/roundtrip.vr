@@ -1,0 +1,41 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: lexer, lossless, roundtrip
+// @description: Test that source can be perfectly reconstructed from tokens (lossless roundtrip)
+
+// This file tests that when parsed losslessly and reconstructed,
+// the output exactly matches the original source byte-for-byte.
+
+// Complex formatting that must be preserved:
+type User is {
+    id:     UserId,    // aligned columns
+    name:   Text,      // with comments
+    email:  Email,     // on each line
+};
+
+// Various indentation styles
+fn tabs_and_spaces() {
+	let tab_indented = 1;
+    let space_indented = 2;
+  let two_space = 3;
+}
+
+// Comments in various positions
+fn comments_everywhere(/* param comment */ x: Int /* after type */) -> Int /* before brace */ {
+    x + 1 // inline
+    /* block in expression */
+}
+
+// Unicode in comments
+// Japanese: こんにちは
+// Emoji: 🚀 🎉 ✨
+// Greek: Γειά σου
+
+// Empty lines with spaces
+
+
+
+
+// Trailing content
+fn last() { }// no space before comment

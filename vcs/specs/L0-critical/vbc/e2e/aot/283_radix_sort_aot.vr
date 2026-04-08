@@ -1,0 +1,237 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, radix-sort, algorithm, sorting
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for LSD radix sort on integer arrays with digit extraction
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int, len: Int };
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: n }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 }
+    else if i == 2 { a.d2 } else if i == 3 { a.d3 }
+    else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 },
+        len: a.len
+    }
+}
+
+// Extract digit at given position (base 10)
+// digit_pos: 0 = ones, 1 = tens, 2 = hundreds, ...
+fn extract_digit(val: Int, digit_pos: Int) -> Int {
+    let mut divisor = 1;
+    let mut p = 0;
+    while p < digit_pos {
+        divisor = divisor * 10;
+        p = p + 1;
+    }
+    (val / divisor) % 10
+}
+
+// Find maximum value in array
+fn arr8_max(a: Arr8) -> Int {
+    let mut mx = arr8_get(a, 0);
+    let mut i = 1;
+    while i < a.len {
+        let v = arr8_get(a, i);
+        if v > mx { mx = v; }
+        i = i + 1;
+    }
+    mx
+}
+
+// Count number of digits in a number
+fn num_digits(val: Int) -> Int {
+    if val == 0 { return 1; }
+    let mut n = val;
+    let mut d = 0;
+    while n > 0 {
+        d = d + 1;
+        n = n / 10;
+    }
+    d
+}
+
+// Counting sort by a specific digit position (stable sort)
+// Uses 10 buckets (digits 0-9), but we only have Arr8 so limit to bucket counting
+// We'll use a 10-element count array as two Arr8s (first 8 + 2 extra fields)
+type Count10 is { c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int, c6: Int, c7: Int, c8: Int, c9: Int };
+
+fn count10_new() -> Count10 {
+    Count10 { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, c8: 0, c9: 0 }
+}
+
+fn count10_get(c: Count10, i: Int) -> Int {
+    if i == 0 { c.c0 } else if i == 1 { c.c1 }
+    else if i == 2 { c.c2 } else if i == 3 { c.c3 }
+    else if i == 4 { c.c4 } else if i == 5 { c.c5 }
+    else if i == 6 { c.c6 } else if i == 7 { c.c7 }
+    else if i == 8 { c.c8 } else { c.c9 }
+}
+
+fn count10_set(c: Count10, i: Int, v: Int) -> Count10 {
+    Count10 {
+        c0: if i == 0 { v } else { c.c0 }, c1: if i == 1 { v } else { c.c1 },
+        c2: if i == 2 { v } else { c.c2 }, c3: if i == 3 { v } else { c.c3 },
+        c4: if i == 4 { v } else { c.c4 }, c5: if i == 5 { v } else { c.c5 },
+        c6: if i == 6 { v } else { c.c6 }, c7: if i == 7 { v } else { c.c7 },
+        c8: if i == 8 { v } else { c.c8 }, c9: if i == 9 { v } else { c.c9 }
+    }
+}
+
+// Stable counting sort by digit at digit_pos
+fn sort_by_digit(a: Arr8, digit_pos: Int) -> Arr8 {
+    // Count occurrences of each digit
+    let mut counts = count10_new();
+    let mut i = 0;
+    while i < a.len {
+        let d = extract_digit(arr8_get(a, i), digit_pos);
+        counts = count10_set(counts, d, count10_get(counts, d) + 1);
+        i = i + 1;
+    }
+
+    // Compute prefix sums (starting positions)
+    let mut prefix = count10_new();
+    prefix = count10_set(prefix, 0, 0);
+    let mut d = 1;
+    while d <= 9 {
+        prefix = count10_set(prefix, d, count10_get(prefix, d - 1) + count10_get(counts, d - 1));
+        d = d + 1;
+    }
+
+    // Place elements in output (stable: left to right)
+    let mut output = arr8_new(a.len);
+    i = 0;
+    while i < a.len {
+        let digit = extract_digit(arr8_get(a, i), digit_pos);
+        let pos = count10_get(prefix, digit);
+        output = arr8_set(output, pos, arr8_get(a, i));
+        prefix = count10_set(prefix, digit, pos + 1);
+        i = i + 1;
+    }
+    output
+}
+
+// Full LSD radix sort
+fn radix_sort(a: Arr8) -> Arr8 {
+    if a.len <= 1 { return a; }
+    let mx = arr8_max(a);
+    let digits = num_digits(mx);
+    let mut result = a;
+    let mut d = 0;
+    while d < digits {
+        result = sort_by_digit(result, d);
+        d = d + 1;
+    }
+    result
+}
+
+fn is_sorted(a: Arr8) -> Bool {
+    let mut i = 1;
+    while i < a.len {
+        if arr8_get(a, i) < arr8_get(a, i - 1) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_extract_digit() {
+    assert_eq(extract_digit(12345, 0), 5);
+    assert_eq(extract_digit(12345, 1), 4);
+    assert_eq(extract_digit(12345, 2), 3);
+    assert_eq(extract_digit(12345, 3), 2);
+    assert_eq(extract_digit(12345, 4), 1);
+    assert_eq(extract_digit(7, 0), 7);
+    assert_eq(extract_digit(7, 1), 0);
+    assert_eq(extract_digit(100, 2), 1);
+}
+
+fn test_num_digits() {
+    assert_eq(num_digits(0), 1);
+    assert_eq(num_digits(5), 1);
+    assert_eq(num_digits(42), 2);
+    assert_eq(num_digits(100), 3);
+    assert_eq(num_digits(99999), 5);
+}
+
+fn test_sort_single_digit() {
+    // All single digit: just sort by ones
+    let mut a = Arr8 { d0: 5, d1: 3, d2: 8, d3: 1, d4: 9, d5: 2, d6: 7, d7: 4, len: 8 };
+    let sorted = radix_sort(a);
+    assert_eq(is_sorted(sorted), true);
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 7), 9);
+}
+
+fn test_sort_two_digit() {
+    let a = Arr8 { d0: 45, d1: 12, d2: 78, d3: 23, d4: 56, d5: 34, d6: 0, d7: 0, len: 6 };
+    let sorted = radix_sort(a);
+    assert_eq(is_sorted(sorted), true);
+    assert_eq(arr8_get(sorted, 0), 12);
+    assert_eq(arr8_get(sorted, 1), 23);
+    assert_eq(arr8_get(sorted, 2), 34);
+    assert_eq(arr8_get(sorted, 3), 45);
+    assert_eq(arr8_get(sorted, 4), 56);
+    assert_eq(arr8_get(sorted, 5), 78);
+}
+
+fn test_sort_three_digit() {
+    let a = Arr8 { d0: 329, d1: 457, d2: 657, d3: 839, d4: 436, d5: 720, d6: 355, d7: 0, len: 7 };
+    let sorted = radix_sort(a);
+    assert_eq(is_sorted(sorted), true);
+    assert_eq(arr8_get(sorted, 0), 329);
+    assert_eq(arr8_get(sorted, 6), 839);
+}
+
+fn test_sort_already_sorted() {
+    let a = Arr8 { d0: 10, d1: 20, d2: 30, d3: 40, d4: 0, d5: 0, d6: 0, d7: 0, len: 4 };
+    let sorted = radix_sort(a);
+    assert_eq(arr8_get(sorted, 0), 10);
+    assert_eq(arr8_get(sorted, 3), 40);
+}
+
+fn test_sort_reverse() {
+    let a = Arr8 { d0: 50, d1: 40, d2: 30, d3: 20, d4: 10, d5: 0, d6: 0, d7: 0, len: 5 };
+    let sorted = radix_sort(a);
+    assert_eq(is_sorted(sorted), true);
+    assert_eq(arr8_get(sorted, 0), 10);
+    assert_eq(arr8_get(sorted, 4), 50);
+}
+
+fn test_sort_duplicates() {
+    let a = Arr8 { d0: 33, d1: 11, d2: 33, d3: 22, d4: 11, d5: 0, d6: 0, d7: 0, len: 5 };
+    let sorted = radix_sort(a);
+    assert_eq(is_sorted(sorted), true);
+    assert_eq(arr8_get(sorted, 0), 11);
+    assert_eq(arr8_get(sorted, 1), 11);
+    assert_eq(arr8_get(sorted, 2), 22);
+    assert_eq(arr8_get(sorted, 3), 33);
+    assert_eq(arr8_get(sorted, 4), 33);
+}
+
+fn main() -> Int {
+    test_extract_digit();
+    test_num_digits();
+    test_sort_single_digit();
+    test_sort_two_digit();
+    test_sort_three_digit();
+    test_sort_already_sorted();
+    test_sort_reverse();
+    test_sort_duplicates();
+    print("[OK] 283_radix_sort_aot");
+    0
+}

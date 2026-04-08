@@ -1,0 +1,163 @@
+// @test: run
+// @expected-stdout: Basic result: 42\nWith params: 15\nGeneric result: hello\nMultiple awaits: 60\nAsync method: 100\nNested async: 200\nRecursive result: 120
+// @tier: 0
+// @level: L2
+// @tags: async, function, basic
+// @description: Comprehensive async function definition and invocation patterns
+
+// Basic async function
+async fn compute() -> Int {
+    42
+}
+
+// Async function with parameters
+async fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Async function with generic type parameter
+async fn identity<T>(value: T) -> T {
+    value
+}
+
+// Async function returning Result
+async fn fallible_compute(should_fail: Bool) -> Result<Int, Error> {
+    if should_fail {
+        Err(Error.new("computation failed"))
+    } else {
+        Ok(42)
+    }
+}
+
+// Async function with multiple await points
+async fn multi_step() -> Int {
+    let a = compute().await;      // 42
+    let b = add(10, 8).await;     // 18
+    a + b                          // 60
+}
+
+// Async function with early return
+async fn early_return(condition: Bool) -> Int {
+    if condition {
+        return 100;
+    }
+    compute().await
+}
+
+// Async function calling other async functions
+async fn composed() -> Int {
+    let x = compute().await;
+    let y = add(x, x).await;
+    y
+}
+
+// Async function with loop
+async fn sum_async(numbers: List<Int>) -> Int {
+    let mut total = 0;
+    for n in numbers {
+        total = add(total, n).await;
+    }
+    total
+}
+
+// Async function with pattern matching
+async fn process_option(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(value) => value * 2,
+        None => 0,
+    }
+}
+
+// Async method on struct
+type AsyncProcessor is {
+    base: Int,
+};
+
+implement AsyncProcessor {
+    async fn process(self, input: Int) -> Int {
+        add(self.base, input).await
+    }
+
+    async fn process_all(self, inputs: List<Int>) -> List<Int> {
+        let mut results = [];
+        for input in inputs {
+            results.push(self.process(input).await);
+        }
+        results
+    }
+}
+
+// Nested async function definitions
+async fn outer() -> Int {
+    async fn inner() -> Int {
+        100
+    }
+
+    let x = inner().await;
+    x * 2
+}
+
+// Recursive async function
+async fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        let sub = factorial(n - 1).await;
+        n * sub
+    }
+}
+
+// Async function with references
+async fn increment(value: &mut Int) {
+    *value += 1;
+}
+
+// Async function returning tuple
+async fn compute_pair() -> (Int, Text) {
+    (42, "answer")
+}
+
+// Async function with default parameters
+async fn with_default(a: Int, b: Int = 10) -> Int {
+    a + b
+}
+
+// Async function with where clause
+async fn constrained<T: Clone + Send>(value: T) -> T {
+    value.clone()
+}
+
+async fn main() {
+    // Async function expression (stored in variable)
+    let async_add = async |a: Int, b: Int| -> Int {
+        a + b
+    };
+    // Basic invocation
+    let result = compute().await;
+    println(f"Basic result: {result}");
+
+    // With parameters
+    let sum = add(10, 5).await;
+    println(f"With params: {sum}");
+
+    // Generic
+    let text = identity("hello").await;
+    println(f"Generic result: {text}");
+
+    // Multiple awaits
+    let multi = multi_step().await;
+    println(f"Multiple awaits: {multi}");
+
+    // Method call
+    let processor = AsyncProcessor { base: 50 };
+    let processed = processor.process(50).await;
+    println(f"Async method: {processed}");
+
+    // Nested
+    let nested = outer().await;
+    println(f"Nested async: {nested}");
+
+    // Recursive
+    let fact = factorial(5).await;
+    println(f"Recursive result: {fact}");
+}

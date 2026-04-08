@@ -1,0 +1,74 @@
+// @test: parse-recover
+// @tier: 0
+// @level: L0
+// @tags: parser, error-recovery, delimiters, braces, parens, brackets
+// @expect: errors
+// @description: Tests error recovery for unclosed delimiters (braces, parens, brackets).
+//              Parser should insert synthetic closing tokens and create ERROR nodes.
+
+// Test 1: Unclosed parenthesis in expression
+// Parser should auto-insert ')' at expression boundary
+fn test_unclosed_paren() {
+    let x = (1 + 2;
+    let y = 3;
+    x + y
+}
+
+// Test 2: Unclosed bracket in array literal
+// Parser should recover at statement boundary
+fn test_unclosed_bracket() {
+    let arr = [1, 2, 3;
+    let other = 4;
+    other
+}
+
+// Test 3: Unclosed brace in block
+// Parser should synchronize at next function definition
+fn test_unclosed_brace() {
+    let result = {
+        let inner = 42;
+        inner
+    // missing closing brace
+}
+
+fn next_function() -> Int {
+    100
+}
+
+// Test 4: Nested unclosed delimiters
+// Parser should track delimiter stack correctly
+fn test_nested_unclosed() {
+    let complex = ([{
+        let x = 1;
+        x
+    // missing }])
+}
+
+fn after_nested() -> Int {
+    200
+}
+
+// Test 5: Unclosed angle brackets in generics
+fn test_unclosed_generics() {
+    let list: List<Int = [];
+    let map: Map<Text, Int> = {};
+    list
+}
+
+// Test 6: Unclosed paren in function call
+fn test_unclosed_call() {
+    print("hello";
+    print("world");
+}
+
+// Test 7: Unclosed brace in record literal
+fn test_unclosed_record() {
+    let point = Point { x: 1, y: 2;
+    let other = Point { x: 3, y: 4 };
+    point
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};

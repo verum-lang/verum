@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, return, invalid, error
+// @description: Test return with invalid expression (comma)
+// @expected-error: E048
+
+fn test() -> Int {
+    return ,;
+}

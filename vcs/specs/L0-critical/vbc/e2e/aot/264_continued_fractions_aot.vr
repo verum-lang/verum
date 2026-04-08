@@ -1,0 +1,205 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, continued, fractions, math
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for continued fraction representations
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+// Continued fraction: [a0; a1, a2, ..., a7] (up to 8 terms)
+type CF is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    len: Int
+};
+
+fn cf_get(cf: CF, i: Int) -> Int {
+    if i == 0 { cf.a0 } else if i == 1 { cf.a1 }
+    else if i == 2 { cf.a2 } else if i == 3 { cf.a3 }
+    else if i == 4 { cf.a4 } else if i == 5 { cf.a5 }
+    else if i == 6 { cf.a6 } else { cf.a7 }
+}
+
+// Rational number (numerator/denominator)
+type Rat is { num: Int, den: Int };
+
+fn rat_reduce(num: Int, den: Int) -> Rat {
+    if den == 0 { return Rat { num: num, den: 0 }; }
+    let g = gcd(abs_val(num), abs_val(den));
+    let sign = if den < 0 { -1 } else { 1 };
+    Rat { num: sign * num / g, den: sign * den / g }
+}
+
+// Convert CF to rational number (evaluate from right)
+fn cf_to_rat(cf: CF) -> Rat {
+    let mut num = cf_get(cf, cf.len - 1);
+    let mut den = 1;
+    let mut i = cf.len - 2;
+    while i >= 0 {
+        // current = a[i] + 1/(num/den) = a[i] + den/num = (a[i]*num + den)/num
+        let new_num = cf_get(cf, i) * num + den;
+        let new_den = num;
+        num = new_num;
+        den = new_den;
+        i = i - 1;
+    }
+    rat_reduce(num, den)
+}
+
+// Convert rational p/q to CF
+fn rat_to_cf(p: Int, q: Int) -> CF {
+    let mut cf = CF { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 0 };
+    let mut a = abs_val(p);
+    let mut b = abs_val(q);
+    let mut idx = 0;
+    while b != 0 && idx < 8 {
+        let quotient = a / b;
+        cf = CF {
+            a0: if idx == 0 { quotient } else { cf.a0 },
+            a1: if idx == 1 { quotient } else { cf.a1 },
+            a2: if idx == 2 { quotient } else { cf.a2 },
+            a3: if idx == 3 { quotient } else { cf.a3 },
+            a4: if idx == 4 { quotient } else { cf.a4 },
+            a5: if idx == 5 { quotient } else { cf.a5 },
+            a6: if idx == 6 { quotient } else { cf.a6 },
+            a7: if idx == 7 { quotient } else { cf.a7 },
+            len: idx + 1
+        };
+        let remainder = a % b;
+        a = b;
+        b = remainder;
+        idx = idx + 1;
+    }
+    cf
+}
+
+// Convergents (h[k]/k[k]) using recurrence
+fn convergent_num(cf: CF, n: Int) -> Int {
+    if n == 0 { return cf.a0; }
+    if n == 1 { return cf.a1 * cf.a0 + 1; }
+    let mut h_prev2 = 1;
+    let mut h_prev1 = cf.a0;
+    let mut i = 1;
+    while i <= n {
+        let h = cf_get(cf, i) * h_prev1 + h_prev2;
+        h_prev2 = h_prev1;
+        h_prev1 = h;
+        i = i + 1;
+    }
+    h_prev1
+}
+
+fn convergent_den(cf: CF, n: Int) -> Int {
+    if n == 0 { return 1; }
+    if n == 1 { return cf.a1; }
+    let mut k_prev2 = 0;
+    let mut k_prev1 = 1;
+    let mut i = 1;
+    while i <= n {
+        let k = cf_get(cf, i) * k_prev1 + k_prev2;
+        k_prev2 = k_prev1;
+        k_prev1 = k;
+        i = i + 1;
+    }
+    k_prev1
+}
+
+fn test_simple_fractions() {
+    // 3/2 = [1; 2]
+    let cf = rat_to_cf(3, 2);
+    assert_eq(cf.a0, 1);
+    assert_eq(cf.a1, 2);
+    assert_eq(cf.len, 2);
+
+    let r = cf_to_rat(cf);
+    assert_eq(r.num, 3);
+    assert_eq(r.den, 2);
+}
+
+fn test_integer() {
+    // 5/1 = [5]
+    let cf = rat_to_cf(5, 1);
+    assert_eq(cf.a0, 5);
+    assert_eq(cf.len, 1);
+
+    let r = cf_to_rat(cf);
+    assert_eq(r.num, 5);
+    assert_eq(r.den, 1);
+}
+
+fn test_golden_ratio_approx() {
+    // 8/5 ≈ golden ratio, CF = [1; 1, 1, 2] (Fibonacci fraction)
+    let cf = rat_to_cf(8, 5);
+    assert_eq(cf.a0, 1);
+    assert_eq(cf.a1, 1);
+    assert_eq(cf.a2, 1);
+    assert_eq(cf.a3, 2);
+    assert_eq(cf.len, 4);
+
+    let r = cf_to_rat(cf);
+    assert_eq(r.num, 8);
+    assert_eq(r.den, 5);
+}
+
+fn test_pi_approx() {
+    // 355/113 ≈ pi, CF = [3; 7, 16]
+    let cf = rat_to_cf(355, 113);
+    assert_eq(cf.a0, 3);
+    assert_eq(cf.a1, 7);
+    assert_eq(cf.a2, 16);
+    assert_eq(cf.len, 3);
+
+    let r = cf_to_rat(cf);
+    assert_eq(r.num, 355);
+    assert_eq(r.den, 113);
+}
+
+fn test_convergents() {
+    // CF for 355/113 = [3; 7, 16]
+    let cf = CF { a0: 3, a1: 7, a2: 16, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+
+    // Convergent 0: 3/1
+    assert_eq(convergent_num(cf, 0), 3);
+    assert_eq(convergent_den(cf, 0), 1);
+
+    // Convergent 1: (7*3+1)/(7) = 22/7
+    assert_eq(convergent_num(cf, 1), 22);
+    assert_eq(convergent_den(cf, 1), 7);
+
+    // Convergent 2: (16*22+3)/(16*7+1) = 355/113
+    assert_eq(convergent_num(cf, 2), 355);
+    assert_eq(convergent_den(cf, 2), 113);
+}
+
+fn test_roundtrip() {
+    // Test various fractions
+    let cf1 = rat_to_cf(7, 3);
+    let r1 = cf_to_rat(cf1);
+    assert_eq(r1.num, 7);
+    assert_eq(r1.den, 3);
+
+    let cf2 = rat_to_cf(22, 7);
+    let r2 = cf_to_rat(cf2);
+    assert_eq(r2.num, 22);
+    assert_eq(r2.den, 7);
+}
+
+fn main() -> Int {
+    test_simple_fractions();
+    test_integer();
+    test_golden_ratio_approx();
+    test_pi_approx();
+    test_convergents();
+    test_roundtrip();
+    print("[OK] 264_continued_fractions_aot");
+    0
+}

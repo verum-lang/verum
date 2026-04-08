@@ -1,0 +1,20 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M407
+// @description: Tests invalid token tree errors in macro processing (double splice)
+// @tags: meta-system, quote, hygiene, tokens
+
+// M407 is triggered when using double-splice $$ which attempts to escape stages
+// Double-splice is not valid at the top level of a quote
+
+meta fn double_splice_error() -> TokenStream {
+    let x = 42;
+    quote {
+        // ERROR M407: double-splice $$ attempts to escape the current stage
+        $$x
+    }
+}
+
+fn main() {
+    @const assert(true);
+}

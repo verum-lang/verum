@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, function-parameters
+
+/// Refined types in function parameters -- functions that require
+/// their arguments to satisfy specific constraints.
+
+type NonZero is Int{!= 0};
+type Positive is Int{> 0};
+type Natural is Int{>= 0};
+type Percentage is Int{>= 0, <= 100};
+
+// Basic refined parameter
+fn safe_divide(a: Int, b: NonZero) -> Int {
+    a / b
+}
+
+// Multiple refined parameters
+fn safe_mod(a: Int, b: Positive) -> Natural {
+    a % b
+}
+
+// Inline refinement in parameter position
+fn sqrt_safe(x: Float{>= 0.0}) -> Float {
+    x.sqrt()
+}
+
+fn log_safe(x: Float{> 0.0}) -> Float {
+    x.ln()
+}
+
+// Dependent parameter: second depends on first
+fn safe_index<T>(arr: List<T>, idx: Int{>= 0}) -> Maybe<T> {
+    if idx < arr.len() {
+        Some(arr[idx])
+    } else {
+        None
+    }
+}
+
+// Sigma-style inline parameter
+fn weighted_avg(
+    a: Float,
+    b: Float,
+    weight: w: Float where w >= 0.0 && w <= 1.0
+) -> Float {
+    a * weight + b * (1.0 - weight)
+}
+
+// Refinement propagation: output inherits constraints
+fn double_positive(x: Positive) -> Positive {
+    x * 2  // Positive * 2 is still positive
+}
+
+// Percentage operations
+fn scale(value: Float, pct: Percentage) -> Float {
+    value * (pct as Float) / 100.0
+}
+
+fn blend(a: Float, b: Float, pct: Percentage) -> Float {
+    let ratio = (pct as Float) / 100.0;
+    a * ratio + b * (1.0 - ratio)
+}
+
+fn main() {
+    let d = safe_divide(100, 7);
+    assert(d == 14);
+
+    let r = sqrt_safe(16.0);
+    assert(r == 4.0);
+
+    let avg = weighted_avg(10.0, 20.0, 0.3);
+    assert(avg > 0.0);
+
+    let dp = double_positive(5);
+    assert(dp == 10);
+
+    let s = scale(200.0, 50);
+    assert(s == 100.0);
+}

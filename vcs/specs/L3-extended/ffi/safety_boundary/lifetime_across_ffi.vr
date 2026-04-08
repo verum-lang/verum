@@ -1,0 +1,132 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, safety, lifetimes
+// @description: Tests lifetime management patterns across FFI boundaries
+
+/// ============================================================
+/// LIFETIME MANAGEMENT ACROSS FFI
+/// ============================================================
+///
+/// FFI boundaries break Verumps lifetime tracking. This file
+/// demonstrates patterns for safe lifetime management when
+/// crossing between Verum and C code.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_int is i32;
+type c_size is usize;
+
+type FfiError is
+    | RegistrationFailed
+    | InvalidPointer;
+
+// ------------------------------------------------------------
+// FFI Declarations
+// ------------------------------------------------------------
+
+ffi register_callback_ffi {
+    @extern("C")
+    fn register_callback(
+        callback: *const c_void,
+        data: *const c_void
+    ) -> c_int;
+}
+
+ffi unregister_callback_ffi {
+    @extern("C")
+    fn unregister_callback(id: c_int);
+}
+
+ffi invoke_callback_ffi {
+    @extern("C")
+    fn invoke_callback(id: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Buffer Types for FFI
+// ------------------------------------------------------------
+
+/// Slice passed to FFI with pointer and length
+@repr(C)
+type FfiSlice is {
+    ptr: *const c_void,
+    len: c_size,
+};
+
+/// Mutable slice for FFI
+@repr(C)
+type FfiSliceMut is {
+    ptr: *mut c_void,
+    len: c_size,
+};
+
+// ------------------------------------------------------------
+// Reference Counting for FFI Objects
+// ------------------------------------------------------------
+
+/// Reference-counted FFI object inner structure
+type RcFfiInner is {
+    ref_count: c_int,
+    value: c_int,
+};
+
+/// Reference-counted FFI object
+type RcFfi is {
+    ptr: *mut RcFfiInner,
+};
+
+// ------------------------------------------------------------
+// Pinned Data for FFI
+// ------------------------------------------------------------
+
+/// Pinned heap allocation for FFI (address won't change)
+type PinnedHeap is {
+    ptr: *mut c_int,
+};
+
+// ------------------------------------------------------------
+// Async Lifetime Context
+// ------------------------------------------------------------
+
+/// Context for async FFI operations
+type AsyncContext is {
+    data: *const c_void,
+    completed: Bool,
+};
+
+// ------------------------------------------------------------
+// Callback Registration Types
+// ------------------------------------------------------------
+
+/// Scoped callback registration (lifetime-bounded)
+type ScopedCallback is {
+    id: c_int,
+    data_ptr: *const c_void,
+};
+
+// ------------------------------------------------------------
+// Borrow Guard Types
+// ------------------------------------------------------------
+
+/// Borrow guard that tracks borrowed data lifetime
+type BorrowGuard is {
+    ptr: *const c_void,
+};
+
+/// Mutable borrow guard
+type BorrowGuardMut is {
+    ptr: *mut c_void,
+};
+
+// ------------------------------------------------------------
+// Main Test
+// ------------------------------------------------------------
+
+fn main() {
+    // Test that FFI declarations and types compile
+    print("Lifetime across FFI type definitions passed");
+}

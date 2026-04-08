@@ -1,0 +1,154 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, chinese, remainder, number-theory
+// @timeout: 10000
+
+// Chinese Remainder Theorem and related number theory
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    a / gcd(a, b) * b
+}
+
+// Extended GCD: returns gcd, and modifies two "output" values
+// Since we can't return multiple values easily, compute mod_inverse instead
+fn mod_inverse(a: Int, m: Int) -> Int {
+    // Find x such that a*x ≡ 1 (mod m)
+    let mut old_r = a;
+    let mut r = m;
+    let mut old_s = 1;
+    let mut s = 0;
+    while r != 0 {
+        let q = old_r / r;
+        let tmp_r = r;
+        r = old_r - q * r;
+        old_r = tmp_r;
+        let tmp_s = s;
+        s = old_s - q * s;
+        old_s = tmp_s;
+    }
+    // old_s might be negative
+    let result = old_s % m;
+    if result < 0 { result + m } else { result }
+}
+
+// CRT for two congruences: x ≡ r1 (mod m1), x ≡ r2 (mod m2)
+// Returns x mod (m1*m2)
+fn crt2(r1: Int, m1: Int, r2: Int, m2: Int) -> Int {
+    // x = r1 + m1 * ((r2 - r1) * mod_inverse(m1, m2) % m2)
+    let diff = ((r2 - r1) % m2 + m2) % m2;
+    let inv = mod_inverse(m1, m2);
+    let k = diff * inv % m2;
+    r1 + m1 * k
+}
+
+// Solve system of 3 congruences
+fn crt3(r1: Int, m1: Int, r2: Int, m2: Int, r3: Int, m3: Int) -> Int {
+    let x12 = crt2(r1, m1, r2, m2);
+    let m12 = m1 * m2;
+    crt2(x12, m12, r3, m3)
+}
+
+// Euler's totient function
+fn euler_phi(n: Int) -> Int {
+    let mut result = n;
+    let mut p = 2;
+    let mut tmp = n;
+    while p * p <= tmp {
+        if tmp % p == 0 {
+            while tmp % p == 0 {
+                tmp = tmp / p;
+            }
+            result = result - result / p;
+        }
+        p = p + 1;
+    }
+    if tmp > 1 {
+        result = result - result / tmp;
+    }
+    result
+}
+
+// Modular exponentiation
+fn mod_exp(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = result * b % modulus;
+        }
+        b = b * b % modulus;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_mod_inverse() -> Int {
+    // 3 * x ≡ 1 (mod 7) -> x = 5 (3*5=15≡1)
+    assert_eq(mod_inverse(3, 7), 5);
+    // 2 * x ≡ 1 (mod 5) -> x = 3 (2*3=6≡1)
+    assert_eq(mod_inverse(2, 5), 3);
+    1
+}
+
+fn test_crt2() -> Int {
+    // x ≡ 2 (mod 3), x ≡ 3 (mod 5)
+    // x = 8 (8%3=2, 8%5=3)
+    let x = crt2(2, 3, 3, 5);
+    assert_eq(x % 3, 2);
+    assert_eq(x % 5, 3);
+    assert_eq(x, 8);
+    1
+}
+
+fn test_crt3() -> Int {
+    // x ≡ 2 (mod 3), x ≡ 3 (mod 5), x ≡ 2 (mod 7)
+    // x = 23 (23%3=2, 23%5=3, 23%7=2)
+    let x = crt3(2, 3, 3, 5, 2, 7);
+    assert_eq(x % 3, 2);
+    assert_eq(x % 5, 3);
+    assert_eq(x % 7, 2);
+    assert_eq(x, 23);
+    1
+}
+
+fn test_euler_phi() -> Int {
+    assert_eq(euler_phi(1), 1);
+    assert_eq(euler_phi(2), 1);
+    assert_eq(euler_phi(6), 2);    // 1, 5
+    assert_eq(euler_phi(12), 4);   // 1, 5, 7, 11
+    assert_eq(euler_phi(7), 6);    // prime: p-1
+    1
+}
+
+fn test_mod_exp() -> Int {
+    assert_eq(mod_exp(2, 10, 1000), 24);   // 1024 % 1000
+    assert_eq(mod_exp(3, 5, 100), 43);      // 243 % 100
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p) for prime p
+    assert_eq(mod_exp(2, 6, 7), 1);
+    assert_eq(mod_exp(3, 10, 11), 1);
+    1
+}
+
+fn main() -> Int {
+    test_mod_inverse();
+    test_crt2();
+    test_crt3();
+    test_euler_phi();
+    test_mod_exp();
+    print("DIFF_OK: chinese_remainder");
+    0
+}

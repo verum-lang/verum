@@ -1,0 +1,403 @@
+// =============================================================================
+// iterator_transducer_test.vr - Tests for ReduceResult and transducer types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, iterator, transducer, reduce-result, peek-mut
+// @description: Tests for ReduceResult sum type methods (unwrap, is_reduced, map),
+//               PeekableIter.peek_mut, and Transducer/StatefulTransducer type existence.
+//               Note: Transducer factory functions (Transducer.map, .filter, etc.)
+//               cannot be tested due to module namespace resolution limitation.
+//               Extension methods (reduce_with, transduce, transduce_stateful)
+//               cannot be tested due to extension method resolution limitation.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.iterator.{ReduceResult, Continue, Reduced};
+mount core.base.iterator.{Transducer, StatefulTransducer};
+mount core.collections.list.{List};
+
+// =============================================================================
+// PART 1: ReduceResult Construction
+// =============================================================================
+
+@test
+fn test_reduce_result_continue_construction() {
+    let r: ReduceResult<Int> = Continue(42);
+    assert(!r.is_reduced());
+}
+
+@test
+fn test_reduce_result_reduced_construction() {
+    let r: ReduceResult<Int> = Reduced(99);
+    assert(r.is_reduced());
+}
+
+@test
+fn test_reduce_result_continue_text() {
+    let r: ReduceResult<Text> = Continue("hello");
+    assert(!r.is_reduced());
+}
+
+@test
+fn test_reduce_result_reduced_text() {
+    let r: ReduceResult<Text> = Reduced("done");
+    assert(r.is_reduced());
+}
+
+// =============================================================================
+// PART 2: ReduceResult.is_reduced()
+// =============================================================================
+
+@test
+fn test_is_reduced_false_for_continue() {
+    let r: ReduceResult<Int> = Continue(0);
+    assert_eq(r.is_reduced(), false);
+}
+
+@test
+fn test_is_reduced_true_for_reduced() {
+    let r: ReduceResult<Int> = Reduced(0);
+    assert_eq(r.is_reduced(), true);
+}
+
+@test
+fn test_is_reduced_continue_with_zero() {
+    let r: ReduceResult<Int> = Continue(0);
+    assert(!r.is_reduced());
+}
+
+@test
+fn test_is_reduced_reduced_with_negative() {
+    let r: ReduceResult<Int> = Reduced(-1);
+    assert(r.is_reduced());
+}
+
+// =============================================================================
+// PART 3: ReduceResult.unwrap()
+// =============================================================================
+
+@test
+fn test_unwrap_continue() {
+    let r: ReduceResult<Int> = Continue(42);
+    assert_eq(r.unwrap(), 42);
+}
+
+@test
+fn test_unwrap_reduced() {
+    let r: ReduceResult<Int> = Reduced(99);
+    assert_eq(r.unwrap(), 99);
+}
+
+@test
+fn test_unwrap_continue_zero() {
+    let r: ReduceResult<Int> = Continue(0);
+    assert_eq(r.unwrap(), 0);
+}
+
+@test
+fn test_unwrap_reduced_zero() {
+    let r: ReduceResult<Int> = Reduced(0);
+    assert_eq(r.unwrap(), 0);
+}
+
+@test
+fn test_unwrap_continue_text() {
+    let r: ReduceResult<Text> = Continue("hello");
+    assert_eq(r.unwrap(), "hello");
+}
+
+@test
+fn test_unwrap_reduced_text() {
+    let r: ReduceResult<Text> = Reduced("stopped");
+    assert_eq(r.unwrap(), "stopped");
+}
+
+// =============================================================================
+// PART 4: ReduceResult.map()
+// =============================================================================
+
+@test
+fn test_map_continue() {
+    let r: ReduceResult<Int> = Continue(5);
+    let mapped = r.map(|x| x * 2);
+    assert_eq(mapped.unwrap(), 10);
+    assert(!mapped.is_reduced());
+}
+
+@test
+fn test_map_reduced() {
+    let r: ReduceResult<Int> = Reduced(5);
+    let mapped = r.map(|x| x * 2);
+    assert_eq(mapped.unwrap(), 10);
+    assert(mapped.is_reduced());
+}
+
+@test
+fn test_map_continue_preserves_variant() {
+    let r: ReduceResult<Int> = Continue(3);
+    let mapped = r.map(|x| x + 10);
+    assert(!mapped.is_reduced());
+}
+
+@test
+fn test_map_reduced_preserves_variant() {
+    let r: ReduceResult<Int> = Reduced(3);
+    let mapped = r.map(|x| x + 10);
+    assert(mapped.is_reduced());
+}
+
+@test
+fn test_map_type_change() {
+    let r: ReduceResult<Int> = Continue(42);
+    let mapped: ReduceResult<Bool> = r.map(|x| x > 0);
+    assert_eq(mapped.unwrap(), true);
+}
+
+@test
+fn test_map_to_text() {
+    let r: ReduceResult<Int> = Reduced(7);
+    let mapped: ReduceResult<Text> = r.map(|x| "done");
+    assert_eq(mapped.unwrap(), "done");
+    assert(mapped.is_reduced());
+}
+
+// =============================================================================
+// PART 5: ReduceResult is pattern matching
+// =============================================================================
+
+@test
+fn test_reduce_result_is_continue() {
+    let r: ReduceResult<Int> = Continue(1);
+    assert(r is Continue);
+}
+
+@test
+fn test_reduce_result_is_reduced_pattern() {
+    let r: ReduceResult<Int> = Reduced(1);
+    assert(r is Reduced);
+}
+
+@test
+fn test_reduce_result_is_not_cross() {
+    let r: ReduceResult<Int> = Continue(1);
+    assert(!(r is Reduced));
+}
+
+// =============================================================================
+// PART 6: PeekableIter.peek_mut()
+// =============================================================================
+
+@test
+fn test_peek_mut_basic() {
+    let arr = [10, 20, 30];
+    let mut iter = arr.iter().peekable();
+    let peeked = iter.peek_mut();
+    assert(peeked.is_some());
+}
+
+@test
+fn test_peek_mut_empty() {
+    let arr: List<Int> = List.new();
+    let mut iter = arr.iter().peekable();
+    let peeked = iter.peek_mut();
+    assert(peeked.is_none());
+}
+
+@test
+fn test_peek_mut_after_exhaustion() {
+    let arr = [1];
+    let mut iter = arr.iter().peekable();
+    let _ = iter.next();
+    let peeked = iter.peek_mut();
+    assert(peeked.is_none());
+}
+
+@test
+fn test_peek_mut_doesnt_advance() {
+    let arr = [5, 10, 15];
+    let mut iter = arr.iter().peekable();
+    let _ = iter.peek_mut();
+    let _ = iter.peek_mut();
+    // Iterator should still be at the start
+    let first = iter.next();
+    assert(first.is_some());
+}
+
+@test
+fn test_peek_mut_then_next() {
+    let arr = [100, 200, 300];
+    let mut iter = arr.iter().peekable();
+    let _ = iter.peek_mut();
+    let val = iter.next();
+    assert(val.is_some());
+    // After consuming first, peek_mut should see second
+    let peeked = iter.peek_mut();
+    assert(peeked.is_some());
+}
+
+// =============================================================================
+// PART 7: Transducer Type Existence
+// =============================================================================
+
+@test
+fn test_transducer_type_exists() {
+    let _: Maybe<Transducer<Int, Int>> = None;
+}
+
+@test
+fn test_stateful_transducer_type_exists() {
+    let _: Maybe<StatefulTransducer<Int, Int, Int>> = None;
+}
+
+@test
+fn test_transducer_different_types() {
+    let _: Maybe<Transducer<Int, Text>> = None;
+}
+
+@test
+fn test_stateful_transducer_different_state() {
+    let _: Maybe<StatefulTransducer<Int, Int, Bool>> = None;
+}
+
+@test
+fn test_transducer_with_float() {
+    let _: Maybe<Transducer<Float, Float>> = None;
+}
+
+@test
+fn test_stateful_transducer_with_list_state() {
+    let _: Maybe<StatefulTransducer<Int, Int, List<Int>>> = None;
+}
+
+// =============================================================================
+// PART 8: ReduceResult Edge Cases
+// =============================================================================
+
+@test
+fn test_reduce_result_continue_bool_true() {
+    let r: ReduceResult<Bool> = Continue(true);
+    assert_eq(r.unwrap(), true);
+}
+
+@test
+fn test_reduce_result_continue_bool_false() {
+    let r: ReduceResult<Bool> = Continue(false);
+    assert_eq(r.unwrap(), false);
+}
+
+@test
+fn test_reduce_result_reduced_negative() {
+    let r: ReduceResult<Int> = Reduced(-100);
+    assert(r.is_reduced());
+    assert_eq(r.unwrap(), -100);
+}
+
+@test
+fn test_reduce_result_map_chain() {
+    let r: ReduceResult<Int> = Continue(1);
+    let mapped = r.map(|x| x + 1);
+    let mapped2 = mapped.map(|x| x * 3);
+    assert_eq(mapped2.unwrap(), 6);
+    assert(!mapped2.is_reduced());
+}
+
+@test
+fn test_reduce_result_reduced_map_chain() {
+    let r: ReduceResult<Int> = Reduced(10);
+    let mapped = r.map(|x| x - 5);
+    let mapped2 = mapped.map(|x| x * 2);
+    assert_eq(mapped2.unwrap(), 10);
+    assert(mapped2.is_reduced());
+}
+
+@test
+fn test_reduce_result_continue_large_value() {
+    let r: ReduceResult<Int> = Continue(999999);
+    assert_eq(r.unwrap(), 999999);
+    assert(!r.is_reduced());
+}
+
+@test
+fn test_reduce_result_reduced_large_value() {
+    let r: ReduceResult<Int> = Reduced(999999);
+    assert_eq(r.unwrap(), 999999);
+    assert(r.is_reduced());
+}
+
+@test
+fn test_reduce_result_map_identity() {
+    let r: ReduceResult<Int> = Continue(42);
+    let mapped = r.map(|x| x);
+    assert_eq(mapped.unwrap(), 42);
+    assert(!mapped.is_reduced());
+}
+
+@test
+fn test_reduce_result_map_to_zero() {
+    let r: ReduceResult<Int> = Continue(42);
+    let mapped = r.map(|_x| 0);
+    assert_eq(mapped.unwrap(), 0);
+}
+
+// =============================================================================
+// PART 9: ReduceResult with Various Generic Types
+// =============================================================================
+
+@test
+fn test_reduce_result_with_float() {
+    let r: ReduceResult<Float> = Continue(3.14);
+    assert(!r.is_reduced());
+}
+
+@test
+fn test_reduce_result_reduced_float() {
+    let r: ReduceResult<Float> = Reduced(2.718);
+    assert(r.is_reduced());
+}
+
+@test
+fn test_reduce_result_with_list() {
+    let r: ReduceResult<List<Int>> = Continue([1, 2, 3]);
+    assert(!r.is_reduced());
+}
+
+@test
+fn test_reduce_result_map_float_to_int() {
+    let r: ReduceResult<Float> = Continue(3.14);
+    let mapped: ReduceResult<Int> = r.map(|_x| 3);
+    assert_eq(mapped.unwrap(), 3);
+}
+
+// =============================================================================
+// PART 10: Documented Limitations
+// =============================================================================
+// The following features cannot be tested in typecheck-pass mode due to
+// type checker limitations:
+//
+// 1. Transducer.map(), .filter(), .filter_map(), .take_while(), .identity(),
+//    .inspect(), .compose2(), .compose() — module namespace resolution
+//    (Transducer resolves as type, not as module)
+//
+// 2. Transducer.take(), .drop(), .drop_while(), .dedupe(), .enumerate()
+//    — same module namespace issue (StatefulTransducer factories)
+//
+// 3. iter.transduce(xform) — extension method on `implement<I: Iterator> I`
+//    not resolved for concrete types
+//
+// 4. iter.transduce_stateful(xform) — same extension method issue
+//
+// 5. iter.reduce_with(init, f) — same extension method issue
+//
+// 6. FromIterator.from_iter() — generic parameter resolution issue
+//
+// 7. Extend.extend_one() — protocol default method resolution
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

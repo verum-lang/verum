@@ -1,0 +1,131 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, result, error
+// @timeout: 5000
+// @expected-error: E101
+
+/// Tests for result expression verification failures
+/// Postconditions referencing result that cannot be proven
+
+/// Result doesn't match claimed value
+@verify(proof)
+fn wrong_sum(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result == a + b;
+    ";
+    // ERROR: Returns a - b, not a + b
+    a - b
+}
+
+/// Result bounds not satisfied
+@verify(proof)
+fn broken_clamp(value: Int, min: Int, max: Int) -> Int {
+    contract#"
+        requires min <= max;
+        ensures result >= min;
+        ensures result <= max;
+    ";
+    // ERROR: Returns value without clamping
+    value
+}
+
+/// Result with Option - wrong branch
+@verify(proof)
+fn find_broken(arr: &List<Int>, target: Int) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < arr.len() && arr[idx] == target,
+            None => forall i: Int. 0 <= i < arr.len() implies arr[i] != target
+        };
+    ";
+    // ERROR: Always returns None even when element exists
+    None
+}
+
+/// Result with Result type - wrong error case
+@verify(proof)
+fn divide_broken(a: Int, b: Int) -> Result<Int, DivError> {
+    contract#"
+        ensures match result {
+            Ok(val) => b != 0 && val == a / b,
+            Err(_) => b == 0
+        };
+    ";
+    // ERROR: Returns error even when b != 0
+    if b <= 0 {  // Wrong condition: should be b == 0
+        Err(DivError)
+    } else {
+        Ok(a / b)
+    }
+}
+
+/// Result doesn't satisfy conditional ensures
+@verify(proof)
+fn sign_broken(x: Int) -> Int {
+    contract#"
+        ensures x > 0 implies result == 1;
+        ensures x < 0 implies result == -1;
+        ensures x == 0 implies result == 0;
+    ";
+    // ERROR: Returns wrong sign for negative numbers
+    if x > 0 { 1 }
+    else if x < 0 { 1 }  // Should be -1
+    else { 0 }
+}
+
+/// Result tuple field access wrong
+@verify(proof)
+fn div_mod_broken(a: Int, b: Int{!= 0}) -> (Int, Int) {
+    contract#"
+        requires b != 0;
+        ensures result.0 == a / b;
+        ensures result.1 == a % b;
+        ensures result.0 * b + result.1 == a;
+    ";
+    // ERROR: Swapped quotient and remainder
+    (a % b, a / b)
+}
+
+/// Result with struct - field mismatch
+type Point is { x: Int, y: Int };
+
+@verify(proof)
+fn origin() -> Point {
+    contract#"
+        ensures result.x == 0;
+        ensures result.y == 0;
+    ";
+    // ERROR: y is not zero
+    Point { x: 0, y: 1 }
+}
+
+/// Result referencing function of result
+fn square(x: Int) -> Int { x * x }
+
+@verify(proof)
+fn sqrt_floor_broken(x: Int{>= 0}) -> Int {
+    contract#"
+        requires x >= 0;
+        ensures square(result) <= x;
+        ensures square(result + 1) > x;
+    ";
+    // ERROR: Returns x, not floor(sqrt(x))
+    x
+}
+
+/// Result with collection size
+@verify(proof)
+fn duplicate_broken<T: Clone>(item: T, count: Int{>= 0}) -> List<T> {
+    contract#"
+        requires count >= 0;
+        ensures result.len() == count;
+        ensures forall i: Int. 0 <= i < count implies result[i] == item;
+    ";
+    // ERROR: Creates count-1 elements, not count
+    let mut result = List.new();
+    for _ in 0..count - 1 {
+        result.push(item.clone());
+    }
+    result
+}

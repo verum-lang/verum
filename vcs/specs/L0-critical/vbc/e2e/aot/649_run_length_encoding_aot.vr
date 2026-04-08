@@ -1,0 +1,205 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, rle, compression, encoding
+// @timeout: 30000
+
+// Run-length encoding and decoding
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Encode pair as value * 100 + count
+fn make_pair(val: Int, count: Int) -> Int { val * 100 + count }
+fn pair_val(p: Int) -> Int { p / 100 }
+fn pair_count(p: Int) -> Int { p % 100 }
+
+// RLE encode: input data[0..n], output pairs[0..out_len]
+// Returns encoded array and length packed as arr + length in separate call
+fn rle_encode_len(data: Arr8, n: Int) -> Int {
+    if n == 0 { 0 }
+    else {
+        let mut out_len = 0;
+        let mut i = 0;
+        while i < n {
+            let val = get8(data, i);
+            let mut count = 1;
+            while i + count < n {
+                if get8(data, i + count) == val { count = count + 1; }
+                else { count = n; } // break
+            }
+            if count >= n { count = 1; let mut j = i + 1; while j < n { if get8(data, j) == val { count = count + 1; } else { j = n; } j = j + 1; } }
+            out_len = out_len + 1;
+            i = i + count;
+        }
+        out_len
+    }
+}
+
+// Simpler approach: encode directly
+fn rle_encode(data: Arr8, n: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i < n {
+        let val = get8(data, i);
+        let mut count = 1;
+        let mut j = i + 1;
+        while j < n {
+            if get8(data, j) == val { count = count + 1; j = j + 1; }
+            else { j = n; } // break
+        }
+        result = set8(result, out_idx, make_pair(val, count));
+        out_idx = out_idx + 1;
+        i = i + count;
+    }
+    result
+}
+
+fn rle_encode_count(data: Arr8, n: Int) -> Int {
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i < n {
+        let val = get8(data, i);
+        let mut count = 1;
+        let mut j = i + 1;
+        while j < n {
+            if get8(data, j) == val { count = count + 1; j = j + 1; }
+            else { j = n; }
+        }
+        out_idx = out_idx + 1;
+        i = i + count;
+    }
+    out_idx
+}
+
+// RLE decode
+fn rle_decode(encoded: Arr8, enc_len: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i < enc_len {
+        let p = get8(encoded, i);
+        let val = pair_val(p);
+        let mut count = pair_count(p);
+        while count > 0 {
+            result = set8(result, out_idx, val);
+            out_idx = out_idx + 1;
+            count = count - 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Total decoded length
+fn rle_decoded_len(encoded: Arr8, enc_len: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < enc_len {
+        total = total + pair_count(get8(encoded, i));
+        i = i + 1;
+    }
+    total
+}
+
+fn test_basic_encode() -> Int {
+    // [1, 1, 1, 2, 2, 3]
+    let data = Arr8 { v0: 1, v1: 1, v2: 1, v3: 2, v4: 2, v5: 3, v6: 0, v7: 0 };
+    let enc = rle_encode(data, 6);
+    let enc_len = rle_encode_count(data, 6);
+    assert_eq(enc_len, 3);
+    // First pair: value=1, count=3
+    assert_eq(pair_val(get8(enc, 0)), 1);
+    assert_eq(pair_count(get8(enc, 0)), 3);
+    // Second: value=2, count=2
+    assert_eq(pair_val(get8(enc, 1)), 2);
+    assert_eq(pair_count(get8(enc, 1)), 2);
+    // Third: value=3, count=1
+    assert_eq(pair_val(get8(enc, 2)), 3);
+    assert_eq(pair_count(get8(enc, 2)), 1);
+    1
+}
+
+fn test_roundtrip() -> Int {
+    let data = Arr8 { v0: 5, v1: 5, v2: 3, v3: 3, v4: 3, v5: 7, v6: 0, v7: 0 };
+    let enc = rle_encode(data, 6);
+    let enc_len = rle_encode_count(data, 6);
+    let dec = rle_decode(enc, enc_len);
+    let dec_len = rle_decoded_len(enc, enc_len);
+    assert_eq(dec_len, 6);
+    let mut i = 0;
+    while i < 6 {
+        assert_eq(get8(dec, i), get8(data, i));
+        i = i + 1;
+    }
+    1
+}
+
+fn test_no_runs() -> Int {
+    // All different values
+    let data = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let enc_len = rle_encode_count(data, 5);
+    assert_eq(enc_len, 5); // No compression
+    1
+}
+
+fn test_all_same() -> Int {
+    let data = Arr8 { v0: 7, v1: 7, v2: 7, v3: 7, v4: 7, v5: 7, v6: 7, v7: 7 };
+    let enc = rle_encode(data, 8);
+    let enc_len = rle_encode_count(data, 8);
+    assert_eq(enc_len, 1); // Maximum compression
+    assert_eq(pair_val(get8(enc, 0)), 7);
+    assert_eq(pair_count(get8(enc, 0)), 8);
+    let dec_len = rle_decoded_len(enc, enc_len);
+    assert_eq(dec_len, 8);
+    1
+}
+
+fn test_single() -> Int {
+    let data = Arr8 { v0: 42, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let enc = rle_encode(data, 1);
+    let enc_len = rle_encode_count(data, 1);
+    assert_eq(enc_len, 1);
+    assert_eq(pair_val(get8(enc, 0)), 42);
+    assert_eq(pair_count(get8(enc, 0)), 1);
+    1
+}
+
+fn test_alternating() -> Int {
+    // [1, 2, 1, 2, 1, 2]
+    let data = Arr8 { v0: 1, v1: 2, v2: 1, v3: 2, v4: 1, v5: 2, v6: 0, v7: 0 };
+    let enc_len = rle_encode_count(data, 6);
+    assert_eq(enc_len, 6); // Worst case: no runs
+    1
+}
+
+fn main() -> Int {
+    test_basic_encode();
+    test_roundtrip();
+    test_no_runs();
+    test_all_same();
+    test_single();
+    test_alternating();
+    print("[OK] 649_run_length_encoding_aot");
+    0
+}

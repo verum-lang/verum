@@ -1,0 +1,643 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, base, protocols, debug, eq, ord, clone, default
+// @description: Tests for Eq, Ord, Clone, Default protocols on custom types
+
+module specs.core.base.protocols_debug_test;
+
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.protocols.{Eq, Ord, Clone, Default};
+
+// Simple point type
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+implement Eq for Point {
+    fn eq(&self, other: &Self) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+implement Ord for Point {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.x.cmp(&other.x) {
+            Equal => self.y.cmp(&other.y),
+            ord => ord,
+        }
+    }
+}
+
+implement Clone for Point {
+    fn clone(&self) -> Self {
+        Point { x: self.x, y: self.y }
+    }
+}
+
+implement Default for Point {
+    fn default() -> Self {
+        Point { x: 0, y: 0 }
+    }
+}
+
+// =============================================================================
+// Section 1: Eq Protocol
+// =============================================================================
+
+@test
+fn test_eq_equal_points() {
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 10, y: 20 };
+    assert(p1.eq(&p2));
+}
+
+@test
+fn test_eq_operator_equal() {
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 10, y: 20 };
+    assert(p1 == p2);
+}
+
+@test
+fn test_ne_different_points() {
+    let p1 = Point { x: 10, y: 20 };
+    let p3 = Point { x: 10, y: 30 };
+    assert(p1.ne(&p3));
+}
+
+@test
+fn test_ne_operator_different() {
+    let p1 = Point { x: 10, y: 20 };
+    let p3 = Point { x: 10, y: 30 };
+    assert(p1 != p3);
+}
+
+@test
+fn test_eq_reflexive() {
+    let p = Point { x: 5, y: 10 };
+    assert(p == p);
+}
+
+@test
+fn test_eq_symmetric() {
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 1, y: 2 };
+    assert(p1 == p2);
+    assert(p2 == p1);
+}
+
+// =============================================================================
+// Section 2: Ord Protocol - cmp
+// =============================================================================
+
+@test
+fn test_cmp_less() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    let result = a.cmp(&b);
+    assert(result is Less);
+}
+
+@test
+fn test_cmp_greater() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    let result = b.cmp(&a);
+    assert(result is Greater);
+}
+
+@test
+fn test_cmp_equal() {
+    let a = Point { x: 1, y: 1 };
+    let result = a.cmp(&a);
+    assert(result is Equal);
+}
+
+@test
+fn test_cmp_secondary_field() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 1, y: 2 };
+    let result = a.cmp(&b);
+    assert(result is Less);
+}
+
+// =============================================================================
+// Section 3: Ord Protocol - comparison methods
+// =============================================================================
+
+@test
+fn test_lt() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    assert(a.lt(&b));
+}
+
+@test
+fn test_le_less() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    assert(a.le(&b));
+}
+
+@test
+fn test_le_equal() {
+    let a = Point { x: 1, y: 1 };
+    assert(a.le(&a));
+}
+
+@test
+fn test_gt() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    assert(b.gt(&a));
+}
+
+@test
+fn test_ge_greater() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    assert(b.ge(&a));
+}
+
+@test
+fn test_ge_equal() {
+    let b = Point { x: 2, y: 1 };
+    assert(b.ge(&b));
+}
+
+// =============================================================================
+// Section 4: Ord Protocol - min/max
+// =============================================================================
+
+@test
+fn test_min() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    let min_p = a.min(b);
+    assert(min_p == a);
+}
+
+@test
+fn test_max() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    let max_p = a.max(b);
+    assert(max_p == b);
+}
+
+@test
+fn test_min_equal() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 1, y: 1 };
+    let min_p = a.min(b);
+    assert(min_p == a);
+}
+
+// =============================================================================
+// Section 5: Clone Protocol
+// =============================================================================
+
+@test
+fn test_clone() {
+    let p = Point { x: 42, y: 99 };
+    let p2 = p.clone();
+    assert(p2.x == 42);
+    assert(p2.y == 99);
+}
+
+@test
+fn test_clone_equality() {
+    let p = Point { x: 42, y: 99 };
+    let p2 = p.clone();
+    assert(p == p2);
+}
+
+// =============================================================================
+// Section 6: Default Protocol
+// =============================================================================
+
+@test
+fn test_default() {
+    let p: Point = Point.default();
+    assert_eq(p.x, 0);
+    assert_eq(p.y, 0);
+}
+
+@test
+fn test_default_not_equal_to_nonzero() {
+    let def: Point = Point.default();
+    let other = Point { x: 1, y: 1 };
+    assert(def != other);
+}
+
+// =============================================================================
+// Section 7: Clamp
+// =============================================================================
+
+@test
+fn test_clamp_within_range() {
+    let p = Point { x: 5, y: 5 };
+    let low = Point { x: 1, y: 1 };
+    let high = Point { x: 10, y: 10 };
+    let clamped = p.clamp(low, high);
+    assert(clamped == p);
+}
+
+@test
+fn test_clamp_below_range() {
+    let p = Point { x: 0, y: 0 };
+    let low = Point { x: 1, y: 1 };
+    let high = Point { x: 10, y: 10 };
+    let clamped = p.clamp(low, high);
+    assert(clamped == low);
+}
+
+@test
+fn test_clamp_above_range() {
+    let p = Point { x: 20, y: 20 };
+    let low = Point { x: 1, y: 1 };
+    let high = Point { x: 10, y: 10 };
+    let clamped = p.clamp(low, high);
+    assert(clamped == high);
+}
+
+@test
+fn test_clamp_at_boundary() {
+    let p = Point { x: 1, y: 1 };
+    let low = Point { x: 1, y: 1 };
+    let high = Point { x: 10, y: 10 };
+    let clamped = p.clamp(low, high);
+    assert(clamped == low);
+}
+
+// =============================================================================
+// Section 8: Ord Operator Tests
+// =============================================================================
+
+@test
+fn test_lt_operator() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    assert(a < b);
+    assert(!(b < a));
+}
+
+@test
+fn test_le_operator() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 1, y: 1 };
+    assert(a <= b);
+    assert(b <= a);
+}
+
+@test
+fn test_gt_operator() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    assert(b > a);
+    assert(!(a > b));
+}
+
+@test
+fn test_ge_operator() {
+    let a = Point { x: 1, y: 1 };
+    assert(a >= a);
+}
+
+// =============================================================================
+// Section 9: Transitivity and Antisymmetry
+// =============================================================================
+
+@test
+fn test_eq_transitive() {
+    let a = Point { x: 1, y: 2 };
+    let b = Point { x: 1, y: 2 };
+    let c = Point { x: 1, y: 2 };
+    assert(a == b);
+    assert(b == c);
+    assert(a == c);
+}
+
+@test
+fn test_ord_transitive() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    let c = Point { x: 3, y: 1 };
+    assert(a < b);
+    assert(b < c);
+    assert(a < c);
+}
+
+@test
+fn test_ord_antisymmetric() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 1 };
+    assert(a < b);
+    assert(!(b < a));
+}
+
+// =============================================================================
+// Section 10: Min/Max Edge Cases
+// =============================================================================
+
+@test
+fn test_min_same_values() {
+    let a = Point { x: 5, y: 5 };
+    let b = Point { x: 5, y: 5 };
+    let result = a.min(b);
+    assert(result == a);
+}
+
+@test
+fn test_max_same_values() {
+    let a = Point { x: 5, y: 5 };
+    let b = Point { x: 5, y: 5 };
+    let result = a.max(b);
+    assert(result == a);
+}
+
+@test
+fn test_min_negative_values() {
+    let a = Point { x: -10, y: -5 };
+    let b = Point { x: -3, y: 0 };
+    let result = a.min(b);
+    assert(result == a);
+}
+
+@test
+fn test_max_negative_values() {
+    let a = Point { x: -10, y: -5 };
+    let b = Point { x: -3, y: 0 };
+    let result = a.max(b);
+    assert(result == b);
+}
+
+// =============================================================================
+// Section 11: Clone Independence
+// =============================================================================
+
+@test
+fn test_clone_then_modify_original() {
+    let mut p1 = Point { x: 10, y: 20 };
+    let p2 = p1.clone();
+    p1.x = 999;
+    p1.y = 888;
+    assert(p2.x == 10);
+    assert(p2.y == 20);
+}
+
+@test
+fn test_clone_default_point() {
+    let def: Point = Point.default();
+    let cloned = def.clone();
+    assert(cloned == def);
+    assert(cloned.x == 0);
+    assert(cloned.y == 0);
+}
+
+// =============================================================================
+// Section 12: Default Then Modify
+// =============================================================================
+
+@test
+fn test_default_then_set_fields() {
+    let mut p: Point = Point.default();
+    assert(p.x == 0 && p.y == 0);
+    p.x = 42;
+    p.y = 99;
+    assert(p.x == 42);
+    assert(p.y == 99);
+}
+
+// =============================================================================
+// Section 13: Comparison Edge Cases
+// =============================================================================
+
+@test
+fn test_cmp_equal_x_less_y() {
+    let a = Point { x: 5, y: 1 };
+    let b = Point { x: 5, y: 10 };
+    assert(a.cmp(&b) is Less);
+    assert(a < b);
+}
+
+@test
+fn test_cmp_equal_x_greater_y() {
+    let a = Point { x: 5, y: 10 };
+    let b = Point { x: 5, y: 1 };
+    assert(a.cmp(&b) is Greater);
+    assert(a > b);
+}
+
+@test
+fn test_cmp_equal_x_equal_y() {
+    let a = Point { x: 5, y: 5 };
+    let b = Point { x: 5, y: 5 };
+    assert(a.cmp(&b) is Equal);
+    assert(a == b);
+}
+
+@test
+fn test_min_mixed_signs() {
+    let a = Point { x: -5, y: 10 };
+    let b = Point { x: 5, y: -10 };
+    let result = a.min(b);
+    assert(result == a);
+}
+
+@test
+fn test_max_mixed_signs() {
+    let a = Point { x: -5, y: 10 };
+    let b = Point { x: 5, y: -10 };
+    let result = a.max(b);
+    assert(result == b);
+}
+
+@test
+fn test_clamp_at_upper_boundary() {
+    let p = Point { x: 10, y: 10 };
+    let low = Point { x: 1, y: 1 };
+    let high = Point { x: 10, y: 10 };
+    let clamped = p.clamp(low, high);
+    assert(clamped == high);
+}
+
+@test
+fn test_ord_three_way_chain() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 2 };
+    let c = Point { x: 3, y: 3 };
+    let d = Point { x: 4, y: 4 };
+    assert(a < b);
+    assert(b < c);
+    assert(c < d);
+    assert(a < d);
+}
+
+// =============================================================================
+// Section 14: Additional Protocol Tests
+// =============================================================================
+
+@test
+fn test_ne_returns_false_for_equal() {
+    let a = Point { x: 5, y: 5 };
+    let b = Point { x: 5, y: 5 };
+    assert(!a.ne(&b));
+    assert(!(a != b));
+}
+
+@test
+fn test_clone_chain() {
+    let p = Point { x: 7, y: 14 };
+    let c1 = p.clone();
+    let c2 = c1.clone();
+    let c3 = c2.clone();
+    assert(c3 == p);
+    assert_eq(c3.x, 7);
+    assert_eq(c3.y, 14);
+}
+
+@test
+fn test_eq_large_values() {
+    let a = Point { x: 1000000, y: 2000000 };
+    let b = Point { x: 1000000, y: 2000000 };
+    assert(a == b);
+    assert(!a.ne(&b));
+}
+
+@test
+fn test_ord_x_primary_decides() {
+    // When x differs, y is irrelevant to ordering
+    let a = Point { x: 1, y: 100 };
+    let b = Point { x: 2, y: 0 };
+    assert(a < b);
+    assert(a.cmp(&b) is Less);
+}
+
+@test
+fn test_min_max_with_zero_point() {
+    let zero = Point { x: 0, y: 0 };
+    let positive = Point { x: 5, y: 5 };
+    let negative = Point { x: -5, y: -5 };
+    assert(negative.min(zero) == negative);
+    assert(zero.max(positive) == positive);
+    assert(negative.max(zero) == zero);
+}
+
+@test
+fn test_clone_preserves_ordering() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 2 };
+    let ca = a.clone();
+    let cb = b.clone();
+    assert(ca < cb);
+    assert(ca.cmp(&cb) is Less);
+}
+
+@test
+fn test_clamp_single_point_range() {
+    let p = Point { x: 50, y: 50 };
+    let bound = Point { x: 3, y: 3 };
+    let clamped = p.clamp(bound, bound);
+    assert(clamped == bound);
+}
+
+@test
+fn test_ord_negative_coordinates() {
+    let a = Point { x: -10, y: -20 };
+    let b = Point { x: -5, y: -30 };
+    let c = Point { x: -5, y: -10 };
+    assert(a < b);
+    assert(b < c);
+    assert(a < c);
+}
+
+// =============================================================================
+// Section 15: Additional Protocol Tests - Hash, Copy, PartialEq, etc.
+// =============================================================================
+
+@test
+fn test_clone_from_method() {
+    let mut a = Point { x: 1, y: 2 };
+    let b = Point { x: 99, y: 88 };
+    a.clone_from(&b);
+    assert(a == b);
+    assert_eq(a.x, 99);
+    assert_eq(a.y, 88);
+}
+
+@test
+fn test_min_max_chain() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 5, y: 5 };
+    let c = Point { x: 10, y: 10 };
+    let d = Point { x: 3, y: 3 };
+    let result = a.max(b).min(c).max(d);
+    assert(result == b);
+}
+
+@test
+fn test_clamp_multiple_times() {
+    let p = Point { x: 50, y: 50 };
+    let low = Point { x: 10, y: 10 };
+    let high = Point { x: 20, y: 20 };
+    let clamped = p.clamp(low, high);
+    let reclamped = clamped.clamp(low, high);
+    assert(clamped == reclamped);
+    assert(clamped == high);
+}
+
+@test
+fn test_ne_method_explicit() {
+    let a = Point { x: 1, y: 1 };
+    let b = Point { x: 2, y: 2 };
+    let result = a.ne(&b);
+    assert(result);
+    assert(!a.ne(&a));
+}
+
+@test
+fn test_ord_boundary_values() {
+    let min_p = Point { x: -2147483648, y: -2147483648 };
+    let max_p = Point { x: 2147483647, y: 2147483647 };
+    assert(min_p < max_p);
+    assert(min_p.cmp(&max_p) is Less);
+    assert(max_p.cmp(&min_p) is Greater);
+}
+
+@test
+fn test_eq_different_construction() {
+    let p1 = Point { x: 5, y: 10 };
+    let mut p2 = Point.default();
+    p2.x = 5;
+    p2.y = 10;
+    assert(p1 == p2);
+    assert(p1.eq(&p2));
+}
+
+@test
+fn test_ord_consistency_with_eq() {
+    let a = Point { x: 3, y: 7 };
+    let b = Point { x: 3, y: 7 };
+    assert(a == b);
+    assert(!(a < b));
+    assert(!(a > b));
+    assert(a.cmp(&b) is Equal);
+}
+
+@test
+fn test_clone_preserves_default() {
+    let def: Point = Point.default();
+    let cloned = def.clone();
+    let another_def: Point = Point.default();
+    assert(cloned == def);
+    assert(cloned == another_def);
+    assert(cloned.x == 0 && cloned.y == 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

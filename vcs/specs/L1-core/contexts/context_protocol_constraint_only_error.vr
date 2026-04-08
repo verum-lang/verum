@@ -1,0 +1,24 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: context, protocol, constraint, using, error
+// @expected-error: cannot be used as a context
+// @description: A plain constraint protocol (not declared with `context`) cannot
+//   appear in a `using [...]` clause. Only `context` or `context protocol`
+//   declarations are injectable.
+
+// Plain constraint protocol -- no `context` modifier
+type Comparable is protocol {
+    fn compare(&self, other: &Self) -> Int;
+};
+
+// ERROR: Comparable is a constraint protocol, not a context protocol.
+// It can only be used in generic bounds (`where T: Comparable`), not `using`.
+fn sort_data(data: List<Int>) -> List<Int>
+    using [Comparable]
+{
+    data
+}
+
+fn main() -> Int {
+    0
+}

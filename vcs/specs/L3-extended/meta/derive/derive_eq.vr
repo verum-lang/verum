@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, eq
+// Note: Changed from run to typecheck-pass - tests derive macro generation at compile-time
+
+/// Автоматическое derive для Eq trait
+///
+/// `@derive(Eq)` генерирует реализацию Eq trait,
+/// позволяющую сравнивать значения на равенство.
+
+@derive(Eq, Debug)
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+@derive(Eq, Debug)
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb { r: Int, g: Int, b: Int };
+
+// PartialEq vs Eq
+// PartialEq - частичное равенство (может быть NaN != NaN)
+// Eq - полное равенство (рефлексивность гарантирована)
+
+@derive(PartialEq, Debug)
+type FloatPoint is {
+    x: Float,
+    y: Float,
+};
+
+// Eq для generic типов
+@derive(Eq, Debug)
+type Pair<A: Eq, B: Eq> is {
+    first: A,
+    second: B,
+};
+
+// Eq для вложенных структур
+@derive(Eq, Debug)
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+// Ord автоматически требует Eq
+@derive(Eq, Ord, Debug)
+type Version is {
+    major: Int,
+    minor: Int,
+    patch: Int,
+};
+
+fn main() {
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 10, y: 20 };
+    let p3 = Point { x: 10, y: 30 };
+
+    println(f"Equal: {p1 == p2}");
+
+    // Сравнение разных значений
+    assert(p1 == p2);
+    assert(p1 != p3);
+
+    // Сравнение enum вариантов
+    let c1 = Color.Red;
+    let c2 = Color.Red;
+    let c3 = Color.Rgb { r: 255, g: 0, b: 0 };
+
+    assert(c1 == c2);
+    assert(c1 != c3);
+
+    // Сравнение Rgb
+    let c4 = Color.Rgb { r: 255, g: 0, b: 0 };
+    assert(c3 == c4);
+
+    // Сравнение Pair
+    let pair1 = Pair { first: 1, second: "a" };
+    let pair2 = Pair { first: 1, second: "a" };
+    assert(pair1 == pair2);
+
+    // Сравнение вложенных структур
+    let rect1 = Rectangle {
+        top_left: Point { x: 0, y: 0 },
+        bottom_right: Point { x: 100, y: 100 },
+    };
+    let rect2 = Rectangle {
+        top_left: Point { x: 0, y: 0 },
+        bottom_right: Point { x: 100, y: 100 },
+    };
+    assert(rect1 == rect2);
+
+    // Сравнение Version с Ord
+    let v1 = Version { major: 1, minor: 0, patch: 0 };
+    let v2 = Version { major: 1, minor: 1, patch: 0 };
+    assert(v1 < v2);
+}

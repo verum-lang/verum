@@ -1,0 +1,93 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, closures, higher-order-functions
+// @expected-exit: 0
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn map_list(nums: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while (i < nums.len()) {
+        result.push(f(nums[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(nums: List<Int>, pred: fn(Int) -> Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while (i < nums.len()) {
+        if (pred(nums[i]) != 0) {
+            result.push(nums[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_list(nums: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    for n in nums {
+        acc = f(acc, n);
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: apply with closure
+    let double = |x: Int| -> Int { x * 2 };
+    let r1 = apply(double, 5);
+    if (r1 != 10) {
+        print(f"FAIL test1: {r1}");
+        return 1;
+    }
+
+    // Test 2: map
+    let nums = [1, 2, 3, 4, 5];
+    let doubled = map_list(nums, |x: Int| -> Int { x * 2 });
+    if (doubled.len() != 5) {
+        print(f"FAIL test2 len: {doubled.len()}");
+        return 1;
+    }
+    if (doubled[0] != 2) {
+        print(f"FAIL test2 [0]: {doubled[0]}");
+        return 1;
+    }
+    if (doubled[4] != 10) {
+        print(f"FAIL test2 [4]: {doubled[4]}");
+        return 1;
+    }
+
+    // Test 3: filter
+    let evens = filter_list(nums, |x: Int| -> Int {
+        if (x % 2 == 0) { 1 } else { 0 }
+    });
+    if (evens.len() != 2) {
+        print(f"FAIL test3 len: {evens.len()}");
+        return 1;
+    }
+
+    // Test 4: fold using for-in
+    let sum = fold_list(nums, 0, |acc: Int, x: Int| -> Int { acc + x });
+    if (sum != 15) {
+        print(f"FAIL test4: {sum}");
+        return 1;
+    }
+
+    // Test 5: closure capturing variable
+    let multiplier = 3;
+    let triple = |x: Int| -> Int { x * multiplier };
+    let r5 = apply(triple, 7);
+    if (r5 != 21) {
+        print(f"FAIL test5: {r5}");
+        return 1;
+    }
+
+    print("922_closures_hof: PASS");
+    0
+}

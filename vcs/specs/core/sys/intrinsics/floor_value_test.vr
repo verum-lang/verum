@@ -1,0 +1,32 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Floor value storage test
+
+module test.stdlib.sys.intrinsics.floor_value_test;
+
+mount core.intrinsics.{floor_f64, sqrt_f64};
+
+fn main() {
+    // Test if floor returns correct type
+    let x: Float64 = 3.7;
+    let floor_result = floor_f64(x);
+
+    // Compare directly - no intermediate
+    if floor_result == 3.0 {
+        print("floor_f64 returned float 3.0");
+    } else {
+        print("floor_f64 returned something else");
+    }
+
+    // What about sqrt? It returns 2.0 which is also a whole number
+    let sqrt_result = sqrt_f64(4.0);
+    if sqrt_result == 2.0 {
+        print("sqrt_f64 returned float 2.0");
+    } else {
+        print("sqrt_f64 returned something else");
+    }
+
+    print("Done");
+}

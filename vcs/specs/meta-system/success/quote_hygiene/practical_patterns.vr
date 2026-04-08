@@ -1,0 +1,301 @@
+// @test: meta-pass
+// @level: L2
+// @tier: 0
+// @tags: meta, quote, hygiene, practical, patterns, derive
+// @description: Tests practical macro patterns with proper hygiene
+
+// =============================================================================
+// DERIVE PATTERN - DEBUG
+// =============================================================================
+
+// Generate Debug implementation for a struct
+meta fn derive_debug(type_name: Ident, fields: List<Ident>) -> TokenStream {
+    quote {
+        implement Debug for $type_name {
+            fn fmt(&self, f: &mut Formatter) -> FmtResult {
+                let mut builder = f.debug_struct(stringify($type_name));
+                $[for field in fields {
+                    builder = builder.field(stringify($field), &self.$field);
+                }]
+                builder.finish()
+            }
+        }
+    }
+}
+
+// =============================================================================
+// DERIVE PATTERN - CLONE
+// =============================================================================
+
+// Generate Clone implementation
+meta fn derive_clone(type_name: Ident, fields: List<Ident>) -> TokenStream {
+    quote {
+        implement Clone for $type_name {
+            fn clone(&self) -> $type_name {
+                $type_name {
+                    $[for field in fields {
+                        $field: self.$field.clone(),
+                    }]
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// DERIVE PATTERN - EQ
+// =============================================================================
+
+// Generate Eq implementation
+meta fn derive_eq(type_name: Ident, fields: List<Ident>) -> TokenStream {
+    quote {
+        implement Eq for $type_name {
+            fn eq(&self, other: &$type_name) -> Bool {
+                $[for (i, field) in fields.enumerate() separator " && " {
+                    ${if i == 0 { "" } else { "" }}self.$field == other.$field
+                }]
+            }
+        }
+    }
+}
+
+// =============================================================================
+// BUILDER PATTERN
+// =============================================================================
+
+// Generate builder for a struct
+meta fn generate_builder(
+    type_name: Ident,
+    builder_name: Ident,
+    fields: List<(Ident, Type)>
+) -> TokenStream {
+    quote {
+        type $builder_name is {
+            $[for (name, ty) in fields {
+                $name: Maybe<$ty>,
+            }]
+        };
+
+        implement $builder_name {
+            fn new() -> $builder_name {
+                $builder_name {
+                    $[for (name, _) in fields {
+                        $name: None,
+                    }]
+                }
+            }
+
+            $[for (name, ty) in fields {
+                fn $name(mut self, value: $ty) -> $builder_name {
+                    self.$name = Some(value);
+                    self
+                }
+            }]
+
+            fn build(self) -> Result<$type_name, Text> {
+                Ok($type_name {
+                    $[for (name, _) in fields {
+                        $name: self.$name.ok_or("Missing field: " ++ stringify($name))?,
+                    }]
+                })
+            }
+        }
+    }
+}
+
+// =============================================================================
+// GETTER/SETTER PATTERN
+// =============================================================================
+
+// Generate getters and setters
+meta fn generate_accessors(type_name: Ident, fields: List<(Ident, Type)>) -> TokenStream {
+    quote {
+        implement $type_name {
+            $[for (name, ty) in fields {
+                // Getter
+                fn ${concat_idents("get_", name)}(&self) -> &$ty {
+                    &self.$name
+                }
+
+                // Setter
+                fn ${concat_idents("set_", name)}(&mut self, value: $ty) {
+                    self.$name = value;
+                }
+
+                // With method for chaining
+                fn ${concat_idents("with_", name)}(mut self, value: $ty) -> $type_name {
+                    self.$name = value;
+                    self
+                }
+            }]
+        }
+    }
+}
+
+// =============================================================================
+// ENUM DISPATCH PATTERN
+// =============================================================================
+
+// Generate match dispatch for enum variants
+meta fn generate_dispatch(
+    enum_name: Ident,
+    variants: List<Ident>,
+    method: Ident,
+    return_ty: Type
+) -> TokenStream {
+    quote {
+        implement $enum_name {
+            fn $method(&self) -> $return_ty {
+                match self {
+                    $[for v in variants {
+                        $enum_name.$v(inner) => inner.$method(),
+                    }]
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// SERIALIZATION PATTERN
+// =============================================================================
+
+// Generate JSON serialization
+meta fn generate_to_json(type_name: Ident, fields: List<Ident>) -> TokenStream {
+    quote {
+        implement ToJson for $type_name {
+            fn to_json(&self) -> Json {
+                let mut map = JsonMap.new();
+                $[for field in fields {
+                    map.insert(stringify($field), self.$field.to_json());
+                }]
+                Json.Object(map)
+            }
+        }
+    }
+}
+
+// =============================================================================
+// VISITOR PATTERN
+// =============================================================================
+
+// Generate visitor accept method
+meta fn generate_visitor(
+    type_name: Ident,
+    visitor_trait: Ident,
+    variants: List<Ident>
+) -> TokenStream {
+    quote {
+        implement $type_name {
+            fn accept<V: $visitor_trait>(&self, visitor: &mut V) {
+                match self {
+                    $[for v in variants {
+                        $type_name.$v(inner) => visitor.${concat_idents("visit_", v)}(inner),
+                    }]
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TEST FRAMEWORK PATTERN
+// =============================================================================
+
+// Generate test wrapper
+meta fn test_case(name: Ident, body: TokenStream) -> TokenStream {
+    let test_name = concat_idents("test_", name);
+    let success_msg = format_ident("{}_passed", name);
+    let failure_msg = format_ident("{}_failed", name);
+
+    quote {
+        fn $test_name() {
+            let __test_start = std.time.now();
+            let __result = {
+                $body
+            };
+            let __duration = std.time.now() - __test_start;
+
+            if __result {
+                print(f"[PASS] {stringify($name)} ({__duration} ms)");
+            } else {
+                print(f"[FAIL] {stringify($name)} ({__duration} ms)");
+            }
+        }
+    }
+}
+
+// =============================================================================
+// SQL DSL PATTERN
+// =============================================================================
+
+// Type-safe SQL query builder
+meta fn sql_select(
+    table: Ident,
+    columns: List<Ident>,
+    where_clause: Maybe<TokenStream>
+) -> TokenStream {
+    let column_list = columns.join(", ");
+
+    quote {
+        SqlQuery.select()
+            .from(stringify($table))
+            $[for col in columns {
+                .column(stringify($col))
+            }]
+            ${match where_clause {
+                Some(clause) => quote { .where_clause($clause) },
+                None => quote {},
+            }}
+            .build()
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn main() {
+    // All pattern generators produce valid token streams
+
+    // Derive patterns
+    let debug_impl = derive_debug(
+        ident("Point"),
+        [ident("x"), ident("y")]
+    );
+    @const assert(!debug_impl.is_empty());
+
+    let clone_impl = derive_clone(
+        ident("Point"),
+        [ident("x"), ident("y")]
+    );
+    @const assert(!clone_impl.is_empty());
+
+    let eq_impl = derive_eq(
+        ident("Point"),
+        [ident("x"), ident("y")]
+    );
+    @const assert(!eq_impl.is_empty());
+
+    // Builder pattern
+    let builder = generate_builder(
+        ident("User"),
+        ident("UserBuilder"),
+        [(ident("name"), ident("Text")), (ident("age"), ident("Int"))]
+    );
+    @const assert(!builder.is_empty());
+
+    // Accessors pattern
+    let accessors = generate_accessors(
+        ident("Person"),
+        [(ident("name"), ident("Text")), (ident("age"), ident("Int"))]
+    );
+    @const assert(!accessors.is_empty());
+
+    // Serialization
+    let to_json = generate_to_json(
+        ident("Config"),
+        [ident("host"), ident("port")]
+    );
+    @const assert(!to_json.is_empty());
+}

@@ -1,0 +1,366 @@
+// =============================================================================
+// list_remaining_test.vr - Tests for remaining untested List methods
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, collections, list, reserve, is_not_empty, unsafe, capacity
+// @description: Tests for List.is_not_empty, List.reserve, List.reserve_exact,
+//               list() helper function, and unsafe pointer access methods
+//               (as_ptr, as_mut_ptr, get_unchecked, get_unchecked_mut).
+//
+// Coverage:
+// - is_not_empty: empty, non-empty, after push/pop
+// - reserve: basic, zero, already sufficient, growth
+// - reserve_exact: basic, zero, already sufficient
+// - list(): helper function construction
+// - as_ptr/as_mut_ptr: pointer existence tests
+// - get_unchecked/get_unchecked_mut: unsafe element access
+// =============================================================================
+
+module specs.core.collections.list_remaining_test;
+
+mount core.base.protocols.{Eq, Clone};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.{List, list};
+
+// =============================================================================
+// Section 1: is_not_empty
+// =============================================================================
+
+@test
+fn test_is_not_empty_on_empty() {
+    let l: List<Int> = List.new();
+    assert(!l.is_not_empty());
+    assert(l.is_empty());
+}
+
+@test
+fn test_is_not_empty_on_nonempty() {
+    let mut l: List<Int> = List.new();
+    l.push(42);
+    assert(l.is_not_empty());
+    assert(!l.is_empty());
+}
+
+@test
+fn test_is_not_empty_after_push_pop() {
+    let mut l: List<Int> = List.new();
+    l.push(1);
+    assert(l.is_not_empty());
+    l.pop();
+    assert(!l.is_not_empty());
+}
+
+@test
+fn test_is_not_empty_after_clear() {
+    let mut l: List<Int> = List.new();
+    l.push(1);
+    l.push(2);
+    l.push(3);
+    l.clear();
+    assert(!l.is_not_empty());
+}
+
+@test
+fn test_is_not_empty_with_capacity_but_empty() {
+    let l: List<Int> = List.with_capacity(100);
+    assert(!l.is_not_empty());
+    assert_eq(l.len(), 0);
+}
+
+@test
+fn test_is_not_empty_inverse_of_is_empty() {
+    let mut l: List<Int> = List.new();
+    assert_eq(l.is_not_empty(), !l.is_empty());
+    l.push(1);
+    assert_eq(l.is_not_empty(), !l.is_empty());
+    l.push(2);
+    assert_eq(l.is_not_empty(), !l.is_empty());
+    l.pop();
+    assert_eq(l.is_not_empty(), !l.is_empty());
+    l.pop();
+    assert_eq(l.is_not_empty(), !l.is_empty());
+}
+
+// =============================================================================
+// Section 2: reserve
+// =============================================================================
+
+@test
+fn test_reserve_basic() {
+    let mut l: List<Int> = List.new();
+    l.reserve(10);
+    assert(l.capacity() >= 10);
+    assert_eq(l.len(), 0);
+}
+
+@test
+fn test_reserve_zero() {
+    let mut l: List<Int> = List.new();
+    l.reserve(0);
+    // Should be a no-op
+    assert_eq(l.len(), 0);
+}
+
+@test
+fn test_reserve_with_existing_elements() {
+    let mut l: List<Int> = List.new();
+    l.push(1);
+    l.push(2);
+    l.push(3);
+    l.reserve(10);
+    // Should have space for at least 3 + 10 = 13
+    assert(l.capacity() >= 13);
+    assert_eq(l.len(), 3);
+    // Existing elements preserved
+    assert_eq(*l.get(0).unwrap(), 1);
+    assert_eq(*l.get(1).unwrap(), 2);
+    assert_eq(*l.get(2).unwrap(), 3);
+}
+
+@test
+fn test_reserve_already_sufficient() {
+    let mut l: List<Int> = List.with_capacity(100);
+    l.push(1);
+    let cap_before = l.capacity();
+    l.reserve(50);
+    // Should not shrink
+    assert(l.capacity() >= cap_before);
+}
+
+@test
+fn test_reserve_then_push_many() {
+    let mut l: List<Int> = List.new();
+    l.reserve(100);
+    let cap_after_reserve = l.capacity();
+    for i in range(0, 100) {
+        l.push(i);
+    }
+    assert_eq(l.len(), 100);
+    // Should not have needed reallocation
+    assert_eq(l.capacity(), cap_after_reserve);
+}
+
+@test
+fn test_reserve_large() {
+    let mut l: List<Int> = List.new();
+    l.reserve(10000);
+    assert(l.capacity() >= 10000);
+    assert_eq(l.len(), 0);
+}
+
+// =============================================================================
+// Section 3: reserve_exact
+// =============================================================================
+
+@test
+fn test_reserve_exact_basic() {
+    let mut l: List<Int> = List.new();
+    l.reserve_exact(10);
+    assert(l.capacity() >= 10);
+    assert_eq(l.len(), 0);
+}
+
+@test
+fn test_reserve_exact_zero() {
+    let mut l: List<Int> = List.new();
+    l.reserve_exact(0);
+    assert_eq(l.len(), 0);
+}
+
+@test
+fn test_reserve_exact_with_existing() {
+    let mut l: List<Int> = List.new();
+    l.push(1);
+    l.push(2);
+    l.reserve_exact(5);
+    assert(l.capacity() >= 7); // 2 existing + 5 additional
+    assert_eq(l.len(), 2);
+    assert_eq(*l.get(0).unwrap(), 1);
+    assert_eq(*l.get(1).unwrap(), 2);
+}
+
+@test
+fn test_reserve_exact_already_sufficient() {
+    let mut l: List<Int> = List.with_capacity(100);
+    l.push(1);
+    let cap_before = l.capacity();
+    l.reserve_exact(50);
+    assert(l.capacity() >= cap_before);
+}
+
+// =============================================================================
+// Section 4: list() helper function
+// =============================================================================
+
+@test
+fn test_list_helper_empty() {
+    let l: List<Int> = list([]);
+    assert(l.is_empty());
+    assert_eq(l.len(), 0);
+}
+
+@test
+fn test_list_helper_single() {
+    let l = list([42]);
+    assert_eq(l.len(), 1);
+    assert_eq(*l.get(0).unwrap(), 42);
+}
+
+@test
+fn test_list_helper_multiple() {
+    let l = list([1, 2, 3, 4, 5]);
+    assert_eq(l.len(), 5);
+    assert_eq(*l.get(0).unwrap(), 1);
+    assert_eq(*l.get(4).unwrap(), 5);
+}
+
+@test
+fn test_list_helper_text() {
+    let l = list(["hello", "world"]);
+    assert_eq(l.len(), 2);
+}
+
+@test
+fn test_list_helper_preserves_order() {
+    let l = list([10, 20, 30, 40]);
+    for i in range(0, 4) {
+        assert_eq(*l.get(i).unwrap(), (i + 1) * 10);
+    }
+}
+
+// =============================================================================
+// Section 5: as_ptr / as_mut_ptr
+// =============================================================================
+
+@test
+fn test_as_ptr_nonempty() {
+    let mut l: List<Int> = List.new();
+    l.push(42);
+    // as_ptr returns unsafe pointer - verify it compiles
+    let ptr = l.as_ptr();
+    let _: &unsafe Int = ptr;
+}
+
+@test
+fn test_as_mut_ptr_nonempty() {
+    let mut l: List<Int> = List.new();
+    l.push(42);
+    // as_mut_ptr returns unsafe pointer
+    let ptr = l.as_mut_ptr();
+    let _: &unsafe Int = ptr;
+}
+
+@test
+fn test_as_ptr_type() {
+    let mut l: List<Float> = List.new();
+    l.push(3.14);
+    let ptr = l.as_ptr();
+    let _: &unsafe Float = ptr;
+}
+
+// =============================================================================
+// Section 6: get_unchecked / get_unchecked_mut
+// =============================================================================
+
+@test
+fn test_get_unchecked_basic() {
+    let mut l: List<Int> = List.new();
+    l.push(10);
+    l.push(20);
+    l.push(30);
+    // get_unchecked is unsafe - verify it compiles
+    unsafe {
+        let val: &Int = l.get_unchecked(0);
+        assert_eq(*val, 10);
+    }
+}
+
+@test
+fn test_get_unchecked_multiple() {
+    let mut l: List<Int> = List.new();
+    l.push(100);
+    l.push(200);
+    l.push(300);
+    unsafe {
+        assert_eq(*l.get_unchecked(0), 100);
+        assert_eq(*l.get_unchecked(1), 200);
+        assert_eq(*l.get_unchecked(2), 300);
+    }
+}
+
+@test
+fn test_get_unchecked_mut_basic() {
+    let mut l: List<Int> = List.new();
+    l.push(10);
+    l.push(20);
+    unsafe {
+        let val: &mut Int = l.get_unchecked_mut(0);
+        *val = 99;
+    }
+    assert_eq(*l.get(0).unwrap(), 99);
+}
+
+@test
+fn test_get_unchecked_mut_modify_all() {
+    let mut l: List<Int> = List.new();
+    l.push(1);
+    l.push(2);
+    l.push(3);
+    unsafe {
+        for i in range(0, 3) {
+            let val: &mut Int = l.get_unchecked_mut(i);
+            *val = *val * 10;
+        }
+    }
+    assert_eq(*l.get(0).unwrap(), 10);
+    assert_eq(*l.get(1).unwrap(), 20);
+    assert_eq(*l.get(2).unwrap(), 30);
+}
+
+// =============================================================================
+// Section 7: Integration - reserve + push + get_unchecked
+// =============================================================================
+
+@test
+fn test_reserve_push_unchecked() {
+    let mut l: List<Int> = List.new();
+    l.reserve(1000);
+    for i in range(0, 1000) {
+        l.push(i);
+    }
+    assert_eq(l.len(), 1000);
+    // Verify a few with get_unchecked
+    unsafe {
+        assert_eq(*l.get_unchecked(0), 0);
+        assert_eq(*l.get_unchecked(500), 500);
+        assert_eq(*l.get_unchecked(999), 999);
+    }
+}
+
+@test
+fn test_is_not_empty_with_list_helper() {
+    let l = list([1, 2, 3]);
+    assert(l.is_not_empty());
+    let empty: List<Int> = list([]);
+    assert(!empty.is_not_empty());
+}
+
+@test
+fn test_reserve_preserves_is_not_empty() {
+    let mut l: List<Int> = List.new();
+    l.reserve(100);
+    assert(!l.is_not_empty()); // reserved but still empty
+    l.push(1);
+    assert(l.is_not_empty());
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

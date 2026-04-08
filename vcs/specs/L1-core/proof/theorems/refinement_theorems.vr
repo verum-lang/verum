@@ -1,0 +1,39 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, refinement, theorem
+// @timeout: 5000
+
+/// Theorems involving refinement types.
+/// Grammar: type_refinement = inline_refinement | value_where_clause
+///          inline_refinement = '{' refinement_predicates '}'
+
+// Refinement type definitions
+type Positive is Int { self > 0 };
+type NonNegative is Int { self >= 0 };
+type Percentage is Int { self >= 0, self <= 100 };
+type NonEmpty is Text { self.len() > 0 };
+
+// Theorem about refinement type relationship
+theorem positive_is_nonneg(x: Positive)
+    proof by omega;
+
+// Function using refinement types with ensures
+fn add_positives(a: Positive, b: Positive) -> Int
+    where ensures result > 0
+{
+    a + b
+}
+
+// Function with inline refinement on parameter
+fn scale(value: Int { self >= 0 }, factor: Int { self > 0 }) -> Int
+    where ensures result >= 0
+{
+    value * factor
+}
+
+// Sigma type definition
+type BoundedList is n: Int, data: List<Int> where n == data.len();
+
+fn main() {
+    print("Refinement theorem tests parsed");
+}

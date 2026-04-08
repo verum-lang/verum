@@ -1,0 +1,70 @@
+// @test: run
+// @level: L0
+// @description: Test Maybe<T> from list.get returns correct value
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Simple list.get returns Maybe<T>, v is the value directly
+    let items = [10, 20, 30, 40, 50];
+
+    match items.get(2) {
+        Some(v) => {
+            if (v != 30) {
+                print(f"FAIL test1: expected 30, got {v}");
+                return 1;
+            }
+            print(f"Test 1 PASS: list.get(2) = {v}");
+        }
+        None => {
+            print("FAIL test1: got None");
+            return 1;
+        }
+    }
+
+    // Test 2: Check multiple gets and sum
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < 5) {
+        match items.get(i) {
+            Some(v) => { sum = sum + v; }
+            None => {}
+        }
+        i = i + 1;
+    }
+    if (sum != 150) {
+        print(f"FAIL test2: expected 150, got {sum}");
+        return 1;
+    }
+    print(f"Test 2 PASS: sum of gets = {sum}");
+
+    // Test 3: Out-of-bounds returns None
+    match items.get(10) {
+        Some(v) => {
+            print(f"FAIL test3: got Some({v}) for out-of-bounds");
+            return 1;
+        }
+        None => {
+            print("Test 3 PASS: out-of-bounds returns None");
+        }
+    }
+
+    // Test 4: get(0) and get(len-1) edge cases
+    let mut first = 0;
+    let mut last = 0;
+    match items.get(0) {
+        Some(v) => { first = v; }
+        None => {}
+    }
+    match items.get(4) {
+        Some(v) => { last = v; }
+        None => {}
+    }
+    if (first != 10 || last != 50) {
+        print(f"FAIL test4: first={first}, last={last}");
+        return 1;
+    }
+    print(f"Test 4 PASS: first={first}, last={last}");
+
+    print("All Maybe tests passed");
+    0
+}

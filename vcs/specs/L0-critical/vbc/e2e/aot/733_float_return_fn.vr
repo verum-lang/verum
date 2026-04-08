@@ -1,0 +1,46 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, float, return, function
+// @expected-exit: 0
+
+// Tests that float-returning functions properly track the register type.
+// Without float tracking, f-string interpolation shows 0 instead of the value.
+
+fn square(x: Float) -> Float {
+    x * x
+}
+
+fn add_floats(a: Float, b: Float) -> Float {
+    a + b
+}
+
+fn circle_area(radius: Float) -> Float {
+    3.14159 * radius * radius
+}
+
+fn main() -> Int {
+    // Test 1: Float return from simple function
+    let r = square(3.0);
+    print(f"square(3.0) = {r}");
+
+    // Test 2: Chain of float functions
+    let a = add_floats(1.5, 2.5);
+    print(f"add_floats(1.5, 2.5) = {a}");
+
+    // Test 3: Float function in expression
+    let area = circle_area(2.0);
+    print(f"circle_area(2.0) = {area}");
+
+    // Test 4: Float comparison after function return
+    let v = square(5.0);
+    if (v > 24.0) {
+        print("square(5.0) > 24.0: true");
+    } else {
+        print("ERROR: square(5.0) should be > 24.0");
+        return 1;
+    }
+
+    print("Float return fn: PASS");
+    0
+}

@@ -1,0 +1,373 @@
+// @test: differential
+// @tier: 0
+// @level: L2
+// @tags: differential, strings
+// @timeout: 10000
+// @expected-exit: 0
+
+/// L2-Standard: Strings (Integer Simulation)
+///
+/// This test verifies that integer-based string-like operations produce
+/// identical results across interpreter (Tier 0) and AOT compiler (Tier 3).
+/// We simulate character codes and string hashing via pure integer arithmetic.
+
+// ============================================================================
+// "String" represented as 8 integers (character codes)
+// ============================================================================
+
+type Str8 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    len: Int
+};
+
+fn str8_empty() -> Str8 {
+    Str8 { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 0 }
+}
+
+fn str8_get(s: Str8, i: Int) -> Int {
+    if i == 0 { s.c0 } else if i == 1 { s.c1 }
+    else if i == 2 { s.c2 } else if i == 3 { s.c3 }
+    else if i == 4 { s.c4 } else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 } else { s.c7 }
+}
+
+fn str8_set(s: Str8, i: Int, val: Int) -> Str8 {
+    Str8 {
+        c0: if i == 0 { val } else { s.c0 },
+        c1: if i == 1 { val } else { s.c1 },
+        c2: if i == 2 { val } else { s.c2 },
+        c3: if i == 3 { val } else { s.c3 },
+        c4: if i == 4 { val } else { s.c4 },
+        c5: if i == 5 { val } else { s.c5 },
+        c6: if i == 6 { val } else { s.c6 },
+        c7: if i == 7 { val } else { s.c7 },
+        len: s.len
+    }
+}
+
+fn str8_with_len(s: Str8, n: Int) -> Str8 {
+    Str8 {
+        c0: s.c0, c1: s.c1, c2: s.c2, c3: s.c3,
+        c4: s.c4, c5: s.c5, c6: s.c6, c7: s.c7,
+        len: n
+    }
+}
+
+// ============================================================================
+// Character code operations
+// ============================================================================
+
+// 'A'=65, 'Z'=90, 'a'=97, 'z'=122, '0'=48, '9'=57
+fn is_uppercase(ch: Int) -> Bool { ch >= 65 && ch <= 90 }
+fn is_lowercase(ch: Int) -> Bool { ch >= 97 && ch <= 122 }
+fn is_digit(ch: Int) -> Bool { ch >= 48 && ch <= 57 }
+fn to_lower(ch: Int) -> Int { if is_uppercase(ch) { ch + 32 } else { ch } }
+fn to_upper(ch: Int) -> Int { if is_lowercase(ch) { ch - 32 } else { ch } }
+
+// ============================================================================
+// String-like hash (djb2 variant using integer arithmetic)
+// ============================================================================
+
+fn str8_hash(s: Str8) -> Int {
+    let mut h = 5381;
+    let mut i = 0;
+    while i < s.len {
+        h = h * 33 + str8_get(s, i);
+        i = i + 1;
+    }
+    // Keep it positive and bounded
+    let result = h % 1000000007;
+    if result < 0 { result + 1000000007 } else { result }
+}
+
+// ============================================================================
+// String comparison
+// ============================================================================
+
+fn str8_equal(a: Str8, b: Str8) -> Bool {
+    if a.len != b.len { false }
+    else {
+        let mut i = 0;
+        let mut eq = true;
+        while i < a.len {
+            if str8_get(a, i) != str8_get(b, i) { eq = false; }
+            i = i + 1;
+        }
+        eq
+    }
+}
+
+// Lexicographic comparison: -1 (less), 0 (equal), 1 (greater)
+fn str8_compare(a: Str8, b: Str8) -> Int {
+    let min_len = if a.len < b.len { a.len } else { b.len };
+    let mut i = 0;
+    let mut result = 0;
+    let mut done = false;
+    while i < min_len && !done {
+        let ca = str8_get(a, i);
+        let cb = str8_get(b, i);
+        if ca < cb {
+            result = -1;
+            done = true;
+        } else if ca > cb {
+            result = 1;
+            done = true;
+        }
+        i = i + 1;
+    }
+    if !done {
+        if a.len < b.len { -1 }
+        else if a.len > b.len { 1 }
+        else { 0 }
+    } else {
+        result
+    }
+}
+
+// ============================================================================
+// String operations: slice, reverse, to_lower, to_upper
+// ============================================================================
+
+fn str8_slice(s: Str8, from: Int, to_excl: Int) -> Str8 {
+    let mut result = str8_empty();
+    let new_len = to_excl - from;
+    let mut i = 0;
+    while i < new_len {
+        result = str8_set(result, i, str8_get(s, from + i));
+        i = i + 1;
+    }
+    str8_with_len(result, new_len)
+}
+
+fn str8_reverse(s: Str8) -> Str8 {
+    let mut result = str8_empty();
+    let mut i = 0;
+    while i < s.len {
+        result = str8_set(result, i, str8_get(s, s.len - 1 - i));
+        i = i + 1;
+    }
+    str8_with_len(result, s.len)
+}
+
+fn str8_to_lower(s: Str8) -> Str8 {
+    let mut result = str8_empty();
+    let mut i = 0;
+    while i < s.len {
+        result = str8_set(result, i, to_lower(str8_get(s, i)));
+        i = i + 1;
+    }
+    str8_with_len(result, s.len)
+}
+
+fn str8_to_upper(s: Str8) -> Str8 {
+    let mut result = str8_empty();
+    let mut i = 0;
+    while i < s.len {
+        result = str8_set(result, i, to_upper(str8_get(s, i)));
+        i = i + 1;
+    }
+    str8_with_len(result, s.len)
+}
+
+// ============================================================================
+// Count character types
+// ============================================================================
+
+fn count_uppercase(s: Str8) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < s.len {
+        if is_uppercase(str8_get(s, i)) { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+fn count_digits_in_str(s: Str8) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < s.len {
+        if is_digit(str8_get(s, i)) { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+// ============================================================================
+// Integer-to-"string" conversion
+// ============================================================================
+
+fn int_to_digit_sum(n: Int) -> Int {
+    let mut val = n;
+    if val < 0 { val = -val; }
+    if val == 0 { 0 }
+    else {
+        let mut total = 0;
+        while val > 0 {
+            total = total + val % 10;
+            val = val / 10;
+        }
+        total
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_char_codes() {
+    assert(is_uppercase(65));   // 'A'
+    assert(is_uppercase(90));   // 'Z'
+    assert(!is_uppercase(97));  // 'a'
+    assert(is_lowercase(97));   // 'a'
+    assert(is_lowercase(122));  // 'z'
+    assert(!is_lowercase(65));  // 'A'
+    assert(is_digit(48));       // '0'
+    assert(is_digit(57));       // '9'
+    assert(!is_digit(65));      // 'A'
+
+    assert_eq(to_lower(65), 97);   // 'A' -> 'a'
+    assert_eq(to_lower(90), 122);  // 'Z' -> 'z'
+    assert_eq(to_lower(97), 97);   // 'a' unchanged
+    assert_eq(to_upper(97), 65);   // 'a' -> 'A'
+    assert_eq(to_upper(65), 65);   // 'A' unchanged
+    print("char_lower_A=97");
+    print("char_upper_a=65");
+}
+
+fn test_hash() {
+    // "ABC" = [65, 66, 67]
+    let mut s1 = str8_empty();
+    s1 = str8_set(s1, 0, 65);
+    s1 = str8_set(s1, 1, 66);
+    s1 = str8_set(s1, 2, 67);
+    s1 = str8_with_len(s1, 3);
+    let h1 = str8_hash(s1);
+
+    // "ABD" = [65, 66, 68]
+    let mut s2 = str8_empty();
+    s2 = str8_set(s2, 0, 65);
+    s2 = str8_set(s2, 1, 66);
+    s2 = str8_set(s2, 2, 68);
+    s2 = str8_with_len(s2, 3);
+    let h2 = str8_hash(s2);
+
+    // Different strings should have different hashes (likely)
+    assert(h1 != h2);
+    // Same string should have same hash
+    let h1b = str8_hash(s1);
+    assert_eq(h1, h1b);
+
+    // Empty string hash
+    let empty = str8_empty();
+    let h_empty = str8_hash(empty);
+    assert_eq(h_empty, 5381 % 1000000007);
+    print("hash_empty=5381");
+    print("hash_consistent=1");
+}
+
+fn test_compare() {
+    // "ABC" vs "ABD"
+    let mut s1 = str8_empty();
+    s1 = str8_set(s1, 0, 65);
+    s1 = str8_set(s1, 1, 66);
+    s1 = str8_set(s1, 2, 67);
+    s1 = str8_with_len(s1, 3);
+
+    let mut s2 = str8_empty();
+    s2 = str8_set(s2, 0, 65);
+    s2 = str8_set(s2, 1, 66);
+    s2 = str8_set(s2, 2, 68);
+    s2 = str8_with_len(s2, 3);
+
+    assert_eq(str8_compare(s1, s2), -1);  // "ABC" < "ABD"
+    assert_eq(str8_compare(s2, s1), 1);   // "ABD" > "ABC"
+    assert_eq(str8_compare(s1, s1), 0);   // equal
+    assert(str8_equal(s1, s1));
+    assert(!str8_equal(s1, s2));
+    print("cmp_abc_abd=-1");
+    print("cmp_equal=0");
+
+    // Prefix comparison: "AB" vs "ABC"
+    let mut s3 = str8_empty();
+    s3 = str8_set(s3, 0, 65);
+    s3 = str8_set(s3, 1, 66);
+    s3 = str8_with_len(s3, 2);
+    assert_eq(str8_compare(s3, s1), -1);  // shorter = less
+    print("cmp_prefix=-1");
+}
+
+fn test_slice_reverse() {
+    // "HELLO" = [72, 69, 76, 76, 79]
+    let mut s = str8_empty();
+    s = str8_set(s, 0, 72);
+    s = str8_set(s, 1, 69);
+    s = str8_set(s, 2, 76);
+    s = str8_set(s, 3, 76);
+    s = str8_set(s, 4, 79);
+    s = str8_with_len(s, 5);
+
+    // Slice [1..4) = "ELL" = [69, 76, 76]
+    let sl = str8_slice(s, 1, 4);
+    assert_eq(sl.len, 3);
+    assert_eq(str8_get(sl, 0), 69);
+    assert_eq(str8_get(sl, 1), 76);
+    assert_eq(str8_get(sl, 2), 76);
+    print("slice_len=3");
+
+    // Reverse "HELLO" -> "OLLEH" = [79, 76, 76, 69, 72]
+    let rev = str8_reverse(s);
+    assert_eq(str8_get(rev, 0), 79);
+    assert_eq(str8_get(rev, 1), 76);
+    assert_eq(str8_get(rev, 4), 72);
+    print("reverse_first=79");
+}
+
+fn test_case_conversion() {
+    // "AbCd" = [65, 98, 67, 100]
+    let mut s = str8_empty();
+    s = str8_set(s, 0, 65);   // A
+    s = str8_set(s, 1, 98);   // b
+    s = str8_set(s, 2, 67);   // C
+    s = str8_set(s, 3, 100);  // d
+    s = str8_with_len(s, 4);
+
+    let lower = str8_to_lower(s);
+    assert_eq(str8_get(lower, 0), 97);   // a
+    assert_eq(str8_get(lower, 1), 98);   // b
+    assert_eq(str8_get(lower, 2), 99);   // c
+    assert_eq(str8_get(lower, 3), 100);  // d
+    print("to_lower_0=97");
+
+    let upper = str8_to_upper(s);
+    assert_eq(str8_get(upper, 0), 65);  // A
+    assert_eq(str8_get(upper, 1), 66);  // B
+    assert_eq(str8_get(upper, 2), 67);  // C
+    assert_eq(str8_get(upper, 3), 68);  // D
+    print("to_upper_1=66");
+
+    assert_eq(count_uppercase(s), 2);
+    print("count_upper=2");
+}
+
+fn test_digit_sum() {
+    assert_eq(int_to_digit_sum(12345), 15);
+    assert_eq(int_to_digit_sum(99), 18);
+    assert_eq(int_to_digit_sum(100), 1);
+    assert_eq(int_to_digit_sum(0), 0);
+    assert_eq(int_to_digit_sum(-42), 6);
+    print("digit_sum_12345=15");
+    print("digit_sum_99=18");
+}
+
+fn main() -> Int {
+    test_char_codes();
+    test_hash();
+    test_compare();
+    test_slice_reverse();
+    test_case_conversion();
+    test_digit_sum();
+    print("PASS: strings");
+    0
+}

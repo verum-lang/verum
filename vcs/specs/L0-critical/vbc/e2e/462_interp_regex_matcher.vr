@@ -1,0 +1,192 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, regex, nfa, pattern_matching, string_matching
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Simple regex matching on integer-encoded strings.
+// Pattern elements: -1 = any char (.), -2 = repeat previous (*), >=0 = literal char.
+// Uses dynamic programming / recursive matching approach.
+// Strings and patterns stored as integer arrays with length prefix at index 0.
+
+// Match pattern pat[pi..] against text txt[ti..].
+// pat[0] = pattern length, txt[0] = text length.
+// Returns 1 if match, 0 otherwise.
+// Supports: literal match, -1 (any single char), followed by -2 (zero or more of previous).
+@allow(unbounded_recursion)
+fn regex_match_dp(pat: [Int; 16], pi: Int, txt: [Int; 16], ti: Int) -> Int {
+    let plen = pat[0];
+    let tlen = txt[0];
+
+    // Base: pattern exhausted
+    if pi > plen {
+        if ti > tlen { 1 } else { 0 }
+    } else {
+        // Check if next pattern element is -2 (star) — handle x* where x=pat[pi]
+        let has_star = if pi + 1 <= plen && pat[pi + 1] == -2 { 1 } else { 0 };
+
+        if has_star == 1 {
+            // x*: try zero occurrences (skip pi and pi+1 in pattern)
+            let zero = regex_match_dp(pat, pi + 2, txt, ti);
+            if zero == 1 {
+                1
+            } else {
+                // Try one or more: current text char must match pat[pi]
+                if ti > tlen {
+                    0
+                } else {
+                    let ch = txt[ti];
+                    let p  = pat[pi];
+                    let matches = if p == -1 { 1 } else if p == ch { 1 } else { 0 };
+                    if matches == 1 {
+                        regex_match_dp(pat, pi, txt, ti + 1)
+                    } else {
+                        0
+                    }
+                }
+            }
+        } else {
+            // No star: must match single char
+            if ti > tlen {
+                0
+            } else {
+                let ch = txt[ti];
+                let p  = pat[pi];
+                let matches = if p == -1 { 1 } else if p == ch { 1 } else { 0 };
+                if matches == 1 {
+                    regex_match_dp(pat, pi + 1, txt, ti + 1)
+                } else {
+                    0
+                }
+            }
+        }
+    }
+}
+
+// Convenience: match pattern (1-indexed, index 0 = length) against text.
+fn regex_match(pat: [Int; 16], txt: [Int; 16]) -> Int {
+    regex_match_dp(pat, 1, txt, 1)
+}
+
+fn test_literal_match() {
+    // Pattern "abc" = [3, 97, 98, 99, 0, 0, ...]
+    // Text "abc"   = [3, 97, 98, 99, 0, 0, ...]
+    let mut pat = [3, 97, 98, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut txt = [3, 97, 98, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat, txt), 1);
+
+    // Text "abd" != pattern "abc"
+    txt[3] = 100;
+    assert_eq(regex_match(pat, txt), 0);
+
+    // Text "ab" (shorter) != pattern "abc"
+    let mut txt2 = [2, 97, 98, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat, txt2), 0);
+
+    // Text "abcd" (longer) != pattern "abc"
+    let mut txt3 = [4, 97, 98, 99, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat, txt3), 0);
+
+    print("literal_match: ok");
+}
+
+fn test_dot_wildcard() {
+    // Pattern "a.c" = [3, 97, -1, 99, ...]
+    // Matches "abc", "aXc", "a1c", etc.
+    let mut pat = [3, 97, -1, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // "abc": a(97).c(99) -> matches
+    let txt1 = [3, 97, 98, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat, txt1), 1);
+
+    // "aZc": a(97) Z(90) c(99) -> matches
+    let txt2 = [3, 97, 90, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat, txt2), 1);
+
+    // "ac": too short (missing middle char) -> no match
+    let txt3 = [2, 97, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat, txt3), 0);
+
+    // "bbc": first char not 'a' -> no match
+    let txt4 = [3, 98, 98, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat, txt4), 0);
+
+    // Pattern "..." matches any 3-char string
+    let pat_dots = [3, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let txt5 = [3, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat_dots, txt5), 1);
+
+    print("dot_wildcard: ok");
+}
+
+fn test_star_repetition() {
+    // Pattern "a*" = [2, 97, -2, ...] matches "", "a", "aa", "aaa", ...
+    let mut pat_astar = [2, 97, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Empty string matches a*
+    let empty = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat_astar, empty), 1);
+
+    // "a" matches a*
+    let one_a = [1, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat_astar, one_a), 1);
+
+    // "aaa" matches a*
+    let three_a = [3, 97, 97, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat_astar, three_a), 1);
+
+    // "b" does NOT match a*
+    let one_b = [1, 98, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(regex_match(pat_astar, one_b), 0);
+
+    // Pattern "ab*c" = [4, 97, 98, -2, 99] matches "ac", "abc", "abbc"
+    let pat_abstarc = [4, 97, 98, -2, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let txt_ac   = [2, 97, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let txt_abc  = [3, 97, 98, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let txt_abbc = [4, 97, 98, 98, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let txt_adc  = [3, 97, 100, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    assert_eq(regex_match(pat_abstarc, txt_ac),   1); // "ac" matches ab*c
+    assert_eq(regex_match(pat_abstarc, txt_abc),  1); // "abc" matches ab*c
+    assert_eq(regex_match(pat_abstarc, txt_abbc), 1); // "abbc" matches ab*c
+    assert_eq(regex_match(pat_abstarc, txt_adc),  0); // "adc" does not match ab*c
+
+    print("star_repetition: ok");
+}
+
+fn test_combined_patterns() {
+    // Pattern ".*" = [2, -1, -2] matches any string (including empty)
+    let pat_any = [2, -1, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let empty  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let one    = [1, 42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let three  = [3, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    assert_eq(regex_match(pat_any, empty), 1);
+    assert_eq(regex_match(pat_any, one),   1);
+    assert_eq(regex_match(pat_any, three), 1);
+
+    // Pattern "a.*b" = [4, 97, -1, -2, 98] matches "ab", "axb", "aXXb"
+    let pat_aXb = [4, 97, -1, -2, 98, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ab   = [2, 97, 98, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let axb  = [3, 97, 120, 98, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let axxb = [4, 97, 120, 120, 98, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ba   = [2, 98, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    assert_eq(regex_match(pat_aXb, ab),   1);
+    assert_eq(regex_match(pat_aXb, axb),  1);
+    assert_eq(regex_match(pat_aXb, axxb), 1);
+    assert_eq(regex_match(pat_aXb, ba),   0);
+
+    print("combined_patterns: ok");
+}
+
+fn main() -> Int {
+    test_literal_match();
+    test_dot_wildcard();
+    test_star_repetition();
+    test_combined_patterns();
+    print("[OK] 462_interp_regex_matcher");
+    0
+}

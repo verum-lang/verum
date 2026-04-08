@@ -1,0 +1,39 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, minimal
+// @description: Test approx_eq pattern from float_math_test
+
+module test.stdlib.sys.intrinsics.approx_eq_test;
+
+mount core.intrinsics.{abs_f64, sqrt_f64};
+
+const EPSILON_F64: Float64 = 1e-10;
+
+fn approx_eq_f64(a: Float64, b: Float64, epsilon: Float64) -> Bool {
+    let diff = abs_f64(a - b);
+    diff < epsilon
+}
+
+fn main() {
+    // Test basic sqrt
+    let sqrt_result = sqrt_f64(0.0);
+    print(f"sqrt(0.0) = {sqrt_result}");
+
+    // Test approx_eq helper
+    let is_close = approx_eq_f64(sqrt_result, 0.0, EPSILON_F64);
+    print(f"is_close = {is_close}");
+
+    // Now assert
+    assert(approx_eq_f64(sqrt_f64(0.0), 0.0, EPSILON_F64));
+    print("Assertion passed!");
+
+    // More tests
+    assert(approx_eq_f64(sqrt_f64(1.0), 1.0, EPSILON_F64));
+    print("sqrt(1) test passed!");
+
+    assert(approx_eq_f64(sqrt_f64(4.0), 2.0, EPSILON_F64));
+    print("sqrt(4) test passed!");
+
+    print("All tests passed!");
+}

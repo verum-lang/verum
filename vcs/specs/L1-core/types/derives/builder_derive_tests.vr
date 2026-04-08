@@ -1,0 +1,197 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: derives, builder, type-system
+// @timeout: 10000
+// @expect: pass
+//
+// Tests for @builder derive macro.
+// Spec: docs/improvements.md Section 10 - Builder Pattern as First-Class Feature
+
+// =============================================================================
+// TEST 1: Basic Builder with Required and Optional Fields
+// =============================================================================
+
+@builder
+type HttpRequest is {
+    method: Text,                           // Required (no default)
+    url: Text,                              // Required (no default)
+    headers: Map<Text, Text> = Map.new(),   // Optional with default
+    timeout: Int = 30,                      // Optional with default
+};
+
+// Test: Builder should allow setting all fields
+fn test_builder_all_fields() {
+    let request = HttpRequest.builder()
+        .method("GET")
+        .url("https://example.com")
+        .headers(Map.from([("Accept", "application/json")]))
+        .timeout(60)
+        .build();
+
+    assert_eq(request.method, "GET");
+    assert_eq(request.url, "https://example.com");
+    assert_eq(request.timeout, 60);
+}
+
+// Test: Builder should use defaults for optional fields
+fn test_builder_defaults() {
+    let request = HttpRequest.builder()
+        .method("POST")
+        .url("https://api.example.com")
+        .build();
+
+    assert_eq(request.method, "POST");
+    assert_eq(request.url, "https://api.example.com");
+    assert_eq(request.timeout, 30);  // Default value
+}
+
+// =============================================================================
+// TEST 2: Fluent Chaining
+// =============================================================================
+
+@builder
+type Config is {
+    name: Text,
+    debug: Bool = false,
+    log_level: Text = "info",
+    max_connections: Int = 100,
+};
+
+fn test_builder_chaining() {
+    // Builder methods should be chainable in any order
+    let config = Config.builder()
+        .max_connections(200)
+        .name("production")
+        .debug(true)
+        .log_level("debug")
+        .build();
+
+    assert_eq(config.name, "production");
+    assert_eq(config.debug, true);
+    assert_eq(config.log_level, "debug");
+    assert_eq(config.max_connections, 200);
+}
+
+// =============================================================================
+// TEST 3: Builder with Complex Types
+// =============================================================================
+
+type DatabaseConfig is {
+    host: Text,
+    port: Int,
+};
+
+@builder
+type AppConfig is {
+    app_name: Text,
+    db_config: DatabaseConfig,
+    features: List<Text> = List.new(),
+};
+
+fn test_builder_complex_types() {
+    let db = DatabaseConfig { host: "localhost", port: 5432 };
+
+    let config = AppConfig.builder()
+        .app_name("my_app")
+        .db_config(db)
+        .features(List.from(["auth", "cache"]))
+        .build();
+
+    assert_eq(config.app_name, "my_app");
+    assert_eq(config.db_config.host, "localhost");
+    assert_eq(config.db_config.port, 5432);
+    assert_eq(config.features.len(), 2);
+}
+
+// =============================================================================
+// TEST 4: Builder Error Case - Missing Required Field
+// =============================================================================
+
+// This should fail at runtime (panic) if required field is not set
+// Note: In future, this should be a compile-time error with typestate pattern
+
+@builder
+type RequiredFieldsType is {
+    required1: Text,
+    required2: Int,
+    optional: Bool = true,
+};
+
+fn test_builder_missing_required_field_panics() {
+    // This should panic because required1 is not set
+    // In a proper test framework, we'd use @expect: panic
+    // For now, this is a documentation test
+
+    // let broken = RequiredFieldsType.builder()
+    //     .required2(42)
+    //     .build();  // PANIC: Missing required field: required1
+}
+
+// =============================================================================
+// TEST 5: Generic Builder
+// =============================================================================
+
+@builder
+type Container<T> is {
+    value: T,
+    label: Text = "default",
+};
+
+fn test_generic_builder() {
+    let int_container = Container.builder()
+        .value(42)
+        .label("int")
+        .build();
+
+    assert_eq(int_container.value, 42);
+    assert_eq(int_container.label, "int");
+
+    let text_container = Container.builder()
+        .value("hello")
+        .build();
+
+    assert_eq(text_container.value, "hello");
+    assert_eq(text_container.label, "default");
+}
+
+// =============================================================================
+// TEST 6: Builder with CBGR References
+// =============================================================================
+
+@builder
+type DataProcessor is {
+    name: Text,
+    buffer_size: Int = 1024,
+    enable_compression: Bool = false,
+};
+
+fn test_builder_cbgr_safety() {
+    // Builder creates owned values, no reference issues
+    let processor = DataProcessor.builder()
+        .name("main_processor")
+        .buffer_size(4096)
+        .enable_compression(true)
+        .build();
+
+    // processor is fully owned, can be moved/used freely
+    assert_eq(processor.name, "main_processor");
+    assert_eq(processor.buffer_size, 4096);
+    assert(processor.enable_compression);
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    test_builder_all_fields();
+    test_builder_defaults();
+    test_builder_chaining();
+    test_builder_complex_types();
+    // test_builder_missing_required_field_panics(); // Commented - would panic
+    test_generic_builder();
+    test_builder_cbgr_safety();
+
+    print("All builder derive tests passed!");
+}

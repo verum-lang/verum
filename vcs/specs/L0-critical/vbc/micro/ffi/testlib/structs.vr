@@ -1,0 +1,85 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, structs, aggregate
+// @description: Test FFI struct operations (Point2D, Point3D)
+
+// Point2D: 8 bytes (two i32)
+// Note: Must use Int32 to match the Rust library's i32 type
+@repr(C)
+type Point2D is {
+    x: Int32,
+    y: Int32,
+};
+
+// Point3D: 24 bytes (three f64)
+@repr(C)
+type Point3D is {
+    x: Float,
+    y: Float,
+    z: Float,
+};
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_make_point2d(x: Int32, y: Int32) -> Point2D;
+    fn ffi_add_point2d(a: Point2D, b: Point2D) -> Point2D;
+    fn ffi_point2d_magnitude(p: Point2D) -> Float;
+    fn ffi_point2d_get_x(p: &Point2D) -> Int32;
+    fn ffi_point2d_scale(p: &mut Point2D, factor: Int32);
+    fn ffi_make_point3d(x: Float, y: Float, z: Float) -> Point3D;
+    fn ffi_add_point3d(a: Point3D, b: Point3D) -> Point3D;
+    fn ffi_dot_point3d(a: Point3D, b: Point3D) -> Float;
+    fn ffi_point3d_magnitude(p: Point3D) -> Float;
+}
+
+fn main() {
+    // Test Point2D creation
+    let p1 = ffi_make_point2d(3, 4);
+    assert_eq(p1.x, 3);
+    assert_eq(p1.y, 4);
+
+    // Test Point2D addition
+    let p2 = ffi_make_point2d(10, 20);
+    let p3 = ffi_add_point2d(p1, p2);
+    assert_eq(p3.x, 13);
+    assert_eq(p3.y, 24);
+
+    // Test Point2D magnitude (3-4-5 triangle)
+    let mag = ffi_point2d_magnitude(p1);
+    assert(mag > 4.99 && mag < 5.01);  // Should be 5.0
+
+    // Test Point2D get_x via pointer
+    let x_val = ffi_point2d_get_x(&p1);
+    assert_eq(x_val, 3);
+
+    // Test Point2D scale in place
+    let mut p4 = ffi_make_point2d(5, 10);
+    ffi_point2d_scale(&mut p4, 3);
+    assert_eq(p4.x, 15);
+    assert_eq(p4.y, 30);
+
+    // Test Point3D creation
+    let p3d1 = ffi_make_point3d(1.0, 2.0, 3.0);
+    assert(p3d1.x > 0.99 && p3d1.x < 1.01);
+    assert(p3d1.y > 1.99 && p3d1.y < 2.01);
+    assert(p3d1.z > 2.99 && p3d1.z < 3.01);
+
+    // Test Point3D addition
+    let p3d2 = ffi_make_point3d(4.0, 5.0, 6.0);
+    let p3d3 = ffi_add_point3d(p3d1, p3d2);
+    assert(p3d3.x > 4.99 && p3d3.x < 5.01);
+    assert(p3d3.y > 6.99 && p3d3.y < 7.01);
+    assert(p3d3.z > 8.99 && p3d3.z < 9.01);
+
+    // Test Point3D dot product: (1,2,3) · (4,5,6) = 4+10+18 = 32
+    let dot = ffi_dot_point3d(p3d1, p3d2);
+    assert(dot > 31.99 && dot < 32.01);
+
+    // Test Point3D magnitude: sqrt(1+4+9) = sqrt(14) ≈ 3.7417
+    let mag3d = ffi_point3d_magnitude(p3d1);
+    assert(mag3d > 3.74 && mag3d < 3.75);
+
+    print("Struct tests passed!\n");
+}

@@ -1,0 +1,396 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: cbgr, performance, memory-safety, thin-ref
+// @description: ThinRef CBGR check latency benchmark (target: < 15ns per check, 16 bytes per ThinRef)
+
+/// ThinRef CBGR Check Latency Benchmark
+///
+/// ThinRef is the compact reference type in Verum's three-tier reference system.
+/// Layout: 16 bytes (ptr: 8 bytes + generation: 4 bytes + epoch_caps: 4 bytes)
+///
+/// This benchmark measures the latency of CBGR validation for ThinRef:
+/// 1. Generation check - validates reference hasn't been invalidated
+/// 2. Epoch capability check - validates access is within valid epoch
+/// 3. Pointer dereference - actual memory access
+///
+/// Target: < 15ns per CBGR check (Tier 0 managed references)
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+module vcs.specs.l4.cbgr_latency.thin_ref_check;
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// ThinRef memory layout verification
+type ThinRefLayout is {
+    ptr: *const (),      // 8 bytes - raw pointer
+    generation: u32,     // 4 bytes - generation counter
+    epoch_caps: u32,     // 4 bytes - epoch capability bits
+};
+
+fn main() {
+    let results = BenchmarkResults.new("ThinRef CBGR Check Latency");
+
+    // Core ThinRef benchmarks
+    results.add(benchmark_thin_ref_single_check());
+    results.add(benchmark_thin_ref_repeated_check());
+    results.add(benchmark_thin_ref_generation_validation());
+    results.add(benchmark_thin_ref_epoch_check());
+    results.add(benchmark_thin_ref_vs_raw_pointer());
+    results.add(benchmark_thin_ref_cache_effects());
+    results.add(benchmark_thin_ref_branch_prediction());
+    results.add(benchmark_thin_ref_memory_layout());
+
+    results.report();
+    assert(results.all_pass(), "ThinRef CBGR check latency exceeds 15ns target");
+}
+
+/// Single ThinRef dereference with full CBGR check
+fn benchmark_thin_ref_single_check() -> BenchmarkResult {
+    let value: Int = 42;
+    let thin_ref: &Int = &value;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*thin_ref);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Each dereference performs:
+        // 1. Load generation from ThinRef (4 bytes)
+        // 2. Compare with source generation
+        // 3. Load epoch_caps from ThinRef (4 bytes)
+        // 4. Check epoch validity
+        // 5. Dereference pointer
+        black_box(*thin_ref);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "thin_ref_single_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 15.0,
+        passed: per_check_ns < 15.0,
+    }
+}
+
+/// Repeated ThinRef checks (should benefit from branch prediction)
+fn benchmark_thin_ref_repeated_check() -> BenchmarkResult {
+    let value: Int = 42;
+    let thin_ref: &Int = &value;
+    let mut sum: Int = 0;
+
+    // Warmup to train branch predictor
+    for _ in 0..WARMUP_ITERATIONS {
+        sum += *thin_ref;
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum += *thin_ref;
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Repeated checks should be faster due to branch prediction
+    BenchmarkResult {
+        name: "thin_ref_repeated_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 12.0,
+        passed: per_check_ns < 12.0,
+    }
+}
+
+/// Generation validation overhead isolation
+fn benchmark_thin_ref_generation_validation() -> BenchmarkResult {
+    let value: Int = 42;
+    let thin_ref: &Int = &value;
+
+    // Get raw generation for comparison
+    let generation = cbgr_get_generation(thin_ref);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let valid = cbgr_validate_generation(thin_ref, generation);
+        black_box(valid);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let valid = cbgr_validate_generation(thin_ref, generation);
+        black_box(valid);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Pure generation check should be ~3-5ns
+    BenchmarkResult {
+        name: "thin_ref_generation_validation",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 5.0,
+        passed: per_check_ns < 5.0,
+    }
+}
+
+/// Epoch capability check overhead
+fn benchmark_thin_ref_epoch_check() -> BenchmarkResult {
+    let value: Int = 42;
+    let thin_ref: &Int = &value;
+
+    // Get current epoch
+    let current_epoch = cbgr_current_epoch();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let valid = cbgr_check_epoch_capability(thin_ref, current_epoch);
+        black_box(valid);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let valid = cbgr_check_epoch_capability(thin_ref, current_epoch);
+        black_box(valid);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Epoch check should be ~2-4ns (bit operation)
+    BenchmarkResult {
+        name: "thin_ref_epoch_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 4.0,
+        passed: per_check_ns < 4.0,
+    }
+}
+
+/// Compare ThinRef overhead to raw pointer access
+fn benchmark_thin_ref_vs_raw_pointer() -> BenchmarkResult {
+    let value: Int = 42;
+    let thin_ref: &Int = &value;
+    let raw_ptr: *const Int = &value as *const Int;
+
+    // Measure ThinRef time
+    let timer_thin = Timer.new();
+    timer_thin.start();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(*thin_ref);
+    }
+    let thin_ns = timer_thin.elapsed_ns();
+
+    // Measure raw pointer time (unsafe, for comparison)
+    let timer_raw = Timer.new();
+    timer_raw.start();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        unsafe {
+            black_box(*raw_ptr);
+        }
+    }
+    let raw_ns = timer_raw.elapsed_ns();
+
+    let overhead_ns = (thin_ns - raw_ns) as Float / BENCHMARK_ITERATIONS as Float;
+
+    // CBGR overhead should be < 15ns
+    BenchmarkResult {
+        name: "thin_ref_vs_raw_overhead",
+        metric: "ns overhead",
+        value: overhead_ns,
+        target: 15.0,
+        passed: overhead_ns < 15.0,
+    }
+}
+
+/// Cache effects on ThinRef checks
+fn benchmark_thin_ref_cache_effects() -> BenchmarkResult {
+    // Create many values to stress cache
+    let values: List<Int> = List.with_capacity(1000);
+    for i in 0..1000 {
+        values.push(i);
+    }
+
+    let refs: List<&Int> = values.iter().map(|v| v).collect();
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 1000) {
+        for r in refs.iter() {
+            black_box(**r);
+        }
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1000) {
+        for r in refs.iter() {
+            black_box(**r);
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Cache misses may increase latency
+    BenchmarkResult {
+        name: "thin_ref_cache_effects",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 25.0,  // Higher target for cache pressure
+        passed: per_check_ns < 25.0,
+    }
+}
+
+/// Branch prediction effects on CBGR checks
+fn benchmark_thin_ref_branch_prediction() -> BenchmarkResult {
+    let value1: Int = 1;
+    let value2: Int = 2;
+    let ref1: &Int = &value1;
+    let ref2: &Int = &value2;
+
+    // Alternating pattern - harder for branch predictor
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        if i % 2 == 0 {
+            black_box(*ref1);
+        } else {
+            black_box(*ref2);
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Branch misprediction may add overhead
+    BenchmarkResult {
+        name: "thin_ref_branch_prediction",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 20.0,
+        passed: per_check_ns < 20.0,
+    }
+}
+
+/// Verify ThinRef memory layout is exactly 16 bytes
+fn benchmark_thin_ref_memory_layout() -> BenchmarkResult {
+    let value: Int = 42;
+    let thin_ref: &Int = &value;
+
+    let size = size_of_ref(thin_ref);
+    let expected_size = 16;  // ptr(8) + generation(4) + epoch_caps(4)
+
+    BenchmarkResult {
+        name: "thin_ref_memory_layout",
+        metric: "bytes",
+        value: size as Float,
+        target: expected_size as Float,
+        passed: size == expected_size,
+    }
+}
+
+// CBGR intrinsic functions (provided by runtime)
+@extern("verum_cbgr")
+fn cbgr_get_generation<T>(r: &T) -> u32;
+
+@extern("verum_cbgr")
+fn cbgr_validate_generation<T>(r: &T, expected: u32) -> Bool;
+
+@extern("verum_cbgr")
+fn cbgr_current_epoch() -> u32;
+
+@extern("verum_cbgr")
+fn cbgr_check_epoch_capability<T>(r: &T, epoch: u32) -> Bool;
+
+@extern("verum_cbgr")
+fn size_of_ref<T>(r: &T) -> Int;
+
+// Benchmark infrastructure types
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+// Utility to prevent compiler optimization
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

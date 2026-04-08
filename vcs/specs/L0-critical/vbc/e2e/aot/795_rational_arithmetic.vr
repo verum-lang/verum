@@ -1,0 +1,131 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, rational_arithmetic
+// @expected-exit: 0
+
+// Rational number arithmetic using pairs (numerator, denominator)
+// Stored in 16-element lists: [num, den, ...]
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { return 0 - x; }
+    x
+}
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    let aa = abs_val(a);
+    let bb = abs_val(b);
+    if (bb == 0) { return aa; }
+    gcd(bb, aa % bb)
+}
+
+// Simplify a rational number, keeping sign in numerator
+fn simplify_num(n: Int, d: Int) -> Int {
+    let g = gcd(abs_val(n), abs_val(d));
+    let sn = n / g;
+    let sd = d / g;
+    if (sd < 0) { return 0 - sn; }
+    sn
+}
+
+fn simplify_den(n: Int, d: Int) -> Int {
+    let g = gcd(abs_val(n), abs_val(d));
+    let sd = d / g;
+    if (sd < 0) { return 0 - sd; }
+    sd
+}
+
+// Addition: a/b + c/d = (a*d + c*b) / (b*d)
+fn rat_add_num(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    simplify_num(an * bd + bn * ad, ad * bd)
+}
+
+fn rat_add_den(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    simplify_den(an * bd + bn * ad, ad * bd)
+}
+
+// Subtraction: a/b - c/d = (a*d - c*b) / (b*d)
+fn rat_sub_num(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    simplify_num(an * bd - bn * ad, ad * bd)
+}
+
+fn rat_sub_den(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    simplify_den(an * bd - bn * ad, ad * bd)
+}
+
+// Multiplication: (a/b) * (c/d) = (a*c) / (b*d)
+fn rat_mul_num(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    simplify_num(an * bn, ad * bd)
+}
+
+fn rat_mul_den(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    simplify_den(an * bn, ad * bd)
+}
+
+// Division: (a/b) / (c/d) = (a*d) / (b*c)
+fn rat_div_num(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    simplify_num(an * bd, ad * bn)
+}
+
+fn rat_div_den(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    simplify_den(an * bd, ad * bn)
+}
+
+// Comparison: a/b < c/d iff a*d < c*b (when b,d > 0)
+fn rat_less(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    if (an * bd < bn * ad) { return 1; }
+    0
+}
+
+fn rat_equal(an: Int, ad: Int, bn: Int, bd: Int) -> Int {
+    if (an * bd == bn * ad) { return 1; }
+    0
+}
+
+// Convert to integer (floor division)
+fn rat_to_int(n: Int, d: Int) -> Int {
+    n / d
+}
+
+fn main() -> Int {
+    // Test 1: Simplify 6/4 = 3/2
+    assert_eq(simplify_num(6, 4), 3);
+
+    // Test 2: Simplified denominator
+    assert_eq(simplify_den(6, 4), 2);
+
+    // Test 3: Addition 1/3 + 1/6 = 2/6 + 1/6 = 3/6 = 1/2
+    let sum_n = rat_add_num(1, 3, 1, 6);
+    let sum_d = rat_add_den(1, 3, 1, 6);
+    assert_eq(sum_n, 1);
+
+    // Test 4: Addition denominator
+    assert_eq(sum_d, 2);
+
+    // Test 5: Subtraction 3/4 - 1/4 = 2/4 = 1/2
+    let diff_n = rat_sub_num(3, 4, 1, 4);
+    assert_eq(diff_n, 1);
+
+    // Test 6: Multiplication 2/3 * 3/4 = 6/12 = 1/2
+    let mul_n = rat_mul_num(2, 3, 3, 4);
+    let mul_d = rat_mul_den(2, 3, 3, 4);
+    assert_eq(mul_n, 1);
+
+    // Test 7: Multiplication denominator check
+    assert_eq(mul_d, 2);
+
+    // Test 8: Division (2/3) / (4/5) = (2*5)/(3*4) = 10/12 = 5/6
+    let div_n = rat_div_num(2, 3, 4, 5);
+    let div_d = rat_div_den(2, 3, 4, 5);
+    assert_eq(div_n, 5);
+
+    // Test 9: Comparison 1/3 < 1/2 should be true
+    assert_eq(rat_less(1, 3, 1, 2), 1);
+
+    // Test 10: Integer conversion: 7/3 = 2 (floor)
+    assert_eq(rat_to_int(7, 3), 2);
+
+    print("795_rational_arithmetic: PASS");
+    0
+}

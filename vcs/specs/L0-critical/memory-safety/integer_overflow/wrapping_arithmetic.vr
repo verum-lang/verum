@@ -1,0 +1,40 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, integer-overflow, wrapping, safe
+// @description: Tests explicit wrapping arithmetic operations
+
+fn main() {
+    let max_int = 9223372036854775807;  // Int.MAX
+    let min_int = -9223372036854775807 - 1;  // Int.MIN
+
+    // Wrapping addition - wraps around on overflow
+    let result1 = max_int.wrapping_add(1);
+    assert(result1 == min_int);  // Wraps to minimum
+
+    // Wrapping subtraction
+    let result2 = min_int.wrapping_sub(1);
+    assert(result2 == max_int);  // Wraps to maximum
+
+    // Wrapping negation
+    let result4 = min_int.wrapping_neg();
+    assert(result4 == min_int);  // MIN negated wraps to MIN
+
+    // Saturating arithmetic (alternative to wrapping)
+    let result5 = max_int.saturating_add(100);
+    assert(result5 == max_int);  // Saturates at MAX
+
+    let result6 = min_int.saturating_sub(100);
+    assert(result6 == min_int);  // Saturates at MIN
+
+    // Overflowing operations return (result, did_overflow)
+    let result7 = max_int.overflowing_add(1);
+    match result7 {
+        (value, overflow) => {
+            assert(value == min_int);
+            assert(overflow == true);
+        }
+    }
+
+    println("Wrapping arithmetic works");
+}

@@ -1,0 +1,123 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, generic, type-parameter
+
+// Single type parameter
+fn identity<T>(x: T) -> T { x }
+
+// Multiple type parameters
+fn swap<A, B>(pair: (A, B)) -> (B, A) {
+    let (a, b) = pair;
+    (b, a)
+}
+
+// Type parameter with constraint
+fn print_debug<T: Debug>(x: T) {
+    print(x.debug());
+}
+
+// Multiple constraints on single type parameter
+fn constrained<T: Debug + Clone>(x: T) -> T {
+    print(x.debug());
+    x.clone()
+}
+
+// Multiple type parameters with constraints
+fn combine<A: Clone, B: Clone>(a: A, b: B) -> (A, B) {
+    (a.clone(), b.clone())
+}
+
+// Type parameter with where clause
+// Grammar: generic_where_clause = 'where' , 'type' , type_constraint_list ;
+fn complex<T>(x: T) -> T
+where type T: Debug + Clone + Default
+{
+    x
+}
+
+// Multiple where clauses
+// Grammar: where type constraint1, constraint2, ...
+fn multi_where<A, B>(a: A, b: B)
+where type A: Clone, B: Debug
+{
+    print(b.debug());
+}
+
+// Generic function returning generic type
+fn wrap<T>(value: T) -> Maybe<T> {
+    Some(value)
+}
+
+// Generic function with generic parameter types
+fn map_option<T, U>(opt: Maybe<T>, f: fn(T) -> U) -> Maybe<U> {
+    match opt {
+        Some(x) => Some(f(x)),
+        None => None,
+    }
+}
+
+// NOTE: Lifetime syntax ('a) is NOT supported in Verum.
+// Verum uses CBGR (Compile-time Borrow-check with Generation-based References)
+// instead of lifetimes. References are managed with generation counters.
+// fn with_lifetime<'a, T>(x: &'a T) -> &'a T { x }  // UNSUPPORTED: Rust lifetime syntax
+
+// Higher-kinded type parameter (if supported)
+fn functor<F<_>, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    fa.map(f)
+}
+
+// Generic function with const generic (if supported)
+fn array_size<T, const N: Int>() -> Int { N }
+
+// Generic with negative bound (exclusion) - supported in Verum
+fn not_copyable<T: !Copy>(x: T) {
+    consume(x);
+}
+
+// NOTE: Equality constraint (T == U) is NOT supported in Verum grammar.
+// Type equality is typically checked through other means.
+// fn same_type<T, U>(a: T, b: U) -> T where T == U { a }  // UNSUPPORTED
+
+// Generic with associated type constraint
+// Using proper Verum where clause syntax
+fn iter_sum<I>(iter: I) -> I.Item
+where type I: Iterator
+{
+    iter.fold(I.Item.default(), |acc, x| acc + x)
+}
+
+// Generic with complex where clause (all constraints on single line after 'where type')
+fn complex_bounds<A, B, C, D>(a: A, b: B, c: C, d: D) -> A
+where type A: Clone + Debug + Default, B: Into<A>, C: TryFrom<A>, D: Fn<A, B>
+{
+    a
+}
+
+// NOTE: `impl Trait` syntax is NOT supported in Verum.
+// Use explicit generic type parameters with constraints instead.
+// fn returns_impl() -> impl Display { "hello" }  // UNSUPPORTED: impl Trait
+// fn accepts_impl(x: impl Display + Debug) { print(x); }  // UNSUPPORTED: impl Trait
+
+// Alternative with explicit generic parameter:
+fn accepts_generic<T: Display + Debug>(x: T) {
+    print(x);
+}
+
+// Generic with turbofish at call site
+fn call_generic() {
+    let x = identity<Int>(42);
+    let y = collect<List<_>>(iter);
+}
+
+// Generic protocol function
+// NOTE: Associated type constraints in where clause have limited support
+fn protocol_fn<T: Protocol>() { }
+
+// Multiple const generics
+fn array_ops<T, const M: Int, const N: Int>(
+    a: [T; M],
+    b: [T; N]
+) -> [T; M + N] {
+    concat(a, b)
+}

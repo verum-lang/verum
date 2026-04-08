@@ -1,0 +1,101 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, higher-order, functional
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT higher-order programming patterns
+
+// Fold/reduce over a range
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+// Map over a range and accumulate
+fn map_sum(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    while i < end {
+        sum = sum + f(i);
+        i = i + 1;
+    }
+    sum
+}
+
+// Count items satisfying predicate
+fn count_if(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Find first item satisfying predicate, return -1 if not found
+fn find_first(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut result = -1;
+    let mut i = start;
+    let mut found = false;
+    while i < end {
+        if !found {
+            if pred(i) {
+                result = i;
+                found = true;
+            }
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Function combinator: negate a predicate
+fn negate(pred: fn(Int) -> Bool) -> fn(Int) -> Bool {
+    |x| !pred(x)
+}
+
+fn main() -> Int {
+    // fold_range as sum
+    let sum = fold_range(1, 11, 0, |acc, x| acc + x);
+    assert_eq(sum, 55);  // 1+2+...+10
+
+    // fold_range as product (factorial of 5)
+    let product = fold_range(1, 6, 1, |acc, x| acc * x);
+    assert_eq(product, 120);  // 5!
+
+    // map_sum: sum of squares
+    let sq_sum = map_sum(1, 6, |x| x * x);
+    assert_eq(sq_sum, 55);  // 1+4+9+16+25
+
+    // count_if: count even numbers
+    let even_count = count_if(1, 11, |x| x % 2 == 0);
+    assert_eq(even_count, 5);
+
+    // find_first
+    let first_gt5 = find_first(1, 11, |x| x > 5);
+    assert_eq(first_gt5, 6);
+
+    let not_found = find_first(1, 5, |x| x > 10);
+    assert_eq(not_found, -1);
+
+    // negate combinator
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    let is_odd = negate(is_even);
+    let odd_count = count_if(1, 11, is_odd);
+    assert_eq(odd_count, 5);
+
+    // Nested higher-order: count primes using trial division
+    let prime_count = count_if(2, 20, |n| {
+        count_if(2, n, |d| n % d == 0) == 0
+    });
+    assert_eq(prime_count, 8);  // 2,3,5,7,11,13,17,19
+
+    0
+}

@@ -1,0 +1,25 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: nursery, syntax, structured-concurrency
+// @description: Test nursery block syntax with spawn inside
+
+fn worker(x: Int) -> Int {
+    x * 10
+}
+
+fn main() -> Int {
+    print("before nursery");
+
+    // nursery block with spawns inside
+    nursery {
+        let h1 = spawn { worker(1) };
+        let h2 = spawn { worker(2) };
+        let r1 = h1.await;
+        let r2 = h2.await;
+        print(f"results: {r1} {r2}");
+    }
+
+    print("after nursery");
+    0
+}

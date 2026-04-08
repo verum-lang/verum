@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, sigma-types, multi-binding
+
+/// Multi-field sigma bindings -- types with multiple dependent fields
+/// where later fields can reference earlier bindings.
+/// Grammar: sigma_bindings = sigma_binding { ',' sigma_binding } ;
+
+// Two fields, second depends on first
+type SizedVec is n: Int where n >= 0, data: List<Int>;
+
+// Three fields with chain dependency
+type Subarray is
+    arr: List<Int>,
+    start: Int where start >= 0,
+    end: Int where end >= start;
+
+// Matrix with dependent dimensions
+type Matrix is
+    rows: Int where rows > 0,
+    cols: Int where cols > 0,
+    data: List<Float>;
+
+// Weighted value: weight must be in [0, 1]
+type Weighted<T> is
+    value: T,
+    weight: Float where weight >= 0.0 && weight <= 1.0;
+
+// Key-value with ordering constraint
+type OrderedEntry is
+    key: Int,
+    value: Text,
+    next_key: Int where next_key > key;
+
+// Decomposition of sigma type
+fn matrix_size(m: Matrix) -> (Int, Int) {
+    (m.rows, m.cols)
+}
+
+fn subarray_len(s: Subarray) -> Int {
+    s.end - s.start
+}
+
+fn subarray_slice(s: Subarray) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = s.start;
+    while i < s.end && i < s.arr.len() {
+        result.push(s.arr[i]);
+        i = i + 1;
+    }
+    result
+}
+
+fn weighted_sum(items: List<Weighted<Float>>) -> Float {
+    let mut sum = 0.0;
+    for item in items {
+        sum = sum + item.value * item.weight;
+    }
+    sum
+}
+
+fn main() {
+    let sv = SizedVec { n: 3, data: [1, 2, 3] };
+    assert(sv.n == 3);
+
+    let sub = Subarray { arr: [10, 20, 30, 40, 50], start: 1, end: 4 };
+    assert(subarray_len(sub) == 3);
+    let slice = subarray_slice(sub);
+    assert(slice == [20, 30, 40]);
+
+    let m = Matrix { rows: 2, cols: 3, data: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] };
+    let (r, c) = matrix_size(m);
+    assert(r == 2 && c == 3);
+
+    let items: List<Weighted<Float>> = [
+        Weighted { value: 10.0, weight: 0.5 },
+        Weighted { value: 20.0, weight: 0.3 },
+        Weighted { value: 30.0, weight: 0.2 },
+    ];
+    let ws = weighted_sum(items);
+    assert(ws == 17.0);
+
+    let entry = OrderedEntry { key: 1, value: "first", next_key: 5 };
+    assert(entry.next_key > entry.key);
+}

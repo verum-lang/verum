@@ -1,0 +1,124 @@
+// @test: typecheck-fail
+// @expected-error: E1003
+// @tier: 3
+// @level: L3
+// @tags: meta, staged, stage-checking, overflow, error
+
+/// Stage Overflow Error Tests (E1003)
+///
+/// Validates that the stage checker correctly rejects stage levels
+/// that exceed the configured maximum.
+/// Spec: 17-meta-system.md Section 2.4 - Stage Coherence Rule
+///
+/// ERROR E1003: Stage level exceeds maximum allowed stage.
+/// Default max stage is typically 8 or configurable.
+
+// ============================================================
+// ERROR: STAGE LEVEL EXCEEDS MAXIMUM
+// ============================================================
+
+// ERROR E1003: Stage 100 exceeds maximum allowed stage
+meta(100) fn absurdly_high_stage(x: Int) -> Int {
+    x
+}
+
+// ERROR E1003: Stage 50 likely exceeds maximum
+meta(50) fn very_high_stage(x: Int) -> Int {
+    x * 2
+}
+
+// ERROR E1003: Stage 20 may exceed maximum depending on config
+meta(20) fn high_stage(x: Int) -> Int {
+    x + 1
+}
+
+// ============================================================
+// ERROR: QUOTE TARGET EXCEEDS STAGE BOUNDS
+// ============================================================
+
+// Assuming max stage is 8, this should error
+meta(8) fn at_max_stage(x: Int) -> Int {
+    x
+}
+
+// ERROR E1003: Trying to define stage 9 when max is 8
+meta(9) fn exceeds_by_one(x: Int) -> Int {
+    // ERROR: stage overflow: meta(9) exceeds maximum allowed stage 8
+    x
+}
+
+// ============================================================
+// ERROR: RECURSIVE STAGE INFLATION
+// ============================================================
+
+// These would cause unbounded stage growth if allowed
+
+// ERROR E1003: Generated code would be at invalid stage
+meta(8) fn gen_invalid_stage() -> @Expr {
+    // ERROR: Cannot generate meta(9) code - exceeds max stage
+    quote(8) {
+        meta(8) fn nested() -> @Expr {
+            quote(8) {
+                // This chain would go beyond max stage
+                meta(8) fn deep() -> Int { 1 }
+            }
+        }
+    }
+}
+
+// ============================================================
+// ERROR: STAGE ARITHMETIC OVERFLOW
+// ============================================================
+
+// Using @stage_level() + N could overflow
+meta(7) fn near_max_with_offset() -> Int {
+    // If trying to generate code at @stage_level() + 2 = 9
+    // ERROR: stage overflow
+    @stage_level() + 2  // This is fine as arithmetic
+}
+
+// But generating at that stage would error
+meta(7) fn try_gen_overflow() -> @Expr {
+    // ERROR E1003: quote(8) from stage 7 is at boundary
+    // If max is 8, this specific case might be okay
+    // But quote(9) would definitely fail
+    quote(8) {
+        meta(8) fn boundary_fn(x: Int) -> Int { x }
+    }
+}
+
+// ============================================================
+// ERROR: DEEPLY NESTED STAGE DEFINITIONS
+// ============================================================
+
+// This pattern of nesting would quickly exceed limits
+meta(5) fn nested_gen_1() -> @Expr {
+    quote(4) {
+        meta(4) fn nested_gen_2() -> @Expr {
+            quote(3) {
+                meta(3) fn nested_gen_3() -> @Expr {
+                    quote(2) {
+                        meta(2) fn nested_gen_4() -> @Expr {
+                            quote(1) {
+                                // Assuming max stage allows this chain
+                                meta fn final_stage_1(x: Int) -> Int { x }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// But this would exceed:
+meta(10) fn too_deep_start() -> @Expr {
+    // ERROR E1003: meta(10) exceeds maximum stage
+    quote(9) {
+        meta(9) fn layer_9() -> Int { 1 }
+    }
+}
+
+fn main() {
+    // All definitions above should fail with E1003 if they exceed max stage
+}

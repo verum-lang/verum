@@ -1,0 +1,128 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, genref, generation-tracking
+
+/// Test generation-tracked reference layout and behavior.
+/// References carry generation information that enables use-after-free detection.
+/// The ThinRef layout is: ptr (8) + generation (4) + epoch_caps (4) = 16 bytes
+/// Spec: 26-cbgr-implementation.md#thin-ref-layout
+
+fn main() {
+    test_ref_generation_tracking();
+    print("  [OK] test_ref_generation_tracking");
+    test_ref_epoch_caps_layout();
+    print("  [OK] test_ref_epoch_caps_layout");
+    test_ref_generation_matches_allocation();
+    print("  [OK] test_ref_generation_matches_allocation");
+    test_multiple_refs_same_allocation();
+    print("  [OK] test_multiple_refs_same_allocation");
+    test_ref_generation_after_mutation();
+    print("  [OK] test_ref_generation_after_mutation");
+
+    print("All GenRef layout tests passed!");
+}
+
+/// Test that references track the generation of their source allocation
+fn test_ref_generation_tracking() {
+    let alloc = Heap.new(42);
+    let gen = alloc.generation();
+
+    // Create a reference — it captures the allocation's generation
+    let ref_val: &Int = &*alloc;
+    let ref_gen = ref_val.stored_generation();
+
+    // Reference generation must match allocation generation
+    assert(ref_gen == gen);
+    assert(ref_gen > 0);
+}
+
+/// Test the epoch_caps packed field in references
+fn test_ref_epoch_caps_layout() {
+    let alloc = Heap.new(42);
+    let ref_val: &Int = &*alloc;
+
+    // epoch_caps_raw returns the packed epoch + capability bits
+    let raw = ref_val.epoch_caps_raw();
+
+    // Extract epoch (upper 24 bits of the packed value)
+    let epoch = (raw >> 8) & 0x00FFFFFF;
+    assert(epoch > 0);
+
+    // Extract capability bits (lower 8 bits)
+    let caps = raw & 0xFF;
+    // Immutable reference should have read capability (bit 0)
+    assert(caps & 0x01 != 0);
+    // Immutable reference should NOT have write capability (bit 1)
+    assert(caps & 0x02 == 0);
+
+    // Mutable reference has both read and write
+    let mut alloc2 = Heap.new(99);
+    let mut_ref: &mut Int = &mut alloc2;
+    let mut_raw = mut_ref.epoch_caps_raw();
+    let mut_caps = mut_raw & 0xFF;
+    assert(mut_caps & 0x01 != 0);  // can_read
+    assert(mut_caps & 0x02 != 0);  // can_write
+}
+
+/// Test that reference generation matches the source allocation header
+fn test_ref_generation_matches_allocation() {
+    let alloc = Heap.new(100);
+    let ref_val: &Int = &*alloc;
+
+    // Reference stored_generation should match allocation header_generation
+    let ref_gen = ref_val.stored_generation();
+    let header_gen = alloc.header_generation();
+
+    assert(ref_gen == header_gen);
+}
+
+/// Test multiple references to the same allocation
+fn test_multiple_refs_same_allocation() {
+    let alloc = Heap.new(42);
+
+    let ref1: &Int = &*alloc;
+    let ref2: &Int = &*alloc;
+
+    // Both references carry the same generation
+    assert(ref1.stored_generation() == ref2.stored_generation());
+
+    // Both can read the correct value
+    assert(*ref1 == 42);
+    assert(*ref2 == 42);
+
+    // Both have the same epoch (created in the same epoch)
+    assert(ref1.epoch() == ref2.epoch());
+}
+
+/// Test reference behavior after mutation
+fn test_ref_generation_after_mutation() {
+    let mut alloc = Heap.new(10);
+
+    // Get the generation before mutation
+    let gen_before = alloc.generation();
+
+    // Mutate through dereference
+    *alloc = 20;
+
+    // Generation should stay the same (mutation doesn't change allocation identity)
+    let gen_after = alloc.generation();
+    assert(gen_before == gen_after);
+
+    // But the epoch in the header may have been updated
+    let epoch_after = alloc.header_epoch();
+    assert(epoch_after > 0);
+
+    // Verify the value changed
+    assert(*alloc == 20);
+}
+
+// Supporting types
+
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+}

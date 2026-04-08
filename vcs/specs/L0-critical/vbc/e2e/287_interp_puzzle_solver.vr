@@ -1,0 +1,392 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, puzzle, backtracking
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: puzzle solving — N-queens for N=4 (count solutions = 2),
+// constraint satisfaction, backtracking search with pruning.
+
+// =============================================================================
+// Array record infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// =============================================================================
+// N-Queens solver for N=4
+// board[row] = column where queen is placed
+// =============================================================================
+
+fn queens_safe(board: Arr8, row: Int, col: Int) -> Int {
+    // Check if placing queen at (row, col) is safe given queens in rows 0..row-1
+    let mut i = 0;
+    while i < row {
+        let other_col = arr8_get(board, i);
+        // Same column?
+        if other_col == col {
+            return 0;
+        }
+        // Same diagonal?
+        if int_abs(other_col - col) == int_abs(i - row) {
+            return 0;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+@allow(unbounded_recursion)
+fn queens_solve(board: Arr8, row: Int, n: Int) -> Int {
+    // Returns number of solutions found
+    if row == n {
+        return 1;
+    }
+    let mut count = 0;
+    let mut col = 0;
+    while col < n {
+        if queens_safe(board, row, col) != 0 {
+            let new_board = arr8_set(board, row, col);
+            count = count + queens_solve(new_board, row + 1, n);
+        }
+        col = col + 1;
+    }
+    count
+}
+
+fn test_queens_4() {
+    let board = arr8_zeros();
+    let solutions = queens_solve(board, 0, 4);
+    assert_eq(solutions, 2);
+}
+
+fn test_queens_5() {
+    let board = arr8_zeros();
+    let solutions = queens_solve(board, 0, 5);
+    assert_eq(solutions, 10);
+}
+
+fn test_queens_6() {
+    let board = arr8_zeros();
+    let solutions = queens_solve(board, 0, 6);
+    assert_eq(solutions, 4);
+}
+
+fn test_queens_trivial() {
+    let board = arr8_zeros();
+    // N=1: 1 solution
+    assert_eq(queens_solve(board, 0, 1), 1);
+    // N=2: 0 solutions
+    assert_eq(queens_solve(board, 0, 2), 0);
+    // N=3: 0 solutions
+    assert_eq(queens_solve(board, 0, 3), 0);
+}
+
+// =============================================================================
+// Verify a specific 4-queens solution
+// =============================================================================
+
+fn test_queens_4_verify_solution() {
+    // Known solution 1: [1, 3, 0, 2] (columns for rows 0-3)
+    let sol1 = Arr8 { e0: 1, e1: 3, e2: 0, e3: 2, e4: 0, e5: 0, e6: 0, e7: 0 };
+    // Verify no conflicts
+    let mut i = 0;
+    while i < 4 {
+        let mut j = i + 1;
+        while j < 4 {
+            let ci = arr8_get(sol1, i);
+            let cj = arr8_get(sol1, j);
+            // Not same column
+            assert(ci != cj);
+            // Not same diagonal
+            assert(int_abs(ci - cj) != int_abs(i - j));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    // Known solution 2: [2, 0, 3, 1]
+    let sol2 = Arr8 { e0: 2, e1: 0, e2: 3, e3: 1, e4: 0, e5: 0, e6: 0, e7: 0 };
+    i = 0;
+    while i < 4 {
+        let mut j = i + 1;
+        while j < 4 {
+            let ci = arr8_get(sol2, i);
+            let cj = arr8_get(sol2, j);
+            assert(ci != cj);
+            assert(int_abs(ci - cj) != int_abs(i - j));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Permutation solver: find all permutations of [0..n-1]
+// =============================================================================
+
+type PermState is { perm: Arr8, used: Arr8, count: Int };
+
+fn perm_is_used(used: Arr8, val: Int) -> Int {
+    arr8_get(used, val)
+}
+
+@allow(unbounded_recursion)
+fn count_perms(perm: Arr8, used: Arr8, pos: Int, n: Int) -> Int {
+    if pos == n {
+        return 1;
+    }
+    let mut count = 0;
+    let mut val = 0;
+    while val < n {
+        if perm_is_used(used, val) == 0 {
+            let new_perm = arr8_set(perm, pos, val);
+            let new_used = arr8_set(used, val, 1);
+            count = count + count_perms(new_perm, new_used, pos + 1, n);
+        }
+        val = val + 1;
+    }
+    count
+}
+
+fn test_permutations() {
+    let perm = arr8_zeros();
+    let used = arr8_zeros();
+    // n! permutations
+    assert_eq(count_perms(perm, used, 0, 1), 1);
+    assert_eq(count_perms(perm, used, 0, 2), 2);
+    assert_eq(count_perms(perm, used, 0, 3), 6);
+    assert_eq(count_perms(perm, used, 0, 4), 24);
+    assert_eq(count_perms(perm, used, 0, 5), 120);
+}
+
+// =============================================================================
+// Subset sum: can we pick elements from an array that sum to target?
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn subset_sum(arr: Arr8, len: Int, idx: Int, target: Int) -> Int {
+    if target == 0 {
+        return 1;
+    }
+    if target < 0 || idx >= len {
+        return 0;
+    }
+    // Include current element or skip it
+    let include = subset_sum(arr, len, idx + 1, target - arr8_get(arr, idx));
+    if include != 0 {
+        return 1;
+    }
+    subset_sum(arr, len, idx + 1, target)
+}
+
+fn test_subset_sum() {
+    let arr = Arr8 { e0: 3, e1: 7, e2: 1, e3: 8, e4: 2, e5: 0, e6: 0, e7: 0 };
+    // Can we make 11? 3+8=11 -> yes
+    assert_eq(subset_sum(arr, 5, 0, 11), 1);
+    // Can we make 6? 3+1+2=6 -> yes
+    assert_eq(subset_sum(arr, 5, 0, 6), 1);
+    // Can we make 21? 3+7+1+8+2=21 -> yes (all)
+    assert_eq(subset_sum(arr, 5, 0, 21), 1);
+    // Can we make 22? No
+    assert_eq(subset_sum(arr, 5, 0, 22), 0);
+    // Can we make 0? Yes (empty subset)
+    assert_eq(subset_sum(arr, 5, 0, 0), 1);
+    // Can we make 5? 3+2=5 -> yes
+    assert_eq(subset_sum(arr, 5, 0, 5), 1);
+    // Can we make 4? 3+1=4 -> yes
+    assert_eq(subset_sum(arr, 5, 0, 4), 1);
+}
+
+// Count number of subsets that sum to target
+@allow(unbounded_recursion)
+fn count_subset_sums(arr: Arr8, len: Int, idx: Int, target: Int) -> Int {
+    if target == 0 {
+        return 1;
+    }
+    if target < 0 || idx >= len {
+        return 0;
+    }
+    let incl = count_subset_sums(arr, len, idx + 1, target - arr8_get(arr, idx));
+    let excl = count_subset_sums(arr, len, idx + 1, target);
+    incl + excl
+}
+
+fn test_count_subset_sums() {
+    let arr = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    // How many subsets sum to 5?
+    // {5}, {1,4}, {2,3} = 3
+    assert_eq(count_subset_sums(arr, 5, 0, 5), 3);
+    // Sum to 6: {1,5}, {2,4}, {1,2,3} = 3
+    assert_eq(count_subset_sums(arr, 5, 0, 6), 3);
+    // Sum to 15: {1,2,3,4,5} = 1
+    assert_eq(count_subset_sums(arr, 5, 0, 15), 1);
+    // Sum to 0: empty set = 1
+    assert_eq(count_subset_sums(arr, 5, 0, 0), 1);
+}
+
+// =============================================================================
+// Magic square checker (3x3)
+// A 3x3 magic square: all rows, cols, diagonals sum to the same value (15)
+// =============================================================================
+
+type Grid3x3 is {
+    c00: Int, c01: Int, c02: Int,
+    c10: Int, c11: Int, c12: Int,
+    c20: Int, c21: Int, c22: Int
+};
+
+fn grid_get(g: Grid3x3, r: Int, c: Int) -> Int {
+    if r == 0 {
+        if c == 0 { g.c00 } else if c == 1 { g.c01 } else { g.c02 }
+    } else if r == 1 {
+        if c == 0 { g.c10 } else if c == 1 { g.c11 } else { g.c12 }
+    } else {
+        if c == 0 { g.c20 } else if c == 1 { g.c21 } else { g.c22 }
+    }
+}
+
+fn is_magic_square(g: Grid3x3) -> Int {
+    let target = 15;
+
+    // Check rows
+    let mut r = 0;
+    while r < 3 {
+        let sum = grid_get(g, r, 0) + grid_get(g, r, 1) + grid_get(g, r, 2);
+        if sum != target { return 0; }
+        r = r + 1;
+    }
+
+    // Check columns
+    let mut c = 0;
+    while c < 3 {
+        let sum = grid_get(g, 0, c) + grid_get(g, 1, c) + grid_get(g, 2, c);
+        if sum != target { return 0; }
+        c = c + 1;
+    }
+
+    // Check diagonals
+    let diag1 = grid_get(g, 0, 0) + grid_get(g, 1, 1) + grid_get(g, 2, 2);
+    if diag1 != target { return 0; }
+
+    let diag2 = grid_get(g, 0, 2) + grid_get(g, 1, 1) + grid_get(g, 2, 0);
+    if diag2 != target { return 0; }
+
+    1
+}
+
+fn test_magic_square() {
+    // Valid 3x3 magic square
+    let magic = Grid3x3 {
+        c00: 2, c01: 7, c02: 6,
+        c10: 9, c11: 5, c12: 1,
+        c20: 4, c21: 3, c22: 8
+    };
+    assert_eq(is_magic_square(magic), 1);
+
+    // Another valid magic square
+    let magic2 = Grid3x3 {
+        c00: 8, c01: 1, c02: 6,
+        c10: 3, c11: 5, c12: 7,
+        c20: 4, c21: 9, c22: 2
+    };
+    assert_eq(is_magic_square(magic2), 1);
+
+    // Not a magic square
+    let not_magic = Grid3x3 {
+        c00: 1, c01: 2, c02: 3,
+        c10: 4, c11: 5, c12: 6,
+        c20: 7, c21: 8, c22: 9
+    };
+    assert_eq(is_magic_square(not_magic), 0);
+}
+
+// =============================================================================
+// Coin change: minimum number of coins to make a value
+// Coins: 1, 5, 10, 25
+// =============================================================================
+
+fn min_coins(amount: Int) -> Int {
+    // Greedy works for this coin set
+    let mut remaining = amount;
+    let mut count = 0;
+
+    count = count + remaining / 25;
+    remaining = remaining % 25;
+
+    count = count + remaining / 10;
+    remaining = remaining % 10;
+
+    count = count + remaining / 5;
+    remaining = remaining % 5;
+
+    count = count + remaining;  // 1-cent coins
+    count
+}
+
+fn test_min_coins() {
+    assert_eq(min_coins(0), 0);
+    assert_eq(min_coins(1), 1);
+    assert_eq(min_coins(5), 1);
+    assert_eq(min_coins(6), 2);     // 5+1
+    assert_eq(min_coins(10), 1);
+    assert_eq(min_coins(11), 2);    // 10+1
+    assert_eq(min_coins(15), 2);    // 10+5
+    assert_eq(min_coins(25), 1);
+    assert_eq(min_coins(30), 2);    // 25+5
+    assert_eq(min_coins(36), 3);    // 25+10+1
+    assert_eq(min_coins(99), 9);    // 25*3+10*2+1*4
+    assert_eq(min_coins(100), 4);   // 25*4
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_queens_trivial();
+    test_queens_4();
+    test_queens_5();
+    test_queens_6();
+    test_queens_4_verify_solution();
+    test_permutations();
+    test_subset_sum();
+    test_count_subset_sums();
+    test_magic_square();
+    test_min_coins();
+    print("[OK] 287_interp_puzzle_solver");
+    0
+}

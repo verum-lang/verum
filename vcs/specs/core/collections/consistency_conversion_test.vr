@@ -1,0 +1,241 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, btreemap, heap, conversion, consistency
+// @description: Tests for consistency methods: Deque.into_list, BTreeMap.keys_list/values_list, Heap.to_list
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Deque.into_list
+// =============================================================================
+
+@test
+fn test_deque_into_list_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let list = d.into_list();
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_deque_into_list_empty() {
+    let d: Deque<Int> = Deque.new();
+    let list = d.into_list();
+    assert(list.is_empty());
+}
+
+@test
+fn test_deque_into_list_single() {
+    let mut d = Deque.new();
+    d.push_back(42);
+    let list = d.into_list();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+@test
+fn test_deque_into_list_push_front() {
+    let mut d = Deque.new();
+    d.push_front(3);
+    d.push_front(2);
+    d.push_front(1);
+    // Logical order: [1, 2, 3]
+    let list = d.into_list();
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_deque_into_list_vs_to_list() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    let cloned = d.to_list();
+    let owned = d.into_list();
+    assert_eq(cloned, owned);
+}
+
+@test
+fn test_deque_into_list_large() {
+    let mut d: Deque<Int> = Deque.with_capacity(50);
+    let mut i = 0;
+    while i < 50 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    let list = d.into_list();
+    assert_eq(list.len(), 50);
+    assert_eq(list[0], 0);
+    assert_eq(list[49], 49);
+}
+
+// =============================================================================
+// Section 2: BTreeMap.keys_list
+// =============================================================================
+
+@test
+fn test_btreemap_keys_list_basic() {
+    let mut m = BTreeMap.new();
+    m.insert(3, 30);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let keys = m.keys_list();
+    assert_eq(keys.len(), 3);
+    // BTreeMap keys are sorted
+    assert_eq(keys[0], 1);
+    assert_eq(keys[1], 2);
+    assert_eq(keys[2], 3);
+}
+
+@test
+fn test_btreemap_keys_list_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let keys = m.keys_list();
+    assert(keys.is_empty());
+}
+
+@test
+fn test_btreemap_keys_list_preserves_map() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let _ = m.keys_list();
+    assert_eq(m.len(), 2);
+    assert_eq(*m.get(&1).unwrap(), 10);
+}
+
+// =============================================================================
+// Section 3: BTreeMap.values_list
+// =============================================================================
+
+@test
+fn test_btreemap_values_list_basic() {
+    let mut m = BTreeMap.new();
+    m.insert(3, 30);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let vals = m.values_list();
+    assert_eq(vals.len(), 3);
+    // Values in key-sorted order
+    assert_eq(vals[0], 10);
+    assert_eq(vals[1], 20);
+    assert_eq(vals[2], 30);
+}
+
+@test
+fn test_btreemap_values_list_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let vals = m.values_list();
+    assert(vals.is_empty());
+}
+
+@test
+fn test_btreemap_values_list_preserves_map() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    let _ = m.values_list();
+    assert_eq(m.len(), 2);
+}
+
+// =============================================================================
+// Section 4: BTreeMap keys_list/values_list consistency
+// =============================================================================
+
+@test
+fn test_btreemap_keys_values_consistency() {
+    let mut m = BTreeMap.new();
+    m.insert(5, 50);
+    m.insert(1, 10);
+    m.insert(3, 30);
+    let keys = m.keys_list();
+    let vals = m.values_list();
+    let entries = m.to_entries();
+    // Keys and values should correspond to entries
+    assert_eq(keys.len(), entries.len());
+    assert_eq(vals.len(), entries.len());
+    let mut i = 0;
+    while i < keys.len() {
+        let k = keys[i];
+        let v = vals[i];
+        assert_eq(entries[i].0, k);
+        assert_eq(entries[i].1, v);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 5: Heap.to_list
+// =============================================================================
+
+@test
+fn test_heap_to_list_basic() {
+    let mut h = BinaryHeap.new();
+    h.push(3);
+    h.push(1);
+    h.push(2);
+    let list = h.to_list();
+    assert_eq(list.len(), 3);
+    // to_list returns heap order (not sorted)
+    assert(list.contains(&1));
+    assert(list.contains(&2));
+    assert(list.contains(&3));
+}
+
+@test
+fn test_heap_to_list_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let list = h.to_list();
+    assert(list.is_empty());
+}
+
+@test
+fn test_heap_to_list_preserves_heap() {
+    let mut h = BinaryHeap.new();
+    h.push(5);
+    h.push(3);
+    h.push(7);
+    let _ = h.to_list();
+    // Heap should still be intact
+    assert_eq(h.len(), 3);
+    assert_eq(*h.peek().unwrap(), 7);
+}
+
+@test
+fn test_heap_to_list_single() {
+    let mut h = BinaryHeap.new();
+    h.push(42);
+    let list = h.to_list();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+@test
+fn test_heap_to_list_vs_into_sorted() {
+    let mut h = BinaryHeap.new();
+    h.push(5);
+    h.push(1);
+    h.push(3);
+    h.push(4);
+    h.push(2);
+    // to_list is not sorted, into_sorted_list is
+    let unsorted = h.to_list();
+    let sorted = h.clone().into_sorted_list();
+    assert_eq(unsorted.len(), sorted.len());
+    // Both contain same elements
+    let mut i = 0;
+    while i < sorted.len() {
+        let val = sorted[i];
+        assert(unsorted.contains(&val));
+        i = i + 1;
+    }
+}

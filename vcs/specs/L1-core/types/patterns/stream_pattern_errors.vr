@@ -1,0 +1,20 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: types, patterns, stream, type-errors
+// @expected-error: E400
+// @description: Pattern matching type errors in stream-like types
+
+// Stream type
+type Stream<T> is Nil | Cons(T, Heap<Stream<T>>);
+
+// ERROR: Return type mismatch - function returns Int but match arm returns Text
+fn type_error_match(s: Stream<Int>) -> Int =
+    match s {
+        Nil => "empty",  // ERROR E400: expected Int, found Text
+        Cons(x, _) => x
+    };
+
+fn main() {
+    let s: Stream<Int> = Cons(1, Heap(Nil));
+    let result = type_error_match(s);
+}

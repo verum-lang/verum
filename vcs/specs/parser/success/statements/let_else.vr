@@ -1,0 +1,505 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for let-else statements
+
+// =============================================================================
+// Grammar Reference:
+// let_else_stmt = 'let' , pattern , '=' , expression , 'else' , block_expr ;
+// =============================================================================
+
+fn test_basic_let_else() {
+    // Simple let-else with Maybe
+    let Some(value) = maybe_value else {
+        return;
+    };
+
+    // Let-else with Result
+    let Ok(data) = result_value else {
+        return;
+    };
+
+    // Let-else with custom variant
+    let Success(result) = operation() else {
+        return;
+    };
+
+    // Let-else returning a value
+    let Some(x) = get_option() else {
+        return default_value();
+    };
+
+    // Let-else with panic
+    let Some(critical) = get_critical() else {
+        panic("Missing critical value");
+    };
+}
+
+fn test_let_else_with_tuple_patterns() {
+    // Tuple pattern
+    let (a, b) = get_pair() else {
+        return;
+    };
+
+    // Nested tuple
+    let ((x, y), z) = get_nested() else {
+        return default();
+    };
+
+    // Tuple with variant
+    let (Some(a), Some(b)) = get_pair_of_options() else {
+        return;
+    };
+
+    // Tuple with ignored elements
+    let (first, _) = get_pair() else {
+        return;
+    };
+}
+
+fn test_let_else_with_record_patterns() {
+    // Simple record pattern
+    let Point { x, y } = get_point() else {
+        return origin();
+    };
+
+    // Record with field renaming
+    let Person { name: person_name, age } = get_person() else {
+        return;
+    };
+
+    // Partial record with rest
+    let Config { host, .. } = get_config() else {
+        return default_config();
+    };
+
+    // Nested record patterns
+    let Response { body: Body { data }, .. } = fetch() else {
+        return empty_response();
+    };
+}
+
+fn test_let_else_with_variant_patterns() {
+    // Maybe variants
+    let Some(inner) = outer_maybe else {
+        return None;
+    };
+
+    // Result variants
+    let Ok(success) = fallible_operation() else {
+        return Err("Failed");
+    };
+
+    // Custom enum variants
+    let Color.Red(intensity) = get_color() else {
+        return Color.Black;
+    };
+
+    // Variant with tuple data
+    let Node(left, value, right) = get_tree() else {
+        return Leaf;
+    };
+
+    // Variant with record data
+    let Error { code, message } = get_error() else {
+        return;
+    };
+}
+
+fn test_let_else_with_nested_patterns() {
+    // Variant containing record
+    let Some(Point { x, y }) = maybe_point else {
+        return;
+    };
+
+    // Variant containing tuple
+    let Some((a, b, c)) = maybe_triple else {
+        return;
+    };
+
+    // Result containing Maybe
+    let Ok(Some(value)) = nested_result else {
+        return default();
+    };
+
+    // Maybe containing Result
+    let Some(Ok(data)) = maybe_result else {
+        return;
+    };
+
+    // Deeply nested
+    let Some(Ok(Person { name, profile: Profile { bio } })) = complex else {
+        return;
+    };
+
+    // Array in variant
+    let Some([first, second, ..rest]) = maybe_array else {
+        return;
+    };
+}
+
+fn test_let_else_with_array_patterns() {
+    // Fixed size array
+    let [a, b, c] = get_array() else {
+        return;
+    };
+
+    // Array with rest
+    let [first, ..rest] = get_slice() else {
+        return;
+    };
+
+    // Array with both ends
+    let [first, ..middle, last] = get_slice() else {
+        return;
+    };
+
+    // Nested arrays
+    let [[a, b], [c, d]] = get_matrix() else {
+        return;
+    };
+}
+
+fn test_let_else_with_reference_patterns() {
+    // Reference pattern
+    let &value = get_ref() else {
+        return;
+    };
+
+    // Mutable reference pattern
+    let &mut value = get_mut_ref() else {
+        return;
+    };
+
+    // Reference to pattern
+    let &Some(inner) = get_ref_to_option() else {
+        return;
+    };
+
+    // With ref binding
+    let ref x = get_value() else {
+        return;
+    };
+}
+
+fn test_let_else_with_or_patterns() {
+    // Or pattern in let-else
+    let Some(x) | None = option_val else {
+        return;
+    };
+
+    // Multiple or alternatives
+    let Red(v) | Green(v) | Blue(v) = color else {
+        return;
+    };
+
+    // Or with nested patterns
+    let Some(Ok(x)) | Some(Err(x)) = nested else {
+        return;
+    };
+}
+
+fn test_let_else_with_at_patterns() {
+    // Binding whole while destructuring
+    let whole @ Some(inner) = maybe_value else {
+        return;
+    };
+
+    // At-pattern with tuple
+    let pair @ (a, b) = get_pair() else {
+        return;
+    };
+
+    // At-pattern with record
+    let point @ Point { x, y } = get_point() else {
+        return;
+    };
+}
+
+fn test_let_else_block_variations() {
+    // Block with return
+    let Some(x) = opt else {
+        return;
+    };
+
+    // Block with return value
+    let Some(x) = opt else {
+        return default();
+    };
+
+    // Block with break (in loop context)
+    loop {
+        let Some(x) = opt else {
+            break;
+        };
+    }
+
+    // Block with continue (in loop context)
+    for item in items {
+        let Some(x) = item.value else {
+            continue;
+        };
+    }
+
+    // Block with multiple statements
+    let Some(x) = opt else {
+        log_error("Value not found");
+        cleanup();
+        return default();
+    };
+
+    // Block with local variable
+    let Some(x) = opt else {
+        let err = create_error();
+        log(err);
+        return err;
+    };
+
+    // Block returning expression
+    let Some(x) = opt else {
+        compute_fallback()
+    };
+}
+
+fn test_let_else_with_mutable_bindings() {
+    // Mutable binding in pattern
+    let Some(mut value) = get_option() else {
+        return;
+    };
+
+    // Multiple mutable bindings
+    let (mut a, mut b) = get_pair() else {
+        return;
+    };
+
+    // Mutable in record pattern
+    let Point { mut x, mut y } = get_point() else {
+        return;
+    };
+}
+
+fn test_let_else_with_type_annotations() {
+    // With explicit type
+    let Some(x): Maybe<Int> = get_option() else {
+        return;
+    };
+
+    // Complex type annotation
+    let Ok((a, b)): Result<(Int, Text), Error> = parse() else {
+        return;
+    };
+}
+
+fn test_let_else_with_complex_expressions() {
+    // Method call
+    let Some(x) = collection.get(key) else {
+        return;
+    };
+
+    // Chained method calls
+    let Some(x) = obj.get_field().try_parse() else {
+        return;
+    };
+
+    // Function call with arguments
+    let Some(x) = compute(a, b, c) else {
+        return;
+    };
+
+    // Pipeline expression
+    let Some(x) = data |> transform |> validate else {
+        return;
+    };
+
+    // Await expression (in async context)
+    let Some(x) = fetch_data().await else {
+        return;
+    };
+
+    // Try expression
+    let Some(x) = parse(input)? else {
+        return;
+    };
+
+    // Block expression - compute the value first
+    let block_result = {
+        let temp = compute();
+        transform(temp)
+    };
+    let Some(x) = block_result else {
+        return;
+    };
+
+    // Match expression - compute first
+    let match_result = match mode {
+        Mode.Fast => fast_compute(),
+        Mode.Slow => slow_compute()
+    };
+    let Some(x) = match_result else {
+        return;
+    };
+
+    // If expression - compute first (avoiding double else)
+    let if_result = if condition { option_a } else { option_b };
+    let Some(x) = if_result else {
+        return;
+    };
+}
+
+fn test_let_else_control_flow_in_blocks() {
+    // Return in block
+    let Some(x) = get() else {
+        return None;
+    };
+
+    // Return with complex expression
+    let Some(x) = get() else {
+        return compute_default(context);
+    };
+
+    // Break in loop
+    while condition {
+        let Some(x) = try_get() else {
+            break;
+        };
+        process(x);
+    }
+
+    // Break with value in loop
+    let result = loop {
+        let Some(x) = try_get() else {
+            break default_value;
+        };
+        if is_valid(x) {
+            break x;
+        }
+    };
+
+    // Continue in for loop
+    for item in items {
+        let Some(data) = item.data else {
+            continue;
+        };
+        process(data);
+    }
+
+    // Panic in block
+    let Some(critical) = get_critical_value() else {
+        panic("Critical value required");
+    };
+
+    // Unreachable (assuming it's a built-in)
+    let Some(x) = always_some() else {
+        unreachable("This should never happen");
+    };
+}
+
+fn test_let_else_in_different_contexts() {
+    // In function body
+    let Some(x) = get() else {
+        return;
+    };
+
+    // In block expression
+    let result = {
+        let Some(x) = get() else {
+            return default();
+        };
+        process(x)
+    };
+
+    // In if block
+    if condition {
+        let Some(x) = get() else {
+            return;
+        };
+        use_x(x);
+    }
+
+    // In else block
+    if other {
+        do_something();
+    } else {
+        let Some(x) = fallback() else {
+            return;
+        };
+        use_x(x);
+    }
+
+    // In match arm block
+    match value {
+        Case1 => {
+            let Some(x) = get() else {
+                return;
+            };
+            process(x)
+        },
+        _ => default()
+    };
+
+    // In loop body
+    loop {
+        let Some(x) = try_get() else {
+            break;
+        };
+        process(x);
+    }
+
+    // In while body
+    while running {
+        let Some(x) = get_next() else {
+            break;
+        };
+        handle(x);
+    }
+
+    // In for body
+    for item in items {
+        let Some(value) = item.try_value() else {
+            continue;
+        };
+        accumulate(value);
+    }
+}
+
+fn test_let_else_chained() {
+    // Multiple sequential let-else
+    let Some(a) = get_a() else {
+        return;
+    };
+    let Some(b) = get_b() else {
+        return;
+    };
+    let Some(c) = get_c() else {
+        return;
+    };
+
+    // Using previous bindings
+    let Some(first) = get_first() else {
+        return;
+    };
+    let Some(second) = get_second(first) else {
+        return;
+    };
+    let Some(third) = get_third(first, second) else {
+        return;
+    };
+}
+
+fn test_let_else_with_guards_equivalent() {
+    // Pattern that implicitly guards
+    let Some(x @ 0..=100) = get_bounded() else {
+        return;
+    };
+
+    // Nested pattern that filters
+    let Some(Point { x, y }) = get_point() else {
+        return;
+    };
+    // Additional guard would be separate if statement
+
+    // Active pattern (if supported)
+    let Even() = get_number() else {
+        return;
+    };
+}

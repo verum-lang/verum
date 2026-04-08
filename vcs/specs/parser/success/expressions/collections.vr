@@ -1,0 +1,405 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, collections, array, tuple, record, map, set
+// @description: Test collection expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// ARRAY EXPRESSIONS (Section 2.12 - array_expr)
+// =============================================================================
+
+fn test_empty_array() {
+    let a: [Int] = [];
+    let b: [Text] = [];
+}
+
+fn test_array_with_elements() {
+    let a = [1, 2, 3];
+    let b = [1, 2, 3, 4, 5];
+    let c = ["hello", "world"];
+    let d = [true, false, true];
+}
+
+fn test_array_with_expressions() {
+    let a = [x, y, z];
+    let b = [compute(), another(), third()];
+    let c = [a + b, c * d, e - f];
+}
+
+fn test_array_repeat_syntax() {
+    let a = [0; 10];
+    let b = [1; 100];
+    let c = [default(); n];
+    let d = [initial_value; size];
+}
+
+fn test_nested_arrays() {
+    let a = [[1, 2], [3, 4]];
+    let b = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    let c = [[[1]]];
+}
+
+fn test_array_trailing_comma() {
+    let a = [1, 2, 3,];
+    let b = [
+        "first",
+        "second",
+        "third",
+    ];
+}
+
+// =============================================================================
+// TUPLE EXPRESSIONS (Section 2.12 - tuple_expr)
+// =============================================================================
+
+fn test_unit_tuple() {
+    let a = ();
+    let b: () = ();
+}
+
+fn test_single_element_tuple() {
+    // Requires trailing comma to distinguish from parenthesized expression
+    let a = (42,);
+    let b = ("hello",);
+    let c = (value,);
+}
+
+fn test_pair_tuple() {
+    let a = (1, 2);
+    let b = ("key", "value");
+    let c = (name, age);
+}
+
+fn test_multi_element_tuple() {
+    let a = (1, 2, 3);
+    let b = (1, 2, 3, 4, 5);
+    let c = ("a", "b", "c", "d");
+}
+
+fn test_mixed_type_tuple() {
+    let a = (42, "hello", true);
+    let b = (1, "two", 3.0, false);
+    let c = (id, name, active, score);
+}
+
+fn test_nested_tuples() {
+    let a = ((1, 2), (3, 4));
+    let b = ((1, 2, 3), (4, 5, 6));
+    let c = (((1,),),);
+}
+
+fn test_tuple_with_expressions() {
+    let a = (x + 1, y * 2);
+    let b = (compute_a(), compute_b());
+    let c = (if cond { 1 } else { 2 }, value);
+}
+
+fn test_tuple_trailing_comma() {
+    let a = (1, 2, 3,);
+    let b = (
+        first,
+        second,
+        third,
+    );
+}
+
+// =============================================================================
+// RECORD EXPRESSIONS (Section 2.12 - record_expr)
+// =============================================================================
+
+fn test_simple_record() {
+    let a = Point { x: 1, y: 2 };
+    let b = Person { name: "Alice", age: 30 };
+}
+
+fn test_record_with_expressions() {
+    let a = Point { x: compute_x(), y: compute_y() };
+    let b = Config { debug: is_debug(), timeout: get_timeout() };
+}
+
+fn test_record_field_shorthand() {
+    // When variable name matches field name
+    let x = 1;
+    let y = 2;
+    let a = Point { x, y };
+
+    let name = "Bob";
+    let age = 25;
+    let b = Person { name, age };
+}
+
+fn test_record_with_spread() {
+    let a = Point { x: 10, ..other };
+    let b = Config { debug: true, ..defaults };
+    let c = User { name: "New", ..existing_user };
+}
+
+fn test_record_mixed_syntax() {
+    let a = Point { x: 1, y };
+    let b = Person { name, age: computed_age() };
+    let c = Config { debug, timeout: 30, ..defaults };
+}
+
+fn test_nested_records() {
+    let a = Container {
+        inner: Inner { value: 42 }
+    };
+
+    let b = Tree {
+        left: Node { value: 1 },
+        right: Node { value: 2 }
+    };
+}
+
+fn test_record_trailing_comma() {
+    let a = Point {
+        x: 1,
+        y: 2,
+    };
+
+    let b = Person {
+        name: "Alice",
+        age: 30,
+        active: true,
+    };
+}
+
+fn test_qualified_record() {
+    let a = mymod.Point { x: 1, y: 2 };
+    let b = std.collections.Entry { key: k, value: v };
+}
+
+// =============================================================================
+// MAP EXPRESSIONS (Section 2.12 - map_expr)
+// =============================================================================
+
+fn test_empty_map() {
+    let a: Map<Text, Int> = {};
+}
+
+fn test_simple_map() {
+    let a = {"key": "value"};
+    let b = {"name": "Alice", "city": "NYC"};
+}
+
+fn test_map_with_expressions() {
+    let a = {key: value};
+    let b = {compute_key(): compute_value()};
+    let c = {x: y, a: b};
+}
+
+fn test_map_mixed_keys() {
+    let a = {"literal": 1, computed: 2};
+    let b = {1: "one", 2: "two"};
+}
+
+fn test_nested_map() {
+    let a = {
+        "user": {
+            "name": "Alice",
+            "profile": {
+                "age": 30
+            }
+        }
+    };
+}
+
+fn test_map_trailing_comma() {
+    let a = {
+        "key1": "value1",
+        "key2": "value2",
+    };
+}
+
+// =============================================================================
+// SET EXPRESSIONS (Section 2.12 - set_expr)
+// =============================================================================
+
+fn test_empty_set() {
+    let a: Set<Int> = {};
+}
+
+fn test_simple_set() {
+    let a = {1, 2, 3};
+    let b = {"apple", "banana", "cherry"};
+}
+
+fn test_set_with_expressions() {
+    let a = {x, y, z};
+    let b = {compute_a(), compute_b()};
+}
+
+fn test_set_trailing_comma() {
+    let a = {
+        1,
+        2,
+        3,
+    };
+}
+
+// =============================================================================
+// COMPREHENSION EXPRESSIONS (Section 2.12 - comprehension_expr)
+// =============================================================================
+
+fn test_basic_comprehension() {
+    let a = [x * 2 for x in items];
+    let b = [x + 1 for x in 0..10];
+}
+
+fn test_comprehension_with_filter() {
+    let a = [x for x in items if x > 0];
+    let b = [x * 2 for x in 0..100 if x % 2 == 0];
+}
+
+fn test_nested_comprehension() {
+    let a = [(x, y) for x in xs for y in ys];
+    let b = [x + y for x in 0..3 for y in 0..3];
+}
+
+fn test_comprehension_with_multiple_clauses() {
+    let a = [x * y for x in xs for y in ys if x != y];
+    let b = [process(x, y) for x in items for y in other if valid(x, y)];
+}
+
+fn test_comprehension_with_pattern() {
+    let a = [x + y for (x, y) in pairs];
+    let b = [p.x + p.y for Point { x, y } in points];
+}
+
+// =============================================================================
+// STREAM EXPRESSIONS (Section 2.11 - stream_expr)
+// =============================================================================
+
+fn test_stream_literal() {
+    let a = stream[1, 2, 3];
+    let b = stream[0..100];
+    let c = stream[0..];
+}
+
+fn test_stream_with_ellipsis() {
+    let a = stream[1, 2, 3, ...];
+    let b = stream[0, 1, 2, ...];
+}
+
+fn test_stream_comprehension() {
+    let a = stream[x * 2 for x in source];
+    let b = stream[x for x in source if pred(x)];
+}
+
+// =============================================================================
+// TENSOR LITERALS (Section 2.12 - tensor_literal_expr)
+// =============================================================================
+
+fn test_tensor_1d() {
+    let a = tensor<3>Float { 1.0, 2.0, 3.0 };
+}
+
+fn test_tensor_2d() {
+    let a = tensor<2, 3>Float {
+        {1.0, 2.0, 3.0},
+        {4.0, 5.0, 6.0}
+    };
+}
+
+fn test_tensor_3d() {
+    let a = tensor<2, 2, 2>Float {
+        {{1.0, 2.0}, {3.0, 4.0}},
+        {{5.0, 6.0}, {7.0, 8.0}}
+    };
+}
+
+// =============================================================================
+// INDEXING EXPRESSIONS (postfix_op)
+// =============================================================================
+
+fn test_array_indexing() {
+    let a = arr[0];
+    let b = arr[i];
+    let c = arr[compute_index()];
+}
+
+fn test_multi_dimensional_indexing() {
+    let a = matrix[0][1];
+    let b = cube[i][j][k];
+}
+
+fn test_slice_indexing() {
+    let a = arr[0..5];
+    let b = arr[start..end];
+    let c = arr[..n];
+    let d = arr[n..];
+}
+
+fn test_map_indexing() {
+    let a = map["key"];
+    let b = map[key];
+}
+
+// =============================================================================
+// COLLECTION CONSTRUCTION WITH METHODS
+// =============================================================================
+
+fn test_collection_constructors() {
+    // Use . for path, NOT .
+    let a = List.new();
+    let b = List.with_capacity(100);
+    let c = Map.new();
+    let d = Set.new();
+}
+
+fn test_generic_constructors() {
+    // Use <T> directly, NOT <T>
+    let a = List<Int>.new();
+    let b = Map<Text, Int>.new();
+    let c = Set<User>.new();
+}
+
+fn test_from_methods() {
+    let a = List.from([1, 2, 3]);
+    let b = Set.from([1, 2, 3]);
+    let c = Map.from([("a", 1), ("b", 2)]);
+}
+
+// =============================================================================
+// COMPLEX COLLECTION EXPRESSIONS
+// =============================================================================
+
+fn test_nested_collections() {
+    let a = [
+        {"name": "Alice", "scores": [90, 85, 88]},
+        {"name": "Bob", "scores": [75, 80, 82]}
+    ];
+
+    let b = {
+        "users": [
+            User { id: 1, name: "Alice" },
+            User { id: 2, name: "Bob" }
+        ],
+        "count": 2
+    };
+}
+
+fn test_collection_in_record() {
+    let a = Config {
+        items: [1, 2, 3],
+        mapping: {"a": 1, "b": 2},
+        point: (10, 20)
+    };
+}
+
+fn test_collection_operations() {
+    let a = [1, 2, 3] + [4, 5, 6];
+    let b = items.iter().map(|x| x * 2).collect();
+    let c = set_a & set_b;  // intersection
+    let d = set_a | set_b;  // union
+}
+
+// =============================================================================
+// COLLECTION WITH ATTRIBUTES
+// =============================================================================
+
+fn test_record_with_field_attributes() {
+    let a = Config {
+        @cfg(feature = "debug") debug: true,
+        timeout: 30
+    };
+}

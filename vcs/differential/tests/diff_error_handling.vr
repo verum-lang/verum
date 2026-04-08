@@ -1,0 +1,130 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, error-handling, question-mark, result, maybe
+// @timeout: 30000
+// @description: Differential test: verify ? operator, Result/Maybe matching across tiers
+
+fn parse_positive(n: Int) -> Result<Int, Text> {
+    if n < 0 { Err("negative") } else { Ok(n) }
+}
+
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 { Err("div_zero") } else { Ok(a / b) }
+}
+
+// ? operator: Ok path continues, Err path returns early
+fn double_positive(n: Int) -> Result<Int, Text> {
+    let val = parse_positive(n)?;
+    Ok(val * 2)
+}
+
+// Chained ? operators
+fn chain_ops(a: Int, b: Int) -> Result<Int, Text> {
+    let x = parse_positive(a)?;
+    let y = safe_divide(x, b)?;
+    Ok(y + 1)
+}
+
+// Early return with Result
+fn validate(a: Int, b: Int) -> Result<Int, Text> {
+    if a < 0 {
+        return Err("a_neg");
+    }
+    if b == 0 {
+        return Err("b_zero");
+    }
+    Ok(a / b)
+}
+
+// Maybe type with match
+fn safe_div_maybe(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 { None } else { Some(a / b) }
+}
+
+fn maybe_map(x: Maybe<Int>, f_mul: Int) -> Maybe<Int> {
+    match x {
+        Some(v) => Some(v * f_mul),
+        None => None
+    }
+}
+
+fn main() -> Int {
+    // ---- ? operator Ok path ----
+    let r1 = double_positive(5);
+    let v1 = match r1 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v1, 10);
+
+    let r2 = double_positive(0);
+    let v2 = match r2 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v2, 0);
+
+    // ---- ? operator Err path ----
+    let r3 = double_positive(-3);
+    let v3 = match r3 { Ok(_) => "ok", Err(e) => e };
+    assert_eq(v3, "negative");
+
+    // ---- Chained ? operators ----
+    let r4 = chain_ops(100, 5);
+    let v4 = match r4 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v4, 21);  // 100/5 + 1 = 21
+
+    let r5 = chain_ops(-5, 2);
+    let v5 = match r5 { Ok(_) => "ok", Err(e) => e };
+    assert_eq(v5, "negative");
+
+    let r6 = chain_ops(100, 0);
+    let v6 = match r6 { Ok(_) => "ok", Err(e) => e };
+    assert_eq(v6, "div_zero");
+
+    // ---- Early return ----
+    let r7 = validate(10, 2);
+    let v7 = match r7 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v7, 5);
+
+    let r8 = validate(-1, 2);
+    let v8 = match r8 { Ok(_) => "ok", Err(e) => e };
+    assert_eq(v8, "a_neg");
+
+    let r9 = validate(10, 0);
+    let v9 = match r9 { Ok(_) => "ok", Err(e) => e };
+    assert_eq(v9, "b_zero");
+
+    // ---- Maybe type ----
+    let m1 = safe_div_maybe(10, 3);
+    let u1 = match m1 { Some(v) => v, None => -1 };
+    assert_eq(u1, 3);
+
+    let m2 = safe_div_maybe(10, 0);
+    let u2 = match m2 { Some(v) => v, None => -1 };
+    assert_eq(u2, -1);
+
+    // ---- Maybe chaining ----
+    let m3 = maybe_map(Some(7), 3);
+    let u3 = match m3 { Some(v) => v, None => -1 };
+    assert_eq(u3, 21);
+
+    let m4 = maybe_map(None, 3);
+    let u4 = match m4 { Some(v) => v, None => -1 };
+    assert_eq(u4, -1);
+
+    // ---- Nested error propagation ----
+    let r10 = nested_prop(10, 20);
+    let v10 = match r10 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v10, 15);
+
+    let r11 = nested_prop(-5, 20);
+    let v11 = match r11 { Ok(_) => "ok", Err(e) => e };
+    assert_eq(v11, "negative");
+
+    print("differential error handling ok");
+    0
+}
+
+fn nested_prop(a: Int, b: Int) -> Result<Int, Text> {
+    let x = parse_positive(a)?;
+    let y = parse_positive(b)?;
+    let result = safe_divide(x + y, 2)?;
+    Ok(result)
+}

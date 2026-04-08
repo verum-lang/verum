@@ -1,0 +1,191 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, nested, list, map, collections
+// @description: Test nested generic types like List<List<Int>>, Map<Text, List<Int>>
+
+fn test_list_of_lists() -> Int {
+    let mut matrix = List.new();
+
+    let mut row1 = List.new();
+    row1.push(1);
+    row1.push(2);
+    row1.push(3);
+
+    let mut row2 = List.new();
+    row2.push(4);
+    row2.push(5);
+    row2.push(6);
+
+    matrix.push(row1);
+    matrix.push(row2);
+
+    if matrix.len() != 2 {
+        print(f"FAIL list_of_lists: len={matrix.len()}, expected 2");
+        return 1;
+    }
+
+    let r0 = matrix[0];
+    let r1 = matrix[1];
+
+    if r0[0] != 1 || r0[2] != 3 {
+        print(f"FAIL list_of_lists: r0[0]={r0[0]}, r0[2]={r0[2]}");
+        return 1;
+    }
+
+    if r1[0] != 4 || r1[2] != 6 {
+        print(f"FAIL list_of_lists: r1[0]={r1[0]}, r1[2]={r1[2]}");
+        return 1;
+    }
+
+    // Sum all elements
+    let mut total = 0;
+    let mut i = 0;
+    while i < matrix.len() {
+        let row = matrix[i];
+        let mut j = 0;
+        while j < row.len() {
+            total = total + row[j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    if total != 21 {
+        print(f"FAIL list_of_lists: total={total}, expected 21");
+        return 1;
+    }
+
+    print("  list_of_lists: OK");
+    0
+}
+
+fn test_matrix_transpose() -> Int {
+    // Build 2x3 matrix
+    let mut m = List.new();
+    let mut r0 = List.new();
+    r0.push(1); r0.push(2); r0.push(3);
+    let mut r1 = List.new();
+    r1.push(4); r1.push(5); r1.push(6);
+    m.push(r0);
+    m.push(r1);
+
+    // Transpose to 3x2
+    let rows = m.len();
+    let cols = m[0].len();
+    let mut t = List.new();
+    let mut j = 0;
+    while j < cols {
+        let mut new_row = List.new();
+        let mut i = 0;
+        while i < rows {
+            new_row.push(m[i][j]);
+            i = i + 1;
+        }
+        t.push(new_row);
+        j = j + 1;
+    }
+
+    if t.len() != 3 {
+        print(f"FAIL transpose: rows={t.len()}, expected 3");
+        return 1;
+    }
+    if t[0].len() != 2 {
+        print(f"FAIL transpose: cols={t[0].len()}, expected 2");
+        return 1;
+    }
+    if t[0][0] != 1 || t[0][1] != 4 {
+        print(f"FAIL transpose: t[0]=[{t[0][0]},{t[0][1]}], expected [1,4]");
+        return 1;
+    }
+    if t[2][0] != 3 || t[2][1] != 6 {
+        print(f"FAIL transpose: t[2]=[{t[2][0]},{t[2][1]}], expected [3,6]");
+        return 1;
+    }
+
+    print("  matrix_transpose: OK");
+    0
+}
+
+fn test_list_of_text() -> Int {
+    let mut words = List.new();
+    words.push("hello");
+    words.push("world");
+    words.push("verum");
+
+    if words.len() != 3 {
+        print(f"FAIL list_of_text: len={words.len()}");
+        return 1;
+    }
+    if words[0] != "hello" {
+        print("FAIL list_of_text: words[0] != hello");
+        return 1;
+    }
+    if words[2] != "verum" {
+        print("FAIL list_of_text: words[2] != verum");
+        return 1;
+    }
+    print("  list_of_text: OK");
+    0
+}
+
+fn test_adjacency_list() -> Int {
+    // Graph as adjacency list: List<List<Int>>
+    // 4 nodes: 0->1,2  1->3  2->3  3->
+    let mut graph = List.new();
+
+    let mut n0 = List.new();
+    n0.push(1); n0.push(2);
+
+    let mut n1 = List.new();
+    n1.push(3);
+
+    let mut n2 = List.new();
+    n2.push(3);
+
+    let mut n3 = List.new(); // no edges
+
+    graph.push(n0);
+    graph.push(n1);
+    graph.push(n2);
+    graph.push(n3);
+
+    // Count total edges
+    let mut edges = 0;
+    let mut i = 0;
+    while i < graph.len() {
+        edges = edges + graph[i].len();
+        i = i + 1;
+    }
+
+    if edges != 4 {
+        print(f"FAIL adjacency: edges={edges}, expected 4");
+        return 1;
+    }
+
+    // Check node 0's neighbors
+    let neighbors = graph[0];
+    if neighbors[0] != 1 || neighbors[1] != 2 {
+        print("FAIL adjacency: node 0 neighbors wrong");
+        return 1;
+    }
+
+    print("  adjacency_list: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Nested Generics Tests:");
+    let mut failures = 0;
+    failures = failures + test_list_of_lists();
+    failures = failures + test_matrix_transpose();
+    failures = failures + test_list_of_text();
+    failures = failures + test_adjacency_list();
+
+    if failures == 0 {
+        print("All nested generics tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

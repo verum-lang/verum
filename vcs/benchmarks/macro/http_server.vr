@@ -1,0 +1,361 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: > 100K req/sec (hello world), > 50K req/sec (JSON)
+// @tags: http, server, async, performance
+
+/// HTTP Server Benchmark
+///
+/// Tests realistic HTTP server workloads:
+/// - Hello world (minimal overhead)
+/// - JSON serialization/deserialization
+/// - Database queries (simulated)
+/// - File serving
+/// - Concurrent connections
+
+module benchmarks.macro.http_server
+
+using [Benchmark, Http, Async, Json]
+
+/// Minimal "Hello World" handler
+fn benchmark_http_hello_world() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    server.route("/", |_req| async {
+        Response.text("Hello, World!")
+    });
+
+    let handle = spawn async {
+        server.run().await
+    };
+
+    // Benchmark client
+    let client = HttpClient.new();
+    let url = text("http://127.0.0.1:{}/", port);
+
+    for _ in 0..100_000 {
+        let response = client.get(&url).await;
+        assert(response.status() == 200);
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+/// JSON response handler
+fn benchmark_http_json_response() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    @derive(Serialize)
+    type User is {
+        id: Int,
+        name: Text,
+        email: Text,
+        created_at: DateTime,
+    };
+
+    server.route("/user", |_req| async {
+        let user = User {
+            id: 1,
+            name: "John Doe".to_text(),
+            email: "john@example.com".to_text(),
+            created_at: DateTime.now(),
+        };
+        Response.json(&user)
+    });
+
+    let handle = spawn async { server.run().await };
+
+    let client = HttpClient.new();
+    let url = text("http://127.0.0.1:{}/user", port);
+
+    for _ in 0..50_000 {
+        let response = client.get(&url).await;
+        assert(response.status() == 200);
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+/// JSON request parsing
+fn benchmark_http_json_request() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    @derive(Deserialize)
+    type CreateUser is {
+        name: Text,
+        email: Text,
+    };
+
+    server.route("/users", |req| async {
+        let body: CreateUser = req.json().await?;
+        Response.json(&map!{"id" => 1, "name" => body.name})
+    });
+
+    let handle = spawn async { server.run().await };
+
+    let client = HttpClient.new();
+    let url = text("http://127.0.0.1:{}/users", port);
+    let body = r#"{"name": "John", "email": "john@example.com"}"#;
+
+    for _ in 0..50_000 {
+        let response = client.post(&url)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send().await;
+        assert(response.status() == 200);
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+/// Simulated database query
+fn benchmark_http_db_query() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    // Simulated database
+    let db = InMemoryDb.new();
+    for i in 0..1000 {
+        db.insert("users", map!{
+            "id" => i,
+            "name" => text("User {}", i),
+            "email" => text("user{}@example.com", i),
+        });
+    }
+
+    server.route("/users/:id", move |req| async {
+        let id: Int = req.param("id").parse()?;
+        match db.find_one("users", map!{"id" => id}) {
+            Some(user) => Response.json(&user),
+            None => Response.not_found(),
+        }
+    });
+
+    let handle = spawn async { server.run().await };
+
+    let client = HttpClient.new();
+
+    for i in 0..20_000 {
+        let url = text("http://127.0.0.1:{}/users/{}", port, i % 1000);
+        let response = client.get(&url).await;
+        assert(response.status() == 200);
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+/// Static file serving
+fn benchmark_http_static_files() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    // Create test files in memory
+    let files = map!{
+        "/index.html" => "<html><body>Hello</body></html>".to_bytes(),
+        "/style.css" => "body { color: black; }".to_bytes(),
+        "/script.js" => "console.log('hello');".to_bytes(),
+    };
+
+    server.route("/*path", move |req| async {
+        let path = req.param("path");
+        match files.get(&text("/{}", path)) {
+            Some(content) => Response.ok()
+                .header("Content-Type", mime_type(&path))
+                .body(content.clone()),
+            None => Response.not_found(),
+        }
+    });
+
+    let handle = spawn async { server.run().await };
+
+    let client = HttpClient.new();
+    let paths = list!["index.html", "style.css", "script.js"];
+
+    for _ in 0..30_000 {
+        for path in &paths {
+            let url = text("http://127.0.0.1:{}/{}", port, path);
+            let response = client.get(&url).await;
+            assert(response.status() == 200);
+        }
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+/// Concurrent connections
+fn benchmark_http_concurrent() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    server.route("/", |_req| async {
+        Response.text("OK")
+    });
+
+    let handle = spawn async { server.run().await };
+
+    // Spawn many concurrent clients
+    let num_clients = 100;
+    let requests_per_client = 1000;
+
+    let client_handles: List<_> = (0..num_clients).map(|_| {
+        let port = port;
+        spawn async move {
+            let client = HttpClient.new();
+            let url = text("http://127.0.0.1:{}/", port);
+
+            for _ in 0..requests_per_client {
+                let response = client.get(&url).await;
+                assert(response.status() == 200);
+            }
+        }
+    }).collect();
+
+    for h in client_handles {
+        h.await;
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+/// Keep-alive connections
+fn benchmark_http_keepalive() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    server.route("/", |_req| async {
+        Response.text("OK")
+    });
+
+    let handle = spawn async { server.run().await };
+
+    // Single connection, many requests (HTTP keep-alive)
+    let client = HttpClient.new()
+        .with_pool_size(1)
+        .with_keepalive(true);
+
+    let url = text("http://127.0.0.1:{}/", port);
+
+    for _ in 0..100_000 {
+        let response = client.get(&url).await;
+        assert(response.status() == 200);
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+/// Large response body
+fn benchmark_http_large_response() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    // 1MB response
+    let large_body = "x".repeat(1_000_000);
+
+    server.route("/large", move |_req| async {
+        Response.text(&large_body)
+    });
+
+    let handle = spawn async { server.run().await };
+
+    let client = HttpClient.new();
+    let url = text("http://127.0.0.1:{}/large", port);
+
+    for _ in 0..1_000 {
+        let response = client.get(&url).await;
+        assert(response.status() == 200);
+        assert(response.body().len() == 1_000_000);
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+/// Middleware chain
+fn benchmark_http_middleware() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    // Add middleware
+    server.use_middleware(|req, next| async {
+        // Logging middleware
+        let start = Instant.now();
+        let response = next(req).await;
+        let duration = start.elapsed();
+        response
+    });
+
+    server.use_middleware(|req, next| async {
+        // Auth middleware (passthrough)
+        next(req).await
+    });
+
+    server.use_middleware(|req, next| async {
+        // CORS middleware
+        let mut response = next(req).await;
+        response.header("Access-Control-Allow-Origin", "*");
+        response
+    });
+
+    server.route("/", |_req| async {
+        Response.text("OK")
+    });
+
+    let handle = spawn async { server.run().await };
+
+    let client = HttpClient.new();
+    let url = text("http://127.0.0.1:{}/", port);
+
+    for _ in 0..50_000 {
+        let response = client.get(&url).await;
+        assert(response.status() == 200);
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+/// Request routing performance
+fn benchmark_http_routing() async {
+    let server = HttpServer.bind("127.0.0.1:0").await;
+    let port = server.local_addr().port();
+
+    // Many routes
+    for i in 0..100 {
+        let path = text("/api/v1/resource{}", i);
+        server.route(&path, move |_req| async {
+            Response.text(&text("Resource {}", i))
+        });
+    }
+
+    let handle = spawn async { server.run().await };
+
+    let client = HttpClient.new();
+
+    for _ in 0..10_000 {
+        for i in 0..100 {
+            let url = text("http://127.0.0.1:{}/api/v1/resource{}", port, i);
+            let response = client.get(&url).await;
+            assert(response.status() == 200);
+        }
+    }
+
+    server.shutdown().await;
+    handle.await;
+}
+
+fn mime_type(path: &Text) -> &'static str {
+    if path.ends_with(".html") { "text/html" }
+    else if path.ends_with(".css") { "text/css" }
+    else if path.ends_with(".js") { "application/javascript" }
+    else { "application/octet-stream" }
+}

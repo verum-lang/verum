@@ -1,0 +1,263 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, wavelet, haar, signal-processing, transform
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for simplified Haar wavelet transform on 8-element arrays.
+// The Haar wavelet decomposes a signal into averages and detail (difference)
+// coefficients at each level. Supports forward and inverse transform.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// ========== Haar Wavelet (Integer, scaled by 2 to avoid fractions) ==========
+// For integer Haar: average = a + b, detail = a - b (no division)
+// This is "unnormalized" Haar. The inverse uses: a = (avg + det)/2, b = (avg - det)/2
+
+// One level of Haar transform: pairs (a[0],a[1]), (a[2],a[3]), ...
+// Output: [averages..., details...]
+fn haar_step(arr: Arr8, n: Int) -> Arr8 {
+    let half = n / 2;
+    let mut out = a8_zero();
+    let mut i = 0;
+    while i < half {
+        let a = a8_get(arr, i * 2);
+        let bv = a8_get(arr, i * 2 + 1);
+        let avg = a + bv;      // sum (scaled average)
+        let det = a - bv;      // detail coefficient
+        out = a8_set(out, i, avg);
+        out = a8_set(out, half + i, det);
+        i = i + 1;
+    }
+    out
+}
+
+// Inverse of one level
+fn haar_inv_step(arr: Arr8, n: Int) -> Arr8 {
+    let half = n / 2;
+    let mut out = a8_zero();
+    let mut i = 0;
+    while i < half {
+        let avg = a8_get(arr, i);
+        let det = a8_get(arr, half + i);
+        let a = (avg + det) / 2;
+        let bv = (avg - det) / 2;
+        out = a8_set(out, i * 2, a);
+        out = a8_set(out, i * 2 + 1, bv);
+        i = i + 1;
+    }
+    out
+}
+
+// Full Haar transform: 3 levels for n=8
+// Level 1: 8 -> 4 averages + 4 details
+// Level 2: 4 averages -> 2 averages + 2 details
+// Level 3: 2 averages -> 1 average + 1 detail
+// We store as: [final_avg, d3, d2a, d2b, d1a, d1b, d1c, d1d]
+
+fn haar_forward(arr: Arr8) -> Arr8 {
+    // Level 1: process all 8 elements
+    let l1 = haar_step(arr, 8);
+    // l1 = [avg0, avg1, avg2, avg3, det0, det1, det2, det3]
+    // Level 2: process first 4 elements (the averages)
+    let avg4 = Arr8 { a0: a8_get(l1, 0), a1: a8_get(l1, 1),
+                      a2: a8_get(l1, 2), a3: a8_get(l1, 3),
+                      a4: 0, a5: 0, a6: 0, a7: 0 };
+    let l2 = haar_step(avg4, 4);
+    // l2 = [avg0', avg1', det0', det1', ...]
+    // Level 3: process first 2
+    let avg2 = Arr8 { a0: a8_get(l2, 0), a1: a8_get(l2, 1),
+                      a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let l3 = haar_step(avg2, 2);
+    // Final: [l3[0], l3[1], l2[2], l2[3], l1[4], l1[5], l1[6], l1[7]]
+    Arr8 {
+        a0: a8_get(l3, 0), a1: a8_get(l3, 1),
+        a2: a8_get(l2, 2), a3: a8_get(l2, 3),
+        a4: a8_get(l1, 4), a5: a8_get(l1, 5),
+        a6: a8_get(l1, 6), a7: a8_get(l1, 7)
+    }
+}
+
+fn haar_inverse(coeffs: Arr8) -> Arr8 {
+    // Reverse the 3-level process
+    // Level 3 inverse: first 2 coefficients -> 2 averages
+    let l3_in = Arr8 { a0: a8_get(coeffs, 0), a1: a8_get(coeffs, 1),
+                       a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let l3_out = haar_inv_step(l3_in, 2);
+    // Level 2 inverse: 2 averages + 2 details -> 4 averages
+    let l2_in = Arr8 { a0: a8_get(l3_out, 0), a1: a8_get(l3_out, 1),
+                       a2: a8_get(coeffs, 2), a3: a8_get(coeffs, 3),
+                       a4: 0, a5: 0, a6: 0, a7: 0 };
+    let l2_out = haar_inv_step(l2_in, 4);
+    // Level 1 inverse: 4 averages + 4 details -> 8 original
+    let l1_in = Arr8 { a0: a8_get(l2_out, 0), a1: a8_get(l2_out, 1),
+                       a2: a8_get(l2_out, 2), a3: a8_get(l2_out, 3),
+                       a4: a8_get(coeffs, 4), a5: a8_get(coeffs, 5),
+                       a6: a8_get(coeffs, 6), a7: a8_get(coeffs, 7) };
+    haar_inv_step(l1_in, 8)
+}
+
+fn test_single_level() -> Int {
+    // [2, 4, 6, 8, 0, 0, 0, 0] with n=4
+    let arr = Arr8 { a0: 2, a1: 4, a2: 6, a3: 8, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let out = haar_step(arr, 4);
+    // avg: 2+4=6, 6+8=14 ; det: 2-4=-2, 6-8=-2
+    assert_eq(a8_get(out, 0), 6);
+    assert_eq(a8_get(out, 1), 14);
+    assert_eq(a8_get(out, 2), 0 - 2);
+    assert_eq(a8_get(out, 3), 0 - 2);
+    0
+}
+
+fn test_single_level_inverse() -> Int {
+    let arr = Arr8 { a0: 6, a1: 14, a2: 0 - 2, a3: 0 - 2, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let out = haar_inv_step(arr, 4);
+    assert_eq(a8_get(out, 0), 2);
+    assert_eq(a8_get(out, 1), 4);
+    assert_eq(a8_get(out, 2), 6);
+    assert_eq(a8_get(out, 3), 8);
+    0
+}
+
+fn test_full_forward() -> Int {
+    let arr = Arr8 { a0: 4, a1: 4, a2: 8, a3: 8, a4: 2, a5: 2, a6: 6, a7: 6 };
+    let c = haar_forward(arr);
+    // Level 1: avgs=[8,16,4,12], dets=[0,0,0,0]
+    // Level 2: avgs=[24,16], dets=[-8,-8]... wait let me recalculate
+    // Level 1: pairs (4,4),(8,8),(2,2),(6,6)
+    //   avgs: 8, 16, 4, 12 ; dets: 0, 0, 0, 0
+    // Level 2: pairs (8,16),(4,12)
+    //   avgs: 24, 16 ; dets: -8, -8
+    // Level 3: pairs (24,16)
+    //   avg: 40, det: 8
+    // Final: [40, 8, -8, -8, 0, 0, 0, 0]
+    assert_eq(a8_get(c, 0), 40);
+    assert_eq(a8_get(c, 1), 8);
+    assert_eq(a8_get(c, 2), 0 - 8);
+    assert_eq(a8_get(c, 3), 0 - 8);
+    assert_eq(a8_get(c, 4), 0);
+    assert_eq(a8_get(c, 5), 0);
+    0
+}
+
+fn test_roundtrip() -> Int {
+    let arr = Arr8 { a0: 4, a1: 4, a2: 8, a3: 8, a4: 2, a5: 2, a6: 6, a7: 6 };
+    let coeffs = haar_forward(arr);
+    let recovered = haar_inverse(coeffs);
+    // Should recover original
+    assert_eq(a8_get(recovered, 0), 4);
+    assert_eq(a8_get(recovered, 1), 4);
+    assert_eq(a8_get(recovered, 2), 8);
+    assert_eq(a8_get(recovered, 3), 8);
+    assert_eq(a8_get(recovered, 4), 2);
+    0
+}
+
+fn test_roundtrip_rest() -> Int {
+    let arr = Arr8 { a0: 4, a1: 4, a2: 8, a3: 8, a4: 2, a5: 2, a6: 6, a7: 6 };
+    let recovered = haar_inverse(haar_forward(arr));
+    assert_eq(a8_get(recovered, 5), 2);
+    assert_eq(a8_get(recovered, 6), 6);
+    assert_eq(a8_get(recovered, 7), 6);
+    0
+}
+
+// ========== Energy Preservation ==========
+// For unnormalized Haar, sum of all coefficients' squares relates to original sum of squares
+// Actually for this unnormalized version, c[0] = total sum of all elements
+fn test_total_sum() -> Int {
+    let arr = Arr8 { a0: 1, a1: 3, a2: 5, a3: 7, a4: 2, a5: 4, a6: 6, a7: 8 };
+    let c = haar_forward(arr);
+    // c[0] should be total sum = 1+3+5+7+2+4+6+8 = 36
+    assert_eq(a8_get(c, 0), 36);
+    0
+}
+
+// ========== Thresholding (Lossy Compression) ==========
+// Zero out small detail coefficients, then reconstruct (lossy approximation)
+fn threshold_coeffs(coeffs: Arr8, thresh: Int) -> Arr8 {
+    let mut out = coeffs;
+    // Keep c[0] (the total/DC component), threshold the rest
+    let mut i = 1;
+    while i < 8 {
+        let v = a8_get(coeffs, i);
+        let av = if v < 0 { 0 - v } else { v };
+        if av < thresh {
+            out = a8_set(out, i, 0);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn test_thresholding() -> Int {
+    let arr = Arr8 { a0: 10, a1: 12, a2: 50, a3: 48, a4: 10, a5: 11, a6: 49, a7: 51 };
+    let coeffs = haar_forward(arr);
+    // Small details (close pairs) should have small detail coeffs
+    // Threshold at 5: zero out small details
+    let threshed = threshold_coeffs(coeffs, 5);
+    let approx = haar_inverse(threshed);
+    // The approximation should be close to original
+    // Pairs were (10,12), (50,48), (10,11), (49,51)
+    // Details: -2, 2, -1, -2 -> all < 5, so all zeroed at level 1
+    // But higher-level details may be larger
+    // The DC component (total sum) is preserved
+    let total_orig = 10 + 12 + 50 + 48 + 10 + 11 + 49 + 51;
+    let mut total_approx = 0;
+    let mut i = 0;
+    while i < 8 {
+        total_approx = total_approx + a8_get(approx, i);
+        i = i + 1;
+    }
+    // Lossy thresholding with integer Haar loses some energy due to integer division
+    // truncation. The approximate sum is 238, not 241, because zeroing c[1]=-1 makes
+    // the level-3 inverse divide 241 (odd) by 2, losing 1, and further rounding accumulates.
+    assert_eq(total_approx, 238);
+    0
+}
+
+fn test_constant_signal() -> Int {
+    // Constant signal: all details should be 0
+    let arr = Arr8 { a0: 5, a1: 5, a2: 5, a3: 5, a4: 5, a5: 5, a6: 5, a7: 5 };
+    let c = haar_forward(arr);
+    assert_eq(a8_get(c, 0), 40);  // total sum = 40
+    assert_eq(a8_get(c, 1), 0);   // all details zero
+    assert_eq(a8_get(c, 2), 0);
+    assert_eq(a8_get(c, 3), 0);
+    assert_eq(a8_get(c, 4), 0);
+    0
+}
+
+fn main() -> Int {
+    test_single_level();
+    test_single_level_inverse();
+    test_full_forward();
+    test_roundtrip();
+    test_roundtrip_rest();
+    test_total_sum();
+    test_thresholding();
+    test_constant_signal();
+    print("All wavelet tests passed!");
+    0
+}

@@ -1,0 +1,55 @@
+// @test: parse
+// @level: L1
+// @tags: meta, repr, advanced, layout
+// @timeout: 5000
+
+/// Advanced @repr usage for fine-grained memory layout control.
+
+// C repr with specific integer discriminant
+@repr(C)
+type CResult is
+    | Success(Int)
+    | Error(Int);
+
+// Repr with both C and packed
+@repr(C)
+@repr(packed)
+type NetworkPacket is {
+    version: Int,
+    length: Int,
+    payload_type: Int,
+};
+
+// Transparent for zero-cost newtypes
+@repr(transparent)
+type NonZeroInt is (Int);
+
+@repr(transparent)
+type FileDescriptor is (Int);
+
+// Alignment for cache optimization
+@repr(align(64))
+type CacheLinePadded is {
+    counter: Int,
+    padding: [Int; 7],
+};
+
+// SIMD-compatible layout
+@repr(simd)
+type Float4 is {
+    x: Float,
+    y: Float,
+    z: Float,
+    w: Float,
+};
+
+@repr(simd)
+type Int8 is {
+    v0: Int, v1: Int, v2: Int, v3: Int,
+    v4: Int, v5: Int, v6: Int, v7: Int,
+};
+
+fn main() {
+    let fd = FileDescriptor(3);
+    print("Repr advanced tests parsed");
+}

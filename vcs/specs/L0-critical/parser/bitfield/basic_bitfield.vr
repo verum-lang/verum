@@ -1,0 +1,41 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: bitfield, parser, low-level
+// @timeout: 5000
+// @description: Basic bitfield type parsing with @bits attribute
+//
+// Spec: docs/architecture/low-level-features.md - Bitfield System
+
+/// Basic 8-bit flags register using bitfield syntax.
+@bitfield
+type Flags is {
+    @bits(1) carry: Bool,
+    @bits(1) zero: Bool,
+    @bits(1) negative: Bool,
+    @bits(1) overflow: Bool,
+    @bits(4) reserved: UInt,
+};
+
+/// Multi-byte bitfield with byte order specification.
+@bitfield
+@endian(big)
+type NetworkHeader is {
+    @bits(4) version: UInt,
+    @bits(4) ihl: UInt,
+    @bits(8) dscp_ecn: UInt,
+    @bits(16) total_length: UInt,
+};
+
+/// Bitfield with explicit offset for sparse layout.
+@bitfield
+type SparseRegister is {
+    @bits(1) @offset(0) enable: Bool,
+    @bits(3) @offset(4) mode: UInt,
+    @bits(8) @offset(24) status: UInt,
+};
+
+fn main() -> Int {
+    // This test only validates parsing, not runtime semantics
+    0
+}

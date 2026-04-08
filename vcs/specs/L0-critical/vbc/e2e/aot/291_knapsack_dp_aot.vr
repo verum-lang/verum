@@ -1,0 +1,257 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, dynamic-programming, knapsack, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for 0/1 knapsack dynamic programming
+
+// Items: weight and value arrays (up to 8 items)
+type Items8 is {
+    w0: Int, w1: Int, w2: Int, w3: Int, w4: Int, w5: Int, w6: Int, w7: Int,
+    v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int,
+    count: Int
+};
+
+fn item_weight(items: Items8, i: Int) -> Int {
+    if i == 0 { items.w0 } else if i == 1 { items.w1 }
+    else if i == 2 { items.w2 } else if i == 3 { items.w3 }
+    else if i == 4 { items.w4 } else if i == 5 { items.w5 }
+    else if i == 6 { items.w6 } else { items.w7 }
+}
+
+fn item_value(items: Items8, i: Int) -> Int {
+    if i == 0 { items.v0 } else if i == 1 { items.v1 }
+    else if i == 2 { items.v2 } else if i == 3 { items.v3 }
+    else if i == 4 { items.v4 } else if i == 5 { items.v5 }
+    else if i == 6 { items.v6 } else { items.v7 }
+}
+
+// DP table row (capacity 0..15)
+type DPRow is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int, d12: Int, d13: Int, d14: Int, d15: Int
+};
+
+fn dp_get(r: DPRow, i: Int) -> Int {
+    if i == 0 { r.d0 } else if i == 1 { r.d1 }
+    else if i == 2 { r.d2 } else if i == 3 { r.d3 }
+    else if i == 4 { r.d4 } else if i == 5 { r.d5 }
+    else if i == 6 { r.d6 } else if i == 7 { r.d7 }
+    else if i == 8 { r.d8 } else if i == 9 { r.d9 }
+    else if i == 10 { r.d10 } else if i == 11 { r.d11 }
+    else if i == 12 { r.d12 } else if i == 13 { r.d13 }
+    else if i == 14 { r.d14 } else { r.d15 }
+}
+
+fn dp_set(r: DPRow, i: Int, v: Int) -> DPRow {
+    DPRow {
+        d0: if i == 0 { v } else { r.d0 }, d1: if i == 1 { v } else { r.d1 },
+        d2: if i == 2 { v } else { r.d2 }, d3: if i == 3 { v } else { r.d3 },
+        d4: if i == 4 { v } else { r.d4 }, d5: if i == 5 { v } else { r.d5 },
+        d6: if i == 6 { v } else { r.d6 }, d7: if i == 7 { v } else { r.d7 },
+        d8: if i == 8 { v } else { r.d8 }, d9: if i == 9 { v } else { r.d9 },
+        d10: if i == 10 { v } else { r.d10 }, d11: if i == 11 { v } else { r.d11 },
+        d12: if i == 12 { v } else { r.d12 }, d13: if i == 13 { v } else { r.d13 },
+        d14: if i == 14 { v } else { r.d14 }, d15: if i == 15 { v } else { r.d15 }
+    }
+}
+
+fn dp_new() -> DPRow {
+    DPRow {
+        d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0,
+        d8: 0, d9: 0, d10: 0, d11: 0, d12: 0, d13: 0, d14: 0, d15: 0
+    }
+}
+
+fn max2(a: Int, b_val: Int) -> Int { if a > b_val { a } else { b_val } }
+
+// 0/1 Knapsack: capacity up to 15, items up to 8
+// Uses 1D rolling DP array (iterate capacity in reverse)
+fn knapsack(items: Items8, capacity: Int) -> Int {
+    let mut dp = dp_new();
+    let mut i = 0;
+    while i < items.count {
+        let wi = item_weight(items, i);
+        let vi = item_value(items, i);
+        // Iterate capacity from high to low (standard 0/1 knapsack trick)
+        let mut c = capacity;
+        while c >= wi {
+            let prev = dp_get(dp, c);
+            let candidate = dp_get(dp, c - wi) + vi;
+            dp = dp_set(dp, c, max2(prev, candidate));
+            c = c - 1;
+        }
+        i = i + 1;
+    }
+    dp_get(dp, capacity)
+}
+
+// Variant: also track which items are selected (bitmask in selection row)
+type KnapsackResult is { max_value: Int, selected_mask: Int };
+
+// Full 2D approach (row per item) using 2 DPRows
+fn knapsack_with_selection(items: Items8, capacity: Int) -> KnapsackResult {
+    // For selection tracking, we use two rows alternating
+    let mut prev_row = dp_new();
+    let mut curr_row = dp_new();
+    // Track selection bitmask per capacity
+    let mut prev_sel = dp_new();
+    let mut curr_sel = dp_new();
+
+    let mut i = 0;
+    while i < items.count {
+        let wi = item_weight(items, i);
+        let vi = item_value(items, i);
+        let mut c = 0;
+        while c <= capacity {
+            let without = dp_get(prev_row, c);
+            if c >= wi {
+                let with_item = dp_get(prev_row, c - wi) + vi;
+                if with_item > without {
+                    curr_row = dp_set(curr_row, c, with_item);
+                    curr_sel = dp_set(curr_sel, c, dp_get(prev_sel, c - wi) | (1 << i));
+                } else {
+                    curr_row = dp_set(curr_row, c, without);
+                    curr_sel = dp_set(curr_sel, c, dp_get(prev_sel, c));
+                }
+            } else {
+                curr_row = dp_set(curr_row, c, without);
+                curr_sel = dp_set(curr_sel, c, dp_get(prev_sel, c));
+            }
+            c = c + 1;
+        }
+        prev_row = curr_row;
+        curr_row = dp_new();
+        prev_sel = curr_sel;
+        curr_sel = dp_new();
+        i = i + 1;
+    }
+    KnapsackResult { max_value: dp_get(prev_row, capacity), selected_mask: dp_get(prev_sel, capacity) }
+}
+
+// Count set bits
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 { count = count + (x & 1); x = x >> 1; }
+    count
+}
+
+fn test_basic_knapsack() {
+    // Classic example: capacity=10, items: (weight, value)
+    // Item 0: w=2, v=6   Item 1: w=3, v=5   Item 2: w=5, v=10   Item 3: w=7, v=14
+    let items = Items8 {
+        w0: 2, w1: 3, w2: 5, w3: 7, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 6, v1: 5, v2: 10, v3: 14, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 4
+    };
+    // Optimal: items 0+2 (w=7, v=16) or items 0+1+2 (w=10, v=21)
+    let result = knapsack(items, 10);
+    assert_eq(result, 21);  // items 0+1+2: w=2+3+5=10, v=6+5+10=21
+}
+
+fn test_single_item() {
+    let items = Items8 {
+        w0: 5, w1: 0, w2: 0, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 10, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 1
+    };
+    assert_eq(knapsack(items, 5), 10);
+    assert_eq(knapsack(items, 4), 0);   // Can't fit
+    assert_eq(knapsack(items, 10), 10); // Still only 1 item
+}
+
+fn test_all_fit() {
+    // All items fit in the knapsack
+    let items = Items8 {
+        w0: 1, w1: 1, w2: 1, w3: 1, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 10, v1: 20, v2: 30, v3: 40, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 4
+    };
+    assert_eq(knapsack(items, 10), 100);  // All fit: 10+20+30+40=100
+}
+
+fn test_zero_capacity() {
+    let items = Items8 {
+        w0: 1, w1: 2, w2: 0, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 10, v1: 20, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 2
+    };
+    assert_eq(knapsack(items, 0), 0);
+}
+
+fn test_equal_weight() {
+    // All items weigh the same, should pick highest values
+    let items = Items8 {
+        w0: 3, w1: 3, w2: 3, w3: 3, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 5, v1: 10, v2: 15, v3: 3, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 4
+    };
+    // Capacity 6: pick 2 items. Best: items 1+2 (v=10+15=25)
+    assert_eq(knapsack(items, 6), 25);
+    // Capacity 9: pick 3 items. Best: items 0+1+2 (v=5+10+15=30)
+    assert_eq(knapsack(items, 9), 30);
+}
+
+fn test_selection_tracking() {
+    let items = Items8 {
+        w0: 2, w1: 3, w2: 5, w3: 7, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 6, v1: 5, v2: 10, v3: 14, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 4
+    };
+    let result = knapsack_with_selection(items, 10);
+    assert_eq(result.max_value, 21);
+    // Selected items: 0, 1, 2 -> mask = 0b0111 = 7
+    assert_eq(result.selected_mask, 7);
+    assert_eq(popcount(result.selected_mask), 3);
+}
+
+fn test_tight_capacity() {
+    // Capacity exactly matches one heavy valuable item vs multiple light items
+    let items = Items8 {
+        w0: 1, w1: 1, w2: 1, w3: 1, w4: 1, w5: 5, w6: 0, w7: 0,
+        v0: 3, v1: 3, v2: 3, v3: 3, v4: 3, v5: 100, v6: 0, v7: 0,
+        count: 6
+    };
+    // Capacity 5: item 5 alone (v=100) vs items 0-4 (v=15). Pick item 5.
+    assert_eq(knapsack(items, 5), 100);
+
+    // Capacity 6: item 5 + one of 0-4 (v=103)
+    assert_eq(knapsack(items, 6), 103);
+}
+
+fn test_greedy_suboptimal() {
+    // Case where greedy by value/weight ratio fails
+    // Item 0: w=1, v=6 (ratio=6)
+    // Item 1: w=2, v=10 (ratio=5)
+    // Item 2: w=3, v=12 (ratio=4)
+    // Capacity=3: Greedy picks item0+item1 (v=16), DP might pick item2 (v=12), or item0+item1(v=16)
+    // Actually item0+item1 is optimal at v=16 (w=3)
+    let items = Items8 {
+        w0: 1, w1: 2, w2: 3, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 6, v1: 10, v2: 12, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 3
+    };
+    assert_eq(knapsack(items, 3), 16);
+
+    // Trickier: capacity=5
+    // item0+item1+item2 = w=6 doesn't fit
+    // item0+item2 = w=4, v=18
+    // item1+item2 = w=5, v=22 - best!
+    assert_eq(knapsack(items, 5), 22);
+}
+
+fn main() -> Int {
+    test_basic_knapsack();
+    test_single_item();
+    test_all_fit();
+    test_zero_capacity();
+    test_equal_weight();
+    test_selection_tracking();
+    test_tight_capacity();
+    test_greedy_suboptimal();
+    print("[OK] 291_knapsack_dp_aot");
+    0
+}

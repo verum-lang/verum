@@ -1,0 +1,29 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test type alignment properties for integer types
+
+fn main() {
+    // Test Int alignments (generally same as size for primitives)
+    assert_eq(Int8.alignment, 1);
+    assert_eq(Int16.alignment, 2);
+    assert_eq(Int32.alignment, 4);
+    assert_eq(Int64.alignment, 8);
+    assert_eq(Int128.alignment, 16);
+
+    // Test UInt alignments
+    assert_eq(UInt8.alignment, 1);
+    assert_eq(UInt16.alignment, 2);
+    assert_eq(UInt32.alignment, 4);
+    assert_eq(UInt64.alignment, 8);
+    assert_eq(UInt128.alignment, 16);
+
+    // Test size types
+    assert_eq(IntSize.alignment, 8);   // 64-bit platform
+    assert_eq(UIntSize.alignment, 8);  // 64-bit platform
+
+    // Test compatibility aliases
+    assert_eq(i32.alignment, 4);
+    assert_eq(u64.alignment, 8);
+}

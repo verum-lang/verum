@@ -1,0 +1,79 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, match, arm, error
+// @description: Test invalid match arm syntax with pattern errors
+// @expected-error: E087
+
+type Option<T> is None | Some(T);
+type Color is Red | Green | Blue;
+
+fn test_missing_arrow() {
+    let value = 42;
+
+    // Invalid: missing => in match arm
+    match value {
+        x print("value"),
+        _ => print("other"),
+    }
+}
+
+fn test_double_arrow() {
+    let value = 42;
+
+    // Invalid: double arrow in match arm
+    match value {
+        x => => print("double arrow"),
+        _ => print("other"),
+    }
+}
+
+fn test_colon_instead_of_arrow() {
+    let value = 42;
+
+    // Invalid: using : instead of =>
+    match value {
+        x: print("colon"),
+        _ => print("other"),
+    }
+}
+
+fn test_missing_expression() {
+    let value = 42;
+
+    // Invalid: arrow without expression
+    match value {
+        x => ,
+        _ => print("other"),
+    }
+}
+
+fn test_pattern_after_arrow() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: pattern instead of expression after arrow
+    match opt {
+        Some(x) => Some(y),
+        None => print("none"),
+    }
+}
+
+fn test_semicolon_after_expression() {
+    let value = 42;
+
+    // Invalid: semicolon after expression (should be comma)
+    match value {
+        1 => print("one");
+        2 => print("two"),
+        _ => print("other"),
+    }
+}
+
+fn test_empty_match_arm() {
+    let color = Red;
+
+    // Invalid: empty match arm
+    match color {
+        => print("empty"),
+        _ => print("other"),
+    }
+}

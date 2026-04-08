@@ -1,0 +1,348 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, async, task-queue, round-robin, ready, pending
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Async simulation — task queue with ready/pending state,
+// round-robin execution. Tasks have progress counters and a target; each "tick"
+// increments progress. When progress reaches target, the task becomes "done".
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Task: encoded as 3 fields per task in flat arrays
+//   - status: 0=pending, 1=ready, 2=done
+//   - progress: current progress (ticks completed)
+//   - target: ticks needed to complete
+// =============================================================================
+
+type TaskPool is {
+    statuses: Arr8,
+    progress: Arr8,
+    targets: Arr8,
+    num_tasks: Int
+};
+
+fn pool_new() -> TaskPool {
+    TaskPool {
+        statuses: a8_zeros(),
+        progress: a8_zeros(),
+        targets: a8_zeros(),
+        num_tasks: 0
+    }
+}
+
+fn pool_add_task(pool: TaskPool, target: Int) -> TaskPool {
+    let idx = pool.num_tasks;
+    TaskPool {
+        statuses: a8_set(pool.statuses, idx, 1),  // ready
+        progress: pool.progress,
+        targets: a8_set(pool.targets, idx, target),
+        num_tasks: pool.num_tasks + 1
+    }
+}
+
+fn pool_get_status(pool: TaskPool, idx: Int) -> Int {
+    a8_get(pool.statuses, idx)
+}
+
+fn pool_get_progress(pool: TaskPool, idx: Int) -> Int {
+    a8_get(pool.progress, idx)
+}
+
+fn pool_get_target(pool: TaskPool, idx: Int) -> Int {
+    a8_get(pool.targets, idx)
+}
+
+// Tick a single task: if ready, increment progress; if progress >= target, mark done
+fn pool_tick_task(pool: TaskPool, idx: Int) -> TaskPool {
+    let st = a8_get(pool.statuses, idx);
+    if st != 1 {
+        // Not ready (pending or done), skip
+        return pool;
+    }
+    let new_prog = a8_get(pool.progress, idx) + 1;
+    let tgt = a8_get(pool.targets, idx);
+    let new_status = if new_prog >= tgt { 2 } else { 1 };
+    TaskPool {
+        statuses: a8_set(pool.statuses, idx, new_status),
+        progress: a8_set(pool.progress, idx, new_prog),
+        targets: pool.targets,
+        num_tasks: pool.num_tasks
+    }
+}
+
+// =============================================================================
+// Scheduler: round-robin ticking
+// =============================================================================
+
+// Count tasks in a given status
+fn pool_count_status(pool: TaskPool, status: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < pool.num_tasks {
+        if a8_get(pool.statuses, i) == status {
+            cnt = cnt + 1;
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+// Run one round: tick all ready tasks once
+fn pool_tick_all(pool: TaskPool) -> TaskPool {
+    let mut p = pool;
+    let mut i = 0;
+    while i < p.num_tasks {
+        p = pool_tick_task(p, i);
+        i = i + 1;
+    }
+    p
+}
+
+// Run until all tasks are done, return total rounds
+fn pool_run_to_completion(pool: TaskPool) -> TaskPool {
+    let mut p = pool;
+    let mut rounds = 0;
+    let max_rounds = 100;
+    while pool_count_status(p, 1) > 0 && rounds < max_rounds {
+        p = pool_tick_all(p);
+        rounds = rounds + 1;
+    }
+    p
+}
+
+// Count total ticks across all tasks
+fn pool_total_progress(pool: TaskPool) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < pool.num_tasks {
+        total = total + a8_get(pool.progress, i);
+        i = i + 1;
+    }
+    total
+}
+
+// Suspend a task (change status to pending)
+fn pool_suspend_task(pool: TaskPool, idx: Int) -> TaskPool {
+    TaskPool {
+        statuses: a8_set(pool.statuses, idx, 0),
+        progress: pool.progress,
+        targets: pool.targets,
+        num_tasks: pool.num_tasks
+    }
+}
+
+// Resume a task (change pending back to ready)
+fn pool_resume_task(pool: TaskPool, idx: Int) -> TaskPool {
+    if a8_get(pool.statuses, idx) == 0 {
+        TaskPool {
+            statuses: a8_set(pool.statuses, idx, 1),
+            progress: pool.progress,
+            targets: pool.targets,
+            num_tasks: pool.num_tasks
+        }
+    } else {
+        pool
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_single_task() {
+    let mut p = pool_new();
+    p = pool_add_task(p, 3);  // needs 3 ticks
+
+    assert_eq(pool_get_status(p, 0), 1);  // ready
+    assert_eq(pool_count_status(p, 1), 1);
+
+    p = pool_tick_task(p, 0);
+    assert_eq(pool_get_progress(p, 0), 1);
+    assert_eq(pool_get_status(p, 0), 1);  // still ready
+
+    p = pool_tick_task(p, 0);
+    assert_eq(pool_get_progress(p, 0), 2);
+
+    p = pool_tick_task(p, 0);
+    assert_eq(pool_get_progress(p, 0), 3);
+    assert_eq(pool_get_status(p, 0), 2);  // done!
+}
+
+fn test_multiple_tasks() {
+    let mut p = pool_new();
+    p = pool_add_task(p, 2);  // task 0: 2 ticks
+    p = pool_add_task(p, 4);  // task 1: 4 ticks
+    p = pool_add_task(p, 1);  // task 2: 1 tick
+
+    assert_eq(p.num_tasks, 3);
+    assert_eq(pool_count_status(p, 1), 3);
+
+    // Round 1
+    p = pool_tick_all(p);
+    assert_eq(pool_get_status(p, 2), 2);  // task 2 done (needed 1)
+    assert_eq(pool_count_status(p, 2), 1);
+    assert_eq(pool_count_status(p, 1), 2);
+
+    // Round 2
+    p = pool_tick_all(p);
+    assert_eq(pool_get_status(p, 0), 2);  // task 0 done (needed 2)
+    assert_eq(pool_count_status(p, 2), 2);
+
+    // Rounds 3 and 4
+    p = pool_tick_all(p);
+    p = pool_tick_all(p);
+    assert_eq(pool_get_status(p, 1), 2);  // task 1 done (needed 4)
+    assert_eq(pool_count_status(p, 2), 3);
+    assert_eq(pool_count_status(p, 1), 0);
+}
+
+fn test_run_to_completion() {
+    let mut p = pool_new();
+    p = pool_add_task(p, 3);
+    p = pool_add_task(p, 5);
+    p = pool_add_task(p, 2);
+
+    p = pool_run_to_completion(p);
+    assert_eq(pool_count_status(p, 2), 3);  // all done
+    assert_eq(pool_count_status(p, 1), 0);  // none ready
+}
+
+fn test_pending_task() {
+    let mut p = pool_new();
+    p = pool_add_task(p, 3);
+    p = pool_add_task(p, 3);
+
+    // Suspend task 0
+    p = pool_suspend_task(p, 0);
+    assert_eq(pool_get_status(p, 0), 0);  // pending
+
+    // Tick all: only task 1 should progress
+    p = pool_tick_all(p);
+    assert_eq(pool_get_progress(p, 0), 0);  // suspended, no progress
+    assert_eq(pool_get_progress(p, 1), 1);
+
+    // Resume task 0
+    p = pool_resume_task(p, 0);
+    assert_eq(pool_get_status(p, 0), 1);  // ready again
+
+    p = pool_tick_all(p);
+    assert_eq(pool_get_progress(p, 0), 1);
+    assert_eq(pool_get_progress(p, 1), 2);
+}
+
+fn test_already_done_not_ticked() {
+    let mut p = pool_new();
+    p = pool_add_task(p, 1);  // done after 1 tick
+
+    p = pool_tick_all(p);
+    assert_eq(pool_get_status(p, 0), 2);
+    assert_eq(pool_get_progress(p, 0), 1);
+
+    // Tick again: should not change progress
+    p = pool_tick_all(p);
+    assert_eq(pool_get_progress(p, 0), 1);  // still 1
+}
+
+fn test_total_progress() {
+    let mut p = pool_new();
+    p = pool_add_task(p, 3);
+    p = pool_add_task(p, 2);
+
+    p = pool_run_to_completion(p);
+    // Task 0 did 3 ticks, task 1 did 2 ticks
+    assert_eq(pool_total_progress(p), 5);
+}
+
+fn test_suspend_resume_workflow() {
+    let mut p = pool_new();
+    p = pool_add_task(p, 5);  // task 0
+    p = pool_add_task(p, 5);  // task 1
+
+    // Run 2 rounds
+    p = pool_tick_all(p);
+    p = pool_tick_all(p);
+    assert_eq(pool_get_progress(p, 0), 2);
+    assert_eq(pool_get_progress(p, 1), 2);
+
+    // Suspend task 0, run 2 more rounds
+    p = pool_suspend_task(p, 0);
+    p = pool_tick_all(p);
+    p = pool_tick_all(p);
+    assert_eq(pool_get_progress(p, 0), 2);  // unchanged
+    assert_eq(pool_get_progress(p, 1), 4);
+
+    // Resume task 0, run to completion
+    p = pool_resume_task(p, 0);
+    p = pool_run_to_completion(p);
+    assert_eq(pool_count_status(p, 2), 2);
+    assert_eq(pool_get_progress(p, 0), 5);
+    assert_eq(pool_get_progress(p, 1), 5);
+}
+
+fn test_all_same_duration() {
+    let mut p = pool_new();
+    p = pool_add_task(p, 4);
+    p = pool_add_task(p, 4);
+    p = pool_add_task(p, 4);
+
+    p = pool_run_to_completion(p);
+    // All should finish at the same time (4 rounds)
+    assert_eq(pool_count_status(p, 2), 3);
+    assert_eq(pool_total_progress(p), 12);
+}
+
+fn test_empty_pool() {
+    let p = pool_new();
+    assert_eq(pool_count_status(p, 1), 0);
+    assert_eq(pool_count_status(p, 2), 0);
+
+    // Tick empty pool should be no-op
+    let p2 = pool_tick_all(p);
+    assert_eq(p2.num_tasks, 0);
+}
+
+fn main() -> Int {
+    test_single_task();
+    test_multiple_tasks();
+    test_run_to_completion();
+    test_pending_task();
+    test_already_done_not_ticked();
+    test_total_progress();
+    test_suspend_resume_workflow();
+    test_all_same_duration();
+    test_empty_pool();
+    print("[OK] 347_interp_async_sim");
+    0
+}

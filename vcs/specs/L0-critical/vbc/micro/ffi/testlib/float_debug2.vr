@@ -1,0 +1,48 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, float, debug
+// @description: Debug float approx_eq function
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_sqrt_f64(x: Float) -> Float;
+}
+
+fn approx_eq(a: Float, b: Float, epsilon: Float) -> Bool {
+    let diff = a - b;
+    print("  a="); print(a); print(" b="); print(b); print(" diff="); print(diff); print("\n");
+    if diff < 0.0 {
+        let neg_diff = -diff;
+        print("  negative branch, neg_diff="); print(neg_diff); print("\n");
+        let result = neg_diff < epsilon;
+        print("  neg_diff < epsilon: "); print(result); print("\n");
+        result
+    } else {
+        print("  positive branch\n");
+        let result = diff < epsilon;
+        print("  diff < epsilon: "); print(result); print("\n");
+        result
+    }
+}
+
+fn main() {
+    let epsilon = 0.0001;
+
+    // Test sqrt(4) = 2
+    let sqrt4 = ffi_sqrt_f64(4.0);
+    print("Testing sqrt(4.0) = "); print(sqrt4); print("\n");
+    let eq1 = approx_eq(sqrt4, 2.0, epsilon);
+    print("approx_eq result: "); print(eq1); print("\n");
+
+    if eq1 {
+        print("Test 1 passed!\n");
+    } else {
+        print("Test 1 FAILED!\n");
+        assert(false);
+    }
+
+    print("All debug tests passed!\n");
+}

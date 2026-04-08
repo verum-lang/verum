@@ -1,0 +1,197 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, interpolated, sql, safe
+
+// SQL-safe interpolated strings (sql"...")
+// Automatically escapes/parameterizes interpolated values
+
+fn test_basic_parameterized_query() {
+    // Basic parameterized query
+    let user_id = 42;
+    let query1 = sql"SELECT * FROM users WHERE id = {user_id}";
+}
+
+fn test_string_parameter() {
+    // String parameter (automatically escaped)
+    let username = "john_doe";
+    let query2 = sql"SELECT * FROM users WHERE username = {username}";
+}
+
+fn test_dangerous_input_safely_handled() {
+    // Dangerous input safely handled
+    let malicious = "'; DROP TABLE users; --";
+    let safe_query = sql"SELECT * FROM users WHERE name = {malicious}";
+    // Produces: SELECT * FROM users WHERE name = $1
+    // With parameter: "'; DROP TABLE users; --"
+}
+
+fn test_multiple_parameters() {
+    // Multiple parameters
+    let name = "Alice";
+    let age = 25;
+    let city = "New York";
+    let multi_param = sql"SELECT * FROM users WHERE name = {name} AND age = {age} AND city = {city}";
+}
+
+fn test_insert_statement() {
+    // Insert statement
+    let new_name = "Bob";
+    let new_email = "bob@example.com";
+    let insert = sql"INSERT INTO users (name, email) VALUES ({new_name}, {new_email})";
+}
+
+fn test_update_statement() {
+    // Update statement
+    let update_id = 100;
+    let new_value = "updated";
+    let update = sql"UPDATE users SET status = {new_value} WHERE id = {update_id}";
+}
+
+fn test_delete_statement() {
+    // Delete statement
+    let delete_id = 50;
+    let delete_query = sql"DELETE FROM users WHERE id = {delete_id}";
+}
+
+fn test_like_queries() {
+    // LIKE queries with wildcards
+    let search_term = "john";
+    let like_query = sql"SELECT * FROM users WHERE name LIKE {search_term + '%'}";
+}
+
+fn test_in_clause() {
+    // IN clause with array (if supported)
+    let ids = [1, 2, 3, 4, 5];
+    let in_query = sql"SELECT * FROM users WHERE id IN ({ids})";
+}
+
+fn test_null_handling() {
+    // NULL handling
+    let maybe_value: Maybe<Text> = None;
+    let null_query = sql"SELECT * FROM users WHERE optional_field = {maybe_value}";
+}
+
+fn test_boolean_parameters() {
+    // Boolean parameters
+    let is_active = true;
+    let bool_query = sql"SELECT * FROM users WHERE active = {is_active}";
+}
+
+fn test_date_parameters() {
+    // Date/time parameters
+    let created_after = d#"2025-01-01";
+    let date_query = sql"SELECT * FROM users WHERE created_at > {created_after}";
+}
+
+fn test_numeric_types() {
+    // Numeric types
+    let min_age: Int = 18;
+    let max_age: Int = 65;
+    let range_query = sql"SELECT * FROM users WHERE age BETWEEN {min_age} AND {max_age}";
+}
+
+fn test_floating_point() {
+    // Floating point
+    let min_salary = 50000.00;
+    let float_query = sql"SELECT * FROM employees WHERE salary >= {min_salary}";
+}
+
+fn test_complex_joins() {
+    // Complex joins
+    let order_status = "pending";
+    let join_query = sql"
+    SELECT users.name, orders.total
+    FROM users
+    JOIN orders ON users.id = orders.user_id
+    WHERE orders.status = {order_status}
+";
+}
+
+fn test_subquery() {
+    // Subquery with parameters
+    let threshold = 1000;
+    let subquery = sql"
+    SELECT * FROM users
+    WHERE id IN (
+        SELECT user_id FROM orders
+        WHERE total > {threshold}
+    )
+";
+}
+
+fn test_aggregation() {
+    // Aggregation with parameters
+    let group_min = 5;
+    let agg_query = sql"
+    SELECT category, COUNT(*) as count
+    FROM products
+    GROUP BY category
+    HAVING COUNT(*) >= {group_min}
+";
+}
+
+fn test_order_and_limit() {
+    // Order and limit
+    let sort_column = "created_at";
+    let limit_val = 10;
+    let offset_val = 20;
+    // Note: Column names might need special handling
+    let paged_query = sql"SELECT * FROM users ORDER BY created_at DESC LIMIT {limit_val} OFFSET {offset_val}";
+}
+
+fn test_cte() {
+    // CTE (Common Table Expression)
+    let cte_param = 100;
+    let cte_query = sql"
+    WITH high_value AS (
+        SELECT * FROM orders WHERE total > {cte_param}
+    )
+    SELECT users.* FROM users
+    JOIN high_value ON users.id = high_value.user_id
+";
+}
+
+fn test_upsert() {
+    // Upsert/Merge
+    let upsert_id = 1;
+    let upsert_name = "Updated Name";
+    let upsert_query = sql"
+    INSERT INTO users (id, name) VALUES ({upsert_id}, {upsert_name})
+    ON CONFLICT (id) DO UPDATE SET name = {upsert_name}
+";
+}
+
+// Function in sql context
+fn build_user_query(user_id: Int, status: Text) -> SqlQuery {
+    sql"SELECT * FROM users WHERE id = {user_id} AND status = {status}"
+}
+
+fn test_function_sql() {
+    let dynamic_query = build_user_query(42, "active");
+}
+
+fn test_array_of_queries() {
+    // Array of queries
+    let event1 = "event1";
+    let event2 = "event2";
+    let event3 = "event3";
+    let batch_inserts = [
+        sql"INSERT INTO log (msg) VALUES ({event1})",
+        sql"INSERT INTO log (msg) VALUES ({event2})",
+        sql"INSERT INTO log (msg) VALUES ({event3})",
+    ];
+}
+
+fn test_type_annotation() {
+    let user_id = 42;
+    // Type annotation on result
+    let typed_query: SqlQuery<User> = sql"SELECT * FROM users WHERE id = {user_id}";
+}
+
+fn test_combining_static_and_dynamic() {
+    // Combining static and dynamic parts
+    let table_name = "users";  // Note: Table names often can't be parameterized
+    let status = "active";
+    let dynamic_select = sql"SELECT id, name, email FROM users WHERE status = {status}";
+}

@@ -1,0 +1,106 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, calls, ufcs, static, associated
+
+fn test_static_method_calls() {
+    // Static method call (associated function)
+    Object.new();
+    Point.origin();
+    List.empty();
+}
+
+fn test_static_method_with_args() {
+    // Static method with arguments
+    Point.from_coords(x, y);
+    Config.from_file("config.toml");
+    Parser.parse(input);
+}
+
+fn test_static_method_with_generics() {
+    // Static method with type parameters (single type param only)
+    List.new<Int>();
+    Map.with_capacity(100);
+    Result.ok<Int>(42);
+}
+
+fn test_fully_qualified_ufcs() {
+    // Fully qualified method call (UFCS)
+    Display.display(&obj);
+    Iterator.next(&mut iter);
+    Clone.clone(&value);
+}
+
+// NOTE: <Type as Trait> syntax may not be supported
+// fn test_ufcs_explicit_type() {
+//     <Point as Display>.display(&point);
+// }
+
+fn test_nested_type_path() {
+    // Nested type path (module is a reserved word)
+    std.collections.Map.new();
+    cog.utils.Helper.create();
+}
+
+fn test_static_on_generic() {
+    // Static method on generic type (single type param only)
+    Maybe.Some(42);
+    Result.Ok(value);
+    List.with_capacity(n);
+}
+
+// Static method returning Self
+implement Point {
+    fn new(x: Float, y: Float) -> Self {
+        Point { x, y }
+    }
+
+    fn origin() -> Self {
+        Self.new(0.0, 0.0)
+    }
+}
+
+fn test_static_chained_with_instance() {
+    // Static method chained with instance method
+    Point.new(1.0, 2.0).distance_to(other);
+    Config.default().with_timeout(1000);
+}
+
+fn test_associated_constants() {
+    // Associated constant access
+    Math.PI;
+    Config.DEFAULT_TIMEOUT;
+    Type.MAX_VALUE;
+}
+
+fn test_enum_variant_static() {
+    // Enum variant as static path
+    Option.Some(value);
+    Option.None;
+    Result.Ok(success);
+    Result.Err(error);
+}
+
+fn test_static_in_expression() {
+    // Static method in expression
+    let point = Point.new(x, y);
+    let config = Config.from_env().unwrap();
+    let sum = List.from_iter(items).sum();
+}
+
+// NOTE: UFCS with <Type as Trait> syntax may not be supported
+// fn test_ufcs_disambiguating() {
+//     let s = <MyType as ToString>.to_string(&value);
+// }
+
+fn test_trait_default_implementation() {
+    // Calling trait default implementation
+    Trait.default_method(&self);
+    Iterator.count(self);
+}
+
+fn test_static_async() {
+    // Static async method
+    let client = HttpClient.connect(url).await;
+    let result = Database.query(sql).await;
+}

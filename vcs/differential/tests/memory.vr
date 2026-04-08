@@ -1,0 +1,261 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, memory
+// @timeout: 15000
+
+/// Memory operations for differential testing.
+/// Tests references, heap allocation, copy/move semantics.
+
+fn main() {
+    test_stack_allocation();
+    test_heap_allocation();
+    test_references();
+    test_move_semantics();
+    test_copy_semantics();
+    test_drop_order();
+}
+
+/// Stack allocation and access
+fn test_stack_allocation() {
+    println("=== Stack Allocation ===");
+
+    // Primitives
+    let i: Int = 42;
+    let f: Float = 3.14;
+    let b: Bool = true;
+    let c: Char = 'A';
+
+    println(f"int: {i}");
+    println(f"float: {f}");
+    println(f"bool: {b}");
+    println(f"char: {c}");
+
+    // Tuples
+    let pair = (1, 2);
+    let triple = (1, 2, 3);
+    println(f"pair: {pair}");
+    println(f"triple: {triple}");
+    println(f"pair.0: {pair.0}");
+    println(f"pair.1: {pair.1}");
+
+    // Arrays
+    let arr = [1, 2, 3, 4, 5];
+    println(f"array: {arr}");
+    println(f"arr[0]: {arr[0]}");
+    println(f"arr[4]: {arr[4]}");
+    println(f"arr.len(): {arr.len()}");
+
+    // Records on stack
+    type Point is { x: Int, y: Int };
+    let p = Point { x: 10, y: 20 };
+    println(f"point: ({p.x}, {p.y})");
+}
+
+/// Heap allocation
+fn test_heap_allocation() {
+    println("\n=== Heap Allocation ===");
+
+    // Box/Heap allocation
+    let boxed_int = Heap(42);
+    let boxed_str = Heap("Hello");
+
+    println(f"boxed_int: {*boxed_int}");
+    println(f"boxed_str: {*boxed_str}");
+
+    // List (heap-allocated)
+    let list = List.from([1, 2, 3, 4, 5]);
+    println(f"list: {list}");
+    println(f"list[0]: {list[0]}");
+    println(f"list.len(): {list.len()}");
+
+    // Nested heap allocation
+    let nested = Heap(Heap(Heap(42)));
+    println(f"nested: {***nested}");
+
+    // Dynamic allocation in loop
+    let mut items = List.new();
+    for i in 0..5 {
+        items.push(Heap(i * 10));
+    }
+    println("heap items:");
+    for item in items {
+        println(f"  {*item}");
+    }
+
+    // Map (heap-allocated)
+    let map = Map.from([("a", 1), ("b", 2), ("c", 3)]);
+    println(f"map: {map}");
+    println(f"map['a']: {map['a']}");
+
+    // Set (heap-allocated)
+    let set = Set.from([1, 2, 3, 4, 5]);
+    println(f"set contains 3: {set.contains(3)}");
+    println(f"set contains 10: {set.contains(10)}");
+}
+
+/// Reference semantics
+fn test_references() {
+    println("\n=== References ===");
+
+    let x = 42;
+    let ref_x = &x;
+    println(f"x: {x}");
+    println(f"*ref_x: {*ref_x}");
+
+    // Mutable reference
+    let mut y = 100;
+    {
+        let ref_y = &mut y;
+        *ref_y = 200;
+    }
+    println(f"y after mutation: {y}");
+
+    // Reference to struct field
+    type Point is { x: Int, y: Int };
+    let mut p = Point { x: 10, y: 20 };
+    {
+        let ref_px = &mut p.x;
+        *ref_px = 30;
+    }
+    println(f"p after field mutation: ({p.x}, {p.y})");
+
+    // Multiple immutable references
+    let z = 50;
+    let r1 = &z;
+    let r2 = &z;
+    println(f"r1: {*r1}, r2: {*r2}");
+
+    // Reference in function
+    fn add_ref(a: &Int, b: &Int) -> Int {
+        *a + *b
+    }
+
+    let a = 10;
+    let b = 20;
+    println(f"add_ref(&a, &b): {add_ref(&a, &b)}");
+
+    // Returning reference
+    fn get_first(list: &List<Int>) -> &Int {
+        &list[0]
+    }
+
+    let nums = [1, 2, 3, 4, 5];
+    println(f"first: {*get_first(&nums)}");
+}
+
+/// Move semantics
+fn test_move_semantics() {
+    println("\n=== Move Semantics ===");
+
+    // Move heap value
+    let s1 = Heap("Hello");
+    let s2 = s1;  // Move
+    // s1 is no longer valid
+    println(f"s2: {*s2}");
+
+    // Move in function call
+    fn take_ownership(s: Heap<Text>) {
+        println(f"took ownership of: {*s}");
+    }
+
+    let s3 = Heap("World");
+    take_ownership(s3);
+    // s3 is no longer valid
+
+    // Return value moves
+    fn create_boxed() -> Heap<Int> {
+        Heap(42)
+    }
+
+    let boxed = create_boxed();
+    println(f"created: {*boxed}");
+
+    // Move in collection
+    let mut items = List.new();
+    let val1 = Heap(100);
+    let val2 = Heap(200);
+    items.push(val1);  // val1 moved
+    items.push(val2);  // val2 moved
+    println(f"items[0]: {*items[0]}");
+    println(f"items[1]: {*items[1]}");
+}
+
+/// Copy semantics
+fn test_copy_semantics() {
+    println("\n=== Copy Semantics ===");
+
+    // Primitives are Copy
+    let x = 42;
+    let y = x;  // Copy, x still valid
+    println(f"x: {x}, y: {y}");
+
+    let a = 3.14;
+    let b = a;  // Copy
+    println(f"a: {a}, b: {b}");
+
+    // Tuples of Copy types are Copy
+    let t1 = (1, 2, 3);
+    let t2 = t1;  // Copy
+    println(f"t1: {t1}, t2: {t2}");
+
+    // Arrays of Copy types
+    let arr1 = [1, 2, 3];
+    let arr2 = arr1;  // Copy
+    println(f"arr1: {arr1}, arr2: {arr2}");
+
+    // Copy in function
+    fn double(n: Int) -> Int {
+        n * 2
+    }
+
+    let val = 10;
+    println(f"double(val): {double(val)}");
+    println(f"val still valid: {val}");
+
+    // Copy in loop
+    let base = 5;
+    for i in 0..3 {
+        println(f"base + i: {base + i}");
+    }
+    println(f"base after loop: {base}");
+}
+
+/// Drop order
+fn test_drop_order() {
+    println("\n=== Drop Order ===");
+
+    // Define a type that prints on drop
+    type Droppable is { id: Int };
+
+    implement Drop for Droppable {
+        fn drop(&mut self) {
+            println(f"dropping {self.id}");
+        }
+    }
+
+    // LIFO drop order
+    println("Creating a, b, c:");
+    let a = Droppable { id: 1 };
+    let b = Droppable { id: 2 };
+    let c = Droppable { id: 3 };
+    println("End of scope - drops should be 3, 2, 1");
+
+    // Nested scope
+    println("\nNested scope:");
+    let outer = Droppable { id: 10 };
+    {
+        let inner = Droppable { id: 20 };
+        println("inner scope end");
+    }
+    println("outer scope continues");
+
+    // Drop in struct
+    type Container is { item: Droppable };
+
+    println("\nContainer:");
+    let container = Container { item: Droppable { id: 100 } };
+    println("container created");
+
+    println("\nEnd of test");
+}

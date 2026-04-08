@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: context, protocol, composition, group, using
+// @description: Context groups composed from context protocols. Tests that
+//   context protocols can be members of context groups, and that groups
+//   support both positive and negative members including context protocols.
+//   Grammar: context_group_def = 'using' , identifier , '=' , context_list_def , ';' ;
+
+context Database {
+    fn query(sql: Text) -> List<Text>;
+    fn execute(sql: Text) -> Int;
+}
+
+context Logger {
+    fn info(msg: Text);
+    fn error(msg: Text);
+}
+
+context Cache {
+    fn get(key: Text) -> Maybe<Text>;
+    fn set(key: Text, value: Text);
+}
+
+// Dual-kind context protocol extends usable as bound AND injectable
+context protocol Validatable {
+    fn validate(&self) -> Bool;
+}
+
+// Group composed of plain contexts and a context protocol
+using WebContext = [Database, Logger, Cache, Validatable];
+
+// Group with negative members
+using ReadOnly = [Database, Logger, !Cache];
+
+// Function using a composed group
+fn handle_request(path: Text)
+    using WebContext
+{
+    Logger.info(f"Handling {path}");
+    let cached = Cache.get(path);
+    match cached {
+        Some(value) => {
+            Logger.info("Cache hit");
+        }
+        None => {
+            let rows = Database.query(f"SELECT * FROM pages WHERE path = '{path}'");
+            Logger.info(f"Queried {rows.len()} rows");
+        }
+    }
+}
+
+// Function using read-only group (no cache writes)
+fn read_data(id: Int) -> List<Text>
+    using ReadOnly
+{
+    Logger.info(f"Reading data for {id}");
+    Database.query(f"SELECT * FROM data WHERE id = {id}")
+}
+
+// Validate with context protocol in both bound and using positions
+fn validate_and_store<T: Validatable>(item: T)
+    using [Database, Validatable]
+{
+    if item.validate() {
+        Database.execute("INSERT INTO valid_items VALUES (1)");
+    }
+}
+
+fn main() -> Int {
+    0
+}

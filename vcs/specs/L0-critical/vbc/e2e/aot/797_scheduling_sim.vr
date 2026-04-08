@@ -1,0 +1,182 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, scheduling
+// @expected-exit: 0
+
+// Job scheduling simulation
+// Jobs stored in a 16-element list: [arrival0, burst0, arrival1, burst1, ...]
+
+// FCFS: First Come First Served
+// Returns total waiting time for n jobs (sorted by arrival time)
+fn fcfs_total_wait(arrivals: List<Int>, bursts: List<Int>, n: Int) -> Int {
+    let mut total_wait = 0;
+    let mut current_time = 0;
+    let mut i = 0;
+    while (i < n) {
+        let arrival = arrivals[i];
+        let burst = bursts[i];
+        if (current_time < arrival) {
+            current_time = arrival;
+        }
+        let wait = current_time - arrival;
+        total_wait = total_wait + wait;
+        current_time = current_time + burst;
+        i = i + 1;
+    }
+    total_wait
+}
+
+// FCFS: Returns total completion time (makespan)
+fn fcfs_makespan(arrivals: List<Int>, bursts: List<Int>, n: Int) -> Int {
+    let mut current_time = 0;
+    let mut i = 0;
+    while (i < n) {
+        let arrival = arrivals[i];
+        let burst = bursts[i];
+        if (current_time < arrival) {
+            current_time = arrival;
+        }
+        current_time = current_time + burst;
+        i = i + 1;
+    }
+    current_time
+}
+
+// SJF (non-preemptive): Shortest Job First from available jobs
+// Returns completion times in a list
+fn sjf_total_wait(arrivals: List<Int>, bursts: List<Int>, n: Int) -> Int {
+    let mut done = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut current_time = 0;
+    let mut total_wait = 0;
+    let mut completed = 0;
+
+    while (completed < n) {
+        // Find shortest available job
+        let mut best = -1;
+        let mut best_burst = 999999;
+        let mut j = 0;
+        while (j < n) {
+            if (done[j] == 0) {
+                if (arrivals[j] <= current_time) {
+                    if (bursts[j] < best_burst) {
+                        best = j;
+                        best_burst = bursts[j];
+                    }
+                }
+            }
+            j = j + 1;
+        }
+        if (best == -1) {
+            // No job available, advance time to next arrival
+            let mut min_arrival = 999999;
+            let mut k = 0;
+            while (k < n) {
+                if (done[k] == 0) {
+                    if (arrivals[k] < min_arrival) {
+                        min_arrival = arrivals[k];
+                    }
+                }
+                k = k + 1;
+            }
+            current_time = min_arrival;
+        } else {
+            let wait = current_time - arrivals[best];
+            total_wait = total_wait + wait;
+            current_time = current_time + bursts[best];
+            done[best] = 1;
+            completed = completed + 1;
+        }
+    }
+    total_wait
+}
+
+// Calculate individual completion times for FCFS
+fn fcfs_completion(arrivals: List<Int>, bursts: List<Int>, n: Int, job_idx: Int) -> Int {
+    let mut current_time = 0;
+    let mut i = 0;
+    while (i <= job_idx) {
+        let arrival = arrivals[i];
+        let burst = bursts[i];
+        if (current_time < arrival) {
+            current_time = arrival;
+        }
+        current_time = current_time + burst;
+        i = i + 1;
+    }
+    current_time
+}
+
+// Resource utilization: (total burst time / makespan) * 100
+fn utilization_pct(bursts: List<Int>, n: Int, makespan: Int) -> Int {
+    let mut total_burst = 0;
+    let mut i = 0;
+    while (i < n) {
+        total_burst = total_burst + bursts[i];
+        i = i + 1;
+    }
+    (total_burst * 100) / makespan
+}
+
+fn main() -> Int {
+    // 4 jobs: (arrival, burst)
+    // Job 0: arrives at 0, burst 3
+    // Job 1: arrives at 1, burst 6
+    // Job 2: arrives at 2, burst 1
+    // Job 3: arrives at 3, burst 4
+    let arrivals = [0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bursts   = [3, 6, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 4;
+
+    // Test 1: FCFS total waiting time
+    // Job 0: start=0, wait=0-0=0
+    // Job 1: start=3, wait=3-1=2
+    // Job 2: start=9, wait=9-2=7
+    // Job 3: start=10, wait=10-3=7
+    // Total = 0+2+7+7 = 16
+    assert_eq(fcfs_total_wait(arrivals, bursts, n), 16);
+
+    // Test 2: FCFS makespan = 14 (0->3->9->10->14)
+    assert_eq(fcfs_makespan(arrivals, bursts, n), 14);
+
+    // Test 3: FCFS completion time of job 0 = 3
+    assert_eq(fcfs_completion(arrivals, bursts, n, 0), 3);
+
+    // Test 4: FCFS completion time of job 1 = 9
+    assert_eq(fcfs_completion(arrivals, bursts, n, 1), 9);
+
+    // Test 5: FCFS completion time of job 3 = 14
+    assert_eq(fcfs_completion(arrivals, bursts, n, 3), 14);
+
+    // Test 6: SJF total waiting time
+    // Time 0: only job 0 available (burst 3), run it. Complete at 3.
+    // Time 3: jobs 1(burst 6), 2(burst 1), 3(burst 4) available. Pick job 2 (shortest=1).
+    //   Job 2: wait = 3-2 = 1. Complete at 4.
+    // Time 4: jobs 1(burst 6), 3(burst 4) available. Pick job 3 (shortest=4).
+    //   Job 3: wait = 4-3 = 1. Complete at 8.
+    // Time 8: job 1(burst 6). Run it.
+    //   Job 1: wait = 8-1 = 7. Complete at 14.
+    // Total = 0+1+1+7 = 9
+    assert_eq(sjf_total_wait(arrivals, bursts, n), 9);
+
+    // Test 7: Resource utilization for FCFS
+    // Total burst = 3+6+1+4 = 14, makespan = 14, utilization = 100%
+    assert_eq(utilization_pct(bursts, n, 14), 100);
+
+    // Test 8: With idle time - jobs arrive later
+    let arrivals2 = [0, 5, 10, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bursts2   = [2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // FCFS: 0->2 (idle 3) 5->7 (idle 3) 10->12 (idle 3) 15->17
+    // No waiting (each arrives after previous completes)
+    assert_eq(fcfs_total_wait(arrivals2, bursts2, 4), 0);
+
+    // Test 9: Makespan with gaps = 17
+    assert_eq(fcfs_makespan(arrivals2, bursts2, 4), 17);
+
+    // Test 10: Utilization with gaps: total_burst=8, makespan=17
+    // 8*100/17 = 800/17 = 47 (integer division)
+    assert_eq(utilization_pct(bursts2, 4, 17), 47);
+
+    print("797_scheduling_sim: PASS");
+    0
+}

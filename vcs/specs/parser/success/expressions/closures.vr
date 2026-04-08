@@ -1,0 +1,355 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, closures, lambdas
+// @description: Test closure expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// BASIC CLOSURE SYNTAX (Section 2.12 - closure_expr)
+// =============================================================================
+
+fn test_minimal_closure() {
+    let f = || 42;
+    let g = || unit;
+    let h = || ();
+}
+
+fn test_single_parameter() {
+    let f = |x| x;
+    let g = |x| x + 1;
+    let h = |x| x * 2;
+    let i = |n| n.to_string();
+}
+
+fn test_multiple_parameters() {
+    let f = |x, y| x + y;
+    let g = |a, b, c| a + b + c;
+    let h = |x, y, z, w| x * y + z * w;
+}
+
+fn test_no_parameters() {
+    let f = || 42;
+    let g = || compute();
+    let h = || {
+        let x = 1;
+        x + 1
+    };
+}
+
+// =============================================================================
+// TYPED CLOSURES
+// =============================================================================
+
+fn test_typed_parameters() {
+    let f = |x: Int| x + 1;
+    let g = |x: Int, y: Int| x + y;
+    let h = |name: Text, age: Int| f"Name: {name}, Age: {age}";
+}
+
+fn test_typed_return() {
+    let f = |x| -> Int { x + 1 };
+    let g = |x: Int| -> Int { x * 2 };
+    let h = |a, b| -> Bool { a > b };
+}
+
+fn test_fully_typed() {
+    let f = |x: Int| -> Int { x + 1 };
+    let g = |x: Int, y: Int| -> Int { x + y };
+    let h = |s: Text| -> Int { s.len() };
+}
+
+fn test_generic_typed() {
+    let f = |x: List<Int>| x.len();
+    let g = |m: Map<Text, Int>| m.get("key");
+    let h = |opt: Maybe<Int>| -> Bool { opt.is_some() };
+}
+
+// =============================================================================
+// CLOSURE BODIES
+// =============================================================================
+
+fn test_expression_body() {
+    let f = |x| x + 1;
+    let g = |x| compute(x);
+    let h = |x, y| x * y + 1;
+}
+
+fn test_block_body() {
+    let f = |x| {
+        let y = x + 1;
+        y * 2
+    };
+
+    let g = |x, y| {
+        let sum = x + y;
+        let product = x * y;
+        sum + product
+    };
+
+    let h = || {
+        setup();
+        let result = compute();
+        cleanup();
+        result
+    };
+}
+
+fn test_complex_body() {
+    let f = |x| {
+        if x > 0 {
+            x
+        } else {
+            -x
+        }
+    };
+
+    let g = |opt| {
+        match opt {
+            Some(v) => v,
+            None => default()
+        }
+    };
+
+    let h = |items| {
+        for item in items {
+            process(item);
+        }
+        items.len()
+    };
+}
+
+// =============================================================================
+// ASYNC CLOSURES (Section 2.12 - closure_expr)
+// =============================================================================
+
+fn test_async_closure() {
+    let f = async |x| x.await;
+    let g = async |url| fetch(url).await;
+    let h = async || {
+        let data = load().await;
+        process(data)
+    };
+}
+
+fn test_async_closure_typed() {
+    let f = async |x: Int| -> Int { compute(x).await };
+    let g = async |url: Text| -> Response { fetch(url).await };
+}
+
+fn test_async_closure_complex() {
+    let f = async |urls| {
+        for url in urls {
+            let response = fetch(url).await;
+            process(response);
+        }
+    };
+
+    let g = async |channel| {
+        loop {
+            let msg = channel.receive().await;
+            if msg.is_done() {
+                break;
+            }
+            handle(msg);
+        }
+    };
+}
+
+// =============================================================================
+// CLOSURE PATTERNS
+// =============================================================================
+
+fn test_destructuring_tuple() {
+    let f = |(a, b)| a + b;
+    let g = |(x, y, z)| x + y + z;
+    let h = |((a, b), c)| a + b + c;
+}
+
+fn test_destructuring_struct() {
+    let f = |Point { x, y }| x + y;
+    let g = |Person { name, age }| f"{name}: {age}";
+    let h = |Config { debug, .. }| debug;
+}
+
+fn test_mixed_patterns() {
+    let f = |(Point { x, y }, z)| x + y + z;
+    let g = |User { id, data: (a, b) }| compute(id, a, b);
+}
+
+fn test_ref_patterns() {
+    let f = |&x| x + 1;
+    let g = |&mut x| { x += 1; };
+}
+
+// =============================================================================
+// CLOSURE CAPTURE
+// =============================================================================
+
+fn test_capturing_variables() {
+    let outer = 10;
+    let f = |x| x + outer;
+
+    let name = "world";
+    let g = || f"Hello, {name}";
+
+    let config = load_config();
+    let h = |x| process_with_config(x, config);
+}
+
+fn test_move_closure() {
+    let data = create_data();
+    let f = move |x| use_data(data, x);
+
+    let buffer = allocate();
+    let g = move || {
+        fill(buffer);
+        buffer
+    };
+}
+
+fn test_multiple_captures() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let f = |x| a + b + c + x;
+}
+
+// =============================================================================
+// CLOSURES IN CONTEXT
+// =============================================================================
+
+fn test_closure_as_argument() {
+    items.map(|x| x * 2);
+    items.filter(|x| x > 0);
+    items.fold(0, |acc, x| acc + x);
+}
+
+fn test_closure_in_chain() {
+    items
+        .iter()
+        .map(|x| x * 2)
+        .filter(|x| x > 10)
+        .fold(0, |acc, x| acc + x);
+}
+
+fn test_closure_stored() {
+    let handlers: List<fn(Int) -> Int> = [
+        |x| x + 1,
+        |x| x * 2,
+        |x| x - 1
+    ];
+
+    let processor = |x| {
+        let mut result = x;
+        for handler in handlers {
+            result = handler(result);
+        }
+        result
+    };
+}
+
+// =============================================================================
+// HIGHER-ORDER CLOSURES
+// =============================================================================
+
+fn test_nested_closures() {
+    let f = |x| |y| x + y;
+    let g = |x| |y| |z| x + y + z;
+}
+
+fn test_closure_returning_closure() {
+    let make_adder = |n| |x| x + n;
+    let add_five = make_adder(5);
+    let result = add_five(10);
+}
+
+fn test_closure_accepting_closure() {
+    let apply = |f, x| f(x);
+    let double = |x| x * 2;
+    let result = apply(double, 21);
+
+    let compose = |f, g| |x| f(g(x));
+    let add_one = |x| x + 1;
+    let add_one_double = compose(double, add_one);
+}
+
+fn test_closure_in_closure() {
+    let outer = |x| {
+        let inner = |y| x + y;
+        inner(10)
+    };
+}
+
+// =============================================================================
+// CLOSURES WITH CONTROL FLOW
+// =============================================================================
+
+fn test_closure_with_if() {
+    let f = |x| if x > 0 { x } else { -x };
+    let g = |opt| if let Some(v) = opt { v } else { 0 };
+}
+
+fn test_closure_with_match() {
+    let f = |opt| match opt {
+        Some(v) => v,
+        None => 0
+    };
+
+    let g = |result| match result {
+        Ok(v) => v,
+        Err(e) => handle_error(e)
+    };
+}
+
+fn test_closure_with_loop() {
+    let f = |items| {
+        let mut sum = 0;
+        for item in items {
+            sum += item;
+        }
+        sum
+    };
+}
+
+// =============================================================================
+// CLOSURE EDGE CASES
+// =============================================================================
+
+fn test_empty_closure() {
+    let f = || {};
+    let g = || { () };
+}
+
+fn test_single_statement_closure() {
+    let f = |x| { x };
+    let g = |x| { x + 1 };
+}
+
+// Note: Trailing commas in closure parameters are not supported by the grammar
+// (param_list_lambda = [ identifier , { ',' , identifier } ])
+// Closures support trailing commas in multiline parameter lists via normal syntax
+
+fn test_closure_multiline_params() {
+    let f = |
+        x,
+        y
+    | x + y;
+}
+
+fn test_closure_immediately_called() {
+    let result = (|x| x + 1)(41);
+    let value = (|| compute())();
+}
+
+fn test_closure_in_expression() {
+    let a = 1 + (|x| x)(2);
+    let b = if (|x| x > 0)(value) { "positive" } else { "non-positive" };
+}
+
+// =============================================================================
+// CLOSURES WITH TYPE ANNOTATIONS ON PATTERNS
+// =============================================================================
+
+fn test_typed_pattern_closure() {
+    let f = |(x, y): (Int, Int)| x + y;
+    let g = |Point { x, y }: Point| x + y;
+}

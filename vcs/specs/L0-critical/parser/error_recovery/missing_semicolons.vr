@@ -1,0 +1,57 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, semicolon, optional
+// @description: Verum supports optional semicolons. Trailing semicolons turn expressions
+//              into statements, but are not required. This matches Rust semantics.
+
+// Test 1: Semicolons after let statements
+fn test_let_semicolons() {
+    let x = 42;
+    let y = 10;
+    x + y
+}
+
+// Test 2: Multiple consecutive statements with semicolons
+fn test_multiple_semicolons() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    a + b + c
+}
+
+// Test 3: Return statement with proper semicolons
+fn test_return_semicolon() -> Int {
+    let result = compute();
+    result
+}
+
+// Helper function
+fn compute() -> Int {
+    100
+}
+
+// Test 4: All statements with proper semicolons
+fn test_all_semicolons() {
+    let valid = 1;
+    let also_valid = 2;
+    let more_valid = 3;
+    let final_valid = 4;
+    valid + also_valid + more_valid + final_valid
+}
+
+// Test 5: Expression statements with semicolons
+fn test_expression_stmt_with_semicolon() {
+    print("hello");
+    print("world");
+    print("done")
+}
+
+// Test 6: Assignment statements with semicolons
+fn test_assignment_with_semicolon() {
+    let mut x = 0;
+    x = 10;
+    x = 20;
+    x = 30;
+    x
+}

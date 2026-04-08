@@ -1,0 +1,168 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, text, manipulation
+// @description: Tests additional text manipulation builtins (substring, index_of, char_at, etc.)
+
+// =============================================================================
+// TEXT_SUBSTRING TESTS
+// =============================================================================
+
+meta fn test_text_substring_basic() -> Text {
+    text_substring("Hello, World!", 0, 5)  // Should be "Hello"
+}
+
+meta fn test_text_substring_middle() -> Text {
+    text_substring("Hello, World!", 7, 12)  // Should be "World"
+}
+
+meta fn test_text_substring_empty() -> Text {
+    text_substring("Hello", 2, 2)  // Same start and end = empty string
+}
+
+meta fn test_text_substring_full() -> Text {
+    text_substring("Hello", 0, 5)  // Full string
+}
+
+// =============================================================================
+// TEXT_INDEX_OF TESTS
+// =============================================================================
+
+meta fn test_text_index_of_found() -> Int {
+    text_index_of("Hello, World!", "World")  // Should be 7
+}
+
+meta fn test_text_index_of_start() -> Int {
+    text_index_of("Hello, World!", "Hello")  // Should be 0
+}
+
+meta fn test_text_index_of_not_found() -> Int {
+    text_index_of("Hello, World!", "xyz")  // Should be -1
+}
+
+meta fn test_text_index_of_empty() -> Int {
+    text_index_of("Hello", "")  // Empty string is found at position 0
+}
+
+// =============================================================================
+// TEXT_CHAR_AT TESTS
+// =============================================================================
+
+meta fn test_text_char_at_first() -> Char {
+    text_char_at("Hello", 0)  // Should be 'H'
+}
+
+meta fn test_text_char_at_middle() -> Char {
+    text_char_at("Hello", 2)  // Should be 'l'
+}
+
+meta fn test_text_char_at_last() -> Char {
+    text_char_at("Hello", 4)  // Should be 'o'
+}
+
+// =============================================================================
+// TEXT_REPEAT TESTS
+// =============================================================================
+
+meta fn test_text_repeat_zero() -> Text {
+    text_repeat("ab", 0)  // Should be ""
+}
+
+meta fn test_text_repeat_one() -> Text {
+    text_repeat("ab", 1)  // Should be "ab"
+}
+
+meta fn test_text_repeat_three() -> Text {
+    text_repeat("ab", 3)  // Should be "ababab"
+}
+
+meta fn test_text_repeat_single_char() -> Text {
+    text_repeat("x", 5)  // Should be "xxxxx"
+}
+
+// =============================================================================
+// TEXT_IS_EMPTY TESTS
+// =============================================================================
+
+meta fn test_text_is_empty_true() -> Bool {
+    text_is_empty("")
+}
+
+meta fn test_text_is_empty_false() -> Bool {
+    text_is_empty("a")
+}
+
+meta fn test_text_is_empty_space() -> Bool {
+    text_is_empty(" ")  // Space is not empty
+}
+
+// =============================================================================
+// TEXT_LINES TESTS
+// =============================================================================
+
+meta fn test_text_lines_count() -> Int {
+    let text = "line1\nline2\nline3";
+    let lines = text_lines(text);
+    list_len(lines)  // Should be 3
+}
+
+meta fn test_text_lines_single() -> Int {
+    let lines = text_lines("single line");
+    list_len(lines)  // Should be 1
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+meta fn test_combined_find_extract() -> Text {
+    let text = "Hello, World!";
+    let start = text_index_of(text, "World");
+    text_substring(text, start, start + 5)  // Should be "World"
+}
+
+meta fn test_combined_find_char() -> Char {
+    let text = "Hello, World!";
+    let start = text_index_of(text, "World");
+    let word = text_substring(text, start, start + 5);
+    text_char_at(word, 0)  // Should be 'W'
+}
+
+// Main test function
+fn main() {
+    // Substring tests
+    @const assert_eq(test_text_substring_basic(), "Hello");
+    @const assert_eq(test_text_substring_middle(), "World");
+    @const assert_eq(test_text_substring_empty(), "");
+    @const assert_eq(test_text_substring_full(), "Hello");
+
+    // Index_of tests
+    @const assert_eq(test_text_index_of_found(), 7);
+    @const assert_eq(test_text_index_of_start(), 0);
+    @const assert_eq(test_text_index_of_not_found(), -1);
+    @const assert_eq(test_text_index_of_empty(), 0);
+
+    // Char_at tests
+    @const assert_eq(test_text_char_at_first(), 'H');
+    @const assert_eq(test_text_char_at_middle(), 'l');
+    @const assert_eq(test_text_char_at_last(), 'o');
+
+    // Repeat tests
+    @const assert_eq(test_text_repeat_zero(), "");
+    @const assert_eq(test_text_repeat_one(), "ab");
+    @const assert_eq(test_text_repeat_three(), "ababab");
+    @const assert_eq(test_text_repeat_single_char(), "xxxxx");
+
+    // Is_empty tests
+    @const assert(test_text_is_empty_true());
+    @const assert(!test_text_is_empty_false());
+    @const assert(!test_text_is_empty_space());
+
+    // Lines tests
+    @const assert_eq(test_text_lines_count(), 3);
+    @const assert_eq(test_text_lines_single(), 1);
+
+    // Combined tests
+    @const assert_eq(test_combined_find_extract(), "World");
+    @const assert_eq(test_combined_find_char(), 'W');
+}

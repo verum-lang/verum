@@ -1,0 +1,202 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, memory, unified
+
+fn main() {
+    let device = Device.gpu(0);
+
+    // Check unified memory support
+    assert(device.supports_unified_memory());
+
+    // Allocate unified (managed) memory
+    let unified: UnifiedTensor<f32, [1024]> = UnifiedTensor.new(Tensor.zeros());
+
+    // Access from CPU
+    unified[0] = 42.0;
+    unified[100] = 100.0;
+
+    // Access from GPU (same memory, no explicit transfer)
+    @kernel(block_size = 256)
+    fn modify_kernel(data: &mut UnifiedTensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N {
+            data[idx] *= 2.0;
+        }
+    }
+
+// LAUNCH:     modify_kernel<<<auto, 256>>>(&mut unified);
+    device.synchronize();
+
+    // CPU can read GPU modifications
+    assert(unified[0] == 84.0);
+    assert(unified[100] == 200.0);
+
+    // Prefetch to device (hint for page migration)
+    unified.prefetch_to(device);
+
+    // GPU kernel has fast access now
+// LAUNCH:     modify_kernel<<<auto, 256>>>(&mut unified);
+    device.synchronize();
+
+    // Prefetch back to host
+    unified.prefetch_to_host();
+
+    // CPU access is now fast
+    assert(unified[0] == 168.0);
+
+    // Memory advice hints
+    let advised: UnifiedTensor<f32, [4096]> = UnifiedTensor.new(Tensor.zeros());
+
+    // Hint that data will be read by GPU
+    advised.advise(MemoryAdvice.SetReadMostly, device);
+
+    // Hint that data is accessed by multiple devices
+    advised.advise(MemoryAdvice.SetAccessedBy, device);
+
+    // Hint preferred location
+    advised.advise(MemoryAdvice.SetPreferredLocation, device);
+
+    // Unset hints
+    advised.advise(MemoryAdvice.UnsetReadMostly, device);
+
+    // Query memory attributes
+    let attrs = unified.attributes();
+    assert(attrs.is_managed == true);
+    // attrs.preferred_location, attrs.accessed_by, etc.
+
+    // Concurrent access pattern
+    let shared: UnifiedTensor<f32, [2048]> = UnifiedTensor.new(Tensor.ones());
+
+    // CPU fills first half
+    for i in 0..1024 {
+        shared[i] = i as f32;
+    }
+
+    // GPU fills second half (can run concurrently on some systems)
+    @kernel(block_size = 256)
+    fn fill_second_half(data: &mut UnifiedTensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx >= N/2 && idx < N {
+            data[idx] = idx as f32;
+        }
+    }
+
+// LAUNCH:     fill_second_half<<<auto, 256>>>(&mut shared);
+    device.synchronize();
+
+    assert(shared[0] == 0.0);
+    assert(shared[1024] == 1024.0);
+
+    // Page migration control
+    let migratable: UnifiedTensor<f32, [8192]> = UnifiedTensor.new(Tensor.zeros());
+
+    // Check current location of a page
+    let page_info = migratable.query_page(0);
+    // page_info.location: Host, Device, or Both
+
+    // Force page to specific location
+    migratable.migrate_range(0..4096, device);
+
+    // Atomic operations across CPU/GPU
+    let atomic_counter: UnifiedTensor<u32, [1]> = UnifiedTensor.new(tensor<1>u32{0});
+
+    // GPU increments
+    @kernel(block_size = 256)
+    fn atomic_increment(counter: &UnifiedTensor<u32, [1]>) {
+        atomic_add(&mut counter[0], 1);
+    }
+
+// LAUNCH:     atomic_increment<<<4, 256>>>(atomic_counter);
+    device.synchronize();
+
+    // CPU can read atomically updated value
+    assert(atomic_counter[0] == 1024);
+
+    // CPU atomic increment
+    atomic_counter[0].fetch_add(1);
+    assert(atomic_counter[0] == 1025);
+
+    // System-wide atomics (across CPU and multiple GPUs)
+    if device.supports_system_atomics() {
+        let sys_atomic: UnifiedTensor<u64, [1]> = UnifiedTensor.with_flags(
+            tensor<1>u64{0},
+            AllocationFlags.SYSTEM_ATOMIC
+        );
+
+        // Can be safely accessed atomically from any processor
+    }
+
+    // Memory oversubscription (more unified memory than GPU VRAM)
+    let mem_info = device.memory_info();
+    let oversubscribed_size = mem_info.total * 2;  // 2x GPU memory
+
+    // Unified memory can exceed device memory via paging
+    let large: UnifiedTensor<u8, [_]> = UnifiedTensor.with_size(oversubscribed_size);
+
+    // Access triggers page faults and migrations
+    large[0] = 1;
+    large[oversubscribed_size - 1] = 2;
+
+    // Multi-GPU unified memory
+    let device0 = Device.gpu(0);
+    let device1 = Device.gpu_if_available(1).unwrap_or(device0);
+
+    if device0 != device1 {
+        let multi_gpu: UnifiedTensor<f32, [4096]> = UnifiedTensor.new(Tensor.zeros());
+
+        // Both GPUs can access
+        multi_gpu.advise(MemoryAdvice.SetAccessedBy, device0);
+        multi_gpu.advise(MemoryAdvice.SetAccessedBy, device1);
+
+        // Launch kernels on both GPUs
+        let stream0 = Stream.new(device0);
+        let stream1 = Stream.new(device1);
+
+        @kernel(block_size = 256)
+        fn fill_range(data: &mut UnifiedTensor<f32, [N]>, start: usize, end: usize, value: f32) {
+            let idx = global_id().x + start;
+            if idx < end && idx < N {
+                data[idx] = value;
+            }
+        }
+
+        // Device 0 fills first half
+        with_device(device0, || {
+// LAUNCH:             fill_range<<<auto, 256, stream0>>>(&mut multi_gpu, 0, 2048, 1.0);
+        });
+
+        // Device 1 fills second half
+        with_device(device1, || {
+// LAUNCH:             fill_range<<<auto, 256, stream1>>>(&mut multi_gpu, 2048, 4096, 2.0);
+        });
+
+        Stream.synchronize_all([stream0, stream1]);
+
+        assert(multi_gpu[0] == 1.0);
+        assert(multi_gpu[2048] == 2.0);
+    }
+
+    // Access counters (for profiling migrations)
+    if device.supports_access_counters() {
+        let profiled: UnifiedTensor<f32, [1024]> = UnifiedTensor.with_flags(
+            Tensor.zeros(),
+            AllocationFlags.ACCESS_COUNTERS
+        );
+
+        // Enable counters
+        profiled.enable_access_counters();
+
+        // Do some work...
+        profiled[0] = 1.0;
+// LAUNCH:         modify_kernel<<<auto, 256>>>(&mut profiled);
+        device.synchronize();
+
+        // Query counters
+        let counters = profiled.access_counters();
+        // counters.host_reads, counters.host_writes
+        // counters.device_reads, counters.device_writes
+        // counters.page_faults
+    }
+}

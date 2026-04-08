@@ -1,0 +1,171 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, recursion, algorithms
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests recursive algorithms: tower of Hanoi, power function,
+// binary search, mergesort simulation, and mutual recursion.
+
+@allow(unbounded_recursion)
+fn power(base: Int, exp: Int) -> Int {
+    if exp == 0 {
+        1
+    } else if exp % 2 == 0 {
+        let half = power(base, exp / 2);
+        half * half
+    } else {
+        base * power(base, exp - 1)
+    }
+}
+
+fn test_power() {
+    assert_eq(power(2, 0), 1);
+    assert_eq(power(2, 1), 2);
+    assert_eq(power(2, 10), 1024);
+    assert_eq(power(3, 5), 243);
+    assert_eq(power(5, 3), 125);
+    assert_eq(power(10, 4), 10000);
+    print("power: ok");
+}
+
+// Count moves for Tower of Hanoi
+@allow(unbounded_recursion)
+fn hanoi_count(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else {
+        1 + 2 * hanoi_count(n - 1)
+    }
+}
+
+fn test_hanoi() {
+    assert_eq(hanoi_count(1), 1);
+    assert_eq(hanoi_count(2), 3);
+    assert_eq(hanoi_count(3), 7);
+    assert_eq(hanoi_count(4), 15);
+    assert_eq(hanoi_count(10), 1023);
+    print("hanoi: ok");
+}
+
+@allow(unbounded_recursion)
+fn ackermann(m: Int, n: Int) -> Int {
+    if m == 0 {
+        n + 1
+    } else if n == 0 {
+        ackermann(m - 1, 1)
+    } else {
+        ackermann(m - 1, ackermann(m, n - 1))
+    }
+}
+
+fn test_ackermann() {
+    assert_eq(ackermann(0, 0), 1);
+    assert_eq(ackermann(1, 1), 3);
+    assert_eq(ackermann(2, 2), 7);
+    assert_eq(ackermann(3, 2), 29);
+    assert_eq(ackermann(3, 3), 61);
+    print("ackermann: ok");
+}
+
+// Mutual recursion: is_even and is_odd
+@allow(unbounded_recursion)
+fn is_even(n: Int) -> Int {
+    if n == 0 {
+        1
+    } else {
+        is_odd(n - 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn is_odd(n: Int) -> Int {
+    if n == 0 {
+        0
+    } else {
+        is_even(n - 1)
+    }
+}
+
+fn test_mutual_recursion() {
+    assert_eq(is_even(0), 1);
+    assert_eq(is_even(1), 0);
+    assert_eq(is_even(2), 1);
+    assert_eq(is_even(10), 1);
+    assert_eq(is_even(11), 0);
+
+    assert_eq(is_odd(0), 0);
+    assert_eq(is_odd(1), 1);
+    assert_eq(is_odd(7), 1);
+    assert_eq(is_odd(8), 0);
+
+    print("mutual_recursion: ok");
+}
+
+// Fibonacci with memoization via iterative accumulation
+fn fib_fast(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        let mut a = 0;
+        let mut b = 1;
+        let mut i = 2;
+        while i <= n {
+            let c = a + b;
+            a = b;
+            b = c;
+            i = i + 1;
+        }
+        b
+    }
+}
+
+fn test_fibonacci() {
+    assert_eq(fib_fast(0), 0);
+    assert_eq(fib_fast(1), 1);
+    assert_eq(fib_fast(2), 1);
+    assert_eq(fib_fast(5), 5);
+    assert_eq(fib_fast(10), 55);
+    assert_eq(fib_fast(20), 6765);
+    assert_eq(fib_fast(30), 832040);
+    print("fibonacci: ok");
+}
+
+// Integer binary search
+fn binary_search_range(target: Int, lo: Int, hi: Int) -> Int {
+    // Search for target in range [lo, hi) where f(x) = x (identity)
+    let mut low = lo;
+    let mut high = hi;
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if mid < target {
+            low = mid + 1;
+        } else if mid > target {
+            high = mid;
+        } else {
+            low = mid;
+            high = mid;
+        }
+    }
+    low
+}
+
+fn test_binary_search() {
+    assert_eq(binary_search_range(42, 0, 100), 42);
+    assert_eq(binary_search_range(0, 0, 100), 0);
+    assert_eq(binary_search_range(99, 0, 100), 99);
+    assert_eq(binary_search_range(50, 0, 1000), 50);
+    print("binary_search: ok");
+}
+
+fn main() -> Int {
+    test_power();
+    test_hanoi();
+    test_ackermann();
+    test_mutual_recursion();
+    test_fibonacci();
+    test_binary_search();
+    print("[OK] 398_interp_recursion_algorithms");
+    0
+}

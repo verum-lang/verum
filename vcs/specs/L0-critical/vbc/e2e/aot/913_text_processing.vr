@@ -1,0 +1,109 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, file-io, text-processing, split
+// @expected-exit: 0
+
+// Test: Text processing pipeline — parse CSV data, process, output results.
+
+fn __file_write_string_raw(path: Text, content: Text) -> Int {
+    0
+}
+
+fn __file_read_to_string_raw(path: Text) -> Text {
+    ""
+}
+
+fn main() -> Int {
+    // Write CSV data to file
+    let csv_data = "alice,95\nbob,87\ncharlie,92\ndave,78\neve,99";
+    let path = "/tmp/verum_test_913.csv";
+    __file_write_string_raw(path, csv_data);
+
+    // Read it back
+    let content = __file_read_to_string_raw(path);
+    if (content != csv_data) {
+        print("FAIL: file content mismatch");
+        return 1;
+    }
+
+    // Parse lines: split by newline
+    let lines = content.split("\n");
+    if (lines.len() != 5) {
+        print(f"FAIL: expected 5 lines, got {lines.len()}");
+        return 1;
+    }
+
+    // Parse each line and track scores
+    let mut total_score = 0;
+    let mut count = 0;
+    let mut i = 0;
+    while (i < lines.len()) {
+        let line = lines[i];
+        let fields = line.split(",");
+        if (fields.len() == 2) {
+            // Verify name field is non-empty
+            let name = fields[0];
+            if (name.len() > 0) {
+                count = count + 1;
+            }
+        }
+        i = i + 1;
+    }
+
+    if (count != 5) {
+        print(f"FAIL: parsed {count} records, expected 5");
+        return 1;
+    }
+
+    // Test string operations on parsed data
+    let first_line = lines[0];
+    if (first_line.contains(",") != true) {
+        print("FAIL: first line should contain comma");
+        return 1;
+    }
+    if (first_line.starts_with("alice") != true) {
+        print(f"FAIL: first line should start with alice: '{first_line}'");
+        return 1;
+    }
+
+    // Extract name part using split (first field before comma)
+    let first_fields = first_line.split(",");
+    if (first_fields.len() != 2) {
+        print(f"FAIL: first line split len={first_fields.len()}");
+        return 1;
+    }
+    let name_part = first_fields[0];
+    if (name_part != "alice") {
+        print(f"FAIL: name_part='{name_part}'");
+        return 1;
+    }
+    let score_part = first_fields[1];
+    if (score_part != "95") {
+        print(f"FAIL: score_part='{score_part}'");
+        return 1;
+    }
+
+    // String replacement
+    let updated = csv_data.replace("alice", "ALICE");
+    if (updated.contains("ALICE") != true) {
+        print("FAIL: replace didn't work");
+        return 1;
+    }
+    if (updated.contains("alice") != false) {
+        print("FAIL: original name still present after replace");
+        return 1;
+    }
+
+    // Write processed result
+    let output_path = "/tmp/verum_test_913_out.csv";
+    __file_write_string_raw(output_path, updated);
+    let verify = __file_read_to_string_raw(output_path);
+    if (verify != updated) {
+        print("FAIL: output file content mismatch");
+        return 1;
+    }
+
+    print("913_text_processing: PASS");
+    0
+}

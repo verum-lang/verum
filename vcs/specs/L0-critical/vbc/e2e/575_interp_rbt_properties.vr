@@ -1,0 +1,175 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, red_black_tree, rbt, color_invariants, black_height, bst
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Red-Black Tree properties verification.
+// Rather than a full RBT implementation, we encode small trees explicitly and
+// verify all RBT invariants:
+//   1. Every node is Red (1) or Black (0).
+//   2. The root is Black.
+//   3. No red node has a red child (no double-red).
+//   4. Every path from root to NULL has the same number of black nodes (black height).
+//   5. BST property: left subtree keys < node key < right subtree keys.
+//
+// Tree encoded as flat arrays (up to 15 nodes for a complete 4-level tree):
+//   key[i], color[i], left[i], right[i], parent[i].
+//   -1 means NULL child.
+// Node 0 = root.
+
+fn rbt_check_root_black(color: [Int; 16]) -> Int {
+    if color[0] == 0 { 1 } else { 0 }
+}
+
+fn rbt_no_double_red(color: [Int; 16], left: [Int; 16], right: [Int; 16], n: Int) -> Int {
+    let mut ok = 1;
+    let mut i = 0;
+    while i < n {
+        if color[i] == 1 {
+            let l = left[i];
+            let r = right[i];
+            if l != -1 && color[l] == 1 { ok = 0; }
+            if r != -1 && color[r] == 1 { ok = 0; }
+        }
+        i = i + 1;
+    }
+    ok
+}
+
+// Compute black height of subtree rooted at node u.
+// Returns -1 if black heights are inconsistent within the subtree.
+@allow(unbounded_recursion)
+fn black_height(color: [Int; 16], left: [Int; 16], right: [Int; 16], u: Int) -> Int {
+    if u == -1 { return 1; }  // NULL leaf counts as black (height=1 sentinel)
+    let lh = black_height(color, left, right, left[u]);
+    let rh = black_height(color, left, right, right[u]);
+    if lh == -1 || rh == -1 { return -1; }
+    if lh != rh { return -1; }
+    let own = if color[u] == 0 { 1 } else { 0 };
+    lh + own
+}
+
+// BST check: all nodes in left subtree have key < node key,
+// all nodes in right subtree have key > node key.
+// Uses min/max bounds propagated downward.
+// min_val = lower bound (exclusive), max_val = upper bound (exclusive).
+// We pass INT_MIN=-999999 and INT_MAX=999999 as sentinels.
+@allow(unbounded_recursion)
+fn bst_check(key: [Int; 16], left: [Int; 16], right: [Int; 16],
+             u: Int, min_val: Int, max_val: Int) -> Int {
+    if u == -1 { return 1; }
+    if key[u] <= min_val || key[u] >= max_val { return 0; }
+    let lok = bst_check(key, left, right, left[u], min_val, key[u]);
+    let rok = bst_check(key, left, right, right[u], key[u], max_val);
+    if lok == 1 && rok == 1 { 1 } else { 0 }
+}
+
+fn rbt_verify(key: [Int; 16], color: [Int; 16],
+              left: [Int; 16], right: [Int; 16], n: Int) -> Int {
+    // 1. Root is black
+    if rbt_check_root_black(color) == 0 { return 0; }
+    // 2. No double-red
+    if rbt_no_double_red(color, left, right, n) == 0 { return 0; }
+    // 3. Black height consistent
+    if black_height(color, left, right, 0) == -1 { return 0; }
+    // 4. BST property
+    if bst_check(key, left, right, 0, -999999, 999999) == 0 { return 0; }
+    1
+}
+
+fn test_valid_three_node_rbt() {
+    //       10(B)
+    //      /    \
+    //    5(R)  15(R)
+    // n=3. Nodes 0=root, 1=left, 2=right.
+    let mut key   = [10,5,15,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut color = [0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0];  // B,R,R
+    let mut left  = [1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let mut right = [2,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let v = rbt_verify(key, color, left, right, 3);
+    assert_eq(v, 1);
+    // Black height of root: bh(root) = bh(left NULL)=1, bh(right NULL)=1.
+    // bh(node1)=1+0(red)=1, bh(node2)=1+0=1, bh(root)=1+1(black)=2.
+    let bh = black_height(color, left, right, 0);
+    assert_eq(bh, 2);
+    print("valid_three_node: ok");
+}
+
+fn test_double_red_violation() {
+    //       10(B)
+    //      /
+    //    5(R)
+    //   /
+    // 3(R)   <- double-red violation
+    // Nodes: 0=10B, 1=5R, 2=3R.
+    let mut key   = [10,5,3,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut color = [0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0];  // B,R,R
+    let mut left  = [1,2,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let mut right = [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let no_dr = rbt_no_double_red(color, left, right, 3);
+    assert_eq(no_dr, 0);
+    // Overall verify fails
+    let v = rbt_verify(key, color, left, right, 3);
+    assert_eq(v, 0);
+    print("double_red_violation: ok");
+}
+
+fn test_black_height_imbalance() {
+    //     10(B)
+    //    /     \
+    //  5(B)   15(B)
+    //  /
+    // 3(B)       <- left path has BH=3, right path has BH=2 -> imbalanced
+    let mut key   = [10,5,15,3,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut color = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];  // all black
+    let mut left  = [1,3,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let mut right = [2,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let bh = black_height(color, left, right, 0);
+    assert_eq(bh, -1);
+    print("black_height_imbalance: ok");
+}
+
+fn test_bst_violation() {
+    //       10(B)
+    //      /    \
+    //   15(R)  20(R)   <- 15 in left subtree but 15 > 10: BST violation
+    let mut key   = [10,15,20,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut color = [0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut left  = [1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let mut right = [2,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let bst_ok = bst_check(key, left, right, 0, -999999, 999999);
+    assert_eq(bst_ok, 0);
+    print("bst_violation: ok");
+}
+
+fn test_valid_seven_node_rbt() {
+    // Perfect 3-level BT (all black except level-2 which is red):
+    //              8(B)
+    //           /        \
+    //        4(B)         12(B)
+    //       /    \       /    \
+    //     2(R) 6(R)  10(R)  14(R)
+    // Nodes: 0=8B,1=4B,2=12B,3=2R,4=6R,5=10R,6=14R
+    let mut key   = [8,4,12,2,6,10,14,0,0,0,0,0,0,0,0,0];
+    let mut color = [0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0];
+    let mut left  = [1,3,5,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let mut right = [2,4,6,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    let v = rbt_verify(key, color, left, right, 7);
+    assert_eq(v, 1);
+    let bh = black_height(color, left, right, 0);
+    // Each path to leaf: root(B)+level1(B)+levelNULL = 2 black + 1(NULL) = 3
+    assert_eq(bh, 3);
+    print("valid_seven_node: ok");
+}
+
+fn main() -> Int {
+    test_valid_three_node_rbt();
+    test_double_red_violation();
+    test_black_height_imbalance();
+    test_bst_violation();
+    test_valid_seven_node_rbt();
+    print("[OK] 575_interp_rbt_properties");
+    0
+}

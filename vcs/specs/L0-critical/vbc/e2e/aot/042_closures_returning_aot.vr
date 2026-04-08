@@ -1,0 +1,107 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, closures, returning-closures, factory-pattern
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT closures that return closures (factory pattern)
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * n }
+}
+
+fn make_line_fn(slope: Int, intercept: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { slope * x + intercept }
+}
+
+fn make_clamp(lo: Int, hi: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int {
+        if x < lo { lo }
+        else if x > hi { hi }
+        else { x }
+    }
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn apply_n(f: fn(Int) -> Int, n: Int, start: Int) -> Int {
+    let mut result = start;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // make_adder
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    assert_eq(add5(100), 105);
+    assert_eq(add10(100), 110);
+    assert_eq(add5(add10(0)), 15);
+
+    // make_multiplier
+    let mul3 = make_multiplier(3);
+    let mul7 = make_multiplier(7);
+    assert_eq(mul3(10), 30);
+    assert_eq(mul7(10), 70);
+
+    // make_line_fn: y = 2x + 3
+    let line_fn = make_line_fn(2, 3);
+    assert_eq(line_fn(0), 3);
+    assert_eq(line_fn(1), 5);
+    assert_eq(line_fn(5), 13);
+    assert_eq(line_fn(10), 23);
+
+    // make_clamp
+    let clamp_0_100 = make_clamp(0, 100);
+    assert_eq(clamp_0_100(-5), 0);
+    assert_eq(clamp_0_100(50), 50);
+    assert_eq(clamp_0_100(200), 100);
+    assert_eq(clamp_0_100(0), 0);
+    assert_eq(clamp_0_100(100), 100);
+
+    // compose returned closures
+    let add5_then_mul3 = compose(mul3, add5);
+    assert_eq(add5_then_mul3(10), 45);  // (10+5)*3
+
+    let mul3_then_add5 = compose(add5, mul3);
+    assert_eq(mul3_then_add5(10), 35);  // 10*3+5
+
+    // Double composition
+    let add15 = compose(add5, add10);
+    assert_eq(add15(0), 15);
+    assert_eq(add15(100), 115);
+
+    // Apply_n with returned closures
+    assert_eq(apply_n(add5, 4, 0), 20);  // 0->5->10->15->20
+    assert_eq(apply_n(mul3, 3, 1), 27);  // 1->3->9->27
+
+    // Chain: make several adders and compose them
+    let add1 = make_adder(1);
+    let add2 = make_adder(2);
+    let add3 = make_adder(3);
+    let add6_composed = compose(add3, compose(add2, add1));
+    assert_eq(add6_composed(100), 106);
+
+    // Different factories combined
+    let step = compose(make_clamp(0, 50), make_line_fn(3, -10));
+    // x=0: 3*0-10 = -10 -> clamp -> 0
+    assert_eq(step(0), 0);
+    // x=5: 3*5-10 = 5 -> clamp -> 5
+    assert_eq(step(5), 5);
+    // x=20: 3*20-10 = 50 -> clamp -> 50
+    assert_eq(step(20), 50);
+    // x=30: 3*30-10 = 80 -> clamp -> 50
+    assert_eq(step(30), 50);
+
+    0
+}

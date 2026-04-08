@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: mmio, register, access-mode, systems, error
+// @timeout: 5000
+// @expected-error: E400
+// @description: Verify that writing to a ReadOnly register is rejected.
+
+mount sys.mmio;
+
+fn main() -> Int {
+    let status_reg: Register<UInt32, ReadOnly> = Register.at(0x4000_0000);
+
+    // ERROR: Cannot write to a ReadOnly register
+    status_reg.write(0x0001);
+
+    0
+}

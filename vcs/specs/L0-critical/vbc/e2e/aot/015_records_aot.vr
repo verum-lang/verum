@@ -1,0 +1,55 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, records
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT record types, field access, and nested records
+
+type Point is { x: Int, y: Int };
+
+fn distance_sq(p: Point) -> Int {
+    p.x * p.x + p.y * p.y
+}
+
+fn translate(p: Point, dx: Int, dy: Int) -> Point {
+    Point { x: p.x + dx, y: p.y + dy }
+}
+
+fn origin() -> Point {
+    Point { x: 0, y: 0 }
+}
+
+type Rect is { top_left: Point, width: Int, height: Int };
+
+fn rect_area(r: Rect) -> Int {
+    r.width * r.height
+}
+
+fn main() -> Int {
+    // Basic record construction and field access
+    let p = Point { x: 3, y: 4 };
+    assert_eq(p.x, 3);
+    assert_eq(p.y, 4);
+
+    // Record passed to function
+    assert_eq(distance_sq(p), 25);  // 3*3 + 4*4
+
+    // Record returned from function
+    let o = origin();
+    assert_eq(o.x, 0);
+    assert_eq(o.y, 0);
+    assert_eq(distance_sq(o), 0);
+
+    // Record with computed fields
+    let p2 = translate(p, 1, -1);
+    assert_eq(p2.x, 4);
+    assert_eq(p2.y, 3);
+    assert_eq(distance_sq(p2), 25);  // 4*4 + 3*3
+
+    // Nested record
+    let r = Rect { top_left: Point { x: 1, y: 2 }, width: 10, height: 5 };
+    assert_eq(rect_area(r), 50);
+
+    0
+}

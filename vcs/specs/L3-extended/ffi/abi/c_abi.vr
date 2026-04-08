@@ -1,0 +1,417 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, abi, c-abi, calling-convention, unsafe
+// @description: Tests C ABI compatibility and calling conventions
+
+/// ============================================================
+/// C ABI COMPATIBILITY
+/// ============================================================
+///
+/// The C ABI defines how functions receive arguments and return
+/// values. Verumps FFI must match the platformps C ABI exactly.
+
+// ------------------------------------------------------------
+// C Calling Convention (cdecl)
+// ------------------------------------------------------------
+
+/// Standard C calling convention
+/// - Arguments passed right-to-left on stack (x86)
+/// - Caller cleans up stack
+/// - Return in EAX/RAX (integer) or ST0/XMM0 (float)
+ffi c_lib {
+    @extern("C")
+    fn cdecl_function(a: c_int, b: c_int, c: c_int) -> c_int;
+}
+
+/// Verum function with C calling convention
+@export("C")
+@extern("C")
+fn verum_cdecl(a: c_int, b: c_int) -> c_int {
+    a + b
+}
+
+// ------------------------------------------------------------
+// x86-64 System V ABI (Linux, macOS, BSD)
+// ------------------------------------------------------------
+
+/// System V AMD64 ABI register usage:
+/// Integer args: RDI, RSI, RDX, RCX, R8, R9
+/// Float args: XMM0-XMM7
+/// Return: RAX (integer), XMM0 (float)
+/// Caller-saved: RAX, RCX, RDX, RSI, RDI, R8-R11, XMM0-XMM15
+
+@cfg(all(target_arch = "x86_64", not(target_os = "windows")))
+ffi sysv_lib {
+    @extern("C")
+    fn sysv_6_ints(
+        a: c_long,    // RDI
+        b: c_long,    // RSI
+        c: c_long,    // RDX
+        d: c_long,    // RCX
+        e: c_long,    // R8
+        f: c_long     // R9
+    ) -> c_long;      // RAX;
+
+    @extern("C")
+    fn sysv_8_floats(
+        a: c_double,  // XMM0
+        b: c_double,  // XMM1
+        c: c_double,  // XMM2
+        d: c_double,  // XMM3
+        e: c_double,  // XMM4
+        f: c_double,  // XMM5
+        g: c_double,  // XMM6
+        h: c_double   // XMM7
+    ) -> c_double;    // XMM0;
+
+    @extern("C")
+    fn sysv_mixed(
+        i1: c_int,    // RDI (zero-extended to 64 bits)
+        f1: c_double, // XMM0
+        i2: c_int,    // RSI
+        f2: c_double  // XMM1
+    ) -> c_int;       // RAX (lower 32 bits);
+
+    /// More than 6 integer args - spill to stack
+    @extern("C")
+    fn sysv_many_args(
+        a: c_long,    // RDI
+        b: c_long,    // RSI
+        c: c_long,    // RDX
+        d: c_long,    // RCX
+        e: c_long,    // R8
+        f: c_long,    // R9
+        g: c_long,    // Stack [RSP]
+        h: c_long     // Stack [RSP+8]
+    ) -> c_long;
+}
+
+// ------------------------------------------------------------
+// x86-64 Windows ABI (Win64)
+// ------------------------------------------------------------
+
+/// Windows x64 ABI register usage:
+/// Integer args: RCX, RDX, R8, R9
+/// Float args: XMM0-XMM3
+/// Return: RAX (integer), XMM0 (float)
+/// 32-byte shadow space required
+
+@cfg(all(target_arch = "x86_64", target_os = "windows"))
+ffi win64_lib {
+    @extern("win64")
+    fn win64_4_args(
+        a: c_longlong,  // RCX
+        b: c_longlong,  // RDX
+        c: c_longlong,  // R8
+        d: c_longlong   // R9
+    ) -> c_longlong;    // RAX;
+
+    @extern("win64")
+    fn win64_floats(
+        a: c_double,    // XMM0
+        b: c_double,    // XMM1
+        c: c_double,    // XMM2
+        d: c_double     // XMM3
+    ) -> c_double;      // XMM0;
+
+    /// Mixed integer/float (each uses a slot)
+    @extern("win64")
+    fn win64_mixed(
+        i1: c_longlong, // RCX
+        f1: c_double,   // XMM1 (note: slot 2, not XMM0!)
+        i2: c_longlong, // R8
+        f2: c_double    // XMM3
+    ) -> c_longlong;
+
+    /// More than 4 args - spill to stack
+    @extern("win64")
+    fn win64_many_args(
+        a: c_longlong,  // RCX
+        b: c_longlong,  // RDX
+        c: c_longlong,  // R8
+        d: c_longlong,  // R9
+        e: c_longlong,  // Stack [RSP+32] (after shadow)
+        f: c_longlong   // Stack [RSP+40]
+    ) -> c_longlong;
+}
+
+// ------------------------------------------------------------
+// AArch64 (ARM64) ABI
+// ------------------------------------------------------------
+
+/// ARM64 AAPCS64 ABI:
+/// Integer args: X0-X7
+/// Float args: V0-V7 (D0-D7 for double)
+/// Return: X0 (integer), V0 (float)
+
+@cfg(target_arch = "aarch64")
+ffi aarch64_lib {
+    @extern("C")
+    fn aarch64_8_ints(
+        a: c_long,    // X0
+        b: c_long,    // X1
+        c: c_long,    // X2
+        d: c_long,    // X3
+        e: c_long,    // X4
+        f: c_long,    // X5
+        g: c_long,    // X6
+        h: c_long     // X7
+    ) -> c_long;      // X0;
+
+    @extern("C")
+    fn aarch64_floats(
+        a: c_double,  // D0
+        b: c_double,  // D1
+        c: c_double,  // D2
+        d: c_double   // D3
+    ) -> c_double;    // D0;
+
+    @extern("C")
+    fn aarch64_many(
+        a: c_long, b: c_long, c: c_long, d: c_long,
+        e: c_long, f: c_long, g: c_long, h: c_long,
+        i: c_long     // Stack
+    ) -> c_long;
+}
+
+// ------------------------------------------------------------
+// Structure Passing
+// ------------------------------------------------------------
+
+/// Small structs passed in registers
+@repr(C)
+type SmallStruct is {
+    a: c_int,
+    b: c_int,
+};
+
+/// Fits in one register (8 bytes)
+@repr(C)
+type PairU32 is {
+    first: u32,
+    second: u32,
+};
+
+/// Requires two registers (16 bytes)
+@repr(C)
+type Point3D is {
+    x: c_double,
+    y: c_double,
+};
+
+/// Too large - passed by pointer
+@repr(C)
+type LargeStruct is {
+    data: [c_long; 8],
+};
+
+ffi struct_lib {
+    /// Small struct passed in registers
+    @extern("C")
+    fn pass_small(s: SmallStruct) -> c_int;
+
+    /// Struct returned in registers
+    @extern("C")
+    fn return_small() -> SmallStruct;
+
+    /// Large struct - hidden pointer parameter
+    @extern("C")
+    fn pass_large(s: *const LargeStruct);
+
+    /// Large struct return - caller provides space
+    @extern("C")
+    fn return_large(out: *mut LargeStruct);
+}
+
+// ------------------------------------------------------------
+// Floating Point ABI
+// ------------------------------------------------------------
+
+/// Hardware float ABI (default on modern platforms)
+ffi float_lib {
+    @extern("C")
+    fn float_arithmetic(a: c_float, b: c_float) -> c_float;
+
+    @extern("C")
+    fn double_arithmetic(a: c_double, b: c_double) -> c_double;
+
+    /// Long double (platform-dependent size)
+    @cfg(not(target_os = "windows"))
+    @extern("C")
+    fn long_double_op(a: c_longdouble) -> c_longdouble;
+}
+
+/// Complex numbers (C99)
+@repr(C)
+type c_complex_float is {
+    real: c_float,
+    imag: c_float,
+};
+
+@repr(C)
+type c_complex_double is {
+    real: c_double,
+    imag: c_double,
+};
+
+ffi complex_lib {
+    @extern("C")
+    fn complex_add(a: c_complex_double, b: c_complex_double) -> c_complex_double;
+
+    @extern("C")
+    fn complex_mul(a: c_complex_double, b: c_complex_double) -> c_complex_double;
+}
+
+// ------------------------------------------------------------
+// Variadic Functions
+// ------------------------------------------------------------
+
+/// Variadic function handling follows platform ABI
+ffi libc {
+    @extern("C")
+    @variadic
+    fn printf(format: *const c_char, ...) -> c_int;
+
+    /// va_list type is platform-specific
+    @extern("C")
+    fn vprintf(format: *const c_char, ap: va_list) -> c_int;
+}
+
+/// va_list on x86-64 System V is a struct
+@cfg(all(target_arch = "x86_64", not(target_os = "windows")))
+@repr(C)
+type va_list_sysv is {
+    gp_offset: c_uint,
+    fp_offset: c_uint,
+    overflow_arg_area: *mut c_void,
+    reg_save_area: *mut c_void,
+};
+
+/// va_list on Windows x64 is a pointer
+@cfg(all(target_arch = "x86_64", target_os = "windows"))
+type va_list_win64 is *mut c_char;
+
+// ------------------------------------------------------------
+// Return Value Conventions
+// ------------------------------------------------------------
+
+/// Integer return in RAX (lower bits for smaller types)
+ffi return_lib {
+    @extern("C")
+    fn return_byte() -> c_char;    // AL;
+
+    @extern("C")
+    fn return_short() -> c_short;  // AX;
+
+    @extern("C")
+    fn return_int() -> c_int;      // EAX;
+
+    @extern("C")
+    fn return_long() -> c_long;    // RAX;
+
+    /// Two-register return (128-bit value)
+    @cfg(all(target_arch = "x86_64", not(target_os = "windows")))
+    @extern("C")
+    fn return_pair() -> (c_long, c_long);  // RAX, RDX;
+}
+
+/// Struct returns
+ffi struct_return {
+    /// Small struct in registers
+    @extern("C")
+    fn return_point() -> Point2D;
+
+    /// Large struct via hidden pointer
+    @extern("C")
+    fn return_large_struct() -> LargeStruct;
+}
+
+@repr(C)
+type Point2D is {
+    x: c_double,
+    y: c_double,
+};
+
+// ------------------------------------------------------------
+// Stack Alignment
+// ------------------------------------------------------------
+
+/// x86-64 requires 16-byte stack alignment at call site
+@stack_align(16)
+fn aligned_function() {
+    // Stack guaranteed 16-byte aligned here
+    let buffer: [u8; 32] = [0; 32];
+}
+
+/// AVX requires 32-byte alignment for optimal performance
+@stack_align(32)
+fn avx_aligned_function() {
+    let vectors: [f32; 8] = [0.0; 8];
+}
+
+// ------------------------------------------------------------
+// Attribute Handling
+// ------------------------------------------------------------
+
+/// No return (diverging function)
+ffi noreturn_lib {
+    @extern("C")
+    @noreturn
+    fn exit(status: c_int) -> !;
+
+    @extern("C")
+    @noreturn
+    fn abort() -> !;
+}
+
+/// Pure function (no side effects)
+@pure
+ffi pure_lib {
+    @extern("C")
+    fn pure_function(x: c_int) -> c_int;
+}
+
+/// Const function (pure + doesn't read global memory)
+@const_fn
+ffi const_lib {
+    @extern("C")
+    fn const_function(x: c_int, y: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Name Mangling
+// ------------------------------------------------------------
+
+/// C functions have no mangling
+@extern("C")
+@no_mangle
+fn unmangled_function(x: c_int) -> c_int {
+    x * 2
+}
+
+/// Explicit symbol name
+@extern("C", name = "_custom_symbol_name")
+fn custom_named() -> c_int {
+    42
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_short is i16;
+type c_int is i32;
+type c_long is i64;      // Unix 64-bit
+type c_longlong is i64;
+type c_uint is u32;
+type c_float is f32;
+type c_double is f64;
+type c_longdouble is f64; // Simplified
+type c_void is ();
+type va_list is *mut c_void;
+
+fn main() {
+    // C ABI tests
+}

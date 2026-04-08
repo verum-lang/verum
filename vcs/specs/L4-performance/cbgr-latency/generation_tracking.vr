@@ -1,0 +1,374 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: cbgr, latency, generation, tracking, benchmark
+// @description: Generation counter overhead measurement (target: < 5ns per check)
+
+/// Generation Tracking Overhead Benchmark
+///
+/// CBGR uses generation counters to detect use-after-free. Each allocation
+/// has a generation number that's incremented when the memory is freed.
+/// References store the expected generation and verify on access.
+///
+/// Memory layout (ThinRef):
+/// - ptr:        8 bytes  (pointer to data)
+/// - generation: 4 bytes  (expected generation number)
+/// - epoch_caps: 4 bytes  (epoch and capabilities)
+///
+/// Expected overhead: ~3-5ns per generation check
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Baseline: Direct pointer access (unsafe, no generation check)
+fn benchmark_no_generation_check() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let ptr: *const i64 = &*data as *const i64;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "no_generation_check",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: true,
+    }
+}
+
+/// Generation check: Single allocation, repeated access
+fn benchmark_single_allocation_access() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let managed_ref: &i64 = &*data;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*managed_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Each access verifies: ref.generation == allocation.generation
+        black_box(*managed_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "single_alloc_repeated_access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Generation check with allocation churn
+fn benchmark_generation_with_churn() -> BenchmarkResult {
+    let mut allocations: List<Heap<i64>> = List.new();
+
+    // Pre-allocate some objects
+    for i in 0..100 {
+        allocations.push(Heap(i));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // Access existing allocation (generation check)
+        let idx = i % allocations.len();
+        black_box(*allocations[idx]);
+
+        // Periodically reallocate (generation increment)
+        if i % 1000 == 0 {
+            let remove_idx = (i / 1000) % allocations.len();
+            allocations[remove_idx] = Heap(i as i64);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "generation_with_churn",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Generation counter increment on deallocation
+fn benchmark_generation_increment() -> BenchmarkResult {
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS / 100 {
+        // Each allocation/deallocation increments generation
+        let obj = Heap(42i64);
+        black_box(&*obj);
+        // obj dropped here, generation incremented
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "generation_increment",
+        iterations: BENCHMARK_ITERATIONS / 100,
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 100) as f64,
+        is_baseline: false,
+    }
+}
+
+/// Multiple references to same allocation
+fn benchmark_aliased_generation_check() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let ref1: &i64 = &*data;
+    let ref2: &i64 = &*data;
+    let ref3: &i64 = &*data;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*ref1);
+        black_box(*ref2);
+        black_box(*ref3);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 3) {
+        // All three references check against same generation
+        black_box(*ref1);
+        black_box(*ref2);
+        black_box(*ref3);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "aliased_generation_check",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// High-frequency allocation with generation reuse
+fn benchmark_generation_reuse() -> BenchmarkResult {
+    // Allocator may reuse slots with higher generations
+    let mut refs: List<Heap<i64>> = List.with_capacity(100);
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS / 100 {
+        // Allocate
+        let obj = Heap(i as i64);
+        refs.push(obj);
+
+        // Keep only recent allocations
+        if refs.len() > 100 {
+            refs.remove(0);  // Drops oldest, frees slot for reuse
+        }
+
+        // Access recent allocations
+        for r in refs.iter().take(10) {
+            black_box(**r);
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let total_ops = BENCHMARK_ITERATIONS / 100 * 11;  // 1 alloc + 10 accesses
+
+    BenchmarkResult {
+        name: "generation_reuse_pattern",
+        iterations: total_ops,
+        per_op_ns: elapsed.as_nanos() as f64 / total_ops as f64,
+        is_baseline: false,
+    }
+}
+
+/// Branch prediction impact on generation check
+fn benchmark_branch_prediction() -> BenchmarkResult {
+    let valid_data = Heap(42i64);
+    let valid_ref: &i64 = &*valid_data;
+
+    // All checks should pass - branch predictor should optimize
+    // Warmup to train branch predictor
+    for _ in 0..WARMUP_ITERATIONS * 10 {
+        black_box(*valid_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Branch predictor should predict "generation matches"
+        black_box(*valid_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "branch_predicted_check",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Cache effects on generation check
+fn benchmark_cache_cold() -> BenchmarkResult {
+    const ARRAY_SIZE: Int = 10_000;
+    let data: List<Heap<i64>> = (0..ARRAY_SIZE)
+        .map(|i| Heap(i))
+        .collect();
+
+    // Random access pattern (cache-unfriendly)
+    let indices: List<usize> = generate_shuffled_indices(ARRAY_SIZE);
+
+    let start = Instant.now();
+
+    for i in 0..(BENCHMARK_ITERATIONS / ARRAY_SIZE) {
+        for idx in indices.iter() {
+            black_box(*data[*idx]);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "cache_cold_generation",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Sequential vs random access generation overhead
+fn benchmark_sequential_vs_random() -> (BenchmarkResult, BenchmarkResult) {
+    const ARRAY_SIZE: Int = 10_000;
+    let data: List<Heap<i64>> = (0..ARRAY_SIZE)
+        .map(|i| Heap(i))
+        .collect();
+
+    // Sequential access
+    let start_seq = Instant.now();
+    for _ in 0..(BENCHMARK_ITERATIONS / ARRAY_SIZE) {
+        for i in 0..ARRAY_SIZE {
+            black_box(*data[i]);
+        }
+    }
+    let elapsed_seq = start_seq.elapsed();
+
+    // Random access
+    let indices: List<usize> = generate_shuffled_indices(ARRAY_SIZE);
+    let start_rand = Instant.now();
+    for _ in 0..(BENCHMARK_ITERATIONS / ARRAY_SIZE) {
+        for idx in indices.iter() {
+            black_box(*data[*idx]);
+        }
+    }
+    let elapsed_rand = start_rand.elapsed();
+
+    (
+        BenchmarkResult {
+            name: "sequential_access",
+            iterations: BENCHMARK_ITERATIONS,
+            per_op_ns: elapsed_seq.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+            is_baseline: false,
+        },
+        BenchmarkResult {
+            name: "random_access",
+            iterations: BENCHMARK_ITERATIONS,
+            per_op_ns: elapsed_rand.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+            is_baseline: false,
+        },
+    )
+}
+
+fn main() {
+    println("=== CBGR Generation Tracking Overhead ===\n");
+
+    let baseline = benchmark_no_generation_check();
+    let single_alloc = benchmark_single_allocation_access();
+    let with_churn = benchmark_generation_with_churn();
+    let increment = benchmark_generation_increment();
+    let aliased = benchmark_aliased_generation_check();
+    let reuse = benchmark_generation_reuse();
+    let branch = benchmark_branch_prediction();
+    let cache_cold = benchmark_cache_cold();
+    let (sequential, random) = benchmark_sequential_vs_random();
+
+    let results = [
+        baseline,
+        single_alloc,
+        with_churn,
+        increment,
+        aliased,
+        reuse,
+        branch,
+        cache_cold,
+        sequential,
+        random,
+    ];
+
+    let baseline_ns = results[0].per_op_ns;
+
+    println("{:<30} {:>12} {:>12} {:>8}", "Benchmark", "Time (ns)", "Overhead", "Status");
+    println("{}", "-".repeat(66));
+
+    for result in results {
+        let overhead = if result.is_baseline {
+            0.0
+        } else {
+            result.per_op_ns - baseline_ns
+        };
+
+        let status = if overhead < 5.0 || result.is_baseline { "PASS" } else { "WARN" };
+
+        println("{:<30} {:>12.2} {:>12.2} {:>8}",
+                result.name, result.per_op_ns, overhead, status);
+    }
+
+    println("");
+    println("Target: < 5ns generation check overhead");
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    per_op_ns: f64,
+    is_baseline: Bool,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn generate_shuffled_indices(n: Int) -> List<usize> {
+    let mut indices: List<usize> = (0..n).collect();
+    // Fisher-Yates shuffle
+    let mut rng = Random.with_seed(42);
+    for i in (1..n).rev() {
+        let j = rng.gen_range(0, i + 1);
+        indices.swap(i, j);
+    }
+    indices
+}

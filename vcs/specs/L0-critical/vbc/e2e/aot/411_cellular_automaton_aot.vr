@@ -1,0 +1,274 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, cellular-automaton, rule30, rule110, 1d
+// @timeout: 30000
+// @expected-exit: 0
+//
+// 1D cellular automaton (Rule 30 and Rule 110).
+// Cell states stored in Arr32 (32 cells). Each cell is 0 or 1.
+// Apply rule based on 3-cell neighborhood: (left, center, right) -> new state.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+type Arr32 is { b0: Arr8, b1: Arr8, b2: Arr8, b3: Arr8 };
+
+fn a32_zero() -> Arr32 {
+    Arr32 { b0: a8_zero(), b1: a8_zero(), b2: a8_zero(), b3: a8_zero() }
+}
+
+fn a32_get(a: Arr32, i: Int) -> Int {
+    if i < 8 { a8_get(a.b0, i) }
+    else if i < 16 { a8_get(a.b1, i - 8) }
+    else if i < 24 { a8_get(a.b2, i - 16) }
+    else { a8_get(a.b3, i - 24) }
+}
+
+fn a32_set(a: Arr32, i: Int, v: Int) -> Arr32 {
+    if i < 8 {
+        Arr32 { b0: a8_set(a.b0, i, v), b1: a.b1, b2: a.b2, b3: a.b3 }
+    } else if i < 16 {
+        Arr32 { b0: a.b0, b1: a8_set(a.b1, i - 8, v), b2: a.b2, b3: a.b3 }
+    } else if i < 24 {
+        Arr32 { b0: a.b0, b1: a.b1, b2: a8_set(a.b2, i - 16, v), b3: a.b3 }
+    } else {
+        Arr32 { b0: a.b0, b1: a.b1, b2: a.b2, b3: a8_set(a.b3, i - 24, v) }
+    }
+}
+
+// Apply a Wolfram rule number to a 3-bit neighborhood.
+// neighborhood = left*4 + center*2 + right (value 0-7)
+// rule_bits stored in Arr8 (8 entries, one per neighborhood pattern)
+fn apply_rule(rule_bits: Arr8, left: Int, center: Int, right: Int) -> Int {
+    let idx = left * 4 + center * 2 + right;
+    a8_get(rule_bits, idx)
+}
+
+// Encode Wolfram rule number into 8 bits stored in Arr8
+fn encode_rule(rule_num: Int) -> Arr8 {
+    let mut bits = a8_zero();
+    let mut r = rule_num;
+    let mut i = 0;
+    while i < 8 {
+        bits = a8_set(bits, i, r % 2);
+        r = r / 2;
+        i = i + 1;
+    }
+    bits
+}
+
+// Evolve one step of a 1D cellular automaton (width cells, boundary = 0)
+fn evolve(cells: Arr32, width: Int, rule_bits: Arr8) -> Arr32 {
+    let mut next = a32_zero();
+    let mut i = 0;
+    while i < width {
+        let left = if i == 0 { 0 } else { a32_get(cells, i - 1) };
+        let center = a32_get(cells, i);
+        let right = if i == width - 1 { 0 } else { a32_get(cells, i + 1) };
+        let new_val = apply_rule(rule_bits, left, center, right);
+        next = a32_set(next, i, new_val);
+        i = i + 1;
+    }
+    next
+}
+
+// Run n generations
+fn run_gen(cells: Arr32, width: Int, rule_bits: Arr8, n: Int) -> Arr32 {
+    let mut c = cells;
+    let mut i = 0;
+    while i < n {
+        c = evolve(c, width, rule_bits);
+        i = i + 1;
+    }
+    c
+}
+
+// Count live cells
+fn count_live(cells: Arr32, width: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < width {
+        cnt = cnt + a32_get(cells, i);
+        i = i + 1;
+    }
+    cnt
+}
+
+// ========== Rule 30 Tests ==========
+// Rule 30 = 00011110 in binary
+// Neighborhood -> result:
+// 111->0, 110->0, 101->0, 100->1, 011->1, 010->1, 001->1, 000->0
+
+fn test_rule30_encode() -> Int {
+    let bits = encode_rule(30);
+    // 30 = 00011110: bit0=0, bit1=1, bit2=1, bit3=1, bit4=1, bit5=0, bit6=0, bit7=0
+    assert_eq(a8_get(bits, 0), 0);
+    assert_eq(a8_get(bits, 1), 1);
+    assert_eq(a8_get(bits, 2), 1);
+    assert_eq(a8_get(bits, 3), 1);
+    assert_eq(a8_get(bits, 4), 1);
+    assert_eq(a8_get(bits, 5), 0);
+    0
+}
+
+fn test_rule30_single_seed() -> Int {
+    // Start with single cell in center of 11-cell strip, index 5
+    let width = 11;
+    let mut cells = a32_zero();
+    cells = a32_set(cells, 5, 1);
+    let rule_bits = encode_rule(30);
+
+    // Generation 1: center cell (5) has neighbors 0,1,0 -> pattern 010 -> 1
+    // Cell 4: 0,0,1 -> pattern 001 -> 1
+    // Cell 6: 1,0,0 -> pattern 100 -> 1
+    let g1 = evolve(cells, width, rule_bits);
+    assert_eq(a32_get(g1, 4), 1);
+    assert_eq(a32_get(g1, 5), 1);
+    assert_eq(a32_get(g1, 6), 1);
+    assert_eq(count_live(g1, width), 3);
+    0
+}
+
+fn test_rule30_two_gens() -> Int {
+    let width = 11;
+    let mut cells = a32_zero();
+    cells = a32_set(cells, 5, 1);
+    let rule_bits = encode_rule(30);
+    let g2 = run_gen(cells, width, rule_bits, 2);
+    // After gen 2 from single seed (centered at 5):
+    // Gen 1: ...01110...
+    // Gen 2: cell 3: 0,0,1->1; cell 4: 0,1,1->1; cell 5: 1,1,1->0;
+    //         cell 6: 1,1,0->0; cell 7: 1,0,0->1
+    assert_eq(a32_get(g2, 3), 1);
+    assert_eq(a32_get(g2, 4), 1);
+    assert_eq(a32_get(g2, 5), 0);
+    assert_eq(a32_get(g2, 6), 0);
+    assert_eq(a32_get(g2, 7), 1);
+    0
+}
+
+fn test_rule30_five_gens() -> Int {
+    let width = 21;
+    let mut cells = a32_zero();
+    cells = a32_set(cells, 10, 1);
+    let rule_bits = encode_rule(30);
+    let g5 = run_gen(cells, width, rule_bits, 5);
+    // Count live cells after 5 generations
+    let live = count_live(g5, width);
+    // Rule 30 grows: should have more cells alive
+    assert(live > 5);
+    assert(live < 21);
+    0
+}
+
+// ========== Rule 110 Tests ==========
+// Rule 110 = 01101110 in binary
+
+fn test_rule110_encode() -> Int {
+    let bits = encode_rule(110);
+    // 110 = 01101110: bit0=0, bit1=1, bit2=1, bit3=1, bit4=0, bit5=1, bit6=1, bit7=0
+    assert_eq(a8_get(bits, 0), 0);
+    assert_eq(a8_get(bits, 1), 1);
+    assert_eq(a8_get(bits, 2), 1);
+    assert_eq(a8_get(bits, 3), 1);
+    assert_eq(a8_get(bits, 4), 0);
+    assert_eq(a8_get(bits, 5), 1);
+    0
+}
+
+fn test_rule110_single_seed() -> Int {
+    let width = 11;
+    let mut cells = a32_zero();
+    cells = a32_set(cells, 5, 1);
+    let rule_bits = encode_rule(110);
+
+    let g1 = evolve(cells, width, rule_bits);
+    // Cell 4: 0,0,1 -> pattern 001 -> bit1 = 1
+    // Cell 5: 0,1,0 -> pattern 010 -> bit2 = 1
+    // Cell 6: 1,0,0 -> pattern 100 -> bit4 = 0
+    assert_eq(a32_get(g1, 4), 1);
+    assert_eq(a32_get(g1, 5), 1);
+    assert_eq(a32_get(g1, 6), 0);
+    assert_eq(count_live(g1, width), 2);
+    0
+}
+
+fn test_rule110_three_gens() -> Int {
+    let width = 11;
+    let mut cells = a32_zero();
+    cells = a32_set(cells, 5, 1);
+    let rule_bits = encode_rule(110);
+    let g3 = run_gen(cells, width, rule_bits, 3);
+    let live = count_live(g3, width);
+    assert(live > 0);
+    assert(live <= width);
+    0
+}
+
+// ========== Rule 90 (XOR) Tests ==========
+// Rule 90: left XOR right (Sierpinski triangle pattern)
+
+fn test_rule90_symmetry() -> Int {
+    let width = 15;
+    let mut cells = a32_zero();
+    cells = a32_set(cells, 7, 1); // center
+    let rule_bits = encode_rule(90);
+    let g4 = run_gen(cells, width, rule_bits, 4);
+    // Rule 90 from single seed is symmetric around center
+    let mut i = 0;
+    let mut ok = 1;
+    while i < 7 {
+        if a32_get(g4, 7 - i) != a32_get(g4, 7 + i) { ok = 0; }
+        i = i + 1;
+    }
+    assert_eq(ok, 1);
+    0
+}
+
+// ========== All-Dead Tests ==========
+
+fn test_all_dead_stays_dead() -> Int {
+    let width = 16;
+    let cells = a32_zero();
+    let rule_bits = encode_rule(30);
+    let g1 = evolve(cells, width, rule_bits);
+    assert_eq(count_live(g1, width), 0);
+    let rule110 = encode_rule(110);
+    let g2 = evolve(cells, width, rule110);
+    assert_eq(count_live(g2, width), 0);
+    0
+}
+
+fn main() -> Int {
+    test_rule30_encode();
+    test_rule30_single_seed();
+    test_rule30_two_gens();
+    test_rule30_five_gens();
+    test_rule110_encode();
+    test_rule110_single_seed();
+    test_rule110_three_gens();
+    test_rule90_symmetry();
+    test_all_dead_stays_dead();
+    print("[OK] 411_cellular_automaton_aot");
+    0
+}

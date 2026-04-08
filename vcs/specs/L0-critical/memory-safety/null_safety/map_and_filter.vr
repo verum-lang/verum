@@ -1,0 +1,47 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, map, filter
+// @description: Tests safe transformation of Maybe values with map and filter
+
+fn parse_int(s: Text) -> Maybe<Int> {
+    // Simplified - returns None for invalid input
+    match s {
+        "0" => Maybe.Some(0),
+        "1" => Maybe.Some(1),
+        "42" => Maybe.Some(42),
+        "100" => Maybe.Some(100),
+        _ => Maybe.None,
+    }
+}
+
+fn main() {
+    // map transforms the value inside Maybe
+    let value = parse_int("42");
+    let doubled = value.map(|x| x * 2);
+    assert(doubled == Maybe.Some(84));
+
+    // map on None returns None
+    let none_value = parse_int("invalid");
+    let none_doubled = none_value.map(|x| x * 2);
+    assert(none_doubled == Maybe.None);
+
+    // filter - keeps Some only if predicate is true
+    let fifty = parse_int("100").filter(|x| x > 50);
+    assert(fifty == Maybe.Some(100));
+
+    let filtered_out = parse_int("42").filter(|x| x > 50);
+    assert(filtered_out == Maybe.None);
+
+    // and_then (flatMap) for chaining Maybe operations
+    let chained = parse_int("42").and_then(|x| {
+        if x > 0 {
+            Maybe.Some(x * 10)
+        } else {
+            Maybe.None
+        }
+    });
+    assert(chained == Maybe.Some(420));
+
+    print("Maybe map and filter test passed");
+}

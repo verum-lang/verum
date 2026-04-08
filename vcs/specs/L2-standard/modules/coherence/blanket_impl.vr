@@ -1,0 +1,361 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, coherence, blanket-impl, generic
+
+/// Blanket implementation - implementing a trait for all types satisfying a bound.
+/// The form: `implement<T: Trait> OtherTrait for T`
+///
+/// Blanket implementations allow defining trait implementations that apply
+/// to any type meeting certain trait bounds, enabling powerful abstractions.
+
+// Define traits for the examples
+module traits {
+    /// Basic formatting trait
+    pub type Debug is protocol {
+        fn debug(&self) -> Text;
+    }
+
+    /// Display trait for user-facing output
+    pub type Display is protocol {
+        fn display(&self) -> Text;
+    }
+
+    /// Clone trait
+    pub type Clone is protocol {
+        fn clone(&self) -> Self;
+    }
+
+    /// Comparison traits
+    pub type PartialEq is protocol {
+        fn eq(&self, other: &Self) -> Bool;
+    }
+
+    pub type Eq is protocol extends PartialEq {};
+
+    /// Trait for types that can be converted to string
+    pub type ToString is protocol {
+        fn to_string(&self) -> Text;
+    }
+
+    /// Trait for types that have a default value
+    pub type Default is protocol {
+        fn default() -> Self;
+    }
+
+    /// Trait for types that can be compared
+    pub type PartialOrd is protocol extends PartialEq {
+        fn partial_cmp(&self, other: &Self) -> Maybe<Ordering>;
+    }
+
+    pub type Ord is protocol extends PartialOrd + Eq {
+        fn cmp(&self, other: &Self) -> Ordering;
+    }
+
+    pub type Ordering is
+    | Less
+    | Equal
+    | Greater;
+
+    /// Trait for iteration
+    pub type Iterator is protocol {
+        type Item;
+        fn next(&mut self) -> Maybe<Self.Item>;
+    }
+
+    /// Trait for collections that can be iterated
+    pub type IntoIterator is protocol {
+        type Item;
+        type IntoIter: Iterator<Item = Self.Item>;
+        fn into_iter(self) -> Self.IntoIter;
+    }
+
+    /// Trait for types that can be added
+    pub type Add<Rhs> is protocol {
+        type Output;
+        fn add(self, rhs: Rhs) -> Self.Output;
+    }
+
+    /// Trait for reference conversion
+    pub type AsRef<T> is protocol {
+        fn as_ref(&self) -> &T;
+    }
+
+    /// Trait for mutable reference conversion
+    pub type AsMut<T> is protocol {
+        fn as_mut(&mut self) -> &mut T;
+    }
+}
+
+module blanket_implementations {
+    mount traits.*;
+
+    // =========================================================================
+    // BLANKET IMPL: Any type implementing Display also implements ToString
+    // =========================================================================
+
+    /// Blanket implementation: Display -> ToString
+    implement<T: Display> ToString for T {
+        fn to_string(&self) -> Text {
+            self.display()
+        }
+    }
+
+    // =========================================================================
+    // BLANKET IMPL: Any type implementing Debug gets a default Display
+    // =========================================================================
+
+    // Note: This is typically avoided to prevent overlap, but shown for example
+    // implement<T: Debug> Display for T {
+    //     fn display(&self) -> Text {
+    //         self.debug()
+    //     }
+    // }
+
+    // =========================================================================
+    // BLANKET IMPL: Reference to T implements trait if T does
+    // =========================================================================
+
+    /// If T implements Clone, &T also "clones" by cloning the referenced value
+    implement<T: Clone> Clone for &T {
+        fn clone(&self) -> &T {
+            // Returns a reference to the same value
+            *self
+        }
+    }
+
+    /// References implement PartialEq by delegating to the inner type
+    implement<T: PartialEq> PartialEq for &T {
+        fn eq(&self, other: &&T) -> Bool {
+            (**self).eq(*other)
+        }
+    }
+
+    // =========================================================================
+    // BLANKET IMPL: Implementing trait for all sized types
+    // =========================================================================
+
+    /// Every type can be converted to a reference of itself
+    implement<T> AsRef<T> for T {
+        fn as_ref(&self) -> &T {
+            self
+        }
+    }
+
+    /// Every type can be mutably converted to itself
+    implement<T> AsMut<T> for T {
+        fn as_mut(&mut self) -> &mut T {
+            self
+        }
+    }
+
+    // =========================================================================
+    // BLANKET IMPL: Option/Maybe wrapping
+    // =========================================================================
+
+    pub type IntoOption is protocol {
+        fn into_option(self) -> Maybe<Self>;
+    }
+
+    /// Any Sized type can be wrapped into Option
+    implement<T> IntoOption for T {
+        fn into_option(self) -> Maybe<T> {
+            Some(self)
+        }
+    }
+
+    // =========================================================================
+    // BLANKET IMPL: Iterator extensions
+    // =========================================================================
+
+    pub type IteratorExt is protocol extends Iterator {
+        fn count(self) -> Int;
+        fn collect_list(self) -> List<Self.Item>;
+        fn map<B, F: Fn(Self.Item) -> B>(self, f: F) -> MapIterator<Self, F>;
+        fn filter<P: Fn(&Self.Item) -> Bool>(self, predicate: P) -> FilterIterator<Self, P>;
+    }
+
+    /// Blanket implementation of extensions for all iterators
+    implement<I: Iterator> IteratorExt for I {
+        fn count(mut self) -> Int {
+            let mut n = 0;
+            while self.next().is_some() {
+                n += 1;
+            }
+            n
+        }
+
+        fn collect_list(mut self) -> List<Self.Item> {
+            let mut result = List.new();
+            while let Some(item) = self.next() {
+                result.push(item);
+            }
+            result
+        }
+
+        fn map<B, F: Fn(Self.Item) -> B>(self, f: F) -> MapIterator<Self, F> {
+            MapIterator { iter: self, f }
+        }
+
+        fn filter<P: Fn(&Self.Item) -> Bool>(self, predicate: P) -> FilterIterator<Self, P> {
+            FilterIterator { iter: self, predicate }
+        }
+    }
+
+    pub type MapIterator<I, F> is {
+        iter: I,
+        f: F
+    };
+
+    implement<I: Iterator, B, F: Fn(I.Item) -> B> Iterator for MapIterator<I, F> {
+        type Item = B;
+
+        fn next(&mut self) -> Maybe<B> {
+            match self.iter.next() {
+                Some(item) => Some((self.f)(item)),
+                None => None
+            }
+        }
+    }
+
+    pub type FilterIterator<I, P> is {
+        iter: I,
+        predicate: P
+    };
+
+    implement<I: Iterator, P: Fn(&I.Item) -> Bool> Iterator for FilterIterator<I, P> {
+        type Item = I.Item;
+
+        fn next(&mut self) -> Maybe<I.Item> {
+            while let Some(item) = self.iter.next() {
+                if (self.predicate)(&item) {
+                    return Some(item);
+                }
+            }
+            None
+        }
+    }
+
+    // =========================================================================
+    // BLANKET IMPL: Comparison chain
+    // =========================================================================
+
+    /// If a type is Ord, it automatically gets PartialOrd
+    implement<T: Ord> PartialOrd for T {
+        fn partial_cmp(&self, other: &T) -> Maybe<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    // =========================================================================
+    // BLANKET IMPL: Tuple implementations
+    // =========================================================================
+
+    /// Debug for tuples where all elements implement Debug
+    implement<A: Debug, B: Debug> Debug for (A, B) {
+        fn debug(&self) -> Text {
+            format("({}, {})", self.0.debug(), self.1.debug())
+        }
+    }
+
+    implement<A: Debug, B: Debug, C: Debug> Debug for (A, B, C) {
+        fn debug(&self) -> Text {
+            format("({}, {}, {})", self.0.debug(), self.1.debug(), self.2.debug())
+        }
+    }
+
+    /// Clone for tuples where all elements implement Clone
+    implement<A: Clone, B: Clone> Clone for (A, B) {
+        fn clone(&self) -> (A, B) {
+            (self.0.clone(), self.1.clone())
+        }
+    }
+}
+
+// Example types to demonstrate blanket impls
+module examples {
+    mount traits.*;
+    mount blanket_implementations.*;
+
+    pub type Point is {
+        x: Int,
+        y: Int
+    };
+
+    implement Display for Point {
+        fn display(&self) -> Text {
+            format("({}, {})", self.x, self.y)
+        }
+    }
+
+    implement Debug for Point {
+        fn debug(&self) -> Text {
+            format("Point {{ x: {}, y: {} }}", self.x, self.y)
+        }
+    }
+
+    implement Clone for Point {
+        fn clone(&self) -> Point {
+            Point { x: self.x, y: self.y }
+        }
+    }
+
+    pub type RangeIterator is {
+        current: Int,
+        end: Int
+    };
+
+    implement RangeIterator {
+        pub fn new(start: Int, end: Int) -> RangeIterator {
+            RangeIterator { current: start, end }
+        }
+    }
+
+    implement Iterator for RangeIterator {
+        type Item = Int;
+
+        fn next(&mut self) -> Maybe<Int> {
+            if self.current < self.end {
+                let val = self.current;
+                self.current += 1;
+                Some(val)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn main() {
+    mount traits.*;
+    mount blanket_implementations.*;
+    mount examples.*;
+
+    // Point implements Display, so it automatically gets ToString via blanket impl
+    let point = Point { x: 10, y: 20 };
+    let s: Text = point.to_text();  // Uses blanket impl
+
+    // Iterator extensions via blanket impl
+    let range = RangeIterator.new(0, 10);
+    let count = range.count();  // Uses blanket IteratorExt impl
+
+    let range2 = RangeIterator.new(0, 5);
+    let doubled = range2.map(|x| x * 2).collect_list();  // [0, 2, 4, 6, 8]
+
+    let range3 = RangeIterator.new(0, 10);
+    let evens = range3.filter(|x| x % 2 == 0).collect_list();  // [0, 2, 4, 6, 8]
+
+    // AsRef blanket impl - every type is AsRef to itself
+    let value: Int = 42;
+    let ref_value: &Int = value.as_ref();
+
+    // IntoOption blanket impl
+    let wrapped: Maybe<Int> = 42.into_option();  // Some(42)
+
+    // Reference equality via blanket impl
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 1, y: 2 };
+    let r1 = &p1;
+    let r2 = &p2;
+    // r1 and r2 can be compared because of blanket PartialEq for &T
+}

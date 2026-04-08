@@ -1,0 +1,381 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, float, midpoint, lerp, total_cmp
+// @description: Tests for Float/Float32/Float64 midpoint, lerp, and total_cmp methods
+
+mount core.base.primitives.{Float32, Float64};
+
+// =============================================================================
+// Float - midpoint
+// =============================================================================
+
+@test
+fn test_float_midpoint_basic() {
+    let m: Float = 0.0.midpoint(10.0);
+    assert_eq(m, 5.0);
+}
+
+@test
+fn test_float_midpoint_same() {
+    let m: Float = 3.0.midpoint(3.0);
+    assert_eq(m, 3.0);
+}
+
+@test
+fn test_float_midpoint_negative() {
+    let m: Float = (-10.0).midpoint(10.0);
+    assert_eq(m, 0.0);
+}
+
+@test
+fn test_float_midpoint_both_negative() {
+    let m: Float = (-8.0).midpoint(-2.0);
+    assert_eq(m, -5.0);
+}
+
+@test
+fn test_float_midpoint_fractional() {
+    let m: Float = 1.0.midpoint(2.0);
+    assert_eq(m, 1.5);
+}
+
+@test
+fn test_float_midpoint_zero() {
+    let m: Float = 0.0.midpoint(0.0);
+    assert_eq(m, 0.0);
+}
+
+@test
+fn test_float_midpoint_large() {
+    // Large values that would overflow with (a+b)/2 for integers
+    let a: Float = 1.0e+300;
+    let b: Float = 1.0e+300;
+    let m: Float = a.midpoint(b);
+    assert_eq(m, 1.0e+300);
+}
+
+@test
+fn test_float_midpoint_asymmetric() {
+    let m1: Float = 2.0.midpoint(8.0);
+    let m2: Float = 8.0.midpoint(2.0);
+    assert_eq(m1, 5.0);
+    assert_eq(m2, 5.0);
+}
+
+// =============================================================================
+// Float - lerp
+// =============================================================================
+
+@test
+fn test_float_lerp_zero() {
+    let v: Float = 10.0.lerp(20.0, 0.0);
+    assert_eq(v, 10.0);
+}
+
+@test
+fn test_float_lerp_one() {
+    let v: Float = 10.0.lerp(20.0, 1.0);
+    assert_eq(v, 20.0);
+}
+
+@test
+fn test_float_lerp_half() {
+    let v: Float = 0.0.lerp(10.0, 0.5);
+    assert_eq(v, 5.0);
+}
+
+@test
+fn test_float_lerp_quarter() {
+    let v: Float = 0.0.lerp(100.0, 0.25);
+    assert_eq(v, 25.0);
+}
+
+@test
+fn test_float_lerp_negative_range() {
+    let v: Float = (-10.0).lerp(10.0, 0.5);
+    assert_eq(v, 0.0);
+}
+
+@test
+fn test_float_lerp_beyond_one() {
+    // Extrapolation: t > 1
+    let v: Float = 0.0.lerp(10.0, 2.0);
+    assert_eq(v, 20.0);
+}
+
+@test
+fn test_float_lerp_negative_t() {
+    // Extrapolation: t < 0
+    let v: Float = 10.0.lerp(20.0, -1.0);
+    assert_eq(v, 0.0);
+}
+
+@test
+fn test_float_lerp_same_values() {
+    let v: Float = 5.0.lerp(5.0, 0.7);
+    assert_eq(v, 5.0);
+}
+
+// =============================================================================
+// Float - total_cmp
+// =============================================================================
+
+@test
+fn test_float_total_cmp_less() {
+    assert_eq(1.0.total_cmp(2.0), -1);
+}
+
+@test
+fn test_float_total_cmp_greater() {
+    assert_eq(3.0.total_cmp(1.0), 1);
+}
+
+@test
+fn test_float_total_cmp_equal() {
+    assert_eq(5.0.total_cmp(5.0), 0);
+}
+
+@test
+fn test_float_total_cmp_nan_vs_number() {
+    let nan: Float = Float.nan();
+    // NaN should sort after numbers
+    assert_eq(1.0.total_cmp(nan), -1);
+}
+
+@test
+fn test_float_total_cmp_nan_vs_nan() {
+    let nan: Float = Float.nan();
+    assert_eq(nan.total_cmp(nan), 0);
+}
+
+@test
+fn test_float_total_cmp_negative() {
+    assert_eq((-5.0).total_cmp(5.0), -1);
+    assert_eq(5.0.total_cmp(-5.0), 1);
+}
+
+// =============================================================================
+// Float32 - midpoint
+// =============================================================================
+
+@test
+fn test_float32_midpoint_basic() {
+    let a = 0.0 as Float32;
+    let b = 10.0 as Float32;
+    let m = a.midpoint(b);
+    assert(m.to_float() == 5.0);
+}
+
+@test
+fn test_float32_midpoint_same() {
+    let a = 3.0 as Float32;
+    let m = a.midpoint(a);
+    assert(m.to_float() == 3.0);
+}
+
+@test
+fn test_float32_midpoint_negative() {
+    let a = -10.0 as Float32;
+    let b = 10.0 as Float32;
+    let m = a.midpoint(b);
+    assert(m.to_float() == 0.0);
+}
+
+// =============================================================================
+// Float32 - lerp
+// =============================================================================
+
+@test
+fn test_float32_lerp_zero() {
+    let a = 10.0 as Float32;
+    let b = 20.0 as Float32;
+    let t = 0.0 as Float32;
+    let v = a.lerp(b, t);
+    assert(v.to_float() == 10.0);
+}
+
+@test
+fn test_float32_lerp_one() {
+    let a = 10.0 as Float32;
+    let b = 20.0 as Float32;
+    let t = 1.0 as Float32;
+    let v = a.lerp(b, t);
+    assert(v.to_float() == 20.0);
+}
+
+@test
+fn test_float32_lerp_half() {
+    let a = 0.0 as Float32;
+    let b = 10.0 as Float32;
+    let t = 0.5 as Float32;
+    let v = a.lerp(b, t);
+    assert(v.to_float() == 5.0);
+}
+
+// =============================================================================
+// Float32 - total_cmp
+// =============================================================================
+
+@test
+fn test_float32_total_cmp_less() {
+    let a = 1.0 as Float32;
+    let b = 2.0 as Float32;
+    assert_eq(a.total_cmp(b), -1);
+}
+
+@test
+fn test_float32_total_cmp_equal() {
+    let a = 5.0 as Float32;
+    assert_eq(a.total_cmp(a), 0);
+}
+
+@test
+fn test_float32_total_cmp_nan() {
+    let nan = Float32.nan();
+    let a = 1.0 as Float32;
+    assert_eq(a.total_cmp(nan), -1);
+    assert_eq(nan.total_cmp(nan), 0);
+}
+
+// =============================================================================
+// Float64 - midpoint
+// =============================================================================
+
+@test
+fn test_float64_midpoint_basic() {
+    let a = 0.0 as Float64;
+    let b = 10.0 as Float64;
+    let m = a.midpoint(b);
+    assert((m as Float) == 5.0);
+}
+
+@test
+fn test_float64_midpoint_same() {
+    let a = 7.0 as Float64;
+    let m = a.midpoint(a);
+    assert((m as Float) == 7.0);
+}
+
+@test
+fn test_float64_midpoint_negative() {
+    let a = -6.0 as Float64;
+    let b = 6.0 as Float64;
+    let m = a.midpoint(b);
+    assert((m as Float) == 0.0);
+}
+
+// =============================================================================
+// Float64 - lerp
+// =============================================================================
+
+@test
+fn test_float64_lerp_zero() {
+    let a = 10.0 as Float64;
+    let b = 20.0 as Float64;
+    let t = 0.0 as Float64;
+    let v = a.lerp(b, t);
+    assert((v as Float) == 10.0);
+}
+
+@test
+fn test_float64_lerp_one() {
+    let a = 10.0 as Float64;
+    let b = 20.0 as Float64;
+    let t = 1.0 as Float64;
+    let v = a.lerp(b, t);
+    assert((v as Float) == 20.0);
+}
+
+@test
+fn test_float64_lerp_half() {
+    let a = 0.0 as Float64;
+    let b = 100.0 as Float64;
+    let t = 0.5 as Float64;
+    let v = a.lerp(b, t);
+    assert((v as Float) == 50.0);
+}
+
+// =============================================================================
+// Float64 - total_cmp
+// =============================================================================
+
+@test
+fn test_float64_total_cmp_less() {
+    let a = 1.0 as Float64;
+    let b = 2.0 as Float64;
+    assert_eq(a.total_cmp(b), -1);
+}
+
+@test
+fn test_float64_total_cmp_equal() {
+    let a = 5.0 as Float64;
+    assert_eq(a.total_cmp(a), 0);
+}
+
+@test
+fn test_float64_total_cmp_nan() {
+    let nan = Float64.nan();
+    let a = 1.0 as Float64;
+    assert_eq(a.total_cmp(nan), -1);
+    assert_eq(nan.total_cmp(nan), 0);
+}
+
+// =============================================================================
+// Cross-type consistency
+// =============================================================================
+
+@test
+fn test_midpoint_consistency() {
+    // All types should agree on midpoint of 2 and 8
+    let f: Float = 2.0.midpoint(8.0);
+    let f32_v = (2.0 as Float32).midpoint(8.0 as Float32);
+    let f64_v = (2.0 as Float64).midpoint(8.0 as Float64);
+    assert_eq(f, 5.0);
+    assert(f32_v.to_float() == 5.0);
+    assert((f64_v as Float) == 5.0);
+}
+
+@test
+fn test_lerp_consistency() {
+    // All types should agree on lerp(0, 10, 0.5)
+    let f: Float = 0.0.lerp(10.0, 0.5);
+    let f32_v = (0.0 as Float32).lerp(10.0 as Float32, 0.5 as Float32);
+    let f64_v = (0.0 as Float64).lerp(10.0 as Float64, 0.5 as Float64);
+    assert_eq(f, 5.0);
+    assert(f32_v.to_float() == 5.0);
+    assert((f64_v as Float) == 5.0);
+}
+
+// =============================================================================
+// Edge cases
+// =============================================================================
+
+@test
+fn test_float_lerp_with_zero_range() {
+    let v: Float = 42.0.lerp(42.0, 0.5);
+    assert_eq(v, 42.0);
+}
+
+@test
+fn test_float_midpoint_opposite_signs() {
+    let m: Float = (-100.0).midpoint(100.0);
+    assert_eq(m, 0.0);
+}
+
+@test
+fn test_float_midpoint_small_values() {
+    let m: Float = 0.1.midpoint(0.3);
+    // Should be 0.2 (approximately)
+    let diff: Float = m - 0.2;
+    let abs_diff: Float = if diff < 0.0 { 0.0 - diff } else { diff };
+    assert(abs_diff < 1.0e-15);
+}
+
+@test
+fn test_float_lerp_third() {
+    let v: Float = 0.0.lerp(9.0, 1.0 / 3.0);
+    // Should be approximately 3.0
+    let diff: Float = v - 3.0;
+    let abs_diff: Float = if diff < 0.0 { 0.0 - diff } else { diff };
+    assert(abs_diff < 1.0e-14);
+}

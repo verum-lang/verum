@@ -1,0 +1,54 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: nursery, structured-concurrency, runtime
+// @description: Test nursery structured concurrency - all tasks complete before scope exits
+
+fn compute(x: Int) -> Int {
+    x * x + 1
+}
+
+fn test_nursery_basic() -> Int {
+    let ch = Channel.new(10);
+
+    nursery {
+        spawn {
+            ch.send(compute(2));
+            0
+        };
+        spawn {
+            ch.send(compute(3));
+            0
+        };
+        spawn {
+            ch.send(compute(4));
+            0
+        };
+    }
+
+    // All three tasks should have completed
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 3 {
+        sum = sum + match ch.recv() { Some(v) => v, None => 0 };
+        i = i + 1;
+    }
+
+    // compute(2)=5, compute(3)=10, compute(4)=17 => 32
+    if sum != 32 {
+        print(f"FAIL: expected 32, got {sum}");
+        return 1;
+    }
+    print("  nursery_basic: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_nursery_basic();
+
+    if failures == 0 {
+        print("All nursery tests passed");
+    }
+    failures
+}

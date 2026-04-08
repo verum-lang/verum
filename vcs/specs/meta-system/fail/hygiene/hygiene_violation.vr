@@ -1,0 +1,21 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, violation, capture, error
+// @expected-error: M408
+// @description: Variable capture without explicit clause should fail with M408
+
+// This macro tries to use a variable from the caller's scope
+// without explicitly marking it for capture
+meta fn capture_caller_variable() -> TokenStream {
+    quote {
+        // ERROR: 'caller_x' is not in scope in this quote
+        // The macro is trying to accidentally capture from call site
+        let result = caller_x + 10;  // M402: HygieneViolation
+    }
+}
+
+fn main() {
+    let caller_x = 100;  // This exists at call site
+    @capture_caller_variable();  // Fails - accidental capture attempt
+}

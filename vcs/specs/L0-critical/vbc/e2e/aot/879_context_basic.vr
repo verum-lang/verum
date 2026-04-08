@@ -1,0 +1,40 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, context, provide, using
+// @expected-exit: 0
+
+// Test: basic context provide and retrieval via using clause.
+// Provides a Config context, calls a function that uses it.
+
+context Config {
+    fn get_value(&self) -> Int;
+}
+
+type SimpleConfig is {
+    val: Int,
+};
+
+implement Config for SimpleConfig {
+    fn get_value(&self) -> Int {
+        self.val
+    }
+}
+
+fn read_config() -> Int using [Config] {
+    Config.get_value()
+}
+
+fn main() -> Int {
+    let cfg = SimpleConfig { val: 42 };
+    provide Config = cfg;
+
+    let v = read_config();
+    if (v != 42) {
+        print(f"FAIL: config value={v}, expected=42");
+        return 1;
+    }
+
+    print("879_context_basic: PASS");
+    0
+}

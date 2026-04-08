@@ -1,0 +1,64 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: concurrency, spawn, multi_task
+// @expect: pass
+
+// Multiple concurrent spawn+await tasks with different computations.
+
+fn main() -> Int {
+    // Test 1: Three concurrent spawns
+    let t1 = spawn { 21 * 2 };
+    let t2 = spawn { 14 * 3 };
+    let t3 = spawn { 7 * 7 };
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+
+    if r1 != 42 {
+        print(f"FAIL: r1 = {r1}, expected 42");
+        return 1;
+    }
+    if r2 != 42 {
+        print(f"FAIL: r2 = {r2}, expected 42");
+        return 1;
+    }
+    if r3 != 49 {
+        print(f"FAIL: r3 = {r3}, expected 49");
+        return 1;
+    }
+
+    // Test 2: Spawn with computation
+    let t4 = spawn {
+        let mut sum = 0;
+        let mut i = 0;
+        while i < 100 {
+            sum = sum + i;
+            i = i + 1;
+        }
+        sum
+    };
+
+    let r4 = t4.await;
+    if r4 != 4950 {
+        print(f"FAIL: r4 = {r4}, expected 4950");
+        return 1;
+    }
+
+    // Test 3: Many concurrent spawns
+    let a = spawn { 1 + 1 };
+    let b = spawn { 2 + 2 };
+    let c = spawn { 3 + 3 };
+    let d = spawn { 4 + 4 };
+    let e = spawn { 5 + 5 };
+
+    let total = a.await + b.await + c.await + d.await + e.await;
+    if total != 30 {
+        print(f"FAIL: total = {total}, expected 30");
+        return 1;
+    }
+
+    print("PASS: all concurrent spawn tasks correct");
+    0
+}

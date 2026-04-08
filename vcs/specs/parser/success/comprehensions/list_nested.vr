@@ -1,0 +1,119 @@
+// @test: parse-pass
+// @tier: 0
+// @category: comprehensions
+// @description: Test nested list comprehensions with multiple generators
+
+fn test_nested_generators() {
+    // Two generators - cartesian product
+    let product = [(x, y) for x in xs for y in ys];
+
+    // Three generators
+    let triples = [(x, y, z) for x in xs for y in ys for z in zs];
+
+    // Dependent generators - inner depends on outer
+    let triangular = [(i, j) for i in 0..n for j in 0..i];
+
+    // Nested with method call
+    let pairs = [(x, y) for x in items for y in x.related()];
+
+    // Nested with field access
+    let flat = [item for group in groups for item in group.items];
+
+    // Deep nesting
+    let deep = [x for a in items for b in a.bs for c in b.cs for x in c.xs];
+
+    // Matrix operations
+    let flattened = [cell for row in matrix for cell in row];
+
+    // With range expressions
+    let grid = [(i, j) for i in 0..rows for j in 0..cols];
+
+    // Inclusive ranges nested
+    let inclusive_grid = [(i, j) for i in 1..=n for j in 1..=m];
+}
+
+fn test_nested_with_filters() {
+    // Filter on outer
+    let outer_filtered = [(x, y) for x in xs if x > 0 for y in ys];
+
+    // Filter on inner
+    let inner_filtered = [(x, y) for x in xs for y in ys if y > 0];
+
+    // Filter on both
+    let both_filtered = [(x, y) for x in xs if x > 0 for y in ys if y > 0];
+
+    // Cross-reference filter
+    let diagonal = [(i, j) for i in 0..n for j in 0..n if i != j];
+
+    // Complex cross filter
+    let related = [(x, y) for x in items for y in items if x.id < y.id && x.related_to(y)];
+
+    // Filter using outer variable
+    let dependent_filter = [(x, y) for x in xs for y in ys if y > x];
+
+    // Multiple filters interleaved
+    let complex = [(x, y) for x in xs if x > 0 for y in ys if y < x if y > 0];
+}
+
+fn test_nested_with_let_bindings() {
+    // Let in outer
+    let outer_let = [(y, z) for x in items let y = transform(x) for z in other];
+
+    // Let in inner using outer
+    let inner_let = [(x, z) for x in xs for y in ys let z = x + y];
+
+    // Let in both
+    let both_let = [(a, b) for x in xs let a = f(x) for y in ys let b = g(y)];
+
+    // Let using both variables
+    let combined = [sum for x in xs for y in ys let sum = x + y];
+
+    // Complex with let, filter, nested
+    let complex = [result for x in xs
+                   let doubled = x * 2
+                   if doubled > 0
+                   for y in ys
+                   let combined = doubled + y
+                   if combined < 100
+                   let result = combined.sqrt()];
+}
+
+fn test_nested_comprehensions() {
+    // Comprehension inside comprehension (produces nested lists)
+    let matrix = [[j for j in 0..cols] for i in 0..rows];
+
+    // Nested with different expressions
+    let transformed = [[cell * 2 for cell in row] for row in matrix];
+
+    // Triple nesting
+    let cube = [[[k for k in 0..d] for j in 0..h] for i in 0..w];
+
+    // Mixed nesting and flattening
+    let mixed = [inner_item for row in [[1, 2], [3, 4]] for inner_item in row];
+
+    // Nested with filters at different levels
+    let filtered_matrix = [[x for x in row if x > 0] for row in data if row.len() > 0];
+}
+
+fn test_practical_nested_examples() {
+    // Find all pairs from two lists
+    let all_pairs = [(a, b) for a in list_a for b in list_b];
+
+    // Flatten nested structure
+    let all_orders = [order for customer in customers for order in customer.orders];
+
+    // Matrix transposition helper
+    let transposed_indices = [(j, i) for i in 0..rows for j in 0..cols];
+
+    // All unique pairs (i < j)
+    let unique_pairs = [(i, j) for i in 0..n for j in (i + 1)..n];
+
+    // Cross join with condition
+    let matches = [(user, role) for user in users for role in roles if user.can_have(role)];
+
+    // Nested data extraction
+    let all_items = [item for dept in company.departments
+                     for team in dept.teams
+                     for employee in team.members
+                     for item in employee.inventory];
+}

@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, forall, quantifier, unclosed, error
+// @description: Test unclosed forall quantifier expression
+// @expected-error: E018
+
+fn test() {
+    let valid = forall x:
+}

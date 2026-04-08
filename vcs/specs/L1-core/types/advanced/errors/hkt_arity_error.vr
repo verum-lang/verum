@@ -1,0 +1,12 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: error, hkt, arity, advanced-type-syntax
+// @expect: error(ArityMismatch)
+// @description: Error test for HKT arity mismatch
+// @spec: 03-type-system.md Section 13. 3.1
+
+// F<_> expects 1 type argument
+fn test_arity_mismatch<F<_>>(x: F<Int, Text>) {
+    // ERROR: F expects 1 type argument, got 2
+}

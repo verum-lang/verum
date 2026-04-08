@@ -1,0 +1,183 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, linked-list, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for linked list simulation using pool allocation
+
+// Pool of 8 nodes, each with value and next index (-1 = null)
+type Pool8 is {
+    v0: Int, n0: Int,
+    v1: Int, n1: Int,
+    v2: Int, n2: Int,
+    v3: Int, n3: Int,
+    v4: Int, n4: Int,
+    v5: Int, n5: Int,
+    v6: Int, n6: Int,
+    v7: Int, n7: Int,
+    next_free: Int
+};
+
+fn pool_new() -> Pool8 {
+    Pool8 {
+        v0: 0, n0: -1, v1: 0, n1: -1,
+        v2: 0, n2: -1, v3: 0, n3: -1,
+        v4: 0, n4: -1, v5: 0, n5: -1,
+        v6: 0, n6: -1, v7: 0, n7: -1,
+        next_free: 0
+    }
+}
+
+fn pool_get_val(p: Pool8, i: Int) -> Int {
+    if i == 0 { p.v0 } else if i == 1 { p.v1 }
+    else if i == 2 { p.v2 } else if i == 3 { p.v3 }
+    else if i == 4 { p.v4 } else if i == 5 { p.v5 }
+    else if i == 6 { p.v6 } else { p.v7 }
+}
+
+fn pool_get_next(p: Pool8, i: Int) -> Int {
+    if i == 0 { p.n0 } else if i == 1 { p.n1 }
+    else if i == 2 { p.n2 } else if i == 3 { p.n3 }
+    else if i == 4 { p.n4 } else if i == 5 { p.n5 }
+    else if i == 6 { p.n6 } else { p.n7 }
+}
+
+fn pool_set_val(p: Pool8, i: Int, v: Int) -> Pool8 {
+    Pool8 {
+        v0: if i == 0 { v } else { p.v0 }, n0: p.n0,
+        v1: if i == 1 { v } else { p.v1 }, n1: p.n1,
+        v2: if i == 2 { v } else { p.v2 }, n2: p.n2,
+        v3: if i == 3 { v } else { p.v3 }, n3: p.n3,
+        v4: if i == 4 { v } else { p.v4 }, n4: p.n4,
+        v5: if i == 5 { v } else { p.v5 }, n5: p.n5,
+        v6: if i == 6 { v } else { p.v6 }, n6: p.n6,
+        v7: if i == 7 { v } else { p.v7 }, n7: p.n7,
+        next_free: p.next_free
+    }
+}
+
+fn pool_set_next(p: Pool8, i: Int, n: Int) -> Pool8 {
+    Pool8 {
+        v0: p.v0, n0: if i == 0 { n } else { p.n0 },
+        v1: p.v1, n1: if i == 1 { n } else { p.n1 },
+        v2: p.v2, n2: if i == 2 { n } else { p.n2 },
+        v3: p.v3, n3: if i == 3 { n } else { p.n3 },
+        v4: p.v4, n4: if i == 4 { n } else { p.n4 },
+        v5: p.v5, n5: if i == 5 { n } else { p.n5 },
+        v6: p.v6, n6: if i == 6 { n } else { p.n6 },
+        v7: p.v7, n7: if i == 7 { n } else { p.n7 },
+        next_free: p.next_free
+    }
+}
+
+// Push value at front of list, return (pool, new_head)
+type PushResult is { pool: Pool8, head: Int };
+
+fn list_push(p: Pool8, head: Int, val: Int) -> PushResult {
+    let idx = p.next_free;
+    let mut pool = pool_set_val(p, idx, val);
+    pool = pool_set_next(pool, idx, head);
+    pool = Pool8 {
+        v0: pool.v0, n0: pool.n0, v1: pool.v1, n1: pool.n1,
+        v2: pool.v2, n2: pool.n2, v3: pool.v3, n3: pool.n3,
+        v4: pool.v4, n4: pool.n4, v5: pool.v5, n5: pool.n5,
+        v6: pool.v6, n6: pool.n6, v7: pool.v7, n7: pool.n7,
+        next_free: idx + 1
+    };
+    PushResult { pool: pool, head: idx }
+}
+
+fn list_length(p: Pool8, head: Int) -> Int {
+    let mut count = 0;
+    let mut cur = head;
+    while cur != -1 {
+        count = count + 1;
+        cur = pool_get_next(p, cur);
+    }
+    count
+}
+
+fn list_sum(p: Pool8, head: Int) -> Int {
+    let mut sum = 0;
+    let mut cur = head;
+    while cur != -1 {
+        sum = sum + pool_get_val(p, cur);
+        cur = pool_get_next(p, cur);
+    }
+    sum
+}
+
+fn list_contains(p: Pool8, head: Int, val: Int) -> Bool {
+    let mut cur = head;
+    while cur != -1 {
+        if pool_get_val(p, cur) == val { return true; }
+        cur = pool_get_next(p, cur);
+    }
+    false
+}
+
+fn list_nth(p: Pool8, head: Int, n: Int) -> Int {
+    let mut cur = head;
+    let mut i = 0;
+    while i < n {
+        cur = pool_get_next(p, cur);
+        i = i + 1;
+    }
+    pool_get_val(p, cur)
+}
+
+fn test_push_and_traverse() {
+    let mut pool = pool_new();
+    let mut head = -1;
+
+    // Push 10, 20, 30 (list will be 30->20->10)
+    let r1 = list_push(pool, head, 10);
+    pool = r1.pool; head = r1.head;
+
+    let r2 = list_push(pool, head, 20);
+    pool = r2.pool; head = r2.head;
+
+    let r3 = list_push(pool, head, 30);
+    pool = r3.pool; head = r3.head;
+
+    assert_eq(list_length(pool, head), 3);
+    assert_eq(list_sum(pool, head), 60);
+    assert_eq(list_nth(pool, head, 0), 30);
+    assert_eq(list_nth(pool, head, 1), 20);
+    assert_eq(list_nth(pool, head, 2), 10);
+}
+
+fn test_contains() {
+    let mut pool = pool_new();
+    let mut head = -1;
+
+    let r1 = list_push(pool, head, 5);
+    pool = r1.pool; head = r1.head;
+    let r2 = list_push(pool, head, 15);
+    pool = r2.pool; head = r2.head;
+    let r3 = list_push(pool, head, 25);
+    pool = r3.pool; head = r3.head;
+
+    assert_eq(list_contains(pool, head, 5), true);
+    assert_eq(list_contains(pool, head, 15), true);
+    assert_eq(list_contains(pool, head, 25), true);
+    assert_eq(list_contains(pool, head, 10), false);
+    assert_eq(list_contains(pool, head, 0), false);
+}
+
+fn test_empty_list() {
+    let pool = pool_new();
+    assert_eq(list_length(pool, -1), 0);
+    assert_eq(list_sum(pool, -1), 0);
+    assert_eq(list_contains(pool, -1, 42), false);
+}
+
+fn main() -> Int {
+    test_push_and_traverse();
+    test_contains();
+    test_empty_list();
+    print("[OK] 221_linked_list_aot");
+    0
+}

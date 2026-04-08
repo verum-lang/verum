@@ -1,0 +1,81 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Char methods
+
+fn main() {
+    let letter = 'A';
+    let digit = '5';
+    let space = ' ';
+    let emoji = '\u{1F600}';  // Grinning face
+
+    // Test is_ascii
+    assert(letter.is_ascii());
+    assert(digit.is_ascii());
+    assert(space.is_ascii());
+    assert(!emoji.is_ascii());
+
+    // Test is_alphabetic
+    assert(letter.is_alphabetic());
+    assert(!'5'.is_alphabetic());
+
+    // Test is_numeric
+    assert(digit.is_numeric());
+    assert(!letter.is_numeric());
+
+    // Test is_alphanumeric
+    assert(letter.is_alphanumeric());
+    assert(digit.is_alphanumeric());
+    assert(!space.is_alphanumeric());
+
+    // Test is_whitespace
+    assert(space.is_whitespace());
+    assert('\t'.is_whitespace());
+    assert('\n'.is_whitespace());
+    assert(!letter.is_whitespace());
+
+    // Test is_uppercase, is_lowercase
+    assert(letter.is_uppercase());
+    assert(!'a'.is_uppercase());
+    assert('a'.is_lowercase());
+    assert(!letter.is_lowercase());
+
+    // Test to_uppercase, to_lowercase
+    assert_eq('a'.to_uppercase(), 'A');
+    assert_eq('A'.to_lowercase(), 'a');
+
+    // Test to_digit
+    match '5'.to_digit(10) {
+        Some(d) => assert_eq(d, 5),
+        None => panic("Expected Some"),
+    }
+
+    match 'A'.to_digit(16) {
+        Some(d) => assert_eq(d, 10),  // A = 10 in hex
+        None => panic("Expected Some"),
+    }
+
+    match 'Z'.to_digit(10) {
+        Some(_) => panic("Expected None"),
+        None => (), // Expected - Z is not a decimal digit
+    }
+
+    // Test from_digit
+    match Char.from_digit(5, 10) {
+        Some(c) => assert_eq(c, '5'),
+        None => panic("Expected Some"),
+    }
+
+    match Char.from_digit(10, 16) {
+        Some(c) => assert_eq(c, 'A'),
+        None => panic("Expected Some"),
+    }
+
+    // Test len_utf8
+    assert_eq('A'.len_utf8(), 1);
+    assert_eq('\u{00E9}'.len_utf8(), 2);  // é = 2 bytes
+    assert_eq('\u{4E2D}'.len_utf8(), 3);  // 中 = 3 bytes
+    assert_eq(emoji.len_utf8(), 4);        // Emoji = 4 bytes
+}

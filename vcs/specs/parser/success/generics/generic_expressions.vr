@@ -1,0 +1,29 @@
+// @test: parse-pass
+// @tier: 0
+// @category: generics
+
+fn test_generic_expressions() {
+    // Explicit type arguments in function calls
+    let result = identity<Int>(42);
+
+    // Method with type arguments
+    let parsed = text.parse<Int>();
+
+    // Constructor with type arguments (uses . not .)
+    let list = List<Int>.new();
+
+    // Path with type arguments
+    let vec = Vec.with_capacity<Text>(10);
+
+    // Chained generic calls
+    let converted = value
+        .into<Text>()
+        .parse<Int>()
+        .unwrap_or<Int>(0);
+
+    // Generic in match
+    match container.downcast<MyType>() {
+        Some(value) => process(value),
+        None => default<MyType>()
+    };
+}

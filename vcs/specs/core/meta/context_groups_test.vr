@@ -1,0 +1,275 @@
+// =============================================================================
+// vcs/specs/stdlib/meta/context_groups_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L3
+// @tags: stdlib, meta, context_groups, metaprogramming, contexts
+// @note: Context groups — types resolve for typecheck
+// @description: Comprehensive tests for meta context groups which bundle common
+//               compile-time capabilities for different metaprogramming use cases.
+//
+// Context Groups:
+// - MetaCore: Essential meta capabilities (AstAccess, MacroState, Hygiene)
+// - MetaFull: All meta contexts for full compile-time access
+// - MetaNoIO: Meta contexts without I/O (pure computation)
+// - MetaDerive: Contexts for derive macros
+// - MetaAttr: Contexts for attribute macros
+// - MetaStaged: Contexts for multi-stage compilation
+//
+// Test Strategy:
+// - Verify each context group provides expected capabilities
+// - Test context group composition
+// - Verify Hygiene is included in all appropriate groups
+// - Verify ProjectInfo is included in appropriate groups
+// =============================================================================
+
+module test.stdlib.meta.context_groups_test;
+
+mount core.meta.contexts.{
+    MetaCore, MetaFull, MetaNoIO, MetaDerive, MetaAttr, MetaStaged,
+    AstAccess, MacroState, Hygiene, StageInfo, ProjectInfo, MetaRuntime,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// MetaCore Tests
+// =============================================================================
+
+/// MetaCore should provide essential meta capabilities
+@test
+fn test_meta_core() using [MetaCore] {
+    // MetaCore includes: AstAccess, MacroState, StageInfo, Hygiene
+
+    // Test AstAccess capability (via MetaCore)
+    let call_span = Hygiene.call_site();
+    assert(call_span.file().len() > 0);
+
+    // Test gensym (Hygiene capability)
+    let id1 = Hygiene.gensym("core_test");
+    let id2 = Hygiene.gensym("core_test");
+    assert(id1 != id2);
+
+    print("meta_core test passed");
+}
+
+// =============================================================================
+// MetaFull Tests
+// =============================================================================
+
+/// MetaFull should provide all meta contexts
+@test
+fn test_meta_full() using [MetaFull] {
+    // MetaFull includes everything: AstAccess, MacroState, StageInfo, Hygiene,
+    // MetaRuntime, ProjectInfo, CompilerAccess, etc.
+
+    // Test Hygiene
+    let gensym_id = Hygiene.gensym("full_test");
+    assert(gensym_id.to_text().len() > 0);
+
+    // Test ProjectInfo (build/target info)
+    let os = ProjectInfo.target_os();
+    assert(os.len() > 0);
+
+    let width = ProjectInfo.target_pointer_width();
+    assert(width == 32 || width == 64);
+
+    // Test MetaRuntime (compiler info)
+    let compiler_ver = MetaRuntime.compiler_version();
+    assert(compiler_ver.len() > 0);
+
+    print("meta_full test passed");
+}
+
+// =============================================================================
+// MetaNoIO Tests
+// =============================================================================
+
+/// MetaNoIO should provide meta contexts without I/O
+@test
+fn test_meta_no_io() using [MetaNoIO] {
+    // MetaNoIO includes: AstAccess, MacroState, StageInfo, Hygiene, ProjectInfo
+    // Does NOT include: FileSystem, Network, etc.
+
+    // Test Hygiene (available)
+    let id = Hygiene.gensym("no_io_test");
+    assert(id.to_text().len() > 0);
+
+    // Test ProjectInfo (available - compile-time info is not I/O)
+    let arch = ProjectInfo.target_arch();
+    assert(arch.len() > 0);
+
+    print("meta_no_io test passed");
+}
+
+// =============================================================================
+// MetaDerive Tests
+// =============================================================================
+
+/// MetaDerive should provide contexts for derive macros
+@test
+fn test_meta_derive() using [MetaDerive] {
+    // MetaDerive includes contexts needed for @derive macros:
+    // AstAccess, MacroState, Hygiene, TypeInfo
+
+    // Test Hygiene (essential for derive macros to generate unique names)
+    let impl_id = Hygiene.gensym("impl");
+    assert(impl_id.to_text().len() > 0);
+
+    // Test gensym uniqueness (important for trait impl generation)
+    let field_id1 = Hygiene.gensym("field");
+    let field_id2 = Hygiene.gensym("field");
+    assert(field_id1 != field_id2);
+
+    print("meta_derive test passed");
+}
+
+// =============================================================================
+// MetaAttr Tests
+// =============================================================================
+
+/// MetaAttr should provide contexts for attribute macros
+@test
+fn test_meta_attr() using [MetaAttr] {
+    // MetaAttr includes contexts needed for attribute macros:
+    // AstAccess, MacroState, Hygiene, CompilerAccess
+
+    // Test Hygiene (essential for attribute macros)
+    let attr_id = Hygiene.gensym("attr_generated");
+    assert(attr_id.to_text().len() > 0);
+
+    // Test span access (for error reporting)
+    let span = Hygiene.call_site();
+    assert(span.file().len() > 0);
+
+    print("meta_attr test passed");
+}
+
+// =============================================================================
+// MetaStaged Tests
+// =============================================================================
+
+/// MetaStaged should provide contexts for multi-stage compilation
+@test
+fn test_meta_staged() using [MetaStaged] {
+    // MetaStaged includes: AstAccess, MacroState, StageInfo, Hygiene, TokenAccess
+
+    // Test Hygiene (stage_unique_ident is especially important)
+    let stage_id = Hygiene.stage_unique_ident("staged_var");
+    assert(stage_id.to_text().len() > 0);
+
+    // Multiple stage-unique idents should be unique
+    let id1 = Hygiene.stage_unique_ident("x");
+    let id2 = Hygiene.stage_unique_ident("x");
+    assert(id1 != id2);
+
+    // Test invocation_id
+    let invoc = Hygiene.invocation_id();
+    assert(invoc.to_text().len() > 0);
+
+    print("meta_staged test passed");
+}
+
+// =============================================================================
+// Hygiene Availability Tests
+// =============================================================================
+
+/// Verify Hygiene is available in all meta context groups
+@test
+fn test_hygiene_in_all_groups() {
+    // Test that Hygiene.gensym works in each context group
+
+    fn test_in_core() using [MetaCore] {
+        let _ = Hygiene.gensym("in_core");
+    }
+
+    fn test_in_full() using [MetaFull] {
+        let _ = Hygiene.gensym("in_full");
+    }
+
+    fn test_in_no_io() using [MetaNoIO] {
+        let _ = Hygiene.gensym("in_no_io");
+    }
+
+    fn test_in_derive() using [MetaDerive] {
+        let _ = Hygiene.gensym("in_derive");
+    }
+
+    fn test_in_attr() using [MetaAttr] {
+        let _ = Hygiene.gensym("in_attr");
+    }
+
+    fn test_in_staged() using [MetaStaged] {
+        let _ = Hygiene.gensym("in_staged");
+    }
+
+    // Run all tests
+    test_in_core();
+    test_in_full();
+    test_in_no_io();
+    test_in_derive();
+    test_in_attr();
+    test_in_staged();
+
+    print("hygiene_in_all_groups test passed");
+}
+
+// =============================================================================
+// Integration: Using Context Groups in Meta Functions
+// =============================================================================
+
+/// Example derive macro using MetaDerive
+@derive_macro
+meta fn my_debug_derive(input: Ast) -> Ast using [MetaDerive] {
+    let struct_name = input.name();
+    let impl_name = Hygiene.gensym("debug_impl");
+
+    quote {
+        implement Debug for lift(struct_name) {
+            fn debug(&self) -> Text {
+                stringify!(lift(struct_name))
+            }
+        }
+    }
+}
+
+/// Example attribute macro using MetaAttr
+@attribute_macro
+meta fn trace_calls(input: Ast) -> Ast using [MetaAttr] {
+    let fn_name = input.name();
+    let trace_id = Hygiene.gensym("trace");
+
+    quote {
+        fn lift(fn_name)() {
+            print(f"Entering {stringify!(lift(fn_name))}");
+            // Original function body would be inserted here
+            print(f"Exiting {stringify!(lift(fn_name))}");
+        }
+    }
+}
+
+/// Example staged meta function using MetaStaged
+meta(2) fn staged_example() -> Ast using [MetaStaged] {
+    let stage1_var = Hygiene.stage_unique_ident("s1_temp");
+
+    quote(1) {
+        let lift(stage1_var) = 42;
+        quote {
+            lift(stage1_var) * 2
+        }
+    }
+}
+
+@test
+fn test_macro_examples() {
+    // These are compile-time tests - they verify the macros can be defined
+    // Actual macro expansion would happen at compile time
+    print("macro_examples test passed");
+}

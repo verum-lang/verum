@@ -1,0 +1,75 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, modules, mount
+// @description: Test module and mount statement parsing
+
+// Basic mount
+mount core.collections;
+
+// Mount with alias
+mount core.io as io;
+
+// Multiple items
+mount core.collections.{List, Map, Set};
+
+// Nested imports
+mount core.{
+    io.{read, write},
+    collections.{List, Map}
+};
+
+// Glob import
+mount core.prelude.*;
+
+// Self and super
+mount self.submodule;
+mount super.sibling;
+mount crate.root_module;
+
+// Module definition
+module utils {
+    fn helper() -> Int {
+        42
+    }
+
+    type Helper is {
+        value: Int
+    };
+}
+
+// Public module
+pub module api {
+    pub fn endpoint() -> Response {
+        Response.ok()
+    }
+}
+
+// Nested modules
+module outer {
+    module inner {
+        fn nested_fn() {}
+    }
+}
+
+// Module declaration (forward)
+module future_module;
+
+// Module with visibility
+internal module internal_utils {
+    fn internal_helper() {}
+}
+
+// Complex module
+pub module services {
+    mount super.models.{User, Post};
+    mount self.database;
+
+    context ServiceContext {
+        fn get_db(&self) -> &Database;
+    }
+
+    pub fn create_user(name: Text) -> User using [ServiceContext] {
+        let db = ServiceContext.get_db();
+        db.insert(User { name })
+    }
+}

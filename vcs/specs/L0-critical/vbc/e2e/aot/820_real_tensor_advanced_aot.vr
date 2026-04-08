@@ -1,0 +1,87 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, advanced
+// @expected-exit: 0
+
+// Tests advanced tensor operations through AOT pipeline.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_binop(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_BINOP", a, b, op) }
+fn tensor_unop(t: Int, op: Int) -> Int { @intrinsic("TENSOR_UNOP", t, op) }
+fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_REDUCE", t, op, axis) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    if a != b { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Power iteration: x = 2^3 * ones = 8 * ones
+    let x = tensor_fill(4, 1, 1);
+    let scale = tensor_fill(4, 2, 1);
+    let x = tensor_binop(x, scale, 2);
+    let x = tensor_binop(x, scale, 2);
+    let x = tensor_binop(x, scale, 2);
+    errors = errors + check_val(x, 0, 8);
+
+    // Polynomial: p(x) = 2x^2 + 3x + 5 at x=[0,1,2,3]
+    let xs = tensor_new(4, 1);
+    let xs = tensor_set_scalar(xs, 0, 0);
+    let xs = tensor_set_scalar(xs, 1, 1);
+    let xs = tensor_set_scalar(xs, 2, 2);
+    let xs = tensor_set_scalar(xs, 3, 3);
+
+    let x2 = tensor_binop(xs, xs, 2);
+    let two = tensor_fill(4, 2, 1);
+    let three = tensor_fill(4, 3, 1);
+    let five = tensor_fill(4, 5, 1);
+
+    let term1 = tensor_binop(x2, two, 2);
+    let term2 = tensor_binop(xs, three, 2);
+    let poly = tensor_binop(term1, term2, 0);
+    let poly = tensor_binop(poly, five, 0);
+
+    errors = errors + check_val(poly, 0, 5);
+    errors = errors + check_val(poly, 1, 10);
+    errors = errors + check_val(poly, 2, 19);
+    errors = errors + check_val(poly, 3, 32);
+
+    // Distance: ||a-b||^2 for a=[1,2,3] b=[4,5,6]
+    let a = tensor_new(3, 1);
+    let a = tensor_set_scalar(a, 0, 1);
+    let a = tensor_set_scalar(a, 1, 2);
+    let a = tensor_set_scalar(a, 2, 3);
+    let b = tensor_new(3, 1);
+    let b = tensor_set_scalar(b, 0, 4);
+    let b = tensor_set_scalar(b, 1, 5);
+    let b = tensor_set_scalar(b, 2, 6);
+    let d = tensor_binop(a, b, 1);
+    let d2 = tensor_binop(d, d, 2);
+    let dist_sq = tensor_reduce(d2, 0, 0);
+    errors = errors + check_val(dist_sq, 0, 27);
+
+    // 10-fold accumulation
+    let base = tensor_fill(3, 1, 1);
+    let acc = base;
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    let acc = tensor_binop(acc, base, 0);
+    errors = errors + check_val(acc, 0, 10);
+
+    errors
+}

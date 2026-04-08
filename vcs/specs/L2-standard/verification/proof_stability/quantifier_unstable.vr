@@ -1,0 +1,97 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: proof-stability, quantifier, potentially-unstable
+// @timeout: 60000
+// @solver: z3
+// @solver-version: >= 4.12
+
+/// Quantifier proofs - potentially unstable due to E-matching and trigger sensitivity.
+/// These proofs may produce different results with different random seeds.
+
+/// Type alias for demonstration
+type Element is Int;
+
+/// Predicate: element exists in range
+predicate in_range(x: Element, lo: Element, hi: Element) -> Bool {
+    lo <= x && x <= hi
+}
+
+/// Test: Universal quantifier over bounded range
+/// May be unstable due to quantifier instantiation heuristics
+fn test_forall_bounded(arr: List<Element>, n: Int where n > 0) -> Bool
+    requires len(arr) == n
+    requires forall i in 0..n => in_range(arr[i], 0, 100)
+    ensures result == (forall i in 0..n => arr[i] >= 0)
+{
+    forall i in 0..n => arr[i] >= 0
+}
+
+/// Test: Existential quantifier
+/// E-matching can be unpredictable
+fn test_exists_in_list(arr: List<Element>, target: Element) -> Bool
+    requires len(arr) > 0
+    requires exists i in 0..len(arr) => arr[i] == target
+    ensures result == true
+{
+    exists i in 0..len(arr) => arr[i] == target
+}
+
+/// Test: Nested quantifiers
+/// Complex instantiation patterns
+fn test_nested_quantifiers(matrix: List<List<Element>>, rows: Int, cols: Int) -> Bool
+    requires rows > 0 && cols > 0
+    requires len(matrix) == rows
+    requires forall i in 0..rows => len(matrix[i]) == cols
+    ensures result == (forall i in 0..rows => forall j in 0..cols => matrix[i][j] >= 0)
+                      || (exists i in 0..rows => exists j in 0..cols => matrix[i][j] < 0)
+{
+    // Either all non-negative or at least one negative
+    let all_positive = forall i in 0..rows => forall j in 0..cols => matrix[i][j] >= 0;
+    let some_negative = exists i in 0..rows => exists j in 0..cols => matrix[i][j] < 0;
+    all_positive || some_negative
+}
+
+/// Test: Quantifier alternation (forall-exists)
+/// Often causes solver instability
+fn test_alternation(f: fn(Int) -> Int) -> Bool
+    requires forall x: Int => exists y: Int => f(x) == y
+    ensures result == true
+{
+    // Every input has some output
+    true
+}
+
+/// Test: Trigger-sensitive proof
+/// Different triggers can lead to different solving paths
+fn test_trigger_sensitive<T>(
+    arr: List<T>,
+    pred: fn(T) -> Bool
+) -> Bool
+    requires len(arr) > 0
+    requires forall i in 0..len(arr) => pred(arr[i])
+    ensures result == pred(arr[0])
+{
+    // Should follow from universal instantiation
+    pred(arr[0])
+}
+
+/// Test: Quantifier with complex body
+fn test_complex_quantifier(
+    arr: List<Int>,
+    n: Int where n == len(arr)
+) -> Bool
+    requires n > 0
+    requires forall i in 0..n =>
+        forall j in 0..n =>
+            i < j implies arr[i] <= arr[j]  // sorted
+    ensures result == (arr[0] <= arr[n-1])
+{
+    arr[0] <= arr[n-1]
+}
+
+fn main() {
+    let arr: List<Element> = [10, 20, 30, 40, 50];
+    assert(test_forall_bounded(arr, 5));
+    assert(test_exists_in_list(arr, 30));
+}

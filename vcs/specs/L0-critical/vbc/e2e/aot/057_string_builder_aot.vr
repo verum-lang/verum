@@ -1,0 +1,130 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, integer-encoding, simulation
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT integer encoding and decoding operations
+
+// Encode/decode multiple small values into a single Int
+// Pack 4 x 8-bit values into a 32-bit int
+
+fn pack4(a: Int, b: Int, c: Int, d: Int) -> Int {
+    (a & 0xFF) | ((b & 0xFF) << 8) | ((c & 0xFF) << 16) | ((d & 0xFF) << 24)
+}
+
+fn unpack_0(packed: Int) -> Int { packed & 0xFF }
+fn unpack_1(packed: Int) -> Int { (packed >> 8) & 0xFF }
+fn unpack_2(packed: Int) -> Int { (packed >> 16) & 0xFF }
+fn unpack_3(packed: Int) -> Int { (packed >> 24) & 0xFF }
+
+// Encode a date as YYYYMMDD integer
+fn encode_date(year: Int, month: Int, day: Int) -> Int {
+    year * 10000 + month * 100 + day
+}
+
+fn decode_year(date: Int) -> Int { date / 10000 }
+fn decode_month(date: Int) -> Int { (date / 100) % 100 }
+fn decode_day(date: Int) -> Int { date % 100 }
+
+fn is_leap_year(y: Int) -> Bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn days_in_month(month: Int, year: Int) -> Int {
+    if month == 2 {
+        if is_leap_year(year) { 29 } else { 28 }
+    } else if month == 4 || month == 6 || month == 9 || month == 11 {
+        30
+    } else {
+        31
+    }
+}
+
+fn is_valid_date(date: Int) -> Bool {
+    let y = decode_year(date);
+    let m = decode_month(date);
+    let d = decode_day(date);
+    y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= days_in_month(m, y)
+}
+
+// Run-length encoding: encode value + count as single int
+fn rle_encode(value: Int, count: Int) -> Int {
+    value * 1000 + count
+}
+
+fn rle_value(encoded: Int) -> Int { encoded / 1000 }
+fn rle_count(encoded: Int) -> Int { encoded % 1000 }
+
+// Simple hash function
+fn simple_hash(x: Int) -> Int {
+    let mut h = x;
+    h = ((h >> 16) ^ h) * 0x45d9f3b;
+    h = ((h >> 16) ^ h) * 0x45d9f3b;
+    h = (h >> 16) ^ h;
+    if h < 0 { 0 - h } else { h }
+}
+
+fn main() -> Int {
+    // Pack/unpack 4 bytes
+    let packed = pack4(10, 20, 30, 40);
+    assert_eq(unpack_0(packed), 10);
+    assert_eq(unpack_1(packed), 20);
+    assert_eq(unpack_2(packed), 30);
+    assert_eq(unpack_3(packed), 40);
+
+    // Edge cases
+    let packed2 = pack4(0, 255, 0, 255);
+    assert_eq(unpack_0(packed2), 0);
+    assert_eq(unpack_1(packed2), 255);
+    assert_eq(unpack_2(packed2), 0);
+    assert_eq(unpack_3(packed2), 255);
+
+    // Date encoding
+    let d1 = encode_date(2024, 3, 15);
+    assert_eq(d1, 20240315);
+    assert_eq(decode_year(d1), 2024);
+    assert_eq(decode_month(d1), 3);
+    assert_eq(decode_day(d1), 15);
+
+    assert(is_valid_date(20240315));
+    assert(is_valid_date(20240229));  // 2024 is leap year
+    assert(!is_valid_date(20230229)); // 2023 is not
+    assert(!is_valid_date(20240132)); // No Jan 32
+    assert(!is_valid_date(20241301)); // No month 13
+
+    // Leap year
+    assert(is_leap_year(2000));
+    assert(is_leap_year(2024));
+    assert(!is_leap_year(1900));
+    assert(!is_leap_year(2023));
+
+    // Days in month
+    assert_eq(days_in_month(1, 2024), 31);
+    assert_eq(days_in_month(2, 2024), 29);
+    assert_eq(days_in_month(2, 2023), 28);
+    assert_eq(days_in_month(4, 2024), 30);
+
+    // RLE encoding
+    let r1 = rle_encode(5, 3);
+    assert_eq(rle_value(r1), 5);
+    assert_eq(rle_count(r1), 3);
+
+    let r2 = rle_encode(42, 100);
+    assert_eq(rle_value(r2), 42);
+    assert_eq(rle_count(r2), 100);
+
+    // Hash: different inputs give different outputs
+    let h1 = simple_hash(1);
+    let h2 = simple_hash(2);
+    let h3 = simple_hash(3);
+    assert(h1 != h2);
+    assert(h2 != h3);
+    assert(h1 != h3);
+
+    // Hash: same input gives same output (deterministic)
+    assert_eq(simple_hash(42), simple_hash(42));
+    assert_eq(simple_hash(0), simple_hash(0));
+
+    0
+}

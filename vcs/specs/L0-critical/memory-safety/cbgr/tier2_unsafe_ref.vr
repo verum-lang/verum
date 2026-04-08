@@ -1,0 +1,48 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, tier2, unsafe
+// @description: Tests Tier 2 unsafe references (&unsafe T) with manual safety proof
+
+// SAFETY: Caller must ensure ptr points to valid memory for lifetime of return value
+fn unsafe_cast<T>(ptr: *const T) -> &unsafe T {
+    unsafe {
+        // Tier 2: &unsafe T - no runtime checks (0ns overhead)
+        // Programmer must prove safety
+        &unsafe *ptr
+    }
+}
+
+fn main() {
+    let value = 42;
+    let ptr: *const Int = &value as *const Int;
+
+    // SAFETY: ptr points to stack-allocated value with valid lifetime
+    let unsafe_ref = unsafe {
+        unsafe_cast(ptr)
+    };
+
+    // Access is unchecked - programmer guarantees safety
+    assert(*unsafe_ref == 42);
+
+    // Example: FFI interop where we trust external pointer
+    unsafe {
+        let external_data = ffi_get_data();
+        // SAFETY: ffi_get_data returns valid pointer per FFI contract
+        let ffi_ref: &unsafe Int = &unsafe *external_data;
+        process_ffi_data(ffi_ref);
+    }
+
+    print("Tier 2 unsafe reference test passed");
+}
+
+// Simulated FFI function
+fn ffi_get_data() -> &unsafe Int {
+    // In real FFI, this would come from external code
+    let data = Heap.new(100);
+    unsafe { &unsafe *data }
+}
+
+fn process_ffi_data(data: &unsafe Int) {
+    unsafe { print(f"FFI data: {*data}"); }
+}

@@ -1,0 +1,215 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, combined, comprehensive
+// @description: Test combined and complex pattern matching scenarios in meta functions
+
+// =============================================================================
+// COMPLEX MATCHING WITH MULTIPLE FEATURES
+// =============================================================================
+
+meta fn classify_value(x: Int) -> Text {
+    match x {
+        n if n > 100 => "large",
+        n if n > 0 => "positive",
+        0 => "zero",
+        n if n > -100 => "negative",
+        _ => "very negative",
+    }
+}
+
+meta fn categorize_tuple(t: (Int, Int)) -> Text {
+    match t {
+        (0, 0) => "origin",
+        (x, 0) if x > 0 => "positive x-axis",
+        (x, 0) if x < 0 => "negative x-axis",
+        (0, y) if y > 0 => "positive y-axis",
+        (0, y) if y < 0 => "negative y-axis",
+        (x, y) if x > 0 && y > 0 => "Q1",
+        (x, y) if x < 0 && y > 0 => "Q2",
+        (x, y) if x < 0 && y < 0 => "Q3",
+        (x, y) if x > 0 && y < 0 => "Q4",
+        _ => "impossible",
+    }
+}
+
+// =============================================================================
+// NESTED TAGGED PATTERNS (simulating Maybe/Result)
+// =============================================================================
+
+// Nested: (outer_tag, (inner_tag, value))
+// Tags: 0=None, 1=Some; 0=Ok, 1=Err
+meta fn unwrap_nested(x: (Int, (Int, (Int, Int)))) -> Int {
+    match x {
+        (1, (0, (1, n))) => n,     // Some(Ok(Some(n)))
+        (1, (0, (0, _))) => -1,    // Some(Ok(None))
+        (1, (1, _)) => -2,         // Some(Err(_))
+        (0, _) => -3,              // None
+        _ => -4,
+    }
+}
+
+meta fn flatten_tagged(x: (Int, (Int, Int))) -> Int {
+    match x {
+        (0, _) => -1,              // None
+        (1, (0, v)) => v,          // Some(Ok(v))
+        (1, (1, _)) => -2,         // Some(Err(_))
+        _ => -3,
+    }
+}
+
+// =============================================================================
+// PATTERN MATCHING WITH COMPLEX GUARDS
+// =============================================================================
+
+meta fn classify_triple(a: Int, b: Int, c: Int) -> Text {
+    match (a, b, c) {
+        (x, y, z) if x == y && y == z => "all equal",
+        (x, y, _) if x == y => "first two equal",
+        (x, _, z) if x == z => "first and third equal",
+        (_, y, z) if y == z => "last two equal",
+        (x, y, z) if x + y == z => "sum property",
+        _ => "other",
+    }
+}
+
+meta fn check_bounds(x: Int, min: Int, max: Int) -> Text {
+    match x {
+        n if n < min => "below",
+        n if n > max => "above",
+        n if n == min => "at minimum",
+        n if n == max => "at maximum",
+        _ => "within bounds",
+    }
+}
+
+// =============================================================================
+// COMBINED OR-PATTERNS AND GUARDS
+// =============================================================================
+
+meta fn categorize_input(x: Int) -> Text {
+    match x {
+        0 | 1 => "binary",
+        2 | 3 | 5 | 7 => "small prime",
+        n if n < 0 => "negative",
+        n if n % 2 == 0 => "even",
+        _ => "odd",
+    }
+}
+
+// Pair of tagged values (tag, value)
+meta fn process_tagged_pair(p: ((Int, Int), (Int, Int))) -> Int {
+    match p {
+        ((1, a), (1, b)) if a > b => a - b,  // (Some(a), Some(b)) where a > b
+        ((1, a), (1, b)) if a < b => b - a,  // (Some(a), Some(b)) where a < b
+        ((1, a), (1, b)) => 0,               // (Some(a), Some(b)) where a == b
+        ((1, a), (0, _)) => a,               // (Some(a), None)
+        ((0, _), (1, b)) => b,               // (None, Some(b))
+        ((0, _), (0, _)) => -1,              // (None, None)
+        _ => -2,
+    }
+}
+
+// =============================================================================
+// TUPLE WITH MULTIPLE LEVELS
+// =============================================================================
+
+meta fn process_deep_tuple(t: ((Int, Int), (Int, Int))) -> Int {
+    match t {
+        ((a, b), (c, d)) if a + d == b + c => a + b + c + d,
+        ((a, _), (_, d)) if a == d => a * 2,
+        ((a, b), (c, d)) => (a + b) * (c + d),
+    }
+}
+
+meta fn extract_from_nested(m: (Int, (Int, (Int, Int)))) -> Int {
+    match m {
+        (1, (1, (a, b))) => a + b,   // Some(Some((a, b)))
+        (1, (0, _)) => -1,           // Some(None)
+        (0, _) => -2,                // None
+        _ => -3,
+    }
+}
+
+// =============================================================================
+// ARRAY PATTERNS IN COMBINATIONS
+// =============================================================================
+
+meta fn process_array_triple(arr: [Int; 3]) -> Text {
+    match arr {
+        [0, 0, 0] => "all zeros",
+        [a, b, c] if a == b && b == c => "all same",
+        [a, b, c] if a < b && b < c => "ascending",
+        [a, b, c] if a > b && b > c => "descending",
+        _ => "mixed",
+    }
+}
+
+meta fn sum_first_two(arr: [Int; 3]) -> Int {
+    match arr {
+        [a, b, _] => a + b,
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Value classification
+    @const assert_eq(classify_value(150), "large");
+    @const assert_eq(classify_value(50), "positive");
+    @const assert_eq(classify_value(0), "zero");
+    @const assert_eq(classify_value(-50), "negative");
+    @const assert_eq(classify_value(-150), "very negative");
+
+    // Tuple categorization
+    @const assert_eq(categorize_tuple((0, 0)), "origin");
+    @const assert_eq(categorize_tuple((5, 5)), "Q1");
+    @const assert_eq(categorize_tuple((-3, 4)), "Q2");
+    @const assert_eq(categorize_tuple((-1, -1)), "Q3");
+    @const assert_eq(categorize_tuple((10, -5)), "Q4");
+
+    // Nested tagged patterns
+    @const assert_eq(unwrap_nested((1, (0, (1, 42)))), 42);
+    @const assert_eq(unwrap_nested((1, (0, (0, 0)))), -1);
+    @const assert_eq(unwrap_nested((1, (1, (0, 0)))), -2);
+    @const assert_eq(unwrap_nested((0, (0, (0, 0)))), -3);
+
+    @const assert_eq(flatten_tagged((1, (0, 100))), 100);
+    @const assert_eq(flatten_tagged((1, (1, 0))), -2);
+    @const assert_eq(flatten_tagged((0, (0, 0))), -1);
+
+    // Triple classification
+    @const assert_eq(classify_triple(5, 5, 5), "all equal");
+    @const assert_eq(classify_triple(3, 3, 7), "first two equal");
+    @const assert_eq(classify_triple(3, 5, 8), "sum property");
+
+    // Bounds checking
+    @const assert_eq(check_bounds(5, 0, 10), "within bounds");
+    @const assert_eq(check_bounds(-5, 0, 10), "below");
+    @const assert_eq(check_bounds(15, 0, 10), "above");
+
+    // Combined or-patterns
+    @const assert_eq(categorize_input(0), "binary");
+    @const assert_eq(categorize_input(5), "small prime");
+    @const assert_eq(categorize_input(-10), "negative");
+    @const assert_eq(categorize_input(8), "even");
+    @const assert_eq(categorize_input(9), "odd");
+
+    // Tagged pair processing
+    @const assert_eq(process_tagged_pair(((1, 10), (1, 3))), 7);
+    @const assert_eq(process_tagged_pair(((1, 5), (0, 0))), 5);
+    @const assert_eq(process_tagged_pair(((0, 0), (0, 0))), -1);
+
+    // Deep tuple processing
+    @const assert_eq(process_deep_tuple(((1, 2), (3, 4))), 15);
+    @const assert_eq(extract_from_nested((1, (1, (10, 20)))), 30);
+    @const assert_eq(extract_from_nested((0, (0, (0, 0)))), -2);
+
+    // Array patterns
+    @const assert_eq(process_array_triple([0, 0, 0]), "all zeros");
+    @const assert_eq(process_array_triple([5, 5, 5]), "all same");
+    @const assert_eq(process_array_triple([1, 2, 3]), "ascending");
+    @const assert_eq(sum_first_two([10, 20, 30]), 30);
+}

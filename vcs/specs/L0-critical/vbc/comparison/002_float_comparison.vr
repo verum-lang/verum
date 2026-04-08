@@ -1,0 +1,221 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, comparison, float, ieee754, nan
+// @timeout: 5000
+// @expect: pass
+//
+// Test: EQ_F, NE_F, LT_F, LE_F, GT_F, GE_F
+// Verifies IEEE 754 compliant floating-point comparisons
+
+fn test_eq_basic() {
+    assert(0.0 == 0.0);
+    assert(1.0 == 1.0);
+    assert(-1.0 == -1.0);
+    assert(3.14 == 3.14);
+
+    assert(!(0.0 == 1.0));
+    assert(!(1.0 == 2.0));
+}
+
+fn test_ne_basic() {
+    assert(0.0 != 1.0);
+    assert(1.0 != -1.0);
+    assert(3.14 != 3.15);
+
+    assert(!(1.0 != 1.0));
+}
+
+fn test_lt_basic() {
+    assert(0.0 < 1.0);
+    assert(-1.0 < 0.0);
+    assert(-1.0 < 1.0);
+    assert(3.14 < 3.15);
+    assert(0.001 < 0.01);
+
+    assert(!(1.0 < 0.0));
+    assert(!(1.0 < 1.0));
+}
+
+fn test_le_basic() {
+    assert(0.0 <= 0.0);
+    assert(0.0 <= 1.0);
+    assert(-1.0 <= 0.0);
+    assert(3.14 <= 3.14);
+    assert(3.14 <= 3.15);
+
+    assert(!(1.0 <= 0.0));
+}
+
+fn test_gt_basic() {
+    assert(1.0 > 0.0);
+    assert(0.0 > -1.0);
+    assert(3.15 > 3.14);
+
+    assert(!(0.0 > 1.0));
+    assert(!(1.0 > 1.0));
+}
+
+fn test_ge_basic() {
+    assert(0.0 >= 0.0);
+    assert(1.0 >= 0.0);
+    assert(0.0 >= -1.0);
+    assert(3.14 >= 3.14);
+    assert(3.15 >= 3.14);
+
+    assert(!(0.0 >= 1.0));
+}
+
+fn test_nan_comparisons() {
+    let nan: Float = 0.0 / 0.0;
+
+    // NaN is not equal to anything, including itself
+    assert(!(nan == nan));
+    assert(nan != nan);
+
+    // NaN is not less than or greater than anything
+    assert(!(nan < 0.0));
+    assert(!(nan > 0.0));
+    assert(!(nan <= 0.0));
+    assert(!(nan >= 0.0));
+    assert(!(nan < nan));
+    assert(!(nan > nan));
+
+    // NaN comparisons with other values
+    assert(!(0.0 < nan));
+    assert(!(0.0 > nan));
+    assert(!(0.0 == nan));
+    assert(0.0 != nan);
+}
+
+fn test_infinity_comparisons() {
+    let pos_inf: Float = 1.0 / 0.0;
+    let neg_inf: Float = -1.0 / 0.0;
+
+    // Infinity equals itself
+    assert(pos_inf == pos_inf);
+    assert(neg_inf == neg_inf);
+    assert(pos_inf != neg_inf);
+
+    // Infinity ordering
+    assert(neg_inf < pos_inf);
+    assert(neg_inf < 0.0);
+    assert(0.0 < pos_inf);
+    assert(pos_inf > neg_inf);
+
+    // Everything finite is between infinities
+    assert(neg_inf < 1e308);
+    assert(1e308 < pos_inf);
+    assert(-1e308 > neg_inf);
+}
+
+fn test_signed_zero() {
+    let pos_zero: Float = 0.0;
+    let neg_zero: Float = -0.0;
+
+    // +0 equals -0 (IEEE 754 requirement)
+    assert(pos_zero == neg_zero);
+    assert(!(pos_zero != neg_zero));
+    assert(!(pos_zero < neg_zero));
+    assert(!(neg_zero < pos_zero));
+    assert(pos_zero <= neg_zero);
+    assert(neg_zero >= pos_zero);
+}
+
+fn test_subnormal_comparisons() {
+    let tiny1: Float = 5e-324;
+    let tiny2: Float = 1e-323;
+    let zero: Float = 0.0;
+
+    assert(zero < tiny1);
+    assert(tiny1 < tiny2);
+    assert(tiny1 > zero);
+    assert(tiny1 != zero);
+}
+
+fn test_precision_edge_cases() {
+    // Numbers that differ only in the last bit
+    let a: Float = 1.0;
+    let b: Float = 1.0000000000000002;  // Next representable float
+
+    assert(a < b);
+    assert(a != b);
+    assert(b > a);
+
+    // Large numbers near precision limit
+    let big: Float = 9007199254740992.0;  // 2^53
+    assert(big == big);
+}
+
+fn test_floating_point_gotchas() {
+    // Classic floating point issues
+
+    // 0.1 + 0.2 != 0.3 (exactly)
+    let sum: Float = 0.1 + 0.2;
+    assert(sum != 0.3);
+    assert(sum > 0.3);  // It's slightly larger
+
+    // The difference is very small (about 5.5e-17)
+    let diff: Float = sum - 0.3;
+    assert(diff > 0.0);
+    assert(diff < 1e-10);  // Within epsilon
+
+    // Associativity failure
+    let a: Float = 1e-16;
+    let b: Float = 1.0;
+    let c: Float = -1.0;
+
+    // (a + b) + c may not equal a + (b + c)
+    let left: Float = (a + b) + c;
+    let right: Float = a + (b + c);
+    // Both should be close to a but may differ slightly
+}
+
+fn test_comparison_with_integer_values() {
+    // Floats that are exact integers
+    assert(1.0 == 1.0);
+    assert(2.0 > 1.0);
+    assert(-1.0 < 0.0);
+
+    // Large exact integers in float
+    let million: Float = 1000000.0;
+    assert(million == 1000000.0);
+    assert(million > 999999.0);
+    assert(million < 1000001.0);
+}
+
+fn test_total_ordering_failure() {
+    // IEEE 754 comparisons don't form a total order due to NaN
+    let nan: Float = 0.0 / 0.0;
+    let a: Float = 1.0;
+    let b: Float = 2.0;
+
+    // Transitivity fails with NaN
+    // NOT: (nan <= a) and (a <= b) implies (nan <= b)
+    // Because nan <= a is false
+
+    // Trichotomy fails with NaN
+    // NOT exactly one of: nan < a, nan == a, nan > a
+    // All three are false
+    assert(!(nan < a));
+    assert(!(nan == a));
+    assert(!(nan > a));
+}
+
+fn main() {
+    test_eq_basic();
+    test_ne_basic();
+    test_lt_basic();
+    test_le_basic();
+    test_gt_basic();
+    test_ge_basic();
+    test_nan_comparisons();
+    test_infinity_comparisons();
+    test_signed_zero();
+    test_subnormal_comparisons();
+    test_precision_edge_cases();
+    test_floating_point_gotchas();
+    test_comparison_with_integer_values();
+    test_total_ordering_failure();
+    print("002_float_comparison: PASSED");
+}

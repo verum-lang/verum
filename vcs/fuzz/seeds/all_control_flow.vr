@@ -1,0 +1,292 @@
+// All control flow constructs in Verum
+// Tests parsing and evaluation of control flow statements
+
+use verum_core.base.{List, Text, Maybe}
+
+fn main() {
+    test_if_else();
+    test_match();
+    test_loops();
+    test_early_return();
+    test_nested_control_flow();
+}
+
+// If-else variations
+fn test_if_else() {
+    let x = 10;
+
+    // Simple if
+    if x > 5 {
+        println("x is greater than 5");
+    }
+
+    // If-else
+    if x > 20 {
+        println("x is greater than 20");
+    } else {
+        println("x is not greater than 20");
+    }
+
+    // If-else if-else chain
+    if x > 100 {
+        println("x is greater than 100");
+    } else if x > 50 {
+        println("x is greater than 50");
+    } else if x > 10 {
+        println("x is greater than 10");
+    } else {
+        println("x is 10 or less");
+    }
+
+    // If as expression
+    let result = if x > 5 { "big" } else { "small" };
+
+    // Nested if
+    if x > 0 {
+        if x < 100 {
+            println("x is between 0 and 100");
+        }
+    }
+
+    // If with complex conditions
+    if x > 0 && x < 100 || x == -1 {
+        println("complex condition");
+    }
+
+    // If let pattern
+    let maybe_val: Maybe<Int> = Some(42);
+    if let Some(v) = maybe_val {
+        println("got value: {}", v);
+    }
+}
+
+// Match expressions
+fn test_match() {
+    let x = 5;
+
+    // Simple match
+    match x {
+        0 => println("zero"),
+        1 => println("one"),
+        _ => println("other"),
+    }
+
+    // Match with multiple patterns
+    match x {
+        0 | 1 | 2 => println("small"),
+        3 | 4 | 5 => println("medium"),
+        _ => println("large"),
+    }
+
+    // Match with guards
+    match x {
+        n if n < 0 => println("negative"),
+        n if n == 0 => println("zero"),
+        n if n < 10 => println("single digit"),
+        _ => println("large"),
+    }
+
+    // Match with bindings
+    match x {
+        n @ 1..=5 => println("matched {}", n),
+        n @ 6..=10 => println("matched higher {}", n),
+        other => println("unmatched: {}", other),
+    }
+
+    // Match on enum
+    type Status is
+        Ok(Int) |
+        Error(Text) |
+        Pending;
+
+    let status = Status.Ok(200);
+    match status {
+        Status.Ok(code) => println("success: {}", code),
+        Status.Error(msg) => println("error: {}", msg),
+        Status.Pending => println("pending"),
+    }
+
+    // Match as expression
+    let result = match x {
+        0 => "zero",
+        1 => "one",
+        _ => "many",
+    };
+
+    // Exhaustive match on bool
+    let b = true;
+    match b {
+        true => println("true"),
+        false => println("false"),
+    }
+}
+
+// Loop constructs
+fn test_loops() {
+    // For loop with range
+    for i in 0..10 {
+        println("i = {}", i);
+    }
+
+    // For loop with inclusive range
+    for i in 0..=10 {
+        println("i = {}", i);
+    }
+
+    // For loop with step
+    for i in (0..10).step_by(2) {
+        println("even i = {}", i);
+    }
+
+    // For loop over collection
+    let list = [1, 2, 3, 4, 5];
+    for item in list {
+        println("item = {}", item);
+    }
+
+    // For loop with index
+    for (idx, item) in list.enumerate() {
+        println("list[{}] = {}", idx, item);
+    }
+
+    // While loop
+    let mut count = 0;
+    while count < 5 {
+        println("count = {}", count);
+        count = count + 1;
+    }
+
+    // While with complex condition
+    let mut a = 0;
+    let mut b = 1;
+    while a < 100 && b < 100 {
+        let temp = a + b;
+        a = b;
+        b = temp;
+    }
+
+    // Loop (infinite with break)
+    let mut counter = 0;
+    loop {
+        counter = counter + 1;
+        if counter >= 10 {
+            break;
+        }
+    }
+
+    // Loop with value (loop as expression)
+    let result = loop {
+        counter = counter + 1;
+        if counter >= 20 {
+            break counter * 2;
+        }
+    };
+
+    // Break with label
+    'outer: for i in 0..10 {
+        for j in 0..10 {
+            if i * j > 25 {
+                break 'outer;
+            }
+        }
+    }
+
+    // Continue
+    for i in 0..10 {
+        if i % 2 == 0 {
+            continue;
+        }
+        println("odd: {}", i);
+    }
+
+    // Continue with label
+    'outer: for i in 0..5 {
+        for j in 0..5 {
+            if j == 2 {
+                continue 'outer;
+            }
+            println("i={}, j={}", i, j);
+        }
+    }
+}
+
+// Early return
+fn test_early_return() {
+    let result = early_return_fn(5);
+    assert result == 10;
+
+    let result2 = early_return_fn(-1);
+    assert result2 == 0;
+}
+
+fn early_return_fn(x: Int) -> Int {
+    if x < 0 {
+        return 0;
+    }
+
+    if x == 0 {
+        return 1;
+    }
+
+    // Multiple return points
+    let computed = x * 2;
+    if computed > 100 {
+        return 100;
+    }
+
+    computed
+}
+
+// Nested control flow
+fn test_nested_control_flow() {
+    let data = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+
+    for row in data {
+        for col in row {
+            if col % 2 == 0 {
+                match col {
+                    2 => println("two"),
+                    4 => println("four"),
+                    6 => println("six"),
+                    8 => println("eight"),
+                    _ => println("even: {}", col),
+                }
+            } else {
+                if col > 5 {
+                    println("odd and large: {}", col);
+                } else {
+                    println("odd and small: {}", col);
+                }
+            }
+        }
+    }
+
+    // Deeply nested
+    let mut result = 0;
+    for i in 0..3 {
+        if i > 0 {
+            for j in 0..3 {
+                match j {
+                    0 => {
+                        while result < i * 10 {
+                            result = result + 1;
+                        }
+                    }
+                    1 => {
+                        loop {
+                            result = result + 2;
+                            if result > i * 20 {
+                                break;
+                            }
+                        }
+                    }
+                    _ => {
+                        for k in 0..i {
+                            result = result + k;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

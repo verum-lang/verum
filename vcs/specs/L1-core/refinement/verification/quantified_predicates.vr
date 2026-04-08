@@ -1,0 +1,288 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, verification, quantifiers
+// @timeout: 10000
+
+/// Quantified predicates: forall and exists in refinement types.
+/// Demonstrates universal and existential quantification over collections.
+
+// ============================================================================
+// Universal quantification (forall)
+// ============================================================================
+
+/// All elements are positive
+type AllPositive is List<Int> where forall x in it => x > 0;
+
+/// All elements are non-negative
+type AllNonNegative is List<Int> where forall x in it => x >= 0;
+
+/// All elements are within bounds
+type AllInRange<LO: meta Int, HI: meta Int> is
+    List<Int> where forall x in it => x >= LO && x <= HI;
+
+/// Sorted list (ascending)
+type Sorted is List<Int> where forall i in 0..(len(it) - 1) => it[i] <= it[i + 1];
+
+/// Strictly sorted (no duplicates)
+type StrictlySorted is List<Int> where forall i in 0..(len(it) - 1) => it[i] < it[i + 1];
+
+// ============================================================================
+// Existential quantification (exists)
+// ============================================================================
+
+/// At least one positive element
+type HasPositive is List<Int> where exists x in it => x > 0;
+
+/// Contains a specific value
+type Contains<V: meta Int> is List<Int> where exists x in it => x == V;
+
+/// Has a zero element
+type HasZero is List<Int> where exists x in it => x == 0;
+
+// ============================================================================
+// Combined quantifiers
+// ============================================================================
+
+/// All positive and at least one even
+type AllPositiveWithEven is List<Int>
+    where forall x in it => x > 0
+    where exists x in it => x % 2 == 0;
+
+/// Contains both positive and negative
+type HasBothSigns is List<Int>
+    where exists x in it => x > 0
+    where exists x in it => x < 0;
+
+// ============================================================================
+// Quantified predicates in functions
+// ============================================================================
+
+@verify(proof)
+fn sum_positives(arr: AllPositive) -> Int{> 0}
+    requires len(arr) > 0
+{
+    // forall x > 0 && len > 0 implies sum > 0
+    let mut sum = 0;
+    for x in arr {
+        sum += x;
+    }
+    sum
+}
+
+@verify(proof)
+fn product_non_negatives(arr: AllNonNegative) -> Int{>= 0} {
+    let mut prod = 1;
+    for x in arr {
+        prod *= x;  // nn * nn = nn
+    }
+    prod
+}
+
+@verify(proof)
+fn min_sorted(arr: Sorted{len(it) > 0}) -> Int
+    ensures result == arr[0]
+    ensures forall x in arr => result <= x
+{
+    arr[0]  // First element is minimum in sorted list
+}
+
+@verify(proof)
+fn max_sorted(arr: Sorted{len(it) > 0}) -> Int
+    ensures result == arr[len(arr) - 1]
+    ensures forall x in arr => result >= x
+{
+    arr[len(arr) - 1]  // Last element is maximum
+}
+
+// ============================================================================
+// Verification of quantified properties
+// ============================================================================
+
+@verify(proof)
+fn verify_all_positive(arr: List<Int>) -> Bool
+    ensures result == (forall x in arr => x > 0)
+{
+    for x in arr {
+        if x <= 0 {
+            return false;
+        }
+    }
+    true
+}
+
+@verify(proof)
+fn verify_exists_positive(arr: List<Int>) -> Bool
+    ensures result == (exists x in arr => x > 0)
+{
+    for x in arr {
+        if x > 0 {
+            return true;
+        }
+    }
+    false
+}
+
+@verify(proof)
+fn is_sorted(arr: List<Int>) -> Bool
+    ensures result == (forall i in 0..(len(arr) - 1) => arr[i] <= arr[i + 1])
+{
+    if len(arr) <= 1 {
+        return true;
+    }
+
+    let mut i = 0;
+    while i < len(arr) - 1 {
+        invariant i >= 0 && i < len(arr);
+        invariant forall j in 0..i => arr[j] <= arr[j + 1];
+
+        if arr[i] > arr[i + 1] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+// ============================================================================
+// Quantifier transformations
+// ============================================================================
+
+@verify(proof)
+fn map_preserves_positive(
+    arr: AllPositive,
+    f: fn(Int) -> Int
+) -> AllPositive {
+    let mut result: AllPositive = [];
+    for x in arr {
+        result.push(f(x));  // f maps positive to positive
+    }
+    result
+}
+
+@verify(proof)
+fn filter_preserves_sorted(arr: Sorted, pred: fn(Int) -> Bool) -> Sorted {
+    // Filtering maintains sortedness
+    let mut result: Sorted = [];
+    for x in arr {
+        if pred(x) {
+            result.push(x);
+        }
+    }
+    result
+}
+
+// ============================================================================
+// Nested quantifiers
+// ============================================================================
+
+type Matrix<T> is List<List<T>> is ();
+
+/// All rows have same length
+type RectangularMatrix is Matrix<Int>
+    where len(it) > 0
+    where forall row in it => len(row) == len(it[0]);
+
+/// All elements positive
+type AllPositiveMatrix is Matrix<Int>
+    where forall row in it => forall x in row => x > 0;
+
+@verify(proof)
+fn matrix_sum(m: AllPositiveMatrix{len(it) > 0}) -> Int{> 0}
+    requires forall row in m => len(row) > 0
+{
+    let mut sum = 0;
+    for row in m {
+        for x in row {
+            sum += x;  // x > 0, so sum increases
+        }
+    }
+    sum
+}
+
+// ============================================================================
+// Uniqueness (exactly one)
+// ============================================================================
+
+predicate unique_satisfies<T>(arr: List<T>, pred: fn(T) -> Bool) -> Bool {
+    exists i in 0..len(arr) =>
+        pred(arr[i]) &&
+        forall j in 0..len(arr) => (j != i => !pred(arr[j]))
+}
+
+type HasUniqueMax is List<Int>
+    where exists i in 0..len(it) =>
+        forall j in 0..len(it) => (j != i => it[i] > it[j]);
+
+@verify(proof)
+fn find_unique<T: Eq>(arr: List<T>, target: T) -> Maybe<Int{>= 0}>
+    requires unique_satisfies(arr, |x| x == target)
+    ensures match result {
+        Some(idx) => idx < len(arr) && arr[idx] == target,
+        None => false,  // unreachable given precondition
+    }
+{
+    for (i, x) in arr.iter().enumerate() {
+        if x == target {
+            return Some(i);
+        }
+    }
+    None  // Unreachable
+}
+
+// ============================================================================
+// Bounded quantifiers
+// ============================================================================
+
+@verify(proof)
+fn all_in_range(arr: List<Int>, lo: Int, hi: Int) -> Bool
+    ensures result == (forall x in arr => x >= lo && x <= hi)
+{
+    for x in arr {
+        if x < lo || x > hi {
+            return false;
+        }
+    }
+    true
+}
+
+@verify(proof)
+fn count_satisfying(arr: List<Int>, pred: fn(Int) -> Bool) -> Int{>= 0}
+    ensures result <= len(arr)
+{
+    let mut count = 0;
+    for x in arr {
+        if pred(x) {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn main() {
+    // All positive
+    let positives: AllPositive = [1, 2, 3, 4, 5];
+    let sum = sum_positives(positives);
+    assert(sum == 15);
+
+    // Sorted
+    let sorted: Sorted = [1, 2, 3, 4, 5];
+    let min = min_sorted(sorted);
+    let max = max_sorted(sorted);
+    assert(min == 1);
+    assert(max == 5);
+
+    // Verification
+    let is_pos = verify_all_positive([1, 2, 3]);
+    assert(is_pos == true);
+
+    let has_pos = verify_exists_positive([-1, 0, 1]);
+    assert(has_pos == true);
+
+    let sorted_check = is_sorted([1, 2, 3]);
+    assert(sorted_check == true);
+
+    // Count
+    let count = count_satisfying([1, 2, 3, 4, 5], |x| x % 2 == 0);
+    assert(count == 2);
+}

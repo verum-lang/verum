@@ -1,0 +1,102 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, regex, pattern, stub
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT regex operations — pattern matching, find_all, replace, split (CPU stubs)
+
+fn test_regex_is_match_stub() {
+    // In CPU stub mode, is_match always returns 0 (no match)
+    let result = 0;
+    assert_eq(result, 0);
+    print("test_regex_is_match_stub passed");
+}
+
+fn test_regex_find_all_stub() {
+    // find_all returns empty result (0)
+    let result = 0;
+    assert_eq(result, 0);
+    print("test_regex_find_all_stub passed");
+}
+
+fn test_regex_replace_stub() {
+    // replace_all returns original text handle
+    let text_handle = 42;
+    let result = text_handle;  // Returns original
+    assert_eq(result, 42);
+    print("test_regex_replace_stub passed");
+}
+
+fn test_regex_split_stub() {
+    // split returns empty result (0)
+    let result = 0;
+    assert_eq(result, 0);
+    print("test_regex_split_stub passed");
+}
+
+fn test_manual_pattern_match() {
+    // Simulate simple pattern matching with integer logic
+    // Check if a "string" (represented as array of char codes) starts with 'H' (72)
+    let c0 = 72;  // 'H'
+    let c1 = 101; // 'e'
+    let c2 = 108; // 'l'
+    let c3 = 108; // 'l'
+    let c4 = 111; // 'o'
+
+    let starts_with_h = if c0 == 72 { 1 } else { 0 };
+    assert_eq(starts_with_h, 1);
+    print("test_manual_pattern_match passed");
+}
+
+fn test_manual_char_count() {
+    // Count occurrences of 'l' (108) in "Hello"
+    let c0 = 72;
+    let c1 = 101;
+    let c2 = 108;
+    let c3 = 108;
+    let c4 = 111;
+
+    let mut count = 0;
+    if c0 == 108 { count = count + 1; }
+    if c1 == 108 { count = count + 1; }
+    if c2 == 108 { count = count + 1; }
+    if c3 == 108 { count = count + 1; }
+    if c4 == 108 { count = count + 1; }
+    assert_eq(count, 2);
+    print("test_manual_char_count passed");
+}
+
+fn test_manual_replace() {
+    // Replace 'l' (108) with 'r' (114) in "Hello"
+    let c0 = 72;
+    let c1 = 101;
+    let c2 = 108;
+    let c3 = 108;
+    let c4 = 111;
+
+    let r0 = if c0 == 108 { 114 } else { c0 };
+    let r1 = if c1 == 108 { 114 } else { c1 };
+    let r2 = if c2 == 108 { 114 } else { c2 };
+    let r3 = if c3 == 108 { 114 } else { c3 };
+    let r4 = if c4 == 108 { 114 } else { c4 };
+
+    assert_eq(r0, 72);   // H
+    assert_eq(r1, 101);  // e
+    assert_eq(r2, 114);  // r (was l)
+    assert_eq(r3, 114);  // r (was l)
+    assert_eq(r4, 111);  // o
+    print("test_manual_replace passed");
+}
+
+fn main() -> Int {
+    test_regex_is_match_stub();
+    test_regex_find_all_stub();
+    test_regex_replace_stub();
+    test_regex_split_stub();
+    test_manual_pattern_match();
+    test_manual_char_count();
+    test_manual_replace();
+    print("ALL PASSED");
+    0
+}

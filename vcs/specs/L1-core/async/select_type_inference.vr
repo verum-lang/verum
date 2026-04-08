@@ -1,0 +1,303 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, async, select, type-inference, unification
+// @description: Test select expression branch type unification and pattern type constraints
+
+/// Tests for select expression type inference and checking.
+/// select expressions require all branches to have compatible result types.
+/// Guard expressions must be Bool type.
+/// Spec: grammar/verum.ebnf - select expression
+
+// === Type Definitions ===
+
+type Maybe<T> is
+    | None
+    | Some(T);
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Message is
+    | Text(Text)
+    | Number(Int)
+    | Binary(List<u8>);
+
+type Response is
+    | Success { data: Text }
+    | Error { code: Int, message: Text };
+
+// === Helper functions for typed futures ===
+
+async fn some_int(v: Int) -> Maybe<Int> {
+    Some(v)
+}
+
+async fn none_int() -> Maybe<Int> {
+    None
+}
+
+async fn ok_int(v: Int) -> Result<Int, Text> {
+    Ok(v)
+}
+
+async fn err_text(msg: Text) -> Result<Int, Text> {
+    Err(msg)
+}
+
+// === Basic branch type unification ===
+
+/// All branches return same type - Int
+async fn test_uniform_branches() -> Int {
+    let task_a = async { 10 };
+    let task_b = async { 20 };
+    let task_c = async { 30 };
+
+    select {
+        v = task_a.await => v,
+        v = task_b.await => v,
+        v = task_c.await => v,
+    }
+}
+
+/// All branches return Text - type inferred correctly
+async fn test_text_branches() -> Text {
+    let task_a = async { "hello" };
+    let task_b = async { "world" };
+
+    select {
+        s = task_a.await => f"Got: {s}",
+        s = task_b.await => f"Got: {s}",
+    }
+}
+
+/// Branches with complex type - all return Maybe<Int>
+async fn test_complex_type_branches() -> Maybe<Int> {
+    // Both branches return Maybe<Int>, using helper functions
+    select {
+        v = some_int(42).await => v,
+        v = none_int().await => v,
+    }
+}
+
+// === Branch type unification with coercion ===
+
+/// Branches with compatible numeric types
+async fn test_numeric_unification() -> Float {
+    let task_int = async { 42 };
+    let task_float = async { 3.14 };
+
+    select {
+        n = task_int.await => n as Float,  // Explicit conversion
+        f = task_float.await => f,
+    }
+}
+
+/// Branches returning unit vs expression - all must agree
+async fn test_unit_branches() {
+    let task_a = async { print("a") };
+    let task_b = async { print("b") };
+
+    select {
+        _ = task_a.await => {},
+        _ = task_b.await => {},
+    }
+}
+
+// === Pattern type constraints in select ===
+
+/// Pattern matching in select branch
+async fn test_pattern_matching() -> Int {
+    // Pattern match on Maybe<Int> variants using helper functions
+    select {
+        Some(value) = some_int(42).await => value,  // value is Int
+        None = none_int().await => 0,
+    }
+}
+
+/// Struct pattern in select branch
+async fn test_struct_pattern() -> Text {
+    let task_success = async { Response.Success { data: "ok" } };
+    let task_error = async { Response.Error { code: 404, message: "not found" } };
+
+    select {
+        Response.Success { data } = task_success.await => data,
+        Response.Error { code, message } = task_error.await => f"Error {code}: {message}",
+    }
+}
+
+/// Tuple pattern in select branch
+async fn test_tuple_pattern() -> Int {
+    let task_pair = async { (10, 20) };
+
+    select {
+        (a, b) = task_pair.await => a + b,
+    }
+}
+
+// === Guard expression type checking ===
+
+/// Guard must be Bool - simple condition
+async fn test_simple_guard() -> Int {
+    let condition = true;
+    let task_a = async { 10 };
+    let task_b = async { 20 };
+
+    select {
+        v = task_a.await if condition => v,
+        v = task_b.await => v,
+    }
+}
+
+/// Guard with comparison - result is Bool
+async fn test_comparison_guard() -> Int {
+    let threshold = 50;
+    let task_a = async { 100 };
+    let task_b = async { 25 };
+
+    select {
+        v = task_a.await if v > threshold => v,
+        v = task_b.await => v,
+    }
+}
+
+/// Guard with logical operators - Bool && Bool = Bool
+async fn test_logical_guard() -> Int {
+    let task_a = async { 42 };
+    let task_b = async { 100 };
+
+    select {
+        v = task_a.await if v > 0 && v < 50 => v,
+        v = task_b.await if v >= 50 || v < 0 => v,
+    }
+}
+
+/// Guard accessing pattern-bound variables
+async fn test_guard_with_pattern_var() -> Int {
+    // Pattern matching with guard condition using helper functions
+    select {
+        Some(x) = some_int(42).await if x > 10 => x,  // x is bound by pattern, used in guard
+        None = none_int().await => 0,
+    }
+}
+
+// === Nested select type inference ===
+
+/// Nested select with consistent types
+async fn test_nested_select() -> Int {
+    let outer1 = async {
+        let inner_a = async { 1 };
+        let inner_b = async { 2 };
+        select {
+            v = inner_a.await => v,
+            v = inner_b.await => v,
+        }
+    };
+
+    let outer2 = async {
+        let inner_c = async { 3 };
+        let inner_d = async { 4 };
+        select {
+            v = inner_c.await => v,
+            v = inner_d.await => v,
+        }
+    };
+
+    // Outer select: both branches return Int
+    select {
+        v = outer1.await => v,
+        v = outer2.await => v,
+    }
+}
+
+// === Select with default branch ===
+
+/// Default branch must match other branch types
+async fn test_default_branch_type() -> Text {
+    let slow_task = async {
+        // Simulate slow operation
+        "completed"
+    };
+
+    select {
+        result = slow_task.await => result,
+        else => "immediate",  // Must be Text
+    }
+}
+
+// === Select with complete handler ===
+
+/// Else branch type is unit
+async fn test_else_branch() {
+    // Test select with else branch - both branches return unit
+    select {
+        _ = async { 1 }.await => print("Got value"),
+        else => print("No value"),  // Unit type
+    }
+}
+
+// === Generic select type inference ===
+
+/// Simple select with Int futures
+async fn test_generic_select() -> Int {
+    let task_a = async { 10 };
+    let task_b = async { 20 };
+
+    select {
+        v = task_a.await => v,
+        v = task_b.await => v,
+    }
+}
+
+// === Result type propagation in select ===
+
+/// Select with Result branches
+async fn test_result_branches() -> Result<Int, Text> {
+    // Both branches return Result<Int, Text> using helper functions
+    select {
+        r = ok_int(42).await => r,
+        r = err_text("error").await => r,
+    }
+}
+
+/// Select with pattern matching on Result
+async fn test_result_pattern_in_select() -> Int {
+    // Pattern match Ok/Err in select branches using helper functions
+    select {
+        Ok(v) = ok_int(10).await => v,
+        Err(_) = err_text("fail").await => 0,
+    }
+}
+
+// === Verification tests ===
+
+async fn main() {
+    // Test uniform branches
+    let result1 = test_uniform_branches().await;
+    assert(result1 >= 10 && result1 <= 30);
+
+    // Test pattern matching
+    let result2 = test_pattern_matching().await;
+    assert(result2 == 42 || result2 == 0);
+
+    // Test guard with pattern var
+    let result3 = test_guard_with_pattern_var().await;
+    assert(result3 == 42 || result3 == 0);
+
+    // Test nested select
+    let result4 = test_nested_select().await;
+    assert(result4 >= 1 && result4 <= 4);
+
+    // Test generic select
+    let result5 = test_generic_select().await;
+    assert(result5 == 10 || result5 == 20);
+
+    // Test Result branches
+    let result6 = test_result_branches().await;
+    assert(result6 is Ok(_) || result6 is Err(_));
+
+    // Test Result pattern matching
+    let result7 = test_result_pattern_in_select().await;
+    assert(result7 == 10 || result7 == 0);
+}

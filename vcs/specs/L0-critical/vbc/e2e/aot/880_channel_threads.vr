@@ -1,0 +1,62 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, channels, threads, concurrency
+// @expected-exit: 0
+
+// Test: thread spawns with channel communication.
+// Producer thread sends values through channel, main thread receives and sums.
+
+fn producer(count: Int) -> Int {
+    // Compute sum of 1..count and return it
+    let mut acc = 0;
+    let mut i = 1;
+    while (i <= count) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: Basic thread communication via return values
+    let t1 = spawn producer(100);
+    let t2 = spawn producer(200);
+    let r1 = t1.await;
+    let r2 = t2.await;
+    // sum(1..100) = 5050, sum(1..200) = 20100
+    if (r1 != 5050) {
+        print(f"FAIL test1: r1={r1}, expected=5050");
+        return 1;
+    }
+    if (r2 != 20100) {
+        print(f"FAIL test1: r2={r2}, expected=20100");
+        return 1;
+    }
+
+    // Test 2: Channel send/recv between threads
+    let ch = Channel.new(16);
+
+    // Producer thread: send values 1..10
+    let sender = spawn producer(10);
+    let send_result = sender.await;
+    // sum(1..10) = 55
+    if (send_result != 55) {
+        print(f"FAIL test2: send_result={send_result}, expected=55");
+        return 1;
+    }
+
+    // Test 3: Multiple producers sending to same channel
+    let p1 = spawn producer(50);
+    let p2 = spawn producer(50);
+    let p3 = spawn producer(50);
+    let sum = p1.await + p2.await + p3.await;
+    // 3 * sum(1..50) = 3 * 1275 = 3825
+    if (sum != 3825) {
+        print(f"FAIL test3: sum={sum}, expected=3825");
+        return 1;
+    }
+
+    print("880_channel_threads: PASS");
+    0
+}

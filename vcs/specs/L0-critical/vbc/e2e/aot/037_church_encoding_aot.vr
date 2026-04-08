@@ -1,0 +1,106 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, closures, church-encoding, lambda-calculus
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT Church encoding of natural numbers using closures
+
+// Church numeral: apply function n times to initial value
+fn church_apply(n: Int, f: fn(Int) -> Int, x: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+// Church addition: apply f (a+b) times
+fn church_plus(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Church multiplication: apply f (a*b) times
+fn church_mul(a: Int, b: Int) -> Int {
+    a * b
+}
+
+// Church exponentiation: a^b iteratively
+fn church_pow(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < exp {
+        result = result * base;
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Church 0: apply f 0 times = identity
+    assert_eq(church_apply(0, |x| x + 1, 5), 5);
+    assert_eq(church_apply(0, |x| x * 2, 5), 5);
+
+    // Church 1: apply f once
+    assert_eq(church_apply(1, |x| x + 1, 5), 6);
+    assert_eq(church_apply(1, |x| x * 2, 5), 10);
+
+    // Church 3: apply f 3 times
+    assert_eq(church_apply(3, |x| x + 1, 0), 3);
+    assert_eq(church_apply(3, |x| x * 2, 1), 8);  // 1->2->4->8
+
+    // Church 5: apply inc 5 times
+    assert_eq(church_apply(5, |x| x + 1, 100), 105);
+
+    // Church addition: 3+4 = 7 (apply inc 7 times to 0)
+    let sum = church_plus(3, 4);
+    assert_eq(church_apply(sum, |x| x + 1, 0), 7);
+
+    // Church multiplication: 3*4 = 12
+    let product = church_mul(3, 4);
+    assert_eq(church_apply(product, |x| x + 1, 0), 12);
+
+    // Successive doubling: 2^10 = 1024
+    assert_eq(church_apply(10, |x| x * 2, 1), 1024);
+
+    // Successive squaring: 2 -> 4 -> 16 -> 256
+    assert_eq(church_apply(1, |x| x * x, 2), 4);
+    assert_eq(church_apply(2, |x| x * x, 2), 16);
+    assert_eq(church_apply(3, |x| x * x, 2), 256);
+
+    // Power: 2^10 = 1024
+    assert_eq(church_pow(2, 10), 1024);
+    assert_eq(church_pow(3, 5), 243);
+
+    // Composition through chaining
+    let step1 = church_apply(3, |x| x + 1, 0);   // 3
+    let step2 = church_apply(2, |x| x * 2, step1); // 3 -> 6 -> 12
+    assert_eq(step2, 12);
+
+    // Using closures with captures as function arguments
+    let offset = 10;
+    assert_eq(church_apply(3, |x| x + offset, 0), 30);
+    assert_eq(church_apply(5, |x| x + offset, 100), 150);
+
+    // Make multiplier via capture
+    let factor = 3;
+    assert_eq(church_apply(4, |x| x * factor, 1), 81); // 1->3->9->27->81 = 3^4
+
+    // Fibonacci via church-like repeated transformation
+    // Transform: (a, b) -> (b, a+b)
+    // Encoded: pair = a * 10000 + b, extract a = pair / 10000, b = pair % 10000
+    let fib_step = |pair: Int| -> Int {
+        let a = pair / 10000;
+        let b = pair % 10000;
+        b * 10000 + (a + b)
+    };
+    let fib_pair = church_apply(10, fib_step, 10000);  // start with (1, 0) encoded as 10000
+    // After 10 steps starting from (1, 0):
+    // (1,0) -> (0,1) -> (1,1) -> (1,2) -> (2,3) -> (3,5) -> (5,8) -> (8,13) -> (13,21) -> (21,34) -> (34,55)
+    let fib10 = fib_pair / 10000;  // first element of pair
+    assert_eq(fib10, 34);  // fib(10) when starting from (1,0) with 10 steps = fib(9) = 34
+
+    0
+}

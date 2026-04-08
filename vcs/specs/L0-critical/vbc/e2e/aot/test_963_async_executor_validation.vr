@@ -1,0 +1,159 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: async, spawn, await, channel, executor
+// @description: Comprehensive async executor validation through AOT pipeline
+
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fib(n - 1) + fib(n - 2) }
+}
+
+fn sum_range(start: Int, count: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while i < start + count {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+// Test 1: Basic spawn/await
+fn test_basic_spawn() -> Int {
+    let h = spawn { double(21) };
+    let result = h.await;
+    if result != 42 {
+        print(f"FAIL basic_spawn: expected 42, got {result}");
+        return 1;
+    }
+    print("  basic_spawn: OK");
+    0
+}
+
+// Test 2: Multiple parallel spawns
+fn test_parallel_spawns() -> Int {
+    let h1 = spawn { double(10) };
+    let h2 = spawn { double(20) };
+    let h3 = spawn { double(30) };
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+    let total = r1 + r2 + r3;
+    if total != 120 {
+        print(f"FAIL parallel_spawns: expected 120, got {total}");
+        return 1;
+    }
+    print("  parallel_spawns: OK");
+    0
+}
+
+// Test 3: Channel send/recv basic
+fn test_channel_basic() -> Int {
+    let ch = Channel.new(4);
+    ch.send(42);
+    ch.send(99);
+    let v1 = match ch.recv() { Some(x) => x, None => -1 };
+    let v2 = match ch.recv() { Some(x) => x, None => -1 };
+    if v1 != 42 {
+        print(f"FAIL channel v1: expected 42, got {v1}");
+        return 1;
+    }
+    if v2 != 99 {
+        print(f"FAIL channel v2: expected 99, got {v2}");
+        return 1;
+    }
+    print("  channel_basic: OK");
+    0
+}
+
+// Test 4: Channel with many values and close
+fn test_channel_multi() -> Int {
+    let ch = Channel.new(8);
+    ch.send(10);
+    ch.send(20);
+    ch.send(30);
+    let a = match ch.recv() { Some(x) => x, None => 0 };
+    let b = match ch.recv() { Some(x) => x, None => 0 };
+    let c = match ch.recv() { Some(x) => x, None => 0 };
+    ch.close();
+    let total = a + b + c;
+    if total != 60 {
+        print(f"FAIL channel_multi: expected 60, got {total}");
+        return 1;
+    }
+    print("  channel_multi: OK");
+    0
+}
+
+// Test 5: Fibonacci via spawn
+fn test_fib_spawn() -> Int {
+    let h1 = spawn { fib(10) };
+    let h2 = spawn { fib(12) };
+    let r1 = h1.await;
+    let r2 = h2.await;
+    if r1 != 55 {
+        print(f"FAIL fib r1: expected 55, got {r1}");
+        return 1;
+    }
+    if r2 != 144 {
+        print(f"FAIL fib r2: expected 144, got {r2}");
+        return 1;
+    }
+    print("  fib_spawn: OK");
+    0
+}
+
+// Test 6: Multiple workers
+fn test_multi_worker() -> Int {
+    let h1 = spawn { sum_range(0, 100) };
+    let h2 = spawn { sum_range(100, 100) };
+    let h3 = spawn { sum_range(200, 100) };
+    let h4 = spawn { sum_range(300, 100) };
+    let total = h1.await + h2.await + h3.await + h4.await;
+    if total != 79800 {
+        print(f"FAIL multi_worker: expected 79800, got {total}");
+        return 1;
+    }
+    print("  multi_worker: OK");
+    0
+}
+
+// Test 7: Spawn with expression
+fn test_spawn_expr() -> Int {
+    let x = 100;
+    let y = 23;
+    let h = spawn { x + y };
+    let result = h.await;
+    if result != 123 {
+        print(f"FAIL spawn_expr: expected 123, got {result}");
+        return 1;
+    }
+    print("  spawn_expr: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Async Executor Validation:");
+
+    let mut failures = 0;
+    failures = failures + test_basic_spawn();
+    failures = failures + test_parallel_spawns();
+    failures = failures + test_channel_basic();
+    failures = failures + test_channel_multi();
+    failures = failures + test_fib_spawn();
+    failures = failures + test_multi_worker();
+    failures = failures + test_spawn_expr();
+
+    if failures == 0 {
+        print("All async executor tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,290 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, trie, prefix-tree, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for trie (prefix tree) on integer sequences
+// We simulate a trie with up to 4 branches per node (alphabet 0-3)
+// using flat record-based storage.
+
+// Trie node pool: up to 32 nodes
+// Each node has: children[0..3] (index into pool, -1 = none), is_end flag, count
+type TriePool is {
+    // children for node i: ch[i*4+0..i*4+3]
+    ch0: Int, ch1: Int, ch2: Int, ch3: Int,
+    ch4: Int, ch5: Int, ch6: Int, ch7: Int,
+    ch8: Int, ch9: Int, ch10: Int, ch11: Int,
+    ch12: Int, ch13: Int, ch14: Int, ch15: Int,
+    ch16: Int, ch17: Int, ch18: Int, ch19: Int,
+    ch20: Int, ch21: Int, ch22: Int, ch23: Int,
+    ch24: Int, ch25: Int, ch26: Int, ch27: Int,
+    ch28: Int, ch29: Int, ch30: Int, ch31: Int,
+    // is_end flags for each node (0 or 1)
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    // next free node index
+    next_free: Int
+};
+
+fn tp_get_child(tp: TriePool, idx: Int) -> Int {
+    if idx == 0 { tp.ch0 } else if idx == 1 { tp.ch1 } else if idx == 2 { tp.ch2 }
+    else if idx == 3 { tp.ch3 } else if idx == 4 { tp.ch4 } else if idx == 5 { tp.ch5 }
+    else if idx == 6 { tp.ch6 } else if idx == 7 { tp.ch7 } else if idx == 8 { tp.ch8 }
+    else if idx == 9 { tp.ch9 } else if idx == 10 { tp.ch10 } else if idx == 11 { tp.ch11 }
+    else if idx == 12 { tp.ch12 } else if idx == 13 { tp.ch13 } else if idx == 14 { tp.ch14 }
+    else if idx == 15 { tp.ch15 } else if idx == 16 { tp.ch16 } else if idx == 17 { tp.ch17 }
+    else if idx == 18 { tp.ch18 } else if idx == 19 { tp.ch19 } else if idx == 20 { tp.ch20 }
+    else if idx == 21 { tp.ch21 } else if idx == 22 { tp.ch22 } else if idx == 23 { tp.ch23 }
+    else if idx == 24 { tp.ch24 } else if idx == 25 { tp.ch25 } else if idx == 26 { tp.ch26 }
+    else if idx == 27 { tp.ch27 } else if idx == 28 { tp.ch28 } else if idx == 29 { tp.ch29 }
+    else if idx == 30 { tp.ch30 } else { tp.ch31 }
+}
+
+fn tp_set_child(tp: TriePool, idx: Int, v: Int) -> TriePool {
+    TriePool {
+        ch0: if idx == 0 { v } else { tp.ch0 }, ch1: if idx == 1 { v } else { tp.ch1 },
+        ch2: if idx == 2 { v } else { tp.ch2 }, ch3: if idx == 3 { v } else { tp.ch3 },
+        ch4: if idx == 4 { v } else { tp.ch4 }, ch5: if idx == 5 { v } else { tp.ch5 },
+        ch6: if idx == 6 { v } else { tp.ch6 }, ch7: if idx == 7 { v } else { tp.ch7 },
+        ch8: if idx == 8 { v } else { tp.ch8 }, ch9: if idx == 9 { v } else { tp.ch9 },
+        ch10: if idx == 10 { v } else { tp.ch10 }, ch11: if idx == 11 { v } else { tp.ch11 },
+        ch12: if idx == 12 { v } else { tp.ch12 }, ch13: if idx == 13 { v } else { tp.ch13 },
+        ch14: if idx == 14 { v } else { tp.ch14 }, ch15: if idx == 15 { v } else { tp.ch15 },
+        ch16: if idx == 16 { v } else { tp.ch16 }, ch17: if idx == 17 { v } else { tp.ch17 },
+        ch18: if idx == 18 { v } else { tp.ch18 }, ch19: if idx == 19 { v } else { tp.ch19 },
+        ch20: if idx == 20 { v } else { tp.ch20 }, ch21: if idx == 21 { v } else { tp.ch21 },
+        ch22: if idx == 22 { v } else { tp.ch22 }, ch23: if idx == 23 { v } else { tp.ch23 },
+        ch24: if idx == 24 { v } else { tp.ch24 }, ch25: if idx == 25 { v } else { tp.ch25 },
+        ch26: if idx == 26 { v } else { tp.ch26 }, ch27: if idx == 27 { v } else { tp.ch27 },
+        ch28: if idx == 28 { v } else { tp.ch28 }, ch29: if idx == 29 { v } else { tp.ch29 },
+        ch30: if idx == 30 { v } else { tp.ch30 }, ch31: if idx == 31 { v } else { tp.ch31 },
+        e0: tp.e0, e1: tp.e1, e2: tp.e2, e3: tp.e3,
+        e4: tp.e4, e5: tp.e5, e6: tp.e6, e7: tp.e7,
+        next_free: tp.next_free
+    }
+}
+
+fn tp_get_end(tp: TriePool, node: Int) -> Int {
+    if node == 0 { tp.e0 } else if node == 1 { tp.e1 }
+    else if node == 2 { tp.e2 } else if node == 3 { tp.e3 }
+    else if node == 4 { tp.e4 } else if node == 5 { tp.e5 }
+    else if node == 6 { tp.e6 } else { tp.e7 }
+}
+
+fn tp_set_end(tp: TriePool, node: Int, v: Int) -> TriePool {
+    TriePool {
+        ch0: tp.ch0, ch1: tp.ch1, ch2: tp.ch2, ch3: tp.ch3,
+        ch4: tp.ch4, ch5: tp.ch5, ch6: tp.ch6, ch7: tp.ch7,
+        ch8: tp.ch8, ch9: tp.ch9, ch10: tp.ch10, ch11: tp.ch11,
+        ch12: tp.ch12, ch13: tp.ch13, ch14: tp.ch14, ch15: tp.ch15,
+        ch16: tp.ch16, ch17: tp.ch17, ch18: tp.ch18, ch19: tp.ch19,
+        ch20: tp.ch20, ch21: tp.ch21, ch22: tp.ch22, ch23: tp.ch23,
+        ch24: tp.ch24, ch25: tp.ch25, ch26: tp.ch26, ch27: tp.ch27,
+        ch28: tp.ch28, ch29: tp.ch29, ch30: tp.ch30, ch31: tp.ch31,
+        e0: if node == 0 { v } else { tp.e0 }, e1: if node == 1 { v } else { tp.e1 },
+        e2: if node == 2 { v } else { tp.e2 }, e3: if node == 3 { v } else { tp.e3 },
+        e4: if node == 4 { v } else { tp.e4 }, e5: if node == 5 { v } else { tp.e5 },
+        e6: if node == 6 { v } else { tp.e6 }, e7: if node == 7 { v } else { tp.e7 },
+        next_free: tp.next_free
+    }
+}
+
+fn tp_new() -> TriePool {
+    TriePool {
+        ch0: -1, ch1: -1, ch2: -1, ch3: -1,
+        ch4: -1, ch5: -1, ch6: -1, ch7: -1,
+        ch8: -1, ch9: -1, ch10: -1, ch11: -1,
+        ch12: -1, ch13: -1, ch14: -1, ch15: -1,
+        ch16: -1, ch17: -1, ch18: -1, ch19: -1,
+        ch20: -1, ch21: -1, ch22: -1, ch23: -1,
+        ch24: -1, ch25: -1, ch26: -1, ch27: -1,
+        ch28: -1, ch29: -1, ch30: -1, ch31: -1,
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        next_free: 1  // node 0 is root
+    }
+}
+
+// Sequences are encoded as Arr8: length in d0, elements in d1..d7
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+// Insert sequence into trie. seq.d0 = length, seq.d1..d7 = elements (values 0-3)
+fn trie_insert(tp: TriePool, seq: Arr8) -> TriePool {
+    let len = a8_get(seq, 0);
+    let mut pool = tp;
+    let mut node = 0;  // start at root
+    let mut i = 0;
+    while i < len {
+        let ch = a8_get(seq, i + 1);  // element
+        let child_idx = node * 4 + ch;
+        let child = tp_get_child(pool, child_idx);
+        if child == -1 {
+            // Allocate new node
+            let new_node = pool.next_free;
+            pool = tp_set_child(pool, child_idx, new_node);
+            pool = TriePool {
+                ch0: pool.ch0, ch1: pool.ch1, ch2: pool.ch2, ch3: pool.ch3,
+                ch4: pool.ch4, ch5: pool.ch5, ch6: pool.ch6, ch7: pool.ch7,
+                ch8: pool.ch8, ch9: pool.ch9, ch10: pool.ch10, ch11: pool.ch11,
+                ch12: pool.ch12, ch13: pool.ch13, ch14: pool.ch14, ch15: pool.ch15,
+                ch16: pool.ch16, ch17: pool.ch17, ch18: pool.ch18, ch19: pool.ch19,
+                ch20: pool.ch20, ch21: pool.ch21, ch22: pool.ch22, ch23: pool.ch23,
+                ch24: pool.ch24, ch25: pool.ch25, ch26: pool.ch26, ch27: pool.ch27,
+                ch28: pool.ch28, ch29: pool.ch29, ch30: pool.ch30, ch31: pool.ch31,
+                e0: pool.e0, e1: pool.e1, e2: pool.e2, e3: pool.e3,
+                e4: pool.e4, e5: pool.e5, e6: pool.e6, e7: pool.e7,
+                next_free: new_node + 1
+            };
+            node = new_node;
+        } else {
+            node = child;
+        }
+        i = i + 1;
+    }
+    pool = tp_set_end(pool, node, 1);
+    pool
+}
+
+// Search: return 1 if sequence exists in trie
+fn trie_search(tp: TriePool, seq: Arr8) -> Int {
+    let len = a8_get(seq, 0);
+    let mut node = 0;
+    let mut i = 0;
+    while i < len {
+        let ch = a8_get(seq, i + 1);
+        let child_idx = node * 4 + ch;
+        let child = tp_get_child(tp, child_idx);
+        if child == -1 {
+            return 0;
+        }
+        node = child;
+        i = i + 1;
+    }
+    tp_get_end(tp, node)
+}
+
+// Prefix search: return 1 if any sequence starts with given prefix
+fn trie_has_prefix(tp: TriePool, seq: Arr8) -> Int {
+    let len = a8_get(seq, 0);
+    let mut node = 0;
+    let mut i = 0;
+    while i < len {
+        let ch = a8_get(seq, i + 1);
+        let child_idx = node * 4 + ch;
+        let child = tp_get_child(tp, child_idx);
+        if child == -1 {
+            return 0;
+        }
+        node = child;
+        i = i + 1;
+    }
+    1  // Reached end of prefix without failing
+}
+
+fn test_insert_search() {
+    let mut tp = tp_new();
+    // Insert [0, 1, 2] (length 3)
+    let seq1 = Arr8 { d0: 3, d1: 0, d2: 1, d3: 2, d4: 0, d5: 0, d6: 0, d7: 0 };
+    tp = trie_insert(tp, seq1);
+    assert_eq(trie_search(tp, seq1), 1);
+
+    // Search for [0, 1] — prefix only, not inserted as complete
+    let seq2 = Arr8 { d0: 2, d1: 0, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(trie_search(tp, seq2), 0);
+    assert_eq(trie_has_prefix(tp, seq2), 1);
+
+    // Search for [0, 1, 3] — not inserted
+    let seq3 = Arr8 { d0: 3, d1: 0, d2: 1, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(trie_search(tp, seq3), 0);
+
+    // Insert the prefix [0, 1] too
+    tp = trie_insert(tp, seq2);
+    assert_eq(trie_search(tp, seq2), 1);
+    assert_eq(trie_search(tp, seq1), 1);  // still there
+}
+
+fn test_multiple_sequences() {
+    let mut tp = tp_new();
+    // Insert [0, 0], [0, 1], [1, 0], [1, 1]
+    let s00 = Arr8 { d0: 2, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let s01 = Arr8 { d0: 2, d1: 0, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let s10 = Arr8 { d0: 2, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let s11 = Arr8 { d0: 2, d1: 1, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+
+    tp = trie_insert(tp, s00);
+    tp = trie_insert(tp, s01);
+    tp = trie_insert(tp, s10);
+    tp = trie_insert(tp, s11);
+
+    assert_eq(trie_search(tp, s00), 1);
+    assert_eq(trie_search(tp, s01), 1);
+    assert_eq(trie_search(tp, s10), 1);
+    assert_eq(trie_search(tp, s11), 1);
+
+    // [0, 2] not inserted
+    let s02 = Arr8 { d0: 2, d1: 0, d2: 2, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(trie_search(tp, s02), 0);
+}
+
+fn test_empty_sequence() {
+    let mut tp = tp_new();
+    // Insert empty sequence (length 0) — marks root as end
+    let empty = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    tp = trie_insert(tp, empty);
+    assert_eq(trie_search(tp, empty), 1);
+    // Prefix of empty is always present
+    assert_eq(trie_has_prefix(tp, empty), 1);
+}
+
+fn test_longer_sequence() {
+    let mut tp = tp_new();
+    // Insert [3, 2, 1, 0, 3]
+    let seq = Arr8 { d0: 5, d1: 3, d2: 2, d3: 1, d4: 0, d5: 3, d6: 0, d7: 0 };
+    tp = trie_insert(tp, seq);
+    assert_eq(trie_search(tp, seq), 1);
+
+    // Check prefixes exist
+    let p1 = Arr8 { d0: 1, d1: 3, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let p3 = Arr8 { d0: 3, d1: 3, d2: 2, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(trie_has_prefix(tp, p1), 1);
+    assert_eq(trie_has_prefix(tp, p3), 1);
+    assert_eq(trie_search(tp, p1), 0);
+    assert_eq(trie_search(tp, p3), 0);
+}
+
+fn test_prefix_detection() {
+    let mut tp = tp_new();
+    // Insert [2, 3]
+    let s23 = Arr8 { d0: 2, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    tp = trie_insert(tp, s23);
+
+    // [2] is a prefix of [2, 3]
+    let p2 = Arr8 { d0: 1, d1: 2, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(trie_has_prefix(tp, p2), 1);
+
+    // [1] is not a prefix
+    let p1 = Arr8 { d0: 1, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(trie_has_prefix(tp, p1), 0);
+
+    // [2, 3, 0] extends beyond — not a prefix of anything
+    let s230 = Arr8 { d0: 3, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(trie_has_prefix(tp, s230), 0);
+}
+
+fn main() -> Int {
+    test_insert_search();
+    test_multiple_sequences();
+    test_empty_sequence();
+    test_longer_sequence();
+    test_prefix_detection();
+    print("[OK] 302_trie_structure_aot");
+    0
+}

@@ -1,0 +1,409 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, extern-c, function-declaration
+// @timeout: 10000
+// @description: Tests @extern("C") function declarations for C library interop
+
+/// ============================================================
+/// @EXTERN("C") FUNCTION DECLARATIONS
+/// ============================================================
+///
+/// This file tests the @extern("C") attribute for declaring
+/// external C functions that Verum can call through FFI.
+
+// ------------------------------------------------------------
+// C Type Definitions
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_uchar is u8;
+type c_short is i16;
+type c_ushort is u16;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+type c_longlong is i64;
+type c_ulonglong is u64;
+type c_float is f32;
+type c_double is f64;
+type c_void is ();
+type size_t is usize;
+type ssize_t is isize;
+type pid_t is i32;
+
+// Opaque types for C handles
+@opaque
+type FILE is ();
+
+@opaque
+type DIR is ();
+
+// ------------------------------------------------------------
+// Standard Library Function Declarations
+// ------------------------------------------------------------
+
+/// Standard I/O functions
+ffi stdio {
+    /// Print formatted output to stdout
+    @extern("C")
+    @variadic
+    fn printf(format: *const c_char, ...) -> c_int;
+
+    /// Print formatted output to a file
+    @extern("C")
+    @variadic
+    fn fprintf(stream: *mut FILE, format: *const c_char, ...) -> c_int;
+
+    /// Write string to stdout
+    @extern("C")
+    fn puts(s: *const c_char) -> c_int;
+
+    /// Write character to stdout
+    @extern("C")
+    fn putchar(c: c_int) -> c_int;
+
+    /// Get character from stdin
+    @extern("C")
+    fn getchar() -> c_int;
+
+    /// Open a file
+    @extern("C")
+    fn fopen(filename: *const c_char, mode: *const c_char) -> *mut FILE;
+
+    /// Close a file
+    @extern("C")
+    fn fclose(stream: *mut FILE) -> c_int;
+
+    /// Read from file
+    @extern("C")
+    fn fread(
+        ptr: *mut c_void,
+        size: size_t,
+        nmemb: size_t,
+        stream: *mut FILE
+    ) -> size_t;
+
+    /// Write to file
+    @extern("C")
+    fn fwrite(
+        ptr: *const c_void,
+        size: size_t,
+        nmemb: size_t,
+        stream: *mut FILE
+    ) -> size_t;
+
+    /// Check end of file
+    @extern("C")
+    fn feof(stream: *mut FILE) -> c_int;
+
+    /// Check file error
+    @extern("C")
+    fn ferror(stream: *mut FILE) -> c_int;
+
+    /// Seek in file
+    @extern("C")
+    fn fseek(stream: *mut FILE, offset: c_long, whence: c_int) -> c_int;
+
+    /// Get file position
+    @extern("C")
+    fn ftell(stream: *mut FILE) -> c_long;
+
+    /// Rewind file to beginning
+    @extern("C")
+    fn rewind(stream: *mut FILE);
+}
+
+/// Text functions
+ffi string {
+    /// Get string length
+    @extern("C")
+    fn strlen(s: *const c_char) -> size_t;
+
+    /// Copy string
+    @extern("C")
+    fn strcpy(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+
+    /// Copy string with limit
+    @extern("C")
+    fn strncpy(
+        dest: *mut c_char,
+        src: *const c_char,
+        n: size_t
+    ) -> *mut c_char;
+
+    /// Concatenate strings
+    @extern("C")
+    fn strcat(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+
+    /// Compare strings
+    @extern("C")
+    fn strcmp(s1: *const c_char, s2: *const c_char) -> c_int;
+
+    /// Compare strings with limit
+    @extern("C")
+    fn strncmp(
+        s1: *const c_char,
+        s2: *const c_char,
+        n: size_t
+    ) -> c_int;
+
+    /// Find character in string
+    @extern("C")
+    fn strchr(s: *const c_char, c: c_int) -> *mut c_char;
+
+    /// Find last occurrence of character
+    @extern("C")
+    fn strrchr(s: *const c_char, c: c_int) -> *mut c_char;
+
+    /// Find substring
+    @extern("C")
+    fn strstr(haystack: *const c_char, needle: *const c_char) -> *mut c_char;
+
+    /// Tokenize string
+    @extern("C")
+    fn strtok(s: *mut c_char, delim: *const c_char) -> *mut c_char;
+
+    /// Duplicate string (may need to be freed)
+    @extern("C")
+    fn strdup(s: *const c_char) -> *mut c_char;
+}
+
+/// Memory functions
+ffi memory {
+    /// Allocate memory
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+
+    /// Allocate and zero memory
+    @extern("C")
+    fn calloc(nmemb: size_t, size: size_t) -> *mut c_void;
+
+    /// Reallocate memory
+    @extern("C")
+    fn realloc(ptr: *mut c_void, size: size_t) -> *mut c_void;
+
+    /// Free memory
+    @extern("C")
+    fn free(ptr: *mut c_void);
+
+    /// Copy memory
+    @extern("C")
+    fn memcpy(
+        dest: *mut c_void,
+        src: *const c_void,
+        n: size_t
+    ) -> *mut c_void;
+
+    /// Move memory (handles overlapping regions)
+    @extern("C")
+    fn memmove(
+        dest: *mut c_void,
+        src: *const c_void,
+        n: size_t
+    ) -> *mut c_void;
+
+    /// Set memory to value
+    @extern("C")
+    fn memset(s: *mut c_void, c: c_int, n: size_t) -> *mut c_void;
+
+    /// Compare memory
+    @extern("C")
+    fn memcmp(
+        s1: *const c_void,
+        s2: *const c_void,
+        n: size_t
+    ) -> c_int;
+
+    /// Find byte in memory
+    @extern("C")
+    fn memchr(s: *const c_void, c: c_int, n: size_t) -> *mut c_void;
+}
+
+/// Math functions
+ffi math {
+    @extern("C")
+    fn sin(x: c_double) -> c_double;
+
+    @extern("C")
+    fn cos(x: c_double) -> c_double;
+
+    @extern("C")
+    fn tan(x: c_double) -> c_double;
+
+    @extern("C")
+    fn asin(x: c_double) -> c_double;
+
+    @extern("C")
+    fn acos(x: c_double) -> c_double;
+
+    @extern("C")
+    fn atan(x: c_double) -> c_double;
+
+    @extern("C")
+    fn atan2(y: c_double, x: c_double) -> c_double;
+
+    @extern("C")
+    fn sqrt(x: c_double) -> c_double;
+
+    @extern("C")
+    fn pow(base: c_double, exponent: c_double) -> c_double;
+
+    @extern("C")
+    fn exp(x: c_double) -> c_double;
+
+    @extern("C")
+    fn log(x: c_double) -> c_double;
+
+    @extern("C")
+    fn log10(x: c_double) -> c_double;
+
+    @extern("C")
+    fn floor(x: c_double) -> c_double;
+
+    @extern("C")
+    fn ceil(x: c_double) -> c_double;
+
+    @extern("C")
+    fn round(x: c_double) -> c_double;
+
+    @extern("C")
+    fn fabs(x: c_double) -> c_double;
+
+    @extern("C")
+    fn fmod(x: c_double, y: c_double) -> c_double;
+}
+
+// ------------------------------------------------------------
+// Function Declarations with Custom Link Names
+// ------------------------------------------------------------
+
+/// Custom link name for symbol aliasing
+ffi aliased {
+    @extern("C", name = "my_library_init")
+    fn init() -> c_int;
+
+    @extern("C", name = "my_library_cleanup")
+    fn cleanup();
+
+    @extern("C", name = "__attribute_hidden_function")
+    fn hidden_api(data: *const c_void) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Variadic Function Declarations
+// ------------------------------------------------------------
+
+/// Variadic functions (printf-style)
+ffi variadic {
+    /// Format string to buffer
+    @extern("C")
+    @variadic
+    fn sprintf(str: *mut c_char, format: *const c_char, ...) -> c_int;
+
+    /// Format string to buffer with size limit
+    @extern("C")
+    @variadic
+    fn snprintf(
+        str: *mut c_char,
+        size: size_t,
+        format: *const c_char,
+        ...
+    ) -> c_int;
+
+    /// Scan formatted input from string
+    @extern("C")
+    @variadic
+    fn sscanf(str: *const c_char, format: *const c_char, ...) -> c_int;
+
+    /// Execute command
+    @extern("C")
+    @variadic
+    fn execl(pathname: *const c_char, arg0: *const c_char, ...) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Noreturn Functions
+// ------------------------------------------------------------
+
+/// Functions that never return
+ffi noreturn {
+    /// Exit program
+    @extern("C")
+    @noreturn
+    fn exit(status: c_int) -> !;
+
+    /// Exit program immediately
+    @extern("C")
+    @noreturn
+    fn _exit(status: c_int) -> !;
+
+    /// Abort program
+    @extern("C")
+    @noreturn
+    fn abort() -> !;
+}
+
+// ------------------------------------------------------------
+// Example Usage
+// ------------------------------------------------------------
+
+/// Safe wrapper for strlen
+fn safe_strlen(s: &Text) -> usize {
+    let c_str = s.to_c_string();
+    unsafe { string.strlen(c_str.as_ptr()) }
+}
+
+/// Safe wrapper for file operations
+fn read_file(path: &Text) -> Result<List<u8>, Error> {
+    let c_path = path.to_c_string();
+    let mode = "rb\0".as_ptr() as *const c_char;
+
+    let file = unsafe { stdio.fopen(c_path.as_ptr(), mode) };
+    if file.is_null() {
+        return Err(Error.FileNotFound);
+    }
+
+    defer unsafe { stdio.fclose(file); };
+
+    // Get file size
+    unsafe { stdio.fseek(file, 0, 2); }  // SEEK_END
+    let size = unsafe { stdio.ftell(file) } as usize;
+    unsafe { stdio.rewind(file); }
+
+    // Read content
+    let mut buffer = List.with_capacity(size);
+    buffer.resize(size, 0u8);
+
+    let read_count = unsafe {
+        stdio.fread(
+            buffer.as_mut_ptr() as *mut c_void,
+            1,
+            size,
+            file
+        )
+    };
+
+    if read_count != size {
+        return Err(Error.ReadError);
+    }
+
+    Ok(buffer)
+}
+
+/// Example with math functions
+fn compute_distance(x1: Float, y1: Float, x2: Float, y2: Float) -> Float {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    unsafe { math.sqrt(dx * dx + dy * dy) }
+}
+
+fn main() {
+    // Demonstrate extern function usage
+    let len = safe_strlen(&"Hello, World!");
+    assert(len == 13);
+
+    let distance = compute_distance(0.0, 0.0, 3.0, 4.0);
+    assert(distance == 5.0);
+}

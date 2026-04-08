@@ -1,0 +1,286 @@
+// @test: typecheck-fail
+// @expected-error: Code generation error
+// @tier: 3
+// @level: L3
+// @tags: meta, compile-time, code-generation, error
+
+/// Code generation failure cases
+///
+/// These tests verify that the quote/unquote mechanism properly
+/// handles invalid code generation scenarios.
+
+// ============================================================
+// QUOTE SYNTAX ERRORS
+// ============================================================
+
+// ERROR: Unbalanced braces in quote
+meta fn unbalanced_braces() -> TokenStream {
+    @quote {
+        fn test() {
+            let x = 1;
+        // Missing closing brace
+    }
+}
+
+// ERROR: Unbalanced parentheses
+meta fn unbalanced_parens() -> TokenStream {
+    @quote {
+        fn test((x: Int) -> Int {
+            x
+        }
+    }
+}
+
+// ERROR: Unclosed string literal
+meta fn unclosed_string() -> TokenStream {
+    @quote {
+        let s = "hello;  // Missing closing quote
+    }
+}
+
+// ERROR: Invalid escape sequence
+meta fn bad_escape() -> TokenStream {
+    @quote {
+        let s = "\q";  // \q is not a valid escape
+    }
+}
+
+// ============================================================
+// INTERPOLATION ERRORS
+// ============================================================
+
+// ERROR: Undefined variable in interpolation
+meta fn undefined_interpolation() -> TokenStream {
+    @quote {
+        fn #(undefined_var)() {}  // undefined_var doesn't exist
+    }
+}
+
+// ERROR: Type mismatch in interpolation
+meta fn type_mismatch_interpolation() -> TokenStream {
+    let count: Int = 42;
+    @quote {
+        fn #(count)() {}  // ERROR: Int cannot be used as identifier
+    }
+}
+
+// ERROR: None interpolation
+meta fn none_interpolation() -> TokenStream {
+    let maybe_name: Maybe<Ident> = None;
+    @quote {
+        fn #(maybe_name.unwrap())() {}  // ERROR: unwrap on None
+    }
+}
+
+// ERROR: Empty repetition
+meta fn empty_repetition() -> TokenStream {
+    let items: List<TokenStream> = [];
+    @quote {
+        fn test() {
+            #(items)*  // Generates nothing - might be error depending on context
+        }
+    }
+}
+
+// ============================================================
+// SEMANTIC ERRORS IN GENERATED CODE
+// ============================================================
+
+// ERROR: Generating duplicate definitions
+meta fn duplicate_defs() -> TokenStream {
+    @quote {
+        fn test() {}
+        fn test() {}  // ERROR: Duplicate function definition
+    }
+}
+
+// ERROR: Generating invalid type
+meta fn invalid_type() -> TokenStream {
+    @quote {
+        let x: NonExistentType = 42;  // ERROR: Type doesn't exist
+    }
+}
+
+// ERROR: Generating code with unresolved references
+meta fn unresolved_refs() -> TokenStream {
+    @quote {
+        fn test() {
+            let y = undefined_function();  // ERROR: Function doesn't exist
+        }
+    }
+}
+
+// ERROR: Generating code with wrong visibility
+meta fn visibility_error() -> TokenStream {
+    @quote {
+        // Generating private function but exposing publicly
+        pub fn wrapper() {
+            private_helper()  // ERROR: private_helper is not in scope
+        }
+    }
+}
+
+// ============================================================
+// HYGIENE ERRORS
+// ============================================================
+
+// ERROR: Capturing local variable with wrong hygiene
+meta fn hygiene_capture() -> TokenStream {
+    let local_var = 42;
+    // Without proper hygiene, local_var won't be accessible
+    @quote {
+        fn test() -> Int {
+            local_var  // ERROR: Cannot find value 'local_varp in this scope
+        }
+    }
+}
+
+// ERROR: Name collision without hygiene
+meta fn hygiene_collision(name: Ident) -> TokenStream {
+    @quote {
+        let #(name) = 1;
+        let #(name) = 2;  // ERROR: Cannot redeclare variable in same scope
+        #(name)
+    }
+}
+
+// ERROR: Macro hygiene violation
+meta fn unhygienic_macro() -> TokenStream {
+    @quote {
+        macro_rules! bad {
+            () => {
+                caller_variable  // Accessing variable from callerps scope - unhygienic
+            }
+        }
+    }
+}
+
+// ============================================================
+// TOKEN STREAM ERRORS
+// ============================================================
+
+// ERROR: Invalid token sequence
+meta fn invalid_tokens() -> TokenStream {
+    // Creating invalid token directly
+    TokenStream.from_str("fn fn fn")  // ERROR: Unexpected token 'fnp
+}
+
+// ERROR: Incomplete statement
+meta fn incomplete_stmt() -> TokenStream {
+    @quote {
+        let x =   // Missing expression
+    }
+}
+
+// ERROR: Missing semicolon where required
+meta fn missing_semi() -> TokenStream {
+    @quote {
+        let x = 1
+        let y = 2  // ERROR: Expected ';' after statement
+    }
+}
+
+// ============================================================
+// ATTRIBUTE GENERATION ERRORS
+// ============================================================
+
+// ERROR: Generating invalid attribute
+meta fn invalid_attr() -> TokenStream {
+    @quote {
+        @invalid_attribute_that_does_not_exist
+        fn test() {}
+    }
+}
+
+// ERROR: Attribute with wrong parameters
+meta fn wrong_attr_params() -> TokenStream {
+    @quote {
+        @derive(Debug, Clone, wrong_param = 42)  // derive doesn't accept params
+        type Data is {};
+    }
+}
+
+// ERROR: Attribute in wrong position
+meta fn misplaced_attr() -> TokenStream {
+    @quote {
+        fn test(@attribute param: Int) {}  // Attribute on parameter might not be allowed
+    }
+}
+
+// ============================================================
+// LIFETIME AND REFERENCE ERRORS
+// ============================================================
+
+// ERROR: Generating code with invalid lifetimes
+meta fn invalid_lifetime() -> TokenStream {
+    @quote {
+        fn test<'a>() -> &'b Int {  // 'b is not declared
+            &42
+        }
+    }
+}
+
+// ERROR: Generating code with borrowing errors
+meta fn borrow_error() -> TokenStream {
+    @quote {
+        fn test() {
+            let mut x = 1;
+            let r1 = &mut x;
+            let r2 = &mut x;  // ERROR: Cannot borrow x mutably twice
+            *r1 + *r2
+        }
+    }
+}
+
+// ============================================================
+// RECURSIVE GENERATION ERRORS
+// ============================================================
+
+// ERROR: Infinite code generation
+meta fn infinite_generation(depth: UInt64) -> TokenStream {
+    // This would generate infinite code
+    if true {  // Always true
+        @quote {
+            #(infinite_generation(depth + 1))
+        }
+    } else {
+        @quote {}
+    }
+}
+
+// ERROR: Exceeding expansion limit
+meta fn too_much_code() -> TokenStream {
+    let mut stream = TokenStream.new();
+    for i in 0..1_000_000 {
+        stream.extend(@quote {
+            const VAL_#(i): Int = #(i);
+        });
+    }
+    stream  // ERROR: Code generation limit exceeded
+}
+
+// ============================================================
+// TYPE PARAMETER ERRORS
+// ============================================================
+
+// ERROR: Wrong number of type parameters in generated code
+meta fn wrong_type_params() -> TokenStream {
+    @quote {
+        type MyList is List<Int, Text>;  // List only takes one type parameter
+    }
+}
+
+// ERROR: Unsatisfied trait bounds in generated code
+meta fn unsatisfied_bounds() -> TokenStream {
+    @quote {
+        fn needs_clone<T: Clone>(x: T) -> T { x.clone() }
+        fn call_it() {
+            let f: fn() = || {};
+            needs_clone(f)  // fn() doesn't implement Clone
+        }
+    }
+}
+
+fn main() {
+    // All code generation above should fail
+}

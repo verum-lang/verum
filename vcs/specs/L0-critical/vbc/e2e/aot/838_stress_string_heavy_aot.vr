@@ -1,0 +1,161 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress
+// @timeout: 60000
+// @expected-exit: 0
+
+// String-heavy stress: many format strings, concatenations, comparisons
+
+fn repeat_char(n: Int) -> Text {
+    let mut acc: Text = "";
+    let mut i = 0;
+    while (i < n) {
+        acc = f"{acc}x";
+        i = i + 1;
+    }
+    acc
+}
+
+fn int_to_text(n: Int) -> Text { f"{n}" }
+
+fn build_csv(a: Int, b: Int, c: Int, d: Int) -> Text { f"{a},{b},{c},{d}" }
+
+fn build_label(prefix: Text, idx: Int) -> Text { f"{prefix}_{idx}" }
+
+fn str_eq_i(s: Text, target: Text) -> Int { if (s == target) { 1 } else { 0 } }
+
+fn build_pair(key: Text, val: Int) -> Text { f"{key}={val}" }
+
+fn join3(a: Text, b: Text, c: Text) -> Text { f"{a}|{b}|{c}" }
+
+fn main() -> Int {
+    // Basic string concat
+    assert_eq(repeat_char(5), "xxxxx");
+    assert_eq(repeat_char(10), "xxxxxxxxxx");
+    assert_eq(repeat_char(0), "");
+
+    // Format strings with integers
+    assert_eq(f"value={42}", "value=42");
+    assert_eq(f"x={10}, y={20}", "x=10, y=20");
+    assert_eq(f"negative={-5}", "negative=-5");
+    assert_eq(f"zero={0}", "zero=0");
+
+    // CSV rows
+    assert_eq(build_csv(1, 2, 3, 4), "1,2,3,4");
+    assert_eq(build_csv(100, 200, 300, 400), "100,200,300,400");
+    assert_eq(build_csv(0, 0, 0, 0), "0,0,0,0");
+
+    // Labels
+    assert_eq(build_label("item", 1), "item_1");
+    assert_eq(build_label("item", 99), "item_99");
+    assert_eq(build_label("test", 0), "test_0");
+
+    // Key-value pairs
+    assert_eq(build_pair("score", 100), "score=100");
+    assert_eq(build_pair("level", 5), "level=5");
+
+    // Join3
+    assert_eq(join3("a", "b", "c"), "a|b|c");
+    assert_eq(join3("hello", "world", "end"), "hello|world|end");
+
+    // String comparisons
+    assert_eq(str_eq_i("hello", "hello"), 1);
+    assert_eq(str_eq_i("hello", "world"), 0);
+    assert_eq(str_eq_i("abc", "abc"), 1);
+    assert_eq(str_eq_i("abc", "abd"), 0);
+    assert_eq(str_eq_i("", ""), 1);
+
+    // Many format strings in sequence
+    let mut ok_count = 0;
+    let t01 = f"n={1}";  if (t01 == "n=1") { ok_count = ok_count + 1; }
+    let t02 = f"n={2}";  if (t02 == "n=2") { ok_count = ok_count + 1; }
+    let t03 = f"n={3}";  if (t03 == "n=3") { ok_count = ok_count + 1; }
+    let t04 = f"n={4}";  if (t04 == "n=4") { ok_count = ok_count + 1; }
+    let t05 = f"n={5}";  if (t05 == "n=5") { ok_count = ok_count + 1; }
+    let t06 = f"n={6}";  if (t06 == "n=6") { ok_count = ok_count + 1; }
+    let t07 = f"n={7}";  if (t07 == "n=7") { ok_count = ok_count + 1; }
+    let t08 = f"n={8}";  if (t08 == "n=8") { ok_count = ok_count + 1; }
+    let t09 = f"n={9}";  if (t09 == "n=9") { ok_count = ok_count + 1; }
+    let t10 = f"n={10}"; if (t10 == "n=10") { ok_count = ok_count + 1; }
+    let t11 = f"n={11}"; if (t11 == "n=11") { ok_count = ok_count + 1; }
+    let t12 = f"n={12}"; if (t12 == "n=12") { ok_count = ok_count + 1; }
+    let t13 = f"n={13}"; if (t13 == "n=13") { ok_count = ok_count + 1; }
+    let t14 = f"n={14}"; if (t14 == "n=14") { ok_count = ok_count + 1; }
+    let t15 = f"n={15}"; if (t15 == "n=15") { ok_count = ok_count + 1; }
+    let t16 = f"n={16}"; if (t16 == "n=16") { ok_count = ok_count + 1; }
+    let t17 = f"n={17}"; if (t17 == "n=17") { ok_count = ok_count + 1; }
+    let t18 = f"n={18}"; if (t18 == "n=18") { ok_count = ok_count + 1; }
+    let t19 = f"n={19}"; if (t19 == "n=19") { ok_count = ok_count + 1; }
+    let t20 = f"n={20}"; if (t20 == "n=20") { ok_count = ok_count + 1; }
+    assert_eq(ok_count, 20);
+
+    // Concatenation in loop
+    let mut chain: Text = "start";
+    let mut i = 0;
+    while (i < 20) {
+        chain = f"{chain}.{i}";
+        i = i + 1;
+    }
+    let mut chain2: Text = "start";
+    let mut j = 0;
+    while (j < 20) {
+        chain2 = f"{chain2}.{j}";
+        j = j + 1;
+    }
+    assert_eq(chain, chain2);
+
+    // Nested format strings
+    let inner = f"inner={42}";
+    let outer = f"outer=[{inner}]";
+    assert_eq(outer, "outer=[inner=42]");
+
+    let d1 = f"a={1}";
+    let d2 = f"b=[{d1}]";
+    let d3 = f"c=[{d2}]";
+    assert_eq(d3, "c=[b=[a=1]]");
+
+    // Int to text
+    assert_eq(int_to_text(0), "0");
+    assert_eq(int_to_text(42), "42");
+    assert_eq(int_to_text(-1), "-1");
+    assert_eq(int_to_text(1000000), "1000000");
+
+    // Many unique string literals
+    let lit01 = "alpha";    let lit02 = "bravo";    let lit03 = "charlie";
+    let lit04 = "delta";    let lit05 = "echo_str"; let lit06 = "foxtrot";
+    let lit07 = "golf";     let lit08 = "hotel";    let lit09 = "india";
+    let lit10 = "juliet";
+    assert(lit01 != lit02);
+    assert(lit02 != lit03);
+    assert(lit09 != lit10);
+    assert_eq(lit01, "alpha");
+    assert_eq(lit10, "juliet");
+
+    // Build table of CSV rows
+    let mut table_sum = 0;
+    let mut ri = 0;
+    while (ri < 10) {
+        let row = build_csv(ri, ri * 2, ri * 3, ri * 4);
+        if (ri == 0) { assert_eq(row, "0,0,0,0"); }
+        if (ri == 5) { assert_eq(row, "5,10,15,20"); }
+        table_sum = table_sum + ri;
+        ri = ri + 1;
+    }
+    assert_eq(table_sum, 45);
+
+    // Build many labels in a loop
+    let mut label_ok = 0;
+    let mut li = 0;
+    while (li < 30) {
+        let lbl = build_label("var", li);
+        if (li == 0) { assert_eq(lbl, "var_0"); }
+        if (li == 29) { assert_eq(lbl, "var_29"); }
+        label_ok = label_ok + 1;
+        li = li + 1;
+    }
+    assert_eq(label_ok, 30);
+
+    print("838_stress_string_heavy: PASS");
+    0
+}

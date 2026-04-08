@@ -1,0 +1,191 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: smt, arithmetic
+// @timeout: 5000
+
+/// SMT verification for arithmetic operations
+/// Tests linear and non-linear arithmetic reasoning
+
+/// Error type for overflow
+type OverflowError is ();
+
+/// Linear integer arithmetic
+@verify(proof)
+fn sum_consecutive(n: Int{>= 0}) -> Int {
+    contract#"
+        ensures result == n * (n + 1) / 2;
+        ensures result >= 0;
+    ";
+    let mut sum = 0;
+    for i in 0..=n {
+        contract#"invariant 
+            sum == i * (i - 1) / 2;
+        ";
+        sum += i;
+    }
+    sum
+}
+
+/// Non-linear arithmetic (may require hints)
+@verify(proof)
+fn square_positive(x: Int{!= 0}) -> Int{> 0} {
+    contract#"
+        requires x != 0;
+        ensures result > 0;
+        ensures result == x * x;
+    ";
+    x * x
+}
+
+/// Division and modulo properties
+@verify(proof)
+fn div_mod_relation(a: Int, b: Int{> 0}) -> (Int, Int) {
+    contract#"
+        requires b > 0;
+        ensures result.0 == a / b;
+        ensures result.1 == a % b;
+        ensures result.0 * b + result.1 == a;
+        ensures result.1 >= 0 && result.1 < b;
+    ";
+    (a / b, a % b)
+}
+
+/// Floating point bounds
+@verify(proof)
+fn normalize(value: Float, min: Float, max: Float) -> Float {
+    contract#"
+        requires min < max;
+        requires value >= min && value <= max;
+        ensures result >= 0.0 && result <= 1.0;
+    ";
+    (value - min) / (max - min)
+}
+
+/// Integer overflow prevention
+@verify(proof)
+fn safe_add(a: Int, b: Int) -> Result<Int, OverflowError> {
+    contract#"
+        ensures match result {
+            Ok(val) => val == a + b && !overflow_occurred(a, b),
+            Err(_) => overflow_occurred(a, b)
+        };
+    ";
+    if b > 0 && a > Int.MAX - b {
+        Err(OverflowError)
+    } else if b < 0 && a < Int.MIN - b {
+        Err(OverflowError)
+    } else {
+        Ok(a + b)
+    }
+}
+
+/// Absolute value properties
+@verify(proof)
+fn abs_properties(x: Int) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result >= x;
+        ensures result >= -x;
+        ensures result == x || result == -x;
+        ensures result * result == x * x;
+    ";
+    if x >= 0 { x } else { -x }
+}
+
+/// Triangle inequality
+@verify(proof)
+fn triangle_inequality(a: Float, b: Float) -> Bool {
+    contract#"
+        ensures result == true;  // Always holds for absolute values
+    ";
+    let abs_a = if a >= 0.0 { a } else { -a };
+    let abs_b = if b >= 0.0 { b } else { -b };
+    let abs_sum = if a + b >= 0.0 { a + b } else { -(a + b) };
+    abs_sum <= abs_a + abs_b
+}
+
+/// Power function verification
+@verify(proof)
+fn power(base: Int, exp: Int{>= 0}) -> Int {
+    contract#"
+        requires exp >= 0;
+        ensures exp == 0 implies result == 1;
+        ensures exp == 1 implies result == base;
+        ensures exp > 1 implies result == base * power(base, exp - 1);
+        decreases exp;
+    ";
+    if exp == 0 {
+        1
+    } else {
+        base * power(base, exp - 1)
+    }
+}
+
+/// Arithmetic with bounds
+@verify(proof)
+fn clamp_arithmetic(value: Int, delta: Int, min: Int, max: Int) -> Int {
+    contract#"
+        requires min <= max;
+        ensures result >= min && result <= max;
+    ";
+    let new_value = value + delta;
+    if new_value < min { min }
+    else if new_value > max { max }
+    else { new_value }
+}
+
+/// Geometric series sum
+@verify(proof)
+fn geometric_sum(a: Float, r: Float{!= 1.0}, n: Int{> 0}) -> Float {
+    contract#"
+        requires r != 1.0;
+        requires n > 0;
+        ensures result == a * (1.0 - r.pow(n)) / (1.0 - r);
+    ";
+    a * (1.0 - r.pow(n)) / (1.0 - r)
+}
+
+/// Bit manipulation arithmetic
+@verify(proof)
+fn is_power_of_two(n: Int{> 0}) -> Bool {
+    contract#"
+        requires n > 0;
+        ensures result == exists k: Int. k >= 0 && (1 << k) == n;
+    ";
+    (n & (n - 1)) == 0
+}
+
+/// Average without overflow
+@verify(proof)
+fn safe_average(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result == (a + b) / 2;
+        // Uses the fact that (a/2 + b/2) avoids overflow
+    ";
+    (a >> 1) + (b >> 1) + (a & b & 1)
+}
+
+/// Euclidean GCD verification
+@verify(proof)
+fn gcd(a: Int{> 0}, b: Int{> 0}) -> Int{> 0} {
+    contract#"
+        requires a > 0 && b > 0;
+        ensures result > 0;
+        ensures a % result == 0;
+        ensures b % result == 0;
+        ensures forall d: Int. d > 0 && a % d == 0 && b % d == 0 implies d <= result;
+    ";
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        contract#"invariant 
+            x > 0 && y >= 0;
+            gcd(x, y) == gcd(a, b);
+        ";
+        let temp = y;
+        y = x % y;
+        x = temp;
+    }
+    x
+}

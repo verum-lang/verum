@@ -1,0 +1,175 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, closures, higher_order
+
+// Higher-order functions with closures
+
+// Function taking closure parameter
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U {
+    f(x)
+}
+
+fn test_apply() {
+    let doubled = apply(|x| x * 2, 5);
+}
+
+// Function returning closure
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    move |x| x + n
+}
+
+fn test_make_adder() {
+    let add_5 = make_adder(5);
+    let result = add_5(10);  // 15
+}
+
+// Test map operation
+fn test_map_operation() {
+    let numbers = [1, 2, 3, 4, 5];
+    let doubled = numbers.map(|x| x * 2);
+    let squared = numbers.map(|x| x * x);
+}
+
+// Test filter operation
+fn test_filter_operation() {
+    let numbers = [1, 2, 3, 4, 5];
+    let evens = numbers.filter(|x| x % 2 == 0);
+    let values = [-1, 0, 1, 2, 3];
+    let positives = values.filter(|x| x > 0);
+}
+
+// Test reduce/fold operation
+fn test_fold_operation() {
+    let numbers = [1, 2, 3, 4, 5];
+    let sum = numbers.fold(0, |acc, x| acc + x);
+    let product = numbers.fold(1, |acc, x| acc * x);
+    let max = numbers.reduce(|a, b| if a > b { a } else { b });
+}
+
+// Test chained operations
+fn test_chained_operations() {
+    let numbers = [1, 2, 3, 4, 5];
+    let result = numbers
+        .filter(|x| x > 0)
+        .map(|x| x * 2)
+        .fold(0, |a, b| a + b);
+}
+
+// Test sort with comparator
+fn test_sort_with_comparator() {
+    let items = [3, 1, 4, 1, 5, 9, 2, 6];
+    let sorted = items.sorted_by(|a, b| a.cmp(&b));
+    let reversed = items.sorted_by(|a, b| b.cmp(a));
+}
+
+// Test find/search operations
+fn test_find_operations() {
+    let items = get_items();
+    let target_id = 42;
+    let found = items.find(|x| x.id == target_id);
+    let query = "test";
+    let position = items.position(|x| x.matches(query));
+}
+
+// Test all/any predicates
+fn test_predicates() {
+    let items = get_items();
+    let all_valid = items.all(|x| x.is_valid());
+    let any_error = items.any(|x| x.has_error());
+}
+
+// Test partition
+fn test_partition() {
+    let tests = get_tests();
+    let (passed, failed) = tests.partition(|t| t.passed());
+}
+
+// Test group by
+fn test_group_by() {
+    let items = get_items();
+    let by_category = items.group_by(|x| x.category);
+}
+
+// Test flat map
+fn test_flat_map() {
+    let nested = [[1, 2], [3, 4], [5, 6]];
+    let flat = nested.flat_map(|arr| arr.iter());
+}
+
+// Test take while / skip while
+fn test_take_skip_while() {
+    let items = get_items();
+    let prefix = items.take_while(|x| x.priority > 0);
+    let suffix = items.skip_while(|x| x.priority > 0);
+}
+
+// Test zip with transformation
+fn test_zip_transform() {
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let pairs = a.zip(b).map(|(x, y)| x + y);
+}
+
+// Function composition
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    move |x| g(f(x))
+}
+
+fn test_composition() {
+    let double = |x| x * 2;
+    let add_one = |x| x + 1;
+    let combined = compose(double, add_one);
+}
+
+// Currying
+fn curry<A, B, C>(f: fn(A, B) -> C) -> fn(A) -> fn(B) -> C {
+    move |a| move |b| f(a, b)
+}
+
+fn test_currying() {
+    let add = |a, b| a + b;
+    let curried_add = curry(add);
+    let add_3 = curried_add(3);
+    let result = add_3(4);  // 7
+}
+
+// Partial application
+fn partial<A, B, C>(f: fn(A, B) -> C, a: A) -> fn(B) -> C {
+    move |b| f(a, b)
+}
+
+// Retry wrapper with loop
+fn with_retry<T, E>(f: fn() -> Result<T, E>, max_attempts: Int) -> Result<T, E> {
+    let mut last_result = f();
+    for _ in 1..max_attempts {
+        match last_result {
+            Ok(v) => { last_result = Ok(v); break; }
+            Err(_) => { last_result = f(); }
+        }
+    }
+    last_result
+}
+
+// Timing wrapper
+fn timed<T>(f: fn() -> T) -> (T, Duration) {
+    let start = now();
+    let result = f();
+    let elapsed = now() - start;
+    (result, elapsed)
+}
+
+// Builder pattern with closures
+fn build_config(configure: fn(&mut Config)) -> Config {
+    let mut config = Config.default();
+    configure(&mut config);
+    config
+}
+
+fn test_builder_pattern() {
+    let config = build_config(|c| {
+        c.set_timeout(30);
+        c.enable_logging();
+        c.set_max_retries(3);
+    });
+}

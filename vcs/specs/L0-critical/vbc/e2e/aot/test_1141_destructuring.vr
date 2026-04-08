@@ -1,0 +1,101 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: destructuring, let, pattern, tuple, struct
+// @description: Test destructuring patterns in let bindings
+
+type Point is { x: Int, y: Int };
+
+fn make_point(x: Int, y: Int) -> Point {
+    Point { x: x, y: y }
+}
+
+fn test_struct_destruct() -> Int {
+    let p = make_point(10, 20);
+    let Point { x: px, y: py } = p;
+    if px != 10 || py != 20 {
+        print(f"FAIL struct: ({px}, {py})");
+        return 1;
+    }
+    print("  struct_destruct: OK");
+    0
+}
+
+fn swap_pair(a: Int, b: Int) -> Point {
+    Point { x: b, y: a }
+}
+
+fn test_swap() -> Int {
+    let result = swap_pair(1, 2);
+    let Point { x: first, y: second } = result;
+    if first != 2 || second != 1 {
+        print(f"FAIL swap: ({first}, {second})");
+        return 1;
+    }
+    print("  swap: OK");
+    0
+}
+
+fn min_max(a: Int, b: Int) -> Point {
+    if a < b {
+        Point { x: a, y: b }
+    } else {
+        Point { x: b, y: a }
+    }
+}
+
+fn test_min_max() -> Int {
+    let result = min_max(7, 3);
+    let Point { x: lo, y: hi } = result;
+    if lo != 3 || hi != 7 {
+        print(f"FAIL min_max: ({lo}, {hi})");
+        return 1;
+    }
+    print("  min_max: OK");
+    0
+}
+
+type Size is { width: Int, height: Int };
+
+fn test_size_destruct() -> Int {
+    let s = Size { width: 1920, height: 1080 };
+    let Size { width: w, height: h } = s;
+    let area = w * h;
+    if area != 2073600 {
+        print(f"FAIL size: area={area}");
+        return 1;
+    }
+    print("  size_destruct: OK");
+    0
+}
+
+fn test_match_destruct() -> Int {
+    let p = make_point(5, 10);
+    match p {
+        Point { x: px, y: py } => {
+            if px != 5 || py != 10 {
+                print("FAIL match destruct");
+                return 1;
+            }
+        },
+    }
+    print("  match_destruct: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Destructuring Tests:");
+    let mut failures = 0;
+    failures = failures + test_struct_destruct();
+    failures = failures + test_swap();
+    failures = failures + test_min_max();
+    failures = failures + test_size_destruct();
+    failures = failures + test_match_destruct();
+
+    if failures == 0 {
+        print("All destructuring tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

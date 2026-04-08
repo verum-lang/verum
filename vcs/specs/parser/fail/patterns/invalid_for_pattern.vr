@@ -1,0 +1,74 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, for, loop, error
+// @description: Test invalid patterns in for loops
+// @expected-error: E089
+
+type Point is { x: Int, y: Int };
+
+fn test_for_missing_in() {
+    let items = [1, 2, 3];
+
+    // Invalid: missing 'in' keyword
+    for item items {
+        print(item);
+    }
+}
+
+fn test_for_guard_pattern() {
+    let items = [1, 2, 3, 4, 5];
+
+    // Invalid: guard in for pattern (not allowed)
+    for x if x > 2 in items {
+        print(x);
+    }
+}
+
+fn test_for_or_pattern() {
+    let items = [1, 2, 3];
+
+    // Invalid: or-pattern in for
+    for 1 | 2 | 3 in items {
+        print("matched");
+    }
+}
+
+fn test_for_expression_pattern() {
+    let items = [1, 2, 3];
+
+    // Invalid: expression instead of pattern
+    for 1 + 2 in items {
+        print("expr");
+    }
+}
+
+fn test_for_missing_pattern() {
+    let items = [1, 2, 3];
+
+    // Invalid: missing pattern before in
+    for in items {
+        print("missing");
+    }
+}
+
+fn test_for_double_in() {
+    let items = [1, 2, 3];
+
+    // Invalid: double 'in' keyword
+    for item in in items {
+        print(item);
+    }
+}
+
+fn test_for_await_wrong_order() {
+    let stream = async_stream();
+
+    // Invalid: 'await for' instead of 'for await'
+    await for item in stream {
+        print(item);
+    }
+}
+
+async fn async_stream() -> stream[Int] {
+    stream[1, 2, 3]
+}

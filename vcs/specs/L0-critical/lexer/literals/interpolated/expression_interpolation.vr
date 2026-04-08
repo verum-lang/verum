@@ -1,0 +1,218 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, interpolated, expressions
+
+// Complex expression interpolation tests
+
+fn test_arithmetic_expressions() {
+    // Arithmetic expressions in interpolation
+    let a = 10;
+    let b = 5;
+    let arith_add = f"Result: {a + b}";
+    let arith_sub = f"Result: {a - b}";
+    let arith_mul = f"Result: {a * b}";
+    let arith_div = f"Result: {a / b}";
+    let arith_mod = f"Result: {a % b}";
+
+    // Complex arithmetic
+    let complex_expr = f"Value: {(a + b) * (a - b) / 2}";
+    let nested_parens = f"Calc: {((a + 1) * (b + 2)) - 3}";
+}
+
+fn test_comparison_expressions() {
+    let a = 10;
+    let b = 5;
+    // Comparison expressions
+    let cmp_gt = f"Greater: {a > b}";
+    let cmp_lt = f"Less: {a < b}";
+    let cmp_eq = f"Equal: {a == b}";
+    let cmp_ne = f"Not equal: {a != b}";
+    let cmp_ge = f"Greater or equal: {a >= b}";
+    let cmp_le = f"Less or equal: {a <= b}";
+}
+
+fn test_logical_expressions() {
+    let a = 10;
+    let b = 5;
+    // Logical expressions
+    let log_and = f"And: {true && false}";
+    let log_or = f"Or: {true || false}";
+    let log_not = f"Not: {!true}";
+    let log_complex = f"Logic: {(a > 0) && (b > 0) || (a < 10)}";
+}
+
+fn test_bitwise_expressions() {
+    let a = 10;
+    let b = 5;
+    // Bitwise expressions
+    let bit_and = f"BitAnd: {a & b}";
+    let bit_or = f"BitOr: {a | b}";
+    let bit_xor = f"BitXor: {a ^ b}";
+    let bit_shift_l = f"ShiftL: {a << 2}";
+    let bit_shift_r = f"ShiftR: {a >> 1}";
+}
+
+fn test_method_chains() {
+    // Method chains
+    let text = "hello world";
+    let method_chain = f"Result: {text.to_upper().trim().replace(' ', '_')}";
+    let chained_len = f"Length: {text.trim().len()}";
+}
+
+// Function definitions
+fn square(x: Int) -> Int { x * x }
+fn double(x: Int) -> Int { x * 2 }
+
+fn test_function_calls() {
+    let a = 10;
+    let b = 5;
+    // Function calls
+    let fn_call = f"Squared: {square(5)}";
+    let fn_nested = f"Result: {square(double(3))}";
+    let fn_expr = f"Value: {square(a) + double(b)}";
+}
+
+fn test_array_operations() {
+    // Array operations
+    let arr = [1, 2, 3, 4, 5];
+    let arr_index = f"Third: {arr[2]}";
+    let arr_len = f"Length: {arr.len()}";
+    let arr_first = f"First: {arr.first()}";
+    let arr_last = f"Last: {arr.last()}";
+    let arr_sum = f"Sum: {arr.sum()}";
+}
+
+fn test_tuple_access() {
+    // Tuple access
+    let tuple = (10, "hello", true);
+    let tup_0 = f"First: {tuple.0}";
+    let tup_1 = f"Second: {tuple.1}";
+    let tup_2 = f"Third: {tuple.2}";
+}
+
+// Struct types
+type Point is { x: Int, y: Int };
+type Line is { start: Point, end: Point };
+
+fn test_struct_field_access() {
+    // Struct field access
+    let point = Point { x: 10, y: 20 };
+    let struct_field = f"X: {point.x}, Y: {point.y}";
+    let struct_expr = f"Sum: {point.x + point.y}";
+
+    // Nested struct access
+    let line = Line {
+        start: Point { x: 0, y: 0 },
+        end: Point { x: 100, y: 100 },
+    };
+    let nested_access = f"Start X: {line.start.x}, End Y: {line.end.y}";
+}
+
+fn test_optional_operations() {
+    // Optional/Maybe operations
+    let maybe_val: Maybe<Int> = Some(42);
+    let maybe_unwrap = f"Value: {maybe_val.unwrap_or(0)}";
+    let maybe_map = f"Doubled: {maybe_val.map(|x| x * 2)}";
+
+    // Result operations
+    let result: Result<Int, Text> = Ok(100);
+    let result_ok = f"Result: {result.unwrap_or(0)}";
+}
+
+fn test_range_expressions() {
+    // Range expressions
+    let range_expr = f"Range: {0..10}";
+    let range_inclusive = f"Inclusive: {1..=5}";
+}
+
+fn test_type_casting() {
+    // Type casting
+    let int_val = 42;
+    let float_val = 3.14;
+    let cast_expr = f"As float: {int_val as Float}";
+    let cast_combined = f"Sum: {int_val as Float + float_val}";
+}
+
+fn test_if_expressions() {
+    // If expressions in interpolation
+    let cond_val = 10;
+    let if_expr = f"Status: {if cond_val > 0 { "positive" } else { "non-positive" }}";
+    let if_nested = f"Category: {if cond_val > 100 { "large" } else if cond_val > 10 { "medium" } else { "small" }}";
+}
+
+fn test_match_expressions() {
+    // Match expressions in interpolation
+    let match_val = 2;
+    let match_expr = f"Name: {match match_val { 1 => "one", 2 => "two", 3 => "three", _ => "other" }}";
+}
+
+fn test_closure_interpolation() {
+    let a = 10;
+    // Closure in interpolation
+    let closure_result = f"Applied: {(|x: Int| x * 2)(21)}";
+    let closure_captured = f"Captured: {(|y: Int| y + a)(5)}";
+}
+
+fn test_pipeline_expressions() {
+    // Pipeline expressions
+    let pipeline_result = f"Piped: {5 |> double |> square}";
+}
+
+fn test_null_coalescing() {
+    // Null coalescing
+    let optional: Maybe<Text> = None;
+    let coalesce = f"Value: {optional ?? "default"}";
+}
+
+fn test_string_methods() {
+    // String methods
+    let str = "  hello  ";
+    let str_trim = f"Trimmed: [{str.trim()}]";
+    let str_upper = f"Upper: {str.to_upper()}";
+    let str_lower = f"Lower: {str.to_lower()}";
+    let str_len = f"Length: {str.len()}";
+}
+
+fn test_numeric_formatting() {
+    // Numeric formatting in expressions
+    let num = 1234567;
+    let formatted_num = f"Formatted: {num.to_string().insert_separator(',')}";
+}
+
+fn test_boolean_to_string() {
+    // Boolean to string
+    let bool_val = true;
+    let bool_str = f"Bool: {bool_val.to_string()}";
+}
+
+fn test_complex_nested_expressions() {
+    let arr = [1, 2, 3, 4, 5];
+    let point = Point { x: 10, y: 20 };
+    let b = 5;
+    // Complex nested expressions
+    let complex_nested = f"Complex: {((arr[0] + arr[1]) * point.x) / (if b > 0 { b } else { 1 })}";
+}
+
+fn test_mixed_types() {
+    let a = 10;
+    // Expression with multiple types
+    let mixed_types = f"Int: {a}, Float: {3.14}, Bool: {true}, Text: {"text"}";
+}
+
+fn test_edge_cases() {
+    let a = 10;
+    // Edge: Expression starting with operators
+    let neg_expr = f"Negative: {-a}";
+    let not_expr = f"Not: {!true}";
+
+    // Edge: Expression with string literal inside
+    let str_in_expr = f"Concat: {"hello" + " " + "world"}";
+}
+
+// Constants in expressions
+const PI: Float = 3.14159;
+
+fn test_const_expressions() {
+    let const_expr = f"Circle area: {PI * square(5) as Float}";
+}

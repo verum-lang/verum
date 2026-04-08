@@ -1,0 +1,60 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, reduce
+// @expected-exit: 0
+
+// Tests REAL tensor reduction operations through AOT pipeline.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_REDUCE", t, op, axis) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    if a != b { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    let t = tensor_new(5, 1);
+    let t = tensor_set_scalar(t, 0, 1);
+    let t = tensor_set_scalar(t, 1, 2);
+    let t = tensor_set_scalar(t, 2, 3);
+    let t = tensor_set_scalar(t, 3, 4);
+    let t = tensor_set_scalar(t, 4, 5);
+
+    let s = tensor_reduce(t, 0, 0);
+    errors = errors + check_val(s, 0, 15);
+
+    let mx = tensor_reduce(t, 2, 0);
+    errors = errors + check_val(mx, 0, 5);
+
+    let mn = tensor_reduce(t, 3, 0);
+    errors = errors + check_val(mn, 0, 1);
+
+    let p = tensor_reduce(t, 4, 0);
+    errors = errors + check_val(p, 0, 120);
+
+    let neg = tensor_new(4, 1);
+    let neg = tensor_set_scalar(neg, 0, -5);
+    let neg = tensor_set_scalar(neg, 1, 3);
+    let neg = tensor_set_scalar(neg, 2, -1);
+    let neg = tensor_set_scalar(neg, 3, 7);
+    let neg_max = tensor_reduce(neg, 2, 0);
+    errors = errors + check_val(neg_max, 0, 7);
+    let neg_min = tensor_reduce(neg, 3, 0);
+    errors = errors + check_val(neg_min, 0, -5);
+
+    let z = tensor_new(10, 1);
+    let zs = tensor_reduce(z, 0, 0);
+    errors = errors + check_val(zs, 0, 0);
+
+    errors
+}

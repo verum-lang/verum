@@ -1,0 +1,13 @@
+// @test: typecheck-fail
+// @expected-error: Invalid index: negative indices not allowed
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-check, negative-index
+// @description: Tests that negative indices are rejected at compile time
+
+fn main() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Negative index - caught at compile time
+    let _ = arr[-1];  // ERROR: Negative indices not allowed
+}

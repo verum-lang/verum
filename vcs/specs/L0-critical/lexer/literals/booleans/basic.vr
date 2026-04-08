@@ -1,0 +1,145 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, booleans, basic
+
+// Basic boolean literals
+
+fn test_boolean_literals() {
+    // Simple true literal
+    let t = true;
+    let yes = true;
+    let enabled = true;
+    let active = true;
+
+    // Simple false literal
+    let f = false;
+    let no = false;
+    let disabled = false;
+    let inactive = false;
+
+    // Boolean literals in assignments
+    let is_valid = true;
+    let is_empty = false;
+    let has_value = true;
+    let is_finished = false;
+
+    // Boolean literals with negation
+    let not_true = !true;
+    let not_false = !false;
+    let double_neg = !!true;
+
+    // Boolean literals in logical expressions
+    let and_result = true && true;
+    let or_result = false || true;
+    let complex = true && false || true;
+
+    // Boolean literals with type annotation
+    let typed_true: Bool = true;
+    let typed_false: Bool = false;
+}
+
+// Boolean literals in conditionals
+fn test_conditionals() {
+    if true {
+        let _ = 1;
+    }
+
+    if false {
+        let _ = 2;
+    }
+}
+
+// Boolean literals in comparisons
+fn test_comparisons() {
+    let x = true;
+    let y = false;
+    let z = true;
+    let w = false;
+    let eq_true = x == true;
+    let eq_false = y == false;
+    let ne_true = z != true;
+    let ne_false = w != false;
+}
+
+// Boolean literals in function parameters
+fn check(flag: Bool) -> Bool {
+    flag
+}
+
+fn test_function_calls() {
+    let result1 = check(true);
+    let result2 = check(false);
+}
+
+// Boolean literals in arrays
+fn test_arrays() {
+    let flags = [true, false, true, false];
+    let all_true = [true, true, true];
+    let all_false = [false, false, false];
+}
+
+// Boolean literals in tuples
+fn test_tuples() {
+    let pair = (true, false);
+    let triple = (true, false, true);
+}
+
+// Boolean literals in struct fields
+type Config is {
+    enabled: Bool,
+    debug: Bool,
+    verbose: Bool,
+};
+
+fn test_struct_fields() {
+    let config = Config {
+        enabled: true,
+        debug: false,
+        verbose: true,
+    };
+}
+
+// Boolean literals in match expressions
+fn describe(b: Bool) -> Text {
+    match b {
+        true => "yes"
+        false => "no"
+    }
+}
+
+// Boolean literals in conditional expressions
+fn test_conditional_expressions() {
+    let ternary = if true { 1 } else { 0 };
+    let other = if false { "a" } else { "b" };
+}
+
+// Boolean literals in return statements
+fn always_true() -> Bool {
+    return true
+}
+
+fn always_false() -> Bool {
+    return false
+}
+
+// Boolean literals in while loops
+fn test_while_loops() {
+    let mut counter = 0;
+    while true {
+        if counter > 5 {
+            break
+        }
+        counter = counter + 1;
+    }
+}
+
+// Boolean literals in guard expressions
+fn test_guards() {
+    let value = 42;
+    match value {
+        x if true => x
+        x if false => x
+        _ => 0
+    };
+}

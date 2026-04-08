@@ -1,0 +1,532 @@
+// @test: differential
+// @tier: all
+// @impl: all
+// @level: L2
+// @tags: differential, memory, cross-impl
+// @platform: any
+// @timeout: 20000
+
+/// Memory model tests for cross-implementation verification.
+/// Verifies that all Verum implementations correctly handle memory
+/// allocation, reference semantics, concurrent access, and cleanup ordering.
+
+fn main() {
+    test_allocation_behavior();
+    test_reference_semantics();
+    test_value_semantics();
+    test_ownership_transfer();
+    test_drop_semantics();
+    test_interior_mutability();
+    test_memory_layout();
+    test_aliasing_rules();
+    test_escape_analysis();
+    test_memory_safety_guarantees();
+}
+
+/// Allocation behavior
+fn test_allocation_behavior() {
+    println("=== Allocation Behavior ===");
+
+    // Stack allocation
+    let stack_int: Int = 42;
+    let stack_float: Float = 3.14;
+    let stack_bool: Bool = true;
+    println(f"stack values: {stack_int}, {stack_float}, {stack_bool}");
+
+    // Heap allocation via Heap
+    let heap_int = Heap(42);
+    let heap_float = Heap(3.14);
+    println(f"heap values: {*heap_int}, {*heap_float}");
+
+    // Collection allocation
+    let list = List.from([1, 2, 3, 4, 5]);
+    let map = Map.from([("a", 1), ("b", 2)]);
+    let set = Set.from([1, 2, 3]);
+    println(f"collections: list={list.len()}, map={map.len()}, set={set.len()}");
+
+    // Capacity management
+    let mut vec = List.with_capacity(100);
+    println(f"capacity before: {vec.capacity()}");
+    for i in 0..50 {
+        vec.push(i);
+    }
+    println(f"capacity after 50 pushes: {vec.capacity()}");
+    vec.shrink_to_fit();
+    println(f"capacity after shrink: {vec.capacity()}");
+
+    // Zero-sized types
+    type ZeroSized is {};
+    let zst = ZeroSized {};
+    let zst_box = Heap(ZeroSized {});
+    println(f"ZST created");
+
+    // Large allocation
+    let large_array = [0u8; 1024 * 1024];  // 1MB
+    println(f"large array created: {large_array.len()} bytes");
+}
+
+/// Reference semantics
+fn test_reference_semantics() {
+    println("\n=== Reference Semantics ===");
+
+    // Immutable reference
+    let value = 42;
+    let ref1 = &value;
+    let ref2 = &value;
+    let ref3 = &value;
+    println(f"multiple immutable refs: {*ref1}, {*ref2}, {*ref3}");
+
+    // Mutable reference (exclusive)
+    let mut mutable = 100;
+    {
+        let mut_ref = &mut mutable;
+        *mut_ref += 50;
+    }
+    println(f"after mutation: {mutable}");
+
+    // Reference to struct field
+    type Container is { x: Int, y: Int };
+    let container = Container { x: 10, y: 20 };
+    let x_ref = &container.x;
+    let y_ref = &container.y;
+    println(f"field refs: {*x_ref}, {*y_ref}");
+
+    // Reference to array element
+    let arr = [10, 20, 30, 40, 50];
+    let elem_ref = &arr[2];
+    println(f"array element ref: {*elem_ref}");
+
+    // Reference to slice
+    let slice = &arr[1..4];
+    println(f"slice: {slice}");
+
+    // Reference coercion
+    fn takes_ref(r: &Int) {
+        println(f"takes_ref: {*r}");
+    }
+    let owned = 42;
+    takes_ref(&owned);
+
+    // Reference reborrowing
+    fn reborrow(r: &mut Int) {
+        let inner = &*r;  // Reborrow as immutable
+        println(f"reborrowed: {*inner}");
+    }
+    let mut val = 50;
+    reborrow(&mut val);
+}
+
+/// Value semantics (Copy vs Move)
+fn test_value_semantics() {
+    println("\n=== Value Semantics ===");
+
+    // Copy types
+    let int_val: Int = 42;
+    let int_copy = int_val;
+    println(f"int copy: original={int_val}, copy={int_copy}");
+
+    let float_val: Float = 3.14;
+    let float_copy = float_val;
+    println(f"float copy: original={float_val}, copy={float_copy}");
+
+    let bool_val: Bool = true;
+    let bool_copy = bool_val;
+    println(f"bool copy: original={bool_val}, copy={bool_copy}");
+
+    // Tuple of Copy types is Copy
+    let tuple = (1, 2, 3);
+    let tuple_copy = tuple;
+    println(f"tuple copy: original={tuple}, copy={tuple_copy}");
+
+    // Array of Copy types is Copy
+    let arr = [1, 2, 3, 4, 5];
+    let arr_copy = arr;
+    println(f"array copy: original={arr}, copy={arr_copy}");
+
+    // Custom Copy type
+    @derive(Copy, Clone)
+    type Point is { x: Int, y: Int };
+
+    let point = Point { x: 10, y: 20 };
+    let point_copy = point;
+    println(f"struct copy: ({point.x}, {point.y}), ({point_copy.x}, {point_copy.y})");
+
+    // Move types
+    let list = List.from([1, 2, 3]);
+    let list_moved = list;  // list is moved
+    println(f"list moved: {list_moved}");
+
+    // Clone for explicit copy
+    let original = List.from([1, 2, 3]);
+    let cloned = original.clone();
+    println(f"clone: original={original}, cloned={cloned}");
+}
+
+/// Ownership transfer
+fn test_ownership_transfer() {
+    println("\n=== Ownership Transfer ===");
+
+    // Transfer to function
+    fn take_ownership(data: Heap<Int>) -> Int {
+        *data
+    }
+
+    let boxed = Heap(42);
+    let result = take_ownership(boxed);
+    // boxed is no longer valid here
+    println(f"ownership transferred: {result}");
+
+    // Transfer from function
+    fn give_ownership() -> Heap<Int> {
+        Heap(100)
+    }
+
+    let received = give_ownership();
+    println(f"ownership received: {*received}");
+
+    // Transfer in struct
+    type Owner is {
+        data: List<Int>,
+    };
+
+    let list = List.from([1, 2, 3]);
+    let owner = Owner { data: list };
+    // list is moved into owner
+    println(f"owner has: {owner.data}");
+
+    // Partial move
+    type Pair is {
+        first: Heap<Int>,
+        second: Heap<Int>,
+    };
+
+    let pair = Pair {
+        first: Heap(1),
+        second: Heap(2),
+    };
+    let moved_first = pair.first;
+    // pair.first is invalid, pair.second is still valid
+    println(f"partial move: first={*moved_first}");
+
+    // Move in pattern matching
+    type Container is Value(Heap<Int>) | Empty;
+
+    let container = Container.Value(Heap(42));
+    match container {
+        Container.Value(v) => println(f"matched: {*v}"),
+        Container.Empty => println("empty"),
+    }
+    // container is consumed
+}
+
+/// Drop semantics
+fn test_drop_semantics() {
+    println("\n=== Drop Semantics ===");
+
+    // Track drop order
+    type Tracker is {
+        id: Int,
+    };
+
+    implement Drop for Tracker {
+        fn drop(&mut self) {
+            println(f"  dropping {self.id}");
+        }
+    }
+
+    // Locals dropped in reverse declaration order
+    println("local drop order:");
+    {
+        let _a = Tracker { id: 1 };
+        let _b = Tracker { id: 2 };
+        let _c = Tracker { id: 3 };
+        println("  before scope ends");
+    }
+    println("  after scope");
+
+    // Struct fields dropped after struct
+    println("struct field drop order:");
+    type DropContainer is {
+        first: Tracker,
+        second: Tracker,
+    };
+    {
+        let _cont = DropContainer {
+            first: Tracker { id: 10 },
+            second: Tracker { id: 20 },
+        };
+        println("  before container drops");
+    }
+    println("  after container");
+
+    // Explicit drop
+    println("explicit drop:");
+    {
+        let early = Tracker { id: 100 };
+        println("  before explicit drop");
+        drop(early);
+        println("  after explicit drop");
+    }
+
+    // Conditional drop
+    println("conditional drop:");
+    {
+        let val = Tracker { id: 200 };
+        let condition = true;
+        if condition {
+            drop(val);
+            println("  dropped in if");
+        }
+        println("  end of scope");
+    }
+
+    // Drop in loop
+    println("loop drop:");
+    for i in 0..3 {
+        let _loop_val = Tracker { id: 300 + i };
+        println(f"  iteration {i}");
+    }
+    println("  after loop");
+}
+
+/// Interior mutability patterns
+fn test_interior_mutability() {
+    println("\n=== Interior Mutability ===");
+
+    // Cell for Copy types
+    let cell = Cell.new(0);
+    println(f"cell initial: {cell.get()}");
+    cell.set(42);
+    println(f"cell after set: {cell.get()}");
+
+    // Multiple modifications through shared ref
+    let shared_cell = &cell;
+    shared_cell.set(100);
+    println(f"cell via shared ref: {cell.get()}");
+
+    // RefCell for runtime borrow checking
+    let refcell = RefCell.new(List.from([1, 2, 3]));
+
+    {
+        let borrowed = refcell.borrow();
+        println(f"refcell borrowed: {*borrowed}");
+    }
+
+    {
+        let mut borrowed_mut = refcell.borrow_mut();
+        borrowed_mut.push(4);
+    }
+    println(f"refcell after mutation: {refcell.borrow()}");
+
+    // OnceCell for lazy initialization
+    let once = OnceCell.new();
+    println(f"once is_initialized: {once.get().is_some()}");
+
+    let value = once.get_or_init(|| {
+        println("initializing once cell");
+        42
+    });
+    println(f"once value: {*value}");
+
+    // Second access doesn't reinitialize
+    let value2 = once.get_or_init(|| {
+        println("this won't print");
+        0
+    });
+    println(f"once value2: {*value2}");
+
+    // Mutex for thread-safe interior mutability
+    let mutex = Mutex.new(0);
+    {
+        let mut guard = mutex.lock().unwrap();
+        *guard += 10;
+    }
+    println(f"mutex value: {*mutex.lock().unwrap()}");
+}
+
+/// Memory layout
+fn test_memory_layout() {
+    println("\n=== Memory Layout ===");
+
+    // Size of primitives
+    println(f"size_of Int: {Int.size}");
+    println(f"size_of Float: {Float.size}");
+    println(f"size_of Bool: {Bool.size}");
+    println(f"size_of Char: {Char.size}");
+
+    // Size of references
+    println(f"size_of &Int: {&Int.size}");
+    println(f"size_of &mut Int: {&mut Int.size}");
+    println(f"size_of Heap<Int>: {Heap<Int>.size}");
+
+    // Size of structs
+    type Empty is {};
+    type OneInt is { x: Int };
+    type TwoInts is { x: Int, y: Int };
+    type Mixed is { x: Int, y: Bool, z: Int };
+
+    println(f"size_of Empty: {Empty.size}");
+    println(f"size_of OneInt: {OneInt.size}");
+    println(f"size_of TwoInts: {TwoInts.size}");
+    println(f"size_of Mixed: {Mixed.size}");
+
+    // Alignment
+    println(f"align_of Int: {Int.alignment}");
+    println(f"align_of Mixed: {Mixed.alignment}");
+
+    // Option optimization
+    println(f"size_of Maybe<Int>: {Maybe<Int>.size}");
+    println(f"size_of Maybe<&Int>: {Maybe<&Int>.size}");  // Niche optimization
+    println(f"size_of Maybe<Heap<Int>>: {Maybe<Heap<Int>>.size}");  // Niche optimization
+
+    // Enum layout
+    type SmallEnum is A | B | C;
+    type LargeEnum is X(Int) | Y(Float) | Z([Int; 10]);
+
+    println(f"size_of SmallEnum: {SmallEnum.size}");
+    println(f"size_of LargeEnum: {LargeEnum.size}");
+}
+
+/// Aliasing rules
+fn test_aliasing_rules() {
+    println("\n=== Aliasing Rules ===");
+
+    // No mutable aliasing
+    let mut value = 42;
+
+    // Multiple immutable references OK
+    let r1 = &value;
+    let r2 = &value;
+    println(f"immutable aliases: {*r1}, {*r2}");
+
+    // Mutable reference excludes others
+    {
+        let r_mut = &mut value;
+        *r_mut = 100;
+        // r1, r2 cannot be used here
+    }
+    println(f"after mutation: {value}");
+
+    // Reborrowing allows nested borrows
+    let mut data = 50;
+    fn nested_borrow(r: &mut Int) {
+        {
+            let inner = &*r;  // Reborrow immutably
+            println(f"inner borrow: {*inner}");
+        }
+        *r += 10;  // Mutable use after inner borrow ends
+    }
+    nested_borrow(&mut data);
+    println(f"after nested borrow: {data}");
+
+    // Split borrows of struct fields
+    type TwoFields is { a: Int, b: Int };
+    let mut fields = TwoFields { a: 1, b: 2 };
+    let a_ref = &mut fields.a;
+    let b_ref = &mut fields.b;  // OK: different fields
+    *a_ref += 10;
+    *b_ref += 20;
+    println(f"split borrows: a={fields.a}, b={fields.b}");
+
+    // Split borrows of array elements
+    let mut arr = [1, 2, 3, 4, 5];
+    let (left, right) = arr.split_at_mut(2);
+    left[0] = 10;
+    right[0] = 30;
+    println(f"split array: {arr}");
+}
+
+/// Escape analysis hints
+fn test_escape_analysis() {
+    println("\n=== Escape Analysis ===");
+
+    // Non-escaping reference (can be optimized to stack)
+    fn local_ref_only() -> Int {
+        let local = 42;
+        let r = &local;  // r doesn't escape
+        *r + 1
+    }
+    println(f"local ref: {local_ref_only()}");
+
+    // Escaping reference via return (requires lifetime)
+    fn escaping_ref(data: &List<Int>) -> &Int {
+        &data[0]  // Reference escapes
+    }
+    let list = List.from([1, 2, 3]);
+    let escaped = escaping_ref(&list);
+    println(f"escaped ref: {*escaped}");
+
+    // Closure capture analysis
+    let captured = 42;
+
+    // Non-escaping closure
+    let local_closure = || captured * 2;
+    println(f"local closure: {local_closure()}");
+
+    // Escaping closure via return
+    fn make_adder(n: Int) -> impl Fn(Int) -> Int {
+        move |x| x + n  // n must be moved/owned
+    }
+    let adder = make_adder(10);
+    println(f"escaping closure: {adder(5)}");
+
+    // Heap avoidance when value doesn't escape
+    fn may_not_need_heap() -> Int {
+        let boxed = Heap(42);  // May be stack-allocated
+        *boxed
+    }
+    println(f"heap elision: {may_not_need_heap()}");
+}
+
+/// Memory safety guarantees
+fn test_memory_safety_guarantees() {
+    println("\n=== Memory Safety ===");
+
+    // Bounds checking
+    fn safe_index(arr: &[Int], idx: Int) -> Maybe<Int> {
+        arr.get(idx).copied()
+    }
+
+    let arr = [10, 20, 30];
+    println(f"safe_index(1): {safe_index(&arr, 1)}");
+    println(f"safe_index(10): {safe_index(&arr, 10)}");
+
+    // No null pointers (use Maybe instead)
+    fn find_item<T: Eq>(list: &List<T>, target: &T) -> Maybe<&T> {
+        list.iter().find(|&x| x == target)
+    }
+
+    let items = List.from([1, 2, 3]);
+    println(f"find 2: {find_item(&items, &2).is_some()}");
+    println(f"find 5: {find_item(&items, &5).is_none()}");
+
+    // Checked arithmetic
+    let max: I32 = I32.MAX;
+    match max.checked_add(1) {
+        Some(v) => println(f"add succeeded: {v}"),
+        None => println("overflow prevented"),
+    }
+
+    // Safe transmute via enums (not raw memory)
+    type Either<L, R> is Left(L) | Right(R);
+
+    let value: Either<Int, Text> = Either.Left(42);
+    match value {
+        Either.Left(n) => println(f"got int: {n}"),
+        Either.Right(s) => println(f"got text: {s}"),
+    }
+
+    // CBGR reference safety
+    fn demonstrate_cbgr_safety() {
+        let data = List.from([1, 2, 3]);
+        let reference = &data[0];  // Reference with generation
+
+        // Generation is checked on every access
+        println(f"CBGR protected access: {*reference}");
+
+        // Reference becomes invalid when data is dropped
+        // (compile-time borrow checker prevents this)
+    }
+    demonstrate_cbgr_safety();
+    println("CBGR safety demonstrated");
+}

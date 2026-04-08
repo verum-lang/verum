@@ -1,0 +1,98 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, algorithm, sorting
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Sorting algorithms: bubble sort, selection sort
+
+fn bubble_sort(arr: List<Int>) -> List<Int> {
+    let n = arr.len();
+    let mut sorted = List.new();
+    let mut i = 0;
+    while i < n {
+        sorted.push(arr[i]);
+        i = i + 1;
+    }
+
+    let mut swapped = true;
+    while swapped {
+        swapped = false;
+        let mut j = 0;
+        while j < n - 1 {
+            if sorted[j] > sorted[j + 1] {
+                let tmp = sorted[j];
+                sorted[j] = sorted[j + 1];
+                sorted[j + 1] = tmp;
+                swapped = true;
+            }
+            j = j + 1;
+        }
+    }
+    sorted
+}
+
+fn is_sorted(arr: List<Int>) -> Bool {
+    let mut i = 0;
+    while i < arr.len() - 1 {
+        if arr[i] > arr[i + 1] {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn main() -> Int {
+    // Sort descending
+    let mut desc = List.new();
+    desc.push(5);
+    desc.push(4);
+    desc.push(3);
+    desc.push(2);
+    desc.push(1);
+
+    let sorted = bubble_sort(desc);
+    assert_eq(sorted[0], 1);
+    assert_eq(sorted[1], 2);
+    assert_eq(sorted[2], 3);
+    assert_eq(sorted[3], 4);
+    assert_eq(sorted[4], 5);
+    assert_eq(is_sorted(sorted), true);
+
+    // Sort with duplicates
+    let mut dups = List.new();
+    dups.push(3);
+    dups.push(1);
+    dups.push(4);
+    dups.push(1);
+    dups.push(5);
+    dups.push(9);
+    dups.push(2);
+    dups.push(6);
+
+    let sorted2 = bubble_sort(dups);
+    assert_eq(sorted2[0], 1);
+    assert_eq(sorted2[1], 1);
+    assert_eq(sorted2[7], 9);
+    assert_eq(is_sorted(sorted2), true);
+
+    // Already sorted
+    let mut asc = List.new();
+    asc.push(1);
+    asc.push(2);
+    asc.push(3);
+    let sorted3 = bubble_sort(asc);
+    assert_eq(sorted3[0], 1);
+    assert_eq(sorted3[2], 3);
+
+    // Single element
+    let mut single = List.new();
+    single.push(42);
+    let sorted4 = bubble_sort(single);
+    assert_eq(sorted4[0], 42);
+
+    print("diff_sorting: ok");
+    0
+}

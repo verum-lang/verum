@@ -1,0 +1,64 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test math operations for Float type
+
+fn main() {
+    // Test sqrt
+    assert_eq(4.0.sqrt(), 2.0);
+    assert_eq(9.0.sqrt(), 3.0);
+    assert_eq(16.0.sqrt(), 4.0);
+
+    // Test pow
+    assert_eq(2.0.pow(3.0), 8.0);
+    assert_eq(3.0.pow(2.0), 9.0);
+
+    // Test powi (integer power)
+    assert_eq(2.0.powi(10), 1024.0);
+
+    // Test exp and ln
+    let e = Float.e();
+    let ln_e = e.ln();
+    assert(ln_e > 0.99 && ln_e < 1.01);  // ln(e) ~ 1
+
+    // Test log10
+    assert_eq(1000.0.log10(), 3.0);
+    assert_eq(100.0.log10(), 2.0);
+
+    // Test log2
+    assert_eq(8.0.log2(), 3.0);
+    assert_eq(16.0.log2(), 4.0);
+
+    // Test floor, ceil, round
+    assert_eq(2.3.floor(), 2.0);
+    assert_eq(2.7.ceil(), 3.0);
+    assert_eq(2.5.round(), 3.0);  // Round half up
+
+    // Test trunc
+    assert_eq(2.9.trunc(), 2.0);
+    assert_eq((-2.9).trunc(), -2.0);
+
+    // Test sin, cos at 0
+    assert_eq(0.0.sin(), 0.0);
+    assert_eq(0.0.cos(), 1.0);
+
+    // Test pi constant
+    let pi = Float.pi();
+    assert(pi > 3.14 && pi < 3.15);
+
+    // Test sin(pi/2) ~ 1
+    let sin_half_pi = (pi / 2.0).sin();
+    assert(sin_half_pi > 0.99 && sin_half_pi < 1.01);
+
+    // Test hypot (Pythagorean)
+    assert_eq(3.0.hypot(4.0), 5.0);
+
+    // Test to_degrees and to_radians
+    let rad = (pi / 2.0);
+    let deg = rad.to_degrees();
+    assert(deg > 89.0 && deg < 91.0);  // ~90 degrees
+
+    let back_to_rad = deg.to_radians();
+    assert((back_to_rad - rad).abs() < 0.0001);
+}

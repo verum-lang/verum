@@ -1,0 +1,151 @@
+// Async edge cases
+// Tests async/await patterns and edge conditions
+
+use verum_core.base.{List, Maybe, Result}
+use verum_std.async.{spawn, sleep, join_all, timeout}
+
+// Basic async function
+async fn simple_async() -> Int {
+    42
+}
+
+// Async with await
+async fn await_simple() -> Int {
+    let x = simple_async().await;
+    x + 1
+}
+
+// Nested async
+async fn nested_async() -> Int {
+    let a = simple_async().await;
+    let b = await_simple().await;
+    a + b
+}
+
+// Async with early return
+async fn early_return(condition: Bool) -> Int {
+    if condition {
+        return 0;
+    }
+    simple_async().await
+}
+
+// Async with loop
+async fn async_loop(n: Int) -> Int {
+    let mut sum = 0;
+    for i in 0..n {
+        sum = sum + simple_async().await;
+    }
+    sum
+}
+
+// Async with error handling
+async fn async_fallible() -> Result<Int, Text> {
+    let x = simple_async().await;
+    if x > 0 {
+        Ok(x)
+    } else {
+        Err("negative value")
+    }
+}
+
+// Parallel async
+async fn parallel_work() -> Int {
+    let task1 = spawn { simple_async().await };
+    let task2 = spawn { simple_async().await };
+
+    let a = task1.await;
+    let b = task2.await;
+    a + b
+}
+
+// Join all pattern
+async fn join_all_tasks() -> List<Int> {
+    let tasks = [
+        spawn { simple_async().await },
+        spawn { simple_async().await },
+        spawn { simple_async().await },
+    ];
+    join_all(tasks).await
+}
+
+// Timeout pattern
+async fn with_timeout() -> Maybe<Int> {
+    match timeout(1000, simple_async()).await {
+        Ok(result) => Some(result),
+        Err(_) => None,
+    }
+}
+
+// Async closure
+async fn with_async_closure() -> Int {
+    let f = async |x| x + 1;
+    f(41).await
+}
+
+// Async in match
+async fn async_in_match(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(x) => simple_async().await + x,
+        None => 0,
+    }
+}
+
+// Cancellation edge case
+async fn cancellable() -> Int {
+    // This might be cancelled before completion
+    sleep(100).await;
+    42
+}
+
+// Select/race pattern
+async fn race_tasks() -> Int {
+    select {
+        result = simple_async() => result,
+        _ = sleep(1000) => 0,
+    }
+}
+
+// Recursive async (with fuel)
+async fn recursive_async(depth: Int) -> Int {
+    if depth <= 0 {
+        1
+    } else {
+        let sub = recursive_async(depth - 1).await;
+        sub * 2
+    }
+}
+
+// Async with mutable state
+async fn async_with_state() -> Int {
+    let mut counter = 0;
+    for _ in 0..10 {
+        sleep(1).await;
+        counter = counter + 1;
+    }
+    counter
+}
+
+// Async protocol implementation
+protocol AsyncReader {
+    async fn read(self) -> Result<List<Byte>, Error>;
+}
+
+// Main function (sync)
+fn main() {
+    // Run async from sync context
+    let result = block_on(simple_async());
+    assert result == 42;
+
+    let nested = block_on(nested_async());
+    assert nested == 85;
+
+    let parallel = block_on(parallel_work());
+    assert parallel == 84;
+}
+
+// Helper to run async in sync context
+fn block_on<T>(future: async T) -> T {
+    // Runtime provides this
+    runtime.block_on(future)
+}

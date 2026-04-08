@@ -1,0 +1,975 @@
+// =============================================================================
+// VCS Test Suite: stdlib/mem/thin_ref.vr - ThinRef<T> Tests
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: mem, cbgr, thin_ref, reference, validation, revocation
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for ThinRef<T>, the 16-byte generational reference for sized types.
+// ThinRef provides memory safety through generation-based validation with
+// ~15ns overhead per dereference.
+//
+// =============================================================================
+
+mount core.mem.thin_ref.{
+    ThinRef, thin_ref_from_heap, deref_thin, deref_thin_mut,
+};
+mount core.mem.header.{
+    AllocationHeader, HEADER_SIZE, GEN_INITIAL, GEN_UNALLOCATED,
+};
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_MUTABLE, CAP_REVOKE, CAP_OWNED,
+    CAP_BORROW_SHARED, CAP_BORROW_MUT, CAP_READ_WRITE, CAP_DELEGATE,
+    CAP_EXECUTE,
+};
+mount core.mem.{UseAfterFreeError, RevocationError};
+
+mount core.intrinsics.{ptr_offset, ptr_write};
+
+// Local constant combining WRITE and MUTABLE capabilities
+// (working around parser issue with | operator in function arguments)
+const CAP_WRITE_MUTABLE: UInt16 = 66;  // CAP_WRITE(2) | CAP_MUTABLE(64)
+
+// =============================================================================
+// Layout Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_size_is_16_bytes() {
+    // ThinRef must be exactly 16 bytes (fits in 2 registers)
+    assert_eq(ThinRef<Int>.size, 16);
+}
+
+@test
+fn test_thin_ref_alignment_is_8() {
+    // Must be 8-byte aligned for efficient access
+    assert_eq(ThinRef<Int>.align, 8);
+}
+
+// =============================================================================
+// Construction Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_new() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_OWNED) };
+
+    assert_eq(thin.generation(), 1);
+    assert_eq(thin.epoch(), 0);
+    assert_eq(thin.capabilities(), CAP_OWNED);
+    assert(!thin.is_null());
+}
+
+@test
+fn test_thin_ref_null() {
+    let thin: ThinRef<Int> = unsafe { ThinRef.null() };
+
+    assert(thin.is_null());
+    assert_eq(thin.generation(), GEN_UNALLOCATED);
+}
+
+@test
+fn test_thin_ref_from_header() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    // Initialize header
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe { ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr as &unsafe Int, header_ptr, CAP_OWNED)
+    };
+
+    assert_eq(thin.generation(), GEN_INITIAL);
+    assert_eq(thin.epoch(), 0);
+    assert(!thin.is_null());
+}
+
+// =============================================================================
+// Accessor Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_as_ptr() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ) };
+
+    let raw = thin.as_ptr();
+    assert_eq(raw as Int, ptr as Int);
+}
+
+@test
+fn test_thin_ref_generation() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 42, 0, CAP_READ) };
+
+    assert_eq(thin.generation(), 42);
+}
+
+@test
+fn test_thin_ref_epoch() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 7, CAP_READ) };
+
+    assert_eq(thin.epoch(), 7);
+}
+
+@test
+fn test_thin_ref_capabilities() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ_WRITE) };
+
+    assert_eq(thin.capabilities(), CAP_READ_WRITE);
+}
+
+@test
+fn test_thin_ref_epoch_and_caps_packing() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    // epoch in bits 0-15, caps in bits 16-31
+    let thin = unsafe { ThinRef.new(ptr, 1, 0x1234, 0xABCD) };
+
+    assert_eq(thin.epoch(), 0x1234);
+    assert_eq(thin.capabilities(), 0xABCD);
+}
+
+// =============================================================================
+// Capability Check Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_has_capability() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ_WRITE) };
+
+    assert(thin.has_capability(CAP_READ));
+    assert(thin.has_capability(CAP_WRITE));
+    assert(!thin.has_capability(CAP_EXECUTE));
+}
+
+@test
+fn test_thin_ref_can_read() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let readable = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ) };
+    let non_readable = unsafe { ThinRef.new(ptr, 1, 0, CAP_WRITE) };
+
+    assert(readable.can_read());
+    assert(!non_readable.can_read());
+}
+
+@test
+fn test_thin_ref_can_write() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    // Can write requires WRITE and MUTABLE
+    let writable = unsafe { ThinRef.new(ptr, 1, 0, CAP_WRITE_MUTABLE) };
+    let read_only = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ) };
+
+    assert(writable.can_write());
+    assert(!read_only.can_write());
+}
+
+@test
+fn test_thin_ref_can_revoke() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let revocable = unsafe { ThinRef.new(ptr, 1, 0, CAP_REVOKE) };
+    let non_revocable = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ) };
+
+    assert(revocable.can_revoke());
+    assert(!non_revocable.can_revoke());
+}
+
+// =============================================================================
+// Validation Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_validate_null_fails() {
+    let thin: ThinRef<Int> = unsafe { ThinRef.null() };
+
+    let result = thin.validate();
+
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_validate_success() {
+    // Create a proper allocation with header
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    let result = thin.validate();
+    assert(result.is_ok());
+}
+
+@test
+fn test_thin_ref_validate_generation_mismatch() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    // Create ThinRef with wrong generation
+    let thin = unsafe { ThinRef.new(user_ptr, 999, 0, CAP_READ) };
+
+    let result = thin.validate();
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_validate_epoch_mismatch() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+        header_ptr.store_epoch(5);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    // Create ThinRef with wrong epoch
+    let thin = unsafe { ThinRef.new(user_ptr, GEN_INITIAL, 0, CAP_READ) };
+
+    let result = thin.validate();
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_is_valid() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    assert(thin.is_valid());
+}
+
+@test
+fn test_thin_ref_is_valid_after_free() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    // Simulate deallocation
+    unsafe {
+        header_ptr.increment_generation();
+    }
+
+    // ThinRef should now be invalid
+    assert(!thin.is_valid());
+}
+
+// =============================================================================
+// Dereference Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_try_deref_success() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+        // Write a value after the header
+        let value_ptr = ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe mut Int;
+        ptr_write(value_ptr, 42);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    let result = thin.try_deref();
+    assert(result.is_ok());
+    assert_eq(*result.unwrap(), 42);
+}
+
+@test
+fn test_thin_ref_try_deref_no_read_capability() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    // Create ThinRef without READ capability
+    let thin = unsafe { ThinRef.new(user_ptr, GEN_INITIAL, 0, CAP_WRITE) };
+
+    let result = thin.try_deref();
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_try_deref_mut_success() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let mut thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_OWNED)
+    };
+
+    let result = thin.try_deref_mut();
+    assert(result.is_ok());
+
+    // Modify through the reference
+    *result.unwrap() = 123;
+
+    // Verify modification
+    let read_result = thin.try_deref();
+    assert_eq(*read_result.unwrap(), 123);
+}
+
+@test
+fn test_thin_ref_try_deref_mut_no_write_capability() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    // Create ThinRef without WRITE capability
+    let mut thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    let result = thin.try_deref_mut();
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_try_deref_mut_no_mutable_capability() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    // Create ThinRef with WRITE but no MUTABLE
+    let mut thin = unsafe {
+        ThinRef.new(user_ptr, GEN_INITIAL, 0, CAP_READ_WRITE)
+    };
+
+    let result = thin.try_deref_mut();
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_deref_unchecked() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+        let value_ptr = ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe mut Int;
+        ptr_write(value_ptr, 99);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    // deref_unchecked bypasses validation
+    let value = unsafe { thin.deref_unchecked() };
+    assert_eq(*value, 99);
+}
+
+// =============================================================================
+// Reference Operations Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_clone_ref() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 42, 7, CAP_OWNED) };
+    let cloned = thin.clone_ref();
+
+    assert_eq(cloned.generation(), thin.generation());
+    assert_eq(cloned.epoch(), thin.epoch());
+    assert_eq(cloned.capabilities(), thin.capabilities());
+    assert_eq(cloned.as_ptr() as Int, thin.as_ptr() as Int);
+}
+
+@test
+fn test_thin_ref_as_readonly() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_OWNED) };
+    let readonly = thin.as_readonly();
+
+    // Read-only should have READ but not WRITE or MUTABLE
+    assert(readonly.has_capability(CAP_READ));
+    assert(!readonly.has_capability(CAP_WRITE));
+    assert(!readonly.has_capability(CAP_MUTABLE));
+
+    // Generation and epoch preserved
+    assert_eq(readonly.generation(), thin.generation());
+    assert_eq(readonly.epoch(), thin.epoch());
+}
+
+@test
+fn test_thin_ref_attenuate() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_OWNED) };
+    let attenuated = thin.attenuate(CAP_READ_WRITE);
+
+    // Only READ and WRITE should remain
+    assert(attenuated.has_capability(CAP_READ));
+    assert(attenuated.has_capability(CAP_WRITE));
+    assert(!attenuated.has_capability(CAP_DELEGATE));
+    assert(!attenuated.has_capability(CAP_REVOKE));
+}
+
+// =============================================================================
+// Revocation Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_revoke_null_fails() {
+    let thin: ThinRef<Int> = unsafe { ThinRef.null() };
+
+    let result = thin.revoke();
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_revoke_no_capability_fails() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    // Create ThinRef without REVOKE capability
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    let result = thin.revoke();
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_revoke_success() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_OWNED)
+    };
+
+    // Should succeed
+    let result = thin.revoke();
+    assert(result.is_ok());
+
+    // After revocation, the ThinRef is no longer valid
+    assert(!thin.is_valid());
+}
+
+@test
+fn test_thin_ref_revoke_invalidates_copies() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin1 = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_OWNED)
+    };
+    let thin2 = thin1.clone_ref();
+
+    // Both should be valid initially
+    assert(thin1.is_valid());
+    assert(thin2.is_valid());
+
+    // Revoke through thin1
+    thin1.revoke();
+
+    // Both should now be invalid
+    assert(!thin1.is_valid());
+    assert(!thin2.is_valid());
+}
+
+@test
+fn test_thin_ref_revoke_already_revoked() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_OWNED)
+    };
+
+    // First revocation succeeds
+    let result1 = thin.revoke();
+    assert(result1.is_ok());
+
+    // Second revocation should fail (already revoked)
+    let result2 = thin.revoke();
+    assert(result2.is_err());
+}
+
+// =============================================================================
+// Trait Implementation Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_copy() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin1 = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ) };
+    let thin2 = thin1;  // Copy
+
+    assert_eq(thin1.generation(), thin2.generation());
+    assert_eq(thin1.as_ptr() as Int, thin2.as_ptr() as Int);
+}
+
+@test
+fn test_thin_ref_clone() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin1 = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ) };
+    let thin2 = thin1.clone();
+
+    assert_eq(thin1.generation(), thin2.generation());
+}
+
+// =============================================================================
+// Convenience Function Tests
+// =============================================================================
+
+@test
+fn test_deref_thin_function() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+        let value_ptr = ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe mut Int;
+        ptr_write(value_ptr, 777);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    let result = deref_thin(&thin);
+    assert(result.is_ok());
+    assert_eq(*result.unwrap(), 777);
+}
+
+@test
+fn test_deref_thin_mut_function() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let mut thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_OWNED)
+    };
+
+    let result = deref_thin_mut(&mut thin);
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Use-After-Free Detection Tests
+// =============================================================================
+
+@test
+fn test_use_after_free_detected() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    // Reference is valid initially
+    assert(thin.is_valid());
+
+    // Simulate deallocation (increment generation)
+    unsafe {
+        header_ptr.increment_generation();
+    }
+
+    // Reference should no longer be valid
+    assert(!thin.is_valid());
+
+    // try_deref should fail
+    let result = thin.try_deref();
+    assert(result.is_err());
+}
+
+@test
+fn test_multiple_frees_detected() {
+    let buffer: [Byte; 96] = [0; 96];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    let user_ptr = unsafe {
+        ptr_offset(&buffer[0] as &unsafe Byte, HEADER_SIZE as ISize) as &unsafe Int
+    };
+
+    let thin = unsafe {
+        ThinRef.from_header(user_ptr, header_ptr, CAP_READ)
+    };
+
+    // Simulate multiple deallocations
+    for _ in 0..5 {
+        unsafe {
+            header_ptr.increment_generation();
+        }
+    }
+
+    // Reference should still be detected as invalid
+    assert(!thin.is_valid());
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_thin_ref_with_max_generation() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 0xFFFFFFFF as UInt32, 0, CAP_READ) };
+
+    assert_eq(thin.generation(), 0xFFFFFFFF as UInt32);
+}
+
+@test
+fn test_thin_ref_with_max_epoch() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0xFFFF as UInt16, CAP_READ) };
+
+    assert_eq(thin.epoch(), 0xFFFF as UInt16);
+}
+
+@test
+fn test_thin_ref_zero_capabilities() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, 0) };
+
+    assert(!thin.can_read());
+    assert(!thin.can_write());
+    assert(!thin.can_revoke());
+}
+
+// =============================================================================
+// Additional Edge Case Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_null_is_not_valid() {
+    let thin: ThinRef<Int> = unsafe { ThinRef.null() };
+    assert(!thin.is_valid());
+    assert(thin.is_null());
+}
+
+@test
+fn test_thin_ref_clone_ref_preserves_all_fields() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 100, 50, CAP_READ_WRITE) };
+    let cloned = thin.clone_ref();
+
+    assert_eq(cloned.generation(), 100);
+    assert_eq(cloned.epoch(), 50);
+    assert_eq(cloned.capabilities(), CAP_READ_WRITE);
+}
+
+@test
+fn test_thin_ref_as_readonly_removes_write() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_OWNED) };
+    let ro = thin.as_readonly();
+
+    assert(ro.can_read());
+    assert(!ro.can_write());
+}
+
+@test
+fn test_thin_ref_attenuate_read_only() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_OWNED) };
+    let attenuated = thin.attenuate(CAP_READ);
+
+    assert(attenuated.has_capability(CAP_READ));
+    assert(!attenuated.has_capability(CAP_WRITE));
+    assert(!attenuated.has_capability(CAP_MUTABLE));
+}
+
+@test
+fn test_thin_ref_null_validate_fails() {
+    let thin: ThinRef<Int> = unsafe { ThinRef.null() };
+    let result = thin.validate();
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_null_try_deref_fails() {
+    let thin: ThinRef<Int> = unsafe { ThinRef.null() };
+    let result = thin.try_deref();
+    assert(result.is_err());
+}
+
+@test
+fn test_thin_ref_generation_one() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ) };
+    assert_eq(thin.generation(), 1);
+}
+
+@test
+fn test_thin_ref_borrow_shared_capability() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_BORROW_SHARED) };
+    assert(thin.has_capability(CAP_BORROW_SHARED));
+}
+
+// =============================================================================
+// Additional ThinRef Tests
+// =============================================================================
+
+@test
+fn test_thin_ref_epoch_zero() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ) };
+    assert_eq(thin.epoch(), 0);
+}
+
+@test
+fn test_thin_ref_capabilities_read_write() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ_WRITE) };
+    assert(thin.can_read());
+    assert(thin.can_write());
+}
+
+@test
+fn test_thin_ref_null_is_null() {
+    let thin: ThinRef<Int> = unsafe { ThinRef.null() };
+    assert(thin.is_null());
+}
+
+@test
+fn test_thin_ref_non_null_is_not_null() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_READ) };
+    assert(!thin.is_null());
+}
+
+@test
+fn test_thin_ref_owned_caps() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+    let thin = unsafe { ThinRef.new(ptr, 1, 0, CAP_OWNED) };
+    assert(thin.has_capability(CAP_OWNED));
+    assert(thin.can_read());
+    assert(thin.can_write());
+}
+
+@test
+fn test_thin_ref_generation_large() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+    let thin = unsafe { ThinRef.new(ptr, 999999, 0, CAP_READ) };
+    assert_eq(thin.generation(), 999999);
+}
+
+@test
+fn test_thin_ref_epoch_nonzero() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+    let thin = unsafe { ThinRef.new(ptr, 1, 42, CAP_READ) };
+    assert_eq(thin.epoch(), 42);
+}
+
+@test
+fn test_thin_ref_clone_ref_same_gen_epoch() {
+    let buffer: [Byte; 96] = [0; 96];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Int;
+    let thin = unsafe { ThinRef.new(ptr, 55, 33, CAP_READ) };
+    let cloned = thin.clone_ref();
+    assert_eq(thin.generation(), cloned.generation());
+    assert_eq(thin.epoch(), cloned.epoch());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

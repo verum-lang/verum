@@ -1,0 +1,441 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, interpreter-vs-aot, records, structs, nested, tagged-union
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential records test: verifies interpreter and AOT produce identical
+// results for record creation, field access, nested records, and variant-like
+// patterns using tag fields.
+
+// ============================================================================
+// Basic record types
+// ============================================================================
+
+type Point is { x: Int, y: Int };
+
+type Rect is { x: Int, y: Int, w: Int, h: Int };
+
+type Color is { r: Int, g: Int, b: Int };
+
+fn point_add(a: Point, b: Point) -> Point {
+    Point { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn point_scale(p: Point, s: Int) -> Point {
+    Point { x: p.x * s, y: p.y * s }
+}
+
+fn point_dot(a: Point, b: Point) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+fn point_manhattan(a: Point, b: Point) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    let abs_dx = if dx < 0 { 0 - dx } else { dx };
+    let abs_dy = if dy < 0 { 0 - dy } else { dy };
+    abs_dx + abs_dy
+}
+
+fn test_point_basic() {
+    let p1 = Point { x: 3, y: 4 };
+    let p2 = Point { x: 1, y: 2 };
+
+    assert_eq(p1.x, 3);
+    assert_eq(p1.y, 4);
+
+    let sum = point_add(p1, p2);
+    assert_eq(sum.x, 4);
+    assert_eq(sum.y, 6);
+
+    let scaled = point_scale(p1, 3);
+    assert_eq(scaled.x, 9);
+    assert_eq(scaled.y, 12);
+
+    let dot = point_dot(p1, p2);
+    assert_eq(dot, 11); // 3*1 + 4*2
+
+    let dist = point_manhattan(p1, p2);
+    assert_eq(dist, 4); // |3-1| + |4-2|
+
+    // Origin
+    let origin = Point { x: 0, y: 0 };
+    assert_eq(point_manhattan(origin, p1), 7); // |0-3| + |0-4|
+
+    print("point_basic: ok");
+}
+
+// ============================================================================
+// Rectangle operations
+// ============================================================================
+
+fn rect_area(r: Rect) -> Int {
+    r.w * r.h
+}
+
+fn rect_perimeter(r: Rect) -> Int {
+    2 * (r.w + r.h)
+}
+
+fn rect_contains_point(r: Rect, px: Int, py: Int) -> Bool {
+    px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h
+}
+
+fn rect_overlaps(a: Rect, b: Rect) -> Bool {
+    // Two rects do NOT overlap if one is entirely left/right/above/below the other
+    let no_overlap = a.x >= b.x + b.w || b.x >= a.x + a.w || a.y >= b.y + b.h || b.y >= a.y + a.h;
+    !no_overlap
+}
+
+fn rect_right(r: Rect) -> Int {
+    r.x + r.w
+}
+
+fn rect_bottom(r: Rect) -> Int {
+    r.y + r.h
+}
+
+fn test_rect_ops() {
+    let r1 = Rect { x: 0, y: 0, w: 10, h: 5 };
+    assert_eq(rect_area(r1), 50);
+    assert_eq(rect_perimeter(r1), 30);
+    assert_eq(rect_right(r1), 10);
+    assert_eq(rect_bottom(r1), 5);
+
+    // Point containment
+    assert(rect_contains_point(r1, 0, 0));
+    assert(rect_contains_point(r1, 5, 3));
+    assert(rect_contains_point(r1, 9, 4));
+    assert(!rect_contains_point(r1, 10, 0)); // at right edge (exclusive)
+    assert(!rect_contains_point(r1, 0, 5)); // at bottom edge (exclusive)
+    assert(!rect_contains_point(r1, 0 - 1, 0));
+
+    // Overlap
+    let r2 = Rect { x: 5, y: 3, w: 10, h: 5 };
+    assert(rect_overlaps(r1, r2));
+
+    let r3 = Rect { x: 20, y: 20, w: 5, h: 5 };
+    assert(!rect_overlaps(r1, r3));
+
+    // Adjacent (touching but not overlapping)
+    let r4 = Rect { x: 10, y: 0, w: 5, h: 5 };
+    assert(!rect_overlaps(r1, r4));
+
+    print("rect_ops: ok");
+}
+
+// ============================================================================
+// Color operations
+// ============================================================================
+
+fn color_mix(a: Color, b: Color) -> Color {
+    Color {
+        r: (a.r + b.r) / 2,
+        g: (a.g + b.g) / 2,
+        b: (a.b + b.b) / 2
+    }
+}
+
+fn color_brightness(c: Color) -> Int {
+    // Simple brightness approximation
+    (c.r + c.g + c.b) / 3
+}
+
+fn color_clamp_channel(v: Int) -> Int {
+    if v < 0 { 0 }
+    else if v > 255 { 255 }
+    else { v }
+}
+
+fn color_brighten(c: Color, amount: Int) -> Color {
+    Color {
+        r: color_clamp_channel(c.r + amount),
+        g: color_clamp_channel(c.g + amount),
+        b: color_clamp_channel(c.b + amount)
+    }
+}
+
+fn color_equals(a: Color, b: Color) -> Bool {
+    a.r == b.r && a.g == b.g && a.b == b.b
+}
+
+fn test_color_ops() {
+    let red = Color { r: 255, g: 0, b: 0 };
+    let blue = Color { r: 0, g: 0, b: 255 };
+    let white = Color { r: 255, g: 255, b: 255 };
+    let black = Color { r: 0, g: 0, b: 0 };
+
+    // Brightness
+    assert_eq(color_brightness(red), 85);
+    assert_eq(color_brightness(white), 255);
+    assert_eq(color_brightness(black), 0);
+
+    // Mix red and blue
+    let purple = color_mix(red, blue);
+    assert_eq(purple.r, 127);
+    assert_eq(purple.g, 0);
+    assert_eq(purple.b, 127);
+
+    // Mix black and white
+    let gray = color_mix(black, white);
+    assert_eq(gray.r, 127);
+    assert_eq(gray.g, 127);
+    assert_eq(gray.b, 127);
+
+    // Brighten
+    let dark = Color { r: 50, g: 100, b: 150 };
+    let lighter = color_brighten(dark, 30);
+    assert_eq(lighter.r, 80);
+    assert_eq(lighter.g, 130);
+    assert_eq(lighter.b, 180);
+
+    // Brighten with clamping
+    let bright = color_brighten(white, 50);
+    assert_eq(bright.r, 255);
+    assert_eq(bright.g, 255);
+    assert_eq(bright.b, 255);
+
+    // Darken (negative amount) with clamping
+    let darkened = color_brighten(Color { r: 10, g: 20, b: 30 }, 0 - 50);
+    assert_eq(darkened.r, 0);
+    assert_eq(darkened.g, 0);
+    assert_eq(darkened.b, 0);
+
+    // Equality
+    assert(color_equals(red, Color { r: 255, g: 0, b: 0 }));
+    assert(!color_equals(red, blue));
+
+    print("color_ops: ok");
+}
+
+// ============================================================================
+// Nested records (flat representation via composition)
+// ============================================================================
+
+type Circle is { center: Point, radius: Int };
+
+fn circle_area_x100(c: Circle) -> Int {
+    // Approximate pi*r^2 * 100 as 314*r^2
+    314 * c.radius * c.radius
+}
+
+fn circle_circumference_x100(c: Circle) -> Int {
+    // Approximate 2*pi*r as 628*r / 100
+    628 * c.radius / 100
+}
+
+fn circle_contains_point(c: Circle, px: Int, py: Int) -> Bool {
+    let dx = px - c.center.x;
+    let dy = py - c.center.y;
+    // dist^2 <= radius^2
+    (dx * dx + dy * dy) <= c.radius * c.radius
+}
+
+fn test_nested_records() {
+    let c = Circle { center: Point { x: 5, y: 5 }, radius: 10 };
+    assert_eq(c.center.x, 5);
+    assert_eq(c.center.y, 5);
+    assert_eq(c.radius, 10);
+
+    // Area ~ 314
+    assert_eq(circle_area_x100(c), 31400);
+
+    // Circumference ~ 62
+    assert_eq(circle_circumference_x100(c), 62);
+
+    // Contains point
+    assert(circle_contains_point(c, 5, 5));   // center
+    assert(circle_contains_point(c, 5, 15));  // on edge (dist=10)
+    assert(!circle_contains_point(c, 5, 16)); // just outside
+    assert(circle_contains_point(c, 12, 5));  // 7 away in x
+    assert(!circle_contains_point(c, 16, 5)); // 11 away in x
+
+    // Small circle
+    let small = Circle { center: Point { x: 0, y: 0 }, radius: 1 };
+    assert(circle_contains_point(small, 0, 0));
+    assert(circle_contains_point(small, 1, 0));
+    assert(circle_contains_point(small, 0, 1));
+    assert(!circle_contains_point(small, 1, 1)); // dist^2 = 2 > 1
+
+    print("nested_records: ok");
+}
+
+// ============================================================================
+// Tagged union pattern (discriminated union via tag field)
+// tag: 0 = Circle shape, 1 = Rectangle shape
+// ============================================================================
+
+type Shape is { tag: Int, x: Int, y: Int, p1: Int, p2: Int };
+
+fn shape_circle(cx: Int, cy: Int, radius: Int) -> Shape {
+    Shape { tag: 0, x: cx, y: cy, p1: radius, p2: 0 }
+}
+
+fn shape_rect(rx: Int, ry: Int, w: Int, h: Int) -> Shape {
+    Shape { tag: 1, x: rx, y: ry, p1: w, p2: h }
+}
+
+fn shape_area_x100(s: Shape) -> Int {
+    if s.tag == 0 {
+        // Circle: pi*r^2 * 100
+        314 * s.p1 * s.p1
+    } else {
+        // Rectangle: w*h * 100
+        s.p1 * s.p2 * 100
+    }
+}
+
+fn shape_perimeter_x100(s: Shape) -> Int {
+    if s.tag == 0 {
+        // Circle: 2*pi*r * 100
+        628 * s.p1
+    } else {
+        // Rectangle: 2*(w+h) * 100
+        2 * (s.p1 + s.p2) * 100
+    }
+}
+
+fn shape_is_circle(s: Shape) -> Bool {
+    s.tag == 0
+}
+
+fn shape_is_rect(s: Shape) -> Bool {
+    s.tag == 1
+}
+
+fn test_tagged_union() {
+    let c = shape_circle(0, 0, 5);
+    let r = shape_rect(0, 0, 10, 4);
+
+    assert(shape_is_circle(c));
+    assert(!shape_is_rect(c));
+    assert(shape_is_rect(r));
+    assert(!shape_is_circle(r));
+
+    // Circle area: pi*25 * 100 = 7850
+    assert_eq(shape_area_x100(c), 7850);
+
+    // Rectangle area: 40 * 100 = 4000
+    assert_eq(shape_area_x100(r), 4000);
+
+    // Circle perimeter: 2*pi*5 * 100 = 3140
+    assert_eq(shape_perimeter_x100(c), 3140);
+
+    // Rectangle perimeter: 2*(10+4) * 100 = 2800
+    assert_eq(shape_perimeter_x100(r), 2800);
+
+    print("tagged_union: ok");
+}
+
+// ============================================================================
+// Record array: fixed-size array of 4 points
+// ============================================================================
+
+type Points4 is { p0: Point, p1: Point, p2: Point, p3: Point };
+
+fn points4_get(pts: Points4, i: Int) -> Point {
+    if i == 0 { pts.p0 }
+    else if i == 1 { pts.p1 }
+    else if i == 2 { pts.p2 }
+    else { pts.p3 }
+}
+
+fn points4_sum_x(pts: Points4, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let p = points4_get(pts, i);
+        total = total + p.x;
+        i = i + 1;
+    }
+    total
+}
+
+fn points4_sum_y(pts: Points4, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let p = points4_get(pts, i);
+        total = total + p.y;
+        i = i + 1;
+    }
+    total
+}
+
+fn test_record_array() {
+    let pts = Points4 {
+        p0: Point { x: 1, y: 2 },
+        p1: Point { x: 3, y: 4 },
+        p2: Point { x: 5, y: 6 },
+        p3: Point { x: 7, y: 8 }
+    };
+
+    assert_eq(points4_get(pts, 0).x, 1);
+    assert_eq(points4_get(pts, 0).y, 2);
+    assert_eq(points4_get(pts, 3).x, 7);
+    assert_eq(points4_get(pts, 3).y, 8);
+
+    assert_eq(points4_sum_x(pts, 4), 16); // 1+3+5+7
+    assert_eq(points4_sum_y(pts, 4), 20); // 2+4+6+8
+
+    // Partial sum
+    assert_eq(points4_sum_x(pts, 2), 4); // 1+3
+    assert_eq(points4_sum_y(pts, 1), 2); // just 2
+
+    // Centroid (integer division)
+    let cx = points4_sum_x(pts, 4) / 4;
+    let cy = points4_sum_y(pts, 4) / 4;
+    assert_eq(cx, 4);
+    assert_eq(cy, 5);
+
+    print("record_array: ok");
+}
+
+// ============================================================================
+// Record update patterns (functional update)
+// ============================================================================
+
+fn point_with_x(p: Point, new_x: Int) -> Point {
+    Point { x: new_x, y: p.y }
+}
+
+fn point_with_y(p: Point, new_y: Int) -> Point {
+    Point { x: p.x, y: new_y }
+}
+
+fn test_record_update() {
+    let p = Point { x: 10, y: 20 };
+
+    let p2 = point_with_x(p, 99);
+    assert_eq(p2.x, 99);
+    assert_eq(p2.y, 20); // y unchanged
+
+    let p3 = point_with_y(p, 77);
+    assert_eq(p3.x, 10); // x unchanged
+    assert_eq(p3.y, 77);
+
+    // Chain updates
+    let p4 = point_with_y(point_with_x(p, 1), 2);
+    assert_eq(p4.x, 1);
+    assert_eq(p4.y, 2);
+
+    // Original unchanged (pure functional)
+    assert_eq(p.x, 10);
+    assert_eq(p.y, 20);
+
+    print("record_update: ok");
+}
+
+fn main() -> Int {
+    test_point_basic();
+    test_rect_ops();
+    test_color_ops();
+    test_nested_records();
+    test_tagged_union();
+    test_record_array();
+    test_record_update();
+    print("[OK] 042_differential_records");
+    0
+}

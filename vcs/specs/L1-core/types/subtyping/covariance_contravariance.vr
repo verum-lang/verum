@@ -1,0 +1,162 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L1
+// @tags: types, subtyping, covariance, contravariance
+
+/// Test for detailed covariance and contravariance rules.
+/// Demonstrates variance in various contexts.
+
+// Type hierarchy for testing
+type Shape is protocol {
+    fn area(&self) -> Float;
+}
+
+type Rectangle is {
+    width: Float,
+    height: Float,
+};
+
+type Square is {
+    side: Float,
+};
+
+implement Shape for Rectangle {
+    fn area(&self) -> Float { self.width * self.height }
+}
+
+implement Shape for Square {
+    fn area(&self) -> Float { self.side * self.side }
+}
+
+// Square is conceptually a subtype of Rectangle (same interface, stricter invariant)
+
+fn main() {
+    // === COVARIANCE (output position) ===
+
+    // 1. Return types are covariant
+    fn make_square() -> Square {
+        Square { side: 5.0 }
+    }
+
+    fn make_shape() -> Shape {
+        make_square()  // Square <: Shape, so valid
+    }
+
+    // 2. Producers (Iterator.Item) are covariant
+    type Producer<T> is {
+        produce: fn() -> T,
+    };
+
+    let square_producer: Producer<Square> = Producer {
+        produce: || Square { side: 3.0 },
+    };
+
+    // Producer<Square> can be used where Producer<Shape> expected (read)
+    fn use_producer(p: &Producer<Shape>) -> Float {
+        (p.produce)().area()
+    }
+    // use_producer(&square_producer);  // Covariant in output
+
+    // 3. Immutable containers are covariant for reading
+    let squares: List<Square> = [
+        Square { side: 1.0 },
+        Square { side: 2.0 },
+    ];
+
+    fn sum_areas<T: Shape>(shapes: &List<T>) -> Float {
+        shapes.iter().map(|s| s.area()).sum()
+    }
+    let total = sum_areas(&squares);  // List<Square> read as List<Shape>
+
+    // 4. Maybe<T> is covariant
+    let maybe_square: Maybe<Square> = Some(Square { side: 4.0 });
+    fn get_area(m: &Maybe<Shape>) -> Float {
+        match m {
+            Some(s) => s.area(),
+            None => 0.0,
+        }
+    }
+    // get_area(&maybe_square);  // Covariant
+
+    // === CONTRAVARIANCE (input position) ===
+
+    // 1. Function parameters are contravariant
+    fn handle_shape(s: &Shape) {
+        print(f"Area: {s.area()}");
+    }
+
+    fn handle_square(s: &Square) {
+        handle_shape(s);  // Calls more general handler
+    }
+
+    // 2. Consumer types are contravariant
+    type Consumer<T> is {
+        consume: fn(T),
+    };
+
+    let shape_consumer: Consumer<Shape> = Consumer {
+        consume: |s| print(f"Consuming shape with area {s.area()}"),
+    };
+
+    // Consumer<Shape> can consume Square (contravariant)
+    fn feed_squares(c: &Consumer<Square>) {
+        (c.consume)(Square { side: 2.0 });
+    }
+    // feed_squares(&shape_consumer);  // Contravariant in input
+
+    // 3. Comparators are contravariant
+    type Comparator<T> is {
+        compare: fn(&T, &T) -> Ordering,
+    };
+
+    let shape_cmp: Comparator<Shape> = Comparator {
+        compare: |a, b| a.area().partial_cmp(&b.area()).unwrap_or(Ordering.Equal),
+    };
+
+    fn sort_squares(squares: &mut List<Square>, cmp: &Comparator<Square>) {
+        squares.sort_by(|a, b| (cmp.compare)(a, b));
+    }
+    // sort_squares(&mut squares, &shape_cmp);  // Contravariant
+
+    // === COMBINED VARIANCE ===
+
+    // Function types: contravariant in input, covariant in output
+    // fn(Square) -> Shape  <:  fn(Shape) -> Square
+    // (can accept more general input, return more specific output)
+
+    type Transformer<In, Out> is {
+        transform: fn(In) -> Out,
+    };
+
+    // If we have transform: Shape -> Square
+    // It can be used where: Square -> Shape is expected
+    // (accepts Square which is a Shape, returns Square which is a Shape)
+
+    let narrow_transformer: Transformer<Shape, Square> = Transformer {
+        transform: |_| Square { side: 1.0 },
+    };
+
+    fn apply_transform(t: &Transformer<Square, Shape>, s: Square) -> Float {
+        (t.transform)(s).area()
+    }
+    // apply_transform(&narrow_transformer, Square { side: 2.0 });
+
+    // === INVARIANCE ===
+
+    // Mutable references are invariant
+    let mut square = Square { side: 5.0 };
+    let square_ref: &mut Square = &mut square;
+    // Cannot assign to &mut Shape - invariant
+
+    // Cells/RefCells are invariant
+    type Cell<T> is {
+        value: T,
+    };
+    // Cell<Square> is NOT related to Cell<Shape>
+
+    // Assertions
+    let s = make_square();
+    assert(s.area() == 25.0);
+    assert(total == 5.0);  // 1 + 4
+    assert(square.side == 5.0);
+}

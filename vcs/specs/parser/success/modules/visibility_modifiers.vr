@@ -1,0 +1,29 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Public items
+pub fn public_function() -> Int { 42 }
+pub type PublicType is { value: Int };
+pub const PUBLIC_CONST: Int = 100;
+
+// Private (default) items
+fn private_function() -> Int { 0 }
+type PrivateType is { data: Text };
+const PRIVATE_CONST: Int = 0;
+
+// Visibility in implementations
+implement PublicType {
+    pub fn new(v: Int) -> Self {
+        PublicType { value: v }
+    }
+
+    fn private_method(&self) -> Int {
+        self.value
+    }
+}
+
+// Module with visibility
+pub module api {
+    pub fn endpoint() -> Int { 1 }
+}

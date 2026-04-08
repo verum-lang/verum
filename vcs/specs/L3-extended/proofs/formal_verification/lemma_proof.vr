@@ -1,0 +1,31 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-verification, lemma
+// @timeout: 15000
+
+/// Lemma proofs for formal verification
+
+lemma add_comm(a: Nat, b: Nat): a + b == b + a { proof by ring }
+lemma add_assoc(a: Nat, b: Nat, c: Nat): (a + b) + c == a + (b + c) { proof by ring }
+lemma mul_comm(a: Nat, b: Nat): a * b == b * a { proof by ring }
+
+lemma list_len_nonneg<T>(xs: List<T>): len(xs) >= 0 { proof by induction on xs }
+lemma append_assoc<T>(xs: List<T>, ys: List<T>, zs: List<T>): (xs ++ ys) ++ zs == xs ++ (ys ++ zs) { proof by induction on xs }
+lemma append_nil_right<T>(xs: List<T>): xs ++ [] == xs { proof by induction on xs }
+
+lemma le_refl(n: Int): n <= n { proof by omega }
+lemma le_trans(a: Int, b: Int, c: Int) requires a <= b requires b <= c ensures a <= c { proof by omega }
+lemma lt_irrefl(n: Int): !(n < n) { proof by omega }
+
+lemma div_positive(n: Int, d: Int) requires n >= 0 requires d > 0 ensures n / d >= 0 { proof by arithmetic }
+
+theorem combined_proof(x: Int, y: Int, z: Int) requires x <= y requires y <= z ensures x <= z {
+    proof { have h1: x <= y by precondition; have h2: y <= z by precondition; conclude by le_trans }
+}
+
+lemma abs_triangle(x: Int, y: Int): abs(x + y) <= abs(x) + abs(y) { proof by auto }
+
+theorem square_nonneg(x: Int): x * x >= 0 { proof by smt }
+
+fn main() {}

@@ -1,0 +1,189 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: state-machine, implement, sum-type, transitions
+// @description: Test complex state machine with multiple transitions
+
+type TrafficLight is Red2 | Yellow2 | Green2;
+
+implement TrafficLight {
+    fn next(&self) -> TrafficLight {
+        match self {
+            Red2 => Green2,
+            Green2 => Yellow2,
+            Yellow2 => Red2,
+        }
+    }
+
+    fn can_go(&self) -> Bool {
+        match self {
+            Green2 => true,
+            Red2 => false,
+            Yellow2 => false,
+        }
+    }
+
+    fn duration(&self) -> Int {
+        match self {
+            Red2 => 30,
+            Green2 => 25,
+            Yellow2 => 5,
+        }
+    }
+}
+
+fn test_traffic_light() -> Int {
+    let mut light = Red2;
+
+    // Red -> Green -> Yellow -> Red
+    light = light.next(); // Green
+    if !light.can_go() {
+        print("FAIL traffic: Green should allow go");
+        return 1;
+    }
+    light = light.next(); // Yellow
+    if light.can_go() {
+        print("FAIL traffic: Yellow should not allow go");
+        return 1;
+    }
+    light = light.next(); // Red
+    if light.duration() != 30 {
+        print(f"FAIL traffic: Red duration={light.duration()}");
+        return 1;
+    }
+    print("  traffic_light: OK");
+    0
+}
+
+type ParseState is Start2 | InNumber2(Int) | InString2(Int) | Error2(Int);
+
+implement ParseState {
+    fn feed(&self, ch: Int) -> ParseState {
+        match self {
+            Start2 => {
+                // 48-57 = '0'-'9', 34 = '"'
+                if ch >= 48 && ch <= 57 {
+                    InNumber2(ch - 48)
+                } else if ch == 34 {
+                    InString2(0)
+                } else {
+                    Error2(ch)
+                }
+            }
+            InNumber2(acc) => {
+                if ch >= 48 && ch <= 57 {
+                    InNumber2(acc * 10 + (ch - 48))
+                } else {
+                    Error2(ch)
+                }
+            }
+            InString2(len) => {
+                if ch == 34 {
+                    Start2 // end of string
+                } else {
+                    InString2(len + 1)
+                }
+            }
+            Error2(c) => Error2(c),
+        }
+    }
+
+    fn value(&self) -> Int {
+        match self {
+            InNumber2(v) => v,
+            InString2(len) => len,
+            Start2 => 0,
+            Error2(c) => 0 - c,
+        }
+    }
+}
+
+fn test_parser_state() -> Int {
+    // Parse "123" as digits
+    let mut s = Start2;
+    s = s.feed(49); // '1'
+    s = s.feed(50); // '2'
+    s = s.feed(51); // '3'
+    if s.value() != 123 {
+        print(f"FAIL parser: value={s.value()}, expected 123");
+        return 1;
+    }
+    print("  parser_state: OK");
+    0
+}
+
+type Elevator is AtFloor(Int) | Moving(Int, Int) | Stopped;
+
+implement Elevator {
+    fn call(&self, floor: Int) -> Elevator {
+        match self {
+            AtFloor(f) => {
+                if f == floor { AtFloor(f) } else { Moving(f, floor) }
+            }
+            Moving(_, _) => self,
+            Stopped => AtFloor(floor),
+        }
+    }
+
+    fn step(&self) -> Elevator {
+        match self {
+            AtFloor(_) => self,
+            Moving(from, to) => {
+                if from == to {
+                    AtFloor(to)
+                } else if from < to {
+                    Moving(from + 1, to)
+                } else {
+                    Moving(from - 1, to)
+                }
+            }
+            Stopped => Stopped,
+        }
+    }
+
+    fn floor(&self) -> Int {
+        match self {
+            AtFloor(f) => f,
+            Moving(f, _) => f,
+            Stopped => -1,
+        }
+    }
+}
+
+fn test_elevator() -> Int {
+    let mut e = AtFloor(1);
+    e = e.call(5);  // Moving(1, 5)
+    // Step through floors
+    let mut steps = 0;
+    while e.floor() != 5 {
+        e = e.step();
+        steps = steps + 1;
+        if steps > 10 { break; } // safety
+    }
+    e = e.step(); // Should reach AtFloor(5)
+    if e.floor() != 5 {
+        print(f"FAIL elevator: floor={e.floor()}, expected 5");
+        return 1;
+    }
+    if steps != 4 {
+        print(f"FAIL elevator: steps={steps}, expected 4");
+        return 1;
+    }
+    print("  elevator: OK");
+    0
+}
+
+fn main() -> Int {
+    print("State Machine Advanced Tests:");
+    let mut failures = 0;
+    failures = failures + test_traffic_light();
+    failures = failures + test_parser_state();
+    failures = failures + test_elevator();
+
+    if failures == 0 {
+        print("All state machine tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

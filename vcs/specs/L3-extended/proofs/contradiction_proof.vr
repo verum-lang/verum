@@ -1,0 +1,109 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, contradiction
+// @timeout: 10000
+
+/// Proof by contradiction demonstration
+/// Shows how to prove statements by assuming the negation and deriving false
+
+/// There is no largest natural number
+theorem no_largest_nat(): !exists n: Nat. forall m: Nat. m <= n {
+    proof by contradiction {
+        assume exists n: Nat. forall m: Nat. m <= n;
+        have h1: n + 1 <= n by instantiation(n + 1);
+        have h2: n < n + 1 by arithmetic;
+        contradiction
+    }
+}
+
+/// Square root of 2 is irrational (simplified version)
+theorem sqrt2_irrational(): !exists p: Int. exists q: Int. q != 0 && p * p == 2 * q * q && gcd(p, q) == 1 {
+    proof by contradiction {
+        assume exists p: Int. exists q: Int. q != 0 && p * p == 2 * q * q && gcd(p, q) == 1;
+
+        // p^2 = 2 * q^2 means p^2 is even
+        have h1: is_even(p * p) by definition_of_even;
+
+        // If p^2 is even, then p is even
+        have h2: is_even(p) by even_square_implies_even(p);
+
+        // q is also even by similar reasoning
+        have h4: is_even(q) by even_square_implies_even(q);
+
+        // Both p and q are even, so gcd(p, q) >= 2
+        have h5: gcd(p, q) >= 2 by both_even_gcd_ge_2(p, q);
+
+        // But we assumed gcd(p, q) == 1
+        have h6: gcd(p, q) == 1 by assumption;
+
+        // Contradiction: gcd >= 2 but gcd == 1
+        contradiction
+    }
+}
+
+/// Empty set has no elements (proof by contradiction)
+theorem empty_set_no_elements<T>(): !exists x: T. x in Set.empty() {
+    proof by contradiction {
+        assume exists x: T. x in Set.empty();
+        // By definition, nothing is in the empty set
+        have: false by definition_of_empty_set;
+        contradiction
+    }
+}
+
+/// If a list is non-empty, it has a head
+theorem nonempty_has_head<T>(xs: List<T>)
+    requires xs != []
+    ensures exists h: T. head(xs) == Some(h)
+{
+    proof by contradiction {
+        assume !(exists h: T. head(xs) == Some(h));
+        // This means head(xs) == None
+        have h1: head(xs) == None by negation_of_exists;
+        // head returns None only for empty list
+        have h2: xs == [] by definition_of_head;
+        // But we required xs != []
+        have h3: xs != [] by precondition;
+        contradiction
+    }
+}
+
+/// Proof that 0 is not a successor
+theorem zero_not_succ(): !exists n: Nat. 0 == succ(n) {
+    proof by contradiction {
+        assume exists n: Nat. 0 == succ(n);
+        // By Peano axioms, succ(n) > 0 for all n
+        have h1: succ(n) > 0 by peano_axiom;
+        have h2: 0 == succ(n) by assumption;
+        have h3: 0 > 0 by substitution;
+        // 0 > 0 is false
+        contradiction
+    }
+}
+
+/// Antisymmetry of < implies no x < x
+theorem lt_irreflexive<T: Ord>(x: T): !(x < x) {
+    proof by contradiction {
+        assume x < x;
+        // By definition of strict order, < is irreflexive
+        have h: !(x < x) by irreflexivity_of_lt;
+        contradiction
+    }
+}
+
+/// If a function is injective and f(a) = f(b), then a = b
+theorem injective_equality<A, B>(f: fn(A) -> B, a: A, b: A)
+    requires is_injective(f)
+    requires f(a) == f(b)
+    ensures a == b
+{
+    proof by contradiction {
+        assume a != b;
+        // Since f is injective, a != b implies f(a) != f(b)
+        have h1: f(a) != f(b) by definition_of_injective;
+        // But we have f(a) == f(b)
+        have h2: f(a) == f(b) by precondition;
+        contradiction
+    }
+}

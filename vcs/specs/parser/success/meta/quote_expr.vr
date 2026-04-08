@@ -1,0 +1,416 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, quote, interpolation, staged-metaprogramming
+// @description: Test quote expressions and interpolation - grammar: quote_expr, quote_interpolation
+
+// ============================================================================
+// BASIC QUOTE EXPRESSIONS
+// Grammar: quote_expr = 'quote' [ quote_stage ] '{' token_tree '}'
+// ============================================================================
+
+// Simple quote - creates code fragment
+fn basic_quote() {
+    let code = quote { let x = 42; };
+}
+
+// Quote with expression
+fn quote_with_expr() {
+    let code = quote { 1 + 2 * 3 };
+}
+
+// Quote with statement
+fn quote_with_stmt() {
+    let code = quote {
+        let a = 1;
+        let b = 2;
+        a + b
+    };
+}
+
+// Quote with function definition
+fn quote_with_fn() {
+    let code = quote {
+        fn generated() -> Int {
+            42
+        }
+    };
+}
+
+// Quote with type definition
+fn quote_with_type() {
+    let code = quote {
+        type Point is { x: Int, y: Int };
+    };
+}
+
+// Quote with complex code
+fn quote_complex() {
+    let code = quote {
+        type List<T> is Nil | Cons(T, Heap<List<T>>);
+
+        implement<T> List<T> {
+            fn new() -> Self { List.Nil }
+
+            fn push(&mut self, item: T) {
+                let old = std.mem.replace(self, List.Nil);
+                *self = List.Cons(item, Heap.new(old));
+            }
+        }
+    };
+}
+
+// ============================================================================
+// QUOTE WITH STAGE
+// Grammar: quote_stage = '(' stage_level ')'
+// ============================================================================
+
+// Quote to stage 0 (runtime)
+fn quote_stage_0() {
+    let runtime_code = quote(0) { execute_at_runtime() };
+}
+
+// Quote to stage 1 (compile-time)
+fn quote_stage_1() {
+    let compile_code = quote(1) { compute_at_compile_time() };
+}
+
+// Explicit default stage
+meta fn with_explicit_stage() {
+    let code = quote(0) {
+        fn runtime_generated() {}
+    };
+}
+
+// Multi-stage: meta(2) quoting to stage 1
+meta(2) fn stage2_quotes() {
+    let meta_code = quote(1) {
+        meta fn generated_meta() {
+            quote { fn inner() {} }
+        }
+    };
+}
+
+// ============================================================================
+// QUOTE INTERPOLATION
+// Grammar: quote_interpolation = '$' ( identifier | '{' expression '}' )
+// ============================================================================
+
+// Simple identifier interpolation
+fn interpolate_ident() {
+    let name = "my_var";
+    let code = quote { let $name = 42; };
+}
+
+// Multiple interpolations
+fn interpolate_multiple() {
+    let var_name = "x";
+    let value = 100;
+    let code = quote { let $var_name: Int = $value; };
+}
+
+// Expression interpolation with braces
+fn interpolate_expr() {
+    let x = 10;
+    let code = quote { let result = ${x + 5}; };
+}
+
+// Complex expression interpolation
+fn interpolate_complex_expr() {
+    let base = 2;
+    let exp = 8;
+    let code = quote { const VALUE: Int = ${base.pow(exp)}; };
+}
+
+// Interpolating types
+fn interpolate_type() {
+    let elem_type = quote { Int };
+    let code = quote { type MyList is List<$elem_type>; };
+}
+
+// Interpolating function names
+fn interpolate_fn_name() {
+    let prefix = "handle";
+    let suffix = "request";
+    let code = quote {
+        fn ${prefix}_${suffix}() {}
+    };
+}
+
+// ============================================================================
+// QUOTE REPETITION
+// Grammar: quote_repetition = '$' '[' 'for' pattern 'in' expression '{' token_tree '}' ']'
+// ============================================================================
+
+// Basic repetition
+fn quote_repetition_basic() {
+    let fields = ["a", "b", "c"];
+    let code = quote {
+        type Generated is {
+            $[for field in fields {
+                $field: Int,
+            }]
+        };
+    };
+}
+
+// Nested repetition
+fn quote_repetition_nested() {
+    let outer = [["a", "b"], ["c", "d"]];
+    let code = quote {
+        $[for inner in outer {
+            $[for item in inner {
+                let $item = 0;
+            }]
+        }]
+    };
+}
+
+// Repetition with separator
+fn quote_repetition_separator() {
+    let variants = ["A", "B", "C"];
+    let code = quote {
+        type MyEnum is
+            $[for v in variants {
+                | $v
+            }];
+    };
+}
+
+// ============================================================================
+// QUOTE STAGE ESCAPE
+// Grammar: quote_stage_escape = '$' '(' 'stage' stage_level ')' '{' expression '}'
+// ============================================================================
+
+// Stage escape - evaluate at specific stage
+meta fn with_stage_escape() {
+    let computed = compute_value();
+    let code = quote {
+        let value = $(stage 1){ computed };
+    };
+}
+
+// Multiple stage escapes
+meta(2) fn multi_stage_escape() {
+    let s2_value = stage2_compute();
+    let code = quote {
+        let a = $(stage 2){ s2_value };
+        let b = $(stage 1){ compile_time_value };
+        let c = $(stage 0){ runtime_value };
+    };
+}
+
+// ============================================================================
+// QUOTE LIFT
+// Grammar: quote_lift = 'lift' '(' expression ')'
+// ============================================================================
+
+// Lift - syntactic sugar for stage escape to current stage
+fn quote_lift_basic() {
+    let value = 42;
+    let code = quote { let x = lift(value); };
+}
+
+// Lift with expression
+fn quote_lift_expr() {
+    let a = 10;
+    let b = 20;
+    let code = quote { let sum = lift(a + b); };
+}
+
+// Multiple lifts
+fn quote_lift_multiple() {
+    let x = 1;
+    let y = 2;
+    let z = 3;
+    let code = quote {
+        let result = lift(x) + lift(y) + lift(z);
+    };
+}
+
+// Lift in meta function
+meta fn with_lift() -> TokenStream {
+    let type_name = get_type_name();
+    let fields = get_fields();
+
+    quote {
+        type lift(type_name) is {
+            $[for field in lift(fields) {
+                $field.name: $field.ty,
+            }]
+        };
+    }
+}
+
+// ============================================================================
+// COMPLEX QUOTE PATTERNS
+// ============================================================================
+
+// Quote building a protocol implementation
+fn quote_impl() {
+    let type_name = "MyType";
+    let protocol_name = "Display";
+    let code = quote {
+        implement $protocol_name for $type_name {
+            fn fmt(&self, f: &mut Formatter) -> FmtResult {
+                write(f, "{}", self.to_string())
+            }
+        }
+    };
+}
+
+// Quote with nested quotes
+meta(2) fn nested_quotes() {
+    let outer_name = "outer";
+    let code = quote(1) {
+        meta fn $outer_name() -> TokenStream {
+            let inner_name = "inner";
+            quote(0) {
+                fn $inner_name() {}
+            }
+        }
+    };
+}
+
+// ============================================================================
+// QUOTE WITH ALL TOKEN TYPES
+// ============================================================================
+
+fn quote_all_tokens() {
+    // Keywords
+    let kw = quote { let fn type if else match for while loop return break continue };
+
+    // Operators
+    let ops = quote { + - * / % & | ^ ! ~ < > = . , : ; @ # };
+
+    // Literals
+    let lits = quote { 42 3.14 "hello" 'c' true false };
+
+    // Delimiters
+    let delims = quote { () [] {} };
+
+    // Combined
+    let combined = quote {
+        fn example(x: Int) -> Int {
+            let y = x + 1;
+            if y > 10 { y } else { 0 }
+        }
+    };
+}
+
+// ============================================================================
+// QUOTE HYGIENE (scoping)
+// ============================================================================
+
+meta fn hygienic_quote() -> TokenStream {
+    // Variables in quote don't clash with caller's scope
+    quote {
+        let __generated_temp = compute();
+        process(__generated_temp)
+    }
+}
+
+// Using gensym for fresh names
+meta fn with_gensym() -> TokenStream {
+    let temp_name = gensym("temp");
+    quote {
+        let $temp_name = get_value();
+        use_value($temp_name)
+    }
+}
+
+// ============================================================================
+// QUOTE AS EXPRESSION VS STATEMENT
+// ============================================================================
+
+// Quote as expression (returns TokenStream)
+fn quote_as_expr() -> TokenStream {
+    quote { 1 + 2 }
+}
+
+// Quote in let binding
+fn quote_in_let() {
+    let code: TokenStream = quote { fn f() {} };
+}
+
+// Quote as function argument
+fn quote_as_arg() {
+    process_code(quote { let x = 42; });
+}
+
+// Quote in return
+fn quote_in_return() -> TokenStream {
+    quote { type T is (); }
+}
+
+// ============================================================================
+// PRACTICAL QUOTE EXAMPLES
+// ============================================================================
+
+// Generate getter/setter
+meta fn generate_accessor(field_name: Ident, field_type: Type) -> TokenStream {
+    let getter_name = concat_idents("get_", field_name);
+    let setter_name = concat_idents("set_", field_name);
+
+    quote {
+        fn $getter_name(&self) -> &$field_type {
+            &self.$field_name
+        }
+
+        fn $setter_name(&mut self, value: $field_type) {
+            self.$field_name = value;
+        }
+    }
+}
+
+// Generate enum match
+meta fn generate_enum_match(enum_name: Ident, variants: List<Ident>) -> TokenStream {
+    quote {
+        fn match_variant(e: &$enum_name) -> Text {
+            match e {
+                $[for v in variants {
+                    $enum_name.$v => stringify($v),
+                }]
+            }
+        }
+    }
+}
+
+// Generate builder
+meta fn generate_builder(struct_name: Ident, fields: List<Field>) -> TokenStream {
+    let builder_name = concat_idents(struct_name, "Builder");
+
+    quote {
+        type $builder_name is {
+            $[for f in fields {
+                $f.name: Maybe<$f.ty>,
+            }]
+        };
+
+        implement $builder_name {
+            fn new() -> Self {
+                Self {
+                    $[for f in fields {
+                        $f.name: None,
+                    }]
+                }
+            }
+
+            $[for f in fields {
+                fn $f.name(mut self, value: $f.ty) -> Self {
+                    self.$f.name = Some(value);
+                    self
+                }
+            }]
+
+            fn build(self) -> $struct_name {
+                $struct_name {
+                    $[for f in fields {
+                        $f.name: self.$f.name.unwrap(),
+                    }]
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,251 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, counterexample
+// @expected-error: verification-failed
+// @expect-counterexample: true
+
+/// Counterexample generation tests.
+/// These proofs should fail and the SMT solver should provide counterexamples.
+
+// ============================================================================
+// Simple counterexample: incorrect postcondition
+// ============================================================================
+
+/// BUG: Claims result is always positive, but 0 + 0 = 0
+@verify(proof)
+fn add_is_positive(x: Int{>= 0}, y: Int{>= 0}) -> Int{> 0} {
+    x + y
+    // Counterexample: x = 0, y = 0 => result = 0, but 0 !> 0
+}
+
+// ============================================================================
+// Counterexample: overflow assumption
+// ============================================================================
+
+/// BUG: Assumes no overflow, but x + y can overflow for large values
+@verify(proof)
+fn sum_in_range(x: Int{>= 0 && < 1000}, y: Int{>= 0 && < 1000}) -> Int{>= 0 && < 1000} {
+    x + y
+    // Counterexample: x = 999, y = 999 => result = 1998, but 1998 >= 1000
+}
+
+// ============================================================================
+// Counterexample: incorrect precondition
+// ============================================================================
+
+/// BUG: Missing precondition that y != 0 for the negative case
+@verify(proof)
+fn safe_divide(x: Int, y: Int) -> Int
+    requires y >= 0  // Should be y != 0
+{
+    x / y
+    // Counterexample: y = 0 => division by zero
+}
+
+// ============================================================================
+// Counterexample: array bounds
+// ============================================================================
+
+/// BUG: Off-by-one error in bounds check
+@verify(proof)
+fn get_element(arr: List<Int>, idx: Int{>= 0}) -> Int
+    requires idx <= len(arr)  // Should be idx < len(arr)
+{
+    arr[idx]
+    // Counterexample: arr = [1, 2, 3], idx = 3 => out of bounds
+}
+
+// ============================================================================
+// Counterexample: incorrect invariant
+// ============================================================================
+
+/// BUG: Loop invariant is too weak
+@verify(proof)
+fn sum_positive(arr: List<Int>) -> Int{> 0}
+    requires len(arr) > 0
+{
+    let mut sum = 0;
+    let mut i = 0;
+
+    while i < len(arr) {
+        invariant sum >= 0;  // Should track that we add positive values
+        sum += arr[i];
+        i += 1;
+    }
+
+    sum
+    // Counterexample: arr = [-1, -1] => sum = -2, but -2 !> 0
+}
+
+// ============================================================================
+// Counterexample: missing case
+// ============================================================================
+
+/// BUG: Doesn't handle empty list case properly
+@verify(proof)
+fn max_element(arr: List<Int>) -> Int
+    ensures forall x in arr => result >= x
+{
+    let mut max = arr[0];  // BUG: crashes on empty list
+
+    for x in arr {
+        if x > max {
+            max = x;
+        }
+    }
+
+    max
+    // Counterexample: arr = [] => index out of bounds
+}
+
+// ============================================================================
+// Counterexample: non-termination
+// ============================================================================
+
+/// BUG: Loop may not terminate for negative input
+@verify(proof)
+fn countdown(n: Int) -> Int{== 0}
+    decreases n
+{
+    let mut x = n;
+
+    while x != 0 {
+        x -= 1;  // BUG: if n < 0, this never reaches 0
+    }
+
+    x
+    // Counterexample: n = -1 => infinite loop (or wrap-around)
+}
+
+// ============================================================================
+// Counterexample: incorrect logical implication
+// ============================================================================
+
+/// BUG: Implication is wrong direction
+@verify(proof)
+fn logical_error(a: Bool, b: Bool) -> Bool
+    requires a => b  // If a then b
+    ensures result == a  // Claims result is a
+{
+    b  // BUG: returns b, not a
+    // Counterexample: a = false, b = true => result = true, but !a
+}
+
+// ============================================================================
+// Counterexample: floating point precision
+// ============================================================================
+
+/// BUG: Floating point comparison is too strict
+@verify(proof)
+fn float_equality(x: Float, y: Float) -> Bool
+    requires x > 0.0 && y > 0.0
+    ensures result == true
+{
+    let a = x / y;
+    let b = x / y;
+    a == b  // May fail due to floating point non-determinism
+    // Counterexample: depends on FP implementation
+}
+
+// ============================================================================
+// Counterexample: incorrect modular arithmetic
+// ============================================================================
+
+/// BUG: Modulo of negative numbers behaves differently
+@verify(proof)
+fn mod_positive(x: Int, m: Int{> 0}) -> Int{>= 0 && < m} {
+    x % m
+    // Counterexample: x = -1, m = 3 => result = -1, but -1 !>= 0
+}
+
+// ============================================================================
+// Counterexample: struct invariant violation
+// ============================================================================
+
+type Range is {
+    start: Int,
+    end: Int,
+};
+
+/// BUG: Doesn't verify the invariant holds
+@verify(proof)
+fn expand_range(r: Range, delta: Int) -> Range
+    requires r.start <= r.end
+    ensures result.start <= result.end
+{
+    Range {
+        start: r.start - delta,
+        end: r.end + delta,
+    }
+    // Counterexample: r = Range{0, 0}, delta = -1
+    // => result = Range{1, -1}, but 1 !<= -1
+}
+
+// ============================================================================
+// Counterexample: quantifier instantiation
+// ============================================================================
+
+/// BUG: Existential claim is false
+@verify(proof)
+fn find_positive(arr: List<Int>) -> Bool
+    ensures result == true => exists x in arr => x > 0
+    ensures result == false => forall x in arr => x <= 0
+{
+    for x in arr {
+        if x > 0 {
+            return true;
+        }
+    }
+    true  // BUG: should return false
+    // Counterexample: arr = [-1, -2, -3] => no positive exists
+}
+
+// ============================================================================
+// Counterexample: incorrect sorting claim
+// ============================================================================
+
+/// BUG: Sorting doesn't preserve elements
+@verify(proof)
+fn broken_sort(arr: List<Int>) -> List<Int>
+    ensures forall i in 0..(len(result) - 1) => result[i] <= result[i + 1]
+    ensures len(result) == len(arr)
+    ensures forall x in arr => exists y in result => x == y
+{
+    // BUG: Just returns ascending sequence, losing original elements
+    let mut result: List<Int> = [];
+    for i in 0..len(arr) {
+        result.push(i);
+    }
+    result
+    // Counterexample: arr = [5, 3, 1] => result = [0, 1, 2]
+    // 5 is in arr but not in result
+}
+
+// ============================================================================
+// Counterexample with witness values
+// ============================================================================
+
+/// BUG: The postcondition is mathematically false
+@verify(proof)
+fn impossible_claim(x: Int{> 0}, y: Int{> 0}) -> Int
+    ensures result > x + y  // Claims result is strictly greater than sum
+{
+    x + y
+    // Counterexample: any x, y > 0
+    // x + y == x + y, but x + y !> x + y
+}
+
+fn main() {
+    // These tests are designed to fail verification
+    // The test harness should:
+    // 1. Verify that verification fails
+    // 2. Check that a counterexample is produced
+    // 3. Validate that the counterexample demonstrates the bug
+
+    // Example expected counterexamples:
+    // add_is_positive: {x: 0, y: 0}
+    // sum_in_range: {x: 999, y: 999}
+    // safe_divide: {x: 1, y: 0}
+    // get_element: {arr: [1, 2, 3], idx: 3}
+}

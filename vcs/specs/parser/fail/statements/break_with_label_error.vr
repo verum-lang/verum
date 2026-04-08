@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, break, label, error
+// @description: Test break with invalid label syntax
+// @expected-error: E049
+
+fn test() {
+    loop {
+        break @invalid;
+    }
+}

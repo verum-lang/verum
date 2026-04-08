@@ -1,0 +1,35 @@
+// @test: parse
+// @level: L1
+// @tags: meta, std, attributes
+// @timeout: 5000
+
+/// @std attribute for marking standard library items.
+/// Grammar: std_attribute = 'std' ['(' context_group_identifier ')']
+
+// Standard library type
+@std
+type CoreList<T> is protocol {
+    fn len(&self) -> Int;
+    fn push(&mut self, item: T);
+    fn pop(&mut self) -> Maybe<T>;
+};
+
+// Std with context group
+@std(collections)
+type CoreMap<K, V> is protocol {
+    fn get(&self, key: &K) -> Maybe<&V>;
+    fn insert(&mut self, key: K, value: V);
+    fn len(&self) -> Int;
+};
+
+// Std on implement block
+@std
+implement CoreList for List<Int> {
+    fn len(&self) -> Int { 0 }
+    fn push(&mut self, item: Int) { }
+    fn pop(&mut self) -> Maybe<Int> { None }
+}
+
+fn main() {
+    print("Std attribute tests parsed");
+}

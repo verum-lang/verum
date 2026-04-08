@@ -1,0 +1,535 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for patterns in function parameters
+
+// Grammar Reference:
+// param         = param_pattern | self_param ;
+// param_pattern = { attribute } , pattern , ':' , type_expr ;
+
+// ============================================================================
+// SECTION 1: Simple Parameter Patterns
+// ============================================================================
+
+fn simple_param(x: Int) -> Int {
+    x
+}
+
+fn two_params(x: Int, y: Int) -> Int {
+    x + y
+}
+
+fn three_params(a: Int, b: Text, c: Bool) -> Text {
+    if c { b } else { a.to_string() }
+}
+
+fn many_params(a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
+    a + b + c + d + e
+}
+
+// ============================================================================
+// SECTION 2: Mutable Parameters
+// ============================================================================
+
+fn mutable_param(mut x: Int) -> Int {
+    x = x + 1;
+    x
+}
+
+fn mixed_mutability(x: Int, mut y: Int, z: Int) -> Int {
+    y = y + x + z;
+    y
+}
+
+fn all_mutable(mut a: Int, mut b: Int, mut c: Int) -> Int {
+    a = a + 1;
+    b = b + 2;
+    c = c + 3;
+    a + b + c
+}
+
+// ============================================================================
+// SECTION 3: Wildcard Parameters
+// ============================================================================
+
+fn ignore_first(_: Int, second: Text) -> Text {
+    second
+}
+
+fn ignore_second(first: Int, _: Text) -> Int {
+    first
+}
+
+fn ignore_middle(first: Int, _: Text, last: Bool) -> Int {
+    if last { first } else { 0 }
+}
+
+fn ignore_all(_: Int, _: Text, _: Bool) -> () {
+    ()
+}
+
+fn wildcard_with_type(_: Option<Int>) -> Bool {
+    true
+}
+
+// ============================================================================
+// SECTION 4: Tuple Destructuring in Parameters
+// ============================================================================
+
+fn tuple_param((a, b): (Int, Int)) -> Int {
+    a + b
+}
+
+fn tuple_triple((x, y, z): (Int, Int, Int)) -> Int {
+    x + y + z
+}
+
+fn tuple_mixed((name, age): (Text, Int)) -> Text {
+    f"{name} is {age}"
+}
+
+fn nested_tuple(((a, b), c): ((Int, Int), Int)) -> Int {
+    a + b + c
+}
+
+fn deep_tuple((((a, b), c), d): (((Int, Int), Int), Int)) -> Int {
+    a + b + c + d
+}
+
+fn tuple_with_wildcard((a, _): (Int, Text)) -> Int {
+    a
+}
+
+fn tuple_both_wildcards((_, _): (Int, Int)) -> Bool {
+    true
+}
+
+fn multiple_tuple_params((a, b): (Int, Int), (c, d): (Int, Int)) -> Int {
+    a + b + c + d
+}
+
+// ============================================================================
+// SECTION 5: Array Destructuring in Parameters
+// ============================================================================
+
+fn array_param([a, b]: [Int; 2]) -> Int {
+    a + b
+}
+
+fn array_triple([x, y, z]: [Int; 3]) -> Int {
+    x + y + z
+}
+
+fn array_with_wildcard([a, _, c]: [Int; 3]) -> Int {
+    a + c
+}
+
+fn array_nested([[a, b], [c, d]]: [[Int; 2]; 2]) -> Int {
+    a + b + c + d
+}
+
+fn multiple_array_params([a, b]: [Int; 2], [c, d]: [Int; 2]) -> Int {
+    a + b + c + d
+}
+
+// ============================================================================
+// SECTION 6: Record Destructuring in Parameters
+// ============================================================================
+
+fn record_param(Point { x, y }: Point) -> Int {
+    x + y
+}
+
+fn record_three(Color { red, green, blue }: Color) -> Int {
+    red + green + blue
+}
+
+fn record_renamed(Point { x: px, y: py }: Point) -> Int {
+    px * py
+}
+
+fn record_partial(Person { name, .. }: Person) -> Text {
+    name
+}
+
+fn record_rest(Config { host, port, .. }: Config) -> Text {
+    f"{host}:{port}"
+}
+
+fn nested_record(
+    Line {
+        start: Point { x: x1, y: y1 },
+        end: Point { x: x2, y: y2 }
+    }: Line
+) -> Int {
+    (x2 - x1) + (y2 - y1)
+}
+
+fn multiple_record_params(
+    Point { x: x1, y: y1 }: Point,
+    Point { x: x2, y: y2 }: Point
+) -> Int {
+    (x2 - x1) * (y2 - y1)
+}
+
+fn record_with_mutable(Point { mut x, y }: Point) -> Int {
+    x = x + 1;
+    x + y
+}
+
+// ============================================================================
+// SECTION 7: Reference Patterns in Parameters
+// ============================================================================
+
+fn ref_param(x_ref: &Int) -> Int {
+    *x_ref
+}
+
+fn ref_tuple(pair_ref: &(Int, Int)) -> Int {
+    let (a, b) = *pair_ref;
+    a + b
+}
+
+fn ref_record(point_ref: &Point) -> Int {
+    point_ref.x + point_ref.y
+}
+
+fn mut_ref_param(x_ref: &mut Int) {
+    *x_ref = *x_ref + 1
+}
+
+fn mut_ref_tuple(pair_ref: &mut (Int, Int)) {
+    pair_ref.0 = pair_ref.0 + 1;
+    pair_ref.1 = pair_ref.1 + 1
+}
+
+fn mut_ref_record(point_ref: &mut Point) {
+    point_ref.x = point_ref.x + 1;
+    point_ref.y = point_ref.y + 1
+}
+
+fn mixed_refs(a_ref: &Int, b_ref: &mut Int, c: Int) -> Int {
+    *b_ref = *b_ref + c;
+    *a_ref + *b_ref
+}
+
+// ============================================================================
+// SECTION 8: @ Bindings in Parameters
+// ============================================================================
+
+fn at_tuple((a, b): (Int, Int)) -> ((Int, Int), Int, Int) {
+    let whole = (a, b);
+    (whole, a, b)
+}
+
+fn at_record(Point { x, y }: Point) -> (Point, Int, Int) {
+    let p = Point { x, y };
+    (p, x, y)
+}
+
+fn at_nested(((a, b), c): ((Int, Int), Int)) -> Int {
+    a + b + c
+}
+
+// ============================================================================
+// SECTION 9: Pattern Matching in Parameters
+// ============================================================================
+
+// Note: Literal patterns not valid in function parameters
+// Use pattern matching inside function instead
+fn check_zero(n: Int) -> Bool {
+    n == 0
+}
+
+fn check_tuple_zero(pair: (Int, Int)) -> Int {
+    let (_, y) = pair;
+    y
+}
+
+fn check_record_zero(point: Point) -> Int {
+    point.y
+}
+
+// ============================================================================
+// SECTION 10: Combined Patterns in Parameters
+// ============================================================================
+
+fn complex_param(
+    (Point { x, y }, [a, b, c]): (Point, [Int; 3])
+) -> Int {
+    x + y + a + b + c
+}
+
+fn very_complex(
+    (
+        Point { x: px, y: py },
+        (name, age),
+        [first, ..],
+        Config { host, .. }
+    ): (Point, (Text, Int), [Int; N], Config)
+) -> Text {
+    f"{name}@{host}:{px},{py}"
+}
+
+fn all_pattern_types(
+    x: Int,                           // Simple
+    mut y: Int,                       // Mutable
+    _: Bool,                          // Wildcard
+    (a, b): (Int, Int),               // Tuple
+    [c, d]: [Int; 2],                 // Array
+    Point { x: px, y: py }: Point,    // Record
+    r_ref: &Int,                      // Reference
+    (e, f): (Int, Int)                // Tuple binding
+) -> Int {
+    x + y + a + b + c + d + px + py + *r_ref + e + f
+}
+
+// ============================================================================
+// SECTION 11: Self Parameter Variations
+// ============================================================================
+
+type Counter is { value: Int };
+
+implement Counter {
+    // Immutable self
+    fn get(self) -> Int {
+        self.value
+    }
+
+    // Mutable self
+    fn increment(mut self) {
+        self.value = self.value + 1
+    }
+
+    // Reference self
+    fn peek(&self) -> Int {
+        self.value
+    }
+
+    // Mutable reference self
+    fn add(&mut self, amount: Int) {
+        self.value = self.value + amount
+    }
+
+    // Self with other params
+    fn add_and_get(&mut self, amount: Int) -> Int {
+        self.value = self.value + amount;
+        self.value
+    }
+}
+
+// ============================================================================
+// SECTION 12: Generic Function Parameters
+// ============================================================================
+
+fn generic_simple<T>(x: T) -> T {
+    x
+}
+
+fn generic_tuple<T, U>((a, b): (T, U)) -> (U, T) {
+    (b, a)
+}
+
+fn generic_record<T>(Wrapper { value }: Wrapper<T>) -> T {
+    value
+}
+
+fn generic_with_bounds<T: Display>(x: T) -> Text {
+    x.to_string()
+}
+
+fn generic_multiple<T, U, V>(a: T, b: U, c: V) -> (T, U, V) {
+    (a, b, c)
+}
+
+// ============================================================================
+// SECTION 13: Closure Parameters
+// ============================================================================
+
+fn test_closure_params() {
+    // Simple param
+    let f = |x: Int| x + 1;
+
+    // Multiple params
+    let add = |a: Int, b: Int| a + b;
+
+    // Tuple destructure
+    let swap = |(a, b): (Int, Int)| (b, a);
+
+    // Record destructure
+    let get_x = |Point { x, .. }: Point| x;
+
+    // Wildcard
+    let ignore = |_: Int, y: Int| y;
+
+    // Reference
+    let borrow = |x_ref: &Int| *x_ref;
+
+    // Complex
+    let complex = |(Point { x, y }, [a, b]): (Point, [Int; 2])| x + y + a + b;
+}
+
+// ============================================================================
+// SECTION 14: Async Function Parameters
+// ============================================================================
+
+async fn async_simple(x: Int) -> Int {
+    x
+}
+
+async fn async_tuple((a, b): (Int, Int)) -> Int {
+    a + b
+}
+
+async fn async_record(Point { x, y }: Point) -> Int {
+    x + y
+}
+
+async fn async_ref(data_ref: &Data) -> Result<Int, Error> {
+    process(data_ref).await
+}
+
+// ============================================================================
+// SECTION 15: Method Parameters with Patterns
+// ============================================================================
+
+type Calculator is { value: Int };
+
+implement Calculator {
+    fn add_pair(&mut self, (a, b): (Int, Int)) {
+        self.value = self.value + a + b
+    }
+
+    fn add_point(&mut self, Point { x, y }: Point) {
+        self.value = self.value + x + y
+    }
+
+    fn process_config(&self, Config { factor, offset, .. }: Config) -> Int {
+        self.value * factor + offset
+    }
+
+    fn from_tuple((value,): (Int,)) -> Self {
+        Calculator { value }
+    }
+}
+
+// ============================================================================
+// SECTION 16: Higher-Order Function Parameters
+// ============================================================================
+
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U {
+    f(x)
+}
+
+fn map_pair<T, U>(f: fn(T) -> U, (a, b): (T, T)) -> (U, U) {
+    (f(a), f(b))
+}
+
+fn fold<T, U>(
+    f: fn(U, T) -> U,
+    initial: U,
+    [first, ..rest]: [T; N]
+) -> U {
+    let acc = f(initial, first);
+    // ... continue with rest
+    acc
+}
+
+// ============================================================================
+// SECTION 17: Variadic-like Patterns
+// ============================================================================
+
+fn first_and_rest<T>([first, ..rest]: [T; N]) -> (T, [T; N-1]) {
+    (first, rest)
+}
+
+fn last_and_init<T>([..init, last]: [T; N]) -> ([T; N-1], T) {
+    (init, last)
+}
+
+fn bookends<T>([first, .., last]: [T; N]) -> (T, T) {
+    (first, last)
+}
+
+// ============================================================================
+// SECTION 18: Parameters with Attributes
+// ============================================================================
+
+fn with_attributes(
+    @unused x: Int,
+    @deprecated old: Text,
+    y: Int
+) -> Int {
+    y
+}
+
+// ============================================================================
+// SECTION 19: Complex Real-World Parameters
+// ============================================================================
+
+fn http_handler(
+    Request {
+        method,
+        path,
+        headers: [content_type, ..other_headers],
+        body: Some(data),
+        ..
+    }: Request
+) -> Response {
+    handle_request(method, path, content_type, data)
+}
+
+fn process_event(
+    Event {
+        kind: Click { x, y },
+        timestamp,
+        source: Source { id, .. },
+        ..
+    }: Event
+) -> Result<(), Error> {
+    log_click(x, y, timestamp, id)
+}
+
+fn transform_data(
+    Data {
+        values: [first, second, ..rest],
+        metadata: Meta { version, .. },
+        options: (enabled, threshold),
+    }: Data
+) -> TransformedData {
+    process(first, second, rest, version, enabled, threshold)
+}
+
+// ============================================================================
+// SECTION 20: Edge Cases
+// ============================================================================
+
+// Single char names
+fn f(a: Int, b: Int, c: Int) -> Int {
+    a + b + c
+}
+
+// Very long names
+fn process_with_very_long_parameter_names(
+    very_long_first_parameter_name: Int,
+    another_extremely_long_parameter_name: Text
+) -> Int {
+    very_long_first_parameter_name
+}
+
+// Deeply nested
+fn deep_nesting(
+    ((((a, b), c), d), e): ((((Int, Int), Int), Int), Int)
+) -> Int {
+    a + b + c + d + e
+}
+
+// Empty tuple (unit)
+fn unit_param((): ()) -> Bool {
+    true
+}
+
+// Single tuple element
+fn single_tuple((x,): (Int,)) -> Int {
+    x
+}

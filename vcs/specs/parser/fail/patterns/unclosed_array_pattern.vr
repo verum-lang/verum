@@ -1,0 +1,42 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, array, delimiter, error
+// @description: Test unclosed array pattern (missing closing bracket)
+// @expected-error: E073
+
+fn test_unclosed_array_simple() {
+    let arr = [1, 2, 3];
+
+    // Invalid: missing closing bracket
+    match arr {
+        [a, b, c => print("array"),
+        _ => print("other"),
+    }
+}
+
+fn test_unclosed_array_with_rest() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Invalid: missing closing bracket with rest pattern
+    match arr {
+        [first, .. => print("with rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_unclosed_array_nested() {
+    let matrix = [[1, 2], [3, 4]];
+
+    // Invalid: nested array with missing bracket
+    match matrix {
+        [[a, b], [c, d] => print("matrix"),
+        _ => print("other"),
+    }
+}
+
+fn test_unclosed_array_in_let() {
+    let arr = [1, 2, 3];
+
+    // Invalid: unclosed array in let pattern
+    let [x, y, z = arr;
+}

@@ -1,0 +1,4 @@
+// @test: typecheck-pass
+// @level: L0
+// @expect: pass
+fn main() { let x: Float = 3.14; assert_eq(x, 3.14); }

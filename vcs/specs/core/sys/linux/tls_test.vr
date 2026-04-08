@@ -1,0 +1,381 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/linux/tls_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, linux, tls, thread-local
+// @description: Tests for Linux TLS bootstrap and context system.
+//
+// Coverage:
+// - ThreadControlBlock: TLS data structure
+// - ContextSlots: Thread-local context storage
+// - init_main_thread_tls, cleanup_thread_tls: TLS lifecycle
+// - get_current_tcb, get_context_slots: TCB access
+// - ctx_get, ctx_set, ctx_clear: Context operations
+// - ctx_push, ctx_pop: Context stack operations
+// - get_errno, set_errno: Thread-local errno
+// - get_tid_fast: Fast thread ID retrieval
+// - arch_prctl constants (ARCH_SET_FS, ARCH_GET_FS)
+//
+// Test Strategy:
+// - Test context operations on initialized TLS
+// - Verify errno operations
+// - Test context stack push/pop
+//
+// Platform: Linux x86_64
+// =============================================================================
+
+@cfg(target_os = "linux")
+module test.stdlib.sys.linux.tls_test;
+
+mount core.sys.linux.tls.{
+    ThreadControlBlock,
+    ContextSlots,
+    TlsError,
+
+    get_current_tcb,
+    get_context_slots,
+    set_context_slots,
+    get_errno,
+    set_errno,
+    get_tid_fast,
+    check_stack_guard,
+
+    ctx_get,
+    ctx_get_mut,
+    ctx_set,
+    ctx_clear,
+    ctx_push,
+    ctx_pop,
+
+    ARCH_SET_FS, ARCH_GET_FS,
+    TLS_CTX_OFFSET,
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// TLS Constants Tests
+// =============================================================================
+
+@test
+fn test_tls_constants() {
+    // arch_prctl constants
+    assert(ARCH_SET_FS == 0x1002);
+    assert(ARCH_GET_FS == 0x1003);
+
+    // Context slot limits
+    assert(MAX_CONTEXT_SLOTS == 256);
+    assert(CONTEXT_STACK_DEPTH == 8);
+
+    // TLS context offset should be non-negative
+    assert(TLS_CTX_OFFSET >= 0);
+
+    print("TLS constants tests passed");
+}
+
+// =============================================================================
+// TCB Access Tests
+// =============================================================================
+
+@test
+fn test_tcb_access() {
+    // Get current TCB (should be initialized by runtime)
+    let tcb_result = get_current_tcb();
+
+    // In a properly initialized runtime, TCB should be available
+    match tcb_result {
+        Some(tcb) => {
+            // TCB should have valid magic number
+            // (Implementation-specific check)
+
+            // Verify we can access context slots
+            let slots = get_context_slots();
+            assert(slots is Some);
+
+            print("TCB access successful");
+        }
+        None => {
+            // TLS may not be initialized in minimal test environment
+            print("TCB not initialized (expected in minimal environment)");
+        }
+    }
+
+    print("TCB access tests passed");
+}
+
+// =============================================================================
+// Errno Operations Tests
+// =============================================================================
+
+@test
+fn test_errno_operations() {
+    // Save original errno
+    let original = get_errno();
+
+    // Set errno to known value
+    set_errno(42);
+    assert(get_errno() == 42);
+
+    // Set to different value
+    set_errno(100);
+    assert(get_errno() == 100);
+
+    // Set to zero
+    set_errno(0);
+    assert(get_errno() == 0);
+
+    // Restore original errno
+    set_errno(original);
+    assert(get_errno() == original);
+
+    // Errno should persist across multiple reads
+    set_errno(77);
+    let read1 = get_errno();
+    let read2 = get_errno();
+    let read3 = get_errno();
+    assert(read1 == 77);
+    assert(read2 == 77);
+    assert(read3 == 77);
+
+    // Restore
+    set_errno(original);
+
+    print("Errno operations tests passed");
+}
+
+// =============================================================================
+// Fast Thread ID Tests
+// =============================================================================
+
+@test
+fn test_tid_fast() {
+    // Get thread ID via fast path
+    let tid = get_tid_fast();
+
+    // TID should be positive
+    assert(tid > 0);
+
+    // Multiple calls should return same TID (single-threaded)
+    let tid2 = get_tid_fast();
+    let tid3 = get_tid_fast();
+    assert(tid == tid2);
+    assert(tid == tid3);
+
+    // Compare with syscall-based gettid
+    mount core.sys.linux.{gettid};
+    let syscall_tid = gettid();
+
+    // Fast TID should match syscall TID
+    assert(tid == syscall_tid as Int);
+
+    // TID should be in reasonable range
+    assert(tid < 4194304);  // PID_MAX_LIMIT
+
+    print(f"Fast TID: {tid}");
+}
+
+// =============================================================================
+// Context Operations Tests
+// =============================================================================
+
+@test
+fn test_context_operations() {
+    // Test context slot operations with type Int
+
+    // Initially slot 0 should be empty
+    let initial: Maybe<Int> = ctx_get(0);
+    // May or may not be None depending on previous tests
+
+    // Set a value
+    ctx_set(0, 42);
+
+    // Get the value back
+    let value: Maybe<Int> = ctx_get(0);
+    assert(value is Some);
+    assert(value.unwrap() == 42);
+
+    // Update the value
+    ctx_set(0, 100);
+    let updated: Maybe<Int> = ctx_get(0);
+    assert(updated is Some);
+    assert(updated.unwrap() == 100);
+
+    // Clear the slot
+    ctx_clear<Int>(0);
+    let cleared: Maybe<Int> = ctx_get(0);
+    assert(cleared is None);
+
+    // Test different slots
+    ctx_set(1, 111);
+    ctx_set(2, 222);
+    ctx_set(3, 333);
+
+    let v1: Maybe<Int> = ctx_get(1);
+    let v2: Maybe<Int> = ctx_get(2);
+    let v3: Maybe<Int> = ctx_get(3);
+
+    assert(v1.unwrap() == 111);
+    assert(v2.unwrap() == 222);
+    assert(v3.unwrap() == 333);
+
+    // Clean up
+    ctx_clear<Int>(1);
+    ctx_clear<Int>(2);
+    ctx_clear<Int>(3);
+
+    print("Context operations tests passed");
+}
+
+// =============================================================================
+// Context Stack Tests
+// =============================================================================
+
+@test
+fn test_context_stack() {
+    // Test push/pop stack operations
+
+    // Clear slot 10 first
+    ctx_clear<Int>(10);
+
+    // Push first value
+    ctx_push(10, 1);
+    let v1: Maybe<Int> = ctx_get(10);
+    assert(v1.unwrap() == 1);
+
+    // Push second value
+    ctx_push(10, 2);
+    let v2: Maybe<Int> = ctx_get(10);
+    assert(v2.unwrap() == 2);
+
+    // Push third value
+    ctx_push(10, 3);
+    let v3: Maybe<Int> = ctx_get(10);
+    assert(v3.unwrap() == 3);
+
+    // Pop should return 3 and reveal 2
+    let popped1: Maybe<Int> = ctx_pop(10);
+    assert(popped1.unwrap() == 3);
+    let after_pop1: Maybe<Int> = ctx_get(10);
+    assert(after_pop1.unwrap() == 2);
+
+    // Pop should return 2 and reveal 1
+    let popped2: Maybe<Int> = ctx_pop(10);
+    assert(popped2.unwrap() == 2);
+    let after_pop2: Maybe<Int> = ctx_get(10);
+    assert(after_pop2.unwrap() == 1);
+
+    // Pop should return 1 and slot becomes empty
+    let popped3: Maybe<Int> = ctx_pop(10);
+    assert(popped3.unwrap() == 1);
+    let after_pop3: Maybe<Int> = ctx_get(10);
+    assert(after_pop3 is None);
+
+    // Pop from empty should return None
+    let popped4: Maybe<Int> = ctx_pop(10);
+    assert(popped4 is None);
+
+    print("Context stack tests passed");
+}
+
+// =============================================================================
+// Context Slot Boundary Tests
+// =============================================================================
+
+@test
+fn test_context_boundaries() {
+    // Test slot boundaries
+
+    // Slot 0 (minimum valid)
+    ctx_set(0, 100);
+    let v0: Maybe<Int> = ctx_get(0);
+    assert(v0.unwrap() == 100);
+    ctx_clear<Int>(0);
+
+    // Slot MAX_CONTEXT_SLOTS - 1 (maximum valid)
+    let max_slot = MAX_CONTEXT_SLOTS - 1;
+    ctx_set(max_slot, 999);
+    let vmax: Maybe<Int> = ctx_get(max_slot);
+    assert(vmax.unwrap() == 999);
+    ctx_clear<Int>(max_slot);
+
+    // Invalid slot (>= MAX_CONTEXT_SLOTS) should be handled
+    // Implementation may return None or panic
+
+    print("Context boundary tests passed");
+}
+
+// =============================================================================
+// Stack Guard Tests
+// =============================================================================
+
+@test
+fn test_stack_guard() {
+    // Check stack guard (should not be corrupted in normal operation)
+    let guard_ok = check_stack_guard();
+
+    // Guard should be valid
+    assert(guard_ok);
+
+    print("Stack guard tests passed");
+}
+
+// =============================================================================
+// TlsError Type Tests
+// =============================================================================
+
+@test
+fn test_tls_error_types() {
+    // Create TlsError variants
+    let arch_err = TlsError.ArchPrctlFailed { errno: 22 };
+    let alloc_err = TlsError.AllocationFailed { size: 4096 };
+    let slot_err = TlsError.SlotExhausted { max: 256 };
+    let not_init = TlsError.NotInitialized;
+    let stack_err = TlsError.StackOverflow { slot: 10, depth: 8 };
+
+    // Pattern matching
+    match arch_err {
+        TlsError.ArchPrctlFailed { errno } => {
+            assert(errno == 22);
+        }
+        _ => assert(false),
+    }
+
+    match alloc_err {
+        TlsError.AllocationFailed { size } => {
+            assert(size == 4096);
+        }
+        _ => assert(false),
+    }
+
+    match slot_err {
+        TlsError.SlotExhausted { max } => {
+            assert(max == 256);
+        }
+        _ => assert(false),
+    }
+
+    match not_init {
+        TlsError.NotInitialized => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match stack_err {
+        TlsError.StackOverflow { slot, depth } => {
+            assert(slot == 10);
+            assert(depth == 8);
+        }
+        _ => assert(false),
+    }
+
+    print("TlsError type tests passed");
+}

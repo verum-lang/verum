@@ -1,0 +1,1740 @@
+// =============================================================================
+// list_test.vr - Comprehensive tests for List<T> collection
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, list, dynamic-array, core
+// @description: Comprehensive tests for List<T> type and methods
+// =============================================================================
+
+mount core.collections.list.List;
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Construction Tests
+// =============================================================================
+
+@test
+fn test_list_new() {
+    let empty: List<Int> = List.new();
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+}
+
+@test
+fn test_list_with_capacity() {
+    let list: List<Int> = List.with_capacity(10);
+    assert(list.is_empty());
+    assert_eq(list.len(), 0);
+    assert(list.capacity() >= 10);
+}
+
+@test
+fn test_list_from_array() {
+    let list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 1);
+    assert_eq(list[4], 5);
+}
+
+// =============================================================================
+// Section 2: Basic Operations Tests
+// =============================================================================
+
+@test
+fn test_list_push() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_list_pop() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+
+    match list.pop() {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+
+    assert_eq(list.len(), 2);
+
+    match list.pop() {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+
+    match list.pop() {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+
+    match list.pop() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_list_clear() {
+    let mut list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    assert_eq(list.len(), 5);
+
+    list.clear();
+    assert(list.is_empty());
+    assert_eq(list.len(), 0);
+}
+
+// =============================================================================
+// Section 3: Index Access Tests
+// =============================================================================
+
+@test
+fn test_list_index_access() {
+    let list: List<Int> = List.from([10, 20, 30, 40, 50]);
+
+    assert_eq(list[0], 10);
+    assert_eq(list[1], 20);
+    assert_eq(list[2], 30);
+    assert_eq(list[3], 40);
+    assert_eq(list[4], 50);
+}
+
+@test
+fn test_list_get() {
+    let list: List<Int> = List.from([1, 2, 3]);
+
+    match list.get(0) {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+
+    match list.get(2) {
+        Some(v) => assert_eq(*v, 3),
+        None => panic("Expected Some"),
+    }
+
+    match list.get(10) {
+        None => {} // Expected - out of bounds
+        Some(_) => panic("Expected None for out of bounds"),
+    }
+}
+
+@test
+fn test_list_first_last() {
+    let list: List<Int> = List.from([1, 2, 3, 4, 5]);
+
+    match list.first() {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+
+    match list.last() {
+        Some(v) => assert_eq(*v, 5),
+        None => panic("Expected Some"),
+    }
+
+    let empty: List<Int> = List.new();
+    match empty.first() {
+        None => {} // Expected
+        Some(_) => panic("Expected None for empty list"),
+    }
+}
+
+// =============================================================================
+// Section 4: Mutation Tests
+// =============================================================================
+
+@test
+fn test_list_set() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+
+    list[1] = 20;
+    assert_eq(list[1], 20);
+
+    list[0] = 10;
+    list[2] = 30;
+    assert_eq(list[0], 10);
+    assert_eq(list[2], 30);
+}
+
+@test
+fn test_list_insert() {
+    let mut list: List<Int> = List.from([1, 3, 4]);
+
+    list.insert(1, 2);  // Insert 2 at index 1
+    assert_eq(list.len(), 4);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+    assert_eq(list[3], 4);
+}
+
+@test
+fn test_list_remove() {
+    let mut list: List<Int> = List.from([1, 2, 3, 4]);
+
+    let removed = list.remove(1);  // Remove at index 1
+    assert_eq(removed, 2);
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 3);
+    assert_eq(list[2], 4);
+}
+
+@test
+fn test_list_swap_remove() {
+    let mut list: List<Int> = List.from([1, 2, 3, 4]);
+
+    // swap_remove swaps with last element then pops - O(1)
+    let removed = list.swap_remove(1);
+    assert_eq(removed, 2);
+    assert_eq(list.len(), 3);
+    // Order: [1, 4, 3] - 4 was swapped into position 1
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 4);
+    assert_eq(list[2], 3);
+}
+
+// =============================================================================
+// Section 5: Multiple Element Access Tests
+// =============================================================================
+
+@test
+fn test_list_multiple_access() {
+    let list: List<Int> = List.from([10, 20, 30, 40, 50]);
+
+    assert_eq(list[0], 10);
+    assert_eq(list[1], 20);
+    assert_eq(list[2], 30);
+    assert_eq(list[3], 40);
+    assert_eq(list[4], 50);
+    assert_eq(list.len(), 5);
+}
+
+@test
+fn test_list_get_multiple() {
+    let list: List<Int> = List.from([1, 2, 3, 4, 5]);
+
+    match list.get(0) {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some at 0"),
+    }
+    match list.get(2) {
+        Some(v) => assert_eq(*v, 3),
+        None => panic("Expected Some at 2"),
+    }
+    match list.get(4) {
+        Some(v) => assert_eq(*v, 5),
+        None => panic("Expected Some at 4"),
+    }
+}
+
+// =============================================================================
+// Section 6: Search Tests
+// =============================================================================
+
+@test
+fn test_list_contains() {
+    let list: List<Int> = List.from([1, 2, 3, 4, 5]);
+
+    assert(list.contains(&3));
+    assert(list.contains(&1));
+    assert(list.contains(&5));
+    assert(!list.contains(&10));
+    assert(!list.contains(&0));
+}
+
+@test
+fn test_list_position() {
+    let list: List<Int> = List.from([10, 20, 30, 20, 40]);
+
+    match list.position(&20) {
+        Some(idx) => assert_eq(idx, 1),  // First occurrence
+        None => panic("Expected Some"),
+    }
+
+    match list.position(&100) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 7: Capacity Management Tests
+// =============================================================================
+
+@test
+fn test_list_reserve() {
+    let mut list: List<Int> = List.new();
+    list.reserve(100);
+
+    assert(list.capacity() >= 100);
+    assert(list.is_empty());
+}
+
+@test
+fn test_list_shrink_to_fit() {
+    let mut list: List<Int> = List.with_capacity(100);
+    list.push(1);
+    list.push(2);
+    list.push(3);
+
+    list.shrink_to_fit();
+    assert_eq(list.len(), 3);
+    // Capacity should be closer to len now
+}
+
+// =============================================================================
+// Section 8: Slice Operations Tests
+// =============================================================================
+
+@test
+fn test_list_as_slice() {
+    let list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    let slice = list.as_slice();
+
+    assert_eq(slice.len(), 5);
+    assert_eq(slice[0], 1);
+    assert_eq(slice[4], 5);
+}
+
+// =============================================================================
+// Section 9: Extension and Appending Tests
+// =============================================================================
+
+@test
+fn test_list_extend() {
+    let mut list1: List<Int> = List.from([1, 2, 3]);
+    let list2: List<Int> = List.from([4, 5, 6]);
+
+    list1.extend(list2.iter());
+
+    assert_eq(list1.len(), 6);
+    assert_eq(list1[3], 4);
+    assert_eq(list1[5], 6);
+}
+
+@test
+fn test_list_append() {
+    let mut list1: List<Int> = List.from([1, 2]);
+    let mut list2: List<Int> = List.from([3, 4]);
+
+    list1.append(&mut list2);
+
+    assert_eq(list1.len(), 4);
+    assert_eq(list1[0], 1);
+    assert_eq(list1[1], 2);
+    assert_eq(list1[2], 3);
+    assert_eq(list1[3], 4);
+    assert(list2.is_empty());  // list2 is drained
+    assert_eq(list2.len(), 0);
+}
+
+@test
+fn test_list_append_empty() {
+    let mut list1: List<Int> = List.from([1, 2, 3]);
+    let mut list2: List<Int> = List.new();
+
+    list1.append(&mut list2);
+
+    assert_eq(list1.len(), 3);
+    assert(list2.is_empty());
+}
+
+@test
+fn test_list_append_to_empty() {
+    let mut list1: List<Int> = List.new();
+    let mut list2: List<Int> = List.from([1, 2, 3]);
+
+    list1.append(&mut list2);
+
+    assert_eq(list1.len(), 3);
+    assert_eq(list1[0], 1);
+    assert_eq(list1[2], 3);
+    assert(list2.is_empty());
+}
+
+// =============================================================================
+// Section 10: Reverse and Sorting Tests
+// =============================================================================
+
+@test
+fn test_list_reverse() {
+    let mut list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    list.reverse();
+
+    assert_eq(list[0], 5);
+    assert_eq(list[1], 4);
+    assert_eq(list[2], 3);
+    assert_eq(list[3], 2);
+    assert_eq(list[4], 1);
+}
+
+// =============================================================================
+// Section 11: Clone and Equality Tests
+// =============================================================================
+
+@test
+fn test_list_clone() {
+    let list1: List<Int> = List.from([1, 2, 3]);
+    let list2 = list1.clone();
+
+    assert_eq(list2.len(), 3);
+    assert_eq(list2[0], 1);
+    assert_eq(list2[1], 2);
+    assert_eq(list2[2], 3);
+}
+
+// =============================================================================
+// Section 12: Edge Cases
+// =============================================================================
+
+@test
+fn test_list_empty_operations() {
+    let empty: List<Int> = List.new();
+
+    assert(empty.is_empty());
+
+    match empty.first() {
+        None => {} // Expected
+        Some(_) => panic("First on empty should return None"),
+    }
+
+    match empty.last() {
+        None => {} // Expected
+        Some(_) => panic("Last on empty should return None"),
+    }
+}
+
+@test
+fn test_list_single_element() {
+    let mut list: List<Int> = List.new();
+    list.push(42);
+
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+
+    match list.first() {
+        Some(v) => assert_eq(*v, 42),
+        None => panic("Expected Some"),
+    }
+
+    match list.last() {
+        Some(v) => assert_eq(*v, 42),
+        None => panic("Expected Some"),
+    }
+
+    list.reverse();  // Single element reverse
+    assert_eq(list[0], 42);
+}
+
+// =============================================================================
+// Section 13: Truncate and Retain
+// =============================================================================
+
+@test
+fn test_list_truncate() {
+    let mut list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    list.truncate(3);
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_list_truncate_to_zero() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    list.truncate(0);
+    assert(list.is_empty());
+}
+
+@test
+fn test_list_truncate_larger() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    list.truncate(10);  // No effect when new_len > len
+    assert_eq(list.len(), 3);
+}
+
+@test
+fn test_list_retain() {
+    let mut list: List<Int> = List.from([1, 2, 3, 4, 5, 6, 7, 8]);
+    list.retain(|x| *x % 2 == 0);  // Keep only even numbers
+    assert_eq(list.len(), 4);
+    assert_eq(list[0], 2);
+    assert_eq(list[1], 4);
+    assert_eq(list[2], 6);
+    assert_eq(list[3], 8);
+}
+
+@test
+fn test_list_retain_all() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    list.retain(|_| true);  // Keep everything
+    assert_eq(list.len(), 3);
+}
+
+@test
+fn test_list_retain_none() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    list.retain(|_| false);  // Remove everything
+    assert(list.is_empty());
+}
+
+// =============================================================================
+// Section 14: Swap and Mutation
+// =============================================================================
+
+@test
+fn test_list_swap() {
+    let mut list: List<Int> = List.from([10, 20, 30, 40, 50]);
+    list.swap(0, 4);
+    assert_eq(list[0], 50);
+    assert_eq(list[4], 10);
+    // Middle elements unchanged
+    assert_eq(list[2], 30);
+}
+
+@test
+fn test_list_swap_adjacent() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    list.swap(0, 1);
+    assert_eq(list[0], 2);
+    assert_eq(list[1], 1);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_list_swap_same_index() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    list.swap(1, 1);  // No-op
+    assert_eq(list[1], 2);
+}
+
+@test
+fn test_list_get_mut() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    match list.get_mut(1) {
+        Some(val) => {
+            *val = 20;
+        },
+        None => panic("Expected Some"),
+    }
+    assert_eq(list[1], 20);
+}
+
+@test
+fn test_list_get_mut_out_of_bounds() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    match list.get_mut(10) {
+        None => {},
+        Some(_) => panic("Expected None for out of bounds"),
+    }
+}
+
+@test
+fn test_list_first_mut() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    match list.first_mut() {
+        Some(val) => {
+            *val = 100;
+        },
+        None => panic("Expected Some"),
+    }
+    assert_eq(list[0], 100);
+}
+
+@test
+fn test_list_last_mut() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    match list.last_mut() {
+        Some(val) => {
+            *val = 300;
+        },
+        None => panic("Expected Some"),
+    }
+    assert_eq(list[2], 300);
+}
+
+// =============================================================================
+// Section 15: Sorting
+// =============================================================================
+
+@test
+fn test_list_sort() {
+    let mut list: List<Int> = List.from([5, 3, 1, 4, 2]);
+    list.sort();
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+    assert_eq(list[3], 4);
+    assert_eq(list[4], 5);
+}
+
+@test
+fn test_list_sort_already_sorted() {
+    let mut list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    list.sort();
+    assert_eq(list[0], 1);
+    assert_eq(list[4], 5);
+}
+
+@test
+fn test_list_sort_reverse_sorted() {
+    let mut list: List<Int> = List.from([5, 4, 3, 2, 1]);
+    list.sort();
+    assert_eq(list[0], 1);
+    assert_eq(list[4], 5);
+}
+
+@test
+fn test_list_sort_single() {
+    let mut list: List<Int> = List.from([42]);
+    list.sort();
+    assert_eq(list[0], 42);
+}
+
+@test
+fn test_list_sort_empty() {
+    let mut list: List<Int> = List.new();
+    list.sort();
+    assert(list.is_empty());
+}
+
+@test
+fn test_list_sort_duplicates() {
+    let mut list: List<Int> = List.from([3, 1, 4, 1, 5, 9, 2, 6, 5]);
+    list.sort();
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 1);
+    assert_eq(list[2], 2);
+    assert_eq(list[3], 3);
+    assert_eq(list[8], 9);
+}
+
+@test
+fn test_list_sort_by_descending() {
+    let mut list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    list.sort_by(|a, b| b.cmp(a));  // Descending
+    assert_eq(list[0], 5);
+    assert_eq(list[4], 1);
+}
+
+@test
+fn test_list_sort_by_key() {
+    // Sort integers by their absolute value
+    let mut list: List<Int> = List.from([3, -1, 4, -5, 2]);
+    list.sort_by_key(|x| x.abs());
+    assert_eq(list[0], -1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+    assert_eq(list[3], 4);
+    assert_eq(list[4], -5);
+}
+
+@test
+fn test_list_sort_by_key_empty() {
+    let mut list: List<Int> = List.new();
+    list.sort_by_key(|x| *x);
+    assert(list.is_empty());
+}
+
+// =============================================================================
+// Section 16: Construction Variants
+// =============================================================================
+
+@test
+fn test_list_is_not_empty() {
+    let list: List<Int> = List.from([1, 2, 3]);
+    assert(list.is_not_empty());
+
+    let empty: List<Int> = List.new();
+    assert(!empty.is_not_empty());
+}
+
+@test
+fn test_list_from_elem() {
+    let list: List<Int> = List.from_elem(42, 5);
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 42);
+    assert_eq(list[4], 42);
+}
+
+@test
+fn test_list_from_elem_zero() {
+    let list: List<Int> = List.from_elem(0, 0);
+    assert(list.is_empty());
+}
+
+// =============================================================================
+// Section 17: Iteration
+// =============================================================================
+
+@test
+fn test_list_iter() {
+    let list: List<Int> = List.from([10, 20, 30]);
+    let mut sum = 0;
+    let mut iter = list.iter();
+    loop {
+        match iter.next() {
+            Some(x) => { sum = sum + *x; },
+            None => break,
+        }
+    }
+    assert_eq(sum, 60);
+}
+
+@test
+fn test_list_iter_fold() {
+    let list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    let sum = list.iter().fold(0, |acc, x| acc + *x);
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_list_iter_count() {
+    let list: List<Int> = List.from([10, 20, 30, 40]);
+    assert_eq(list.iter().count(), 4);
+}
+
+// =============================================================================
+// Section: zip and enumerate_list Tests
+// =============================================================================
+
+@test
+fn test_list_zip_equal_length() {
+    let a = List.from([1, 2, 3]);
+    let b = List.from(["a", "b", "c"]);
+    let zipped = a.zip(&b);
+    assert_eq(zipped.len(), 3);
+    assert_eq(zipped[0].0, 1);
+    assert_eq(zipped[0].1, "a");
+    assert_eq(zipped[2].0, 3);
+    assert_eq(zipped[2].1, "c");
+}
+
+@test
+fn test_list_zip_different_length() {
+    let a = List.from([1, 2, 3, 4, 5]);
+    let b = List.from(["x", "y"]);
+    let zipped = a.zip(&b);
+    assert_eq(zipped.len(), 2); // Shorter length
+    assert_eq(zipped[0].0, 1);
+    assert_eq(zipped[1].1, "y");
+}
+
+@test
+fn test_list_zip_empty() {
+    let a: List<Int> = List.new();
+    let b = List.from([1, 2, 3]);
+    let zipped = a.zip(&b);
+    assert_eq(zipped.len(), 0);
+}
+
+@test
+fn test_list_enumerate_list() {
+    let items = List.from(["a", "b", "c"]);
+    let enumerated = items.enumerate_list();
+    assert_eq(enumerated.len(), 3);
+    assert_eq(enumerated[0].0, 0);
+    assert_eq(enumerated[0].1, "a");
+    assert_eq(enumerated[1].0, 1);
+    assert_eq(enumerated[1].1, "b");
+    assert_eq(enumerated[2].0, 2);
+    assert_eq(enumerated[2].1, "c");
+}
+
+@test
+fn test_list_enumerate_list_empty() {
+    let items: List<Int> = List.new();
+    let enumerated = items.enumerate_list();
+    assert_eq(enumerated.len(), 0);
+}
+
+// =============================================================================
+// Section: List.map Tests
+// =============================================================================
+
+@test
+fn test_list_map_double() {
+    let nums = List.from([1, 2, 3, 4, 5]);
+    let doubled = nums.map(|x: &Int| *x * 2);
+    assert_eq(doubled.len(), 5);
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[1], 4);
+    assert_eq(doubled[2], 6);
+    assert_eq(doubled[3], 8);
+    assert_eq(doubled[4], 10);
+}
+
+@test
+fn test_list_map_to_bool() {
+    let nums = List.from([1, 2, 3, 4, 5]);
+    let bools = nums.map(|x: &Int| *x > 3);
+    assert_eq(bools.len(), 5);
+    assert(!bools[0]);
+    assert(!bools[1]);
+    assert(!bools[2]);
+    assert(bools[3]);
+    assert(bools[4]);
+}
+
+@test
+fn test_list_map_empty() {
+    let empty: List<Int> = List.new();
+    let result = empty.map(|x: &Int| *x * 2);
+    assert(result.is_empty());
+}
+
+@test
+fn test_list_map_single() {
+    let single = List.from([42]);
+    let result = single.map(|x: &Int| *x + 8);
+    assert_eq(result.len(), 1);
+    assert_eq(result[0], 50);
+}
+
+// =============================================================================
+// Section: List.filter Tests
+// =============================================================================
+
+@test
+fn test_list_filter_evens() {
+    let nums = List.from([1, 2, 3, 4, 5, 6]);
+    let evens = nums.filter(|x: &Int| *x % 2 == 0);
+    assert_eq(evens.len(), 3);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[1], 4);
+    assert_eq(evens[2], 6);
+}
+
+@test
+fn test_list_filter_all() {
+    let nums = List.from([1, 2, 3]);
+    let all = nums.filter(|_x: &Int| true);
+    assert_eq(all.len(), 3);
+}
+
+@test
+fn test_list_filter_none() {
+    let nums = List.from([1, 2, 3]);
+    let none = nums.filter(|_x: &Int| false);
+    assert(none.is_empty());
+}
+
+@test
+fn test_list_filter_empty() {
+    let empty: List<Int> = List.new();
+    let result = empty.filter(|_x: &Int| true);
+    assert(result.is_empty());
+}
+
+@test
+fn test_list_filter_greater_than() {
+    let nums = List.from([10, 20, 30, 40, 50]);
+    let big = nums.filter(|x: &Int| *x > 25);
+    assert_eq(big.len(), 3);
+    assert_eq(big[0], 30);
+    assert_eq(big[1], 40);
+    assert_eq(big[2], 50);
+}
+
+// =============================================================================
+// Section: List.fold Tests
+// =============================================================================
+
+@test
+fn test_list_fold_sum() {
+    let nums = List.from([1, 2, 3, 4, 5]);
+    let total = nums.fold(0, |acc: Int, x: &Int| acc + *x);
+    assert_eq(total, 15);
+}
+
+@test
+fn test_list_fold_product() {
+    let nums = List.from([1, 2, 3, 4]);
+    let product = nums.fold(1, |acc: Int, x: &Int| acc * *x);
+    assert_eq(product, 24);
+}
+
+@test
+fn test_list_fold_empty() {
+    let empty: List<Int> = List.new();
+    let result = empty.fold(42, |acc: Int, x: &Int| acc + *x);
+    assert_eq(result, 42); // Initial value unchanged
+}
+
+@test
+fn test_list_fold_string_concat() {
+    let words = List.from(["hello", " ", "world"]);
+    let sentence = words.fold("", |acc: Text, x: &Text| acc + *x);
+    assert_eq(sentence, "hello world");
+}
+
+// =============================================================================
+// Section: List.for_each Tests
+// =============================================================================
+
+@test
+fn test_list_for_each_basic() {
+    let nums = List.from([1, 2, 3]);
+    let mut count = 0;
+    nums.for_each(|_x: &Int| { count = count + 1; });
+    assert_eq(count, 3);
+}
+
+@test
+fn test_list_for_each_empty() {
+    let empty: List<Int> = List.new();
+    let mut count = 0;
+    empty.for_each(|_x: &Int| { count = count + 1; });
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section: List.reduce Tests
+// =============================================================================
+
+@test
+fn test_list_reduce_sum() {
+    let nums = List.from([1, 2, 3, 4, 5]);
+    let result = nums.reduce(|acc: Int, x: &Int| acc + *x);
+    match result {
+        Some(total) => assert_eq(total, 15),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_list_reduce_max() {
+    let nums = List.from([3, 1, 4, 1, 5, 9, 2, 6]);
+    let result = nums.reduce(|acc: Int, x: &Int| if *x > acc { *x } else { acc });
+    match result {
+        Some(max) => assert_eq(max, 9),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_list_reduce_empty() {
+    let empty: List<Int> = List.new();
+    let result = empty.reduce(|acc: Int, x: &Int| acc + *x);
+    assert(result.is_none());
+}
+
+@test
+fn test_list_reduce_single() {
+    let single = List.from([42]);
+    let result = single.reduce(|acc: Int, x: &Int| acc + *x);
+    match result {
+        Some(val) => assert_eq(val, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section: List.min / List.max Tests
+// =============================================================================
+
+@test
+fn test_list_min() {
+    let nums = List.from([3, 1, 4, 1, 5, 9]);
+    match nums.min() {
+        Some(m) => assert_eq(*m, 1),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_list_min_empty() {
+    let empty: List<Int> = List.new();
+    assert(empty.min().is_none());
+}
+
+@test
+fn test_list_min_single() {
+    let single = List.from([42]);
+    match single.min() {
+        Some(m) => assert_eq(*m, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_list_max() {
+    let nums = List.from([3, 1, 4, 1, 5, 9]);
+    match nums.max() {
+        Some(m) => assert_eq(*m, 9),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_list_max_empty() {
+    let empty: List<Int> = List.new();
+    assert(empty.max().is_none());
+}
+
+@test
+fn test_list_max_single() {
+    let single = List.from([42]);
+    match single.max() {
+        Some(m) => assert_eq(*m, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_list_min_max_negative() {
+    let nums = List.from([-5, -1, -10, -3]);
+    match nums.min() {
+        Some(m) => assert_eq(*m, -10),
+        None => panic("Expected Some"),
+    }
+    match nums.max() {
+        Some(m) => assert_eq(*m, -1),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section: Map + Filter Combined Patterns
+// =============================================================================
+
+@test
+fn test_list_filter_then_map() {
+    let nums = List.from([1, 2, 3, 4, 5, 6]);
+    let result = nums.filter(|x: &Int| *x % 2 == 0).map(|x: &Int| *x * 10);
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 20);
+    assert_eq(result[1], 40);
+    assert_eq(result[2], 60);
+}
+
+@test
+fn test_list_map_then_filter() {
+    let nums = List.from([1, 2, 3, 4, 5]);
+    let result = nums.map(|x: &Int| *x * *x).filter(|x: &Int| *x > 10);
+    assert_eq(result.len(), 2);
+    assert_eq(result[0], 16);
+    assert_eq(result[1], 25);
+}
+
+// =============================================================================
+// Section: from_slice Tests
+// =============================================================================
+
+@test
+fn test_list_from_slice() {
+    let arr = [10, 20, 30, 40, 50];
+    let list = List.from_slice(&arr);
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 10);
+    assert_eq(list[2], 30);
+    assert_eq(list[4], 50);
+}
+
+@test
+fn test_list_from_slice_empty() {
+    let arr: [Int; 0] = [];
+    let list = List.from_slice(&arr);
+    assert(list.is_empty());
+}
+
+@test
+fn test_list_from_slice_single() {
+    let arr = [42];
+    let list = List.from_slice(&arr);
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+// =============================================================================
+// Section: extend_from_slice Tests
+// =============================================================================
+
+@test
+fn test_list_extend_from_slice() {
+    let mut list = List.from([1, 2, 3]);
+    let more = [4, 5, 6];
+    list.extend_from_slice(&more);
+    assert_eq(list.len(), 6);
+    assert_eq(list[3], 4);
+    assert_eq(list[4], 5);
+    assert_eq(list[5], 6);
+}
+
+@test
+fn test_list_extend_from_slice_empty() {
+    let mut list = List.from([1, 2, 3]);
+    let empty: [Int; 0] = [];
+    list.extend_from_slice(&empty);
+    assert_eq(list.len(), 3);
+}
+
+@test
+fn test_list_extend_from_slice_to_empty() {
+    let mut list: List<Int> = List.new();
+    let data = [10, 20, 30];
+    list.extend_from_slice(&data);
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 10);
+    assert_eq(list[2], 30);
+}
+
+// =============================================================================
+// Section: reserve_exact Tests
+// =============================================================================
+
+@test
+fn test_list_reserve_exact() {
+    let mut list: List<Int> = List.new();
+    list.reserve_exact(50);
+    assert(list.capacity() >= 50);
+    assert(list.is_empty());
+}
+
+@test
+fn test_list_reserve_exact_with_elements() {
+    let mut list = List.from([1, 2, 3]);
+    let old_len = list.len();
+    list.reserve_exact(100);
+    assert(list.capacity() >= 103); // len + additional
+    assert_eq(list.len(), old_len);
+    assert_eq(list[0], 1);
+    assert_eq(list[2], 3);
+}
+
+// =============================================================================
+// Section: as_mut_slice Tests
+// =============================================================================
+
+@test
+fn test_list_as_mut_slice() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    let slice = list.as_mut_slice();
+    slice[0] = 10;
+    slice[4] = 50;
+    assert_eq(list[0], 10);
+    assert_eq(list[4], 50);
+    // Middle elements unchanged
+    assert_eq(list[2], 3);
+}
+
+// =============================================================================
+// Section: drain Tests
+// =============================================================================
+
+@test
+fn test_list_drain_middle() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    let mut drained: List<Int> = List.new();
+    for item in list.drain(1, 4) {
+        drained.push(item);
+    }
+    assert_eq(drained.len(), 3);
+    assert_eq(drained[0], 2);
+    assert_eq(drained[1], 3);
+    assert_eq(drained[2], 4);
+    // Remaining: [1, 5]
+    assert_eq(list.len(), 2);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 5);
+}
+
+@test
+fn test_list_drain_all() {
+    let mut list = List.from([10, 20, 30]);
+    let mut sum = 0;
+    for item in list.drain(0, 3) {
+        sum = sum + item;
+    }
+    assert_eq(sum, 60);
+    assert(list.is_empty());
+}
+
+@test
+fn test_list_drain_empty_range() {
+    let mut list = List.from([1, 2, 3]);
+    let mut count = 0;
+    for _item in list.drain(1, 1) {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+    assert_eq(list.len(), 3); // Unchanged
+}
+
+@test
+fn test_list_drain_from_start() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    let mut drained: List<Int> = List.new();
+    for item in list.drain(0, 2) {
+        drained.push(item);
+    }
+    assert_eq(drained.len(), 2);
+    assert_eq(drained[0], 1);
+    assert_eq(drained[1], 2);
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 3);
+}
+
+@test
+fn test_list_drain_from_end() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    let mut drained: List<Int> = List.new();
+    for item in list.drain(3, 5) {
+        drained.push(item);
+    }
+    assert_eq(drained.len(), 2);
+    assert_eq(drained[0], 4);
+    assert_eq(drained[1], 5);
+    assert_eq(list.len(), 3);
+    assert_eq(list[2], 3);
+}
+
+// =============================================================================
+// Section: find_by Tests
+// =============================================================================
+
+@test
+fn test_list_find_by() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    match list.find_by(|x| *x > 3) {
+        Some(val) => assert_eq(*val, 4),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_list_find_by_not_found() {
+    let list = List.from([1, 2, 3]);
+    assert(list.find_by(|x| *x > 10).is_none());
+}
+
+// =============================================================================
+// Section: position_by Tests
+// =============================================================================
+
+@test
+fn test_list_position_by() {
+    let list = List.from([10, 20, 30, 40]);
+    match list.position_by(|x| *x == 30) {
+        Some(idx) => assert_eq(idx, 2),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_list_position_by_not_found() {
+    let list = List.from([1, 2, 3]);
+    assert(list.position_by(|x| *x == 99).is_none());
+}
+
+// =============================================================================
+// Section: rposition Tests
+// =============================================================================
+
+@test
+fn test_list_rposition() {
+    let list = List.from([1, 2, 3, 2, 1]);
+    match list.rposition(&2) {
+        Some(idx) => assert_eq(idx, 3), // Last occurrence
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_list_rposition_not_found() {
+    let list = List.from([1, 2, 3]);
+    assert(list.rposition(&99).is_none());
+}
+
+// =============================================================================
+// Section: any / all Tests
+// =============================================================================
+
+@test
+fn test_list_any_true() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    assert(list.any(|x| *x > 4));
+}
+
+@test
+fn test_list_any_false() {
+    let list = List.from([1, 2, 3]);
+    assert(!list.any(|x| *x > 10));
+}
+
+@test
+fn test_list_any_empty() {
+    let list: List<Int> = List.new();
+    assert(!list.any(|_x| true));
+}
+
+@test
+fn test_list_all_true() {
+    let list = List.from([2, 4, 6, 8]);
+    assert(list.all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_list_all_false() {
+    let list = List.from([2, 4, 5, 8]);
+    assert(!list.all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_list_all_empty() {
+    let list: List<Int> = List.new();
+    assert(list.all(|_x| false)); // Vacuously true
+}
+
+// =============================================================================
+// Section: starts_with / ends_with Tests
+// =============================================================================
+
+@test
+fn test_list_starts_with_true() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let prefix = List.from([1, 2, 3]);
+    assert(list.starts_with(&prefix));
+}
+
+@test
+fn test_list_starts_with_false() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let prefix = List.from([2, 3]);
+    assert(!list.starts_with(&prefix));
+}
+
+@test
+fn test_list_starts_with_empty_prefix() {
+    let list = List.from([1, 2, 3]);
+    let empty: List<Int> = List.new();
+    assert(list.starts_with(&empty)); // Empty prefix matches everything
+}
+
+@test
+fn test_list_starts_with_longer_prefix() {
+    let list = List.from([1, 2]);
+    let prefix = List.from([1, 2, 3]);
+    assert(!list.starts_with(&prefix));
+}
+
+@test
+fn test_list_ends_with_true() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let suffix = List.from([3, 4, 5]);
+    assert(list.ends_with(&suffix));
+}
+
+@test
+fn test_list_ends_with_false() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let suffix = List.from([3, 4]);
+    assert(!list.ends_with(&suffix));
+}
+
+// =============================================================================
+// Section: fill / resize Tests
+// =============================================================================
+
+@test
+fn test_list_fill() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    list.fill(0);
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 0);
+    assert_eq(list[2], 0);
+    assert_eq(list[4], 0);
+}
+
+@test
+fn test_list_resize_grow() {
+    let mut list = List.from([1, 2, 3]);
+    list.resize(6, 0);
+    assert_eq(list.len(), 6);
+    assert_eq(list[0], 1);
+    assert_eq(list[2], 3);
+    assert_eq(list[3], 0);
+    assert_eq(list[5], 0);
+}
+
+@test
+fn test_list_resize_shrink() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    list.resize(2, 0);
+    assert_eq(list.len(), 2);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+}
+
+@test
+fn test_list_resize_same() {
+    let mut list = List.from([1, 2, 3]);
+    list.resize(3, 0);
+    assert_eq(list.len(), 3);
+}
+
+// =============================================================================
+// Section: split_off Tests
+// =============================================================================
+
+@test
+fn test_list_split_off() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    let tail = list.split_off(3);
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[2], 3);
+    assert_eq(tail.len(), 2);
+    assert_eq(tail[0], 4);
+    assert_eq(tail[1], 5);
+}
+
+@test
+fn test_list_split_off_at_zero() {
+    let mut list = List.from([1, 2, 3]);
+    let tail = list.split_off(0);
+    assert(list.is_empty());
+    assert_eq(tail.len(), 3);
+    assert_eq(tail[0], 1);
+}
+
+@test
+fn test_list_split_off_at_end() {
+    let mut list = List.from([1, 2, 3]);
+    let tail = list.split_off(3);
+    assert_eq(list.len(), 3);
+    assert(tail.is_empty());
+}
+
+// =============================================================================
+// Section: partition_by Tests
+// =============================================================================
+
+@test
+fn test_list_partition_by() {
+    let list = List.from([1, 2, 3, 4, 5, 6]);
+    let (evens, odds) = list.partition_by(|x| *x % 2 == 0);
+    assert_eq(evens.len(), 3);
+    assert_eq(odds.len(), 3);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[1], 4);
+    assert_eq(evens[2], 6);
+    assert_eq(odds[0], 1);
+    assert_eq(odds[1], 3);
+    assert_eq(odds[2], 5);
+}
+
+// =============================================================================
+// Section: repeat_list Tests
+// =============================================================================
+
+@test
+fn test_list_repeat_list() {
+    let list = List.from([1, 2]);
+    let repeated = list.repeat_list(3);
+    assert_eq(repeated.len(), 6);
+    assert_eq(repeated[0], 1);
+    assert_eq(repeated[1], 2);
+    assert_eq(repeated[2], 1);
+    assert_eq(repeated[5], 2);
+}
+
+@test
+fn test_list_repeat_list_zero() {
+    let list = List.from([1, 2, 3]);
+    let repeated = list.repeat_list(0);
+    assert(repeated.is_empty());
+}
+
+// =============================================================================
+// Section: binary_search Tests
+// =============================================================================
+
+@test
+fn test_list_binary_search_found() {
+    let list = List.from([1, 3, 5, 7, 9]);
+    match list.binary_search(&5) {
+        Ok(idx) => assert_eq(idx, 2),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_list_binary_search_not_found() {
+    let list = List.from([1, 3, 5, 7, 9]);
+    match list.binary_search(&4) {
+        Err(idx) => assert_eq(idx, 2), // Insertion point
+        Ok(_) => panic("Expected Err"),
+    }
+}
+
+@test
+fn test_list_binary_search_first() {
+    let list = List.from([1, 3, 5, 7, 9]);
+    match list.binary_search(&1) {
+        Ok(idx) => assert_eq(idx, 0),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_list_binary_search_last() {
+    let list = List.from([1, 3, 5, 7, 9]);
+    match list.binary_search(&9) {
+        Ok(idx) => assert_eq(idx, 4),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_list_binary_search_empty() {
+    let list: List<Int> = List.new();
+    match list.binary_search(&5) {
+        Err(idx) => assert_eq(idx, 0),
+        Ok(_) => panic("Expected Err"),
+    }
+}
+
+// =============================================================================
+// Section: binary_search_by Tests
+// =============================================================================
+
+@test
+fn test_list_binary_search_by() {
+    let list = List.from([10, 20, 30, 40, 50]);
+    match list.binary_search_by(|x| x.cmp(&30)) {
+        Ok(idx) => assert_eq(idx, 2),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section: dedup Tests
+// =============================================================================
+
+@test
+fn test_list_dedup() {
+    let mut list = List.from([1, 1, 2, 3, 3, 3, 4, 4, 5]);
+    list.dedup();
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+    assert_eq(list[3], 4);
+    assert_eq(list[4], 5);
+}
+
+@test
+fn test_list_dedup_no_duplicates() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    list.dedup();
+    assert_eq(list.len(), 5);
+}
+
+@test
+fn test_list_dedup_all_same() {
+    let mut list = List.from([7, 7, 7, 7]);
+    list.dedup();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 7);
+}
+
+@test
+fn test_list_dedup_empty() {
+    let mut list: List<Int> = List.new();
+    list.dedup();
+    assert(list.is_empty());
+}
+
+@test
+fn test_list_dedup_single() {
+    let mut list = List.from([42]);
+    list.dedup();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+// =============================================================================
+// Section: dedup_by Tests
+// =============================================================================
+
+@test
+fn test_list_dedup_by() {
+    let mut list = List.from([1, 2, 2, 3, 3, 3, 4]);
+    list.dedup_by(|a, b| *a == *b);
+    assert_eq(list.len(), 4);
+    assert_eq(list[0], 1);
+    assert_eq(list[3], 4);
+}
+
+// =============================================================================
+// Section: split_at Tests
+// =============================================================================
+
+@test
+fn test_list_split_at() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let (left, right) = list.split_at(3);
+    assert_eq(left.len(), 3);
+    assert_eq(right.len(), 2);
+    assert_eq(left[0], 1);
+    assert_eq(left[2], 3);
+    assert_eq(right[0], 4);
+    assert_eq(right[1], 5);
+}
+
+@test
+fn test_list_split_at_zero() {
+    let list = List.from([1, 2, 3]);
+    let (left, right) = list.split_at(0);
+    assert(left.is_empty());
+    assert_eq(right.len(), 3);
+}
+
+@test
+fn test_list_split_at_end() {
+    let list = List.from([1, 2, 3]);
+    let (left, right) = list.split_at(3);
+    assert_eq(left.len(), 3);
+    assert(right.is_empty());
+}
+
+// =============================================================================
+// Section: rotate Tests
+// =============================================================================
+
+@test
+fn test_list_rotate_left() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    list.rotate_left(2);
+    assert_eq(list[0], 3);
+    assert_eq(list[1], 4);
+    assert_eq(list[2], 5);
+    assert_eq(list[3], 1);
+    assert_eq(list[4], 2);
+}
+
+@test
+fn test_list_rotate_right() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    list.rotate_right(2);
+    assert_eq(list[0], 4);
+    assert_eq(list[1], 5);
+    assert_eq(list[2], 1);
+    assert_eq(list[3], 2);
+    assert_eq(list[4], 3);
+}
+
+@test
+fn test_list_rotate_full() {
+    let mut list = List.from([1, 2, 3]);
+    list.rotate_left(3); // Full rotation = no change
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+// =============================================================================
+// Section: windows / chunks Tests
+// =============================================================================
+
+@test
+fn test_list_windows() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let wins = list.windows(3);
+    assert_eq(wins.len(), 3);
+    assert_eq(wins[0][0], 1);
+    assert_eq(wins[0][2], 3);
+    assert_eq(wins[2][0], 3);
+    assert_eq(wins[2][2], 5);
+}
+
+@test
+fn test_list_windows_too_large() {
+    let list = List.from([1, 2]);
+    let wins = list.windows(5);
+    assert(wins.is_empty());
+}
+
+@test
+fn test_list_chunks() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let chs = list.chunks(2);
+    assert_eq(chs.len(), 3);
+    assert_eq(chs[0].len(), 2);
+    assert_eq(chs[1].len(), 2);
+    assert_eq(chs[2].len(), 1); // Last chunk may be smaller
+    assert_eq(chs[0][0], 1);
+    assert_eq(chs[2][0], 5);
+}
+
+@test
+fn test_list_chunks_exact() {
+    let list = List.from([1, 2, 3, 4]);
+    let chs = list.chunks(2);
+    assert_eq(chs.len(), 2);
+    assert_eq(chs[0].len(), 2);
+    assert_eq(chs[1].len(), 2);
+}
+
+// =============================================================================
+// Section: Eq / Clone / Default protocol Tests
+// =============================================================================
+
+@test
+fn test_list_eq() {
+    let a = List.from([1, 2, 3]);
+    let b = List.from([1, 2, 3]);
+    let c = List.from([1, 2, 4]);
+    assert(a == b);
+    assert(!(a == c));
+}
+
+@test
+fn test_list_eq_different_length() {
+    let a = List.from([1, 2]);
+    let b = List.from([1, 2, 3]);
+    assert(!(a == b));
+}
+
+@test
+fn test_list_default() {
+    let list: List<Int> = List.default();
+    assert(list.is_empty());
+}
+
+// =============================================================================
+// Section: IntoIterator / FromIterator Tests
+// =============================================================================
+
+@test
+fn test_list_into_iter() {
+    let list = List.from([10, 20, 30]);
+    let mut sum = 0;
+    for item in list {
+        sum = sum + item;
+    }
+    assert_eq(sum, 60);
+}
+
+@test
+fn test_list_from_iterator() {
+    let list: List<Int> = range(0, 5).collect();
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 0);
+    assert_eq(list[4], 4);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

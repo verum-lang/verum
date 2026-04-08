@@ -1,0 +1,66 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: io, file, read, write
+// @description: File I/O integration — write, read, verify
+
+fn main() -> Int {
+    // Test 1: write and read a file
+    let path = "/tmp/verum_test_992.txt";
+    let content = "Hello from Verum!\nLine 2\nLine 3";
+
+    // Write file (returns bytes written, or negative on error)
+    let write_ok = file_write(path, content);
+    if (write_ok < 0) {
+        print(f"FAIL test1: write failed with code {write_ok}");
+        return 1;
+    }
+
+    // Read file back
+    let data = file_read(path);
+    if (data != content) {
+        print(f"FAIL test1: read mismatch");
+        return 1;
+    }
+
+    // Test 2: append to file
+    let append_content = "\nAppended line";
+    let append_ok = file_append(path, append_content);
+    if (append_ok < 0) {
+        print(f"FAIL test2: append failed");
+        return 1;
+    }
+
+    let data2 = file_read(path);
+    let expected = "Hello from Verum!\nLine 2\nLine 3\nAppended line";
+    if (data2 != expected) {
+        print(f"FAIL test2: append mismatch, got '{data2}'");
+        return 1;
+    }
+
+    // Test 3: write numbers and read back
+    let num_path = "/tmp/verum_test_992_nums.txt";
+    let mut num_content = "";
+    let mut i = 1;
+    while (i <= 5) {
+        if (i > 1) {
+            num_content = f"{num_content},{i}";
+        } else {
+            num_content = f"{i}";
+        }
+        i = i + 1;
+    }
+    file_write(num_path, num_content);
+    let nums_back = file_read(num_path);
+    if (nums_back != "1,2,3,4,5") {
+        print(f"FAIL test3: got '{nums_back}'");
+        return 1;
+    }
+
+    // Cleanup
+    file_delete(path);
+    file_delete(num_path);
+
+    print("992_file_io_integration: PASS");
+    0
+}

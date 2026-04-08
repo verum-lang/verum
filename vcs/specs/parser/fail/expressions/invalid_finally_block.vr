@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, try, finally, error
+// @description: Finally clause without block body
+// @expected-error: E018
+
+fn test() {
+    try {
+        fallible();
+    } finally cleanup();  // Finally requires block body
+}

@@ -1,0 +1,214 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: spawn, channel, mutex, concurrency, threading
+// @description: Test concurrency patterns with spawn, channels, and mutex
+
+fn __mutex_new_raw() -> Int {
+    0  // intrinsic
+}
+
+fn __mutex_lock_raw(mtx: Int) -> Int {
+    0  // intrinsic
+}
+
+fn __mutex_unlock_raw(mtx: Int) -> Int {
+    0  // intrinsic
+}
+
+fn test_spawn_basic() -> Int {
+    let ch = Channel.new(10);
+    let h = spawn {
+        ch.send(42);
+        0
+    };
+    h.await;
+    let val = match ch.recv() { Some(v) => v, None => -1 };
+    if val != 42 {
+        print(f"FAIL spawn_basic: val={val}, expected 42");
+        return 1;
+    }
+    print("  spawn_basic: OK");
+    0
+}
+
+fn test_producer_consumer() -> Int {
+    let ch = Channel.new(10);
+    let producer = spawn {
+        let mut i = 0;
+        while i < 5 {
+            ch.send(i * 10);
+            i = i + 1;
+        }
+        ch.send(-1); // sentinel
+        0
+    };
+
+    let mut sum = 0;
+    loop {
+        let val = match ch.recv() { Some(v) => v, None => -1 };
+        if val == -1 { break; }
+        sum = sum + val;
+    }
+    producer.await;
+
+    // 0+10+20+30+40 = 100
+    if sum != 100 {
+        print(f"FAIL producer: sum={sum}, expected 100");
+        return 1;
+    }
+    print("  producer_consumer: OK");
+    0
+}
+
+fn test_parallel_compute() -> Int {
+    // Compute sum in two halves
+    let ch1 = Channel.new(10);
+    let ch2 = Channel.new(10);
+
+    let t1 = spawn {
+        // Sum 0..50
+        let mut s = 0;
+        let mut i = 0;
+        while i < 50 {
+            s = s + i;
+            i = i + 1;
+        }
+        ch1.send(s);
+        0
+    };
+
+    let t2 = spawn {
+        // Sum 50..100
+        let mut s = 0;
+        let mut i = 50;
+        while i < 100 {
+            s = s + i;
+            i = i + 1;
+        }
+        ch2.send(s);
+        0
+    };
+
+    t1.await;
+    t2.await;
+
+    let s1 = match ch1.recv() { Some(v) => v, None => 0 };
+    let s2 = match ch2.recv() { Some(v) => v, None => 0 };
+    let total = s1 + s2;
+
+    // Sum 0..100 = 4950
+    if total != 4950 {
+        print(f"FAIL parallel: total={total}, expected 4950");
+        return 1;
+    }
+    print("  parallel_compute: OK");
+    0
+}
+
+fn test_mutex_counter() -> Int {
+    let mtx = __mutex_new_raw();
+    let ch = Channel.new(10);
+    ch.send(0);
+
+    let t1 = spawn {
+        let mut i = 0;
+        while i < 100 {
+            __mutex_lock_raw(mtx);
+            match ch.recv() {
+                Some(v) => {
+                    ch.send(v + 1);
+                }
+                None => {}
+            }
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        0
+    };
+    let t2 = spawn {
+        let mut i = 0;
+        while i < 100 {
+            __mutex_lock_raw(mtx);
+            match ch.recv() {
+                Some(v) => {
+                    ch.send(v + 1);
+                }
+                None => {}
+            }
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        0
+    };
+
+    t1.await;
+    t2.await;
+
+    let final_val = match ch.recv() { Some(v) => v, None => -1 };
+    if final_val != 200 {
+        print(f"FAIL mutex: final={final_val}, expected 200");
+        return 1;
+    }
+    print("  mutex_counter: OK");
+    0
+}
+
+fn test_channel_pipeline() -> Int {
+    let ch1 = Channel.new(10);
+    let ch2 = Channel.new(10);
+
+    // Stage 1: double
+    let s1 = spawn {
+        let mut i = 0;
+        while i < 5 {
+            let val = match ch1.recv() { Some(v) => v, None => 0 };
+            ch2.send(val * 2);
+            i = i + 1;
+        }
+        0
+    };
+
+    // Feed input
+    let mut i = 0;
+    while i < 5 {
+        ch1.send(i + 1);
+        i = i + 1;
+    }
+
+    // Collect output
+    let mut sum = 0;
+    i = 0;
+    while i < 5 {
+        let v = match ch2.recv() { Some(v) => v, None => 0 };
+        sum = sum + v;
+        i = i + 1;
+    }
+
+    s1.await;
+
+    // 2+4+6+8+10 = 30
+    if sum != 30 {
+        print(f"FAIL pipeline: sum={sum}, expected 30");
+        return 1;
+    }
+    print("  channel_pipeline: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Concurrency Tests:");
+    let mut failures = 0;
+    failures = failures + test_spawn_basic();
+    failures = failures + test_producer_consumer();
+    failures = failures + test_parallel_compute();
+    failures = failures + test_mutex_counter();
+    failures = failures + test_channel_pipeline();
+
+    if failures == 0 {
+        print("All concurrency tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

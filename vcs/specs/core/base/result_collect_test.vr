@@ -1,0 +1,231 @@
+// =============================================================================
+// result_collect_test.vr - Tests for collect_results and partition_results
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, result, collect, partition, utility, core
+// @description: Tests for collect_results() and partition_results() standalone
+//               utility functions.
+// =============================================================================
+
+module specs.core.base.result_collect_test;
+
+mount core.*;
+
+// =============================================================================
+// Section 1: collect_results Tests
+// =============================================================================
+
+@test
+fn test_collect_results_all_ok() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Ok(1));
+    items.push(Ok(2));
+    items.push(Ok(3));
+
+    let result = collect_results(items.into_iter());
+    assert(result.is_ok());
+    let list = result.unwrap();
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_collect_results_first_err() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Ok(1));
+    items.push(Err("bad"));
+    items.push(Ok(3));
+
+    let result = collect_results(items.into_iter());
+    assert(result.is_err());
+    assert_eq(result.unwrap_err(), "bad");
+}
+
+@test
+fn test_collect_results_all_err() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Err("a"));
+    items.push(Err("b"));
+
+    let result = collect_results(items.into_iter());
+    assert(result.is_err());
+    // Returns first error
+    assert_eq(result.unwrap_err(), "a");
+}
+
+@test
+fn test_collect_results_empty() {
+    let items: List<Result<Int, Text>> = List.new();
+    let result = collect_results(items.into_iter());
+    assert(result.is_ok());
+    assert_eq(result.unwrap().len(), 0);
+}
+
+@test
+fn test_collect_results_single_ok() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Ok(42));
+
+    let result = collect_results(items.into_iter());
+    assert(result.is_ok());
+    let list = result.unwrap();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+@test
+fn test_collect_results_single_err() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Err("fail"));
+
+    let result = collect_results(items.into_iter());
+    assert(result.is_err());
+}
+
+@test
+fn test_collect_results_err_at_end() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Ok(1));
+    items.push(Ok(2));
+    items.push(Ok(3));
+    items.push(Err("last"));
+
+    let result = collect_results(items.into_iter());
+    assert(result.is_err());
+    assert_eq(result.unwrap_err(), "last");
+}
+
+@test
+fn test_collect_results_err_at_start() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Err("first"));
+    items.push(Ok(2));
+    items.push(Ok(3));
+
+    let result = collect_results(items.into_iter());
+    assert(result.is_err());
+    assert_eq(result.unwrap_err(), "first");
+}
+
+// =============================================================================
+// Section 2: partition_results Tests
+// =============================================================================
+
+@test
+fn test_partition_results_mixed() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Ok(1));
+    items.push(Err("a"));
+    items.push(Ok(2));
+    items.push(Err("b"));
+    items.push(Ok(3));
+
+    let pair = partition_results(items.into_iter());
+    let oks = pair.0;
+    let errs = pair.1;
+
+    assert_eq(oks.len(), 3);
+    assert_eq(oks[0], 1);
+    assert_eq(oks[1], 2);
+    assert_eq(oks[2], 3);
+
+    assert_eq(errs.len(), 2);
+    assert_eq(errs[0], "a");
+    assert_eq(errs[1], "b");
+}
+
+@test
+fn test_partition_results_all_ok() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Ok(1));
+    items.push(Ok(2));
+
+    let pair = partition_results(items.into_iter());
+    assert_eq(pair.0.len(), 2);
+    assert_eq(pair.1.len(), 0);
+}
+
+@test
+fn test_partition_results_all_err() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Err("x"));
+    items.push(Err("y"));
+
+    let pair = partition_results(items.into_iter());
+    assert_eq(pair.0.len(), 0);
+    assert_eq(pair.1.len(), 2);
+}
+
+@test
+fn test_partition_results_empty() {
+    let items: List<Result<Int, Text>> = List.new();
+    let pair = partition_results(items.into_iter());
+    assert_eq(pair.0.len(), 0);
+    assert_eq(pair.1.len(), 0);
+}
+
+@test
+fn test_partition_results_single_ok() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Ok(42));
+
+    let pair = partition_results(items.into_iter());
+    assert_eq(pair.0.len(), 1);
+    assert_eq(pair.0[0], 42);
+    assert_eq(pair.1.len(), 0);
+}
+
+@test
+fn test_partition_results_single_err() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    items.push(Err("fail"));
+
+    let pair = partition_results(items.into_iter());
+    assert_eq(pair.0.len(), 0);
+    assert_eq(pair.1.len(), 1);
+    assert_eq(pair.1[0], "fail");
+}
+
+@test
+fn test_partition_results_preserves_order() {
+    let mut items: List<Result<Int, Int>> = List.new();
+    items.push(Ok(10));
+    items.push(Err(1));
+    items.push(Ok(20));
+    items.push(Err(2));
+    items.push(Ok(30));
+    items.push(Err(3));
+
+    let pair = partition_results(items.into_iter());
+    let oks = pair.0;
+    let errs = pair.1;
+
+    assert_eq(oks[0], 10);
+    assert_eq(oks[1], 20);
+    assert_eq(oks[2], 30);
+    assert_eq(errs[0], 1);
+    assert_eq(errs[1], 2);
+    assert_eq(errs[2], 3);
+}
+
+@test
+fn test_partition_results_larger() {
+    let mut items: List<Result<Int, Text>> = List.new();
+    for i in range(0, 20) {
+        if i % 3 == 0 {
+            items.push(Err("err"));
+        } else {
+            items.push(Ok(i));
+        }
+    }
+
+    let pair = partition_results(items.into_iter());
+    // Errors at 0, 3, 6, 9, 12, 15, 18 = 7 errors
+    assert_eq(pair.1.len(), 7);
+    // Oks at 1, 2, 4, 5, 7, 8, 10, 11, 13, 14, 16, 17, 19 = 13 oks
+    assert_eq(pair.0.len(), 13);
+}

@@ -1,0 +1,277 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 10ms simple, < 100ms complex
+// @tags: verification, smt, z3, performance
+
+/// Benchmark for SMT (Satisfiability Modulo Theories) verification
+///
+/// SMT solving is used for:
+/// - Refinement type verification
+/// - Precondition/postcondition checking
+/// - Array bounds proofs
+/// - Overflow checking
+
+module benchmarks.micro.smt_simple
+
+using [Benchmark, Verification]
+
+/// Simple integer arithmetic verification
+fn benchmark_smt_simple_arithmetic() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..10_000 {
+        // Verify: x > 0 && y > 0 => x + y > 0
+        let result = solver.verify(|ctx| {
+            let x = ctx.int_var("x");
+            let y = ctx.int_var("y");
+
+            ctx.assume(x.gt(0));
+            ctx.assume(y.gt(0));
+            ctx.prove(x.add(y).gt(0))
+        });
+
+        assert(result.is_valid());
+    }
+}
+
+/// Boolean satisfiability
+fn benchmark_smt_boolean_sat() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..10_000 {
+        // Check: (a || b) && (!a || c) && (!b || !c) is satisfiable
+        let result = solver.check_sat(|ctx| {
+            let a = ctx.bool_var("a");
+            let b = ctx.bool_var("b");
+            let c = ctx.bool_var("c");
+
+            ctx.assert(a.or(b));
+            ctx.assert(a.not().or(c));
+            ctx.assert(b.not().or(c.not()))
+        });
+
+        assert(result.is_sat());
+    }
+}
+
+/// Array bounds verification
+fn benchmark_smt_array_bounds() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..5_000 {
+        // Verify: 0 <= i < len => array[i] is safe
+        let result = solver.verify(|ctx| {
+            let i = ctx.int_var("i");
+            let len = ctx.int_var("len");
+
+            ctx.assume(len.gt(0));
+            ctx.assume(i.ge(0));
+            ctx.assume(i.lt(len));
+
+            // Index is in bounds
+            ctx.prove(i.ge(0).and(i.lt(len)))
+        });
+
+        assert(result.is_valid());
+    }
+}
+
+/// Loop invariant verification
+fn benchmark_smt_loop_invariant() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..2_000 {
+        // Verify loop invariant: i >= 0 && i <= n
+        let result = solver.verify(|ctx| {
+            let i = ctx.int_var("i");
+            let n = ctx.int_var("n");
+
+            // Initial: i = 0
+            ctx.assume(i.eq(0));
+            ctx.assume(n.ge(0));
+
+            // Invariant holds initially
+            let inv_init = i.ge(0).and(i.le(n));
+
+            // If invariant holds and i < n, after i++ invariant still holds
+            let i_next = i.add(1);
+            let inv_preserved = i.ge(0).and(i.lt(n)).implies(
+                i_next.ge(0).and(i_next.le(n))
+            );
+
+            ctx.prove(inv_init.and(inv_preserved))
+        });
+
+        assert(result.is_valid());
+    }
+}
+
+/// Overflow checking
+fn benchmark_smt_overflow_check() {
+    let solver = SmtSolver.new();
+    let int32_max = 2_147_483_647;
+    let int32_min = -2_147_483_648;
+
+    for _ in 0..5_000 {
+        // Check if x + y can overflow
+        let result = solver.check_sat(|ctx| {
+            let x = ctx.int_var("x");
+            let y = ctx.int_var("y");
+
+            // x, y are valid Int32
+            ctx.assert(x.ge(int32_min).and(x.le(int32_max)));
+            ctx.assert(y.ge(int32_min).and(y.le(int32_max)));
+
+            // Check if sum overflows
+            let sum = x.add(y);
+            ctx.assert(sum.lt(int32_min).or(sum.gt(int32_max)))
+        });
+
+        // Overflow IS possible for some inputs
+        assert(result.is_sat());
+    }
+}
+
+/// Bitvector operations
+fn benchmark_smt_bitvector() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..3_000 {
+        // Verify: (x & 0xFF) <= 255
+        let result = solver.verify(|ctx| {
+            let x = ctx.bv_var("x", 32);
+
+            let masked = x.bvand(ctx.bv_const(0xFF, 32));
+            ctx.prove(masked.bvule(ctx.bv_const(255, 32)))
+        });
+
+        assert(result.is_valid());
+    }
+}
+
+/// Floating point verification
+fn benchmark_smt_floating_point() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..1_000 {
+        // Verify: x >= 0.0 => sqrt(x) * sqrt(x) ~= x
+        // (approximate due to floating point)
+        let result = solver.check_sat(|ctx| {
+            let x = ctx.fp_var("x", FPSort.Double);
+
+            ctx.assert(x.fp_ge(ctx.fp_const(0.0)));
+
+            let sqrt_x = x.fp_sqrt();
+            let reconstructed = sqrt_x.fp_mul(sqrt_x);
+
+            // Allow small epsilon for floating point error
+            let diff = x.fp_sub(reconstructed).fp_abs();
+            ctx.assert(diff.fp_gt(ctx.fp_const(1e-10)))
+        });
+    }
+}
+
+/// Uninterpreted functions
+fn benchmark_smt_uninterpreted() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..5_000 {
+        // Verify: f(x) = f(y) if x = y (congruence)
+        let result = solver.verify(|ctx| {
+            let x = ctx.int_var("x");
+            let y = ctx.int_var("y");
+            let f = ctx.func("f", IntSort, IntSort);
+
+            ctx.assume(x.eq(y));
+            ctx.prove(f.apply(x).eq(f.apply(y)))
+        });
+
+        assert(result.is_valid());
+    }
+}
+
+/// Quantifier verification
+fn benchmark_smt_quantifiers() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..500 {
+        // Verify: forall x. x > 0 => x + 1 > 1
+        let result = solver.verify(|ctx| {
+            ctx.prove(ctx.forall("x", IntSort, |x| {
+                x.gt(0).implies(x.add(1).gt(1))
+            }))
+        });
+
+        assert(result.is_valid());
+    }
+}
+
+/// Refinement type verification
+fn benchmark_smt_refinement() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..2_000 {
+        // Verify: if x: {v: Int | v > 0} and y: {v: Int | v > 0}
+        //         then x + y: {v: Int | v > 1}
+        let result = solver.verify(|ctx| {
+            let x = ctx.int_var("x");
+            let y = ctx.int_var("y");
+
+            // Refinements as assumptions
+            ctx.assume(x.gt(0));
+            ctx.assume(y.gt(0));
+
+            // Prove result refinement
+            ctx.prove(x.add(y).gt(1))
+        });
+
+        assert(result.is_valid());
+    }
+}
+
+/// Multiple assertions
+fn benchmark_smt_multiple_assertions() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..1_000 {
+        let result = solver.verify(|ctx| {
+            let vars: List<_> = (0..10).map(|i| ctx.int_var(text("x{}", i))).collect();
+
+            // Each var is positive
+            for v in &vars {
+                ctx.assume(v.gt(0));
+            }
+
+            // Sum is positive
+            let sum = vars.iter().fold(ctx.int_const(0), |acc, v| acc.add(v));
+            ctx.prove(sum.gt(0))
+        });
+
+        assert(result.is_valid());
+    }
+}
+
+/// Incremental solving
+fn benchmark_smt_incremental() {
+    let solver = SmtSolver.new();
+
+    for _ in 0..1_000 {
+        solver.push();
+
+        let x = solver.int_var("x");
+        solver.assert(x.gt(0));
+
+        // First check
+        let _ = solver.check_sat();
+
+        solver.push();
+        solver.assert(x.lt(10));
+
+        // Second check with additional constraint
+        let _ = solver.check_sat();
+
+        solver.pop();
+        solver.pop();
+    }
+}

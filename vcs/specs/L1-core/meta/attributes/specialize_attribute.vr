@@ -1,0 +1,53 @@
+// @test: parse
+// @level: L1
+// @tags: meta, specialize, attributes, generics
+// @timeout: 5000
+
+/// @specialize attribute for generic specialization.
+/// Grammar: specialize_attribute = 'specialize'
+
+type Printable is protocol {
+    fn to_text(&self) -> Text;
+};
+
+// Default generic implementation
+implement<T: Printable> Printable for List<T> {
+    fn to_text(&self) -> Text {
+        let mut result = "[";
+        for i in 0..self.len() {
+            if i > 0 { result = result + ", "; }
+            result = result + self[i].to_text();
+        }
+        result + "]"
+    }
+}
+
+// Specialized implementation for List<Int> — more efficient
+@specialize
+implement Printable for List<Int> {
+    fn to_text(&self) -> Text {
+        let mut result = "[";
+        for i in 0..self.len() {
+            if i > 0 { result = result + ", "; }
+            result = f"{result}{self[i]}";
+        }
+        result + "]"
+    }
+}
+
+// Specialized for Text — avoid extra conversion
+@specialize
+implement Printable for List<Text> {
+    fn to_text(&self) -> Text {
+        let mut result = "[";
+        for i in 0..self.len() {
+            if i > 0 { result = result + ", "; }
+            result = result + self[i];
+        }
+        result + "]"
+    }
+}
+
+fn main() {
+    print("Specialize attribute tests parsed");
+}

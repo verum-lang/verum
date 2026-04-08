@@ -1,0 +1,24 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: memory-safety, lifetimes, dangling-reference, cbgr, error-detection
+// @expected-error: E312
+// @description: CBGR rejects references that outlive their referent
+
+/// Dangling Reference Detection Test
+///
+/// This test verifies that the CBGR lifetime analyzer correctly
+/// rejects code where a reference would outlive the data it points to.
+///
+/// Spec: docs/detailed/26-cbgr-implementation.md#lifetime-analysis
+
+fn create_dangling() -> &Int {
+    let local = 42;
+    &local  // E312: Reference outlives referent
+}
+
+fn main() {
+    // ERROR: would create a dangling reference
+    let r = create_dangling();
+    let _ = *r;  // Would access freed memory
+}

@@ -1,0 +1,744 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, stdlib, tensor, integration
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Stdlib tensor integration — exercises core.math.tensor API patterns through interpreter
+
+// ============================================================================
+// Primary type: 2x2 tensor stored as flat struct fields
+// ============================================================================
+
+type Tensor2D is { rows: Int, cols: Int, d00: Int, d01: Int, d10: Int, d11: Int };
+
+// ============================================================================
+// Flat 4-element vector for reshape tests
+// ============================================================================
+
+type Vec4 is { len: Int, e0: Int, e1: Int, e2: Int, e3: Int };
+
+// ============================================================================
+// Factory functions
+// ============================================================================
+
+fn t2d_new(d00: Int, d01: Int, d10: Int, d11: Int) -> Tensor2D {
+    Tensor2D { rows: 2, cols: 2, d00: d00, d01: d01, d10: d10, d11: d11 }
+}
+
+fn t2d_zeros() -> Tensor2D {
+    Tensor2D { rows: 2, cols: 2, d00: 0, d01: 0, d10: 0, d11: 0 }
+}
+
+fn t2d_ones() -> Tensor2D {
+    Tensor2D { rows: 2, cols: 2, d00: 1, d01: 1, d10: 1, d11: 1 }
+}
+
+fn t2d_fill(v: Int) -> Tensor2D {
+    Tensor2D { rows: 2, cols: 2, d00: v, d01: v, d10: v, d11: v }
+}
+
+fn t2d_identity() -> Tensor2D {
+    Tensor2D { rows: 2, cols: 2, d00: 1, d01: 0, d10: 0, d11: 1 }
+}
+
+// ============================================================================
+// Accessor functions
+// ============================================================================
+
+fn t2d_get(t: Tensor2D, r: Int, c: Int) -> Int {
+    if r == 0 && c == 0 { t.d00 }
+    else if r == 0 && c == 1 { t.d01 }
+    else if r == 1 && c == 0 { t.d10 }
+    else { t.d11 }
+}
+
+fn t2d_set(t: Tensor2D, r: Int, c: Int, v: Int) -> Tensor2D {
+    Tensor2D {
+        rows: t.rows,
+        cols: t.cols,
+        d00: if r == 0 && c == 0 { v } else { t.d00 },
+        d01: if r == 0 && c == 1 { v } else { t.d01 },
+        d10: if r == 1 && c == 0 { v } else { t.d10 },
+        d11: if r == 1 && c == 1 { v } else { t.d11 }
+    }
+}
+
+// ============================================================================
+// Comparison
+// ============================================================================
+
+fn t2d_eq(a: Tensor2D, b: Tensor2D) -> Bool {
+    a.d00 == b.d00 && a.d01 == b.d01 && a.d10 == b.d10 && a.d11 == b.d11
+}
+
+// ============================================================================
+// Element-wise arithmetic
+// ============================================================================
+
+fn t2d_add(a: Tensor2D, b: Tensor2D) -> Tensor2D {
+    Tensor2D {
+        rows: 2, cols: 2,
+        d00: a.d00 + b.d00, d01: a.d01 + b.d01,
+        d10: a.d10 + b.d10, d11: a.d11 + b.d11
+    }
+}
+
+fn t2d_sub(a: Tensor2D, b: Tensor2D) -> Tensor2D {
+    Tensor2D {
+        rows: 2, cols: 2,
+        d00: a.d00 - b.d00, d01: a.d01 - b.d01,
+        d10: a.d10 - b.d10, d11: a.d11 - b.d11
+    }
+}
+
+fn t2d_mul_elem(a: Tensor2D, b: Tensor2D) -> Tensor2D {
+    Tensor2D {
+        rows: 2, cols: 2,
+        d00: a.d00 * b.d00, d01: a.d01 * b.d01,
+        d10: a.d10 * b.d10, d11: a.d11 * b.d11
+    }
+}
+
+fn t2d_div_elem(a: Tensor2D, b: Tensor2D) -> Tensor2D {
+    Tensor2D {
+        rows: 2, cols: 2,
+        d00: a.d00 / b.d00, d01: a.d01 / b.d01,
+        d10: a.d10 / b.d10, d11: a.d11 / b.d11
+    }
+}
+
+fn t2d_mul_scalar(t: Tensor2D, s: Int) -> Tensor2D {
+    Tensor2D {
+        rows: 2, cols: 2,
+        d00: t.d00 * s, d01: t.d01 * s,
+        d10: t.d10 * s, d11: t.d11 * s
+    }
+}
+
+// ============================================================================
+// Matrix multiplication (2x2 @ 2x2 -> 2x2)
+// ============================================================================
+
+fn t2d_matmul(a: Tensor2D, b: Tensor2D) -> Tensor2D {
+    Tensor2D {
+        rows: 2, cols: 2,
+        d00: a.d00 * b.d00 + a.d01 * b.d10,
+        d01: a.d00 * b.d01 + a.d01 * b.d11,
+        d10: a.d10 * b.d00 + a.d11 * b.d10,
+        d11: a.d10 * b.d01 + a.d11 * b.d11
+    }
+}
+
+// ============================================================================
+// Analysis functions
+// ============================================================================
+
+fn t2d_det(t: Tensor2D) -> Int {
+    t.d00 * t.d11 - t.d01 * t.d10
+}
+
+fn t2d_trace(t: Tensor2D) -> Int {
+    t.d00 + t.d11
+}
+
+fn t2d_transpose(t: Tensor2D) -> Tensor2D {
+    Tensor2D {
+        rows: t.cols, cols: t.rows,
+        d00: t.d00, d01: t.d10,
+        d10: t.d01, d11: t.d11
+    }
+}
+
+// ============================================================================
+// Reduction functions
+// ============================================================================
+
+fn t2d_sum(t: Tensor2D) -> Int {
+    t.d00 + t.d01 + t.d10 + t.d11
+}
+
+fn t2d_product(t: Tensor2D) -> Int {
+    t.d00 * t.d01 * t.d10 * t.d11
+}
+
+fn t2d_min(t: Tensor2D) -> Int {
+    let mut m = t.d00;
+    if t.d01 < m { m = t.d01; }
+    if t.d10 < m { m = t.d10; }
+    if t.d11 < m { m = t.d11; }
+    m
+}
+
+fn t2d_max(t: Tensor2D) -> Int {
+    let mut m = t.d00;
+    if t.d01 > m { m = t.d01; }
+    if t.d10 > m { m = t.d10; }
+    if t.d11 > m { m = t.d11; }
+    m
+}
+
+// ============================================================================
+// Reshape: 2x2 -> flat Vec4 (metadata change, same data)
+// ============================================================================
+
+fn t2d_to_vec4(t: Tensor2D) -> Vec4 {
+    Vec4 { len: 4, e0: t.d00, e1: t.d01, e2: t.d10, e3: t.d11 }
+}
+
+fn vec4_to_t2d(v: Vec4) -> Tensor2D {
+    Tensor2D { rows: 2, cols: 2, d00: v.e0, d01: v.e1, d10: v.e2, d11: v.e3 }
+}
+
+fn vec4_get(v: Vec4, i: Int) -> Int {
+    if i == 0 { v.e0 }
+    else if i == 1 { v.e1 }
+    else if i == 2 { v.e2 }
+    else { v.e3 }
+}
+
+// ============================================================================
+// Broadcast: scalar + tensor
+// ============================================================================
+
+fn t2d_add_scalar(t: Tensor2D, s: Int) -> Tensor2D {
+    Tensor2D {
+        rows: 2, cols: 2,
+        d00: t.d00 + s, d01: t.d01 + s,
+        d10: t.d10 + s, d11: t.d11 + s
+    }
+}
+
+// ============================================================================
+// Adjugate (classical adjoint) for 2x2: used in inverse computation
+// adj(A) = [d, -b; -c, a]
+// A^-1 = adj(A) / det(A)
+// ============================================================================
+
+fn t2d_adjugate(t: Tensor2D) -> Tensor2D {
+    Tensor2D {
+        rows: 2, cols: 2,
+        d00: t.d11,
+        d01: 0 - t.d01,
+        d10: 0 - t.d10,
+        d11: t.d00
+    }
+}
+
+// ============================================================================
+// Test 1: Tensor creation — zeros, ones, fill, identity
+// ============================================================================
+
+fn test_tensor_creation() {
+    // Zeros
+    let z = t2d_zeros();
+    assert_eq(z.d00, 0);
+    assert_eq(z.d01, 0);
+    assert_eq(z.d10, 0);
+    assert_eq(z.d11, 0);
+    assert_eq(z.rows, 2);
+    assert_eq(z.cols, 2);
+
+    // Ones
+    let o = t2d_ones();
+    assert_eq(o.d00, 1);
+    assert_eq(o.d01, 1);
+    assert_eq(o.d10, 1);
+    assert_eq(o.d11, 1);
+
+    // Fill
+    let f = t2d_fill(7);
+    assert_eq(f.d00, 7);
+    assert_eq(f.d01, 7);
+    assert_eq(f.d10, 7);
+    assert_eq(f.d11, 7);
+    assert_eq(t2d_sum(f), 28);
+
+    // Identity
+    let id = t2d_identity();
+    assert_eq(id.d00, 1);
+    assert_eq(id.d01, 0);
+    assert_eq(id.d10, 0);
+    assert_eq(id.d11, 1);
+    assert_eq(t2d_det(id), 1);
+    assert_eq(t2d_trace(id), 2);
+
+    // Constructor with t2d_new
+    let m = t2d_new(1, 2, 3, 4);
+    assert_eq(m.d00, 1);
+    assert_eq(m.d01, 2);
+    assert_eq(m.d10, 3);
+    assert_eq(m.d11, 4);
+
+    // Accessors
+    assert_eq(t2d_get(m, 0, 0), 1);
+    assert_eq(t2d_get(m, 0, 1), 2);
+    assert_eq(t2d_get(m, 1, 0), 3);
+    assert_eq(t2d_get(m, 1, 1), 4);
+
+    // Set
+    let m2 = t2d_set(m, 0, 1, 99);
+    assert_eq(t2d_get(m2, 0, 1), 99);
+    assert_eq(t2d_get(m2, 0, 0), 1);
+    assert_eq(t2d_get(m2, 1, 0), 3);
+
+    print("test_tensor_creation passed");
+}
+
+// ============================================================================
+// Test 2: Element-wise arithmetic — add, sub, mul, div
+// ============================================================================
+
+fn test_tensor_arithmetic() {
+    let a = t2d_new(10, 20, 30, 40);
+    let b = t2d_new(1, 2, 3, 4);
+
+    // Add
+    let s = t2d_add(a, b);
+    assert_eq(s.d00, 11);
+    assert_eq(s.d01, 22);
+    assert_eq(s.d10, 33);
+    assert_eq(s.d11, 44);
+
+    // Sub
+    let d = t2d_sub(a, b);
+    assert_eq(d.d00, 9);
+    assert_eq(d.d01, 18);
+    assert_eq(d.d10, 27);
+    assert_eq(d.d11, 36);
+
+    // Element-wise mul
+    let p = t2d_mul_elem(a, b);
+    assert_eq(p.d00, 10);
+    assert_eq(p.d01, 40);
+    assert_eq(p.d10, 90);
+    assert_eq(p.d11, 160);
+
+    // Element-wise div
+    let q = t2d_div_elem(a, b);
+    assert_eq(q.d00, 10);
+    assert_eq(q.d01, 10);
+    assert_eq(q.d10, 10);
+    assert_eq(q.d11, 10);
+
+    // Scalar mul
+    let sc = t2d_mul_scalar(b, 5);
+    assert_eq(sc.d00, 5);
+    assert_eq(sc.d01, 10);
+    assert_eq(sc.d10, 15);
+    assert_eq(sc.d11, 20);
+
+    // Identity: a + zeros = a
+    assert(t2d_eq(t2d_add(a, t2d_zeros()), a));
+
+    // Identity: a - a = zeros
+    assert(t2d_eq(t2d_sub(a, a), t2d_zeros()));
+
+    // Scalar mul by 0 = zeros
+    assert(t2d_eq(t2d_mul_scalar(a, 0), t2d_zeros()));
+
+    // Scalar mul by 1 = self
+    assert(t2d_eq(t2d_mul_scalar(a, 1), a));
+
+    print("test_tensor_arithmetic passed");
+}
+
+// ============================================================================
+// Test 3: Matrix multiplication (2x2)
+// ============================================================================
+
+fn test_tensor_matmul() {
+    let a = t2d_new(1, 2, 3, 4);
+    let b = t2d_new(5, 6, 7, 8);
+
+    // [1 2; 3 4] * [5 6; 7 8] = [1*5+2*7, 1*6+2*8; 3*5+4*7, 3*6+4*8]
+    //                           = [19, 22; 43, 50]
+    let c = t2d_matmul(a, b);
+    assert_eq(c.d00, 19);
+    assert_eq(c.d01, 22);
+    assert_eq(c.d10, 43);
+    assert_eq(c.d11, 50);
+
+    // Identity property: A * I = A
+    let id = t2d_identity();
+    assert(t2d_eq(t2d_matmul(a, id), a));
+
+    // Identity property: I * A = A
+    assert(t2d_eq(t2d_matmul(id, a), a));
+
+    // Zero property: A * 0 = 0
+    assert(t2d_eq(t2d_matmul(a, t2d_zeros()), t2d_zeros()));
+
+    // Associativity: (A * B) * C = A * (B * C)
+    let d = t2d_new(2, 1, 0, 3);
+    let ab_c = t2d_matmul(t2d_matmul(a, b), d);
+    let a_bc = t2d_matmul(a, t2d_matmul(b, d));
+    assert(t2d_eq(ab_c, a_bc));
+
+    // Distributivity: A * (B + C) = A*B + A*C
+    let left = t2d_matmul(a, t2d_add(b, d));
+    let right = t2d_add(t2d_matmul(a, b), t2d_matmul(a, d));
+    assert(t2d_eq(left, right));
+
+    // det(A * B) = det(A) * det(B)
+    assert_eq(t2d_det(t2d_matmul(a, b)), t2d_det(a) * t2d_det(b));
+
+    print("test_tensor_matmul passed");
+}
+
+// ============================================================================
+// Test 4: Transpose
+// ============================================================================
+
+fn test_tensor_transpose() {
+    let a = t2d_new(1, 2, 3, 4);
+    let at = t2d_transpose(a);
+
+    // [1 2; 3 4]^T = [1 3; 2 4]
+    assert_eq(at.d00, 1);
+    assert_eq(at.d01, 3);
+    assert_eq(at.d10, 2);
+    assert_eq(at.d11, 4);
+
+    // Double transpose = original
+    assert(t2d_eq(t2d_transpose(at), a));
+
+    // Transpose of identity = identity
+    assert(t2d_eq(t2d_transpose(t2d_identity()), t2d_identity()));
+
+    // Transpose of zeros = zeros
+    assert(t2d_eq(t2d_transpose(t2d_zeros()), t2d_zeros()));
+
+    // Symmetric matrix: transpose = self
+    let sym = t2d_new(5, 3, 3, 7);
+    assert(t2d_eq(t2d_transpose(sym), sym));
+
+    // (A + B)^T = A^T + B^T
+    let b = t2d_new(5, 6, 7, 8);
+    let sum_t = t2d_transpose(t2d_add(a, b));
+    let t_sum = t2d_add(t2d_transpose(a), t2d_transpose(b));
+    assert(t2d_eq(sum_t, t_sum));
+
+    // (A * B)^T = B^T * A^T
+    let prod_t = t2d_transpose(t2d_matmul(a, b));
+    let t_prod = t2d_matmul(t2d_transpose(b), t2d_transpose(a));
+    assert(t2d_eq(prod_t, t_prod));
+
+    // det(A^T) = det(A)
+    assert_eq(t2d_det(at), t2d_det(a));
+
+    // trace(A^T) = trace(A)
+    assert_eq(t2d_trace(at), t2d_trace(a));
+
+    print("test_tensor_transpose passed");
+}
+
+// ============================================================================
+// Test 5: Determinant and trace
+// ============================================================================
+
+fn test_tensor_det_trace() {
+    // det([1 2; 3 4]) = 1*4 - 2*3 = -2
+    let a = t2d_new(1, 2, 3, 4);
+    assert_eq(t2d_det(a), 0 - 2);
+
+    // trace([1 2; 3 4]) = 1 + 4 = 5
+    assert_eq(t2d_trace(a), 5);
+
+    // Identity: det = 1, trace = 2
+    assert_eq(t2d_det(t2d_identity()), 1);
+    assert_eq(t2d_trace(t2d_identity()), 2);
+
+    // Zeros: det = 0, trace = 0
+    assert_eq(t2d_det(t2d_zeros()), 0);
+    assert_eq(t2d_trace(t2d_zeros()), 0);
+
+    // Singular matrix: det = 0
+    let sing = t2d_new(2, 4, 1, 2);
+    assert_eq(t2d_det(sing), 0);
+
+    // det(k*A) = k^2 * det(A) for 2x2
+    let b = t2d_new(3, 7, 2, 5);
+    // det(b) = 15 - 14 = 1
+    assert_eq(t2d_det(b), 1);
+    assert_eq(t2d_det(t2d_mul_scalar(b, 3)), 9);
+    assert_eq(t2d_det(t2d_mul_scalar(b, 5)), 25);
+
+    // trace(A + B) = trace(A) + trace(B)
+    assert_eq(t2d_trace(t2d_add(a, b)), t2d_trace(a) + t2d_trace(b));
+
+    // trace(k*A) = k * trace(A)
+    assert_eq(t2d_trace(t2d_mul_scalar(a, 4)), 4 * t2d_trace(a));
+
+    // Rotation matrix [0 -1; 1 0]: det = 1, trace = 0
+    let rot = t2d_new(0, 0 - 1, 1, 0);
+    assert_eq(t2d_det(rot), 1);
+    assert_eq(t2d_trace(rot), 0);
+
+    print("test_tensor_det_trace passed");
+}
+
+// ============================================================================
+// Test 6: Reshape 2x2 -> 1x4 (metadata change)
+// ============================================================================
+
+fn test_tensor_reshape() {
+    let t = t2d_new(10, 20, 30, 40);
+
+    // Reshape to flat vector
+    let v = t2d_to_vec4(t);
+    assert_eq(v.len, 4);
+    assert_eq(vec4_get(v, 0), 10);
+    assert_eq(vec4_get(v, 1), 20);
+    assert_eq(vec4_get(v, 2), 30);
+    assert_eq(vec4_get(v, 3), 40);
+
+    // Reshape back to 2x2
+    let t2 = vec4_to_t2d(v);
+    assert(t2d_eq(t2, t));
+
+    // Round-trip preserves data
+    let id = t2d_identity();
+    let v_id = t2d_to_vec4(id);
+    assert_eq(vec4_get(v_id, 0), 1);
+    assert_eq(vec4_get(v_id, 1), 0);
+    assert_eq(vec4_get(v_id, 2), 0);
+    assert_eq(vec4_get(v_id, 3), 1);
+    assert(t2d_eq(vec4_to_t2d(v_id), id));
+
+    // Sum is preserved through reshape
+    let t3 = t2d_new(3, 5, 7, 11);
+    let v3 = t2d_to_vec4(t3);
+    let flat_sum = vec4_get(v3, 0) + vec4_get(v3, 1) + vec4_get(v3, 2) + vec4_get(v3, 3);
+    assert_eq(flat_sum, t2d_sum(t3));
+
+    print("test_tensor_reshape passed");
+}
+
+// ============================================================================
+// Test 7: Reduce — sum, product of all elements
+// ============================================================================
+
+fn test_tensor_reduce() {
+    let a = t2d_new(1, 2, 3, 4);
+
+    // Sum: 1 + 2 + 3 + 4 = 10
+    assert_eq(t2d_sum(a), 10);
+
+    // Product: 1 * 2 * 3 * 4 = 24
+    assert_eq(t2d_product(a), 24);
+
+    // Min / Max
+    assert_eq(t2d_min(a), 1);
+    assert_eq(t2d_max(a), 4);
+
+    // With negative values
+    let b = t2d_new(0 - 5, 3, 0 - 1, 7);
+    assert_eq(t2d_sum(b), 4);
+    assert_eq(t2d_min(b), 0 - 5);
+    assert_eq(t2d_max(b), 7);
+
+    // Ones
+    let o = t2d_ones();
+    assert_eq(t2d_sum(o), 4);
+    assert_eq(t2d_product(o), 1);
+
+    // Zeros
+    let z = t2d_zeros();
+    assert_eq(t2d_sum(z), 0);
+    assert_eq(t2d_product(z), 0);
+
+    // Fill: sum(fill(k)) = 4*k, product(fill(k)) = k^4
+    let f3 = t2d_fill(3);
+    assert_eq(t2d_sum(f3), 12);
+    assert_eq(t2d_product(f3), 81);
+
+    // Sum of add = sum(a) + sum(b)
+    let c = t2d_new(10, 20, 30, 40);
+    assert_eq(t2d_sum(t2d_add(a, c)), t2d_sum(a) + t2d_sum(c));
+
+    print("test_tensor_reduce passed");
+}
+
+// ============================================================================
+// Test 8: Broadcast add — scalar + matrix
+// ============================================================================
+
+fn test_tensor_broadcast_add() {
+    let a = t2d_new(1, 2, 3, 4);
+
+    // Add scalar 10 to all elements
+    let b = t2d_add_scalar(a, 10);
+    assert_eq(b.d00, 11);
+    assert_eq(b.d01, 12);
+    assert_eq(b.d10, 13);
+    assert_eq(b.d11, 14);
+
+    // Add zero = no change
+    assert(t2d_eq(t2d_add_scalar(a, 0), a));
+
+    // Negative scalar
+    let c = t2d_add_scalar(a, 0 - 1);
+    assert_eq(c.d00, 0);
+    assert_eq(c.d01, 1);
+    assert_eq(c.d10, 2);
+    assert_eq(c.d11, 3);
+
+    // Broadcast add then reduce: sum(A + s) = sum(A) + 4*s
+    assert_eq(t2d_sum(t2d_add_scalar(a, 5)), t2d_sum(a) + 20);
+
+    // Combine broadcast with element-wise
+    // (A + 10) - A = fill(10)
+    let diff = t2d_sub(t2d_add_scalar(a, 10), a);
+    assert(t2d_eq(diff, t2d_fill(10)));
+
+    // Chain broadcasts: (A + 3) + 7 should equal A + 10
+    let chain = t2d_add_scalar(t2d_add_scalar(a, 3), 7);
+    let direct = t2d_add_scalar(a, 10);
+    assert(t2d_eq(chain, direct));
+
+    print("test_tensor_broadcast_add passed");
+}
+
+// ============================================================================
+// Test 9: Chained operations — matmul -> transpose -> det pipeline
+// ============================================================================
+
+fn test_tensor_chain_ops() {
+    let a = t2d_new(1, 2, 3, 4);
+    let b = t2d_new(2, 0, 1, 3);
+
+    // Pipeline: matmul -> transpose -> det
+    let prod = t2d_matmul(a, b);
+    // [1 2; 3 4] * [2 0; 1 3] = [1*2+2*1, 1*0+2*3; 3*2+4*1, 3*0+4*3]
+    //                           = [4, 6; 10, 12]
+    assert_eq(prod.d00, 4);
+    assert_eq(prod.d01, 6);
+    assert_eq(prod.d10, 10);
+    assert_eq(prod.d11, 12);
+
+    let prod_t = t2d_transpose(prod);
+    // [4 10; 6 12]
+    assert_eq(prod_t.d00, 4);
+    assert_eq(prod_t.d01, 10);
+    assert_eq(prod_t.d10, 6);
+    assert_eq(prod_t.d11, 12);
+
+    // det(transpose) = det(original)
+    let det_prod = t2d_det(prod);
+    let det_prod_t = t2d_det(prod_t);
+    assert_eq(det_prod, det_prod_t);
+    // det = 4*12 - 6*10 = 48 - 60 = -12
+    assert_eq(det_prod, 0 - 12);
+
+    // Verify: det(A*B) = det(A) * det(B)
+    // det(A) = 1*4-2*3 = -2, det(B) = 2*3-0*1 = 6, product = -12
+    assert_eq(t2d_det(a) * t2d_det(b), 0 - 12);
+    assert_eq(det_prod, t2d_det(a) * t2d_det(b));
+
+    // Another pipeline: scale -> add -> trace
+    let scaled = t2d_mul_scalar(a, 2);   // [2 4; 6 8]
+    let added = t2d_add(scaled, b);      // [4 4; 7 11]
+    assert_eq(t2d_trace(added), 15);
+
+    // Pipeline: transpose -> matmul -> sum
+    // A^T * B: [1 3; 2 4] * [2 0; 1 3] = [1*2+3*1, 1*0+3*3; 2*2+4*1, 2*0+4*3]
+    //                                    = [5, 9; 8, 12]
+    let at_b = t2d_matmul(t2d_transpose(a), b);
+    assert_eq(at_b.d00, 5);
+    assert_eq(at_b.d01, 9);
+    assert_eq(at_b.d10, 8);
+    assert_eq(at_b.d11, 12);
+    assert_eq(t2d_sum(at_b), 34);
+
+    print("test_tensor_chain_ops passed");
+}
+
+// ============================================================================
+// Test 10: Inverse — A * A^-1 ~ I using scaled integer arithmetic
+//
+// For 2x2 matrix: A^-1 = adj(A) / det(A)
+// We use scaled integers: A * adj(A) = det(A) * I
+// This avoids division and verifies the inverse relationship exactly.
+// ============================================================================
+
+fn test_tensor_inverse() {
+    // Matrix A = [3 7; 2 5], det(A) = 15 - 14 = 1
+    // When det = 1, adj(A) IS the inverse exactly!
+    let a = t2d_new(3, 7, 2, 5);
+    assert_eq(t2d_det(a), 1);
+
+    let adj_a = t2d_adjugate(a);
+    // adj([3 7; 2 5]) = [5 -7; -2 3]
+    assert_eq(adj_a.d00, 5);
+    assert_eq(adj_a.d01, 0 - 7);
+    assert_eq(adj_a.d10, 0 - 2);
+    assert_eq(adj_a.d11, 3);
+
+    // A * adj(A) = det(A) * I = 1 * I = I
+    let product = t2d_matmul(a, adj_a);
+    assert(t2d_eq(product, t2d_identity()));
+
+    // adj(A) * A = I as well
+    let product2 = t2d_matmul(adj_a, a);
+    assert(t2d_eq(product2, t2d_identity()));
+
+    // For arbitrary matrix with det != 1, verify A * adj(A) = det(A) * I
+    let b = t2d_new(1, 2, 3, 4);
+    // det(B) = 4 - 6 = -2
+    assert_eq(t2d_det(b), 0 - 2);
+
+    let adj_b = t2d_adjugate(b);
+    // adj([1 2; 3 4]) = [4 -2; -3 1]
+    assert_eq(adj_b.d00, 4);
+    assert_eq(adj_b.d01, 0 - 2);
+    assert_eq(adj_b.d10, 0 - 3);
+    assert_eq(adj_b.d11, 1);
+
+    // B * adj(B) should equal det(B) * I = -2 * I = [-2 0; 0 -2]
+    let b_adj = t2d_matmul(b, adj_b);
+    let det_i = t2d_mul_scalar(t2d_identity(), t2d_det(b));
+    assert(t2d_eq(b_adj, det_i));
+
+    // adj(B) * B should also equal det(B) * I
+    let adj_b_b = t2d_matmul(adj_b, b);
+    assert(t2d_eq(adj_b_b, det_i));
+
+    // Rotation matrix: [0 -1; 1 0], det = 1
+    // adj = [0 1; -1 0] which is the inverse rotation
+    let rot = t2d_new(0, 0 - 1, 1, 0);
+    assert_eq(t2d_det(rot), 1);
+    let inv_rot = t2d_adjugate(rot);
+    let rot_product = t2d_matmul(rot, inv_rot);
+    assert(t2d_eq(rot_product, t2d_identity()));
+
+    // (A*B)^-1 = B^-1 * A^-1, verified via adjugates when det = 1
+    // Both A and rot have det = 1, so adj IS inverse
+    let ab = t2d_matmul(a, rot);
+    // det(A*rot) = det(A)*det(rot) = 1*1 = 1
+    assert_eq(t2d_det(ab), 1);
+    let inv_ab = t2d_adjugate(ab);
+    let inv_b_inv_a = t2d_matmul(inv_rot, adj_a);
+    assert(t2d_eq(inv_ab, inv_b_inv_a));
+
+    print("test_tensor_inverse passed");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_tensor_creation();
+    test_tensor_arithmetic();
+    test_tensor_matmul();
+    test_tensor_transpose();
+    test_tensor_det_trace();
+    test_tensor_reshape();
+    test_tensor_reduce();
+    test_tensor_broadcast_add();
+    test_tensor_chain_ops();
+    test_tensor_inverse();
+    print("[OK] 063_stdlib_tensor");
+    0
+}

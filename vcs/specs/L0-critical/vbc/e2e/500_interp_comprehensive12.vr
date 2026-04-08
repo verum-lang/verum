@@ -1,0 +1,444 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone, treap, nfa, skip_list, flow, symbolic_diff
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #12: combines records, closures, generators, spawn/await,
+// lists, format strings, and algorithms from tests 491-499.
+// MAJOR MILESTONE: 500 test files, ~327 interpreter tests.
+
+// ============================================================
+// Records: 2D point geometry
+// ============================================================
+
+type Point2D is { x: Int, y: Int };
+type Rect is { lo_x: Int, lo_y: Int, hi_x: Int, hi_y: Int };
+
+fn pt_new(x: Int, y: Int) -> Point2D { Point2D { x: x, y: y } }
+fn pt_manhattan(a: Point2D, b: Point2D) -> Int {
+    let dx = if a.x > b.x { a.x - b.x } else { b.x - a.x };
+    let dy = if a.y > b.y { a.y - b.y } else { b.y - a.y };
+    dx + dy
+}
+fn rect_new(lx: Int, ly: Int, hx: Int, hy: Int) -> Rect {
+    Rect { lo_x: lx, lo_y: ly, hi_x: hx, hi_y: hy }
+}
+fn rect_area(r: Rect) -> Int { (r.hi_x - r.lo_x) * (r.hi_y - r.lo_y) }
+fn rect_contains(r: Rect, p: Point2D) -> Int {
+    if p.x >= r.lo_x && p.x <= r.hi_x && p.y >= r.lo_y && p.y <= r.hi_y { 1 } else { 0 }
+}
+
+fn test_records() {
+    let p1 = pt_new(0, 0);
+    let p2 = pt_new(3, 4);
+    let p3 = pt_new(10, 10);
+    assert_eq(pt_manhattan(p1, p2), 7);   // |0-3|+|0-4|=7
+    assert_eq(pt_manhattan(p2, p3), 13);  // |3-10|+|4-10|=13
+    assert_eq(pt_manhattan(p1, p3), 20);  // 10+10=20
+
+    let r = rect_new(2, 3, 8, 9);
+    assert_eq(rect_area(r), 36); // 6*6=36
+    assert_eq(rect_contains(r, pt_new(5, 5)), 1);
+    assert_eq(rect_contains(r, pt_new(1, 5)), 0); // left of rect
+    assert_eq(rect_contains(r, pt_new(5, 10)), 0); // above rect
+
+    // Nearest-site: 3 sites, find which is closest to a query point
+    let sites_x = [0, 10, 5];
+    let sites_y = [0,  0, 8];
+    // Query (2,2): dist(0,0)=4, dist(10,0)=10, dist(5,8)=9 -> site 0
+    let qx = 2; let qy = 2;
+    let mut best = 0;
+    let mut best_d = pt_manhattan(pt_new(qx, qy), pt_new(sites_x[0], sites_y[0]));
+    let mut si = 1;
+    while si < 3 {
+        let d = pt_manhattan(pt_new(qx, qy), pt_new(sites_x[si], sites_y[si]));
+        if d < best_d { best_d = d; best = si; }
+        si = si + 1;
+    }
+    assert_eq(best, 0);
+    print("records: ok");
+}
+
+// ============================================================
+// Closures: higher-order operations
+// ============================================================
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int { f(f(x)) }
+fn compose_apply(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int { f(g(x)) }
+fn scan_prefix(f: fn(Int, Int) -> Int, init: Int, arr: [Int; 8], n: Int, out: [Int; 8]) {
+    let mut acc = init;
+    let mut i = 0;
+    while i < n {
+        acc = f(acc, arr[i]);
+        out[i] = acc;
+        i = i + 1;
+    }
+}
+
+fn test_closures() {
+    // apply_twice(x+3, 5) = (5+3)+3 = 11
+    let add3 = |x: Int| -> Int { x + 3 };
+    assert_eq(apply_twice(add3, 5), 11);
+
+    // apply_twice(x*2, 3) = 3*2*2 = 12
+    let dbl = |x: Int| -> Int { x * 2 };
+    assert_eq(apply_twice(dbl, 3), 12);
+
+    // compose: (x+3) applied after (x*2): 5*2=10, 10+3=13
+    assert_eq(compose_apply(add3, dbl, 5), 13);
+
+    // prefix sums of [1,2,3,4,5,6,7,8]
+    let vals = [1, 2, 3, 4, 5, 6, 7, 8];
+    let mut psums = [0, 0, 0, 0, 0, 0, 0, 0];
+    let add = |a: Int, b: Int| -> Int { a + b };
+    scan_prefix(add, 0, vals, 8, psums);
+    // prefix sums: [1, 3, 6, 10, 15, 21, 28, 36]
+    assert_eq(psums[0], 1);
+    assert_eq(psums[1], 3);
+    assert_eq(psums[2], 6);
+    assert_eq(psums[3], 10);
+    assert_eq(psums[7], 36);
+
+    // prefix max of [3,1,4,1,5,9,2,6]: [3,3,4,4,5,9,9,9]
+    let mut pmaxs = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mx = |a: Int, b: Int| -> Int { if a > b { a } else { b } };
+    scan_prefix(mx, 0 - 1000000, vals, 8, pmaxs);
+    assert_eq(pmaxs[0], 1);  // max(−∞,1)=1
+    assert_eq(pmaxs[2], 3);  // max of [1,2,3]=3
+    assert_eq(pmaxs[7], 8);  // max of all=8
+
+    print("closures: ok");
+}
+
+// ============================================================
+// Generators: polynomial evaluation
+// ============================================================
+
+// Generate powers of base: base^0, base^1, ..., base^(n-1)
+fn* powers_gen(base: Int, n: Int) -> Int {
+    let mut p = 1;
+    let mut k = 0;
+    while k < n {
+        yield p;
+        p = p * base;
+        k = k + 1;
+    }
+}
+
+// Generate triangular numbers: 1, 3, 6, 10, 15, ...
+fn* triangular_gen(n: Int) -> Int {
+    let mut sum = 0;
+    let mut k = 1;
+    while k <= n {
+        sum = sum + k;
+        yield sum;
+        k = k + 1;
+    }
+}
+
+fn test_generators() {
+    // Powers of 3: 1, 3, 9, 27, 81, 243, 729, 2187
+    let mut pows = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for p in powers_gen(3, 8) {
+        pows[idx] = p;
+        idx = idx + 1;
+    }
+    assert_eq(pows[0], 1);
+    assert_eq(pows[1], 3);
+    assert_eq(pows[2], 9);
+    assert_eq(pows[3], 27);
+    assert_eq(pows[4], 81);
+    assert_eq(pows[7], 2187);
+
+    // Sum of powers of 3 = (3^8-1)/(3-1) = (6561-1)/2 = 3280
+    let mut pow_sum = 0;
+    let mut k = 0;
+    while k < 8 { pow_sum = pow_sum + pows[k]; k = k + 1; }
+    assert_eq(pow_sum, 3280);
+
+    // Triangular numbers T(1)..T(8): 1,3,6,10,15,21,28,36
+    let mut tri = [0, 0, 0, 0, 0, 0, 0, 0];
+    idx = 0;
+    for t in triangular_gen(8) {
+        tri[idx] = t;
+        idx = idx + 1;
+    }
+    assert_eq(tri[0], 1);
+    assert_eq(tri[1], 3);
+    assert_eq(tri[2], 6);
+    assert_eq(tri[3], 10);
+    assert_eq(tri[4], 15);
+    assert_eq(tri[7], 36);
+
+    print("generators: ok");
+}
+
+// ============================================================
+// Spawn/Await: concurrent computations
+// ============================================================
+
+fn sum_of_squares(n: Int) -> Int {
+    // Sum of squares: 1^2 + 2^2 + ... + n^2 = n*(n+1)*(2n+1)/6
+    n * (n + 1) * (2 * n + 1) / 6
+}
+
+@allow(unbounded_recursion)
+fn power_mod(base: Int, exp: Int, modv: Int) -> Int {
+    if exp == 0 { return 1; }
+    if exp % 2 == 0 {
+        let half = power_mod(base, exp / 2, modv);
+        return (half * half) % modv;
+    }
+    (base * power_mod(base, exp - 1, modv)) % modv
+}
+
+fn count_divisors(n: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 1;
+    while i * i <= n {
+        if n % i == 0 {
+            cnt = cnt + 2;
+            if i * i == n { cnt = cnt - 1; }
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+fn test_spawn_await() {
+    // Sum of squares: 1^2+...+10^2 = 10*11*21/6 = 385
+    let t1 = spawn sum_of_squares(10);
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    let t2 = spawn power_mod(2, 10, 1000);
+    // 3^7 mod 100 = 2187 mod 100 = 87
+    let t3 = spawn power_mod(3, 7, 100);
+    // divisors of 36: 1,2,3,4,6,9,12,18,36 -> 9
+    let t4 = spawn count_divisors(36);
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+    let r4 = t4.await;
+
+    assert_eq(r1, 385);
+    assert_eq(r2, 24);
+    assert_eq(r3, 87);
+    assert_eq(r4, 9);
+
+    // More tasks
+    let t5 = spawn sum_of_squares(5);   // 1+4+9+16+25=55
+    let t6 = spawn count_divisors(12);  // 1,2,3,4,6,12 -> 6
+    let r5 = t5.await;
+    let r6 = t6.await;
+    assert_eq(r5, 55);
+    assert_eq(r6, 6);
+
+    print("spawn_await: ok");
+}
+
+// ============================================================
+// Array/list algorithms: binary polynomial checksum + NFA simulation
+// ============================================================
+
+// XOR checksum of array
+fn xor_check(arr: [Int; 16], n: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < n { c = c ^ arr[i]; i = i + 1; }
+    c
+}
+
+// NFA move on bitmask (from 492)
+fn nfa_move_bm(nfa_trans: [Int; 16], states: Int, sym: Int, n_nfa: Int) -> Int {
+    let mut result = 0;
+    let mut s = 0;
+    while s < n_nfa {
+        if (states >> s) % 2 == 1 { result = result | nfa_trans[s * 2 + sym]; }
+        s = s + 1;
+    }
+    result
+}
+
+fn test_list_operations() {
+    // XOR checksum of [1..8]: 1^2^3^4^5^6^7^8
+    // 1^2=3, 3^3=0, 0^4=4, 4^5=1, 1^6=7, 7^7=0, 0^8=8
+    let arr1 = [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(xor_check(arr1, 8), 8);
+
+    // NFA simulation: 3-state NFA for "ends in 01"
+    let nfa_trans = [3, 1, 2, 4, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0];
+    let n_nfa = 3;
+    // Start = {0}=1. On "001": A->{0,1}->on 0->{0,1}->on 1->{0,2}=5 (accept)
+    let mut state = 1;
+    let seq = [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 3 { state = nfa_move_bm(nfa_trans, state, seq[i], n_nfa); i = i + 1; }
+    assert_eq(state, 5); // {0,2} contains accept state 2 (bit 2)
+    assert((state & 4) != 0); // bit 2 set = accept state
+
+    // Insertion sort on small array [5,2,8,1,9,3]
+    let mut sarr = [5, 2, 8, 1, 9, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sn = 6;
+    let mut ii = 1;
+    while ii < sn {
+        let key = sarr[ii];
+        let mut jj = ii - 1;
+        while jj >= 0 && sarr[jj] > key {
+            sarr[jj + 1] = sarr[jj];
+            jj = jj - 1;
+        }
+        sarr[jj + 1] = key;
+        ii = ii + 1;
+    }
+    assert_eq(sarr[0], 1);
+    assert_eq(sarr[1], 2);
+    assert_eq(sarr[2], 3);
+    assert_eq(sarr[3], 5);
+    assert_eq(sarr[4], 8);
+    assert_eq(sarr[5], 9);
+
+    print("list_operations: ok");
+}
+
+// ============================================================
+// Format strings
+// ============================================================
+
+fn test_format_strings() {
+    let p = pt_new(7, 11);
+    let area = rect_area(rect_new(0, 0, p.x, p.y));
+    assert_eq(area, 77); // 7 * 11 = 77
+    print(f"rect_area: {area}");
+
+    // Powers summary
+    let mut pows = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for v in powers_gen(2, 8) { pows[idx] = v; idx = idx + 1; }
+    // Powers of 2: 1,2,4,8,16,32,64,128. Sum = 255.
+    let mut psum = 0;
+    let mut k = 0;
+    while k < 8 { psum = psum + pows[k]; k = k + 1; }
+    assert_eq(psum, 255);
+    print(f"powers_of_2_sum: {psum}");
+
+    // Sum of squares and divisors
+    let ss20 = sum_of_squares(20); // 20*21*41/6 = 2870
+    assert_eq(ss20, 2870);
+    let dv24 = count_divisors(24); // 1,2,3,4,6,8,12,24 -> 8
+    assert_eq(dv24, 8);
+    print(f"sum_of_squares_20: {ss20} divisors_24: {dv24}");
+
+    print("format_strings: ok");
+}
+
+// ============================================================
+// Combined pipeline: Voronoi + CRC + BST search
+// ============================================================
+
+// Simple BST search in a sorted array (binary search)
+fn bsearch(arr: [Int; 16], n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if arr[mid] == target { return mid; }
+        if arr[mid] < target { lo = mid + 1; } else { hi = mid - 1; }
+    }
+    0 - 1
+}
+
+// Manhattan distance nearest-site for 4 sites
+fn nearest4(
+    sx: [Int; 4], sy: [Int; 4],
+    px: Int, py: Int
+) -> Int {
+    let mut best = 0;
+    let mut bd = 2147483647;
+    let mut i = 0;
+    while i < 4 {
+        let dx = if px > sx[i] { px - sx[i] } else { sx[i] - px };
+        let dy = if py > sy[i] { py - sy[i] } else { sy[i] - py };
+        let d = dx + dy;
+        if d < bd { bd = d; best = i; }
+        i = i + 1;
+    }
+    best
+}
+
+// Simple CRC-8 (poly=0x07)
+fn crc8_simple(data: [Int; 16], n: Int) -> Int {
+    let poly = 7;
+    let mut crc = 0;
+    let mut i = 0;
+    while i < n {
+        crc = crc ^ data[i];
+        let mut bit = 0;
+        while bit < 8 {
+            if (crc & 128) != 0 { crc = ((crc << 1) & 255) ^ poly; }
+            else { crc = (crc << 1) & 255; }
+            bit = bit + 1;
+        }
+        i = i + 1;
+    }
+    crc
+}
+
+fn test_combined_pipeline() {
+    // Step 1: Binary search in sorted array [2,5,8,12,18,25,33,40]
+    let sorted = [2, 5, 8, 12, 18, 25, 33, 40, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(bsearch(sorted, 8, 5),  1);
+    assert_eq(bsearch(sorted, 8, 18), 4);
+    assert_eq(bsearch(sorted, 8, 40), 7);
+    assert_eq(bsearch(sorted, 8, 7),  0 - 1);
+
+    // Step 2: Voronoi with 4 sites at cardinal directions
+    let sx = [0, 100,  50,  50];
+    let sy = [50,  50,   0, 100];
+    // (10,50): dist(0,50)=10, dist(100,50)=90, dist(50,0)=90, dist(50,100)=90 -> site 0
+    assert_eq(nearest4(sx, sy, 10, 50), 0);
+    // (90,50): dist(0,50)=90, dist(100,50)=10, dist(50,0)=90, dist(50,100)=90 -> site 1
+    assert_eq(nearest4(sx, sy, 90, 50), 1);
+    // (50,10): dist(0,50)=90, dist(100,50)=90, dist(50,0)=10, dist(50,100)=90 -> site 2
+    assert_eq(nearest4(sx, sy, 50, 10), 2);
+    // (50,90): dist(0,50)=90, dist(100,50)=90, dist(50,0)=90, dist(50,100)=10 -> site 3
+    assert_eq(nearest4(sx, sy, 50, 90), 3);
+
+    // Step 3: CRC-8 of [1,2,3,4] then verify append property
+    let data = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let c = crc8_simple(data, 4);
+    assert(c >= 0);
+    assert(c <= 255);
+    // Append CRC: CRC of [1,2,3,4,c] should be 0
+    let mut data2 = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    data2[4] = c;
+    let c2 = crc8_simple(data2, 5);
+    assert_eq(c2, 0);
+
+    // Step 4: spawn summary computations
+    let ta = spawn sum_of_squares(6); // 1+4+9+16+25+36=91
+    let tb = spawn count_divisors(100); // 1,2,4,5,10,20,25,50,100 -> 9
+    let ra = ta.await;
+    let rb = tb.await;
+    assert_eq(ra, 91);
+    assert_eq(rb, 9);
+
+    let msg = f"pipeline: bsearch ok, voronoi ok, crc={c}, sq_sum={ra}, div_100={rb}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_records();
+    test_closures();
+    test_generators();
+    test_spawn_await();
+    test_list_operations();
+    test_format_strings();
+    test_combined_pipeline();
+    print("[OK] 500_interp_comprehensive12 — MAJOR MILESTONE: 500 test files, ~327 interpreter tests");
+    0
+}

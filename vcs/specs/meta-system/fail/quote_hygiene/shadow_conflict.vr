@@ -1,0 +1,34 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M402
+// @tags: meta, quote, hygiene, shadow, conflict
+// @description: Tests detection of shadow conflicts in generated code
+
+// =============================================================================
+// SHADOW CONFLICT DETECTION
+// =============================================================================
+
+// Macro that generates code that shadows a caller-visible binding
+// This should be detected as a hygiene violation (M402)
+@transparent  // Request transparent mode for this macro
+meta fn shadow_conflict_macro() -> TokenStream {
+    quote {
+        // This 'result' would conflict with caller's 'result' in transparent mode
+        let result = 0;  // ERROR: M402 - Shadows caller's 'result'
+        result
+    }
+}
+
+fn test_shadow() {
+    let result = compute_important_value();
+    let temp = @shadow_conflict_macro();  // Shadows 'result'
+    use_result(result);  // 'result' was shadowed - hygiene violation
+}
+
+fn compute_important_value() -> Int { 42 }
+fn use_result(_: Int) {}
+
+fn main() {
+    test_shadow();
+}

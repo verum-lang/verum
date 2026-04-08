@@ -1,0 +1,712 @@
+// =============================================================================
+// token_test.vr - Comprehensive tests for token stream and token types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, token, tokenstream, delimiter, spacing, keyword, literal,
+//        token-kind, token-tree, group, lex-error
+// @description: Tests for Delimiter, Spacing, StringKind, Keyword, TokenKind,
+//               Literal, Token, TokenTree, Group, TokenStream, and LexError
+//               from the meta.token module.
+// =============================================================================
+
+mount core.meta.token.{
+    Delimiter, Spacing, Keyword, StringKind,
+    TokenKind, Literal, Token, TokenTree, Group,
+    TokenStream, LexError,
+};
+mount core.meta.span.Span;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Delimiter Variants
+// =============================================================================
+
+@test
+fn test_delimiter_parenthesis() {
+    let d: Delimiter = Delimiter.Parenthesis;
+    assert_eq(d.open(), Some('('));
+    assert_eq(d.close(), Some(')'));
+}
+
+@test
+fn test_delimiter_brace() {
+    let d: Delimiter = Delimiter.Brace;
+    assert_eq(d.open(), Some('{'));
+    assert_eq(d.close(), Some('}'));
+}
+
+@test
+fn test_delimiter_bracket() {
+    let d: Delimiter = Delimiter.Bracket;
+    assert_eq(d.open(), Some('['));
+    assert_eq(d.close(), Some(']'));
+}
+
+@test
+fn test_delimiter_none() {
+    let d: Delimiter = Delimiter.None;
+    assert(d.open().is_none());
+    assert(d.close().is_none());
+}
+
+// =============================================================================
+// Section 2: Spacing Variants
+// =============================================================================
+
+@test
+fn test_spacing_joint() {
+    let s: Spacing = Spacing.Joint;
+    assert(s is Spacing.Joint);
+}
+
+@test
+fn test_spacing_alone() {
+    let s: Spacing = Spacing.Alone;
+    assert(s is Spacing.Alone);
+}
+
+// =============================================================================
+// Section 3: StringKind Variants
+// =============================================================================
+
+@test
+fn test_string_kind_normal() {
+    let k: StringKind = StringKind.Normal;
+    assert(k is StringKind.Normal);
+}
+
+@test
+fn test_string_kind_format() {
+    let k: StringKind = StringKind.Format;
+    assert(k is StringKind.Format);
+}
+
+@test
+fn test_string_kind_raw() {
+    let k: StringKind = StringKind.Raw;
+    assert(k is StringKind.Raw);
+}
+
+@test
+fn test_string_kind_raw_format() {
+    let k: StringKind = StringKind.RawFormat;
+    assert(k is StringKind.RawFormat);
+}
+
+// =============================================================================
+// Section 4: Keyword Variants — Comprehensive
+// =============================================================================
+
+@test
+fn test_keyword_reserved() {
+    let k1: Keyword = Keyword.Let;
+    let k2: Keyword = Keyword.Fn;
+    let k3: Keyword = Keyword.Is;
+    assert(k1 is Keyword.Let);
+    assert(k2 is Keyword.Fn);
+    assert(k3 is Keyword.Is);
+}
+
+@test
+fn test_keyword_type_system() {
+    let k1: Keyword = Keyword.Type;
+    let k2: Keyword = Keyword.Implement;
+    let k3: Keyword = Keyword.Protocol;
+    let k4: Keyword = Keyword.Extends;
+    assert(k1 is Keyword.Type);
+    assert(k2 is Keyword.Implement);
+    assert(k3 is Keyword.Protocol);
+    assert(k4 is Keyword.Extends);
+}
+
+@test
+fn test_keyword_control_flow() {
+    let k1: Keyword = Keyword.If;
+    let k2: Keyword = Keyword.Else;
+    let k3: Keyword = Keyword.Match;
+    let k4: Keyword = Keyword.Return;
+    let k5: Keyword = Keyword.Break;
+    let k6: Keyword = Keyword.Continue;
+    assert(k1 is Keyword.If);
+    assert(k4 is Keyword.Return);
+    assert(k5 is Keyword.Break);
+    assert(k6 is Keyword.Continue);
+}
+
+@test
+fn test_keyword_loop() {
+    let k1: Keyword = Keyword.For;
+    let k2: Keyword = Keyword.While;
+    let k3: Keyword = Keyword.Loop;
+    let k4: Keyword = Keyword.In;
+    assert(k1 is Keyword.For);
+    assert(k3 is Keyword.Loop);
+    assert(k4 is Keyword.In);
+}
+
+@test
+fn test_keyword_async() {
+    let k1: Keyword = Keyword.Async;
+    let k2: Keyword = Keyword.Await;
+    assert(k1 is Keyword.Async);
+    assert(k2 is Keyword.Await);
+}
+
+@test
+fn test_keyword_context_system() {
+    let k1: Keyword = Keyword.Using;
+    let k2: Keyword = Keyword.Provide;
+    let k3: Keyword = Keyword.Context;
+    assert(k1 is Keyword.Using);
+    assert(k2 is Keyword.Provide);
+    assert(k3 is Keyword.Context);
+}
+
+@test
+fn test_keyword_module() {
+    let k1: Keyword = Keyword.Module;
+    let k2: Keyword = Keyword.Import;
+    let k3: Keyword = Keyword.Public;
+    let k4: Keyword = Keyword.Private;
+    assert(k1 is Keyword.Module);
+    assert(k3 is Keyword.Public);
+    assert(k4 is Keyword.Private);
+}
+
+@test
+fn test_keyword_qualifiers() {
+    let k1: Keyword = Keyword.Meta;
+    let k2: Keyword = Keyword.Pure;
+    let k3: Keyword = Keyword.Where;
+    let k4: Keyword = Keyword.As;
+    let k5: Keyword = Keyword.Mut;
+    let k6: Keyword = Keyword.Ref;
+    assert(k1 is Keyword.Meta);
+    assert(k2 is Keyword.Pure);
+    assert(k5 is Keyword.Mut);
+}
+
+@test
+fn test_keyword_literals() {
+    let k1: Keyword = Keyword.True;
+    let k2: Keyword = Keyword.False;
+    let k3: Keyword = Keyword.None;
+    let k4: Keyword = Keyword.Some;
+    assert(k1 is Keyword.True);
+    assert(k2 is Keyword.False);
+}
+
+@test
+fn test_keyword_self_super() {
+    let k1: Keyword = Keyword.Self_;
+    let k2: Keyword = Keyword.Super;
+    assert(k1 is Keyword.Self_);
+    assert(k2 is Keyword.Super);
+}
+
+// =============================================================================
+// Section 5: Literal Constructors and Matching
+// =============================================================================
+
+@test
+fn test_literal_int() {
+    let lit = Literal.int(42);
+    match lit {
+        Literal.Int { value, suffix } => {
+            assert_eq(value, 42);
+            assert(suffix.is_none());
+        },
+        _ => panic("expected Int literal"),
+    }
+}
+
+@test
+fn test_literal_int_zero() {
+    let lit = Literal.int(0);
+    match lit {
+        Literal.Int { value, suffix } => {
+            assert_eq(value, 0);
+        },
+        _ => panic("expected Int literal"),
+    }
+}
+
+@test
+fn test_literal_int_negative() {
+    let lit = Literal.int(-1);
+    match lit {
+        Literal.Int { value, suffix } => {
+            assert_eq(value, -1);
+        },
+        _ => panic("expected Int literal"),
+    }
+}
+
+@test
+fn test_literal_float() {
+    // Literal.float() static method not resolvable — use direct variant construction
+    let lit = Literal.Float { value: 3.14, suffix: None };
+    match lit {
+        Literal.Float { value, suffix } => {
+            assert(suffix.is_none());
+        },
+        _ => panic("expected Float literal"),
+    }
+}
+
+@test
+fn test_literal_float_zero() {
+    let lit = Literal.Float { value: 0.0, suffix: None };
+    assert(lit is Literal.Float);
+}
+
+@test
+fn test_literal_string() {
+    let lit = Literal.string("hello");
+    match lit {
+        Literal.String { value, kind } => {
+            assert_eq(value, "hello");
+        },
+        _ => panic("expected String literal"),
+    }
+}
+
+@test
+fn test_literal_string_empty() {
+    let lit = Literal.string("");
+    match lit {
+        Literal.String { value, kind } => {
+            assert_eq(value, "");
+        },
+        _ => panic("expected String literal"),
+    }
+}
+
+@test
+fn test_literal_format_string() {
+    let lit = Literal.format_string("x = 42");
+    assert(lit is Literal.String);
+}
+
+@test
+fn test_literal_raw_string() {
+    let lit = Literal.raw_string("raw content");
+    assert(lit is Literal.String);
+}
+
+@test
+fn test_literal_char() {
+    let lit = Literal.char('A');
+    match lit {
+        Literal.Char(c) => assert_eq(c, 'A'),
+        _ => panic("expected Char literal"),
+    }
+}
+
+@test
+fn test_literal_bool_true() {
+    let lit = Literal.bool(true);
+    match lit {
+        Literal.Bool(b) => assert(b),
+        _ => panic("expected Bool literal"),
+    }
+}
+
+@test
+fn test_literal_bool_false() {
+    let lit = Literal.bool(false);
+    match lit {
+        Literal.Bool(b) => assert(!b),
+        _ => panic("expected Bool literal"),
+    }
+}
+
+// =============================================================================
+// Section 6: Token — Construction
+// =============================================================================
+
+@test
+fn test_token_ident() {
+    let t = Token.ident("foo");
+    assert(t.is_ident());
+    assert(!t.is_keyword());
+    assert(!t.is_literal());
+    assert(!t.is_punct());
+}
+
+@test
+fn test_token_ident_as_ident() {
+    let t = Token.ident("bar");
+    let name = t.as_ident();
+    assert(name.is_some());
+}
+
+@test
+fn test_token_ident_spanned() {
+    let span = Span.call_site();
+    let t = Token.ident_spanned("baz", span);
+    assert(t.is_ident());
+}
+
+@test
+fn test_token_keyword() {
+    let t = Token.keyword(Keyword.Let);
+    assert(t.is_keyword());
+    assert(!t.is_ident());
+}
+
+@test
+fn test_token_literal() {
+    let t = Token.literal(Literal.int(42));
+    assert(t.is_literal());
+    assert(!t.is_ident());
+    assert(!t.is_keyword());
+}
+
+@test
+fn test_token_punct() {
+    let t = Token.punct('+', Spacing.Alone);
+    assert(t.is_punct());
+    assert(!t.is_ident());
+}
+
+@test
+fn test_token_punct_as_punct() {
+    let t = Token.punct('+', Spacing.Alone);
+    let p = t.as_punct();
+    assert(p.is_some());
+}
+
+@test
+fn test_token_with_span() {
+    let t = Token.ident("x");
+    let span = Span.def_site();
+    let t2 = t.with_span(span);
+    assert(t2.is_ident());
+}
+
+// =============================================================================
+// Section 7: TokenTree — Variants and Methods
+// =============================================================================
+
+@test
+fn test_token_tree_leaf() {
+    let tok = Token.ident("foo");
+    let tree: TokenTree = TokenTree.Leaf(tok);
+    assert(tree.is_token());
+    assert(!tree.is_group());
+}
+
+@test
+fn test_token_tree_as_token() {
+    let tok = Token.ident("bar");
+    let tree = TokenTree.Leaf(tok);
+    let t = tree.as_token();
+    assert(t.is_some());
+}
+
+@test
+fn test_token_tree_as_group_none() {
+    let tok = Token.ident("baz");
+    let tree = TokenTree.Leaf(tok);
+    let g = tree.as_group();
+    assert(g.is_none());
+}
+
+@test
+fn test_token_tree_grouped() {
+    let group = Group.new(Delimiter.Parenthesis, TokenStream.empty());
+    let tree: TokenTree = TokenTree.Grouped(group);
+    assert(tree.is_group());
+    assert(!tree.is_token());
+}
+
+@test
+fn test_token_tree_as_group() {
+    let group = Group.new(Delimiter.Brace, TokenStream.empty());
+    let tree = TokenTree.Grouped(group);
+    let g = tree.as_group();
+    assert(g.is_some());
+}
+
+@test
+fn test_token_tree_span() {
+    let tok = Token.ident("x");
+    let tree = TokenTree.Leaf(tok);
+    let s: Span = tree.span();
+    let _ = s;
+}
+
+// =============================================================================
+// Section 8: Group — Construction and Methods
+// =============================================================================
+
+@test
+fn test_group_new() {
+    let g = Group.new(Delimiter.Parenthesis, TokenStream.empty());
+    assert_eq(g.delimiter(), Delimiter.Parenthesis);
+}
+
+@test
+fn test_group_brace() {
+    let g = Group.new(Delimiter.Brace, TokenStream.empty());
+    assert_eq(g.delimiter(), Delimiter.Brace);
+}
+
+@test
+fn test_group_bracket() {
+    let g = Group.new(Delimiter.Bracket, TokenStream.empty());
+    assert_eq(g.delimiter(), Delimiter.Bracket);
+}
+
+@test
+fn test_group_tokens() {
+    let inner = TokenStream.empty();
+    let g = Group.new(Delimiter.Parenthesis, inner);
+    let t = g.tokens();
+    assert(t.is_empty());
+}
+
+@test
+fn test_group_into_tokens() {
+    let inner = TokenStream.empty();
+    let g = Group.new(Delimiter.Parenthesis, inner);
+    let t: TokenStream = g.into_tokens();
+    assert(t.is_empty());
+}
+
+// =============================================================================
+// Section 9: TokenStream — Construction
+// =============================================================================
+
+@test
+fn test_token_stream_empty() {
+    let ts = TokenStream.empty();
+    assert(ts.is_empty());
+    assert_eq(ts.len(), 0);
+}
+
+@test
+fn test_token_stream_from_token() {
+    let tok = Token.ident("x");
+    let ts = TokenStream.from_token(tok);
+    assert(!ts.is_empty());
+    assert_eq(ts.len(), 1);
+}
+
+@test
+fn test_token_stream_from_tree() {
+    let tree = TokenTree.Leaf(Token.ident("y"));
+    let ts = TokenStream.from_tree(tree);
+    assert_eq(ts.len(), 1);
+}
+
+@test
+fn test_token_stream_from_trees() {
+    let mut trees: List<TokenTree> = List.new();
+    trees.push(TokenTree.Leaf(Token.ident("a")));
+    trees.push(TokenTree.Leaf(Token.ident("b")));
+    let ts = TokenStream.from_trees(trees);
+    assert_eq(ts.len(), 2);
+}
+
+@test
+fn test_token_stream_from_trees_empty() {
+    let trees: List<TokenTree> = List.new();
+    let ts = TokenStream.from_trees(trees);
+    assert(ts.is_empty());
+}
+
+@test
+fn test_token_stream_ident() {
+    let ts = TokenStream.ident("foo");
+    assert_eq(ts.len(), 1);
+}
+
+@test
+fn test_token_stream_literal() {
+    let ts = TokenStream.literal(Literal.int(42));
+    assert_eq(ts.len(), 1);
+}
+
+@test
+fn test_token_stream_punct() {
+    let ts = TokenStream.punct('+', Spacing.Alone);
+    assert_eq(ts.len(), 1);
+}
+
+// =============================================================================
+// Section 10: TokenStream — Properties
+// =============================================================================
+
+@test
+fn test_token_stream_span() {
+    let ts = TokenStream.ident("x");
+    let s: Span = ts.span();
+    let _ = s;
+}
+
+@test
+fn test_token_stream_first() {
+    let ts = TokenStream.ident("x");
+    let first = ts.first();
+    assert(first.is_some());
+}
+
+@test
+fn test_token_stream_first_empty() {
+    let ts = TokenStream.empty();
+    let first = ts.first();
+    assert(first.is_none());
+}
+
+@test
+fn test_token_stream_last() {
+    let ts = TokenStream.ident("x");
+    let last = ts.last();
+    assert(last.is_some());
+}
+
+@test
+fn test_token_stream_last_empty() {
+    let ts = TokenStream.empty();
+    let last = ts.last();
+    assert(last.is_none());
+}
+
+// =============================================================================
+// Section 11: TokenStream — Manipulation
+// =============================================================================
+
+@test
+fn test_token_stream_append() {
+    let ts1 = TokenStream.ident("a");
+    let ts2 = TokenStream.ident("b");
+    let combined = ts1.append(ts2);
+    assert_eq(combined.len(), 2);
+}
+
+@test
+fn test_token_stream_prepend() {
+    let ts1 = TokenStream.ident("a");
+    let ts2 = TokenStream.ident("b");
+    let combined = ts1.prepend(ts2);
+    assert_eq(combined.len(), 2);
+}
+
+@test
+fn test_token_stream_push() {
+    let ts = TokenStream.empty();
+    let tree = TokenTree.Leaf(Token.ident("x"));
+    let ts2 = ts.push(tree);
+    assert_eq(ts2.len(), 1);
+}
+
+@test
+fn test_token_stream_take() {
+    let mut trees: List<TokenTree> = List.new();
+    trees.push(TokenTree.Leaf(Token.ident("a")));
+    trees.push(TokenTree.Leaf(Token.ident("b")));
+    trees.push(TokenTree.Leaf(Token.ident("c")));
+    let ts = TokenStream.from_trees(trees);
+    let taken = ts.take(2);
+    assert_eq(taken.len(), 2);
+}
+
+@test
+fn test_token_stream_skip() {
+    let mut trees: List<TokenTree> = List.new();
+    trees.push(TokenTree.Leaf(Token.ident("a")));
+    trees.push(TokenTree.Leaf(Token.ident("b")));
+    trees.push(TokenTree.Leaf(Token.ident("c")));
+    let ts = TokenStream.from_trees(trees);
+    let skipped = ts.skip(1);
+    assert_eq(skipped.len(), 2);
+}
+
+@test
+fn test_token_stream_wrap() {
+    let ts = TokenStream.ident("x");
+    let wrapped = ts.wrap(Delimiter.Parenthesis);
+    assert_eq(wrapped.len(), 1);
+}
+
+@test
+fn test_token_stream_to_trees() {
+    let ts = TokenStream.ident("x");
+    let trees: List<TokenTree> = ts.to_trees();
+    assert_eq(trees.len(), 1);
+}
+
+@test
+fn test_token_stream_trees_ref() {
+    let ts = TokenStream.ident("x");
+    let trees = ts.trees();
+    assert_eq(trees.len(), 1);
+}
+
+// =============================================================================
+// Section 12: TokenKind — Variants
+// =============================================================================
+
+@test
+fn test_token_kind_ident() {
+    let k: TokenKind = TokenKind.Ident("foo");
+    assert(k is TokenKind.Ident);
+}
+
+@test
+fn test_token_kind_keyword() {
+    let k: TokenKind = TokenKind.Kw(Keyword.Let);
+    assert(k is TokenKind.Kw);
+}
+
+@test
+fn test_token_kind_literal() {
+    let k: TokenKind = TokenKind.Lit(Literal.int(42));
+    assert(k is TokenKind.Lit);
+}
+
+@test
+fn test_token_kind_punct() {
+    let k: TokenKind = TokenKind.Punct('+', Spacing.Alone);
+    assert(k is TokenKind.Punct);
+}
+
+@test
+fn test_token_kind_doc_comment() {
+    let k: TokenKind = TokenKind.DocComment("A doc comment");
+    assert(k is TokenKind.DocComment);
+}
+
+@test
+fn test_token_kind_eof() {
+    let k: TokenKind = TokenKind.Eof;
+    assert(k is TokenKind.Eof);
+}
+
+// =============================================================================
+// Section 13: LexError
+// =============================================================================
+
+@test
+fn test_lex_error_new() {
+    let err = LexError.new("unexpected character", Span.call_site());
+    assert_eq(err.message, "unexpected character");
+}
+
+@test
+fn test_lex_error_fields() {
+    let err = LexError {
+        message: "unterminated string",
+        span: Span.call_site(),
+    };
+    assert_eq(err.message, "unterminated string");
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

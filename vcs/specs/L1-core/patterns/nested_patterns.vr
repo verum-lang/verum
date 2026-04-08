@@ -1,0 +1,362 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, nested
+//
+// Tests nested patterns combining structs, enums, tuples, and lists.
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+type Tree<T> is
+    | Leaf(T)
+    | Node(Tree<T>, T, Tree<T>);
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    address: Address,
+};
+
+type Address is {
+    city: Text,
+    zip: Text,
+};
+
+// Nested enum in enum
+fn flatten_maybe<T>(mm: Maybe<Maybe<T>>) -> Maybe<T> {
+    match mm {
+        None => None,
+        Some(None) => None,
+        Some(Some(x)) => Some(x),
+    }
+}
+
+fn flatten_result<T, E>(rr: Result<Result<T, E>, E>) -> Result<T, E> {
+    match rr {
+        Err(e) => Err(e),
+        Ok(Err(e)) => Err(e),
+        Ok(Ok(x)) => Ok(x),
+    }
+}
+
+// Nested tuple patterns
+fn process_nested_tuples(data: ((Int, Int), (Int, Int))) -> Int {
+    match data {
+        ((a, b), (c, d)) => a + b + c + d,
+    }
+}
+
+fn deep_tuple(data: (((Int, Int), Int), Int)) -> Int {
+    match data {
+        (((a, b), c), d) => a * b + c * d,
+    }
+}
+
+// Nested struct patterns
+fn get_city(person: Person) -> Text {
+    match person {
+        Person { address: Address { city, .. }, .. } => city,
+    }
+}
+
+fn rectangle_width(rect: Rectangle) -> Int {
+    match rect {
+        Rectangle {
+            top_left: Point { x: x1, .. },
+            bottom_right: Point { x: x2, .. }
+        } => {
+            let diff = x2 - x1;
+            if diff < 0 { -diff } else { diff }
+        }
+    }
+}
+
+fn rectangle_height(rect: Rectangle) -> Int {
+    match rect {
+        Rectangle {
+            top_left: Point { y: y1, .. },
+            bottom_right: Point { y: y2, .. }
+        } => {
+            let diff = y2 - y1;
+            if diff < 0 { -diff } else { diff }
+        }
+    }
+}
+
+// Nested enum and struct
+type Shape is
+    | Circle { center: Point, radius: Int }
+    | Rect(Rectangle);
+
+fn shape_center(s: Shape) -> Point {
+    match s {
+        Circle { center, .. } => center,
+        Rect(Rectangle {
+            top_left: Point { x: x1, y: y1 },
+            bottom_right: Point { x: x2, y: y2 }
+        }) => Point { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+    }
+}
+
+// Nested list patterns (custom ConsList type)
+fn list_head<T>(list: ConsList<T>) -> Maybe<T> {
+    match list {
+        Nil => None,
+        Cons(head, _) => Some(head),
+    }
+}
+
+fn list_second<T>(list: ConsList<T>) -> Maybe<T> {
+    match list {
+        Cons(_, Cons(second, _)) => Some(second),
+        _ => None,
+    }
+}
+
+fn list_third<T>(list: ConsList<T>) -> Maybe<T> {
+    match list {
+        Cons(_, Cons(_, Cons(third, _))) => Some(third),
+        _ => None,
+    }
+}
+
+// Nested patterns in tree
+fn tree_root<T>(tree: Tree<T>) -> T {
+    match tree {
+        Leaf(value) => value,
+        Node(_, value, _) => value,
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_left_leaf<T>(tree: Tree<T>) -> Maybe<T> {
+    match tree {
+        Leaf(v) => Some(v),
+        Node(Leaf(v), _, _) => Some(v),
+        Node(left, _, _) => tree_left_leaf(left),
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_right_leaf<T>(tree: Tree<T>) -> Maybe<T> {
+    match tree {
+        Leaf(v) => Some(v),
+        Node(_, _, Leaf(v)) => Some(v),
+        Node(_, _, right) => tree_right_leaf(right),
+    }
+}
+
+// Nested tuple with enum
+fn process_maybe_pair(mp: Maybe<(Int, Int)>) -> Int {
+    match mp {
+        None => 0,
+        Some((a, b)) => a + b,
+    }
+}
+
+fn process_pair_of_maybes(pair: (Maybe<Int>, Maybe<Int>)) -> Int {
+    match pair {
+        (Some(a), Some(b)) => a + b,
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => 0,
+    }
+}
+
+// Nested result and maybe
+fn process_result_maybe<T, E>(rm: Result<Maybe<T>, E>) -> Maybe<T> {
+    match rm {
+        Err(_) => None,
+        Ok(None) => None,
+        Ok(Some(x)) => Some(x),
+    }
+}
+
+// Complex nested pattern with guards
+fn analyze_nested(data: Maybe<(Point, Point)>) -> Text {
+    match data {
+        None => "no data",
+        Some((Point { x: 0, y: 0 }, Point { x: 0, y: 0 })) => "both at origin",
+        Some((Point { x: x1, y: y1 }, Point { x: x2, y: y2 })) if x1 == x2 && y1 == y2 =>
+            "same point",
+        Some((Point { x: x1, .. }, Point { x: x2, .. })) if x1 == x2 =>
+            "vertically aligned",
+        Some((Point { y: y1, .. }, Point { y: y2, .. })) if y1 == y2 =>
+            "horizontally aligned",
+        Some(_) => "general case",
+    }
+}
+
+// Deeply nested with list syntax - helpers to avoid tuple pattern in generic context
+fn pair_x(p: (Int, Int)) -> Int { let (x, _) = p; x }
+fn pair_is_origin(p: (Int, Int)) -> Bool { let (x, y) = p; x == 0 && y == 0 }
+fn pair_is_diagonal(p: (Int, Int)) -> Bool { let (x, y) = p; x == y }
+
+fn analyze_tail(tail: ConsList<(Int, Int)>, x1: Int) -> Text {
+    match tail {
+        Nil => "other",
+        Cons(second, Nil) if pair_x(second) == x1 => "two vertical",
+        Cons(_, _) => "multiple points",
+        _ => "other",
+    }
+}
+
+fn analyze_list_of_tuples(data: ConsList<(Int, Int)>) -> Text {
+    match data {
+        Nil => "empty",
+        Cons(first, Nil) if pair_is_origin(first) => "single origin",
+        Cons(first, Nil) if pair_is_diagonal(first) => "single on diagonal",
+        Cons(_, Nil) => "other",
+        Cons(first, rest) => analyze_tail(rest, pair_x(first)),
+    }
+}
+
+// Nested or-patterns
+type Status is
+    | Active { since: Int }
+    | Inactive { reason: Text }
+    | Pending;
+
+fn is_actionable(s: Status) -> Bool {
+    match s {
+        Active { .. } | Pending => true,
+        Inactive { .. } => false,
+    }
+}
+
+fn nested_or(data: Maybe<Status>) -> Text {
+    match data {
+        None | Some(Inactive { .. }) => "not active",
+        Some(Active { .. }) | Some(Pending) => "active or pending",
+    }
+}
+
+// Nested binding patterns
+@allow(unbounded_recursion)
+fn extract_coordinates(shapes: ConsList<Shape>) -> ConsList<Point> {
+    match shapes {
+        Nil => Nil,
+        Cons(Circle { center, .. }, rest) => Cons(center, extract_coordinates(rest)),
+        Cons(Rect(Rectangle { top_left, .. }), rest) => Cons(top_left, extract_coordinates(rest)),
+    }
+}
+
+// Extremely deep nesting — define inner types first to avoid forward references
+type Level3 is
+    | Level3Val(Int);
+
+type Level2 is
+    | Level2A(Level3)
+    | Level2B(Int);
+
+type DeepNest is
+    | Level1(Level2)
+    | End(Int);
+
+fn extract_deep(d: DeepNest) -> Int {
+    match d {
+        Level1(inner) => match inner {
+            Level2A(Level3Val(n)) => n,
+            Level2B(n) => n,
+        },
+        End(n) => n,
+    }
+}
+
+fn main() {
+    // Flatten maybe
+    assert(flatten_maybe(None) == None);
+    assert(flatten_maybe(Some(None)) == None);
+    assert(flatten_maybe(Some(Some(42))) == Some(42));
+
+    // Flatten result
+    let nested_ok: Result<Result<Int, Text>, Text> = Ok(Ok(42));
+    assert(flatten_result(nested_ok) == Ok(42));
+
+    // Nested tuples
+    assert(process_nested_tuples(((1, 2), (3, 4))) == 10);
+    assert(deep_tuple((((2, 3), 4), 5)) == 26);  // 2*3 + 4*5 = 6 + 20
+
+    // Nested struct
+    let person = Person {
+        name: "Alice",
+        age: 30,
+        address: Address { city: "NYC", zip: "10001" }
+    };
+    assert(get_city(person) == "NYC");
+
+    // Rectangle
+    let rect = Rectangle {
+        top_left: Point { x: 0, y: 10 },
+        bottom_right: Point { x: 5, y: 0 }
+    };
+    assert(rectangle_width(rect) == 5);
+    assert(rectangle_height(rect) == 10);
+
+    // Shape center
+    let circle = Circle { center: Point { x: 5, y: 5 }, radius: 10 };
+    let rect_shape = Rect(Rectangle {
+        top_left: Point { x: 0, y: 10 },
+        bottom_right: Point { x: 10, y: 0 }
+    });
+    assert(shape_center(circle) == Point { x: 5, y: 5 });
+    assert(shape_center(rect_shape) == Point { x: 5, y: 5 });
+
+    // ConsList patterns
+    let list = Cons(1, Cons(2, Cons(3, Nil)));
+    assert(list_head(list) == Some(1));
+    assert(list_second(list) == Some(2));
+    assert(list_third(list) == Some(3));
+
+    // Maybe pair
+    assert(process_maybe_pair(None) == 0);
+    assert(process_maybe_pair(Some((3, 4))) == 7);
+
+    // Pair of maybes
+    assert(process_pair_of_maybes((Some(3), Some(4))) == 7);
+    assert(process_pair_of_maybes((Some(3), None)) == 3);
+    assert(process_pair_of_maybes((None, None)) == 0);
+
+    // Nested point analysis
+    assert(analyze_nested(None) == "no data");
+    let origin = Point { x: 0, y: 0 };
+    assert(analyze_nested(Some((origin, origin))) == "both at origin");
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 1, y: 5 };
+    assert(analyze_nested(Some((p1, p2))) == "vertically aligned");
+
+    // Status checks
+    assert(is_actionable(Active { since: 2020 }) == true);
+    assert(is_actionable(Pending) == true);
+    assert(is_actionable(Inactive { reason: "expired" }) == false);
+
+    // Nested or
+    assert(nested_or(None) == "not active");
+    assert(nested_or(Some(Active { since: 2020 })) == "active or pending");
+    assert(nested_or(Some(Inactive { reason: "x" })) == "not active");
+
+    // Deep nesting
+    assert(extract_deep(Level1(Level2A(Level3Val(42)))) == 42);
+    assert(extract_deep(Level1(Level2B(10))) == 10);
+    assert(extract_deep(End(5)) == 5);
+}

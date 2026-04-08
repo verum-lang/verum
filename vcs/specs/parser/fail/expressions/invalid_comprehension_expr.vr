@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, comprehension, expr, error
+// @description: Comprehension missing projection expression
+// @expected-error: E018
+
+fn test() {
+    let x = [for x in items];  // Missing expression before for
+}

@@ -1,0 +1,36 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, literal, indexing
+// @expected-exit: 0
+
+fn main() -> Int {
+    let xs = [10, 20, 30, 40, 50];
+
+    // Test list element access
+    let a = xs[0];
+    let b = xs[1];
+    let c = xs[2];
+    let d = xs[3];
+    let e = xs[4];
+
+    print(a);
+    print(b);
+    print(c);
+    print(d);
+    print(e);
+
+    // Verify values
+    assert_eq(a, 10);
+    assert_eq(b, 20);
+    assert_eq(c, 30);
+    assert_eq(d, 40);
+    assert_eq(e, 50);
+
+    // Test .len()
+    let n = xs.len();
+    print(n);
+    assert_eq(n, 5);
+
+    0
+}

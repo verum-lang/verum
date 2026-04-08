@@ -1,0 +1,35 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, literal, error
+// @description: Test invalid literals in pattern context
+// @expected-error: E070
+
+fn test_invalid_literal_patterns() {
+    let value = 42;
+
+    // Invalid: expression as pattern (should be literal or identifier)
+    match value {
+        1 + 2 => print("sum pattern"),
+        _ => print("other"),
+    }
+}
+
+fn test_invalid_function_call_pattern() {
+    let value = 42;
+
+    // Invalid: function call cannot be a pattern
+    match value {
+        foo() => print("call pattern"),
+        _ => print("other"),
+    }
+}
+
+fn test_invalid_method_call_pattern() {
+    let value = "hello";
+
+    // Invalid: method call cannot be a pattern
+    match value {
+        value.len() => print("method pattern"),
+        _ => print("other"),
+    }
+}

@@ -1,0 +1,33 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, performance, fibonacci
+// @expected-exit: 0
+
+// Performance: Iterative fibonacci(40)
+
+fn fibonacci(n: Int) -> Int {
+    if (n <= 1) { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while (i <= n) {
+        let temp = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+    b
+}
+
+fn main() -> Int {
+    let result = fibonacci(40);
+    // fib(40) = 102334155
+    let expected = 102334155;
+    if (result != expected) {
+        print(f"FAIL: fib(40)={result}, expected={expected}");
+        return 1;
+    }
+    print(f"OK: fib(40)={result}");
+    0
+}

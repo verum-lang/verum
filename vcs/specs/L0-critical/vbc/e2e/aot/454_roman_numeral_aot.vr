@@ -1,0 +1,154 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, roman, numeral, conversion
+// @timeout: 30000
+
+// Roman numeral conversion (integer representation)
+// Encoding: M=1000, D=500, C=100, L=50, X=10, V=5, I=1
+// We represent roman numerals as arrays of digit values
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Convert roman digit values array to integer
+// Using subtractive notation: if digit < next digit, subtract it
+fn roman_to_int(digits: Arr8, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let current = get8(digits, i);
+        if i + 1 < n {
+            let next = get8(digits, i + 1);
+            if current < next {
+                total = total - current;
+            } else {
+                total = total + current;
+            }
+        } else {
+            total = total + current;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// Convert integer to roman (return as count of each denomination)
+// Returns packed: thousands*1000000 + hundreds*10000 + tens*100 + ones
+fn int_to_roman_count(n: Int) -> Int {
+    let thousands = n / 1000;
+    let mut rem = n % 1000;
+
+    let five_hundreds = rem / 500;
+    rem = rem % 500;
+    let hundreds = rem / 100;
+    rem = rem % 100;
+
+    let fifties = rem / 50;
+    rem = rem % 50;
+    let tens = rem / 10;
+    rem = rem % 10;
+
+    let fives = rem / 5;
+    let ones = rem % 5;
+
+    // Total digit count
+    thousands + five_hundreds + hundreds + fifties + tens + fives + ones
+}
+
+// Simple int-to-roman value: sum of greedy decomposition
+fn greedy_roman(n: Int) -> Int {
+    let mut val = n;
+    let mut count = 0;
+    // 1000s
+    while val >= 1000 { val = val - 1000; count = count + 1; }
+    while val >= 500 { val = val - 500; count = count + 1; }
+    while val >= 100 { val = val - 100; count = count + 1; }
+    while val >= 50 { val = val - 50; count = count + 1; }
+    while val >= 10 { val = val - 10; count = count + 1; }
+    while val >= 5 { val = val - 5; count = count + 1; }
+    while val >= 1 { val = val - 1; count = count + 1; }
+    count
+}
+
+fn test_roman_to_int() -> Int {
+    // III = 1+1+1 = 3
+    let iii = Arr8 { v0: 1, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_to_int(iii, 3), 3);
+
+    // IV = -1+5 = 4
+    let iv = Arr8 { v0: 1, v1: 5, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_to_int(iv, 2), 4);
+
+    // IX = -1+10 = 9
+    let ix = Arr8 { v0: 1, v1: 10, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_to_int(ix, 2), 9);
+
+    // XLII = -10+50+1+1 = 42
+    let xlii = Arr8 { v0: 10, v1: 50, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_to_int(xlii, 4), 42);
+
+    // MCMXCIX = 1000+(-100+1000)+(-10+100)+(-1+10) = 1999
+    let m = Arr8 { v0: 1000, v1: 100, v2: 1000, v3: 10, v4: 100, v5: 1, v6: 10, v7: 0 };
+    assert_eq(roman_to_int(m, 7), 1999);
+    1
+}
+
+fn test_greedy() -> Int {
+    // 1 = I (1 digit)
+    assert_eq(greedy_roman(1), 1);
+    // 3 = III (3 digits)
+    assert_eq(greedy_roman(3), 3);
+    // 8 = VIII (4 digits: V+I+I+I)
+    assert_eq(greedy_roman(8), 4);
+    // 1000 = M (1 digit)
+    assert_eq(greedy_roman(1000), 1);
+    // 1666 = MDCLXVI (7 digits)
+    assert_eq(greedy_roman(1666), 7);
+    1
+}
+
+fn test_roundtrip() -> Int {
+    // Verify roman_to_int for common values
+    // VII = 5+1+1 = 7
+    let vii = Arr8 { v0: 5, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_to_int(vii, 3), 7);
+
+    // XIV = 10+(-1+5) = 14
+    let xiv = Arr8 { v0: 10, v1: 1, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_to_int(xiv, 3), 14);
+
+    // CD = -100+500 = 400
+    let cd = Arr8 { v0: 100, v1: 500, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_to_int(cd, 2), 400);
+    1
+}
+
+fn main() -> Int {
+    test_roman_to_int();
+    test_greedy();
+    test_roundtrip();
+    print("[OK] 454_roman_numeral_aot");
+    0
+}

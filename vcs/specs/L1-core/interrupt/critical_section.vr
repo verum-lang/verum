@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: interrupt, critical-section, systems
+// @timeout: 5000
+// @description: Verify critical section types and RAII pattern compile correctly.
+
+mount core.sys.interrupt.{CriticalSection, with_interrupts_disabled, disable_interrupts, restore_interrupts, save_and_disable_interrupts};
+
+/// Test CriticalSection RAII pattern.
+fn test_critical_section_raii() {
+    // Enter critical section - interrupts disabled
+    let _guard = CriticalSection.enter();
+
+    // Operations here are atomic with respect to interrupts
+    let x = 1 + 2;
+
+    // When _guard goes out of scope, interrupts are restored
+}
+
+/// Test nested critical sections.
+fn test_nested_critical_sections() {
+    // Outer critical section
+    let _outer = CriticalSection.enter();
+
+    // Inner critical section (should work correctly)
+    {
+        let _inner = CriticalSection.enter();
+        // Still in critical section
+    }
+    // Back to outer critical section state
+
+    // Outer drops, restores original state
+}
+
+/// Test with_interrupts_disabled helper.
+fn test_with_interrupts_disabled() {
+    let result = with_interrupts_disabled(|| {
+        // Compute something atomically
+        42 * 2
+    });
+
+    assert(result == 84);
+}
+
+/// Test checking if in critical section.
+fn test_is_active() {
+    // Outside critical section
+    let was_active = CriticalSection.is_active();
+
+    let _guard = CriticalSection.enter();
+
+    // Inside critical section
+    let is_active_now = CriticalSection.is_active();
+
+    // Note: exact behavior depends on platform
+}
+
+/// Test manual interrupt control.
+fn test_manual_interrupt_control() {
+    // Save current state and disable
+    let saved = disable_interrupts();
+
+    // Do something critical
+    let x = 1 + 1;
+
+    // Restore previous state
+    restore_interrupts(saved);
+}
+
+/// Test combined save and disable.
+fn test_save_and_disable() {
+    let saved = save_and_disable_interrupts();
+
+    // Interrupts are now disabled
+
+    restore_interrupts(saved);
+}
+
+fn main() -> Int {
+    test_critical_section_raii();
+    test_nested_critical_sections();
+    test_with_interrupts_disabled();
+    test_is_active();
+    test_manual_interrupt_control();
+    test_save_and_disable();
+    0
+}

@@ -1,0 +1,630 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/type_info_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, type_info, size, alignment, reflection, properties
+// @description: Comprehensive tests for type information intrinsics.
+//
+// Coverage:
+// - Legacy size intrinsics: size_of, align_of, stride_of, bits_of
+// - Legacy type identification: type_id, type_name
+// - Type properties: needs_drop, min_align
+// - Type property syntax: T.size, T.alignment, T.bits, T.name
+// - Size relationships between types
+// - Alignment invariants
+//
+// Test Strategy:
+// - Test with all primitive types
+// - Test size ordering relationships
+// - Test alignment divides size
+// - Test type properties (T.size syntax)
+// =============================================================================
+
+module test.stdlib.intrinsics.type_info_test;
+
+mount core.intrinsics.type_info.{size_of, align_of, stride_of, bits_of, type_id, type_name, needs_drop, min_align};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Size of Signed Integers
+// =============================================================================
+
+@test
+fn test_size_of_signed_ints() {
+    assert(size_of<Int8>() == (1 as USize));
+    assert(size_of<Int16>() == (2 as USize));
+    assert(size_of<Int32>() == (4 as USize));
+    assert(size_of<Int64>() == (8 as USize));
+    assert(size_of<Int>() == (8 as USize));
+}
+
+// =============================================================================
+// Size of Unsigned Integers
+// =============================================================================
+
+@test
+fn test_size_of_unsigned_ints() {
+    assert(size_of<UInt8>() == (1 as USize));
+    assert(size_of<UInt16>() == (2 as USize));
+    assert(size_of<UInt32>() == (4 as USize));
+    assert(size_of<UInt64>() == (8 as USize));
+}
+
+// =============================================================================
+// Size of Floats and Other Primitives
+// =============================================================================
+
+@test
+fn test_size_of_floats() {
+    assert(size_of<Float32>() == (4 as USize));
+    assert(size_of<Float64>() == (8 as USize));
+}
+
+@test
+fn test_size_of_bool_byte() {
+    assert(size_of<Bool>() == (1 as USize));
+    assert(size_of<Byte>() == (1 as USize));
+}
+
+// =============================================================================
+// Alignment of Integers
+// =============================================================================
+
+@test
+fn test_align_of_signed_ints() {
+    assert(align_of<Int8>() == (1 as USize));
+    assert(align_of<Int16>() == (2 as USize));
+    assert(align_of<Int32>() == (4 as USize));
+    assert(align_of<Int64>() == (8 as USize));
+}
+
+@test
+fn test_align_of_unsigned_ints() {
+    assert(align_of<UInt8>() == (1 as USize));
+    assert(align_of<UInt16>() == (2 as USize));
+    assert(align_of<UInt32>() == (4 as USize));
+    assert(align_of<UInt64>() == (8 as USize));
+}
+
+@test
+fn test_align_of_floats() {
+    assert(align_of<Float32>() == (4 as USize));
+    assert(align_of<Float64>() == (8 as USize));
+}
+
+@test
+fn test_align_of_bool_byte() {
+    assert(align_of<Bool>() == (1 as USize));
+    assert(align_of<Byte>() == (1 as USize));
+}
+
+// =============================================================================
+// Bits of Types
+// =============================================================================
+
+@test
+fn test_bits_of_ints() {
+    assert(bits_of<Int8>() == (8 as USize));
+    assert(bits_of<Int16>() == (16 as USize));
+    assert(bits_of<Int32>() == (32 as USize));
+    assert(bits_of<Int64>() == (64 as USize));
+    assert(bits_of<Int>() == (64 as USize));
+}
+
+@test
+fn test_bits_of_unsigned() {
+    assert(bits_of<UInt8>() == (8 as USize));
+    assert(bits_of<UInt16>() == (16 as USize));
+    assert(bits_of<UInt32>() == (32 as USize));
+    assert(bits_of<UInt64>() == (64 as USize));
+}
+
+@test
+fn test_bits_of_floats() {
+    assert(bits_of<Float32>() == (32 as USize));
+    assert(bits_of<Float64>() == (64 as USize));
+}
+
+// =============================================================================
+// Size Ordering Relationships
+// =============================================================================
+
+@test
+fn test_size_ordering_signed() {
+    assert(size_of<Int8>() < size_of<Int16>());
+    assert(size_of<Int16>() < size_of<Int32>());
+    assert(size_of<Int32>() < size_of<Int64>());
+}
+
+@test
+fn test_size_ordering_unsigned() {
+    assert(size_of<UInt8>() < size_of<UInt16>());
+    assert(size_of<UInt16>() < size_of<UInt32>());
+    assert(size_of<UInt32>() < size_of<UInt64>());
+}
+
+@test
+fn test_size_ordering_floats() {
+    assert(size_of<Float32>() < size_of<Float64>());
+}
+
+// =============================================================================
+// Size-Alignment Invariants
+// =============================================================================
+
+@test
+fn test_alignment_divides_size() {
+    assert(size_of<Int32>() % align_of<Int32>() == (0 as USize));
+    assert(size_of<Int64>() % align_of<Int64>() == (0 as USize));
+    assert(size_of<Float32>() % align_of<Float32>() == (0 as USize));
+    assert(size_of<Float64>() % align_of<Float64>() == (0 as USize));
+    assert(size_of<UInt32>() % align_of<UInt32>() == (0 as USize));
+    assert(size_of<UInt64>() % align_of<UInt64>() == (0 as USize));
+}
+
+@test
+fn test_all_sizes_positive() {
+    assert(size_of<Int>() > (0 as USize));
+    assert(size_of<Float64>() > (0 as USize));
+    assert(size_of<Bool>() > (0 as USize));
+    assert(size_of<Byte>() > (0 as USize));
+    assert(size_of<UInt8>() > (0 as USize));
+}
+
+// =============================================================================
+// Stride
+// =============================================================================
+
+@test
+fn test_stride_of_types() {
+    // Stride should be >= size
+    assert(stride_of<Int32>() >= size_of<Int32>());
+    assert(stride_of<Int64>() >= size_of<Int64>());
+    assert(stride_of<Float64>() >= size_of<Float64>());
+}
+
+// =============================================================================
+// Min Alignment
+// =============================================================================
+
+@test
+fn test_min_align() {
+    assert(min_align() >= (1 as USize));
+}
+
+// =============================================================================
+// Type Name
+// =============================================================================
+
+@test
+fn test_type_name_int() {
+    let name = type_name<Int>();
+    let _: Text = name;
+}
+
+@test
+fn test_type_name_float() {
+    let name = type_name<Float64>();
+    let _: Text = name;
+}
+
+@test
+fn test_type_name_bool() {
+    let name = type_name<Bool>();
+    let _: Text = name;
+}
+
+// =============================================================================
+// Type ID
+// =============================================================================
+
+@test
+fn test_type_id_distinct() {
+    let id_int = type_id<Int>();
+    let id_float = type_id<Float64>();
+    let id_bool = type_id<Bool>();
+
+    let _: UInt64 = id_int;
+    let _: UInt64 = id_float;
+    let _: UInt64 = id_bool;
+
+    // Different types should have different IDs
+    assert(id_int != id_float);
+    assert(id_int != id_bool);
+    assert(id_float != id_bool);
+}
+
+@test
+fn test_type_id_same() {
+    // Same type should have same ID
+    let id1 = type_id<Int>();
+    let id2 = type_id<Int>();
+    assert(id1 == id2);
+}
+
+// =============================================================================
+// Needs Drop
+// =============================================================================
+
+@test
+fn test_needs_drop_primitives() {
+    // Primitive types don't need drop
+    let _: Bool = needs_drop<Int>();
+    let _: Bool = needs_drop<Float64>();
+    let _: Bool = needs_drop<Bool>();
+    let _: Bool = needs_drop<UInt32>();
+}
+
+// =============================================================================
+// Bits = Size * 8
+// =============================================================================
+
+@test
+fn test_bits_equals_size_times_8() {
+    assert(bits_of<Int8>() == size_of<Int8>() * (8 as USize));
+    assert(bits_of<Int16>() == size_of<Int16>() * (8 as USize));
+    assert(bits_of<Int32>() == size_of<Int32>() * (8 as USize));
+    assert(bits_of<Int64>() == size_of<Int64>() * (8 as USize));
+    assert(bits_of<Float32>() == size_of<Float32>() * (8 as USize));
+    assert(bits_of<Float64>() == size_of<Float64>() * (8 as USize));
+}
+
+// =============================================================================
+// Signed/Unsigned Same Size
+// =============================================================================
+
+@test
+fn test_signed_unsigned_same_size() {
+    assert(size_of<Int8>() == size_of<UInt8>());
+    assert(size_of<Int16>() == size_of<UInt16>());
+    assert(size_of<Int32>() == size_of<UInt32>());
+    assert(size_of<Int64>() == size_of<UInt64>());
+}
+
+// =============================================================================
+// Additional Type Info Tests
+// =============================================================================
+
+@test
+fn test_signed_unsigned_same_alignment() {
+    assert(align_of<Int8>() == align_of<UInt8>());
+    assert(align_of<Int16>() == align_of<UInt16>());
+    assert(align_of<Int32>() == align_of<UInt32>());
+    assert(align_of<Int64>() == align_of<UInt64>());
+}
+
+@test
+fn test_signed_unsigned_same_bits() {
+    assert(bits_of<Int8>() == bits_of<UInt8>());
+    assert(bits_of<Int16>() == bits_of<UInt16>());
+    assert(bits_of<Int32>() == bits_of<UInt32>());
+    assert(bits_of<Int64>() == bits_of<UInt64>());
+}
+
+@test
+fn test_type_id_int_sizes_distinct() {
+    let id8 = type_id<Int8>();
+    let id16 = type_id<Int16>();
+    let id32 = type_id<Int32>();
+    let id64 = type_id<Int64>();
+
+    assert(id8 != id16);
+    assert(id16 != id32);
+    assert(id32 != id64);
+    assert(id8 != id64);
+}
+
+@test
+fn test_type_id_unsigned_distinct() {
+    let id8 = type_id<UInt8>();
+    let id16 = type_id<UInt16>();
+    let id32 = type_id<UInt32>();
+    let id64 = type_id<UInt64>();
+
+    assert(id8 != id16);
+    assert(id16 != id32);
+    assert(id32 != id64);
+}
+
+@test
+fn test_type_id_signed_vs_unsigned_distinct() {
+    assert(type_id<Int8>() != type_id<UInt8>());
+    assert(type_id<Int16>() != type_id<UInt16>());
+    assert(type_id<Int32>() != type_id<UInt32>());
+    assert(type_id<Int64>() != type_id<UInt64>());
+}
+
+@test
+fn test_type_name_various() {
+    let n1 = type_name<Int8>();
+    let n2 = type_name<UInt32>();
+    let n3 = type_name<Float32>();
+    let n4 = type_name<Byte>();
+    let _: Text = n1;
+    let _: Text = n2;
+    let _: Text = n3;
+    let _: Text = n4;
+}
+
+@test
+fn test_needs_drop_various() {
+    let _: Bool = needs_drop<Int8>();
+    let _: Bool = needs_drop<Int16>();
+    let _: Bool = needs_drop<UInt8>();
+    let _: Bool = needs_drop<UInt16>();
+    let _: Bool = needs_drop<Float32>();
+    let _: Bool = needs_drop<Byte>();
+}
+
+@test
+fn test_stride_ge_size_all_types() {
+    assert(stride_of<Int8>() >= size_of<Int8>());
+    assert(stride_of<Int16>() >= size_of<Int16>());
+    assert(stride_of<UInt8>() >= size_of<UInt8>());
+    assert(stride_of<UInt16>() >= size_of<UInt16>());
+    assert(stride_of<Float32>() >= size_of<Float32>());
+    assert(stride_of<Bool>() >= size_of<Bool>());
+    assert(stride_of<Byte>() >= size_of<Byte>());
+}
+
+@test
+fn test_float_int_same_size() {
+    // Float32 has same size as Int32
+    assert(size_of<Float32>() == size_of<Int32>());
+    // Float64 has same size as Int64
+    assert(size_of<Float64>() == size_of<Int64>());
+}
+
+@test
+fn test_alignment_is_power_of_two() {
+    // All alignments should be powers of 2
+    let a1 = align_of<Int8>();
+    let a2 = align_of<Int16>();
+    let a4 = align_of<Int32>();
+    let a8 = align_of<Int64>();
+    assert(a1 == (1 as USize));
+    assert(a2 == (2 as USize));
+    assert(a4 == (4 as USize));
+    assert(a8 == (8 as USize));
+}
+
+// =============================================================================
+// Additional Type Info Tests
+// =============================================================================
+
+@test
+fn test_bits_bool_byte() {
+    assert(bits_of<Bool>() == (8 as USize));
+    assert(bits_of<Byte>() == (8 as USize));
+}
+
+@test
+fn test_all_alignments_positive() {
+    assert(align_of<Int8>() > (0 as USize));
+    assert(align_of<Int16>() > (0 as USize));
+    assert(align_of<Int32>() > (0 as USize));
+    assert(align_of<Int64>() > (0 as USize));
+    assert(align_of<Float32>() > (0 as USize));
+    assert(align_of<Float64>() > (0 as USize));
+    assert(align_of<Bool>() > (0 as USize));
+    assert(align_of<Byte>() > (0 as USize));
+}
+
+@test
+fn test_alignment_le_size() {
+    // Alignment should never exceed size for primitive types
+    assert(align_of<Int8>() <= size_of<Int8>());
+    assert(align_of<Int16>() <= size_of<Int16>());
+    assert(align_of<Int32>() <= size_of<Int32>());
+    assert(align_of<Int64>() <= size_of<Int64>());
+    assert(align_of<Float32>() <= size_of<Float32>());
+    assert(align_of<Float64>() <= size_of<Float64>());
+}
+
+@test
+fn test_type_id_float_types_distinct() {
+    let id32 = type_id<Float32>();
+    let id64 = type_id<Float64>();
+    assert(id32 != id64);
+}
+
+@test
+fn test_type_name_non_empty() {
+    assert(type_name<Int>().len() > 0);
+    assert(type_name<Float64>().len() > 0);
+    assert(type_name<Bool>().len() > 0);
+    assert(type_name<Byte>().len() > 0);
+}
+
+@test
+fn test_size_doubling_pattern() {
+    // Each step doubles: Int8=1, Int16=2, Int32=4, Int64=8
+    assert(size_of<Int16>() == size_of<Int8>() * (2 as USize));
+    assert(size_of<Int32>() == size_of<Int16>() * (2 as USize));
+    assert(size_of<Int64>() == size_of<Int32>() * (2 as USize));
+}
+
+@test
+fn test_stride_alignment_multiple() {
+    // Stride should be a multiple of alignment
+    assert(stride_of<Int32>() % align_of<Int32>() == (0 as USize));
+    assert(stride_of<Int64>() % align_of<Int64>() == (0 as USize));
+    assert(stride_of<Float64>() % align_of<Float64>() == (0 as USize));
+}
+
+@test
+fn test_type_id_bool_byte_distinct() {
+    let id_bool = type_id<Bool>();
+    let id_byte = type_id<Byte>();
+    assert(id_bool != id_byte);
+}
+
+@test
+fn test_min_align_positive() {
+    // min_align should be at least 1
+    assert(min_align() >= (1 as USize));
+    // And typically a power of 2 (at most 16)
+    assert(min_align() <= (16 as USize));
+}
+
+// =============================================================================
+// Additional Type Info Tests
+// =============================================================================
+
+@test
+fn test_size_of_char() {
+    // Char should be 4 bytes (Unicode scalar value)
+    assert(size_of<Char>() == (4 as USize));
+}
+
+@test
+fn test_bits_of_integers_match_size() {
+    // bits should be 8 * size for integer types
+    assert(bits_of<Int8>() == size_of<Int8>() * (8 as USize));
+    assert(bits_of<Int16>() == size_of<Int16>() * (8 as USize));
+    assert(bits_of<Int32>() == size_of<Int32>() * (8 as USize));
+    assert(bits_of<Int64>() == size_of<Int64>() * (8 as USize));
+}
+
+@test
+fn test_stride_ge_size() {
+    // stride should be >= size for all types
+    assert(stride_of<Int8>() >= size_of<Int8>());
+    assert(stride_of<Int16>() >= size_of<Int16>());
+    assert(stride_of<Int32>() >= size_of<Int32>());
+    assert(stride_of<Int64>() >= size_of<Int64>());
+    assert(stride_of<Float32>() >= size_of<Float32>());
+    assert(stride_of<Float64>() >= size_of<Float64>());
+}
+
+@test
+fn test_type_id_signed_unsigned_distinct() {
+    let id_i32 = type_id<Int32>();
+    let id_u32 = type_id<UInt32>();
+    assert(id_i32 != id_u32);
+}
+
+@test
+fn test_type_id_int_float_distinct() {
+    let id_int = type_id<Int>();
+    let id_float = type_id<Float>();
+    assert(id_int != id_float);
+}
+
+@test
+fn test_size_of_float_matches_int() {
+    // Float32 same size as Int32, Float64 same size as Int64
+    assert(size_of<Float32>() == size_of<Int32>());
+    assert(size_of<Float64>() == size_of<Int64>());
+}
+
+@test
+fn test_align_of_power_of_two() {
+    // Alignment should be a power of 2 for all primitive types
+    fn is_pow2(x: USize) -> Bool { x > (0 as USize) && (x & (x - (1 as USize))) == (0 as USize) }
+    assert(is_pow2(align_of<Int8>()));
+    assert(is_pow2(align_of<Int16>()));
+    assert(is_pow2(align_of<Int32>()));
+    assert(is_pow2(align_of<Int64>()));
+    assert(is_pow2(align_of<Float32>()));
+    assert(is_pow2(align_of<Float64>()));
+}
+
+@test
+fn test_type_id_reflexive() {
+    // Same type should have same id
+    let id1 = type_id<Int>();
+    let id2 = type_id<Int>();
+    assert(id1 == id2);
+}
+
+// =============================================================================
+// Additional Type Info Tests (Expanded Coverage)
+// =============================================================================
+
+@test
+fn test_type_id_char_distinct() {
+    // Char should have a unique type ID distinct from integers
+    let id_char = type_id<Char>();
+    let id_i32 = type_id<Int32>();
+    let id_u32 = type_id<UInt32>();
+    assert(id_char != id_i32);
+    assert(id_char != id_u32);
+}
+
+@test
+fn test_align_of_char() {
+    // Char should have 4-byte alignment (32-bit Unicode scalar)
+    assert(align_of<Char>() == (4 as USize));
+}
+
+@test
+fn test_bits_of_char() {
+    // Char is 4 bytes = 32 bits
+    assert(bits_of<Char>() == (32 as USize));
+    assert(bits_of<Char>() == size_of<Char>() * (8 as USize));
+}
+
+@test
+fn test_stride_of_char() {
+    // Stride of Char should be at least 4 bytes
+    assert(stride_of<Char>() >= (4 as USize));
+    assert(stride_of<Char>() >= size_of<Char>());
+}
+
+@test
+fn test_type_name_consistency() {
+    // Different calls to type_name on the same type should return equal values
+    let name1 = type_name<Int64>();
+    let name2 = type_name<Int64>();
+    assert(name1 == name2);
+}
+
+@test
+fn test_needs_drop_all_primitives() {
+    // All primitive types should consistently have needs_drop value
+    let drop_int = needs_drop<Int>();
+    let drop_float = needs_drop<Float64>();
+    let drop_bool = needs_drop<Bool>();
+    let drop_char = needs_drop<Char>();
+    let drop_byte = needs_drop<Byte>();
+
+    // Verify all return Bool type
+    let _: Bool = drop_int;
+    let _: Bool = drop_float;
+    let _: Bool = drop_bool;
+    let _: Bool = drop_char;
+    let _: Bool = drop_byte;
+}
+
+@test
+fn test_unsigned_doubling_pattern() {
+    // Unsigned types also follow doubling pattern
+    assert(size_of<UInt16>() == size_of<UInt8>() * (2 as USize));
+    assert(size_of<UInt32>() == size_of<UInt16>() * (2 as USize));
+    assert(size_of<UInt64>() == size_of<UInt32>() * (2 as USize));
+}
+
+@test
+fn test_min_align_le_all_alignments() {
+    // min_align should be <= all type alignments
+    let min_a = min_align();
+    assert(min_a <= align_of<Int8>());
+    assert(min_a <= align_of<Int16>());
+    assert(min_a <= align_of<Int32>());
+    assert(min_a <= align_of<Int64>());
+    assert(min_a <= align_of<Float32>());
+    assert(min_a <= align_of<Float64>());
+    assert(min_a <= align_of<Bool>());
+    assert(min_a <= align_of<Byte>());
+    assert(min_a <= align_of<Char>());
+}

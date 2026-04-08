@@ -1,0 +1,27 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let mut m = BTreeMap.new();
+    m.insert(3, 30);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    print(f"len = {m.len()}");
+
+    // Now overwrite key 1
+    m.insert(1, 99);
+    print(f"len after dup insert = {m.len()}");
+
+    let k = 1;
+    match m.get(&k) {
+        Some(v) => {
+            print(f"get(1) = {v}");
+        },
+        None => {
+            print("get(1) = None");
+        },
+    }
+    0
+}

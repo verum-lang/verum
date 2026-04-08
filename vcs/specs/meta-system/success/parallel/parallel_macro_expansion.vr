@@ -1,0 +1,67 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, parallel, expansion, deterministic
+// @description: Test deterministic meta expansion patterns
+
+// =============================================================================
+// PURE META FUNCTIONS
+// =============================================================================
+
+meta fn identity(x: Int) -> Int { x }
+meta fn successor(x: Int) -> Int { x + 1 }
+meta fn predecessor(x: Int) -> Int { x - 1 }
+
+// =============================================================================
+// FIBONACCI
+// =============================================================================
+
+meta fn fib(n: Int) -> Int {
+    if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+// =============================================================================
+// TEXT OPERATIONS
+// =============================================================================
+
+meta fn greet(name: Text) -> Text {
+    text_concat("Hello, ", text_concat(name, "!"))
+}
+
+meta fn wrap(tag: Text, content: Text) -> Text {
+    text_concat("<", text_concat(tag, text_concat(">", text_concat(content, text_concat("</", text_concat(tag, ">"))))))
+}
+
+// =============================================================================
+// BOOLEAN OPERATIONS
+// =============================================================================
+
+meta fn both(a: Bool, b: Bool) -> Bool { a && b }
+meta fn either(a: Bool, b: Bool) -> Bool { a || b }
+meta fn negate(a: Bool) -> Bool { !a }
+
+// =============================================================================
+// MAIN TEST
+// =============================================================================
+
+fn main() {
+    // Identity and successor/predecessor
+    @const assert_eq(identity(42), 42);
+    @const assert_eq(successor(10), 11);
+    @const assert_eq(predecessor(10), 9);
+
+    // Fibonacci
+    @const assert_eq(fib(6), 8);
+    @const assert_eq(fib(7), 13);
+
+    // Text operations
+    @const assert_eq(greet("World"), "Hello, World!");
+    @const assert_eq(wrap("b", "text"), "<b>text</b>");
+
+    // Boolean operations
+    @const assert(both(true, true));
+    @const assert(!both(true, false));
+    @const assert(either(true, false));
+    @const assert(!either(false, false));
+    @const assert(negate(false));
+}

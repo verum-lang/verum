@@ -1,0 +1,230 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, term, elm, architecture, model, update, view
+// @expected-exit: 0
+// @description: Terminal Elm Architecture pattern (Model->Update->View cycle) with commands and subscriptions
+
+type Msg is Increment | Decrement | Reset | SetValue(Int) | ToggleFlag;
+type Command is CmdNone | CmdQuit | CmdSetValue(Int);
+
+type Model is { count: Int, flag: Bool, history: List<Int> };
+
+implement Model {
+    pub fn new() -> Model {
+        Model { count: 0, flag: false, history: [] }
+    }
+}
+
+type UpdateResult is { model: Model, cmd: Command };
+
+fn update(model: Model, msg: Msg) -> UpdateResult {
+    match msg {
+        Increment => {
+            let mut hist = model.history;
+            hist.push(model.count);
+            let new_model = Model { count: model.count + 1, flag: model.flag, history: hist };
+            UpdateResult { model: new_model, cmd: CmdNone }
+        },
+        Decrement => {
+            let mut hist = model.history;
+            hist.push(model.count);
+            let new_model = Model { count: model.count - 1, flag: model.flag, history: hist };
+            UpdateResult { model: new_model, cmd: CmdNone }
+        },
+        Reset => {
+            let mut hist = model.history;
+            hist.push(model.count);
+            let new_model = Model { count: 0, flag: false, history: hist };
+            UpdateResult { model: new_model, cmd: CmdNone }
+        },
+        SetValue(v) => {
+            let mut hist = model.history;
+            hist.push(model.count);
+            let new_model = Model { count: v, flag: model.flag, history: hist };
+            UpdateResult { model: new_model, cmd: CmdNone }
+        },
+        ToggleFlag => {
+            let new_flag = !model.flag;
+            let new_model = Model { count: model.count, flag: new_flag, history: model.history };
+            UpdateResult { model: new_model, cmd: CmdNone }
+        },
+    }
+}
+
+// View produces a text representation
+fn render_view(model: Model) -> Text {
+    let flag_str = if model.flag { "ON" } else { "OFF" };
+    f"Count: {model.count} Flag: {flag_str} History: {model.history.len()}"
+}
+
+// Process a command (returns Maybe<Msg> to feed back)
+fn process_command(cmd: Command) -> Maybe<Msg> {
+    match cmd {
+        CmdNone => None,
+        CmdQuit => None,
+        CmdSetValue(v) => Some(SetValue(v)),
+    }
+}
+
+// Run a batch of messages through the update loop
+fn run_batch(init: Model, messages: List<Msg>) -> Model {
+    let mut model = init;
+    let mut i = 0;
+    while i < messages.len() {
+        let result = update(model, messages[i]);
+        model = result.model;
+        // Process any resulting command
+        match process_command(result.cmd) {
+            Some(msg) => {
+                let result2 = update(model, msg);
+                model = result2.model;
+            },
+            None => {},
+        }
+        i = i + 1;
+    }
+    model
+}
+
+fn test_basic_update() -> Int {
+    let m0 = Model.new();
+    let r1 = update(m0, Increment);
+    if r1.model.count != 1 {
+        print(f"FAIL inc: {r1.model.count}");
+        return 1;
+    }
+    let r2 = update(r1.model, Increment);
+    if r2.model.count != 2 {
+        print(f"FAIL inc2: {r2.model.count}");
+        return 1;
+    }
+    let r3 = update(r2.model, Decrement);
+    if r3.model.count != 1 {
+        print(f"FAIL dec: {r3.model.count}");
+        return 1;
+    }
+    0
+}
+
+fn test_reset() -> Int {
+    let m0 = Model.new();
+    let r1 = update(m0, Increment);
+    let r2 = update(r1.model, Increment);
+    let r3 = update(r2.model, Increment);
+    let r4 = update(r3.model, Reset);
+    if r4.model.count != 0 {
+        print(f"FAIL reset count: {r4.model.count}");
+        return 1;
+    }
+    if r4.model.flag != false {
+        print("FAIL reset flag");
+        return 1;
+    }
+    0
+}
+
+fn test_set_value() -> Int {
+    let m0 = Model.new();
+    let r1 = update(m0, SetValue(42));
+    if r1.model.count != 42 {
+        print(f"FAIL set_value: {r1.model.count}");
+        return 1;
+    }
+    0
+}
+
+fn test_toggle_flag() -> Int {
+    let m0 = Model.new();
+    if m0.flag != false {
+        print("FAIL initial flag");
+        return 1;
+    }
+    let r1 = update(m0, ToggleFlag);
+    if r1.model.flag != true {
+        print("FAIL toggle on");
+        return 1;
+    }
+    let r2 = update(r1.model, ToggleFlag);
+    if r2.model.flag != false {
+        print("FAIL toggle off");
+        return 1;
+    }
+    0
+}
+
+fn test_history() -> Int {
+    let m0 = Model.new();
+    let r1 = update(m0, Increment);      // history: [0]
+    let r2 = update(r1.model, Increment); // history: [0, 1]
+    let r3 = update(r2.model, Decrement); // history: [0, 1, 2]
+    if r3.model.history.len() != 3 {
+        print(f"FAIL history len: {r3.model.history.len()}");
+        return 1;
+    }
+    if r3.model.history[0] != 0 {
+        print(f"FAIL history[0]: {r3.model.history[0]}");
+        return 1;
+    }
+    if r3.model.history[1] != 1 {
+        print(f"FAIL history[1]: {r3.model.history[1]}");
+        return 1;
+    }
+    if r3.model.history[2] != 2 {
+        print(f"FAIL history[2]: {r3.model.history[2]}");
+        return 1;
+    }
+    0
+}
+
+fn test_batch_update() -> Int {
+    let mut msgs: List<Msg> = [];
+    msgs.push(Increment);
+    msgs.push(Increment);
+    msgs.push(Increment);
+    msgs.push(Decrement);
+    msgs.push(SetValue(100));
+    msgs.push(Increment);
+
+    let final_model = run_batch(Model.new(), msgs);
+    // 0 -> 1 -> 2 -> 3 -> 2 -> 100 -> 101
+    if final_model.count != 101 {
+        print(f"FAIL batch count: {final_model.count}");
+        return 1;
+    }
+    if final_model.history.len() != 6 {
+        print(f"FAIL batch history: {final_model.history.len()}");
+        return 1;
+    }
+    0
+}
+
+fn test_render_view() -> Int {
+    let m = Model { count: 42, flag: true, history: [1, 2, 3] };
+    let v = render_view(m);
+    // Just check it's non-empty and contains the count
+    if v.len() == 0 {
+        print("FAIL view empty");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_basic_update();
+    if r1 != 0 { return r1; }
+    let r2 = test_reset();
+    if r2 != 0 { return r2; }
+    let r3 = test_set_value();
+    if r3 != 0 { return r3; }
+    let r4 = test_toggle_flag();
+    if r4 != 0 { return r4; }
+    let r5 = test_history();
+    if r5 != 0 { return r5; }
+    let r6 = test_batch_update();
+    if r6 != 0 { return r6; }
+    let r7 = test_render_view();
+    if r7 != 0 { return r7; }
+    print("PASS: term_elm_architecture");
+    0
+}

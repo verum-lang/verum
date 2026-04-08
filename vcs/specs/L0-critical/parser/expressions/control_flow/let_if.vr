@@ -1,0 +1,219 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control_flow, if, let, pattern
+
+fn test_simple_let_if() {
+    // Simple let-if (if-let) pattern
+    if let Some(x) = maybe_value {
+        use(x);
+    }
+}
+
+fn test_let_if_else() {
+    // Let-if with else branch
+    if let Some(x) = optional {
+        process(x);
+    } else {
+        handle_none();
+    }
+}
+
+fn test_let_if_chain() {
+    // Let-if with else-if chain
+    if let Some(x) = first {
+        use_first(x);
+    } else if let Some(y) = second {
+        use_second(y);
+    } else {
+        use_default();
+    }
+}
+
+fn test_let_if_result_ok() {
+    // Let-if with Result pattern
+    if let Ok(value) = result {
+        process(value);
+    }
+}
+
+fn test_let_if_result_err() {
+    if let Err(error) = fallible_op() {
+        log_error(error);
+    }
+}
+
+fn test_let_if_nested() {
+    // Let-if with nested pattern
+    if let Some(Some(inner)) = nested_option {
+        use(inner);
+    }
+}
+
+fn test_let_if_tuple() {
+    // Let-if with tuple pattern
+    if let (Some(a), Some(b)) = (opt_a, opt_b) {
+        combine(a, b);
+    }
+}
+
+fn test_let_if_struct() {
+    // Let-if with struct pattern
+    if let Point { x, y } = point_value {
+        draw(x, y);
+    }
+}
+
+fn test_let_if_variant_struct() {
+    // Let-if with variant pattern
+    if let Event.Click { x, y } = event {
+        handle_click(x, y);
+    }
+}
+
+fn test_let_if_variant_tuple() {
+    if let Message.Text(content) = msg {
+        display(content);
+    }
+}
+
+fn test_let_if_guard() {
+    // Let-if with guard (and additional condition)
+    if let Some(x) = optional && x > 0 {
+        positive(x);
+    }
+}
+
+fn test_let_if_chained() {
+    // Multiple let conditions chained
+    if let Some(a) = get_a() && let Some(b) = get_b() {
+        process(a, b);
+    }
+}
+
+fn test_let_if_expression() {
+    // Let-if as expression
+    let result = if let Some(x) = maybe {
+        x * 2
+    } else {
+        0
+    };
+}
+
+fn test_nested_let_if() {
+    // Nested let-if
+    if let Some(outer) = get_outer() {
+        if let Some(inner) = outer.get_inner() {
+            process(inner);
+        }
+    }
+}
+
+fn test_let_if_mutable() {
+    // Let-if with mutable binding
+    if let Some(mut x) = get_mutable() {
+        x.modify();
+        store(x);
+    }
+}
+
+fn test_let_if_ref() {
+    // Let-if with reference binding
+    if let Some(ref x) = stored_option {
+        read(x);
+    }
+}
+
+fn test_let_if_ref_mut() {
+    if let Some(ref mut x) = mutable_option {
+        x.modify();
+    }
+}
+
+fn test_let_if_at_binding() {
+    // Let-if with @ binding
+    if let Some(all @ Person { name, .. }) = maybe_person {
+        log(all);
+        greet(name);
+    }
+}
+
+fn test_while_let() {
+    // While-let pattern
+    while let Some(item) = iterator.next() {
+        process(item);
+    }
+}
+
+fn test_let_if_rest_pattern() {
+    // Let-if with rest pattern
+    if let [first, rest @ ..] = slice {
+        process_first(first);
+        process_rest(rest);
+    }
+}
+
+fn test_let_if_or_pattern() {
+    // Let-if with or pattern
+    if let Some(1) | Some(2) | Some(3) = small_number {
+        handle_small();
+    }
+}
+
+fn test_let_if_in_block() {
+    // Let-if in block
+    {
+        if let Some(config) = load_config() {
+            apply(config);
+        }
+    }
+}
+
+fn test_let_if_simple_complex() {
+    // Let-if with struct pattern
+    if let Some(Point { x: px, y: py }) = find_point() {
+        if px > 0 && py > 0 {
+            draw(px, py);
+        }
+    }
+}
+
+fn test_let_if_array_pattern() {
+    // Let-if with array pattern
+    if let [a, b, c] = array {
+        process_triple(a, b, c);
+    }
+}
+
+fn test_let_if_unit() {
+    // Let-if expression returning unit
+    if let Some(_) = optional {
+        side_effect();
+    }
+}
+
+fn test_let_if_complex_chain() {
+    // Let-if with complex else-if chain
+    if let Some(x) = first_option {
+        handle_first(x);
+    } else if let Ok(y) = try_alternative() {
+        handle_alternative(y);
+    } else {
+        handle_failure();
+    }
+}
+
+async fn process_async() {
+    // Let-if in async context
+    if let Some(data) = fetch_data().await {
+        process_data(data).await;
+    }
+}
+
+fn with_context() using [Logger] {
+    // Let-if with context
+    if let Some(result) = compute() {
+        Logger.info("Got result");
+        use(result);
+    }
+}

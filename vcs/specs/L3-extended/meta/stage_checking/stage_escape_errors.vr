@@ -1,0 +1,64 @@
+// @test: typecheck-fail
+// @expected-error: E018
+// @tier: 3
+// @level: L3
+// @tags: meta, staged, stage-checking, escape, error
+
+/// Stage Escape Error Tests
+///
+/// Validates that the stage checker / parser correctly rejects invalid
+/// stage escape expressions.
+/// Spec: 17-meta-system.md Section 2.4 - Stage Coherence Rule
+///
+/// The $(stage N) escape syntax is only valid inside quote expressions.
+/// Using it outside quote produces a parse error (E018).
+
+// ============================================================
+// VALID STAGE ESCAPES INSIDE QUOTE (for context)
+// ============================================================
+
+/// Valid: Stage 1 escaping into stage 0 code via quote
+meta fn valid_escape(x: Int) -> @Expr {
+    quote {
+        fn runtime_fn() -> Int {
+            $(x) + 1
+        }
+    }
+}
+
+// ============================================================
+// ERROR: ESCAPE IN NON-QUOTE CONTEXT
+// ============================================================
+
+/// Stage escape only valid inside quote
+meta fn bad_escape_outside_quote(x: Int) -> Int {
+    // ERROR E018: $(stage N) only valid inside quote expressions
+    $(stage 0)(x) + 1
+}
+
+/// Direct escape in function body (not in quote)
+meta fn bad_direct_escape() -> Int {
+    // ERROR E018: This is not inside a quote
+    let result = $(stage 0)(42);
+    result
+}
+
+// ============================================================
+// ERROR: ESCAPE FROM RUNTIME FUNCTION
+// ============================================================
+
+/// Runtime functions cannot use stage escape
+fn runtime_with_escape(x: Int) -> Int {
+    // ERROR E018: Stage escape only valid in meta context
+    $(stage 0)(x)
+}
+
+/// Runtime trying to escape to stage 1
+fn runtime_escape_to_meta() -> Int {
+    // ERROR E018: Runtime cannot escape to any stage
+    $(stage 1)(42)
+}
+
+fn main() {
+    // All escape patterns above should fail with parse errors
+}

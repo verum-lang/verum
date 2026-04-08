@@ -1,0 +1,183 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, hash, table, map
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for hash table simulation with open addressing
+
+// Simple hash map with 8 slots, open addressing (linear probing)
+// Each slot: key, value, occupied flag
+type HMap is {
+    k0: Int, v0: Int, o0: Int,
+    k1: Int, v1: Int, o1: Int,
+    k2: Int, v2: Int, o2: Int,
+    k3: Int, v3: Int, o3: Int,
+    k4: Int, v4: Int, o4: Int,
+    k5: Int, v5: Int, o5: Int,
+    k6: Int, v6: Int, o6: Int,
+    k7: Int, v7: Int, o7: Int,
+    count: Int
+};
+
+fn hmap_new() -> HMap {
+    HMap {
+        k0: 0, v0: 0, o0: 0,
+        k1: 0, v1: 0, o1: 0,
+        k2: 0, v2: 0, o2: 0,
+        k3: 0, v3: 0, o3: 0,
+        k4: 0, v4: 0, o4: 0,
+        k5: 0, v5: 0, o5: 0,
+        k6: 0, v6: 0, o6: 0,
+        k7: 0, v7: 0, o7: 0,
+        count: 0
+    }
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+fn hash(key: Int) -> Int {
+    // Simple hash: key mod 8
+    abs_val(key) % 8
+}
+
+fn hmap_get_key(m: HMap, i: Int) -> Int {
+    if i == 0 { m.k0 } else if i == 1 { m.k1 }
+    else if i == 2 { m.k2 } else if i == 3 { m.k3 }
+    else if i == 4 { m.k4 } else if i == 5 { m.k5 }
+    else if i == 6 { m.k6 } else { m.k7 }
+}
+
+fn hmap_get_val(m: HMap, i: Int) -> Int {
+    if i == 0 { m.v0 } else if i == 1 { m.v1 }
+    else if i == 2 { m.v2 } else if i == 3 { m.v3 }
+    else if i == 4 { m.v4 } else if i == 5 { m.v5 }
+    else if i == 6 { m.v6 } else { m.v7 }
+}
+
+fn hmap_get_occ(m: HMap, i: Int) -> Int {
+    if i == 0 { m.o0 } else if i == 1 { m.o1 }
+    else if i == 2 { m.o2 } else if i == 3 { m.o3 }
+    else if i == 4 { m.o4 } else if i == 5 { m.o5 }
+    else if i == 6 { m.o6 } else { m.o7 }
+}
+
+fn hmap_set_slot(m: HMap, i: Int, k: Int, v: Int) -> HMap {
+    HMap {
+        k0: if i == 0 { k } else { m.k0 }, v0: if i == 0 { v } else { m.v0 }, o0: if i == 0 { 1 } else { m.o0 },
+        k1: if i == 1 { k } else { m.k1 }, v1: if i == 1 { v } else { m.v1 }, o1: if i == 1 { 1 } else { m.o1 },
+        k2: if i == 2 { k } else { m.k2 }, v2: if i == 2 { v } else { m.v2 }, o2: if i == 2 { 1 } else { m.o2 },
+        k3: if i == 3 { k } else { m.k3 }, v3: if i == 3 { v } else { m.v3 }, o3: if i == 3 { 1 } else { m.o3 },
+        k4: if i == 4 { k } else { m.k4 }, v4: if i == 4 { v } else { m.v4 }, o4: if i == 4 { 1 } else { m.o4 },
+        k5: if i == 5 { k } else { m.k5 }, v5: if i == 5 { v } else { m.v5 }, o5: if i == 5 { 1 } else { m.o5 },
+        k6: if i == 6 { k } else { m.k6 }, v6: if i == 6 { v } else { m.v6 }, o6: if i == 6 { 1 } else { m.o6 },
+        k7: if i == 7 { k } else { m.k7 }, v7: if i == 7 { v } else { m.v7 }, o7: if i == 7 { 1 } else { m.o7 },
+        count: m.count + 1
+    }
+}
+
+fn hmap_set_val_only(m: HMap, i: Int, v: Int) -> HMap {
+    HMap {
+        k0: m.k0, v0: if i == 0 { v } else { m.v0 }, o0: m.o0,
+        k1: m.k1, v1: if i == 1 { v } else { m.v1 }, o1: m.o1,
+        k2: m.k2, v2: if i == 2 { v } else { m.v2 }, o2: m.o2,
+        k3: m.k3, v3: if i == 3 { v } else { m.v3 }, o3: m.o3,
+        k4: m.k4, v4: if i == 4 { v } else { m.v4 }, o4: m.o4,
+        k5: m.k5, v5: if i == 5 { v } else { m.v5 }, o5: m.o5,
+        k6: m.k6, v6: if i == 6 { v } else { m.v6 }, o6: m.o6,
+        k7: m.k7, v7: if i == 7 { v } else { m.v7 }, o7: m.o7,
+        count: m.count
+    }
+}
+
+// Insert: returns updated map
+fn hmap_insert(m: HMap, key: Int, val: Int) -> HMap {
+    let mut idx = hash(key);
+    let mut probes = 0;
+    while probes < 8 {
+        let occ = hmap_get_occ(m, idx);
+        if occ == 0 {
+            return hmap_set_slot(m, idx, key, val);
+        }
+        if hmap_get_key(m, idx) == key {
+            // Update existing
+            return hmap_set_val_only(m, idx, val);
+        }
+        idx = (idx + 1) % 8;
+        probes = probes + 1;
+    }
+    m // Full, return unchanged
+}
+
+// Lookup: returns value or -1 if not found
+fn hmap_lookup(m: HMap, key: Int) -> Int {
+    let mut idx = hash(key);
+    let mut probes = 0;
+    while probes < 8 {
+        let occ = hmap_get_occ(m, idx);
+        if occ == 0 { return -1; }
+        if hmap_get_key(m, idx) == key {
+            return hmap_get_val(m, idx);
+        }
+        idx = (idx + 1) % 8;
+        probes = probes + 1;
+    }
+    -1
+}
+
+fn hmap_contains(m: HMap, key: Int) -> Bool {
+    hmap_lookup(m, key) != -1
+}
+
+fn test_basic_ops() {
+    let mut m = hmap_new();
+    m = hmap_insert(m, 10, 100);
+    m = hmap_insert(m, 20, 200);
+    m = hmap_insert(m, 30, 300);
+
+    assert_eq(hmap_lookup(m, 10), 100);
+    assert_eq(hmap_lookup(m, 20), 200);
+    assert_eq(hmap_lookup(m, 30), 300);
+    assert_eq(hmap_lookup(m, 40), -1);
+    assert_eq(m.count, 3);
+}
+
+fn test_collision() {
+    let mut m = hmap_new();
+    // Keys 0 and 8 both hash to slot 0
+    m = hmap_insert(m, 0, 10);
+    m = hmap_insert(m, 8, 20);
+    m = hmap_insert(m, 16, 30);
+
+    assert_eq(hmap_lookup(m, 0), 10);
+    assert_eq(hmap_lookup(m, 8), 20);
+    assert_eq(hmap_lookup(m, 16), 30);
+    assert_eq(m.count, 3);
+}
+
+fn test_update() {
+    let mut m = hmap_new();
+    m = hmap_insert(m, 5, 50);
+    assert_eq(hmap_lookup(m, 5), 50);
+    m = hmap_insert(m, 5, 99);
+    assert_eq(hmap_lookup(m, 5), 99);
+    // Count shouldn't increase on update
+    assert_eq(m.count, 1);
+}
+
+fn test_contains() {
+    let mut m = hmap_new();
+    m = hmap_insert(m, 42, 1);
+    assert_eq(hmap_contains(m, 42), true);
+    assert_eq(hmap_contains(m, 43), false);
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_collision();
+    test_update();
+    test_contains();
+    print("[OK] 214_hash_table_aot");
+    0
+}

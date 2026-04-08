@@ -1,0 +1,125 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, interval_arithmetic
+// @expected-exit: 0
+
+// Interval arithmetic using pairs stored in 16-element lists
+// Each interval [lo, hi] stored as two consecutive elements in a list
+// Intervals use scaled integers (multiply by 100) to avoid float
+
+fn interval_add_lo(a_lo: Int, a_hi: Int, b_lo: Int, b_hi: Int) -> Int {
+    a_lo + b_lo
+}
+
+fn interval_add_hi(a_lo: Int, a_hi: Int, b_lo: Int, b_hi: Int) -> Int {
+    a_hi + b_hi
+}
+
+fn interval_sub_lo(a_lo: Int, a_hi: Int, b_lo: Int, b_hi: Int) -> Int {
+    a_lo - b_hi
+}
+
+fn interval_sub_hi(a_lo: Int, a_hi: Int, b_lo: Int, b_hi: Int) -> Int {
+    a_hi - b_lo
+}
+
+fn min4(a: Int, b: Int, c: Int, d: Int) -> Int {
+    let mut m = a;
+    if (b < m) { m = b; }
+    if (c < m) { m = c; }
+    if (d < m) { m = d; }
+    m
+}
+
+fn max4(a: Int, b: Int, c: Int, d: Int) -> Int {
+    let mut m = a;
+    if (b > m) { m = b; }
+    if (c > m) { m = c; }
+    if (d > m) { m = d; }
+    m
+}
+
+fn interval_mul_lo(a_lo: Int, a_hi: Int, b_lo: Int, b_hi: Int) -> Int {
+    min4(a_lo * b_lo, a_lo * b_hi, a_hi * b_lo, a_hi * b_hi)
+}
+
+fn interval_mul_hi(a_lo: Int, a_hi: Int, b_lo: Int, b_hi: Int) -> Int {
+    max4(a_lo * b_lo, a_lo * b_hi, a_hi * b_lo, a_hi * b_hi)
+}
+
+fn interval_contains(lo: Int, hi: Int, val: Int) -> Int {
+    if (val >= lo) {
+        if (val <= hi) { return 1; }
+    }
+    0
+}
+
+fn interval_overlaps(a_lo: Int, a_hi: Int, b_lo: Int, b_hi: Int) -> Int {
+    if (a_lo > b_hi) { return 0; }
+    if (b_lo > a_hi) { return 0; }
+    1
+}
+
+fn interval_merge_lo(a_lo: Int, a_hi: Int, b_lo: Int, b_hi: Int) -> Int {
+    if (a_lo < b_lo) { a_lo } else { b_lo }
+}
+
+fn interval_merge_hi(a_lo: Int, a_hi: Int, b_lo: Int, b_hi: Int) -> Int {
+    if (a_hi > b_hi) { a_hi } else { b_hi }
+}
+
+fn interval_width(lo: Int, hi: Int) -> Int {
+    hi - lo
+}
+
+fn interval_midpoint(lo: Int, hi: Int) -> Int {
+    (lo + hi) / 2
+}
+
+fn main() -> Int {
+    // Interval A = [2, 5], Interval B = [3, 7]
+
+    // Test 1: Interval addition [2,5] + [3,7] = [5, 12]
+    let add_lo = interval_add_lo(2, 5, 3, 7);
+    let add_hi = interval_add_hi(2, 5, 3, 7);
+    assert_eq(add_lo, 5);
+
+    // Test 2: Interval addition high bound
+    assert_eq(add_hi, 12);
+
+    // Test 3: Interval subtraction [2,5] - [3,7] = [2-7, 5-3] = [-5, 2]
+    let sub_lo = interval_sub_lo(2, 5, 3, 7);
+    let sub_hi = interval_sub_hi(2, 5, 3, 7);
+    assert_eq(sub_lo, -5);
+
+    // Test 4: Interval subtraction high bound
+    assert_eq(sub_hi, 2);
+
+    // Test 5: Interval multiplication [2,5] * [3,7] = [6, 35]
+    // Products: 2*3=6, 2*7=14, 5*3=15, 5*7=35
+    let mul_lo = interval_mul_lo(2, 5, 3, 7);
+    let mul_hi = interval_mul_hi(2, 5, 3, 7);
+    assert_eq(mul_lo, 6);
+
+    // Test 6: Interval multiplication high bound
+    assert_eq(mul_hi, 35);
+
+    // Test 7: Interval contains - 4 is in [2, 5]
+    assert_eq(interval_contains(2, 5, 4), 1);
+
+    // Test 8: Interval contains - 6 is NOT in [2, 5]
+    assert_eq(interval_contains(2, 5, 6), 0);
+
+    // Test 9: Interval overlap - [2,5] and [3,7] overlap
+    assert_eq(interval_overlaps(2, 5, 3, 7), 1);
+
+    // Test 10: Interval width and midpoint
+    // Width of [2, 5] = 3, midpoint = (2+5)/2 = 3 (integer division)
+    let w = interval_width(2, 5);
+    let mid = interval_midpoint(2, 5);
+    assert_eq(w + mid, 6);
+
+    print("792_interval_arithmetic: PASS");
+    0
+}

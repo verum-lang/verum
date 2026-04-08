@@ -1,0 +1,229 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, records, variants
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Interpreter e2e test: record types, sum types, field access, is-checks, match
+
+// =============================================================================
+// Record type definitions
+// =============================================================================
+
+type Point is { x: Int, y: Int };
+type Color is { r: Int, g: Int, b: Int };
+type NamedPoint is { label: Text, pos: Point };
+type Bounds is { top_left: Point, bottom_right: Point };
+
+// =============================================================================
+// Sum type definitions
+// =============================================================================
+
+type Weekday is Monday | Tuesday | Wednesday | Thursday | Friday;
+type Shape is Circle(Int) | Rect { w: Int, h: Int } | Dot;
+type Payload is Empty | Single(Int) | Pair { a: Int, b: Int };
+type MaybeInt is NoValue | HasValue(Int);
+
+// =============================================================================
+// Record tests
+// =============================================================================
+
+fn test_record_creation_and_access() {
+    let p = Point { x: 10, y: 20 };
+    assert_eq(p.x, 10);
+    assert_eq(p.y, 20);
+}
+
+fn test_record_with_text_field() {
+    let np = NamedPoint { label: "origin", pos: Point { x: 0, y: 0 } };
+    assert_eq(np.label, "origin");
+    assert_eq(np.pos.x, 0);
+    assert_eq(np.pos.y, 0);
+}
+
+fn test_nested_record() {
+    let bounds = Bounds {
+        top_left: Point { x: 1, y: 2 },
+        bottom_right: Point { x: 10, y: 20 }
+    };
+    assert_eq(bounds.top_left.x, 1);
+    assert_eq(bounds.top_left.y, 2);
+    assert_eq(bounds.bottom_right.x, 10);
+    assert_eq(bounds.bottom_right.y, 20);
+}
+
+fn test_record_in_function() {
+    fn distance_sq(a: Point, b: Point) -> Int {
+        let dx = a.x - b.x;
+        let dy = a.y - b.y;
+        dx * dx + dy * dy
+    }
+    let p1 = Point { x: 0, y: 0 };
+    let p2 = Point { x: 3, y: 4 };
+    assert_eq(distance_sq(p1, p2), 25);
+}
+
+fn test_record_returned_from_function() {
+    fn make_point(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+    let p = make_point(7, 8);
+    assert_eq(p.x, 7);
+    assert_eq(p.y, 8);
+}
+
+fn test_mutable_record() {
+    let mut c = Color { r: 0, g: 0, b: 0 };
+    c.r = 255;
+    c.g = 128;
+    c.b = 64;
+    assert_eq(c.r, 255);
+    assert_eq(c.g, 128);
+    assert_eq(c.b, 64);
+}
+
+fn test_record_equality_by_field() {
+    let p1 = Point { x: 5, y: 10 };
+    let p2 = Point { x: 5, y: 10 };
+    assert_eq(p1.x, p2.x);
+    assert_eq(p1.y, p2.y);
+}
+
+// =============================================================================
+// Sum type / variant tests
+// =============================================================================
+
+fn test_unit_variant_is_check() {
+    let d: Weekday = Monday;
+    assert(d is Monday);
+
+    let e: Weekday = Friday;
+    assert(e is Friday);
+}
+
+fn test_variant_match() {
+    fn day_number(d: Weekday) -> Int {
+        match d {
+            Monday => 1,
+            Tuesday => 2,
+            Wednesday => 3,
+            Thursday => 4,
+            Friday => 5
+        }
+    }
+    assert_eq(day_number(Monday), 1);
+    assert_eq(day_number(Wednesday), 3);
+    assert_eq(day_number(Friday), 5);
+}
+
+fn test_variant_with_payload() {
+    let s = Circle(10);
+    assert(s is Circle(_));
+
+    let r = Rect { w: 3, h: 4 };
+    assert(r is Rect { w: _, h: _ });
+
+    let d: Shape = Dot;
+    assert(d is Dot);
+}
+
+fn test_variant_payload_match() {
+    fn shape_area(s: Shape) -> Int {
+        match s {
+            Circle(r) => r * r,
+            Rect { w, h } => w * h,
+            Dot => 0
+        }
+    }
+    assert_eq(shape_area(Circle(5)), 25);
+    assert_eq(shape_area(Rect { w: 3, h: 4 }), 12);
+    assert_eq(shape_area(Dot), 0);
+}
+
+fn test_maybe_int() {
+    fn unwrap_or_default(m: MaybeInt, default: Int) -> Int {
+        match m {
+            NoValue => default,
+            HasValue(v) => v
+        }
+    }
+    assert_eq(unwrap_or_default(HasValue(42), 0), 42);
+    assert_eq(unwrap_or_default(NoValue, -1), -1);
+}
+
+fn test_payload_variants() {
+    fn payload_sum(p: Payload) -> Int {
+        match p {
+            Empty => 0,
+            Single(x) => x,
+            Pair { a, b } => a + b
+        }
+    }
+    assert_eq(payload_sum(Empty), 0);
+    assert_eq(payload_sum(Single(99)), 99);
+    assert_eq(payload_sum(Pair { a: 10, b: 20 }), 30);
+}
+
+fn test_variant_in_conditional() {
+    let val = HasValue(10);
+    let result = if val is HasValue(_) {
+        match val {
+            HasValue(v) => v,
+            NoValue => 0
+        }
+    } else {
+        -1
+    };
+    assert_eq(result, 10);
+}
+
+// =============================================================================
+// Generic record test (using built-in Maybe<T>)
+// =============================================================================
+
+fn test_generic_maybe() {
+    let some_int: Maybe<Int> = Some(42);
+    let none_int: Maybe<Int> = None;
+    assert(some_int is Some(_));
+    assert(none_int is None);
+
+    let result = match some_int {
+        Some(v) => v,
+        None => 0
+    };
+    assert_eq(result, 42);
+
+    let result2 = match none_int {
+        Some(v) => v,
+        None => -1
+    };
+    assert_eq(result2, -1);
+}
+
+fn test_variant_negative_is_check() {
+    let s = Circle(5);
+    assert_eq(s is Dot, false);
+    assert_eq(s is Rect { w: _, h: _ }, false);
+}
+
+fn main() -> Int {
+    test_record_creation_and_access();
+    test_record_with_text_field();
+    test_nested_record();
+    test_record_in_function();
+    test_record_returned_from_function();
+    test_mutable_record();
+    test_record_equality_by_field();
+    test_unit_variant_is_check();
+    test_variant_match();
+    test_variant_with_payload();
+    test_variant_payload_match();
+    test_maybe_int();
+    test_payload_variants();
+    test_variant_in_conditional();
+    test_generic_maybe();
+    test_variant_negative_is_check();
+    print("[OK] 177_interp_records_variants");
+    0
+}

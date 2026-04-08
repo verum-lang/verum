@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, records, field-dependency
+
+/// Dependent record types -- record fields whose types or constraints
+/// depend on other fields in the same record.
+
+// Field constraint depends on sibling field
+type ValidSlice is {
+    data: List<Int>,
+    start: Int{>= 0},
+    end: Int{>= 0},
+} where self.start <= self.end;
+
+// Field type depends on compile-time parameter
+type TypedBuffer<T, N: meta Int{> 0}> is {
+    data: [T; N],
+    len: Int{>= 0, <= N},
+};
+
+// Self-referential constraint
+type SortedPair is {
+    first: Int,
+    second: Int,
+} where self.first <= self.second;
+
+// Record where field validity depends on another field
+type Pagination is {
+    page: Int{>= 0},
+    page_size: Int{> 0},
+    total: Int{>= 0},
+} where self.page * self.page_size <= self.total;
+
+// Record with derived field constraint
+type Fraction is {
+    numerator: Int,
+    denominator: Int{!= 0},
+};
+
+// Nested dependent record
+type TimeRange is {
+    start_hour: Int{>= 0, <= 23},
+    start_minute: Int{>= 0, <= 59},
+    end_hour: Int{>= 0, <= 23},
+    end_minute: Int{>= 0, <= 59},
+} where self.start_hour * 60 + self.start_minute < self.end_hour * 60 + self.end_minute;
+
+// Generic dependent record
+type Bounded<T: Ord> is {
+    min: T,
+    max: T,
+    value: T,
+} where self.min <= self.value && self.value <= self.max;
+
+fn make_slice(data: List<Int>, start: Int, end: Int) -> Maybe<ValidSlice> {
+    if start >= 0 && end >= 0 && start <= end && end <= data.len() {
+        Some(ValidSlice { data, start, end })
+    } else {
+        None
+    }
+}
+
+fn slice_length(s: ValidSlice) -> Int{>= 0} {
+    s.end - s.start
+}
+
+fn reduce_fraction(f: Fraction) -> Fraction {
+    let g = gcd(f.numerator.abs(), f.denominator.abs());
+    let sign = if f.denominator < 0 { -1 } else { 1 };
+    Fraction {
+        numerator: sign * f.numerator / g,
+        denominator: sign * f.denominator / g,
+    }
+}
+
+fn gcd(a: Int{>= 0}, b: Int{>= 0}) -> Int{>= 0} {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+fn main() {
+    let slice = make_slice([10, 20, 30, 40, 50], 1, 4);
+    match slice {
+        Some(s) => assert(slice_length(s) == 3),
+        None => panic("should succeed"),
+    }
+
+    let pair = SortedPair { first: 3, second: 7 };
+    assert(pair.first <= pair.second);
+
+    let page = Pagination { page: 0, page_size: 10, total: 100 };
+    assert(page.page_size > 0);
+
+    let f = Fraction { numerator: 6, denominator: 4 };
+    let reduced = reduce_fraction(f);
+    assert(reduced.numerator == 3);
+    assert(reduced.denominator == 2);
+
+    let bounded = Bounded { min: 0, max: 100, value: 50 };
+    assert(bounded.value >= bounded.min);
+    assert(bounded.value <= bounded.max);
+}

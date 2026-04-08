@@ -1,0 +1,362 @@
+// =============================================================================
+// numeric_tryfrom_cross_test.vr - Cross-type TryFrom narrowing conversions
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, primitives, tryfrom, conversions, numeric, cross-type
+// @description: Tests for TryFrom narrowing conversions between sized integer types.
+//               Covers Int32→Int16/Int8, Int16→Int8, UInt32→UInt16/UInt8,
+//               UInt16→UInt8, and signed↔unsigned cross-conversions.
+// =============================================================================
+
+mount core.base.protocols.{TryFrom, Eq};
+mount core.base.primitives.TryFromIntError;
+
+// =============================================================================
+// Section 1: TryFrom<Int32> for Int16
+// =============================================================================
+
+@test
+fn test_int32_to_int16_valid_zero() {
+    let val = 0 as Int32;
+    let result = Int16.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_to_int16_valid_positive() {
+    let val = 1000 as Int32;
+    let result = Int16.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_to_int16_valid_negative() {
+    let val = 0 as Int32;
+    let neg = val - (1000 as Int32);
+    let result = Int16.try_from(neg);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_to_int16_max() {
+    let val = 32767 as Int32;
+    let result = Int16.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_to_int16_overflow() {
+    let val = 32768 as Int32;
+    let result = Int16.try_from(val);
+    assert(result.is_err());
+}
+
+@test
+fn test_int32_to_int16_large_overflow() {
+    let val = 100000 as Int32;
+    let result = Int16.try_from(val);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 2: TryFrom<Int32> for Int8
+// =============================================================================
+
+@test
+fn test_int32_to_int8_valid_zero() {
+    let val = 0 as Int32;
+    let result = Int8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_to_int8_valid_positive() {
+    let val = 42 as Int32;
+    let result = Int8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_to_int8_max() {
+    let val = 127 as Int32;
+    let result = Int8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int32_to_int8_overflow() {
+    let val = 128 as Int32;
+    let result = Int8.try_from(val);
+    assert(result.is_err());
+}
+
+@test
+fn test_int32_to_int8_large_overflow() {
+    let val = 1000 as Int32;
+    let result = Int8.try_from(val);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 3: TryFrom<Int16> for Int8
+// =============================================================================
+
+@test
+fn test_int16_to_int8_valid_zero() {
+    let val = 0 as Int16;
+    let result = Int8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int16_to_int8_valid_positive() {
+    let val = 42 as Int16;
+    let result = Int8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int16_to_int8_max() {
+    let val = 127 as Int16;
+    let result = Int8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_int16_to_int8_overflow() {
+    let val = 128 as Int16;
+    let result = Int8.try_from(val);
+    assert(result.is_err());
+}
+
+@test
+fn test_int16_to_int8_large_value() {
+    let val = 1000 as Int16;
+    let result = Int8.try_from(val);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 4: TryFrom<UInt32> for UInt16
+// =============================================================================
+
+@test
+fn test_uint32_to_uint16_valid_zero() {
+    let val = 0 as UInt32;
+    let result = UInt16.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_to_uint16_valid() {
+    let val = 40000 as UInt32;
+    let result = UInt16.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_to_uint16_max() {
+    let val = 65535 as UInt32;
+    let result = UInt16.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_to_uint16_overflow() {
+    let val = 65536 as UInt32;
+    let result = UInt16.try_from(val);
+    assert(result.is_err());
+}
+
+@test
+fn test_uint32_to_uint16_large_overflow() {
+    let val = 100000 as UInt32;
+    let result = UInt16.try_from(val);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 5: TryFrom<UInt32> for UInt8
+// =============================================================================
+
+@test
+fn test_uint32_to_uint8_valid_zero() {
+    let val = 0 as UInt32;
+    let result = UInt8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_to_uint8_valid() {
+    let val = 200 as UInt32;
+    let result = UInt8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_to_uint8_max() {
+    let val = 255 as UInt32;
+    let result = UInt8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_to_uint8_overflow() {
+    let val = 256 as UInt32;
+    let result = UInt8.try_from(val);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 6: TryFrom<UInt16> for UInt8
+// =============================================================================
+
+@test
+fn test_uint16_to_uint8_valid_zero() {
+    let val = 0 as UInt16;
+    let result = UInt8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint16_to_uint8_valid() {
+    let val = 200 as UInt16;
+    let result = UInt8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint16_to_uint8_max() {
+    let val = 255 as UInt16;
+    let result = UInt8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint16_to_uint8_overflow() {
+    let val = 256 as UInt16;
+    let result = UInt8.try_from(val);
+    assert(result.is_err());
+}
+
+@test
+fn test_uint16_to_uint8_large_overflow() {
+    let val = 1000 as UInt16;
+    let result = UInt8.try_from(val);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 7: TryFrom<UInt64> for UInt32
+// =============================================================================
+
+@test
+fn test_uint64_to_uint32_valid_zero() {
+    let val = 0 as UInt64;
+    let result = UInt32.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint64_to_uint32_valid() {
+    let val = 3000000000 as UInt64;
+    let result = UInt32.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint64_to_uint32_max() {
+    let val = 4294967295 as UInt64;
+    let result = UInt32.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint64_to_uint32_overflow() {
+    let val = 4294967296 as UInt64;
+    let result = UInt32.try_from(val);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 8: Cross-sign conversions
+// =============================================================================
+
+@test
+fn test_uint64_to_int_valid() {
+    // UInt64 value within Int range
+    let val = 1000 as UInt64;
+    let result = Int.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_to_int16_valid() {
+    let val = 100 as UInt32;
+    let result = Int16.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint32_to_int16_overflow() {
+    let val = 40000 as UInt32;
+    let result = Int16.try_from(val);
+    assert(result.is_err());
+}
+
+@test
+fn test_uint16_to_int8_valid() {
+    let val = 100 as UInt16;
+    let result = Int8.try_from(val);
+    assert(result.is_ok());
+}
+
+@test
+fn test_uint16_to_int8_overflow() {
+    let val = 200 as UInt16;
+    let result = Int8.try_from(val);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 9: Comprehensive boundary tests
+// =============================================================================
+
+@test
+fn test_cross_type_chain_narrowing() {
+    // A value that fits in Int8 should pass through all narrowing chains
+    let val32 = 42 as Int32;
+    let r16 = Int16.try_from(val32);
+    assert(r16.is_ok());
+
+    let val16 = 42 as Int16;
+    let r8 = Int8.try_from(val16);
+    assert(r8.is_ok());
+}
+
+@test
+fn test_unsigned_chain_narrowing() {
+    let val32 = 200 as UInt32;
+    let r16 = UInt16.try_from(val32);
+    assert(r16.is_ok());
+
+    let val16 = 200 as UInt16;
+    let r8 = UInt8.try_from(val16);
+    assert(r8.is_ok());
+}
+
+@test
+fn test_cross_type_all_fail_for_large() {
+    // 100000 is too large for Int16 and Int8
+    let val = 100000 as Int32;
+    let r16 = Int16.try_from(val);
+    let r8 = Int8.try_from(val);
+    assert(r16.is_err());
+    assert(r8.is_err());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,74 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, pattern-matching, match, variant
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Pattern matching: Maybe, Result, variant destructuring
+
+fn safe_div(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 { None } else { Some(a / b) }
+}
+
+fn unwrap_or(m: Maybe<Int>, default: Int) -> Int {
+    match m {
+        Some(v) => v,
+        None => default
+    }
+}
+
+fn validate(n: Int) -> Result<Int, Text> {
+    if n < 0 {
+        Err("negative")
+    } else if n > 100 {
+        Err("too_large")
+    } else {
+        Ok(n)
+    }
+}
+
+fn result_to_int(r: Result<Int, Text>) -> Int {
+    match r {
+        Ok(v) => v,
+        Err(_) => -1
+    }
+}
+
+fn result_to_msg(r: Result<Int, Text>) -> Text {
+    match r {
+        Ok(v) => f"ok:{v}",
+        Err(e) => f"err:{e}"
+    }
+}
+
+fn main() -> Int {
+    // Maybe patterns
+    assert_eq(unwrap_or(Some(42), 0), 42);
+    assert_eq(unwrap_or(None, 99), 99);
+
+    assert_eq(unwrap_or(safe_div(10, 3), -1), 3);
+    assert_eq(unwrap_or(safe_div(10, 0), -1), -1);
+    assert_eq(unwrap_or(safe_div(0, 5), -1), 0);
+
+    // Result patterns
+    assert_eq(result_to_int(validate(50)), 50);
+    assert_eq(result_to_int(validate(-5)), -1);
+    assert_eq(result_to_int(validate(200)), -1);
+
+    assert_eq(result_to_msg(validate(42)), "ok:42");
+    assert_eq(result_to_msg(validate(-1)), "err:negative");
+    assert_eq(result_to_msg(validate(101)), "err:too_large");
+
+    // Nested match
+    let values = [Some(1), None, Some(3), None, Some(5)];
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        total = total + unwrap_or(values[i], 0);
+        i = i + 1;
+    }
+    assert_eq(total, 9);
+
+    print("diff_pattern_matching: ok");
+    0
+}

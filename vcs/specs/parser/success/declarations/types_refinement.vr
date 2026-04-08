@@ -1,0 +1,48 @@
+// @test: parse-pass
+// @level: L0
+// @tags: parser, declarations, types, refinement
+// @description: Test refinement type definition parsing
+
+// Inline refinement
+type Positive is Int{> 0};
+
+type NonNegative is Int{>= 0};
+
+type Percentage is Float{>= 0.0, <= 100.0};
+
+// Named refinement with predicate
+type NonEmpty is Text{it.len() > 0};
+
+// Multiple predicates
+type ValidAge is Int{>= 0, <= 150};
+
+type BoundedFloat is Float{>= -1.0, <= 1.0, it is not NaN};
+
+// Refinement on generic type
+type NonEmptyList<T> is List<T>{it.len() > 0};
+
+type SortedList<T: Ord> is List<T>{is_sorted(it)};
+
+// With explicit predicate name
+type Email is Text where is_valid_email;
+
+type PhoneNumber is Text where |s| s.len() >= 10 && s.all(is_digit);
+
+// Refinement with lambda
+type Even is Int where |n| n % 2 == 0;
+
+type Prime is Int where is_prime;
+
+// Complex refinement
+type ValidUser is {
+    name: Text{it.len() >= 1, it.len() <= 100},
+    age: Int{>= 0, <= 150},
+    email: Text{is_valid_email(it)}
+};
+
+// Simple refinement types with comparisons
+type SmallInt is Int{< 100};
+
+type LargeFloat is Float{> 1000.0};
+
+type InRange is Int{>= 10, <= 20};

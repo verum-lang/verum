@@ -1,0 +1,157 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, matrix_exponentiation, repeated_squaring, fibonacci, linear_recurrence
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Matrix exponentiation by repeated squaring for 2x2 matrices.
+// Matrices stored as flat [Int; 4]: [a,b,c,d] = {{a,b},{c,d}}.
+// mat_mul multiplies two 2x2 matrices.
+// mat_pow raises a 2x2 matrix to the n-th power.
+// Application: fast Fibonacci via matrix [[1,1],[1,0]]^n.
+
+// Multiply two 2x2 matrices stored as [Int; 4].
+// A = [a0,a1,a2,a3] = {{a0,a1},{a2,a3}}
+// B = [b0,b1,b2,b3]
+// Result stored in out[].
+fn mat_mul(a: [Int; 4], b: [Int; 4], out: [Int; 4]) {
+    out[0] = a[0]*b[0] + a[1]*b[2];
+    out[1] = a[0]*b[1] + a[1]*b[3];
+    out[2] = a[2]*b[0] + a[3]*b[2];
+    out[3] = a[2]*b[1] + a[3]*b[3];
+}
+
+// Copy 2x2 matrix src into dst.
+fn mat_copy(src: [Int; 4], dst: [Int; 4]) {
+    dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = src[3];
+}
+
+// Identity matrix into out.
+fn mat_identity(out: [Int; 4]) {
+    out[0] = 1; out[1] = 0; out[2] = 0; out[3] = 1;
+}
+
+// Raise matrix base to power n, result stored in result[].
+// Uses result as accumulator (identity), base as the running square.
+// tmp[] used as scratch.
+@allow(unbounded_recursion)
+fn mat_pow(base: [Int; 4], n: Int, result: [Int; 4], tmp: [Int; 4]) {
+    if n == 0 {
+        mat_identity(result);
+        return;
+    }
+    if n == 1 {
+        mat_copy(base, result);
+        return;
+    }
+    // tmp = base^(n/2)
+    let mut half_base = [base[0], base[1], base[2], base[3]];
+    let mut half_res  = [0, 0, 0, 0];
+    mat_pow(half_base, n / 2, half_res, tmp);
+    // result = half_res * half_res
+    mat_mul(half_res, half_res, result);
+    if n % 2 == 1 {
+        // result = result * base
+        mat_copy(result, tmp);
+        mat_mul(tmp, base, result);
+    }
+}
+
+// Fibonacci via matrix exponentiation.
+// fib(0)=0, fib(1)=1, fib(n) = [[1,1],[1,0]]^n [0][1] = result[1]
+fn fib_matrix(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut base   = [1, 1, 1, 0];
+    let mut result = [0, 0, 0, 0];
+    let mut tmp    = [0, 0, 0, 0];
+    mat_pow(base, n, result, tmp);
+    result[1]
+}
+
+fn test_mat_mul_identity() {
+    // I * A = A
+    let mut id  = [1, 0, 0, 1];
+    let mut a   = [2, 3, 5, 7];
+    let mut out = [0, 0, 0, 0];
+    mat_mul(id, a, out);
+    assert_eq(out[0], 2);
+    assert_eq(out[1], 3);
+    assert_eq(out[2], 5);
+    assert_eq(out[3], 7);
+    // A * I = A
+    let mut out2 = [0, 0, 0, 0];
+    mat_mul(a, id, out2);
+    assert_eq(out2[0], 2);
+    assert_eq(out2[3], 7);
+    print("mat_mul_identity: ok");
+}
+
+fn test_mat_mul_specific() {
+    // A = [[1,2],[3,4]], B = [[5,6],[7,8]]
+    // A*B = [[1*5+2*7, 1*6+2*8],[3*5+4*7, 3*6+4*8]]
+    //      = [[5+14,6+16],[15+28,18+32]]
+    //      = [[19,22],[43,50]]
+    let mut a = [1, 2, 3, 4];
+    let mut b = [5, 6, 7, 8];
+    let mut out = [0, 0, 0, 0];
+    mat_mul(a, b, out);
+    assert_eq(out[0], 19);
+    assert_eq(out[1], 22);
+    assert_eq(out[2], 43);
+    assert_eq(out[3], 50);
+    print("mat_mul_specific: ok");
+}
+
+fn test_fibonacci_small() {
+    // fib: 0,1,1,2,3,5,8,13,21,34,55,89
+    assert_eq(fib_matrix(1),  1);
+    assert_eq(fib_matrix(2),  1);
+    assert_eq(fib_matrix(3),  2);
+    assert_eq(fib_matrix(4),  3);
+    assert_eq(fib_matrix(5),  5);
+    assert_eq(fib_matrix(6),  8);
+    assert_eq(fib_matrix(10), 55);
+    print("fibonacci_small: ok");
+}
+
+fn test_matrix_power() {
+    // [[2,0],[0,3]]^3 = [[8,0],[0,27]]
+    let mut base   = [2, 0, 0, 3];
+    let mut result = [0, 0, 0, 0];
+    let mut tmp    = [0, 0, 0, 0];
+    mat_pow(base, 3, result, tmp);
+    assert_eq(result[0], 8);
+    assert_eq(result[1], 0);
+    assert_eq(result[2], 0);
+    assert_eq(result[3], 27);
+    print("matrix_power: ok");
+}
+
+fn test_power_zero_and_one() {
+    // A^0 = I
+    let mut base   = [5, 7, 2, 3];
+    let mut result = [0, 0, 0, 0];
+    let mut tmp    = [0, 0, 0, 0];
+    mat_pow(base, 0, result, tmp);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 0);
+    assert_eq(result[2], 0);
+    assert_eq(result[3], 1);
+    // A^1 = A
+    let mut result2 = [0, 0, 0, 0];
+    mat_pow(base, 1, result2, tmp);
+    assert_eq(result2[0], 5);
+    assert_eq(result2[3], 3);
+    print("power_zero_and_one: ok");
+}
+
+fn main() -> Int {
+    test_mat_mul_identity();
+    test_mat_mul_specific();
+    test_fibonacci_small();
+    test_matrix_power();
+    test_power_zero_and_one();
+    print("[OK] 563_interp_matrix_exponentiation");
+    0
+}

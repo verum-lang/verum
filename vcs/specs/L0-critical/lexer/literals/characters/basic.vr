@@ -1,0 +1,144 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, characters, basic
+
+// Basic character literals
+
+fn test_lowercase() {
+    // Lowercase letters
+    let a = 'a';
+    let b = 'b';
+    let c = 'c';
+    let z = 'z';
+}
+
+fn test_uppercase() {
+    // Uppercase letters
+    let A = 'A';
+    let B = 'B';
+    let C = 'C';
+    let Z = 'Z';
+}
+
+fn test_digits() {
+    // Digits
+    let zero = '0';
+    let one = '1';
+    let five = '5';
+    let nine = '9';
+}
+
+fn test_symbols() {
+    // Common symbols
+    let space = ' ';
+    let exclaim = '!';
+    let at = '@';
+    let hash = '#';
+    let dollar = '$';
+    let percent = '%';
+    let caret = '^';
+    let amp = '&';
+    let star = '*';
+    let lparen = '(';
+    let rparen = ')';
+    let minus = '-';
+    let plus = '+';
+    let equals = '=';
+}
+
+fn test_brackets() {
+    // Bracket characters
+    let lbracket = '[';
+    let rbracket = ']';
+    let lbrace = '{';
+    let rbrace = '}';
+    let lt = '<';
+    let gt = '>';
+}
+
+fn test_punctuation() {
+    // Punctuation
+    let period = '.';
+    let comma = ',';
+    let colon = ':';
+    let semi = ';';
+    let question = '?';
+    let slash = '/';
+    let pipe = '|';
+    let tilde = '~';
+    let grave = '`';
+    let underscore = '_';
+}
+
+fn test_arrays() {
+    // Character literals in arrays
+    let vowels = ['a', 'e', 'i', 'o', 'u'];
+    let digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    let operators = ['+', '-', '*', '/', '%'];
+}
+
+fn test_tuples() {
+    // Character literals in tuples
+    let char_pair = ('a', 'b');
+    let range = ('A', 'Z');
+}
+
+// Character literals in match
+fn is_vowel(c: Char) -> Bool {
+    match c {
+        'a' | 'e' | 'i' | 'o' | 'u' => true
+        'A' | 'E' | 'I' | 'O' | 'U' => true
+        _ => false
+    }
+}
+
+fn test_comparisons() {
+    let c = 'a';
+
+    // Character comparisons
+    let is_digit = c >= '0' && c <= '9';
+    let is_lower = c >= 'a' && c <= 'z';
+    let is_upper = c >= 'A' && c <= 'Z';
+    let is_alpha = is_lower || is_upper;
+}
+
+fn test_typed() {
+    // Character literals with type annotation
+    let typed: Char = 'x';
+    let explicit_char: Char = 'y';
+}
+
+// Character literals in function parameters
+fn char_to_digit(c: Char) -> Maybe<Int> {
+    match c {
+        '0' => Some(0)
+        '1' => Some(1)
+        '2' => Some(2)
+        '3' => Some(3)
+        '4' => Some(4)
+        '5' => Some(5)
+        '6' => Some(6)
+        '7' => Some(7)
+        '8' => Some(8)
+        '9' => Some(9)
+        _ => None
+    }
+}
+
+// Character as struct field
+type TokenKind is Symbol | Keyword | Identifier;
+
+type Token is {
+    kind: TokenKind,
+    char_val: Char,
+    position: Int,
+};
+
+fn test_struct_field() {
+    let token = Token {
+        kind: TokenKind.Symbol,
+        char_val: '+',
+        position: 42,
+    };
+}

@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, for, iterable, error
+// @description: For loop missing iterable expression after 'in'
+// @expected-error: E018
+
+fn test() {
+    for x in { }  // Missing iterable expression
+}

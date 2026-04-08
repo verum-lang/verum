@@ -1,0 +1,282 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, generics, call_g, instantiate, monomorphization
+// @timeout: 5000
+// @expect: pass
+//
+// Test: CALL_G, INSTANTIATE, SIZE_OF_G, ALIGN_OF_G
+// Verifies generic function instantiation and calls
+
+type Point is { x: Float, y: Float };
+type Box<T> is { value: T };
+
+// =============================================================================
+// Basic generic functions
+// =============================================================================
+
+fn test_identity() {
+    fn identity<T>(x: T) -> T { x }
+
+    assert_eq(identity(42), 42);
+    assert_eq(identity(3.14), 3.14);
+    assert_eq(identity(true), true);
+    assert_eq(identity("hello"), "hello");
+}
+
+fn test_generic_pair() {
+    fn make_pair<A, B>(a: A, b: B) -> (A, B) { (a, b) }
+
+    let p1 = make_pair(1, "one");
+    assert_eq(p1.0, 1);
+    assert_eq(p1.1, "one");
+
+    let p2 = make_pair(true, 3.14);
+    assert(p2.0);
+    assert_eq(p2.1, 3.14);
+}
+
+fn test_generic_swap() {
+    fn swap<T>(pair: (T, T)) -> (T, T) {
+        (pair.1, pair.0)
+    }
+
+    let p = (1, 2);
+    let swapped = swap(p);
+    assert_eq(swapped.0, 2);
+    assert_eq(swapped.1, 1);
+
+    let p2 = ("a", "b");
+    let swapped2 = swap(p2);
+    assert_eq(swapped2.0, "b");
+    assert_eq(swapped2.1, "a");
+}
+
+// =============================================================================
+// Generic with constraints
+// =============================================================================
+
+fn test_generic_with_constraint() {
+    fn add<T: Add>(a: T, b: T) -> T {
+        a + b
+    }
+
+    assert_eq(add(1, 2), 3);
+    assert_eq(add(1.5, 2.5), 4.0);
+}
+
+fn test_generic_comparable() {
+    fn max<T: Ord>(a: T, b: T) -> T {
+        if a > b { a } else { b }
+    }
+
+    assert_eq(max(1, 2), 2);
+    assert_eq(max(10, 5), 10);
+    assert_eq(max(3.14, 2.71), 3.14);
+    assert_eq(max("z", "a"), "z");
+}
+
+fn test_generic_display() {
+    fn to_string<T: Display>(x: T) -> Text {
+        f"{x}"
+    }
+
+    assert_eq(to_string(42), "42");
+    assert_eq(to_string(3.14), "3.14");
+    assert_eq(to_string(true), "true");
+}
+
+// =============================================================================
+// Generic type instantiation
+// =============================================================================
+
+fn test_generic_struct() {
+    let b1: Box<Int> = Box { value: 42 };
+    let b2: Box<Text> = Box { value: "hello" };
+    let b3: Box<Bool> = Box { value: true };
+
+    assert_eq(b1.value, 42);
+    assert_eq(b2.value, "hello");
+    assert(b3.value);
+}
+
+fn test_nested_generics() {
+    let nested: Box<Box<Int>> = Box { value: Box { value: 42 } };
+
+    assert_eq(nested.value.value, 42);
+}
+
+fn test_generic_with_multiple_params() {
+    type Pair<A, B> is { first: A, second: B };
+
+    let p: Pair<Int, Text> = Pair { first: 1, second: "one" };
+
+    assert_eq(p.first, 1);
+    assert_eq(p.second, "one");
+}
+
+// =============================================================================
+// Generic methods
+// =============================================================================
+
+fn test_generic_methods() {
+    type Container<T> is { items: List<T> };
+
+    implement<T> Container<T> {
+        fn new() -> Container<T> {
+            Container { items: [] }
+        }
+
+        fn add(&mut self, item: T) {
+            self.items.push(item);
+        }
+
+        fn get(&self, index: Int) -> &T {
+            &self.items[index]
+        }
+
+        fn len(&self) -> Int {
+            self.items.len()
+        }
+    }
+
+    let mut c: Container<Int> = Container.new();
+    c.add(1);
+    c.add(2);
+    c.add(3);
+
+    assert_eq(c.len(), 3);
+    assert_eq(*c.get(0), 1);
+    assert_eq(*c.get(2), 3);
+}
+
+fn test_generic_method_with_different_type() {
+    type Wrapper<T> is { value: T };
+
+    implement<T> Wrapper<T> {
+        fn map<U>(self, f: fn(T) -> U) -> Wrapper<U> {
+            Wrapper { value: f(self.value) }
+        }
+    }
+
+    let w: Wrapper<Int> = Wrapper { value: 42 };
+    let w2: Wrapper<Text> = w.map(|x: Int| -> Text { f"{x}" });
+
+    assert_eq(w2.value, "42");
+}
+
+// =============================================================================
+// Type inference with generics
+// =============================================================================
+
+fn test_type_inference() {
+    fn identity<T>(x: T) -> T { x }
+
+    // Type inferred from argument
+    let a = identity(42);       // Int inferred
+    let b = identity("hello");  // Text inferred
+    let c = identity(true);     // Bool inferred
+
+    assert_eq(a, 42);
+    assert_eq(b, "hello");
+    assert(c);
+}
+
+fn test_inference_from_return() {
+    fn default<T: Default>() -> T { T.default() }
+
+    let a: Int = default();
+    let b: Float = default();
+    let c: Bool = default();
+
+    assert_eq(a, 0);
+    assert_eq(b, 0.0);
+    assert(!c);
+}
+
+fn test_inference_chain() {
+    fn first<T>(list: &[T]) -> &T { &list[0] }
+    fn double<T: Add + Copy>(x: T) -> T { x + x }
+
+    let numbers = [1, 2, 3, 4, 5];
+    let first_doubled = double(*first(&numbers));
+
+    assert_eq(first_doubled, 2);
+}
+
+// =============================================================================
+// Monomorphization
+// =============================================================================
+
+// test_monomorphization_creates_specialized: skipped — requires .<T>() turbofish and @size_of
+
+fn test_monomorphization_multiple_uses() {
+    fn process<T: Clone>(x: T) -> (T, T) {
+        (x.clone(), x)
+    }
+
+    // Same generic function, different instantiations
+    let (a, b) = process(42);
+    assert_eq(a, 42);
+    assert_eq(b, 42);
+
+    let (c, d) = process("hello");
+    assert_eq(c, "hello");
+    assert_eq(d, "hello");
+}
+
+fn test_recursive_generic() {
+    fn sum<T: Add + Default>(list: &[T]) -> T {
+        let mut result = T.default();
+        for item in list {
+            result = result + *item;
+        }
+        result
+    }
+
+    assert_eq(sum(&[1, 2, 3, 4, 5]), 15);
+    assert_eq(sum(&[1.0, 2.0, 3.0]), 6.0);
+}
+
+// =============================================================================
+// SIZE_OF_G and ALIGN_OF_G
+// =============================================================================
+
+// test_size_of_generic: skipped — requires .<T>() turbofish and @size_of
+// test_align_of_generic: skipped — requires .<T>() turbofish and @align_of
+// test_size_of_in_allocation: skipped — requires .<T>() turbofish and T.default()
+
+fn main() {
+    // Basic generic functions
+    test_identity();
+    test_generic_pair();
+    test_generic_swap();
+
+    // Constraints
+    test_generic_with_constraint();
+    test_generic_comparable();
+    test_generic_display();
+
+    // Generic types
+    test_generic_struct();
+    test_nested_generics();
+    test_generic_with_multiple_params();
+
+    // Generic methods
+    test_generic_methods();
+    test_generic_method_with_different_type();
+
+    // Type inference
+    test_type_inference();
+    test_inference_from_return();
+    test_inference_chain();
+
+    // Monomorphization
+    // test_monomorphization_creates_specialized: skipped (turbofish)
+    test_monomorphization_multiple_uses();
+    test_recursive_generic();
+
+    // Size and alignment — skipped (turbofish + @size_of/@align_of)
+
+    print("001_generic_functions: PASSED");
+}

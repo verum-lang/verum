@@ -1,0 +1,295 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, binding, at, ref, advanced
+//
+// Tests @ binding patterns that allow binding a value while also
+// destructuring it or matching it against a subpattern.
+
+//------------------------------------------------------------------------------
+// Type Definitions (moved to top to avoid forward reference issues)
+//------------------------------------------------------------------------------
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+//------------------------------------------------------------------------------
+// Basic @ Binding Patterns
+//------------------------------------------------------------------------------
+
+/// Bind entire value while matching subpattern.
+fn at_with_literal(n: Int) -> (Int, Text) {
+    match n {
+        x @ 0 => (x, "zero"),
+        x @ 1 => (x, "one"),
+        x @ 2..=10 => (x, "small"),
+        x @ _ => (x, "other"),
+    }
+}
+
+/// Bind to range pattern.
+fn at_with_range(n: Int) -> Maybe<Int> {
+    match n {
+        valid @ 1..=100 => Some(valid),
+        _ => None,
+    }
+}
+
+/// Bind entire match value (trivial @ _).
+fn at_trivial(n: Int) -> Int {
+    match n {
+        x @ _ => x + 1,
+    }
+}
+
+//------------------------------------------------------------------------------
+// @ Binding with Enum Variants
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+/// Bind entire enum variant.
+fn at_maybe_variant(m: Maybe<Int>) -> (Maybe<Int>, Int) {
+    match m {
+        opt @ Some(x) => (opt, x),
+        opt @ None => (opt, 0),
+    }
+}
+
+/// Bind only the inner value with additional constraint.
+fn at_maybe_inner(m: Maybe<Int>) -> Maybe<Int> {
+    match m {
+        Some(x @ 1..=100) => Some(x),
+        _ => None,
+    }
+}
+
+/// Bind result variant while extracting payload.
+fn at_result(r: Result<Int, Text>) -> (Bool, Int) {
+    match r {
+        res @ Ok(val) => (true, val),
+        res @ Err(_) => (false, -1),
+    }
+}
+
+//------------------------------------------------------------------------------
+// @ Binding with Nested Patterns
+//------------------------------------------------------------------------------
+
+/// Bind nested enum.
+fn at_nested_maybe(mm: Maybe<Maybe<Int>>) -> (Maybe<Int>, Int) {
+    match mm {
+        Some(inner @ Some(x)) => (inner, x),
+        Some(inner @ None) => (inner, 0),
+        None => (None, -1),
+    }
+}
+
+/// Bind at multiple levels.
+fn at_multi_level(mm: Maybe<Maybe<Int>>) -> (Maybe<Maybe<Int>>, Maybe<Int>, Int) {
+    match mm {
+        outer @ Some(inner @ Some(x)) => (outer, inner, x),
+        outer @ Some(inner @ None) => (outer, inner, 0),
+        outer @ None => (outer, None, -1),
+    }
+}
+
+//------------------------------------------------------------------------------
+// @ Binding with Structs
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+/// Bind entire struct while destructuring.
+fn at_struct(p: Point) -> (Point, Int, Int) {
+    match p {
+        point @ Point { x, y } => (point, x, y),
+    }
+}
+
+/// Bind nested struct field.
+fn at_nested_struct(r: Rectangle) -> (Point, Int) {
+    match r {
+        Rectangle { top_left: corner @ Point { x, .. }, .. } => (corner, x),
+    }
+}
+
+/// Multiple @ bindings in struct.
+fn at_multi_struct(r: Rectangle) -> (Point, Point) {
+    match r {
+        Rectangle {
+            top_left: tl @ Point { .. },
+            bottom_right: br @ Point { .. }
+        } => (tl, br),
+    }
+}
+
+//------------------------------------------------------------------------------
+// @ Binding with Tuples
+//------------------------------------------------------------------------------
+
+/// Bind entire tuple.
+fn at_tuple(pair: (Int, Int)) -> ((Int, Int), Int) {
+    match pair {
+        p @ (a, b) => (p, a + b),
+    }
+}
+
+/// Bind tuple elements with ranges.
+fn at_tuple_ranges(pair: (Int, Int)) -> Maybe<(Int, Int)> {
+    match pair {
+        (a @ 0..=10, b @ 0..=10) => Some((a, b)),
+        _ => None,
+    }
+}
+
+/// Nested tuple with @ binding.
+fn at_nested_tuple(data: ((Int, Int), Int)) -> ((Int, Int), Int) {
+    match data {
+        (inner @ (a, b), c) => (inner, a + b + c),
+    }
+}
+
+//------------------------------------------------------------------------------
+// @ Binding with List Patterns
+//------------------------------------------------------------------------------
+
+/// Bind first element with constraint.
+fn at_list_first(arr: List<Int>) -> Maybe<Int> {
+    match arr {
+        [first @ 1..=10, ..] => Some(first),
+        _ => None,
+    }
+}
+
+/// Bind list head.
+fn at_list_head(arr: List<Int>) -> (Int, List<Int>) {
+    match arr {
+        [head, ..tail] => (head, tail),
+        [] => (0, []),
+    }
+}
+
+//------------------------------------------------------------------------------
+// @ Binding with Guards
+//------------------------------------------------------------------------------
+
+/// @ binding with guard condition.
+fn at_with_guard(n: Int) -> Text {
+    match n {
+        x @ 0..=100 if x % 2 == 0 => "even in range",
+        x @ 0..=100 if x % 2 == 1 => "odd in range",
+        x @ _ if x > 100 => "large",
+        _ => "negative",
+    }
+}
+
+/// Guard using the bound variable.
+fn at_guard_uses_binding(pair: (Int, Int)) -> Text {
+    match pair {
+        p @ (a, b) if a + b > 10 => "large sum",
+        p @ (a, b) if a * b > 10 => "large product",
+        _ => "small",
+    }
+}
+
+//------------------------------------------------------------------------------
+// @ Binding with Or-Patterns
+//------------------------------------------------------------------------------
+
+/// @ binding on or-pattern.
+fn at_or_pattern(n: Int) -> (Int, Text) {
+    match n {
+        x @ (1 | 2 | 3) => (x, "small"),
+        x @ (10 | 20 | 30) => (x, "medium"),
+        x @ _ => (x, "other"),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Complex @ Binding Combinations
+//------------------------------------------------------------------------------
+
+// Use simpler non-recursive tree for testing @ binding
+type SimpleNode is
+    | Leaf(Int)
+    | Branch(Int, Int, Int);
+
+/// Bind tree node while destructuring.
+fn at_tree_node(n: SimpleNode) -> (SimpleNode, Int) {
+    match n {
+        node @ Leaf(x) => (node, x),
+        node @ Branch(_, value, _) => (node, value),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Basic @ binding
+    assert(at_with_literal(0) == (0, "zero"));
+    assert(at_with_literal(5) == (5, "small"));
+    assert(at_with_literal(100) == (100, "other"));
+
+    // Range binding
+    assert(at_with_range(50) == Some(50));
+    assert(at_with_range(0) == None);
+    assert(at_with_range(101) == None);
+
+    // Enum binding
+    let (opt, val) = at_maybe_variant(Some(42));
+    assert(val == 42);
+
+    // Inner binding
+    assert(at_maybe_inner(Some(50)) == Some(50));
+    assert(at_maybe_inner(Some(150)) == None);
+    assert(at_maybe_inner(None) == None);
+
+    // Nested binding
+    let (inner, x) = at_nested_maybe(Some(Some(42)));
+    assert(x == 42);
+
+    // Struct binding
+    let (p, x, y) = at_struct(Point { x: 3, y: 4 });
+    assert(x == 3);
+    assert(y == 4);
+
+    // Tuple binding
+    let (pair, sum) = at_tuple((3, 4));
+    assert(sum == 7);
+
+    // Range tuple
+    assert(at_tuple_ranges((5, 5)) == Some((5, 5)));
+    assert(at_tuple_ranges((15, 5)) == None);
+
+    // List head
+    let (head, _) = at_list_head([1, 2, 3, 4, 5]);
+    assert(head == 1);
+
+    // With guard
+    assert(at_with_guard(50) == "even in range");
+    assert(at_with_guard(51) == "odd in range");
+    assert(at_with_guard(200) == "large");
+
+    // Or-pattern
+    assert(at_or_pattern(2) == (2, "small"));
+    assert(at_or_pattern(20) == (20, "medium"));
+    assert(at_or_pattern(100) == (100, "other"));
+}

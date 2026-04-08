@@ -1,0 +1,317 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, permutation, combinatorics
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Generate permutations of [1,2,3] using iterative
+// next-permutation algorithm. Verify total count is 6 and lexicographic ordering.
+
+// =============================================================================
+// Arr3 type for permutations of 3 elements
+// =============================================================================
+
+type Arr3 is { e0: Int, e1: Int, e2: Int };
+
+fn arr3_get(a: Arr3, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else { a.e2 }
+}
+
+fn arr3_set(a: Arr3, i: Int, v: Int) -> Arr3 {
+    Arr3 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }
+    }
+}
+
+fn arr3_swap(a: Arr3, i: Int, j: Int) -> Arr3 {
+    let vi = arr3_get(a, i);
+    let vj = arr3_get(a, j);
+    let a2 = arr3_set(a, i, vj);
+    arr3_set(a2, j, vi)
+}
+
+// =============================================================================
+// Next permutation algorithm (returns new Arr3 and whether there was a next)
+// Returns: encoded as Arr3 + flag (1=has next, 0=last permutation)
+// =============================================================================
+
+type PermResult is { perm: Arr3, has_next: Int };
+
+fn next_permutation(a: Arr3, n: Int) -> PermResult {
+    // Step 1: Find largest i such that a[i] < a[i+1]
+    let mut i = n - 2;
+    let mut found = 0;
+    while i >= 0 {
+        if arr3_get(a, i) < arr3_get(a, i + 1) {
+            found = 1;
+            // break by setting i to escape value after recording
+            let save_i = i;
+            i = -1; // exit loop
+            i = save_i; // restore, but we need to exit
+            // Use found flag to break
+            let dummy = 0;
+            // Actually just break the while with a workaround
+            i = -100; // force exit
+            i = save_i;
+        }
+        if found == 0 {
+            i = i - 1;
+        } else {
+            // We found it, stop searching
+            i = -100; // force exit
+        }
+    }
+
+    if found == 0 {
+        // Already last permutation
+        return PermResult { perm: a, has_next: 0 };
+    }
+
+    // Recover actual i: find it again
+    let mut pivot = n - 2;
+    while pivot >= 0 {
+        if arr3_get(a, pivot) < arr3_get(a, pivot + 1) {
+            // Found the pivot; stop
+            let found2 = 1;
+            // force exit
+            let save_p = pivot;
+            pivot = -100;
+            pivot = save_p;
+        }
+        if pivot >= 0 && arr3_get(a, pivot) < arr3_get(a, pivot + 1) {
+            pivot = -100;
+        } else if pivot >= -1 {
+            pivot = pivot - 1;
+        }
+    }
+
+    // Simpler approach: re-scan from right to find pivot
+    let mut px = -1;
+    let mut k = n - 2;
+    while k >= 0 {
+        if px == -1 && arr3_get(a, k) < arr3_get(a, k + 1) {
+            px = k;
+        }
+        k = k - 1;
+    }
+
+    if px == -1 {
+        return PermResult { perm: a, has_next: 0 };
+    }
+
+    // Step 2: Find largest j > px such that a[px] < a[j]
+    let mut j = n - 1;
+    while j > px {
+        if arr3_get(a, j) > arr3_get(a, px) {
+            let save_j = j;
+            j = -100;
+            j = save_j;
+        }
+        if j >= 0 && arr3_get(a, j) > arr3_get(a, px) {
+            j = -100;
+        } else if j > px {
+            j = j - 1;
+        }
+    }
+
+    // Re-scan for j
+    let mut jx = -1;
+    let mut m = n - 1;
+    while m > px {
+        if jx == -1 && arr3_get(a, m) > arr3_get(a, px) {
+            jx = m;
+        }
+        m = m - 1;
+    }
+
+    // Step 3: Swap a[px] and a[jx]
+    let mut b = arr3_swap(a, px, jx);
+
+    // Step 4: Reverse the suffix starting at px+1
+    // For n=3, if px=0, reverse indices 1..2; if px=1, nothing to reverse
+    let mut lo = px + 1;
+    let mut hi = n - 1;
+    while lo < hi {
+        b = arr3_swap(b, lo, hi);
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+
+    PermResult { perm: b, has_next: 1 }
+}
+
+// =============================================================================
+// Encode permutation as 3-digit number for easy comparison
+// =============================================================================
+
+fn encode_perm(a: Arr3) -> Int {
+    arr3_get(a, 0) * 100 + arr3_get(a, 1) * 10 + arr3_get(a, 2)
+}
+
+// =============================================================================
+// Store all 6 permutations
+// =============================================================================
+
+type Arr6 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int };
+
+fn arr6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else { a.e5 }
+}
+
+fn arr6_set(a: Arr6, i: Int, v: Int) -> Arr6 {
+    Arr6 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 }
+    }
+}
+
+fn test_all_permutations() {
+    let mut current = Arr3 { e0: 1, e1: 2, e2: 3 };
+    let mut perms = Arr6 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0 };
+    perms = arr6_set(perms, 0, encode_perm(current));
+
+    let mut count = 1;
+    let mut cont = 1;
+    while cont == 1 {
+        let pr = next_permutation(current, 3);
+        if pr.has_next == 1 {
+            current = pr.perm;
+            perms = arr6_set(perms, count, encode_perm(current));
+            count = count + 1;
+        } else {
+            cont = 0;
+        }
+    }
+
+    // Should have exactly 6 permutations (3! = 6)
+    assert_eq(count, 6);
+
+    // Verify lexicographic order
+    // 123, 132, 213, 231, 312, 321
+    assert_eq(arr6_get(perms, 0), 123);
+    assert_eq(arr6_get(perms, 1), 132);
+    assert_eq(arr6_get(perms, 2), 213);
+    assert_eq(arr6_get(perms, 3), 231);
+    assert_eq(arr6_get(perms, 4), 312);
+    assert_eq(arr6_get(perms, 5), 321);
+}
+
+// =============================================================================
+// Verify each permutation is strictly greater than previous (lexicographic)
+// =============================================================================
+
+fn test_lexicographic_order() {
+    let mut current = Arr3 { e0: 1, e1: 2, e2: 3 };
+    let mut prev_code = encode_perm(current);
+    let mut count = 1;
+    let mut all_increasing = 1;
+    let mut cont = 1;
+
+    while cont == 1 {
+        let pr = next_permutation(current, 3);
+        if pr.has_next == 1 {
+            current = pr.perm;
+            let code = encode_perm(current);
+            if code <= prev_code {
+                all_increasing = 0;
+            }
+            prev_code = code;
+            count = count + 1;
+        } else {
+            cont = 0;
+        }
+    }
+
+    assert_eq(count, 6);
+    assert_eq(all_increasing, 1);
+}
+
+// =============================================================================
+// Factorial via permutation counting
+// =============================================================================
+
+fn count_permutations_2() -> Int {
+    let mut current = Arr3 { e0: 1, e1: 2, e2: 0 };
+    let mut count = 1;
+    let mut cont = 1;
+    while cont == 1 {
+        let pr = next_permutation(current, 2);
+        if pr.has_next == 1 {
+            current = pr.perm;
+            count = count + 1;
+        } else {
+            cont = 0;
+        }
+    }
+    count
+}
+
+fn test_permutation_count_n2() {
+    assert_eq(count_permutations_2(), 2);  // 2! = 2
+}
+
+// =============================================================================
+// Test each permutation has all elements
+// =============================================================================
+
+fn has_all_elements(a: Arr3) -> Int {
+    let mut has1 = 0;
+    let mut has2 = 0;
+    let mut has3 = 0;
+    let mut i = 0;
+    while i < 3 {
+        let v = arr3_get(a, i);
+        if v == 1 { has1 = 1; }
+        if v == 2 { has2 = 1; }
+        if v == 3 { has3 = 1; }
+        i = i + 1;
+    }
+    if has1 == 1 && has2 == 1 && has3 == 1 { 1 } else { 0 }
+}
+
+fn test_all_valid_permutations() {
+    let mut current = Arr3 { e0: 1, e1: 2, e2: 3 };
+    assert_eq(has_all_elements(current), 1);
+
+    let mut all_valid = 1;
+    let mut cont = 1;
+    while cont == 1 {
+        let pr = next_permutation(current, 3);
+        if pr.has_next == 1 {
+            current = pr.perm;
+            if has_all_elements(current) != 1 {
+                all_valid = 0;
+            }
+        } else {
+            cont = 0;
+        }
+    }
+    assert_eq(all_valid, 1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_all_permutations();
+    test_lexicographic_order();
+    test_permutation_count_n2();
+    test_all_valid_permutations();
+    print("[OK] 272_interp_permutation_gen");
+    0
+}

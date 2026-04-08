@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, references, mut, error
+// @description: Test detection of double mut in reference type
+// @expected-error: E088
+
+// Double mut is not valid - only one mut allowed
+fn test(x: &mut mut T) {}

@@ -1,0 +1,7 @@
+// Minimal: Simple list
+use verum_core.base.{List}
+
+fn main() {
+    let xs: List<Int> = [1, 2, 3];
+    let first = xs[0];
+}

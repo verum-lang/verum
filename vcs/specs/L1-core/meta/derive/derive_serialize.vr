@@ -1,0 +1,42 @@
+// @test: parse
+// @level: L1
+// @tags: meta, derive, serialize, attributes
+// @timeout: 5000
+
+/// @derive for serialization-related protocols.
+
+@derive(Serialize, Deserialize)
+type User is {
+    name: Text,
+    age: Int,
+    active: Bool,
+};
+
+@derive(Serialize)
+type Config is {
+    host: Text,
+    port: Int,
+    debug: Bool,
+};
+
+// Derive with field-level attributes
+@derive(Serialize)
+type ApiResponse is {
+    @serialize(rename = "status_code")
+    status: Int,
+    @serialize(skip)
+    internal_id: Int,
+    body: Text,
+};
+
+// Derive on sum type for serialization
+@derive(Serialize, Deserialize)
+type Message is
+    | Text(Text)
+    | Binary(List<Int>)
+    | Ping;
+
+fn main() {
+    let user = User { name: "Alice", age: 30, active: true };
+    print("Derive serialize tests parsed");
+}

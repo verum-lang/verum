@@ -1,0 +1,85 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, buffer-overflow, stack, compile-time
+// @description: Tests compile-time detection of stack overflow risks
+
+/// Verum performs static analysis to detect potential stack overflows:
+/// - Excessively large stack allocations
+/// - Unbounded recursion without @allow(unbounded_recursion)
+/// - Deep call chains exceeding stack limit
+///
+/// This prevents stack smashing attacks and undefined behavior.
+
+// INVALID: Stack allocation too large
+fn allocate_huge_stack() {
+    // 1GB array on stack - definitely too large
+    let huge: [Int; 134_217_728] = [0; 134_217_728];  // ERROR: Stack allocation exceeds safe limit
+
+    print(f"First: {huge[0]}");
+}
+
+// INVALID: Unbounded recursion without annotation
+fn infinite_loop(n: Int) -> Int {
+    // No base case - infinite recursion
+    infinite_loop(n + 1)  // ERROR: Potential stack overflow: unbounded recursion detected
+}
+
+// INVALID: Mutual recursion without bounds
+fn ping(n: Int) {
+    pong(n);  // ERROR: Mutual recursion may cause stack overflow
+}
+
+fn pong(n: Int) {
+    ping(n);
+}
+
+fn main() {
+    allocate_huge_stack();
+    let _ = infinite_loop(0);
+    ping(0);
+}
+
+// VALID: Bounded recursion with decreasing argument
+fn factorial(n: Int) -> Int {
+    contract#"requires n >= 0;";
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)  // OK: n decreases, will terminate
+    }
+}
+
+// VALID: Tail recursion (optimized to loop)
+@tailrec
+fn sum_tail(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        sum_tail(n - 1, acc + n)  // Tail position, becomes loop
+    }
+}
+
+// VALID: Explicit allowance for unbounded (expert use)
+@allow(unbounded_recursion)
+fn user_controlled_recursion(depth: Int) {
+    if depth > 0 {
+        user_controlled_recursion(depth - 1);
+    }
+}
+
+// VALID: Heap allocation for large data
+// Note: Uses List instead of Heap<T> since Heap type is not yet implemented
+fn allocate_large_on_heap() {
+    // Large data goes on heap, not stack - using List which is heap-allocated
+    let large: List<Int> = List.with_capacity(1000);
+
+    print("Large list allocated on heap");
+}
+
+// VALID: Dynamic allocation for unknown-size data
+fn dynamic_allocation(size: Int) {
+    // List handles heap allocation automatically
+    let data: List<Int> = List.with_capacity(size);
+    // List grows as needed
+}

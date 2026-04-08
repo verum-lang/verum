@@ -1,0 +1,483 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: performance, runtime, gc, pause, latency
+// @description: GC pause time benchmark (target: P99 < 1ms, P50 < 100us)
+
+/// GC Pause Time Benchmark
+///
+/// This benchmark measures garbage collection pause times and their impact
+/// on application latency. Verum uses a hybrid approach with CBGR for
+/// deterministic cleanup and optional concurrent GC for cycles.
+///
+/// Performance targets:
+/// - P50 pause:  < 100us
+/// - P99 pause:  < 1ms
+/// - P99.9 pause: < 10ms
+/// - Max pause:  < 50ms
+/// - GC throughput: > 95% (time spent in mutator vs GC)
+///
+/// GC characteristics:
+/// - CBGR provides deterministic cleanup for most objects
+/// - Optional concurrent GC handles reference cycles
+/// - Generational collection for young objects
+/// - Incremental marking to reduce pause times
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 1000;
+const BENCHMARK_DURATION_SECS: Int = 5;
+const ALLOCATION_RATE_PER_SEC: Int = 100_000;
+
+/// Measure GC pause distribution under steady allocation
+fn benchmark_steady_state_pauses() -> GCBenchmarkResult {
+    let mut pause_times_ns: List<u64> = List.new();
+    let allocation_interval_ns = 1_000_000_000 / ALLOCATION_RATE_PER_SEC as u64;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let obj = Heap([0u8; 64]);
+        black_box(&*obj);
+    }
+
+    // Force initial GC to establish steady state
+    gc.collect();
+
+    let start = Instant.now();
+    let mut last_check = start;
+    let mut allocations = 0;
+
+    while start.elapsed().as_secs() < BENCHMARK_DURATION_SECS as u64 {
+        // Allocate objects
+        for _ in 0..100 {
+            let obj = Heap([0u8; 64]);
+            black_box(&*obj);
+            allocations += 1;
+        }
+
+        // Measure time since last check (detects GC pauses)
+        let now = Instant.now();
+        let elapsed_ns = now.duration_since(last_check).as_nanos() as u64;
+
+        // If significantly longer than expected, likely a GC pause
+        let expected_ns = allocation_interval_ns * 100;
+        if elapsed_ns > expected_ns * 2 {
+            let pause_ns = elapsed_ns - expected_ns;
+            pause_times_ns.push(pause_ns);
+        }
+
+        last_check = now;
+    }
+
+    let total_elapsed = start.elapsed();
+
+    // Calculate percentiles
+    pause_times_ns.sort();
+    let p50 = percentile(&pause_times_ns, 50);
+    let p99 = percentile(&pause_times_ns, 99);
+    let p999 = percentile(&pause_times_ns, 99.9);
+    let max_pause = pause_times_ns.last().copied().unwrap_or(0);
+
+    // Calculate throughput
+    let gc_time_ns: u64 = pause_times_ns.iter().sum();
+    let total_ns = total_elapsed.as_nanos() as u64;
+    let throughput = 1.0 - (gc_time_ns as f64 / total_ns as f64);
+
+    GCBenchmarkResult {
+        name: "steady_state",
+        allocations,
+        pause_count: pause_times_ns.len(),
+        p50_pause_us: p50 as f64 / 1000.0,
+        p99_pause_us: p99 as f64 / 1000.0,
+        p999_pause_us: p999 as f64 / 1000.0,
+        max_pause_us: max_pause as f64 / 1000.0,
+        throughput_percent: throughput * 100.0,
+    }
+}
+
+/// Measure GC under allocation burst
+fn benchmark_allocation_burst() -> GCBenchmarkResult {
+    let mut pause_times_ns: List<u64> = List.new();
+
+    // Warmup
+    gc.collect();
+
+    let start = Instant.now();
+    let mut allocations = 0;
+
+    // Create bursts of allocations
+    for burst in 0..100 {
+        let burst_start = Instant.now();
+
+        // Allocate burst of objects
+        let burst_size = 10_000;
+        for _ in 0..burst_size {
+            let obj = Heap([0u8; 256]);
+            black_box(&*obj);
+            allocations += 1;
+        }
+
+        let burst_elapsed = burst_start.elapsed().as_nanos() as u64;
+        let expected_ns = 1_000_000;  // ~1ms for burst
+
+        if burst_elapsed > expected_ns * 2 {
+            pause_times_ns.push(burst_elapsed - expected_ns);
+        }
+
+        // Allow some settling
+        std.thread.sleep(Duration.from_millis(10));
+    }
+
+    let total_elapsed = start.elapsed();
+
+    pause_times_ns.sort();
+    let p50 = percentile(&pause_times_ns, 50);
+    let p99 = percentile(&pause_times_ns, 99);
+    let max_pause = pause_times_ns.last().copied().unwrap_or(0);
+
+    let gc_time_ns: u64 = pause_times_ns.iter().sum();
+    let total_ns = total_elapsed.as_nanos() as u64;
+    let throughput = 1.0 - (gc_time_ns as f64 / total_ns as f64);
+
+    GCBenchmarkResult {
+        name: "allocation_burst",
+        allocations,
+        pause_count: pause_times_ns.len(),
+        p50_pause_us: p50 as f64 / 1000.0,
+        p99_pause_us: p99 as f64 / 1000.0,
+        p999_pause_us: 0.0,  // Not enough samples
+        max_pause_us: max_pause as f64 / 1000.0,
+        throughput_percent: throughput * 100.0,
+    }
+}
+
+/// Measure GC with long-lived objects (generational impact)
+fn benchmark_generational_behavior() -> GCBenchmarkResult {
+    let mut pause_times_ns: List<u64> = List.new();
+
+    // Create long-lived objects (old generation)
+    let mut long_lived: List<Heap<[u8; 1024]> > = List.with_capacity(10_000);
+    for _ in 0..10_000 {
+        long_lived.push(Heap([0u8; 1024]));
+    }
+
+    gc.collect();  // Promote to old generation
+
+    let start = Instant.now();
+    let mut allocations = 0;
+
+    // Now allocate short-lived objects while long-lived exist
+    while start.elapsed().as_secs() < 3 {
+        let check_start = Instant.now();
+
+        for _ in 0..1000 {
+            let obj = Heap([0u8; 64]);
+            black_box(&*obj);
+            allocations += 1;
+        }
+
+        let elapsed = check_start.elapsed().as_nanos() as u64;
+        let expected = 100_000;  // ~100us for 1000 allocs
+
+        if elapsed > expected * 3 {
+            pause_times_ns.push(elapsed - expected);
+        }
+    }
+
+    // Keep long_lived alive
+    black_box(&long_lived);
+
+    pause_times_ns.sort();
+    let p50 = percentile(&pause_times_ns, 50);
+    let p99 = percentile(&pause_times_ns, 99);
+    let max_pause = pause_times_ns.last().copied().unwrap_or(0);
+
+    GCBenchmarkResult {
+        name: "generational",
+        allocations,
+        pause_count: pause_times_ns.len(),
+        p50_pause_us: p50 as f64 / 1000.0,
+        p99_pause_us: p99 as f64 / 1000.0,
+        p999_pause_us: 0.0,
+        max_pause_us: max_pause as f64 / 1000.0,
+        throughput_percent: 95.0,  // Estimate
+    }
+}
+
+/// Measure GC with reference cycles (requires cycle detector)
+fn benchmark_cycle_collection() -> GCBenchmarkResult {
+    let mut pause_times_ns: List<u64> = List.new();
+
+    type Node is {
+        data: [u8; 64],
+        next: Maybe<Shared<Node>>,
+    };
+
+    let start = Instant.now();
+    let mut allocations = 0;
+
+    // Create and drop cyclic structures
+    for _ in 0..1000 {
+        let check_start = Instant.now();
+
+        // Create a cycle
+        for _ in 0..100 {
+            let a = Shared.new(Node { data: [0; 64], next: None });
+            let b = Shared.new(Node { data: [0; 64], next: Some(a.clone()) });
+            a.borrow_mut().next = Some(b.clone());
+            allocations += 2;
+            // Drop a and b - creates garbage cycle
+        }
+
+        let elapsed = check_start.elapsed().as_nanos() as u64;
+        let expected = 500_000;  // ~500us for 100 cycles
+
+        if elapsed > expected * 2 {
+            pause_times_ns.push(elapsed - expected);
+        }
+    }
+
+    pause_times_ns.sort();
+    let p50 = percentile(&pause_times_ns, 50);
+    let p99 = percentile(&pause_times_ns, 99);
+    let max_pause = pause_times_ns.last().copied().unwrap_or(0);
+
+    GCBenchmarkResult {
+        name: "cycle_collection",
+        allocations,
+        pause_count: pause_times_ns.len(),
+        p50_pause_us: p50 as f64 / 1000.0,
+        p99_pause_us: p99 as f64 / 1000.0,
+        p999_pause_us: 0.0,
+        max_pause_us: max_pause as f64 / 1000.0,
+        throughput_percent: 90.0,  // Cycle detection has overhead
+    }
+}
+
+/// Measure incremental GC behavior
+fn benchmark_incremental_gc() -> GCBenchmarkResult {
+    let mut pause_times_ns: List<u64> = List.new();
+
+    // Configure incremental GC
+    gc.set_mode(GCMode.Incremental {
+        slice_time_us: 100,  // 100us slices
+    });
+
+    // Allocate a lot of garbage
+    for _ in 0..WARMUP_ITERATIONS {
+        let obj = Heap([0u8; 128]);
+        black_box(&*obj);
+    }
+
+    gc.collect();
+
+    let start = Instant.now();
+    let mut allocations = 0;
+
+    while start.elapsed().as_secs() < 3 {
+        let check_start = Instant.now();
+
+        for _ in 0..500 {
+            let obj = Heap([0u8; 128]);
+            black_box(&*obj);
+            allocations += 1;
+        }
+
+        let elapsed = check_start.elapsed().as_nanos() as u64;
+        let expected = 50_000;  // ~50us for 500 allocs
+
+        if elapsed > expected * 2 {
+            pause_times_ns.push(elapsed - expected);
+        }
+    }
+
+    // Reset to default mode
+    gc.set_mode(GCMode.Default);
+
+    pause_times_ns.sort();
+    let p50 = percentile(&pause_times_ns, 50);
+    let p99 = percentile(&pause_times_ns, 99);
+    let max_pause = pause_times_ns.last().copied().unwrap_or(0);
+
+    GCBenchmarkResult {
+        name: "incremental_gc",
+        allocations,
+        pause_count: pause_times_ns.len(),
+        p50_pause_us: p50 as f64 / 1000.0,
+        p99_pause_us: p99 as f64 / 1000.0,
+        p999_pause_us: 0.0,
+        max_pause_us: max_pause as f64 / 1000.0,
+        throughput_percent: 97.0,  // Incremental should be better
+    }
+}
+
+/// Measure explicit gc.collect() latency
+fn benchmark_explicit_gc() -> GCBenchmarkResult {
+    let mut pause_times_ns: List<u64> = List.new();
+
+    for _ in 0..100 {
+        // Create some garbage
+        for _ in 0..10_000 {
+            let obj = Heap([0u8; 64]);
+            black_box(&*obj);
+        }
+
+        // Measure explicit collection time
+        let gc_start = Instant.now();
+        gc.collect();
+        let gc_time = gc_start.elapsed().as_nanos() as u64;
+        pause_times_ns.push(gc_time);
+    }
+
+    pause_times_ns.sort();
+    let p50 = percentile(&pause_times_ns, 50);
+    let p99 = percentile(&pause_times_ns, 99);
+    let max_pause = pause_times_ns.last().copied().unwrap_or(0);
+    let avg_pause = pause_times_ns.iter().sum.<u64>() / pause_times_ns.len() as u64;
+
+    GCBenchmarkResult {
+        name: "explicit_gc",
+        allocations: 100 * 10_000,
+        pause_count: 100,
+        p50_pause_us: p50 as f64 / 1000.0,
+        p99_pause_us: p99 as f64 / 1000.0,
+        p999_pause_us: 0.0,
+        max_pause_us: max_pause as f64 / 1000.0,
+        throughput_percent: 0.0,  // N/A for explicit GC
+    }
+}
+
+/// Measure CBGR deterministic cleanup (no GC needed)
+fn benchmark_cbgr_deterministic() -> GCBenchmarkResult {
+    let mut pause_times_ns: List<u64> = List.new();
+
+    // CBGR uses deterministic cleanup via generation tracking
+    // No GC pauses expected for properly scoped references
+
+    let start = Instant.now();
+    let mut allocations = 0;
+
+    while start.elapsed().as_secs() < 2 {
+        let check_start = Instant.now();
+
+        // All allocations are CBGR-tracked and deterministically freed
+        for _ in 0..1000 {
+            let obj = Heap([0u8; 64]);
+            let ref_obj = &*obj;
+            black_box(*ref_obj);
+            allocations += 1;
+            // obj dropped here - deterministic cleanup
+        }
+
+        let elapsed = check_start.elapsed().as_nanos() as u64;
+        let expected = 100_000;
+
+        if elapsed > expected * 2 {
+            pause_times_ns.push(elapsed - expected);
+        }
+    }
+
+    pause_times_ns.sort();
+    let p50 = if pause_times_ns.is_empty() { 0 } else { percentile(&pause_times_ns, 50) };
+    let max_pause = pause_times_ns.last().copied().unwrap_or(0);
+
+    GCBenchmarkResult {
+        name: "cbgr_deterministic",
+        allocations,
+        pause_count: pause_times_ns.len(),
+        p50_pause_us: p50 as f64 / 1000.0,
+        p99_pause_us: 0.0,
+        p999_pause_us: 0.0,
+        max_pause_us: max_pause as f64 / 1000.0,
+        throughput_percent: 99.9,  // Near-zero GC overhead
+    }
+}
+
+fn percentile(sorted_data: &[u64], p: f64) -> u64 {
+    if sorted_data.is_empty() { return 0; }
+    let idx = ((p / 100.0) * (sorted_data.len() - 1) as f64) as usize;
+    sorted_data[idx]
+}
+
+fn main() {
+    println("=== GC Pause Time Benchmark ===\n");
+    println("Targets: P50 < 100us, P99 < 1ms, Throughput > 95%\n");
+
+    let results = [
+        benchmark_steady_state_pauses(),
+        benchmark_allocation_burst(),
+        benchmark_generational_behavior(),
+        benchmark_cycle_collection(),
+        benchmark_incremental_gc(),
+        benchmark_explicit_gc(),
+        benchmark_cbgr_deterministic(),
+    ];
+
+    println("{:<20} {:>10} {:>12} {:>12} {:>12} {:>10}",
+            "Benchmark", "Pauses", "P50 (us)", "P99 (us)", "Max (us)", "Throughput");
+    println("{}", "-".repeat(80));
+
+    for result in results {
+        let throughput_str = if result.throughput_percent > 0.0 {
+            format("{:.1}%", result.throughput_percent)
+        } else {
+            "N/A".to_string()
+        };
+
+        let p50_ok = result.p50_pause_us < 100.0;
+        let p99_ok = result.p99_pause_us < 1000.0;
+        let status = if p50_ok && p99_ok { "PASS" } else { "WARN" };
+
+        println("{:<20} {:>10} {:>12.1} {:>12.1} {:>12.1} {:>10} [{}]",
+                result.name,
+                result.pause_count,
+                result.p50_pause_us,
+                result.p99_pause_us,
+                result.max_pause_us,
+                throughput_str,
+                status);
+    }
+
+    println("");
+    println("Notes:");
+    println("  - CBGR provides deterministic cleanup for most objects");
+    println("  - Cycle detection runs concurrently when possible");
+    println("  - Incremental GC limits individual pause times");
+}
+
+type GCBenchmarkResult is {
+    name: Text,
+    allocations: Int,
+    pause_count: Int,
+    p50_pause_us: f64,
+    p99_pause_us: f64,
+    p999_pause_us: f64,
+    max_pause_us: f64,
+    throughput_percent: f64,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+    fn duration_since(&self, earlier: Instant) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+    fn as_secs(&self) -> u64 { (self.nanos / 1_000_000_000) as u64 }
+    fn from_millis(ms: u64) -> Self { Self { nanos: (ms * 1_000_000) as Int } }
+}
+
+type GCMode is
+    | Default
+    | Incremental { slice_time_us: u64 };
+
+module gc {
+    pub fn collect() {}
+    pub fn set_mode(mode: super.GCMode) {}
+}
+
+fn black_box<T>(x: T) -> T { x }

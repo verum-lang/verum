@@ -1,0 +1,89 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: text, interpolation, fstring, e2e
+// @description: Test f-string text interpolation with various expressions
+
+type Point is { x: Int, y: Int };
+
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn describe(&self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+fn greet(name: Text, age: Int) -> Text {
+    f"Hello {name}, you are {age} years old"
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Simple interpolation
+    let name = "World";
+    let msg = f"Hello {name}!";
+    if msg != "Hello World!" {
+        print(f"FAIL 1: '{msg}'");
+        f = f + 1;
+    } else {
+        print("  simple_interp: OK");
+    }
+
+    // Test 2: Number interpolation
+    let x = 42;
+    let num_msg = f"The answer is {x}";
+    if num_msg != "The answer is 42" {
+        print(f"FAIL 2: '{num_msg}'");
+        f = f + 1;
+    } else {
+        print("  num_interp: OK");
+    }
+
+    // Test 3: Expression in interpolation
+    let a = 10;
+    let b = 20;
+    let expr_msg = f"{a} + {b} = {a + b}";
+    if expr_msg != "10 + 20 = 30" {
+        print(f"FAIL 3: '{expr_msg}'");
+        f = f + 1;
+    } else {
+        print("  expr_interp: OK");
+    }
+
+    // Test 4: Method return in interpolation
+    let p = Point.new(3, 4);
+    let desc = p.describe();
+    if desc != "Point(3, 4)" {
+        print(f"FAIL 4: '{desc}'");
+        f = f + 1;
+    } else {
+        print("  method_interp: OK");
+    }
+
+    // Test 5: Function call result
+    let greeting = greet("Alice", 30);
+    if greeting != "Hello Alice, you are 30 years old" {
+        print(f"FAIL 5: '{greeting}'");
+        f = f + 1;
+    } else {
+        print("  func_interp: OK");
+    }
+
+    // Test 6: Multiple expressions
+    let multi = f"({p.x},{p.y})";
+    if multi != "(3,4)" {
+        print(f"FAIL 6: '{multi}'");
+        f = f + 1;
+    } else {
+        print("  multi_interp: OK");
+    }
+
+    if f == 0 {
+        print("All text interpolation tests passed");
+    }
+    f
+}

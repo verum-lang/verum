@@ -1,0 +1,46 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: typecheck passes but VBC interpreter execution fails - FIXED
+// @tier: 0
+// @expected-exit: 0
+// @description: Test type min/max properties for integer types
+
+fn main() {
+    // Test Int8 min/max
+    assert_eq(Int8.min, -128);
+    assert_eq(Int8.max, 127);
+
+    // Test Int16 min/max
+    assert_eq(Int16.min, -32768);
+    assert_eq(Int16.max, 32767);
+
+    // Test Int32 min/max
+    assert_eq(Int32.min, -2147483648);
+    assert_eq(Int32.max, 2147483647);
+
+    // Test Int64 min/max
+    assert_eq(Int64.min, -9223372036854775808);
+    assert_eq(Int64.max, 9223372036854775807);
+
+    // Test UInt8 min/max
+    assert_eq(UInt8.min, 0);
+    assert_eq(UInt8.max, 255);
+
+    // Test UInt16 min/max
+    assert_eq(UInt16.min, 0);
+    assert_eq(UInt16.max, 65535);
+
+    // Test UInt32 min/max
+    assert_eq(UInt32.min, 0);
+    assert_eq(UInt32.max, 4294967295);
+
+    // Test UInt64 min/max
+    assert_eq(UInt64.min, 0);
+    assert_eq(UInt64.max, 18446744073709551615);
+
+    // Test compatibility aliases
+    assert_eq(i32.min, -2147483648);
+    assert_eq(i32.max, 2147483647);
+    assert_eq(u64.min, 0);
+    assert_eq(u64.max, 18446744073709551615);
+}

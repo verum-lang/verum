@@ -1,0 +1,770 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, interpreter, stack-machine, bytecode, vm
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT stack-based bytecode interpreter with push, pop, add, sub, mul, div, dup, swap, over, jump-if-zero, halt
+
+// === Data stack: 16-element flat buffer ===
+type Stack16 is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    s8: Int, s9: Int, s10: Int, s11: Int,
+    s12: Int, s13: Int, s14: Int, s15: Int,
+    sp: Int  // stack pointer (number of elements)
+};
+
+fn stack_new() -> Stack16 {
+    Stack16 {
+        s0: 0, s1: 0, s2: 0, s3: 0,
+        s4: 0, s5: 0, s6: 0, s7: 0,
+        s8: 0, s9: 0, s10: 0, s11: 0,
+        s12: 0, s13: 0, s14: 0, s15: 0,
+        sp: 0
+    }
+}
+
+fn stack_get(st: Stack16, i: Int) -> Int {
+    if i == 0 { st.s0 }
+    else if i == 1 { st.s1 }
+    else if i == 2 { st.s2 }
+    else if i == 3 { st.s3 }
+    else if i == 4 { st.s4 }
+    else if i == 5 { st.s5 }
+    else if i == 6 { st.s6 }
+    else if i == 7 { st.s7 }
+    else if i == 8 { st.s8 }
+    else if i == 9 { st.s9 }
+    else if i == 10 { st.s10 }
+    else if i == 11 { st.s11 }
+    else if i == 12 { st.s12 }
+    else if i == 13 { st.s13 }
+    else if i == 14 { st.s14 }
+    else { st.s15 }
+}
+
+fn stack_set(st: Stack16, i: Int, v: Int) -> Stack16 {
+    Stack16 {
+        s0: if i == 0 { v } else { st.s0 },
+        s1: if i == 1 { v } else { st.s1 },
+        s2: if i == 2 { v } else { st.s2 },
+        s3: if i == 3 { v } else { st.s3 },
+        s4: if i == 4 { v } else { st.s4 },
+        s5: if i == 5 { v } else { st.s5 },
+        s6: if i == 6 { v } else { st.s6 },
+        s7: if i == 7 { v } else { st.s7 },
+        s8: if i == 8 { v } else { st.s8 },
+        s9: if i == 9 { v } else { st.s9 },
+        s10: if i == 10 { v } else { st.s10 },
+        s11: if i == 11 { v } else { st.s11 },
+        s12: if i == 12 { v } else { st.s12 },
+        s13: if i == 13 { v } else { st.s13 },
+        s14: if i == 14 { v } else { st.s14 },
+        s15: if i == 15 { v } else { st.s15 },
+        sp: st.sp
+    }
+}
+
+fn stack_push(st: Stack16, v: Int) -> Stack16 {
+    let idx = st.sp;
+    let st2 = stack_set(st, idx, v);
+    Stack16 {
+        s0: st2.s0, s1: st2.s1, s2: st2.s2, s3: st2.s3,
+        s4: st2.s4, s5: st2.s5, s6: st2.s6, s7: st2.s7,
+        s8: st2.s8, s9: st2.s9, s10: st2.s10, s11: st2.s11,
+        s12: st2.s12, s13: st2.s13, s14: st2.s14, s15: st2.s15,
+        sp: idx + 1
+    }
+}
+
+fn stack_top(st: Stack16) -> Int {
+    if st.sp == 0 { 0 }
+    else { stack_get(st, st.sp - 1) }
+}
+
+fn stack_pop(st: Stack16) -> Stack16 {
+    if st.sp == 0 { st }
+    else {
+        Stack16 {
+            s0: st.s0, s1: st.s1, s2: st.s2, s3: st.s3,
+            s4: st.s4, s5: st.s5, s6: st.s6, s7: st.s7,
+            s8: st.s8, s9: st.s9, s10: st.s10, s11: st.s11,
+            s12: st.s12, s13: st.s13, s14: st.s14, s15: st.s15,
+            sp: st.sp - 1
+        }
+    }
+}
+
+// === Bytecode program: 32-instruction flat buffer ===
+// Each instruction: opcode in upper bits, operand in lower bits
+// Opcodes:
+//   0 = HALT
+//   1 = PUSH(operand)
+//   2 = POP
+//   3 = ADD
+//   4 = SUB
+//   5 = MUL
+//   6 = DIV
+//   7 = DUP
+//   8 = SWAP
+//   9 = OVER
+//  10 = JZ(target)   -- jump if top is zero (pops the test value)
+//  11 = JMP(target)  -- unconditional jump
+//  12 = NEG          -- negate top of stack
+//  13 = MOD          -- modulo
+
+type Code32 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int,
+    c12: Int, c13: Int, c14: Int, c15: Int,
+    c16: Int, c17: Int, c18: Int, c19: Int,
+    c20: Int, c21: Int, c22: Int, c23: Int,
+    c24: Int, c25: Int, c26: Int, c27: Int,
+    c28: Int, c29: Int, c30: Int, c31: Int,
+    count: Int
+};
+
+fn code_new() -> Code32 {
+    Code32 {
+        c0: 0, c1: 0, c2: 0, c3: 0,
+        c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0,
+        c12: 0, c13: 0, c14: 0, c15: 0,
+        c16: 0, c17: 0, c18: 0, c19: 0,
+        c20: 0, c21: 0, c22: 0, c23: 0,
+        c24: 0, c25: 0, c26: 0, c27: 0,
+        c28: 0, c29: 0, c30: 0, c31: 0,
+        count: 0
+    }
+}
+
+fn code_get(p: Code32, i: Int) -> Int {
+    if i == 0 { p.c0 }
+    else if i == 1 { p.c1 }
+    else if i == 2 { p.c2 }
+    else if i == 3 { p.c3 }
+    else if i == 4 { p.c4 }
+    else if i == 5 { p.c5 }
+    else if i == 6 { p.c6 }
+    else if i == 7 { p.c7 }
+    else if i == 8 { p.c8 }
+    else if i == 9 { p.c9 }
+    else if i == 10 { p.c10 }
+    else if i == 11 { p.c11 }
+    else if i == 12 { p.c12 }
+    else if i == 13 { p.c13 }
+    else if i == 14 { p.c14 }
+    else if i == 15 { p.c15 }
+    else if i == 16 { p.c16 }
+    else if i == 17 { p.c17 }
+    else if i == 18 { p.c18 }
+    else if i == 19 { p.c19 }
+    else if i == 20 { p.c20 }
+    else if i == 21 { p.c21 }
+    else if i == 22 { p.c22 }
+    else if i == 23 { p.c23 }
+    else if i == 24 { p.c24 }
+    else if i == 25 { p.c25 }
+    else if i == 26 { p.c26 }
+    else if i == 27 { p.c27 }
+    else if i == 28 { p.c28 }
+    else if i == 29 { p.c29 }
+    else if i == 30 { p.c30 }
+    else { p.c31 }
+}
+
+fn code_set(p: Code32, i: Int, v: Int) -> Code32 {
+    Code32 {
+        c0: if i == 0 { v } else { p.c0 },
+        c1: if i == 1 { v } else { p.c1 },
+        c2: if i == 2 { v } else { p.c2 },
+        c3: if i == 3 { v } else { p.c3 },
+        c4: if i == 4 { v } else { p.c4 },
+        c5: if i == 5 { v } else { p.c5 },
+        c6: if i == 6 { v } else { p.c6 },
+        c7: if i == 7 { v } else { p.c7 },
+        c8: if i == 8 { v } else { p.c8 },
+        c9: if i == 9 { v } else { p.c9 },
+        c10: if i == 10 { v } else { p.c10 },
+        c11: if i == 11 { v } else { p.c11 },
+        c12: if i == 12 { v } else { p.c12 },
+        c13: if i == 13 { v } else { p.c13 },
+        c14: if i == 14 { v } else { p.c14 },
+        c15: if i == 15 { v } else { p.c15 },
+        c16: if i == 16 { v } else { p.c16 },
+        c17: if i == 17 { v } else { p.c17 },
+        c18: if i == 18 { v } else { p.c18 },
+        c19: if i == 19 { v } else { p.c19 },
+        c20: if i == 20 { v } else { p.c20 },
+        c21: if i == 21 { v } else { p.c21 },
+        c22: if i == 22 { v } else { p.c22 },
+        c23: if i == 23 { v } else { p.c23 },
+        c24: if i == 24 { v } else { p.c24 },
+        c25: if i == 25 { v } else { p.c25 },
+        c26: if i == 26 { v } else { p.c26 },
+        c27: if i == 27 { v } else { p.c27 },
+        c28: if i == 28 { v } else { p.c28 },
+        c29: if i == 29 { v } else { p.c29 },
+        c30: if i == 30 { v } else { p.c30 },
+        c31: if i == 31 { v } else { p.c31 },
+        count: p.count
+    }
+}
+
+// Encode instruction: opcode * 1000 + operand
+fn encode(opcode: Int, operand: Int) -> Int {
+    opcode * 1000 + operand
+}
+
+fn decode_opcode(instr: Int) -> Int {
+    instr / 1000
+}
+
+fn decode_operand(instr: Int) -> Int {
+    instr % 1000
+}
+
+// Helper to emit instruction and return updated code with incremented count
+fn emit(p: Code32, opcode: Int, operand: Int) -> Code32 {
+    let idx = p.count;
+    let p2 = code_set(p, idx, encode(opcode, operand));
+    Code32 {
+        c0: p2.c0, c1: p2.c1, c2: p2.c2, c3: p2.c3,
+        c4: p2.c4, c5: p2.c5, c6: p2.c6, c7: p2.c7,
+        c8: p2.c8, c9: p2.c9, c10: p2.c10, c11: p2.c11,
+        c12: p2.c12, c13: p2.c13, c14: p2.c14, c15: p2.c15,
+        c16: p2.c16, c17: p2.c17, c18: p2.c18, c19: p2.c19,
+        c20: p2.c20, c21: p2.c21, c22: p2.c22, c23: p2.c23,
+        c24: p2.c24, c25: p2.c25, c26: p2.c26, c27: p2.c27,
+        c28: p2.c28, c29: p2.c29, c30: p2.c30, c31: p2.c31,
+        count: idx + 1
+    }
+}
+
+// === VM State ===
+type VM is { stack: Stack16, pc: Int, halted: Bool };
+
+fn vm_new(st: Stack16) -> VM {
+    VM { stack: st, pc: 0, halted: false }
+}
+
+// Execute one instruction
+fn vm_step(vm: VM, code: Code32) -> VM {
+    if vm.halted { vm }
+    else if vm.pc >= code.count { VM { stack: vm.stack, pc: vm.pc, halted: true } }
+    else {
+        let instr = code_get(code, vm.pc);
+        let op = decode_opcode(instr);
+        let arg = decode_operand(instr);
+        let st = vm.stack;
+
+        if op == 0 {
+            // HALT
+            VM { stack: st, pc: vm.pc + 1, halted: true }
+        } else if op == 1 {
+            // PUSH operand
+            VM { stack: stack_push(st, arg), pc: vm.pc + 1, halted: false }
+        } else if op == 2 {
+            // POP
+            VM { stack: stack_pop(st), pc: vm.pc + 1, halted: false }
+        } else if op == 3 {
+            // ADD
+            let a = stack_top(st);
+            let st2 = stack_pop(st);
+            let b = stack_top(st2);
+            let st3 = stack_pop(st2);
+            VM { stack: stack_push(st3, b + a), pc: vm.pc + 1, halted: false }
+        } else if op == 4 {
+            // SUB
+            let a = stack_top(st);
+            let st2 = stack_pop(st);
+            let b = stack_top(st2);
+            let st3 = stack_pop(st2);
+            VM { stack: stack_push(st3, b - a), pc: vm.pc + 1, halted: false }
+        } else if op == 5 {
+            // MUL
+            let a = stack_top(st);
+            let st2 = stack_pop(st);
+            let b = stack_top(st2);
+            let st3 = stack_pop(st2);
+            VM { stack: stack_push(st3, b * a), pc: vm.pc + 1, halted: false }
+        } else if op == 6 {
+            // DIV
+            let a = stack_top(st);
+            let st2 = stack_pop(st);
+            let b = stack_top(st2);
+            let st3 = stack_pop(st2);
+            let result = if a == 0 { 0 } else { b / a };
+            VM { stack: stack_push(st3, result), pc: vm.pc + 1, halted: false }
+        } else if op == 7 {
+            // DUP
+            let v = stack_top(st);
+            VM { stack: stack_push(st, v), pc: vm.pc + 1, halted: false }
+        } else if op == 8 {
+            // SWAP
+            let a = stack_top(st);
+            let st2 = stack_pop(st);
+            let b = stack_top(st2);
+            let st3 = stack_pop(st2);
+            VM { stack: stack_push(stack_push(st3, a), b), pc: vm.pc + 1, halted: false }
+        } else if op == 9 {
+            // OVER: copy second element to top
+            let a = stack_top(st);
+            let st2 = stack_pop(st);
+            let b = stack_top(st2);
+            VM { stack: stack_push(st, b), pc: vm.pc + 1, halted: false }
+        } else if op == 10 {
+            // JZ(target): jump if top == 0
+            let v = stack_top(st);
+            let st2 = stack_pop(st);
+            if v == 0 {
+                VM { stack: st2, pc: arg, halted: false }
+            } else {
+                VM { stack: st2, pc: vm.pc + 1, halted: false }
+            }
+        } else if op == 11 {
+            // JMP(target)
+            VM { stack: st, pc: arg, halted: false }
+        } else if op == 12 {
+            // NEG
+            let v = stack_top(st);
+            let st2 = stack_pop(st);
+            VM { stack: stack_push(st2, 0 - v), pc: vm.pc + 1, halted: false }
+        } else {
+            // MOD (op == 13)
+            let a = stack_top(st);
+            let st2 = stack_pop(st);
+            let b = stack_top(st2);
+            let st3 = stack_pop(st2);
+            let result = if a == 0 { 0 } else { b % a };
+            VM { stack: stack_push(st3, result), pc: vm.pc + 1, halted: false }
+        }
+    }
+}
+
+// Run VM until halted (max 500 steps to prevent infinite loops)
+fn vm_run(code: Code32) -> Stack16 {
+    let mut vm = vm_new(stack_new());
+    let mut steps = 0;
+    while !vm.halted && steps < 500 {
+        vm = vm_step(vm, code);
+        steps = steps + 1;
+    }
+    vm.stack
+}
+
+fn main() -> Int {
+    // === Test 1: Simple push and add ===
+    // PUSH 3, PUSH 4, ADD, HALT -> stack top = 7
+    let mut p1 = code_new();
+    p1 = emit(p1, 1, 3);   // PUSH 3
+    p1 = emit(p1, 1, 4);   // PUSH 4
+    p1 = emit(p1, 3, 0);   // ADD
+    p1 = emit(p1, 0, 0);   // HALT
+    let r1 = vm_run(p1);
+    assert_eq(stack_top(r1), 7);
+    assert_eq(r1.sp, 1);
+
+    // === Test 2: Subtraction ===
+    // PUSH 10, PUSH 3, SUB, HALT -> 10 - 3 = 7
+    let mut p2 = code_new();
+    p2 = emit(p2, 1, 10);
+    p2 = emit(p2, 1, 3);
+    p2 = emit(p2, 4, 0);   // SUB
+    p2 = emit(p2, 0, 0);
+    let r2 = vm_run(p2);
+    assert_eq(stack_top(r2), 7);
+
+    // === Test 3: Multiplication ===
+    // PUSH 6, PUSH 7, MUL, HALT -> 42
+    let mut p3 = code_new();
+    p3 = emit(p3, 1, 6);
+    p3 = emit(p3, 1, 7);
+    p3 = emit(p3, 5, 0);   // MUL
+    p3 = emit(p3, 0, 0);
+    let r3 = vm_run(p3);
+    assert_eq(stack_top(r3), 42);
+
+    // === Test 4: Division ===
+    // PUSH 20, PUSH 4, DIV, HALT -> 5
+    let mut p4 = code_new();
+    p4 = emit(p4, 1, 20);
+    p4 = emit(p4, 1, 4);
+    p4 = emit(p4, 6, 0);   // DIV
+    p4 = emit(p4, 0, 0);
+    let r4 = vm_run(p4);
+    assert_eq(stack_top(r4), 5);
+
+    // === Test 5: DUP ===
+    // PUSH 5, DUP, MUL, HALT -> 5*5 = 25
+    let mut p5 = code_new();
+    p5 = emit(p5, 1, 5);
+    p5 = emit(p5, 7, 0);   // DUP
+    p5 = emit(p5, 5, 0);   // MUL
+    p5 = emit(p5, 0, 0);
+    let r5 = vm_run(p5);
+    assert_eq(stack_top(r5), 25);
+    assert_eq(r5.sp, 1);
+
+    // === Test 6: SWAP ===
+    // PUSH 10, PUSH 20, SWAP, HALT -> top=10, second=20
+    let mut p6 = code_new();
+    p6 = emit(p6, 1, 10);
+    p6 = emit(p6, 1, 20);
+    p6 = emit(p6, 8, 0);   // SWAP
+    p6 = emit(p6, 0, 0);
+    let r6 = vm_run(p6);
+    assert_eq(stack_top(r6), 10);
+    assert_eq(stack_get(r6, 0), 20);
+
+    // === Test 7: OVER ===
+    // PUSH 10, PUSH 20, OVER, HALT -> stack = [10, 20, 10], top=10
+    let mut p7 = code_new();
+    p7 = emit(p7, 1, 10);
+    p7 = emit(p7, 1, 20);
+    p7 = emit(p7, 9, 0);   // OVER
+    p7 = emit(p7, 0, 0);
+    let r7 = vm_run(p7);
+    assert_eq(r7.sp, 3);
+    assert_eq(stack_top(r7), 10);
+    assert_eq(stack_get(r7, 1), 20);
+    assert_eq(stack_get(r7, 0), 10);
+
+    // === Test 8: NEG ===
+    // PUSH 42, NEG, HALT -> -42
+    let mut p8 = code_new();
+    p8 = emit(p8, 1, 42);
+    p8 = emit(p8, 12, 0);  // NEG
+    p8 = emit(p8, 0, 0);
+    let r8 = vm_run(p8);
+    assert_eq(stack_top(r8), 0 - 42);
+
+    // === Test 9: MOD ===
+    // PUSH 17, PUSH 5, MOD, HALT -> 17 % 5 = 2
+    let mut p9 = code_new();
+    p9 = emit(p9, 1, 17);
+    p9 = emit(p9, 1, 5);
+    p9 = emit(p9, 13, 0);  // MOD
+    p9 = emit(p9, 0, 0);
+    let r9 = vm_run(p9);
+    assert_eq(stack_top(r9), 2);
+
+    // === Test 10: Complex expression (2 + 3) * (7 - 4) = 15 ===
+    let mut p10 = code_new();
+    p10 = emit(p10, 1, 2);   // PUSH 2
+    p10 = emit(p10, 1, 3);   // PUSH 3
+    p10 = emit(p10, 3, 0);   // ADD -> 5
+    p10 = emit(p10, 1, 7);   // PUSH 7
+    p10 = emit(p10, 1, 4);   // PUSH 4
+    p10 = emit(p10, 4, 0);   // SUB -> 3
+    p10 = emit(p10, 5, 0);   // MUL -> 15
+    p10 = emit(p10, 0, 0);   // HALT
+    let r10 = vm_run(p10);
+    assert_eq(stack_top(r10), 15);
+    assert_eq(r10.sp, 1);
+
+    // === Test 11: JZ (jump if zero) - taken ===
+    // PUSH 0, JZ 3, PUSH 99, PUSH 42, HALT
+    // Since top is 0, jump to instruction 3 (PUSH 42), skip PUSH 99
+    let mut p11 = code_new();
+    p11 = emit(p11, 1, 0);    // 0: PUSH 0
+    p11 = emit(p11, 10, 3);   // 1: JZ 3 (pops 0, jumps to 3)
+    p11 = emit(p11, 1, 99);   // 2: PUSH 99 (skipped)
+    p11 = emit(p11, 1, 42);   // 3: PUSH 42
+    p11 = emit(p11, 0, 0);    // 4: HALT
+    let r11 = vm_run(p11);
+    assert_eq(stack_top(r11), 42);
+    assert_eq(r11.sp, 1);
+
+    // === Test 12: JZ (not taken) ===
+    // PUSH 1, JZ 3, PUSH 99, HALT, PUSH 42, HALT
+    // Top is 1 (non-zero), don't jump -> PUSH 99
+    let mut p12 = code_new();
+    p12 = emit(p12, 1, 1);    // 0: PUSH 1
+    p12 = emit(p12, 10, 4);   // 1: JZ 4 (pops 1, NOT zero, fall through)
+    p12 = emit(p12, 1, 99);   // 2: PUSH 99
+    p12 = emit(p12, 0, 0);    // 3: HALT
+    p12 = emit(p12, 1, 42);   // 4: PUSH 42 (not reached)
+    p12 = emit(p12, 0, 0);    // 5: HALT
+    let r12 = vm_run(p12);
+    assert_eq(stack_top(r12), 99);
+
+    // === Test 13: Loop - compute sum 1+2+...+10 using JZ/JMP ===
+    // Algorithm: push accumulator=0, push counter=10
+    // Loop: DUP, JZ end, OVER, ADD (acc += counter), SWAP, PUSH 1, SUB (counter--), JMP loop
+    // end: POP (remove 0 counter), HALT
+    let mut p13 = code_new();
+    p13 = emit(p13, 1, 0);     // 0: PUSH 0 (accumulator)
+    p13 = emit(p13, 1, 10);    // 1: PUSH 10 (counter)
+    // loop: (pc=2)
+    p13 = emit(p13, 7, 0);     // 2: DUP (duplicate counter)
+    p13 = emit(p13, 10, 9);    // 3: JZ 9 (if counter==0, jump to end)
+    p13 = emit(p13, 9, 0);     // 4: OVER (copy accumulator)
+    p13 = emit(p13, 3, 0);     // 5: ADD (acc + counter)
+    p13 = emit(p13, 8, 0);     // 6: SWAP (put new acc below counter)
+    p13 = emit(p13, 1, 1);     // 7: PUSH 1
+    p13 = emit(p13, 4, 0);     // 8: SUB (counter - 1)  -- note: stack is [..., acc, counter, 1] -> [..., acc, counter-1]
+    // Wait, need to be more careful. Let me restructure.
+    // After step 6 SWAP: stack is [new_acc, old_counter]
+    // But we need counter on top. Let me think again...
+    // Actually, let me use a simpler loop structure.
+    // Stack layout: [acc, counter]
+    // Step 2 DUP: [acc, counter, counter]
+    // Step 3 JZ: pops counter copy -> [acc, counter], jumps if 0
+    // Step 4 OVER: [acc, counter, acc]
+    // Step 5 ADD: [acc, counter+acc] -- wrong, we want acc+counter but OVER copies second
+
+    // Let me redo this more carefully:
+    // We want:  acc += counter; counter -= 1; loop
+    // Stack: [acc, counter]
+    // DUP counter: [acc, counter, counter]
+    // JZ end: pops copy, if 0 go to end. [acc, counter]
+    // SWAP: [counter, acc]
+    // OVER: [counter, acc, counter]
+    // ADD:  [counter, acc+counter]
+    // SWAP: [acc+counter, counter] = [new_acc, counter]
+    // PUSH 1: [new_acc, counter, 1]
+    // SWAP: [new_acc, 1, counter]
+    // Hmm, this is getting complex. Let me use a cleaner approach.
+
+    // Simpler: compute 5! = 120 with a loop
+    // Push result=1, push n=5
+    // loop: DUP, JZ end, SWAP, OVER, MUL, SWAP, PUSH 1, SUB, JMP loop
+    // end: POP, HALT
+    // Stack: [result, n]
+    // DUP: [result, n, n]
+    // JZ end: pops n-copy, if 0 jump. [result, n]
+    // SWAP: [n, result]
+    // OVER: [n, result, n]
+    // MUL: [n, result*n]
+    // SWAP: [result*n, n]
+    // PUSH 1: [result*n, n, 1]
+    // SUB: [result*n, n-1]
+    // JMP loop
+
+    p13 = code_new();
+    p13 = emit(p13, 1, 1);     // 0: PUSH 1 (result)
+    p13 = emit(p13, 1, 5);     // 1: PUSH 5 (n)
+    // loop at pc=2
+    p13 = emit(p13, 7, 0);     // 2: DUP  -> [result, n, n]
+    p13 = emit(p13, 10, 10);   // 3: JZ 10 -> [result, n]
+    p13 = emit(p13, 8, 0);     // 4: SWAP -> [n, result]
+    p13 = emit(p13, 9, 0);     // 5: OVER -> [n, result, n]
+    p13 = emit(p13, 5, 0);     // 6: MUL  -> [n, result*n]
+    p13 = emit(p13, 8, 0);     // 7: SWAP -> [result*n, n]
+    p13 = emit(p13, 1, 1);     // 8: PUSH 1 -> [result*n, n, 1]
+    p13 = emit(p13, 4, 0);     // 9: SUB  -> [result*n, n-1]
+    p13 = emit(p13, 11, 2);    // 10 is where we jump on zero... wait.
+    // Actually JZ at index 3 jumps to 10 when n=0.
+    // JMP should be at index 10, not 11.
+    // Let me fix: after SUB at index 9, we need JMP loop (index 2)
+    // JZ target=11 (the POP instruction after the loop)
+
+    p13 = code_new();
+    p13 = emit(p13, 1, 1);     // 0: PUSH 1 (result)
+    p13 = emit(p13, 1, 5);     // 1: PUSH 5 (n)
+    // loop at pc=2
+    p13 = emit(p13, 7, 0);     // 2: DUP
+    p13 = emit(p13, 10, 11);   // 3: JZ 11 (to POP+HALT)
+    p13 = emit(p13, 8, 0);     // 4: SWAP
+    p13 = emit(p13, 9, 0);     // 5: OVER
+    p13 = emit(p13, 5, 0);     // 6: MUL
+    p13 = emit(p13, 8, 0);     // 7: SWAP
+    p13 = emit(p13, 1, 1);     // 8: PUSH 1
+    p13 = emit(p13, 4, 0);     // 9: SUB
+    p13 = emit(p13, 11, 2);    // 10: JMP 2 (loop)
+    p13 = emit(p13, 2, 0);     // 11: POP (remove 0)
+    p13 = emit(p13, 0, 0);     // 12: HALT
+
+    let r13 = vm_run(p13);
+    assert_eq(stack_top(r13), 120);  // 5! = 120
+    assert_eq(r13.sp, 1);
+
+    // === Test 14: POP ===
+    let mut p14 = code_new();
+    p14 = emit(p14, 1, 10);
+    p14 = emit(p14, 1, 20);
+    p14 = emit(p14, 1, 30);
+    p14 = emit(p14, 2, 0);    // POP
+    p14 = emit(p14, 0, 0);
+    let r14 = vm_run(p14);
+    assert_eq(stack_top(r14), 20);
+    assert_eq(r14.sp, 2);
+
+    // === Test 15: Chain of operations ===
+    // Compute (100 - 37) * 2 + 5 = 131
+    let mut p15 = code_new();
+    p15 = emit(p15, 1, 100);
+    p15 = emit(p15, 1, 37);
+    p15 = emit(p15, 4, 0);    // SUB -> 63
+    p15 = emit(p15, 1, 2);
+    p15 = emit(p15, 5, 0);    // MUL -> 126
+    p15 = emit(p15, 1, 5);
+    p15 = emit(p15, 3, 0);    // ADD -> 131
+    p15 = emit(p15, 0, 0);
+    let r15 = vm_run(p15);
+    assert_eq(stack_top(r15), 131);
+
+    // === Test 16: Multiple values on stack ===
+    // Push 1,2,3,4,5 then add all
+    let mut p16 = code_new();
+    p16 = emit(p16, 1, 1);
+    p16 = emit(p16, 1, 2);
+    p16 = emit(p16, 1, 3);
+    p16 = emit(p16, 1, 4);
+    p16 = emit(p16, 1, 5);
+    p16 = emit(p16, 3, 0);   // ADD -> 4+5=9
+    p16 = emit(p16, 3, 0);   // ADD -> 3+9=12
+    p16 = emit(p16, 3, 0);   // ADD -> 2+12=14
+    p16 = emit(p16, 3, 0);   // ADD -> 1+14=15
+    p16 = emit(p16, 0, 0);
+    let r16 = vm_run(p16);
+    assert_eq(stack_top(r16), 15);
+    assert_eq(r16.sp, 1);
+
+    // === Test 17: DUP then ADD = double ===
+    let mut p17 = code_new();
+    p17 = emit(p17, 1, 21);
+    p17 = emit(p17, 7, 0);   // DUP
+    p17 = emit(p17, 3, 0);   // ADD -> 42
+    p17 = emit(p17, 0, 0);
+    let r17 = vm_run(p17);
+    assert_eq(stack_top(r17), 42);
+
+    // === Test 18: Division by zero returns 0 ===
+    let mut p18 = code_new();
+    p18 = emit(p18, 1, 42);
+    p18 = emit(p18, 1, 0);
+    p18 = emit(p18, 6, 0);   // DIV by zero
+    p18 = emit(p18, 0, 0);
+    let r18 = vm_run(p18);
+    assert_eq(stack_top(r18), 0);
+
+    // === Test 19: SWAP then SUB ===
+    // PUSH 3, PUSH 10, SWAP, SUB -> 10 - 3 = 7
+    // After SWAP: stack is [10, 3], SUB pops 3 and 10: 10 - 3 = 7
+    let mut p19 = code_new();
+    p19 = emit(p19, 1, 3);
+    p19 = emit(p19, 1, 10);
+    p19 = emit(p19, 8, 0);   // SWAP -> [10, 3]
+    p19 = emit(p19, 4, 0);   // SUB -> 10 - 3 = 7
+    p19 = emit(p19, 0, 0);
+    let r19 = vm_run(p19);
+    assert_eq(stack_top(r19), 7);
+
+    // === Test 20: Fibonacci via loop ===
+    // Compute fib(10) = 55
+    // Stack: [fib_prev, fib_curr, counter]
+    // We keep track with: PUSH 0, PUSH 1, PUSH 10
+    // loop: check counter, if 0 done; else compute next fib
+    // This is complex in a stack machine, let me do a simple iterative approach:
+    // accumulator-based: push a=0, b=1, n=10
+    // loop: dup n, jz end, pop-n, swap a/b, over b, add -> [b, a+b], push n-1, jmp loop
+    // Actually let me just verify the factorial result is correct and add more simple tests
+
+    // === Test 20: NEG twice is identity ===
+    let mut p20 = code_new();
+    p20 = emit(p20, 1, 77);
+    p20 = emit(p20, 12, 0);  // NEG -> -77
+    p20 = emit(p20, 12, 0);  // NEG -> 77
+    p20 = emit(p20, 0, 0);
+    let r20 = vm_run(p20);
+    assert_eq(stack_top(r20), 77);
+
+    // === Test 21: MOD operation ===
+    // 100 % 7 = 2
+    let mut p21 = code_new();
+    p21 = emit(p21, 1, 100);
+    p21 = emit(p21, 1, 7);
+    p21 = emit(p21, 13, 0);  // MOD
+    p21 = emit(p21, 0, 0);
+    let r21 = vm_run(p21);
+    assert_eq(stack_top(r21), 2);
+
+    // === Test 22: Unconditional JMP ===
+    // PUSH 1, JMP 3, PUSH 99, PUSH 42, HALT
+    let mut p22 = code_new();
+    p22 = emit(p22, 1, 1);    // 0: PUSH 1
+    p22 = emit(p22, 11, 3);   // 1: JMP 3
+    p22 = emit(p22, 1, 99);   // 2: PUSH 99 (skipped)
+    p22 = emit(p22, 1, 42);   // 3: PUSH 42
+    p22 = emit(p22, 0, 0);    // 4: HALT
+    let r22 = vm_run(p22);
+    assert_eq(stack_top(r22), 42);
+    assert_eq(r22.sp, 2);
+
+    // === Test 23: Compute 10^3 = 1000 via DUP+MUL chain ===
+    let mut p23 = code_new();
+    p23 = emit(p23, 1, 10);   // PUSH 10
+    p23 = emit(p23, 7, 0);    // DUP -> [10, 10]
+    p23 = emit(p23, 5, 0);    // MUL -> [100]
+    p23 = emit(p23, 1, 10);   // PUSH 10 -> [100, 10]
+    p23 = emit(p23, 5, 0);    // MUL -> [1000]
+    p23 = emit(p23, 0, 0);
+    let r23 = vm_run(p23);
+    assert_eq(stack_top(r23), 1000);
+    assert_eq(r23.sp, 1);
+
+    // === Test 24: OVER + SUB pattern ===
+    // Stack: [a, b], OVER -> [a, b, a], SUB -> [a, b-a]
+    let mut p24 = code_new();
+    p24 = emit(p24, 1, 100);  // PUSH 100
+    p24 = emit(p24, 1, 37);   // PUSH 37
+    p24 = emit(p24, 9, 0);    // OVER -> [100, 37, 100]
+    p24 = emit(p24, 4, 0);    // SUB -> [100, 37-100] = [100, -63]
+    p24 = emit(p24, 12, 0);   // NEG -> [100, 63]
+    p24 = emit(p24, 0, 0);
+    let r24 = vm_run(p24);
+    assert_eq(stack_top(r24), 63);
+    assert_eq(r24.sp, 2);
+    assert_eq(stack_get(r24, 0), 100);
+
+    // === Test 25: Compute sum 1+2+...+10 = 55 via loop ===
+    // Stack: [acc, n]
+    // loop: DUP n, JZ end, SWAP, OVER, ADD, SWAP, PUSH 1, SUB, JMP loop
+    // end: POP, HALT
+    let mut p25 = code_new();
+    p25 = emit(p25, 1, 0);      // 0: PUSH 0 (acc)
+    p25 = emit(p25, 1, 10);     // 1: PUSH 10 (n)
+    // loop at pc=2
+    p25 = emit(p25, 7, 0);      // 2: DUP -> [acc, n, n]
+    p25 = emit(p25, 10, 11);    // 3: JZ 11
+    p25 = emit(p25, 8, 0);      // 4: SWAP -> [n, acc]
+    p25 = emit(p25, 9, 0);      // 5: OVER -> [n, acc, n]
+    p25 = emit(p25, 3, 0);      // 6: ADD -> [n, acc+n]
+    p25 = emit(p25, 8, 0);      // 7: SWAP -> [acc+n, n]
+    p25 = emit(p25, 1, 1);      // 8: PUSH 1
+    p25 = emit(p25, 4, 0);      // 9: SUB -> [acc+n, n-1]
+    p25 = emit(p25, 11, 2);     // 10: JMP 2
+    p25 = emit(p25, 2, 0);      // 11: POP
+    p25 = emit(p25, 0, 0);      // 12: HALT
+    let r25 = vm_run(p25);
+    assert_eq(stack_top(r25), 55);
+    assert_eq(r25.sp, 1);
+
+    // === Test 26: Modular by zero returns 0 ===
+    let mut p26 = code_new();
+    p26 = emit(p26, 1, 42);
+    p26 = emit(p26, 1, 0);
+    p26 = emit(p26, 13, 0);  // MOD by zero
+    p26 = emit(p26, 0, 0);
+    let r26 = vm_run(p26);
+    assert_eq(stack_top(r26), 0);
+
+    // === Test 27: Encoding/decoding roundtrip ===
+    assert_eq(decode_opcode(encode(1, 42)), 1);
+    assert_eq(decode_operand(encode(1, 42)), 42);
+    assert_eq(decode_opcode(encode(10, 99)), 10);
+    assert_eq(decode_operand(encode(10, 99)), 99);
+    assert_eq(decode_opcode(encode(0, 0)), 0);
+    assert_eq(decode_operand(encode(0, 0)), 0);
+
+    // === Test 28: Empty program halts immediately ===
+    let p28 = emit(code_new(), 0, 0);
+    let r28 = vm_run(p28);
+    assert_eq(r28.sp, 0);
+
+    0
+}

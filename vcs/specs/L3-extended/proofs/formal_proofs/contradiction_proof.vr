@@ -1,0 +1,174 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-proofs, contradiction
+// @timeout: 20000
+// @description: Tests proof by contradiction techniques
+
+/// ============================================================
+/// PROOF BY CONTRADICTION
+/// ============================================================
+
+// ------------------------------------------------------------
+// Simple Contradiction
+// ------------------------------------------------------------
+
+/// No natural number is both even and odd
+theorem not_even_and_odd(n: Nat): !(is_even(n) && is_odd(n)) {
+    proof by contradiction {
+        assume h: is_even(n) && is_odd(n);
+        // Even and odd are mutually exclusive by definition
+        have: false by parity_contradiction;
+        contradiction
+    }
+}
+
+// ------------------------------------------------------------
+// Classic Irrationality Proof
+// ------------------------------------------------------------
+
+/// Square root of 2 is irrational (simplified)
+theorem sqrt2_irrational():
+    !exists p: Int. exists q: Int. q > 0 && gcd(p, q) == 1 && p * p == 2 * q * q
+{
+    proof by contradiction {
+        assume h: exists p: Int. exists q: Int. q > 0 && gcd(p, q) == 1 && p * p == 2 * q * q;
+
+        // p^2 = 2q^2 means both p and q are even
+        // But gcd(p,q) = 1 means they can't both be even
+        have: false by irrationality_lemma;
+        contradiction
+    }
+}
+
+// ------------------------------------------------------------
+// Infinite Descent
+// ------------------------------------------------------------
+
+/// No positive integer solutions to x^4 + y^4 = z^2
+theorem fermat_x4_y4(x: Nat, y: Nat, z: Nat)
+    requires x > 0 && y > 0 && z > 0
+    ensures x*x*x*x + y*y*y*y != z*z
+{
+    proof by contradiction {
+        assume contra: x*x*x*x + y*y*y*y == z*z;
+        // By infinite descent, there are smaller solutions
+        // contradicting well-foundedness
+        have: false by fermat_descent_step;
+        contradiction
+    }
+}
+
+// ------------------------------------------------------------
+// Contrapositive
+// ------------------------------------------------------------
+
+/// If n^2 is even, then n is even (via contrapositive)
+theorem square_even_implies_even(n: Nat)
+    requires is_even(n * n)
+    ensures is_even(n)
+{
+    // Prove contrapositive: if n is odd, then n^2 is odd
+    proof by contrapositive {
+        assume h: is_odd(n);
+        // n = 2k + 1 => n^2 = 4k^2 + 4k + 1 = 2(2k^2 + 2k) + 1
+        // So n^2 is odd
+        conclude is_odd(n * n) by odd_squared_is_odd
+    }
+}
+
+// ------------------------------------------------------------
+// Proving Negations
+// ------------------------------------------------------------
+
+/// Empty list has no head
+theorem empty_no_head<T>(): !exists x: T. head_of([]) == Some(x) {
+    proof by contradiction {
+        assume h: exists x: T. head_of([]) == Some(x);
+        // But head([]) = None by definition
+        have h1: head_of([]) == None by definition;
+        // Some(x) != None
+        contradiction
+    }
+}
+
+/// No element is in empty set
+theorem not_in_empty<T>(x: T): !(x in Set.empty()) {
+    proof by contradiction {
+        assume h: x in Set.empty();
+        have: false by empty_set_def;
+        contradiction
+    }
+}
+
+// ------------------------------------------------------------
+// Classical Logic
+// ------------------------------------------------------------
+
+/// Double negation elimination (classical)
+theorem double_neg_elim<P: Prop>()
+    requires !!P
+    ensures P
+{
+    proof by contradiction {
+        assume h_not_p: !P;
+        have h_not_not_p: !!P by assumption;
+        contradiction
+    }
+}
+
+/// Law of excluded middle (classical)
+theorem excluded_middle<P: Prop>(): P || !P {
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Uniqueness via Contradiction
+// ------------------------------------------------------------
+
+/// Division result is unique
+theorem division_unique(n: Int, d: Int, q1: Int, r1: Int, q2: Int, r2: Int)
+    requires d > 0
+    requires n == d * q1 + r1 && 0 <= r1 && r1 < d
+    requires n == d * q2 + r2 && 0 <= r2 && r2 < d
+    ensures q1 == q2 && r1 == r2
+{
+    proof by contradiction {
+        assume h: !(q1 == q2 && r1 == r2);
+        // d * q1 + r1 == d * q2 + r2 implies d | (r1 - r2)
+        // But |r1 - r2| < d, so r1 == r2, then q1 == q2
+        have: false by division_uniqueness_lemma;
+        contradiction
+    }
+}
+
+// ------------------------------------------------------------
+// Impossibility Proofs
+// ------------------------------------------------------------
+
+/// Cannot have bijection between finite set and proper subset
+theorem cantor_finite<T>(s: FiniteSet<T>, t: FiniteSet<T>)
+    requires t.is_proper_subset(s)
+    ensures s.size != t.size
+{
+    proof by contradiction {
+        assume h: s.size == t.size;
+        // Proper subset means |t| < |s|
+        // But we assumed |s| == |t|
+        have: false by cardinality_contradiction;
+        contradiction
+    }
+}
+
+// Helper type and function declarations
+type FiniteSet<T> is { size: Nat };
+
+fn is_even(n: Nat) -> Bool;
+fn is_odd(n: Nat) -> Bool;
+fn gcd(a: Int, b: Int) -> Nat;
+fn head_of<T>(xs: List<T>) -> Maybe<T>;
+fn is_bijection_between<T>(s: FiniteSet<T>, t: FiniteSet<T>) -> Bool;
+
+fn main() {
+    // Contradiction proof tests
+}

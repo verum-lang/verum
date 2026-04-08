@@ -1,0 +1,308 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, sqrt-decomposition, range-query, data-structure
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for square root decomposition for range sum queries.
+// Partition array into blocks of size sqrt(n), precompute block sums.
+// Supports O(sqrt(n)) range sum queries and point updates.
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 } else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 } else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 } else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 } else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 } else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+// Integer square root (floor)
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut r = 1;
+    while (r + 1) * (r + 1) <= n {
+        r = r + 1;
+    }
+    r
+}
+
+// Sqrt decomposition structure
+// data: the original array (up to 16 elements)
+// blocks: precomputed block sums (up to 4 blocks for sqrt(16)=4)
+// n: number of elements
+// block_size: size of each block
+type SqrtDecomp is {
+    data: Arr16,
+    blocks: Arr16,
+    n: Int,
+    block_size: Int
+};
+
+// Build sqrt decomposition from an array of n elements
+fn sd_build(data: Arr16, n: Int) -> SqrtDecomp {
+    let bs = isqrt(n);
+    let block_size = if bs == 0 { 1 } else { bs };
+    let mut blocks = a16_zero();
+    let mut i = 0;
+    while i < n {
+        let blk = i / block_size;
+        blocks = a16_set(blocks, blk, a16_get(blocks, blk) + a16_get(data, i));
+        i = i + 1;
+    }
+    SqrtDecomp { data: data, blocks: blocks, n: n, block_size: block_size }
+}
+
+// Range sum query [l, r] inclusive
+fn sd_query(sd: SqrtDecomp, l: Int, r: Int) -> Int {
+    let mut sum = 0;
+    let mut i = l;
+    let bs = sd.block_size;
+
+    // Walk through partial left block
+    while i <= r {
+        if i % bs == 0 {
+            // At block boundary, check if whole block fits
+            if i + bs - 1 <= r {
+                // Add whole block
+                sum = sum + a16_get(sd.blocks, i / bs);
+                i = i + bs;
+            } else {
+                // Partial block, add element by element
+                sum = sum + a16_get(sd.data, i);
+                i = i + 1;
+            }
+        } else {
+            sum = sum + a16_get(sd.data, i);
+            i = i + 1;
+        }
+    }
+    sum
+}
+
+// Point update: set data[idx] = val
+fn sd_update(sd: SqrtDecomp, idx: Int, val: Int) -> SqrtDecomp {
+    let old_val = a16_get(sd.data, idx);
+    let diff = val - old_val;
+    let blk = idx / sd.block_size;
+    SqrtDecomp {
+        data: a16_set(sd.data, idx, val),
+        blocks: a16_set(sd.blocks, blk, a16_get(sd.blocks, blk) + diff),
+        n: sd.n,
+        block_size: sd.block_size
+    }
+}
+
+// Brute force range sum for verification
+fn brute_sum(data: Arr16, l: Int, r: Int) -> Int {
+    let mut sum = 0;
+    let mut i = l;
+    while i <= r {
+        sum = sum + a16_get(data, i);
+        i = i + 1;
+    }
+    sum
+}
+
+// ---- Tests ----
+
+fn test_isqrt() {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(15), 3);
+    assert_eq(isqrt(16), 4);
+}
+
+fn test_basic_query() {
+    // data = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    let mut data = a16_zero();
+    let mut i = 0;
+    while i < 9 {
+        data = a16_set(data, i, i + 1);
+        i = i + 1;
+    }
+    let sd = sd_build(data, 9);
+    // block_size = 3
+    assert_eq(sd.block_size, 3);
+    // Full range sum: 1+2+...+9 = 45
+    assert_eq(sd_query(sd, 0, 8), 45);
+}
+
+fn test_single_element_query() {
+    let mut data = a16_zero();
+    data = a16_set(data, 0, 10);
+    data = a16_set(data, 1, 20);
+    data = a16_set(data, 2, 30);
+    data = a16_set(data, 3, 40);
+    let sd = sd_build(data, 4);
+    assert_eq(sd_query(sd, 0, 0), 10);
+    assert_eq(sd_query(sd, 1, 1), 20);
+    assert_eq(sd_query(sd, 2, 2), 30);
+    assert_eq(sd_query(sd, 3, 3), 40);
+}
+
+fn test_partial_block_query() {
+    // 9 elements, block_size=3
+    let mut data = a16_zero();
+    let mut i = 0;
+    while i < 9 {
+        data = a16_set(data, i, i + 1);
+        i = i + 1;
+    }
+    let sd = sd_build(data, 9);
+    // Query [1,4]: 2+3+4+5 = 14
+    assert_eq(sd_query(sd, 1, 4), 14);
+    // Query [2,7]: 3+4+5+6+7+8 = 33
+    assert_eq(sd_query(sd, 2, 7), 33);
+}
+
+fn test_full_block_query() {
+    let mut data = a16_zero();
+    let mut i = 0;
+    while i < 9 {
+        data = a16_set(data, i, i + 1);
+        i = i + 1;
+    }
+    let sd = sd_build(data, 9);
+    // Query [0,2]: block 0 = 1+2+3 = 6
+    assert_eq(sd_query(sd, 0, 2), 6);
+    // Query [3,5]: block 1 = 4+5+6 = 15
+    assert_eq(sd_query(sd, 3, 5), 15);
+    // Query [6,8]: block 2 = 7+8+9 = 24
+    assert_eq(sd_query(sd, 6, 8), 24);
+}
+
+fn test_point_update() {
+    let mut data = a16_zero();
+    let mut i = 0;
+    while i < 9 {
+        data = a16_set(data, i, i + 1);
+        i = i + 1;
+    }
+    let mut sd = sd_build(data, 9);
+    // Update index 4 from 5 to 50
+    sd = sd_update(sd, 4, 50);
+    // Now sum [3,5] = 4 + 50 + 6 = 60
+    assert_eq(sd_query(sd, 3, 5), 60);
+    // Full sum = 45 - 5 + 50 = 90
+    assert_eq(sd_query(sd, 0, 8), 90);
+}
+
+fn test_multiple_updates() {
+    let mut data = a16_zero();
+    let mut i = 0;
+    while i < 9 {
+        data = a16_set(data, i, 10);
+        i = i + 1;
+    }
+    let mut sd = sd_build(data, 9);
+    // All 10s, sum = 90
+    assert_eq(sd_query(sd, 0, 8), 90);
+    // Set index 0 to 100
+    sd = sd_update(sd, 0, 100);
+    assert_eq(sd_query(sd, 0, 8), 180);
+    // Set index 8 to 0
+    sd = sd_update(sd, 8, 0);
+    assert_eq(sd_query(sd, 0, 8), 170);
+}
+
+fn test_verify_against_brute_force() {
+    let mut data = a16_zero();
+    data = a16_set(data, 0, 3);
+    data = a16_set(data, 1, 7);
+    data = a16_set(data, 2, 1);
+    data = a16_set(data, 3, 9);
+    data = a16_set(data, 4, 2);
+    data = a16_set(data, 5, 8);
+    data = a16_set(data, 6, 4);
+    data = a16_set(data, 7, 6);
+    let sd = sd_build(data, 8);
+    // Check all possible ranges
+    let mut l = 0;
+    while l < 8 {
+        let mut r = l;
+        while r < 8 {
+            assert_eq(sd_query(sd, l, r), brute_sum(data, l, r));
+            r = r + 1;
+        }
+        l = l + 1;
+    }
+}
+
+fn test_single_element_array() {
+    let mut data = a16_zero();
+    data = a16_set(data, 0, 42);
+    let sd = sd_build(data, 1);
+    assert_eq(sd_query(sd, 0, 0), 42);
+    let sd2 = sd_update(sd, 0, 99);
+    assert_eq(sd_query(sd2, 0, 0), 99);
+}
+
+fn test_two_elements() {
+    let mut data = a16_zero();
+    data = a16_set(data, 0, 5);
+    data = a16_set(data, 1, 15);
+    let sd = sd_build(data, 2);
+    assert_eq(sd_query(sd, 0, 0), 5);
+    assert_eq(sd_query(sd, 1, 1), 15);
+    assert_eq(sd_query(sd, 0, 1), 20);
+}
+
+fn test_16_elements() {
+    // Full capacity
+    let mut data = a16_zero();
+    let mut i = 0;
+    while i < 16 {
+        data = a16_set(data, i, i * i);
+        i = i + 1;
+    }
+    let sd = sd_build(data, 16);
+    // block_size = 4
+    assert_eq(sd.block_size, 4);
+    // Sum of i^2 for i=0..15 = 0+1+4+9+16+25+36+49+64+81+100+121+144+169+196+225 = 1240
+    assert_eq(sd_query(sd, 0, 15), 1240);
+    // Partial: [4,11] = 16+25+36+49+64+81+100+121 = 492
+    assert_eq(sd_query(sd, 4, 11), 492);
+}
+
+fn main() -> Int {
+    test_isqrt();
+    test_basic_query();
+    test_single_element_query();
+    test_partial_block_query();
+    test_full_block_query();
+    test_point_update();
+    test_multiple_updates();
+    test_verify_against_brute_force();
+    test_single_element_array();
+    test_two_elements();
+    test_16_elements();
+    print("[OK] 384_sqrt_decomp_aot");
+    0
+}

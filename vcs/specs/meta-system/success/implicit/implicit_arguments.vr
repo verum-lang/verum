@@ -1,0 +1,235 @@
+// @test: meta-pass
+// @level: L2
+// @tier: 0
+// @tags: meta, implicit, arguments, inference, type-parameters
+// @description: Tests argument inference patterns in meta-system
+
+// =============================================================================
+// GENERIC-LIKE PATTERNS USING META FUNCTIONS
+// =============================================================================
+
+// Identity function - works with any type via meta evaluation
+meta fn id_int(x: Int) -> Int { x }
+meta fn id_text(x: Text) -> Text { x }
+meta fn id_bool(x: Bool) -> Bool { x }
+
+// First and second of pairs
+meta fn first_ii(pair: (Int, Int)) -> Int { pair.0 }
+meta fn second_ii(pair: (Int, Int)) -> Int { pair.1 }
+meta fn first_it(pair: (Int, Text)) -> Int { pair.0 }
+meta fn second_it(pair: (Int, Text)) -> Text { pair.1 }
+
+// =============================================================================
+// TYPE-DRIVEN CONSTRUCTION
+// =============================================================================
+
+// Default values for different types
+meta fn default_int() -> Int { 0 }
+meta fn default_text() -> Text { "" }
+meta fn default_bool() -> Bool { false }
+meta fn default_list() -> List<Int> { [] }
+
+// Create a list of n default values
+meta fn make_list_of(n: Int, default: Int) -> List<Int> {
+    let mut result = [];
+    let mut i = 0;
+    while i < n {
+        result = list_push(result, default);
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// COMPARISON PATTERNS
+// =============================================================================
+
+// Equality check
+meta fn eq_int(a: Int, b: Int) -> Bool { a == b }
+meta fn eq_text(a: Text, b: Text) -> Bool { text_eq(a, b) }
+meta fn eq_bool(a: Bool, b: Bool) -> Bool { a == b }
+
+// Ordering
+meta fn cmp_int(a: Int, b: Int) -> Int {
+    if a < b { -1 }
+    else if a > b { 1 }
+    else { 0 }
+}
+
+// Min/max
+meta fn min_int(a: Int, b: Int) -> Int {
+    if a <= b { a } else { b }
+}
+
+meta fn max_int(a: Int, b: Int) -> Int {
+    if a >= b { a } else { b }
+}
+
+// =============================================================================
+// LIST OPERATIONS (simulating generic operations)
+// =============================================================================
+
+meta fn list_sum_int(items: List<Int>) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < list_len(items) {
+        result = result + maybe_unwrap(list_get(items, i));
+        i = i + 1;
+    }
+    result
+}
+
+meta fn list_filter_positive(items: List<Int>) -> List<Int> {
+    let mut result = [];
+    let mut i = 0;
+    while i < list_len(items) {
+        let item = maybe_unwrap(list_get(items, i));
+        if item > 0 {
+            result = list_push(result, item);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+meta fn list_map_double(items: List<Int>) -> List<Int> {
+    let mut result = [];
+    let mut i = 0;
+    while i < list_len(items) {
+        result = list_push(result, maybe_unwrap(list_get(items, i)) * 2);
+        i = i + 1;
+    }
+    result
+}
+
+meta fn list_fold_int(items: List<Int>, init: Int, op: Text) -> Int {
+    let mut result = init;
+    let mut i = 0;
+    while i < list_len(items) {
+        let item = maybe_unwrap(list_get(items, i));
+        if text_eq(op, "add") {
+            result = result + item;
+        } else if text_eq(op, "mul") {
+            result = result * item;
+        } else if text_eq(op, "max") {
+            result = max_int(result, item);
+        } else if text_eq(op, "min") {
+            result = min_int(result, item);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// HIGHER-ORDER PATTERNS
+// =============================================================================
+
+// Apply an operation
+meta fn apply_twice_int(f: Text, x: Int) -> Int {
+    let once = if text_eq(f, "inc") { x + 1 }
+               else if text_eq(f, "double") { x * 2 }
+               else { x };
+    if text_eq(f, "inc") { once + 1 }
+    else if text_eq(f, "double") { once * 2 }
+    else { once }
+}
+
+// Compose two operations
+meta fn compose_ops(f: Text, g: Text, x: Int) -> Int {
+    let first = if text_eq(g, "inc") { x + 1 }
+                else if text_eq(g, "double") { x * 2 }
+                else if text_eq(g, "square") { x * x }
+                else { x };
+    if text_eq(f, "inc") { first + 1 }
+    else if text_eq(f, "double") { first * 2 }
+    else if text_eq(f, "square") { first * first }
+    else { first }
+}
+
+// =============================================================================
+// CONTAINER PATTERNS
+// =============================================================================
+
+// Wrap in container
+meta fn wrap_int(x: Int) -> (Bool, Int) {
+    (true, x)  // Simulating Some(x)
+}
+
+meta fn empty_int() -> (Bool, Int) {
+    (false, 0)  // Simulating None
+}
+
+meta fn unwrap_or(container: (Bool, Int), default: Int) -> Int {
+    if container.0 { container.1 } else { default }
+}
+
+meta fn map_container(container: (Bool, Int), op: Text) -> (Bool, Int) {
+    if container.0 {
+        let value = container.1;
+        let result = if text_eq(op, "inc") { value + 1 }
+                     else if text_eq(op, "double") { value * 2 }
+                     else { value };
+        (true, result)
+    } else {
+        container
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Test identity functions
+    @const assert_eq(id_int(42), 42);
+    @const assert_eq(id_text("hello"), "hello");
+    @const assert_eq(id_bool(true), true);
+
+    // Test pair functions
+    @const assert_eq(first_ii((1, 2)), 1);
+    @const assert_eq(second_ii((1, 2)), 2);
+    @const assert_eq(first_it((42, "hello")), 42);
+    @const assert_eq(second_it((42, "hello")), "hello");
+
+    // Test defaults
+    @const assert_eq(default_int(), 0);
+    @const assert_eq(default_text(), "");
+    @const assert_eq(default_bool(), false);
+    @const assert_eq(list_len(default_list()), 0);
+
+    // Test make_list_of
+    @const assert_eq(list_len(make_list_of(5, 0)), 5);
+    @const assert_eq(list_get(make_list_of(3, 42), 0), Some(42));
+
+    // Test comparisons
+    @const assert(eq_int(5, 5));
+    @const assert(!eq_int(5, 6));
+    @const assert_eq(cmp_int(3, 5), -1);
+    @const assert_eq(cmp_int(5, 3), 1);
+    @const assert_eq(cmp_int(5, 5), 0);
+    @const assert_eq(min_int(3, 7), 3);
+    @const assert_eq(max_int(3, 7), 7);
+
+    // Test list operations
+    @const assert_eq(list_sum_int([1, 2, 3, 4, 5]), 15);
+    @const assert_eq(list_len(list_filter_positive([-1, 2, -3, 4, 5])), 3);
+    @const assert_eq(list_get(list_map_double([1, 2, 3]), 0), Some(2));
+    @const assert_eq(list_get(list_map_double([1, 2, 3]), 2), Some(6));
+
+    // Test fold operations
+    @const assert_eq(list_fold_int([1, 2, 3, 4], 0, "add"), 10);
+    @const assert_eq(list_fold_int([1, 2, 3, 4], 1, "mul"), 24);
+    @const assert_eq(list_fold_int([1, 5, 3, 2], 0, "max"), 5);
+
+    // Test higher-order patterns
+    @const assert_eq(apply_twice_int("inc", 5), 7);
+    @const assert_eq(apply_twice_int("double", 3), 12);
+    @const assert_eq(compose_ops("double", "inc", 5), 12);  // (5+1)*2
+
+    // Test container patterns
+    @const assert_eq(unwrap_or(wrap_int(42), 0), 42);
+    @const assert_eq(unwrap_or(empty_int(), 99), 99);
+    @const assert_eq(unwrap_or(map_container(wrap_int(5), "double"), 0), 10);
+    @const assert_eq(unwrap_or(map_container(empty_int(), "double"), 0), 0);
+}

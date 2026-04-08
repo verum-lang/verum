@@ -1,0 +1,81 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: bitfield, parser, hardware, mmio, low-level
+// @timeout: 5000
+// @description: Hardware register examples demonstrating bitfield syntax
+//
+// Spec: docs/architecture/low-level-features.md - MMIO/Register Abstractions
+
+/// x86 CPU flags register (EFLAGS).
+@bitfield
+type X86Flags is {
+    @bits(1) cf: Bool,      // Carry flag
+    @bits(1) _reserved1: UInt,
+    @bits(1) pf: Bool,      // Parity flag
+    @bits(1) _reserved2: UInt,
+    @bits(1) af: Bool,      // Auxiliary carry flag
+    @bits(1) _reserved3: UInt,
+    @bits(1) zf: Bool,      // Zero flag
+    @bits(1) sf: Bool,      // Sign flag
+    @bits(1) tf: Bool,      // Trap flag
+    @bits(1) if_: Bool,     // Interrupt enable flag
+    @bits(1) df: Bool,      // Direction flag
+    @bits(1) of: Bool,      // Overflow flag
+    @bits(2) iopl: UInt,    // I/O privilege level
+    @bits(1) nt: Bool,      // Nested task
+    @bits(1) _reserved4: UInt,
+    @bits(16) _reserved5: UInt,
+};
+
+/// ARM Cortex-M SysTick Control Register.
+@bitfield
+type SysTickControl is {
+    @bits(1) enable: Bool,
+    @bits(1) tickint: Bool,
+    @bits(1) clksource: Bool,
+    @bits(13) _reserved: UInt,
+    @bits(1) countflag: Bool,
+    @bits(15) _reserved2: UInt,
+};
+
+/// PCIe BAR (Base Address Register).
+@bitfield
+type PcieBar is {
+    @bits(1) space: Bool,      // 0=memory, 1=I/O
+    @bits(2) type_: UInt,      // Memory type (00=32-bit, 10=64-bit)
+    @bits(1) prefetchable: Bool,
+    @bits(28) base_address: UInt,
+};
+
+/// USB Endpoint descriptor bmAttributes field.
+@bitfield
+type UsbEndpointAttrs is {
+    @bits(2) transfer_type: UInt,   // 00=Control, 01=Isochronous, 10=Bulk, 11=Interrupt
+    @bits(2) sync_type: UInt,       // For isochronous endpoints
+    @bits(2) usage_type: UInt,      // For isochronous endpoints
+    @bits(2) _reserved: UInt,
+};
+
+/// IPv4 header (per RFC 791).
+@bitfield
+@endian(big)
+type Ipv4Header is {
+    @bits(4) version: UInt,
+    @bits(4) ihl: UInt,
+    @bits(6) dscp: UInt,
+    @bits(2) ecn: UInt,
+    @bits(16) total_length: UInt,
+    @bits(16) identification: UInt,
+    @bits(1) _reserved: UInt,
+    @bits(1) df: Bool,              // Don't fragment
+    @bits(1) mf: Bool,              // More fragments
+    @bits(13) fragment_offset: UInt,
+    @bits(8) ttl: UInt,
+    @bits(8) protocol: UInt,
+    @bits(16) header_checksum: UInt,
+};
+
+fn main() -> Int {
+    0
+}

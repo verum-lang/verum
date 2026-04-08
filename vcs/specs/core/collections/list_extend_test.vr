@@ -1,0 +1,134 @@
+// =============================================================================
+// list_extend_test.vr - Tests for List Extend and protocol completeness
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, list, extend, protocols, core
+// @description: Tests for List<T> Extend protocol and protocol completeness
+// =============================================================================
+
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Extend from another list's iterator
+// =============================================================================
+
+@test
+fn test_extend_from_list_iter() {
+    let mut a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [4, 5, 6];
+    a.extend(b.iter().map(|x| *x));
+    assert_eq(a.len(), 6);
+    assert_eq(a[0], 1);
+    assert_eq(a[3], 4);
+    assert_eq(a[5], 6);
+}
+
+@test
+fn test_extend_empty_into_nonempty() {
+    let mut a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [];
+    a.extend(b.iter().map(|x| *x));
+    assert_eq(a.len(), 3);
+}
+
+@test
+fn test_extend_nonempty_into_empty() {
+    let mut a: List<Int> = [];
+    let b: List<Int> = [1, 2, 3];
+    a.extend(b.iter().map(|x| *x));
+    assert_eq(a.len(), 3);
+    assert_eq(a[0], 1);
+}
+
+@test
+fn test_extend_both_empty() {
+    let mut a: List<Int> = [];
+    let b: List<Int> = [];
+    a.extend(b.iter().map(|x| *x));
+    assert(a.is_empty());
+}
+
+@test
+fn test_extend_preserves_order() {
+    let mut a: List<Int> = [10, 20];
+    let b: List<Int> = [30, 40, 50];
+    a.extend(b.iter().map(|x| *x));
+    assert_eq(a[0], 10);
+    assert_eq(a[1], 20);
+    assert_eq(a[2], 30);
+    assert_eq(a[3], 40);
+    assert_eq(a[4], 50);
+}
+
+@test
+fn test_extend_large() {
+    let mut a: List<Int> = [];
+    let mut b: List<Int> = [];
+    for i in range(0, 100) {
+        b.push(i);
+    }
+    a.extend(b.iter().map(|x| *x));
+    assert_eq(a.len(), 100);
+    assert_eq(a[0], 0);
+    assert_eq(a[99], 99);
+}
+
+@test
+fn test_extend_with_map_transform() {
+    let mut a: List<Int> = [1, 2];
+    let b: List<Int> = [3, 4, 5];
+    a.extend(b.iter().map(|x| *x * 10));
+    assert_eq(a.len(), 5);
+    assert_eq(a[2], 30);
+    assert_eq(a[3], 40);
+    assert_eq(a[4], 50);
+}
+
+@test
+fn test_extend_with_filter() {
+    let mut a: List<Int> = [];
+    let b: List<Int> = [1, 2, 3, 4, 5, 6];
+    a.extend(b.iter().filter(|x| **x % 2 == 0).map(|x| *x));
+    assert_eq(a.len(), 3);
+    assert_eq(a[0], 2);
+    assert_eq(a[1], 4);
+    assert_eq(a[2], 6);
+}
+
+@test
+fn test_extend_text_list() {
+    let mut a: List<Text> = ["hello".clone()];
+    let b: List<Text> = ["world".clone()];
+    a.extend(b.iter().map(|x| x.clone()));
+    assert_eq(a.len(), 2);
+    assert_eq(a[0], "hello");
+    assert_eq(a[1], "world");
+}
+
+// =============================================================================
+// Section 2: Multiple extends
+// =============================================================================
+
+@test
+fn test_extend_multiple_times() {
+    let mut a: List<Int> = [];
+    let b: List<Int> = [1, 2];
+    let c: List<Int> = [3, 4];
+    let d: List<Int> = [5, 6];
+    a.extend(b.iter().map(|x| *x));
+    a.extend(c.iter().map(|x| *x));
+    a.extend(d.iter().map(|x| *x));
+    assert_eq(a.len(), 6);
+    assert_eq(a[0], 1);
+    assert_eq(a[5], 6);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

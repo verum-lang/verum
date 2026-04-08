@@ -1,0 +1,445 @@
+// =============================================================================
+// deque_new_methods_test.vr - Tests for new Deque methods
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, core
+// @description: Tests for Deque.set, Deque.reverse, Deque.swap_remove_front/back
+
+mount core.collections.deque.{Deque};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: set() - Replace element at index
+// =============================================================================
+
+@test
+fn test_set_basic() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    let old = d.set(1, 99);
+    match old {
+        Some(v) => assert_eq(v, 20),
+        None => panic("Expected Some"),
+    }
+    assert_eq(*d.get(1).unwrap(), 99);
+}
+
+@test
+fn test_set_first() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let old = d.set(0, 100);
+    match old {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+    assert_eq(*d.get(0).unwrap(), 100);
+}
+
+@test
+fn test_set_last() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let old = d.set(2, 300);
+    match old {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+    assert_eq(*d.get(2).unwrap(), 300);
+}
+
+@test
+fn test_set_out_of_bounds() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+
+    let result = d.set(5, 99);
+    assert(result is None);
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_set_negative_index() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+
+    let result = d.set(-1, 99);
+    assert(result is None);
+}
+
+@test
+fn test_set_preserves_other_elements() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    d.push_back(40);
+
+    d.set(2, 99);
+    assert_eq(*d.get(0).unwrap(), 10);
+    assert_eq(*d.get(1).unwrap(), 20);
+    assert_eq(*d.get(2).unwrap(), 99);
+    assert_eq(*d.get(3).unwrap(), 40);
+}
+
+@test
+fn test_set_after_push_front() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_front(3);
+    d.push_front(2);
+    d.push_front(1);
+    // d = [1, 2, 3]
+
+    let old = d.set(1, 99);
+    match old {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 99);
+    assert_eq(*d.get(2).unwrap(), 3);
+}
+
+@test
+fn test_set_single_element() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+
+    let old = d.set(0, 100);
+    match old {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+    assert_eq(*d.get(0).unwrap(), 100);
+    assert_eq(d.len(), 1);
+}
+
+// =============================================================================
+// Section 2: reverse() - In-place reversal
+// =============================================================================
+
+@test
+fn test_reverse_basic() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    d.reverse();
+    assert_eq(*d.get(0).unwrap(), 4);
+    assert_eq(*d.get(1).unwrap(), 3);
+    assert_eq(*d.get(2).unwrap(), 2);
+    assert_eq(*d.get(3).unwrap(), 1);
+}
+
+@test
+fn test_reverse_single() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+
+    d.reverse();
+    assert_eq(*d.get(0).unwrap(), 42);
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_reverse_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.reverse();
+    assert(d.is_empty());
+}
+
+@test
+fn test_reverse_two_elements() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    d.reverse();
+    assert_eq(*d.get(0).unwrap(), 2);
+    assert_eq(*d.get(1).unwrap(), 1);
+}
+
+@test
+fn test_reverse_odd_count() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    d.reverse();
+    assert_eq(*d.get(0).unwrap(), 5);
+    assert_eq(*d.get(1).unwrap(), 4);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 2);
+    assert_eq(*d.get(4).unwrap(), 1);
+}
+
+@test
+fn test_reverse_preserves_length() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    let before = d.len();
+    d.reverse();
+    assert_eq(d.len(), before);
+}
+
+@test
+fn test_reverse_double_is_identity() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    d.reverse();
+    d.reverse();
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+}
+
+@test
+fn test_reverse_after_push_front() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_front(3);
+    d.push_front(2);
+    d.push_front(1);
+    // d = [1, 2, 3]
+
+    d.reverse();
+    assert_eq(*d.get(0).unwrap(), 3);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 1);
+}
+
+// =============================================================================
+// Section 3: swap_remove_front() - O(1) removal via front swap
+// =============================================================================
+
+@test
+fn test_swap_remove_front_middle() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    let removed = d.swap_remove_front(2);
+    match removed {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+    assert_eq(d.len(), 3);
+    // Element at 0 was swapped to 2, then popped from front
+    // After: [2, 1, 4] — front element (1) went to pos 2, then front popped
+    // Actually: swap(0, 2) makes [3, 2, 1, 4], then pop_front returns 3
+    // Result: [2, 1, 4]
+    assert_eq(*d.get(0).unwrap(), 2);
+}
+
+@test
+fn test_swap_remove_front_first() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let removed = d.swap_remove_front(0);
+    match removed {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_swap_remove_front_last() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let removed = d.swap_remove_front(2);
+    match removed {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_swap_remove_front_out_of_bounds() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+
+    let result = d.swap_remove_front(5);
+    assert(result is None);
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_swap_remove_front_single() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+
+    let removed = d.swap_remove_front(0);
+    match removed {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+    assert(d.is_empty());
+}
+
+// =============================================================================
+// Section 4: swap_remove_back() - O(1) removal via back swap
+// =============================================================================
+
+@test
+fn test_swap_remove_back_middle() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    let removed = d.swap_remove_back(1);
+    match removed {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+    assert_eq(d.len(), 3);
+    // swap(1, 3) makes [1, 4, 3, 2], then pop_back returns 2
+    // Result: [1, 4, 3]
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 4);
+    assert_eq(*d.get(2).unwrap(), 3);
+}
+
+@test
+fn test_swap_remove_back_last() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let removed = d.swap_remove_back(2);
+    match removed {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_swap_remove_back_first() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let removed = d.swap_remove_back(0);
+    match removed {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_swap_remove_back_out_of_bounds() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+
+    let result = d.swap_remove_back(5);
+    assert(result is None);
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_swap_remove_back_single() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+
+    let removed = d.swap_remove_back(0);
+    match removed {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+    assert(d.is_empty());
+}
+
+// =============================================================================
+// Section 5: Integration / Combined usage
+// =============================================================================
+
+@test
+fn test_set_then_reverse() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    d.set(1, 99);
+    d.reverse();
+    assert_eq(*d.get(0).unwrap(), 3);
+    assert_eq(*d.get(1).unwrap(), 99);
+    assert_eq(*d.get(2).unwrap(), 1);
+}
+
+@test
+fn test_reverse_then_swap_remove() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    d.reverse();
+    // d = [4, 3, 2, 1]
+    let removed = d.swap_remove_back(0);
+    match removed {
+        Some(v) => assert_eq(v, 4),
+        None => panic("Expected Some"),
+    }
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_multiple_set_operations() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(0);
+    d.push_back(0);
+    d.push_back(0);
+    d.push_back(0);
+    d.push_back(0);
+
+    for i in range(0, 5) {
+        d.set(i, (i + 1) * 10);
+    }
+    assert_eq(*d.get(0).unwrap(), 10);
+    assert_eq(*d.get(1).unwrap(), 20);
+    assert_eq(*d.get(2).unwrap(), 30);
+    assert_eq(*d.get(3).unwrap(), 40);
+    assert_eq(*d.get(4).unwrap(), 50);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

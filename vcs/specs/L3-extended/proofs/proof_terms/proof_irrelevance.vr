@@ -1,0 +1,67 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, proof-terms, irrelevance
+// @timeout: 15000
+
+/// Proof irrelevance in proof terms
+
+/// Two proofs of True are equal
+theorem true_irrelevance: true == true { proof by trivial }
+
+/// Proof irrelevance for arithmetic
+theorem arith_irrelevance(n: Int) requires n > 0 ensures n > 0 { proof by auto }
+
+/// Any proof of P is as good as any other
+theorem prop_collapse<P: Prop>() requires P ensures P { proof by auto }
+
+/// Irrelevance in functions
+theorem fn_irrelevance(x: Int): x + 0 == x { proof by auto }
+
+/// Proof irrelevance for ordering
+theorem ord_irrelevance(a: Int, b: Int) requires a <= b ensures a <= b { proof by auto }
+
+/// Proof of False elimination
+theorem false_elim<P: Prop>() requires false ensures P { proof by contradiction { assume h: !P; contradiction } }
+
+/// Proof irrelevance for conjunction
+theorem and_irrelevance<P: Prop, Q: Prop>()
+    requires P && Q
+    ensures Q && P
+{
+    proof by auto
+}
+
+/// Proof irrelevance for disjunction
+theorem or_irrelevance<P: Prop, Q: Prop>()
+    requires P || Q
+    ensures Q || P
+{
+    proof by auto
+}
+
+/// Proof irrelevance for negation
+theorem neg_irrelevance<P: Prop>()
+    requires !!P
+    ensures !!P
+{
+    proof by auto
+}
+
+/// Proof terms are computationally irrelevant
+theorem computation_irrelevance(x: Int, y: Int)
+    requires x == y
+    ensures x + 1 == y + 1
+{
+    proof by auto
+}
+
+/// Proof erasure: proofs don't affect runtime
+theorem erasure_example(n: Nat)
+    requires n >= 0
+    ensures n * 1 == n
+{
+    proof by ring
+}
+
+fn main() {}

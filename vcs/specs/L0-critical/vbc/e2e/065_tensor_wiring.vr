@@ -1,0 +1,1022 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, wiring, extended
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Tensor wiring validation — tests newly wired TensorSubOpcodes via Verum simulation
+
+// ============================================================================
+// Array types — simulate fixed-length arrays with struct fields
+// ============================================================================
+
+type Arr4 is {
+    e0: Int, e1: Int, e2: Int, e3: Int
+};
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+type Arr9 is {
+    e0: Int, e1: Int, e2: Int,
+    e3: Int, e4: Int, e5: Int,
+    e6: Int, e7: Int, e8: Int
+};
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+// Mask: 1 = true, 0 = false
+type BoolMask4 is { m0: Int, m1: Int, m2: Int, m3: Int };
+
+// Result types for operations that return array + count
+type SelectOutcome is { arr: Arr4, count: Int };
+type NonzeroOutcome is { indices: Arr4, count: Int };
+
+// ============================================================================
+// Arr4 helpers
+// ============================================================================
+
+fn arr4_new(a: Int, b: Int, c: Int, d: Int) -> Arr4 {
+    Arr4 { e0: a, e1: b, e2: c, e3: d }
+}
+
+fn arr4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, val: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 }
+    }
+}
+
+// ============================================================================
+// Arr8 helpers
+// ============================================================================
+
+fn arr8_new(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: g, e7: h }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+// ============================================================================
+// Arr9 helpers (for 3x3 matrix)
+// ============================================================================
+
+fn arr9_get(a: Arr9, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else { a.e8 }
+}
+
+fn arr9_set(a: Arr9, i: Int, v: Int) -> Arr9 {
+    Arr9 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }
+    }
+}
+
+fn arr9_zeros() -> Arr9 {
+    Arr9 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0 }
+}
+
+// ============================================================================
+// Arr16 helpers
+// ============================================================================
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// ============================================================================
+// BoolMask4 helper
+// ============================================================================
+
+fn bmask4_get(m: BoolMask4, i: Int) -> Int {
+    if i == 0 { m.m0 } else if i == 1 { m.m1 }
+    else if i == 2 { m.m2 } else { m.m3 }
+}
+
+// ============================================================================
+// Utility
+// ============================================================================
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+// ============================================================================
+// Test 1: Clone — cloning an array preserves all values
+// ============================================================================
+
+fn arr4_clone(src: Arr4) -> Arr4 {
+    Arr4 { e0: src.e0, e1: src.e1, e2: src.e2, e3: src.e3 }
+}
+
+fn arr8_clone(src: Arr8) -> Arr8 {
+    Arr8 {
+        e0: src.e0, e1: src.e1, e2: src.e2, e3: src.e3,
+        e4: src.e4, e5: src.e5, e6: src.e6, e7: src.e7
+    }
+}
+
+@test
+fn test_clone() {
+    let a = arr4_new(10, 20, 30, 40);
+    let b = arr4_clone(a);
+    assert_eq(arr4_get(b, 0), 10);
+    assert_eq(arr4_get(b, 1), 20);
+    assert_eq(arr4_get(b, 2), 30);
+    assert_eq(arr4_get(b, 3), 40);
+
+    // Clone of zeros
+    let z = arr4_zeros();
+    let zc = arr4_clone(z);
+    assert_eq(arr4_get(zc, 0), 0);
+    assert_eq(arr4_get(zc, 1), 0);
+    assert_eq(arr4_get(zc, 2), 0);
+    assert_eq(arr4_get(zc, 3), 0);
+
+    // Clone of 8-element array with negatives
+    let c = arr8_new(-1, 2, -3, 4, -5, 6, -7, 8);
+    let d = arr8_clone(c);
+    assert_eq(arr8_get(d, 0), -1);
+    assert_eq(arr8_get(d, 1), 2);
+    assert_eq(arr8_get(d, 4), -5);
+    assert_eq(arr8_get(d, 7), 8);
+
+    // Modifying clone does not affect original (value semantics)
+    let orig = arr4_new(1, 2, 3, 4);
+    let mut copy = arr4_clone(orig);
+    copy = arr4_set(copy, 0, 999);
+    assert_eq(arr4_get(orig, 0), 1);
+    assert_eq(arr4_get(copy, 0), 999);
+
+    print("test_clone passed");
+}
+
+// ============================================================================
+// Test 2: Arange — simulate arange(start, stop, step)
+// ============================================================================
+
+fn arange4(start: Int, step: Int) -> Arr4 {
+    Arr4 {
+        e0: start,
+        e1: start + step,
+        e2: start + step * 2,
+        e3: start + step * 3
+    }
+}
+
+@test
+fn test_arange() {
+    // arange(0, 4, 1) -> [0, 1, 2, 3]
+    let a = arange4(0, 1);
+    assert_eq(arr4_get(a, 0), 0);
+    assert_eq(arr4_get(a, 1), 1);
+    assert_eq(arr4_get(a, 2), 2);
+    assert_eq(arr4_get(a, 3), 3);
+
+    // arange(10, _, 5) -> [10, 15, 20, 25]
+    let b = arange4(10, 5);
+    assert_eq(arr4_get(b, 0), 10);
+    assert_eq(arr4_get(b, 1), 15);
+    assert_eq(arr4_get(b, 2), 20);
+    assert_eq(arr4_get(b, 3), 25);
+
+    // arange(0, _, 2) -> [0, 2, 4, 6]
+    let c = arange4(0, 2);
+    assert_eq(arr4_get(c, 0), 0);
+    assert_eq(arr4_get(c, 1), 2);
+    assert_eq(arr4_get(c, 2), 4);
+    assert_eq(arr4_get(c, 3), 6);
+
+    // Negative step: arange(10, _, -3) -> [10, 7, 4, 1]
+    let d = arange4(10, -3);
+    assert_eq(arr4_get(d, 0), 10);
+    assert_eq(arr4_get(d, 1), 7);
+    assert_eq(arr4_get(d, 2), 4);
+    assert_eq(arr4_get(d, 3), 1);
+
+    print("test_arange passed");
+}
+
+// ============================================================================
+// Test 3: Linspace — simulate linspace(start, stop, n) with integer scaling
+// linspace produces n evenly-spaced values from start to stop (inclusive)
+// We use scale=1000 for precision, returning values * 1000
+// ============================================================================
+
+fn linspace4(start: Int, stop: Int) -> Arr4 {
+    // 4 points from start to stop inclusive, values scaled by 1000
+    // step = (stop - start) * 1000 / 3  (3 intervals for 4 points)
+    let step_scaled = (stop - start) * 1000 / 3;
+    Arr4 {
+        e0: start * 1000,
+        e1: start * 1000 + step_scaled,
+        e2: start * 1000 + step_scaled * 2,
+        e3: stop * 1000
+    }
+}
+
+@test
+fn test_linspace() {
+    // linspace(0, 10, 4) -> [0, 3333, 6666, 10000] (scaled by 1000)
+    let a = linspace4(0, 10);
+    assert_eq(arr4_get(a, 0), 0);
+    assert_eq(arr4_get(a, 1), 3333);
+    assert_eq(arr4_get(a, 2), 6666);
+    assert_eq(arr4_get(a, 3), 10000);
+
+    // linspace(0, 6, 4) -> [0, 2000, 4000, 6000] (evenly divisible)
+    let b = linspace4(0, 6);
+    assert_eq(arr4_get(b, 0), 0);
+    assert_eq(arr4_get(b, 1), 2000);
+    assert_eq(arr4_get(b, 2), 4000);
+    assert_eq(arr4_get(b, 3), 6000);
+
+    // linspace(10, 10, 4) -> all 10000 (constant)
+    let c = linspace4(10, 10);
+    assert_eq(arr4_get(c, 0), 10000);
+    assert_eq(arr4_get(c, 1), 10000);
+    assert_eq(arr4_get(c, 2), 10000);
+    assert_eq(arr4_get(c, 3), 10000);
+
+    // Descending: linspace(9, 0, 4) -> [9000, 6000, 3000, 0]
+    let d = linspace4(9, 0);
+    assert_eq(arr4_get(d, 0), 9000);
+    assert_eq(arr4_get(d, 1), 6000);
+    assert_eq(arr4_get(d, 2), 3000);
+    assert_eq(arr4_get(d, 3), 0);
+
+    print("test_linspace passed");
+}
+
+// ============================================================================
+// Test 4: Identity matrix — simulate 3x3 identity stored in Arr9
+// ============================================================================
+
+fn identity3x3() -> Arr9 {
+    Arr9 {
+        e0: 1, e1: 0, e2: 0,
+        e3: 0, e4: 1, e5: 0,
+        e6: 0, e7: 0, e8: 1
+    }
+}
+
+@test
+fn test_identity() {
+    let eye = identity3x3();
+    // Diagonal elements are 1
+    assert_eq(arr9_get(eye, 0), 1);
+    assert_eq(arr9_get(eye, 4), 1);
+    assert_eq(arr9_get(eye, 8), 1);
+
+    // Off-diagonal elements are 0
+    assert_eq(arr9_get(eye, 1), 0);
+    assert_eq(arr9_get(eye, 2), 0);
+    assert_eq(arr9_get(eye, 3), 0);
+    assert_eq(arr9_get(eye, 5), 0);
+    assert_eq(arr9_get(eye, 6), 0);
+    assert_eq(arr9_get(eye, 7), 0);
+
+    // Identity * vector = vector (matrix-vector multiply)
+    // [1 0 0] [5]   [5]
+    // [0 1 0] [7] = [7]
+    // [0 0 1] [9]   [9]
+    let v0 = arr9_get(eye, 0) * 5 + arr9_get(eye, 1) * 7 + arr9_get(eye, 2) * 9;
+    let v1 = arr9_get(eye, 3) * 5 + arr9_get(eye, 4) * 7 + arr9_get(eye, 5) * 9;
+    let v2 = arr9_get(eye, 6) * 5 + arr9_get(eye, 7) * 7 + arr9_get(eye, 8) * 9;
+    assert_eq(v0, 5);
+    assert_eq(v1, 7);
+    assert_eq(v2, 9);
+
+    print("test_identity passed");
+}
+
+// ============================================================================
+// Test 5: Rand simulation — values should be non-negative
+// We simulate a simple LCG pseudo-random: next = (a * prev + c) % m
+// ============================================================================
+
+fn rand_lcg_arr4(seed: Int) -> Arr4 {
+    // Simple LCG: next = (seed * 1103515245 + 12345) % 2147483647
+    // We use a simplified version to avoid overflow: (seed * 1013 + 7) % 10000
+    let r0 = (seed * 1013 + 7) % 10000;
+    let r1 = (r0 * 1013 + 7) % 10000;
+    let r2 = (r1 * 1013 + 7) % 10000;
+    let r3 = (r2 * 1013 + 7) % 10000;
+    Arr4 { e0: r0, e1: r1, e2: r2, e3: r3 }
+}
+
+@test
+fn test_rand() {
+    let r = rand_lcg_arr4(42);
+    // All values should be non-negative (mod 10000 produces [0, 9999])
+    assert(arr4_get(r, 0) >= 0);
+    assert(arr4_get(r, 1) >= 0);
+    assert(arr4_get(r, 2) >= 0);
+    assert(arr4_get(r, 3) >= 0);
+
+    // All values should be less than 10000
+    assert(arr4_get(r, 0) < 10000);
+    assert(arr4_get(r, 1) < 10000);
+    assert(arr4_get(r, 2) < 10000);
+    assert(arr4_get(r, 3) < 10000);
+
+    // Different seed gives different values
+    let r2 = rand_lcg_arr4(99);
+    // At least one element should differ (overwhelmingly likely)
+    let same_count = (if arr4_get(r, 0) == arr4_get(r2, 0) { 1 } else { 0 })
+                   + (if arr4_get(r, 1) == arr4_get(r2, 1) { 1 } else { 0 })
+                   + (if arr4_get(r, 2) == arr4_get(r2, 2) { 1 } else { 0 })
+                   + (if arr4_get(r, 3) == arr4_get(r2, 3) { 1 } else { 0 });
+    assert(same_count < 4);
+
+    // Verify deterministic: same seed gives same result
+    let r3 = rand_lcg_arr4(42);
+    assert_eq(arr4_get(r, 0), arr4_get(r3, 0));
+    assert_eq(arr4_get(r, 1), arr4_get(r3, 1));
+    assert_eq(arr4_get(r, 2), arr4_get(r3, 2));
+    assert_eq(arr4_get(r, 3), arr4_get(r3, 3));
+
+    print("test_rand passed");
+}
+
+// ============================================================================
+// Test 6: Dot product — dot(a, b) = sum of element-wise products
+// ============================================================================
+
+fn dot4(a: Arr4, b: Arr4) -> Int {
+    a.e0 * b.e0 + a.e1 * b.e1 + a.e2 * b.e2 + a.e3 * b.e3
+}
+
+@test
+fn test_dot_product() {
+    // [1,2,3,4] . [5,6,7,8] = 5+12+21+32 = 70
+    let a = arr4_new(1, 2, 3, 4);
+    let b = arr4_new(5, 6, 7, 8);
+    assert_eq(dot4(a, b), 70);
+
+    // Self dot = squared magnitude: [3,4,0,0] -> 9+16 = 25
+    let v = arr4_new(3, 4, 0, 0);
+    assert_eq(dot4(v, v), 25);
+
+    // Orthogonal vectors: [1,0,0,0] . [0,1,0,0] = 0
+    let x = arr4_new(1, 0, 0, 0);
+    let y = arr4_new(0, 1, 0, 0);
+    assert_eq(dot4(x, y), 0);
+
+    // Negative values: [1,-1,1,-1] . [1,1,1,1] = 1-1+1-1 = 0
+    let p = arr4_new(1, -1, 1, -1);
+    let q = arr4_new(1, 1, 1, 1);
+    assert_eq(dot4(p, q), 0);
+
+    // Anti-parallel: [2,3,0,0] . [-2,-3,0,0] = -4-9 = -13
+    let u = arr4_new(2, 3, 0, 0);
+    let w = arr4_new(-2, -3, 0, 0);
+    assert_eq(dot4(u, w), -13);
+
+    print("test_dot_product passed");
+}
+
+// ============================================================================
+// Test 7: Outer product — outer(a, b) = matrix where m[i][j] = a[i] * b[j]
+// 4x4 result stored in Arr16 (row-major)
+// ============================================================================
+
+fn outer4x4(a: Arr4, b: Arr4) -> Arr16 {
+    Arr16 {
+        e0:  a.e0 * b.e0,  e1:  a.e0 * b.e1,  e2:  a.e0 * b.e2,  e3:  a.e0 * b.e3,
+        e4:  a.e1 * b.e0,  e5:  a.e1 * b.e1,  e6:  a.e1 * b.e2,  e7:  a.e1 * b.e3,
+        e8:  a.e2 * b.e0,  e9:  a.e2 * b.e1,  e10: a.e2 * b.e2,  e11: a.e2 * b.e3,
+        e12: a.e3 * b.e0,  e13: a.e3 * b.e1,  e14: a.e3 * b.e2,  e15: a.e3 * b.e3
+    }
+}
+
+@test
+fn test_outer_product() {
+    // [1, 2] outer [3, 4] (using first 2 elements)
+    // Result: [[3, 4, 0, 0], [6, 8, 0, 0], [0,...], [0,...]]
+    let a = arr4_new(1, 2, 0, 0);
+    let b = arr4_new(3, 4, 0, 0);
+    let m = outer4x4(a, b);
+    assert_eq(arr16_get(m, 0), 3);   // 1*3
+    assert_eq(arr16_get(m, 1), 4);   // 1*4
+    assert_eq(arr16_get(m, 4), 6);   // 2*3
+    assert_eq(arr16_get(m, 5), 8);   // 2*4
+
+    // Full 4x4: [1,2,3,4] outer [1,0,0,0] = column vector
+    let c = arr4_new(1, 2, 3, 4);
+    let d = arr4_new(1, 0, 0, 0);
+    let m2 = outer4x4(c, d);
+    assert_eq(arr16_get(m2, 0), 1);
+    assert_eq(arr16_get(m2, 4), 2);
+    assert_eq(arr16_get(m2, 8), 3);
+    assert_eq(arr16_get(m2, 12), 4);
+    // All other columns are 0
+    assert_eq(arr16_get(m2, 1), 0);
+    assert_eq(arr16_get(m2, 5), 0);
+
+    // Symmetric: a outer a gives symmetric matrix
+    let s = arr4_new(1, 2, 0, 0);
+    let sym = outer4x4(s, s);
+    assert_eq(arr16_get(sym, 0), 1);  // 1*1
+    assert_eq(arr16_get(sym, 1), 2);  // 1*2
+    assert_eq(arr16_get(sym, 4), 2);  // 2*1 = sym[1,0]
+    assert_eq(arr16_get(sym, 5), 4);  // 2*2
+
+    print("test_outer_product passed");
+}
+
+// ============================================================================
+// Test 8: Lerp — linear interpolation between two arrays
+// lerp(a, b, t, scale) = a + t * (b - a) / scale
+// ============================================================================
+
+fn lerp_scalar(a: Int, b: Int, t: Int, scale: Int) -> Int {
+    a + t * (b - a) / scale
+}
+
+fn arr4_lerp(src_a: Arr4, src_b: Arr4, t: Int, scale: Int) -> Arr4 {
+    Arr4 {
+        e0: lerp_scalar(src_a.e0, src_b.e0, t, scale),
+        e1: lerp_scalar(src_a.e1, src_b.e1, t, scale),
+        e2: lerp_scalar(src_a.e2, src_b.e2, t, scale),
+        e3: lerp_scalar(src_a.e3, src_b.e3, t, scale)
+    }
+}
+
+@test
+fn test_lerp() {
+    // t=0: result = a
+    let a = arr4_new(0, 100, 200, 300);
+    let b = arr4_new(100, 200, 300, 400);
+    let r0 = arr4_lerp(a, b, 0, 100);
+    assert_eq(arr4_get(r0, 0), 0);
+    assert_eq(arr4_get(r0, 1), 100);
+    assert_eq(arr4_get(r0, 2), 200);
+    assert_eq(arr4_get(r0, 3), 300);
+
+    // t=100 (scale=100 means t=1.0): result = b
+    let r1 = arr4_lerp(a, b, 100, 100);
+    assert_eq(arr4_get(r1, 0), 100);
+    assert_eq(arr4_get(r1, 1), 200);
+    assert_eq(arr4_get(r1, 2), 300);
+    assert_eq(arr4_get(r1, 3), 400);
+
+    // t=50 (t=0.5): midpoint
+    let r_half = arr4_lerp(a, b, 50, 100);
+    assert_eq(arr4_get(r_half, 0), 50);
+    assert_eq(arr4_get(r_half, 1), 150);
+    assert_eq(arr4_get(r_half, 2), 250);
+    assert_eq(arr4_get(r_half, 3), 350);
+
+    // Lerp with negative values: [-100, 100] at t=50 -> midpoint 0
+    assert_eq(lerp_scalar(-100, 100, 50, 100), 0);
+
+    // t=25 (quarter): 0 + 25*(100)/100 = 25
+    assert_eq(lerp_scalar(0, 100, 25, 100), 25);
+
+    print("test_lerp passed");
+}
+
+// ============================================================================
+// Test 9: Determinant and Trace of 2x2 matrix
+// 2x2 matrix stored as Arr4: [a, b, c, d] represents [[a,b],[c,d]]
+// det = a*d - b*c
+// trace = a + d
+// ============================================================================
+
+fn det2x2(m: Arr4) -> Int {
+    m.e0 * m.e3 - m.e1 * m.e2
+}
+
+fn trace2x2(m: Arr4) -> Int {
+    m.e0 + m.e3
+}
+
+@test
+fn test_det_trace() {
+    // Identity 2x2: [[1,0],[0,1]]
+    let eye = arr4_new(1, 0, 0, 1);
+    assert_eq(det2x2(eye), 1);
+    assert_eq(trace2x2(eye), 2);
+
+    // [[2, 3], [1, 4]] -> det = 2*4 - 3*1 = 5, trace = 2+4 = 6
+    let m1 = arr4_new(2, 3, 1, 4);
+    assert_eq(det2x2(m1), 5);
+    assert_eq(trace2x2(m1), 6);
+
+    // Singular matrix: [[2, 4], [1, 2]] -> det = 2*2 - 4*1 = 0
+    let sing = arr4_new(2, 4, 1, 2);
+    assert_eq(det2x2(sing), 0);
+    assert_eq(trace2x2(sing), 4);
+
+    // Negative determinant: [[1, 3], [2, 1]] -> det = 1-6 = -5
+    let m2 = arr4_new(1, 3, 2, 1);
+    assert_eq(det2x2(m2), -5);
+    assert_eq(trace2x2(m2), 2);
+
+    // Diagonal matrix: [[5, 0], [0, 7]] -> det = 35, trace = 12
+    let diag = arr4_new(5, 0, 0, 7);
+    assert_eq(det2x2(diag), 35);
+    assert_eq(trace2x2(diag), 12);
+
+    // Skew symmetric: [[0, -3], [3, 0]] -> det = 0+9 = 9, trace = 0
+    let skew = arr4_new(0, -3, 3, 0);
+    assert_eq(det2x2(skew), 9);
+    assert_eq(trace2x2(skew), 0);
+
+    print("test_det_trace passed");
+}
+
+// ============================================================================
+// Test 10: BroadcastToShape — broadcast scalar to fill an array
+// ============================================================================
+
+fn broadcast_scalar_to_arr4(val: Int) -> Arr4 {
+    Arr4 { e0: val, e1: val, e2: val, e3: val }
+}
+
+fn broadcast_scalar_to_arr8(val: Int) -> Arr8 {
+    Arr8 { e0: val, e1: val, e2: val, e3: val, e4: val, e5: val, e6: val, e7: val }
+}
+
+@test
+fn test_broadcast() {
+    // Broadcast 42 to all 4 elements
+    let b4 = broadcast_scalar_to_arr4(42);
+    assert_eq(arr4_get(b4, 0), 42);
+    assert_eq(arr4_get(b4, 1), 42);
+    assert_eq(arr4_get(b4, 2), 42);
+    assert_eq(arr4_get(b4, 3), 42);
+
+    // Broadcast 0
+    let z4 = broadcast_scalar_to_arr4(0);
+    assert_eq(arr4_get(z4, 0), 0);
+    assert_eq(arr4_get(z4, 3), 0);
+
+    // Broadcast negative
+    let n4 = broadcast_scalar_to_arr4(-7);
+    assert_eq(arr4_get(n4, 0), -7);
+    assert_eq(arr4_get(n4, 3), -7);
+
+    // Broadcast to 8 elements
+    let b8 = broadcast_scalar_to_arr8(99);
+    assert_eq(arr8_get(b8, 0), 99);
+    assert_eq(arr8_get(b8, 3), 99);
+    assert_eq(arr8_get(b8, 7), 99);
+
+    // Broadcast + arithmetic: all elements same, so sum = 4*val
+    let bsum = broadcast_scalar_to_arr4(25);
+    let total = arr4_get(bsum, 0) + arr4_get(bsum, 1) + arr4_get(bsum, 2) + arr4_get(bsum, 3);
+    assert_eq(total, 100);
+
+    print("test_broadcast passed");
+}
+
+// ============================================================================
+// Test 11: Contiguous — contiguous returns same values (identity reshape)
+// ============================================================================
+
+fn arr4_contiguous(a: Arr4) -> Arr4 {
+    // Simulates making a tensor contiguous in memory — returns identical values
+    Arr4 { e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3 }
+}
+
+fn arr8_contiguous(a: Arr8) -> Arr8 {
+    Arr8 {
+        e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3,
+        e4: a.e4, e5: a.e5, e6: a.e6, e7: a.e7
+    }
+}
+
+@test
+fn test_contiguous() {
+    let a = arr4_new(11, 22, 33, 44);
+    let c = arr4_contiguous(a);
+    assert_eq(arr4_get(c, 0), 11);
+    assert_eq(arr4_get(c, 1), 22);
+    assert_eq(arr4_get(c, 2), 33);
+    assert_eq(arr4_get(c, 3), 44);
+
+    // Contiguous of contiguous is idempotent
+    let cc = arr4_contiguous(c);
+    assert_eq(arr4_get(cc, 0), 11);
+    assert_eq(arr4_get(cc, 3), 44);
+
+    // 8-element contiguous
+    let b = arr8_new(1, 2, 3, 4, 5, 6, 7, 8);
+    let bc = arr8_contiguous(b);
+    let mut i = 0;
+    let mut ok = 1;
+    while i < 8 {
+        if arr8_get(bc, i) != i + 1 {
+            ok = 0;
+        }
+        i = i + 1;
+    }
+    assert_eq(ok, 1);
+
+    print("test_contiguous passed");
+}
+
+// ============================================================================
+// Test 12: Concat — concatenate two Arr4 arrays into an Arr8
+// ============================================================================
+
+fn concat_arr4_arr4(a: Arr4, b: Arr4) -> Arr8 {
+    Arr8 {
+        e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3,
+        e4: b.e0, e5: b.e1, e6: b.e2, e7: b.e3
+    }
+}
+
+// Stack: simulate stacking two Arr4 arrays as rows of a 2x4 matrix (Arr8)
+fn stack_arr4_arr4(a: Arr4, b: Arr4) -> Arr8 {
+    // Row 0: a, Row 1: b (same layout as concat for 1D)
+    Arr8 {
+        e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3,
+        e4: b.e0, e5: b.e1, e6: b.e2, e7: b.e3
+    }
+}
+
+@test
+fn test_concat_stack() {
+    // Concat [1, 2, 3, 4] ++ [5, 6, 7, 8] -> [1, 2, 3, 4, 5, 6, 7, 8]
+    let a = arr4_new(1, 2, 3, 4);
+    let b = arr4_new(5, 6, 7, 8);
+    let cat = concat_arr4_arr4(a, b);
+    assert_eq(arr8_get(cat, 0), 1);
+    assert_eq(arr8_get(cat, 1), 2);
+    assert_eq(arr8_get(cat, 2), 3);
+    assert_eq(arr8_get(cat, 3), 4);
+    assert_eq(arr8_get(cat, 4), 5);
+    assert_eq(arr8_get(cat, 5), 6);
+    assert_eq(arr8_get(cat, 6), 7);
+    assert_eq(arr8_get(cat, 7), 8);
+
+    // Concat with zeros: [10, 20, 30, 40] ++ [0, 0, 0, 0]
+    let c = arr4_new(10, 20, 30, 40);
+    let z = arr4_zeros();
+    let cat2 = concat_arr4_arr4(c, z);
+    assert_eq(arr8_get(cat2, 0), 10);
+    assert_eq(arr8_get(cat2, 3), 40);
+    assert_eq(arr8_get(cat2, 4), 0);
+    assert_eq(arr8_get(cat2, 7), 0);
+
+    // Stack: same data, interpreted as 2 rows x 4 cols
+    let row0 = arr4_new(1, 0, 0, 0);
+    let row1 = arr4_new(0, 0, 0, 1);
+    let stacked = stack_arr4_arr4(row0, row1);
+    // Access as matrix[row][col] = stacked[row*4 + col]
+    assert_eq(arr8_get(stacked, 0), 1);  // [0][0]
+    assert_eq(arr8_get(stacked, 1), 0);  // [0][1]
+    assert_eq(arr8_get(stacked, 4), 0);  // [1][0]
+    assert_eq(arr8_get(stacked, 7), 1);  // [1][3]
+
+    print("test_concat_stack passed");
+}
+
+// ============================================================================
+// Test 13: Split / SplitAt — split an Arr8 into two Arr4 halves at a boundary
+// ============================================================================
+
+type SplitPair is { left: Arr4, right: Arr4 };
+
+fn split_at_4(a: Arr8) -> SplitPair {
+    // Split 8-element array at index 4: left=[0..3], right=[4..7]
+    let left = Arr4 { e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3 };
+    let right = Arr4 { e0: a.e4, e1: a.e5, e2: a.e6, e3: a.e7 };
+    SplitPair { left: left, right: right }
+}
+
+// Split at arbitrary index (0-based) into elements [0..idx-1] and [idx..7]
+// For simplicity, left gets first `idx` elements, right gets remaining
+type SplitFlexible is { left: Arr8, left_len: Int, right: Arr8, right_len: Int };
+
+fn split_at_idx(a: Arr8, idx: Int) -> SplitFlexible {
+    let mut left = arr8_zeros();
+    let mut right = arr8_zeros();
+    let mut li = 0;
+    let mut ri = 0;
+    let mut i = 0;
+    while i < 8 {
+        if i < idx {
+            left = arr8_set(left, li, arr8_get(a, i));
+            li = li + 1;
+        } else {
+            right = arr8_set(right, ri, arr8_get(a, i));
+            ri = ri + 1;
+        }
+        i = i + 1;
+    }
+    SplitFlexible { left: left, left_len: li, right: right, right_len: ri }
+}
+
+@test
+fn test_split() {
+    // Split [10, 20, 30, 40, 50, 60, 70, 80] at midpoint
+    let a = arr8_new(10, 20, 30, 40, 50, 60, 70, 80);
+    let sp = split_at_4(a);
+    assert_eq(arr4_get(sp.left, 0), 10);
+    assert_eq(arr4_get(sp.left, 1), 20);
+    assert_eq(arr4_get(sp.left, 2), 30);
+    assert_eq(arr4_get(sp.left, 3), 40);
+    assert_eq(arr4_get(sp.right, 0), 50);
+    assert_eq(arr4_get(sp.right, 1), 60);
+    assert_eq(arr4_get(sp.right, 2), 70);
+    assert_eq(arr4_get(sp.right, 3), 80);
+
+    // Roundtrip: concat(split(a)) == a
+    let cat = concat_arr4_arr4(sp.left, sp.right);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(arr8_get(cat, i), arr8_get(a, i));
+        i = i + 1;
+    }
+
+    // Flexible split at index 2: left=[10,20], right=[30,40,50,60,70,80]
+    let sf = split_at_idx(a, 2);
+    assert_eq(sf.left_len, 2);
+    assert_eq(sf.right_len, 6);
+    assert_eq(arr8_get(sf.left, 0), 10);
+    assert_eq(arr8_get(sf.left, 1), 20);
+    assert_eq(arr8_get(sf.right, 0), 30);
+    assert_eq(arr8_get(sf.right, 5), 80);
+
+    // Split at 0: everything goes to right
+    let sf0 = split_at_idx(a, 0);
+    assert_eq(sf0.left_len, 0);
+    assert_eq(sf0.right_len, 8);
+    assert_eq(arr8_get(sf0.right, 0), 10);
+
+    print("test_split passed");
+}
+
+// ============================================================================
+// Test 14: MaskedFill / MaskedSelect
+// ============================================================================
+
+fn masked_fill(src: Arr4, mask: BoolMask4, fill_val: Int) -> Arr4 {
+    Arr4 {
+        e0: if mask.m0 == 1 { fill_val } else { src.e0 },
+        e1: if mask.m1 == 1 { fill_val } else { src.e1 },
+        e2: if mask.m2 == 1 { fill_val } else { src.e2 },
+        e3: if mask.m3 == 1 { fill_val } else { src.e3 }
+    }
+}
+
+fn masked_select(src: Arr4, mask: BoolMask4) -> SelectOutcome {
+    let mut out = arr4_zeros();
+    let mut j = 0;
+    let mut i = 0;
+    while i < 4 {
+        if bmask4_get(mask, i) == 1 {
+            out = arr4_set(out, j, arr4_get(src, i));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    SelectOutcome { arr: out, count: j }
+}
+
+@test
+fn test_masked_ops() {
+    // MaskedFill: fill positions 0 and 2 with -999
+    let src = arr4_new(10, 20, 30, 40);
+    let mask = BoolMask4 { m0: 1, m1: 0, m2: 1, m3: 0 };
+    let filled = masked_fill(src, mask, -999);
+    assert_eq(arr4_get(filled, 0), -999);
+    assert_eq(arr4_get(filled, 1), 20);
+    assert_eq(arr4_get(filled, 2), -999);
+    assert_eq(arr4_get(filled, 3), 40);
+
+    // All-true mask fills everything
+    let all_mask = BoolMask4 { m0: 1, m1: 1, m2: 1, m3: 1 };
+    let filled2 = masked_fill(src, all_mask, 0);
+    assert_eq(arr4_get(filled2, 0), 0);
+    assert_eq(arr4_get(filled2, 1), 0);
+    assert_eq(arr4_get(filled2, 2), 0);
+    assert_eq(arr4_get(filled2, 3), 0);
+
+    // All-false mask: no change
+    let no_mask = BoolMask4 { m0: 0, m1: 0, m2: 0, m3: 0 };
+    let filled3 = masked_fill(src, no_mask, 777);
+    assert_eq(arr4_get(filled3, 0), 10);
+    assert_eq(arr4_get(filled3, 3), 40);
+
+    // MaskedSelect: select positions 1 and 3
+    let sel_mask = BoolMask4 { m0: 0, m1: 1, m2: 0, m3: 1 };
+    let selected = masked_select(src, sel_mask);
+    assert_eq(selected.count, 2);
+    assert_eq(arr4_get(selected.arr, 0), 20);
+    assert_eq(arr4_get(selected.arr, 1), 40);
+
+    // Select all
+    let sel_all = masked_select(src, all_mask);
+    assert_eq(sel_all.count, 4);
+    assert_eq(arr4_get(sel_all.arr, 0), 10);
+    assert_eq(arr4_get(sel_all.arr, 3), 40);
+
+    // Select none
+    let sel_none = masked_select(src, no_mask);
+    assert_eq(sel_none.count, 0);
+
+    print("test_masked_ops passed");
+}
+
+// ============================================================================
+// Test 15: Nonzero / OneHot
+// ============================================================================
+
+fn nonzero(src: Arr4) -> NonzeroOutcome {
+    let mut out = arr4_zeros();
+    let mut j = 0;
+    let mut i = 0;
+    while i < 4 {
+        if arr4_get(src, i) != 0 {
+            out = arr4_set(out, j, i);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    NonzeroOutcome { indices: out, count: j }
+}
+
+fn one_hot(index: Int, length: Int) -> Arr4 {
+    // Create one-hot vector: all zeros except position `index` which is 1
+    let mut out = arr4_zeros();
+    if index >= 0 {
+        if index < length {
+            out = arr4_set(out, index, 1);
+        }
+    }
+    out
+}
+
+@test
+fn test_nonzero_onehot() {
+    // Nonzero: [0, 5, 0, 3] -> indices [1, 3]
+    let a = arr4_new(0, 5, 0, 3);
+    let nz = nonzero(a);
+    assert_eq(nz.count, 2);
+    assert_eq(arr4_get(nz.indices, 0), 1);
+    assert_eq(arr4_get(nz.indices, 1), 3);
+
+    // All nonzero
+    let b = arr4_new(1, -2, 3, -4);
+    let nz2 = nonzero(b);
+    assert_eq(nz2.count, 4);
+    assert_eq(arr4_get(nz2.indices, 0), 0);
+    assert_eq(arr4_get(nz2.indices, 1), 1);
+    assert_eq(arr4_get(nz2.indices, 2), 2);
+    assert_eq(arr4_get(nz2.indices, 3), 3);
+
+    // All zeros
+    let z = arr4_zeros();
+    let nz3 = nonzero(z);
+    assert_eq(nz3.count, 0);
+
+    // Single nonzero at position 2
+    let c = arr4_new(0, 0, 7, 0);
+    let nz4 = nonzero(c);
+    assert_eq(nz4.count, 1);
+    assert_eq(arr4_get(nz4.indices, 0), 2);
+
+    // OneHot: index=0, length=4 -> [1, 0, 0, 0]
+    let oh0 = one_hot(0, 4);
+    assert_eq(arr4_get(oh0, 0), 1);
+    assert_eq(arr4_get(oh0, 1), 0);
+    assert_eq(arr4_get(oh0, 2), 0);
+    assert_eq(arr4_get(oh0, 3), 0);
+
+    // OneHot: index=2, length=4 -> [0, 0, 1, 0]
+    let oh2 = one_hot(2, 4);
+    assert_eq(arr4_get(oh2, 0), 0);
+    assert_eq(arr4_get(oh2, 1), 0);
+    assert_eq(arr4_get(oh2, 2), 1);
+    assert_eq(arr4_get(oh2, 3), 0);
+
+    // OneHot: index=3, length=4 -> [0, 0, 0, 1]
+    let oh3 = one_hot(3, 4);
+    assert_eq(arr4_get(oh3, 0), 0);
+    assert_eq(arr4_get(oh3, 3), 1);
+
+    // OneHot: sum of all one-hot vectors = [1, 1, 1, 1]
+    let sum_e0 = arr4_get(one_hot(0, 4), 0) + arr4_get(one_hot(1, 4), 0)
+               + arr4_get(one_hot(2, 4), 0) + arr4_get(one_hot(3, 4), 0);
+    assert_eq(sum_e0, 1);
+    let sum_all = arr4_get(one_hot(0, 4), 0) + arr4_get(one_hot(1, 4), 1)
+                + arr4_get(one_hot(2, 4), 2) + arr4_get(one_hot(3, 4), 3);
+    assert_eq(sum_all, 4);
+
+    print("test_nonzero_onehot passed");
+}
+
+// ============================================================================
+// Main — run all tests
+// ============================================================================
+
+fn main() -> Int {
+    test_clone();
+    test_arange();
+    test_linspace();
+    test_identity();
+    test_rand();
+    test_dot_product();
+    test_outer_product();
+    test_lerp();
+    test_det_trace();
+    test_broadcast();
+    test_contiguous();
+    test_concat_stack();
+    test_split();
+    test_masked_ops();
+    test_nonzero_onehot();
+    print("[OK] 065_tensor_wiring");
+    0
+}

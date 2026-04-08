@@ -1,0 +1,265 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, conversion, from, into
+
+/// Error conversion - transforming between error types.
+/// Uses the From/Into traits for ergonomic error handling.
+
+/// Low-level I/O error
+type IoError is {
+    kind: IoErrorKind,
+    message: Text
+};
+
+type IoErrorKind is
+    | NotFound
+    | PermissionDenied
+    | ConnectionRefused
+    | TimedOut
+    | Other;
+
+/// Network-specific error
+type NetworkError is
+    | Io(IoError)
+    | DnsResolutionFailed(Text)
+    | TlsHandshakeFailed(Text)
+    | ProtocolError(Text);
+
+/// Database error
+type DatabaseError is
+    | Connection(NetworkError)
+    | Query(Text)
+    | ConstraintViolation { table: Text, constraint: Text }
+    | Timeout;
+
+/// Application-level error that aggregates all error types
+type AppError is
+    | Io(IoError)
+    | Network(NetworkError)
+    | Database(DatabaseError)
+    | Validation(Text)
+    | Internal(Text);
+
+// Implement From trait for automatic conversions
+
+implement From<IoError> for NetworkError {
+    fn from(e: IoError) -> NetworkError {
+        NetworkError.Io(e)
+    }
+}
+
+implement From<IoError> for AppError {
+    fn from(e: IoError) -> AppError {
+        AppError.Io(e)
+    }
+}
+
+implement From<NetworkError> for AppError {
+    fn from(e: NetworkError) -> AppError {
+        AppError.Network(e)
+    }
+}
+
+implement From<NetworkError> for DatabaseError {
+    fn from(e: NetworkError) -> DatabaseError {
+        DatabaseError.Connection(e)
+    }
+}
+
+implement From<DatabaseError> for AppError {
+    fn from(e: DatabaseError) -> AppError {
+        AppError.Database(e)
+    }
+}
+
+/// Into trait is automatically derived from From
+// If From<A> for B exists, Into<B> for A is automatic
+
+/// Simulated low-level operations
+fn read_socket_raw() -> Result<Bytes, IoError> {
+    // Simulate I/O error
+    Err(IoError {
+        kind: IoErrorKind.ConnectionRefused,
+        message: "Connection refused by remote host"
+    })
+}
+
+fn connect_to_server(host: &Text) -> Result<Connection, NetworkError> {
+    // Using ? with automatic conversion from IoError to NetworkError
+    let data = read_socket_raw()?;  // IoError -> NetworkError via From
+    Ok(Connection { host: host.clone() })
+}
+
+type Connection is {
+    host: Text
+};
+
+fn execute_query(conn: &Connection, query: &Text) -> Result<QueryResult, DatabaseError> {
+    // Would use connection to execute query
+    if query.is_empty() {
+        Err(DatabaseError.Query("Empty query not allowed"))
+    } else {
+        Ok(QueryResult { rows_affected: 0 })
+    }
+}
+
+type QueryResult is {
+    rows_affected: Int
+};
+
+/// High-level function using automatic conversions
+fn fetch_user_data(user_id: Int) -> Result<UserData, AppError> {
+    // All these operations have different error types
+    // but ? automatically converts them to AppError
+
+    // This would convert NetworkError -> AppError
+    // let conn = connect_to_server("db.example.com")?;
+
+    // Simulated success path
+    Ok(UserData { id: user_id, name: "Test User" })
+}
+
+type UserData is {
+    id: Int,
+    name: Text
+};
+
+/// Custom conversion with additional context
+type ErrorContext is protocol {
+    fn context(self, ctx: Text) -> ContextualError;
+    fn with_context<F>(self, f: F) -> ContextualError
+    where F: Fn() -> Text;
+};
+
+type ContextualError is {
+    source: Heap<Error>,
+    context: List<Text>
+};
+
+/// Manual conversion functions for complex transformations
+fn io_to_app_error(e: IoError) -> AppError {
+    match e.kind {
+        IoErrorKind.NotFound => AppError.Validation("Resource not found"),
+        IoErrorKind.PermissionDenied => AppError.Validation("Access denied"),
+        IoErrorKind.TimedOut => AppError.Internal("Operation timed out"),
+        _ => AppError.Io(e)
+    }
+}
+
+fn network_to_app_error_with_retry(e: NetworkError) -> (AppError, Bool) {
+    match e {
+        NetworkError.Io(io_e) => (io_to_app_error(io_e), false),
+        NetworkError.DnsResolutionFailed(_) => (AppError.Network(e), true),
+        NetworkError.TlsHandshakeFailed(_) => (AppError.Network(e), false),
+        NetworkError.ProtocolError(_) => (AppError.Network(e), false)
+    }
+}
+
+/// Using explicit Result with AppError
+fn simplified_api(input: &Text) -> Result<Int, AppError> {
+    if input.is_empty() {
+        Err(AppError.Validation("Input cannot be empty"))
+    } else {
+        Ok(input.len() as Int)
+    }
+}
+
+/// Bidirectional conversion (for error recovery/normalization)
+implement From<AppError> for Text {
+    fn from(e: AppError) -> Text {
+        match e {
+            AppError.Io(io_e) => f"I/O Error: {io_e.message}",
+            AppError.Network(net_e) => f"Network Error: {net_e}",
+            AppError.Database(db_e) => f"Database Error: {db_e}",
+            AppError.Validation(msg) => f"Validation Error: {msg}",
+            AppError.Internal(msg) => f"Internal Error: {msg}"
+        }
+    }
+}
+
+/// Converting external errors (e.g., from FFI or third-party libraries)
+type ExternalLibError is {
+    code: Int,
+    description: Text
+};
+
+implement From<ExternalLibError> for AppError {
+    fn from(e: ExternalLibError) -> AppError {
+        match e.code {
+            1 => AppError.Validation(e.description),
+            2 => AppError.Io(IoError {
+                kind: IoErrorKind.Other,
+                message: e.description
+            }),
+            _ => AppError.Internal(f"External error {e.code}: {e.description}")
+        }
+    }
+}
+
+/// TryFrom for fallible conversions
+implement TryFrom<Int> for IoErrorKind {
+    type Error = Text;
+
+    fn try_from(code: Int) -> Result<IoErrorKind, Text> {
+        match code {
+            1 => Ok(IoErrorKind.NotFound),
+            2 => Ok(IoErrorKind.PermissionDenied),
+            3 => Ok(IoErrorKind.ConnectionRefused),
+            4 => Ok(IoErrorKind.TimedOut),
+            0 => Ok(IoErrorKind.Other),
+            _ => Err(f"Unknown error code: {code}")
+        }
+    }
+}
+
+/// Example of using TryFrom
+fn error_from_code(code: Int) -> Result<IoError, Text> {
+    let kind = IoErrorKind.try_from(code)?;
+    Ok(IoError {
+        kind: kind,
+        message: f"Error code {code}"
+    })
+}
+
+/// Conversion chains
+fn complex_operation() -> Result<Data, AppError> {
+    // This demonstrates a chain of automatic conversions:
+    // IoError -> NetworkError -> DatabaseError -> AppError
+
+    // Each ? operator uses the appropriate From implementation
+    let connection = establish_connection()?;  // NetworkError -> AppError
+    let query_result = run_query(&connection)?;  // DatabaseError -> AppError
+
+    Ok(Data { value: query_result.rows_affected })
+}
+
+type Data is { value: Int };
+
+fn establish_connection() -> Result<Connection, NetworkError> {
+    Ok(Connection { host: "localhost" })
+}
+
+fn run_query(conn: &Connection) -> Result<QueryResult, DatabaseError> {
+    Ok(QueryResult { rows_affected: 1 })
+}
+
+fn main() {
+    // Demonstrate error conversions
+    let result: Result<UserData, AppError> = fetch_user_data(1);
+
+    match result {
+        Ok(data) => println(f"User: {data.name}"),
+        Err(e) => {
+            // Convert error to string for display
+            let message: Text = e.into();
+            println(message);
+        }
+    }
+
+    // Test TryFrom conversion
+    match error_from_code(1) {
+        Ok(e) => println(f"Created error: {e.kind}"),
+        Err(msg) => println(f"Conversion failed: {msg}")
+    }
+}

@@ -1,0 +1,352 @@
+// =============================================================================
+// vcs/specs/stdlib/meta/staged_meta_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L3
+// @tags: stdlib, meta, staged, quote, stage_escape, lift, multi-stage
+// @note: Staged meta — types resolve for typecheck
+// @description: Comprehensive tests for staged metaprogramming features including
+//               quote expressions, stage escapes, lift operator, and N-level staging.
+//
+// Coverage:
+// - quote { } blocks for code generation
+// - quote(N) { } for N-level staging
+// - $(stage N){ expr } stage escapes
+// - lift(expr) syntactic sugar
+// - Interpolation with $ and lift
+// - Multi-stage compilation patterns
+// - Stage type checking
+//
+// Test Strategy:
+// - Test basic quote/unquote patterns
+// - Test N-level staging with quote(1), quote(2), etc.
+// - Verify lift equivalence to stage escape
+// - Test complex staging scenarios
+// =============================================================================
+
+module test.stdlib.meta.staged_meta_test;
+
+mount core.meta.contexts.{Hygiene, StageInfo};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Basic Quote Tests
+// =============================================================================
+
+/// Basic quote block generates AST
+meta fn basic_quote() -> Ast {
+    quote {
+        let x = 42;
+        x + 1
+    }
+}
+
+@test
+fn test_basic_quote() {
+    let result = @basic_quote();
+    assert_eq(result, 43);
+    print("basic_quote test passed");
+}
+
+/// Quote with $ interpolation
+meta fn quote_with_dollar(n: Int) -> Ast {
+    quote {
+        let val = $n;
+        val * 2
+    }
+}
+
+@test
+fn test_quote_with_interpolation() {
+    let result = @quote_with_dollar(21);
+    assert_eq(result, 42);
+    print("quote_with_interpolation test passed");
+}
+
+// =============================================================================
+// Stage Escape Tests
+// =============================================================================
+
+/// Explicit stage escape with $(stage 0){ }
+meta fn explicit_stage_escape(x: Int) -> Ast {
+    quote {
+        $(stage 0){ x } + 10
+    }
+}
+
+@test
+fn test_stage_escape() {
+    let result = @explicit_stage_escape(32);
+    assert_eq(result, 42);
+    print("stage_escape test passed");
+}
+
+// =============================================================================
+// Lift Operator Tests
+// =============================================================================
+
+/// Basic lift usage
+meta fn basic_lift(val: Int) -> Ast {
+    quote {
+        lift(val) + 5
+    }
+}
+
+@test
+fn test_lift_basic() {
+    let result = @basic_lift(37);
+    assert_eq(result, 42);
+    print("lift_basic test passed");
+}
+
+/// Verify lift and stage escape produce same results
+meta fn using_lift_op(x: Int) -> Ast {
+    quote { lift(x) }
+}
+
+meta fn using_stage_esc(x: Int) -> Ast {
+    quote { $(stage 0){ x } }
+}
+
+@test
+fn test_lift_vs_stage_escape() {
+    let lift_result = @using_lift_op(100);
+    let escape_result = @using_stage_esc(100);
+
+    assert_eq(lift_result, escape_result);
+    assert_eq(lift_result, 100);
+
+    // Test with different values
+    assert_eq(@using_lift_op(-42), @using_stage_esc(-42));
+    assert_eq(@using_lift_op(0), @using_stage_esc(0));
+
+    print("lift_vs_stage_escape test passed");
+}
+
+// =============================================================================
+// N-Level Staging Tests
+// =============================================================================
+
+/// Single level staging with meta
+meta fn stage_1_generator() -> Ast {
+    let compile_time_value = 100;
+    quote {
+        lift(compile_time_value) / 2
+    }
+}
+
+@test
+fn test_n_level_staging() {
+    let result = @stage_1_generator();
+    assert_eq(result, 50);
+    print("n_level_staging test passed");
+}
+
+/// quote(1) generates code for stage 1
+meta(2) fn quote_1_test() -> Ast {
+    let stage2_value = 10;
+    quote(1) {
+        let stage1_value = lift(stage2_value) * 2;
+        quote {
+            stage1_value + 1
+        }
+    }
+}
+
+@test
+fn test_quote_1_level() {
+    let result = @quote_1_test();
+    assert_eq(result, 21);  // (10 * 2) + 1
+    print("quote_1_level test passed");
+}
+
+/// quote(2) for deeper staging
+meta(3) fn quote_2_test() -> Ast {
+    let stage3_val = 5;
+    quote(2) {
+        let stage2_val = lift(stage3_val);
+        quote(1) {
+            let stage1_val = stage2_val * 2;
+            quote {
+                stage1_val + stage2_val
+            }
+        }
+    }
+}
+
+@test
+fn test_quote_2_level() {
+    let result = @quote_2_test();
+    assert_eq(result, 15);  // (5 * 2) + 5
+    print("quote_2_level test passed");
+}
+
+// =============================================================================
+// Nested Quote Tests
+// =============================================================================
+
+/// Nested quotes with different interpolation
+meta(2) fn nested_quotes() -> Ast {
+    let outer = 100;
+    quote(1) {
+        let middle = lift(outer) + 50;
+        quote {
+            middle * 2
+        }
+    }
+}
+
+@test
+fn test_nested_quotes() {
+    let result = @nested_quotes();
+    assert_eq(result, 300);  // (100 + 50) * 2
+    print("nested_quotes test passed");
+}
+
+// =============================================================================
+// Complex Staging Patterns
+// =============================================================================
+
+/// Staged computation with conditionals
+meta fn staged_conditional(flag: Bool) -> Ast {
+    if flag {
+        quote { 1 }
+    } else {
+        quote { 0 }
+    }
+}
+
+@test
+fn test_staged_computation() {
+    let true_result = @staged_conditional(true);
+    let false_result = @staged_conditional(false);
+
+    assert_eq(true_result, 1);
+    assert_eq(false_result, 0);
+
+    print("staged_computation test passed");
+}
+
+/// Staged loop unrolling example
+meta fn unroll_sum(n: Int) -> Ast {
+    let mut expr = quote { 0 };
+    for i in 0..n {
+        let current = i;
+        expr = quote {
+            lift(expr) + lift(current)
+        };
+    }
+    expr
+}
+
+@test
+fn test_staged_loop_unroll() {
+    // Sum of 0..5 = 0 + 1 + 2 + 3 + 4 = 10
+    let result = @unroll_sum(5);
+    assert_eq(result, 10);
+
+    // Sum of 0..10 = 0 + 1 + ... + 9 = 45
+    let result2 = @unroll_sum(10);
+    assert_eq(result2, 45);
+
+    print("staged_loop_unroll test passed");
+}
+
+// =============================================================================
+// Hygiene in Staged Context Tests
+// =============================================================================
+
+/// Test hygiene with staged compilation
+meta fn hygienic_staged() -> Ast using [Hygiene] {
+    let temp = Hygiene.gensym("temp");
+    quote {
+        let lift(temp) = 42;
+        lift(temp)
+    }
+}
+
+@test
+fn test_hygiene_staged() {
+    let result = @hygienic_staged();
+    assert_eq(result, 42);
+    print("hygiene_staged test passed");
+}
+
+/// Multiple hygienic bindings shouldn't conflict
+meta fn multiple_hygienic() -> Ast using [Hygiene] {
+    let a = Hygiene.gensym("x");
+    let b = Hygiene.gensym("x");
+
+    quote {
+        let lift(a) = 10;
+        let lift(b) = 20;
+        lift(a) + lift(b)
+    }
+}
+
+@test
+fn test_multiple_hygienic() {
+    let result = @multiple_hygienic();
+    assert_eq(result, 30);
+    print("multiple_hygienic test passed");
+}
+
+// =============================================================================
+// Stage Info Tests
+// =============================================================================
+
+/// Test StageInfo context in staged code
+meta fn check_stage_info() -> Ast using [StageInfo] {
+    let current = StageInfo.current_stage();
+    quote {
+        // The stage info was captured at compile time
+        lift(current)
+    }
+}
+
+@test
+fn test_stage_info() {
+    let stage = @check_stage_info();
+    // Meta functions run at stage > 0
+    assert(stage >= 0);
+    print("stage_info test passed: stage=" + stage.to_text());
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+/// Empty quote block
+meta fn empty_quote() -> Ast {
+    quote { () }
+}
+
+/// Quote with complex expressions
+meta fn complex_quote_expr() -> Ast {
+    let a = 5;
+    let b = 3;
+    quote {
+        let x = lift(a) * lift(b);
+        let y = x + 1;
+        let z = y * 2;
+        z
+    }
+}
+
+@test
+fn test_edge_cases() {
+    let _ = @empty_quote();
+
+    let result = @complex_quote_expr();
+    assert_eq(result, 32);  // ((5 * 3) + 1) * 2 = 16 * 2 = 32
+
+    print("edge_cases test passed");
+}

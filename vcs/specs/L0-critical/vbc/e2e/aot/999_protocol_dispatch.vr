@@ -1,0 +1,136 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: protocol, dispatch, impl, polymorphism
+// @description: Protocol-based dispatch and multiple implementations
+
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+type Circle is { radius: Int };
+type Rectangle is { width: Int, height: Int };
+type Point is { x: Int, y: Int };
+
+implement Describable for Circle {
+    fn describe(&self) -> Text {
+        f"Circle(r={self.radius})"
+    }
+}
+
+implement Describable for Rectangle {
+    fn describe(&self) -> Text {
+        f"Rect({self.width}x{self.height})"
+    }
+}
+
+implement Circle {
+    fn area_approx(&self) -> Int {
+        // Approximate: 3 * r * r (using 3 instead of pi)
+        3 * self.radius * self.radius
+    }
+}
+
+implement Rectangle {
+    fn area(&self) -> Int {
+        self.width * self.height
+    }
+
+    fn perimeter(&self) -> Int {
+        2 * (self.width + self.height)
+    }
+
+    fn is_square(&self) -> Bool {
+        self.width == self.height
+    }
+}
+
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn distance_squared(&self, other: Point) -> Int {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        dx * dx + dy * dy
+    }
+
+    fn translate(&self, dx: Int, dy: Int) -> Point {
+        Point { x: self.x + dx, y: self.y + dy }
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Circle describe
+    let c = Circle { radius: 5 };
+    let desc = c.describe();
+    if (desc != "Circle(r=5)") {
+        print(f"FAIL test1: got '{desc}'");
+        return 1;
+    }
+
+    // Test 2: Rectangle describe
+    let r = Rectangle { width: 3, height: 4 };
+    let rdesc = r.describe();
+    if (rdesc != "Rect(3x4)") {
+        print(f"FAIL test2: got '{rdesc}'");
+        return 1;
+    }
+
+    // Test 3: Circle area
+    let area = c.area_approx();
+    if (area != 75) {
+        print(f"FAIL test3: area={area}");
+        return 1;
+    }
+
+    // Test 4: Rectangle area and perimeter
+    let rarea = r.area();
+    if (rarea != 12) {
+        print(f"FAIL test4a: area={rarea}");
+        return 1;
+    }
+    let perim = r.perimeter();
+    if (perim != 14) {
+        print(f"FAIL test4b: perim={perim}");
+        return 1;
+    }
+
+    // Test 5: Rectangle is_square
+    let sq = Rectangle { width: 5, height: 5 };
+    if (!sq.is_square()) {
+        print("FAIL test5a");
+        return 1;
+    }
+    if (r.is_square()) {
+        print("FAIL test5b");
+        return 1;
+    }
+
+    // Test 6: Point operations
+    let p1 = Point.new(0, 0);
+    let p2 = Point.new(3, 4);
+    let dist_sq = p1.distance_squared(p2);
+    if (dist_sq != 25) {
+        print(f"FAIL test6a: dist_sq={dist_sq}");
+        return 1;
+    }
+
+    // Test 7: Point translate
+    let p3 = p1.translate(5, 10);
+    if (p3.x != 5 || p3.y != 10) {
+        print(f"FAIL test7: p3=({p3.x},{p3.y})");
+        return 1;
+    }
+
+    // Test 8: chained operations
+    let p4 = Point.new(1, 1).translate(2, 3);
+    if (p4.x != 3 || p4.y != 4) {
+        print(f"FAIL test8: p4=({p4.x},{p4.y})");
+        return 1;
+    }
+
+    print("999_protocol_dispatch: PASS");
+    0
+}

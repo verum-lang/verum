@@ -1,0 +1,228 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, yield, generators, errors, negative
+
+/// Parser-level errors for yield expressions and generator declarations.
+/// These tests verify that the parser correctly rejects invalid syntax
+/// related to generator functions and yield expressions.
+/// Spec: grammar/verum.ebnf - fn_keyword, yield_expr
+
+// ============================================================================
+// 1. INVALID GENERATOR DECLARATION SYNTAX
+// ============================================================================
+
+// ERROR: asterisk on wrong side of fn
+*fn bad_placement() -> Int {
+    yield 1;
+}
+
+// ERROR: asterisk with space
+fn * spaced_asterisk() -> Int {
+    yield 1;
+}
+
+// ERROR: double asterisk
+fn** double_star() -> Int {
+    yield 1;
+}
+
+// ERROR: asterisk after function name
+fn generator*() -> Int {
+    yield 1;
+}
+
+// ERROR: asterisk after parameters
+fn generator()* -> Int {
+    yield 1;
+}
+
+// ERROR: wrong order of async and fn*
+fn* async wrong_order() -> Int {
+    yield 1;
+}
+
+// ERROR: async* instead of async fn*
+async* bad_async() -> Int {
+    yield 1;
+}
+
+// ERROR: generator in closure syntax (closures can't be generators)
+let gen = |*| { yield 1 };
+
+// ERROR: fn* with arrow function syntax
+fn* arrow => yield 1;
+
+// ============================================================================
+// 2. INVALID YIELD SYNTAX
+// ============================================================================
+
+// ERROR: yield as statement without expression
+fn* empty_yield() -> Int {
+    yield;  // ERROR: yield requires an expression
+}
+
+// ERROR: yield with semicolon before expression
+fn* yield_semicolon() -> Int {
+    yield; 1  // ERROR: unexpected expression after yield statement
+}
+
+// ERROR: yield from (not a Verum keyword)
+fn* yield_from_invalid() -> Int {
+    yield from other_gen();  // ERROR: 'from' is not a keyword
+}
+
+// ERROR: yield* (not valid Verum syntax)
+fn* yield_star() -> Int {
+    yield* other_gen();  // ERROR: yield* is not valid syntax
+}
+
+// ERROR: yield with assignment operator
+fn* yield_assign() -> Int {
+    yield = 1;  // ERROR: unexpected '=' after yield
+}
+
+// ERROR: multiple yields on same line without separator
+fn* multiple_yields() -> Int {
+    yield 1 yield 2  // ERROR: expected ';' or newline
+}
+
+// ============================================================================
+// 3. INVALID FOR AWAIT SYNTAX
+// ============================================================================
+
+// ERROR: await for (wrong order)
+async fn wrong_await_order() {
+    async fn* gen() -> Int { yield 1; }
+
+    await for x in gen() {  // ERROR: use 'for await', not 'await for'
+        process(x);
+    }
+}
+
+// ERROR: for...await...in (await in wrong position)
+async fn await_wrong_position() {
+    async fn* gen() -> Int { yield 1; }
+
+    for x await in gen() {  // ERROR: 'await' must follow 'for'
+        process(x);
+    }
+}
+
+// ERROR: for await without pattern
+async fn for_await_no_pattern() {
+    async fn* gen() -> Int { yield 1; }
+
+    for await in gen() {  // ERROR: expected pattern after 'for await'
+        process();
+    }
+}
+
+// ERROR: for await without 'in'
+async fn for_await_no_in() {
+    async fn* gen() -> Int { yield 1; }
+
+    for await x gen() {  // ERROR: expected 'in' keyword
+        process(x);
+    }
+}
+
+// ERROR: for await with let (invalid)
+async fn for_await_let() {
+    async fn* gen() -> Int { yield 1; }
+
+    for await let x in gen() {  // ERROR: 'let' not valid in for await
+        process(x);
+    }
+}
+
+// ============================================================================
+// 4. GENERATOR VISIBILITY AND MODIFIERS
+// ============================================================================
+
+// ERROR: mut fn* (mut not valid modifier)
+mut fn* mutable_gen() -> Int {
+    yield 1;
+}
+
+// ERROR: const fn* (const generators don't make sense)
+const fn* const_gen() -> Int {
+    yield 1;
+}
+
+// ERROR: static fn* (static generators invalid)
+static fn* static_gen() -> Int {
+    yield 1;
+}
+
+// ERROR: fn* with multiple return types
+fn* multi_return() -> Int, Text {  // ERROR: generators return Iterator<Item=T>
+    yield 1;
+}
+
+// ============================================================================
+// 5. GENERATOR BODY ERRORS
+// ============================================================================
+
+// ERROR: generator with expression body (must be block)
+fn* expression_body() -> Int = 42;  // ERROR: generators require block body
+
+// ERROR: empty generator body (no braces)
+fn* no_body() -> Int
+
+// ERROR: generator with only semicolon body
+fn* semicolon_body() -> Int;
+
+// ============================================================================
+// 6. YIELD IN INVALID POSITIONS
+// ============================================================================
+
+// ERROR: yield at module level
+yield 42;
+
+// ERROR: yield as type annotation
+type YieldType is yield Int;  // ERROR: unexpected 'yield' in type position
+
+// ERROR: yield in pattern position
+fn* yield_pattern() -> Int {
+    let yield x = 1;  // ERROR: 'yield' not valid in pattern
+    yield x;
+}
+
+// ERROR: yield as function name
+fn yield() -> Int {  // ERROR: 'yield' is a reserved keyword
+    42
+}
+
+// ERROR: yield in link
+mount yield.module;  // ERROR: 'yield' not valid in link path
+
+// ============================================================================
+// 7. INCOMPLETE GENERATOR SYNTAX
+// ============================================================================
+
+// ERROR: fn* without identifier
+fn*() -> Int {
+    yield 1;
+}
+
+// ERROR: async fn* without identifier
+async fn*() -> Int {
+    yield 1;
+}
+
+// ERROR: unclosed generator block
+fn* unclosed() -> Int {
+    yield 1;
+    yield 2;
+// Missing closing brace
+
+// ERROR: missing yield expression value (parse as prefix operator fail)
+fn* missing_value() -> Int {
+    yield
+}
+
+// ERROR: yield followed by closing brace only
+fn* yield_brace() -> Int {
+    yield }
+}

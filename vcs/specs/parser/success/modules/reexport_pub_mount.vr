@@ -1,0 +1,146 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Simple re-export
+pub mount core.collections.List;
+
+// Re-export with alias
+pub mount core.collections.HashMap as Map;
+
+// Re-export using public keyword
+public mount core.io.Read;
+public mount core.io.Write;
+
+// Re-export multiple items
+pub mount core.collections.{List, Set, Map};
+
+// Re-export with glob (re-export everything)
+pub mount core.prelude.*;
+
+// Re-export from nested path
+pub mount core.collections.hash.HashMap;
+pub mount core.collections.btree.BTreeMap;
+
+// Re-export with nested groups
+pub mount core.{
+    collections.{List, Map},
+    io.{Read, Write}
+};
+
+// Module that creates a prelude
+module prelude {
+    // Re-export common types
+    pub mount crate.types.Result;
+    pub mount crate.types.Maybe;
+    pub mount crate.types.Error;
+
+    // Re-export collections
+    pub mount crate.collections.List;
+    pub mount crate.collections.Map;
+    pub mount crate.collections.Set;
+
+    // Re-export utilities
+    pub mount crate.utils.format;
+    pub mount crate.utils.parse;
+}
+
+// Library facade pattern
+pub module lib {
+    // Re-export the public API
+    pub mount super.internal.PublicType;
+    pub mount super.internal.public_function;
+
+    // Don't re-export internal implementation
+    // internal mount super.internal.InternalType; // kept internal
+}
+
+module internal {
+    pub type PublicType is { value: Int };
+    pub fn public_function() -> Int { 42 }
+
+    type InternalType is { secret: Int };
+    fn internal_function() -> Int { 0 }
+}
+
+// Re-export with different visibility levels
+pub module visibility_reexports {
+    // Public re-export
+    pub mount core.collections.List;
+
+    // Internal re-export (visible in crate but not outside)
+    internal mount core.internal.Helper;
+
+    // Protected re-export
+    protected mount core.protected.Base;
+}
+
+// Chained re-exports
+module layer1 {
+    pub mount core.base.Type1;
+}
+
+module layer2 {
+    pub mount super.layer1.Type1;
+}
+
+module layer3 {
+    pub mount super.layer2.Type1;
+}
+
+// Re-export aliased items
+pub module renamed {
+    pub mount core.collections.HashMap as Dict;
+    pub mount core.collections.HashSet as Set;
+    pub mount core.collections.BTreeMap as OrderedDict;
+    pub mount core.collections.BTreeSet as OrderedSet;
+}
+
+// Re-export for API stability
+pub module stable_api {
+    // Version 1.0 exports
+    pub mount crate.v1.Feature1;
+    pub mount crate.v1.Feature2;
+
+    // Version 2.0 additions
+    pub mount crate.v2.Feature3;
+    pub mount crate.v2.Feature4;
+
+    // Deprecated re-export with new name
+    pub mount crate.v1.OldName as NewName;
+}
+
+// Re-export external dependencies
+pub module deps {
+    pub mount external.http.Client as HttpClient;
+    pub mount external.json.Value as JsonValue;
+    pub mount external.regex.Regex;
+}
+
+// Platform-specific re-exports
+module platform {
+    // These would be conditionally compiled
+    pub mount platform.unix.Signal;
+    pub mount platform.unix.Process;
+}
+
+// Full prelude pattern
+pub module full_prelude {
+    // Core types
+    pub mount crate.core.{Int, Float, Text, Bool, Byte};
+
+    // Collections
+    pub mount crate.collections.{List, Map, Set, Heap};
+
+    // Option/Result
+    pub mount crate.types.{Maybe, Some, None, Result, Ok, Err};
+
+    // Common protocols
+    pub mount crate.protocols.{Clone, Debug, Display, Default};
+
+    // I/O
+    pub mount crate.io.{print, println, read_line};
+
+    // Error handling
+    pub mount crate.error.{Error, panic, assert};
+}

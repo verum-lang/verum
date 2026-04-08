@@ -1,0 +1,366 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, math, algorithms, primes, sqrt, numerical
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: mathematical algorithms through VBC interpreter
+
+// ============================================================================
+// Prime number tests
+// ============================================================================
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { false }
+    else if n < 4 { true }
+    else if n % 2 == 0 { false }
+    else {
+        let mut i = 3;
+        let mut prime = true;
+        while i * i <= n {
+            if n % i == 0 {
+                prime = false;
+            }
+            i = i + 2;
+        }
+        prime
+    }
+}
+
+fn test_primes() {
+    assert(!is_prime(0));
+    assert(!is_prime(1));
+    assert(is_prime(2));
+    assert(is_prime(3));
+    assert(!is_prime(4));
+    assert(is_prime(5));
+    assert(is_prime(7));
+    assert(!is_prime(9));
+    assert(is_prime(11));
+    assert(is_prime(13));
+    assert(!is_prime(15));
+    assert(is_prime(97));
+    assert(!is_prime(100));
+    assert(is_prime(101));
+}
+
+fn count_primes(limit: Int) -> Int {
+    let mut count = 0;
+    let mut n = 2;
+    while n <= limit {
+        if is_prime(n) {
+            count = count + 1;
+        }
+        n = n + 1;
+    }
+    count
+}
+
+fn test_prime_counting() {
+    assert_eq(count_primes(10), 4);    // 2, 3, 5, 7
+    assert_eq(count_primes(20), 8);    // + 11, 13, 17, 19
+    assert_eq(count_primes(100), 25);  // known: 25 primes under 100
+    assert_eq(count_primes(200), 46);  // known: 46 primes under 200
+}
+
+// ============================================================================
+// Integer square root (Newton's method)
+// ============================================================================
+
+fn isqrt(n: Int) -> Int {
+    if n < 0 { -1 }
+    else if n == 0 { 0 }
+    else {
+        let mut x = n;
+        let mut y = (x + 1) / 2;
+        while y < x {
+            x = y;
+            y = (x + n / x) / 2;
+        }
+        x
+    }
+}
+
+fn test_isqrt() {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(25), 5);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(10000), 100);
+    assert_eq(isqrt(8), 2);   // floor(sqrt(8)) = 2
+    assert_eq(isqrt(15), 3);  // floor(sqrt(15)) = 3
+    assert_eq(isqrt(99), 9);
+}
+
+// ============================================================================
+// Modular arithmetic
+// ============================================================================
+
+fn mod_pow_iter(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % modulus;
+        }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+fn test_mod_pow() {
+    assert_eq(mod_pow_iter(2, 10, 1000), 24);   // 1024 % 1000
+    assert_eq(mod_pow_iter(3, 5, 100), 43);      // 243 % 100
+    assert_eq(mod_pow_iter(7, 3, 13), 5);        // 343 % 13
+    assert_eq(mod_pow_iter(2, 0, 100), 1);
+    assert_eq(mod_pow_iter(10, 9, 7), 6);        // 10^9 % 7
+}
+
+// ============================================================================
+// Sieve-like prime generation (bit simulation)
+// ============================================================================
+
+// Use a 100-element sieve via loop and function
+fn sieve_count(limit: Int) -> Int {
+    // Count primes up to limit using trial division (simulating sieve)
+    let mut count = 0;
+    let mut n = 2;
+    while n <= limit {
+        let mut is_p = true;
+        let mut d = 2;
+        while d * d <= n {
+            if n % d == 0 {
+                is_p = false;
+            }
+            d = d + 1;
+        }
+        if is_p {
+            count = count + 1;
+        }
+        n = n + 1;
+    }
+    count
+}
+
+fn test_sieve_count() {
+    assert_eq(sieve_count(50), 15);
+    assert_eq(sieve_count(100), 25);
+}
+
+// ============================================================================
+// Numerical integration (rectangle rule)
+// ============================================================================
+
+// Approximate sum of i^2 for i in [1..n]
+fn sum_squares(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= n {
+        total = total + i * i;
+        i = i + 1;
+    }
+    total
+}
+
+// Known formula: n*(n+1)*(2n+1)/6
+fn sum_squares_formula(n: Int) -> Int {
+    n * (n + 1) * (2 * n + 1) / 6
+}
+
+fn test_sum_squares() {
+    assert_eq(sum_squares(1), 1);
+    assert_eq(sum_squares(10), 385);
+    assert_eq(sum_squares(100), 338350);
+
+    // Verify loop matches formula
+    let mut k = 1;
+    while k <= 50 {
+        assert_eq(sum_squares(k), sum_squares_formula(k));
+        k = k + 1;
+    }
+}
+
+// Sum of cubes
+fn sum_cubes(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= n {
+        total = total + i * i * i;
+        i = i + 1;
+    }
+    total
+}
+
+// Known: sum of cubes = (n*(n+1)/2)^2
+fn sum_cubes_formula(n: Int) -> Int {
+    let s = n * (n + 1) / 2;
+    s * s
+}
+
+fn test_sum_cubes() {
+    assert_eq(sum_cubes(1), 1);
+    assert_eq(sum_cubes(5), 225);
+    assert_eq(sum_cubes(10), 3025);
+
+    let mut k = 1;
+    while k <= 30 {
+        assert_eq(sum_cubes(k), sum_cubes_formula(k));
+        k = k + 1;
+    }
+}
+
+// ============================================================================
+// Number theory
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn euler_totient(n: Int) -> Int {
+    let mut result = n;
+    let mut p = 2;
+    let mut m = n;
+    while p * p <= m {
+        if m % p == 0 {
+            while m % p == 0 {
+                m = m / p;
+            }
+            result = result - result / p;
+        }
+        p = p + 1;
+    }
+    if m > 1 {
+        result = result - result / m;
+    }
+    result
+}
+
+fn test_euler_totient() {
+    assert_eq(euler_totient(1), 1);
+    assert_eq(euler_totient(2), 1);
+    assert_eq(euler_totient(6), 2);
+    assert_eq(euler_totient(10), 4);
+    assert_eq(euler_totient(12), 4);
+    assert_eq(euler_totient(7), 6);  // 7 is prime
+    assert_eq(euler_totient(100), 40);
+}
+
+// ============================================================================
+// Fibonacci variants
+// ============================================================================
+
+fn tribonacci(n: Int) -> Int {
+    if n == 0 { 0 }
+    else if n <= 2 { 1 }
+    else {
+        let mut a = 0;
+        let mut b = 1;
+        let mut c = 1;
+        let mut i = 3;
+        while i <= n {
+            let next = a + b + c;
+            a = b;
+            b = c;
+            c = next;
+            i = i + 1;
+        }
+        c
+    }
+}
+
+fn test_tribonacci() {
+    assert_eq(tribonacci(0), 0);
+    assert_eq(tribonacci(1), 1);
+    assert_eq(tribonacci(2), 1);
+    assert_eq(tribonacci(3), 2);
+    assert_eq(tribonacci(4), 4);
+    assert_eq(tribonacci(5), 7);
+    assert_eq(tribonacci(10), 149);
+}
+
+// ============================================================================
+// Digit operations
+// ============================================================================
+
+fn count_digits(n: Int) -> Int {
+    if n == 0 { 1 }
+    else {
+        let mut count = 0;
+        let mut m = if n < 0 { -n } else { n };
+        while m > 0 {
+            count = count + 1;
+            m = m / 10;
+        }
+        count
+    }
+}
+
+fn sum_digits(n: Int) -> Int {
+    let mut sum = 0;
+    let mut m = if n < 0 { -n } else { n };
+    while m > 0 {
+        sum = sum + m % 10;
+        m = m / 10;
+    }
+    sum
+}
+
+fn reverse_number(n: Int) -> Int {
+    let mut result = 0;
+    let mut m = if n < 0 { -n } else { n };
+    while m > 0 {
+        result = result * 10 + m % 10;
+        m = m / 10;
+    }
+    if n < 0 { -result } else { result }
+}
+
+fn test_digit_operations() {
+    assert_eq(count_digits(0), 1);
+    assert_eq(count_digits(5), 1);
+    assert_eq(count_digits(42), 2);
+    assert_eq(count_digits(12345), 5);
+    assert_eq(count_digits(-42), 2);
+
+    assert_eq(sum_digits(123), 6);
+    assert_eq(sum_digits(9999), 36);
+    assert_eq(sum_digits(0), 0);
+
+    assert_eq(reverse_number(123), 321);
+    assert_eq(reverse_number(1000), 1);
+    assert_eq(reverse_number(12321), 12321); // palindrome
+}
+
+fn is_palindrome_number(n: Int) -> Bool {
+    n >= 0 && n == reverse_number(n)
+}
+
+fn test_palindrome_numbers() {
+    assert(is_palindrome_number(0));
+    assert(is_palindrome_number(1));
+    assert(is_palindrome_number(11));
+    assert(is_palindrome_number(121));
+    assert(is_palindrome_number(12321));
+    assert(!is_palindrome_number(123));
+    assert(!is_palindrome_number(-121));
+}
+
+fn main() -> Int {
+    test_primes();
+    test_prime_counting();
+    test_isqrt();
+    test_mod_pow();
+    test_sieve_count();
+    test_sum_squares();
+    test_sum_cubes();
+    test_euler_totient();
+    test_tribonacci();
+    test_digit_operations();
+    test_palindrome_numbers();
+    print("[OK] 017_math_algorithms");
+    0
+}

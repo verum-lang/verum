@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: interrupt, exception-frame, systems
+// @timeout: 5000
+// @description: Verify ExceptionFrame type and accessors compile correctly.
+
+mount core.sys.interrupt.{ExceptionFrame};
+
+/// Test ExceptionFrame field access (platform-specific).
+@cfg(target_arch = "x86_64")
+fn test_exception_frame_x86() {
+    // Create a test frame (normally passed by hardware)
+    let frame = ExceptionFrame {
+        error_code: 0,
+        rip: 0x0040_0000,
+        cs: 0x08,
+        rflags: 0x0000_0202,
+        rsp: 0x7FFF_0000,
+        ss: 0x10,
+    };
+
+    // Test accessors
+    let ip = frame.instruction_pointer();
+    let sp = frame.stack_pointer();
+
+    assert(ip == 0x0040_0000);
+    assert(sp == 0x7FFF_0000);
+}
+
+///Test that exception frame is properly packed.
+fn test_exception_frame_layout() {
+    // The frame should have the expected size for the target
+    @cfg(target_arch = "x86_64") {
+        // 6 x 8 bytes = 48 bytes
+        assert(@size_of(ExceptionFrame) == 48);
+    }
+    @cfg(target_arch = "aarch64") {
+        // 4 x 8 + 31 x 8 = 280 bytes
+        assert(@size_of(ExceptionFrame) == 280);
+    }
+}
+
+fn main() -> Int {
+    @cfg(target_arch = "x86_64") {
+        test_exception_frame_x86();
+    }
+    test_exception_frame_layout();
+    0
+}

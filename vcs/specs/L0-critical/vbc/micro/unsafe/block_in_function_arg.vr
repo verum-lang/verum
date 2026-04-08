@@ -1,0 +1,12 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, expression, function-argument
+// @description: Unsafe block used as function argument (like Rust's drop(unsafe { ... }))
+fn consume(value: Int) -> Int {
+    value
+}
+
+fn main() {
+    let result: Int = consume(unsafe { 100 });
+    assert_eq(result, 100);
+}

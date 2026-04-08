@@ -1,0 +1,166 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: proof-stability, bitvector, stable
+// @timeout: 30000
+
+/// Bit-vector proofs - testing SMT bit-vector theory stability.
+/// Bit-vector operations are typically very stable due to finite domain.
+
+/// Test: Basic bit operations
+fn test_bit_and(x: U32, y: U32) -> Bool
+    ensures result == ((x & y) <= x && (x & y) <= y)
+{
+    (x & y) <= x && (x & y) <= y
+}
+
+fn test_bit_or(x: U32, y: U32) -> Bool
+    ensures result == ((x | y) >= x && (x | y) >= y)
+{
+    (x | y) >= x && (x | y) >= y
+}
+
+fn test_bit_xor(x: U32) -> Bool
+    ensures result == (x ^ x == 0)
+{
+    x ^ x == 0
+}
+
+/// Test: Shift operations
+fn test_left_shift(x: U32, n: U32 where n < 32) -> Bool
+    ensures result == ((x << n) == x * (1 << n))
+{
+    (x << n) == x * (1 << n)
+}
+
+fn test_right_shift(x: U32, n: U32 where n < 32) -> Bool
+    ensures result == ((x >> n) == x / (1 << n))
+{
+    (x >> n) == x / (1 << n)
+}
+
+/// Test: Two's complement properties
+fn test_negation(x: I32) -> Bool
+    ensures result == (-(-x) == x)
+{
+    -(-x) == x
+}
+
+fn test_add_inverse(x: I32) -> Bool
+    ensures result == (x + (-x) == 0)
+{
+    x + (-x) == 0
+}
+
+/// Test: Overflow detection
+fn test_unsigned_overflow(x: U32, y: U32) -> Bool
+    requires x <= U32.MAX - y  // no overflow
+    ensures result == ((x + y) >= x)
+{
+    (x + y) >= x
+}
+
+fn test_signed_overflow(x: I32, y: I32) -> Bool
+    requires x >= 0 && y >= 0
+    requires x <= I32.MAX - y  // no overflow
+    ensures result == ((x + y) >= 0)
+{
+    (x + y) >= 0
+}
+
+/// Test: Bit counting
+fn popcount(x: U32) -> U32
+    ensures result <= 32
+{
+    let mut count: U32 = 0;
+    let mut n = x;
+
+    while n != 0 {
+        count = count + (n & 1);
+        n = n >> 1;
+    }
+
+    count
+}
+
+fn test_popcount_bounds(x: U32) -> Bool
+    ensures result == (popcount(x) <= 32)
+{
+    popcount(x) <= 32
+}
+
+/// Test: Bit manipulation patterns
+fn clear_lowest_bit(x: U32) -> U32
+    ensures result == (x & (x - 1))
+    ensures popcount(result) <= popcount(x)
+{
+    x & (x - 1)
+}
+
+fn isolate_lowest_bit(x: U32) -> U32
+    ensures result == (x & (~x + 1))
+    ensures result == 0 || popcount(result) == 1
+{
+    x & (~x + 1)
+}
+
+/// Test: Bit rotation
+fn rotate_left(x: U32, n: U32 where n < 32) -> U32
+    ensures result == ((x << n) | (x >> (32 - n)))
+{
+    (x << n) | (x >> (32 - n))
+}
+
+fn rotate_right(x: U32, n: U32 where n < 32) -> U32
+    ensures result == ((x >> n) | (x << (32 - n)))
+{
+    (x >> n) | (x << (32 - n))
+}
+
+fn test_rotation_inverse(x: U32, n: U32 where n < 32) -> Bool
+    ensures result == (rotate_right(rotate_left(x, n), n) == x)
+{
+    rotate_right(rotate_left(x, n), n) == x
+}
+
+/// Test: Byte swap
+fn byte_swap(x: U32) -> U32
+    ensures result == (
+        ((x & 0xFF) << 24) |
+        ((x & 0xFF00) << 8) |
+        ((x & 0xFF0000) >> 8) |
+        ((x & 0xFF000000) >> 24)
+    )
+{
+    ((x & 0xFF) << 24) |
+    ((x & 0xFF00) << 8) |
+    ((x & 0xFF0000) >> 8) |
+    ((x & 0xFF000000) >> 24)
+}
+
+fn test_double_byte_swap(x: U32) -> Bool
+    ensures result == (byte_swap(byte_swap(x)) == x)
+{
+    byte_swap(byte_swap(x)) == x
+}
+
+/// Test: Power of two check
+fn is_power_of_two(x: U32) -> Bool
+    ensures result == (x != 0 && (x & (x - 1)) == 0)
+{
+    x != 0 && (x & (x - 1)) == 0
+}
+
+fn main() {
+    assert(test_bit_and(0xFF, 0x0F));
+    assert(test_bit_or(0xF0, 0x0F));
+    assert(test_bit_xor(42));
+    assert(test_left_shift(1, 4));
+    assert(test_right_shift(16, 2));
+    assert(test_negation(-5));
+    assert(test_add_inverse(100));
+    assert(test_popcount_bounds(0xAAAA));
+    assert(test_rotation_inverse(0xDEADBEEF, 8));
+    assert(test_double_byte_swap(0x12345678));
+    assert(is_power_of_two(64));
+}

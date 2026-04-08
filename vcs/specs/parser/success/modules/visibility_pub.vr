@@ -1,0 +1,94 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Public function with pub keyword
+pub fn public_function() -> Int {
+    42
+}
+
+// Public function with public keyword
+public fn explicit_public_function() -> Int {
+    100
+}
+
+// Public type definitions
+pub type PublicRecord is { x: Int, y: Int };
+public type ExplicitPublicRecord is { a: Float, b: Float };
+
+// Public sum types
+pub type PublicEnum is Red | Green | Blue;
+public type ExplicitPublicEnum is Yes | No | Maybe;
+
+// Public protocol types
+pub type PublicProtocol is protocol {
+    fn method(&self);
+};
+
+public type ExplicitPublicProtocol is protocol {
+    fn do_something(&self) -> Int;
+};
+
+// Public constants
+pub const PUB_CONST: Int = 1;
+public const EXPLICIT_PUB_CONST: Int = 2;
+
+// Public statics
+pub static PUB_STATIC: Int = 10;
+public static EXPLICIT_PUB_STATIC: Int = 20;
+
+// Public modules
+pub module pub_module {
+    pub fn inner_pub() -> Int { 1 }
+}
+
+public module explicit_pub_module {
+    public fn inner_explicit_pub() -> Int { 2 }
+}
+
+// Public implementations
+pub type PublicStruct is { value: Int };
+
+implement PublicStruct {
+    pub fn new(v: Int) -> Self {
+        PublicStruct { value: v }
+    }
+
+    pub fn get(&self) -> Int {
+        self.value
+    }
+}
+
+// Public generic types
+pub type PublicContainer<T> is { item: T };
+public type ExplicitPublicContainer<T> is { data: T };
+
+// Public generic functions
+pub fn public_identity<T>(x: T) -> T { x }
+public fn explicit_public_identity<T>(x: T) -> T { x }
+
+// Public async functions
+pub async fn public_async_fn() -> Int {
+    42
+}
+
+public async fn explicit_public_async_fn() -> Int {
+    100
+}
+
+// Public context-using functions
+pub fn public_contextual() using [Logger] {
+    Logger.log("public");
+}
+
+public fn explicit_public_contextual() using [Database] {
+    Database.query("SELECT 1");
+}
+
+// Public mount (re-export)
+pub mount core.collections.List;
+public mount core.collections.Map;
+
+// Public type alias pattern
+pub type MyList<T> is List<T>;
+public type MyMap<K, V> is Map<K, V>;

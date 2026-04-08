@@ -1,0 +1,304 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, permutation, next-permutation, lehmer, rank
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Permutation operations: next permutation algorithm, permutation rank
+// (Lehmer code), validity check. Permutations stored in Arr8.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Swap elements at positions i and j
+fn a8_swap(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = a8_get(a, i);
+    let vj = a8_get(a, j);
+    let tmp = a8_set(a, i, vj);
+    a8_set(tmp, j, vi)
+}
+
+// Reverse elements from index lo to hi (inclusive)
+fn a8_reverse(a: Arr8, lo: Int, hi: Int) -> Arr8 {
+    let mut arr = a;
+    let mut l = lo;
+    let mut h = hi;
+    while l < h {
+        arr = a8_swap(arr, l, h);
+        l = l + 1;
+        h = h - 1;
+    }
+    arr
+}
+
+// Check if array is a valid permutation of [0, n)
+fn is_valid_perm(a: Arr8, n: Int) -> Int {
+    // Each value 0..n-1 must appear exactly once
+    let mut i = 0;
+    while i < n {
+        let val = a8_get(a, i);
+        if val < 0 { return 0; }
+        if val >= n { return 0; }
+        // Check for duplicates: count occurrences of val
+        let mut count = 0;
+        let mut j = 0;
+        while j < n {
+            if a8_get(a, j) == val { count = count + 1; }
+            j = j + 1;
+        }
+        if count != 1 { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Next permutation: returns the lexicographically next permutation.
+// Returns (arr, found) where found=1 if next exists, 0 if already last.
+type PermResult is { arr: Arr8, found: Int };
+
+fn next_perm(a: Arr8, n: Int) -> PermResult {
+    // Step 1: Find largest i such that a[i] < a[i+1]
+    let mut i = n - 2;
+    let mut found_i = 0 - 1;
+    while i >= 0 {
+        if a8_get(a, i) < a8_get(a, i + 1) {
+            found_i = i;
+            i = 0 - 1; // break
+        } else {
+            i = i - 1;
+        }
+    }
+    if found_i < 0 {
+        // Already the last permutation
+        return PermResult { arr: a, found: 0 };
+    }
+    // Step 2: Find largest j > found_i such that a[found_i] < a[j]
+    let mut j = n - 1;
+    let mut found_j = found_i + 1;
+    while j > found_i {
+        if a8_get(a, j) > a8_get(a, found_i) {
+            found_j = j;
+            j = found_i; // break
+        } else {
+            j = j - 1;
+        }
+    }
+    // Step 3: Swap a[found_i] and a[found_j]
+    let swapped = a8_swap(a, found_i, found_j);
+    // Step 4: Reverse from found_i+1 to end
+    let result = a8_reverse(swapped, found_i + 1, n - 1);
+    PermResult { arr: result, found: 1 }
+}
+
+// Factorial
+fn factorial(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 2;
+    while i <= n {
+        r = r * i;
+        i = i + 1;
+    }
+    r
+}
+
+// Lehmer code: compute the rank of permutation (0-indexed)
+// Rank = sum of lehmer[i] * (n-1-i)! where lehmer[i] = # of a[j] < a[i] for j > i
+fn perm_rank(a: Arr8, n: Int) -> Int {
+    let mut rank = 0;
+    let mut i = 0;
+    while i < n {
+        let mut count = 0;
+        let mut j = i + 1;
+        while j < n {
+            if a8_get(a, j) < a8_get(a, i) {
+                count = count + 1;
+            }
+            j = j + 1;
+        }
+        rank = rank + count * factorial(n - 1 - i);
+        i = i + 1;
+    }
+    rank
+}
+
+// Unrank: given rank, produce the permutation of [0, n)
+fn perm_unrank(rank: Int, n: Int) -> Arr8 {
+    // Available digits
+    let mut avail = a8_zero();
+    let mut i = 0;
+    while i < n {
+        avail = a8_set(avail, i, i);
+        i = i + 1;
+    }
+    let mut avail_len = n;
+    let mut result = a8_zero();
+    let mut r = rank;
+    i = 0;
+    while i < n {
+        let f = factorial(n - 1 - i);
+        let idx = r / f;
+        r = r % f;
+        // Pick the idx-th available element
+        let val = a8_get(avail, idx);
+        result = a8_set(result, i, val);
+        // Remove from available by shifting left
+        let mut j = idx;
+        while j < avail_len - 1 {
+            avail = a8_set(avail, j, a8_get(avail, j + 1));
+            j = j + 1;
+        }
+        avail_len = avail_len - 1;
+        i = i + 1;
+    }
+    result
+}
+
+// ========== Tests ==========
+
+fn test_identity() -> Int {
+    // [0,1,2,3] is the first permutation (rank 0)
+    let p = Arr8 { a0: 0, a1: 1, a2: 2, a3: 3, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(is_valid_perm(p, 4), 1);
+    assert_eq(perm_rank(p, 4), 0);
+    0
+}
+
+fn test_last_perm() -> Int {
+    // [3,2,1,0] is the last permutation (rank 23 = 4!-1)
+    let p = Arr8 { a0: 3, a1: 2, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(is_valid_perm(p, 4), 1);
+    assert_eq(perm_rank(p, 4), 23);
+    0
+}
+
+fn test_next_perm_basic() -> Int {
+    // [0,1,2] -> [0,2,1]
+    let p = Arr8 { a0: 0, a1: 1, a2: 2, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let r = next_perm(p, 3);
+    assert_eq(r.found, 1);
+    assert_eq(a8_get(r.arr, 0), 0);
+    assert_eq(a8_get(r.arr, 1), 2);
+    assert_eq(a8_get(r.arr, 2), 1);
+    0
+}
+
+fn test_next_perm_chain() -> Int {
+    // Generate all 6 perms of [0,1,2] starting from [0,1,2]
+    let mut p = Arr8 { a0: 0, a1: 1, a2: 2, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let mut count = 1;
+    let mut cont = 1;
+    while cont == 1 {
+        let r = next_perm(p, 3);
+        if r.found == 1 {
+            p = r.arr;
+            count = count + 1;
+        } else {
+            cont = 0;
+        }
+    }
+    assert_eq(count, 6);  // 3! = 6
+    0
+}
+
+fn test_next_perm_last() -> Int {
+    // [2,1,0] has no next permutation
+    let p = Arr8 { a0: 2, a1: 1, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let r = next_perm(p, 3);
+    assert_eq(r.found, 0);
+    0
+}
+
+fn test_rank_specific() -> Int {
+    // [1,0,2] should be rank 2 (after [0,1,2] and [0,2,1])
+    let p = Arr8 { a0: 1, a1: 0, a2: 2, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(perm_rank(p, 3), 2);
+    // [2,0,1] should be rank 4
+    let p2 = Arr8 { a0: 2, a1: 0, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(perm_rank(p2, 3), 4);
+    0
+}
+
+fn test_unrank() -> Int {
+    // Unrank 0 of size 3 should give [0,1,2]
+    let p = perm_unrank(0, 3);
+    assert_eq(a8_get(p, 0), 0);
+    assert_eq(a8_get(p, 1), 1);
+    assert_eq(a8_get(p, 2), 2);
+    // Unrank 5 of size 3 should give [2,1,0]
+    let p2 = perm_unrank(5, 3);
+    assert_eq(a8_get(p2, 0), 2);
+    assert_eq(a8_get(p2, 1), 1);
+    assert_eq(a8_get(p2, 2), 0);
+    0
+}
+
+fn test_rank_unrank_roundtrip() -> Int {
+    // For each rank 0..5, unrank then rank should give same value
+    let mut r = 0;
+    while r < 6 {
+        let p = perm_unrank(r, 3);
+        let computed_rank = perm_rank(p, 3);
+        assert_eq(computed_rank, r);
+        r = r + 1;
+    }
+    0
+}
+
+fn test_invalid_perm() -> Int {
+    // Duplicate element
+    let p = Arr8 { a0: 0, a1: 1, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(is_valid_perm(p, 3), 0);
+    // Out of range
+    let p2 = Arr8 { a0: 0, a1: 5, a2: 2, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(is_valid_perm(p2, 3), 0);
+    0
+}
+
+fn test_four_elements() -> Int {
+    // [1,0,3,2] -> rank = 1*6 + 0*2 + 1*1 + 0 = 7
+    let p = Arr8 { a0: 1, a1: 0, a2: 3, a3: 2, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(is_valid_perm(p, 4), 1);
+    assert_eq(perm_rank(p, 4), 7);
+    // Unrank 7 should give [1,0,3,2]
+    let q = perm_unrank(7, 4);
+    assert_eq(a8_get(q, 0), 1);
+    assert_eq(a8_get(q, 1), 0);
+    assert_eq(a8_get(q, 2), 3);
+    assert_eq(a8_get(q, 3), 2);
+    0
+}
+
+fn main() -> Int {
+    test_identity();
+    test_last_perm();
+    test_next_perm_basic();
+    test_next_perm_chain();
+    test_next_perm_last();
+    test_rank_specific();
+    test_unrank();
+    test_rank_unrank_roundtrip();
+    test_invalid_perm();
+    test_four_elements();
+    print("[OK] 406_permutation_aot");
+    0
+}

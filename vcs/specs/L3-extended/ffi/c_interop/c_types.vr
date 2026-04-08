@@ -1,0 +1,546 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, types
+// @description: Tests C type mappings and FFI type conversions
+
+/// ============================================================
+/// C TYPE MAPPINGS
+/// ============================================================
+///
+/// Verum provides standard C type aliases for FFI interoperability.
+/// These types match the C ABI on each target platform.
+
+// ------------------------------------------------------------
+// Primitive C Types
+// ------------------------------------------------------------
+
+/// Character types
+type c_char is i8;          // Platform-dependent signedness
+type c_schar is i8;         // Explicitly signed
+type c_uchar is u8;         // Explicitly unsigned
+
+/// Integer types
+type c_short is i16;
+type c_ushort is u16;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;         // Platform-dependent size
+type c_ulong is u64;
+type c_longlong is i64;
+type c_ulonglong is u64;
+
+/// Size types
+type c_size is usize;       // size_t
+type c_ssize is isize;      // ssize_t
+type c_ptrdiff is isize;    // ptrdiff_t
+
+/// Floating point types
+type c_float is f32;
+type c_double is f64;
+
+/// Void type (for pointers)
+type c_void is ();
+
+// ------------------------------------------------------------
+// Fixed-Width Integer Types
+// ------------------------------------------------------------
+
+/// Exact-width integers (from <stdint.h>)
+type int8_t is i8;
+type int16_t is i16;
+type int32_t is i32;
+type int64_t is i64;
+type uint8_t is u8;
+type uint16_t is u16;
+type uint32_t is u32;
+type uint64_t is u64;
+
+/// Pointer-sized integers
+type intptr_t is isize;
+type uintptr_t is usize;
+
+/// Maximum-width integers
+type intmax_t is i64;
+type uintmax_t is u64;
+
+// ------------------------------------------------------------
+// Pointer Types
+// ------------------------------------------------------------
+
+/// Raw pointer types
+type RawPtr<T> is *mut T;
+type ConstPtr<T> is *const T;
+
+/// Pointer predicates
+fn is_null<T>(ptr: *const T) -> Bool {
+    ptr == null
+}
+
+fn is_aligned<T>(ptr: *const T, align: usize) -> Bool {
+    // Placeholder: real impl does ptr-to-int conversion
+    true
+}
+
+// ------------------------------------------------------------
+// Text Types
+// ------------------------------------------------------------
+
+/// C string (null-terminated)
+type CStr is {
+    ptr: *const c_char,
+};
+
+implement CStr {
+    /// Create from raw pointer (unsafe)
+    unsafe fn from_ptr(ptr: *const c_char) -> CStr {
+        CStr { ptr }
+    }
+
+    /// Get raw pointer
+    fn as_ptr(&self) -> *const c_char {
+        self.ptr
+    }
+
+    /// Convert to Verum string (copies)
+    fn to_text(&self) -> Text {
+        // Placeholder: real impl calls C strlen and converts
+        ""
+    }
+}
+
+ffi libc_strlen {
+    @extern("C")
+    fn strlen(s: *const c_char) -> c_size;
+}
+
+/// Owned C string
+type CString is {
+    data: List<c_char>,
+};
+
+implement CString {
+    /// Create from Verum string
+    fn new(s: &str) -> CString {
+        let mut data: List<c_char> = List.new();
+        for b in s.bytes() {
+            data.push(b as c_char);
+        }
+        data.push(0);  // Null terminator
+        CString { data }
+    }
+
+    /// Get pointer for FFI
+    fn as_ptr(&self) -> *const c_char {
+        self.data.as_ptr()
+    }
+
+    /// Get mutable pointer
+    fn as_mut_ptr(&mut self) -> *mut c_char {
+        self.data.as_mut_ptr()
+    }
+}
+
+// ------------------------------------------------------------
+// Array Types
+// ------------------------------------------------------------
+
+/// Fixed-size C array (generic over element type)
+type CArray<T> is {
+    data: *mut T,
+    len: usize,
+};
+
+/// Flexible array member (FAM) header
+type FlexArrayHeader<Header, Element> is {
+    header: Header,
+    _marker: PhantomData<Element>,
+};
+
+implement<Header, Element> FlexArrayHeader<Header, Element> {
+    /// Get element at index
+    unsafe fn get(&self, index: usize) -> &Element {
+        let base = (self as *const FlexArrayHeader<Header, Element> as *const u8)
+            .add(Header.size);
+        &*(base as *const Element).add(index)
+    }
+}
+
+// ------------------------------------------------------------
+// Struct Types
+// ------------------------------------------------------------
+
+/// C-compatible struct with explicit layout
+@repr(C)
+type Point is {
+    x: c_int,
+    y: c_int,
+};
+
+/// Packed struct (no padding)
+@repr(C, packed)
+type PackedData is {
+    tag: u8,
+    value: u32,  // Not aligned to 4 bytes
+};
+
+/// Aligned struct
+@repr(C, align(16))
+type AlignedBuffer is {
+    data: [u8; 64],
+};
+
+/// Struct with bitfields (conceptual representation)
+@repr(C)
+type Flags is {
+    raw: u8,
+};
+
+implement Flags {
+    fn enabled(&self) -> Bool {
+        (self.raw & 0x01) != 0
+    }
+
+    fn level(&self) -> u8 {
+        (self.raw >> 1) & 0x07
+    }
+
+    fn mode(&self) -> u8 {
+        (self.raw >> 4) & 0x0F
+    }
+
+    fn set_enabled(&mut self, enabled: Bool) {
+        if enabled {
+            self.raw = self.raw | 0x01;
+        } else {
+            self.raw = self.raw & !0x01;
+        }
+    }
+
+    fn set_level(&mut self, level: u8) {
+        self.raw = (self.raw & !0x0E) | ((level & 0x07) << 1);
+    }
+
+    fn set_mode(&mut self, mode: u8) {
+        self.raw = (self.raw & !0xF0) | ((mode & 0x0F) << 4);
+    }
+}
+
+// ------------------------------------------------------------
+// Union-Like Types (Using Sum Types)
+// ------------------------------------------------------------
+
+/// C-compatible union simulation
+/// In Verum, we represent unions as sum types with explicit memory layout
+@repr(C)
+type IntOrFloat is {
+    bytes: [u8; 4],  // Store raw bytes
+};
+
+implement IntOrFloat {
+    fn from_int(i: c_int) -> IntOrFloat {
+        let bytes = int_to_bytes(i);
+        IntOrFloat { bytes }
+    }
+
+    fn from_float(f: c_float) -> IntOrFloat {
+        let bytes = float_to_bytes(f);
+        IntOrFloat { bytes }
+    }
+
+    fn as_int(&self) -> c_int {
+        bytes_to_int(self.bytes)
+    }
+
+    fn as_float(&self) -> c_float {
+        bytes_to_float(self.bytes)
+    }
+}
+
+fn int_to_bytes(i: c_int) -> [u8; 4] {
+    [
+        (i & 0xFF) as u8,
+        ((i >> 8) & 0xFF) as u8,
+        ((i >> 16) & 0xFF) as u8,
+        ((i >> 24) & 0xFF) as u8,
+    ]
+}
+
+fn bytes_to_int(bytes: [u8; 4]) -> c_int {
+    bytes[0] as c_int
+        | ((bytes[1] as c_int) << 8)
+        | ((bytes[2] as c_int) << 16)
+        | ((bytes[3] as c_int) << 24)
+}
+
+fn float_to_bytes(f: c_float) -> [u8; 4] {
+    // Placeholder: real impl uses bit reinterpretation
+    [0, 0, 0, 0]
+}
+
+fn bytes_to_float(bytes: [u8; 4]) -> c_float {
+    // Placeholder: real impl uses bit reinterpretation
+    0.0
+}
+
+/// Tagged union (variant)
+@repr(C)
+type TaggedValue is {
+    tag: c_int,
+    data: TaggedValueData,
+};
+
+@repr(C)
+type TaggedValueData is {
+    bytes: [u8; 8],  // Large enough for any variant
+};
+
+implement TaggedValue {
+    const TAG_INT: c_int = 0;
+    const TAG_FLOAT: c_int = 1;
+    const TAG_PTR: c_int = 2;
+
+    fn new_int(value: c_int) -> TaggedValue {
+        let mut data = TaggedValueData { bytes: [0; 8] };
+        unsafe {
+            *(data.bytes.as_mut_ptr() as *mut c_int) = value;
+        }
+        TaggedValue { tag: TaggedValue.TAG_INT, data }
+    }
+
+    fn new_float(value: c_float) -> TaggedValue {
+        let mut data = TaggedValueData { bytes: [0; 8] };
+        unsafe {
+            *(data.bytes.as_mut_ptr() as *mut c_float) = value;
+        }
+        TaggedValue { tag: TaggedValue.TAG_FLOAT, data }
+    }
+
+    fn new_ptr(value: *mut c_void) -> TaggedValue {
+        let mut data = TaggedValueData { bytes: [0; 8] };
+        unsafe {
+            *(data.bytes.as_mut_ptr() as *mut *mut c_void) = value;
+        }
+        TaggedValue { tag: TaggedValue.TAG_PTR, data }
+    }
+
+    fn as_int(&self) -> Maybe<c_int> {
+        if self.tag == TaggedValue.TAG_INT {
+            Some(unsafe { *(self.data.bytes.as_ptr() as *const c_int) })
+        } else {
+            None
+        }
+    }
+
+    fn as_float(&self) -> Maybe<c_float> {
+        if self.tag == TaggedValue.TAG_FLOAT {
+            Some(unsafe { *(self.data.bytes.as_ptr() as *const c_float) })
+        } else {
+            None
+        }
+    }
+
+    fn as_ptr(&self) -> Maybe<*mut c_void> {
+        if self.tag == TaggedValue.TAG_PTR {
+            Some(unsafe { *(self.data.bytes.as_ptr() as *const *mut c_void) })
+        } else {
+            None
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Enum Types
+// ------------------------------------------------------------
+
+/// C-compatible enum (fixed underlying type)
+@repr(C)
+type ErrorCode is
+    | Success
+    | NotFound
+    | PermissionDenied
+    | InvalidArgument;
+
+implement ErrorCode {
+    fn to_c_int(&self) -> c_int {
+        match self {
+            Success => 0,
+            NotFound => 1,
+            PermissionDenied => 2,
+            InvalidArgument => 3,
+        }
+    }
+
+    fn from_c_int(code: c_int) -> Maybe<ErrorCode> {
+        match code {
+            0 => Some(Success),
+            1 => Some(NotFound),
+            2 => Some(PermissionDenied),
+            3 => Some(InvalidArgument),
+            _ => None,
+        }
+    }
+}
+
+/// Open flags with explicit values
+type OpenFlags is {
+    value: u32,
+};
+
+implement OpenFlags {
+    const O_RDONLY: u32 = 0;
+    const O_WRONLY: u32 = 1;
+    const O_RDWR: u32 = 2;
+    const O_CREAT: u32 = 0x40;
+    const O_TRUNC: u32 = 0x200;
+    const O_APPEND: u32 = 0x400;
+
+    fn rdonly() -> OpenFlags { OpenFlags { value: OpenFlags.O_RDONLY } }
+    fn wronly() -> OpenFlags { OpenFlags { value: OpenFlags.O_WRONLY } }
+    fn rdwr() -> OpenFlags { OpenFlags { value: OpenFlags.O_RDWR } }
+
+    fn with_creat(self) -> OpenFlags {
+        OpenFlags { value: self.value | OpenFlags.O_CREAT }
+    }
+
+    fn with_trunc(self) -> OpenFlags {
+        OpenFlags { value: self.value | OpenFlags.O_TRUNC }
+    }
+
+    fn with_append(self) -> OpenFlags {
+        OpenFlags { value: self.value | OpenFlags.O_APPEND }
+    }
+
+    fn to_c_int(&self) -> c_int {
+        self.value as c_int
+    }
+}
+
+// ------------------------------------------------------------
+// Opaque Types
+// ------------------------------------------------------------
+
+/// Opaque C type (forward declaration)
+@opaque
+type FILE is ();
+
+@opaque
+type DIR is ();
+
+@opaque
+type pthread_mutex_t is ();
+
+// ------------------------------------------------------------
+// Type Conversion Functions
+// ------------------------------------------------------------
+
+type OverflowError is
+    | IntOverflow;
+
+/// Safe integer conversion
+fn to_c_int(n: Int) -> Result<c_int, OverflowError> {
+    let min = -2147483648i64;
+    let max = 2147483647i64;
+    if n >= min && n <= max {
+        Ok(n as c_int)
+    } else {
+        Err(OverflowError.IntOverflow)
+    }
+}
+
+/// Pointer conversion
+fn to_void_ptr<T>(ptr: *mut T) -> *mut c_void {
+    ptr as *mut c_void
+}
+
+fn from_void_ptr<T>(ptr: *mut c_void) -> *mut T {
+    ptr as *mut T
+}
+
+// ------------------------------------------------------------
+// Type Properties
+// ------------------------------------------------------------
+
+// Type Properties: use T.size and T.alignment instead of deprecated size_of<T>() and align_of<T>() functions
+// Example: c_int.size returns 4, c_double.size returns 8
+
+// ------------------------------------------------------------
+// Helper Types
+// ------------------------------------------------------------
+
+type PhantomData<T> is {};
+type Int is i64;
+
+// ------------------------------------------------------------
+// Tests
+// ------------------------------------------------------------
+
+fn test_c_types_sizes() {
+    // Basic size assertions using Type Properties
+    assert(c_char.size == 1);
+    assert(c_short.size == 2);
+    assert(c_int.size == 4);
+    assert(c_float.size == 4);
+    assert(c_double.size == 8);
+}
+
+fn test_pointer_null() {
+    let ptr: *const c_int = null;
+    assert(is_null(ptr));
+
+    let value: c_int = 42;
+    let ptr = &value as *const c_int;
+    assert(!is_null(ptr));
+}
+
+fn test_cstring() {
+    let s = CString.new("hello");
+    assert(s.as_ptr() != null);
+}
+
+fn test_flags() {
+    let mut flags = Flags { raw: 0 };
+
+    flags.set_enabled(true);
+    assert(flags.enabled());
+
+    flags.set_level(5);
+    assert(flags.level() == 5);
+
+    flags.set_mode(10);
+    assert(flags.mode() == 10);
+}
+
+fn test_int_or_float() {
+    let i = IntOrFloat { bytes: [42, 0, 0, 0] };
+    assert(i.as_int() == 42);
+}
+
+fn test_tagged_value() {
+    // TaggedValue requires method resolution
+    let v = TaggedValue { tag: 0, data: TaggedValueData { bytes: [100, 0, 0, 0, 0, 0, 0, 0] } };
+}
+
+fn test_error_code() {
+    let e: ErrorCode = Success;
+    assert(e.to_c_int() == 0);
+}
+
+fn test_open_flags() {
+    let flags = OpenFlags.wronly().with_creat().with_trunc();
+    assert((flags.value & OpenFlags.O_WRONLY) != 0);
+    assert((flags.value & OpenFlags.O_CREAT) != 0);
+    assert((flags.value & OpenFlags.O_TRUNC) != 0);
+}
+
+fn main() {
+    test_c_types_sizes();
+    test_pointer_null();
+    test_cstring();
+    test_flags();
+    test_int_or_float();
+    test_tagged_value();
+    test_error_code();
+    test_open_flags();
+    print("C types tests passed");
+}

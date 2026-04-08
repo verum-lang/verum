@@ -1,0 +1,515 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, embedding, scripting
+// @description: Tests integration of Verum as a scripting engine
+
+/// ============================================================
+/// VERUM SCRIPTING ENGINE
+/// ============================================================
+///
+/// Provides a high-level API for using Verum as a scripting
+/// engine within host applications.
+
+// ------------------------------------------------------------
+// Script Engine Handle
+// ------------------------------------------------------------
+
+/// Script engine with sandboxed execution
+type ScriptEngine is {
+    runtime: *mut VerumRuntime,
+    sandbox: Sandbox,
+    globals: Map<Text, Value>,
+    modules: Map<Text, *mut VerumModule>,
+};
+
+/// Sandbox configuration
+@repr(C)
+type Sandbox is {
+    allow_file_io: c_int,
+    allow_network: c_int,
+    allow_subprocess: c_int,
+    memory_limit: usize,
+    cpu_time_limit_ms: u64,
+    instruction_limit: u64,
+};
+
+implement Sandbox {
+    fn permissive() -> Sandbox {
+        Sandbox {
+            allow_file_io: 1,
+            allow_network: 1,
+            allow_subprocess: 1,
+            memory_limit: 0,
+            cpu_time_limit_ms: 0,
+            instruction_limit: 0,
+        }
+    }
+
+    fn restricted() -> Sandbox {
+        Sandbox {
+            allow_file_io: 0,
+            allow_network: 0,
+            allow_subprocess: 0,
+            memory_limit: 64 * 1024 * 1024,  // 64MB
+            cpu_time_limit_ms: 5000,          // 5 seconds
+            instruction_limit: 1_000_000,     // 1M instructions
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Engine Creation API
+// ------------------------------------------------------------
+
+/// Create script engine with default settings
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_create() -> *mut ScriptEngine {
+    let runtime = verum_runtime_create();
+    if runtime.is_null() {
+        return std.ptr.null as *mut c_void;
+    }
+
+    let engine = Heap(ScriptEngine {
+        runtime,
+        sandbox: Sandbox.permissive(),
+        globals: Map.new(),
+        modules: Map.new(),
+    });
+
+    Heap.into_raw(engine)
+}
+
+/// Create sandboxed script engine
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_create_sandboxed(config: *const Sandbox) -> *mut ScriptEngine {
+    let runtime = verum_runtime_create();
+    if runtime.is_null() {
+        return std.ptr.null as *mut c_void;
+    }
+
+    let sandbox = if config.is_null() {
+        Sandbox.restricted()
+    } else {
+        unsafe { (*config).clone() }
+    };
+
+    let engine = Heap(ScriptEngine {
+        runtime,
+        sandbox,
+        globals: Map.new(),
+        modules: Map.new(),
+    });
+
+    Heap.into_raw(engine)
+}
+
+/// Destroy script engine
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_destroy(engine: *mut ScriptEngine) {
+    if !engine.is_null() {
+        unsafe {
+            let e = Heap.from_raw(engine);
+            verum_runtime_destroy(e.runtime);
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Script Execution
+// ------------------------------------------------------------
+
+/// Evaluate script and return result
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_eval(
+    engine: *mut ScriptEngine,
+    script: *const c_char,
+    script_len: usize,
+    result: *mut *mut VerumValue
+) -> c_int {
+    if engine.is_null() || script.is_null() {
+        return -1;
+    }
+
+    unsafe {
+        let e = &mut *engine;
+        let src = std.slice.from_raw_parts(script as *const u8, script_len);
+        let script_str = match std.str.from_utf8(src) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+
+        match e.evaluate(script_str) {
+            Ok(value) => {
+                if !result.is_null() {
+                    *result = Heap.into_raw(Heap(value)) as *mut VerumValue;
+                }
+                0
+            }
+            Err(code) => code,
+        }
+    }
+}
+
+/// Execute script file
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_exec_file(
+    engine: *mut ScriptEngine,
+    path: *const c_char,
+    result: *mut *mut VerumValue
+) -> c_int {
+    if engine.is_null() || path.is_null() {
+        return -1;
+    }
+
+    unsafe {
+        let e = &mut *engine;
+
+        // Check sandbox permissions
+        if e.sandbox.allow_file_io == 0 {
+            return -2;  // Permission denied
+        }
+
+        let cstr = CStr.from_ptr(path);
+        let path_str = match cstr.to_str() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+
+        match e.execute_file(path_str) {
+            Ok(value) => {
+                if !result.is_null() {
+                    *result = Heap.into_raw(Heap(value)) as *mut VerumValue;
+                }
+                0
+            }
+            Err(code) => code,
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Global Variables
+// ------------------------------------------------------------
+
+/// Set global variable
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_set_global(
+    engine: *mut ScriptEngine,
+    name: *const c_char,
+    value: *const VerumValue
+) -> c_int {
+    if engine.is_null() || name.is_null() || value.is_null() {
+        return -1;
+    }
+
+    unsafe {
+        let e = &mut *engine;
+        let cstr = CStr.from_ptr(name);
+        let name_str = match cstr.to_str() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+
+        let v = (*(value as *const Value)).clone();
+        e.globals.insert(name_str.to_owned(), v);
+        0
+    }
+}
+
+/// Get global variable
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_get_global(
+    engine: *const ScriptEngine,
+    name: *const c_char,
+    result: *mut *mut VerumValue
+) -> c_int {
+    if engine.is_null() || name.is_null() || result.is_null() {
+        return -1;
+    }
+
+    unsafe {
+        let e = &*engine;
+        let cstr = CStr.from_ptr(name);
+        let name_str = match cstr.to_str() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+
+        // Placeholder: real impl looks up global variable
+        let _name = name_str;
+        -1  // Not found
+    }
+}
+
+// ------------------------------------------------------------
+// Host Function Registration
+// ------------------------------------------------------------
+
+/// Host function callback type
+type HostFunctionCallback is extern "C" fn(
+    argc: c_int,
+    argv: *const *const VerumValue,
+    result: *mut *mut VerumValue,
+    user_data: *mut c_void
+) -> c_int;
+
+/// Register host function
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_register_function(
+    engine: *mut ScriptEngine,
+    name: *const c_char,
+    callback: HostFunctionCallback,
+    user_data: *mut c_void
+) -> c_int {
+    if engine.is_null() || name.is_null() {
+        return -1;
+    }
+
+    unsafe {
+        let e = &mut *engine;
+        let cstr = CStr.from_ptr(name);
+        let name_str = match cstr.to_str() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+
+        e.register_host_function(name_str, callback, user_data);
+        0
+    }
+}
+
+/// Host object type for complex bindings
+type HostObject is {
+    destructor: extern "C" fn(*mut c_void),
+    method_call: extern "C" fn(*mut c_void, *const c_char, c_int, *const *const VerumValue, *mut *mut VerumValue) -> c_int,
+    property_get: extern "C" fn(*mut c_void, *const c_char, *mut *mut VerumValue) -> c_int,
+    property_set: extern "C" fn(*mut c_void, *const c_char, *const VerumValue) -> c_int,
+    data: *mut c_void,
+};
+
+/// Register host object
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_register_object(
+    engine: *mut ScriptEngine,
+    name: *const c_char,
+    host_object: *const HostObject
+) -> c_int {
+    if engine.is_null() || name.is_null() || host_object.is_null() {
+        return -1;
+    }
+
+    // Implementation would register the object for script access
+    0
+}
+
+// ------------------------------------------------------------
+// Module System
+// ------------------------------------------------------------
+
+/// Import module
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_import(
+    engine: *mut ScriptEngine,
+    module_name: *const c_char
+) -> c_int {
+    if engine.is_null() || module_name.is_null() {
+        return -1;
+    }
+
+    unsafe {
+        let e = &mut *engine;
+        let cstr = CStr.from_ptr(module_name);
+        let name_str = match cstr.to_str() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+
+        match e.import_module(name_str) {
+            Ok(()) => 0,
+            Err(code) => code,
+        }
+    }
+}
+
+/// Add module search path
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_add_path(
+    engine: *mut ScriptEngine,
+    path: *const c_char
+) -> c_int {
+    if engine.is_null() || path.is_null() {
+        return -1;
+    }
+
+    // Implementation would add to module search path
+    0
+}
+
+// ------------------------------------------------------------
+// Interrupt Handling
+// ------------------------------------------------------------
+
+/// Request script interruption
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_interrupt(engine: *mut ScriptEngine) {
+    if !engine.is_null() {
+        unsafe {
+            let e = &mut *engine;
+            e.request_interrupt();
+        }
+    }
+}
+
+/// Check if interrupted
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_is_interrupted(engine: *const ScriptEngine) -> c_int {
+    if engine.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        let e = &*engine;
+        if e.is_interrupted() { 1 } else { 0 }
+    }
+}
+
+/// Clear interrupt flag
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_engine_clear_interrupt(engine: *mut ScriptEngine) {
+    if !engine.is_null() {
+        unsafe {
+            let e = &mut *engine;
+            e.clear_interrupt();
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Internal Implementation
+// ------------------------------------------------------------
+
+implement ScriptEngine {
+    fn evaluate(&mut self, script: &str) -> Result<Value, c_int> {
+        Ok(Value.Null)
+    }
+
+    fn execute_file(&mut self, path: &str) -> Result<Value, c_int> {
+        Ok(Value.Null)
+    }
+
+    fn register_host_function(
+        &mut self,
+        name: &str,
+        callback: HostFunctionCallback,
+        user_data: *mut c_void
+    ) {
+    }
+
+    fn import_module(&mut self, name: &str) -> Result<(), c_int> {
+        Ok(())
+    }
+
+    fn request_interrupt(&mut self) {
+    }
+
+    fn is_interrupted(&self) -> Bool {
+        false
+    }
+
+    fn clear_interrupt(&mut self) {
+    }
+}
+
+implement Sandbox {
+    fn clone(&self) -> Sandbox {
+        Sandbox {
+            allow_file_io: self.allow_file_io,
+            allow_network: self.allow_network,
+            allow_subprocess: self.allow_subprocess,
+            memory_limit: self.memory_limit,
+            cpu_time_limit_ms: self.cpu_time_limit_ms,
+            instruction_limit: self.instruction_limit,
+        }
+    }
+}
+
+// Import from embed_runtime
+extern "C" {
+    fn verum_runtime_create() -> *mut VerumRuntime;
+    fn verum_runtime_destroy(runtime: *mut VerumRuntime);
+}
+
+@opaque
+type VerumRuntime is ();
+
+@opaque
+type VerumModule is ();
+
+@opaque
+type VerumValue is ();
+
+type Value is
+    | Null
+    | Bool(Bool)
+    | Int(i64)
+    | Float(f64)
+    | Text(Text)
+    | Array(List<Value>)
+    | Object(Map<Text, Value>);
+
+implement Value {
+    fn clone(&self) -> Value {
+        match self {
+            Value.Null => Value.Null,
+            Value.Bool(b) => Value.Bool(*b),
+            Value.Int(i) => Value.Int(*i),
+            Value.Float(f) => Value.Float(*f),
+            Value.Text(s) => Value.Text(s.clone()),
+            Value.Array(a) => Value.Array(a.clone()),
+            Value.Object(o) => Value.Object(o.clone()),
+        }
+    }
+}
+
+type c_char is i8;
+type c_int is i32;
+type c_void is ();
+
+type CStr is { ptr: *const c_char };
+implement CStr {
+    unsafe fn from_ptr(ptr: *const c_char) -> CStr { CStr { ptr } }
+    fn to_str(&self) -> Result<&str, ()> { Ok("") }
+}
+
+fn main() {
+    // Script engine test
+}

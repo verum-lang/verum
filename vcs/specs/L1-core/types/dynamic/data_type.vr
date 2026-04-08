@@ -1,0 +1,275 @@
+// =============================================================================
+// data_type.vr - Tests for Data type (structured dynamic data)
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1
+// @tags: types, data, dynamic, json, safe_dynamic_typing
+// =============================================================================
+
+module tests.types.dynamic.data_type;
+
+mount core.data.{Data, DataBuilder};
+
+// =============================================================================
+// Test 1: Basic constructors
+// =============================================================================
+
+fn test_null_constructor() {
+    let d = Data.null();
+    assert(d.is_null());
+}
+
+fn test_bool_constructor() {
+    let d = Data.from_bool(true);
+    assert(d.is_bool());
+    assert(d.as_bool() == Some(true));
+}
+
+fn test_int_constructor() {
+    let d = Data.from_int(42);
+    assert(d.is_int());
+    assert(d.as_int() == Some(42));
+}
+
+fn test_float_constructor() {
+    let d = Data.from_float(3.14);
+    assert(d.is_float());
+}
+
+fn test_text_constructor() {
+    let d = Data.from_text("hello");
+    assert(d.is_text());
+}
+
+fn test_array_constructor() {
+    let arr = [Data.from_int(1), Data.from_int(2), Data.from_int(3)];
+    let d = Data.from_array(arr);
+    assert(d.is_array());
+    assert(d.len() == 3);
+}
+
+fn test_object_constructor() {
+    let mut obj: Map<Text, Data> = {};
+    obj.insert("name", Data.from_text("Alice"));
+    obj.insert("age", Data.from_int(30));
+    let d = Data.from_object(obj);
+    assert(d.is_object());
+    assert(d.len() == 2);
+}
+
+// =============================================================================
+// Test 2: Type predicates
+// =============================================================================
+
+fn test_type_predicates() {
+    assert(Data.Null.is_null());
+    assert(!Data.Null.is_bool());
+
+    assert(Data.Bool(true).is_bool());
+    assert(!Data.Bool(true).is_int());
+
+    assert(Data.Int(42).is_int());
+    assert(Data.Int(42).is_number());
+    assert(!Data.Int(42).is_float());
+
+    assert(Data.Float(3.14).is_float());
+    assert(Data.Float(3.14).is_number());
+
+    assert(Data.Text("hello").is_text());
+    assert(!Data.Text("hello").is_array());
+
+    let arr = Data.from_array([]);
+    assert(arr.is_array());
+    assert(!arr.is_object());
+
+    let obj = Data.empty_object();
+    assert(obj.is_object());
+    assert(!obj.is_array());
+}
+
+// =============================================================================
+// Test 3: Safe accessors (using == instead of assert_eq)
+// =============================================================================
+
+fn test_safe_accessors() {
+    let int_data = Data.from_int(42);
+    assert(int_data.as_int() == Some(42));
+    assert(int_data.as_bool() == None);
+
+    // Float coercion: Int coerces to Float
+    let float_data = Data.from_float(3.14);
+    assert(float_data.as_float().is_some());
+
+    let int_as_float = Data.from_int(42);
+    assert(int_as_float.as_float() == Some(42.0));
+}
+
+// =============================================================================
+// Test 4: Object field access
+// =============================================================================
+
+fn test_object_get() {
+    let mut obj = Data.empty_object();
+    let _ = obj.set("name", Data.from_text("Alice"));
+    let _ = obj.set("age", Data.from_int(30));
+
+    let name = obj.get("name");
+    assert(name.is_some());
+
+    let missing = obj.get("email");
+    assert(missing.is_none());
+}
+
+fn test_object_contains_key() {
+    let mut obj = Data.empty_object();
+    let _ = obj.set("name", Data.from_text("Alice"));
+
+    assert(obj.contains_key("name"));
+    assert(!obj.contains_key("email"));
+}
+
+fn test_object_remove() {
+    let mut obj = Data.empty_object();
+    let _ = obj.set("name", Data.from_text("Alice"));
+    let _ = obj.set("age", Data.from_int(30));
+
+    let removed = obj.remove("name");
+    assert(removed.is_some());
+    assert(obj.len() == 1);
+    assert(!obj.contains_key("name"));
+}
+
+// =============================================================================
+// Test 5: Array index access
+// =============================================================================
+
+fn test_array_at() {
+    let arr = Data.from_array([
+        Data.from_int(10),
+        Data.from_int(20),
+        Data.from_int(30),
+    ]);
+
+    assert(arr.at(0).is_some());
+    assert(arr.at(1).is_some());
+    assert(arr.at(2).is_some());
+    assert(arr.at(3).is_none());
+}
+
+fn test_array_push_pop() {
+    let mut arr = Data.empty_array();
+    let _ = arr.push(Data.from_int(1));
+    let _ = arr.push(Data.from_int(2));
+    assert(arr.len() == 2);
+
+    let popped = arr.pop();
+    assert(popped.is_some());
+    assert(arr.len() == 1);
+}
+
+// =============================================================================
+// Test 6: Pattern matching
+// =============================================================================
+
+fn classify_data(d: Data) -> Text {
+    match d {
+        Data.Null => "null",
+        Data.Bool(b) => "bool",
+        Data.Int(i) => "int",
+        Data.Float(f) => "float",
+        Data.Text(t) => "text",
+        Data.Array(arr) => "array",
+        Data.Object(obj) => "object",
+    }
+}
+
+fn test_pattern_matching() {
+    assert(classify_data(Data.Null) == "null");
+    assert(classify_data(Data.Bool(true)) == "bool");
+    assert(classify_data(Data.Int(42)) == "int");
+    assert(classify_data(Data.Float(3.14)) == "float");
+    assert(classify_data(Data.Text("hi")) == "text");
+    assert(classify_data(Data.empty_array()) == "array");
+    assert(classify_data(Data.empty_object()) == "object");
+}
+
+// =============================================================================
+// Test 7: DataBuilder
+// =============================================================================
+
+fn test_builder_object() {
+    let data = DataBuilder.new()
+        .set("name", Data.from_text("Alice"))
+        .set("age", Data.from_int(30))
+        .set("active", Data.from_bool(true))
+        .build();
+
+    assert(data.is_object());
+    assert(data.len() == 3);
+}
+
+fn test_builder_array() {
+    let data = DataBuilder.new_array()
+        .push(Data.from_int(1))
+        .push(Data.from_int(2))
+        .push(Data.from_int(3))
+        .build();
+
+    assert(data.is_array());
+    assert(data.len() == 3);
+}
+
+// =============================================================================
+// Test 8: Equality
+// =============================================================================
+
+fn test_equality() {
+    assert(Data.Null == Data.Null);
+    assert(Data.Bool(true) == Data.Bool(true));
+    assert(Data.Bool(true) != Data.Bool(false));
+    assert(Data.Int(42) == Data.Int(42));
+    assert(Data.Int(42) != Data.Int(43));
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    // Constructor tests
+    test_null_constructor();
+    test_bool_constructor();
+    test_int_constructor();
+    test_float_constructor();
+    test_text_constructor();
+    test_array_constructor();
+    test_object_constructor();
+
+    // Type predicate tests
+    test_type_predicates();
+
+    // Safe accessor tests
+    test_safe_accessors();
+
+    // Object access tests
+    test_object_get();
+    test_object_contains_key();
+    test_object_remove();
+
+    // Array access tests
+    test_array_at();
+    test_array_push_pop();
+
+    // Pattern matching tests
+    test_pattern_matching();
+
+    // Builder tests
+    test_builder_object();
+    test_builder_array();
+
+    // Equality tests
+    test_equality();
+
+    print("All Data type tests passed!");
+}

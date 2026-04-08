@@ -1,0 +1,131 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, fin
+
+/// Fin<N> - natural number strictly less than N
+///
+/// The Fin type represents bounded natural numbers, enabling
+/// compile-time guarantees that array indices are always valid.
+
+/// Fin<N> is a bounded index type
+type Fin<N: meta Int> is {
+    value: Int,
+};
+
+/// Create a Fin from an integer with bounds check
+fn mk_fin<N: meta Int>(i: Int) -> Maybe<Fin<N>> {
+    if i >= 0 && i < N {
+        Some(Fin { value: i })
+    } else {
+        None
+    }
+}
+
+/// Convert Fin to Int
+fn to_int<N: meta Int>(f: Fin<N>) -> Int {
+    f.value
+}
+
+/// Zero index (always valid for N > 0)
+fn fin_zero<N: meta Int>() -> Fin<N> {
+    Fin { value: 0 }
+}
+
+/// Last index
+fn fin_last<N: meta Int>() -> Fin<N> {
+    Fin { value: N - 1 }
+}
+
+/// Safe array access using Fin index
+fn safe_index<T, N: meta Int>(arr: [T; N], idx: Fin<N>) -> T {
+    arr[idx.value]
+}
+
+/// Weaken: Fin<N> can be used as Fin<N+1>
+fn weaken<N: meta Int>(f: Fin<N>) -> Fin<N> {
+    f  // Value still in bounds
+}
+
+/// Map over Fin range
+fn map_fins<T, N: meta Int>(f: fn(Fin<N>) -> T) -> List<T> {
+    let mut result: List<T> = [];
+    let mut i = 0;
+    while i < N {
+        result.push(f(Fin { value: i }));
+        i = i + 1;
+    }
+    result
+}
+
+/// All Fin values for a given bound
+fn all_fins<N: meta Int>() -> List<Fin<N>> {
+    let mut result: List<Fin<N>> = [];
+    let mut i = 0;
+    while i < N {
+        result.push(Fin { value: i });
+        i = i + 1;
+    }
+    result
+}
+
+/// Complement: N - 1 - i
+fn complement<N: meta Int>(f: Fin<N>) -> Fin<N> {
+    Fin { value: N - 1 - f.value }
+}
+
+/// Increment (may fail if at max)
+fn inc<N: meta Int>(f: Fin<N>) -> Maybe<Fin<N>> {
+    if f.value + 1 < N {
+        Some(Fin { value: f.value + 1 })
+    } else {
+        None
+    }
+}
+
+/// Decrement (may fail if at zero)
+fn dec<N: meta Int>(f: Fin<N>) -> Maybe<Fin<N>> {
+    if f.value > 0 {
+        Some(Fin { value: f.value - 1 })
+    } else {
+        None
+    }
+}
+
+fn main() {
+    // Create Fin values
+    let zero = fin_zero.<5>();
+    assert(to_int(zero) == 0);
+
+    let last = fin_last.<5>();
+    assert(to_int(last) == 4);
+
+    // Safe indexing
+    let arr: [Int; 5] = [10, 20, 30, 40, 50];
+    let val = safe_index(arr, zero);
+    assert(val == 10);
+
+    let val2 = safe_index(arr, last);
+    assert(val2 == 50);
+
+    // Complement
+    let comp = complement(zero);
+    assert(to_int(comp) == 4);
+
+    // Increment
+    let next = inc(zero);
+    assert(next.is_some());
+    assert(to_int(next.unwrap()) == 1);
+
+    // Decrement from zero fails
+    let prev = dec(zero);
+    assert(prev.is_none());
+
+    // All fins
+    let fins = all_fins.<3>();
+    assert(fins.len() == 3);
+
+    // Map over fins
+    let squares = map_fins.<Int, 4>(|f| to_int(f) * to_int(f));
+    assert(squares == [0, 1, 4, 9]);
+}

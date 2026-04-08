@@ -1,0 +1,256 @@
+// @test: typecheck-fail
+// @expected-error: E0506
+// @tier: 0
+// @level: L1
+// @tags: refinement, errors, subsumption, subtyping
+// @description: Errors when refinement types fail to satisfy subtyping requirements
+
+/// Error E0506: Refinement subsumption error
+/// Occurs when a refined type cannot be proven to be a subtype of another.
+/// The SMT solver cannot prove that one refinement implies another.
+
+// ============================================================================
+// Direct subsumption failures
+// ============================================================================
+
+type Positive is Int{> 0};
+type NonNegative is Int{>= 0};
+type Bounded is Int{>= 0 && <= 100};
+
+fn subsumption_failures() {
+    // E0506: NonNegative includes 0, which is not Positive
+    let nn: NonNegative = 0;
+    let p: Positive = nn;  // Error: NonNegative !<: Positive
+
+    // E0506: Positive doesn't guarantee upper bound
+    let pos: Positive = 1000;
+    let bounded: Bounded = pos;  // Error: Positive !<: Bounded
+
+    // E0506: Int doesn't imply any refinement
+    let i: Int = 42;
+    let pos2: Positive = i;  // Error: Int !<: Positive
+}
+
+// ============================================================================
+// Function parameter subsumption
+// ============================================================================
+
+fn takes_positive(x: Positive) -> Int {
+    x
+}
+
+fn takes_bounded(x: Bounded) -> Int {
+    x
+}
+
+fn param_subsumption_errors() {
+    // E0506: Cannot pass weaker type to stronger requirement
+    let nn: NonNegative = 5;
+    takes_positive(nn);  // Error: NonNegative !<: Positive
+
+    // E0506: Cannot pass unbounded to bounded
+    let pos: Positive = 500;
+    takes_bounded(pos);  // Error: Positive !<: Bounded
+}
+
+// ============================================================================
+// Return type subsumption
+// ============================================================================
+
+fn return_subsumption_error1(x: NonNegative) -> Positive {
+    x  // Error: NonNegative !<: Positive
+}
+
+fn return_subsumption_error2(x: Int) -> NonNegative {
+    x  // Error: Int !<: NonNegative
+}
+
+fn return_subsumption_error3(x: Positive) -> Bounded {
+    x  // Error: Positive !<: Bounded (no upper bound guarantee)
+}
+
+// ============================================================================
+// Collection element subsumption
+// ============================================================================
+
+type PositiveList is List<Positive>;
+type NonNegativeList is List<NonNegative>;
+
+fn collection_subsumption() {
+    // E0506: List<NonNegative> !<: List<Positive>
+    let nn_list: NonNegativeList = [0, 1, 2];
+    let pos_list: PositiveList = nn_list;  // Error
+
+    // E0506: Even single element type mismatch
+    let mixed: List<NonNegative> = [0, 1, 2];
+    let strict: List<Positive> = mixed;  // Error
+}
+
+// ============================================================================
+// Struct field subsumption
+// ============================================================================
+
+type StrictUser is {
+    id: Positive,
+    score: Bounded,
+};
+
+type LooseUser is {
+    id: NonNegative,
+    score: Int,
+};
+
+fn struct_subsumption() {
+    // E0506: LooseUser fields don't satisfy StrictUser requirements
+    let loose = LooseUser { id: 0, score: -5 };
+    let strict: StrictUser = loose;  // Error: field types don't match
+}
+
+// ============================================================================
+// Generic constraint subsumption
+// ============================================================================
+
+type Comparable is protocol {
+    fn compare(self: &Self, other: &Self) -> Int;
+};
+
+fn requires_bounded<T: Bounded>(x: T) -> T {
+    x
+}
+
+fn generic_subsumption() {
+    // E0506: Positive doesn't satisfy Bounded constraint
+    let p: Positive = 500;
+    requires_bounded(p);  // Error: Positive !<: Bounded
+}
+
+// ============================================================================
+// Disjunctive refinement subsumption
+// ============================================================================
+
+type Sign is Int{== -1 || == 0 || == 1};
+type Binary is Int{== 0 || == 1};
+
+fn disjunctive_subsumption() {
+    // E0506: Sign includes -1, which is not in Binary
+    let s: Sign = -1;
+    let b: Binary = s;  // Error: Sign !<: Binary
+}
+
+// ============================================================================
+// Intersection refinement subsumption
+// ============================================================================
+
+type PositiveEven is Int{> 0 && it % 2 == 0};
+type Even is Int{it % 2 == 0};
+type Positive2 is Int{> 0};
+
+fn intersection_subsumption() {
+    // E0506: Even doesn't guarantee positivity
+    let e: Even = -2;
+    let pe: PositiveEven = e;  // Error: Even !<: PositiveEven
+
+    // E0506: Positive doesn't guarantee evenness
+    let p: Positive2 = 3;
+    let pe2: PositiveEven = p;  // Error: Positive !<: PositiveEven
+}
+
+// ============================================================================
+// Floating point refinement subsumption
+// ============================================================================
+
+type UnitInterval is Float{>= 0.0 && <= 1.0};
+type Probability is Float{>= 0.0 && <= 1.0};  // Same as UnitInterval
+type ExtendedProb is Float{>= 0.0 && <= 2.0};
+
+fn float_subsumption() {
+    // E0506: ExtendedProb allows values > 1.0
+    let ext: ExtendedProb = 1.5;
+    let unit: UnitInterval = ext;  // Error: ExtendedProb !<: UnitInterval
+}
+
+// ============================================================================
+// Optional type subsumption
+// ============================================================================
+
+type MaybePositive is Maybe<Positive>;
+type MaybeNonNeg is Maybe<NonNegative>;
+
+fn optional_subsumption() {
+    // E0506: Maybe<NonNegative> !<: Maybe<Positive>
+    let mn: MaybeNonNeg = Some(0);
+    let mp: MaybePositive = mn;  // Error
+}
+
+// ============================================================================
+// Result type subsumption
+// ============================================================================
+
+type PositiveResult is Result<Positive, Text>;
+type NonNegResult is Result<NonNegative, Text>;
+
+fn result_subsumption() {
+    // E0506: Result success type doesn't match
+    let nnr: NonNegResult = Ok(0);
+    let pr: PositiveResult = nnr;  // Error
+}
+
+// ============================================================================
+// Function type subsumption
+// ============================================================================
+
+fn function_type_subsumption() {
+    // Functions are contravariant in parameters, covariant in returns
+
+    // E0506: Return type not a subtype
+    let f1: fn(Int) -> NonNegative = |x| if x >= 0 { x } else { -x };
+    let f2: fn(Int) -> Positive = f1;  // Error: NonNegative !<: Positive
+
+    // E0506: Parameter type subsumption failure (contravariance)
+    let g1: fn(Positive) -> Int = |x| x;
+    let g2: fn(NonNegative) -> Int = g1;  // Error: need stronger param type
+}
+
+// ============================================================================
+// Conditional branch subsumption
+// ============================================================================
+
+fn conditional_subsumption(cond: Bool, x: NonNegative) -> Positive {
+    // E0506: One or both branches don't satisfy return type
+    if cond {
+        x  // Error: NonNegative !<: Positive
+    } else {
+        x + 1  // Still may not be positive if x is very negative Int
+    }
+}
+
+// ============================================================================
+// Match arm subsumption
+// ============================================================================
+
+fn match_subsumption(opt: Maybe<NonNegative>) -> Positive {
+    match opt {
+        Some(x) => x,  // Error: NonNegative !<: Positive
+        None => 1,     // Ok
+    }
+}
+
+// ============================================================================
+// Expected diagnostics
+// ============================================================================
+
+// Expected error message format:
+// error[E0506]: refinement subsumption error
+//   --> refinement_subsumption_error.vr:24:23
+//    |
+// 24 |     let p: Positive = nn;
+//    |                       ^^
+//    |
+//    = note: cannot prove `NonNegative <: Positive`
+//    = note: `NonNegative` is `Int{>= 0}`, which includes 0
+//    = note: `Positive` is `Int{> 0}`, which excludes 0
+//    = help: ensure the source type's refinement implies the target's refinement
+
+fn main() {
+    // This file should not compile - all assignments have subsumption errors
+}

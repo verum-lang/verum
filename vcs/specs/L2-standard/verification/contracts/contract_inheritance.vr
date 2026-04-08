@@ -1,0 +1,238 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, inheritance
+// @timeout: 5000
+
+/// Tests for contract inheritance
+/// Behavioral subtyping via Liskov Substitution Principle
+
+/// Base protocol with contracts
+type Comparable<T> is protocol {
+    @verify(proof)
+    fn compare(&self, other: &T) -> Ordering {
+        contract#"
+            ensures result == Ordering.Equal implies self.equals(other);
+            ensures result == Ordering.Less implies !other.less_than(self);
+        ";
+    }
+
+    @verify(proof)
+    fn equals(&self, other: &T) -> Bool {
+        contract#"
+            ensures result == (self.compare(other) == Ordering.Equal);
+            ensures result implies other.equals(self);  // Symmetry
+        ";
+    }
+
+    @verify(proof)
+    fn less_than(&self, other: &T) -> Bool {
+        contract#"
+            ensures result == (self.compare(other) == Ordering.Less);
+            ensures result implies !other.less_than(self);  // Antisymmetry
+        ";
+    }
+}
+
+/// Interface with contract specification
+type Container<T> is protocol {
+    @verify(proof)
+    fn len(&self) -> Int {
+        contract#"
+            ensures result >= 0;
+        ";
+    }
+
+    @verify(proof)
+    fn is_empty(&self) -> Bool {
+        contract#"
+            ensures result == (self.len() == 0);
+        ";
+    }
+
+    @verify(proof)
+    fn add(&mut self, item: T) {
+        contract#"
+            ensures self.len() == old(self.len()) + 1;
+            ensures self.contains(&item);
+        ";
+    }
+
+    @verify(proof)
+    fn contains(&self, item: &T) -> Bool;
+}
+
+/// Implementation must respect inherited contracts
+implement Container<Int> for List<Int> {
+    @verify(proof)
+    fn len(&self) -> Int {
+        contract#"
+            // Inherited: ensures result >= 0;
+        ";
+        self.data.len()
+    }
+
+    @verify(proof)
+    fn is_empty(&self) -> Bool {
+        contract#"
+            // Inherited: ensures result == (self.len() == 0);
+        ";
+        self.data.is_empty()
+    }
+
+    @verify(proof)
+    fn add(&mut self, item: Int) {
+        contract#"
+            // Inherited: ensures self.len() == old(self.len()) + 1;
+            // Inherited: ensures self.contains(&item);
+        ";
+        self.data.push(item);
+    }
+
+    @verify(proof)
+    fn contains(&self, item: &Int) -> Bool {
+        self.data.contains(item)
+    }
+}
+
+/// Covariant contract strengthening (allowed for postconditions)
+type Shape is protocol {
+    @verify(proof)
+    fn area(&self) -> Float {
+        contract#"
+            ensures result >= 0.0;
+        ";
+    }
+}
+
+type Circle is {
+    radius: Float,
+};
+
+implement Shape for Circle {
+    @verify(proof)
+    fn area(&self) -> Float {
+        contract#"
+            // Strengthened postcondition (allowed)
+            ensures result >= 0.0;
+            ensures result == 3.14159 * self.radius * self.radius;
+        ";
+        3.14159 * self.radius * self.radius
+    }
+}
+
+/// Contravariant contract weakening (allowed for preconditions)
+type Processor<T> is protocol {
+    @verify(proof)
+    fn process(&self, input: T) -> T {
+        contract#"
+            requires self.can_process(&input);
+        ";
+    }
+
+    fn can_process(&self, input: &T) -> Bool;
+}
+
+type LenientProcessor is {};
+
+implement Processor<Int> for LenientProcessor {
+    @verify(proof)
+    fn process(&self, input: Int) -> Int {
+        contract#"
+            // Weakened precondition (allowed) - accepts all inputs
+            // Base required: self.can_process(&input)
+            // Override: no precondition (weaker)
+        ";
+        input * 2
+    }
+
+    fn can_process(&self, _input: &Int) -> Bool {
+        true  // Accepts everything
+    }
+}
+
+/// Abstract class pattern with inherited contracts
+type AbstractCollection<T> is protocol {
+    @verify(proof)
+    fn size(&self) -> Int {
+        contract#"
+            ensures result >= 0;
+        ";
+    }
+
+    @verify(proof)
+    fn get(&self, index: Int) -> &T {
+        contract#"
+            requires index >= 0 && index < self.size();
+        ";
+    }
+
+    // Default implementation using abstract methods
+    @verify(proof)
+    fn first(&self) -> Maybe<&T> {
+        contract#"
+            ensures match result {
+                Some(v) => self.size() > 0 && *v == *self.get(0),
+                None => self.size() == 0
+            };
+        ";
+        if self.size() > 0 {
+            Some(self.get(0))
+        } else {
+            None
+        }
+    }
+
+    @verify(proof)
+    fn last(&self) -> Maybe<&T> {
+        contract#"
+            ensures match result {
+                Some(v) => self.size() > 0 && *v == *self.get(self.size() - 1),
+                None => self.size() == 0
+            };
+        ";
+        if self.size() > 0 {
+            Some(self.get(self.size() - 1))
+        } else {
+            None
+        }
+    }
+}
+
+/// Contract inheritance with generics
+type Monoid<T> is protocol {
+    fn empty() -> T {
+        contract#"
+            ensures forall x: T. combine(empty(), x) == x;
+            ensures forall x: T. combine(x, empty()) == x;
+        ";
+    }
+
+    fn combine(a: T, b: T) -> T {
+        contract#"
+            // Associativity
+            ensures forall x, y, z: T. combine(combine(x, y), z) == combine(x, combine(y, z));
+        ";
+    }
+}
+
+/// Type for integer addition monoid
+type IntAddition is ();
+
+/// Implementing monoid contract
+implement Monoid<Int> for IntAddition {
+    fn empty() -> Int {
+        contract#"
+            // Inherits identity laws
+        ";
+        0
+    }
+
+    fn combine(a: Int, b: Int) -> Int {
+        contract#"
+            // Inherits associativity
+            ensures result == a + b;
+        ";
+        a + b
+    }
+}

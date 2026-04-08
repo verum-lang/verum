@@ -1,0 +1,156 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, simd, vector
+// @timeout: 50000
+// @expected-exit: 0
+// @description: SIMD vector operations — simulated 4-wide float vector arithmetic
+
+// Simulated 4-wide SIMD vector
+type SimdVec4 is { x0: Float, x1: Float, x2: Float, x3: Float };
+
+fn splat4(v: Float) -> SimdVec4 {
+    SimdVec4 { x0: v, x1: v, x2: v, x3: v }
+}
+
+fn simd_add(a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: a.x0 + b.x0, x1: a.x1 + b.x1, x2: a.x2 + b.x2, x3: a.x3 + b.x3 }
+}
+
+fn simd_sub(a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: a.x0 - b.x0, x1: a.x1 - b.x1, x2: a.x2 - b.x2, x3: a.x3 - b.x3 }
+}
+
+fn simd_mul(a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: a.x0 * b.x0, x1: a.x1 * b.x1, x2: a.x2 * b.x2, x3: a.x3 * b.x3 }
+}
+
+fn simd_div(a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: a.x0 / b.x0, x1: a.x1 / b.x1, x2: a.x2 / b.x2, x3: a.x3 / b.x3 }
+}
+
+fn simd_fma(a: SimdVec4, b: SimdVec4, c: SimdVec4) -> SimdVec4 {
+    // fused multiply-add: a * b + c
+    simd_add(simd_mul(a, b), c)
+}
+
+fn simd_neg(a: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: 0.0 - a.x0, x1: 0.0 - a.x1, x2: 0.0 - a.x2, x3: 0.0 - a.x3 }
+}
+
+fn abs_f(x: Float) -> Float { if x < 0.0 { 0.0 - x } else { x } }
+
+fn simd_abs(a: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: abs_f(a.x0), x1: abs_f(a.x1), x2: abs_f(a.x2), x3: abs_f(a.x3) }
+}
+
+fn fsqrt(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let mut g = x / 2.0;
+        let mut i = 0;
+        while i < 20 { g = (g + x / g) / 2.0; i = i + 1; }
+        g
+    }
+}
+
+fn simd_sqrt(a: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: fsqrt(a.x0), x1: fsqrt(a.x1), x2: fsqrt(a.x2), x3: fsqrt(a.x3) }
+}
+
+fn min_f(a: Float, b: Float) -> Float { if a < b { a } else { b } }
+fn max_f(a: Float, b: Float) -> Float { if a > b { a } else { b } }
+
+fn simd_min(a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: min_f(a.x0, b.x0), x1: min_f(a.x1, b.x1),
+               x2: min_f(a.x2, b.x2), x3: min_f(a.x3, b.x3) }
+}
+
+fn simd_max(a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: max_f(a.x0, b.x0), x1: max_f(a.x1, b.x1),
+               x2: max_f(a.x2, b.x2), x3: max_f(a.x3, b.x3) }
+}
+
+@test
+fn test_simd_add() {
+    let a = splat4(2.0);
+    let b = splat4(3.0);
+    let c = simd_add(a, b);
+    assert(c.x0 == 5.0);
+}
+
+@test
+fn test_simd_sub() {
+    let a = splat4(5.0);
+    let b = splat4(2.0);
+    let c = simd_sub(a, b);
+    assert(c.x0 == 3.0);
+}
+
+@test
+fn test_simd_mul() {
+    let a = splat4(3.0);
+    let b = splat4(4.0);
+    let c = simd_mul(a, b);
+    assert(c.x0 == 12.0);
+}
+
+@test
+fn test_simd_div() {
+    let a = splat4(10.0);
+    let b = splat4(2.0);
+    let c = simd_div(a, b);
+    assert(c.x0 == 5.0);
+}
+
+@test
+fn test_simd_fma() {
+    let a = splat4(2.0);
+    let b = splat4(3.0);
+    let c = splat4(1.0);
+    let result = simd_fma(a, b, c);
+    assert(result.x0 == 7.0);
+}
+
+@test
+fn test_simd_neg() {
+    let a = splat4(5.0);
+    let b = simd_neg(a);
+    assert(b.x0 == -5.0);
+}
+
+@test
+fn test_simd_abs() {
+    let a = splat4(-3.0);
+    let b = simd_abs(a);
+    assert(b.x0 == 3.0);
+}
+
+@test
+fn test_simd_sqrt() {
+    let a = splat4(9.0);
+    let b = simd_sqrt(a);
+    assert(b.x0 > 2.99 && b.x0 < 3.01);
+}
+
+@test
+fn test_simd_min_max() {
+    let a = splat4(3.0);
+    let b = splat4(5.0);
+    let mn = simd_min(a, b);
+    let mx = simd_max(a, b);
+    assert(mn.x0 == 3.0);
+    assert(mx.x0 == 5.0);
+}
+
+fn main() {
+    test_simd_add();
+    test_simd_sub();
+    test_simd_mul();
+    test_simd_div();
+    test_simd_fma();
+    test_simd_neg();
+    test_simd_abs();
+    test_simd_sqrt();
+    test_simd_min_max();
+}

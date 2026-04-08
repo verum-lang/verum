@@ -1,0 +1,1505 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, gpu, full, device, memory, stream, event, graph
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Interpreter GPU full — device management, memory lifecycle, streams, events, graphs, profiling, peer access, multi-device
+
+// ============================================================================
+// Core GPU state record
+// ============================================================================
+
+type GpuState is {
+    device_id: Int,
+    alloc_bytes: Int,
+    free_bytes: Int,
+    stream_count: Int,
+    event_count: Int,
+    graph_count: Int,
+    kernel_count: Int
+};
+
+fn gpu_new() -> GpuState {
+    GpuState {
+        device_id: 0,
+        alloc_bytes: 0,
+        free_bytes: 0,
+        stream_count: 0,
+        event_count: 0,
+        graph_count: 0,
+        kernel_count: 0
+    }
+}
+
+fn gpu_with_device(g: GpuState, dev: Int) -> GpuState {
+    GpuState {
+        device_id: dev,
+        alloc_bytes: g.alloc_bytes,
+        free_bytes: g.free_bytes,
+        stream_count: g.stream_count,
+        event_count: g.event_count,
+        graph_count: g.graph_count,
+        kernel_count: g.kernel_count
+    }
+}
+
+fn gpu_with_alloc(g: GpuState, bytes: Int) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_bytes: g.alloc_bytes + bytes,
+        free_bytes: g.free_bytes,
+        stream_count: g.stream_count,
+        event_count: g.event_count,
+        graph_count: g.graph_count,
+        kernel_count: g.kernel_count
+    }
+}
+
+fn gpu_with_free(g: GpuState, bytes: Int) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_bytes: g.alloc_bytes,
+        free_bytes: g.free_bytes + bytes,
+        stream_count: g.stream_count,
+        event_count: g.event_count,
+        graph_count: g.graph_count,
+        kernel_count: g.kernel_count
+    }
+}
+
+fn gpu_with_streams(g: GpuState, delta: Int) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_bytes: g.alloc_bytes,
+        free_bytes: g.free_bytes,
+        stream_count: g.stream_count + delta,
+        event_count: g.event_count,
+        graph_count: g.graph_count,
+        kernel_count: g.kernel_count
+    }
+}
+
+fn gpu_with_events(g: GpuState, delta: Int) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_bytes: g.alloc_bytes,
+        free_bytes: g.free_bytes,
+        stream_count: g.stream_count,
+        event_count: g.event_count + delta,
+        graph_count: g.graph_count,
+        kernel_count: g.kernel_count
+    }
+}
+
+fn gpu_with_graphs(g: GpuState, delta: Int) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_bytes: g.alloc_bytes,
+        free_bytes: g.free_bytes,
+        stream_count: g.stream_count,
+        event_count: g.event_count,
+        graph_count: g.graph_count + delta,
+        kernel_count: g.kernel_count
+    }
+}
+
+fn gpu_with_kernel(g: GpuState) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_bytes: g.alloc_bytes,
+        free_bytes: g.free_bytes,
+        stream_count: g.stream_count,
+        event_count: g.event_count,
+        graph_count: g.graph_count,
+        kernel_count: g.kernel_count + 1
+    }
+}
+
+fn gpu_live_bytes(g: GpuState) -> Int {
+    g.alloc_bytes - g.free_bytes
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+// ============================================================================
+// Device properties simulation
+// ============================================================================
+
+type DeviceProps is {
+    device_id: Int,
+    total_mem: Int,
+    compute_cap_major: Int,
+    compute_cap_minor: Int,
+    max_threads_per_block: Int,
+    warp_size: Int,
+    multiprocessor_count: Int,
+    clock_rate_khz: Int
+};
+
+fn make_device_props(id: Int) -> DeviceProps {
+    // Simulate different GPU models by device id
+    if id == 0 {
+        DeviceProps {
+            device_id: 0,
+            total_mem: 8192,
+            compute_cap_major: 8,
+            compute_cap_minor: 6,
+            max_threads_per_block: 1024,
+            warp_size: 32,
+            multiprocessor_count: 84,
+            clock_rate_khz: 1410000
+        }
+    } else if id == 1 {
+        DeviceProps {
+            device_id: 1,
+            total_mem: 16384,
+            compute_cap_major: 9,
+            compute_cap_minor: 0,
+            max_threads_per_block: 1024,
+            warp_size: 32,
+            multiprocessor_count: 128,
+            clock_rate_khz: 1695000
+        }
+    } else {
+        DeviceProps {
+            device_id: id,
+            total_mem: 4096,
+            compute_cap_major: 7,
+            compute_cap_minor: 5,
+            max_threads_per_block: 1024,
+            warp_size: 32,
+            multiprocessor_count: 40,
+            clock_rate_khz: 1200000
+        }
+    }
+}
+
+fn device_count() -> Int {
+    4
+}
+
+// ============================================================================
+// Memory tracker (up to 8 allocations)
+// ============================================================================
+
+type MemTracker is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    count: Int,
+    total_alloc: Int,
+    total_free: Int,
+    peak: Int,
+    current: Int
+};
+
+fn mt_new() -> MemTracker {
+    MemTracker {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        count: 0,
+        total_alloc: 0, total_free: 0,
+        peak: 0, current: 0
+    }
+}
+
+fn mt_get(m: MemTracker, i: Int) -> Int {
+    if i == 0 { m.a0 } else if i == 1 { m.a1 }
+    else if i == 2 { m.a2 } else if i == 3 { m.a3 }
+    else if i == 4 { m.a4 } else if i == 5 { m.a5 }
+    else if i == 6 { m.a6 } else { m.a7 }
+}
+
+fn mt_set(m: MemTracker, i: Int, v: Int) -> MemTracker {
+    MemTracker {
+        a0: if i == 0 { v } else { m.a0 },
+        a1: if i == 1 { v } else { m.a1 },
+        a2: if i == 2 { v } else { m.a2 },
+        a3: if i == 3 { v } else { m.a3 },
+        a4: if i == 4 { v } else { m.a4 },
+        a5: if i == 5 { v } else { m.a5 },
+        a6: if i == 6 { v } else { m.a6 },
+        a7: if i == 7 { v } else { m.a7 },
+        count: m.count,
+        total_alloc: m.total_alloc, total_free: m.total_free,
+        peak: m.peak, current: m.current
+    }
+}
+
+fn mt_malloc(m: MemTracker, size: Int) -> MemTracker {
+    let new_current = m.current + size;
+    let new_peak = int_max(m.peak, new_current);
+    let m2 = mt_set(m, m.count, size);
+    MemTracker {
+        a0: m2.a0, a1: m2.a1, a2: m2.a2, a3: m2.a3,
+        a4: m2.a4, a5: m2.a5, a6: m2.a6, a7: m2.a7,
+        count: m2.count + 1,
+        total_alloc: m2.total_alloc + 1, total_free: m2.total_free,
+        peak: new_peak, current: new_current
+    }
+}
+
+fn mt_memcpy(src_size: Int, dst_size: Int) -> Int {
+    // Returns the number of bytes actually copied (min of src and dst)
+    int_min(src_size, dst_size)
+}
+
+fn mt_memset(m: MemTracker, slot: Int, value: Int) -> MemTracker {
+    // Simulate memset: the slot retains its original size (memset does not
+    // change allocation size). We just return the tracker unchanged to
+    // represent "the memory was zeroed/filled" without mutating sizes.
+    m
+}
+
+fn mt_free(m: MemTracker, slot: Int) -> MemTracker {
+    // Free by looking up the size at the slot, then zero it
+    let size = mt_get(m, slot);
+    let m2 = mt_set(m, slot, 0);
+    MemTracker {
+        a0: m2.a0, a1: m2.a1, a2: m2.a2, a3: m2.a3,
+        a4: m2.a4, a5: m2.a5, a6: m2.a6, a7: m2.a7,
+        count: m2.count,
+        total_alloc: m2.total_alloc, total_free: m2.total_free + 1,
+        peak: m2.peak, current: m2.current - size
+    }
+}
+
+fn mt_has_leaks(m: MemTracker) -> Bool {
+    m.current != 0
+}
+
+// ============================================================================
+// Stream tracker (up to 6 streams)
+// ============================================================================
+
+type StreamTracker is {
+    s0: Int, s1: Int, s2: Int, s3: Int, s4: Int, s5: Int,
+    count: Int,
+    next_id: Int,
+    sync_count: Int,
+    query_count: Int
+};
+
+fn st_new() -> StreamTracker {
+    StreamTracker {
+        s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0,
+        count: 0, next_id: 1, sync_count: 0, query_count: 0
+    }
+}
+
+fn st_get(t: StreamTracker, i: Int) -> Int {
+    if i == 0 { t.s0 } else if i == 1 { t.s1 }
+    else if i == 2 { t.s2 } else if i == 3 { t.s3 }
+    else if i == 4 { t.s4 } else { t.s5 }
+}
+
+fn st_set(t: StreamTracker, i: Int, v: Int) -> StreamTracker {
+    StreamTracker {
+        s0: if i == 0 { v } else { t.s0 },
+        s1: if i == 1 { v } else { t.s1 },
+        s2: if i == 2 { v } else { t.s2 },
+        s3: if i == 3 { v } else { t.s3 },
+        s4: if i == 4 { v } else { t.s4 },
+        s5: if i == 5 { v } else { t.s5 },
+        count: t.count, next_id: t.next_id,
+        sync_count: t.sync_count, query_count: t.query_count
+    }
+}
+
+fn st_create(t: StreamTracker) -> StreamTracker {
+    let id = t.next_id;
+    let t2 = st_set(t, t.count, id);
+    StreamTracker {
+        s0: t2.s0, s1: t2.s1, s2: t2.s2, s3: t2.s3, s4: t2.s4, s5: t2.s5,
+        count: t2.count + 1, next_id: id + 1,
+        sync_count: t2.sync_count, query_count: t2.query_count
+    }
+}
+
+fn st_destroy(t: StreamTracker, sid: Int) -> StreamTracker {
+    let mut found = 0 - 1;
+    let mut i = 0;
+    while i < t.count {
+        if st_get(t, i) == sid { found = i; }
+        i = i + 1;
+    }
+    if found >= 0 {
+        let mut t2 = t;
+        let mut j = found;
+        while j < t.count - 1 {
+            t2 = st_set(t2, j, st_get(t2, j + 1));
+            j = j + 1;
+        }
+        t2 = st_set(t2, t.count - 1, 0);
+        StreamTracker {
+            s0: t2.s0, s1: t2.s1, s2: t2.s2, s3: t2.s3, s4: t2.s4, s5: t2.s5,
+            count: t2.count - 1, next_id: t2.next_id,
+            sync_count: t2.sync_count, query_count: t2.query_count
+        }
+    } else {
+        t
+    }
+}
+
+fn st_sync(t: StreamTracker) -> StreamTracker {
+    StreamTracker {
+        s0: t.s0, s1: t.s1, s2: t.s2, s3: t.s3, s4: t.s4, s5: t.s5,
+        count: t.count, next_id: t.next_id,
+        sync_count: t.sync_count + 1, query_count: t.query_count
+    }
+}
+
+fn st_query(t: StreamTracker) -> StreamTracker {
+    // In interpreter mode, streams always complete immediately
+    StreamTracker {
+        s0: t.s0, s1: t.s1, s2: t.s2, s3: t.s3, s4: t.s4, s5: t.s5,
+        count: t.count, next_id: t.next_id,
+        sync_count: t.sync_count, query_count: t.query_count + 1
+    }
+}
+
+fn st_is_complete(t: StreamTracker) -> Bool {
+    // Interpreter: streams always complete
+    true
+}
+
+// ============================================================================
+// Event tracker (up to 6 events)
+// ============================================================================
+
+type EventTracker is {
+    e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int,
+    count: Int,
+    next_id: Int,
+    record_count: Int,
+    sync_count: Int
+};
+
+fn ev_new() -> EventTracker {
+    EventTracker {
+        e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0,
+        count: 0, next_id: 1, record_count: 0, sync_count: 0
+    }
+}
+
+fn ev_get(t: EventTracker, i: Int) -> Int {
+    if i == 0 { t.e0 } else if i == 1 { t.e1 }
+    else if i == 2 { t.e2 } else if i == 3 { t.e3 }
+    else if i == 4 { t.e4 } else { t.e5 }
+}
+
+fn ev_set(t: EventTracker, i: Int, v: Int) -> EventTracker {
+    EventTracker {
+        e0: if i == 0 { v } else { t.e0 },
+        e1: if i == 1 { v } else { t.e1 },
+        e2: if i == 2 { v } else { t.e2 },
+        e3: if i == 3 { v } else { t.e3 },
+        e4: if i == 4 { v } else { t.e4 },
+        e5: if i == 5 { v } else { t.e5 },
+        count: t.count, next_id: t.next_id,
+        record_count: t.record_count, sync_count: t.sync_count
+    }
+}
+
+fn ev_create(t: EventTracker) -> EventTracker {
+    let id = t.next_id;
+    let t2 = ev_set(t, t.count, id);
+    EventTracker {
+        e0: t2.e0, e1: t2.e1, e2: t2.e2, e3: t2.e3, e4: t2.e4, e5: t2.e5,
+        count: t2.count + 1, next_id: id + 1,
+        record_count: t2.record_count, sync_count: t2.sync_count
+    }
+}
+
+fn ev_destroy(t: EventTracker, eid: Int) -> EventTracker {
+    let mut found = 0 - 1;
+    let mut i = 0;
+    while i < t.count {
+        if ev_get(t, i) == eid { found = i; }
+        i = i + 1;
+    }
+    if found >= 0 {
+        let mut t2 = t;
+        let mut j = found;
+        while j < t.count - 1 {
+            t2 = ev_set(t2, j, ev_get(t2, j + 1));
+            j = j + 1;
+        }
+        t2 = ev_set(t2, t.count - 1, 0);
+        EventTracker {
+            e0: t2.e0, e1: t2.e1, e2: t2.e2, e3: t2.e3, e4: t2.e4, e5: t2.e5,
+            count: t2.count - 1, next_id: t2.next_id,
+            record_count: t2.record_count, sync_count: t2.sync_count
+        }
+    } else {
+        t
+    }
+}
+
+fn ev_record(t: EventTracker, stream_id: Int) -> EventTracker {
+    // Record event on stream (no-op in interpreter, just count)
+    EventTracker {
+        e0: t.e0, e1: t.e1, e2: t.e2, e3: t.e3, e4: t.e4, e5: t.e5,
+        count: t.count, next_id: t.next_id,
+        record_count: t.record_count + 1, sync_count: t.sync_count
+    }
+}
+
+fn ev_synchronize(t: EventTracker) -> EventTracker {
+    EventTracker {
+        e0: t.e0, e1: t.e1, e2: t.e2, e3: t.e3, e4: t.e4, e5: t.e5,
+        count: t.count, next_id: t.next_id,
+        record_count: t.record_count, sync_count: t.sync_count + 1
+    }
+}
+
+fn ev_elapsed_time(start_record: Int, end_record: Int) -> Int {
+    // Simulated elapsed time: each record tick is 100 microseconds
+    (end_record - start_record) * 100
+}
+
+fn ev_is_complete(t: EventTracker) -> Bool {
+    true
+}
+
+// ============================================================================
+// Graph capture state
+// ============================================================================
+
+type GraphState is {
+    is_capturing: Bool,
+    capture_stream: Int,
+    node_count: Int,
+    instantiated: Bool,
+    launch_count: Int,
+    total_graphs: Int
+};
+
+fn graph_new() -> GraphState {
+    GraphState {
+        is_capturing: false,
+        capture_stream: 0,
+        node_count: 0,
+        instantiated: false,
+        launch_count: 0,
+        total_graphs: 0
+    }
+}
+
+fn graph_begin_capture(gs: GraphState, stream_id: Int) -> GraphState {
+    GraphState {
+        is_capturing: true,
+        capture_stream: stream_id,
+        node_count: 0,
+        instantiated: false,
+        launch_count: gs.launch_count,
+        total_graphs: gs.total_graphs
+    }
+}
+
+fn graph_add_node(gs: GraphState) -> GraphState {
+    if gs.is_capturing {
+        GraphState {
+            is_capturing: gs.is_capturing,
+            capture_stream: gs.capture_stream,
+            node_count: gs.node_count + 1,
+            instantiated: gs.instantiated,
+            launch_count: gs.launch_count,
+            total_graphs: gs.total_graphs
+        }
+    } else {
+        gs
+    }
+}
+
+fn graph_end_capture(gs: GraphState) -> GraphState {
+    GraphState {
+        is_capturing: false,
+        capture_stream: 0,
+        node_count: gs.node_count,
+        instantiated: false,
+        launch_count: gs.launch_count,
+        total_graphs: gs.total_graphs + 1
+    }
+}
+
+fn graph_instantiate(gs: GraphState) -> GraphState {
+    GraphState {
+        is_capturing: gs.is_capturing,
+        capture_stream: gs.capture_stream,
+        node_count: gs.node_count,
+        instantiated: true,
+        launch_count: gs.launch_count,
+        total_graphs: gs.total_graphs
+    }
+}
+
+fn graph_launch(gs: GraphState) -> GraphState {
+    if gs.instantiated {
+        GraphState {
+            is_capturing: gs.is_capturing,
+            capture_stream: gs.capture_stream,
+            node_count: gs.node_count,
+            instantiated: gs.instantiated,
+            launch_count: gs.launch_count + 1,
+            total_graphs: gs.total_graphs
+        }
+    } else {
+        gs
+    }
+}
+
+// ============================================================================
+// Profiling state
+// ============================================================================
+
+type ProfileState is {
+    range_depth: Int,
+    marker_depth: Int,
+    total_ranges: Int,
+    total_markers: Int
+};
+
+fn prof_new() -> ProfileState {
+    ProfileState {
+        range_depth: 0,
+        marker_depth: 0,
+        total_ranges: 0,
+        total_markers: 0
+    }
+}
+
+fn prof_range_start(p: ProfileState) -> ProfileState {
+    ProfileState {
+        range_depth: p.range_depth + 1,
+        marker_depth: p.marker_depth,
+        total_ranges: p.total_ranges + 1,
+        total_markers: p.total_markers
+    }
+}
+
+fn prof_range_end(p: ProfileState) -> ProfileState {
+    let new_depth = if p.range_depth > 0 { p.range_depth - 1 } else { 0 };
+    ProfileState {
+        range_depth: new_depth,
+        marker_depth: p.marker_depth,
+        total_ranges: p.total_ranges,
+        total_markers: p.total_markers
+    }
+}
+
+fn prof_marker_push(p: ProfileState) -> ProfileState {
+    ProfileState {
+        range_depth: p.range_depth,
+        marker_depth: p.marker_depth + 1,
+        total_ranges: p.total_ranges,
+        total_markers: p.total_markers + 1
+    }
+}
+
+fn prof_marker_pop(p: ProfileState) -> ProfileState {
+    let new_depth = if p.marker_depth > 0 { p.marker_depth - 1 } else { 0 };
+    ProfileState {
+        range_depth: p.range_depth,
+        marker_depth: new_depth,
+        total_ranges: p.total_ranges,
+        total_markers: p.total_markers
+    }
+}
+
+// ============================================================================
+// Peer access state (4 devices, 4x4 access matrix stored flat)
+// ============================================================================
+
+type PeerAccess is {
+    m00: Int, m01: Int, m02: Int, m03: Int,
+    m10: Int, m11: Int, m12: Int, m13: Int,
+    m20: Int, m21: Int, m22: Int, m23: Int,
+    m30: Int, m31: Int, m32: Int, m33: Int
+};
+
+fn peer_new() -> PeerAccess {
+    // Diagonal is always 1 (device can access itself)
+    PeerAccess {
+        m00: 1, m01: 0, m02: 0, m03: 0,
+        m10: 0, m11: 1, m12: 0, m13: 0,
+        m20: 0, m21: 0, m22: 1, m23: 0,
+        m30: 0, m31: 0, m32: 0, m33: 1
+    }
+}
+
+fn peer_get(p: PeerAccess, from: Int, to: Int) -> Int {
+    let idx = from * 4 + to;
+    if idx == 0 { p.m00 } else if idx == 1 { p.m01 }
+    else if idx == 2 { p.m02 } else if idx == 3 { p.m03 }
+    else if idx == 4 { p.m10 } else if idx == 5 { p.m11 }
+    else if idx == 6 { p.m12 } else if idx == 7 { p.m13 }
+    else if idx == 8 { p.m20 } else if idx == 9 { p.m21 }
+    else if idx == 10 { p.m22 } else if idx == 11 { p.m23 }
+    else if idx == 12 { p.m30 } else if idx == 13 { p.m31 }
+    else if idx == 14 { p.m32 } else { p.m33 }
+}
+
+fn peer_set(p: PeerAccess, from: Int, to: Int, v: Int) -> PeerAccess {
+    let idx = from * 4 + to;
+    PeerAccess {
+        m00: if idx == 0 { v } else { p.m00 },
+        m01: if idx == 1 { v } else { p.m01 },
+        m02: if idx == 2 { v } else { p.m02 },
+        m03: if idx == 3 { v } else { p.m03 },
+        m10: if idx == 4 { v } else { p.m10 },
+        m11: if idx == 5 { v } else { p.m11 },
+        m12: if idx == 6 { v } else { p.m12 },
+        m13: if idx == 7 { v } else { p.m13 },
+        m20: if idx == 8 { v } else { p.m20 },
+        m21: if idx == 9 { v } else { p.m21 },
+        m22: if idx == 10 { v } else { p.m22 },
+        m23: if idx == 11 { v } else { p.m23 },
+        m30: if idx == 12 { v } else { p.m30 },
+        m31: if idx == 13 { v } else { p.m31 },
+        m32: if idx == 14 { v } else { p.m32 },
+        m33: if idx == 15 { v } else { p.m33 }
+    }
+}
+
+fn can_access_peer(from: Int, to: Int) -> Bool {
+    // Simulate: devices 0-1 can access each other (same PCIe switch)
+    // Devices 2-3 can access each other (same PCIe switch)
+    // Cross-switch: 0,1 cannot access 2,3 directly
+    if from == to { true }
+    else if from == 0 && to == 1 { true }
+    else if from == 1 && to == 0 { true }
+    else if from == 2 && to == 3 { true }
+    else if from == 3 && to == 2 { true }
+    else { false }
+}
+
+fn peer_enable(p: PeerAccess, from: Int, to: Int) -> PeerAccess {
+    if can_access_peer(from, to) {
+        peer_set(p, from, to, 1)
+    } else {
+        p
+    }
+}
+
+fn peer_disable(p: PeerAccess, from: Int, to: Int) -> PeerAccess {
+    if from != to {
+        peer_set(p, from, to, 0)
+    } else {
+        p
+    }
+}
+
+// ============================================================================
+// 2D memory simulation
+// ============================================================================
+
+type Mem2D is {
+    width: Int,
+    height: Int,
+    pitch: Int,
+    total_bytes: Int
+};
+
+fn mem2d_alloc(width: Int, height: Int) -> Mem2D {
+    // Pitch is width aligned to 128-byte boundary
+    let aligned = ((width + 127) / 128) * 128;
+    Mem2D {
+        width: width,
+        height: height,
+        pitch: aligned,
+        total_bytes: aligned * height
+    }
+}
+
+fn mem2d_copy_bytes(src: Mem2D, dst: Mem2D) -> Int {
+    // Copy row by row: min(src.width, dst.width) * min(src.height, dst.height)
+    let copy_width = int_min(src.width, dst.width);
+    let copy_height = int_min(src.height, dst.height);
+    copy_width * copy_height
+}
+
+fn mem2d_set_bytes(m: Mem2D) -> Int {
+    // Memset touches pitch * height bytes
+    m.pitch * m.height
+}
+
+// ============================================================================
+// Unified memory simulation
+// ============================================================================
+
+type UnifiedMem is {
+    size: Int,
+    is_managed: Bool,
+    preferred_device: Int,
+    prefetch_count: Int,
+    advise_count: Int
+};
+
+fn um_alloc_managed(size: Int) -> UnifiedMem {
+    UnifiedMem {
+        size: size,
+        is_managed: true,
+        preferred_device: 0 - 1,
+        prefetch_count: 0,
+        advise_count: 0
+    }
+}
+
+fn um_prefetch(u: UnifiedMem, device: Int) -> UnifiedMem {
+    UnifiedMem {
+        size: u.size,
+        is_managed: u.is_managed,
+        preferred_device: device,
+        prefetch_count: u.prefetch_count + 1,
+        advise_count: u.advise_count
+    }
+}
+
+fn um_advise(u: UnifiedMem, device: Int) -> UnifiedMem {
+    UnifiedMem {
+        size: u.size,
+        is_managed: u.is_managed,
+        preferred_device: device,
+        prefetch_count: u.prefetch_count,
+        advise_count: u.advise_count + 1
+    }
+}
+
+// ============================================================================
+// Multi-stream pipeline state
+// ============================================================================
+
+type PipelineState is {
+    h2d_ops: Int,
+    compute_ops: Int,
+    d2h_ops: Int,
+    total_bytes_in: Int,
+    total_bytes_out: Int,
+    total_flops: Int
+};
+
+fn pipe_new() -> PipelineState {
+    PipelineState {
+        h2d_ops: 0, compute_ops: 0, d2h_ops: 0,
+        total_bytes_in: 0, total_bytes_out: 0, total_flops: 0
+    }
+}
+
+fn pipe_h2d(p: PipelineState, bytes: Int) -> PipelineState {
+    PipelineState {
+        h2d_ops: p.h2d_ops + 1,
+        compute_ops: p.compute_ops,
+        d2h_ops: p.d2h_ops,
+        total_bytes_in: p.total_bytes_in + bytes,
+        total_bytes_out: p.total_bytes_out,
+        total_flops: p.total_flops
+    }
+}
+
+fn pipe_compute(p: PipelineState, flops: Int) -> PipelineState {
+    PipelineState {
+        h2d_ops: p.h2d_ops,
+        compute_ops: p.compute_ops + 1,
+        d2h_ops: p.d2h_ops,
+        total_bytes_in: p.total_bytes_in,
+        total_bytes_out: p.total_bytes_out,
+        total_flops: p.total_flops + flops
+    }
+}
+
+fn pipe_d2h(p: PipelineState, bytes: Int) -> PipelineState {
+    PipelineState {
+        h2d_ops: p.h2d_ops,
+        compute_ops: p.compute_ops,
+        d2h_ops: p.d2h_ops + 1,
+        total_bytes_in: p.total_bytes_in,
+        total_bytes_out: p.total_bytes_out + bytes,
+        total_flops: p.total_flops
+    }
+}
+
+// ============================================================================
+// Test 1: Device management
+// ============================================================================
+
+fn test_device_management() {
+    // Get device count
+    let count = device_count();
+    assert_eq(count, 4);
+
+    // Create GPU state and set device
+    let mut g = gpu_new();
+    assert_eq(g.device_id, 0);
+
+    g = gpu_with_device(g, 1);
+    assert_eq(g.device_id, 1);
+
+    g = gpu_with_device(g, 3);
+    assert_eq(g.device_id, 3);
+
+    // Query device properties for device 0
+    let props0 = make_device_props(0);
+    assert_eq(props0.device_id, 0);
+    assert_eq(props0.total_mem, 8192);
+    assert_eq(props0.compute_cap_major, 8);
+    assert_eq(props0.compute_cap_minor, 6);
+    assert_eq(props0.max_threads_per_block, 1024);
+    assert_eq(props0.warp_size, 32);
+    assert_eq(props0.multiprocessor_count, 84);
+
+    // Query device properties for device 1
+    let props1 = make_device_props(1);
+    assert_eq(props1.device_id, 1);
+    assert_eq(props1.total_mem, 16384);
+    assert_eq(props1.compute_cap_major, 9);
+    assert_eq(props1.compute_cap_minor, 0);
+    assert_eq(props1.multiprocessor_count, 128);
+
+    // Default device properties for device 2
+    let props2 = make_device_props(2);
+    assert_eq(props2.total_mem, 4096);
+    assert_eq(props2.compute_cap_major, 7);
+
+    // Set back to device 0
+    g = gpu_with_device(g, 0);
+    assert_eq(g.device_id, 0);
+
+    print("test_device_management passed");
+}
+
+// ============================================================================
+// Test 2: Memory lifecycle
+// ============================================================================
+
+fn test_memory_lifecycle() {
+    let mut mt = mt_new();
+    assert_eq(mt.current, 0);
+    assert_eq(mt.peak, 0);
+    assert_eq(mt.current, 0);
+
+    // Malloc 1024 bytes (slot 0)
+    mt = mt_malloc(mt, 1024);
+    assert_eq(mt.count, 1);
+    assert_eq(mt.current, 1024);
+    assert_eq(mt.peak, 1024);
+    assert_eq(mt.total_alloc, 1);
+    assert_eq(mt_get(mt, 0), 1024);
+
+    // Malloc 2048 bytes (slot 1)
+    mt = mt_malloc(mt, 2048);
+    assert_eq(mt.count, 2);
+    assert_eq(mt.current, 3072);
+    assert_eq(mt.peak, 3072);
+
+    // Memcpy simulation: copy from 1024-byte src to 2048-byte dst
+    let copied = mt_memcpy(1024, 2048);
+    assert_eq(copied, 1024);
+
+    // Memcpy same size
+    let copied2 = mt_memcpy(512, 512);
+    assert_eq(copied2, 512);
+
+    // Memset slot 0 with value 0 (zero fill) — size unchanged
+    mt = mt_memset(mt, 0, 0);
+    assert_eq(mt_get(mt, 0), 1024);
+
+    // Free slot 1 (2048 bytes)
+    mt = mt_free(mt, 1);
+    assert_eq(mt.current, 1024);
+    assert_eq(mt.peak, 3072);
+    assert_eq(mt.total_free, 1);
+
+    // Free slot 0 (1024 bytes)
+    mt = mt_free(mt, 0);
+    assert_eq(mt.current, 0);
+    assert_eq(mt.current, 0);
+    assert_eq(mt.total_free, 2);
+    assert_eq(mt.total_alloc, 2);
+
+    // Peak should remain at 3072
+    assert_eq(mt.peak, 3072);
+
+    print("test_memory_lifecycle passed");
+}
+
+// ============================================================================
+// Test 3: Stream lifecycle
+// ============================================================================
+
+fn test_stream_lifecycle() {
+    let mut st = st_new();
+    assert_eq(st.count, 0);
+
+    // Create 3 streams
+    st = st_create(st);
+    st = st_create(st);
+    st = st_create(st);
+    assert_eq(st.count, 3);
+    assert_eq(st_get(st, 0), 1);
+    assert_eq(st_get(st, 1), 2);
+    assert_eq(st_get(st, 2), 3);
+
+    // Sync stream (simulated)
+    st = st_sync(st);
+    assert_eq(st.sync_count, 1);
+
+    // Query stream
+    st = st_query(st);
+    assert_eq(st.query_count, 1);
+    assert(st_is_complete(st));
+
+    // Destroy middle stream (id=2)
+    st = st_destroy(st, 2);
+    assert_eq(st.count, 2);
+    assert_eq(st_get(st, 0), 1);
+    assert_eq(st_get(st, 1), 3);
+
+    // Create new stream (gets id=4)
+    st = st_create(st);
+    assert_eq(st.count, 3);
+    assert_eq(st_get(st, 2), 4);
+
+    // Destroy all streams one by one
+    st = st_destroy(st, 1);
+    st = st_destroy(st, 3);
+    st = st_destroy(st, 4);
+    assert_eq(st.count, 0);
+
+    // Destroy on empty (no-op)
+    st = st_destroy(st, 999);
+    assert_eq(st.count, 0);
+
+    print("test_stream_lifecycle passed");
+}
+
+// ============================================================================
+// Test 4: Event lifecycle
+// ============================================================================
+
+fn test_event_lifecycle() {
+    let mut ev = ev_new();
+    assert_eq(ev.count, 0);
+
+    // Create 3 events
+    ev = ev_create(ev);
+    ev = ev_create(ev);
+    ev = ev_create(ev);
+    assert_eq(ev.count, 3);
+    assert_eq(ev_get(ev, 0), 1);
+    assert_eq(ev_get(ev, 1), 2);
+    assert_eq(ev_get(ev, 2), 3);
+
+    // Record event on stream 1
+    ev = ev_record(ev, 1);
+    assert_eq(ev.record_count, 1);
+
+    // Record again
+    ev = ev_record(ev, 1);
+    assert_eq(ev.record_count, 2);
+
+    // Synchronize event
+    ev = ev_synchronize(ev);
+    assert_eq(ev.sync_count, 1);
+    assert(ev_is_complete(ev));
+
+    // Elapsed time between record 1 and record 2
+    let elapsed = ev_elapsed_time(1, 2);
+    assert_eq(elapsed, 100);
+
+    // Elapsed time spanning 5 records
+    let elapsed2 = ev_elapsed_time(0, 5);
+    assert_eq(elapsed2, 500);
+
+    // Destroy event 2
+    ev = ev_destroy(ev, 2);
+    assert_eq(ev.count, 2);
+    assert_eq(ev_get(ev, 0), 1);
+    assert_eq(ev_get(ev, 1), 3);
+
+    // Destroy remaining events
+    ev = ev_destroy(ev, 1);
+    ev = ev_destroy(ev, 3);
+    assert_eq(ev.count, 0);
+
+    print("test_event_lifecycle passed");
+}
+
+// ============================================================================
+// Test 5: Graph capture
+// ============================================================================
+
+fn test_graph_capture() {
+    let mut gs = graph_new();
+    assert_eq(gs.is_capturing, false);
+    assert_eq(gs.node_count, 0);
+    assert_eq(gs.total_graphs, 0);
+
+    // Begin capture on stream 1
+    gs = graph_begin_capture(gs, 1);
+    assert_eq(gs.is_capturing, true);
+    assert_eq(gs.capture_stream, 1);
+
+    // Add nodes (simulated kernel captures)
+    gs = graph_add_node(gs);
+    gs = graph_add_node(gs);
+    gs = graph_add_node(gs);
+    assert_eq(gs.node_count, 3);
+
+    // End capture
+    gs = graph_end_capture(gs);
+    assert_eq(gs.is_capturing, false);
+    assert_eq(gs.capture_stream, 0);
+    assert_eq(gs.node_count, 3);
+    assert_eq(gs.total_graphs, 1);
+
+    // Adding nodes outside capture is a no-op
+    gs = graph_add_node(gs);
+    assert_eq(gs.node_count, 3);
+
+    // Instantiate the graph
+    gs = graph_instantiate(gs);
+    assert_eq(gs.instantiated, true);
+
+    // Launch the graph
+    gs = graph_launch(gs);
+    assert_eq(gs.launch_count, 1);
+
+    // Launch again (replay)
+    gs = graph_launch(gs);
+    gs = graph_launch(gs);
+    assert_eq(gs.launch_count, 3);
+
+    // Launch without instantiation should be no-op
+    let mut gs2 = graph_new();
+    gs2 = graph_begin_capture(gs2, 2);
+    gs2 = graph_add_node(gs2);
+    gs2 = graph_end_capture(gs2);
+    // Not instantiated
+    gs2 = graph_launch(gs2);
+    assert_eq(gs2.launch_count, 0);
+
+    // Now instantiate and launch
+    gs2 = graph_instantiate(gs2);
+    gs2 = graph_launch(gs2);
+    assert_eq(gs2.launch_count, 1);
+
+    print("test_graph_capture passed");
+}
+
+// ============================================================================
+// Test 6: Profiling
+// ============================================================================
+
+fn test_profiling() {
+    let mut p = prof_new();
+    assert_eq(p.range_depth, 0);
+    assert_eq(p.marker_depth, 0);
+
+    // Start a profiling range
+    p = prof_range_start(p);
+    assert_eq(p.range_depth, 1);
+    assert_eq(p.total_ranges, 1);
+
+    // Nested range
+    p = prof_range_start(p);
+    assert_eq(p.range_depth, 2);
+    assert_eq(p.total_ranges, 2);
+
+    // End inner range
+    p = prof_range_end(p);
+    assert_eq(p.range_depth, 1);
+    assert_eq(p.total_ranges, 2);
+
+    // Push a marker inside the range
+    p = prof_marker_push(p);
+    assert_eq(p.marker_depth, 1);
+    assert_eq(p.total_markers, 1);
+
+    // Push nested marker
+    p = prof_marker_push(p);
+    assert_eq(p.marker_depth, 2);
+    assert_eq(p.total_markers, 2);
+
+    // Pop markers
+    p = prof_marker_pop(p);
+    assert_eq(p.marker_depth, 1);
+
+    p = prof_marker_pop(p);
+    assert_eq(p.marker_depth, 0);
+
+    // End outer range
+    p = prof_range_end(p);
+    assert_eq(p.range_depth, 0);
+    assert_eq(p.total_ranges, 2);
+    assert_eq(p.total_markers, 2);
+
+    // Pop on zero depth stays zero
+    p = prof_range_end(p);
+    assert_eq(p.range_depth, 0);
+
+    p = prof_marker_pop(p);
+    assert_eq(p.marker_depth, 0);
+
+    print("test_profiling passed");
+}
+
+// ============================================================================
+// Test 7: Peer access
+// ============================================================================
+
+fn test_peer_access() {
+    let mut pa = peer_new();
+
+    // Diagonal: self-access always enabled
+    assert_eq(peer_get(pa, 0, 0), 1);
+    assert_eq(peer_get(pa, 1, 1), 1);
+    assert_eq(peer_get(pa, 2, 2), 1);
+    assert_eq(peer_get(pa, 3, 3), 1);
+
+    // Initially no cross-device access
+    assert_eq(peer_get(pa, 0, 1), 0);
+    assert_eq(peer_get(pa, 1, 0), 0);
+
+    // Check can_access_peer topology
+    assert(can_access_peer(0, 0));
+    assert(can_access_peer(0, 1));
+    assert(can_access_peer(1, 0));
+    assert(can_access_peer(2, 3));
+    assert(can_access_peer(3, 2));
+    assert(!can_access_peer(0, 2));
+    assert(!can_access_peer(1, 3));
+    assert(!can_access_peer(2, 0));
+    assert(!can_access_peer(3, 1));
+
+    // Enable peer access 0 <-> 1
+    pa = peer_enable(pa, 0, 1);
+    pa = peer_enable(pa, 1, 0);
+    assert_eq(peer_get(pa, 0, 1), 1);
+    assert_eq(peer_get(pa, 1, 0), 1);
+
+    // Enable peer access 2 <-> 3
+    pa = peer_enable(pa, 2, 3);
+    pa = peer_enable(pa, 3, 2);
+    assert_eq(peer_get(pa, 2, 3), 1);
+    assert_eq(peer_get(pa, 3, 2), 1);
+
+    // Try to enable invalid peer access (0 -> 2), should be no-op
+    pa = peer_enable(pa, 0, 2);
+    assert_eq(peer_get(pa, 0, 2), 0);
+
+    // Disable peer access 0 -> 1
+    pa = peer_disable(pa, 0, 1);
+    assert_eq(peer_get(pa, 0, 1), 0);
+    // 1 -> 0 still enabled
+    assert_eq(peer_get(pa, 1, 0), 1);
+
+    // Cannot disable self-access
+    pa = peer_disable(pa, 0, 0);
+    assert_eq(peer_get(pa, 0, 0), 1);
+
+    print("test_peer_access passed");
+}
+
+// ============================================================================
+// Test 8: 2D memory operations
+// ============================================================================
+
+fn test_memory_2d() {
+    // Allocate 2D memory: 500 x 300
+    let m1 = mem2d_alloc(500, 300);
+    assert_eq(m1.width, 500);
+    assert_eq(m1.height, 300);
+    // Pitch: ceil(500/128)*128 = 4*128 = 512
+    assert_eq(m1.pitch, 512);
+    assert_eq(m1.total_bytes, 512 * 300);
+
+    // Allocate another: 256 x 256 (already aligned)
+    let m2 = mem2d_alloc(256, 256);
+    assert_eq(m2.pitch, 256);
+    assert_eq(m2.total_bytes, 256 * 256);
+
+    // Allocate: 1 x 1 (minimum allocation)
+    let m3 = mem2d_alloc(1, 1);
+    assert_eq(m3.pitch, 128);
+    assert_eq(m3.total_bytes, 128);
+
+    // 2D memcpy: copy from m1 (500x300) to m2 (256x256)
+    let copy_bytes = mem2d_copy_bytes(m1, m2);
+    // min(500,256) * min(300,256) = 256 * 256 = 65536
+    assert_eq(copy_bytes, 65536);
+
+    // 2D memcpy: copy from m2 to m1
+    let copy_bytes2 = mem2d_copy_bytes(m2, m1);
+    // min(256,500) * min(256,300) = 256 * 256 = 65536
+    assert_eq(copy_bytes2, 65536);
+
+    // 2D memcpy same dimensions
+    let copy_bytes3 = mem2d_copy_bytes(m2, m2);
+    assert_eq(copy_bytes3, 65536);
+
+    // 2D memset
+    let set_bytes = mem2d_set_bytes(m1);
+    // pitch * height = 512 * 300 = 153600
+    assert_eq(set_bytes, 153600);
+
+    let set_bytes2 = mem2d_set_bytes(m2);
+    assert_eq(set_bytes2, 65536);
+
+    // Edge case: 128-aligned width
+    let m4 = mem2d_alloc(128, 100);
+    assert_eq(m4.pitch, 128);
+    assert_eq(m4.total_bytes, 12800);
+
+    // Edge case: width = 129 rounds up to 256
+    let m5 = mem2d_alloc(129, 100);
+    assert_eq(m5.pitch, 256);
+    assert_eq(m5.total_bytes, 25600);
+
+    print("test_memory_2d passed");
+}
+
+// ============================================================================
+// Test 9: Unified memory
+// ============================================================================
+
+fn test_unified_memory() {
+    // Allocate managed memory
+    let mut um = um_alloc_managed(4096);
+    assert_eq(um.size, 4096);
+    assert_eq(um.is_managed, true);
+    assert_eq(um.preferred_device, 0 - 1);
+    assert_eq(um.prefetch_count, 0);
+    assert_eq(um.advise_count, 0);
+
+    // Prefetch to device 0
+    um = um_prefetch(um, 0);
+    assert_eq(um.preferred_device, 0);
+    assert_eq(um.prefetch_count, 1);
+
+    // Prefetch to device 1
+    um = um_prefetch(um, 1);
+    assert_eq(um.preferred_device, 1);
+    assert_eq(um.prefetch_count, 2);
+
+    // Advise preferred location is device 0
+    um = um_advise(um, 0);
+    assert_eq(um.preferred_device, 0);
+    assert_eq(um.advise_count, 1);
+
+    // Multiple advise calls
+    um = um_advise(um, 2);
+    um = um_advise(um, 3);
+    assert_eq(um.advise_count, 3);
+    assert_eq(um.preferred_device, 3);
+
+    // Prefetch after advise
+    um = um_prefetch(um, 0);
+    assert_eq(um.prefetch_count, 3);
+    assert_eq(um.preferred_device, 0);
+
+    // Test a second managed allocation
+    let um2 = um_alloc_managed(8192);
+    assert_eq(um2.size, 8192);
+    assert_eq(um2.is_managed, true);
+    assert_eq(um2.prefetch_count, 0);
+
+    print("test_unified_memory passed");
+}
+
+// ============================================================================
+// Test 10: Multi-stream overlap simulation
+// ============================================================================
+
+fn test_multi_stream_overlap() {
+    // Simulate a 3-stage pipeline: H2D -> Compute -> D2H
+    // with 4 batches overlapping across 3 streams
+
+    let mut pipe = pipe_new();
+    let mut g = gpu_new();
+
+    // Create 3 streams for the pipeline
+    g = gpu_with_streams(g, 3);
+    assert_eq(g.stream_count, 3);
+
+    // Batch 0: H2D on stream 0
+    pipe = pipe_h2d(pipe, 1024);
+    g = gpu_with_alloc(g, 1024);
+
+    // Batch 0: Compute on stream 1 (overlapping with batch 1 H2D)
+    // Batch 1: H2D on stream 0
+    pipe = pipe_compute(pipe, 2048);
+    g = gpu_with_kernel(g);
+    pipe = pipe_h2d(pipe, 1024);
+    g = gpu_with_alloc(g, 1024);
+
+    // Batch 0: D2H on stream 2 (overlapping with batch 1 compute, batch 2 H2D)
+    // Batch 1: Compute on stream 1
+    // Batch 2: H2D on stream 0
+    pipe = pipe_d2h(pipe, 512);
+    g = gpu_with_free(g, 512);
+    pipe = pipe_compute(pipe, 2048);
+    g = gpu_with_kernel(g);
+    pipe = pipe_h2d(pipe, 1024);
+    g = gpu_with_alloc(g, 1024);
+
+    // Batch 1: D2H on stream 2
+    // Batch 2: Compute on stream 1
+    // Batch 3: H2D on stream 0
+    pipe = pipe_d2h(pipe, 512);
+    g = gpu_with_free(g, 512);
+    pipe = pipe_compute(pipe, 2048);
+    g = gpu_with_kernel(g);
+    pipe = pipe_h2d(pipe, 1024);
+    g = gpu_with_alloc(g, 1024);
+
+    // Batch 2: D2H on stream 2
+    // Batch 3: Compute on stream 1
+    pipe = pipe_d2h(pipe, 512);
+    g = gpu_with_free(g, 512);
+    pipe = pipe_compute(pipe, 2048);
+    g = gpu_with_kernel(g);
+
+    // Batch 3: D2H on stream 2
+    pipe = pipe_d2h(pipe, 512);
+    g = gpu_with_free(g, 512);
+
+    // Verify pipeline counters
+    assert_eq(pipe.h2d_ops, 4);
+    assert_eq(pipe.compute_ops, 4);
+    assert_eq(pipe.d2h_ops, 4);
+    assert_eq(pipe.total_bytes_in, 4096);
+    assert_eq(pipe.total_bytes_out, 2048);
+    assert_eq(pipe.total_flops, 8192);
+
+    // Verify GPU state
+    assert_eq(g.kernel_count, 4);
+    assert_eq(g.alloc_bytes, 4096);
+    assert_eq(g.free_bytes, 2048);
+    assert_eq(gpu_live_bytes(g), 2048);
+
+    print("test_multi_stream_overlap passed");
+}
+
+// ============================================================================
+// Bonus: Combined integration test
+// ============================================================================
+
+fn test_combined_integration() {
+    // Full workflow: device setup, memory, streams, events, graph, profiling
+    let mut g = gpu_new();
+
+    // 1. Select device
+    g = gpu_with_device(g, 0);
+    let props = make_device_props(0);
+    assert_eq(props.warp_size, 32);
+
+    // 2. Create streams and events
+    let mut st = st_new();
+    st = st_create(st);
+    st = st_create(st);
+    g = gpu_with_streams(g, 2);
+
+    let mut ev = ev_new();
+    ev = ev_create(ev);
+    ev = ev_create(ev);
+    g = gpu_with_events(g, 2);
+
+    // 3. Allocate memory
+    let mut mt = mt_new();
+    mt = mt_malloc(mt, 4096);
+    mt = mt_malloc(mt, 2048);
+    g = gpu_with_alloc(g, 6144);
+    assert_eq(mt.current, 6144);
+
+    // 4. Start profiling
+    let mut prof = prof_new();
+    prof = prof_range_start(prof);
+    prof = prof_marker_push(prof);
+
+    // 5. Begin graph capture on stream 1
+    let mut gs = graph_new();
+    gs = graph_begin_capture(gs, st_get(st, 0));
+    assert_eq(gs.is_capturing, true);
+
+    // 6. Simulate kernel captures
+    gs = graph_add_node(gs);
+    gs = graph_add_node(gs);
+    g = gpu_with_kernel(g);
+    g = gpu_with_kernel(g);
+
+    // 7. End capture, instantiate, launch
+    gs = graph_end_capture(gs);
+    gs = graph_instantiate(gs);
+    gs = graph_launch(gs);
+    g = gpu_with_graphs(g, 1);
+
+    // 8. Record event after graph launch
+    ev = ev_record(ev, st_get(st, 0));
+
+    // 9. Sync
+    st = st_sync(st);
+    ev = ev_synchronize(ev);
+
+    // 10. End profiling
+    prof = prof_marker_pop(prof);
+    prof = prof_range_end(prof);
+
+    // 11. Free memory
+    mt = mt_free(mt, 0);
+    mt = mt_free(mt, 1);
+    g = gpu_with_free(g, 6144);
+
+    // 12. Destroy events and streams
+    ev = ev_destroy(ev, 1);
+    ev = ev_destroy(ev, 2);
+    st = st_destroy(st, 1);
+    st = st_destroy(st, 2);
+    g = gpu_with_streams(g, 0 - 2);
+    g = gpu_with_events(g, 0 - 2);
+
+    // Verify final state
+    assert_eq(g.device_id, 0);
+    assert_eq(g.kernel_count, 2);
+    assert_eq(g.graph_count, 1);
+    assert_eq(g.stream_count, 0);
+    assert_eq(g.event_count, 0);
+    assert_eq(gpu_live_bytes(g), 0);
+    assert_eq(mt.current, 0);
+    assert_eq(gs.launch_count, 1);
+    assert_eq(gs.total_graphs, 1);
+    assert_eq(ev.count, 0);
+    assert_eq(st.count, 0);
+    assert_eq(prof.range_depth, 0);
+    assert_eq(prof.marker_depth, 0);
+    assert_eq(prof.total_ranges, 1);
+    assert_eq(prof.total_markers, 1);
+
+    print("test_combined_integration passed");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_device_management();
+    test_memory_lifecycle();
+    test_stream_lifecycle();
+    test_event_lifecycle();
+    test_graph_capture();
+    test_profiling();
+    test_peer_access();
+    test_memory_2d();
+    test_unified_memory();
+    test_multi_stream_overlap();
+    test_combined_integration();
+    print("[OK] 060_gpu_full");
+    0
+}

@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, match, arrow, error
+// @description: Match arm missing => arrow between pattern and body
+// @expected-error: E087
+
+fn test(x: Int) {
+    match x {
+        1 "one",  // Missing =>
+        _ => "other"
+    }
+}

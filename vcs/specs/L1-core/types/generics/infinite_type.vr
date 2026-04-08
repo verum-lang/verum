@@ -1,0 +1,139 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, infinite-type, recursive-types
+
+/// Test for valid recursive types with proper indirection.
+/// Infinite types (without Heap/Maybe indirection) are commented out
+/// and will be tested separately when infinite type detection is implemented.
+
+// Direct recursive type without indirection - SHOULD FAIL
+// This creates an infinite type: Node contains Node contains Node...
+// type InfiniteNode<T> is {
+//     value: T,
+//     next: InfiniteNode<T>,  // ERROR: Infinite type
+// };
+
+// Correct version: use Heap for indirection
+type Node<T> is {
+    value: T,
+    next: Maybe<Heap<Node<T>>>,  // OK: Heap provides indirection
+};
+
+// Another infinite type example - SHOULD FAIL
+// type InfiniteTree<T> is {
+//     value: T,
+//     left: InfiniteTree<T>,   // ERROR: Infinite type
+//     right: InfiniteTree<T>,  // ERROR: Infinite type
+// };
+
+// Correct version: use Heap for children
+type Tree<T> is {
+    value: T,
+    left: Maybe<Heap<Tree<T>>>,
+    right: Maybe<Heap<Tree<T>>>,
+};
+
+// Mutual recursion without indirection - SHOULD FAIL
+// type A is { b: B };  // ERROR: A and B are mutually infinitely recursive
+// type B is { a: A };
+
+// Correct version: break cycle with Heap
+type NodeA is {
+    data: Int,
+    link: Maybe<Heap<NodeB>>,
+};
+
+type NodeB is {
+    data: Text,
+    link: Maybe<Heap<NodeA>>,
+};
+
+// Infinite type through generic instantiation - SHOULD FAIL
+// type Wrapper<T> is { inner: Wrapper<Wrapper<T>> };  // ERROR: Infinite nesting
+
+// Function type that would create infinite type - SHOULD FAIL
+// The return type references itself without indirection
+// fn infinite_fn() -> fn() -> fn() -> ... { }  // ERROR
+
+// Correct recursive function type uses trait objects or Heap
+type RecursiveFn is {
+    call: Heap<fn() -> Maybe<RecursiveFn>>,
+};
+
+// Enum variants can also create infinite types - SHOULD FAIL
+// type InfiniteEnum<T> is
+//     | Leaf(T)
+//     | Branch(InfiniteEnum<T>, InfiniteEnum<T>);  // ERROR: Infinite size
+
+// Correct version with Heap
+type FiniteEnum<T> is
+    | Leaf(T)
+    | Branch(Heap<FiniteEnum<T>>, Heap<FiniteEnum<T>>);
+
+// Self-referential tuple - SHOULD FAIL
+// type InfiniteTuple is (Int, InfiniteTuple);  // ERROR
+
+// Array with self type - SHOULD FAIL
+// type InfiniteArray is [InfiniteArray; 10];  // ERROR
+
+// Type alias that expands infinitely - SHOULD FAIL
+// type Expand<T> = (T, Expand<T>);  // ERROR: Infinite expansion
+
+// Nested generic that expands - SHOULD FAIL
+// type Nest<T> = Maybe<Nest<Maybe<T>>>;  // ERROR: Infinite nesting
+
+fn main() {
+    // Correct usage of finite recursive types
+
+    // Building a linked list
+    let list: Node<Int> = Node {
+        value: 1,
+        next: Some(Heap.new(Node {
+            value: 2,
+            next: Some(Heap.new(Node {
+                value: 3,
+                next: None,
+            })),
+        })),
+    };
+    assert(list.value == 1);
+
+    // Building a binary tree
+    let tree: Tree<Int> = Tree {
+        value: 10,
+        left: Some(Heap.new(Tree {
+            value: 5,
+            left: None,
+            right: None,
+        })),
+        right: Some(Heap.new(Tree {
+            value: 15,
+            left: None,
+            right: None,
+        })),
+    };
+    assert(tree.value == 10);
+
+    // Using mutual recursion
+    let node_a: NodeA = NodeA {
+        data: 42,
+        link: Some(Heap.new(NodeB {
+            data: "hello",
+            link: None,
+        })),
+    };
+    assert(node_a.data == 42);
+
+    // Using finite enum
+    let enum_tree: FiniteEnum<Int> = FiniteEnum.Branch(
+        Heap.new(FiniteEnum.Leaf(1)),
+        Heap.new(FiniteEnum.Branch(
+            Heap.new(FiniteEnum.Leaf(2)),
+            Heap.new(FiniteEnum.Leaf(3)),
+        )),
+    );
+
+    // The commented-out types above should all be rejected by the type checker
+    // with errors indicating infinite type / recursive type without indirection
+}

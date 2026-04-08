@@ -1,0 +1,67 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, matrix, linear-algebra
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential test: matrix operations (interpreter vs AOT)
+
+type Mat2 is { m00: Int, m01: Int, m10: Int, m11: Int };
+
+fn mat2_mul(a: Mat2, b: Mat2) -> Mat2 {
+    Mat2 {
+        m00: a.m00 * b.m00 + a.m01 * b.m10,
+        m01: a.m00 * b.m01 + a.m01 * b.m11,
+        m10: a.m10 * b.m00 + a.m11 * b.m10,
+        m11: a.m10 * b.m01 + a.m11 * b.m11
+    }
+}
+
+fn mat2_det(a: Mat2) -> Int {
+    a.m00 * a.m11 - a.m01 * a.m10
+}
+
+fn mat2_trace(a: Mat2) -> Int {
+    a.m00 + a.m11
+}
+
+fn mat2_add(a: Mat2, b: Mat2) -> Mat2 {
+    Mat2 {
+        m00: a.m00 + b.m00, m01: a.m01 + b.m01,
+        m10: a.m10 + b.m10, m11: a.m11 + b.m11
+    }
+}
+
+fn main() -> Int {
+    let id = Mat2 { m00: 1, m01: 0, m10: 0, m11: 1 };
+    let a = Mat2 { m00: 2, m01: 3, m10: 1, m11: 4 };
+
+    // A * I = A
+    let ai = mat2_mul(a, id);
+    assert_eq(ai.m00, 2);
+    assert_eq(ai.m01, 3);
+    assert_eq(ai.m10, 1);
+    assert_eq(ai.m11, 4);
+
+    // det(A) = 2*4 - 3*1 = 5
+    assert_eq(mat2_det(a), 5);
+    assert_eq(mat2_det(id), 1);
+
+    // trace(A) = 2 + 4 = 6
+    assert_eq(mat2_trace(a), 6);
+
+    // A * A
+    let aa = mat2_mul(a, a);
+    assert_eq(aa.m00, 7);   // 2*2+3*1
+    assert_eq(aa.m01, 18);  // 2*3+3*4
+    assert_eq(aa.m10, 6);   // 1*2+4*1
+    assert_eq(aa.m11, 19);  // 1*3+4*4
+
+    // det(A*A) = det(A)^2
+    assert_eq(mat2_det(aa), 25);
+
+    print("DIFF_OK: matrix");
+    0
+}

@@ -1,0 +1,68 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, binding, mut, error
+// @description: Test invalid mut modifier usage in patterns
+// @expected-error: E073
+
+type Option<T> is None | Some(T);
+type Point is { x: Int, y: Int };
+
+fn test_mut_alone() {
+    let value = 42;
+
+    // Invalid: 'mut' without identifier
+    match value {
+        mut => print("mut alone"),
+        _ => print("other"),
+    }
+}
+
+fn test_mut_with_literal() {
+    let value = 42;
+
+    // Invalid: mut cannot be used with literal
+    match value {
+        mut 42 => print("mut literal"),
+        _ => print("other"),
+    }
+}
+
+fn test_mut_with_underscore() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: mut with wildcard
+    match opt {
+        Some(mut _) => print("mut wildcard"),
+        None => print("none"),
+    }
+}
+
+fn test_double_mut() {
+    let value = 42;
+
+    // Invalid: double mut modifier
+    match value {
+        mut mut x => print("double mut"),
+        _ => print("other"),
+    }
+}
+
+fn test_mut_ref_order() {
+    let value = 42;
+
+    // Invalid: mut before ref (should be ref mut)
+    match value {
+        mut ref x => print("wrong order"),
+        _ => print("other"),
+    }
+}
+
+fn test_mut_in_wrong_position() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: mut after identifier
+    match p {
+        Point { x mut } => print("wrong mut position"),
+        _ => print("other"),
+    }
+}

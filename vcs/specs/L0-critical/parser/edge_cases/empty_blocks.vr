@@ -1,0 +1,177 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, empty, blocks, minimal
+
+// Helper types
+type Empty is { };
+type EmptyProtocol is protocol { };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+type Map<K, V> is { entries: List<(K, V)> };
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+type SomeType is { value: Int };
+type Value is A | B;
+
+// Helper functions
+fn condition() -> Bool { true }
+fn cond() -> Bool { true }
+fn value() -> Value { Value.A }
+fn x() -> Value { Value.A }
+
+// Empty function body
+fn empty_fn() { }
+
+// Empty function with return type
+fn empty_with_return() -> () { }
+
+fn test_empty_block_expression() {
+    // Empty block expression
+    let unit = { };
+}
+
+fn test_empty_if() {
+    // Empty block in if
+    if condition() { }
+}
+
+fn test_empty_if_else_branches() {
+    // Empty if-else branches
+    if condition() {
+    } else {
+    }
+}
+
+fn test_empty_match_arm_body() {
+    // Empty match arm body
+    match value() {
+        Value.A => { },
+        Value.B => { },
+    };
+}
+
+fn test_empty_loop_body() {
+    // Empty loop body
+    loop { break; }
+}
+
+fn test_empty_for_loop_body() {
+    // Empty for loop body
+    for i in 0..0 { }
+}
+
+fn test_empty_while_loop_body() {
+    // Empty while loop body
+    while false { }
+}
+
+fn test_empty_closure_body() {
+    // Empty closure body
+    let empty_closure = || { };
+}
+
+fn test_empty_async_block() {
+    // Empty async block
+    let future = async { };
+}
+
+fn test_empty_try_block() {
+    // Empty try block
+    try { } recover { _ => {} };
+}
+
+// Empty implement block
+implement Empty { }
+
+// Empty module (if supported)
+module empty { }
+
+fn test_empty_unit_type() {
+    // Empty tuple (unit type)
+    let unit_value: () = ();
+}
+
+fn test_empty_collections() {
+    // Empty array
+    let empty_array: List<Int> = Nil;
+
+    // Empty map
+    let empty_map: Map<Text, Int> = Map { entries: Nil };
+
+    // Empty string
+    let empty_string = "";
+}
+
+fn test_minimal_let_binding() {
+    // Minimal let binding
+    let _ = ();
+}
+
+fn test_empty_pattern_block() {
+    // Empty pattern block
+    let () = ();
+}
+
+// Nested empty blocks
+fn nested_empty() {
+    {
+        {
+            {
+            }
+        }
+    }
+}
+
+// Empty blocks with comments
+fn with_comments() {
+    // This block intentionally left empty
+}
+
+// Empty async function
+async fn empty_async() { }
+
+// Empty unsafe block
+fn with_empty_unsafe() {
+    unsafe { }
+}
+
+// Empty generic function
+fn empty_generic<T>() { }
+
+// Empty method
+implement SomeType {
+    fn empty_method(&self) { }
+}
+
+fn test_empty_conditional_expression() {
+    // Empty conditional expression branches
+    let result = if cond() { () } else { () };
+}
+
+fn test_empty_match_as_expression() {
+    // Empty match as expression
+    let matched: () = match x() {
+        _ => { },
+    };
+}
+
+// Empty labeled loop
+fn labeled_empty() {
+    'label: loop { break 'label; }
+}
+
+// Empty with semicolon variations
+fn semicolon_variations() {
+    { };
+    { }
+    ;
+}
+
+// Empty protocol implementation
+implement Display for Empty {
+    fn display(&self) -> Text { "" }
+}
+
+// Minimal program structure
+fn main() { }

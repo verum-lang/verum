@@ -1,0 +1,12 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: debug, minimal
+
+mount core.intrinsics.runtime.time.{monotonic_nanos};
+
+fn main() {
+    // Test intrinsic directly
+    let t = monotonic_nanos();
+    print("Intrinsic test passed!");
+}

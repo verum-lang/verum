@@ -1,0 +1,58 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, basic
+// @description: Test only basic float math intrinsics
+
+module test.stdlib.sys.intrinsics.basic_math_only_test;
+
+mount core.intrinsics.{
+    sqrt_f64, abs_f64, floor_f64, ceil_f64, round_f64, trunc_f64,
+};
+
+const EPSILON_F64: Float64 = 1e-10;
+
+fn approx_eq_f64(a: Float64, b: Float64, epsilon: Float64) -> Bool {
+    let diff = abs_f64(a - b);
+    diff < epsilon
+}
+
+fn main() {
+    // sqrt
+    assert(approx_eq_f64(sqrt_f64(0.0), 0.0, EPSILON_F64));
+    assert(approx_eq_f64(sqrt_f64(1.0), 1.0, EPSILON_F64));
+    assert(approx_eq_f64(sqrt_f64(4.0), 2.0, EPSILON_F64));
+    assert(approx_eq_f64(sqrt_f64(100.0), 10.0, EPSILON_F64));
+
+    // abs
+    assert(abs_f64(5.0) == 5.0);
+    assert(abs_f64(-5.0) == 5.0);
+    assert(abs_f64(0.0) == 0.0);
+    assert(abs_f64(-0.0) == 0.0);
+
+    // floor
+    assert(floor_f64(3.7) == 3.0);
+    assert(floor_f64(3.0) == 3.0);
+    assert(floor_f64(-3.7) == -4.0);
+    assert(floor_f64(-3.0) == -3.0);
+
+    // ceil
+    assert(ceil_f64(3.2) == 4.0);
+    assert(ceil_f64(3.0) == 3.0);
+    assert(ceil_f64(-3.2) == -3.0);
+    assert(ceil_f64(-3.0) == -3.0);
+
+    // round
+    assert(round_f64(3.4) == 3.0);
+    assert(round_f64(3.5) == 4.0);
+    assert(round_f64(3.6) == 4.0);
+    assert(round_f64(-3.4) == -3.0);
+    assert(round_f64(-3.5) == -4.0);
+
+    // trunc
+    assert(trunc_f64(3.7) == 3.0);
+    assert(trunc_f64(-3.7) == -3.0);
+    assert(trunc_f64(3.0) == 3.0);
+
+    print("All basic math tests passed!");
+}

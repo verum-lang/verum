@@ -1,0 +1,81 @@
+// @test: verify-pass
+// @level: L1
+// @tags: dependent-types, refinement, arithmetic, smt
+
+/// Refinement verification through arithmetic -- the SMT solver
+/// should verify that arithmetic operations preserve or establish
+/// refinement constraints.
+
+type Natural is Int{>= 0};
+type Positive is Int{> 0};
+
+// Addition preserves non-negativity
+fn add_naturals(a: Natural, b: Natural) -> Natural {
+    a + b
+}
+
+// Multiplication preserves positivity
+fn mul_positive(a: Positive, b: Positive) -> Positive {
+    a * b
+}
+
+// Successor always yields positive
+fn succ(n: Natural) -> Positive {
+    n + 1
+}
+
+// Max of naturals is natural
+fn max_nat(a: Natural, b: Natural) -> Natural {
+    if a >= b { a } else { b }
+}
+
+// Min of positives is positive
+fn min_pos(a: Positive, b: Positive) -> Positive {
+    if a <= b { a } else { b }
+}
+
+// Average of two naturals is natural (integer division)
+fn avg_nat(a: Natural, b: Natural) -> Natural {
+    (a + b) / 2
+}
+
+// Power of positive is positive
+fn pow_pos(base: Positive, exp: Natural) -> Positive {
+    if exp == 0 { 1 }
+    else { base * pow_pos(base, exp - 1) }
+}
+
+// Absolute difference of naturals is natural
+fn abs_diff(a: Natural, b: Natural) -> Natural {
+    if a >= b { a - b } else { b - a }
+}
+
+// Double a positive stays positive
+fn double(x: Positive) -> Positive
+    where ensures result == x * 2
+{
+    x + x
+}
+
+// Sum of list of naturals is natural
+fn sum_nats(xs: List<Natural>) -> Natural {
+    let mut total: Natural = 0;
+    for x in xs {
+        total = total + x;
+    }
+    total
+}
+
+fn main() {
+    assert(add_naturals(3, 5) == 8);
+    assert(mul_positive(3, 4) == 12);
+    assert(succ(0) == 1);
+    assert(max_nat(3, 7) == 7);
+    assert(min_pos(3, 7) == 3);
+    assert(avg_nat(4, 6) == 5);
+    assert(pow_pos(2, 10) == 1024);
+    assert(abs_diff(10, 3) == 7);
+    assert(abs_diff(3, 10) == 7);
+    assert(double(5) == 10);
+    assert(sum_nats([1, 2, 3, 4, 5]) == 15);
+}

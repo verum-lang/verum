@@ -1,0 +1,20 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, dangling-reference, iterator, cbgr
+// @description: Tests that CBGR detects iterator invalidation at runtime
+
+fn main() {
+    let mut data = [1, 2, 3, 4, 5];
+
+    // Create iterator (holds reference to collection)
+    let iter = data.iter();
+
+    // Iterate while modifying
+    for (i, elem) in iter.enumerate() {
+        if elem == 3 {
+            // Modifying collection invalidates iterator
+            data.push(100);  // CBGR detects invalidation
+        }
+    }
+}

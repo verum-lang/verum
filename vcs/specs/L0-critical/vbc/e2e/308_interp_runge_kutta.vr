@@ -1,0 +1,285 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, ode, runge-kutta
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: RK4 (4th-order Runge-Kutta) numerical ODE solver.
+// Uses integer-scaled arithmetic (scale 1000). Tests various ODEs with
+// known analytical solutions. Reduced iteration count for interpreter speed.
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn assert_near(actual: Int, expected: Int, tolerance: Int) {
+    let diff = abs_val(actual - expected);
+    assert(diff <= tolerance);
+}
+
+// =============================================================================
+// ODE 1: dy/dx = 1 (constant)
+// Solution: y = x + C
+// =============================================================================
+
+fn rk4_const(x_s: Int, y_s: Int, h_s: Int) -> Int {
+    // f(x,y) = 1000 (constant, scaled)
+    let k1 = h_s;
+    let k2 = h_s;
+    let k3 = h_s;
+    let k4 = h_s;
+    y_s + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+}
+
+fn test_ode_constant() {
+    // dy/dx = 1, y(0) = 0, h = 1000 (1.0), 3 steps
+    let mut y = 0;
+    y = rk4_const(0, y, 1000);
+    assert_eq(y, 1000);
+    y = rk4_const(1000, y, 1000);
+    assert_eq(y, 2000);
+    y = rk4_const(2000, y, 1000);
+    assert_eq(y, 3000);
+}
+
+// =============================================================================
+// ODE 2: dy/dx = 2x
+// Solution: y = x^2, y(0) = 0
+// f_scaled = 2 * x_s (returns value in scaled units)
+// =============================================================================
+
+fn rk4_linear(x_s: Int, y_s: Int, h_s: Int) -> Int {
+    // k1 = h * f(x) = h * 2x / 1000
+    let k1 = (h_s * 2 * x_s) / 1000;
+    // k2 = h * f(x + h/2) = h * 2*(x + h/2) / 1000
+    let k2 = (h_s * 2 * (x_s + h_s / 2)) / 1000;
+    let k3 = k2; // Same as k2 since f doesn't depend on y
+    // k4 = h * f(x + h) = h * 2*(x + h) / 1000
+    let k4 = (h_s * 2 * (x_s + h_s)) / 1000;
+    y_s + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+}
+
+fn test_ode_linear() {
+    // dy/dx = 2x, y(0) = 0, h = 500 (0.5)
+    // y = x^2 => y(0.5)=0.25, y(1.0)=1, y(1.5)=2.25, y(2.0)=4
+    let h = 500;
+    let mut x = 0;
+    let mut y = 0;
+
+    y = rk4_linear(x, y, h);
+    x = x + h;
+    assert_near(y, 250, 10); // y(0.5) = 0.25 * 1000
+
+    y = rk4_linear(x, y, h);
+    x = x + h;
+    assert_near(y, 1000, 10); // y(1.0) = 1.0 * 1000
+
+    y = rk4_linear(x, y, h);
+    x = x + h;
+    assert_near(y, 2250, 10); // y(1.5) = 2.25 * 1000
+
+    y = rk4_linear(x, y, h);
+    x = x + h;
+    assert_near(y, 4000, 10); // y(2.0) = 4.0 * 1000
+}
+
+// =============================================================================
+// ODE 3: dy/dx = -y (exponential decay)
+// Solution: y = y0 * e^(-x), y(0) = 1000
+// Uses scale: y_s = y * 1000, so y(0)_s = 1000000
+// =============================================================================
+
+fn rk4_decay(x_s: Int, y_s: Int, h_s: Int) -> Int {
+    // f(x,y) = -y
+    let k1 = (h_s * (-y_s)) / 1000;
+    let k2 = (h_s * (-(y_s + k1 / 2))) / 1000;
+    let k3 = (h_s * (-(y_s + k2 / 2))) / 1000;
+    let k4 = (h_s * (-(y_s + k3))) / 1000;
+    y_s + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+}
+
+fn test_ode_decay() {
+    // dy/dx = -y, y(0) = 1000 (scaled 1000000), h = 500 (0.5), 2 steps to x=1
+    let h = 500;
+    let mut y = 1000000;
+
+    y = rk4_decay(0, y, h);
+    // y(0.5) = 1000 * e^(-0.5) ~ 1000 * 0.6065 = 606500
+    assert_near(y, 606530, 5000);
+
+    y = rk4_decay(500, y, h);
+    // y(1.0) = 1000 * e^(-1) ~ 367879
+    assert_near(y, 367879, 5000);
+}
+
+fn test_decay_monotone() {
+    let h = 500;
+    let mut y = 1000000;
+    let mut prev_y = y;
+
+    y = rk4_decay(0, y, h);
+    assert(y < prev_y);
+    assert(y > 0);
+    prev_y = y;
+
+    y = rk4_decay(500, y, h);
+    assert(y < prev_y);
+    assert(y > 0);
+    prev_y = y;
+
+    y = rk4_decay(1000, y, h);
+    assert(y < prev_y);
+    assert(y > 0);
+}
+
+// =============================================================================
+// ODE 4: dy/dx = y (exponential growth)
+// Solution: y = y0 * e^x
+// =============================================================================
+
+fn rk4_growth(x_s: Int, y_s: Int, h_s: Int) -> Int {
+    let k1 = (h_s * y_s) / 1000;
+    let k2 = (h_s * (y_s + k1 / 2)) / 1000;
+    let k3 = (h_s * (y_s + k2 / 2)) / 1000;
+    let k4 = (h_s * (y_s + k3)) / 1000;
+    y_s + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+}
+
+fn test_ode_growth() {
+    // dy/dx = y, y(0) = 1000 (scaled 1000000), h = 500, 2 steps to x=1
+    let h = 500;
+    let mut y = 1000000;
+
+    y = rk4_growth(0, y, h);
+    // y(0.5) = 1000 * e^0.5 ~ 1000 * 1.6487 = 1648721
+    assert_near(y, 1648721, 10000);
+
+    y = rk4_growth(500, y, h);
+    // y(1.0) = 1000 * e ~ 2718281
+    assert_near(y, 2718281, 20000);
+}
+
+fn test_growth_monotone() {
+    let h = 500;
+    let mut y = 1000000;
+    let mut prev_y = y;
+
+    y = rk4_growth(0, y, h);
+    assert(y > prev_y);
+    prev_y = y;
+
+    y = rk4_growth(500, y, h);
+    assert(y > prev_y);
+}
+
+// =============================================================================
+// ODE 5: dy/dx = 3x^2 (cubic)
+// Solution: y = x^3, y(0) = 0
+// RK4 is exact for polynomials up to degree 3
+// =============================================================================
+
+fn rk4_cubic(x_s: Int, y_s: Int, h_s: Int) -> Int {
+    // f(x,y) = 3*x^2 (scaled: 3*x_s^2/1000)
+    let k1 = (h_s * 3 * x_s * x_s) / (1000 * 1000);
+    let xmid = x_s + h_s / 2;
+    let k2 = (h_s * 3 * xmid * xmid) / (1000 * 1000);
+    let k3 = k2;
+    let xend = x_s + h_s;
+    let k4 = (h_s * 3 * xend * xend) / (1000 * 1000);
+    y_s + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+}
+
+fn test_ode_cubic() {
+    // y = x^3, h = 1000 (1.0)
+    let h = 1000;
+    let mut x = 0;
+    let mut y = 0;
+
+    y = rk4_cubic(x, y, h);
+    x = x + h;
+    assert_near(y, 1000, 50); // y(1) = 1
+
+    y = rk4_cubic(x, y, h);
+    x = x + h;
+    assert_near(y, 8000, 100); // y(2) = 8
+
+    y = rk4_cubic(x, y, h);
+    x = x + h;
+    assert_near(y, 27000, 200); // y(3) = 27
+}
+
+// =============================================================================
+// Euler method comparison
+// =============================================================================
+
+fn euler_decay(y_s: Int, h_s: Int) -> Int {
+    y_s + (h_s * (-y_s)) / 1000
+}
+
+fn test_rk4_vs_euler() {
+    // Solve dy/dx = -y, y(0)=1000000, h=500, 2 steps
+    let h = 500;
+
+    let mut y_rk = 1000000;
+    y_rk = rk4_decay(0, y_rk, h);
+    y_rk = rk4_decay(500, y_rk, h);
+
+    let mut y_eu = 1000000;
+    y_eu = euler_decay(y_eu, h);
+    y_eu = euler_decay(y_eu, h);
+
+    // Exact: 367879
+    let exact = 367879;
+    let rk_err = abs_val(y_rk - exact);
+    let eu_err = abs_val(y_eu - exact);
+
+    // RK4 should be more accurate
+    assert(rk_err < eu_err);
+}
+
+// =============================================================================
+// RK4 order verification: halving h should reduce error by ~16x
+// =============================================================================
+
+fn test_rk4_order() {
+    // dy/dx = -y, y(0) = 1000000, exact y(1) = 367879
+
+    // 2 steps of h=500
+    let mut y2 = 1000000;
+    y2 = rk4_decay(0, y2, 500);
+    y2 = rk4_decay(500, y2, 500);
+    let err2 = abs_val(y2 - 367879);
+
+    // 1 step of h=1000
+    let mut y1 = 1000000;
+    y1 = rk4_decay(0, y1, 1000);
+    let err1 = abs_val(y1 - 367879);
+
+    // With RK4 (4th order), err1 / err2 should be ~ 16
+    // Allow wide tolerance since we're comparing integers
+    assert(err2 < err1); // More steps = more accurate
+    assert(err2 * 4 < err1); // At least 4x improvement
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_ode_constant();
+    test_ode_linear();
+    test_ode_decay();
+    test_decay_monotone();
+    test_ode_growth();
+    test_growth_monotone();
+    test_ode_cubic();
+    test_rk4_vs_euler();
+    test_rk4_order();
+    print("[OK] 308_interp_runge_kutta");
+    0
+}

@@ -1,0 +1,207 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, number-theory, sequences
+// @timeout: 30000
+
+// Milestone 610: Number sequences and series
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Triangular numbers: T(n) = n*(n+1)/2
+fn triangular(n: Int) -> Int { n * (n + 1) / 2 }
+
+// Pentagonal numbers: P(n) = n*(3n-1)/2
+fn pentagonal(n: Int) -> Int { n * (3 * n - 1) / 2 }
+
+// Hexagonal numbers: H(n) = n*(2n-1)
+fn hexagonal(n: Int) -> Int { n * (2 * n - 1) }
+
+// Sum of first n natural numbers
+fn sum_n(n: Int) -> Int { n * (n + 1) / 2 }
+
+// Sum of squares: 1^2 + 2^2 + ... + n^2 = n(n+1)(2n+1)/6
+fn sum_squares(n: Int) -> Int { n * (n + 1) * (2 * n + 1) / 6 }
+
+// Sum of cubes: 1^3 + ... + n^3 = (n(n+1)/2)^2
+fn sum_cubes(n: Int) -> Int {
+    let s = sum_n(n);
+    s * s
+}
+
+// Fibonacci
+fn fib(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n { let t = a + b; a = b; b = t; i = i + 1; }
+    a
+}
+
+// Lucas numbers: L(0)=2, L(1)=1, L(n) = L(n-1) + L(n-2)
+fn lucas(n: Int) -> Int {
+    let mut a = 2;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n { let t = a + b; a = b; b = t; i = i + 1; }
+    a
+}
+
+// Pell numbers: P(0)=0, P(1)=1, P(n) = 2*P(n-1) + P(n-2)
+fn pell(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n { let t = 2 * b + a; a = b; b = t; i = i + 1; }
+    a
+}
+
+// Padovan sequence: P(0)=1, P(1)=1, P(2)=1, P(n) = P(n-2) + P(n-3)
+fn padovan(n: Int) -> Int {
+    if n <= 2 { 1 }
+    else {
+        let mut a = 1;
+        let mut b = 1;
+        let mut c = 1;
+        let mut i = 3;
+        while i <= n {
+            let t = a + b;
+            a = b;
+            b = c;
+            c = t;
+            i = i + 1;
+        }
+        c
+    }
+}
+
+// Tribonacci: T(0)=0, T(1)=0, T(2)=1, T(n) = T(n-1)+T(n-2)+T(n-3)
+fn tribonacci(n: Int) -> Int {
+    if n == 0 { 0 }
+    else if n == 1 { 0 }
+    else if n == 2 { 1 }
+    else {
+        let mut a = 0;
+        let mut b = 0;
+        let mut c = 1;
+        let mut i = 3;
+        while i <= n {
+            let t = a + b + c;
+            a = b;
+            b = c;
+            c = t;
+            i = i + 1;
+        }
+        c
+    }
+}
+
+// GCD
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+fn test_figurate() -> Int {
+    // Triangular: 1, 3, 6, 10, 15, 21, 28
+    assert_eq(triangular(1), 1);
+    assert_eq(triangular(4), 10);
+    assert_eq(triangular(7), 28);
+    // Pentagonal: 1, 5, 12, 22, 35
+    assert_eq(pentagonal(1), 1);
+    assert_eq(pentagonal(2), 5);
+    assert_eq(pentagonal(3), 12);
+    assert_eq(pentagonal(5), 35);
+    // Hexagonal: 1, 6, 15, 28, 45
+    assert_eq(hexagonal(1), 1);
+    assert_eq(hexagonal(2), 6);
+    assert_eq(hexagonal(3), 15);
+    // Every hexagonal number is triangular
+    assert_eq(hexagonal(1), triangular(1));
+    assert_eq(hexagonal(2), triangular(3));
+    assert_eq(hexagonal(3), triangular(5));
+    1
+}
+
+fn test_power_sums() -> Int {
+    assert_eq(sum_n(10), 55);
+    assert_eq(sum_n(100), 5050);
+    assert_eq(sum_squares(5), 55);   // 1+4+9+16+25
+    assert_eq(sum_squares(10), 385);
+    assert_eq(sum_cubes(5), 225);    // (15)^2
+    // Nicomachus's theorem: sum of cubes = square of sum
+    assert_eq(sum_cubes(10), sum_n(10) * sum_n(10));
+    1
+}
+
+fn test_fibonacci() -> Int {
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(15), 610);
+    // Consecutive Fibonacci are coprime
+    assert_eq(gcd(fib(10), fib(11)), 1);
+    assert_eq(gcd(fib(7), fib(8)), 1);
+    1
+}
+
+fn test_lucas() -> Int {
+    assert_eq(lucas(0), 2);
+    assert_eq(lucas(1), 1);
+    assert_eq(lucas(2), 3);
+    assert_eq(lucas(5), 11);
+    assert_eq(lucas(8), 47);
+    // L(n) = F(n-1) + F(n+1) for n >= 1
+    assert_eq(lucas(5), fib(4) + fib(6));
+    assert_eq(lucas(8), fib(7) + fib(9));
+    1
+}
+
+fn test_pell() -> Int {
+    // Pell: 0, 1, 2, 5, 12, 29, 70
+    assert_eq(pell(0), 0);
+    assert_eq(pell(1), 1);
+    assert_eq(pell(2), 2);
+    assert_eq(pell(3), 5);
+    assert_eq(pell(4), 12);
+    assert_eq(pell(5), 29);
+    assert_eq(pell(6), 70);
+    1
+}
+
+fn test_padovan() -> Int {
+    // Padovan: 1, 1, 1, 2, 2, 3, 4, 5, 7, 9
+    assert_eq(padovan(0), 1);
+    assert_eq(padovan(3), 2);
+    assert_eq(padovan(5), 3);
+    assert_eq(padovan(6), 4);
+    assert_eq(padovan(8), 7);
+    assert_eq(padovan(9), 9);
+    1
+}
+
+fn test_tribonacci() -> Int {
+    // Tribonacci: 0, 0, 1, 1, 2, 4, 7, 13, 24, 44
+    assert_eq(tribonacci(0), 0);
+    assert_eq(tribonacci(2), 1);
+    assert_eq(tribonacci(4), 2);
+    assert_eq(tribonacci(5), 4);
+    assert_eq(tribonacci(6), 7);
+    assert_eq(tribonacci(7), 13);
+    assert_eq(tribonacci(8), 24);
+    assert_eq(tribonacci(9), 44);
+    1
+}
+
+fn main() -> Int {
+    test_figurate();
+    test_power_sums();
+    test_fibonacci();
+    test_lucas();
+    test_pell();
+    test_padovan();
+    test_tribonacci();
+    print("[OK] 610_milestone_aot");
+    0
+}

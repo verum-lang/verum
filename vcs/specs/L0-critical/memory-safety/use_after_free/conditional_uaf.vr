@@ -1,0 +1,21 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, use-after-free, cbgr, conditional
+// @description: Tests CBGR detection of use-after-free in conditional branch
+
+fn process(should_free: Bool) {
+    let data = Heap.new([1, 2, 3, 4, 5]);
+    let data_ref = &data;
+
+    if should_free {
+        drop(data);
+    }
+
+    // Access that may be after free depending on branch taken
+    let _ = data_ref.len();  // CBGR detects use after free when should_free is true
+}
+
+fn main() {
+    process(true);  // Will trigger use-after-free
+}

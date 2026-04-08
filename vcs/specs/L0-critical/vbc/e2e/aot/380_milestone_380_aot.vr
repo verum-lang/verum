@@ -1,0 +1,418 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, integration, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Milestone 380 integration test: combines multiple algorithm families
+// from the 373-379 range into a single cross-verifying test.
+// 1. Inversion counting (from 373) with sorting verification
+// 2. Palindrome detection (from 374)
+// 3. Grid path counting (from 375)
+// 4. Maximum subarray / stock profit (from 376)
+// 5. Modular arithmetic (from 377)
+// 6. Expression evaluation (from 378)
+// 7. Bit manipulation (from 379)
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn min_val(a: Int, bv: Int) -> Int { if a < bv { a } else { bv } }
+fn max_val(a: Int, bv: Int) -> Int { if a > bv { a } else { bv } }
+
+// --- Part 1: Inversion Count + Sort ---
+
+type MergeInfo is { arr: Arr8, inv_count: Int };
+
+fn merge_and_count(a: Arr8, left: Int, mid: Int, right: Int) -> MergeInfo {
+    let l_len = mid - left;
+    let r_len = right - mid;
+    let mut tl = a8_zero();
+    let mut tr = a8_zero();
+    let mut i = 0;
+    while i < l_len {
+        tl = a8_set(tl, i, a8_get(a, left + i));
+        i = i + 1;
+    }
+    i = 0;
+    while i < r_len {
+        tr = a8_set(tr, i, a8_get(a, mid + i));
+        i = i + 1;
+    }
+    let mut result = a;
+    let mut inversions = 0;
+    let mut li = 0;
+    let mut ri = 0;
+    let mut k = left;
+    while li < l_len {
+        if ri < r_len {
+            if a8_get(tl, li) <= a8_get(tr, ri) {
+                result = a8_set(result, k, a8_get(tl, li));
+                li = li + 1;
+            } else {
+                result = a8_set(result, k, a8_get(tr, ri));
+                inversions = inversions + (l_len - li);
+                ri = ri + 1;
+            }
+        } else {
+            result = a8_set(result, k, a8_get(tl, li));
+            li = li + 1;
+        }
+        k = k + 1;
+    }
+    while ri < r_len {
+        result = a8_set(result, k, a8_get(tr, ri));
+        ri = ri + 1;
+        k = k + 1;
+    }
+    MergeInfo { arr: result, inv_count: inversions }
+}
+
+fn sort_and_count(arr: Arr8, n: Int) -> MergeInfo {
+    let mut a = arr;
+    let mut total = 0;
+    let mut width = 1;
+    while width < n {
+        let mut left = 0;
+        while left < n {
+            let mid = min_val(left + width, n);
+            let right = min_val(left + 2 * width, n);
+            if mid < right {
+                let mr = merge_and_count(a, left, mid, right);
+                a = mr.arr;
+                total = total + mr.inv_count;
+            }
+            left = left + 2 * width;
+        }
+        width = width * 2;
+    }
+    MergeInfo { arr: a, inv_count: total }
+}
+
+// --- Part 2: Palindrome check on integer sequence ---
+
+fn is_palindrome_seq(arr: Arr8, start: Int, length: Int) -> Int {
+    let mut lo = start;
+    let mut hi = start + length - 1;
+    while lo < hi {
+        if a8_get(arr, lo) != a8_get(arr, hi) { return 0; }
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+    1
+}
+
+// --- Part 3: Grid path count (space-optimized) ---
+
+fn grid_paths(rows: Int, cols: Int) -> Int {
+    let mut prev_row = a8_zero();
+    let mut c = 0;
+    while c < cols {
+        prev_row = a8_set(prev_row, c, 1);
+        c = c + 1;
+    }
+    let mut r = 1;
+    while r < rows {
+        let mut curr = a8_zero();
+        curr = a8_set(curr, 0, 1);
+        c = 1;
+        while c < cols {
+            let val = a8_get(curr, c - 1) + a8_get(prev_row, c);
+            curr = a8_set(curr, c, val);
+            c = c + 1;
+        }
+        prev_row = curr;
+        r = r + 1;
+    }
+    a8_get(prev_row, cols - 1)
+}
+
+// --- Part 4: Kadane's maximum subarray ---
+
+fn kadane(arr: Arr8, n: Int) -> Int {
+    let mut max_here = a8_get(arr, 0);
+    let mut max_total = a8_get(arr, 0);
+    let mut i = 1;
+    while i < n {
+        let val = a8_get(arr, i);
+        max_here = max_val(val, max_here + val);
+        max_total = max_val(max_total, max_here);
+        i = i + 1;
+    }
+    max_total
+}
+
+// --- Part 5: Modular exponentiation ---
+
+fn mod_exp(base: Int, exp: Int, modulus: Int) -> Int {
+    if modulus == 1 { return 0; }
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % modulus;
+        }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+fn gcd_val(a: Int, bv: Int) -> Int {
+    let mut x = a;
+    let mut y = bv;
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// --- Part 6: Simple expression evaluator using postfix ---
+// Encode postfix expression as array:
+// Positive values = operands, negative values = operators (-1=add, -2=sub, -3=mul, -4=div)
+// Use a stack (Arr8) to evaluate
+
+fn eval_postfix(expr: Arr8, n: Int) -> Int {
+    let mut stack = a8_zero();
+    let mut top = -1;
+    let mut i = 0;
+    while i < n {
+        let token = a8_get(expr, i);
+        if token >= 0 {
+            // operand: push
+            top = top + 1;
+            stack = a8_set(stack, top, token);
+        } else {
+            // operator: pop two, compute, push result
+            let right_val = a8_get(stack, top);
+            top = top - 1;
+            let left_val = a8_get(stack, top);
+            let res = if token == -1 { left_val + right_val }
+                      else if token == -2 { left_val - right_val }
+                      else if token == -3 { left_val * right_val }
+                      else { if right_val != 0 { left_val / right_val } else { 0 } };
+            stack = a8_set(stack, top, res);
+        }
+        i = i + 1;
+    }
+    a8_get(stack, 0)
+}
+
+// --- Part 7: Bit ops ---
+
+fn popcount(n: Int) -> Int {
+    let mut count = 0;
+    let mut val = n;
+    while val != 0 {
+        count = count + (val % 2);
+        val = val / 2;
+    }
+    count
+}
+
+fn highest_bit(n: Int) -> Int {
+    if n == 0 { return -1; }
+    let mut pos = 0;
+    let mut val = n;
+    while val > 1 {
+        val = val / 2;
+        pos = pos + 1;
+    }
+    pos
+}
+
+fn is_power_of_two(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if popcount(n) == 1 { 1 } else { 0 }
+}
+
+fn pow2(e: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < e {
+        result = result * 2;
+        i = i + 1;
+    }
+    result
+}
+
+// === Integration Tests ===
+
+fn test_sort_then_palindrome() {
+    // Sort [3, 1, 2, 1, 3] and check if sorted result is a palindrome
+    // Sorted: [1, 1, 2, 3, 3] -> not palindrome
+    // But the original IS a palindrome
+    let arr = Arr8 { a0: 3, a1: 1, a2: 2, a3: 1, a4: 3, a5: 0, a6: 0, a7: 0 };
+    assert_eq(is_palindrome_seq(arr, 0, 5), 1);
+
+    let sorted = sort_and_count(arr, 5);
+    assert_eq(a8_get(sorted.arr, 0), 1);
+    assert_eq(a8_get(sorted.arr, 4), 3);
+    assert_eq(is_palindrome_seq(sorted.arr, 0, 5), 0); // sorted is not palindrome
+}
+
+fn test_inversions_and_sorting() {
+    let arr = Arr8 { a0: 5, a1: 3, a2: 8, a3: 1, a4: 2, a5: 7, a6: 4, a7: 6 };
+    let result = sort_and_count(arr, 8);
+    // Verify sorted
+    let mut i = 1;
+    while i < 8 {
+        assert(a8_get(result.arr, i) >= a8_get(result.arr, i - 1));
+        i = i + 1;
+    }
+    // Inversions should be positive for unsorted array
+    assert(result.inv_count > 0);
+}
+
+fn test_grid_paths_vs_binomial() {
+    // paths(m, n) = C(m+n-2, m-1)
+    // paths(4, 4) = C(6, 3) = 20
+    assert_eq(grid_paths(4, 4), 20);
+    // paths(3, 5) = C(6, 2) = 15
+    assert_eq(grid_paths(3, 5), 15);
+    // Symmetry
+    assert_eq(grid_paths(3, 5), grid_paths(5, 3));
+}
+
+fn test_kadane_stock() {
+    // Price differences: buy/sell max profit
+    // Prices: [7, 1, 5, 3, 6, 4]
+    // Diffs:  [-6, 4, -2, 3, -2]
+    // Max subarray of diffs = max profit with one txn = [4, -2, 3] = 5
+    let diffs = Arr8 { a0: -6, a1: 4, a2: -2, a3: 3, a4: -2, a5: 0, a6: 0, a7: 0 };
+    assert_eq(kadane(diffs, 5), 5);
+}
+
+fn test_mod_exp_and_fermat() {
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p) for prime p
+    let p = 17;
+    assert_eq(mod_exp(2, p - 1, p), 1);
+    assert_eq(mod_exp(3, p - 1, p), 1);
+    assert_eq(mod_exp(5, p - 1, p), 1);
+
+    // Use mod_exp to compute inverse: a^(p-2) mod p
+    let inv5 = mod_exp(5, p - 2, p);
+    assert_eq((5 * inv5) % p, 1);
+}
+
+fn test_postfix_expression() {
+    // Infix: (3 + 5) * (10 - 2) = 64
+    // Postfix: 3, 5, +, 10, 2, -, *
+    // Encoded: 3, 5, -1, 10, 2, -2, -3
+    let expr = Arr8 { a0: 3, a1: 5, a2: -1, a3: 10, a4: 2, a5: -2, a6: -3, a7: 0 };
+    assert_eq(eval_postfix(expr, 7), 64);
+}
+
+fn test_postfix_complex() {
+    // Infix: (2 + 3) * 4 = 20
+    // Postfix: 2, 3, +, 4, *
+    let expr = Arr8 { a0: 2, a1: 3, a2: -1, a3: 4, a4: -3, a5: 0, a6: 0, a7: 0 };
+    assert_eq(eval_postfix(expr, 5), 20);
+
+    // Infix: 10 / 2 - 1 = 4
+    // Postfix: 10, 2, /, 1, -
+    let expr2 = Arr8 { a0: 10, a1: 2, a2: -4, a3: 1, a4: -2, a5: 0, a6: 0, a7: 0 };
+    assert_eq(eval_postfix(expr2, 5), 4);
+}
+
+fn test_bit_ops_integration() {
+    // popcount of grid path counts
+    let paths_33 = grid_paths(3, 3); // 6 = 0b110
+    assert_eq(popcount(paths_33), 2);
+
+    let paths_44 = grid_paths(4, 4); // 20 = 0b10100
+    assert_eq(popcount(paths_44), 2);
+
+    // highest_bit of powers of 2
+    assert_eq(highest_bit(1), 0);
+    assert_eq(highest_bit(4), 2);
+    assert_eq(highest_bit(64), 6);
+
+    // Power of two checks
+    assert_eq(is_power_of_two(paths_33), 0);  // 6 is not power of 2
+    assert_eq(is_power_of_two(paths_44), 0);  // 20 is not power of 2
+    assert_eq(is_power_of_two(grid_paths(1, 1)), 1); // 1 is power of 2
+}
+
+fn test_gcd_popcount() {
+    // GCD of popcount results
+    let pc1 = popcount(255);  // 8
+    let pc2 = popcount(15);   // 4
+    assert_eq(gcd_val(pc1, pc2), 4);
+
+    let pc3 = popcount(7);    // 3
+    assert_eq(gcd_val(pc1, pc3), 1);
+}
+
+fn test_cross_verification() {
+    // Verify: number of paths in 2xN grid = N
+    assert_eq(grid_paths(2, 1), 1);
+    assert_eq(grid_paths(2, 2), 2);
+    assert_eq(grid_paths(2, 3), 3);
+    assert_eq(grid_paths(2, 4), 4);
+    assert_eq(grid_paths(2, 5), 5);
+
+    // Verify: sorted array has 0 inversions
+    let sorted = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    assert_eq(sort_and_count(sorted, 8).inv_count, 0);
+
+    // Verify: reversed array has max inversions n*(n-1)/2
+    let rev = Arr8 { a0: 4, a1: 3, a2: 2, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(sort_and_count(rev, 4).inv_count, 6);
+}
+
+fn test_composite_calculation() {
+    // Compute: grid_paths(3,3) * mod_exp(2, 3, 100) % 50
+    // = 6 * 8 % 50 = 48 % 50 = 48
+    let paths = grid_paths(3, 3);
+    let power = mod_exp(2, 3, 100);
+    let product = (paths * power) % 50;
+    assert_eq(product, 48);
+
+    // Kadane on array of factorials mod 10
+    // factorials mod 10: 1, 1, 2, 6, 4, 0, 0, 0
+    // (1!, 2!, 3!, 4!, 5!, 6!, 7! mod 10 = 1, 2, 6, 24%10=4, 0, 0, 0)
+    // Wait, let's use simpler: kadane on [1, 2, 6, 4, 0]
+    // Max subarray = 1+2+6+4 = 13
+    let facts = Arr8 { a0: 1, a1: 2, a2: 6, a3: 4, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(kadane(facts, 5), 13);
+}
+
+fn main() -> Int {
+    test_sort_then_palindrome();
+    test_inversions_and_sorting();
+    test_grid_paths_vs_binomial();
+    test_kadane_stock();
+    test_mod_exp_and_fermat();
+    test_postfix_expression();
+    test_postfix_complex();
+    test_bit_ops_integration();
+    test_gcd_popcount();
+    test_cross_verification();
+    test_composite_calculation();
+    print("[OK] 380_milestone_380_aot");
+    0
+}

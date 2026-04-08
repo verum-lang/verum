@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, error
+// @description: Test detection of multiple using clauses
+// @expected-error: E018
+
+// Function type can only have one using clause
+type Callback is fn() -> Int using [Database] using [Logger];

@@ -1,0 +1,281 @@
+// @test: run
+// @expected-stdout: Result: 42\nUser email: alice@example.com\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, recovery, question-mark, propagation
+// @description: ? operator for error propagation
+
+/// Question mark operator - concise error propagation.
+/// The ? operator unwraps Ok/Some or returns Err/None early.
+
+type ParseError is
+    | InvalidNumber(Text)
+    | EmptyInput
+    | Overflow;
+
+type IoError is
+    | NotFound(Text)
+    | PermissionDenied
+    | Timeout;
+
+type AppError is
+    | Parse(ParseError)
+    | Io(IoError)
+    | Other(Text);
+
+// Error conversions for ? to work across types
+implement From<ParseError> for AppError {
+    fn from(e: ParseError) -> AppError {
+        AppError.Parse(e)
+    }
+}
+
+implement From<IoError> for AppError {
+    fn from(e: IoError) -> AppError {
+        AppError.Io(e)
+    }
+}
+
+/// Basic ? usage with Result
+fn parse_number(s: &Text) -> Result<Int, ParseError> {
+    if s.is_empty() {
+        Err(ParseError.EmptyInput)
+    } else if s == "42" {
+        Ok(42)
+    } else if s == "999999999999" {
+        Err(ParseError.Overflow)
+    } else {
+        Err(ParseError.InvalidNumber(s.clone()))
+    }
+}
+
+fn read_file(path: &Text) -> Result<Text, IoError> {
+    if path == "/data.txt" {
+        Ok("42")
+    } else if path == "/forbidden.txt" {
+        Err(IoError.PermissionDenied)
+    } else {
+        Err(IoError.NotFound(path.clone()))
+    }
+}
+
+/// Simple ? propagation
+fn load_and_parse(path: &Text) -> Result<Int, AppError> {
+    let content = read_file(path)?;  // IoError -> AppError
+    let number = parse_number(&content)?;  // ParseError -> AppError
+    Ok(number)
+}
+
+/// Chained ? operations
+fn compute_from_files(path1: &Text, path2: &Text) -> Result<Int, AppError> {
+    let a = parse_number(&read_file(path1)?)?;
+    let b = parse_number(&read_file(path2)?)?;
+    Ok(a + b)
+}
+
+/// ? with Maybe type
+fn find_user(id: Int) -> Maybe<User> {
+    if id == 1 {
+        Some(User { id: 1, name: "Alice", email: Some("alice@example.com") })
+    } else if id == 2 {
+        Some(User { id: 2, name: "Bob", email: None })
+    } else {
+        None
+    }
+}
+
+type User is {
+    id: Int,
+    name: Text,
+    email: Maybe<Text>
+};
+
+/// ? with Maybe returns None early
+fn get_user_email(id: Int) -> Maybe<Text> {
+    let user = find_user(id)?;  // Returns None if user not found
+    let email = user.email.clone()?;  // Returns None if email is None
+    Some(email)
+}
+
+/// ? in expression position
+fn multiply_parsed(s: &Text) -> Result<Int, ParseError> {
+    Ok(parse_number(s)? * 2)  // ? unwraps, then multiplies
+}
+
+/// ? with method chaining
+fn get_processed_data(path: &Text) -> Result<Text, AppError> {
+    Ok(read_file(path)?
+        .trim()
+        .to_uppercase())
+}
+
+/// ? in match expressions
+fn process_optional(value: Maybe<Int>) -> Maybe<Int> {
+    let v = value?;
+    if v > 0 {
+        Some(v * 2)
+    } else {
+        None
+    }
+}
+
+/// Multiple ? in one line
+fn complex_chain(id: Int) -> Maybe<Text> {
+    let user = find_user(id)?;
+    let email = user.email.clone()?;
+    let domain = email.split("@").last()?;
+    Some(domain.to_text())
+}
+
+/// ? with custom error types
+type ValidationError is
+    | TooShort(Int)
+    | TooLong(Int)
+    | InvalidChar(Char);
+
+fn validate_length(s: &Text, min: Int, max: Int) -> Result<Bool, ValidationError> {
+    let len = s.len() as Int;
+    if len < min {
+        Err(ValidationError.TooShort(len))
+    } else if len > max {
+        Err(ValidationError.TooLong(len))
+    } else {
+        Ok(true)
+    }
+}
+
+fn validate_chars(s: &Text) -> Result<Bool, ValidationError> {
+    for c in s.chars() {
+        if !c.is_alphanumeric() && c != '_' {
+            return Err(ValidationError.InvalidChar(c))
+        }
+    }
+    Ok(true)
+}
+
+fn validate_username(s: &Text) -> Result<Text, ValidationError> {
+    validate_length(s, 3, 20)?;  // Early return if length invalid
+    validate_chars(s)?;  // Early return if chars invalid
+    Ok(s.clone())  // All validations passed
+}
+
+/// ? in loops
+fn parse_all_numbers(strings: &List<Text>) -> Result<List<Int>, ParseError> {
+    let mut numbers: List<Int> = List.new();
+    for s in strings {
+        numbers.push(parse_number(s)?);  // Returns Err on first failure
+    }
+    Ok(numbers)
+}
+
+/// ? with ok_or for Maybe -> Result conversion
+fn get_user_or_error(id: Int) -> Result<User, AppError> {
+    find_user(id).ok_or(AppError.Other(f"User {id} not found"))
+}
+
+/// ? with ok_or_else for lazy error creation
+fn get_email_or_error(id: Int) -> Result<Text, AppError> {
+    let user = find_user(id).ok_or_else(|| {
+        AppError.Other(f"User {id} not found")
+    })?;
+
+    user.email.clone().ok_or_else(|| {
+        AppError.Other(f"User {id} has no email")
+    })
+}
+
+/// Practical example: Data pipeline with ?
+type DataRecord is {
+    id: Int,
+    value: Float,
+    category: Text
+};
+
+type DataError is
+    | LoadFailed(Text)
+    | ParseFailed(Text)
+    | ValidationFailed(Text)
+    | ProcessingFailed(Text);
+
+fn load_data(source: &Text) -> Result<Text, DataError> {
+    if source == "valid" {
+        Ok("1,42.5,category_a")
+    } else {
+        Err(DataError.LoadFailed(source.clone()))
+    }
+}
+
+fn parse_record(raw: &Text) -> Result<DataRecord, DataError> {
+    if raw.is_empty() {
+        return Err(DataError.ParseFailed("Invalid format"))
+    }
+
+    Ok(DataRecord {
+        id: 1,  // Simplified
+        value: 42.5,
+        category: "category_a"
+    })
+}
+
+fn validate_record(record: &DataRecord) -> Result<Bool, DataError> {
+    if record.value < 0.0 {
+        Err(DataError.ValidationFailed("Negative value"))
+    } else {
+        Ok(true)
+    }
+}
+
+fn process_record(record: &DataRecord) -> Result<DataRecord, DataError> {
+    Ok(DataRecord {
+        id: record.id,
+        value: record.value * 2.0,
+        category: record.category.clone()
+    })
+}
+
+fn full_pipeline(source: &Text) -> Result<DataRecord, DataError> {
+    let raw = load_data(source)?;
+    let record = parse_record(&raw)?;
+    validate_record(&record)?;
+    let processed = process_record(&record)?;
+    Ok(processed)
+}
+
+/// ? with try blocks
+fn try_block_with_question_mark() -> Result<Int, Text> {
+    let result = try {
+        let a = Some(10).ok_or("missing a")?;
+        let b = Some(20).ok_or("missing b")?;
+        a + b
+    };
+
+    // Result is already Result<Int, Text>
+    result
+}
+
+/// ? returning from async functions
+async fn async_with_question_mark() -> Result<Int, AppError> {
+    let data = fetch_async("/data.txt").await?;
+    let number = parse_number(&data)?;
+    Ok(number)
+}
+
+async fn fetch_async(path: &Text) -> Result<Text, IoError> {
+    read_file(path)
+}
+
+fn main() {
+    // Basic ? usage
+    match load_and_parse("/data.txt") {
+        Ok(n) => println(f"Result: {n}"),
+        Err(e) => println(f"Error: {e}")
+    }
+
+    // ? with Maybe
+    match get_user_email(1) {
+        Some(email) => println(f"User email: {email}"),
+        None => println("Email not found")
+    }
+
+    println("Operation completed");
+}

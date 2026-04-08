@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, associated, binding, error
+// @description: Test detection of associated type binding missing equals sign
+// @expected-error: E018
+
+// Associated type binding must have = between name and type
+fn test(x: dyn Iterator<Item Int>) {}

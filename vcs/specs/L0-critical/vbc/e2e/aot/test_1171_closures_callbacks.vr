@@ -1,0 +1,104 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: closures, callbacks, higher-order, e2e
+// @description: Test closures as callbacks, captures, and higher-order patterns
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn map_list(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(items: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            result.push(items[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_list(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: apply
+    let double = |x: Int| x * 2;
+    if apply(double, 5) != 10 {
+        print("FAIL: apply double");
+        failures = failures + 1;
+    } else {
+        print("  apply: OK");
+    }
+
+    // Test 2: compose
+    let inc = |x: Int| x + 1;
+    let triple = |x: Int| x * 3;
+    let inc_then_triple = compose(triple, inc);
+    if inc_then_triple(4) != 15 {
+        print("FAIL: compose");
+        failures = failures + 1;
+    } else {
+        print("  compose: OK");
+    }
+
+    // Test 3: map
+    let data = [1, 2, 3, 4, 5];
+    let squared = map_list(data, |x: Int| x * x);
+    let sum = fold_list(squared, 0, |a: Int, b: Int| a + b);
+    if sum != 55 {
+        print(f"FAIL: map+fold expected 55, got {sum}");
+        failures = failures + 1;
+    } else {
+        print("  map_fold: OK");
+    }
+
+    // Test 4: filter
+    let evens = filter_list(data, |x: Int| x % 2 == 0);
+    if evens.len() != 2 {
+        print(f"FAIL: filter expected 2, got {evens.len()}");
+        failures = failures + 1;
+    } else {
+        print("  filter: OK");
+    }
+
+    // Test 5: closure capture
+    let multiplier = 7;
+    let times_seven = |x: Int| x * multiplier;
+    if apply(times_seven, 6) != 42 {
+        print("FAIL: capture");
+        failures = failures + 1;
+    } else {
+        print("  capture: OK");
+    }
+
+    if failures == 0 {
+        print("All closure/callback tests passed");
+    }
+    failures
+}

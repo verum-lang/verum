@@ -1,0 +1,178 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: smt, counterexample
+// @timeout: 5000
+// @expected-error: ContractViolation
+
+/// Tests for SMT counterexample generation
+/// Intentionally incorrect specifications to test error reporting
+
+/// Simple arithmetic counterexample
+@verify(proof)
+fn bad_abs(x: Int) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result == x;  // ERROR: fails for negative x
+    ";
+    // Counterexample: x = -1
+    // Expected: result = -1, but result >= 0 conflicts
+    if x >= 0 { x } else { -x }
+}
+
+/// Array bounds counterexample
+@verify(proof)
+fn bad_access(arr: &List<Int>, i: Int) -> Int {
+    contract#"
+        requires i >= 0;  // Missing: i < arr.len()
+        ensures result == arr[i];
+    ";
+    // Counterexample: arr = [], i = 0
+    // Or: arr = [1, 2], i = 5
+    arr[i]
+}
+
+/// Missing precondition
+@verify(proof)
+fn bad_divide(a: Int, b: Int) -> Int {
+    contract#"
+        // Missing: requires b != 0;
+        ensures result == a / b;
+    ";
+    // Counterexample: b = 0
+    a / b
+}
+
+/// Incorrect postcondition bound
+@verify(proof)
+fn bad_clamp(value: Int, min: Int, max: Int) -> Int {
+    contract#"
+        requires min <= max;
+        ensures result >= min;
+        ensures result <= max;
+        ensures result == value;  // ERROR: not always true
+    ";
+    // Counterexample: value = 100, min = 0, max = 10
+    // result = 10, but ensures says result == value (100)
+    if value < min { min }
+    else if value > max { max }
+    else { value }
+}
+
+/// Quantifier counterexample
+@verify(proof)
+fn bad_all_positive(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result implies forall i: Int. 0 <= i < arr.len() implies arr[i] > 0;
+        ensures !result implies arr.len() == 0;  // ERROR: wrong negation
+    ";
+    // Counterexample: arr = [-1], returns false
+    // But arr.len() = 1, not 0
+    for x in arr {
+        if *x <= 0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Frame condition violation
+@verify(proof)
+fn bad_frame(arr: &mut List<Int>, idx: Int, value: Int) {
+    contract#"
+        requires idx >= 0 && idx < arr.len();
+        ensures arr[idx] == value;
+        // Missing frame condition for other elements
+        ensures arr.len() == old(arr.len());
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == old(arr[i]);  // ERROR
+    ";
+    // Counterexample: This claims ALL elements unchanged, but we modify arr[idx]
+    arr[idx] = value;
+}
+
+/// Invariant violation in loop
+@verify(proof)
+fn bad_loop_invariant(arr: &List<Int>) -> Int {
+    contract#"
+        ensures result == arr.iter().sum();
+    ";
+    let mut sum = 0;
+    for i in 0..arr.len() {
+        contract#"invariant 
+            sum == arr[0..i].iter().sum();
+            sum >= 0;  // ERROR: not preserved if arr has negatives
+        ";
+        // Counterexample: arr = [-5], at i=1, sum = -5 < 0
+        sum += arr[i];
+    }
+    sum
+}
+
+/// Overflow counterexample
+@verify(proof)
+fn bad_multiply(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result == a * b;
+        ensures result / a == b;  // ERROR: fails for a = 0
+    ";
+    // Counterexample: a = 0, b = 5
+    // result = 0, but 0 / 0 is undefined
+    a * b
+}
+
+/// Incorrect sorting specification
+@verify(proof)
+fn bad_sort(arr: &mut List<Int>) {
+    contract#"
+        ensures forall i: Int, j: Int. 0 <= i < j < arr.len() implies arr[i] <= arr[j];
+        ensures arr.len() == old(arr.len());
+        ensures arr == old(arr);  // ERROR: sorted array != original
+    ";
+    // Counterexample: arr = [3, 1, 2]
+    // After sort: arr = [1, 2, 3] != [3, 1, 2]
+    arr.sort();
+}
+
+/// Missing case in match
+@verify(proof)
+fn bad_sign(x: Int) -> Int {
+    contract#"
+        ensures result == -1 || result == 0 || result == 1;
+        ensures result == 1 implies x > 0;
+        ensures result == -1 implies x < 0;
+        // ERROR: Missing case for x == 0
+    ";
+    // Counterexample: x = 0
+    // result = 0, but no ensures clause covers x == 0 -> result == 0
+    if x > 0 { 1 }
+    else if x < 0 { -1 }
+    else { 0 }
+}
+
+/// Counterexample with structs
+type Point is { x: Int, y: Int };
+
+@verify(proof)
+fn bad_distance(p1: &Point, p2: &Point) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result == 0 implies p1 == p2;  // ERROR: should be IFF, not implies
+    ";
+    // Counterexample: p1 = Point{x: 0, y: 0}, p2 = Point{x: 0, y: 0}
+    // These are equal, result = 0, but the reverse implication is missing
+    // p1 == p2 implies result == 0 is NOT stated
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    (dx * dx + dy * dy).sqrt() as Int
+}
+
+/// Counterexample generation hint
+@verify(proof, show_counterexample: true)
+fn annotated_bad_function(x: Int) -> Int {
+    contract#"
+        ensures result > x;  // ERROR: not true for overflow
+    ";
+    // SMT solver should show: x = Int.MAX
+    // result = Int.MAX + 1 = overflow
+    x + 1
+}

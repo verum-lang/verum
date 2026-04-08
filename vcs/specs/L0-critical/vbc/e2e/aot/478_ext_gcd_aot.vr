@@ -1,0 +1,234 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, extended-gcd, modular-inverse, number-theory
+// @timeout: 30000
+
+// Extended GCD, modular inverse, Chinese Remainder Theorem
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 { return 0; }
+    if b == 0 { return 0; }
+    abs_val(a) / gcd(a, b) * abs_val(b)
+}
+
+// Extended GCD: returns (g, x, y) such that a*x + b*y = g
+// Packed as: g + x*10000 + y*100000000 (using offset encoding)
+// g in [0, 9999], x in [-4999, 5000], y in [-4999, 5000]
+fn ext_gcd_g(a: Int, b: Int) -> Int {
+    gcd(a, b)
+}
+
+// Returns x coefficient of extended GCD (a*x + b*y = gcd(a,b))
+fn ext_gcd_x(a: Int, b: Int) -> Int {
+    if b == 0 { return 1; }
+    let mut old_r = a;
+    let mut r = b;
+    let mut old_s = 1;
+    let mut s = 0;
+    while r != 0 {
+        let q = old_r / r;
+        let tmp_r = r;
+        r = old_r - q * r;
+        old_r = tmp_r;
+        let tmp_s = s;
+        s = old_s - q * s;
+        old_s = tmp_s;
+    }
+    old_s
+}
+
+fn ext_gcd_y(a: Int, b: Int) -> Int {
+    if b == 0 { return 0; }
+    let mut old_r = a;
+    let mut r = b;
+    let mut old_t = 0;
+    let mut t = 1;
+    while r != 0 {
+        let q = old_r / r;
+        let tmp_r = r;
+        r = old_r - q * r;
+        old_r = tmp_r;
+        let tmp_t = t;
+        t = old_t - q * t;
+        old_t = tmp_t;
+    }
+    old_t
+}
+
+// Modular inverse: a^(-1) mod m (returns -1 if no inverse)
+fn mod_inverse(a: Int, m: Int) -> Int {
+    let g = gcd(a, m);
+    if g != 1 { return -1; }
+    let x = ext_gcd_x(a, m);
+    ((x % m) + m) % m
+}
+
+// Modular exponentiation: base^exp mod m
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = result * b % m;
+        }
+        e = e / 2;
+        b = b * b % m;
+    }
+    result
+}
+
+// Chinese Remainder Theorem for 2 congruences:
+// x ≡ r1 (mod m1)
+// x ≡ r2 (mod m2)
+// Returns x mod (m1*m2), or -1 if no solution
+fn crt2(r1: Int, m1: Int, r2: Int, m2: Int) -> Int {
+    let g = gcd(m1, m2);
+    if (r2 - r1) % g != 0 { return -1; }
+    let m = m1 / g * m2; // lcm(m1, m2)
+    let inv = mod_inverse(m1 / g, m2 / g);
+    if inv == -1 { return -1; }
+    let x = r1 + m1 * ((r2 - r1) / g % (m2 / g) * inv % (m2 / g));
+    ((x % m) + m) % m
+}
+
+// Euler's totient function
+fn euler_totient(n: Int) -> Int {
+    let mut result = n;
+    let mut p = 2;
+    let mut num = n;
+    while p * p <= num {
+        if num % p == 0 {
+            while num % p == 0 { num = num / p; }
+            result = result - result / p;
+        }
+        p = p + 1;
+    }
+    if num > 1 {
+        result = result - result / num;
+    }
+    result
+}
+
+fn test_ext_gcd() -> Int {
+    // gcd(35, 15) = 5, 35*x + 15*y = 5
+    let g = ext_gcd_g(35, 15);
+    assert_eq(g, 5);
+    let x = ext_gcd_x(35, 15);
+    let y = ext_gcd_y(35, 15);
+    assert_eq(35 * x + 15 * y, 5);
+
+    // gcd(12, 8) = 4
+    let g2 = ext_gcd_g(12, 8);
+    assert_eq(g2, 4);
+    let x2 = ext_gcd_x(12, 8);
+    let y2 = ext_gcd_y(12, 8);
+    assert_eq(12 * x2 + 8 * y2, 4);
+
+    // gcd(17, 13) = 1 (coprime)
+    let x3 = ext_gcd_x(17, 13);
+    let y3 = ext_gcd_y(17, 13);
+    assert_eq(17 * x3 + 13 * y3, 1);
+    1
+}
+
+fn test_mod_inverse() -> Int {
+    // 3^(-1) mod 7 = 5 (since 3*5=15, 15%7=1)
+    assert_eq(mod_inverse(3, 7), 5);
+
+    // 2^(-1) mod 5 = 3 (since 2*3=6, 6%5=1)
+    assert_eq(mod_inverse(2, 5), 3);
+
+    // 7^(-1) mod 11 = 8 (since 7*8=56, 56%11=1)
+    assert_eq(mod_inverse(7, 11), 8);
+
+    // 4 has no inverse mod 8 (gcd=4, not coprime)
+    assert_eq(mod_inverse(4, 8), -1);
+
+    // Verify: a * a^(-1) ≡ 1 (mod m)
+    let inv = mod_inverse(13, 97);
+    assert_eq(13 * inv % 97, 1);
+    1
+}
+
+fn test_mod_pow() -> Int {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    assert_eq(mod_pow(2, 10, 1000), 24);
+
+    // 3^5 mod 7 = 243 mod 7 = 243 - 34*7 = 243-238 = 5
+    assert_eq(mod_pow(3, 5, 7), 5);
+
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p) for prime p
+    assert_eq(mod_pow(2, 12, 13), 1);
+    assert_eq(mod_pow(5, 6, 7), 1);
+    1
+}
+
+fn test_crt() -> Int {
+    // x ≡ 2 (mod 3), x ≡ 3 (mod 5)
+    // x = 8 (8%3=2, 8%5=3)
+    let x = crt2(2, 3, 3, 5);
+    assert_eq(x % 3, 2);
+    assert_eq(x % 5, 3);
+
+    // x ≡ 1 (mod 3), x ≡ 2 (mod 5), x ≡ 3 (mod 7)
+    // First: x ≡ 1 (mod 3), x ≡ 2 (mod 5) → x = 7 (mod 15)
+    let x1 = crt2(1, 3, 2, 5);
+    assert_eq(x1 % 3, 1);
+    assert_eq(x1 % 5, 2);
+    // Then: x ≡ 7 (mod 15), x ≡ 3 (mod 7) → x mod 105
+    let x2 = crt2(x1, 15, 3, 7);
+    assert_eq(x2 % 3, 1);
+    assert_eq(x2 % 5, 2);
+    assert_eq(x2 % 7, 3);
+    1
+}
+
+fn test_euler_totient() -> Int {
+    // φ(1) = 1
+    assert_eq(euler_totient(1), 1);
+    // φ(p) = p-1 for prime p
+    assert_eq(euler_totient(7), 6);
+    assert_eq(euler_totient(13), 12);
+    // φ(p^k) = p^k - p^(k-1)
+    assert_eq(euler_totient(8), 4);   // 2^3: 8-4=4
+    assert_eq(euler_totient(9), 6);   // 3^2: 9-3=6
+    // φ(12) = 12 * (1-1/2) * (1-1/3) = 4
+    assert_eq(euler_totient(12), 4);
+    // φ(30) = 30 * (1-1/2) * (1-1/3) * (1-1/5) = 8
+    assert_eq(euler_totient(30), 8);
+    1
+}
+
+fn test_lcm() -> Int {
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(3, 5), 15);
+    assert_eq(lcm(12, 18), 36);
+    assert_eq(lcm(7, 7), 7);
+    assert_eq(lcm(1, 100), 100);
+    1
+}
+
+fn main() -> Int {
+    test_ext_gcd();
+    test_mod_inverse();
+    test_mod_pow();
+    test_crt();
+    test_euler_totient();
+    test_lcm();
+    print("[OK] 478_ext_gcd_aot");
+    0
+}

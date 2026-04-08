@@ -1,0 +1,180 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, game-of-life, cellular-automaton
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Conway's Game of Life on a 4x4 grid
+
+// 4x4 grid represented as 16-bit integer (bit i = cell at row i/4, col i%4)
+fn cell_idx(row: Int, col: Int) -> Int {
+    row * 4 + col
+}
+
+fn get_cell(grid: Int, row: Int, col: Int) -> Int {
+    if row < 0 || row >= 4 || col < 0 || col >= 4 { return 0; }
+    (grid >> cell_idx(row, col)) & 1
+}
+
+fn set_cell(grid: Int, row: Int, col: Int) -> Int {
+    grid | (1 << cell_idx(row, col))
+}
+
+fn count_neighbors(grid: Int, row: Int, col: Int) -> Int {
+    let mut count = 0;
+    let mut dr = -1;
+    while dr <= 1 {
+        let mut dc = -1;
+        while dc <= 1 {
+            if dr != 0 || dc != 0 {
+                count = count + get_cell(grid, row + dr, col + dc);
+            }
+            dc = dc + 1;
+        }
+        dr = dr + 1;
+    }
+    count
+}
+
+fn step(grid: Int) -> Int {
+    let mut new_grid = 0;
+    let mut row = 0;
+    while row < 4 {
+        let mut col = 0;
+        while col < 4 {
+            let alive = get_cell(grid, row, col);
+            let neighbors = count_neighbors(grid, row, col);
+            // Rules:
+            // Alive + 2 or 3 neighbors: survive
+            // Dead + exactly 3 neighbors: born
+            if alive == 1 {
+                if neighbors == 2 || neighbors == 3 {
+                    new_grid = set_cell(new_grid, row, col);
+                }
+            } else {
+                if neighbors == 3 {
+                    new_grid = set_cell(new_grid, row, col);
+                }
+            }
+            col = col + 1;
+        }
+        row = row + 1;
+    }
+    new_grid
+}
+
+fn count_alive(grid: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 16 {
+        count = count + ((grid >> i) & 1);
+        i = i + 1;
+    }
+    count
+}
+
+fn test_blinker() {
+    // Blinker oscillator (period 2)
+    // Phase 1: vertical bar at col 1, rows 0-2
+    //  .X..
+    //  .X..
+    //  .X..
+    //  ....
+    let mut grid = 0;
+    grid = set_cell(grid, 0, 1);
+    grid = set_cell(grid, 1, 1);
+    grid = set_cell(grid, 2, 1);
+
+    assert_eq(count_alive(grid), 3);
+
+    // After one step: horizontal bar at row 1, cols 0-2
+    let grid1 = step(grid);
+    assert_eq(count_alive(grid1), 3);
+    assert_eq(get_cell(grid1, 1, 0), 1);
+    assert_eq(get_cell(grid1, 1, 1), 1);
+    assert_eq(get_cell(grid1, 1, 2), 1);
+    assert_eq(get_cell(grid1, 0, 1), 0);  // Died
+
+    // After two steps: back to original
+    let grid2 = step(grid1);
+    assert_eq(grid2, grid);
+}
+
+fn test_block() {
+    // Block (still life)
+    // XX..
+    // XX..
+    // ....
+    // ....
+    let mut grid = 0;
+    grid = set_cell(grid, 0, 0);
+    grid = set_cell(grid, 0, 1);
+    grid = set_cell(grid, 1, 0);
+    grid = set_cell(grid, 1, 1);
+
+    assert_eq(count_alive(grid), 4);
+    let grid1 = step(grid);
+    assert_eq(grid1, grid);  // Still life: no change
+}
+
+fn test_empty_grid() {
+    let grid = 0;
+    assert_eq(step(grid), 0);  // Empty stays empty
+}
+
+fn test_single_cell_dies() {
+    // Single cell with no neighbors dies
+    let mut grid = 0;
+    grid = set_cell(grid, 1, 1);
+    assert_eq(count_alive(grid), 1);
+    assert_eq(step(grid), 0);
+}
+
+fn test_overcrowding() {
+    // 3x3 full block: center has 8 neighbors (dies), corners have 3 (survive/born)
+    let mut grid = 0;
+    grid = set_cell(grid, 0, 0);
+    grid = set_cell(grid, 0, 1);
+    grid = set_cell(grid, 0, 2);
+    grid = set_cell(grid, 1, 0);
+    grid = set_cell(grid, 1, 1);
+    grid = set_cell(grid, 1, 2);
+    grid = set_cell(grid, 2, 0);
+    grid = set_cell(grid, 2, 1);
+    grid = set_cell(grid, 2, 2);
+
+    assert_eq(count_alive(grid), 9);
+    let grid1 = step(grid);
+    // Center cell (1,1) has 8 neighbors -> dies
+    assert_eq(get_cell(grid1, 1, 1), 0);
+    // Corner cells (0,0) have 3 neighbors -> survive
+    assert_eq(get_cell(grid1, 0, 0), 1);
+}
+
+fn test_neighbor_count() {
+    // Set all 8 neighbors of (1,1)
+    let mut grid = 0;
+    grid = set_cell(grid, 0, 0);
+    grid = set_cell(grid, 0, 1);
+    grid = set_cell(grid, 0, 2);
+    grid = set_cell(grid, 1, 0);
+    grid = set_cell(grid, 1, 2);
+    grid = set_cell(grid, 2, 0);
+    grid = set_cell(grid, 2, 1);
+    grid = set_cell(grid, 2, 2);
+
+    assert_eq(count_neighbors(grid, 1, 1), 8);
+    assert_eq(count_neighbors(grid, 0, 0), 2);  // (0,1) and (1,0)
+}
+
+fn main() -> Int {
+    test_blinker();
+    test_block();
+    test_empty_grid();
+    test_single_cell_dies();
+    test_overcrowding();
+    test_neighbor_count();
+    print("[OK] 228_game_of_life_aot");
+    0
+}

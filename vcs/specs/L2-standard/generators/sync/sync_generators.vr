@@ -1,0 +1,496 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: generators, sync, yield, iterator
+// @description: Tests synchronous generator functions (fn*)
+//
+// Sync generators are functions that yield values lazily. They return
+// an Iterator that produces values on demand.
+//
+// Grammar:
+//   fn_keyword = 'fn' , [ '*' ] ;
+//   function_def = ... fn_keyword identifier ( params ) -> T { body }
+//   yield_expr = 'yield' , expression ;
+//
+// Semantics:
+//   - fn* returns Iterator<Item = T>
+//   - yield suspends execution and produces a value
+//   - Generators cannot use 'return expr;' (only bare 'return;')
+
+// ============================================================================
+// Basic sync generators
+// ============================================================================
+
+// Simple range generator
+fn* range(start: Int, end: Int) -> Int {
+    let mut i = start;
+    while i < end {
+        yield i;
+        i += 1;
+    }
+}
+
+fn test_basic_range() {
+    let nums: List<Int> = range(0, 5).collect();
+    assert_eq(nums, [0, 1, 2, 3, 4]);
+}
+
+// Generator with fixed values
+fn* fixed_sequence() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+fn test_fixed_sequence() {
+    let nums: List<Int> = fixed_sequence().collect();
+    assert_eq(nums, [1, 2, 3]);
+}
+
+// ============================================================================
+// Generator with loop constructs
+// ============================================================================
+
+// For loop in generator
+fn* squares(n: Int) -> Int {
+    for i in 1..=n {
+        yield i * i;
+    }
+}
+
+fn test_squares() {
+    let sqs: List<Int> = squares(5).collect();
+    assert_eq(sqs, [1, 4, 9, 16, 25]);
+}
+
+// While loop in generator
+fn* countdown(from: Int) -> Int {
+    let mut n = from;
+    while n > 0 {
+        yield n;
+        n -= 1;
+    }
+    yield 0;  // Include zero
+}
+
+fn test_countdown() {
+    let nums: List<Int> = countdown(5).collect();
+    assert_eq(nums, [5, 4, 3, 2, 1, 0]);
+}
+
+// Infinite generator (must be consumed lazily)
+fn* naturals() -> Int {
+    let mut n = 0;
+    loop {
+        yield n;
+        n += 1;
+    }
+}
+
+fn test_infinite_generator() {
+    // Take only first 10
+    let first_ten: List<Int> = naturals().take(10).collect();
+    assert_eq(first_ten, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+}
+
+// ============================================================================
+// Generator with conditional logic
+// ============================================================================
+
+fn* even_numbers(max: Int) -> Int {
+    for i in 0..max {
+        if i % 2 == 0 {
+            yield i;
+        }
+    }
+}
+
+fn test_even_numbers() {
+    let evens: List<Int> = even_numbers(10).collect();
+    assert_eq(evens, [0, 2, 4, 6, 8]);
+}
+
+fn* fizzbuzz(n: Int) -> Text {
+    for i in 1..=n {
+        if i % 15 == 0 {
+            yield "FizzBuzz";
+        } else if i % 3 == 0 {
+            yield "Fizz";
+        } else if i % 5 == 0 {
+            yield "Buzz";
+        } else {
+            yield f"{i}";
+        }
+    }
+}
+
+fn test_fizzbuzz() {
+    let fb: List<Text> = fizzbuzz(15).collect();
+    assert_eq(fb[0], "1");
+    assert_eq(fb[2], "Fizz");
+    assert_eq(fb[4], "Buzz");
+    assert_eq(fb[14], "FizzBuzz");
+}
+
+// ============================================================================
+// Generator with state
+// ============================================================================
+
+fn* fibonacci() -> Int {
+    let mut a = 0;
+    let mut b = 1;
+
+    yield a;
+    yield b;
+
+    loop {
+        let next = a + b;
+        yield next;
+        a = b;
+        b = next;
+    }
+}
+
+fn test_fibonacci() {
+    let fibs: List<Int> = fibonacci().take(10).collect();
+    assert_eq(fibs, [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]);
+}
+
+fn* running_total(nums: List<Int>) -> Int {
+    let mut total = 0;
+    for n in nums {
+        total += n;
+        yield total;
+    }
+}
+
+fn test_running_total() {
+    let totals: List<Int> = running_total([1, 2, 3, 4, 5]).collect();
+    assert_eq(totals, [1, 3, 6, 10, 15]);
+}
+
+// ============================================================================
+// Generator with early termination
+// ============================================================================
+
+fn* until_zero(nums: List<Int>) -> Int {
+    for n in nums {
+        if n == 0 {
+            return;  // Early termination (bare return)
+        }
+        yield n;
+    }
+}
+
+fn test_early_termination() {
+    let nums: List<Int> = until_zero([1, 2, 3, 0, 4, 5]).collect();
+    assert_eq(nums, [1, 2, 3]);  // Stops at 0
+}
+
+fn* limited(max_yields: Int) -> Int {
+    let mut count = 0;
+    loop {
+        if count >= max_yields {
+            return;
+        }
+        yield count;
+        count += 1;
+    }
+}
+
+fn test_limited_generator() {
+    let nums: List<Int> = limited(5).collect();
+    assert_eq(nums, [0, 1, 2, 3, 4]);
+}
+
+// ============================================================================
+// Generator with complex types
+// ============================================================================
+
+type Point is { x: Int, y: Int };
+
+fn* grid_points(width: Int, height: Int) -> Point {
+    for y in 0..height {
+        for x in 0..width {
+            yield Point { x, y };
+        }
+    }
+}
+
+fn test_grid_points() {
+    let points: List<Point> = grid_points(2, 2).collect();
+    assert_eq(points.len(), 4);
+    assert_eq(points[0], Point { x: 0, y: 0 });
+    assert_eq(points[3], Point { x: 1, y: 1 });
+}
+
+fn* pairs<T>(items: List<T>) -> (T, T) {
+    let len = items.len();
+    for i in 0..len {
+        for j in (i+1)..len {
+            yield (items[i].clone(), items[j].clone());
+        }
+    }
+}
+
+fn test_pairs() {
+    let p: List<(Int, Int)> = pairs([1, 2, 3]).collect();
+    assert_eq(p, [(1, 2), (1, 3), (2, 3)]);
+}
+
+// ============================================================================
+// Generator with Result/Maybe
+// ============================================================================
+
+fn* parse_numbers(strings: List<Text>) -> Result<Int, Text> {
+    for s in strings {
+        match s.parse_int() {
+            Ok(n) => {
+                let result: Result<Int, Text> = Ok(n);
+                yield result;
+            },
+            Err(_) => yield Err(f"Failed to parse: {s}"),
+        }
+    }
+}
+
+fn test_parse_numbers() {
+    let results: List<Result<Int, Text>> = parse_numbers(["1", "abc", "3"]).collect();
+    assert(results[0].is_ok());
+    assert(results[1].is_err());
+    assert(results[2].is_ok());
+}
+
+fn* find_indices<T: Eq>(items: List<T>, target: &T) -> Maybe<Int> {
+    for (i, item) in items.iter().enumerate() {
+        if item == target {
+            yield Some(i);
+        }
+    }
+    yield None;  // Sentinel
+}
+
+// ============================================================================
+// Generator composition
+// ============================================================================
+
+fn* map_gen<T, U>(gen: impl Iterator<Item = T>, f: fn(T) -> U) -> U {
+    for item in gen {
+        yield f(item);
+    }
+}
+
+fn test_map_gen() {
+    let doubled = map_gen(range(1, 5), |x| x * 2);
+    let nums: List<Int> = doubled.collect();
+    assert_eq(nums, [2, 4, 6, 8]);
+}
+
+fn* filter_gen<T>(gen: impl Iterator<Item = T>, pred: fn(&T) -> Bool) -> T {
+    for item in gen {
+        if pred(&item) {
+            yield item;
+        }
+    }
+}
+
+fn test_filter_gen() {
+    let evens = filter_gen(range(1, 10), |x| x % 2 == 0);
+    let nums: List<Int> = evens.collect();
+    assert_eq(nums, [2, 4, 6, 8]);
+}
+
+fn* chain_gen<T>(first: impl Iterator<Item = T>, second: impl Iterator<Item = T>) -> T {
+    for item in first {
+        yield item;
+    }
+    for item in second {
+        yield item;
+    }
+}
+
+fn test_chain_gen() {
+    let chained = chain_gen(range(1, 4), range(10, 13));
+    let nums: List<Int> = chained.collect();
+    assert_eq(nums, [1, 2, 3, 10, 11, 12]);
+}
+
+fn* flatten_gen<T>(nested: impl Iterator<Item = impl Iterator<Item = T>>) -> T {
+    for inner in nested {
+        for item in inner {
+            yield item;
+        }
+    }
+}
+
+// ============================================================================
+// Generator with captures
+// ============================================================================
+
+fn make_counter(start: Int, step: Int) -> impl Iterator<Item = Int> {
+    fn* counter() -> Int {
+        let mut n = start;
+        loop {
+            yield n;
+            n += step;
+        }
+    }
+    counter()
+}
+
+fn test_counter_factory() {
+    let by_twos = make_counter(0, 2);
+    let nums: List<Int> = by_twos.take(5).collect();
+    assert_eq(nums, [0, 2, 4, 6, 8]);
+}
+
+// ============================================================================
+// Generator with match expressions
+// ============================================================================
+
+type Command is
+    | Add(Int)
+    | Subtract(Int)
+    | Multiply(Int)
+    | Reset;
+
+fn* process_commands(commands: List<Command>, initial: Int) -> Int {
+    let mut value = initial;
+    yield value;
+
+    for cmd in commands {
+        match cmd {
+            Command.Add(n) => value += n,
+            Command.Subtract(n) => value -= n,
+            Command.Multiply(n) => value *= n,
+            Command.Reset => value = 0,
+        }
+        yield value;
+    }
+}
+
+fn test_process_commands() {
+    let commands = [
+        Command.Add(5),
+        Command.Multiply(2),
+        Command.Subtract(3),
+        Command.Reset,
+    ];
+
+    let states: List<Int> = process_commands(commands, 10).collect();
+    assert_eq(states, [10, 15, 30, 27, 0]);
+}
+
+// ============================================================================
+// Generator consuming other generators
+// ============================================================================
+
+fn* interleave<T>(a: impl Iterator<Item = T>, b: impl Iterator<Item = T>) -> T {
+    let mut iter_a = a.peekable();
+    let mut iter_b = b.peekable();
+
+    loop {
+        match (iter_a.next(), iter_b.next()) {
+            (Some(x), Some(y)) => {
+                yield x;
+                yield y;
+            }
+            (Some(x), None) => yield x,
+            (None, Some(y)) => yield y,
+            (None, None) => return,
+        }
+    }
+}
+
+fn test_interleave() {
+    let interleaved = interleave(range(1, 4), range(10, 13));
+    let nums: List<Int> = interleaved.collect();
+    assert_eq(nums, [1, 10, 2, 11, 3, 12]);
+}
+
+// ============================================================================
+// Edge cases
+// ============================================================================
+
+fn* empty_generator() -> Int {
+    // No yields - empty iterator
+}
+
+fn test_empty_generator() {
+    let nums: List<Int> = empty_generator().collect();
+    assert_eq(nums.len(), 0);
+}
+
+fn* single_yield() -> Int {
+    yield 42;
+}
+
+fn test_single_yield() {
+    let nums: List<Int> = single_yield().collect();
+    assert_eq(nums, [42]);
+}
+
+fn* nested_loops_generator(rows: Int, cols: Int) -> (Int, Int) {
+    for r in 0..rows {
+        for c in 0..cols {
+            yield (r, c);
+            if c >= 2 {
+                break;  // Break inner loop only
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Iterator trait usage
+// ============================================================================
+
+fn test_iterator_methods() {
+    // Generators return iterators, so all iterator methods work
+    let sum: Int = range(1, 11).fold(0, |acc, x| acc + x);
+    assert_eq(sum, 55);
+
+    let product: Int = range(1, 6).fold(1, |acc, x| acc * x);
+    assert_eq(product, 120);
+
+    let exists = range(1, 100).any(|x| x == 42);
+    assert(exists);
+
+    let all_positive = range(1, 10).all(|x| x > 0);
+    assert(all_positive);
+
+    let count = range(0, 100).filter(|x| x % 7 == 0).count();
+    assert_eq(count, 15);  // 0, 7, 14, ..., 98
+}
+
+// ============================================================================
+// Test entry point
+// ============================================================================
+
+fn main() {
+    test_basic_range();
+    test_fixed_sequence();
+    test_squares();
+    test_countdown();
+    test_infinite_generator();
+    test_even_numbers();
+    test_fizzbuzz();
+    test_fibonacci();
+    test_running_total();
+    test_early_termination();
+    test_limited_generator();
+    test_grid_points();
+    test_pairs();
+    test_parse_numbers();
+    test_map_gen();
+    test_filter_gen();
+    test_chain_gen();
+    test_counter_factory();
+    test_process_commands();
+    test_interleave();
+    test_empty_generator();
+    test_single_yield();
+    test_iterator_methods();
+
+    print("All sync generator tests passed!");
+}

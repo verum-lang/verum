@@ -1,0 +1,18 @@
+// @test: parse-fail
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, strings, error
+// @description: Test rejection of old raw string syntax (r#"..."# has been removed)
+//
+// Per simplified literal architecture v6.0:
+//   - The r#"..."# syntax has been REMOVED
+//   - Raw strings now use triple-quoted syntax: """..."""
+//   - This test verifies the parser rejects old syntax with proper diagnostics
+//
+// @expected-error: E010
+
+fn test_old_raw_string_syntax_rejected() {
+    // Old Rust-style raw string syntax is no longer valid
+    let s = r"this is invalid";
+}

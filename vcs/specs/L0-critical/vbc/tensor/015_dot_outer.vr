@@ -1,0 +1,142 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, dot-product, outer-product, linear-algebra
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Dot product and outer product
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+type Arr4 is { d0: Float, d1: Float, d2: Float, d3: Float };
+type Mat2x2 is { a00: Float, a01: Float, a10: Float, a11: Float };
+
+fn arr4_get(a: Arr4, idx: Int) -> Float {
+    if idx == 0 { a.d0 }
+    else if idx == 1 { a.d1 }
+    else if idx == 2 { a.d2 }
+    else { a.d3 }
+}
+
+// dot product using individual float parameters (avoids record-field addition bug)
+fn dot4f(ax: Float, ay: Float, az: Float, aw: Float,
+         bx: Float, b_y: Float, bz: Float, bw: Float) -> Float {
+    ax * bx + ay * b_y + az * bz + aw * bw
+}
+
+// dot product for 3 elements
+fn dot3f(ax: Float, ay: Float, az: Float,
+         bx: Float, b_y: Float, bz: Float) -> Float {
+    ax * bx + ay * b_y + az * bz
+}
+
+// outer product of two 2-element vectors -> 2x2 matrix
+fn outer2(a0: Float, a1: Float, b0: Float, b1: Float) -> Mat2x2 {
+    Mat2x2 {
+        a00: a0 * b0, a01: a0 * b1,
+        a10: a1 * b0, a11: a1 * b1
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_dot_product() {
+    // [1, 2, 3, 4] . [5, 6, 7, 8] = 1*5 + 2*6 + 3*7 + 4*8 = 5 + 12 + 21 + 32 = 70
+    let d = dot4f(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
+    assert_eq(d, 70.0);
+
+    // [1, 0, 0, 0] . [0, 1, 0, 0] = 0 (orthogonal basis vectors)
+    let d2 = dot4f(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    assert_eq(d2, 0.0);
+
+    // Self dot = magnitude squared: [3, 4, 0, 0] . [3, 4, 0, 0] = 25
+    let d3 = dot4f(3.0, 4.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0);
+    assert_eq(d3, 25.0);
+    print("  test_dot_product: ok");
+}
+
+@test
+fn test_outer_product() {
+    // outer([1, 2], [3, 4]) = [[3, 4], [6, 8]]
+    let m = outer2(1.0, 2.0, 3.0, 4.0);
+
+    assert_eq(m.a00, 3.0);
+    assert_eq(m.a01, 4.0);
+    assert_eq(m.a10, 6.0);
+    assert_eq(m.a11, 8.0);
+
+    // outer([2, 0], [0, 3]) = [[0, 6], [0, 0]]
+    let m2 = outer2(2.0, 0.0, 0.0, 3.0);
+    assert_eq(m2.a00, 0.0);
+    assert_eq(m2.a01, 6.0);
+    assert_eq(m2.a10, 0.0);
+    assert_eq(m2.a11, 0.0);
+    print("  test_outer_product: ok");
+}
+
+@test
+fn test_dot_orthogonal() {
+    // Standard basis vectors in 3D are mutually orthogonal
+    // e1=[1,0,0], e2=[0,1,0], e3=[0,0,1]
+    assert_eq(dot3f(1.0, 0.0, 0.0, 0.0, 1.0, 0.0), 0.0);
+    assert_eq(dot3f(1.0, 0.0, 0.0, 0.0, 0.0, 1.0), 0.0);
+    assert_eq(dot3f(0.0, 1.0, 0.0, 0.0, 0.0, 1.0), 0.0);
+
+    // Self dot = 1 for unit vectors
+    assert_eq(dot3f(1.0, 0.0, 0.0, 1.0, 0.0, 0.0), 1.0);
+    assert_eq(dot3f(0.0, 1.0, 0.0, 0.0, 1.0, 0.0), 1.0);
+    assert_eq(dot3f(0.0, 0.0, 1.0, 0.0, 0.0, 1.0), 1.0);
+
+    // Perpendicular non-unit vectors: [1,1,0] . [-1,1,0] = -1+1+0 = 0
+    assert_eq(dot3f(1.0, 1.0, 0.0, -1.0, 1.0, 0.0), 0.0);
+    print("  test_dot_orthogonal: ok");
+}
+
+@test
+fn test_outer_rank1() {
+    // outer product of unit vectors creates rank-1 matrix
+    // outer([1,0], [0,1]) has only a01 = 1.0
+    let m = outer2(1.0, 0.0, 0.0, 1.0);
+    assert_eq(m.a00, 0.0);
+    assert_eq(m.a01, 1.0);
+    assert_eq(m.a10, 0.0);
+    assert_eq(m.a11, 0.0);
+
+    // outer([1,0], [1,0]) = [[1,0],[0,0]]
+    let m2 = outer2(1.0, 0.0, 1.0, 0.0);
+    assert_eq(m2.a00, 1.0);
+    assert_eq(m2.a01, 0.0);
+    assert_eq(m2.a10, 0.0);
+    assert_eq(m2.a11, 0.0);
+
+    // outer([3,4], [3,4]) = [[9,12],[12,16]] - rank-1 symmetric matrix
+    let m3 = outer2(3.0, 4.0, 3.0, 4.0);
+    assert_eq(m3.a00, 9.0);
+    assert_eq(m3.a01, 12.0);
+    assert_eq(m3.a10, 12.0);
+    assert_eq(m3.a11, 16.0);
+    print("  test_outer_rank1: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_dot_product();
+    test_outer_product();
+    test_dot_orthogonal();
+    test_outer_rank1();
+
+    print("[OK] 015_dot_outer");
+    0
+}

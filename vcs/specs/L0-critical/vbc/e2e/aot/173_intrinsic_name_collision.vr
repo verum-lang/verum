@@ -1,0 +1,50 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: aot, codegen, intrinsic, regression
+// @expect: pass
+// Bug 1 reproducer: User-defined functions with names matching intrinsics
+// should NOT be hijacked by intrinsic opcodes.
+
+fn wrapping_add(a: Int, b: Int) -> Int {
+    // User logic: multiply instead of add (to prove this code runs, not the intrinsic)
+    a * 100 + b
+}
+
+fn pow(base: Int, exp: Int) -> Int {
+    // User logic: simple iterative power (NOT the float intrinsic)
+    let mut result = 1;
+    let mut i = 0;
+    if exp == 0 {
+        1
+    } else {
+        let mut r = 1;
+        let mut j = 0;
+        while j < exp {
+            r = r * base;
+            j = j + 1;
+        }
+        r
+    }
+}
+
+fn checked_mul(a: Int, b: Int) -> Int {
+    // User logic: returns a + b (to prove it's not the real checked_mul intrinsic)
+    a + b
+}
+
+fn main() -> Int {
+    // wrapping_add should do a * 100 + b, NOT actual wrapping add
+    let r1 = wrapping_add(3, 7);
+    assert_eq(r1, 307);
+
+    // pow should do iterative multiplication, NOT float power
+    let r2 = pow(2, 10);
+    assert_eq(r2, 1024);
+
+    // checked_mul should do a + b, NOT actual checked multiply
+    let r3 = checked_mul(5, 3);
+    assert_eq(r3, 8);
+
+    0
+}

@@ -1,0 +1,32 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, division, error
+// @description: Test that division by zero is caught at compile time in meta evaluation
+// @expected-error: Division by zero
+
+// =============================================================================
+// DIVISION BY ZERO TESTS
+// =============================================================================
+
+// Test integer division by zero
+meta fn test_div_by_zero() -> Int {
+    let x = 10;
+    let y = 0;
+    x / y  // ERROR: division by zero
+}
+
+// Test modulo by zero
+meta fn test_mod_by_zero() -> Int {
+    let x = 10;
+    let y = 0;
+    x % y  // ERROR: division by zero (modulo)
+}
+
+// Test division by expression that evaluates to zero
+meta fn test_div_by_computed_zero() -> Int {
+    let a = 5;
+    let b = 5;
+    let divisor = a - b;  // = 0
+    100 / divisor  // ERROR: division by zero
+}

@@ -1,0 +1,534 @@
+// Async patterns in Verum
+// Tests async/await, concurrency, and structured concurrency
+
+use verum_core.base.{List, Text, Maybe, Result}
+use verum_std.async.{spawn, sleep, timeout, select, join}
+use verum_std.channel.{channel, Sender, Receiver}
+use verum_std.sync.{Mutex, RwLock, Semaphore}
+use verum_std.time.Duration
+
+fn main() {
+    Runtime.new().block_on(async_main());
+}
+
+async fn async_main() {
+    test_basic_async().await;
+    test_spawning().await;
+    test_channels().await;
+    test_select().await;
+    test_join().await;
+    test_timeout().await;
+    test_synchronization().await;
+    test_cancellation().await;
+    test_error_handling().await;
+}
+
+// Basic async/await
+async fn test_basic_async() {
+    // Simple async function
+    let result = simple_async().await;
+    assert result == 42;
+
+    // Chained awaits
+    let a = fetch_data("url1").await;
+    let b = process_data(a).await;
+    let c = save_result(b).await;
+
+    // Async in expression position
+    let combined = (fetch_a().await, fetch_b().await);
+
+    // Async with error handling
+    let maybe_result = fallible_async().await?;
+}
+
+async fn simple_async() -> Int {
+    await sleep(Duration.from_millis(10));
+    42
+}
+
+async fn fetch_data(url: Text) -> Text {
+    await sleep(Duration.from_millis(50));
+    format("data from {}", url)
+}
+
+async fn process_data(data: Text) -> Text {
+    await sleep(Duration.from_millis(30));
+    data.to_uppercase()
+}
+
+async fn save_result(data: Text) -> Bool {
+    await sleep(Duration.from_millis(20));
+    true
+}
+
+async fn fetch_a() -> Int { await sleep(Duration.from_millis(10)); 1 }
+async fn fetch_b() -> Int { await sleep(Duration.from_millis(10)); 2 }
+
+async fn fallible_async() -> Result<Int, Text> {
+    await sleep(Duration.from_millis(10));
+    Ok(42)
+}
+
+// Spawning tasks
+async fn test_spawning() {
+    // Simple spawn
+    let handle = spawn async {
+        await sleep(Duration.from_millis(100));
+        42
+    };
+    let result = await handle;
+    assert result == 42;
+
+    // Multiple spawns
+    let mut handles = [];
+    for i in 0..10 {
+        let h = spawn async {
+            await sleep(Duration.from_millis(i as u64 * 10));
+            i * 2
+        };
+        handles.push(h);
+    }
+
+    // Collect results
+    let mut results = [];
+    for handle in handles {
+        results.push(await handle);
+    }
+
+    // Spawn with capture
+    let factor = 3;
+    let h = spawn async move {
+        factor * 7
+    };
+    assert await h == 21;
+
+    // Nested spawn
+    let outer = spawn async {
+        let inner = spawn async {
+            await sleep(Duration.from_millis(10));
+            "inner"
+        };
+        let inner_result = await inner;
+        format("outer: {}", inner_result)
+    };
+    let nested_result = await outer;
+}
+
+// Channel patterns
+async fn test_channels() {
+    // Unbounded channel
+    let (tx, rx) = channel<Int>();
+
+    spawn async move {
+        for i in 0..10 {
+            await tx.send(i);
+        }
+        drop(tx); // Close channel
+    };
+
+    let mut received = [];
+    while let Some(value) = await rx.recv() {
+        received.push(value);
+    }
+    assert len(received) == 10;
+
+    // Bounded channel
+    let (tx, rx) = channel<Int>(5);
+
+    let producer = spawn async move {
+        for i in 0..20 {
+            await tx.send(i);  // Will block when buffer full
+        }
+    };
+
+    let consumer = spawn async move {
+        let mut sum = 0;
+        while let Some(value) = await rx.recv() {
+            sum = sum + value;
+            await sleep(Duration.from_millis(1));  // Slow consumer
+        }
+        sum
+    };
+
+    await producer;
+    let total = await consumer;
+
+    // Multiple producers, single consumer (MPSC)
+    let (tx, rx) = channel<Int>();
+
+    for i in 0..3 {
+        let tx = tx.clone();
+        spawn async move {
+            for j in 0..5 {
+                await tx.send(i * 100 + j);
+            }
+        };
+    }
+    drop(tx);
+
+    let mut all_values = [];
+    while let Some(v) = await rx.recv() {
+        all_values.push(v);
+    }
+    assert len(all_values) == 15;
+}
+
+// Select pattern
+async fn test_select() {
+    // Basic select
+    let result = select {
+        v = async { 1 } => v,
+        v = async { 2 } => v,
+    };
+
+    // Select with timeout
+    let (tx, rx) = channel<Int>();
+
+    let result = select {
+        value = rx.recv() => {
+            match value {
+                Some(v) => format("received: {}", v),
+                None => "channel closed",
+            }
+        }
+        _ = sleep(Duration.from_secs(1)) => {
+            "timeout"
+        }
+    };
+
+    // Select with multiple channels
+    let (tx1, rx1) = channel<Int>();
+    let (tx2, rx2) = channel<Text>();
+
+    spawn async move {
+        await sleep(Duration.from_millis(50));
+        await tx1.send(42);
+    };
+
+    spawn async move {
+        await sleep(Duration.from_millis(30));
+        await tx2.send("hello");
+    };
+
+    let first = select {
+        v = rx1.recv() => format("int: {:?}", v),
+        v = rx2.recv() => format("text: {:?}", v),
+    };
+
+    // Select in loop
+    let (tx, rx) = channel<Int>();
+    let mut done = false;
+
+    while !done {
+        select {
+            value = rx.recv() => {
+                match value {
+                    Some(v) => println("got: {}", v),
+                    None => done = true,
+                }
+            }
+            _ = sleep(Duration.from_secs(5)) => {
+                println("heartbeat");
+            }
+        }
+    }
+}
+
+// Join pattern
+async fn test_join() {
+    // Basic join
+    let (a, b, c) = await join(
+        async { 1 },
+        async { 2 },
+        async { 3 },
+    );
+    assert a == 1 && b == 2 && c == 3;
+
+    // Join with different types
+    let (num, text, flag) = await join(
+        async { 42 },
+        async { "hello" },
+        async { true },
+    );
+
+    // Join list of futures
+    let futures = [
+        async { 1 },
+        async { 2 },
+        async { 3 },
+    ];
+    let results = await join_all(futures);
+    assert results == [1, 2, 3];
+
+    // Try join (fail fast)
+    let result = await try_join(
+        fallible_async(),
+        fallible_async(),
+        fallible_async(),
+    );
+
+    // Join with spawned tasks
+    let handles = [
+        spawn async { fetch_data("url1").await },
+        spawn async { fetch_data("url2").await },
+        spawn async { fetch_data("url3").await },
+    ];
+    let data = await join_all(handles);
+}
+
+async fn join_all<T>(futures: List<impl Future<Output = T>>) -> List<T> {
+    let mut results = [];
+    for future in futures {
+        results.push(await future);
+    }
+    results
+}
+
+// Timeout handling
+async fn test_timeout() {
+    // Simple timeout
+    let result = await timeout(
+        Duration.from_secs(1),
+        async {
+            await sleep(Duration.from_millis(100));
+            42
+        }
+    );
+    assert result.is_ok();
+
+    // Timeout that expires
+    let result = await timeout(
+        Duration.from_millis(10),
+        async {
+            await sleep(Duration.from_secs(1));
+            42
+        }
+    );
+    assert result.is_err();
+
+    // Timeout with fallback
+    let value = match await timeout(Duration.from_millis(100), slow_operation()) {
+        Ok(v) => v,
+        Err(_) => default_value(),
+    };
+
+    // Retry with timeout
+    let mut attempts = 0;
+    let result = loop {
+        attempts = attempts + 1;
+        match await timeout(Duration.from_secs(1), unreliable_operation()) {
+            Ok(v) => break Ok(v),
+            Err(_) if attempts < 3 => continue,
+            Err(e) => break Err(e),
+        }
+    };
+}
+
+async fn slow_operation() -> Int {
+    await sleep(Duration.from_secs(10));
+    42
+}
+
+fn default_value() -> Int { 0 }
+
+async fn unreliable_operation() -> Result<Int, Text> {
+    await sleep(Duration.from_millis(100));
+    Ok(42)
+}
+
+// Synchronization primitives
+async fn test_synchronization() {
+    // Mutex
+    let counter = Mutex.new(0);
+
+    let mut handles = [];
+    for _ in 0..10 {
+        let counter = counter.clone();
+        let h = spawn async move {
+            for _ in 0..100 {
+                let mut guard = await counter.lock();
+                *guard = *guard + 1;
+            }
+        };
+        handles.push(h);
+    }
+
+    for h in handles {
+        await h;
+    }
+
+    let final_count = await counter.lock();
+    assert *final_count == 1000;
+
+    // RwLock
+    let data = RwLock.new(List.new());
+
+    // Writer
+    let data_write = data.clone();
+    let writer = spawn async move {
+        for i in 0..10 {
+            let mut guard = await data_write.write();
+            guard.push(i);
+            await sleep(Duration.from_millis(10));
+        }
+    };
+
+    // Readers
+    let mut readers = [];
+    for _ in 0..3 {
+        let data_read = data.clone();
+        let r = spawn async move {
+            for _ in 0..20 {
+                let guard = await data_read.read();
+                let _len = guard.len();
+                await sleep(Duration.from_millis(5));
+            }
+        };
+        readers.push(r);
+    }
+
+    await writer;
+    for r in readers {
+        await r;
+    }
+
+    // Semaphore
+    let sem = Semaphore.new(3);
+
+    let mut handles = [];
+    for i in 0..10 {
+        let sem = sem.clone();
+        let h = spawn async move {
+            let _permit = await sem.acquire();
+            // At most 3 concurrent here
+            await sleep(Duration.from_millis(50));
+            i
+        };
+        handles.push(h);
+    }
+
+    for h in handles {
+        await h;
+    }
+}
+
+// Cancellation
+async fn test_cancellation() {
+    // Cancellation token
+    let token = CancellationToken.new();
+
+    let work = spawn async {
+        loop {
+            if token.is_cancelled() {
+                return Err("cancelled");
+            }
+            await sleep(Duration.from_millis(100));
+            // Do work...
+        }
+    };
+
+    // Cancel after some time
+    await sleep(Duration.from_secs(1));
+    token.cancel();
+
+    let result = await work;
+    assert result.is_err();
+
+    // Scoped cancellation
+    let token = CancellationToken.new();
+    let child_token = token.child();
+
+    let parent = spawn async {
+        await sleep(Duration.from_secs(2));
+    };
+
+    let child = spawn async {
+        loop {
+            await child_token.cancelled();
+            return;
+        }
+    };
+
+    // Cancelling parent cancels children
+    token.cancel();
+    await child; // Returns immediately
+
+    // Graceful shutdown
+    async fn graceful_shutdown(token: CancellationToken) {
+        select {
+            _ = do_work() => println("work completed"),
+            _ = token.cancelled() => {
+                println("cancellation requested, cleaning up...");
+                await cleanup();
+                println("cleanup complete");
+            }
+        }
+    }
+}
+
+async fn do_work() {
+    await sleep(Duration.from_secs(60));
+}
+
+async fn cleanup() {
+    await sleep(Duration.from_millis(100));
+}
+
+// Error handling in async
+async fn test_error_handling() {
+    // Try in async
+    let result: Result<Int, Text> = try {
+        let a = await fallible_operation()?;
+        let b = await another_fallible()?;
+        a + b
+    };
+
+    // Async with context
+    async fn with_context() using [Database, Logger] {
+        Logger.info("Starting operation");
+        let data = await Database.query("SELECT * FROM users");
+        Logger.info("Query complete");
+        data
+    }
+
+    // Error propagation
+    async fn fetch_and_process() -> Result<Text, Error> {
+        let data = await fetch("url").map_err(|e| Error.Fetch(e))?;
+        let processed = await process(data).map_err(|e| Error.Process(e))?;
+        Ok(processed)
+    }
+
+    // Retry logic
+    async fn with_retry<T, E>(
+        f: impl Fn() -> Future<Result<T, E>>,
+        max_retries: Int,
+    ) -> Result<T, E> {
+        let mut last_error = None;
+        for _ in 0..max_retries {
+            match await f() {
+                Ok(v) => return Ok(v),
+                Err(e) => last_error = Some(e),
+            }
+            await sleep(Duration.from_secs(1));
+        }
+        Err(last_error.unwrap())
+    }
+}
+
+async fn fallible_operation() -> Result<Int, Text> {
+    await sleep(Duration.from_millis(10));
+    Ok(42)
+}
+
+async fn another_fallible() -> Result<Int, Text> {
+    await sleep(Duration.from_millis(10));
+    Ok(10)
+}
+
+async fn fetch(url: Text) -> Result<Text, FetchError> {
+    Ok("data")
+}
+
+async fn process(data: Text) -> Result<Text, ProcessError> {
+    Ok(data.to_uppercase())
+}

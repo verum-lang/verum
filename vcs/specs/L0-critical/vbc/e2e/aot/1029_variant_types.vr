@@ -1,0 +1,113 @@
+// @test: run
+// Variant (sum) types — construction, matching, nested variants
+
+type Shape is
+    Circle(Int)
+  | Rect { w: Int, h: Int }
+  | Triangle { base: Int, height: Int };
+
+fn area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Rect { w, h } => w * h,
+        Triangle { base, height } => base * height / 2,
+    }
+}
+
+fn describe(s: Shape) -> Text {
+    match s {
+        Circle(_) => "circle",
+        Rect { w: _, h: _ } => "rectangle",
+        Triangle { base: _, height: _ } => "triangle",
+    }
+}
+
+type Expr is
+    Lit(Int)
+  | Add { left: Heap<Expr>, right: Heap<Expr> }
+  | Mul { left: Heap<Expr>, right: Heap<Expr> };
+
+@allow(unbounded_recursion)
+fn eval(e: Expr) -> Int {
+    match e {
+        Lit(n) => n,
+        Add { left, right } => eval(*left) + eval(*right),
+        Mul { left, right } => eval(*left) * eval(*right),
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Circle
+    let c = Circle(5);
+    let ca = area(c);
+    if (ca != 75) {
+        print(f"FAIL test1: circle area = {ca}");
+        return 1;
+    }
+    print("test1 circle: OK");
+
+    // Test 2: Rectangle
+    let r = Rect { w: 4, h: 6 };
+    let ra = area(r);
+    if (ra != 24) {
+        print(f"FAIL test2: rect area = {ra}");
+        return 1;
+    }
+    print("test2 rect: OK");
+
+    // Test 3: Triangle
+    let t = Triangle { base: 10, height: 5 };
+    let ta = area(t);
+    if (ta != 25) {
+        print(f"FAIL test3: triangle area = {ta}");
+        return 1;
+    }
+    print("test3 triangle: OK");
+
+    // Test 4: Describe
+    let d1 = describe(Circle(1));
+    let d2 = describe(Rect { w: 1, h: 1 });
+    if (d1 != "circle") {
+        print(f"FAIL test4: d1 = {d1}");
+        return 1;
+    }
+    if (d2 != "rectangle") {
+        print(f"FAIL test4: d2 = {d2}");
+        return 1;
+    }
+    print("test4 describe: OK");
+
+    // Test 5: Is-pattern
+    let s = Circle(10);
+    if (!(s is Circle)) {
+        print("FAIL test5: is Circle");
+        return 1;
+    }
+    if (s is Rect) {
+        print("FAIL test5: not Rect");
+        return 1;
+    }
+    print("test5 is-pattern: OK");
+
+    // Test 6: Recursive expression tree
+    // (2 + 3) * (4 + 1) = 5 * 5 = 25
+    let expr = Mul {
+        left: Heap(Add {
+            left: Heap(Lit(2)),
+            right: Heap(Lit(3)),
+        }),
+        right: Heap(Add {
+            left: Heap(Lit(4)),
+            right: Heap(Lit(1)),
+        }),
+    };
+    let result = eval(expr);
+    if (result != 25) {
+        print(f"FAIL test6: eval = {result}");
+        return 1;
+    }
+    print("test6 expr tree: OK");
+
+    print("1029_variant_types: PASS");
+    0
+}

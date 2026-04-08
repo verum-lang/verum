@@ -1,0 +1,214 @@
+// @test: differential
+
+// @level: L0
+// @tags: differential, set, bitmask, operations
+// @timeout: 30000
+
+// Set operations using bitmask representation (elements 0-7)
+
+fn set_empty() -> Int { 0 }
+fn set_full(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r - 1
+}
+
+fn set_add(s: Int, elem: Int) -> Int {
+    let mut b = 1;
+    let mut i = 0;
+    while i < elem { b = b * 2; i = i + 1; }
+    if (s / b) % 2 == 0 { s + b } else { s }
+}
+
+fn set_remove(s: Int, elem: Int) -> Int {
+    let mut b = 1;
+    let mut i = 0;
+    while i < elem { b = b * 2; i = i + 1; }
+    if (s / b) % 2 == 1 { s - b } else { s }
+}
+
+fn set_contains(s: Int, elem: Int) -> Int {
+    let mut b = 1;
+    let mut i = 0;
+    while i < elem { b = b * 2; i = i + 1; }
+    (s / b) % 2
+}
+
+fn set_size(s: Int) -> Int {
+    let mut count = 0;
+    let mut m = s;
+    while m > 0 {
+        count = count + m % 2;
+        m = m / 2;
+    }
+    count
+}
+
+// Union: a | b using XOR and AND
+fn set_union(a: Int, b: Int) -> Int {
+    // a | b = a + b - (a & b)
+    // a & b: both bits set
+    let mut result = 0;
+    let mut bit = 1;
+    let mut aa = a;
+    let mut bb = b;
+    let mut i = 0;
+    while i < 8 {
+        let ab = aa % 2;
+        let bb_bit = bb % 2;
+        if ab == 1 { result = result + bit; }
+        else if bb_bit == 1 { result = result + bit; }
+        bit = bit * 2;
+        aa = aa / 2;
+        bb = bb / 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Intersection
+fn set_intersect(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut bit = 1;
+    let mut aa = a;
+    let mut bb = b;
+    let mut i = 0;
+    while i < 8 {
+        let ab = aa % 2;
+        let bb_bit = bb % 2;
+        if ab == 1 {
+            if bb_bit == 1 {
+                result = result + bit;
+            }
+        }
+        bit = bit * 2;
+        aa = aa / 2;
+        bb = bb / 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Difference: a - b
+fn set_diff(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut bit = 1;
+    let mut aa = a;
+    let mut bb = b;
+    let mut i = 0;
+    while i < 8 {
+        let ab = aa % 2;
+        let bb_bit = bb % 2;
+        if ab == 1 {
+            if bb_bit == 0 {
+                result = result + bit;
+            }
+        }
+        bit = bit * 2;
+        aa = aa / 2;
+        bb = bb / 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Symmetric difference
+fn set_sym_diff(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut bit = 1;
+    let mut aa = a;
+    let mut bb = b;
+    let mut i = 0;
+    while i < 8 {
+        let ab = aa % 2;
+        let bb_bit = bb % 2;
+        if ab != bb_bit {
+            result = result + bit;
+        }
+        bit = bit * 2;
+        aa = aa / 2;
+        bb = bb / 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Subset check: a ⊆ b
+fn set_is_subset(a: Int, b: Int) -> Int {
+    if set_intersect(a, b) == a { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    // Basic operations
+    let mut s = set_empty();
+    s = set_add(s, 1);
+    s = set_add(s, 3);
+    s = set_add(s, 5);
+    assert_eq(set_size(s), 3);
+    assert_eq(set_contains(s, 1), 1);
+    assert_eq(set_contains(s, 2), 0);
+    assert_eq(set_contains(s, 3), 1);
+
+    s = set_remove(s, 3);
+    assert_eq(set_size(s), 2);
+    assert_eq(set_contains(s, 3), 0);
+
+    // Idempotent add/remove
+    s = set_add(s, 1); // already present
+    assert_eq(set_size(s), 2);
+    s = set_remove(s, 7); // not present
+    assert_eq(set_size(s), 2);
+
+    // Set operations
+    let a = set_add(set_add(set_add(set_empty(), 1), 2), 3); // {1,2,3}
+    let b = set_add(set_add(set_add(set_empty(), 2), 3), 4); // {2,3,4}
+
+    let u = set_union(a, b);       // {1,2,3,4}
+    assert_eq(set_size(u), 4);
+    assert_eq(set_contains(u, 1), 1);
+    assert_eq(set_contains(u, 4), 1);
+
+    let i_set = set_intersect(a, b);   // {2,3}
+    assert_eq(set_size(i_set), 2);
+    assert_eq(set_contains(i_set, 2), 1);
+    assert_eq(set_contains(i_set, 1), 0);
+
+    let d = set_diff(a, b);        // {1}
+    assert_eq(set_size(d), 1);
+    assert_eq(set_contains(d, 1), 1);
+
+    let sd = set_sym_diff(a, b);   // {1,4}
+    assert_eq(set_size(sd), 2);
+    assert_eq(set_contains(sd, 1), 1);
+    assert_eq(set_contains(sd, 4), 1);
+    assert_eq(set_contains(sd, 2), 0);
+
+    // Set identities
+    // A ∪ A = A
+    assert_eq(set_union(a, a), a);
+    // A ∩ A = A
+    assert_eq(set_intersect(a, a), a);
+    // A - A = ∅
+    assert_eq(set_diff(a, a), 0);
+    // A ∪ ∅ = A
+    assert_eq(set_union(a, 0), a);
+    // A ∩ ∅ = ∅
+    assert_eq(set_intersect(a, 0), 0);
+
+    // Subset checks
+    assert_eq(set_is_subset(i_set, a), 1);  // {2,3} ⊆ {1,2,3}
+    assert_eq(set_is_subset(a, u), 1);       // {1,2,3} ⊆ {1,2,3,4}
+    assert_eq(set_is_subset(a, b), 0);       // {1,2,3} ⊄ {2,3,4}
+
+    // Full set
+    let full = set_full(4); // {0,1,2,3} = 15
+    assert_eq(full, 15);
+    assert_eq(set_size(full), 4);
+
+    // |A ∪ B| = |A| + |B| - |A ∩ B|
+    assert_eq(set_size(u), set_size(a) + set_size(b) - set_size(i_set));
+
+    print("[OK] diff_set_operations");
+    0
+}

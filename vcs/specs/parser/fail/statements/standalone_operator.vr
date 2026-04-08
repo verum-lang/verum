@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, expression, operator, error
+// @description: Test standalone operator as expression statement
+// @expected-error: E048
+
+fn test() {
+    +;
+}

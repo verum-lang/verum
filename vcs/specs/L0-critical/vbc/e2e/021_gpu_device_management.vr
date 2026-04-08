@@ -1,0 +1,502 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, gpu, device, management, stream, event
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: GPU device management operations through VBC interpreter.
+// In interpreter mode all GPU operations use CPU fallback stubs:
+// device count returns 0 (no real GPU), streams/events are logical IDs,
+// synchronization is always immediate (no-op).
+
+// ============================================================================
+// Device info record (mirrors what the runtime would report)
+// ============================================================================
+
+type DeviceInfo is {
+    device_id: Int,
+    total_memory: Int,
+    free_memory: Int,
+    is_available: Bool
+};
+
+fn make_default_device() -> DeviceInfo {
+    DeviceInfo {
+        device_id: 0,
+        total_memory: 0,
+        free_memory: 0,
+        is_available: false
+    }
+}
+
+// ============================================================================
+// Simulated GPU device management (CPU fallback behavior)
+// ============================================================================
+
+type DeviceManager is {
+    current_device: Int,
+    device_count: Int,
+    next_stream_id: Int,
+    next_event_id: Int,
+    // Track active streams (up to 8)
+    stream0: Int, stream1: Int, stream2: Int, stream3: Int,
+    stream4: Int, stream5: Int, stream6: Int, stream7: Int,
+    stream_count: Int,
+    // Track active events (up to 8)
+    event0: Int, event1: Int, event2: Int, event3: Int,
+    event4: Int, event5: Int, event6: Int, event7: Int,
+    event_count: Int
+};
+
+fn dm_new() -> DeviceManager {
+    DeviceManager {
+        current_device: 0,
+        device_count: 0,
+        next_stream_id: 1,
+        next_event_id: 1,
+        stream0: 0, stream1: 0, stream2: 0, stream3: 0,
+        stream4: 0, stream5: 0, stream6: 0, stream7: 0,
+        stream_count: 0,
+        event0: 0, event1: 0, event2: 0, event3: 0,
+        event4: 0, event5: 0, event6: 0, event7: 0,
+        event_count: 0
+    }
+}
+
+fn dm_get_stream(dm: DeviceManager, idx: Int) -> Int {
+    if idx == 0 { dm.stream0 }
+    else if idx == 1 { dm.stream1 }
+    else if idx == 2 { dm.stream2 }
+    else if idx == 3 { dm.stream3 }
+    else if idx == 4 { dm.stream4 }
+    else if idx == 5 { dm.stream5 }
+    else if idx == 6 { dm.stream6 }
+    else { dm.stream7 }
+}
+
+fn dm_set_stream(dm: DeviceManager, idx: Int, val: Int) -> DeviceManager {
+    DeviceManager {
+        current_device: dm.current_device,
+        device_count: dm.device_count,
+        next_stream_id: dm.next_stream_id,
+        next_event_id: dm.next_event_id,
+        stream0: if idx == 0 { val } else { dm.stream0 },
+        stream1: if idx == 1 { val } else { dm.stream1 },
+        stream2: if idx == 2 { val } else { dm.stream2 },
+        stream3: if idx == 3 { val } else { dm.stream3 },
+        stream4: if idx == 4 { val } else { dm.stream4 },
+        stream5: if idx == 5 { val } else { dm.stream5 },
+        stream6: if idx == 6 { val } else { dm.stream6 },
+        stream7: if idx == 7 { val } else { dm.stream7 },
+        stream_count: dm.stream_count,
+        event0: dm.event0, event1: dm.event1, event2: dm.event2, event3: dm.event3,
+        event4: dm.event4, event5: dm.event5, event6: dm.event6, event7: dm.event7,
+        event_count: dm.event_count
+    }
+}
+
+fn dm_get_event(dm: DeviceManager, idx: Int) -> Int {
+    if idx == 0 { dm.event0 }
+    else if idx == 1 { dm.event1 }
+    else if idx == 2 { dm.event2 }
+    else if idx == 3 { dm.event3 }
+    else if idx == 4 { dm.event4 }
+    else if idx == 5 { dm.event5 }
+    else if idx == 6 { dm.event6 }
+    else { dm.event7 }
+}
+
+fn dm_set_event(dm: DeviceManager, idx: Int, val: Int) -> DeviceManager {
+    DeviceManager {
+        current_device: dm.current_device,
+        device_count: dm.device_count,
+        next_stream_id: dm.next_stream_id,
+        next_event_id: dm.next_event_id,
+        stream0: dm.stream0, stream1: dm.stream1, stream2: dm.stream2, stream3: dm.stream3,
+        stream4: dm.stream4, stream5: dm.stream5, stream6: dm.stream6, stream7: dm.stream7,
+        stream_count: dm.stream_count,
+        event0: if idx == 0 { val } else { dm.event0 },
+        event1: if idx == 1 { val } else { dm.event1 },
+        event2: if idx == 2 { val } else { dm.event2 },
+        event3: if idx == 3 { val } else { dm.event3 },
+        event4: if idx == 4 { val } else { dm.event4 },
+        event5: if idx == 5 { val } else { dm.event5 },
+        event6: if idx == 6 { val } else { dm.event6 },
+        event7: if idx == 7 { val } else { dm.event7 },
+        event_count: dm.event_count
+    }
+}
+
+// ============================================================================
+// Device management operations
+// ============================================================================
+
+fn dm_get_device_count(dm: DeviceManager) -> Int {
+    // In interpreter/CPU fallback mode, device count is 0 (no GPU)
+    dm.device_count
+}
+
+fn dm_set_current_device(dm: DeviceManager, id: Int) -> DeviceManager {
+    DeviceManager {
+        current_device: id,
+        device_count: dm.device_count,
+        next_stream_id: dm.next_stream_id,
+        next_event_id: dm.next_event_id,
+        stream0: dm.stream0, stream1: dm.stream1, stream2: dm.stream2, stream3: dm.stream3,
+        stream4: dm.stream4, stream5: dm.stream5, stream6: dm.stream6, stream7: dm.stream7,
+        stream_count: dm.stream_count,
+        event0: dm.event0, event1: dm.event1, event2: dm.event2, event3: dm.event3,
+        event4: dm.event4, event5: dm.event5, event6: dm.event6, event7: dm.event7,
+        event_count: dm.event_count
+    }
+}
+
+fn dm_get_memory_info(dm: DeviceManager) -> DeviceInfo {
+    // Interpreter returns defaults: no memory info available
+    DeviceInfo {
+        device_id: dm.current_device,
+        total_memory: 0,
+        free_memory: 0,
+        is_available: false
+    }
+}
+
+fn dm_create_stream(dm: DeviceManager) -> DeviceManager {
+    let sid = dm.next_stream_id;
+    let idx = dm.stream_count;
+    let dm2 = dm_set_stream(dm, idx, sid);
+    DeviceManager {
+        current_device: dm2.current_device,
+        device_count: dm2.device_count,
+        next_stream_id: sid + 1,
+        next_event_id: dm2.next_event_id,
+        stream0: dm2.stream0, stream1: dm2.stream1, stream2: dm2.stream2, stream3: dm2.stream3,
+        stream4: dm2.stream4, stream5: dm2.stream5, stream6: dm2.stream6, stream7: dm2.stream7,
+        stream_count: dm2.stream_count + 1,
+        event0: dm2.event0, event1: dm2.event1, event2: dm2.event2, event3: dm2.event3,
+        event4: dm2.event4, event5: dm2.event5, event6: dm2.event6, event7: dm2.event7,
+        event_count: dm2.event_count
+    }
+}
+
+fn dm_destroy_stream(dm: DeviceManager, sid: Int) -> DeviceManager {
+    // Find and remove stream by shifting
+    let mut found = -1;
+    let mut i = 0;
+    let mut dm2 = dm;
+    while i < dm.stream_count {
+        if dm_get_stream(dm, i) == sid {
+            found = i;
+        }
+        i = i + 1;
+    }
+    if found >= 0 {
+        // Shift streams down
+        let mut j = found;
+        while j < dm.stream_count - 1 {
+            dm2 = dm_set_stream(dm2, j, dm_get_stream(dm2, j + 1));
+            j = j + 1;
+        }
+        dm2 = dm_set_stream(dm2, dm.stream_count - 1, 0);
+        DeviceManager {
+            current_device: dm2.current_device,
+            device_count: dm2.device_count,
+            next_stream_id: dm2.next_stream_id,
+            next_event_id: dm2.next_event_id,
+            stream0: dm2.stream0, stream1: dm2.stream1, stream2: dm2.stream2, stream3: dm2.stream3,
+            stream4: dm2.stream4, stream5: dm2.stream5, stream6: dm2.stream6, stream7: dm2.stream7,
+            stream_count: dm2.stream_count - 1,
+            event0: dm2.event0, event1: dm2.event1, event2: dm2.event2, event3: dm2.event3,
+            event4: dm2.event4, event5: dm2.event5, event6: dm2.event6, event7: dm2.event7,
+            event_count: dm2.event_count
+        }
+    } else {
+        dm2
+    }
+}
+
+fn dm_create_event(dm: DeviceManager) -> DeviceManager {
+    let eid = dm.next_event_id;
+    let idx = dm.event_count;
+    let dm2 = dm_set_event(dm, idx, eid);
+    DeviceManager {
+        current_device: dm2.current_device,
+        device_count: dm2.device_count,
+        next_stream_id: dm2.next_stream_id,
+        next_event_id: eid + 1,
+        stream0: dm2.stream0, stream1: dm2.stream1, stream2: dm2.stream2, stream3: dm2.stream3,
+        stream4: dm2.stream4, stream5: dm2.stream5, stream6: dm2.stream6, stream7: dm2.stream7,
+        stream_count: dm2.stream_count,
+        event0: dm2.event0, event1: dm2.event1, event2: dm2.event2, event3: dm2.event3,
+        event4: dm2.event4, event5: dm2.event5, event6: dm2.event6, event7: dm2.event7,
+        event_count: dm2.event_count + 1
+    }
+}
+
+fn dm_destroy_event(dm: DeviceManager, eid: Int) -> DeviceManager {
+    let mut found = -1;
+    let mut i = 0;
+    let mut dm2 = dm;
+    while i < dm.event_count {
+        if dm_get_event(dm, i) == eid {
+            found = i;
+        }
+        i = i + 1;
+    }
+    if found >= 0 {
+        let mut j = found;
+        while j < dm.event_count - 1 {
+            dm2 = dm_set_event(dm2, j, dm_get_event(dm2, j + 1));
+            j = j + 1;
+        }
+        dm2 = dm_set_event(dm2, dm.event_count - 1, 0);
+        DeviceManager {
+            current_device: dm2.current_device,
+            device_count: dm2.device_count,
+            next_stream_id: dm2.next_stream_id,
+            next_event_id: dm2.next_event_id,
+            stream0: dm2.stream0, stream1: dm2.stream1, stream2: dm2.stream2, stream3: dm2.stream3,
+            stream4: dm2.stream4, stream5: dm2.stream5, stream6: dm2.stream6, stream7: dm2.stream7,
+            stream_count: dm2.stream_count,
+            event0: dm2.event0, event1: dm2.event1, event2: dm2.event2, event3: dm2.event3,
+            event4: dm2.event4, event5: dm2.event5, event6: dm2.event6, event7: dm2.event7,
+            event_count: dm2.event_count - 1
+        }
+    } else {
+        dm2
+    }
+}
+
+fn dm_query_stream_complete(dm: DeviceManager, sid: Int) -> Bool {
+    // In interpreter mode, all streams complete immediately
+    true
+}
+
+fn dm_device_reset(dm: DeviceManager) -> DeviceManager {
+    // No-op in interpreter mode, just return with zeroed streams/events
+    DeviceManager {
+        current_device: dm.current_device,
+        device_count: dm.device_count,
+        next_stream_id: 1,
+        next_event_id: 1,
+        stream0: 0, stream1: 0, stream2: 0, stream3: 0,
+        stream4: 0, stream5: 0, stream6: 0, stream7: 0,
+        stream_count: 0,
+        event0: 0, event1: 0, event2: 0, event3: 0,
+        event4: 0, event5: 0, event6: 0, event7: 0,
+        event_count: 0
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_device_count() {
+    let dm = dm_new();
+    // In interpreter mode, no GPU devices
+    assert_eq(dm_get_device_count(dm), 0);
+}
+
+fn test_current_device() {
+    let dm = dm_new();
+    assert_eq(dm.current_device, 0);
+
+    let dm2 = dm_set_current_device(dm, 1);
+    assert_eq(dm2.current_device, 1);
+
+    let dm3 = dm_set_current_device(dm2, 3);
+    assert_eq(dm3.current_device, 3);
+
+    // Setting back to 0
+    let dm4 = dm_set_current_device(dm3, 0);
+    assert_eq(dm4.current_device, 0);
+}
+
+fn test_memory_info() {
+    let dm = dm_new();
+    let info = dm_get_memory_info(dm);
+    // Interpreter returns default: zero memory, not available
+    assert_eq(info.device_id, 0);
+    assert_eq(info.total_memory, 0);
+    assert_eq(info.free_memory, 0);
+    assert_eq(info.is_available, false);
+
+    // After setting device, id should match
+    let dm2 = dm_set_current_device(dm, 2);
+    let info2 = dm_get_memory_info(dm2);
+    assert_eq(info2.device_id, 2);
+}
+
+fn test_stream_lifecycle() {
+    let dm = dm_new();
+    assert_eq(dm.stream_count, 0);
+
+    // Create a stream
+    let dm2 = dm_create_stream(dm);
+    assert_eq(dm2.stream_count, 1);
+    assert_eq(dm_get_stream(dm2, 0), 1); // first stream ID = 1
+
+    // Create another stream
+    let dm3 = dm_create_stream(dm2);
+    assert_eq(dm3.stream_count, 2);
+    assert_eq(dm_get_stream(dm3, 0), 1);
+    assert_eq(dm_get_stream(dm3, 1), 2);
+
+    // Destroy first stream
+    let dm4 = dm_destroy_stream(dm3, 1);
+    assert_eq(dm4.stream_count, 1);
+    assert_eq(dm_get_stream(dm4, 0), 2); // stream 2 shifted to index 0
+
+    // Destroy remaining stream
+    let dm5 = dm_destroy_stream(dm4, 2);
+    assert_eq(dm5.stream_count, 0);
+}
+
+fn test_event_lifecycle() {
+    let dm = dm_new();
+    assert_eq(dm.event_count, 0);
+
+    // Create events
+    let dm2 = dm_create_event(dm);
+    assert_eq(dm2.event_count, 1);
+    assert_eq(dm_get_event(dm2, 0), 1);
+
+    let dm3 = dm_create_event(dm2);
+    assert_eq(dm3.event_count, 2);
+    assert_eq(dm_get_event(dm3, 1), 2);
+
+    // Query event (in interpreter: event always "recorded")
+    // Destroy event
+    let dm4 = dm_destroy_event(dm3, 1);
+    assert_eq(dm4.event_count, 1);
+    assert_eq(dm_get_event(dm4, 0), 2);
+
+    let dm5 = dm_destroy_event(dm4, 2);
+    assert_eq(dm5.event_count, 0);
+}
+
+fn test_device_reset() {
+    let mut dm = dm_new();
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_create_event(dm);
+    dm = dm_create_event(dm);
+    dm = dm_create_event(dm);
+    assert_eq(dm.stream_count, 2);
+    assert_eq(dm.event_count, 3);
+
+    // Reset clears all streams and events
+    let dm2 = dm_device_reset(dm);
+    assert_eq(dm2.stream_count, 0);
+    assert_eq(dm2.event_count, 0);
+    assert_eq(dm2.next_stream_id, 1);
+    assert_eq(dm2.next_event_id, 1);
+    // Device selection preserved
+    assert_eq(dm2.current_device, dm.current_device);
+}
+
+fn test_stream_completion_query() {
+    let mut dm = dm_new();
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+
+    let sid1 = dm_get_stream(dm, 0);
+    let sid2 = dm_get_stream(dm, 1);
+
+    // In interpreter mode, all streams are always complete
+    assert_eq(dm_query_stream_complete(dm, sid1), true);
+    assert_eq(dm_query_stream_complete(dm, sid2), true);
+    // Even a nonexistent stream is "complete"
+    assert_eq(dm_query_stream_complete(dm, 999), true);
+}
+
+fn test_multiple_streams() {
+    let mut dm = dm_new();
+
+    // Create 5 streams
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    assert_eq(dm.stream_count, 5);
+
+    // Verify IDs are sequential
+    assert_eq(dm_get_stream(dm, 0), 1);
+    assert_eq(dm_get_stream(dm, 1), 2);
+    assert_eq(dm_get_stream(dm, 2), 3);
+    assert_eq(dm_get_stream(dm, 3), 4);
+    assert_eq(dm_get_stream(dm, 4), 5);
+
+    // Destroy middle stream (ID 3)
+    dm = dm_destroy_stream(dm, 3);
+    assert_eq(dm.stream_count, 4);
+    assert_eq(dm_get_stream(dm, 0), 1);
+    assert_eq(dm_get_stream(dm, 1), 2);
+    assert_eq(dm_get_stream(dm, 2), 4); // shifted
+    assert_eq(dm_get_stream(dm, 3), 5); // shifted
+
+    // Create new stream after destruction (gets next ID = 6)
+    dm = dm_create_stream(dm);
+    assert_eq(dm.stream_count, 5);
+    assert_eq(dm_get_stream(dm, 4), 6);
+}
+
+fn test_interleaved_stream_event() {
+    let mut dm = dm_new();
+
+    // Interleave stream and event creation
+    dm = dm_create_stream(dm);   // stream 1
+    dm = dm_create_event(dm);    // event 1
+    dm = dm_create_stream(dm);   // stream 2
+    dm = dm_create_event(dm);    // event 2
+    dm = dm_create_stream(dm);   // stream 3
+
+    assert_eq(dm.stream_count, 3);
+    assert_eq(dm.event_count, 2);
+    assert_eq(dm_get_stream(dm, 0), 1);
+    assert_eq(dm_get_stream(dm, 1), 2);
+    assert_eq(dm_get_stream(dm, 2), 3);
+    assert_eq(dm_get_event(dm, 0), 1);
+    assert_eq(dm_get_event(dm, 1), 2);
+
+    // Destroy event 1, stream 2
+    dm = dm_destroy_event(dm, 1);
+    dm = dm_destroy_stream(dm, 2);
+    assert_eq(dm.stream_count, 2);
+    assert_eq(dm.event_count, 1);
+    assert_eq(dm_get_stream(dm, 0), 1);
+    assert_eq(dm_get_stream(dm, 1), 3);
+    assert_eq(dm_get_event(dm, 0), 2);
+}
+
+fn test_destroy_nonexistent() {
+    let mut dm = dm_new();
+    dm = dm_create_stream(dm);
+    assert_eq(dm.stream_count, 1);
+
+    // Destroying a non-existent stream should be a no-op
+    dm = dm_destroy_stream(dm, 999);
+    assert_eq(dm.stream_count, 1);
+
+    // Destroying a non-existent event should be a no-op
+    dm = dm_destroy_event(dm, 999);
+    assert_eq(dm.event_count, 0);
+}
+
+fn main() -> Int {
+    test_device_count();
+    test_current_device();
+    test_memory_info();
+    test_stream_lifecycle();
+    test_event_lifecycle();
+    test_device_reset();
+    test_stream_completion_query();
+    test_multiple_streams();
+    test_interleaved_stream_event();
+    test_destroy_nonexistent();
+    print("[OK] 021_gpu_device_management");
+    0
+}

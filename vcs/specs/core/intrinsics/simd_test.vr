@@ -1,0 +1,109 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/simd_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, intrinsics, simd, lane, shuffle, reduction
+// @description: Tests for architecture-independent SIMD lane operation intrinsics
+//               including lane access, shuffling, and reductions.
+//
+// Coverage:
+// - Lane access: simd_extract, simd_insert
+// - Shuffling: simd_shuffle
+// - Arithmetic reductions: simd_reduce_add, simd_reduce_mul, simd_reduce_min, simd_reduce_max
+// - Bitwise reductions: simd_reduce_and, simd_reduce_or, simd_reduce_xor
+//
+// Test Strategy:
+// - Verify function imports resolve
+// - Verify function type signatures
+// =============================================================================
+
+module specs.core.intrinsics.simd_test;
+
+mount core.intrinsics.simd.{
+    simd_extract,
+    simd_insert,
+    simd_shuffle,
+    simd_reduce_add,
+    simd_reduce_mul,
+    simd_reduce_min,
+    simd_reduce_max,
+    simd_reduce_and,
+    simd_reduce_or,
+    simd_reduce_xor,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Lane Access Function Tests
+// =============================================================================
+
+@test
+fn test_simd_extract_exists() {
+    let _ = simd_extract;
+}
+
+@test
+fn test_simd_insert_exists() {
+    let _ = simd_insert;
+}
+
+// =============================================================================
+// Shuffling Function Tests
+// =============================================================================
+
+@test
+fn test_simd_shuffle_exists() {
+    let _ = simd_shuffle;
+}
+
+// =============================================================================
+// Arithmetic Reduction Function Tests
+// =============================================================================
+
+@test
+fn test_simd_reduce_add_exists() {
+    let _ = simd_reduce_add;
+}
+
+@test
+fn test_simd_reduce_mul_exists() {
+    let _ = simd_reduce_mul;
+}
+
+@test
+fn test_simd_reduce_min_exists() {
+    let _ = simd_reduce_min;
+}
+
+@test
+fn test_simd_reduce_max_exists() {
+    let _ = simd_reduce_max;
+}
+
+// =============================================================================
+// Bitwise Reduction Function Tests
+// =============================================================================
+
+@test
+fn test_simd_reduce_and_exists() {
+    let _ = simd_reduce_and;
+}
+
+@test
+fn test_simd_reduce_or_exists() {
+    let _ = simd_reduce_or;
+}
+
+@test
+fn test_simd_reduce_xor_exists() {
+    let _ = simd_reduce_xor;
+}

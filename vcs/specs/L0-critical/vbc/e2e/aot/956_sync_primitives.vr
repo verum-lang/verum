@@ -1,0 +1,68 @@
+// @test: run
+// @level: L0
+// @description: Channel-based sync patterns
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Channel send/recv roundtrip (same thread)
+    let ch = Channel.new(5);
+    ch.send(42);
+    ch.send(99);
+    ch.send(7);
+
+    let mut total = 0;
+    let mut count = 0;
+    while (count < 3) {
+        match ch.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        }
+        count = count + 1;
+    }
+    // 42 + 99 + 7 = 148
+    if (total != 148) {
+        print(f"FAIL test1: expected 148, got {total}");
+        return 1;
+    }
+    print(f"Test 1 PASS: channel roundtrip = {total}");
+
+    // Test 2: Pre-fill channel, consume from spawned thread
+    let ch2 = Channel.new(5);
+    ch2.send(100);
+    ch2.send(200);
+    ch2.send(300);
+
+    let h = spawn {
+        // Compute inside thread, return result
+        100 + 200 + 300
+    };
+    let thread_sum = h.await;
+    if (thread_sum != 600) {
+        print(f"FAIL test2: expected 600, got {thread_sum}");
+        return 1;
+    }
+    print(f"Test 2 PASS: thread computation = {thread_sum}");
+
+    // Test 3: Multiple channel recv calls
+    let mut ch3_sum = 0;
+    match ch2.recv() {
+        Some(v) => { ch3_sum = ch3_sum + v; }
+        None => {}
+    }
+    match ch2.recv() {
+        Some(v) => { ch3_sum = ch3_sum + v; }
+        None => {}
+    }
+    match ch2.recv() {
+        Some(v) => { ch3_sum = ch3_sum + v; }
+        None => {}
+    }
+    if (ch3_sum != 600) {
+        print(f"FAIL test3: expected 600, got {ch3_sum}");
+        return 1;
+    }
+    print(f"Test 3 PASS: multi-recv sum = {ch3_sum}");
+
+    print("All sync primitive tests passed");
+    0
+}

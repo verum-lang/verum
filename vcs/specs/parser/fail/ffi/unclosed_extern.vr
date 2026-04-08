@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, ffi, extern, unclosed, error
+// @description: Test unclosed extern block
+// @expected-error: E018
+
+extern "C" {
+    fn malloc(size: Int) -> &unsafe Byte;

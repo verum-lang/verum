@@ -1,0 +1,1017 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, manipulation, reshape
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Interpreter tensor manipulation — reshape, squeeze, unsqueeze, transpose, concat, stack, split, flip, roll, repeat
+
+// ============================================================================
+// Core types: flat arrays with shape metadata
+// ============================================================================
+
+// 4-element array (used for 1D, 2x2, 4x1, 1x4 views)
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+// 6-element array (for concat, stack results)
+type Arr6 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int };
+
+// 8-element array (for repeat, stack, larger results)
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+// 2x2 matrix with explicit shape metadata
+type Mat2 is {
+    rows: Int, cols: Int,
+    d00: Int, d01: Int,
+    d10: Int, d11: Int
+};
+
+// Shape descriptor: up to 4 dimensions
+type Shape4 is { d0: Int, d1: Int, d2: Int, d3: Int, ndim: Int };
+
+// Tensor4: 4 data elements + shape metadata
+type Tensor4 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    shape_d0: Int, shape_d1: Int, shape_d2: Int, shape_d3: Int,
+    ndim: Int
+};
+
+// ============================================================================
+// Arr4 helpers
+// ============================================================================
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, val: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 }
+    }
+}
+
+fn arr4_eq(a: Arr4, b: Arr4) -> Bool {
+    a.e0 == b.e0 && a.e1 == b.e1 && a.e2 == b.e2 && a.e3 == b.e3
+}
+
+// ============================================================================
+// Arr6 helpers
+// ============================================================================
+
+fn arr6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else { a.e5 }
+}
+
+fn arr6_eq(a: Arr6, b: Arr6) -> Bool {
+    a.e0 == b.e0 && a.e1 == b.e1 && a.e2 == b.e2
+    && a.e3 == b.e3 && a.e4 == b.e4 && a.e5 == b.e5
+}
+
+// ============================================================================
+// Arr8 helpers
+// ============================================================================
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_eq(a: Arr8, b: Arr8) -> Bool {
+    a.e0 == b.e0 && a.e1 == b.e1 && a.e2 == b.e2 && a.e3 == b.e3
+    && a.e4 == b.e4 && a.e5 == b.e5 && a.e6 == b.e6 && a.e7 == b.e7
+}
+
+// ============================================================================
+// Mat2 helpers
+// ============================================================================
+
+fn mat2_get(m: Mat2, r: Int, c: Int) -> Int {
+    if r == 0 && c == 0 { m.d00 }
+    else if r == 0 && c == 1 { m.d01 }
+    else if r == 1 && c == 0 { m.d10 }
+    else { m.d11 }
+}
+
+fn mat2_eq(a: Mat2, b: Mat2) -> Bool {
+    a.rows == b.rows && a.cols == b.cols
+    && a.d00 == b.d00 && a.d01 == b.d01
+    && a.d10 == b.d10 && a.d11 == b.d11
+}
+
+// ============================================================================
+// Tensor4 helpers
+// ============================================================================
+
+fn tensor4_new(e0: Int, e1: Int, e2: Int, e3: Int, d0: Int, d1: Int, ndim: Int) -> Tensor4 {
+    Tensor4 {
+        e0: e0, e1: e1, e2: e2, e3: e3,
+        shape_d0: d0, shape_d1: d1, shape_d2: 0, shape_d3: 0,
+        ndim: ndim
+    }
+}
+
+fn tensor4_get(t: Tensor4, i: Int) -> Int {
+    if i == 0 { t.e0 }
+    else if i == 1 { t.e1 }
+    else if i == 2 { t.e2 }
+    else { t.e3 }
+}
+
+fn tensor4_numel(t: Tensor4) -> Int {
+    if t.ndim == 1 { t.shape_d0 }
+    else if t.ndim == 2 { t.shape_d0 * t.shape_d1 }
+    else if t.ndim == 3 { t.shape_d0 * t.shape_d1 * t.shape_d2 }
+    else { t.shape_d0 * t.shape_d1 * t.shape_d2 * t.shape_d3 }
+}
+
+fn tensor4_data_eq(a: Tensor4, b: Tensor4) -> Bool {
+    a.e0 == b.e0 && a.e1 == b.e1 && a.e2 == b.e2 && a.e3 == b.e3
+}
+
+// ============================================================================
+// Shape helpers
+// ============================================================================
+
+fn shape_new1(d0: Int) -> Shape4 {
+    Shape4 { d0: d0, d1: 0, d2: 0, d3: 0, ndim: 1 }
+}
+
+fn shape_new2(d0: Int, d1: Int) -> Shape4 {
+    Shape4 { d0: d0, d1: d1, d2: 0, d3: 0, ndim: 2 }
+}
+
+fn shape_new3(d0: Int, d1: Int, d2: Int) -> Shape4 {
+    Shape4 { d0: d0, d1: d1, d2: d2, d3: 0, ndim: 3 }
+}
+
+fn shape_numel(s: Shape4) -> Int {
+    if s.ndim == 1 { s.d0 }
+    else if s.ndim == 2 { s.d0 * s.d1 }
+    else if s.ndim == 3 { s.d0 * s.d1 * s.d2 }
+    else { s.d0 * s.d1 * s.d2 * s.d3 }
+}
+
+fn shape_eq(a: Shape4, b: Shape4) -> Bool {
+    a.ndim == b.ndim && a.d0 == b.d0 && a.d1 == b.d1 && a.d2 == b.d2 && a.d3 == b.d3
+}
+
+// ============================================================================
+// 1. test_reshape — reshape 2x2 to 4x1 and back
+// ============================================================================
+
+fn reshape_tensor4(t: Tensor4, new_d0: Int, new_d1: Int, new_ndim: Int) -> Tensor4 {
+    // Reshape only changes shape metadata, data stays in row-major order
+    Tensor4 {
+        e0: t.e0, e1: t.e1, e2: t.e2, e3: t.e3,
+        shape_d0: new_d0, shape_d1: new_d1, shape_d2: 0, shape_d3: 0,
+        ndim: new_ndim
+    }
+}
+
+fn test_reshape() {
+    // Create a 2x2 tensor: [[10, 20], [30, 40]]
+    let t = tensor4_new(10, 20, 30, 40, 2, 2, 2);
+    assert_eq(t.ndim, 2);
+    assert_eq(t.shape_d0, 2);
+    assert_eq(t.shape_d1, 2);
+    assert_eq(tensor4_numel(t), 4);
+
+    // Reshape to 4x1 (flatten to column vector)
+    let flat = reshape_tensor4(t, 4, 1, 2);
+    assert_eq(flat.shape_d0, 4);
+    assert_eq(flat.shape_d1, 1);
+    assert_eq(tensor4_numel(flat), 4);
+    // Data unchanged
+    assert(tensor4_data_eq(t, flat));
+    assert_eq(tensor4_get(flat, 0), 10);
+    assert_eq(tensor4_get(flat, 1), 20);
+    assert_eq(tensor4_get(flat, 2), 30);
+    assert_eq(tensor4_get(flat, 3), 40);
+
+    // Reshape to 1x4 (row vector)
+    let row = reshape_tensor4(t, 1, 4, 2);
+    assert_eq(row.shape_d0, 1);
+    assert_eq(row.shape_d1, 4);
+    assert(tensor4_data_eq(t, row));
+
+    // Reshape to 1D (4,)
+    let one_d = reshape_tensor4(t, 4, 0, 1);
+    assert_eq(one_d.ndim, 1);
+    assert_eq(one_d.shape_d0, 4);
+    assert(tensor4_data_eq(t, one_d));
+
+    // Reshape back to 2x2
+    let back = reshape_tensor4(one_d, 2, 2, 2);
+    assert_eq(back.shape_d0, 2);
+    assert_eq(back.shape_d1, 2);
+    assert(tensor4_data_eq(back, t));
+
+    print("test_reshape passed");
+}
+
+// ============================================================================
+// 2. test_squeeze — remove size-1 dimensions
+// ============================================================================
+
+fn squeeze_shape(s: Shape4) -> Shape4 {
+    // Remove all dimensions of size 1, collect remaining
+    // Use a manual gather of non-1 dims
+    let mut out_d0 = 0;
+    let mut out_d1 = 0;
+    let mut out_d2 = 0;
+    let mut out_d3 = 0;
+    let mut out_ndim = 0;
+
+    // Check d0
+    if s.ndim >= 1 && s.d0 != 1 {
+        if out_ndim == 0 { out_d0 = s.d0; }
+        else if out_ndim == 1 { out_d1 = s.d0; }
+        else if out_ndim == 2 { out_d2 = s.d0; }
+        else { out_d3 = s.d0; }
+        out_ndim = out_ndim + 1;
+    }
+    // Check d1
+    if s.ndim >= 2 && s.d1 != 1 {
+        if out_ndim == 0 { out_d0 = s.d1; }
+        else if out_ndim == 1 { out_d1 = s.d1; }
+        else if out_ndim == 2 { out_d2 = s.d1; }
+        else { out_d3 = s.d1; }
+        out_ndim = out_ndim + 1;
+    }
+    // Check d2
+    if s.ndim >= 3 && s.d2 != 1 {
+        if out_ndim == 0 { out_d0 = s.d2; }
+        else if out_ndim == 1 { out_d1 = s.d2; }
+        else if out_ndim == 2 { out_d2 = s.d2; }
+        else { out_d3 = s.d2; }
+        out_ndim = out_ndim + 1;
+    }
+
+    // At least 1D: if everything was squeezed, return scalar shape (1,)
+    if out_ndim == 0 {
+        Shape4 { d0: 1, d1: 0, d2: 0, d3: 0, ndim: 1 }
+    } else {
+        Shape4 { d0: out_d0, d1: out_d1, d2: out_d2, d3: out_d3, ndim: out_ndim }
+    }
+}
+
+fn test_squeeze() {
+    // Shape (1, 4) -> squeezed to (4,)
+    let s1 = shape_new2(1, 4);
+    let sq1 = squeeze_shape(s1);
+    assert_eq(sq1.ndim, 1);
+    assert_eq(sq1.d0, 4);
+
+    // Shape (4, 1) -> squeezed to (4,)
+    let s2 = shape_new2(4, 1);
+    let sq2 = squeeze_shape(s2);
+    assert_eq(sq2.ndim, 1);
+    assert_eq(sq2.d0, 4);
+
+    // Shape (1, 3, 1) -> squeezed to (3,)
+    let s3 = shape_new3(1, 3, 1);
+    let sq3 = squeeze_shape(s3);
+    assert_eq(sq3.ndim, 1);
+    assert_eq(sq3.d0, 3);
+
+    // Shape (2, 3) -> no change (no size-1 dims)
+    let s4 = shape_new2(2, 3);
+    let sq4 = squeeze_shape(s4);
+    assert_eq(sq4.ndim, 2);
+    assert_eq(sq4.d0, 2);
+    assert_eq(sq4.d1, 3);
+
+    // Shape (1, 1, 1) -> squeezed to (1,)
+    let s5 = shape_new3(1, 1, 1);
+    let sq5 = squeeze_shape(s5);
+    assert_eq(sq5.ndim, 1);
+    assert_eq(sq5.d0, 1);
+
+    // Shape (2, 1, 3) -> squeezed to (2, 3)
+    let s6 = shape_new3(2, 1, 3);
+    let sq6 = squeeze_shape(s6);
+    assert_eq(sq6.ndim, 2);
+    assert_eq(sq6.d0, 2);
+    assert_eq(sq6.d1, 3);
+
+    print("test_squeeze passed");
+}
+
+// ============================================================================
+// 3. test_unsqueeze — add size-1 dimension at specified position
+// ============================================================================
+
+fn unsqueeze_shape(s: Shape4, axis: Int) -> Shape4 {
+    // Insert a dimension of size 1 at the given axis
+    if s.ndim == 1 {
+        if axis == 0 {
+            Shape4 { d0: 1, d1: s.d0, d2: 0, d3: 0, ndim: 2 }
+        } else {
+            Shape4 { d0: s.d0, d1: 1, d2: 0, d3: 0, ndim: 2 }
+        }
+    } else if s.ndim == 2 {
+        if axis == 0 {
+            Shape4 { d0: 1, d1: s.d0, d2: s.d1, d3: 0, ndim: 3 }
+        } else if axis == 1 {
+            Shape4 { d0: s.d0, d1: 1, d2: s.d1, d3: 0, ndim: 3 }
+        } else {
+            Shape4 { d0: s.d0, d1: s.d1, d2: 1, d3: 0, ndim: 3 }
+        }
+    } else {
+        // ndim == 3 -> 4D
+        if axis == 0 {
+            Shape4 { d0: 1, d1: s.d0, d2: s.d1, d3: s.d2, ndim: 4 }
+        } else if axis == 1 {
+            Shape4 { d0: s.d0, d1: 1, d2: s.d1, d3: s.d2, ndim: 4 }
+        } else if axis == 2 {
+            Shape4 { d0: s.d0, d1: s.d1, d2: 1, d3: s.d2, ndim: 4 }
+        } else {
+            Shape4 { d0: s.d0, d1: s.d1, d2: s.d2, d3: 1, ndim: 4 }
+        }
+    }
+}
+
+fn test_unsqueeze() {
+    // (4,) unsqueeze at 0 -> (1, 4)
+    let s1 = shape_new1(4);
+    let u1 = unsqueeze_shape(s1, 0);
+    assert_eq(u1.ndim, 2);
+    assert_eq(u1.d0, 1);
+    assert_eq(u1.d1, 4);
+
+    // (4,) unsqueeze at 1 -> (4, 1)
+    let u2 = unsqueeze_shape(s1, 1);
+    assert_eq(u2.ndim, 2);
+    assert_eq(u2.d0, 4);
+    assert_eq(u2.d1, 1);
+
+    // (2, 3) unsqueeze at 0 -> (1, 2, 3)
+    let s2 = shape_new2(2, 3);
+    let u3 = unsqueeze_shape(s2, 0);
+    assert_eq(u3.ndim, 3);
+    assert_eq(u3.d0, 1);
+    assert_eq(u3.d1, 2);
+    assert_eq(u3.d2, 3);
+
+    // (2, 3) unsqueeze at 1 -> (2, 1, 3)
+    let u4 = unsqueeze_shape(s2, 1);
+    assert_eq(u4.ndim, 3);
+    assert_eq(u4.d0, 2);
+    assert_eq(u4.d1, 1);
+    assert_eq(u4.d2, 3);
+
+    // (2, 3) unsqueeze at 2 -> (2, 3, 1)
+    let u5 = unsqueeze_shape(s2, 2);
+    assert_eq(u5.ndim, 3);
+    assert_eq(u5.d0, 2);
+    assert_eq(u5.d1, 3);
+    assert_eq(u5.d2, 1);
+
+    // Roundtrip: unsqueeze then squeeze recovers original
+    let roundtrip = squeeze_shape(u3);
+    assert(shape_eq(roundtrip, s2));
+
+    let roundtrip2 = squeeze_shape(unsqueeze_shape(s1, 0));
+    assert(shape_eq(roundtrip2, s1));
+
+    print("test_unsqueeze passed");
+}
+
+// ============================================================================
+// 4. test_transpose — swap rows and columns of 2x2 matrix
+// ============================================================================
+
+fn mat2_transpose(m: Mat2) -> Mat2 {
+    Mat2 {
+        rows: m.cols, cols: m.rows,
+        d00: m.d00, d01: m.d10,
+        d10: m.d01, d11: m.d11
+    }
+}
+
+fn test_transpose() {
+    // [[1, 2], [3, 4]] -> [[1, 3], [2, 4]]
+    let m = Mat2 { rows: 2, cols: 2, d00: 1, d01: 2, d10: 3, d11: 4 };
+    let t = mat2_transpose(m);
+    assert_eq(t.rows, 2);
+    assert_eq(t.cols, 2);
+    assert_eq(t.d00, 1);
+    assert_eq(t.d01, 3);
+    assert_eq(t.d10, 2);
+    assert_eq(t.d11, 4);
+
+    // Double transpose = original
+    let tt = mat2_transpose(t);
+    assert(mat2_eq(tt, m));
+
+    // Transpose of identity is identity
+    let id = Mat2 { rows: 2, cols: 2, d00: 1, d01: 0, d10: 0, d11: 1 };
+    assert(mat2_eq(mat2_transpose(id), id));
+
+    // Transpose of symmetric matrix is itself
+    let sym = Mat2 { rows: 2, cols: 2, d00: 5, d01: 7, d10: 7, d11: 9 };
+    assert(mat2_eq(mat2_transpose(sym), sym));
+
+    // Transpose of diagonal is itself
+    let diag = Mat2 { rows: 2, cols: 2, d00: 3, d01: 0, d10: 0, d11: 8 };
+    assert(mat2_eq(mat2_transpose(diag), diag));
+
+    // Transpose preserves trace: d00 + d11 unchanged
+    assert_eq(m.d00 + m.d11, t.d00 + t.d11);
+
+    // Verify element access pattern for transposed view:
+    // Original: m[0][1] = 2, transposed: t[0][1] = 3 = m[1][0]
+    assert_eq(mat2_get(t, 0, 1), mat2_get(m, 1, 0));
+    assert_eq(mat2_get(t, 1, 0), mat2_get(m, 0, 1));
+
+    print("test_transpose passed");
+}
+
+// ============================================================================
+// 5. test_concat — concatenate two arrays
+// ============================================================================
+
+fn concat_arr4_to_arr6(a: Arr4, a_len: Int, b: Arr4, b_len: Int) -> Arr6 {
+    // Concatenate first a_len elements of a with first b_len elements of b
+    // Result has a_len + b_len elements (max 6)
+    let mut r0 = 0;
+    let mut r1 = 0;
+    let mut r2 = 0;
+    let mut r3 = 0;
+    let mut r4 = 0;
+    let mut r5 = 0;
+
+    // Fill from a
+    if a_len >= 1 { r0 = a.e0; }
+    if a_len >= 2 { r1 = a.e1; }
+    if a_len >= 3 { r2 = a.e2; }
+    if a_len >= 4 { r3 = a.e3; }
+
+    // Fill from b, starting at position a_len
+    let mut bi = 0;
+    if bi < b_len {
+        if a_len + bi == 0 { r0 = b.e0; }
+        else if a_len + bi == 1 { r1 = b.e0; }
+        else if a_len + bi == 2 { r2 = b.e0; }
+        else if a_len + bi == 3 { r3 = b.e0; }
+        else if a_len + bi == 4 { r4 = b.e0; }
+        else { r5 = b.e0; }
+        bi = bi + 1;
+    }
+    if bi < b_len {
+        if a_len + bi == 1 { r1 = b.e1; }
+        else if a_len + bi == 2 { r2 = b.e1; }
+        else if a_len + bi == 3 { r3 = b.e1; }
+        else if a_len + bi == 4 { r4 = b.e1; }
+        else { r5 = b.e1; }
+        bi = bi + 1;
+    }
+    if bi < b_len {
+        if a_len + bi == 2 { r2 = b.e2; }
+        else if a_len + bi == 3 { r3 = b.e2; }
+        else if a_len + bi == 4 { r4 = b.e2; }
+        else { r5 = b.e2; }
+    }
+
+    Arr6 { e0: r0, e1: r1, e2: r2, e3: r3, e4: r4, e5: r5 }
+}
+
+fn test_concat() {
+    // Concat [10, 20, 30] ++ [40, 50, 60] = [10, 20, 30, 40, 50, 60]
+    let a = Arr4 { e0: 10, e1: 20, e2: 30, e3: 0 };
+    let b = Arr4 { e0: 40, e1: 50, e2: 60, e3: 0 };
+    let c = concat_arr4_to_arr6(a, 3, b, 3);
+    assert_eq(c.e0, 10);
+    assert_eq(c.e1, 20);
+    assert_eq(c.e2, 30);
+    assert_eq(c.e3, 40);
+    assert_eq(c.e4, 50);
+    assert_eq(c.e5, 60);
+
+    // Concat [1, 2] ++ [3] = [1, 2, 3, 0, 0, 0]
+    let d = Arr4 { e0: 1, e1: 2, e2: 0, e3: 0 };
+    let e = Arr4 { e0: 3, e1: 0, e2: 0, e3: 0 };
+    let f = concat_arr4_to_arr6(d, 2, e, 1);
+    assert_eq(f.e0, 1);
+    assert_eq(f.e1, 2);
+    assert_eq(f.e2, 3);
+
+    // Concat [5] ++ [6, 7, 8] = [5, 6, 7, 8, 0, 0]
+    let g = Arr4 { e0: 5, e1: 0, e2: 0, e3: 0 };
+    let h = Arr4 { e0: 6, e1: 7, e2: 8, e3: 0 };
+    let j = concat_arr4_to_arr6(g, 1, h, 3);
+    assert_eq(j.e0, 5);
+    assert_eq(j.e1, 6);
+    assert_eq(j.e2, 7);
+    assert_eq(j.e3, 8);
+
+    print("test_concat passed");
+}
+
+// ============================================================================
+// 6. test_stack — stack two arrays along new axis
+// ============================================================================
+
+// Stack two Arr4 arrays: result is conceptually (2, 4) stored in Arr8
+// Row 0 = first array, Row 1 = second array
+fn stack_arr4(a: Arr4, b: Arr4) -> Arr8 {
+    Arr8 {
+        e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3,
+        e4: b.e0, e5: b.e1, e6: b.e2, e7: b.e3
+    }
+}
+
+// Stack along axis=1: interleave columns, result is conceptually (4, 2)
+// stored as [a0, b0, a1, b1, a2, b2, a3, b3]
+fn stack_arr4_axis1(a: Arr4, b: Arr4) -> Arr8 {
+    Arr8 {
+        e0: a.e0, e1: b.e0, e2: a.e1, e3: b.e1,
+        e4: a.e2, e5: b.e2, e6: a.e3, e7: b.e3
+    }
+}
+
+fn test_stack() {
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let b = Arr4 { e0: 5, e1: 6, e2: 7, e3: 8 };
+
+    // Stack along axis=0 -> shape (2, 4)
+    let s0 = stack_arr4(a, b);
+    // Row 0 = [1, 2, 3, 4]
+    assert_eq(s0.e0, 1);
+    assert_eq(s0.e1, 2);
+    assert_eq(s0.e2, 3);
+    assert_eq(s0.e3, 4);
+    // Row 1 = [5, 6, 7, 8]
+    assert_eq(s0.e4, 5);
+    assert_eq(s0.e5, 6);
+    assert_eq(s0.e6, 7);
+    assert_eq(s0.e7, 8);
+
+    // Stack along axis=1 -> shape (4, 2), stored interleaved
+    let s1 = stack_arr4_axis1(a, b);
+    // Pairs: (1,5), (2,6), (3,7), (4,8)
+    assert_eq(s1.e0, 1);
+    assert_eq(s1.e1, 5);
+    assert_eq(s1.e2, 2);
+    assert_eq(s1.e3, 6);
+    assert_eq(s1.e4, 3);
+    assert_eq(s1.e5, 7);
+    assert_eq(s1.e6, 4);
+    assert_eq(s1.e7, 8);
+
+    // Stack identical arrays
+    let dup = stack_arr4(a, a);
+    assert_eq(dup.e0, dup.e4);
+    assert_eq(dup.e1, dup.e5);
+    assert_eq(dup.e2, dup.e6);
+    assert_eq(dup.e3, dup.e7);
+
+    print("test_stack passed");
+}
+
+// ============================================================================
+// 7. test_split — split array into chunks
+// ============================================================================
+
+// Split result: two Arr4s representing the two halves
+type SplitResult is { left: Arr4, right: Arr4 };
+
+fn split_arr4_at(a: Arr4, pos: Int) -> SplitResult {
+    // Split at position: left = [0..pos), right = [pos..4)
+    // Left side: take first pos elements
+    let left = Arr4 {
+        e0: if pos >= 1 { a.e0 } else { 0 },
+        e1: if pos >= 2 { a.e1 } else { 0 },
+        e2: if pos >= 3 { a.e2 } else { 0 },
+        e3: if pos >= 4 { a.e3 } else { 0 }
+    };
+    // Right side: take elements from pos onward
+    let right = Arr4 {
+        e0: if pos <= 0 { a.e0 } else if pos <= 1 { a.e1 } else if pos <= 2 { a.e2 } else if pos <= 3 { a.e3 } else { 0 },
+        e1: if pos <= 0 { a.e1 } else if pos <= 1 { a.e2 } else if pos <= 2 { a.e3 } else { 0 },
+        e2: if pos <= 0 { a.e2 } else if pos <= 1 { a.e3 } else { 0 },
+        e3: if pos <= 0 { a.e3 } else { 0 }
+    };
+    SplitResult { left: left, right: right }
+}
+
+fn test_split() {
+    let a = Arr4 { e0: 10, e1: 20, e2: 30, e3: 40 };
+
+    // Split at 2: [10, 20] and [30, 40]
+    let s2 = split_arr4_at(a, 2);
+    assert_eq(s2.left.e0, 10);
+    assert_eq(s2.left.e1, 20);
+    assert_eq(s2.left.e2, 0);
+    assert_eq(s2.right.e0, 30);
+    assert_eq(s2.right.e1, 40);
+    assert_eq(s2.right.e2, 0);
+
+    // Split at 1: [10] and [20, 30, 40]
+    let s1 = split_arr4_at(a, 1);
+    assert_eq(s1.left.e0, 10);
+    assert_eq(s1.left.e1, 0);
+    assert_eq(s1.right.e0, 20);
+    assert_eq(s1.right.e1, 30);
+    assert_eq(s1.right.e2, 40);
+
+    // Split at 3: [10, 20, 30] and [40]
+    let s3 = split_arr4_at(a, 3);
+    assert_eq(s3.left.e0, 10);
+    assert_eq(s3.left.e1, 20);
+    assert_eq(s3.left.e2, 30);
+    assert_eq(s3.left.e3, 0);
+    assert_eq(s3.right.e0, 40);
+    assert_eq(s3.right.e1, 0);
+
+    // Split at 0: [] and [10, 20, 30, 40]
+    let s0 = split_arr4_at(a, 0);
+    assert_eq(s0.left.e0, 0);
+    assert_eq(s0.right.e0, 10);
+    assert_eq(s0.right.e1, 20);
+    assert_eq(s0.right.e2, 30);
+    assert_eq(s0.right.e3, 40);
+
+    // Split at 4: [10, 20, 30, 40] and []
+    let s4 = split_arr4_at(a, 4);
+    assert_eq(s4.left.e0, 10);
+    assert_eq(s4.left.e1, 20);
+    assert_eq(s4.left.e2, 30);
+    assert_eq(s4.left.e3, 40);
+    assert_eq(s4.right.e0, 0);
+
+    print("test_split passed");
+}
+
+// ============================================================================
+// 8. test_flip — reverse array order
+// ============================================================================
+
+fn flip_arr4(a: Arr4, len: Int) -> Arr4 {
+    // Reverse first `len` elements
+    if len == 1 {
+        Arr4 { e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3 }
+    } else if len == 2 {
+        Arr4 { e0: a.e1, e1: a.e0, e2: a.e2, e3: a.e3 }
+    } else if len == 3 {
+        Arr4 { e0: a.e2, e1: a.e1, e2: a.e0, e3: a.e3 }
+    } else {
+        Arr4 { e0: a.e3, e1: a.e2, e2: a.e1, e3: a.e0 }
+    }
+}
+
+fn test_flip() {
+    let a = Arr4 { e0: 10, e1: 20, e2: 30, e3: 40 };
+
+    // Flip all 4 elements: [40, 30, 20, 10]
+    let f4 = flip_arr4(a, 4);
+    assert_eq(f4.e0, 40);
+    assert_eq(f4.e1, 30);
+    assert_eq(f4.e2, 20);
+    assert_eq(f4.e3, 10);
+
+    // Double flip = original
+    let ff = flip_arr4(f4, 4);
+    assert(arr4_eq(ff, a));
+
+    // Flip 3 elements: [30, 20, 10, 40]
+    let f3 = flip_arr4(a, 3);
+    assert_eq(f3.e0, 30);
+    assert_eq(f3.e1, 20);
+    assert_eq(f3.e2, 10);
+    assert_eq(f3.e3, 40);
+
+    // Flip 2 elements: [20, 10, 30, 40]
+    let f2 = flip_arr4(a, 2);
+    assert_eq(f2.e0, 20);
+    assert_eq(f2.e1, 10);
+    assert_eq(f2.e2, 30);
+    assert_eq(f2.e3, 40);
+
+    // Flip 1 element: no change
+    let f1 = flip_arr4(a, 1);
+    assert(arr4_eq(f1, a));
+
+    // Flip palindrome stays the same
+    let pal = Arr4 { e0: 1, e1: 2, e2: 2, e3: 1 };
+    assert(arr4_eq(flip_arr4(pal, 4), pal));
+
+    print("test_flip passed");
+}
+
+// ============================================================================
+// 9. test_roll — circular shift array elements
+// ============================================================================
+
+fn roll_arr4(a: Arr4, shift: Int) -> Arr4 {
+    // Circular shift right by `shift` positions (for 4 elements)
+    // Normalize shift to [0, 4)
+    let mut s = shift;
+    if s < 0 {
+        // Handle negative by adding 4 until positive
+        s = s + 4;
+        if s < 0 { s = s + 4; }
+    }
+    // mod 4
+    if s >= 4 { s = s - 4; }
+    if s >= 4 { s = s - 4; }
+
+    if s == 0 {
+        Arr4 { e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3 }
+    } else if s == 1 {
+        // shift right 1: last element goes to front
+        Arr4 { e0: a.e3, e1: a.e0, e2: a.e1, e3: a.e2 }
+    } else if s == 2 {
+        Arr4 { e0: a.e2, e1: a.e3, e2: a.e0, e3: a.e1 }
+    } else {
+        // s == 3: shift right 3 = shift left 1
+        Arr4 { e0: a.e1, e1: a.e2, e2: a.e3, e3: a.e0 }
+    }
+}
+
+fn test_roll() {
+    let a = Arr4 { e0: 10, e1: 20, e2: 30, e3: 40 };
+
+    // Roll right by 1: [40, 10, 20, 30]
+    let r1 = roll_arr4(a, 1);
+    assert_eq(r1.e0, 40);
+    assert_eq(r1.e1, 10);
+    assert_eq(r1.e2, 20);
+    assert_eq(r1.e3, 30);
+
+    // Roll right by 2: [30, 40, 10, 20]
+    let r2 = roll_arr4(a, 2);
+    assert_eq(r2.e0, 30);
+    assert_eq(r2.e1, 40);
+    assert_eq(r2.e2, 10);
+    assert_eq(r2.e3, 20);
+
+    // Roll right by 3: [20, 30, 40, 10]
+    let r3 = roll_arr4(a, 3);
+    assert_eq(r3.e0, 20);
+    assert_eq(r3.e1, 30);
+    assert_eq(r3.e2, 40);
+    assert_eq(r3.e3, 10);
+
+    // Roll by 4: full cycle = original
+    let r4 = roll_arr4(a, 4);
+    assert(arr4_eq(r4, a));
+
+    // Roll by 0: no change
+    let r0 = roll_arr4(a, 0);
+    assert(arr4_eq(r0, a));
+
+    // Roll left by 1 = roll right by 3
+    let rl1 = roll_arr4(a, 0 - 1);
+    assert(arr4_eq(rl1, r3));
+
+    // Composition: roll(1) then roll(2) = roll(3)
+    let composed = roll_arr4(roll_arr4(a, 1), 2);
+    assert(arr4_eq(composed, r3));
+
+    // 4 consecutive rolls of 1 = identity
+    let cycle = roll_arr4(roll_arr4(roll_arr4(roll_arr4(a, 1), 1), 1), 1);
+    assert(arr4_eq(cycle, a));
+
+    print("test_roll passed");
+}
+
+// ============================================================================
+// 10. test_repeat — repeat each element n times
+// ============================================================================
+
+// Repeat a 2-element array so each element appears twice -> 4 elements
+fn repeat_elements_x2(a: Arr4, len: Int) -> Arr4 {
+    // Each element repeated 2 times, up to 4 output slots
+    // For len=2: [a0, a0, a1, a1]
+    if len == 1 {
+        Arr4 { e0: a.e0, e1: a.e0, e2: 0, e3: 0 }
+    } else {
+        Arr4 { e0: a.e0, e1: a.e0, e2: a.e1, e3: a.e1 }
+    }
+}
+
+// Tile: repeat the entire array n times (for 2-element input, tile x2 -> 4 elements)
+fn tile_arr2_x2(a: Arr4) -> Arr4 {
+    Arr4 { e0: a.e0, e1: a.e1, e2: a.e0, e3: a.e1 }
+}
+
+// Tile: repeat 4-element array x2 -> 8 elements
+fn tile_arr4_x2(a: Arr4) -> Arr8 {
+    Arr8 {
+        e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3,
+        e4: a.e0, e5: a.e1, e6: a.e2, e7: a.e3
+    }
+}
+
+fn test_repeat() {
+    let a = Arr4 { e0: 5, e1: 9, e2: 0, e3: 0 };
+
+    // repeat_elements: [5, 5, 9, 9]
+    let r = repeat_elements_x2(a, 2);
+    assert_eq(r.e0, 5);
+    assert_eq(r.e1, 5);
+    assert_eq(r.e2, 9);
+    assert_eq(r.e3, 9);
+
+    // Single element repeated: [7, 7, 0, 0]
+    let single = Arr4 { e0: 7, e1: 0, e2: 0, e3: 0 };
+    let rs = repeat_elements_x2(single, 1);
+    assert_eq(rs.e0, 7);
+    assert_eq(rs.e1, 7);
+
+    // Tile [5, 9] x2: [5, 9, 5, 9]
+    let tiled = tile_arr2_x2(a);
+    assert_eq(tiled.e0, 5);
+    assert_eq(tiled.e1, 9);
+    assert_eq(tiled.e2, 5);
+    assert_eq(tiled.e3, 9);
+
+    // Tile [1, 2, 3, 4] x2: [1,2,3,4,1,2,3,4]
+    let b = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let t2 = tile_arr4_x2(b);
+    assert_eq(t2.e0, 1);
+    assert_eq(t2.e1, 2);
+    assert_eq(t2.e2, 3);
+    assert_eq(t2.e3, 4);
+    assert_eq(t2.e4, 1);
+    assert_eq(t2.e5, 2);
+    assert_eq(t2.e6, 3);
+    assert_eq(t2.e7, 4);
+
+    // Tile of zeros is zeros
+    let zeros = Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 };
+    let tz = tile_arr4_x2(zeros);
+    assert_eq(tz.e0, 0);
+    assert_eq(tz.e4, 0);
+    assert_eq(tz.e7, 0);
+
+    print("test_repeat passed");
+}
+
+// ============================================================================
+// 11. test_broadcast — broadcast scalar to match array shape
+// ============================================================================
+
+fn broadcast_scalar(val: Int) -> Arr4 {
+    Arr4 { e0: val, e1: val, e2: val, e3: val }
+}
+
+fn broadcast_scalar_mat2(val: Int) -> Mat2 {
+    Mat2 { rows: 2, cols: 2, d00: val, d01: val, d10: val, d11: val }
+}
+
+fn arr4_add(a: Arr4, b: Arr4) -> Arr4 {
+    Arr4 {
+        e0: a.e0 + b.e0, e1: a.e1 + b.e1,
+        e2: a.e2 + b.e2, e3: a.e3 + b.e3
+    }
+}
+
+fn arr4_mul(a: Arr4, b: Arr4) -> Arr4 {
+    Arr4 {
+        e0: a.e0 * b.e0, e1: a.e1 * b.e1,
+        e2: a.e2 * b.e2, e3: a.e3 * b.e3
+    }
+}
+
+fn test_broadcast() {
+    // Broadcast scalar 5 to [5, 5, 5, 5]
+    let b = broadcast_scalar(5);
+    assert_eq(b.e0, 5);
+    assert_eq(b.e1, 5);
+    assert_eq(b.e2, 5);
+    assert_eq(b.e3, 5);
+
+    // Add broadcasted scalar to array: [1,2,3,4] + broadcast(10) = [11,12,13,14]
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let added = arr4_add(a, broadcast_scalar(10));
+    assert_eq(added.e0, 11);
+    assert_eq(added.e1, 12);
+    assert_eq(added.e2, 13);
+    assert_eq(added.e3, 14);
+
+    // Multiply by broadcasted scalar: [2,3,4,5] * broadcast(3) = [6,9,12,15]
+    let c = Arr4 { e0: 2, e1: 3, e2: 4, e3: 5 };
+    let mulled = arr4_mul(c, broadcast_scalar(3));
+    assert_eq(mulled.e0, 6);
+    assert_eq(mulled.e1, 9);
+    assert_eq(mulled.e2, 12);
+    assert_eq(mulled.e3, 15);
+
+    // Broadcast zero: adding 0 is identity
+    let zero_b = broadcast_scalar(0);
+    assert(arr4_eq(arr4_add(a, zero_b), a));
+
+    // Broadcast one: multiplying by 1 is identity
+    let one_b = broadcast_scalar(1);
+    assert(arr4_eq(arr4_mul(a, one_b), a));
+
+    // Broadcast to matrix
+    let m = broadcast_scalar_mat2(7);
+    assert_eq(m.d00, 7);
+    assert_eq(m.d01, 7);
+    assert_eq(m.d10, 7);
+    assert_eq(m.d11, 7);
+
+    print("test_broadcast passed");
+}
+
+// ============================================================================
+// 12. test_contiguous — verify contiguous copy preserves data
+// ============================================================================
+
+fn copy_arr4(src: Arr4) -> Arr4 {
+    Arr4 { e0: src.e0, e1: src.e1, e2: src.e2, e3: src.e3 }
+}
+
+fn copy_mat2(src: Mat2) -> Mat2 {
+    Mat2 {
+        rows: src.rows, cols: src.cols,
+        d00: src.d00, d01: src.d01,
+        d10: src.d10, d11: src.d11
+    }
+}
+
+// Simulate making a transposed view contiguous by copying into new storage
+fn make_contiguous_transpose(m: Mat2) -> Mat2 {
+    let t = mat2_transpose(m);
+    copy_mat2(t)
+}
+
+fn test_contiguous() {
+    // Copy preserves data
+    let a = Arr4 { e0: 100, e1: 200, e2: 300, e3: 400 };
+    let c = copy_arr4(a);
+    assert(arr4_eq(a, c));
+    assert_eq(c.e0, 100);
+    assert_eq(c.e1, 200);
+    assert_eq(c.e2, 300);
+    assert_eq(c.e3, 400);
+
+    // Copy of matrix preserves shape and data
+    let m = Mat2 { rows: 2, cols: 2, d00: 11, d01: 22, d10: 33, d11: 44 };
+    let mc = copy_mat2(m);
+    assert(mat2_eq(m, mc));
+
+    // Making a transposed view contiguous
+    let ct = make_contiguous_transpose(m);
+    assert_eq(ct.d00, 11);
+    assert_eq(ct.d01, 33);  // was d10 in original
+    assert_eq(ct.d10, 22);  // was d01 in original
+    assert_eq(ct.d11, 44);
+
+    // Contiguous copy of contiguous is idempotent
+    let ct2 = copy_mat2(ct);
+    assert(mat2_eq(ct, ct2));
+
+    // Verify reshape then contiguous copy preserves element order
+    let t = tensor4_new(1, 2, 3, 4, 2, 2, 2);
+    let flat = reshape_tensor4(t, 4, 0, 1);
+    assert_eq(tensor4_get(flat, 0), 1);
+    assert_eq(tensor4_get(flat, 1), 2);
+    assert_eq(tensor4_get(flat, 2), 3);
+    assert_eq(tensor4_get(flat, 3), 4);
+
+    // Reshape back and verify
+    let back = reshape_tensor4(flat, 2, 2, 2);
+    assert(tensor4_data_eq(t, back));
+    assert_eq(back.shape_d0, 2);
+    assert_eq(back.shape_d1, 2);
+
+    print("test_contiguous passed");
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_reshape();
+    test_squeeze();
+    test_unsqueeze();
+    test_transpose();
+    test_concat();
+    test_stack();
+    test_split();
+    test_flip();
+    test_roll();
+    test_repeat();
+    test_broadcast();
+    test_contiguous();
+    print("[OK] 056_tensor_manipulation");
+    0
+}

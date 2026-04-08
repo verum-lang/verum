@@ -1,0 +1,19 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Test sqrt with print then multiply
+
+module test.stdlib.sys.intrinsics.sqrt_print_multiply_test;
+
+mount core.intrinsics.{sqrt_f64};
+
+fn main() {
+    print("Testing sqrt_f64...");
+    let s = sqrt_f64(4.0);
+    print(f"sqrt = {s}");    // Add a print
+    let s_sq = s * s;
+    print(f"sqrt^2 = {s_sq}");
+
+    print("All tests passed!");
+}

@@ -1,0 +1,247 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, polynomial, multiplication, convolution, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for polynomial multiplication (coefficient arrays, convolution-style)
+// Polynomial p(x) = a0 + a1*x + a2*x^2 + ... stored as Arr8
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+// Multiply two polynomials: result[k] = sum(a[i] * b[k-i]) for valid i
+// Result has degree (a.len-1 + b.len-1), so result.len = a.len + b.len - 1
+// Clamp to max 8 coefficients
+fn poly_mul(a: Arr8, bv: Arr8) -> Arr8 {
+    let result_len = a.len + bv.len - 1;
+    let clamped_len = if result_len > 8 { 8 } else { result_len };
+    let mut result = arr8_new(clamped_len);
+
+    let mut i = 0;
+    while i < a.len {
+        let mut j = 0;
+        while j < bv.len {
+            let k = i + j;
+            if k < clamped_len {
+                let old = arr8_get(result, k);
+                result = arr8_set(result, k, old + arr8_get(a, i) * arr8_get(bv, j));
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Add two polynomials
+fn poly_add(a: Arr8, bv: Arr8) -> Arr8 {
+    let max_len = if a.len > bv.len { a.len } else { bv.len };
+    let mut result = arr8_new(max_len);
+    let mut i = 0;
+    while i < max_len {
+        let av = if i < a.len { arr8_get(a, i) } else { 0 };
+        let bvv = if i < bv.len { arr8_get(bv, i) } else { 0 };
+        result = arr8_set(result, i, av + bvv);
+        i = i + 1;
+    }
+    result
+}
+
+// Evaluate polynomial at a given x
+fn poly_eval(p: Arr8, x: Int) -> Int {
+    // Horner's method: start from highest coefficient
+    let mut result = 0;
+    let mut i = p.len - 1;
+    while i >= 0 {
+        result = result * x + arr8_get(p, i);
+        i = i - 1;
+    }
+    result
+}
+
+// Scale polynomial by a constant
+fn poly_scale(p: Arr8, c: Int) -> Arr8 {
+    let mut result = arr8_new(p.len);
+    let mut i = 0;
+    while i < p.len {
+        result = arr8_set(result, i, arr8_get(p, i) * c);
+        i = i + 1;
+    }
+    result
+}
+
+// Derivative of polynomial
+fn poly_deriv(p: Arr8) -> Arr8 {
+    if p.len <= 1 { return arr8_new(1); }
+    let mut result = arr8_new(p.len - 1);
+    let mut i = 1;
+    while i < p.len {
+        result = arr8_set(result, i - 1, arr8_get(p, i) * i);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_linear_times_linear() {
+    // (1 + 2x) * (3 + 4x) = 3 + 4x + 6x + 8x^2 = 3 + 10x + 8x^2
+    let a = Arr8 { a0: 1, a1: 2, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let bv = Arr8 { a0: 3, a1: 4, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let result = poly_mul(a, bv);
+    assert_eq(result.len, 3);
+    assert_eq(arr8_get(result, 0), 3);
+    assert_eq(arr8_get(result, 1), 10);
+    assert_eq(arr8_get(result, 2), 8);
+}
+
+fn test_constant_times_poly() {
+    // 5 * (1 + 2x + 3x^2) = 5 + 10x + 15x^2
+    let a = Arr8 { a0: 5, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 1 };
+    let bv = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let result = poly_mul(a, bv);
+    assert_eq(result.len, 3);
+    assert_eq(arr8_get(result, 0), 5);
+    assert_eq(arr8_get(result, 1), 10);
+    assert_eq(arr8_get(result, 2), 15);
+}
+
+fn test_quadratic_times_linear() {
+    // (1 + x + x^2) * (1 - x) = 1 + x + x^2 - x - x^2 - x^3 = 1 - x^3
+    // But using integers: (1 + x + x^2) * (1 + (-1)x)
+    let a = Arr8 { a0: 1, a1: 1, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let bv = Arr8 { a0: 1, a1: -1, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let result = poly_mul(a, bv);
+    assert_eq(result.len, 4);
+    assert_eq(arr8_get(result, 0), 1);   // constant
+    assert_eq(arr8_get(result, 1), 0);   // x: 1*(-1) + 1*1 = 0
+    assert_eq(arr8_get(result, 2), 0);   // x^2: 1*(-1) + 1*1 = 0
+    assert_eq(arr8_get(result, 3), -1);  // x^3: 1*(-1)
+}
+
+fn test_squaring() {
+    // (1 + x)^2 = 1 + 2x + x^2
+    let a = Arr8 { a0: 1, a1: 1, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let result = poly_mul(a, a);
+    assert_eq(arr8_get(result, 0), 1);
+    assert_eq(arr8_get(result, 1), 2);
+    assert_eq(arr8_get(result, 2), 1);
+}
+
+fn test_evaluation() {
+    // p(x) = 3 + 2x + x^2
+    let p = Arr8 { a0: 3, a1: 2, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    assert_eq(poly_eval(p, 0), 3);     // 3
+    assert_eq(poly_eval(p, 1), 6);     // 3+2+1
+    assert_eq(poly_eval(p, 2), 11);    // 3+4+4
+    assert_eq(poly_eval(p, 3), 18);    // 3+6+9
+    assert_eq(poly_eval(p, -1), 2);    // 3-2+1
+}
+
+fn test_eval_consistency() {
+    // For any polys a, b and point x: eval(a*b, x) == eval(a, x) * eval(b, x)
+    let a = Arr8 { a0: 1, a1: 3, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let bv = Arr8 { a0: 2, a1: -1, a2: 4, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let prod = poly_mul(a, bv);
+
+    let mut x = -2;
+    while x <= 3 {
+        let lhs = poly_eval(prod, x);
+        let rhs = poly_eval(a, x) * poly_eval(bv, x);
+        assert_eq(lhs, rhs);
+        x = x + 1;
+    }
+}
+
+fn test_add_polynomials() {
+    let a = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let bv = Arr8 { a0: 10, a1: 20, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let sum = poly_add(a, bv);
+    assert_eq(sum.len, 3);
+    assert_eq(arr8_get(sum, 0), 11);
+    assert_eq(arr8_get(sum, 1), 22);
+    assert_eq(arr8_get(sum, 2), 3);
+}
+
+fn test_derivative() {
+    // d/dx (3 + 2x + 5x^2 + x^3) = 2 + 10x + 3x^2
+    let p = Arr8 { a0: 3, a1: 2, a2: 5, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let dp = poly_deriv(p);
+    assert_eq(dp.len, 3);
+    assert_eq(arr8_get(dp, 0), 2);
+    assert_eq(arr8_get(dp, 1), 10);
+    assert_eq(arr8_get(dp, 2), 3);
+}
+
+fn test_derivative_constant() {
+    // d/dx (7) = 0
+    let p = Arr8 { a0: 7, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 1 };
+    let dp = poly_deriv(p);
+    assert_eq(dp.len, 1);
+    assert_eq(arr8_get(dp, 0), 0);
+}
+
+fn test_scale() {
+    let p = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let scaled = poly_scale(p, 4);
+    assert_eq(arr8_get(scaled, 0), 4);
+    assert_eq(arr8_get(scaled, 1), 8);
+    assert_eq(arr8_get(scaled, 2), 12);
+}
+
+fn test_multiply_by_zero() {
+    let a = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let zero = Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 1 };
+    let result = poly_mul(a, zero);
+    assert_eq(arr8_get(result, 0), 0);
+    assert_eq(arr8_get(result, 1), 0);
+    assert_eq(arr8_get(result, 2), 0);
+}
+
+fn test_binomial_expansion() {
+    // (1 + x)^3 = 1 + 3x + 3x^2 + x^3
+    let binomial = Arr8 { a0: 1, a1: 1, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let sq = poly_mul(binomial, binomial);
+    let cube = poly_mul(sq, binomial);
+    assert_eq(arr8_get(cube, 0), 1);
+    assert_eq(arr8_get(cube, 1), 3);
+    assert_eq(arr8_get(cube, 2), 3);
+    assert_eq(arr8_get(cube, 3), 1);
+}
+
+fn main() -> Int {
+    test_linear_times_linear();
+    test_constant_times_poly();
+    test_quadratic_times_linear();
+    test_squaring();
+    test_evaluation();
+    test_eval_consistency();
+    test_add_polynomials();
+    test_derivative();
+    test_derivative_constant();
+    test_scale();
+    test_multiply_by_zero();
+    test_binomial_expansion();
+    print("[OK] 323_poly_multiply_aot");
+    0
+}

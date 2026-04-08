@@ -1,0 +1,235 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, broadcasting, elementwise, shape
+// @timeout: 3000
+// @expect: pass
+//
+// Test: Tensor broadcasting rules
+// Verifies shape broadcasting for elementwise operations across dimensions
+
+// =============================================================================
+// Same shape operations (no broadcasting needed)
+// =============================================================================
+
+fn test_same_shape_add() {
+    let a = Tensor.zeros([2, 3]);
+    let b = Tensor.ones([2, 3]);
+    let c = a + b;
+
+    assert_eq(c.shape(), [2, 3]);
+    for i in 0..2 {
+        for j in 0..3 {
+            assert_eq(c[[i, j]], 1.0);
+        }
+    }
+}
+
+fn test_same_shape_mul() {
+    let a = Tensor.full([3, 3], 2.0);
+    let b = Tensor.full([3, 3], 3.0);
+    let c = a * b;
+
+    assert_eq(c.shape(), [3, 3]);
+    for i in 0..3 {
+        for j in 0..3 {
+            assert_eq(c[[i, j]], 6.0);
+        }
+    }
+}
+
+fn test_same_shape_sub() {
+    let a = Tensor.full([4, 2], 10.0);
+    let b = Tensor.full([4, 2], 3.0);
+    let c = a - b;
+
+    assert_eq(c.shape(), [4, 2]);
+    assert_eq(c[[0, 0]], 7.0);
+    assert_eq(c[[3, 1]], 7.0);
+}
+
+// =============================================================================
+// Scalar broadcast: scalar op with tensor
+// =============================================================================
+
+fn test_scalar_broadcast_mul() {
+    let a = Tensor.ones([3, 3]);
+    let b = a * 2.0;
+
+    assert_eq(b.shape(), [3, 3]);
+    for i in 0..3 {
+        for j in 0..3 {
+            assert_eq(b[[i, j]], 2.0);
+        }
+    }
+}
+
+fn test_scalar_broadcast_add() {
+    let a = Tensor.zeros([2, 4]);
+    let b = a + 5.0;
+
+    assert_eq(b.shape(), [2, 4]);
+    assert_eq(b[[0, 0]], 5.0);
+    assert_eq(b[[1, 3]], 5.0);
+}
+
+fn test_scalar_broadcast_left() {
+    let a = Tensor.full([3], 2.0);
+    let b = 10.0 - a;
+
+    assert_eq(b.shape(), [3]);
+    assert_eq(b[0], 8.0);
+    assert_eq(b[1], 8.0);
+    assert_eq(b[2], 8.0);
+}
+
+// =============================================================================
+// Row and column broadcasting
+// =============================================================================
+
+fn test_row_broadcast() {
+    let a = Tensor.full([3, 4], 1.0);
+    let b = Tensor.full([1, 4], 2.0);
+    let c = a + b;
+
+    assert_eq(c.shape(), [3, 4]);
+    for i in 0..3 {
+        for j in 0..4 {
+            assert_eq(c[[i, j]], 3.0);
+        }
+    }
+}
+
+fn test_column_broadcast() {
+    let a = Tensor.full([3, 4], 1.0);
+    let b = Tensor.full([3, 1], 5.0);
+    let c = a + b;
+
+    assert_eq(c.shape(), [3, 4]);
+    for i in 0..3 {
+        for j in 0..4 {
+            assert_eq(c[[i, j]], 6.0);
+        }
+    }
+}
+
+fn test_row_column_outer_broadcast() {
+    // [4, 1] * [1, 5] -> [4, 5] (outer-product-like broadcast)
+    let a = Tensor.full([4, 1], 3.0);
+    let b = Tensor.full([1, 5], 2.0);
+    let c = a * b;
+
+    assert_eq(c.shape(), [4, 5]);
+    for i in 0..4 {
+        for j in 0..5 {
+            assert_eq(c[[i, j]], 6.0);
+        }
+    }
+}
+
+fn test_broadcast_subtraction() {
+    let a = Tensor.full([2, 3], 5.0);
+    let b = Tensor.full([1, 3], 1.0);
+    let c = a - b;
+
+    assert_eq(c.shape(), [2, 3]);
+    assert_eq(c[[0, 0]], 4.0);
+    assert_eq(c[[1, 2]], 4.0);
+}
+
+fn test_broadcast_division() {
+    let a = Tensor.full([4, 4], 10.0);
+    let b = Tensor.full([1, 4], 2.0);
+    let c = a / b;
+
+    assert_eq(c.shape(), [4, 4]);
+    for i in 0..4 {
+        for j in 0..4 {
+            assert_eq(c[[i, j]], 5.0);
+        }
+    }
+}
+
+// =============================================================================
+// Multi-dimensional broadcasting
+// =============================================================================
+
+fn test_3d_broadcast() {
+    let a = Tensor.zeros([2, 3, 4]);
+    let b = Tensor.ones([1, 1, 4]);
+    let c = a + b;
+
+    assert_eq(c.shape(), [2, 3, 4]);
+}
+
+fn test_4d_broadcast() {
+    let a = Tensor.zeros([2, 1, 3, 1]);
+    let b = Tensor.ones([1, 4, 1, 5]);
+    let c = a + b;
+
+    assert_eq(c.shape(), [2, 4, 3, 5]);
+}
+
+fn test_3d_trailing_broadcast() {
+    // [2, 3, 4] + [4] -> [2, 3, 4]
+    let a = Tensor.full([2, 3, 4], 1.0);
+    let b = Tensor.full([4], 2.0);
+    let c = a + b;
+
+    assert_eq(c.shape(), [2, 3, 4]);
+}
+
+fn test_broadcast_preserves_values() {
+    let a = Tensor.from([[1.0, 2.0], [3.0, 4.0]]);
+    let b = Tensor.from([[10.0], [20.0]]);
+    let c = a + b;
+
+    assert_eq(c.shape(), [2, 2]);
+    assert_eq(c[[0, 0]], 11.0);
+    assert_eq(c[[0, 1]], 12.0);
+    assert_eq(c[[1, 0]], 23.0);
+    assert_eq(c[[1, 1]], 24.0);
+}
+
+fn test_broadcast_1d_with_scalar_tensor() {
+    let a = Tensor.full([3], 2.0);
+    let b = Tensor.full([1], 3.0);
+    let c = a + b;
+
+    assert_eq(c.shape(), [3]);
+    assert_eq(c[0], 5.0);
+    assert_eq(c[1], 5.0);
+    assert_eq(c[2], 5.0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Same shape
+    test_same_shape_add();
+    test_same_shape_mul();
+    test_same_shape_sub();
+
+    // Scalar broadcast
+    test_scalar_broadcast_mul();
+    test_scalar_broadcast_add();
+    test_scalar_broadcast_left();
+
+    // Row and column broadcast
+    test_row_broadcast();
+    test_column_broadcast();
+    test_row_column_outer_broadcast();
+    test_broadcast_subtraction();
+    test_broadcast_division();
+
+    // Multi-dimensional broadcast
+    test_3d_broadcast();
+    test_4d_broadcast();
+    test_3d_trailing_broadcast();
+    test_broadcast_preserves_values();
+    test_broadcast_1d_with_scalar_tensor();
+
+    print("004_broadcasting: PASSED");
+}

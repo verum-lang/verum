@@ -1,0 +1,90 @@
+// @test: parse
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, convenience, dsl
+// @description: Verify convenience APIs parse correctly
+
+/// Section 16: Convenience API — layout shortcuts, text builder DSL,
+/// color utilities, Rgb methods.
+
+mount core.term.*;
+
+fn test_text_builder_dsl() {
+    // Quick styled text helpers
+    let b = bold("Important");
+    let i = italic("Emphasis");
+    let d = dim("Secondary");
+    let u = underlined("Link");
+
+    // Color shortcuts
+    let r = red("Error");
+    let g = green("Success");
+    let bl = blue("Info");
+    let y = yellow("Warning");
+}
+
+fn test_layout_shortcuts() {
+    let area = Rect.new(0, 0, 80, 24);
+
+    // Header-body-footer pattern
+    let (header, body, footer) = header_body_footer(area, 3, 1);
+    assert_eq(header.height, 3);
+    assert_eq(footer.height, 1);
+    assert(body.height > 0);
+
+    // Sidebar-main pattern
+    let (sidebar, main) = sidebar_main(area, 20);
+    assert_eq(sidebar.width, 20);
+    assert(main.width > 0);
+
+    // Centered box
+    let dialog = centered(area, 40, 10);
+    assert_eq(dialog.width, 40);
+    assert_eq(dialog.height, 10);
+
+    // Equal columns
+    let cols = equal_columns(area, 3);
+    assert_eq(cols.len(), 3);
+
+    // Equal rows
+    let rows = equal_rows(area, 4);
+    assert_eq(rows.len(), 4);
+}
+
+fn test_color_utils() {
+    // Quick hex color
+    let orange = hex("#FF8800");
+    // Should produce a Color.Rgb variant
+
+    // Rgb darken/lighten
+    let red = Rgb.new(255, 0, 0);
+    let dark_red = red.darken(0.5);
+    assert(dark_red.r as Int < 255);
+
+    let light_red = red.lighten(0.5);
+    assert(light_red.r as Int == 255);
+    assert(light_red.g as Int > 0);
+
+    // Lerp between colors
+    let blue = Rgb.new(0, 0, 255);
+    let mid = red.lerp(&blue, 0.5);
+    assert(mid.r as Int > 0);
+    assert(mid.b as Int > 0);
+
+    // Gradient
+    let palette = Rgb.gradient(red, blue, 5);
+    assert_eq(palette.len(), 5);
+}
+
+fn test_span_chaining() {
+    // Span.then() for building lines
+    let line = Span.raw("Hello ").then(Span.styled("World", Style.new().bold()));
+    assert_eq(line.spans.len(), 2);
+}
+
+fn main() {
+    test_text_builder_dsl();
+    test_layout_shortcuts();
+    test_color_utils();
+    test_span_chaining();
+}

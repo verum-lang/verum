@@ -1,0 +1,295 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, abi, stdcall, calling-convention, windows, unsafe
+// @description: Tests stdcall calling convention (Windows x86)
+
+/// ============================================================
+/// STDCALL CALLING CONVENTION
+/// ============================================================
+///
+/// stdcall is the standard Windows API calling convention on x86:
+/// - Arguments pushed right-to-left on stack
+/// - Callee cleans up stack
+/// - Return value in EAX
+/// - Name decorated with @n suffix (n = bytes of args)
+
+// ------------------------------------------------------------
+// Basic stdcall Functions
+// ------------------------------------------------------------
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi stdcall_lib {
+    /// Simple stdcall function
+    @extern("stdcall")
+    fn StdcallSimple(a: c_int) -> c_int;
+
+    /// Two parameters
+    @extern("stdcall")
+    fn StdcallTwo(a: c_int, b: c_int) -> c_int;
+
+    /// Multiple parameters
+    @extern("stdcall")
+    fn StdcallMultiple(
+        a: c_int,
+        b: c_int,
+        c: c_int,
+        d: c_int
+    ) -> c_int;
+}
+
+/// Export Verum function with stdcall
+@cfg(all(target_os = "windows", target_arch = "x86"))
+@export("stdcall")
+@no_mangle
+extern "stdcall" fn VerumStdcall(a: c_int, b: c_int) -> c_int {
+    a + b
+}
+
+// ------------------------------------------------------------
+// Windows API Examples (x86)
+// ------------------------------------------------------------
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi kernel32_x86 {
+    /// Name mangling: _GetLastError@0
+    @extern("stdcall")
+    fn GetLastError() -> DWORD;
+
+    /// Name mangling: _SetLastError@4
+    @extern("stdcall")
+    fn SetLastError(dwErrCode: DWORD);
+
+    /// Name mangling: _CloseHandle@4
+    @extern("stdcall")
+    fn CloseHandle(hObject: HANDLE) -> BOOL;
+
+    /// Name mangling: _Sleep@4
+    @extern("stdcall")
+    fn Sleep(dwMilliseconds: DWORD);
+
+    /// Name mangling: _GetCurrentProcessId@0
+    @extern("stdcall")
+    fn GetCurrentProcessId() -> DWORD;
+
+    /// Multiple pointer parameters
+    @extern("stdcall")
+    fn CreateFileA(
+        lpFileName: LPCSTR,           // 4 bytes
+        dwDesiredAccess: DWORD,       // 4 bytes
+        dwShareMode: DWORD,           // 4 bytes
+        lpSecurityAttributes: LPVOID, // 4 bytes
+        dwCreationDisposition: DWORD, // 4 bytes
+        dwFlagsAndAttributes: DWORD,  // 4 bytes
+        hTemplateFile: HANDLE         // 4 bytes
+    ) -> HANDLE;                      // Total: 28 bytes -> @28;
+
+    /// ReadFile with out parameter
+    @extern("stdcall")
+    fn ReadFile(
+        hFile: HANDLE,                // 4 bytes
+        lpBuffer: LPVOID,             // 4 bytes
+        nNumberOfBytesToRead: DWORD,  // 4 bytes
+        lpNumberOfBytesRead: LPDWORD, // 4 bytes
+        lpOverlapped: LPVOID          // 4 bytes
+    ) -> BOOL;                        // Total: 20 bytes -> @20;
+}
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi user32_x86 {
+    /// Name mangling: _MessageBoxA@16
+    @extern("stdcall")
+    fn MessageBoxA(
+        hWnd: HWND,        // 4 bytes
+        lpText: LPCSTR,    // 4 bytes
+        lpCaption: LPCSTR, // 4 bytes
+        uType: UINT        // 4 bytes
+    ) -> c_int;            // Total: 16 bytes -> @16;
+
+    /// Window procedure callback type
+    @extern("stdcall")
+    fn DefWindowProcA(
+        hWnd: HWND,     // 4 bytes
+        Msg: UINT,      // 4 bytes
+        wParam: WPARAM, // 4 bytes
+        lParam: LPARAM  // 4 bytes
+    ) -> LRESULT;       // Total: 16 bytes -> @16;
+}
+
+// ------------------------------------------------------------
+// stdcall Callback Types
+// ------------------------------------------------------------
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+type WNDPROC is extern "stdcall" fn(HWND, UINT, WPARAM, LPARAM) -> LRESULT;
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+type DLGPROC is extern "stdcall" fn(HWND, UINT, WPARAM, LPARAM) -> BOOL;
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+type TIMERPROC is extern "stdcall" fn(HWND, UINT, UINT_PTR, DWORD);
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+type THREAD_START_ROUTINE is extern "stdcall" fn(LPVOID) -> DWORD;
+
+/// Window procedure implementation
+@cfg(all(target_os = "windows", target_arch = "x86"))
+@export("stdcall")
+@no_mangle
+extern "stdcall" fn MyWndProc(
+    hwnd: HWND,
+    msg: UINT,
+    wParam: WPARAM,
+    lParam: LPARAM
+) -> LRESULT {
+    const WM_DESTROY: UINT = 0x0002;
+    const WM_PAINT: UINT = 0x000F;
+
+    match msg {
+        WM_DESTROY => {
+            // Handle window destruction
+            0
+        }
+        WM_PAINT => {
+            // Handle paint
+            0
+        }
+        _ => {
+            // Default processing
+            unsafe { user32_x86.DefWindowProcA(hwnd, msg, wParam, lParam) }
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Stack Cleanup Difference
+// ------------------------------------------------------------
+
+/// In stdcall, callee pops arguments with RET n
+/// This is different from cdecl where caller adjusts ESP
+
+/// cdecl example (for comparison)
+@cfg(target_arch = "x86")
+ffi cdecl_lib {
+    @extern("C")  // cdecl
+    fn cdecl_function(a: c_int, b: c_int) -> c_int;
+    // Caller must: ADD ESP, 8 after call
+}
+
+/// stdcall example
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi stdcall_example {
+    @extern("stdcall")
+    fn stdcall_function(a: c_int, b: c_int) -> c_int;
+    // Callee uses: RET 8 to clean stack
+}
+
+// ------------------------------------------------------------
+// x64 Note
+// ------------------------------------------------------------
+
+/// On Windows x64, stdcall is not used - only win64 ABI exists
+/// The @extern("stdcall") becomes equivalent to @extern("win64")
+
+@cfg(all(target_os = "windows", target_arch = "x86_64"))
+ffi win64_equiv {
+    /// On x64, this uses win64 calling convention
+    @extern("stdcall")
+    fn StdcallOnX64(a: c_int, b: c_int) -> c_int;
+    // Same as: @extern("win64")
+}
+
+// ------------------------------------------------------------
+// Name Decoration
+// ------------------------------------------------------------
+
+/// stdcall name decoration examples:
+/// _FunctionName@ByteCount
+///
+/// void Foo()                    -> _Foo@0
+/// int Foo(int a)               -> _Foo@4
+/// int Foo(int a, int b)        -> _Foo@8
+/// int Foo(int a, DWORD* b)     -> _Foo@8
+/// int Foo(double a)            -> _Foo@8
+/// int Foo(int a, double b)     -> _Foo@12
+
+/// Explicit name decoration
+@cfg(all(target_os = "windows", target_arch = "x86"))
+ffi decorated_names {
+    @extern("stdcall", name = "_MyFunction@4")
+    fn my_function(x: c_int) -> c_int;
+
+    @extern("stdcall", name = "_MyOtherFunction@8")
+    fn my_other_function(x: c_int, y: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Common Windows Types for x86
+// ------------------------------------------------------------
+
+@cfg(target_arch = "x86")
+type BOOL is c_int;
+@cfg(target_arch = "x86")
+type DWORD is u32;
+@cfg(target_arch = "x86")
+type UINT is u32;
+@cfg(target_arch = "x86")
+type HANDLE is *mut c_void;
+@cfg(target_arch = "x86")
+type HWND is *mut c_void;
+@cfg(target_arch = "x86")
+type LPVOID is *mut c_void;
+@cfg(target_arch = "x86")
+type LPCSTR is *const c_char;
+@cfg(target_arch = "x86")
+type LPDWORD is *mut DWORD;
+@cfg(target_arch = "x86")
+type WPARAM is u32;      // 32-bit on x86
+@cfg(target_arch = "x86")
+type LPARAM is i32;      // 32-bit on x86
+@cfg(target_arch = "x86")
+type LRESULT is i32;     // 32-bit on x86
+@cfg(target_arch = "x86")
+type UINT_PTR is u32;    // 32-bit on x86
+
+// ------------------------------------------------------------
+// Safe Wrappers
+// ------------------------------------------------------------
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+fn show_message(text: &str, caption: &str) -> c_int {
+    let c_text = text.to_cstring();
+    let c_caption = caption.to_cstring();
+
+    // SAFETY: Both strings are valid null-terminated
+    unsafe {
+        user32_x86.MessageBoxA(
+            0 as HWND,
+            c_text.as_ptr(),
+            c_caption.as_ptr(),
+            0  // MB_OK
+        )
+    }
+}
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+fn get_error() -> u32 {
+    unsafe { kernel32_x86.GetLastError() }
+}
+
+@cfg(all(target_os = "windows", target_arch = "x86"))
+fn sleep_ms(ms: u32) {
+    unsafe { kernel32_x86.Sleep(ms); }
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_int is i32;
+type c_void is ();
+
+fn main() {
+    // stdcall tests
+}

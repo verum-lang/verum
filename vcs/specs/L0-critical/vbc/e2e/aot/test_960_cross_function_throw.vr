@@ -1,0 +1,140 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: try, recover, cross-function, throw, setjmp, longjmp
+// @description: Test cross-function throw via setjmp/longjmp
+
+fn always_throws() -> Int {
+    throw 42;
+    0
+}
+
+fn test_cross_function_throw() -> Int {
+    let result = try {
+        always_throws()
+    } recover |e| {
+        e
+    };
+    if result != 42 {
+        print(f"FAIL cross_throw: expected 42, got {result}");
+        return 1;
+    }
+    print("  cross_function_throw: OK");
+    0
+}
+
+fn may_throw(x: Int) -> Int {
+    if x < 0 {
+        throw x;
+    }
+    x * 2
+}
+
+fn test_cross_no_throw() -> Int {
+    let result = try {
+        may_throw(10)
+    } recover |e| {
+        e
+    };
+    if result != 20 {
+        print(f"FAIL cross_no_throw: expected 20, got {result}");
+        return 1;
+    }
+    print("  cross_no_throw: OK");
+    0
+}
+
+fn test_cross_conditional_throw() -> Int {
+    let result = try {
+        may_throw(-7)
+    } recover |e| {
+        e * -1
+    };
+    // may_throw(-7) → throw -7 → recover: 7
+    if result != 7 {
+        print(f"FAIL cross_cond: expected 7, got {result}");
+        return 1;
+    }
+    print("  cross_conditional: OK");
+    0
+}
+
+fn chain_a(x: Int) -> Int {
+    let v = chain_b(x);
+    v + 1
+}
+
+fn chain_b(x: Int) -> Int {
+    if x == 0 {
+        throw 999;
+    }
+    x * 10
+}
+
+fn test_deep_chain() -> Int {
+    let result = try {
+        chain_a(0)
+    } recover |e| {
+        e
+    };
+    // chain_a(0) → chain_b(0) → throw 999 → longjmp to handler → 999
+    if result != 999 {
+        print(f"FAIL deep_chain: expected 999, got {result}");
+        return 1;
+    }
+    print("  deep_chain_throw: OK");
+    0
+}
+
+fn test_deep_chain_ok() -> Int {
+    let result = try {
+        chain_a(5)
+    } recover |e| {
+        e
+    };
+    // chain_a(5) → chain_b(5) = 50 → chain_a: 50+1=51
+    if result != 51 {
+        print(f"FAIL deep_ok: expected 51, got {result}");
+        return 1;
+    }
+    print("  deep_chain_ok: OK");
+    0
+}
+
+fn test_multiple_calls() -> Int {
+    let result = try {
+        let a = may_throw(3);
+        let b = may_throw(4);
+        let c = may_throw(-1);
+        a + b + c
+    } recover |e| {
+        e + 100
+    };
+    // a=6, b=8, c → throw -1 → recover: -1+100=99
+    if result != 99 {
+        print(f"FAIL multi_calls: expected 99, got {result}");
+        return 1;
+    }
+    print("  multiple_calls: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Cross-Function Throw Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_cross_function_throw();
+    failures = failures + test_cross_no_throw();
+    failures = failures + test_cross_conditional_throw();
+    failures = failures + test_deep_chain();
+    failures = failures + test_deep_chain_ok();
+    failures = failures + test_multiple_calls();
+
+    if failures == 0 {
+        print("All cross-function throw tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+
+    failures
+}

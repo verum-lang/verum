@@ -1,0 +1,202 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, bloom-filter, probabilistic, hashing
+// @timeout: 30000
+
+// Bloom filter simulation using multiple hash functions
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Bloom filter uses a bit array of size 64 (stored as single Int)
+// with 3 hash functions
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit_i(val: Int, pos: Int) -> Int {
+    (val / pow2(pos)) % 2
+}
+
+fn set_bit_i(val: Int, pos: Int) -> Int {
+    if get_bit_i(val, pos) == 1 { val }
+    else { val + pow2(pos) }
+}
+
+// Hash functions (simple modular hashing)
+fn hash1(val: Int, size: Int) -> Int { abs_val(val * 7 + 3) % size }
+fn hash2(val: Int, size: Int) -> Int { abs_val(val * 13 + 5) % size }
+fn hash3(val: Int, size: Int) -> Int { abs_val(val * 19 + 11) % size }
+
+// Bloom filter stored as two parts: low32 and high32
+// We use 32-bit range to keep within safe integer arithmetic
+type BloomFilter is { bits_lo: Int, bits_hi: Int, count: Int };
+
+fn bloom_new() -> BloomFilter {
+    BloomFilter { bits_lo: 0, bits_hi: 0, count: 0 }
+}
+
+fn bloom_set_bit(bf: BloomFilter, pos: Int) -> BloomFilter {
+    if pos < 16 {
+        BloomFilter { bits_lo: set_bit_i(bf.bits_lo, pos), bits_hi: bf.bits_hi, count: bf.count }
+    } else {
+        BloomFilter { bits_lo: bf.bits_lo, bits_hi: set_bit_i(bf.bits_hi, pos - 16), count: bf.count }
+    }
+}
+
+fn bloom_get_bit(bf: BloomFilter, pos: Int) -> Int {
+    if pos < 16 { get_bit_i(bf.bits_lo, pos) }
+    else { get_bit_i(bf.bits_hi, pos - 16) }
+}
+
+fn bloom_add(bf: BloomFilter, val: Int) -> BloomFilter {
+    let size = 32; // 32 bits total
+    let h1 = hash1(val, size);
+    let h2 = hash2(val, size);
+    let h3 = hash3(val, size);
+    let mut bf2 = bloom_set_bit(bf, h1);
+    bf2 = bloom_set_bit(bf2, h2);
+    bf2 = bloom_set_bit(bf2, h3);
+    BloomFilter { bits_lo: bf2.bits_lo, bits_hi: bf2.bits_hi, count: bf.count + 1 }
+}
+
+fn bloom_may_contain(bf: BloomFilter, val: Int) -> Int {
+    let size = 32;
+    let h1 = hash1(val, size);
+    let h2 = hash2(val, size);
+    let h3 = hash3(val, size);
+    if bloom_get_bit(bf, h1) == 0 { return 0; }
+    if bloom_get_bit(bf, h2) == 0 { return 0; }
+    if bloom_get_bit(bf, h3) == 0 { return 0; }
+    1 // probably contains
+}
+
+// Count set bits in bloom filter
+fn bloom_popcount(bf: BloomFilter) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 32 {
+        if bloom_get_bit(bf, i) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_empty_bloom() -> Int {
+    let bf = bloom_new();
+    assert_eq(bloom_may_contain(bf, 42), 0);
+    assert_eq(bloom_may_contain(bf, 0), 0);
+    assert_eq(bloom_popcount(bf), 0);
+    assert_eq(bf.count, 0);
+    1
+}
+
+fn test_add_and_check() -> Int {
+    let mut bf = bloom_new();
+    bf = bloom_add(bf, 10);
+    assert_eq(bloom_may_contain(bf, 10), 1); // definitely should be found
+    assert_eq(bf.count, 1);
+
+    bf = bloom_add(bf, 20);
+    assert_eq(bloom_may_contain(bf, 10), 1);
+    assert_eq(bloom_may_contain(bf, 20), 1);
+    assert_eq(bf.count, 2);
+
+    bf = bloom_add(bf, 30);
+    assert_eq(bloom_may_contain(bf, 10), 1);
+    assert_eq(bloom_may_contain(bf, 20), 1);
+    assert_eq(bloom_may_contain(bf, 30), 1);
+    1
+}
+
+fn test_no_false_negatives() -> Int {
+    // After adding elements, they must always be found
+    let mut bf = bloom_new();
+    let mut i = 0;
+    while i < 5 {
+        bf = bloom_add(bf, i * 100 + 7);
+        i = i + 1;
+    }
+    // Verify all added elements are found
+    let mut j = 0;
+    while j < 5 {
+        assert_eq(bloom_may_contain(bf, j * 100 + 7), 1);
+        j = j + 1;
+    }
+    1
+}
+
+fn test_popcount_growth() -> Int {
+    // Adding elements increases popcount
+    let mut bf = bloom_new();
+    let pc0 = bloom_popcount(bf);
+    bf = bloom_add(bf, 42);
+    let pc1 = bloom_popcount(bf);
+    bf = bloom_add(bf, 99);
+    let pc2 = bloom_popcount(bf);
+    // Popcount should be non-decreasing
+    let ok1 = if pc1 >= pc0 { 1 } else { 0 };
+    let ok2 = if pc2 >= pc1 { 1 } else { 0 };
+    assert_eq(ok1, 1);
+    assert_eq(ok2, 1);
+    // At least some bits set
+    let ok3 = if pc1 > 0 { 1 } else { 0 };
+    assert_eq(ok3, 1);
+    1
+}
+
+fn test_hash_distribution() -> Int {
+    // Verify hash functions produce different values
+    let h1 = hash1(42, 32);
+    let h2 = hash2(42, 32);
+    let h3 = hash3(42, 32);
+    // At least 2 of 3 should be different for good distribution
+    let distinct = if h1 != h2 { 1 }
+                   else if h1 != h3 { 1 }
+                   else { 0 };
+    assert_eq(distinct, 1);
+    // All values in range
+    let ok1 = if h1 >= 0 { if h1 < 32 { 1 } else { 0 } } else { 0 };
+    let ok2 = if h2 >= 0 { if h2 < 32 { 1 } else { 0 } } else { 0 };
+    let ok3 = if h3 >= 0 { if h3 < 32 { 1 } else { 0 } } else { 0 };
+    assert_eq(ok1, 1);
+    assert_eq(ok2, 1);
+    assert_eq(ok3, 1);
+    1
+}
+
+fn main() -> Int {
+    test_empty_bloom();
+    test_add_and_check();
+    test_no_false_negatives();
+    test_popcount_growth();
+    test_hash_distribution();
+    print("[OK] 587_bloom_filter_aot");
+    0
+}

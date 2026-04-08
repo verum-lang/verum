@@ -1,0 +1,229 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, graph, algorithms
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Tests graph algorithms using adjacency matrix representation.
+
+// Graph as adjacency matrix (6x6 stored as flat array)
+// Nodes: 0,1,2,3,4,5
+fn test_bfs_reachability() {
+    // Adjacency matrix (1=connected, 0=not)
+    //   0 1 2 3 4 5
+    // 0 0 1 1 0 0 0
+    // 1 1 0 0 1 0 0
+    // 2 1 0 0 1 1 0
+    // 3 0 1 1 0 0 1
+    // 4 0 0 1 0 0 1
+    // 5 0 0 0 1 1 0
+    let adj = [
+        0, 1, 1, 0, 0, 0,
+        1, 0, 0, 1, 0, 0,
+        1, 0, 0, 1, 1, 0,
+        0, 1, 1, 0, 0, 1,
+        0, 0, 1, 0, 0, 1,
+        0, 0, 0, 1, 1, 0
+    ];
+    let n = 6;
+
+    // BFS from node 0
+    let mut visited = [0, 0, 0, 0, 0, 0];
+    let mut queue_arr = [0, 0, 0, 0, 0, 0];
+    let mut head = 0;
+    let mut tail = 0;
+
+    visited[0] = 1;
+    queue_arr[tail] = 0;
+    tail = tail + 1;
+
+    while head < tail {
+        let node = queue_arr[head];
+        head = head + 1;
+        let mut neighbor = 0;
+        while neighbor < n {
+            if adj[node * n + neighbor] == 1 {
+                if visited[neighbor] == 0 {
+                    visited[neighbor] = 1;
+                    queue_arr[tail] = neighbor;
+                    tail = tail + 1;
+                }
+            }
+            neighbor = neighbor + 1;
+        }
+    }
+
+    // All nodes should be reachable from 0
+    let mut reachable = 0;
+    let mut i = 0;
+    while i < n {
+        reachable = reachable + visited[i];
+        i = i + 1;
+    }
+    assert_eq(reachable, 6);
+    print("bfs_reachability: ok");
+}
+
+fn test_connected_components() {
+    // Two disconnected components:
+    // Component 1: nodes 0,1,2 (triangle)
+    // Component 2: nodes 3,4 (edge)
+    // Node 5: isolated
+    let adj = [
+        0, 1, 1, 0, 0, 0,
+        1, 0, 1, 0, 0, 0,
+        1, 1, 0, 0, 0, 0,
+        0, 0, 0, 0, 1, 0,
+        0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 0
+    ];
+    let n = 6;
+
+    let mut component = [-1, -1, -1, -1, -1, -1];
+    let mut num_components = 0;
+
+    let mut start = 0;
+    while start < n {
+        if component[start] == -1 {
+            // BFS from start
+            let mut queue_arr = [0, 0, 0, 0, 0, 0];
+            let mut head = 0;
+            let mut tail = 0;
+            component[start] = num_components;
+            queue_arr[tail] = start;
+            tail = tail + 1;
+
+            while head < tail {
+                let node = queue_arr[head];
+                head = head + 1;
+                let mut nb = 0;
+                while nb < n {
+                    if adj[node * n + nb] == 1 {
+                        if component[nb] == -1 {
+                            component[nb] = num_components;
+                            queue_arr[tail] = nb;
+                            tail = tail + 1;
+                        }
+                    }
+                    nb = nb + 1;
+                }
+            }
+            num_components = num_components + 1;
+        }
+        start = start + 1;
+    }
+
+    assert_eq(num_components, 3); // Triangle, edge, isolated
+    // Nodes 0,1,2 in same component
+    assert_eq(component[0], component[1]);
+    assert_eq(component[1], component[2]);
+    // Nodes 3,4 in same component
+    assert_eq(component[3], component[4]);
+    // Node 5 in its own component
+    assert(component[5] != component[0]);
+    assert(component[5] != component[3]);
+    print("connected_components: ok");
+}
+
+fn test_degree_sequence() {
+    // Complete graph K4 (4 nodes, all connected)
+    let adj = [
+        0, 1, 1, 1,
+        1, 0, 1, 1,
+        1, 1, 0, 1,
+        1, 1, 1, 0
+    ];
+    let n = 4;
+
+    let mut degrees = [0, 0, 0, 0];
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            degrees[i] = degrees[i] + adj[i * n + j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    // K4: each node has degree 3
+    assert_eq(degrees[0], 3);
+    assert_eq(degrees[1], 3);
+    assert_eq(degrees[2], 3);
+    assert_eq(degrees[3], 3);
+
+    // Total edges = sum(degrees) / 2 = 12/2 = 6
+    let total_degree = degrees[0] + degrees[1] + degrees[2] + degrees[3];
+    assert_eq(total_degree / 2, 6);
+    print("degree_sequence: ok");
+}
+
+fn test_shortest_path() {
+    // Weighted graph (weights in separate matrix)
+    // 4 nodes with various weights
+    let weights = [
+        0,  4,  1,  0,
+        4,  0,  0,  2,
+        1,  0,  0,  5,
+        0,  2,  5,  0
+    ];
+    let n = 4;
+    let inf = 999999;
+
+    // Dijkstra from node 0
+    let mut dist = [0, inf, inf, inf];
+    let mut done = [0, 0, 0, 0];
+
+    let mut step = 0;
+    while step < n {
+        // Find unvisited node with minimum distance
+        let mut min_dist = inf;
+        let mut u = -1;
+        let mut i = 0;
+        while i < n {
+            if done[i] == 0 {
+                if dist[i] < min_dist {
+                    min_dist = dist[i];
+                    u = i;
+                }
+            }
+            i = i + 1;
+        }
+        if u == -1 { break; }
+        done[u] = 1;
+
+        // Relax neighbors
+        let mut v = 0;
+        while v < n {
+            let w = weights[u * n + v];
+            if w > 0 {
+                if done[v] == 0 {
+                    let new_dist = dist[u] + w;
+                    if new_dist < dist[v] {
+                        dist[v] = new_dist;
+                    }
+                }
+            }
+            v = v + 1;
+        }
+        step = step + 1;
+    }
+
+    // Shortest paths from node 0:
+    // 0→0: 0, 0→1: 4, 0→2: 1, 0→3: 6 (0→1→3=6 or 0→2→3=6)
+    assert_eq(dist[0], 0);
+    assert_eq(dist[1], 4);
+    assert_eq(dist[2], 1);
+    assert_eq(dist[3], 6);
+    print("shortest_path: ok");
+}
+
+fn main() -> Int {
+    test_bfs_reachability();
+    test_connected_components();
+    test_degree_sequence();
+    test_shortest_path();
+    print("[OK] 421_interp_graph_algorithms");
+    0
+}

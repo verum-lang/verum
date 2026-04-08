@@ -1,0 +1,185 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, matrix-chain, dynamic-programming, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for matrix chain multiplication (minimum multiplications via DP)
+// Given matrices A1(p0 x p1), A2(p1 x p2), ..., An(p_{n-1} x p_n),
+// find the minimum number of scalar multiplications.
+
+// Dimensions stored in Arr8
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+// 7x7 DP table stored as 7 Arr8 rows
+type DpTable is { r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8, r4: Arr8, r5: Arr8, r6: Arr8 };
+
+fn dp_zero_row() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 7 }
+}
+
+fn dp_new() -> DpTable {
+    DpTable { r0: dp_zero_row(), r1: dp_zero_row(), r2: dp_zero_row(), r3: dp_zero_row(), r4: dp_zero_row(), r5: dp_zero_row(), r6: dp_zero_row() }
+}
+
+fn dp_get_row(t: DpTable, r: Int) -> Arr8 {
+    if r == 0 { t.r0 } else if r == 1 { t.r1 } else if r == 2 { t.r2 }
+    else if r == 3 { t.r3 } else if r == 4 { t.r4 } else if r == 5 { t.r5 }
+    else { t.r6 }
+}
+
+fn dp_get(t: DpTable, i: Int, j: Int) -> Int {
+    arr8_get(dp_get_row(t, i), j)
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn dp_set(t: DpTable, i: Int, j: Int, v: Int) -> DpTable {
+    let old_row = dp_get_row(t, i);
+    let new_row = arr8_set(old_row, j, v);
+    DpTable {
+        r0: if i == 0 { new_row } else { t.r0 },
+        r1: if i == 1 { new_row } else { t.r1 },
+        r2: if i == 2 { new_row } else { t.r2 },
+        r3: if i == 3 { new_row } else { t.r3 },
+        r4: if i == 4 { new_row } else { t.r4 },
+        r5: if i == 5 { new_row } else { t.r5 },
+        r6: if i == 6 { new_row } else { t.r6 }
+    }
+}
+
+// Matrix chain multiplication DP
+// dims: array of dimensions, n = number of matrices (dims.len - 1)
+// Returns minimum number of scalar multiplications
+fn matrix_chain_order(dims: Arr8) -> Int {
+    let n = dims.len - 1;
+    if n <= 1 { return 0; }
+
+    let mut dp = dp_new();
+
+    // Fill for chain lengths 2..n
+    let mut chain_len = 2;
+    while chain_len <= n {
+        let mut i = 0;
+        while i <= n - chain_len {
+            let j = i + chain_len - 1;
+            let mut best = 999999999;
+            let mut k = i;
+            while k < j {
+                let cost = dp_get(dp, i, k)
+                         + dp_get(dp, k + 1, j)
+                         + arr8_get(dims, i) * arr8_get(dims, k + 1) * arr8_get(dims, j + 1);
+                if cost < best { best = cost; }
+                k = k + 1;
+            }
+            dp = dp_set(dp, i, j, best);
+            i = i + 1;
+        }
+        chain_len = chain_len + 1;
+    }
+
+    dp_get(dp, 0, n - 1)
+}
+
+fn test_two_matrices() {
+    // A1: 10x30, A2: 30x5 => 10*30*5 = 1500
+    let dims = Arr8 { a0: 10, a1: 30, a2: 5, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    assert_eq(matrix_chain_order(dims), 1500);
+}
+
+fn test_three_matrices() {
+    // dims = [10, 20, 30, 40]
+    // 3 matrices: A1(10x20), A2(20x30), A3(30x40)
+    // (A1*A2)*A3 = 10*20*30 + 10*30*40 = 6000 + 12000 = 18000
+    // A1*(A2*A3) = 20*30*40 + 10*20*40 = 24000 + 8000 = 32000
+    // Optimal = 18000
+    let dims = Arr8 { a0: 10, a1: 20, a2: 30, a3: 40, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    assert_eq(matrix_chain_order(dims), 18000);
+}
+
+fn test_single_matrix() {
+    let dims = Arr8 { a0: 5, a1: 10, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    assert_eq(matrix_chain_order(dims), 0);
+}
+
+fn test_classic_four() {
+    // dims = [40, 20, 30, 10, 30]
+    // 4 matrices: A1(40x20), A2(20x30), A3(30x10), A4(10x30)
+    // Optimal = 26000
+    let dims = Arr8 { a0: 40, a1: 20, a2: 30, a3: 10, a4: 30, a5: 0, a6: 0, a7: 0, len: 5 };
+    assert_eq(matrix_chain_order(dims), 26000);
+}
+
+fn test_square_matrices() {
+    // All 5x5: dims = [5, 5, 5, 5, 5]
+    // 4 matrices, any parenthesization = 3 * 125 = 375
+    let dims = Arr8 { a0: 5, a1: 5, a2: 5, a3: 5, a4: 5, a5: 0, a6: 0, a7: 0, len: 5 };
+    assert_eq(matrix_chain_order(dims), 375);
+}
+
+fn test_skinny_then_wide() {
+    // dims = [1, 100, 1, 100, 1]
+    // A1(1x100), A2(100x1), A3(1x100), A4(100x1)
+    // Optimal: ((A1*A2)*(A3*A4)) = 100 + 100 + 1 = 201
+    let dims = Arr8 { a0: 1, a1: 100, a2: 1, a3: 100, a4: 1, a5: 0, a6: 0, a7: 0, len: 5 };
+    assert_eq(matrix_chain_order(dims), 201);
+}
+
+fn test_textbook_six() {
+    // dims = [30, 35, 15, 5, 10, 20, 25]
+    // Classic textbook example with 6 matrices
+    // Known answer: 15125
+    let dims = Arr8 { a0: 30, a1: 35, a2: 15, a3: 5, a4: 10, a5: 20, a6: 25, a7: 0, len: 7 };
+    assert_eq(matrix_chain_order(dims), 15125);
+}
+
+fn test_identity_chain() {
+    // dims = [2, 3, 4, 5]
+    // (A1*A2)*A3 = 2*3*4 + 2*4*5 = 24 + 40 = 64
+    // A1*(A2*A3) = 3*4*5 + 2*3*5 = 60 + 30 = 90
+    // Optimal = 64
+    let dims = Arr8 { a0: 2, a1: 3, a2: 4, a3: 5, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    assert_eq(matrix_chain_order(dims), 64);
+}
+
+fn test_five_matrices() {
+    // dims = [5, 10, 3, 12, 5, 50]
+    let dims = Arr8 { a0: 5, a1: 10, a2: 3, a3: 12, a4: 5, a5: 50, a6: 0, a7: 0, len: 6 };
+    let cost = matrix_chain_order(dims);
+    // Verify it is less than the naive left-to-right cost
+    // Left-to-right: (((A1*A2)*A3)*A4)*A5
+    // = 5*10*3 + 5*3*12 + 5*12*5 + 5*5*50
+    // = 150 + 180 + 300 + 1250 = 1880
+    assert_eq(cost <= 1880, true);
+    assert_eq(cost > 0, true);
+}
+
+fn main() -> Int {
+    test_two_matrices();
+    test_three_matrices();
+    test_single_matrix();
+    test_classic_four();
+    test_square_matrices();
+    test_skinny_then_wide();
+    test_textbook_six();
+    test_identity_chain();
+    test_five_matrices();
+    print("[OK] 319_matrix_chain_aot");
+    0
+}

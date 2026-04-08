@@ -1,0 +1,133 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arithmetic, precedence, parentheses
+
+fn test_parentheses_override() {
+    // Parentheses override default precedence
+    let a = (1 + 2) * 3;      // = 9, not 7
+    let b = 10 / (2 + 3);     // = 2, not 7
+
+    let c_val = 3;
+    let d_val = 4;
+    let e_val = 5;
+    let f_val = 6;
+
+    let c = (1 - 2) * (c_val + d_val);
+}
+
+fn test_nested_parentheses() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let g = 7;
+    let h = 8;
+
+    // Nested parentheses
+    let result_d = ((1 + 2) * 3) + 4;
+    let result_e = 1 + ((2 * 3) + 4);
+    let result_f = ((a + b) * (c + d)) / ((e - f) * (g - h));
+}
+
+fn test_deeply_nested() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+
+    // Deeply nested
+    let deep = (((1 + 2) * 3) - 4) / 5;
+    let deeper = ((((a + b) * c) - d) / e) % f;
+}
+
+fn test_multiplication_before_addition() {
+    // Multiplication before addition
+    let m1 = 2 + 3 * 4;       // = 14 (3*4 first)
+    let m2 = 2 * 3 + 4;       // = 10 (2*3 first)
+    let m3 = 2 + 3 * 4 + 5;   // = 19
+}
+
+fn test_division_before_subtraction() {
+    // Division before subtraction
+    let d1 = 10 - 6 / 2;      // = 7 (6/2 first)
+    let d2 = 10 / 2 - 3;      // = 2 (10/2 first)
+}
+
+fn test_modulo_precedence() {
+    // Modulo has same precedence as * and /
+    let mod1 = 10 + 7 % 3;    // = 11 (7%3 first)
+    let mod2 = 10 % 3 + 2;    // = 3 (10%3 first)
+}
+
+fn test_left_to_right_associativity() {
+    // Left-to-right associativity for same precedence
+    let ltr1 = 10 - 5 - 2;    // = 3 ((10-5)-2)
+    let ltr2 = 24 / 4 / 2;    // = 3 ((24/4)/2)
+    let ltr3 = 10 * 2 / 4;    // = 5 ((10*2)/4)
+}
+
+fn test_power_right_associativity() {
+    // Right-to-left associativity for power (if supported)
+    let pow1 = 2 ** 3 ** 2;   // = 512 (2**(3**2))
+}
+
+fn test_unary_minus_precedence() {
+    // Unary minus precedence
+    let u1 = -2 + 3;          // = 1
+    let u2 = 3 + -2;          // = 1
+    let u3 = -2 * 3;          // = -6
+    let u4 = 2 * -3;          // = -6
+    let u5 = -(2 + 3);        // = -5
+}
+
+fn test_complex_precedence() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+
+    // Complex precedence combinations
+    let complex1 = 1 + 2 * 3 - 4 / 2 + 5 % 3;
+    let complex2 = (1 + 2) * (3 - 4) / (2 + 5) % 3;
+    let complex3 = -a + b * -c - d / -e;
+}
+
+fn test_comparison_operator_precedence() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let x = 5;
+    let y = 6;
+    let z = 7;
+    let w = 8;
+
+    // Comparison operator precedence (lower than arithmetic)
+    let cmp1 = 1 + 2 < 3 + 4;     // (1+2) < (3+4)
+    let cmp2 = a * b == c * d;    // (a*b) == (c*d)
+    let cmp3 = x / y >= z - w;    // (x/y) >= (z-w)
+}
+
+fn test_logical_operator_precedence() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let x = 7;
+    let y = 8;
+    let z = 9;
+    let w = 10;
+
+    // Logical operator precedence (lower than comparison)
+    let log1 = a < b && c > d;
+    let log2 = x == y || z != w;
+    let log3 = (a + b < c) && (d - e > f);
+}

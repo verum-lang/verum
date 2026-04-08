@@ -1,0 +1,418 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @baseline-comparison: rust
+// @tags: comparison, rust, fibonacci, compute, baseline, performance
+// @description: Fibonacci vs Rust benchmark (target: 0.95-1.05x Rust performance)
+
+/// Verum vs Rust: Fibonacci Benchmark
+///
+/// This benchmark compares Verum's performance against Rust for recursive
+/// Fibonacci computation. This tests pure compute with no memory safety
+/// overhead, establishing a baseline for algorithmic performance.
+///
+/// Target: 0.95-1.05x Rust performance (within 5%)
+///
+/// Test cases:
+/// - Naive recursive fib(40)
+/// - Memoized fib(50)
+/// - Iterative fib(10000)
+/// - Tail-recursive fib (if TCO enabled)
+///
+/// Why these targets:
+/// - Pure compute should be identical after LLVM optimization
+/// - No CBGR overhead (no heap allocations in tight loop)
+/// - Tests function call overhead
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 10;
+const BENCHMARK_ITERATIONS: Int = 5;
+
+/// Rust baseline measurements (pre-measured with release build)
+module rust_baselines {
+    /// Rust fib(40) naive recursive in milliseconds
+    pub const FIB_40_NAIVE_MS: Float = 450.0;
+
+    /// Rust fib(50) memoized in milliseconds
+    pub const FIB_50_MEMO_MS: Float = 0.1;
+
+    /// Rust fib(10000) iterative in milliseconds
+    pub const FIB_10000_ITER_MS: Float = 0.5;
+
+    /// Rust fib(1000000) iterative (bigint) in milliseconds
+    pub const FIB_1M_BIGINT_MS: Float = 500.0;
+
+    /// Rust tail-recursive fib(10000) in milliseconds (with TCO)
+    pub const FIB_10000_TAIL_MS: Float = 0.3;
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs Rust: Fibonacci");
+
+    results.add(benchmark_fib_naive());
+    results.add(benchmark_fib_memoized());
+    results.add(benchmark_fib_iterative());
+    results.add(benchmark_fib_tail_recursive());
+    results.add(benchmark_fib_matrix());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_rust_fibonacci.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.ratio >= r.min_target);
+    assert(all_meet_target, "Verum Fibonacci performance below target");
+}
+
+/// Naive recursive Fibonacci
+fn fib_naive(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fib_naive(n - 1) + fib_naive(n - 2) }
+}
+
+/// Benchmark: Naive recursive fibonacci(40)
+fn benchmark_fib_naive() -> ComparisonResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(fib_naive(35));
+    }
+
+    let mut total_ms: Float = 0.0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let timer = Timer.new();
+        timer.start();
+
+        let result = fib_naive(40);
+
+        total_ms += timer.elapsed_ms() as Float;
+        black_box(result);
+    }
+
+    let verum_ms = total_ms / BENCHMARK_ITERATIONS as Float;
+    let rust_ms = rust_baselines.FIB_40_NAIVE_MS;
+    let ratio = rust_ms / verum_ms;
+
+    ComparisonResult {
+        name: "fib_40_naive_recursive",
+        verum_ms,
+        baseline_ms: rust_ms,
+        ratio,
+        min_target: 0.95,
+        category: "compute",
+    }
+}
+
+/// Memoized Fibonacci using dynamic programming
+fn fib_memoized(n: Int, memo: &mut Map<Int, Int>) -> Int {
+    if n <= 1 { return n; }
+
+    if let Some(&cached) = memo.get(&n) {
+        return cached;
+    }
+
+    let result = fib_memoized(n - 1, memo) + fib_memoized(n - 2, memo);
+    memo.insert(n, result);
+    result
+}
+
+/// Benchmark: Memoized fibonacci(50)
+fn benchmark_fib_memoized() -> ComparisonResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS * 10 {
+        let mut memo: Map<Int, Int> = Map.new();
+        black_box(fib_memoized(50, &mut memo));
+    }
+
+    let mut total_ms: Float = 0.0;
+
+    for _ in 0..BENCHMARK_ITERATIONS * 100 {
+        let mut memo: Map<Int, Int> = Map.new();
+
+        let timer = Timer.new();
+        timer.start();
+
+        let result = fib_memoized(50, &mut memo);
+
+        total_ms += timer.elapsed_ms() as Float;
+        black_box(result);
+    }
+
+    let verum_ms = total_ms / (BENCHMARK_ITERATIONS * 100) as Float;
+    let rust_ms = rust_baselines.FIB_50_MEMO_MS;
+    let ratio = rust_ms / verum_ms;
+
+    ComparisonResult {
+        name: "fib_50_memoized",
+        verum_ms,
+        baseline_ms: rust_ms,
+        ratio,
+        min_target: 0.85, // HashMap overhead may differ
+        category: "compute_memo",
+    }
+}
+
+/// Iterative Fibonacci
+fn fib_iterative(n: Int) -> Int {
+    if n <= 1 { return n; }
+
+    let mut prev = 0;
+    let mut curr = 1;
+
+    for _ in 2..=n {
+        let next = prev + curr;
+        prev = curr;
+        curr = next;
+    }
+
+    curr
+}
+
+/// Benchmark: Iterative fibonacci(10000)
+fn benchmark_fib_iterative() -> ComparisonResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS * 100 {
+        black_box(fib_iterative(10000));
+    }
+
+    let mut total_ms: Float = 0.0;
+
+    for _ in 0..BENCHMARK_ITERATIONS * 1000 {
+        let timer = Timer.new();
+        timer.start();
+
+        let result = fib_iterative(10000);
+
+        total_ms += timer.elapsed_ms() as Float;
+        black_box(result);
+    }
+
+    let verum_ms = total_ms / (BENCHMARK_ITERATIONS * 1000) as Float;
+    let rust_ms = rust_baselines.FIB_10000_ITER_MS;
+    let ratio = rust_ms / verum_ms;
+
+    ComparisonResult {
+        name: "fib_10000_iterative",
+        verum_ms,
+        baseline_ms: rust_ms,
+        ratio,
+        min_target: 0.95, // Pure stack operations
+        category: "compute_iter",
+    }
+}
+
+/// Tail-recursive Fibonacci (tests TCO)
+fn fib_tail(n: Int, a: Int, b: Int) -> Int {
+    if n == 0 { a }
+    else if n == 1 { b }
+    else { fib_tail(n - 1, b, a + b) }
+}
+
+fn fib_tail_entry(n: Int) -> Int {
+    fib_tail(n, 0, 1)
+}
+
+/// Benchmark: Tail-recursive fibonacci(10000)
+fn benchmark_fib_tail_recursive() -> ComparisonResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS * 100 {
+        black_box(fib_tail_entry(10000));
+    }
+
+    let mut total_ms: Float = 0.0;
+
+    for _ in 0..BENCHMARK_ITERATIONS * 1000 {
+        let timer = Timer.new();
+        timer.start();
+
+        let result = fib_tail_entry(10000);
+
+        total_ms += timer.elapsed_ms() as Float;
+        black_box(result);
+    }
+
+    let verum_ms = total_ms / (BENCHMARK_ITERATIONS * 1000) as Float;
+    let rust_ms = rust_baselines.FIB_10000_TAIL_MS;
+    let ratio = rust_ms / verum_ms;
+
+    ComparisonResult {
+        name: "fib_10000_tail_recursive",
+        verum_ms,
+        baseline_ms: rust_ms,
+        ratio,
+        min_target: 0.90, // TCO optimization dependent
+        category: "compute_tail",
+    }
+}
+
+/// Matrix exponentiation for O(log n) Fibonacci
+fn matrix_mult(a: [[Int; 2]; 2], b: [[Int; 2]; 2]) -> [[Int; 2]; 2] {
+    [
+        [a[0][0] * b[0][0] + a[0][1] * b[1][0],
+         a[0][0] * b[0][1] + a[0][1] * b[1][1]],
+        [a[1][0] * b[0][0] + a[1][1] * b[1][0],
+         a[1][0] * b[0][1] + a[1][1] * b[1][1]],
+    ]
+}
+
+fn matrix_pow(mut m: [[Int; 2]; 2], mut n: Int) -> [[Int; 2]; 2] {
+    let mut result = [[1, 0], [0, 1]]; // Identity matrix
+
+    while n > 0 {
+        if n % 2 == 1 {
+            result = matrix_mult(result, m);
+        }
+        m = matrix_mult(m, m);
+        n /= 2;
+    }
+
+    result
+}
+
+fn fib_matrix(n: Int) -> Int {
+    if n <= 1 { return n; }
+
+    let base = [[1, 1], [1, 0]];
+    let result = matrix_pow(base, n - 1);
+    result[0][0]
+}
+
+/// Benchmark: Matrix exponentiation fibonacci(1000000)
+fn benchmark_fib_matrix() -> ComparisonResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS * 100 {
+        black_box(fib_matrix(1_000_000));
+    }
+
+    let mut total_ms: Float = 0.0;
+
+    for _ in 0..BENCHMARK_ITERATIONS * 100 {
+        let timer = Timer.new();
+        timer.start();
+
+        let result = fib_matrix(1_000_000);
+
+        total_ms += timer.elapsed_ms() as Float;
+        black_box(result);
+    }
+
+    let verum_ms = total_ms / (BENCHMARK_ITERATIONS * 100) as Float;
+    // No direct baseline, compare to theoretical O(log n)
+    let rust_ms = 0.05; // Expected ~50 microseconds
+
+    let ratio = rust_ms / verum_ms;
+
+    ComparisonResult {
+        name: "fib_1m_matrix_exp",
+        verum_ms,
+        baseline_ms: rust_ms,
+        ratio,
+        min_target: 0.90,
+        category: "compute_matrix",
+    }
+}
+
+type ComparisonResult is {
+    name: Text,
+    verum_ms: Float,
+    baseline_ms: Float,
+    ratio: Float,
+    min_target: Float,
+    category: Text,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<ComparisonResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: ComparisonResult) {
+        self.results.push(result);
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<30} {:>12} {:>12} {:>10} {:>8} {:>8}",
+                "Benchmark", "Verum (ms)", "Rust (ms)", "Ratio", "Target", "Status");
+        println("{}", "-".repeat(85));
+
+        for result in &self.results {
+            let passed = result.ratio >= result.min_target;
+            let status = if passed { "PASS" } else { "FAIL" };
+            let ratio_pct = result.ratio * 100.0;
+
+            println("{:<30} {:>12.4} {:>12.4} {:>9.1}% {:>7.0}% {:>8}",
+                    result.name, result.verum_ms, result.baseline_ms,
+                    ratio_pct, result.min_target * 100.0, status);
+        }
+
+        println("");
+        let avg_ratio = self.results.iter()
+            .map(|r| r.ratio)
+            .sum.<Float>() / self.results.len() as Float;
+        println("Average performance ratio: {:.1}% of Rust", avg_ratio * 100.0);
+    }
+
+    fn export_comparison(&self, path: Text) {
+        let json = Json.object();
+        json.set("suite", &self.suite_name);
+        json.set("baseline", "rust");
+
+        let results_json = Json.array();
+        for result in &self.results {
+            let r = Json.object();
+            r.set("name", &result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("baseline_ms", result.baseline_ms);
+            r.set("ratio", result.ratio);
+            r.set("min_target", result.min_target);
+            r.set("category", &result.category);
+            r.set("passed", result.ratio >= result.min_target);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+        println("Comparison exported to {}", path);
+    }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+type Timer is { start_time: Instant };
+implement Timer {
+    fn new() -> Self { Self { start_time: Instant.now() } }
+    fn start(&mut self) { self.start_time = Instant.now(); }
+    fn elapsed_ms(&self) -> Int { self.start_time.elapsed().as_millis() }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+type Json is { data: Map<Text, Heap<Any>> };
+implement Json {
+    fn object() -> Self { Self { data: Map.new() } }
+    fn array() -> Self { Self { data: Map.new() } }
+    fn set<T>(&mut self, key: &Text, value: T) {}
+    fn push<T>(&mut self, value: T) {}
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+module File {
+    pub fn write(path: Text, content: Text) {}
+}

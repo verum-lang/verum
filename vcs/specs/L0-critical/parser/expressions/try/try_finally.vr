@@ -1,0 +1,167 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, try, finally, cleanup
+
+// Simple try-finally
+fn test_simple_try_finally() {
+    try {
+        use_resource()
+    } finally {
+        cleanup()
+    }
+}
+
+// Try-finally with resource acquisition
+fn test_resource_acquisition() {
+    let handle = acquire_resource();
+    try {
+        use_handle(handle)
+    } finally {
+        release_handle(handle)
+    }
+}
+
+// Try-finally-recover (all three)
+fn test_try_finally_recover() {
+    try {
+        risky_operation()
+    } recover |e| handle_error(e) finally {
+        cleanup()
+    }
+}
+
+// Try-recover-finally (proper order: recover before finally)
+fn test_try_recover_finally() {
+    try {
+        operation()
+    } recover |e| error_handler(e) finally {
+        always_cleanup()
+    }
+}
+
+// Try-finally with multiple cleanup actions
+fn test_multiple_cleanup() {
+    try {
+        connect();
+        execute();
+    } finally {
+        disconnect();
+        log_completion();
+    }
+}
+
+// Try-finally with file handling
+fn test_file_handling() {
+    let file = open(path);
+    try {
+        file.write(data)
+    } finally {
+        file.close()
+    }
+}
+
+// Try-finally with lock
+fn test_lock() {
+    let guard = mutex.lock();
+    try {
+        modify_shared_state(guard)
+    } finally {
+        guard.unlock()
+    }
+}
+
+// Nested try-finally
+fn test_nested_try_finally() {
+    try {
+        let outer = acquire_outer();
+        try {
+            let inner = acquire_inner();
+            use_both(outer, inner)
+        } finally {
+            release_inner()
+        }
+    } finally {
+        release_outer()
+    }
+}
+
+// Try-finally as expression
+fn test_try_finally_expr() {
+    let result = try {
+        compute_result()
+    } finally {
+        cleanup_computation()
+    };
+}
+
+// Try-finally with return in try block
+fn with_cleanup() -> Int {
+    let resource = acquire();
+    try {
+        if condition {
+            return early_value;
+        }
+        normal_value
+    } finally {
+        release(resource)
+    }
+}
+
+// Try-finally with break in loop
+fn test_break_in_loop() {
+    for item in items {
+        try {
+            if item.special {
+                break;
+            }
+            process(item)
+        } finally {
+            log_item(item)
+        }
+    }
+}
+
+// Try-finally with panic (if supported)
+fn test_with_panic() {
+    try {
+        if critical_failure {
+            panic("Unrecoverable");
+        }
+        normal_operation()
+    } finally {
+        // Still runs even on panic
+        emergency_cleanup()
+    }
+}
+
+// Try-finally with async
+async fn async_with_cleanup() {
+    let conn = connect().await;
+    try {
+        use_connection(conn).await
+    } finally {
+        conn.close().await
+    }
+}
+
+// Try-finally with context manager pattern
+fn test_context_manager() {
+    try {
+        enter_context();
+        do_work()
+    } finally {
+        exit_context()
+    }
+}
+
+// Try-finally ensuring state restoration
+fn test_state_restoration() {
+    let old_state = get_state();
+    try {
+        set_state(new_state);
+        operation()
+    } finally {
+        set_state(old_state)
+    }
+}

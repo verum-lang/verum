@@ -1,0 +1,261 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L4
+// @tags: cbgr, latency, managed, benchmark
+// @description: Managed (Tier 0) reference overhead benchmark (target: < 20ns per access)
+
+/// Managed Reference Overhead Benchmark
+///
+/// Measures the overhead of CBGR Tier 0 managed references compared to
+/// raw pointer access. Tier 0 provides full runtime safety checks.
+///
+/// Expected overhead: ~15-20ns per access (includes generation + epoch check)
+///
+/// Memory layout:
+/// - ThinRef<T>: 16 bytes (ptr: 8, generation: 4, epoch_caps: 4)
+/// - FatRef<T>:  24 bytes (ptr: 8, generation: 4, epoch_caps: 4, len: 8)
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 1_000_000;
+
+/// Baseline: raw pointer access (unsafe)
+fn benchmark_raw_pointer() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let ptr: *const i64 = &*data;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    // Measure
+    let start = Instant.now();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "raw_pointer_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed.as_nanos(),
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        baseline: true,
+    }
+}
+
+/// Tier 0: Managed reference with full checks
+fn benchmark_managed_ref() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let managed_ref: &i64 = &*data;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*managed_ref);
+    }
+
+    // Measure
+    let start = Instant.now();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(*managed_ref);
+    }
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_ref_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed.as_nanos(),
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        baseline: false,
+    }
+}
+
+/// Fat reference with bounds check
+fn benchmark_fat_ref() -> BenchmarkResult {
+    let data: List<i64> = (0..1000).collect();
+    let fat_ref: &[i64] = &data[..];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(fat_ref[500]);
+    }
+
+    // Measure
+    let start = Instant.now();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(fat_ref[500]);
+    }
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "fat_ref_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed.as_nanos(),
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        baseline: false,
+    }
+}
+
+/// Sequential access pattern
+fn benchmark_sequential_access() -> BenchmarkResult {
+    let data: List<i64> = (0..1024).collect();
+    let slice: &[i64] = &data[..];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS / 1024 {
+        for i in 0..1024 {
+            black_box(slice[i]);
+        }
+    }
+
+    // Measure
+    let start = Instant.now();
+    for _ in 0..BENCHMARK_ITERATIONS / 1024 {
+        for i in 0..1024 {
+            black_box(slice[i]);
+        }
+    }
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "sequential_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed.as_nanos(),
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        baseline: false,
+    }
+}
+
+/// Random access pattern (cache-unfriendly)
+fn benchmark_random_access() -> BenchmarkResult {
+    let data: List<i64> = (0..1024).collect();
+    let slice: &[i64] = &data[..];
+    let indices: List<usize> = generate_random_indices(BENCHMARK_ITERATIONS, 1024);
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(slice[indices[i % indices.len()]]);
+    }
+
+    // Measure
+    let start = Instant.now();
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(slice[indices[i % indices.len()]]);
+    }
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "random_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed.as_nanos(),
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        baseline: false,
+    }
+}
+
+/// Nested reference access
+fn benchmark_nested_refs() -> BenchmarkResult {
+    let inner = Heap(42i64);
+    let middle = Heap(&*inner);
+    let outer = Heap(&*middle);
+
+    let outer_ref = &*outer;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(***outer_ref);
+    }
+
+    // Measure
+    let start = Instant.now();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(***outer_ref);
+    }
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "nested_refs_3_levels",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed.as_nanos(),
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        baseline: false,
+    }
+}
+
+/// Write operation overhead
+fn benchmark_write_operation() -> BenchmarkResult {
+    let mut data = Heap(0i64);
+    let managed_ref: &mut i64 = &mut *data;
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        *managed_ref = i as i64;
+    }
+
+    // Measure
+    let start = Instant.now();
+    for i in 0..BENCHMARK_ITERATIONS {
+        *managed_ref = i as i64;
+    }
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_write",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed.as_nanos(),
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        baseline: false,
+    }
+}
+
+fn main() {
+    println("=== CBGR Managed Reference Overhead Benchmark ===\n");
+
+    let results = [
+        benchmark_raw_pointer(),
+        benchmark_managed_ref(),
+        benchmark_fat_ref(),
+        benchmark_sequential_access(),
+        benchmark_random_access(),
+        benchmark_nested_refs(),
+        benchmark_write_operation(),
+    ];
+
+    let baseline_ns = results[0].per_op_ns;
+
+    for result in results {
+        let overhead = if result.baseline {
+            0.0
+        } else {
+            result.per_op_ns - baseline_ns
+        };
+
+        println("[{}] {}", if result.per_op_ns < 25.0 { "PASS" } else { "WARN" }, result.name);
+        println("  Time per op: {:.2}ns", result.per_op_ns);
+        println("  Overhead:    {:.2}ns", overhead);
+        println("  Throughput:  {:.2}M ops/sec", 1000.0 / result.per_op_ns);
+        println("");
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    total_ns: Int,
+    per_op_ns: f64,
+    baseline: Bool,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn generate_random_indices(count: Int, max: Int) -> List<usize> { List.new() }

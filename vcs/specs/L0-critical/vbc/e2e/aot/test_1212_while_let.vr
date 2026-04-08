@@ -1,0 +1,89 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: while-let, pattern, maybe, e2e
+// @description: Test while-let pattern for iterating over Maybe values
+
+fn next_value(state: Int) -> Maybe<Int> {
+    if state < 5 {
+        Some(state * state)
+    } else {
+        None
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Manual iteration with match in while loop
+    let mut state = 0;
+    let mut sum = 0;
+    let mut running = true;
+    while running {
+        match next_value(state) {
+            Some(v) => {
+                sum = sum + v;
+                state = state + 1;
+            }
+            None => {
+                running = false;
+            }
+        }
+    }
+    // 0 + 1 + 4 + 9 + 16 = 30
+    if sum != 30 {
+        print(f"FAIL 1: sum = {sum}, expected 30");
+        f = f + 1;
+    } else {
+        print("  manual_iteration: OK");
+    }
+
+    // Test 2: Stack drain with match
+    let mut stack = List.new();
+    stack.push(10);
+    stack.push(20);
+    stack.push(30);
+
+    let mut total = 0;
+    while stack.len() > 0 {
+        let idx = stack.len() - 1;
+        let val = stack[idx];
+        stack.pop();
+        total = total + val;
+    }
+    if total != 60 {
+        print(f"FAIL 2: total = {total}, expected 60");
+        f = f + 1;
+    } else {
+        print("  stack_drain: OK");
+    }
+
+    // Test 3: Chain of Maybe transformations
+    let values = List.new();
+    values.push(1);
+    values.push(2);
+    values.push(3);
+    values.push(4);
+    values.push(5);
+
+    let mut even_sum = 0;
+    let mut i = 0;
+    while i < values.len() {
+        let v = values[i];
+        if v % 2 == 0 {
+            even_sum = even_sum + v;
+        }
+        i = i + 1;
+    }
+    if even_sum != 6 {
+        print(f"FAIL 3: even_sum = {even_sum}, expected 6");
+        f = f + 1;
+    } else {
+        print("  even_filter: OK");
+    }
+
+    if f == 0 {
+        print("All while-let pattern tests passed");
+    }
+    f
+}

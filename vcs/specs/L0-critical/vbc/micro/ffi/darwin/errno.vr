@@ -1,0 +1,30 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, libsystem, errno
+// @description: Test __error() FFI call for errno access
+
+@ffi("libSystem.B.dylib")
+extern {
+    // __error() returns pointer to thread-local errno
+    // C's errno is int (32-bit), so use Int32
+    fn __error() -> *mut Int32;
+}
+
+fn main() {
+    // Get errno pointer
+    let errno_ptr = __error();
+
+    // Set errno to 0
+    *errno_ptr = 0 as Int32;
+    assert(*errno_ptr == 0 as Int32);
+
+    // Set errno to a known value
+    *errno_ptr = 42 as Int32;
+    assert(*errno_ptr == 42 as Int32);
+
+    // Reset
+    *errno_ptr = 0 as Int32;
+    assert(*errno_ptr == 0 as Int32);
+}

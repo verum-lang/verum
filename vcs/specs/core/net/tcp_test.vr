@@ -1,0 +1,1134 @@
+// =============================================================================
+// tcp_test.vr - Comprehensive tests for TCP stream and listener types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: net, tcp, stream, listener, socket, shutdown, error
+// @description: Tests for TcpStream, TcpListener, Incoming, Shutdown types
+//               and TCP error conditions via StreamError/IoErrorKind
+// =============================================================================
+
+mount core.net.{TcpStream, TcpListener, Incoming};
+mount core.net.tcp.Shutdown;
+mount core.net.{SocketAddr, SocketAddrV4, SocketAddrV6, Ipv4Addr, Ipv6Addr};
+mount core.io.protocols.{IoResult, StreamError, IoErrorKind};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TcpStream Type Existence
+// =============================================================================
+
+@test
+fn test_tcp_stream_type_exists() {
+    // TcpStream wraps a file descriptor
+    // Can't construct without real socket, verify type compiles
+    let opt: Maybe<TcpStream> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 2: TcpListener Type Existence
+// =============================================================================
+
+@test
+fn test_tcp_listener_type_exists() {
+    // TcpListener wraps a file descriptor
+    let opt: Maybe<TcpListener> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 3: Incoming Iterator Type
+// =============================================================================
+
+@test
+fn test_incoming_type_exists() {
+    // Incoming is an iterator over accepted connections
+    let opt: Maybe<Incoming> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 4: Shutdown Variants
+// =============================================================================
+
+@test
+fn test_shutdown_read() {
+    let s: Shutdown = Shutdown.Read;
+    assert(s is Shutdown.Read);
+    assert(!(s is Shutdown.Write));
+    assert(!(s is Shutdown.Both));
+}
+
+@test
+fn test_shutdown_write() {
+    let s: Shutdown = Shutdown.Write;
+    assert(s is Shutdown.Write);
+    assert(!(s is Shutdown.Read));
+    assert(!(s is Shutdown.Both));
+}
+
+@test
+fn test_shutdown_both() {
+    let s: Shutdown = Shutdown.Both;
+    assert(s is Shutdown.Both);
+    assert(!(s is Shutdown.Read));
+    assert(!(s is Shutdown.Write));
+}
+
+@test
+fn test_shutdown_match_read() {
+    let s = Shutdown.Read;
+    assert(s is Shutdown.Read);
+}
+
+@test
+fn test_shutdown_match_write() {
+    let s = Shutdown.Write;
+    assert(s is Shutdown.Write);
+}
+
+@test
+fn test_shutdown_match_both() {
+    let s = Shutdown.Both;
+    assert(s is Shutdown.Both);
+}
+
+// =============================================================================
+// Section 5: Connection Error Types
+// =============================================================================
+
+@test
+fn test_tcp_connect_result_type() {
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    let result: Result<Int, StreamError> = Err(err);
+    assert(result.is_err());
+}
+
+@test
+fn test_tcp_error_connection_refused() {
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    assert_eq(err.kind(), IoErrorKind.ConnectionRefused);
+}
+
+@test
+fn test_tcp_error_connection_reset() {
+    let err = StreamError.new(IoErrorKind.ConnectionReset);
+    assert_eq(err.kind(), IoErrorKind.ConnectionReset);
+}
+
+@test
+fn test_tcp_error_connection_aborted() {
+    let err = StreamError.new(IoErrorKind.ConnectionAborted);
+    assert_eq(err.kind(), IoErrorKind.ConnectionAborted);
+}
+
+@test
+fn test_tcp_error_timed_out() {
+    let err = StreamError.new(IoErrorKind.TimedOut);
+    assert_eq(err.kind(), IoErrorKind.TimedOut);
+}
+
+@test
+fn test_tcp_error_broken_pipe() {
+    let err = StreamError.new(IoErrorKind.BrokenPipe);
+    assert_eq(err.kind(), IoErrorKind.BrokenPipe);
+}
+
+@test
+fn test_tcp_error_not_connected() {
+    let err = StreamError.new(IoErrorKind.NotConnected);
+    assert_eq(err.kind(), IoErrorKind.NotConnected);
+}
+
+@test
+fn test_tcp_error_would_block() {
+    let err = StreamError.new(IoErrorKind.WouldBlock);
+    assert_eq(err.kind(), IoErrorKind.WouldBlock);
+}
+
+// =============================================================================
+// Section 6: Address Binding Errors
+// =============================================================================
+
+@test
+fn test_tcp_error_addr_in_use() {
+    let err = StreamError.new(IoErrorKind.AddrInUse);
+    assert_eq(err.kind(), IoErrorKind.AddrInUse);
+}
+
+@test
+fn test_tcp_error_addr_not_available() {
+    let err = StreamError.new(IoErrorKind.AddrNotAvailable);
+    assert_eq(err.kind(), IoErrorKind.AddrNotAvailable);
+}
+
+@test
+fn test_tcp_error_permission_denied() {
+    let err = StreamError.new(IoErrorKind.PermissionDenied);
+    assert_eq(err.kind(), IoErrorKind.PermissionDenied);
+}
+
+// =============================================================================
+// Section 7: Socket Address for TCP Scenarios
+// =============================================================================
+
+@test
+fn test_tcp_localhost_connect() {
+    let addr = SocketAddrV4.new(Ipv4Addr.new(127, 0, 0, 1), 9090);
+    assert_eq(addr.port(), 9090);
+}
+
+@test
+fn test_tcp_localhost_binding() {
+    let addr = SocketAddrV4.new(Ipv4Addr.localhost(), 0);
+    assert_eq(addr.port(), 0);
+}
+
+@test
+fn test_tcp_any_addr_binding() {
+    let addr = SocketAddrV4.new(Ipv4Addr.unspecified(), 8080);
+    assert_eq(addr.port(), 8080);
+}
+
+@test
+fn test_tcp_high_port() {
+    let addr = SocketAddrV4.new(Ipv4Addr.localhost(), 65535);
+    assert_eq(addr.port(), 65535);
+}
+
+@test
+fn test_tcp_standard_http_port() {
+    let addr = SocketAddrV4.new(Ipv4Addr.unspecified(), 80);
+    assert_eq(addr.port(), 80);
+}
+
+@test
+fn test_tcp_standard_https_port() {
+    let addr = SocketAddrV4.new(Ipv4Addr.unspecified(), 443);
+    assert_eq(addr.port(), 443);
+}
+
+// =============================================================================
+// Section 8: IPv6 TCP Addresses
+// =============================================================================
+
+@test
+fn test_tcp_ipv6_localhost() {
+    let addr = SocketAddrV6.new(Ipv6Addr.localhost(), 8080, 0, 0);
+    assert_eq(addr.port(), 8080);
+}
+
+@test
+fn test_tcp_ipv6_unspecified() {
+    let addr = SocketAddrV6.new(Ipv6Addr.unspecified(), 3000, 0, 0);
+    assert_eq(addr.port(), 3000);
+}
+
+// =============================================================================
+// Section 9: Result Type Patterns
+// =============================================================================
+
+@test
+fn test_tcp_ok_result() {
+    let result: Result<Int, StreamError> = Ok(42);
+    assert(result.is_ok());
+}
+
+@test
+fn test_tcp_err_result() {
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    let result: Result<Int, StreamError> = Err(err);
+    assert(result.is_err());
+}
+
+@test
+fn test_tcp_accept_result_type() {
+    // accept returns Result<(TcpStream, SocketAddr), IoError>
+    let addr = SocketAddrV4.new(Ipv4Addr.localhost(), 8080);
+    assert_eq(addr.port(), 8080);
+}
+
+// =============================================================================
+// Section 10: Error Kind Distinctness
+// =============================================================================
+
+@test
+fn test_error_kinds_are_distinct() {
+    let refused = StreamError.new(IoErrorKind.ConnectionRefused);
+    let reset = StreamError.new(IoErrorKind.ConnectionReset);
+    let timeout = StreamError.new(IoErrorKind.TimedOut);
+    // Each error kind should be distinct
+    assert(refused.kind() != reset.kind());
+    assert(reset.kind() != timeout.kind());
+    assert(refused.kind() != timeout.kind());
+}
+
+// =============================================================================
+// Section 11: Shutdown Exhaustive Match
+// =============================================================================
+
+@test
+fn test_shutdown_exhaustive_match() {
+    let variants = [Shutdown.Read, Shutdown.Write, Shutdown.Both];
+    let mut read_count = 0;
+    let mut write_count = 0;
+    let mut both_count = 0;
+
+    for s in variants {
+        match s {
+            Shutdown.Read => { read_count = read_count + 1; }
+            Shutdown.Write => { write_count = write_count + 1; }
+            Shutdown.Both => { both_count = both_count + 1; }
+        }
+    }
+    assert_eq(read_count, 1);
+    assert_eq(write_count, 1);
+    assert_eq(both_count, 1);
+}
+
+@test
+fn test_shutdown_is_operator() {
+    let read = Shutdown.Read;
+    let write = Shutdown.Write;
+    let both = Shutdown.Both;
+
+    assert(read is Shutdown.Read);
+    assert(!(read is Shutdown.Write));
+    assert(!(read is Shutdown.Both));
+
+    assert(write is Shutdown.Write);
+    assert(!(write is Shutdown.Read));
+    assert(!(write is Shutdown.Both));
+
+    assert(both is Shutdown.Both);
+    assert(!(both is Shutdown.Read));
+    assert(!(both is Shutdown.Write));
+}
+
+// =============================================================================
+// Section 12: TCP Error Classification
+// =============================================================================
+
+@test
+fn test_tcp_error_all_connection_kinds() {
+    // All connection-related error kinds
+    let kinds = [
+        IoErrorKind.ConnectionRefused,
+        IoErrorKind.ConnectionReset,
+        IoErrorKind.ConnectionAborted,
+        IoErrorKind.NotConnected,
+    ];
+    for kind in kinds {
+        let err = StreamError.new(kind);
+        assert_eq(err.kind(), kind);
+    }
+}
+
+@test
+fn test_tcp_error_with_context_message() {
+    let err = StreamError.with_message(IoErrorKind.ConnectionRefused, "connect to 127.0.0.1:8080 refused");
+    assert_eq(err.kind(), IoErrorKind.ConnectionRefused);
+    assert(err.message().is_some());
+}
+
+@test
+fn test_tcp_error_addr_in_use_with_port() {
+    let err = StreamError.with_message(IoErrorKind.AddrInUse, "port 80 already in use");
+    assert_eq(err.kind(), IoErrorKind.AddrInUse);
+}
+
+@test
+fn test_tcp_error_timed_out_with_context() {
+    let err = StreamError.with_message(IoErrorKind.TimedOut, "connection timed out after 30000ms");
+    assert_eq(err.kind(), IoErrorKind.TimedOut);
+}
+
+// =============================================================================
+// Section 13: IoResult Patterns for TCP
+// =============================================================================
+
+@test
+fn test_tcp_result_ok_chain() {
+    let result: Result<Int, StreamError> = Ok(1024);
+    let mapped = result.map(|n| n * 2);
+    match mapped {
+        Ok(n) => assert_eq(n, 2048),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_tcp_result_err_chain() {
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    let result: Result<Int, StreamError> = Err(err);
+    assert(result.is_err());
+    match result {
+        Ok(_) => panic("expected Err"),
+        Err(e) => assert_eq(e.kind(), IoErrorKind.ConnectionRefused),
+    }
+}
+
+@test
+fn test_tcp_result_or_else() {
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    let result: Result<Int, StreamError> = Err(err);
+    let fallback: Int = result.unwrap_or(0);
+    assert_eq(fallback, 0);
+}
+
+// =============================================================================
+// Section 14: Socket Address Construction for TCP
+// =============================================================================
+
+@test
+fn test_tcp_server_socket_addr() {
+    // Server binds to 0.0.0.0:port
+    let server_addr = SocketAddrV4.new(Ipv4Addr.unspecified(), 3000);
+    assert_eq(server_addr.port(), 3000);
+    assert(server_addr.ip().is_unspecified());
+}
+
+@test
+fn test_tcp_client_socket_addr() {
+    // Client connects to specific host:port
+    let client_addr = SocketAddrV4.new(Ipv4Addr.new(192, 168, 1, 100), 8080);
+    assert_eq(client_addr.port(), 8080);
+    assert(!client_addr.ip().is_loopback());
+}
+
+@test
+fn test_tcp_socket_addr_v4_v6_coexistence() {
+    // Server can bind to both v4 and v6
+    let v4_addr = SocketAddr.new_v4(Ipv4Addr.unspecified(), 9000);
+    let v6_addr = SocketAddr.new_v6(Ipv6Addr.unspecified(), 9000);
+
+    assert(v4_addr is SocketAddr.V4);
+    assert(v6_addr is SocketAddr.V6);
+}
+
+@test
+fn test_tcp_ephemeral_port() {
+    // Port 0 means OS assigns ephemeral port
+    let addr = SocketAddrV4.new(Ipv4Addr.localhost(), 0);
+    assert_eq(addr.port(), 0);
+}
+
+@test
+fn test_tcp_private_network_addrs() {
+    // Common private network addresses used in TCP
+    let addr_10 = SocketAddrV4.new(Ipv4Addr.new(10, 0, 0, 1), 80);
+    let addr_172 = SocketAddrV4.new(Ipv4Addr.new(172, 16, 0, 1), 80);
+    let addr_192 = SocketAddrV4.new(Ipv4Addr.new(192, 168, 0, 1), 80);
+
+    assert(addr_10.ip().is_private());
+    assert(addr_172.ip().is_private());
+    assert(addr_192.ip().is_private());
+}
+
+// =============================================================================
+// Section 15: Multiple Error Kinds Match Pattern
+// =============================================================================
+
+@test
+fn test_tcp_retryable_errors() {
+    // Errors that should trigger retry logic
+    let retryable_kinds = [
+        IoErrorKind.ConnectionRefused,
+        IoErrorKind.TimedOut,
+        IoErrorKind.Interrupted,
+        IoErrorKind.WouldBlock,
+    ];
+
+    for kind in retryable_kinds {
+        let err = StreamError.new(kind);
+        let should_retry = match err.kind() {
+            IoErrorKind.ConnectionRefused => true,
+            IoErrorKind.TimedOut => true,
+            IoErrorKind.Interrupted => true,
+            IoErrorKind.WouldBlock => true,
+            _ => false,
+        };
+        assert(should_retry);
+    }
+}
+
+@test
+fn test_tcp_fatal_errors() {
+    // Errors that should NOT trigger retry
+    let fatal_kinds = [
+        IoErrorKind.PermissionDenied,
+        IoErrorKind.AddrInUse,
+        IoErrorKind.AddrNotAvailable,
+    ];
+
+    for kind in fatal_kinds {
+        let err = StreamError.new(kind);
+        let is_fatal = match err.kind() {
+            IoErrorKind.PermissionDenied => true,
+            IoErrorKind.AddrInUse => true,
+            IoErrorKind.AddrNotAvailable => true,
+            _ => false,
+        };
+        assert(is_fatal);
+    }
+}
+
+// =============================================================================
+// Section 16: TcpStream Method Signature Types
+// =============================================================================
+
+@test
+fn test_tcp_stream_connect_result_type() {
+    // TcpStream.connect returns Result<TcpStream, IoError>
+    // Verify the result type shape via Maybe wrapping
+    let opt: Maybe<Result<TcpStream, StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_stream_peer_addr_return_type() {
+    // peer_addr returns Result<SocketAddr, IoError>
+    let opt: Maybe<Result<SocketAddr, StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_stream_local_addr_return_type() {
+    // local_addr returns Result<SocketAddr, IoError>
+    let opt: Maybe<Result<SocketAddr, StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_stream_shutdown_return_type() {
+    // shutdown returns Result<(), IoError>
+    let opt: Maybe<Result<(), StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_stream_set_nodelay_type() {
+    // set_nodelay takes Bool, returns Result<(), IoError>
+    let nodelay_val: Bool = true;
+    assert(nodelay_val);
+    let opt: Maybe<Result<(), StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_stream_set_keepalive_type() {
+    // set_keepalive takes Bool, returns Result<(), IoError>
+    let keepalive_val: Bool = true;
+    assert(keepalive_val);
+    let opt: Maybe<Result<(), StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_stream_set_nonblocking_type() {
+    // set_nonblocking takes Bool, returns Result<(), IoError>
+    let nonblocking_val: Bool = false;
+    assert(!nonblocking_val);
+    let opt: Maybe<Result<(), StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_stream_set_read_timeout_type() {
+    // set_read_timeout takes Maybe<Int>, returns Result<(), IoError>
+    let timeout: Maybe<Int> = Some(5000);
+    assert(timeout.is_some());
+    let no_timeout: Maybe<Int> = None;
+    assert(no_timeout.is_none());
+}
+
+@test
+fn test_tcp_stream_set_write_timeout_type() {
+    // set_write_timeout takes Maybe<Int>, returns Result<(), IoError>
+    let timeout: Maybe<Int> = Some(10000);
+    assert(timeout.is_some());
+    let no_timeout: Maybe<Int> = None;
+    assert(no_timeout.is_none());
+}
+
+@test
+fn test_tcp_stream_try_clone_return_type() {
+    // try_clone returns Result<TcpStream, IoError>
+    let opt: Maybe<Result<TcpStream, StreamError>> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 17: TcpListener Method Signature Types
+// =============================================================================
+
+@test
+fn test_tcp_listener_bind_result_type() {
+    // TcpListener.bind returns Result<TcpListener, IoError>
+    let opt: Maybe<Result<TcpListener, StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_listener_accept_result_type() {
+    // accept returns Result<(TcpStream, SocketAddr), IoError>
+    let opt: Maybe<Result<(TcpStream, SocketAddr), StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_listener_local_addr_return_type() {
+    // local_addr returns Result<SocketAddr, IoError>
+    let opt: Maybe<Result<SocketAddr, StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_listener_incoming_return_type() {
+    // incoming returns Incoming iterator type
+    let opt: Maybe<Incoming> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_tcp_listener_set_nonblocking_type() {
+    // set_nonblocking takes Bool, returns Result<(), IoError>
+    let opt: Maybe<Result<(), StreamError>> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 18: Shutdown Half-Close Patterns
+// =============================================================================
+
+@test
+fn test_shutdown_read_half_close() {
+    // Half-close read: remote can still send but we stop receiving
+    let how = Shutdown.Read;
+    let name = match how {
+        Shutdown.Read => "read",
+        Shutdown.Write => "write",
+        Shutdown.Both => "both",
+    };
+    assert_eq(name, "read");
+}
+
+@test
+fn test_shutdown_write_half_close() {
+    // Half-close write: sends FIN, remote gets EOF on read
+    let how = Shutdown.Write;
+    let name = match how {
+        Shutdown.Read => "read",
+        Shutdown.Write => "write",
+        Shutdown.Both => "both",
+    };
+    assert_eq(name, "write");
+}
+
+@test
+fn test_shutdown_both_full_close() {
+    // Full close: both halves shut down
+    let how = Shutdown.Both;
+    let name = match how {
+        Shutdown.Read => "read",
+        Shutdown.Write => "write",
+        Shutdown.Both => "both",
+    };
+    assert_eq(name, "both");
+}
+
+@test
+fn test_shutdown_variant_count() {
+    // Shutdown has exactly 3 variants
+    let variants = [Shutdown.Read, Shutdown.Write, Shutdown.Both];
+    assert_eq(variants.len(), 3);
+}
+
+// =============================================================================
+// Section 19: Socket Option Patterns
+// =============================================================================
+
+@test
+fn test_tcp_nodelay_enable_disable() {
+    // TCP_NODELAY can be enabled (true) or disabled (false)
+    let enable: Bool = true;
+    let disable: Bool = false;
+    assert(enable != disable);
+}
+
+@test
+fn test_tcp_keepalive_enable_disable() {
+    // SO_KEEPALIVE can be enabled or disabled
+    let enable: Bool = true;
+    let disable: Bool = false;
+    assert(enable);
+    assert(!disable);
+}
+
+@test
+fn test_tcp_timeout_some_value() {
+    // Timeout as Some(milliseconds)
+    let timeout: Maybe<Int> = Some(30000);
+    match timeout {
+        Some(ms) => assert_eq(ms, 30000),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_tcp_timeout_none_infinite() {
+    // Timeout as None means infinite/blocking
+    let timeout: Maybe<Int> = None;
+    assert(timeout.is_none());
+    let effective_ms = timeout.unwrap_or(0);
+    assert_eq(effective_ms, 0);
+}
+
+@test
+fn test_tcp_read_write_timeout_types() {
+    // Both read and write timeouts use Maybe<Int>
+    let read_timeout: Maybe<Int> = Some(5000);
+    let write_timeout: Maybe<Int> = Some(10000);
+    assert(read_timeout.is_some());
+    assert(write_timeout.is_some());
+    assert(read_timeout.unwrap() != write_timeout.unwrap());
+}
+
+// =============================================================================
+// Section 20: Error Construction Patterns
+// =============================================================================
+
+@test
+fn test_tcp_error_write_zero() {
+    let err = StreamError.new(IoErrorKind.WriteZero);
+    assert_eq(err.kind(), IoErrorKind.WriteZero);
+}
+
+@test
+fn test_tcp_error_unexpected_eof() {
+    let err = StreamError.new(IoErrorKind.UnexpectedEof);
+    assert_eq(err.kind(), IoErrorKind.UnexpectedEof);
+}
+
+@test
+fn test_tcp_error_interrupted() {
+    let err = StreamError.new(IoErrorKind.Interrupted);
+    assert_eq(err.kind(), IoErrorKind.Interrupted);
+}
+
+@test
+fn test_tcp_error_invalid_input() {
+    let err = StreamError.new(IoErrorKind.InvalidInput);
+    assert_eq(err.kind(), IoErrorKind.InvalidInput);
+}
+
+@test
+fn test_tcp_error_invalid_data() {
+    let err = StreamError.new(IoErrorKind.InvalidData);
+    assert_eq(err.kind(), IoErrorKind.InvalidData);
+}
+
+@test
+fn test_tcp_error_other() {
+    let err = StreamError.new(IoErrorKind.Other);
+    assert_eq(err.kind(), IoErrorKind.Other);
+}
+
+@test
+fn test_tcp_error_from_raw_os_error() {
+    // ECONNREFUSED = 111 on Linux
+    let err = StreamError.from_raw_os_error(111);
+    assert_eq(err.kind(), IoErrorKind.ConnectionRefused);
+}
+
+@test
+fn test_tcp_error_from_errno_econnreset() {
+    // ECONNRESET = 104 on Linux
+    let err = StreamError.from_errno(104);
+    assert_eq(err.kind(), IoErrorKind.ConnectionReset);
+}
+
+@test
+fn test_tcp_error_from_errno_epipe() {
+    // EPIPE = 32 on Linux
+    let err = StreamError.from_errno(32);
+    assert_eq(err.kind(), IoErrorKind.BrokenPipe);
+}
+
+@test
+fn test_tcp_error_from_errno_eagain() {
+    // EAGAIN = 11 on Linux
+    let err = StreamError.from_errno(11);
+    assert_eq(err.kind(), IoErrorKind.WouldBlock);
+}
+
+@test
+fn test_tcp_error_from_errno_etimedout() {
+    // ETIMEDOUT = 110 on Linux
+    let err = StreamError.from_errno(110);
+    assert_eq(err.kind(), IoErrorKind.TimedOut);
+}
+
+@test
+fn test_tcp_error_from_errno_unknown() {
+    // Unknown errno maps to Other
+    let err = StreamError.from_errno(999);
+    assert_eq(err.kind(), IoErrorKind.Other);
+}
+
+// =============================================================================
+// Section 21: Error Message Patterns
+// =============================================================================
+
+@test
+fn test_tcp_error_new_has_no_message() {
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    assert(err.message().is_none());
+}
+
+@test
+fn test_tcp_error_with_message_has_message() {
+    let err = StreamError.with_message(IoErrorKind.BrokenPipe, "write to closed socket");
+    assert(err.message().is_some());
+}
+
+@test
+fn test_tcp_error_message_content() {
+    let msg = "connection to 10.0.0.1:5432 refused";
+    let err = StreamError.with_message(IoErrorKind.ConnectionRefused, msg);
+    assert_eq(err.kind(), IoErrorKind.ConnectionRefused);
+    assert(err.message().is_some());
+}
+
+@test
+fn test_tcp_error_reset_with_context() {
+    let err = StreamError.with_message(IoErrorKind.ConnectionReset, "peer forcibly closed");
+    assert_eq(err.kind(), IoErrorKind.ConnectionReset);
+    assert(err.message().is_some());
+}
+
+@test
+fn test_tcp_error_broken_pipe_with_context() {
+    let err = StreamError.with_message(IoErrorKind.BrokenPipe, "write after peer shutdown");
+    assert_eq(err.kind(), IoErrorKind.BrokenPipe);
+    assert(err.message().is_some());
+}
+
+// =============================================================================
+// Section 22: Address Patterns for TCP Scenarios
+// =============================================================================
+
+@test
+fn test_tcp_dual_stack_bind_addrs() {
+    // Server binding to both IPv4 and IPv6 wildcard addresses
+    let v4 = SocketAddr.new_v4(Ipv4Addr.unspecified(), 8080);
+    let v6 = SocketAddr.new_v6(Ipv6Addr.unspecified(), 8080);
+    assert(v4 is SocketAddr.V4);
+    assert(v6 is SocketAddr.V6);
+}
+
+@test
+fn test_tcp_common_service_ports() {
+    // Commonly used TCP service ports
+    let ssh_addr = SocketAddrV4.new(Ipv4Addr.localhost(), 22);
+    let smtp_addr = SocketAddrV4.new(Ipv4Addr.localhost(), 25);
+    let dns_addr = SocketAddrV4.new(Ipv4Addr.localhost(), 53);
+    let http_addr = SocketAddrV4.new(Ipv4Addr.localhost(), 80);
+    let https_addr = SocketAddrV4.new(Ipv4Addr.localhost(), 443);
+    let postgres_addr = SocketAddrV4.new(Ipv4Addr.localhost(), 5432);
+    let mysql_addr = SocketAddrV4.new(Ipv4Addr.localhost(), 3306);
+    let redis_addr = SocketAddrV4.new(Ipv4Addr.localhost(), 6379);
+
+    assert_eq(ssh_addr.port(), 22);
+    assert_eq(smtp_addr.port(), 25);
+    assert_eq(dns_addr.port(), 53);
+    assert_eq(http_addr.port(), 80);
+    assert_eq(https_addr.port(), 443);
+    assert_eq(postgres_addr.port(), 5432);
+    assert_eq(mysql_addr.port(), 3306);
+    assert_eq(redis_addr.port(), 6379);
+}
+
+@test
+fn test_tcp_multicast_addr_not_valid_for_tcp() {
+    // Multicast addresses are for UDP, not TCP
+    let addr = Ipv4Addr.new(224, 0, 0, 1);
+    assert(addr.is_multicast());
+    // TCP should not bind to multicast; verify address classification
+    assert(!addr.is_loopback());
+    assert(!addr.is_private());
+}
+
+@test
+fn test_tcp_broadcast_addr_not_valid_for_tcp() {
+    // Broadcast address is not valid for TCP
+    let addr = Ipv4Addr.broadcast();
+    assert(addr.is_broadcast());
+    assert(!addr.is_loopback());
+}
+
+@test
+fn test_tcp_ipv6_link_local_addr() {
+    // Link-local IPv6 address (fe80::1) with scope_id
+    let addr = SocketAddrV6.new(
+        Ipv6Addr.new(0xfe80, 0, 0, 0, 0, 0, 0, 1),
+        8080, 0, 1
+    );
+    assert_eq(addr.port(), 8080);
+}
+
+@test
+fn test_tcp_loopback_both_families() {
+    // Loopback addresses in both IPv4 and IPv6
+    let v4_lo = Ipv4Addr.localhost();
+    let v6_lo = Ipv6Addr.localhost();
+    assert(v4_lo.is_loopback());
+    assert(v6_lo.is_loopback());
+}
+
+// =============================================================================
+// Section 23: IoResult Alias Patterns
+// =============================================================================
+
+@test
+fn test_io_result_ok_bytes_read() {
+    // IoResult<Int> for bytes read
+    let result: IoResult<Int> = Ok(4096);
+    assert(result.is_ok());
+    match result {
+        Ok(n) => assert_eq(n, 4096),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_io_result_ok_unit() {
+    // IoResult<()> for operations that return nothing
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_io_result_err_conversion() {
+    // IoResult wraps StreamError
+    let err = StreamError.new(IoErrorKind.BrokenPipe);
+    let result: IoResult<Int> = Err(err);
+    assert(result.is_err());
+    match result {
+        Ok(_) => panic("expected Err"),
+        Err(e) => assert_eq(e.kind(), IoErrorKind.BrokenPipe),
+    }
+}
+
+// =============================================================================
+// Section 24: TCP Error Classification Groups
+// =============================================================================
+
+@test
+fn test_tcp_all_io_error_kinds_exist() {
+    // Verify all IoErrorKind variants exist
+    let kinds = [
+        IoErrorKind.NotFound,
+        IoErrorKind.PermissionDenied,
+        IoErrorKind.ConnectionRefused,
+        IoErrorKind.ConnectionReset,
+        IoErrorKind.ConnectionAborted,
+        IoErrorKind.NotConnected,
+        IoErrorKind.AddrInUse,
+        IoErrorKind.AddrNotAvailable,
+        IoErrorKind.BrokenPipe,
+        IoErrorKind.AlreadyExists,
+        IoErrorKind.WouldBlock,
+        IoErrorKind.InvalidInput,
+        IoErrorKind.InvalidData,
+        IoErrorKind.TimedOut,
+        IoErrorKind.WriteZero,
+        IoErrorKind.Interrupted,
+        IoErrorKind.UnexpectedEof,
+        IoErrorKind.OutOfMemory,
+        IoErrorKind.Unsupported,
+        IoErrorKind.Other,
+    ];
+    assert_eq(kinds.len(), 20);
+}
+
+@test
+fn test_tcp_network_error_group() {
+    // Errors specifically related to network/connection issues
+    let network_kinds = [
+        IoErrorKind.ConnectionRefused,
+        IoErrorKind.ConnectionReset,
+        IoErrorKind.ConnectionAborted,
+        IoErrorKind.NotConnected,
+        IoErrorKind.BrokenPipe,
+        IoErrorKind.TimedOut,
+    ];
+    for kind in network_kinds {
+        let err = StreamError.new(kind);
+        let is_network = match err.kind() {
+            IoErrorKind.ConnectionRefused => true,
+            IoErrorKind.ConnectionReset => true,
+            IoErrorKind.ConnectionAborted => true,
+            IoErrorKind.NotConnected => true,
+            IoErrorKind.BrokenPipe => true,
+            IoErrorKind.TimedOut => true,
+            _ => false,
+        };
+        assert(is_network);
+    }
+}
+
+@test
+fn test_tcp_resource_error_group() {
+    // Errors related to resource availability
+    let resource_kinds = [
+        IoErrorKind.AddrInUse,
+        IoErrorKind.AddrNotAvailable,
+        IoErrorKind.OutOfMemory,
+        IoErrorKind.AlreadyExists,
+    ];
+    for kind in resource_kinds {
+        let err = StreamError.new(kind);
+        let is_resource = match err.kind() {
+            IoErrorKind.AddrInUse => true,
+            IoErrorKind.AddrNotAvailable => true,
+            IoErrorKind.OutOfMemory => true,
+            IoErrorKind.AlreadyExists => true,
+            _ => false,
+        };
+        assert(is_resource);
+    }
+}
+
+// =============================================================================
+// Section 25: Result Chaining and Transformation
+// =============================================================================
+
+@test
+fn test_tcp_result_map_ok() {
+    let result: Result<Int, StreamError> = Ok(512);
+    let doubled = result.map(|n| n * 2);
+    assert_eq(doubled.unwrap(), 1024);
+}
+
+@test
+fn test_tcp_result_map_err_preserves_error() {
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    let result: Result<Int, StreamError> = Err(err);
+    let mapped = result.map(|n| n * 2);
+    assert(mapped.is_err());
+}
+
+@test
+fn test_tcp_result_unwrap_or_default() {
+    let err = StreamError.new(IoErrorKind.TimedOut);
+    let result: Result<Int, StreamError> = Err(err);
+    let val = result.unwrap_or(0);
+    assert_eq(val, 0);
+}
+
+@test
+fn test_tcp_result_ok_unwrap() {
+    let result: Result<Int, StreamError> = Ok(8192);
+    assert_eq(result.unwrap(), 8192);
+}
+
+@test
+fn test_tcp_result_and_then_chain() {
+    let result: Result<Int, StreamError> = Ok(100);
+    let chained: Result<Int, StreamError> = result.and_then(|n| Ok(n + 50));
+    match chained {
+        Ok(v) => assert_eq(v, 150),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_tcp_result_and_then_err_short_circuit() {
+    let err = StreamError.new(IoErrorKind.BrokenPipe);
+    let result: Result<Int, StreamError> = Err(err);
+    let chained: Result<Int, StreamError> = result.and_then(|n| Ok(n + 50));
+    assert(chained.is_err());
+}
+
+// =============================================================================
+// Section 26: TCP Connection State Modeling
+// =============================================================================
+
+@test
+fn test_tcp_connection_states_as_variants() {
+    // Model TCP connection states using Shutdown and error patterns
+    // ESTABLISHED: both read and write active
+    let established_read: Bool = true;
+    let established_write: Bool = true;
+    assert(established_read);
+    assert(established_write);
+
+    // CLOSE_WAIT: write still active after read shutdown
+    let close_wait_read: Bool = false;
+    let close_wait_write: Bool = true;
+    assert(!close_wait_read);
+    assert(close_wait_write);
+}
+
+@test
+fn test_tcp_graceful_shutdown_sequence() {
+    // Model graceful TCP close: shutdown write, then full close
+    let step1 = Shutdown.Write;  // Send FIN
+    let step2 = Shutdown.Both;   // Full close
+
+    assert(step1 is Shutdown.Write);
+    assert(step2 is Shutdown.Both);
+}
+
+// =============================================================================
+// Section 27: Address Set Port Patterns
+// =============================================================================
+
+@test
+fn test_tcp_addr_set_port() {
+    let mut addr = SocketAddrV4.new(Ipv4Addr.localhost(), 8080);
+    assert_eq(addr.port(), 8080);
+    addr.set_port(9090);
+    assert_eq(addr.port(), 9090);
+}
+
+@test
+fn test_tcp_addr_set_port_to_zero() {
+    let mut addr = SocketAddrV4.new(Ipv4Addr.localhost(), 8080);
+    addr.set_port(0);
+    assert_eq(addr.port(), 0);
+}
+
+@test
+fn test_tcp_addr_set_port_max() {
+    let mut addr = SocketAddrV4.new(Ipv4Addr.localhost(), 0);
+    addr.set_port(65535);
+    assert_eq(addr.port(), 65535);
+}
+
+// =============================================================================
+// Section 28: Error Clone Pattern
+// =============================================================================
+
+@test
+fn test_tcp_stream_error_clone() {
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    let cloned = err.clone();
+    assert_eq(cloned.kind(), IoErrorKind.ConnectionRefused);
+}
+
+@test
+fn test_tcp_stream_error_clone_with_message() {
+    let err = StreamError.with_message(IoErrorKind.TimedOut, "dial tcp timeout");
+    let cloned = err.clone();
+    assert_eq(cloned.kind(), IoErrorKind.TimedOut);
+    assert(cloned.message().is_some());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,194 @@
+// =============================================================================
+// maybe_flatten_default_test.vr - Tests for Maybe.flatten and unwrap_or_default
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, base, maybe, flatten, default
+// @description: Tests for Maybe.flatten() and Maybe.unwrap_or_default().
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// SECTION 1: unwrap_or_default - Int
+// =============================================================================
+
+@test
+fn test_unwrap_or_default_some_int() {
+    let m: Maybe<Int> = Some(42);
+    assert_eq(m.unwrap_or_default(), 42);
+}
+
+@test
+fn test_unwrap_or_default_none_int() {
+    let m: Maybe<Int> = None;
+    assert_eq(m.unwrap_or_default(), 0);  // Int default is 0
+}
+
+// =============================================================================
+// SECTION 2: unwrap_or_default - Bool
+// =============================================================================
+
+@test
+fn test_unwrap_or_default_some_bool() {
+    let m: Maybe<Bool> = Some(true);
+    assert_eq(m.unwrap_or_default(), true);
+}
+
+@test
+fn test_unwrap_or_default_none_bool() {
+    let m: Maybe<Bool> = None;
+    assert_eq(m.unwrap_or_default(), false);  // Bool default is false
+}
+
+// =============================================================================
+// SECTION 3: unwrap_or_default - Float
+// =============================================================================
+
+@test
+fn test_unwrap_or_default_some_float() {
+    let m: Maybe<Float> = Some(3.14);
+    let val: Float = m.unwrap_or_default();
+    assert(val > 3.0);
+}
+
+@test
+fn test_unwrap_or_default_none_float() {
+    let m: Maybe<Float> = None;
+    let val: Float = m.unwrap_or_default();
+    assert_eq(val, 0.0);  // Float default is 0.0
+}
+
+// =============================================================================
+// SECTION 4: unwrap_or_default - Text
+// =============================================================================
+
+@test
+fn test_unwrap_or_default_some_text() {
+    let m: Maybe<Text> = Some("hello");
+    assert_eq(m.unwrap_or_default(), "hello");
+}
+
+@test
+fn test_unwrap_or_default_none_text() {
+    let m: Maybe<Text> = None;
+    assert_eq(m.unwrap_or_default(), "");  // Text default is ""
+}
+
+// =============================================================================
+// SECTION 5: flatten - Maybe<Maybe<Int>>
+// =============================================================================
+
+@test
+fn test_flatten_some_some() {
+    let m: Maybe<Maybe<Int>> = Some(Some(42));
+    let flat: Maybe<Int> = m.flatten();
+    assert_eq(flat, Some(42));
+}
+
+@test
+fn test_flatten_some_none() {
+    let m: Maybe<Maybe<Int>> = Some(None);
+    let flat: Maybe<Int> = m.flatten();
+    assert(flat is None);
+}
+
+@test
+fn test_flatten_none() {
+    let m: Maybe<Maybe<Int>> = None;
+    let flat: Maybe<Int> = m.flatten();
+    assert(flat is None);
+}
+
+// =============================================================================
+// SECTION 6: flatten - Maybe<Maybe<Bool>>
+// =============================================================================
+
+@test
+fn test_flatten_some_some_bool() {
+    let m: Maybe<Maybe<Bool>> = Some(Some(true));
+    let flat: Maybe<Bool> = m.flatten();
+    assert_eq(flat, Some(true));
+}
+
+@test
+fn test_flatten_some_none_bool() {
+    let m: Maybe<Maybe<Bool>> = Some(None);
+    let flat: Maybe<Bool> = m.flatten();
+    assert(flat is None);
+}
+
+@test
+fn test_flatten_none_bool() {
+    let m: Maybe<Maybe<Bool>> = None;
+    let flat: Maybe<Bool> = m.flatten();
+    assert(flat is None);
+}
+
+// =============================================================================
+// SECTION 7: flatten - Maybe<Maybe<Text>>
+// =============================================================================
+
+@test
+fn test_flatten_some_some_text() {
+    let m: Maybe<Maybe<Text>> = Some(Some("hello"));
+    let flat: Maybe<Text> = m.flatten();
+    assert_eq(flat, Some("hello"));
+}
+
+@test
+fn test_flatten_some_none_text() {
+    let m: Maybe<Maybe<Text>> = Some(None);
+    let flat: Maybe<Text> = m.flatten();
+    assert(flat is None);
+}
+
+@test
+fn test_flatten_none_text() {
+    let m: Maybe<Maybe<Text>> = None;
+    let flat: Maybe<Text> = m.flatten();
+    assert(flat is None);
+}
+
+// =============================================================================
+// SECTION 8: flatten combined with other operations
+// =============================================================================
+
+@test
+fn test_flatten_after_map() {
+    // map produces Maybe<Maybe<Int>>, then flatten reduces to Maybe<Int>
+    let m: Maybe<Int> = Some(5);
+    let nested: Maybe<Maybe<Int>> = m.map(|x| Some(x * 2));
+    let flat: Maybe<Int> = nested.flatten();
+    assert_eq(flat, Some(10));
+}
+
+@test
+fn test_flatten_after_map_to_none() {
+    let m: Maybe<Int> = Some(5);
+    let nested: Maybe<Maybe<Int>> = m.map(|_x| None);
+    let flat: Maybe<Int> = nested.flatten();
+    assert(flat is None);
+}
+
+@test
+fn test_unwrap_or_default_after_transform() {
+    let m: Maybe<Int> = None;
+    let mapped: Maybe<Int> = m.map(|x| x * 2);
+    assert_eq(mapped.unwrap_or_default(), 0);
+}
+
+@test
+fn test_unwrap_or_default_some_after_filter() {
+    let m: Maybe<Int> = Some(10);
+    let filtered: Maybe<Int> = m.filter(|x| *x > 5);
+    assert_eq(filtered.unwrap_or_default(), 10);
+}
+
+@test
+fn test_unwrap_or_default_none_after_filter() {
+    let m: Maybe<Int> = Some(3);
+    let filtered: Maybe<Int> = m.filter(|x| *x > 5);
+    assert_eq(filtered.unwrap_or_default(), 0);  // Filtered out → None → default
+}

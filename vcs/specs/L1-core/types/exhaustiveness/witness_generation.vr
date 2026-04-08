@@ -1,0 +1,70 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: exhaustiveness, witness, diagnostics
+// @expected-error: non-exhaustive
+// @description: Witness generation for various non-exhaustive patterns
+
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Color is Red | Green | Blue | Yellow | Cyan | Magenta;
+type Shape is Circle { r: Float } | Square { s: Float } | Triangle { b: Float, h: Float };
+
+// Missing Some case - witness: Some(_)
+fn missing_some(opt: Maybe<Int>) -> Int =
+    match opt {
+        None => 0
+        // ERROR: Non-exhaustive - missing case: Some(_)
+    };
+
+// Missing variant - witness: Yellow
+fn missing_color(c: Color) -> Text =
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+        Cyan => "cyan",
+        Magenta => "magenta"
+        // ERROR: Non-exhaustive - missing case: Yellow
+    };
+
+// Missing nested - witness: Ok(None)
+fn missing_nested(r: Result<Maybe<Int>, Text>) -> Int =
+    match r {
+        Ok(Some(x)) => x,
+        Err(_) => -1
+        // ERROR: Non-exhaustive - missing case: Ok(None)
+    };
+
+// Missing tuple combination - witness: (true, true)
+fn missing_tuple(pair: (Bool, Bool)) -> Text =
+    match pair {
+        (false, _) => "first false",
+        (true, false) => "second false"
+        // ERROR: Non-exhaustive - missing case: (true, true)
+    };
+
+// Missing record variant - witness: Triangle { .. }
+fn missing_shape(s: Shape) -> Float =
+    match s {
+        Circle { r } => r,
+        Square { s } => s
+        // ERROR: Non-exhaustive - missing case: Triangle { b: _, h: _ }
+    };
+
+// Missing in range - witness: 5
+fn missing_range(n: Int) -> Text =
+    match n {
+        0..=4 => "low",
+        6..=10 => "high"
+        // ERROR: Non-exhaustive - missing case: 5
+    };
+
+fn main() {
+    // Call the non-exhaustive functions so the type checker analyzes them
+    let _ = missing_some(None);
+    let _ = missing_color(Red);
+    let _ = missing_nested(Err("error"));
+    let _ = missing_tuple((false, false));
+    let _ = missing_shape(Circle { r: 1.0 });
+    let _ = missing_range(3);
+}

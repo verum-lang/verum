@@ -1,0 +1,31 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M403
+// @tags: meta, quote, hygiene, gensym, collision
+// @description: Tests detection of gensym name collision (internal error condition)
+
+// =============================================================================
+// GENSYM COLLISION
+// =============================================================================
+
+// NOTE: M403 is an internal error that should never occur in normal use.
+// It indicates a bug in the hygiene system's unique name generation.
+// This test verifies that if such a collision were to occur, it would be reported.
+
+// Attempt to force a gensym collision by using internal naming convention
+meta fn attempt_gensym_collision() -> TokenStream {
+    // Try to create a manual identifier that looks like a gensym
+    // The hygiene system should detect this conflicts with its internal naming
+    let fake_gensym = ident("__verum_gensym_0");
+
+    quote {
+        // Use both a real gensym and the fake one
+        let $fake_gensym = 42;
+        let __verum_gensym_0 = 100;  // ERROR: M403 - collision with hygiene-generated name
+    }
+}
+
+fn main() {
+    @attempt_gensym_collision();
+}

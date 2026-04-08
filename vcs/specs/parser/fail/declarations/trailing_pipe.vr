@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, variants, grammar, error
+// @description: Test detection of trailing '|' in variant type definitions
+// @expected-error: E0D0
+
+// GRAMMAR: variant_list = [ '|' ] , variant , { '|' , variant } ;
+// After '|', another variant is REQUIRED. Trailing '|' is invalid.
+
+type Option<T> is Some(T) | None |;

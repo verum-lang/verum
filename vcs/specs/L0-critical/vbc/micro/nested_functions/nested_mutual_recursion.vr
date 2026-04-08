@@ -1,0 +1,57 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, mutual-recursion
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn is_even(n: Int) -> Bool {
+        fn even(x: Int) -> Bool {
+            if x == 0 {
+                return true;
+            }
+            return odd(x - 1);
+        }
+        fn odd(x: Int) -> Bool {
+            if x == 0 {
+                return false;
+            }
+            return even(x - 1);
+        }
+        return even(n);
+    }
+
+    assert_eq(is_even(0), true);
+    assert_eq(is_even(1), false);
+    assert_eq(is_even(2), true);
+    assert_eq(is_even(3), false);
+    assert_eq(is_even(10), true);
+    assert_eq(is_even(11), false);
+
+    // Another mutual recursion example
+    fn compute(n: Int) -> Int {
+        fn f(x: Int) -> Int {
+            if x <= 0 {
+                return 1;
+            }
+            return x + g(x - 1);
+        }
+        fn g(x: Int) -> Int {
+            if x <= 0 {
+                return 0;
+            }
+            return x * 2 + f(x - 1);
+        }
+        return f(n);
+    }
+
+    // f(0) = 1
+    // f(1) = 1 + g(0) = 1 + 0 = 1
+    // f(2) = 2 + g(1) = 2 + (2 + f(0)) = 2 + 2 + 1 = 5
+    // f(3) = 3 + g(2) = 3 + (4 + f(1)) = 3 + 4 + 1 = 8
+    assert_eq(compute(0), 1);
+    assert_eq(compute(1), 1);
+    assert_eq(compute(2), 5);
+    assert_eq(compute(3), 8);
+}

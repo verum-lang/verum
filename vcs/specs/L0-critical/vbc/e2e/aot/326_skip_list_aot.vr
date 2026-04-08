@@ -1,0 +1,296 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, skip-list, data-structure, lookup
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for skip list simulation with multi-level linked list lookups.
+// Simulates a 3-level skip list with 8 sorted elements.
+// Level 0: all elements, Level 1: every other, Level 2: every fourth.
+// Uses flat arrays to avoid nested record issues in AOT.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+// Global skip list data (avoid passing nested records)
+// values: 10, 20, 30, 40, 50, 60, 70, 80
+fn sl_value(i: Int) -> Int { (i + 1) * 10 }
+
+// Level 0 links: 0->1->2->3->4->5->6->7->-1
+fn sl_next0(i: Int) -> Int {
+    if i == 7 { -1 } else { i + 1 }
+}
+
+// Level 1 links: 0->2->4->6->-1, others -1
+fn sl_next1(i: Int) -> Int {
+    if i == 0 { 2 }
+    else if i == 2 { 4 }
+    else if i == 4 { 6 }
+    else { -1 }
+}
+
+// Level 2 links: 0->4->-1, others -1
+fn sl_next2(i: Int) -> Int {
+    if i == 0 { 4 }
+    else { -1 }
+}
+
+// Is element present at level 1?
+fn in_level1(i: Int) -> Int {
+    if i == 0 { 1 } else if i == 2 { 1 }
+    else if i == 4 { 1 } else if i == 6 { 1 }
+    else { 0 }
+}
+
+// Is element present at level 2?
+fn in_level2(i: Int) -> Int {
+    if i == 0 { 1 } else if i == 4 { 1 }
+    else { 0 }
+}
+
+// Search for a value in the skip list, returns index or -1
+fn skip_search(target: Int) -> Int {
+    // Start at level 2
+    let mut cur = 0;  // head of level 2
+    let mut found = -1;
+    let mut prev2 = -1;
+
+    // Level 2 traversal
+    let mut done2 = 0;
+    while done2 == 0 {
+        if cur == -1 {
+            done2 = 1;
+        } else {
+            let cv = sl_value(cur);
+            if cv == target { found = cur; done2 = 1; }
+            else if cv < target {
+                prev2 = cur;
+                cur = sl_next2(cur);
+            } else { done2 = 1; }
+        }
+    }
+    if found >= 0 { return found; }
+
+    // Level 1: start from prev2 or head1
+    cur = if prev2 == -1 { 0 } else { prev2 };
+    let mut prev1 = -1;
+    let mut done1 = 0;
+    while done1 == 0 {
+        if cur == -1 { done1 = 1; }
+        else {
+            let cv = sl_value(cur);
+            if cv == target { found = cur; done1 = 1; }
+            else if cv < target {
+                prev1 = cur;
+                let nxt = sl_next1(cur);
+                if nxt == -1 { done1 = 1; } else { cur = nxt; }
+            } else { done1 = 1; }
+        }
+    }
+    if found >= 0 { return found; }
+
+    // Level 0: start from prev1 or head0
+    cur = if prev1 == -1 { 0 } else { prev1 };
+    let mut done0 = 0;
+    while done0 == 0 {
+        if cur == -1 { done0 = 1; }
+        else {
+            let cv = sl_value(cur);
+            if cv == target { found = cur; done0 = 1; }
+            else if cv < target { cur = sl_next0(cur); }
+            else { done0 = 1; }
+        }
+    }
+    found
+}
+
+// Count comparisons for skip search
+fn skip_comps(target: Int) -> Int {
+    let mut comps = 0;
+    let mut cur = 0;
+    let mut found = 0;
+    let mut prev2 = -1;
+
+    // Level 2
+    let mut done2 = 0;
+    while done2 == 0 {
+        if cur == -1 { done2 = 1; }
+        else {
+            comps = comps + 1;
+            let cv = sl_value(cur);
+            if cv == target { found = 1; done2 = 1; }
+            else if cv < target { prev2 = cur; cur = sl_next2(cur); }
+            else { done2 = 1; }
+        }
+    }
+    if found == 1 { return comps; }
+
+    // Level 1
+    cur = if prev2 == -1 { 0 } else { prev2 };
+    let mut prev1 = -1;
+    let mut done1 = 0;
+    while done1 == 0 {
+        if cur == -1 { done1 = 1; }
+        else {
+            comps = comps + 1;
+            let cv = sl_value(cur);
+            if cv == target { found = 1; done1 = 1; }
+            else if cv < target {
+                prev1 = cur;
+                let nxt = sl_next1(cur);
+                if nxt == -1 { done1 = 1; } else { cur = nxt; }
+            } else { done1 = 1; }
+        }
+    }
+    if found == 1 { return comps; }
+
+    // Level 0
+    cur = if prev1 == -1 { 0 } else { prev1 };
+    let mut done0 = 0;
+    while done0 == 0 {
+        if cur == -1 { done0 = 1; }
+        else {
+            comps = comps + 1;
+            let cv = sl_value(cur);
+            if cv == target { found = 1; done0 = 1; }
+            else if cv < target { cur = sl_next0(cur); }
+            else { done0 = 1; }
+        }
+    }
+    comps
+}
+
+// Linear search: count comparisons at level 0 only
+fn linear_comps(target: Int) -> Int {
+    let mut cur = 0;
+    let mut comps = 0;
+    while cur != -1 {
+        comps = comps + 1;
+        let cv = sl_value(cur);
+        if cv == target { return comps; }
+        if cv > target { return comps; }
+        cur = sl_next0(cur);
+    }
+    comps
+}
+
+fn test_find_all_elements() {
+    // Every element should be findable
+    assert_eq(skip_search(10), 0);
+    assert_eq(skip_search(20), 1);
+    assert_eq(skip_search(30), 2);
+    assert_eq(skip_search(40), 3);
+    assert_eq(skip_search(50), 4);
+    assert_eq(skip_search(60), 5);
+    assert_eq(skip_search(70), 6);
+    assert_eq(skip_search(80), 7);
+}
+
+fn test_find_first_element() {
+    // Finding 10 (head, in all levels): 1 comparison at level 2
+    assert_eq(skip_search(10), 0);
+    assert_eq(skip_comps(10), 1);
+}
+
+fn test_find_last_element() {
+    // Finding 80 (last, only in level 0)
+    assert_eq(skip_search(80), 7);
+}
+
+fn test_not_found() {
+    assert_eq(skip_search(25), -1);
+    assert_eq(skip_search(5), -1);
+    assert_eq(skip_search(100), -1);
+    assert_eq(skip_search(0), -1);
+    assert_eq(skip_search(45), -1);
+}
+
+fn test_skip_efficiency() {
+    // Finding 50: level 2 sees 10<50, jumps to 4 (50==50) = 2 comps
+    assert_eq(skip_search(50), 4);
+    let sc = skip_comps(50);
+    let lc = linear_comps(50);
+    assert_eq(lc, 5);
+    // Skip should need fewer comparisons
+    assert_eq(sc <= lc, true);
+}
+
+fn test_level_traversal() {
+    // Count elements reachable at each level
+    // Level 0: 0->1->2->3->4->5->6->7 = 8
+    let mut count0 = 0;
+    let mut cur = 0;
+    while cur != -1 {
+        count0 = count0 + 1;
+        cur = sl_next0(cur);
+    }
+    assert_eq(count0, 8);
+
+    // Level 1: 0->2->4->6 = 4
+    let mut count1 = 0;
+    cur = 0;
+    let mut d1 = 0;
+    while d1 == 0 {
+        count1 = count1 + 1;
+        let nxt = sl_next1(cur);
+        if nxt == -1 { d1 = 1; } else { cur = nxt; }
+    }
+    assert_eq(count1, 4);
+
+    // Level 2: 0->4 = 2
+    let mut count2 = 0;
+    cur = 0;
+    let mut d2 = 0;
+    while d2 == 0 {
+        count2 = count2 + 1;
+        let nxt = sl_next2(cur);
+        if nxt == -1 { d2 = 1; } else { cur = nxt; }
+    }
+    assert_eq(count2, 2);
+}
+
+fn test_sorted_order() {
+    // Verify values in sorted order at level 0
+    let mut cur = 0;
+    let mut prev_val = -1;
+    while cur != -1 {
+        let cv = sl_value(cur);
+        assert_eq(cv > prev_val, true);
+        prev_val = cv;
+        cur = sl_next0(cur);
+    }
+    assert_eq(prev_val, 80);
+}
+
+fn test_comparison_counts() {
+    // Elements in higher levels should need fewer comparisons
+    let c10 = skip_comps(10);  // Level 2 head: 1 comp
+    let c30 = skip_comps(30);  // Level 1: need a few
+    let c80 = skip_comps(80);  // Last element
+
+    // First element needs fewest
+    assert_eq(c10, 1);
+    // Last element needs most
+    assert_eq(c80 >= c10, true);
+    assert_eq(c80 >= c30, true);
+}
+
+fn main() -> Int {
+    test_find_all_elements();
+    test_find_first_element();
+    test_find_last_element();
+    test_not_found();
+    test_skip_efficiency();
+    test_level_traversal();
+    test_sorted_order();
+    test_comparison_counts();
+    print("[OK] 326_skip_list_aot");
+    0
+}

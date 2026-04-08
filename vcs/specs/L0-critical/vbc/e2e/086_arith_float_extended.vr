@@ -1,0 +1,257 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, arithmetic, float, extended
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Extended float arithmetic — atan2, hypot, copysign, pow, logbase, fmod simulations
+
+// ============================================================================
+// Float helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool {
+    abs_f(a - b) < tol
+}
+
+fn manual_sqrt(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let mut g = x / 2.0;
+        if g < 1.0 { g = 1.0; }
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g
+    }
+}
+
+// ============================================================================
+// Test 1: Hypot — sqrt(x^2 + y^2) without overflow
+// ============================================================================
+
+fn manual_hypot(x: Float, y: Float) -> Float {
+    let ax = abs_f(x);
+    let ay = abs_f(y);
+    manual_sqrt(ax * ax + ay * ay)
+}
+
+@test
+fn test_hypot() {
+    // 3-4-5 triangle
+    let h1 = manual_hypot(3.0, 4.0);
+    assert(approx_eq(h1, 5.0, 0.01));
+
+    // 5-12-13 triangle
+    let h2 = manual_hypot(5.0, 12.0);
+    assert(approx_eq(h2, 13.0, 0.01));
+
+    // Negative arguments
+    let h3 = manual_hypot(0.0 - 3.0, 4.0);
+    assert(approx_eq(h3, 5.0, 0.01));
+
+    let h4 = manual_hypot(0.0 - 3.0, 0.0 - 4.0);
+    assert(approx_eq(h4, 5.0, 0.01));
+
+    // One zero
+    let h5 = manual_hypot(7.0, 0.0);
+    assert(approx_eq(h5, 7.0, 0.01));
+
+    // Both zero
+    let h6 = manual_hypot(0.0, 0.0);
+    assert(approx_eq(h6, 0.0, 0.001));
+
+    print("  test_hypot: ok");
+}
+
+// ============================================================================
+// Test 2: Copysign — magnitude of x with sign of y
+// ============================================================================
+
+fn manual_copysign(x: Float, y: Float) -> Float {
+    let mag = abs_f(x);
+    if y < 0.0 { 0.0 - mag } else { mag }
+}
+
+@test
+fn test_copysign() {
+    // positive x, positive y
+    assert(approx_eq(manual_copysign(5.0, 1.0), 5.0, 0.001));
+
+    // positive x, negative y
+    assert(approx_eq(manual_copysign(5.0, 0.0 - 1.0), 0.0 - 5.0, 0.001));
+
+    // negative x, positive y
+    assert(approx_eq(manual_copysign(0.0 - 5.0, 1.0), 5.0, 0.001));
+
+    // negative x, negative y
+    assert(approx_eq(manual_copysign(0.0 - 5.0, 0.0 - 1.0), 0.0 - 5.0, 0.001));
+
+    // zero magnitude
+    assert(approx_eq(manual_copysign(0.0, 0.0 - 1.0), 0.0, 0.001));
+
+    print("  test_copysign: ok");
+}
+
+// ============================================================================
+// Test 3: Integer power — x^n for integer exponent
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn int_pow(base: Float, exp: Int) -> Float {
+    if exp == 0 { 1.0 }
+    else if exp < 0 {
+        1.0 / int_pow(base, 0 - exp)
+    } else {
+        let mut result = 1.0;
+        let mut i = 0;
+        while i < exp {
+            result = result * base;
+            i = i + 1;
+        }
+        result
+    }
+}
+
+@test
+fn test_pow_integer() {
+    assert(approx_eq(int_pow(2.0, 0), 1.0, 0.001));
+    assert(approx_eq(int_pow(2.0, 1), 2.0, 0.001));
+    assert(approx_eq(int_pow(2.0, 10), 1024.0, 0.001));
+    assert(approx_eq(int_pow(3.0, 3), 27.0, 0.001));
+    assert(approx_eq(int_pow(5.0, 4), 625.0, 0.001));
+
+    // Negative exponent
+    assert(approx_eq(int_pow(2.0, 0 - 1), 0.5, 0.001));
+    assert(approx_eq(int_pow(2.0, 0 - 3), 0.125, 0.001));
+    assert(approx_eq(int_pow(10.0, 0 - 2), 0.01, 0.001));
+
+    // Base 1
+    assert(approx_eq(int_pow(1.0, 100), 1.0, 0.001));
+
+    print("  test_pow_integer: ok");
+}
+
+// ============================================================================
+// Test 4: Fmod — floating point remainder
+// ============================================================================
+
+fn manual_fmod(x: Float, y: Float) -> Float {
+    // fmod(x, y) = x - trunc(x/y) * y
+    let ay = abs_f(y);
+    if ay < 0.0000001 { 0.0 }
+    else {
+        let quotient = x / y;
+        // Truncate toward zero
+        let trunc_q = (quotient as Int) as Float;
+        x - trunc_q * y
+    }
+}
+
+@test
+fn test_fmod() {
+    // fmod(7.0, 3.0) = 1.0
+    assert(approx_eq(manual_fmod(7.0, 3.0), 1.0, 0.001));
+
+    // fmod(10.0, 3.0) = 1.0
+    assert(approx_eq(manual_fmod(10.0, 3.0), 1.0, 0.001));
+
+    // fmod(5.5, 2.0) = 1.5
+    assert(approx_eq(manual_fmod(5.5, 2.0), 1.5, 0.001));
+
+    // Negative numerator: fmod(-7.0, 3.0) = -1.0
+    assert(approx_eq(manual_fmod(0.0 - 7.0, 3.0), 0.0 - 1.0, 0.001));
+
+    // Exact division: fmod(6.0, 3.0) = 0.0
+    assert(approx_eq(manual_fmod(6.0, 3.0), 0.0, 0.001));
+
+    // Small remainder: fmod(1.0, 0.3) ~ 0.1
+    assert(approx_eq(manual_fmod(1.0, 0.3), 0.1, 0.01));
+
+    print("  test_fmod: ok");
+}
+
+// ============================================================================
+// Test 5: Log base — change of base using natural log approximation
+// ============================================================================
+
+fn manual_ln(x: Float) -> Float {
+    // ln(x) for x > 0.5 using series: ln(x) = ln(1 + (x-1))
+    // For wider range, reduce x to [1, 2) by repeated division/multiplication
+    if x <= 0.0 { 0.0 }
+    else {
+        let mut val = x;
+        let mut correction = 0.0;
+        let ln2 = 0.6931471805599453;
+
+        // Reduce to [1, 2)
+        while val >= 2.0 {
+            val = val / 2.0;
+            correction = correction + ln2;
+        }
+        while val < 1.0 {
+            val = val * 2.0;
+            correction = correction - ln2;
+        }
+
+        // Now val is in [1, 2), use series for ln(1 + d) where d = val - 1
+        let d = val - 1.0;
+        let d2 = d * d;
+        let d3 = d2 * d;
+        let d4 = d3 * d;
+        let d5 = d4 * d;
+        let d6 = d5 * d;
+        let series = d - d2 / 2.0 + d3 / 3.0 - d4 / 4.0 + d5 / 5.0 - d6 / 6.0;
+        series + correction
+    }
+}
+
+fn manual_log_base(x: Float, base: Float) -> Float {
+    manual_ln(x) / manual_ln(base)
+}
+
+@test
+fn test_log_base() {
+    // log2(8) = 3
+    let l1 = manual_log_base(8.0, 2.0);
+    assert(approx_eq(l1, 3.0, 0.05));
+
+    // log10(100) = 2
+    let l2 = manual_log_base(100.0, 10.0);
+    assert(approx_eq(l2, 2.0, 0.05));
+
+    // log2(1) = 0
+    let l3 = manual_log_base(1.0, 2.0);
+    assert(approx_eq(l3, 0.0, 0.01));
+
+    // log10(10) = 1
+    let l4 = manual_log_base(10.0, 10.0);
+    assert(approx_eq(l4, 1.0, 0.05));
+
+    // log2(32) = 5
+    let l5 = manual_log_base(32.0, 2.0);
+    assert(approx_eq(l5, 5.0, 0.1));
+
+    print("  test_log_base: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_hypot();
+    test_copysign();
+    test_pow_integer();
+    test_fmod();
+    test_log_base();
+    print("[OK] 086_arith_float_extended");
+    0
+}

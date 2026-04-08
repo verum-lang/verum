@@ -1,0 +1,359 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, async, generators, yield, gen_create, gen_next
+// @timeout: 5000
+// @expect: pass
+//
+// Test: GEN_CREATE, GEN_NEXT, GEN_HAS_NEXT, YIELD
+// Verifies generator/coroutine functionality
+// Note: Generator functions (fn*) must be defined at module level
+
+// =============================================================================
+// Module-level generator functions
+// =============================================================================
+
+fn* simple() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+fn* counter(max: Int) -> Int {
+    for i in 0..max {
+        yield i;
+    }
+}
+
+fn* empty_gen() -> Int {
+    // No yields
+}
+
+fn* single() -> Int {
+    yield 99;
+}
+
+fn* accumulator() -> Int {
+    let mut sum: Int = 0;
+    for i in 1..6 {  // 1..=5 alternative
+        sum = sum + i;
+        yield sum;
+    }
+}
+
+fn* fibonacci() -> Int {
+    let mut a: Int = 0;
+    let mut b: Int = 1;
+
+    yield a;
+    yield b;
+
+    for _ in 0..100 {  // Bounded loop for safety
+        let next = a + b;
+        yield next;
+        a = b;
+        b = next;
+    }
+}
+
+fn* range_gen(start: Int, end: Int) -> Int {
+    for i in start..end {
+        yield i;
+    }
+}
+
+fn* evens(max: Int) -> Int {
+    for i in 0..max {
+        if i % 2 == 0 {
+            yield i;
+        }
+    }
+}
+
+fn* limited(max: Int) -> Int {
+    for i in 0..1000 {  // Bounded upper limit
+        if i >= max {
+            return;
+        }
+        yield i;
+    }
+}
+
+fn* matrix_indices(rows: Int, cols: Int) -> Int {
+    for r in 0..rows {
+        for c in 0..cols {
+            yield r * cols + c;
+        }
+    }
+}
+
+fn* numbers() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+fn* values() -> Int {
+    yield 10;
+    yield 20;
+    yield 30;
+}
+
+fn* base() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+fn* range_ten() -> Int {
+    for i in 0..10 {
+        yield i;
+    }
+}
+
+fn* take_n(n: Int) -> Int {
+    for i in 0..n {
+        yield i;
+    }
+}
+
+type Point is { x: Int, y: Int };
+
+fn* point_gen() -> Point {
+    yield Point { x: 1, y: 2 };
+    yield Point { x: 3, y: 4 };
+}
+
+fn* maybe_gen() -> Maybe<Int> {
+    yield Some(1);
+    yield None;
+    yield Some(3);
+}
+
+// delegate_to: skipped — for-in over &mut Iterator<T> not yet supported
+
+fn* local_ref() -> Int {
+    let local: Int = 42;
+    yield local;  // Yields copy, not reference
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_simple_generator() {
+    let mut gen = simple();
+
+    assert_eq(gen.next(), Some(1));
+    assert_eq(gen.next(), Some(2));
+    assert_eq(gen.next(), Some(3));
+    assert_eq(gen.next(), None);
+}
+
+fn test_generator_exhaustion() {
+    let mut gen = counter(3);
+
+    assert(gen.has_next());
+    assert_eq(gen.next(), Some(0));
+    assert(gen.has_next());
+    assert_eq(gen.next(), Some(1));
+    assert(gen.has_next());
+    assert_eq(gen.next(), Some(2));
+    assert(!gen.has_next());
+    assert_eq(gen.next(), None);
+}
+
+fn test_empty_generator() {
+    let mut gen = empty_gen();
+    assert(!gen.has_next());
+    assert_eq(gen.next(), None);
+}
+
+fn test_single_yield() {
+    let mut gen = single();
+    assert_eq(gen.next(), Some(99));
+    assert_eq(gen.next(), None);
+}
+
+fn test_stateful_generator() {
+    let mut gen = accumulator();
+
+    assert_eq(gen.next(), Some(1));    // 1
+    assert_eq(gen.next(), Some(3));    // 1+2
+    assert_eq(gen.next(), Some(6));    // 1+2+3
+    assert_eq(gen.next(), Some(10));   // 1+2+3+4
+    assert_eq(gen.next(), Some(15));   // 1+2+3+4+5
+    assert_eq(gen.next(), None);
+}
+
+fn test_fibonacci_generator() {
+    let mut gen = fibonacci();
+
+    assert_eq(gen.next(), Some(0));
+    assert_eq(gen.next(), Some(1));
+    assert_eq(gen.next(), Some(1));
+    assert_eq(gen.next(), Some(2));
+    assert_eq(gen.next(), Some(3));
+    assert_eq(gen.next(), Some(5));
+    assert_eq(gen.next(), Some(8));
+}
+
+fn test_generator_with_parameter() {
+    let mut gen = range_gen(5, 8);
+
+    assert_eq(gen.next(), Some(5));
+    assert_eq(gen.next(), Some(6));
+    assert_eq(gen.next(), Some(7));
+    assert_eq(gen.next(), None);
+}
+
+fn test_conditional_yield() {
+    let mut gen = evens(10);
+
+    assert_eq(gen.next(), Some(0));
+    assert_eq(gen.next(), Some(2));
+    assert_eq(gen.next(), Some(4));
+    assert_eq(gen.next(), Some(6));
+    assert_eq(gen.next(), Some(8));
+    assert_eq(gen.next(), None);
+}
+
+fn test_early_return() {
+    let mut gen = limited(3);
+
+    assert_eq(gen.next(), Some(0));
+    assert_eq(gen.next(), Some(1));
+    assert_eq(gen.next(), Some(2));
+    assert_eq(gen.next(), None);
+}
+
+fn test_nested_loops() {
+    let mut gen = matrix_indices(2, 3);
+
+    assert_eq(gen.next(), Some(0));  // 0*3+0
+    assert_eq(gen.next(), Some(1));  // 0*3+1
+    assert_eq(gen.next(), Some(2));  // 0*3+2
+    assert_eq(gen.next(), Some(3));  // 1*3+0
+    assert_eq(gen.next(), Some(4));  // 1*3+1
+    assert_eq(gen.next(), Some(5));  // 1*3+2
+    assert_eq(gen.next(), None);
+}
+
+fn test_for_loop_over_generator() {
+    let mut sum: Int = 0;
+    for n in numbers() {
+        sum = sum + n;
+    }
+
+    assert_eq(sum, 6);
+}
+
+fn test_collect_generator() {
+    let list: List<Int> = values().collect();
+
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 10);
+    assert_eq(list[1], 20);
+    assert_eq(list[2], 30);
+}
+
+fn test_generator_map() {
+    let doubled: List<Int> = base()
+        .map(|x| x * 2)
+        .collect();
+
+    assert_eq(doubled, [2, 4, 6]);
+}
+
+fn test_generator_filter() {
+    let evens_list: List<Int> = range_ten()
+        .filter(|x| x % 2 == 0)
+        .collect();
+
+    assert_eq(evens_list, [0, 2, 4, 6, 8]);
+}
+
+fn test_generator_take() {
+    let first_five: List<Int> = range_ten()
+        .take(5)
+        .collect();
+
+    assert_eq(first_five, [0, 1, 2, 3, 4]);
+}
+
+fn test_generator_chain() {
+    let combined: List<Int> = take_n(3)
+        .chain(take_n(2))
+        .collect();
+
+    assert_eq(combined.len(), 5);
+}
+
+fn test_generator_yields_structs() {
+    let mut gen = point_gen();
+
+    let p1 = gen.next();
+    assert(p1 is Some);
+
+    let p2 = gen.next();
+    assert(p2 is Some);
+
+    assert_eq(gen.next(), None);
+}
+
+fn test_generator_yields_options() {
+    let mut gen = maybe_gen();
+
+    let v1 = gen.next();
+    assert(v1 is Some);
+
+    let v2 = gen.next();
+    assert(v2 is Some);
+
+    let v3 = gen.next();
+    assert(v3 is Some);
+
+    assert_eq(gen.next(), None);
+}
+
+fn test_generator_no_reference_leak() {
+    let mut gen = local_ref();
+    let value = gen.next();
+
+    assert_eq(value, Some(42));
+}
+
+fn main() {
+    // Basic generators
+    test_simple_generator();
+    test_generator_exhaustion();
+    test_empty_generator();
+    test_single_yield();
+
+    // Stateful generators
+    test_stateful_generator();
+    test_fibonacci_generator();
+    test_generator_with_parameter();
+
+    // Control flow
+    test_conditional_yield();
+    test_early_return();
+    test_nested_loops();
+
+    // Iterator protocol
+    test_for_loop_over_generator();
+    test_collect_generator();
+    test_generator_map();
+    test_generator_filter();
+    test_generator_take();
+    test_generator_chain();
+
+    // Complex types
+    test_generator_yields_structs();
+    test_generator_yields_options();
+
+    // Memory safety
+    test_generator_no_reference_leak();
+
+    print("003_generators: PASSED");
+}

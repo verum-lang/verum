@@ -1,0 +1,1064 @@
+// @test: parse
+// @level: L0
+// @tier: 0
+// @tags: parser, patterns, cluster6, comprehensive, reference
+// @description: Comprehensive Cluster 6 Pattern Extensions test suite covering all 18 PatternKind variants
+
+// ============================================================================
+// REFERENCE DOCUMENT: Verum Pattern System
+// ============================================================================
+//
+// This test file serves as the canonical reference for Verum's pattern system,
+// covering all 18 PatternKind variants as defined in verum_ast/src/pattern.rs:
+//
+// 1.  Wildcard    - Matches anything, discards value
+// 2.  Rest        - Captures remaining elements (..)
+// 3.  Ident       - Binds matched value to identifier
+// 4.  Literal     - Matches exact literal values
+// 5.  Tuple       - Destructures tuple types
+// 6.  Array       - Matches fixed-size arrays
+// 7.  Slice       - Matches slices with head/tail capture
+// 8.  Record      - Destructures record/struct types
+// 9.  Variant     - Matches sum type variants
+// 10. Or          - Matches any of multiple patterns
+// 11. Reference   - Matches references (&, &mut)
+// 12. Range       - Matches value ranges
+// 13. Paren       - Parenthesized pattern for grouping
+// 14. Active      - F#-style user-defined pattern matchers
+// 15. And         - Intersection of patterns (&)
+// 16. Guard       - Conditional pattern (x if cond)
+// 17. TypeTest    - Runtime type test (x is T)
+// 18. Stream      - Lazy iterator pattern matching
+//
+// Grammar Reference: grammar/verum.ebnf Section 2.8 (Patterns)
+// Spec Reference: docs/architecture/new-features.md Cluster 6
+// ============================================================================
+
+// ============================================================================
+// SECTION 1: WILDCARD PATTERN (PatternKind::Wildcard)
+// Grammar: '_'
+// ============================================================================
+
+fn test_wildcard_patterns() {
+    // Basic wildcard in let
+    let _ = compute_value();
+
+    // Wildcard in match arm
+    match value {
+        _ => default_handler()
+    }
+
+    // Wildcard as catch-all
+    match result {
+        Ok(value) => process(value),
+        _ => fallback()
+    }
+
+    // Multiple wildcards in tuple
+    let (_, _, _) = triple;
+
+    // Wildcard in nested positions
+    let (_, (_, _)) = nested;
+    let Point { x: _, y: _ } = point;
+    let Some(_) = option;
+}
+
+// ============================================================================
+// SECTION 2: REST PATTERN (PatternKind::Rest)
+// Grammar: '..' , [ identifier ]
+// ============================================================================
+
+fn test_rest_patterns() {
+    // Bare rest in arrays
+    let [first, ..] = array;
+    let [.., last] = array;
+    let [first, .., last] = array;
+
+    // Named rest binding
+    let [head, ..tail] = list;
+    let [..all_but_last, last] = items;
+    let [first, ..middle, last] = sequence;
+
+    // Rest in record patterns
+    let Point { x, .. } = point;
+    let Config { timeout, retry_count, .. } = config;
+
+    // Rest in match arms
+    match array {
+        [] => empty(),
+        [single] => one(single),
+        [first, second, ..rest] => many(first, second, rest)
+    }
+}
+
+// ============================================================================
+// SECTION 3: IDENTIFIER PATTERN (PatternKind::Ident)
+// Grammar: identifier , [ '@' , pattern ]
+// ============================================================================
+
+fn test_identifier_patterns() {
+    // Simple binding
+    let x = value;
+    let name = compute_name();
+    let result = call_function();
+
+    // Mutable binding
+    let mut counter = 0;
+    let mut accumulator = initial;
+
+    // @ binding (binds both name and subpattern)
+    match option {
+        opt @ Some(_) => use_entire(opt),
+        None => none()
+    }
+
+    // Nested @ binding
+    match nested {
+        outer @ (inner @ (a, b), c) => use_nested(outer, inner, a, b, c)
+    }
+
+    // @ with specific patterns
+    match value {
+        n @ 0 => zero(n),
+        n @ (1 | 2 | 3) => small(n),
+        n => other(n)
+    }
+
+    // ref binding
+    let ref borrowed = owned_value;
+    let ref mut borrowed_mut = owned_mut;
+
+    // @ in arrays
+    match list {
+        all @ [first, ..rest] => use_all(all, first, rest),
+        empty @ [] => use_empty(empty)
+    }
+}
+
+// ============================================================================
+// SECTION 4: LITERAL PATTERN (PatternKind::Literal)
+// Grammar: integer | float | string | char | bool
+// ============================================================================
+
+fn test_literal_patterns() {
+    // Integer literals
+    match n {
+        0 => zero(),
+        1 => one(),
+        42 => answer(),
+        100 => century(),
+        -1 => neg_one(),
+        -100 => neg_century(),
+        _ => other()
+    }
+
+    // Float literals
+    // Note: Negative float literals in patterns require parentheses or guard expressions
+    // because the `-` is parsed as a unary operator, not part of the literal
+    match f {
+        0.0 => zero(),
+        1.0 => one(),
+        3.14159 => pi(),
+        f if f == -273.15 => absolute_zero(),  // Use guard for negative floats
+        _ => other()
+    }
+
+    // String literals
+    match s {
+        "" => empty_string(),
+        "hello" => greeting(),
+        "world" => place(),
+        "hello world" => full_greeting(),
+        _ => other()
+    }
+
+    // Character literals
+    match c {
+        ' ' => space(),
+        '\t' => tab(),
+        '\n' => newline(),
+        'a' => letter_a(),
+        '0' => digit_zero(),
+        _ => other()
+    }
+
+    // Boolean literals
+    match b {
+        true => yes(),
+        false => no()
+    }
+
+    // Hex/binary/octal integer literals
+    match hex {
+        0xFF => byte_max(),
+        0x00 => byte_min(),
+        0b1010 => binary_pattern(),
+        0o777 => octal_perms(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 5: TUPLE PATTERN (PatternKind::Tuple)
+// Grammar: '(' , [ pattern , { ',' , pattern } , [ ',' ] ] , ')'
+// ============================================================================
+
+fn test_tuple_patterns() {
+    // Empty tuple (unit)
+    let () = unit_value;
+
+    // Single element tuple
+    let (single,) = one_tuple;
+
+    // Pair
+    let (a, b) = pair;
+    let (first, second) = compute_pair();
+
+    // Triple
+    let (x, y, z) = coordinates;
+
+    // Nested tuples
+    let ((a, b), (c, d)) = nested_pairs;
+    let ((deep, (deeper, deepest)), shallow) = complex;
+
+    // Mixed with other patterns
+    let (0, rest) = pair;
+    let (first, _) = pair;
+    let (Some(x), y) = mixed;
+
+    // In match
+    match pair {
+        (0, 0) => origin(),
+        (0, y) => y_axis(y),
+        (x, 0) => x_axis(x),
+        (x, y) => general(x, y)
+    }
+
+    // Trailing comma allowed
+    let (a, b,) = pair;
+    let (x, y, z,) = triple;
+}
+
+// ============================================================================
+// SECTION 6: ARRAY PATTERN (PatternKind::Array)
+// Grammar: '[' , [ pattern , { ',' , pattern } ] , ']'
+// ============================================================================
+
+fn test_array_patterns() {
+    // Empty array
+    let [] = empty_array;
+
+    // Fixed-size arrays
+    let [a] = single_elem;
+    let [a, b] = pair_array;
+    let [a, b, c] = triple_array;
+    let [a, b, c, d, e] = five_array;
+
+    // With wildcards
+    let [_, b, _] = triple;
+    let [_, _, _, x] = quad;
+
+    // With literals
+    let [0, second] = starts_zero;
+    let [first, 0] = ends_zero;
+
+    // Nested arrays
+    let [[a, b], [c, d]] = matrix_2x2;
+
+    // In match
+    match array {
+        [] => empty(),
+        [x] => single(x),
+        [x, y] => pair(x, y),
+        [x, y, z] => triple(x, y, z),
+        _ => many()
+    }
+}
+
+// ============================================================================
+// SECTION 7: SLICE PATTERN (PatternKind::Slice)
+// Grammar: '[' , [ pattern , { ',' , pattern } ] , '..' , [ identifier ] , [ { ',' , pattern } ] , ']'
+// ============================================================================
+
+fn test_slice_patterns() {
+    // Rest at end
+    let [first, ..] = slice;
+    let [first, second, ..] = longer_slice;
+
+    // Rest at start
+    let [.., last] = slice;
+    let [.., second_last, last] = longer_slice;
+
+    // Rest in middle
+    let [first, .., last] = slice;
+    let [first, second, .., last] = longer_slice;
+    let [a, b, .., y, z] = very_long;
+
+    // Named rest
+    let [first, ..rest] = slice;
+    let [..init, last] = slice;
+    let [head, ..middle, tail] = slice;
+
+    // In match
+    match slice {
+        [] => empty(),
+        [x] => single(x),
+        [x, y] => pair(x, y),
+        [x, ..] => starts_with(x),
+        [.., x] => ends_with(x),
+        [x, ..middle, y] => sandwich(x, middle, y)
+    }
+
+    // Nested with slices
+    match nested {
+        [[first, ..], ..] => first_of_first(first),
+        [[], ..rest] => empty_first(rest),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 8: RECORD PATTERN (PatternKind::Record)
+// Grammar: path , '{' , [ field_pattern , { ',' , field_pattern } ] , [ '..' ] , '}'
+// ============================================================================
+
+fn test_record_patterns() {
+    // Simple record destructuring
+    let Point { x, y } = point;
+    let Person { name, age } = person;
+
+    // With rest
+    let Point { x, .. } = point;
+    let Config { timeout, .. } = config;
+
+    // Field renaming
+    let Point { x: px, y: py } = point;
+    let Person { name: person_name, age: person_age } = p;
+
+    // Mixed shorthand and rename
+    let Point { x, y: vertical } = point;
+
+    // Nested records
+    let Line { start: Point { x: x1, y: y1 }, end: Point { x: x2, y: y2 } } = line;
+
+    // With literal patterns
+    let Point { x: 0, y } = on_y_axis;
+    let Config { enabled: true, .. } = enabled_config;
+
+    // In match
+    match point {
+        Point { x: 0, y: 0 } => origin(),
+        Point { x: 0, y } => y_axis(y),
+        Point { x, y: 0 } => x_axis(x),
+        Point { x, y } => general(x, y)
+    }
+
+    // Qualified paths in match patterns
+    match qualified_point {
+        geometry.Point { x, y } => use_point(x, y)
+    }
+
+    match nested_config {
+        config_mod.inner.Config { value, .. } => use_config(value)
+    }
+}
+
+// ============================================================================
+// SECTION 9: VARIANT PATTERN (PatternKind::Variant)
+// Grammar: path , [ '(' , [ pattern_list ] , ')' ] | [ '{' , field_patterns , '}' ]
+// ============================================================================
+
+fn test_variant_patterns() {
+    // Unit variants
+    match direction {
+        North => go_north(),
+        South => go_south(),
+        East => go_east(),
+        West => go_west()
+    }
+
+    // Tuple variants
+    match option {
+        Some(x) => has_value(x),
+        None => no_value()
+    }
+
+    match result {
+        Ok(value) => success(value),
+        Err(error) => failure(error)
+    }
+
+    // Record variants
+    match message {
+        Message.Text { content, sender } => text_message(content, sender),
+        Message.Image { url, width, height } => image_message(url, width, height),
+        Message.Empty => empty_message()
+    }
+
+    // Nested variants
+    match nested {
+        Some(Some(x)) => double_some(x),
+        Some(None) => some_none(),
+        None => none()
+    }
+
+    match result {
+        Ok(Some(value)) => success_with_value(value),
+        Ok(None) => success_empty(),
+        Err(e) => error(e)
+    }
+
+    // Qualified variant paths
+    match qualified {
+        std.Result.Ok(x) => ok(x),
+        std.Result.Err(e) => err(e)
+    }
+
+    // Variant with multiple tuple fields
+    match complex {
+        Pair(first, second) => pair(first, second),
+        Triple(a, b, c) => triple(a, b, c)
+    }
+}
+
+// ============================================================================
+// SECTION 10: OR PATTERN (PatternKind::Or)
+// Grammar: pattern , { '|' , pattern }
+// ============================================================================
+
+fn test_or_patterns() {
+    // Basic or with literals
+    match n {
+        0 | 1 => binary(),
+        2 | 3 | 4 => small(),
+        _ => other()
+    }
+
+    // Or with characters
+    match c {
+        'a' | 'e' | 'i' | 'o' | 'u' => vowel(),
+        _ => consonant()
+    }
+
+    // Or with strings
+    match cmd {
+        "yes" | "y" | "true" => affirmative(),
+        "no" | "n" | "false" => negative(),
+        _ => unrecognized()
+    }
+
+    // Or with variants
+    match option {
+        Some(0) | Some(1) => special(),
+        Some(n) => other(n),
+        None => none()
+    }
+
+    // Or in tuple position
+    let (0 | 1, y) = pair;
+
+    // Parenthesized or
+    let (0 | 1) = binary_value;
+
+    // Or with ranges
+    match n {
+        0..10 | 20..30 => specific_range(),
+        _ => other()
+    }
+
+    // Or with bindings
+    match n {
+        x @ (0 | 1 | 2) => small(x),
+        x => other(x)
+    }
+}
+
+// ============================================================================
+// SECTION 11: REFERENCE PATTERN (PatternKind::Reference)
+// Grammar: '&' , [ 'mut' ] , pattern
+// ============================================================================
+
+fn test_reference_patterns() {
+    // Immutable reference
+    let &x = ref_value;
+    let &inner = &outer;
+
+    // Mutable reference
+    let &mut x = mut_ref;
+    let &mut inner = &mut outer;
+
+    // Nested references
+    let &(&inner) = double_ref;
+    let &(&(&deepest)) = triple_ref;
+
+    // Reference to tuple
+    let &(a, b) = ref_pair;
+    let &mut (x, y) = mut_ref_pair;
+
+    // Reference in match
+    match ref_option {
+        &Some(x) => has_value(x),
+        &None => no_value()
+    }
+
+    // Reference to variant
+    match ref_result {
+        &Ok(value) => success(value),
+        &Err(ref error) => failure(error)
+    }
+
+    // Ref binding modifier
+    match value {
+        ref borrowed => use_ref(borrowed)
+    }
+
+    match value {
+        ref mut borrowed => modify(borrowed)
+    }
+}
+
+// ============================================================================
+// SECTION 12: RANGE PATTERN (PatternKind::Range)
+// Grammar: range_start , ( '..' | '..=' ) , range_end
+// ============================================================================
+
+fn test_range_patterns() {
+    // Exclusive range (half-open)
+    match n {
+        0..10 => single_digit(),
+        10..100 => double_digit(),
+        100..1000 => triple_digit(),
+        _ => many_digits()
+    }
+
+    // Inclusive range
+    match n {
+        0..=9 => single_digit(),
+        10..=99 => double_digit(),
+        100..=999 => triple_digit(),
+        _ => many_digits()
+    }
+
+    // Character ranges
+    match c {
+        'a'..='z' => lowercase(),
+        'A'..='Z' => uppercase(),
+        '0'..='9' => digit(),
+        _ => other()
+    }
+
+    // Open ranges
+    match n {
+        ..0 => negative(),
+        0 => zero(),
+        1.. => positive()
+    }
+
+    // Note: Range patterns only support non-negative integer and character literals
+    // Negative ranges and float ranges require guards:
+    match n {
+        n if n >= -100 && n < 0 => negative(),  // Use guard for negative ranges
+        0..100 => positive(),
+        _ => other()
+    }
+
+    // Float ranges must use guards
+    match f {
+        f if f >= 0.0 && f < 1.0 => unit_interval(),
+        f if f >= 1.0 && f < 10.0 => single_digit_interval(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 13: PAREN PATTERN (PatternKind::Paren)
+// Grammar: '(' , pattern , ')'
+// ============================================================================
+
+fn test_paren_patterns() {
+    // Simple parenthesized
+    let (x) = value;
+    let ((inner)) = value;
+
+    // Parentheses for grouping
+    let (x | y) = binary;
+    let ((a | b) | (c | d)) = quad;
+
+    // Guard in parentheses
+    let (x if x > 0) = positive;
+
+    // Complex grouping
+    match value {
+        (0 | 1) => binary(),
+        (2 | 3) => small(),
+        (n) => other(n)
+    }
+
+    // Nested parentheses
+    let (((deeply_nested))) = value;
+}
+
+// ============================================================================
+// SECTION 14: ACTIVE PATTERN (PatternKind::Active)
+// Grammar: identifier , '(' , [ expression_list ] , ')' , [ '(' , [ pattern_list ] , ')' ]
+// ============================================================================
+
+// Active pattern definitions for testing
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+pattern Odd(n: Int) -> Bool = n % 2 != 0;
+pattern Positive(n: Int) -> Bool = n > 0;
+pattern Negative(n: Int) -> Bool = n < 0;
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = n >= lo && n <= hi;
+pattern DivisibleBy(divisor: Int)(n: Int) -> Bool = n % divisor == 0;
+pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
+pattern HeadTail<T>(list: List<T>) -> Maybe<(T, List<T>)> =
+    if list.is_empty() { None } else { Some((list[0], list[1..])) };
+
+fn test_active_patterns() {
+    // Total patterns (boolean test)
+    match n {
+        Even() => even_number(),
+        Odd() => odd_number()
+    }
+
+    match n {
+        Positive() => positive(),
+        Negative() => negative(),
+        _ => zero()
+    }
+
+    // Parameterized patterns
+    match n {
+        InRange(0, 100)() => valid_percentage(),
+        InRange(100, 200)() => bonus_range(),
+        _ => out_of_range()
+    }
+
+    match n {
+        DivisibleBy(3)() => fizz(),
+        DivisibleBy(5)() => buzz(),
+        _ => number()
+    }
+
+    // Partial patterns with extraction
+    match s {
+        ParseInt()(n) => got_number(n),
+        _ => not_a_number()
+    }
+
+    match list {
+        HeadTail()((head, tail)) => has_elements(head, tail),
+        _ => empty()
+    }
+
+    // Combined active patterns
+    match n {
+        Even() => even(),
+        _ => odd()
+    }
+
+    // Active pattern in complex expressions
+    match data {
+        Some(n) if Even().matches(n) => some_even(n),
+        Some(n) => some_odd(n),
+        None => nothing()
+    }
+}
+
+// ============================================================================
+// SECTION 15: AND PATTERN (PatternKind::And)
+// Grammar: pattern , '&' , pattern
+// ============================================================================
+
+fn test_and_patterns() {
+    // Basic and pattern
+    match n {
+        Even() & Positive() => even_positive(),
+        Odd() & Negative() => odd_negative(),
+        _ => other()
+    }
+
+    // Multiple and patterns
+    match n {
+        InRange(0, 100)() & Even() & Positive() => valid_even_positive(),
+        _ => other()
+    }
+
+    // And with parameterized patterns
+    match n {
+        DivisibleBy(3)() & DivisibleBy(5)() => fizzbuzz(),
+        DivisibleBy(3)() => fizz(),
+        DivisibleBy(5)() => buzz(),
+        _ => number()
+    }
+
+    // And in or pattern
+    match n {
+        (Even() & Positive()) | (Odd() & Negative()) => valid(),
+        _ => invalid()
+    }
+
+    // Nested and patterns
+    match complex {
+        Even() & InRange(0, 50)() & Positive() => small_even_positive(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 16: GUARD PATTERN (PatternKind::Guard)
+// Grammar: pattern , 'if' , expression
+// ============================================================================
+
+fn test_guard_patterns() {
+    // Basic guards in match arms
+    match n {
+        x if x > 0 => positive(x),
+        x if x < 0 => negative(x),
+        _ => zero()
+    }
+
+    // Guards with bindings
+    match pair {
+        (x, y) if x == y => equal(),
+        (x, y) if x > y => first_larger(),
+        (x, y) => second_larger_or_equal()
+    }
+
+    // Guards with variant patterns
+    match option {
+        Some(x) if x > threshold => large(x),
+        Some(x) if x > 0 => positive(x),
+        Some(x) => non_positive(x),
+        None => nothing()
+    }
+
+    // Guards with record patterns
+    match point {
+        Point { x, y } if x == y => diagonal(),
+        Point { x: 0, y } if y > 0 => positive_y_axis(),
+        Point { x, y: 0 } if x > 0 => positive_x_axis(),
+        Point { x, y } => general(x, y)
+    }
+
+    // Complex guard expressions
+    match data {
+        (a, b) if a * b > 100 && a + b < 50 => special_case(),
+        (a, b) if is_valid(a, b) => valid_case(),
+        _ => fallback()
+    }
+
+    // Guard with or pattern
+    match n {
+        x @ (0 | 1 | 2) if some_condition(x) => conditional_small(),
+        0 | 1 | 2 => unconditional_small(),
+        _ => other()
+    }
+
+    // Where clause (alternative guard syntax)
+    match value {
+        Some(x) where x > 0 => positive(x),
+        Some(x) where x < 0 => negative(x),
+        Some(_) => zero(),
+        None => none()
+    }
+
+    // Inline guard in parentheses
+    match value {
+        (x if x > 0) => positive(x),
+        x => non_positive(x)
+    }
+}
+
+// ============================================================================
+// SECTION 17: TYPE TEST PATTERN (PatternKind::TypeTest)
+// Grammar: identifier , 'is' , type_expr
+// ============================================================================
+
+fn test_type_test_patterns() {
+    // Basic type tests
+    match value {
+        x is Int => handle_int(x),
+        x is Float => handle_float(x),
+        x is Text => handle_text(x),
+        x is Bool => handle_bool(x),
+        _ => handle_unrecognized()
+    }
+
+    // Generic type tests
+    match data {
+        list is List<Int> => handle_int_list(list),
+        list is List<Text> => handle_text_list(list),
+        map is Map<Text, Int> => handle_map(map),
+        _ => handle_other()
+    }
+
+    // Type test with custom types
+    match entity {
+        user is User => handle_user(user),
+        admin is Admin => handle_admin(admin),
+        _ => handle_unknown_entity()
+    }
+
+    // Type test in conditions
+    if value is Int {
+        process_int(value);
+    }
+
+    // Type test combined with guards
+    match data {
+        x is Int if x > 0 => positive_int(x),
+        x is Int if x < 0 => negative_int(x),
+        x is Int => zero_int(),
+        x is Float => some_float(x),
+        _ => other()
+    }
+
+    // Type test with or patterns
+    match value {
+        x is Int | x is Float => numeric(x),
+        x is Text | x is Char => textual(x),
+        _ => other()
+    }
+
+    // Negated type test in expressions (not patterns)
+    if value is not Error {
+        proceed(value);
+    }
+}
+
+// ============================================================================
+// SECTION 18: STREAM PATTERN (PatternKind::Stream)
+// Grammar: 'stream' , '[' , stream_pattern_elements , ']'
+// ============================================================================
+
+fn test_stream_patterns() {
+    // Empty stream
+    match s {
+        stream[] => empty_stream(),
+        _ => non_empty()
+    }
+
+    // Single element
+    match s {
+        stream[only] => single(only),
+        stream[] => empty(),
+        _ => multiple()
+    }
+
+    // Head and rest
+    match s {
+        stream[head, ...rest] => has_head(head, rest),
+        stream[] => empty()
+    }
+
+    // Multiple fixed elements
+    match s {
+        stream[first, second, ...rest] => at_least_two(first, second, rest),
+        stream[only] => exactly_one(only),
+        stream[] => empty()
+    }
+
+    // Three elements with rest
+    match s {
+        stream[a, b, c, ...rest] => at_least_three(a, b, c, rest),
+        _ => fewer_than_three()
+    }
+
+    // Stream pattern in function parameters
+    fn head<T>(stream[x, ..._]: Stream<T>) -> Maybe<T> {
+        Some(x)
+    }
+
+    fn tail<T>(stream[_, ...rest]: Stream<T>) -> Stream<T> {
+        rest
+    }
+
+    // Stream with nested patterns
+    match stream_of_tuples {
+        stream[(a, b), ...rest] => first_pair(a, b, rest),
+        stream[] => empty()
+    }
+
+    // Stream with variant elements
+    match result_stream {
+        stream[Ok(value), ...rest] => starts_ok(value, rest),
+        stream[Err(e), ...rest] => starts_err(e, rest),
+        stream[] => empty()
+    }
+
+    // Stream with guards
+    match numbers {
+        stream[x, ...rest] if x > 0 => starts_positive(x, rest),
+        stream[x, ...rest] if x < 0 => starts_negative(x, rest),
+        stream[_, ...rest] => starts_zero(rest),
+        stream[] => empty()
+    }
+
+    // Stream with record elements
+    match user_stream {
+        stream[User { name, age }, ...rest] if age >= 18 => adult_first(name, rest),
+        stream[User { name, .. }, ...rest] => minor_first(name, rest),
+        stream[] => no_users()
+    }
+
+    // Recursive stream processing
+    fn sum_stream(s: Stream<Int>) -> Int {
+        match s {
+            stream[] => 0,
+            stream[x, ...rest] => x + sum_stream(rest)
+        }
+    }
+
+    // Find pattern in stream
+    fn find_pattern(s: Stream<Int>) -> Bool {
+        match s {
+            stream[] => false,
+            stream[1, 2, 3, ..._] => true,
+            stream[_, ...rest] => find_pattern(rest)
+        }
+    }
+}
+
+// ============================================================================
+// SECTION 19: COMPOUND PATTERNS (Combinations)
+// ============================================================================
+
+fn test_compound_patterns() {
+    // Or + Guard
+    match n {
+        (0 | 1) if is_special => special_binary(),
+        0 | 1 => normal_binary(),
+        _ => other()
+    }
+
+    // Active + Or
+    match n {
+        Even() | Odd() => always_matches()
+    }
+
+    // Variant + Guard + Record
+    match result {
+        Ok(Point { x, y }) if x == y => ok_diagonal(),
+        Ok(Point { x: 0, y }) => ok_y_axis(y),
+        Ok(Point { x, y }) => ok_general(x, y),
+        Err(e) => error(e)
+    }
+
+    // Slice + Or + Binding
+    match slice {
+        [0 | 1, ..rest] => starts_binary(rest),
+        [x, ..rest] => starts_other(x, rest),
+        [] => empty()
+    }
+
+    // Tuple + Reference + Guard
+    match ref_pair {
+        &(x, y) if x + y > 10 => large_sum(),
+        &(x, y) => small_sum(x, y)
+    }
+
+    // Record + Active + Range
+    match data {
+        Data { value } if InRange(0, 100)().matches(value) => valid(value),
+        Data { value: 0..=100 } => also_valid_by_range(),
+        Data { value } => invalid(value)
+    }
+
+    // Deeply nested pattern
+    match complex {
+        Some(Ok((Point { x, y }, [first, ..rest]))) if x > 0 =>
+            deep_match(x, y, first, rest),
+        _ => fallback()
+    }
+
+    // Stream + Tuple + Guard
+    match stream_pairs {
+        stream[(a, b), ...rest] if a < b => ascending_first(a, b, rest),
+        stream[(a, b), ...rest] if a > b => descending_first(a, b, rest),
+        stream[(a, b), ...rest] => equal_first(a, rest),
+        stream[] => empty()
+    }
+}
+
+// ============================================================================
+// SECTION 20: PATTERNS IN DIFFERENT CONTEXTS
+// ============================================================================
+
+fn test_pattern_contexts() {
+    // Pattern in let
+    let x = value;
+    let (a, b) = pair;
+    let Point { x, y } = point;
+    let Some(inner) = option else { return };
+
+    // Pattern in match
+    match value {
+        pattern => expr()
+    }
+
+    // Pattern in if-let
+    if let Some(x) = option {
+        use(x);
+    }
+
+    if let Ok(value) = result {
+        process(value);
+    } else {
+        handle_error();
+    }
+
+    // Pattern in while-let
+    while let Some(item) = iterator.next() {
+        process(item);
+    }
+
+    // Pattern in for loop
+    for (key, value) in map.entries() {
+        use(key, value);
+    }
+
+    for Point { x, y } in points {
+        draw(x, y);
+    }
+
+    // Pattern in function parameters
+    fn process_pair((a, b): (Int, Int)) -> Int {
+        a + b
+    }
+
+    fn extract_name(Person { name, .. }: Person) -> Text {
+        name
+    }
+
+    // Pattern in closure parameters
+    let sum = pairs.map(|(a, b)| a + b);
+    let names = people.map(|Person { name, .. }| name);
+}
+
+// ============================================================================
+// MAIN - Test Entry Point
+// ============================================================================
+
+fn main() {
+    test_wildcard_patterns();
+    test_rest_patterns();
+    test_identifier_patterns();
+    test_literal_patterns();
+    test_tuple_patterns();
+    test_array_patterns();
+    test_slice_patterns();
+    test_record_patterns();
+    test_variant_patterns();
+    test_or_patterns();
+    test_reference_patterns();
+    test_range_patterns();
+    test_paren_patterns();
+    test_active_patterns();
+    test_and_patterns();
+    test_guard_patterns();
+    test_type_test_patterns();
+    test_stream_patterns();
+    test_compound_patterns();
+    test_pattern_contexts();
+}

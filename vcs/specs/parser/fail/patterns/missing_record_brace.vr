@@ -1,0 +1,44 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, record, brace, error
+// @description: Test missing closing brace in record pattern
+// @expected-error: E075
+
+type Point is { x: Int, y: Int };
+
+fn test_missing_closing_brace() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: missing closing brace
+    match p {
+        Point { x => print("missing brace"),
+        _ => print("other"),
+    }
+}
+
+fn test_missing_closing_brace_with_multiple_fields() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: missing closing brace with multiple fields
+    match p {
+        Point { x, y => print("missing brace"),
+        _ => print("other"),
+    }
+}
+
+fn test_missing_closing_brace_with_rest() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: missing closing brace with rest pattern
+    match p {
+        Point { x, .. => print("missing brace with rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_missing_closing_brace_in_let() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: missing closing brace in let pattern
+    let Point { x, y = p;
+}

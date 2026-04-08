@@ -1,0 +1,180 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, collections
+
+/// Collection operations must behave identically across
+/// interpreter (Tier 0) and AOT (Tier 3)
+
+fn main() {
+    // ===== List operations =====
+    println("=== List ===");
+
+    let empty: List<Int> = [];
+    println(f"empty.len() = {empty.len()}");
+    println(f"empty.is_empty() = {empty.is_empty()}");
+
+    let nums = [1, 2, 3, 4, 5];
+    println(f"nums = {nums}");
+    println(f"nums.len() = {nums.len()}");
+    println(f"nums[0] = {nums[0]}");
+    println(f"nums[4] = {nums[4]}");
+
+    // List methods
+    let first = nums.first();
+    let last = nums.last();
+    println(f"first = {first}, last = {last}");
+
+    let mut mutable_list = [1, 2, 3];
+    mutable_list.push(4);
+    println(f"after push: {mutable_list}");
+
+    let popped = mutable_list.pop();
+    println(f"popped = {popped}, list = {mutable_list}");
+
+    // Slicing
+    let slice = nums[1..4];
+    println(f"nums[1..4] = {slice}");
+
+    // Concatenation
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let concat = a + b;
+    println(f"concat = {concat}");
+
+    // Functional operations
+    let doubled = nums.map(|n| n * 2);
+    println(f"doubled = {doubled}");
+
+    let evens = nums.filter(|n| n % 2 == 0);
+    println(f"evens = {evens}");
+
+    let sum = nums.fold(0, |acc, n| acc + n);
+    println(f"sum = {sum}");
+
+    let any_even = nums.any(|n| n % 2 == 0);
+    let all_positive = nums.all(|n| n > 0);
+    println(f"any_even = {any_even}, all_positive = {all_positive}");
+
+    let found = nums.find(|n| n > 3);
+    println(f"find(n > 3) = {found}");
+
+    // Sorting
+    let unsorted = [3, 1, 4, 1, 5, 9, 2, 6];
+    let sorted = unsorted.sorted();
+    println(f"sorted = {sorted}");
+
+    let reversed = nums.reversed();
+    println(f"reversed = {reversed}");
+
+    // Zip and enumerate
+    let letters = ["a", "b", "c"];
+    let zipped = [1, 2, 3].zip(letters);
+    println(f"zipped = {zipped}");
+
+    let enumerated = letters.enumerate();
+    println(f"enumerated = {enumerated}");
+
+    // ===== Map operations =====
+    println("\n=== Map ===");
+
+    let empty_map: Map<Text, Int> = {};
+    println(f"empty_map.len() = {empty_map.len()}");
+
+    let ages = {
+        "alice": 30,
+        "bob": 25,
+        "charlie": 35,
+    };
+    println(f"ages = {ages}");
+    println(f"ages.len() = {ages.len()}");
+    println(f"ages[\"alice\"] = {ages[\"alice\"]}");
+
+    let bob_age = ages.get("bob");
+    let unknown = ages.get("unknown");
+    println(f"get(\"bob\") = {bob_age}, get(\"unknown\") = {unknown}");
+
+    let has_alice = ages.contains_key("alice");
+    let has_david = ages.contains_key("david");
+    println(f"contains(\"alice\") = {has_alice}, contains(\"david\") = {has_david}");
+
+    let mut mutable_map = {"a": 1};
+    mutable_map.insert("b", 2);
+    println(f"after insert: {mutable_map}");
+
+    let removed = mutable_map.remove("a");
+    println(f"removed = {removed}, map = {mutable_map}");
+
+    let keys = ages.keys();
+    let values = ages.values();
+    println(f"keys = {keys}");
+    println(f"values = {values}");
+
+    // ===== Set operations =====
+    println("\n=== Set ===");
+
+    let empty_set: Set<Int> = {};
+    println(f"empty_set.len() = {empty_set.len()}");
+
+    let nums_set = {1, 2, 3, 4, 5};
+    println(f"nums_set = {nums_set}");
+    println(f"nums_set.len() = {nums_set.len()}");
+
+    let contains_3 = nums_set.contains(3);
+    let contains_10 = nums_set.contains(10);
+    println(f"contains(3) = {contains_3}, contains(10) = {contains_10}");
+
+    let mut mutable_set = {1, 2, 3};
+    mutable_set.insert(4);
+    println(f"after insert: {mutable_set}");
+
+    let was_removed = mutable_set.remove(2);
+    println(f"remove(2) = {was_removed}, set = {mutable_set}");
+
+    // Set operations
+    let set_a = {1, 2, 3, 4};
+    let set_b = {3, 4, 5, 6};
+
+    let union = set_a | set_b;
+    let intersection = set_a & set_b;
+    let difference = set_a - set_b;
+    let symmetric_diff = set_a ^ set_b;
+
+    println(f"union = {union}");
+    println(f"intersection = {intersection}");
+    println(f"difference = {difference}");
+    println(f"symmetric_diff = {symmetric_diff}");
+
+    let is_subset = {1, 2}.is_subset({1, 2, 3});
+    let is_superset = {1, 2, 3}.is_superset({1, 2});
+    println(f"is_subset = {is_subset}, is_superset = {is_superset}");
+
+    // ===== Tuple operations =====
+    println("\n=== Tuple ===");
+
+    let tuple2 = (1, "hello");
+    println(f"tuple2 = {tuple2}");
+    println(f"tuple2.0 = {tuple2.0}, tuple2.1 = {tuple2.1}");
+
+    let tuple3 = (1, 2.0, "three");
+    println(f"tuple3 = {tuple3}");
+
+    let (a, b, c) = tuple3;
+    println(f"destructured: a={a}, b={b}, c={c}");
+
+    // ===== Nested collections =====
+    println("\n=== Nested ===");
+
+    let matrix = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+    ];
+    println(f"matrix[1][1] = {matrix[1][1]}");
+
+    let nested_map = {
+        "user1": {"name": "Alice", "role": "admin"},
+        "user2": {"name": "Bob", "role": "user"},
+    };
+    println(f"nested_map[\"user1\"][\"name\"] = {nested_map[\"user1\"][\"name\"]}");
+}

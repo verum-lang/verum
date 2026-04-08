@@ -1,0 +1,203 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: integration, large, comprehensive, stress
+// @description: Stress test combining many language features in one file
+
+// Multiple types
+type Color3 is { r: Int, g: Int, b: Int };
+type Particle is { x: Int, y: Int, vx: Int, vy: Int, life: Int };
+type SimResult is { alive: Int, dead: Int };
+
+implement Color3 {
+    fn white() -> Color3 { Color3 { r: 255, g: 255, b: 255 } }
+    fn black() -> Color3 { Color3 { r: 0, g: 0, b: 0 } }
+    fn brightness(&self) -> Int { (self.r + self.g + self.b) / 3 }
+}
+
+implement Particle {
+    fn create(x: Int, y: Int) -> Particle {
+        Particle { x: x, y: y, vx: 1, vy: -1, life: 10 }
+    }
+
+    fn tick(&self) -> Particle {
+        Particle {
+            x: self.x + self.vx,
+            y: self.y + self.vy,
+            vx: self.vx,
+            vy: self.vy,
+            life: self.life - 1,
+        }
+    }
+
+    fn is_alive(&self) -> Bool {
+        self.life > 0
+    }
+}
+
+fn simulate(particles: List<Particle>, steps: Int) -> SimResult {
+    let mut alive = 0;
+    let mut dead = 0;
+    let mut i = 0;
+    while i < particles.len() {
+        let mut p = particles[i];
+        let mut s = 0;
+        while s < steps {
+            p = p.tick();
+            s = s + 1;
+        }
+        if p.is_alive() {
+            alive = alive + 1;
+        } else {
+            dead = dead + 1;
+        }
+        i = i + 1;
+    }
+    SimResult { alive: alive, dead: dead }
+}
+
+fn test_particle_sim() -> Int {
+    let mut particles = List.new();
+    particles.push(Particle.create(0, 0));
+    particles.push(Particle.create(10, 10));
+    particles.push(Particle.create(20, 20));
+
+    // Simulate 5 steps (life goes 10 -> 5, still alive)
+    let r5 = simulate(particles, 5);
+    if r5.alive != 3 || r5.dead != 0 {
+        print(f"FAIL sim5: alive={r5.alive}, dead={r5.dead}");
+        return 1;
+    }
+
+    // Simulate 15 steps (life goes 10 -> -5, all dead)
+    let r15 = simulate(particles, 15);
+    if r15.alive != 0 || r15.dead != 3 {
+        print(f"FAIL sim15: alive={r15.alive}, dead={r15.dead}");
+        return 1;
+    }
+    print("  particle_sim: OK");
+    0
+}
+
+// Functional programming patterns
+fn apply_n(f: fn(Int) -> Int, x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn double_val(x: Int) -> Int { x * 2 }
+
+fn test_apply_n() -> Int {
+    // double 3 times: 1 -> 2 -> 4 -> 8
+    let result = apply_n(double_val, 1, 3);
+    if result != 8 {
+        print(f"FAIL apply_n: {result}, expected 8");
+        return 1;
+    }
+    // double 10 times: 1 -> 1024
+    let big = apply_n(double_val, 1, 10);
+    if big != 1024 {
+        print(f"FAIL apply_n_big: {big}");
+        return 1;
+    }
+    print("  apply_n: OK");
+    0
+}
+
+// Hash table simulation using Map
+fn test_hash_ops() -> Int {
+    let mut table = Map.new();
+
+    // Insert many entries
+    let mut i = 0;
+    while i < 50 {
+        let key = f"key_{i}";
+        table.insert(key, i * i);
+        i = i + 1;
+    }
+
+    if table.len() != 50 {
+        print(f"FAIL hash_ops: len={table.len()}");
+        return 1;
+    }
+
+    // Verify some values
+    if table.get("key_0") != 0 {
+        print("FAIL hash key_0");
+        return 1;
+    }
+    if table.get("key_7") != 49 {
+        print(f"FAIL hash key_7: {table.get(\"key_7\")}");
+        return 1;
+    }
+    if table.get("key_49") != 2401 {
+        print(f"FAIL hash key_49");
+        return 1;
+    }
+
+    // Remove some
+    table.remove("key_25");
+    if table.len() != 49 {
+        print("FAIL hash remove");
+        return 1;
+    }
+
+    print("  hash_ops: OK");
+    0
+}
+
+// Complex control flow
+fn collatz_steps(n: Int) -> Int {
+    let mut val = n;
+    let mut steps = 0;
+    while val != 1 {
+        if val % 2 == 0 {
+            val = val / 2;
+        } else {
+            val = val * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn test_collatz() -> Int {
+    // collatz(1) = 0 steps
+    if collatz_steps(1) != 0 {
+        print("FAIL collatz(1)");
+        return 1;
+    }
+    // collatz(6) = 8 steps: 6->3->10->5->16->8->4->2->1
+    if collatz_steps(6) != 8 {
+        print(f"FAIL collatz(6)={collatz_steps(6)}");
+        return 1;
+    }
+    // collatz(27) = 111 steps
+    if collatz_steps(27) != 111 {
+        print(f"FAIL collatz(27)={collatz_steps(27)}");
+        return 1;
+    }
+    print("  collatz: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Multi-Feature Stress Tests:");
+    let mut failures = 0;
+    failures = failures + test_particle_sim();
+    failures = failures + test_apply_n();
+    failures = failures + test_hash_ops();
+    failures = failures + test_collatz();
+
+    if failures == 0 {
+        print("All multi-feature tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

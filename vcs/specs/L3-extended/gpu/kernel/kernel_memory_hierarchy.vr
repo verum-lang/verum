@@ -1,0 +1,367 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, kernel, memory, hierarchy
+// @description: GPU memory hierarchy and cache management
+
+/// GPU memory hierarchy tests covering registers, shared memory,
+/// L1/L2 caches, and global memory access patterns.
+
+mount gpu.memory.{shared, constant, texture, surface};
+
+/// Register allocation and spilling
+@kernel(block_size = 256)
+fn register_usage(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+    let tid = global_id().x;
+    if tid >= N { return; }
+
+    // Explicit register allocation
+    @register let r0: f32 = input[tid];
+    @register let r1: f32 = r0 * 2.0;
+    @register let r2: f32 = r1 + r0;
+    @register let r3: f32 = r2.sqrt();
+
+    // Compiler should keep these in registers
+    let result = r0 + r1 + r2 + r3;
+    output[tid] = result;
+}
+
+/// Register array (may spill to local memory for large arrays)
+@kernel(block_size = 256)
+fn register_arrays(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+    let tid = global_id().x;
+    if tid >= N { return; }
+
+    // Small array - should fit in registers
+    @register let mut small: [f32; 4] = [0.0; 4];
+    for i in 0..4 {
+        small[i] = input[tid * 4 + i];
+    }
+
+    // Sum in registers
+    let mut sum = 0.0f32;
+    for i in 0..4 {
+        sum += small[i];
+    }
+    output[tid] = sum;
+}
+
+/// Shared memory tiling patterns
+@kernel(block_size = 256)
+fn shared_memory_tiling(
+    a: &Tensor<f32, [M, K]>,
+    b: &Tensor<f32, [K, N]>,
+    c: &mut Tensor<f32, [M, N]>
+) {
+    const TILE_SIZE: usize = 16;
+
+    // Shared memory tiles
+    @shared let mut a_tile: [[f32; TILE_SIZE]; TILE_SIZE];
+    @shared let mut b_tile: [[f32; TILE_SIZE]; TILE_SIZE];
+
+    let row = blockIdx.y * TILE_SIZE + threadIdx.y;
+    let col = blockIdx.x * TILE_SIZE + threadIdx.x;
+
+    let mut sum = 0.0f32;
+
+    // Iterate over tiles
+    for tile_k in 0..(K / TILE_SIZE) {
+        // Collaborative load into shared memory
+        let a_row = row;
+        let a_col = tile_k * TILE_SIZE + threadIdx.x;
+        let b_row = tile_k * TILE_SIZE + threadIdx.y;
+        let b_col = col;
+
+        a_tile[threadIdx.y][threadIdx.x] = if a_row < M && a_col < K {
+            a[a_row, a_col]
+        } else { 0.0 };
+
+        b_tile[threadIdx.y][threadIdx.x] = if b_row < K && b_col < N {
+            b[b_row, b_col]
+        } else { 0.0 };
+
+        // Wait for all threads to complete loading
+        barrier();
+
+        // Compute partial dot product from shared memory
+        for k in 0..TILE_SIZE {
+            sum += a_tile[threadIdx.y][k] * b_tile[k][threadIdx.x];
+        }
+
+        // Wait before loading next tile
+        barrier();
+    }
+
+    if row < M && col < N {
+        c[row, col] = sum;
+    }
+}
+
+/// Double buffering for hiding latency
+@kernel(block_size = 256)
+fn double_buffered_load(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+    const CHUNK_SIZE: usize = 256;
+
+    // Two shared memory buffers
+    @shared let mut buffer: [[f32; CHUNK_SIZE]; 2];
+
+    let tid = threadIdx.x;
+    let bid = blockIdx.x;
+    let chunks_per_block = (N / gridDim.x) / CHUNK_SIZE;
+
+    // Prefetch first chunk
+    let first_chunk = bid * chunks_per_block * CHUNK_SIZE + tid;
+    buffer[0][tid] = input[first_chunk];
+
+    for chunk in 0..chunks_per_block {
+        let read_buf = chunk % 2;
+        let write_buf = 1 - read_buf;
+
+        // Start loading next chunk while processing current
+        if chunk + 1 < chunks_per_block {
+            let next_idx = (bid * chunks_per_block + chunk + 1) * CHUNK_SIZE + tid;
+            buffer[write_buf][tid] = input[next_idx];
+        }
+
+        barrier();
+
+        // Process current buffer
+        let val = buffer[read_buf][tid];
+        let processed = val * 2.0 + 1.0;
+
+        // Write output
+        let out_idx = (bid * chunks_per_block + chunk) * CHUNK_SIZE + tid;
+        output[out_idx] = processed;
+
+        barrier();
+    }
+}
+
+/// Constant memory for read-only broadcast data
+@constant const LOOKUP_TABLE: [f32; 256] = init_lookup_table();
+
+@kernel(block_size = 256)
+fn constant_memory_usage(input: &Tensor<u8, [N]>, output: &mut Tensor<f32, [N]>) {
+    let tid = global_id().x;
+    if tid >= N { return; }
+
+    // Constant memory is cached and broadcast-efficient
+    let idx = input[tid] as usize;
+    output[tid] = LOOKUP_TABLE[idx];  // All threads in warp may access same location
+}
+
+/// L1 cache configuration
+@kernel(l1_cache = "prefer_shared")  // or "prefer_l1", "equal"
+fn l1_cache_config(data: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+    // With prefer_shared: More shared memory, less L1
+    // With prefer_l1: More L1 cache, less shared memory
+    @shared let mut sdata: [f32; 256];
+
+    let tid = threadIdx.x;
+    let gid = global_id().x;
+
+    sdata[tid] = data[gid];
+    barrier();
+
+    output[gid] = sdata[tid] * 2.0;
+}
+
+/// Coalesced global memory access
+@kernel(block_size = 256)
+fn coalesced_access(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+    let tid = global_id().x;
+    if tid >= N { return; }
+
+    // GOOD: Coalesced - consecutive threads access consecutive addresses
+    let val = input[tid];
+    output[tid] = val * 2.0;
+}
+
+/// Non-coalesced (strided) access pattern - avoid if possible
+@kernel(block_size = 256)
+fn strided_access(input: &Tensor<f32, [N, M]>, output: &mut Tensor<f32, [M, N]>) {
+    let tid = global_id().x;
+    let row = tid / M;
+    let col = tid % M;
+
+    if row >= N { return; }
+
+    // BAD: Non-coalesced column-major access
+    // Consecutive threads access addresses M elements apart
+    let val = input[row, col];
+
+    // Transpose to make output coalesced
+    output[col, row] = val;
+}
+
+/// Shared memory bank conflicts
+@kernel(block_size = 256)
+fn bank_conflict_free(data: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+    // 32 banks, each 4 bytes wide (for 32-bit words)
+    @shared let mut sdata: [f32; 256];
+
+    let tid = threadIdx.x;
+    let warp_id = tid / 32;
+    let lane_id = tid % 32;
+
+    // GOOD: Each thread in warp accesses different bank
+    sdata[tid] = data[global_id().x];
+    barrier();
+
+    // GOOD: Sequential access - no conflicts
+    output[global_id().x] = sdata[tid];
+}
+
+@kernel(block_size = 256)
+fn bank_conflict_example(data: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+    // BAD pattern - demonstrates bank conflicts
+    @shared let mut sdata: [[f32; 33]; 32];  // Padding column to avoid conflicts
+
+    let tid = threadIdx.x;
+    let row = tid / 32;
+    let col = tid % 32;
+
+    // BAD without padding: Column access causes 32-way bank conflict
+    // sdata[row, col] vs sdata[row, col] for different rows
+
+    // GOOD with 33-wide allocation: Stride of 33 avoids conflicts
+    sdata[row][col] = data[global_id().x];
+    barrier();
+
+    output[global_id().x] = sdata[row][col];
+}
+
+/// Texture memory for spatially local access
+@kernel(block_size = [16, 16])
+fn texture_memory_usage(
+    tex: TextureRef<f32, 2>,
+    output: &mut Tensor<f32, [H, W]>
+) {
+    let x = blockIdx.x * blockDim.x + threadIdx.x;
+    let y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if x >= W || y >= H { return; }
+
+    // Texture cache is optimized for 2D spatial locality
+    // Also provides hardware interpolation
+    let u = (x as f32 + 0.5) / W as f32;
+    let v = (y as f32 + 0.5) / H as f32;
+
+    // Bilinear interpolated sample
+    let sampled = tex.sample(u, v, FilterMode.Linear);
+
+    output[y, x] = sampled;
+}
+
+/// Surface memory for read-write 2D access
+@kernel(block_size = [16, 16])
+fn surface_memory_usage(surf: SurfaceRef<f32, 2>, scale: f32) {
+    let x = blockIdx.x * blockDim.x + threadIdx.x;
+    let y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // Surface read
+    let val = surf.read(x, y);
+
+    // Surface write
+    surf.write(x, y, val * scale);
+}
+
+/// Memory prefetching
+@kernel(block_size = 256)
+fn prefetch_pattern(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+    let tid = global_id().x;
+    if tid >= N { return; }
+
+    // Prefetch next cache line
+    if tid + 32 < N {
+        prefetch(&input[tid + 32]);
+    }
+
+    // Process current data
+    let val = input[tid];
+    output[tid] = val * 2.0;
+}
+
+/// Local memory (thread-private, but off-chip)
+@kernel(block_size = 256)
+fn local_memory_usage(input: &Tensor<f32, [N, K]>, output: &mut Tensor<f32, [N]>) {
+    let tid = global_id().x;
+    if tid >= N { return; }
+
+    // Large array - will be placed in local memory (GPU DRAM)
+    @local let mut work_array: [f32; 1024];
+
+    // Load into local memory
+    for i in 0..K {
+        work_array[i] = input[tid, i];
+    }
+
+    // Process
+    let mut sum = 0.0f32;
+    for i in 0..K {
+        sum += work_array[i].sin();
+    }
+
+    output[tid] = sum;
+}
+
+/// Cache hints
+@kernel(block_size = 256)
+fn cache_hints(input: &Tensor<f32, [N]>, output: &mut Tensor<f32, [N]>) {
+    let tid = global_id().x;
+    if tid >= N { return; }
+
+    // Stream load - don't cache, data used only once
+    let val = load_streaming(&input[tid]);
+
+    // Process
+    let result = val * 2.0;
+
+    // Stream store - bypass cache
+    store_streaming(&mut output[tid], result);
+}
+
+fn init_lookup_table() -> [f32; 256] {
+    let mut table: [f32; 256];
+    for i in 0..256 {
+        table[i] = (i as f32 / 255.0).powf(2.2);  // Gamma correction
+    }
+    table
+}
+
+fn prefetch(ptr: &f32) {
+    // Compiler intrinsic for prefetch
+}
+
+fn load_streaming(ptr: &f32) -> f32 {
+    // Compiler intrinsic for non-cached load
+    *ptr
+}
+
+fn store_streaming(ptr: &mut f32, val: f32) {
+    // Compiler intrinsic for non-cached store
+    *ptr = val;
+}
+
+type TextureRef<T, const D: usize> is {};
+implement<T, const D: usize> TextureRef<T, D> {
+    fn sample(&self, u: f32, v: f32, mode: FilterMode) -> T { unreachable() }
+}
+
+type SurfaceRef<T, const D: usize> is {};
+implement<T, const D: usize> SurfaceRef<T, D> {
+    fn read(&self, x: usize, y: usize) -> T { unreachable() }
+    fn write(&self, x: usize, y: usize, val: T) {}
+}
+
+type FilterMode is Point | Linear;
+
+const M: usize = 1024;
+const K: usize = 512;
+const H: usize = 1024;
+const W: usize = 1024;
+
+fn main() {
+    // GPU kernel compilation only
+}

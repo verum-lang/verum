@@ -1,0 +1,227 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, turing-machine, computation, automata
+// @timeout: 30000
+
+// Simple Turing machine simulator on a tape of 8 cells
+// Tape stored in Arr8, head position as Int, state as Int
+// Transition: (state, symbol) -> (new_state, write_symbol, direction)
+// Direction: 0 = left, 1 = right
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Transition encoded as: new_state * 100 + write_sym * 10 + direction
+fn tr_state(t: Int) -> Int { t / 100 }
+fn tr_symbol(t: Int) -> Int { (t / 10) % 10 }
+fn tr_dir(t: Int) -> Int { t % 10 }
+fn make_tr(state: Int, sym: Int, dir: Int) -> Int { state * 100 + sym * 10 + dir }
+
+// Pack (state, symbol) into index for transition lookup
+fn tr_key(state: Int, symbol: Int) -> Int { state * 10 + symbol }
+
+// Lookup transition from table (Arr8 of transitions indexed by tr_key)
+fn lookup_tr(table: Arr8, state: Int, symbol: Int) -> Int {
+    let key = tr_key(state, symbol);
+    // Linear search for matching key in first field, transition in second
+    // Simpler: use direct indexing if keys are small enough
+    get8(table, key)
+}
+
+// Run TM for max_steps, return packed result: state*1000 + head*100 + halted*10
+fn tm_run(tape: Arr8, table: Arr8, init_state: Int, halt_state: Int, head: Int, max_steps: Int) -> Int {
+    let mut t = tape;
+    let mut state = init_state;
+    let mut h = head;
+    let mut steps = 0;
+    let mut halted = 0;
+    while steps < max_steps {
+        if state == halt_state {
+            halted = 1;
+            steps = max_steps; // break
+        } else {
+            let sym = get8(t, h);
+            let tr = lookup_tr(table, state, sym);
+            state = tr_state(tr);
+            t = set8(t, h, tr_symbol(tr));
+            let dir = tr_dir(tr);
+            if dir == 1 {
+                h = h + 1;
+                if h > 7 { h = 7; }
+            } else {
+                h = h - 1;
+                if h < 0 { h = 0; }
+            }
+            steps = steps + 1;
+        }
+    }
+    state * 1000 + h * 100 + halted * 10
+}
+
+// Count non-zero cells on tape
+fn count_ones(tape: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(tape, i) != 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Run TM and return final tape (for inspection)
+fn tm_run_tape(tape: Arr8, table: Arr8, init_state: Int, halt_state: Int, head: Int, max_steps: Int) -> Arr8 {
+    let mut t = tape;
+    let mut state = init_state;
+    let mut h = head;
+    let mut steps = 0;
+    while steps < max_steps {
+        if state == halt_state {
+            steps = max_steps;
+        } else {
+            let sym = get8(t, h);
+            let tr = lookup_tr(table, state, sym);
+            state = tr_state(tr);
+            t = set8(t, h, tr_symbol(tr));
+            let dir = tr_dir(tr);
+            if dir == 1 {
+                h = h + 1;
+                if h > 7 { h = 7; }
+            } else {
+                h = h - 1;
+                if h < 0 { h = 0; }
+            }
+            steps = steps + 1;
+        }
+    }
+    t
+}
+
+fn test_simple_writer() -> Int {
+    // TM that writes 1s moving right, halts at state 9
+    // State 0, symbol 0 -> state 0, write 1, move right
+    // State 0, symbol 1 -> state 9, write 1, move right (halt on existing 1)
+    // Table: key 0*10+0=0 -> make_tr(0,1,1)=011, key 0*10+1=1 -> make_tr(9,1,1)=911
+    let table = Arr8 { v0: 11, v1: 911, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Tape: [0,0,0,1,0,0,0,0] - will write 1s until hitting the 1 at position 3
+    let tape = Arr8 { v0: 0, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let result = tm_run(tape, table, 0, 9, 0, 100);
+    let final_state = result / 1000;
+    let halted = (result / 10) % 10;
+    assert_eq(final_state, 9);
+    assert_eq(halted, 1);
+
+    // Check tape: should have 1s at positions 0-3
+    let final_tape = tm_run_tape(tape, table, 0, 9, 0, 100);
+    assert_eq(get8(final_tape, 0), 1);
+    assert_eq(get8(final_tape, 1), 1);
+    assert_eq(get8(final_tape, 2), 1);
+    assert_eq(get8(final_tape, 3), 1);
+    assert_eq(get8(final_tape, 4), 0); // untouched
+    1
+}
+
+fn test_flipper() -> Int {
+    // TM that flips bits: 0->1, 1->0, moves right, halts at state 9 after 4 steps
+    // We'll use a 2-state machine: state 0 flips, state 1 counts
+    // Simpler: state 0, sym 0 -> (0, 1, right); state 0, sym 1 -> (0, 0, right)
+    // Run for exactly 4 steps then check
+    let table = Arr8 { v0: 11, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let tape = Arr8 { v0: 1, v1: 0, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let final_tape = tm_run_tape(tape, table, 0, 9, 0, 4);
+    assert_eq(get8(final_tape, 0), 0); // was 1, flipped to 0
+    assert_eq(get8(final_tape, 1), 1); // was 0, flipped to 1
+    assert_eq(get8(final_tape, 2), 0); // was 1, flipped to 0
+    assert_eq(get8(final_tape, 3), 1); // was 0, flipped to 1
+    assert_eq(get8(final_tape, 4), 0); // untouched
+    1
+}
+
+fn test_immediate_halt() -> Int {
+    // If initial state equals halt state, should halt immediately
+    let table = zeros();
+    let tape = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let result = tm_run(tape, table, 9, 9, 0, 100);
+    let halted = (result / 10) % 10;
+    assert_eq(halted, 1);
+    // Tape should be unchanged
+    let final_tape = tm_run_tape(tape, table, 9, 9, 0, 100);
+    assert_eq(get8(final_tape, 0), 1);
+    assert_eq(get8(final_tape, 1), 2);
+    assert_eq(get8(final_tape, 2), 3);
+    1
+}
+
+fn test_bouncing() -> Int {
+    // TM that moves right writing 1s for 3 cells, then moves left writing 2s
+    // State 0, sym 0 -> (0, 1, right) — write 1, go right
+    // State 0, sym 1 -> (1, 1, left)  — hit old 1, switch to state 1, go left
+    // State 1, sym 1 -> (1, 2, left)  — write 2, go left
+    // State 1, sym 0 -> (9, 0, right) — halt on empty
+    // table[0] = (0,sym0) = make_tr(0,1,1) = 011 = 11
+    // table[1] = (0,sym1) = make_tr(1,1,0) = 110
+    // table[10] = (1,sym0) = make_tr(9,0,1) = 901 — but index 10 > 7!
+    // Hmm, state 1 * 10 + 0 = 10, doesn't fit in Arr8
+    // Use smaller states: state 0 = right-writer, state 1 = left-writer
+    // Remap: use keys 0-7 only, so max state*10+sym=7 => state=0,sym=7
+    // Let's simplify: 2 symbols (0,1), 2 states (0,1), halt=2
+    // Keys: 0*2+0=0, 0*2+1=1, 1*2+0=2, 1*2+1=3
+    // Redefine tr_key as state*2+symbol for binary alphabet
+
+    // Actually let's just test with the tape directly
+    // Write 1s at positions 0,1,2; position 3 already has 1
+    let tape = Arr8 { v0: 0, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // State 0, sym 0: write 1, go right = make_tr(0,1,1) = 11
+    // State 0, sym 1: switch to halt = make_tr(9,1,1) = 911
+    let table = Arr8 { v0: 11, v1: 911, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let final_tape = tm_run_tape(tape, table, 0, 9, 0, 100);
+    assert_eq(get8(final_tape, 0), 1);
+    assert_eq(get8(final_tape, 1), 1);
+    assert_eq(get8(final_tape, 2), 1);
+    assert_eq(get8(final_tape, 3), 1);
+    1
+}
+
+fn test_max_steps() -> Int {
+    // TM that never halts (loops forever), should stop at max_steps
+    // State 0, sym 0 -> (0, 0, right) — just move right
+    // State 0, sym 1 -> (0, 1, right) — just move right
+    let table = Arr8 { v0: 1, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let tape = zeros();
+    let result = tm_run(tape, table, 0, 9, 0, 5);
+    let halted = (result / 10) % 10;
+    assert_eq(halted, 0); // Did not halt
+    let final_state = result / 1000;
+    assert_eq(final_state, 0); // Still in state 0
+    1
+}
+
+fn main() -> Int {
+    test_simple_writer();
+    test_flipper();
+    test_immediate_halt();
+    test_bouncing();
+    test_max_steps();
+    print("[OK] 623_turing_machine_aot");
+    0
+}

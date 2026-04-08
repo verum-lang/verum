@@ -1,0 +1,76 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, while-loops
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT while loops, mutable state, loop control
+
+fn sum_while(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= n {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn count_digits(n: Int) -> Int {
+    if n == 0 { 1 } else {
+        let mut count = 0;
+        let mut val = n;
+        if val < 0 { val = -val; }
+        while val > 0 {
+            count = count + 1;
+            val = val / 10;
+        }
+        count
+    }
+}
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { false }
+    else if n < 4 { true }
+    else if n % 2 == 0 { false }
+    else {
+        let mut i = 3;
+        let mut result = true;
+        while i * i <= n {
+            if n % i == 0 {
+                result = false;
+            }
+            i = i + 2;
+        }
+        result
+    }
+}
+
+fn main() -> Int {
+    // sum_while
+    assert_eq(sum_while(0), 0);
+    assert_eq(sum_while(10), 55);
+    assert_eq(sum_while(100), 5050);
+
+    // count_digits
+    assert_eq(count_digits(0), 1);
+    assert_eq(count_digits(1), 1);
+    assert_eq(count_digits(42), 2);
+    assert_eq(count_digits(12345), 5);
+    assert_eq(count_digits(-99), 2);
+
+    // is_prime
+    assert(!is_prime(0));
+    assert(!is_prime(1));
+    assert(is_prime(2));
+    assert(is_prime(3));
+    assert(!is_prime(4));
+    assert(is_prime(5));
+    assert(is_prime(7));
+    assert(!is_prime(9));
+    assert(is_prime(11));
+    assert(is_prime(97));
+    assert(!is_prime(100));
+
+    0
+}

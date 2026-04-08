@@ -1,0 +1,153 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: implement, methods, self, struct, sum-type
+// @description: Test implement blocks with various method patterns
+
+type Vec2 is { x: Int, y: Int };
+
+implement Vec2 {
+    fn new(x: Int, y: Int) -> Vec2 {
+        Vec2 { x: x, y: y }
+    }
+
+    fn add(&self, other: Vec2) -> Vec2 {
+        Vec2 { x: self.x + other.x, y: self.y + other.y }
+    }
+
+    fn dot(&self, other: Vec2) -> Int {
+        self.x * other.x + self.y * other.y
+    }
+
+    fn scale(&self, s: Int) -> Vec2 {
+        Vec2 { x: self.x * s, y: self.y * s }
+    }
+
+    fn magnitude_sq(&self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+}
+
+fn test_vec2() -> Int {
+    let a = Vec2.new(3, 4);
+    let b = Vec2.new(1, 2);
+    let c = a.add(b);
+    if c.x != 4 || c.y != 6 {
+        print(f"FAIL vec2 add: ({c.x}, {c.y})");
+        return 1;
+    }
+    let d = a.dot(b);
+    if d != 11 {
+        print(f"FAIL vec2 dot: {d}, expected 11");
+        return 1;
+    }
+    let e = a.scale(3);
+    if e.x != 9 || e.y != 12 {
+        print(f"FAIL vec2 scale: ({e.x}, {e.y})");
+        return 1;
+    }
+    if a.magnitude_sq() != 25 {
+        print(f"FAIL vec2 mag: {a.magnitude_sq()}, expected 25");
+        return 1;
+    }
+    print("  vec2: OK");
+    0
+}
+
+type Direction is North | South | East | West;
+
+implement Direction {
+    fn opposite(&self) -> Direction {
+        match self {
+            North => South,
+            South => North,
+            East => West,
+            West => East,
+        }
+    }
+
+    fn is_vertical(&self) -> Bool {
+        match self {
+            North => true,
+            South => true,
+            East => false,
+            West => false,
+        }
+    }
+}
+
+fn test_direction() -> Int {
+    let d = North;
+    let opp = d.opposite();
+    let is_south = match opp { South => true, North => false, East => false, West => false };
+    if !is_south {
+        print("FAIL direction: opposite of North should be South");
+        return 1;
+    }
+    if !d.is_vertical() {
+        print("FAIL direction: North should be vertical");
+        return 1;
+    }
+    let e = East;
+    if e.is_vertical() {
+        print("FAIL direction: East should not be vertical");
+        return 1;
+    }
+    print("  direction: OK");
+    0
+}
+
+type Stack2 is { data: List<Int>, size: Int };
+
+implement Stack2 {
+    fn new() -> Stack2 {
+        Stack2 { data: List.new(), size: 0 }
+    }
+
+    fn push(&mut self, val: Int) {
+        self.data.push(val);
+        self.size = self.size + 1;
+    }
+
+    fn peek(&self) -> Int {
+        if self.size == 0 { return -1; }
+        self.data[self.size - 1]
+    }
+
+    fn len(&self) -> Int {
+        self.size
+    }
+}
+
+fn test_stack2() -> Int {
+    let mut s = Stack2.new();
+    s.push(10);
+    s.push(20);
+    s.push(30);
+
+    if s.len() != 3 {
+        print(f"FAIL stack2: len={s.len()}, expected 3");
+        return 1;
+    }
+    if s.peek() != 30 {
+        print(f"FAIL stack2: peek={s.peek()}, expected 30");
+        return 1;
+    }
+    print("  stack2: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Implement Methods Tests:");
+    let mut failures = 0;
+    failures = failures + test_vec2();
+    failures = failures + test_direction();
+    failures = failures + test_stack2();
+
+    if failures == 0 {
+        print("All implement methods tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

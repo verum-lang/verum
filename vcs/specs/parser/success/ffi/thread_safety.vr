@@ -1,0 +1,578 @@
+// @test: parse-pass
+// @tier: 0
+// @category: ffi
+// @level: L0
+// @tags: parser, ffi, thread_safety, ffi_thread_safety
+// @description: Comprehensive test for ffi_thread_safety grammar production
+
+// ============================================================
+// GRAMMAR: ffi_thread_safety = 'thread_safe' , '=' , bool_lit , ';' ;
+// ============================================================
+
+// Type definitions for thread safety tests
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_void is ();
+type size_t is usize;
+
+// ------------------------------------------------------------
+// Thread-safe functions (thread_safe = true)
+// ------------------------------------------------------------
+
+ffi ThreadSafeFunctions {
+    @extern("C")
+    fn atomic_add(ptr: *mut c_int, value: c_int) -> c_int;
+
+    @extern("C")
+    fn atomic_sub(ptr: *mut c_int, value: c_int) -> c_int;
+
+    @extern("C")
+    fn atomic_load(ptr: *const c_int) -> c_int;
+
+    @extern("C")
+    fn atomic_store(ptr: *mut c_int, value: c_int);
+
+    thread_safe = true;
+}
+
+ffi AtomicOperations {
+    @extern("C")
+    fn atomic_compare_exchange(
+        ptr: *mut c_int,
+        expected: *mut c_int,
+        desired: c_int
+    ) -> bool;
+
+    @extern("C")
+    fn atomic_exchange(ptr: *mut c_int, value: c_int) -> c_int;
+
+    @extern("C")
+    fn atomic_fetch_and(ptr: *mut c_int, value: c_int) -> c_int;
+
+    @extern("C")
+    fn atomic_fetch_or(ptr: *mut c_int, value: c_int) -> c_int;
+
+    @extern("C")
+    fn atomic_fetch_xor(ptr: *mut c_int, value: c_int) -> c_int;
+
+    thread_safe = true;
+}
+
+ffi ThreadSafeMemory {
+    @extern("C")
+    fn thread_safe_malloc(size: size_t) -> *mut c_void;
+
+    @extern("C")
+    fn thread_safe_free(ptr: *mut c_void);
+
+    @extern("C")
+    fn thread_safe_realloc(ptr: *mut c_void, size: size_t) -> *mut c_void;
+
+    thread_safe = true;
+}
+
+ffi ThreadSafeMutex {
+    @extern("C")
+    fn mutex_create() -> *mut Mutex;
+
+    @extern("C")
+    fn mutex_destroy(mtx: *mut Mutex);
+
+    @extern("C")
+    fn mutex_lock(mtx: *mut Mutex) -> c_int;
+
+    @extern("C")
+    fn mutex_unlock(mtx: *mut Mutex) -> c_int;
+
+    @extern("C")
+    fn mutex_trylock(mtx: *mut Mutex) -> c_int;
+
+    thread_safe = true;
+}
+
+@opaque
+type Mutex is ();
+
+ffi ThreadSafeRWLock {
+    @extern("C")
+    fn rwlock_create() -> *mut RWLock;
+
+    @extern("C")
+    fn rwlock_destroy(rwl: *mut RWLock);
+
+    @extern("C")
+    fn rwlock_rdlock(rwl: *mut RWLock) -> c_int;
+
+    @extern("C")
+    fn rwlock_wrlock(rwl: *mut RWLock) -> c_int;
+
+    @extern("C")
+    fn rwlock_unlock(rwl: *mut RWLock) -> c_int;
+
+    thread_safe = true;
+}
+
+@opaque
+type RWLock is ();
+
+ffi ThreadSafeCondVar {
+    @extern("C")
+    fn condvar_create() -> *mut CondVar;
+
+    @extern("C")
+    fn condvar_destroy(cv: *mut CondVar);
+
+    @extern("C")
+    fn condvar_wait(cv: *mut CondVar, mtx: *mut Mutex) -> c_int;
+
+    @extern("C")
+    fn condvar_signal(cv: *mut CondVar) -> c_int;
+
+    @extern("C")
+    fn condvar_broadcast(cv: *mut CondVar) -> c_int;
+
+    thread_safe = true;
+}
+
+@opaque
+type CondVar is ();
+
+ffi ThreadSafeSemaphore {
+    @extern("C")
+    fn semaphore_create(initial: c_uint) -> *mut Semaphore;
+
+    @extern("C")
+    fn semaphore_destroy(sem: *mut Semaphore);
+
+    @extern("C")
+    fn semaphore_wait(sem: *mut Semaphore) -> c_int;
+
+    @extern("C")
+    fn semaphore_post(sem: *mut Semaphore) -> c_int;
+
+    @extern("C")
+    fn semaphore_trywait(sem: *mut Semaphore) -> c_int;
+
+    thread_safe = true;
+}
+
+@opaque
+type Semaphore is ();
+
+ffi ThreadSafeBarrier {
+    @extern("C")
+    fn barrier_create(count: c_uint) -> *mut Barrier;
+
+    @extern("C")
+    fn barrier_destroy(bar: *mut Barrier);
+
+    @extern("C")
+    fn barrier_wait(bar: *mut Barrier) -> c_int;
+
+    thread_safe = true;
+}
+
+@opaque
+type Barrier is ();
+
+// ------------------------------------------------------------
+// Non-thread-safe functions (thread_safe = false)
+// ------------------------------------------------------------
+
+ffi NonThreadSafeFunctions {
+    @extern("C")
+    fn strtok(str: *mut i8, delim: *const i8) -> *mut i8;
+
+    @extern("C")
+    fn rand() -> c_int;
+
+    @extern("C")
+    fn srand(seed: c_uint);
+
+    thread_safe = false;
+}
+
+ffi NonThreadSafeGlobals {
+    @extern("C")
+    fn get_errno() -> c_int;
+
+    @extern("C")
+    fn set_errno(err: c_int);
+
+    @extern("C")
+    fn strerror(errnum: c_int) -> *mut i8;
+
+    thread_safe = false;
+}
+
+ffi NonThreadSafeIO {
+    @extern("C")
+    fn getchar() -> c_int;
+
+    @extern("C")
+    fn putchar(c: c_int) -> c_int;
+
+    @extern("C")
+    fn gets(s: *mut i8) -> *mut i8;
+
+    thread_safe = false;
+}
+
+ffi NonThreadSafeTime {
+    @extern("C")
+    fn localtime(timer: *const c_long) -> *mut TimeInfo;
+
+    @extern("C")
+    fn gmtime(timer: *const c_long) -> *mut TimeInfo;
+
+    @extern("C")
+    fn asctime(timeptr: *const TimeInfo) -> *mut i8;
+
+    @extern("C")
+    fn ctime(timer: *const c_long) -> *mut i8;
+
+    thread_safe = false;
+}
+
+@repr(C)
+type TimeInfo is {
+    tm_sec: c_int,
+    tm_min: c_int,
+    tm_hour: c_int,
+    tm_mday: c_int,
+    tm_mon: c_int,
+    tm_year: c_int,
+    tm_wday: c_int,
+    tm_yday: c_int,
+    tm_isdst: c_int,
+};
+
+ffi NonThreadSafeRegistry {
+    @extern("C")
+    fn register_global(name: *const i8, value: *mut c_void);
+
+    @extern("C")
+    fn unregister_global(name: *const i8) -> *mut c_void;
+
+    @extern("C")
+    fn lookup_global(name: *const i8) -> *mut c_void;
+
+    thread_safe = false;
+}
+
+ffi NonThreadSafeCache {
+    @extern("C")
+    fn cache_put(key: *const i8, value: *mut c_void);
+
+    @extern("C")
+    fn cache_get(key: *const i8) -> *mut c_void;
+
+    @extern("C")
+    fn cache_remove(key: *const i8) -> *mut c_void;
+
+    @extern("C")
+    fn cache_clear();
+
+    thread_safe = false;
+}
+
+// ------------------------------------------------------------
+// Mixed thread safety in one library
+// ------------------------------------------------------------
+
+ffi MixedThreadSafety {
+    // Thread-safe functions
+    @extern("C")
+    fn safe_increment(counter: *mut AtomicCounter) -> c_int;
+
+    thread_safe = true;
+
+    // Non-thread-safe functions
+    @extern("C")
+    fn unsafe_increment(counter: *mut Counter) -> c_int;
+
+    thread_safe = false;
+}
+
+@repr(C)
+type AtomicCounter is {
+    value: c_int,
+};
+
+@repr(C)
+type Counter is {
+    value: c_int,
+};
+
+// ------------------------------------------------------------
+// Thread safety with other FFI annotations
+// ------------------------------------------------------------
+
+ffi ThreadSafeWithOwnership {
+    @extern("C")
+    @ownership(shared)
+    fn ref_count_increment(rc: *mut RefCounted) -> *mut RefCounted;
+
+    @extern("C")
+    @ownership(shared)
+    fn ref_count_decrement(rc: *mut RefCounted);
+
+    thread_safe = true;
+}
+
+@opaque
+type RefCounted is ();
+
+ffi ThreadSafeWithMemoryEffects {
+    @extern("C")
+    fn concurrent_alloc(size: size_t) -> *mut c_void;
+
+    memory_effects = Allocates;
+    thread_safe = true;
+}
+
+ffi ThreadSafeWithContracts {
+    @extern("C")
+    fn synchronized_push(queue: *mut Queue, item: *mut c_void);
+
+    requires queue != null;
+    requires item != null;
+    thread_safe = true;
+}
+
+@opaque
+type Queue is ();
+
+ffi ThreadSafeWithErrorProtocol {
+    @extern("C")
+    fn concurrent_operation(data: *mut c_void) -> c_int;
+
+    errors_via = ReturnCode(-1);
+    thread_safe = true;
+}
+
+// All FFI annotations together
+ffi FullyAnnotatedThreadSafe {
+    @extern("C")
+    @ownership(shared)
+    fn fully_annotated_function(data: *mut SharedData) -> c_int;
+
+    requires data != null;
+    ensures result >= 0;
+    memory_effects = Reads(data) + Writes(data);
+    thread_safe = true;
+    errors_via = ReturnCode(-1);
+}
+
+@opaque
+type SharedData is ();
+
+// ------------------------------------------------------------
+// Thread safety in extended FFI blocks
+// ------------------------------------------------------------
+
+ffi BaseThreadSafe {
+    @extern("C")
+    fn base_safe_function(x: c_int) -> c_int;
+
+    thread_safe = true;
+}
+
+ffi ExtendedThreadSafe extends BaseThreadSafe {
+    @extern("C")
+    fn extended_safe_function(y: c_int) -> c_int;
+
+    thread_safe = true;
+}
+
+ffi BaseNonThreadSafe {
+    @extern("C")
+    fn base_unsafe_function(x: c_int) -> c_int;
+
+    thread_safe = false;
+}
+
+ffi ExtendedNonThreadSafe extends BaseNonThreadSafe {
+    @extern("C")
+    fn extended_unsafe_function(y: c_int) -> c_int;
+
+    thread_safe = false;
+}
+
+// ------------------------------------------------------------
+// Thread safety with visibility
+// ------------------------------------------------------------
+
+pub ffi PublicThreadSafe {
+    @extern("C")
+    fn public_safe_op(x: c_int) -> c_int;
+
+    thread_safe = true;
+}
+
+internal ffi InternalThreadSafe {
+    @extern("C")
+    fn internal_safe_op(x: c_int) -> c_int;
+
+    thread_safe = true;
+}
+
+pub ffi PublicNonThreadSafe {
+    @extern("C")
+    fn public_unsafe_op(x: c_int) -> c_int;
+
+    thread_safe = false;
+}
+
+internal ffi InternalNonThreadSafe {
+    @extern("C")
+    fn internal_unsafe_op(x: c_int) -> c_int;
+
+    thread_safe = false;
+}
+
+// ------------------------------------------------------------
+// Platform-specific thread safety
+// ------------------------------------------------------------
+
+@cfg(target_os = "windows")
+ffi WindowsThreadSafe {
+    @extern("C", calling_convention = "stdcall")
+    fn InterlockedIncrement(addend: *mut c_long) -> c_long;
+
+    @extern("C", calling_convention = "stdcall")
+    fn InterlockedDecrement(addend: *mut c_long) -> c_long;
+
+    @extern("C", calling_convention = "stdcall")
+    fn InterlockedExchange(target: *mut c_long, value: c_long) -> c_long;
+
+    thread_safe = true;
+}
+
+@cfg(target_os = "linux")
+ffi LinuxThreadSafe {
+    @extern("C")
+    fn pthread_mutex_lock(mutex: *mut PthreadMutex) -> c_int;
+
+    @extern("C")
+    fn pthread_mutex_unlock(mutex: *mut PthreadMutex) -> c_int;
+
+    thread_safe = true;
+}
+
+@opaque
+type PthreadMutex is ();
+
+@cfg(target_os = "macos")
+ffi MacOSThreadSafe {
+    @extern("C")
+    fn OSAtomicAdd32(amount: i32, value: *mut i32) -> i32;
+
+    @extern("C")
+    fn OSAtomicCompareAndSwap32(
+        old_value: i32,
+        new_value: i32,
+        value: *mut i32
+    ) -> bool;
+
+    thread_safe = true;
+}
+
+// ------------------------------------------------------------
+// Thread safety with different data structures
+// ------------------------------------------------------------
+
+ffi ConcurrentCollections {
+    @extern("C")
+    fn concurrent_queue_create() -> *mut ConcurrentQueue;
+
+    @extern("C")
+    fn concurrent_queue_push(q: *mut ConcurrentQueue, item: *mut c_void);
+
+    @extern("C")
+    fn concurrent_queue_pop(q: *mut ConcurrentQueue) -> *mut c_void;
+
+    @extern("C")
+    fn concurrent_queue_destroy(q: *mut ConcurrentQueue);
+
+    thread_safe = true;
+}
+
+@opaque
+type ConcurrentQueue is ();
+
+ffi ConcurrentHashMap {
+    @extern("C")
+    fn hashmap_create() -> *mut ConcHashMap;
+
+    @extern("C")
+    fn hashmap_insert(
+        map: *mut ConcHashMap,
+        key: *const i8,
+        value: *mut c_void
+    ) -> bool;
+
+    @extern("C")
+    fn hashmap_get(map: *mut ConcHashMap, key: *const i8) -> *mut c_void;
+
+    @extern("C")
+    fn hashmap_remove(map: *mut ConcHashMap, key: *const i8) -> *mut c_void;
+
+    @extern("C")
+    fn hashmap_destroy(map: *mut ConcHashMap);
+
+    thread_safe = true;
+}
+
+@opaque
+type ConcHashMap is ();
+
+ffi LockFreeStack {
+    @extern("C")
+    fn lockfree_stack_create() -> *mut LFStack;
+
+    @extern("C")
+    fn lockfree_stack_push(stack: *mut LFStack, item: *mut c_void);
+
+    @extern("C")
+    fn lockfree_stack_pop(stack: *mut LFStack) -> *mut c_void;
+
+    @extern("C")
+    fn lockfree_stack_destroy(stack: *mut LFStack);
+
+    thread_safe = true;
+}
+
+@opaque
+type LFStack is ();
+
+// ------------------------------------------------------------
+// Thread safety for I/O operations
+// ------------------------------------------------------------
+
+ffi ThreadSafeIO {
+    @extern("C")
+    fn ts_read(fd: c_int, buf: *mut u8, count: size_t) -> isize;
+
+    @extern("C")
+    fn ts_write(fd: c_int, buf: *const u8, count: size_t) -> isize;
+
+    @extern("C")
+    fn ts_open(path: *const i8, flags: c_int) -> c_int;
+
+    @extern("C")
+    fn ts_close(fd: c_int) -> c_int;
+
+    thread_safe = true;
+}
+
+ffi ThreadSafeLogging {
+    @extern("C")
+    fn log_message(level: c_int, msg: *const i8);
+
+    @extern("C")
+    fn log_formatted(level: c_int, fmt: *const i8, ...);
+
+    thread_safe = true;
+}

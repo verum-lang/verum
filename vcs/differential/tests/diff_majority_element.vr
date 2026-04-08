@@ -1,0 +1,108 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, majority, boyer-moore, voting
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+// Boyer-Moore voting algorithm: find candidate majority element
+fn majority_candidate(a: Arr8, n: Int) -> Int {
+    let mut candidate = get(a, 0);
+    let mut count = 1;
+    let mut i = 1;
+    while i < n {
+        if get(a, i) == candidate {
+            count = count + 1;
+        } else {
+            count = count - 1;
+            if count == 0 {
+                candidate = get(a, i);
+                count = 1;
+            }
+        }
+        i = i + 1;
+    }
+    candidate
+}
+
+// Verify if candidate is actually a majority (> n/2)
+fn count_occ(a: Arr8, n: Int, val: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < n { if get(a, i) == val { c = c + 1; } i = i + 1; }
+    c
+}
+
+fn has_majority(a: Arr8, n: Int) -> Int {
+    let cand = majority_candidate(a, n);
+    if count_occ(a, n, cand) > n / 2 { 1 } else { 0 }
+}
+
+fn majority_element(a: Arr8, n: Int) -> Int {
+    let cand = majority_candidate(a, n);
+    if count_occ(a, n, cand) > n / 2 { cand } else { -1 }
+}
+
+// Find mode (most frequent element) by brute force
+fn mode(a: Arr8, n: Int) -> Int {
+    let mut best = get(a, 0);
+    let mut best_count = 0;
+    let mut i = 0;
+    while i < n {
+        let c = count_occ(a, n, get(a, i));
+        if c > best_count {
+            best_count = c;
+            best = get(a, i);
+        }
+        i = i + 1;
+    }
+    best
+}
+
+fn main() -> Int {
+    // Clear majority: [2,2,1,1,2,2,2]
+    let a1 = Arr8 { d0: 2, d1: 2, d2: 1, d3: 1, d4: 2, d5: 2, d6: 2, d7: 0 };
+    assert_eq(majority_element(a1, 7), 2);
+    assert_eq(has_majority(a1, 7), 1);
+    assert_eq(count_occ(a1, 7, 2), 5);
+
+    // No majority: [1,2,3,4]
+    let a2 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(has_majority(a2, 4), 0);
+    assert_eq(majority_element(a2, 4), -1);
+
+    // All same
+    let a3 = Arr8 { d0: 7, d1: 7, d2: 7, d3: 7, d4: 7, d5: 0, d6: 0, d7: 0 };
+    assert_eq(majority_element(a3, 5), 7);
+
+    // Exactly half: [1,1,2,2] — no majority (need > n/2)
+    let a4 = Arr8 { d0: 1, d1: 1, d2: 2, d3: 2, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(has_majority(a4, 4), 0);
+
+    // Barely majority: [1,1,1,2,2] — 1 appears 3 times, 3 > 5/2=2
+    let a5 = Arr8 { d0: 1, d1: 1, d2: 1, d3: 2, d4: 2, d5: 0, d6: 0, d7: 0 };
+    assert_eq(majority_element(a5, 5), 1);
+
+    // Single element
+    let a6 = Arr8 { d0: 42, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(majority_element(a6, 1), 42);
+
+    // Mode tests
+    assert_eq(mode(a1, 7), 2);
+    assert_eq(mode(a3, 5), 7);
+
+    // Mode of [1,2,2,3,3,3]: 3 with count 3
+    let a7 = Arr8 { d0: 1, d1: 2, d2: 2, d3: 3, d4: 3, d5: 3, d6: 0, d7: 0 };
+    assert_eq(mode(a7, 6), 3);
+
+    print("DIFF_OK: majority_element");
+    0
+}

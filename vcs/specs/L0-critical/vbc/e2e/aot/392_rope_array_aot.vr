@@ -1,0 +1,357 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, rope, segmented-array, split, join
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for a rope-like segmented array with split/join operations.
+// A Rope is two segments (left, right) each holding up to 8 elements.
+// Supports: build, get, set, split at index, join two ropes, rebalance.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Rope: two segments (left and right), each up to 8 elements
+type Rope is { left: Arr8, left_len: Int, right: Arr8, right_len: Int };
+
+fn rope_new() -> Rope {
+    Rope { left: a8_zero(), left_len: 0, right: a8_zero(), right_len: 0 }
+}
+
+fn rope_len(r: Rope) -> Int {
+    r.left_len + r.right_len
+}
+
+// Get element at logical index
+fn rope_get(r: Rope, i: Int) -> Int {
+    if i < r.left_len {
+        a8_get(r.left, i)
+    } else {
+        a8_get(r.right, i - r.left_len)
+    }
+}
+
+// Set element at logical index
+fn rope_set(r: Rope, i: Int, v: Int) -> Rope {
+    if i < r.left_len {
+        Rope { left: a8_set(r.left, i, v), left_len: r.left_len, right: r.right, right_len: r.right_len }
+    } else {
+        Rope { left: r.left, left_len: r.left_len, right: a8_set(r.right, i - r.left_len, v), right_len: r.right_len }
+    }
+}
+
+// Push to the end (append to right segment if space, else error/ignore)
+fn rope_push(r: Rope, v: Int) -> Rope {
+    if r.right_len < 8 {
+        Rope { left: r.left, left_len: r.left_len, right: a8_set(r.right, r.right_len, v), right_len: r.right_len + 1 }
+    } else {
+        r // full, no change
+    }
+}
+
+// Build a rope from a single flat array of n elements (split in half)
+fn rope_from_array(arr: Arr8, n: Int) -> Rope {
+    let half = n / 2;
+    let mut left = a8_zero();
+    let mut right = a8_zero();
+    let mut i = 0;
+    while i < half {
+        left = a8_set(left, i, a8_get(arr, i));
+        i = i + 1;
+    }
+    while i < n {
+        right = a8_set(right, i - half, a8_get(arr, i));
+        i = i + 1;
+    }
+    Rope { left: left, left_len: half, right: right, right_len: n - half }
+}
+
+// Flatten a rope back to an array
+type FlatOut is { data: Arr8, len: Int };
+
+fn rope_flatten(r: Rope) -> FlatOut {
+    let mut out = a8_zero();
+    let mut i = 0;
+    while i < r.left_len {
+        out = a8_set(out, i, a8_get(r.left, i));
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < r.right_len {
+        out = a8_set(out, i, a8_get(r.right, j));
+        i = i + 1;
+        j = j + 1;
+    }
+    FlatOut { data: out, len: i }
+}
+
+// Split a rope at logical index k: returns (left_rope, right_rope)
+// left_rope contains elements [0, k), right_rope contains [k, n)
+type SplitOut is { a: Rope, b: Rope };
+
+fn rope_split(r: Rope, k: Int) -> SplitOut {
+    // Flatten first, then rebuild two ropes
+    let flat = rope_flatten(r);
+    let n = flat.len;
+    let mut left_arr = a8_zero();
+    let mut i = 0;
+    while i < k {
+        left_arr = a8_set(left_arr, i, a8_get(flat.data, i));
+        i = i + 1;
+    }
+    let mut right_arr = a8_zero();
+    i = k;
+    while i < n {
+        right_arr = a8_set(right_arr, i - k, a8_get(flat.data, i));
+        i = i + 1;
+    }
+    SplitOut {
+        a: rope_from_array(left_arr, k),
+        b: rope_from_array(right_arr, n - k)
+    }
+}
+
+// Join two ropes into one (concatenate)
+fn rope_join(a: Rope, b: Rope) -> Rope {
+    let fa = rope_flatten(a);
+    let fb = rope_flatten(b);
+    let total = fa.len + fb.len;
+    let mut combined = a8_zero();
+    let mut i = 0;
+    while i < fa.len {
+        combined = a8_set(combined, i, a8_get(fa.data, i));
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < fb.len {
+        combined = a8_set(combined, i, a8_get(fb.data, j));
+        i = i + 1;
+        j = j + 1;
+    }
+    rope_from_array(combined, total)
+}
+
+// Rebalance: flatten and re-split evenly
+fn rope_rebalance(r: Rope) -> Rope {
+    let flat = rope_flatten(r);
+    rope_from_array(flat.data, flat.len)
+}
+
+// Sum all elements
+fn rope_sum(r: Rope) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < r.left_len {
+        total = total + a8_get(r.left, i);
+        i = i + 1;
+    }
+    i = 0;
+    while i < r.right_len {
+        total = total + a8_get(r.right, i);
+        i = i + 1;
+    }
+    total
+}
+
+// ========== Tests ==========
+
+fn test_basic_build() {
+    let arr = Arr8 { a0: 10, a1: 20, a2: 30, a3: 40, a4: 50, a5: 60, a6: 0, a7: 0 };
+    let r = rope_from_array(arr, 6);
+    assert_eq(rope_len(r), 6);
+    assert_eq(r.left_len, 3);
+    assert_eq(r.right_len, 3);
+    assert_eq(rope_get(r, 0), 10);
+    assert_eq(rope_get(r, 2), 30);
+    assert_eq(rope_get(r, 3), 40);
+    assert_eq(rope_get(r, 5), 60);
+}
+
+fn test_get_set() {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 0, a7: 0 };
+    let mut r = rope_from_array(arr, 6);
+    r = rope_set(r, 0, 100);
+    r = rope_set(r, 5, 600);
+    r = rope_set(r, 3, 400);
+    assert_eq(rope_get(r, 0), 100);
+    assert_eq(rope_get(r, 1), 2);
+    assert_eq(rope_get(r, 3), 400);
+    assert_eq(rope_get(r, 5), 600);
+}
+
+fn test_flatten() {
+    let arr = Arr8 { a0: 5, a1: 10, a2: 15, a3: 20, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let r = rope_from_array(arr, 4);
+    let flat = rope_flatten(r);
+    assert_eq(flat.len, 4);
+    assert_eq(a8_get(flat.data, 0), 5);
+    assert_eq(a8_get(flat.data, 1), 10);
+    assert_eq(a8_get(flat.data, 2), 15);
+    assert_eq(a8_get(flat.data, 3), 20);
+}
+
+fn test_split_at_middle() {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 0, a7: 0 };
+    let r = rope_from_array(arr, 6);
+    let sp = rope_split(r, 3);
+    assert_eq(rope_len(sp.a), 3);
+    assert_eq(rope_len(sp.b), 3);
+    assert_eq(rope_get(sp.a, 0), 1);
+    assert_eq(rope_get(sp.a, 2), 3);
+    assert_eq(rope_get(sp.b, 0), 4);
+    assert_eq(rope_get(sp.b, 2), 6);
+}
+
+fn test_split_at_start() {
+    let arr = Arr8 { a0: 10, a1: 20, a2: 30, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let r = rope_from_array(arr, 3);
+    let sp = rope_split(r, 0);
+    assert_eq(rope_len(sp.a), 0);
+    assert_eq(rope_len(sp.b), 3);
+    assert_eq(rope_get(sp.b, 0), 10);
+}
+
+fn test_split_at_end() {
+    let arr = Arr8 { a0: 10, a1: 20, a2: 30, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let r = rope_from_array(arr, 3);
+    let sp = rope_split(r, 3);
+    assert_eq(rope_len(sp.a), 3);
+    assert_eq(rope_len(sp.b), 0);
+    assert_eq(rope_get(sp.a, 2), 30);
+}
+
+fn test_join_basic() {
+    let arr1 = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let arr2 = Arr8 { a0: 4, a1: 5, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let r1 = rope_from_array(arr1, 3);
+    let r2 = rope_from_array(arr2, 2);
+    let joined = rope_join(r1, r2);
+    assert_eq(rope_len(joined), 5);
+    assert_eq(rope_get(joined, 0), 1);
+    assert_eq(rope_get(joined, 2), 3);
+    assert_eq(rope_get(joined, 3), 4);
+    assert_eq(rope_get(joined, 4), 5);
+}
+
+fn test_split_join_roundtrip() {
+    let arr = Arr8 { a0: 10, a1: 20, a2: 30, a3: 40, a4: 50, a5: 0, a6: 0, a7: 0 };
+    let r = rope_from_array(arr, 5);
+    let sp = rope_split(r, 2);
+    let rejoined = rope_join(sp.a, sp.b);
+    assert_eq(rope_len(rejoined), 5);
+    let mut i = 0;
+    while i < 5 {
+        assert_eq(rope_get(rejoined, i), rope_get(r, i));
+        i = i + 1;
+    }
+}
+
+fn test_rebalance() {
+    // Create unbalanced rope: left=1 element, right=5 elements
+    let mut r = Rope {
+        left: a8_set(a8_zero(), 0, 1),
+        left_len: 1,
+        right: a8_zero(),
+        right_len: 5
+    };
+    r = Rope { left: a8_set(a8_zero(), 0, 1), left_len: 1,
+               right: Arr8 { a0: 2, a1: 3, a2: 4, a3: 5, a4: 6, a5: 0, a6: 0, a7: 0 }, right_len: 5 };
+    let balanced = rope_rebalance(r);
+    assert_eq(rope_len(balanced), 6);
+    assert_eq(balanced.left_len, 3);
+    assert_eq(balanced.right_len, 3);
+    // Values preserved
+    assert_eq(rope_get(balanced, 0), 1);
+    assert_eq(rope_get(balanced, 1), 2);
+    assert_eq(rope_get(balanced, 5), 6);
+}
+
+fn test_sum() {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 0, a6: 0, a7: 0 };
+    let r = rope_from_array(arr, 5);
+    assert_eq(rope_sum(r), 15);
+}
+
+fn test_empty_rope() {
+    let r = rope_new();
+    assert_eq(rope_len(r), 0);
+    assert_eq(rope_sum(r), 0);
+}
+
+fn test_single_element() {
+    let arr = Arr8 { a0: 42, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let r = rope_from_array(arr, 1);
+    assert_eq(rope_len(r), 1);
+    assert_eq(rope_get(r, 0), 42);
+    assert_eq(rope_sum(r), 42);
+}
+
+fn test_push() {
+    let mut r = rope_new();
+    r = rope_push(r, 10);
+    r = rope_push(r, 20);
+    r = rope_push(r, 30);
+    assert_eq(rope_len(r), 3);
+    assert_eq(rope_get(r, 0), 10);
+    assert_eq(rope_get(r, 1), 20);
+    assert_eq(rope_get(r, 2), 30);
+}
+
+fn test_multiple_splits_joins() {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let r = rope_from_array(arr, 8);
+    // Split into [1,2] and [3,4,5,6,7,8]
+    let sp1 = rope_split(r, 2);
+    // Split second into [3,4,5] and [6,7,8]
+    let sp2 = rope_split(sp1.b, 3);
+    // Join: [3,4,5] + [1,2] = [3,4,5,1,2]
+    let j1 = rope_join(sp2.a, sp1.a);
+    assert_eq(rope_len(j1), 5);
+    assert_eq(rope_get(j1, 0), 3);
+    assert_eq(rope_get(j1, 3), 1);
+    assert_eq(rope_get(j1, 4), 2);
+    // Join: [3,4,5,1,2] + [6,7,8] = [3,4,5,1,2,6,7,8]
+    let j2 = rope_join(j1, sp2.b);
+    assert_eq(rope_len(j2), 8);
+    assert_eq(rope_get(j2, 5), 6);
+    assert_eq(rope_get(j2, 7), 8);
+}
+
+fn main() -> Int {
+    test_basic_build();
+    test_get_set();
+    test_flatten();
+    test_split_at_middle();
+    test_split_at_start();
+    test_split_at_end();
+    test_join_basic();
+    test_split_join_roundtrip();
+    test_rebalance();
+    test_sum();
+    test_empty_rope();
+    test_single_element();
+    test_push();
+    test_multiple_splits_joins();
+    print("[OK] 392_rope_array_aot");
+    0
+}

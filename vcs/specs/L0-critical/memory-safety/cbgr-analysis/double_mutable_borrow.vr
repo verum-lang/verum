@@ -1,0 +1,27 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: memory-safety, borrow-checking, aliasing, cbgr, error-detection
+// @expected-error: E312
+// @description: CBGR rejects simultaneous mutable borrows
+
+/// Double Mutable Borrow Detection Test
+///
+/// This test verifies that the CBGR borrow checker correctly
+/// rejects code with simultaneous mutable references to the same data.
+///
+/// Spec: docs/detailed/26-cbgr-implementation.md#borrow-checking
+
+fn main() {
+    let mut data = [1, 2, 3];
+
+    // First mutable borrow
+    let r1 = &mut data;
+
+    // ERROR: second mutable borrow while first is active
+    let r2 = &mut data;  // E312: Cannot borrow mutably twice
+
+    // Attempting to use both
+    r1[0] = 10;
+    r2[1] = 20;
+}

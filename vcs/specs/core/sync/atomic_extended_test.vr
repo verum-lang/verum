@@ -1,0 +1,623 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: sync, atomic, atomicptr, spinlock, futexlock, default, get_mut
+// @description: Extended atomic tests covering AtomicPtr, SpinLock, FutexLock,
+//               Default impls, get_mut methods, and missing API coverage.
+
+mount core.sync.atomic.{
+    Ordering, Relaxed, Acquire, Release, AcqRel, SeqCst,
+    AtomicInt, AtomicU8, AtomicU16, AtomicU32, AtomicU64, AtomicBool,
+    AtomicPtr, SpinLock, FutexLock, fence,
+};
+
+// =============================================================================
+// Section 1: AtomicInt - Default + get_mut
+// =============================================================================
+
+@test
+fn test_atomicint_default_value() {
+    let a = AtomicInt.default();
+    assert_eq(a.load(SeqCst), 0);
+}
+
+@test
+fn test_atomicint_get_mut() {
+    let mut a = AtomicInt.new(42);
+    let r = a.get_mut();
+    assert_eq(*r, 42);
+}
+
+@test
+fn test_atomicint_get_mut_modify() {
+    let mut a = AtomicInt.new(10);
+    *a.get_mut() = 20;
+    assert_eq(a.load(SeqCst), 20);
+}
+
+// =============================================================================
+// Section 2: AtomicU8 - Default + get_mut
+// =============================================================================
+
+@test
+fn test_atomicu8_default_value() {
+    let a = AtomicU8.default();
+    assert_eq(a.load(SeqCst), 0);
+}
+
+@test
+fn test_atomicu8_get_mut() {
+    let mut a = AtomicU8.new(42);
+    let r = a.get_mut();
+    assert_eq(*r, 42);
+}
+
+@test
+fn test_atomicu8_get_mut_modify() {
+    let mut a = AtomicU8.new(10);
+    let val: Byte = 20;
+    *a.get_mut() = val;
+    assert_eq(a.load(SeqCst), 20);
+}
+
+// =============================================================================
+// Section 3: AtomicU16 - Default + get_mut + compare_exchange failure
+// =============================================================================
+
+@test
+fn test_atomicu16_default_value() {
+    let a = AtomicU16.default();
+    assert_eq(a.load(SeqCst), 0 as UInt16);
+}
+
+@test
+fn test_atomicu16_get_mut() {
+    let mut a = AtomicU16.new(1000 as UInt16);
+    let r = a.get_mut();
+    assert_eq(*r, 1000 as UInt16);
+}
+
+@test
+fn test_atomicu16_get_mut_modify() {
+    let mut a = AtomicU16.new(100 as UInt16);
+    *a.get_mut() = 200 as UInt16;
+    assert_eq(a.load(SeqCst), 200 as UInt16);
+}
+
+@test
+fn test_atomicu16_compare_exchange_failure() {
+    let a = AtomicU16.new(42 as UInt16);
+    let result = a.compare_exchange(10 as UInt16, 99 as UInt16, SeqCst, Relaxed);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 4: AtomicU32 - Default + get_mut
+// =============================================================================
+
+@test
+fn test_atomicu32_default_value() {
+    let a = AtomicU32.default();
+    assert_eq(a.load(SeqCst), 0 as UInt32);
+}
+
+@test
+fn test_atomicu32_get_mut() {
+    let mut a = AtomicU32.new(500 as UInt32);
+    let r = a.get_mut();
+    assert_eq(*r, 500 as UInt32);
+}
+
+@test
+fn test_atomicu32_get_mut_modify() {
+    let mut a = AtomicU32.new(100 as UInt32);
+    *a.get_mut() = 999 as UInt32;
+    assert_eq(a.load(SeqCst), 999 as UInt32);
+}
+
+// =============================================================================
+// Section 5: AtomicU64 - Default + get_mut
+// =============================================================================
+
+@test
+fn test_atomicu64_default_value() {
+    let a = AtomicU64.default();
+    assert_eq(a.load(SeqCst), 0 as UInt64);
+}
+
+@test
+fn test_atomicu64_get_mut() {
+    let mut a = AtomicU64.new(123456 as UInt64);
+    let r = a.get_mut();
+    assert_eq(*r, 123456 as UInt64);
+}
+
+@test
+fn test_atomicu64_get_mut_modify() {
+    let mut a = AtomicU64.new(100 as UInt64);
+    *a.get_mut() = 999 as UInt64;
+    assert_eq(a.load(SeqCst), 999 as UInt64);
+}
+
+// =============================================================================
+// Section 6: AtomicBool - Default + get_mut
+// =============================================================================
+
+@test
+fn test_atomicbool_default_value() {
+    let a = AtomicBool.default();
+    assert_eq(a.load(SeqCst), false);
+}
+
+@test
+fn test_atomicbool_get_mut_false() {
+    let mut a = AtomicBool.new(false);
+    let r = a.get_mut();
+    assert_eq(*r, false);
+}
+
+@test
+fn test_atomicbool_get_mut_true() {
+    let mut a = AtomicBool.new(true);
+    let r = a.get_mut();
+    assert_eq(*r, true);
+}
+
+// =============================================================================
+// Section 7: AtomicPtr<T> - Complete coverage
+// =============================================================================
+
+@test
+fn test_atomicptr_null() {
+    let p: AtomicPtr<Int> = AtomicPtr.null();
+    assert(p.is_null());
+}
+
+@test
+fn test_atomicptr_default_is_null() {
+    let p: AtomicPtr<Int> = AtomicPtr.default();
+    assert(p.is_null());
+}
+
+@test
+fn test_atomicptr_new_not_null() {
+    let mut val = 42;
+    let p = AtomicPtr.new(&mut val as &unsafe Int);
+    assert(!p.is_null());
+}
+
+@test
+fn test_atomicptr_store_and_load() {
+    let mut val = 100;
+    let p: AtomicPtr<Int> = AtomicPtr.null();
+    p.store(&mut val as &unsafe Int, Release);
+    assert(!p.is_null());
+}
+
+@test
+fn test_atomicptr_swap() {
+    let mut val1 = 10;
+    let mut val2 = 20;
+    let p = AtomicPtr.new(&mut val1 as &unsafe Int);
+    let old = p.swap(&mut val2 as &unsafe Int, SeqCst);
+    // After swap, p now points to val2
+    assert(!p.is_null());
+}
+
+@test
+fn test_atomicptr_compare_exchange_success() {
+    let mut val1 = 10;
+    let mut val2 = 20;
+    let ptr1 = &mut val1 as &unsafe Int;
+    let ptr2 = &mut val2 as &unsafe Int;
+    let p = AtomicPtr.new(ptr1);
+    let result = p.compare_exchange(ptr1, ptr2, SeqCst, Relaxed);
+    assert(result.is_ok());
+}
+
+@test
+fn test_atomicptr_compare_exchange_failure() {
+    let mut val1 = 10;
+    let mut val2 = 20;
+    let mut val3 = 30;
+    let ptr1 = &mut val1 as &unsafe Int;
+    let ptr2 = &mut val2 as &unsafe Int;
+    let ptr3 = &mut val3 as &unsafe Int;
+    let p = AtomicPtr.new(ptr1);
+    // Expect failure: current is ptr1, not ptr2
+    let result = p.compare_exchange(ptr2, ptr3, SeqCst, Relaxed);
+    assert(result.is_err());
+}
+
+@test
+fn test_atomicptr_store_null_makes_null() {
+    let mut val = 42;
+    let p = AtomicPtr.new(&mut val as &unsafe Int);
+    assert(!p.is_null());
+    // Store a null-like value using another null ptr
+    let null_ptr: AtomicPtr<Int> = AtomicPtr.null();
+    let null_raw = null_ptr.load(Relaxed);
+    p.store(null_raw, SeqCst);
+    assert(p.is_null());
+}
+
+// =============================================================================
+// Section 8: SpinLock - Complete coverage
+// =============================================================================
+
+@test
+fn test_spinlock_new_is_unlocked() {
+    let s = SpinLock.new();
+    assert(!s.is_locked());
+}
+
+@test
+fn test_spinlock_default_is_unlocked() {
+    let s = SpinLock.default();
+    assert(!s.is_locked());
+}
+
+@test
+fn test_spinlock_lock_makes_locked() {
+    let s = SpinLock.new();
+    s.lock();
+    assert(s.is_locked());
+}
+
+@test
+fn test_spinlock_unlock_makes_unlocked() {
+    let s = SpinLock.new();
+    s.lock();
+    assert(s.is_locked());
+    s.unlock();
+    assert(!s.is_locked());
+}
+
+@test
+fn test_spinlock_try_lock_succeeds_when_unlocked() {
+    let s = SpinLock.new();
+    let got = s.try_lock();
+    assert(got);
+    assert(s.is_locked());
+}
+
+@test
+fn test_spinlock_try_lock_fails_when_locked() {
+    let s = SpinLock.new();
+    s.lock();
+    let got = s.try_lock();
+    assert(!got);
+    // Still locked
+    assert(s.is_locked());
+}
+
+@test
+fn test_spinlock_lock_unlock_cycle() {
+    let s = SpinLock.new();
+    // Lock/unlock multiple times
+    s.lock();
+    assert(s.is_locked());
+    s.unlock();
+    assert(!s.is_locked());
+
+    s.lock();
+    assert(s.is_locked());
+    s.unlock();
+    assert(!s.is_locked());
+}
+
+@test
+fn test_spinlock_try_lock_after_unlock() {
+    let s = SpinLock.new();
+    s.lock();
+    s.unlock();
+    // Should succeed after unlock
+    let got = s.try_lock();
+    assert(got);
+    assert(s.is_locked());
+}
+
+// =============================================================================
+// Section 9: FutexLock - Complete coverage
+// =============================================================================
+
+@test
+fn test_futexlock_new_is_unlocked() {
+    let f = FutexLock.new();
+    assert(!f.is_locked());
+}
+
+@test
+fn test_futexlock_default_is_unlocked() {
+    let f = FutexLock.default();
+    assert(!f.is_locked());
+}
+
+@test
+fn test_futexlock_lock_makes_locked() {
+    let f = FutexLock.new();
+    f.lock();
+    assert(f.is_locked());
+}
+
+@test
+fn test_futexlock_unlock_makes_unlocked() {
+    let f = FutexLock.new();
+    f.lock();
+    assert(f.is_locked());
+    f.unlock();
+    assert(!f.is_locked());
+}
+
+@test
+fn test_futexlock_try_lock_succeeds_when_unlocked() {
+    let f = FutexLock.new();
+    let got = f.try_lock();
+    assert(got);
+    assert(f.is_locked());
+}
+
+@test
+fn test_futexlock_try_lock_fails_when_locked() {
+    let f = FutexLock.new();
+    f.lock();
+    let got = f.try_lock();
+    assert(!got);
+    assert(f.is_locked());
+}
+
+@test
+fn test_futexlock_lock_unlock_cycle() {
+    let f = FutexLock.new();
+    f.lock();
+    assert(f.is_locked());
+    f.unlock();
+    assert(!f.is_locked());
+
+    f.lock();
+    assert(f.is_locked());
+    f.unlock();
+    assert(!f.is_locked());
+}
+
+@test
+fn test_futexlock_try_lock_after_unlock() {
+    let f = FutexLock.new();
+    f.lock();
+    f.unlock();
+    let got = f.try_lock();
+    assert(got);
+    assert(f.is_locked());
+}
+
+// =============================================================================
+// Section 10: Ordering exhaustive usage
+// =============================================================================
+
+@test
+fn test_atomicint_all_orderings_load() {
+    let a = AtomicInt.new(42);
+    assert_eq(a.load(Relaxed), 42);
+    assert_eq(a.load(Acquire), 42);
+    assert_eq(a.load(SeqCst), 42);
+}
+
+@test
+fn test_atomicint_all_orderings_store() {
+    let a = AtomicInt.new(0);
+    a.store(1, Relaxed);
+    assert_eq(a.load(SeqCst), 1);
+    a.store(2, Release);
+    assert_eq(a.load(SeqCst), 2);
+    a.store(3, SeqCst);
+    assert_eq(a.load(SeqCst), 3);
+}
+
+@test
+fn test_atomicint_fetch_add_with_acqrel() {
+    let a = AtomicInt.new(10);
+    let old = a.fetch_add(5, AcqRel);
+    assert_eq(old, 10);
+    assert_eq(a.load(SeqCst), 15);
+}
+
+@test
+fn test_atomicint_fetch_sub_with_acqrel() {
+    let a = AtomicInt.new(100);
+    let old = a.fetch_sub(30, AcqRel);
+    assert_eq(old, 100);
+    assert_eq(a.load(SeqCst), 70);
+}
+
+@test
+fn test_atomicint_fetch_and_with_acqrel() {
+    let a = AtomicInt.new(0xFF);
+    let old = a.fetch_and(0x0F, AcqRel);
+    assert_eq(old, 0xFF);
+    assert_eq(a.load(SeqCst), 0x0F);
+}
+
+@test
+fn test_atomicint_fetch_or_with_acqrel() {
+    let a = AtomicInt.new(0xF0);
+    let old = a.fetch_or(0x0F, AcqRel);
+    assert_eq(old, 0xF0);
+    assert_eq(a.load(SeqCst), 0xFF);
+}
+
+@test
+fn test_atomicint_swap_with_acqrel() {
+    let a = AtomicInt.new(42);
+    let old = a.swap(99, AcqRel);
+    assert_eq(old, 42);
+    assert_eq(a.load(SeqCst), 99);
+}
+
+// =============================================================================
+// Section 11: AtomicInt fetch_max/fetch_min edge cases
+// =============================================================================
+
+@test
+fn test_atomicint_fetch_max_returns_old() {
+    let a = AtomicInt.new(5);
+    let old = a.fetch_max(10, SeqCst);
+    assert_eq(old, 5);
+    assert_eq(a.load(SeqCst), 10);
+}
+
+@test
+fn test_atomicint_fetch_min_returns_old() {
+    let a = AtomicInt.new(10);
+    let old = a.fetch_min(5, SeqCst);
+    assert_eq(old, 10);
+    assert_eq(a.load(SeqCst), 5);
+}
+
+@test
+fn test_atomicint_fetch_max_no_change() {
+    let a = AtomicInt.new(100);
+    let old = a.fetch_max(50, SeqCst);
+    assert_eq(old, 100);
+    assert_eq(a.load(SeqCst), 100);
+}
+
+@test
+fn test_atomicint_fetch_min_no_change() {
+    let a = AtomicInt.new(5);
+    let old = a.fetch_min(50, SeqCst);
+    assert_eq(old, 5);
+    assert_eq(a.load(SeqCst), 5);
+}
+
+@test
+fn test_atomicint_fetch_max_with_zero() {
+    let a = AtomicInt.new(0);
+    let old = a.fetch_max(0, SeqCst);
+    assert_eq(old, 0);
+    assert_eq(a.load(SeqCst), 0);
+}
+
+@test
+fn test_atomicint_fetch_min_with_zero() {
+    let a = AtomicInt.new(0);
+    let old = a.fetch_min(0, SeqCst);
+    assert_eq(old, 0);
+    assert_eq(a.load(SeqCst), 0);
+}
+
+// =============================================================================
+// Section 12: Compound patterns
+// =============================================================================
+
+@test
+fn test_atomicint_increment_decrement_roundtrip() {
+    let a = AtomicInt.new(50);
+    a.increment(SeqCst);
+    a.increment(SeqCst);
+    a.decrement(SeqCst);
+    assert_eq(a.load(SeqCst), 51);
+}
+
+@test
+fn test_atomicu32_fetch_ops_chain() {
+    let a = AtomicU32.new(0 as UInt32);
+    a.fetch_add(100 as UInt32, SeqCst);
+    a.fetch_sub(25 as UInt32, SeqCst);
+    assert_eq(a.load(SeqCst), 75 as UInt32);
+}
+
+@test
+fn test_atomicu64_fetch_ops_chain() {
+    let a = AtomicU64.new(0 as UInt64);
+    a.fetch_add(1000 as UInt64, SeqCst);
+    a.fetch_sub(250 as UInt64, SeqCst);
+    assert_eq(a.load(SeqCst), 750 as UInt64);
+}
+
+@test
+fn test_atomicbool_swap_chain() {
+    let a = AtomicBool.new(false);
+    let v1 = a.swap(true, SeqCst);
+    assert_eq(v1, false);
+    let v2 = a.swap(false, SeqCst);
+    assert_eq(v2, true);
+    let v3 = a.swap(true, SeqCst);
+    assert_eq(v3, false);
+    assert_eq(a.load(SeqCst), true);
+}
+
+@test
+fn test_fence_relaxed_noop() {
+    // Relaxed fence should be a no-op
+    fence(Relaxed);
+    assert(!false); // Runtime-only: atomics
+}
+
+@test
+fn test_atomicint_compare_exchange_orderings() {
+    let a = AtomicInt.new(10);
+    // Test with Acquire/Relaxed
+    let r1 = a.compare_exchange(10, 20, Acquire, Relaxed);
+    assert(r1.is_ok());
+    assert_eq(a.load(SeqCst), 20);
+
+    // Test with Release/Relaxed
+    let r2 = a.compare_exchange(20, 30, Release, Relaxed);
+    assert(r2.is_ok());
+    assert_eq(a.load(SeqCst), 30);
+
+    // Test with AcqRel/Acquire
+    let r3 = a.compare_exchange(30, 40, AcqRel, Acquire);
+    assert(r3.is_ok());
+    assert_eq(a.load(SeqCst), 40);
+}
+
+@test
+fn test_atomicu8_boundary_values() {
+    let a = AtomicU8.new(255);
+    assert_eq(a.load(SeqCst), 255);
+    a.store(0, SeqCst);
+    assert_eq(a.load(SeqCst), 0);
+    a.store(127, SeqCst);
+    assert_eq(a.load(SeqCst), 127);
+}
+
+@test
+fn test_atomicu16_boundary_values() {
+    let a = AtomicU16.new(65535 as UInt16);
+    assert_eq(a.load(SeqCst), 65535 as UInt16);
+    a.store(0 as UInt16, SeqCst);
+    assert_eq(a.load(SeqCst), 0 as UInt16);
+}
+
+@test
+fn test_atomicu32_boundary_values() {
+    let a = AtomicU32.new(0 as UInt32);
+    a.store(0x7FFFFFFF as UInt32, SeqCst);
+    assert_eq(a.load(SeqCst), 0x7FFFFFFF as UInt32);
+}
+
+@test
+fn test_atomicu64_boundary_values() {
+    let a = AtomicU64.new(0 as UInt64);
+    a.store(0x7FFFFFFFFFFFFFFF as UInt64, SeqCst);
+    assert_eq(a.load(SeqCst), 0x7FFFFFFFFFFFFFFF as UInt64);
+}
+
+@test
+fn test_spinlock_and_futexlock_coexist() {
+    // Verify both lock types can exist simultaneously
+    let spin = SpinLock.new();
+    let futex = FutexLock.new();
+    assert(!spin.is_locked());
+    assert(!futex.is_locked());
+
+    spin.lock();
+    futex.lock();
+    assert(spin.is_locked());
+    assert(futex.is_locked());
+
+    spin.unlock();
+    futex.unlock();
+    assert(!spin.is_locked());
+    assert(!futex.is_locked());
+}

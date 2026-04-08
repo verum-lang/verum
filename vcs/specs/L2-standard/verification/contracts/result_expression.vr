@@ -1,0 +1,169 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, result
+// @timeout: 5000
+
+/// Tests for result expression in contracts
+/// References the return value of a function in postconditions
+
+/// Error type for division by zero
+type DivisionByZero is ();
+
+@verify(proof)
+fn identity(x: Int) -> Int {
+    contract#"
+        ensures result == x;
+    ";
+    x
+}
+
+@verify(proof)
+fn add(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result == a + b;
+    ";
+    a + b
+}
+
+@verify(proof)
+fn max(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result >= a && result >= b;
+        ensures result == a || result == b;
+    ";
+    if a >= b { a } else { b }
+}
+
+/// Result with bounds
+@verify(proof)
+fn clamp(value: Int, min: Int, max: Int) -> Int {
+    contract#"
+        requires min <= max;
+        ensures result >= min && result <= max;
+    ";
+    if value < min { min }
+    else if value > max { max }
+    else { value }
+}
+
+/// Result with option types
+@verify(proof)
+fn find_first<T: Eq>(list: &List<T>, target: &T) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < list.len() && list[idx] == *target,
+            None => forall i: Int. 0 <= i < list.len() implies list[i] != *target
+        };
+    ";
+    for i in 0..list.len() {
+        if list[i] == *target {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Result with Result types
+@verify(proof)
+fn safe_divide(a: Int, b: Int) -> Result<Int, DivisionByZero> {
+    contract#"
+        ensures match result {
+            Ok(val) => b != 0 && val == a / b,
+            Err(_) => b == 0
+        };
+    ";
+    if b == 0 {
+        Err(DivisionByZero)
+    } else {
+        Ok(a / b)
+    }
+}
+
+/// Result with complex types
+type Point is { x: Float, y: Float };
+
+@verify(proof)
+fn distance_from_origin(p: &Point) -> Float {
+    contract#"
+        ensures result >= 0.0;
+        ensures result * result == p.x * p.x + p.y * p.y;
+    ";
+    (p.x * p.x + p.y * p.y).sqrt()
+}
+
+/// Result in conditional ensures
+@verify(proof)
+fn abs(x: Int) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures x >= 0 implies result == x;
+        ensures x < 0 implies result == -x;
+    ";
+    if x >= 0 { x } else { -x }
+}
+
+/// Result compared to function calls
+fn square(x: Int) -> Int { x * x }
+
+@verify(proof)
+fn square_if_positive(x: Int) -> Int {
+    contract#"
+        ensures x > 0 implies result == square(x);
+        ensures x <= 0 implies result == 0;
+    ";
+    if x > 0 { square(x) } else { 0 }
+}
+
+/// Result with collection operations
+@verify(proof)
+fn filter_positive(list: &List<Int>) -> List<Int> {
+    contract#"
+        ensures forall i: Int. 0 <= i < result.len() implies result[i] > 0;
+        ensures result.len() <= list.len();
+        ensures forall x: Int. result.contains(&x) implies list.contains(&x) && x > 0;
+    ";
+    list.iter().filter(|&x| *x > 0).cloned().collect()
+}
+
+/// Result referring to itself (for idempotent operations)
+@verify(proof)
+fn to_uppercase(s: Text) -> Text {
+    contract#"
+        ensures result.len() == s.len();
+        ensures to_uppercase(result) == result;  // Idempotent
+    ";
+    s.to_uppercase()
+}
+
+/// Result with tuple returns
+@verify(proof)
+fn div_mod(a: Int, b: Int{!= 0}) -> (Int, Int) {
+    contract#"
+        requires b != 0;
+        ensures result.0 == a / b;
+        ensures result.1 == a % b;
+        ensures result.0 * b + result.1 == a;
+    ";
+    (a / b, a % b)
+}
+
+/// Result with named tuple fields
+@verify(proof)
+fn min_max(list: &List<Int>) -> (min: Int, max: Int) {
+    contract#"
+        requires list.len() > 0;
+        ensures result.min <= result.max;
+        ensures forall i: Int. 0 <= i < list.len() implies result.min <= list[i];
+        ensures forall i: Int. 0 <= i < list.len() implies result.max >= list[i];
+        ensures list.contains(&result.min);
+        ensures list.contains(&result.max);
+    ";
+    let mut min = list[0];
+    let mut max = list[0];
+    for x in list {
+        if *x < min { min = *x; }
+        if *x > max { max = *x; }
+    }
+    (min, max)
+}

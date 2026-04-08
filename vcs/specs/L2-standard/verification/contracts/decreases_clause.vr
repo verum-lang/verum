@@ -1,0 +1,168 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, contracts, termination, decreases
+// @description: Decreases clause for termination checking
+
+/// The `decreases` clause proves that recursive functions terminate
+/// by specifying a value that strictly decreases with each recursive call.
+
+@verify(proof)
+fn factorial(n: Int{>= 0}) -> Int{> 0} {
+    contract#"
+        requires n >= 0;
+        decreases n;
+        ensures result >= 1;
+    ";
+    if n == 0 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+@verify(proof)
+fn fibonacci(n: Int{>= 0}) -> Int{>= 0} {
+    contract#"
+        requires n >= 0;
+        decreases n;
+        ensures result >= 0;
+    ";
+    match n {
+        0 => 0,
+        1 => 1,
+        _ => fibonacci(n - 1) + fibonacci(n - 2),
+    }
+}
+
+/// Multi-argument decreases (lexicographic ordering)
+@verify(proof)
+fn ackermann(m: Int{>= 0}, n: Int{>= 0}) -> Int{> 0} {
+    contract#"
+        requires m >= 0 && n >= 0;
+        decreases (m, n);  // Lexicographic: m decreases first, then n
+        ensures result > 0;
+    ";
+    match (m, n) {
+        (0, _) => n + 1,
+        (_, 0) => ackermann(m - 1, 1),
+        _ => ackermann(m - 1, ackermann(m, n - 1)),
+    }
+}
+
+/// Decreases on data structure size
+@verify(proof)
+fn sum_list(list: List<Int>) -> Int {
+    contract#"
+        decreases list.len();
+    ";
+    match list.as_slice() {
+        [] => 0,
+        [head, ..tail] => head + sum_list(tail.to_list()),
+    }
+}
+
+/// Decreases on tree height
+type Tree<T> is
+    | Leaf(T)
+    | Node(Tree<T>, T, Tree<T>);
+
+implement Tree<T> {
+    @verify(proof)
+    fn height(&self) -> Int{>= 1} {
+        contract#"
+            decreases self;  // Structural recursion on tree
+            ensures result >= 1;
+        ";
+        match self {
+            Tree.Leaf(_) => 1,
+            Tree.Node(left, _, right) =>
+                1 + max(left.height(), right.height()),
+        }
+    }
+
+    @verify(proof)
+    fn count(&self) -> Int{>= 1} {
+        contract#"
+            decreases self;
+            ensures result >= 1;
+        ";
+        match self {
+            Tree.Leaf(_) => 1,
+            Tree.Node(left, _, right) =>
+                1 + left.count() + right.count(),
+        }
+    }
+}
+
+/// Mutual recursion with decreases
+@verify(proof)
+fn is_even(n: Int{>= 0}) -> Bool {
+    contract#"
+        requires n >= 0;
+        decreases n;
+    ";
+    if n == 0 { true }
+    else { is_odd(n - 1) }
+}
+
+@verify(proof)
+fn is_odd(n: Int{>= 0}) -> Bool {
+    contract#"
+        requires n >= 0;
+        decreases n;
+    ";
+    if n == 0 { false }
+    else { is_even(n - 1) }
+}
+
+/// Decreases with custom well-founded relation
+type Fuel is Int{>= 0};
+
+@verify(proof)
+fn bounded_loop<T>(
+    mut state: T,
+    step: fn(T) -> (T, Bool),
+    fuel: Fuel
+) -> T {
+    contract#"
+        decreases fuel;
+    ";
+    if fuel == 0 {
+        state
+    } else {
+        let (new_state, done) = step(state);
+        if done {
+            new_state
+        } else {
+            bounded_loop(new_state, step, fuel - 1)
+        }
+    }
+}
+
+/// Decreases on expression
+@verify(proof)
+fn gcd(a: Int{> 0}, b: Int{> 0}) -> Int{> 0} {
+    contract#"
+        requires a > 0 && b > 0;
+        decreases b;
+        ensures result > 0;
+        ensures divides(result, a) && divides(result, b);
+    ";
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+fn divides(d: Int, n: Int) -> Bool {
+    n % d == 0
+}
+
+fn main() {
+    assert(factorial(5) == 120);
+    assert(fibonacci(10) == 55);
+    assert(is_even(10) == true);
+    assert(is_odd(7) == true);
+}

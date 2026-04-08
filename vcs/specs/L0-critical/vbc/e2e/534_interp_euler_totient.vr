@@ -1,0 +1,130 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, euler_totient, phi, number_theory, coprime
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Euler's totient function phi(n): count of integers in [1,n] coprime to n.
+// Properties verified:
+//   phi(1)=1, phi(prime p)=p-1
+//   phi(p^k)=p^(k-1)*(p-1)
+//   phi(m*n)=phi(m)*phi(n) when gcd(m,n)=1
+//   sum_{d|n} phi(d) = n
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+// Compute phi(n) by counting integers in [1,n] coprime to n.
+fn phi_naive(n: Int) -> Int {
+    if n == 1 { return 1; }
+    let mut cnt = 0;
+    let mut k = 1;
+    while k <= n {
+        if gcd(k, n) == 1 { cnt = cnt + 1; }
+        k = k + 1;
+    }
+    cnt
+}
+
+// Compute phi(n) via prime factorisation (Euler's product formula).
+// phi(n) = n * product_{p|n} (1 - 1/p)
+// Computed as integer: phi = n; for each prime p dividing n: phi = phi / p * (p-1).
+fn phi_product(n: Int) -> Int {
+    let mut result = n;
+    let mut p = 2;
+    let mut m = n;
+    while p * p <= m {
+        if m % p == 0 {
+            while m % p == 0 { m = m / p; }
+            result = result / p * (p - 1);
+        }
+        p = p + 1;
+    }
+    if m > 1 { result = result / m * (m - 1); }
+    result
+}
+
+// Sum phi(d) for all divisors d of n should equal n.
+fn sum_phi_divisors(n: Int) -> Int {
+    let mut s = 0;
+    let mut d = 1;
+    while d <= n {
+        if n % d == 0 { s = s + phi_naive(d); }
+        d = d + 1;
+    }
+    s
+}
+
+fn test_small_values() {
+    assert_eq(phi_naive(1), 1);
+    assert_eq(phi_naive(2), 1);
+    assert_eq(phi_naive(3), 2);
+    assert_eq(phi_naive(4), 2);
+    assert_eq(phi_naive(6), 2);
+    assert_eq(phi_naive(10), 4);
+    assert_eq(phi_naive(12), 4);
+    print("small_values: ok");
+}
+
+fn test_primes() {
+    // phi(prime) = prime - 1
+    assert_eq(phi_naive(5),  4);
+    assert_eq(phi_naive(7),  6);
+    assert_eq(phi_naive(11), 10);
+    assert_eq(phi_naive(13), 12);
+    assert_eq(phi_naive(17), 16);
+    print("primes: ok");
+}
+
+fn test_product_formula() {
+    // Both methods must agree.
+    let mut n = 1;
+    while n <= 30 {
+        assert_eq(phi_naive(n), phi_product(n));
+        n = n + 1;
+    }
+    // A few larger values.
+    assert_eq(phi_product(36), 12);  // 36 = 2^2 * 3^2, phi = 36*(1/2)*(2/3) = 12
+    assert_eq(phi_product(100), 40); // 100 = 2^2 * 5^2, phi = 40
+    print("product_formula: ok");
+}
+
+fn test_multiplicativity() {
+    // phi is multiplicative: phi(m*n) = phi(m)*phi(n) when gcd(m,n)=1.
+    // gcd(4,9)=1: phi(36)=phi(4)*phi(9)=2*6=12
+    assert_eq(phi_product(4) * phi_product(9), phi_product(36));
+    // gcd(5,7)=1: phi(35)=phi(5)*phi(7)=4*6=24
+    assert_eq(phi_product(5) * phi_product(7), phi_product(35));
+    // gcd(8,15)=1: phi(120)=phi(8)*phi(15)=4*8=32
+    assert_eq(phi_product(8) * phi_product(15), phi_product(120));
+    print("multiplicativity: ok");
+}
+
+fn test_divisor_sum() {
+    // sum_{d|n} phi(d) = n for all n.
+    let mut n = 1;
+    while n <= 20 {
+        assert_eq(sum_phi_divisors(n), n);
+        n = n + 1;
+    }
+    print("divisor_sum: ok");
+}
+
+fn main() -> Int {
+    test_small_values();
+    test_primes();
+    test_product_formula();
+    test_multiplicativity();
+    test_divisor_sum();
+    print("[OK] 534_interp_euler_totient");
+    0
+}

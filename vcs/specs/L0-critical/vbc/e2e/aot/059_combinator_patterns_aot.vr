@@ -1,0 +1,162 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, combinators, higher-order, function-composition
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT combinator patterns (identity, const, flip, twice, etc.)
+
+// Identity combinator
+fn identity(x: Int) -> Int { x }
+
+// Constant combinator: returns a function that ignores its argument
+fn make_const(k: Int) -> fn(Int) -> Int {
+    |_x: Int| -> Int { k }
+}
+
+// Apply function twice
+fn twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+// Apply function n times
+fn iterate(f: fn(Int) -> Int, n: Int, x: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+// Compose two functions
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+// Fixed-point iteration: apply f until value stops changing
+fn fix_iterate(f: fn(Int) -> Int, x: Int) -> Int {
+    let mut prev = x;
+    let mut curr = f(x);
+    while curr != prev {
+        prev = curr;
+        curr = f(curr);
+    }
+    curr
+}
+
+// Power combinator: create f^n (f composed n times)
+fn power_fn(f: fn(Int) -> Int, n: Int) -> fn(Int) -> Int {
+    // We can't easily build composed closures in a loop without boxing,
+    // so we use iterate internally
+    let captured_n = n;
+    let captured_f = f;
+    |x: Int| -> Int {
+        let mut result = x;
+        let mut i = 0;
+        while i < captured_n {
+            result = captured_f(result);
+            i = i + 1;
+        }
+        result
+    }
+}
+
+// Conditional application: apply f if pred is true, else identity
+fn apply_if(pred: fn(Int) -> Bool, f: fn(Int) -> Int, x: Int) -> Int {
+    if pred(x) { f(x) } else { x }
+}
+
+// Map over range and reduce
+fn map_reduce(start: Int, end_val: Int, mapper: fn(Int) -> Int, reducer: fn(Int, Int) -> Int, init: Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end_val {
+        acc = reducer(acc, mapper(i));
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Identity
+    assert_eq(identity(42), 42);
+    assert_eq(identity(0), 0);
+
+    // Const
+    let always_5 = make_const(5);
+    assert_eq(always_5(0), 5);
+    assert_eq(always_5(999), 5);
+    assert_eq(always_5(-1), 5);
+
+    // Twice
+    assert_eq(twice(|x| x + 1, 5), 7);      // +1 twice: 5->6->7
+    assert_eq(twice(|x| x * 2, 3), 12);      // *2 twice: 3->6->12
+    assert_eq(twice(|x| x * x, 2), 16);      // square twice: 2->4->16
+
+    // Iterate
+    assert_eq(iterate(|x| x + 1, 0, 5), 5);   // 0 times = identity
+    assert_eq(iterate(|x| x + 1, 10, 0), 10);  // +1 ten times
+    assert_eq(iterate(|x| x * 2, 8, 1), 256);  // 2^8 = 256
+    assert_eq(iterate(|x| x + 3, 5, 0), 15);   // +3 five times
+
+    // Compose
+    let inc = |x: Int| -> Int { x + 1 };
+    let dbl = |x: Int| -> Int { x * 2 };
+    let inc_then_dbl = compose(dbl, inc);  // dbl(inc(x))
+    let dbl_then_inc = compose(inc, dbl);  // inc(dbl(x))
+
+    assert_eq(inc_then_dbl(5), 12);  // (5+1)*2 = 12
+    assert_eq(dbl_then_inc(5), 11);  // 5*2+1 = 11
+
+    // Triple compose
+    let triple_inc = compose(inc, compose(inc, inc));
+    assert_eq(triple_inc(10), 13);
+
+    // fix_iterate: Collatz-like convergence to 1
+    let collatz_step = |x: Int| -> Int {
+        if x <= 1 { 1 }
+        else if x % 2 == 0 { x / 2 }
+        else { 3 * x + 1 }
+    };
+    assert_eq(fix_iterate(collatz_step, 1), 1);
+    // Note: fix_iterate checks for value equality, so for Collatz
+    // it will converge when x reaches 1 (since collatz_step(1) = 1)
+    assert_eq(fix_iterate(collatz_step, 4), 1);  // 4->2->1
+
+    // Fixed point of integer division convergence
+    let half_round = |x: Int| -> Int { (x + 1) / 2 };
+    assert_eq(fix_iterate(half_round, 100), 1);  // Eventually converges to 1
+    assert_eq(fix_iterate(half_round, 1), 1);
+
+    // Power combinator
+    let add3 = |x: Int| -> Int { x + 3 };
+    let add3_5times = power_fn(add3, 5);
+    assert_eq(add3_5times(0), 15);   // +3 five times
+    assert_eq(add3_5times(10), 25);
+
+    let double_4times = power_fn(dbl, 4);
+    assert_eq(double_4times(1), 16);  // 2^4
+
+    // apply_if
+    assert_eq(apply_if(|x| x > 5, |x| x * 2, 10), 20);  // 10>5, so double
+    assert_eq(apply_if(|x| x > 5, |x| x * 2, 3), 3);     // 3<=5, so identity
+
+    // map_reduce: sum of squares
+    let sum_sq = map_reduce(1, 6, |x| x * x, |a, b| a + b, 0);
+    assert_eq(sum_sq, 55);  // 1+4+9+16+25
+
+    // map_reduce: product of increments
+    let prod_inc = map_reduce(1, 6, |x| x + 1, |a, b| a * b, 1);
+    assert_eq(prod_inc, 720);  // 2*3*4*5*6 = 720
+
+    // Compose identity preserves behavior
+    let f = compose(identity, |x| x * 3);
+    assert_eq(f(7), 21);
+
+    let g = compose(|x| x * 3, identity);
+    assert_eq(g(7), 21);
+
+    0
+}

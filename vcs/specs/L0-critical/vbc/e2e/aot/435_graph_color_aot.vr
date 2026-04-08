@@ -1,0 +1,153 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, graph, coloring, greedy
+// @timeout: 30000
+
+// Graph coloring using greedy algorithm on adjacency matrix
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Adjacency matrix: 8 rows stored as Arr8 each
+// For simplicity, encode as bitmask: adj[i] has bit j set if edge i-j exists
+fn has_edge(adj: Arr8, i: Int, j: Int) -> Int {
+    let row = get8(adj, i);
+    let bit = 1;
+    let mut shift = bit;
+    let mut k = 0;
+    while k < j {
+        shift = shift * 2;
+        k = k + 1;
+    }
+    if (row & shift) != 0 { 1 } else { 0 }
+}
+
+// Greedy coloring: assign smallest available color to each vertex
+fn greedy_color(adj: Arr8, n: Int) -> Arr8 {
+    let mut colors = Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let mut v = 0;
+    while v < n {
+        // Find used colors among colored neighbors
+        let mut used = new_arr8(); // used[c] = 1 if color c is used by neighbor
+        let mut u = 0;
+        while u < n {
+            if has_edge(adj, v, u) == 1 {
+                let c = get8(colors, u);
+                if c >= 0 {
+                    used = set8(used, c, 1);
+                }
+            }
+            u = u + 1;
+        }
+        // Find smallest available color
+        let mut c = 0;
+        while get8(used, c) == 1 {
+            c = c + 1;
+        }
+        colors = set8(colors, v, c);
+        v = v + 1;
+    }
+    colors
+}
+
+// Count number of colors used
+fn count_colors(colors: Arr8, n: Int) -> Int {
+    let mut mx = 0;
+    let mut i = 0;
+    while i < n {
+        let c = get8(colors, i);
+        if c + 1 > mx { mx = c + 1; }
+        i = i + 1;
+    }
+    mx
+}
+
+// Verify coloring is valid (no adjacent vertices share color)
+fn valid_coloring(adj: Arr8, colors: Arr8, n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if has_edge(adj, i, j) == 1 {
+                if get8(colors, i) == get8(colors, j) { return 0; }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_triangle() -> Int {
+    // K3: complete graph on 3 vertices
+    // adj[0] = 0b110 = 6, adj[1] = 0b101 = 5, adj[2] = 0b011 = 3
+    let adj = Arr8 { v0: 6, v1: 5, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let colors = greedy_color(adj, 3);
+    assert_eq(valid_coloring(adj, colors, 3), 1);
+    assert_eq(count_colors(colors, 3), 3); // K3 needs 3 colors
+    1
+}
+
+fn test_bipartite() -> Int {
+    // Path graph: 0-1-2-3
+    // adj[0]=0b0010=2, adj[1]=0b0101=5, adj[2]=0b1010=10, adj[3]=0b0100=4
+    let adj = Arr8 { v0: 2, v1: 5, v2: 10, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let colors = greedy_color(adj, 4);
+    assert_eq(valid_coloring(adj, colors, 4), 1);
+    assert_eq(count_colors(colors, 4), 2); // bipartite -> 2 colors
+    1
+}
+
+fn test_cycle_4() -> Int {
+    // C4: 0-1, 1-2, 2-3, 3-0
+    // adj[0]=0b1010=10, adj[1]=0b0101=5, adj[2]=0b1010=10, adj[3]=0b0101=5
+    let adj = Arr8 { v0: 10, v1: 5, v2: 10, v3: 5, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let colors = greedy_color(adj, 4);
+    assert_eq(valid_coloring(adj, colors, 4), 1);
+    assert_eq(count_colors(colors, 4), 2);
+    1
+}
+
+fn test_independent() -> Int {
+    // No edges
+    let adj = new_arr8();
+    let colors = greedy_color(adj, 4);
+    assert_eq(count_colors(colors, 4), 1); // all can be color 0
+    1
+}
+
+fn main() -> Int {
+    test_triangle();
+    test_bipartite();
+    test_cycle_4();
+    test_independent();
+    print("[OK] 435_graph_color_aot");
+    0
+}

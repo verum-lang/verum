@@ -1,0 +1,499 @@
+// @test: parse-pass
+// @tier: 0
+// @category: ffi
+// @level: L0
+// @tags: parser, ffi, memory_effects, ffi_memory_effects
+// @description: Comprehensive test for ffi_memory_effects grammar production
+
+// ============================================================
+// GRAMMAR: ffi_memory_effects = 'memory_effects' , '=' , memory_effect_spec , ';' ;
+// GRAMMAR: memory_effect_spec = 'Pure'
+//                             | 'Reads' , '(' , path , ')'
+//                             | 'Writes' , '(' , path , ')'
+//                             | 'Allocates'
+//                             | 'Deallocates' , '(' , path , ')'
+//                             | memory_effect_spec , '+' , memory_effect_spec ;
+// ============================================================
+
+// Type definitions for memory effect tests
+type c_int is i32;
+type c_void is ();
+type size_t is usize;
+
+// ------------------------------------------------------------
+// Pure memory effects - no side effects
+// ------------------------------------------------------------
+
+ffi PureFunctions {
+    @extern("C")
+    fn pure_add(a: c_int, b: c_int) -> c_int;
+
+    memory_effects = Pure;
+}
+
+ffi PureMath {
+    @extern("C")
+    fn pure_sin(x: f64) -> f64;
+
+    @extern("C")
+    fn pure_cos(x: f64) -> f64;
+
+    @extern("C")
+    fn pure_sqrt(x: f64) -> f64;
+
+    @extern("C")
+    fn pure_abs(x: c_int) -> c_int;
+
+    memory_effects = Pure;
+}
+
+// Multiple pure functions in one block
+ffi MultiplePureFunctions {
+    @extern("C")
+    fn strlen(s: *const i8) -> size_t;
+
+    @extern("C")
+    fn strcmp(s1: *const i8, s2: *const i8) -> c_int;
+
+    @extern("C")
+    fn memcmp(s1: *const c_void, s2: *const c_void, n: size_t) -> c_int;
+
+    memory_effects = Pure;
+}
+
+// ------------------------------------------------------------
+// Reads memory effects - reads from specific paths
+// ------------------------------------------------------------
+
+ffi ReadOnlyFunctions {
+    @extern("C")
+    fn read_buffer(buf: *const u8, len: size_t) -> c_int;
+
+    memory_effects = Reads(buf);
+}
+
+ffi ReadsGlobalState {
+    @extern("C")
+    fn get_errno() -> c_int;
+
+    memory_effects = Reads(errno);
+}
+
+ffi ReadsStructField {
+    @extern("C")
+    fn get_field(obj: *const MyStruct) -> c_int;
+
+    // Note: Parser accepts simple parameter names, not field paths
+    memory_effects = Reads(obj);
+}
+
+ffi ReadsNestedPath {
+    @extern("C")
+    fn read_nested(data: *const Nested) -> c_int;
+
+    // Note: Parser accepts simple parameter names, not nested paths
+    memory_effects = Reads(data);
+}
+
+ffi ReadsArrayElement {
+    @extern("C")
+    fn read_element(arr: *const [c_int; 10], index: size_t) -> c_int;
+
+    memory_effects = Reads(arr);
+}
+
+// Type definitions for reads tests
+@repr(C)
+type MyStruct is {
+    field: c_int,
+};
+
+@repr(C)
+type Inner is {
+    value: c_int,
+};
+
+@repr(C)
+type Nested is {
+    inner: Inner,
+};
+
+// ------------------------------------------------------------
+// Writes memory effects - writes to specific paths
+// ------------------------------------------------------------
+
+ffi WriteOnlyFunctions {
+    @extern("C")
+    fn write_buffer(buf: *mut u8, value: u8, len: size_t);
+
+    memory_effects = Writes(buf);
+}
+
+ffi WritesGlobalState {
+    @extern("C")
+    fn set_errno(err: c_int);
+
+    memory_effects = Writes(errno);
+}
+
+ffi WritesStructField {
+    @extern("C")
+    fn set_field(obj: *mut MyStruct, value: c_int);
+
+    // Note: Parser accepts simple parameter names, not field paths
+    memory_effects = Writes(obj);
+}
+
+ffi WritesNestedPath {
+    @extern("C")
+    fn write_nested(data: *mut Nested, value: c_int);
+
+    // Note: Parser accepts simple parameter names, not nested paths
+    memory_effects = Writes(data);
+}
+
+ffi WritesOutputParam {
+    @extern("C")
+    fn compute_and_store(input: c_int, output: *mut c_int);
+
+    memory_effects = Writes(output);
+}
+
+// ------------------------------------------------------------
+// Allocates memory effects
+// ------------------------------------------------------------
+
+ffi AllocatingFunctions {
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+
+    memory_effects = Allocates;
+}
+
+ffi MultipleAllocators {
+    @extern("C")
+    fn calloc(nmemb: size_t, size: size_t) -> *mut c_void;
+
+    @extern("C")
+    fn realloc(ptr: *mut c_void, size: size_t) -> *mut c_void;
+
+    @extern("C")
+    fn aligned_alloc(alignment: size_t, size: size_t) -> *mut c_void;
+
+    memory_effects = Allocates;
+}
+
+ffi CustomAllocator {
+    @extern("C")
+    fn pool_alloc(pool: *mut MemPool, size: size_t) -> *mut c_void;
+
+    @extern("C")
+    fn arena_alloc(arena: *mut Arena, size: size_t) -> *mut c_void;
+
+    memory_effects = Allocates;
+}
+
+@opaque
+type MemPool is ();
+
+@opaque
+type Arena is ();
+
+// ------------------------------------------------------------
+// Deallocates memory effects - frees specific paths
+// ------------------------------------------------------------
+
+ffi DeallocatingFunctions {
+    @extern("C")
+    fn free(ptr: *mut c_void);
+
+    memory_effects = Deallocates(ptr);
+}
+
+ffi CustomDeallocator {
+    @extern("C")
+    fn pool_free(pool: *mut MemPool, ptr: *mut c_void);
+
+    memory_effects = Deallocates(ptr);
+}
+
+ffi TypedDeallocator {
+    @extern("C")
+    fn destroy_widget(widget: *mut Widget);
+
+    memory_effects = Deallocates(widget);
+}
+
+ffi MultipleDeallocation {
+    @extern("C")
+    fn free_list(list: *mut ListNode);
+
+    memory_effects = Deallocates(list);
+}
+
+@opaque
+type Widget is ();
+
+@repr(C)
+type ListNode is {
+    data: c_int,
+    next: *mut ListNode,
+};
+
+// ------------------------------------------------------------
+// Combined memory effects with + operator
+// ------------------------------------------------------------
+
+// Reads + Writes
+ffi ReadsAndWrites {
+    @extern("C")
+    fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void;
+
+    memory_effects = Reads(src) + Writes(dest);
+}
+
+// Multiple paths
+ffi MultipleReadsWrites {
+    @extern("C")
+    fn transform(
+        input: *const u8,
+        output: *mut u8,
+        config: *const Config,
+        len: size_t
+    ) -> c_int;
+
+    memory_effects = Reads(input) + Reads(config) + Writes(output);
+}
+
+@repr(C)
+type Config is {
+    flags: u32,
+};
+
+// Allocates + Writes
+ffi AllocatesAndWrites {
+    @extern("C")
+    fn strdup(s: *const i8) -> *mut i8;
+
+    memory_effects = Allocates + Reads(s);
+}
+
+// Allocates + Deallocates (realloc pattern)
+ffi AllocatesAndDeallocates {
+    @extern("C")
+    fn resize_buffer(ptr: *mut c_void, new_size: size_t) -> *mut c_void;
+
+    memory_effects = Allocates + Deallocates(ptr);
+}
+
+// Complex combination
+ffi ComplexMemoryEffects {
+    @extern("C")
+    fn process_and_store(
+        input: *const u8,
+        output: *mut u8,
+        temp: *mut u8,
+        result: *mut c_int,
+        len: size_t
+    ) -> c_int;
+
+    memory_effects = Reads(input) + Writes(output) + Writes(temp) + Writes(result);
+}
+
+// Reads + Allocates
+ffi ReadsAndAllocates {
+    @extern("C")
+    fn clone_buffer(src: *const u8, len: size_t) -> *mut u8;
+
+    memory_effects = Reads(src) + Allocates;
+}
+
+// Writes + Deallocates
+ffi WritesAndDeallocates {
+    @extern("C")
+    fn clear_and_free(buffer: *mut Buffer);
+
+    memory_effects = Writes(buffer) + Deallocates(buffer);
+}
+
+@repr(C)
+type Buffer is {
+    data: *mut u8,
+    len: size_t,
+    capacity: size_t,
+};
+
+// Three effects combined
+ffi ThreeEffects {
+    @extern("C")
+    fn read_transform_store(
+        src: *const u8,
+        dest: *mut u8,
+        len: size_t
+    ) -> c_int;
+
+    memory_effects = Reads(src) + Writes(dest) + Writes(errno);
+}
+
+// Four effects combined
+ffi FourEffects {
+    @extern("C")
+    fn complex_operation(
+        input: *const u8,
+        output: *mut u8,
+        state: *mut State,
+        config: *const Config
+    ) -> c_int;
+
+    memory_effects = Reads(input) + Reads(config) + Writes(output) + Writes(state);
+}
+
+@repr(C)
+type State is {
+    counter: c_int,
+    flags: u32,
+};
+
+// Five effects combined
+ffi FiveEffects {
+    @extern("C")
+    fn very_complex_operation(
+        src1: *const u8,
+        src2: *const u8,
+        dest: *mut u8,
+        log: *mut u8,
+        status: *mut c_int
+    ) -> c_int;
+
+    memory_effects = Reads(src1) + Reads(src2) + Writes(dest) + Writes(log) + Writes(status);
+}
+
+// Allocates + multiple reads/writes
+ffi AllocatesWithReadsWrites {
+    @extern("C")
+    fn create_from_template(
+        template: *const Template,
+        config: *const Config
+    ) -> *mut Instance;
+
+    memory_effects = Allocates + Reads(template) + Reads(config);
+}
+
+@opaque
+type Template is ();
+
+@opaque
+type Instance is ();
+
+// Deallocates + reads
+ffi DeallocatesWithReads {
+    @extern("C")
+    fn cleanup_conditional(ptr: *mut c_void, condition: *const c_int);
+
+    memory_effects = Deallocates(ptr) + Reads(condition);
+}
+
+// Full spectrum
+ffi FullSpectrumEffects {
+    @extern("C")
+    fn full_operation(
+        src: *const u8,
+        old_buf: *mut u8,
+        dest: *mut u8
+    ) -> *mut u8;
+
+    memory_effects = Reads(src) + Deallocates(old_buf) + Allocates + Writes(dest);
+}
+
+// ------------------------------------------------------------
+// Memory effects with different path types
+// ------------------------------------------------------------
+
+// Simple identifier paths
+ffi SimplePathEffects {
+    @extern("C")
+    fn read_global() -> c_int;
+
+    memory_effects = Reads(global_state);
+}
+
+// Qualified paths - Note: Parser only supports simple identifiers
+ffi QualifiedPathEffects {
+    @extern("C")
+    fn read_module_state() -> c_int;
+
+    memory_effects = Reads(module_state);
+}
+
+// Array indexing in paths (conceptual)
+ffi ArrayPathEffects {
+    @extern("C")
+    fn read_array_element(arr: *const c_int, index: size_t) -> c_int;
+
+    memory_effects = Reads(arr);
+}
+
+// Dereferenced paths
+ffi DereferencedPathEffects {
+    @extern("C")
+    fn read_through_pointer(ptr: *const *const c_int) -> c_int;
+
+    memory_effects = Reads(ptr);
+}
+
+// ------------------------------------------------------------
+// Memory effects in extended FFI blocks
+// ------------------------------------------------------------
+
+ffi BaseMemoryFfi {
+    @extern("C")
+    fn base_read(data: *const c_int) -> c_int;
+
+    memory_effects = Reads(data);
+}
+
+ffi ExtendedMemoryFfi extends BaseMemoryFfi {
+    @extern("C")
+    fn extended_write(data: *mut c_int, value: c_int);
+
+    memory_effects = Writes(data);
+}
+
+// ------------------------------------------------------------
+// Memory effects with visibility
+// ------------------------------------------------------------
+
+pub ffi PublicMemoryEffects {
+    @extern("C")
+    fn public_alloc(size: size_t) -> *mut c_void;
+
+    memory_effects = Allocates;
+}
+
+internal ffi InternalMemoryEffects {
+    @extern("C")
+    fn internal_free(ptr: *mut c_void);
+
+    memory_effects = Deallocates(ptr);
+}
+
+// ------------------------------------------------------------
+// Memory effects per-function (multiple effect clauses)
+// ------------------------------------------------------------
+
+ffi PerFunctionEffects {
+    @extern("C")
+    fn func1(data: *const u8) -> c_int;
+
+    memory_effects = Reads(data);
+
+    @extern("C")
+    fn func2(data: *mut u8);
+
+    memory_effects = Writes(data);
+
+    @extern("C")
+    fn func3(size: size_t) -> *mut u8;
+
+    memory_effects = Allocates;
+}

@@ -1,0 +1,612 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: compilation, codegen, llvm, speed
+// @description: Code generation performance benchmark (target: > 50K LOC/sec)
+
+/// Code Generation Performance Benchmark
+///
+/// This benchmark measures the throughput of the Verum code generator.
+/// Code generation produces LLVM IR from typed AST.
+///
+/// Target: > 50,000 lines of code per second
+///
+/// Codegen characteristics:
+/// - LLVM IR generation via Inkwell
+/// - CBGR instrumentation insertion
+/// - Optimization passes (O0, O1, O2, O3)
+/// - Native code emission
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const TARGET_LOC_PER_SEC: Int = 50_000;
+const SMALL_LOC: Int = 1_000;
+const MEDIUM_LOC: Int = 10_000;
+const LARGE_LOC: Int = 50_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Code Generation Performance");
+
+    // Basic codegen benchmarks
+    results.add(benchmark_simple_codegen());
+    results.add(benchmark_generic_codegen());
+    results.add(benchmark_cbgr_instrumentation());
+
+    // Scale benchmarks
+    results.add(benchmark_small_project_codegen());
+    results.add(benchmark_medium_project_codegen());
+    results.add(benchmark_large_project_codegen());
+
+    // Optimization level comparison
+    results.add(benchmark_opt_level_o0());
+    results.add(benchmark_opt_level_o1());
+    results.add(benchmark_opt_level_o2());
+    results.add(benchmark_opt_level_o3());
+
+    // Specific codegen features
+    results.add(benchmark_async_codegen());
+    results.add(benchmark_context_codegen());
+    results.add(benchmark_native_emission());
+
+    results.report();
+    assert(results.all_pass(), "Codegen performance below target");
+}
+
+/// Generate simple function code
+fn generate_simple_functions(count: Int) -> TypedAst {
+    let mut source = Text.with_capacity(count * 100);
+    source.push_str("module simple_codegen;\n\n");
+
+    for i in 0..count {
+        source.push_str(&format(
+            "fn add_{}(x: Int, y: Int) -> Int {{
+    x + y
+}}
+
+fn mul_{}(x: Int, y: Int) -> Int {{
+    x * y
+}}
+
+", i, i));
+    }
+
+    let ast = compiler.parse(&source);
+    compiler.typecheck(ast)
+}
+
+/// Benchmark: Simple function codegen
+fn benchmark_simple_codegen() -> BenchmarkResult {
+    let typed_ast = generate_simple_functions(100);
+    let loc = typed_ast.line_count();
+    let iterations = 50;
+
+    for _ in 0..5 {
+        black_box(codegen(&typed_ast, OptLevel.O0));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O0));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "simple_codegen",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Generate generic function code
+fn generate_generic_functions(count: Int) -> TypedAst {
+    let mut source = Text.new();
+    source.push_str("module generic_codegen;\n\n");
+
+    for i in 0..count {
+        source.push_str(&format(
+            "fn swap_{}<T>(a: &mut T, b: &mut T) {{
+    let temp = *a;
+    *a = *b;
+    *b = temp;
+}}
+
+fn identity_{}<T: Clone>(x: T) -> T {{
+    x.clone()
+}}
+
+", i, i));
+    }
+
+    let ast = compiler.parse(&source);
+    compiler.typecheck(ast)
+}
+
+/// Benchmark: Generic function codegen (monomorphization)
+fn benchmark_generic_codegen() -> BenchmarkResult {
+    let typed_ast = generate_generic_functions(50);
+    let loc = typed_ast.line_count();
+    let iterations = 30;
+
+    for _ in 0..3 {
+        black_box(codegen(&typed_ast, OptLevel.O0));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O0));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    // Generic codegen involves monomorphization overhead
+    let target = TARGET_LOC_PER_SEC as Float * 0.8;
+
+    BenchmarkResult {
+        name: "generic_codegen",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: target,
+        passed: loc_per_sec > target,
+    }
+}
+
+/// Generate code requiring CBGR instrumentation
+fn generate_cbgr_code(refs: Int) -> TypedAst {
+    let mut source = Text.new();
+    source.push_str("module cbgr_codegen;\n\n");
+
+    for i in 0..refs {
+        source.push_str(&format(
+            "fn use_ref_{}(data: Heap<Int>) -> Int {{
+    let ref_data = &*data;
+    *ref_data + {}
+}}
+
+fn chain_refs_{}() {{
+    let a = Heap.new(1);
+    let b = Heap.new(&*a);
+    let c = Heap.new(&*b);
+    let val = ***c;
+}}
+
+", i, i, i));
+    }
+
+    let ast = compiler.parse(&source);
+    compiler.typecheck(ast)
+}
+
+/// Benchmark: CBGR instrumentation insertion
+fn benchmark_cbgr_instrumentation() -> BenchmarkResult {
+    let typed_ast = generate_cbgr_code(50);
+    let loc = typed_ast.line_count();
+    let iterations = 30;
+
+    for _ in 0..3 {
+        black_box(codegen(&typed_ast, OptLevel.O0));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O0));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    // CBGR instrumentation adds some overhead
+    let target = TARGET_LOC_PER_SEC as Float * 0.9;
+
+    BenchmarkResult {
+        name: "cbgr_instrumentation",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: target,
+        passed: loc_per_sec > target,
+    }
+}
+
+/// Generate project of specified size
+fn generate_project(loc: Int) -> TypedAst {
+    let functions = loc / 10;
+    generate_simple_functions(functions)
+}
+
+/// Benchmark: Small project codegen (~1K LOC)
+fn benchmark_small_project_codegen() -> BenchmarkResult {
+    let typed_ast = generate_project(SMALL_LOC);
+    let loc = typed_ast.line_count();
+    let iterations = 20;
+
+    for _ in 0..2 {
+        black_box(codegen(&typed_ast, OptLevel.O2));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O2));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "small_project_1k",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Benchmark: Medium project codegen (~10K LOC)
+fn benchmark_medium_project_codegen() -> BenchmarkResult {
+    let typed_ast = generate_project(MEDIUM_LOC);
+    let loc = typed_ast.line_count();
+    let iterations = 5;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O2));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "medium_project_10k",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Benchmark: Large project codegen (~50K LOC)
+fn benchmark_large_project_codegen() -> BenchmarkResult {
+    let typed_ast = generate_project(LARGE_LOC);
+    let loc = typed_ast.line_count();
+    let iterations = 2;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O2));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "large_project_50k",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Benchmark: Codegen with O0 (no optimization)
+fn benchmark_opt_level_o0() -> BenchmarkResult {
+    let typed_ast = generate_project(MEDIUM_LOC);
+    let loc = typed_ast.line_count();
+    let iterations = 5;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O0));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    // O0 should be fastest
+    let target = TARGET_LOC_PER_SEC as Float * 1.5;
+
+    BenchmarkResult {
+        name: "opt_level_o0",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: target,
+        passed: loc_per_sec > target,
+    }
+}
+
+/// Benchmark: Codegen with O1 (basic optimization)
+fn benchmark_opt_level_o1() -> BenchmarkResult {
+    let typed_ast = generate_project(MEDIUM_LOC);
+    let loc = typed_ast.line_count();
+    let iterations = 5;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O1));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "opt_level_o1",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Benchmark: Codegen with O2 (standard optimization)
+fn benchmark_opt_level_o2() -> BenchmarkResult {
+    let typed_ast = generate_project(MEDIUM_LOC);
+    let loc = typed_ast.line_count();
+    let iterations = 5;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O2));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "opt_level_o2",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Benchmark: Codegen with O3 (aggressive optimization)
+fn benchmark_opt_level_o3() -> BenchmarkResult {
+    let typed_ast = generate_project(MEDIUM_LOC);
+    let loc = typed_ast.line_count();
+    let iterations = 3;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O3));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    // O3 is slower but still should meet baseline
+    let target = TARGET_LOC_PER_SEC as Float * 0.5;
+
+    BenchmarkResult {
+        name: "opt_level_o3",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: target,
+        passed: loc_per_sec > target,
+    }
+}
+
+/// Generate async code
+fn generate_async_code(functions: Int) -> TypedAst {
+    let mut source = Text.new();
+    source.push_str("module async_codegen;\n\n");
+
+    for i in 0..functions {
+        source.push_str(&format(
+            "async fn fetch_{}(url: Text) -> Result<Text, Error> {{
+    let response = http.get(url).await?;
+    let body = response.text().await?;
+    Ok(body)
+}}
+
+async fn process_{}() {{
+    let urls = [\"a\", \"b\", \"c\"];
+    let futures = urls.iter().map(|u| fetch_{}(u.to_string()));
+    let results = join_all(futures).await;
+}}
+
+", i, i, i));
+    }
+
+    let ast = compiler.parse(&source);
+    compiler.typecheck(ast)
+}
+
+/// Benchmark: Async function codegen
+fn benchmark_async_codegen() -> BenchmarkResult {
+    let typed_ast = generate_async_code(30);
+    let loc = typed_ast.line_count();
+    let iterations = 20;
+
+    for _ in 0..2 {
+        black_box(codegen(&typed_ast, OptLevel.O2));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O2));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    // Async codegen involves state machine generation
+    let target = TARGET_LOC_PER_SEC as Float * 0.7;
+
+    BenchmarkResult {
+        name: "async_codegen",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: target,
+        passed: loc_per_sec > target,
+    }
+}
+
+/// Generate code with context usage
+fn generate_context_code(functions: Int) -> TypedAst {
+    let mut source = Text.new();
+    source.push_str("module context_codegen;\n\n");
+
+    source.push_str("context Logger { fn log(msg: Text); }\n\n");
+
+    for i in 0..functions {
+        source.push_str(&format(
+            "fn logged_op_{}(x: Int) -> Int using [Logger] {{
+    Logger.log(\"Starting operation {}\");
+    let result = x * 2;
+    Logger.log(\"Completed operation {}\");
+    result
+}}
+
+", i, i, i));
+    }
+
+    let ast = compiler.parse(&source);
+    compiler.typecheck(ast)
+}
+
+/// Benchmark: Context-aware codegen
+fn benchmark_context_codegen() -> BenchmarkResult {
+    let typed_ast = generate_context_code(50);
+    let loc = typed_ast.line_count();
+    let iterations = 30;
+
+    for _ in 0..3 {
+        black_box(codegen(&typed_ast, OptLevel.O2));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(codegen(&typed_ast, OptLevel.O2));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let total_loc = loc * iterations;
+    let loc_per_sec = (total_loc as Float / elapsed_ms as Float) * 1000.0;
+
+    BenchmarkResult {
+        name: "context_codegen",
+        metric: "LOC/sec",
+        value: loc_per_sec,
+        target: TARGET_LOC_PER_SEC as Float,
+        passed: loc_per_sec > TARGET_LOC_PER_SEC as Float,
+    }
+}
+
+/// Benchmark: Native code emission (LLVM -> object file)
+fn benchmark_native_emission() -> BenchmarkResult {
+    let typed_ast = generate_project(MEDIUM_LOC);
+    let llvm_module = codegen(&typed_ast, OptLevel.O2);
+    let iterations = 5;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(emit_object(&llvm_module));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    // Native emission for 10K LOC should be < 500ms
+    let target = 500.0;
+
+    BenchmarkResult {
+        name: "native_emission",
+        metric: "ms/10K LOC",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+type OptLevel is O0 | O1 | O2 | O3;
+
+fn codegen(ast: &TypedAst, opt: OptLevel) -> LlvmModule {
+    compiler.codegen(ast, opt)
+}
+
+fn emit_object(mod_ref: &LlvmModule) -> List<u8> {
+    compiler.emit_object(mod_ref)
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

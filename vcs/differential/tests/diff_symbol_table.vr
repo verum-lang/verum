@@ -1,0 +1,195 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, map, symbol-table
+// @timeout: 10000
+// @description: Symbol table operations must be consistent across tiers
+
+/// Symbol table operations for differential testing.
+/// Tests Map insert/get/remove sequences, key ordering, and collision handling.
+
+fn main() -> Int {
+    test_insert_get_sequence();
+    test_overwrite_and_remove();
+    test_key_ordering();
+    test_collision_handling();
+    test_bulk_operations();
+    test_nested_symbol_tables();
+    0
+}
+
+/// Insert then get — values must match
+fn test_insert_get_sequence() {
+    print("=== Insert/Get Sequence ===");
+
+    let mut table: Map<Text, Int> = Map.new();
+    table.insert("alpha", 1);
+    table.insert("beta", 2);
+    table.insert("gamma", 3);
+    table.insert("delta", 4);
+    table.insert("epsilon", 5);
+
+    print(f"alpha = {table.get('alpha')}");
+    print(f"beta = {table.get('beta')}");
+    print(f"gamma = {table.get('gamma')}");
+    print(f"delta = {table.get('delta')}");
+    print(f"epsilon = {table.get('epsilon')}");
+    print(f"len = {table.len()}");
+}
+
+/// Overwrite existing keys and remove entries
+fn test_overwrite_and_remove() {
+    print("\n=== Overwrite and Remove ===");
+
+    let mut table: Map<Text, Int> = Map.new();
+    table.insert("x", 10);
+    table.insert("y", 20);
+    table.insert("z", 30);
+
+    // Overwrite
+    table.insert("x", 100);
+    table.insert("y", 200);
+    print(f"x after overwrite = {table.get('x')}");
+    print(f"y after overwrite = {table.get('y')}");
+    print(f"z unchanged = {table.get('z')}");
+
+    // Remove
+    let removed = table.remove("y");
+    print(f"removed y = {removed}");
+    print(f"len after remove = {table.len()}");
+    print(f"contains y = {table.contains_key('y')}");
+    print(f"contains x = {table.contains_key('x')}");
+}
+
+/// Key ordering must be deterministic
+fn test_key_ordering() {
+    print("\n=== Key Ordering ===");
+
+    let mut table: Map<Int, Text> = Map.new();
+    let keys = [50, 20, 80, 10, 40, 90, 30, 70, 60];
+
+    for k in keys {
+        table.insert(k, f"val_{k}");
+    }
+
+    // Verify all entries present
+    for k in keys {
+        print(f"key {k} = {table.get(k)}");
+    }
+    print(f"total entries = {table.len()}");
+}
+
+/// Handling of many entries that may collide internally
+fn test_collision_handling() {
+    print("\n=== Collision Handling ===");
+
+    let mut table: Map<Int, Int> = Map.new();
+
+    // Insert entries that might hash to similar buckets
+    let mut i = 0;
+    while i < 100 {
+        table.insert(i * 17, i);
+        i = i + 1;
+    }
+
+    // Verify all entries retrievable
+    let mut found = 0;
+    i = 0;
+    while i < 100 {
+        let val = table.get(i * 17);
+        if val == i {
+            found = found + 1;
+        }
+        i = i + 1;
+    }
+    print(f"found {found} of 100 entries");
+
+    // Remove every other entry
+    i = 0;
+    while i < 100 {
+        if i % 2 == 0 {
+            table.remove(i * 17);
+        }
+        i = i + 1;
+    }
+    print(f"len after removing 50 = {table.len()}");
+
+    // Verify remaining entries still accessible
+    let mut remaining = 0;
+    i = 0;
+    while i < 100 {
+        if i % 2 != 0 {
+            let val = table.get(i * 17);
+            if val == i {
+                remaining = remaining + 1;
+            }
+        }
+        i = i + 1;
+    }
+    print(f"remaining accessible = {remaining}");
+}
+
+/// Bulk insert/remove/re-insert
+fn test_bulk_operations() {
+    print("\n=== Bulk Operations ===");
+
+    let mut table: Map<Text, Int> = Map.new();
+
+    // Bulk insert
+    let mut i = 0;
+    while i < 50 {
+        table.insert(f"key_{i}", i * i);
+        i = i + 1;
+    }
+    print(f"after 50 inserts: len = {table.len()}");
+
+    // Bulk remove first 25
+    i = 0;
+    while i < 25 {
+        table.remove(f"key_{i}");
+        i = i + 1;
+    }
+    print(f"after 25 removes: len = {table.len()}");
+
+    // Re-insert with different values
+    i = 0;
+    while i < 25 {
+        table.insert(f"key_{i}", i * 10);
+        i = i + 1;
+    }
+    print(f"after re-insert: len = {table.len()}");
+
+    // Spot check values
+    print(f"key_0 = {table.get('key_0')}");
+    print(f"key_10 = {table.get('key_10')}");
+    print(f"key_30 = {table.get('key_30')}");
+    print(f"key_49 = {table.get('key_49')}");
+}
+
+/// Nested symbol tables (scope simulation)
+fn test_nested_symbol_tables() {
+    print("\n=== Nested Symbol Tables ===");
+
+    // Outer scope
+    let mut outer: Map<Text, Int> = Map.new();
+    outer.insert("a", 1);
+    outer.insert("b", 2);
+
+    // Inner scope shadows outer
+    let mut inner: Map<Text, Int> = Map.new();
+    inner.insert("b", 20);
+    inner.insert("c", 30);
+
+    // Lookup with inner-first fallback to outer
+    fn lookup(key: Text, inner: &Map<Text, Int>, outer: &Map<Text, Int>) -> Int {
+        if inner.contains_key(key) {
+            inner.get(key)
+        } else {
+            outer.get(key)
+        }
+    }
+
+    print(f"a (outer only) = {lookup('a', &inner, &outer)}");
+    print(f"b (shadowed) = {lookup('b', &inner, &outer)}");
+    print(f"c (inner only) = {lookup('c', &inner, &outer)}");
+}

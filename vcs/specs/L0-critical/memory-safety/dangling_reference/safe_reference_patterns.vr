@@ -1,0 +1,43 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, dangling-reference, safe-pattern
+// @description: Tests safe reference patterns that prevent dangling
+
+fn main() {
+    // Pattern 1: Reference within valid scope
+    let outer_val = 42;
+    {
+        let inner_ref = &outer_val;
+        assert(*inner_ref == 42);
+    }
+    // inner_ref dropped before outer_val - safe
+
+    // Pattern 2: Return owned data, not references
+    let result = create_owned();
+    assert(result == 100);
+
+    // Pattern 3: Use indices instead of references for collections
+    let items: List<Int> = [1, 2, 3, 4, 5];
+    let idx = 0;
+    let mut copy = items[idx];  // Copy, not reference
+    // items can be mutated without invalidating copy
+
+    // Pattern 4: Clone when lifetime is uncertain
+    let original = Text.from("hello");
+    let cloned = original.clone();
+    drop(original);  // original gone
+    assert(cloned == "hello");  // cloned still valid
+
+    // Pattern 5: Use Heap for shared ownership
+    let shared = Shared.new(42);
+    let shared2 = shared.clone();
+    assert(*shared == *shared2);
+
+    print("Safe reference patterns test passed");
+}
+
+fn create_owned() -> Int {
+    let local = 100;
+    local  // Return by value, not reference
+}

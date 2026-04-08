@@ -1,0 +1,219 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, floyd-warshall, shortest-path
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Floyd-Warshall all-pairs shortest paths on a 4x4 adjacency
+// matrix. Uses INF=999999 for unreachable. Verify distances between all node pairs.
+
+// =============================================================================
+// Arr16 for 4x4 distance matrix (16 entries)
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn dist_get(m: Arr16, i: Int, j: Int) -> Int {
+    a16_get(m, i * 4 + j)
+}
+
+fn dist_set(m: Arr16, i: Int, j: Int, v: Int) -> Arr16 {
+    a16_set(m, i * 4 + j, v)
+}
+
+// =============================================================================
+// Initialize distance matrix with INF everywhere, 0 on diagonal
+// =============================================================================
+
+fn mat_init_inf(n: Int) -> Arr16 {
+    let inf = 999999;
+    let mut m = Arr16 {
+        e0: inf, e1: inf, e2: inf, e3: inf,
+        e4: inf, e5: inf, e6: inf, e7: inf,
+        e8: inf, e9: inf, e10: inf, e11: inf,
+        e12: inf, e13: inf, e14: inf, e15: inf
+    };
+    let mut i = 0;
+    while i < n {
+        m = dist_set(m, i, i, 0);
+        i = i + 1;
+    }
+    m
+}
+
+// =============================================================================
+// Floyd-Warshall algorithm
+// =============================================================================
+
+fn floyd_warshall(m: Arr16, n: Int) -> Arr16 {
+    let mut d = m;
+    let mut k = 0;
+    while k < n {
+        let mut i = 0;
+        while i < n {
+            let mut j = 0;
+            while j < n {
+                let via_k = dist_get(d, i, k) + dist_get(d, k, j);
+                let direct = dist_get(d, i, j);
+                if via_k < direct {
+                    d = dist_set(d, i, j, via_k);
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        k = k + 1;
+    }
+    d
+}
+
+// =============================================================================
+// Test 1: Simple triangle graph
+//   Edges: 0-1: 2, 1-2: 3, 0-2: 6
+//   Shortest 0->2 is via 1: 2+3=5
+// =============================================================================
+
+fn test_triangle() {
+    let mut m = mat_init_inf(3);
+    m = dist_set(m, 0, 1, 2);
+    m = dist_set(m, 1, 0, 2);
+    m = dist_set(m, 1, 2, 3);
+    m = dist_set(m, 2, 1, 3);
+    m = dist_set(m, 0, 2, 6);
+    m = dist_set(m, 2, 0, 6);
+
+    let d = floyd_warshall(m, 3);
+    assert_eq(dist_get(d, 0, 0), 0);
+    assert_eq(dist_get(d, 0, 1), 2);
+    assert_eq(dist_get(d, 0, 2), 5);
+    assert_eq(dist_get(d, 1, 2), 3);
+    assert_eq(dist_get(d, 2, 0), 5);
+}
+
+// =============================================================================
+// Test 2: Directed weighted graph with 4 nodes
+//   0 -> 1: 3, 0 -> 2: 7, 1 -> 3: 2, 2 -> 3: 1
+//   Shortest 0->3: min(0->1->3=5, 0->2->3=8) = 5
+// =============================================================================
+
+fn test_directed_weighted() {
+    let mut m = mat_init_inf(4);
+    m = dist_set(m, 0, 1, 3);
+    m = dist_set(m, 0, 2, 7);
+    m = dist_set(m, 1, 3, 2);
+    m = dist_set(m, 2, 3, 1);
+
+    let d = floyd_warshall(m, 4);
+    assert_eq(dist_get(d, 0, 1), 3);
+    assert_eq(dist_get(d, 0, 3), 5);
+    assert_eq(dist_get(d, 0, 2), 7);
+    assert_eq(dist_get(d, 3, 0), 999999);
+}
+
+// =============================================================================
+// Test 3: Complete graph K4 with varying weights
+// =============================================================================
+
+fn test_complete_graph() {
+    let mut m = mat_init_inf(4);
+    m = dist_set(m, 0, 1, 1); m = dist_set(m, 1, 0, 1);
+    m = dist_set(m, 0, 2, 5); m = dist_set(m, 2, 0, 5);
+    m = dist_set(m, 0, 3, 10); m = dist_set(m, 3, 0, 10);
+    m = dist_set(m, 1, 2, 3); m = dist_set(m, 2, 1, 3);
+    m = dist_set(m, 1, 3, 8); m = dist_set(m, 3, 1, 8);
+    m = dist_set(m, 2, 3, 2); m = dist_set(m, 3, 2, 2);
+
+    let d = floyd_warshall(m, 4);
+    assert_eq(dist_get(d, 0, 1), 1);
+    // 0->2: min(5, 1+3=4) = 4
+    assert_eq(dist_get(d, 0, 2), 4);
+    // 0->3: min(10, 1+3+2=6) = 6
+    assert_eq(dist_get(d, 0, 3), 6);
+    // 1->3: min(8, 3+2=5) = 5
+    assert_eq(dist_get(d, 1, 3), 5);
+}
+
+// =============================================================================
+// Test 4: Disconnected components
+// =============================================================================
+
+fn test_disconnected() {
+    let mut m = mat_init_inf(4);
+    m = dist_set(m, 0, 1, 2); m = dist_set(m, 1, 0, 2);
+    m = dist_set(m, 2, 3, 3); m = dist_set(m, 3, 2, 3);
+
+    let d = floyd_warshall(m, 4);
+    assert_eq(dist_get(d, 0, 1), 2);
+    assert_eq(dist_get(d, 2, 3), 3);
+    assert_eq(dist_get(d, 0, 2), 999999);
+    assert_eq(dist_get(d, 1, 3), 999999);
+}
+
+// =============================================================================
+// Test 5: Single node
+// =============================================================================
+
+fn test_single_node() {
+    let m = mat_init_inf(1);
+    let d = floyd_warshall(m, 1);
+    assert_eq(dist_get(d, 0, 0), 0);
+}
+
+// =============================================================================
+// Test 6: Linear chain 0->1->2->3
+// =============================================================================
+
+fn test_chain() {
+    let mut m = mat_init_inf(4);
+    m = dist_set(m, 0, 1, 1); m = dist_set(m, 1, 0, 1);
+    m = dist_set(m, 1, 2, 1); m = dist_set(m, 2, 1, 1);
+    m = dist_set(m, 2, 3, 1); m = dist_set(m, 3, 2, 1);
+
+    let d = floyd_warshall(m, 4);
+    assert_eq(dist_get(d, 0, 3), 3);
+    assert_eq(dist_get(d, 0, 2), 2);
+    assert_eq(dist_get(d, 1, 3), 2);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_triangle();
+    test_directed_weighted();
+    test_complete_graph();
+    test_disconnected();
+    test_single_node();
+    test_chain();
+    print("[OK] 321_interp_floyd_warshall");
+    0
+}

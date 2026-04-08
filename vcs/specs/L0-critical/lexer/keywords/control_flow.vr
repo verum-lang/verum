@@ -1,0 +1,187 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, control-flow
+
+// Control flow keywords
+
+// If-else expressions
+fn abs(x: Int) -> Int {
+    if x < 0 {
+        -x
+    } else {
+        x
+    }
+}
+
+// Chained if-else
+fn grade(score: Int) -> Text {
+    if score >= 90 {
+        "A"
+    } else if score >= 80 {
+        "B"
+    } else if score >= 70 {
+        "C"
+    } else if score >= 60 {
+        "D"
+    } else {
+        "F"
+    }
+}
+
+// Match expressions
+fn describe_number(n: Int) -> Text {
+    match n {
+        0 => "zero"
+        1 => "one"
+        2 => "two"
+        n if n < 0 => "negative"
+        n if n > 100 => "large"
+        _ => "some number"
+    }
+}
+
+// Match with destructuring
+fn process_result<T, E>(result: Result<T, E>) -> Maybe<T> {
+    match result {
+        Ok(value) => Some(value)
+        Err(_) => None
+    }
+}
+
+// Return keyword
+fn find_first_positive(numbers: List<Int>) -> Maybe<Int> {
+    for n in numbers {
+        if n > 0 {
+            return Some(n)
+        }
+    }
+    return None
+}
+
+// Early return pattern
+fn validate(input: Text) -> Result<ValidInput, Error> {
+    if input.is_empty() {
+        return Err(Error.Empty)
+    }
+    if input.len() > 100 {
+        return Err(Error.TooLong)
+    }
+    return Ok(ValidInput(input))
+}
+
+// For loops
+fn sum(numbers: List<Int>) -> Int {
+    let mut total = 0;
+    for n in numbers {
+        total = total + n;
+    }
+    total
+}
+
+// For with range
+fn factorial(n: Int) -> Int {
+    let mut result = 1;
+    for i in 1..=n {
+        result = result * i;
+    }
+    result
+}
+
+// While loops
+fn countdown(from: Int) {
+    let mut n = from;
+    while n > 0 {
+        print(n);
+        n = n - 1;
+    }
+    print("Liftoff!");
+}
+
+// While with condition
+fn find_sqrt_approx(n: Float) -> Float {
+    let mut guess = n / 2.0;
+    while abs(guess * guess - n) > 0.0001 {
+        guess = (guess + n / guess) / 2.0;
+    }
+    guess
+}
+
+// Infinite loop with break
+fn find_answer() -> Int {
+    let mut candidate = 0;
+    loop {
+        if is_answer(candidate) {
+            break candidate
+        }
+        candidate = candidate + 1;
+    }
+}
+
+// Loop with continue
+fn sum_positive(numbers: List<Int>) -> Int {
+    let mut total = 0;
+    for n in numbers {
+        if n <= 0 {
+            continue
+        }
+        total = total + n;
+    }
+    total
+}
+
+// Nested loops with labeled break
+fn find_in_matrix(matrix: List<List<Int>>, target: Int) -> Maybe<(Int, Int)> {
+    let mut result: Maybe<(Int, Int)> = None;
+    'outer: for i in 0..matrix.len() {
+        for j in 0..matrix[i].len() {
+            if matrix[i][j] == target {
+                result = Some((i, j));
+                break 'outer
+            }
+        }
+    }
+    result
+}
+
+// Continue with label
+fn process_chunks(data: List<List<Int>>) {
+    'chunks: for chunk in data {
+        for item in chunk {
+            if item == 0 {
+                continue 'chunks  // Skip to next chunk
+            }
+            process(item);
+        }
+    }
+}
+
+// Complex control flow
+fn parse_tokens(tokens: List<Token>) -> Result<Ast, ParseError> {
+    let mut ast = Ast.new();
+    let mut i = 0;
+
+    while i < tokens.len() {
+        let token = tokens[i];
+
+        match token {
+            Token.LeftParen => {
+                let (expr, consumed) = parse_expr(tokens, i)?;
+                ast.add(expr);
+                i = i + consumed;
+            }
+            Token.RightParen => {
+                return Err(ParseError.UnmatchedParen)
+            }
+            Token.Eof => {
+                break
+            }
+            _ => {
+                i = i + 1;
+                continue
+            }
+        }
+    }
+
+    Ok(ast)
+}

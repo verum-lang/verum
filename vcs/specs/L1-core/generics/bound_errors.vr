@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L1
+// @tags: generics, errors, bounds, missing-bound
+// @expected-error: E400
+
+/// Test for type errors with generic bound violations.
+/// When types are used incorrectly, E400 type mismatches arise.
+
+type Label is { text: Text };
+type Counter is { value: Int };
+
+fn takes_counter(c: Counter) -> Int {
+    c.value
+}
+
+fn main() {
+    let l = Label { text: "hello" };
+    // ERROR E400: Type mismatch - Label is not Counter
+    let result = takes_counter(l);
+}

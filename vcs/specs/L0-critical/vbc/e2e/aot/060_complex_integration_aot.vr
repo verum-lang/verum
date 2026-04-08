@@ -1,0 +1,299 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, integration, complex, comprehensive
+// @timeout: 30000
+// @expected-exit: 0
+// @description: AOT complex integration test combining all features
+
+// ==================== Type Definitions ====================
+
+type Pair is { fst: Int, snd: Int };
+type Triple is { a: Int, b: Int, c: Int };
+
+type IntResult is ROk(Int) | RErr(Int);
+
+type IntList is LNil | LCons { val: Int, next: IntList };
+
+// ==================== Utility Functions ====================
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 || b == 0 { 0 }
+    else { abs_val(a) / gcd(a, b) * abs_val(b) }
+}
+
+// ==================== Safe Math ====================
+
+fn safe_div(a: Int, b: Int) -> IntResult {
+    if b == 0 { RErr(-1) } else { ROk(a / b) }
+}
+
+fn safe_mod(a: Int, b: Int) -> IntResult {
+    if b == 0 { RErr(-1) } else { ROk(a % b) }
+}
+
+fn unwrap_or(r: IntResult, default: Int) -> Int {
+    match r {
+        ROk(v) => v,
+        RErr(_) => default,
+    }
+}
+
+fn result_map(r: IntResult, f: fn(Int) -> Int) -> IntResult {
+    match r {
+        ROk(v) => ROk(f(v)),
+        RErr(e) => RErr(e),
+    }
+}
+
+// ==================== List Operations ====================
+
+fn list_from_range(start: Int, end_val: Int) -> IntList {
+    let mut result = LNil;
+    let mut i = end_val - 1;
+    while i >= start {
+        result = LCons { val: i, next: result };
+        i = i - 1;
+    }
+    result
+}
+
+fn list_len(xs: IntList) -> Int {
+    match xs {
+        LNil => 0,
+        LCons { val: _, next } => 1 + list_len(next),
+    }
+}
+
+fn list_sum(xs: IntList) -> Int {
+    match xs {
+        LNil => 0,
+        LCons { val, next } => val + list_sum(next),
+    }
+}
+
+fn list_map(xs: IntList, f: fn(Int) -> Int) -> IntList {
+    match xs {
+        LNil => LNil,
+        LCons { val, next } => LCons { val: f(val), next: list_map(next, f) },
+    }
+}
+
+fn list_filter(xs: IntList, pred: fn(Int) -> Bool) -> IntList {
+    match xs {
+        LNil => LNil,
+        LCons { val, next } => {
+            let rest = list_filter(next, pred);
+            if pred(val) { LCons { val: val, next: rest } }
+            else { rest }
+        },
+    }
+}
+
+fn list_fold(xs: IntList, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    match xs {
+        LNil => init,
+        LCons { val, next } => list_fold(next, f(init, val), f),
+    }
+}
+
+// ==================== Number Theory ====================
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { false }
+    else if n < 4 { true }
+    else if n % 2 == 0 { false }
+    else {
+        let mut d = 3;
+        let mut result = true;
+        while d * d <= n {
+            if n % d == 0 { result = false; }
+            d = d + 2;
+        }
+        result
+    }
+}
+
+fn fibonacci(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        let tmp = b;
+        b = a + b;
+        a = tmp;
+        i = i + 1;
+    }
+    a
+}
+
+fn factorial(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 2;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+fn binomial(n: Int, k: Int) -> Int {
+    if k > n { 0 }
+    else if k == 0 || k == n { 1 }
+    else {
+        let kk = if k > n - k { n - k } else { k };
+        let mut result = 1;
+        let mut i = 0;
+        while i < kk {
+            result = result * (n - i) / (i + 1);
+            i = i + 1;
+        }
+        result
+    }
+}
+
+// ==================== Main Integration ====================
+
+fn main() -> Int {
+    // === Pairs and Triples ===
+    let p = Pair { fst: 10, snd: 20 };
+    assert_eq(p.fst + p.snd, 30);
+
+    let t = Triple { a: 3, b: 4, c: 5 };
+    assert_eq(t.a * t.a + t.b * t.b, t.c * t.c);  // Pythagorean triple
+
+    // === GCD/LCM ===
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(7, 5), 35);
+
+    // === Safe Math ===
+    assert_eq(unwrap_or(safe_div(100, 7), -1), 14);
+    assert_eq(unwrap_or(safe_div(100, 0), -1), -1);
+    assert_eq(unwrap_or(safe_mod(17, 5), -1), 2);
+    assert_eq(unwrap_or(safe_mod(17, 0), -1), -1);
+
+    // Result chaining via map
+    let r = result_map(safe_div(100, 4), |x| x * 3);
+    assert_eq(unwrap_or(r, -1), 75);  // 100/4=25, 25*3=75
+
+    let r2 = result_map(safe_div(100, 0), |x| x * 3);
+    assert_eq(unwrap_or(r2, -1), -1);  // Error propagated
+
+    // === Lists ===
+    let xs = list_from_range(1, 11);  // [1..10]
+    assert_eq(list_len(xs), 10);
+    assert_eq(list_sum(xs), 55);
+
+    // Map: square
+    let squares = list_map(xs, |x| x * x);
+    assert_eq(list_sum(squares), 385);  // 1+4+9+...+100
+
+    // Filter: evens only
+    let evens = list_filter(xs, |x| x % 2 == 0);
+    assert_eq(list_len(evens), 5);
+    assert_eq(list_sum(evens), 30);  // 2+4+6+8+10
+
+    // Filter: primes
+    let primes = list_filter(xs, |x| is_prime(x));
+    assert_eq(list_sum(primes), 17);  // 2+3+5+7
+
+    // Fold: product
+    let small_xs = list_from_range(1, 6);  // [1..5]
+    let product = list_fold(small_xs, 1, |acc, x| acc * x);
+    assert_eq(product, 120);
+
+    // Fold: max
+    let max_val2 = list_fold(xs, 0, |acc, x| if x > acc { x } else { acc });
+    assert_eq(max_val2, 10);
+
+    // Chain: map-filter-fold
+    // [1..10] -> square -> filter(>20) -> sum
+    let chain = list_fold(
+        list_filter(list_map(xs, |x| x * x), |x| x > 20),
+        0,
+        |acc, x| acc + x
+    );
+    // Squares > 20: 25, 36, 49, 64, 81, 100
+    assert_eq(chain, 355);
+
+    // === Number Theory ===
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(10), 55);
+    assert_eq(fibonacci(15), 610);
+
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+
+    assert_eq(binomial(5, 2), 10);
+    assert_eq(binomial(10, 3), 120);
+    assert_eq(binomial(10, 5), 252);
+
+    // Pascal's rule: C(n,k) = C(n-1,k-1) + C(n-1,k)
+    assert_eq(binomial(8, 3), binomial(7, 2) + binomial(7, 3));
+
+    // === Complex: Sum of first 10 Fibonacci numbers ===
+    let mut fib_sum = 0;
+    let mut fi = 0;
+    while fi < 10 {
+        fib_sum = fib_sum + fibonacci(fi);
+        fi = fi + 1;
+    }
+    assert_eq(fib_sum, 88);  // 0+1+1+2+3+5+8+13+21+34 = 88
+
+    // === Complex: Count primes up to 50 ===
+    let mut prime_count = 0;
+    let mut pi = 2;
+    while pi <= 50 {
+        if is_prime(pi) { prime_count = prime_count + 1; }
+        pi = pi + 1;
+    }
+    assert_eq(prime_count, 15);
+
+    // === Complex: GCD of consecutive Fibonacci pairs ===
+    // gcd(fib(n), fib(n+1)) = 1 for all n
+    let mut gi = 0;
+    while gi < 10 {
+        assert_eq(gcd(fibonacci(gi), fibonacci(gi + 1)), 1);
+        gi = gi + 1;
+    }
+
+    // === Complex: Closures with results and lists ===
+    let safe_transform = |x: Int| -> Int {
+        unwrap_or(result_map(safe_div(100, x), |v| v * v), 0)
+    };
+    // x=1: 100/1=100, 100^2=10000
+    assert_eq(safe_transform(1), 10000);
+    // x=5: 100/5=20, 20^2=400
+    assert_eq(safe_transform(5), 400);
+    // x=0: error -> 0
+    assert_eq(safe_transform(0), 0);
+
+    let transform_sum = list_fold(
+        list_map(list_from_range(1, 6), safe_transform),
+        0,
+        |acc, x| acc + x
+    );
+    // x=1: 10000, x=2: (50)^2=2500, x=3: (33)^2=1089, x=4: (25)^2=625, x=5: (20)^2=400
+    assert_eq(transform_sum, 14614);
+
+    0
+}

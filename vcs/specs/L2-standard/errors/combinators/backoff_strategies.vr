@@ -1,0 +1,486 @@
+// @test: run
+// @expected-stdout: All backoff strategy tests passed!
+// @tier: 0
+// @level: L2
+// @tags: errors, backoff, retry, exponential, jitter, constant
+// @description: Tests for Backoff Strategies
+//
+// Spec: docs/detailed/20-error-handling.md Section 2.5.7 - Rich Error Combinators
+// Configurable retry delays for resilient error handling.
+
+// ============================================================================
+// Duration Type (simplified)
+// ============================================================================
+
+type Duration is {
+    millis: Int,
+};
+
+implement Duration {
+    fn from_millis(ms: Int) -> Self {
+        Duration { millis: ms }
+    }
+
+    fn from_seconds(s: Int) -> Self {
+        Duration { millis: s * 1000 }
+    }
+
+    fn as_millis(&self) -> Int {
+        self.millis
+    }
+
+    fn min(self, other: Duration) -> Duration {
+        if self.millis < other.millis {
+            self
+        } else {
+            other
+        }
+    }
+
+    fn mul(self, factor: Float) -> Duration {
+        Duration { millis: (self.millis as Float * factor) as Int }
+    }
+}
+
+// ============================================================================
+// BackoffStrategy Protocol
+// ============================================================================
+
+type BackoffStrategy is protocol {
+    /// Get the delay for the given attempt number (1-based)
+    /// Returns None if max attempts exceeded
+    fn next_delay(&self, attempt: Int) -> Maybe<Duration>;
+};
+
+// ============================================================================
+// ExponentialBackoff
+// ============================================================================
+
+type ExponentialBackoff is {
+    initial: Duration,
+    max: Duration,
+    multiplier: Float,
+    max_attempts: Int,
+};
+
+implement ExponentialBackoff {
+    fn new(initial: Duration, max: Duration, multiplier: Float, max_attempts: Int) -> Self {
+        ExponentialBackoff { initial, max, multiplier, max_attempts }
+    }
+
+    fn default() -> Self {
+        ExponentialBackoff {
+            initial: Duration.from_millis(100),
+            max: Duration.from_seconds(30),
+            multiplier: 2.0,
+            max_attempts: 5,
+        }
+    }
+}
+
+implement BackoffStrategy for ExponentialBackoff {
+    fn next_delay(&self, attempt: Int) -> Maybe<Duration> {
+        if attempt > self.max_attempts {
+            return None;
+        }
+
+        // Calculate exponential delay: initial * multiplier^(attempt-1)
+        let mut delay_ms = self.initial.millis as Float;
+        for _ in 1..attempt {
+            delay_ms = delay_ms * self.multiplier;
+        }
+
+        let delay = Duration { millis: delay_ms as Int };
+        Some(delay.min(self.max))
+    }
+}
+
+// ============================================================================
+// ConstantBackoff
+// ============================================================================
+
+type ConstantBackoff is {
+    delay: Duration,
+    max_attempts: Int,
+};
+
+implement ConstantBackoff {
+    fn new(delay: Duration, max_attempts: Int) -> Self {
+        ConstantBackoff { delay, max_attempts }
+    }
+}
+
+implement BackoffStrategy for ConstantBackoff {
+    fn next_delay(&self, attempt: Int) -> Maybe<Duration> {
+        if attempt > self.max_attempts {
+            None
+        } else {
+            Some(self.delay)
+        }
+    }
+}
+
+// ============================================================================
+// LinearBackoff
+// ============================================================================
+
+type LinearBackoff is {
+    initial: Duration,
+    increment: Duration,
+    max: Duration,
+    max_attempts: Int,
+};
+
+implement LinearBackoff {
+    fn new(initial: Duration, increment: Duration, max: Duration, max_attempts: Int) -> Self {
+        LinearBackoff { initial, increment, max, max_attempts }
+    }
+}
+
+implement BackoffStrategy for LinearBackoff {
+    fn next_delay(&self, attempt: Int) -> Maybe<Duration> {
+        if attempt > self.max_attempts {
+            return None;
+        }
+
+        // Linear: initial + (attempt - 1) * increment
+        let delay_ms = self.initial.millis + (attempt - 1) * self.increment.millis;
+        let delay = Duration { millis: delay_ms };
+        Some(delay.min(self.max))
+    }
+}
+
+// ============================================================================
+// JitteredBackoff (decorator pattern)
+// ============================================================================
+
+// Simplified random for testing (deterministic)
+static mut RANDOM_SEED: Int = 12345;
+
+fn pseudo_random_float() -> Float {
+    // Simple LCG for deterministic testing
+    RANDOM_SEED = (RANDOM_SEED * 1103515245 + 12345) % 2147483648;
+    (RANDOM_SEED as Float) / 2147483648.0
+}
+
+fn reset_random() {
+    RANDOM_SEED = 12345;
+}
+
+type JitteredBackoff is {
+    base: ExponentialBackoff,
+    jitter_factor: Float,  // 0.0 to 1.0
+};
+
+implement JitteredBackoff {
+    fn new(base: ExponentialBackoff, jitter_factor: Float) -> Self {
+        // Clamp jitter_factor to [0, 1]
+        let clamped = if jitter_factor < 0.0 {
+            0.0
+        } else if jitter_factor > 1.0 {
+            1.0
+        } else {
+            jitter_factor
+        };
+        JitteredBackoff { base, jitter_factor: clamped }
+    }
+}
+
+implement BackoffStrategy for JitteredBackoff {
+    fn next_delay(&self, attempt: Int) -> Maybe<Duration> {
+        self.base.next_delay(attempt).map(|delay| {
+            let jitter = pseudo_random_float() * self.jitter_factor;
+            delay.mul(1.0 + jitter)
+        })
+    }
+}
+
+// ============================================================================
+// DecorrelatedJitterBackoff (AWS style)
+// ============================================================================
+
+type DecorrelatedJitterBackoff is {
+    base: Duration,
+    cap: Duration,
+    max_attempts: Int,
+    last_delay: Duration,
+};
+
+implement DecorrelatedJitterBackoff {
+    fn new(base: Duration, cap: Duration, max_attempts: Int) -> Self {
+        DecorrelatedJitterBackoff { base, cap, max_attempts, last_delay: base }
+    }
+
+    fn next_delay_stateful(&mut self, attempt: Int) -> Maybe<Duration> {
+        if attempt > self.max_attempts {
+            return None;
+        }
+
+        // First attempt uses base
+        if attempt == 1 {
+            self.last_delay = self.base;
+            return Some(self.base);
+        }
+
+        // Subsequent: random between base and last_delay * 3
+        let rand = pseudo_random_float();
+        let max_delay = self.last_delay.millis * 3;
+        let delay_ms = self.base.millis + (rand * (max_delay - self.base.millis) as Float) as Int;
+        let delay = Duration { millis: delay_ms }.min(self.cap);
+        self.last_delay = delay;
+        Some(delay)
+    }
+}
+
+// ============================================================================
+// NoRetry - for completeness
+// ============================================================================
+
+type NoRetry is ();
+
+implement BackoffStrategy for NoRetry {
+    fn next_delay(&self, attempt: Int) -> Maybe<Duration> {
+        None  // Never retry
+    }
+}
+
+// ============================================================================
+// Retry helper function
+// ============================================================================
+
+fn retry_with_backoff<T, E>(
+    operation: fn() -> Result<T, E>,
+    strategy: &dyn BackoffStrategy,
+    should_retry: fn(&E) -> Bool,
+) -> Result<T, E> {
+    let mut attempt = 1;
+    let mut last_error: Maybe<E> = None;
+
+    loop {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(e) => {
+                if !should_retry(&e) {
+                    return Err(e);
+                }
+
+                match strategy.next_delay(attempt) {
+                    Some(delay) => {
+                        // In real implementation: sleep(delay)
+                        // For testing, we just track the attempt
+                        last_error = Some(e);
+                        attempt += 1;
+                    }
+                    None => {
+                        return Err(e);  // Max attempts exceeded
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_exponential_backoff_delays() {
+    let backoff = ExponentialBackoff.new(
+        Duration.from_millis(100),  // initial
+        Duration.from_seconds(10),  // max
+        2.0,                        // multiplier
+        5,                          // max_attempts
+    );
+
+    // Attempt 1: 100ms
+    assert_eq(backoff.next_delay(1).unwrap().as_millis(), 100);
+
+    // Attempt 2: 200ms
+    assert_eq(backoff.next_delay(2).unwrap().as_millis(), 200);
+
+    // Attempt 3: 400ms
+    assert_eq(backoff.next_delay(3).unwrap().as_millis(), 400);
+
+    // Attempt 4: 800ms
+    assert_eq(backoff.next_delay(4).unwrap().as_millis(), 800);
+
+    // Attempt 5: 1600ms
+    assert_eq(backoff.next_delay(5).unwrap().as_millis(), 1600);
+
+    // Attempt 6: None (exceeded)
+    assert(backoff.next_delay(6).is_none());
+}
+
+fn test_exponential_backoff_max_cap() {
+    let backoff = ExponentialBackoff.new(
+        Duration.from_seconds(1),   // initial
+        Duration.from_seconds(5),   // max
+        2.0,
+        10,
+    );
+
+    // Attempt 3: 4s (under cap)
+    assert_eq(backoff.next_delay(3).unwrap().as_millis(), 4000);
+
+    // Attempt 4: would be 8s, capped to 5s
+    assert_eq(backoff.next_delay(4).unwrap().as_millis(), 5000);
+
+    // Attempt 5: would be 16s, still capped to 5s
+    assert_eq(backoff.next_delay(5).unwrap().as_millis(), 5000);
+}
+
+fn test_constant_backoff() {
+    let backoff = ConstantBackoff.new(Duration.from_millis(500), 3);
+
+    assert_eq(backoff.next_delay(1).unwrap().as_millis(), 500);
+    assert_eq(backoff.next_delay(2).unwrap().as_millis(), 500);
+    assert_eq(backoff.next_delay(3).unwrap().as_millis(), 500);
+    assert(backoff.next_delay(4).is_none());
+}
+
+fn test_linear_backoff() {
+    let backoff = LinearBackoff.new(
+        Duration.from_millis(100),   // initial
+        Duration.from_millis(50),    // increment
+        Duration.from_millis(500),   // max
+        10,
+    );
+
+    // Attempt 1: 100ms
+    assert_eq(backoff.next_delay(1).unwrap().as_millis(), 100);
+
+    // Attempt 2: 150ms
+    assert_eq(backoff.next_delay(2).unwrap().as_millis(), 150);
+
+    // Attempt 3: 200ms
+    assert_eq(backoff.next_delay(3).unwrap().as_millis(), 200);
+
+    // Attempt 9: 500ms (capped)
+    assert_eq(backoff.next_delay(9).unwrap().as_millis(), 500);
+}
+
+fn test_jittered_backoff() {
+    reset_random();
+
+    let base = ExponentialBackoff.new(
+        Duration.from_millis(100),
+        Duration.from_seconds(10),
+        2.0,
+        5,
+    );
+    let jittered = JitteredBackoff.new(base, 0.5);  // 50% jitter
+
+    // Delays should be >= base but <= base * 1.5
+    let delay1 = jittered.next_delay(1).unwrap().as_millis();
+    assert(delay1 >= 100 && delay1 <= 150);
+
+    let delay2 = jittered.next_delay(2).unwrap().as_millis();
+    assert(delay2 >= 200 && delay2 <= 300);
+}
+
+fn test_jittered_backoff_adds_randomness() {
+    // Two calls should produce different values (with high probability)
+    reset_random();
+
+    let base = ExponentialBackoff.new(
+        Duration.from_millis(1000),
+        Duration.from_seconds(10),
+        2.0,
+        5,
+    );
+    let jittered = JitteredBackoff.new(base, 0.5);
+
+    let delay1 = jittered.next_delay(1).unwrap().as_millis();
+    let delay2 = jittered.next_delay(1).unwrap().as_millis();
+
+    // With 50% jitter, delays should be different
+    assert(delay1 != delay2);
+}
+
+fn test_no_retry() {
+    let no_retry = NoRetry;
+
+    assert(no_retry.next_delay(1).is_none());
+    assert(no_retry.next_delay(0).is_none());
+}
+
+fn test_default_exponential_backoff() {
+    let default_backoff = ExponentialBackoff.default();
+
+    assert_eq(default_backoff.initial.as_millis(), 100);
+    assert_eq(default_backoff.max.as_millis(), 30000);
+    assert_eq(default_backoff.multiplier, 2.0);
+    assert_eq(default_backoff.max_attempts, 5);
+}
+
+fn test_decorrelated_jitter() {
+    reset_random();
+
+    let mut backoff = DecorrelatedJitterBackoff.new(
+        Duration.from_millis(100),  // base
+        Duration.from_seconds(10),  // cap
+        5,
+    );
+
+    let delay1 = backoff.next_delay_stateful(1).unwrap().as_millis();
+    assert_eq(delay1, 100);  // First is always base
+
+    let delay2 = backoff.next_delay_stateful(2).unwrap().as_millis();
+    // Should be between base (100) and last * 3 (300)
+    assert(delay2 >= 100 && delay2 <= 300);
+}
+
+fn test_zero_attempts() {
+    let backoff = ExponentialBackoff.default();
+
+    // Attempt 0 should work (might be used for initial delay)
+    // Our implementation treats attempt as 1-based, so 0 would be < 1
+    // This is design choice - here we test 1-based
+    assert(backoff.next_delay(1).is_some());
+}
+
+fn test_large_attempt_numbers() {
+    let backoff = ExponentialBackoff.new(
+        Duration.from_millis(1),
+        Duration.from_seconds(60),
+        2.0,
+        100,
+    );
+
+    // Attempt 20: 2^19 ms = 524288 ms, capped to 60000 ms
+    let delay = backoff.next_delay(20).unwrap().as_millis();
+    assert_eq(delay, 60000);
+}
+
+fn test_jitter_factor_clamping() {
+    let base = ExponentialBackoff.default();
+
+    // Negative jitter should be clamped to 0
+    let jittered_neg = JitteredBackoff.new(base.clone(), -0.5);
+    assert_eq(jittered_neg.jitter_factor, 0.0);
+
+    // Jitter > 1 should be clamped to 1
+    let jittered_high = JitteredBackoff.new(base.clone(), 1.5);
+    assert_eq(jittered_high.jitter_factor, 1.0);
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    test_exponential_backoff_delays();
+    test_exponential_backoff_max_cap();
+    test_constant_backoff();
+    test_linear_backoff();
+    test_jittered_backoff();
+    test_jittered_backoff_adds_randomness();
+    test_no_retry();
+    test_default_exponential_backoff();
+    test_decorrelated_jitter();
+    test_zero_attempts();
+    test_large_attempt_numbers();
+    test_jitter_factor_clamping();
+
+    print("All backoff strategy tests passed!");
+}

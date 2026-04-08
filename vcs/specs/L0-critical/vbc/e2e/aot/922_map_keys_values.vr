@@ -1,0 +1,171 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, map, keys, values, iteration
+// @expected-exit: 0
+
+// Test: Map keys() and values() methods — verify correct counts after
+// insert, remove, and overwrite operations.
+
+fn main() -> Int {
+    // Test 1: Integer-keyed map — keys/values lengths
+    let mut m1 = Map.new();
+    m1.insert(10, 100);
+    m1.insert(20, 200);
+    m1.insert(30, 300);
+    m1.insert(40, 400);
+
+    let k1 = m1.keys();
+    if (k1.len() != 4) {
+        print(f"FAIL test1: keys len={k1.len()}, expected 4");
+        return 1;
+    }
+
+    let v1 = m1.values();
+    if (v1.len() != 4) {
+        print(f"FAIL test2: values len={v1.len()}, expected 4");
+        return 1;
+    }
+
+    // Test 3: Sum values via direct gets (verifies map correctness)
+    let val_sum = m1.get(10) + m1.get(20) + m1.get(30) + m1.get(40);
+    if (val_sum != 1000) {
+        print(f"FAIL test3: values sum={val_sum}, expected 1000");
+        return 1;
+    }
+
+    // Test 4: String-keyed map — keys/values lengths
+    let mut m2 = Map.new();
+    m2.insert("alpha", 5);
+    m2.insert("beta", 15);
+    m2.insert("gamma", 25);
+
+    let k2 = m2.keys();
+    if (k2.len() != 3) {
+        print(f"FAIL test4: str keys len={k2.len()}, expected 3");
+        return 1;
+    }
+
+    let v2 = m2.values();
+    if (v2.len() != 3) {
+        print(f"FAIL test5: str values len={v2.len()}, expected 3");
+        return 1;
+    }
+
+    // Test 6: Larger map — 10 entries
+    let mut m3 = Map.new();
+    let mut n = 1;
+    while (n <= 10) {
+        m3.insert(n, n * n);
+        n = n + 1;
+    }
+
+    let k3 = m3.keys();
+    let v3 = m3.values();
+    if (k3.len() != 10) {
+        print(f"FAIL test6a: keys len={k3.len()}, expected 10");
+        return 1;
+    }
+    if (v3.len() != 10) {
+        print(f"FAIL test6b: values len={v3.len()}, expected 10");
+        return 1;
+    }
+
+    // Test 7: After remove, keys/values reflect updated state
+    let mut m4 = Map.new();
+    m4.insert(1, 10);
+    m4.insert(2, 20);
+    m4.insert(3, 30);
+    m4.remove(2);
+
+    let k4 = m4.keys();
+    let v4 = m4.values();
+    if (k4.len() != 2) {
+        print(f"FAIL test7a: keys len after remove={k4.len()}, expected 2");
+        return 1;
+    }
+    if (v4.len() != 2) {
+        print(f"FAIL test7b: values len after remove={v4.len()}, expected 2");
+        return 1;
+    }
+
+    // Verify remaining entries accessible
+    if (m4.get(1) != 10) {
+        print(f"FAIL test7c: get(1) after remove(2)={m4.get(1)}, expected 10");
+        return 1;
+    }
+    if (m4.get(3) != 30) {
+        print(f"FAIL test7d: get(3) after remove(2)={m4.get(3)}, expected 30");
+        return 1;
+    }
+
+    // Test 8: After overwrite, no duplicate keys
+    let mut m5 = Map.new();
+    m5.insert(1, 100);
+    m5.insert(2, 200);
+    m5.insert(1, 999);
+
+    let k5 = m5.keys();
+    let v5 = m5.values();
+    if (k5.len() != 2) {
+        print(f"FAIL test8a: keys len after overwrite={k5.len()}, expected 2");
+        return 1;
+    }
+    if (v5.len() != 2) {
+        print(f"FAIL test8b: values len after overwrite={v5.len()}, expected 2");
+        return 1;
+    }
+    if (m5.get(1) != 999) {
+        print(f"FAIL test8c: get(1) after overwrite={m5.get(1)}, expected 999");
+        return 1;
+    }
+
+    // Test 9: Remove all entries — keys/values empty
+    let mut m6 = Map.new();
+    m6.insert(10, 1);
+    m6.insert(20, 2);
+    m6.insert(30, 3);
+    m6.remove(10);
+    m6.remove(20);
+    m6.remove(30);
+
+    let k6 = m6.keys();
+    let v6 = m6.values();
+    if (k6.len() != 0) {
+        print(f"FAIL test9a: keys len after remove all={k6.len()}, expected 0");
+        return 1;
+    }
+    if (v6.len() != 0) {
+        print(f"FAIL test9b: values len after remove all={v6.len()}, expected 0");
+        return 1;
+    }
+
+    // Test 10: String-keyed map remove + keys/values
+    let mut m7 = Map.new();
+    m7.insert("x", 10);
+    m7.insert("y", 20);
+    m7.insert("z", 30);
+    m7.remove("y");
+
+    let k7 = m7.keys();
+    let v7 = m7.values();
+    if (k7.len() != 2) {
+        print(f"FAIL test10a: str keys after remove={k7.len()}, expected 2");
+        return 1;
+    }
+    if (v7.len() != 2) {
+        print(f"FAIL test10b: str values after remove={v7.len()}, expected 2");
+        return 1;
+    }
+    if (m7.get("x") != 10) {
+        print(f"FAIL test10c: get('x')={m7.get("x")}, expected 10");
+        return 1;
+    }
+    if (m7.get("z") != 30) {
+        print(f"FAIL test10d: get('z')={m7.get("z")}, expected 30");
+        return 1;
+    }
+
+    print("922_map_keys_values: PASS");
+    0
+}

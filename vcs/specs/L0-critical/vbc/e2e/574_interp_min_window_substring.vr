@@ -1,0 +1,187 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, sliding_window, minimum_window_substring, frequency_counting
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Minimum window substring problem (integer-alphabet version).
+// Given a text array t[0..tlen) and a pattern array p[0..plen), find the
+// shortest contiguous subarray of t that contains all elements of p
+// (with multiplicity).
+//
+// Algorithm: sliding window with two frequency arrays (both length 64 buckets,
+// values in range 0..63).
+// need[x] = count of x needed from pattern.
+// got[x] = count of x currently in window.
+// "satisfied" counter tracks how many distinct bucket values are fully covered.
+//
+// Returns: length of minimum window, stored in res_len[0].
+//          Start index stored in res_start[0].
+//          If no valid window exists, res_len[0] = -1.
+
+fn mw_init_freq(freq: [Int; 64]) {
+    let mut i = 0;
+    while i < 64 { freq[i] = 0; i = i + 1; }
+}
+
+fn mw_find(text: [Int; 32], tlen: Int,
+           pat: [Int; 32], plen: Int,
+           need: [Int; 64], got: [Int; 64],
+           res_len: [Int; 8], res_start: [Int; 8]) {
+    mw_init_freq(need);
+    mw_init_freq(got);
+    // Build need[] from pattern
+    let mut i = 0;
+    while i < plen { need[pat[i]] = need[pat[i]] + 1; i = i + 1; }
+    // Count distinct required buckets
+    let mut required = 0;
+    i = 0;
+    while i < 64 { if need[i] > 0 { required = required + 1; } i = i + 1; }
+    let mut formed = 0;
+    let mut left = 0;
+    res_len[0] = -1;
+    res_start[0] = 0;
+    i = 0;
+    while i < tlen {
+        let c = text[i];
+        got[c] = got[c] + 1;
+        if need[c] > 0 && got[c] == need[c] { formed = formed + 1; }
+        // Shrink window from left while fully formed
+        while formed == required && left <= i {
+            let wlen = i - left + 1;
+            if res_len[0] == -1 || wlen < res_len[0] {
+                res_len[0] = wlen;
+                res_start[0] = left;
+            }
+            let lc = text[left];
+            got[lc] = got[lc] - 1;
+            if need[lc] > 0 && got[lc] < need[lc] { formed = formed - 1; }
+            left = left + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn test_basic_window() {
+    // text=[1,2,3,1,4], pat=[1,3]. Min window containing {1,3} is [1,2,3] (len=3, start=0)
+    // or [3,1] (len=2, start=2). Actually [3,1] at index 2 is shorter.
+    // Window [2..3]: text[2]=3, text[3]=1 -> both present. len=2.
+    let mut text = [1,2,3,1,4,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut pat  = [1,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut need = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut got = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut res_len   = [0,0,0,0,0,0,0,0];
+    let mut res_start = [0,0,0,0,0,0,0,0];
+    mw_find(text, 5, pat, 2, need, got, res_len, res_start);
+    assert_eq(res_len[0], 2);
+    assert_eq(res_start[0], 2);
+    print("basic_window: ok");
+}
+
+fn test_no_window() {
+    // pat contains element not in text.
+    let mut text = [1,2,3,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut pat  = [5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut need = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut got = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut res_len   = [0,0,0,0,0,0,0,0];
+    let mut res_start = [0,0,0,0,0,0,0,0];
+    mw_find(text, 3, pat, 1, need, got, res_len, res_start);
+    assert_eq(res_len[0], -1);
+    print("no_window: ok");
+}
+
+fn test_multiplicity() {
+    // pat=[2,2]: need two 2s. text=[1,2,3,2,1]. Min window with two 2s:
+    // indices 1..3 = [2,3,2], len=3. No shorter window has two 2s.
+    let mut text = [1,2,3,2,1,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut pat  = [2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut need = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut got = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut res_len   = [0,0,0,0,0,0,0,0];
+    let mut res_start = [0,0,0,0,0,0,0,0];
+    mw_find(text, 5, pat, 2, need, got, res_len, res_start);
+    assert_eq(res_len[0], 3);
+    assert_eq(res_start[0], 1);
+    print("multiplicity: ok");
+}
+
+fn test_exact_match() {
+    // text equals pat: window = whole text, len=3.
+    let mut text = [10,20,30,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut pat  = [10,20,30,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut need = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut got = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut res_len   = [0,0,0,0,0,0,0,0];
+    let mut res_start = [0,0,0,0,0,0,0,0];
+    mw_find(text, 3, pat, 3, need, got, res_len, res_start);
+    assert_eq(res_len[0], 3);
+    assert_eq(res_start[0], 0);
+    print("exact_match: ok");
+}
+
+fn test_window_at_end() {
+    // text=[5,1,1,3], pat=[1,3]. Min window with 1 and 3:
+    // Window [1,1,3] at index 1 len=3. Or [1,3] at index 2 len=2.
+    let mut text = [5,1,1,3,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut pat  = [1,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut need = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut got = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut res_len   = [0,0,0,0,0,0,0,0];
+    let mut res_start = [0,0,0,0,0,0,0,0];
+    mw_find(text, 4, pat, 2, need, got, res_len, res_start);
+    assert_eq(res_len[0], 2);
+    assert_eq(res_start[0], 2);
+    print("window_at_end: ok");
+}
+
+fn main() -> Int {
+    test_basic_window();
+    test_no_window();
+    test_multiplicity();
+    test_exact_match();
+    test_window_at_end();
+    print("[OK] 574_interp_min_window_substring");
+    0
+}

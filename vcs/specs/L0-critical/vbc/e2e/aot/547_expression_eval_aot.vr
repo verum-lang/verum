@@ -1,0 +1,181 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, expression, evaluator, parser
+// @timeout: 30000
+
+// Expression evaluator for encoded arithmetic expressions
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Postfix expression evaluator
+// Tokens encoded as: positive = number, negative = operator
+// -1 = ADD, -2 = SUB, -3 = MUL, -4 = DIV, -5 = MOD, -6 = NEG (unary)
+
+type EvalResult is { value: Int, stack_depth: Int };
+
+fn eval_postfix(tokens: Arr8, n: Int) -> Int {
+    let mut stack = zeros();
+    let mut sp = 0;
+    let mut i = 0;
+    while i < n {
+        let tok = get8(tokens, i);
+        if tok >= 0 {
+            // Push number
+            stack = set8(stack, sp, tok);
+            sp = sp + 1;
+        } else if tok == -6 {
+            // Unary negate
+            let a = get8(stack, sp - 1);
+            stack = set8(stack, sp - 1, 0 - a);
+        } else {
+            // Binary op
+            let b = get8(stack, sp - 1);
+            sp = sp - 1;
+            let a = get8(stack, sp - 1);
+            let result = if tok == -1 { a + b }
+                         else if tok == -2 { a - b }
+                         else if tok == -3 { a * b }
+                         else if tok == -4 { a / b }
+                         else { a % b }; // -5
+            stack = set8(stack, sp - 1, result);
+        }
+        i = i + 1;
+    }
+    get8(stack, 0)
+}
+
+// Prefix expression evaluator (recursive descent with index tracking)
+// Uses same encoding, read right-to-left for prefix → same as postfix reversed
+// Simpler: just evaluate prefix directly with an index counter
+
+type PrefixState is { result: Int, pos: Int };
+
+@allow(unbounded_recursion)
+fn eval_prefix_helper(tokens: Arr8, pos: Int) -> PrefixState {
+    let tok = get8(tokens, pos);
+    if tok >= 0 {
+        return PrefixState { result: tok, pos: pos + 1 };
+    }
+    // Operator: evaluate two sub-expressions
+    let left = eval_prefix_helper(tokens, pos + 1);
+    let right = eval_prefix_helper(tokens, left.pos);
+    let val = if tok == -1 { left.result + right.result }
+              else if tok == -2 { left.result - right.result }
+              else if tok == -3 { left.result * right.result }
+              else { left.result / right.result }; // -4
+    PrefixState { result: val, pos: right.pos }
+}
+
+@allow(unbounded_recursion)
+fn eval_prefix(tokens: Arr8) -> Int {
+    let state = eval_prefix_helper(tokens, 0);
+    state.result
+}
+
+// Evaluate polynomial at x: coefficients in array, degree = n-1
+fn eval_poly(coeffs: Arr8, n: Int, x: Int) -> Int {
+    // Horner's method
+    let mut result = get8(coeffs, n - 1);
+    let mut i = n - 2;
+    while i >= 0 {
+        result = result * x + get8(coeffs, i);
+        i = i - 1;
+    }
+    result
+}
+
+fn test_postfix_simple() -> Int {
+    // "3 4 +" → 7
+    let tokens = Arr8 { v0: 3, v1: 4, v2: -1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_postfix(tokens, 3), 7);
+    1
+}
+
+fn test_postfix_complex() -> Int {
+    // "2 3 * 4 +" → (2*3)+4 = 10
+    let tokens = Arr8 { v0: 2, v1: 3, v2: -3, v3: 4, v4: -1, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_postfix(tokens, 5), 10);
+    1
+}
+
+fn test_postfix_subtract() -> Int {
+    // "10 3 -" → 7
+    let tokens = Arr8 { v0: 10, v1: 3, v2: -2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_postfix(tokens, 3), 7);
+    1
+}
+
+fn test_postfix_divide() -> Int {
+    // "20 4 /" → 5
+    let tokens = Arr8 { v0: 20, v1: 4, v2: -4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_postfix(tokens, 3), 5);
+    1
+}
+
+fn test_postfix_negate() -> Int {
+    // "5 NEG 3 +" → -5+3 = -2
+    let tokens = Arr8 { v0: 5, v1: -6, v2: 3, v3: -1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_postfix(tokens, 4), -2);
+    1
+}
+
+fn test_prefix_add() -> Int {
+    // "+ 3 4" → 7
+    let tokens = Arr8 { v0: -1, v1: 3, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_prefix(tokens), 7);
+    1
+}
+
+fn test_prefix_nested() -> Int {
+    // "* + 2 3 4" → (2+3)*4 = 20
+    let tokens = Arr8 { v0: -3, v1: -1, v2: 2, v3: 3, v4: 4, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_prefix(tokens), 20);
+    1
+}
+
+fn test_polynomial() -> Int {
+    // 3x^2 + 2x + 1 at x=5: 75+10+1 = 86
+    let coeffs = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_poly(coeffs, 3, 5), 86);
+
+    // At x=0: 1
+    assert_eq(eval_poly(coeffs, 3, 0), 1);
+
+    // At x=1: 6
+    assert_eq(eval_poly(coeffs, 3, 1), 6);
+    1
+}
+
+fn main() -> Int {
+    test_postfix_simple();
+    test_postfix_complex();
+    test_postfix_subtract();
+    test_postfix_divide();
+    test_postfix_negate();
+    test_prefix_add();
+    test_prefix_nested();
+    test_polynomial();
+    print("[OK] 547_expression_eval_aot");
+    0
+}

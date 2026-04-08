@@ -1,0 +1,134 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, code_gen, compile_warning, CompileDiag
+// @description: Test compile_warning builtin with CompileDiag context
+// @contexts: CompileDiag
+
+// =============================================================================
+// COMPILE WARNING TESTS
+// =============================================================================
+// Note: compile_error cannot be tested in success tests as it always fails
+// This file tests compile_warning which does not abort compilation
+
+// Test compile_warning with simple message
+meta fn test_compile_warning_simple() using [CompileDiag] {
+    compile_warning("This is a simple warning");
+}
+
+// Test compile_warning with dynamic message
+meta fn test_compile_warning_dynamic(feature: Text) using [CompileDiag] {
+    let msg = text_concat("Feature '", feature, "' is deprecated");
+    compile_warning(msg);
+}
+
+// Test compile_warning in conditional context
+meta fn maybe_warn(should_warn: Bool, msg: Text) using [CompileDiag] {
+    if should_warn {
+        compile_warning(msg);
+    }
+}
+
+// Test compile_warning with type information
+meta fn warn_about_type(type_name: Text) using [CompileDiag] {
+    compile_warning(text_concat("Using non-optimal type: ", type_name));
+}
+
+// Test compile_warning with multiple warnings
+meta fn emit_multiple_warnings() using [CompileDiag] {
+    compile_warning("Warning 1: Consider using const");
+    compile_warning("Warning 2: Unused variable detected");
+    compile_warning("Warning 3: Prefer immutable bindings");
+}
+
+// Test compile_warning with formatted message
+meta fn warn_deprecated_function(name: Text, alternative: Text) using [CompileDiag] {
+    let msg = text_concat(
+        "Function '", name, "' is deprecated. ",
+        "Use '", alternative, "' instead."
+    );
+    compile_warning(msg);
+}
+
+// Test compile_warning in macro helper
+meta fn deprecation_warning(item: Text, version: Text) using [CompileDiag] {
+    let msg = text_concat(
+        item, " is deprecated since version ", version,
+        ". It will be removed in a future release."
+    );
+    compile_warning(msg);
+}
+
+// Test compile_warning with code location info
+meta fn location_warning(file: Text, line: Int, msg: Text) using [CompileDiag] {
+    let full_msg = text_concat(
+        file, ":", stringify(line), ": ", msg
+    );
+    compile_warning(full_msg);
+}
+
+// Test compile_warning returns unit
+meta fn test_warning_returns_unit() -> () using [CompileDiag] {
+    compile_warning("Test warning");
+    // Returns unit implicitly
+}
+
+// =============================================================================
+// PRACTICAL WARNING PATTERNS
+// =============================================================================
+
+// Security warning pattern
+meta fn security_warning(issue: Text) using [CompileDiag] {
+    compile_warning(text_concat("[SECURITY] ", issue));
+}
+
+// Performance warning pattern
+meta fn perf_warning(issue: Text) using [CompileDiag] {
+    compile_warning(text_concat("[PERFORMANCE] ", issue));
+}
+
+// Compatibility warning pattern
+meta fn compat_warning(min_version: Text) using [CompileDiag] {
+    compile_warning(text_concat(
+        "This feature requires Verum ", min_version, " or later"
+    ));
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // All warning tests should compile and run without errors
+    // Warnings are emitted but don't cause compilation failure
+
+    // Simple warnings
+    @const test_compile_warning_simple();
+    @const test_compile_warning_dynamic("old_api");
+
+    // Conditional warning
+    @const maybe_warn(true, "Conditional warning triggered");
+    @const maybe_warn(false, "This warning should not appear");
+
+    // Type warning
+    @const warn_about_type("Float32");
+
+    // Multiple warnings
+    @const emit_multiple_warnings();
+
+    // Formatted warnings
+    @const warn_deprecated_function("old_process", "new_process");
+    @const deprecation_warning("legacy_module", "2.0");
+    @const location_warning("test.vr", 42, "Potential issue");
+
+    // Unit return
+    @const {
+        let result: () = test_warning_returns_unit();
+        assert(true);  // Just verify it compiles
+    };
+
+    // Practical patterns
+    @const security_warning("Potential SQL injection");
+    @const perf_warning("O(n^2) algorithm detected");
+    @const compat_warning("3.0");
+}

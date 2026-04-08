@@ -1,0 +1,153 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, job_scheduling, greedy, deadlines, profit_maximization
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Job scheduling with deadlines: maximize total profit.
+// Each job has a deadline d[i] and profit p[i]; execution takes 1 unit of time.
+// Greedy: sort jobs by profit descending; for each job find the latest free slot
+// at or before deadline; if found, schedule there.
+// Slot array: slot[t] = job index (1-based) if occupied, 0 if free.
+// All arrays [Int; 16].
+
+// Sort jobs by profit descending (insertion sort on parallel arrays).
+fn sort_by_profit_desc(d: [Int; 16], p: [Int; 16], n: Int) {
+    let mut i = 1;
+    while i < n {
+        let kd = d[i]; let kp = p[i];
+        let mut j = i;
+        while j > 0 && p[j - 1] < kp {
+            d[j] = d[j - 1]; p[j] = p[j - 1];
+            j = j - 1;
+        }
+        d[j] = kd; p[j] = kp;
+        i = i + 1;
+    }
+}
+
+// Schedule jobs. Returns total profit; fills slot[] and job_count[0].
+fn schedule_jobs(d: [Int; 16], p: [Int; 16], n: Int,
+                 slot: [Int; 16], max_d: Int, job_count: [Int; 16]) -> Int {
+    // Init slots to 0 (free)
+    let mut t = 0;
+    while t < max_d { slot[t] = 0; t = t + 1; }
+    let mut total = 0;
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n {
+        // Find latest free slot <= d[i] (1-indexed deadline, 0-indexed slot array)
+        let mut j = d[i] - 1;
+        while j >= 0 {
+            if slot[j] == 0 {
+                slot[j] = i + 1;   // job number (1-based)
+                total = total + p[i];
+                cnt = cnt + 1;
+                j = -1;            // break
+            } else {
+                j = j - 1;
+            }
+        }
+        i = i + 1;
+    }
+    job_count[0] = cnt;
+    total
+}
+
+fn test_classic_scheduling() {
+    // Jobs: (d=2,p=100), (d=1,p=19), (d=2,p=27), (d=1,p=25), (d=3,p=15)
+    // Sort by profit desc: (100,d2),(27,d2),(25,d1),(19,d1),(15,d3)
+    // Schedule job p=100 in slot 1 (d2-1=1). slot=[0,1]
+    // Schedule job p=27 in slot 0 (try slot 1 busy, slot 0 free). slot=[2,1]
+    // Schedule job p=25: d=1, try slot 0 busy -> skip.
+    // Schedule job p=19: d=1, try slot 0 busy -> skip.
+    // Schedule job p=15: d=3, slot 2 free. slot=[2,1,3]
+    // Total = 100+27+15 = 142, count = 3
+    let mut d = [2, 1, 2, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut p = [100,19,27,25,15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sort_by_profit_desc(d, p, 5);
+    assert_eq(p[0], 100);
+    assert_eq(p[1], 27);
+    let mut slot = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut jc   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total = schedule_jobs(d, p, 5, slot, 3, jc);
+    assert_eq(total, 142);
+    assert_eq(jc[0], 3);
+    print("classic_scheduling: ok");
+}
+
+fn test_all_same_deadline() {
+    // 4 jobs all with deadline=1: only 1 slot available (slot[0]).
+    // Profits: 10, 40, 20, 30. Sorted desc: 40, 30, 20, 10.
+    // Only job p=40 scheduled. Total = 40.
+    let mut d = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut p = [10,40,20,30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sort_by_profit_desc(d, p, 4);
+    assert_eq(p[0], 40);
+    let mut slot = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut jc   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total = schedule_jobs(d, p, 4, slot, 1, jc);
+    assert_eq(total, 40);
+    assert_eq(jc[0], 1);
+    print("all_same_deadline: ok");
+}
+
+fn test_no_conflicts() {
+    // 4 jobs each with unique deadline; all can be scheduled.
+    // d=[1,2,3,4], p=[5,10,15,20]. Sorted desc: (20,4),(15,3),(10,2),(5,1).
+    // Job p=20 d=4 -> slot[3]. Job p=15 d=3 -> slot[2].
+    // Job p=10 d=2 -> slot[1]. Job p=5 d=1 -> slot[0]. All 4 scheduled.
+    // Total = 50.
+    let mut d = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut p = [5,10,15,20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sort_by_profit_desc(d, p, 4);
+    let mut slot = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut jc   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total = schedule_jobs(d, p, 4, slot, 4, jc);
+    assert_eq(total, 50);
+    assert_eq(jc[0], 4);
+    print("no_conflicts: ok");
+}
+
+fn test_single_job() {
+    // 1 job: d=3, p=99. Scheduled in slot[2]. Total=99.
+    let mut d = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut p = [99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut slot = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut jc   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total = schedule_jobs(d, p, 1, slot, 3, jc);
+    assert_eq(total, 99);
+    assert_eq(jc[0], 1);
+    assert_eq(slot[2], 1);
+    print("single_job: ok");
+}
+
+fn test_late_deadline_jobs() {
+    // Jobs: (d=4,p=60),(d=2,p=100),(d=4,p=40),(d=3,p=20),(d=1,p=10)
+    // Sort desc: (100,d2),(60,d4),(40,d4),(20,d3),(10,d1)
+    // p=100,d=2: slot[1]. p=60,d=4: slot[3]. p=40,d=4: slot[2] free.
+    // p=20,d=3: slot[2] now busy, slot[1] busy, slot[0] free -> slot[0].
+    // p=10,d=1: slot[0] busy -> skip.
+    // Total = 100+60+40+20 = 220, count=4.
+    let mut d = [4, 2, 4, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut p = [60,100,40,20,10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sort_by_profit_desc(d, p, 5);
+    assert_eq(p[0], 100);
+    let mut slot = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut jc   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total = schedule_jobs(d, p, 5, slot, 4, jc);
+    assert_eq(total, 220);
+    assert_eq(jc[0], 4);
+    print("late_deadline: ok");
+}
+
+fn main() -> Int {
+    test_classic_scheduling();
+    test_all_same_deadline();
+    test_no_conflicts();
+    test_single_job();
+    test_late_deadline_jobs();
+    print("[OK] 562_interp_job_scheduling");
+    0
+}

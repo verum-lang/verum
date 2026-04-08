@@ -1,0 +1,218 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, generators, async, iterator
+// @timeout: 15000
+// @description: Type inference tests for generator functions (fn* and async fn*)
+//
+// Tests type inference for:
+// - fn* -> Iterator<Item = T>
+// - async fn* -> AsyncIterator<Item = T>
+// - Yield type consistency validation
+// - Generic generator type parameters
+// - Return type inference from yield expressions
+// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+
+// =============================================================================
+// Type definitions needed for tests
+// =============================================================================
+
+type Choice is A | B | C;
+
+// =============================================================================
+// Section 1: Protocol Definitions for Type System
+// =============================================================================
+
+/// Synchronous iterator protocol
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+    fn size_hint(&self) -> (Int, Maybe<Int>) = (0, Maybe.None);
+};
+
+/// Asynchronous iterator protocol
+type AsyncIterator is protocol {
+    type Item;
+    async fn next(&mut self) -> Maybe<Self.Item>;
+    fn size_hint(&self) -> (Int, Maybe<Int>) = (0, Maybe.None);
+};
+
+// =============================================================================
+// Section 2: Basic Return Type Inference for fn*
+// =============================================================================
+
+// fn* with Int yield -> Iterator<Item = Int>
+fn* int_generator() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+// fn* with Text yield -> Iterator<Item = Text>
+fn* text_generator() -> Text {
+    yield "hello";
+    yield "world";
+}
+
+// fn* with Bool yield -> Iterator<Item = Bool>
+fn* bool_generator() -> Bool {
+    yield true;
+    yield false;
+}
+
+// fn* with Float yield -> Iterator<Item = Float>
+fn* float_generator() -> Float {
+    yield 1.0;
+    yield 2.5;
+    yield 3.14;
+}
+
+// =============================================================================
+// Section 3: Basic Return Type Inference for async fn*
+// =============================================================================
+
+// async fn* with Int yield -> AsyncIterator<Item = Int>
+async fn* async_int_generator() -> Int {
+    yield 1;
+    yield 2;
+}
+
+// async fn* with Text yield -> AsyncIterator<Item = Text>
+async fn* async_text_generator() -> Text {
+    yield "async";
+    yield "hello";
+}
+
+// =============================================================================
+// Section 4: Complex Yield Types
+// =============================================================================
+
+// Tuple yield type
+fn* tuple_generator() -> (Int, Text) {
+    yield (1, "one");
+    yield (2, "two");
+    yield (3, "three");
+}
+
+// Optional yield type
+fn* maybe_generator() -> Maybe<Int> {
+    yield Maybe.Some(1);
+    yield Maybe.None;
+    yield Maybe.Some(2);
+}
+
+// =============================================================================
+// Section 5: Generic Generator Type Parameters
+// =============================================================================
+
+// Generic identity generator
+fn* identity<T>(value: T) -> T {
+    yield value;
+}
+
+// Generic with Clone bound
+fn* repeat<T: Clone>(value: T, count: Int) -> T {
+    for _ in 0..count {
+        yield value.clone();
+    }
+}
+
+// Generic with multiple parameters
+fn* zip_manual<A, B>(a: List<A>, b: List<B>) -> (A, B) {
+    let mut iter_a = a.into_iter();
+    let mut iter_b = b.into_iter();
+
+    loop {
+        match (iter_a.next(), iter_b.next()) {
+            (Maybe.Some(va), Maybe.Some(vb)) => yield (va, vb),
+            _ => break,
+        }
+    }
+}
+
+// =============================================================================
+// Section 6: Yield Type Consistency Validation
+// =============================================================================
+
+// Valid: all yields have same type
+fn* consistent_yields() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+// Valid: yields in different branches have same type
+fn* branching_yields(flag: Bool) -> Int {
+    if flag {
+        yield 1;
+        yield 2;
+    } else {
+        yield 10;
+        yield 20;
+    }
+}
+
+// Valid: yields in match arms have same type
+fn* match_yields(choice: Choice) -> Text {
+    match choice {
+        Choice.A => yield "a",
+        Choice.B => yield "b",
+        Choice.C => yield "c",
+    }
+}
+
+// =============================================================================
+// Section 7: Generator Combinators Type Inference
+// =============================================================================
+
+// Map combinator preserves structure
+fn* map_gen<T, U>(source: impl Iterator<Item = T>, f: fn(T) -> U) -> U {
+    for item in source {
+        yield f(item);
+    }
+}
+
+// Filter combinator preserves item type
+fn* filter_gen<T>(source: impl Iterator<Item = T>, pred: fn(&T) -> Bool) -> T {
+    for item in source {
+        if pred(&item) {
+            yield item;
+        }
+    }
+}
+
+// Chain combinator requires matching types
+fn* chain_gen<T>(first: impl Iterator<Item = T>, second: impl Iterator<Item = T>) -> T {
+    for item in first {
+        yield item;
+    }
+    for item in second {
+        yield item;
+    }
+}
+
+// =============================================================================
+// Section 8: Main Entry Point
+// =============================================================================
+
+fn main() {
+    // Basic generator creation and type validation
+    let gen = int_generator();
+    let tgen = text_generator();
+    let bgen = bool_generator();
+    let fgen = float_generator();
+
+    // Async generators
+    let agen = async_int_generator();
+    let atgen = async_text_generator();
+
+    // Generic generators
+    let id_gen = identity(42);
+    let rep = repeat("hello", 3);
+
+    // Consistency
+    let c = consistent_yields();
+    let b = branching_yields(true);
+
+    print("All type inference tests passed!");
+}

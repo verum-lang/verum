@@ -1,0 +1,351 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for async block expressions
+
+// ============================================================================
+// Basic Async Blocks
+// ============================================================================
+
+fn test_basic_async_blocks() {
+    // Simple async block
+    let task = async {
+        42
+    };
+
+    // Async block with statement
+    let task2 = async {
+        let x = compute();
+        x * 2
+    };
+
+    // Empty async block
+    let empty = async {};
+
+    // Async block with multiple statements
+    let multi = async {
+        let a = 1;
+        let b = 2;
+        let c = 3;
+        a + b + c
+    };
+
+    // Async block returning unit
+    let unit_task = async {
+        do_side_effect();
+    };
+}
+
+// ============================================================================
+// Async Move Blocks
+// ============================================================================
+
+fn test_async_move_blocks() {
+    // Async move block captures by value
+    let captured = "hello";
+    let task = async move {
+        captured
+    };
+
+    // Move block with multiple captures
+    let a = 1;
+    let b = 2;
+    let task2 = async move {
+        a + b
+    };
+
+    // Move block with complex capture
+    let data = List.new();
+    let task3 = async move {
+        data.len()
+    };
+}
+
+// ============================================================================
+// Nested Async Blocks
+// ============================================================================
+
+fn test_nested_async_blocks() {
+    // Simple nesting
+    let nested = async {
+        let inner = async {
+            "inner"
+        };
+        inner.await
+    };
+
+    // Deep nesting
+    let deep = async {
+        async {
+            async {
+                async {
+                    "deep"
+                }.await
+            }.await
+        }.await
+    };
+
+    // Mixed nesting with move
+    let x = 42;
+    let mixed = async move {
+        let inner = async {
+            compute()
+        };
+        inner.await + x
+    };
+}
+
+// ============================================================================
+// Async Blocks with Control Flow
+// ============================================================================
+
+fn test_async_control_flow() {
+    // Async block with if
+    let conditional = async {
+        if condition {
+            branch_a().await
+        } else {
+            branch_b().await
+        }
+    };
+
+    // Async block with match
+    let matched = async {
+        match value {
+            Some(x) => process(x).await,
+            None => default_value().await
+        }
+    };
+
+    // Async block with loop
+    let looped = async {
+        let mut count = 0;
+        while count < 10 {
+            step().await;
+            count += 1;
+        }
+        count
+    };
+
+    // Async block with for
+    let iterated = async {
+        let mut sum = 0;
+        for i in 0..10 {
+            sum += fetch(i).await;
+        }
+        sum
+    };
+
+    // Async block with for await
+    let streamed = async {
+        let mut results = List.new();
+        for await item in stream {
+            results.push(item);
+        }
+        results
+    };
+}
+
+// ============================================================================
+// Async Blocks with Error Handling
+// ============================================================================
+
+fn test_async_error_handling() {
+    // Async block with try
+    let tried = async {
+        try {
+            risky_op().await
+        } recover {
+            Error => default_value()
+        }
+    };
+
+    // Async block with question mark
+    let propagated = async {
+        let a = op1().await?;
+        let b = op2(a).await?;
+        Ok(b)
+    };
+
+    // Async block with defer
+    let deferred = async {
+        defer cleanup();
+        risky_operation().await
+    };
+
+    // Async block with errdefer
+    let errdeferred = async {
+        errdefer rollback();
+        transaction().await
+    };
+}
+
+// ============================================================================
+// Async Blocks as Expressions
+// ============================================================================
+
+fn test_async_as_expression() {
+    // In function call
+    spawn(async { compute() });
+
+    // In method chain
+    executor.run(async { task() });
+
+    // In let binding with type annotation
+    let task: Future<Int> = async { 42 };
+
+    // In tuple
+    let pair = (async { a() }, async { b() });
+
+    // In array/list
+    let tasks = [
+        async { task1() },
+        async { task2() },
+        async { task3() }
+    ];
+
+    // In struct literal
+    let obj = TaskWrapper {
+        task: async { do_work() }
+    };
+
+    // As function argument
+    process_async(async { compute() });
+
+    // In binary expression (not typical but syntactically valid)
+    let selected = if use_a { async { a() } } else { async { b() } };
+}
+
+// ============================================================================
+// Async Blocks with Await
+// ============================================================================
+
+fn test_async_with_await() {
+    // Single await
+    let single = async {
+        fetch().await
+    };
+
+    // Multiple awaits
+    let multi = async {
+        let a = fetch_a().await;
+        let b = fetch_b().await;
+        a + b
+    };
+
+    // Chained awaits
+    let chained = async {
+        fetch()
+            .await
+            .process()
+            .await
+            .finalize()
+            .await
+    };
+
+    // Await in expression
+    let expr = async {
+        fetch_a().await + fetch_b().await * fetch_c().await
+    };
+
+    // Conditional await
+    let cond = async {
+        if condition {
+            Some(fetch().await)
+        } else {
+            None
+        }
+    };
+}
+
+// ============================================================================
+// Async Blocks with Local Functions
+// ============================================================================
+
+fn test_async_with_local_fns() {
+    let task = async {
+        // Local function inside async block
+        fn helper(x: Int) -> Int {
+            x * 2
+        }
+
+        let value = fetch().await;
+        helper(value)
+    };
+
+    // Async block with local async closure
+    let task2 = async {
+        let fetch_data = async |id: Int| {
+            database.get(id).await
+        };
+
+        fetch_data(1).await + fetch_data(2).await
+    };
+}
+
+// ============================================================================
+// Async Blocks with Complex Expressions
+// ============================================================================
+
+fn test_complex_async_blocks() {
+    // Pipeline in async block
+    let piped = async {
+        data
+            |> transform
+            |> async_process().await
+            |> finalize
+    };
+
+    // Comprehension in async block
+    let comprehended = async {
+        [x * 2 for x in fetch_list().await if x > 0]
+    };
+
+    // Method chain with multiple awaits
+    let chain = async {
+        client
+            .connect().await
+            .authenticate(creds).await
+            .fetch_data(query).await
+            .parse()
+    };
+
+    // Nursery inside async block
+    let parallel = async {
+        nursery {
+            let a = spawn fetch_a();
+            let b = spawn fetch_b();
+        }
+    };
+
+    // Select inside async block
+    let raced = async {
+        select {
+            result = fast_path().await => result,
+            _ = timeout(1000).await => default()
+        }
+    };
+}
+
+// ============================================================================
+// Async Blocks with Type Annotations
+// ============================================================================
+
+fn test_async_with_types() {
+    // Explicit return type via let
+    let typed: Future<Int> = async { 42 };
+
+    // In generic context
+    let generic: Future<List<Text>> = async {
+        fetch_strings().await
+    };
+
+    // With result type
+    let fallible: Future<Result<Data, Error>> = async {
+        try {
+            fetch_data().await
+        } recover {
+            e => Err(e)
+        }
+    };
+}

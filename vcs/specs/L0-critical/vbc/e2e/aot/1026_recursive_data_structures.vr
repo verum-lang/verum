@@ -1,0 +1,126 @@
+// @test: run
+// Recursive data structures — linked list with Heap allocation
+
+type IntList is Nil | Cons { head: Int, tail: Heap<IntList> };
+
+@allow(unbounded_recursion)
+fn list_len(xs: IntList) -> Int {
+    match xs {
+        Nil => 0,
+        Cons { head: _, tail } => 1 + list_len(*tail),
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_sum(xs: IntList) -> Int {
+    match xs {
+        Nil => 0,
+        Cons { head, tail } => head + list_sum(*tail),
+    }
+}
+
+fn cons(head: Int, tail: IntList) -> IntList {
+    Cons { head: head, tail: Heap(tail) }
+}
+
+@allow(unbounded_recursion)
+fn list_reverse_helper(xs: IntList, acc: IntList) -> IntList {
+    match xs {
+        Nil => acc,
+        Cons { head, tail } => list_reverse_helper(*tail, cons(head, acc)),
+    }
+}
+
+fn list_reverse(xs: IntList) -> IntList {
+    list_reverse_helper(xs, Nil)
+}
+
+@allow(unbounded_recursion)
+fn list_nth(xs: IntList, n: Int) -> Int {
+    match xs {
+        Nil => -1,
+        Cons { head, tail } => {
+            if (n == 0) { head }
+            else { list_nth(*tail, n - 1) }
+        },
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Linked list construction and length
+    let xs = cons(1, cons(2, cons(3, cons(4, cons(5, Nil)))));
+    let len = list_len(xs);
+    if (len != 5) {
+        print(f"FAIL test1: len = {len}");
+        return 1;
+    }
+    print("test1 list_len: OK");
+
+    // Test 2: List sum
+    let xs2 = cons(10, cons(20, cons(30, Nil)));
+    let s = list_sum(xs2);
+    if (s != 60) {
+        print(f"FAIL test2: sum = {s}");
+        return 1;
+    }
+    print("test2 list_sum: OK");
+
+    // Test 3: List reverse
+    let xs3 = cons(1, cons(2, cons(3, Nil)));
+    let rev = list_reverse(xs3);
+    // reversed: 3, 2, 1
+    let first = list_nth(rev, 0);
+    let second = list_nth(rev, 1);
+    let third = list_nth(rev, 2);
+    if (first != 3 || second != 2 || third != 1) {
+        print(f"FAIL test3: reversed = {first},{second},{third}");
+        return 1;
+    }
+    print("test3 list_reverse: OK");
+
+    // Test 4: Single element list
+    let single = cons(42, Nil);
+    if (list_len(single) != 1) {
+        print("FAIL test4: single len");
+        return 1;
+    }
+    if (list_sum(single) != 42) {
+        print("FAIL test4: single sum");
+        return 1;
+    }
+    print("test4 single: OK");
+
+    // Test 5: Nil list
+    let empty = Nil;
+    if (list_len(empty) != 0) {
+        print("FAIL test5: nil len");
+        return 1;
+    }
+    if (list_sum(empty) != 0) {
+        print("FAIL test5: nil sum");
+        return 1;
+    }
+    print("test5 nil: OK");
+
+    // Test 6: Larger list
+    let mut big = Nil;
+    let mut i = 10;
+    while i > 0 {
+        big = cons(i, big);
+        i = i - 1;
+    }
+    // big = cons(1, cons(2, ... cons(10, Nil)))
+    if (list_len(big) != 10) {
+        print(f"FAIL test6: big len = {list_len(big)}");
+        return 1;
+    }
+    // sum 1..10 = 55
+    if (list_sum(big) != 55) {
+        print(f"FAIL test6: big sum = {list_sum(big)}");
+        return 1;
+    }
+    print("test6 big list: OK");
+
+    print("1026_recursive_data_structures: PASS");
+    0
+}

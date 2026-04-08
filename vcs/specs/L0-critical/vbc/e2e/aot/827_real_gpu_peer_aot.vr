@@ -1,0 +1,47 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, gpu, real-opcode, peer
+// @expected-exit: 0
+
+// Tests REAL GPU peer access intrinsics through AOT (LLVM) pipeline.
+// Mirror of interpreter test 207. Exercises gpu_can_peer, gpu_enable_peer,
+// gpu_disable_peer.
+
+// GPU peer access intrinsic declarations
+fn gpu_can_peer(src_device: Int, peer_device: Int) -> Int { @intrinsic("GPU_CAN_PEER", src_device, peer_device) }
+fn gpu_enable_peer(src_device: Int, peer_device: Int) -> Int { @intrinsic("GPU_ENABLE_PEER", src_device, peer_device) }
+fn gpu_disable_peer(src_device: Int, peer_device: Int) -> Int { @intrinsic("GPU_DISABLE_PEER", src_device, peer_device) }
+fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Check peer access (simulated, may return 0 or 1)
+    let can = gpu_can_peer(0, 1);
+    // Just verify it doesn't crash -- result depends on simulator state
+
+    // Test 2: Enable peer access (may succeed or fail gracefully)
+    let en = gpu_enable_peer(0, 1);
+    // Don't check return -- simulator may not support peer
+
+    // Test 3: Disable peer access
+    let dis = gpu_disable_peer(0, 1);
+    // Don't check return -- symmetric with enable
+
+    // Test 4: Self-peer check (device 0 to device 0)
+    let self_peer = gpu_can_peer(0, 0);
+    // Self-access is always possible in simulation
+
+    // Test 5: Multiple peer operations don't crash
+    let c1 = gpu_can_peer(0, 1);
+    let c2 = gpu_can_peer(1, 0);
+    let c3 = gpu_can_peer(0, 2);
+
+    // Test 6: Get device still works after peer operations
+    let dev = gpu_get_device();
+    if dev != 0 { errors = errors + 1; }
+
+    // Verify pipeline works (all operations complete without panic)
+    errors
+}

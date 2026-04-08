@@ -1,0 +1,260 @@
+// =============================================================================
+// lazy_stream_comprehension.vr - Tests for true lazy stream comprehension
+// =============================================================================
+// @test: unit
+// @tier: 2
+// @level: L2
+// @tags: stream, lazy, generator, iterator, comprehension
+// @spec: docs/improvements.md Section 17.1 - True Lazy Stream Comprehensions
+// =============================================================================
+//
+// Tests for generator-based lazy stream comprehension compilation.
+// Stream comprehensions should:
+// 1. Compile to generator functions (fn*)
+// 2. Execute lazily - elements computed only when consumed
+// 3. Support filters, let bindings, and nested for clauses
+// 4. Memory efficient - O(1) for generator state, not O(n) for results
+//
+// =============================================================================
+
+module tests.streaming.lazy_stream_comprehension;
+
+type Point is { x: Int, y: Int };
+
+// =============================================================================
+// Test 1: Simple stream (no filter) - lazy execution
+// =============================================================================
+
+fn test_simple_stream_lazy() {
+    // stream[x * 2 for x in source] should be lazy
+    let source = [1, 2, 3, 4, 5];
+    let stream = stream[x * 2 for x in source];
+
+    // Stream should be a generator/iterator, not a materialized list
+    // Taking only first 2 elements should not compute all 5
+    let first = stream.next();
+    assert_eq(first, Some(2));
+
+    let second = stream.next();
+    assert_eq(second, Some(4));
+
+    // Rest should still be available
+    let third = stream.next();
+    assert_eq(third, Some(6));
+}
+
+// =============================================================================
+// Test 2: Stream with filter - lazy evaluation of predicate
+// =============================================================================
+
+fn test_filtered_stream_lazy() {
+    // stream[x for x in source if pred] should be lazy
+    let source = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let evens = stream[x for x in source if x % 2 == 0];
+
+    // Should yield only even numbers, lazily
+    assert_eq(evens.next(), Some(2));
+    assert_eq(evens.next(), Some(4));
+    assert_eq(evens.next(), Some(6));
+
+    // Can stop early without computing remaining elements
+    let count = evens.take(2).count();
+    assert_eq(count, 2);  // Only computed 2 more (8, 10)
+}
+
+// =============================================================================
+// Test 3: Stream with transform and filter
+// =============================================================================
+
+fn test_transform_and_filter_lazy() {
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Transform and filter: double the even numbers
+    let doubled_evens = stream[x * 2 for x in numbers if x % 2 == 0];
+
+    let results = doubled_evens.collect();
+    assert_eq(results, [4, 8, 12, 16, 20]);
+}
+
+// =============================================================================
+// Test 4: Stream with let binding
+// =============================================================================
+
+fn test_stream_with_let_binding() {
+    let items = [1, 2, 3, 4, 5];
+
+    // Let binding intermediate computation
+    let stream = stream[result for x in items let y = x * x let result = y + 1];
+
+    let results = stream.collect();
+    assert_eq(results, [2, 5, 10, 17, 26]);  // (1+1), (4+1), (9+1), (16+1), (25+1)
+}
+
+// =============================================================================
+// Test 5: Nested stream comprehension - lazy cartesian product
+// =============================================================================
+
+fn test_nested_stream_lazy() {
+    let xs = [1, 2, 3];
+    let ys = ["a", "b"];
+
+    // Nested for produces cartesian product lazily
+    let pairs = stream[(x, y) for x in xs for y in ys];
+
+    // Take first 3 pairs without computing all 6
+    let first_three = pairs.take(3).collect();
+    assert_eq(first_three, [(1, "a"), (1, "b"), (2, "a")]);
+}
+
+// =============================================================================
+// Test 6: Complex nested with filter
+// =============================================================================
+
+fn test_nested_with_filter_lazy() {
+    let rows = [1, 2, 3];
+    let cols = [1, 2, 3];
+
+    // Only pairs where sum is even
+    let even_sum_pairs = stream[(r, c) for r in rows for c in cols if (r + c) % 2 == 0];
+
+    let results = even_sum_pairs.collect();
+    // (1,1)=2✓, (1,2)=3✗, (1,3)=4✓, (2,1)=3✗, (2,2)=4✓, (2,3)=5✗, (3,1)=4✓, (3,2)=5✗, (3,3)=6✓
+    assert_eq(results, [(1, 1), (1, 3), (2, 2), (3, 1), (3, 3)]);
+}
+
+// =============================================================================
+// Test 7: Stream with pattern destructuring
+// =============================================================================
+
+fn test_stream_pattern_destructuring() {
+    let points = [
+        Point { x: 1, y: 2 },
+        Point { x: 3, y: 4 },
+        Point { x: 5, y: 6 },
+    ];
+
+    // Destructure records in for pattern
+    let sums = stream[p.x + p.y for p in points];
+
+    let results = sums.collect();
+    assert_eq(results, [3, 7, 11]);
+}
+
+// =============================================================================
+// Test 8: Stream tuple pattern
+// =============================================================================
+
+fn test_stream_tuple_pattern() {
+    let pairs = [(1, 10), (2, 20), (3, 30)];
+
+    let products = stream[a * b for (a, b) in pairs if a > 1];
+
+    let results = products.collect();
+    assert_eq(results, [40, 90]);
+}
+
+// =============================================================================
+// Test 9: Large stream with early termination - memory test
+// =============================================================================
+
+fn test_large_stream_early_termination() {
+    // Create a stream over a large range
+    // If this were eager, it would allocate O(1M) memory
+    let large_stream = stream[x * 2 for x in 0..1000000 if x % 1000 == 0];
+
+    // Take only first 5 elements - should be O(1) memory
+    let first_five = large_stream.take(5).collect();
+    assert_eq(first_five, [0, 2000, 4000, 6000, 8000]);
+}
+
+// =============================================================================
+// Test 10: Chained stream operations
+// =============================================================================
+
+fn test_chained_stream_operations() {
+    let numbers = stream[x for x in 1..100];
+
+    // Chain multiple operations - all should remain lazy
+    let result = numbers
+        .filter(|x| x % 3 == 0)
+        .map(|x| x * 2)
+        .take(5)
+        .collect();
+
+    assert_eq(result, [6, 12, 18, 24, 30]);  // 3*2, 6*2, 9*2, 12*2, 15*2
+}
+
+// =============================================================================
+// Test 11: Stream as iterator in for loop
+// =============================================================================
+
+fn test_stream_in_for_loop() {
+    let squares = stream[x * x for x in 1..10 if x % 2 == 1];
+
+    let mut sum = 0;
+    for sq in squares {
+        sum = sum + sq;
+        if sum > 50 {
+            break;  // Early exit - stream stops computing
+        }
+    }
+
+    // 1 + 9 + 25 + 49 = 84 > 50, but 1 + 9 + 25 = 35 < 50
+    assert(sum > 50);
+}
+
+// =============================================================================
+// Test 12: Empty stream
+// =============================================================================
+
+fn test_empty_stream() {
+    let empty = stream[x for x in []];
+    assert_eq(empty.next(), None);
+
+    let filtered_empty = stream[x for x in [1, 2, 3] if x > 100];
+    assert_eq(filtered_empty.next(), None);
+}
+
+// =============================================================================
+// Test 13: Stream with side effects verification
+// =============================================================================
+
+fn test_stream_deferred_evaluation() {
+    let mut counter = 0;
+
+    // This function has a side effect
+    let increment = |x| {
+        counter = counter + 1;
+        x * 2
+    };
+
+    // Creating the stream should NOT trigger any evaluation
+    let stream = stream[increment(x) for x in [1, 2, 3, 4, 5]];
+    assert_eq(counter, 0);  // Nothing computed yet!
+
+    // Taking 2 elements should compute exactly 2
+    let _ = stream.take(2).collect();
+    assert_eq(counter, 2);
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    test_simple_stream_lazy();
+    test_filtered_stream_lazy();
+    test_transform_and_filter_lazy();
+    test_stream_with_let_binding();
+    test_nested_stream_lazy();
+    test_nested_with_filter_lazy();
+    test_stream_pattern_destructuring();
+    test_stream_tuple_pattern();
+    test_large_stream_early_termination();
+    test_chained_stream_operations();
+    test_stream_in_for_loop();
+    test_empty_stream();
+    test_stream_deferred_evaluation();
+
+    print("All lazy stream comprehension tests passed!");
+}

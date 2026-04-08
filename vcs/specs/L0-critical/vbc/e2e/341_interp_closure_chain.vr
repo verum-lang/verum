@@ -1,0 +1,367 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, closures, compose, pipe, map-reduce, higher-order
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Chained closures — compose, pipe, map-reduce using
+// function-pointer-based closures and higher-order function combinators.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+type BufArr is { data: Arr8, len: Int };
+
+fn buf_new() -> BufArr {
+    BufArr { data: a8_zeros(), len: 0 }
+}
+
+fn buf_push(b: BufArr, val: Int) -> BufArr {
+    BufArr { data: a8_set(b.data, b.len, val), len: b.len + 1 }
+}
+
+fn buf_get(b: BufArr, i: Int) -> Int {
+    a8_get(b.data, i)
+}
+
+// =============================================================================
+// Basic transform functions (used as function pointers)
+// =============================================================================
+
+fn double(x: Int) -> Int { x * 2 }
+fn triple(x: Int) -> Int { x * 3 }
+fn square(x: Int) -> Int { x * x }
+fn increment(x: Int) -> Int { x + 1 }
+fn decrement(x: Int) -> Int { x - 1 }
+fn negate(x: Int) -> Int { -x }
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn add_10(x: Int) -> Int { x + 10 }
+
+// =============================================================================
+// Higher-order combinators
+// =============================================================================
+
+// Apply a function to all elements in a buffer
+fn buf_map(b: BufArr, f: fn(Int) -> Int) -> BufArr {
+    let mut out = buf_new();
+    let mut i = 0;
+    while i < b.len {
+        out = buf_push(out, f(buf_get(b, i)));
+        i = i + 1;
+    }
+    out
+}
+
+// Filter elements using a predicate function (returns 1 for keep, 0 for discard)
+fn buf_filter(b: BufArr, pred: fn(Int) -> Int) -> BufArr {
+    let mut out = buf_new();
+    let mut i = 0;
+    while i < b.len {
+        let v = buf_get(b, i);
+        if pred(v) == 1 {
+            out = buf_push(out, v);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// Fold/reduce with accumulator
+fn buf_fold(b: BufArr, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < b.len {
+        acc = f(acc, buf_get(b, i));
+        i = i + 1;
+    }
+    acc
+}
+
+// Reducer functions
+fn add(a: Int, b: Int) -> Int { a + b }
+fn mul(a: Int, b: Int) -> Int { a * b }
+fn max_of(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_of(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// =============================================================================
+// Predicates
+// =============================================================================
+
+fn is_positive(x: Int) -> Int { if x > 0 { 1 } else { 0 } }
+fn is_even(x: Int) -> Int { if x % 2 == 0 { 1 } else { 0 } }
+fn is_odd(x: Int) -> Int { if x % 2 != 0 { 1 } else { 0 } }
+fn is_gt_5(x: Int) -> Int { if x > 5 { 1 } else { 0 } }
+fn is_lt_20(x: Int) -> Int { if x < 20 { 1 } else { 0 } }
+
+// =============================================================================
+// Two-stage composition via manual chaining
+// Since we can't return closures, we compose by applying sequentially
+// =============================================================================
+
+// Apply two maps in sequence (compose)
+fn buf_map2(b: BufArr, f: fn(Int) -> Int, g: fn(Int) -> Int) -> BufArr {
+    buf_map(buf_map(b, f), g)
+}
+
+// Apply three maps in sequence (pipe)
+fn buf_map3(b: BufArr, f: fn(Int) -> Int, g: fn(Int) -> Int, h: fn(Int) -> Int) -> BufArr {
+    buf_map(buf_map(buf_map(b, f), g), h)
+}
+
+// Apply map then fold (map-reduce)
+fn buf_map_reduce(b: BufArr, mapper: fn(Int) -> Int, init: Int, reducer: fn(Int, Int) -> Int) -> Int {
+    buf_fold(buf_map(b, mapper), init, reducer)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_single_map() {
+    let mut b = buf_new();
+    b = buf_push(b, 1);
+    b = buf_push(b, 2);
+    b = buf_push(b, 3);
+    b = buf_push(b, 4);
+
+    let doubled = buf_map(b, double);
+    assert_eq(buf_get(doubled, 0), 2);
+    assert_eq(buf_get(doubled, 1), 4);
+    assert_eq(buf_get(doubled, 2), 6);
+    assert_eq(buf_get(doubled, 3), 8);
+    assert_eq(doubled.len, 4);
+}
+
+fn test_compose_two() {
+    // double then increment: f(x) = (x*2)+1
+    let mut b = buf_new();
+    b = buf_push(b, 1);
+    b = buf_push(b, 2);
+    b = buf_push(b, 3);
+
+    let composed = buf_map2(b, double, increment);
+    assert_eq(buf_get(composed, 0), 3);  // 1*2+1
+    assert_eq(buf_get(composed, 1), 5);  // 2*2+1
+    assert_eq(buf_get(composed, 2), 7);  // 3*2+1
+}
+
+fn test_compose_three() {
+    // increment, double, add_10: ((x+1)*2)+10
+    let mut b = buf_new();
+    b = buf_push(b, 0);
+    b = buf_push(b, 4);
+    b = buf_push(b, 9);
+
+    let piped = buf_map3(b, increment, double, add_10);
+    assert_eq(buf_get(piped, 0), 12);  // ((0+1)*2)+10=12
+    assert_eq(buf_get(piped, 1), 20);  // ((4+1)*2)+10=20
+    assert_eq(buf_get(piped, 2), 30);  // ((9+1)*2)+10=30
+}
+
+fn test_map_reduce_sum() {
+    let mut b = buf_new();
+    b = buf_push(b, 1);
+    b = buf_push(b, 2);
+    b = buf_push(b, 3);
+    b = buf_push(b, 4);
+    b = buf_push(b, 5);
+
+    // square then sum: 1+4+9+16+25 = 55
+    let total = buf_map_reduce(b, square, 0, add);
+    assert_eq(total, 55);
+}
+
+fn test_map_reduce_product() {
+    let mut b = buf_new();
+    b = buf_push(b, 1);
+    b = buf_push(b, 2);
+    b = buf_push(b, 3);
+    b = buf_push(b, 4);
+
+    // double then product: 2*4*6*8 = 384
+    let prod = buf_map_reduce(b, double, 1, mul);
+    assert_eq(prod, 384);
+}
+
+fn test_filter_then_fold() {
+    let mut b = buf_new();
+    b = buf_push(b, 1);
+    b = buf_push(b, 2);
+    b = buf_push(b, 3);
+    b = buf_push(b, 4);
+    b = buf_push(b, 5);
+    b = buf_push(b, 6);
+
+    // filter even, then sum: 2+4+6 = 12
+    let evens = buf_filter(b, is_even);
+    let total = buf_fold(evens, 0, add);
+    assert_eq(total, 12);
+}
+
+fn test_map_filter_reduce_chain() {
+    let mut b = buf_new();
+    b = buf_push(b, 1);
+    b = buf_push(b, 2);
+    b = buf_push(b, 3);
+    b = buf_push(b, 4);
+    b = buf_push(b, 5);
+
+    // double -> filter >5 -> sum
+    // [2,4,6,8,10] -> [6,8,10] -> 24
+    let step1 = buf_map(b, double);
+    let step2 = buf_filter(step1, is_gt_5);
+    let total = buf_fold(step2, 0, add);
+    assert_eq(total, 24);
+}
+
+fn test_negate_abs_identity() {
+    let mut b = buf_new();
+    b = buf_push(b, 3);
+    b = buf_push(b, 7);
+    b = buf_push(b, 0);
+    b = buf_push(b, 12);
+
+    // negate then abs should give original (for non-negative)
+    let composed = buf_map2(b, negate, abs_val);
+    assert_eq(buf_get(composed, 0), 3);
+    assert_eq(buf_get(composed, 1), 7);
+    assert_eq(buf_get(composed, 2), 0);
+    assert_eq(buf_get(composed, 3), 12);
+}
+
+fn test_max_via_fold() {
+    let mut b = buf_new();
+    b = buf_push(b, 5);
+    b = buf_push(b, 2);
+    b = buf_push(b, 8);
+    b = buf_push(b, 1);
+    b = buf_push(b, 9);
+    b = buf_push(b, 3);
+
+    let mx = buf_fold(b, 0, max_of);
+    assert_eq(mx, 9);
+}
+
+fn test_min_via_fold() {
+    let mut b = buf_new();
+    b = buf_push(b, 5);
+    b = buf_push(b, 2);
+    b = buf_push(b, 8);
+    b = buf_push(b, 1);
+    b = buf_push(b, 9);
+
+    let mn = buf_fold(b, 999, min_of);
+    assert_eq(mn, 1);
+}
+
+fn test_complex_chain() {
+    // [1,2,3,4,5,6,7,8] -> triple -> filter odd -> filter <20 -> sum
+    let mut b = buf_new();
+    b = buf_push(b, 1);
+    b = buf_push(b, 2);
+    b = buf_push(b, 3);
+    b = buf_push(b, 4);
+    b = buf_push(b, 5);
+    b = buf_push(b, 6);
+
+    // triple: [3,6,9,12,15,18]
+    let step1 = buf_map(b, triple);
+    // filter odd: [3,9,15]
+    let step2 = buf_filter(step1, is_odd);
+    assert_eq(step2.len, 3);
+    // filter <20: [3,9,15]
+    let step3 = buf_filter(step2, is_lt_20);
+    assert_eq(step3.len, 3);
+    // sum: 27
+    let total = buf_fold(step3, 0, add);
+    assert_eq(total, 27);
+}
+
+fn test_empty_chain() {
+    let b = buf_new();
+
+    // map empty -> empty
+    let mapped = buf_map(b, double);
+    assert_eq(mapped.len, 0);
+
+    // filter empty -> empty
+    let filtered = buf_filter(b, is_positive);
+    assert_eq(filtered.len, 0);
+
+    // fold empty -> init value
+    let total = buf_fold(b, 42, add);
+    assert_eq(total, 42);
+}
+
+fn test_all_filtered_out() {
+    let mut b = buf_new();
+    b = buf_push(b, -3);
+    b = buf_push(b, -1);
+    b = buf_push(b, 0);
+    b = buf_push(b, -5);
+
+    let pos = buf_filter(b, is_positive);
+    assert_eq(pos.len, 0);
+    let total = buf_fold(pos, 0, add);
+    assert_eq(total, 0);
+}
+
+fn test_increment_decrement_roundtrip() {
+    let mut b = buf_new();
+    b = buf_push(b, 10);
+    b = buf_push(b, 20);
+    b = buf_push(b, 30);
+
+    let up = buf_map(b, increment);
+    let down = buf_map(up, decrement);
+    assert_eq(buf_get(down, 0), 10);
+    assert_eq(buf_get(down, 1), 20);
+    assert_eq(buf_get(down, 2), 30);
+}
+
+fn main() -> Int {
+    test_single_map();
+    test_compose_two();
+    test_compose_three();
+    test_map_reduce_sum();
+    test_map_reduce_product();
+    test_filter_then_fold();
+    test_map_filter_reduce_chain();
+    test_negate_abs_identity();
+    test_max_via_fold();
+    test_min_via_fold();
+    test_complex_chain();
+    test_empty_chain();
+    test_all_filtered_out();
+    test_increment_decrement_roundtrip();
+    print("[OK] 341_interp_closure_chain");
+    0
+}

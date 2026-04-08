@@ -1,0 +1,216 @@
+// @test: parse-pass
+// @tier: 0
+// @category: errors
+// @description: Test try/finally expression parsing for cleanup
+
+fn test_basic_try_finally() {
+    // Simple finally for cleanup
+    try {
+        acquire_resource();
+        use_resource();
+    } finally {
+        release_resource();
+    }
+
+    // Finally without recover
+    try {
+        let file = open_file(path);
+        process_file(file);
+    } finally {
+        close_all_files();
+    }
+
+    // Multiple cleanup actions
+    try {
+        let conn = connect();
+        let tx = conn.begin();
+        do_work(tx);
+    } finally {
+        cleanup_connections();
+        log_completion();
+        notify_complete();
+    }
+}
+
+fn test_try_recover_finally() {
+    // Full try/recover/finally
+    try {
+        risky_operation();
+    } recover {
+        Error.Recoverable => attempt_recovery(),
+        _ => log_error()
+    } finally {
+        cleanup();
+    }
+
+    // Recovery and cleanup
+    try {
+        let lock = acquire_lock();
+        critical_section(lock);
+    } recover {
+        LockError.Timeout => wait_and_retry(),
+        LockError.Deadlock => resolve_deadlock(),
+        e => propagate(e)
+    } finally {
+        release_lock();
+    }
+
+    // Complex combination
+    try {
+        let db = connect_database();
+        let tx = db.begin_transaction();
+        perform_operations(tx);
+        tx.commit();
+    } recover {
+        DbError.Conflict => {
+            tx.rollback();
+            retry_with_new_tx()
+        },
+        e => {
+            log_error(e);
+            Err(e)
+        }
+    } finally {
+        db.close();
+        metrics.record("operation_complete");
+    }
+}
+
+fn test_finally_execution_order() {
+    // Finally always runs
+    try {
+        if condition {
+            return early_result();
+        }
+        normal_operation();
+    } finally {
+        // This runs even on early return
+        ensure_cleanup();
+    }
+
+    // Finally with break/continue
+    for item in items {
+        try {
+            if should_skip(item) {
+                continue;
+            }
+            process(item);
+            if should_stop(item) {
+                break;
+            }
+        } finally {
+            record_processed(item);
+        }
+    }
+}
+
+fn test_nested_try_finally() {
+    // Nested try blocks
+    try {
+        outer_setup();
+        try {
+            inner_setup();
+            inner_work();
+        } finally {
+            inner_cleanup();
+        }
+        outer_work();
+    } finally {
+        outer_cleanup();
+    }
+
+    // Deep nesting
+    try {
+        acquire_a();
+        try {
+            acquire_b();
+            try {
+                acquire_c();
+                work_with_abc();
+            } finally {
+                release_c();
+            }
+        } finally {
+            release_b();
+        }
+    } finally {
+        release_a();
+    }
+}
+
+fn test_finally_with_resources() {
+    // File handling
+    try {
+        let file = File.open(path)?;
+        let content = file.read_all();
+        process(content);
+    } finally {
+        file.close();
+    }
+
+    // Network connection
+    try {
+        let conn = TcpConnection.connect(host, port)?;
+        conn.send(request);
+        conn.receive()
+    } finally {
+        conn.shutdown();
+    }
+
+    // Database transaction
+    try {
+        let tx = db.begin();
+        tx.execute(query1);
+        tx.execute(query2);
+        tx.commit();
+    } finally {
+        tx.close();
+    }
+
+    // Lock management
+    try {
+        mutex.lock();
+        shared_state.modify();
+    } finally {
+        mutex.unlock();
+    }
+}
+
+fn test_finally_with_errors() {
+    // Finally can contain error handling
+    try {
+        main_work();
+    } finally {
+        try {
+            cleanup_that_might_fail();
+        } recover {
+            _ => log_cleanup_error()
+        }
+    }
+
+    // Finally with fallible operations
+    try {
+        process();
+    } finally {
+        // Errors in finally are typically logged but not propagated
+        let _ = try { save_state() } recover { _ => () };
+    }
+}
+
+fn test_finally_expressions() {
+    // Finally block as expression (result is from try block)
+    let result = try {
+        compute()
+    } finally {
+        cleanup()
+    };
+
+    // With recover
+    let value = try {
+        parse(input)
+    } recover {
+        _ => default_value
+    } finally {
+        release_parser()
+    };
+}

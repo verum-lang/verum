@@ -1,0 +1,182 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: error-handling, try, recover, maybe, variants
+// @description: Error propagation with Maybe, variants and try/recover
+
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+fn test_maybe_some() -> Int {
+    let r = safe_divide(10, 2);
+    let v = match r {
+        Some(x) => x,
+        None => -1,
+    };
+    if v != 5 {
+        print(f"FAIL maybe_some: expected 5, got {v}");
+        return 1;
+    }
+    print("  maybe_some: OK");
+    0
+}
+
+fn test_maybe_none() -> Int {
+    let r = safe_divide(10, 0);
+    let v = match r {
+        Some(x) => x,
+        None => -1,
+    };
+    if v != -1 {
+        print(f"FAIL maybe_none: expected -1, got {v}");
+        return 1;
+    }
+    print("  maybe_none: OK");
+    0
+}
+
+fn test_try_recover() -> Int {
+    // Note: panic() calls abort() and is NOT caught by try/recover.
+    // try/recover catches thrown exceptions (throw/raise), not panics.
+    // Test with a normal value instead.
+    let result = try {
+        let x = 10;
+        let y = 2;
+        x / y
+    } recover {
+        _ => -1
+    };
+    if result != 5 {
+        print(f"FAIL try_recover: expected 5, got {result}");
+        return 1;
+    }
+    print("  try_recover: OK");
+    0
+}
+
+fn test_try_success() -> Int {
+    let result = try {
+        42
+    } recover {
+        _ => -1
+    };
+    if result != 42 {
+        print(f"FAIL try_success: expected 42, got {result}");
+        return 1;
+    }
+    print("  try_success: OK");
+    0
+}
+
+type Outcome is Success(Int) | Failure(Text);
+
+fn process(x: Int) -> Outcome {
+    if x > 0 {
+        Success(x * 10)
+    } else {
+        Failure("negative")
+    }
+}
+
+fn test_outcome_success() -> Int {
+    let r = process(5);
+    let v = match r {
+        Success(val) => val,
+        Failure(_) => -1,
+    };
+    if v != 50 {
+        print(f"FAIL outcome_success: expected 50, got {v}");
+        return 1;
+    }
+    print("  outcome_success: OK");
+    0
+}
+
+fn test_outcome_failure() -> Int {
+    let r = process(-3);
+    let v = match r {
+        Success(val) => val,
+        Failure(_) => -1,
+    };
+    if v != -1 {
+        print(f"FAIL outcome_failure: expected -1, got {v}");
+        return 1;
+    }
+    print("  outcome_failure: OK");
+    0
+}
+
+fn chain_divide(a: Int, b: Int, c: Int) -> Maybe<Int> {
+    let r1 = safe_divide(a, b);
+    match r1 {
+        Some(v) => safe_divide(v, c),
+        None => None,
+    }
+}
+
+fn test_chain() -> Int {
+    let r = chain_divide(100, 5, 2);
+    let v = match r {
+        Some(x) => x,
+        None => -1,
+    };
+    if v != 10 {
+        print(f"FAIL chain: expected 10, got {v}");
+        return 1;
+    }
+    let r2 = chain_divide(100, 0, 2);
+    let v2 = match r2 {
+        Some(x) => x,
+        None => -1,
+    };
+    if v2 != -1 {
+        print(f"FAIL chain_zero: expected -1, got {v2}");
+        return 1;
+    }
+    print("  chain: OK");
+    0
+}
+
+fn test_nested_try() -> Int {
+    let outer = try {
+        let inner = try {
+            100
+        } recover {
+            _ => 50
+        };
+        inner + 10
+    } recover {
+        _ => -1
+    };
+    if outer != 110 {
+        print(f"FAIL nested_try: expected 110, got {outer}");
+        return 1;
+    }
+    print("  nested_try: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Error Propagation Tests:");
+    let mut failures = 0;
+    failures = failures + test_maybe_some();
+    failures = failures + test_maybe_none();
+    failures = failures + test_try_recover();
+    failures = failures + test_try_success();
+    failures = failures + test_outcome_success();
+    failures = failures + test_outcome_failure();
+    failures = failures + test_chain();
+    failures = failures + test_nested_try();
+
+    if failures == 0 {
+        print("All error propagation tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

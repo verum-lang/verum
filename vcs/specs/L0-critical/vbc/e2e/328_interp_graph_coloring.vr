@@ -1,0 +1,212 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, coloring, greedy
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Greedy graph coloring algorithm.
+// Uses Arr16 for 4x4 adjacency, Arr4 for colors.
+// Assigns smallest available color to each vertex in order.
+
+// =============================================================================
+// Arr16 for 4x4 adjacency, Arr4 for colors/availability
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn adj_get(m: Arr16, i: Int, j: Int) -> Int { a16_get(m, i * 4 + j) }
+
+fn add_edge(m: Arr16, i: Int, j: Int) -> Arr16 {
+    let m1 = a16_set(m, i * 4 + j, 1);
+    a16_set(m1, j * 4 + i, 1)
+}
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+fn arr4_fill(v: Int) -> Arr4 { Arr4 { e0: v, e1: v, e2: v, e3: v } }
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+// =============================================================================
+// Greedy coloring
+// =============================================================================
+
+type ColorResult is { colors: Arr4, num_colors: Int };
+
+fn greedy_color(adj: Arr16, n: Int) -> ColorResult {
+    let mut colors = arr4_fill(-1);
+    let mut max_color = 0;
+    let mut v = 0;
+    while v < n {
+        let mut avail = arr4_fill(1);
+        let mut nb = 0;
+        while nb < n {
+            if adj_get(adj, v, nb) == 1 {
+                let nc = arr4_get(colors, nb);
+                if nc >= 0 { avail = arr4_set(avail, nc, 0); }
+            }
+            nb = nb + 1;
+        }
+        let mut c = 0;
+        while c < n {
+            if arr4_get(avail, c) == 1 {
+                colors = arr4_set(colors, v, c);
+                if c + 1 > max_color { max_color = c + 1; }
+                c = n;
+            } else { c = c + 1; }
+        }
+        v = v + 1;
+    }
+    ColorResult { colors: colors, num_colors: max_color }
+}
+
+fn verify_coloring(adj: Arr16, colors: Arr4, n: Int) -> Int {
+    let mut valid = 1;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if adj_get(adj, i, j) == 1 {
+                if arr4_get(colors, i) == arr4_get(colors, j) { valid = 0; }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    valid
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_no_edges() {
+    let adj = a16_zeros();
+    let cr = greedy_color(adj, 4);
+    assert_eq(cr.num_colors, 1);
+    assert_eq(verify_coloring(adj, cr.colors, 4), 1);
+}
+
+fn test_single_edge() {
+    let mut adj = a16_zeros();
+    adj = add_edge(adj, 0, 1);
+    let cr = greedy_color(adj, 2);
+    assert_eq(cr.num_colors, 2);
+    assert_eq(verify_coloring(adj, cr.colors, 2), 1);
+}
+
+fn test_triangle() {
+    let mut adj = a16_zeros();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 1, 2);
+    adj = add_edge(adj, 2, 0);
+    let cr = greedy_color(adj, 3);
+    assert_eq(cr.num_colors, 3);
+    assert_eq(verify_coloring(adj, cr.colors, 3), 1);
+}
+
+fn test_bipartite() {
+    let mut adj = a16_zeros();
+    adj = add_edge(adj, 0, 2);
+    adj = add_edge(adj, 0, 3);
+    adj = add_edge(adj, 1, 2);
+    adj = add_edge(adj, 1, 3);
+    let cr = greedy_color(adj, 4);
+    assert_eq(cr.num_colors, 2);
+    assert_eq(verify_coloring(adj, cr.colors, 4), 1);
+}
+
+fn test_k4() {
+    let mut adj = a16_zeros();
+    adj = add_edge(adj, 0, 1); adj = add_edge(adj, 0, 2); adj = add_edge(adj, 0, 3);
+    adj = add_edge(adj, 1, 2); adj = add_edge(adj, 1, 3); adj = add_edge(adj, 2, 3);
+    let cr = greedy_color(adj, 4);
+    assert_eq(cr.num_colors, 4);
+    assert_eq(verify_coloring(adj, cr.colors, 4), 1);
+}
+
+fn test_path() {
+    let mut adj = a16_zeros();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 1, 2);
+    adj = add_edge(adj, 2, 3);
+    let cr = greedy_color(adj, 4);
+    assert_eq(cr.num_colors, 2);
+    assert_eq(verify_coloring(adj, cr.colors, 4), 1);
+}
+
+fn test_cycle_c4() {
+    let mut adj = a16_zeros();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 1, 2);
+    adj = add_edge(adj, 2, 3);
+    adj = add_edge(adj, 3, 0);
+    let cr = greedy_color(adj, 4);
+    assert_eq(cr.num_colors, 2);
+    assert_eq(verify_coloring(adj, cr.colors, 4), 1);
+}
+
+fn test_single_node() {
+    let adj = a16_zeros();
+    let cr = greedy_color(adj, 1);
+    assert_eq(cr.num_colors, 1);
+    assert_eq(arr4_get(cr.colors, 0), 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_no_edges();
+    test_single_edge();
+    test_triangle();
+    test_bipartite();
+    test_k4();
+    test_path();
+    test_cycle_c4();
+    test_single_node();
+    print("[OK] 328_interp_graph_coloring");
+    0
+}

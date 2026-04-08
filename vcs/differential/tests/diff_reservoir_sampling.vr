@@ -1,0 +1,149 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, reservoir-sampling, random, deterministic
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Simple deterministic pseudo-random (LCG)
+fn lcg_next(state: Int) -> Int {
+    // LCG: next = (a * state + c) % m
+    // Use small modulus for predictability
+    (state * 1103515245 + 12345) % 2147483647
+}
+
+// Reservoir sampling with deterministic RNG
+// Sample k items from stream of n items
+fn reservoir_sample(stream: Arr8, n: Int, k: Int, seed: Int) -> Arr8 {
+    let mut reservoir = zeros();
+    // Fill first k
+    let mut i = 0;
+    while i < k {
+        reservoir = set(reservoir, i, get(stream, i));
+        i = i + 1;
+    }
+
+    // For remaining items, replace with probability k/i
+    let mut rng = seed;
+    while i < n {
+        rng = lcg_next(rng);
+        let r = rng % (i + 1);
+        if r < 0 { // handle negative modulo
+            let r2 = r + i + 1;
+            if r2 < k {
+                reservoir = set(reservoir, r2, get(stream, i));
+            }
+        } else if r < k {
+            reservoir = set(reservoir, r, get(stream, i));
+        }
+        i = i + 1;
+    }
+    reservoir
+}
+
+// Fisher-Yates shuffle (deterministic)
+fn shuffle(data: Arr8, n: Int, seed: Int) -> Arr8 {
+    let mut arr = data;
+    let mut rng = seed;
+    let mut i = n - 1;
+    while i > 0 {
+        rng = lcg_next(rng);
+        let mut j = rng % (i + 1);
+        if j < 0 { j = j + i + 1; }
+        // Swap arr[i] and arr[j]
+        let tmp = get(arr, i);
+        arr = set(arr, i, get(arr, j));
+        arr = set(arr, j, tmp);
+        i = i - 1;
+    }
+    arr
+}
+
+// Check if array is a permutation of original (count each element)
+fn is_permutation_of(a: Arr8, b: Arr8, n: Int) -> Int {
+    // For each element in a, check it appears same number of times in b
+    let mut i = 0;
+    while i < n {
+        let val = get(a, i);
+        // Count val in a
+        let mut ca = 0;
+        let mut j = 0;
+        while j < n { if get(a, j) == val { ca = ca + 1; } j = j + 1; }
+        // Count val in b
+        let mut cb = 0;
+        let mut k = 0;
+        while k < n { if get(b, k) == val { cb = cb + 1; } k = k + 1; }
+        if ca != cb { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn main() -> Int {
+    let data = Arr8 { d0: 10, d1: 20, d2: 30, d3: 40, d4: 50, d5: 60, d6: 70, d7: 80 };
+
+    // LCG determinism: same seed → same sequence
+    let r1 = lcg_next(42);
+    let r2 = lcg_next(42);
+    assert_eq(r1, r2);
+
+    // Different seeds → different values
+    let r3 = lcg_next(1);
+    let r4 = lcg_next(2);
+    assert(r3 != r4);
+
+    // Shuffle is a permutation
+    let shuffled = shuffle(data, 8, 42);
+    assert_eq(is_permutation_of(shuffled, data, 8), 1);
+
+    // Shuffle with same seed gives same result (deterministic)
+    let shuffled2 = shuffle(data, 8, 42);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(get(shuffled, i), get(shuffled2, i));
+        i = i + 1;
+    }
+
+    // Different seed gives different result
+    let shuffled3 = shuffle(data, 8, 123);
+    // At least one element should differ (extremely likely)
+    let mut diff = 0;
+    let mut j = 0;
+    while j < 8 {
+        if get(shuffled, j) != get(shuffled3, j) { diff = diff + 1; }
+        j = j + 1;
+    }
+    assert(diff > 0);
+
+    // Reservoir sample k=3: deterministic
+    let sample1 = reservoir_sample(data, 8, 3, 42);
+    let sample2 = reservoir_sample(data, 8, 3, 42);
+    assert_eq(get(sample1, 0), get(sample2, 0));
+    assert_eq(get(sample1, 1), get(sample2, 1));
+    assert_eq(get(sample1, 2), get(sample2, 2));
+
+    // Sample k=n should contain all elements
+    let sample_all = reservoir_sample(data, 8, 8, 42);
+    assert_eq(is_permutation_of(sample_all, data, 8), 1);
+
+    print("DIFF_OK: reservoir_sampling");
+    0
+}

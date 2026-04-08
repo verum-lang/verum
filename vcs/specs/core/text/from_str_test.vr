@@ -1,0 +1,244 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, fromstr, parsing, protocols
+// @description: Tests for FromStr protocol implementations for Int, Float, Bool, Text
+
+mount core.*;
+mount core.base.result.{Result, Ok, Err};
+mount core.base.protocols.{FromStr};
+
+// =============================================================================
+// Section 1: FromStr for Int
+// =============================================================================
+
+@test
+fn test_fromstr_int_basic() {
+    let r: Result<Int, ParseError> = Int.from_str("42");
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 42);
+}
+
+@test
+fn test_fromstr_int_zero() {
+    let r: Result<Int, ParseError> = Int.from_str("0");
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 0);
+}
+
+@test
+fn test_fromstr_int_negative() {
+    let r: Result<Int, ParseError> = Int.from_str("-123");
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), -123);
+}
+
+@test
+fn test_fromstr_int_large() {
+    let r: Result<Int, ParseError> = Int.from_str("1000000");
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 1000000);
+}
+
+@test
+fn test_fromstr_int_invalid() {
+    let r: Result<Int, ParseError> = Int.from_str("abc");
+    assert(r.is_err());
+}
+
+@test
+fn test_fromstr_int_empty() {
+    let r: Result<Int, ParseError> = Int.from_str("");
+    assert(r.is_err());
+}
+
+@test
+fn test_fromstr_int_with_plus() {
+    let r: Result<Int, ParseError> = Int.from_str("+42");
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 42);
+}
+
+// =============================================================================
+// Section 2: FromStr for Float
+// =============================================================================
+
+@test
+fn test_fromstr_float_basic() {
+    let r: Result<Float, ParseError> = Float.from_str("3.14");
+    assert(r.is_ok());
+    let val: Float = r.unwrap();
+    assert(val > 3.0);
+    assert(val < 4.0);
+}
+
+@test
+fn test_fromstr_float_zero() {
+    let r: Result<Float, ParseError> = Float.from_str("0.0");
+    assert(r.is_ok());
+}
+
+@test
+fn test_fromstr_float_negative() {
+    let r: Result<Float, ParseError> = Float.from_str("-2.5");
+    assert(r.is_ok());
+    let val: Float = r.unwrap();
+    assert(val < 0.0);
+}
+
+@test
+fn test_fromstr_float_integer() {
+    let r: Result<Float, ParseError> = Float.from_str("42");
+    assert(r.is_ok());
+}
+
+// =============================================================================
+// Section 3: FromStr for Bool
+// =============================================================================
+
+@test
+fn test_fromstr_bool_true() {
+    let r: Result<Bool, ParseError> = Bool.from_str("true");
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), true);
+}
+
+@test
+fn test_fromstr_bool_false() {
+    let r: Result<Bool, ParseError> = Bool.from_str("false");
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), false);
+}
+
+@test
+fn test_fromstr_bool_invalid() {
+    let r: Result<Bool, ParseError> = Bool.from_str("yes");
+    assert(r.is_err());
+}
+
+@test
+fn test_fromstr_bool_empty() {
+    let r: Result<Bool, ParseError> = Bool.from_str("");
+    assert(r.is_err());
+}
+
+@test
+fn test_fromstr_bool_case_sensitive() {
+    let r: Result<Bool, ParseError> = Bool.from_str("True");
+    assert(r.is_err());
+}
+
+// =============================================================================
+// Section 4: FromStr for Text
+// =============================================================================
+
+@test
+fn test_fromstr_text_basic() {
+    let r: Result<Text, ParseError> = Text.from_str("hello");
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), "hello");
+}
+
+@test
+fn test_fromstr_text_empty() {
+    let r: Result<Text, ParseError> = Text.from_str("");
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), "");
+}
+
+@test
+fn test_fromstr_text_always_ok() {
+    let r: Result<Text, ParseError> = Text.from_str("anything at all");
+    assert(r.is_ok());
+}
+
+// =============================================================================
+// Section 5: FromStr with error handling patterns
+// =============================================================================
+
+@test
+fn test_fromstr_int_unwrap_or_default() {
+    let r: Result<Int, ParseError> = Int.from_str("not a number");
+    assert_eq(r.unwrap_or(0), 0);
+}
+
+@test
+fn test_fromstr_int_map() {
+    let r: Result<Int, ParseError> = Int.from_str("10");
+    let doubled: Result<Int, ParseError> = r.map(|x| x * 2);
+    assert(doubled.is_ok());
+    assert_eq(doubled.unwrap(), 20);
+}
+
+@test
+fn test_fromstr_chain_results() {
+    let a: Result<Int, ParseError> = Int.from_str("10");
+    let b: Result<Int, ParseError> = Int.from_str("20");
+    if a.is_ok() && b.is_ok() {
+        assert_eq(a.unwrap() + b.unwrap(), 30);
+    }
+}
+
+fn check_positive(x: Int) -> Result<Int, ParseError> {
+    if x > 0 {
+        Ok(x)
+    } else {
+        Err(ParseError.new("must be positive"))
+    }
+}
+
+@test
+fn test_fromstr_int_and_then() {
+    let r: Result<Int, ParseError> = Int.from_str("42");
+    let validated: Result<Int, ParseError> = r.and_then(check_positive);
+    assert(validated.is_ok());
+    assert_eq(validated.unwrap(), 42);
+}
+
+// =============================================================================
+// Section 6: Extend<Char> for Text
+// =============================================================================
+
+@test
+fn test_text_extend_chars() {
+    let mut t: Text = "hello";
+    let chars = List.from([' ', 'w', 'o', 'r', 'l', 'd']);
+    t.extend(chars.iter().cloned());
+    assert_eq(t, "hello world");
+}
+
+@test
+fn test_text_extend_chars_empty() {
+    let mut t: Text = "hello";
+    let chars: List<Char> = List.new();
+    t.extend(chars.iter().cloned());
+    assert_eq(t, "hello");
+}
+
+@test
+fn test_text_extend_chars_from_empty() {
+    let mut t: Text = "";
+    let chars = List.from(['a', 'b', 'c']);
+    t.extend(chars.iter().cloned());
+    assert_eq(t, "abc");
+}
+
+// =============================================================================
+// Section 7: Extend<Text> for Text
+// =============================================================================
+
+@test
+fn test_text_extend_texts() {
+    let mut t: Text = "hello";
+    let parts = List.from([" ", "world"]);
+    t.extend(parts.iter().cloned());
+    assert_eq(t, "hello world");
+}
+
+@test
+fn test_text_extend_texts_empty() {
+    let mut t: Text = "hello";
+    let parts: List<Text> = List.new();
+    t.extend(parts.iter().cloned());
+    assert_eq(t, "hello");
+}

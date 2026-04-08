@@ -1,0 +1,80 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, async
+
+// Simple async function
+async fn async_fn() { }
+
+// Async function with return type
+async fn fetch_data() -> Text {
+    http_get("https://example.com").await
+}
+
+// Async function with parameters
+async fn process_item(id: Int) -> Result<Data, Error> {
+    let data = fetch(id).await;
+    validate(data).await
+}
+
+// Async function with multiple awaits
+async fn complex_async() -> Int {
+    let a = fetch_a().await;
+    let b = fetch_b().await;
+    let c = compute(a, b).await;
+    c
+}
+
+// Async function with generic type
+async fn async_generic<T>(x: T) -> T {
+    process(x).await
+}
+
+// Async function with context
+async fn async_with_context() using [Database] {
+    let conn = Database.connect().await;
+    conn.query("SELECT * FROM users").await
+}
+
+// Async function returning Future explicitly (if supported)
+fn returns_future() -> Future<Int> {
+    async {
+        compute().await
+    }
+}
+
+// Async function with error handling
+async fn async_with_try() -> Result<Int, Error> {
+    try {
+        let data = risky_fetch().await?;
+        Ok(data)
+    } recover {
+        e => Err(e)
+    }
+}
+
+// Async function with timeout pattern
+// NOTE: select expression is not part of Verum grammar
+// Use runtime timeout() function instead
+async fn with_timeout(duration: Duration) -> Maybe<Data> {
+    match timeout(duration, fetch_data()).await {
+        Ok(data) => Some(data),
+        Err(TimeoutError) => None,
+    }
+}
+
+// Async function with concurrent operations
+async fn parallel_fetch() -> (A, B) {
+    let (a, b) = join(fetch_a(), fetch_b()).await;
+    (a, b)
+}
+
+// NOTE: Generator function syntax (fn*) does NOT exist in Verum grammar.
+// The following is commented out as it uses unsupported syntax.
+// Yield expressions ARE valid in async blocks, but fn* is not a valid function form.
+//
+// async fn* async_generator() -> Int {
+//     yield compute(1).await;
+//     yield compute(2).await;
+//     yield compute(3).await;
+// }

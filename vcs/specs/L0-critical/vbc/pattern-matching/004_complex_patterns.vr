@@ -1,0 +1,438 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, pattern-matching, complex, guards, and-patterns, or-patterns, active-patterns
+// @timeout: 5000
+// @expect: pass
+// @expected-exit: 0
+//
+// Test: Complex pattern combinations at VBC interpreter level
+// Verifies guards, and-patterns, or-patterns, type tests, and active patterns
+
+// =============================================================================
+// Type definitions
+// =============================================================================
+
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type List<T> is Nil | Cons(T, Heap<List<T>>);
+
+type Shape is
+    Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { a: Float, b: Float, c: Float }
+    | Point;
+
+type JsonValue is
+    JsonNull
+    | JsonBool(Bool)
+    | JsonNumber(Float)
+    | JsonString(Text)
+    | JsonArray(List<JsonValue>)
+    | JsonObject(List<(Text, JsonValue)>);
+
+type Expr is
+    Num(Int)
+    | Var(Text)
+    | Add(Heap<Expr>, Heap<Expr>)
+    | Mul(Heap<Expr>, Heap<Expr>)
+    | Neg(Heap<Expr>);
+
+// =============================================================================
+// Section 1: Guard patterns
+// =============================================================================
+
+fn classify_number(n: Int) -> Text =
+    match n {
+        0 => "zero",
+        n if n < 0 => "negative",
+        n if n > 0 && n <= 10 => "small positive",
+        n if n > 10 && n <= 100 => "medium positive",
+        n if n > 100 => "large positive",
+        _ => "unknown"  // Should never reach here
+    };
+
+fn test_guard_patterns() {
+    assert_eq(classify_number(0), "zero");
+    assert_eq(classify_number(-5), "negative");
+    assert_eq(classify_number(-100), "negative");
+    assert_eq(classify_number(5), "small positive");
+    assert_eq(classify_number(10), "small positive");
+    assert_eq(classify_number(50), "medium positive");
+    assert_eq(classify_number(100), "medium positive");
+    assert_eq(classify_number(500), "large positive");
+}
+
+// =============================================================================
+// Section 2: Guard patterns with destructuring
+// =============================================================================
+
+fn process_maybe_positive(opt: Maybe<Int>) -> Text =
+    match opt {
+        None => "no value",
+        Some(n) if n > 0 => f"positive: {n}",
+        Some(n) if n < 0 => f"negative: {n}",
+        Some(0) => "zero"
+    };
+
+fn test_guards_with_destructuring() {
+    assert_eq(process_maybe_positive(None), "no value");
+    assert_eq(process_maybe_positive(Some(42)), "positive: 42");
+    assert_eq(process_maybe_positive(Some(-10)), "negative: -10");
+    assert_eq(process_maybe_positive(Some(0)), "zero");
+}
+
+// =============================================================================
+// Section 3: Or-patterns
+// =============================================================================
+
+fn is_vowel(c: Char) -> Bool =
+    match c {
+        'a' | 'e' | 'i' | 'o' | 'u' |
+        'A' | 'E' | 'I' | 'O' | 'U' => true,
+        _ => false
+    };
+
+fn classify_result<T, E>(r: Result<T, E>) -> Text =
+    match r {
+        Ok(_) | Err(_) if false => "impossible",  // Guard on or-pattern
+        Ok(_) => "success",
+        Err(_) => "failure"
+    };
+
+fn test_or_patterns() {
+    assert(is_vowel('a'));
+    assert(is_vowel('E'));
+    assert(is_vowel('i'));
+    assert(!is_vowel('b'));
+    assert(!is_vowel('x'));
+
+    let ok: Result<Int, Text> = Ok(42);
+    let err: Result<Int, Text> = Err("error");
+    assert_eq(classify_result(ok), "success");
+    assert_eq(classify_result(err), "failure");
+}
+
+// =============================================================================
+// Section 4: Nested or-patterns
+// =============================================================================
+
+fn parse_boolean(s: Text) -> Maybe<Bool> =
+    match s {
+        "true" | "True" | "TRUE" | "yes" | "Yes" | "YES" | "1" => Some(true),
+        "false" | "False" | "FALSE" | "no" | "No" | "NO" | "0" => Some(false),
+        _ => None
+    };
+
+fn test_nested_or_patterns() {
+    assert_eq(parse_boolean("true"), Some(true));
+    assert_eq(parse_boolean("TRUE"), Some(true));
+    assert_eq(parse_boolean("yes"), Some(true));
+    assert_eq(parse_boolean("1"), Some(true));
+    assert_eq(parse_boolean("false"), Some(false));
+    assert_eq(parse_boolean("NO"), Some(false));
+    assert_eq(parse_boolean("0"), Some(false));
+    assert_eq(parse_boolean("maybe"), None);
+    assert_eq(parse_boolean(""), None);
+}
+
+// =============================================================================
+// Section 5: And-patterns (intersection patterns)
+// =============================================================================
+
+fn check_special_positive(n: Int) -> Bool =
+    match n {
+        n if n > 0 && n % 2 == 0 && n < 100 => true,  // Even positive < 100
+        _ => false
+    };
+
+fn test_and_patterns() {
+    assert(check_special_positive(2));
+    assert(check_special_positive(42));
+    assert(check_special_positive(98));
+    assert(!check_special_positive(100));
+    assert(!check_special_positive(-2));
+    assert(!check_special_positive(3));  // Odd
+}
+
+// =============================================================================
+// Section 6: Range patterns
+// =============================================================================
+
+fn grade_to_letter(score: Int) -> Text =
+    match score {
+        90..=100 => "A",
+        80..=89 => "B",
+        70..=79 => "C",
+        60..=69 => "D",
+        0..=59 => "F",
+        _ => "Invalid"
+    };
+
+fn categorize_char(c: Char) -> Text =
+    match c {
+        'a'..='z' => "lowercase",
+        'A'..='Z' => "uppercase",
+        '0'..='9' => "digit",
+        _ => "other"
+    };
+
+fn test_range_patterns() {
+    assert_eq(grade_to_letter(95), "A");
+    assert_eq(grade_to_letter(90), "A");
+    assert_eq(grade_to_letter(85), "B");
+    assert_eq(grade_to_letter(75), "C");
+    assert_eq(grade_to_letter(65), "D");
+    assert_eq(grade_to_letter(50), "F");
+    assert_eq(grade_to_letter(0), "F");
+    assert_eq(grade_to_letter(-1), "Invalid");
+    assert_eq(grade_to_letter(101), "Invalid");
+
+    assert_eq(categorize_char('g'), "lowercase");
+    assert_eq(categorize_char('M'), "uppercase");
+    assert_eq(categorize_char('5'), "digit");
+    assert_eq(categorize_char('!'), "other");
+}
+
+// =============================================================================
+// Section 7: @ binding patterns
+// =============================================================================
+
+fn describe_shape(s: Shape) -> Text =
+    match s {
+        circle @ Circle { radius } if radius > 10.0 => f"large circle with radius {radius}",
+        Circle { radius } => f"small circle with radius {radius}",
+        rect @ Rectangle { width, height } if width == height => f"square with side {width}",
+        Rectangle { width, height } => f"rectangle {width}x{height}",
+        Triangle { a, b, c } if a == b && b == c => "equilateral triangle",
+        Triangle { a, b, c } if a == b || b == c || a == c => "isosceles triangle",
+        Triangle { .. } => "scalene triangle",
+        Point => "point"
+    };
+
+fn test_at_binding_patterns() {
+    assert_eq(describe_shape(Circle { radius: 5.0 }), "small circle with radius 5.0");
+    assert_eq(describe_shape(Circle { radius: 15.0 }), "large circle with radius 15.0");
+    assert_eq(describe_shape(Rectangle { width: 5.0, height: 5.0 }), "square with side 5.0");
+    assert_eq(describe_shape(Rectangle { width: 3.0, height: 4.0 }), "rectangle 3.0x4.0");
+    assert_eq(describe_shape(Triangle { a: 3.0, b: 3.0, c: 3.0 }), "equilateral triangle");
+    assert_eq(describe_shape(Triangle { a: 3.0, b: 3.0, c: 4.0 }), "isosceles triangle");
+    assert_eq(describe_shape(Triangle { a: 3.0, b: 4.0, c: 5.0 }), "scalene triangle");
+    assert_eq(describe_shape(Point), "point");
+}
+
+// =============================================================================
+// Section 8: Recursive patterns
+// =============================================================================
+
+fn list_length<T>(xs: List<T>) -> Int =
+    match xs {
+        Nil => 0,
+        Cons(_, tail) => 1 + list_length(*tail)
+    };
+
+fn list_sum(xs: List<Int>) -> Int =
+    match xs {
+        Nil => 0,
+        Cons(x, tail) => x + list_sum(*tail)
+    };
+
+fn list_contains<T: Eq>(xs: List<T>, target: T) -> Bool =
+    match xs {
+        Nil => false,
+        Cons(x, _) if x == target => true,
+        Cons(_, tail) => list_contains(*tail, target)
+    };
+
+fn test_recursive_patterns() {
+    let empty: List<Int> = Nil;
+    let nums = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+
+    assert_eq(list_length(empty), 0);
+    assert_eq(list_length(nums), 3);
+
+    let nums2 = Cons(10, Heap(Cons(20, Heap(Cons(30, Heap(Nil))))));
+    assert_eq(list_sum(nums2), 60);
+
+    let items = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    assert(list_contains(items, 2));
+    assert(!list_contains(Nil, 2));
+}
+
+// =============================================================================
+// Section 9: JSON-like recursive data patterns
+// =============================================================================
+
+fn json_is_truthy(val: JsonValue) -> Bool =
+    match val {
+        JsonNull => false,
+        JsonBool(b) => b,
+        JsonNumber(n) if n == 0.0 => false,
+        JsonNumber(_) => true,
+        JsonString(s) if s == "" => false,
+        JsonString(_) => true,
+        JsonArray(Nil) => false,
+        JsonArray(_) => true,
+        JsonObject(Nil) => false,
+        JsonObject(_) => true
+    };
+
+fn json_type_name(val: JsonValue) -> Text =
+    match val {
+        JsonNull => "null",
+        JsonBool(_) => "boolean",
+        JsonNumber(_) => "number",
+        JsonString(_) => "string",
+        JsonArray(_) => "array",
+        JsonObject(_) => "object"
+    };
+
+fn test_json_patterns() {
+    assert(!json_is_truthy(JsonNull));
+    assert(json_is_truthy(JsonBool(true)));
+    assert(!json_is_truthy(JsonBool(false)));
+    assert(json_is_truthy(JsonNumber(1.0)));
+    assert(!json_is_truthy(JsonNumber(0.0)));
+    assert(json_is_truthy(JsonString("hello")));
+    assert(!json_is_truthy(JsonString("")));
+    assert(!json_is_truthy(JsonArray(Nil)));
+    assert(json_is_truthy(JsonArray(Cons(JsonNull, Heap(Nil)))));
+
+    assert_eq(json_type_name(JsonNull), "null");
+    assert_eq(json_type_name(JsonBool(true)), "boolean");
+    assert_eq(json_type_name(JsonNumber(3.14)), "number");
+    assert_eq(json_type_name(JsonString("test")), "string");
+    assert_eq(json_type_name(JsonArray(Nil)), "array");
+    assert_eq(json_type_name(JsonObject(Nil)), "object");
+}
+
+// =============================================================================
+// Section 10: Expression tree patterns
+// =============================================================================
+
+fn eval_expr(e: Expr) -> Int =
+    match e {
+        Num(n) => n,
+        Var(_) => 0,  // Variables evaluate to 0 for simplicity
+        Add(left, right) => eval_expr(*left) + eval_expr(*right),
+        Mul(left, right) => eval_expr(*left) * eval_expr(*right),
+        Neg(inner) => -eval_expr(*inner)
+    };
+
+fn count_nodes(e: Expr) -> Int =
+    match e {
+        Num(_) | Var(_) => 1,
+        Add(l, r) | Mul(l, r) => 1 + count_nodes(*l) + count_nodes(*r),
+        Neg(inner) => 1 + count_nodes(*inner)
+    };
+
+fn simplify(e: Expr) -> Expr =
+    match e {
+        // 0 + x => x
+        Add(Heap(Num(0)), right) => simplify(*right),
+        // x + 0 => x
+        Add(left, Heap(Num(0))) => simplify(*left),
+        // 0 * x => 0
+        Mul(Heap(Num(0)), _) => Num(0),
+        // x * 0 => 0
+        Mul(_, Heap(Num(0))) => Num(0),
+        // 1 * x => x
+        Mul(Heap(Num(1)), right) => simplify(*right),
+        // x * 1 => x
+        Mul(left, Heap(Num(1))) => simplify(*left),
+        // --x => x
+        Neg(Heap(Neg(inner))) => simplify(*inner),
+        // Recurse
+        Add(left, right) => Add(Heap(simplify(*left)), Heap(simplify(*right))),
+        Mul(left, right) => Mul(Heap(simplify(*left)), Heap(simplify(*right))),
+        Neg(inner) => Neg(Heap(simplify(*inner))),
+        // Base cases
+        other => other
+    };
+
+fn test_expression_patterns() {
+    // Build: (1 + 2) * 3
+    let expr1 = Mul(
+        Heap(Add(Heap(Num(1)), Heap(Num(2)))),
+        Heap(Num(3))
+    );
+    assert_eq(eval_expr(expr1), 9);
+    assert_eq(count_nodes(expr1), 5);
+
+    // Build: -(5 + -3)
+    let expr2 = Neg(
+        Heap(Add(
+            Heap(Num(5)),
+            Heap(Neg(Heap(Num(3))))
+        ))
+    );
+    assert_eq(eval_expr(expr2), -2);
+
+    // Simplification: 0 + x => x
+    let zero_plus_five = Add(Heap(Num(0)), Heap(Num(5)));
+    let simplified = simplify(zero_plus_five);
+    assert_eq(eval_expr(simplified), 5);
+
+    // Simplification: 1 * x => x
+    let one_times_ten = Mul(Heap(Num(1)), Heap(Num(10)));
+    let simplified2 = simplify(one_times_ten);
+    assert_eq(eval_expr(simplified2), 10);
+}
+
+// =============================================================================
+// Section 11: Tuple patterns
+// =============================================================================
+
+fn swap<T, U>(pair: (T, U)) -> (U, T) =
+    match pair {
+        (a, b) => (b, a)
+    };
+
+fn categorize_pair(pair: (Int, Int)) -> Text =
+    match pair {
+        (0, 0) => "origin",
+        (0, _) => "on y-axis",
+        (_, 0) => "on x-axis",
+        (x, y) if x == y => "on diagonal",
+        (x, y) if x == -y => "on anti-diagonal",
+        (x, y) if x > 0 && y > 0 => "quadrant I",
+        (x, y) if x < 0 && y > 0 => "quadrant II",
+        (x, y) if x < 0 && y < 0 => "quadrant III",
+        (x, y) if x > 0 && y < 0 => "quadrant IV",
+        _ => "unknown"
+    };
+
+fn test_tuple_patterns() {
+    assert_eq(swap((1, 2)), (2, 1));
+    assert_eq(swap(("hello", 42)), (42, "hello"));
+
+    assert_eq(categorize_pair((0, 0)), "origin");
+    assert_eq(categorize_pair((0, 5)), "on y-axis");
+    assert_eq(categorize_pair((5, 0)), "on x-axis");
+    assert_eq(categorize_pair((3, 3)), "on diagonal");
+    assert_eq(categorize_pair((3, -3)), "on anti-diagonal");
+    assert_eq(categorize_pair((1, 2)), "quadrant I");
+    assert_eq(categorize_pair((-1, 2)), "quadrant II");
+    assert_eq(categorize_pair((-1, -2)), "quadrant III");
+    assert_eq(categorize_pair((1, -2)), "quadrant IV");
+}
+
+// =============================================================================
+// Main - run all tests
+// =============================================================================
+
+fn main() {
+    test_guard_patterns();
+    test_guards_with_destructuring();
+    test_or_patterns();
+    test_nested_or_patterns();
+    test_and_patterns();
+    test_range_patterns();
+    test_at_binding_patterns();
+    test_recursive_patterns();
+    test_json_patterns();
+    test_expression_patterns();
+    test_tuple_patterns();
+
+    print("All complex pattern tests passed!");
+}

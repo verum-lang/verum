@@ -1,0 +1,213 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: lsp, rename, refactoring
+// @description: Tests rename refactoring functionality in LSP.
+//              Verifies all references are correctly updated.
+
+// ============================================================================
+// This file tests rename refactoring for various symbol types.
+// Each test documents expected rename behavior.
+// ============================================================================
+
+// Test 1: Rename local variable
+// Renaming 'local_var' should update all uses within scope
+fn test_rename_local() {
+    let local_var = 42;
+    let result = local_var + 1;
+    let doubled = local_var * 2;
+    result + doubled
+}
+
+// Test 2: Rename function parameter
+// Renaming 'param' should update parameter and body uses
+fn test_rename_param(param: Int) -> Int {
+    let x = param + 1;
+    let y = param * 2;
+    param + x + y
+}
+
+// Test 3: Rename function
+// Renaming 'helper_function' should update definition and all calls
+fn helper_function(x: Int) -> Int {
+    x * 2
+}
+
+fn uses_helper() -> Int {
+    let a = helper_function(1);
+    let b = helper_function(2);
+    let c = helper_function(3);
+    a + b + c
+}
+
+// Test 4: Rename type
+// Renaming 'RenameType' should update type def and all uses
+type RenameType is {
+    value: Int,
+};
+
+fn creates_rename_type() -> RenameType {
+    RenameType { value: 42 }
+}
+
+fn takes_rename_type(rt: RenameType) -> Int {
+    rt.value
+}
+
+// Test 5: Rename field
+// Renaming 'field_to_rename' should update in type and all accesses
+type FieldType is {
+    field_to_rename: Int,
+    other_field: Text,
+};
+
+fn accesses_field(ft: FieldType) -> Int {
+    ft.field_to_rename
+}
+
+fn creates_with_field() -> FieldType {
+    FieldType {
+        field_to_rename: 42,
+        other_field: "text",
+    }
+}
+
+// Test 6: Rename method
+// Renaming 'method_to_rename' should update in impl and all calls
+type MethodType is {
+    value: Int,
+};
+
+implement MethodType {
+    fn method_to_rename(self) -> Int {
+        self.value
+    }
+
+    fn other_method(self) -> Int {
+        self.method_to_rename() * 2
+    }
+}
+
+fn calls_method(mt: MethodType) -> Int {
+    let a = mt.method_to_rename();
+    let b = mt.method_to_rename();
+    a + b
+}
+
+// Test 7: Rename generic type parameter
+// Renaming 'T' should update constraint and body uses
+fn generic_rename<T>(value: T) -> T
+where T: Clone
+{
+    value.clone()
+}
+
+// Test 8: Rename in closure
+// Renaming 'closure_param' should update in closure scope
+fn closure_rename() {
+    let closure = |closure_param: Int| {
+        closure_param * 2 + closure_param
+    };
+    closure(42)
+}
+
+// Test 9: Rename shadowed variable
+// Renaming inner 'shadowed' should not affect outer
+fn shadow_rename() {
+    let shadowed = 1;
+    {
+        let shadowed = 2; // Different variable
+        shadowed
+    };
+    shadowed
+}
+
+// Test 10: Rename across match arms
+// Renaming 'matched_value' should update all arm bindings
+fn match_rename(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(matched_value) => matched_value * 2,
+        None => 0,
+    }
+}
+
+// Test 11: Rename mutable variable
+// Renaming 'mut_var' should update all assignments and reads
+fn mutable_rename() {
+    let mut mut_var = 0;
+    mut_var = 1;
+    mut_var = mut_var + 1;
+    mut_var
+}
+
+// Test 12: Rename with reference
+// Renaming 'ref_var' should update reference and dereference
+fn reference_rename() {
+    let ref_var = 42;
+    let ref_to = &ref_var;
+    *ref_to
+}
+
+// Test 13: Rename protocol
+// Renaming 'RenameProtocol' should update def, impl, and bounds
+type RenameProtocol is protocol {
+    fn proto_method(self) -> Int;
+};
+
+implement RenameProtocol for MethodType {
+    fn proto_method(self) -> Int {
+        self.value
+    }
+}
+
+fn takes_protocol<T>(value: T) -> Int
+where T: RenameProtocol
+{
+    value.proto_method()
+}
+
+// Test 14: Rename link alias (if supported)
+// Renaming alias should update alias and uses
+type RenamedList<T> is List<T>;
+
+fn uses_alias() -> RenamedList<Int> {
+    List.new()
+}
+
+// Test 15: Rename context
+// Renaming 'RenameContext' should update def and using clauses
+context RenameContext {
+    fn context_method(self) -> Int;
+}
+
+fn uses_context() -> Int using [RenameContext] {
+    42
+}
+
+// Test 16: Invalid rename targets
+// Renaming these should fail or be refused:
+// - Keywords cannot be renamed
+// - Literals cannot be renamed
+
+fn invalid_rename_targets() {
+    let cannot_rename_keyword = 42;  // 'let' cannot be renamed
+    let cannot_rename_literal = 42;  // '42' cannot be renamed
+    cannot_rename_keyword
+}
+
+// Test 17: Rename preserves formatting
+fn formatted_rename() {
+    let formatted_var = 42;
+    let result = formatted_var
+        + formatted_var
+        + formatted_var;
+    result
+}
+
+// Test 18: Rename with comments
+fn commented_rename() {
+    // This variable does something
+    let commented_var = 42;
+    // Use the variable here
+    commented_var + 1
+}

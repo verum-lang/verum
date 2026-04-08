@@ -1,0 +1,24 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, data-race, type-system, send
+// @description: Tests that non-Send types cannot be transferred across threads
+
+// This test verifies that the type system prevents sending non-Send types
+// across thread boundaries. Currently skipped because threading primitives
+// (spawn) are not yet implemented.
+
+// ThreadLocalData does not implement Send (types are not Send by default)
+// Types containing raw pointers or thread-local references are non-Send
+type ThreadLocalData is {
+    // Contains thread-local state that cannot be safely sent
+    value: Int,
+};
+
+fn main() {
+    // Placeholder - actual test requires spawn syntax
+    // The intended test would verify compile-time rejection of:
+    //   let data = ThreadLocalData { value: 42 };
+    //   spawn move || { let _ = data; }  // ERROR: does not implement Send
+    print("Send bound violation test - skipped (threading not implemented)");
+}

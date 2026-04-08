@@ -1,0 +1,23 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, use-after-free, cbgr, thread
+// @description: Tests that CBGR detects use-after-free across threads
+
+fn main() {
+    let data = Heap.new([1, 2, 3]);
+    let ref_data = &data;
+
+    // Spawn thread with reference to heap data
+    let handle = spawn(|| {
+        // Simulate work
+        sleep(Duration.millis(50));
+        ref_data[0]  // Access data
+    });
+
+    // Main thread frees data
+    drop(data);
+
+    // Thread will panic when accessing freed memory
+    let _ = handle.join();  // CBGR detects use after free
+}

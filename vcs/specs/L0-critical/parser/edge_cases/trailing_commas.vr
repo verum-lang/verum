@@ -1,0 +1,182 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, trailing-comma, syntax
+
+// Helper types
+type Point is { x: Float, y: Float, z: Float };
+type Config is {
+    host: Text,
+    port: Int,
+    timeout: Int,
+};
+type Status is Pending | Running | Completed;
+type Multi<T, U, V> is {
+    t: T,
+    u: U,
+    v: V,
+};
+type Derived is { };
+type Debug is protocol { };
+type Clone is protocol { };
+type Eq is protocol { };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+type ItemA is { };
+type ItemB is { };
+type ItemC is { };
+type Value is A | B | C;
+
+// Helper functions
+fn function(a: Int, b: Int, c: Int) -> Int { a + b + c }
+fn process(a: Int, b: Int) { }
+
+// Trailing comma in function parameters
+fn with_trailing(
+    a: Int,
+    b: Int,
+    c: Int,
+) -> Int {
+    a + b + c
+}
+
+fn test_trailing_comma_in_function_call() {
+    let arg1 = 1;
+    let arg2 = 2;
+    let arg3 = 3;
+
+    // Trailing comma in function call
+    let result = function(
+        arg1,
+        arg2,
+        arg3,
+    );
+}
+
+fn test_trailing_comma_in_array_literal() {
+    // Trailing comma in array literal
+    let array = [
+        1,
+        2,
+        3,
+    ];
+}
+
+fn test_trailing_comma_in_tuple() {
+    // Trailing comma in tuple
+    let tuple = (
+        "first",
+        "second",
+        "third",
+    );
+}
+
+fn test_trailing_comma_in_struct_literal() {
+    // Trailing comma in struct literal
+    let point = Point {
+        x: 1.0,
+        y: 2.0,
+        z: 3.0,
+    };
+}
+
+fn test_trailing_comma_in_match_arms() {
+    let value = Value.A;
+
+    // Trailing comma in match arms
+    match value {
+        Value.A => 1,
+        Value.B => 2,
+        Value.C => 3,
+    };
+}
+
+// Trailing comma in where clause
+fn constrained<T>(x: T)
+where type T: Clone + Debug
+{
+    let _ = x;
+}
+
+// Trailing comma in implement block items
+implement Point {
+    fn x(&self) -> Float { self.x }
+    fn y(&self) -> Float { self.y }
+}
+
+fn test_trailing_comma_in_closure_parameters() {
+    // Trailing comma in closure parameters
+    let f = |x: Int, y: Int| x + y;
+}
+
+fn test_trailing_comma_in_pattern() {
+    let triple = (1, 2, 3);
+    let point = Point { x: 1.0, y: 2.0, z: 3.0 };
+
+    // Trailing comma in pattern
+    let (
+        first,
+        second,
+        third,
+    ) = triple;
+
+    // Trailing comma in struct pattern
+    let Point {
+        x,
+        y,
+        z,
+    } = point;
+}
+
+// Trailing comma in attribute arguments
+@derive(Debug, Clone, Eq)
+type DerivedType is { };
+
+fn test_trailing_comma_in_method_chain() {
+    let arg1 = 1;
+    let arg2 = 2;
+    let arg3 = 3;
+
+    // Trailing comma in multiline method chain arguments
+    let result = function(
+        arg1,
+        arg2,
+        arg3,
+    );
+}
+
+fn test_single_item_with_trailing_comma() {
+    // Single item with trailing comma
+    let single_array = [42,];
+    let single_tuple = (42,);
+}
+
+fn test_nested_structures_with_trailing_commas() {
+    // Nested structures with trailing commas
+    let nested = [
+        [
+            1,
+            2,
+        ],
+    ];
+}
+
+fn test_trailing_comma_in_for_loop() {
+    let enumerated: List<(Int, Int)> = Nil;
+
+    // Trailing comma in for loop tuple destructuring
+    for (
+        index,
+        value,
+    ) in enumerated {
+        process(index, value);
+    }
+}
+
+fn test_trailing_comma_in_type_annotation() {
+    // Trailing comma in type annotation
+    let annotated: (
+        Int,
+        Int,
+        Int,
+    ) = (1, 2, 3);
+}

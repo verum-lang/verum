@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, while, condition, error
+// @description: While loop with missing condition
+// @expected-error: E018
+
+fn test() {
+    while { }  // Missing condition
+}

@@ -1,0 +1,284 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: ffi, errors, unsafe, safety
+// @expected-error: E707 "Unsafe operation outside unsafe block"
+// @description: Tests detection of unsafe operations without proper unsafe blocks
+
+/// ============================================================
+/// UNSAFE OPERATION ERRORS
+/// ============================================================
+///
+/// E707: Unsafe operation outside unsafe block
+/// E708: Unsafe function call without unsafe block
+/// E709: Raw pointer dereference without unsafe block
+/// E710: Access to mutable static without unsafe block
+/// E711: Implementing unsafe trait without unsafe impl
+/// E712: Missing safety documentation
+
+// ============================================================
+// E707: GENERAL UNSAFE OPERATIONS
+// ============================================================
+
+// ------------------------------------------------------------
+// Dereferencing Raw Pointers
+// ------------------------------------------------------------
+
+/// ERROR: Dereferencing raw pointer without unsafe block
+fn deref_raw_pointer() {
+    let x = 42;
+    let ptr = &x as *const i32;
+
+    // @expected-error: E707 "Unsafe operation outside unsafe block: raw pointer dereference"
+    let value = *ptr;  // ERROR: Must be in unsafe block
+}
+
+fn deref_mut_pointer() {
+    let mut x = 42;
+    let ptr = &mut x as *mut i32;
+
+    // @expected-error: E707 "Unsafe operation outside unsafe block: raw pointer dereference"
+    *ptr = 100;  // ERROR: Must be in unsafe block
+}
+
+/// Correct: Unsafe block present
+fn deref_with_unsafe() {
+    let x = 42;
+    let ptr = &x as *const i32;
+
+    let value = unsafe { *ptr };  // OK
+}
+
+// ------------------------------------------------------------
+// Calling Unsafe Functions
+// ------------------------------------------------------------
+
+unsafe fn dangerous_function() {
+    // This function is inherently unsafe
+}
+
+fn call_unsafe_function() {
+    // @expected-error: E708 "Unsafe function call without unsafe block"
+    dangerous_function();  // ERROR: Must be in unsafe block
+}
+
+/// Correct: Unsafe block present
+fn call_with_unsafe() {
+    unsafe {
+        dangerous_function();  // OK
+    }
+}
+
+// ------------------------------------------------------------
+// Calling FFI Functions
+// ------------------------------------------------------------
+
+ffi libc {
+    @extern("C")
+    fn strlen(s: *const c_char) -> c_size;
+
+    @extern("C")
+    fn free(ptr: *mut c_void);
+}
+
+fn call_ffi_directly() {
+    let s = "hello\0".as_ptr() as *const c_char;
+
+    // @expected-error: E708 "Unsafe function call without unsafe block: extern function 'strlenp"
+    let len = libc.strlen(s);  // ERROR
+}
+
+fn call_free_directly() {
+    let ptr = null_mut<c_void>();
+
+    // @expected-error: E708 "Unsafe function call without unsafe block: extern function 'freep"
+    libc.free(ptr);  // ERROR
+}
+
+// ============================================================
+// E710: MUTABLE STATICS
+// ============================================================
+
+static mut GLOBAL_COUNTER: i32 = 0;
+
+fn read_mutable_static() {
+    // @expected-error: E710 "Access to mutable static without unsafe block"
+    let value = GLOBAL_COUNTER;  // ERROR
+}
+
+fn write_mutable_static() {
+    // @expected-error: E710 "Access to mutable static without unsafe block"
+    GLOBAL_COUNTER = 42;  // ERROR
+}
+
+fn modify_mutable_static() {
+    // @expected-error: E710 "Access to mutable static without unsafe block"
+    GLOBAL_COUNTER += 1;  // ERROR
+}
+
+/// Correct: Using unsafe block
+fn access_static_with_unsafe() {
+    unsafe {
+        GLOBAL_COUNTER += 1;  // OK
+        let value = GLOBAL_COUNTER;  // OK
+    }
+}
+
+// ============================================================
+// E711: UNSAFE TRAIT IMPLEMENTATION
+// ============================================================
+
+/// Unsafe trait - implementor must uphold invariants
+unsafe type Send is protocol {}
+unsafe type Sync is protocol {}
+
+type MyType is {
+    data: *mut i32,
+};
+
+// @expected-error: E711 "Implementing unsafe trait without 'unsafe implp"
+implement Send for MyType {}  // ERROR: Must be 'unsafe implp
+
+// @expected-error: E711 "Implementing unsafe trait without 'unsafe implp"
+implement Sync for MyType {}  // ERROR
+
+/// Correct: Using unsafe impl
+unsafe implement Send for MyType {}  // OK (if we can prove safety)
+
+// ============================================================
+// E712: MISSING SAFETY DOCUMENTATION
+// ============================================================
+
+/// Missing SAFETY comment on unsafe block
+fn missing_safety_comment() {
+    let x = 42;
+    let ptr = &x as *const i32;
+
+    // @expected-warning: E712 "Missing safety documentation for unsafe block"
+    unsafe {
+        let _value = *ptr;  // WARNING: Should have SAFETY comment
+    }
+}
+
+/// Correct: With safety comment
+fn with_safety_comment() {
+    let x = 42;
+    let ptr = &x as *const i32;
+
+    // SAFETY: ptr is derived from valid reference and still in scope
+    unsafe {
+        let _value = *ptr;  // OK
+    }
+}
+
+/// Missing SAFETY on unsafe function
+// @expected-warning: E712 "Missing safety documentation for unsafe function"
+unsafe fn undocumented_unsafe() {  // WARNING
+    // Should document what caller must uphold
+}
+
+/// Correct: Documented unsafe function
+/// # Safety
+/// Caller must ensure ptr is valid and aligned
+unsafe fn documented_unsafe(ptr: *const i32) -> i32 {
+    *ptr
+}
+
+// ============================================================
+// UNION FIELD ACCESS
+// ============================================================
+
+@repr(C)
+type IntOrFloat is union {
+    i: i32,
+    f: f32,
+};
+
+fn access_union_field() {
+    let u = IntOrFloat { i: 42 };
+
+    // @expected-error: E707 "Unsafe operation outside unsafe block: union field access"
+    let value = u.f;  // ERROR: Reading union field requires unsafe
+}
+
+fn write_union_field() {
+    let mut u = IntOrFloat { i: 42 };
+
+    // @expected-error: E707 "Unsafe operation outside unsafe block: union field access"
+    u.f = 3.14;  // ERROR
+}
+
+// ============================================================
+// INLINE ASSEMBLY
+// ============================================================
+
+fn use_inline_asm() {
+    // @expected-error: E707 "Unsafe operation outside unsafe block: inline assembly"
+    asm("nop");  // ERROR: asm! requires unsafe
+}
+
+fn use_inline_asm_with_unsafe() {
+    // SAFETY: nop has no side effects
+    unsafe {
+        asm("nop");  // OK
+    }
+}
+
+// ============================================================
+// TRANSMUTE
+// ============================================================
+
+fn transmute_without_unsafe() {
+    let x: i32 = 42;
+
+    // @expected-error: E708 "Unsafe function call without unsafe block: std.mem.transmute"
+    let y: f32 = std.mem.transmute(x);  // ERROR
+}
+
+// ============================================================
+// POINTER ARITHMETIC
+// ============================================================
+
+fn pointer_arithmetic() {
+    let arr = [1, 2, 3, 4, 5];
+    let ptr = arr.as_ptr();
+
+    // Creating offset pointer requires unsafe (depending on implementation)
+    // @expected-error: E707 "Unsafe operation outside unsafe block: pointer offset"
+    let next = ptr.add(1);  // ERROR on .add()
+}
+
+fn pointer_offset_from() {
+    let arr = [1, 2, 3];
+    let start = arr.as_ptr();
+    let end = unsafe { start.add(3) };
+
+    // @expected-error: E707 "Unsafe operation outside unsafe block: pointer offset_from"
+    let diff = end.offset_from(start);  // ERROR
+}
+
+// ============================================================
+// SLICE FROM RAW PARTS
+// ============================================================
+
+fn slice_from_raw() {
+    let arr = [1, 2, 3];
+    let ptr = arr.as_ptr();
+
+    // @expected-error: E708 "Unsafe function call without unsafe block: from_raw_parts"
+    let slice = std.slice.from_raw_parts(ptr, 3);  // ERROR
+}
+
+// ============================================================
+// TYPE DEFINITIONS
+// ============================================================
+
+type c_char is i8;
+type c_size is usize;
+type c_void is ();
+
+fn null_mut<T>() -> *mut T { 0 as *mut T }
+
+fn main() {
+    // Unsafe operation error tests
+}

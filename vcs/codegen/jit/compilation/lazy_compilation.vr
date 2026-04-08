@@ -1,0 +1,47 @@
+// @test: jit-compilation
+// @tier: 1, 2
+// @level: L1
+// @tags: jit, lazy-compilation
+// @timeout: 10000
+// @scenario: lazy-compile
+// @description: Verify JIT lazy compilation triggers only when needed
+
+// This function should NOT be compiled at module load time
+// when using lazy compilation strategy
+fn expensive_function_a() -> Int {
+    let mut sum = 0;
+    for i in 0..1000 {
+        sum = sum + i * i;
+    }
+    sum
+}
+
+// This function should NOT be compiled at module load time
+fn expensive_function_b() -> Int {
+    let mut prod = 1;
+    for i in 1..20 {
+        prod = prod * i % 1000000007;
+    }
+    prod
+}
+
+// This function should NOT be compiled at module load time
+fn expensive_function_c() -> Int {
+    expensive_function_a() + expensive_function_b()
+}
+
+fn cheap_function() -> Int {
+    42
+}
+
+fn main() -> Int {
+    // Only cheap_function should be compiled initially
+    let result = cheap_function();
+
+    // expensive_function_a should be compiled on first call
+    let a = expensive_function_a();
+
+    // Return without calling b or c
+    // They should NOT be compiled
+    result + a
+}

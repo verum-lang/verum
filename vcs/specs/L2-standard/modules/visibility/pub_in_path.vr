@@ -1,0 +1,192 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, visibility, pub-in-path
+
+/// Path-restricted visibility - items accessible up to a specific ancestor.
+/// `pub(in path)` restricts visibility to a specific module path,
+/// allowing fine-grained control over item accessibility.
+
+module crate {
+    module api {
+        /// Public API types that external users interact with
+        pub type ApiRequest is {
+            endpoint: Text,
+            method: HttpMethod,
+            body: Maybe<Bytes>
+        };
+
+        pub type ApiResponse is {
+            status: Int,
+            body: Bytes
+        };
+
+        pub type HttpMethod is
+    | Get
+    | Post
+    | Put
+    | Delete;
+
+        /// Handler implementation - uses path-restricted visibility
+        module handlers {
+            mount super.{ApiRequest, ApiResponse, HttpMethod};
+
+            /// Visible only within crate.api and its submodules
+            pub(in crate.api) type HandlerContext is {
+                request: ApiRequest,
+                auth_token: Maybe<Text>,
+                trace_id: Text
+            };
+
+            /// Visible only within crate.api
+            pub(in crate.api) fn create_context(req: ApiRequest) -> HandlerContext {
+                HandlerContext {
+                    request: req,
+                    auth_token: None,
+                    trace_id: generate_trace_id()
+                }
+            }
+
+            fn generate_trace_id() -> Text {
+                "trace-12345"  // Simplified
+            }
+
+            /// Public handler function
+            pub fn handle_request(req: ApiRequest) -> ApiResponse {
+                let ctx = create_context(req);
+                process_with_context(&ctx)
+            }
+
+            fn process_with_context(ctx: &HandlerContext) -> ApiResponse {
+                ApiResponse { status: 200, body: Bytes.empty() }
+            }
+        }
+
+        /// Middleware can access handler internals via pub(in crate.api)
+        module middleware {
+            mount super.{ApiRequest, ApiResponse};
+            mount super.handlers.{HandlerContext, create_context};
+
+            pub type Middleware is {
+                name: Text,
+                enabled: Bool
+            };
+
+            /// Uses path-visible type from handlers
+            pub(in crate.api) fn wrap_with_context(
+                req: ApiRequest,
+                next: fn(HandlerContext) -> ApiResponse
+            ) -> ApiResponse {
+                let ctx = create_context(req);
+                // Add middleware processing
+                next(ctx)
+            }
+        }
+
+        /// Router can also access internal types
+        module router {
+            mount super.{ApiRequest, ApiResponse, HttpMethod};
+            mount super.handlers.HandlerContext;
+            mount super.middleware.wrap_with_context;
+
+            pub type Route is {
+                path: Text,
+                method: HttpMethod,
+                handler: fn(ApiRequest) -> ApiResponse
+            };
+
+            /// Uses path-visible items from sibling modules
+            pub(in crate.api) fn dispatch(routes: &List<Route>, req: ApiRequest) -> ApiResponse {
+                // Find matching route and dispatch
+                ApiResponse { status: 404, body: Bytes.from_text("Not Found") }
+            }
+        }
+    }
+
+    module internal {
+        // This module is OUTSIDE crate.api, so it CANNOT access pub(in crate.api) items
+
+        // The following would be errors:
+        // mount crate.api.handlers.HandlerContext;   // ERROR: not visible
+        // mount crate.api.middleware.wrap_with_context; // ERROR: not visible
+
+        // Can still use public items
+        mount crate.api.{ApiRequest, ApiResponse, HttpMethod};
+        mount crate.api.handlers.handle_request;
+
+        pub fn make_request() -> ApiResponse {
+            let req = ApiRequest {
+                endpoint: "/users",
+                method: HttpMethod.Get,
+                body: None
+            };
+            handle_request(req)
+        }
+    }
+}
+
+module library {
+    /// Complex visibility with nested paths
+    pub module core {
+        pub(in library) type LibraryInternal is {
+            version: Int
+        };
+
+        pub module utils {
+            pub(in library.core) type CoreUtilType is {
+                helper: Text
+            };
+
+            pub(in library) type LibraryUtilType is {
+                shared: Int
+            };
+
+            pub fn public_util() -> Int {
+                42
+            }
+        }
+
+        pub module impl_detail {
+            // Can access both library.core items and library items
+            mount super.LibraryInternal;
+            mount super.utils.{CoreUtilType, LibraryUtilType};
+
+            pub(in library.core) fn core_only_function() -> CoreUtilType {
+                CoreUtilType { helper: "internal" }
+            }
+        }
+    }
+
+    module feature {
+        // Can access pub(in library) items
+        mount library.core.LibraryInternal;
+        mount library.core.utils.LibraryUtilType;
+
+        // Cannot access pub(in library.core) items
+        // mount library.core.utils.CoreUtilType; // ERROR
+
+        pub fn use_library_internals() -> Int {
+            let internal = LibraryInternal { version: 1 };
+            let util = LibraryUtilType { shared: 100 };
+            internal.version + util.shared
+        }
+    }
+}
+
+fn main() {
+    mount crate.api.handlers.handle_request;
+    mount crate.api.{ApiRequest, HttpMethod};
+    mount crate.internal.make_request;
+    mount library.feature.use_library_internals;
+
+    let response = make_request();
+
+    let req = ApiRequest {
+        endpoint: "/api/data",
+        method: HttpMethod.Post,
+        body: Some(Bytes.from_text("{}"))
+    };
+    let direct_response = handle_request(req);
+
+    let lib_result = use_library_internals();
+}

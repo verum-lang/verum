@@ -1,0 +1,147 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, list, csv, pipeline, to_int, join, sort
+// @expected-exit: 0
+
+// Test: Complete CSV data pipeline — parse, transform, aggregate, output.
+// Exercises: split, to_int, sort, reverse, join, replace, contains, to_upper.
+
+fn __file_write_string_raw(path: Text, content: Text) -> Int {
+    0
+}
+
+fn __file_read_to_string_raw(path: Text) -> Text {
+    ""
+}
+
+fn main() -> Int {
+    // Step 1: Write CSV data
+    let csv_data = "charlie,92\nalice,95\neve,99\nbob,87\ndave,78";
+    let path = "/tmp/verum_test_920.csv";
+    __file_write_string_raw(path, csv_data);
+
+    // Step 2: Read and parse
+    let content = __file_read_to_string_raw(path);
+    let lines = content.split("\n");
+    if (lines.len() != 5) {
+        print(f"FAIL: lines={lines.len()}");
+        return 1;
+    }
+
+    // Step 3: Extract scores, compute stats
+    let mut scores = List.new();
+    let mut i = 0;
+    while (i < lines.len()) {
+        let line = lines[i];
+        let fields = line.split(",");
+        let score_str = fields[1];
+        scores.push(score_str.to_int());
+        i = i + 1;
+    }
+
+    // Sum
+    let mut total = 0;
+    let mut j = 0;
+    while (j < scores.len()) {
+        total = total + scores[j];
+        j = j + 1;
+    }
+    // 92 + 95 + 99 + 87 + 78 = 451
+    if (total != 451) {
+        print(f"FAIL total: {total}");
+        return 1;
+    }
+
+    // Average (integer division)
+    let avg = total / scores.len();
+    // 451 / 5 = 90
+    if (avg != 90) {
+        print(f"FAIL avg: {avg}");
+        return 1;
+    }
+
+    // Min and max via sort
+    scores.sort();
+    let min_score = scores[0];
+    let max_score = scores[scores.len() - 1];
+    if (min_score != 78) {
+        print(f"FAIL min: {min_score}");
+        return 1;
+    }
+    if (max_score != 99) {
+        print(f"FAIL max: {max_score}");
+        return 1;
+    }
+
+    // Step 4: Transform — uppercase names
+    let updated = csv_data.replace("alice", "ALICE");
+    let updated2 = updated.replace("bob", "BOB");
+    let updated3 = updated2.replace("charlie", "CHARLIE");
+    let updated4 = updated3.replace("dave", "DAVE");
+    let updated5 = updated4.replace("eve", "EVE");
+
+    if (updated5.contains("alice") != false) {
+        print("FAIL: lowercase name still present");
+        return 1;
+    }
+    if (updated5.contains("ALICE") != true) {
+        print("FAIL: uppercase ALICE not found");
+        return 1;
+    }
+
+    // Step 5: Write output
+    let out_path = "/tmp/verum_test_920_out.csv";
+    __file_write_string_raw(out_path, updated5);
+    let verify = __file_read_to_string_raw(out_path);
+    if (verify != updated5) {
+        print("FAIL: output file mismatch");
+        return 1;
+    }
+
+    // Step 6: Re-parse output and verify
+    let out_lines = verify.split("\n");
+    let mut k = 0;
+    let mut out_total = 0;
+    while (k < out_lines.len()) {
+        let ol = out_lines[k];
+        let of = ol.split(",");
+        let os = of[1];
+        out_total = out_total + os.to_int();
+        k = k + 1;
+    }
+    if (out_total != 451) {
+        print(f"FAIL out_total: {out_total}");
+        return 1;
+    }
+
+    // Step 7: Build summary using join
+    let summary_parts = "count:5,total:451,avg:90,min:78,max:99".split(",");
+    let summary = summary_parts.join(" | ");
+    if (summary.contains("total:451") != true) {
+        print(f"FAIL summary: '{summary}'");
+        return 1;
+    }
+
+    // Step 8: Find specific entry
+    let mut found_eve = false;
+    let mut m = 0;
+    while (m < out_lines.len()) {
+        let check_line = out_lines[m];
+        if (check_line.starts_with("EVE")) {
+            let check_fields = check_line.split(",");
+            let eve_score = check_fields[1];
+            if (eve_score.to_int() == 99) {
+                found_eve = true;
+            }
+        }
+        m = m + 1;
+    }
+    if (found_eve != true) {
+        print("FAIL: EVE,99 not found");
+        return 1;
+    }
+
+    print("920_csv_pipeline: PASS");
+    0
+}

@@ -1,0 +1,115 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, channels, threads, producer-consumer, pipeline
+// @expected-exit: 0
+
+// Test: channel-based producer-consumer with real threads.
+// Multiple producers send through channels, consumer collects results.
+
+fn producer_sum(start: Int, count: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < start + count) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn producer_primes(limit: Int) -> Int {
+    // Count primes up to limit using trial division
+    let mut count = 0;
+    let mut n = 2;
+    while (n <= limit) {
+        let mut is_prime = 1;
+        let mut d = 2;
+        while (d * d <= n) {
+            if (n % d == 0) {
+                is_prime = 0;
+                break;
+            }
+            d = d + 1;
+        }
+        if (is_prime == 1) {
+            count = count + 1;
+        }
+        n = n + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Test 1: Channel send/recv
+    let ch = Channel.new(4);
+    ch.send(42);
+    ch.send(100);
+    let mut v1 = 0;
+    let mut v2 = 0;
+    match ch.recv() { Some(v) => { v1 = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { v2 = v; } None => { return 1; } }
+    if (v1 != 42) {
+        print(f"FAIL test1a: v1={v1}");
+        return 1;
+    }
+    if (v2 != 100) {
+        print(f"FAIL test1b: v2={v2}");
+        return 1;
+    }
+
+    // Test 2: Multiple worker threads producing results
+    let p1 = spawn producer_sum(0, 100);
+    let p2 = spawn producer_sum(100, 100);
+    let p3 = spawn producer_sum(200, 100);
+    let p4 = spawn producer_sum(300, 100);
+
+    let total = p1.await + p2.await + p3.await + p4.await;
+    // sum(0..399) = 399*400/2 = 79800
+    if (total != 79800) {
+        print(f"FAIL test2: total={total}");
+        return 1;
+    }
+
+    // Test 3: Parallel prime counting
+    let pc1 = spawn producer_primes(250);
+    let pc2 = spawn producer_primes(500);
+    let pc3 = spawn producer_primes(1000);
+
+    let primes_250 = pc1.await;  // 54 primes <= 250
+    let primes_500 = pc2.await;  // 95 primes <= 500
+    let primes_1000 = pc3.await; // 168 primes <= 1000
+
+    // Verify prime counts are reasonable
+    if (primes_250 < 50 || primes_250 > 60) {
+        print(f"FAIL test3a: primes(250)={primes_250}");
+        return 1;
+    }
+    if (primes_500 < 90 || primes_500 > 100) {
+        print(f"FAIL test3b: primes(500)={primes_500}");
+        return 1;
+    }
+    if (primes_1000 < 160 || primes_1000 > 175) {
+        print(f"FAIL test3c: primes(1000)={primes_1000}");
+        return 1;
+    }
+
+    // Test 4: Channel with multiple sends and recv + close
+    let ch2 = Channel.new(16);
+    ch2.send(10);
+    ch2.send(20);
+    ch2.send(30);
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    match ch2.recv() { Some(v) => { a = v; } None => { return 1; } }
+    match ch2.recv() { Some(v) => { b = v; } None => { return 1; } }
+    match ch2.recv() { Some(v) => { c = v; } None => { return 1; } }
+    ch2.close();
+    if (a + b + c != 60) {
+        print(f"FAIL test4: sum={a + b + c}");
+        return 1;
+    }
+
+    print("895_channel_producer_consumer: PASS");
+    0
+}

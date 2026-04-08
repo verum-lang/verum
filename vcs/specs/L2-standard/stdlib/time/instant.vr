@@ -1,0 +1,482 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: stdlib, time, instant
+
+/// Comprehensive test suite for Instant type.
+/// Tests monotonic time measurement and elapsed duration.
+
+fn main() {
+    test_instant_creation();
+    test_instant_elapsed();
+    test_instant_duration_since();
+    test_instant_arithmetic();
+    test_instant_comparison();
+    test_instant_timing();
+    test_instant_checked_operations();
+    test_instant_saturating_operations();
+    test_instant_benchmarking();
+    test_instant_timeout();
+}
+
+/// Test instant creation
+fn test_instant_creation() {
+    mount std.time.Instant;
+
+    // Current instant
+    let now: Instant = Instant.now();
+
+    // Instants are never equal unless from same call
+    let later: Instant = Instant.now();
+    // later >= now (monotonic)
+
+    // Cannot create instant from arbitrary value
+    // Instant is opaque - only created via now()
+
+    // Instant is guaranteed to be monotonic
+    let t1 = Instant.now();
+    let t2 = Instant.now();
+    let t3 = Instant.now();
+    assert(t2 >= t1);
+    assert(t3 >= t2);
+}
+
+/// Test elapsed time measurement
+fn test_instant_elapsed() {
+    mount std.time.{Instant, Duration};
+    mount std.thread;
+
+    let start: Instant = Instant.now();
+
+    // Do some work
+    let mut sum: u64 = 0;
+    for i in 0..1000 {
+        sum += i;
+    }
+
+    let elapsed: Duration = start.elapsed();
+
+    // Elapsed should be non-negative
+    assert(elapsed >= Duration.ZERO);
+
+    // elapsed() is equivalent to Instant.now() - start
+    let now = Instant.now();
+    let diff = now.duration_since(start).unwrap();
+    // elapsed and diff should be very close
+
+    // Sleep and measure
+    let before_sleep = Instant.now();
+    thread.sleep(Duration.from_millis(10));
+    let after_sleep = before_sleep.elapsed();
+
+    // Should have elapsed at least 10ms (might be slightly more)
+    assert(after_sleep >= Duration.from_millis(10));
+
+    // Multiple elapsed calls
+    let instant = Instant.now();
+    let e1 = instant.elapsed();
+    thread.sleep(Duration.from_millis(1));
+    let e2 = instant.elapsed();
+    assert(e2 > e1);
+}
+
+/// Test duration_since method
+fn test_instant_duration_since() {
+    mount std.time.{Instant, Duration};
+    mount std.thread;
+
+    let earlier: Instant = Instant.now();
+    thread.sleep(Duration.from_millis(10));
+    let later: Instant = Instant.now();
+
+    // duration_since returns Duration between two instants
+    let elapsed: Duration = later.duration_since(earlier).unwrap();
+    assert(elapsed >= Duration.from_millis(10));
+
+    // duration_since(self) is zero
+    let same = earlier.duration_since(earlier).unwrap();
+    assert(same == Duration.ZERO);
+
+    // duration_since with earlier instant panics (use checked_duration_since)
+    // let would_panic = earlier.duration_since(later).unwrap();  // PANIC!
+
+    // checked_duration_since returns None for reverse order
+    let reverse: Maybe<Duration> = earlier.checked_duration_since(later);
+    assert(reverse.is_none());
+
+    // saturating_duration_since returns ZERO for reverse order
+    let saturated: Duration = earlier.saturating_duration_since(later);
+    assert(saturated == Duration.ZERO);
+}
+
+/// Test instant arithmetic
+fn test_instant_arithmetic() {
+    mount std.time.{Instant, Duration};
+
+    let now: Instant = Instant.now();
+    let one_sec: Duration = Duration.from_secs(1);
+
+    // Add duration to instant
+    let later: Instant = now + one_sec;
+    assert(later > now);
+
+    // Subtract duration from instant
+    let earlier: Instant = later - one_sec;
+    // earlier should be close to now
+
+    // Subtract instants to get duration
+    let diff: Duration = later - now;
+    assert(diff >= one_sec);
+
+    // Compound assignment
+    let mut instant: Instant = Instant.now();
+    instant += Duration.from_millis(100);
+    instant -= Duration.from_millis(50);
+
+    // Chain operations
+    let base: Instant = Instant.now();
+    let future: Instant = base + Duration.from_secs(1) + Duration.from_millis(500);
+    let diff: Duration = future - base;
+    assert(diff >= Duration.from_millis(1500));
+
+    // Multiple subtractions
+    let t1 = Instant.now();
+    let t2 = t1 + Duration.from_secs(10);
+    let t3 = t2 + Duration.from_secs(5);
+
+    assert((t3 - t2) == Duration.from_secs(5));
+    assert((t3 - t1) == Duration.from_secs(15));
+}
+
+/// Test instant comparison
+fn test_instant_comparison() {
+    mount std.time.{Instant, Duration};
+
+    let now: Instant = Instant.now();
+    let later: Instant = now + Duration.from_secs(1);
+    let same: Instant = now + Duration.ZERO;
+
+    // Equality (rare in practice due to monotonicity)
+    // Two instants are equal only if created at exact same time
+
+    // Ordering
+    assert(later > now);
+    assert(now < later);
+    assert(now <= later);
+    assert(later >= now);
+
+    // Min/max
+    assert(now.min(later) == now);
+    assert(now.max(later) == later);
+
+    // Sorting instants
+    let t1 = Instant.now();
+    let t2 = t1 + Duration.from_millis(10);
+    let t3 = t1 + Duration.from_millis(5);
+
+    let mut instants: List<Instant> = [t2, t1, t3];
+    instants.sort();
+    assert(instants[0] == t1);
+    assert(instants[1] == t3);
+    assert(instants[2] == t2);
+
+    // Comparison with arithmetic
+    assert(now + Duration.from_secs(1) > now);
+    assert(now + Duration.ZERO >= now);
+}
+
+/// Test timing patterns
+fn test_instant_timing() {
+    mount std.time.{Instant, Duration};
+
+    // Simple timing
+    fn time_operation<F: FnOnce()>(f: F) -> Duration {
+        let start = Instant.now();
+        f();
+        start.elapsed()
+    }
+
+    let elapsed = time_operation(|| {
+        let mut sum: u64 = 0;
+        for i in 0..1000 {
+            sum += i;
+        }
+    });
+    assert(elapsed >= Duration.ZERO);
+
+    // Timing with result
+    fn time_with_result<F: FnOnce() -> T, T>(f: F) -> (T, Duration) {
+        let start = Instant.now();
+        let result = f();
+        (result, start.elapsed())
+    }
+
+    let (result, elapsed) = time_with_result(|| 42 * 2);
+    assert(result == 84);
+    assert(elapsed >= Duration.ZERO);
+
+    // Repeated timing for averaging
+    fn average_time<F: Fn()>(iterations: u32, f: F) -> Duration {
+        let start = Instant.now();
+        for _ in 0..iterations {
+            f();
+        }
+        start.elapsed() / iterations
+    }
+
+    let avg = average_time(100, || {
+        let _x = 1 + 1;
+    });
+    assert(avg >= Duration.ZERO);
+
+    // Lap timer
+    type LapTimer is {
+        start: Instant,
+        last_lap: Instant,
+        laps: List<Duration>,
+    };
+
+    implement LapTimer {
+        fn new() -> Self {
+            let now = Instant.now();
+            LapTimer {
+                start: now,
+                last_lap: now,
+                laps: List.new(),
+            }
+        }
+
+        fn lap(&mut self) -> Duration {
+            let now = Instant.now();
+            let lap_time = now - self.last_lap;
+            self.last_lap = now;
+            self.laps.push(lap_time);
+            lap_time
+        }
+
+        fn total(&self) -> Duration {
+            self.start.elapsed()
+        }
+    }
+}
+
+/// Test checked operations
+fn test_instant_checked_operations() {
+    mount std.time.{Instant, Duration};
+
+    let now: Instant = Instant.now();
+
+    // checked_add
+    let future: Maybe<Instant> = now.checked_add(Duration.from_secs(1));
+    assert(future.is_some());
+    assert(future.unwrap() > now);
+
+    // checked_add with very large duration might overflow
+    let overflow: Maybe<Instant> = now.checked_add(Duration.MAX);
+    // May be None on some platforms
+
+    // checked_sub
+    let past: Maybe<Instant> = now.checked_sub(Duration.from_secs(1));
+    // May be None if it would go before epoch
+
+    // checked_duration_since
+    let later = now + Duration.from_secs(1);
+    let diff: Maybe<Duration> = later.checked_duration_since(now);
+    assert(diff.is_some());
+    assert(diff.unwrap() >= Duration.from_secs(1));
+
+    // Reverse order returns None
+    let reverse: Maybe<Duration> = now.checked_duration_since(later);
+    assert(reverse.is_none());
+
+    // Safe timing pattern
+    fn safe_elapsed_since(start: Instant, end: Instant) -> Duration {
+        end.checked_duration_since(start).unwrap_or(Duration.ZERO)
+    }
+}
+
+/// Test saturating operations
+fn test_instant_saturating_operations() {
+    mount std.time.{Instant, Duration};
+
+    let now: Instant = Instant.now();
+    let later = now + Duration.from_secs(10);
+
+    // saturating_duration_since
+    let forward: Duration = later.saturating_duration_since(now);
+    assert(forward >= Duration.from_secs(10));
+
+    // Reverse returns ZERO instead of panicking
+    let reverse: Duration = now.saturating_duration_since(later);
+    assert(reverse == Duration.ZERO);
+
+    // Useful for safe comparisons
+    fn time_since_or_zero(reference: Instant, current: Instant) -> Duration {
+        current.saturating_duration_since(reference)
+    }
+
+    let safe_elapsed = time_since_or_zero(later, now);
+    assert(safe_elapsed == Duration.ZERO);
+}
+
+/// Test benchmarking patterns
+fn test_instant_benchmarking() {
+    mount std.time.{Instant, Duration};
+
+    // Warmup and benchmark
+    fn benchmark<F: Fn()>(warmup_iterations: u32, bench_iterations: u32, f: F) -> BenchResult {
+        // Warmup
+        for _ in 0..warmup_iterations {
+            f();
+        }
+
+        // Benchmark
+        let mut times: List<Duration> = List.new();
+        for _ in 0..bench_iterations {
+            let start = Instant.now();
+            f();
+            times.push(start.elapsed());
+        }
+
+        times.sort();
+
+        BenchResult {
+            min: times[0],
+            max: times[times.len() - 1],
+            median: times[times.len() / 2],
+            mean: {
+                let sum: Duration = times.iter().sum();
+                sum / bench_iterations
+            },
+        }
+    }
+
+    type BenchResult is {
+        min: Duration,
+        max: Duration,
+        median: Duration,
+        mean: Duration,
+    };
+
+    let result = benchmark(10, 100, || {
+        let mut v: List<u32> = (0..100).collect();
+        v.sort();
+    });
+
+    assert(result.min <= result.median);
+    assert(result.median <= result.max);
+
+    // Throughput calculation
+    fn calculate_throughput(operations: u64, elapsed: Duration) -> f64 {
+        let secs = elapsed.as_secs_f64();
+        if secs > 0.0 {
+            operations as f64 / secs
+        } else {
+            f64.INFINITY
+        }
+    }
+
+    let ops: u64 = 1_000_000;
+    let start = Instant.now();
+    for _ in 0..ops {
+        let _x = 1 + 1;
+    }
+    let elapsed = start.elapsed();
+    let throughput = calculate_throughput(ops, elapsed);
+    // throughput is operations per second
+}
+
+/// Test timeout patterns
+fn test_instant_timeout() {
+    mount std.time.{Instant, Duration};
+
+    // Deadline-based timeout
+    let timeout: Duration = Duration.from_secs(5);
+    let deadline: Instant = Instant.now() + timeout;
+
+    fn operation_with_deadline(deadline: Instant) -> Result<(), Text> {
+        loop {
+            // Check deadline
+            if Instant.now() >= deadline {
+                return Err("Timeout".to_text());
+            }
+
+            // Try operation
+            // if operation_succeeded() {
+            //     return Ok(());
+            // }
+
+            // Simulate quick return for test
+            return Ok(());
+        }
+    }
+
+    let result = operation_with_deadline(deadline);
+    assert(result.is_ok());
+
+    // Time remaining until deadline
+    fn time_remaining(deadline: Instant) -> Duration {
+        deadline.saturating_duration_since(Instant.now())
+    }
+
+    let future_deadline = Instant.now() + Duration.from_secs(10);
+    let remaining = time_remaining(future_deadline);
+    assert(remaining > Duration.ZERO);
+
+    let past_deadline = Instant.now() - Duration.from_secs(10);
+    let past_remaining = time_remaining(past_deadline);
+    assert(past_remaining == Duration.ZERO);
+
+    // Retry with timeout
+    fn retry_with_timeout<F, T, E>(
+        timeout: Duration,
+        retry_delay: Duration,
+        mut operation: F
+    ) -> Result<T, Text>
+    where type F: FnMut() -> Result<T, E>
+    {
+        let deadline = Instant.now() + timeout;
+
+        loop {
+            match operation() {
+                Ok(result) => return Ok(result),
+                Err(_) => {
+                    if Instant.now() >= deadline {
+                        return Err("Timeout after retries".to_text());
+                    }
+                    std.thread.sleep(retry_delay);
+                }
+            }
+        }
+    }
+
+    // Exponential backoff
+    fn exponential_backoff_with_timeout<F, T, E>(
+        timeout: Duration,
+        initial_delay: Duration,
+        max_delay: Duration,
+        mut operation: F
+    ) -> Result<T, Text>
+    where type F: FnMut() -> Result<T, E>
+    {
+        let deadline = Instant.now() + timeout;
+        let mut delay = initial_delay;
+
+        loop {
+            match operation() {
+                Ok(result) => return Ok(result),
+                Err(_) => {
+                    let remaining = deadline.saturating_duration_since(Instant.now());
+                    if remaining == Duration.ZERO {
+                        return Err("Timeout".to_text());
+                    }
+
+                    let sleep_time = delay.min(remaining);
+                    std.thread.sleep(sleep_time);
+
+                    delay = (delay * 2).min(max_delay);
+                }
+            }
+        }
+    }
+}

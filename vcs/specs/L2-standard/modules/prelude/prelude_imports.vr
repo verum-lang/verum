@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, prelude, imports
+// @description: Prelude module automatic imports
+
+/// The prelude is automatically imported in every module
+/// unless explicitly opted out with #![no_prelude]
+
+// These types are available without explicit link due to prelude:
+
+fn test_prelude_types() {
+    // Core types from prelude
+    let _int: Int = 42;
+    let _float: Float = 3.14;
+    let _bool: Bool = true;
+    let _char: Char = 'a';
+    let _text: Text = "hello";
+    let _unit: () = ();
+
+    // Container types
+    let _list: List<Int> = [1, 2, 3];
+    let _map: Map<Text, Int> = {"one": 1, "two": 2};
+    let _set: Set<Int> = {1, 2, 3};
+
+    // Algebraic types
+    let _maybe: Maybe<Int> = Some(42);
+    let _result: Result<Int, Text> = Ok(42);
+
+    // Smart pointers
+    let _heap: Heap<Int> = Heap.new(42);
+    let _shared: Shared<Int> = Shared.new(42);
+}
+
+fn test_prelude_traits() {
+    // Core protocols from prelude
+    fn takes_clone<T: Clone>(x: T) -> T { x.clone() }
+    fn takes_eq<T: Eq>(a: T, b: T) -> Bool { a == b }
+    fn takes_ord<T: Ord>(a: T, b: T) -> Bool { a < b }
+    fn takes_display<T: Display>(x: T) -> Text { x.to_text() }
+    fn takes_debug<T: Debug>(x: T) -> Text { format("{:?}", x) }
+    fn takes_default<T: Default>() -> T { T.default() }
+    fn takes_hash<T: Hash>(x: T) -> Int { 0 }
+
+    // Iterator traits
+    fn takes_iter<I: Iterator>(i: I) {
+        for _ in i {}
+    }
+}
+
+fn test_prelude_functions() {
+    // Built-in functions from prelude
+    println("Hello");
+    print("No newline");
+
+    let _ = format("Formatted: {}", 42);
+
+    // Assertions
+    assert(true);
+    assert_eq(1, 1);
+    assert_ne(1, 2);
+
+    // Debug
+    debug_assert(true);
+
+    // Panic functions available but not called
+    // panic("oops");
+    // unreachable();
+    // todo();
+}
+
+fn test_prelude_macros() {
+    // Common macros from prelude
+    let v = [1, 2, 3];
+    let s = {1, 2, 3};
+    let m = map!{"a" => 1, "b" => 2};
+
+    // Format string
+    let text = f"Value: {42}";
+
+    // Debug printing
+    dbg(v);
+}
+
+// Custom prelude extension
+module my_prelude {
+    public type MyType is { value: Int };
+
+    public fn my_helper() -> Int { 42 }
+}
+
+// Opt out of standard prelude and use custom
+@no_prelude
+mount core.prelude.*;  // Explicit link needed without auto-prelude
+mount my_prelude.*;
+
+fn with_custom_prelude() {
+    let _ = MyType { value: my_helper() };
+}
+
+fn main() {
+    test_prelude_types();
+    test_prelude_traits();
+    test_prelude_functions();
+}

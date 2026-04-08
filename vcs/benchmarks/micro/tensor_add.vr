@@ -1,0 +1,248 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: ~5 GFLOPS (single-threaded), ~20 GFLOPS (multi-threaded)
+// @tags: tensor, simd, performance, numerics
+
+/// Benchmark for tensor addition operations
+///
+/// Tests element-wise addition performance:
+/// - Scalar loop
+/// - SIMD vectorized
+/// - Multi-threaded
+/// - Various tensor sizes
+
+module benchmarks.micro.tensor_add
+
+using [Benchmark, Tensor]
+
+/// Small tensor addition (fits in L1 cache)
+fn benchmark_tensor_add_small() {
+    let size = 1024;  // 8KB per tensor (Float64)
+    let a = Tensor.zeros<Float>([size]);
+    let b = Tensor.ones<Float>([size]);
+
+    for _ in 0..100_000 {
+        let _ = a.add(&b);
+    }
+}
+
+/// Medium tensor addition (fits in L2 cache)
+fn benchmark_tensor_add_medium() {
+    let size = 32_768;  // 256KB per tensor
+    let a = Tensor.zeros<Float>([size]);
+    let b = Tensor.ones<Float>([size]);
+
+    for _ in 0..10_000 {
+        let _ = a.add(&b);
+    }
+}
+
+/// Large tensor addition (exceeds L3 cache)
+fn benchmark_tensor_add_large() {
+    let size = 4_194_304;  // 32MB per tensor
+    let a = Tensor.zeros<Float>([size]);
+    let b = Tensor.ones<Float>([size]);
+
+    for _ in 0..100 {
+        let _ = a.add(&b);
+    }
+}
+
+/// 2D tensor addition
+fn benchmark_tensor_add_2d() {
+    let shape = [1024, 1024];  // 8MB per tensor
+    let a = Tensor.zeros<Float>(shape);
+    let b = Tensor.ones<Float>(shape);
+
+    for _ in 0..100 {
+        let _ = a.add(&b);
+    }
+}
+
+/// 3D tensor addition
+fn benchmark_tensor_add_3d() {
+    let shape = [64, 128, 128];  // ~8MB per tensor
+    let a = Tensor.zeros<Float>(shape);
+    let b = Tensor.ones<Float>(shape);
+
+    for _ in 0..100 {
+        let _ = a.add(&b);
+    }
+}
+
+/// Contiguous vs strided
+fn benchmark_tensor_add_strided() {
+    let shape = [1024, 1024];
+    let a = Tensor.zeros<Float>(shape);
+    let b = Tensor.ones<Float>(shape);
+
+    // Contiguous
+    for _ in 0..100 {
+        let _ = a.add(&b);
+    }
+
+    // Strided (transposed)
+    let a_t = a.transpose();
+    let b_t = b.transpose();
+
+    for _ in 0..100 {
+        let _ = a_t.add(&b_t);
+    }
+}
+
+/// In-place addition
+fn benchmark_tensor_add_inplace() {
+    let size = 1_000_000;
+    let mut a = Tensor.zeros<Float>([size]);
+    let b = Tensor.ones<Float>([size]);
+
+    for _ in 0..1_000 {
+        a.add_inplace(&b);
+    }
+}
+
+/// Scalar broadcast addition
+fn benchmark_tensor_add_scalar() {
+    let size = 1_000_000;
+    let a = Tensor.zeros<Float>([size]);
+
+    for _ in 0..1_000 {
+        let _ = a.add_scalar(1.0);
+    }
+}
+
+/// Broadcasting addition (different shapes)
+fn benchmark_tensor_add_broadcast() {
+    let a = Tensor.zeros<Float>([1000, 1000]);
+    let b = Tensor.ones<Float>([1, 1000]);  // Will broadcast
+
+    for _ in 0..100 {
+        let _ = a.add(&b);  // Broadcasting along first dimension
+    }
+}
+
+/// SIMD-explicit addition (Float32x8)
+fn benchmark_tensor_add_simd_f32() {
+    let size = 1_000_000;
+    let a = Tensor.zeros<Float32>([size]);
+    let b = Tensor.ones<Float32>([size]);
+
+    for _ in 0..1_000 {
+        let _ = a.simd_add.<8>(&b);  // AVX2: 8 floats at once
+    }
+}
+
+/// SIMD-explicit addition (Float64x4)
+fn benchmark_tensor_add_simd_f64() {
+    let size = 1_000_000;
+    let a = Tensor.zeros<Float>([size]);
+    let b = Tensor.ones<Float>([size]);
+
+    for _ in 0..1_000 {
+        let _ = a.simd_add.<4>(&b);  // AVX2: 4 doubles at once
+    }
+}
+
+/// Multi-threaded addition
+fn benchmark_tensor_add_parallel() {
+    let size = 10_000_000;
+    let a = Tensor.zeros<Float>([size]);
+    let b = Tensor.ones<Float>([size]);
+
+    for _ in 0..100 {
+        let _ = a.par_add(&b);  // Parallel addition
+    }
+}
+
+/// Different data types
+fn benchmark_tensor_add_int32() {
+    let size = 1_000_000;
+    let a = Tensor.zeros<Int32>([size]);
+    let b = Tensor.ones<Int32>([size]);
+
+    for _ in 0..1_000 {
+        let _ = a.add(&b);
+    }
+}
+
+fn benchmark_tensor_add_int64() {
+    let size = 1_000_000;
+    let a = Tensor.zeros<Int64>([size]);
+    let b = Tensor.ones<Int64>([size]);
+
+    for _ in 0..1_000 {
+        let _ = a.add(&b);
+    }
+}
+
+fn benchmark_tensor_add_float32() {
+    let size = 1_000_000;
+    let a = Tensor.zeros<Float32>([size]);
+    let b = Tensor.ones<Float32>([size]);
+
+    for _ in 0..1_000 {
+        let _ = a.add(&b);
+    }
+}
+
+/// Complex number addition
+fn benchmark_tensor_add_complex() {
+    let size = 500_000;
+    let a = Tensor.zeros<Complex<Float>>([size]);
+    let b = Tensor.ones<Complex<Float>>([size]);
+
+    for _ in 0..500 {
+        let _ = a.add(&b);
+    }
+}
+
+/// Fused operations (a + b + c)
+fn benchmark_tensor_add_fused() {
+    let size = 1_000_000;
+    let a = Tensor.zeros<Float>([size]);
+    let b = Tensor.ones<Float>([size]);
+    let c = Tensor.full<Float>([size], 2.0);
+
+    for _ in 0..500 {
+        // Fused: single pass over data
+        let _ = a.add(&b).add(&c);
+    }
+}
+
+/// With memory allocation tracking
+fn benchmark_tensor_add_alloc() {
+    let size = 1_000_000;
+
+    for _ in 0..100 {
+        let a = Tensor.zeros<Float>([size]);  // Allocation
+        let b = Tensor.ones<Float>([size]);   // Allocation
+        let c = a.add(&b);                       // Allocation for result
+        // All deallocated
+    }
+}
+
+/// Pre-allocated output
+fn benchmark_tensor_add_preallocated() {
+    let size = 1_000_000;
+    let a = Tensor.zeros<Float>([size]);
+    let b = Tensor.ones<Float>([size]);
+    let mut out = Tensor.zeros<Float>([size]);
+
+    for _ in 0..1_000 {
+        a.add_into(&b, &mut out);  // No allocation
+    }
+}
+
+/// GPU-style batched addition
+fn benchmark_tensor_add_batched() {
+    let batch_size = 64;
+    let size = 1024;
+
+    let a = Tensor.zeros<Float>([batch_size, size]);
+    let b = Tensor.ones<Float>([batch_size, size]);
+
+    for _ in 0..1_000 {
+        let _ = a.add(&b);
+    }
+}

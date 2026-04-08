@@ -1,0 +1,24 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, validated, zip_with
+// @description: Test Validated.zip_with type inference
+
+mount core.collections.list.{List};
+mount core.base.result.{Validated, Valid, Invalid};
+
+/// Test zip_with with both valid values
+@test
+fn test_zip_with_both_valid() {
+    let a: Validated<Text, Int> = Validated.valid(10);
+    let b: Validated<Text, Int> = Validated.valid(20);
+    let result = a.zip_with(b, |x, y| x + y);
+    match result {
+        Valid(sum) => assert_eq(sum, 30),
+        Invalid(_) => panic("Expected Valid"),
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

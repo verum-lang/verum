@@ -1,0 +1,89 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, infinite
+// @expected-error: E100
+
+/// Test for infinite type errors (occurs check failures).
+/// These examples create recursive type constraints that cannot be solved.
+
+fn main() {
+    // E403: Self-referential closure type
+    let f = |x| f(x);  // ERROR: f: T -> T where T = (T -> T), infinite
+
+    // E403: Unification with occurs check failure
+    fn id<T>(x: T) -> T { x }
+    let x = id(x);  // ERROR: x: T, but T = id(T), occurs check fails
+
+    // E403: Recursive function without explicit type
+    let rec = |n| {
+        if n == 0 { 0 }
+        else { rec(n - 1) }  // ERROR: rec type is infinite without annotation
+    };
+
+    // E403: Self-containing list type
+    let list_inf = [list_inf];  // ERROR: List<List<List<...>>> infinite type
+
+    // E403: Function returning itself (removed: typeof not supported)
+    // fn returns_self() -> typeof(returns_self) {  // ERROR: infinite type
+    //     returns_self
+    // }
+
+    // E403: Type variable unifies with containing type
+    fn bad<T>(x: T) -> T {
+        (x, x)  // ERROR: T = (T, T), occurs check fails
+    }
+
+    // E403: Indirect recursion
+    fn a<T>(x: T) -> T {
+        b(x)
+    }
+    fn b<T>(x: T) -> T {
+        a((x, x))  // ERROR: creates infinite type through mutual recursion
+    }
+
+    // E403: Self-referential struct field (without indirection)
+    // type Node is {
+    //     value: Int,
+    //     next: Node,  // ERROR: infinite type (needs Heap<Node> or Maybe<Node>)
+    // };
+
+    // E403: Type inference loop
+    fn apply<A, B>(f: fn(A) -> B, x: A) -> B {
+        f(x)
+    }
+    let result = apply(|x| apply(|y| y, x), 42);
+    // May trigger occurs check in complex scenarios
+
+    // E403: Polymorphic recursion without annotation
+    fn poly_rec(n: Int) {
+        if n > 0 {
+            poly_rec(n - 1);
+            poly_rec(f"{n}");  // ERROR: n is both Int and Text, inference fails
+        }
+    }
+
+    // E403: Generic type escaping its scope
+    fn escape<T>() -> T {
+        let inner = |x: T| x;
+        inner  // ERROR: T in return type but not constrained
+    }
+
+    // E403: Circular type alias (if allowed)
+    // type A = B;
+    // type B = A;  // ERROR: circular type definition
+
+    // E403: Self-application
+    fn self_apply<T>(f: fn(T) -> T) -> T {
+        f(f)  // ERROR: f: (T -> T), but passed as T, occurs check
+    }
+
+    // E403: Y combinator type
+    fn y<T>(f: fn(fn(T) -> T) -> fn(T) -> T) -> fn(T) -> T {
+        let g = |x| f(|n| (x(x))(n));
+        g(g)  // ERROR: infinite type in x(x)
+    }
+}
+
+// All examples above should produce E403 "Infinite type" error
+// These errors occur during unification when the occurs check fails

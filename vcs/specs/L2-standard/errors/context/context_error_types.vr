@@ -1,0 +1,457 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, context, throws, typed-errors, context-system
+// @description: Test ContextError<C> type usage with throws and error conversion
+
+/// Tests for typed context errors with throws clause integration.
+/// Per audit1.md Section 4.3.2: ContextError<C> for typed context errors.
+/// Spec: docs/audit1.md - Context Error Types recommendation
+/// Spec: grammar/verum.ebnf Section 2.4 - throws_clause with context
+
+// === Context Error Type Definition ===
+
+/// Generic context error type parameterized by context type
+/// This provides type-safe context errors integrated with throws clause
+type ContextError<C> is
+    | NotProvided { context_name: Text, scope: Text }
+    | AlreadyProvided { context_name: Text, existing_scope: Text }
+    | TypeMismatch { expected: Text, actual: Text }
+    | AcquisitionFailed { context_name: Text, reason: Text };
+
+implement<C> ContextError<C> {
+    fn not_provided() -> Self {
+        ContextError.NotProvided {
+            context_name: C.name,
+            scope: current_scope_name()
+        }
+    }
+
+    fn already_provided(existing: Text) -> Self {
+        ContextError.AlreadyProvided {
+            context_name: C.name,
+            existing_scope: existing
+        }
+    }
+
+    fn type_mismatch(expected: Text, actual: Text) -> Self {
+        ContextError.TypeMismatch { expected, actual }
+    }
+
+    fn acquisition_failed(reason: Text) -> Self {
+        ContextError.AcquisitionFailed {
+            context_name: C.name,
+            reason
+        }
+    }
+}
+
+fn current_scope_name() -> Text {
+    "main"  // Would be populated by runtime
+}
+
+implement<C> Display for ContextError<C> {
+    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
+        match self {
+            ContextError.NotProvided { context_name, scope } =>
+                formatter.write_str(f"Context '{context_name}' not provided in scope '{scope}'"),
+            ContextError.AlreadyProvided { context_name, existing_scope } =>
+                formatter.write_str(f"Context '{context_name}' already provided in scope '{existing_scope}'"),
+            ContextError.TypeMismatch { expected, actual } =>
+                formatter.write_str(f"Context type mismatch: expected '{expected}', got '{actual}'"),
+            ContextError.AcquisitionFailed { context_name, reason } =>
+                formatter.write_str(f"Failed to acquire context '{context_name}': {reason}")
+        }
+    }
+}
+
+// === Context Definitions ===
+
+/// Database context providing connection management
+context Database {
+    fn connect() -> Result<Connection, DbError>;
+    fn query(sql: &Text) -> Result<QueryResult, DbError>;
+    fn execute(sql: &Text) -> Result<Int, DbError>;
+    fn transaction() -> Result<Transaction, DbError>;
+}
+
+/// Logger context for structured logging
+context Logger {
+    fn info(message: &Text);
+    fn warn(message: &Text);
+    fn error(message: &Text);
+    fn with_context(key: &Text, value: &Text);
+}
+
+/// Configuration context for application settings
+context Config {
+    fn get(key: &Text) -> Maybe<Text>;
+    fn require(key: &Text) -> Result<Text, ConfigError>;
+}
+
+// === Supporting Types ===
+
+type Connection is {
+    id: Int,
+    active: Bool
+};
+
+type QueryResult is {
+    rows: List<Row>,
+    affected: Int
+};
+
+type Row is Map<Text, Text>;
+
+type Transaction is {
+    id: Int,
+    conn: &Connection
+};
+
+type DbError is
+    | ConnectionFailed(Text)
+    | QueryFailed(Text)
+    | TransactionFailed(Text)
+    | Timeout;
+
+type ConfigError is
+    | KeyNotFound(Text)
+    | InvalidValue { key: Text, reason: Text };
+
+// === Test 1: throws with ContextError<C> ===
+
+/// Function that declares it may fail due to missing Database context
+fn get_user(user_id: Int) throws(ContextError<Database> | DbError) -> User
+    using [Database]
+{
+    // If Database not provided, throws ContextError<Database>.NotProvided
+    let conn = Database.connect()?;
+
+    let result = Database.query(&f"SELECT * FROM users WHERE id = {user_id}")?;
+
+    if result.rows.is_empty() {
+        throw DbError.QueryFailed("User not found");
+    }
+
+    parse_user(&result.rows[0])
+}
+
+type User is {
+    id: Int,
+    name: Text,
+    email: Text
+};
+
+fn parse_user(row: &Row) -> User {
+    User {
+        id: row.get("id").unwrap_or("0").parse().unwrap_or(0),
+        name: row.get("name").unwrap_or("unknown").clone(),
+        email: row.get("email").unwrap_or("").clone()
+    }
+}
+
+// === Test 2: Multiple context error types ===
+
+/// Function using multiple contexts with typed errors for each
+fn process_request(request_id: Int) throws(ContextError<Database> | ContextError<Logger> | ContextError<Config> | ProcessError)
+    using [Database, Logger, Config]
+{
+    Logger.info(&f"Processing request {request_id}");
+
+    let timeout_opt = Config.get(&"request_timeout");
+
+    Logger.with_context(&"request_id", &request_id.to_text());
+
+    let user = get_user_for_request(request_id).unwrap_or(User { id: 0, name: "unknown", email: "" });
+    Logger.info(&f"Found user: {user.name}");
+}
+
+type ProcessError is
+    | Config(ConfigError)
+    | Database(DbError)
+    | NotFound(Text);
+
+fn get_user_for_request(request_id: Int) throws(ContextError<Database> | DbError) -> User
+    using [Database]
+{
+    get_user(request_id)?
+}
+
+// === Test 3: Error conversion from context errors ===
+
+/// Convert ContextError to unified application error
+type AppError is
+    | ContextMissing { name: Text }
+    | ContextConflict { name: Text }
+    | Database(DbError)
+    | Config(ConfigError)
+    | Internal(Text);
+
+implement<C> From<ContextError<C>> for AppError {
+    fn from(e: ContextError<C>) -> AppError {
+        match e {
+            ContextError.NotProvided { context_name, .. } =>
+                AppError.ContextMissing { name: context_name },
+            ContextError.AlreadyProvided { context_name, .. } =>
+                AppError.ContextConflict { name: context_name },
+            ContextError.TypeMismatch { expected, actual } =>
+                AppError.Internal(f"Type mismatch: {expected} vs {actual}"),
+            ContextError.AcquisitionFailed { context_name, reason } =>
+                AppError.Internal(f"{context_name}: {reason}")
+        }
+    }
+}
+
+implement From<DbError> for AppError {
+    fn from(e: DbError) -> AppError {
+        AppError.Database(e)
+    }
+}
+
+implement From<ConfigError> for AppError {
+    fn from(e: ConfigError) -> AppError {
+        AppError.Config(e)
+    }
+}
+
+/// Function using unified error type with automatic conversion
+fn unified_handler(user_id: Int) -> Result<User, AppError>
+    using [Database, Logger]
+{
+    Logger.info(&f"Handling user {user_id}");
+
+    // Simplified: get user and convert to AppError on failure
+    let user = get_user(user_id).unwrap_or(User { id: user_id, name: "default", email: "" });
+
+    Logger.info(&f"User found: {user.name}");
+    Ok(user)
+}
+
+// === Test 4: Context error recovery patterns ===
+
+/// Recover from missing context with fallback
+fn with_fallback_context() -> Int
+    using [Database]
+{
+    let result = Database.connect();
+    match result {
+        Ok(conn) => {
+            let qr = Database.query(&"SELECT COUNT(*) FROM users");
+            match qr {
+                Ok(r) => r.affected,
+                Err(_) => -1
+            }
+        },
+        Err(_) => 0
+    }
+}
+
+/// Attempt to acquire context dynamically
+fn try_with_database() -> Result<MockDatabase, AppError> {
+    // Would create actual database context
+    Ok(MockDatabase {})
+}
+
+type MockDatabase is ();
+
+implement Database for MockDatabase {
+    fn connect() -> Result<Connection, DbError> {
+        Ok(Connection { id: 1, active: true })
+    }
+
+    fn query(sql: &Text) -> Result<QueryResult, DbError> {
+        Ok(QueryResult { rows: List.new(), affected: 0 })
+    }
+
+    fn execute(sql: &Text) -> Result<Int, DbError> {
+        Ok(0)
+    }
+
+    fn transaction() -> Result<Transaction, DbError> {
+        Err(DbError.TransactionFailed("Not implemented"))
+    }
+}
+
+// === Test 5: Context error in async functions ===
+
+/// Async function with typed context errors
+async fn async_fetch_user(user_id: Int) throws(ContextError<Database> | DbError)
+    -> User using [Database]
+{
+    // Context errors can occur in async contexts too
+    let conn = Database.connect().await?;
+
+    let result = Database.query(&f"SELECT * FROM users WHERE id = {user_id}").await?;
+
+    if result.rows.is_empty() {
+        throw DbError.QueryFailed("User not found");
+    }
+
+    parse_user(&result.rows[0])
+}
+
+// === Test 6: Context error chaining ===
+
+type ChainedError<C> is {
+    context_error: ContextError<C>,
+    chain: List<Text>,
+    timestamp: Timestamp
+};
+
+type Timestamp is Int;
+
+implement<C> ChainedError<C> {
+    fn new(error: ContextError<C>) -> Self {
+        ChainedError {
+            context_error: error,
+            chain: List.new(),
+            timestamp: now()
+        }
+    }
+
+    fn with_context(mut self, context: Text) -> Self {
+        self.chain.push(context);
+        self
+    }
+}
+
+fn now() -> Timestamp { 0 }
+
+/// Function demonstrating error chaining with context errors
+fn chained_operation() -> Result<Int, ChainedError<Database>>
+    using [Database]
+{
+    let conn_result = Database.connect();
+    match conn_result {
+        Ok(conn) => {
+            let qr = Database.query("SELECT 1");
+            match qr {
+                Ok(r) => Ok(r.affected),
+                Err(_) => Err(ChainedError.new(ContextError.AcquisitionFailed {
+                    context_name: "Database",
+                    reason: "Query failed"
+                }).with_context("During database operation"))
+            }
+        },
+        Err(_) => Err(ChainedError.new(ContextError.AcquisitionFailed {
+            context_name: "Database",
+            reason: "Connection failed"
+        }).with_context("In chained_operation"))
+    }
+}
+
+// === Test 7: Protocol with context error bounds ===
+
+/// Protocol for repositories that may fail with context errors
+type Repository<T, E> is protocol {
+    fn find(id: Int) throws(ContextError<Database> | E) -> Maybe<T> using [Database];
+    fn save(item: &T) throws(ContextError<Database> | E) -> Int using [Database];
+    fn delete(id: Int) throws(ContextError<Database> | E) -> Bool using [Database];
+}
+
+type UserRepository is ();
+
+type UserRepoError is
+    | NotFound(Int)
+    | Duplicate(Text)
+    | ValidationFailed(Text);
+
+implement Repository<User, UserRepoError> for UserRepository {
+    fn find(id: Int) throws(ContextError<Database> | UserRepoError) -> Maybe<User>
+        using [Database]
+    {
+        let result = Database.query(&f"SELECT * FROM users WHERE id = {id}");
+        match result {
+            Ok(qr) => {
+                if qr.rows.is_empty() {
+                    None
+                } else {
+                    Some(parse_user(&qr.rows[0]))
+                }
+            },
+            Err(_) => None
+        }
+    }
+
+    fn save(user: &User) throws(ContextError<Database> | UserRepoError) -> Int
+        using [Database]
+    {
+        let sql = f"INSERT INTO users (name, email) VALUES ('{user.name}', '{user.email}')";
+        let result = Database.execute(&sql);
+        match result {
+            Ok(n) => n,
+            Err(_) => 0
+        }
+    }
+
+    fn delete(id: Int) throws(ContextError<Database> | UserRepoError) -> Bool
+        using [Database]
+    {
+        let result = Database.execute(&f"DELETE FROM users WHERE id = {id}");
+        match result {
+            Ok(affected) => affected > 0,
+            Err(_) => false
+        }
+    }
+}
+
+// === Verification Tests ===
+
+fn main() {
+    // Setup mock database context
+    provide Database = MockDatabase {};
+    provide Logger = MockLogger {};
+    provide Config = MockConfig {};
+
+    // Test 1: Basic context error handling
+    let user_result = get_user(1).unwrap_or(User { id: -1, name: "fallback", email: "" });
+    print(f"User result: {user_result}");
+
+    // Test 2: Unified error handling
+    let unified_result = unified_handler(42).unwrap_or(User { id: -1, name: "fallback", email: "" });
+    print(f"Unified result: {unified_result}");
+
+    // Test 3: Fallback context
+    let fallback_result = with_fallback_context();
+    print(f"Fallback result: {fallback_result}");
+
+    // Test 4: Repository pattern
+    let repo = UserRepository {};
+    let repo_result = repo.find(1).unwrap_or(None);
+    print(f"Repository result: {repo_result}");
+
+    print("All context_error_types tests passed");
+}
+
+// === Mock Implementations for Testing ===
+
+type MockLogger is ();
+
+implement Logger for MockLogger {
+    fn info(message: &Text) {
+        print(f"[INFO] {message}");
+    }
+
+    fn warn(message: &Text) {
+        print(f"[WARN] {message}");
+    }
+
+    fn error(message: &Text) {
+        print(f"[ERROR] {message}");
+    }
+
+    fn with_context(key: &Text, value: &Text) {
+    }
+}
+
+type MockConfig is ();
+
+implement Config for MockConfig {
+    fn get(key: &Text) -> Maybe<Text> {
+        Some("30000")
+    }
+
+    fn require(key: &Text) -> Result<Text, ConfigError> {
+        Ok("30000")
+    }
+}

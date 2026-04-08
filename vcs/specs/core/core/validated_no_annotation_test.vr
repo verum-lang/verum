@@ -1,0 +1,36 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, validated, inference
+// @description: Test Validated.validate_all type inference without explicit annotation
+
+// IMPORTANT: Import List BEFORE Validated because Validated depends on List
+// for its Invalid(List<E>) variant
+mount core.collections.list.{List};
+mount core.base.result.{Validated, Valid, Invalid};
+
+/// Test Validated.validate_all return type inference WITHOUT explicit type annotation
+@test
+fn test_validate_all_no_annotation() {
+    // Explicitly type the input list
+    let items: List<Validated<Text, Int>> = List.from([
+        Validated.valid(1),
+        Validated.valid(2),
+    ]);
+
+    // Call validate_all WITHOUT explicit return type annotation
+    let result = Validated.validate_all(items);
+
+    // Match on the result - the compiler should infer values: List<Int>
+    match result {
+        Valid(values) => {
+            // This should work if type inference is correct
+            assert_eq(values.len(), 2);
+        }
+        Invalid(_) => panic("Expected Valid"),
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,784 @@
+// =============================================================================
+// atomic_test.vr - Tests for atomic types and operations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: sync, atomic, concurrency, core
+// @description: Comprehensive tests for AtomicInt, AtomicBool, and memory ordering
+// =============================================================================
+
+// Mount atomic types and memory ordering
+mount core.sync.atomic.{
+    AtomicInt, AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64,
+    Ordering, Relaxed, Acquire, Release, AcqRel, SeqCst,
+    fence,
+};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: AtomicInt Construction and Basic Operations
+// =============================================================================
+
+@test
+fn test_atomicint_new() {
+    let atomic = AtomicInt.new(42);
+    assert_eq(atomic.load(Relaxed), 42);
+}
+
+@test
+fn test_atomicint_new_zero() {
+    let atomic = AtomicInt.new(0);
+    assert_eq(atomic.load(Relaxed), 0);
+}
+
+@test
+fn test_atomicint_new_negative() {
+    let atomic = AtomicInt.new(-100);
+    assert_eq(atomic.load(Relaxed), -100);
+}
+
+// =============================================================================
+// Section 2: AtomicInt Load/Store Operations
+// =============================================================================
+
+@test
+fn test_atomicint_load_relaxed() {
+    let atomic = AtomicInt.new(123);
+    assert_eq(atomic.load(Relaxed), 123);
+}
+
+@test
+fn test_atomicint_load_acquire() {
+    let atomic = AtomicInt.new(456);
+    assert_eq(atomic.load(Acquire), 456);
+}
+
+@test
+fn test_atomicint_load_seqcst() {
+    let atomic = AtomicInt.new(789);
+    assert_eq(atomic.load(SeqCst), 789);
+}
+
+@test
+fn test_atomicint_store_relaxed() {
+    let atomic = AtomicInt.new(0);
+    atomic.store(100, Relaxed);
+    assert_eq(atomic.load(Relaxed), 100);
+}
+
+@test
+fn test_atomicint_store_release() {
+    let atomic = AtomicInt.new(0);
+    atomic.store(200, Release);
+    assert_eq(atomic.load(Acquire), 200);
+}
+
+@test
+fn test_atomicint_store_seqcst() {
+    let atomic = AtomicInt.new(0);
+    atomic.store(300, SeqCst);
+    assert_eq(atomic.load(SeqCst), 300);
+}
+
+@test
+fn test_atomicint_multiple_stores() {
+    let atomic = AtomicInt.new(0);
+    atomic.store(1, Relaxed);
+    atomic.store(2, Relaxed);
+    atomic.store(3, Relaxed);
+    assert_eq(atomic.load(Relaxed), 3);
+}
+
+// =============================================================================
+// Section 3: AtomicInt Fetch Operations
+// =============================================================================
+
+@test
+fn test_atomicint_fetch_add() {
+    let atomic = AtomicInt.new(10);
+    let old = atomic.fetch_add(5, Relaxed);
+    assert_eq(old, 10);
+    assert_eq(atomic.load(Relaxed), 15);
+}
+
+@test
+fn test_atomicint_fetch_add_negative() {
+    let atomic = AtomicInt.new(10);
+    let old = atomic.fetch_add(-3, Relaxed);
+    assert_eq(old, 10);
+    assert_eq(atomic.load(Relaxed), 7);
+}
+
+@test
+fn test_atomicint_fetch_add_multiple() {
+    let atomic = AtomicInt.new(0);
+    atomic.fetch_add(1, Relaxed);
+    atomic.fetch_add(2, Relaxed);
+    atomic.fetch_add(3, Relaxed);
+    assert_eq(atomic.load(Relaxed), 6);
+}
+
+@test
+fn test_atomicint_fetch_sub() {
+    let atomic = AtomicInt.new(20);
+    let old = atomic.fetch_sub(5, Relaxed);
+    assert_eq(old, 20);
+    assert_eq(atomic.load(Relaxed), 15);
+}
+
+@test
+fn test_atomicint_fetch_sub_negative() {
+    let atomic = AtomicInt.new(10);
+    let old = atomic.fetch_sub(-5, Relaxed);
+    assert_eq(old, 10);
+    assert_eq(atomic.load(Relaxed), 15);
+}
+
+// =============================================================================
+// Section 4: AtomicBool Operations
+// =============================================================================
+
+@test
+fn test_atomicbool_new_false() {
+    let atomic = AtomicBool.new(false);
+    assert_eq(atomic.load(Relaxed), false);
+}
+
+@test
+fn test_atomicbool_new_true() {
+    let atomic = AtomicBool.new(true);
+    assert_eq(atomic.load(Relaxed), true);
+}
+
+@test
+fn test_atomicbool_store() {
+    let atomic = AtomicBool.new(false);
+    atomic.store(true, Relaxed);
+    assert_eq(atomic.load(Relaxed), true);
+}
+
+@test
+fn test_atomicbool_store_false() {
+    let atomic = AtomicBool.new(true);
+    atomic.store(false, Relaxed);
+    assert_eq(atomic.load(Relaxed), false);
+}
+
+@test
+fn test_atomicbool_toggle() {
+    let atomic = AtomicBool.new(false);
+    atomic.store(true, SeqCst);
+    assert_eq(atomic.load(SeqCst), true);
+    atomic.store(false, SeqCst);
+    assert_eq(atomic.load(SeqCst), false);
+}
+
+// =============================================================================
+// Section 5: Ordering Tests
+// =============================================================================
+
+@test
+fn test_ordering_relaxed() {
+    // Relaxed provides no synchronization, just atomicity
+    let a = AtomicInt.new(0);
+    a.store(1, Relaxed);
+    assert_eq(a.load(Relaxed), 1);
+}
+
+@test
+fn test_ordering_acquire_release() {
+    // Acquire-Release pair for synchronization
+    let a = AtomicInt.new(0);
+    a.store(42, Release);
+    let v = a.load(Acquire);
+    assert_eq(v, 42);
+}
+
+@test
+fn test_ordering_seqcst() {
+    // Sequential consistency - strongest ordering
+    let a = AtomicInt.new(0);
+    let b = AtomicInt.new(0);
+
+    a.store(1, SeqCst);
+    b.store(2, SeqCst);
+
+    // With SeqCst, there's a total order
+    let va = a.load(SeqCst);
+    let vb = b.load(SeqCst);
+    assert_eq(va, 1);
+    assert_eq(vb, 2);
+}
+
+// =============================================================================
+// Section 6: Edge Cases
+// =============================================================================
+
+@test
+fn test_atomicint_max_value() {
+    let max = 9223372036854775807; // Int max (64-bit signed)
+    let atomic = AtomicInt.new(max);
+    assert_eq(atomic.load(Relaxed), max);
+}
+
+@test
+fn test_atomicint_min_value() {
+    let min = -9223372036854775808; // Int min (64-bit signed)
+    let atomic = AtomicInt.new(min);
+    assert_eq(atomic.load(Relaxed), min);
+}
+
+// =============================================================================
+// Section 7: Concurrent Simulation (Single Thread)
+// =============================================================================
+
+@test
+fn test_atomicint_counter_simulation() {
+    // Simulate incrementing counter multiple times
+    let counter = AtomicInt.new(0);
+
+    for i in 0..100 {
+        counter.fetch_add(1, Relaxed);
+    }
+
+    assert_eq(counter.load(Relaxed), 100);
+}
+
+@test
+fn test_atomicbool_flag_simulation() {
+    // Simulate flag operations
+    let flag = AtomicBool.new(false);
+
+    // Set flag
+    flag.store(true, Release);
+
+    // Check flag (acquire semantics)
+    assert(flag.load(Acquire));
+
+    // Clear flag
+    flag.store(false, Release);
+
+    assert(!flag.load(Acquire));
+}
+
+// =============================================================================
+// Section 8: AtomicInt Swap and Compare-Exchange
+// =============================================================================
+
+@test
+fn test_atomicint_swap() {
+    let atomic = AtomicInt.new(42);
+    let old = atomic.swap(100, SeqCst);
+    assert_eq(old, 42);
+    assert_eq(atomic.load(SeqCst), 100);
+}
+
+@test
+fn test_atomicint_swap_zero() {
+    let atomic = AtomicInt.new(0);
+    let old = atomic.swap(1, Relaxed);
+    assert_eq(old, 0);
+    assert_eq(atomic.load(Relaxed), 1);
+}
+
+@test
+fn test_atomicint_compare_exchange_success() {
+    let atomic = AtomicInt.new(42);
+    let result = atomic.compare_exchange(42, 100, SeqCst, Relaxed);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+    assert_eq(atomic.load(SeqCst), 100);
+}
+
+@test
+fn test_atomicint_compare_exchange_failure() {
+    let atomic = AtomicInt.new(42);
+    let result = atomic.compare_exchange(99, 100, SeqCst, Relaxed);
+    assert(result.is_err());
+    assert_eq(result.unwrap_err(), 42); // Returns actual value
+    assert_eq(atomic.load(SeqCst), 42); // Unchanged
+}
+
+@test
+fn test_atomicint_compare_exchange_retry_loop() {
+    let atomic = AtomicInt.new(0);
+
+    // Simulate CAS loop: increment from 0 to 1
+    let mut current = atomic.load(Relaxed);
+    loop {
+        let result = atomic.compare_exchange(current, current + 1, SeqCst, Relaxed);
+        match result {
+            Ok(_) => { break; },
+            Err(actual) => { current = actual; },
+        }
+    }
+    assert_eq(atomic.load(Relaxed), 1);
+}
+
+@test
+fn test_atomicint_increment() {
+    let atomic = AtomicInt.new(0);
+    let new_val = atomic.increment(SeqCst);
+    assert_eq(new_val, 1);
+    assert_eq(atomic.load(SeqCst), 1);
+}
+
+@test
+fn test_atomicint_decrement() {
+    let atomic = AtomicInt.new(10);
+    let new_val = atomic.decrement(SeqCst);
+    assert_eq(new_val, 9);
+    assert_eq(atomic.load(SeqCst), 9);
+}
+
+@test
+fn test_atomicint_default() {
+    let atomic = AtomicInt.default();
+    assert_eq(atomic.load(Relaxed), 0);
+}
+
+// =============================================================================
+// Section 9: AtomicU8 (AtomicByte) Tests
+// =============================================================================
+
+@test
+fn test_atomicu8_new() {
+    let atomic = AtomicU8.new(0 as Byte);
+    assert_eq(atomic.load(Relaxed), 0 as Byte);
+}
+
+@test
+fn test_atomicu8_store_load() {
+    let atomic = AtomicU8.new(0 as Byte);
+    atomic.store(255 as Byte, SeqCst);
+    assert_eq(atomic.load(SeqCst), 255 as Byte);
+}
+
+@test
+fn test_atomicu8_fetch_add() {
+    let atomic = AtomicU8.new(10 as Byte);
+    let old = atomic.fetch_add(5 as Byte, Relaxed);
+    assert_eq(old, 10 as Byte);
+    assert_eq(atomic.load(Relaxed), 15 as Byte);
+}
+
+@test
+fn test_atomicu8_fetch_sub() {
+    let atomic = AtomicU8.new(20 as Byte);
+    let old = atomic.fetch_sub(5 as Byte, Relaxed);
+    assert_eq(old, 20 as Byte);
+    assert_eq(atomic.load(Relaxed), 15 as Byte);
+}
+
+@test
+fn test_atomicu8_swap() {
+    let atomic = AtomicU8.new(42 as Byte);
+    let old = atomic.swap(100 as Byte, SeqCst);
+    assert_eq(old, 42 as Byte);
+    assert_eq(atomic.load(SeqCst), 100 as Byte);
+}
+
+@test
+fn test_atomicu8_compare_exchange_success() {
+    let atomic = AtomicU8.new(42 as Byte);
+    let result = atomic.compare_exchange(42 as Byte, 100 as Byte, SeqCst, Relaxed);
+    assert(result.is_ok());
+    assert_eq(atomic.load(SeqCst), 100 as Byte);
+}
+
+@test
+fn test_atomicu8_compare_exchange_failure() {
+    let atomic = AtomicU8.new(42 as Byte);
+    let result = atomic.compare_exchange(99 as Byte, 100 as Byte, SeqCst, Relaxed);
+    assert(result.is_err());
+    assert_eq(atomic.load(SeqCst), 42 as Byte);
+}
+
+@test
+fn test_atomicu8_fetch_or() {
+    let atomic = AtomicU8.new(0b1010 as Byte);
+    let old = atomic.fetch_or(0b0101 as Byte, Relaxed);
+    assert_eq(old, 0b1010 as Byte);
+    assert_eq(atomic.load(Relaxed), 0b1111 as Byte);
+}
+
+@test
+fn test_atomicu8_fetch_and() {
+    let atomic = AtomicU8.new(0b1111 as Byte);
+    let old = atomic.fetch_and(0b1010 as Byte, Relaxed);
+    assert_eq(old, 0b1111 as Byte);
+    assert_eq(atomic.load(Relaxed), 0b1010 as Byte);
+}
+
+// =============================================================================
+// Section 10: AtomicU16 Tests
+// =============================================================================
+
+@test
+fn test_atomicu16_new() {
+    let atomic = AtomicU16.new(0 as UInt16);
+    assert_eq(atomic.load(Relaxed), 0 as UInt16);
+}
+
+@test
+fn test_atomicu16_store_load() {
+    let atomic = AtomicU16.new(0 as UInt16);
+    atomic.store(65535 as UInt16, SeqCst);
+    assert_eq(atomic.load(SeqCst), 65535 as UInt16);
+}
+
+@test
+fn test_atomicu16_fetch_add() {
+    let atomic = AtomicU16.new(100 as UInt16);
+    let old = atomic.fetch_add(50 as UInt16, Relaxed);
+    assert_eq(old, 100 as UInt16);
+    assert_eq(atomic.load(Relaxed), 150 as UInt16);
+}
+
+@test
+fn test_atomicu16_fetch_sub() {
+    let atomic = AtomicU16.new(200 as UInt16);
+    let old = atomic.fetch_sub(50 as UInt16, Relaxed);
+    assert_eq(old, 200 as UInt16);
+    assert_eq(atomic.load(Relaxed), 150 as UInt16);
+}
+
+@test
+fn test_atomicu16_swap() {
+    let atomic = AtomicU16.new(1000 as UInt16);
+    let old = atomic.swap(2000 as UInt16, SeqCst);
+    assert_eq(old, 1000 as UInt16);
+    assert_eq(atomic.load(SeqCst), 2000 as UInt16);
+}
+
+@test
+fn test_atomicu16_compare_exchange_success() {
+    let atomic = AtomicU16.new(500 as UInt16);
+    let result = atomic.compare_exchange(500 as UInt16, 600 as UInt16, SeqCst, Relaxed);
+    assert(result.is_ok());
+    assert_eq(atomic.load(SeqCst), 600 as UInt16);
+}
+
+@test
+fn test_atomicu16_fetch_or() {
+    let atomic = AtomicU16.new(0xFF00 as UInt16);
+    let old = atomic.fetch_or(0x00FF as UInt16, Relaxed);
+    assert_eq(old, 0xFF00 as UInt16);
+    assert_eq(atomic.load(Relaxed), 0xFFFF as UInt16);
+}
+
+@test
+fn test_atomicu16_fetch_and() {
+    let atomic = AtomicU16.new(0xFFFF as UInt16);
+    let old = atomic.fetch_and(0xFF00 as UInt16, Relaxed);
+    assert_eq(old, 0xFFFF as UInt16);
+    assert_eq(atomic.load(Relaxed), 0xFF00 as UInt16);
+}
+
+// =============================================================================
+// Section 11: AtomicU32 Tests
+// =============================================================================
+
+@test
+fn test_atomicu32_new() {
+    let atomic = AtomicU32.new(0 as UInt32);
+    assert_eq(atomic.load(Relaxed), 0 as UInt32);
+}
+
+@test
+fn test_atomicu32_store_load() {
+    let atomic = AtomicU32.new(0 as UInt32);
+    atomic.store(0xDEAD as UInt32, SeqCst);
+    assert_eq(atomic.load(SeqCst), 0xDEAD as UInt32);
+}
+
+@test
+fn test_atomicu32_fetch_add() {
+    let atomic = AtomicU32.new(1000 as UInt32);
+    let old = atomic.fetch_add(500 as UInt32, Relaxed);
+    assert_eq(old, 1000 as UInt32);
+    assert_eq(atomic.load(Relaxed), 1500 as UInt32);
+}
+
+@test
+fn test_atomicu32_fetch_sub() {
+    let atomic = AtomicU32.new(1000 as UInt32);
+    let old = atomic.fetch_sub(300 as UInt32, Relaxed);
+    assert_eq(old, 1000 as UInt32);
+    assert_eq(atomic.load(Relaxed), 700 as UInt32);
+}
+
+@test
+fn test_atomicu32_swap() {
+    let atomic = AtomicU32.new(0xBEEF as UInt32);
+    let old = atomic.swap(0xCAFE as UInt32, SeqCst);
+    assert_eq(old, 0xBEEF as UInt32);
+    assert_eq(atomic.load(SeqCst), 0xCAFE as UInt32);
+}
+
+@test
+fn test_atomicu32_compare_exchange_success() {
+    let atomic = AtomicU32.new(42 as UInt32);
+    let result = atomic.compare_exchange(42 as UInt32, 100 as UInt32, SeqCst, Relaxed);
+    assert(result.is_ok());
+    assert_eq(atomic.load(SeqCst), 100 as UInt32);
+}
+
+@test
+fn test_atomicu32_compare_exchange_failure() {
+    let atomic = AtomicU32.new(42 as UInt32);
+    let result = atomic.compare_exchange(99 as UInt32, 100 as UInt32, SeqCst, Relaxed);
+    assert(result.is_err());
+    assert_eq(atomic.load(SeqCst), 42 as UInt32);
+}
+
+@test
+fn test_atomicu32_fetch_or() {
+    let atomic = AtomicU32.new(0xFF000000 as UInt32);
+    let old = atomic.fetch_or(0x00FF0000 as UInt32, Relaxed);
+    assert_eq(old, 0xFF000000 as UInt32);
+    assert_eq(atomic.load(Relaxed), 0xFFFF0000 as UInt32);
+}
+
+@test
+fn test_atomicu32_fetch_and() {
+    let atomic = AtomicU32.new(0xFFFFFFFF as UInt32);
+    let old = atomic.fetch_and(0x0000FFFF as UInt32, Relaxed);
+    assert_eq(old, 0xFFFFFFFF as UInt32);
+    assert_eq(atomic.load(Relaxed), 0x0000FFFF as UInt32);
+}
+
+// =============================================================================
+// Section 12: AtomicU64 Tests
+// =============================================================================
+
+@test
+fn test_atomicu64_new() {
+    let atomic = AtomicU64.new(0 as UInt64);
+    assert_eq(atomic.load(Relaxed), 0 as UInt64);
+}
+
+@test
+fn test_atomicu64_store_load() {
+    let atomic = AtomicU64.new(0 as UInt64);
+    atomic.store(0xDEADBEEF as UInt64, SeqCst);
+    assert_eq(atomic.load(SeqCst), 0xDEADBEEF as UInt64);
+}
+
+@test
+fn test_atomicu64_fetch_add() {
+    let atomic = AtomicU64.new(1000 as UInt64);
+    let old = atomic.fetch_add(500 as UInt64, Relaxed);
+    assert_eq(old, 1000 as UInt64);
+    assert_eq(atomic.load(Relaxed), 1500 as UInt64);
+}
+
+@test
+fn test_atomicu64_fetch_sub() {
+    let atomic = AtomicU64.new(1000 as UInt64);
+    let old = atomic.fetch_sub(300 as UInt64, Relaxed);
+    assert_eq(old, 1000 as UInt64);
+    assert_eq(atomic.load(Relaxed), 700 as UInt64);
+}
+
+@test
+fn test_atomicu64_swap() {
+    let atomic = AtomicU64.new(0xCAFEBABE as UInt64);
+    let old = atomic.swap(0xFEEDFACE as UInt64, SeqCst);
+    assert_eq(old, 0xCAFEBABE as UInt64);
+    assert_eq(atomic.load(SeqCst), 0xFEEDFACE as UInt64);
+}
+
+@test
+fn test_atomicu64_compare_exchange_success() {
+    let atomic = AtomicU64.new(42 as UInt64);
+    let result = atomic.compare_exchange(42 as UInt64, 100 as UInt64, SeqCst, Relaxed);
+    assert(result.is_ok());
+    assert_eq(atomic.load(SeqCst), 100 as UInt64);
+}
+
+@test
+fn test_atomicu64_compare_exchange_failure() {
+    let atomic = AtomicU64.new(42 as UInt64);
+    let result = atomic.compare_exchange(99 as UInt64, 100 as UInt64, SeqCst, Relaxed);
+    assert(result.is_err());
+    assert_eq(atomic.load(SeqCst), 42 as UInt64);
+}
+
+@test
+fn test_atomicu64_fetch_or() {
+    let atomic = AtomicU64.new(0xFF00000000000000 as UInt64);
+    let old = atomic.fetch_or(0x00FF000000000000 as UInt64, Relaxed);
+    assert_eq(old, 0xFF00000000000000 as UInt64);
+    assert_eq(atomic.load(Relaxed), 0xFFFF000000000000 as UInt64);
+}
+
+@test
+fn test_atomicu64_fetch_and() {
+    let atomic = AtomicU64.new(0xFFFFFFFFFFFFFFFF as UInt64);
+    let old = atomic.fetch_and(0x00000000FFFFFFFF as UInt64, Relaxed);
+    assert_eq(old, 0xFFFFFFFFFFFFFFFF as UInt64);
+    assert_eq(atomic.load(Relaxed), 0x00000000FFFFFFFF as UInt64);
+}
+
+// =============================================================================
+// Section 13: AtomicBool Swap and Compare-Exchange
+// =============================================================================
+
+@test
+fn test_atomicbool_swap_true_to_false() {
+    let atomic = AtomicBool.new(true);
+    let old = atomic.swap(false, SeqCst);
+    assert_eq(old, true);
+    assert_eq(atomic.load(SeqCst), false);
+}
+
+@test
+fn test_atomicbool_swap_false_to_true() {
+    let atomic = AtomicBool.new(false);
+    let old = atomic.swap(true, SeqCst);
+    assert_eq(old, false);
+    assert_eq(atomic.load(SeqCst), true);
+}
+
+@test
+fn test_atomicbool_compare_exchange_success() {
+    let atomic = AtomicBool.new(false);
+    let result = atomic.compare_exchange(false, true, SeqCst, Relaxed);
+    assert(result.is_ok());
+    assert_eq(atomic.load(SeqCst), true);
+}
+
+@test
+fn test_atomicbool_compare_exchange_failure() {
+    let atomic = AtomicBool.new(true);
+    let result = atomic.compare_exchange(false, true, SeqCst, Relaxed);
+    assert(result.is_err());
+    assert_eq(atomic.load(SeqCst), true); // Unchanged
+}
+
+// =============================================================================
+// Section 14: Fence and Ordering Variant Tests
+// =============================================================================
+
+@test
+fn test_fence_seqcst() {
+    // Fence should not panic
+    fence(SeqCst);
+}
+
+@test
+fn test_fence_acquire() {
+    fence(Acquire);
+}
+
+@test
+fn test_fence_release() {
+    fence(Release);
+}
+
+@test
+fn test_fence_acqrel() {
+    fence(AcqRel);
+}
+
+@test
+fn test_ordering_variants_exist() {
+    let r = Relaxed;
+    let a = Acquire;
+    let rel = Release;
+    let ar = AcqRel;
+    let sc = SeqCst;
+
+    assert(r is Ordering.Relaxed);
+    assert(a is Ordering.Acquire);
+    assert(rel is Ordering.Release);
+    assert(ar is Ordering.AcqRel);
+    assert(sc is Ordering.SeqCst);
+}
+
+@test
+fn test_ordering_match() {
+    let ord = AcqRel;
+    let val = match ord {
+        Ordering.Relaxed => 0,
+        Ordering.Acquire => 1,
+        Ordering.Release => 2,
+        Ordering.AcqRel => 3,
+        Ordering.SeqCst => 4,
+    };
+    assert_eq(val, 3);
+}
+
+// =============================================================================
+// Section 15: AtomicInt Advanced Patterns
+// =============================================================================
+
+@test
+fn test_atomicint_cas_loop_increment() {
+    let counter = AtomicInt.new(0);
+
+    // Increment 10 times via CAS loop
+    for _ in 0..10 {
+        let mut current = counter.load(Relaxed);
+        loop {
+            let result = counter.compare_exchange(current, current + 1, SeqCst, Relaxed);
+            match result {
+                Ok(_) => { break; },
+                Err(actual) => { current = actual; },
+            }
+        }
+    }
+
+    assert_eq(counter.load(SeqCst), 10);
+}
+
+@test
+fn test_atomicint_swap_chain() {
+    let atomic = AtomicInt.new(1);
+    let v1 = atomic.swap(2, SeqCst);
+    let v2 = atomic.swap(3, SeqCst);
+    let v3 = atomic.swap(4, SeqCst);
+    assert_eq(v1, 1);
+    assert_eq(v2, 2);
+    assert_eq(v3, 3);
+    assert_eq(atomic.load(SeqCst), 4);
+}
+
+@test
+fn test_atomicint_mixed_operations() {
+    let atomic = AtomicInt.new(0);
+    atomic.fetch_add(10, SeqCst);       // 0 + 10 = 10
+    atomic.fetch_sub(3, SeqCst);        // 10 - 3 = 7
+    let old = atomic.swap(100, SeqCst); // swap 7 -> 100
+    assert_eq(old, 7);
+    assert_eq(atomic.load(SeqCst), 100);
+}
+
+@test
+fn test_atomicu32_counter_simulation() {
+    let counter = AtomicU32.new(0 as UInt32);
+
+    for _ in 0..50 {
+        counter.fetch_add(1 as UInt32, Relaxed);
+    }
+
+    assert_eq(counter.load(Relaxed), 50 as UInt32);
+}
+
+@test
+fn test_atomicu64_large_values() {
+    let atomic = AtomicU64.new(0xFFFFFFFF00000000 as UInt64);
+    let old = atomic.fetch_add(0x00000000FFFFFFFF as UInt64, SeqCst);
+    assert_eq(old, 0xFFFFFFFF00000000 as UInt64);
+    assert_eq(atomic.load(SeqCst), 0xFFFFFFFFFFFFFFFF as UInt64);
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

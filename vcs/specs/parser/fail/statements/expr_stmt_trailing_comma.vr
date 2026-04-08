@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, expression, comma, error
+// @description: Test expression statement with trailing comma
+// @expected-error: E048
+
+fn test() {
+    foo(),;
+}

@@ -1,0 +1,242 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, closures, edge-cases
+
+// Test empty closure
+fn test_empty_closure() {
+    let empty = || {};
+    let empty_expr = || ();
+}
+
+// Test single expression closure (no braces)
+fn test_single_expr_closure() {
+    let single = |x| x;
+    let doubled = |x| x * 2;
+}
+
+// Test single expression with return type (requires block body)
+fn test_single_expr_with_return_type() {
+    let typed = |x| -> Int { x * 2 };
+}
+
+// Test closure with unit return
+fn test_unit_return() {
+    let unit_return = || -> () { };
+    let unit_implicit = || { side_effect(); };
+}
+
+// Test closure returning closure
+fn test_closure_returning_closure() {
+    let curried = |x| { |y| x + y };
+}
+
+// Test deeply nested closures
+fn test_deeply_nested() {
+    // Use unit parameter to avoid || ambiguity at expression start
+    let deep = |_: ()| { |_: ()| { |_: ()| { |_: ()| { |_: ()| innermost() } } } };
+}
+
+// Test closure with complex body
+fn test_complex_body() {
+    let complex = |x| {
+        let a = compute(x);
+        let b = transform(a);
+        finalize(b)
+    };
+}
+
+// Test closure with early return
+fn test_early_return() {
+    let early_return = |x| {
+        if x < 0 {
+            return -1;
+        }
+        x * 2
+    };
+}
+
+// Test closure with match
+fn test_closure_with_match() {
+    let matcher = |x| match x {
+        Maybe.Some(v) => v,
+        Maybe.None => 0,
+    };
+}
+
+// Test closure with if expression
+fn test_closure_with_if() {
+    let conditional = |x| if x > 0 { "positive" } else { "non-positive" };
+}
+
+// Test closure with for loop (no value returned)
+fn test_closure_with_loop() {
+    let looper = |items| {
+        for item in items {
+            process(item);
+        }
+    };
+}
+
+// Test closure with try expression
+fn test_closure_with_try() {
+    let fallible = |x| try {
+        risky(x)?
+    } recover {
+        e => handle(e)
+    };
+}
+
+// Test closure capturing by reference
+fn test_capturing_by_reference() {
+    let value = 42;
+    let captured_ref = |_: ()| { &value };
+}
+
+// Test closure capturing mutably
+fn test_capturing_mutably() {
+    let mut counter = 0;
+    let captured_mut = |_: ()| { counter += 1; counter };
+}
+
+// Test closure with move semantics (if supported)
+fn test_move_semantics() {
+    let captured = 42;
+    let moved = move |x| x + captured;
+}
+
+// Test closure as method argument
+fn test_closure_as_method_arg() {
+    let items = [1, 2, 3, 4, 5];
+    items.map(|x| x * 2);
+    items.filter(|x| x > 0);
+    items.fold(0, |acc, x| acc + x);
+}
+
+// Test closure with tuple destructuring parameter
+fn test_destructuring_param() {
+    let destructure = |(a, b)| a + b;
+}
+
+// Test closure with pattern matching parameter
+fn test_pattern_matching_param() {
+    let pattern_param = |Maybe.Some(x)| x;
+}
+
+// Test closure in complex expression
+fn test_complex_expression() {
+    let result = (|x| x * 2)(21);
+    let chained = (|x| { |y| x + y })(1)(2);
+}
+
+// Test closure stored in struct
+fn test_closure_in_struct() {
+    let handler = Handler {
+        on_click: |event| handle_click(event),
+        on_hover: |event| handle_hover(event),
+    };
+}
+
+// Test closure in match arm
+fn test_closure_in_match() {
+    let mode = Mode.Add;
+    let processor = match mode {
+        Mode.Add => |a, b| a + b,
+        Mode.Sub => |a, b| a - b,
+        Mode.Mul => |a, b| a * b,
+    };
+}
+
+// Test closure with async (if supported)
+fn test_async_closure() {
+    let async_closure = async |x| {
+        compute(x).await
+    };
+}
+
+// Test closure passed to higher-order function
+fn apply<F: Fn(Int) -> Int>(f: F, x: Int) -> Int {
+    f(x)
+}
+
+fn test_higher_order_apply() {
+    let result = apply(|x| x * 2, 21);
+}
+
+// Test closure returning Result
+fn test_closure_returning_result() {
+    let fallible_closure = |x| -> Result<Int, Error> {
+        if x < 0 {
+            Result.Err(Error.new("negative"))
+        } else {
+            Result.Ok(x * 2)
+        }
+    };
+}
+
+// Test closure with pipeline in body
+fn test_pipeline_in_body() {
+    let piped = |data| {
+        data |> transform |> filter |> collect
+    };
+}
+
+// Test closure with method chaining
+fn test_method_chaining() {
+    let chained_methods = |s| {
+        s.trim().to_lower().replace(" ", "_")
+    };
+}
+
+// Test immediately invoked closure
+fn test_iife() {
+    let value = (|_: ()| { let a = compute_a(); let b = compute_b(); a + b })();
+}
+
+// Test closure with complex types
+fn test_complex_types() {
+    let typed_complex = |map: Map<Text, List<Int>>| -> Maybe<Int> {
+        map.get("key")?.first()
+    };
+}
+
+// Test closure with variadic-like tuple
+fn test_variadic_tuple() {
+    let variadic = |args: (Int, Int, Int)| {
+        let (a, b, c) = args;
+        a + b + c
+    };
+}
+
+// Test closure in array literal
+fn test_closure_array() {
+    let closures = [
+        |x| x + 1,
+        |x| x * 2,
+        |x| x - 1,
+    ];
+}
+
+// Test closure with generic inference
+fn test_generic_inference() {
+    let generic_infer = |container| container.first();
+}
+
+// Test nested closures with captures
+fn test_nested_captures() {
+    let outer_val = 10;
+    let inner_val = 20;
+    let nested_capture = |_: ()| { |_: ()| { outer_val + inner_val } };
+}
+
+// Test closure as return value
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+// Test closure with Bottom type (diverges)
+fn test_diverging() {
+    let diverging = |x| -> Bottom {
+        panic("always panics")
+    };
+}

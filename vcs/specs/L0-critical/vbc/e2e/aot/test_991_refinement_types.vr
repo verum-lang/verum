@@ -1,0 +1,156 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: refinement, types, predicates, constraints
+// @description: Test refinement type basics — Int constraints, refined parameters, multiple predicates
+
+fn abs_value(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+fn clamp_positive(x: Int) -> Int {
+    if x <= 0 { 1 } else { x }
+}
+
+fn safe_divide(a: Int, b: Int) -> Int {
+    // Precondition: b must not be zero
+    if b == 0 { return -1; }
+    a / b
+}
+
+fn bounded_index(list: List<Int>, idx: Int) -> Int {
+    if idx < 0 || idx >= list.len() {
+        return -1;
+    }
+    list[idx]
+}
+
+fn test_positive_constraint() -> Int {
+    // Values that satisfy x > 0
+    let a = clamp_positive(5);
+    let b = clamp_positive(-3);
+    let c = clamp_positive(0);
+
+    if !is_positive(a) {
+        print("FAIL: clamp_positive(5) should be positive");
+        return 1;
+    }
+    if !is_positive(b) {
+        print("FAIL: clamp_positive(-3) should be positive");
+        return 1;
+    }
+    if !is_positive(c) {
+        print("FAIL: clamp_positive(0) should be positive");
+        return 1;
+    }
+    print("  positive_constraint: OK");
+    0
+}
+
+fn test_nonzero_division() -> Int {
+    let r1 = safe_divide(10, 2);
+    if r1 != 5 {
+        print(f"FAIL: 10/2 expected 5, got {r1}");
+        return 1;
+    }
+
+    let r2 = safe_divide(10, 0);
+    if r2 != -1 {
+        print(f"FAIL: 10/0 expected -1, got {r2}");
+        return 1;
+    }
+
+    let r3 = safe_divide(100, 7);
+    if r3 != 14 {
+        print(f"FAIL: 100/7 expected 14, got {r3}");
+        return 1;
+    }
+    print("  nonzero_division: OK");
+    0
+}
+
+fn test_multiple_predicates() -> Int {
+    // Simulate value in range [1, 100]
+    let values = [0, 1, 50, 100, 101];
+    let mut in_range_count = 0;
+
+    let mut i = 0;
+    while i < values.len() {
+        let v = values[i];
+        if v >= 1 && v <= 100 {
+            in_range_count = in_range_count + 1;
+        }
+        i = i + 1;
+    }
+
+    if in_range_count != 3 {
+        print(f"FAIL: expected 3 in-range values, got {in_range_count}");
+        return 1;
+    }
+    print("  multiple_predicates: OK");
+    0
+}
+
+fn test_bounded_access() -> Int {
+    let data = [10, 20, 30, 40, 50];
+
+    let v0 = bounded_index(data, 0);
+    if v0 != 10 {
+        print(f"FAIL: data[0] expected 10, got {v0}");
+        return 1;
+    }
+
+    let v4 = bounded_index(data, 4);
+    if v4 != 50 {
+        print(f"FAIL: data[4] expected 50, got {v4}");
+        return 1;
+    }
+
+    let v_neg = bounded_index(data, -1);
+    if v_neg != -1 {
+        print(f"FAIL: data[-1] expected -1, got {v_neg}");
+        return 1;
+    }
+
+    let v_oob = bounded_index(data, 5);
+    if v_oob != -1 {
+        print(f"FAIL: data[5] expected -1, got {v_oob}");
+        return 1;
+    }
+    print("  bounded_access: OK");
+    0
+}
+
+fn test_abs_refinement() -> Int {
+    // abs_value always returns >= 0
+    let vals = [-100, -1, 0, 1, 100];
+    let mut i = 0;
+    while i < vals.len() {
+        let a = abs_value(vals[i]);
+        if a < 0 {
+            print(f"FAIL: abs_value({vals[i]}) returned {a}");
+            return 1;
+        }
+        i = i + 1;
+    }
+    print("  abs_refinement: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_positive_constraint();
+    failures = failures + test_nonzero_division();
+    failures = failures + test_multiple_predicates();
+    failures = failures + test_bounded_access();
+    failures = failures + test_abs_refinement();
+
+    if failures == 0 {
+        print("All refinement type tests passed");
+    }
+    failures
+}

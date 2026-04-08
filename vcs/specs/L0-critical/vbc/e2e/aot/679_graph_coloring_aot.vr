@@ -1,0 +1,215 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, graph, coloring, greedy
+// @timeout: 30000
+
+// Graph coloring: greedy coloring of small graphs
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+fn get_bit(val: Int, pos: Int) -> Int { (val / pow2(pos)) % 2 }
+
+// Adjacency matrix for up to 8 nodes: adj[i] is bitset of neighbors
+// adj stored in Arr8, adj[i] = bitset
+
+// Check if edge exists
+fn has_edge(adj: Arr8, u: Int, v: Int) -> Int {
+    get_bit(get8(adj, u), v)
+}
+
+// Add undirected edge
+fn add_edge(adj: Arr8, u: Int, v: Int) -> Arr8 {
+    let au = get8(adj, u);
+    let av = get8(adj, v);
+    let new_au = if get_bit(au, v) == 0 { au + pow2(v) } else { au };
+    let new_av = if get_bit(av, u) == 0 { av + pow2(u) } else { av };
+    let tmp = set8(adj, u, new_au);
+    set8(tmp, v, new_av)
+}
+
+// Greedy coloring: assign smallest color not used by neighbors
+// Colors stored in Arr8 (color[i] = color of node i, 0-based, -1 = uncolored)
+fn greedy_color(adj: Arr8, n: Int) -> Arr8 {
+    let mut colors = Arr8 { v0: 0-1, v1: 0-1, v2: 0-1, v3: 0-1, v4: 0-1, v5: 0-1, v6: 0-1, v7: 0-1 };
+    let mut node = 0;
+    while node < n {
+        // Find colors used by neighbors
+        let mut used = 0; // bitset of used colors
+        let mut j = 0;
+        while j < n {
+            if has_edge(adj, node, j) == 1 {
+                let c = get8(colors, j);
+                if c >= 0 {
+                    used = if get_bit(used, c) == 0 { used + pow2(c) } else { used };
+                }
+            }
+            j = j + 1;
+        }
+        // Find smallest unused color
+        let mut c = 0;
+        let mut found = 0;
+        while found == 0 {
+            if get_bit(used, c) == 0 { found = 1; }
+            else { c = c + 1; }
+        }
+        colors = set8(colors, node, c);
+        node = node + 1;
+    }
+    colors
+}
+
+// Verify coloring is valid
+fn is_valid_coloring(adj: Arr8, colors: Arr8, n: Int) -> Int {
+    let mut valid = 1;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if has_edge(adj, i, j) == 1 {
+                if get8(colors, i) == get8(colors, j) { valid = 0; }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    valid
+}
+
+// Count distinct colors used
+fn count_colors(colors: Arr8, n: Int) -> Int {
+    let mut max_c = 0;
+    let mut i = 0;
+    while i < n {
+        let c = get8(colors, i);
+        if c > max_c { max_c = c; }
+        i = i + 1;
+    }
+    max_c + 1
+}
+
+// Degree of a node
+fn degree(adj: Arr8, node: Int) -> Int {
+    let bits = get8(adj, node);
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        count = count + get_bit(bits, i);
+        i = i + 1;
+    }
+    count
+}
+
+fn test_triangle() -> Int {
+    // K3: complete graph on 3 vertices
+    let mut adj = zeros();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 1, 2);
+    adj = add_edge(adj, 0, 2);
+    let colors = greedy_color(adj, 3);
+    assert_eq(is_valid_coloring(adj, colors, 3), 1);
+    assert_eq(count_colors(colors, 3), 3); // K3 needs 3 colors
+    1
+}
+
+fn test_bipartite() -> Int {
+    // Path 0-1-2-3 (bipartite, 2-colorable)
+    let mut adj = zeros();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 1, 2);
+    adj = add_edge(adj, 2, 3);
+    let colors = greedy_color(adj, 4);
+    assert_eq(is_valid_coloring(adj, colors, 4), 1);
+    assert_eq(count_colors(colors, 4), 2); // path is 2-colorable
+    1
+}
+
+fn test_cycle_4() -> Int {
+    // Cycle on 4 vertices: 0-1-2-3-0 (even cycle, 2-colorable)
+    let mut adj = zeros();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 1, 2);
+    adj = add_edge(adj, 2, 3);
+    adj = add_edge(adj, 3, 0);
+    let colors = greedy_color(adj, 4);
+    assert_eq(is_valid_coloring(adj, colors, 4), 1);
+    assert_eq(count_colors(colors, 4), 2);
+    1
+}
+
+fn test_star() -> Int {
+    // Star: center (0) connected to 1,2,3,4
+    let mut adj = zeros();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 0, 2);
+    adj = add_edge(adj, 0, 3);
+    adj = add_edge(adj, 0, 4);
+    assert_eq(degree(adj, 0), 4);
+    assert_eq(degree(adj, 1), 1);
+    let colors = greedy_color(adj, 5);
+    assert_eq(is_valid_coloring(adj, colors, 5), 1);
+    assert_eq(count_colors(colors, 5), 2); // star is bipartite
+    1
+}
+
+fn test_petersen_sub() -> Int {
+    // Small dense graph: K4 minus one edge
+    // 0-1, 0-2, 0-3, 1-2, 1-3 (missing 2-3)
+    let mut adj = zeros();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 0, 2);
+    adj = add_edge(adj, 0, 3);
+    adj = add_edge(adj, 1, 2);
+    adj = add_edge(adj, 1, 3);
+    let colors = greedy_color(adj, 4);
+    assert_eq(is_valid_coloring(adj, colors, 4), 1);
+    // Chromatic number = 3 (0,1,2 form K3)
+    assert_eq(count_colors(colors, 4), 3);
+    1
+}
+
+fn test_independent() -> Int {
+    // No edges: all nodes same color
+    let adj = zeros();
+    let colors = greedy_color(adj, 5);
+    assert_eq(is_valid_coloring(adj, colors, 5), 1);
+    assert_eq(count_colors(colors, 5), 1);
+    1
+}
+
+fn main() -> Int {
+    test_triangle();
+    test_bipartite();
+    test_cycle_4();
+    test_star();
+    test_petersen_sub();
+    test_independent();
+    print("[OK] 679_graph_coloring_aot");
+    0
+}

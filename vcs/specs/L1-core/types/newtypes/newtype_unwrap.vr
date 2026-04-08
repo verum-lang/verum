@@ -1,0 +1,57 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, newtypes, unwrap, extraction
+
+/// Test for unwrapping newtypes to access the inner value.
+/// Newtypes can be destructured or have their inner value extracted.
+
+// Define newtypes for testing
+type UserId is (Int);
+type Email is (Text);
+type Temperature is (Float);
+type Enabled is (Bool);
+
+fn main() {
+    // Create newtype instances
+    let id: UserId = UserId(42);
+    let email: Email = Email("test@example.com");
+    let temp: Temperature = Temperature(98.6);
+    let enabled: Enabled = Enabled(true);
+
+    // Destructuring assignment to extract inner value
+    let UserId(raw_id) = id;
+    let Email(raw_email) = email;
+    let Temperature(raw_temp) = temp;
+    let Enabled(raw_enabled) = enabled;
+
+    // Verify extracted values
+    assert(raw_id == 42);
+    assert(raw_email == "test@example.com");
+    assert(raw_temp == 98.6);
+    assert(raw_enabled == true);
+
+    // Pattern matching on newtypes
+    let result: Int = match id {
+        UserId(n) if n > 0 => n * 2,
+        UserId(_) => 0,
+    };
+    assert(result == 84);
+
+    // Destructuring in function parameters
+    fn process_id(UserId(n): UserId) -> Int {
+        n + 100
+    }
+    assert(process_id(id) == 142);
+
+    // Destructuring in let with type annotation
+    let UserId(extracted): UserId = UserId(999);
+    assert(extracted == 999);
+
+    // Multiple nested destructuring
+    fn get_user_score(UserId(uid): UserId, Temperature(t): Temperature) -> Float {
+        uid as Float + t
+    }
+    let score = get_user_score(UserId(10), Temperature(5.5));
+    assert(score == 15.5);
+}

@@ -1,0 +1,147 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, reference-pattern, borrowing
+// @description: Reference pattern exhaustiveness checking via dereferencing
+
+type Maybe<T> is None | Some(T);
+type List<T> is Nil | Cons(T, Heap<List<T>>);
+
+// Basic match through dereference
+fn ref_match(r: &Int) -> Int {
+    match *r {
+        0 => 0,
+        1 => 1,
+        x => x
+    }
+}
+
+// Mutable reference - match through dereference
+fn mut_ref_match(r: &mut Int) -> Int {
+    match *r {
+        0 => 0,
+        x => x + 1
+    }
+}
+
+// Reference to enum - match through dereference
+fn ref_maybe_match(r: &Maybe<Int>) -> Int {
+    match *r {
+        None => 0,
+        Some(x) => x
+    }
+}
+
+// Mutable reference to enum
+fn mut_maybe_set(r: &mut Maybe<Int>, value: Int) {
+    match *r {
+        None => { *r = Some(value); },
+        Some(_) => ()
+    }
+}
+
+// Nested reference patterns - dereference both levels
+fn nested_ref(r: &Maybe<&Int>) -> Int {
+    match *r {
+        None => 0,
+        Some(inner) => *inner
+    }
+}
+
+// Reference in tuple pattern - dereference then match
+fn ref_tuple(r: &(Int, Int)) -> Int {
+    match *r {
+        (0, y) => y,
+        (x, 0) => x,
+        (x, y) => x + y
+    }
+}
+
+// Match through dereference with guard
+fn ref_with_guard(r: &Int) -> Text {
+    match *r {
+        x if x < 0 => "negative",
+        0 => "zero",
+        x if x > 0 => "positive",
+        _ => "unreachable"
+    }
+}
+
+// Reference to list - use Clone to avoid moving
+fn ref_list_head<T: Clone>(r: &List<T>) -> Maybe<T> {
+    match *r {
+        Nil => None,
+        Cons(ref x, _) => Some(x.clone())
+    }
+}
+
+// Modify through mutable reference
+fn increment_if_positive(r: &mut Int) {
+    let val = *r;
+    if val > 0 {
+        *r = val + 1;
+    }
+}
+
+// Reference pattern with record
+type Point is { x: Int, y: Int };
+
+fn ref_point_match(r: &Point) -> Int {
+    // Dereference before matching
+    match *r {
+        Point { x: 0, y: 0 } => 0,
+        Point { x, y: 0 } => x,
+        Point { x: 0, y } => y,
+        Point { x, y } => x + y
+    }
+}
+
+// Match on tuple of dereferenced values
+fn compare_refs(a: &Int, b: &Int) -> Int {
+    let av = *a;
+    let bv = *b;
+    if av < bv { -1 }
+    else if av == bv { 0 }
+    else { 1 }
+}
+
+// Or-pattern with dereference
+fn ref_or_pattern(r: &Int) -> Text {
+    match *r {
+        0 | 1 => "binary",
+        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 => "digit",
+        _ => "other"
+    }
+}
+
+// Process reference without moving
+fn process_maybe_ref<T: Clone>(r: &Maybe<T>) -> Maybe<T> {
+    match *r {
+        None => None,
+        Some(ref x) => Some(x.clone())
+    }
+}
+
+fn main() -> Int {
+    let n = 42;
+    assert(ref_match(&n) == 42);
+    assert(ref_match(&0) == 0);
+
+    let mut m = 5;
+    assert(mut_ref_match(&mut m) == 6);
+
+    let opt = Some(10);
+    assert(ref_maybe_match(&opt) == 10);
+    assert(ref_maybe_match(&None) == 0);
+
+    let p = Point { x: 3, y: 4 };
+    assert(ref_point_match(&p) == 7);
+
+    let origin = Point { x: 0, y: 0 };
+    assert(ref_point_match(&origin) == 0);
+
+    assert(ref_with_guard(&5) == "positive");
+    assert(ref_with_guard(&-3) == "negative");
+    assert(ref_with_guard(&0) == "zero");
+
+    0
+}

@@ -1,0 +1,257 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, list, collections, iteration
+// @timeout: 10000
+// @description: List operations must produce identical results and iteration order across tiers
+
+/// List operations differential test.
+/// push/pop/insert/remove/sort, for-in iteration order, index access bounds.
+
+fn main() -> Int {
+    test_push_pop();
+    test_insert_remove();
+    test_sort();
+    test_iteration_order();
+    test_index_access();
+    test_list_transformations();
+    test_nested_lists();
+    0
+}
+
+/// Push and pop operations
+fn test_push_pop() {
+    print("=== Push/Pop ===");
+
+    let mut list: List<Int> = [];
+    print(f"empty len = {list.len()}");
+
+    // Push sequence
+    list.push(10);
+    list.push(20);
+    list.push(30);
+    list.push(40);
+    list.push(50);
+    print(f"after 5 pushes: {list}");
+    print(f"len = {list.len()}");
+
+    // Pop sequence
+    let a = list.pop();
+    let b = list.pop();
+    print(f"pop 1 = {a}");
+    print(f"pop 2 = {b}");
+    print(f"after 2 pops: {list}");
+    print(f"len = {list.len()}");
+
+    // Push after pop
+    list.push(60);
+    list.push(70);
+    print(f"after push again: {list}");
+}
+
+/// Insert and remove at specific positions
+fn test_insert_remove() {
+    print("\n=== Insert/Remove ===");
+
+    let mut list = [10, 20, 30, 40, 50];
+    print(f"initial: {list}");
+
+    // Insert at beginning
+    list.insert(0, 5);
+    print(f"insert 5 at 0: {list}");
+
+    // Insert in middle
+    list.insert(3, 25);
+    print(f"insert 25 at 3: {list}");
+
+    // Insert at end
+    list.insert(list.len(), 60);
+    print(f"insert 60 at end: {list}");
+
+    // Remove from beginning
+    list.remove(0);
+    print(f"remove at 0: {list}");
+
+    // Remove from middle
+    list.remove(2);
+    print(f"remove at 2: {list}");
+
+    // Remove from end
+    list.remove(list.len() - 1);
+    print(f"remove at end: {list}");
+
+    print(f"final len = {list.len()}");
+}
+
+/// Sort operations
+fn test_sort() {
+    print("\n=== Sort ===");
+
+    // Integer sort
+    let mut nums = [5, 3, 8, 1, 9, 2, 7, 4, 6, 0];
+    nums.sort();
+    print(f"sorted ints: {nums}");
+
+    // Already sorted
+    let mut sorted = [1, 2, 3, 4, 5];
+    sorted.sort();
+    print(f"already sorted: {sorted}");
+
+    // Reverse sorted
+    let mut rev = [5, 4, 3, 2, 1];
+    rev.sort();
+    print(f"reverse sorted: {rev}");
+
+    // Duplicates
+    let mut dups = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+    dups.sort();
+    print(f"with duplicates: {dups}");
+
+    // Single element
+    let mut single = [42];
+    single.sort();
+    print(f"single: {single}");
+
+    // Empty
+    let mut empty: List<Int> = [];
+    empty.sort();
+    print(f"empty: {empty}");
+
+    // Negative numbers
+    let mut negatives = [3, -1, 4, -5, 2, -3, 0];
+    negatives.sort();
+    print(f"with negatives: {negatives}");
+}
+
+/// For-in iteration order must be deterministic
+fn test_iteration_order() {
+    print("\n=== Iteration Order ===");
+
+    let list = [10, 20, 30, 40, 50];
+
+    // Forward iteration
+    let mut forward: List<Int> = [];
+    for item in list {
+        forward.push(item);
+    }
+    print(f"forward: {forward}");
+
+    // Iteration with index tracking
+    let mut indexed: List<Text> = [];
+    let mut idx = 0;
+    for item in list {
+        indexed.push(f"{idx}:{item}");
+        idx = idx + 1;
+    }
+    print(f"indexed: {indexed}");
+
+    // Range iteration
+    let mut range_items: List<Int> = [];
+    for i in 0..5 {
+        range_items.push(i);
+    }
+    print(f"range 0..5: {range_items}");
+
+    // Nested iteration
+    let outer = [1, 2, 3];
+    let inner = [10, 20];
+    let mut products: List<Int> = [];
+    for a in outer {
+        for b in inner {
+            products.push(a * b);
+        }
+    }
+    print(f"nested products: {products}");
+}
+
+/// Index access and boundary behavior
+fn test_index_access() {
+    print("\n=== Index Access ===");
+
+    let list = [100, 200, 300, 400, 500];
+
+    // Direct access
+    print(f"list[0] = {list[0]}");
+    print(f"list[2] = {list[2]}");
+    print(f"list[4] = {list[4]}");
+
+    // Computed index
+    let i = 3;
+    print(f"list[{i}] = {list[i]}");
+
+    // Index in expressions
+    let sum = list[0] + list[1] + list[2];
+    print(f"sum of first 3 = {sum}");
+
+    // Mutable index assignment
+    let mut mlist = [1, 2, 3, 4, 5];
+    mlist[0] = 10;
+    mlist[4] = 50;
+    print(f"after assignment: {mlist}");
+
+    // First and last
+    print(f"first = {list[0]}");
+    print(f"last = {list[list.len() - 1]}");
+}
+
+/// List transformation operations
+fn test_list_transformations() {
+    print("\n=== Transformations ===");
+
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Map
+    let doubled = nums.map(|n| n * 2);
+    print(f"doubled: {doubled}");
+
+    // Filter
+    let evens = nums.filter(|n| n % 2 == 0);
+    print(f"evens: {evens}");
+
+    // Filter + map
+    let even_squares = nums.filter(|n| n % 2 == 0).map(|n| n * n);
+    print(f"even squares: {even_squares}");
+
+    // Fold
+    let sum = nums.fold(0, |acc, n| acc + n);
+    print(f"sum = {sum}");
+
+    let product = nums.fold(1, |acc, n| acc * n);
+    print(f"product = {product}");
+
+    // Reverse
+    let mut rev_list = [1, 2, 3, 4, 5];
+    rev_list.reverse();
+    print(f"reversed: {rev_list}");
+
+    // Contains
+    print(f"contains 5 = {nums.contains(5)}");
+    print(f"contains 11 = {nums.contains(11)}");
+}
+
+/// Nested list operations
+fn test_nested_lists() {
+    print("\n=== Nested Lists ===");
+
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    print(f"matrix[0] = {matrix[0]}");
+    print(f"matrix[1][1] = {matrix[1][1]}");
+    print(f"matrix[2][2] = {matrix[2][2]}");
+
+    // Flatten manually
+    let mut flat: List<Int> = [];
+    for row in matrix {
+        for val in row {
+            flat.push(val);
+        }
+    }
+    print(f"flattened: {flat}");
+
+    // Row sums
+    let mut row_sums: List<Int> = [];
+    for row in matrix {
+        let s = row.fold(0, |acc, n| acc + n);
+        row_sums.push(s);
+    }
+    print(f"row sums: {row_sums}");
+}

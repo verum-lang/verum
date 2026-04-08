@@ -1,0 +1,153 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, async, await
+
+// Await expressions
+
+// Basic await
+async fn fetch_data() -> Data {
+    let response = http.get(url).await;
+    response.json().await
+}
+
+// Await with ?
+async fn fetch_or_error() -> Result<Data, Error> {
+    let response = http.get(url).await?;
+    let data = response.json().await?;
+    Result.Ok(data)
+}
+
+// Chained await
+async fn process() -> Result<Output, Error> {
+    let res = fetch_data()
+        .await?
+        .transform()
+        .validate()
+        .await?;
+    Result.Ok(res)
+}
+
+// Await in let binding
+async fn example() {
+    let data = fetch().await;
+    let processed = process(data).await;
+    let saved = save(processed).await;
+}
+
+// Await in expressions
+async fn combined() -> Int {
+    fetch_a().await + fetch_b().await
+}
+
+// Await in conditional
+async fn conditional() -> Data {
+    if use_cache {
+        cache.get(key).await
+    } else {
+        database.query(key).await
+    }
+}
+
+// Await in match
+async fn match_await(source: Source) -> Data {
+    match source {
+        Source.Cache => cache.get().await,
+        Source.Database => db.query().await,
+        Source.Remote => http.fetch().await,
+    }
+}
+
+// Await in loop
+async fn poll_until_ready() -> Data {
+    loop {
+        let status = check_status().await;
+        if status.is_ready() {
+            break status.data().await
+        }
+        sleep(100).await;
+    }
+}
+
+// Multiple awaits in sequence
+async fn pipeline() -> Result<Output, Error> {
+    let step1 = operation1().await?;
+    let step2 = operation2(step1).await?;
+    let step3 = operation3(step2).await?;
+    Result.Ok(step3)
+}
+
+// Parallel await with join
+async fn parallel() -> (DataA, DataB) {
+    let (a, b) = join(
+        fetch_a(),
+        fetch_b(),
+    ).await;
+    (a, b)
+}
+
+// Await with timeout
+async fn with_timeout() -> Result<Data, Error> {
+    let result = timeout(
+        Duration.from_secs(5),
+        fetch_data(),
+    ).await?;
+    Result.Ok(result)
+}
+
+// Await on method call
+async fn method_await() -> Data {
+    let client = HttpClient.new();
+    client.get(url).await
+}
+
+// Await on field access
+async fn field_await() -> Data {
+    self.fetcher.fetch().await
+}
+
+// Await in closure
+fn test_await_in_closure() {
+    let async_closure = async |url| {
+        http.get(url).await
+    };
+}
+
+// Await with error handling
+async fn with_recover() -> Data {
+    try {
+        fetch().await
+    } recover |error| {
+        fallback().await
+    }
+}
+
+// Await with finally
+async fn with_finally() -> Result<Data, Error> {
+    try {
+        open_connection().await?;
+        let data = query().await?;
+        Result.Ok(data)
+    } finally {
+        close_connection().await
+    }
+}
+
+// Nested async blocks
+async fn nested() {
+    let outer_data = fetch_outer().await;
+
+    let inner_result = async {
+        let inner_data = fetch_inner().await;
+        process(inner_data).await
+    }.await;
+
+    combine(outer_data, inner_result).await
+}
+
+// Await on spawned task
+async fn spawn_and_await() -> Data {
+    let handle = spawn { compute_heavy() };
+    // Do other work...
+    handle.await
+}

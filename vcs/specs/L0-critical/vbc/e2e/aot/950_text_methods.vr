@@ -1,0 +1,66 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: strings, text, methods, find, slice, trim, split, replace
+// Exercises Text method suite: find, slice, contains, starts_with, ends_with,
+// trim, to_upper, to_lower, replace, repeat, split, byte_at
+
+fn main() -> Int {
+    let s = "Hello, World!";
+
+    // find / index_of — returns Maybe<Int>
+    let pos = match s.find("World") { Some(i) => i, None => -1, };
+    if (pos != 7) { print(f"FAIL: find={pos}"); return 1; }
+    let pos2 = match s.find("xyz") { Some(i) => i, None => -1, };
+    if (pos2 != -1) { print(f"FAIL: find2={pos2}"); return 1; }
+
+    // slice
+    let sub = s.slice(0, 5);
+    if (sub != "Hello") { print(f"FAIL: slice={sub}"); return 1; }
+    let sub2 = s.slice(7, 12);
+    if (sub2 != "World") { print(f"FAIL: slice2={sub2}"); return 1; }
+
+    // contains
+    if (!s.contains("World")) { print("FAIL: contains"); return 1; }
+    if (s.contains("xyz")) { print("FAIL: !contains"); return 1; }
+
+    // starts_with / ends_with
+    if (!s.starts_with("Hello")) { print("FAIL: starts_with"); return 1; }
+    if (!s.ends_with("!")) { print("FAIL: ends_with"); return 1; }
+    if (s.starts_with("xyz")) { print("FAIL: !starts_with"); return 1; }
+
+    // trim
+    let trimmed = "  hello  ".trim();
+    if (trimmed != "hello") { print(f"FAIL: trim={trimmed}"); return 1; }
+
+    // to_upper / to_lower
+    let upper = "hello".to_upper();
+    if (upper != "HELLO") { print(f"FAIL: upper={upper}"); return 1; }
+    let lower = "HELLO".to_lower();
+    if (lower != "hello") { print(f"FAIL: lower={lower}"); return 1; }
+
+    // replace
+    let replaced = "aXbXc".replace("X", "-");
+    if (replaced != "a-b-c") { print(f"FAIL: replace={replaced}"); return 1; }
+
+    // repeat
+    let rep = "ab".repeat(3);
+    if (rep != "ababab") { print(f"FAIL: repeat={rep}"); return 1; }
+
+    // split
+    let parts = "a,b,c".split(",");
+    if (parts.len() != 3) { print(f"FAIL: split len={parts.len()}"); return 1; }
+    if (parts[0] != "a") { return 1; }
+    if (parts[1] != "b") { return 1; }
+    if (parts[2] != "c") { return 1; }
+
+    // byte_at / char_at — depend on as_bytes()/chars() which need Byte/Char runtime support
+    // These methods are tested separately when Byte/Char runtime is complete
+
+    // chained operations
+    let result = "  Hello World  ".trim().to_upper();
+    if (result != "HELLO WORLD") { print(f"FAIL: chain={result}"); return 1; }
+
+    print("950_text_methods: PASS");
+    0
+}

@@ -1,0 +1,17 @@
+fn main() -> Int {
+    let mut m = Map.new();
+    m.insert(10, 100);
+    m.insert(20, 200);
+    m.insert(30, 300);
+    print(f"len={m.len()}");
+
+    let old = m.remove(20);
+    print(f"len after remove(20)={m.len()}");
+    if (m.len() != 2) {
+        print(f"FAIL: len={m.len()}, expected 2");
+        return 1;
+    }
+
+    print("972_map_remove: PASS");
+    0
+}

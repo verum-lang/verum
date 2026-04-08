@@ -1,0 +1,1291 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, expressions, async, select, concurrency
+// @timeout: 5000
+// @expect: pass
+//
+// Comprehensive tests for the select expression syntax.
+// Select expressions race multiple async branches and execute
+// the first one to complete.
+//
+// Syntax: select [biased] { pattern = future.await [if guard] => result, ... }
+// Spec: docs/detailed/05-syntax-grammar.md Section 2.12.1
+// Grammar: grammar/verum.ebnf (select_expr)
+
+// === Stub Type Definitions for Parse Testing ===
+// These minimal definitions allow type checking to proceed.
+// L0 tests focus on parser correctness, not type semantics.
+
+type Data is { value: Int };
+type Response is { status: Int, body: Maybe<Data> };
+type Rows is { count: Int };
+type Instant is { epoch: Int };
+type Coordinator is { id: Int };
+type Action is Stop | Pause | Process(Data) | Sent | Received(Data) | ReportStatus;
+type Command is Shutdown | Pause;
+type Output is { result: Int };
+type TimeoutError is ();
+
+// Duration with static constructor methods
+type Duration is { millis: Int };
+implement Duration {
+    fn from_secs(secs: Int) -> Duration { Duration { millis: secs * 1000 } }
+    fn from_millis(ms: Int) -> Duration { Duration { millis: ms } }
+}
+
+// Stream with next method
+type Stream<T> is { items: List<T> };
+implement<T> Stream<T> {
+    async fn next(&self) -> Maybe<T> { None }
+}
+
+// DataSource with fetch method
+type DataSource is { url: Text };
+implement DataSource {
+    async fn fetch(&self) -> Data { Data { value: 0 } }
+}
+
+// CancellationToken with cancelled method
+type CancellationToken is { cancelled_flag: Bool };
+implement CancellationToken {
+    async fn cancelled(&self) { }
+}
+
+type Mode is Fast | Slow;
+type Control is Stop | Flush;
+type Message is Data(Data) | Empty;
+type Level is Warn | Error | Info;
+
+type Error is
+    | Timeout
+    | MaxRetries
+    | Cancelled
+    | AllFailed
+    | MaxRetriesExceeded
+    | NoSourceAvailable;
+
+type DbError is
+    | Timeout
+    | Connection(Text);
+
+type HttpError is
+    | Timeout
+    | NetworkError
+    | Request(Error);
+
+type FetchError is
+    | Timeout
+    | NetworkError;
+
+type Maybe<T> is
+    | None
+    | Some(T);
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// HttpClient for http.get stub
+type HttpClient is { _marker: Int };
+implement HttpClient {
+    async fn get(&self, url: Text) -> Result<Response, Error> { Ok(Response { status: 200, body: None }) }
+    fn new() -> HttpClient { HttpClient { _marker: 0 } }
+}
+
+// Cache stub
+type Cache is { _marker: Int };
+implement Cache {
+    async fn fetch(&self, key: Text) -> Data { Data { value: 0 } }
+    async fn get(&self, key: Text) -> Maybe<Data> { None }
+    fn new() -> Cache { Cache { _marker: 0 } }
+}
+
+// Client stub
+type Client is { _marker: Int };
+implement Client {
+    fn connect(&self) -> Client { Client { _marker: 0 } }
+    async fn fetch(&self, id: Int) -> Data { Data { value: 0 } }
+    fn new() -> Client { Client { _marker: 0 } }
+}
+
+// Backup stub
+type Backup is { _marker: Int };
+implement Backup {
+    async fn get_cached(&self) -> Data { Data { value: 0 } }
+    fn new() -> Backup { Backup { _marker: 0 } }
+}
+
+// Sender stub
+type Sender<T> is { _marker: Int };
+implement<T> Sender<T> {
+    async fn send(&self, data: T) { }
+    fn new() -> Sender<T> { Sender { _marker: 0 } }
+}
+
+// Receiver stub
+type Receiver<T> is { _marker: Int };
+implement<T> Receiver<T> {
+    async fn recv(&self) -> T { panic("stub") }
+    fn new() -> Receiver<T> { Receiver { _marker: 0 } }
+}
+
+// Channel stub
+type Channel<T> is { _marker: Int };
+implement<T> Channel<T> {
+    async fn recv(&self) -> T { panic("stub") }
+    fn new() -> Channel<T> { Channel { _marker: 0 } }
+}
+
+// Listener stub
+type Listener is { _marker: Int };
+implement Listener {
+    async fn accept(&self) -> Request { Request { _marker: 0 } }
+    fn new() -> Listener { Listener { _marker: 0 } }
+}
+
+// Request stub
+type Request is { _marker: Int };
+
+// Timer interval stub
+type Interval is { _marker: Int };
+implement Interval {
+    async fn tick(&self) { }
+    fn new() -> Interval { Interval { _marker: 0 } }
+}
+
+// Source stubs
+type Source is { name: Text };
+implement Source {
+    async fn fetch(&self) -> Data { Data { value: 0 } }
+    fn is_available(&self) -> Bool { true }
+    fn is_healthy(&self) -> Bool { true }
+    async fn get(&self) -> Data { Data { value: 0 } }
+}
+
+// Config and user stubs for guard tests
+type Config is { enabled: Bool };
+implement Config {
+    fn is_enabled(&self) -> Bool { self.enabled }
+}
+
+type User is { name: Text };
+implement User {
+    fn has_permission(&self, perm: Text) -> Bool { true }
+}
+
+type WorkResult is { done: Bool };
+implement WorkResult {
+    fn is_done(&self) -> Bool { self.done }
+}
+
+// DatabaseConnection type
+type DatabaseConnection is { _marker: Int };
+implement DatabaseConnection {
+    async fn query(&self, sql: Text) -> Result<Rows, DbError> { Ok(Rows { count: 0 }) }
+    fn new() -> DatabaseConnection { DatabaseConnection { _marker: 0 } }
+}
+
+// === Stub Context Definitions ===
+context Logger {
+    fn log(level: Level, msg: Text);
+    fn info(msg: Text);
+    fn warn(msg: Text);
+    fn debug(msg: Text);
+    fn error(msg: Text);
+}
+
+context Metrics {
+    fn record(name: Text, value: Int);
+    fn increment(name: Text);
+}
+
+context async Database {
+    fn primary() -> DatabaseConnection;
+    fn replica() -> DatabaseConnection;
+}
+
+context async Shutdown {
+    async fn signal();
+}
+
+// === Stub Function Definitions ===
+async fn fetch() -> Result<Data, Error> { Ok(Data { value: 0 }) }
+async fn process(d: Data) -> Data { d }
+async fn long_work() -> Data { Data { value: 0 } }
+async fn sleep(duration: Duration) { }
+async fn flush_buffers() { }
+async fn report_metrics() { }
+async fn long_running_computation() -> Data { Data { value: 0 } }
+async fn expensive_computation() -> Data { Data { value: 0 } }
+async fn perform_operation() -> Result<Data, Error> { Ok(Data { value: 0 }) }
+async fn do_work() -> WorkResult { WorkResult { done: false } }
+async fn cleanup() { }
+
+// Additional stub functions
+async fn fetch_from_primary() -> Data { Data { value: 0 } }
+async fn fetch_from_replica() -> Data { Data { value: 0 } }
+fn get_client() -> Client { Client }
+fn build_request() -> Int { 0 }
+async fn create_timeout(d: Duration) { }
+fn transform(d: Data) -> Data { d }
+fn validate(d: Data) { }
+fn log(msg: Text) { }
+async fn operation() -> Data { Data { value: 0 } }
+fn default_value_fn() -> Data { Data { value: 0 } }
+fn fallback_value_fn() -> Data { Data { value: 0 } }
+async fn slow_operation() -> Data { Data { value: 0 } }
+async fn timeout(duration: Duration) { }
+async fn fetch_data() -> Data { Data { value: 0 } }
+fn handle_critical(d: Data) -> Data { d }
+fn handle_high(d: Data) -> Data { d }
+fn handle_normal(d: Data) -> Data { d }
+fn handle_low(d: Data) -> Data { d }
+fn handle_a(d: Data) -> Data { d }
+fn handle_b(d: Data) -> Data { d }
+fn handle_c(d: Data) -> Data { d }
+fn log_error(e: Error) { }
+fn default_data() -> Data { Data { value: 0 } }
+fn empty_data() -> Data { Data { value: 0 } }
+fn error_data() -> Data { Data { value: 0 } }
+fn timeout_data() -> Data { Data { value: 0 } }
+fn default_fn() -> Data { Data { value: 0 } }
+fn handle_text(t: Text) -> Data { Data { value: 0 } }
+fn handle_binary(d: Data, len: Int) -> Data { Data { value: 0 } }
+fn handle_close() -> Data { Data { value: 0 } }
+async fn fetch_pair() -> (Int, Int) { (0, 0) }
+async fn fetch_triple() -> (Int, Int, Int) { (0, 0, 0) }
+async fn step1() -> Data { Data { value: 0 } }
+async fn step2(d: Data) -> Data { d }
+async fn quick_fallback() -> Data { Data { value: 0 } }
+fn default_deep() -> Data { Data { value: 0 } }
+fn default_mid() -> Data { Data { value: 0 } }
+fn default_outer() -> Data { Data { value: 0 } }
+async fn shutdown_signal() { }
+fn process_item(d: Data) { }
+fn spawn_task(r: Request) { }
+fn handle_request(r: Request) { }
+async fn process_payload(d: Data) { }
+fn process_a(d: Data) -> Output { Output { result: 0 } }
+fn process_b(d: Data) -> Output { Output { result: 0 } }
+async fn compute(n: Int) -> Int { n }
+fn handle_d(d: Data) -> Data { d }
+fn handle_e(d: Data) -> Data { d }
+fn handle_f(d: Data) -> Data { d }
+fn handle_g(d: Data) -> Data { d }
+fn handle_h(d: Data) -> Data { d }
+fn process_int(n: Int) { }
+
+// ============================================================================
+// 1. BASIC SELECT WITH TWO BRANCHES
+// ============================================================================
+
+// 1.1 Minimal two-branch select
+async fn test_basic_two_branches() {
+    let future1 = async { Data { value: 1 } };
+    let future2 = async { Data { value: 2 } };
+    let result = select {
+        x = future1.await => x,
+        y = future2.await => y,
+    };
+}
+
+// 1.2 Select with method calls
+async fn test_select_with_method_calls() {
+    let http = HttpClient.new();
+    let cache = Cache.new();
+    let url = "http://example.com";
+    let key = "key";
+    let result = select {
+        response = http.get(url).await => response,
+        Ok(data) = http.get(url).await => Ok(data),
+    };
+}
+
+// 1.3 Select with chained method calls
+async fn test_select_chained_methods() {
+    let client = Client.new();
+    let backup = Backup.new();
+    let result = select {
+        data = client.connect().fetch(0).await => data,
+        fallback = backup.get_cached().await => fallback,
+    };
+}
+
+// 1.4 Select with function calls
+async fn test_select_function_calls() {
+    let result = select {
+        a = fetch_from_primary().await => a,
+        b = fetch_from_replica().await => b,
+    };
+}
+
+// 1.5 Select with complex expressions in await
+async fn test_select_complex_await_expr() {
+    let result = select {
+        data = (get_client().fetch(build_request())).await => data,
+        timeout_val = create_timeout(Duration.from_secs(5)).await => Data { value: 0 },
+    };
+}
+
+// 1.6 Select with block bodies
+async fn test_select_block_bodies() {
+    let future1 = async { Data { value: 1 } };
+    let future2 = async { Data { value: 2 } };
+    let result = select {
+        x = future1.await => {
+            let processed = transform(x);
+            validate(processed);
+            processed
+        },
+        y = future2.await => {
+            log("Using fallback");
+            y
+        },
+    };
+}
+
+// ============================================================================
+// 2. SELECT WITH DEFAULT/ELSE BRANCH
+// ============================================================================
+
+// 2.1 Select with else clause
+async fn test_select_with_else() {
+    let result = select {
+        data = operation().await => Some(data),
+        else => None,
+    };
+}
+
+// 2.2 Select with else and guards (all guards can fail)
+async fn test_select_else_with_guards() {
+    let a = async { Data { value: 1 } };
+    let b = async { Data { value: 2 } };
+    let condition1 = true;
+    let condition2 = true;
+    let default_value = Data { value: 0 };
+    let result = select {
+        x = a.await if condition1 => x,
+        y = b.await if condition2 => y,
+        else => default_value,
+    };
+}
+
+// 2.3 Select with else block
+async fn test_select_else_block() {
+    let enabled = true;
+    let result = select {
+        Ok(data) = fetch().await if enabled => Ok(process(data).await),
+        else => {
+            log("All branches disabled");
+            Ok(fallback_value_fn())
+        },
+    };
+}
+
+// 2.4 Select with else and trailing comma
+async fn test_select_else_trailing_comma() {
+    let a = async { Data { value: 1 } };
+    let b = async { Data { value: 2 } };
+    let default_value = Data { value: 0 };
+    let result = select {
+        x = a.await => x,
+        y = b.await => y,
+        else => default_value,
+    };
+}
+
+// ============================================================================
+// 3. SELECT WITH TIMEOUT PATTERN
+// ============================================================================
+
+// 3.1 Basic timeout with sleep
+async fn test_timeout_sleep() {
+    let result = select {
+        data = slow_operation().await => Some(data),
+        _ = sleep(Duration.from_secs(5)).await => None,
+    };
+}
+
+// 3.2 Timeout with Duration
+async fn test_timeout_duration() {
+    let http = HttpClient.new();
+    let url = "http://example.com";
+    let result = select {
+        response = http.get(url).await => response,
+        _ = timeout(Duration.from_secs(30)).await => Err(Error.Timeout),
+    };
+}
+
+// 3.3 Timeout returning Result
+async fn test_timeout_result() {
+    let result = select {
+        data = fetch_data().await => Ok(data),
+        _ = sleep(Duration.from_millis(100)).await => Err(Error.Timeout),
+    };
+}
+
+// 3.4 Configurable timeout
+async fn test_configurable_timeout(timeout_ms: Int) -> Maybe<Data> {
+    select {
+        data = expensive_computation().await => Some(data),
+        _ = sleep(Duration.from_millis(timeout_ms)).await => None,
+    }
+}
+
+// ============================================================================
+// 4. SELECT WITH BIASED MODIFIER
+// ============================================================================
+
+// 4.1 Basic biased select
+async fn test_biased_basic() {
+    let high_priority = async { Data { value: 1 } };
+    let low_priority = async { Data { value: 2 } };
+    let result = select biased {
+        x = high_priority.await => x,
+        y = low_priority.await => y,
+    };
+}
+
+// 4.2 Biased with multiple priorities
+async fn test_biased_multiple_priorities() {
+    let critical_task = async { Data { value: 1 } };
+    let high_priority_task = async { Data { value: 2 } };
+    let normal_task = async { Data { value: 3 } };
+    let low_priority_task = async { Data { value: 4 } };
+    let result = select biased {
+        critical = critical_task.await => handle_critical(critical),
+        high = high_priority_task.await => handle_high(high),
+        normal = normal_task.await => handle_normal(normal),
+        low = low_priority_task.await => handle_low(low),
+    };
+}
+
+// 4.3 Biased select with control channel
+async fn test_biased_control_channel() {
+    let control_rx: Receiver<Control> = Receiver { _marker: 0 };
+    let data_rx: Receiver<Message> = Receiver { _marker: 0 };
+    let result = select biased {
+        Control.Stop = control_rx.recv().await => Action.Stop,
+        Control.Flush = control_rx.recv().await => Action.Pause,
+        msg = data_rx.recv().await => Action.Process(Data { value: 0 }),
+    };
+}
+
+// 4.4 Biased select with guards
+async fn test_biased_with_guards() {
+    let fast_path = async { Data { value: 1 } };
+    let slow_path = async { Data { value: 2 } };
+    let fast_path_enabled = true;
+    let result = select biased {
+        x = fast_path.await if fast_path_enabled => x,
+        y = slow_path.await => y,
+    };
+}
+
+// 4.5 Biased select with else
+async fn test_biased_with_else() {
+    let a = async { Data { value: 1 } };
+    let condition = true;
+    let fallback = Data { value: 0 };
+    let result = select biased {
+        x = a.await if condition => x,
+        else => fallback,
+    };
+}
+
+// ============================================================================
+// 5. SELECT WITH GUARDS
+// ============================================================================
+
+// 5.1 Single branch with guard
+async fn test_guard_single() {
+    let cache = Cache.new();
+    let database = DatabaseConnection.new();
+    let key = "key";
+    let cache_enabled = true;
+    let result = select {
+        Some(data) = cache.get(key).await if cache_enabled => Ok(data),
+        rows = database.query(key).await => rows,
+    };
+}
+
+// 5.2 Multiple guards
+async fn test_guards_multiple() {
+    let source_a = Source { name: "a" };
+    let source_b = Source { name: "b" };
+    let source_c = Source { name: "c" };
+    let fallback = async { Data { value: 0 } };
+    let use_source_a = true;
+    let use_source_b = true;
+    let use_source_c = true;
+    let result = select {
+        a = source_a.fetch().await if use_source_a => a,
+        b = source_b.fetch().await if use_source_b => b,
+        c = source_c.fetch().await if use_source_c => c,
+        d = fallback.await => d,
+    };
+}
+
+// 5.3 Guards with complex expressions
+async fn test_guards_complex_expressions() {
+    let a = async { Data { value: 1 } };
+    let b = async { Data { value: 2 } };
+    let c = async { Data { value: 3 } };
+    let config = Config { enabled: true };
+    let user = User { name: "test" };
+    let feature_flag = true;
+    let result = select {
+        x = a.await if config.is_enabled() && feature_flag => x,
+        y = b.await if user.has_permission("admin") => y,
+        z = c.await => z,
+    };
+}
+
+// 5.4 Guards with variable references
+async fn test_guards_variables() {
+    let cache = Cache.new();
+    let network = HttpClient.new();
+    let defaults = Cache.new();
+    let key = "key";
+    let url = "http://example.com";
+    let enable_cache_local = true;
+    let enable_network_local = false;
+
+    let result = select {
+        Some(cached) = cache.get(key).await if enable_cache_local => Ok(cached),
+        Ok(fetched) = network.get(url).await if enable_network_local => Ok(fetched),
+        Some(default_val) = defaults.get(key).await => Ok(default_val),
+        else => Err(Error.NoSourceAvailable),
+    };
+}
+
+// 5.5 Guards with method calls
+async fn test_guards_method_calls() {
+    let fast_source = Source { name: "fast" };
+    let slow_source = Source { name: "slow" };
+    let result = select {
+        data = fast_source.get().await if fast_source.is_available() => Ok(data),
+        data = slow_source.get().await if slow_source.is_healthy() => Ok(data),
+        else => Err(Error.NoSourceAvailable),
+    };
+}
+
+// 5.6 All branches with guards and else
+async fn test_guards_all_with_else() {
+    let source_a = Source { name: "a" };
+    let source_b = Source { name: "b" };
+    let source_c = Source { name: "c" };
+    let condition_a = true;
+    let condition_b = true;
+    let condition_c = true;
+    let fallback_value = Data { value: 0 };
+    let result = select {
+        a = source_a.fetch().await if condition_a => a,
+        b = source_b.fetch().await if condition_b => b,
+        c = source_c.fetch().await if condition_c => c,
+        else => fallback_value,
+    };
+}
+
+// ============================================================================
+// 6. SELECT WITH RESULT BINDING (PATTERN MATCHING)
+// ============================================================================
+
+// 6.1 Binding Ok variant
+async fn test_pattern_ok() {
+    let result = select {
+        Ok(data) = fetch().await => data,
+        _ = timeout(Duration.from_secs(5)).await => default_data(),
+    };
+}
+
+// 6.2 Binding Err variant
+async fn test_pattern_err() {
+    let primary = async { Ok(Response { status: 200, body: None }) };
+    let backup = async { Data { value: 0 } };
+    let result = select {
+        Ok(data) = primary.await => Ok(data),
+        Err(e) = primary.await => {
+            log_error(e);
+            Ok(backup.await)
+        },
+        _ = timeout(Duration.from_secs(10)).await => Err(Error.Timeout),
+    };
+}
+
+// 6.3 Binding Some/None
+async fn test_pattern_option() {
+    let cache = Cache.new();
+    let database = DatabaseConnection.new();
+    let key = "key";
+    let default_value = Data { value: 0 };
+    let result = select {
+        Some(value) = cache.get(key).await => value,
+        _ = database.query(key).await => default_value,
+    };
+}
+
+// 6.4 Struct pattern binding
+async fn test_pattern_struct() {
+    let http = HttpClient.new();
+    let url = "http://example.com";
+    let result = select {
+        Ok(Response { status, body }) = http.get(url).await => {
+            if status == 200 { Ok(status) } else { Err(status) }
+        },
+        _ = timeout(Duration.from_secs(5)).await => Err(408),
+    };
+}
+
+// 6.5 Tuple pattern binding
+async fn test_pattern_tuple() {
+    let result = select {
+        (first, second) = fetch_pair().await => first + second,
+        (a, _, c) = fetch_triple().await => a + c,
+    };
+}
+
+// 6.6 Variant pattern binding
+async fn test_pattern_variant() {
+    let channel_a: Channel<Message> = Channel { _marker: 0 };
+    let result = select {
+        Message.Data(content) = channel_a.recv().await => handle_text("data"),
+        Message.Empty = channel_a.recv().await => handle_close(),
+    };
+}
+
+// 6.7 Wildcard pattern
+async fn test_pattern_wildcard() {
+    let important_future = async { Data { value: 1 } };
+    let timeout_future = async { };
+    let result = select {
+        data = important_future.await => Some(data),
+        _ = timeout_future.await => None,
+    };
+}
+
+// 6.8 Nested pattern binding
+async fn test_pattern_nested() {
+    let http = HttpClient.new();
+    let url = "http://example.com";
+    let result = select {
+        Ok(Response { body: Some(data), .. }) = http.get(url).await => data,
+        Ok(Response { body: None, .. }) = http.get(url).await => empty_data(),
+        Err(_) = fetch().await => error_data(),
+        _ = timeout(Duration.from_secs(5)).await => timeout_data(),
+    };
+}
+
+// 6.9 Or pattern in select arm
+async fn test_pattern_or() {
+    let source = async { Ok(Data { value: 1 }) };
+    let fallback = async { Data { value: 0 } };
+    let result = select {
+        Ok(data) = source.await => data,
+        _ = fallback.await => default_fn(),
+    };
+}
+
+// ============================================================================
+// 7. NESTED SELECT EXPRESSIONS
+// ============================================================================
+
+// 7.1 Select inside select (nested select must be wrapped in async block)
+async fn test_nested_basic() {
+    let a = async { Data { value: 1 } };
+    let b = async { Data { value: 2 } };
+    let c = async { Data { value: 3 } };
+    let result = select {
+        outer = async { select {
+            inner1 = a.await => inner1,
+            inner2 = b.await => inner2,
+        } }.await => outer,
+        fallback = c.await => fallback,
+    };
+}
+
+// 7.2 Select in branch body
+async fn test_nested_in_body() {
+    let stage1 = async { Data { value: 1 } };
+    let result = select {
+        first_stage = stage1.await => {
+            select {
+                data = process(first_stage).await => data,
+                _ = timeout(Duration.from_secs(1)).await => first_stage,
+            }
+        },
+        _ = timeout(Duration.from_secs(5)).await => default_fn(),
+    };
+}
+
+// 7.3 Deeply nested selects (nested selects wrapped in async blocks)
+async fn test_nested_deep() {
+    let deepest = async { Data { value: 1 } };
+    let result = select {
+        level1 = async { select {
+            level2 = async { select {
+                level3 = deepest.await => level3,
+                _ = timeout(Duration.from_millis(100)).await => default_deep(),
+            } }.await => level2,
+            _ = timeout(Duration.from_millis(500)).await => default_mid(),
+        } }.await => level1,
+        _ = timeout(Duration.from_secs(1)).await => default_outer(),
+    };
+}
+
+// 7.4 Select with nested async blocks
+async fn test_nested_async_blocks() {
+    let result = select {
+        a = async {
+            let x = step1().await;
+            let y = step2(x).await;
+            y
+        }.await => a,
+        b = async {
+            quick_fallback().await
+        }.await => b,
+    };
+}
+
+// ============================================================================
+// 8. SELECT IN ASYNC FUNCTIONS
+// ============================================================================
+
+// 8.1 Basic async function with select
+async fn fetch_with_timeout(url_param: Text) -> Maybe<Response> {
+    let http = HttpClient.new();
+    select {
+        Ok(response) = http.get(url_param).await => Some(response),
+        _ = sleep(Duration.from_secs(5)).await => None,
+    }
+}
+
+// 8.2 Async function with multiple selects
+async fn complex_fetch(urls: List<Text>) -> Result<Data, Error> {
+    let primary_result = select {
+        Ok(data) = fetch().await => Ok(data),
+        _ = timeout(Duration.from_secs(1)).await => Err(Error.Timeout),
+    };
+
+    match primary_result {
+        Ok(data) => Ok(data),
+        Err(_) => select {
+            Ok(data) = fetch().await => Ok(data),
+            _ = timeout(Duration.from_secs(2)).await => Err(Error.AllFailed),
+        },
+    }
+}
+
+// 8.3 Async function with context and select
+// Note: Context access via Context.method() is demonstrated syntactically.
+// For L0 tests, we use stub local variables instead of actual context resolution.
+async fn monitored_operation() -> Result<Data, Error> {
+    select {
+        data = perform_operation().await => {
+            match data {
+                Ok(d) => {
+                    log("Operation succeeded");
+                    Ok(d)
+                },
+                Err(e) => {
+                    log("Operation failed");
+                    Err(e)
+                },
+            }
+        },
+        _ = timeout(Duration.from_secs(30)).await => {
+            log("Operation timed out");
+            Err(Error.Timeout)
+        },
+    }
+}
+
+// 8.4 Async function with loop and select
+async fn process_stream<T>(s: Stream<T>) -> Result<(), Error> {
+    loop {
+        select {
+            Some(item) = s.next().await => {
+                // Process item
+            },
+            None = s.next().await => {
+                break
+            },
+            _ = shutdown_signal().await => {
+                return Ok(())
+            },
+        }
+    }
+    Ok(())
+}
+
+// 8.5 Async function returning select result
+async fn race_requests(url1: Text, url2: Text) -> Result<Response, Error> {
+    let http = HttpClient.new();
+    select {
+        r1 = http.get(url1).await => r1,
+        r2 = http.get(url2).await => r2,
+    }
+}
+
+// 8.6 Async function with try in select (try block wrapped in async block)
+async fn fetch_with_error_handling() -> Result<Data, Error> {
+    let http = HttpClient.new();
+    let url = "http://example.com";
+    select {
+        data = async {
+            try {
+                let response = http.get(url).await?;
+                Ok(Data { value: response.status })
+            } recover |_| { Ok(default_data()) }
+        }.await => data,
+        _ = timeout(Duration.from_secs(5)).await => Err(Error.Timeout),
+    }
+}
+
+// 8.7 Generic async function with select
+// Note: async fn type uses fn() -> Future<T> syntax
+async fn timeout_wrapper<T>(
+    f: fn() -> Future<T>,
+    duration: Duration,
+) -> Maybe<T>
+{
+    select {
+        result = f().await => Some(result),
+        _ = sleep(duration).await => None,
+    }
+}
+
+// Stub Future type for generic context
+type Future<T> is { _value: T };
+
+// ============================================================================
+// 9. SELECT WITH CHANNELS
+// ============================================================================
+
+// 9.1 Receive from multiple channels
+async fn test_multiple_channels() {
+    let channel_a: Channel<Data> = Channel { _marker: 0 };
+    let channel_b: Channel<Data> = Channel { _marker: 0 };
+    let channel_c: Channel<Data> = Channel { _marker: 0 };
+    let result = select {
+        msg = channel_a.recv().await => handle_a(msg),
+        msg = channel_b.recv().await => handle_b(msg),
+        msg = channel_c.recv().await => handle_c(msg),
+    };
+}
+
+// 9.2 Send or receive
+async fn test_send_receive() {
+    let sender: Sender<Data> = Sender { _marker: 0 };
+    let receiver: Receiver<Data> = Receiver { _marker: 0 };
+    let data = Data { value: 0 };
+    let result = select {
+        _ = sender.send(data).await => Action.Sent,
+        received = receiver.recv().await => Action.Received(received),
+    };
+}
+
+// 9.3 Prioritized channel handling (biased)
+async fn test_prioritized_channels() {
+    let control: Receiver<Command> = Receiver { _marker: 0 };
+    let data_channel: Receiver<Data> = Receiver { _marker: 0 };
+    let status_request: Receiver<()> = Receiver { _marker: 0 };
+    let action = select biased {
+        Command.Shutdown = control.recv().await => Action.Stop,
+        Command.Pause = control.recv().await => Action.Pause,
+        data = data_channel.recv().await => Action.Process(data),
+        _ = status_request.recv().await => Action.ReportStatus,
+    };
+}
+
+// ============================================================================
+// 10. SELECT WITH ATTRIBUTES
+// ============================================================================
+
+// 10.1 Cold attribute on arm
+async fn test_attribute_cold() {
+    let fast_path = async { Data { value: 1 } };
+    let slow_path = async { Data { value: 2 } };
+    let result = select {
+        data = fast_path.await => data,
+        @cold
+        fallback = slow_path.await => fallback,
+    };
+}
+
+// 10.2 Hot attribute on arm
+async fn test_attribute_hot() {
+    let frequent_case = async { Data { value: 1 } };
+    let uncommon_case = async { Data { value: 2 } };
+    let result = select {
+        @hot
+        common = frequent_case.await => common,
+        rare = uncommon_case.await => rare,
+    };
+}
+
+// 10.3 Multiple attributes
+async fn test_attributes_multiple() {
+    let optimized_path = async { Data { value: 1 } };
+    let fallback_path = async { Data { value: 2 } };
+    let result = select {
+        @hot @inline
+        fast = optimized_path.await => fast,
+        @cold
+        slow = fallback_path.await => slow,
+    };
+}
+
+// ============================================================================
+// 11. SELECT EDGE CASES
+// ============================================================================
+
+// 11.1 Single arm select
+async fn test_single_arm() {
+    let only_option = async { Data { value: 1 } };
+    let result = select {
+        data = only_option.await => data,
+    };
+}
+
+// 11.2 Many arms select
+async fn test_many_arms() {
+    let fa = async { Data { value: 1 } };
+    let fb = async { Data { value: 2 } };
+    let fc = async { Data { value: 3 } };
+    let fd = async { Data { value: 4 } };
+    let fe = async { Data { value: 5 } };
+    let ff = async { Data { value: 6 } };
+    let fg = async { Data { value: 7 } };
+    let fh = async { Data { value: 8 } };
+    let result = select {
+        a = fa.await => handle_a(a),
+        b = fb.await => handle_b(b),
+        c = fc.await => handle_c(c),
+        d = fd.await => handle_d(d),
+        e = fe.await => handle_e(e),
+        f = ff.await => handle_f(f),
+        g = fg.await => handle_g(g),
+        h = fh.await => handle_h(h),
+    };
+}
+
+// 11.3 Select with trailing comma
+async fn test_trailing_comma() {
+    let a = async { Data { value: 1 } };
+    let b = async { Data { value: 2 } };
+    let result = select {
+        x = a.await => x,
+        y = b.await => y,
+    };
+}
+
+// 11.4 Select without trailing comma
+async fn test_no_trailing_comma() {
+    let a = async { Data { value: 1 } };
+    let b = async { Data { value: 2 } };
+    let result = select {
+        x = a.await => x,
+        y = b.await => y
+    };
+}
+
+// 11.5 Select with all features combined
+async fn test_all_features() {
+    let primary = async { Ok(Response { status: 200, body: None }) };
+    let secondary = async { Data { value: 1 } };
+    let primary_enabled = true;
+    let secondary_enabled = true;
+    let result = select biased {
+        @hot
+        Ok(Response { status, .. }) = primary.await if primary_enabled => {
+            log("Using primary");
+            Data { value: status }
+        },
+        @cold
+        data = secondary.await if secondary_enabled => {
+            log("Using secondary");
+            data
+        },
+        else => {
+            log("Using fallback");
+            default_data()
+        },
+    };
+}
+
+// 11.6 Select as expression in various positions
+async fn test_select_positions() {
+    let f = async { 42 };
+    // In let binding
+    let a = select { x = f.await => x, else => 0 };
+
+    // In function argument
+    process_int(select { x = f.await => x, else => 0 });
+
+    // In return
+    return select { x = f.await => x, else => 0 };
+}
+
+// 11.7 Select with ? operator
+async fn test_select_question_mark() -> Result<Data, Error> {
+    let data = select {
+        Ok(d) = fetch().await => d,
+        _ = timeout(Duration.from_secs(5)).await => { return Err(Error.Timeout) },
+    };
+
+    Ok(data)
+}
+
+// 11.8 Select in match arm
+async fn test_select_in_match() {
+    let fast = async { 1 };
+    let slow = async { 2 };
+    let mode_local: Mode = Mode.Fast;
+    let result = match mode_local {
+        Mode.Fast => select {
+            x = fast.await => x,
+            else => 0,
+        },
+        Mode.Slow => select {
+            x = slow.await => x,
+            else => 0,
+        },
+    };
+}
+
+// 11.9 Select in if expression
+async fn test_select_in_if() {
+    let a = async { Data { value: 1 } };
+    let b = async { Data { value: 2 } };
+    let condition_local = true;
+    let result = if condition_local {
+        select { x = a.await => x, else => Data { value: 0 } }
+    } else {
+        select { x = b.await => x, else => Data { value: 0 } }
+    };
+}
+
+// 11.10 Select with closure capture
+async fn test_select_closure() {
+    let captured_value_local = 42;
+
+    let result = select {
+        x = compute(captured_value_local).await => x + captured_value_local,
+        _ = timeout(Duration.from_secs(1)).await => captured_value_local,
+    };
+}
+
+// ============================================================================
+// 12. REAL-WORLD PATTERNS
+// ============================================================================
+
+// 12.1 HTTP request with timeout
+async fn http_fetch_timeout(url_param: Text, timeout_duration: Duration) -> Result<Response, HttpError> {
+    let http = HttpClient.new();
+    select {
+        Ok(response) = http.get(url_param).await => Ok(response),
+        Err(e) = http.get(url_param).await => Err(HttpError.Request(e)),
+        _ = sleep(timeout_duration).await => Err(HttpError.Timeout),
+    }
+}
+
+// 12.2 Database query with failover
+// Note: Context access is an L2 feature. For L0 tests, we use local stubs.
+async fn query_with_failover(sql: Text) -> Result<Rows, DbError> {
+    let primary = DatabaseConnection.new();
+    let replica = DatabaseConnection.new();
+    select {
+        result = primary.query(sql).await => {
+            match result {
+                Ok(rows) => {
+                    log("Query succeeded on primary");
+                    Ok(rows)
+                },
+                Err(e) => {
+                    log("Primary failed, trying replica");
+                    replica.query(sql).await
+                },
+            }
+        },
+        _ = timeout(Duration.from_secs(30)).await => {
+            log("Query timed out");
+            Err(DbError.Timeout)
+        },
+    }
+}
+
+// 12.3 Graceful shutdown pattern
+// Note: Context access is an L2 feature. For L0 tests, we use local stubs.
+async fn run_service() -> Result<(), Error> {
+    let listener: Listener = Listener { _marker: 0 };
+    let shutdown_signal_recv = async { };  // Stub for shutdown signal
+    loop {
+        select biased {
+            _ = shutdown_signal_recv.await => {
+                log("Shutdown requested");
+                break;
+            },
+            request = listener.accept().await => {
+                spawn_task(request);
+            },
+        }
+    }
+
+    cleanup().await;
+    Ok(())
+}
+
+// 12.4 Heartbeat pattern
+async fn worker_with_heartbeat(coordinator: Coordinator) -> Result<(), Error> {
+    let heartbeat_interval = Duration.from_secs(10);
+
+    loop {
+        select {
+            result = do_work().await => {
+                if result.is_done() { break; }
+            },
+            _ = sleep(heartbeat_interval).await => {
+                // Send heartbeat
+            },
+        }
+    }
+
+    Ok(())
+}
+
+// 12.5 First-wins race pattern
+async fn fetch_fastest(sources: List<DataSource>) -> Maybe<Data> {
+    select {
+        data = sources[0].fetch().await => Some(data),
+        data = sources[1].fetch().await => Some(data),
+        data = sources[2].fetch().await => Some(data),
+        else => None,
+    }
+}
+
+// 12.6 Retry with exponential backoff
+// Note: async fn type uses fn() -> Future<Result<T, Error>> syntax
+async fn retry_with_backoff<T>(
+    operation: fn() -> Future<Result<T, Error>>,
+    max_retries: Int,
+) -> Result<T, Error>
+{
+    let mut delay = Duration.from_millis(100);
+    let mut attempt = 0;
+
+    while attempt < max_retries {
+        let result = select {
+            Ok(data) = operation().await => Ok(data),
+            Err(e) = operation().await => {
+                sleep(delay).await;
+                delay = Duration.from_millis(delay.millis * 2);
+                Err(e)
+            },
+            _ = timeout(Duration.from_secs(30)).await => Err(Error.Timeout),
+        };
+        match result {
+            Ok(data) => { return Ok(data) },
+            Err(Error.Timeout) => { return Err(Error.Timeout) },
+            Err(_) => { attempt = attempt + 1 },
+        }
+    }
+
+    Err(Error.MaxRetriesExceeded)
+}
+
+// 12.7 Multiplexed message handling
+// Note: Context access is an L2 feature. For L0 tests, we use local stubs.
+async fn message_loop() {
+    let control_rx: Receiver<Control> = Receiver { _marker: 0 };
+    let data_rx: Receiver<Message> = Receiver { _marker: 0 };
+    let metrics_interval: Interval = Interval { _marker: 0 };
+    loop {
+        select biased {
+            // Highest priority: Control messages
+            ctrl = control_rx.recv().await => {
+                match ctrl {
+                    Control.Stop => {
+                        log("Stopping message loop");
+                        break;
+                    },
+                    Control.Flush => {
+                        flush_buffers().await;
+                    },
+                }
+            },
+
+            // Normal priority: Data messages
+            msg = data_rx.recv().await => {
+                match msg {
+                    Message.Data(payload) => {
+                        process_payload(payload).await;
+                    },
+                    Message.Empty => { },
+                }
+            },
+
+            // Low priority: Metrics
+            _ = metrics_interval.tick().await => {
+                report_metrics().await;
+            },
+        }
+    }
+}
+
+// 12.8 Cancellation token pattern
+async fn cancellable_operation(cancel: CancellationToken) -> Result<Data, Error> {
+    select {
+        result = long_running_computation().await => Ok(result),
+        _ = cancel.cancelled().await => Err(Error.Cancelled),
+    }
+}
+
+// ============================================================================
+// 13. TYPE INFERENCE TESTS
+// ============================================================================
+
+// 13.1 Inferred return type from branches
+async fn test_infer_from_branches() {
+    let int_future = async { 42 };
+    let another_int_future = async { 100 };
+    // All branches return Int, so result is Int
+    let result: Int = select {
+        x = int_future.await => x,
+        y = another_int_future.await => y,
+    };
+}
+
+// 13.2 Inferred Option type
+async fn test_infer_option() {
+    // Branches return Some(T) and None, result is Maybe<T>
+    let result: Maybe<Data> = select {
+        Ok(data) = fetch().await => Some(data),
+        _ = timeout(Duration.from_secs(1)).await => None,
+    };
+}
+
+// 13.3 Inferred Result type
+async fn test_infer_result() {
+    // Branches return Ok and Err, result is Result<T, E>
+    let result: Result<Data, Error> = select {
+        Ok(data) = fetch().await => Ok(data),
+        _ = timeout(Duration.from_secs(1)).await => Err(Error.Timeout),
+    };
+}
+
+// 13.4 Branch body type unification
+async fn test_type_unification() {
+    let future_a = async { Data { value: 1 } };
+    let future_b = async { Data { value: 2 } };
+    // Both branches must unify to same type
+    let result = select {
+        x = future_a.await => process_a(x),  // Returns Output
+        y = future_b.await => process_b(y),  // Must also return Output
+    };
+}
+
+// ============================================================================
+// END OF TEST FILE
+// ============================================================================

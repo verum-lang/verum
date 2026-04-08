@@ -1,0 +1,13 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, integer-overflow, division
+// @description: Tests that division overflow is detected (MIN / -1)
+
+fn main() {
+    // Use -MAX - 1 to get MIN
+    let min_int = -9223372036854775807 - 1;  // Int.MIN
+
+    // Dividing MIN by -1 causes overflow because |MIN| > MAX
+    let _ = min_int / -1;  // Panic: Integer overflow
+}

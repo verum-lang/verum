@@ -1,0 +1,167 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, topological, sort, graph, dag
+// @timeout: 30000
+
+// Topological sort via Kahn's algorithm on DAG (max 8 nodes)
+// Adjacency stored as bitmask per node
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn get_bit(v: Int, pos: Int) -> Int {
+    let mut mask = 1;
+    let mut i = 0;
+    while i < pos { mask = mask * 2; i = i + 1; }
+    if (v / mask) % 2 == 1 { 1 } else { 0 }
+}
+
+fn set_bit(v: Int, pos: Int) -> Int {
+    let mut mask = 1;
+    let mut i = 0;
+    while i < pos { mask = mask * 2; i = i + 1; }
+    if get_bit(v, pos) == 1 { v } else { v + mask }
+}
+
+// Compute in-degree for each node
+fn compute_indegree(adj: Arr8, n: Int) -> Arr8 {
+    let mut indeg = new_arr8();
+    let mut u = 0;
+    while u < n {
+        let edges = get8(adj, u);
+        let mut v = 0;
+        while v < n {
+            if get_bit(edges, v) == 1 {
+                indeg = set8(indeg, v, get8(indeg, v) + 1);
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    indeg
+}
+
+// Kahn's algorithm: returns topological order encoded as position array
+// result[i] = position of node i in topo order (0-indexed)
+fn topo_sort(adj: Arr8, n: Int) -> Arr8 {
+    let mut indeg = compute_indegree(adj, n);
+    let mut order = new_arr8(); // order[i] = topo position of node i
+    let mut processed = 0;
+
+    let mut step = 0;
+    while step < n {
+        // Find a node with in-degree 0
+        let mut found = -1;
+        let mut u = 0;
+        while u < n {
+            if get8(indeg, u) == 0 {
+                found = u;
+                u = n; // break
+            }
+            u = u + 1;
+        }
+        if found == -1 { return order; } // cycle detected
+
+        order = set8(order, found, processed);
+        processed = processed + 1;
+        indeg = set8(indeg, found, -1); // mark as done
+
+        // Reduce in-degree for neighbors
+        let edges = get8(adj, found);
+        let mut v = 0;
+        while v < n {
+            if get_bit(edges, v) == 1 {
+                indeg = set8(indeg, v, get8(indeg, v) - 1);
+            }
+            v = v + 1;
+        }
+        step = step + 1;
+    }
+    order
+}
+
+// Verify topological order: for every edge u->v, order[u] < order[v]
+fn verify_topo(adj: Arr8, order: Arr8, n: Int) -> Int {
+    let mut u = 0;
+    while u < n {
+        let edges = get8(adj, u);
+        let mut v = 0;
+        while v < n {
+            if get_bit(edges, v) == 1 {
+                if get8(order, u) >= get8(order, v) {
+                    return 0; // invalid
+                }
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    1
+}
+
+fn test_linear() -> Int {
+    // Linear DAG: 0->1->2->3
+    let mut adj = new_arr8();
+    adj = set8(adj, 0, set_bit(0, 1));   // 0->1
+    adj = set8(adj, 1, set_bit(0, 2));   // 1->2
+    adj = set8(adj, 2, set_bit(0, 3));   // 2->3
+
+    let order = topo_sort(adj, 4);
+    assert_eq(verify_topo(adj, order, 4), 1);
+    assert_eq(get8(order, 0), 0); // 0 comes first
+    assert_eq(get8(order, 3), 3); // 3 comes last
+    1
+}
+
+fn test_diamond() -> Int {
+    // Diamond: 0->1, 0->2, 1->3, 2->3
+    let mut adj = new_arr8();
+    adj = set8(adj, 0, set_bit(set_bit(0, 1), 2)); // 0->1, 0->2
+    adj = set8(adj, 1, set_bit(0, 3));               // 1->3
+    adj = set8(adj, 2, set_bit(0, 3));               // 2->3
+
+    let order = topo_sort(adj, 4);
+    assert_eq(verify_topo(adj, order, 4), 1);
+    assert_eq(get8(order, 0), 0); // 0 must be first
+    assert_eq(get8(order, 3), 3); // 3 must be last
+    1
+}
+
+fn test_independent() -> Int {
+    // No edges: all independent
+    let adj = new_arr8();
+    let order = topo_sort(adj, 4);
+    // Any order is valid
+    assert_eq(verify_topo(adj, order, 4), 1);
+    1
+}
+
+fn main() -> Int {
+    test_linear();
+    test_diamond();
+    test_independent();
+    print("[OK] 447_topological_sort_aot");
+    0
+}

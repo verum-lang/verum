@@ -1,0 +1,356 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/linux/io_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, linux, io, io_uring, epoll
+// @description: Tests for Linux I/O subsystem (io_uring and epoll).
+//
+// Coverage:
+// - IoUringDriver, IoUringSqe, IoUringCqe: io_uring types
+// - EpollDriver, EpollEvent: epoll types
+// - IoDriver, create_io_driver: Unified driver
+// - is_io_uring_available: Feature detection
+// - io_uring constants (IORING_OP_*, IORING_ENTER_*)
+// - epoll constants (EPOLL*, EPOLL_CTL_*)
+//
+// Test Strategy:
+// - Test type construction and field access
+// - Verify constants match kernel definitions
+// - Test driver creation and basic operations
+// - Feature detection for io_uring availability
+//
+// Platform: Linux x86_64 (kernel 5.1+ for io_uring)
+// =============================================================================
+
+@cfg(target_os = "linux")
+module test.stdlib.sys.linux.io_test;
+
+mount core.sys.linux.io.{
+    IoUringDriver, IoUringSqe, IoUringCqe, IoUringParams,
+    EpollDriver, EpollEvent,
+    IoDriver, IoError,
+    create_io_driver, is_io_uring_available,
+
+    IORING_OP_READ, IORING_OP_WRITE, IORING_OP_ACCEPT, IORING_OP_CONNECT,
+    IORING_ENTER_GETEVENTS,
+
+    EPOLLIN, EPOLLOUT, EPOLLERR, EPOLLHUP, EPOLLET,
+    EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLL_CTL_MOD,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// io_uring Constants Tests
+// =============================================================================
+
+@test
+fn test_io_uring_constants() {
+    // io_uring opcodes
+    assert(IORING_OP_READ >= 0);
+    assert(IORING_OP_WRITE >= 0);
+    assert(IORING_OP_ACCEPT >= 0);
+    assert(IORING_OP_CONNECT >= 0);
+
+    // Opcodes should be distinct
+    assert(IORING_OP_READ != IORING_OP_WRITE);
+    assert(IORING_OP_ACCEPT != IORING_OP_CONNECT);
+
+    // Standard Linux io_uring opcode values
+    assert(IORING_OP_READ == 22);  // IORING_OP_READ in Linux 5.6+
+    assert(IORING_OP_WRITE == 23); // IORING_OP_WRITE
+
+    // Enter flags
+    assert(IORING_ENTER_GETEVENTS == 1);
+
+    print("io_uring constants tests passed");
+}
+
+// =============================================================================
+// epoll Constants Tests
+// =============================================================================
+
+@test
+fn test_epoll_constants() {
+    // epoll event types
+    assert(EPOLLIN == 0x001);
+    assert(EPOLLOUT == 0x004);
+    assert(EPOLLERR == 0x008);
+    assert(EPOLLHUP == 0x010);
+    assert(EPOLLET == 0x80000000);  // Edge-triggered
+
+    // Event types are bit flags
+    let read_write = EPOLLIN | EPOLLOUT;
+    assert(read_write == 0x005);
+
+    // Combined event mask
+    let all_events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP;
+    assert((all_events & EPOLLIN) != 0);
+    assert((all_events & EPOLLOUT) != 0);
+    assert((all_events & EPOLLERR) != 0);
+    assert((all_events & EPOLLHUP) != 0);
+
+    // epoll control operations
+    assert(EPOLL_CTL_ADD == 1);
+    assert(EPOLL_CTL_DEL == 2);
+    assert(EPOLL_CTL_MOD == 3);
+
+    print("epoll constants tests passed");
+}
+
+// =============================================================================
+// io_uring Availability Tests
+// =============================================================================
+
+@test
+fn test_io_uring_availability() {
+    // Check if io_uring is available
+    let available = is_io_uring_available();
+
+    // Log availability (not a failure if unavailable)
+    if available {
+        print("io_uring is available");
+    } else {
+        print("io_uring is not available (kernel < 5.1 or no permissions)");
+    }
+
+    // Multiple calls should return consistent result
+    let available2 = is_io_uring_available();
+    assert(available == available2);
+}
+
+// =============================================================================
+// Epoll Event Tests
+// =============================================================================
+
+@test
+fn test_epoll_event() {
+    // Create epoll event
+    let event = EpollEvent {
+        events: EPOLLIN | EPOLLOUT,
+        data: 42,
+    };
+
+    assert(event.events == (EPOLLIN | EPOLLOUT));
+    assert(event.data == 42);
+
+    // Check individual event flags
+    assert((event.events & EPOLLIN) != 0);
+    assert((event.events & EPOLLOUT) != 0);
+    assert((event.events & EPOLLERR) == 0);
+    assert((event.events & EPOLLHUP) == 0);
+
+    // Create edge-triggered event
+    let et_event = EpollEvent {
+        events: EPOLLIN | EPOLLET,
+        data: 100,
+    };
+
+    assert((et_event.events & EPOLLET) != 0);
+    assert((et_event.events & EPOLLIN) != 0);
+
+    // Create error-aware event
+    let err_event = EpollEvent {
+        events: EPOLLIN | EPOLLERR | EPOLLHUP,
+        data: 200,
+    };
+
+    assert((err_event.events & EPOLLERR) != 0);
+    assert((err_event.events & EPOLLHUP) != 0);
+
+    print("Epoll event tests passed");
+}
+
+// =============================================================================
+// I/O Driver Creation Tests
+// =============================================================================
+
+@test
+fn test_io_driver_creation() {
+    // Create I/O driver (will use io_uring if available, else epoll)
+    let driver_result = create_io_driver();
+
+    match driver_result {
+        Ok(driver) => {
+            // Verify driver is valid
+            match driver {
+                IoDriver.IoUring(uring) => {
+                    print("Created io_uring driver");
+                    // io_uring driver created
+                }
+                IoDriver.Epoll(epoll) => {
+                    print("Created epoll driver");
+                    // epoll driver created
+                }
+            }
+        }
+        Err(e) => {
+            // May fail in restricted environments
+            print(f"Failed to create I/O driver: {e.message()}");
+        }
+    }
+}
+
+// =============================================================================
+// IoError Type Tests
+// =============================================================================
+
+@test
+fn test_io_error_types() {
+    // Create various IoError variants
+    let sys_err = IoError.SystemError { errno: 22, message: "Invalid argument" };
+    let ring_err = IoError.RingSetupFailed { reason: "No memory" };
+    let sq_err = IoError.SubmissionFailed { sqe_count: 10 };
+    let cq_err = IoError.CompletionFailed { cqe_count: 5 };
+    let timeout = IoError.Timeout { ms: 1000 };
+    let closed = IoError.DriverClosed;
+
+    // Pattern matching
+    match sys_err {
+        IoError.SystemError { errno, message } => {
+            assert(errno == 22);
+            assert(message.contains("Invalid"));
+        }
+        _ => assert(false),
+    }
+
+    match ring_err {
+        IoError.RingSetupFailed { reason } => {
+            assert(reason == "No memory");
+        }
+        _ => assert(false),
+    }
+
+    match sq_err {
+        IoError.SubmissionFailed { sqe_count } => {
+            assert(sqe_count == 10);
+        }
+        _ => assert(false),
+    }
+
+    match cq_err {
+        IoError.CompletionFailed { cqe_count } => {
+            assert(cqe_count == 5);
+        }
+        _ => assert(false),
+    }
+
+    match timeout {
+        IoError.Timeout { ms } => {
+            assert(ms == 1000);
+        }
+        _ => assert(false),
+    }
+
+    match closed {
+        IoError.DriverClosed => { /* ok */ }
+        _ => assert(false),
+    }
+
+    print("IoError type tests passed");
+}
+
+// =============================================================================
+// io_uring SQE/CQE Tests
+// =============================================================================
+
+@test
+fn test_io_uring_sqe_cqe() {
+    // Create SQE (Submission Queue Entry)
+    let sqe = IoUringSqe {
+        opcode: IORING_OP_READ,
+        flags: 0,
+        fd: 0,
+        off: 0,
+        addr: 0,
+        len: 4096,
+        user_data: 123,
+    };
+
+    assert(sqe.opcode == IORING_OP_READ);
+    assert(sqe.len == 4096);
+    assert(sqe.user_data == 123);
+
+    // Create CQE (Completion Queue Entry)
+    let cqe = IoUringCqe {
+        user_data: 123,
+        res: 4096,  // Bytes read
+        flags: 0,
+    };
+
+    assert(cqe.user_data == 123);
+    assert(cqe.res == 4096);
+
+    // Error result (negative errno)
+    let err_cqe = IoUringCqe {
+        user_data: 456,
+        res: -22,  // -EINVAL
+        flags: 0,
+    };
+
+    assert(err_cqe.res < 0);
+
+    print("io_uring SQE/CQE tests passed");
+}
+
+// =============================================================================
+// io_uring Params Tests
+// =============================================================================
+
+@test
+fn test_io_uring_params() {
+    // Create default params
+    let params = IoUringParams {
+        sq_entries: 256,
+        cq_entries: 512,
+        flags: 0,
+        sq_thread_cpu: 0,
+        sq_thread_idle: 0,
+    };
+
+    assert(params.sq_entries == 256);
+    assert(params.cq_entries == 512);
+
+    // CQ entries should be >= SQ entries (or 2x typically)
+    assert(params.cq_entries >= params.sq_entries);
+
+    // Common configuration: CQ = 2 * SQ
+    let params2 = IoUringParams {
+        sq_entries: 128,
+        cq_entries: 256,
+        flags: 0,
+        sq_thread_cpu: 0,
+        sq_thread_idle: 0,
+    };
+
+    assert(params2.cq_entries == params2.sq_entries * 2);
+
+    print("io_uring params tests passed");
+}
+
+// =============================================================================
+// Epoll Driver Type Tests
+// =============================================================================
+
+@test
+fn test_epoll_driver_type() {
+    // EpollDriver should have fd field
+    // Note: We can't actually create one without syscall,
+    // so we just verify the type exists
+
+    // Create mock structure for type checking
+    let _mock = EpollDriver {
+        fd: -1,  // Invalid fd for type checking only
+        events: [],
+    };
+
+    print("Epoll driver type tests passed");
+}

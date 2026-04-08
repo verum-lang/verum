@@ -1,0 +1,220 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: smt, datatypes
+// @timeout: 5000
+
+/// SMT verification for algebraic datatypes
+/// Tests ADT theory and structural reasoning
+
+/// Option type verification
+@verify(proof)
+fn map_option<A, B>(opt: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    contract#"
+        ensures match (opt, result) {
+            (Some(a), Some(b)) => b == f(a),
+            (None, None) => true,
+            _ => false
+        };
+    ";
+    match opt {
+        Some(a) => Some(f(a)),
+        None => None,
+    }
+}
+
+@verify(proof)
+fn unwrap_or<T>(opt: Maybe<T>, default: T) -> T {
+    contract#"
+        ensures match opt {
+            Some(val) => result == val,
+            None => result == default
+        };
+    ";
+    match opt {
+        Some(val) => val,
+        None => default,
+    }
+}
+
+/// Result type verification
+@verify(proof)
+fn map_result<T, E, U>(res: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    contract#"
+        ensures match (res, result) {
+            (Ok(t), Ok(u)) => u == f(t),
+            (Err(e1), Err(e2)) => e1 == e2,
+            _ => false
+        };
+    ";
+    match res {
+        Ok(t) => Ok(f(t)),
+        Err(e) => Err(e),
+    }
+}
+
+/// List/Cons datatype verification
+type List<T> is Nil | Cons(T, Heap<List<T>>);
+
+@verify(proof)
+fn list_length<T>(list: &List<T>) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures match list {
+            Nil => result == 0,
+            Cons(_, tail) => result == 1 + list_length(tail)
+        };
+        decreases list;
+    ";
+    match list {
+        List.Nil => 0,
+        List.Cons(_, tail) => 1 + list_length(tail),
+    }
+}
+
+@verify(proof)
+fn list_append<T>(a: List<T>, b: List<T>) -> List<T> {
+    contract#"
+        ensures list_length(&result) == list_length(&a) + list_length(&b);
+        decreases a;
+    ";
+    match a {
+        List.Nil => b,
+        List.Cons(head, tail) => List.Cons(head, Heap(list_append(*tail, b))),
+    }
+}
+
+/// Binary tree verification
+type Tree<T> is Leaf | Node(T, Heap<Tree<T>>, Heap<Tree<T>>);
+
+@verify(proof)
+fn tree_size<T>(tree: &Tree<T>) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures match tree {
+            Leaf => result == 0,
+            Node(_, left, right) => result == 1 + tree_size(left) + tree_size(right)
+        };
+        decreases tree;
+    ";
+    match tree {
+        Tree.Leaf => 0,
+        Tree.Node(_, left, right) => 1 + tree_size(left) + tree_size(right),
+    }
+}
+
+@verify(proof)
+fn tree_height<T>(tree: &Tree<T>) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures match tree {
+            Leaf => result == 0,
+            Node(_, left, right) => result == 1 + max(tree_height(left), tree_height(right))
+        };
+        decreases tree;
+    ";
+    match tree {
+        Tree.Leaf => 0,
+        Tree.Node(_, left, right) => 1 + max(tree_height(left), tree_height(right)),
+    }
+}
+
+/// BST invariant
+@verify(proof)
+fn is_bst(tree: &Tree<Int>) -> Bool {
+    contract#"
+        ensures result == is_bst_helper(tree, Int.MIN, Int.MAX);
+    ";
+    is_bst_helper(tree, Int.MIN, Int.MAX)
+}
+
+@verify(proof)
+fn is_bst_helper(tree: &Tree<Int>, min: Int, max: Int) -> Bool {
+    contract#"
+        ensures match tree {
+            Leaf => result == true,
+            Node(val, left, right) =>
+                result == (val > min && val < max &&
+                          is_bst_helper(left, min, val) &&
+                          is_bst_helper(right, val, max))
+        };
+        decreases tree;
+    ";
+    match tree {
+        Tree.Leaf => true,
+        Tree.Node(val, left, right) => {
+            *val > min && *val < max &&
+            is_bst_helper(left, min, *val) &&
+            is_bst_helper(right, *val, max)
+        }
+    }
+}
+
+/// Error type for full queue
+type QueueFull is ();
+
+/// Struct with invariants
+type BoundedQueue<T> is {
+    data: List<T>,
+    capacity: Int,
+} { self.capacity > 0 && self.data.len() <= self.capacity };
+
+@verify(proof)
+fn queue_enqueue<T>(queue: &mut BoundedQueue<T>, item: T) -> Result<(), QueueFull> {
+    contract#"
+        ensures match result {
+            Ok(_) => queue.data.len() == old(queue.data.len()) + 1,
+            Err(_) => queue.data.len() == queue.capacity
+        };
+    ";
+    if queue.data.len() >= queue.capacity {
+        Err(QueueFull)
+    } else {
+        queue.data.push(item);
+        Ok(())
+    }
+}
+
+/// Sum type with exhaustive matching
+type JsonValue is Null | Bool(Bool) | Number(Float) | String(Text) | Array(List<JsonValue>) | Object(Map<Text, JsonValue>);
+
+@verify(proof)
+fn json_is_scalar(value: &JsonValue) -> Bool {
+    contract#"
+        ensures result == match value {
+            Null | Bool(_) | Number(_) | String(_) => true,
+            Array(_) | Object(_) => false
+        };
+    ";
+    match value {
+        JsonValue.Null => true,
+        JsonValue.Bool(_) => true,
+        JsonValue.Number(_) => true,
+        JsonValue.String(_) => true,
+        JsonValue.Array(_) => false,
+        JsonValue.Object(_) => false,
+    }
+}
+
+/// Recursive datatype with measures
+@verify(proof)
+fn count_leaves<T>(tree: &Tree<T>) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result == 0 implies tree == &Tree.Leaf;
+        ensures result > 0 implies tree != &Tree.Leaf;
+        decreases tree;
+    ";
+    match tree {
+        Tree.Leaf => 0,
+        Tree.Node(_, left, right) => {
+            let left_leaves = count_leaves(left);
+            let right_leaves = count_leaves(right);
+            if left_leaves == 0 && right_leaves == 0 {
+                1  // This is a leaf node
+            } else {
+                left_leaves + right_leaves
+            }
+        }
+    }
+}

@@ -1,0 +1,85 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, control-flow, nested, complex
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Nested control flow: loops inside ifs, match inside loops, complex branching
+
+fn collatz_steps(n: Int) -> Int {
+    let mut x = n;
+    let mut steps = 0;
+    while x != 1 {
+        if x % 2 == 0 {
+            x = x / 2;
+        } else {
+            x = 3 * x + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn digit_sum(n: Int) -> Int {
+    let mut x = if n < 0 { -n } else { n };
+    let mut sum = 0;
+    while x > 0 {
+        sum = sum + x % 10;
+        x = x / 10;
+    }
+    sum
+}
+
+fn main() -> Int {
+    // Collatz sequence
+    assert_eq(collatz_steps(1), 0);
+    assert_eq(collatz_steps(2), 1);
+    assert_eq(collatz_steps(3), 7);
+    assert_eq(collatz_steps(6), 8);
+    assert_eq(collatz_steps(27), 111);
+
+    // Digit sum
+    assert_eq(digit_sum(0), 0);
+    assert_eq(digit_sum(123), 6);
+    assert_eq(digit_sum(999), 27);
+    assert_eq(digit_sum(100000), 1);
+
+    // Nested loop: multiplication table check
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 9 {
+        let mut j = 1;
+        while j <= 9 {
+            let prod = i * j;
+            if prod % 7 == 0 {
+                sum = sum + prod;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Products divisible by 7: 7,14,21,28,35,42,49,56,63,14,28,42,56,21,42,63,28,56,35,63,42,49,56,63
+    assert_eq(sum, 784);
+
+    // Complex conditional accumulation
+    let mut result = 0;
+    let mut k = 1;
+    while k <= 50 {
+        if k % 2 == 0 {
+            if k % 3 == 0 {
+                result = result + k;   // divisible by 6
+            }
+        } else {
+            if k % 5 == 0 {
+                result = result - k;   // odd multiples of 5
+            }
+        }
+        k = k + 1;
+    }
+    // div by 6: 6+12+18+24+30+36+42+48 = 216
+    // odd mult of 5: 5+15+25+35+45 = 125
+    assert_eq(result, 216 - 125);
+
+    print("diff_nested_control: ok");
+    0
+}

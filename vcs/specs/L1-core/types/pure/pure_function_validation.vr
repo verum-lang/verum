@@ -1,0 +1,499 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L1
+// @tags: types, pure, computational-properties, purity, side-effects
+// @description: Test pure function type validation and purity inference
+//
+// This file tests pure function validation rules:
+// 1. Pure function calling pure function (OK)
+// 2. Pure function calling IO function (FAIL)
+// 3. Pure function with mutable references (FAIL)
+// 4. Pure function accessing global state (FAIL)
+// 5. Pure function with only local operations (OK)
+// 6. Pure context group equivalence: `pure fn` vs `using Pure`
+//
+// Grammar v2.12: grammar/verum.ebnf Section 2.4 - function_modifiers
+// Spec: docs/detailed/16-context-system.md Section 2.11 Section 6
+
+// ============================================================================
+// Context Definitions for Testing
+// ============================================================================
+
+context IO {
+    fn print(message: Text);
+    fn read_line() -> Text;
+}
+
+context Database {
+    fn query(sql: Text) -> Result<List<Row>, DbError>;
+    fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+context Network {
+    fn get(url: Text) -> Result<Response, NetworkError>;
+}
+
+context FileSystem {
+    fn read(path: Text) -> Result<Text, IoError>;
+    fn write(path: Text, content: Text) -> Result<(), IoError>;
+}
+
+context State<T> {
+    fn get() -> T;
+    fn put(value: T);
+}
+
+context Random {
+    fn next_int() -> Int;
+}
+
+context Time {
+    fn now() -> Timestamp;
+}
+
+// Type definitions
+type Row is Map<Text, Text>;
+type DbError is Failed(Text);
+type NetworkError is Failed(Text);
+type IoError is Failed(Text);
+type Response is { status: Int, body: Text };
+type Timestamp is Int;
+
+// Global mutable state (for testing purity violations)
+static mut GLOBAL_COUNTER: Int = 0;
+
+// ============================================================================
+// Standard Pure Context Group Definition
+// ============================================================================
+
+/// Pure context group excludes all side-effectful contexts
+/// This is the canonical definition of "pure" in Verum
+using Pure = [!IO, !State<_>, !Random, !Network, !FileSystem, !Database, !Time];
+
+// ============================================================================
+// Section 1: Pure Function Calling Pure Function (OK)
+// ============================================================================
+// @test: typecheck-pass
+
+/// Basic pure function - no side effects
+pure fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+/// Pure function calling another pure function - OK
+pure fn add_three(a: Int, b: Int, c: Int) -> Int {
+    add(add(a, b), c)
+}
+
+/// Pure function with local variables only - OK
+pure fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+/// Pure function calling multiple pure functions - OK
+pure fn combined_calculation(x: Int, y: Int, z: Int) -> Int {
+    let sum = add(x, y);
+    let product = multiply(sum, z);
+    let fact = factorial(product);
+    fact
+}
+
+pure fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+/// Pure function with pattern matching (pure operation) - OK
+pure fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+/// Pure function with closures over local scope - OK
+pure fn apply_twice<T>(f: fn(T) -> T, x: T) -> T {
+    f(f(x))
+}
+
+/// Pure function composition - OK
+pure fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |x| g(f(x))
+}
+
+/// Pure function with generic type parameters - OK
+pure fn identity<T>(x: T) -> T {
+    x
+}
+
+/// Pure function with complex local computation - OK
+pure fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+// ============================================================================
+// Section 2: Pure Function Calling IO Function (FAIL)
+// ============================================================================
+// @test: typecheck-fail
+// @expected-error: E701 "Purity violation: pure function cannot call IO function"
+
+/// ERROR: Pure function calling IO context - violates purity
+pure fn impure_with_io(x: Int) -> Int {
+    print(f"Value: {x}");  // ERROR: IO side effect in pure function
+    x
+}
+
+/// ERROR: Pure function calling print (IO) - violates purity
+pure fn impure_print(message: Text) -> () {
+    print(message);  // ERROR: print is an IO operation
+}
+
+/// ERROR: Pure function reading from IO - violates purity
+pure fn impure_read() -> Text {
+    IO.read_line()  // ERROR: IO side effect
+}
+
+// ============================================================================
+// Section 3: Pure Function With Mutable References (FAIL)
+// ============================================================================
+// @test: typecheck-fail
+// @expected-error: E702 "Purity violation: pure function cannot use mutable references"
+
+/// ERROR: Pure function with &mut parameter - violates purity
+pure fn impure_mutate(x: &mut Int) -> Int {
+    *x += 1;  // ERROR: mutation in pure function
+    *x
+}
+
+/// ERROR: Pure function mutating through reference - violates purity
+pure fn impure_increment(counter: &mut Int) -> () {
+    *counter = *counter + 1;  // ERROR: mutation
+}
+
+/// ERROR: Pure function creating mutable reference - violates purity
+pure fn impure_local_mut() -> Int {
+    let mut x = 0;  // ERROR: local mutable variable in pure function
+    x += 1;
+    x
+}
+
+/// ERROR: Pure function with mutable closure capture - violates purity
+pure fn impure_closure_mutate(initial: Int) -> Int {
+    let mut acc = initial;  // ERROR: mutable local
+    let f = || {
+        acc += 1;  // ERROR: mutating captured variable
+        acc
+    };
+    f()
+}
+
+// ============================================================================
+// Section 4: Pure Function Accessing Global State (FAIL)
+// ============================================================================
+// @test: typecheck-fail
+// @expected-error: E703 "Purity violation: pure function cannot access global mutable state"
+
+/// ERROR: Pure function reading global mutable state - violates purity
+pure fn impure_read_global() -> Int {
+    GLOBAL_COUNTER  // ERROR: reading global mutable state
+}
+
+/// ERROR: Pure function writing global mutable state - violates purity
+pure fn impure_write_global() -> () {
+    GLOBAL_COUNTER = 42;  // ERROR: writing global mutable state
+}
+
+/// ERROR: Pure function modifying global state - violates purity
+pure fn impure_increment_global() -> Int {
+    GLOBAL_COUNTER += 1;  // ERROR: modifying global state
+    GLOBAL_COUNTER
+}
+
+/// ERROR: Pure function using State context - violates purity
+pure fn impure_with_state() -> Int using [State<Int>] {
+    State.get()  // ERROR: State context forbidden in pure function
+}
+
+/// ERROR: Pure function using Random context - violates purity (non-deterministic)
+pure fn impure_random() -> Int using [Random] {
+    Random.next_int()  // ERROR: Random is non-deterministic
+}
+
+/// ERROR: Pure function using Time context - violates purity (non-deterministic)
+pure fn impure_time() -> Timestamp using [Time] {
+    Time.now()  // ERROR: Time is non-deterministic
+}
+
+// ============================================================================
+// Section 5: Pure Function With Only Local Operations (OK)
+// ============================================================================
+// @test: typecheck-pass
+
+/// Pure function with local immutable bindings - OK
+pure fn local_bindings(x: Int) -> Int {
+    let a = x + 1;
+    let b = a * 2;
+    let c = b - 3;
+    c
+}
+
+/// Pure function with nested let bindings - OK
+pure fn nested_lets(n: Int) -> Int {
+    let outer = {
+        let inner = n * 2;
+        inner + 1
+    };
+    outer * 3
+}
+
+/// Pure function with tuple operations - OK
+pure fn tuple_ops(x: Int, y: Int) -> Int {
+    let pair = (x, y);
+    let (a, b) = pair;
+    a + b
+}
+
+/// Pure function with record operations - OK
+type Point is { x: Int, y: Int };
+
+pure fn point_distance(p1: Point, p2: Point) -> Int {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    dx * dx + dy * dy  // Squared distance (avoiding sqrt for simplicity)
+}
+
+/// Pure function with match expression - OK
+type Maybe<T> is None | Some(T);
+
+pure fn unwrap_or<T>(opt: Maybe<T>, default: T) -> T {
+    match opt {
+        Some(v) => v,
+        None => default,
+    }
+}
+
+/// Pure function with list operations (pure methods only) - OK
+pure fn sum_list(xs: List<Int>) -> Int {
+    xs.fold(0, |acc, x| acc + x)
+}
+
+/// Pure function with immutable reference parameter - OK
+pure fn read_reference(x: &Int) -> Int {
+    *x + 1  // Reading through immutable reference is pure
+}
+
+/// Pure function returning reference to input - OK
+pure fn select_larger<'a>(a: &'a Int, b: &'a Int) -> &'a Int {
+    if *a > *b { a } else { b }
+}
+
+/// Pure function with complex control flow - OK
+pure fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+/// Pure function with loop-like recursion - OK
+pure fn power(base: Int, exp: Int) -> Int {
+    if exp == 0 {
+        1
+    } else if exp % 2 == 0 {
+        let half = power(base, exp / 2);
+        half * half
+    } else {
+        base * power(base, exp - 1)
+    }
+}
+
+// ============================================================================
+// Section 6: Pure Context Group Equivalence: `pure fn` vs `using Pure`
+// ============================================================================
+// @test: typecheck-pass
+
+/// Function using Pure context group - equivalent to `pure fn`
+fn using_pure_group(x: Int, y: Int) -> Int
+    using Pure
+{
+    x + y
+}
+
+/// The `pure fn` modifier is syntactic sugar for `using Pure`
+/// These two declarations should be type-equivalent:
+
+/// Option A: Using `pure fn` modifier
+pure fn pure_modifier_style(x: Int) -> Int {
+    x * x
+}
+
+/// Option B: Using `using Pure` context group
+fn context_group_style(x: Int) -> Int
+    using Pure
+{
+    x * x
+}
+
+/// Verify that both can call each other (same purity level)
+pure fn calls_context_style(x: Int) -> Int {
+    context_group_style(x)  // OK: both are pure
+}
+
+fn calls_modifier_style(x: Int) -> Int
+    using Pure
+{
+    pure_modifier_style(x)  // OK: both are pure
+}
+
+/// Complex example with both styles
+pure fn pure_transform<T, U>(value: T, f: fn(T) -> U) -> U {
+    f(value)
+}
+
+fn context_transform<T, U>(value: T, f: fn(T) -> U) -> U
+    using Pure
+{
+    f(value)
+}
+
+/// Cross-calling between styles should work
+pure fn cross_call_example(n: Int) -> Int {
+    let doubled = context_group_style(n);    // Call using Pure function
+    let squared = pure_modifier_style(doubled);  // Call pure fn function
+    squared
+}
+
+/// Equivalence verification: both should have same computational properties
+@verify(static)
+fn verify_pure_equivalence() {
+    // Both styles should produce identical computational property sets
+    static_assert(properties_of(pure_modifier_style) == properties_of(context_group_style));
+
+    // Both should be recognized as pure
+    static_assert(properties_of(pure_modifier_style) == {Pure});
+    static_assert(properties_of(context_group_style) == {Pure});
+
+    // Neither should have IO, State, or other impure properties
+    static_assert(!properties_of(pure_modifier_style).contains(IO));
+    static_assert(!properties_of(context_group_style).contains(IO));
+    static_assert(!properties_of(pure_modifier_style).contains(Mutates));
+    static_assert(!properties_of(context_group_style).contains(Mutates));
+}
+
+// ============================================================================
+// Section 7: Additional Purity Violation Cases
+// ============================================================================
+// @test: typecheck-fail
+
+/// ERROR: Pure function calling impure function
+fn impure_helper() -> Int using [IO] {
+    IO.print("side effect");
+    42
+}
+
+pure fn calls_impure() -> Int {
+    impure_helper()  // ERROR: calling impure function from pure context
+}
+
+/// ERROR: Pure function with Database context
+pure fn impure_database() -> Int using [Database] {
+    let result = Database.query("SELECT 1");  // ERROR: Database is impure
+    42
+}
+
+/// ERROR: Pure function with Network context
+pure fn impure_network() -> Int using [Network] {
+    let response = Network.get("http://example.com");  // ERROR: Network is impure
+    42
+}
+
+/// ERROR: Pure function with FileSystem context
+pure fn impure_filesystem() -> Text using [FileSystem] {
+    let content = FileSystem.read("/tmp/file.txt");  // ERROR: FileSystem is impure
+    "read"
+}
+
+// ============================================================================
+// Section 8: Edge Cases and Corner Cases
+// ============================================================================
+// @test: typecheck-pass
+
+/// Pure function with const (compile-time constant) - OK
+const PI: Float = 3.14159;
+
+pure fn circle_area(radius: Float) -> Float {
+    PI * radius * radius  // OK: const is not mutable state
+}
+
+/// Pure function with immutable static - OK (if truly immutable)
+static MAGIC_NUMBER: Int = 42;
+
+pure fn use_immutable_static() -> Int {
+    MAGIC_NUMBER  // OK: reading immutable static is pure
+}
+
+/// Pure function with type introspection - OK
+pure fn type_size<T>() -> Int {
+    T.size  // OK: type properties are compile-time constants
+}
+
+/// Pure function with panic (diverging) - OK (debatable, but allowed)
+pure fn assert_positive(n: Int) -> Int {
+    if n <= 0 {
+        panic("Expected positive number");  // OK: panic is allowed in pure functions
+    }
+    n
+}
+
+/// Pure function with unreachable - OK
+pure fn never_negative(n: Int) -> Int {
+    if n >= 0 {
+        n
+    } else {
+        unreachable()  // OK: unreachable is allowed
+    }
+}
+
+// ============================================================================
+// Test Entry Point
+// ============================================================================
+
+fn main() {
+    // Test pure functions work correctly
+    assert_eq(add(2, 3), 5);
+    assert_eq(add_three(1, 2, 3), 6);
+    assert_eq(factorial(5), 120);
+    assert_eq(fibonacci(10), 55);
+    assert_eq(max(10, 20), 20);
+    assert_eq(gcd(48, 18), 6);
+    assert_eq(power(2, 10), 1024);
+
+    // Test local operations
+    assert_eq(local_bindings(5), 9);  // ((5+1)*2)-3 = 9
+    assert_eq(sum_list([1, 2, 3, 4, 5]), 15);
+
+    // Test pure context group equivalence
+    assert_eq(pure_modifier_style(4), context_group_style(4));
+    assert_eq(pure_modifier_style(4), 16);
+
+    // Test cross-calling
+    assert_eq(calls_context_style(3), 9);
+    assert_eq(calls_modifier_style(3), 9);
+    assert_eq(cross_call_example(2), 16);  // (2*2)^2 = 16
+
+    // Test Point operations
+    let p1 = Point { x: 0, y: 0 };
+    let p2 = Point { x: 3, y: 4 };
+    assert_eq(point_distance(p1, p2), 25);  // 3^2 + 4^2 = 25
+
+    // Test Maybe operations
+    assert_eq(unwrap_or(Some(42), 0), 42);
+    assert_eq(unwrap_or(None, 0), 0);
+
+    print("All pure function validation tests passed!");
+}

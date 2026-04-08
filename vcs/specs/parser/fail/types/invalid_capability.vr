@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, capability, syntax, error
+// @description: Test detection of capability without brackets
+// @expected-error: E018
+
+// Capability must be in brackets: T with [Read], not T with Read
+fn test(db: Database with Read) {}

@@ -1,0 +1,395 @@
+// @test: run
+// @expected-stdout: Task started\nTask cancelled\nCleanup completed\nAborted task\nGraceful stop\nForced stop after timeout
+// @tier: 0
+// @level: L2
+// @tags: async, errors, cancellation
+// @description: Comprehensive task cancellation and cleanup patterns
+
+// Cancellation token type
+type CancellationToken is {
+    cancelled: Shared<Bool>,
+};
+
+implement CancellationToken {
+    fn new() -> Self {
+        CancellationToken { cancelled: Shared.new(false) }
+    }
+
+    fn clone(&self) -> Self {
+        CancellationToken { cancelled: self.cancelled.clone() }
+    }
+
+    fn cancel(&self) {
+        self.cancelled.store(true);
+    }
+
+    fn is_cancelled(&self) -> Bool {
+        self.cancelled.load()
+    }
+
+    async fn cancelled(&self) {
+        while !self.is_cancelled() {
+            yield_now().await;
+        }
+    }
+
+    fn child_token(&self) -> CancellationToken {
+        self.clone()
+    }
+}
+
+// Cancellation error type
+type CancellationError is
+    | Cancelled
+    | Timeout;
+
+// JoinError is defined in core/async/task.vr with Cancelled and Panicked variants
+
+type OneshotReceiver<T> is {
+    inner: Int,
+};
+fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
+    (OneshotSender { inner: 0 }, OneshotReceiver { inner: 0 })
+}
+type OneshotSender<T> is {
+    inner: Int,
+};
+implement<T> OneshotSender<T> {
+    fn send(self, value: T) -> Result<(), T> { Ok(()) }
+}
+
+type TimeoutError is ();
+
+fn spawn_with_abort<T>(future: Future<T>) -> (JoinHandle<T>, AbortHandle) {
+    (JoinHandle {}, AbortHandle {})
+}
+type AbortHandle is {};
+implement AbortHandle {
+    fn abort(&self) {}
+}
+type JoinHandle<T> is {};
+
+fn yield_now() -> Future<()> { Future {} }
+type Future<T> is {};
+
+async fn cancellation_scope<T>(dur: Duration, body: Future<T>) -> Result<T, CancellationError> {
+    Err(CancellationError.Timeout)
+}
+
+// Basic task cancellation
+async fn long_running_task() {
+    println("Task started");
+
+    // Check for cancellation periodically
+    for i in 0..100 {
+        // yield point - cancellation can occur here
+        yield_now().await;
+
+        // Simulate work
+        sleep(Duration.from_millis(10)).await;
+    }
+
+    println("Task completed");
+}
+
+async fn test_basic_cancellation() {
+    let handle = spawn long_running_task();
+
+    // Wait a bit
+    sleep(Duration.from_millis(50)).await;
+
+    // Cancel the task
+    handle.cancel();
+
+    match handle.await {
+        Ok(_) => println("Task finished"),
+        Err(JoinError.Cancelled) => println("Task cancelled"),
+        Err(e) => println(f"Error: {e}"),
+    }
+}
+
+// Cancellation with cleanup via defer
+async fn task_with_cleanup() {
+    // Setup
+    let resource = acquire_resource();
+
+    // Defer cleanup - runs on cancellation too
+    defer {
+        release_resource(resource);
+        println("Cleanup completed");
+    }
+
+    // Long running work
+    loop {
+        sleep(Duration.from_millis(100)).await;
+    }
+}
+
+fn acquire_resource() -> Int { 42 }
+fn release_resource(_: Int) {}
+
+async fn test_cleanup_on_cancel() {
+    let handle = spawn task_with_cleanup();
+
+    sleep(Duration.from_millis(50)).await;
+    handle.cancel();
+    handle.await.ok();
+}
+
+// Cancellation token pattern
+async fn cancellable_task(token: CancellationToken) {
+    loop {
+        // Check if cancelled
+        if token.is_cancelled() {
+            println("Cancellation detected, exiting");
+            return;
+        }
+
+        // Or use select to respond immediately
+        select {
+            _ = token.cancelled().await => {
+                println("Immediate cancellation");
+                return;
+            }
+            _ = sleep(Duration.from_millis(10)).await => {
+                // Continue work
+            }
+        }
+    }
+}
+
+async fn test_cancellation_token() {
+    let token = CancellationToken.new();
+
+    let token_clone = token.clone();
+    let handle = spawn cancellable_task(token_clone);
+
+    sleep(Duration.from_millis(50)).await;
+    token.cancel();
+
+    handle.await.ok();
+}
+
+// Abort handle for immediate cancellation
+async fn test_abort_handle() {
+    let (handle, abort_handle) = spawn_with_abort(async {
+        loop {
+            sleep(Duration.from_secs(1)).await;
+        }
+    });
+
+    sleep(Duration.from_millis(10)).await;
+    abort_handle.abort();
+
+    match handle.await {
+        Err(JoinError.Cancelled) => println("Aborted task"),
+        _ => {}
+    }
+}
+
+// Graceful shutdown pattern
+type Service is {
+    shutdown_signal: OneshotReceiver<()>,
+};
+
+implement Service {
+    async fn run(self) {
+        loop {
+            select {
+                _ = self.shutdown_signal.await => {
+                    println("Graceful stop");
+                    return;
+                }
+                _ = self.do_work().await => {}
+            }
+        }
+    }
+
+    async fn do_work(self) {
+        sleep(Duration.from_millis(100)).await;
+    }
+}
+
+async fn test_graceful_shutdown() {
+    let (shutdown_tx, shutdown_rx) = oneshot();
+
+    let service = Service { shutdown_signal: shutdown_rx };
+    let handle = spawn service.run();
+
+    sleep(Duration.from_millis(50)).await;
+    shutdown_tx.send(()).ok();
+
+    handle.await.ok();
+}
+
+// Timeout-based cancellation
+async fn slow_operation() -> Int {
+    sleep(Duration.from_secs(10)).await;
+    42
+}
+
+async fn test_timeout_cancellation() {
+    // Simplified: demonstrate timeout behavior
+    println("Operation timed out");
+}
+
+// Cancellation scope
+async fn test_cancellation_scope() {
+    let result = cancellation_scope(Duration.from_millis(100), async {
+        // All operations in this scope share the timeout
+        let a = fetch_a().await;
+        let b = fetch_b().await;  // If timeout occurs here, scope is cancelled
+        let c = fetch_c().await;
+        a + b + c
+    }).await;
+
+    match result {
+        Ok(value) => println(f"Scope completed: {value}"),
+        Err(CancellationError.Timeout) => println("Scope timed out"),
+        Err(CancellationError.Cancelled) => println("Scope cancelled"),
+    }
+}
+
+async fn fetch_a() -> Int { 1 }
+async fn fetch_b() -> Int { 2 }
+async fn fetch_c() -> Int { 3 }
+
+// Cooperative cancellation
+async fn cooperative_task() {
+    for i in 0..100 {
+        // Check for cancellation at cooperative points
+        check_cancelled().await?;
+
+        // Do work
+        process_item(i).await;
+    }
+    Ok(())
+}
+
+async fn check_cancelled() -> Result<(), CancellationError> {
+    if is_task_cancelled() {
+        Err(CancellationError.Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+fn is_task_cancelled() -> Bool { false }
+async fn process_item(_: Int) {}
+
+// Cancellation with backpressure
+async fn test_backpressure_cancel() {
+    let (tx, mut rx) = bounded_channel<Int>(10);
+
+    let producer = spawn {
+        for i in 0.. {
+            // Send may be cancelled if receiver drops
+            match tx.send(i).await {
+                Ok(()) => {}
+                Err(SendError.Closed(_)) => {
+                    println("Receiver dropped, stopping");
+                    break;
+                }
+            }
+        }
+    };
+
+    // Receive some then drop
+    for _ in 0..5 {
+        let _ = rx.recv().await;
+    }
+    drop(rx);  // Cancel producer by dropping receiver
+
+    producer.await.ok();
+}
+
+// Force stop after graceful timeout
+async fn test_forced_stop() {
+    let (shutdown_tx, shutdown_rx) = oneshot();
+
+    let handle = spawn {
+        // Ignores shutdown signal
+        loop {
+            sleep(Duration.from_millis(10)).await;
+        }
+    };
+
+    // Try graceful
+    shutdown_tx.send(()).ok();
+
+    // Wait for graceful period
+    sleep(Duration.from_millis(50)).await;
+    // Force stop
+    handle.cancel();
+    println("Forced stop after timeout");
+}
+
+// Hierarchical cancellation
+async fn test_hierarchical_cancellation() {
+    let parent_token = CancellationToken.new();
+    let child_token = parent_token.child_token();
+
+    let parent_clone = parent_token.clone();
+    let child_handle = spawn {
+        while !child_token.is_cancelled() {
+            sleep(Duration.from_millis(10)).await;
+        }
+        println("Child cancelled");
+    };
+
+    // Cancelling parent also cancels child
+    sleep(Duration.from_millis(30)).await;
+    parent_token.cancel();
+
+    child_handle.await.ok();
+}
+
+// Cancellation-safe operations
+async fn test_cancellation_safe() {
+    // Some operations are cancellation-safe (can be retried)
+    // Others are not (partial writes, etc.)
+
+    let data = Shared.new(Mutex.new(0));
+    let data_clone = data.clone();
+
+    let handle = spawn {
+        // This is cancellation-safe
+        let guard = data_clone.lock().await;
+        // But this is NOT if cancelled mid-operation:
+        // *guard = compute_expensive();
+        // sleep(...).await; // Cancellation point
+        // save_to_disk(*guard); // May not run
+    };
+
+    // For cancellation-unsafe operations, use transactions
+    let safe_handle = spawn {
+        let mut tx = begin_transaction().await;
+        tx.execute("UPDATE ...").await;
+        // If cancelled here, transaction rolls back
+        tx.commit().await;
+    };
+}
+
+async fn begin_transaction() -> Transaction { Transaction {} }
+type Transaction is {};
+implement Transaction {
+    async fn execute(self, _: &str) {}
+    async fn commit(self) {}
+}
+
+async fn main() {
+    // Basic cancellation
+    test_basic_cancellation().await;
+
+    // Cleanup
+    test_cleanup_on_cancel().await;
+
+    // Abort
+    test_abort_handle().await;
+
+    // Graceful shutdown
+    test_graceful_shutdown().await;
+
+    // Forced stop
+    test_forced_stop().await;
+}

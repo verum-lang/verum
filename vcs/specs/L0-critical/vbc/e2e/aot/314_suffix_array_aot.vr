@@ -1,0 +1,305 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, suffix-array, string-matching, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for suffix array construction on integer sequences
+// Uses simple O(n^2) comparison-based construction
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn min2(a: Int, b_val: Int) -> Int { if a < b_val { a } else { b_val } }
+
+// Compare suffix starting at position i with suffix starting at position j
+// in array `data` of length n. Returns: -1 if suffix_i < suffix_j, 0 if equal, 1 if greater
+fn compare_suffixes(data: Arr8, n: Int, i: Int, j: Int) -> Int {
+    let mut k = 0;
+    let len_i = n - i;
+    let len_j = n - j;
+    let max_k = min2(len_i, len_j);
+    while k < max_k {
+        let a_val = arr8_get(data, i + k);
+        let b_val = arr8_get(data, j + k);
+        if a_val < b_val { return -1; }
+        if a_val > b_val { return 1; }
+        k = k + 1;
+    }
+    // Shorter suffix comes first
+    if len_i < len_j { -1 } else if len_i > len_j { 1 } else { 0 }
+}
+
+// Build suffix array using insertion sort on suffix indices
+fn build_suffix_array(data: Arr8) -> Arr8 {
+    let n = data.len;
+    // Initialize with identity permutation [0, 1, 2, ..., n-1]
+    let mut sa = arr8_new(n);
+    let mut i = 0;
+    while i < n {
+        sa = arr8_set(sa, i, i);
+        i = i + 1;
+    }
+
+    // Insertion sort on suffix indices
+    let mut i2 = 1;
+    while i2 < n {
+        let key = arr8_get(sa, i2);
+        let mut j = i2 - 1;
+        let mut insert_pos = i2;
+        let mut found = 0;
+        while j >= 0 {
+            if found == 0 {
+                if compare_suffixes(data, n, arr8_get(sa, j), key) > 0 {
+                    sa = arr8_set(sa, j + 1, arr8_get(sa, j));
+                    insert_pos = j;
+                    j = j - 1;
+                } else {
+                    insert_pos = j + 1;
+                    found = 1;
+                    j = -1;
+                }
+            } else {
+                j = -1;
+            }
+        }
+        if found == 0 {
+            insert_pos = 0;
+        }
+        sa = arr8_set(sa, insert_pos, key);
+        i2 = i2 + 1;
+    }
+    sa
+}
+
+// Verify suffix array is sorted
+fn is_sa_sorted(data: Arr8, sa: Arr8) -> Int {
+    let mut i = 1;
+    while i < sa.len {
+        let cmp = compare_suffixes(data, data.len, arr8_get(sa, i - 1), arr8_get(sa, i));
+        if cmp > 0 { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Compute LCP (Longest Common Prefix) between two suffixes
+fn lcp_at(data: Arr8, i: Int, j: Int) -> Int {
+    let n = data.len;
+    let mut k = 0;
+    while i + k < n {
+        if j + k >= n { return k; }
+        if arr8_get(data, i + k) != arr8_get(data, j + k) { return k; }
+        k = k + 1;
+    }
+    k
+}
+
+// Compute LCP array from suffix array
+fn build_lcp_array(data: Arr8, sa: Arr8) -> Arr8 {
+    let n = sa.len;
+    let mut lcp = arr8_new(n);
+    // lcp[0] is undefined (no predecessor), set to 0
+    let mut i = 1;
+    while i < n {
+        let prev_suffix = arr8_get(sa, i - 1);
+        let cur_suffix = arr8_get(sa, i);
+        lcp = arr8_set(lcp, i, lcp_at(data, prev_suffix, cur_suffix));
+        i = i + 1;
+    }
+    lcp
+}
+
+// Search for a pattern in the suffix array using binary search
+// Returns the index of any matching suffix, or -1
+fn sa_search(data: Arr8, sa: Arr8, pat: Arr8) -> Int {
+    let n = data.len;
+    let pn = pat.len;
+    let mut lo = 0;
+    let mut hi = sa.len - 1;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let suf = arr8_get(sa, mid);
+        // Compare pattern with suffix at sa[mid]
+        let mut k = 0;
+        let mut cmp = 0;
+        let mut cmp_done = 0;
+        while k < pn {
+            if cmp_done == 0 {
+                if suf + k >= n {
+                    cmp = 1;  // Pattern longer than remaining suffix
+                    cmp_done = 1;
+                } else {
+                    let sv = arr8_get(data, suf + k);
+                    let pv = arr8_get(pat, k);
+                    if pv < sv { cmp = -1; cmp_done = 1; }
+                    else if pv > sv { cmp = 1; cmp_done = 1; }
+                }
+            }
+            k = k + 1;
+        }
+        if cmp == 0 { return suf; }  // Found
+        if cmp < 0 { hi = mid - 1; } else { lo = mid + 1; }
+    }
+    -1
+}
+
+fn test_simple_sequence() {
+    // Data: [3, 1, 4, 1, 5]
+    // Suffixes:
+    //   0: [3,1,4,1,5]
+    //   1: [1,4,1,5]
+    //   2: [4,1,5]
+    //   3: [1,5]
+    //   4: [5]
+    // Sorted: [1,4,1,5] < [1,5] < [3,1,4,1,5] < [4,1,5] < [5]
+    // SA: [1, 3, 0, 2, 4]
+    let data = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sa = build_suffix_array(data);
+
+    assert_eq(is_sa_sorted(data, sa), 1);
+    assert_eq(arr8_get(sa, 0), 1);  // [1,4,1,5]
+    assert_eq(arr8_get(sa, 1), 3);  // [1,5]
+    assert_eq(arr8_get(sa, 2), 0);  // [3,1,4,1,5]
+    assert_eq(arr8_get(sa, 3), 2);  // [4,1,5]
+    assert_eq(arr8_get(sa, 4), 4);  // [5]
+}
+
+fn test_sorted_sequence() {
+    // Already sorted: [1, 2, 3, 4]
+    // Suffixes sorted: [1,2,3,4] < [2,3,4] < [3,4] < [4]
+    // SA: [0, 1, 2, 3]
+    let data = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let sa = build_suffix_array(data);
+    assert_eq(is_sa_sorted(data, sa), 1);
+    assert_eq(arr8_get(sa, 0), 0);
+    assert_eq(arr8_get(sa, 1), 1);
+    assert_eq(arr8_get(sa, 2), 2);
+    assert_eq(arr8_get(sa, 3), 3);
+}
+
+fn test_reverse_sequence() {
+    // Reverse sorted: [4, 3, 2, 1]
+    // Suffixes sorted: [1] < [2,1] < [3,2,1] < [4,3,2,1]
+    // SA: [3, 2, 1, 0]
+    let data = Arr8 { a0: 4, a1: 3, a2: 2, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let sa = build_suffix_array(data);
+    assert_eq(is_sa_sorted(data, sa), 1);
+    assert_eq(arr8_get(sa, 0), 3);
+    assert_eq(arr8_get(sa, 3), 0);
+}
+
+fn test_repeated_elements() {
+    // Data: [2, 2, 2]
+    // Suffixes: [2,2,2] > [2,2] > [2]
+    // SA: [2, 1, 0]
+    let data = Arr8 { a0: 2, a1: 2, a2: 2, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let sa = build_suffix_array(data);
+    assert_eq(is_sa_sorted(data, sa), 1);
+    assert_eq(arr8_get(sa, 0), 2);  // shortest [2]
+    assert_eq(arr8_get(sa, 1), 1);  // [2,2]
+    assert_eq(arr8_get(sa, 2), 0);  // [2,2,2]
+}
+
+fn test_lcp_array() {
+    // Data: [3, 1, 4, 1, 5]
+    // SA: [1, 3, 0, 2, 4]
+    let data = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sa = build_suffix_array(data);
+    let lcp = build_lcp_array(data, sa);
+
+    // LCP between [1,4,1,5] and [1,5] = 1
+    assert_eq(arr8_get(lcp, 1), 1);
+    // LCP between [1,5] and [3,1,4,1,5] = 0
+    assert_eq(arr8_get(lcp, 2), 0);
+    // LCP between [3,1,4,1,5] and [4,1,5] = 0
+    assert_eq(arr8_get(lcp, 3), 0);
+    // LCP between [4,1,5] and [5] = 0
+    assert_eq(arr8_get(lcp, 4), 0);
+}
+
+fn test_lcp_repeated() {
+    // Data: [1, 1, 1, 2]
+    // Suffixes sorted: [1,1,1,2] < [1,1,2] < [1,2] < [2]
+    // SA: [0, 1, 2, 3]
+    let data = Arr8 { a0: 1, a1: 1, a2: 1, a3: 2, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let sa = build_suffix_array(data);
+    let lcp = build_lcp_array(data, sa);
+
+    // LCP between suf[0]=[1,1,1,2] and suf[1]=[1,1,2] = 2
+    assert_eq(arr8_get(lcp, 1), 2);
+    // LCP between suf[1]=[1,1,2] and suf[2]=[1,2] = 1
+    assert_eq(arr8_get(lcp, 2), 1);
+}
+
+fn test_search_found() {
+    let data = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sa = build_suffix_array(data);
+
+    // Search for [1, 4]: should find at position 1
+    let pat = Arr8 { a0: 1, a1: 4, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let found = sa_search(data, sa, pat);
+    assert_eq(found, 1);
+
+    // Search for [4, 1, 5]: should find at position 2
+    let pat2 = Arr8 { a0: 4, a1: 1, a2: 5, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let found2 = sa_search(data, sa, pat2);
+    assert_eq(found2, 2);
+}
+
+fn test_search_not_found() {
+    let data = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sa = build_suffix_array(data);
+
+    // Search for [9]: not in data
+    let pat = Arr8 { a0: 9, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 1 };
+    let found = sa_search(data, sa, pat);
+    assert_eq(found, -1);
+
+    // Search for [1, 3]: not a valid subsequence at any position
+    let pat2 = Arr8 { a0: 1, a1: 3, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let found2 = sa_search(data, sa, pat2);
+    assert_eq(found2, -1);
+}
+
+fn test_single_element() {
+    let data = Arr8 { a0: 42, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 1 };
+    let sa = build_suffix_array(data);
+    assert_eq(arr8_get(sa, 0), 0);
+    assert_eq(is_sa_sorted(data, sa), 1);
+}
+
+fn main() -> Int {
+    test_simple_sequence();
+    test_sorted_sequence();
+    test_reverse_sequence();
+    test_repeated_elements();
+    test_lcp_array();
+    test_lcp_repeated();
+    test_search_found();
+    test_search_not_found();
+    test_single_element();
+    print("[OK] 314_suffix_array_aot");
+    0
+}

@@ -1,0 +1,165 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, logical
+
+// Logical operators
+
+fn test_logical_and() {
+    // Logical AND operator (&&)
+    let and_tt = true && true;
+    let and_tf = true && false;
+    let and_ft = false && true;
+    let and_ff = false && false;
+}
+
+fn test_logical_or() {
+    // Logical OR operator (||)
+    let or_tt = true || true;
+    let or_tf = true || false;
+    let or_ft = false || true;
+    let or_ff = false || false;
+}
+
+fn test_logical_not() {
+    // Logical NOT operator (!)
+    let not_true = !true;
+    let not_false = !false;
+    let double_not = !!true;
+}
+
+fn test_combined_logical() {
+    // Combined logical operations
+    let complex1 = true && false || true;
+    let complex2 = (true && false) || true;
+    let complex3 = true && (false || true);
+    let complex4 = !(true && false);
+    let complex5 = !true || !false;
+
+    // De Morgan's laws
+    let x = true;
+    let y = false;
+    let demorgan1 = !(x && y) == (!x || !y);
+    let demorgan2 = !(x || y) == (!x && !y);
+}
+
+fn test_with_comparisons() {
+    // Logical operators with comparisons
+    let a = 10;
+    let b = 20;
+    let c = 30;
+
+    let in_range = a < b && b < c;
+    let out_of_range = a > b || b > c;
+    let boundary_check = a <= b && b <= c;
+
+    // Multiple conditions
+    let all_positive = a > 0 && b > 0 && c > 0;
+    let any_negative = a < 0 || b < 0 || c < 0;
+    let none_zero = a != 0 && b != 0 && c != 0;
+
+    // In conditional statements
+    if a > 0 && b > 0 {
+        let result = "both positive";
+    }
+
+    if a < 0 || b < 0 {
+        let result = "at least one negative";
+    }
+
+    if !(a == b) {
+        let result = "not equal";
+    }
+
+    // Complex condition chains
+    let valid = (a > 0 && a < 100) && (b > 0 && b < 100) && (c > 0 && c < 100);
+    let invalid = !(a > 0) || !(b > 0) || !(c > 0);
+}
+
+fn is_running() -> Bool {
+    true
+}
+
+fn test_while_conditions() {
+    // While loop conditions
+    let mut count = 0;
+    while count < 10 && is_running() {
+        count = count + 1;
+    }
+}
+
+// Conditional categorization with logical operators
+fn categorize(x: Int, y: Int) -> Text {
+    if x > 0 && y > 0 {
+        "first quadrant"
+    } else if x < 0 && y > 0 {
+        "second quadrant"
+    } else if x < 0 && y < 0 {
+        "third quadrant"
+    } else if x > 0 && y < 0 {
+        "fourth quadrant"
+    } else if x == 0 || y == 0 {
+        "on axis"
+    } else {
+        "unknown"
+    }
+}
+
+type User is { authenticated: Bool, admin: Bool };
+
+implement User {
+    fn is_authenticated(&self) -> Bool {
+        self.authenticated
+    }
+
+    fn is_admin(&self) -> Bool {
+        self.admin
+    }
+
+    fn has_permission(&self, perm: Text) -> Bool {
+        true
+    }
+}
+
+fn test_method_chains() {
+    let user = User { authenticated: true, admin: false };
+
+    // Method calls with logical operators
+    let can_view = user.is_authenticated();
+    let can_edit = user.is_authenticated() && user.is_admin();
+    let can_access = user.is_authenticated() || user.has_permission("access");
+}
+
+// Boolean helper functions
+
+fn nand(a: Bool, b: Bool) -> Bool {
+    !(a && b)
+}
+
+fn nor(a: Bool, b: Bool) -> Bool {
+    !(a || b)
+}
+
+fn implication(a: Bool, b: Bool) -> Bool {
+    !a || b
+}
+
+fn iff(a: Bool, b: Bool) -> Bool {
+    (a && b) || (!a && !b)
+}
+
+fn test_arrays() {
+    // Logical operators in arrays
+    let conditions = [true && false, true || false, !true];
+}
+
+fn test_ternary_like() {
+    // Ternary-like patterns with logical operators
+    let x = 10;
+    let is_positive = x > 0;
+    let is_small = x < 100;
+
+    // Short-circuit for default values
+    let default_if_false = is_positive && is_small;
+    let either_condition = is_positive || is_small;
+}

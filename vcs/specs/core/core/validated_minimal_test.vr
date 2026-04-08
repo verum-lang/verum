@@ -1,0 +1,37 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, validated, minimal
+// @description: Minimal test for Validated.validate_all type inference
+
+mount core.base.result.{Validated, Valid, Invalid};
+mount core.collections.list.{List};
+
+/// Test Validated.validate_all return type inference
+@test
+fn test_validate_all_basic() {
+    // Explicitly type the input list
+    let items: List<Validated<Text, Int>> = List.from([
+        Validated.valid(1),
+        Validated.valid(2),
+    ]);
+
+    // Call validate_all
+    let result: Validated<Text, List<Int>> = Validated.validate_all(items);
+
+    // Match on the result - values should be List<Int>
+    match result {
+        Valid(values) => {
+            // values should be List<Int>
+            let _: List<Int> = values;
+        }
+        Invalid(errors) => {
+            // errors should be List<Text>
+            let _: List<Text> = errors;
+        }
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,115 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-checking, iterators, safe-access
+// @description: Tests that iterators provide bounds-safe access patterns
+
+/// Iterators in Verum are the idiomatic way to process collections safely.
+/// They eliminate bounds-checking overhead while guaranteeing safety:
+/// - No index manipulation required
+/// - Cannot access out-of-bounds elements
+/// - Ownership rules prevent iterator invalidation
+/// - Lazy evaluation for efficiency
+
+fn main() {
+    test_basic_iteration();
+    test_iterator_combinators();
+    test_enumerated_iteration();
+    test_iterator_safety_guarantees();
+
+    print("All iterator safety tests passed!");
+}
+
+fn test_basic_iteration() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Simple iteration - no bounds checking needed
+    let mut sum = 0;
+    for n in numbers {
+        sum = sum + n;
+    }
+    assert(sum == 15);
+}
+
+fn test_iterator_combinators() {
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // filter: only even numbers
+    let evens: List<Int> = numbers.iter()
+        .filter(|n| n % 2 == 0)
+        .collect();
+    assert(evens.len() == 5);
+
+    // map: transform each element
+    let doubled: List<Int> = numbers.iter()
+        .map(|n| n * 2)
+        .collect();
+    assert(doubled[0] == 2);
+    assert(doubled[9] == 20);
+
+    // fold: accumulate values
+    let sum = numbers.iter().fold(0, |acc, n| acc + n);
+    assert(sum == 55);
+
+    // take: limit iteration
+    let first_three: List<Int> = numbers.iter()
+        .take(3)
+        .collect();
+    assert(first_three.len() == 3);
+
+    // skip: bypass elements
+    let last_three: List<Int> = numbers.iter()
+        .skip(7)
+        .collect();
+    assert(last_three.len() == 3);
+
+    // sum: accumulate all elements
+    let total = numbers.iter().sum();
+    assert(total == 55);
+
+    // product: multiply all elements
+    let small = [1, 2, 3, 4, 5];
+    let prod = small.iter().product();
+    assert(prod == 120);
+
+    // count: count elements
+    let cnt = numbers.iter().count();
+    assert(cnt == 10);
+}
+
+fn test_enumerated_iteration() {
+    let names = ["Alice", "Bob", "Charlie"];
+
+    // enumerate provides index safely
+    for (idx, name) in names.iter().enumerate() {
+        match idx {
+            0 => assert(name == "Alice"),
+            1 => assert(name == "Bob"),
+            2 => assert(name == "Charlie"),
+            _ => panic("Unexpected index"),
+        }
+    }
+}
+
+fn test_iterator_safety_guarantees() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // SAFE: Iteration completes before mutation
+    let sum: Int = numbers.iter().sum();
+    assert(sum == 15);
+
+    // SAFE: chain combines iterators
+    let a = [1, 2];
+    let b = [3, 4];
+    let chained: List<Int> = a.iter()
+        .chain(b.iter())
+        .collect();
+    assert(chained.len() == 4);
+
+    // SAFE: zip stops at shortest iterator
+    let letters = ["a", "b"];
+    let zipped: List<(Int, Text)> = numbers.iter()
+        .zip(letters.iter())
+        .collect();
+    assert(zipped.len() == 2);
+}

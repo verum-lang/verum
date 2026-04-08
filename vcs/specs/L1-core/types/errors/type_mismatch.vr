@@ -1,0 +1,203 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, mismatch
+// @expected-error: E401 "Type mismatch"
+
+/// Test for type mismatch errors.
+/// These examples should fail with E401 during type checking.
+
+fn main() {
+    // === Basic Type Mismatches ===
+
+    // E401: Assigning Int to Text
+    let text: Text = 42;  // ERROR: expected Text, found Int
+
+    // E401: Assigning Text to Int
+    let number: Int = "hello";  // ERROR: expected Int, found Text
+
+    // E401: Assigning Bool to Int
+    let int_val: Int = true;  // ERROR: expected Int, found Bool
+
+    // E401: Assigning Float to Int (no implicit narrowing)
+    let int_from_float: Int = 3.14;  // ERROR: expected Int, found Float
+
+    // E401: Assigning Unit to non-Unit
+    let not_unit: Int = ();  // ERROR: expected Int, found Unit
+
+    // === Function Type Mismatches ===
+
+    // E401: Wrong type in function call
+    fn takes_int(n: Int) -> Int {
+        n * 2
+    }
+    let result = takes_int("not an int");  // ERROR: expected Int, found Text
+
+    // E401: Wrong return type
+    fn returns_int() -> Int {
+        "not an int"  // ERROR: expected Int, found Text
+    }
+
+    // E401: Wrong number of arguments (arity mismatch)
+    fn two_args(a: Int, b: Int) -> Int { a + b }
+    let wrong_arity = two_args(1);  // ERROR: expected 2 arguments, found 1
+
+    // E401: Wrong closure parameter type
+    fn apply_fn(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+    apply_fn(|s: Text| s.len(), 42);  // ERROR: closure parameter type mismatch
+
+    // === Compound Type Mismatches ===
+
+    // E401: Mismatched tuple types
+    let tuple: (Int, Text) = (42, 100);  // ERROR: expected Text, found Int
+
+    // E401: Wrong tuple length
+    let short_tuple: (Int, Int, Int) = (1, 2);  // ERROR: expected 3 elements
+
+    // E401: Mismatched array element types
+    let arr: [Int; 3] = [1, "two", 3];  // ERROR: expected Int, found Text
+
+    // E401: Wrong array length
+    let wrong_len: [Int; 5] = [1, 2, 3];  // ERROR: expected 5 elements
+
+    // E401: Wrong type in list literal
+    let list_err: List<Int> = [1, 2, "three"];  // ERROR: expected Int, found Text
+
+    // E401: Wrong type in map key
+    let map_key: Map<Int, Text> = {
+        "one" => "a",  // ERROR: expected Int key, found Text
+    };
+
+    // E401: Wrong type in map value
+    let map_val: Map<Text, Int> = {
+        "one" => 1,
+        "two" => "not an int",  // ERROR: expected Int, found Text
+    };
+
+    // E401: Wrong type in set
+    let set_err: Set<Int> = {1, 2, "three"};  // ERROR: expected Int, found Text
+
+    // === Control Flow Type Mismatches ===
+
+    // E401: Incompatible types in if expression
+    let cond = if true { 42 } else { "text" };  // ERROR: branches have different types
+
+    // E401: If without else returns Unit, but expecting value
+    let if_no_else: Int = if true { 42 };  // ERROR: if without else returns Unit
+
+    // E401: Wrong type in match arm
+    let x = 5;
+    let matched: Int = match x {
+        1 => 1,
+        2 => 2,
+        _ => "other",  // ERROR: expected Int, found Text
+    };
+
+    // E401: Inconsistent match arm types
+    let match_inconsistent = match true {
+        true => 42,
+        false => "text",  // ERROR: all arms must have same type
+    };
+
+    // E401: Wrong type in while condition
+    let while_cond = while 42 { break; };  // ERROR: expected Bool, found Int
+
+    // E401: Wrong type in for iterator
+    let for_wrong = for i in 42 { };  // ERROR: 42 is not iterable
+
+    // === Operator Type Mismatches ===
+
+    // E401: Arithmetic operator type mismatch
+    let sum = 1 + "two";  // ERROR: cannot add Int and Text
+    let diff = "a" - "b";  // ERROR: cannot subtract Text
+    let prod = true * false;  // ERROR: cannot multiply Bool
+
+    // E401: Comparison type mismatch
+    let cmp = 42 == "42";  // ERROR: cannot compare Int and Text
+
+    // E401: Logical operator on non-Bool
+    let logical = 1 && 2;  // ERROR: expected Bool, found Int
+
+    // E401: Unary operator type mismatch
+    let neg_text = -"hello";  // ERROR: cannot negate Text
+    let not_int = !42;  // ERROR: expected Bool for !, found Int (unless bitwise)
+
+    // === Record and Struct Mismatches ===
+
+    // E401: Wrong struct field type
+    type Point is { x: Float, y: Float };
+    let p = Point { x: 1, y: 2 };  // ERROR: expected Float, found Int (no auto-coerce)
+
+    // E401: Missing struct field
+    let missing = Point { x: 1.0 };  // ERROR: missing field 'y'
+
+    // E401: Unknown struct field
+    let bad_field = Point { x: 1.0, y: 2.0, z: 3.0 };  // ERROR: unknown field 'z'
+
+    // E401: Wrong type in struct update
+    let p1 = Point { x: 1.0, y: 2.0 };
+    let p2 = Point { x: "wrong", ..p1 };  // ERROR: expected Float, found Text
+
+    // === Generic Type Mismatches ===
+
+    // E401: Wrong generic type parameter
+    fn identity<T>(x: T) -> T { x }
+    let typed: Text = identity(42);  // ERROR: expected Text, got Int
+
+    // E401: Incompatible Maybe types
+    let maybe: Maybe<Int> = Some("text");  // ERROR: expected Int, found Text
+
+    // E401: Wrong Result type
+    let result_ok: Result<Int, Text> = Ok("not int");  // ERROR: expected Int
+
+    // E401: Wrong Result error type
+    let result_err: Result<Int, Text> = Err(42);  // ERROR: expected Text
+
+    // E401: Incompatible generic instantiations
+    let list_int: List<Int> = [1, 2, 3];
+    let list_text: List<Text> = list_int;  // ERROR: List<Int> != List<Text>
+
+    // === Closure Type Mismatches ===
+
+    // E401: Wrong closure return type
+    let closure: fn(Int) -> Int = |x| "string";  // ERROR: expected Int, found Text
+
+    // E401: Wrong closure parameter count
+    let binary: fn(Int, Int) -> Int = |x| x;  // ERROR: expected 2 params
+
+    // E401: Closure capture type mismatch
+    let captured: Int = 42;
+    let wrong_capture: fn() -> Text = || captured;  // ERROR: captured Int, expect Text
+
+    // === Reference Type Mismatches ===
+
+    // E401: Wrong reference mutability
+    fn takes_mut(x: &mut Int) { *x = 42; }
+    let immut: Int = 5;
+    takes_mut(&immut);  // ERROR: expected &mut, found &
+
+    // E401: Wrong referenced type
+    let int_ref: &Int = &"hello";  // ERROR: expected &Int, found &Text
+
+    // === Trait Object Mismatches ===
+
+    type Printable is protocol {
+        fn print(&self);
+    };
+
+    type NotPrintable is { value: Int };
+
+    fn takes_printable(p: &Printable) { p.print(); }
+    let np = NotPrintable { value: 42 };
+    takes_printable(&np);  // ERROR: NotPrintable does not implement Printable
+
+    // === Never Type Mismatches ===
+
+    // E401: Never in non-diverging context (would be unusual)
+    fn not_diverging() -> Int {
+        42
+    }
+    let never_val: Never = not_diverging();  // ERROR: expected Never, found Int
+}
+
+// All examples above should produce E401 "Type mismatch" error

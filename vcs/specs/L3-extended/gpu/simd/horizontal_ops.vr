@@ -1,0 +1,136 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: SIMD tests can parse without runtime
+// @tags: simd, horizontal
+
+fn main() {
+    // Horizontal add (sum adjacent pairs)
+    let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let b: f32x4 = f32x4(5.0, 6.0, 7.0, 8.0);
+
+    // hadd: [a0+a1, a2+a3, b0+b1, b2+b3]
+    let hadd_result = a.hadd(b);
+    assert(hadd_result[0] == 3.0);   // 1.0 + 2.0
+    assert(hadd_result[1] == 7.0);   // 3.0 + 4.0
+    assert(hadd_result[2] == 11.0);  // 5.0 + 6.0
+    assert(hadd_result[3] == 15.0);  // 7.0 + 8.0
+
+    // Horizontal subtract (subtract adjacent pairs)
+    // hsub: [a0-a1, a2-a3, b0-b1, b2-b3]
+    let hsub_result = a.hsub(b);
+    assert(hsub_result[0] == -1.0);  // 1.0 - 2.0
+    assert(hsub_result[1] == -1.0);  // 3.0 - 4.0
+    assert(hsub_result[2] == -1.0);  // 5.0 - 6.0
+    assert(hsub_result[3] == -1.0);  // 7.0 - 8.0
+
+    // Self horizontal add
+    let self_hadd = a.hadd(a);
+    assert(self_hadd[0] == 3.0);   // 1.0 + 2.0
+    assert(self_hadd[1] == 7.0);   // 3.0 + 4.0
+    assert(self_hadd[2] == 3.0);   // 1.0 + 2.0
+    assert(self_hadd[3] == 7.0);   // 3.0 + 4.0
+
+    // Full horizontal sum (reduce to scalar)
+    let sum = a.reduce_add();
+    assert(sum == 10.0);  // 1 + 2 + 3 + 4
+
+    // Alternative: manual horizontal sum using hadd
+    let step1 = a.hadd(a);       // [3, 7, 3, 7]
+    let step2 = step1.hadd(step1); // [10, 10, 10, 10]
+    assert(step2[0] == 10.0);
+
+    // Horizontal max
+    let c: f32x4 = f32x4(3.0, 1.0, 4.0, 1.5);
+    let max_val = c.reduce_max();
+    assert(max_val == 4.0);
+
+    // Horizontal min
+    let min_val = c.reduce_min();
+    assert(min_val == 1.0);
+
+    // Dot product using horizontal ops
+    let v1: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let v2: f32x4 = f32x4(2.0, 3.0, 4.0, 5.0);
+
+    // Dot product = sum of element-wise products
+    let products = v1 * v2;  // [2, 6, 12, 20]
+    let dot = products.reduce_add();
+    assert(dot == 40.0);  // 2 + 6 + 12 + 20
+
+    // Built-in dot product with mask
+    let dot_masked = v1.dp(v2, 0xFF);  // All lanes included
+    assert(dot_masked[0] == 40.0);
+
+    let dot_partial = v1.dp(v2, 0xF3);  // Only first two lanes
+    // Mask 0xF3 = 1111 0011: high nibble = output lanes, low nibble = input lanes
+    assert(dot_partial[0] == 8.0);  // Only 1*2 + 2*3 = 8
+
+    // Integer horizontal operations
+    let ia: i32x4 = i32x4(1, 2, 3, 4);
+    let ib: i32x4 = i32x4(5, 6, 7, 8);
+
+    let ihadd = ia.hadd(ib);
+    assert(ihadd[0] == 3);   // 1 + 2
+    assert(ihadd[1] == 7);   // 3 + 4
+    assert(ihadd[2] == 11);  // 5 + 6
+    assert(ihadd[3] == 15);  // 7 + 8
+
+    let ihsub = ia.hsub(ib);
+    assert(ihsub[0] == -1);  // 1 - 2
+    assert(ihsub[1] == -1);  // 3 - 4
+
+    // 8-wide horizontal operations
+    let wide_a: f32x8 = f32x8(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
+    let wide_b: f32x8 = f32x8(9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0);
+
+    // Note: hadd on f32x8 operates on 128-bit lanes independently
+    let wide_hadd = wide_a.hadd(wide_b);
+    // Low 128-bit lane: [a0+a1, a2+a3, b0+b1, b2+b3] = [3, 7, 19, 23]
+    // High 128-bit lane: [a4+a5, a6+a7, b4+b5, b6+b7] = [11, 15, 27, 31]
+
+    let wide_sum = wide_a.reduce_add();
+    assert(wide_sum == 36.0);  // 1+2+3+4+5+6+7+8
+
+    // Sad (sum of absolute differences) - useful for image processing
+    let pa: u8x16 = u8x16.from_array([10, 20, 30, 40, 50, 60, 70, 80,
+                                        90, 100, 110, 120, 130, 140, 150, 160]);
+    let pb: u8x16 = u8x16.from_array([15, 25, 35, 45, 55, 65, 75, 85,
+                                        95, 105, 115, 125, 135, 145, 155, 165]);
+
+    // SAD computes sum of |a[i] - b[i]| for each 8-byte group
+    let sad_result: u16x8 = pa.sad(pb);
+    // Each u16 contains sum of 8 absolute differences
+    assert(sad_result[0] == 40);  // |10-15| + |20-25| + ... (first 8 bytes)
+    assert(sad_result[4] == 40);  // Same for next 8 bytes
+
+    // Multiply and horizontal add (for convolutions)
+    let i16_a: i16x8 = i16x8(1, 2, 3, 4, 5, 6, 7, 8);
+    let i16_b: i16x8 = i16x8(1, 1, 1, 1, 1, 1, 1, 1);
+
+    // pmaddwd: multiply pairs and add horizontally to i32
+    let madd_result: i32x4 = i16_a.madd(i16_b);
+    assert(madd_result[0] == 3);   // 1*1 + 2*1
+    assert(madd_result[1] == 7);   // 3*1 + 4*1
+    assert(madd_result[2] == 11);  // 5*1 + 6*1
+    assert(madd_result[3] == 15);  // 7*1 + 8*1
+
+    // Complex number operations using horizontal add/sub
+    // Complex: (a + bi) stored as [a, b, c, d] representing two complex numbers
+    let complex1: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);  // (1+2i), (3+4i)
+    let complex2: f32x4 = f32x4(5.0, 6.0, 7.0, 8.0);  // (5+6i), (7+8i)
+
+    // Complex multiplication: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
+    // Use shuffle, multiply, and horizontal add/sub
+    let a_parts = complex1.shuffle.<0, 0, 2, 2>();  // [a, a, c, c]
+    let b_parts = complex1.shuffle.<1, 1, 3, 3>();  // [b, b, d, d]
+    let c_parts = complex2;                           // [e, f, g, h]
+    let d_parts = complex2.shuffle.<1, 0, 3, 2>();  // [f, e, h, g]
+
+    let ac = a_parts * c_parts;
+    let bd = b_parts * d_parts;
+
+    // Result: use addsub for real-imag pattern
+    let complex_prod = ac.addsub(bd);
+    // complex_prod = [ae-bf, af+be, cg-dh, ch+dg]
+}

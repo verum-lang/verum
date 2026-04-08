@@ -1,0 +1,128 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: try, recover, error-handling, match-arms, closure, e2e
+// @description: Test try/recover with variant pattern matching in both closure and match-arm forms
+
+type IoError is NotFound(Text) | PermissionDenied | Timeout(Int);
+
+fn read_file(name: Text) -> Result<Text, IoError> {
+    if name == "readme.txt" {
+        Ok("hello world")
+    } else if name == "secret.txt" {
+        Err(IoError.PermissionDenied)
+    } else if name == "slow.txt" {
+        Err(IoError.Timeout(5000))
+    } else {
+        Err(IoError.NotFound(name))
+    }
+}
+
+fn get_timeout(name: Text) -> Result<Int, IoError> {
+    if name == "ok" {
+        Ok(0)
+    } else {
+        Err(IoError.Timeout(5000))
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: try/recover closure - success path
+    let r1 = try {
+        read_file("readme.txt")?
+    } recover |e| {
+        "error"
+    };
+    if r1 != "hello world" {
+        print(f"FAIL 1: r1 = {r1}");
+        f = f + 1;
+    }
+
+    // Test 2: try/recover closure - error path with variant match
+    let r2 = try {
+        read_file("missing.txt")?
+    } recover |e| {
+        match e {
+            IoError.NotFound(name) => f"not found: {name}",
+            IoError.PermissionDenied => "denied",
+            IoError.Timeout(ms) => f"timeout: {ms}",
+        }
+    };
+    if r2 != "not found: missing.txt" {
+        print(f"FAIL 2: r2 = {r2}");
+        f = f + 1;
+    }
+
+    // Test 3: try/recover match arms - NotFound
+    let r3 = try {
+        read_file("gone.txt")?
+    } recover {
+        IoError.NotFound(name) => f"404: {name}",
+        IoError.PermissionDenied => "403",
+        IoError.Timeout(_) => "504",
+    };
+    if r3 != "404: gone.txt" {
+        print(f"FAIL 3: r3 = {r3}");
+        f = f + 1;
+    }
+
+    // Test 4: try/recover match arms - PermissionDenied
+    let r4 = try {
+        read_file("secret.txt")?
+    } recover {
+        IoError.NotFound(_) => "404",
+        IoError.PermissionDenied => "403",
+        IoError.Timeout(_) => "504",
+    };
+    if r4 != "403" {
+        print(f"FAIL 4: r4 = {r4}");
+        f = f + 1;
+    }
+
+    // Test 5: try/recover match arms - Timeout with Int payload
+    let r5 = try {
+        get_timeout("bad")?
+    } recover {
+        IoError.Timeout(ms) => ms,
+        _ => -1,
+    };
+    if r5 != 5000 {
+        print(f"FAIL 5: r5 = {r5}");
+        f = f + 1;
+    }
+
+    // Test 6: chained ? - second fails
+    let r6 = try {
+        let a = read_file("readme.txt")?;
+        let _b = read_file("missing.txt")?;
+        a
+    } recover {
+        IoError.NotFound(name) => f"failed: {name}",
+        _ => "other",
+    };
+    if r6 != "failed: missing.txt" {
+        print(f"FAIL 6: r6 = {r6}");
+        f = f + 1;
+    }
+
+    // Test 7: try/recover with wildcard fallback
+    let r7 = try {
+        get_timeout("bad")?
+    } recover |e| {
+        match e {
+            IoError.Timeout(ms) => ms + 1,
+            _ => -1,
+        }
+    };
+    if r7 != 5001 {
+        print(f"FAIL 7: r7 = {r7}");
+        f = f + 1;
+    }
+
+    if f == 0 {
+        print("All try/recover variant tests passed");
+    }
+    f
+}

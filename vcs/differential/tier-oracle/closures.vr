@@ -1,0 +1,91 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, closures
+
+/// Closures must behave identically across
+/// interpreter (Tier 0) and AOT (Tier 3)
+
+fn main() {
+    // Basic closure
+    let add = |a, b| a + b;
+    println(f"add(2, 3) = {add(2, 3)}");
+
+    // Closure capturing environment
+    let x = 10;
+    let add_x = |n| n + x;
+    println(f"add_x(5) = {add_x(5)}");
+
+    // Closure capturing multiple values
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let sum_abc = || a + b + c;
+    println(f"sum_abc() = {sum_abc()}");
+
+    // Nested closures
+    let outer = |x| {
+        let inner = |y| x + y;
+        inner
+    };
+    let add_10 = outer(10);
+    println(f"add_10(5) = {add_10(5)}");
+
+    // Closure as function argument (typed for AOT compatibility)
+    let apply = |f: fn(Int) -> Int, x: Int| -> Int { f(x) };
+    let double = |n: Int| -> Int { n * 2 };
+    println(f"apply(double, 21) = {apply(double, 21)}");
+
+    // Higher-order function returning closure
+    let make_multiplier = |factor| {
+        |n| n * factor
+    };
+    let triple = make_multiplier(3);
+    println(f"triple(7) = {triple(7)}");
+
+    // Closure with mutable capture
+    let mut counter = 0;
+    let increment = || {
+        counter = counter + 1;
+        counter
+    };
+    println(f"increment() = {increment()}");
+    println(f"increment() = {increment()}");
+    println(f"increment() = {increment()}");
+
+    // Closures in collection operations
+    let nums = [1, 2, 3, 4, 5];
+
+    let doubled = nums.map(|n| n * 2);
+    println(f"doubled = {doubled}");
+
+    let evens = nums.filter(|n| n % 2 == 0);
+    println(f"evens = {evens}");
+
+    let sum = nums.fold(0, |acc, n| acc + n);
+    println(f"sum = {sum}");
+
+    let product = nums.fold(1, |acc, n| acc * n);
+    println(f"product = {product}");
+
+    // Chained operations
+    let result = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        .filter(|n| n % 2 == 0)
+        .map(|n| n * n)
+        .fold(0, |acc, n| acc + n);
+    println(f"sum of squares of evens = {result}");
+
+    // Closure with type annotation
+    let typed: fn(Int, Int) -> Int = |a, b| a * b + 1;
+    println(f"typed(3, 4) = {typed(3, 4)}");
+
+    // Immediately invoked closure
+    let immediate = (|x| x * x)(5);
+    println(f"immediate = {immediate}");
+
+    // Recursive closure (via explicit binding)
+    fn fib_closure(n: Int) -> Int {
+        if n <= 1 { n } else { fib_closure(n - 1) + fib_closure(n - 2) }
+    }
+    println(f"fib_closure(10) = {fib_closure(10)}");
+}

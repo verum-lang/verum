@@ -1,0 +1,245 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, arithmetic, float
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for floating-point arithmetic.
+/// Tests precision, special values, rounding behavior, and complex expressions.
+
+fn main() {
+    test_basic_operations();
+    test_precision_sensitive();
+    test_special_values();
+    test_very_small_numbers();
+    test_very_large_numbers();
+    test_mixed_expressions();
+    test_comparison_operations();
+    test_rounding_and_truncation();
+}
+
+/// Basic floating-point operations
+fn test_basic_operations() {
+    println("=== Basic Float Operations ===");
+
+    let a = 3.14159;
+    let b = 2.71828;
+
+    // Basic arithmetic
+    println(f"a + b: {a + b}");
+    println(f"a - b: {a - b}");
+    println(f"a * b: {a * b}");
+    println(f"a / b: {a / b}");
+
+    // With integers coerced to float
+    println(f"3.5 + 2: {3.5 + 2}");
+    println(f"10 / 4.0: {10 / 4.0}");
+    println(f"7.0 * 3: {7.0 * 3}");
+
+    // Negative floats
+    let neg = -5.5;
+    println(f"neg + 10: {neg + 10}");
+    println(f"neg * 2: {neg * 2}");
+    println(f"neg / 2: {neg / 2}");
+    println(f"neg * neg: {neg * neg}");
+}
+
+/// Precision-sensitive operations
+fn test_precision_sensitive() {
+    println("\n=== Precision Sensitive ===");
+
+    // High precision constants
+    let pi = 3.141592653589793;
+    let e = 2.718281828459045;
+
+    println(f"pi: {pi}");
+    println(f"e: {e}");
+    println(f"pi + e: {pi + e}");
+    println(f"pi - e: {pi - e}");
+    println(f"pi * e: {pi * e}");
+    println(f"pi / e: {pi / e}");
+
+    // Decimal representation precision
+    println(f"0.1 + 0.2: {0.1 + 0.2}");
+    println(f"0.1 + 0.1 + 0.1: {0.1 + 0.1 + 0.1}");
+    println(f"1.0 - 0.9 - 0.1: {1.0 - 0.9 - 0.1}");
+
+    // Accumulation of small errors
+    let mut sum = 0.0;
+    for _ in 0..10 {
+        sum = sum + 0.1;
+    }
+    println(f"0.1 * 10 via loop: {sum}");
+    println(f"0.1 * 10 direct: {0.1 * 10.0}");
+
+    // Subtraction of nearly equal numbers
+    let x = 1.0000001;
+    let y = 1.0000000;
+    println(f"1.0000001 - 1.0: {x - y}");
+}
+
+/// Special floating-point values
+fn test_special_values() {
+    println("\n=== Special Values ===");
+
+    // Zero
+    println(f"0.0: {0.0}");
+    println(f"-0.0: {-0.0}");
+    println(f"0.0 == -0.0: {0.0 == -0.0}");
+    println(f"0.0 * 100: {0.0 * 100.0}");
+    println(f"0.0 + 0.0: {0.0 + 0.0}");
+
+    // One (identity)
+    println(f"1.0 * 123.456: {1.0 * 123.456}");
+    println(f"123.456 / 1.0: {123.456 / 1.0}");
+
+    // Fractions
+    println(f"1.0 / 3.0: {1.0 / 3.0}");
+    println(f"2.0 / 3.0: {2.0 / 3.0}");
+    println(f"1.0 / 7.0: {1.0 / 7.0}");
+    println(f"1.0 / 9.0: {1.0 / 9.0}");
+
+    // Perfect fractions
+    println(f"1.0 / 2.0: {1.0 / 2.0}");
+    println(f"1.0 / 4.0: {1.0 / 4.0}");
+    println(f"1.0 / 8.0: {1.0 / 8.0}");
+}
+
+/// Very small numbers
+fn test_very_small_numbers() {
+    println("\n=== Very Small Numbers ===");
+
+    let tiny = 0.000000001;
+    println(f"tiny: {tiny}");
+    println(f"tiny * 1000000000: {tiny * 1000000000.0}");
+    println(f"tiny + tiny: {tiny + tiny}");
+    println(f"tiny * tiny: {tiny * tiny}");
+
+    // Scientific notation equivalents
+    let small1 = 1e-10;
+    let small2 = 1e-20;
+    println(f"1e-10: {small1}");
+    println(f"1e-20: {small2}");
+    println(f"1e-10 / 1e-20: {small1 / small2}");
+
+    // Near-zero operations
+    let near_zero = 0.0000000000001;
+    println(f"1.0 + near_zero: {1.0 + near_zero}");
+    println(f"1.0 - near_zero: {1.0 - near_zero}");
+}
+
+/// Very large numbers
+fn test_very_large_numbers() {
+    println("\n=== Very Large Numbers ===");
+
+    let big = 1000000000000.0;
+    println(f"big: {big}");
+    println(f"big + 1: {big + 1.0}");
+    println(f"big * 2: {big * 2.0}");
+    println(f"big / 1000: {big / 1000.0}");
+
+    // Scientific notation
+    let large1 = 1e10;
+    let large2 = 1e20;
+    println(f"1e10: {large1}");
+    println(f"1e20: {large2}");
+    println(f"1e10 * 1e10: {large1 * large1}");
+
+    // Large and small combination
+    println(f"1e15 + 0.001: {1e15 + 0.001}");
+    println(f"1e15 * 1e-15: {1e15 * 1e-15}");
+}
+
+/// Mixed expressions with floats
+fn test_mixed_expressions() {
+    println("\n=== Mixed Expressions ===");
+
+    // Precedence with floats
+    println(f"2.0 + 3.0 * 4.0: {2.0 + 3.0 * 4.0}");
+    println(f"(2.0 + 3.0) * 4.0: {(2.0 + 3.0) * 4.0}");
+    println(f"10.0 / 2.0 / 2.0: {10.0 / 2.0 / 2.0}");
+    println(f"10.0 / (2.0 / 2.0): {10.0 / (2.0 / 2.0)}");
+
+    // Complex nesting
+    let a = 2.5;
+    let b = 3.0;
+    let c = 1.5;
+    println(f"(a + b) * c: {(a + b) * c}");
+    println(f"a * b + c: {a * b + c}");
+    println(f"a / b * c: {a / b * c}");
+    println(f"a / (b * c): {a / (b * c)}");
+
+    // Long expression
+    let result = 1.1 + 2.2 * 3.3 - 4.4 / 2.2 + 5.5;
+    println(f"1.1 + 2.2 * 3.3 - 4.4 / 2.2 + 5.5: {result}");
+
+    // Function calls in expressions
+    fn square(x: Float) -> Float { x * x }
+    fn cube(x: Float) -> Float { x * x * x }
+
+    println(f"square(2.5): {square(2.5)}");
+    println(f"cube(2.0): {cube(2.0)}");
+    println(f"square(3.0) + cube(2.0): {square(3.0) + cube(2.0)}");
+}
+
+/// Comparison operations
+fn test_comparison_operations() {
+    println("\n=== Comparison Operations ===");
+
+    let a = 3.14;
+    let b = 2.71;
+    let c = 3.14;
+
+    println(f"a == c: {a == c}");
+    println(f"a != b: {a != b}");
+    println(f"a > b: {a > b}");
+    println(f"a < b: {a < b}");
+    println(f"a >= c: {a >= c}");
+    println(f"a <= c: {a <= c}");
+
+    // Comparison with zero
+    println(f"0.0 == 0.0: {0.0 == 0.0}");
+    println(f"0.0 > -0.1: {0.0 > -0.1}");
+    println(f"-0.1 < 0.1: {-0.1 < 0.1}");
+
+    // Comparison chain
+    for x in [0.1, 0.5, 1.0, 1.5, 2.0] {
+        let category = if x < 0.5 {
+            "tiny"
+        } else if x < 1.0 {
+            "small"
+        } else if x < 1.5 {
+            "medium"
+        } else {
+            "large"
+        };
+        println(f"{x}: {category}");
+    }
+}
+
+/// Rounding and truncation operations
+fn test_rounding_and_truncation() {
+    println("\n=== Rounding and Truncation ===");
+
+    let values = [1.4, 1.5, 1.6, 2.4, 2.5, 2.6, -1.4, -1.5, -1.6];
+
+    for v in values {
+        println(f"floor({v}): {v.floor()}");
+        println(f"ceil({v}): {v.ceil()}");
+        println(f"round({v}): {v.round()}");
+        println(f"trunc({v}): {v.trunc()}");
+    }
+
+    // Fractional part
+    println(f"fract(3.14): {3.14.fract()}");
+    println(f"fract(-2.7): {(-2.7).fract()}");
+
+    // Absolute value
+    println(f"abs(-5.5): {(-5.5).abs()}");
+    println(f"abs(5.5): {5.5.abs()}");
+
+    // Sign
+    println(f"signum(3.14): {3.14.signum()}");
+    println(f"signum(-2.71): {(-2.71).signum()}");
+    println(f"signum(0.0): {0.0.signum()}");
+}

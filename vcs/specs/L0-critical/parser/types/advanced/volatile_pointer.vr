@@ -1,0 +1,45 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, types, volatile, pointers, low-level
+// @description: Test parsing of volatile pointer types per grammar/verum.ebnf pointer_type
+
+// Volatile read-only pointer
+fn read_register(addr: *volatile UInt32) -> UInt32 {
+    volatile_load(addr)
+}
+
+// Volatile mutable pointer
+fn write_register(addr: *volatile mut UInt32, value: UInt32) {
+    volatile_store(addr, value);
+}
+
+// Volatile pointer in struct field
+type MmioRegister is {
+    addr: *volatile mut UInt32,
+};
+
+// Volatile pointer in return position
+fn get_status_register() -> *volatile UInt32 {
+    0x4000_0000 as *volatile UInt32
+}
+
+// Const pointer (non-volatile, for comparison)
+fn read_memory(ptr: *const Int) -> Int {
+    unsafe { *ptr }
+}
+
+// Mut pointer (non-volatile, for comparison)
+fn write_memory(ptr: *mut Int, val: Int) {
+    unsafe { *ptr = val; }
+}
+
+// Function with mixed pointer types
+fn transfer(src: *volatile UInt32, dst: *volatile mut UInt32) {
+    let val = volatile_load(src);
+    volatile_store(dst, val);
+}
+
+fn main() -> Int {
+    0
+}

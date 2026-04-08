@@ -1,0 +1,158 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, primitives, text
+
+/// Test for Text primitive type.
+/// Text represents UTF-8 encoded strings with full Unicode support.
+
+fn main() {
+    // Basic string literals
+    let t: Text = "hello";
+    let empty: Text = "";
+    let with_spaces: Text = "hello world";
+    let single_char: Text = "a";
+
+    // Unicode support
+    let unicode: Text = "Привет мир";
+    let emoji: Text = "Hello 👋 World 🌍";
+    let chinese: Text = "你好世界";
+
+    // Escape sequences
+    let newline: Text = "line1\nline2";
+    let tab: Text = "col1\tcol2";
+    let backslash: Text = "path\\to\\file";
+    let carriage_return: Text = "line1\r\nline2";
+    let unicode_escape: Text = "Heart: \u{2764}";
+
+    // Text interpolation
+    let name: Text = "Alice";
+    let age: Int = 30;
+    let greeting: Text = f"Hello, {name}! You are {age} years old.";
+    let expr_interp: Text = f"Sum: {1 + 2 + 3}";
+    let nested_interp: Text = f"Length of name: {name.len()}";
+    let format_spec: Text = f"Pi: {3.14159:.2}";
+    let debug_format: Text = f"Debug: {name:?}";
+
+    // Text operations
+    let concat: Text = t + " " + "world";
+    let length: Int = t.len();
+    let upper: Text = t.to_uppercase();
+    let lower: Text = "HELLO".to_lowercase();
+    let repeated: Text = "ab".repeat(3);
+
+    // Character access - char_at returns Maybe<Char>
+    let first_char: Maybe<Char> = t.char_at(0);
+    let char_count: Int = t.chars().count();
+
+    // Substring via slice method (range slicing [1..4] not supported for Text)
+    let substring: Text = t.slice(1, 4);  // "ell"
+    let from_start: Text = t.slice(0, 3);  // "hel"
+    let to_end: Text = t.slice(2, t.len());  // "llo"
+
+    // Search operations
+    let contains_ell: Bool = t.contains("ell");
+    let starts_with_he: Bool = t.starts_with("he");
+    let ends_with_lo: Bool = t.ends_with("lo");
+    let find_pos: Maybe<Int> = t.find("ll");
+    let rfind_pos: Maybe<Int> = "hello hello".rfind("ll");
+
+    // Split operations - split() returns List<Text> directly
+    let words: List<Text> = "one two three".split(" ");
+    // lines() returns an iterator, count with for loop
+    let mut line_count: Int = 0;
+    for _ in "line1\nline2\nline3".lines() {
+        line_count = line_count + 1;
+    }
+    // splitn() returns List<Text> directly
+    let split_parts: List<Text> = "a,b,c,d".splitn(2, ",");
+
+    // Trim operations
+    let trimmed: Text = "  hello  ".trim();
+    let trim_start: Text = "  hello".trim_start();
+    let trim_end: Text = "hello  ".trim_end();
+    // trim_matches takes &Text pattern, not a Char
+    let trim_chars: Text = "###hello###".trim_matches("###");
+
+    // Replace operations
+    let replaced: Text = "hello".replace("l", "L");
+    let replace_n: Text = "aaaa".replacen("a", "b", 2);
+
+    // Padding and alignment (pad_start/pad_end are aliases for pad_left/pad_right)
+    let padded_left: Text = "hi".pad_start(5, ' ');
+    let padded_right: Text = "hi".pad_end(5, ' ');
+    let centered: Text = "hi".center(6, '-');
+
+    // Join using Text.join static method
+    let mut parts: List<Text> = [];
+    parts.push("a");
+    parts.push("b");
+    parts.push("c");
+    let joined: Text = Text.join(&parts, ", ");
+
+    // Comparison
+    let cmp_eq: Bool = "abc" == "abc";
+    let cmp_ne: Bool = "abc" != "def";
+    let cmp_lt: Bool = "abc" < "abd";
+    let cmp_gt: Bool = "xyz" > "abc";
+
+    // Case operations
+    let title_case: Text = "hello world".to_title_case();
+
+    // Byte operations - as_bytes() returns &[Byte] (slice of Byte)
+    let byte_len: Int = t.len();     // UTF-8 byte length
+    let char_len: Int = t.char_count();  // Character count
+
+    // Default value
+    let default_text: Text = Text.default();
+
+    // Parsing (Display::to_string via ToString protocol)
+    let from_int: Text = 42.to_string();
+    let from_bool: Text = true.to_string();
+
+    // Assertions
+    assert(t == "hello");
+    assert(empty.is_empty());
+    assert(length == 5);
+    assert(concat == "hello world");
+    assert(upper == "HELLO");
+    assert(lower == "hello");
+    assert(greeting == "Hello, Alice! You are 30 years old.");
+    assert(repeated == "ababab");
+    match first_char {
+        Some(c) => assert(c == 'h'),
+        None => panic("Expected first char"),
+    }
+    assert(char_count == 5);
+    assert(substring == "ell");
+    assert(from_start == "hel");
+    assert(to_end == "llo");
+    assert(contains_ell == true);
+    assert(starts_with_he == true);
+    assert(ends_with_lo == true);
+    match find_pos {
+        Some(pos) => assert(pos == 2),
+        None => panic("Expected Some(2)"),
+    }
+    assert(words.len() == 3);
+    assert(line_count == 3);
+    assert(split_parts.len() == 2);
+    assert(trimmed == "hello");
+    assert(replaced == "heLLo");
+    assert(replace_n == "bbaa");
+    assert(padded_left == "   hi");
+    assert(padded_right == "hi   ");
+    assert(centered == "--hi--");
+    assert(joined == "a, b, c");
+    assert(cmp_eq == true);
+    assert(cmp_ne == true);
+    assert(cmp_lt == true);
+    assert(cmp_gt == true);
+    assert(title_case == "Hello World");
+    assert(default_text == "");
+    assert(from_int == "42");
+    assert(from_bool == "true");
+    assert(byte_len == 5);
+    assert(char_len == 5);
+    assert(expr_interp == "Sum: 6");
+}

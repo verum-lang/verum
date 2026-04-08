@@ -1,0 +1,147 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, modular, arithmetic, crypto
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for modular arithmetic operations
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// Modular addition
+fn mod_add(a: Int, b: Int, m: Int) -> Int { ((a % m) + (b % m)) % m }
+fn mod_sub(a: Int, b: Int, m: Int) -> Int { (((a % m) - (b % m)) + m) % m }
+fn mod_mul(a: Int, b: Int, m: Int) -> Int { ((a % m) * (b % m)) % m }
+
+// Modular exponentiation
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b) % m; }
+        e = e / 2;
+        b = (b * b) % m;
+    }
+    result
+}
+
+// Modular inverse (brute force for small m)
+fn mod_inv(a: Int, m: Int) -> Int {
+    let mut i = 1;
+    while i < m {
+        if (a * i) % m == 1 { return i; }
+        i = i + 1;
+    }
+    -1
+}
+
+// Chinese Remainder Theorem for 2 congruences:
+// x ≡ a1 (mod m1), x ≡ a2 (mod m2)
+// Requires gcd(m1, m2) = 1
+fn crt2(a1: Int, m1: Int, a2: Int, m2: Int) -> Int {
+    let inv = mod_inv(m1, m2);
+    let x = (a1 + m1 * ((a2 - a1) * inv % m2 + m2)) % (m1 * m2);
+    x
+}
+
+// Jacobi symbol (a/n) for odd n > 0
+fn jacobi(a_in: Int, n_in: Int) -> Int {
+    let mut a = a_in % n_in;
+    if a < 0 { a = a + n_in; }
+    let mut n = n_in;
+    let mut result = 1;
+    while a != 0 {
+        while a % 2 == 0 {
+            a = a / 2;
+            if n % 8 == 3 || n % 8 == 5 { result = -result; }
+        }
+        let tmp = a;
+        a = n;
+        n = tmp;
+        if a % 4 == 3 && n % 4 == 3 { result = -result; }
+        a = a % n;
+    }
+    if n == 1 { result } else { 0 }
+}
+
+fn test_basic_modular() {
+    assert_eq(mod_add(7, 8, 10), 5);
+    assert_eq(mod_sub(3, 8, 10), 5);
+    assert_eq(mod_mul(7, 8, 10), 6);
+    assert_eq(mod_add(0, 0, 7), 0);
+}
+
+fn test_mod_pow() {
+    assert_eq(mod_pow(2, 10, 1024), 0);   // 1024 mod 1024
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    assert_eq(mod_pow(3, 5, 7), 5);        // 243 mod 7 = 5
+    assert_eq(mod_pow(7, 0, 13), 1);
+    assert_eq(mod_pow(0, 5, 13), 0);
+
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p)
+    assert_eq(mod_pow(2, 12, 13), 1);
+    assert_eq(mod_pow(5, 16, 17), 1);
+}
+
+fn test_mod_inv() {
+    // 3^-1 mod 7 = 5 (3*5=15≡1)
+    assert_eq(mod_inv(3, 7), 5);
+    // 2^-1 mod 11 = 6 (2*6=12≡1)
+    assert_eq(mod_inv(2, 11), 6);
+
+    // a * a^-1 ≡ 1 (mod m)
+    let inv = mod_inv(5, 17);
+    assert_eq((5 * inv) % 17, 1);
+}
+
+fn test_crt() {
+    // x ≡ 2 (mod 3), x ≡ 3 (mod 5) -> x = 8
+    let x = crt2(2, 3, 3, 5);
+    assert_eq(x % 3, 2);
+    assert_eq(x % 5, 3);
+    assert_eq(x, 8);
+
+    // x ≡ 1 (mod 2), x ≡ 2 (mod 3) -> x = 5
+    let y = crt2(1, 2, 2, 3);
+    assert_eq(y % 2, 1);
+    assert_eq(y % 3, 2);
+    assert_eq(y, 5);
+}
+
+fn test_jacobi() {
+    // Legendre symbols for small primes
+    // (1/p) = 1 for any p
+    assert_eq(jacobi(1, 3), 1);
+    assert_eq(jacobi(1, 5), 1);
+    assert_eq(jacobi(1, 7), 1);
+
+    // (2/7) = 1 (2 is a QR mod 7: 3^2=9≡2)
+    assert_eq(jacobi(2, 7), 1);
+
+    // (2/3) = -1 (2 is not a QR mod 3)
+    assert_eq(jacobi(2, 3), -1);
+
+    // (3/5) = -1 (QRs mod 5 are {1,4})
+    assert_eq(jacobi(3, 5), -1);
+}
+
+fn test_identities() {
+    let m = 97;
+    // (a + b) mod m = ((a mod m) + (b mod m)) mod m
+    assert_eq((50 + 60) % m, mod_add(50, 60, m));
+    // (a * b) mod m = ((a mod m) * (b mod m)) mod m
+    assert_eq((50 * 60) % m, mod_mul(50, 60, m));
+}
+
+fn main() -> Int {
+    test_basic_modular();
+    test_mod_pow();
+    test_mod_inv();
+    test_crt();
+    test_jacobi();
+    test_identities();
+    print("[OK] 265_modular_arithmetic_aot");
+    0
+}

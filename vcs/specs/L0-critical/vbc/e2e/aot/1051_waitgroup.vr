@@ -1,0 +1,73 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: waitgroup, sync, concurrency
+// @expect: pass
+
+// WaitGroup: wait for N tasks to complete.
+
+fn __waitgroup_new_raw() -> Int { 0 }
+fn __waitgroup_add_raw(wg: Int, delta: Int) -> Int { 0 }
+fn __waitgroup_done_raw(wg: Int) -> Int { 0 }
+fn __waitgroup_wait_raw(wg: Int) -> Int { 0 }
+fn __waitgroup_destroy_raw(wg: Int) -> Int { 0 }
+
+fn main() -> Int {
+    let wg = __waitgroup_new_raw();
+    if wg == 0 {
+        print("FAIL: could not create waitgroup");
+        return 1;
+    }
+
+    // Add 3 tasks
+    __waitgroup_add_raw(wg, 3);
+
+    let results = Channel.new(3);
+
+    // Spawn 3 workers
+    let t1 = spawn {
+        results.send(10);
+        __waitgroup_done_raw(wg);
+        1
+    };
+
+    let t2 = spawn {
+        results.send(20);
+        __waitgroup_done_raw(wg);
+        2
+    };
+
+    let t3 = spawn {
+        results.send(30);
+        __waitgroup_done_raw(wg);
+        3
+    };
+
+    // Wait for all to complete
+    __waitgroup_wait_raw(wg);
+
+    // All workers should have finished — collect results
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 3 {
+        match results.recv() {
+            Some(v) => { sum = sum + v; },
+            None => {}
+        }
+        i = i + 1;
+    }
+
+    // Cleanup
+    t1.await;
+    t2.await;
+    t3.await;
+    __waitgroup_destroy_raw(wg);
+
+    if sum != 60 {
+        print(f"FAIL: sum = {sum}, expected 60");
+        return 1;
+    }
+
+    print(f"PASS: waitgroup sum = {sum}");
+    0
+}

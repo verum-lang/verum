@@ -1,0 +1,140 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tuples, edge-cases, large, boundary
+// @timeout: 3000
+// @expected-exit: 0
+// @description: Large tuples and boundary condition tests
+
+fn main() {
+    // === Test 1: 6-element tuple ===
+    let t6 = (1, 2, 3, 4, 5, 6);
+    let (a1, a2, a3, a4, a5, a6) = t6;
+    assert_eq(a1, 1);
+    assert_eq(a2, 2);
+    assert_eq(a3, 3);
+    assert_eq(a4, 4);
+    assert_eq(a5, 5);
+    assert_eq(a6, 6);
+
+    // === Test 2: 8-element tuple ===
+    let t8 = (10, 20, 30, 40, 50, 60, 70, 80);
+    let (b1, b2, b3, b4, b5, b6, b7, b8) = t8;
+    assert_eq(b1, 10);
+    assert_eq(b2, 20);
+    assert_eq(b3, 30);
+    assert_eq(b4, 40);
+    assert_eq(b5, 50);
+    assert_eq(b6, 60);
+    assert_eq(b7, 70);
+    assert_eq(b8, 80);
+
+    // === Test 3: 10-element tuple with computed values ===
+    fn make_ten(base: Int) -> (Int, Int, Int, Int, Int, Int, Int, Int, Int, Int) {
+        return (base, base+1, base+2, base+3, base+4,
+                base+5, base+6, base+7, base+8, base+9);
+    }
+    let (c1, c2, c3, c4, c5, c6, c7, c8, c9, c10) = make_ten(100);
+    assert_eq(c1, 100);
+    assert_eq(c2, 101);
+    assert_eq(c3, 102);
+    assert_eq(c4, 103);
+    assert_eq(c5, 104);
+    assert_eq(c6, 105);
+    assert_eq(c7, 106);
+    assert_eq(c8, 107);
+    assert_eq(c9, 108);
+    assert_eq(c10, 109);
+
+    // === Test 4: Alternating values in large tuple ===
+    let alt = (1, -1, 2, -2, 3, -3, 4, -4);
+    let (d1, d2, d3, d4, d5, d6, d7, d8) = alt;
+    assert_eq(d1 + d2, 0);
+    assert_eq(d3 + d4, 0);
+    assert_eq(d5 + d6, 0);
+    assert_eq(d7 + d8, 0);
+
+    // === Test 5: Large tuple from function with multiple parameters ===
+    fn combine_six(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> (Int, Int, Int, Int, Int, Int) {
+        return (a, b, c, d, e, f);
+    }
+    let (e1, e2, e3, e4, e5, e6) = combine_six(11, 22, 33, 44, 55, 66);
+    assert_eq(e1, 11);
+    assert_eq(e2, 22);
+    assert_eq(e3, 33);
+    assert_eq(e4, 44);
+    assert_eq(e5, 55);
+    assert_eq(e6, 66);
+
+    // === Test 6: Computed elements with many temporaries ===
+    fn stress_regs(x: Int) -> (Int, Int, Int, Int, Int, Int) {
+        // Each element uses multiple temporaries
+        return (
+            x * 2 + 1,
+            x * 3 + 2,
+            x * 4 + 3,
+            x * 5 + 4,
+            x * 6 + 5,
+            x * 7 + 6
+        );
+    }
+    let (f1, f2, f3, f4, f5, f6) = stress_regs(10);
+    assert_eq(f1, 21);  // 10 * 2 + 1 = 21
+    assert_eq(f2, 32);  // 10 * 3 + 2 = 32
+    assert_eq(f3, 43);  // 10 * 4 + 3 = 43
+    assert_eq(f4, 54);  // 10 * 5 + 4 = 54
+    assert_eq(f5, 65);  // 10 * 6 + 5 = 65
+    assert_eq(f6, 76);  // 10 * 7 + 6 = 76
+
+    // === Test 7: Sequential large tuple operations ===
+    fn add_all_six(t: (Int, Int, Int, Int, Int, Int)) -> Int {
+        let (a, b, c, d, e, f) = t;
+        return a + b + c + d + e + f;
+    }
+    let sum1 = add_all_six((1, 2, 3, 4, 5, 6));
+    assert_eq(sum1, 21);
+
+    let sum2 = add_all_six((10, 20, 30, 40, 50, 60));
+    assert_eq(sum2, 210);
+
+    // === Test 8: Large tuple passed through nested functions ===
+    fn outer_six(t: (Int, Int, Int, Int, Int, Int)) -> (Int, Int, Int, Int, Int, Int) {
+        fn inner_transform(t: (Int, Int, Int, Int, Int, Int)) -> (Int, Int, Int, Int, Int, Int) {
+            let (a, b, c, d, e, f) = t;
+            return (a + 1, b + 1, c + 1, d + 1, e + 1, f + 1);
+        }
+        return inner_transform(t);
+    }
+    let (g1, g2, g3, g4, g5, g6) = outer_six((100, 200, 300, 400, 500, 600));
+    assert_eq(g1, 101);
+    assert_eq(g2, 201);
+    assert_eq(g3, 301);
+    assert_eq(g4, 401);
+    assert_eq(g5, 501);
+    assert_eq(g6, 601);
+
+    // === Test 9: Many tuples in sequence ===
+    let seq1 = (1, 2, 3, 4);
+    let seq2 = (5, 6, 7, 8);
+    let seq3 = (9, 10, 11, 12);
+    let (s1a, s1b, s1c, s1d) = seq1;
+    let (s2a, s2b, s2c, s2d) = seq2;
+    let (s3a, s3b, s3c, s3d) = seq3;
+    let total = s1a + s1b + s1c + s1d + s2a + s2b + s2c + s2d + s3a + s3b + s3c + s3d;
+    assert_eq(total, 78);  // sum of 1..12
+
+    // === Test 10: Stress test - multiple 4-tuples with computed values ===
+    fn make_quad(n: Int) -> (Int, Int, Int, Int) {
+        return (n, n * 2, n * 3, n * 4);
+    }
+    let q1 = make_quad(1);
+    let q2 = make_quad(2);
+    let q3 = make_quad(3);
+    let (h1a, h1b, h1c, h1d) = q1;
+    let (h2a, h2b, h2c, h2d) = q2;
+    let (h3a, h3b, h3c, h3d) = q3;
+    assert_eq(h1a + h2a + h3a, 6);   // 1 + 2 + 3 = 6
+    assert_eq(h1b + h2b + h3b, 12);  // 2 + 4 + 6 = 12
+    assert_eq(h1c + h2c + h3c, 18);  // 3 + 6 + 9 = 18
+    assert_eq(h1d + h2d + h3d, 24);  // 4 + 8 + 12 = 24
+}

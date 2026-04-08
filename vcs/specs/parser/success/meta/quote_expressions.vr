@@ -1,0 +1,68 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @description: Test quote expression parsing per grammar/verum.ebnf quote_expr production
+
+// Basic quote expression
+fn test_basic_quote() {
+    let tokens = quote { let x = 1; };
+    let more = quote { fn foo() {} };
+}
+
+// Quote with target stage
+fn test_staged_quote() {
+    let stage0 = quote(1) { let x = 1; };
+    let stage2 = quote(2) { fn bar() {} };
+}
+
+// Quote with interpolation
+fn test_quote_interpolation() {
+    let name = "x";
+    let tokens = quote { let $name = 42; };
+    let with_expr = quote { let val = ${compute_value()}; };
+}
+
+// Quote with nested structures
+fn test_nested_quote() {
+    let nested = quote {
+        fn outer() {
+            fn inner() {
+                let x = 1;
+            }
+        }
+    };
+}
+
+// Quote with various token types
+fn test_quote_tokens() {
+    let operators = quote { a + b * c - d / e };
+    let brackets = quote { [1, 2, 3] };
+    let braces = quote { { inner } };
+    let parens = quote { (a, b, c) };
+}
+
+// Quote repetition
+fn test_quote_repetition() {
+    let fields = get_fields();
+    let expanded = quote {
+        $[for field in fields {
+            let $field = 0;
+        }]
+    };
+}
+
+// Stage escape in quote
+fn test_stage_escape() {
+    let value = 42;
+    let tokens = quote {
+        let x = $(stage 1){ value };
+    };
+}
+
+// Lift expression
+fn test_lift() {
+    let computed = compute();
+    let tokens = quote {
+        let x = lift(computed);
+    };
+}

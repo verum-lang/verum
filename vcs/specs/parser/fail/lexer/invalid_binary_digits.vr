@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, numbers, binary, error
+// @description: Test invalid binary digit detection
+// @expected-error: E003
+
+fn test_invalid_binary() {
+    let a = 0b102;
+    let b = 0b222;
+}

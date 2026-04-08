@@ -1,0 +1,48 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, record, duplicate, error
+// @description: Test duplicate field names in record pattern
+// @expected-error: E077
+
+type Point is { x: Int, y: Int };
+type Rectangle is { x: Int, y: Int, width: Int, height: Int };
+
+fn test_duplicate_field_simple() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: field 'x' appears twice
+    match p {
+        Point { x, x } => print("duplicate field"),
+        _ => print("other"),
+    }
+}
+
+fn test_duplicate_field_with_binding() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: field 'x' appears twice with different bindings
+    match p {
+        Point { x: a, x: b } => print("duplicate field"),
+        _ => print("other"),
+    }
+}
+
+fn test_duplicate_field_mixed() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: field 'x' appears both short and long form
+    match p {
+        Point { x, x: val } => print("duplicate mixed"),
+        _ => print("other"),
+    }
+}
+
+fn test_multiple_duplicates() {
+    let rect = Rectangle { x: 0, y: 0, width: 100, height: 50 };
+
+    // Invalid: multiple duplicate fields
+    match rect {
+        Rectangle { x, y, x, y } => print("multiple duplicates"),
+        _ => print("other"),
+    }
+}

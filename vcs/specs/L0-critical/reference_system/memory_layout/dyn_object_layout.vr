@@ -1,0 +1,108 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, dyn, protocol-object
+
+/// Test dynamic dispatch concepts with CBGR protection.
+/// Protocol objects enable polymorphic behavior while CBGR ensures memory safety.
+/// Spec: 26-cbgr-implementation.md#trait-object-layout
+
+fn main() {
+    test_cbgr_tracking();
+    print("  [OK] test_cbgr_tracking");
+    test_multiple_allocations();
+    print("  [OK] test_multiple_allocations");
+    test_generation_uniqueness();
+    print("  [OK] test_generation_uniqueness");
+    test_epoch_validity();
+    print("  [OK] test_epoch_validity");
+
+    print("All protocol object layout tests passed!");
+}
+
+/// Test CBGR generation tracking with heap-allocated values
+fn test_cbgr_tracking() {
+    let value = Heap.new(42);
+
+    // Generation tracking works
+    let generation = value.generation();
+    assert(generation > 0);
+
+    // Header inspection works
+    assert(value.is_allocated());
+    assert(!value.is_freed());
+
+    // Reference carries generation info
+    let ref_val: &Int = &*value;
+    assert(ref_val.stored_generation() == generation);
+}
+
+/// Test multiple heap allocations maintain independence
+fn test_multiple_allocations() {
+    let val1 = Heap.new(100);
+    let val2 = Heap.new(200);
+    let val3 = Heap.new(300);
+
+    // All are valid allocations
+    assert(val1.is_allocated());
+    assert(val2.is_allocated());
+    assert(val3.is_allocated());
+
+    // Values are correct through references
+    let r1: &Int = &*val1;
+    let r2: &Int = &*val2;
+    let r3: &Int = &*val3;
+    assert(*r1 == 100);
+    assert(*r2 == 200);
+    assert(*r3 == 300);
+}
+
+/// Test generations are unique across allocations
+fn test_generation_uniqueness() {
+    let a = Heap.new(1);
+    let b = Heap.new(2);
+    let c = Heap.new(3);
+
+    // Generations are strictly increasing
+    assert(a.generation() < b.generation());
+    assert(b.generation() < c.generation());
+
+    // All generations are positive
+    assert(a.generation() > 0);
+    assert(b.generation() > 0);
+    assert(c.generation() > 0);
+}
+
+/// Test epoch validity tracking
+fn test_epoch_validity() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Reference epoch is valid
+    assert(ref_val.is_epoch_valid());
+
+    // Advance epoch several times
+    Epoch.advance();
+    Epoch.advance();
+    Epoch.advance();
+
+    // Reference still valid (within window)
+    assert(ref_val.is_epoch_valid());
+
+    // Value unchanged
+    assert(*ref_val == 42);
+}
+
+// Supporting types
+
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+
+    fn advance() {
+        Runtime.advance_epoch();
+    }
+}

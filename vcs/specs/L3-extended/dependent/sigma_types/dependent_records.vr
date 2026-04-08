@@ -1,0 +1,175 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent, sigma-types, records
+// @description: Dependent records as sigma types
+
+/// Dependent records allow later fields to depend on earlier fields.
+/// They are the record equivalent of sigma types.
+
+/// Simple dependent record: a length-indexed vector with its length
+type SizedVec<T> is {
+    len: Int,
+    data: List<T>,
+};
+
+fn create_sized_vec<T>(items: List<T>) -> SizedVec<T> {
+    SizedVec { len: items.len(), data: items }
+}
+
+fn get_sized_vec<T>(sv: SizedVec<T>, idx: Int) -> T
+where idx >= 0, idx < sv.len {
+    sv.data[idx]
+}
+
+/// Matrix with dimensions
+type Matrix<T> is {
+    rows: Int,
+    cols: Int,
+    data: List<List<T>>,
+};
+
+fn matrix_get<T>(m: Matrix<T>, r: Int, c: Int) -> T
+where r >= 0, r < m.rows, c >= 0, c < m.cols {
+    m.data[r][c]
+}
+
+fn matrix_transpose<T>(m: Matrix<T>) -> Matrix<T> {
+    let mut result: List<List<T>> = [];
+    let mut j = 0;
+    while j < m.cols {
+        let mut row: List<T> = [];
+        let mut i = 0;
+        while i < m.rows {
+            row.push(m.data[i][j]);
+            i = i + 1;
+        }
+        result.push(row);
+        j = j + 1;
+    }
+    Matrix {
+        rows: m.cols,
+        cols: m.rows,
+        data: result,
+    }
+}
+
+/// Sorted array record
+type SortedArray<T> is {
+    data: List<T>,
+    sorted: Bool,
+};
+
+fn mk_sorted<T>(xs: List<T>) -> SortedArray<T> {
+    let mut data = xs;
+    data.sort();
+    SortedArray { data, sorted: true }
+}
+
+fn sorted_insert(arr: SortedArray<Int>, elem: Int) -> SortedArray<Int> {
+    let mut data = arr.data;
+    // Find insertion point
+    let mut i = 0;
+    while i < data.len() && data[i] < elem {
+        i = i + 1;
+    }
+    data.insert(i, elem);
+    SortedArray { data, sorted: true }
+}
+
+/// Typed AST node
+type Term is
+    | Var(Text)
+    | NumLit(Int)
+    | BinOp { op: Text, left: Heap<Term>, right: Heap<Term> };
+
+/// Typed AST with type info
+type TypedTerm is {
+    term: Term,
+    ty: Text,
+};
+
+fn type_of(t: TypedTerm) -> Text {
+    t.ty
+}
+
+/// Triangle with constraints
+type Triangle is {
+    a: Float,
+    b: Float,
+    c: Float,
+};
+
+fn triangle_perimeter(t: Triangle) -> Float {
+    t.a + t.b + t.c
+}
+
+fn triangle_is_valid(t: Triangle) -> Bool {
+    t.a > 0.0 && t.b > 0.0 && t.c > 0.0
+    && t.a + t.b > t.c
+    && t.b + t.c > t.a
+    && t.c + t.a > t.b
+}
+
+/// Even number witness
+type EvenWitness is {
+    value: Int,
+    half: Int,
+};
+
+fn mk_even(k: Int) -> EvenWitness {
+    EvenWitness { value: 2 * k, half: k }
+}
+
+/// Dependent pair with proof witness
+type DepPair<A, B> is {
+    fst: A,
+    snd: B,
+};
+
+fn lookup<V>(list: List<(Text, V)>, key: Text) -> Maybe<V> {
+    for item in list {
+        if item.0 == key { return Some(item.1); }
+    }
+    None
+}
+
+fn main() {
+    // Sized vector
+    let sv = create_sized_vec([1, 2, 3, 4, 5]);
+    assert(sv.len == 5);
+    assert(get_sized_vec(sv, 0) == 1);
+
+    // Matrix
+    let m: Matrix<Int> = Matrix {
+        rows: 2,
+        cols: 3,
+        data: [[1, 2, 3], [4, 5, 6]],
+    };
+    assert(matrix_get(m, 0, 1) == 2);
+
+    let mt = matrix_transpose(m);
+    assert(mt.rows == 3);
+    assert(mt.cols == 2);
+
+    // Sorted array
+    let sorted = mk_sorted([3, 1, 4, 1, 5]);
+    assert(sorted.sorted == true);
+    let sorted2 = sorted_insert(sorted, 2);
+    assert(sorted2.data.len() == 6);
+
+    // Triangle
+    let t: Triangle = Triangle { a: 3.0, b: 4.0, c: 5.0 };
+    assert(triangle_is_valid(t));
+    assert(triangle_perimeter(t) == 12.0);
+
+    // Even witness
+    let e = mk_even(21);
+    assert(e.value == 42);
+    assert(e.half == 21);
+
+    // Lookup
+    let table = [("x", 1), ("y", 2), ("z", 3)];
+    let found = lookup(table, "y");
+    assert(found == Some(2));
+}

@@ -1,0 +1,177 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, incremental, correctness, equivalence
+// @description: Tests that incremental reparsing produces correct results equivalent to full parsing.
+//              Critical for ensuring semantic correctness of incremental updates.
+
+// ============================================================================
+// This file verifies that trees produced by incremental parsing are
+// semantically equivalent to trees produced by full parsing after the edit.
+// ============================================================================
+
+// Test 1: Simple identifier change
+// Base: fn foo() -> Int { 42 }
+// Edit: Change 'foo' to 'bar'
+// Verify: Incremental result equals full parse of 'fn bar() -> Int { 42 }'
+fn simple_ident() -> Int {
+    42
+}
+
+// Test 2: Numeric literal change
+// Base: let x = 42;
+// Edit: Change '42' to '100'
+// Verify: Value changes correctly
+fn numeric_change() {
+    let x = 42;
+    x
+}
+
+// Test 3: String literal change
+// Base: let s = "hello";
+// Edit: Change "hello" to "world"
+// Verify: String value changes correctly
+fn string_change() {
+    let s = "hello";
+    s
+}
+
+// Test 4: Operator change
+// Base: x + y
+// Edit: Change '+' to '*'
+// Verify: Binary expression operator changes
+fn operator_change(x: Int, y: Int) -> Int {
+    x + y
+}
+
+// Test 5: Add statement to block
+// Base: { let a = 1; }
+// Edit: Insert 'let b = 2;' after first statement
+// Verify: Block has two statements
+fn add_to_block() {
+    let a = 1;
+}
+
+// Test 6: Remove statement from block
+// Base: { let a = 1; let b = 2; let c = 3; }
+// Edit: Remove 'let b = 2;'
+// Verify: Block has two statements, c still accessible
+fn remove_from_block() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    a + c
+}
+
+// Test 7: Change control flow structure
+// Base: if x > 0 { 1 } else { 0 }
+// Edit: Change condition from 'x > 0' to 'x >= 0'
+// Verify: Condition changes correctly
+fn control_flow_change(x: Int) -> Int {
+    if x > 0 { 1 } else { 0 }
+}
+
+// Test 8: Add else branch
+// Base: if x > 0 { 1 }
+// Edit: Add ' else { 0 }' after if block
+// Verify: If expression gains else branch
+fn add_else(x: Int) -> Int {
+    if x > 0 { 1 } else { 0 }
+}
+
+// Test 9: Change match arm
+// Base: match opt { Some(x) => x, None => 0 }
+// Edit: Change 'x' to 'x * 2' in Some arm
+// Verify: Match arm expression changes
+fn match_arm_change(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(x) => x,
+        None => 0,
+    }
+}
+
+// Test 10: Add generic parameter
+// Base: fn identity(x: Int) -> Int { x }
+// Edit: Change to 'fn identity<T>(x: T) -> T { x }'
+// Verify: Function becomes generic
+fn identity(x: Int) -> Int {
+    x
+}
+
+// Test 11: Change type annotation
+// Base: let x: Int = 42;
+// Edit: Change 'Int' to 'Float'
+// Verify: Type annotation changes
+fn type_annotation_change() {
+    let x: Int = 42;
+    x
+}
+
+// Test 12: Add parameter
+// Base: fn one_param(a: Int) -> Int { a }
+// Edit: Add ', b: Int' to parameters, change body to 'a + b'
+// Verify: Function has two parameters
+fn one_param(a: Int) -> Int {
+    a
+}
+
+// Test 13: Remove parameter
+// Base: fn two_params(a: Int, b: Int) -> Int { a + b }
+// Edit: Remove ', b: Int', change body to 'a'
+// Verify: Function has one parameter
+fn two_params(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Test 14: Change function visibility
+// Base: fn private_fn() -> Int { 1 }
+// Edit: Add 'pub ' before 'fn'
+// Verify: Function becomes public
+fn private_fn() -> Int {
+    1
+}
+
+// Test 15: Complex nested change
+// Base: Complex nested structure
+// Edit: Change deepest value
+// Verify: Nested structure preserved correctly
+fn complex_nested() -> Int {
+    let result = {
+        let outer = {
+            let middle = {
+                let inner = 42;
+                inner
+            };
+            middle
+        };
+        outer
+    };
+    result
+}
+
+// Test 16: Type definition change
+// Base: type Point is { x: Int, y: Int };
+// Edit: Add 'z: Int' field
+// Verify: Type has three fields
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// Test 17: Implement block change
+// Base: implement Point { fn sum(self) -> Int { self.x + self.y } }
+// Edit: Add 'self.z' to sum
+// Verify: Method body changes correctly
+implement Point {
+    fn sum(self) -> Int {
+        self.x + self.y
+    }
+}
+
+// Test 18: Protocol method change
+// Base: protocol with one method
+// Edit: Add another method
+// Verify: Protocol has two methods
+type Computable is protocol {
+    fn compute(self) -> Int;
+};

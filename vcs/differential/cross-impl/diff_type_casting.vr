@@ -1,0 +1,47 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, types, casting, conversion
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Type conversions: Int/Float/Bool casting, truncation behavior
+
+fn main() -> Int {
+    // Int to Float
+    let i = 42;
+    let f = i as Float;
+    assert_eq(f, 42.0);
+
+    // Float to Int (truncation toward zero)
+    assert_eq((3.7 as Int), 3);
+    assert_eq((3.2 as Int), 3);
+    assert_eq((-3.7 as Int), -3);
+    assert_eq((-3.2 as Int), -3);
+    assert_eq((0.999 as Int), 0);
+
+    // Bool to Int
+    assert_eq((true as Int), 1);
+    assert_eq((false as Int), 0);
+
+    // Arithmetic with mixed types after casting
+    let x = 10;
+    let y = 3.0;
+    let result = (x as Float) / y;
+    // 10.0 / 3.0 should be consistent across tiers
+    let truncated = result as Int;
+    assert_eq(truncated, 3);
+
+    // Large value casting
+    let big = 1000000;
+    let big_f = big as Float;
+    let back = big_f as Int;
+    assert_eq(back, 1000000);
+
+    // Zero casting
+    assert_eq((0 as Float), 0.0);
+    assert_eq((0.0 as Int), 0);
+
+    print("diff_type_casting: ok");
+    0
+}

@@ -1,0 +1,187 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, base, higher-order, apply, closures
+// @description: Tests for higher-order function application with named functions and closures
+
+module specs.core.base.simple_map_test;
+
+mount core.base.maybe.{Maybe, Some, None};
+
+// Simple function to double
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+// Simple higher-order function
+fn apply<F: fn(Int) -> Int>(x: Int, f: F) -> Int {
+    f(x)
+}
+
+@test
+fn test_apply_named_function() {
+    let result = apply(5, double);
+    assert_eq(result, 10);
+}
+
+@test
+fn test_apply_closure() {
+    let result = apply(5, |x| x * 2);
+    assert_eq(result, 10);
+}
+
+@test
+fn test_apply_identity_closure() {
+    let result = apply(42, |x| x);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_apply_add_closure() {
+    let result = apply(7, |x| x + 3);
+    assert_eq(result, 10);
+}
+
+// =============================================================================
+// Section 2: Higher-order functions with different signatures
+// =============================================================================
+
+fn apply_to_text<F: fn(Text) -> Int>(s: Text, f: F) -> Int {
+    f(s)
+}
+
+fn apply_to_bool<F: fn(Bool) -> Int>(b: Bool, f: F) -> Int {
+    f(b)
+}
+
+@test
+fn test_apply_to_text_len() {
+    let result = apply_to_text("hello", |s: Text| s.len());
+    assert_eq(result, 5);
+}
+
+@test
+fn test_apply_to_text_empty() {
+    let result = apply_to_text("", |s: Text| s.len());
+    assert_eq(result, 0);
+}
+
+@test
+fn test_apply_to_bool_convert() {
+    let result = apply_to_bool(true, |b: Bool| if b { 1 } else { 0 });
+    assert_eq(result, 1);
+}
+
+@test
+fn test_apply_to_bool_false() {
+    let result = apply_to_bool(false, |b: Bool| if b { 1 } else { 0 });
+    assert_eq(result, 0);
+}
+
+// =============================================================================
+// Section 3: Composition patterns
+// =============================================================================
+
+fn compose<F: fn(Int) -> Int, G: fn(Int) -> Int>(x: Int, f: F, g: G) -> Int {
+    g(f(x))
+}
+
+@test
+fn test_compose_add_then_double() {
+    let result = compose(3, |x| x + 2, |x| x * 2);
+    assert_eq(result, 10);
+}
+
+@test
+fn test_compose_double_then_add() {
+    let result = compose(3, |x| x * 2, |x| x + 2);
+    assert_eq(result, 8);
+}
+
+@test
+fn test_compose_identity() {
+    let result = compose(42, |x| x, |x| x);
+    assert_eq(result, 42);
+}
+
+// =============================================================================
+// Section 4: Maybe.map with closures
+// =============================================================================
+
+@test
+fn test_maybe_map_some() {
+    let val: Maybe<Int> = Some(5);
+    let result = val.map(|x| x * 3);
+    assert_eq(result.unwrap(), 15);
+}
+
+@test
+fn test_maybe_map_none() {
+    let val: Maybe<Int> = None;
+    let result = val.map(|x| x * 3);
+    assert(result.is_none());
+}
+
+@test
+fn test_maybe_map_chained() {
+    let val: Maybe<Int> = Some(2);
+    let result = val.map(|x| x + 1).map(|x| x * 10);
+    assert_eq(result.unwrap(), 30);
+}
+
+@test
+fn test_maybe_map_with_named_fn() {
+    let val: Maybe<Int> = Some(10);
+    let result = val.map(double);
+    assert_eq(result.unwrap(), 20);
+}
+
+// =============================================================================
+// Section 5: Predicate higher-order functions
+// =============================================================================
+
+fn apply_predicate<F: fn(Int) -> Bool>(x: Int, pred: F) -> Bool {
+    pred(x)
+}
+
+@test
+fn test_predicate_greater_than() {
+    assert(apply_predicate(10, |x| x > 5));
+    assert(!apply_predicate(3, |x| x > 5));
+}
+
+@test
+fn test_predicate_even() {
+    assert(apply_predicate(4, |x| x % 2 == 0));
+    assert(!apply_predicate(3, |x| x % 2 == 0));
+}
+
+@test
+fn test_predicate_zero() {
+    assert(apply_predicate(0, |x| x == 0));
+    assert(!apply_predicate(1, |x| x == 0));
+}
+
+// =============================================================================
+// Section 6: Multiple closure arguments
+// =============================================================================
+
+fn apply_then_check<F: fn(Int) -> Int, P: fn(Int) -> Bool>(x: Int, transform: F, check: P) -> Bool {
+    check(transform(x))
+}
+
+@test
+fn test_transform_and_check() {
+    let result = apply_then_check(3, |x| x * x, |x| x > 5);
+    assert(result);
+}
+
+@test
+fn test_transform_and_check_fails() {
+    let result = apply_then_check(2, |x| x * x, |x| x > 5);
+    assert(!result);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

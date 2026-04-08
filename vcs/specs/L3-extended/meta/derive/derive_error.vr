@@ -1,0 +1,218 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, error, display
+
+/// Automatic derive for Error protocol
+///
+/// `@derive(Error)` generates an implementation of the Error protocol,
+/// enabling error types to participate in error handling with proper
+/// message formatting and error chaining.
+/// Test uses only basic language features without stdlib.
+
+// =============================================================================
+// Section 1: Basic @derive(Error) on sum types
+// =============================================================================
+
+/// Simple error type with unit variants
+@derive(Error, Display)
+type ParseError is
+    | UnexpectedToken
+    | UnexpectedEof
+    | InvalidSyntax;
+
+/// Error type with data-carrying variants
+@derive(Error, Display)
+type IoError is
+    | NotFound { path: Text }
+    | PermissionDenied { path: Text, required: Text }
+    | ConnectionFailed { host: Text, port: Int }
+    | Timeout { duration_ms: Int };
+
+/// Error with mixed variant styles
+@derive(Error, Display)
+type ValidationError is
+    | Empty
+    | TooShort { min_length: Int }
+    | TooLong { max_length: Int }
+    | InvalidFormat { expected: Text, got: Text }
+    | OutOfRange { min: Int, max: Int, actual: Int };
+
+// =============================================================================
+// Section 2: @derive(Error, Display) combination
+// =============================================================================
+
+/// Error with custom display format using @message attribute
+@derive(Error, Display)
+type ConfigError is
+    | @message("Missing required field: {name}")
+      MissingField { name: Text }
+    | @message("Invalid value '{value}' for field '{field}': {reason}")
+      InvalidValue { field: Text, value: Text, reason: Text }
+    | @message("Duplicate key: {key}")
+      DuplicateKey { key: Text };
+
+/// Error with automatic Display generation from variant structure
+@derive(Error, Display)
+type DatabaseError is
+    | ConnectionError { message: Text }
+    | QueryError { query: Text, message: Text }
+    | TransactionError { transaction_id: Int, message: Text }
+    | ConstraintViolation { table: Text, constraint: Text };
+
+// =============================================================================
+// Section 3: Error types with @from for automatic conversion
+// =============================================================================
+
+/// High-level application error that wraps lower-level errors
+@derive(Error, Display)
+type AppError is
+    | @from(IoError)
+      Io(IoError)
+    | @from(ParseError)
+      Parse(ParseError)
+    | @from(ValidationError)
+      Validation(ValidationError)
+    | @from(ConfigError)
+      Config(ConfigError)
+    | Internal { message: Text };
+
+// =============================================================================
+// Section 4: Nested error wrapping with @source
+// =============================================================================
+
+/// Error with explicit source tracking for error chains
+@derive(Error, Display)
+type FileProcessingError is
+    | @source
+      ReadError { path: Text, source: IoError }
+    | @source
+      ParseError { path: Text, line: Int, source: ParseError }
+    | @source
+      ValidationError { path: Text, source: ValidationError }
+    | ProcessingFailed { path: Text, stage: Text, message: Text };
+
+// =============================================================================
+// Section 5: Error with structured context fields (struct form)
+// =============================================================================
+
+/// Error kind enumeration
+@derive(Error, Display)
+type TaskErrorKind is
+    | Timeout
+    | Cancelled
+    | Panic { message: Text }
+    | RetryExhausted
+    | DependencyFailed { dependency_task_id: Int };
+
+/// Structured error with context
+@derive(Error, Display)
+type TaskError is {
+    task_id: Int,
+    task_name: Text,
+    attempt: Int,
+    max_attempts: Int,
+    error_kind: TaskErrorKind,
+};
+
+// =============================================================================
+// Section 6: Generic error types
+// =============================================================================
+
+/// Generic error wrapper
+@derive(Error, Display)
+type WrappedError<E> is
+    | @source
+      Inner { source: E }
+    | WithMessage { message: Text, inner: E };
+
+/// Generic result with error
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// =============================================================================
+// Section 7: Simple error hierarchies
+// =============================================================================
+
+/// Network layer error
+@derive(Error, Display)
+type NetworkError is
+    | Disconnected
+    | Timeout { ms: Int }
+    | InvalidResponse { code: Int };
+
+/// Service layer error
+@derive(Error, Display)
+type ServiceError is
+    | @from(NetworkError)
+      Network(NetworkError)
+    | @from(DatabaseError)
+      Database(DatabaseError)
+    | NotFound { resource: Text, id: Int }
+    | Unauthorized { reason: Text };
+
+// =============================================================================
+// Section 8: Usage examples
+// =============================================================================
+
+fn parse_config(content: Text) -> Result<Config, ConfigError> {
+    if content == "" {
+        return Result.Err(ConfigError.MissingField { name: "content" });
+    }
+    // Parse logic...
+    Result.Ok(Config { name: "default", value: 0 })
+}
+
+fn read_file(path: Text) -> Result<Text, IoError> {
+    // Simulated file read
+    Result.Err(IoError.NotFound { path: path })
+}
+
+fn process_file(path: Text) -> Result<(), FileProcessingError> {
+    match read_file(path) {
+        Result.Err(e) => {
+            Result.Err(FileProcessingError.ReadError { path: path, source: e })
+        },
+        Result.Ok(content) => {
+            // More processing...
+            Result.Ok(())
+        },
+    }
+}
+
+fn demonstrate_error_creation() {
+    // Simple error
+    let parse_err = ParseError.UnexpectedEof;
+
+    // Error with data
+    let io_err = IoError.NotFound { path: "/etc/config.json" };
+
+    // Error with custom message
+    let config_err = ConfigError.MissingField { name: "database.host" };
+
+    // Wrapped error
+    let file_err = FileProcessingError.ReadError {
+        path: "/etc/config.json",
+        source: IoError.PermissionDenied {
+            path: "/etc/config.json",
+            required: "read",
+        },
+    };
+
+    // Structured error
+    let task_err = TaskError {
+        task_id: 123,
+        task_name: "process_data",
+        attempt: 3,
+        max_attempts: 5,
+        error_kind: TaskErrorKind.Timeout,
+    };
+}
+
+// Helper types for examples
+type Config is { name: Text, value: Int };
+
+fn main() {
+    demonstrate_error_creation();
+}

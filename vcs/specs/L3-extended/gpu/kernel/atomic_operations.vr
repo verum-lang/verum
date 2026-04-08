@@ -1,0 +1,92 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only, runtime needs GPU device
+// @tags: gpu, kernel, atomic
+
+@kernel(block_size = 256)
+fn atomic_add_kernel(
+    input: &Tensor<f32, [N]>,
+    sum: &mut f32
+) {
+    let idx = global_id().x;
+    if idx < N {
+        atomic_add(sum, input[idx]);
+    }
+}
+
+@kernel(block_size = 256)
+fn atomic_counter(
+    counter: &mut u32
+) {
+    atomic_add(counter, 1);
+}
+
+@kernel(block_size = 256)
+fn atomic_min_max_kernel(
+    input: &Tensor<f32, [N]>,
+    min_val: &mut f32,
+    max_val: &mut f32
+) {
+    let idx = global_id().x;
+    if idx < N {
+        atomic_min(min_val, input[idx]);
+        atomic_max(max_val, input[idx]);
+    }
+}
+
+@kernel(block_size = 256)
+fn atomic_cas_kernel(
+    values: &mut Tensor<u32, [N]>,
+    expected: u32,
+    new_val: u32
+) {
+    let idx = global_id().x;
+    if idx < N {
+        // Compare-and-swap: if values[idx] == expected, set to new_val
+        let old = atomic_compare_exchange(&mut values[idx], expected, new_val);
+        // old contains the previous value
+    }
+}
+
+@kernel(block_size = 256)
+fn atomic_exchange_kernel(
+    values: &mut Tensor<f32, [N]>,
+    old_values: &mut Tensor<f32, [N]>,
+    new_val: f32
+) {
+    let idx = global_id().x;
+    if idx < N {
+        old_values[idx] = atomic_exchange(&mut values[idx], new_val);
+    }
+}
+
+@kernel(block_size = 256)
+fn histogram_kernel(
+    data: &Tensor<u8, [N]>,
+    hist: &mut Tensor<u32, [256]>
+) {
+    let idx = global_id().x;
+    if idx < N {
+        let bin = data[idx] as usize;
+        atomic_add(&mut hist[bin], 1);
+    }
+}
+
+@kernel(block_size = 256)
+fn atomic_bitwise_kernel(
+    values: &mut Tensor<u32, [N]>,
+    mask: u32
+) {
+    let idx = global_id().x;
+    if idx < N {
+        atomic_or(&mut values[idx], mask);
+        atomic_and(&mut values[idx], 0x7FFFFFFF_u32);
+        atomic_xor(&mut values[idx], 0xFF);
+    }
+}
+
+fn main() {
+    // GPU kernel launch syntax (<<<grid, block>>>) requires runtime
+    // This test validates kernel function parsing only
+}

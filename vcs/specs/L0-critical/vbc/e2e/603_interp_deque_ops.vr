@@ -1,0 +1,113 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, deque, push, pop
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Integration test for Deque push/pop operations.
+// Note: Deque.len() routes through stdlib function (direct Call),
+// while push/pop route through builtin CallM dispatch.
+// This test uses to_list().len() to verify element count.
+
+fn test_deque_push_pop() {
+    let mut d = Deque.new();
+
+    // Push 3 elements
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    // Verify via to_list
+    let lst = d.to_list();
+    assert_eq(lst.len(), 3);
+    let mut total = 0;
+    let mut i = 0;
+    while i < lst.len() {
+        total = total + lst[i];
+        i = i + 1;
+    }
+    assert_eq(total, 60);
+
+    // Pop from front
+    let v1 = d.pop_front();
+    let lst2 = d.to_list();
+    assert_eq(lst2.len(), 2);
+
+    // Pop from back
+    let v2 = d.pop_back();
+    let lst3 = d.to_list();
+    assert_eq(lst3.len(), 1);
+
+    print("deque_push_pop: ok");
+}
+
+fn test_deque_push_front() {
+    let mut d = Deque.new();
+    d.push_front(3);
+    d.push_front(2);
+    d.push_front(1);
+
+    let lst = d.to_list();
+    assert_eq(lst.len(), 3);
+
+    // Pop all from front
+    d.pop_front();
+    d.pop_front();
+    d.pop_front();
+
+    let lst2 = d.to_list();
+    assert_eq(lst2.len(), 0);
+
+    print("deque_push_front: ok");
+}
+
+fn test_deque_clear() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    d.clear();
+    let lst = d.to_list();
+    assert_eq(lst.len(), 0);
+
+    // Can reuse after clear
+    d.push_back(99);
+    let lst2 = d.to_list();
+    assert_eq(lst2.len(), 1);
+
+    print("deque_clear: ok");
+}
+
+fn test_deque_grow() {
+    // Push more than default capacity (16) to test growth
+    let mut d = Deque.new();
+    let mut i = 0;
+    while i < 50 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    let lst = d.to_list();
+    assert_eq(lst.len(), 50);
+
+    // Drain all
+    let mut count = 0;
+    while count < 50 {
+        d.pop_front();
+        count = count + 1;
+    }
+    let lst2 = d.to_list();
+    assert_eq(lst2.len(), 0);
+
+    print("deque_grow: ok");
+}
+
+fn main() -> Int {
+    test_deque_push_pop();
+    test_deque_push_front();
+    test_deque_clear();
+    test_deque_grow();
+    print("[OK] 603_interp_deque_ops");
+    0
+}

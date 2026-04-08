@@ -1,0 +1,42 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, quantifiers, exists
+// @timeout: 5000
+
+/// Existential quantifier (exists) in various contexts.
+/// Grammar: exists_expr = 'exists' quantifier_binding { ',' quantifier_binding } '.' expression
+
+// Type-based exists
+fn test_exists_typed() {
+    let has_zero = exists x: Int . x == 0;
+    let has_pair = exists x: Int, y: Int . x + y == 10;
+}
+
+// Collection-based exists
+fn test_exists_collection() {
+    let nums: List<Int> = [1, 2, 3, 4, 5];
+    let has_even = exists x in nums . x % 2 == 0;
+}
+
+// Exists with guard
+fn test_exists_guarded() {
+    let items: List<Int> = [0, 1, 2, 3];
+    let has_large_positive = exists x in items where x > 0 . x > 2;
+}
+
+// Mixed quantifiers
+fn test_mixed_quantifiers() {
+    // For every positive int, there exists a larger one
+    let unbounded = forall x: Int . exists y: Int . y > x;
+
+    // There exists a zero element for addition
+    let has_identity = exists z: Int . forall x: Int . x + z == x;
+}
+
+fn main() {
+    test_exists_typed();
+    test_exists_collection();
+    test_exists_guarded();
+    test_mixed_quantifiers();
+    print("Exists quantifier tests parsed");
+}

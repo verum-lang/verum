@@ -1,0 +1,212 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, safety-guarantees, null-safety, critical
+// @description: Core safety guarantee - no null pointer dereferences
+
+/// SAFETY GUARANTEE: No Null Pointer Dereferences
+///
+/// Verum fundamentally eliminates null pointer dereferences through:
+/// 1. No null literal or null type in the language
+/// 2. All references are always valid (non-null by construction)
+/// 3. Optional values use Maybe<T> with explicit handling
+/// 4. Type system enforces completeness of Maybe handling
+///
+/// This prevents the "billion-dollar mistake" and guarantees that
+/// any dereference operation always accesses valid memory.
+
+fn main() {
+    test_references_always_valid();
+    test_maybe_forces_handling();
+    test_references_from_borrows();
+    test_references_in_containers();
+    test_function_return_safety();
+}
+
+/// Demonstration: References are always valid by construction
+fn test_references_always_valid() {
+    // Creating a reference requires a valid value
+    let value = 42;
+    let ref_val: &Int = &value;
+
+    // Dereference is always safe - no null check needed
+    let result = *ref_val;
+    assert(result == 42);
+
+    // Multiple references to same value - all valid
+    let ref1 = &value;
+    let ref2 = &value;
+    let ref3 = &value;
+
+    assert(*ref1 == *ref2);
+    assert(*ref2 == *ref3);
+}
+
+/// Demonstration: Maybe<T> forces explicit absence handling
+fn test_maybe_forces_handling() {
+    // Optional value with explicit Some/None
+    let present: Maybe<Int> = Maybe.Some(42);
+    let absent: Maybe<Int> = Maybe.None;
+
+    // Must pattern match - cannot accidentally dereference None
+    let result1 = match present {
+        Some(v) => v,
+        None => 0,
+    };
+    assert(result1 == 42);
+
+    let result2 = match absent {
+        Some(v) => v,
+        None => -1,  // Explicit default for absent case
+    };
+    assert(result2 == -1);
+
+    // unwrap_or provides safe default
+    assert(present.unwrap_or(0) == 42);
+    assert(absent.unwrap_or(0) == 0);
+
+    // map transforms only if present
+    let doubled = present.map(|x| x * 2);
+    assert(doubled == Maybe.Some(84));
+
+    let absent_doubled = absent.map(|x| x * 2);
+    assert(absent_doubled == Maybe.None);
+}
+
+/// Demonstration: References from borrows are always valid
+fn test_references_from_borrows() {
+    let text = Text.from("hello world");
+
+    // Borrow creates valid reference
+    let ref_text: &Text = &text;
+
+    // Can safely access through reference
+    assert(ref_text.len() == 11);
+    assert(ref_text.starts_with("hello"));
+
+    // Struct field references
+    let point = Point { x: 10, y: 20 };
+    let ref_x: &Int = &point.x;
+    let ref_y: &Int = &point.y;
+
+    assert(*ref_x == 10);
+    assert(*ref_y == 20);
+
+    // Nested structure references
+    let container = Container {
+        data: Text.from("nested"),
+        count: 42,
+    };
+    let ref_data: &Text = &container.data;
+    assert(ref_data.len() == 6);
+}
+
+/// Demonstration: References in containers are valid
+fn test_references_in_containers() {
+    let values = [1, 2, 3, 4, 5];
+
+    // References stored in collections
+    let refs: List<&Int> = values.iter().collect();
+
+    // All references are valid
+    for r in &refs {
+        let _ = **r;  // Safe dereference
+    }
+
+    // Map returning references
+    let map: Map<Text, Int> = Map.from([
+        (Text.from("a"), 1),
+        (Text.from("b"), 2),
+    ]);
+
+    // Get returns Maybe<&V> - forces handling of absence
+    match map.get(&Text.from("a")) {
+        Some(value) => assert(*value == 1),
+        None => panic("unexpected"),
+    }
+
+    match map.get(&Text.from("missing")) {
+        Some(_) => panic("unexpected"),
+        None => {},  // Correctly handled
+    }
+}
+
+/// Demonstration: Function returns are always valid or explicitly Maybe
+fn test_function_return_safety() {
+    // Functions returning references - always valid
+    fn get_first(items: &List<Int>) -> Maybe<&Int> {
+        items.first()  // Returns Maybe<&Int>
+    }
+
+    let list = [1, 2, 3];
+    match get_first(&list) {
+        Some(first) => assert(*first == 1),
+        None => panic("unexpected"),
+    }
+
+    let empty: List<Int> = List.new();
+    match get_first(&empty) {
+        Some(_) => panic("unexpected"),
+        None => {},  // Correctly handled
+    }
+
+    // Functions returning owned values - always valid
+    fn create_point(x: Int, y: Int) -> Point {
+        Point { x, y }  // Always returns valid Point
+    }
+
+    let p = create_point(5, 10);
+    assert(p.x == 5);
+    assert(p.y == 10);
+}
+
+/// Demonstration: Result<T, E> for fallible operations
+fn demonstrate_result_safety() {
+    // Parse can fail - uses Result
+    let parse_result: Result<Int, ParseError> = "42".parse();
+
+    match parse_result {
+        Ok(value) => assert(value == 42),
+        Err(e) => panic("parse failed"),
+    }
+
+    let invalid_result: Result<Int, ParseError> = "not a number".parse();
+
+    match invalid_result {
+        Ok(_) => panic("should have failed"),
+        Err(_) => {},  // Correctly handled
+    }
+
+    // Chaining with and_then
+    let computed = parse_result.and_then(|n| {
+        if n > 0 {
+            Ok(n * 2)
+        } else {
+            Err(ParseError.new("must be positive"))
+        }
+    });
+
+    assert(computed == Ok(84));
+}
+
+// Supporting types
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Container is {
+    data: Text,
+    count: Int,
+};
+
+type ParseError is {
+    message: Text,
+};
+
+implement ParseError {
+    fn new(msg: &Text) -> ParseError {
+        ParseError { message: msg.clone() }
+    }
+}

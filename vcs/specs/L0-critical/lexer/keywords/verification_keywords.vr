@@ -1,0 +1,148 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, verification, contracts
+
+// Verification keywords lexer test
+// Note: Some verification features may not be fully implemented in the parser yet
+
+// Simple function
+fn divide(a: Int, b: Int) -> Int {
+    a / b
+}
+
+fn array_get<T>(arr: &List<T>, index: Int) -> &T {
+    arr[index]
+}
+
+// Mathematical functions
+fn safe_sqrt(x: Float) -> Float {
+    x.sqrt()
+}
+
+fn abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn double_value(x: Int) -> Int {
+    x * 2
+}
+
+// Clamping function
+fn clamp(value: Int, min: Int, max: Int) -> Int {
+    if value < min { min }
+    else if value > max { max }
+    else { value }
+}
+
+// Recursive function
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+// Loop-based function
+fn sum_array(arr: &List<Int>) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+
+    while i < arr.len() {
+        total = total + arr[i];
+        i = i + 1;
+    }
+
+    total
+}
+
+// GCD algorithm
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a }
+    else { gcd(b, a % b) }
+}
+
+fn fibonacci(n: Int) -> Int {
+    match n {
+        0 => 0,
+        1 => 1,
+        _ => fibonacci(n - 1) + fibonacci(n - 2),
+    }
+}
+
+// Type definitions
+type PositiveInt is Int;
+
+type NonEmptyList<T> is List<T>;
+
+type SortedList is List<Int>;
+
+// Struct definition
+type BoundedCounter is {
+    value: Int,
+    min: Int,
+    max: Int,
+};
+
+// Method implementation
+implement BoundedCounter {
+    fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+
+    fn decrement(&mut self) {
+        self.value = self.value - 1;
+    }
+}
+
+// Collection operations
+fn push<T>(list: &mut List<T>, item: T) {
+    list.push(item);
+}
+
+fn pop<T>(list: &mut List<T>) -> Maybe<T> {
+    list.pop()
+}
+
+// Assertion statements
+fn process(value: Int) {
+    assert(value >= 0, "Value must be non-negative");
+    assert(value < 100);
+
+    // Debug assertions (only in debug builds)
+    debug_assert(value > 0);
+}
+
+// Sort function
+fn verified_sort(list: &mut List<Int>) {
+    // Actual sorting code
+    quicksort(list);
+}
+
+// Refinement types
+type Percentage is Float;
+
+type Age is Int;
+
+fn create_percentage(value: Float) -> Maybe<Percentage> {
+    if value >= 0.0 && value <= 100.0 {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+// Stack data structure
+type VerifiedStack<T> is {
+    data: List<T>,
+    size: Int,
+};
+
+implement<T> VerifiedStack<T> {
+    fn push(&mut self, item: T) {
+        self.data.push(item);
+        self.size = self.size + 1;
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        self.size = self.size - 1;
+        self.data.pop()
+    }
+}

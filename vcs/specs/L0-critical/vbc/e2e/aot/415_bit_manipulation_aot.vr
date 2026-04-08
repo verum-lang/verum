@@ -1,0 +1,311 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, bit-manipulation, bitwise, power-of-two
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Bit manipulation utilities implemented using division/modulo
+// (no intrinsics). All operations work on non-negative integers.
+// Includes: count trailing zeros, highest set bit, is_power_of_2,
+// next_power_of_2, reverse_bits (8-bit), popcount, and bit extraction.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Get bit at position k (0-indexed from LSB)
+fn get_bit(n: Int, k: Int) -> Int {
+    let mut v = n;
+    let mut i = 0;
+    while i < k {
+        v = v / 2;
+        i = i + 1;
+    }
+    v % 2
+}
+
+// Count trailing zeros: number of 0 bits from LSB until first 1
+// Returns -1 for n=0 (undefined)
+fn ctz(n: Int) -> Int {
+    if n == 0 { return 0 - 1; }
+    let mut v = n;
+    let mut count = 0;
+    while v % 2 == 0 {
+        count = count + 1;
+        v = v / 2;
+    }
+    count
+}
+
+// Highest set bit position (0-indexed). Returns -1 for n=0.
+fn highest_bit(n: Int) -> Int {
+    if n == 0 { return 0 - 1; }
+    let mut v = n;
+    let mut pos = 0;
+    while v > 1 {
+        v = v / 2;
+        pos = pos + 1;
+    }
+    pos
+}
+
+// Population count: number of 1 bits
+fn popcount(n: Int) -> Int {
+    let mut v = n;
+    let mut count = 0;
+    while v > 0 {
+        count = count + (v % 2);
+        v = v / 2;
+    }
+    count
+}
+
+// Is power of 2? (n > 0 and exactly one bit set)
+fn is_pow2(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if popcount(n) == 1 { 1 } else { 0 }
+}
+
+// Next power of 2 >= n (for n > 0)
+fn next_pow2(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut p = 1;
+    while p < n {
+        p = p * 2;
+    }
+    p
+}
+
+// Previous power of 2 <= n (for n > 0)
+fn prev_pow2(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let h = highest_bit(n);
+    let mut result = 1;
+    let mut i = 0;
+    while i < h {
+        result = result * 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Reverse bits of an 8-bit number
+fn reverse_bits8(n: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 8 {
+        let bit = get_bit(n, i);
+        // Set bit at position (7-i)
+        if bit == 1 {
+            let mut p = 1;
+            let mut j = 0;
+            while j < 7 - i {
+                p = p * 2;
+                j = j + 1;
+            }
+            result = result + p;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Extract bits [lo..hi] inclusive (0-indexed from LSB)
+fn extract_bits(n: Int, lo: Int, hi: Int) -> Int {
+    let mut result = 0;
+    let mut pos = lo;
+    let mut shift = 0;
+    while pos <= hi {
+        let bit = get_bit(n, pos);
+        if bit == 1 {
+            let mut p = 1;
+            let mut j = 0;
+            while j < shift {
+                p = p * 2;
+                j = j + 1;
+            }
+            result = result + p;
+        }
+        pos = pos + 1;
+        shift = shift + 1;
+    }
+    result
+}
+
+// Count leading zeros in an 8-bit context
+fn clz8(n: Int) -> Int {
+    if n == 0 { return 8; }
+    7 - highest_bit(n)
+}
+
+// ========== Tests ==========
+
+fn test_get_bit() -> Int {
+    // 13 = 1101 in binary
+    assert_eq(get_bit(13, 0), 1);
+    assert_eq(get_bit(13, 1), 0);
+    assert_eq(get_bit(13, 2), 1);
+    assert_eq(get_bit(13, 3), 1);
+    assert_eq(get_bit(13, 4), 0);
+    0
+}
+
+fn test_ctz() -> Int {
+    assert_eq(ctz(0), 0 - 1);
+    assert_eq(ctz(1), 0);      // 1 = ...001
+    assert_eq(ctz(2), 1);      // 2 = ...010
+    assert_eq(ctz(4), 2);      // 4 = ...100
+    assert_eq(ctz(12), 2);     // 12 = 1100
+    assert_eq(ctz(8), 3);      // 8 = 1000
+    0
+}
+
+fn test_highest_bit() -> Int {
+    assert_eq(highest_bit(0), 0 - 1);
+    assert_eq(highest_bit(1), 0);
+    assert_eq(highest_bit(2), 1);
+    assert_eq(highest_bit(3), 1);
+    assert_eq(highest_bit(4), 2);
+    assert_eq(highest_bit(255), 7);
+    0
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);     // 111
+    assert_eq(popcount(255), 8);   // 11111111
+    assert_eq(popcount(128), 1);   // 10000000
+    assert_eq(popcount(170), 4);   // 10101010
+    0
+}
+
+fn test_is_pow2() -> Int {
+    assert_eq(is_pow2(0), 0);
+    assert_eq(is_pow2(1), 1);
+    assert_eq(is_pow2(2), 1);
+    assert_eq(is_pow2(3), 0);
+    assert_eq(is_pow2(4), 1);
+    assert_eq(is_pow2(64), 1);
+    0
+}
+
+fn test_is_pow2_more() -> Int {
+    assert_eq(is_pow2(128), 1);
+    assert_eq(is_pow2(256), 1);
+    assert_eq(is_pow2(100), 0);
+    assert_eq(is_pow2(127), 0);
+    assert_eq(is_pow2(0 - 1), 0);
+    0
+}
+
+fn test_next_pow2() -> Int {
+    assert_eq(next_pow2(1), 1);
+    assert_eq(next_pow2(2), 2);
+    assert_eq(next_pow2(3), 4);
+    assert_eq(next_pow2(5), 8);
+    assert_eq(next_pow2(9), 16);
+    assert_eq(next_pow2(16), 16);
+    0
+}
+
+fn test_next_pow2_larger() -> Int {
+    assert_eq(next_pow2(17), 32);
+    assert_eq(next_pow2(33), 64);
+    assert_eq(next_pow2(65), 128);
+    assert_eq(next_pow2(100), 128);
+    assert_eq(next_pow2(128), 128);
+    assert_eq(next_pow2(129), 256);
+    0
+}
+
+fn test_prev_pow2() -> Int {
+    assert_eq(prev_pow2(1), 1);
+    assert_eq(prev_pow2(2), 2);
+    assert_eq(prev_pow2(3), 2);
+    assert_eq(prev_pow2(4), 4);
+    assert_eq(prev_pow2(5), 4);
+    assert_eq(prev_pow2(7), 4);
+    0
+}
+
+fn test_reverse_bits8() -> Int {
+    // 0 -> 0
+    assert_eq(reverse_bits8(0), 0);
+    // 1 = 00000001 -> 10000000 = 128
+    assert_eq(reverse_bits8(1), 128);
+    // 128 = 10000000 -> 00000001 = 1
+    assert_eq(reverse_bits8(128), 1);
+    // 255 = 11111111 -> 11111111 = 255
+    assert_eq(reverse_bits8(255), 255);
+    0
+}
+
+fn test_reverse_bits8_more() -> Int {
+    // 0xAA = 10101010 -> 01010101 = 0x55 = 85
+    assert_eq(reverse_bits8(170), 85);
+    // 0x55 = 01010101 -> 10101010 = 0xAA = 170
+    assert_eq(reverse_bits8(85), 170);
+    // Double reverse = identity
+    assert_eq(reverse_bits8(reverse_bits8(42)), 42);
+    assert_eq(reverse_bits8(reverse_bits8(123)), 123);
+    0
+}
+
+fn test_extract_bits() -> Int {
+    // 0b11010110 = 214
+    // bits[0..3] = 0110 = 6
+    assert_eq(extract_bits(214, 0, 3), 6);
+    // bits[4..7] = 1101 = 13
+    assert_eq(extract_bits(214, 4, 7), 13);
+    // bits[2..5] = 0101 = 5
+    assert_eq(extract_bits(214, 2, 5), 5);
+    0
+}
+
+fn test_clz8() -> Int {
+    assert_eq(clz8(0), 8);
+    assert_eq(clz8(1), 7);
+    assert_eq(clz8(128), 0);
+    assert_eq(clz8(255), 0);
+    assert_eq(clz8(64), 1);
+    assert_eq(clz8(15), 4);
+    0
+}
+
+fn main() -> Int {
+    test_get_bit();
+    test_ctz();
+    test_highest_bit();
+    test_popcount();
+    test_is_pow2();
+    test_is_pow2_more();
+    test_next_pow2();
+    test_next_pow2_larger();
+    test_prev_pow2();
+    test_reverse_bits8();
+    test_reverse_bits8_more();
+    test_extract_bits();
+    test_clz8();
+    print("[OK] 415_bit_manipulation_aot");
+    0
+}

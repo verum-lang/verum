@@ -1,0 +1,232 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, struct, record, destructuring
+
+// Helper types
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int, address: Address };
+type Address is { city: Text, country: Text };
+type Config is { host: Text, port: Int, timeout: Int, enabled: Bool };
+type Inner is { value: Int };
+type Outer is { inner: Inner };
+type Container is { data: Maybe<Int> };
+type ResultContainer is { value: Result<Int, Text> };
+type Node is { position: (Int, Int) };
+type Edge is { endpoints: (Int, Int) };
+type Customer is { name: Text, email: Text };
+type Order is { id: Int, customer: Customer, items: List<Int>, metadata: Metadata };
+type Metadata is { created_at: Int };
+type Wrapper is { inner: Int };
+type Id is { value: Int };
+type Unit is {};
+type ModuleStruct is { pub_field: Int };
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type ModData is { Point: Point };
+
+// Helper functions
+fn format(fmt: Text, x: Int) -> Text { fmt }
+fn compute(x: Int, y: Int) -> Int { x + y }
+fn plot(x: Int, y: Int) { }
+fn allow_entry() { }
+fn use<T>(x: T) { }
+fn handle_origin(p: Point) { }
+fn handle_other(x: Int, y: Int) { }
+
+fn test_simple_struct_destructuring() {
+    let point = Point { x: 10, y: 20 };
+    let person = Person { name: "Alice", age: 30, address: Address { city: "NYC", country: "USA" } };
+
+    // Simple struct destructuring
+    let Point { x, y } = point;
+    let Person { name, age, address } = person;
+}
+
+fn test_struct_pattern_with_field_rename() {
+    let point = Point { x: 10, y: 20 };
+    let config = Config { host: "localhost", port: 8080, timeout: 30, enabled: true };
+
+    // Struct pattern with field rename
+    let Point { x: px, y: py } = point;
+    let Config { host: server_host, port: server_port, timeout, enabled } = config;
+}
+
+fn test_struct_pattern_in_match() {
+    let point = Point { x: 10, y: 20 };
+
+    // Struct pattern in match
+    match point {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x, y: 0 } => format("on x-axis at {}", x),
+        Point { x: 0, y } => format("on y-axis at {}", y),
+        Point { x, y } => format("at ({}, {})", x),
+    };
+}
+
+fn test_struct_pattern_with_rest() {
+    let point = Point { x: 10, y: 20 };
+    let config = Config { host: "localhost", port: 8080, timeout: 30, enabled: true };
+    let person = Person { name: "Alice", age: 30, address: Address { city: "NYC", country: "USA" } };
+
+    // Struct pattern with rest (..)
+    let Point { x, .. } = point;
+    let Config { timeout, .. } = config;
+    let Person { name, .. } = person;
+}
+
+fn test_struct_pattern_with_nested_struct() {
+    let nested = Outer { inner: Inner { value: 42 } };
+    let person = Person { name: "Alice", age: 30, address: Address { city: "NYC", country: "USA" } };
+
+    // Struct pattern with nested struct
+    let Outer { inner: Inner { value } } = nested;
+    let Person { address: Address { city, country }, .. } = person;
+}
+
+fn test_struct_pattern_with_enum_field() {
+    let container = Container { data: Some(42) };
+    let result_container = ResultContainer { value: Ok(42) };
+
+    // Struct pattern with enum field
+    let Container { data: Some(value) } = container;
+    let ResultContainer { value: Ok(data) } = result_container;
+}
+
+fn test_struct_pattern_with_tuple_field() {
+    let node = Node { position: (10, 20) };
+    let edge = Edge { endpoints: (1, 2) };
+
+    // Struct pattern with tuple field
+    let Node { position: (x, y) } = node;
+    let Edge { endpoints: (start, end) } = edge;
+}
+
+fn test_struct_pattern_with_literal_field() {
+    let config = Config { host: "localhost", port: 8080, timeout: 30, enabled: true };
+
+    // Struct pattern with literal field
+    match config {
+        Config { enabled: true, .. } => "enabled",
+        Config { enabled: false, .. } => "disabled",
+    };
+}
+
+fn test_struct_pattern_in_if_let() {
+    let person = Person { name: "Alice", age: 30, address: Address { city: "NYC", country: "USA" } };
+
+    // Struct pattern in if-let
+    if let Person { age, .. } = person && age >= 18 {
+        allow_entry()
+    }
+}
+
+fn test_struct_pattern_in_for_loop() {
+    let points: List<Point> = Nil;
+
+    // Struct pattern in for loop
+    for Point { x, y } in points {
+        plot(x, y);
+    }
+}
+
+// Struct pattern in function parameter
+fn process_point(Point { x, y }: Point) {
+    compute(x, y);
+}
+
+fn test_struct_pattern_in_closure() {
+    // Struct pattern in closure
+    let get_x = |Point { x, .. }| x;
+    let get_name = |Person { name, .. }| name;
+}
+
+fn test_struct_pattern_with_type_path() {
+    let qualified_point = Point { x: 10, y: 20 };
+    let some_value: Maybe<Int> = Some(42);
+
+    // Struct pattern with type path
+    let Point { x, y } = qualified_point;
+}
+
+fn test_struct_pattern_with_ref() {
+    let point = Point { x: 10, y: 20 };
+    let mut config = Config { host: "localhost", port: 8080, timeout: 30, enabled: true };
+
+    // Struct pattern with ref - must use explicit field: pattern syntax
+    let Point { x: ref px, y: ref py } = point;
+    let Config { timeout: ref mut t, .. } = config;
+}
+
+fn test_struct_pattern_with_at_binding() {
+    let point = Point { x: 0, y: 0 };
+
+    // Struct pattern with @ binding
+    match point {
+        p @ Point { x: 0, y: 0 } => handle_origin(p),
+        Point { x, y } => handle_other(x, y),
+    };
+}
+
+fn test_struct_pattern_with_guards() {
+    let person = Person { name: "Alice", age: 30, address: Address { city: "NYC", country: "USA" } };
+
+    // Struct pattern with guards
+    match person {
+        Person { age, .. } if age < 18 => "minor",
+        Person { age, .. } if age >= 65 => "senior",
+        _ => "adult",
+    };
+}
+
+fn test_empty_struct_pattern() {
+    let unit_struct = Unit {};
+
+    // Empty struct pattern
+    let Unit { } = unit_struct;
+}
+
+fn test_single_field_struct() {
+    let wrapped = Wrapper { inner: 42 };
+    let identifier = Id { value: 1 };
+
+    // Single-field struct
+    let Wrapper { inner } = wrapped;
+    let Id { value: id } = identifier;
+}
+
+fn test_struct_pattern_with_generic_type() {
+    let int_container = Container { data: Some(42) };
+
+    // Struct pattern with generic type
+    let Container { data } = int_container;
+}
+
+fn test_struct_pattern_with_visibility_check() {
+    let module_struct = ModuleStruct { pub_field: 42 };
+
+    // Struct pattern with visibility check (if applicable)
+    match module_struct {
+        ModuleStruct { pub_field, .. } => use(pub_field),
+    };
+}
+
+fn test_complex_nested_struct_pattern() {
+    let order = Order {
+        id: 1,
+        customer: Customer { name: "Alice", email: "alice@example.com" },
+        items: Cons(1, Heap(Nil)),
+        metadata: Metadata { created_at: 0 }
+    };
+
+    // Complex nested struct pattern
+    let Order {
+        id,
+        customer: Customer { name, email },
+        items: first,
+        metadata: Metadata { created_at },
+    } = order;
+}
+
+// Helper type for list
+type List<T> is Cons(T, Heap<List<T>>) | Nil;

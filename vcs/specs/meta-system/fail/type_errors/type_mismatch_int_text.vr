@@ -1,0 +1,16 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, type, mismatch
+// @description: Type mismatch: meta function returns Text but declares Int return type
+// @expected-error: E400
+
+meta fn test_type_mismatch() -> Int {
+    // Returns Text, but declared return type is Int
+    // Type checker catches this mismatch
+    "hello"
+}
+
+fn main() {
+    @const assert(true);
+}

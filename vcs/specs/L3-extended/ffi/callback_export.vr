@@ -1,0 +1,126 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, callback, export
+
+/// Callback export demonstration
+/// Shows how to export Verum functions for use as C callbacks
+
+type c_int is i32;
+type c_void is ();
+
+type ErrorContext is {
+    code: c_int,
+};
+
+implement ErrorContext {
+    fn handle_error(&self, code: c_int) {
+        // Error handling logic
+    }
+}
+
+type EventType is
+    | Click
+    | KeyPress
+    | Scroll;
+
+fn handle_event(event: EventType, data: Maybe<&[u8]>) -> c_int {
+    0
+}
+
+fn log_error(code: c_int, msg: Text) {
+    // Log error
+}
+
+/// Export a function with C calling convention
+@export("C")
+fn verum_callback(x: i32, y: i32) -> i32 {
+    x + y
+}
+
+/// Callback type definition for C interop
+type CCallback is extern "C" fn(*mut u8, usize) -> i32;
+
+/// Register callback with C library
+ffi CallbackRegistry {
+    @extern("C")
+    fn register_callback(cb: CCallback, user_data: *mut u8);
+
+    @extern("C")
+    fn unregister_callback(cb: CCallback);
+
+    @extern("C")
+    fn trigger_callbacks();
+}
+
+/// Safe wrapper for callback registration
+type CallbackHandle is {
+    raw_callback: CCallback,
+};
+
+/// Event handler callback
+@export("C")
+fn on_event(event_type: i32, event_data: *const u8, data_len: usize) -> i32 {
+    let event = if event_type == 0 {
+        EventType.Click
+    } else if event_type == 1 {
+        EventType.KeyPress
+    } else if event_type == 2 {
+        EventType.Scroll
+    } else {
+        return -1;
+    };
+
+    // SAFETY: Caller guarantees event_data is valid
+    let data: Maybe<&[u8]> = None;
+    handle_event(event, data)
+}
+
+/// Comparator callback for qsort
+@export("C")
+fn compare_ints(a: *const u8, b: *const u8) -> i32 {
+    // SAFETY: qsort passes valid pointers to elements
+    let a_val = unsafe { *(a as *const i32) };
+    let b_val = unsafe { *(b as *const i32) };
+
+    if a_val < b_val {
+        -1
+    } else if a_val > b_val {
+        1
+    } else {
+        0
+    }
+}
+
+/// Cleanup handler for atexit
+@export("C")
+fn cleanup_handler() {
+    // Called at program exit
+}
+
+/// Signal handler (must be async-signal-safe)
+@export("C")
+@no_mangle
+fn signal_handler(signum: i32) {
+    // Only async-signal-safe operations here
+}
+
+/// Error handler callback
+@export("C")
+fn error_callback(
+    error_code: i32,
+    error_message: *const i8,
+    context: *mut u8
+) {
+    // SAFETY: error_message is null-terminated C string
+    log_error(error_code, f"error {error_code}");
+
+    if !context.is_null() {
+        let ctx = unsafe { &*(context as *const ErrorContext) };
+        ctx.handle_error(error_code);
+    }
+}
+
+fn main() {
+    // Callback export tests
+}

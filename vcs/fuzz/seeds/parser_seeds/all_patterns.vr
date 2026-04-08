@@ -1,0 +1,292 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: parser, patterns, comprehensive
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// All Patterns - Parser Pattern Test Seed
+// Tests all pattern forms for correct parsing
+// =============================================================================
+
+fn literal_patterns() {
+    match value {
+        // Integer patterns
+        0 => "zero",
+        42 => "answer",
+        0xFF => "max byte",
+        0b1010 => "binary",
+
+        // Float patterns
+        0.0 => "zero float",
+        3.14 => "pi-ish",
+
+        // String patterns
+        "" => "empty",
+        "hello" => "greeting",
+
+        // Char patterns
+        'a' => "letter a",
+        '\n' => "newline",
+
+        // Boolean patterns
+        true => "truthy",
+        false => "falsy",
+
+        _ => "other",
+    }
+}
+
+fn identifier_patterns() {
+    match value {
+        x => use(x),
+    }
+
+    // With mutability
+    match value {
+        mut x => {
+            x = x + 1;
+            x
+        },
+    }
+
+    // With ref
+    match value {
+        ref x => use(x),
+    }
+
+    // With ref mut
+    match value {
+        ref mut x => {
+            *x = *x + 1;
+        },
+    }
+
+    // With binding
+    match value {
+        x @ 1..=10 => "single digit bound to x",
+        _ => "other",
+    }
+
+    // Binding with complex pattern
+    match value {
+        all @ Some(inner @ 1..=10) => use(all, inner),
+        _ => (),
+    }
+}
+
+fn wildcard_patterns() {
+    match value {
+        _ => "anything",
+    }
+
+    match tuple {
+        (_, y) => use(y),
+        (x, _) => use(x),
+        (_, _) => "ignore both",
+    }
+}
+
+fn rest_patterns() {
+    match array {
+        [first, ..] => use(first),
+        [.., last] => use(last),
+        [first, .., last] => use(first, last),
+        [first, second, ..rest] => use(first, second, rest),
+    }
+}
+
+fn tuple_patterns() {
+    match value {
+        () => "unit",
+        (x,) => "single",
+        (x, y) => "pair",
+        (x, y, z) => "triple",
+        (a, b, c, d, e) => "five",
+        ((x, y), z) => "nested",
+        (_, (a, _), _) => "mixed",
+    }
+}
+
+fn array_patterns() {
+    match arr {
+        [] => "empty",
+        [x] => "single",
+        [x, y] => "pair",
+        [x, y, z] => "triple",
+        [1, 2, 3] => "exact match",
+        [first, _, third] => "skip middle",
+    }
+}
+
+fn slice_patterns() {
+    match slice {
+        [] => "empty",
+        [only] => "single",
+        [first, rest @ ..] => "head and tail",
+        [init @ .., last] => "init and last",
+        [first, middle @ .., last] => "sandwich",
+        [a, b, .., y, z] => "ends",
+    }
+}
+
+fn record_patterns() {
+    match point {
+        Point {} => "empty record",
+        Point { x } => "just x",
+        Point { x, y } => "both",
+        Point { x: 0, y: 0 } => "origin",
+        Point { x, y: 0 } => "on x-axis",
+        Point { x: a, y: b } => "renamed",
+        Point { x, .. } => "x and ignore rest",
+    }
+
+    // Nested records
+    match nested {
+        Outer { inner: Inner { value } } => use(value),
+        Outer { inner: Inner { value: v } } => use(v),
+    }
+
+    // Qualified paths
+    match value {
+        module.Point { x, y } => use(x, y),
+    }
+}
+
+fn variant_patterns() {
+    // Unit variants
+    match option {
+        None => "nothing",
+        Some(x) => use(x),
+    }
+
+    // Tuple variants
+    match result {
+        Ok(value) => use(value),
+        Err(error) => handle(error),
+    }
+
+    // Record variants
+    match node {
+        Leaf { value } => value,
+        Node { left, right } => combine(left, right),
+    }
+
+    // Nested variants
+    match complex {
+        Some(Ok(value)) => value,
+        Some(Err(e)) => handle(e),
+        None => default,
+    }
+
+    // Qualified variants
+    match value {
+        module.Variant.A => "a",
+        module.Variant.B(x) => x,
+    }
+}
+
+fn reference_patterns() {
+    match reference {
+        &x => "shared ref",
+        &mut x => "mutable ref",
+    }
+
+    // Nested
+    match value {
+        &(x, y) => use(x, y),
+        &[first, ..rest] => use(first, rest),
+    }
+}
+
+fn range_patterns() {
+    match num {
+        0..10 => "single digit",
+        0..=9 => "single digit inclusive",
+        10..100 => "two digits",
+        100..=999 => "three digits",
+        ..0 => "negative",
+        1000.. => "large",
+    }
+
+    match char {
+        'a'..'z' => "lowercase",
+        'A'..'Z' => "uppercase",
+        '0'..'9' => "digit",
+    }
+}
+
+fn or_patterns() {
+    match value {
+        1 | 2 | 3 => "small",
+        4 | 5 | 6 => "medium",
+        7 | 8 | 9 => "large",
+        _ => "other",
+    }
+
+    match variant {
+        Some(1) | Some(2) | Some(3) => "small some",
+        None | Some(0) => "nothing or zero",
+        _ => "other",
+    }
+
+    match result {
+        Ok(x) | Err(x) => "either way it's x",
+    }
+}
+
+fn guard_patterns() {
+    match value {
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        x if x == 0 => "zero",
+        _ => "unreachable",
+    }
+
+    // Where-style guards
+    match value {
+        x where x > 0 => "positive",
+        x where x < 0 => "negative",
+        _ => "zero",
+    }
+
+    // Complex guards
+    match pair {
+        (x, y) if x > y => "x larger",
+        (x, y) if x < y => "y larger",
+        (x, y) if x == y => "equal",
+        _ => "unreachable",
+    }
+}
+
+fn let_patterns() {
+    let x = 1;
+    let (a, b) = (1, 2);
+    let [first, second] = [1, 2];
+    let Point { x, y } = point;
+    let Some(value) = maybe else { return };
+    let Ok(result) = fallible else { return };
+}
+
+fn for_patterns() {
+    for x in items {}
+    for (key, value) in pairs {}
+    for (i, item) in items.enumerate() {}
+    for Point { x, y } in points {}
+}
+
+fn function_param_patterns() {
+    fn with_tuple((x, y): (Int, Int)) {}
+    fn with_record(Point { x, y }: Point) {}
+    fn with_array([a, b, c]: [Int; 3]) {}
+}
+
+fn complex_nested_patterns() {
+    match complex {
+        Some(Ok((Point { x: 0, y }, [first, ..]))) if y > 0 => "complex match",
+        None | Some(Err(_)) => "failure case",
+        Some(Ok((Point { x, y: 0 }, []))) => "on x-axis empty",
+        _ => "other",
+    }
+}

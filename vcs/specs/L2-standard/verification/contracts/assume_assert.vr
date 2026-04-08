@@ -1,0 +1,170 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, contracts, assume, assert
+// @description: Assume and assert statements in verification
+
+/// `assume` tells the verifier to accept a condition as true without proof
+/// `assert` tells the verifier to prove a condition holds
+
+@verify(proof)
+fn demonstrate_assume_assert(x: Int, y: Int) -> Int {
+    contract#"
+        requires x > 0;
+        requires y > 0;
+        ensures result > 0;
+    ";
+    // Assert: verifier must prove this
+    assert(x > 0, "x is positive by precondition");
+    assert(y > 0, "y is positive by precondition");
+
+    let sum = x + y;
+
+    // Assert about computed value
+    assert(sum >= x, "sum is at least x");
+    assert(sum >= y, "sum is at least y");
+    assert(sum > 0, "sum is positive");
+
+    sum
+}
+
+/// Using assume for external facts
+@verify(proof)
+fn sqrt_example(x: Float{>= 0.0}) -> Float{>= 0.0} {
+    contract#"
+        requires x >= 0.0;
+        ensures result * result == x;  // Mathematical property
+    ";
+    let result = external_sqrt(x);
+
+    // Assume external function satisfies its specification
+    assume(result >= 0.0); // sqrt returns non-negative
+    assume(result * result == x); // sqrt is correct
+
+    result
+}
+
+/// Assert with custom message
+@verify(runtime)
+fn checked_divide(a: Int, b: Int) -> Int {
+    assert(b != 0, "division by zero");
+    a / b
+}
+
+/// Debug assertions (removed in release builds)
+fn optimized_function(list: List<Int>) -> Int {
+    debug_assert(!list.is_empty()); // list should not be empty
+    debug_assert(list.iter().all(|&x| x >= 0)); // all elements non-negative
+
+    list.iter().sum()
+}
+
+/// Static assertions (compile-time)
+fn compile_time_checks<N: Int>() {
+    static_assert(N > 0); // N must be positive
+    static_assert(N <= 1000); // N must be at most 1000
+    static_assert(N % 2 == 0); // N must be even
+}
+
+/// Assert with proof obligation
+@verify(proof)
+fn quadratic_formula(a: Float{!= 0.0}, b: Float, c: Float) -> Maybe<(Float, Float)> {
+    contract#"
+        requires a != 0.0;
+    ";
+    let discriminant = b * b - 4.0 * a * c;
+
+    if discriminant < 0.0 {
+        None
+    } else {
+        let sqrt_d = external_sqrt(discriminant);
+        assume(sqrt_d >= 0.0);
+        assume(sqrt_d * sqrt_d == discriminant);
+
+        let x1 = (-b + sqrt_d) / (2.0 * a);
+        let x2 = (-b - sqrt_d) / (2.0 * a);
+
+        // Assert solutions satisfy equation
+        assert(approximately_equal(a * x1 * x1 + b * x1 + c, 0.0));
+        assert(approximately_equal(a * x2 * x2 + b * x2 + c, 0.0));
+
+        Some((x1, x2))
+    }
+}
+
+/// Assert in loop invariant
+@verify(proof)
+fn find_max(list: List<Int>{len > 0}) -> Int {
+    contract#"
+        requires list.len() > 0;
+        ensures forall i in 0..list.len() => result >= list[i];
+        ensures exists i in 0..list.len() => result == list[i];
+    ";
+    let mut max = list[0];
+
+    for i in 1..list.len() {
+        assert(max >= list[0], "max is at least first element");
+
+        if list[i] > max {
+            max = list[i];
+        }
+
+        // Loop invariant assertion
+        assert(forall j in 0..=i => max >= list[j]);
+    }
+
+    max
+}
+
+/// Unreachable assertion
+@verify(proof)
+fn process_status(status: Status) -> Text {
+    match status {
+        Status.Success => "ok",
+        Status.Pending => "pending",
+        Status.Failed => "failed",
+        _ => unreachable("all status variants are handled")
+    }
+}
+
+type Status is
+    | Success
+    | Pending
+    | Failed;
+
+/// Combining assume and assert for modular verification
+@verify(proof)
+fn caller_function(x: Int{> 0}) -> Int{> 0} {
+    // We know x > 0 from precondition
+    assert(x > 0);
+
+    let result = helper_function(x);
+
+    // Assume helper function's postcondition
+    assume(result > 0); // helper guarantees positive result
+
+    result
+}
+
+@verify(proof)
+fn helper_function(x: Int{> 0}) -> Int{> 0} {
+    contract#"
+        requires x > 0;
+        ensures result > 0;
+    ";
+    x * 2
+}
+
+fn external_sqrt(x: Float) -> Float {
+    // External implementation
+    x.sqrt()
+}
+
+fn approximately_equal(a: Float, b: Float) -> Bool {
+    (a - b).abs() < 0.0001
+}
+
+fn main() {
+    let result = demonstrate_assume_assert(5, 10);
+    assert(result == 15);
+}

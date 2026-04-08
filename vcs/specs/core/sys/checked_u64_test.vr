@@ -1,0 +1,47 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: debug, uint64, checked
+
+module test.debug.checked_u64;
+
+mount core.intrinsics.arithmetic.{checked_add_u64};
+
+fn main() {
+    // Direct test of checked_add_u64
+    let a: UInt64 = 0xFFFFFFFFFFFFFFFF;  // UInt64::MAX
+    let b: UInt64 = 1;
+
+    print(f"a = {a as Int}");
+    print(f"b = {b as Int}");
+
+    let result = checked_add_u64(a, b);
+
+    match result {
+        Some(v) => {
+            print(f"Got Some({v as Int}) - UNEXPECTED, should overflow!");
+            assert(false);
+        }
+        None => {
+            print("Got None - CORRECT, overflow detected!");
+        }
+    }
+
+    // Test non-overflow case
+    let c: UInt64 = 100;
+    let d: UInt64 = 200;
+
+    let result2 = checked_add_u64(c, d);
+    match result2 {
+        Some(v) => {
+            print(f"100 + 200 = {v as Int} - CORRECT");
+            assert(v == 300);
+        }
+        None => {
+            print("Got None for 100 + 200 - UNEXPECTED!");
+            assert(false);
+        }
+    }
+
+    print("All checked_u64 tests passed!");
+}

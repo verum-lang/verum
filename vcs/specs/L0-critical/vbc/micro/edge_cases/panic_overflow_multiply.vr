@@ -1,0 +1,16 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, overflow, multiply
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Test integer multiplication overflow behavior (wrapping semantics)
+
+fn main() {
+    let x: Int = 9223372036854775807;  // Int max
+    let y: Int = 2;
+    let z = x * y;  // Wraps on overflow
+    // Result is -2 due to wrapping
+    assert(z < 0);
+    assert_eq(z, -2);
+}

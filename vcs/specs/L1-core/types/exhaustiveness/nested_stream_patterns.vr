@@ -1,0 +1,204 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, stream-pattern, nested, pattern-matching
+// @description: Nested stream patterns - streams of streams and complex nesting
+
+// Stream type with Nil/Cons constructors
+type Stream<T> is Nil | Cons(T, Heap<Stream<T>>);
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+
+// ============================================================
+// BASIC STREAM OPERATIONS
+// ============================================================
+
+// Stream concat - wildcard on second Cons field
+@allow(unbounded_recursion)
+fn concat_streams<T>(a: Stream<T>, b: Stream<T>) -> Stream<T> =
+    match a {
+        Nil => b,
+        Cons(x, tail) => Cons(x, Heap(concat_streams(*tail, b)))
+    };
+
+// ============================================================
+// STREAMS OF STREAMS
+// ============================================================
+
+// Flatten 2D stream
+@allow(unbounded_recursion)
+fn flatten_2d<T>(ss: Stream<Stream<T>>) -> Stream<T> =
+    match ss {
+        Nil => Nil,
+        Cons(inner, rest) => concat_streams(inner, flatten_2d(*rest))
+    };
+
+// Get first element of first inner stream (using helper)
+fn inner_first<T>(inner: Stream<T>, default: T) -> T =
+    match inner {
+        Nil => default,
+        Cons(x, _) => x
+    };
+
+fn first_of_first<T>(ss: Stream<Stream<T>>, default: T) -> T =
+    match ss {
+        Nil => default,
+        Cons(inner, _) => inner_first(inner, default)
+    };
+
+// Describe outer stream structure
+fn describe_outer<T>(ss: Stream<Stream<T>>) -> Text =
+    match ss {
+        Nil => "empty outer",
+        Cons(_, _) => "has inner"
+    };
+
+// ============================================================
+// STREAMS OF RESULT VARIANTS
+// ============================================================
+
+@allow(unbounded_recursion)
+fn collect_successes<T, E>(s: Stream<Result<T, E>>) -> Stream<T> =
+    match s {
+        Nil => Nil,
+        Cons(item, rest) => match item {
+            Ok(x) => Cons(x, Heap(collect_successes(*rest))),
+            Err(_) => collect_successes(*rest),
+        }
+    };
+
+@allow(unbounded_recursion)
+fn first_error<T, E>(s: Stream<Result<T, E>>) -> Maybe<E> =
+    match s {
+        Nil => None,
+        Cons(item, rest) => match item {
+            Ok(_) => first_error(*rest),
+            Err(e) => Some(e),
+        }
+    };
+
+// ============================================================
+// STREAM WITH TUPLE ELEMENTS
+// ============================================================
+
+@allow(unbounded_recursion)
+fn unzip<A, B>(s: Stream<(A, B)>) -> (Stream<A>, Stream<B>) =
+    match s {
+        Nil => (Nil, Nil),
+        Cons(pair, rest) => {
+            let (as_, bs) = unzip(*rest);
+            (Cons(pair.0, Heap(as_)), Cons(pair.1, Heap(bs)))
+        }
+    };
+
+@allow(unbounded_recursion)
+fn zip<A, B>(a: Stream<A>, b: Stream<B>) -> Stream<(A, B)> =
+    match (a, b) {
+        (Nil, Nil) => Nil,
+        (Nil, Cons(_, _)) => Nil,
+        (Cons(_, _), Nil) => Nil,
+        (Cons(x, xs), Cons(y, ys)) => Cons((x, y), Heap(zip(*xs, *ys)))
+    };
+
+// ============================================================
+// STREAM OF MAYBE (FLAT)
+// ============================================================
+
+@allow(unbounded_recursion)
+fn compact<T>(s: Stream<Maybe<T>>) -> Stream<T> =
+    match s {
+        Nil => Nil,
+        Cons(item, rest) => match item {
+            None => compact(*rest),
+            Some(val) => Cons(val, Heap(compact(*rest))),
+        }
+    };
+
+// ============================================================
+// TREE TYPE IN STREAM (USING SEPARATE MATCH)
+// ============================================================
+
+type Tree<T> is Leaf(T) | Branch(Tree<T>, Tree<T>);
+
+fn tree_depth<T>(t: Tree<T>) -> Int =
+    match t {
+        Leaf(_) => 1,
+        Branch(left, right) => {
+            let ld = tree_depth(left);
+            let rd = tree_depth(right);
+            1 + if ld > rd { ld } else { rd }
+        }
+    };
+
+@allow(unbounded_recursion)
+fn max_tree_depth<T>(s: Stream<Tree<T>>) -> Int =
+    match s {
+        Nil => 0,
+        Cons(tree, rest) => {
+            let d = tree_depth(tree);
+            let rest_max = max_tree_depth(*rest);
+            if d > rest_max { d } else { rest_max }
+        }
+    };
+
+// ============================================================
+// SUM AND FILTER ON STREAM
+// ============================================================
+
+@allow(unbounded_recursion)
+fn stream_sum(s: Stream<Int>) -> Int =
+    match s {
+        Nil => 0,
+        Cons(x, rest) => x + stream_sum(*rest)
+    };
+
+@allow(unbounded_recursion)
+fn stream_filter<T>(s: Stream<T>, pred: fn(&T) -> Bool) -> Stream<T> =
+    match s {
+        Nil => Nil,
+        Cons(x, rest) => {
+            if pred(&x) {
+                Cons(x, Heap(stream_filter(*rest, pred)))
+            } else {
+                stream_filter(*rest, pred)
+            }
+        }
+    };
+
+// ============================================================
+// MAIN
+// ============================================================
+
+fn main() {
+    // Build test streams
+    let empty: Stream<Int> = Nil;
+    let s1 = Cons(1, Heap(Cons(2, Heap(Nil))));
+    let s2 = Cons(3, Heap(Cons(4, Heap(Nil))));
+
+    // Stream of streams
+    let ss: Stream<Stream<Int>> = Cons(s1, Heap(Cons(s2, Heap(Nil))));
+    let empty_ss: Stream<Stream<Int>> = Nil;
+
+    // Test flatten
+    let flat = flatten_2d(ss);
+
+    // Test first_of_first
+    assert(first_of_first(empty_ss, 0) == 0);
+
+    // Test describe
+    assert(describe_outer(empty_ss) == "empty outer");
+
+    // Test result streams
+    let results: Stream<Result<Int, Text>> =
+        Cons(Ok(1), Heap(Cons(Err("fail"), Heap(Cons(Ok(2), Heap(Nil))))));
+    let successes = collect_successes(results);
+
+    // Test zip
+    let pairs = zip(Cons(1, Heap(Nil)), Cons(2, Heap(Nil)));
+
+    // Test sum
+    assert(stream_sum(Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))))) == 6);
+
+    // Test compact
+    let maybes: Stream<Maybe<Int>> = Cons(Some(1), Heap(Cons(None, Heap(Cons(Some(3), Heap(Nil))))));
+    let compacted = compact(maybes);
+}

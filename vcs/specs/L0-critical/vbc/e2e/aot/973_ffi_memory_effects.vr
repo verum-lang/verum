@@ -1,0 +1,77 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: ffi, memory-effects, pure, reads, writes, allocates
+// @description: Tests FFI memory effects from grammar (memory_effect_spec variants)
+// @expected-exit: 0
+
+// Grammar reference (verum.ebnf lines 960-965):
+//   memory_effect_spec = 'Pure' | 'Reads(path)' | 'Writes(path)'
+//                      | 'Allocates' | 'Deallocates(path)'
+//                      | memory_effect_spec '+' memory_effect_spec
+
+@ffi("libSystem.B.dylib")
+extern {
+    // Pure: no memory effects (getpid reads kernel state but is safe)
+    fn getpid() -> Int;
+
+    // Reads: only reads memory
+    fn getuid() -> Int;
+
+    // Allocates: allocates memory (malloc)
+    fn malloc(size: Int) -> &unsafe Byte;
+
+    // Deallocates: frees memory (free)
+    fn free(ptr: &unsafe Byte) -> ();
+
+    // Writes: writes to memory (memset)
+    fn memset(ptr: &unsafe Byte, value: Int, size: Int) -> &unsafe Byte;
+
+    // Reads + Writes combined: memcpy
+    fn memcpy(dst: &unsafe Byte, src: &Byte, size: Int) -> &unsafe Byte;
+}
+
+fn main() {
+    // ============================================================
+    // Test 1: Pure function — can be called multiple times, same result
+    // ============================================================
+    let pid1 = getpid();
+    let pid2 = getpid();
+    assert(pid1 == pid2);
+    print(f"Test 1 PASS: Pure — getpid consistent: {pid1}");
+
+    // ============================================================
+    // Test 2: Reads-only function
+    // ============================================================
+    let uid = getuid();
+    assert(uid >= 0);
+    print(f"Test 2 PASS: Reads — getuid: {uid}");
+
+    // ============================================================
+    // Test 3: Allocates — memory allocation
+    // ============================================================
+    let buf = malloc(1024);
+    print("Test 3 PASS: Allocates — malloc(1024)");
+
+    // ============================================================
+    // Test 4: Writes — write to allocated memory
+    // ============================================================
+    memset(buf, 65, 26);  // Fill with 'A'
+    print("Test 4 PASS: Writes — memset filled buffer");
+
+    // ============================================================
+    // Test 5: Reads + Writes — memcpy
+    // ============================================================
+    let buf2 = malloc(1024);
+    memcpy(buf2, buf, 26);
+    print("Test 5 PASS: Reads+Writes — memcpy");
+
+    // ============================================================
+    // Test 6: Deallocates — free memory
+    // ============================================================
+    free(buf2);
+    free(buf);
+    print("Test 6 PASS: Deallocates — free");
+
+    print("All memory effects tests passed");
+}

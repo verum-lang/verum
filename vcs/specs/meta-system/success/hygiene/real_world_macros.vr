@@ -1,0 +1,200 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, integration, real-world
+// @description: Test hygiene in real-world macro patterns
+
+// =============================================================================
+// LOGGING MACRO WITH HYGIENE
+// =============================================================================
+// A logging macro that captures log levels and formats messages
+// Must maintain hygiene to not conflict with user's variables
+
+meta fn log_macro(level: Text, message: Expr) -> TokenStream {
+    // Use gensym for internal variables to avoid collision with user code
+    let log_result = gensym("log_result");
+
+    quote {
+        {
+            // Hygienic temporary variable
+            let $log_result = f"[{${level}}]: {$message}";
+            print($log_result);
+        }
+    }
+}
+
+// Helper macros using log_macro
+meta fn log_info(message: Expr) -> TokenStream {
+    log_macro("INFO", message)
+}
+
+meta fn log_error(message: Expr) -> TokenStream {
+    log_macro("ERROR", message)
+}
+
+// =============================================================================
+// MEASURE MACRO
+// =============================================================================
+// Measures execution time of an expression
+
+meta fn measure(name: Text, body: Expr) -> TokenStream {
+    // Use gensym for internal variables
+    let measure_result = gensym("measure_result");
+
+    quote {
+        {
+            // Measure the body and return result with hygienic variable
+            let $measure_result = $body;
+            print(f"{${name}} completed");
+            $measure_result
+        }
+    }
+}
+
+// =============================================================================
+// BUILDER PATTERN MACRO
+// =============================================================================
+
+meta fn derive_builder(type_name: Ident, fields: List<(Ident, Type)>) -> TokenStream {
+    let builder_name = ident(f"{type_name}Builder");
+
+    quote {
+        type $builder_name is {
+            $[for (field, ty) in fields {
+                $field: Maybe<$ty>,
+            }]
+        };
+
+        implement $builder_name {
+            fn new() -> Self {
+                $builder_name {
+                    $[for (field, _ty) in fields {
+                        $field: None,
+                    }]
+                }
+            }
+
+            $[for (field, ty) in fields {
+                fn $field(mut self, value: $ty) -> Self {
+                    self.$field = Some(value);
+                    self
+                }
+            }]
+
+            fn build(self) -> Result<$type_name, Text> {
+                Ok($type_name {
+                    $[for (field, _ty) in fields {
+                        $field: self.$field.ok_or(f"Missing field: {stringify($field)}")?,
+                    }]
+                })
+            }
+        }
+    }
+}
+
+// =============================================================================
+// RETRY MACRO
+// =============================================================================
+// Retries an operation up to N times
+
+meta fn retry(max_attempts: Int, body: Expr) -> TokenStream {
+    let attempt = gensym("attempt");
+    let result = gensym("result");
+    let err = gensym("err");
+
+    quote {
+        {
+            let mut $attempt = 0;
+            loop {
+                $attempt = $attempt + 1;
+                match $body {
+                    Ok(value) => break Ok(value),
+                    Err($err) => {
+                        if $attempt >= ${max_attempts} {
+                            break Err($err);
+                        }
+                        // Continue to next attempt
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// MATCH EXTENSION MACRO
+// =============================================================================
+// Generates exhaustive match with fallback
+
+meta fn match_with_fallback(value: Expr, arms: List<(Pattern, Expr)>, fallback: Expr) -> TokenStream {
+    quote {
+        match $value {
+            $[for (pat, result) in arms {
+                $pat => $result,
+            }]
+            _ => $fallback,
+        }
+    }
+}
+
+// =============================================================================
+// META VERIFICATION TESTS
+// =============================================================================
+// Test that the macros generate correct hygienic code
+
+meta fn test_log_macro_hygiene() -> Int {
+    // Test that log_macro generates code with unique gensym'd variables
+    let msg = quote { "test message" };
+    let tokens = log_macro("INFO", msg);
+
+    // If we got here, gensym worked correctly
+    1
+}
+
+meta fn test_measure_hygiene() -> Int {
+    // Test that measure generates code with unique gensym'd variables
+    let body = quote { compute_something() };
+    let tokens = measure("test", body);
+
+    1
+}
+
+meta fn test_builder_hygiene() -> Int {
+    // Test derive_builder generates correct code
+    let type_name = ident("TestConfig");
+    let fields = [(ident("host"), ident("Text")), (ident("port"), ident("Int"))];
+    let tokens = derive_builder(type_name, fields);
+
+    1
+}
+
+meta fn test_retry_hygiene() -> Int {
+    // Test retry macro generates hygienic code
+    let body = quote { try_operation() };
+    let tokens = retry(3, body);
+
+    1
+}
+
+meta fn test_match_hygiene() -> Int {
+    // Test match_with_fallback generates correct code
+    let value = quote { x };
+    let arms = [(quote { 1 }, quote { "one" }), (quote { 2 }, quote { "two" })];
+    let fallback = quote { "other" };
+    let tokens = match_with_fallback(value, arms, fallback);
+
+    1
+}
+
+// Combined test function for the test runner
+meta fn test_all_real_world_macros() -> Int {
+    test_log_macro_hygiene() +
+    test_measure_hygiene() +
+    test_builder_hygiene() +
+    test_retry_hygiene() +
+    test_match_hygiene()
+}
+
+fn main() {
+    // Tests are evaluated at compile time via meta functions
+}

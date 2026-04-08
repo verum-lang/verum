@@ -1,0 +1,183 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, hash, simulation
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests hash table simulation using arrays (open addressing).
+
+fn hash_fn(key: Int, table_size: Int) -> Int {
+    let h = ((key * 2654435761) >> 16) & 0x7FFFFFFF;
+    h % table_size
+}
+
+fn test_hash_insert_lookup() {
+    let size = 16;
+    let mut keys = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut vals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut used = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Insert key=42, value=100
+    let mut idx = hash_fn(42, size);
+    let mut probes = 0;
+    while used[idx] == 1 {
+        idx = (idx + 1) % size;
+        probes = probes + 1;
+        if probes > size { break; }
+    }
+    keys[idx] = 42;
+    vals[idx] = 100;
+    used[idx] = 1;
+
+    // Insert key=17, value=200
+    idx = hash_fn(17, size);
+    probes = 0;
+    while used[idx] == 1 {
+        idx = (idx + 1) % size;
+        probes = probes + 1;
+        if probes > size { break; }
+    }
+    keys[idx] = 17;
+    vals[idx] = 200;
+    used[idx] = 1;
+
+    // Insert key=99, value=300
+    idx = hash_fn(99, size);
+    probes = 0;
+    while used[idx] == 1 {
+        idx = (idx + 1) % size;
+        probes = probes + 1;
+        if probes > size { break; }
+    }
+    keys[idx] = 99;
+    vals[idx] = 300;
+    used[idx] = 1;
+
+    // Lookup key=42
+    idx = hash_fn(42, size);
+    probes = 0;
+    let mut found = -1;
+    while probes < size {
+        if used[idx] == 1 {
+            if keys[idx] == 42 {
+                found = vals[idx];
+                probes = size; // break
+            }
+        } else {
+            probes = size; // break — not found
+        }
+        idx = (idx + 1) % size;
+        probes = probes + 1;
+    }
+    assert_eq(found, 100);
+
+    // Lookup key=17
+    idx = hash_fn(17, size);
+    probes = 0;
+    found = -1;
+    while probes < size {
+        if used[idx] == 1 {
+            if keys[idx] == 17 {
+                found = vals[idx];
+                probes = size;
+            }
+        } else {
+            probes = size;
+        }
+        idx = (idx + 1) % size;
+        probes = probes + 1;
+    }
+    assert_eq(found, 200);
+
+    print("hash_insert_lookup: ok");
+}
+
+fn test_hash_collision() {
+    // Multiple keys that may hash to same bucket
+    let size = 8;
+    let mut keys = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut vals = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut used = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut count = 0;
+
+    // Insert keys 0..7
+    let mut k = 0;
+    while k < 8 {
+        let mut idx = hash_fn(k * 13, size);
+        let mut probes = 0;
+        while used[idx] == 1 {
+            idx = (idx + 1) % size;
+            probes = probes + 1;
+            if probes >= size { break; }
+        }
+        if probes < size {
+            keys[idx] = k * 13;
+            vals[idx] = k * 100;
+            used[idx] = 1;
+            count = count + 1;
+        }
+        k = k + 1;
+    }
+    assert_eq(count, 8);
+
+    // Verify all keys are findable
+    let mut found_count = 0;
+    k = 0;
+    while k < 8 {
+        let target = k * 13;
+        let mut idx = hash_fn(target, size);
+        let mut probes = 0;
+        while probes < size {
+            if used[idx] == 1 {
+                if keys[idx] == target {
+                    found_count = found_count + 1;
+                    probes = size;
+                }
+            } else {
+                probes = size;
+            }
+            idx = (idx + 1) % size;
+            probes = probes + 1;
+        }
+        k = k + 1;
+    }
+    assert_eq(found_count, 8);
+    print("hash_collision: ok");
+}
+
+fn test_hash_distribution() {
+    // Check that hash function distributes keys
+    let size = 8;
+    let mut buckets = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 100 {
+        let bucket = hash_fn(i, size);
+        buckets[bucket] = buckets[bucket] + 1;
+        i = i + 1;
+    }
+
+    // Each bucket should have some entries (rough check)
+    let mut min_bucket = buckets[0];
+    let mut max_bucket = buckets[0];
+    i = 1;
+    while i < size {
+        if buckets[i] < min_bucket { min_bucket = buckets[i]; }
+        if buckets[i] > max_bucket { max_bucket = buckets[i]; }
+        i = i + 1;
+    }
+
+    // All buckets should have at least 1 entry
+    assert(min_bucket >= 1);
+    // Max should be reasonable (not all in one bucket)
+    assert(max_bucket <= 30);
+    print("hash_distribution: ok");
+}
+
+fn main() -> Int {
+    test_hash_insert_lookup();
+    test_hash_collision();
+    test_hash_distribution();
+    print("[OK] 422_interp_hash_simulation");
+    0
+}

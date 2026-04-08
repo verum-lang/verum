@@ -1,0 +1,410 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, xml, html
+
+// XML/HTML Tagged Literals
+// Tests for xml#"""...""" and html#"""...""" syntax
+
+// ============================================================================
+// SECTION 1: Basic XML Elements
+// ============================================================================
+
+fn test_xml_simple_element() {
+    let xml = xml#"""
+<root>content</root>
+""";
+}
+
+fn test_xml_nested_elements() {
+    let xml = xml#"""
+<root>
+    <child>value</child>
+</root>
+""";
+}
+
+fn test_xml_with_attributes() {
+    let xml = xml#"""
+<element id="123" class="main">content</element>
+""";
+}
+
+fn test_xml_self_closing() {
+    let xml = xml#"""
+<element id="1" />
+""";
+}
+
+// ============================================================================
+// SECTION 2: XML Document Structure
+// ============================================================================
+
+fn test_xml_declaration() {
+    let xml = xml#"""
+<?xml version="1.0" encoding="UTF-8"?>
+<root>content</root>
+""";
+}
+
+fn test_xml_with_doctype() {
+    let xml = xml#"""
+<?xml version="1.0"?>
+<!DOCTYPE root SYSTEM "root.dtd">
+<root>
+    <element>value</element>
+</root>
+""";
+}
+
+fn test_xml_namespaces() {
+    let xml = xml#"""
+<root xmlns="http://example.com/default"
+      xmlns:custom="http://example.com/custom">
+    <element>default namespace</element>
+    <custom:element>custom namespace</custom:element>
+</root>
+""";
+}
+
+// ============================================================================
+// SECTION 3: XML Content Types
+// ============================================================================
+
+fn test_xml_cdata() {
+    let xml = xml#"""
+<script><![CDATA[
+function example() {
+    if (a < b && c > d) {
+        return true;
+    }
+}
+]]></script>
+""";
+}
+
+fn test_xml_comments() {
+    let xml = xml#"""
+<root>
+    <!-- This is a comment -->
+    <element>value</element>
+    <!-- Another comment -->
+</root>
+""";
+}
+
+fn test_xml_processing_instruction() {
+    let xml = xml#"""
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="style.xsl"?>
+<root>content</root>
+""";
+}
+
+// ============================================================================
+// SECTION 4: XML Special Characters
+// ============================================================================
+
+fn test_xml_entities() {
+    let xml = xml#"""
+<text>
+    Less than: &lt;
+    Greater than: &gt;
+    Ampersand: &amp;
+    Quote: &quot;
+    Apostrophe: &apos;
+</text>
+""";
+}
+
+fn test_xml_numeric_entities() {
+    let xml = xml#"""
+<text>
+    Copyright: &#169;
+    Euro: &#8364;
+    Emoji: &#128512;
+</text>
+""";
+}
+
+// ============================================================================
+// SECTION 5: Complex XML Documents
+// ============================================================================
+
+fn test_xml_rss_feed() {
+    let rss = xml#"""
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+    <channel>
+        <title>My Blog</title>
+        <link>https://example.com</link>
+        <description>A sample blog</description>
+        <item>
+            <title>First Post</title>
+            <link>https://example.com/post/1</link>
+            <description>This is the first post</description>
+            <pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate>
+        </item>
+    </channel>
+</rss>
+""";
+}
+
+fn test_xml_svg() {
+    let svg = xml#"""
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+    <circle cx="50" cy="50" r="40" stroke="black" stroke-width="2" fill="red"/>
+    <text x="50" y="55" text-anchor="middle" fill="white">SVG</text>
+</svg>
+""";
+}
+
+fn test_xml_soap_envelope() {
+    let soap = xml#"""
+<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+    <soap:Header>
+        <auth:Token xmlns:auth="http://example.com/auth">abc123</auth:Token>
+    </soap:Header>
+    <soap:Body>
+        <m:GetUser xmlns:m="http://example.com/api">
+            <m:UserId>123</m:UserId>
+        </m:GetUser>
+    </soap:Body>
+</soap:Envelope>
+""";
+}
+
+// ============================================================================
+// SECTION 6: Basic HTML Documents
+// ============================================================================
+
+fn test_html_simple() {
+    let page = html#"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Page</title>
+</head>
+<body>
+    <h1>Hello World</h1>
+</body>
+</html>
+""";
+}
+
+fn test_html_with_meta() {
+    let page = html#"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Page</title>
+</head>
+<body>
+    <p>Content here</p>
+</body>
+</html>
+""";
+}
+
+// ============================================================================
+// SECTION 7: HTML Elements
+// ============================================================================
+
+fn test_html_form() {
+    let form = html#"""
+<form action="/submit" method="POST">
+    <label for="name">Name:</label>
+    <input type="text" id="name" name="name" required>
+
+    <label for="email">Email:</label>
+    <input type="email" id="email" name="email" required>
+
+    <button type="submit">Submit</button>
+</form>
+""";
+}
+
+fn test_html_table() {
+    let table = html#"""
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Age</th>
+            <th>Email</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Alice</td>
+            <td>30</td>
+            <td>alice@example.com</td>
+        </tr>
+        <tr>
+            <td>Bob</td>
+            <td>25</td>
+            <td>bob@example.com</td>
+        </tr>
+    </tbody>
+</table>
+""";
+}
+
+fn test_html_list() {
+    let list = html#"""
+<ul class="menu">
+    <li><a href="/">Home</a></li>
+    <li><a href="/about">About</a></li>
+    <li><a href="/contact">Contact</a></li>
+</ul>
+""";
+}
+
+// ============================================================================
+// SECTION 8: HTML with Styles and Scripts
+// ============================================================================
+
+fn test_html_with_style() {
+    let styled = html#"""
+<style>
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    .button {
+        background-color: #007bff;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        cursor: pointer;
+    }
+</style>
+<div class="container">
+    <button class="button">Click me</button>
+</div>
+""";
+}
+
+fn test_html_with_script() {
+    let scripted = html#"""
+<div id="app"></div>
+<script>
+    document.getElementById('app').innerHTML = '<h1>Hello</h1>';
+
+    function handleClick() {
+        alert('Button clicked!');
+    }
+</script>
+""";
+}
+
+// ============================================================================
+// SECTION 9: HTML5 Semantic Elements
+// ============================================================================
+
+fn test_html5_semantic() {
+    let page = html#"""
+<article>
+    <header>
+        <h1>Article Title</h1>
+        <time datetime="2024-01-01">January 1, 2024</time>
+    </header>
+
+    <section>
+        <p>Article content goes here.</p>
+    </section>
+
+    <footer>
+        <p>Written by Author</p>
+    </footer>
+</article>
+""";
+}
+
+fn test_html5_navigation() {
+    let nav = html#"""
+<nav aria-label="Main navigation">
+    <ul>
+        <li><a href="/" aria-current="page">Home</a></li>
+        <li><a href="/products">Products</a></li>
+        <li><a href="/about">About</a></li>
+    </ul>
+</nav>
+""";
+}
+
+// ============================================================================
+// SECTION 10: XML/HTML in Expressions
+// ============================================================================
+
+fn test_xml_in_function() {
+    fn process_xml(x: XmlDocument) -> Int { 0 }
+
+    let result = process_xml(xml#"""
+<root><element>value</element></root>
+""");
+}
+
+fn test_html_in_conditional() {
+    let dark_mode = true;
+
+    let template = if dark_mode {
+        html#"""
+<body class="dark">Dark mode</body>
+"""
+    } else {
+        html#"""
+<body class="light">Light mode</body>
+"""
+    };
+}
+
+fn test_xml_in_array() {
+    let templates = [
+        xml#"""<template id="1">First</template>""",
+        xml#"""<template id="2">Second</template>""",
+    ];
+}
+
+// ============================================================================
+// SECTION 11: Edge Cases
+// ============================================================================
+
+fn test_xml_empty() {
+    let empty = xml#"""
+""";
+}
+
+fn test_xml_single_line() {
+    let single = xml#"""<root/>""";
+}
+
+fn test_xml_unicode() {
+    let unicode = xml#"""
+<text>
+    <greeting lang="zh">你好</greeting>
+    <greeting lang="ja">こんにちは</greeting>
+    <greeting lang="ar">مرحبا</greeting>
+    <emoji>🎉</emoji>
+</text>
+""";
+}
+
+fn test_html_void_elements() {
+    let void_elements = html#"""
+<div>
+    <br>
+    <hr>
+    <img src="image.png" alt="Image">
+    <input type="text" name="field">
+    <meta name="description" content="Test">
+    <link rel="stylesheet" href="style.css">
+</div>
+""";
+}
+

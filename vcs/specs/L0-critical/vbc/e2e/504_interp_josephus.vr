@@ -1,0 +1,192 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, josephus, circular_elimination, combinatorics
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Josephus problem: n people in a circle, every k-th person is eliminated.
+// Find the (0-indexed) position of the last survivor.
+//
+// Recursive formula (0-indexed):
+//   J(1, k) = 0
+//   J(n, k) = (J(n-1, k) + k) % n
+//
+// Iterative version:
+//   pos = 0
+//   for i in 2..=n: pos = (pos + k) % i
+//
+// We verify with known values and simulate the circular list directly.
+
+// Josephus position, iterative (0-indexed).
+fn josephus(n: Int, k: Int) -> Int {
+    let mut pos = 0;
+    let mut i = 2;
+    while i <= n {
+        pos = (pos + k) % i;
+        i = i + 1;
+    }
+    pos
+}
+
+// Direct simulation: mark eliminated people in order, return survivor.
+// alive[i] = 1 if still in circle.
+// Returns the 0-indexed position of the last survivor.
+fn josephus_simulate(n: Int, k: Int) -> Int {
+    let mut alive = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+    let mut remaining = n;
+    let mut cur = 0; // current position in the circle
+
+    while remaining > 1 {
+        // advance k steps among alive people
+        let mut steps = k;
+        // find the k-th alive person (count = steps)
+        // cur is already pointing at a valid alive person,
+        // we need to advance k-1 more steps
+        let mut count = 1;
+        while count < steps {
+            cur = (cur + 1) % n;
+            while alive[cur] == 0 { cur = (cur + 1) % n; }
+            count = count + 1;
+        }
+        // eliminate cur
+        alive[cur] = 0;
+        remaining = remaining - 1;
+        if remaining > 0 {
+            cur = (cur + 1) % n;
+            while alive[cur] == 0 { cur = (cur + 1) % n; }
+        }
+    }
+
+    // find survivor
+    let mut s = 0;
+    while s < n {
+        if alive[s] == 1 { return s; }
+        s = s + 1;
+    }
+    0 - 1
+}
+
+fn test_known_values() {
+    // J(1,k) = 0 for any k
+    assert_eq(josephus(1, 2), 0);
+    assert_eq(josephus(1, 3), 0);
+
+    // J(2,2) = (0+2)%2 = 0
+    assert_eq(josephus(2, 2), 0);
+
+    // J(5,2): standard Josephus. Answer = 2 (0-indexed)
+    // i=2: pos=(0+2)%2=0
+    // i=3: pos=(0+2)%3=2
+    // i=4: pos=(2+2)%4=0
+    // i=5: pos=(0+2)%5=2
+    assert_eq(josephus(5, 2), 2);
+
+    // J(6,2):
+    // i=2:(0+2)%2=0, i=3:(0+2)%3=2, i=4:(2+2)%4=0, i=5:(0+2)%5=2, i=6:(2+2)%6=4
+    assert_eq(josephus(6, 2), 4);
+
+    // J(7,2):
+    // i=2:0, i=3:2, i=4:0, i=5:2, i=6:4, i=7:(4+2)%7=6
+    assert_eq(josephus(7, 2), 6);
+
+    // J(10,2):
+    // i=2:0,i=3:2,i=4:0,i=5:2,i=6:4,i=7:6,i=8:(6+2)%8=0,i=9:(0+2)%9=2,i=10:(2+2)%10=4
+    assert_eq(josephus(10, 2), 4);
+
+    print("josephus_known_values: ok");
+}
+
+fn test_step3() {
+    // J(n,3) known values:
+    // J(1,3)=0
+    // J(2,3)=(0+3)%2=1
+    // J(3,3)=(1+3)%3=1
+    // J(4,3)=(1+3)%4=0
+    // J(5,3)=(0+3)%5=3
+    // J(6,3)=(3+3)%6=0
+    // J(7,3)=(0+3)%7=3
+    // J(8,3)=(3+3)%8=6
+    assert_eq(josephus(1, 3), 0);
+    assert_eq(josephus(2, 3), 1);
+    assert_eq(josephus(3, 3), 1);
+    assert_eq(josephus(4, 3), 0);
+    assert_eq(josephus(5, 3), 3);
+    assert_eq(josephus(6, 3), 0);
+    assert_eq(josephus(7, 3), 3);
+    assert_eq(josephus(8, 3), 6);
+    print("josephus_step3: ok");
+}
+
+fn test_simulation_matches_formula() {
+    // Verify simulation matches formula for small cases
+    // J(5,2)=2
+    let sim52 = josephus_simulate(5, 2);
+    assert_eq(sim52, josephus(5, 2));
+
+    // J(6,2)=4
+    let sim62 = josephus_simulate(6, 2);
+    assert_eq(sim62, josephus(6, 2));
+
+    // J(7,3)=3
+    let sim73 = josephus_simulate(7, 3);
+    assert_eq(sim73, josephus(7, 3));
+
+    // J(8,3)=6
+    let sim83 = josephus_simulate(8, 3);
+    assert_eq(sim83, josephus(8, 3));
+
+    print("josephus_simulation_matches: ok");
+}
+
+fn test_large_n() {
+    // J(100, 2) — well-known result.
+    // Formula: J(n,2) = 2*L + 1 where n = 2^m + L, 0 <= L < 2^m
+    // 100 = 64 + 36. 0-indexed: J(100,2) = 2*36 = 72.
+    assert_eq(josephus(100, 2), 72);
+
+    // J(16,2): n=2^4, L=0. J = 2*0+1 = 1... wait.
+    // Actually for n=2^m exactly, formula gives J=1? Let's compute iteratively.
+    // i=2:0,i=3:2,i=4:0,i=5:2,i=6:4,i=7:6,i=8:0,
+    // i=9:2,i=10:4,i=11:6,i=12:8,i=13:10,i=14:12,i=15:14,i=16:0
+    assert_eq(josephus(16, 2), 0);
+
+    // J(15,2):
+    // Continue from i=14: pos=12, i=15: (12+2)%15=14
+    assert_eq(josephus(15, 2), 14);
+
+    print(f"josephus_100_2={72}");
+    print("josephus_large_n: ok");
+}
+
+fn test_step_equals_n() {
+    // When k=n: always eliminates the last person in the circle first.
+    // J(n,n): iterative formula gives specific values.
+    // J(3,3)=1 (computed above)
+    // J(4,4):
+    // i=2:(0+4)%2=0, i=3:(0+4)%3=1, i=4:(1+4)%4=1
+    assert_eq(josephus(4, 4), 1);
+
+    // J(5,5):
+    // i=2:0, i=3:1, i=4:1, i=5:(1+5)%5=1
+    assert_eq(josephus(5, 5), 1);
+
+    // k=1: always eliminate current person -> survivor is last (0-indexed: n-1)
+    // J(n,1): pos starts 0, each step adds 1 and mods.
+    // i=2:(0+1)%2=1, i=3:(1+1)%3=2, ..., i=n: pos = n-1
+    assert_eq(josephus(5, 1), 4);
+    assert_eq(josephus(10, 1), 9);
+    assert_eq(josephus(8, 1), 7);
+
+    print("josephus_edge_cases: ok");
+}
+
+fn main() -> Int {
+    test_known_values();
+    test_step3();
+    test_simulation_matches_formula();
+    test_large_n();
+    test_step_equals_n();
+    print("[OK] 504_interp_josephus");
+    0
+}

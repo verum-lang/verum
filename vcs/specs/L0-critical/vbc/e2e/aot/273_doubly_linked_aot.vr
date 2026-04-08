@@ -1,0 +1,162 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, doubly, linked, list
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for doubly-linked list simulation using pool allocation
+
+type DLNode is { value: Int, prev_idx: Int, next_idx: Int, active: Int };
+
+type DLList is {
+    n0: DLNode, n1: DLNode, n2: DLNode, n3: DLNode,
+    n4: DLNode, n5: DLNode, n6: DLNode, n7: DLNode,
+    head: Int, tail: Int, size: Int, next_free: Int
+};
+
+fn dl_empty_node() -> DLNode { DLNode { value: 0, prev_idx: -1, next_idx: -1, active: 0 } }
+
+fn dl_new() -> DLList {
+    let e = dl_empty_node();
+    DLList { n0: e, n1: e, n2: e, n3: e, n4: e, n5: e, n6: e, n7: e, head: -1, tail: -1, size: 0, next_free: 0 }
+}
+
+fn dl_get(dl: DLList, i: Int) -> DLNode {
+    if i == 0 { dl.n0 } else if i == 1 { dl.n1 }
+    else if i == 2 { dl.n2 } else if i == 3 { dl.n3 }
+    else if i == 4 { dl.n4 } else if i == 5 { dl.n5 }
+    else if i == 6 { dl.n6 } else { dl.n7 }
+}
+
+fn dl_set(dl: DLList, i: Int, n: DLNode) -> DLList {
+    DLList {
+        n0: if i == 0 { n } else { dl.n0 }, n1: if i == 1 { n } else { dl.n1 },
+        n2: if i == 2 { n } else { dl.n2 }, n3: if i == 3 { n } else { dl.n3 },
+        n4: if i == 4 { n } else { dl.n4 }, n5: if i == 5 { n } else { dl.n5 },
+        n6: if i == 6 { n } else { dl.n6 }, n7: if i == 7 { n } else { dl.n7 },
+        head: dl.head, tail: dl.tail, size: dl.size, next_free: dl.next_free
+    }
+}
+
+// Push to back
+fn dl_push_back(dl: DLList, val: Int) -> DLList {
+    if dl.next_free >= 8 { return dl; }
+    let idx = dl.next_free;
+    let node = DLNode { value: val, prev_idx: dl.tail, next_idx: -1, active: 1 };
+    let mut dl2 = dl_set(dl, idx, node);
+
+    // Update previous tail's next pointer
+    if dl.tail >= 0 {
+        let old_tail = dl_get(dl2, dl.tail);
+        let updated = DLNode { value: old_tail.value, prev_idx: old_tail.prev_idx, next_idx: idx, active: 1 };
+        dl2 = dl_set(dl2, dl.tail, updated);
+    }
+
+    let new_head = if dl.head == -1 { idx } else { dl2.head };
+    DLList {
+        n0: dl2.n0, n1: dl2.n1, n2: dl2.n2, n3: dl2.n3,
+        n4: dl2.n4, n5: dl2.n5, n6: dl2.n6, n7: dl2.n7,
+        head: new_head, tail: idx, size: dl.size + 1, next_free: dl.next_free + 1
+    }
+}
+
+// Push to front
+fn dl_push_front(dl: DLList, val: Int) -> DLList {
+    if dl.next_free >= 8 { return dl; }
+    let idx = dl.next_free;
+    let node = DLNode { value: val, prev_idx: -1, next_idx: dl.head, active: 1 };
+    let mut dl2 = dl_set(dl, idx, node);
+
+    if dl.head >= 0 {
+        let old_head = dl_get(dl2, dl.head);
+        let updated = DLNode { value: old_head.value, prev_idx: idx, next_idx: old_head.next_idx, active: 1 };
+        dl2 = dl_set(dl2, dl.head, updated);
+    }
+
+    let new_tail = if dl.tail == -1 { idx } else { dl2.tail };
+    DLList {
+        n0: dl2.n0, n1: dl2.n1, n2: dl2.n2, n3: dl2.n3,
+        n4: dl2.n4, n5: dl2.n5, n6: dl2.n6, n7: dl2.n7,
+        head: idx, tail: new_tail, size: dl.size + 1, next_free: dl.next_free + 1
+    }
+}
+
+// Sum forward traversal
+fn dl_sum_forward(dl: DLList) -> Int {
+    let mut sum = 0;
+    let mut idx = dl.head;
+    while idx >= 0 {
+        let node = dl_get(dl, idx);
+        sum = sum + node.value;
+        idx = node.next_idx;
+    }
+    sum
+}
+
+// Sum backward traversal
+fn dl_sum_backward(dl: DLList) -> Int {
+    let mut sum = 0;
+    let mut idx = dl.tail;
+    while idx >= 0 {
+        let node = dl_get(dl, idx);
+        sum = sum + node.value;
+        idx = node.prev_idx;
+    }
+    sum
+}
+
+fn dl_front(dl: DLList) -> Int { dl_get(dl, dl.head).value }
+fn dl_back(dl: DLList) -> Int { dl_get(dl, dl.tail).value }
+
+fn test_push_back() {
+    let mut dl = dl_new();
+    dl = dl_push_back(dl, 10);
+    dl = dl_push_back(dl, 20);
+    dl = dl_push_back(dl, 30);
+    assert_eq(dl.size, 3);
+    assert_eq(dl_front(dl), 10);
+    assert_eq(dl_back(dl), 30);
+    assert_eq(dl_sum_forward(dl), 60);
+    assert_eq(dl_sum_backward(dl), 60);
+}
+
+fn test_push_front() {
+    let mut dl = dl_new();
+    dl = dl_push_front(dl, 30);
+    dl = dl_push_front(dl, 20);
+    dl = dl_push_front(dl, 10);
+    assert_eq(dl.size, 3);
+    assert_eq(dl_front(dl), 10);
+    assert_eq(dl_back(dl), 30);
+}
+
+fn test_mixed() {
+    let mut dl = dl_new();
+    dl = dl_push_back(dl, 2);
+    dl = dl_push_front(dl, 1);
+    dl = dl_push_back(dl, 3);
+    // List: 1 <-> 2 <-> 3
+    assert_eq(dl_front(dl), 1);
+    assert_eq(dl_back(dl), 3);
+    assert_eq(dl_sum_forward(dl), 6);
+    assert_eq(dl_sum_backward(dl), 6);
+}
+
+fn test_single_element() {
+    let mut dl = dl_new();
+    dl = dl_push_back(dl, 42);
+    assert_eq(dl.size, 1);
+    assert_eq(dl_front(dl), 42);
+    assert_eq(dl_back(dl), 42);
+    assert_eq(dl_sum_forward(dl), 42);
+}
+
+fn main() -> Int {
+    test_push_back();
+    test_push_front();
+    test_mixed();
+    test_single_element();
+    print("[OK] 273_doubly_linked_aot");
+    0
+}

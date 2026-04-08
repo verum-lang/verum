@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, sandbox, forbidden, network
+// @description: Test that network operations are forbidden in meta functions
+// @expected-error: M301
+
+// Network operations should be blocked in meta context
+meta fn test_network_fetch() -> Text {
+    // Attempting network access should fail with M301 ForbiddenOperation
+    // Using direct call to http_get which is in the network allowlist
+    http_get("http://example.com")
+}
+
+fn main() {
+    // Call meta function at compile time
+    @const assert(text_len(test_network_fetch()) > 0);
+}

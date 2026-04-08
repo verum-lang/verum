@@ -1,0 +1,123 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: list, methods, sort, reverse, contains
+// @description: Test list method operations
+
+fn test_list_reverse() -> Int {
+    let mut items = [5, 3, 1, 4, 2];
+    items.reverse();
+    if items[0] != 2 || items[4] != 5 {
+        print(f"FAIL reverse: [{items[0]}..{items[4]}]");
+        return 1;
+    }
+    print("  list_reverse: OK");
+    0
+}
+
+fn test_list_contains() -> Int {
+    let items = [10, 20, 30, 40, 50];
+    if !items.contains(30) {
+        print("FAIL contains: should contain 30");
+        return 1;
+    }
+    if items.contains(99) {
+        print("FAIL contains: should not contain 99");
+        return 1;
+    }
+    print("  list_contains: OK");
+    0
+}
+
+fn test_list_push() -> Int {
+    let mut items = List.new();
+    items.push(1);
+    items.push(2);
+    items.push(3);
+    if items.len() != 3 {
+        print(f"FAIL push: len={items.len()}");
+        return 1;
+    }
+    if items[0] != 1 || items[2] != 3 {
+        print("FAIL push: wrong values");
+        return 1;
+    }
+    print("  list_push: OK");
+    0
+}
+
+fn test_list_pop() -> Int {
+    let mut items = List.new();
+    items.push(10);
+    items.push(20);
+    items.push(30);
+    // pop() returns Maybe<T>
+    let popped = match items.pop() {
+        Some(v) => v,
+        None => -1,
+    };
+    if popped != 30 {
+        print(f"FAIL pop: got {popped}, expected 30");
+        return 1;
+    }
+    if items.len() != 2 {
+        print(f"FAIL pop: len={items.len()}, expected 2");
+        return 1;
+    }
+    print("  list_pop: OK");
+    0
+}
+
+fn test_list_sort() -> Int {
+    let mut items = [5, 2, 8, 1, 9, 3];
+    items.sort();
+    if items[0] != 1 || items[5] != 9 {
+        print(f"FAIL sort: [{items[0]}..{items[5]}]");
+        return 1;
+    }
+    // Verify sorted
+    let mut i = 1;
+    while i < items.len() {
+        if items[i] < items[i - 1] {
+            print(f"FAIL sort: not sorted at {i}");
+            return 1;
+        }
+        i = i + 1;
+    }
+    print("  list_sort: OK");
+    0
+}
+
+fn test_list_index_of() -> Int {
+    let items = [10, 20, 30, 40, 50];
+    let idx = items.index_of(30);
+    if idx != 2 {
+        print(f"FAIL index_of: idx={idx}, expected 2");
+        return 1;
+    }
+    let not_found = items.index_of(99);
+    if not_found != -1 {
+        print(f"FAIL index_of: not_found={not_found}, expected -1");
+        return 1;
+    }
+    print("  list_index_of: OK");
+    0
+}
+
+fn main() -> Int {
+    print("List Methods Tests:");
+    let mut failures = 0;
+    failures = failures + test_list_reverse();
+    failures = failures + test_list_contains();
+    failures = failures + test_list_push();
+    failures = failures + test_list_pop();
+    failures = failures + test_list_sort();
+    failures = failures + test_list_index_of();
+
+    if failures == 0 {
+        print("All list methods tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

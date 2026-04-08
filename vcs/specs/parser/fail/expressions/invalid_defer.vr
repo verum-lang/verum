@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, defer, error
+// @description: defer statement without body
+// @expected-error: E045
+
+fn test() {
+    defer;  // defer requires expression or block
+}

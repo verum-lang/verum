@@ -1,0 +1,298 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, error
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Error handling patterns — option types, result-like types, early return
+
+// Sum types for option and result patterns.
+// Note: Cannot name the type "Result" (conflicts with stdlib).
+type Maybe is None | Some(Int);
+type Outcome is Ok(Int) | Fail(Int);
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
+fn maybe_value(m: Maybe) -> Int {
+    match m {
+        Some(v) => v,
+        None => 0
+    }
+}
+
+fn maybe_is_some(m: Maybe) -> Bool {
+    match m {
+        Some(_) => true,
+        None => false
+    }
+}
+
+fn maybe_is_none(m: Maybe) -> Bool {
+    match m {
+        Some(_) => false,
+        None => true
+    }
+}
+
+fn outcome_is_ok(o: Outcome) -> Bool {
+    match o {
+        Ok(v) => true,
+        Fail(e) => false
+    }
+}
+
+fn outcome_is_fail(o: Outcome) -> Bool {
+    match o {
+        Ok(_) => false,
+        Fail(_) => true
+    }
+}
+
+fn outcome_value(o: Outcome) -> Int {
+    match o {
+        Ok(v) => v,
+        Fail(e) => e
+    }
+}
+
+// =============================================================================
+// Test 1: Option-like type — Some(val) or None
+// =============================================================================
+
+@test
+fn test_option_some_none() {
+    let some_val = Some(42);
+    let none_val: Maybe = None;
+
+    assert(maybe_is_some(some_val));
+    assert(maybe_is_none(none_val));
+    assert_eq(maybe_value(some_val), 42);
+    assert_eq(maybe_value(none_val), 0);
+
+    // Nested construction
+    let another = Some(100);
+    assert(maybe_is_some(another));
+    assert_eq(maybe_value(another), 100);
+
+    // Multiple None values are equal in behavior
+    let none2: Maybe = None;
+    assert(maybe_is_none(none2));
+    assert_eq(maybe_value(none2), 0);
+
+    print("  test_option_some_none: ok");
+}
+
+// =============================================================================
+// Test 2: Map over option value
+// =============================================================================
+
+fn maybe_map_double(m: Maybe) -> Maybe {
+    match m {
+        Some(v) => Some(v * 2),
+        None => None
+    }
+}
+
+fn maybe_map_add_ten(m: Maybe) -> Maybe {
+    match m {
+        Some(v) => Some(v + 10),
+        None => None
+    }
+}
+
+fn maybe_map_negate(m: Maybe) -> Maybe {
+    match m {
+        Some(v) => Some(0 - v),
+        None => None
+    }
+}
+
+@test
+fn test_option_map() {
+    let val = Some(21);
+
+    // Map double: Some(21) -> Some(42)
+    let doubled = maybe_map_double(val);
+    assert(maybe_is_some(doubled));
+    assert_eq(maybe_value(doubled), 42);
+
+    // Map add ten: Some(21) -> Some(31)
+    let added = maybe_map_add_ten(val);
+    assert(maybe_is_some(added));
+    assert_eq(maybe_value(added), 31);
+
+    // Map negate: Some(21) -> Some(-21)
+    let negated = maybe_map_negate(val);
+    assert(maybe_is_some(negated));
+    assert_eq(maybe_value(negated), -21);
+
+    // Mapping over None gives None
+    let nothing: Maybe = None;
+    let mapped_nothing = maybe_map_double(nothing);
+    assert(maybe_is_none(mapped_nothing));
+
+    // Chaining maps: double then add ten
+    let chained = maybe_map_add_ten(maybe_map_double(Some(5)));
+    assert_eq(maybe_value(chained), 20);  // 5*2=10, 10+10=20
+
+    print("  test_option_map: ok");
+}
+
+// =============================================================================
+// Test 3: Unwrap with default
+// =============================================================================
+
+fn maybe_unwrap_or(m: Maybe, default_val: Int) -> Int {
+    match m {
+        Some(v) => v,
+        None => default_val
+    }
+}
+
+@test
+fn test_option_unwrap_or() {
+    let val = Some(42);
+    let nothing: Maybe = None;
+
+    // Unwrap Some returns the value
+    assert_eq(maybe_unwrap_or(val, -1), 42);
+
+    // Unwrap None returns the default
+    assert_eq(maybe_unwrap_or(nothing, -1), -1);
+    assert_eq(maybe_unwrap_or(nothing, 0), 0);
+    assert_eq(maybe_unwrap_or(nothing, 999), 999);
+
+    // Unwrap Some ignores the default
+    assert_eq(maybe_unwrap_or(Some(7), 100), 7);
+
+    print("  test_option_unwrap_or: ok");
+}
+
+// =============================================================================
+// Test 4: Result-like type — Ok(val) or Fail(code)
+// =============================================================================
+
+fn safe_divide(a: Int, b: Int) -> Outcome {
+    if b == 0 {
+        Fail(-1)
+    } else {
+        Ok(a / b)
+    }
+}
+
+@test
+fn test_result_ok_err() {
+    let ok_val = Ok(42);
+    let err_val = Fail(404);
+
+    assert(outcome_is_ok(ok_val));
+    assert(outcome_is_fail(err_val));
+
+    assert_eq(outcome_value(ok_val), 42);
+    assert_eq(outcome_value(err_val), 404);
+
+    // Safe divide succeeds
+    let div_ok = safe_divide(10, 2);
+    assert(outcome_is_ok(div_ok));
+    assert_eq(outcome_value(div_ok), 5);
+
+    // Safe divide by zero fails
+    let div_err = safe_divide(10, 0);
+    assert(outcome_is_fail(div_err));
+    assert_eq(outcome_value(div_err), -1);
+
+    // More division tests
+    let div2 = safe_divide(100, 10);
+    assert(outcome_is_ok(div2));
+    assert_eq(outcome_value(div2), 10);
+
+    print("  test_result_ok_err: ok");
+}
+
+// =============================================================================
+// Test 5: Chain result-producing functions (error propagation)
+// =============================================================================
+
+fn parse_positive(x: Int) -> Outcome {
+    if x > 0 {
+        Ok(x)
+    } else {
+        Fail(-2)
+    }
+}
+
+fn double_if_small(x: Int) -> Outcome {
+    if x > 1000 {
+        Fail(-3)
+    } else {
+        Ok(x * 2)
+    }
+}
+
+fn chain_operations(input: Int) -> Outcome {
+    // Step 1: parse must be positive
+    let step1 = parse_positive(input);
+    let val1 = match step1 {
+        Ok(v) => v,
+        Fail(e) => { return Fail(e); }
+    };
+    // Step 2: double if small
+    let step2 = double_if_small(val1);
+    let val2 = match step2 {
+        Ok(v) => v,
+        Fail(e) => { return Fail(e); }
+    };
+    // Step 3: divide by 2 (always succeeds for positive)
+    Ok(val2 / 2)
+}
+
+@test
+fn test_error_propagation() {
+    // Successful chain: 10 -> positive(10) -> double(20) -> /2 = 10
+    let r1 = chain_operations(10);
+    assert(outcome_is_ok(r1));
+    assert_eq(outcome_value(r1), 10);
+
+    // Fails at step 1: negative input
+    let r2 = chain_operations(-5);
+    assert(outcome_is_fail(r2));
+    assert_eq(outcome_value(r2), -2);
+
+    // Fails at step 1: zero input
+    let r3 = chain_operations(0);
+    assert(outcome_is_fail(r3));
+    assert_eq(outcome_value(r3), -2);
+
+    // Fails at step 2: too large
+    let r4 = chain_operations(2000);
+    assert(outcome_is_fail(r4));
+    assert_eq(outcome_value(r4), -3);
+
+    // Edge case: exactly 1000
+    let r5 = chain_operations(1000);
+    assert(outcome_is_ok(r5));
+    assert_eq(outcome_value(r5), 1000);  // 1000 * 2 / 2 = 1000
+
+    // Small positive value
+    let r6 = chain_operations(1);
+    assert(outcome_is_ok(r6));
+    assert_eq(outcome_value(r6), 1);  // 1 * 2 / 2 = 1
+
+    print("  test_error_propagation: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_option_some_none();
+    test_option_map();
+    test_option_unwrap_or();
+    test_result_ok_err();
+    test_error_propagation();
+    print("[OK] 008_error_patterns");
+    0
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, union, variant, error
+// @description: Test detection of empty variant between pipes
+// @expected-error: E048
+
+// Missing variant between pipes
+type Result is Ok(Int) | | Err(Text);

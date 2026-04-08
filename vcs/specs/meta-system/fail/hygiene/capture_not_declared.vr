@@ -1,0 +1,27 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, capture, declaration, error
+// @expected-error: M408
+// @description: Variable captured without explicit capture clause should fail with M408
+
+// =============================================================================
+// CAPTURE WITHOUT DECLARATION
+// =============================================================================
+// When using transparency features, variables must be explicitly declared
+// for capture. Using an undeclared capture variable should fail.
+
+// This macro uses @capture but doesn't declare 'z'
+@capture(x, y)  // Only x and y declared for capture
+meta fn partial_capture() -> TokenStream {
+    quote {
+        let sum = x + y + z;  // ERROR: z not declared in @capture - M408
+    }
+}
+
+fn main() {
+    let x = 10;
+    let y = 20;
+    let z = 30;  // This exists but wasn't declared for capture
+    @partial_capture();  // Fails with M408
+}

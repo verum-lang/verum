@@ -1,0 +1,270 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, bounds-elimination, loop-hoisting, optimization
+// @timeout: 5000
+// @description: Tests bounds check hoisting from inner loops to outer positions
+
+/// Loop hoisting for bounds check elimination.
+/// When array length is loop-invariant, bounds checks can be hoisted
+/// outside the loop or eliminated entirely.
+
+// =============================================================================
+// Basic loop hoisting
+// =============================================================================
+
+fn sum_with_hoisted_check(arr: [Int; 10]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    // Array length is loop-invariant
+    // Bounds check for arr[i] can be hoisted before loop
+    while i < 10 {
+        sum = sum + arr[i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn process_array_hoisted(arr: [Int; 100], factor: Int) -> [Int; 100] {
+    let mut result: [Int; 100] = [0; 100];
+    let mut i: Int = 0;
+    while i < 100 {
+        result[i] = arr[i] * factor;
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Nested loop hoisting
+// =============================================================================
+
+fn matrix_sum_hoisted(m: [[Int; 10]; 10]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 10 {
+        let mut j: Int = 0;
+        while j < 10 {
+            sum = sum + m[i][j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+fn matrix_multiply_hoisted(a: [[Int; 10]; 10], b: [[Int; 10]; 10]) -> [[Int; 10]; 10] {
+    let mut result: [[Int; 10]; 10] = [[0; 10]; 10];
+    let mut i: Int = 0;
+    while i < 10 {
+        let mut j: Int = 0;
+        while j < 10 {
+            let mut k: Int = 0;
+            while k < 10 {
+                result[i][j] = result[i][j] + a[i][k] * b[k][j];
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Loop-invariant array reference hoisting
+// =============================================================================
+
+fn loop_invariant_array(arr: [Int; 10], multipliers: [Int; 10]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 10 {
+        sum = sum + arr[i] * multipliers[i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn accumulate_from_invariant(source: [Int; 5], dest: &mut [Int; 5]) {
+    let mut i: Int = 0;
+    while i < 5 {
+        dest[i] = dest[i] + source[i];
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Conditional loop with hoisting
+// =============================================================================
+
+fn conditional_process(arr: [Int; 10], threshold: Int) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 10 {
+        if arr[i] > threshold {
+            sum = sum + arr[i];
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+// =============================================================================
+// Adjacent element access hoisting
+// =============================================================================
+
+fn pairwise_diff(arr: [Int; 10]) -> [Int; 9] {
+    let mut result: [Int; 9] = [0; 9];
+    let mut i: Int = 0;
+    while i < 9 {
+        result[i] = arr[i + 1] - arr[i];
+        i = i + 1;
+    }
+    result
+}
+
+fn sliding_average(arr: [Int; 10]) -> [Int; 8] {
+    let mut result: [Int; 8] = [0; 8];
+    let mut i: Int = 0;
+    while i < 8 {
+        result[i] = (arr[i] + arr[i + 1] + arr[i + 2]) / 3;
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Multiple array hoisting
+// =============================================================================
+
+fn vector_dot(a: [Float; 4], b: [Float; 4]) -> Float {
+    let mut sum: Float = 0.0;
+    let mut i: Int = 0;
+    while i < 4 {
+        sum = sum + a[i] * b[i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn vector_cross_2d(a: [Float; 2], b: [Float; 2]) -> Float {
+    a[0] * b[1] - a[1] * b[0]
+}
+
+fn triple_array_op(a: [Int; 5], b: [Int; 5], c: [Int; 5]) -> [Int; 5] {
+    let mut result: [Int; 5] = [0; 5];
+    let mut i: Int = 0;
+    while i < 5 {
+        result[i] = a[i] + b[i] * c[i];
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Struct field array hoisting
+// =============================================================================
+
+type Particle is {
+    position: [Float; 3],
+    velocity: [Float; 3],
+    mass: Float,
+};
+
+fn update_position(p: &mut Particle, dt: Float) {
+    let mut i: Int = 0;
+    while i < 3 {
+        p.position[i] = p.position[i] + p.velocity[i] * dt;
+        i = i + 1;
+    }
+}
+
+fn compute_kinetic_energy(p: Particle) -> Float {
+    let mut v_squared: Float = 0.0;
+    let mut i: Int = 0;
+    while i < 3 {
+        v_squared = v_squared + p.velocity[i] * p.velocity[i];
+        i = i + 1;
+    }
+    0.5 * p.mass * v_squared
+}
+
+// =============================================================================
+// Loop splitting for hoisting
+// =============================================================================
+
+fn process_halves(arr: [Int; 10]) -> (Int, Int) {
+    let mut first_half: Int = 0;
+    let mut second_half: Int = 0;
+
+    let mut i: Int = 0;
+    while i < 5 {
+        first_half = first_half + arr[i];
+        i = i + 1;
+    }
+
+    let mut j: Int = 5;
+    while j < 10 {
+        second_half = second_half + arr[j];
+        j = j + 1;
+    }
+
+    (first_half, second_half)
+}
+
+// =============================================================================
+// Loop unrolling with hoisting
+// =============================================================================
+
+fn sum_unrolled_4(arr: [Int; 8]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 2 {
+        let base = i * 4;
+        sum = sum + arr[base] + arr[base + 1] + arr[base + 2] + arr[base + 3];
+        i = i + 1;
+    }
+    sum
+}
+
+// =============================================================================
+// Main - validation
+// =============================================================================
+
+fn main() {
+    let arr10: [Int; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let arr5: [Int; 5] = [1, 2, 3, 4, 5];
+
+    // Basic hoisting
+    assert(sum_with_hoisted_check(arr10) == 55);
+
+    // Matrix operations
+    let m: [[Int; 10]; 10] = [[1; 10]; 10];
+    assert(matrix_sum_hoisted(m) == 100);
+
+    // Conditional
+    assert(conditional_process(arr10, 5) == 6 + 7 + 8 + 9 + 10);
+
+    // Pairwise
+    let diffs = pairwise_diff(arr10);
+    assert(diffs[0] == 1);  // 2-1
+    assert(diffs[8] == 1);  // 10-9
+
+    // Vector operations
+    let va: [Float; 4] = [1.0, 0.0, 0.0, 0.0];
+    let vb: [Float; 4] = [1.0, 0.0, 0.0, 0.0];
+    assert(vector_dot(va, vb) == 1.0);
+
+    // Triple array
+    let a5: [Int; 5] = [1, 2, 3, 4, 5];
+    let b5: [Int; 5] = [1, 1, 1, 1, 1];
+    let c5: [Int; 5] = [2, 2, 2, 2, 2];
+    let result = triple_array_op(a5, b5, c5);
+    assert(result[0] == 3);  // 1 + 1*2
+    assert(result[4] == 7);  // 5 + 1*2
+
+    // Split halves
+    let (first, second) = process_halves(arr10);
+    assert(first == 15);   // 1+2+3+4+5
+    assert(second == 40);  // 6+7+8+9+10
+}

@@ -1,0 +1,119 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, identifiers, invalid, negative
+
+// Invalid identifier lexing - these should fail
+
+// Starting with digit
+let 1var = 1
+let 42answer = 2
+let 0x_start = 3
+
+// Reserved keywords as identifiers
+let let = 1
+let fn = 2
+let if = 3
+let else = 4
+let match = 5
+let for = 6
+let while = 7
+let return = 8
+let true = 9
+let false = 10
+
+// Special characters in identifier
+let my-variable = 1
+let my.variable = 2
+let my@variable = 3
+let my#variable = 4
+let my$variable = 5
+let my%variable = 6
+let my^variable = 7
+let my&variable = 8
+let my*variable = 9
+
+// Operators as identifiers
+let + = 1
+let - = 2
+let * = 3
+let / = 4
+let = = 5
+let < = 6
+let > = 7
+
+// Empty identifier
+let = 1
+
+// Only digits
+let 12345 = 1
+
+// Only special characters
+let @#$ = 1
+
+// Spaces in identifier
+let my variable = 1
+let with spaces = 2
+
+// Newline in identifier
+let my
+variable = 1
+
+// Tab in identifier
+let my	variable = 1
+
+// Unicode control characters
+let my\x00variable = 1
+let my\x1Fvariable = 2
+
+// Quotes in identifier
+let my"variable = 1
+let my'variable = 2
+
+// Backslash in identifier
+let my\variable = 1
+
+// Parentheses in identifier
+let my(variable) = 1
+let my[variable] = 2
+let my{variable} = 3
+
+// Starting with special prefix that's not valid
+let `backtick` = 1
+let 'single = 2
+let "double = 3
+
+// Only underscores (might be valid as placeholder)
+// let __ = 1  // Could be valid in some languages
+
+// Unicode category violations (if strict)
+// Identifiers with symbols from wrong Unicode categories
+
+// Combining marks at start
+let combining = 1
+
+// Zero-width characters
+let hidden = 1
+
+// Right-to-left override
+let override = 1
+
+// Mathematical operators as names
+let integral = 1
+let sum_symbol = 2
+
+// Reserved future keywords (if any)
+let await = 1   // If not already a keyword
+let yield = 2   // If not already a keyword
+let async = 3   // If not already a keyword
+
+// Type keywords as variable names
+let Int = 1
+let Float = 2
+let Bool = 3
+let Text = 4
+
+// Module/package reserved names
+let self = 1
+let super = 2
+let cog = 3

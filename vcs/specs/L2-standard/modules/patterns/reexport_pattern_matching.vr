@@ -1,0 +1,160 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, patterns, re-exports, exhaustiveness
+// @description: Pattern matching on types imported from other modules
+
+// Module defining AST types
+module ast {
+    pub type Expr is
+        | IntLit(Int)
+        | FloatLit(Float)
+        | TextLit(Text)
+        | BoolLit(Bool)
+        | Var(Text)
+        | Binary { op: BinOp, lhs: Heap<Expr>, rhs: Heap<Expr> }
+        | Unary { op: UnaryOp, operand: Heap<Expr> };
+
+    pub type BinOp is Add | Sub | Mul | Div | Eq | Ne | Lt | Gt;
+
+    pub type UnaryOp is Neg | Not;
+
+    pub type Value is
+        | VInt(Int)
+        | VFloat(Float)
+        | VText(Text)
+        | VBool(Bool)
+        | VUnit;
+}
+
+// Interpreter module that imports and pattern matches on AST types
+module interpreter {
+    mount super.ast.{Expr, BinOp, UnaryOp, Value};
+
+    type Env is Map<Text, Value>;
+
+    // Pattern match on imported variant type
+    pub fn eval(env: &Env, expr: &Expr) -> Result<Value, Text> =
+        match expr {
+            &IntLit(n) => Ok(VInt(n)),
+            &FloatLit(f) => Ok(VFloat(f)),
+            &TextLit(s) => Ok(VText(s.clone())),
+            &BoolLit(b) => Ok(VBool(b)),
+            &Var(name) =>
+                // Return a placeholder - variable lookup simplified
+                Err(f"variable lookup not implemented: {name}"),
+            &Binary { op, lhs, rhs } => {
+                let l = eval(env, lhs)?;
+                let r = eval(env, rhs)?;
+                eval_binary(op, l, r)
+            },
+            &Unary { op: Neg, operand } =>
+                match eval(env, operand)? {
+                    VInt(n) => Ok(VInt(-n)),
+                    VFloat(f) => Ok(VFloat(-f)),
+                    _ => Err("negation requires numeric type")
+                },
+            &Unary { op: Not, operand } =>
+                match eval(env, operand)? {
+                    VBool(b) => Ok(VBool(!b)),
+                    _ => Err("not requires boolean type")
+                }
+        }
+
+    fn eval_binary(op: BinOp, l: Value, r: Value) -> Result<Value, Text> =
+        match (op, l, r) {
+            (Add, VInt(a), VInt(b)) => Ok(VInt(a + b)),
+            (Sub, VInt(a), VInt(b)) => Ok(VInt(a - b)),
+            (Mul, VInt(a), VInt(b)) => Ok(VInt(a * b)),
+            (Div, VInt(_, ), VInt(0)) => Err("division by zero"),
+            (Div, VInt(a), VInt(b)) => Ok(VInt(a / b)),
+            (Eq, VInt(a), VInt(b)) => Ok(VBool(a == b)),
+            (Ne, VInt(a), VInt(b)) => Ok(VBool(a != b)),
+            (Lt, VInt(a), VInt(b)) => Ok(VBool(a < b)),
+            (Gt, VInt(a), VInt(b)) => Ok(VBool(a > b)),
+            (Add, VFloat(a), VFloat(b)) => Ok(VFloat(a + b)),
+            (Sub, VFloat(a), VFloat(b)) => Ok(VFloat(a - b)),
+            (Mul, VFloat(a), VFloat(b)) => Ok(VFloat(a * b)),
+            (Add, VText(a), VText(b)) => Ok(VText(a + &b)),
+            _ => Err("type mismatch in binary operation")
+        }
+}
+
+// Pretty printer module also imports and pattern matches on same types
+module pretty_printer {
+    mount super.ast.{Expr, BinOp, UnaryOp};
+
+    pub fn print_op(op: BinOp) -> Text =
+        match op {
+            Add => "+",
+            Sub => "-",
+            Mul => "*",
+            Div => "/",
+            Eq => "==",
+            Ne => "!=",
+            Lt => "<",
+            Gt => ">"
+        }
+
+    pub fn print_unary_op(op: UnaryOp) -> Text =
+        match op {
+            Neg => "-",
+            Not => "!"
+        }
+
+    pub fn print_expr(e: &Expr) -> Text =
+        match e {
+            &IntLit(n) => f"{n}",
+            &FloatLit(f) => f"{f}",
+            &TextLit(s) => f"\"{s}\"",
+            &BoolLit(true) => "true",
+            &BoolLit(false) => "false",
+            &Var(name) => name.clone(),
+            &Binary { op, lhs, rhs } =>
+                f"({print_expr(lhs)} {print_op(op)} {print_expr(rhs)})",
+            &Unary { op, operand } =>
+                f"{print_unary_op(op)}{print_expr(operand)}"
+        }
+}
+
+// Helper module with convenience constructors
+module helpers {
+    mount super.ast.{Expr, BinOp};
+
+    pub fn int_expr(n: Int) -> Expr {
+        IntLit(n)
+    }
+
+    pub fn var_expr(name: Text) -> Expr {
+        Var(name)
+    }
+
+    pub fn add_expr(l: Expr, r: Expr) -> Expr {
+        Binary { op: Add, lhs: Heap(l), rhs: Heap(r) }
+    }
+}
+
+fn main() {
+    mount helpers.{int_expr, var_expr, add_expr};
+    mount ast.Value;
+    mount interpreter.eval;
+    mount pretty_printer.{print_expr, print_op};
+
+    // Create expression
+    let expr = add_expr(int_expr(10), int_expr(20));
+
+    // Evaluate
+    let env: Map<Text, Value> = Map.new();
+    let result = eval(&env, &expr);
+
+    // Pattern match on result
+    match result {
+        Ok(VInt(n)) => assert(n == 30),
+        Ok(_) => panic("expected integer"),
+        Err(e) => panic(f"evaluation error: {e}")
+    }
+
+    // Pretty print
+    let printed = print_expr(&expr);
+    assert(printed == "(10 + 20)");
+}

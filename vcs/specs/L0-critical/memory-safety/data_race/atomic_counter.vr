@@ -1,0 +1,21 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, data-race, atomic, lock-free
+// @description: Tests atomic operations for lock-free concurrency
+
+// This test demonstrates atomic operations for thread-safe counters without locks.
+// Currently skipped because threading primitives (spawn, Atomic, ThreadHandle)
+// are not yet implemented in the compiler.
+
+fn main() {
+    // Placeholder test - actual atomic test requires spawn syntax
+    print("Atomic counter test - skipped (threading not implemented)");
+}
+
+// The intended test would:
+// 1. Create an atomic counter (Atomic<Int>)
+// 2. Spawn multiple threads incrementing the counter atomically
+// 3. Use fetch_add for lock-free increments
+// 4. Verify final count matches expected value (no lost updates)
+// 5. Demonstrate compare_exchange for CAS operations

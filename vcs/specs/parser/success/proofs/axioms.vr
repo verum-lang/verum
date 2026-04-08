@@ -1,0 +1,312 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, axiom, corollary, verification
+// @description: Comprehensive test for axiom and corollary declaration parsing
+
+// ============================================================================
+// Basic Axiom Declarations
+// ============================================================================
+
+// Simple axiom (no proof required)
+axiom excluded_middle(p: Bool) -> Bool;
+
+// Axiom establishing fundamental property
+axiom identity_element(x: Int): x + 0 == x;
+
+// Axiom for equality
+axiom eq_reflexive<T: Eq>(x: T): x == x;
+
+// Axiom for negation
+axiom double_neg_elim(p: Bool): !!p == p;
+
+// ============================================================================
+// Axioms with Generic Parameters
+// ============================================================================
+
+// Generic axiom for equality symmetry
+axiom eq_symmetric<T: Eq>(x: T, y: T): x == y => y == x;
+
+// Generic axiom for transitivity
+axiom eq_transitive<T: Eq>(x: T, y: T, z: T): (x == y && y == z) => x == z;
+
+// Multiple generic constraints
+axiom ord_reflexive<T: Ord + Eq>(x: T): x <= x;
+
+// Axiom with higher-kinded type
+axiom functor_id<F: Functor, T>(fa: F<T>): fa.map(|x| x) == fa;
+
+// Axiom with multiple type parameters
+axiom pair_eq<A: Eq, B: Eq>(a1: A, b1: B, a2: A, b2: B):
+    (a1, b1) == (a2, b2) == (a1 == a2 && b1 == b2);
+
+// ============================================================================
+// Axioms with Return Types
+// ============================================================================
+
+// Axiom with explicit return type
+axiom choice<T>(p: fn(T) -> Bool) -> T
+    requires exists x: T . p(x);
+
+// Axiom returning proof type
+// NOTE: Dependent proof types with embedded expressions like Proof<p || !p>
+// are a future feature. Using simpler type parameter for now.
+axiom proof_of_em<P: Proposition>(p: P) -> Proof<P>;
+
+// Axiom with generic return
+axiom witness<T, P: fn(T) -> Bool>() -> T
+    requires exists x: T . P(x);
+
+// ============================================================================
+// Axioms with Requires Clauses
+// ============================================================================
+
+// Axiom with precondition
+axiom division_valid(a: Int, b: Int)
+    requires b != 0
+: a == (a / b) * b + a % b;
+
+// Multiple preconditions
+axiom modulo_range(a: Int, b: Int)
+    requires b > 0
+    requires a >= 0
+: a % b >= 0 && a % b < b;
+
+// Precondition with quantifier
+axiom array_axiom<T>(arr: List<T>, i: Int)
+    requires 0 <= i, i < arr.len()
+: arr.get(i) is Some;
+
+// Complex precondition
+axiom sqrt_exists(x: Float)
+    requires x >= 0.0
+: exists y: Float . y >= 0.0 && y * y == x;
+
+// ============================================================================
+// Mathematical Axioms
+// ============================================================================
+
+// Peano axioms for natural numbers
+axiom peano_zero(): 0 is Nat;
+
+axiom peano_succ(n: Nat): succ(n) is Nat;
+
+axiom peano_succ_ne_zero(n: Nat): succ(n) != 0;
+
+axiom peano_succ_injective(m: Nat, n: Nat): succ(m) == succ(n) => m == n;
+
+// Induction axiom schema
+axiom peano_induction<P: fn(Nat) -> Bool>(p: P)
+    requires p(0)
+    requires forall n: Nat . p(n) => p(succ(n))
+: forall n: Nat . p(n);
+
+// Field axioms
+axiom add_associative(a: Real, b: Real, c: Real): (a + b) + c == a + (b + c);
+
+axiom add_commutative(a: Real, b: Real): a + b == b + a;
+
+axiom add_identity(a: Real): a + 0.0 == a;
+
+axiom add_inverse(a: Real): a + (-a) == 0.0;
+
+axiom mul_associative(a: Real, b: Real, c: Real): (a * b) * c == a * (b * c);
+
+axiom mul_commutative(a: Real, b: Real): a * b == b * a;
+
+axiom mul_identity(a: Real): a * 1.0 == a;
+
+axiom mul_inverse(a: Real)
+    requires a != 0.0
+: a * (1.0 / a) == 1.0;
+
+axiom distributive(a: Real, b: Real, c: Real): a * (b + c) == a * b + a * c;
+
+// ============================================================================
+// Set Theory Axioms
+// ============================================================================
+
+// Extensionality
+axiom set_extensionality<T>(s1: Set<T>, s2: Set<T>):
+    (forall x: T . s1.contains(x) == s2.contains(x)) => s1 == s2;
+
+// Empty set
+axiom empty_set<T>(x: T): !Set.empty().contains(x);
+
+// Union
+axiom union_def<T>(s1: Set<T>, s2: Set<T>, x: T):
+    s1.union(s2).contains(x) == (s1.contains(x) || s2.contains(x));
+
+// Intersection
+axiom intersection_def<T>(s1: Set<T>, s2: Set<T>, x: T):
+    s1.intersection(s2).contains(x) == (s1.contains(x) && s2.contains(x));
+
+// Comprehension (restricted)
+axiom comprehension<T>(pred: fn(T) -> Bool, x: T):
+    Set.from_pred(pred).contains(x) == pred(x);
+
+// ============================================================================
+// Order Theory Axioms
+// ============================================================================
+
+// Total order axioms
+axiom ord_antisymmetric<T: Ord>(x: T, y: T): (x <= y && y <= x) => x == y;
+
+axiom ord_transitive<T: Ord>(x: T, y: T, z: T): (x <= y && y <= z) => x <= z;
+
+axiom ord_total<T: Ord>(x: T, y: T): x <= y || y <= x;
+
+// Strict order relationship
+axiom lt_from_le<T: Ord>(x: T, y: T): x < y == (x <= y && x != y);
+
+// ============================================================================
+// Type System Axioms
+// ============================================================================
+
+// Subtyping axioms
+// NOTE: The <: subtype operator is a future feature. Using predicate function syntax.
+axiom subtype_refl<T>(): subtype_of(T, T);
+
+axiom subtype_trans<A, B, C>()
+    requires subtype_of(A, B), subtype_of(B, C)
+: subtype_of(A, C);
+
+// Variance axioms
+axiom covariant_list<A, B>()
+    requires subtype_of(A, B)
+: subtype_of(List<A>, List<B>);
+
+// NOTE: Function type syntax in expressions requires special handling.
+// Using type parameter for function type representation.
+axiom contravariant_fn<A, B, R, FA, FB>()
+    requires subtype_of(B, A)
+    requires is_fn_type(FA, A, R)
+    requires is_fn_type(FB, B, R)
+: subtype_of(FA, FB);
+
+// ============================================================================
+// Corollary Declarations (as lemmas, since 'from' is not yet implemented)
+// ============================================================================
+
+// NOTE: The grammar defines corollary with 'from base_theorem' syntax,
+// but this is not yet implemented in the parser. Using lemma syntax instead.
+
+// Basic lemma (would be corollary from add_commutes)
+lemma add_zero_right(x: Int): x + 0 == 0 + x {
+    proof by simp
+}
+
+// Lemma with proposition
+lemma mul_zero(x: Int): x * 0 == 0 {
+    proof by ring
+}
+
+// Generic lemma
+lemma eq_sym<T: Eq>(x: T, y: T)
+    requires x == y
+    ensures y == x
+{
+    proof by exact eq_symmetric(x, y)
+}
+
+// Lemma with requires clause
+lemma div_self(x: Int)
+    requires x != 0
+    ensures x / x == 1
+{
+    proof {
+        have h: x == (x / x) * x + x % x by exact division_valid(x, x);
+        show x / x == 1 by omega;
+    }
+}
+
+// Lemma with return type
+lemma neg_neg(x: Int) -> Int
+    ensures result == x
+{
+    proof by simp
+}
+
+// Complex lemma with structured proof
+lemma transitivity_chain<T: Ord>(a: T, b: T, c: T, d: T)
+    requires a <= b, b <= c, c <= d
+    ensures a <= d
+{
+    proof {
+        have h1: a <= b by assumption;
+        have h2: b <= c by assumption;
+        have h3: c <= d by assumption;
+        have h4: a <= c by apply ord_transitive(a, b, c);
+        show a <= d by apply ord_transitive(a, c, d);
+    }
+}
+
+// Lemma from multiple axioms
+lemma field_basics(a: Real, b: Real)
+    ensures (a + b) * 2.0 == 2.0 * (b + a)
+{
+    proof {
+        have h1: a + b == b + a by exact add_commutative(a, b);
+        have h2: a * b == b * a by exact mul_commutative(a, b);
+        show (a + b) * 2.0 == 2.0 * (b + a) by ring;
+    }
+}
+
+// Simple lemma
+lemma simple_lemma(x: Int): x == x {
+    proof by trivial
+}
+
+// Lemma with generic parameters
+lemma list_ext<T: Eq>(l1: List<T>, l2: List<T>)
+    requires l1.len() == l2.len()
+    requires forall i: Int . 0 <= i && i < l1.len() => l1[i] == l2[i]
+    ensures l1 == l2
+{
+    proof by auto
+}
+
+// ============================================================================
+// Domain-Specific Axioms
+// ============================================================================
+
+// Memory model axioms
+axiom heap_disjoint(p1: Ptr<Int>, p2: Ptr<Int>)
+    requires p1 != p2
+: read(p1) != addr_of(p2);
+
+// Concurrency axioms
+// NOTE: The original axiom used `;` in the proposition which is ambiguous.
+// Using a block expression to group the statement sequence.
+axiom atomic_read_write<T: Sync>(loc: Atomic<T>, val: T):
+    { loc.store(val); loc.load() } == val;
+
+// Float axioms (IEEE 754)
+axiom float_nan_ne(x: Float): x is NaN => x != x;
+
+axiom float_inf_order(x: Float): x is not Inf => -Inf < x && x < Inf;
+
+// ============================================================================
+// Axiom Schemas (Higher-Order)
+// ============================================================================
+
+// Comprehension schema
+axiom comprehension_schema<T>(phi: fn(T) -> Bool):
+    exists s: Set<T> . forall x: T . s.contains(x) == phi(x);
+
+// Replacement schema
+axiom replacement_schema<A, B>(s: Set<A>, f: fn(A) -> B):
+    exists t: Set<B> . forall y: B . t.contains(y) == (exists x: A . s.contains(x) && f(x) == y);
+
+// Induction schema for custom types
+// NOTE: Dependent proof types with expressions like Proof<P(T)> are a future feature.
+// The pattern below shows the simplified version without embedded proof types.
+// NOTE: `in` is not a binary operator in Verum. Use .contains() for membership testing.
+axiom custom_induction<T, P: fn(T) -> Bool>(
+    base_cases: List<T>,
+    step: fn(T) -> T
+)
+    requires forall bc: T . base_cases.contains(bc) => P(bc)
+    requires forall t: T . P(t) => P(step(t))
+: forall t: T . P(t);

@@ -1,0 +1,1371 @@
+// =============================================================================
+// data_test.vr - Tests for Data type (JSON-like dynamic data)
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: data, json, dynamic, base, core
+// @description: Comprehensive tests for Data type: constructors, predicates,
+//               accessors, object/array operations, and conversions
+// =============================================================================
+
+mount core.base.data.{Data, DataError, DataBuilder, parse_json};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+
+// =============================================================================
+// SECTION 1: Constructors
+// =============================================================================
+
+@test
+fn test_null_constructor() {
+    let d = Data.null();
+    assert(d.is_null());
+}
+
+@test
+fn test_from_bool_true() {
+    let d = Data.from_bool(true);
+    assert(d.is_bool());
+    assert_eq(d.as_bool().unwrap(), true);
+}
+
+@test
+fn test_from_bool_false() {
+    let d = Data.from_bool(false);
+    assert(d.is_bool());
+    assert_eq(d.as_bool().unwrap(), false);
+}
+
+@test
+fn test_from_int() {
+    let d = Data.from_int(42);
+    assert(d.is_int());
+    assert_eq(d.as_int().unwrap(), 42);
+}
+
+@test
+fn test_from_int_negative() {
+    let d = Data.from_int(-100);
+    assert(d.is_int());
+    assert_eq(d.as_int().unwrap(), -100);
+}
+
+@test
+fn test_from_float() {
+    let d = Data.from_float(3.14);
+    assert(d.is_float());
+    let f: Float = d.as_float().unwrap();
+    assert(f > 3.13 && f < 3.15);
+}
+
+@test
+fn test_from_text() {
+    let d = Data.from_text("hello");
+    assert(d.is_text());
+    assert_eq(d.as_text().unwrap(), "hello");
+}
+
+@test
+fn test_from_array() {
+    let arr: List<Data> = [Data.from_int(1), Data.from_int(2), Data.from_int(3)];
+    let d = Data.from_array(arr);
+    assert(d.is_array());
+}
+
+@test
+fn test_from_object() {
+    let mut obj: Map<Text, Data> = Map.new();
+    obj.insert("key", Data.from_int(42));
+    let d = Data.from_object(obj);
+    assert(d.is_object());
+}
+
+@test
+fn test_empty_object() {
+    let d = Data.empty_object();
+    assert(d.is_object());
+    assert_eq(d.len(), 0);
+}
+
+@test
+fn test_empty_array() {
+    let d = Data.empty_array();
+    assert(d.is_array());
+    assert_eq(d.len(), 0);
+}
+
+// =============================================================================
+// SECTION 2: Type Predicates
+// =============================================================================
+
+@test
+fn test_is_null() {
+    let null_data = Data.null();
+    let int_data = Data.from_int(42);
+    assert(null_data.is_null());
+    assert(!int_data.is_null());
+}
+
+@test
+fn test_is_bool() {
+    let bool_data = Data.from_bool(true);
+    let int_data = Data.from_int(42);
+    assert(bool_data.is_bool());
+    assert(!int_data.is_bool());
+}
+
+@test
+fn test_is_int() {
+    let int_data = Data.from_int(42);
+    let float_data = Data.from_float(3.14);
+    assert(int_data.is_int());
+    assert(!float_data.is_int());
+}
+
+@test
+fn test_is_float() {
+    let float_data = Data.from_float(3.14);
+    let int_data = Data.from_int(42);
+    assert(float_data.is_float());
+    assert(!int_data.is_float());
+}
+
+@test
+fn test_is_number() {
+    let int_data = Data.from_int(42);
+    let float_data = Data.from_float(3.14);
+    let text_data = Data.from_text("hello");
+    assert(int_data.is_number());
+    assert(float_data.is_number());
+    assert(!text_data.is_number());
+}
+
+@test
+fn test_is_text() {
+    let text_data = Data.from_text("hello");
+    let int_data = Data.from_int(42);
+    assert(text_data.is_text());
+    assert(!int_data.is_text());
+}
+
+@test
+fn test_is_array() {
+    let arr_data = Data.empty_array();
+    let obj_data = Data.empty_object();
+    assert(arr_data.is_array());
+    assert(!obj_data.is_array());
+}
+
+@test
+fn test_is_object() {
+    let obj_data = Data.empty_object();
+    let arr_data = Data.empty_array();
+    assert(obj_data.is_object());
+    assert(!arr_data.is_object());
+}
+
+// =============================================================================
+// SECTION 3: Safe Accessors
+// =============================================================================
+
+@test
+fn test_as_bool_valid() {
+    let d = Data.from_bool(true);
+    let result = d.as_bool();
+    assert(result.is_some());
+    assert_eq(result.unwrap(), true);
+}
+
+@test
+fn test_as_bool_invalid() {
+    let d = Data.from_int(42);
+    let result = d.as_bool();
+    assert(result.is_none());
+}
+
+@test
+fn test_as_int_valid() {
+    let d = Data.from_int(42);
+    let result = d.as_int();
+    assert(result.is_some());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_as_int_invalid() {
+    let d = Data.from_text("hello");
+    let result = d.as_int();
+    assert(result.is_none());
+}
+
+@test
+fn test_as_float_from_float() {
+    let d = Data.from_float(3.14);
+    let result = d.as_float();
+    assert(result.is_some());
+}
+
+@test
+fn test_as_float_from_int_coercion() {
+    // Int coerces to Float
+    let d = Data.from_int(42);
+    let result = d.as_float();
+    assert(result.is_some());
+    let f: Float = result.unwrap();
+    assert_eq(f, 42.0);
+}
+
+@test
+fn test_as_float_invalid() {
+    let d = Data.from_text("hello");
+    let result = d.as_float();
+    assert(result.is_none());
+}
+
+@test
+fn test_as_text_valid() {
+    let d = Data.from_text("hello");
+    let result = d.as_text();
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "hello");
+}
+
+@test
+fn test_as_text_invalid() {
+    let d = Data.from_int(42);
+    let result = d.as_text();
+    assert(result.is_none());
+}
+
+@test
+fn test_as_array_valid() {
+    let d = Data.empty_array();
+    let result = d.as_array();
+    assert(result.is_some());
+}
+
+@test
+fn test_as_array_invalid() {
+    let d = Data.empty_object();
+    let result = d.as_array();
+    assert(result.is_none());
+}
+
+@test
+fn test_as_object_valid() {
+    let d = Data.empty_object();
+    let result = d.as_object();
+    assert(result.is_some());
+}
+
+@test
+fn test_as_object_invalid() {
+    let d = Data.empty_array();
+    let result = d.as_object();
+    assert(result.is_none());
+}
+
+// =============================================================================
+// SECTION 4: Object Field Access
+// =============================================================================
+
+@test
+fn test_object_get_existing_key() {
+    let mut obj = Data.empty_object();
+    let _ = obj.set("name", Data.from_text("Alice"));
+    let result = obj.get("name");
+    assert(result.is_some());
+    assert_eq(result.unwrap().as_text().unwrap(), "Alice");
+}
+
+@test
+fn test_object_get_missing_key() {
+    let obj = Data.empty_object();
+    let result = obj.get("nonexistent");
+    assert(result.is_none());
+}
+
+@test
+fn test_object_get_on_non_object() {
+    let arr = Data.empty_array();
+    let result = arr.get("key");
+    assert(result.is_none());
+}
+
+@test
+fn test_object_contains_key() {
+    let mut obj = Data.empty_object();
+    let _ = obj.set("key", Data.from_int(42));
+    assert(obj.contains_key("key"));
+    assert(!obj.contains_key("other"));
+}
+
+@test
+fn test_object_set() {
+    let mut obj = Data.empty_object();
+    let result = obj.set("value", Data.from_int(100));
+    assert(result.is_ok());
+    assert(obj.contains_key("value"));
+}
+
+@test
+fn test_object_set_on_non_object() {
+    let mut arr = Data.empty_array();
+    let result = arr.set("key", Data.from_int(42));
+    assert(result.is_err());
+}
+
+@test
+fn test_object_remove() {
+    let mut obj = Data.empty_object();
+    let _ = obj.set("key", Data.from_int(42));
+    let removed = obj.remove("key");
+    assert(removed.is_some());
+    assert(!obj.contains_key("key"));
+}
+
+@test
+fn test_object_remove_missing() {
+    let mut obj = Data.empty_object();
+    let removed = obj.remove("nonexistent");
+    assert(removed.is_none());
+}
+
+// =============================================================================
+// SECTION 5: Array Index Access
+// =============================================================================
+
+@test
+fn test_array_at_valid_index() {
+    let arr: List<Data> = [Data.from_int(10), Data.from_int(20), Data.from_int(30)];
+    let d = Data.from_array(arr);
+    let result = d.at(1);
+    assert(result.is_some());
+    assert_eq(result.unwrap().as_int().unwrap(), 20);
+}
+
+@test
+fn test_array_at_first_index() {
+    let arr: List<Data> = [Data.from_text("first")];
+    let d = Data.from_array(arr);
+    let result = d.at(0);
+    assert(result.is_some());
+    assert_eq(result.unwrap().as_text().unwrap(), "first");
+}
+
+@test
+fn test_array_at_negative_index() {
+    let arr: List<Data> = [Data.from_int(1), Data.from_int(2)];
+    let d = Data.from_array(arr);
+    let result = d.at(-1);
+    assert(result.is_none());
+}
+
+@test
+fn test_array_at_out_of_bounds() {
+    let arr: List<Data> = [Data.from_int(1), Data.from_int(2)];
+    let d = Data.from_array(arr);
+    let result = d.at(10);
+    assert(result.is_none());
+}
+
+@test
+fn test_array_at_on_non_array() {
+    let obj = Data.empty_object();
+    let result = obj.at(0);
+    assert(result.is_none());
+}
+
+@test
+fn test_array_push() {
+    let mut d = Data.empty_array();
+    let result = d.push(Data.from_int(42));
+    assert(result.is_ok());
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_array_push_on_non_array() {
+    let mut obj = Data.empty_object();
+    let result = obj.push(Data.from_int(42));
+    assert(result.is_err());
+}
+
+@test
+fn test_array_pop() {
+    let mut d = Data.empty_array();
+    let _ = d.push(Data.from_int(1));
+    let _ = d.push(Data.from_int(2));
+    let popped = d.pop();
+    assert(popped.is_some());
+    assert_eq(popped.unwrap().as_int().unwrap(), 2);
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_array_pop_empty() {
+    let mut d = Data.empty_array();
+    let popped = d.pop();
+    assert(popped.is_none());
+}
+
+// =============================================================================
+// SECTION 6: Length and Empty
+// =============================================================================
+
+@test
+fn test_len_array() {
+    let arr: List<Data> = [Data.from_int(1), Data.from_int(2), Data.from_int(3)];
+    let d = Data.from_array(arr);
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_len_object() {
+    let mut obj = Data.empty_object();
+    let _ = obj.set("a", Data.from_int(1));
+    let _ = obj.set("b", Data.from_int(2));
+    assert_eq(obj.len(), 2);
+}
+
+@test
+fn test_len_text() {
+    let d = Data.from_text("hello");
+    assert_eq(d.len(), 5);
+}
+
+@test
+fn test_len_primitive() {
+    let d = Data.from_int(42);
+    assert_eq(d.len(), 0);
+}
+
+@test
+fn test_is_empty_true() {
+    let d = Data.empty_array();
+    assert(d.is_empty());
+}
+
+@test
+fn test_is_empty_false() {
+    let mut d = Data.empty_array();
+    let _ = d.push(Data.from_int(1));
+    assert(!d.is_empty());
+}
+
+// =============================================================================
+// SECTION 7: Type Introspection
+// =============================================================================
+
+@test
+fn test_type_name_null() {
+    let d = Data.null();
+    assert_eq(d.type_name(), "Null");
+}
+
+@test
+fn test_type_name_bool() {
+    let d = Data.from_bool(true);
+    assert_eq(d.type_name(), "Bool");
+}
+
+@test
+fn test_type_name_int() {
+    let d = Data.from_int(42);
+    assert_eq(d.type_name(), "Int");
+}
+
+@test
+fn test_type_name_float() {
+    let d = Data.from_float(3.14);
+    assert_eq(d.type_name(), "Float");
+}
+
+@test
+fn test_type_name_text() {
+    let d = Data.from_text("hello");
+    assert_eq(d.type_name(), "Text");
+}
+
+@test
+fn test_type_name_array() {
+    let d = Data.empty_array();
+    assert_eq(d.type_name(), "Array");
+}
+
+@test
+fn test_type_name_object() {
+    let d = Data.empty_object();
+    assert_eq(d.type_name(), "Object");
+}
+
+// =============================================================================
+// SECTION 8: Conversion
+// =============================================================================
+
+@test
+fn test_to_json_null() {
+    let d = Data.null();
+    assert_eq(d.to_json(), "null");
+}
+
+@test
+fn test_to_json_bool_true() {
+    let d = Data.from_bool(true);
+    assert_eq(d.to_json(), "true");
+}
+
+@test
+fn test_to_json_bool_false() {
+    let d = Data.from_bool(false);
+    assert_eq(d.to_json(), "false");
+}
+
+@test
+fn test_to_json_int() {
+    let d = Data.from_int(42);
+    assert_eq(d.to_json(), "42");
+}
+
+@test
+fn test_to_json_text() {
+    let d = Data.from_text("hello");
+    assert_eq(d.to_json(), "\"hello\"");
+}
+
+@test
+fn test_to_json_empty_array() {
+    let d = Data.empty_array();
+    assert_eq(d.to_json(), "[]");
+}
+
+@test
+fn test_to_json_empty_object() {
+    let d = Data.empty_object();
+    assert_eq(d.to_json(), "{}");
+}
+
+@test
+fn test_to_number_from_int() {
+    let d = Data.from_int(42);
+    let result = d.to_number();
+    assert(result.is_some());
+    assert_eq(result.unwrap(), 42.0);
+}
+
+@test
+fn test_to_number_from_float() {
+    let d = Data.from_float(3.14);
+    let result = d.to_number();
+    assert(result.is_some());
+}
+
+@test
+fn test_to_number_from_text() {
+    let d = Data.from_text("not a number");
+    let result = d.to_number();
+    // May or may not parse depending on implementation
+}
+
+@test
+fn test_to_number_from_null() {
+    let d = Data.null();
+    let result = d.to_number();
+    assert(result.is_none());
+}
+
+@test
+fn test_to_string_null() {
+    let d = Data.null();
+    assert_eq(d.to_string(), "null");
+}
+
+@test
+fn test_to_string_bool() {
+    let d = Data.from_bool(true);
+    assert_eq(d.to_string(), "true");
+}
+
+@test
+fn test_to_string_int() {
+    let d = Data.from_int(42);
+    assert_eq(d.to_string(), "42");
+}
+
+@test
+fn test_to_string_text() {
+    let d = Data.from_text("hello");
+    assert_eq(d.to_string(), "hello");
+}
+
+// =============================================================================
+// SECTION 9: Protocol Implementations
+// =============================================================================
+
+@test
+fn test_clone_null() {
+    let d = Data.null();
+    let cloned = d.clone();
+    assert(cloned.is_null());
+}
+
+@test
+fn test_clone_int() {
+    let d = Data.from_int(42);
+    let cloned = d.clone();
+    assert_eq(cloned.as_int().unwrap(), 42);
+}
+
+@test
+fn test_clone_text() {
+    let d = Data.from_text("hello");
+    let cloned = d.clone();
+    assert_eq(cloned.as_text().unwrap(), "hello");
+}
+
+@test
+fn test_clone_array() {
+    let mut d = Data.empty_array();
+    let _ = d.push(Data.from_int(1));
+    let cloned = d.clone();
+    assert(cloned.is_array());
+    assert_eq(cloned.len(), 1);
+}
+
+@test
+fn test_eq_null() {
+    let a = Data.null();
+    let b = Data.null();
+    assert(a == b);
+}
+
+@test
+fn test_eq_bool() {
+    let a = Data.from_bool(true);
+    let b = Data.from_bool(true);
+    let c = Data.from_bool(false);
+    assert(a == b);
+    assert(a != c);
+}
+
+@test
+fn test_eq_int() {
+    let a = Data.from_int(42);
+    let b = Data.from_int(42);
+    let c = Data.from_int(43);
+    assert(a == b);
+    assert(a != c);
+}
+
+@test
+fn test_eq_text() {
+    let a = Data.from_text("hello");
+    let b = Data.from_text("hello");
+    let c = Data.from_text("world");
+    assert(a == b);
+    assert(a != c);
+}
+
+@test
+fn test_eq_different_types() {
+    let int_data = Data.from_int(42);
+    let text_data = Data.from_text("42");
+    assert(int_data != text_data);
+}
+
+@test
+fn test_default() {
+    let d: Data = Data.default();
+    assert(d.is_null());
+}
+
+// =============================================================================
+// SECTION 10: DataBuilder
+// =============================================================================
+
+@test
+fn test_builder_new_object() {
+    let data = DataBuilder.new()
+        .set("name", Data.from_text("Alice"))
+        .set("age", Data.from_int(30))
+        .build();
+    assert(data.is_object());
+    assert(data.contains_key("name"));
+    assert(data.contains_key("age"));
+}
+
+@test
+fn test_builder_new_array() {
+    let data = DataBuilder.new_array()
+        .push(Data.from_int(1))
+        .push(Data.from_int(2))
+        .push(Data.from_int(3))
+        .build();
+    assert(data.is_array());
+    assert_eq(data.len(), 3);
+}
+
+@test
+fn test_builder_empty_object() {
+    let data = DataBuilder.new().build();
+    assert(data.is_object());
+    assert(data.is_empty());
+}
+
+@test
+fn test_builder_empty_array() {
+    let data = DataBuilder.new_array().build();
+    assert(data.is_array());
+    assert(data.is_empty());
+}
+
+// =============================================================================
+// SECTION 11: DataError
+// =============================================================================
+
+@test
+fn test_data_error_type_mismatch() {
+    let mut arr = Data.empty_array();
+    let result = arr.set("key", Data.from_int(42));
+    assert(result.is_err());
+}
+
+@test
+fn test_data_error_on_push_non_array() {
+    let mut obj = Data.empty_object();
+    let result = obj.push(Data.from_int(1));
+    assert(result.is_err());
+}
+
+// =============================================================================
+// SECTION 12: Nested Data Structures
+// =============================================================================
+
+@test
+fn test_nested_object() {
+    let inner = DataBuilder.new()
+        .set("city", Data.from_text("NYC"))
+        .build();
+    let outer = DataBuilder.new()
+        .set("user", Data.from_text("Alice"))
+        .set("address", inner)
+        .build();
+
+    assert(outer.is_object());
+    assert(outer.contains_key("address"));
+    let addr = outer.get("address").unwrap();
+    assert(addr.is_object());
+    assert(addr.contains_key("city"));
+}
+
+@test
+fn test_nested_array() {
+    let row1 = DataBuilder.new_array()
+        .push(Data.from_int(1))
+        .push(Data.from_int(2))
+        .build();
+    let row2 = DataBuilder.new_array()
+        .push(Data.from_int(3))
+        .push(Data.from_int(4))
+        .build();
+    let matrix = DataBuilder.new_array()
+        .push(row1)
+        .push(row2)
+        .build();
+
+    assert(matrix.is_array());
+    assert_eq(matrix.len(), 2);
+    let first_row = matrix.at(0).unwrap();
+    assert(first_row.is_array());
+    assert_eq(first_row.len(), 2);
+}
+
+@test
+fn test_mixed_nested() {
+    let user = DataBuilder.new()
+        .set("name", Data.from_text("Alice"))
+        .set("scores", DataBuilder.new_array()
+            .push(Data.from_int(95))
+            .push(Data.from_int(87))
+            .push(Data.from_int(92))
+            .build())
+        .set("active", Data.from_bool(true))
+        .build();
+
+    assert(user.is_object());
+    assert_eq(user.get("name").unwrap().as_text().unwrap(), "Alice");
+    assert(user.get("scores").unwrap().is_array());
+    assert_eq(user.get("active").unwrap().as_bool().unwrap(), true);
+}
+
+// =============================================================================
+// SECTION 13: Data::path() - Dot Notation Navigation
+// =============================================================================
+
+@test
+fn test_path_simple() {
+    let user = DataBuilder.new()
+        .set("name", Data.from_text("Alice"))
+        .set("age", Data.from_int(30))
+        .build();
+
+    let name = user.path("name");
+    assert(name.is_some());
+    assert_eq(name.unwrap().as_text().unwrap(), "Alice");
+}
+
+@test
+fn test_path_nested() {
+    let address = DataBuilder.new()
+        .set("city", Data.from_text("NYC"))
+        .set("zip", Data.from_text("10001"))
+        .build();
+    let user = DataBuilder.new()
+        .set("name", Data.from_text("Alice"))
+        .set("address", address)
+        .build();
+
+    let city = user.path("address.city");
+    assert(city.is_some());
+    assert_eq(city.unwrap().as_text().unwrap(), "NYC");
+}
+
+@test
+fn test_path_deeply_nested() {
+    let inner = DataBuilder.new()
+        .set("value", Data.from_int(42))
+        .build();
+    let mid = DataBuilder.new()
+        .set("inner", inner)
+        .build();
+    let outer = DataBuilder.new()
+        .set("mid", mid)
+        .build();
+
+    let val = outer.path("mid.inner.value");
+    assert(val.is_some());
+    assert_eq(val.unwrap().as_int().unwrap(), 42);
+}
+
+@test
+fn test_path_not_found() {
+    let user = DataBuilder.new()
+        .set("name", Data.from_text("Alice"))
+        .build();
+
+    let result = user.path("address.city");
+    assert(result.is_none());
+}
+
+@test
+fn test_path_single_segment() {
+    let d = DataBuilder.new()
+        .set("key", Data.from_int(100))
+        .build();
+
+    let val = d.path("key");
+    assert(val.is_some());
+    assert_eq(val.unwrap().as_int().unwrap(), 100);
+}
+
+@test
+fn test_path_array_index() {
+    let arr = DataBuilder.new_array()
+        .push(Data.from_int(10))
+        .push(Data.from_int(20))
+        .push(Data.from_int(30))
+        .build();
+    let wrapper = DataBuilder.new()
+        .set("items", arr)
+        .build();
+
+    let second = wrapper.path("items.1");
+    assert(second.is_some());
+    assert_eq(second.unwrap().as_int().unwrap(), 20);
+}
+
+@test
+fn test_path_missing_key() {
+    let d = DataBuilder.new()
+        .set("a", Data.from_int(1))
+        .build();
+
+    assert(d.path("b").is_none());
+    assert(d.path("a.b").is_none());
+}
+
+// =============================================================================
+// Section 14: JSON Parsing Tests
+// =============================================================================
+
+@test
+fn test_parse_json_null() {
+    let data = parse_json("null".into());
+    assert(data.is_ok());
+    assert(data.unwrap().is_null());
+}
+
+@test
+fn test_parse_json_true() {
+    let data = parse_json("true".into());
+    assert(data.is_ok());
+    assert_eq(data.unwrap().as_bool().unwrap(), true);
+}
+
+@test
+fn test_parse_json_false() {
+    let data = parse_json("false".into());
+    assert(data.is_ok());
+    assert_eq(data.unwrap().as_bool().unwrap(), false);
+}
+
+@test
+fn test_parse_json_integer() {
+    let data = parse_json("42".into());
+    assert(data.is_ok());
+    assert_eq(data.unwrap().as_int().unwrap(), 42);
+}
+
+@test
+fn test_parse_json_negative_integer() {
+    let data = parse_json("-17".into());
+    assert(data.is_ok());
+    assert_eq(data.unwrap().as_int().unwrap(), -17);
+}
+
+@test
+fn test_parse_json_float() {
+    let data = parse_json("3.14".into());
+    assert(data.is_ok());
+    let val = data.unwrap().as_float().unwrap();
+    assert(val > 3.13 && val < 3.15);
+}
+
+@test
+fn test_parse_json_string() {
+    let data = parse_json("\"hello world\"".into());
+    assert(data.is_ok());
+    assert_eq(data.unwrap().as_text().unwrap(), "hello world");
+}
+
+@test
+fn test_parse_json_string_escapes() {
+    let data = parse_json("\"line1\\nline2\"".into());
+    assert(data.is_ok());
+    let text = data.unwrap().as_text().unwrap();
+    assert(text.contains("\n"));
+}
+
+@test
+fn test_parse_json_empty_array() {
+    let data = parse_json("[]".into());
+    assert(data.is_ok());
+    assert(data.unwrap().is_array());
+}
+
+@test
+fn test_parse_json_array() {
+    let data = parse_json("[1, 2, 3]".into());
+    assert(data.is_ok());
+    let arr = data.unwrap();
+    assert(arr.is_array());
+    assert_eq(arr.len(), 3);
+    assert_eq(arr.at(0).unwrap().as_int().unwrap(), 1);
+    assert_eq(arr.at(2).unwrap().as_int().unwrap(), 3);
+}
+
+@test
+fn test_parse_json_empty_object() {
+    let data = parse_json("{}".into());
+    assert(data.is_ok());
+    assert(data.unwrap().is_object());
+}
+
+@test
+fn test_parse_json_object() {
+    let data = parse_json("{\"name\": \"Alice\", \"age\": 30}".into());
+    assert(data.is_ok());
+    let obj = data.unwrap();
+    assert(obj.is_object());
+    assert_eq(obj.get("name").unwrap().as_text().unwrap(), "Alice");
+    assert_eq(obj.get("age").unwrap().as_int().unwrap(), 30);
+}
+
+@test
+fn test_parse_json_nested_object() {
+    let json = "{\"user\": {\"name\": \"Bob\", \"active\": true}}";
+    let data = parse_json(json.into());
+    assert(data.is_ok());
+    let obj = data.unwrap();
+    let user = obj.get("user").unwrap();
+    assert(user.is_object());
+    assert_eq(user.get("name").unwrap().as_text().unwrap(), "Bob");
+    assert_eq(user.get("active").unwrap().as_bool().unwrap(), true);
+}
+
+@test
+fn test_parse_json_mixed_array() {
+    let data = parse_json("[1, \"two\", true, null]".into());
+    assert(data.is_ok());
+    let arr = data.unwrap();
+    assert_eq(arr.len(), 4);
+    assert_eq(arr.at(0).unwrap().as_int().unwrap(), 1);
+    assert_eq(arr.at(1).unwrap().as_text().unwrap(), "two");
+    assert_eq(arr.at(2).unwrap().as_bool().unwrap(), true);
+    assert(arr.at(3).unwrap().is_null());
+}
+
+@test
+fn test_parse_json_whitespace() {
+    let data = parse_json("  {  \"key\"  :  \"value\"  }  ".into());
+    assert(data.is_ok());
+    assert_eq(data.unwrap().get("key").unwrap().as_text().unwrap(), "value");
+}
+
+@test
+fn test_parse_json_error_empty() {
+    let data = parse_json("".into());
+    assert(data.is_err());
+}
+
+@test
+fn test_parse_json_error_invalid() {
+    let data = parse_json("invalid".into());
+    assert(data.is_err());
+}
+
+@test
+fn test_parse_json_error_trailing() {
+    let data = parse_json("42 extra".into());
+    assert(data.is_err());
+}
+
+// =============================================================================
+// Section 15: Pretty JSON and Merge Tests
+// =============================================================================
+
+@test
+fn test_to_json_pretty_simple() {
+    let d = DataBuilder.new()
+        .set("name", Data.from_text("Alice"))
+        .set("age", Data.from_int(30))
+        .build();
+    let pretty = d.to_json_pretty();
+    assert(pretty.contains("\"name\""));
+    assert(pretty.contains("\"Alice\""));
+    assert(pretty.contains("\n"));
+}
+
+@test
+fn test_to_json_pretty_empty_object() {
+    let d = Data.empty_object();
+    assert_eq(d.to_json_pretty(), "{}");
+}
+
+@test
+fn test_to_json_pretty_empty_array() {
+    let d = Data.from_array(List.new());
+    assert_eq(d.to_json_pretty(), "[]");
+}
+
+@test
+fn test_to_json_pretty_primitives() {
+    assert_eq(Data.null().to_json_pretty(), "null");
+    assert_eq(Data.from_bool(true).to_json_pretty(), "true");
+    assert_eq(Data.from_int(42).to_json_pretty(), "42");
+}
+
+@test
+fn test_merge_objects() {
+    let a = DataBuilder.new()
+        .set("x", Data.from_int(1))
+        .set("y", Data.from_int(2))
+        .build();
+    let b = DataBuilder.new()
+        .set("y", Data.from_int(99))
+        .set("z", Data.from_int(3))
+        .build();
+    let merged = a.merge(&b);
+    assert_eq(merged.get("x").unwrap().as_int().unwrap(), 1);
+    assert_eq(merged.get("y").unwrap().as_int().unwrap(), 99);  // overwritten
+    assert_eq(merged.get("z").unwrap().as_int().unwrap(), 3);
+}
+
+@test
+fn test_merge_non_objects() {
+    let a = Data.from_int(1);
+    let b = Data.from_text("hello");
+    let merged = a.merge(&b);
+    assert_eq(merged.as_text().unwrap(), "hello");
+}
+
+@test
+fn test_deep_merge() {
+    let inner_a = DataBuilder.new()
+        .set("x", Data.from_int(1))
+        .set("y", Data.from_int(2))
+        .build();
+    let a = DataBuilder.new()
+        .set("nested", inner_a)
+        .set("top", Data.from_text("a"))
+        .build();
+
+    let inner_b = DataBuilder.new()
+        .set("y", Data.from_int(99))
+        .set("z", Data.from_int(3))
+        .build();
+    let b = DataBuilder.new()
+        .set("nested", inner_b)
+        .build();
+
+    let merged = a.deep_merge(&b);
+    let nested = merged.get("nested").unwrap();
+    assert_eq(nested.get("x").unwrap().as_int().unwrap(), 1);  // preserved
+    assert_eq(nested.get("y").unwrap().as_int().unwrap(), 99); // overwritten
+    assert_eq(nested.get("z").unwrap().as_int().unwrap(), 3);  // added
+    assert_eq(merged.get("top").unwrap().as_text().unwrap(), "a");  // preserved
+}
+
+@test
+fn test_keys() {
+    let d = DataBuilder.new()
+        .set("a", Data.from_int(1))
+        .set("b", Data.from_int(2))
+        .build();
+    let keys = d.keys();
+    assert(keys.is_some());
+    let key_list = keys.unwrap();
+    assert_eq(key_list.len(), 2);
+    let key_a: Text = "a";
+    let key_b: Text = "b";
+    assert(key_list.contains(&key_a));
+    assert(key_list.contains(&key_b));
+}
+
+@test
+fn test_keys_not_object() {
+    let d = Data.from_int(42);
+    assert(d.keys().is_none());
+}
+
+@test
+fn test_values() {
+    let d = DataBuilder.new()
+        .set("x", Data.from_int(10))
+        .set("y", Data.from_int(20))
+        .build();
+    let vals = d.values();
+    assert(vals.is_some());
+    assert_eq(vals.unwrap().len(), 2);
+}
+
+// =============================================================================
+// Section 16: JSON Parser — Unicode Escape Tests
+// =============================================================================
+
+@test
+fn test_parse_json_unicode_escape_basic() {
+    // \u0041 = 'A'
+    let result = parse_json("\"\\u0041\"");
+    assert(result.is_ok());
+    assert_eq(result.unwrap().as_text().unwrap(), "A");
+}
+
+@test
+fn test_parse_json_unicode_escape_euro() {
+    // \u20AC = '€'
+    let result = parse_json("\"\\u20AC\"");
+    assert(result.is_ok());
+    assert_eq(result.unwrap().as_text().unwrap(), "\u{20AC}");
+}
+
+@test
+fn test_parse_json_unicode_escape_null_char() {
+    // \u0000 = null character
+    let result = parse_json("\"\\u0000\"");
+    assert(result.is_ok());
+    let text = result.unwrap().as_text().unwrap();
+    assert_eq(text.len(), 1);
+}
+
+@test
+fn test_parse_json_unicode_escape_mixed() {
+    // Mix of regular text and unicode escapes
+    let result = parse_json("\"Hello \\u0057orld\"");
+    assert(result.is_ok());
+    assert_eq(result.unwrap().as_text().unwrap(), "Hello World");
+}
+
+@test
+fn test_parse_json_unicode_escape_surrogate_pair() {
+    // \uD83D\uDE00 = U+1F600 (grinning face emoji)
+    let result = parse_json("\"\\uD83D\\uDE00\"");
+    assert(result.is_ok());
+    let text = result.unwrap().as_text().unwrap();
+    assert_eq(text.char_count(), 1);
+}
+
+@test
+fn test_parse_json_unicode_escape_invalid_hex() {
+    let result = parse_json("\"\\uXYZW\"");
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_json_unicode_escape_truncated() {
+    let result = parse_json("\"\\u00\"");
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_json_unicode_lone_high_surrogate() {
+    // High surrogate without low surrogate
+    let result = parse_json("\"\\uD800\"");
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_json_unicode_lone_low_surrogate() {
+    // Low surrogate without high surrogate
+    let result = parse_json("\"\\uDC00\"");
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_json_unicode_multiple_escapes() {
+    // \u0048\u0065\u006C\u006C\u006F = "Hello"
+    let result = parse_json("\"\\u0048\\u0065\\u006C\\u006C\\u006F\"");
+    assert(result.is_ok());
+    assert_eq(result.unwrap().as_text().unwrap(), "Hello");
+}
+
+// =============================================================================
+// Section 17: JSON Roundtrip and Escape Tests
+// =============================================================================
+
+@test
+fn test_to_json_control_chars_escaped() {
+    // Control characters should be escaped as \u00XX
+    let d = Data.from_text("\x01\x02\x03");
+    let json = d.to_json();
+    assert(json.contains("\\u"));
+    assert(!json.contains("\x01"));
+}
+
+@test
+fn test_to_json_backspace_formfeed() {
+    let d = Data.from_text("\x08\x0C");
+    let json = d.to_json();
+    assert(json.contains("\\b"));
+    assert(json.contains("\\f"));
+}
+
+@test
+fn test_to_json_roundtrip_special_chars() {
+    let original = "hello\nworld\ttab\\slash\"quote";
+    let d = Data.from_text(original);
+    let json = d.to_json();
+    let parsed = parse_json(json);
+    assert(parsed.is_ok());
+    assert_eq(parsed.unwrap().as_text().unwrap(), original);
+}
+
+@test
+fn test_to_json_object_key_escaping() {
+    let mut d = Data.empty_object();
+    d.set("key\"with\"quotes", Data.from_int(1));
+    let json = d.to_json();
+    // Key should have escaped quotes
+    assert(json.contains("\\\""));
+}
+
+@test
+fn test_parse_json_deeply_nested() {
+    // 5-level nested array
+    let json = "[[[[[42]]]]]";
+    let result = parse_json(json);
+    assert(result.is_ok());
+    let inner = result.unwrap()
+        .at(0).unwrap()
+        .at(0).unwrap()
+        .at(0).unwrap()
+        .at(0).unwrap()
+        .at(0).unwrap();
+    assert_eq(inner.as_int().unwrap(), 42);
+}
+
+@test
+fn test_parse_json_deeply_nested_object() {
+    let json = "{\"a\":{\"b\":{\"c\":{\"d\":99}}}}";
+    let result = parse_json(json);
+    assert(result.is_ok());
+    let d = result.unwrap();
+    let inner = d.get("a").unwrap()
+        .get("b").unwrap()
+        .get("c").unwrap()
+        .get("d").unwrap();
+    assert_eq(inner.as_int().unwrap(), 99);
+}
+
+@test
+fn test_parse_json_scientific_notation() {
+    let result = parse_json("1.5e10");
+    assert(result.is_ok());
+    let val = result.unwrap().as_float().unwrap();
+    assert(val > 1.4e10 && val < 1.6e10);
+}
+
+@test
+fn test_parse_json_negative_exponent() {
+    let result = parse_json("1.5e-3");
+    assert(result.is_ok());
+    let val = result.unwrap().as_float().unwrap();
+    assert(val > 0.001 && val < 0.002);
+}
+
+@test
+fn test_parse_json_positive_exponent() {
+    let result = parse_json("2.5E+2");
+    assert(result.is_ok());
+    let val = result.unwrap().as_float().unwrap();
+    assert(val > 249.0 && val < 251.0);
+}
+
+@test
+fn test_parse_json_zero() {
+    let result = parse_json("0");
+    assert(result.is_ok());
+    assert_eq(result.unwrap().as_int().unwrap(), 0);
+}
+
+@test
+fn test_parse_json_negative_zero() {
+    let result = parse_json("-0");
+    assert(result.is_ok());
+    assert_eq(result.unwrap().as_int().unwrap(), 0);
+}
+
+@test
+fn test_parse_json_complex_structure() {
+    let json = "{\"users\":[{\"name\":\"Alice\",\"age\":30,\"active\":true},{\"name\":\"Bob\",\"age\":25,\"active\":false}],\"count\":2,\"meta\":null}";
+    let result = parse_json(json);
+    assert(result.is_ok());
+    let d = result.unwrap();
+    assert_eq(d.get("count").unwrap().as_int().unwrap(), 2);
+    assert(d.get("meta").unwrap().is_null());
+    let users = d.get("users").unwrap();
+    assert_eq(users.len(), 2);
+    assert_eq(users.at(0).unwrap().get("name").unwrap().as_text().unwrap(), "Alice");
+    assert_eq(users.at(1).unwrap().get("age").unwrap().as_int().unwrap(), 25);
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

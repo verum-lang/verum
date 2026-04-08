@@ -1,0 +1,285 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, data-structures, list, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Interpreter e2e test: data structure patterns using lists
+
+// =============================================================================
+// Stack (LIFO) via list
+// =============================================================================
+
+fn test_stack() {
+    let mut stack: List<Int> = [];
+    stack.push(10);
+    stack.push(20);
+    stack.push(30);
+    assert_eq(stack.len(), 3);
+
+    // Pop returns the last element (LIFO); access via index before removing
+    let top = stack[stack.len() - 1];
+    assert_eq(top, 30);
+
+    // Simulate pop: read last, track length
+    let mut stack2: List<Int> = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    let mut idx = stack2.len() - 1;
+    // Sum all elements from back to front
+    while idx >= 0 {
+        sum = sum + stack2[idx];
+        if idx == 0 { break; }
+        idx = idx - 1;
+    }
+    assert_eq(sum, 15);
+    print("  test_stack: ok");
+}
+
+// =============================================================================
+// Queue (FIFO) via two lists
+// =============================================================================
+
+fn test_queue_simulation() {
+    // Simulate queue with enqueue at end, dequeue from front
+    let mut queue: List<Int> = [];
+    queue.push(1);
+    queue.push(2);
+    queue.push(3);
+
+    // "dequeue" by reading from front
+    assert_eq(queue[0], 1);
+    assert_eq(queue[1], 2);
+    assert_eq(queue[2], 3);
+
+    // Process in FIFO order
+    let mut sum = 0;
+    let mut i = 0;
+    while i < queue.len() {
+        sum = sum + queue[i];
+        i = i + 1;
+    }
+    assert_eq(sum, 6);
+    print("  test_queue_simulation: ok");
+}
+
+// =============================================================================
+// Sorting (bubble sort)
+// =============================================================================
+
+fn bubble_sort(items: List<Int>) -> List<Int> {
+    let n = items.len();
+    let mut arr: List<Int> = [];
+    let mut i = 0;
+    while i < n {
+        arr.push(items[i]);
+        i = i + 1;
+    }
+
+    let mut swapped = true;
+    while swapped {
+        swapped = false;
+        let mut j = 0;
+        while j < n - 1 {
+            if arr[j] > arr[j + 1] {
+                let tmp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = tmp;
+                swapped = true;
+            }
+            j = j + 1;
+        }
+    }
+    arr
+}
+
+fn test_bubble_sort() {
+    let unsorted: List<Int> = [5, 3, 8, 1, 9, 2, 7, 4, 6];
+    let sorted = bubble_sort(unsorted);
+    assert_eq(sorted[0], 1);
+    assert_eq(sorted[1], 2);
+    assert_eq(sorted[2], 3);
+    assert_eq(sorted[8], 9);
+
+    // Already sorted
+    let already: List<Int> = [1, 2, 3, 4, 5];
+    let result = bubble_sort(already);
+    assert_eq(result[0], 1);
+    assert_eq(result[4], 5);
+
+    // Reverse sorted
+    let rev: List<Int> = [5, 4, 3, 2, 1];
+    let result2 = bubble_sort(rev);
+    assert_eq(result2[0], 1);
+    assert_eq(result2[4], 5);
+    print("  test_bubble_sort: ok");
+}
+
+// =============================================================================
+// Selection sort
+// =============================================================================
+
+fn selection_sort(items: List<Int>) -> List<Int> {
+    let n = items.len();
+    let mut arr: List<Int> = [];
+    let mut i = 0;
+    while i < n {
+        arr.push(items[i]);
+        i = i + 1;
+    }
+
+    let mut idx = 0;
+    while idx < n - 1 {
+        let mut min_idx = idx;
+        let mut j = idx + 1;
+        while j < n {
+            if arr[j] < arr[min_idx] {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != idx {
+            let tmp = arr[idx];
+            arr[idx] = arr[min_idx];
+            arr[min_idx] = tmp;
+        }
+        idx = idx + 1;
+    }
+    arr
+}
+
+fn test_selection_sort() {
+    let unsorted: List<Int> = [64, 25, 12, 22, 11];
+    let sorted = selection_sort(unsorted);
+    assert_eq(sorted[0], 11);
+    assert_eq(sorted[1], 12);
+    assert_eq(sorted[2], 22);
+    assert_eq(sorted[3], 25);
+    assert_eq(sorted[4], 64);
+    print("  test_selection_sort: ok");
+}
+
+// =============================================================================
+// Matrix (2D) via flat list
+// =============================================================================
+
+fn mat_get(m: List<Int>, cols: Int, row: Int, col: Int) -> Int {
+    m[row * cols + col]
+}
+
+fn mat_multiply(a: List<Int>, b: List<Int>, n: Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while i < n * n {
+        result.push(0);
+        i = i + 1;
+    }
+
+    let mut row = 0;
+    while row < n {
+        let mut col = 0;
+        while col < n {
+            let mut sum = 0;
+            let mut k = 0;
+            while k < n {
+                sum = sum + mat_get(a, n, row, k) * mat_get(b, n, k, col);
+                k = k + 1;
+            }
+            result[row * n + col] = sum;
+            col = col + 1;
+        }
+        row = row + 1;
+    }
+    result
+}
+
+fn test_matrix_ops() {
+    // 2x2 identity * [1,2; 3,4]
+    let identity: List<Int> = [1, 0, 0, 1];
+    let m: List<Int> = [1, 2, 3, 4];
+    let result = mat_multiply(identity, m, 2);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 3);
+    assert_eq(result[3], 4);
+
+    // [1,2; 3,4] * [1,2; 3,4]
+    let sq = mat_multiply(m, m, 2);
+    // [1*1+2*3, 1*2+2*4; 3*1+4*3, 3*2+4*4] = [7, 10; 15, 22]
+    assert_eq(sq[0], 7);
+    assert_eq(sq[1], 10);
+    assert_eq(sq[2], 15);
+    assert_eq(sq[3], 22);
+    print("  test_matrix_ops: ok");
+}
+
+// =============================================================================
+// Histogram (frequency counting)
+// =============================================================================
+
+fn test_histogram() {
+    let data: List<Int> = [1, 3, 2, 1, 4, 2, 1, 3, 2, 1, 4, 3];
+    // Count occurrences of 1-4
+    let mut counts: List<Int> = [0, 0, 0, 0, 0]; // index 0 unused, 1-4
+
+    let mut i = 0;
+    while i < data.len() {
+        let val = data[i];
+        counts[val] = counts[val] + 1;
+        i = i + 1;
+    }
+
+    assert_eq(counts[1], 4); // 1 appears 4 times
+    assert_eq(counts[2], 3); // 2 appears 3 times
+    assert_eq(counts[3], 3); // 3 appears 3 times
+    assert_eq(counts[4], 2); // 4 appears 2 times
+    print("  test_histogram: ok");
+}
+
+// =============================================================================
+// Two-pointer technique
+// =============================================================================
+
+fn is_palindrome_list(items: List<Int>) -> Bool {
+    let mut left = 0;
+    let mut right = items.len() - 1;
+    while left < right {
+        if items[left] != items[right] {
+            return false;
+        }
+        left = left + 1;
+        right = right - 1;
+    }
+    true
+}
+
+fn test_two_pointer() {
+    let pal: List<Int> = [1, 2, 3, 2, 1];
+    assert_eq(is_palindrome_list(pal), true);
+
+    let not_pal: List<Int> = [1, 2, 3, 4, 5];
+    assert_eq(is_palindrome_list(not_pal), false);
+
+    let single: List<Int> = [42];
+    assert_eq(is_palindrome_list(single), true);
+
+    let even_pal: List<Int> = [1, 2, 2, 1];
+    assert_eq(is_palindrome_list(even_pal), true);
+    print("  test_two_pointer: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_stack();
+    test_queue_simulation();
+    test_bubble_sort();
+    test_selection_sort();
+    test_matrix_ops();
+    test_histogram();
+    test_two_pointer();
+    print("[OK] 615_interp_data_structures");
+    0
+}

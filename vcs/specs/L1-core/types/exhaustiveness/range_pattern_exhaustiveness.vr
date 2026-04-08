@@ -1,0 +1,56 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, range-pattern
+// @description: Range patterns with exhaustiveness checking
+
+// Numeric ranges with exhaustive coverage
+fn classify_score(score: Int) -> Text =
+    match score {
+        ..0 => "invalid",
+        0..60 => "failing",
+        60..70 => "D",
+        70..80 => "C",
+        80..90 => "B",
+        90..=100 => "A",
+        101.. => "invalid"
+    };
+
+// Character ranges
+fn char_category(c: Char) -> Text =
+    match c {
+        'a'..='z' => "lowercase",
+        'A'..='Z' => "uppercase",
+        '0'..='9' => "digit",
+        _ => "other"
+    };
+
+// Range with variant types
+type Grade is Letter(Char) | Percentage(Int);
+
+fn grade_description(g: Grade) -> Text =
+    match g {
+        Letter('A'..='C') => "passing letter",
+        Letter('D'..='F') => "failing letter",
+        Letter(_) => "invalid letter",
+        Percentage(0..60) => "failing percentage",
+        Percentage(60..=100) => "passing percentage",
+        Percentage(_) => "invalid percentage"
+    };
+
+// Inclusive and exclusive ranges
+fn range_test(n: Int) -> Text =
+    match n {
+        ..0 => "negative",        // exclusive: n < 0
+        0 => "zero",              // exactly 0
+        1..10 => "small",         // exclusive: 1 <= n < 10
+        10..=100 => "medium",     // inclusive: 10 <= n <= 100
+        101.. => "large"          // exclusive: n > 100
+    };
+
+fn main() {
+    assert(classify_score(85) == "B");
+    assert(classify_score(95) == "A");
+    assert(char_category('m') == "lowercase");
+    assert(grade_description(Percentage(75)) == "passing percentage");
+    assert(range_test(50) == "medium");
+}

@@ -1,0 +1,15 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, using-clause, context, error
+// @description: Test invalid using clause syntax detection
+// @expected-error: E039
+
+fn missing_bracket() using Database {}
+
+fn empty_using() using [] {}
+
+fn invalid_context() using [123] {}
+
+fn unclosed_bracket() using [Database {}
+
+fn double_using() using [Database] using [Logger] {}

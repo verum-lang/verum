@@ -1,0 +1,500 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for record patterns (full, partial, renamed)
+
+// Grammar Reference:
+// record_pattern  = path , '{' , field_patterns , '}' ;
+// field_patterns  = [ field_pattern , { ',' , field_pattern } , [ ',' , '..' ] ] ;
+// field_pattern   = identifier , [ ':' , pattern ] ;
+
+// CRITICAL: Verum record patterns MUST include the type name!
+// CORRECT:   let Point { x, y } = p;
+// INCORRECT: let { x, y } = p;  // This is NOT valid Verum syntax!
+
+// ============================================================================
+// SECTION 1: Basic Record Patterns with Type Name
+// ============================================================================
+
+fn test_basic_records() {
+    // Simple two-field record
+    let Point { x, y } = point;
+
+    // Three-field record
+    let Color { red, green, blue } = color;
+
+    // More fields
+    let Person { name, age, email, phone } = person;
+
+    // Single field
+    let Wrapper { value } = wrapper;
+
+    // Empty record (unit-like struct)
+    let Marker {} = marker;
+}
+
+// ============================================================================
+// SECTION 2: Record Patterns with Field Renaming
+// ============================================================================
+
+fn test_renamed_fields() {
+    // Rename all fields
+    let Point { x: px, y: py } = point;
+    let Person { name: person_name, age: person_age } = person;
+
+    // Single renamed field
+    let Point { x: horizontal, y } = point;
+    let Point { x, y: vertical } = point;
+
+    // Rename with descriptive names
+    let Rectangle {
+        width: rect_width,
+        height: rect_height
+    } = rectangle;
+
+    // Rename to shorter names
+    let Connection {
+        hostname: h,
+        port: p,
+        timeout: t
+    } = connection;
+}
+
+// ============================================================================
+// SECTION 3: Record Patterns with Rest (..)
+// ============================================================================
+
+fn test_partial_records() {
+    // Extract one field, ignore rest
+    let Point { x, .. } = point;
+    let Person { name, .. } = person;
+
+    // Extract some fields, ignore rest
+    let Point { x, y, .. } = point3d;
+    let Person { name, age, .. } = person;
+
+    // Just rest (match type but ignore all fields)
+    let Point { .. } = point;
+    let Person { .. } = person;
+
+    // Rest with trailing comma
+    let Point { x, .. } = point;
+    let Person { name, age, .. } = person;
+}
+
+// ============================================================================
+// SECTION 4: Record Patterns with Wildcards
+// ============================================================================
+
+fn test_wildcards_in_records() {
+    // Wildcard as field value
+    let Point { x: _, y } = point;
+    let Point { x, y: _ } = point;
+    let Point { x: _, y: _ } = point;
+
+    // Wildcard on some fields
+    let Person { name, age: _, email } = person;
+
+    // All wildcards (explicit)
+    let Point { x: _, y: _, z: _ } = point3d;
+}
+
+// ============================================================================
+// SECTION 5: Record Patterns with Literal Values
+// ============================================================================
+
+fn test_literals_in_records() {
+    // Integer literals
+    let Point { x: 0, y } = point;
+    let Point { x, y: 0 } = point;
+    let Point { x: 0, y: 0 } = origin;
+
+    // Boolean literals
+    let Flags { enabled: true, visible } = flags;
+    let Flags { enabled, visible: false } = flags;
+
+    // String literals
+    let Config { mode: "debug", level } = config;
+    let User { role: "admin", name } = user;
+
+    // Character literals
+    let Token { kind: 'x', value } = token;
+
+    // Mixed literals
+    let Settings {
+        debug: true,
+        port: 8080,
+        host: "localhost"
+    } = settings;
+}
+
+// ============================================================================
+// SECTION 6: Nested Record Patterns
+// ============================================================================
+
+fn test_nested_records() {
+    // Record containing record
+    let Line {
+        start: Point { x: x1, y: y1 },
+        end: Point { x: x2, y: y2 }
+    } = line;
+
+    // Deep nesting
+    let Container {
+        inner: Wrapper {
+            value: Item { id, name }
+        }
+    } = container;
+
+    // Mixed nesting with rest
+    let Line {
+        start: Point { x, .. },
+        end: Point { y, .. }
+    } = line;
+
+    // Partial nested patterns
+    let Outer {
+        field: Inner { a, .. },
+        ..
+    } = nested;
+}
+
+// ============================================================================
+// SECTION 7: Record Patterns with Mutable Bindings
+// ============================================================================
+
+fn test_mutable_in_records() {
+    // Mutable field binding
+    let Point { mut x, y } = point;
+    let Point { x, mut y } = point;
+    let Point { mut x, mut y } = point;
+
+    // Renamed mutable
+    let Point { x: mut px, y: mut py } = point;
+
+    // Mixed
+    let Person { name, mut age, email } = person;
+}
+
+// ============================================================================
+// SECTION 8: Record Patterns with Ref Bindings
+// ============================================================================
+
+fn test_ref_in_records() {
+    // Ref field binding
+    let Point { ref x, ref y } = point;
+    let Person { ref name, ref age } = person;
+
+    // Ref mut field binding
+    let Point { ref mut x, ref mut y } = point;
+
+    // Mixed ref and regular
+    let Person { ref name, age, ref mut email } = person;
+
+    // Renamed ref
+    let Point { x: ref px, y: ref py } = point;
+}
+
+// ============================================================================
+// SECTION 9: Record Patterns with @ Bindings
+// ============================================================================
+
+fn test_at_in_records() {
+    // @ on field value
+    let Point { x: origin_x @ 0, y } = point;
+    let Person { name: admin @ "admin", .. } = person;
+
+    // @ on whole record
+    let whole @ Point { x, y } = point;
+    let p @ Person { name, age } = person;
+
+    // Nested @ bindings
+    let outer @ Line {
+        start: inner @ Point { x, y },
+        end
+    } = line;
+
+    // @ with complex field pattern
+    let Config {
+        mode: m @ ("debug" | "release"),
+        ..
+    } = config;
+}
+
+// ============================================================================
+// SECTION 10: Record Patterns with Variants
+// ============================================================================
+
+fn test_records_with_variants() {
+    // Variant as field value
+    let Container {
+        value: Some(inner),
+        status
+    } = container;
+
+    let Result {
+        data: Ok(value),
+        timestamp
+    } = result;
+
+    // Multiple variant fields
+    let Pair {
+        first: Some(a),
+        second: Some(b)
+    } = pair;
+
+    // With None/Err
+    let Optional {
+        value: None,
+        default
+    } = optional;
+}
+
+// ============================================================================
+// SECTION 11: Record Patterns with Tuples
+// ============================================================================
+
+fn test_records_with_tuples() {
+    // Tuple as field value
+    let Data {
+        coords: (x, y),
+        label
+    } = data;
+
+    // Nested tuples
+    let Complex {
+        pairs: ((a, b), (c, d)),
+        ..
+    } = complex;
+}
+
+// ============================================================================
+// SECTION 12: Record Patterns with Arrays
+// ============================================================================
+
+fn test_records_with_arrays() {
+    // Array as field value
+    let Data {
+        values: [a, b, c],
+        name
+    } = data;
+
+    // Array with rest
+    let Data {
+        values: [first, ..rest],
+        ..
+    } = data;
+
+    // Nested arrays
+    let Matrix {
+        data: [[a, b], [c, d]],
+        size
+    } = matrix;
+}
+
+// ============================================================================
+// SECTION 13: Record Patterns in Match Arms
+// ============================================================================
+
+fn test_records_in_match() {
+    // Basic matching
+    match point {
+        Point { x: 0, y: 0 } => origin(),
+        Point { x: 0, y } => on_y_axis(y),
+        Point { x, y: 0 } => on_x_axis(x),
+        Point { x, y } => general(x, y)
+    }
+
+    // With rest
+    match person {
+        Person { name: "admin", .. } => admin_user(),
+        Person { age, .. } if age < 18 => minor(),
+        Person { name, age, .. } => regular(name, age)
+    }
+
+    // Nested in match
+    match line {
+        Line { start: Point { x: 0, y: 0 }, end } => from_origin(end),
+        Line { start, end: Point { x: 0, y: 0 } } => to_origin(start),
+        Line { start, end } => general(start, end)
+    }
+
+    // With guards
+    match point {
+        Point { x, y } if x == y => diagonal(x),
+        Point { x, y } if x > y => upper(x, y),
+        Point { x, y } => lower(x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 14: Record Patterns in Function Parameters
+// ============================================================================
+
+fn process_point(Point { x, y }: Point) -> Int {
+    x + y
+}
+
+fn process_with_rename(Point { x: px, y: py }: Point) -> Int {
+    px * py
+}
+
+fn process_partial(Person { name, .. }: Person) -> Text {
+    name
+}
+
+fn process_nested(
+    Line { start: Point { x: x1, y: y1 }, end: Point { x: x2, y: y2 } }: Line
+) -> Int {
+    (x2 - x1) + (y2 - y1)
+}
+
+// ============================================================================
+// SECTION 15: Record Patterns in For Loops
+// ============================================================================
+
+fn test_records_in_loops() {
+    // Destructure in loop
+    for Point { x, y } in points {
+        process(x, y)
+    }
+
+    // Partial destructure
+    for Person { name, .. } in people {
+        greet(name)
+    }
+
+    // With rename
+    for Point { x: px, y: py } in points {
+        plot(px, py)
+    }
+}
+
+// ============================================================================
+// SECTION 16: Record Patterns in If-Let and While-Let
+// ============================================================================
+
+fn test_records_in_conditionals() {
+    // If-let with record
+    if let Point { x: 0, y } = point {
+        on_y_axis(y)
+    }
+
+    if let Person { name: "admin", .. } = user {
+        admin_access()
+    }
+
+    // While-let with record
+    while let Item { value: Some(v), .. } = get_next() {
+        process(v)
+    }
+}
+
+// ============================================================================
+// SECTION 17: Qualified Path Record Patterns
+// ============================================================================
+
+fn test_qualified_records() {
+    // Module-qualified type
+    let geometry.Point { x, y } = point;
+    let http.Request { method, path, .. } = request;
+
+    // In match
+    match value {
+        types.Point { x: 0, .. } => on_origin_x(),
+        types.Point { x, y } => general(x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 18: Complex Record Patterns
+// ============================================================================
+
+fn test_complex_records() {
+    // All features combined
+    let whole @ Person {
+        ref name,
+        mut age,
+        email: addr @ Some(ref inner),
+        address: Address { city, .. },
+        ..
+    } = person;
+
+    // Deep matching in match
+    match data {
+        Outer {
+            a: Inner { x: 0, .. },
+            b: inner @ Inner { y, .. },
+            ..
+        } if y > 0 => special(inner, y),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 19: Or Patterns in Records
+// ============================================================================
+
+fn test_or_in_records() {
+    // Or pattern in field
+    let Point { x: 0 | 1, y } = point;
+    let Config { mode: "debug" | "test", .. } = config;
+
+    // In match
+    match point {
+        Point { x: 0 | 1, y: 0 | 1 } => near_origin(),
+        Point { x, y } => far(x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 20: Record Variant Patterns
+// ============================================================================
+
+fn test_record_variants() {
+    // Enum with record variants
+    match shape {
+        Circle { center, radius } => draw_circle(center, radius),
+        Rectangle { top_left, bottom_right } => draw_rect(top_left, bottom_right),
+        Triangle { a, b, c } => draw_triangle(a, b, c)
+    }
+
+    // With rest
+    match shape {
+        Circle { radius, .. } => area_circle(radius),
+        Rectangle { width, height, .. } => area_rect(width, height),
+        _ => unknown_shape()
+    }
+
+    // Nested record variants
+    match container {
+        Box { content: Circle { radius, .. }, .. } => boxed_circle(radius),
+        Box { content: Rectangle { width, height, .. }, .. } => boxed_rect(width, height),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 21: Edge Cases
+// ============================================================================
+
+fn test_edge_cases() {
+    // Very long field names
+    let Config {
+        very_long_field_name_that_describes_something,
+        another_extremely_long_and_descriptive_field_name,
+        ..
+    } = config;
+
+    // Many fields
+    let LargeRecord {
+        a, b, c, d, e, f, g, h, i, j,
+        ..
+    } = large;
+
+    // Single char field names
+    let Small { a, b, c } = small;
+
+    // Fields with underscore prefix (shorthand)
+    let Internal { private_field, internal_field, public_field } = internal;
+}

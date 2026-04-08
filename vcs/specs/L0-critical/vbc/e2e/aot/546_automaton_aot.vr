@@ -1,0 +1,251 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, automaton, fsm, state-machine
+// @timeout: 30000
+
+// Finite state automaton (DFA) simulation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// DFA with up to 4 states, 2 symbols (0 and 1)
+// Transition table: transitions[state*2 + symbol] = next_state
+// Accept states: bitmask (bit i = state i is accepting)
+
+type DFA is {
+    transitions: Arr8,  // 8 entries: state*2 + symbol → next state
+    start: Int,
+    accept_mask: Int    // bitmask of accepting states
+};
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn has_bit(mask: Int, k: Int) -> Int { (mask / pow2(k)) % 2 }
+
+fn dfa_step(dfa: DFA, state: Int, symbol: Int) -> Int {
+    get8(dfa.transitions, state * 2 + symbol)
+}
+
+fn dfa_run(dfa: DFA, input: Arr8, n: Int) -> Int {
+    let mut state = dfa.start;
+    let mut i = 0;
+    while i < n {
+        state = dfa_step(dfa, state, get8(input, i));
+        i = i + 1;
+    }
+    has_bit(dfa.accept_mask, state)
+}
+
+// Count number of accepting inputs of length n (exhaustive for small n)
+fn count_accepting_len2(dfa: DFA) -> Int {
+    let mut count = 0;
+    let mut a = 0;
+    while a < 2 {
+        let mut b = 0;
+        while b < 2 {
+            let s1 = dfa_step(dfa, dfa.start, a);
+            let s2 = dfa_step(dfa, s1, b);
+            if has_bit(dfa.accept_mask, s2) == 1 { count = count + 1; }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    count
+}
+
+// Mealy machine: produces output on each transition
+// output_table[state*2 + symbol] = output value
+type Mealy is {
+    transitions: Arr8,
+    outputs: Arr8,
+    start: Int
+};
+
+type MealyResult is { final_state: Int, output_sum: Int };
+
+fn mealy_run(m: Mealy, input: Arr8, n: Int) -> MealyResult {
+    let mut state = m.start;
+    let mut output_sum = 0;
+    let mut i = 0;
+    while i < n {
+        let sym = get8(input, i);
+        let idx = state * 2 + sym;
+        output_sum = output_sum + get8(m.outputs, idx);
+        state = get8(m.transitions, idx);
+        i = i + 1;
+    }
+    MealyResult { final_state: state, output_sum: output_sum }
+}
+
+fn test_even_zeros_dfa() -> Int {
+    // DFA that accepts strings with even number of 0s
+    // States: 0 (even, accept), 1 (odd)
+    // On 0: toggle, On 1: stay
+    let dfa = DFA {
+        transitions: Arr8 {
+            v0: 1, // state 0, sym 0 → state 1
+            v1: 0, // state 0, sym 1 → state 0
+            v2: 0, // state 1, sym 0 → state 0
+            v3: 1, // state 1, sym 1 → state 1
+            v4: 0, v5: 0, v6: 0, v7: 0
+        },
+        start: 0,
+        accept_mask: 1 // state 0 is accepting
+    };
+
+    // Empty string → accept (even zeros)
+    assert_eq(dfa_run(dfa, zeros(), 0), 1);
+
+    // "0" → odd zeros → reject
+    let input1 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dfa_run(dfa, input1, 1), 0);
+
+    // "00" → even zeros → accept
+    assert_eq(dfa_run(dfa, input1, 2), 1);
+
+    // "101" → 0 zeros → accept (even)
+    let input2 = Arr8 { v0: 1, v1: 0, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dfa_run(dfa, input2, 3), 0); // 1 zero → odd → reject
+    1
+}
+
+fn test_ends_with_1_dfa() -> Int {
+    // DFA that accepts strings ending with 1
+    // State 0: not ending with 1 (reject)
+    // State 1: ending with 1 (accept)
+    let dfa = DFA {
+        transitions: Arr8 {
+            v0: 0, // state 0, sym 0 → 0
+            v1: 1, // state 0, sym 1 → 1
+            v2: 0, // state 1, sym 0 → 0
+            v3: 1, // state 1, sym 1 → 1
+            v4: 0, v5: 0, v6: 0, v7: 0
+        },
+        start: 0,
+        accept_mask: 2 // state 1 is accepting
+    };
+
+    // "1" → accept
+    let i1 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dfa_run(dfa, i1, 1), 1);
+
+    // "0" → reject
+    let i0 = zeros();
+    assert_eq(dfa_run(dfa, i0, 1), 0);
+
+    // "010" → reject
+    let i010 = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dfa_run(dfa, i010, 3), 0);
+
+    // "011" → accept
+    let i011 = Arr8 { v0: 0, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dfa_run(dfa, i011, 3), 1);
+    1
+}
+
+fn test_count_accepting() -> Int {
+    // Count accepting strings of length 2 for "ends with 1" DFA
+    // 00→reject, 01→accept, 10→reject, 11→accept → 2
+    let dfa = DFA {
+        transitions: Arr8 {
+            v0: 0, v1: 1, v2: 0, v3: 1,
+            v4: 0, v5: 0, v6: 0, v7: 0
+        },
+        start: 0,
+        accept_mask: 2
+    };
+    assert_eq(count_accepting_len2(dfa), 2);
+    1
+}
+
+fn test_modulo3_dfa() -> Int {
+    // DFA that accepts binary numbers divisible by 3
+    // States: 0 (mod 0, accept), 1 (mod 1), 2 (mod 2)
+    // Transition: state * 2 + bit = new_state
+    // n*2+0 mod 3: (state*2) mod 3
+    // n*2+1 mod 3: (state*2+1) mod 3
+    let dfa = DFA {
+        transitions: Arr8 {
+            v0: 0, // 0*2+0=0 mod 3=0
+            v1: 1, // 0*2+1=1 mod 3=1
+            v2: 2, // 1*2+0=2 mod 3=2
+            v3: 0, // 1*2+1=3 mod 3=0
+            v4: 1, // 2*2+0=4 mod 3=1
+            v5: 2, // 2*2+1=5 mod 3=2
+            v6: 0, v7: 0
+        },
+        start: 0,
+        accept_mask: 1 // state 0
+    };
+
+    // "110" = 6, 6%3=0 → accept
+    let i6 = Arr8 { v0: 1, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dfa_run(dfa, i6, 3), 1);
+
+    // "101" = 5, 5%3=2 → reject
+    let i5 = Arr8 { v0: 1, v1: 0, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dfa_run(dfa, i5, 3), 0);
+
+    // "1001" = 9, 9%3=0 → accept
+    let i9 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(dfa_run(dfa, i9, 4), 1);
+    1
+}
+
+fn test_mealy_machine() -> Int {
+    // Mealy machine: output 1 on transition to accepting state, 0 otherwise
+    // Using "ends with 1" transitions
+    let m = Mealy {
+        transitions: Arr8 {
+            v0: 0, v1: 1, v2: 0, v3: 1,
+            v4: 0, v5: 0, v6: 0, v7: 0
+        },
+        outputs: Arr8 {
+            v0: 0, v1: 1, v2: 0, v3: 1,
+            v4: 0, v5: 0, v6: 0, v7: 0
+        },
+        start: 0
+    };
+
+    // Input "1011" → outputs: 1,0,1,1 → sum=3
+    let input = Arr8 { v0: 1, v1: 0, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let result = mealy_run(m, input, 4);
+    assert_eq(result.output_sum, 3);
+    assert_eq(result.final_state, 1);
+    1
+}
+
+fn main() -> Int {
+    test_even_zeros_dfa();
+    test_ends_with_1_dfa();
+    test_count_accepting();
+    test_modulo3_dfa();
+    test_mealy_machine();
+    print("[OK] 546_automaton_aot");
+    0
+}

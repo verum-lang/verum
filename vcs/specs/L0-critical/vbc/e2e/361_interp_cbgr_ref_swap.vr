@@ -1,0 +1,322 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, advanced
+// @timeout: 15000
+// @expected-exit: 0
+//
+// CBGR advanced reference test: Reference swapping operations.
+// Swap values through mutable refs, triple rotation, array-like swap
+// patterns, conditional swapping, and chain-swap operations.
+
+// ============================================================================
+// Type definitions
+// ============================================================================
+
+type SwapPair is { fst: Int, snd: Int };
+type Trio is { a: Int, b: Int, c: Int };
+type Quad4 is { w: Int, x: Int, y: Int, z: Int };
+
+// ============================================================================
+// Swap primitives
+// ============================================================================
+
+fn swap_vals(a: &mut Int, b: &mut Int) {
+    let tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+fn swap_pair_fields(p: &mut SwapPair) {
+    let tmp = (*p).fst;
+    (*p).fst = (*p).snd;
+    (*p).snd = tmp;
+}
+
+fn rotate_left_trio(t: &mut Trio) {
+    let tmp = (*t).a;
+    (*t).a = (*t).b;
+    (*t).b = (*t).c;
+    (*t).c = tmp;
+}
+
+fn rotate_right_trio(t: &mut Trio) {
+    let tmp = (*t).c;
+    (*t).c = (*t).b;
+    (*t).b = (*t).a;
+    (*t).a = tmp;
+}
+
+fn rotate_quad_left(q: &mut Quad4) {
+    let tmp = (*q).w;
+    (*q).w = (*q).x;
+    (*q).x = (*q).y;
+    (*q).y = (*q).z;
+    (*q).z = tmp;
+}
+
+fn conditional_swap(a: &mut Int, b: &mut Int, cond: Bool) {
+    if cond {
+        let tmp = *a;
+        *a = *b;
+        *b = tmp;
+    }
+}
+
+fn sort_pair(p: &mut SwapPair) {
+    if (*p).fst > (*p).snd {
+        swap_pair_fields(p);
+    }
+}
+
+// ============================================================================
+// Test: basic swap
+// ============================================================================
+
+fn test_basic_swap() {
+    let mut a = 10;
+    let mut b = 20;
+    swap_vals(&mut a, &mut b);
+    assert_eq(a, 20);
+    assert_eq(b, 10);
+}
+
+fn test_swap_same() {
+    let mut a = 7;
+    let mut b = 7;
+    swap_vals(&mut a, &mut b);
+    assert_eq(a, 7);
+    assert_eq(b, 7);
+}
+
+fn test_double_swap_identity() {
+    let mut a = 33;
+    let mut b = 77;
+    swap_vals(&mut a, &mut b);
+    swap_vals(&mut a, &mut b);
+    assert_eq(a, 33);
+    assert_eq(b, 77);
+}
+
+fn test_swap_negatives() {
+    let mut a = -100;
+    let mut b = 200;
+    swap_vals(&mut a, &mut b);
+    assert_eq(a, 200);
+    assert_eq(b, -100);
+}
+
+// ============================================================================
+// Test: triple rotation
+// ============================================================================
+
+fn test_trio_rotate_left() {
+    let mut t = Trio { a: 1, b: 2, c: 3 };
+    rotate_left_trio(&mut t);
+    assert_eq(t.a, 2);
+    assert_eq(t.b, 3);
+    assert_eq(t.c, 1);
+}
+
+fn test_trio_rotate_right() {
+    let mut t = Trio { a: 1, b: 2, c: 3 };
+    rotate_right_trio(&mut t);
+    assert_eq(t.a, 3);
+    assert_eq(t.b, 1);
+    assert_eq(t.c, 2);
+}
+
+fn test_trio_3_rotations_identity() {
+    let mut t = Trio { a: 10, b: 20, c: 30 };
+    rotate_left_trio(&mut t);
+    rotate_left_trio(&mut t);
+    rotate_left_trio(&mut t);
+    assert_eq(t.a, 10);
+    assert_eq(t.b, 20);
+    assert_eq(t.c, 30);
+}
+
+fn test_trio_left_right_identity() {
+    let mut t = Trio { a: 5, b: 15, c: 25 };
+    rotate_left_trio(&mut t);
+    rotate_right_trio(&mut t);
+    assert_eq(t.a, 5);
+    assert_eq(t.b, 15);
+    assert_eq(t.c, 25);
+}
+
+// ============================================================================
+// Test: quad rotation
+// ============================================================================
+
+fn test_quad_rotate() {
+    let mut q = Quad4 { w: 1, x: 2, y: 3, z: 4 };
+    rotate_quad_left(&mut q);
+    assert_eq(q.w, 2);
+    assert_eq(q.x, 3);
+    assert_eq(q.y, 4);
+    assert_eq(q.z, 1);
+}
+
+fn test_quad_4_rotations_identity() {
+    let mut q = Quad4 { w: 11, x: 22, y: 33, z: 44 };
+    rotate_quad_left(&mut q);
+    rotate_quad_left(&mut q);
+    rotate_quad_left(&mut q);
+    rotate_quad_left(&mut q);
+    assert_eq(q.w, 11);
+    assert_eq(q.x, 22);
+    assert_eq(q.y, 33);
+    assert_eq(q.z, 44);
+}
+
+// ============================================================================
+// Test: chain swap (rotate through multiple vars)
+// ============================================================================
+
+fn test_chain_swap_4() {
+    let mut a = 1;
+    let mut b = 2;
+    let mut c = 3;
+    let mut d = 4;
+    // Rotate: a<->b, b<->c, c<->d => shifts right
+    swap_vals(&mut c, &mut d);
+    swap_vals(&mut b, &mut c);
+    swap_vals(&mut a, &mut b);
+    assert_eq(a, 4);
+    assert_eq(b, 1);
+    assert_eq(c, 2);
+    assert_eq(d, 3);
+}
+
+fn test_reverse_via_swaps() {
+    let mut v0 = 1;
+    let mut v1 = 2;
+    let mut v2 = 3;
+    let mut v3 = 4;
+    let mut v4 = 5;
+    swap_vals(&mut v0, &mut v4);
+    swap_vals(&mut v1, &mut v3);
+    assert_eq(v0, 5);
+    assert_eq(v1, 4);
+    assert_eq(v2, 3);
+    assert_eq(v3, 2);
+    assert_eq(v4, 1);
+}
+
+// ============================================================================
+// Test: conditional swap and sort
+// ============================================================================
+
+fn test_cond_swap_true() {
+    let mut a = 5;
+    let mut b = 10;
+    conditional_swap(&mut a, &mut b, true);
+    assert_eq(a, 10);
+    assert_eq(b, 5);
+}
+
+fn test_cond_swap_false() {
+    let mut a = 5;
+    let mut b = 10;
+    conditional_swap(&mut a, &mut b, false);
+    assert_eq(a, 5);
+    assert_eq(b, 10);
+}
+
+fn test_sort_pair_unordered() {
+    let mut p = SwapPair { fst: 9, snd: 3 };
+    sort_pair(&mut p);
+    assert_eq(p.fst, 3);
+    assert_eq(p.snd, 9);
+}
+
+fn test_sort_pair_already_sorted() {
+    let mut p = SwapPair { fst: 2, snd: 8 };
+    sort_pair(&mut p);
+    assert_eq(p.fst, 2);
+    assert_eq(p.snd, 8);
+}
+
+// ============================================================================
+// Test: loop-based swap patterns
+// ============================================================================
+
+fn test_swap_loop_even() {
+    let mut a = 0;
+    let mut b = 100;
+    let mut i = 0;
+    while i < 10 {
+        swap_vals(&mut a, &mut b);
+        i = i + 1;
+    }
+    assert_eq(a, 0);
+    assert_eq(b, 100);
+}
+
+fn test_swap_loop_odd() {
+    let mut a = 0;
+    let mut b = 100;
+    let mut i = 0;
+    while i < 7 {
+        swap_vals(&mut a, &mut b);
+        i = i + 1;
+    }
+    assert_eq(a, 100);
+    assert_eq(b, 0);
+}
+
+fn test_swap_preserves_sum() {
+    let mut a = 17;
+    let mut b = 83;
+    let sum_before = a + b;
+    swap_vals(&mut a, &mut b);
+    assert_eq(a + b, sum_before);
+    assert_eq(a + b, 100);
+}
+
+fn test_bubble_sort_5() {
+    let mut v0 = 5;
+    let mut v1 = 3;
+    let mut v2 = 4;
+    let mut v3 = 1;
+    let mut v4 = 2;
+    let mut pass = 0;
+    while pass < 5 {
+        if v0 > v1 { swap_vals(&mut v0, &mut v1); }
+        if v1 > v2 { swap_vals(&mut v1, &mut v2); }
+        if v2 > v3 { swap_vals(&mut v2, &mut v3); }
+        if v3 > v4 { swap_vals(&mut v3, &mut v4); }
+        pass = pass + 1;
+    }
+    assert_eq(v0, 1);
+    assert_eq(v1, 2);
+    assert_eq(v2, 3);
+    assert_eq(v3, 4);
+    assert_eq(v4, 5);
+}
+
+fn main() -> Int {
+    test_basic_swap();
+    test_swap_same();
+    test_double_swap_identity();
+    test_swap_negatives();
+    test_trio_rotate_left();
+    test_trio_rotate_right();
+    test_trio_3_rotations_identity();
+    test_trio_left_right_identity();
+    test_quad_rotate();
+    test_quad_4_rotations_identity();
+    test_chain_swap_4();
+    test_reverse_via_swaps();
+    test_cond_swap_true();
+    test_cond_swap_false();
+    test_sort_pair_unordered();
+    test_sort_pair_already_sorted();
+    test_swap_loop_even();
+    test_swap_loop_odd();
+    test_swap_preserves_sum();
+    test_bubble_sort_5();
+    print("[OK] 361_interp_cbgr_ref_swap");
+    0
+}

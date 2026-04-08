@@ -1,0 +1,285 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 20ns uncontended read, scales with readers
+// @tags: synchronization, rwlock, performance
+
+/// Benchmark for RwLock read acquisition
+///
+/// RwLock allows multiple concurrent readers or one exclusive writer.
+/// Tests read performance under various conditions:
+/// - Single reader
+/// - Multiple concurrent readers
+/// - Readers with occasional writer
+
+module benchmarks.micro.rwlock_read
+
+using [Benchmark, Sync]
+
+/// Uncontended read (single thread)
+fn benchmark_rwlock_read_uncontended() {
+    let rwlock = RwLock.new(42);
+
+    for _ in 0..2_000_000 {
+        let guard = rwlock.read();
+        let _ = *guard;
+    }
+}
+
+/// Try read (non-blocking)
+fn benchmark_rwlock_try_read() {
+    let rwlock = RwLock.new(42);
+
+    for _ in 0..2_000_000 {
+        if let Some(guard) = rwlock.try_read() {
+            let _ = *guard;
+        }
+    }
+}
+
+/// Multiple concurrent readers (2 threads)
+fn benchmark_rwlock_read_2_readers() {
+    let rwlock = Shared.new(RwLock.new(42));
+    let iterations = 1_000_000;
+
+    let handles = (0..2).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..iterations {
+                let guard = rwlock.read();
+                let _ = *guard;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Multiple concurrent readers (4 threads)
+fn benchmark_rwlock_read_4_readers() {
+    let rwlock = Shared.new(RwLock.new(42));
+    let iterations = 500_000;
+
+    let handles = (0..4).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..iterations {
+                let guard = rwlock.read();
+                let _ = *guard;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Multiple concurrent readers (8 threads)
+fn benchmark_rwlock_read_8_readers() {
+    let rwlock = Shared.new(RwLock.new(42));
+    let iterations = 250_000;
+
+    let handles = (0..8).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..iterations {
+                let guard = rwlock.read();
+                let _ = *guard;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Readers with rare writer
+fn benchmark_rwlock_read_with_rare_writer() {
+    let rwlock = Shared.new(RwLock.new(0));
+    let running = Shared.new(AtomicBool.new(true));
+
+    // Writer thread (1% of operations)
+    let writer = {
+        let rwlock = rwlock.clone();
+        let running = running.clone();
+        spawn_thread(|| {
+            while running.load(Ordering.Relaxed) {
+                {
+                    let mut guard = rwlock.write();
+                    *guard += 1;
+                }
+                sleep(Duration.from_micros(100));  // Rare writes
+            }
+        })
+    };
+
+    // Reader threads
+    let readers: List<_> = (0..4).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..500_000 {
+                let guard = rwlock.read();
+                let _ = *guard;
+            }
+        })
+    }).collect();
+
+    for reader in readers {
+        reader.join();
+    }
+
+    running.store(false, Ordering.Relaxed);
+    writer.join();
+}
+
+/// Readers with frequent writer
+fn benchmark_rwlock_read_with_frequent_writer() {
+    let rwlock = Shared.new(RwLock.new(0));
+    let running = Shared.new(AtomicBool.new(true));
+
+    // Frequent writer
+    let writer = {
+        let rwlock = rwlock.clone();
+        let running = running.clone();
+        spawn_thread(|| {
+            while running.load(Ordering.Relaxed) {
+                let mut guard = rwlock.write();
+                *guard += 1;
+                // No sleep - continuous writes
+            }
+        })
+    };
+
+    // Readers
+    let readers: List<_> = (0..4).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..100_000 {
+                let guard = rwlock.read();
+                let _ = *guard;
+            }
+        })
+    }).collect();
+
+    for reader in readers {
+        reader.join();
+    }
+
+    running.store(false, Ordering.Relaxed);
+    writer.join();
+}
+
+/// Read lock/unlock cycle
+fn benchmark_rwlock_read_cycle() {
+    let rwlock = RwLock.new(42);
+
+    for _ in 0..2_000_000 {
+        let guard = rwlock.read();
+        drop(guard);  // Explicit unlock
+    }
+}
+
+/// Read with work inside
+fn benchmark_rwlock_read_with_work() {
+    let rwlock = Shared.new(RwLock.new(list![0; 1000]));
+
+    let handles = (0..4).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..10_000 {
+                let guard = rwlock.read();
+                // Read work
+                let sum: Int = guard.iter().sum();
+                let _ = sum;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Read timeout
+fn benchmark_rwlock_read_timeout() {
+    let rwlock = Shared.new(RwLock.new(42));
+
+    // Writer holds lock
+    let holder = {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            let _guard = rwlock.write();
+            sleep(Duration.from_millis(100));
+        })
+    };
+
+    sleep(Duration.from_millis(10));
+
+    for _ in 0..1_000 {
+        let _ = rwlock.try_read_for(Duration.from_micros(10));
+    }
+
+    holder.join();
+}
+
+/// Recursive read (same thread can acquire multiple times)
+fn benchmark_rwlock_recursive_read() {
+    let rwlock = RwLock.new(42);
+
+    fn nested_read(rwlock: &RwLock<Int>, depth: Int) -> Int {
+        let guard = rwlock.read();
+        if depth > 0 {
+            nested_read(rwlock, depth - 1)
+        } else {
+            *guard
+        }
+    }
+
+    for _ in 0..100_000 {
+        let _ = nested_read(&rwlock, 5);
+    }
+}
+
+/// Fair RwLock (prevents reader starvation of writers)
+fn benchmark_rwlock_fair_read() {
+    let rwlock = Shared.new(FairRwLock.new(42));
+
+    let handles = (0..4).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..250_000 {
+                let guard = rwlock.read();
+                let _ = *guard;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Async read lock
+fn benchmark_rwlock_async_read() async {
+    let rwlock = AsyncRwLock.new(42);
+
+    for _ in 0..500_000 {
+        let guard = rwlock.read().await;
+        let _ = *guard;
+    }
+}
+
+/// Downgrade from write to read
+fn benchmark_rwlock_downgrade_read() {
+    let rwlock = RwLock.new(42);
+
+    for _ in 0..500_000 {
+        let write_guard = rwlock.write();
+        let read_guard = write_guard.downgrade();  // Atomic downgrade
+        let _ = *read_guard;
+    }
+}

@@ -1,0 +1,530 @@
+// =============================================================================
+// mod_test.vr - Tests for runtime module root types and constants
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, initialization, execution-env, core
+// @description: Tests for runtime module types, constants, and function
+//               signatures. Runtime initialization functions (init, shutdown,
+//               current_env) require actual runtime to execute, so we test
+//               type existence and constant values only.
+// =============================================================================
+
+mount core.runtime.{
+    ExecutionEnv, MemoryContext, CapabilityContext,
+    RecoveryContext, ConcurrencyContext,
+    ExecutionTier, RestartPolicy, IsolationLevel,
+    EXEC_ENV_SLOT, SUPERVISOR_SLOT, RECOVERY_SLOT,
+    // Function existence verification
+    current_env, current_env_mut, is_initialized,
+    init, shutdown,
+};
+mount core.runtime.spawn.{
+    SpawnConfig, SpawnConfigBuilder, PriorityLevel,
+};
+mount core.runtime.recovery.{
+    RetryPolicy, RetryConfig, CircuitBreaker, CircuitState,
+    BackoffStrategy, RecoveryStrategy,
+};
+mount core.runtime.supervisor.{
+    Supervisor, SupervisorId, SupervisorHandle,
+    SupervisionStrategy, ChildSpec, RestartIntensity,
+};
+
+// =============================================================================
+// SECTION 1: Context Slot Constants
+// =============================================================================
+
+@test
+fn test_exec_env_slot() {
+    assert_eq(EXEC_ENV_SLOT, 0);
+}
+
+@test
+fn test_supervisor_slot() {
+    assert_eq(SUPERVISOR_SLOT, 1);
+}
+
+@test
+fn test_recovery_slot() {
+    assert_eq(RECOVERY_SLOT, 2);
+}
+
+@test
+fn test_slots_unique() {
+    assert(EXEC_ENV_SLOT != SUPERVISOR_SLOT);
+    assert(SUPERVISOR_SLOT != RECOVERY_SLOT);
+    assert(EXEC_ENV_SLOT != RECOVERY_SLOT);
+}
+
+// =============================================================================
+// SECTION 2: Function Existence Verification
+// =============================================================================
+
+@test
+fn test_current_env_exists() {
+    // Verify the function exists and has correct type
+    let _ = current_env;
+}
+
+@test
+fn test_current_env_mut_exists() {
+    let _ = current_env_mut;
+}
+
+@test
+fn test_is_initialized_exists() {
+    let _ = is_initialized;
+}
+
+@test
+fn test_init_exists() {
+    let _ = init;
+}
+
+@test
+fn test_shutdown_exists() {
+    let _ = shutdown;
+}
+
+// =============================================================================
+// SECTION 3: ExecutionTier Type Tests
+// =============================================================================
+
+@test
+fn test_isolation_level_shared() {
+    let level = IsolationLevel.Shared;
+    assert(level is IsolationLevel.Shared);
+}
+
+@test
+fn test_isolation_level_variants() {
+    // Verify all variants exist
+    let _ = IsolationLevel.Shared;
+}
+
+// =============================================================================
+// SECTION 4: PriorityLevel Type Tests
+// =============================================================================
+
+@test
+fn test_priority_level_variants() {
+    let low = PriorityLevel.Low;
+    let normal = PriorityLevel.Normal;
+    let high = PriorityLevel.High;
+    let critical = PriorityLevel.Critical;
+
+    assert(low is PriorityLevel.Low);
+    assert(normal is PriorityLevel.Normal);
+    assert(high is PriorityLevel.High);
+    assert(critical is PriorityLevel.Critical);
+}
+
+@test
+fn test_priority_level_match() {
+    let p = PriorityLevel.High;
+    let val = match p {
+        PriorityLevel.Low => 0,
+        PriorityLevel.Normal => 1,
+        PriorityLevel.High => 2,
+        PriorityLevel.Critical => 3,
+    };
+    assert_eq(val, 2);
+}
+
+// =============================================================================
+// SECTION 5: CircuitState Type Tests
+// =============================================================================
+
+@test
+fn test_circuit_state_closed() {
+    let state = CircuitState.Closed;
+    assert(state is CircuitState.Closed);
+}
+
+@test
+fn test_circuit_state_open() {
+    let state = CircuitState.Open;
+    assert(state is CircuitState.Open);
+}
+
+@test
+fn test_circuit_state_half_open() {
+    let state = CircuitState.HalfOpen;
+    assert(state is CircuitState.HalfOpen);
+}
+
+@test
+fn test_circuit_state_match() {
+    let s = CircuitState.HalfOpen;
+    let val = match s {
+        CircuitState.Closed => "closed",
+        CircuitState.Open => "open",
+        CircuitState.HalfOpen => "half-open",
+    };
+    assert_eq(val, "half-open");
+}
+
+// =============================================================================
+// SECTION 6: SupervisionStrategy Type Tests
+// =============================================================================
+
+@test
+fn test_supervision_strategy_one_for_one() {
+    let strat = SupervisionStrategy.OneForOne;
+    assert(strat is SupervisionStrategy.OneForOne);
+}
+
+@test
+fn test_supervision_strategy_one_for_all() {
+    let strat = SupervisionStrategy.OneForAll;
+    assert(strat is SupervisionStrategy.OneForAll);
+}
+
+@test
+fn test_supervision_strategy_rest_for_one() {
+    let strat = SupervisionStrategy.RestForOne;
+    assert(strat is SupervisionStrategy.RestForOne);
+}
+
+// =============================================================================
+// SECTION 7: BackoffStrategy Type Tests
+// =============================================================================
+
+@test
+fn test_backoff_strategy_fixed() {
+    let strat = BackoffStrategy.Fixed { delay_ms: 1000 as UInt64 };
+    match strat {
+        BackoffStrategy.Fixed { delay_ms } => { assert_eq(delay_ms, 1000 as UInt64); }
+        _ => { assert(false); }
+    }
+}
+
+@test
+fn test_backoff_strategy_exponential() {
+    let strat = BackoffStrategy.Exponential {
+        base_ms: 100 as UInt64,
+        max_ms: 10000 as UInt64,
+        multiplier: 2,
+    };
+    match strat {
+        BackoffStrategy.Exponential { base_ms, max_ms, multiplier } => {
+            assert_eq(base_ms, 100 as UInt64);
+            assert_eq(multiplier, 2);
+        }
+        _ => { assert(false); }
+    }
+}
+
+@test
+fn test_backoff_strategy_none() {
+    let strat = BackoffStrategy.None;
+    assert(strat is BackoffStrategy.None);
+}
+
+@test
+fn test_backoff_strategy_linear() {
+    let strat = BackoffStrategy.Linear {
+        base_ms: 100 as UInt64,
+        increment_ms: 50 as UInt64,
+        max_ms: 5000 as UInt64,
+    };
+    assert(strat is BackoffStrategy.Linear);
+}
+
+// =============================================================================
+// SECTION 8: Type Existence Tests
+// =============================================================================
+
+@test
+fn test_execution_env_type_exists() {
+    let _ = ExecutionEnv;
+}
+
+@test
+fn test_memory_context_type_exists() {
+    let _ = MemoryContext;
+}
+
+@test
+fn test_capability_context_type_exists() {
+    let _ = CapabilityContext;
+}
+
+@test
+fn test_recovery_context_type_exists() {
+    let _ = RecoveryContext;
+}
+
+@test
+fn test_concurrency_context_type_exists() {
+    let _ = ConcurrencyContext;
+}
+
+@test
+fn test_spawn_config_type_exists() {
+    let _ = SpawnConfig;
+}
+
+@test
+fn test_spawn_config_builder_type_exists() {
+    let _ = SpawnConfigBuilder;
+}
+
+@test
+fn test_retry_policy_type_exists() {
+    let _ = RetryPolicy;
+}
+
+@test
+fn test_retry_config_type_exists() {
+    let _ = RetryConfig;
+}
+
+@test
+fn test_circuit_breaker_type_exists() {
+    let _ = CircuitBreaker;
+}
+
+@test
+fn test_supervisor_type_exists() {
+    let _ = Supervisor;
+}
+
+@test
+fn test_supervisor_id_type_exists() {
+    let _ = SupervisorId;
+}
+
+@test
+fn test_supervisor_handle_type_exists() {
+    let _ = SupervisorHandle;
+}
+
+@test
+fn test_child_spec_type_exists() {
+    let _ = ChildSpec;
+}
+
+@test
+fn test_restart_intensity_type_exists() {
+    let _ = RestartIntensity;
+}
+
+// =============================================================================
+// SECTION 9: IsolationLevel All Variants
+// =============================================================================
+
+@test
+fn test_isolation_level_send_only() {
+    let level = IsolationLevel.SendOnly;
+    assert(level is IsolationLevel.SendOnly);
+    assert(!(level is IsolationLevel.Shared));
+}
+
+@test
+fn test_isolation_level_full() {
+    let level = IsolationLevel.Full;
+    assert(level is IsolationLevel.Full);
+    assert(!(level is IsolationLevel.Shared));
+    assert(!(level is IsolationLevel.SendOnly));
+}
+
+@test
+fn test_isolation_level_match_exhaustive() {
+    let level = IsolationLevel.SendOnly;
+    let val = match level {
+        IsolationLevel.Shared => 0,
+        IsolationLevel.SendOnly => 1,
+        IsolationLevel.Full => 2,
+    };
+    assert_eq(val, 1);
+}
+
+// =============================================================================
+// SECTION 10: CircuitState All-Pairs Distinctness
+// =============================================================================
+
+@test
+fn test_circuit_state_closed_not_others() {
+    let s = CircuitState.Closed;
+    assert(s is CircuitState.Closed);
+    assert(!(s is CircuitState.Open));
+    assert(!(s is CircuitState.HalfOpen));
+}
+
+@test
+fn test_circuit_state_open_not_others() {
+    let s = CircuitState.Open;
+    assert(s is CircuitState.Open);
+    assert(!(s is CircuitState.Closed));
+    assert(!(s is CircuitState.HalfOpen));
+}
+
+@test
+fn test_circuit_state_half_open_not_others() {
+    let s = CircuitState.HalfOpen;
+    assert(s is CircuitState.HalfOpen);
+    assert(!(s is CircuitState.Closed));
+    assert(!(s is CircuitState.Open));
+}
+
+// =============================================================================
+// SECTION 11: SupervisionStrategy Match & Distinctness
+// =============================================================================
+
+@test
+fn test_supervision_strategy_match_exhaustive() {
+    let strat = SupervisionStrategy.RestForOne;
+    let val = match strat {
+        SupervisionStrategy.OneForOne => "1-1",
+        SupervisionStrategy.OneForAll => "1-all",
+        SupervisionStrategy.RestForOne => "rest-1",
+    };
+    assert_eq(val, "rest-1");
+}
+
+@test
+fn test_supervision_strategy_all_distinct() {
+    let s1 = SupervisionStrategy.OneForOne;
+    let s2 = SupervisionStrategy.OneForAll;
+    let s3 = SupervisionStrategy.RestForOne;
+    assert(s1 is SupervisionStrategy.OneForOne);
+    assert(!(s1 is SupervisionStrategy.OneForAll));
+    assert(!(s1 is SupervisionStrategy.RestForOne));
+    assert(s2 is SupervisionStrategy.OneForAll);
+    assert(!(s2 is SupervisionStrategy.OneForOne));
+    assert(s3 is SupervisionStrategy.RestForOne);
+    assert(!(s3 is SupervisionStrategy.OneForAll));
+}
+
+// =============================================================================
+// SECTION 12: BackoffStrategy Edge Cases
+// =============================================================================
+
+@test
+fn test_backoff_strategy_fixed_zero_delay() {
+    let strat = BackoffStrategy.Fixed { delay_ms: 0 as UInt64 };
+    match strat {
+        BackoffStrategy.Fixed { delay_ms } => { assert_eq(delay_ms, 0 as UInt64); }
+        _ => { assert(false); }
+    }
+}
+
+@test
+fn test_backoff_strategy_none_not_others() {
+    let s = BackoffStrategy.None;
+    assert(s is BackoffStrategy.None);
+    assert(!(s is BackoffStrategy.Fixed));
+    assert(!(s is BackoffStrategy.Linear));
+    assert(!(s is BackoffStrategy.Exponential));
+}
+
+// =============================================================================
+// SECTION 13: Additional Tests
+// =============================================================================
+
+@test
+fn test_execution_tier_tier0() {
+    let tier = ExecutionTier.Tier0_Full;
+    assert(tier is ExecutionTier.Tier0_Full);
+    assert(!(tier is ExecutionTier.Tier1_Epoch));
+}
+
+@test
+fn test_execution_tier_all_variants() {
+    let t0 = ExecutionTier.Tier0_Full;
+    let t1 = ExecutionTier.Tier1_Epoch;
+    let t2 = ExecutionTier.Tier2_Gen;
+    let t3 = ExecutionTier.Tier3_Unchecked;
+    assert(t0 is ExecutionTier.Tier0_Full);
+    assert(t1 is ExecutionTier.Tier1_Epoch);
+    assert(t2 is ExecutionTier.Tier2_Gen);
+    assert(t3 is ExecutionTier.Tier3_Unchecked);
+}
+
+@test
+fn test_isolation_level_send_only() {
+    let level = IsolationLevel.SendOnly;
+    assert(level is IsolationLevel.SendOnly);
+    assert(!(level is IsolationLevel.Shared));
+    assert(!(level is IsolationLevel.Full));
+}
+
+@test
+fn test_isolation_level_full_not_shared() {
+    let level = IsolationLevel.Full;
+    assert(level is IsolationLevel.Full);
+    assert(!(level is IsolationLevel.Shared));
+}
+
+@test
+fn test_backoff_strategy_linear_fields() {
+    let strat = BackoffStrategy.Linear {
+        base_ms: 100 as UInt64,
+        increment_ms: 50 as UInt64,
+        max_ms: 5000 as UInt64,
+    };
+    match strat {
+        BackoffStrategy.Linear { base_ms, increment_ms, max_ms } => {
+            assert_eq(base_ms, 100 as UInt64);
+            assert_eq(increment_ms, 50 as UInt64);
+            assert_eq(max_ms, 5000 as UInt64);
+        }
+        _ => { assert(false); }
+    }
+}
+
+@test
+fn test_backoff_strategy_exponential_fields() {
+    let strat = BackoffStrategy.Exponential {
+        base_ms: 100 as UInt64,
+        max_ms: 10000 as UInt64,
+        multiplier: 2,
+    };
+    match strat {
+        BackoffStrategy.Exponential { base_ms, max_ms, multiplier } => {
+            assert_eq(base_ms, 100 as UInt64);
+            assert_eq(max_ms, 10000 as UInt64);
+            assert_eq(multiplier, 2);
+        }
+        _ => { assert(false); }
+    }
+}
+
+@test
+fn test_supervision_strategy_match_all() {
+    fn strategy_name(s: SupervisionStrategy) -> Text {
+        match s {
+            SupervisionStrategy.OneForOne => "one_for_one",
+            SupervisionStrategy.OneForAll => "one_for_all",
+            SupervisionStrategy.RestForOne => "rest_for_one",
+        }
+    }
+    assert_eq(strategy_name(SupervisionStrategy.OneForOne), "one_for_one");
+    assert_eq(strategy_name(SupervisionStrategy.OneForAll), "one_for_all");
+    assert_eq(strategy_name(SupervisionStrategy.RestForOne), "rest_for_one");
+}
+
+@test
+fn test_execution_tier_match() {
+    fn tier_name(t: ExecutionTier) -> Text {
+        match t {
+            ExecutionTier.Tier0_Full => "full",
+            ExecutionTier.Tier1_Epoch => "epoch",
+            ExecutionTier.Tier2_Gen => "gen",
+            ExecutionTier.Tier3_Unchecked => "unchecked",
+        }
+    }
+    assert_eq(tier_name(ExecutionTier.Tier0_Full), "full");
+    assert_eq(tier_name(ExecutionTier.Tier3_Unchecked), "unchecked");
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

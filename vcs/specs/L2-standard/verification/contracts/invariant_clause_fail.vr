@@ -1,0 +1,122 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, invariant, error
+// @timeout: 5000
+// @expected-error: E603 "Loop invariant violated"
+
+/// Tests for invariant clause violations
+/// Loop invariants that don't hold
+
+/// Invariant not established initially
+@verify(proof)
+fn bad_initial_invariant(arr: &List<Int>) -> Int {
+    let mut sum = 100;  // ERROR: should be 0 for invariant to hold
+    for i in 0..arr.len() {
+        contract#"invariant 
+            sum == arr[0..i].iter().sum();  // Not true at i=0 with sum=100
+        ";
+        sum += arr[i];
+    }
+    sum
+}
+
+/// Invariant not preserved by loop body
+@verify(proof)
+fn invariant_not_preserved(arr: &List<Int>) -> Int {
+    let mut count = 0;
+    for i in 0..arr.len() {
+        contract#"invariant 
+            count == i;  // ERROR: we increment count by 2 each iteration
+        ";
+        count += 2;  // Breaks invariant: count becomes 2*i, not i
+    }
+    count
+}
+
+/// Invariant claims property that becomes false
+@verify(proof)
+fn invariant_becomes_false(arr: &mut List<Int>) {
+    contract#"
+        requires arr.len() > 0;
+    ";
+    for i in 0..arr.len() {
+        contract#"invariant 
+            forall j: Int. 0 <= j < arr.len() implies arr[j] >= 0;  // ERROR
+        ";
+        arr[i] = -1;  // Sets element to negative, breaking invariant
+    }
+}
+
+/// Nested loop with inner invariant violation
+@verify(proof)
+fn nested_invariant_error(matrix: &List<List<Int>>) -> Int {
+    let mut total = 0;
+    for i in 0..matrix.len() {
+        contract#"invariant 
+            total >= 0;
+        ";
+        for j in 0..matrix[i].len() {
+            contract#"invariant 
+                total == matrix[0..i].flatten().sum() + matrix[i][0..j].sum();
+            ";
+            // ERROR: We're adding matrix[i][j], but invariant expects
+            // the sum up to but not including current element
+            total += matrix[i][j];
+        }
+    }
+    total
+}
+
+/// Decreasing variant that doesn't decrease
+@verify(proof)
+fn non_decreasing_variant(n: Int{>= 0}) -> Int {
+    contract#"
+        requires n >= 0;
+        decreases n;  // ERROR: n doesn't decrease
+    ";
+    let mut x = n;
+    while x > 0 {
+        contract#"invariant 
+            x >= 0;
+            decreases x;
+        ";
+        x += 1;  // Increases instead of decreases - infinite loop!
+        if x > 100 { break; }
+    }
+    x
+}
+
+/// Type invariant violated by method
+type Counter is {
+    value: Int,
+    max: Int,
+} { self.value >= 0 && self.value <= self.max };
+
+implement Counter {
+    @verify(proof)
+    fn increment_unchecked(&mut self) {
+        contract#"
+            // Missing: requires self.value < self.max
+            ensures self.value == old(self.value) + 1;
+        ";
+        // ERROR: Could violate type invariant value <= max
+        self.value += 1;
+    }
+}
+
+/// Invariant with wrong quantifier bounds
+@verify(proof)
+fn wrong_quantifier_bounds(arr: &List<Int>) -> Int {
+    let mut max = arr[0];
+    for i in 1..arr.len() {
+        contract#"invariant 
+            // ERROR: Should be 0 <= j < i, not 0 <= j <= i
+            forall j: Int. 0 <= j <= i implies max >= arr[j];
+        ";
+        if arr[i] > max {
+            max = arr[i];
+        }
+    }
+    max
+}

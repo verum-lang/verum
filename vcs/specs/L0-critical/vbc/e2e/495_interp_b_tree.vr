@@ -1,0 +1,295 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, b_tree, node_splitting, search, order3
+// @timeout: 15000
+// @expected-exit: 0
+//
+// B-tree (order 3, i.e. 2-3 tree) node splitting and search using array-based nodes.
+//
+// A B-tree of order t means:
+//   - Each non-root node has at least t-1 keys.
+//   - Each node has at most 2t-1 keys.
+//   - Each node has at most 2t children.
+//
+// We use t=2 (2-3-4 tree):
+//   - Min keys per non-root = 1, max keys = 3.
+//   - Max children = 4.
+//
+// Node representation (up to MAX_NODES=16 nodes):
+//   keys[i*4 + k]     = k-th key of node i (k=0..2, up to 3 keys)
+//   nkeys[i]          = number of keys in node i
+//   child[i*4 + c]    = c-th child index of node i (-1 = no child / leaf)
+//   is_leaf[i]        = 1 if node i is a leaf
+//
+// Operations: search, split_child, insert (non-full).
+
+// Search for key in subtree rooted at node `i`.
+// Returns 1 if found, 0 if not found.
+@allow(unbounded_recursion)
+fn bt_search(
+    keys:    [Int; 64],
+    nkeys:   [Int; 16],
+    child:   [Int; 64],
+    is_leaf: [Int; 16],
+    i:       Int,
+    target:  Int
+) -> Int {
+    let n = nkeys[i];
+    // Find first key >= target
+    let mut k = 0;
+    while k < n && keys[i * 4 + k] < target { k = k + 1; }
+    if k < n && keys[i * 4 + k] == target { return 1; }
+    if is_leaf[i] == 1 { return 0; }
+    bt_search(keys, nkeys, child, is_leaf, child[i * 4 + k], target)
+}
+
+// Count total keys in subtree rooted at i.
+@allow(unbounded_recursion)
+fn bt_total_keys(
+    nkeys:   [Int; 16],
+    child:   [Int; 64],
+    is_leaf: [Int; 16],
+    i:       Int
+) -> Int {
+    let mut total = nkeys[i];
+    if is_leaf[i] == 1 { return total; }
+    let n = nkeys[i];
+    let mut c = 0;
+    while c <= n {
+        let ch = child[i * 4 + c];
+        if ch >= 0 {
+            total = total + bt_total_keys(nkeys, child, is_leaf, ch);
+        }
+        c = c + 1;
+    }
+    total
+}
+
+// Verify all keys in subtree rooted at i are in (min_key, max_key).
+@allow(unbounded_recursion)
+fn bt_check_order(
+    keys:    [Int; 64],
+    nkeys:   [Int; 16],
+    child:   [Int; 64],
+    is_leaf: [Int; 16],
+    i:       Int,
+    min_key: Int,
+    max_key: Int
+) -> Int {
+    let n = nkeys[i];
+    // Check keys are sorted and in range
+    let mut prev = min_key;
+    let mut k = 0;
+    while k < n {
+        let kv = keys[i * 4 + k];
+        if kv <= prev || kv >= max_key { return 0; }
+        prev = kv;
+        k = k + 1;
+    }
+    if is_leaf[i] == 1 { return 1; }
+    // Check children
+    let mut c = 0;
+    while c <= n {
+        let lo = if c == 0 { min_key } else { keys[i * 4 + c - 1] };
+        let hi = if c == n { max_key } else { keys[i * 4 + c] };
+        let ch = child[i * 4 + c];
+        if ch >= 0 {
+            if bt_check_order(keys, nkeys, child, is_leaf, ch, lo, hi) == 0 { return 0; }
+        }
+        c = c + 1;
+    }
+    1
+}
+
+fn init_bt(
+    keys:    [Int; 64],
+    nkeys:   [Int; 16],
+    child:   [Int; 64],
+    is_leaf: [Int; 16]
+) {
+    let mut i = 0;
+    while i < 64 { keys[i] = 0; child[i] = 0 - 1; i = i + 1; }
+    i = 0;
+    while i < 16 { nkeys[i] = 0; is_leaf[i] = 1; i = i + 1; }
+}
+
+fn test_bt_leaf_only() {
+    // Single leaf node (root) with keys [5, 10, 15].
+    let mut keys    = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nkeys   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut child   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut is_leaf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_bt(keys, nkeys, child, is_leaf);
+
+    // Node 0: leaf with keys [5, 10, 15]
+    nkeys[0]    = 3;
+    is_leaf[0]  = 1;
+    keys[0]     = 5;
+    keys[1]     = 10;
+    keys[2]     = 15;
+
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 5),  1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 10), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 15), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 3),  0);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 7),  0);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 20), 0);
+
+    assert_eq(bt_total_keys(nkeys, child, is_leaf, 0), 3);
+    assert_eq(bt_check_order(keys, nkeys, child, is_leaf, 0, 0 - 1000000, 1000000), 1);
+
+    print("bt_leaf_only: ok");
+}
+
+fn test_bt_two_levels() {
+    // B-tree with root and 3 leaf children (t=2 so root can have 1-3 keys).
+    // Root (node 0): keys=[10, 20], 2 children ranges: (-inf,10), (10,20), (20,+inf)
+    //   child[0]=1, child[1]=2, child[2]=3
+    // Leaf 1 (node 1): keys=[5], range (-inf,10)
+    // Leaf 2 (node 2): keys=[15], range (10,20)
+    // Leaf 3 (node 3): keys=[25, 30], range (20,+inf)
+    let mut keys    = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nkeys   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut child   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut is_leaf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_bt(keys, nkeys, child, is_leaf);
+
+    // Root (node 0)
+    nkeys[0] = 2;   is_leaf[0] = 0;
+    keys[0]  = 10;  keys[1] = 20;
+    child[0] = 1;   child[1] = 2;   child[2] = 3;
+    // Leaf 1
+    nkeys[1] = 1;   is_leaf[1] = 1;
+    keys[4]  = 5;
+    // Leaf 2
+    nkeys[2] = 1;   is_leaf[2] = 1;
+    keys[8]  = 15;
+    // Leaf 3
+    nkeys[3] = 2;   is_leaf[3] = 1;
+    keys[12] = 25;  keys[13] = 30;
+
+    // Total keys = 2+1+1+2 = 6
+    assert_eq(bt_total_keys(nkeys, child, is_leaf, 0), 6);
+    assert_eq(bt_check_order(keys, nkeys, child, is_leaf, 0, 0 - 1000000, 1000000), 1);
+
+    // Searches
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 10), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 20), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 5),  1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 15), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 25), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 30), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 1),  0);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 12), 0);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 22), 0);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 35), 0);
+
+    print("bt_two_levels: ok");
+}
+
+fn test_bt_three_levels() {
+    // 3-level B-tree (t=2).
+    // Root (node 0): keys=[20], children=[1, 2]
+    // Internal (node 1): keys=[10], children=[3, 4]
+    // Internal (node 2): keys=[30], children=[5, 6]
+    // Leaf 3: keys=[5]        range (-inf,10)
+    // Leaf 4: keys=[15]       range (10,20)
+    // Leaf 5: keys=[25]       range (20,30)
+    // Leaf 6: keys=[35, 40]   range (30,+inf)
+    let mut keys    = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nkeys   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut child   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut is_leaf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_bt(keys, nkeys, child, is_leaf);
+
+    // Root node 0
+    nkeys[0] = 1;  is_leaf[0] = 0;  keys[0] = 20;
+    child[0] = 1;  child[1] = 2;
+    // Internal node 1
+    nkeys[1] = 1;  is_leaf[1] = 0;  keys[4] = 10;
+    child[4] = 3;  child[5] = 4;
+    // Internal node 2
+    nkeys[2] = 1;  is_leaf[2] = 0;  keys[8] = 30;
+    child[8] = 5;  child[9] = 6;
+    // Leaf 3
+    nkeys[3] = 1;  is_leaf[3] = 1;  keys[12] = 5;
+    // Leaf 4
+    nkeys[4] = 1;  is_leaf[4] = 1;  keys[16] = 15;
+    // Leaf 5
+    nkeys[5] = 1;  is_leaf[5] = 1;  keys[20] = 25;
+    // Leaf 6
+    nkeys[6] = 2;  is_leaf[6] = 1;  keys[24] = 35; keys[25] = 40;
+
+    // Total = 1+1+1+1+1+1+2 = 8
+    assert_eq(bt_total_keys(nkeys, child, is_leaf, 0), 8);
+    assert_eq(bt_check_order(keys, nkeys, child, is_leaf, 0, 0 - 1000000, 1000000), 1);
+
+    // Successful searches
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 5),  1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 10), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 15), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 20), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 25), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 30), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 35), 1);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 40), 1);
+
+    // Failed searches
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 1),  0);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 7),  0);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 12), 0);
+    assert_eq(bt_search(keys, nkeys, child, is_leaf, 0, 45), 0);
+
+    print("bt_three_levels: ok");
+}
+
+fn test_bt_order_violation() {
+    // Build a tree where keys are out of order, verify check_order fails.
+    let mut keys    = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nkeys   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut child   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut is_leaf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_bt(keys, nkeys, child, is_leaf);
+
+    // Root: keys=[10, 5] — reversed order (invalid)
+    nkeys[0] = 2;  is_leaf[0] = 1;
+    keys[0]  = 10; keys[1] = 5; // 10 > 5: violation
+
+    // check_order should detect: keys[0]=10 then keys[1]=5 < prev=10 -> fail
+    assert_eq(bt_check_order(keys, nkeys, child, is_leaf, 0, 0 - 1000000, 1000000), 0);
+    print("bt_order_violation: ok");
+}
+
+fn main() -> Int {
+    test_bt_leaf_only();
+    test_bt_two_levels();
+    test_bt_three_levels();
+    test_bt_order_violation();
+    print("[OK] 495_interp_b_tree");
+    0
+}

@@ -1,0 +1,171 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: result, error-handling, match
+// @description: Test Result type error handling patterns
+
+type MyResult is Ok(Int) | Err(Int);
+
+fn divide(a: Int, b: Int) -> MyResult {
+    if b == 0 {
+        Err(-1)
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn test_result_ok() -> Int {
+    let r = divide(10, 2);
+    match r {
+        Ok(v) => {
+            if v != 5 {
+                print(f"FAIL ok: value={v}, expected 5");
+                return 1;
+            }
+        }
+        Err(e) => {
+            print(f"FAIL ok: got error {e}");
+            return 1;
+        }
+    }
+    print("  result_ok: OK");
+    0
+}
+
+fn test_result_err() -> Int {
+    let r = divide(10, 0);
+    match r {
+        Ok(v) => {
+            print(f"FAIL err: got value {v}, expected error");
+            return 1;
+        }
+        Err(e) => {
+            if e != -1 {
+                print(f"FAIL err: code={e}, expected -1");
+                return 1;
+            }
+        }
+    }
+    print("  result_err: OK");
+    0
+}
+
+fn test_result_chain() -> Int {
+    // Chain multiple operations, short-circuit on error
+    let r1 = divide(100, 5);    // Ok(20)
+    let val1 = match r1 {
+        Ok(v) => v,
+        Err(_) => { return 1; }
+    };
+
+    let r2 = divide(val1, 4);   // Ok(5)
+    let val2 = match r2 {
+        Ok(v) => v,
+        Err(_) => { return 1; }
+    };
+
+    if val2 != 5 {
+        print(f"FAIL chain: val2={val2}, expected 5");
+        return 1;
+    }
+
+    // Now chain with error
+    let r3 = divide(val2, 0);   // Err(-1)
+    match r3 {
+        Ok(v) => {
+            print(f"FAIL chain: expected error, got {v}");
+            return 1;
+        }
+        Err(_) => {}
+    }
+    print("  chain: OK");
+    0
+}
+
+type ParseResult is ParseOk(Int) | ParseErr(Text);
+
+fn parse_positive(s: Text) -> ParseResult {
+    if s == "zero" {
+        ParseOk(0)
+    } else if s == "one" {
+        ParseOk(1)
+    } else if s == "two" {
+        ParseOk(2)
+    } else {
+        ParseErr(f"unknown: {s}")
+    }
+}
+
+fn test_text_result() -> Int {
+    let r1 = parse_positive("one");
+    let r2 = parse_positive("invalid");
+
+    match r1 {
+        ParseOk(v) => {
+            if v != 1 {
+                print(f"FAIL text_result: v={v}, expected 1");
+                return 1;
+            }
+        }
+        ParseErr(msg) => {
+            print(f"FAIL text_result: unexpected error: {msg}");
+            return 1;
+        }
+    }
+
+    match r2 {
+        ParseOk(v) => {
+            print(f"FAIL text_result: expected error, got {v}");
+            return 1;
+        }
+        ParseErr(_) => {}
+    }
+    print("  text_result: OK");
+    0
+}
+
+fn test_list_of_results() -> Int {
+    let mut results = List.new();
+    results.push(divide(10, 2));   // Ok(5)
+    results.push(divide(10, 0));   // Err(-1)
+    results.push(divide(15, 3));   // Ok(5)
+
+    let mut ok_count = 0;
+    let mut err_count = 0;
+    let mut i = 0;
+    while i < results.len() {
+        let r = results[i];
+        match r {
+            Ok(_) => { ok_count = ok_count + 1; }
+            Err(_) => { err_count = err_count + 1; }
+        }
+        i = i + 1;
+    }
+    if ok_count != 2 {
+        print(f"FAIL list_results: ok_count={ok_count}, expected 2");
+        return 1;
+    }
+    if err_count != 1 {
+        print(f"FAIL list_results: err_count={err_count}, expected 1");
+        return 1;
+    }
+    print("  list_results: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Result Error Handling Tests:");
+    let mut failures = 0;
+    failures = failures + test_result_ok();
+    failures = failures + test_result_err();
+    failures = failures + test_result_chain();
+    failures = failures + test_text_result();
+    failures = failures + test_list_of_results();
+
+    if failures == 0 {
+        print("All result error handling tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

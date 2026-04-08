@@ -1,0 +1,215 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, puzzle, fifteen, sliding
+// @timeout: 30000
+
+// 15-puzzle / sliding puzzle operations on a 4x4 grid
+// Grid stored as two Arr8s (16 cells), or simplified to 3x3 (8-puzzle) in single Arr8
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// 3x3 grid (8-puzzle): positions 0-7 in Arr8, value 0 = blank
+// Goal state: 1,2,3,4,5,6,7,8,0 but we only store 8 cells
+// Use positions as: row = i/3, col = i%3
+
+fn row(i: Int) -> Int { i / 3 }
+fn col(i: Int) -> Int { i % 3 }
+
+// Find position of blank (0) in grid
+fn find_blank(grid: Arr8) -> Int {
+    let mut pos = 0;
+    let mut i = 0;
+    while i < 8 {
+        if get8(grid, i) == 0 { pos = i; }
+        i = i + 1;
+    }
+    pos
+}
+
+// Swap two positions
+fn swap8(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = get8(a, i);
+    let vj = get8(a, j);
+    let tmp = set8(a, i, vj);
+    set8(tmp, j, vi)
+}
+
+// Move blank in direction: 0=up, 1=right, 2=down, 3=left
+// Returns new grid (or same grid if invalid move)
+fn move_blank(grid: Arr8, dir: Int) -> Arr8 {
+    let pos = find_blank(grid);
+    let r = row(pos);
+    let c = col(pos);
+    if dir == 0 { // up
+        if r > 0 { swap8(grid, pos, pos - 3) } else { grid }
+    } else if dir == 1 { // right
+        if c < 2 { swap8(grid, pos, pos + 1) } else { grid }
+    } else if dir == 2 { // down
+        if r < 2 { swap8(grid, pos, pos + 3) } else { grid }
+    } else { // left
+        if c > 0 { swap8(grid, pos, pos - 1) } else { grid }
+    }
+}
+
+// Manhattan distance heuristic
+// Each tile should be at position (tile-1) for tile 1-7, and 0 is uncounted
+fn manhattan_dist(grid: Arr8) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 8 {
+        let val = get8(grid, i);
+        if val != 0 {
+            let goal_pos = val - 1; // tile 1 goes to pos 0, etc.
+            total = total + abs_val(row(i) - row(goal_pos)) + abs_val(col(i) - col(goal_pos));
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// Count misplaced tiles (not counting blank)
+fn misplaced(grid: Arr8) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        let val = get8(grid, i);
+        if val != 0 {
+            if val != i + 1 { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Check if grid is solved: 1,2,3,4,5,6,7,0
+fn is_solved(grid: Arr8) -> Int {
+    let mut ok = 1;
+    let mut i = 0;
+    while i < 7 {
+        if get8(grid, i) != i + 1 { ok = 0; }
+        i = i + 1;
+    }
+    if get8(grid, 7) != 0 { ok = 0; }
+    ok
+}
+
+// Count inversions (for solvability check)
+fn count_inversions(grid: Arr8) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        let mut j = i + 1;
+        while j < 8 {
+            let a = get8(grid, i);
+            let b = get8(grid, j);
+            if a != 0 {
+                if b != 0 {
+                    if a > b { count = count + 1; }
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// For 3x3 puzzle: solvable if inversions count is even
+fn is_solvable(grid: Arr8) -> Int {
+    if count_inversions(grid) % 2 == 0 { 1 } else { 0 }
+}
+
+fn test_solved_state() -> Int {
+    // Goal: 1,2,3,4,5,6,7,0
+    let goal = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 0 };
+    assert_eq(is_solved(goal), 1);
+    assert_eq(manhattan_dist(goal), 0);
+    assert_eq(misplaced(goal), 0);
+    1
+}
+
+fn test_one_move() -> Int {
+    // Start from goal, move blank left → swaps 7 and 0
+    let goal = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 0 };
+    let moved = move_blank(goal, 3); // left: swap pos 7 and pos 6
+    // Now: 1,2,3,4,5,6,0,7
+    assert_eq(get8(moved, 6), 0);
+    assert_eq(get8(moved, 7), 7);
+    assert_eq(is_solved(moved), 0);
+    assert_eq(misplaced(moved), 1); // only tile 7 is misplaced
+    // Move right to restore
+    let restored = move_blank(moved, 1);
+    assert_eq(is_solved(restored), 1);
+    1
+}
+
+fn test_manhattan() -> Int {
+    // 2,1,3,4,5,6,7,0 → tiles 1 and 2 swapped
+    // Tile 2 at pos 0, should be at pos 1: distance 1
+    // Tile 1 at pos 1, should be at pos 0: distance 1
+    let grid = Arr8 { v0: 2, v1: 1, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 0 };
+    assert_eq(manhattan_dist(grid), 2);
+    assert_eq(misplaced(grid), 2);
+    1
+}
+
+fn test_inversions() -> Int {
+    // Goal state: 0 inversions
+    let goal = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 0 };
+    assert_eq(count_inversions(goal), 0);
+    assert_eq(is_solvable(goal), 1);
+    // 2,1,3,4,5,6,7,0: 1 inversion (2 before 1)
+    let grid = Arr8 { v0: 2, v1: 1, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 0 };
+    assert_eq(count_inversions(grid), 1);
+    assert_eq(is_solvable(grid), 0); // odd inversions: unsolvable
+    1
+}
+
+fn test_boundary_moves() -> Int {
+    // Blank at corner (pos 0): can only move right or down
+    let grid = Arr8 { v0: 0, v1: 1, v2: 2, v3: 3, v4: 4, v5: 5, v6: 6, v7: 7 };
+    // Move up: invalid, grid unchanged
+    let up = move_blank(grid, 0);
+    assert_eq(find_blank(up), 0); // still at 0
+    // Move left: invalid
+    let left_m = move_blank(grid, 3);
+    assert_eq(find_blank(left_m), 0);
+    // Move right: valid
+    let right_m = move_blank(grid, 1);
+    assert_eq(find_blank(right_m), 1);
+    // Move down: valid
+    let down = move_blank(grid, 2);
+    assert_eq(find_blank(down), 3);
+    1
+}
+
+fn main() -> Int {
+    test_solved_state();
+    test_one_move();
+    test_manhattan();
+    test_inversions();
+    test_boundary_moves();
+    print("[OK] 669_game_of_fifteen_aot");
+    0
+}

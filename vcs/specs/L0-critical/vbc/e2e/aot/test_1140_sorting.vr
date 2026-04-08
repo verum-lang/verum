@@ -1,0 +1,198 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: sorting, algorithms, merge-sort, quickselect
+// @description: Test sorting algorithm implementations
+
+fn swap(items: List<Int>, i: Int, j: Int) {
+    let tmp = items[i];
+    items[i] = items[j];
+    items[j] = tmp;
+}
+
+fn selection_sort(items: List<Int>) {
+    let n = items.len();
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if items[j] < items[min_idx] {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            swap(items, i, min_idx);
+        }
+        i = i + 1;
+    }
+}
+
+fn test_selection_sort() -> Int {
+    let mut items = List.new();
+    items.push(64);
+    items.push(25);
+    items.push(12);
+    items.push(22);
+    items.push(11);
+    selection_sort(items);
+    if items[0] != 11 || items[1] != 12 || items[2] != 22 || items[3] != 25 || items[4] != 64 {
+        print("FAIL selection_sort");
+        return 1;
+    }
+    print("  selection_sort: OK");
+    0
+}
+
+fn bubble_sort(items: List<Int>) {
+    let n = items.len();
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        let mut swapped = false;
+        while j < n - i - 1 {
+            if items[j] > items[j + 1] {
+                swap(items, j, j + 1);
+                swapped = true;
+            }
+            j = j + 1;
+        }
+        if !swapped {
+            break;
+        }
+        i = i + 1;
+    }
+}
+
+fn test_bubble_sort() -> Int {
+    let mut items = List.new();
+    items.push(5);
+    items.push(1);
+    items.push(4);
+    items.push(2);
+    items.push(8);
+    bubble_sort(items);
+    if items[0] != 1 || items[1] != 2 || items[2] != 4 || items[3] != 5 || items[4] != 8 {
+        print("FAIL bubble_sort");
+        return 1;
+    }
+    print("  bubble_sort: OK");
+    0
+}
+
+// Counting sort for small non-negative integers
+fn counting_sort(items: List<Int>, max_val: Int) {
+    let mut counts = List.new();
+    let mut i = 0;
+    while i <= max_val {
+        counts.push(0);
+        i = i + 1;
+    }
+
+    // Count occurrences
+    i = 0;
+    while i < items.len() {
+        counts[items[i]] = counts[items[i]] + 1;
+        i = i + 1;
+    }
+
+    // Write back sorted
+    let mut idx = 0;
+    let mut val = 0;
+    while val <= max_val {
+        let mut c = 0;
+        while c < counts[val] {
+            items[idx] = val;
+            idx = idx + 1;
+            c = c + 1;
+        }
+        val = val + 1;
+    }
+}
+
+fn test_counting_sort() -> Int {
+    let mut items = List.new();
+    items.push(4);
+    items.push(2);
+    items.push(2);
+    items.push(8);
+    items.push(3);
+    items.push(3);
+    items.push(1);
+    counting_sort(items, 8);
+    if items[0] != 1 || items[1] != 2 || items[2] != 2 || items[3] != 3 || items[4] != 3 || items[5] != 4 || items[6] != 8 {
+        print("FAIL counting_sort");
+        return 1;
+    }
+    print("  counting_sort: OK");
+    0
+}
+
+fn is_sorted(items: List<Int>) -> Bool {
+    let mut i = 1;
+    while i < items.len() {
+        if items[i] < items[i - 1] {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_sorted_check() -> Int {
+    let mut sorted = List.new();
+    sorted.push(1); sorted.push(3); sorted.push(5);
+    if !is_sorted(sorted) {
+        print("FAIL: should be sorted");
+        return 1;
+    }
+
+    let mut unsorted = List.new();
+    unsorted.push(3); unsorted.push(1); unsorted.push(2);
+    if is_sorted(unsorted) {
+        print("FAIL: should not be sorted");
+        return 1;
+    }
+    print("  sorted_check: OK");
+    0
+}
+
+fn test_sort_stability() -> Int {
+    // Sort a large-ish array
+    let mut items = List.new();
+    let mut i = 100;
+    while i > 0 {
+        items.push(i);
+        i = i - 1;
+    }
+    // items = [100, 99, ..., 1]
+    selection_sort(items);
+    if items[0] != 1 || items[99] != 100 {
+        print(f"FAIL large sort: [{items[0]}, ..., {items[99]}]");
+        return 1;
+    }
+    if !is_sorted(items) {
+        print("FAIL: large array not sorted");
+        return 1;
+    }
+    print("  sort_stability: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Sorting Tests:");
+    let mut failures = 0;
+    failures = failures + test_selection_sort();
+    failures = failures + test_bubble_sort();
+    failures = failures + test_counting_sort();
+    failures = failures + test_sorted_check();
+    failures = failures + test_sort_stability();
+
+    if failures == 0 {
+        print("All sorting tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

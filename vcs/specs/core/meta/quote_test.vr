@@ -1,0 +1,636 @@
+// =============================================================================
+// vcs/specs/core/meta/quote_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: core, meta, quote, quasi-quotation, code-generation, token-stream
+// @description: Comprehensive tests for quasi-quotation support including
+//               QuoteBuilder, GroupBuilder, QuotePart, and convenience functions.
+//
+// Coverage:
+// - QuoteBuilder: construction, basic tokens, literals, delimiters, common patterns, building
+// - GroupBuilder: construction, methods, close
+// - QuotePart: all variants
+// - Convenience functions: empty, ident, string, int, parens, braces, brackets, join_with
+//
+// Test Strategy:
+// - Type existence verification
+// - Builder pattern construction and chaining
+// - Enum variant matching
+// - Convenience function invocation
+// =============================================================================
+
+module specs.core.meta.quote_test;
+
+mount core.meta.quote.{
+    QuoteBuilder, GroupBuilder, QuotePart,
+    empty as quote_empty, ident as quote_ident,
+    string as quote_string, int as quote_int,
+    parens, braces, brackets, join_with,
+};
+mount core.meta.token.{TokenStream, TokenTree, Delimiter};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// QuoteBuilder — Construction
+// =============================================================================
+
+@test
+fn test_quote_builder_new() {
+    let builder = QuoteBuilder.new();
+    let _ = builder;
+}
+
+@test
+fn test_quote_builder_build_empty() {
+    let builder = QuoteBuilder.new();
+    let stream: TokenStream = builder.build();
+    assert(stream.is_empty());
+}
+
+@test
+fn test_quote_builder_build_returns_token_stream() {
+    let builder = QuoteBuilder.new();
+    let stream: TokenStream = builder.build();
+    assert_eq(stream.len(), 0);
+}
+
+// =============================================================================
+// QuoteBuilder — Basic Tokens
+// =============================================================================
+
+@test
+fn test_quote_builder_ident() {
+    let stream = QuoteBuilder.new()
+        .ident("foo")
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_multiple_idents() {
+    let stream = QuoteBuilder.new()
+        .ident("foo")
+        .ident("bar")
+        .ident("baz")
+        .build();
+    assert_eq(stream.len(), 3);
+}
+
+@test
+fn test_quote_builder_keyword() {
+    let stream = QuoteBuilder.new()
+        .keyword("let")
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_punct() {
+    let stream = QuoteBuilder.new()
+        .punct(';')
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_punct_joint() {
+    let stream = QuoteBuilder.new()
+        .punct_joint('=')
+        .punct('>')
+        .build();
+    assert_eq(stream.len(), 2);
+}
+
+@test
+fn test_quote_builder_operator() {
+    let stream = QuoteBuilder.new()
+        .operator("->")
+        .build();
+    assert_eq(stream.len(), 2);
+}
+
+@test
+fn test_quote_builder_operator_double_colon() {
+    let stream = QuoteBuilder.new()
+        .operator("::")
+        .build();
+    assert_eq(stream.len(), 2);
+}
+
+// =============================================================================
+// QuoteBuilder — Literals
+// =============================================================================
+
+@test
+fn test_quote_builder_int_lit() {
+    let stream = QuoteBuilder.new()
+        .int_lit(42)
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_float_lit() {
+    let stream = QuoteBuilder.new()
+        .float_lit(3.14)
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_string_lit() {
+    let stream = QuoteBuilder.new()
+        .string_lit("hello world")
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_char_lit() {
+    let stream = QuoteBuilder.new()
+        .char_lit('x')
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_bool_lit_true() {
+    let stream = QuoteBuilder.new()
+        .bool_lit(true)
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_bool_lit_false() {
+    let stream = QuoteBuilder.new()
+        .bool_lit(false)
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+// =============================================================================
+// QuoteBuilder — Delimiters
+// =============================================================================
+
+@test
+fn test_quote_builder_paren() {
+    let inner = TokenStream.empty();
+    let stream = QuoteBuilder.new()
+        .paren(inner)
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_brace() {
+    let inner = TokenStream.empty();
+    let stream = QuoteBuilder.new()
+        .brace(inner)
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_bracket() {
+    let inner = TokenStream.empty();
+    let stream = QuoteBuilder.new()
+        .bracket(inner)
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_group() {
+    let inner = TokenStream.empty();
+    let stream = QuoteBuilder.new()
+        .group(Delimiter.Parenthesis, inner)
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+// =============================================================================
+// QuoteBuilder — Splice
+// =============================================================================
+
+@test
+fn test_quote_builder_splice_empty() {
+    let other = TokenStream.empty();
+    let stream = QuoteBuilder.new()
+        .splice(other)
+        .build();
+    assert(stream.is_empty());
+}
+
+@test
+fn test_quote_builder_splice_nonempty() {
+    let other = QuoteBuilder.new().ident("x").build();
+    let stream = QuoteBuilder.new()
+        .ident("let")
+        .splice(other)
+        .build();
+    assert_eq(stream.len(), 2);
+}
+
+// =============================================================================
+// QuoteBuilder — Common Patterns
+// =============================================================================
+
+@test
+fn test_quote_builder_let_binding() {
+    let value = QuoteBuilder.new().int_lit(42).build();
+    let stream = QuoteBuilder.new()
+        .let_binding("x", value)
+        .build();
+    // let x = 42 ; => keyword + ident + punct + lit + punct = 5 tokens
+    assert(stream.len() >= 4);
+}
+
+@test
+fn test_quote_builder_function() {
+    let params = TokenStream.empty();
+    let ret = QuoteBuilder.new().ident("Int").build();
+    let body = QuoteBuilder.new().int_lit(42).build();
+    let stream = QuoteBuilder.new()
+        .function("foo", params, ret, body)
+        .build();
+    // fn foo() -> Int { 42 } => multiple tokens
+    assert(stream.len() >= 4);
+}
+
+@test
+fn test_quote_builder_type_def() {
+    let def = QuoteBuilder.new().ident("Int").build();
+    let stream = QuoteBuilder.new()
+        .type_def("MyInt", def)
+        .build();
+    // type MyInt is Int ; => 5 tokens
+    assert(stream.len() >= 4);
+}
+
+@test
+fn test_quote_builder_impl_block() {
+    let proto = QuoteBuilder.new().ident("Clone").build();
+    let ty = QuoteBuilder.new().ident("MyType").build();
+    let body = TokenStream.empty();
+    let stream = QuoteBuilder.new()
+        .impl_block(proto, ty, body)
+        .build();
+    // implement Clone for MyType { } => 4+ tokens
+    assert(stream.len() >= 3);
+}
+
+// =============================================================================
+// QuoteBuilder — Chaining
+// =============================================================================
+
+@test
+fn test_quote_builder_chaining_complex() {
+    let stream = QuoteBuilder.new()
+        .keyword("let")
+        .ident("x")
+        .punct(':')
+        .ident("Int")
+        .punct('=')
+        .int_lit(100)
+        .punct(';')
+        .build();
+    assert_eq(stream.len(), 7);
+}
+
+@test
+fn test_quote_builder_chaining_multiple_statements() {
+    let stream = QuoteBuilder.new()
+        .keyword("let")
+        .ident("a")
+        .punct('=')
+        .int_lit(1)
+        .punct(';')
+        .keyword("let")
+        .ident("b")
+        .punct('=')
+        .int_lit(2)
+        .punct(';')
+        .build();
+    assert_eq(stream.len(), 10);
+}
+
+// =============================================================================
+// QuotePart — Variants
+// =============================================================================
+
+@test
+fn test_quote_part_literal() {
+    let part: QuotePart = QuotePart.Literal("let x = 1;");
+    assert(part is QuotePart.Literal);
+}
+
+@test
+fn test_quote_part_interpolate() {
+    let tokens = TokenStream.empty();
+    let part: QuotePart = QuotePart.Interpolate(tokens);
+    assert(part is QuotePart.Interpolate);
+}
+
+@test
+fn test_quote_part_repeat() {
+    let part: QuotePart = QuotePart.Repeat {
+        var_name: "field",
+        iterator: TokenStream.empty(),
+        body: List.new(),
+        separator: Some(", "),
+    };
+    assert(part is QuotePart.Repeat);
+}
+
+@test
+fn test_quote_part_repeat_no_separator() {
+    let part: QuotePart = QuotePart.Repeat {
+        var_name: "item",
+        iterator: TokenStream.empty(),
+        body: List.new(),
+        separator: None,
+    };
+    assert(part is QuotePart.Repeat);
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+@test
+fn test_convenience_empty() {
+    let stream = quote_empty();
+    assert(stream.is_empty());
+}
+
+@test
+fn test_convenience_ident() {
+    let stream = quote_ident("foo");
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_convenience_string() {
+    let stream = quote_string("hello");
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_convenience_int() {
+    let stream = quote_int(42);
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_convenience_parens() {
+    let inner = TokenStream.empty();
+    let stream = parens(inner);
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_convenience_braces() {
+    let inner = TokenStream.empty();
+    let stream = braces(inner);
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_convenience_brackets() {
+    let inner = TokenStream.empty();
+    let stream = brackets(inner);
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_convenience_join_with_empty() {
+    let streams: List<TokenStream> = List.new();
+    let sep = TokenStream.empty();
+    let result = join_with(streams, sep);
+    assert(result.is_empty());
+}
+
+@test
+fn test_convenience_join_with_single() {
+    let s1 = quote_ident("foo");
+    let streams = List.of(s1);
+    let sep = TokenStream.empty();
+    let result = join_with(streams, sep);
+    assert_eq(result.len(), 1);
+}
+
+// =============================================================================
+// TokenStream Properties via QuoteBuilder
+// =============================================================================
+
+@test
+fn test_built_stream_is_not_empty() {
+    let stream = QuoteBuilder.new().ident("x").build();
+    assert(!stream.is_empty());
+}
+
+@test
+fn test_built_stream_len() {
+    let stream = QuoteBuilder.new()
+        .ident("a")
+        .ident("b")
+        .build();
+    assert_eq(stream.len(), 2);
+}
+
+// =============================================================================
+// Additional QuoteBuilder Literal Tests
+// =============================================================================
+
+@test
+fn test_quote_builder_int_lit_zero() {
+    let stream = QuoteBuilder.new()
+        .int_lit(0)
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_int_lit_negative() {
+    let stream = QuoteBuilder.new()
+        .int_lit(-42)
+        .build();
+    assert(stream.len() >= 1);
+}
+
+@test
+fn test_quote_builder_string_lit_empty() {
+    let stream = QuoteBuilder.new()
+        .string_lit("")
+        .build();
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_multiple_punctuation() {
+    let stream = QuoteBuilder.new()
+        .punct(';')
+        .punct(',')
+        .punct(':')
+        .build();
+    assert_eq(stream.len(), 3);
+}
+
+@test
+fn test_convenience_ident_keyword() {
+    let stream = quote_ident("let");
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_quote_builder_splice_two_streams() {
+    let s1 = QuoteBuilder.new().ident("a").build();
+    let s2 = QuoteBuilder.new().ident("b").build();
+    let stream = QuoteBuilder.new()
+        .splice(s1)
+        .splice(s2)
+        .build();
+    assert_eq(stream.len(), 2);
+}
+
+@test
+fn test_built_stream_three_idents() {
+    let stream = QuoteBuilder.new()
+        .ident("x")
+        .ident("y")
+        .ident("z")
+        .build();
+    assert_eq(stream.len(), 3);
+    assert(!stream.is_empty());
+}
+
+@test
+fn test_quote_part_literal_empty() {
+    let part: QuotePart = QuotePart.Literal("");
+    assert(part is QuotePart.Literal);
+}
+
+// =============================================================================
+// GroupBuilder — Methods and Nesting
+// =============================================================================
+
+@test
+fn test_group_builder_paren_ident_punct() {
+    let stream = QuoteBuilder.new()
+        .paren_open()
+        .ident("x")
+        .punct(',')
+        .ident("y")
+        .close()
+        .build();
+    // (x, y) => 1 group token
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_group_builder_brace_keyword_splice() {
+    let inner = QuoteBuilder.new().int_lit(42).build();
+    let stream = QuoteBuilder.new()
+        .brace_open()
+        .keyword("return")
+        .splice(inner)
+        .punct(';')
+        .close()
+        .build();
+    // { return 42; } => 1 group token
+    assert_eq(stream.len(), 1);
+}
+
+@test
+fn test_group_builder_bracket_multiple_idents() {
+    let stream = QuoteBuilder.new()
+        .bracket_open()
+        .ident("a")
+        .punct(',')
+        .ident("b")
+        .punct(',')
+        .ident("c")
+        .close()
+        .build();
+    // [a, b, c] => 1 group token
+    assert_eq(stream.len(), 1);
+}
+
+// =============================================================================
+// Convenience join_with — Multiple Streams with Separators
+// =============================================================================
+
+@test
+fn test_convenience_join_with_multiple_streams() {
+    let s1 = quote_ident("foo");
+    let s2 = quote_ident("bar");
+    let s3 = quote_ident("baz");
+    let mut streams: List<TokenStream> = List.new();
+    streams.push(s1);
+    streams.push(s2);
+    streams.push(s3);
+    let sep = QuoteBuilder.new().operator("::").build();
+    let result = join_with(streams, sep);
+    // foo :: bar :: baz => 3 idents + 2 seps (2 tokens each) = 7 tokens
+    assert(result.len() >= 5);
+}
+
+@test
+fn test_convenience_join_with_two_streams() {
+    let s1 = quote_string("hello");
+    let s2 = quote_string("world");
+    let mut streams: List<TokenStream> = List.new();
+    streams.push(s1);
+    streams.push(s2);
+    let sep = QuoteBuilder.new().punct(',').build();
+    let result = join_with(streams, sep);
+    // "hello" , "world" => 3 tokens
+    assert_eq(result.len(), 3);
+}
+
+// =============================================================================
+// QuoteBuilder — Multi-Character Operators
+// =============================================================================
+
+@test
+fn test_quote_builder_operator_triple_eq() {
+    let stream = QuoteBuilder.new()
+        .operator("===")
+        .build();
+    // === is 3 punct tokens (joint spacing)
+    assert_eq(stream.len(), 3);
+}
+
+@test
+fn test_quote_builder_operator_less_equal() {
+    let stream = QuoteBuilder.new()
+        .operator("<=")
+        .build();
+    // <= is 2 punct tokens
+    assert_eq(stream.len(), 2);
+}
+
+// =============================================================================
+// QuoteBuilder — Float Literal Edge Cases
+// =============================================================================
+
+@test
+fn test_quote_builder_float_lit_negative() {
+    let stream = QuoteBuilder.new()
+        .float_lit(-3.14)
+        .build();
+    // Negative float literal
+    assert(stream.len() >= 1);
+}

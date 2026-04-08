@@ -1,0 +1,150 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, subtyping, subsumption
+
+/// Refinement subsumption: a refined type is a subtype of its base type.
+/// Int{> 0} <: Int - any Positive can be used where Int is expected.
+
+type Positive is Int{> 0};
+type NonNegative is Int{>= 0};
+type NonZero is Int{!= 0};
+type Even is Int{it % 2 == 0};
+type EvenPositive is Int{> 0 && it % 2 == 0};
+
+// ============================================================================
+// Basic subsumption: refined <: base
+// ============================================================================
+
+fn takes_int(x: Int) -> Int {
+    x
+}
+
+fn takes_float(x: Float) -> Float {
+    x
+}
+
+fn test_basic_subsumption() {
+    let pos: Positive = 42;
+    let non_neg: NonNegative = 0;
+    let non_zero: NonZero = -5;
+
+    // Positive <: Int
+    let a: Int = pos;
+    let b = takes_int(pos);
+
+    // NonNegative <: Int
+    let c: Int = non_neg;
+    let d = takes_int(non_neg);
+
+    // NonZero <: Int
+    let e: Int = non_zero;
+    let f = takes_int(non_zero);
+}
+
+// ============================================================================
+// Transitive subsumption: EvenPositive <: Positive <: Int
+// ============================================================================
+
+fn takes_positive(x: Positive) -> Positive {
+    x
+}
+
+fn test_transitive_subsumption() {
+    let even_pos: EvenPositive = 4;
+
+    // EvenPositive <: Positive (strengthening constraint)
+    let pos: Positive = even_pos;
+    let a = takes_positive(even_pos);
+
+    // EvenPositive <: Int (transitive through Positive)
+    let int_val: Int = even_pos;
+    let b = takes_int(even_pos);
+}
+
+// ============================================================================
+// Collection subsumption: List<Positive> <: List<Int>
+// ============================================================================
+
+fn takes_list_int(lst: List<Int>) -> Int {
+    lst.len()
+}
+
+fn test_collection_subsumption() {
+    let positives: List<Positive> = [1, 2, 3];
+
+    // List<Positive> <: List<Int> (covariant in element type)
+    let ints: List<Int> = positives;
+    let length = takes_list_int(positives);
+}
+
+// ============================================================================
+// Function return type subsumption
+// ============================================================================
+
+fn returns_positive() -> Positive {
+    42
+}
+
+fn returns_int() -> Int {
+    returns_positive()  // OK: Positive <: Int
+}
+
+// ============================================================================
+// Struct field subsumption
+// ============================================================================
+
+type IntContainer is {
+    value: Int,
+};
+
+fn test_struct_subsumption() {
+    let pos: Positive = 10;
+
+    // Can assign Positive to Int field
+    let container = IntContainer { value: pos };
+}
+
+// ============================================================================
+// Optional type subsumption: Maybe<Positive> <: Maybe<Int>
+// ============================================================================
+
+fn takes_maybe_int(opt: Maybe<Int>) -> Bool {
+    match opt {
+        Some(_) => true,
+        None => false,
+    }
+}
+
+fn test_maybe_subsumption() {
+    let maybe_pos: Maybe<Positive> = Some(42);
+
+    // Maybe<Positive> <: Maybe<Int>
+    let maybe_int: Maybe<Int> = maybe_pos;
+    let result = takes_maybe_int(maybe_pos);
+}
+
+// ============================================================================
+// Tuple subsumption
+// ============================================================================
+
+fn takes_int_tuple(t: (Int, Int)) -> Int {
+    t.0 + t.1
+}
+
+fn test_tuple_subsumption() {
+    let pos_tuple: (Positive, Positive) = (1, 2);
+
+    // (Positive, Positive) <: (Int, Int)
+    let int_tuple: (Int, Int) = pos_tuple;
+    let sum = takes_int_tuple(pos_tuple);
+}
+
+fn main() {
+    test_basic_subsumption();
+    test_transitive_subsumption();
+    test_collection_subsumption();
+    test_struct_subsumption();
+    test_maybe_subsumption();
+    test_tuple_subsumption();
+}

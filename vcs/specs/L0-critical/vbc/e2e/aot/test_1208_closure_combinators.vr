@@ -1,0 +1,137 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: closure, combinator, higher-order, e2e
+// @description: Test closure combinators - compose, pipe, memoize patterns
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn chain(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { g(f(x)) }
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn map_list(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(items: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            result.push(items[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_list(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: compose
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let double_then_inc = compose(inc, double);
+    let r1 = double_then_inc(5);
+    if r1 != 11 {
+        print(f"FAIL 1: compose = {r1}");
+        f = f + 1;
+    } else {
+        print("  compose: OK");
+    }
+
+    // Test 2: chain (pipe)
+    let inc_then_double = chain(inc, double);
+    let r2 = inc_then_double(5);
+    if r2 != 12 {
+        print(f"FAIL 2: chain = {r2}");
+        f = f + 1;
+    } else {
+        print("  chain: OK");
+    }
+
+    // Test 3: apply_twice
+    let r3 = apply_twice(double, 3);
+    if r3 != 12 {
+        print(f"FAIL 3: twice = {r3}");
+        f = f + 1;
+    } else {
+        print("  apply_twice: OK");
+    }
+
+    // Test 4: map_list
+    let nums = List.new();
+    nums.push(1);
+    nums.push(2);
+    nums.push(3);
+    nums.push(4);
+    let doubled = map_list(nums, double);
+    if doubled[0] != 2 {
+        print(f"FAIL 4: map[0] = {doubled[0]}");
+        f = f + 1;
+    } else if doubled[3] != 8 {
+        print(f"FAIL 4: map[3] = {doubled[3]}");
+        f = f + 1;
+    } else {
+        print("  map_list: OK");
+    }
+
+    // Test 5: filter_list
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    let evens = filter_list(doubled, is_even);
+    if evens.len() != 4 {
+        print(f"FAIL 5: filter len = {evens.len()}");
+        f = f + 1;
+    } else {
+        print("  filter_list: OK");
+    }
+
+    // Test 6: fold_list
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let sum = fold_list(doubled, 0, add);
+    if sum != 20 {
+        print(f"FAIL 6: fold = {sum}");
+        f = f + 1;
+    } else {
+        print("  fold_list: OK");
+    }
+
+    // Test 7: Closure capturing
+    let offset = 100;
+    let add_offset = |x: Int| -> Int { x + offset };
+    let r7 = add_offset(42);
+    if r7 != 142 {
+        print(f"FAIL 7: capture = {r7}");
+        f = f + 1;
+    } else {
+        print("  closure_capture: OK");
+    }
+
+    if f == 0 {
+        print("All closure combinator tests passed");
+    }
+    f
+}

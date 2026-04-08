@@ -1,0 +1,81 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: map, operations, iteration, e2e
+// @description: Test Map operations including insert, get, remove, contains_key, len
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Basic map operations
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+    if m.len() != 3 {
+        print(f"FAIL: map len expected 3, got {m.len()}");
+        failures = failures + 1;
+    }
+    let val = m.get("b");
+    if val != 2 {
+        print(f"FAIL: map.get('b') expected 2, got {val}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  basic_map: OK");
+    }
+
+    // Test 2: Contains and remove
+    if !m.contains_key("a") {
+        print("FAIL: should contain 'a'");
+        failures = failures + 1;
+    }
+    m.remove("a");
+    if m.contains_key("a") {
+        print("FAIL: should not contain 'a' after remove");
+        failures = failures + 1;
+    }
+    if m.len() != 2 {
+        print(f"FAIL: map len after remove expected 2, got {m.len()}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  contains_remove: OK");
+    }
+
+    // Test 3: Overwrite existing key
+    let mut scores = Map.new();
+    scores.insert("alice", 90);
+    scores.insert("bob", 85);
+    scores.insert("alice", 95);  // overwrite
+    let alice_score = scores.get("alice");
+    if alice_score != 95 {
+        print(f"FAIL: alice score expected 95, got {alice_score}");
+        failures = failures + 1;
+    }
+    if scores.len() != 2 {
+        print(f"FAIL: scores len expected 2, got {scores.len()}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  overwrite: OK");
+    }
+
+    // Test 4: Int keys
+    let mut id_map = Map.new();
+    id_map.insert(1, 100);
+    id_map.insert(2, 200);
+    id_map.insert(3, 300);
+    let sum = id_map.get(1) + id_map.get(2) + id_map.get(3);
+    if sum != 600 {
+        print(f"FAIL: id sum expected 600, got {sum}");
+        failures = failures + 1;
+    } else {
+        print("  int_keys: OK");
+    }
+
+    if failures == 0 {
+        print("All map advanced tests passed");
+    }
+    failures
+}

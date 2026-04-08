@@ -1,0 +1,102 @@
+// @test: run
+// String algorithms — reverse, char counting, text building
+
+fn reverse_text(s: Text) -> Text {
+    let chars = List.new();
+    let mut i = 0;
+    while i < s.len() {
+        chars.push(s.slice(i, i + 1));
+        i = i + 1;
+    }
+    let mut result = "";
+    let mut j = chars.len() - 1;
+    while j >= 0 {
+        result = result + chars[j];
+        j = j - 1;
+    }
+    result
+}
+
+fn repeat_char(c: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < n {
+        result = result + c;
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: Reverse
+    let rev = reverse_text("hello");
+    if (rev != "olleh") {
+        print(f"FAIL test1: reverse = '{rev}'");
+        return 1;
+    }
+    print("test1 reverse: OK");
+
+    // Test 2: Single char
+    let rev2 = reverse_text("x");
+    if (rev2 != "x") {
+        print("FAIL test2");
+        return 1;
+    }
+    print("test2 single: OK");
+
+    // Test 3: Repeat
+    let stars = repeat_char("*", 10);
+    if (stars.len() != 10) {
+        print(f"FAIL test3: len = {stars.len()}");
+        return 1;
+    }
+    if (stars != "**********") {
+        print(f"FAIL test3: stars = '{stars}'");
+        return 1;
+    }
+    print("test3 repeat: OK");
+
+    // Test 4: Build text with numbers
+    let mut result = "";
+    let mut i = 1;
+    while i <= 5 {
+        if (i > 1) { result = result + "-"; }
+        result = result + f"{i}";
+        i = i + 1;
+    }
+    if (result != "1-2-3-4-5") {
+        print(f"FAIL test4: result = '{result}'");
+        return 1;
+    }
+    print("test4 build: OK");
+
+    // Test 5: Equality and comparison
+    let a = "abc";
+    let b = "abc";
+    let c = "def";
+    if (a != b) {
+        print("FAIL test5a: equal strings");
+        return 1;
+    }
+    if (a == c) {
+        print("FAIL test5b: different strings");
+        return 1;
+    }
+    print("test5 equality: OK");
+
+    // Test 6: Empty string operations
+    let empty = "";
+    let filled = empty + "hello" + " " + "world";
+    if (filled != "hello world") {
+        print(f"FAIL test6: filled = '{filled}'");
+        return 1;
+    }
+    if (filled.len() != 11) {
+        print(f"FAIL test6: len = {filled.len()}");
+        return 1;
+    }
+    print("test6 empty concat: OK");
+
+    print("1036_string_algorithms: PASS");
+    0
+}

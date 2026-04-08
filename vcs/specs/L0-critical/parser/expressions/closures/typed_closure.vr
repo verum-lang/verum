@@ -1,0 +1,86 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, closures, lambda, typed
+
+// Test closure with typed parameter
+fn test_single_typed_param() {
+    let double = |x: Int| x * 2;
+    let greet = |name: Text| "Hello, " + name;
+}
+
+// Test closure with multiple typed parameters
+fn test_multiple_typed_params() {
+    let add = |a: Int, b: Int| a + b;
+    let point = |x: Float, y: Float| Point { x, y };
+}
+
+// Test closure with return type annotation (requires block body)
+fn test_return_type_annotation() {
+    let parse = |s: Text| -> Int { s.parse() };
+    let square = |x: Int| -> Int { x * x };
+
+    // Closure with both parameter and return types
+    let transform = |x: Int| -> Text {
+        x.to_string()
+    };
+}
+
+// Test closure with generic-like typed parameters
+fn test_generic_typed_params() {
+    let first = |list: List<Int>| -> Int { list[0] };
+    let wrap = |x: Int| -> Maybe<Int> { Some(x) };
+}
+
+// Test closure with reference parameter types
+fn test_reference_params() {
+    let read = |r: &Int| -> Int { *r };
+    let mutate = |r: &mut Int| { *r = 0; };
+}
+
+// Test closure with complex return type
+fn test_complex_return_type() {
+    let pair = |a: Int, b: Int| -> (Int, Int) {
+        (a, b)
+    };
+}
+
+// Test closure with function type parameter
+fn test_function_type_param() {
+    let apply = |f: fn(Int) -> Int, x: Int| -> Int {
+        f(x)
+    };
+}
+
+// Test closure with optional types
+fn test_optional_types() {
+    let safe_get = |m: Map<Text, Int>, k: Text| -> Maybe<Int> {
+        m.get(k)
+    };
+}
+
+// Test closure with result type
+fn test_result_type() {
+    let try_parse = |s: Text| -> Result<Int, Error> {
+        s.parse()
+    };
+}
+
+// Test closure with unit return type
+fn test_unit_return_type() {
+    let log = |msg: Text| -> () {
+        print(msg);
+    };
+}
+
+// Test closure type used in variable declaration
+fn test_closure_type_annotation() {
+    let f: fn(Int) -> Int = |x: Int| -> Int { x * 2 };
+    let g: fn(Int, Int) -> Int = |a: Int, b: Int| -> Int { a + b };
+}
+
+// Test partially typed closure
+fn test_partially_typed() {
+    let mixed = |x: Int, y| x + y;
+    let inferred_return = |x: Int| x * 2;
+}

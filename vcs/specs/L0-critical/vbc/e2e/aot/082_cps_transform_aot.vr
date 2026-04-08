@@ -1,0 +1,157 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, closures, cps, continuation-passing
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT continuation-passing style patterns with closure chaining
+
+// CPS-style functions: instead of returning a value, pass it to a continuation
+
+fn cps_add(a: Int, b: Int, k: fn(Int) -> Int) -> Int {
+    k(a + b)
+}
+
+fn cps_mul(a: Int, b: Int, k: fn(Int) -> Int) -> Int {
+    k(a * b)
+}
+
+fn cps_sub(a: Int, b: Int, k: fn(Int) -> Int) -> Int {
+    k(a - b)
+}
+
+fn cps_abs(x: Int, k: fn(Int) -> Int) -> Int {
+    if x < 0 { k(0 - x) } else { k(x) }
+}
+
+fn cps_max(a: Int, b: Int, k: fn(Int) -> Int) -> Int {
+    if a > b { k(a) } else { k(b) }
+}
+
+fn cps_min(a: Int, b: Int, k: fn(Int) -> Int) -> Int {
+    if a < b { k(a) } else { k(b) }
+}
+
+// Identity continuation
+fn id(x: Int) -> Int { x }
+
+// Pipeline: apply a list of transformations
+type Transform is { f: fn(Int) -> Int };
+type TransList is TLNil | TLCons { head: Transform, tail: TransList };
+
+fn pipeline(x: Int, transforms: TransList) -> Int {
+    match transforms {
+        TLNil => x,
+        TLCons { head, tail } => pipeline((head.f)(x), tail),
+    }
+}
+
+// CPS factorial
+fn cps_factorial(n: Int, k: fn(Int) -> Int) -> Int {
+    if n <= 1 { k(1) }
+    else { cps_factorial(n - 1, |r| k(n * r)) }
+}
+
+// CPS fibonacci
+fn cps_fib(n: Int, k: fn(Int) -> Int) -> Int {
+    if n <= 0 { k(0) }
+    else if n == 1 { k(1) }
+    else { cps_fib(n - 1, |a| cps_fib(n - 2, |b| k(a + b))) }
+}
+
+// Fold-like iteration (non-recursive to avoid E321)
+fn iter_fold(start: Int, end_val: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end_val {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // === Basic CPS operations ===
+    assert_eq(cps_add(3, 4, id), 7);
+    assert_eq(cps_mul(5, 6, id), 30);
+    assert_eq(cps_sub(10, 3, id), 7);
+    assert_eq(cps_abs(-5, id), 5);
+    assert_eq(cps_abs(5, id), 5);
+    assert_eq(cps_max(10, 20, id), 20);
+    assert_eq(cps_min(10, 20, id), 10);
+
+    // === CPS with transformation continuation ===
+    assert_eq(cps_add(3, 4, |x| x * 2), 14);   // (3+4)*2
+    assert_eq(cps_mul(5, 6, |x| x + 1), 31);   // 5*6+1
+    assert_eq(cps_add(3, 4, |x| x * x), 49);   // (3+4)^2
+
+    // === Chained CPS: (3 + 4) * 5 - 2 ===
+    let result1 = cps_add(3, 4, |sum| cps_mul(sum, 5, |prod| cps_sub(prod, 2, id)));
+    assert_eq(result1, 33);
+
+    // === CPS: abs(3-10) * 2 ===
+    let result2 = cps_sub(3, 10, |diff| cps_abs(diff, |a| cps_mul(a, 2, id)));
+    assert_eq(result2, 14);
+
+    // === CPS: max(3+4, 2*5) ===
+    let result3 = cps_add(3, 4, |a| cps_mul(2, 5, |b| cps_max(a, b, id)));
+    assert_eq(result3, 10);
+
+    // === CPS factorial ===
+    assert_eq(cps_factorial(0, id), 1);
+    assert_eq(cps_factorial(1, id), 1);
+    assert_eq(cps_factorial(5, id), 120);
+    assert_eq(cps_factorial(7, id), 5040);
+
+    // Factorial with continuation
+    assert_eq(cps_factorial(5, |x| x + 1), 121);   // 120 + 1
+    assert_eq(cps_factorial(5, |x| x * 2), 240);   // 120 * 2
+
+    // === CPS fibonacci ===
+    assert_eq(cps_fib(0, id), 0);
+    assert_eq(cps_fib(1, id), 1);
+    assert_eq(cps_fib(5, id), 5);
+    assert_eq(cps_fib(8, id), 21);
+
+    // === Pipeline ===
+    let p1 = TLCons {
+        head: Transform { f: |x| x + 10 },
+        tail: TLCons {
+            head: Transform { f: |x| x * 2 },
+            tail: TLCons {
+                head: Transform { f: |x| x - 5 },
+                tail: TLNil,
+            },
+        },
+    };
+    // 3 -> +10 -> 13 -> *2 -> 26 -> -5 -> 21
+    assert_eq(pipeline(3, p1), 21);
+
+    let p2 = TLCons {
+        head: Transform { f: |x| x * x },
+        tail: TLCons {
+            head: Transform { f: |x| x + 1 },
+            tail: TLNil,
+        },
+    };
+    // 5 -> ^2 -> 25 -> +1 -> 26
+    assert_eq(pipeline(5, p2), 26);
+
+    // Empty pipeline
+    assert_eq(pipeline(42, TLNil), 42);
+
+    // === Iterative fold: sum of 1..10 ===
+    let sum = iter_fold(1, 11, 0, |acc, x| acc + x);
+    assert_eq(sum, 55);
+
+    // Fold: product of 1..6
+    let prod = iter_fold(1, 7, 1, |acc, x| acc * x);
+    assert_eq(prod, 720);
+
+    // Fold then apply transformation
+    let base_sum = iter_fold(1, 6, 0, |acc, x| acc + x);
+    let doubled_sum = base_sum * 2;
+    assert_eq(doubled_sum, 30);  // sum(1..5)=15, *2=30
+
+    0
+}

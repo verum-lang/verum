@@ -1,0 +1,13 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn side_effect() -> Bool {
+    assert(false);  // Should never be called
+    false
+}
+
+fn main() {
+    let result = true || side_effect();
+    assert(result);
+}

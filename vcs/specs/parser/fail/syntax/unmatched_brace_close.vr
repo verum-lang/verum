@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, braces, error
+// @description: Test unmatched closing brace detection
+// @expected-error: E011
+
+fn test_unmatched() {
+    let x = 1;
+    }
+}

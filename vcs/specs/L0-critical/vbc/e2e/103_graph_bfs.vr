@@ -1,0 +1,314 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, graph, bfs, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+// @description: BFS on 6-node adjacency matrix graph, computing shortest distances
+
+// ============================================================================
+// Graph: 6-node adjacency matrix stored as flat 36-element array
+// adj[i*6 + j] = 1 means edge from i to j
+// ============================================================================
+
+type Graph6 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int,
+    a6: Int, a7: Int, a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int, a16: Int, a17: Int,
+    a18: Int, a19: Int, a20: Int, a21: Int, a22: Int, a23: Int,
+    a24: Int, a25: Int, a26: Int, a27: Int, a28: Int, a29: Int,
+    a30: Int, a31: Int, a32: Int, a33: Int, a34: Int, a35: Int
+};
+
+fn empty_graph() -> Graph6 {
+    Graph6 {
+        a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0,
+        a6: 0, a7: 0, a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0, a16: 0, a17: 0,
+        a18: 0, a19: 0, a20: 0, a21: 0, a22: 0, a23: 0,
+        a24: 0, a25: 0, a26: 0, a27: 0, a28: 0, a29: 0,
+        a30: 0, a31: 0, a32: 0, a33: 0, a34: 0, a35: 0
+    }
+}
+
+fn g_get(g: Graph6, idx: Int) -> Int {
+    if idx == 0 { g.a0 } else if idx == 1 { g.a1 }
+    else if idx == 2 { g.a2 } else if idx == 3 { g.a3 }
+    else if idx == 4 { g.a4 } else if idx == 5 { g.a5 }
+    else if idx == 6 { g.a6 } else if idx == 7 { g.a7 }
+    else if idx == 8 { g.a8 } else if idx == 9 { g.a9 }
+    else if idx == 10 { g.a10 } else if idx == 11 { g.a11 }
+    else if idx == 12 { g.a12 } else if idx == 13 { g.a13 }
+    else if idx == 14 { g.a14 } else if idx == 15 { g.a15 }
+    else if idx == 16 { g.a16 } else if idx == 17 { g.a17 }
+    else if idx == 18 { g.a18 } else if idx == 19 { g.a19 }
+    else if idx == 20 { g.a20 } else if idx == 21 { g.a21 }
+    else if idx == 22 { g.a22 } else if idx == 23 { g.a23 }
+    else if idx == 24 { g.a24 } else if idx == 25 { g.a25 }
+    else if idx == 26 { g.a26 } else if idx == 27 { g.a27 }
+    else if idx == 28 { g.a28 } else if idx == 29 { g.a29 }
+    else if idx == 30 { g.a30 } else if idx == 31 { g.a31 }
+    else if idx == 32 { g.a32 } else if idx == 33 { g.a33 }
+    else if idx == 34 { g.a34 } else { g.a35 }
+}
+
+fn g_set(g: Graph6, idx: Int, val: Int) -> Graph6 {
+    Graph6 {
+        a0: if idx == 0 { val } else { g.a0 },
+        a1: if idx == 1 { val } else { g.a1 },
+        a2: if idx == 2 { val } else { g.a2 },
+        a3: if idx == 3 { val } else { g.a3 },
+        a4: if idx == 4 { val } else { g.a4 },
+        a5: if idx == 5 { val } else { g.a5 },
+        a6: if idx == 6 { val } else { g.a6 },
+        a7: if idx == 7 { val } else { g.a7 },
+        a8: if idx == 8 { val } else { g.a8 },
+        a9: if idx == 9 { val } else { g.a9 },
+        a10: if idx == 10 { val } else { g.a10 },
+        a11: if idx == 11 { val } else { g.a11 },
+        a12: if idx == 12 { val } else { g.a12 },
+        a13: if idx == 13 { val } else { g.a13 },
+        a14: if idx == 14 { val } else { g.a14 },
+        a15: if idx == 15 { val } else { g.a15 },
+        a16: if idx == 16 { val } else { g.a16 },
+        a17: if idx == 17 { val } else { g.a17 },
+        a18: if idx == 18 { val } else { g.a18 },
+        a19: if idx == 19 { val } else { g.a19 },
+        a20: if idx == 20 { val } else { g.a20 },
+        a21: if idx == 21 { val } else { g.a21 },
+        a22: if idx == 22 { val } else { g.a22 },
+        a23: if idx == 23 { val } else { g.a23 },
+        a24: if idx == 24 { val } else { g.a24 },
+        a25: if idx == 25 { val } else { g.a25 },
+        a26: if idx == 26 { val } else { g.a26 },
+        a27: if idx == 27 { val } else { g.a27 },
+        a28: if idx == 28 { val } else { g.a28 },
+        a29: if idx == 29 { val } else { g.a29 },
+        a30: if idx == 30 { val } else { g.a30 },
+        a31: if idx == 31 { val } else { g.a31 },
+        a32: if idx == 32 { val } else { g.a32 },
+        a33: if idx == 33 { val } else { g.a33 },
+        a34: if idx == 34 { val } else { g.a34 },
+        a35: if idx == 35 { val } else { g.a35 }
+    }
+}
+
+fn has_edge(g: Graph6, from: Int, to: Int) -> Int {
+    g_get(g, from * 6 + to)
+}
+
+fn add_edge(g: Graph6, from: Int, to: Int) -> Graph6 {
+    g_set(g, from * 6 + to, 1)
+}
+
+// Add undirected edge (both directions)
+fn add_edge_undirected(g: Graph6, u: Int, v: Int) -> Graph6 {
+    let g2 = add_edge(g, u, v);
+    add_edge(g2, v, u)
+}
+
+// ============================================================================
+// Small arrays for BFS state (6 elements)
+// ============================================================================
+
+type Arr6 is {
+    e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int
+};
+
+fn a6_new(val: Int) -> Arr6 {
+    Arr6 { e0: val, e1: val, e2: val, e3: val, e4: val, e5: val }
+}
+
+fn a6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else { a.e5 }
+}
+
+fn a6_set(a: Arr6, i: Int, val: Int) -> Arr6 {
+    Arr6 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 }
+    }
+}
+
+// Queue for BFS (max 6 entries since 6 nodes)
+type Queue6 is {
+    e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int,
+    head: Int, tail: Int, count: Int
+};
+
+fn q6_new() -> Queue6 {
+    Queue6 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0,
+             head: 0, tail: 0, count: 0 }
+}
+
+fn q6_get(q: Queue6, i: Int) -> Int {
+    if i == 0 { q.e0 } else if i == 1 { q.e1 } else if i == 2 { q.e2 }
+    else if i == 3 { q.e3 } else if i == 4 { q.e4 } else { q.e5 }
+}
+
+fn q6_set(q: Queue6, i: Int, val: Int) -> Queue6 {
+    Queue6 {
+        e0: if i == 0 { val } else { q.e0 },
+        e1: if i == 1 { val } else { q.e1 },
+        e2: if i == 2 { val } else { q.e2 },
+        e3: if i == 3 { val } else { q.e3 },
+        e4: if i == 4 { val } else { q.e4 },
+        e5: if i == 5 { val } else { q.e5 },
+        head: q.head, tail: q.tail, count: q.count
+    }
+}
+
+fn q6_enqueue(q: Queue6, val: Int) -> Queue6 {
+    let updated = q6_set(q, q.tail, val);
+    let new_tail = q.tail + 1;
+    let wrapped = new_tail - (new_tail / 6) * 6;
+    Queue6 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2,
+        e3: updated.e3, e4: updated.e4, e5: updated.e5,
+        head: q.head, tail: wrapped, count: q.count + 1
+    }
+}
+
+fn q6_front(q: Queue6) -> Int {
+    q6_get(q, q.head)
+}
+
+fn q6_dequeue(q: Queue6) -> Queue6 {
+    let new_head = q.head + 1;
+    let wrapped = new_head - (new_head / 6) * 6;
+    Queue6 {
+        e0: q.e0, e1: q.e1, e2: q.e2, e3: q.e3, e4: q.e4, e5: q.e5,
+        head: wrapped, tail: q.tail, count: q.count - 1
+    }
+}
+
+// ============================================================================
+// BFS: returns distance array from source (-1 = unreachable)
+// ============================================================================
+
+fn bfs(g: Graph6, src: Int) -> Arr6 {
+    let mut dist = a6_new(-1);
+    let mut visited = a6_new(0);
+    let mut queue = q6_new();
+
+    dist = a6_set(dist, src, 0);
+    visited = a6_set(visited, src, 1);
+    queue = q6_enqueue(queue, src);
+
+    while queue.count > 0 {
+        let u = q6_front(queue);
+        queue = q6_dequeue(queue);
+        let d_u = a6_get(dist, u);
+        // Check all neighbors
+        let mut v = 0;
+        while v < 6 {
+            if has_edge(g, u, v) == 1 {
+                if a6_get(visited, v) == 0 {
+                    visited = a6_set(visited, v, 1);
+                    dist = a6_set(dist, v, d_u + 1);
+                    queue = q6_enqueue(queue, v);
+                }
+            }
+            v = v + 1;
+        }
+    }
+    dist
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_bfs_line_graph() -> Int {
+    // Line: 0 - 1 - 2 - 3 - 4 - 5
+    let mut g = empty_graph();
+    g = add_edge_undirected(g, 0, 1);
+    g = add_edge_undirected(g, 1, 2);
+    g = add_edge_undirected(g, 2, 3);
+    g = add_edge_undirected(g, 3, 4);
+    g = add_edge_undirected(g, 4, 5);
+    let dist = bfs(g, 0);
+    assert_eq(a6_get(dist, 0), 0);
+    assert_eq(a6_get(dist, 1), 1);
+    assert_eq(a6_get(dist, 2), 2);
+    assert_eq(a6_get(dist, 3), 3);
+    assert_eq(a6_get(dist, 4), 4);
+    assert_eq(a6_get(dist, 5), 5);
+    0
+}
+
+@test
+fn test_bfs_star_graph() -> Int {
+    // Star: 0 connected to all others
+    let mut g = empty_graph();
+    g = add_edge_undirected(g, 0, 1);
+    g = add_edge_undirected(g, 0, 2);
+    g = add_edge_undirected(g, 0, 3);
+    g = add_edge_undirected(g, 0, 4);
+    g = add_edge_undirected(g, 0, 5);
+    let dist = bfs(g, 0);
+    assert_eq(a6_get(dist, 0), 0);
+    assert_eq(a6_get(dist, 1), 1);
+    assert_eq(a6_get(dist, 2), 1);
+    assert_eq(a6_get(dist, 3), 1);
+    assert_eq(a6_get(dist, 4), 1);
+    assert_eq(a6_get(dist, 5), 1);
+    0
+}
+
+@test
+fn test_bfs_shortest_path() -> Int {
+    // Graph with multiple paths:
+    //   0 -- 1 -- 3
+    //   |         |
+    //   2 ------- 4 -- 5
+    let mut g = empty_graph();
+    g = add_edge_undirected(g, 0, 1);
+    g = add_edge_undirected(g, 0, 2);
+    g = add_edge_undirected(g, 1, 3);
+    g = add_edge_undirected(g, 2, 4);
+    g = add_edge_undirected(g, 3, 4);
+    g = add_edge_undirected(g, 4, 5);
+    let dist = bfs(g, 0);
+    assert_eq(a6_get(dist, 0), 0);
+    assert_eq(a6_get(dist, 1), 1);
+    assert_eq(a6_get(dist, 2), 1);
+    assert_eq(a6_get(dist, 3), 2);
+    assert_eq(a6_get(dist, 4), 2);
+    assert_eq(a6_get(dist, 5), 3);
+    0
+}
+
+@test
+fn test_bfs_disconnected() -> Int {
+    // Two components: {0, 1, 2} and {3, 4, 5}
+    let mut g = empty_graph();
+    g = add_edge_undirected(g, 0, 1);
+    g = add_edge_undirected(g, 1, 2);
+    g = add_edge_undirected(g, 3, 4);
+    g = add_edge_undirected(g, 4, 5);
+    let dist = bfs(g, 0);
+    assert_eq(a6_get(dist, 0), 0);
+    assert_eq(a6_get(dist, 1), 1);
+    assert_eq(a6_get(dist, 2), 2);
+    // Unreachable nodes
+    assert_eq(a6_get(dist, 3), -1);
+    assert_eq(a6_get(dist, 4), -1);
+    assert_eq(a6_get(dist, 5), -1);
+    0
+}
+
+fn main() -> Int {
+    test_bfs_line_graph();
+    test_bfs_star_graph();
+    test_bfs_shortest_path();
+    test_bfs_disconnected();
+    print("[OK] 103_graph_bfs");
+    0
+}

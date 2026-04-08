@@ -1,0 +1,306 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, sparse-table, range-minimum, rmq
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Sparse table for range minimum queries (RMQ).
+// Given an array of N elements, build a table where table[k][i] = min of
+// arr[i..i+2^k]. Then answer queries min(arr[l..r]) in O(1).
+// Array stored in Arr16 (up to 16 elements).
+// Table stored flat in Arr32 arrays: table[k][i] at index k*16+i.
+// We support up to k=3 (2^3=8), so 4 levels * 16 = 64 entries.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 } else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 } else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 } else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 } else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 } else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+type Arr32 is { b0: Arr8, b1: Arr8, b2: Arr8, b3: Arr8 };
+
+fn a32_zero() -> Arr32 {
+    Arr32 { b0: a8_zero(), b1: a8_zero(), b2: a8_zero(), b3: a8_zero() }
+}
+
+fn a32_get(a: Arr32, i: Int) -> Int {
+    if i < 8 { a8_get(a.b0, i) }
+    else if i < 16 { a8_get(a.b1, i - 8) }
+    else if i < 24 { a8_get(a.b2, i - 16) }
+    else { a8_get(a.b3, i - 24) }
+}
+
+fn a32_set(a: Arr32, i: Int, v: Int) -> Arr32 {
+    if i < 8 {
+        Arr32 { b0: a8_set(a.b0, i, v), b1: a.b1, b2: a.b2, b3: a.b3 }
+    } else if i < 16 {
+        Arr32 { b0: a.b0, b1: a8_set(a.b1, i - 8, v), b2: a.b2, b3: a.b3 }
+    } else if i < 24 {
+        Arr32 { b0: a.b0, b1: a.b1, b2: a8_set(a.b2, i - 16, v), b3: a.b3 }
+    } else {
+        Arr32 { b0: a.b0, b1: a.b1, b2: a.b2, b3: a8_set(a.b3, i - 24, v) }
+    }
+}
+
+// 64-slot array using two Arr32
+type Arr64 is { lo: Arr32, hi: Arr32 };
+
+fn a64_zero() -> Arr64 {
+    Arr64 { lo: a32_zero(), hi: a32_zero() }
+}
+
+fn a64_get(a: Arr64, i: Int) -> Int {
+    if i < 32 { a32_get(a.lo, i) } else { a32_get(a.hi, i - 32) }
+}
+
+fn a64_set(a: Arr64, i: Int, v: Int) -> Arr64 {
+    if i < 32 {
+        Arr64 { lo: a32_set(a.lo, i, v), hi: a.hi }
+    } else {
+        Arr64 { lo: a.lo, hi: a32_set(a.hi, i - 32, v) }
+    }
+}
+
+fn min_of(a: Int, b: Int) -> Int {
+    if a <= b { a } else { b }
+}
+
+// Sparse table: 4 levels (k=0..3), 16 positions each = 64 entries
+// table[k*16 + i] = min(arr[i..i+2^k])
+type SparseTable is { data: Arr64, n: Int };
+
+// Build sparse table from array
+fn st_build(arr: Arr16, n: Int) -> SparseTable {
+    let mut tbl = a64_zero();
+    // Level 0: table[0*16+i] = arr[i]
+    let mut i = 0;
+    while i < n {
+        tbl = a64_set(tbl, i, a16_get(arr, i));
+        i = i + 1;
+    }
+    // Levels 1..3
+    let mut k = 1;
+    while k <= 3 {
+        // 2^k
+        let mut pw = 1;
+        let mut kk = 0;
+        while kk < k { pw = pw * 2; kk = kk + 1; }
+        // 2^(k-1)
+        let half = pw / 2;
+        i = 0;
+        while i + pw <= n {
+            let left = a64_get(tbl, (k - 1) * 16 + i);
+            let right = a64_get(tbl, (k - 1) * 16 + i + half);
+            tbl = a64_set(tbl, k * 16 + i, min_of(left, right));
+            i = i + 1;
+        }
+        k = k + 1;
+    }
+    SparseTable { data: tbl, n: n }
+}
+
+// Floor of log2(x) for x in 1..16
+fn log2_floor(x: Int) -> Int {
+    if x >= 8 { 3 }
+    else if x >= 4 { 2 }
+    else if x >= 2 { 1 }
+    else { 0 }
+}
+
+// Query: min of arr[l..r] (inclusive)
+fn st_query(st: SparseTable, l: Int, r: Int) -> Int {
+    let len = r - l + 1;
+    let k = log2_floor(len);
+    // 2^k
+    let mut pw = 1;
+    let mut kk = 0;
+    while kk < k { pw = pw * 2; kk = kk + 1; }
+    let left = a64_get(st.data, k * 16 + l);
+    let right = a64_get(st.data, k * 16 + r - pw + 1);
+    min_of(left, right)
+}
+
+// Brute force min for verification
+fn brute_min(arr: Arr16, l: Int, r: Int) -> Int {
+    let mut m = a16_get(arr, l);
+    let mut i = l + 1;
+    while i <= r {
+        let v = a16_get(arr, i);
+        if v < m { m = v; }
+        i = i + 1;
+    }
+    m
+}
+
+// ========== Tests ==========
+
+fn make_arr() -> Arr16 {
+    // [7, 2, 3, 0, 5, 10, 3, 12, 18, 1]
+    let mut a = a16_zero();
+    a = a16_set(a, 0, 7);
+    a = a16_set(a, 1, 2);
+    a = a16_set(a, 2, 3);
+    a = a16_set(a, 3, 0);
+    a = a16_set(a, 4, 5);
+    a = a16_set(a, 5, 10);
+    a = a16_set(a, 6, 3);
+    a = a16_set(a, 7, 12);
+    a = a16_set(a, 8, 18);
+    a = a16_set(a, 9, 1);
+    a
+}
+
+fn test_single_element() -> Int {
+    let arr = make_arr();
+    let st = st_build(arr, 10);
+    // Single element queries
+    assert_eq(st_query(st, 0, 0), 7);
+    assert_eq(st_query(st, 1, 1), 2);
+    assert_eq(st_query(st, 3, 3), 0);
+    assert_eq(st_query(st, 9, 9), 1);
+    0
+}
+
+fn test_pair_queries() -> Int {
+    let arr = make_arr();
+    let st = st_build(arr, 10);
+    assert_eq(st_query(st, 0, 1), 2);
+    assert_eq(st_query(st, 1, 2), 2);
+    assert_eq(st_query(st, 2, 3), 0);
+    assert_eq(st_query(st, 8, 9), 1);
+    0
+}
+
+fn test_wider_queries() -> Int {
+    let arr = make_arr();
+    let st = st_build(arr, 10);
+    // Range [0, 3] = min(7,2,3,0) = 0
+    assert_eq(st_query(st, 0, 3), 0);
+    // Range [4, 7] = min(5,10,3,12) = 3
+    assert_eq(st_query(st, 4, 7), 3);
+    // Range [0, 9] = min(all) = 0
+    assert_eq(st_query(st, 0, 9), 0);
+    0
+}
+
+fn test_vs_brute_force() -> Int {
+    let arr = make_arr();
+    let st = st_build(arr, 10);
+    // Test several ranges against brute force
+    assert_eq(st_query(st, 1, 5), brute_min(arr, 1, 5));
+    assert_eq(st_query(st, 2, 8), brute_min(arr, 2, 8));
+    assert_eq(st_query(st, 5, 9), brute_min(arr, 5, 9));
+    assert_eq(st_query(st, 0, 6), brute_min(arr, 0, 6));
+    0
+}
+
+fn test_sorted_array() -> Int {
+    // Sorted: [1, 2, 3, 4, 5, 6, 7, 8]
+    let mut a = a16_zero();
+    let mut i = 0;
+    while i < 8 {
+        a = a16_set(a, i, i + 1);
+        i = i + 1;
+    }
+    let st = st_build(a, 8);
+    // Min of any range starting at 0 is 1
+    assert_eq(st_query(st, 0, 0), 1);
+    assert_eq(st_query(st, 0, 3), 1);
+    assert_eq(st_query(st, 0, 7), 1);
+    // Min of range [3,7] = 4
+    assert_eq(st_query(st, 3, 7), 4);
+    0
+}
+
+fn test_reverse_sorted() -> Int {
+    // Descending: [8, 7, 6, 5, 4, 3, 2, 1]
+    let mut a = a16_zero();
+    let mut i = 0;
+    while i < 8 {
+        a = a16_set(a, i, 8 - i);
+        i = i + 1;
+    }
+    let st = st_build(a, 8);
+    // Min of [0,7] = 1
+    assert_eq(st_query(st, 0, 7), 1);
+    // Min of [0,3] = 5
+    assert_eq(st_query(st, 0, 3), 5);
+    // Min of [4,7] = 1
+    assert_eq(st_query(st, 4, 7), 1);
+    0
+}
+
+fn test_all_same() -> Int {
+    let mut a = a16_zero();
+    let mut i = 0;
+    while i < 8 {
+        a = a16_set(a, i, 42);
+        i = i + 1;
+    }
+    let st = st_build(a, 8);
+    assert_eq(st_query(st, 0, 7), 42);
+    assert_eq(st_query(st, 2, 5), 42);
+    assert_eq(st_query(st, 7, 7), 42);
+    0
+}
+
+fn main() -> Int {
+    test_single_element();
+    test_pair_queries();
+    test_wider_queries();
+    test_vs_brute_force();
+    test_sorted_array();
+    test_reverse_sorted();
+    test_all_same();
+    print("[OK] 412_sparse_table_aot");
+    0
+}

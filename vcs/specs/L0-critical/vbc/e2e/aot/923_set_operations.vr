@@ -1,0 +1,101 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, set, collection
+// @expected-exit: 0
+
+// Test: Set operations — new, insert, contains, remove, len, clear.
+
+fn main() -> Int {
+    // Test 1: Create set and insert elements
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+
+    if (s.len() != 3) {
+        print(f"FAIL test1: len={s.len()}, expected 3");
+        return 1;
+    }
+
+    // Test 2: Contains checks
+    if (s.contains(10) != true) {
+        print("FAIL test2a: should contain 10");
+        return 1;
+    }
+    if (s.contains(20) != true) {
+        print("FAIL test2b: should contain 20");
+        return 1;
+    }
+    if (s.contains(99) != false) {
+        print("FAIL test2c: should not contain 99");
+        return 1;
+    }
+
+    // Test 3: Duplicate insert — len stays the same
+    s.insert(10);
+    if (s.len() != 3) {
+        print(f"FAIL test3: len after dup={s.len()}, expected 3");
+        return 1;
+    }
+
+    // Test 4: Remove
+    s.remove(20);
+    if (s.len() != 2) {
+        print(f"FAIL test4a: len after remove={s.len()}, expected 2");
+        return 1;
+    }
+    if (s.contains(20) != false) {
+        print("FAIL test4b: should not contain 20 after remove");
+        return 1;
+    }
+    if (s.contains(10) != true) {
+        print("FAIL test4c: should still contain 10");
+        return 1;
+    }
+
+    // Test 5: Insert more, verify larger set
+    let mut s2 = Set.new();
+    let mut i = 0;
+    while (i < 20) {
+        s2.insert(i * 3);
+        i = i + 1;
+    }
+    if (s2.len() != 20) {
+        print(f"FAIL test5a: len={s2.len()}, expected 20");
+        return 1;
+    }
+    if (s2.contains(0) != true) {
+        print("FAIL test5b: should contain 0");
+        return 1;
+    }
+    if (s2.contains(57) != true) {
+        print("FAIL test5c: should contain 57");
+        return 1;
+    }
+    if (s2.contains(1) != false) {
+        print("FAIL test5d: should not contain 1");
+        return 1;
+    }
+
+    // Test 6: Clear
+    s.clear();
+    if (s.len() != 0) {
+        print(f"FAIL test6a: len after clear={s.len()}, expected 0");
+        return 1;
+    }
+    if (s.contains(10) != false) {
+        print("FAIL test6b: should not contain 10 after clear");
+        return 1;
+    }
+
+    // Test 7: Insert after clear
+    s.insert(100);
+    if (s.len() != 1) {
+        print(f"FAIL test7: len after re-insert={s.len()}, expected 1");
+        return 1;
+    }
+
+    print("923_set_operations: PASS");
+    0
+}

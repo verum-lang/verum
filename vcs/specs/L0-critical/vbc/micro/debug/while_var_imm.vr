@@ -1,0 +1,9 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let i = 0;
+    while i < 0 {
+    }
+}

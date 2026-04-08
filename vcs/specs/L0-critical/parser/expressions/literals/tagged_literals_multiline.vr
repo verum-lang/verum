@@ -1,0 +1,362 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, multiline
+
+// Multiline Tagged Literals
+// Tests for tag#"""...""" syntax
+
+// ============================================================================
+// SECTION 1: Basic Multiline Tagged Literals
+// ============================================================================
+
+fn test_basic_multiline_json() {
+    // Multiline JSON tagged literal
+    let config = json#"""
+{
+    "name": "Alice",
+    "age": 30,
+    "active": true
+}
+""";
+}
+
+fn test_basic_multiline_yaml() {
+    // Multiline YAML tagged literal
+    let data = yaml#"""
+name: Alice
+age: 30
+roles:
+  - admin
+  - user
+""";
+}
+
+fn test_basic_multiline_toml() {
+    // Multiline TOML tagged literal
+    let settings = toml#"""
+[server]
+host = "localhost"
+port = 8080
+
+[database]
+url = "postgres://localhost/db"
+""";
+}
+
+fn test_basic_multiline_sql() {
+    // Multiline SQL tagged literal
+    let query = sql#"""
+SELECT users.name, orders.total
+FROM users
+JOIN orders ON users.id = orders.user_id
+WHERE orders.status = 'completed'
+ORDER BY orders.created_at DESC
+""";
+}
+
+fn test_basic_multiline_gql() {
+    // Multiline GraphQL tagged literal
+    let query = gql#"""
+query GetUser($id: ID!) {
+    user(id: $id) {
+        name
+        email
+        posts {
+            title
+        }
+    }
+}
+""";
+}
+
+// ============================================================================
+// SECTION 2: JSON5 Relaxed Syntax
+// ============================================================================
+
+fn test_json5_unquoted_keys() {
+    // JSON5: unquoted keys
+    let config = json#"""
+{
+    name: "Alice",
+    age: 30,
+    active: true
+}
+""";
+}
+
+fn test_json5_trailing_comma() {
+    // JSON5: trailing commas allowed
+    let config = json#"""
+{
+    "items": [
+        "one",
+        "two",
+        "three",
+    ],
+}
+""";
+}
+
+fn test_json5_comments() {
+    // JSON5: comments allowed
+    let config = json#"""
+{
+    // This is a comment
+    name: "Alice",
+    /* Multi-line
+       comment */
+    age: 30
+}
+""";
+}
+
+fn test_json5_single_quotes() {
+    // JSON5: single-quoted strings
+    let config = json#"""
+{
+    name: 'Alice',
+    message: 'Hello, World!'
+}
+""";
+}
+
+// ============================================================================
+// SECTION 3: Complex Multiline Structures
+// ============================================================================
+
+fn test_complex_json() {
+    // Complex nested JSON
+    let api_response = json#"""
+{
+    status: "success",
+    data: {
+        users: [
+            { id: 1, name: "Alice", roles: ["admin"] },
+            { id: 2, name: "Bob", roles: ["user"] }
+        ],
+        pagination: {
+            page: 1,
+            per_page: 10,
+            total: 100
+        }
+    }
+}
+""";
+}
+
+fn test_complex_sql() {
+    // Complex SQL with CTEs
+    let query = sql#"""
+WITH active_users AS (
+    SELECT id, name
+    FROM users
+    WHERE status = 'active'
+),
+user_orders AS (
+    SELECT user_id, COUNT(*) as order_count
+    FROM orders
+    GROUP BY user_id
+)
+SELECT
+    au.name,
+    COALESCE(uo.order_count, 0) as orders
+FROM active_users au
+LEFT JOIN user_orders uo ON au.id = uo.user_id
+ORDER BY orders DESC
+""";
+}
+
+fn test_yaml_advanced() {
+    // YAML with multiline strings and anchors
+    let config = yaml#"""
+defaults: &defaults
+  timeout: 30
+  retries: 3
+
+production:
+  <<: *defaults
+  host: prod.example.com
+
+development:
+  <<: *defaults
+  host: localhost
+  timeout: 60
+""";
+}
+
+fn test_toml_array_of_tables() {
+    // TOML with array of tables
+    let config = toml#"""
+[package]
+name = "my-app"
+version = "0.1.0"
+
+[[bin]]
+name = "app"
+path = "src/main.rs"
+
+[[bin]]
+name = "worker"
+path = "src/worker.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+""";
+}
+
+// ============================================================================
+// SECTION 4: Multiline in Expressions
+// ============================================================================
+
+fn test_multiline_in_function_arg() {
+    fn process_config(config: JsonValue) -> Int { 0 }
+
+    // Multiline as function argument
+    let result = process_config(json#"""
+{
+    setting: "value",
+    enabled: true
+}
+""");
+}
+
+fn test_multiline_in_conditional() {
+    let production = true;
+
+    // Multiline in conditional
+    let config = if production {
+        json#"""
+{
+    env: "production",
+    debug: false
+}
+"""
+    } else {
+        json#"""
+{
+    env: "development",
+    debug: true
+}
+"""
+    };
+}
+
+fn test_multiline_in_array() {
+    // Array of multiline tagged literals
+    let queries = [
+        sql#"""
+SELECT * FROM users
+WHERE active = true
+""",
+        sql#"""
+SELECT * FROM orders
+WHERE status = 'pending'
+""",
+    ];
+}
+
+fn test_multiline_in_struct() {
+    type AppConfig is {
+        database: SqlQuery,
+        api: JsonValue,
+    };
+
+    // Multiline in struct initialization
+    let config = AppConfig {
+        database: sql#"""
+SELECT * FROM settings
+WHERE app_id = 1
+""",
+        api: json#"""
+{
+    endpoint: "/api/v1",
+    timeout: 30
+}
+""",
+    };
+}
+
+// ============================================================================
+// SECTION 5: Edge Cases
+// ============================================================================
+
+fn test_empty_multiline() {
+    // Empty multiline content
+    let empty = json#"""
+""";
+}
+
+fn test_single_line_in_multiline() {
+    // Single line content in multiline syntax
+    let single = json#"""{}""";
+}
+
+fn test_multiline_with_quotes_inside() {
+    // Content containing quote characters
+    let with_quotes = json#"""
+{
+    message: "He said \"Hello\""
+}
+""";
+}
+
+fn test_multiline_preserves_indentation() {
+    // Indentation should be preserved
+    let sql = sql#"""
+        SELECT *
+        FROM users
+        WHERE id = 1
+    """;
+}
+
+fn test_multiline_with_empty_lines() {
+    // Empty lines in content
+    let yaml = yaml#"""
+section1:
+  key: value
+
+section2:
+  key: value
+""";
+}
+
+// ============================================================================
+// SECTION 6: Various Tags with Multiline
+// ============================================================================
+
+fn test_xml_multiline() {
+    let xml = xml#"""
+<?xml version="1.0"?>
+<root>
+    <child attr="value">
+        Content
+    </child>
+</root>
+""";
+}
+
+fn test_html_multiline() {
+    let html = html#"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test</title>
+</head>
+<body>
+    <h1>Hello</h1>
+</body>
+</html>
+""";
+}
+
+fn test_sh_multiline() {
+    let script = sh#"""
+#!/bin/bash
+echo "Starting..."
+for i in 1 2 3; do
+    echo "Item $i"
+done
+echo "Done"
+""";
+}

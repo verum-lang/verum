@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, context, literal, error
+// @description: Test detection of invalid literal as context
+// @expected-error: E039
+
+// Context must be a type name, not a literal
+type Callback is fn() using [123];

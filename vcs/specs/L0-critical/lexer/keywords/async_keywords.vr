@@ -1,0 +1,153 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, async
+
+// Async/concurrent programming keywords
+
+// Async function definition
+async fn fetch_data(url: Text) -> Result<Data, Error> {
+    let response = http.get(url).await;
+    response.json().await
+}
+
+// Await expression
+async fn process_all(urls: List<Text>) -> List<Data> {
+    let mut results = [];
+    for url in urls {
+        let data = fetch_data(url).await;
+        results.push(data);
+    }
+    results
+}
+
+// Spawn for concurrent execution
+async fn parallel_fetch(urls: List<Text>) -> List<Data> {
+    let handles = urls.map(|url| spawn fetch_data(url));
+    let mut results = [];
+    for handle in handles {
+        let data = handle.await;
+        results.push(data);
+    }
+    results
+}
+
+// Spawn with block
+async fn background_work() {
+    spawn {
+        loop {
+            let item = queue.pop().await;
+            process(item);
+        }
+    };
+}
+
+// Defer for cleanup
+fn open_file(path: Text) -> Result<File, Error> {
+    let file = File.open(path)?;
+    defer {
+        file.close();
+    };
+    // file will be closed when scope exits
+    Ok(file)
+}
+
+// Multiple defer statements (LIFO order)
+fn transaction() -> Result<(), Error> {
+    let conn = acquire_connection()?;
+    defer conn.release();
+
+    let tx = conn.begin_transaction()?;
+    defer tx.rollback();  // Will only run if commit not reached
+
+    do_work(tx)?;
+    tx.commit();
+    Ok(())
+}
+
+// Try blocks for error handling
+fn read_config(path: Text) -> Result<Config, Error> {
+    try {
+        let content = File.read_to_string(path)?;
+        let config = Config.parse(content)?;
+        Ok(config)
+    }
+}
+
+// Complex async patterns
+async fn with_timeout<T>(
+    future: Future<T>,
+    duration: Duration
+) -> Result<T, TimeoutError> {
+    let timeout_handle = spawn {
+        sleep(duration).await;
+        Err(TimeoutError)
+    };
+
+    let result_handle = spawn future;
+
+    match race(timeout_handle, result_handle).await {
+        Left(_) => Err(TimeoutError),
+        Right(value) => Ok(value),
+    }
+}
+
+// Async with defer
+async fn safe_request(url: Text) -> Result<Response, Error> {
+    let client = HttpClient.new();
+    defer client.shutdown();
+
+    let response = client.get(url).await;
+    defer response.close();
+
+    response.read_body().await
+}
+
+// Spawn with structured concurrency
+async fn process_batch(items: List<Item>) -> List<Result<Output, Error>> {
+    let scope = TaskScope.new();
+    defer scope.cancel_all().await;
+
+    for item in items {
+        spawn scope.run(|| {
+            process_item(item).await
+        });
+    }
+
+    scope.join_all().await
+}
+
+// Try with async
+async fn fetch_and_parse(url: Text) -> Result<Document, Error> {
+    try {
+        let response = fetch(url).await?;
+        let text = response.text().await?;
+        let doc = Document.parse(text)?;
+        Ok(doc)
+    }
+}
+
+// Complex defer ordering
+fn complex_cleanup() {
+    defer print("First to register, last to run");
+
+    let resource1 = acquire()?;
+    defer resource1.release();
+
+    let resource2 = acquire()?;
+    defer resource2.release();
+
+    defer print("Last to register, first to run");
+
+    use_resources(resource1, resource2);
+    // Cleanup order: print("Last..."), resource2.release(), resource1.release(), print("First...")
+}
+
+// Yield expression in async context
+async fn stream_numbers() {
+    let mut i = 0;
+    while i < 10 {
+        yield i;
+        i = i + 1;
+    }
+}

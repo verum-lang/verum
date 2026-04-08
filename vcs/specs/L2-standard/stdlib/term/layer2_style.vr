@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, style, layer2
+// @description: Verify core.term.style types and color system parse and type-check
+
+/// Layer 2: Style & Color — Color, Rgb, Hsl, Lab, Style, Modifier, Theme.
+/// CIELAB perceptual distance, adaptive downscaling, builder chain API.
+
+mount core.term.style.*;
+
+fn test_color_variants() {
+    let colors = [
+        Color.Reset,
+        Color.Black,
+        Color.Red,
+        Color.Green,
+        Color.Blue,
+        Color.White,
+        Color.DarkGrey,
+        Color.Ansi256(42),
+        Color.Rgb(Rgb.new(255, 128, 0)),
+    ];
+    assert(colors.len() >= 9);
+}
+
+fn test_rgb() {
+    let red = Rgb.new(255, 0, 0);
+    let blue = Rgb.new(0, 0, 255);
+
+    // Perceptual distance should be > 0
+    let dist = red.perceptual_distance(&blue);
+    assert(dist > 0.0);
+
+    // Ansi256 downscaling
+    let ansi = red.to_ansi256();
+    assert(ansi >= 0 && ansi <= 255);
+
+    // HSL conversion
+    let hsl = red.to_hsl();
+    assert(hsl.s > 0.0);
+}
+
+fn test_rgb_from_hex() {
+    let color = Rgb.from_hex("#FF8800");
+    assert(color.is_some());
+    match color {
+        Some(rgb) => {
+            assert_eq(rgb.r as Int, 255);
+            assert_eq(rgb.g as Int, 136);
+            assert_eq(rgb.b as Int, 0);
+        }
+        None => assert(false),
+    }
+}
+
+fn test_modifier_bitfield() {
+    let bold = Modifier.BOLD;
+    let italic = Modifier.ITALIC;
+    let combined = bold.union(italic);
+
+    assert(combined.contains(Modifier.BOLD));
+    assert(combined.contains(Modifier.ITALIC));
+    assert(!combined.contains(Modifier.DIM));
+    assert(!Modifier.NONE.contains(Modifier.BOLD));
+}
+
+fn test_style_builder() {
+    // Builder chain pattern
+    let s = Style.new()
+        .fg(Color.Red)
+        .bg(Color.Black)
+        .bold()
+        .italic()
+        .underlined();
+
+    // Verify fg is set
+    assert(s.fg.is_some());
+    assert(s.bg.is_some());
+    // NOTE: s.add_modifier.contains(Modifier.BOLD) not tested — Modifier type
+    // resolves as placeholder, method dispatch fails (cross-module limitation)
+}
+
+fn test_style_patch() {
+    let base = Style.new().fg(Color.Red).bold();
+    let overlay = Style.new().bg(Color.Blue).italic();
+    let patched = base.patch(overlay);
+
+    // fg from base, bg from overlay, both modifiers
+    assert(patched.fg.is_some());
+    assert(patched.bg.is_some());
+    // NOTE: Modifier.contains() not tested — placeholder type resolution limitation
+}
+
+fn test_theme() {
+    let dark = Theme.dark();
+    let light = Theme.light();
+
+    // Both themes should have all semantic roles set
+    assert(dark.primary.fg.is_some());
+    assert(dark.error.fg.is_some());
+    assert(light.primary.fg.is_some());
+    assert(light.error.fg.is_some());
+}
+
+fn main() {
+    test_color_variants();
+    test_rgb();
+    test_rgb_from_hex();
+    test_modifier_bitfield();
+    test_style_builder();
+    test_style_patch();
+    test_theme();
+}

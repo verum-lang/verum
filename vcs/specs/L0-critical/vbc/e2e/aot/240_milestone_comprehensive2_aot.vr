@@ -1,0 +1,209 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, comprehensive
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Milestone test #240: comprehensive verification of all major AOT features
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn bnot(x: Int) -> Int { !x }
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// === Records and Types ===
+type Point is { x: Int, y: Int };
+type RGB is { r: Int, g: Int, b: Int };
+type Pair is { first: Int, second: Int };
+
+fn point_add(a: Point, b: Point) -> Point {
+    Point { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn point_dist_sq(a: Point, b: Point) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
+// === Higher-order functions ===
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+// === Algorithms ===
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    let mut i = 2;
+    while i * i <= n {
+        if n % i == 0 { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn fib(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    a
+}
+
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 {
+        count = count + (x & 1);
+        x = x >> 1;
+    }
+    count
+}
+
+fn test_records() {
+    let p1 = Point { x: 3, y: 4 };
+    let p2 = Point { x: 0, y: 0 };
+    assert_eq(point_dist_sq(p1, p2), 25);
+
+    let p3 = point_add(p1, Point { x: 7, y: 6 });
+    assert_eq(p3.x, 10);
+    assert_eq(p3.y, 10);
+
+    let c = RGB { r: 255, g: 128, b: 64 };
+    assert_eq(c.r + c.g + c.b, 447);
+
+    let pair = Pair { first: 42, second: 99 };
+    assert_eq(pair.first + pair.second, 141);
+}
+
+fn test_closures() {
+    let double = |x: Int| -> Int { x * 2 };
+    let square = |x: Int| -> Int { x * x };
+
+    assert_eq(apply(double, 21), 42);
+    assert_eq(apply(square, 7), 49);
+
+    // Fold: sum 1..10
+    let add = |acc: Int, x: Int| -> Int { acc + x };
+    assert_eq(fold_range(1, 11, 0, add), 55);
+
+    // Fold: factorial 5
+    let mul = |acc: Int, x: Int| -> Int { acc * x };
+    assert_eq(fold_range(1, 6, 1, mul), 120);
+}
+
+fn test_algorithms() {
+    // GCD
+    assert_eq(gcd(12, 18), 6);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(17, 13), 1);
+
+    // Primes
+    assert_eq(is_prime(2), true);
+    assert_eq(is_prime(17), true);
+    assert_eq(is_prime(100), false);
+    assert_eq(is_prime(97), true);
+
+    // Fibonacci
+    assert_eq(fib(0), 0);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(20), 6765);
+}
+
+fn test_bitwise() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(1023), 10);
+
+    // Bit manipulation
+    assert_eq(5 & 3, 1);
+    assert_eq(5 | 3, 7);
+    assert_eq(5 ^ 3, 6);
+    assert_eq(1 << 10, 1024);
+    assert_eq(1024 >> 5, 32);
+
+    // XOR swap
+    let mut a = 42;
+    let mut b = 99;
+    a = a ^ b;
+    b = a ^ b;
+    a = a ^ b;
+    assert_eq(a, 99);
+    assert_eq(b, 42);
+}
+
+fn test_control_flow() {
+    // While with break (using flag)
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 100 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    assert_eq(sum, 5050);
+
+    // Nested loops
+    let mut pairs = 0;
+    let mut x = 0;
+    while x < 5 {
+        let mut y = x + 1;
+        while y < 5 {
+            pairs = pairs + 1;
+            y = y + 1;
+        }
+        x = x + 1;
+    }
+    assert_eq(pairs, 10);  // C(5,2) = 10
+
+    // Early return
+    assert_eq(is_prime(1), false);
+    assert_eq(is_prime(2), true);
+}
+
+fn test_arithmetic() {
+    // Overflow-safe operations
+    assert_eq(abs_val(-42), 42);
+    assert_eq(abs_val(42), 42);
+    assert_eq(max2(10, 20), 20);
+    assert_eq(min2(10, 20), 10);
+
+    // Integer division and modulo
+    assert_eq(17 / 5, 3);
+    assert_eq(17 % 5, 2);
+    assert_eq(-7 / 2, -3);
+}
+
+fn main() -> Int {
+    test_records();
+    test_closures();
+    test_algorithms();
+    test_bitwise();
+    test_control_flow();
+    test_arithmetic();
+    print("[OK] 240_milestone_comprehensive2_aot");
+    0
+}

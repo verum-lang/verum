@@ -1,0 +1,121 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 50ns per allocation (small), < 200ns (large)
+// @tags: memory, allocation, performance
+
+/// Benchmark for memory allocation performance
+///
+/// Tests various allocation scenarios:
+/// - Small object allocation (< 256 bytes)
+/// - Medium object allocation (256 bytes - 4KB)
+/// - Large object allocation (> 4KB)
+/// - Heap vs stack allocation
+
+module benchmarks.micro.allocation
+
+using [Benchmark, Memory]
+
+/// Small object allocation (64 bytes)
+fn benchmark_alloc_small() {
+    for _ in 0..1_000_000 {
+        let obj = Heap.alloc(SmallStruct {
+            a: 1,
+            b: 2,
+            c: 3.14,
+            d: true,
+        });
+        // Allocation tracked by CBGR
+    }
+}
+
+type SmallStruct is {
+    a: Int32,
+    b: Int32,
+    c: Float64,
+    d: Bool,
+};
+
+/// Medium object allocation (1KB)
+fn benchmark_alloc_medium() {
+    for _ in 0..100_000 {
+        let data = Heap.alloc(list![0; 256]);  // 256 * 4 bytes = 1KB
+    }
+}
+
+/// Large object allocation (1MB)
+fn benchmark_alloc_large() {
+    for _ in 0..1_000 {
+        let data = Heap.alloc(list![0; 262_144]);  // 1MB
+    }
+}
+
+/// List growth allocation pattern
+fn benchmark_alloc_list_growth() {
+    let mut list: List<Int> = list![];
+
+    for i in 0..100_000 {
+        list.push(i);  // Triggers reallocation at capacity boundaries
+    }
+}
+
+/// Map allocation pattern
+fn benchmark_alloc_map() {
+    let mut map: Map<Text, Int> = map!{};
+
+    for i in 0..10_000 {
+        map.insert(text("key_{}", i), i);
+    }
+}
+
+/// Arena allocation (batch allocations)
+fn benchmark_alloc_arena() {
+    let arena = Arena.new(1024 * 1024);  // 1MB arena
+
+    for _ in 0..100_000 {
+        let _ = arena.alloc(SmallStruct {
+            a: 1, b: 2, c: 3.14, d: true,
+        });
+    }
+
+    // Single deallocation for entire arena
+    arena.reset();
+}
+
+/// Stack allocation (should be near-zero cost)
+fn benchmark_alloc_stack() {
+    for _ in 0..10_000_000 {
+        let local = SmallStruct {
+            a: 1, b: 2, c: 3.14, d: true,
+        };
+        // Stack allocation - no heap overhead
+        let _ = local.a + local.b;
+    }
+}
+
+/// Shared allocation (reference counted)
+fn benchmark_alloc_shared() {
+    for _ in 0..500_000 {
+        let shared = Shared.new(list![1, 2, 3, 4, 5]);
+        let clone1 = shared.clone();
+        let clone2 = shared.clone();
+        // Reference count decremented on drop
+    }
+}
+
+/// Allocation with explicit capacity
+fn benchmark_alloc_with_capacity() {
+    for _ in 0..10_000 {
+        let list = List.with_capacity(1000);
+        for i in 0..1000 {
+            list.push(i);  // No reallocation needed
+        }
+    }
+}
+
+/// Zero-initialized allocation
+fn benchmark_alloc_zeroed() {
+    for _ in 0..10_000 {
+        let data = Heap.alloc_zeroed.<[Int; 1024]>();
+    }
+}

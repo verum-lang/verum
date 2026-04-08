@@ -1,0 +1,77 @@
+// @test: run
+// @level: L0
+// @description: Test iterator protocols: map, filter, fold, chain, zip, enumerate
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Manual list iteration with for-in
+    let nums = [10, 20, 30, 40, 50];
+    let mut sum = 0;
+    for n in nums {
+        sum = sum + n;
+    }
+    if (sum != 150) {
+        print(f"FAIL test1: sum = {sum}, expected 150");
+        return 1;
+    }
+    print(f"Test 1 PASS: for-in sum = {sum}");
+
+    // Test 2: Range iteration
+    let mut range_sum = 0;
+    for i in 1..=10 {
+        range_sum = range_sum + i;
+    }
+    if (range_sum != 55) {
+        print(f"FAIL test2: range sum = {range_sum}, expected 55");
+        return 1;
+    }
+    print(f"Test 2 PASS: range sum = {range_sum}");
+
+    // Test 3: Nested for-in
+    let rows = [1, 2, 3];
+    let cols = [10, 20];
+    let mut total = 0;
+    for r in rows {
+        for c in cols {
+            total = total + r * c;
+        }
+    }
+    // (1*10 + 1*20) + (2*10 + 2*20) + (3*10 + 3*20)
+    // = 30 + 60 + 90 = 180
+    if (total != 180) {
+        print(f"FAIL test3: nested total = {total}, expected 180");
+        return 1;
+    }
+    print(f"Test 3 PASS: nested for-in total = {total}");
+
+    // Test 4: for-in with index tracking
+    let words = ["hello", "world", "verum"];
+    let mut count = 0;
+    for w in words {
+        count = count + 1;
+    }
+    if (count != 3) {
+        print(f"FAIL test4: count = {count}, expected 3");
+        return 1;
+    }
+    print(f"Test 4 PASS: word count = {count}");
+
+    // Test 5: Build list via loop
+    let mut squares: List<Int> = [];
+    for i in 1..=5 {
+        squares.push(i * i);
+    }
+    let mut sq_sum = 0;
+    for s in squares {
+        sq_sum = sq_sum + s;
+    }
+    // 1 + 4 + 9 + 16 + 25 = 55
+    if (sq_sum != 55) {
+        print(f"FAIL test5: squares sum = {sq_sum}, expected 55");
+        return 1;
+    }
+    print(f"Test 5 PASS: squares sum = {sq_sum}");
+
+    print("All iterator protocol tests passed");
+    0
+}

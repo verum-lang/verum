@@ -1,0 +1,242 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, protocol, implement, dispatch, abstraction
+// @description: Protocol/trait system — critical for compiler abstractions and visitor patterns
+
+type Circle is { radius: Int };
+type Rect is { width: Int, height: Int };
+type Triangle is { base: Int, height: Int };
+
+implement Circle {
+    fn new(r: Int) -> Circle {
+        Circle { radius: r }
+    }
+
+    fn area(&self) -> Int {
+        // Approximate: pi * r^2 ≈ 314 * r^2 / 100
+        314 * self.radius * self.radius / 100
+    }
+
+    fn perimeter(&self) -> Int {
+        // Approximate: 2 * pi * r ≈ 628 * r / 100
+        628 * self.radius / 100
+    }
+
+    fn describe(&self) -> Text {
+        f"Circle(r={self.radius})"
+    }
+}
+
+implement Rect {
+    fn new(w: Int, h: Int) -> Rect {
+        Rect { width: w, height: h }
+    }
+
+    fn area(&self) -> Int {
+        self.width * self.height
+    }
+
+    fn perimeter(&self) -> Int {
+        2 * (self.width + self.height)
+    }
+
+    fn describe(&self) -> Text {
+        f"Rect({self.width}x{self.height})"
+    }
+}
+
+implement Triangle {
+    fn new(b: Int, h: Int) -> Triangle {
+        Triangle { base: b, height: h }
+    }
+
+    fn area(&self) -> Int {
+        self.base * self.height / 2
+    }
+
+    fn perimeter(&self) -> Int {
+        // Approximate for right triangle
+        self.base + self.height + self.base
+    }
+
+    fn describe(&self) -> Text {
+        f"Triangle(b={self.base}, h={self.height})"
+    }
+}
+
+// Sum type to hold different shapes — protocol dispatch via match
+type Shape is
+    | ShapeCircle(Circle)
+    | ShapeRect(Rect)
+    | ShapeTriangle(Triangle);
+
+fn shape_area(s: Shape) -> Int {
+    match s {
+        ShapeCircle(c) => c.area(),
+        ShapeRect(r) => r.area(),
+        ShapeTriangle(t) => t.area(),
+    }
+}
+
+fn shape_perimeter(s: Shape) -> Int {
+    match s {
+        ShapeCircle(c) => c.perimeter(),
+        ShapeRect(r) => r.perimeter(),
+        ShapeTriangle(t) => t.perimeter(),
+    }
+}
+
+fn shape_describe(s: Shape) -> Text {
+    match s {
+        ShapeCircle(c) => c.describe(),
+        ShapeRect(r) => r.describe(),
+        ShapeTriangle(t) => t.describe(),
+    }
+}
+
+fn test_circle_methods() -> Int {
+    let c = Circle.new(10);
+    let area = c.area();
+    // 314 * 100 / 100 = 314
+    if area != 314 {
+        print(f"FAIL circle area: expected 314, got {area}");
+        return 1;
+    }
+
+    let peri = c.perimeter();
+    // 628 * 10 / 100 = 62
+    if peri != 62 {
+        print(f"FAIL circle perimeter: expected 62, got {peri}");
+        return 1;
+    }
+
+    let desc = c.describe();
+    if desc != "Circle(r=10)" {
+        print(f"FAIL circle describe: '{desc}'");
+        return 1;
+    }
+    print("  circle_methods: OK");
+    0
+}
+
+fn test_rect_methods() -> Int {
+    let r = Rect.new(5, 3);
+    let area = r.area();
+    if area != 15 {
+        print(f"FAIL rect area: expected 15, got {area}");
+        return 1;
+    }
+
+    let peri = r.perimeter();
+    if peri != 16 {
+        print(f"FAIL rect perimeter: expected 16, got {peri}");
+        return 1;
+    }
+
+    let desc = r.describe();
+    if desc != "Rect(5x3)" {
+        print(f"FAIL rect describe: '{desc}'");
+        return 1;
+    }
+    print("  rect_methods: OK");
+    0
+}
+
+fn test_triangle_methods() -> Int {
+    let t = Triangle.new(6, 4);
+    let area = t.area();
+    if area != 12 {
+        print(f"FAIL triangle area: expected 12, got {area}");
+        return 1;
+    }
+
+    let desc = t.describe();
+    if desc != "Triangle(b=6, h=4)" {
+        print(f"FAIL triangle describe: '{desc}'");
+        return 1;
+    }
+    print("  triangle_methods: OK");
+    0
+}
+
+fn test_dispatch_via_sum_type() -> Int {
+    let shapes = [
+        Shape.ShapeCircle(Circle.new(10)),
+        Shape.ShapeRect(Rect.new(5, 3)),
+        Shape.ShapeTriangle(Triangle.new(6, 4)),
+    ];
+
+    let a0 = shape_area(shapes[0]);
+    if a0 != 314 {
+        print(f"FAIL dispatch: circle area expected 314, got {a0}");
+        return 1;
+    }
+
+    let a1 = shape_area(shapes[1]);
+    if a1 != 15 {
+        print(f"FAIL dispatch: rect area expected 15, got {a1}");
+        return 1;
+    }
+
+    let a2 = shape_area(shapes[2]);
+    if a2 != 12 {
+        print(f"FAIL dispatch: triangle area expected 12, got {a2}");
+        return 1;
+    }
+    print("  dispatch_via_sum_type: OK");
+    0
+}
+
+fn test_describe_dispatch() -> Int {
+    let c_desc = shape_describe(Shape.ShapeCircle(Circle.new(5)));
+    if c_desc != "Circle(r=5)" {
+        print(f"FAIL describe: circle '{c_desc}'");
+        return 1;
+    }
+
+    let r_desc = shape_describe(Shape.ShapeRect(Rect.new(10, 20)));
+    if r_desc != "Rect(10x20)" {
+        print(f"FAIL describe: rect '{r_desc}'");
+        return 1;
+    }
+    print("  describe_dispatch: OK");
+    0
+}
+
+fn test_total_area() -> Int {
+    let shapes = [
+        Shape.ShapeCircle(Circle.new(10)),
+        Shape.ShapeRect(Rect.new(5, 3)),
+        Shape.ShapeTriangle(Triangle.new(6, 4)),
+    ];
+
+    let mut total = 0;
+    let mut i = 0;
+    while i < shapes.len() {
+        total = total + shape_area(shapes[i]);
+        i = i + 1;
+    }
+    // 314 + 15 + 12 = 341
+    if total != 341 {
+        print(f"FAIL total_area: expected 341, got {total}");
+        return 1;
+    }
+    print("  total_area: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_circle_methods();
+    failures = failures + test_rect_methods();
+    failures = failures + test_triangle_methods();
+    failures = failures + test_dispatch_via_sum_type();
+    failures = failures + test_describe_dispatch();
+    failures = failures + test_total_area();
+
+    if failures == 0 {
+        print("All implement protocol tests passed");
+    }
+    failures
+}

@@ -1,0 +1,68 @@
+// @test: run
+// @expected-stdout: Counter created with id: 1
+// Counter created with id: 2
+// Counter created with id: 3
+// @tier: 0
+// @level: L2
+// @tags: di, injectable, transient
+// @description: Tests transient scope - new instance on every injection
+
+// Global counter for tracking instance creation (for testing purposes)
+static mut INSTANCE_COUNTER: Int = 0;
+
+fn next_instance_id() -> Int {
+    unsafe {
+        INSTANCE_COUNTER += 1;
+        INSTANCE_COUNTER
+    }
+}
+
+@injectable(Scope.Transient)
+type Counter is {
+    id: Int,
+    value: Int,
+};
+
+implement Counter {
+    @inject
+    fn new() -> Self {
+        let id = next_instance_id();
+        println("Counter created with id: " + id.to_text());
+        Self {
+            id,
+            value: 0,
+        }
+    }
+
+    fn increment(&mut self) {
+        self.value += 1;
+    }
+
+    fn get_value(&self) -> Int {
+        self.value
+    }
+
+    fn get_id(&self) -> Int {
+        self.id
+    }
+}
+
+fn main() {
+    // Each injection creates a new instance
+    let counter1 = inject Counter;
+    let counter2 = inject Counter;
+    let counter3 = inject Counter;
+
+    // All counters are different instances
+    assert(counter1.get_id() == 1);
+    assert(counter2.get_id() == 2);
+    assert(counter3.get_id() == 3);
+
+    // Modifications to one don't affect others
+    counter1.increment();
+    counter1.increment();
+
+    assert(counter1.get_value() == 2);
+    assert(counter2.get_value() == 0);
+    assert(counter3.get_value() == 0);
+}

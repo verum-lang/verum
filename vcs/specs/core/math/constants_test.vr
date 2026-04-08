@@ -1,0 +1,669 @@
+// =============================================================================
+// constants_test.vr - Tests for math constants and refinement types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, constants, pi, e, ieee754, refinement-types, core
+// @description: Comprehensive tests for mathematical constants and refinement types
+// =============================================================================
+
+mount core.math.constants.{
+    PI, TAU, E, PHI,
+    SQRT2, SQRT3, SQRT5, FRAC_1_SQRT2, FRAC_1_SQRT_PI, FRAC_2_SQRT_PI,
+    LN2, LN10, LOG2_E, LOG10_E, LOG2_10, LOG10_2,
+    FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, FRAC_PI_6, FRAC_PI_8, FRAC_1_PI, FRAC_2_PI,
+    EPSILON, INFINITY, NEG_INFINITY, NAN, MAX_FLOAT, MIN_POSITIVE, MIN_SUBNORMAL,
+    EPSILON_F32, MAX_F32, MIN_POSITIVE_F32,
+    NonNegative, Positive, UnitInterval, Probability, ClosedProbability,
+    Angle, PositiveAngle, Correlation, NatInt, PosInt, Dim,
+};
+
+// =============================================================================
+// Section 1: Fundamental Constants - Basic Values
+// =============================================================================
+
+@test
+fn test_pi_value() {
+    // PI should be approximately 3.14159...
+    assert(PI > 3.14);
+    assert(PI < 3.15);
+    assert(PI > 3.141592);
+    assert(PI < 3.141593);
+}
+
+@test
+fn test_tau_value() {
+    // TAU = 2 * PI
+    assert(TAU > 6.28);
+    assert(TAU < 6.29);
+
+    // TAU should be approximately 2 * PI
+    let two_pi: Float = 2.0 * PI;
+    let diff: Float = TAU - two_pi;
+    assert(diff > -EPSILON);
+    assert(diff < EPSILON);
+}
+
+@test
+fn test_e_value() {
+    // E should be approximately 2.71828...
+    assert(E > 2.71);
+    assert(E < 2.72);
+    assert(E > 2.718281);
+    assert(E < 2.718282);
+}
+
+@test
+fn test_phi_value() {
+    // PHI (golden ratio) should be approximately 1.618...
+    assert(PHI > 1.61);
+    assert(PHI < 1.62);
+
+    // PHI^2 = PHI + 1 (golden ratio property)
+    let phi_squared: Float = PHI * PHI;
+    let phi_plus_one: Float = PHI + 1.0;
+    let diff: Float = phi_squared - phi_plus_one;
+    assert(diff > -1e-10);
+    assert(diff < 1e-10);
+}
+
+// =============================================================================
+// Section 2: Square Root Constants
+// =============================================================================
+
+@test
+fn test_sqrt2_value() {
+    // SQRT2 ≈ 1.41421...
+    assert(SQRT2 > 1.41);
+    assert(SQRT2 < 1.42);
+
+    // SQRT2 * SQRT2 ≈ 2
+    let sq: Float = SQRT2 * SQRT2;
+    assert(sq > 1.999999);
+    assert(sq < 2.000001);
+}
+
+@test
+fn test_sqrt3_value() {
+    // SQRT3 ≈ 1.73205...
+    assert(SQRT3 > 1.73);
+    assert(SQRT3 < 1.74);
+
+    // SQRT3 * SQRT3 ≈ 3
+    let sq: Float = SQRT3 * SQRT3;
+    assert(sq > 2.999999);
+    assert(sq < 3.000001);
+}
+
+@test
+fn test_sqrt5_value() {
+    // SQRT5 ≈ 2.23606...
+    assert(SQRT5 > 2.23);
+    assert(SQRT5 < 2.24);
+
+    // SQRT5 * SQRT5 ≈ 5
+    let sq: Float = SQRT5 * SQRT5;
+    assert(sq > 4.999999);
+    assert(sq < 5.000001);
+}
+
+@test
+fn test_frac_1_sqrt2_value() {
+    // FRAC_1_SQRT2 = 1 / √2 ≈ 0.70710...
+    assert(FRAC_1_SQRT2 > 0.707);
+    assert(FRAC_1_SQRT2 < 0.708);
+
+    // FRAC_1_SQRT2 * SQRT2 ≈ 1
+    let product: Float = FRAC_1_SQRT2 * SQRT2;
+    assert(product > 0.999999);
+    assert(product < 1.000001);
+}
+
+// =============================================================================
+// Section 3: Logarithm Constants
+// =============================================================================
+
+@test
+fn test_ln2_value() {
+    // LN2 = ln(2) ≈ 0.69314...
+    assert(LN2 > 0.693);
+    assert(LN2 < 0.694);
+}
+
+@test
+fn test_ln10_value() {
+    // LN10 = ln(10) ≈ 2.30258...
+    assert(LN10 > 2.30);
+    assert(LN10 < 2.31);
+}
+
+@test
+fn test_log2_e_value() {
+    // LOG2_E = log₂(e) = 1/ln(2) ≈ 1.44269...
+    assert(LOG2_E > 1.44);
+    assert(LOG2_E < 1.45);
+
+    // LOG2_E * LN2 ≈ 1
+    let product: Float = LOG2_E * LN2;
+    assert(product > 0.999999);
+    assert(product < 1.000001);
+}
+
+@test
+fn test_log10_e_value() {
+    // LOG10_E = log₁₀(e) = 1/ln(10) ≈ 0.43429...
+    assert(LOG10_E > 0.434);
+    assert(LOG10_E < 0.435);
+
+    // LOG10_E * LN10 ≈ 1
+    let product: Float = LOG10_E * LN10;
+    assert(product > 0.999999);
+    assert(product < 1.000001);
+}
+
+// =============================================================================
+// Section 4: Pi Fractions
+// =============================================================================
+
+@test
+fn test_frac_pi_2_value() {
+    // FRAC_PI_2 = π/2 ≈ 1.5707...
+    assert(FRAC_PI_2 > 1.57);
+    assert(FRAC_PI_2 < 1.58);
+
+    // FRAC_PI_2 * 2 ≈ PI
+    let double: Float = FRAC_PI_2 * 2.0;
+    let diff: Float = double - PI;
+    assert(diff > -EPSILON);
+    assert(diff < EPSILON);
+}
+
+@test
+fn test_frac_pi_4_value() {
+    // FRAC_PI_4 = π/4 ≈ 0.7853...
+    assert(FRAC_PI_4 > 0.785);
+    assert(FRAC_PI_4 < 0.786);
+
+    // FRAC_PI_4 * 4 ≈ PI
+    let quad: Float = FRAC_PI_4 * 4.0;
+    let diff: Float = quad - PI;
+    assert(diff > -EPSILON * 10.0);
+    assert(diff < EPSILON * 10.0);
+}
+
+@test
+fn test_frac_1_pi_value() {
+    // FRAC_1_PI = 1/π ≈ 0.31830...
+    assert(FRAC_1_PI > 0.318);
+    assert(FRAC_1_PI < 0.319);
+
+    // FRAC_1_PI * PI ≈ 1
+    let product: Float = FRAC_1_PI * PI;
+    assert(product > 0.999999);
+    assert(product < 1.000001);
+}
+
+// =============================================================================
+// Section 5: IEEE 754 Special Values
+// =============================================================================
+
+@test
+fn test_epsilon_value() {
+    // EPSILON should be very small but positive
+    assert(EPSILON > 0.0);
+    assert(EPSILON < 1e-15);
+
+    // 1.0 + EPSILON should be distinguishable from 1.0
+    let one_plus_eps: Float = 1.0 + EPSILON;
+    assert(one_plus_eps > 1.0);
+}
+
+@test
+fn test_infinity_positive() {
+    assert(INFINITY > 0.0);
+    assert(INFINITY > MAX_FLOAT);
+}
+
+@test
+fn test_infinity_negative() {
+    assert(NEG_INFINITY < 0.0);
+    assert(NEG_INFINITY < -MAX_FLOAT);
+}
+
+@test
+fn test_max_float_value() {
+    // MAX_FLOAT should be very large
+    assert(MAX_FLOAT > 1e308);
+    assert(MAX_FLOAT > 0.0);
+}
+
+@test
+fn test_min_positive_value() {
+    // MIN_POSITIVE should be very small but positive
+    assert(MIN_POSITIVE > 0.0);
+    assert(MIN_POSITIVE < 1e-307);
+}
+
+// =============================================================================
+// Section 6: Float32 Constants
+// =============================================================================
+
+@test
+fn test_epsilon_f32_value() {
+    // EPSILON_F32 should be larger than Float64 epsilon
+    assert(EPSILON_F32 > 0.0);
+    assert(EPSILON_F32 > EPSILON as Float32);
+    assert(EPSILON_F32 < 1e-6);
+}
+
+@test
+fn test_max_f32_value() {
+    // MAX_F32 should be smaller than MAX_FLOAT
+    assert(MAX_F32 > 0.0);
+    assert(MAX_F32 > 1e38);
+}
+
+@test
+fn test_min_positive_f32_value() {
+    assert(MIN_POSITIVE_F32 > 0.0);
+    assert(MIN_POSITIVE_F32 < 1e-37);
+}
+
+// =============================================================================
+// Section 7: Constant Relationships
+// =============================================================================
+
+@test
+fn test_pi_tau_relationship() {
+    // TAU = 2 * PI
+    let computed_tau: Float = 2.0 * PI;
+    let diff: Float = TAU - computed_tau;
+    assert(diff > -EPSILON);
+    assert(diff < EPSILON);
+}
+
+@test
+fn test_golden_ratio_property() {
+    // PHI = (1 + √5) / 2
+    let computed_phi: Float = (1.0 + SQRT5) / 2.0;
+    let diff: Float = PHI - computed_phi;
+    assert(diff > -EPSILON);
+    assert(diff < EPSILON);
+}
+
+@test
+fn test_sqrt_reciprocal_relationship() {
+    // FRAC_1_SQRT2 = 1 / SQRT2
+    let computed: Float = 1.0 / SQRT2;
+    let diff: Float = FRAC_1_SQRT2 - computed;
+    assert(diff > -EPSILON);
+    assert(diff < EPSILON);
+}
+
+// =============================================================================
+// Section 8: Refinement Types - Assignment Tests
+// NOTE: Comparison tests removed - refinement types don't support direct comparison
+// The refinement is verified at assignment time, not through runtime checks
+// =============================================================================
+
+@test
+fn test_non_negative_assignment() {
+    // Valid assignments - compiler checks refinement at assignment
+    let zero: NonNegative = 0.0;
+    let positive: NonNegative = 1.5;
+    let large: NonNegative = 1000.0;
+    // These would fail to compile: let negative: NonNegative = -1.0;
+}
+
+@test
+fn test_positive_assignment() {
+    let small: Positive = 0.001;
+    let one: Positive = 1.0;
+    let large: Positive = 1000.0;
+}
+
+@test
+fn test_unit_interval_assignment() {
+    let zero: UnitInterval = 0.0;
+    let half: UnitInterval = 0.5;
+    let one: UnitInterval = 1.0;
+}
+
+@test
+fn test_closed_probability_assignment() {
+    let zero: ClosedProbability = 0.0;
+    let half: ClosedProbability = 0.5;
+    let one: ClosedProbability = 1.0;
+}
+
+@test
+fn test_correlation_assignment() {
+    let neg_one: Correlation = -1.0;
+    let zero: Correlation = 0.0;
+    let pos_one: Correlation = 1.0;
+}
+
+// =============================================================================
+// Section 9: Integer Refinement Types - Assignment Tests
+// =============================================================================
+
+@test
+fn test_nat_int_assignment() {
+    let zero: NatInt = 0;
+    let one: NatInt = 1;
+    let large: NatInt = 1000;
+}
+
+@test
+fn test_pos_int_assignment() {
+    let one: PosInt = 1;
+    let large: PosInt = 1000;
+}
+
+// =============================================================================
+// Section 10: Edge Cases
+// =============================================================================
+
+@test
+fn test_constants_are_finite() {
+    // All fundamental constants should be finite (not infinity or NaN)
+    assert(PI == PI);  // NaN != NaN, so this tests for non-NaN
+    assert(TAU == TAU);
+    assert(E == E);
+    assert(PHI == PHI);
+    assert(SQRT2 == SQRT2);
+    assert(SQRT3 == SQRT3);
+    assert(SQRT5 == SQRT5);
+    assert(LN2 == LN2);
+    assert(LN10 == LN10);
+}
+
+@test
+fn test_constants_are_positive() {
+    assert(PI > 0.0);
+    assert(TAU > 0.0);
+    assert(E > 0.0);
+    assert(PHI > 0.0);
+    assert(SQRT2 > 0.0);
+    assert(SQRT3 > 0.0);
+    assert(SQRT5 > 0.0);
+    assert(LN2 > 0.0);
+    assert(LN10 > 0.0);
+    assert(EPSILON > 0.0);
+    assert(MAX_FLOAT > 0.0);
+    assert(MIN_POSITIVE > 0.0);
+}
+
+// =============================================================================
+// Section 11: Additional Square Root Pi Constants
+// =============================================================================
+
+@test
+fn test_frac_1_sqrt_pi_value() {
+    // FRAC_1_SQRT_PI = 1 / sqrt(PI) ~ 0.56418...
+    assert(FRAC_1_SQRT_PI > 0.564);
+    assert(FRAC_1_SQRT_PI < 0.565);
+}
+
+@test
+fn test_frac_2_sqrt_pi_value() {
+    // FRAC_2_SQRT_PI = 2 / sqrt(PI) ~ 1.12837...
+    assert(FRAC_2_SQRT_PI > 1.128);
+    assert(FRAC_2_SQRT_PI < 1.129);
+}
+
+@test
+fn test_frac_2_sqrt_pi_is_double_frac_1() {
+    // FRAC_2_SQRT_PI = 2 * FRAC_1_SQRT_PI
+    let computed: Float = 2.0 * FRAC_1_SQRT_PI;
+    let diff: Float = FRAC_2_SQRT_PI - computed;
+    assert(diff > -EPSILON);
+    assert(diff < EPSILON);
+}
+
+@test
+fn test_frac_2_sqrt_pi_identity() {
+    // FRAC_2_SQRT_PI^2 * PI / 4 ~ 1
+    let sq: Float = FRAC_2_SQRT_PI * FRAC_2_SQRT_PI;
+    let result: Float = sq * PI / 4.0;
+    let diff: Float = result - 1.0;
+    assert(diff > -1e-10);
+    assert(diff < 1e-10);
+}
+
+// =============================================================================
+// Section 12: Additional Pi Fractions
+// =============================================================================
+
+@test
+fn test_frac_pi_3_value() {
+    // FRAC_PI_3 = PI / 3 ~ 1.04719...
+    assert(FRAC_PI_3 > 1.047);
+    assert(FRAC_PI_3 < 1.048);
+}
+
+@test
+fn test_frac_pi_3_times_3_is_pi() {
+    let triple: Float = FRAC_PI_3 * 3.0;
+    let diff: Float = triple - PI;
+    assert(diff > -EPSILON * 10.0);
+    assert(diff < EPSILON * 10.0);
+}
+
+@test
+fn test_frac_pi_6_value() {
+    // FRAC_PI_6 = PI / 6 ~ 0.52359...
+    assert(FRAC_PI_6 > 0.523);
+    assert(FRAC_PI_6 < 0.524);
+}
+
+@test
+fn test_frac_pi_6_times_6_is_pi() {
+    let product: Float = FRAC_PI_6 * 6.0;
+    let diff: Float = product - PI;
+    assert(diff > -EPSILON * 10.0);
+    assert(diff < EPSILON * 10.0);
+}
+
+@test
+fn test_frac_pi_8_value() {
+    // FRAC_PI_8 = PI / 8 ~ 0.39269...
+    assert(FRAC_PI_8 > 0.392);
+    assert(FRAC_PI_8 < 0.393);
+}
+
+@test
+fn test_frac_pi_8_times_8_is_pi() {
+    let product: Float = FRAC_PI_8 * 8.0;
+    let diff: Float = product - PI;
+    assert(diff > -EPSILON * 10.0);
+    assert(diff < EPSILON * 10.0);
+}
+
+@test
+fn test_frac_2_pi_value() {
+    // FRAC_2_PI = 2 / PI ~ 0.63661...
+    assert(FRAC_2_PI > 0.636);
+    assert(FRAC_2_PI < 0.637);
+}
+
+@test
+fn test_frac_2_pi_is_double_frac_1_pi() {
+    // FRAC_2_PI = 2 * FRAC_1_PI
+    let computed: Float = 2.0 * FRAC_1_PI;
+    let diff: Float = FRAC_2_PI - computed;
+    assert(diff > -EPSILON);
+    assert(diff < EPSILON);
+}
+
+// =============================================================================
+// Section 13: Additional Logarithm Constants
+// =============================================================================
+
+@test
+fn test_log2_10_value() {
+    // LOG2_10 = log2(10) ~ 3.32192...
+    assert(LOG2_10 > 3.321);
+    assert(LOG2_10 < 3.322);
+}
+
+@test
+fn test_log10_2_value() {
+    // LOG10_2 = log10(2) ~ 0.30102...
+    assert(LOG10_2 > 0.301);
+    assert(LOG10_2 < 0.302);
+}
+
+@test
+fn test_log2_10_times_log10_2_is_one() {
+    // LOG2_10 * LOG10_2 = 1
+    let product: Float = LOG2_10 * LOG10_2;
+    let diff: Float = product - 1.0;
+    assert(diff > -1e-10);
+    assert(diff < 1e-10);
+}
+
+@test
+fn test_log2_10_equals_ln10_over_ln2() {
+    // LOG2_10 = LN10 / LN2
+    let computed: Float = LN10 / LN2;
+    let diff: Float = LOG2_10 - computed;
+    assert(diff > -1e-10);
+    assert(diff < 1e-10);
+}
+
+@test
+fn test_log10_2_equals_ln2_over_ln10() {
+    // LOG10_2 = LN2 / LN10
+    let computed: Float = LN2 / LN10;
+    let diff: Float = LOG10_2 - computed;
+    assert(diff > -1e-10);
+    assert(diff < 1e-10);
+}
+
+// =============================================================================
+// Section 14: IEEE 754 - NAN and MIN_SUBNORMAL
+// =============================================================================
+
+@test
+fn test_nan_is_not_equal_to_itself() {
+    // NaN != NaN is a fundamental IEEE 754 property
+    let is_nan: Bool = NAN == NAN;
+    assert(is_nan == false);
+}
+
+@test
+fn test_nan_not_less_than_zero() {
+    let lt: Bool = NAN < 0.0;
+    assert(lt == false);
+}
+
+@test
+fn test_nan_not_greater_than_zero() {
+    let gt: Bool = NAN > 0.0;
+    assert(gt == false);
+}
+
+@test
+fn test_min_subnormal_value() {
+    // MIN_SUBNORMAL is the smallest positive representable Float64
+    assert(MIN_SUBNORMAL > 0.0);
+    assert(MIN_SUBNORMAL < MIN_POSITIVE);
+}
+
+// =============================================================================
+// Section 15: Additional Refinement Types
+// =============================================================================
+
+@test
+fn test_probability_assignment() {
+    // Probability is open interval (0, 1) - excludes 0 and 1
+    let half: Probability = 0.5;
+    let small: Probability = 0.001;
+    let large: Probability = 0.999;
+}
+
+@test
+fn test_angle_assignment() {
+    // Angle is [-PI, PI)
+    let zero: Angle = 0.0;
+    let neg: Angle = -1.0;
+    let pos: Angle = 1.0;
+}
+
+@test
+fn test_positive_angle_assignment() {
+    // PositiveAngle is [0, 2*PI)
+    let zero: PositiveAngle = 0.0;
+    let mid: PositiveAngle = 3.0;
+    let large: PositiveAngle = 6.0;
+}
+
+@test
+fn test_dim_assignment() {
+    // Dim is USize{> 0}
+    let one: Dim = 1 as USize;
+    let hundred: Dim = 100 as USize;
+}
+
+// =============================================================================
+// Section 16: Additional Constant Relationships
+// =============================================================================
+
+@test
+fn test_golden_ratio_reciprocal() {
+    // PHI - 1 = 1/PHI
+    let phi_minus_one: Float = PHI - 1.0;
+    let one_over_phi: Float = 1.0 / PHI;
+    let diff: Float = phi_minus_one - one_over_phi;
+    assert(diff > -1e-10);
+    assert(diff < 1e-10);
+}
+
+@test
+fn test_e_squared_approximation() {
+    // E * E ~ 7.389056...
+    let e_sq: Float = E * E;
+    assert(e_sq > 7.389);
+    assert(e_sq < 7.390);
+}
+
+// =============================================================================
+// Section 17: Infinity Arithmetic
+// =============================================================================
+
+@test
+fn test_infinity_plus_one() {
+    let result: Float = INFINITY + 1.0;
+    assert(result == INFINITY);
+}
+
+@test
+fn test_infinity_greater_than_max_float() {
+    assert(INFINITY > MAX_FLOAT);
+}
+
+// =============================================================================
+// Section 18: Constant Ordering
+// =============================================================================
+
+@test
+fn test_constant_ordering() {
+    // PHI < E < PI < TAU
+    assert(PHI < E);
+    assert(E < PI);
+    assert(PI < TAU);
+
+    // SQRT2 < SQRT3 < SQRT5
+    assert(SQRT2 < SQRT3);
+    assert(SQRT3 < SQRT5);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

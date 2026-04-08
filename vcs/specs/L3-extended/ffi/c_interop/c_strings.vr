@@ -1,0 +1,520 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, strings
+// @description: Tests C string handling and conversion patterns
+
+/// ============================================================
+/// C STRING HANDLING
+/// ============================================================
+///
+/// C strings are null-terminated byte arrays. Verum provides safe
+/// abstractions for working with C strings across FFI boundaries.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_int is i32;
+type c_size is usize;
+
+type Ordering is
+    | Less
+    | Equal
+    | Greater;
+
+/// Placeholder for C strlen
+fn c_strlen(ptr: *const c_char) -> usize {
+    // In real implementation, this calls C strlen
+    0
+}
+
+type CStrError is
+    | NullPointer
+    | NoNullTerminator
+    | InteriorNul
+    | InvalidUtf8
+    | BufferTooSmall
+    | AllocationFailed;
+
+// ------------------------------------------------------------
+// C Text Types
+// ------------------------------------------------------------
+
+/// Borrowed C string slice (immutable)
+type CStr is {
+    ptr: *const c_char,
+};
+
+implement CStr {
+    /// Create from raw pointer (unsafe)
+    /// SAFETY: ptr must be valid, properly aligned, and null-terminated
+    unsafe fn from_ptr(ptr: *const c_char) -> CStr {
+        assert(ptr != null);
+        CStr { ptr }
+    }
+
+    /// Create with length check
+    /// SAFETY: ptr must be valid for at least max_len bytes
+    unsafe fn from_ptr_with_max_len(ptr: *const c_char, max_len: usize) -> Result<CStr, CStrError> {
+        if ptr == null {
+            return Err(NullPointer);
+        }
+
+        // Find null terminator within max_len
+        for i in 0..max_len {
+            if *ptr.add(i) == 0 {
+                return Ok(CStr { ptr });
+            }
+        }
+
+        Err(CStrError.NoNullTerminator)
+    }
+
+    /// Get raw pointer
+    fn as_ptr(&self) -> *const c_char {
+        self.ptr
+    }
+
+    /// Get length (not including null terminator)
+    fn len(&self) -> usize {
+        // SAFETY: ptr is guaranteed valid and null-terminated
+        unsafe { c_strlen(self.ptr) }
+    }
+
+    /// Check if empty
+    fn is_empty(&self) -> Bool {
+        // SAFETY: ptr is valid
+        unsafe { *self.ptr == 0 }
+    }
+
+    /// Get bytes (not including null terminator)
+    fn as_bytes(&self) -> &[u8] {
+        // SAFETY: ptr is valid for len() bytes
+        unsafe {
+            slice_from_raw_parts(self.ptr as *const u8, self.len())
+        }
+    }
+
+    /// Get bytes with null terminator
+    fn as_bytes_with_nul(&self) -> &[u8] {
+        // SAFETY: ptr is valid for len() + 1 bytes
+        unsafe {
+            slice_from_raw_parts(self.ptr as *const u8, self.len() + 1)
+        }
+    }
+
+    /// Convert to Verum Text (UTF-8 validated)
+    fn to_text(&self) -> Result<Text, CStrError> {
+        let bytes = self.as_bytes();
+        Text.from_utf8(bytes.to_list())
+            .map_err(|_| CStrError.InvalidUtf8)
+    }
+
+    /// Convert to Text (lossy, replaces invalid UTF-8)
+    fn to_text_lossy(&self) -> Text {
+        Text.from_utf8_lossy(self.as_bytes())
+    }
+}
+
+/// Owned C string
+type CString is {
+    data: List<u8>,
+};
+
+implement CString {
+    /// Create from Text (may fail if contains null bytes)
+    fn new(s: &str) -> Result<CString, CStrError> {
+        let bytes = s.as_bytes();
+        for b in bytes.iter() {
+            if *b == 0 {
+                return Err(InteriorNul);
+            }
+        }
+
+        let mut data = bytes.to_list();
+        data.push(0);
+        Ok(CString { data })
+    }
+
+    /// Create from Text, replacing null bytes with replacement char
+    fn new_safe(s: &str) -> CString {
+        let mut data = List.new();
+        for b in s.bytes() {
+            if b == 0 {
+                data.push('?' as u8);
+            } else {
+                data.push(b);
+            }
+        }
+        data.push(0);
+        CString { data }
+    }
+
+    /// Create from raw bytes (validates no interior nulls)
+    fn from_bytes(bytes: List<u8>) -> Result<CString, CStrError> {
+        for b in bytes.iter() {
+            if *b == 0 {
+                return Err(InteriorNul);
+            }
+        }
+
+        let mut data = bytes;
+        data.push(0);
+        Ok(CString { data })
+    }
+
+    /// Create from raw C pointer (copies the string)
+    unsafe fn from_raw(ptr: *const c_char) -> Result<CString, CStrError> {
+        if ptr == null {
+            return Err(NullPointer);
+        }
+
+        let len = c_strlen(ptr);
+        let mut data = List.with_capacity(len + 1);
+
+        for i in 0..len {
+            data.push(*ptr.add(i) as u8);
+        }
+        data.push(0);
+
+        Ok(CString { data })
+    }
+
+    /// Get as CStr
+    fn as_c_str(&self) -> CStr {
+        // SAFETY: data is guaranteed null-terminated
+        CStr { ptr: self.data.as_ptr() as *const c_char }
+    }
+
+    /// Get raw pointer
+    fn as_ptr(&self) -> *const c_char {
+        self.data.as_ptr() as *const c_char
+    }
+
+    /// Get mutable raw pointer
+    fn as_mut_ptr(&mut self) -> *mut c_char {
+        self.data.as_mut_ptr() as *mut c_char
+    }
+
+    /// Get length (not including null)
+    fn len(&self) -> usize {
+        self.data.len() - 1
+    }
+
+    /// Convert to Text
+    fn to_text(&self) -> Result<Text, CStrError> {
+        self.as_c_str().to_text()
+    }
+
+    /// Transfer ownership to C (returns pointer that must be freed by C)
+    fn into_raw(self) -> *mut c_char {
+        let ptr = self.data.as_mut_ptr() as *mut c_char;
+        forget(self);
+        ptr
+    }
+
+    /// Reclaim ownership from raw pointer
+    /// SAFETY: ptr must have been created by into_raw()
+    unsafe fn from_raw_owned(ptr: *mut c_char) -> CString {
+        let len = c_strlen(ptr);
+        let mut data = List.with_capacity(len + 1);
+        for i in 0..len + 1 {
+            data.push(*ptr.add(i) as u8);
+        }
+        CString { data }
+    }
+}
+
+// ------------------------------------------------------------
+// C Library Text Functions
+// ------------------------------------------------------------
+
+ffi libc_strlen {
+    @extern("C")
+    fn strlen(s: *const c_char) -> c_size;
+}
+
+ffi libc_strcmp {
+    @extern("C")
+    fn strcmp(s1: *const c_char, s2: *const c_char) -> c_int;
+}
+
+ffi libc_strncmp {
+    @extern("C")
+    fn strncmp(s1: *const c_char, s2: *const c_char, n: c_size) -> c_int;
+}
+
+ffi libc_strcpy {
+    @extern("C")
+    fn strcpy(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+}
+
+ffi libc_strncpy {
+    @extern("C")
+    fn strncpy(dest: *mut c_char, src: *const c_char, n: c_size) -> *mut c_char;
+}
+
+ffi libc_strcat {
+    @extern("C")
+    fn strcat(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+}
+
+ffi libc_strchr {
+    @extern("C")
+    fn strchr(s: *const c_char, c: c_int) -> *const c_char;
+}
+
+ffi libc_strstr {
+    @extern("C")
+    fn strstr(haystack: *const c_char, needle: *const c_char) -> *const c_char;
+}
+
+ffi libc_strdup {
+    @extern("C")
+    fn strdup(s: *const c_char) -> *mut c_char;
+}
+
+ffi libc_strtok_r {
+    @extern("C")
+    fn strtok_r(s: *mut c_char, delim: *const c_char, saveptr: *mut *mut c_char) -> *mut c_char;
+}
+
+// ------------------------------------------------------------
+// Safe Text Operations
+// ------------------------------------------------------------
+
+/// Safe string comparison
+fn cstr_compare(s1: &CStr, s2: &CStr) -> Ordering {
+    // SAFETY: Both CStr instances are valid
+    let result = unsafe { libc_strcmp.strcmp(s1.as_ptr(), s2.as_ptr()) };
+
+    if result < 0 {
+        Less
+    } else if result > 0 {
+        Greater
+    } else {
+        Equal
+    }
+}
+
+/// Safe string copy with bounds checking
+fn cstr_copy(dest: &mut [u8], src: &CStr) -> Result<(), CStrError> {
+    let src_len = src.len();
+
+    if dest.len() <= src_len {
+        return Err(BufferTooSmall);
+    }
+
+    // SAFETY: We verified dest is large enough
+    unsafe {
+        libc_strncpy.strncpy(dest.as_mut_ptr() as *mut c_char, src.as_ptr(), dest.len());
+        // Ensure null termination
+        dest[dest.len() - 1] = 0;
+    }
+
+    Ok(())
+}
+
+/// Safe string concatenation
+fn cstr_concat(dest: &mut [u8], dest_len: usize, src: &CStr) -> Result<usize, CStrError> {
+    let src_len = src.len();
+    let new_len = dest_len + src_len;
+
+    if new_len >= dest.len() {
+        return Err(BufferTooSmall);
+    }
+
+    // SAFETY: We verified thereps space
+    unsafe {
+        libc_strcpy.strcpy(
+            dest.as_mut_ptr().add(dest_len) as *mut c_char,
+            src.as_ptr()
+        );
+    }
+
+    Ok(new_len)
+}
+
+/// Safe string search
+fn cstr_find(haystack: &CStr, needle: &CStr) -> Maybe<usize> {
+    // Placeholder: real impl calls C strstr and does pointer arithmetic
+    None
+}
+
+/// Safe character search
+fn cstr_find_char(s: &CStr, c: u8) -> Maybe<usize> {
+    // Placeholder: real impl calls C strchr and does pointer arithmetic
+    None
+}
+
+/// Safe string duplication
+fn cstr_dup(s: &CStr) -> Result<CString, CStrError> {
+    // SAFETY: s is valid
+    let ptr = unsafe { libc_strdup.strdup(s.as_ptr()) };
+
+    if ptr == null {
+        return Err(CStrError.AllocationFailed);
+    }
+
+    // SAFETY: strdup returned valid pointer
+    unsafe { CString.from_raw(ptr) }
+}
+
+// ------------------------------------------------------------
+// Tokenization (Thread-Safe)
+// ------------------------------------------------------------
+
+/// Safe tokenizer using strtok_r
+type CStringTokenizer is {
+    string: CString,
+    saveptr: *mut c_char,
+};
+
+implement CStringTokenizer {
+    fn new(s: &str) -> Result<CStringTokenizer, CStrError> {
+        let string = CString.new(s)?;
+        Ok(CStringTokenizer {
+            string,
+            saveptr: null as *mut c_char,
+        })
+    }
+
+    fn next(&mut self, delimiters: &CStr) -> Maybe<CStr> {
+        let ptr = if self.saveptr == null {
+            self.string.as_mut_ptr()
+        } else {
+            null as *mut c_char  // Continue from saveptr
+        };
+
+        // SAFETY: Using thread-safe strtok_r
+        let token = unsafe {
+            libc_strtok_r.strtok_r(ptr, delimiters.as_ptr(), &mut self.saveptr)
+        };
+
+        if token == null {
+            None
+        } else {
+            // SAFETY: strtok_r returned valid pointer
+            Some(unsafe { CStr.from_ptr(token) })
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Wide Character Strings
+// ------------------------------------------------------------
+
+/// Wide character type (platform-dependent)
+type wchar_t is u32;
+
+/// Wide C string
+type WCStr is {
+    ptr: *const wchar_t,
+};
+
+ffi libc_wcslen {
+    @extern("C")
+    fn wcslen(s: *const wchar_t) -> c_size;
+}
+
+implement WCStr {
+    unsafe fn from_ptr(ptr: *const wchar_t) -> WCStr {
+        WCStr { ptr }
+    }
+
+    fn len(&self) -> usize {
+        // SAFETY: ptr is valid
+        unsafe { libc_wcslen.wcslen(self.ptr) }
+    }
+
+    /// Convert to UTF-8 Text
+    fn to_text(&self) -> Result<Text, CStrError> {
+        let len = self.len();
+        let mut bytes = List.with_capacity(len * 4);  // Max UTF-8 expansion
+
+        for i in 0..len {
+            // SAFETY: i < len
+            let wc = unsafe { *self.ptr.add(i) };
+            // Encode as UTF-8
+            encode_utf8(wc, &mut bytes);
+        }
+
+        Text.from_utf8(bytes).map_err(|_| CStrError.InvalidUtf8)
+    }
+}
+
+/// Encode Unicode code point as UTF-8
+fn encode_utf8(code: u32, output: &mut List<u8>) {
+    if code < 0x80 {
+        output.push(code as u8);
+    } else if code < 0x800 {
+        output.push((0xC0 | (code >> 6)) as u8);
+        output.push((0x80 | (code & 0x3F)) as u8);
+    } else if code < 0x10000 {
+        output.push((0xE0 | (code >> 12)) as u8);
+        output.push((0x80 | ((code >> 6) & 0x3F)) as u8);
+        output.push((0x80 | (code & 0x3F)) as u8);
+    } else {
+        output.push((0xF0 | (code >> 18)) as u8);
+        output.push((0x80 | ((code >> 12) & 0x3F)) as u8);
+        output.push((0x80 | ((code >> 6) & 0x3F)) as u8);
+        output.push((0x80 | (code & 0x3F)) as u8);
+    }
+}
+
+// ------------------------------------------------------------
+// Helper Functions
+// ------------------------------------------------------------
+
+fn forget<T>(value: T) {
+    let _ = Heap.into_raw(Heap(value));
+}
+
+unsafe fn slice_from_raw_parts<T>(ptr: *const T, len: usize) -> &[T] {
+    // Placeholder - would be intrinsic
+    &[]
+}
+
+// ------------------------------------------------------------
+// Tests
+// ------------------------------------------------------------
+
+fn test_cstring_creation() {
+    let s = CString.new("hello");
+    assert(s.is_ok());
+
+    let s = s.unwrap();
+    assert(s.len() == 5);
+    assert(s.as_ptr() != null);
+}
+
+fn test_cstring_with_interior_null() {
+    let s = CString.new("hel\0lo");
+    assert(s.is_err());
+}
+
+fn test_cstr_compare() {
+    let s1 = CString.new("abc").unwrap();
+    let s2 = CString.new("def").unwrap();
+
+    let ordering = cstr_compare(&s1.as_c_str(), &s2.as_c_str());
+    assert(ordering is Less);
+}
+
+fn test_cstr_find() {
+    let s = CString.new("hello world").unwrap();
+    let needle = CString.new("world").unwrap();
+
+    let pos = cstr_find(&s.as_c_str(), &needle.as_c_str());
+    assert(pos == Some(6));
+}
+
+fn main() {
+    test_cstring_creation();
+    test_cstring_with_interior_null();
+    test_cstr_compare();
+    test_cstr_find();
+    print("C string tests passed");
+}

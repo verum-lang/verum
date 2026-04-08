@@ -1,0 +1,43 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, declaration, file-based
+
+/// File module declaration - module body defined in a separate file.
+/// The `module name;` syntax indicates the module content is in `name.vr`.
+///
+/// NOTE: This feature requires integration between the type checker
+/// and interpreter module registries. Currently:
+/// - Parser supports `module name;` syntax
+/// - Interpreter can load external module files via load_external_module()
+/// - Source root is set from the source file directory
+/// - But type checker's ModuleRegistry is separate from interpreter's
+///
+/// Project structure:
+/// ```
+/// src/
+///   main.vr          <- main file with `module database;`
+///   database.vr      <- module database content
+/// ```
+
+// Declare modules whose content is in separate files
+// module database;  // Would load from database.vr
+
+/// For now, inline modules work correctly:
+module database {
+    pub type Connection is {
+        url: Text,
+        pool_size: Int
+    };
+
+    pub fn connect(url: Text) -> Connection {
+        Connection { url: url, pool_size: 10 }
+    }
+}
+
+fn main() {
+    mount database.{Connection, connect};
+
+    let conn = connect("postgres://localhost/mydb");
+    print(f"Connected to: {conn.url}");
+}

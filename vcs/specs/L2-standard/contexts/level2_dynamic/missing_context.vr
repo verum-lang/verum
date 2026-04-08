@@ -1,0 +1,49 @@
+// @test: typecheck-fail
+// @expected-error: E801
+// @tier: 0
+// @level: L2
+// @tags: contexts, missing, typecheck, error
+// @description: Tests compile-time error when using a context without declaring it
+//
+// When a function uses a context (e.g., Database.query()) but does not declare
+// it in its `using [...]` clause, the compiler should emit error E801:
+// "Context 'X' used but not declared in function signature"
+
+context Logger {
+    fn info(message: Text);
+    fn error(message: Text);
+}
+
+context async Database {
+    async fn query(sql: Text) -> List<Text>;
+}
+
+// This function declares Logger but NOT Database
+// ERROR E801: Using Database without declaring it in `using` clause
+fn process_request() using [Logger] {
+    Logger.info("Processing request");
+
+    // ERROR: Database is used but not declared in `using [Logger]`
+    // The compiler should catch this at typecheck time
+    let users = Database.query("SELECT * FROM users");  // E801 error here
+
+    Logger.info("Found users");
+}
+
+// Another example: no using clause at all
+fn query_database() {
+    // ERROR E801: Database.query used without any context declaration
+    let data = Database.query("SELECT * FROM data");  // E801 error here
+}
+
+// Correct version for comparison (not tested, just documentation):
+// async fn correct_process_request() using [Logger, Database] {
+//     Logger.info("Processing request");
+//     let users = Database.query("SELECT * FROM users").await;
+//     Logger.info("Found users");
+// }
+
+fn main() {
+    // This test verifies compile-time detection of missing context usage
+    // The code should not compile due to E801 errors above
+}

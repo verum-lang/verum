@@ -1,0 +1,156 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, calculator, arithmetic, precision
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for multi-precision integer arithmetic simulation
+
+fn abs(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// Simulate big integer as (high, low) pair where value = high * BASE + low
+// BASE = 1000000 for 6+6 = 12 digit numbers
+fn big_add_low(al: Int, bl: Int) -> Int {
+    let sum = al + bl;
+    sum % 1000000
+}
+
+fn big_add_carry(al: Int, bl: Int) -> Int {
+    let sum = al + bl;
+    sum / 1000000
+}
+
+fn big_add_high(ah: Int, bh: Int, carry: Int) -> Int {
+    ah + bh + carry
+}
+
+fn big_mul_low(al: Int, bl: Int) -> Int {
+    // Product of two 6-digit numbers can overflow, so use smaller base
+    // Actually for testing, let's just compute within safe range
+    (al * bl) % 1000000
+}
+
+fn big_mul_carry(al: Int, bl: Int) -> Int {
+    (al * bl) / 1000000
+}
+
+// Integer square root
+fn isqrt(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+// Integer power
+fn ipow(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut b = base;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = result * b;
+        }
+        b = b * b;
+        e = e / 2;
+    }
+    result
+}
+
+// Integer log2 (floor)
+fn ilog2(n: Int) -> Int {
+    let mut x = n;
+    let mut result = 0;
+    while x > 1 {
+        x = x / 2;
+        result = result + 1;
+    }
+    result
+}
+
+fn test_big_add() {
+    // 999999 + 000001 = 1 000000 (carry)
+    let low = big_add_low(999999, 1);
+    let carry = big_add_carry(999999, 1);
+    assert_eq(low, 0);
+    assert_eq(carry, 1);
+
+    // 500000 + 600000 = 1 100000
+    let low2 = big_add_low(500000, 600000);
+    let carry2 = big_add_carry(500000, 600000);
+    assert_eq(low2, 100000);
+    assert_eq(carry2, 1);
+
+    // High part with carry
+    let high = big_add_high(42, 58, 1);
+    assert_eq(high, 101);
+}
+
+fn test_isqrt() {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(144), 12);
+    assert_eq(isqrt(10000), 100);
+    // Non-perfect squares: floor
+    assert_eq(isqrt(2), 1);
+    assert_eq(isqrt(8), 2);
+    assert_eq(isqrt(15), 3);
+    assert_eq(isqrt(99), 9);
+}
+
+fn test_ipow() {
+    assert_eq(ipow(2, 0), 1);
+    assert_eq(ipow(2, 1), 2);
+    assert_eq(ipow(2, 10), 1024);
+    assert_eq(ipow(3, 5), 243);
+    assert_eq(ipow(10, 6), 1000000);
+    assert_eq(ipow(5, 3), 125);
+}
+
+fn test_ilog2() {
+    assert_eq(ilog2(1), 0);
+    assert_eq(ilog2(2), 1);
+    assert_eq(ilog2(4), 2);
+    assert_eq(ilog2(8), 3);
+    assert_eq(ilog2(16), 4);
+    assert_eq(ilog2(1024), 10);
+    // Non-powers: floor
+    assert_eq(ilog2(3), 1);
+    assert_eq(ilog2(7), 2);
+    assert_eq(ilog2(15), 3);
+}
+
+fn test_arithmetic_identities() {
+    // (a+b)^2 = a^2 + 2ab + b^2
+    let a = 7;
+    let b = 13;
+    let lhs = ipow(a + b, 2);
+    let rhs = ipow(a, 2) + 2 * a * b + ipow(b, 2);
+    assert_eq(lhs, rhs);
+
+    // (a-b)(a+b) = a^2 - b^2
+    let c = 15;
+    let d = 8;
+    let lhs2 = (c - d) * (c + d);
+    let rhs2 = ipow(c, 2) - ipow(d, 2);
+    assert_eq(lhs2, rhs2);
+}
+
+fn main() -> Int {
+    test_big_add();
+    test_isqrt();
+    test_ipow();
+    test_ilog2();
+    test_arithmetic_identities();
+    print("[OK] 212_calculator_aot");
+    0
+}

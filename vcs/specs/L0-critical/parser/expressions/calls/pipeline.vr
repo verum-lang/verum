@@ -1,0 +1,116 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, calls, pipeline, pipe
+
+fn test_simple_pipeline() {
+    // Simple pipeline
+    data |> transform;
+    value |> process;
+}
+
+fn test_pipeline_with_call() {
+    // Pipeline with function call
+    data |> transform();
+    input |> parse() |> validate();
+}
+
+fn test_multi_stage_pipeline() {
+    // Multi-stage pipeline
+    data
+        |> filter
+        |> transform
+        |> collect;
+}
+
+fn test_pipeline_with_args() {
+    // Pipeline with arguments
+    data |> map(|x| x * 2);
+    list |> filter(|x| x > 0) |> sum();
+}
+
+fn test_pipeline_method_equivalent() {
+    // Pipeline equivalent to method chaining
+    // list.filter(pred).map(f).collect()
+    list
+        |> filter(pred)
+        |> map(f)
+        |> collect();
+}
+
+fn test_pipeline_partial_application() {
+    // Pipeline with partial application
+    data |> add(1);       // add(data, 1)
+    value |> multiply(2); // multiply(value, 2)
+}
+
+fn test_pipeline_multiple_args() {
+    // Pipeline into function with multiple args
+    // First arg is piped value
+    data |> process(config, options);
+}
+
+fn test_nested_pipeline() {
+    // Nested pipeline expressions
+    (data |> transform) |> finalize;
+    data |> (if condition { f } else { g });
+}
+
+fn test_pipeline_with_await() {
+    // Pipeline with await
+    data
+        |> fetch.await
+        |> process.await
+        |> save.await;
+}
+
+fn test_pipeline_with_error_handling() {
+    // Pipeline with error handling
+    data
+        |> parse?
+        |> validate?
+        |> transform?;
+}
+
+fn test_pipeline_complex() {
+    // Pipeline building complex expressions
+    users
+        |> filter(|u| u.active)
+        |> map(|u| u.name)
+        |> sort()
+        |> take(10)
+        |> collect();
+}
+
+fn test_pipeline_with_generics() {
+    // Pipeline with type annotations
+    data |> parse<Config>() |> validate();
+}
+
+fn test_pipeline_vs_method_chain() {
+    // Pipeline vs method chain comparison
+    // Method chain style:
+    let result1 = data.parse().validate().transform();
+    // Pipeline style:
+    let result2 = data |> parse() |> validate() |> transform();
+}
+
+fn test_pipeline_with_closures() {
+    // Pipeline with closures
+    numbers
+        |> filter(|n| n % 2 == 0)
+        |> map(|n| n * n)
+        |> reduce(0, |acc, n| acc + n);
+}
+
+fn test_pipeline_in_let() {
+    // Pipeline in let binding
+    let processed = raw_data
+        |> decode()
+        |> transform()
+        |> encode();
+}
+
+// NOTE: Reverse pipeline '<|' is not in the grammar
+// Commenting out unsupported syntax
+// result <| transform <| data;

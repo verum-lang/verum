@@ -1,0 +1,255 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, bst
+// @timeout: 60000
+// @expected-exit: 0
+
+// Binary search and tree operations: BST simulation via record-based nodes
+
+// BST stored as array of nodes (max 15 for a balanced tree of depth 4)
+// Each node: value, left_idx (-1 if none), right_idx (-1 if none), active (1 or 0)
+type BstNode is { val: Int, left: Int, right: Int, active: Int };
+
+// Array of 15 BST nodes
+type Bst15 is {
+    n00: BstNode, n01: BstNode, n02: BstNode, n03: BstNode, n04: BstNode,
+    n05: BstNode, n06: BstNode, n07: BstNode, n08: BstNode, n09: BstNode,
+    n10: BstNode, n11: BstNode, n12: BstNode, n13: BstNode, n14: BstNode
+};
+
+fn empty_node() -> BstNode { BstNode { val: 0, left: -1, right: -1, active: 0 } }
+
+fn bst15_new() -> Bst15 {
+    Bst15 {
+        n00: empty_node(), n01: empty_node(), n02: empty_node(), n03: empty_node(), n04: empty_node(),
+        n05: empty_node(), n06: empty_node(), n07: empty_node(), n08: empty_node(), n09: empty_node(),
+        n10: empty_node(), n11: empty_node(), n12: empty_node(), n13: empty_node(), n14: empty_node()
+    }
+}
+
+fn bst15_get(t: Bst15, i: Int) -> BstNode {
+    if (i == 0) { return t.n00; }  if (i == 1) { return t.n01; }
+    if (i == 2) { return t.n02; }  if (i == 3) { return t.n03; }
+    if (i == 4) { return t.n04; }  if (i == 5) { return t.n05; }
+    if (i == 6) { return t.n06; }  if (i == 7) { return t.n07; }
+    if (i == 8) { return t.n08; }  if (i == 9) { return t.n09; }
+    if (i == 10) { return t.n10; } if (i == 11) { return t.n11; }
+    if (i == 12) { return t.n12; } if (i == 13) { return t.n13; }
+    t.n14
+}
+
+fn bst15_set(t: Bst15, i: Int, nd: BstNode) -> Bst15 {
+    Bst15 {
+        n00: if (i == 0) { nd } else { t.n00 },  n01: if (i == 1) { nd } else { t.n01 },
+        n02: if (i == 2) { nd } else { t.n02 },  n03: if (i == 3) { nd } else { t.n03 },
+        n04: if (i == 4) { nd } else { t.n04 },  n05: if (i == 5) { nd } else { t.n05 },
+        n06: if (i == 6) { nd } else { t.n06 },  n07: if (i == 7) { nd } else { t.n07 },
+        n08: if (i == 8) { nd } else { t.n08 },  n09: if (i == 9) { nd } else { t.n09 },
+        n10: if (i == 10) { nd } else { t.n10 }, n11: if (i == 11) { nd } else { t.n11 },
+        n12: if (i == 12) { nd } else { t.n12 }, n13: if (i == 13) { nd } else { t.n13 },
+        n14: if (i == 14) { nd } else { t.n14 }
+    }
+}
+
+// Find next free slot
+fn bst15_next_free(t: Bst15) -> Int {
+    let mut i = 0;
+    while (i < 15) {
+        let nd = bst15_get(t, i);
+        if (nd.active == 0) { return i; }
+        i = i + 1;
+    }
+    -1
+}
+
+// Insert value into BST, root at index 0. Returns updated tree.
+fn bst_insert(t: Bst15, v: Int) -> Bst15 {
+    let root = bst15_get(t, 0);
+    // If tree is empty, create root
+    if (root.active == 0) {
+        return bst15_set(t, 0, BstNode { val: v, left: -1, right: -1, active: 1 });
+    }
+
+    // Walk down to find insertion point
+    let mut cur = 0;
+    let mut parent = -1;
+    let mut go_left = 0;
+    let mut done = 0;
+
+    while (done == 0) {
+        let nd = bst15_get(t, cur);
+        if (nd.active == 0) { done = 1; }
+        else {
+            if (v == nd.val) { return t; }  // duplicate, ignore
+            parent = cur;
+            if (v < nd.val) {
+                go_left = 1;
+                if (nd.left < 0) { done = 1; }
+                else { cur = nd.left; }
+            } else {
+                go_left = 0;
+                if (nd.right < 0) { done = 1; }
+                else { cur = nd.right; }
+            }
+        }
+    }
+
+    // Allocate new node
+    let slot = bst15_next_free(t);
+    if (slot < 0) { return t; }  // tree full
+
+    let mut tree = bst15_set(t, slot, BstNode { val: v, left: -1, right: -1, active: 1 });
+
+    // Link parent to new node
+    let pnd = bst15_get(tree, parent);
+    if (go_left == 1) {
+        tree = bst15_set(tree, parent, BstNode { val: pnd.val, left: slot, right: pnd.right, active: 1 });
+    } else {
+        tree = bst15_set(tree, parent, BstNode { val: pnd.val, left: pnd.left, right: slot, active: 1 });
+    }
+    tree
+}
+
+// Search for value, return 1 if found, 0 if not
+fn bst_search(t: Bst15, v: Int) -> Int {
+    let mut cur = 0;
+    while (cur >= 0) {
+        let nd = bst15_get(t, cur);
+        if (nd.active == 0) { return 0; }
+        if (v == nd.val) { return 1; }
+        if (v < nd.val) { cur = nd.left; }
+        else { cur = nd.right; }
+    }
+    0
+}
+
+// Count nodes in tree
+fn bst_count(t: Bst15) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while (i < 15) {
+        let nd = bst15_get(t, i);
+        if (nd.active == 1) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Find min value (leftmost node from root)
+fn bst_min(t: Bst15) -> Int {
+    let mut cur = 0;
+    let nd0 = bst15_get(t, 0);
+    if (nd0.active == 0) { return -1; }
+    while (cur >= 0) {
+        let nd = bst15_get(t, cur);
+        if (nd.left < 0) { return nd.val; }
+        cur = nd.left;
+    }
+    -1
+}
+
+// Find max value (rightmost node from root)
+fn bst_max(t: Bst15) -> Int {
+    let mut cur = 0;
+    let nd0 = bst15_get(t, 0);
+    if (nd0.active == 0) { return -1; }
+    while (cur >= 0) {
+        let nd = bst15_get(t, cur);
+        if (nd.right < 0) { return nd.val; }
+        cur = nd.right;
+    }
+    -1
+}
+
+// Binary search on sorted array (A10)
+type A10 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int, e8: Int, e9: Int };
+
+fn a10_get(a: A10, i: Int) -> Int {
+    if (i == 0) { return a.e0; }  if (i == 1) { return a.e1; }
+    if (i == 2) { return a.e2; }  if (i == 3) { return a.e3; }
+    if (i == 4) { return a.e4; }  if (i == 5) { return a.e5; }
+    if (i == 6) { return a.e6; }  if (i == 7) { return a.e7; }
+    if (i == 8) { return a.e8; }  a.e9
+}
+
+fn binary_search(arr: A10, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while (lo <= hi) {
+        let mid = (lo + hi) / 2;
+        let val = a10_get(arr, mid);
+        if (val == target) { return mid; }
+        if (val < target) { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    -1
+}
+
+fn main() -> Int {
+    // Build BST: insert 50, 30, 70, 20, 40, 60, 80
+    let mut tree = bst15_new();
+    tree = bst_insert(tree, 50);
+    tree = bst_insert(tree, 30);
+    tree = bst_insert(tree, 70);
+    tree = bst_insert(tree, 20);
+    tree = bst_insert(tree, 40);
+    tree = bst_insert(tree, 60);
+    tree = bst_insert(tree, 80);
+
+    assert_eq(bst_count(tree), 7);
+    assert_eq(bst_search(tree, 50), 1);
+    assert_eq(bst_search(tree, 30), 1);
+    assert_eq(bst_search(tree, 70), 1);
+    assert_eq(bst_search(tree, 20), 1);
+    assert_eq(bst_search(tree, 40), 1);
+    assert_eq(bst_search(tree, 60), 1);
+    assert_eq(bst_search(tree, 80), 1);
+    assert_eq(bst_search(tree, 10), 0);
+    assert_eq(bst_search(tree, 45), 0);
+    assert_eq(bst_search(tree, 90), 0);
+
+    assert_eq(bst_min(tree), 20);
+    assert_eq(bst_max(tree), 80);
+
+    // Duplicate insertion (should not increase count)
+    tree = bst_insert(tree, 50);
+    tree = bst_insert(tree, 30);
+    assert_eq(bst_count(tree), 7);
+
+    // Insert more
+    tree = bst_insert(tree, 10);
+    tree = bst_insert(tree, 25);
+    tree = bst_insert(tree, 35);
+    tree = bst_insert(tree, 45);
+    tree = bst_insert(tree, 55);
+    tree = bst_insert(tree, 65);
+    tree = bst_insert(tree, 75);
+    tree = bst_insert(tree, 90);
+    // Now tree has 15 nodes (full)
+    assert_eq(bst_count(tree), 15);
+    assert_eq(bst_search(tree, 10), 1);
+    assert_eq(bst_search(tree, 90), 1);
+    assert_eq(bst_min(tree), 10);
+    assert_eq(bst_max(tree), 90);
+
+    // Binary search on sorted array
+    let sorted = A10 { e0: 5, e1: 10, e2: 15, e3: 20, e4: 25, e5: 30, e6: 35, e7: 40, e8: 45, e9: 50 };
+    assert_eq(binary_search(sorted, 10, 5), 0);
+    assert_eq(binary_search(sorted, 10, 50), 9);
+    assert_eq(binary_search(sorted, 10, 25), 4);
+    assert_eq(binary_search(sorted, 10, 30), 5);
+    assert_eq(binary_search(sorted, 10, 7), -1);
+    assert_eq(binary_search(sorted, 10, 100), -1);
+    assert_eq(binary_search(sorted, 10, 0), -1);
+
+    // Binary search on another array
+    let primes = A10 { e0: 2, e1: 3, e2: 5, e3: 7, e4: 11, e5: 13, e6: 17, e7: 19, e8: 23, e9: 29 };
+    assert_eq(binary_search(primes, 10, 2), 0);
+    assert_eq(binary_search(primes, 10, 29), 9);
+    assert_eq(binary_search(primes, 10, 11), 4);
+    assert_eq(binary_search(primes, 10, 4), -1);
+
+    print("846_stress_bst_and_search: PASS");
+    0
+}

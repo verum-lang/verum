@@ -1,0 +1,334 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, automation, triggers
+// @timeout: 20000
+// @description: Tests quantifier instantiation triggers for SMT reasoning
+
+/// ============================================================
+/// TRIGGERS
+/// ============================================================
+///
+/// Triggers (also called patterns) guide SMT solvers on when
+/// to instantiate universally quantified formulas. Proper
+/// trigger selection is crucial for efficient verification.
+
+// ------------------------------------------------------------
+// Basic Trigger Patterns
+// ------------------------------------------------------------
+
+/// Simple trigger on function application
+@trigger(f(x))
+lemma trigger_basic<T>(f: fn(T) -> T)
+    ensures forall x: T. f(f(x)) == f(x) implies f(x) == f(f(f(x)))
+{
+    // Trigger: f(x) - instantiate when solver sees f(something)
+    proof by auto
+}
+
+/// Trigger on binary operation
+@trigger(x + y)
+lemma trigger_add(x: Int, y: Int)
+    ensures forall a: Int, b: Int. a + b == b + a
+{
+    // Instantiate when solver encounters addition
+    proof by omega
+}
+
+/// Multi-trigger (require all patterns)
+@trigger(f(x), g(y))
+lemma trigger_multi<T>(f: fn(T) -> T, g: fn(T) -> T, x: T, y: T)
+    ensures forall a: T, b: T. f(a) == g(b) implies a == b
+{
+    // Only instantiate when BOTH f(something) and g(something) appear
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Trigger Selection
+// ------------------------------------------------------------
+
+/// Good trigger: covers bound variable
+@trigger(arr.get(i))
+lemma good_trigger_covers(arr: Array<Int>, i: Index)
+    ensures forall j: Index. j < len(arr) implies arr.get(j) >= 0
+{
+    // j appears in trigger via arr.get(j)
+    proof by auto
+}
+
+/// Bad trigger: doesn't cover variable (would cause warning)
+// @warning: trigger doesn't cover variable n
+// @trigger(arr.get(0))
+// lemma bad_trigger_missing(arr: Array<Int>)
+//     ensures forall n: Nat. n > 0
+// {
+//     // n doesn't appear in trigger - infinite instantiation risk
+// }
+
+/// Trigger with nested pattern
+@trigger(f(g(x)))
+lemma trigger_nested<T>(f: fn(T) -> T, g: fn(T) -> T)
+    ensures forall a: T. f(g(a)) == g(f(a))
+{
+    // Matches nested function calls
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Avoiding Matching Loops
+// ------------------------------------------------------------
+
+/// Problematic trigger (can cause loop)
+// forall x. P(x) implies P(f(x))  with trigger P(x)
+// Instantiating gives P(f(x)), which re-triggers with x=f(x)...
+
+/// Safe trigger design
+@trigger(f(x))
+@no_loop
+lemma safe_trigger<T>(f: fn(T) -> T, P: fn(T) -> Bool)
+    ensures forall a: T. P(a) implies P(f(a))
+{
+    // Using f(x) as trigger, not P(x)
+    // f(x) doesn't appear in RHS, so no re-triggering
+    proof by auto
+}
+
+/// Stratified triggers
+@trigger(size(x))
+@level(0)
+lemma stratified_trigger<T>(x: Tree<T>)
+    ensures forall t: Tree<T>. size(t) >= 0
+{
+    // Level annotation prevents cross-level triggering
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Multiple Alternative Triggers
+// ------------------------------------------------------------
+
+/// Multiple trigger options (any can fire)
+@trigger(f(x) | g(x))
+lemma alt_triggers<T>(f: fn(T) -> T, g: fn(T) -> T)
+    ensures forall a: T. f(a) == a || g(a) == a
+{
+    // Instantiate on either f(something) or g(something)
+    proof by auto
+}
+
+/// Prioritized triggers
+@trigger(f(x), priority: 1)
+@trigger(g(x), priority: 2)
+lemma priority_triggers<T>(f: fn(T) -> T, g: fn(T) -> T)
+    ensures forall a: T. f(a) == g(a)
+{
+    // Try f(x) first, then g(x) if needed
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Trigger Inference
+// ------------------------------------------------------------
+
+/// Automatic trigger inference
+@auto_trigger
+lemma auto_infer_trigger<T: Eq>(xs: List<T>, x: T)
+    ensures forall y: T. y in xs implies y == y
+{
+    // Compiler infers trigger: y in xs
+    proof by auto
+}
+
+/// Disable trigger inference
+@no_auto_trigger
+lemma manual_only<T>(f: fn(T) -> T)
+    ensures forall x: T. f(x) == f(x)
+{
+    // Must specify trigger manually if needed
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Triggers in Practice
+// ------------------------------------------------------------
+
+/// Array access trigger
+@trigger(arr.get(i))
+theorem array_trigger(arr: Array<Int>, n: Nat)
+    requires n == len(arr)
+    requires forall i: Index. i < n implies arr.get(i) > 0
+    ensures n > 0 implies arr.get(0) > 0
+{
+    // Trigger fires when arr.get(0) is encountered
+    proof by smt
+}
+
+/// Set membership trigger
+@trigger(x in s)
+theorem set_trigger<T: Eq>(s: Set<T>, t: Set<T>)
+    requires forall x: T. x in s implies x in t
+    requires forall x: T. x in t implies x in s
+    ensures s == t
+{
+    // Membership tests trigger quantifier
+    proof by smt
+
+/// Function injectivity trigger
+@trigger(f(x), f(y))
+theorem inject_trigger<A, B>(f: fn(A) -> B)
+    requires forall a1: A, a2: A. f(a1) == f(a2) implies a1 == a2
+    requires f(x) == f(y)
+    ensures x == y
+{
+    // Need both f(x) and f(y) to instantiate
+    proof by smt
+}
+
+// ------------------------------------------------------------
+// Triggers and Matching
+// ------------------------------------------------------------
+
+/// E-matching semantics
+@trigger(f(x, y))
+lemma e_matching<T>(f: fn(T, T) -> T)
+    ensures forall a: T, b: T. f(a, b) == f(b, a)
+{
+    // E-matching finds instances of f(_,_)
+    proof by auto
+}
+
+/// Pattern with ground terms
+@trigger(f(x, 0))
+lemma ground_trigger(f: fn(Int, Int) -> Int)
+    ensures forall n: Int. f(n, 0) == n
+{
+    // Only matches f(something, 0)
+    proof by auto
+}
+
+/// Capturing subterms
+@trigger(f(g(x)))
+lemma capture_subterm<T>(f: fn(T) -> T, g: fn(T) -> T)
+    ensures forall a: T. f(g(a)) == f(g(a))
+{
+    // x captures the inner g(a)
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Trigger Debugging
+// ------------------------------------------------------------
+
+/// Trace trigger instantiation
+@trigger(f(x))
+@trace_triggers
+theorem trace_trigger_demo<T>(f: fn(T) -> T)
+    requires forall a: T. f(a) == a
+    ensures f(x) == x
+{
+    proof by smt
+    // Output: Instantiated forall with a := x
+}
+
+/// Show all trigger matches
+@trigger(arr.get(i))
+@show_matches
+theorem show_matches_demo(arr: Array<Int>)
+    requires len(arr) > 2
+    requires forall i: Index. i < len(arr) implies arr.get(i) >= 0
+    ensures arr.get(0) >= 0 && arr.get(1) >= 0
+{
+    proof by smt
+    // Output: Matches found: arr.get(0), arr.get(1)
+}
+
+/// Count instantiations
+@trigger(f(x))
+@count_instantiations
+theorem count_inst_demo<T>(f: fn(T) -> T)
+    requires forall a: T. f(a) == a
+    ensures f(f(f(x))) == x
+{
+    proof by smt
+    // Output: Instantiation count: 3
+}
+
+// ------------------------------------------------------------
+// Advanced Trigger Patterns
+// ------------------------------------------------------------
+
+/// Arithmetic triggers
+@trigger(a + b, a - b)
+lemma arith_trigger(a: Int, b: Int)
+    ensures forall x: Int, y: Int. (x + y) - y == x
+{
+    proof by omega
+}
+
+/// Type-specific triggers
+@trigger(len(xs))
+@type_specific(List<Int>)
+lemma type_trigger(xs: List<Int>)
+    ensures forall ys: List<Int>. len(ys) >= 0
+{
+    proof by auto
+}
+
+/// Recursive definition triggers
+@trigger(fib(n))
+lemma fib_trigger(n: Nat)
+    requires n >= 2
+    ensures forall k: Nat. k >= 2 implies fib(k) == fib(k-1) + fib(k-2)
+{
+    proof by definition
+}
+
+// ------------------------------------------------------------
+// Trigger Strategies
+// ------------------------------------------------------------
+
+/// Eager instantiation
+@trigger(f(x))
+@eager
+lemma eager_trigger<T>(f: fn(T) -> T)
+    ensures forall a: T. f(a) == f(a)
+{
+    // Instantiate immediately when trigger matches
+    proof by auto
+}
+
+/// Lazy instantiation
+@trigger(f(x))
+@lazy
+lemma lazy_trigger<T>(f: fn(T) -> T)
+    ensures forall a: T. f(a) == f(a)
+{
+    // Only instantiate when needed for proof
+    proof by auto
+}
+
+/// Depth-limited instantiation
+@trigger(f(x))
+@max_depth(3)
+lemma depth_trigger<T>(f: fn(T) -> T)
+    ensures forall a: T. f(f(f(a))) == f(f(f(a)))
+{
+    // Limit nested instantiation depth
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Trigger Documentation
+// ------------------------------------------------------------
+
+/// Document trigger choice
+/// @trigger_rationale: f(x) covers the bound variable and avoids
+/// matching loops since the conclusion doesn't contain f applications
+/// that would re-trigger.
+@trigger(f(x))
+lemma documented_trigger<T>(f: fn(T) -> Bool)
+    ensures forall a: T. f(a) implies f(a)
+{
+    proof by auto
+}

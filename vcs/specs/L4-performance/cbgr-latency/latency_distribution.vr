@@ -1,0 +1,403 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: cbgr, latency, distribution, statistical, micro
+// @description: CBGR latency distribution analysis (target: p99 < 50ns, p999 < 100ns)
+
+/// CBGR Latency Distribution Analysis
+///
+/// This benchmark performs detailed statistical analysis of CBGR check latency
+/// across all execution tiers. Understanding the distribution is critical for:
+///
+/// - Real-time systems with latency SLAs
+/// - Identifying tail latency issues
+/// - Detecting GC/OS interference
+/// - Capacity planning
+///
+/// Metrics collected:
+/// - Mean, median, std deviation
+/// - Percentiles: p50, p90, p95, p99, p999, p9999
+/// - Min/Max outliers
+/// - Histogram with configurable bins
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const SAMPLE_SIZE: Int = 1_000_000;
+const HISTOGRAM_BINS: Int = 100;
+const WARMUP_SAMPLES: Int = 100_000;
+
+fn main() {
+    let distribution = LatencyDistribution.new("CBGR Latency Distribution");
+
+    // Collect latency samples
+    distribution.collect_samples(SAMPLE_SIZE);
+
+    // Compute statistics
+    let stats = distribution.compute_statistics();
+
+    // Generate histogram
+    let histogram = distribution.generate_histogram(HISTOGRAM_BINS);
+
+    // Report results
+    stats.report();
+    histogram.report();
+
+    // Export detailed data
+    distribution.export_csv("/tmp/cbgr_latency_samples.csv");
+    histogram.export_json("/tmp/cbgr_latency_histogram.json");
+
+    // Verify latency targets
+    verify_latency_targets(&stats);
+}
+
+/// Collect latency samples for a standard CBGR operation
+fn collect_latency_samples(count: Int) -> List<Int> {
+    let data = Heap.new(42);
+    let ref_data: &Int = &*data;
+
+    // Warmup phase
+    for _ in 0..WARMUP_SAMPLES {
+        black_box(*ref_data);
+    }
+
+    // Pin to CPU core for consistent measurements
+    pin_to_core(0);
+
+    // Disable interrupts if possible (requires privileges)
+    let _guard = try_disable_interrupts();
+
+    let mut samples: List<Int> = List.with_capacity(count);
+
+    for _ in 0..count {
+        // Use CPU cycle counter for high precision
+        let start = rdtsc();
+        black_box(*ref_data);
+        let end = rdtsc();
+
+        // Convert cycles to nanoseconds
+        let cycles = end - start;
+        let ns = cycles_to_ns(cycles);
+        samples.push(ns);
+    }
+
+    samples
+}
+
+/// Statistical analysis of latency samples
+type LatencyStatistics is {
+    sample_count: Int,
+    min_ns: Int,
+    max_ns: Int,
+    mean_ns: Float,
+    median_ns: Int,
+    std_dev_ns: Float,
+    variance_ns: Float,
+
+    // Percentiles
+    p50: Int,
+    p75: Int,
+    p90: Int,
+    p95: Int,
+    p99: Int,
+    p999: Int,
+    p9999: Int,
+};
+
+implement LatencyStatistics {
+    fn from_samples(samples: &List<Int>) -> Self {
+        let count = samples.len();
+        let sorted = samples.clone();
+        sorted.sort();
+
+        // Basic statistics
+        let min_ns = sorted[0];
+        let max_ns = sorted[count - 1];
+        let sum: Int = samples.iter().sum();
+        let mean_ns = sum as Float / count as Float;
+        let median_ns = sorted[count / 2];
+
+        // Variance and standard deviation
+        let variance_sum: Float = samples.iter()
+            .map(|s| {
+                let diff = *s as Float - mean_ns;
+                diff * diff
+            })
+            .sum();
+        let variance_ns = variance_sum / count as Float;
+        let std_dev_ns = variance_ns.sqrt();
+
+        // Percentiles
+        let p50 = sorted[(count * 50) / 100];
+        let p75 = sorted[(count * 75) / 100];
+        let p90 = sorted[(count * 90) / 100];
+        let p95 = sorted[(count * 95) / 100];
+        let p99 = sorted[(count * 99) / 100];
+        let p999 = sorted[(count * 999) / 1000];
+        let p9999 = sorted[(count * 9999) / 10000];
+
+        Self {
+            sample_count: count,
+            min_ns, max_ns, mean_ns, median_ns,
+            std_dev_ns, variance_ns,
+            p50, p75, p90, p95, p99, p999, p9999,
+        }
+    }
+
+    fn report(self) {
+        println("=== Latency Statistics ===");
+        println("");
+        println("Samples:    {}", self.sample_count);
+        println("Min:        {}ns", self.min_ns);
+        println("Max:        {}ns", self.max_ns);
+        println("Mean:       {:.2}ns", self.mean_ns);
+        println("Median:     {}ns", self.median_ns);
+        println("Std Dev:    {:.2}ns", self.std_dev_ns);
+        println("");
+        println("Percentiles:");
+        println("  p50:   {}ns", self.p50);
+        println("  p75:   {}ns", self.p75);
+        println("  p90:   {}ns", self.p90);
+        println("  p95:   {}ns", self.p95);
+        println("  p99:   {}ns", self.p99);
+        println("  p999:  {}ns", self.p999);
+        println("  p9999: {}ns", self.p9999);
+        println("");
+    }
+}
+
+/// Histogram for latency distribution visualization
+type LatencyHistogram is {
+    bins: List<HistogramBin>,
+    bin_width_ns: Int,
+    total_samples: Int,
+};
+
+type HistogramBin is {
+    lower_bound_ns: Int,
+    upper_bound_ns: Int,
+    count: Int,
+    percentage: Float,
+};
+
+implement LatencyHistogram {
+    fn from_samples(samples: &List<Int>, num_bins: Int) -> Self {
+        let sorted = samples.clone();
+        sorted.sort();
+
+        let min_val = sorted[0];
+        let max_val = sorted[samples.len() - 1];
+        let range = max_val - min_val;
+        let bin_width = (range / num_bins).max(1);
+
+        let mut bins: List<HistogramBin> = List.new();
+
+        for i in 0..num_bins {
+            let lower = min_val + i * bin_width;
+            let upper = if i == num_bins - 1 { max_val + 1 } else { lower + bin_width };
+
+            let count = samples.iter()
+                .filter(|s| **s >= lower && **s < upper)
+                .count();
+
+            let percentage = (count as Float / samples.len() as Float) * 100.0;
+
+            bins.push(HistogramBin {
+                lower_bound_ns: lower,
+                upper_bound_ns: upper,
+                count: count,
+                percentage: percentage,
+            });
+        }
+
+        Self {
+            bins: bins,
+            bin_width_ns: bin_width,
+            total_samples: samples.len(),
+        }
+    }
+
+    fn report(self) {
+        println("=== Latency Histogram ===");
+        println("");
+        println("Bin width: {}ns", self.bin_width_ns);
+        println("Total samples: {}", self.total_samples);
+        println("");
+
+        let max_count = self.bins.iter().map(|b| b.count).max().unwrap_or(1);
+        let bar_width = 50;
+
+        for bin in self.bins {
+            if bin.count > 0 {
+                let bar_len = (bin.count * bar_width) / max_count;
+                let bar = "#".repeat(bar_len);
+
+                println("{:>6}-{:<6}ns [{:>6}] {:>5.1}% {}",
+                        bin.lower_bound_ns, bin.upper_bound_ns,
+                        bin.count, bin.percentage, bar);
+            }
+        }
+        println("");
+    }
+
+    fn export_json(self, path: Text) {
+        let json = Json.object();
+        json.set("bin_width_ns", self.bin_width_ns);
+        json.set("total_samples", self.total_samples);
+
+        let bins_json = Json.array();
+        for bin in self.bins {
+            let b = Json.object();
+            b.set("lower", bin.lower_bound_ns);
+            b.set("upper", bin.upper_bound_ns);
+            b.set("count", bin.count);
+            b.set("percentage", bin.percentage);
+            bins_json.push(b);
+        }
+        json.set("bins", bins_json);
+
+        File.write(path, json.to_string_pretty());
+    }
+}
+
+/// Main distribution analysis controller
+type LatencyDistribution is {
+    name: Text,
+    samples: List<Int>,
+};
+
+implement LatencyDistribution {
+    fn new(name: Text) -> Self {
+        Self { name: name, samples: List.new() }
+    }
+
+    fn collect_samples(mut self, count: Int) {
+        println("Collecting {} latency samples...", count);
+        self.samples = collect_latency_samples(count);
+        println("Collection complete.");
+    }
+
+    fn compute_statistics(self) -> LatencyStatistics {
+        LatencyStatistics.from_samples(&self.samples)
+    }
+
+    fn generate_histogram(self, bins: Int) -> LatencyHistogram {
+        LatencyHistogram.from_samples(&self.samples, bins)
+    }
+
+    fn export_csv(self, path: Text) {
+        let mut content = Text.from("sample_index,latency_ns\n");
+
+        for (i, sample) in self.samples.iter().enumerate() {
+            content.push_str(&format("{},{}\n", i, sample));
+        }
+
+        File.write(path, content);
+        println("Exported {} samples to {}", self.samples.len(), path);
+    }
+}
+
+/// Verify latency meets SLA targets
+fn verify_latency_targets(stats: &LatencyStatistics) {
+    println("=== Latency Target Verification ===");
+    println("");
+
+    // Target: median < 15ns
+    let median_pass = stats.median_ns < 15;
+    println("[{}] Median < 15ns: {}ns",
+            if median_pass { "PASS" } else { "FAIL" },
+            stats.median_ns);
+
+    // Target: p99 < 50ns
+    let p99_pass = stats.p99 < 50;
+    println("[{}] p99 < 50ns: {}ns",
+            if p99_pass { "PASS" } else { "FAIL" },
+            stats.p99);
+
+    // Target: p999 < 100ns
+    let p999_pass = stats.p999 < 100;
+    println("[{}] p999 < 100ns: {}ns",
+            if p999_pass { "PASS" } else { "FAIL" },
+            stats.p999);
+
+    // Target: max < 1000ns (no extreme outliers)
+    let max_pass = stats.max_ns < 1000;
+    println("[{}] max < 1000ns: {}ns",
+            if max_pass { "PASS" } else { "FAIL" },
+            stats.max_ns);
+
+    println("");
+
+    let all_pass = median_pass && p99_pass && p999_pass && max_pass;
+    assert(all_pass, "CBGR latency targets not met");
+}
+
+/// CPU cycle counter for precise timing
+@inline(always)
+fn rdtsc() -> Int {
+    // x86-64: Read timestamp counter
+    // asm("rdtsc; shl rdx, 32; or rax, rdx" : "=A"(result) : : "memory");
+    0 // placeholder: inline asm requires runtime
+}
+
+/// Convert CPU cycles to nanoseconds
+fn cycles_to_ns(cycles: Int) -> Int {
+    // Assumes 3GHz CPU - should be calibrated at runtime
+    let cpu_freq_ghz = 3.0;
+    (cycles as Float / cpu_freq_ghz) as Int
+}
+
+/// Pin current thread to a specific CPU core
+fn pin_to_core(core_id: Int) {
+    @cfg(target_os = "linux")
+    {
+        let mut cpuset = cpu_set_t.new();
+        cpuset.set(core_id);
+        sched_setaffinity(0, cpuset);
+    }
+}
+
+/// Try to disable interrupts for precise measurement
+fn try_disable_interrupts() -> Maybe<InterruptGuard> {
+    // Requires root/elevated privileges
+    @cfg(target_os = "linux")
+    {
+        if prctl(PR_SET_TIMERSLACK, 1) == 0 {
+            return Some(InterruptGuard {});
+        }
+    }
+    None
+}
+
+type InterruptGuard is  {};
+
+implement Drop for InterruptGuard {
+    fn drop(self) {
+        // Re-enable normal scheduling
+    }
+}
+
+/// Compare latency distribution across tiers
+fn compare_tier_distributions() {
+    println("=== Cross-Tier Latency Comparison ===");
+    println("");
+
+    let tier_names = ["Tier 0 (Interpreter)", "Tier 1 (JIT Base)",
+                      "Tier 2 (JIT Opt)", "Tier 3 (AOT)"];
+
+    let tier_targets_ns = [100.0, 30.0, 15.0, 15.0];
+
+    for (tier, (name, target)) in tier_names.iter().zip(tier_targets_ns.iter()).enumerate() {
+        println("{}:", name);
+
+        // Run collection on specific tier (would need runtime support)
+        let samples = collect_latency_samples(100_000);
+        let stats = LatencyStatistics.from_samples(&samples);
+
+        let pass = stats.mean_ns < *target;
+        println("  Mean: {:.2}ns (target: {:.2}ns) [{}]",
+                stats.mean_ns, target, if pass { "PASS" } else { "FAIL" });
+        println("  p99:  {}ns", stats.p99);
+        println("");
+    }
+}

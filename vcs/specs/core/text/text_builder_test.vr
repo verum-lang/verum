@@ -1,0 +1,273 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: text, builder, capacity, drain
+// @description: Tests for Text builder methods: reserve, shrink_to_fit, into_bytes, make_ascii_*, split_inclusive, remove_matches, drain
+
+mount core.text.text.{Text};
+mount core.collections.list.{List, list};
+
+// =============================================================================
+// reserve — pre-allocate additional capacity
+// =============================================================================
+
+@test
+fn test_reserve_empty() {
+    let mut t = Text.new();
+    t.reserve(100);
+    assert(t.capacity() >= 100);
+    assert(t.is_empty());
+}
+
+@test
+fn test_reserve_existing() {
+    let mut t = "hello".clone();
+    let old_cap = t.capacity();
+    t.reserve(1000);
+    assert(t.capacity() >= 1000 + t.len());
+    assert_eq(t, "hello");
+}
+
+@test
+fn test_reserve_zero() {
+    let mut t = "test".clone();
+    let old_cap = t.capacity();
+    t.reserve(0);
+    // Capacity should not decrease
+    assert(t.capacity() >= old_cap);
+}
+
+// =============================================================================
+// shrink_to_fit — reduce capacity to match length
+// =============================================================================
+
+@test
+fn test_shrink_to_fit_basic() {
+    let mut t = Text.with_capacity(1000);
+    t.push_str(&"hi");
+    assert(t.capacity() >= 1000);
+    t.shrink_to_fit();
+    // After shrink, capacity should be close to length
+    // (may still be >= len due to alignment)
+    assert(t.capacity() >= t.len());
+    assert_eq(t, "hi");
+}
+
+@test
+fn test_shrink_to_fit_empty() {
+    let mut t = Text.with_capacity(100);
+    t.shrink_to_fit();
+    assert_eq(t.len(), 0);
+}
+
+@test
+fn test_shrink_to_fit_exact() {
+    let mut t = Text.with_capacity(500);
+    t.push_str(&"hello world");
+    t.shrink_to_fit();
+    assert(t.capacity() >= t.len());
+    assert_eq(t, "hello world");
+}
+
+// =============================================================================
+// shrink_to — reduce capacity to at least min_capacity
+// =============================================================================
+
+@test
+fn test_shrink_to_basic() {
+    let mut t = Text.with_capacity(1000);
+    t.push_str(&"hello");
+    t.shrink_to(50);
+    assert(t.capacity() >= 50);
+    assert_eq(t, "hello");
+}
+
+@test
+fn test_shrink_to_below_len() {
+    let mut t = Text.with_capacity(1000);
+    t.push_str(&"hello world this is a longer string");
+    t.shrink_to(5); // Below current length
+    // Should not shrink below current length
+    assert(t.capacity() >= t.len());
+    assert_eq(t, "hello world this is a longer string");
+}
+
+// =============================================================================
+// into_bytes — consume text and return owned byte buffer
+// =============================================================================
+
+@test
+fn test_into_bytes_basic() {
+    let t = "hello".clone();
+    let bytes = t.into_bytes();
+    assert_eq(bytes.len(), 5);
+    assert_eq(bytes[0], 104); // 'h'
+    assert_eq(bytes[1], 101); // 'e'
+    assert_eq(bytes[2], 108); // 'l'
+    assert_eq(bytes[3], 108); // 'l'
+    assert_eq(bytes[4], 111); // 'o'
+}
+
+@test
+fn test_into_bytes_empty() {
+    let t = Text.new();
+    let bytes = t.into_bytes();
+    assert_eq(bytes.len(), 0);
+}
+
+@test
+fn test_into_bytes_unicode() {
+    let t = "cafe\u{0301}".clone(); // "café" with combining accent
+    let bytes = t.into_bytes();
+    assert(bytes.len() > 4); // Multi-byte due to combining char
+}
+
+// =============================================================================
+// make_ascii_lowercase / make_ascii_uppercase — in-place ASCII case conversion
+// =============================================================================
+
+@test
+fn test_make_ascii_lowercase_basic() {
+    let mut t = "HELLO WORLD".clone();
+    t.make_ascii_lowercase();
+    assert_eq(t, "hello world");
+}
+
+@test
+fn test_make_ascii_lowercase_mixed() {
+    let mut t = "Hello World 123!".clone();
+    t.make_ascii_lowercase();
+    assert_eq(t, "hello world 123!");
+}
+
+@test
+fn test_make_ascii_lowercase_already_lower() {
+    let mut t = "already lower".clone();
+    t.make_ascii_lowercase();
+    assert_eq(t, "already lower");
+}
+
+@test
+fn test_make_ascii_lowercase_empty() {
+    let mut t = Text.new();
+    t.make_ascii_lowercase();
+    assert_eq(t, "");
+}
+
+@test
+fn test_make_ascii_uppercase_basic() {
+    let mut t = "hello world".clone();
+    t.make_ascii_uppercase();
+    assert_eq(t, "HELLO WORLD");
+}
+
+@test
+fn test_make_ascii_uppercase_mixed() {
+    let mut t = "Hello World 123!".clone();
+    t.make_ascii_uppercase();
+    assert_eq(t, "HELLO WORLD 123!");
+}
+
+@test
+fn test_make_ascii_uppercase_already_upper() {
+    let mut t = "ALREADY UPPER".clone();
+    t.make_ascii_uppercase();
+    assert_eq(t, "ALREADY UPPER");
+}
+
+// =============================================================================
+// split_inclusive — split keeping the separator at end of each part
+// =============================================================================
+
+@test
+fn test_split_inclusive_basic() {
+    let t = "one.two.three";
+    let parts = t.split_inclusive(&".");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "one.");
+    assert_eq(parts[1], "two.");
+    assert_eq(parts[2], "three");
+}
+
+@test
+fn test_split_inclusive_newlines() {
+    let t = "line1\nline2\nline3";
+    let parts = t.split_inclusive(&"\n");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "line1\n");
+    assert_eq(parts[1], "line2\n");
+    assert_eq(parts[2], "line3");
+}
+
+@test
+fn test_split_inclusive_no_match() {
+    let t = "no separator here";
+    let parts = t.split_inclusive(&",");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "no separator here");
+}
+
+@test
+fn test_split_inclusive_empty() {
+    let t = "";
+    let parts = t.split_inclusive(&".");
+    // Empty string should return empty list or single empty element
+    assert(parts.len() <= 1);
+}
+
+@test
+fn test_split_inclusive_trailing_sep() {
+    let t = "a.b.";
+    let parts = t.split_inclusive(&".");
+    assert_eq(parts.len(), 2);
+    assert_eq(parts[0], "a.");
+    assert_eq(parts[1], "b.");
+}
+
+// =============================================================================
+// remove_matches — remove all occurrences of a pattern in-place
+// =============================================================================
+
+@test
+fn test_remove_matches_basic() {
+    let mut t = "hello world hello".clone();
+    t.remove_matches(&"hello");
+    assert_eq(t, " world ");
+}
+
+@test
+fn test_remove_matches_no_match() {
+    let mut t = "hello world".clone();
+    t.remove_matches(&"xyz");
+    assert_eq(t, "hello world");
+}
+
+@test
+fn test_remove_matches_all() {
+    let mut t = "aaa".clone();
+    t.remove_matches(&"a");
+    assert_eq(t, "");
+}
+
+@test
+fn test_remove_matches_empty_pattern() {
+    let mut t = "hello".clone();
+    t.remove_matches(&"");
+    assert_eq(t, "hello");
+}
+
+@test
+fn test_remove_matches_longer_pattern() {
+    let mut t = "abcabcabc".clone();
+    t.remove_matches(&"abc");
+    assert_eq(t, "");
+}
+
+@test
+fn test_remove_matches_overlapping() {
+    let mut t = "aabaa".clone();
+    t.remove_matches(&"aa");
+    // Non-overlapping removal: "aabaa" -> removes "aa" at pos 0, then "aa" at pos 1(3)
+    // First "aa" at 0 removed -> "baa", then "aa" at end removed -> "b"
+    // Actually non-overlapping scan: pos 0 match "aa", skip to pos 2 "baa" -> find "aa" at pos 3 -> "b"
+    assert_eq(t, "b");
+}

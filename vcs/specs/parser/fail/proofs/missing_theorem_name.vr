@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, theorem, missing-name, error
+// @description: Test theorem declaration with missing name
+// @expected-error: E021
+
+theorem is {
+    proof by auto
+}

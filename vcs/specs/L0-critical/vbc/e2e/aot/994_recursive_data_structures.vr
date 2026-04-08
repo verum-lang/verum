@@ -1,0 +1,129 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: recursive, data-structures, heap, linked-list, tree
+// @description: Recursive data structures with Heap<T>
+
+type IntList is Nil | Cons(Int, Heap<IntList>);
+
+fn list_sum(lst: IntList) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(head, tail) => head + list_sum(tail),
+    }
+}
+
+fn list_len(lst: IntList) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(_, tail) => 1 + list_len(tail),
+    }
+}
+
+type Tree is Leaf(Int) | Node(Heap<Tree>, Int, Heap<Tree>);
+
+fn tree_sum(t: Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Node(left, v, right) => tree_sum(left) + v + tree_sum(right),
+    }
+}
+
+fn tree_depth(t: Tree) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node(left, _, right) => {
+            let ld = tree_depth(left);
+            let rd = tree_depth(right);
+            if (ld > rd) { 1 + ld } else { 1 + rd }
+        }
+    }
+}
+
+fn main() -> Int {
+    // Test 1: linked list
+    let lst = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil))))))));
+    let s = list_sum(lst);
+    if (s != 10) {
+        print(f"FAIL test1a: sum={s}");
+        return 1;
+    }
+
+    let lst2 = Cons(10, Heap(Cons(20, Heap(Cons(30, Heap(Nil))))));
+    let len = list_len(lst2);
+    if (len != 3) {
+        print(f"FAIL test1b: len={len}");
+        return 1;
+    }
+
+    // Test 2: binary tree
+    //        5
+    //       / \
+    //      3   7
+    //     / \   \
+    //    1   4   9
+    let tree = Node(
+        Heap(Node(
+            Heap(Leaf(1)),
+            3,
+            Heap(Leaf(4))
+        )),
+        5,
+        Heap(Node(
+            Heap(Leaf(6)),
+            7,
+            Heap(Leaf(9))
+        ))
+    );
+    let ts = tree_sum(tree);
+    // 1+3+4+5+6+7+9 = 35
+    if (ts != 35) {
+        print(f"FAIL test2a: tree_sum={ts}");
+        return 1;
+    }
+
+    // Test 3: tree depth
+    let deep = Node(
+        Heap(Node(
+            Heap(Node(
+                Heap(Leaf(1)),
+                2,
+                Heap(Leaf(3))
+            )),
+            4,
+            Heap(Leaf(5))
+        )),
+        6,
+        Heap(Leaf(7))
+    );
+    let d = tree_depth(deep);
+    if (d != 4) {
+        print(f"FAIL test3: depth={d}");
+        return 1;
+    }
+
+    // Test 4: empty list
+    let empty = Nil;
+    if (list_sum(empty) != 0) {
+        print("FAIL test4a");
+        return 1;
+    }
+    if (list_len(empty) != 0) {
+        print("FAIL test4b");
+        return 1;
+    }
+
+    // Test 5: single element
+    let single = Leaf(42);
+    if (tree_sum(single) != 42) {
+        print("FAIL test5a");
+        return 1;
+    }
+    if (tree_depth(single) != 1) {
+        print("FAIL test5b");
+        return 1;
+    }
+
+    print("994_recursive_data_structures: PASS");
+    0
+}

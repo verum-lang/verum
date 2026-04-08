@@ -1,0 +1,123 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, catalan_numbers, combinatorics, dynamic_programming
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Catalan numbers: C(n) = (2n)! / ((n+1)! * n!)
+// First few: C(0)=1, C(1)=1, C(2)=2, C(3)=5, C(4)=14, C(5)=42, C(6)=132, C(7)=429
+//
+// We use DP recurrence: C(0) = 1, C(n) = sum_{i=0..n-1} C(i)*C(n-1-i)
+// and also the direct formula via product: C(n) = product_{k=2..n} (n+k)/k
+
+// Catalan DP: build table C[0..n] into out[0..n].
+fn catalan_dp(n: Int, out: [Int; 16]) {
+    out[0] = 1;
+    let mut i = 1;
+    while i <= n {
+        out[i] = 0;
+        let mut j = 0;
+        while j < i {
+            out[i] = out[i] + out[j] * out[i - 1 - j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// Direct Catalan via binomial: C(n) = C(2n, n) / (n+1)
+// Use integer arithmetic: accumulate product carefully.
+// C(n) = (2n choose n) / (n+1) = product_{k=1..n} (n+k)/k
+fn catalan_direct(n: Int) -> Int {
+    if n == 0 { return 1; }
+    // Compute as integer: multiply numerator (n+1..2n) and divide by denominator (1..n) step-by-step
+    // Use the recurrence: C(n) = C(n-1) * 2*(2n-1) / (n+1)
+    let mut c = 1;
+    let mut i = 0;
+    while i < n {
+        c = c * 2 * (2 * i + 1);
+        c = c / (i + 2);
+        i = i + 1;
+    }
+    c
+}
+
+fn test_dp_values() {
+    let mut c = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    catalan_dp(8, c);
+    assert_eq(c[0], 1);
+    assert_eq(c[1], 1);
+    assert_eq(c[2], 2);
+    assert_eq(c[3], 5);
+    assert_eq(c[4], 14);
+    assert_eq(c[5], 42);
+    assert_eq(c[6], 132);
+    assert_eq(c[7], 429);
+    assert_eq(c[8], 1430);
+    print("dp_values: ok");
+}
+
+fn test_direct_values() {
+    assert_eq(catalan_direct(0), 1);
+    assert_eq(catalan_direct(1), 1);
+    assert_eq(catalan_direct(2), 2);
+    assert_eq(catalan_direct(3), 5);
+    assert_eq(catalan_direct(4), 14);
+    assert_eq(catalan_direct(5), 42);
+    assert_eq(catalan_direct(6), 132);
+    print("direct_values: ok");
+}
+
+fn test_dp_matches_direct() {
+    let mut c = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    catalan_dp(7, c);
+    let mut i = 0;
+    while i <= 6 {
+        assert_eq(c[i], catalan_direct(i));
+        i = i + 1;
+    }
+    print("dp_matches_direct: ok");
+}
+
+fn test_interpretations() {
+    // C(n) counts number of valid parenthesizations of n+1 factors.
+    // C(3) = 5: for 4 factors (a*b*c*d) there are 5 ways.
+    // C(n) also counts full binary trees with n+1 leaves.
+    let mut c = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    catalan_dp(6, c);
+    // Verify specific combinatorial identities:
+    // C(n+1) = sum C(i)*C(n-i) for i in 0..n = c[n+1] (already verified by DP construction)
+    // Extra check: C(4) = 14 = C(0)*C(3) + C(1)*C(2) + C(2)*C(1) + C(3)*C(0)
+    let sum4 = c[0] * c[3] + c[1] * c[2] + c[2] * c[1] + c[3] * c[0];
+    assert_eq(sum4, 14);
+    // C(5) = 42
+    let sum5 = c[0]*c[4] + c[1]*c[3] + c[2]*c[2] + c[3]*c[1] + c[4]*c[0];
+    assert_eq(sum5, 42);
+    print("interpretations: ok");
+}
+
+fn test_growth_rate() {
+    // Catalan numbers grow approximately as 4^n / (n^(3/2) * sqrt(pi)).
+    // Verify they are strictly increasing for n >= 1.
+    let mut c = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    catalan_dp(8, c);
+    let mut i = 1;
+    while i <= 7 {
+        assert(c[i] < c[i + 1]);
+        i = i + 1;
+    }
+    // C(8) / C(7) should be close to 4: 1430/429 = 3.33... (so 1430 > 3*429)
+    assert(c[8] > 3 * c[7]);
+    print("growth_rate: ok");
+}
+
+fn main() -> Int {
+    test_dp_values();
+    test_direct_values();
+    test_dp_matches_direct();
+    test_interpretations();
+    test_growth_rate();
+    print("[OK] 518_interp_catalan");
+    0
+}

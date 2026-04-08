@@ -1,0 +1,214 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, numeric
+
+// Numeric literal expressions
+
+// ============================================================================
+// SECTION 1: Integer Literals
+// ============================================================================
+
+fn test_basic_integers() {
+    let zero = 0;
+    let one = 1;
+    let answer = 42;
+    let million = 1000000;
+    let max_i32 = 2147483647;
+}
+
+fn test_negative_integers() {
+    let neg_one = -1;
+    let neg_answer = -42;
+    let min_i32 = -2147483648;
+}
+
+fn test_integers_with_underscores() {
+    let with_sep = 1_000_000;
+    let binary_sep = 0b1111_0000;
+    let hex_sep = 0xFF_FF_FF_FF;
+}
+
+// ============================================================================
+// SECTION 2: Non-Decimal Integer Literals
+// ============================================================================
+
+fn test_hexadecimal() {
+    let hex = 0xFF;
+    let hex_upper = 0xDEADBEEF;
+    let hex_lower = 0xdeadbeef;
+    let hex_mixed = 0xDeAdBeEf;
+}
+
+fn test_binary() {
+    let bin = 0b1010;
+    let bin_byte = 0b11110000;
+    let bin_16 = 0b1111111111111111;
+}
+
+fn test_octal() {
+    let oct = 0o777;
+    let oct_perm = 0o644;
+    let oct_mask = 0o007;
+}
+
+// ============================================================================
+// SECTION 3: Float Literals
+// ============================================================================
+
+fn test_basic_floats() {
+    let pi = 3.14159;
+    let e = 2.71828;
+    let half = 0.5;
+    let big_float = 1000000.0;
+}
+
+fn test_scientific_notation() {
+    let sci = 1e10;
+    let sci_neg = 1e-5;
+    let sci_float = 3.14e10;
+    let sci_pos = 1.5e+3;
+}
+
+// ============================================================================
+// SECTION 4: Typed Integer Literals
+// ============================================================================
+
+fn test_typed_signed_integers() {
+    let i8_lit = 42i8;
+    let i16_lit = 42i16;
+    let i32_lit = 42i32;
+    let i64_lit = 42i64;
+    let i128_lit = 42i128;
+}
+
+fn test_typed_unsigned_integers() {
+    let u8_lit = 42u8;
+    let u16_lit = 42u16;
+    let u32_lit = 42u32;
+    let u64_lit = 42u64;
+    let u128_lit = 42u128;
+}
+
+fn test_typed_floats() {
+    let f32_lit = 3.14f32;
+    let f64_lit = 3.14f64;
+}
+
+fn test_size_types() {
+    let isize_lit = 42isize;
+    let usize_lit = 42usize;
+}
+
+// ============================================================================
+// SECTION 5: Unit Suffixes
+// ============================================================================
+
+fn test_unit_suffixes() {
+    let distance = 100_km;
+    let weight = 75_kg;
+    let duration = 5_s;
+    let memory = 1024_mb;
+}
+
+// ============================================================================
+// SECTION 6: Numeric Expressions
+// ============================================================================
+
+fn test_numeric_in_expressions() {
+    let sum = 1 + 2 + 3;
+    let product = 10 * 20 * 30;
+    let mixed = 100 / 10 + 5;
+}
+
+fn square(n: Int) -> Int {
+    n * n
+}
+
+fn test_numeric_in_function_calls() {
+    let result = square(5);
+}
+
+// ============================================================================
+// SECTION 7: Numeric in Collections
+// ============================================================================
+
+fn test_numeric_in_arrays() {
+    let numbers = [1, 2, 3, 4, 5];
+    let floats = [1.0, 2.0, 3.0];
+    let hexes = [0x10, 0x20, 0x30];
+}
+
+fn test_numeric_in_tuples() {
+    let pair = (42, 3.14);
+    let coords = (100, 200, 300);
+}
+
+// ============================================================================
+// SECTION 8: Numeric in Structs
+// ============================================================================
+
+type Dimensions is { width: Int, height: Int };
+
+fn test_numeric_in_structs() {
+    let dims = Dimensions { width: 1920, height: 1080 };
+}
+
+// ============================================================================
+// SECTION 9: Numeric in Control Flow
+// ============================================================================
+
+fn success() -> Int { 0 }
+fn not_found() -> Int { 1 }
+fn server_error() -> Int { 2 }
+fn unknown_status(code: Int) -> Int { code }
+fn process(i: Int) {}
+
+fn test_numeric_in_match(code: Int) {
+    match code {
+        200 => success(),
+        404 => not_found(),
+        500 => server_error(),
+        _ => unknown_status(code),
+    };
+}
+
+fn test_numeric_range() {
+    for i in 0..100 {
+        process(i);
+    }
+}
+
+// ============================================================================
+// SECTION 10: Maximum and Minimum Values
+// ============================================================================
+
+fn test_max_unsigned_values() {
+    let max_u8 = 0xFF_u8;
+    let max_u16 = 0xFFFF_u16;
+    let max_u32 = 0xFFFF_FFFF_u32;
+    // Note: max u64 value exceeds i64 parsing range, use max i64 as hex instead
+    let large_u64 = 0x7FFF_FFFF_FFFF_FFFF_u64;
+}
+
+fn test_min_signed_values() {
+    let min_i8 = -128i8;
+    let min_i16 = -32768i16;
+    let min_i32 = -2147483648i32;
+}
+
+// ============================================================================
+// SECTION 11: Special Float Values
+// ============================================================================
+
+fn test_special_floats() {
+    // Associated constants on Float type
+    let infinity = Float.INFINITY;
+    let neg_infinity = Float.NEG_INFINITY;
+    let nan = Float.NAN;
+    let epsilon = Float.EPSILON;
+    let max = Float.MAX;
+    let min = Float.MIN;
+    let pi = Float.PI;
+    let e = Float.E;
+}

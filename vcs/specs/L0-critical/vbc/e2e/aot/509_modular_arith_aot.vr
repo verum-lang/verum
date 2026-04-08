@@ -1,0 +1,180 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, modular-arithmetic, number-theory
+// @timeout: 30000
+
+// Modular arithmetic: mod inverse, mod power, linear congruence
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = result * b % modulus; }
+        b = b * b % modulus;
+        e = e / 2;
+    }
+    result
+}
+
+// Extended GCD: returns (g, x, y) such that a*x + b*y = g
+// Returns as packed: g + x*10000 + y*100000000 (for small values)
+// Use separate functions to avoid tuple issues
+fn ext_gcd_g(a: Int, b: Int) -> Int {
+    let mut old_r = a;
+    let mut r = b;
+    while r != 0 { let t = r; r = old_r % r; old_r = t; }
+    old_r
+}
+
+fn ext_gcd_x(a: Int, b: Int) -> Int {
+    let mut old_r = a;
+    let mut r = b;
+    let mut old_s = 1;
+    let mut s = 0;
+    while r != 0 {
+        let q = old_r / r;
+        let t = r;
+        r = old_r - q * r;
+        old_r = t;
+        let ts = s;
+        s = old_s - q * s;
+        old_s = ts;
+    }
+    old_s
+}
+
+// Modular inverse: a^(-1) mod m (returns -1 if doesn't exist)
+fn mod_inverse(a: Int, m: Int) -> Int {
+    if gcd(a, m) != 1 { return -1; }
+    let x = ext_gcd_x(a, m);
+    ((x % m) + m) % m
+}
+
+// Solve linear congruence: a*x ≡ b (mod m)
+// Returns smallest non-negative solution, or -1 if none
+fn linear_congruence(a: Int, b: Int, m: Int) -> Int {
+    let g = gcd(a, m);
+    if b % g != 0 { return -1; } // no solution
+    let a2 = a / g;
+    let b2 = b / g;
+    let m2 = m / g;
+    let inv = mod_inverse(a2, m2);
+    if inv == -1 { return -1; }
+    (inv * b2) % m2
+}
+
+// Wilson's theorem: (p-1)! ≡ -1 (mod p) for prime p
+fn factorial_mod(n: Int, m: Int) -> Int {
+    let mut r = 1;
+    let mut i = 2;
+    while i <= n {
+        r = r * i % m;
+        i = i + 1;
+    }
+    r
+}
+
+// Check if a is a quadratic residue mod p (Euler's criterion)
+// a is QR mod p iff a^((p-1)/2) ≡ 1 (mod p)
+fn is_quadratic_residue(a: Int, p: Int) -> Int {
+    let r = mod_pow(a, (p - 1) / 2, p);
+    if r == 1 { 1 } else { 0 }
+}
+
+// Multiplicative order: smallest k > 0 such that a^k ≡ 1 (mod m)
+fn mult_order(a: Int, m: Int) -> Int {
+    if gcd(a, m) != 1 { return -1; }
+    let mut k = 1;
+    let mut power = a % m;
+    while power != 1 {
+        power = power * a % m;
+        k = k + 1;
+        if k > m { return -1; } // safety
+    }
+    k
+}
+
+fn test_mod_pow() -> Int {
+    assert_eq(mod_pow(2, 10, 1000), 24); // 1024 % 1000
+    assert_eq(mod_pow(3, 4, 100), 81);
+    assert_eq(mod_pow(7, 3, 13), 5); // 343 % 13 = 5
+    assert_eq(mod_pow(2, 0, 7), 1);
+
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p)
+    assert_eq(mod_pow(2, 12, 13), 1);
+    assert_eq(mod_pow(3, 16, 17), 1);
+    1
+}
+
+fn test_mod_inverse() -> Int {
+    // 3^(-1) mod 7 = 5 (3*5=15≡1 mod 7)
+    assert_eq(mod_inverse(3, 7), 5);
+    // 2^(-1) mod 5 = 3 (2*3=6≡1 mod 5)
+    assert_eq(mod_inverse(2, 5), 3);
+    // No inverse when gcd(a,m) != 1
+    assert_eq(mod_inverse(2, 4), -1);
+    // Verify: a * a^(-1) ≡ 1 (mod m)
+    let inv = mod_inverse(5, 11);
+    assert_eq((5 * inv) % 11, 1);
+    1
+}
+
+fn test_linear_congruence() -> Int {
+    // 3x ≡ 6 (mod 9) → x = 2
+    assert_eq(linear_congruence(3, 6, 9), 2);
+    // 2x ≡ 1 (mod 5) → x = 3
+    assert_eq(linear_congruence(2, 1, 5), 3);
+    // 4x ≡ 3 (mod 6) → no solution (gcd(4,6)=2, 2∤3)
+    assert_eq(linear_congruence(4, 3, 6), -1);
+    1
+}
+
+fn test_wilson() -> Int {
+    // (p-1)! ≡ -1 (mod p) for prime p
+    // (6)! mod 7 = 720 mod 7 = 6 ≡ -1 (mod 7)
+    assert_eq(factorial_mod(6, 7), 6);
+    // (4)! mod 5 = 24 mod 5 = 4 ≡ -1 (mod 5)
+    assert_eq(factorial_mod(4, 5), 4);
+    // (10)! mod 11 = 3628800 mod 11 = 10 ≡ -1 (mod 11)
+    assert_eq(factorial_mod(10, 11), 10);
+    1
+}
+
+fn test_quadratic_residue() -> Int {
+    // QR mod 7: 1²=1, 2²=4, 3²=2 → QR = {1,2,4}
+    assert_eq(is_quadratic_residue(1, 7), 1);
+    assert_eq(is_quadratic_residue(2, 7), 1);
+    assert_eq(is_quadratic_residue(4, 7), 1);
+    assert_eq(is_quadratic_residue(3, 7), 0);
+    assert_eq(is_quadratic_residue(5, 7), 0);
+    1
+}
+
+fn test_mult_order() -> Int {
+    // ord_7(2) = 3 (2^1=2, 2^2=4, 2^3=1)
+    assert_eq(mult_order(2, 7), 3);
+    // ord_7(3) = 6 (primitive root)
+    assert_eq(mult_order(3, 7), 6);
+    // ord_5(2) = 4
+    assert_eq(mult_order(2, 5), 4);
+    1
+}
+
+fn main() -> Int {
+    test_mod_pow();
+    test_mod_inverse();
+    test_linear_congruence();
+    test_wilson();
+    test_quadratic_residue();
+    test_mult_order();
+    print("[OK] 509_modular_arith_aot");
+    0
+}

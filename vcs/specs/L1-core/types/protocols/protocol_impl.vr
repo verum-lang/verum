@@ -1,0 +1,554 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, protocols, implementation, generic-instantiation
+// @description: Protocol implementations for various type kinds including T.method() pattern
+
+/// Test for protocol implementations.
+/// Demonstrates implementing protocols for various type kinds.
+
+// ============================================================================
+// Protocol definitions
+// ============================================================================
+
+type Stringify is protocol {
+    fn to_string(&self) -> Text;
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+    fn ne(&self, other: &Self) -> Bool;
+};
+
+// Use a local CmpResult to avoid conflict with core.sync.atomic.Ordering
+// (which also defines a type named Ordering with different variants)
+type CmpResult is Less | Equal | Greater;
+
+type Ord is protocol {
+    fn cmp(&self, other: &Self) -> CmpResult;
+    fn lt(&self, other: &Self) -> Bool;
+    fn le(&self, other: &Self) -> Bool;
+    fn gt(&self, other: &Self) -> Bool;
+    fn ge(&self, other: &Self) -> Bool;
+};
+
+type Hash is protocol {
+    fn hash(&self) -> Int;
+};
+
+type Default is protocol {
+    fn default() -> Self;
+};
+
+// ============================================================================
+// Record type implementing protocols
+// ============================================================================
+
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+implement Stringify for Person {
+    fn to_string(&self) -> Text {
+        f"{self.name} (age {self.age})"
+    }
+}
+
+implement Clone for Person {
+    fn clone(&self) -> Person {
+        Person {
+            name: self.name.clone(),
+            age: self.age,
+        }
+    }
+}
+
+implement Eq for Person {
+    fn eq(&self, other: &Person) -> Bool {
+        self.name == other.name && self.age == other.age
+    }
+
+    fn ne(&self, other: &Person) -> Bool {
+        !(self.name == other.name && self.age == other.age)
+    }
+}
+
+implement Hash for Person {
+    fn hash(&self) -> Int {
+        // Avoid calling stdlib Hash.hash(hasher) — use simple field combination
+        self.name.len() * 31 + self.age
+    }
+}
+
+implement Default for Person {
+    fn default() -> Person {
+        Person { name: "", age: 0 }
+    }
+}
+
+// ============================================================================
+// Sum type implementing protocols
+// ============================================================================
+
+type Status is
+    | Active
+    | Inactive
+    | Pending(Int);
+
+implement Stringify for Status {
+    fn to_string(&self) -> Text {
+        match self {
+            Active => "Active",
+            Inactive => "Inactive",
+            Pending(n) => f"Pending({n})",
+        }
+    }
+}
+
+implement Clone for Status {
+    fn clone(&self) -> Status {
+        match self {
+            Active => Active,
+            Inactive => Inactive,
+            Pending(n) => Pending(*n),
+        }
+    }
+}
+
+implement Eq for Status {
+    fn eq(&self, other: &Status) -> Bool {
+        match (self, other) {
+            (Active, Active) => true,
+            (Inactive, Inactive) => true,
+            (Pending(a), Pending(b)) => a == b,
+            _ => false,
+        }
+    }
+
+    fn ne(&self, other: &Status) -> Bool {
+        match (self, other) {
+            (Active, Active) => false,
+            (Inactive, Inactive) => false,
+            (Pending(a), Pending(b)) => a != b,
+            _ => true,
+        }
+    }
+}
+
+implement Default for Status {
+    fn default() -> Status {
+        Inactive
+    }
+}
+
+// ============================================================================
+// Generic type implementing protocols
+// ============================================================================
+
+type Wrapper<T> is {
+    value: T,
+};
+
+implement<T: Stringify> Stringify for Wrapper<T> {
+    fn to_string(&self) -> Text {
+        f"Wrapper({self.value.to_string()})"
+    }
+}
+
+implement<T: Clone> Clone for Wrapper<T> {
+    fn clone(&self) -> Wrapper<T> {
+        Wrapper { value: self.value.clone() }
+    }
+}
+
+implement<T: Eq> Eq for Wrapper<T> {
+    fn eq(&self, other: &Wrapper<T>) -> Bool {
+        self.value.eq(&other.value)
+    }
+
+    fn ne(&self, other: &Wrapper<T>) -> Bool {
+        !self.value.eq(&other.value)
+    }
+}
+
+implement<T: Default> Default for Wrapper<T> {
+    fn default() -> Wrapper<T> {
+        Wrapper { value: T.default() }
+    }
+}
+
+// ============================================================================
+// Implementing multiple protocols for same type
+// ============================================================================
+
+type Temperature is {
+    celsius: Float,
+};
+
+implement Stringify for Temperature {
+    fn to_string(&self) -> Text {
+        f"{self.celsius}C"
+    }
+}
+
+implement Clone for Temperature {
+    fn clone(&self) -> Temperature {
+        Temperature { celsius: self.celsius }
+    }
+}
+
+implement Eq for Temperature {
+    fn eq(&self, other: &Temperature) -> Bool {
+        self.celsius == other.celsius
+    }
+
+    fn ne(&self, other: &Temperature) -> Bool {
+        self.celsius != other.celsius
+    }
+}
+
+implement Ord for Temperature {
+    fn cmp(&self, other: &Temperature) -> CmpResult {
+        if self.celsius < other.celsius {
+            Less
+        } else if self.celsius > other.celsius {
+            Greater
+        } else {
+            Equal
+        }
+    }
+
+    fn lt(&self, other: &Temperature) -> Bool {
+        self.celsius < other.celsius
+    }
+
+    fn le(&self, other: &Temperature) -> Bool {
+        self.celsius <= other.celsius
+    }
+
+    fn gt(&self, other: &Temperature) -> Bool {
+        self.celsius > other.celsius
+    }
+
+    fn ge(&self, other: &Temperature) -> Bool {
+        self.celsius >= other.celsius
+    }
+}
+
+implement Default for Temperature {
+    fn default() -> Temperature {
+        Temperature { celsius: 0.0 }
+    }
+}
+
+// ============================================================================
+// Newtype implementing protocols
+// ============================================================================
+
+type UserId is (Int);
+
+implement Stringify for UserId {
+    fn to_string(&self) -> Text {
+        f"User#{self.0}"
+    }
+}
+
+implement Clone for UserId {
+    fn clone(&self) -> UserId {
+        UserId(self.0)
+    }
+}
+
+implement Eq for UserId {
+    fn eq(&self, other: &UserId) -> Bool {
+        self.0 == other.0
+    }
+
+    fn ne(&self, other: &UserId) -> Bool {
+        self.0 != other.0
+    }
+}
+
+implement Hash for UserId {
+    fn hash(&self) -> Int {
+        self.0
+    }
+}
+
+// ============================================================================
+// Functions using implemented protocols
+// ============================================================================
+
+fn stringify<T: Stringify>(item: &T) -> Text {
+    item.to_string()
+}
+
+fn duplicate<T: Clone>(item: &T) -> (T, T) {
+    (item.clone(), item.clone())
+}
+
+fn are_equal<T: Eq>(a: &T, b: &T) -> Bool {
+    a == b
+}
+
+fn get_default<T: Default>() -> T {
+    T.default()
+}
+
+// ============================================================================
+// T.method() Pattern Tests - Type Parameter Static Method Calls
+// ============================================================================
+
+// Test: Generic impl with T.default() - the core pattern
+type Box<T> is {
+    content: T,
+};
+
+implement<T: Default> Default for Box<T> {
+    fn default() -> Box<T> {
+        // T.default() - calling static protocol method on type parameter
+        Box { content: T.default() }
+    }
+}
+
+// Test: Multiple type parameters with T.method() calls
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+implement<A: Default, B: Default> Default for Pair<A, B> {
+    fn default() -> Pair<A, B> {
+        // Both type parameters use static method calls
+        Pair { first: A.default(), second: B.default() }
+    }
+}
+
+// Test: Nested generics with T.method()
+type Container<T> is {
+    item: T,
+    count: Int,
+};
+
+implement<T: Default> Default for Container<T> {
+    fn default() -> Container<T> {
+        Container { item: T.default(), count: 0 }
+    }
+}
+
+// Test: Deeply nested generics
+implement<T: Default> Default for Container<Box<T>> {
+    fn default() -> Container<Box<T>> {
+        Container {
+            item: Box { content: T.default() },
+            count: 0,
+        }
+    }
+}
+
+// Test: Protocol with static factory method - T.method() pattern
+type Factory is protocol {
+    fn create() -> Self;
+};
+
+type Widget is {
+    id: Int,
+};
+
+implement Factory for Widget {
+    fn create() -> Widget {
+        Widget { id: 0 }
+    }
+}
+
+implement Default for Widget {
+    fn default() -> Widget {
+        Widget { id: 0 }
+    }
+}
+
+type WidgetWrapper<T> is {
+    widget: T,
+};
+
+implement<T: Factory> Factory for WidgetWrapper<T> {
+    fn create() -> WidgetWrapper<T> {
+        // Static method call on type parameter
+        WidgetWrapper { widget: T.create() }
+    }
+}
+
+implement<T: Default> Default for WidgetWrapper<T> {
+    fn default() -> WidgetWrapper<T> {
+        WidgetWrapper { widget: T.default() }
+    }
+}
+
+// Test: Chained field access from TypeExpr method call
+fn test_chained_access() -> Text {
+    // Direct chained access: TypeExpr.method().field.field
+    let name = Wrapper<Person>.default().value.name;
+    name
+}
+
+// Test: Intermediate variable from TypeExpr method call
+fn test_intermediate_variable() -> Person {
+    // Assign result to variable, then access fields
+    let wrapper = Wrapper<Person>.default();
+    let person = wrapper.value;
+    person
+}
+
+// Test: Generic function that uses T.method() in its body
+fn make_default_pair<X: Default, Y: Default>() -> (X, Y) {
+    // Calling static methods in function body
+    (X.default(), Y.default())
+}
+
+// Test: TypeExpr with explicit type annotation
+fn test_explicit_type() -> Wrapper<Person> {
+    let result: Wrapper<Person> = Wrapper<Person>.default();
+    result
+}
+
+// Test: TypeExpr in expression context
+fn test_expr_context() -> Bool {
+    // TypeExpr as expression, comparing result
+    Wrapper<Person>.default().value.name == ""
+}
+
+fn main() {
+    // Test Person implementation
+    let person = Person { name: "Alice", age: 30 };
+    let person_str: Text = stringify(&person);
+    let (p1, p2) = duplicate(&person);
+    let is_eq: Bool = are_equal(&p1, &p2);
+    // Test generic function call with explicit type arguments: get_default<Person>()
+    let default_person = get_default<Person>();
+
+    assert(person_str == "Alice (age 30)");
+    assert(is_eq == true);
+    assert(default_person.name == "");
+    assert(default_person.age == 0);
+
+    // Test Status implementation
+    let status = Pending(5);
+    let status_str: Text = stringify(&status);
+    let status_clone = status.clone();
+    let status_eq: Bool = are_equal(&status, &status_clone);
+    let default_status = get_default<Status>();
+
+    assert(status_str == "Pending(5)");
+    assert(status_eq == true);
+    assert(default_status.eq(&Inactive));
+
+    // Test Wrapper implementation
+    let wrapped: Wrapper<Person> = Wrapper { value: person.clone() };
+    let wrapped_str: Text = stringify(&wrapped);
+    let (w1, w2) = duplicate(&wrapped);
+    let wrapped_eq: Bool = are_equal(&w1, &w2);
+    let default_wrapped = get_default<Wrapper<Person>>();
+
+    assert(wrapped_str == "Wrapper(Alice (age 30))");
+    assert(wrapped_eq == true);
+
+    // Test Temperature implementation
+    let temp = Temperature { celsius: 25.0 };
+    let cold = Temperature { celsius: 0.0 };
+    assert(temp.gt(&cold));
+    assert(cold.lt(&temp));
+    assert(Temperature.default().celsius == 0.0);
+
+    // Test UserId implementation
+    let user = UserId(42);
+    assert(stringify(&user) == "User#42");
+    assert(user.eq(&UserId(42)));
+    assert(user.ne(&UserId(99)));
+
+    // =========================================================================
+    // T.method() Pattern Tests
+    // =========================================================================
+
+    // Test 1: Basic TypeExpr.method() call with type substitution
+    // Wrapper<Person>.default() should return Wrapper<Person>, not Wrapper<T>
+    let wrapper_from_type = Wrapper<Person>.default();
+    assert(wrapper_from_type.value.name == "");
+    assert(wrapper_from_type.value.age == 0);
+
+    // Test 2: Chained field access from TypeExpr.method()
+    // The type of Wrapper<Person>.default().value should be Person
+    let person_name = Wrapper<Person>.default().value.name;
+    assert(person_name == "");
+
+    // Test 3: Multiple levels of chaining
+    let chained_name = test_chained_access();
+    assert(chained_name == "");
+
+    // Test 4: Intermediate variable approach
+    let intermediate_person = test_intermediate_variable();
+    assert(intermediate_person.name == "");
+
+    // Test 5: Box<T> with T.default()
+    let box_person = Box<Person>.default();
+    assert(box_person.content.name == "");
+    assert(box_person.content.age == 0);
+
+    // Test 6: Multiple type parameters - Pair<A, B>
+    let pair = Pair<Person, Temperature>.default();
+    assert(pair.first.name == "");
+    assert(pair.second.celsius == 0.0);
+
+    // Test 7: Container with T.default()
+    let container = Container<Person>.default();
+    assert(container.item.name == "");
+    assert(container.count == 0);
+
+    // Test 8: Generic function with multiple type parameters
+    let (default_p, default_t) = make_default_pair<Person, Temperature>();
+    assert(default_p.name == "");
+    assert(default_t.celsius == 0.0);
+
+    // Test 9: Explicit type annotation with TypeExpr
+    let explicit_wrapper = test_explicit_type();
+    assert(explicit_wrapper.value.name == "");
+
+    // Test 10: TypeExpr in boolean expression context
+    let expr_result = test_expr_context();
+    assert(expr_result == true);
+
+    // Test 11: Widget and Factory protocol
+    let widget = Widget.create();
+    assert(widget.id == 0);
+
+    let widget_default = Widget.default();
+    assert(widget_default.id == 0);
+
+    // Test 12: WidgetWrapper with T.create() pattern
+    let wrapped_widget = WidgetWrapper<Widget>.create();
+    assert(wrapped_widget.widget.id == 0);
+
+    let wrapped_widget_default = WidgetWrapper<Widget>.default();
+    assert(wrapped_widget_default.widget.id == 0);
+
+    // Test 13: Deeply nested - Container<Box<Person>> with specialized impl
+    // Uses specialized impl Container<Box<T>> where T = Person
+    // The specialized impl builds Box directly with T.default() inside
+    let nested = Container<Box<Person>>.default();
+    assert(nested.item.content.name == "");
+    assert(nested.count == 0);
+
+    // Test 14: Verify return type is concrete, not generic
+    // The type checker should have resolved Wrapper<T> to Wrapper<Person>
+    // so we can access .value.name directly without type annotation
+    let w = Wrapper<Person>.default();
+    let v = w.value;
+    let n = v.name;
+    assert(n == "");
+
+    print("All T.method() pattern tests passed!");
+}

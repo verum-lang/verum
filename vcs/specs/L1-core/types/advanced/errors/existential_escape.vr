@@ -1,0 +1,203 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: existential, escape, skolem, errors, advanced-type-syntax
+// @expect: error(E0401)
+// @expected-error: E0401 "Existential type escapes its scope"
+// @description: Tests for existential (skolem) type escaping its defining scope
+// @spec: 03-type-system.md Section 13. 3.7.3
+
+// =============================================================================
+// ERROR 1: Existential type escaping through return type mismatch
+// =============================================================================
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+fn create_iterator() -> some I: Iterator<Item = Int> {
+    [1, 2, 3].iter()
+}
+
+// ERROR: Cannot expose concrete type of existential
+fn bad_expose_concrete() -> ListIterator<Int> {
+    create_iterator()  // E0401: Existential type cannot be converted to concrete type
+}
+
+type ListIterator<T> is { items: List<T>, pos: Int };
+
+// =============================================================================
+// ERROR 2: Storing existential in struct with wrong type
+// =============================================================================
+
+type Container is {
+    // Attempting to store existential in incompatible field
+    iter: ListIterator<Int>,  // Concrete type
+};
+
+fn bad_store_existential() -> Container {
+    let iter = create_iterator();  // some I: Iterator<Item = Int>
+    Container { iter: iter }  // E0401: Cannot assign existential to concrete field
+}
+
+// =============================================================================
+// ERROR 3: Comparing different existential types
+// =============================================================================
+
+fn create_other_iterator() -> some I: Iterator<Item = Int> {
+    [4, 5, 6].iter()
+}
+
+fn bad_compare_existentials() {
+    let iter1 = create_iterator();      // some I1: Iterator<Item = Int>
+    let iter2 = create_other_iterator(); // some I2: Iterator<Item = Int>
+
+    // E0401: Cannot compare different existential types
+    // Even though both are Iterator<Item = Int>, they're distinct skolem types
+    if iter1 == iter2 {  // ERROR
+        print("Same");
+    }
+}
+
+// =============================================================================
+// ERROR 4: Existential escaping through closure capture
+// =============================================================================
+
+fn bad_closure_capture() -> fn() -> Int {
+    let iter = create_iterator();  // some I: Iterator<Item = Int>
+
+    // E0401: Closure captures existential type that would escape
+    || iter.count()  // ERROR: iter's type escapes via closure return
+}
+
+// =============================================================================
+// ERROR 5: Generic function expecting concrete but receiving existential
+// =============================================================================
+
+fn process_list_iterator(iter: ListIterator<Int>) -> Int {
+    iter.count()
+}
+
+fn bad_generic_mismatch() {
+    let iter = create_iterator();  // some I: Iterator<Item = Int>
+    process_list_iterator(iter)  // E0401: Expected ListIterator, got existential
+}
+
+// =============================================================================
+// ERROR 6: Returning existential's inner type directly
+// =============================================================================
+
+type Wrapper is protocol {
+    type Inner;
+    fn unwrap(&self) -> Self.Inner;
+};
+
+fn create_wrapper() -> some W: Wrapper {
+    IntWrapper { value: 42 }
+}
+
+type IntWrapper is { value: Int };
+
+implement Wrapper for IntWrapper {
+    type Inner is Int;
+    fn unwrap(&self) -> Int { self.value }
+}
+
+// ERROR: Exposing associated type of existential
+fn bad_expose_associated() -> Int {
+    let w = create_wrapper();  // some W: Wrapper
+    // This is actually OK in this case since Inner = Int is concrete
+    w.unwrap()
+}
+
+// But this would be an error:
+fn bad_return_associated_type() -> some W: Wrapper {
+    create_wrapper()
+}
+
+fn bad_expose_inner_type() {
+    let w = bad_return_associated_type();
+    let inner: W.Inner = w.unwrap();  // E0401: W is existential, cannot use W.Inner outside
+}
+
+// =============================================================================
+// ERROR 7: Assigning existential to type parameter
+// =============================================================================
+
+fn with_concrete_type<T: Iterator>(iter: T) -> Int {
+    iter.count()
+}
+
+fn bad_existential_to_type_param() {
+    let iter = create_iterator();  // some I: Iterator<Item = Int>
+    // This should work because I: Iterator is satisfied
+    // But if we try to use the concrete type:
+    with_concrete_type<ListIterator<Int>>(iter)  // E0401: Type mismatch
+}
+
+// =============================================================================
+// ERROR 8: Existential in mutable reference escaping
+// =============================================================================
+
+fn bad_mut_ref_escape() {
+    let mut iter = create_iterator();
+    let iter_ref: &mut ListIterator<Int> = &mut iter;  // E0401: Cannot coerce existential to concrete reference
+}
+
+// =============================================================================
+// ERROR 9: Existential type in array with mixed concrete types
+// =============================================================================
+
+fn bad_mixed_array() {
+    let iter1 = create_iterator();  // some I: Iterator
+    let concrete: ListIterator<Int> = [1, 2].iter();
+
+    // E0401: Cannot create array with both existential and concrete types
+    let iters: [ListIterator<Int>; 2] = [iter1, concrete];  // ERROR
+}
+
+// =============================================================================
+// ERROR 10: Leaking existential through trait object
+// =============================================================================
+
+fn bad_downcast_attempt() {
+    let iter = create_iterator();  // some I: Iterator
+
+    // Cannot downcast existential to concrete type
+    let concrete = iter as ListIterator<Int>;  // E0401: Cannot cast existential
+}
+
+// =============================================================================
+// ERROR 11: Existential in recursive type
+// =============================================================================
+
+type Node is {
+    value: Int,
+    next: Maybe<Heap<Node>>,
+    iter: some I: Iterator<Item = Int>,  // E0401: Existential in struct field must be named type
+};
+
+// =============================================================================
+// ERROR 12: Using existential across async boundary incorrectly
+// =============================================================================
+
+async fn bad_async_escape() {
+    let iter = create_iterator();  // some I: Iterator
+
+    spawn {
+        // E0401: Existential type I is not guaranteed Send
+        for x in iter {  // ERROR: iter escapes to spawned task
+            print(f"{x}");
+        }
+    };
+}
+
+// Helper declarations
+protocol Clone { fn clone(&self) -> Self; }
+protocol Eq { fn eq(&self, other: &Self) -> Bool; }
+implement<T> ListIterator<T> { fn count(&self) -> Int { 0 } }
+
+fn main() {
+    // All above examples should produce E0401 errors
+}

@@ -1,0 +1,151 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, refinement, integration, error
+// @timeout: 5000
+// @expected-error: E018
+
+/// Integration test failures: Contracts with Refinement Types
+/// Demonstrates common errors when combining contracts and refinements
+
+/// Refinement type definitions
+type Money is Float{>= 0.0};
+type PositiveInt is Int{> 0};
+type NonEmptyText is Text{len > 0};
+type Percentage is Float{>= 0.0, <= 100.0};
+
+/// ERROR: Contract allows refinement violation
+@verify(proof)
+fn withdraw_unsafe(balance: Money, amount: Money) -> Money {
+    contract#"
+        requires amount <= balance;
+        ensures result == balance - amount;
+        // ERROR: Missing ensures result >= 0.0 (refinement constraint)
+    ";
+    // Result could be negative if amount > balance (contract allows it)
+    balance - amount
+}
+
+/// ERROR: Refinement and contract preconditions conflict
+type Index is Int{>= 0};
+
+@verify(proof)
+fn access_wrong(arr: &List<Int>, idx: Index) -> Int {
+    contract#"
+        // ERROR: Contract requires idx > 0, but Index allows 0
+        requires idx > 0;
+        requires idx < arr.len();
+    ";
+    arr[idx]
+}
+
+/// ERROR: Refinement postcondition weaker than contract
+@verify(proof)
+fn clamp_to_positive(value: Int) -> PositiveInt {
+    contract#"
+        ensures result > 0;
+        ensures result >= value;  // ERROR: Can't satisfy both for negative input
+    ";
+    if value > 0 { value } else { 1 }
+}
+
+/// ERROR: Struct invariant conflicts with contract
+type Account is {
+    balance: Money,
+    min_balance: Money,
+} { self.balance >= self.min_balance };
+
+@verify(proof)
+fn force_withdraw(account: &mut Account, amount: Money) {
+    contract#"
+        ensures account.balance == old(account.balance) - amount;
+        // ERROR: Could violate struct invariant balance >= min_balance
+    ";
+    account.balance -= amount;
+}
+
+/// ERROR: Refinement type in return doesn't match implementation
+type EvenInt is Int{value % 2 == 0};
+
+@verify(proof)
+fn make_even(x: Int) -> EvenInt {
+    contract#"
+        ensures result % 2 == 0;
+    ";
+    // ERROR: Returns x+1 which might be odd
+    x + 1
+}
+
+/// ERROR: Dependent refinement violated
+type BoundedList<T, const MAX: Int> is List<T>{len <= MAX};
+
+@verify(proof)
+fn append_bounded<T, const MAX: Int>(
+    list: &mut BoundedList<T, MAX>,
+    item: T
+) {
+    contract#"
+        // ERROR: Missing precondition that list.len() < MAX
+        ensures list.len() == old(list.len()) + 1;
+    ";
+    list.push(item);  // Could violate BoundedList refinement
+}
+
+/// ERROR: Refinement intersection empty
+type SmallPositive is Int{> 0, < 10};
+type LargeNegative is Int{< 0, < -100};
+
+@verify(proof)
+fn impossible_refinement(x: SmallPositive) -> LargeNegative {
+    contract#"
+        ensures result < x;  // Always true given refinements
+    ";
+    // ERROR: No value can satisfy both refinements
+    x - 200  // Would need to be both positive and negative
+}
+
+/// ERROR: Quantified refinement not preserved
+type SortedList is List<Int>{
+    forall i: Int, j: Int. 0 <= i < j < len implies self[i] <= self[j]
+}
+
+@verify(proof)
+fn insert_unsorted(list: &mut SortedList, value: Int) {
+    contract#"
+        ensures list.len() == old(list.len()) + 1;
+        ensures list.contains(&value);
+        // ERROR: Missing sorted preservation
+    ";
+    // Just appends, doesn't maintain sorted property
+    list.push(value);
+}
+
+/// ERROR: Unit refinement conversion wrong
+type Meters is Float{>= 0.0};
+type Feet is Float{>= 0.0};
+
+const METERS_TO_FEET: Float = 3.28084;
+
+@verify(proof)
+fn convert_units(m: Meters) -> Feet {
+    contract#"
+        ensures result == m * METERS_TO_FEET;
+        ensures result >= 0.0;
+    ";
+    // ERROR: Uses wrong conversion factor
+    m * 0.3048  // This is feet to meters, not meters to feet
+}
+
+/// ERROR: Nested refinement types with conflicting constraints
+type ValidEmail is Text{contains("@") && len >= 5};
+type ShortText is Text{len <= 10};
+
+// These types can conflict: email "a@b.cd" (6 chars) is valid,
+// but what about "a@b.cdefghij" (13 chars)?
+@verify(proof)
+fn short_email(email: ValidEmail) -> ShortText {
+    contract#"
+        ensures result == email;  // ERROR: Email might be > 10 chars
+    ";
+    email
+}

@@ -1,0 +1,353 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, linalg
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT tensor linear algebra — matrix multiply, transpose, determinant, trace, inverse
+
+// ============================================================================
+// 2x2 integer matrix type (row-major: [a b; c d])
+// ============================================================================
+
+type M2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn m2_new(a: Int, b: Int, c: Int, d: Int) -> M2 {
+    M2 { a: a, b: b, c: c, d: d }
+}
+
+fn m2_identity() -> M2 {
+    M2 { a: 1, b: 0, c: 0, d: 1 }
+}
+
+fn m2_zeros() -> M2 {
+    M2 { a: 0, b: 0, c: 0, d: 0 }
+}
+
+fn m2_matmul(p: M2, q: M2) -> M2 {
+    M2 {
+        a: p.a * q.a + p.b * q.c,
+        b: p.a * q.b + p.b * q.d,
+        c: p.c * q.a + p.d * q.c,
+        d: p.c * q.b + p.d * q.d
+    }
+}
+
+fn m2_transpose(m: M2) -> M2 {
+    M2 { a: m.a, b: m.c, c: m.b, d: m.d }
+}
+
+fn m2_det(m: M2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn m2_trace(m: M2) -> Int {
+    m.a + m.d
+}
+
+fn m2_adjugate(m: M2) -> M2 {
+    M2 { a: m.d, b: -m.b, c: -m.c, d: m.a }
+}
+
+fn m2_add(p: M2, q: M2) -> M2 {
+    M2 {
+        a: p.a + q.a,
+        b: p.b + q.b,
+        c: p.c + q.c,
+        d: p.d + q.d
+    }
+}
+
+fn m2_scale(m: M2, s: Int) -> M2 {
+    M2 { a: m.a * s, b: m.b * s, c: m.c * s, d: m.d * s }
+}
+
+// ============================================================================
+// 3x3 integer matrix type (row-major)
+// ============================================================================
+
+type M3 is {
+    e00: Int, e01: Int, e02: Int,
+    e10: Int, e11: Int, e12: Int,
+    e20: Int, e21: Int, e22: Int
+};
+
+fn m3_identity() -> M3 {
+    M3 {
+        e00: 1, e01: 0, e02: 0,
+        e10: 0, e11: 1, e12: 0,
+        e20: 0, e21: 0, e22: 1
+    }
+}
+
+fn m3_matmul(p: M3, q: M3) -> M3 {
+    M3 {
+        e00: p.e00 * q.e00 + p.e01 * q.e10 + p.e02 * q.e20,
+        e01: p.e00 * q.e01 + p.e01 * q.e11 + p.e02 * q.e21,
+        e02: p.e00 * q.e02 + p.e01 * q.e12 + p.e02 * q.e22,
+        e10: p.e10 * q.e00 + p.e11 * q.e10 + p.e12 * q.e20,
+        e11: p.e10 * q.e01 + p.e11 * q.e11 + p.e12 * q.e21,
+        e12: p.e10 * q.e02 + p.e11 * q.e12 + p.e12 * q.e22,
+        e20: p.e20 * q.e00 + p.e21 * q.e10 + p.e22 * q.e20,
+        e21: p.e20 * q.e01 + p.e21 * q.e11 + p.e22 * q.e21,
+        e22: p.e20 * q.e02 + p.e21 * q.e12 + p.e22 * q.e22
+    }
+}
+
+fn m3_transpose(m: M3) -> M3 {
+    M3 {
+        e00: m.e00, e01: m.e10, e02: m.e20,
+        e10: m.e01, e11: m.e11, e12: m.e21,
+        e20: m.e02, e21: m.e12, e22: m.e22
+    }
+}
+
+fn m3_det(m: M3) -> Int {
+    m.e00 * (m.e11 * m.e22 - m.e12 * m.e21)
+    - m.e01 * (m.e10 * m.e22 - m.e12 * m.e20)
+    + m.e02 * (m.e10 * m.e21 - m.e11 * m.e20)
+}
+
+fn m3_trace(m: M3) -> Int {
+    m.e00 + m.e11 + m.e22
+}
+
+// ============================================================================
+// Test 1: 2x2 matmul
+// ============================================================================
+
+fn test_matmul_2x2() {
+    let a = m2_new(1, 2, 3, 4);
+    let b = m2_new(5, 6, 7, 8);
+    let c = m2_matmul(a, b);
+    // [1*5+2*7, 1*6+2*8] = [19, 22]
+    // [3*5+4*7, 3*6+4*8] = [43, 50]
+    assert_eq(c.a, 19);
+    assert_eq(c.b, 22);
+    assert_eq(c.c, 43);
+    assert_eq(c.d, 50);
+
+    // Identity multiplication: I * A = A
+    let id = m2_identity();
+    let ia = m2_matmul(id, a);
+    assert_eq(ia.a, 1);
+    assert_eq(ia.b, 2);
+    assert_eq(ia.c, 3);
+    assert_eq(ia.d, 4);
+
+    // A * I = A
+    let ai = m2_matmul(a, id);
+    assert_eq(ai.a, 1);
+    assert_eq(ai.b, 2);
+    assert_eq(ai.c, 3);
+    assert_eq(ai.d, 4);
+
+    // Matrix multiplication is associative: (A*B)*C = A*(B*C)
+    let d2 = m2_new(2, 0, 1, 3);
+    let abc = m2_matmul(m2_matmul(a, b), d2);
+    let a_bc = m2_matmul(a, m2_matmul(b, d2));
+    assert_eq(abc.a, a_bc.a);
+    assert_eq(abc.b, a_bc.b);
+    assert_eq(abc.c, a_bc.c);
+    assert_eq(abc.d, a_bc.d);
+
+    print("test_matmul_2x2 passed");
+}
+
+// ============================================================================
+// Test 2: transpose
+// ============================================================================
+
+fn test_transpose() {
+    // 2x2 transpose
+    let a = m2_new(1, 2, 3, 4);
+    let at = m2_transpose(a);
+    assert_eq(at.a, 1);
+    assert_eq(at.b, 3);
+    assert_eq(at.c, 2);
+    assert_eq(at.d, 4);
+
+    // Double transpose = original
+    let att = m2_transpose(at);
+    assert_eq(att.a, a.a);
+    assert_eq(att.b, a.b);
+    assert_eq(att.c, a.c);
+    assert_eq(att.d, a.d);
+
+    // Symmetric matrix: transpose = self
+    let sym = m2_new(5, 3, 3, 7);
+    let symt = m2_transpose(sym);
+    assert_eq(symt.a, 5);
+    assert_eq(symt.b, 3);
+    assert_eq(symt.c, 3);
+    assert_eq(symt.d, 7);
+
+    // 3x3 transpose
+    let b = M3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let bt = m3_transpose(b);
+    assert_eq(bt.e00, 1); assert_eq(bt.e01, 4); assert_eq(bt.e02, 7);
+    assert_eq(bt.e10, 2); assert_eq(bt.e11, 5); assert_eq(bt.e12, 8);
+    assert_eq(bt.e20, 3); assert_eq(bt.e21, 6); assert_eq(bt.e22, 9);
+
+    // (AB)^T = B^T * A^T for 2x2
+    let p = m2_new(1, 2, 3, 4);
+    let q = m2_new(5, 6, 7, 8);
+    let pq_t = m2_transpose(m2_matmul(p, q));
+    let qt_pt = m2_matmul(m2_transpose(q), m2_transpose(p));
+    assert_eq(pq_t.a, qt_pt.a);
+    assert_eq(pq_t.b, qt_pt.b);
+    assert_eq(pq_t.c, qt_pt.c);
+    assert_eq(pq_t.d, qt_pt.d);
+
+    print("test_transpose passed");
+}
+
+// ============================================================================
+// Test 3: determinant
+// ============================================================================
+
+fn test_determinant() {
+    // 2x2 basic
+    let a = m2_new(3, 8, 4, 6);
+    assert_eq(m2_det(a), -14);
+
+    // Identity has det = 1
+    assert_eq(m2_det(m2_identity()), 1);
+
+    // Singular matrix has det = 0
+    let sing = m2_new(2, 4, 1, 2);
+    assert_eq(m2_det(sing), 0);
+
+    // det(A*B) = det(A) * det(B)
+    let b = m2_new(1, 2, 3, 4);
+    let c = m2_new(5, 6, 7, 8);
+    let det_ab = m2_det(m2_matmul(b, c));
+    let det_a_times_det_b = m2_det(b) * m2_det(c);
+    assert_eq(det_ab, det_a_times_det_b);
+
+    // 3x3 determinant
+    let m = M3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 0, e11: 1, e12: 4,
+        e20: 5, e21: 6, e22: 0
+    };
+    // det = 1*(1*0 - 4*6) - 2*(0*0 - 4*5) + 3*(0*6 - 1*5)
+    //     = 1*(-24) - 2*(-20) + 3*(-5)
+    //     = -24 + 40 - 15 = 1
+    assert_eq(m3_det(m), 1);
+
+    // 3x3 identity has det = 1
+    assert_eq(m3_det(m3_identity()), 1);
+
+    print("test_determinant passed");
+}
+
+// ============================================================================
+// Test 4: trace
+// ============================================================================
+
+fn test_trace() {
+    // 2x2 trace
+    let a = m2_new(3, 8, 4, 6);
+    assert_eq(m2_trace(a), 9);
+
+    // Identity trace = dimension
+    assert_eq(m2_trace(m2_identity()), 2);
+
+    // 3x3 trace
+    let b = M3 {
+        e00: 5, e01: 2, e02: 3,
+        e10: 4, e11: 7, e12: 6,
+        e20: 1, e21: 8, e22: 9
+    };
+    assert_eq(m3_trace(b), 21);
+    assert_eq(m3_trace(m3_identity()), 3);
+
+    // trace(A + B) = trace(A) + trace(B)
+    let p = m2_new(1, 2, 3, 4);
+    let q = m2_new(5, 6, 7, 8);
+    let pq = m2_add(p, q);
+    assert_eq(m2_trace(pq), m2_trace(p) + m2_trace(q));
+
+    // trace(kA) = k * trace(A)
+    let kp = m2_scale(p, 3);
+    assert_eq(m2_trace(kp), 3 * m2_trace(p));
+
+    // Transpose preserves trace
+    let pt = m2_transpose(p);
+    assert_eq(m2_trace(pt), m2_trace(p));
+
+    print("test_trace passed");
+}
+
+// ============================================================================
+// Test 5: inverse via adjugate (M * adj(M) = det(M) * I)
+// ============================================================================
+
+fn test_inverse() {
+    // Matrix with det = 1 (exact integer inverse)
+    let a = m2_new(3, 1, 5, 2);
+    let da = m2_det(a);
+    assert_eq(da, 1);
+
+    let adj_a = m2_adjugate(a);
+    assert_eq(adj_a.a, 2);
+    assert_eq(adj_a.b, -1);
+    assert_eq(adj_a.c, -5);
+    assert_eq(adj_a.d, 3);
+
+    // M * adj(M) = det(M) * I = I when det = 1
+    let prod = m2_matmul(a, adj_a);
+    assert_eq(prod.a, 1);
+    assert_eq(prod.b, 0);
+    assert_eq(prod.c, 0);
+    assert_eq(prod.d, 1);
+
+    // Matrix with det != 1: M * adj(M) = det * I
+    let b = m2_new(4, 7, 2, 6);
+    let db = m2_det(b);
+    assert_eq(db, 10);
+
+    let adj_b = m2_adjugate(b);
+    let prod_b = m2_matmul(b, adj_b);
+    // Should be 10 * I
+    assert_eq(prod_b.a, 10);
+    assert_eq(prod_b.b, 0);
+    assert_eq(prod_b.c, 0);
+    assert_eq(prod_b.d, 10);
+
+    // adj(M) * M = det * I (also works on both sides)
+    let prod_b2 = m2_matmul(adj_b, b);
+    assert_eq(prod_b2.a, 10);
+    assert_eq(prod_b2.b, 0);
+    assert_eq(prod_b2.c, 0);
+    assert_eq(prod_b2.d, 10);
+
+    // Cayley-Hamilton: M^2 - trace(M)*M + det(M)*I = 0 for 2x2
+    let m = m2_new(2, 1, 1, 3);
+    let m_sq = m2_matmul(m, m);
+    let tr_m = m2_trace(m);
+    let det_m = m2_det(m);
+    // M^2 - trace*M + det*I
+    let r = m2_add(m2_add(m_sq, m2_scale(m, -tr_m)), m2_scale(m2_identity(), det_m));
+    assert_eq(r.a, 0);
+    assert_eq(r.b, 0);
+    assert_eq(r.c, 0);
+    assert_eq(r.d, 0);
+
+    print("test_inverse passed");
+}
+
+fn main() -> Int {
+    test_matmul_2x2();
+    test_transpose();
+    test_determinant();
+    test_trace();
+    test_inverse();
+    print("ALL PASSED");
+    0
+}

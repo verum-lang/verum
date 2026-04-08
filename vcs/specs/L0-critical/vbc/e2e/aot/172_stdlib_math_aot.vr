@@ -1,0 +1,302 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stdlib, math
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT math operations — integer power, GCD/LCM, Fibonacci, float precision, Newton sqrt
+
+// ============================================================================
+// Integer helpers
+// ============================================================================
+
+fn abs_int(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn int_power(base: Int, exp: Int) -> Int {
+    if exp == 0 { 1 }
+    else {
+        let mut result = 1;
+        let mut i = 0;
+        while i < exp {
+            result = result * base;
+            i = i + 1;
+        }
+        result
+    }
+}
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_int(a);
+    let mut y = abs_int(b);
+    while y > 0 {
+        let temp = y;
+        y = x - (x / y) * y;
+        x = temp;
+    }
+    x
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 { 0 }
+    else if b == 0 { 0 }
+    else { abs_int(a) / gcd(a, b) * abs_int(b) }
+}
+
+fn fibonacci(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        let mut a = 0;
+        let mut b = 1;
+        let mut i = 2;
+        while i <= n {
+            let temp = a + b;
+            a = b;
+            b = temp;
+            i = i + 1;
+        }
+        b
+    }
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 }
+    else {
+        let mut result = 1;
+        let mut i = 2;
+        while i <= n {
+            result = result * i;
+            i = i + 1;
+        }
+        result
+    }
+}
+
+// ============================================================================
+// Float helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Int {
+    if abs_f(a - b) < tol { 1 } else { 0 }
+}
+
+fn newton_sqrt(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let mut g = x / 2.0;
+        if g < 0.5 { g = 0.5; }
+        // 10 unrolled Newton-Raphson iterations
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g
+    }
+}
+
+// ============================================================================
+// Test 1: Integer power and factorial
+// ============================================================================
+
+fn test_power_factorial() {
+    // Powers of 2
+    assert_eq(int_power(2, 0), 1);
+    assert_eq(int_power(2, 1), 2);
+    assert_eq(int_power(2, 8), 256);
+    assert_eq(int_power(2, 10), 1024);
+    assert_eq(int_power(2, 16), 65536);
+
+    // Other bases
+    assert_eq(int_power(3, 5), 243);
+    assert_eq(int_power(5, 4), 625);
+    assert_eq(int_power(10, 6), 1000000);
+    assert_eq(int_power(7, 3), 343);
+    assert_eq(int_power(1, 100), 1);
+
+    // Factorial
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(7), 5040);
+    assert_eq(factorial(10), 3628800);
+
+    // Verify n! = n * (n-1)!
+    assert_eq(factorial(8), 8 * factorial(7));
+
+    print("test_power_factorial passed");
+}
+
+// ============================================================================
+// Test 2: GCD and LCM
+// ============================================================================
+
+fn test_gcd_lcm() {
+    // Basic GCD
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(48, 36), 12);
+    assert_eq(gcd(17, 13), 1);     // coprime
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(0, 7), 7);
+    assert_eq(gcd(7, 0), 7);
+
+    // GCD commutativity
+    assert_eq(gcd(24, 36), gcd(36, 24));
+
+    // LCM
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(3, 5), 15);
+    assert_eq(lcm(12, 18), 36);
+    assert_eq(lcm(7, 7), 7);
+    assert_eq(lcm(0, 5), 0);
+
+    // Identity: gcd(a,b) * lcm(a,b) == a * b  (for positive a,b)
+    let a = 24;
+    let b = 36;
+    assert_eq(gcd(a, b) * lcm(a, b), a * b);
+
+    // Consecutive integers are coprime
+    assert_eq(gcd(99, 100), 1);
+    assert_eq(gcd(1000, 1001), 1);
+
+    print("test_gcd_lcm passed");
+}
+
+// ============================================================================
+// Test 3: Fibonacci sequence
+// ============================================================================
+
+fn test_fibonacci() {
+    // Base cases
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(2), 1);
+
+    // Known values
+    assert_eq(fibonacci(5), 5);
+    assert_eq(fibonacci(10), 55);
+    assert_eq(fibonacci(15), 610);
+    assert_eq(fibonacci(20), 6765);
+    assert_eq(fibonacci(25), 75025);
+
+    // Verify recurrence: F(n) = F(n-1) + F(n-2)
+    let mut n = 2;
+    while n <= 20 {
+        assert_eq(fibonacci(n), fibonacci(n - 1) + fibonacci(n - 2));
+        n = n + 1;
+    }
+
+    // Cassini identity: F(n-1)*F(n+1) - F(n)^2 = (-1)^n
+    // For n=6: F(5)*F(7) - F(6)^2 = 5*13 - 8*8 = 65-64 = 1
+    let f5 = fibonacci(5);
+    let f6 = fibonacci(6);
+    let f7 = fibonacci(7);
+    assert_eq(f5 * f7 - f6 * f6, 1);
+
+    print("test_fibonacci passed");
+}
+
+// ============================================================================
+// Test 4: Float precision edge cases
+// ============================================================================
+
+fn test_float_precision() {
+    // Exact binary fractions
+    assert_eq(approx_eq(0.5 + 0.25, 0.75, 0.0000001), 1);
+    assert_eq(approx_eq(0.125 * 8.0, 1.0, 0.0000001), 1);
+
+    // Accumulation of 0.1 (non-exact in binary)
+    let mut sum = 0.0;
+    let mut i = 0;
+    while i < 10 {
+        sum = sum + 0.1;
+        i = i + 1;
+    }
+    assert_eq(approx_eq(sum, 1.0, 0.0001), 1);
+
+    // 1/3 round-trip
+    let third = 1.0 / 3.0;
+    assert_eq(approx_eq(third * 3.0, 1.0, 0.0001), 1);
+
+    // Large + small (precision loss)
+    let big = 1000000.0;
+    let small = 0.001;
+    let result = big + small - big;
+    assert_eq(approx_eq(result, small, 0.01), 1);
+
+    // Pi approximation: 22/7
+    assert_eq(approx_eq(22.0 / 7.0, 3.14285714, 0.0001), 1);
+
+    // Associativity check (may differ slightly)
+    let a = 0.1;
+    let b = 0.2;
+    let c = 0.3;
+    let ab_c = (a + b) + c;
+    let a_bc = a + (b + c);
+    assert_eq(approx_eq(ab_c, a_bc, 0.0001), 1);
+
+    print("test_float_precision passed");
+}
+
+// ============================================================================
+// Test 5: Newton's method square root
+// ============================================================================
+
+fn test_newton_sqrt() {
+    // Perfect squares
+    assert_eq(approx_eq(newton_sqrt(4.0), 2.0, 0.0001), 1);
+    assert_eq(approx_eq(newton_sqrt(9.0), 3.0, 0.0001), 1);
+    assert_eq(approx_eq(newton_sqrt(16.0), 4.0, 0.0001), 1);
+    assert_eq(approx_eq(newton_sqrt(25.0), 5.0, 0.0001), 1);
+    assert_eq(approx_eq(newton_sqrt(100.0), 10.0, 0.0001), 1);
+
+    // Irrational roots
+    assert_eq(approx_eq(newton_sqrt(2.0), 1.41421356, 0.0001), 1);
+    assert_eq(approx_eq(newton_sqrt(3.0), 1.73205080, 0.0001), 1);
+    assert_eq(approx_eq(newton_sqrt(5.0), 2.23606797, 0.0001), 1);
+
+    // Edge cases
+    assert_eq(approx_eq(newton_sqrt(1.0), 1.0, 0.0001), 1);
+    assert_eq(approx_eq(newton_sqrt(0.0), 0.0, 0.0001), 1);
+
+    // Small values
+    assert_eq(approx_eq(newton_sqrt(0.25), 0.5, 0.001), 1);
+    assert_eq(approx_eq(newton_sqrt(0.01), 0.1, 0.001), 1);
+
+    // Large values
+    assert_eq(approx_eq(newton_sqrt(10000.0), 100.0, 0.01), 1);
+
+    // Verify sqrt(x)^2 == x
+    let s = newton_sqrt(7.0);
+    assert_eq(approx_eq(s * s, 7.0, 0.001), 1);
+
+    let s2 = newton_sqrt(123.456);
+    assert_eq(approx_eq(s2 * s2, 123.456, 0.01), 1);
+
+    print("test_newton_sqrt passed");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_power_factorial();
+    test_gcd_lcm();
+    test_fibonacci();
+    test_float_precision();
+    test_newton_sqrt();
+    print("ALL PASSED");
+    0
+}

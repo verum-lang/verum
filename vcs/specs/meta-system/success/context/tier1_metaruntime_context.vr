@@ -1,0 +1,214 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, context, tier1, metaruntime
+// @description: Test that Tier 1 MetaRuntime builtins work with MetaRuntime context
+// @contexts: MetaRuntime
+
+// =============================================================================
+// TARGET INFO FUNCTIONS
+// =============================================================================
+
+meta fn test_target_os_with_context() -> Text using [MetaRuntime] {
+    target_os()
+}
+
+meta fn test_target_arch_with_context() -> Text using [MetaRuntime] {
+    target_arch()
+}
+
+meta fn test_target_triple_with_context() -> Text using [MetaRuntime] {
+    target_triple()
+}
+
+meta fn test_target_pointer_width_with_context() -> Int using [MetaRuntime] {
+    target_pointer_width()
+}
+
+meta fn test_target_endian_with_context() -> Text using [MetaRuntime] {
+    target_endian()
+}
+
+meta fn test_target_has_feature_with_context() -> Bool using [MetaRuntime] {
+    target_has_feature("sse2")  // May or may not be true
+}
+
+// =============================================================================
+// BUILD INFO FUNCTIONS
+// =============================================================================
+
+meta fn test_crate_name_with_context() -> Text using [MetaRuntime] {
+    crate_name()
+}
+
+meta fn test_cog_name_with_context() -> Text using [MetaRuntime] {
+    cog_name()
+}
+
+meta fn test_module_path_with_context() -> Text using [MetaRuntime] {
+    module_path()
+}
+
+meta fn test_is_debug_with_context() -> Bool using [MetaRuntime] {
+    is_debug()
+}
+
+meta fn test_is_release_with_context() -> Bool using [MetaRuntime] {
+    is_release()
+}
+
+meta fn test_opt_level_with_context() -> Int using [MetaRuntime] {
+    opt_level()
+}
+
+meta fn test_compiler_version_with_context() -> Text using [MetaRuntime] {
+    compiler_version()
+}
+
+// =============================================================================
+// FEATURE FLAGS FUNCTIONS
+// =============================================================================
+
+meta fn test_has_feature_with_context() -> Bool using [MetaRuntime] {
+    has_feature("std")
+}
+
+meta fn test_enabled_features_with_context() -> List<Text> using [MetaRuntime] {
+    enabled_features()
+}
+
+// =============================================================================
+// CONFIG/LIMITS FUNCTIONS
+// =============================================================================
+
+meta fn test_recursion_limit_with_context() -> Int using [MetaRuntime] {
+    recursion_limit()
+}
+
+meta fn test_iteration_limit_with_context() -> Int using [MetaRuntime] {
+    iteration_limit()
+}
+
+meta fn test_memory_limit_with_context() -> Int using [MetaRuntime] {
+    memory_limit()
+}
+
+meta fn test_timeout_ms_with_context() -> Int using [MetaRuntime] {
+    timeout_ms()
+}
+
+meta fn test_config_get_with_context() -> Maybe<Text> using [MetaRuntime] {
+    config_get("some_key")
+}
+
+meta fn test_config_get_int_with_context() -> Maybe<Int> using [MetaRuntime] {
+    config_get_int("some_int_key")
+}
+
+meta fn test_config_get_bool_with_context() -> Maybe<Bool> using [MetaRuntime] {
+    config_get_bool("some_bool_key")
+}
+
+// =============================================================================
+// ENVIRONMENT FUNCTIONS
+// =============================================================================
+
+meta fn test_env_with_context() -> Maybe<Text> using [MetaRuntime] {
+    env("PATH")
+}
+
+meta fn test_is_ci_with_context() -> Bool using [MetaRuntime] {
+    is_ci()
+}
+
+// =============================================================================
+// COMBINED RUNTIME USAGE
+// =============================================================================
+
+// Test platform-specific code generation
+meta fn generate_platform_code() -> Text using [MetaRuntime] {
+    let os = target_os();
+    let arch = target_arch();
+    let ptr_width = target_pointer_width();
+
+    f"// Platform: {os}/{arch} ({ptr_width}-bit)"
+}
+
+meta fn test_generate_platform_code() -> Bool using [MetaRuntime] {
+    let code = generate_platform_code();
+    text_contains(code, "Platform:")
+}
+
+// Test feature-conditional compilation
+meta fn select_impl_strategy() -> Text using [MetaRuntime] {
+    let debug = is_debug();
+    let opt = opt_level();
+
+    if debug {
+        "debug_impl"
+    } else if opt >= 3 {
+        "highly_optimized_impl"
+    } else if opt >= 2 {
+        "optimized_impl"
+    } else {
+        "default_impl"
+    }
+}
+
+meta fn test_select_impl_strategy() -> Bool using [MetaRuntime] {
+    let strategy = select_impl_strategy();
+    text_len(strategy) > 0
+}
+
+// Test limit-aware algorithm selection
+meta fn choose_algorithm_for_depth(requested_depth: Int) -> Text using [MetaRuntime] {
+    let max_recursion = recursion_limit();
+
+    if requested_depth <= max_recursion / 2 {
+        "recursive"
+    } else if requested_depth <= max_recursion {
+        "tail_recursive"
+    } else {
+        "iterative"
+    }
+}
+
+meta fn test_choose_algorithm() -> Bool using [MetaRuntime] {
+    let algo = choose_algorithm_for_depth(100);
+    algo == "recursive" || algo == "tail_recursive" || algo == "iterative"
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Target info
+    @const assert(text_len(test_target_os_with_context()) > 0);
+    @const assert(text_len(test_target_arch_with_context()) > 0);
+    @const assert(text_len(test_target_triple_with_context()) > 0);
+    @const assert(test_target_pointer_width_with_context() > 0);
+    @const assert(text_len(test_target_endian_with_context()) > 0);
+
+    // Build info
+    @const assert(text_len(test_crate_name_with_context()) > 0);
+    @const assert(text_len(test_cog_name_with_context()) > 0);
+    @const assert(text_len(test_module_path_with_context()) > 0);
+    @const assert(test_is_debug_with_context() || test_is_release_with_context());
+    @const assert(test_opt_level_with_context() >= 0);
+    @const assert(text_len(test_compiler_version_with_context()) > 0);
+
+    // Feature flags
+    @const assert(list_len(test_enabled_features_with_context()) >= 0);
+
+    // Config/limits
+    @const assert(test_recursion_limit_with_context() > 0);
+    @const assert(test_iteration_limit_with_context() > 0);
+    @const assert(test_memory_limit_with_context() > 0);
+    @const assert(test_timeout_ms_with_context() > 0);
+
+    // Combined
+    @const assert(test_generate_platform_code());
+    @const assert(test_select_impl_strategy());
+    @const assert(test_choose_algorithm());
+}

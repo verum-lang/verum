@@ -1,0 +1,946 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, advanced
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Advanced tensor operations — gather, scatter, concat, stack, slice, broadcast, where/masked, clamp, cumulative ops, topk, einsum-like contraction
+
+// ============================================================================
+// Arr16: Fixed-size flat array of 16 Ints
+// ============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn a16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// ============================================================================
+// Arr8: Smaller array for indices and secondary tensors
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        len: a.len
+    }
+}
+
+fn a8_from4(a: Int, b: Int, c: Int, d: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: 0, e5: 0, e6: 0, e7: 0, len: 4 }
+}
+
+fn a8_from8(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: g, e7: h, len: 8 }
+}
+
+fn a8_zeros(n: Int) -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: n }
+}
+
+// ============================================================================
+// Gather: out[i] = src[indices[i]]
+// ============================================================================
+
+fn gather(src: Arr8, indices: Arr8) -> Arr8 {
+    let mut out = a8_zeros(indices.len);
+    let mut i = 0;
+    while i < indices.len {
+        let idx = a8_get(indices, i);
+        out = a8_set(out, i, a8_get(src, idx));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Scatter: out[indices[i]] = src[i] (last write wins)
+// ============================================================================
+
+fn scatter(src: Arr8, indices: Arr8, out_len: Int) -> Arr8 {
+    let mut out = a8_zeros(out_len);
+    let mut i = 0;
+    while i < src.len {
+        let idx = a8_get(indices, i);
+        out = a8_set(out, idx, a8_get(src, i));
+        i = i + 1;
+    }
+    out
+}
+
+// Scatter-add: out[indices[i]] += src[i]
+fn scatter_add(src: Arr8, indices: Arr8, out_len: Int) -> Arr8 {
+    let mut out = a8_zeros(out_len);
+    let mut i = 0;
+    while i < src.len {
+        let idx = a8_get(indices, i);
+        let prev = a8_get(out, idx);
+        out = a8_set(out, idx, prev + a8_get(src, i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Concatenation: join two arrays end-to-end
+// ============================================================================
+
+fn concat(a: Arr8, b: Arr8) -> Arr8 {
+    let mut out = a8_zeros(a.len + b.len);
+    let mut i = 0;
+    while i < a.len {
+        out = a8_set(out, i, a8_get(a, i));
+        i = i + 1;
+    }
+    i = 0;
+    while i < b.len {
+        out = a8_set(out, a.len + i, a8_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Stack: interleave two arrays (simulates stacking along new axis)
+// For two length-4 arrays, produces length-8 with [a0, b0, a1, b1, ...]
+// ============================================================================
+
+fn stack_interleave(a: Arr8, b: Arr8) -> Arr8 {
+    let mut out = a8_zeros(a.len + b.len);
+    let mut i = 0;
+    while i < a.len {
+        out = a8_set(out, i * 2, a8_get(a, i));
+        out = a8_set(out, i * 2 + 1, a8_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Slicing: extract sub-range [start, start+length)
+// ============================================================================
+
+fn slice_range(src: Arr8, start: Int, length: Int) -> Arr8 {
+    let mut out = a8_zeros(length);
+    let mut i = 0;
+    while i < length {
+        out = a8_set(out, i, a8_get(src, start + i));
+        i = i + 1;
+    }
+    out
+}
+
+// Stride slicing: extract every `stride`-th element
+fn slice_stride(src: Arr8, start: Int, stride: Int, count: Int) -> Arr8 {
+    let mut out = a8_zeros(count);
+    let mut i = 0;
+    while i < count {
+        out = a8_set(out, i, a8_get(src, start + i * stride));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Broadcasting: expand scalar to array, or short array to match long
+// ============================================================================
+
+fn broadcast_scalar(val: Int, n: Int) -> Arr8 {
+    let mut out = a8_zeros(n);
+    let mut i = 0;
+    while i < n {
+        out = a8_set(out, i, val);
+        i = i + 1;
+    }
+    out
+}
+
+fn broadcast_add(a: Arr8, scalar: Int) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        out = a8_set(out, i, a8_get(a, i) + scalar);
+        i = i + 1;
+    }
+    out
+}
+
+fn broadcast_mul(a: Arr8, scalar: Int) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        out = a8_set(out, i, a8_get(a, i) * scalar);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Where / masked select: out[i] = if cond[i] then a[i] else b[i]
+// ============================================================================
+
+fn where_select(cond: Arr8, a: Arr8, b: Arr8) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        let c = a8_get(cond, i);
+        if c > 0 {
+            out = a8_set(out, i, a8_get(a, i));
+        } else {
+            out = a8_set(out, i, a8_get(b, i));
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// Masked fill: set elements to `fill_val` where mask is nonzero
+fn masked_fill(src: Arr8, mask: Arr8, fill_val: Int) -> Arr8 {
+    let mut out = a8_zeros(src.len);
+    let mut i = 0;
+    while i < src.len {
+        if a8_get(mask, i) > 0 {
+            out = a8_set(out, i, fill_val);
+        } else {
+            out = a8_set(out, i, a8_get(src, i));
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// Count nonzero elements
+fn count_nonzero(a: Arr8) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < a.len {
+        if a8_get(a, i) != 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// ============================================================================
+// Clamp: clamp values to [lo, hi]
+// ============================================================================
+
+fn clamp(a: Arr8, lo: Int, hi: Int) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        let v = a8_get(a, i);
+        let clamped = if v < lo { lo } else if v > hi { hi } else { v };
+        out = a8_set(out, i, clamped);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Cumulative operations
+// ============================================================================
+
+fn cumsum(a: Arr8) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut running = 0;
+    let mut i = 0;
+    while i < a.len {
+        running = running + a8_get(a, i);
+        out = a8_set(out, i, running);
+        i = i + 1;
+    }
+    out
+}
+
+fn cumprod(a: Arr8) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut running = 1;
+    let mut i = 0;
+    while i < a.len {
+        running = running * a8_get(a, i);
+        out = a8_set(out, i, running);
+        i = i + 1;
+    }
+    out
+}
+
+fn cummax(a: Arr8) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut running = a8_get(a, 0);
+    out = a8_set(out, 0, running);
+    let mut i = 1;
+    while i < a.len {
+        running = int_max(running, a8_get(a, i));
+        out = a8_set(out, i, running);
+        i = i + 1;
+    }
+    out
+}
+
+fn cummin(a: Arr8) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut running = a8_get(a, 0);
+    out = a8_set(out, 0, running);
+    let mut i = 1;
+    while i < a.len {
+        running = int_min(running, a8_get(a, i));
+        out = a8_set(out, i, running);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Top-k: find k largest values and their indices
+// Returns (values, indices) as two Arr8s
+// Simple selection sort approach
+// ============================================================================
+
+type TopkResult is { values: Arr8, indices: Arr8 };
+
+fn topk(src: Arr8, k: Int) -> TopkResult {
+    let mut vals = a8_zeros(k);
+    let mut idxs = a8_zeros(k);
+    // Track which indices are used
+    let mut used = a8_zeros(src.len);
+
+    let mut ki = 0;
+    while ki < k {
+        let mut best_val = -999999;
+        let mut best_idx = 0;
+        let mut i = 0;
+        while i < src.len {
+            if a8_get(used, i) == 0 {
+                let v = a8_get(src, i);
+                if v > best_val {
+                    best_val = v;
+                    best_idx = i;
+                }
+            }
+            i = i + 1;
+        }
+        vals = a8_set(vals, ki, best_val);
+        idxs = a8_set(idxs, ki, best_idx);
+        used = a8_set(used, best_idx, 1);
+        ki = ki + 1;
+    }
+    TopkResult { values: vals, indices: idxs }
+}
+
+// ============================================================================
+// One-hot encoding: given class index and num_classes, produce one-hot vector
+// ============================================================================
+
+fn one_hot(class_idx: Int, num_classes: Int) -> Arr8 {
+    let mut out = a8_zeros(num_classes);
+    out = a8_set(out, class_idx, 1);
+    out
+}
+
+// ============================================================================
+// Flip / reverse
+// ============================================================================
+
+fn flip(a: Arr8) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        out = a8_set(out, i, a8_get(a, a.len - 1 - i));
+        i = i + 1;
+    }
+    out
+}
+
+// Roll: circular shift by `shift` positions
+fn roll(a: Arr8, shift: Int) -> Arr8 {
+    let mut out = a8_zeros(a.len);
+    let mut i = 0;
+    while i < a.len {
+        let src_idx = ((i - shift) % a.len + a.len) % a.len;
+        out = a8_set(out, i, a8_get(a, src_idx));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Test 1: Gather
+// ============================================================================
+
+@test
+fn test_gather() {
+    let src = a8_from8(10, 20, 30, 40, 50, 60, 70, 80);
+    let indices = a8_from4(3, 1, 7, 0);
+
+    let result = gather(src, indices);
+    assert_eq(a8_get(result, 0), 40);  // src[3]
+    assert_eq(a8_get(result, 1), 20);  // src[1]
+    assert_eq(a8_get(result, 2), 80);  // src[7]
+    assert_eq(a8_get(result, 3), 10);  // src[0]
+
+    // Identity gather (indices = 0,1,2,3)
+    let id_indices = a8_from4(0, 1, 2, 3);
+    let id_result = gather(src, id_indices);
+    assert_eq(a8_get(id_result, 0), 10);
+    assert_eq(a8_get(id_result, 3), 40);
+
+    // Duplicate indices
+    let dup_indices = a8_from4(2, 2, 2, 2);
+    let dup_result = gather(src, dup_indices);
+    assert_eq(a8_get(dup_result, 0), 30);
+    assert_eq(a8_get(dup_result, 3), 30);
+    print("  test_gather: ok");
+}
+
+// ============================================================================
+// Test 2: Scatter and scatter-add
+// ============================================================================
+
+@test
+fn test_scatter() {
+    let src = a8_from4(100, 200, 300, 400);
+    let indices = a8_from4(1, 3, 5, 7);
+
+    let result = scatter(src, indices, 8);
+    assert_eq(a8_get(result, 0), 0);    // untouched
+    assert_eq(a8_get(result, 1), 100);  // from src[0]
+    assert_eq(a8_get(result, 3), 200);  // from src[1]
+    assert_eq(a8_get(result, 5), 300);  // from src[2]
+    assert_eq(a8_get(result, 7), 400);  // from src[3]
+
+    // Scatter-add with overlapping indices
+    let src2 = a8_from4(10, 20, 30, 40);
+    let indices2 = a8_from4(0, 1, 0, 1);  // elements 0 and 2 go to index 0; 1 and 3 go to index 1
+    let result2 = scatter_add(src2, indices2, 4);
+    assert_eq(a8_get(result2, 0), 40);   // 10 + 30
+    assert_eq(a8_get(result2, 1), 60);   // 20 + 40
+    assert_eq(a8_get(result2, 2), 0);    // no contributions
+    print("  test_scatter: ok");
+}
+
+// ============================================================================
+// Test 3: Concatenation
+// ============================================================================
+
+@test
+fn test_concat() {
+    let a = a8_from4(1, 2, 3, 4);
+    let b = a8_from4(5, 6, 7, 8);
+
+    let ab = concat(a, b);
+    assert_eq(ab.len, 8);
+    assert_eq(a8_get(ab, 0), 1);
+    assert_eq(a8_get(ab, 3), 4);
+    assert_eq(a8_get(ab, 4), 5);
+    assert_eq(a8_get(ab, 7), 8);
+
+    // Concat with empty-like (len=0, but we pass len=0 arrays)
+    // Not possible with our fixed-size, but concat of same array with itself
+    let aa = concat(a, a);
+    assert_eq(aa.len, 8);
+    assert_eq(a8_get(aa, 0), 1);
+    assert_eq(a8_get(aa, 4), 1);
+    assert_eq(a8_get(aa, 7), 4);
+
+    // Verify: sum(concat(a,b)) = sum(a) + sum(b)
+    let sum_a = a8_get(a, 0) + a8_get(a, 1) + a8_get(a, 2) + a8_get(a, 3);
+    let sum_b = a8_get(b, 0) + a8_get(b, 1) + a8_get(b, 2) + a8_get(b, 3);
+    let mut sum_ab = 0;
+    let mut i = 0;
+    while i < 8 {
+        sum_ab = sum_ab + a8_get(ab, i);
+        i = i + 1;
+    }
+    assert_eq(sum_ab, sum_a + sum_b);
+    print("  test_concat: ok");
+}
+
+// ============================================================================
+// Test 4: Stack (interleave)
+// ============================================================================
+
+@test
+fn test_stack() {
+    let a = a8_from4(10, 20, 30, 40);
+    let b = a8_from4(11, 21, 31, 41);
+
+    let stacked = stack_interleave(a, b);
+    assert_eq(stacked.len, 8);
+    // Interleaved: [10, 11, 20, 21, 30, 31, 40, 41]
+    assert_eq(a8_get(stacked, 0), 10);
+    assert_eq(a8_get(stacked, 1), 11);
+    assert_eq(a8_get(stacked, 2), 20);
+    assert_eq(a8_get(stacked, 3), 21);
+    assert_eq(a8_get(stacked, 4), 30);
+    assert_eq(a8_get(stacked, 5), 31);
+    assert_eq(a8_get(stacked, 6), 40);
+    assert_eq(a8_get(stacked, 7), 41);
+
+    // Even indices = a, odd indices = b
+    assert_eq(a8_get(stacked, 0), a8_get(a, 0));
+    assert_eq(a8_get(stacked, 1), a8_get(b, 0));
+    assert_eq(a8_get(stacked, 6), a8_get(a, 3));
+    assert_eq(a8_get(stacked, 7), a8_get(b, 3));
+    print("  test_stack: ok");
+}
+
+// ============================================================================
+// Test 5: Slicing
+// ============================================================================
+
+@test
+fn test_slice() {
+    let src = a8_from8(10, 20, 30, 40, 50, 60, 70, 80);
+
+    // Slice [2..5) = [30, 40, 50]
+    let s1 = slice_range(src, 2, 3);
+    assert_eq(s1.len, 3);
+    assert_eq(a8_get(s1, 0), 30);
+    assert_eq(a8_get(s1, 1), 40);
+    assert_eq(a8_get(s1, 2), 50);
+
+    // Slice [0..4) = first half
+    let s2 = slice_range(src, 0, 4);
+    assert_eq(a8_get(s2, 0), 10);
+    assert_eq(a8_get(s2, 3), 40);
+
+    // Stride slice: every 2nd element starting at 0 = [10, 30, 50, 70]
+    let s3 = slice_stride(src, 0, 2, 4);
+    assert_eq(a8_get(s3, 0), 10);
+    assert_eq(a8_get(s3, 1), 30);
+    assert_eq(a8_get(s3, 2), 50);
+    assert_eq(a8_get(s3, 3), 70);
+
+    // Stride slice: every 2nd starting at 1 = [20, 40, 60, 80]
+    let s4 = slice_stride(src, 1, 2, 4);
+    assert_eq(a8_get(s4, 0), 20);
+    assert_eq(a8_get(s4, 1), 40);
+    assert_eq(a8_get(s4, 2), 60);
+    assert_eq(a8_get(s4, 3), 80);
+
+    // Stride 3: [10, 40, 70]
+    let s5 = slice_stride(src, 0, 3, 3);
+    assert_eq(a8_get(s5, 0), 10);
+    assert_eq(a8_get(s5, 1), 40);
+    assert_eq(a8_get(s5, 2), 70);
+    print("  test_slice: ok");
+}
+
+// ============================================================================
+// Test 6: Broadcasting
+// ============================================================================
+
+@test
+fn test_broadcast() {
+    // Scalar broadcast
+    let bcast = broadcast_scalar(42, 4);
+    assert_eq(bcast.len, 4);
+    assert_eq(a8_get(bcast, 0), 42);
+    assert_eq(a8_get(bcast, 3), 42);
+
+    // Broadcast add (tensor + scalar)
+    let a = a8_from4(10, 20, 30, 40);
+    let added = broadcast_add(a, 5);
+    assert_eq(a8_get(added, 0), 15);
+    assert_eq(a8_get(added, 3), 45);
+
+    // Broadcast multiply
+    let scaled = broadcast_mul(a, 3);
+    assert_eq(a8_get(scaled, 0), 30);
+    assert_eq(a8_get(scaled, 1), 60);
+    assert_eq(a8_get(scaled, 3), 120);
+
+    // Broadcast add then mul: (a + 5) * 3
+    let composed = broadcast_mul(broadcast_add(a, 5), 3);
+    assert_eq(a8_get(composed, 0), 45);   // (10+5)*3
+    assert_eq(a8_get(composed, 1), 75);   // (20+5)*3
+    assert_eq(a8_get(composed, 3), 135);  // (40+5)*3
+
+    // Broadcast mul by 0 = zeros
+    let zero_scaled = broadcast_mul(a, 0);
+    assert_eq(a8_get(zero_scaled, 0), 0);
+    assert_eq(a8_get(zero_scaled, 3), 0);
+    print("  test_broadcast: ok");
+}
+
+// ============================================================================
+// Test 7: Where / masked operations
+// ============================================================================
+
+@test
+fn test_where_masked() {
+    let cond = a8_from4(1, 0, 1, 0);   // true, false, true, false
+    let a = a8_from4(10, 20, 30, 40);
+    let b = a8_from4(100, 200, 300, 400);
+
+    let result = where_select(cond, a, b);
+    assert_eq(a8_get(result, 0), 10);    // cond=1, take a
+    assert_eq(a8_get(result, 1), 200);   // cond=0, take b
+    assert_eq(a8_get(result, 2), 30);    // cond=1, take a
+    assert_eq(a8_get(result, 3), 400);   // cond=0, take b
+
+    // All true -> take a
+    let all_true = a8_from4(1, 1, 1, 1);
+    let r2 = where_select(all_true, a, b);
+    assert_eq(a8_get(r2, 0), 10);
+    assert_eq(a8_get(r2, 3), 40);
+
+    // Masked fill: replace where mask=1 with -9999
+    let src = a8_from4(5, 10, 15, 20);
+    let mask = a8_from4(0, 1, 0, 1);
+    let filled = masked_fill(src, mask, -9999);
+    assert_eq(a8_get(filled, 0), 5);
+    assert_eq(a8_get(filled, 1), -9999);
+    assert_eq(a8_get(filled, 2), 15);
+    assert_eq(a8_get(filled, 3), -9999);
+
+    // Count nonzero
+    let data = a8_from8(0, 1, 0, 3, 0, 0, 7, 0);
+    assert_eq(count_nonzero(data), 3);
+    print("  test_where_masked: ok");
+}
+
+// ============================================================================
+// Test 8: Clamp
+// ============================================================================
+
+@test
+fn test_clamp() {
+    let data = a8_from8(-50, -10, 0, 5, 10, 50, 100, 200);
+
+    // Clamp to [0, 100]
+    let clamped = clamp(data, 0, 100);
+    assert_eq(a8_get(clamped, 0), 0);    // -50 -> 0
+    assert_eq(a8_get(clamped, 1), 0);    // -10 -> 0
+    assert_eq(a8_get(clamped, 2), 0);    // 0 stays
+    assert_eq(a8_get(clamped, 3), 5);    // 5 stays
+    assert_eq(a8_get(clamped, 4), 10);   // 10 stays
+    assert_eq(a8_get(clamped, 5), 50);   // 50 stays
+    assert_eq(a8_get(clamped, 6), 100);  // 100 stays
+    assert_eq(a8_get(clamped, 7), 100);  // 200 -> 100
+
+    // Clamp to [-5, 5]
+    let tight = clamp(data, -5, 5);
+    assert_eq(a8_get(tight, 0), -5);
+    assert_eq(a8_get(tight, 3), 5);
+    assert_eq(a8_get(tight, 7), 5);
+
+    // Clamp already in range: no change
+    let in_range = a8_from4(3, 5, 7, 9);
+    let unchanged = clamp(in_range, 0, 100);
+    assert_eq(a8_get(unchanged, 0), 3);
+    assert_eq(a8_get(unchanged, 3), 9);
+    print("  test_clamp: ok");
+}
+
+// ============================================================================
+// Test 9: Cumulative operations
+// ============================================================================
+
+@test
+fn test_cumulative() {
+    let data = a8_from4(1, 2, 3, 4);
+
+    // Cumulative sum: [1, 3, 6, 10]
+    let cs = cumsum(data);
+    assert_eq(a8_get(cs, 0), 1);
+    assert_eq(a8_get(cs, 1), 3);
+    assert_eq(a8_get(cs, 2), 6);
+    assert_eq(a8_get(cs, 3), 10);
+
+    // Cumulative product: [1, 2, 6, 24]
+    let cp = cumprod(data);
+    assert_eq(a8_get(cp, 0), 1);
+    assert_eq(a8_get(cp, 1), 2);
+    assert_eq(a8_get(cp, 2), 6);
+    assert_eq(a8_get(cp, 3), 24);
+
+    // Cumulative max on unsorted: [3, 3, 5, 5]
+    let unsorted = a8_from4(3, 1, 5, 2);
+    let cm = cummax(unsorted);
+    assert_eq(a8_get(cm, 0), 3);
+    assert_eq(a8_get(cm, 1), 3);
+    assert_eq(a8_get(cm, 2), 5);
+    assert_eq(a8_get(cm, 3), 5);
+
+    // Cumulative min: [3, 1, 1, 1]
+    let cmin = cummin(unsorted);
+    assert_eq(a8_get(cmin, 0), 3);
+    assert_eq(a8_get(cmin, 1), 1);
+    assert_eq(a8_get(cmin, 2), 1);
+    assert_eq(a8_get(cmin, 3), 1);
+
+    // Property: last element of cumsum = total sum
+    let total = a8_get(data, 0) + a8_get(data, 1) + a8_get(data, 2) + a8_get(data, 3);
+    assert_eq(a8_get(cs, 3), total);
+    print("  test_cumulative: ok");
+}
+
+// ============================================================================
+// Test 10: Top-k
+// ============================================================================
+
+@test
+fn test_topk() {
+    let data = a8_from8(30, 10, 80, 50, 20, 70, 40, 60);
+
+    // Top-3
+    let tk = topk(data, 3);
+    assert_eq(a8_get(tk.values, 0), 80);  // largest
+    assert_eq(a8_get(tk.values, 1), 70);  // 2nd largest
+    assert_eq(a8_get(tk.values, 2), 60);  // 3rd largest
+
+    assert_eq(a8_get(tk.indices, 0), 2);  // index of 80
+    assert_eq(a8_get(tk.indices, 1), 5);  // index of 70
+    assert_eq(a8_get(tk.indices, 2), 7);  // index of 60
+
+    // Top-1 = argmax
+    let tk1 = topk(data, 1);
+    assert_eq(a8_get(tk1.values, 0), 80);
+    assert_eq(a8_get(tk1.indices, 0), 2);
+
+    // Top-4 of sorted descending
+    let sorted_desc = a8_from4(40, 30, 20, 10);
+    let tk4 = topk(sorted_desc, 4);
+    assert_eq(a8_get(tk4.values, 0), 40);
+    assert_eq(a8_get(tk4.values, 1), 30);
+    assert_eq(a8_get(tk4.values, 2), 20);
+    assert_eq(a8_get(tk4.values, 3), 10);
+    print("  test_topk: ok");
+}
+
+// ============================================================================
+// Test 11: One-hot encoding
+// ============================================================================
+
+@test
+fn test_one_hot() {
+    let oh0 = one_hot(0, 4);
+    assert_eq(a8_get(oh0, 0), 1);
+    assert_eq(a8_get(oh0, 1), 0);
+    assert_eq(a8_get(oh0, 2), 0);
+    assert_eq(a8_get(oh0, 3), 0);
+
+    let oh2 = one_hot(2, 4);
+    assert_eq(a8_get(oh2, 0), 0);
+    assert_eq(a8_get(oh2, 2), 1);
+
+    let oh3 = one_hot(3, 5);
+    assert_eq(a8_get(oh3, 3), 1);
+
+    // Sum of one-hot = 1
+    let sum_oh = a8_get(oh2, 0) + a8_get(oh2, 1) + a8_get(oh2, 2) + a8_get(oh2, 3);
+    assert_eq(sum_oh, 1);
+    print("  test_one_hot: ok");
+}
+
+// ============================================================================
+// Test 12: Flip and roll
+// ============================================================================
+
+@test
+fn test_flip_roll() {
+    let data = a8_from4(10, 20, 30, 40);
+
+    // Flip: [40, 30, 20, 10]
+    let flipped = flip(data);
+    assert_eq(a8_get(flipped, 0), 40);
+    assert_eq(a8_get(flipped, 1), 30);
+    assert_eq(a8_get(flipped, 2), 20);
+    assert_eq(a8_get(flipped, 3), 10);
+
+    // Double flip = identity
+    let ff = flip(flip(data));
+    assert_eq(a8_get(ff, 0), 10);
+    assert_eq(a8_get(ff, 3), 40);
+
+    // Roll by 1: [40, 10, 20, 30]
+    let rolled1 = roll(data, 1);
+    assert_eq(a8_get(rolled1, 0), 40);
+    assert_eq(a8_get(rolled1, 1), 10);
+    assert_eq(a8_get(rolled1, 2), 20);
+    assert_eq(a8_get(rolled1, 3), 30);
+
+    // Roll by 2: [30, 40, 10, 20]
+    let rolled2 = roll(data, 2);
+    assert_eq(a8_get(rolled2, 0), 30);
+    assert_eq(a8_get(rolled2, 1), 40);
+    assert_eq(a8_get(rolled2, 2), 10);
+    assert_eq(a8_get(rolled2, 3), 20);
+
+    // Roll by n = identity
+    let rolled4 = roll(data, 4);
+    assert_eq(a8_get(rolled4, 0), 10);
+    assert_eq(a8_get(rolled4, 3), 40);
+    print("  test_flip_roll: ok");
+}
+
+// ============================================================================
+// Test 13: Complex pipeline — gather -> transform -> scatter
+// ============================================================================
+
+@test
+fn test_gather_transform_scatter() {
+    // Source data
+    let src = a8_from8(10, 20, 30, 40, 50, 60, 70, 80);
+
+    // Gather specific indices
+    let gather_idx = a8_from4(1, 3, 5, 7);
+    let gathered = gather(src, gather_idx);
+    // gathered = [20, 40, 60, 80]
+    assert_eq(a8_get(gathered, 0), 20);
+    assert_eq(a8_get(gathered, 3), 80);
+
+    // Transform: double each value
+    let transformed = broadcast_mul(gathered, 2);
+    // transformed = [40, 80, 120, 160]
+    assert_eq(a8_get(transformed, 0), 40);
+    assert_eq(a8_get(transformed, 3), 160);
+
+    // Scatter back to different positions
+    let scatter_idx = a8_from4(0, 2, 4, 6);
+    let result = scatter(transformed, scatter_idx, 8);
+    // result[0]=40, result[2]=80, result[4]=120, result[6]=160, rest=0
+    assert_eq(a8_get(result, 0), 40);
+    assert_eq(a8_get(result, 1), 0);
+    assert_eq(a8_get(result, 2), 80);
+    assert_eq(a8_get(result, 4), 120);
+    assert_eq(a8_get(result, 6), 160);
+
+    // Clamp the result to [0, 100]
+    let clamped = clamp(result, 0, 100);
+    assert_eq(a8_get(clamped, 0), 40);   // within range
+    assert_eq(a8_get(clamped, 2), 80);   // within range
+    assert_eq(a8_get(clamped, 4), 100);  // 120 -> 100
+    assert_eq(a8_get(clamped, 6), 100);  // 160 -> 100
+    print("  test_gather_transform_scatter: ok");
+}
+
+// ============================================================================
+// Test 14: Einsum-like contraction (inner product via gather + sum)
+// ============================================================================
+
+@test
+fn test_contraction() {
+    // Simulate tensor contraction: sum over shared index
+    // A[i,k] * B[k,j] -> C[i,j] for i=j=0, summing over k=0..3
+    // This is just a dot product of row 0 of A with column 0 of B
+    let a_row0 = a8_from4(1, 2, 3, 4);
+    let b_col0 = a8_from4(5, 6, 7, 8);
+
+    // Elementwise multiply then sum
+    let mut dot = 0;
+    let mut k = 0;
+    while k < 4 {
+        dot = dot + a8_get(a_row0, k) * a8_get(b_col0, k);
+        k = k + 1;
+    }
+    // 1*5 + 2*6 + 3*7 + 4*8 = 5+12+21+32 = 70
+    assert_eq(dot, 70);
+
+    // Trace-like contraction: sum of diagonal of outer product
+    // trace(a outer b) = dot(a, b)
+    let a = a8_from4(2, 3, 4, 5);
+    let b = a8_from4(1, 1, 1, 1);
+    let trace_val = a8_get(a, 0) * a8_get(b, 0)
+                  + a8_get(a, 1) * a8_get(b, 1)
+                  + a8_get(a, 2) * a8_get(b, 2)
+                  + a8_get(a, 3) * a8_get(b, 3);
+    assert_eq(trace_val, 14);  // sum of a = 2+3+4+5
+    print("  test_contraction: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_gather();
+    test_scatter();
+    test_concat();
+    test_stack();
+    test_slice();
+    test_broadcast();
+    test_where_masked();
+    test_clamp();
+    test_cumulative();
+    test_topk();
+    test_one_hot();
+    test_flip_roll();
+    test_gather_transform_scatter();
+    test_contraction();
+    print("[OK] 187_interp_tensor_advanced");
+    0
+}

@@ -1,0 +1,32 @@
+// Stack module with implement block
+
+module module_stack;
+
+public type Stack is {
+    data: List<Int>,
+};
+
+public fn stack_new() -> Stack {
+    Stack { data: List.new() }
+}
+
+implement Stack {
+    public fn push(&mut self, val: Int) {
+        self.data.push(val);
+    }
+
+    public fn pop(&mut self) -> Int {
+        match self.data.pop() {
+            Some(v) => v,
+            None => -1,
+        }
+    }
+
+    public fn len(&self) -> Int {
+        self.data.len()
+    }
+
+    public fn is_empty(&self) -> Bool {
+        self.data.len() == 0
+    }
+}

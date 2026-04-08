@@ -1,0 +1,68 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @expected-exit: 0
+
+fn* range_gen(start: Int, end: Int) -> Int {
+    let mut i = start;
+    while (i < end) {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn* squares(n: Int) -> Int {
+    let mut i = 1;
+    while (i <= n) {
+        yield i * i;
+        i = i + 1;
+    }
+}
+
+fn* evens(n: Int) -> Int {
+    let mut i = 0;
+    while (i < n) {
+        yield i * 2;
+        i = i + 1;
+    }
+}
+
+fn main() -> Int {
+    // Test 1: for-in with generator
+    let mut sum = 0;
+    for v in range_gen(1, 6) {
+        sum = sum + v;
+    }
+    print(f"range_sum={sum}");
+    if (sum != 15) { return 1; }
+
+    // Test 2: sum of squares
+    let mut sq_sum = 0;
+    for s in squares(5) {
+        sq_sum = sq_sum + s;
+    }
+    print(f"sq_sum={sq_sum}");
+    if (sq_sum != 55) { return 2; }
+
+    // Test 3: collect generator values into list
+    let mut vals: List<Int> = [];
+    for v in range_gen(10, 15) {
+        vals.push(v);
+    }
+    print(f"vals_len={vals.len()}");
+    if (vals.len() != 5) { return 3; }
+    if (vals[0] != 10) { return 4; }
+    if (vals[4] != 14) { return 5; }
+
+    // Test 4: even numbers
+    let mut even_sum = 0;
+    for e in evens(6) {
+        even_sum = even_sum + e;
+    }
+    print(f"even_sum={even_sum}");
+    // 0+2+4+6+8+10 = 30
+    if (even_sum != 30) { return 6; }
+
+    print("gen_forin: PASS");
+    0
+}

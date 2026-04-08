@@ -1,0 +1,121 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, matrix_chain, dynamic_programming, optimal_parenthesization, dp
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Matrix Chain Multiplication — find the optimal parenthesization
+// that minimizes the total scalar multiplications.
+// Input: dims[0..n] where matrix i has dimensions dims[i] x dims[i+1].
+// Uses DP table m[n*n] where m[i*(n)+j] = min cost to multiply matrices i..j.
+// Maximum chain length: 8 matrices (9 dimension values).
+// DP table size: 8*8 = 64.
+
+fn mc_get(dp: [Int; 64], n: Int, i: Int, j: Int) -> Int {
+    dp[i * n + j]
+}
+
+fn mc_set(dp: [Int; 64], n: Int, i: Int, j: Int, val: Int) {
+    dp[i * n + j] = val;
+}
+
+// Compute minimum multiplication cost for matrices 0..n-1.
+// dims[i] = row count of matrix i; dims[i+1] = col count of matrix i.
+fn matrix_chain_order(dims: [Int; 9], n: Int) -> Int {
+    // dp[i][j] = min cost for multiplying matrix i through matrix j.
+    let mut dp = [0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Single matrices: cost 0 (already set to 0 above).
+    // Fill by increasing chain length.
+    let mut len = 2;
+    while len <= n {
+        let mut i = 0;
+        while i <= n - len {
+            let j = i + len - 1;
+            mc_set(dp, n, i, j, 1000000000);
+            let mut k = i;
+            while k < j {
+                let cost = mc_get(dp, n, i, k)
+                         + mc_get(dp, n, k + 1, j)
+                         + dims[i] * dims[k + 1] * dims[j + 1];
+                if cost < mc_get(dp, n, i, j) {
+                    mc_set(dp, n, i, j, cost);
+                }
+                k = k + 1;
+            }
+            i = i + 1;
+        }
+        len = len + 1;
+    }
+    mc_get(dp, n, 0, n - 1)
+}
+
+fn test_classic_three_matrices() {
+    // A(10x30) B(30x5) C(5x60)
+    // Option1: (AB)C = 10*30*5 + 10*5*60 = 1500 + 3000 = 4500
+    // Option2: A(BC) = 30*5*60 + 10*30*60 = 9000 + 18000 = 27000
+    // Optimal: 4500
+    let mut dims = [10, 30, 5, 60, 0, 0, 0, 0, 0];
+    assert_eq(matrix_chain_order(dims, 3), 4500);
+    print("classic_three_matrices: ok");
+}
+
+fn test_four_matrices() {
+    // A(40x20) B(20x30) C(30x10) D(10x30)
+    // Known optimal: 26000
+    let mut dims = [40, 20, 30, 10, 30, 0, 0, 0, 0];
+    let cost = matrix_chain_order(dims, 4);
+    assert_eq(cost, 26000);
+    print("four_matrices: ok");
+}
+
+fn test_two_matrices() {
+    // A(5x10) B(10x3): only one way, cost = 5*10*3 = 150.
+    let mut dims = [5, 10, 3, 0, 0, 0, 0, 0, 0];
+    assert_eq(matrix_chain_order(dims, 2), 150);
+
+    // A(3x7) B(7x4): cost = 3*7*4 = 84.
+    let mut d2 = [3, 7, 4, 0, 0, 0, 0, 0, 0];
+    assert_eq(matrix_chain_order(d2, 2), 84);
+
+    print("two_matrices: ok");
+}
+
+fn test_single_matrix() {
+    // One matrix: cost = 0.
+    let mut dims = [5, 10, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(matrix_chain_order(dims, 1), 0);
+    print("single_matrix: ok");
+}
+
+fn test_five_matrices() {
+    // A(5x4) B(4x6) C(6x2) D(2x7) E(7x3)
+    // Dimensions: [5,4,6,2,7,3]
+    let mut dims = [5, 4, 6, 2, 7, 3, 0, 0, 0];
+    let cost = matrix_chain_order(dims, 5);
+    // Optimal parenthesization minimizes cost.
+    // Verify it is less than naive left-to-right:
+    // ((((AB)C)D)E) = 5*4*6 + 5*6*2 + 5*2*7 + 5*7*3 = 120+60+70+105 = 355
+    assert(cost <= 355);
+    // Also verify strictly positive.
+    assert(cost > 0);
+    print("five_matrices: ok");
+}
+
+fn main() -> Int {
+    test_two_matrices();
+    test_single_matrix();
+    test_classic_three_matrices();
+    test_four_matrices();
+    test_five_matrices();
+    print("[OK] 545_interp_matrix_chain");
+    0
+}

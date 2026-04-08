@@ -1,0 +1,50 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: typeof, reflection, e2e
+// @description: Test typeof() expression for runtime type inspection
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: typeof on Int literal
+    let x = 42;
+    if typeof(x) != "Int" {
+        print(f"FAIL 1: typeof(Int) = '{typeof(x)}'");
+        f = f + 1;
+    } else {
+        print("  typeof_int: OK");
+    }
+
+    // Test 2: typeof on Text
+    let s = "hello";
+    if typeof(s) != "Text" {
+        print(f"FAIL 2: typeof(Text) = '{typeof(s)}'");
+        f = f + 1;
+    } else {
+        print("  typeof_text: OK");
+    }
+
+    // Test 3: typeof on Bool
+    let b = true;
+    if typeof(b) != "Bool" {
+        print(f"FAIL 3: typeof(Bool) = '{typeof(b)}'");
+        f = f + 1;
+    } else {
+        print("  typeof_bool: OK");
+    }
+
+    // Test 4: typeof on Float
+    let pi = 3.14;
+    if typeof(pi) != "Float" {
+        print(f"FAIL 4: typeof(Float) = '{typeof(pi)}'");
+        f = f + 1;
+    } else {
+        print("  typeof_float: OK");
+    }
+
+    if f == 0 {
+        print("All typeof tests passed");
+    }
+    f
+}

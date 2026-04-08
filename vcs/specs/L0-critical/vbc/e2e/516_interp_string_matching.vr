@@ -1,0 +1,166 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, string_matching, brute_force, kmp, pattern_search
+// @timeout: 15000
+// @expected-exit: 0
+//
+// String matching: brute-force and KMP (Knuth-Morris-Pratt).
+// Strings are encoded as integer arrays (ASCII values).
+// Returns index of first match or -1.
+// All arrays are [Int; 32].
+
+// Brute-force: find pattern[0..m-1] in text[0..n-1].
+// Returns first occurrence index, or -1.
+fn brute_force_search(text: [Int; 32], n: Int, pattern: [Int; 32], m: Int) -> Int {
+    if m == 0 { return 0; }
+    let mut i = 0;
+    while i <= n - m {
+        let mut j = 0;
+        while j < m && text[i + j] == pattern[j] {
+            j = j + 1;
+        }
+        if j == m { return i; }
+        i = i + 1;
+    }
+    0 - 1
+}
+
+// Count all occurrences of pattern in text.
+fn count_occurrences(text: [Int; 32], n: Int, pattern: [Int; 32], m: Int) -> Int {
+    if m == 0 { return 0; }
+    let mut cnt = 0;
+    let mut i = 0;
+    while i <= n - m {
+        let mut j = 0;
+        while j < m && text[i + j] == pattern[j] {
+            j = j + 1;
+        }
+        if j == m { cnt = cnt + 1; }
+        i = i + 1;
+    }
+    cnt
+}
+
+// Build KMP failure function (partial match table) for pattern[0..m-1].
+fn build_failure(pattern: [Int; 32], m: Int, fail: [Int; 32]) {
+    fail[0] = 0;
+    let mut len = 0;
+    let mut i = 1;
+    while i < m {
+        while len > 0 && pattern[i] != pattern[len] {
+            len = fail[len - 1];
+        }
+        if pattern[i] == pattern[len] {
+            len = len + 1;
+        } else {
+            len = 0;
+        }
+        fail[i] = len;
+        i = i + 1;
+    }
+}
+
+// KMP search: returns first occurrence index or -1.
+fn kmp_search(text: [Int; 32], n: Int, pattern: [Int; 32], m: Int, fail: [Int; 32]) -> Int {
+    if m == 0 { return 0; }
+    let mut j = 0;
+    let mut i = 0;
+    while i < n {
+        while j > 0 && text[i] != pattern[j] {
+            j = fail[j - 1];
+        }
+        if text[i] == pattern[j] {
+            j = j + 1;
+        }
+        if j == m {
+            return i - m + 1;
+        }
+        i = i + 1;
+    }
+    0 - 1
+}
+
+fn test_basic_search() {
+    // text = "hello world" as ASCII: h=104 e=101 l=108 l=108 o=111 ' '=32 w=119 o=111 r=114 l=108 d=100
+    let mut text = [104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // pattern = "world" = 119 111 114 108 100
+    let mut pat = [119, 111, 114, 108, 100,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let idx = brute_force_search(text, 11, pat, 5);
+    assert_eq(idx, 6);  // "world" starts at index 6
+
+    // pattern = "llo" = 108 108 111
+    let mut pat2 = [108, 108, 111,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(brute_force_search(text, 11, pat2, 3), 2);
+    print("basic_search: ok");
+}
+
+fn test_no_match() {
+    let mut text = [1, 2, 3, 4, 5, 6, 7, 8,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pat  = [5, 6, 9,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(brute_force_search(text, 8, pat, 3), 0 - 1);
+    print("no_match: ok");
+}
+
+fn test_kmp_matches_brute_force() {
+    // "aababcabcabc" encoded as: 1 1 2 1 2 3 1 2 3 1 2 3
+    let mut text = [1, 1, 2, 1, 2, 3, 1, 2, 3, 1, 2, 3,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // pattern "abc" = 1 2 3
+    let mut pat  = [1, 2, 3,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut fail = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_failure(pat, 3, fail);
+    let bf  = brute_force_search(text, 12, pat, 3);
+    let kmp = kmp_search(text, 12, pat, 3, fail);
+    assert_eq(bf, kmp);
+    assert_eq(bf, 3);  // first "abc" at index 3
+    print("kmp_matches_brute: ok");
+}
+
+fn test_count_occurrences() {
+    // text: [1,2,1,2,1,2] contains pattern [1,2] three times at 0,2,4
+    let mut text = [1, 2, 1, 2, 1, 2,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pat  = [1, 2,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_occurrences(text, 6, pat, 2), 3);
+    // Single-char pattern
+    let mut pat2 = [1,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(count_occurrences(text, 6, pat2, 1), 3);
+    print("count_occurrences: ok");
+}
+
+fn test_failure_function() {
+    // pattern "ababcabab" -> failure = [0,0,1,2,0,1,2,3,4]
+    let mut pat = [1, 2, 1, 2, 3, 1, 2, 1, 2,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut fail = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_failure(pat, 9, fail);
+    assert_eq(fail[0], 0);
+    assert_eq(fail[1], 0);
+    assert_eq(fail[2], 1);
+    assert_eq(fail[3], 2);
+    assert_eq(fail[4], 0);
+    assert_eq(fail[5], 1);
+    assert_eq(fail[6], 2);
+    assert_eq(fail[7], 3);
+    assert_eq(fail[8], 4);
+    print("failure_function: ok");
+}
+
+fn main() -> Int {
+    test_basic_search();
+    test_no_match();
+    test_kmp_matches_brute_force();
+    test_count_occurrences();
+    test_failure_function();
+    print("[OK] 516_interp_string_matching");
+    0
+}

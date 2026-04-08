@@ -1,0 +1,149 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: generics, type-params, polymorphism, higher-order
+// @description: Advanced generic function patterns
+
+type Maybe<T> is None | Some(T);
+type Pair<A, B> is { first: A, second: B };
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+fn map_maybe<T, U>(m: Maybe<T>, f: fn(T) -> U) -> Maybe<U> {
+    match m {
+        None => None,
+        Some(v) => Some(f(v)),
+    }
+}
+
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        None => default,
+        Some(v) => v,
+    }
+}
+
+fn fold_list(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let len = items.len();
+    let mut i = 0;
+    while (i < len) {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn map_list(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = [];
+    let len = items.len();
+    let mut i = 0;
+    while (i < len) {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: identity function
+    let a = identity(42);
+    if (a != 42) {
+        print(f"FAIL test1a: got {a}");
+        return 1;
+    }
+    let b = identity("hello");
+    if (b != "hello") {
+        print(f"FAIL test1b");
+        return 1;
+    }
+
+    // Test 2: pair swap
+    let p = Pair { first: 1, second: 2 };
+    let swapped = swap(p);
+    if (swapped.first != 2 || swapped.second != 1) {
+        print(f"FAIL test2: got ({swapped.first},{swapped.second})");
+        return 1;
+    }
+
+    // Test 3: map_maybe
+    let some_val = Some(10);
+    let doubled = map_maybe(some_val, |x: Int| -> Int { x * 2 });
+    match doubled {
+        Some(v) => {
+            if (v != 20) {
+                print(f"FAIL test3a: got {v}");
+                return 1;
+            }
+        }
+        None => {
+            print("FAIL test3a: got None");
+            return 1;
+        }
+    };
+
+    let none_val: Maybe<Int> = None;
+    let mapped_none = map_maybe(none_val, |x: Int| -> Int { x * 2 });
+    match mapped_none {
+        Some(_) => {
+            print("FAIL test3b: should be None");
+            return 1;
+        }
+        None => {}
+    };
+
+    // Test 4: unwrap_or
+    let v1 = unwrap_or(Some(42), 0);
+    if (v1 != 42) {
+        print(f"FAIL test4a: got {v1}");
+        return 1;
+    }
+    let v2 = unwrap_or(None, 99);
+    if (v2 != 99) {
+        print(f"FAIL test4b: got {v2}");
+        return 1;
+    }
+
+    // Test 5: fold_list
+    let nums = [1, 2, 3, 4, 5];
+    let sum = fold_list(nums, 0, |acc: Int, x: Int| -> Int { acc + x });
+    if (sum != 15) {
+        print(f"FAIL test5a: sum={sum}");
+        return 1;
+    }
+    let product = fold_list(nums, 1, |acc: Int, x: Int| -> Int { acc * x });
+    if (product != 120) {
+        print(f"FAIL test5b: product={product}");
+        return 1;
+    }
+
+    // Test 6: map_list
+    let doubled_list = map_list(nums, |x: Int| -> Int { x * 2 });
+    if (doubled_list.len() != 5) {
+        print(f"FAIL test6a: len={doubled_list.len()}");
+        return 1;
+    }
+    if (doubled_list[0] != 2 || doubled_list[4] != 10) {
+        print(f"FAIL test6b");
+        return 1;
+    }
+
+    // Test 7: composing generic operations
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let squares = map_list(data, |x: Int| -> Int { x * x });
+    let sum_of_squares = fold_list(squares, 0, |acc: Int, x: Int| -> Int { acc + x });
+    // 1+4+9+16+25+36+49+64+81+100 = 385
+    if (sum_of_squares != 385) {
+        print(f"FAIL test7: sum_of_squares={sum_of_squares}");
+        return 1;
+    }
+
+    print("998_generic_functions_advanced: PASS");
+    0
+}

@@ -1,0 +1,136 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: while, loop, break, continue, nested-loops
+// @description: Test while loop patterns including break/continue
+
+fn test_basic_while() -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 10 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    if sum != 55 {
+        print(f"FAIL basic_while: sum={sum}, expected 55");
+        return 1;
+    }
+    print("  basic_while: OK");
+    0
+}
+
+fn test_while_break() -> Int {
+    let mut i = 0;
+    let mut last = 0;
+    while i < 100 {
+        if i == 7 {
+            break;
+        }
+        last = i;
+        i = i + 1;
+    }
+    if last != 6 {
+        print(f"FAIL while_break: last={last}, expected 6");
+        return 1;
+    }
+    print("  while_break: OK");
+    0
+}
+
+fn test_while_continue() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 10 {
+        i = i + 1;
+        if i % 2 == 0 {
+            continue;
+        }
+        sum = sum + i;
+    }
+    // Sum of odd numbers 1-9: 1+3+5+7+9 = 25
+    if sum != 25 {
+        print(f"FAIL while_continue: sum={sum}, expected 25");
+        return 1;
+    }
+    print("  while_continue: OK");
+    0
+}
+
+fn test_nested_while() -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 5 {
+        let mut j = 0;
+        while j < 5 {
+            if i == j {
+                count = count + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Diagonal: (0,0), (1,1), (2,2), (3,3), (4,4) = 5
+    if count != 5 {
+        print(f"FAIL nested_while: count={count}, expected 5");
+        return 1;
+    }
+    print("  nested_while: OK");
+    0
+}
+
+fn test_while_accumulate() -> Int {
+    // Compute factorial of 10
+    let mut result = 1;
+    let mut n = 10;
+    while n > 1 {
+        result = result * n;
+        n = n - 1;
+    }
+    if result != 3628800 {
+        print(f"FAIL factorial: {result}, expected 3628800");
+        return 1;
+    }
+    print("  while_accumulate: OK");
+    0
+}
+
+fn test_convergence() -> Int {
+    // Approximate sqrt(2) using Newton's method with integers
+    // x_{n+1} = (x_n + 2/x_n) / 2
+    // Using scaled integers (x1000)
+    let mut x = 2000; // 2.0 * 1000
+    let mut iterations = 0;
+    while iterations < 20 {
+        let new_x = (x + 2000000 / x) / 2;
+        if new_x == x {
+            break;
+        }
+        x = new_x;
+        iterations = iterations + 1;
+    }
+    // sqrt(2) ≈ 1.414, so x ≈ 1414
+    if x < 1413 || x > 1415 {
+        print(f"FAIL convergence: x={x}, expected ~1414");
+        return 1;
+    }
+    print("  convergence: OK");
+    0
+}
+
+fn main() -> Int {
+    print("While Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_while();
+    failures = failures + test_while_break();
+    failures = failures + test_while_continue();
+    failures = failures + test_nested_while();
+    failures = failures + test_while_accumulate();
+    failures = failures + test_convergence();
+
+    if failures == 0 {
+        print("All while pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

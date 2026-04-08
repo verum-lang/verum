@@ -1,0 +1,292 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, closures, composition, currying, higher-order
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT advanced closure patterns - closure returning closure, composition, currying, state via records
+
+// === Closure factories ===
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * n }
+}
+
+fn make_power_of_2() -> fn(Int) -> Int {
+    // Compute 2^n iteratively
+    |n: Int| -> Int {
+        let mut result = 1;
+        let mut i = 0;
+        while i < n {
+            result = result * 2;
+            i = i + 1;
+        }
+        result
+    }
+}
+
+// === Closure composition ===
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn compose3(f: fn(Int) -> Int, g: fn(Int) -> Int, h: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(h(x))) }
+}
+
+// === Currying: multi-argument functions as nested closures ===
+
+// curry_add(a)(b) = a + b
+fn curry_add(a: Int) -> fn(Int) -> Int {
+    |b: Int| -> Int { a + b }
+}
+
+// curry_mul(a)(b) = a * b
+fn curry_mul(a: Int) -> fn(Int) -> Int {
+    |b: Int| -> Int { a * b }
+}
+
+// curry_linear(a)(b)(x) = a*x + b  (via nested closures)
+fn curry_linear(a: Int) -> fn(Int) -> fn(Int) -> Int {
+    |b: Int| -> fn(Int) -> Int {
+        |x: Int| -> Int { a * x + b }
+    }
+}
+
+// === Higher-order combinators ===
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn apply_n(f: fn(Int) -> Int, n: Int, x: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+// Fold over range [start, end) with accumulator
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+// Map+sum over range
+fn map_sum(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
+    let mut total = 0;
+    let mut i = start;
+    while i < end {
+        total = total + f(i);
+        i = i + 1;
+    }
+    total
+}
+
+// Filter-count in range
+fn count_where(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut cnt = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) { cnt = cnt + 1; }
+        i = i + 1;
+    }
+    cnt
+}
+
+// === State mutation via records ===
+
+type Counter is { value: Int, step: Int };
+
+fn counter_new(step: Int) -> Counter {
+    Counter { value: 0, step: step }
+}
+
+fn counter_tick(c: Counter) -> Counter {
+    Counter { value: c.value + c.step, step: c.step }
+}
+
+fn counter_tick_n(c: Counter, n: Int) -> Counter {
+    let mut cc = c;
+    let mut i = 0;
+    while i < n {
+        cc = counter_tick(cc);
+        i = i + 1;
+    }
+    cc
+}
+
+// Apply a closure to transform counter value
+fn counter_map(c: Counter, f: fn(Int) -> Int) -> Counter {
+    Counter { value: f(c.value), step: c.step }
+}
+
+// === Pipeline builder pattern ===
+
+fn pipeline2(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    g(f(x))
+}
+
+fn pipeline3(f: fn(Int) -> Int, g: fn(Int) -> Int, h: fn(Int) -> Int, x: Int) -> Int {
+    h(g(f(x)))
+}
+
+// === Predicate combinators ===
+
+fn both(p: fn(Int) -> Bool, q: fn(Int) -> Bool) -> fn(Int) -> Bool {
+    |x: Int| -> Bool { p(x) && q(x) }
+}
+
+fn either(p: fn(Int) -> Bool, q: fn(Int) -> Bool) -> fn(Int) -> Bool {
+    |x: Int| -> Bool { p(x) || q(x) }
+}
+
+fn negate(p: fn(Int) -> Bool) -> fn(Int) -> Bool {
+    |x: Int| -> Bool { !p(x) }
+}
+
+fn main() -> Int {
+    // === Basic closure factories ===
+    let add3 = make_adder(3);
+    let mul5 = make_multiplier(5);
+    assert_eq(add3(10), 13);
+    assert_eq(mul5(10), 50);
+    assert_eq(add3(mul5(2)), 13);  // 5*2=10, 10+3=13
+
+    // === Closure composition ===
+    let add3_then_mul5 = compose(mul5, add3);  // mul5(add3(x))
+    assert_eq(add3_then_mul5(7), 50);  // (7+3)*5 = 50
+
+    let mul5_then_add3 = compose(add3, mul5);  // add3(mul5(x))
+    assert_eq(mul5_then_add3(7), 38);  // 7*5+3 = 38
+
+    // Triple composition
+    let sub1 = make_adder(0 - 1);
+    let triple = compose3(sub1, mul5, add3);  // sub1(mul5(add3(x)))
+    assert_eq(triple(10), 64);  // (10+3)*5-1 = 64
+
+    // Self-composition: double, double again = *4
+    let double = make_multiplier(2);
+    let quad = compose(double, double);
+    assert_eq(quad(10), 40);
+
+    // === Currying ===
+    let add_10 = curry_add(10);
+    assert_eq(add_10(5), 15);
+    assert_eq(add_10(0), 10);
+
+    let mul_7 = curry_mul(7);
+    assert_eq(mul_7(6), 42);
+    assert_eq(mul_7(0), 0);
+
+    // Nested currying: linear function y = 3x + 7
+    let linear_3 = curry_linear(3);
+    let line_3_7 = linear_3(7);
+    assert_eq(line_3_7(0), 7);
+    assert_eq(line_3_7(1), 10);
+    assert_eq(line_3_7(10), 37);
+
+    // Different line: y = 2x + 100
+    let line_2_100 = curry_linear(2)(100);
+    assert_eq(line_2_100(0), 100);
+    assert_eq(line_2_100(50), 200);
+
+    // === apply_twice and apply_n ===
+    assert_eq(apply_twice(double, 3), 12);  // 3->6->12
+    assert_eq(apply_twice(add3, 10), 16);  // 10->13->16
+
+    assert_eq(apply_n(double, 0, 5), 5);
+    assert_eq(apply_n(double, 1, 5), 10);
+    assert_eq(apply_n(double, 5, 1), 32);  // 1->2->4->8->16->32
+
+    let pow2 = make_power_of_2();
+    assert_eq(pow2(0), 1);
+    assert_eq(pow2(1), 2);
+    assert_eq(pow2(8), 256);
+    assert_eq(pow2(10), 1024);
+
+    // === fold_range ===
+    // Sum 0..10
+    let sum_fn = |acc: Int, x: Int| -> Int { acc + x };
+    assert_eq(fold_range(0, 10, 0, sum_fn), 45);
+
+    // Factorial via fold: 1*2*3*4*5
+    let prod_fn = |acc: Int, x: Int| -> Int { acc * x };
+    assert_eq(fold_range(1, 6, 1, prod_fn), 120);
+
+    // Collect max
+    let max_fn = |acc: Int, x: Int| -> Int { if x > acc { x } else { acc } };
+    assert_eq(fold_range(0, 10, 0, max_fn), 9);
+
+    // === map_sum ===
+    let sq = |x: Int| -> Int { x * x };
+    assert_eq(map_sum(1, 5, sq), 30);  // 1+4+9+16
+
+    let id = |x: Int| -> Int { x };
+    assert_eq(map_sum(1, 101, id), 5050);  // sum 1..100
+
+    // === count_where ===
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    assert_eq(count_where(0, 20, is_even), 10);
+
+    let is_mul3 = |x: Int| -> Bool { x % 3 == 0 };
+    assert_eq(count_where(1, 30, is_mul3), 9);  // 3,6,...,27
+
+    // === Predicate combinators ===
+    let gt5 = |x: Int| -> Bool { x > 5 };
+    let lt15 = |x: Int| -> Bool { x < 15 };
+    let in_range = both(gt5, lt15);  // 5 < x < 15
+    assert(in_range(10));
+    assert(!in_range(5));
+    assert(!in_range(15));
+    assert_eq(count_where(0, 20, in_range), 9);  // 6,7,8,...,14
+
+    let outside = either(negate(gt5), negate(lt15));  // x <= 5 || x >= 15
+    assert(outside(3));
+    assert(outside(17));
+    assert(!outside(10));
+    assert_eq(count_where(0, 20, outside), 11);  // 0-5 (6) + 15-19 (5)
+
+    // === State via records ===
+    let c1 = counter_new(3);
+    assert_eq(c1.value, 0);
+    assert_eq(c1.step, 3);
+
+    let c2 = counter_tick(c1);
+    assert_eq(c2.value, 3);
+
+    let c3 = counter_tick_n(c1, 10);
+    assert_eq(c3.value, 30);
+
+    let c4 = counter_map(c3, |v| v * 2);
+    assert_eq(c4.value, 60);
+    assert_eq(c4.step, 3);  // step preserved
+
+    // === Pipeline patterns ===
+    let result = pipeline2(add3, mul5, 10);
+    assert_eq(result, 65);  // (10+3)*5
+
+    let result2 = pipeline3(add3, mul5, sub1, 10);
+    assert_eq(result2, 64);  // ((10+3)*5)-1
+
+    // === Composed predicates with count ===
+    let div2 = |x: Int| -> Bool { x % 2 == 0 };
+    let div3 = |x: Int| -> Bool { x % 3 == 0 };
+    let div6 = both(div2, div3);
+    assert_eq(count_where(1, 31, div6), 5);  // 6,12,18,24,30
+
+    0
+}

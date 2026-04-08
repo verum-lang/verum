@@ -1,0 +1,39 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "hello world";
+    let n = "world";
+
+    let self_bytes = s.as_bytes();
+    let needle_bytes = n.as_bytes();
+
+    // Compare bytes at position 6
+    let a = self_bytes[6];
+    let b = needle_bytes[0];
+    print(f"a={a} b={b}");
+    if a == b {
+        print("match at 6,0");
+    } else {
+        print("no match at 6,0");
+    }
+
+    // Try simple loop over 1 element
+    let mut found = true;
+    for j in range(0, 1) {
+        let x = self_bytes[6 + j];
+        let y = needle_bytes[j];
+        print(f"j={j} x={x} y={y}");
+        if x != y {
+            found = false;
+        }
+    }
+    if found {
+        print("found after 1-loop");
+    } else {
+        print("not found after 1-loop");
+    }
+
+    0
+}

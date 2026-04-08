@@ -1,0 +1,459 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, struct, layout, alignment, unsafe
+// @description: Tests C struct memory layout, padding, and alignment
+
+// Type Definitions (must come first)
+type c_char is i8;
+type c_int is i32;
+type c_uint is u32;
+type c_float is f32;
+type c_double is f64;
+type c_size_t is usize;
+type c_void is ();
+
+/// ============================================================
+/// C STRUCT MEMORY LAYOUT
+/// ============================================================
+///
+/// Verum structs with @repr(C) follow C ABI layout rules including:
+/// - Natural alignment of fields
+/// - Padding between fields for alignment
+/// - Struct size rounded up to alignment boundary
+
+// ------------------------------------------------------------
+// Basic C Layout Rules
+// ------------------------------------------------------------
+
+/// Simple struct - no padding needed
+@repr(C)
+type TwoInts is {
+    a: c_int,    // offset 0, size 4
+    b: c_int,    // offset 4, size 4
+};
+
+const _: () = {
+    static_assert(TwoInts.size == 8);
+    static_assert(TwoInts.alignment == 4);
+    static_assert(offset_of(TwoInts, a) == 0);
+    static_assert(offset_of(TwoInts, b) == 4);
+};
+
+/// Struct with padding between fields
+@repr(C)
+type CharAndInt is {
+    c: c_char,   // offset 0, size 1
+    // 3 bytes padding
+    i: c_int,    // offset 4, size 4
+};
+
+const _: () = {
+    static_assert(CharAndInt.size == 8);
+    static_assert(CharAndInt.alignment == 4);
+    static_assert(offset_of(CharAndInt, c) == 0);
+    static_assert(offset_of(CharAndInt, i) == 4);
+};
+
+/// Struct with trailing padding
+@repr(C)
+type IntAndChar is {
+    i: c_int,    // offset 0, size 4
+    c: c_char,   // offset 4, size 1
+    // 3 bytes trailing padding to reach alignment multiple
+};
+
+const _: () = {
+    static_assert(IntAndChar.size == 8);
+    static_assert(IntAndChar.alignment == 4);
+};
+
+/// Complex padding example
+@repr(C)
+type ComplexPadding is {
+    a: c_char,     // offset 0, size 1
+    // 7 bytes padding for double alignment
+    b: c_double,   // offset 8, size 8
+    c: c_char,     // offset 16, size 1
+    // 3 bytes padding for int alignment
+    d: c_int,      // offset 20, size 4
+    e: c_char,     // offset 24, size 1
+    // 7 bytes trailing padding
+};
+
+const _: () = {
+    static_assert(ComplexPadding.size == 32);
+    static_assert(ComplexPadding.alignment == 8);
+};
+
+// ------------------------------------------------------------
+// Packed Structs
+// ------------------------------------------------------------
+
+/// Packed struct - no padding at all
+@repr(C, packed)
+type PackedStruct is {
+    a: c_char,     // offset 0, size 1
+    b: c_int,      // offset 1, size 4 (unaligned!)
+    c: c_char,     // offset 5, size 1
+    d: c_double,   // offset 6, size 8 (unaligned!)
+};
+
+const _: () = {
+    static_assert(PackedStruct.size == 14);
+    static_assert(PackedStruct.alignment == 1);
+};
+
+/// Packed with minimum alignment
+@repr(C, packed(2))
+type PackedAlign2 is {
+    a: c_char,     // offset 0, size 1
+    // 1 byte padding for 2-byte alignment
+    b: c_int,      // offset 2, size 4
+    c: c_char,     // offset 6, size 1
+    // 1 byte padding
+    d: c_double,   // offset 8, size 8
+};
+
+const _: () = {
+    static_assert(PackedAlign2.size == 16);
+    static_assert(PackedAlign2.alignment == 2);
+};
+
+/// Packed with 4-byte alignment
+@repr(C, packed(4))
+type PackedAlign4 is {
+    a: c_char,     // offset 0, size 1
+    // 3 bytes padding
+    b: c_double,   // offset 4, size 8 (aligned to 4, not 8)
+};
+
+// ------------------------------------------------------------
+// Explicit Alignment
+// ------------------------------------------------------------
+
+/// Force higher alignment
+@repr(C, align(16))
+type AlignedTo16 is {
+    value: c_double,   // 8 bytes
+    // 8 bytes padding to reach 16
+};
+
+const _: () = {
+    static_assert(AlignedTo16.size == 16);
+    static_assert(AlignedTo16.alignment == 16);
+};
+
+/// SIMD-aligned structure
+@repr(C, align(32))
+type SimdAligned is {
+    values: [c_float; 8],  // 32 bytes, aligned to 32
+};
+
+const _: () = {
+    static_assert(SimdAligned.size == 32);
+    static_assert(SimdAligned.alignment == 32);
+};
+
+/// Cache-line aligned
+@repr(C, align(64))
+type CacheLineAligned is {
+    data: [c_char; 64],
+};
+
+const _: () = {
+    static_assert(CacheLineAligned.size == 64);
+    static_assert(CacheLineAligned.alignment == 64);
+};
+
+// ------------------------------------------------------------
+// Nested Structs
+// ------------------------------------------------------------
+
+/// Inner struct
+@repr(C)
+type Inner is {
+    x: c_int,
+    y: c_int,
+};
+
+/// Outer struct containing inner
+@repr(C)
+type Outer is {
+    a: c_char,
+    // 3 bytes padding for Inner alignment
+    inner: Inner,   // starts at offset 4
+    b: c_char,
+    // 3 bytes trailing padding
+};
+
+const _: () = {
+    static_assert(Outer.size == 16);
+    static_assert(offset_of(Outer, a) == 0);
+    static_assert(offset_of(Outer, inner) == 4);
+    static_assert(offset_of(Outer, b) == 12);
+};
+
+/// Deeply nested
+@repr(C)
+type Point3D is {
+    x: c_double,
+    y: c_double,
+    z: c_double,
+};
+
+@repr(C)
+type Box3D is {
+    min: Point3D,
+    max: Point3D,
+};
+
+const _: () = {
+    static_assert(Point3D.size == 24);
+    static_assert(Box3D.size == 48);
+};
+
+// ------------------------------------------------------------
+// Arrays in Structs
+// ------------------------------------------------------------
+
+/// Fixed-size array field
+@repr(C)
+type WithArray is {
+    count: c_int,
+    // No padding - array of chars has align 1
+    data: [c_char; 16],
+};
+
+const _: () = {
+    static_assert(WithArray.size == 20);
+};
+
+/// Array with alignment requirements
+@repr(C)
+type WithAlignedArray is {
+    count: c_int,
+    // No padding - already aligned
+    values: [c_int; 4],
+};
+
+const _: () = {
+    static_assert(WithAlignedArray.size == 20);
+    static_assert(offset_of(WithAlignedArray, values) == 4);
+};
+
+/// Array of structs
+@repr(C)
+type ArrayOfPoints is {
+    points: [Inner; 3],
+    count: c_int,
+};
+
+const _: () = {
+    static_assert(ArrayOfPoints.size == 28);
+};
+
+// ------------------------------------------------------------
+// Pointers in Structs
+// ------------------------------------------------------------
+
+/// Struct with pointer fields
+@repr(C)
+type WithPointers is {
+    data: *mut c_void,     // 8 bytes on 64-bit
+    callback: *const c_void,
+    user_data: *mut c_void,
+};
+
+const _: () = {
+    static_assert(WithPointers.size == 24);
+    static_assert(WithPointers.alignment == 8);
+};
+
+/// Pointer before small field
+@repr(C)
+type PointerAndChar is {
+    ptr: *const c_void,   // offset 0, size 8
+    flag: c_char,         // offset 8, size 1
+    // 7 bytes trailing padding
+};
+
+const _: () = {
+    static_assert(PointerAndChar.size == 16);
+};
+
+// ------------------------------------------------------------
+// Unions
+// ------------------------------------------------------------
+
+/// Union takes size of largest member
+@repr(C)
+type IntOrDouble is union {
+    i: c_int,      // 4 bytes
+    d: c_double,   // 8 bytes
+};
+
+const _: () = {
+    static_assert(IntOrDouble.size == 8);
+    static_assert(IntOrDouble.alignment == 8);
+};
+
+/// Union with array
+@repr(C)
+type DataUnion is union {
+    bytes: [c_char; 16],
+    ints: [c_int; 4],
+    doubles: [c_double; 2],
+};
+
+const _: () = {
+    static_assert(DataUnion.size == 16);
+    static_assert(DataUnion.alignment == 8);
+};
+
+// ------------------------------------------------------------
+// Bit Fields (Manual Implementation)
+// ------------------------------------------------------------
+
+/// Manual bit field layout
+@repr(C)
+type BitFields is {
+    packed: c_uint,  // Contains multiple fields
+};
+
+implement BitFields {
+    const FLAG_A_SHIFT: c_uint = 0;
+    const FLAG_A_MASK: c_uint = 0x1;
+
+    const FLAG_B_SHIFT: c_uint = 1;
+    const FLAG_B_MASK: c_uint = 0x2;
+
+    const VALUE_SHIFT: c_uint = 2;
+    const VALUE_MASK: c_uint = 0x3FC;  // 8 bits
+
+    const RESERVED_SHIFT: c_uint = 10;
+    const RESERVED_MASK: c_uint = 0xFFFFFC00;
+
+    fn get_flag_a(&self) -> Bool {
+        (self.packed & Self.FLAG_A_MASK) != 0
+    }
+
+    fn set_flag_a(&mut self, value: Bool) {
+        if value {
+            self.packed |= Self.FLAG_A_MASK;
+        } else {
+            self.packed &= (0xFFFFFFFF ^ Self.FLAG_A_MASK);
+        }
+    }
+
+    fn get_value(&self) -> u8 {
+        ((self.packed & Self.VALUE_MASK) >> Self.VALUE_SHIFT) as u8
+    }
+
+    fn set_value(&mut self, value: u8) {
+        self.packed = (self.packed & !Self.VALUE_MASK) |
+            ((value as c_uint) << Self.VALUE_SHIFT);
+    }
+}
+
+// ------------------------------------------------------------
+// Flexible Array Member (FAM)
+// ------------------------------------------------------------
+
+/// Header for flexible array member pattern
+@repr(C)
+type FlexHeader is {
+    magic: c_uint,
+    version: c_uint,
+    count: c_size_t,
+    // Flexible array follows: data: [T; 0]
+};
+
+implement FlexHeader {
+    /// Calculate allocation size for n elements
+    fn alloc_size<T>(count: usize) -> usize {
+        FlexHeader.size + count * T.size
+    }
+
+    /// Get pointer to flexible array
+    unsafe fn get_data<T>(&self) -> *const T {
+        (self as *const FlexHeader).add(1) as *const T
+    }
+
+    unsafe fn get_data_mut<T>(&mut self) -> *mut T {
+        (self as *mut FlexHeader).add(1) as *mut T
+    }
+}
+
+// ------------------------------------------------------------
+// FFI Interop Examples
+// ------------------------------------------------------------
+
+ffi layout_lib {
+    @extern("C")
+    fn accept_point(p: Point3D);
+
+    @extern("C")
+    fn accept_point_ptr(p: *const Point3D);
+
+    @extern("C")
+    fn return_point() -> Point3D;
+
+    @extern("C")
+    fn modify_point(p: *mut Point3D);
+
+    @extern("C")
+    fn accept_box(b: *const Box3D);
+}
+
+/// Safe wrapper
+fn pass_to_c(p: &Point3D) {
+    // SAFETY: Point3D has C-compatible layout
+    unsafe { layout_lib.accept_point_ptr(p as *const Point3D); }
+}
+
+// ------------------------------------------------------------
+// Layout Compatibility Verification
+// ------------------------------------------------------------
+
+/// Ensure two types have compatible layout
+fn verify_layout_compat<A, B>() {
+    static_assert(A.size == B.size);
+    static_assert(A.alignment == B.alignment);
+}
+
+/// Types that can be transmuted to each other
+@repr(C)
+type RgbColor is {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+};
+
+@repr(C)
+type ColorPacked is {
+    rgba: u32,
+};
+
+const _: () = {
+    static_assert(RgbColor.size == ColorPacked.size);
+    static_assert(RgbColor.alignment == ColorPacked.alignment);
+};
+
+implement RgbColor {
+    fn as_packed(&self) -> &ColorPacked {
+        // SAFETY: Same size and alignment
+        unsafe { &*(self as *const RgbColor as *const ColorPacked) }
+    }
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+// Type properties: use T.size and T.alignment instead of deprecated intrinsics
+
+fn main() {
+    // Struct layout tests
+}

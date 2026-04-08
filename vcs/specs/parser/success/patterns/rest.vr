@@ -1,0 +1,449 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for rest patterns (.., ..rest, ...rest)
+
+// Grammar Reference:
+// rest_pattern = '..' ;
+// slice_pattern_elements = [ pattern , { ',' , pattern } , ',' ] , '..'
+//                        , [ ',' , pattern , { ',' , pattern } ] ;
+// stream_pattern_elements = [ pattern , { ',' , pattern } , [ ',' , '...' , identifier ] ]
+
+// ============================================================================
+// SECTION 1: Anonymous Rest in Arrays (Head Pattern)
+// ============================================================================
+
+fn test_rest_at_end() {
+    // Single element then rest
+    let [first, ..] = array;
+    let [head, ..] = list;
+
+    // Multiple elements then rest
+    let [a, b, ..] = array;
+    let [first, second, third, ..] = array;
+
+    // Many elements
+    let [a, b, c, d, e, ..] = long_array;
+}
+
+// ============================================================================
+// SECTION 2: Anonymous Rest in Arrays (Tail Pattern)
+// ============================================================================
+
+fn test_rest_at_start() {
+    // Rest then single element
+    let [.., last] = array;
+    let [.., tail] = list;
+
+    // Rest then multiple elements
+    let [.., a, b] = array;
+    let [.., third, second, first] = array;
+
+    // Many elements after rest
+    let [.., a, b, c, d, e] = long_array;
+}
+
+// ============================================================================
+// SECTION 3: Anonymous Rest in Middle
+// ============================================================================
+
+fn test_rest_in_middle() {
+    // Simple bookends
+    let [first, .., last] = array;
+    let [head, .., tail] = list;
+
+    // Multiple on each side
+    let [a, b, .., y, z] = array;
+    let [first, second, .., penultimate, last] = array;
+
+    // Asymmetric
+    let [a, .., x, y, z] = array;
+    let [a, b, c, .., z] = array;
+}
+
+// ============================================================================
+// SECTION 4: Just Rest (Match Any Length)
+// ============================================================================
+
+fn test_just_rest() {
+    // Only rest
+    let [..] = any_array;
+
+    // In match
+    match arr {
+        [..] => any_length()
+    }
+}
+
+// ============================================================================
+// SECTION 5: Named Rest (Binding the Rest)
+// ============================================================================
+
+fn test_named_rest_end() {
+    // Named rest at end
+    let [first, ..rest] = array;
+    let [head, ..tail] = list;
+    let [a, b, ..remaining] = array;
+
+    // In match
+    match arr {
+        [first, ..rest] => has_elements(first, rest),
+        [] => empty()
+    }
+}
+
+// ============================================================================
+// SECTION 6: Named Rest at Start
+// ============================================================================
+
+fn test_named_rest_start() {
+    // Named rest at beginning
+    let [..init, last] = array;
+    let [..prefix, final_elem] = array;
+
+    // Multiple elements after
+    let [..init, a, b] = array;
+}
+
+// ============================================================================
+// SECTION 7: Named Rest in Middle
+// ============================================================================
+
+fn test_named_rest_middle() {
+    // Named middle rest
+    let [first, ..middle, last] = array;
+    let [a, ..center, z] = array;
+
+    // Multiple bookends
+    let [a, b, ..middle, y, z] = array;
+}
+
+// ============================================================================
+// SECTION 8: Rest in Slice Patterns
+// ============================================================================
+
+fn test_rest_in_slices() {
+    // Slice with rest at end
+    let [first, second, ..] = slice;
+
+    // Slice with rest at start
+    let [.., last] = slice;
+
+    // Slice with rest in middle
+    let [first, .., last] = slice;
+
+    // Named rest in slice
+    let [head, ..tail] = slice;
+}
+
+// ============================================================================
+// SECTION 9: Rest in Records (Field Rest)
+// ============================================================================
+
+fn test_rest_in_records() {
+    // Ignore remaining fields
+    let Point { x, .. } = point;
+    let Person { name, .. } = person;
+
+    // Extract multiple, ignore rest
+    let Person { name, age, .. } = person;
+    let Config { host, port, timeout, .. } = config;
+
+    // Just rest (type check only)
+    let Point { .. } = point;
+    let Person { .. } = person;
+
+    // In match
+    match person {
+        Person { name: "admin", .. } => admin(),
+        Person { age, .. } if age > 18 => adult(),
+        Person { .. } => other()
+    }
+}
+
+// ============================================================================
+// SECTION 10: Rest in Nested Patterns
+// ============================================================================
+
+fn test_nested_rest() {
+    // Rest in nested array
+    let [[first, ..], ..] = matrix;
+    let [[.., last], [.., last2]] = matrix;
+
+    // Rest in nested tuple containing array
+    let ([first, ..], rest) = pair;
+    let (a, [.., last]) = pair;
+
+    // Rest in record containing array
+    let Data { values: [first, ..], .. } = data;
+
+    // Rest in variant containing array
+    match container {
+        Some([first, ..rest]) => has_elements(first, rest),
+        Some([]) => empty_container(),
+        None => no_container()
+    }
+
+    // Deep nesting
+    let [[[a, ..], ..], ..] = cube;
+}
+
+// ============================================================================
+// SECTION 11: Rest with Other Pattern Features
+// ============================================================================
+
+fn test_rest_with_features() {
+    // Rest with wildcards
+    let [_, .., _] = at_least_two;
+    let [_, _, .., _, _] = at_least_four;
+
+    // Rest with literals
+    let [0, ..] = starts_with_zero;
+    let [.., 0] = ends_with_zero;
+    let [0, .., 0] = zero_bookends;
+
+    // Rest with @ binding on elements
+    let [first @ 0, ..rest] = array;
+    let [..init, last @ 100] = array;
+
+    // Rest with mutable first element
+    let [mut first, ..rest] = array;
+    let [first, ..tail] = array;  // rest captures remaining
+
+    // Rest with ref first element
+    let [ref first, ..rest] = array;
+    let [first, ..tail] = array;  // rest captures remaining
+}
+
+// ============================================================================
+// SECTION 12: Stream Rest Pattern (...identifier)
+// ============================================================================
+
+fn test_stream_rest() {
+    // Stream pattern with rest (uses three dots)
+    match stream {
+        stream[first, ...rest] => has_first(first, rest),
+        stream[] => empty()
+    }
+
+    // Multiple elements then stream rest
+    match stream {
+        stream[a, b, c, ...rest] => has_three(a, b, c, rest),
+        stream[a, b, ...rest] => has_two(a, b, rest),
+        stream[a, ...rest] => has_one(a, rest),
+        stream[] => empty()
+    }
+
+    // Bind entire stream
+    match stream {
+        stream[...all] => consume_all(all)
+    }
+
+    // In let
+    let stream[head, ...tail] = input_stream;
+}
+
+// ============================================================================
+// SECTION 13: Rest in Match Arms
+// ============================================================================
+
+fn test_rest_in_match() {
+    // Pattern by length
+    match arr {
+        [] => empty(),
+        [single] => one(single),
+        [a, b] => two(a, b),
+        [a, b, c] => three(a, b, c),
+        [first, ..rest] => many(first, rest)
+    }
+
+    // Named rest decisions
+    match arr {
+        [first, ..rest] if rest.len() > 10 => large_tail(first, rest),
+        [first, ..rest] if rest.len() > 0 => small_tail(first, rest),
+        [only] => single(only),
+        [] => empty()
+    }
+
+    // Multiple rest patterns
+    match arr {
+        [a, .., z] if a == z => palindrome_ends(a),
+        [a, .., z] if a > z => descending(a, z),
+        [a, .., z] => ascending(a, z),
+        _ => too_short()
+    }
+}
+
+// ============================================================================
+// SECTION 14: Rest in Function Parameters
+// ============================================================================
+
+fn head_and_rest([first, ..rest]: [Int; N]) -> (Int, [Int; N-1]) {
+    (first, rest)
+}
+
+fn init_and_last([..init, last]: [Int; N]) -> ([Int; N-1], Int) {
+    (init, last)
+}
+
+fn bookends([first, .., last]: [Int; N]) -> (Int, Int) {
+    (first, last)
+}
+
+fn partial_record(Person { name, .. }: Person) -> Text {
+    name
+}
+
+// ============================================================================
+// SECTION 15: Rest in For Loops
+// ============================================================================
+
+fn test_rest_in_loops() {
+    // Rest in array destructure
+    for [first, ..] in arrays {
+        process_first(first)
+    }
+
+    // Named rest in loop
+    for [head, ..tail] in lists {
+        process_list(head, tail)
+    }
+
+    // Record rest in loop
+    for Person { name, .. } in people {
+        greet(name)
+    }
+}
+
+// ============================================================================
+// SECTION 16: Rest in If-Let and While-Let
+// ============================================================================
+
+fn test_rest_in_conditionals() {
+    // If-let with rest
+    if let [first, ..rest] = maybe_array {
+        process(first, rest)
+    }
+
+    if let Person { name, .. } = maybe_person {
+        greet(name)
+    }
+
+    // While-let with rest
+    while let [head, ..tail] = remaining {
+        process(head);
+        remaining = tail
+    }
+}
+
+// ============================================================================
+// SECTION 17: Rest with Guards
+// ============================================================================
+
+fn test_rest_with_guards() {
+    // Guard on rest
+    match arr {
+        [first, ..rest] if rest.len() > 100 => large(first, rest),
+        [first, ..rest] if rest.is_empty() => single(first),
+        [first, ..rest] => normal(first, rest),
+        [] => empty()
+    }
+
+    // Guard on bookends
+    match arr {
+        [first, .., last] if first == last => equal_ends(first),
+        [first, .., last] if first < last => ascending_ends(first, last),
+        [first, .., last] => descending_ends(first, last),
+        _ => too_short()
+    }
+}
+
+// ============================================================================
+// SECTION 18: Complex Rest Patterns
+// ============================================================================
+
+fn test_complex_rest() {
+    // Combining many features
+    let [
+        ref first,
+        mut second,
+        ..rest
+    ] = complex_array;
+
+    // In match with all features
+    match data {
+        [
+            a @ 0,
+            ..middle,
+            z @ 100
+        ] if middle.len() > 0 => bounded(a, middle, z),
+
+        [single @ 50] => exactly_fifty(single),
+
+        [..all] if all.iter().all(|x| x > 0) => all_positive(all),
+
+        _ => other()
+    }
+
+    // Nested with rest at multiple levels
+    let Container {
+        items: [first, ..rest],
+        metadata: Meta { tags: [primary, ..], .. },
+        ..
+    } = container;
+}
+
+// ============================================================================
+// SECTION 19: Edge Cases
+// ============================================================================
+
+fn test_edge_cases() {
+    // Rest captures nothing (array exactly matches)
+    let [a, b, ..empty] = two_element_array;
+
+    // Single element with rest
+    let [only, ..empty] = single_element;
+
+    // Rest at start captures nothing
+    let [..empty, only] = single_element;
+
+    // Rest in middle captures nothing
+    let [first, ..empty, last] = two_element_array;
+
+    // Very long pattern with rest
+    let [a, b, c, d, e, f, g, h, i, j, ..remaining] = long_array;
+}
+
+// ============================================================================
+// SECTION 20: Practical Examples
+// ============================================================================
+
+fn test_practical_rest() {
+    // Command parsing
+    match args {
+        ["help", ..] => show_help(),
+        ["version"] => show_version(),
+        [command, ..args] => execute(command, args),
+        [] => show_usage()
+    }
+
+    // Path parsing
+    match path_segments {
+        ["api", "v1", ..rest] => api_v1(rest),
+        ["api", "v2", ..rest] => api_v2(rest),
+        ["static", ..path] => serve_static(path),
+        [..path] => not_found(path)
+    }
+
+    // Partial config
+    match config {
+        Config { host, port, .. } if host == "localhost" => local_config(port),
+        Config { host, port, timeout, .. } => remote_config(host, port, timeout)
+    }
+
+    // Stream processing
+    match input {
+        stream[header, ...data] => process_with_header(header, data),
+        stream[...all] => process_headerless(all)
+    }
+}

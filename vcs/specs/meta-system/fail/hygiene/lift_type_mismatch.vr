@@ -1,0 +1,21 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, lift, type, error
+// @expected-error: M406
+// @description: Lift with type mismatch should fail with M406
+
+// Cannot lift a value that doesn't have a liftable type
+meta fn lift_non_liftable() -> TokenStream {
+    // Closures cannot be lifted to runtime code
+    let func = |x: Int| x + 1;
+
+    quote {
+        // ERROR: Closure type cannot be lifted to runtime code
+        let f = lift(func);  // M406: LiftTypeMismatch
+    }
+}
+
+fn main() {
+    @lift_non_liftable();
+}

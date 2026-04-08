@@ -1,0 +1,47 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, nested-function, complex
+// @expected-exit: 0
+
+fn main() -> Int {
+    fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    fn mul(a: Int, b: Int) -> Int {
+        a * b
+    }
+
+    fn square(x: Int) -> Int {
+        mul(x, x)
+    }
+
+    // Use nested functions
+    let s1 = square(5);
+    assert_eq(s1, 25);
+
+    let s2 = add(square(3), square(4));
+    print(s2);
+    assert_eq(s2, 25);
+
+    // More complex nesting
+    fn fib_iter(n: Int) -> Int {
+        let mut a = 0;
+        let mut b = 1;
+        let mut i = 0;
+        while (i < n) {
+            let tmp = b;
+            b = a + b;
+            a = tmp;
+            i = i + 1;
+        }
+        a
+    }
+
+    let f10 = fib_iter(10);
+    print(f10);
+    assert_eq(f10, 55);
+
+    0
+}

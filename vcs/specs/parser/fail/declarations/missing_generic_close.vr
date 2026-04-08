@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, generics, error
+// @description: Test missing generic closing bracket detection
+// @expected-error: E041
+
+fn missing_close<T() {}
+
+fn nested_missing<T, U<V>() {}
+
+fn complex_missing<T: Clone, U() {}

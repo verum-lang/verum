@@ -1,0 +1,35 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, gcd, lcm, number-theory
+// @timeout: 10000
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 || b == 0 { return 0; }
+    abs_val(a) / gcd(a, b) * abs_val(b)
+}
+
+fn main() -> Int {
+    assert_eq(gcd(12, 18), 6);
+    assert_eq(gcd(35, 49), 7);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(3, 7), 21);
+    assert_eq(gcd(12, 18) * lcm(12, 18), 12 * 18);
+    print("DIFF_OK: gcd_lcm");
+    0
+}

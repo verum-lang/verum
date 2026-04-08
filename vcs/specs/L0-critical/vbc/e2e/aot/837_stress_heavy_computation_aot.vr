@@ -1,0 +1,240 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress
+// @timeout: 60000
+// @expected-exit: 0
+
+// Heavy computation stress: Mandelbrot-like iteration, Collatz sequences, modular arithmetic
+
+fn abs_v(x: Int) -> Int { if (x < 0) { 0 - x } else { x } }
+
+// Mandelbrot-like iteration using integer approximation (scaled by 1000)
+// z = z^2 + c, where z and c are complex numbers stored as (r, i) * 1000
+// Returns iteration count before |z| > 2000 (i.e., r^2 + i^2 > 4000000)
+fn mandelbrot_iter(cr: Int, ci: Int, max_iter: Int) -> Int {
+    let mut zr = 0;
+    let mut zi = 0;
+    let mut iter_count = 0;
+    while (iter_count < max_iter) {
+        let zr2 = (zr * zr) / 1000;
+        let zi2 = (zi * zi) / 1000;
+        if (zr2 + zi2 > 4000) {
+            return iter_count;
+        }
+        let new_zr = zr2 - zi2 + cr;
+        let new_zi = (2 * zr * zi) / 1000 + ci;
+        zr = new_zr;
+        zi = new_zi;
+        iter_count = iter_count + 1;
+    }
+    max_iter
+}
+
+// Collatz sequence: returns number of steps to reach 1
+fn collatz_steps(start: Int) -> Int {
+    let mut n = start;
+    let mut steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) { n = n / 2; } else { n = n * 3 + 1; }
+        steps = steps + 1;
+        if (steps > 2000) { return -1; }
+    }
+    steps
+}
+
+// Collatz max value reached during sequence
+fn collatz_max(start: Int) -> Int {
+    let mut n = start;
+    let mut mx = start;
+    let mut steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) { n = n / 2; } else { n = n * 3 + 1; }
+        if (n > mx) { mx = n; }
+        steps = steps + 1;
+        if (steps > 2000) { return -1; }
+    }
+    mx
+}
+
+// Modular exponentiation: base^exp mod m
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut acc = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while (e > 0) {
+        if (e % 2 == 1) { acc = (acc * b) % m; }
+        e = e / 2;
+        b = (b * b) % m;
+    }
+    acc
+}
+
+// Sum of squares: 1^2 + 2^2 + ... + n^2
+fn sum_of_squares(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while (i <= n) { total = total + i * i; i = i + 1; }
+    total
+}
+
+// Lattice points in sphere of radius r (3D)
+fn lattice_count(radius: Int) -> Int {
+    let r2 = radius * radius;
+    let mut count = 0;
+    let mut x = 0 - radius;
+    while (x <= radius) {
+        let mut y = 0 - radius;
+        while (y <= radius) {
+            let mut z = 0 - radius;
+            while (z <= radius) {
+                if (x * x + y * y + z * z <= r2) {
+                    count = count + 1;
+                }
+                z = z + 1;
+            }
+            y = y + 1;
+        }
+        x = x + 1;
+    }
+    count
+}
+
+// Integer square root via Newton's method
+fn isqrt(n: Int) -> Int {
+    if (n <= 0) { return 0; }
+    if (n == 1) { return 1; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while (y < x) {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+// Check primality
+fn is_prime(n: Int) -> Int {
+    if (n < 2) { return 0; }
+    if (n < 4) { return 1; }
+    if (n % 2 == 0) { return 0; }
+    let limit = isqrt(n);
+    let mut d = 3;
+    while (d <= limit) {
+        if (n % d == 0) { return 0; }
+        d = d + 2;
+    }
+    1
+}
+
+// Count primes up to n
+fn prime_count(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while (i <= n) {
+        count = count + is_prime(i);
+        i = i + 1;
+    }
+    count
+}
+
+// Heavy loop: sum of digit_sum(i^2) for i = 0..n-1
+fn digit_sum(x: Int) -> Int {
+    let mut n = abs_v(x);
+    let mut s = 0;
+    while (n > 0) { s = s + n % 10; n = n / 10; }
+    s
+}
+
+fn main() -> Int {
+    // Mandelbrot iterations for points inside/outside
+    // c = (0, 0) is inside, should reach max_iter
+    assert_eq(mandelbrot_iter(0, 0, 100), 100);
+    // c = (2000, 0) = (2.0, 0) is outside, should escape quickly
+    let m1 = mandelbrot_iter(2000, 0, 100);
+    assert(m1 < 10);
+    // c = (-1000, 0) = (-1.0, 0) is on boundary, should iterate many times
+    let m2 = mandelbrot_iter(-1000, 0, 100);
+    assert(m2 > 50);
+
+    // Scan a row of the Mandelbrot set and count inside points
+    let mut inside_count = 0;
+    let mut px = -2000;
+    while (px <= 1000) {
+        let iters = mandelbrot_iter(px, 0, 50);
+        if (iters == 50) { inside_count = inside_count + 1; }
+        px = px + 100;
+    }
+    assert(inside_count > 0);
+
+    // Collatz sequences
+    assert_eq(collatz_steps(1), 0);
+    assert_eq(collatz_steps(2), 1);
+    assert_eq(collatz_steps(3), 7);
+    assert_eq(collatz_steps(6), 8);
+    assert_eq(collatz_steps(27), 111);
+    assert_eq(collatz_steps(97), 118);
+
+    // Collatz max values
+    assert_eq(collatz_max(1), 1);
+    assert_eq(collatz_max(3), 16);
+    assert_eq(collatz_max(27), 9232);
+
+    // Modular exponentiation
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    assert_eq(mod_pow(3, 7, 100), 87);
+    assert_eq(mod_pow(5, 3, 13), 8);
+    assert_eq(mod_pow(7, 0, 100), 1);
+    assert_eq(mod_pow(2, 12, 13), 1);  // Fermat's little theorem
+    assert_eq(mod_pow(2, 16, 65537), 65536);  // 2^16 mod 65537
+
+    // Sum of squares
+    assert_eq(sum_of_squares(10), 385);
+    assert_eq(sum_of_squares(100), 338350);
+
+    // Lattice points
+    assert_eq(lattice_count(0), 1);
+    assert_eq(lattice_count(1), 7);
+    let lp5 = lattice_count(5);
+    let lp5b = lattice_count(5);
+    assert_eq(lp5, lp5b);
+    assert(lp5 > 100);
+
+    // Integer square root
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(10000), 100);
+    assert_eq(isqrt(15), 3);
+
+    // Prime counting (pi(100) = 25)
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(97), 1);
+    assert_eq(is_prime(100), 0);
+    assert_eq(prime_count(100), 25);
+    assert_eq(prime_count(10), 4);
+
+    // Heavy digit sum loop
+    let mut ds_total = 0;
+    let mut i = 0;
+    while (i < 500) {
+        ds_total = ds_total + digit_sum(i * i);
+        i = i + 1;
+    }
+    assert(ds_total > 0);
+    // Verify deterministic
+    let mut ds_total2 = 0;
+    let mut j = 0;
+    while (j < 500) {
+        ds_total2 = ds_total2 + digit_sum(j * j);
+        j = j + 1;
+    }
+    assert_eq(ds_total, ds_total2);
+
+    print("837_stress_heavy_computation: PASS");
+    0
+}

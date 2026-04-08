@@ -1,0 +1,37 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, gpu, real-opcode, peer
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL GPU peer access intrinsics through VBC interpreter.
+// Exercises gpu_can_peer, gpu_enable_peer, gpu_disable_peer.
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Check peer access (simulated, may return 0 or 1)
+    let can = gpu_can_peer(0, 1);
+    // Just verify it doesn't crash — result depends on simulator state
+
+    // Test 2: Enable peer access (may succeed or fail gracefully)
+    let en = gpu_enable_peer(0, 1);
+    // Don't check return — simulator may not support peer
+
+    // Test 3: Disable peer access
+    let dis = gpu_disable_peer(0, 1);
+    // Don't check return — symmetric with enable
+
+    // Test 4: Self-peer check (device 0 to device 0)
+    let self_peer = gpu_can_peer(0, 0);
+    // Self-access is always possible in simulation
+
+    // Test 5: Multiple peer operations don't crash
+    let c1 = gpu_can_peer(0, 1);
+    let c2 = gpu_can_peer(1, 0);
+    let c3 = gpu_can_peer(0, 2);
+
+    // Verify pipeline works (all operations complete without panic)
+    errors
+}

@@ -1,0 +1,122 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: modules, re-exports, pub-mount
+
+/// Module re-export tests.
+/// Verifies public mount (re-export) syntax is parsed correctly.
+
+// Source module with items
+module source {
+    pub type Data is {
+        id: Int,
+        name: Text
+    };
+
+    pub fn create_data(id: Int, name: Text) -> Data {
+        Data { id: id, name: name }
+    }
+
+    pub const DEFAULT_ID: Int = 0;
+
+    pub type Status is
+        | Active
+        | Inactive
+        | Pending;
+
+    pub module nested {
+        pub fn helper() -> Int {
+            42
+        }
+
+        pub type Inner is {
+            value: Int
+        };
+    }
+}
+
+// Facade module that re-exports selected items
+module facade {
+    // Simple re-export
+    pub mount source.Data;
+    pub mount source.create_data;
+    pub mount source.DEFAULT_ID;
+
+    // Re-export with alias
+    pub mount source.Status as DataStatus;
+
+    // Re-export nested items
+    pub mount source.nested.helper as utility_helper;
+    pub mount source.nested.Inner as InnerType;
+
+    // Add additional functionality
+    pub fn create_default() -> Data {
+        create_data(DEFAULT_ID, "default")
+    }
+}
+
+// Selective re-export module
+module selective {
+    // Only re-export some items
+    pub mount source.Data;
+    // Note: Status and other items not re-exported
+
+    // Add custom wrapper
+    pub fn wrap_data(d: Data) -> WrappedData {
+        WrappedData { inner: d }
+    }
+
+    pub type WrappedData is {
+        inner: Data
+    };
+}
+
+// Nested re-export (re-export from re-exporter)
+module secondary {
+    // Re-export from facade
+    pub mount facade.Data;
+    pub mount facade.create_default;
+    pub mount facade.DataStatus;
+
+    // Add more
+    pub fn create_active_default() -> (Data, DataStatus) {
+        (create_default(), DataStatus.Active)
+    }
+}
+
+// Consumer using re-exports
+module consumer {
+    // Import from facade (re-exported items)
+    mount facade.Data;
+    mount facade.create_data;
+    mount facade.DataStatus;
+    mount facade.utility_helper;
+    mount facade.InnerType;
+    mount facade.create_default;
+
+    pub fn use_facade() -> Data {
+        let d = create_data(1, "test");
+        let default = create_default();
+        let helper_val = utility_helper();
+        let inner = InnerType { value: helper_val };
+        d
+    }
+}
+
+// Consumer using secondary re-exports (chained)
+module chained_consumer {
+    mount secondary.Data;
+    mount secondary.create_default;
+    mount secondary.DataStatus;
+    mount secondary.create_active_default;
+
+    pub fn use_chained() -> (Data, DataStatus) {
+        create_active_default()
+    }
+}
+
+fn main() -> Int {
+    // Note: Re-export testing from main requires module integration.
+    // This test verifies public mount (re-export) syntax parsing only.
+    0
+}

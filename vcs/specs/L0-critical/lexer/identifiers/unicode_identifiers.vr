@@ -1,0 +1,114 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, identifiers, unicode
+
+// Unicode identifiers
+
+fn test_unicode_identifiers() {
+    // Greek letters
+    let alpha = 1;
+    let beta = 2;
+    let gamma = 3;
+    let delta = 4;
+    let epsilon = 5;
+    let theta = 6;
+    let lambda = 7;
+    let pi = 3.14159;
+    let sigma = 8;
+    let omega_val = 9;
+
+    // Cyrillic letters
+    let cyrillic_var = 1;
+
+    // Latin Extended
+    let cafe = "coffee";
+    let resume = "cv";
+    let naive = true;
+
+    // CJK characters (if supported)
+    let chinese_var = 1;
+    let japanese_var = 2;
+
+    // Mixed scripts in identifiers (ASCII start)
+    let alpha_value = 1;
+    let beta_coefficient = 2;
+    let gamma_factor = 3;
+
+    // Mathematical symbols as part of names
+    let x_prime = 1;
+    let x_double_prime = 2;
+    let delta_x = 3;
+    let delta_t = 4;
+
+    // Subscript-like naming
+    let x_0 = 0;
+    let x_1 = 1;
+    let x_i = 2;
+    let x_n = 3;
+
+    // Superscript-like naming
+    let x_squared = 4;
+    let x_cubed = 5;
+
+    // Physics/engineering conventions
+    let v_0 = 0.0;
+    let a_g = 9.81;
+    let omega_0 = 0.0;
+    let tau = 6.28;
+
+    // Statistical variables
+    let mu = 0.0;
+    let sigma_stat = 1.0;
+    let rho = 0.5;
+
+    // Coordinate systems
+    let theta_angle = 0.0;
+    let phi = 0.0;
+    let r = 1.0;
+
+    // Unicode normalization (same identifier)
+    let e_acute = 1;
+    let e_acute_precomposed = 1;
+
+    // Currency symbols with underscore variants
+    let dollar_amount = 100;
+    let euro_amount = 85;
+    let pound_amount = 75;
+
+    // Accented characters in variable names
+    let angle = 45.0;
+    let resume_text = "...";
+    let nino_count = 5;
+
+    // Identifiers that look like operators
+    let plus_value = 1;
+    let minus_value = 2;
+    let times_value = 3;
+
+    // Combining characters (if supported)
+    let combined = 1;
+}
+
+// Mathematical usage
+fn calculate_area(r: Float) -> Float {
+    let pi = 3.14159;
+    pi * r * r
+}
+
+// Greek in formulas
+fn quadratic(a: Float, b: Float, c: Float) -> (Float, Float) {
+    let delta = b * b - 4.0 * a * c;
+    let sqrt_delta = delta.sqrt();
+    let x1 = (-b + sqrt_delta) / (2.0 * a);
+    let x2 = (-b - sqrt_delta) / (2.0 * a);
+    (x1, x2)
+}
+
+// Type names with Greek
+type DeltaResult is { before: Int, after: Int, delta: Int };
+
+// Generic parameters can use Greek-style
+fn transform<T>(value: T) -> T {
+    value
+}

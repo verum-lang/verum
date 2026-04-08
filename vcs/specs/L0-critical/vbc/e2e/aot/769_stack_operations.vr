@@ -1,0 +1,148 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, stack, push, pop, peek, balanced-parentheses
+// @expected-exit: 0
+
+// Stack is represented as a list with a separate top-of-stack index.
+// stack[0..top) contains elements, top starts at 0 (empty).
+
+fn stack_push(stk: List<Int>, top: Int, val: Int) -> Int {
+    stk[top] = val;
+    top + 1
+}
+
+fn stack_pop(stk: List<Int>, top: Int) -> Int {
+    // Returns new top. Caller reads stk[top-1] before popping.
+    top - 1
+}
+
+fn stack_peek(stk: List<Int>, top: Int) -> Int {
+    stk[top - 1]
+}
+
+fn stack_is_empty(top: Int) -> Int {
+    if (top == 0) { 1 } else { 0 }
+}
+
+// Check balanced parentheses using integer encoding:
+// 1 = '(', 2 = ')', 3 = '[', 4 = ']', 5 = '{', 6 = '}'
+// Returns 1 if balanced, 0 if not
+fn is_balanced(expr: List<Int>, n: Int) -> Int {
+    let mut stk = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut top = 0;
+    let mut i = 0;
+    let mut valid = 1;
+    while (i < n) {
+        let ch = expr[i];
+        if (ch == 1) {
+            // push '('
+            stk[top] = 1;
+            top = top + 1;
+        } else if (ch == 3) {
+            // push '['
+            stk[top] = 3;
+            top = top + 1;
+        } else if (ch == 5) {
+            // push '{'
+            stk[top] = 5;
+            top = top + 1;
+        } else if (ch == 2) {
+            // ')' matches '(' = 1
+            if (top == 0) {
+                valid = 0;
+            } else {
+                top = top - 1;
+                if (stk[top] != 1) {
+                    valid = 0;
+                }
+            }
+        } else if (ch == 4) {
+            // ']' matches '[' = 3
+            if (top == 0) {
+                valid = 0;
+            } else {
+                top = top - 1;
+                if (stk[top] != 3) {
+                    valid = 0;
+                }
+            }
+        } else if (ch == 6) {
+            // '}' matches '{' = 5
+            if (top == 0) {
+                valid = 0;
+            } else {
+                top = top - 1;
+                if (stk[top] != 5) {
+                    valid = 0;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    if (top != 0) {
+        valid = 0;
+    }
+    valid
+}
+
+fn main() -> Int {
+    // Test 1: Push and peek
+    let mut stk = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut top = 0;
+    top = stack_push(stk, top, 10);
+    assert_eq(top, 1);
+    assert_eq(stack_peek(stk, top), 10);
+
+    // Test 2: Push multiple and peek (LIFO order)
+    top = stack_push(stk, top, 20);
+    top = stack_push(stk, top, 30);
+    assert_eq(top, 3);
+    assert_eq(stack_peek(stk, top), 30);
+
+    // Test 3: Pop and verify LIFO
+    let val = stack_peek(stk, top);
+    top = stack_pop(stk, top);
+    assert_eq(val, 30);
+    assert_eq(stack_peek(stk, top), 20);
+
+    // Test 4: Pop until empty
+    top = stack_pop(stk, top); // remove 20
+    top = stack_pop(stk, top); // remove 10
+    assert_eq(stack_is_empty(top), 1);
+
+    // Test 5: Push-pop interleave
+    top = stack_push(stk, top, 100);
+    top = stack_push(stk, top, 200);
+    top = stack_pop(stk, top); // remove 200
+    top = stack_push(stk, top, 300);
+    assert_eq(stack_peek(stk, top), 300);
+
+    // Test 6: Stack size tracking
+    top = 0;
+    top = stack_push(stk, top, 1);
+    top = stack_push(stk, top, 2);
+    top = stack_push(stk, top, 3);
+    top = stack_push(stk, top, 4);
+    top = stack_push(stk, top, 5);
+    assert_eq(top, 5);
+
+    // Test 7: Balanced parentheses - "(()[])" encoded as [1,1,2,3,4,2, 0,0,0,0,0,0,0,0,0,0]
+    let expr1 = [1, 1, 2, 3, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(expr1, 6), 1);
+
+    // Test 8: Unbalanced - "(()" encoded as [1,1,2, 0,...] -> unbalanced (1 open left)
+    let expr2 = [1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(expr2, 3), 0);
+
+    // Test 9: Mismatched - "(]" encoded as [1,4, 0,...] -> mismatch
+    let expr3 = [1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(expr3, 2), 0);
+
+    // Test 10: Complex balanced "{[()]}" -> [5,3,1,2,4,6, 0,0,0,0,0,0,0,0,0,0]
+    let expr4 = [5, 3, 1, 2, 4, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(expr4, 6), 1);
+
+    print("Stack operations: PASS");
+    0
+}

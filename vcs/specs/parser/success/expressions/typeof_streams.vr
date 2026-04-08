@@ -1,0 +1,285 @@
+// @test: parse-pass
+// @tier: 0
+// @category: expressions
+// @level: L0
+// @tags: parser, expressions, typeof, streams, tensors
+// @description: Comprehensive tests for typeof, stream, and tensor expressions
+
+// ============================================================================
+// Typeof Expressions
+// Grammar: 'typeof' , '(' , expression , ')'
+// ============================================================================
+
+fn test_typeof_basic() {
+    let t = typeof(42);
+    let s = typeof("hello");
+    let b = typeof(true);
+}
+
+fn test_typeof_complex() {
+    let list_type = typeof([1, 2, 3]);
+    let map_type = typeof({ "key": "value" });
+    let tuple_type = typeof((1, "two", 3.0));
+}
+
+fn test_typeof_in_conditions() {
+    if typeof(value).name == "Int" {
+        handle_int(value);
+    }
+}
+
+fn test_typeof_comparison() {
+    let same = typeof(a) == typeof(b);
+    let different = typeof(x).id != typeof(y).id;
+}
+
+fn test_typeof_runtime() {
+    fn process(value: unknown) {
+        match typeof(value) {
+            t if t.name == "Int" => print("Integer"),
+            t if t.name == "Text" => print("Text"),
+            _ => print("Other"),
+        }
+    }
+}
+
+// ============================================================================
+// Stream Comprehension Expressions
+// Grammar: 'stream' , '[' , stream_body , ']'
+// ============================================================================
+
+fn test_stream_comprehension_basic() {
+    let doubled = stream[x * 2 for x in source];
+}
+
+fn test_stream_comprehension_filter() {
+    let evens = stream[x for x in numbers if x % 2 == 0];
+}
+
+fn test_stream_comprehension_nested() {
+    let matrix = stream[(i, j) for i in rows for j in cols];
+}
+
+fn test_stream_comprehension_let() {
+    let processed = stream[
+        result
+        for item in items
+        let processed = process(item)
+        let result = transform(processed)
+        if result.is_valid()
+    ];
+}
+
+fn test_stream_comprehension_complex() {
+    let data = stream[
+        f"{user.name}: {order.total}"
+        for user in users
+        for order in user.orders
+        let total = order.items.sum()
+        if total > 100
+    ];
+}
+
+// ============================================================================
+// Stream Literal Expressions
+// Grammar: 'stream' , '[' , stream_literal_body , ']'
+// ============================================================================
+
+fn test_stream_range() {
+    let infinite = stream[0..];
+    let bounded = stream[0..100];
+    let inclusive = stream[0..=99];
+}
+
+fn test_stream_elements() {
+    let cycle = stream[1, 2, 3, ...];
+    let sequence = stream[0, 1, 2, ...];
+}
+
+fn test_stream_operations() {
+    let result = stream[0..]
+        |> filter(|x| x % 2 == 0)
+        |> map(|x| x * x)
+        |> take(10);
+}
+
+// ============================================================================
+// Tensor Literal Expressions
+// Grammar: 'tensor' , '<' , shape_params , '>' , type_expr , '{' , tensor_elements , '}'
+// ============================================================================
+
+fn test_tensor_1d() {
+    let vec = tensor<3>Float{ 1.0, 2.0, 3.0 };
+}
+
+fn test_tensor_2d() {
+    let matrix = tensor<2, 3>Float{
+        { 1.0, 2.0, 3.0 },
+        { 4.0, 5.0, 6.0 },
+    };
+}
+
+fn test_tensor_3d() {
+    let cube = tensor<2, 2, 2>Int{
+        { { 1, 2 }, { 3, 4 } },
+        { { 5, 6 }, { 7, 8 } },
+    };
+}
+
+fn test_tensor_with_literal_shape() {
+    // Note: tensor dimensions must be integer literals in the current parser
+    // The identity matrix is 4x4 - using flat initialization
+    let identity = tensor<4, 4>Float{
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0
+    };
+}
+
+// ============================================================================
+// Map and Set Expressions
+// Grammar: map_expr = '{' , [ map_entries ] , '}'
+// ============================================================================
+
+fn test_map_empty() {
+    let empty: Map<Text, Int> = {};
+}
+
+fn test_map_single() {
+    let single = { "key": 42 };
+}
+
+fn test_map_multiple() {
+    let config = {
+        "host": "localhost",
+        "port": "8080",
+        "debug": "true",
+    };
+}
+
+fn test_map_computed_keys() {
+    let computed = {
+        get_key(): get_value(),
+        f"item_{i}": data[i],
+    };
+}
+
+fn test_set_empty() {
+    let empty: Set<Int> = {};
+}
+
+fn test_set_elements() {
+    let primes = { 2, 3, 5, 7, 11 };
+}
+
+// ============================================================================
+// Comprehension Expressions (List)
+// Grammar: '[' , expression , 'for' , pattern , 'in' , expression , { comprehension_clause } , ']'
+// ============================================================================
+
+fn test_list_comprehension_basic() {
+    let squares = [x * x for x in 1..10];
+}
+
+fn test_list_comprehension_filter() {
+    let evens = [x for x in numbers if x % 2 == 0];
+}
+
+fn test_list_comprehension_nested() {
+    let pairs = [(i, j) for i in 1..5 for j in 1..5 if i < j];
+}
+
+fn test_list_comprehension_pattern() {
+    let names = [name for (name, age) in users if age >= 18];
+}
+
+// ============================================================================
+// Record Expressions
+// Grammar: record_expr = path , '{' , field_inits , '}'
+// ============================================================================
+
+fn test_record_basic() {
+    let point = Point { x: 10.0, y: 20.0 };
+}
+
+fn test_record_shorthand() {
+    let x = 10.0;
+    let y = 20.0;
+    let point = Point { x, y };
+}
+
+fn test_record_spread() {
+    let updated = User { name: "New Name", ..old_user };
+}
+
+fn test_record_conditional_fields() {
+    let config = Config {
+        @cfg(debug) debug_level: 3,
+        host: "localhost",
+        port: 8080,
+    };
+}
+
+fn test_record_nested() {
+    let app = App {
+        config: Config {
+            host: "localhost",
+            port: 8080,
+        },
+        state: State {
+            running: true,
+            connections: 0,
+        },
+    };
+}
+
+// ============================================================================
+// Array Expressions
+// Grammar: array_expr = '[' , [ array_elements ] , ']'
+// ============================================================================
+
+fn test_array_empty() {
+    let empty: [Int; 0] = [];
+}
+
+fn test_array_elements() {
+    let nums = [1, 2, 3, 4, 5];
+}
+
+fn test_array_repeat() {
+    let zeros = [0; 100];
+}
+
+fn test_array_complex() {
+    let matrix = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+    ];
+}
+
+// ============================================================================
+// Tuple Expressions
+// Grammar: tuple_expr = '(' , expression , ',' , [ expression_list ] , ')'
+// ============================================================================
+
+fn test_tuple_single() {
+    let single = (42,);
+}
+
+fn test_tuple_pair() {
+    let pair = (1, "one");
+}
+
+fn test_tuple_triple() {
+    let triple = (1, 2.0, "three");
+}
+
+fn test_tuple_nested() {
+    let nested = ((1, 2), (3, 4));
+}
+
+fn test_unit() {
+    let unit = ();
+}

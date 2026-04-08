@@ -1,0 +1,42 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, code_gen, quote, unquote, error
+// @description: Error tests for code generation builtins
+// @expected-error: arguments
+
+// =============================================================================
+// STRINGIFY ERRORS
+// =============================================================================
+
+// Test stringify with no arguments
+meta fn test_stringify_no_args() -> Text {
+    stringify()  // ERROR: expected 1 argument
+}
+
+// Test stringify with too many arguments
+meta fn test_stringify_too_many() -> Text {
+    stringify(1, 2, 3)  // ERROR: expected 1 argument, got 3
+}
+
+// =============================================================================
+// CONCAT_IDENTS ERRORS
+// =============================================================================
+
+// Test concat_idents with no arguments
+meta fn test_concat_idents_no_args() -> Text {
+    concat_idents()  // ERROR: expected at least 1 argument
+}
+
+// =============================================================================
+// FORMAT_IDENT ERRORS
+// =============================================================================
+
+// Test format_ident with no arguments
+meta fn test_format_ident_no_args() -> Text {
+    format_ident()  // ERROR: expected at least 1 argument
+}
+
+fn main() {
+    @const test_stringify_no_args();
+}

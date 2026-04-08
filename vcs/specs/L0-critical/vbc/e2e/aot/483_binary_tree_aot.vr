@@ -1,0 +1,235 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, binary-tree, traversal, data-structure
+// @timeout: 30000
+
+// Binary tree stored in flat array (heap-style): node i has children at 2i+1 and 2i+2
+// -1 indicates empty node
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// Tree has max 7 nodes (indices 0-6), stored in level-order
+// Left child of i: 2*i+1, Right child: 2*i+2
+// Parent of i: (i-1)/2
+
+fn left_child(i: Int) -> Int { 2 * i + 1 }
+fn right_child(i: Int) -> Int { 2 * i + 2 }
+fn parent(i: Int) -> Int { (i - 1) / 2 }
+
+fn has_node(tree: Arr8, i: Int) -> Int {
+    if i >= 7 { return 0; }
+    if get8(tree, i) != -1 { 1 } else { 0 }
+}
+
+// Count nodes in tree
+fn count_nodes(tree: Arr8) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 7 {
+        if get8(tree, i) != -1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Height of tree (0 for single node, -1 for empty)
+@allow(unbounded_recursion)
+fn tree_height_at(tree: Arr8, i: Int) -> Int {
+    if i >= 7 { return -1; }
+    if get8(tree, i) == -1 { return -1; }
+    let lh = tree_height_at(tree, left_child(i));
+    let rh = tree_height_at(tree, right_child(i));
+    1 + max_val(lh, rh)
+}
+
+@allow(unbounded_recursion)
+fn tree_height(tree: Arr8) -> Int {
+    tree_height_at(tree, 0)
+}
+
+// Sum of all node values
+@allow(unbounded_recursion)
+fn tree_sum_at(tree: Arr8, i: Int) -> Int {
+    if i >= 7 { return 0; }
+    if get8(tree, i) == -1 { return 0; }
+    get8(tree, i) + tree_sum_at(tree, left_child(i)) + tree_sum_at(tree, right_child(i))
+}
+
+@allow(unbounded_recursion)
+fn tree_sum(tree: Arr8) -> Int {
+    tree_sum_at(tree, 0)
+}
+
+// Max value in tree
+@allow(unbounded_recursion)
+fn tree_max_at(tree: Arr8, i: Int) -> Int {
+    if i >= 7 { return -999999; }
+    if get8(tree, i) == -1 { return -999999; }
+    let val = get8(tree, i);
+    let lm = tree_max_at(tree, left_child(i));
+    let rm = tree_max_at(tree, right_child(i));
+    max_val(val, max_val(lm, rm))
+}
+
+@allow(unbounded_recursion)
+fn tree_max(tree: Arr8) -> Int {
+    tree_max_at(tree, 0)
+}
+
+// Check if tree is a valid BST (in-order traversal should be sorted)
+// Returns 1 if BST property holds
+@allow(unbounded_recursion)
+fn is_bst_helper(tree: Arr8, i: Int, lo: Int, hi: Int) -> Int {
+    if i >= 7 { return 1; }
+    if get8(tree, i) == -1 { return 1; }
+    let val = get8(tree, i);
+    if val <= lo { return 0; }
+    if val >= hi { return 0; }
+    let left_ok = is_bst_helper(tree, left_child(i), lo, val);
+    if left_ok == 0 { return 0; }
+    is_bst_helper(tree, right_child(i), val, hi)
+}
+
+@allow(unbounded_recursion)
+fn is_bst(tree: Arr8) -> Int {
+    is_bst_helper(tree, 0, -999999, 999999)
+}
+
+// Check if tree is balanced (height diff of children <= 1)
+@allow(unbounded_recursion)
+fn is_balanced_at(tree: Arr8, i: Int) -> Int {
+    if i >= 7 { return 1; }
+    if get8(tree, i) == -1 { return 1; }
+    let lh = tree_height_at(tree, left_child(i));
+    let rh = tree_height_at(tree, right_child(i));
+    let diff = if lh > rh { lh - rh } else { rh - lh };
+    if diff > 1 { return 0; }
+    if is_balanced_at(tree, left_child(i)) == 0 { return 0; }
+    is_balanced_at(tree, right_child(i))
+}
+
+@allow(unbounded_recursion)
+fn is_balanced(tree: Arr8) -> Int {
+    is_balanced_at(tree, 0)
+}
+
+// Count leaf nodes
+@allow(unbounded_recursion)
+fn count_leaves_at(tree: Arr8, i: Int) -> Int {
+    if i >= 7 { return 0; }
+    if get8(tree, i) == -1 { return 0; }
+    let l = left_child(i);
+    let r = right_child(i);
+    let has_left = has_node(tree, l);
+    let has_right = has_node(tree, r);
+    if has_left == 0 {
+        if has_right == 0 { return 1; }
+    }
+    count_leaves_at(tree, l) + count_leaves_at(tree, r)
+}
+
+@allow(unbounded_recursion)
+fn count_leaves(tree: Arr8) -> Int {
+    count_leaves_at(tree, 0)
+}
+
+fn test_complete_tree() -> Int {
+    // Complete binary tree:
+    //       4
+    //      / \
+    //     2   6
+    //    / \ / \
+    //   1  3 5  7
+    let tree = Arr8 { v0: 4, v1: 2, v2: 6, v3: 1, v4: 3, v5: 5, v6: 7, v7: 0 };
+    assert_eq(count_nodes(tree), 7);
+    assert_eq(tree_height(tree), 2);
+    assert_eq(tree_sum(tree), 28); // 1+2+3+4+5+6+7
+    assert_eq(tree_max(tree), 7);
+    assert_eq(is_bst(tree), 1);
+    assert_eq(is_balanced(tree), 1);
+    assert_eq(count_leaves(tree), 4); // nodes 1,3,5,7
+    1
+}
+
+fn test_single_node() -> Int {
+    let tree = Arr8 { v0: 42, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    assert_eq(count_nodes(tree), 1);
+    assert_eq(tree_height(tree), 0);
+    assert_eq(tree_sum(tree), 42);
+    assert_eq(is_bst(tree), 1);
+    assert_eq(is_balanced(tree), 1);
+    assert_eq(count_leaves(tree), 1);
+    1
+}
+
+fn test_left_skewed() -> Int {
+    // Left-skewed tree (only left children):
+    //     3
+    //    /
+    //   2
+    //  /
+    // 1
+    let tree = Arr8 { v0: 3, v1: 2, v2: -1, v3: 1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    assert_eq(count_nodes(tree), 3);
+    assert_eq(tree_height(tree), 2);
+    assert_eq(is_bst(tree), 1);
+    assert_eq(is_balanced(tree), 0); // left height 2, right height -1
+    assert_eq(count_leaves(tree), 1);
+    1
+}
+
+fn test_not_bst() -> Int {
+    // Not a BST: root=5, left=6 (violation)
+    let tree = Arr8 { v0: 5, v1: 6, v2: 3, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    assert_eq(is_bst(tree), 0);
+    1
+}
+
+fn test_partial_tree() -> Int {
+    //     10
+    //    /  \
+    //   5   15
+    //  /
+    // 3
+    let tree = Arr8 { v0: 10, v1: 5, v2: 15, v3: 3, v4: -1, v5: -1, v6: -1, v7: -1 };
+    assert_eq(count_nodes(tree), 4);
+    assert_eq(tree_height(tree), 2);
+    assert_eq(is_bst(tree), 1);
+    assert_eq(is_balanced(tree), 1); // left=2, right=0, diff=2... wait no
+    // Left subtree has height 1 (5->3), right subtree has height 0 (15 alone)
+    // At root: left height = 1, right height = 0, diff = 1 → balanced
+    assert_eq(tree_sum(tree), 33);
+    1
+}
+
+fn main() -> Int {
+    test_complete_tree();
+    test_single_node();
+    test_left_skewed();
+    test_not_bst();
+    test_partial_tree();
+    print("[OK] 483_binary_tree_aot");
+    0
+}

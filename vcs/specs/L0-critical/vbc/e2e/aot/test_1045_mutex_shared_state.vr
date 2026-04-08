@@ -1,0 +1,121 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: mutex, shared-state, concurrency, spawn
+// @description: Mutex-protected shared state across threads using raw intrinsics
+
+fn __mutex_new_raw() -> Int {
+    0  // intrinsic
+}
+
+fn __mutex_lock_raw(mtx: Int) -> Int {
+    0  // intrinsic
+}
+
+fn __mutex_unlock_raw(mtx: Int) -> Int {
+    0  // intrinsic
+}
+
+fn test_mutex_basic() -> Int {
+    let mtx = __mutex_new_raw();
+    if mtx == 0 {
+        print("FAIL mutex_basic: mutex_new returned null");
+        return 1;
+    }
+    __mutex_lock_raw(mtx);
+    __mutex_unlock_raw(mtx);
+    print("  mutex_basic: OK");
+    0
+}
+
+fn test_mutex_multiple_cycles() -> Int {
+    let mtx = __mutex_new_raw();
+    let mut i = 0;
+    while i < 100 {
+        __mutex_lock_raw(mtx);
+        __mutex_unlock_raw(mtx);
+        i = i + 1;
+    }
+    print("  mutex_multiple_cycles: OK");
+    0
+}
+
+fn test_mutex_concurrent_counter() -> Int {
+    let mtx = __mutex_new_raw();
+    let ch = Channel.new(10);
+    ch.send(0);
+
+    let t1 = spawn {
+        let mut i = 0;
+        while i < 100 {
+            __mutex_lock_raw(mtx);
+            match ch.recv() {
+                Some(v) => {
+                    ch.send(v + 1);
+                }
+                None => {}
+            }
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        0
+    };
+
+    let t2 = spawn {
+        let mut i = 0;
+        while i < 100 {
+            __mutex_lock_raw(mtx);
+            match ch.recv() {
+                Some(v) => {
+                    ch.send(v + 1);
+                }
+                None => {}
+            }
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        0
+    };
+
+    t1.await;
+    t2.await;
+
+    let final_value = match ch.recv() { Some(v) => v, None => -1 };
+    if final_value != 200 {
+        print(f"FAIL mutex_concurrent: expected 200, got {final_value}");
+        return 1;
+    }
+    print("  mutex_concurrent: OK");
+    0
+}
+
+fn test_two_mutexes() -> Int {
+    let m1 = __mutex_new_raw();
+    let m2 = __mutex_new_raw();
+    if m1 == m2 {
+        print("FAIL two_mutexes: same address");
+        return 1;
+    }
+    __mutex_lock_raw(m1);
+    __mutex_lock_raw(m2);
+    __mutex_unlock_raw(m2);
+    __mutex_unlock_raw(m1);
+    print("  two_mutexes: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Mutex Shared State Tests:");
+    let mut failures = 0;
+    failures = failures + test_mutex_basic();
+    failures = failures + test_mutex_multiple_cycles();
+    failures = failures + test_mutex_concurrent_counter();
+    failures = failures + test_two_mutexes();
+
+    if failures == 0 {
+        print("All mutex shared state tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

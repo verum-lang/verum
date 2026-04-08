@@ -1,0 +1,29 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, map, compiled
+// @expected-exit: 0
+
+fn main() -> Int {
+    let mut m = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+    let v1 = m.get(1);
+    let v2 = m.get(2);
+    let v3 = m.get(3);
+    if v1 != 100 {
+        print(f"FAIL: get(1)={v1}");
+        return 1;
+    }
+    if v2 != 200 {
+        print(f"FAIL: get(2)={v2}");
+        return 1;
+    }
+    if v3 != 300 {
+        print(f"FAIL: get(3)={v3}");
+        return 1;
+    }
+    print("OK");
+    0
+}

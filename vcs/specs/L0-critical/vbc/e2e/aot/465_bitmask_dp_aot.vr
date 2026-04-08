@@ -1,0 +1,218 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, bitmask, dp, combinatorics
+// @timeout: 30000
+
+// Bitmask DP and bit manipulation tricks
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Bit operations using arithmetic
+fn bit_set(mask: Int, pos: Int) -> Int {
+    let mut b = 1;
+    let mut i = 0;
+    while i < pos { b = b * 2; i = i + 1; }
+    mask + b
+}
+
+fn bit_test(mask: Int, pos: Int) -> Int {
+    let mut b = 1;
+    let mut i = 0;
+    while i < pos { b = b * 2; i = i + 1; }
+    (mask / b) % 2
+}
+
+fn popcount(mask: Int) -> Int {
+    let mut count = 0;
+    let mut m = mask;
+    while m > 0 {
+        count = count + m % 2;
+        m = m / 2;
+    }
+    count
+}
+
+// Count subsets of n elements
+fn count_subsets(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < n { result = result * 2; i = i + 1; }
+    result
+}
+
+// Sum over all subsets: for each subset, sum the elements
+fn sum_all_subsets(arr: Arr8, n: Int) -> Int {
+    let total_subsets = count_subsets(n);
+    let mut total = 0;
+    let mut mask = 0;
+    while mask < total_subsets {
+        let mut i = 0;
+        while i < n {
+            if bit_test(mask, i) == 1 {
+                total = total + get8(arr, i);
+            }
+            i = i + 1;
+        }
+        mask = mask + 1;
+    }
+    total
+}
+
+// Minimum weight Hamiltonian path (TSP-like) on 4 vertices
+// dist[i*4+j] encoded in a flat manner
+// For 4 vertices, we use a 4x4 distance stored in two Arr8s (first 8 in arr1, second 8 in arr2)
+fn get_dist(d1: Arr8, d2: Arr8, i: Int, j: Int) -> Int {
+    let idx = i * 4 + j;
+    if idx < 8 { get8(d1, idx) } else { get8(d2, idx - 8) }
+}
+
+fn tsp4(d1: Arr8, d2: Arr8) -> Int {
+    // dp[mask][i] = min cost to visit subset mask ending at i
+    // mask has 4 bits (0-15), i has 4 values
+    // Encode as dp_array[mask * 4 + i], need 64 entries
+    // Use 8 Arr8s... too many. Simplify: brute force all 4! = 24 permutations
+    // For 4 elements, try all orderings starting from 0
+
+    let inf = 999999;
+    let mut best = inf;
+
+    // Try all 6 orderings of {1,2,3} (starting from 0)
+    let mut a = 1;
+    while a <= 3 {
+        let mut b = 1;
+        while b <= 3 {
+            if b != a {
+                let mut c = 1;
+                while c <= 3 {
+                    if c != a {
+                        if c != b {
+                            let cost = get_dist(d1, d2, 0, a) + get_dist(d1, d2, a, b) + get_dist(d1, d2, b, c);
+                            if cost < best { best = cost; }
+                        }
+                    }
+                    c = c + 1;
+                }
+            }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    best
+}
+
+// Count subsets with sum equal to target (subset sum)
+fn count_subset_sums(arr: Arr8, n: Int, target: Int) -> Int {
+    let total = count_subsets(n);
+    let mut count = 0;
+    let mut mask = 0;
+    while mask < total {
+        let mut sum = 0;
+        let mut i = 0;
+        while i < n {
+            if bit_test(mask, i) == 1 {
+                sum = sum + get8(arr, i);
+            }
+            i = i + 1;
+        }
+        if sum == target { count = count + 1; }
+        mask = mask + 1;
+    }
+    count
+}
+
+fn test_bit_ops() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(15), 4);
+
+    assert_eq(count_subsets(0), 1);
+    assert_eq(count_subsets(3), 8);
+    assert_eq(count_subsets(4), 16);
+
+    let mut m = 0;
+    m = bit_set(m, 0);
+    m = bit_set(m, 2);
+    assert_eq(m, 5); // 101
+    assert_eq(bit_test(m, 0), 1);
+    assert_eq(bit_test(m, 1), 0);
+    assert_eq(bit_test(m, 2), 1);
+    1
+}
+
+fn test_subset_sum() -> Int {
+    // Each element appears in exactly 2^(n-1) subsets
+    // So sum = each element * 2^(n-1)
+    let arr = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Total sum = (1+2+3) * 2^2 = 6*4 = 24
+    assert_eq(sum_all_subsets(arr, 3), 24);
+
+    let arr2 = Arr8 { v0: 10, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // 10 * 2^0 = 10 (element 10 appears in 1 subset out of 2)
+    assert_eq(sum_all_subsets(arr2, 1), 10);
+    1
+}
+
+fn test_count_subset_sums() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Subsets with sum 3: {3}, {1,2} → 2
+    assert_eq(count_subset_sums(arr, 3, 3), 2);
+    // Sum 6: {1,2,3} → 1
+    assert_eq(count_subset_sums(arr, 3, 6), 1);
+    // Sum 0: empty set → 1
+    assert_eq(count_subset_sums(arr, 3, 0), 1);
+    // Sum 7: impossible → 0
+    assert_eq(count_subset_sums(arr, 3, 7), 0);
+    1
+}
+
+fn test_tsp() -> Int {
+    // Distance matrix (4x4):
+    //   0  1  2  3
+    // 0: 0 10 15 20
+    // 1:10  0 35 25
+    // 2:15 35  0 30
+    // 3:20 25 30  0
+    let d1 = Arr8 { v0: 0, v1: 10, v2: 15, v3: 20, v4: 10, v5: 0, v6: 35, v7: 25 };
+    let d2 = Arr8 { v0: 15, v1: 35, v2: 0, v3: 30, v4: 20, v5: 25, v6: 30, v7: 0 };
+    // Best path from 0: 0->1->3->2 = 10+25+30 = 65
+    // Or: 0->2->3->1 = 15+30+25 = 70
+    // Or: 0->1->2->3 = 10+35+30 = 75
+    // Or: 0->2->1->3 = 15+35+25 = 75
+    // Or: 0->3->1->2 = 20+25+35 = 80
+    // Or: 0->3->2->1 = 20+30+35 = 85
+    // Best: 0->1->3->2 = 65
+    assert_eq(tsp4(d1, d2), 65);
+    1
+}
+
+fn main() -> Int {
+    test_bit_ops();
+    test_subset_sum();
+    test_count_subset_sums();
+    test_tsp();
+    print("[OK] 465_bitmask_dp_aot");
+    0
+}

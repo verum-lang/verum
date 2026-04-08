@@ -1,0 +1,39 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: cbgr, memory_safety, references
+// @expected-exit: 0
+// @description: Basic CBGR reference safety — verify references work correctly
+
+type Data is { value: Int, name: Text };
+
+fn modify(d: &mut Data) {
+    d.value = d.value + 1;
+}
+
+fn read_val(d: &Data) -> Int {
+    d.value
+}
+
+fn main() -> Int {
+    let mut d = Data { value: 10, name: "test" };
+
+    // Test 1: Mutable reference
+    modify(&mut d);
+    assert_eq(d.value, 11);
+    print("test1 mut ref: OK");
+
+    // Test 2: Immutable reference
+    let v = read_val(&d);
+    assert_eq(v, 11);
+    print("test2 immut ref: OK");
+
+    // Test 3: Heap allocation with reference
+    let h = Heap(Data { value: 42, name: "heap" });
+    let href = &(*h);
+    assert_eq(href.value, 42);
+    print("test3 heap ref: OK");
+
+    print("1096_cbgr_basic_safety: PASS");
+    0
+}

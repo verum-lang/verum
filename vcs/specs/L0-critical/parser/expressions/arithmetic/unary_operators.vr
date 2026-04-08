@@ -1,0 +1,171 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arithmetic, unary, operators
+
+fn test_unary_negation() {
+    let a = 5;
+    let b = 10;
+
+    // Unary minus (negation)
+    let neg = -a;
+    let neg_lit = -42;
+    let neg_float = -3.14;
+    let neg_expr = -(a + b);
+}
+
+fn test_explicit_positive() {
+    let a = 5;
+
+    // Note: Verum doesn't have unary plus operator
+    // Instead, positive values are just literals
+    let pos = a;
+    let pos_lit = 42;
+}
+
+fn test_double_negation() {
+    let a = 5;
+
+    // Double negation
+    let double_neg = --a;
+    let double_neg2 = -(-a);
+}
+
+fn test_logical_not() {
+    let condition = true;
+    let a = true;
+    let b = false;
+    let x = 5;
+    let y = 10;
+
+    // Logical not
+    let not_cond = !condition;
+    let not_true = !true;
+    let not_false = !false;
+    let not_expr = !(a && b);
+    let not_cmp = !(x < y);
+}
+
+fn test_double_logical_not() {
+    let condition = true;
+
+    // Double logical not
+    let double_not = !!condition;
+    let double_not2 = !(!condition);
+}
+
+fn test_bitwise_not() {
+    let bits = 0xFF;
+    let a = 0xAA;
+    let b = 0x55;
+
+    // Bitwise not (complement)
+    let bit_not = ~bits;
+    let bit_not_lit = ~0xFF;
+    let bit_not_expr = ~(a | b);
+}
+
+fn test_unary_in_expressions() {
+    let a = 5;
+    let b = 10;
+
+    // Unary operators with expressions
+    let u1 = -a + b;
+    let u2 = a + -b;
+    let u3 = -a * -b;
+    let u4 = !true && !false;
+}
+
+fn test_unary_with_methods() {
+    type Obj is { val: Int, valid: Bool };
+
+    fn value(o: Obj) -> Int { o.val }
+    fn is_valid(o: Obj) -> Bool { o.valid }
+
+    let obj = Obj { val: 5, valid: true };
+
+    // Unary operators with method calls
+    let u5 = -value(obj);
+    let u6 = !is_valid(obj);
+}
+
+fn test_unary_with_indexing() {
+    let array = [1, 2, 3];
+    let flags = [true, false, true];
+    let i = 0;
+
+    // Unary operators with indexing
+    let u7 = -array[0];
+    let u8 = !flags[i];
+}
+
+fn test_reference_operators() {
+    let a = 5;
+    let mut b = 10;
+
+    // Reference operators (unary)
+    let ref_a = &a;
+    let ref_mut = &mut b;
+}
+
+fn test_deref_operators() {
+    let a = 5;
+    let ptr = &a;
+    let ptr_ptr = &ptr;
+
+    // Dereference operators
+    let deref = *ptr;
+    let deref_nested = **ptr_ptr;
+}
+
+fn test_combined_reference_ops() {
+    let value = 5;
+    let ptr = &value;
+
+    // Combined reference operations
+    let ref_deref = &*ptr;
+    let deref_ref = *&value;
+}
+
+fn test_complex_unary_expressions() {
+    let a = 5;
+    let b = 10;
+    let c = 0xFF;
+
+    // Unary in complex expressions
+    let complex1 = -a + (!true as Int) * ~c;
+    let complex2 = !(!true && -b < 0);
+    let complex3 = -(-a + -b) * -c;
+}
+
+fn test_unary_with_parentheses() {
+    let a = 5;
+    let b = 10;
+    let cond = true;
+    let other = false;
+
+    // Unary with parentheses for clarity
+    let clear1 = (-a) + b;
+    let clear2 = -(a + b);
+    let clear3 = (!cond) && other;
+    let clear4 = !(cond && other);
+}
+
+fn test_chained_unary() {
+    let a = 5;
+    let b = true;
+    let c = 0xFF;
+
+    // Chained unary (multiple applications)
+    let chain1 = ---a;  // -(-(-a))
+    let chain2 = !!!b;  // !(!(!b))
+    let chain3 = ~~~c;  // ~(~(~c))
+}
+
+fn test_unary_with_casts() {
+    let a = 5;
+
+    // Unary with casts (if supported)
+    let cast_neg = -(a as Int);
+    let neg_cast = (-a) as Float;
+}

@@ -1,0 +1,414 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/tls_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, tls, thread-local, context
+// @description: Comprehensive tests for Thread-Local Storage intrinsics that
+//               form the foundation of the context system.
+//
+// Coverage:
+// - tls_get_base(): Get TLS base pointer
+// - tls_slot_get/set/clear/has(): Per-slot operations (~2ns hot path)
+// - tls_frame_push/pop(): Context frame management for provide blocks
+// - tls_read/write_*(): Direct TLS access by byte offset
+//
+// Test Strategy:
+// - Basic get/set/clear operations
+// - Slot isolation (setting one doesn't affect others)
+// - Frame push/pop semantics
+// - Boundary slots (0, 255)
+// - Context inheritance across frames
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.tls_test;
+
+mount core.intrinsics.{
+    tls_get_base,
+    tls_slot_get, tls_slot_set, tls_slot_clear, tls_slot_has,
+    tls_frame_push, tls_frame_pop,
+    tls_read_ptr, tls_write_ptr,
+    tls_read_i32, tls_write_i32,
+    tls_read_usize, tls_write_usize,
+    null_ptr,
+};
+
+// Test constants
+const TEST_SLOT_1: UInt8 = 10;
+const TEST_SLOT_2: UInt8 = 20;
+const TEST_SLOT_3: UInt8 = 30;
+const TEST_SLOT_MIN: UInt8 = 0;
+const TEST_SLOT_MAX: UInt8 = 255;
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// TLS Base Pointer Tests
+// =============================================================================
+
+@test
+fn test_tls_base() {
+    let base = tls_get_base();
+
+    // Base should be non-null on initialized systems
+    // Use type inference - null_ptr() infers type from comparison context
+    let null_base = null_ptr();
+    assert(base != null_base);
+
+    // Multiple calls should return same base
+    let base2 = tls_get_base();
+    assert(base == base2);
+
+    // Base should be page-aligned on most systems
+    let base_addr = base as Int;
+    // Not strictly required, but common
+    // assert(base_addr % 4096 == 0);
+
+    print(f"TLS base pointer: {base_addr}");
+}
+
+// =============================================================================
+// Basic Slot Operations Tests
+// =============================================================================
+
+@test
+fn test_slot_basic_operations() {
+    // Initially slot should be empty (or clean it first)
+    tls_slot_clear(TEST_SLOT_1);
+    assert(!tls_slot_has(TEST_SLOT_1));
+
+    // Get on empty slot returns null
+    let ptr = tls_slot_get(TEST_SLOT_1);
+    let null_byte: *const Byte = null_ptr();
+    assert(ptr == null_byte);
+
+    // Set a value
+    let test_value: Int = 42;
+    tls_slot_set(TEST_SLOT_1, &test_value as *const Int as *const Byte);
+
+    // Slot should now exist
+    assert(tls_slot_has(TEST_SLOT_1));
+
+    // Get should return the pointer we set
+    let retrieved = tls_slot_get(TEST_SLOT_1);
+    assert(retrieved != null_byte);
+
+    // Dereference and verify value
+    unsafe {
+        let value_ptr = retrieved as *const Int;
+        assert(*value_ptr == 42);
+    }
+
+    // Update the slot
+    let new_value: Int = 99;
+    tls_slot_set(TEST_SLOT_1, &new_value as *const Int as *const Byte);
+
+    let retrieved2 = tls_slot_get(TEST_SLOT_1);
+    unsafe {
+        let value_ptr = retrieved2 as *const Int;
+        assert(*value_ptr == 99);
+    }
+
+    // Clear the slot
+    tls_slot_clear(TEST_SLOT_1);
+    assert(!tls_slot_has(TEST_SLOT_1));
+    assert(tls_slot_get(TEST_SLOT_1) == null_byte);
+}
+
+// =============================================================================
+// Slot Isolation Tests
+// =============================================================================
+
+@test
+fn test_slot_isolation() {
+    // Clean up test slots
+    tls_slot_clear(TEST_SLOT_1);
+    tls_slot_clear(TEST_SLOT_2);
+    tls_slot_clear(TEST_SLOT_3);
+
+    // Set different values in different slots
+    let val1: Int = 100;
+    let val2: Int = 200;
+    let val3: Int = 300;
+
+    tls_slot_set(TEST_SLOT_1, &val1 as *const Int as *const Byte);
+    tls_slot_set(TEST_SLOT_2, &val2 as *const Int as *const Byte);
+    tls_slot_set(TEST_SLOT_3, &val3 as *const Int as *const Byte);
+
+    // Verify all slots are independent
+    assert(tls_slot_has(TEST_SLOT_1));
+    assert(tls_slot_has(TEST_SLOT_2));
+    assert(tls_slot_has(TEST_SLOT_3));
+
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_1) as *const Int) == 100);
+        assert(*(tls_slot_get(TEST_SLOT_2) as *const Int) == 200);
+        assert(*(tls_slot_get(TEST_SLOT_3) as *const Int) == 300);
+    }
+
+    // Clearing one slot doesn't affect others
+    tls_slot_clear(TEST_SLOT_2);
+
+    assert(tls_slot_has(TEST_SLOT_1));
+    assert(!tls_slot_has(TEST_SLOT_2));
+    assert(tls_slot_has(TEST_SLOT_3));
+
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_1) as *const Int) == 100);
+        assert(*(tls_slot_get(TEST_SLOT_3) as *const Int) == 300);
+    }
+
+    // Clean up
+    tls_slot_clear(TEST_SLOT_1);
+    tls_slot_clear(TEST_SLOT_3);
+}
+
+// =============================================================================
+// Slot Boundary Tests
+// =============================================================================
+
+@test
+fn test_slot_boundaries() {
+    // Test slot 0 (minimum)
+    tls_slot_clear(TEST_SLOT_MIN);
+    assert(!tls_slot_has(TEST_SLOT_MIN));
+
+    let val_min: Int = 1;
+    tls_slot_set(TEST_SLOT_MIN, &val_min as *const Int as *const Byte);
+    assert(tls_slot_has(TEST_SLOT_MIN));
+
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_MIN) as *const Int) == 1);
+    }
+
+    tls_slot_clear(TEST_SLOT_MIN);
+
+    // Test slot 255 (maximum)
+    tls_slot_clear(TEST_SLOT_MAX);
+    assert(!tls_slot_has(TEST_SLOT_MAX));
+
+    let val_max: Int = 255;
+    tls_slot_set(TEST_SLOT_MAX, &val_max as *const Int as *const Byte);
+    assert(tls_slot_has(TEST_SLOT_MAX));
+
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_MAX) as *const Int) == 255);
+    }
+
+    tls_slot_clear(TEST_SLOT_MAX);
+
+    // Test multiple boundary slots simultaneously
+    let v0: Int = 0;
+    let v127: Int = 127;
+    let v255: Int = 255;
+
+    tls_slot_set(0 as UInt8, &v0 as *const Int as *const Byte);
+    tls_slot_set(127 as UInt8, &v127 as *const Int as *const Byte);
+    tls_slot_set(255 as UInt8, &v255 as *const Int as *const Byte);
+
+    unsafe {
+        assert(*(tls_slot_get(0) as *const Int) == 0);
+        assert(*(tls_slot_get(127) as *const Int) == 127);
+        assert(*(tls_slot_get(255) as *const Int) == 255);
+    }
+
+    tls_slot_clear(0);
+    tls_slot_clear(127);
+    tls_slot_clear(255);
+}
+
+// =============================================================================
+// Frame Operation Tests
+// =============================================================================
+
+@test
+fn test_frame_operations() {
+    // Clean state
+    tls_slot_clear(TEST_SLOT_1);
+
+    // Set value in base frame
+    let base_value: Int = 1000;
+    tls_slot_set(TEST_SLOT_1, &base_value as *const Int as *const Byte);
+
+    // Push new frame
+    let saved_frame = tls_frame_push();
+    let null_byte: *const Byte = null_ptr();
+    assert(saved_frame != null_byte);
+
+    // Value should still be accessible (inherited)
+    assert(tls_slot_has(TEST_SLOT_1));
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_1) as *const Int) == 1000);
+    }
+
+    // Override in new frame
+    let new_value: Int = 2000;
+    tls_slot_set(TEST_SLOT_1, &new_value as *const Int as *const Byte);
+
+    // Should see new value
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_1) as *const Int) == 2000);
+    }
+
+    // Pop frame
+    tls_frame_pop();
+
+    // Should see original value again
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_1) as *const Int) == 1000);
+    }
+
+    // Clean up
+    tls_slot_clear(TEST_SLOT_1);
+}
+
+// =============================================================================
+// Frame Inheritance Tests
+// =============================================================================
+
+@test
+fn test_frame_inheritance() {
+    // Set up initial values
+    tls_slot_clear(TEST_SLOT_1);
+    tls_slot_clear(TEST_SLOT_2);
+
+    let val1: Int = 100;
+    let val2: Int = 200;
+    tls_slot_set(TEST_SLOT_1, &val1 as *const Int as *const Byte);
+    tls_slot_set(TEST_SLOT_2, &val2 as *const Int as *const Byte);
+
+    // Push frame 1
+    let frame1 = tls_frame_push();
+
+    // Override only slot 1
+    let val1_frame1: Int = 110;
+    tls_slot_set(TEST_SLOT_1, &val1_frame1 as *const Int as *const Byte);
+
+    // Slot 1 overridden, slot 2 inherited
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_1) as *const Int) == 110);
+        assert(*(tls_slot_get(TEST_SLOT_2) as *const Int) == 200);
+    }
+
+    // Push frame 2 (nested)
+    let frame2 = tls_frame_push();
+
+    // Override slot 2
+    let val2_frame2: Int = 220;
+    tls_slot_set(TEST_SLOT_2, &val2_frame2 as *const Int as *const Byte);
+
+    // Now slot 1 is from frame 1, slot 2 is from frame 2
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_1) as *const Int) == 110);
+        assert(*(tls_slot_get(TEST_SLOT_2) as *const Int) == 220);
+    }
+
+    // Pop frame 2
+    tls_frame_pop();
+
+    // Slot 2 should revert to frame 1's inherited value (200)
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_1) as *const Int) == 110);
+        assert(*(tls_slot_get(TEST_SLOT_2) as *const Int) == 200);
+    }
+
+    // Pop frame 1
+    tls_frame_pop();
+
+    // Should be back to original values
+    unsafe {
+        assert(*(tls_slot_get(TEST_SLOT_1) as *const Int) == 100);
+        assert(*(tls_slot_get(TEST_SLOT_2) as *const Int) == 200);
+    }
+
+    // Clean up
+    tls_slot_clear(TEST_SLOT_1);
+    tls_slot_clear(TEST_SLOT_2);
+}
+
+// =============================================================================
+// Direct TLS Access Tests
+// =============================================================================
+
+@test
+fn test_direct_tls_access() {
+    // These intrinsics access TLS by byte offset
+    // Use with caution - offsets are platform-specific
+
+    // Test Int32 read/write
+    let test_offset_i32: Int = 1024;  // Safe offset away from context slots
+
+    unsafe {
+        tls_write_i32(test_offset_i32, 12345);
+        let read_val = tls_read_i32(test_offset_i32);
+        assert(read_val == 12345);
+
+        // Write different value
+        tls_write_i32(test_offset_i32, -54321);
+        assert(tls_read_i32(test_offset_i32) == -54321);
+    }
+
+    // Test usize read/write
+    let test_offset_usize: Int = 1032;
+
+    unsafe {
+        tls_write_usize(test_offset_usize, 9876543210);
+        let read_val = tls_read_usize(test_offset_usize);
+        assert(read_val == 9876543210);
+    }
+
+    // Test pointer read/write
+    let test_offset_ptr: Int = 1040;
+    let test_data: Int = 42;
+
+    unsafe {
+        tls_write_ptr<Int>(test_offset_ptr, &test_data as *const Int);
+        let read_ptr = tls_read_ptr<Int>(test_offset_ptr);
+        assert(*read_ptr == 42);
+    }
+
+    print("Direct TLS access tests passed");
+}
+
+// =============================================================================
+// Performance Characteristic Tests
+// =============================================================================
+
+@test
+fn test_tls_performance() {
+    // TLS access should be very fast (~2ns)
+    // This test verifies the operation doesn't block or take excessive time
+
+    mount core.intrinsics.{monotonic_nanos};
+
+    let iterations = 10000;
+
+    tls_slot_clear(TEST_SLOT_1);
+    let test_val: Int = 42;
+    tls_slot_set(TEST_SLOT_1, &test_val as *const Int as *const Byte);
+
+    let start = monotonic_nanos();
+
+    for i in 0..iterations {
+        let _ = tls_slot_get(TEST_SLOT_1);
+    }
+
+    let end = monotonic_nanos();
+    let elapsed_ns = end - start;
+    let ns_per_op = elapsed_ns / iterations as UInt64;
+
+    print(f"{iterations} tls_slot_get calls took {elapsed_ns}ns ({ns_per_op}ns/op)");
+
+    // Should be < 100ns per operation typically
+    // (accounting for loop overhead and interpreter)
+    assert(ns_per_op < 1000);  // < 1μs per operation
+
+    tls_slot_clear(TEST_SLOT_1);
+}

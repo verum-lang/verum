@@ -1,0 +1,25 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, libsystem, pthread
+// @description: Test pthread_self() FFI call
+
+@ffi("libSystem.B.dylib")
+extern {
+    fn pthread_self() -> Int;
+}
+
+fn main() {
+    // pthread_self() returns ID of current thread
+    // It never fails
+    let thread_id = pthread_self();
+
+    // Thread ID should be non-zero
+    assert(thread_id != 0);
+
+    // Calling twice should return same value (same thread)
+    let thread_id2 = pthread_self();
+    assert(thread_id == thread_id2);
+}

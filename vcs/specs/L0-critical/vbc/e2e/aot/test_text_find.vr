@@ -1,0 +1,26 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "hello world";
+    let n = "world";
+
+    let self_bytes = s.as_bytes();
+    let needle_bytes = n.as_bytes();
+
+    let slen = self_bytes.len();
+    let nlen = needle_bytes.len();
+    print(f"slen={slen}");
+    print(f"nlen={nlen}");
+
+    let end = slen - nlen + 1;
+    print(f"end={end}");
+
+    // Manual byte comparison at position 6
+    let b0 = self_bytes[6];
+    let nb0 = needle_bytes[0];
+    print(f"self[6]={b0} needle[0]={nb0}");
+
+    0
+}

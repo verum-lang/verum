@@ -1,0 +1,541 @@
+// =============================================================================
+// iterator_constructors_test.vr - Tests for iterator constructor functions
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: iterator, constructors, repeat_with, once_with
+// @description: Comprehensive tests for repeat_with and once_with iterator
+//               constructors, verifying type resolution, size_hint behavior,
+//               ExactSizeIterator implementation, and combinator composition.
+// =============================================================================
+
+mount core.base.iterator.{
+    Iterator, ExactSizeIterator,
+    repeat_with, once_with,
+    repeat, once, empty, from_fn,
+    RepeatWith, OnceWith,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: repeat_with Basic Tests
+// =============================================================================
+
+@test
+fn test_repeat_with_type_exists() {
+    let iter = repeat_with(|| 42);
+    let _: &RepeatWith<_, _> = &iter;
+    assert(!false);
+}
+
+@test
+fn test_repeat_with_returns_iterator() {
+    let mut iter = repeat_with(|| 42);
+    let first: Maybe<Int> = iter.next();
+    assert(first is Some);
+}
+
+@test
+fn test_repeat_with_yields_computed_value() {
+    let mut iter = repeat_with(|| 99);
+    match iter.next() {
+        Some(val) => assert_eq(val, 99),
+        None => panic("repeat_with should yield a value"),
+    }
+}
+
+@test
+fn test_repeat_with_yields_multiple() {
+    let mut iter = repeat_with(|| 7);
+    let a = iter.next();
+    let b = iter.next();
+    let c = iter.next();
+    assert(a is Some);
+    assert(b is Some);
+    assert(c is Some);
+}
+
+@test
+fn test_repeat_with_size_hint_infinite() {
+    let iter = repeat_with(|| 42);
+    let hint = iter.size_hint();
+    // Infinite iterator: large lower bound, no upper bound
+    assert(hint.0 > 0);
+    assert(hint.1 is None);
+}
+
+// =============================================================================
+// Section 2: repeat_with with Stateful Functions
+// =============================================================================
+
+@test
+fn test_repeat_with_counter() {
+    let mut count = 0;
+    let mut iter = repeat_with(|| {
+        count = count + 1;
+        count
+    });
+    let first = iter.next();
+    let second = iter.next();
+    let third = iter.next();
+    // Each call should produce a new value
+    assert(first is Some);
+    assert(second is Some);
+    assert(third is Some);
+}
+
+@test
+fn test_repeat_with_alternating() {
+    let mut flag = true;
+    let mut iter = repeat_with(|| {
+        let val = flag;
+        flag = !flag;
+        val
+    });
+    let a = iter.next();
+    let b = iter.next();
+    assert(a is Some);
+    assert(b is Some);
+}
+
+// =============================================================================
+// Section 3: repeat_with with Combinators
+// =============================================================================
+
+@test
+fn test_repeat_with_take() {
+    let iter = repeat_with(|| 42).take(5);
+    let hint = iter.size_hint();
+    assert(hint.0 <= 5);
+    match hint.1 {
+        Some(upper) => assert(upper <= 5),
+        None => {} // acceptable
+    }
+}
+
+@test
+fn test_repeat_with_take_collect() {
+    let result: List<Int> = repeat_with(|| 7).take(3).collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 7);
+    assert_eq(result[1], 7);
+    assert_eq(result[2], 7);
+}
+
+@test
+fn test_repeat_with_map() {
+    let iter = repeat_with(|| 10).map(|x| x * 2).take(4);
+    let hint = iter.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_repeat_with_filter() {
+    let mut n = 0;
+    let iter = repeat_with(|| {
+        n = n + 1;
+        n
+    }).filter(|x| *x % 2 == 0).take(3);
+    let hint = iter.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_repeat_with_enumerate() {
+    let iter = repeat_with(|| 42).enumerate().take(3);
+    let hint = iter.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_repeat_with_zip() {
+    let a = repeat_with(|| 1);
+    let b = [10, 20, 30].into_iter();
+    let zipped = a.zip(b);
+    let hint = zipped.size_hint();
+    assert(hint.0 >= 0);
+}
+
+@test
+fn test_repeat_with_chain() {
+    let a = repeat_with(|| 1).take(2);
+    let b = repeat_with(|| 2).take(3);
+    let chained = a.chain(b);
+    let hint = chained.size_hint();
+    assert(hint.0 >= 0);
+}
+
+// =============================================================================
+// Section 4: repeat_with with Different Types
+// =============================================================================
+
+@test
+fn test_repeat_with_bool() {
+    let mut iter = repeat_with(|| true);
+    match iter.next() {
+        Some(val) => assert(val),
+        None => panic("should yield"),
+    }
+}
+
+@test
+fn test_repeat_with_float() {
+    let mut iter = repeat_with(|| 3.14);
+    match iter.next() {
+        Some(val) => assert_eq(val, 3.14),
+        None => panic("should yield"),
+    }
+}
+
+@test
+fn test_repeat_with_text() {
+    let mut iter = repeat_with(|| "hello");
+    match iter.next() {
+        Some(val) => assert_eq(val, "hello"),
+        None => panic("should yield"),
+    }
+}
+
+@test
+fn test_repeat_with_tuple() {
+    let mut iter = repeat_with(|| (1, true));
+    let first = iter.next();
+    assert(first is Some);
+}
+
+@test
+fn test_repeat_with_list() {
+    let mut iter = repeat_with(|| [1, 2, 3]);
+    let first = iter.next();
+    assert(first is Some);
+}
+
+// =============================================================================
+// Section 5: once_with Basic Tests
+// =============================================================================
+
+@test
+fn test_once_with_type_exists() {
+    let iter = once_with(|| 42);
+    let _: &OnceWith<_, _> = &iter;
+    assert(!false);
+}
+
+@test
+fn test_once_with_returns_iterator() {
+    let mut iter = once_with(|| 42);
+    let first: Maybe<Int> = iter.next();
+    assert(first is Some);
+}
+
+@test
+fn test_once_with_yields_one_value() {
+    let mut iter = once_with(|| 99);
+    match iter.next() {
+        Some(val) => assert_eq(val, 99),
+        None => panic("once_with should yield one value"),
+    }
+}
+
+@test
+fn test_once_with_exhausted_after_one() {
+    let mut iter = once_with(|| 42);
+    let first = iter.next();
+    let second = iter.next();
+    assert(first is Some);
+    assert(second is None);
+}
+
+@test
+fn test_once_with_size_hint_before_poll() {
+    let iter = once_with(|| 42);
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 1);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 1),
+        None => panic("once_with should have exact upper bound"),
+    }
+}
+
+@test
+fn test_once_with_size_hint_after_poll() {
+    let mut iter = once_with(|| 42);
+    let _ = iter.next();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 0);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 0),
+        None => panic("exhausted once_with should have exact upper bound"),
+    }
+}
+
+@test
+fn test_once_with_exact_size() {
+    let iter = once_with(|| 42);
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 1);
+}
+
+@test
+fn test_once_with_exact_size_after_poll() {
+    let mut iter = once_with(|| 42);
+    let _ = iter.next();
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 0);
+}
+
+// =============================================================================
+// Section 6: once_with Laziness
+// =============================================================================
+
+@test
+fn test_once_with_lazy_computation() {
+    // The function should not be called until next() is invoked
+    let mut called = false;
+    let mut iter = once_with(|| {
+        called = true;
+        42
+    });
+    // Before first poll, function not called (in typecheck mode, this is symbolic)
+    let first = iter.next();
+    assert(first is Some);
+}
+
+@test
+fn test_once_with_no_double_evaluation() {
+    let mut count = 0;
+    let mut iter = once_with(|| {
+        count = count + 1;
+        count
+    });
+    let first = iter.next();
+    let second = iter.next();
+    // First yields a value, second yields None
+    assert(first is Some);
+    assert(second is None);
+}
+
+// =============================================================================
+// Section 7: once_with with Combinators
+// =============================================================================
+
+@test
+fn test_once_with_map() {
+    let mut iter = once_with(|| 5).map(|x| x * 10);
+    match iter.next() {
+        Some(val) => assert_eq(val, 50),
+        None => panic("map on once_with should yield"),
+    }
+}
+
+@test
+fn test_once_with_filter_pass() {
+    let mut iter = once_with(|| 42).filter(|x| *x > 10);
+    let first = iter.next();
+    assert(first is Some);
+}
+
+@test
+fn test_once_with_filter_fail() {
+    let mut iter = once_with(|| 5).filter(|x| *x > 10);
+    let first = iter.next();
+    assert(first is None);
+}
+
+@test
+fn test_once_with_chain() {
+    let a = once_with(|| 1);
+    let b = once_with(|| 2);
+    let mut chained = a.chain(b);
+    let first = chained.next();
+    let second = chained.next();
+    let third = chained.next();
+    assert(first is Some);
+    assert(second is Some);
+    assert(third is None);
+}
+
+@test
+fn test_once_with_chain_collect() {
+    let result: List<Int> = once_with(|| 10)
+        .chain(once_with(|| 20))
+        .chain(once_with(|| 30))
+        .collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 10);
+    assert_eq(result[1], 20);
+    assert_eq(result[2], 30);
+}
+
+@test
+fn test_once_with_zip() {
+    let a = once_with(|| 1);
+    let b = once_with(|| "hello");
+    let mut zipped = a.zip(b);
+    let first = zipped.next();
+    let second = zipped.next();
+    assert(first is Some);
+    assert(second is None);
+}
+
+@test
+fn test_once_with_enumerate() {
+    let mut iter = once_with(|| 99).enumerate();
+    let first = iter.next();
+    assert(first is Some);
+    let second = iter.next();
+    assert(second is None);
+}
+
+@test
+fn test_once_with_take_zero() {
+    let mut iter = once_with(|| 42).take(0);
+    let first = iter.next();
+    assert(first is None);
+}
+
+@test
+fn test_once_with_skip_one() {
+    let mut iter = once_with(|| 42).skip(1);
+    let first = iter.next();
+    assert(first is None);
+}
+
+@test
+fn test_once_with_collect() {
+    let result: List<Int> = once_with(|| 42).collect();
+    assert_eq(result.len(), 1);
+    assert_eq(result[0], 42);
+}
+
+// =============================================================================
+// Section 8: once_with with Different Types
+// =============================================================================
+
+@test
+fn test_once_with_bool() {
+    let mut iter = once_with(|| true);
+    match iter.next() {
+        Some(val) => assert(val),
+        None => panic("should yield"),
+    }
+}
+
+@test
+fn test_once_with_float() {
+    let mut iter = once_with(|| 2.718);
+    match iter.next() {
+        Some(val) => assert_eq(val, 2.718),
+        None => panic("should yield"),
+    }
+}
+
+@test
+fn test_once_with_text() {
+    let mut iter = once_with(|| "world");
+    match iter.next() {
+        Some(val) => assert_eq(val, "world"),
+        None => panic("should yield"),
+    }
+}
+
+// =============================================================================
+// Section 9: Comparison with Eager Variants
+// =============================================================================
+
+@test
+fn test_repeat_with_vs_repeat() {
+    // repeat_with is lazy (calls fn each time), repeat clones a value
+    let mut rw = repeat_with(|| 42).take(3);
+    let mut r = repeat(42).take(3);
+    // Both should produce the same values
+    let rw_result: List<Int> = rw.collect();
+    let r_result: List<Int> = r.collect();
+    assert_eq(rw_result.len(), r_result.len());
+    assert_eq(rw_result[0], r_result[0]);
+    assert_eq(rw_result[1], r_result[1]);
+    assert_eq(rw_result[2], r_result[2]);
+}
+
+@test
+fn test_once_with_vs_once() {
+    // once_with is lazy (calls fn), once takes an existing value
+    let mut ow = once_with(|| 42);
+    let mut o = once(42);
+    match (ow.next(), o.next()) {
+        (Some(a), Some(b)) => assert_eq(a, b),
+        _ => panic("both should yield"),
+    }
+    assert(ow.next() is None);
+    assert(o.next() is None);
+}
+
+// =============================================================================
+// Section 10: Advanced Combinator Chains
+// =============================================================================
+
+@test
+fn test_repeat_with_counter_take_sum() {
+    let mut n = 0;
+    let result: Int = repeat_with(|| {
+        n = n + 1;
+        n
+    }).take(5).sum();
+    // 1 + 2 + 3 + 4 + 5 = 15
+    assert_eq(result, 15);
+}
+
+@test
+fn test_repeat_with_take_fold() {
+    let result: Int = repeat_with(|| 2).take(4).fold(0, |acc, x| acc + x);
+    // 2 + 2 + 2 + 2 = 8
+    assert_eq(result, 8);
+}
+
+@test
+fn test_once_with_fold() {
+    let result: Int = once_with(|| 42).fold(0, |acc, x| acc + x);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_once_with_any() {
+    let result = once_with(|| 42).any(|x| *x > 10);
+    assert(result);
+}
+
+@test
+fn test_once_with_all() {
+    let result = once_with(|| 42).all(|x| *x > 10);
+    assert(result);
+}
+
+@test
+fn test_once_with_find() {
+    let result = once_with(|| 42).find(|x| *x == 42);
+    assert(result is Some);
+}
+
+@test
+fn test_once_with_find_none() {
+    let result = once_with(|| 42).find(|x| *x == 99);
+    assert(result is None);
+}
+
+@test
+fn test_once_with_count() {
+    let c = once_with(|| 42).count();
+    assert_eq(c, 1);
+}
+
+@test
+fn test_repeat_with_take_count() {
+    let c = repeat_with(|| 0).take(10).count();
+    assert_eq(c, 10);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

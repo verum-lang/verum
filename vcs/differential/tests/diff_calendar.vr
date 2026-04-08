@@ -1,0 +1,106 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, calendar, date-math
+// @timeout: 10000
+
+fn is_leap_year(y: Int) -> Int {
+    if y % 400 == 0 { return 1; }
+    if y % 100 == 0 { return 0; }
+    if y % 4 == 0 { return 1; }
+    0
+}
+
+fn days_in_month(m: Int, y: Int) -> Int {
+    if m == 2 { return 28 + is_leap_year(y); }
+    if m == 4 { return 30; }
+    if m == 6 { return 30; }
+    if m == 9 { return 30; }
+    if m == 11 { return 30; }
+    31
+}
+
+fn days_in_year(y: Int) -> Int {
+    365 + is_leap_year(y)
+}
+
+// Day of year (1-based)
+fn day_of_year(d: Int, m: Int, y: Int) -> Int {
+    let mut total = d;
+    let mut month = 1;
+    while month < m {
+        total = total + days_in_month(month, y);
+        month = month + 1;
+    }
+    total
+}
+
+// Zeller's congruence for day of week (0=Sat, 1=Sun, ..., 6=Fri)
+fn zeller(d: Int, m: Int, y: Int) -> Int {
+    let mut adj_m = m;
+    let mut adj_y = y;
+    if m < 3 {
+        adj_m = m + 12;
+        adj_y = y - 1;
+    }
+    let q = d;
+    let k = adj_y % 100;
+    let j = adj_y / 100;
+    let h = (q + (13 * (adj_m + 1)) / 5 + k + k / 4 + j / 4 - 2 * j) % 7;
+    // Make it positive
+    let hh = (h + 7) % 7;
+    hh
+}
+
+// Convert Zeller to ISO day (1=Mon...7=Sun)
+fn day_of_week_iso(d: Int, m: Int, y: Int) -> Int {
+    let z = zeller(d, m, y);
+    // Zeller: 0=Sat, 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri
+    // ISO: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
+    if z == 0 { 6 }
+    else if z == 1 { 7 }
+    else { z - 1 }
+}
+
+fn main() -> Int {
+    // Leap years
+    assert_eq(is_leap_year(2000), 1);  // divisible by 400
+    assert_eq(is_leap_year(1900), 0);  // divisible by 100 but not 400
+    assert_eq(is_leap_year(2024), 1);  // divisible by 4
+    assert_eq(is_leap_year(2023), 0);  // not divisible by 4
+    assert_eq(is_leap_year(2026), 0);  // current year
+
+    // Days in month
+    assert_eq(days_in_month(2, 2024), 29);
+    assert_eq(days_in_month(2, 2023), 28);
+    assert_eq(days_in_month(1, 2024), 31);
+    assert_eq(days_in_month(4, 2024), 30);
+
+    // Days in year
+    assert_eq(days_in_year(2024), 366);
+    assert_eq(days_in_year(2023), 365);
+
+    // Day of year
+    assert_eq(day_of_year(1, 1, 2024), 1);    // Jan 1
+    assert_eq(day_of_year(31, 12, 2024), 366); // Dec 31 (leap)
+    assert_eq(day_of_year(31, 12, 2023), 365); // Dec 31 (non-leap)
+    assert_eq(day_of_year(1, 3, 2024), 61);    // Mar 1 (31+29+1)
+    assert_eq(day_of_year(1, 3, 2023), 60);    // Mar 1 (31+28+1)
+
+    // Day of week (ISO)
+    // Feb 26, 2026 is a Thursday = 4
+    assert_eq(day_of_week_iso(26, 2, 2026), 4);
+
+    // Jan 1, 2024 was Monday = 1
+    assert_eq(day_of_week_iso(1, 1, 2024), 1);
+
+    // Jul 4, 2024 was Thursday = 4
+    assert_eq(day_of_week_iso(4, 7, 2024), 4);
+
+    // Dec 25, 2024 was Wednesday = 3
+    assert_eq(day_of_week_iso(25, 12, 2024), 3);
+
+    print("DIFF_OK: calendar");
+    0
+}

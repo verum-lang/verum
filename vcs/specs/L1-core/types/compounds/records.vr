@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, compounds, records, structs
+
+/// Test for record types (structural types with named fields).
+/// Records are defined using the `type X is { ... }` syntax.
+
+// Basic record definition
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+// Record with mixed types
+type Person is {
+    name: Text,
+    age: Int,
+    active: Bool,
+};
+
+// Nested records
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+// Record with generic fields
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+// Record with optional fields
+type UserProfile is {
+    username: Text,
+    email: Maybe<Text>,
+    bio: Maybe<Text>,
+};
+
+fn main() {
+    // Record instantiation
+    let point: Point = Point { x: 3.0, y: 4.0 };
+    let person: Person = Person { name: "Alice", age: 30, active: true };
+
+    // Field access
+    let x_coord: Float = point.x;
+    let person_name: Text = person.name;
+
+    // Nested field access
+    let rect: Rectangle = Rectangle {
+        top_left: Point { x: 0.0, y: 10.0 },
+        bottom_right: Point { x: 10.0, y: 0.0 },
+    };
+    let top_x: Float = rect.top_left.x;
+
+    // Mutable record
+    let mut mutable_point: Point = Point { x: 0.0, y: 0.0 };
+    mutable_point.x = 5.0;
+    mutable_point.y = 10.0;
+
+    // Destructuring
+    let Point { x, y } = point;
+
+    // Functional update (copy with changes)
+    let moved_point: Point = Point { x: point.x + 1.0, ..point };
+
+    // Generic record instantiation
+    let int_text_pair: Pair<Int, Text> = Pair { first: 42, second: "hello" };
+    let point_pair: Pair<Point, Point> = Pair { first: point, second: moved_point };
+
+    // Optional fields
+    let profile: UserProfile = UserProfile {
+        username: "alice",
+        email: Some("alice@example.com"),
+        bio: None,
+    };
+
+    // Record comparison (field-wise)
+    let p1: Point = Point { x: 1.0, y: 2.0 };
+    let p2: Point = Point { x: 1.0, y: 2.0 };
+    let p3: Point = Point { x: 1.0, y: 3.0 };
+
+    // Helper function for distance calculation
+    fn distance(p: &Point) -> Float {
+        (p.x * p.x + p.y * p.y).sqrt()
+    }
+    let dist: Float = distance(&point);
+
+    // Assertions
+    assert(x_coord == 3.0);
+    assert(person_name == "Alice");
+    assert(top_x == 0.0);
+    assert(mutable_point.x == 5.0);
+    assert(x == 3.0);
+    assert(int_text_pair.first == 42);
+    assert(p1 == p2);
+    assert(p1 != p3);
+}
+

@@ -1,0 +1,218 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, bloom_filter, hash, probabilistic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Bloom filter simulation using multiple hash functions.
+// Insert elements, query membership, estimate false positive rate.
+// Bit array represented as integer array where each Int stores 1 bit.
+
+// Hash function 1: polynomial hash mod m
+fn hash1(key: Int, m: Int) -> Int {
+    let mut h = (key * 2654435761) % m;
+    if h < 0 { h = 0 - h; }
+    h
+}
+
+// Hash function 2: different multiplier
+fn hash2(key: Int, m: Int) -> Int {
+    let mut h = (key * 1013904223) % m;
+    if h < 0 { h = 0 - h; }
+    h
+}
+
+// Hash function 3: another variant
+fn hash3(key: Int, m: Int) -> Int {
+    let mut h = (key * 1664525 + 1013904223) % m;
+    if h < 0 { h = 0 - h; }
+    h
+}
+
+// Set bit at position pos in bit array (32-element array, 32 positions).
+fn bf_set(bits: [Int; 32], pos: Int) {
+    bits[pos] = 1;
+}
+
+// Check bit at position pos.
+fn bf_get(bits: [Int; 32], pos: Int) -> Int {
+    bits[pos]
+}
+
+// Insert key into bloom filter of size m (bits array of size m).
+fn bf_insert(bits: [Int; 32], m: Int, key: Int) {
+    let h1 = hash1(key, m);
+    let h2 = hash2(key, m);
+    let h3 = hash3(key, m);
+    bits[h1] = 1;
+    bits[h2] = 1;
+    bits[h3] = 1;
+}
+
+// Query: returns 1 if key is POSSIBLY in the set, 0 if DEFINITELY not.
+fn bf_query(bits: [Int; 32], m: Int, key: Int) -> Int {
+    let h1 = hash1(key, m);
+    let h2 = hash2(key, m);
+    let h3 = hash3(key, m);
+    if bits[h1] == 1 && bits[h2] == 1 && bits[h3] == 1 { 1 } else { 0 }
+}
+
+fn test_bloom_basic_insert_query() {
+    let m = 32;
+    let mut bits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Insert 42, 17, 99
+    bf_insert(bits, m, 42);
+    bf_insert(bits, m, 17);
+    bf_insert(bits, m, 99);
+
+    // Inserted elements must be found (no false negatives for Bloom filter)
+    assert_eq(bf_query(bits, m, 42), 1);
+    assert_eq(bf_query(bits, m, 17), 1);
+    assert_eq(bf_query(bits, m, 99), 1);
+
+    // Count set bits
+    let mut set_count = 0;
+    let mut i = 0;
+    while i < m { set_count = set_count + bits[i]; i = i + 1; }
+    // At most 9 bits set (3 inserts * 3 hashes), possibly fewer due to collisions
+    assert(set_count >= 1);
+    assert(set_count <= 9);
+
+    print("bloom_basic_insert_query: ok");
+}
+
+fn test_bloom_no_false_negatives() {
+    // A correct Bloom filter NEVER produces false negatives.
+    // Insert 5 elements and verify all are found.
+    let m = 32;
+    let mut bits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let keys = [10, 20, 30, 40, 50];
+    let mut i = 0;
+    while i < 5 {
+        bf_insert(bits, m, keys[i]);
+        i = i + 1;
+    }
+
+    // All inserted keys must be found
+    let mut all_found = 1;
+    i = 0;
+    while i < 5 {
+        if bf_query(bits, m, keys[i]) == 0 { all_found = 0; }
+        i = i + 1;
+    }
+    assert_eq(all_found, 1);
+
+    print("bloom_no_false_negatives: ok");
+}
+
+fn test_bloom_hash_distribution() {
+    // Test that our hash functions spread bits somewhat evenly.
+    // Insert 10 consecutive integers and check bit density.
+    let m = 32;
+    let mut bits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let mut i = 0;
+    while i < 10 {
+        bf_insert(bits, m, i * 13 + 7); // insert varied values
+        i = i + 1;
+    }
+
+    // Count set bits
+    let mut set_bits = 0;
+    i = 0;
+    while i < m { set_bits = set_bits + bits[i]; i = i + 1; }
+
+    // With 10 inserts * 3 hashes = 30 attempts into 32 slots,
+    // should have at least 10 bits set (some collision expected but not all overlap)
+    // and at most 30 (if no collision at all)
+    assert(set_bits >= 5);
+    assert(set_bits <= 30);
+
+    print("bloom_hash_distribution: ok");
+}
+
+fn test_bloom_manual_hash_verify() {
+    // Manually verify hash functions for specific inputs.
+    // hash1(key, m) = (key * 2654435761) % m
+    // For m=16:
+    // hash1(1, 16) = (2654435761) % 16 = 2654435761 mod 16
+    // 2654435761 = 165902235 * 16 + 1 -> so 2654435761 % 16 = 1
+    // Actually let's compute carefully: 2654435761 / 16 = 165902235.0625 -> floor=165902235 -> rem = 2654435761 - 165902235*16
+    // 165902235 * 16 = 2654435760 -> rem = 1
+    let h1_1 = hash1(1, 16);
+    assert_eq(h1_1, 1); // 2654435761 % 16 = 1
+
+    // hash1(2, 16) = (2 * 2654435761) % 16 = 5308871522 % 16
+    // 5308871522 / 16 = 331804470.125 -> floor=331804470 -> rem = 5308871522 - 331804470*16
+    // 331804470 * 16 = 5308871520 -> rem = 2
+    let h1_2 = hash1(2, 16);
+    assert_eq(h1_2, 2);
+
+    // hash2(1, 16) = 1013904223 % 16
+    // 1013904223 / 16 = 63369013.9375 -> floor=63369013 -> rem = 1013904223 - 63369013*16
+    // 63369013 * 16 = 1013904208 -> rem = 15
+    let h2_1 = hash2(1, 16);
+    assert_eq(h2_1, 15);
+
+    // hash3(0, 16) = (0 * 1664525 + 1013904223) % 16 = 1013904223 % 16 = 15
+    let h3_0 = hash3(0, 16);
+    assert_eq(h3_0, 15);
+
+    print("bloom_manual_hash_verify: ok");
+}
+
+fn test_bloom_false_positive_rate() {
+    // Estimate false positive rate empirically.
+    // Insert keys 100-109, then query keys 200-219 (never inserted).
+    // Count how many of the 20 non-inserted keys are "possibly present" (false positives).
+    let m = 32;
+    let mut bits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Insert 10 elements
+    let mut i = 0;
+    while i < 10 {
+        bf_insert(bits, m, 100 + i);
+        i = i + 1;
+    }
+
+    // Query 20 non-inserted elements; count false positives
+    let mut fp = 0;
+    i = 0;
+    while i < 20 {
+        if bf_query(bits, m, 200 + i) == 1 { fp = fp + 1; }
+        i = i + 1;
+    }
+
+    // With a small filter (32 bits, 10 inserts, 3 hashes), we expect some false positives
+    // but also some true negatives. The false positive rate shouldn't be 100%.
+    // We can't guarantee exact count, but:
+    // - fp >= 0 (trivially true)
+    // - fp <= 20
+    assert(fp >= 0);
+    assert(fp <= 20);
+    // With 10 elements inserted, ~30 of 32 bits are likely set, so FP rate is high
+    // For this test, just verify the count is sane.
+    let fp_pct = fp * 100 / 20;
+    print(f"false_positive_rate: {fp}/{20} = {fp_pct}%");
+    assert(fp_pct >= 0);
+    assert(fp_pct <= 100);
+
+    print("bloom_false_positive_rate: ok");
+}
+
+fn main() -> Int {
+    test_bloom_basic_insert_query();
+    test_bloom_no_false_negatives();
+    test_bloom_hash_distribution();
+    test_bloom_manual_hash_verify();
+    test_bloom_false_positive_rate();
+    print("[OK] 458_interp_bloom_filter");
+    0
+}

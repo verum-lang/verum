@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, refinement, colon, error
+// @description: Test detection of refinement missing colon between variable and predicate
+// @expected-error: E018
+
+// Refinement needs colon between variable name and predicate
+type PositiveInt is Int { value value > 0 };

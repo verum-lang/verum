@@ -1,0 +1,310 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, iterator
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Iterator protocol operations — next, has_next, collect, count
+
+// Simulate iterators with index-based iteration over fixed-size arrays.
+// ArrayIter tracks current position and length for manual iteration.
+
+type Arr5 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, size: Int };
+type ArrayIter is { arr: Arr5, pos: Int };
+
+fn arr5(v0: Int, v1: Int, v2: Int, v3: Int, v4: Int) -> Arr5 {
+    Arr5 { a0: v0, a1: v1, a2: v2, a3: v3, a4: v4, size: 5 }
+}
+
+fn arr5_get(a: Arr5, idx: Int) -> Int {
+    if idx == 0 { a.a0 }
+    else if idx == 1 { a.a1 }
+    else if idx == 2 { a.a2 }
+    else if idx == 3 { a.a3 }
+    else { a.a4 }
+}
+
+fn arr5_set(a: Arr5, idx: Int, val: Int) -> Arr5 {
+    let mut r = Arr5 { a0: a.a0, a1: a.a1, a2: a.a2, a3: a.a3, a4: a.a4, size: a.size };
+    if idx == 0 { r.a0 = val; }
+    else if idx == 1 { r.a1 = val; }
+    else if idx == 2 { r.a2 = val; }
+    else if idx == 3 { r.a3 = val; }
+    else { r.a4 = val; }
+    r
+}
+
+fn iter_new(a: Arr5) -> ArrayIter {
+    ArrayIter { arr: a, pos: 0 }
+}
+
+fn iter_has_next(it: ArrayIter) -> Bool {
+    let p = it.pos;
+    let s = it.arr.size;
+    p < s
+}
+
+fn iter_current(it: ArrayIter) -> Int {
+    arr5_get(it.arr, it.pos)
+}
+
+fn iter_advance(it: ArrayIter) -> ArrayIter {
+    ArrayIter { arr: it.arr, pos: it.pos + 1 }
+}
+
+// =============================================================================
+// Test 1: Iterate through a range manually
+// =============================================================================
+
+@test
+fn test_range_iteration() {
+    let a = arr5(10, 20, 30, 40, 50);
+    let mut it = iter_new(a);
+
+    let mut sum = 0;
+    let mut count = 0;
+    while iter_has_next(it) {
+        sum = sum + iter_current(it);
+        count = count + 1;
+        it = iter_advance(it);
+    }
+
+    assert_eq(count, 5);
+    assert_eq(sum, 150);
+
+    // Verify individual values by re-iterating
+    let mut it2 = iter_new(a);
+    assert_eq(iter_current(it2), 10);
+    it2 = iter_advance(it2);
+    assert_eq(iter_current(it2), 20);
+    it2 = iter_advance(it2);
+    assert_eq(iter_current(it2), 30);
+    it2 = iter_advance(it2);
+    assert_eq(iter_current(it2), 40);
+    it2 = iter_advance(it2);
+    assert_eq(iter_current(it2), 50);
+
+    print("  test_range_iteration: ok");
+}
+
+// =============================================================================
+// Test 2: Count elements matching a predicate (filter + count)
+// =============================================================================
+
+fn is_even(x: Int) -> Bool {
+    x % 2 == 0
+}
+
+fn is_greater_than_25(x: Int) -> Bool {
+    x > 25
+}
+
+@test
+fn test_filter_count() {
+    let a = arr5(10, 15, 20, 25, 30);
+    let mut it = iter_new(a);
+
+    // Count even numbers
+    let mut even_count = 0;
+    while iter_has_next(it) {
+        if is_even(iter_current(it)) {
+            even_count = even_count + 1;
+        }
+        it = iter_advance(it);
+    }
+    assert_eq(even_count, 3);  // 10, 20, 30
+
+    // Count elements > 25
+    let mut it2 = iter_new(a);
+    let mut big_count = 0;
+    while iter_has_next(it2) {
+        if is_greater_than_25(iter_current(it2)) {
+            big_count = big_count + 1;
+        }
+        it2 = iter_advance(it2);
+    }
+    assert_eq(big_count, 1);  // 30
+
+    print("  test_filter_count: ok");
+}
+
+// =============================================================================
+// Test 3: Map and collect to array
+// =============================================================================
+
+fn double_val(x: Int) -> Int {
+    x * 2
+}
+
+fn square_val(x: Int) -> Int {
+    x * x
+}
+
+@test
+fn test_map_collect() {
+    let a = arr5(1, 2, 3, 4, 5);
+    let mut it = iter_new(a);
+
+    // Map: double each element, collect into new Arr5
+    let mut result = arr5(0, 0, 0, 0, 0);
+    let mut idx = 0;
+    while iter_has_next(it) {
+        let val = double_val(iter_current(it));
+        result = arr5_set(result, idx, val);
+        idx = idx + 1;
+        it = iter_advance(it);
+    }
+
+    assert_eq(arr5_get(result, 0), 2);
+    assert_eq(arr5_get(result, 1), 4);
+    assert_eq(arr5_get(result, 2), 6);
+    assert_eq(arr5_get(result, 3), 8);
+    assert_eq(arr5_get(result, 4), 10);
+
+    // Map: square each element
+    let mut it2 = iter_new(a);
+    let mut sq_result = arr5(0, 0, 0, 0, 0);
+    let mut idx2 = 0;
+    while iter_has_next(it2) {
+        let val = square_val(iter_current(it2));
+        sq_result = arr5_set(sq_result, idx2, val);
+        idx2 = idx2 + 1;
+        it2 = iter_advance(it2);
+    }
+
+    assert_eq(arr5_get(sq_result, 0), 1);
+    assert_eq(arr5_get(sq_result, 1), 4);
+    assert_eq(arr5_get(sq_result, 2), 9);
+    assert_eq(arr5_get(sq_result, 3), 16);
+    assert_eq(arr5_get(sq_result, 4), 25);
+
+    print("  test_map_collect: ok");
+}
+
+// =============================================================================
+// Test 4: Zip two sequences
+// =============================================================================
+
+@test
+fn test_zip_iterate() {
+    let a = arr5(1, 2, 3, 4, 5);
+    let b = arr5(10, 20, 30, 40, 50);
+    let mut it_a = iter_new(a);
+    let mut it_b = iter_new(b);
+
+    // Zip: produce sum of corresponding pairs
+    let mut zipped_sum = arr5(0, 0, 0, 0, 0);
+    let mut idx = 0;
+    while iter_has_next(it_a) {
+        let sum_val = iter_current(it_a) + iter_current(it_b);
+        zipped_sum = arr5_set(zipped_sum, idx, sum_val);
+        idx = idx + 1;
+        it_a = iter_advance(it_a);
+        it_b = iter_advance(it_b);
+    }
+
+    assert_eq(arr5_get(zipped_sum, 0), 11);
+    assert_eq(arr5_get(zipped_sum, 1), 22);
+    assert_eq(arr5_get(zipped_sum, 2), 33);
+    assert_eq(arr5_get(zipped_sum, 3), 44);
+    assert_eq(arr5_get(zipped_sum, 4), 55);
+
+    // Zip: produce product of corresponding pairs
+    let mut it_a2 = iter_new(a);
+    let mut it_b2 = iter_new(b);
+    let mut zipped_prod = arr5(0, 0, 0, 0, 0);
+    let mut idx2 = 0;
+    while iter_has_next(it_a2) {
+        let prod_val = iter_current(it_a2) * iter_current(it_b2);
+        zipped_prod = arr5_set(zipped_prod, idx2, prod_val);
+        idx2 = idx2 + 1;
+        it_a2 = iter_advance(it_a2);
+        it_b2 = iter_advance(it_b2);
+    }
+
+    assert_eq(arr5_get(zipped_prod, 0), 10);
+    assert_eq(arr5_get(zipped_prod, 1), 40);
+    assert_eq(arr5_get(zipped_prod, 2), 90);
+    assert_eq(arr5_get(zipped_prod, 3), 160);
+    assert_eq(arr5_get(zipped_prod, 4), 250);
+
+    print("  test_zip_iterate: ok");
+}
+
+// =============================================================================
+// Test 5: Chain two sequences
+// =============================================================================
+
+@test
+fn test_chain_iterate() {
+    // Chain: iterate a first, then b
+    // Using two Arr5s of length 3 each (set len to 3)
+    let mut a = arr5(1, 2, 3, 0, 0);
+    a.size = 3;
+    let mut b = arr5(4, 5, 6, 0, 0);
+    b.size = 3;
+
+    let mut it_a = iter_new(a);
+    let mut it_b = iter_new(b);
+
+    // Collect chained values into a full-size result
+    let mut result = arr5(0, 0, 0, 0, 0);
+    result.size = 6;  // logically 6 elements but only 5 slots
+    let mut idx = 0;
+
+    // Iterate first sequence
+    while iter_has_next(it_a) {
+        result = arr5_set(result, idx, iter_current(it_a));
+        idx = idx + 1;
+        it_a = iter_advance(it_a);
+    }
+
+    // Then iterate second sequence
+    while iter_has_next(it_b) {
+        if idx < 5 {
+            result = arr5_set(result, idx, iter_current(it_b));
+        }
+        idx = idx + 1;
+        it_b = iter_advance(it_b);
+    }
+
+    // Total elements processed
+    assert_eq(idx, 6);
+
+    // Check first 5 values (our array can hold 5)
+    assert_eq(arr5_get(result, 0), 1);
+    assert_eq(arr5_get(result, 1), 2);
+    assert_eq(arr5_get(result, 2), 3);
+    assert_eq(arr5_get(result, 3), 4);
+    assert_eq(arr5_get(result, 4), 5);
+
+    // Verify sum of all chained elements
+    let mut sum = 0;
+    let mut it_a2 = iter_new(a);
+    while iter_has_next(it_a2) {
+        sum = sum + iter_current(it_a2);
+        it_a2 = iter_advance(it_a2);
+    }
+    let mut it_b2 = iter_new(b);
+    while iter_has_next(it_b2) {
+        sum = sum + iter_current(it_b2);
+        it_b2 = iter_advance(it_b2);
+    }
+    assert_eq(sum, 21);  // 1+2+3+4+5+6
+
+    print("  test_chain_iterate: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_range_iteration();
+    test_filter_count();
+    test_map_collect();
+    test_zip_iterate();
+    test_chain_iterate();
+    print("[OK] 007_iterator_protocols");
+    0
+}

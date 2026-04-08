@@ -1,0 +1,744 @@
+// =============================================================================
+// agent_test.vr - Tests for LLM agent and inference types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, agent, llm, role, message, request, tokenizer, chat, prompt,
+//        function-calling, json-schema, tool-choice
+// @description: Tests for Role, Message, Request, EOS_TOKEN, MessageContent,
+//               ImageDetail, ChatMessage, FewShotPrompt, ChainOfThoughtPrompt,
+//               ToolChoice, JsonSchema, FunctionSchema, FunctionCall,
+//               FunctionCallResult, ParseError, BPETokenizer, KVCache,
+//               PagedKVCache, QuantizedLinear, SentencePieceTokenizer.
+// =============================================================================
+
+mount core.math.agent.{
+    Role, Message, Request, EOS_TOKEN,
+    MessageContent, ImageDetail, ChatMessage,
+    FewShotPrompt, ChainOfThoughtPrompt,
+    ToolChoice, JsonSchema, FunctionSchema,
+    FunctionCall, FunctionCallResult, ParseError,
+    BPETokenizer, KVCache, PagedKVCache, QuantizedLinear,
+    SentencePieceTokenizer, AttentionKeyValueStore,
+    PagedAttentionStore,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Role Variants
+// =============================================================================
+
+@test
+fn test_role_system() {
+    let r = Role.System;
+    assert(r is Role.System);
+}
+
+@test
+fn test_role_user() {
+    let r = Role.User;
+    assert(r is Role.User);
+}
+
+@test
+fn test_role_assistant() {
+    let r = Role.Assistant;
+    assert(r is Role.Assistant);
+}
+
+@test
+fn test_role_tool_result() {
+    let r = Role.ToolResult;
+    assert(r is Role.ToolResult);
+}
+
+@test
+fn test_role_distinctness() {
+    assert(!(Role.System is Role.User));
+    assert(!(Role.System is Role.Assistant));
+    assert(!(Role.System is Role.ToolResult));
+    assert(!(Role.User is Role.Assistant));
+    assert(!(Role.User is Role.ToolResult));
+    assert(!(Role.Assistant is Role.ToolResult));
+}
+
+@test
+fn test_role_match_exhaustive() {
+    let roles = [
+        Role.System,
+        Role.User,
+        Role.Assistant,
+        Role.ToolResult,
+    ];
+    let mut counts = [0, 0, 0, 0];
+
+    for role in roles {
+        match role {
+            Role.System => counts[0] = counts[0] + 1,
+            Role.User => counts[1] = counts[1] + 1,
+            Role.Assistant => counts[2] = counts[2] + 1,
+            Role.ToolResult => counts[3] = counts[3] + 1,
+        }
+    }
+    assert_eq(counts[0], 1);
+    assert_eq(counts[1], 1);
+    assert_eq(counts[2], 1);
+    assert_eq(counts[3], 1);
+}
+
+// =============================================================================
+// Section 2: Message Construction
+// =============================================================================
+
+@test
+fn test_message_system() {
+    let msg = Message {
+        role: Role.System,
+        content: "You are a helpful assistant.",
+    };
+    assert(msg.role is Role.System);
+    assert_eq(msg.content, "You are a helpful assistant.");
+}
+
+@test
+fn test_message_user() {
+    let msg = Message {
+        role: Role.User,
+        content: "Hello!",
+    };
+    assert(msg.role is Role.User);
+    assert_eq(msg.content, "Hello!");
+}
+
+@test
+fn test_message_assistant() {
+    let msg = Message {
+        role: Role.Assistant,
+        content: "Hi there! How can I help?",
+    };
+    assert(msg.role is Role.Assistant);
+}
+
+@test
+fn test_message_tool_result() {
+    let msg = Message {
+        role: Role.ToolResult,
+        content: "{\"result\": 42}",
+    };
+    assert(msg.role is Role.ToolResult);
+}
+
+@test
+fn test_message_empty_content() {
+    let msg = Message {
+        role: Role.User,
+        content: "",
+    };
+    assert_eq(msg.content, "");
+}
+
+// =============================================================================
+// Section 3: Request Construction
+// =============================================================================
+
+@test
+fn test_request_construction() {
+    let input: List<U32> = List.from(&[100 as U32, 200 as U32, 300 as U32]);
+    let gen: List<U32> = List.new();
+    let req = Request {
+        id: 1 as U64,
+        input_ids: input,
+        max_new_tokens: 50 as USize,
+        generated: gen,
+        is_complete: false,
+    };
+    assert_eq(req.id, 1 as U64);
+    assert_eq(req.max_new_tokens, 50 as USize);
+    assert(!req.is_complete);
+}
+
+@test
+fn test_request_with_generated() {
+    let input: List<U32> = List.from(&[10 as U32, 20 as U32]);
+    let gen: List<U32> = List.from(&[30 as U32, 40 as U32, 50 as U32]);
+    let req = Request {
+        id: 42 as U64,
+        input_ids: input,
+        max_new_tokens: 100 as USize,
+        generated: gen,
+        is_complete: false,
+    };
+    assert_eq(req.id, 42 as U64);
+    assert_eq(req.generated.len(), 3);
+    assert(!req.is_complete);
+}
+
+@test
+fn test_request_completed() {
+    let input: List<U32> = List.from(&[1 as U32, 2 as U32, 3 as U32]);
+    let gen: List<U32> = List.from(&[4 as U32, 5 as U32, 6 as U32, EOS_TOKEN]);
+    let req = Request {
+        id: 7 as U64,
+        input_ids: input,
+        max_new_tokens: 10 as USize,
+        generated: gen,
+        is_complete: true,
+    };
+    assert(req.is_complete);
+}
+
+@test
+fn test_request_empty_input() {
+    let req = Request {
+        id: 0 as U64,
+        input_ids: List.new(),
+        max_new_tokens: 256 as USize,
+        generated: List.new(),
+        is_complete: false,
+    };
+    assert_eq(req.input_ids.len(), 0);
+    assert_eq(req.generated.len(), 0);
+}
+
+// =============================================================================
+// Section 4: EOS_TOKEN Constant
+// =============================================================================
+
+@test
+fn test_eos_token_value() {
+    assert_eq(EOS_TOKEN, 2 as U32);
+}
+
+@test
+fn test_eos_token_in_generated() {
+    let generated: List<U32> = List.from(&[10 as U32, 20 as U32, 30 as U32, EOS_TOKEN]);
+    let last = generated[generated.len() - 1];
+    assert_eq(last, EOS_TOKEN);
+}
+
+// =============================================================================
+// Section 5: MessageContent Variants
+// =============================================================================
+
+@test
+fn test_message_content_text() {
+    let mc = MessageContent.TextContent("hello world");
+    assert(mc is MessageContent.TextContent);
+}
+
+@test
+fn test_message_content_image_url() {
+    let mc = MessageContent.ImageUrl {
+        url: "https://example.com/image.png",
+        detail: ImageDetail.Auto,
+    };
+    assert(mc is MessageContent.ImageUrl);
+}
+
+@test
+fn test_message_content_function_call() {
+    let mc = MessageContent.FunctionCallContent {
+        name: "get_weather",
+        arguments: "{\"city\": \"NYC\"}",
+    };
+    assert(mc is MessageContent.FunctionCallContent);
+}
+
+@test
+fn test_message_content_function_result() {
+    let mc = MessageContent.FunctionResultContent {
+        name: "get_weather",
+        content: "{\"temp\": 72}",
+    };
+    assert(mc is MessageContent.FunctionResultContent);
+}
+
+@test
+fn test_message_content_multipart() {
+    let parts: List<MessageContent> = List.from(&[
+        MessageContent.TextContent("look at this"),
+        MessageContent.ImageUrl {
+            url: "https://example.com/img.jpg",
+            detail: ImageDetail.High,
+        },
+    ]);
+    let mc = MessageContent.MultiPart(parts);
+    assert(mc is MessageContent.MultiPart);
+}
+
+@test
+fn test_message_content_distinctness() {
+    let text = MessageContent.TextContent("x");
+    let img = MessageContent.ImageUrl { url: "u", detail: ImageDetail.Low };
+    let call = MessageContent.FunctionCallContent { name: "f", arguments: "{}" };
+    let result = MessageContent.FunctionResultContent { name: "f", content: "ok" };
+
+    assert(!(text is MessageContent.ImageUrl));
+    assert(!(img is MessageContent.FunctionCallContent));
+    assert(!(call is MessageContent.FunctionResultContent));
+    assert(!(result is MessageContent.TextContent));
+}
+
+// =============================================================================
+// Section 6: ImageDetail Variants
+// =============================================================================
+
+@test
+fn test_image_detail_auto() {
+    let d = ImageDetail.Auto;
+    assert(d is ImageDetail.Auto);
+}
+
+@test
+fn test_image_detail_low() {
+    let d = ImageDetail.Low;
+    assert(d is ImageDetail.Low);
+}
+
+@test
+fn test_image_detail_high() {
+    let d = ImageDetail.High;
+    assert(d is ImageDetail.High);
+}
+
+@test
+fn test_image_detail_distinctness() {
+    assert(!(ImageDetail.Auto is ImageDetail.Low));
+    assert(!(ImageDetail.Auto is ImageDetail.High));
+    assert(!(ImageDetail.Low is ImageDetail.High));
+}
+
+@test
+fn test_image_detail_match_exhaustive() {
+    let details = [ImageDetail.Auto, ImageDetail.Low, ImageDetail.High];
+    let mut counts = [0, 0, 0];
+    for d in details {
+        match d {
+            ImageDetail.Auto => counts[0] = counts[0] + 1,
+            ImageDetail.Low => counts[1] = counts[1] + 1,
+            ImageDetail.High => counts[2] = counts[2] + 1,
+        }
+    }
+    assert_eq(counts[0], 1);
+    assert_eq(counts[1], 1);
+    assert_eq(counts[2], 1);
+}
+
+// =============================================================================
+// Section 7: ChatMessage Construction
+// =============================================================================
+
+@test
+fn test_chat_message_text_constructor() {
+    let msg = ChatMessage.text(Role.User, "Hello");
+    assert(msg.role is Role.User);
+    assert(msg.content is MessageContent.TextContent);
+}
+
+@test
+fn test_chat_message_system_constructor() {
+    let msg = ChatMessage.system("You are helpful.");
+    assert(msg.role is Role.System);
+    assert(msg.content is MessageContent.TextContent);
+}
+
+@test
+fn test_chat_message_user_constructor() {
+    let msg = ChatMessage.user("What is 2+2?");
+    assert(msg.role is Role.User);
+}
+
+@test
+fn test_chat_message_assistant_constructor() {
+    let msg = ChatMessage.assistant("The answer is 4.");
+    assert(msg.role is Role.Assistant);
+}
+
+@test
+fn test_chat_message_tool_result_constructor() {
+    let msg = ChatMessage.tool_result("calc", "42");
+    assert(msg.role is Role.ToolResult);
+    assert(msg.content is MessageContent.FunctionResultContent);
+}
+
+@test
+fn test_chat_message_name_field_none() {
+    let msg = ChatMessage.user("test");
+    assert(msg.name is Maybe.None);
+}
+
+@test
+fn test_chat_message_tool_result_name_some() {
+    let msg = ChatMessage.tool_result("my_tool", "result");
+    assert(msg.name is Maybe.Some);
+}
+
+// =============================================================================
+// Section 8: ToolChoice Variants
+// =============================================================================
+
+@test
+fn test_tool_choice_auto() {
+    let tc = ToolChoice.Auto;
+    assert(tc is ToolChoice.Auto);
+}
+
+@test
+fn test_tool_choice_required() {
+    let tc = ToolChoice.Required;
+    assert(tc is ToolChoice.Required);
+}
+
+@test
+fn test_tool_choice_none() {
+    let tc = ToolChoice.None;
+    assert(tc is ToolChoice.None);
+}
+
+@test
+fn test_tool_choice_specific() {
+    let tc = ToolChoice.Specific("get_weather");
+    assert(tc is ToolChoice.Specific);
+}
+
+@test
+fn test_tool_choice_distinctness() {
+    assert(!(ToolChoice.Auto is ToolChoice.Required));
+    assert(!(ToolChoice.Auto is ToolChoice.None));
+    assert(!(ToolChoice.Required is ToolChoice.None));
+    assert(!(ToolChoice.None is ToolChoice.Specific));
+}
+
+@test
+fn test_tool_choice_match_exhaustive() {
+    let choices = [
+        ToolChoice.Auto,
+        ToolChoice.Required,
+        ToolChoice.None,
+        ToolChoice.Specific("calc"),
+    ];
+    let mut counts = [0, 0, 0, 0];
+    for choice in choices {
+        match choice {
+            ToolChoice.Auto => counts[0] = counts[0] + 1,
+            ToolChoice.Required => counts[1] = counts[1] + 1,
+            ToolChoice.None => counts[2] = counts[2] + 1,
+            ToolChoice.Specific(_) => counts[3] = counts[3] + 1,
+        }
+    }
+    assert_eq(counts[0], 1);
+    assert_eq(counts[1], 1);
+    assert_eq(counts[2], 1);
+    assert_eq(counts[3], 1);
+}
+
+// =============================================================================
+// Section 9: JsonSchema Constructors
+// =============================================================================
+
+@test
+fn test_json_schema_string() {
+    let schema = JsonSchema.string();
+    assert_eq(schema.schema_type, "string");
+    assert(schema.description is Maybe.None);
+    assert(schema.properties is Maybe.None);
+    assert(schema.required is Maybe.None);
+    assert(schema.items is Maybe.None);
+    assert(schema.enum_values is Maybe.None);
+}
+
+@test
+fn test_json_schema_number() {
+    let schema = JsonSchema.number();
+    assert_eq(schema.schema_type, "number");
+}
+
+@test
+fn test_json_schema_integer() {
+    let schema = JsonSchema.integer();
+    assert_eq(schema.schema_type, "integer");
+}
+
+@test
+fn test_json_schema_boolean() {
+    let schema = JsonSchema.boolean();
+    assert_eq(schema.schema_type, "boolean");
+}
+
+@test
+fn test_json_schema_array() {
+    let items = JsonSchema.string();
+    let schema = JsonSchema.array(items);
+    assert_eq(schema.schema_type, "array");
+    assert(schema.items is Maybe.Some);
+}
+
+@test
+fn test_json_schema_with_description() {
+    let schema = JsonSchema.string().with_description("A name");
+    assert(schema.description is Maybe.Some);
+}
+
+@test
+fn test_json_schema_with_enum() {
+    let values: List<Text> = List.from(&["red", "green", "blue"]);
+    let schema = JsonSchema.string().with_enum(values);
+    assert(schema.enum_values is Maybe.Some);
+}
+
+// =============================================================================
+// Section 10: FunctionSchema
+// =============================================================================
+
+@test
+fn test_function_schema_new() {
+    let params = JsonSchema.object(List.from(&[
+        ("city", JsonSchema.string(), true),
+        ("unit", JsonSchema.string(), false),
+    ]));
+    let fs = FunctionSchema.new("get_weather", "Get weather for a city", params);
+    assert_eq(fs.name, "get_weather");
+    assert_eq(fs.description, "Get weather for a city");
+    assert_eq(fs.parameters.schema_type, "object");
+}
+
+@test
+fn test_function_schema_simple() {
+    let fs = FunctionSchema.new("noop", "No-op function", JsonSchema.object(List.new()));
+    assert_eq(fs.name, "noop");
+}
+
+// =============================================================================
+// Section 11: FunctionCall
+// =============================================================================
+
+@test
+fn test_function_call_new() {
+    let call = FunctionCall.new("call_123", "get_weather", "{\"city\":\"NYC\"}");
+    assert_eq(call.id, "call_123");
+    assert_eq(call.name, "get_weather");
+    assert_eq(call.arguments, "{\"city\":\"NYC\"}");
+}
+
+@test
+fn test_function_call_direct_construction() {
+    let call = FunctionCall {
+        id: "abc",
+        name: "calc",
+        arguments: "{\"expr\":\"2+2\"}",
+    };
+    assert_eq(call.id, "abc");
+    assert_eq(call.name, "calc");
+}
+
+// =============================================================================
+// Section 12: FunctionCallResult
+// =============================================================================
+
+@test
+fn test_function_call_result_type_exists() {
+    fn accept_result(r: &FunctionCallResult) -> Bool { true }
+    let _ = accept_result;
+}
+
+@test
+fn test_function_call_result_has_call_id_field() {
+    fn get_call_id(r: &FunctionCallResult) -> &Text { &r.call_id }
+    let _ = get_call_id;
+}
+
+// =============================================================================
+// Section 13: ParseError
+// =============================================================================
+
+@test
+fn test_parse_error_new() {
+    let e = ParseError.new("unexpected token");
+    assert_eq(e.message, "unexpected token");
+    assert(e.position is Maybe.None);
+}
+
+@test
+fn test_parse_error_at() {
+    let e = ParseError.at("bad char", 42 as USize);
+    assert_eq(e.message, "bad char");
+    assert(e.position is Maybe.Some);
+}
+
+@test
+fn test_parse_error_position_none() {
+    let e = ParseError.new("error");
+    assert(e.position is Maybe.None);
+}
+
+@test
+fn test_parse_error_position_some() {
+    let e = ParseError.at("error", 10 as USize);
+    match e.position {
+        Maybe.Some(pos) => assert_eq(pos, 10 as USize),
+        Maybe.None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 14: FewShotPrompt
+// =============================================================================
+
+@test
+fn test_few_shot_prompt_new() {
+    let prompt = FewShotPrompt.new("You are a translator.");
+    assert_eq(prompt.system, "You are a translator.");
+    assert_eq(prompt.examples.len(), 0);
+    assert(prompt.prefix is Maybe.None);
+    assert(prompt.suffix is Maybe.None);
+    assert_eq(prompt.input_label, "Input");
+    assert_eq(prompt.output_label, "Output");
+}
+
+@test
+fn test_few_shot_prompt_add_example() {
+    let mut prompt = FewShotPrompt.new("Translate English to French.");
+    prompt.add_example("Hello", "Bonjour");
+    prompt.add_example("Goodbye", "Au revoir");
+    assert_eq(prompt.example_count(), 2);
+}
+
+@test
+fn test_few_shot_prompt_example_count_empty() {
+    let prompt = FewShotPrompt.new("system");
+    assert_eq(prompt.example_count(), 0);
+}
+
+@test
+fn test_few_shot_prompt_with_prefix() {
+    let mut prompt = FewShotPrompt.new("system");
+    prompt.with_prefix("Please translate:");
+    assert(prompt.prefix is Maybe.Some);
+}
+
+@test
+fn test_few_shot_prompt_with_suffix() {
+    let mut prompt = FewShotPrompt.new("system");
+    prompt.with_suffix("Answer concisely.");
+    assert(prompt.suffix is Maybe.Some);
+}
+
+@test
+fn test_few_shot_prompt_with_labels() {
+    let mut prompt = FewShotPrompt.new("system");
+    prompt.with_labels("Question", "Answer");
+    assert_eq(prompt.input_label, "Question");
+    assert_eq(prompt.output_label, "Answer");
+}
+
+// =============================================================================
+// Section 15: ChainOfThoughtPrompt
+// =============================================================================
+
+@test
+fn test_chain_of_thought_prompt_new() {
+    let prompt = ChainOfThoughtPrompt.new("You solve math problems.");
+    assert_eq(prompt.reasoning_prefix, "Let me think through this step by step:");
+    assert_eq(prompt.answer_prefix, "Therefore, the answer is:");
+}
+
+@test
+fn test_chain_of_thought_prompt_with_reasoning_prefix() {
+    let mut prompt = ChainOfThoughtPrompt.new("system");
+    prompt.with_reasoning_prefix("Step by step:");
+    assert_eq(prompt.reasoning_prefix, "Step by step:");
+}
+
+@test
+fn test_chain_of_thought_prompt_with_answer_prefix() {
+    let mut prompt = ChainOfThoughtPrompt.new("system");
+    prompt.with_answer_prefix("Final answer:");
+    assert_eq(prompt.answer_prefix, "Final answer:");
+}
+
+// =============================================================================
+// Section 16: Type Import Verification for Complex Types
+// =============================================================================
+
+@test
+fn test_bpe_tokenizer_type() {
+    fn accept(t: &BPETokenizer) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_sentence_piece_tokenizer_type() {
+    fn accept(t: &SentencePieceTokenizer) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_kv_cache_type() {
+    fn accept(c: &KVCache) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_paged_kv_cache_type() {
+    fn accept(c: &PagedKVCache) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_quantized_linear_type() {
+    fn accept(l: &QuantizedLinear) -> Bool { true }
+    let _ = accept;
+}
+
+@test
+fn test_attention_kv_store_alias() {
+    // AttentionKeyValueStore is alias for KVCache
+    fn accept_kv(c: &AttentionKeyValueStore) -> Bool { true }
+    let _ = accept_kv;
+}
+
+@test
+fn test_paged_attention_store_alias() {
+    // PagedAttentionStore is alias for PagedKVCache
+    fn accept_paged(c: &PagedAttentionStore) -> Bool { true }
+    let _ = accept_paged;
+}
+
+// =============================================================================
+// Section 17: Function Import Existence — Sampling & Attention
+// =============================================================================
+
+mount core.math.agent.{
+    flash_attention, sample_top_p, sample_temperature,
+    sample_greedy, quantize_per_channel,
+};
+
+@test
+fn test_flash_attention_fn_exists() {
+    let _ = flash_attention;
+}
+
+@test
+fn test_sample_top_p_fn_exists() {
+    let _ = sample_top_p;
+}
+
+@test
+fn test_sample_temperature_fn_exists() {
+    let _ = sample_temperature;
+}
+
+@test
+fn test_sample_greedy_fn_exists() {
+    let _ = sample_greedy;
+}
+
+@test
+fn test_quantize_per_channel_fn_exists() {
+    let _ = quantize_per_channel;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

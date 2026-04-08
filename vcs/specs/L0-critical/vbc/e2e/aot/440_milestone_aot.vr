@@ -1,0 +1,152 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, 440
+// @timeout: 30000
+
+// Milestone test 440: mixed algorithms
+
+// Fibonacci with matrix exponentiation (2x2 matrix)
+type M2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn m2_mul(x: M2, y: M2) -> M2 {
+    M2 {
+        a: x.a * y.a + x.b * y.c,
+        b: x.a * y.b + x.b * y.d,
+        c: x.c * y.a + x.d * y.c,
+        d: x.c * y.b + x.d * y.d
+    }
+}
+
+fn m2_pow(m: M2, n: Int) -> M2 {
+    let mut result = M2 { a: 1, b: 0, c: 0, d: 1 }; // identity
+    let mut base = m;
+    let mut exp = n;
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = m2_mul(result, base);
+        }
+        base = m2_mul(base, base);
+        exp = exp / 2;
+    }
+    result
+}
+
+fn fib_fast(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let m = M2 { a: 1, b: 1, c: 1, d: 0 };
+    let r = m2_pow(m, n);
+    r.b
+}
+
+// Ackermann-Peter function for small values
+@allow(unbounded_recursion)
+fn ackermann(m: Int, n: Int) -> Int {
+    if m == 0 { return n + 1; }
+    if n == 0 { return ackermann(m - 1, 1); }
+    ackermann(m - 1, ackermann(m, n - 1))
+}
+
+// Integer log base b
+fn ilog(n: Int, base: Int) -> Int {
+    let mut count = 0;
+    let mut v = n;
+    while v >= base {
+        v = v / base;
+        count = count + 1;
+    }
+    count
+}
+
+// Digital root: keep summing digits until single digit
+fn digital_root(n: Int) -> Int {
+    let mut v = n;
+    while v >= 10 {
+        let mut s = 0;
+        while v > 0 {
+            s = s + v % 10;
+            v = v / 10;
+        }
+        v = s;
+    }
+    v
+}
+
+// Check if n is a happy number (digit squares eventually reach 1)
+fn is_happy(n: Int) -> Int {
+    let mut slow = n;
+    let mut fast = n;
+    let mut first = 1;
+    while first == 1 {
+        slow = digit_sq_sum(slow);
+        fast = digit_sq_sum(digit_sq_sum(fast));
+        first = 0;
+        if slow == fast { first = 0; }
+        else { first = 1; }
+    }
+    // Reached cycle - check if it's the "1" cycle
+    if slow == 1 { 1 } else { 0 }
+}
+
+fn digit_sq_sum(n: Int) -> Int {
+    let mut s = 0;
+    let mut v = n;
+    while v > 0 {
+        let d = v % 10;
+        s = s + d * d;
+        v = v / 10;
+    }
+    s
+}
+
+fn test_fib_fast() -> Int {
+    assert_eq(fib_fast(0), 0);
+    assert_eq(fib_fast(1), 1);
+    assert_eq(fib_fast(10), 55);
+    assert_eq(fib_fast(20), 6765);
+    1
+}
+
+fn test_ackermann() -> Int {
+    assert_eq(ackermann(0, 0), 1);
+    assert_eq(ackermann(1, 1), 3);
+    assert_eq(ackermann(2, 2), 7);
+    assert_eq(ackermann(3, 2), 29);
+    1
+}
+
+fn test_ilog() -> Int {
+    assert_eq(ilog(1, 10), 0);
+    assert_eq(ilog(10, 10), 1);
+    assert_eq(ilog(100, 10), 2);
+    assert_eq(ilog(1000, 10), 3);
+    assert_eq(ilog(8, 2), 3);
+    assert_eq(ilog(1024, 2), 10);
+    1
+}
+
+fn test_digital_root() -> Int {
+    assert_eq(digital_root(0), 0);
+    assert_eq(digital_root(5), 5);
+    assert_eq(digital_root(123), 6); // 1+2+3=6
+    assert_eq(digital_root(9999), 9); // 9+9+9+9=36, 3+6=9
+    1
+}
+
+fn test_happy() -> Int {
+    assert_eq(is_happy(1), 1);
+    assert_eq(is_happy(7), 1);   // 49->97->130->10->1
+    assert_eq(is_happy(10), 1);
+    assert_eq(is_happy(4), 0);   // enters cycle not reaching 1
+    1
+}
+
+fn main() -> Int {
+    test_fib_fast();
+    test_ackermann();
+    test_ilog();
+    test_digital_root();
+    test_happy();
+    print("[OK] 440_milestone_aot");
+    0
+}

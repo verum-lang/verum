@@ -1,0 +1,435 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, treap, randomized-bst, tree, priority
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Treap (randomized BST with priorities).
+// Uses a flat array representation where node i has:
+//   key, priority, left child index, right child index.
+// -1 means null. Max 16 nodes.
+
+// 16-element array
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_fill(v: Int) -> Arr16 {
+    Arr16 {
+        a0: v, a1: v, a2: v, a3: v,
+        a4: v, a5: v, a6: v, a7: v,
+        a8: v, a9: v, a10: v, a11: v,
+        a12: v, a13: v, a14: v, a15: v
+    }
+}
+
+// Treap stored as parallel arrays: keys, priorities, left children, right children
+type Treap is {
+    keys: Arr16,
+    pris: Arr16,
+    lefts: Arr16,
+    rights: Arr16,
+    root: Int,
+    count: Int
+};
+
+fn treap_new() -> Treap {
+    Treap {
+        keys: a16_fill(0),
+        pris: a16_fill(0),
+        lefts: a16_fill(-1),
+        rights: a16_fill(-1),
+        root: -1,
+        count: 0
+    }
+}
+
+fn treap_key(t: Treap, i: Int) -> Int { a16_get(t.keys, i) }
+fn treap_pri(t: Treap, i: Int) -> Int { a16_get(t.pris, i) }
+fn treap_left(t: Treap, i: Int) -> Int { a16_get(t.lefts, i) }
+fn treap_right(t: Treap, i: Int) -> Int { a16_get(t.rights, i) }
+
+// Allocate a new node
+fn treap_alloc(t: Treap, key: Int, pri: Int) -> Treap {
+    let idx = t.count;
+    Treap {
+        keys: a16_set(t.keys, idx, key),
+        pris: a16_set(t.pris, idx, pri),
+        lefts: t.lefts,
+        rights: t.rights,
+        root: t.root,
+        count: idx + 1
+    }
+}
+
+fn set_left(t: Treap, node: Int, child: Int) -> Treap {
+    Treap {
+        keys: t.keys, pris: t.pris,
+        lefts: a16_set(t.lefts, node, child),
+        rights: t.rights, root: t.root, count: t.count
+    }
+}
+
+fn set_right(t: Treap, node: Int, child: Int) -> Treap {
+    Treap {
+        keys: t.keys, pris: t.pris,
+        lefts: t.lefts,
+        rights: a16_set(t.rights, node, child),
+        root: t.root, count: t.count
+    }
+}
+
+fn set_root(t: Treap, r: Int) -> Treap {
+    Treap {
+        keys: t.keys, pris: t.pris,
+        lefts: t.lefts, rights: t.rights,
+        root: r, count: t.count
+    }
+}
+
+// Right rotate around idx: left child becomes parent
+fn rotate_right(t: Treap, idx: Int) -> Treap {
+    let lc = treap_left(t, idx);
+    let t2 = set_left(t, idx, treap_right(t, lc));
+    set_right(t2, lc, idx)
+}
+
+// Left rotate around idx: right child becomes parent
+fn rotate_left(t: Treap, idx: Int) -> Treap {
+    let rc = treap_right(t, idx);
+    let t2 = set_right(t, idx, treap_left(t, rc));
+    set_left(t2, rc, idx)
+}
+
+// BST insert without heap fixup
+fn bst_insert(t: Treap, key: Int, pri: Int) -> Treap {
+    let t2 = treap_alloc(t, key, pri);
+    let new_idx = t2.count - 1;
+    if t2.root == -1 {
+        return set_root(t2, new_idx);
+    }
+    let mut cur = t2.root;
+    let mut t3 = t2;
+    let mut placed = 0;
+    while placed == 0 {
+        let ck = treap_key(t3, cur);
+        if key < ck {
+            let lc = treap_left(t3, cur);
+            if lc == -1 {
+                t3 = set_left(t3, cur, new_idx);
+                placed = 1;
+            } else {
+                cur = lc;
+            }
+        } else {
+            let rc = treap_right(t3, cur);
+            if rc == -1 {
+                t3 = set_right(t3, cur, new_idx);
+                placed = 1;
+            } else {
+                cur = rc;
+            }
+        }
+    }
+    t3
+}
+
+// Find parent of a given node
+fn find_parent(t: Treap, target: Int) -> Int {
+    if t.root == target { return -1; }
+    let mut cur = t.root;
+    let mut parent = -1;
+    let tkey = treap_key(t, target);
+    while cur != -1 {
+        if cur == target { return parent; }
+        parent = cur;
+        if tkey < treap_key(t, cur) {
+            cur = treap_left(t, cur);
+        } else {
+            cur = treap_right(t, cur);
+        }
+    }
+    -1
+}
+
+fn is_left_child(t: Treap, parent: Int, child: Int) -> Int {
+    if treap_left(t, parent) == child { 1 } else { 0 }
+}
+
+fn replace_child(t: Treap, parent: Int, old_child: Int, new_child: Int) -> Treap {
+    if is_left_child(t, parent, old_child) == 1 {
+        set_left(t, parent, new_child)
+    } else {
+        set_right(t, parent, new_child)
+    }
+}
+
+// Bubble up after BST insert to restore heap property
+fn bubble_up(t: Treap, idx: Int) -> Treap {
+    let mut tr = t;
+    let mut node = idx;
+    let mut done = 0;
+    while done == 0 {
+        let par = find_parent(tr, node);
+        if par == -1 {
+            done = 1;
+        } else if treap_pri(tr, node) <= treap_pri(tr, par) {
+            done = 1;
+        } else {
+            if is_left_child(tr, par, node) == 1 {
+                let tr2 = rotate_right(tr, par);
+                let gp = find_parent(tr2, par);
+                if gp == -1 {
+                    tr = set_root(tr2, node);
+                } else {
+                    tr = replace_child(tr2, gp, par, node);
+                }
+            } else {
+                let tr2 = rotate_left(tr, par);
+                let gp = find_parent(tr2, par);
+                if gp == -1 {
+                    tr = set_root(tr2, node);
+                } else {
+                    tr = replace_child(tr2, gp, par, node);
+                }
+            }
+        }
+    }
+    tr
+}
+
+// Full treap insert
+fn treap_insert(t: Treap, key: Int, pri: Int) -> Treap {
+    let t2 = bst_insert(t, key, pri);
+    let new_idx = t2.count - 1;
+    bubble_up(t2, new_idx)
+}
+
+// Search for key
+fn treap_search(t: Treap, key: Int) -> Int {
+    let mut cur = t.root;
+    while cur != -1 {
+        let ck = treap_key(t, cur);
+        if key == ck { return 1; }
+        if key < ck {
+            cur = treap_left(t, cur);
+        } else {
+            cur = treap_right(t, cur);
+        }
+    }
+    0
+}
+
+// Count nodes in subtree
+@allow(unbounded_recursion)
+fn subtree_size(t: Treap, idx: Int) -> Int {
+    if idx == -1 { return 0; }
+    1 + subtree_size(t, treap_left(t, idx)) + subtree_size(t, treap_right(t, idx))
+}
+
+// Check BST property
+@allow(unbounded_recursion)
+fn check_bst(t: Treap, idx: Int, lo: Int, hi: Int) -> Int {
+    if idx == -1 { return 1; }
+    let k = treap_key(t, idx);
+    if k <= lo { return 0; }
+    if k >= hi { return 0; }
+    let lv = check_bst(t, treap_left(t, idx), lo, k);
+    let rv = check_bst(t, treap_right(t, idx), k, hi);
+    if lv == 1 { rv } else { 0 }
+}
+
+// Check max-heap property on priorities
+@allow(unbounded_recursion)
+fn check_heap(t: Treap, idx: Int) -> Int {
+    if idx == -1 { return 1; }
+    let lc = treap_left(t, idx);
+    let rc = treap_right(t, idx);
+    let p = treap_pri(t, idx);
+    if lc != -1 {
+        if treap_pri(t, lc) > p { return 0; }
+    }
+    if rc != -1 {
+        if treap_pri(t, rc) > p { return 0; }
+    }
+    let lv = check_heap(t, treap_left(t, idx));
+    let rv = check_heap(t, treap_right(t, idx));
+    if lv == 1 { rv } else { 0 }
+}
+
+// In-order collect keys
+type CollectState is { arr: Arr16, pos: Int };
+
+@allow(unbounded_recursion)
+fn inorder_collect(t: Treap, idx: Int, st: CollectState) -> CollectState {
+    if idx == -1 { return st; }
+    let st2 = inorder_collect(t, treap_left(t, idx), st);
+    let st3 = CollectState { arr: a16_set(st2.arr, st2.pos, treap_key(t, idx)), pos: st2.pos + 1 };
+    inorder_collect(t, treap_right(t, idx), st3)
+}
+
+fn test_empty_treap() {
+    let t = treap_new();
+    assert_eq(t.root, -1);
+    assert_eq(t.count, 0);
+    assert_eq(treap_search(t, 5), 0);
+    assert_eq(subtree_size(t, t.root), 0);
+}
+
+fn test_single_insert() {
+    let t = treap_insert(treap_new(), 10, 50);
+    assert_eq(t.count, 1);
+    assert_eq(t.root, 0);
+    assert_eq(treap_key(t, 0), 10);
+    assert_eq(treap_pri(t, 0), 50);
+    assert_eq(treap_search(t, 10), 1);
+    assert_eq(treap_search(t, 5), 0);
+    assert_eq(subtree_size(t, t.root), 1);
+}
+
+fn test_three_inserts_bst() {
+    let mut t = treap_new();
+    t = treap_insert(t, 10, 100);
+    t = treap_insert(t, 5, 50);
+    t = treap_insert(t, 15, 50);
+    assert_eq(t.count, 3);
+    assert_eq(treap_search(t, 10), 1);
+    assert_eq(treap_search(t, 5), 1);
+    assert_eq(treap_search(t, 15), 1);
+    assert_eq(treap_search(t, 7), 0);
+    assert_eq(subtree_size(t, t.root), 3);
+    assert_eq(check_bst(t, t.root, -1000, 1000), 1);
+    assert_eq(check_heap(t, t.root), 1);
+}
+
+fn test_rotation_needed() {
+    let mut t = treap_new();
+    t = treap_insert(t, 10, 50);
+    t = treap_insert(t, 5, 100);
+    assert_eq(treap_key(t, t.root), 5);
+    assert_eq(check_bst(t, t.root, -1000, 1000), 1);
+    assert_eq(check_heap(t, t.root), 1);
+    assert_eq(subtree_size(t, t.root), 2);
+}
+
+fn test_multiple_rotations() {
+    let mut t = treap_new();
+    t = treap_insert(t, 20, 30);
+    t = treap_insert(t, 10, 20);
+    t = treap_insert(t, 30, 10);
+    t = treap_insert(t, 5, 100);
+    assert_eq(t.count, 4);
+    assert_eq(treap_key(t, t.root), 5);
+    assert_eq(check_bst(t, t.root, -1000, 1000), 1);
+    assert_eq(check_heap(t, t.root), 1);
+    assert_eq(subtree_size(t, t.root), 4);
+}
+
+fn test_inorder_sorted() {
+    let mut t = treap_new();
+    t = treap_insert(t, 30, 40);
+    t = treap_insert(t, 10, 80);
+    t = treap_insert(t, 50, 20);
+    t = treap_insert(t, 20, 60);
+    t = treap_insert(t, 40, 10);
+    let st = inorder_collect(t, t.root, CollectState { arr: a16_fill(0), pos: 0 });
+    assert_eq(st.pos, 5);
+    assert_eq(a16_get(st.arr, 0), 10);
+    assert_eq(a16_get(st.arr, 1), 20);
+    assert_eq(a16_get(st.arr, 2), 30);
+    assert_eq(a16_get(st.arr, 3), 40);
+    assert_eq(a16_get(st.arr, 4), 50);
+}
+
+fn test_right_rotation_chain() {
+    let mut t = treap_new();
+    t = treap_insert(t, 50, 10);
+    t = treap_insert(t, 40, 20);
+    t = treap_insert(t, 30, 30);
+    t = treap_insert(t, 20, 40);
+    t = treap_insert(t, 10, 50);
+    assert_eq(treap_key(t, t.root), 10);
+    assert_eq(check_bst(t, t.root, -1000, 1000), 1);
+    assert_eq(check_heap(t, t.root), 1);
+    assert_eq(subtree_size(t, t.root), 5);
+}
+
+fn test_left_rotation_chain() {
+    let mut t = treap_new();
+    t = treap_insert(t, 10, 10);
+    t = treap_insert(t, 20, 20);
+    t = treap_insert(t, 30, 30);
+    t = treap_insert(t, 40, 40);
+    t = treap_insert(t, 50, 50);
+    assert_eq(treap_key(t, t.root), 50);
+    assert_eq(check_bst(t, t.root, -1000, 1000), 1);
+    assert_eq(check_heap(t, t.root), 1);
+    assert_eq(subtree_size(t, t.root), 5);
+}
+
+fn test_search_all_nodes() {
+    let mut t = treap_new();
+    t = treap_insert(t, 15, 90);
+    t = treap_insert(t, 7, 70);
+    t = treap_insert(t, 23, 50);
+    t = treap_insert(t, 3, 30);
+    t = treap_insert(t, 11, 10);
+    assert_eq(treap_search(t, 15), 1);
+    assert_eq(treap_search(t, 7), 1);
+    assert_eq(treap_search(t, 23), 1);
+    assert_eq(treap_search(t, 3), 1);
+    assert_eq(treap_search(t, 11), 1);
+    assert_eq(treap_search(t, 0), 0);
+    assert_eq(treap_search(t, 8), 0);
+    assert_eq(treap_search(t, 100), 0);
+}
+
+fn main() -> Int {
+    test_empty_treap();
+    test_single_insert();
+    test_three_inserts_bst();
+    test_rotation_needed();
+    test_multiple_rotations();
+    test_inorder_sorted();
+    test_right_rotation_chain();
+    test_left_rotation_chain();
+    test_search_all_nodes();
+    print("[OK] 349_treap_aot");
+    0
+}

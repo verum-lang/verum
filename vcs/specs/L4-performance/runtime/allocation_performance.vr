@@ -1,0 +1,495 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: runtime, allocation, memory, heap, micro
+// @description: Allocation performance benchmark (target: < 50ns small allocation)
+
+/// Allocation Performance Benchmark
+///
+/// This benchmark measures the performance of memory allocation in Verum.
+/// Efficient allocation is critical for high-performance applications.
+///
+/// Target: < 50ns for small allocations (< 256 bytes)
+///
+/// Allocation types:
+/// - Stack allocation (trivial)
+/// - Small heap allocation (arena allocator)
+/// - Large heap allocation (system allocator)
+/// - Arena/bump allocation (batch allocation)
+/// - Pool allocation (fixed-size objects)
+///
+/// Spec reference: docs/detailed/04-memory-model.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 1_000_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Allocation Performance");
+
+    // Stack allocation
+    results.add(benchmark_stack_allocation());
+
+    // Heap allocation by size
+    results.add(benchmark_heap_tiny());    // 8 bytes
+    results.add(benchmark_heap_small());   // 64 bytes
+    results.add(benchmark_heap_medium());  // 256 bytes
+    results.add(benchmark_heap_large());   // 4KB
+    results.add(benchmark_heap_huge());    // 1MB
+
+    // Special allocators
+    results.add(benchmark_arena_allocation());
+    results.add(benchmark_pool_allocation());
+    results.add(benchmark_aligned_allocation());
+
+    // Allocation patterns
+    results.add(benchmark_sequential_alloc_free());
+    results.add(benchmark_interleaved_alloc_free());
+    results.add(benchmark_bulk_allocation());
+
+    // With CBGR tracking
+    results.add(benchmark_heap_with_generation());
+
+    results.report();
+    assert(results.all_pass(), "Allocation performance below target");
+}
+
+/// Benchmark: Stack allocation (baseline)
+fn benchmark_stack_allocation() -> BenchmarkResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let x: [Int; 8] = [0; 8];
+        black_box(&x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let x: [Int; 8] = [0; 8];  // 64 bytes on stack
+        black_box(&x);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_alloc_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Stack allocation should be essentially free
+    BenchmarkResult {
+        name: "stack_allocation",
+        metric: "ns/alloc",
+        value: per_alloc_ns,
+        target: 2.0,
+        passed: per_alloc_ns < 2.0,
+    }
+}
+
+/// Benchmark: Tiny heap allocation (8 bytes)
+fn benchmark_heap_tiny() -> BenchmarkResult {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let x = Heap.new(42i64);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let x = Heap.new(42i64);  // 8 bytes + metadata
+        black_box(&*x);
+        // Implicit drop
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_alloc_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "heap_tiny_8b",
+        metric: "ns/alloc",
+        value: per_alloc_ns,
+        target: 30.0,
+        passed: per_alloc_ns < 30.0,
+    }
+}
+
+/// Benchmark: Small heap allocation (64 bytes)
+fn benchmark_heap_small() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let x = Heap.new([0i64; 8]);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let x = Heap.new([0i64; 8]);  // 64 bytes
+        black_box(&*x);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_alloc_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "heap_small_64b",
+        metric: "ns/alloc",
+        value: per_alloc_ns,
+        target: 50.0,
+        passed: per_alloc_ns < 50.0,
+    }
+}
+
+/// Benchmark: Medium heap allocation (256 bytes)
+fn benchmark_heap_medium() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let x = Heap.new([0i64; 32]);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let x = Heap.new([0i64; 32]);  // 256 bytes
+        black_box(&*x);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_alloc_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "heap_medium_256b",
+        metric: "ns/alloc",
+        value: per_alloc_ns,
+        target: 80.0,
+        passed: per_alloc_ns < 80.0,
+    }
+}
+
+/// Benchmark: Large heap allocation (4KB)
+fn benchmark_heap_large() -> BenchmarkResult {
+    let iterations = BENCHMARK_ITERATIONS / 100;
+
+    for _ in 0..(WARMUP_ITERATIONS / 100) {
+        let x = Heap.new([0u8; 4096]);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let x = Heap.new([0u8; 4096]);  // 4KB
+        black_box(&*x);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_alloc_ns = elapsed_ns as Float / iterations as Float;
+
+    BenchmarkResult {
+        name: "heap_large_4kb",
+        metric: "ns/alloc",
+        value: per_alloc_ns,
+        target: 500.0,
+        passed: per_alloc_ns < 500.0,
+    }
+}
+
+/// Benchmark: Huge heap allocation (1MB)
+fn benchmark_heap_huge() -> BenchmarkResult {
+    let iterations = 1000;
+
+    for _ in 0..10 {
+        let x = Heap.new([0u8; 1024 * 1024]);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let x = Heap.new([0u8; 1024 * 1024]);  // 1MB
+        black_box(&*x);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_alloc_us = (elapsed_ns as Float / iterations as Float) / 1000.0;
+
+    // Large allocations measured in microseconds
+    BenchmarkResult {
+        name: "heap_huge_1mb",
+        metric: "us/alloc",
+        value: per_alloc_us,
+        target: 50.0,  // 50 microseconds
+        passed: per_alloc_us < 50.0,
+    }
+}
+
+/// Benchmark: Arena/bump allocation
+fn benchmark_arena_allocation() -> BenchmarkResult {
+    let arena = Arena.new(1024 * 1024);  // 1MB arena
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let x = arena.alloc_typed();
+        black_box(x);
+    }
+    arena.reset();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let x = arena.alloc_typed();  // Bump allocation
+        black_box(x);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_alloc_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Arena allocation should be very fast (pointer bump)
+    BenchmarkResult {
+        name: "arena_allocation",
+        metric: "ns/alloc",
+        value: per_alloc_ns,
+        target: 5.0,
+        passed: per_alloc_ns < 5.0,
+    }
+}
+
+/// Benchmark: Pool allocation (fixed-size)
+fn benchmark_pool_allocation() -> BenchmarkResult {
+    let pool: Pool<[Int; 8]> = Pool.new(10_000);
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let x = pool.alloc();
+        black_box(&*x);
+        pool.free(x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let x = pool.alloc();
+        black_box(&*x);
+        pool.free(x);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    // This includes both alloc and free
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "pool_alloc_free",
+        metric: "ns/op",
+        value: per_op_ns,
+        target: 15.0,
+        passed: per_op_ns < 15.0,
+    }
+}
+
+/// Benchmark: Aligned allocation
+fn benchmark_aligned_allocation() -> BenchmarkResult {
+    let iterations = BENCHMARK_ITERATIONS / 10;
+
+    for _ in 0..(WARMUP_ITERATIONS / 10) {
+        let x = Heap.aligned_new(64);  // 64-byte alignment
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let x = Heap.aligned_new(64);
+        black_box(&*x);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_alloc_ns = elapsed_ns as Float / iterations as Float;
+
+    BenchmarkResult {
+        name: "aligned_allocation_64",
+        metric: "ns/alloc",
+        value: per_alloc_ns,
+        target: 100.0,
+        passed: per_alloc_ns < 100.0,
+    }
+}
+
+/// Benchmark: Sequential allocate then free
+fn benchmark_sequential_alloc_free() -> BenchmarkResult {
+    let count = 10_000;
+    let iterations = 100;
+
+    // Warmup
+    for _ in 0..10 {
+        let mut allocs: List<Heap<Int>> = List.with_capacity(count);
+        for _ in 0..count {
+            allocs.push(Heap.new(42));
+        }
+        // All freed at once when allocs drops
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let mut allocs: List<Heap<Int>> = List.with_capacity(count);
+        for _ in 0..count {
+            allocs.push(Heap.new(42));
+        }
+        // Batch free
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let total_ops = count * iterations * 2;  // alloc + free
+    let per_op_ns = elapsed_ns as Float / total_ops as Float;
+
+    BenchmarkResult {
+        name: "sequential_alloc_free",
+        metric: "ns/op",
+        value: per_op_ns,
+        target: 30.0,
+        passed: per_op_ns < 30.0,
+    }
+}
+
+/// Benchmark: Interleaved allocate and free
+fn benchmark_interleaved_alloc_free() -> BenchmarkResult {
+    let iterations = BENCHMARK_ITERATIONS / 10;
+
+    // Pre-allocate some objects
+    let mut objects: List<Maybe<Heap<Int> >> = List.new();
+    for _ in 0..1000 {
+        objects.push(Some(Heap.new(42)));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let idx = i % 1000;
+        if objects[idx].is_some() {
+            objects[idx] = None;  // Free
+        } else {
+            objects[idx] = Some(Heap.new(42));  // Alloc
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / iterations as Float;
+
+    // Interleaved pattern tests allocator fragmentation handling
+    BenchmarkResult {
+        name: "interleaved_alloc_free",
+        metric: "ns/op",
+        value: per_op_ns,
+        target: 80.0,
+        passed: per_op_ns < 80.0,
+    }
+}
+
+/// Benchmark: Bulk allocation
+fn benchmark_bulk_allocation() -> BenchmarkResult {
+    let batch_size = 1000;
+    let iterations = 1000;
+
+    for _ in 0..10 {
+        let batch = Heap.new_batch.<Int>(batch_size);
+        black_box(&batch);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let batch = Heap.new_batch.<Int>(batch_size);
+        black_box(&batch);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_element_ns = elapsed_ns as Float / (batch_size * iterations) as Float;
+
+    // Bulk allocation should amortize overhead
+    BenchmarkResult {
+        name: "bulk_allocation",
+        metric: "ns/element",
+        value: per_element_ns,
+        target: 10.0,
+        passed: per_element_ns < 10.0,
+    }
+}
+
+/// Benchmark: Heap allocation with CBGR generation tracking
+fn benchmark_heap_with_generation() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        let x = Heap.new(42);
+        let gen = x.generation();
+        black_box(gen);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let x = Heap.new(42);
+        // Generation is assigned during allocation
+        let gen = x.generation();
+        black_box(gen);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_alloc_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Generation tracking should not significantly impact allocation
+    BenchmarkResult {
+        name: "heap_with_generation",
+        metric: "ns/alloc",
+        value: per_alloc_ns,
+        target: 40.0,
+        passed: per_alloc_ns < 40.0,
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

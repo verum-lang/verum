@@ -1,0 +1,391 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, edit-distance, levenshtein, dynamic-programming
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Levenshtein edit distance using 2D DP on integer arrays
+
+// =============================================================================
+// Sequence arrays (up to 8 elements)
+// =============================================================================
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn arr8_new() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else { -1 }
+}
+
+fn arr8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { val } else { a.a0 },
+        a1: if i == 1 { val } else { a.a1 },
+        a2: if i == 2 { val } else { a.a2 },
+        a3: if i == 3 { val } else { a.a3 },
+        a4: if i == 4 { val } else { a.a4 },
+        a5: if i == 5 { val } else { a.a5 },
+        a6: if i == 6 { val } else { a.a6 },
+        a7: if i == 7 { val } else { a.a7 }
+    }
+}
+
+// =============================================================================
+// DP row (up to 9 elements for sequences of length up to 8)
+// Need len+1 entries, so 9 entries for sequences of length up to 8
+// =============================================================================
+
+type Row9 is { r0: Int, r1: Int, r2: Int, r3: Int, r4: Int, r5: Int, r6: Int, r7: Int, r8: Int };
+
+fn row9_new() -> Row9 {
+    Row9 { r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0, r8: 0 }
+}
+
+fn row9_get(r: Row9, i: Int) -> Int {
+    if i == 0 { r.r0 }
+    else if i == 1 { r.r1 }
+    else if i == 2 { r.r2 }
+    else if i == 3 { r.r3 }
+    else if i == 4 { r.r4 }
+    else if i == 5 { r.r5 }
+    else if i == 6 { r.r6 }
+    else if i == 7 { r.r7 }
+    else if i == 8 { r.r8 }
+    else { 0 }
+}
+
+fn row9_set(r: Row9, i: Int, val: Int) -> Row9 {
+    Row9 {
+        r0: if i == 0 { val } else { r.r0 },
+        r1: if i == 1 { val } else { r.r1 },
+        r2: if i == 2 { val } else { r.r2 },
+        r3: if i == 3 { val } else { r.r3 },
+        r4: if i == 4 { val } else { r.r4 },
+        r5: if i == 5 { val } else { r.r5 },
+        r6: if i == 6 { val } else { r.r6 },
+        r7: if i == 7 { val } else { r.r7 },
+        r8: if i == 8 { val } else { r.r8 }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn min3(a: Int, b: Int, c: Int) -> Int {
+    let mut m = a;
+    if b < m { m = b; }
+    if c < m { m = c; }
+    m
+}
+
+fn min2(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+// =============================================================================
+// Edit distance (Levenshtein) using two-row DP
+// seq_a has length len_a, seq_b has length len_b
+// =============================================================================
+
+fn edit_distance(seq_a: Arr8, len_a: Int, seq_b: Arr8, len_b: Int) -> Int {
+    // prev = dp[i-1][*], curr = dp[i][*]
+    // Initialize prev = [0, 1, 2, ..., len_b]
+    let mut prev = row9_new();
+    let mut j = 0;
+    while j <= len_b {
+        prev = row9_set(prev, j, j);
+        j = j + 1;
+    }
+
+    let mut i = 1;
+    while i <= len_a {
+        let mut curr = row9_new();
+        curr = row9_set(curr, 0, i);
+        let mut k = 1;
+        while k <= len_b {
+            let cost = if arr8_get(seq_a, i - 1) == arr8_get(seq_b, k - 1) { 0 } else { 1 };
+            let del = row9_get(prev, k) + 1;
+            let ins = row9_get(curr, k - 1) + 1;
+            let sub = row9_get(prev, k - 1) + cost;
+            curr = row9_set(curr, k, min3(del, ins, sub));
+            k = k + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+    row9_get(prev, len_b)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_identical_sequences() {
+    // [1, 2, 3, 4, 5] vs [1, 2, 3, 4, 5] = 0
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    a = arr8_set(a, 3, 4);
+    a = arr8_set(a, 4, 5);
+    assert_eq(edit_distance(a, 5, a, 5), 0);
+}
+
+fn test_empty_sequences() {
+    let a = arr8_new();
+    let b = arr8_new();
+    assert_eq(edit_distance(a, 0, b, 0), 0);
+}
+
+fn test_one_empty() {
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    let b = arr8_new();
+    // Distance = length of non-empty sequence
+    assert_eq(edit_distance(a, 3, b, 0), 3);
+    assert_eq(edit_distance(b, 0, a, 3), 3);
+}
+
+fn test_single_insertion() {
+    // [1, 2, 3] vs [1, 2, 3, 4] = 1 insertion
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 1);
+    b = arr8_set(b, 1, 2);
+    b = arr8_set(b, 2, 3);
+    b = arr8_set(b, 3, 4);
+    assert_eq(edit_distance(a, 3, b, 4), 1);
+}
+
+fn test_single_deletion() {
+    // [1, 2, 3, 4] vs [1, 3, 4] = 1 deletion
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    a = arr8_set(a, 3, 4);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 1);
+    b = arr8_set(b, 1, 3);
+    b = arr8_set(b, 2, 4);
+    assert_eq(edit_distance(a, 4, b, 3), 1);
+}
+
+fn test_single_substitution() {
+    // [1, 2, 3] vs [1, 9, 3] = 1 substitution
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 1);
+    b = arr8_set(b, 1, 9);
+    b = arr8_set(b, 2, 3);
+    assert_eq(edit_distance(a, 3, b, 3), 1);
+}
+
+fn test_completely_different() {
+    // [1, 2, 3] vs [4, 5, 6] = 3 substitutions
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 4);
+    b = arr8_set(b, 1, 5);
+    b = arr8_set(b, 2, 6);
+    assert_eq(edit_distance(a, 3, b, 3), 3);
+}
+
+fn test_mixed_operations() {
+    // [1, 2, 3, 4] vs [2, 4, 5] = 3
+    // delete 1, delete 3, insert 5 (or substitute 1->2, delete 2, substitute 3->4, substitute 4->5 = worse)
+    // Actually: optimal path
+    // [1,2,3,4] -> [2,3,4] (del 1) -> [2,4] (del 3) -> [2,4,5] (ins 5) = 3
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    a = arr8_set(a, 3, 4);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 2);
+    b = arr8_set(b, 1, 4);
+    b = arr8_set(b, 2, 5);
+    assert_eq(edit_distance(a, 4, b, 3), 3);
+}
+
+fn test_symmetry() {
+    // edit_distance(a, b) == edit_distance(b, a)
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 2);
+    b = arr8_set(b, 1, 3);
+    b = arr8_set(b, 2, 4);
+    b = arr8_set(b, 3, 5);
+    let d1 = edit_distance(a, 3, b, 4);
+    let d2 = edit_distance(b, 4, a, 3);
+    assert_eq(d1, d2);
+}
+
+fn test_triangle_inequality() {
+    // edit_distance(a, c) <= edit_distance(a, b) + edit_distance(b, c)
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 1);
+    b = arr8_set(b, 1, 4);
+    b = arr8_set(b, 2, 3);
+    let mut c = arr8_new();
+    c = arr8_set(c, 0, 5);
+    c = arr8_set(c, 1, 4);
+    c = arr8_set(c, 2, 6);
+    let dab = edit_distance(a, 3, b, 3);
+    let dbc = edit_distance(b, 3, c, 3);
+    let dac = edit_distance(a, 3, c, 3);
+    assert(dac <= dab + dbc);
+}
+
+fn test_longer_sequences() {
+    // [1,2,3,4,5,6,7,8] vs [1,3,5,7] = 4 (delete 2,4,6,8)
+    let mut a = arr8_new();
+    let mut i = 0;
+    while i < 8 {
+        a = arr8_set(a, i, i + 1);
+        i = i + 1;
+    }
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 1);
+    b = arr8_set(b, 1, 3);
+    b = arr8_set(b, 2, 5);
+    b = arr8_set(b, 3, 7);
+    assert_eq(edit_distance(a, 8, b, 4), 4);
+}
+
+fn test_reversed_sequence() {
+    // [1,2,3,4] vs [4,3,2,1]
+    // One possible path: sub(1->4), keep 2->keep impossible...
+    // Actually: [1,2,3,4] -> [4,2,3,4](sub 1)->  [4,3,3,4](sub 2->3 no)...
+    // LCS is length 1 (just "2" or "3"), so edit distance = 4+4-2*1 = 6? No.
+    // Actually LCS can be [2,3] (length 2), edit dist = 4+4-2*2 = 4? No, that formula is wrong.
+    // Let me compute manually for [1,2,3,4] vs [4,3,2,1]:
+    //     "" 4  3  2  1
+    //  ""  0  1  2  3  4
+    //  1   1  1  2  3  3
+    //  2   2  2  2  2  3
+    //  3   3  3  2  3  3
+    //  4   4  3  3  3  3
+    // Answer: 3? Let me recheck row by row:
+    // i=1(val=1): dp[1][1]=min(dp[0][1]+1,dp[1][0]+1,dp[0][0]+(1!=4?1:0))=min(2,2,1)=1
+    //             dp[1][2]=min(dp[0][2]+1,dp[1][1]+1,dp[0][1]+(1!=3?1:0))=min(3,2,2)=2
+    //             dp[1][3]=min(dp[0][3]+1,dp[1][2]+1,dp[0][2]+(1!=2?1:0))=min(4,3,3)=3
+    //             dp[1][4]=min(dp[0][4]+1,dp[1][3]+1,dp[0][3]+(1==1?0:1))=min(5,4,3)=3
+    // i=2(val=2): dp[2][1]=min(dp[1][1]+1,dp[2][0]+1,dp[1][0]+(2!=4?1:0))=min(2,3,2)=2
+    //             dp[2][2]=min(dp[1][2]+1,dp[2][1]+1,dp[1][1]+(2!=3?1:0))=min(3,3,2)=2
+    //             dp[2][3]=min(dp[1][3]+1,dp[2][2]+1,dp[1][2]+(2==2?0:1))=min(4,3,2)=2
+    //             dp[2][4]=min(dp[1][4]+1,dp[2][3]+1,dp[1][3]+(2!=1?1:0))=min(4,3,4)=3
+    // i=3(val=3): dp[3][1]=min(dp[2][1]+1,dp[3][0]+1,dp[2][0]+(3!=4?1:0))=min(3,4,3)=3
+    //             dp[3][2]=min(dp[2][2]+1,dp[3][1]+1,dp[2][1]+(3==3?0:1))=min(3,4,2)=2
+    //             dp[3][3]=min(dp[2][3]+1,dp[3][2]+1,dp[2][2]+(3!=2?1:0))=min(3,3,3)=3
+    //             dp[3][4]=min(dp[2][4]+1,dp[3][3]+1,dp[2][3]+(3!=1?1:0))=min(4,4,3)=3
+    // i=4(val=4): dp[4][1]=min(dp[3][1]+1,dp[4][0]+1,dp[3][0]+(4==4?0:1))=min(4,5,3)=3
+    //             dp[4][2]=min(dp[3][2]+1,dp[4][1]+1,dp[3][1]+(4!=3?1:0))=min(3,4,4)=3
+    //             dp[4][3]=min(dp[3][3]+1,dp[4][2]+1,dp[3][2]+(4!=2?1:0))=min(4,4,3)=3
+    //             dp[4][4]=min(dp[3][4]+1,dp[4][3]+1,dp[3][3]+(4!=1?1:0))=min(4,4,4)=4
+    // Answer: 4
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    a = arr8_set(a, 3, 4);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 4);
+    b = arr8_set(b, 1, 3);
+    b = arr8_set(b, 2, 2);
+    b = arr8_set(b, 3, 1);
+    assert_eq(edit_distance(a, 4, b, 4), 4);
+}
+
+fn test_single_element() {
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 1);
+    assert_eq(edit_distance(a, 1, b, 1), 0);
+
+    let mut c = arr8_new();
+    c = arr8_set(c, 0, 2);
+    assert_eq(edit_distance(a, 1, c, 1), 1);
+}
+
+fn test_prefix() {
+    // [1,2,3] vs [1,2,3,4,5] = 2 insertions
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 1);
+    a = arr8_set(a, 1, 2);
+    a = arr8_set(a, 2, 3);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 1);
+    b = arr8_set(b, 1, 2);
+    b = arr8_set(b, 2, 3);
+    b = arr8_set(b, 3, 4);
+    b = arr8_set(b, 4, 5);
+    assert_eq(edit_distance(a, 3, b, 5), 2);
+}
+
+fn test_suffix() {
+    // [3,4,5] vs [1,2,3,4,5] = 2 insertions
+    let mut a = arr8_new();
+    a = arr8_set(a, 0, 3);
+    a = arr8_set(a, 1, 4);
+    a = arr8_set(a, 2, 5);
+    let mut b = arr8_new();
+    b = arr8_set(b, 0, 1);
+    b = arr8_set(b, 1, 2);
+    b = arr8_set(b, 2, 3);
+    b = arr8_set(b, 3, 4);
+    b = arr8_set(b, 4, 5);
+    assert_eq(edit_distance(a, 3, b, 5), 2);
+}
+
+fn main() -> Int {
+    test_identical_sequences();
+    test_empty_sequences();
+    test_one_empty();
+    test_single_insertion();
+    test_single_deletion();
+    test_single_substitution();
+    test_completely_different();
+    test_mixed_operations();
+    test_symmetry();
+    test_triangle_inequality();
+    test_longer_sequences();
+    test_reversed_sequence();
+    test_single_element();
+    test_prefix();
+    test_suffix();
+    print("[OK] 249_interp_edit_distance");
+    0
+}

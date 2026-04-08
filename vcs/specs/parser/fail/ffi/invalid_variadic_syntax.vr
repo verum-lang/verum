@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, ffi, variadic, error
+// @description: Test invalid variadic function syntax
+// @expected-error: E018
+
+@extern("C")
+fn printf(fmt: &Byte, ...args);  // Invalid variadic syntax

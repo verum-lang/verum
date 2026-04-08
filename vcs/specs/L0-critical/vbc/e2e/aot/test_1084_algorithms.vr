@@ -1,0 +1,250 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: algorithms, sorting, searching, dynamic-programming
+// @description: Test algorithm implementations in Verum
+
+// Binary search on sorted list
+fn binary_search(items: List<Int>, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = items.len() - 1;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        if items[mid] == target {
+            return mid;
+        } else if items[mid] < target {
+            lo = mid + 1;
+        } else {
+            if mid == 0 { return -1; }
+            hi = mid - 1;
+        }
+    }
+    -1
+}
+
+fn test_binary_search() -> Int {
+    let sorted = [2, 5, 8, 12, 16, 23, 38, 56, 72, 91];
+    let idx = binary_search(sorted, 23);
+    if idx != 5 {
+        print(f"FAIL bsearch: idx={idx}, expected 5");
+        return 1;
+    }
+    let not_found = binary_search(sorted, 50);
+    if not_found != -1 {
+        print(f"FAIL bsearch: not_found={not_found}, expected -1");
+        return 1;
+    }
+    let first = binary_search(sorted, 2);
+    if first != 0 {
+        print(f"FAIL bsearch: first={first}, expected 0");
+        return 1;
+    }
+    let last = binary_search(sorted, 91);
+    if last != 9 {
+        print(f"FAIL bsearch: last={last}, expected 9");
+        return 1;
+    }
+    print("  binary_search: OK");
+    0
+}
+
+// Bubble sort
+fn bubble_sort(items: List<Int>) -> List<Int> {
+    let n = items.len();
+    // Copy to mutable list
+    let mut arr = List.new();
+    let mut i = 0;
+    while i < n {
+        arr.push(items[i]);
+        i = i + 1;
+    }
+
+    i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n - 1 - i {
+            if arr[j] > arr[j + 1] {
+                // Swap using temp list rebuild
+                let tmp = arr[j];
+                // Note: direct arr[j] = arr[j+1] may not work, use a rebuild approach
+                let mut new_arr = List.new();
+                let mut k = 0;
+                while k < n {
+                    if k == j {
+                        new_arr.push(arr[j + 1]);
+                    } else if k == j + 1 {
+                        new_arr.push(tmp);
+                    } else {
+                        new_arr.push(arr[k]);
+                    }
+                    k = k + 1;
+                }
+                arr = new_arr;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    arr
+}
+
+fn test_bubble_sort() -> Int {
+    let nums = [5, 3, 8, 1, 9, 2];
+    let sorted = bubble_sort(nums);
+    if sorted[0] != 1 || sorted[5] != 9 {
+        print(f"FAIL bubble: [{sorted[0]}..{sorted[5]}], expected [1..9]");
+        return 1;
+    }
+    // Verify order
+    let mut i = 1;
+    while i < sorted.len() {
+        if sorted[i] < sorted[i - 1] {
+            print(f"FAIL bubble: not sorted at {i}");
+            return 1;
+        }
+        i = i + 1;
+    }
+    print("  bubble_sort: OK");
+    0
+}
+
+// Greatest common divisor
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    a / gcd(a, b) * b
+}
+
+fn test_gcd_lcm() -> Int {
+    if gcd(48, 18) != 6 {
+        print("FAIL gcd: gcd(48,18) != 6");
+        return 1;
+    }
+    if gcd(100, 75) != 25 {
+        print("FAIL gcd: gcd(100,75) != 25");
+        return 1;
+    }
+    if lcm(12, 8) != 24 {
+        print(f"FAIL lcm: lcm(12,8)={lcm(12,8)}, expected 24");
+        return 1;
+    }
+    print("  gcd_lcm: OK");
+    0
+}
+
+// Fibonacci with memoization (using list)
+fn fib_memo(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut memo = List.new();
+    memo.push(0);
+    memo.push(1);
+    let mut i = 2;
+    while i <= n {
+        memo.push(memo[i - 1] + memo[i - 2]);
+        i = i + 1;
+    }
+    memo[n]
+}
+
+fn test_fib_memo() -> Int {
+    if fib_memo(0) != 0 {
+        print("FAIL fib: fib(0) != 0");
+        return 1;
+    }
+    if fib_memo(1) != 1 {
+        print("FAIL fib: fib(1) != 1");
+        return 1;
+    }
+    if fib_memo(10) != 55 {
+        print(f"FAIL fib: fib(10)={fib_memo(10)}, expected 55");
+        return 1;
+    }
+    if fib_memo(20) != 6765 {
+        print(f"FAIL fib: fib(20)={fib_memo(20)}, expected 6765");
+        return 1;
+    }
+    print("  fib_memo: OK");
+    0
+}
+
+// Sieve of Eratosthenes
+fn count_primes(limit: Int) -> Int {
+    // is_prime[i] = 1 means i is prime
+    let mut is_prime = List.new();
+    let mut i = 0;
+    while i < limit {
+        is_prime.push(1);
+        i = i + 1;
+    }
+
+    // 0 and 1 are not prime
+    let mut sieve = List.new();
+    sieve.push(0); sieve.push(0);
+    i = 2;
+    while i < limit {
+        sieve.push(is_prime[i]);
+        i = i + 1;
+    }
+
+    i = 2;
+    while i * i < limit {
+        if sieve[i] == 1 {
+            let mut j = i * i;
+            while j < limit {
+                // Mark as not prime - rebuild
+                let mut new_sieve = List.new();
+                let mut k = 0;
+                while k < limit {
+                    if k == j {
+                        new_sieve.push(0);
+                    } else {
+                        new_sieve.push(sieve[k]);
+                    }
+                    k = k + 1;
+                }
+                sieve = new_sieve;
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+
+    let mut count = 0;
+    i = 0;
+    while i < limit {
+        count = count + sieve[i];
+        i = i + 1;
+    }
+    count
+}
+
+fn test_primes() -> Int {
+    let count = count_primes(30);
+    // Primes below 30: 2,3,5,7,11,13,17,19,23,29 = 10
+    if count != 10 {
+        print(f"FAIL primes: count={count}, expected 10");
+        return 1;
+    }
+    print("  primes: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Algorithm Tests:");
+    let mut failures = 0;
+    failures = failures + test_binary_search();
+    failures = failures + test_bubble_sort();
+    failures = failures + test_gcd_lcm();
+    failures = failures + test_fib_memo();
+    failures = failures + test_primes();
+
+    if failures == 0 {
+        print("All algorithm tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

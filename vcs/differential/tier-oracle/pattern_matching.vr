@@ -1,0 +1,221 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, pattern_matching
+
+/// Pattern matching must behave identically across
+/// interpreter (Tier 0) and AOT (Tier 3)
+
+// Type for testing
+type Color is
+    Red |
+    Green |
+    Blue |
+    Rgb(Int, Int, Int) |
+    Named(Text);
+
+type Shape is
+    Circle { radius: Float } |
+    Rectangle { width: Float, height: Float } |
+    Triangle { base: Float, height: Float };
+
+type BinaryTree<T> is
+    Empty |
+    Node { value: T, left: Heap<BinaryTree<T>>, right: Heap<BinaryTree<T>> };
+
+// Result type for testing
+type MyResult<T, E> is Ok(T) | Err(E);
+
+fn main() {
+    // ===== Literal patterns =====
+    println("=== Literal Patterns ===");
+
+    let x = 5;
+    match x {
+        1 => println("one"),
+        2 => println("two"),
+        5 => println("five"),
+        _ => println("other"),
+    }
+
+    let c = 'a';
+    match c {
+        'a' => println("letter a"),
+        'b' => println("letter b"),
+        _ => println("other letter"),
+    }
+
+    // ===== Variable patterns =====
+    println("\n=== Variable Patterns ===");
+
+    let value = 42;
+    match value {
+        n => println(f"captured: {n}"),
+    }
+
+    // ===== Tuple patterns =====
+    println("\n=== Tuple Patterns ===");
+
+    let point = (3, 4);
+    match point {
+        (0, 0) => println("origin"),
+        (x, 0) => println(f"on x-axis at {x}"),
+        (0, y) => println(f"on y-axis at {y}"),
+        (x, y) => println(f"point at ({x}, {y})"),
+    }
+
+    let triple = (1, 2, 3);
+    match triple {
+        (a, b, c) => println(f"triple: {a}, {b}, {c}"),
+    }
+
+    // ===== Struct patterns =====
+    println("\n=== Struct Patterns ===");
+
+    let circle = Shape.Circle { radius: 5.0 };
+    match circle {
+        Shape.Circle { radius } => println(f"circle with radius {radius}"),
+        Shape.Rectangle { width, height } => println(f"rectangle {width}x{height}"),
+        Shape.Triangle { base, height } => println(f"triangle base={base} height={height}"),
+    }
+
+    // Partial struct patterns with ..
+    let rect = Shape.Rectangle { width: 10.0, height: 5.0 };
+    match rect {
+        Shape.Rectangle { width, .. } => println(f"rectangle width = {width}"),
+        _ => println("not a rectangle"),
+    }
+
+    // ===== Enum patterns =====
+    println("\n=== Enum Patterns ===");
+
+    let color = Color.Rgb(255, 128, 0);
+    match color {
+        Color.Red => println("red"),
+        Color.Green => println("green"),
+        Color.Blue => println("blue"),
+        Color.Rgb(r, g, b) => println(f"RGB({r}, {g}, {b})"),
+        Color.Named(name) => println(f"named: {name}"),
+    }
+
+    // ===== Array/List patterns =====
+    println("\n=== Array Patterns ===");
+
+    let arr = [1, 2, 3];
+    match arr {
+        [] => println("empty"),
+        [x] => println(f"single: {x}"),
+        [x, y] => println(f"pair: {x}, {y}"),
+        [x, y, z] => println(f"triple: {x}, {y}, {z}"),
+        _ => println("more elements"),
+    }
+
+    // Head/tail pattern
+    let list = [1, 2, 3, 4, 5];
+    match list {
+        [] => println("empty"),
+        [head, ..tail] => println(f"head: {head}, tail: {tail}"),
+    }
+
+    // ===== Or patterns =====
+    println("\n=== Or Patterns ===");
+
+    let num = 3;
+    match num {
+        1 | 2 | 3 => println("1, 2, or 3"),
+        4 | 5 | 6 => println("4, 5, or 6"),
+        _ => println("other"),
+    }
+
+    // ===== Guard patterns =====
+    println("\n=== Guard Patterns ===");
+
+    let n = 15;
+    match n {
+        x where x < 0 => println("negative"),
+        x where x == 0 => println("zero"),
+        x where x % 2 == 0 => println(f"{x} is positive even"),
+        x => println(f"{x} is positive odd"),
+    }
+
+    // ===== Binding patterns with @ =====
+    println("\n=== Binding Patterns ===");
+
+    let val = 42;
+    match val {
+        x @ 1..=50 => println(f"{x} is in range 1-50"),
+        x @ 51..=100 => println(f"{x} is in range 51-100"),
+        x => println(f"{x} is out of range"),
+    }
+
+    // ===== Nested patterns =====
+    println("\n=== Nested Patterns ===");
+
+    let result: MyResult<(Int, Text), Text> = MyResult.Ok((42, "answer"));
+    match result {
+        MyResult.Ok((n, s)) => println(f"Ok: {n}, {s}"),
+        MyResult.Err(e) => println(f"Error: {e}"),
+    }
+
+    // ===== Ref patterns =====
+    println("\n=== Ref Patterns ===");
+
+    let opt = Some(42);
+    match opt {
+        Some(ref x) => println(f"borrowed: {x}"),
+        None => println("none"),
+    }
+
+    // ===== Wildcard and ignore patterns =====
+    println("\n=== Wildcard Patterns ===");
+
+    let data = (1, 2, 3, 4);
+    match data {
+        (first, _, _, last) => println(f"first: {first}, last: {last}"),
+    }
+
+    // ===== If let =====
+    println("\n=== If Let ===");
+
+    let maybe = Some(10);
+    if let Some(x) = maybe {
+        println(f"got value: {x}");
+    } else {
+        println("no value");
+    }
+
+    // ===== While let =====
+    println("\n=== While Let ===");
+
+    let mut stack = [3, 2, 1];
+    while let [.., last] = stack {
+        println(f"popped: {last}");
+        stack = stack[..stack.len() - 1];
+        if stack.is_empty() {
+            break;
+        }
+    }
+
+    // ===== Let else =====
+    println("\n=== Let Else ===");
+
+    let opt2 = Some(42);
+    let Some(value) = opt2 else {
+        println("no value");
+        return;
+    };
+    println(f"extracted: {value}");
+
+    // ===== Exhaustiveness =====
+    println("\n=== Exhaustiveness ===");
+
+    let color2 = Color.Named("purple");
+    let description = match color2 {
+        Color.Red => "primary red",
+        Color.Green => "primary green",
+        Color.Blue => "primary blue",
+        Color.Rgb(r, g, b) => f"custom RGB",
+        Color.Named(n) => f"named: {n}",
+    };
+    println(description);
+}

@@ -1,0 +1,146 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, nursery, concurrency, structured
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Nursery basic structured concurrency — spawn 3 tasks, await_all, verify completion
+
+fn compute_square(n: Int) -> Int {
+    n * n
+}
+
+fn worker_sum(start: Int, end: Int, result_ch: Channel<Int>) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    while i <= end {
+        sum = sum + i;
+        i = i + 1;
+    }
+    result_ch.send(sum);
+    sum
+}
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    // Test 1: spawn 3 tasks via spawn/await (structured pattern)
+    let ch = Channel.new(10);
+
+    let t1 = spawn {
+        ch.send(compute_square(3));
+        0
+    };
+    let t2 = spawn {
+        ch.send(compute_square(4));
+        0
+    };
+    let t3 = spawn {
+        ch.send(compute_square(5));
+        0
+    };
+
+    // Structured: await ALL before proceeding
+    t1.await;
+    t2.await;
+    t3.await;
+
+    let mut total = 0;
+    let mut i = 0;
+    while (i < 3) {
+        match ch.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        }
+        i = i + 1;
+    }
+
+    // 9 + 16 + 25 = 50
+    if total == 50 { pass = pass + 1; } else { print(f"FAIL1: expected 50, got {total}"); }
+
+    // Test 2: structured concurrency — child tasks finish before parent continues
+    let done_ch = Channel.new(5);
+    let order_ch = Channel.new(10);
+
+    let w1 = spawn {
+        let mut s = 0;
+        let mut i = 1;
+        while i <= 100 {
+            s = s + i;
+            i = i + 1;
+        }
+        done_ch.send(s);
+        order_ch.send(1);
+        s
+    };
+    let w2 = spawn {
+        let mut s = 0;
+        let mut i = 101;
+        while i <= 200 {
+            s = s + i;
+            i = i + 1;
+        }
+        done_ch.send(s);
+        order_ch.send(2);
+        s
+    };
+
+    w1.await;
+    w2.await;
+
+    // After await, both must have sent their results
+    let mut sum_total = 0;
+    match done_ch.recv() { Some(v) => { sum_total = sum_total + v; } None => {} }
+    match done_ch.recv() { Some(v) => { sum_total = sum_total + v; } None => {} }
+
+    // 1+2+...+200 = 20100
+    if sum_total == 20100 { pass = pass + 1; } else { print(f"FAIL2: expected 20100, got {sum_total}"); }
+
+    // Test 3: Worker functions with channel params
+    let r1 = Channel.new(1);
+    let r2 = Channel.new(1);
+    let r3 = Channel.new(1);
+
+    let h1 = spawn worker_sum(1, 10, r1);
+    let h2 = spawn worker_sum(11, 20, r2);
+    let h3 = spawn worker_sum(21, 30, r3);
+
+    h1.await;
+    h2.await;
+    h3.await;
+
+    let mut grand = 0;
+    match r1.recv() { Some(v) => { grand = grand + v; } None => {} }
+    match r2.recv() { Some(v) => { grand = grand + v; } None => {} }
+    match r3.recv() { Some(v) => { grand = grand + v; } None => {} }
+
+    // 1+2+...+30 = 465
+    if grand == 465 { pass = pass + 1; } else { print(f"FAIL3: expected 465, got {grand}"); }
+
+    // Test 4: Nested spawn (inner tasks complete before outer)
+    let nested_ch = Channel.new(5);
+
+    let outer = spawn {
+        let inner1 = spawn {
+            nested_ch.send(10);
+            10
+        };
+        let inner2 = spawn {
+            nested_ch.send(20);
+            20
+        };
+        let r1 = inner1.await;
+        let r2 = inner2.await;
+        r1 + r2
+    };
+
+    let outer_result = outer.await;
+    if outer_result == 30 { pass = pass + 1; } else { print(f"FAIL4: expected 30, got {outer_result}"); }
+
+    print(f"pass = {pass}/4");
+    if pass == 4 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

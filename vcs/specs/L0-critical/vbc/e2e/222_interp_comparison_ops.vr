@@ -1,0 +1,161 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comparison, operators
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: comparison operators ==, !=, <, >, <=, >= for Int,
+// edge cases, chained comparisons
+
+// =============================================================================
+// Equality and inequality
+// =============================================================================
+
+fn test_equality() {
+    assert(0 == 0);
+    assert(1 == 1);
+    assert(-1 == -1);
+    assert(42 == 42);
+    assert(1000000 == 1000000);
+}
+
+fn test_inequality() {
+    assert(0 != 1);
+    assert(1 != -1);
+    assert(42 != 43);
+    assert(-5 != 5);
+    assert(100 != 99);
+}
+
+// =============================================================================
+// Less than and greater than
+// =============================================================================
+
+fn test_less_than() {
+    assert(0 < 1);
+    assert(-1 < 0);
+    assert(-100 < -99);
+    assert(1 < 1000);
+    assert_eq(1 < 1, false);
+    assert_eq(2 < 1, false);
+}
+
+fn test_greater_than() {
+    assert(1 > 0);
+    assert(0 > -1);
+    assert(-99 > -100);
+    assert(1000 > 1);
+    assert_eq(1 > 1, false);
+    assert_eq(1 > 2, false);
+}
+
+// =============================================================================
+// Less than or equal, greater than or equal
+// =============================================================================
+
+fn test_less_or_equal() {
+    assert(0 <= 0);
+    assert(0 <= 1);
+    assert(-1 <= 0);
+    assert(-1 <= -1);
+    assert_eq(2 <= 1, false);
+    assert(100 <= 100);
+}
+
+fn test_greater_or_equal() {
+    assert(0 >= 0);
+    assert(1 >= 0);
+    assert(0 >= -1);
+    assert(-1 >= -1);
+    assert_eq(1 >= 2, false);
+    assert(100 >= 100);
+}
+
+// =============================================================================
+// Edge cases with zero
+// =============================================================================
+
+fn test_zero_comparisons() {
+    assert(0 == 0);
+    assert(0 <= 0);
+    assert(0 >= 0);
+    assert_eq(0 < 0, false);
+    assert_eq(0 > 0, false);
+    assert_eq(0 != 0, false);
+}
+
+// =============================================================================
+// Comparison with negative numbers
+// =============================================================================
+
+fn test_negative_comparisons() {
+    assert(-1 < 0);
+    assert(-100 < -1);
+    assert(-1 > -2);
+    assert(-1 >= -1);
+    assert(-1 <= -1);
+    assert(-5 != 5);
+    assert(-5 < 5);
+}
+
+// =============================================================================
+// Comparisons with expressions
+// =============================================================================
+
+fn test_comparison_with_expressions() {
+    let a = 10;
+    let b = 20;
+    assert(a < b);
+    assert(b > a);
+    assert(a + b == 30);
+    assert(a * 2 == b);
+    assert(b - a == a);
+    assert(b / a == 2);
+}
+
+fn test_comparison_in_conditionals() {
+    fn clamp(val: Int, low: Int, high: Int) -> Int {
+        if val < low {
+            low
+        } else if val > high {
+            high
+        } else {
+            val
+        }
+    }
+    assert_eq(clamp(5, 0, 10), 5);
+    assert_eq(clamp(-5, 0, 10), 0);
+    assert_eq(clamp(15, 0, 10), 10);
+    assert_eq(clamp(0, 0, 10), 0);
+    assert_eq(clamp(10, 0, 10), 10);
+}
+
+// =============================================================================
+// Comparison result as value
+// =============================================================================
+
+fn test_comparison_as_value() {
+    let result = 5 > 3;
+    assert_eq(result, true);
+    let result2 = 3 > 5;
+    assert_eq(result2, false);
+    let result3 = 5 == 5;
+    assert_eq(result3, true);
+}
+
+fn main() -> Int {
+    test_equality();
+    test_inequality();
+    test_less_than();
+    test_greater_than();
+    test_less_or_equal();
+    test_greater_or_equal();
+    test_zero_comparisons();
+    test_negative_comparisons();
+    test_comparison_with_expressions();
+    test_comparison_in_conditionals();
+    test_comparison_as_value();
+    print("[OK] 222_interp_comparison_ops");
+    0
+}

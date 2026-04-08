@@ -1,0 +1,247 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress
+// @timeout: 60000
+// @expected-exit: 0
+
+// Complex control flow: break/continue patterns via flags, deeply nested loops, state machines
+
+type Direction is North | South | East | West;
+
+fn dir_dx(d: Direction) -> Int { match d { North => 0, South => 0, East => 1, West => -1 } }
+fn dir_dy(d: Direction) -> Int { match d { North => 1, South => -1, East => 0, West => 0 } }
+fn opposite(d: Direction) -> Direction { match d { North => South, South => North, East => West, West => East } }
+
+// Traffic light: 0=Red, 1=RedYellow, 2=Green, 3=Yellow
+fn traffic_next(state: Int) -> Int {
+    if (state == 0) { return 1; }
+    if (state == 1) { return 2; }
+    if (state == 2) { return 3; }
+    0
+}
+
+fn traffic_sim(steps: Int) -> Int {
+    let mut state = 0;
+    let mut green = 0;
+    let mut i = 0;
+    while (i < steps) {
+        if (state == 2) { green = green + 1; }
+        state = traffic_next(state);
+        i = i + 1;
+    }
+    green
+}
+
+// Find first value divisible by both d1 and d2 in range
+fn find_first_divisible(start: Int, end_val: Int, d1: Int, d2: Int) -> Int {
+    let mut i = start;
+    while (i < end_val) {
+        if (i % d1 == 0) {
+            if (i % d2 == 0) { return i; }
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Collatz sequence length
+fn collatz_len(start: Int) -> Int {
+    let mut n = start;
+    let mut steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) { n = n / 2; } else { n = n * 3 + 1; }
+        steps = steps + 1;
+        if (steps > 1000) { return -1; }
+    }
+    steps
+}
+
+// Parser state machine: 0=Start, 1=InNum, 2=AfterOp, 3=Done, 4=Error
+// Input: 0=digit, 1=plus, 2=minus, 3=end
+fn parse_step(state: Int, input: Int) -> Int {
+    if (state == 0) { if (input == 0) { return 1; } return 4; }
+    if (state == 1) {
+        if (input == 0) { return 1; }
+        if (input == 1) { return 2; }
+        if (input == 2) { return 2; }
+        if (input == 3) { return 3; }
+        return 4;
+    }
+    if (state == 2) { if (input == 0) { return 1; } return 4; }
+    state
+}
+
+// FizzBuzz counter returning encoded result
+fn fizzbuzz_count(n: Int) -> Int {
+    let mut fizz = 0;
+    let mut buzz = 0;
+    let mut fb = 0;
+    let mut other = 0;
+    let mut i = 1;
+    while (i <= n) {
+        if (i % 15 == 0) { fb = fb + 1; }
+        else {
+            if (i % 3 == 0) { fizz = fizz + 1; }
+            else {
+                if (i % 5 == 0) { buzz = buzz + 1; }
+                else { other = other + 1; }
+            }
+        }
+        i = i + 1;
+    }
+    fb * 1000000 + fizz * 10000 + buzz * 100 + other
+}
+
+// Find pair summing to target
+fn find_pair_sum(target: Int, n: Int) -> Int {
+    let mut a = 0;
+    while (a < n) {
+        let mut b = a + 1;
+        while (b < n) {
+            if (a + b == target) { return a * 1000 + b; }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    -1
+}
+
+// Elevator simulation: 0=Idle, 1=Up, 2=Down, 3=Open
+fn elevator_step(state: Int, floor: Int, target: Int) -> Int {
+    if (state == 0) {
+        if (target > floor) { return 1; }
+        if (target < floor) { return 2; }
+        return 3;
+    }
+    if (state == 1) { if (floor >= target) { return 3; } return 1; }
+    if (state == 2) { if (floor <= target) { return 3; } return 2; }
+    0
+}
+
+fn sim_elevator(start: Int, target: Int) -> Int {
+    let mut state = 0;
+    let mut floor = start;
+    let mut steps = 0;
+    while (state != 3) {
+        state = elevator_step(state, floor, target);
+        if (state == 1) { floor = floor + 1; }
+        if (state == 2) { floor = floor - 1; }
+        steps = steps + 1;
+        if (steps > 100) { return -1; }
+    }
+    steps
+}
+
+// Nested loop with flag-based continue/break patterns
+fn scan_grid(size: Int) -> Int {
+    let mut count = 0;
+    let mut skip_row = 0;
+    let mut i = 0;
+    while (i < size) {
+        skip_row = 0;
+        if (i % 7 == 0) { skip_row = 1; }
+        if (skip_row == 0) {
+            let mut j = 0;
+            let mut row_done = 0;
+            while (j < size) {
+                if (row_done == 0) {
+                    if (i * j > 500) {
+                        row_done = 1;
+                    } else {
+                        if ((i + j) % 3 == 0) {
+                            count = count + 1;
+                        }
+                    }
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Direction operations
+    assert_eq(dir_dx(East), 1);
+    assert_eq(dir_dx(West), -1);
+    assert_eq(dir_dy(North), 1);
+    assert_eq(dir_dy(South), -1);
+    assert_eq(dir_dx(opposite(East)), -1);
+    assert_eq(dir_dy(opposite(North)), -1);
+
+    // Traffic light
+    assert_eq(traffic_sim(4), 1);
+    assert_eq(traffic_sim(20), 5);
+    assert_eq(traffic_sim(100), 25);
+
+    // Find divisible
+    assert_eq(find_first_divisible(1, 100, 3, 5), 15);
+    assert_eq(find_first_divisible(1, 100, 7, 11), 77);
+    assert_eq(find_first_divisible(10, 20, 100, 200), -1);
+
+    // Collatz
+    assert_eq(collatz_len(1), 0);
+    assert_eq(collatz_len(3), 7);
+    assert_eq(collatz_len(27), 111);
+    assert_eq(collatz_len(97), 118);
+
+    // Parser
+    let mut st = 0;
+    st = parse_step(st, 0);  assert_eq(st, 1);
+    st = parse_step(st, 1);  assert_eq(st, 2);
+    st = parse_step(st, 0);  assert_eq(st, 1);
+    st = parse_step(st, 3);  assert_eq(st, 3);
+
+    let mut st2 = 0;
+    st2 = parse_step(st2, 1);  assert_eq(st2, 4);
+
+    // FizzBuzz 30: fb=2, fizz=8, buzz=4, other=16
+    assert_eq(fizzbuzz_count(30), 2080416);
+
+    // Find pair
+    assert_eq(find_pair_sum(10, 20), 10);
+    assert_eq(find_pair_sum(3, 10), 3);
+    assert_eq(find_pair_sum(199, 100), -1);
+
+    // Elevator (includes the step where state transitions to Open/3)
+    assert_eq(sim_elevator(1, 5), 5);
+    assert_eq(sim_elevator(3, 3), 1);
+    assert_eq(sim_elevator(10, 7), 4);
+    assert_eq(sim_elevator(0, 10), 11);
+
+    // Grid scan (deterministic)
+    let gs = scan_grid(50);
+    let gs2 = scan_grid(50);
+    assert_eq(gs, gs2);
+    assert(gs > 0);
+
+    // Complex conditional loop
+    let mut acc = 0;
+    let mut i = 0;
+    while (i < 200) {
+        if (i % 2 == 0) {
+            if (i % 3 == 0) { acc = acc + 6; }
+            else { if (i % 5 == 0) { acc = acc + 10; } else { acc = acc + 2; } }
+        } else {
+            if (i % 7 == 0) { acc = acc + 7; } else { acc = acc + 1; }
+        }
+        i = i + 1;
+    }
+    let mut acc2 = 0;
+    let mut j = 0;
+    while (j < 200) {
+        if (j % 2 == 0) {
+            if (j % 3 == 0) { acc2 = acc2 + 6; }
+            else { if (j % 5 == 0) { acc2 = acc2 + 10; } else { acc2 = acc2 + 2; } }
+        } else {
+            if (j % 7 == 0) { acc2 = acc2 + 7; } else { acc2 = acc2 + 1; }
+        }
+        j = j + 1;
+    }
+    assert_eq(acc, acc2);
+
+    print("839_stress_complex_control: PASS");
+    0
+}

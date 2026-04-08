@@ -1,0 +1,194 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: autodiff, backward
+
+fn main() {
+    // Tape-based automatic differentiation
+    let tape = GradientTape.new();
+
+    // Record operations
+    let x = tape.variable(tensor<4>f32{1.0, 2.0, 3.0, 4.0});
+    let y = tape.variable(tensor<4>f32{2.0, 2.0, 2.0, 2.0});
+
+    // Forward pass (recorded on tape)
+    let z = x * y;           // Element-wise multiply
+    let w = z + x;           // Add
+    let loss = w.sum();      // Reduce to scalar
+
+    // Backward pass
+    let grads = tape.gradient(loss, [x, y]);
+
+    // grad_x = d(loss)/dx = d((x*y + x).sum())/dx = y + 1
+    assert((grads[x][0] - 3.0).abs() < 1e-5);  // 2 + 1
+    assert((grads[x][1] - 3.0).abs() < 1e-5);
+
+    // grad_y = d(loss)/dy = x
+    assert((grads[y][0] - 1.0).abs() < 1e-5);
+    assert((grads[y][1] - 2.0).abs() < 1e-5);
+
+    // Persistent tape for multiple backward passes
+    let persistent_tape = GradientTape.new_persistent();
+
+    let a = persistent_tape.variable(tensor<3>f32{1.0, 2.0, 3.0});
+    let b = a.pow(2);
+    let c = b.sum();
+
+    // First backward
+    let grad1 = persistent_tape.gradient(c, [a]);
+    // d(x^2.sum())/dx = 2x
+
+    // Can compute again (tape not consumed)
+    let grad2 = persistent_tape.gradient(c, [a]);
+
+    assert(grad1[a][0] == grad2[a][0]);
+
+    // Nested differentiation (for Hessian, etc.)
+    let outer_tape = GradientTape.new();
+
+    let x_outer = outer_tape.variable(tensor<2>f32{1.0, 2.0});
+
+    // Inner tape for second derivative
+    let inner_tape = GradientTape.new();
+    let x_inner = inner_tape.variable(x_outer.value());
+
+    let f = x_inner.pow(3).sum();  // x^3
+    let df = inner_tape.gradient(f, [x_inner])[x_inner];  // 3x^2
+
+    // Now differentiate df using outer tape
+    let x_reconstructed = outer_tape.variable(df);
+    let d2f = outer_tape.gradient(df.sum(), [x_outer]);
+    // 6x
+
+    // Gradient accumulation (for batch processing)
+    let mut accumulated_grads: Tensor<f32, [10]> = Tensor.zeros();
+
+    for batch_idx in 0..5 {
+        let tape = GradientTape.new();
+        let params = tape.variable(Tensor.ones());
+        let batch_data = Tensor.randn();  // Simulated batch
+
+        let batch_loss = (params * batch_data).sum();
+        let batch_grads = tape.gradient(batch_loss, [params]);
+
+        // Accumulate gradients
+        accumulated_grads += batch_grads[params];
+    }
+
+    // Average accumulated gradients
+    accumulated_grads /= 5.0;
+
+    // Gradient clipping during backward
+    let tape = GradientTape.new();
+    let params = tape.variable(Tensor.randn_like.<[100]>());
+    let loss = params.pow(2).sum();
+
+    let raw_grads = tape.gradient(loss, [params]);
+
+    // Clip by value
+    let clipped_val = raw_grads[params].clamp(-1.0, 1.0);
+
+    // Clip by norm
+    let grad_norm = raw_grads[params].norm(p: 2);
+    let max_norm = 1.0;
+    let clipped_norm = if grad_norm > max_norm {
+        raw_grads[params] * (max_norm / grad_norm)
+    } else {
+        raw_grads[params]
+    };
+
+    // Selective gradient computation
+    let tape = GradientTape.new();
+
+    let w1 = tape.variable(Tensor.randn_like.<[784, 128]>());
+    let w2 = tape.variable(Tensor.randn_like.<[128, 10]>());
+    let b1 = tape.constant(Tensor.zeros_like.<[128]>());  // No gradient needed
+    let b2 = tape.constant(Tensor.zeros_like.<[10]>());
+
+    let input = tape.constant(Tensor.randn_like.<[32, 784]>());
+    let target = tape.constant(Tensor.randn_like.<[32, 10]>());
+
+    let hidden = (matmul(input, w1) + b1).relu();
+    let output = matmul(hidden, w2) + b2;
+    let loss = (output - target).pow(2).mean();
+
+    // Only compute gradients for variables, not constants
+    let grads = tape.gradient(loss, [w1, w2]);
+    // grads[b1] would error - not tracked
+
+    // Gradient checkpointing (memory optimization)
+    let tape = GradientTape.new_with_checkpointing();
+
+    @checkpoint  // Recompute during backward instead of storing
+    fn heavy_computation(x: Tensor<f32, [N]>) -> Tensor<f32, [N]> {
+        let mut result = x;
+        for _ in 0..100 {
+            result = result.sin().cos().exp();
+        }
+        result
+    }
+
+    let x = tape.variable(Tensor.randn_like.<[1000]>());
+    let y = heavy_computation(x);
+    let loss = y.sum();
+
+    // Backward pass recomputes heavy_computation
+    let grads = tape.gradient(loss, [x]);
+
+    // Custom backward function
+    type CustomOp is ();
+
+    implement CustomOp {
+        fn forward(ctx: &mut BackwardContext, x: Tensor<f32, [N]>) -> Tensor<f32, [N]> {
+            // Save for backward
+            ctx.save_for_backward([x]);
+
+            // Forward computation
+            x.pow(2) + x
+        }
+
+        fn backward(ctx: &BackwardContext, grad_output: Tensor<f32, [N]>) -> Tensor<f32, [N]> {
+            let [x] = ctx.saved_tensors();
+
+            // Gradient: d(x^2 + x)/dx = 2x + 1
+            grad_output * (2.0 * x + 1.0)
+        }
+    }
+
+    // Register and use
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<4>f32{1.0, 2.0, 3.0, 4.0});
+    let y = tape.apply(CustomOp.forward, CustomOp.backward, x);
+    let loss = y.sum();
+
+    let grads = tape.gradient(loss, [x]);
+    // grads[x] = 2x + 1 = [3, 5, 7, 9]
+    assert((grads[x][0] - 3.0).abs() < 1e-5);
+
+    // Gradient hooks (for debugging/modification)
+    let tape = GradientTape.new();
+    let x = tape.variable(Tensor.ones_like.<[10]>());
+
+    x.register_hook(|grad| {
+        // Called during backward
+        grad * 2.0  // Double the gradient
+    });
+
+    let loss = x.pow(2).sum();
+    let grads = tape.gradient(loss, [x]);
+    // Normal gradient would be 2x = 2, but hook doubles it to 4
+    assert((grads[x][0] - 4.0).abs() < 1e-5);
+
+    // Gradient anomaly detection
+    GradientTape.set_detect_anomaly(true);
+
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<2>f32{0.0, 1.0});
+
+    // This would trigger anomaly detection (NaN gradient)
+    // let y = x.log();  // log(0) = -inf, gradient = 1/0 = NaN
+    // let grads = tape.gradient(y.sum(), [x]);
+
+    GradientTape.set_detect_anomaly(false);
+}

@@ -1,0 +1,38 @@
+// @test: parse-pass
+// @tier: 0
+// @category: syntax
+
+// Type definitions require semicolons
+type Point is { x: Int, y: Int };
+type Color is Red | Green | Blue;
+
+// Const/static require semicolons
+const PI: Float = 3.14159;
+
+// Mount statements require semicolons
+mount core.io;
+
+fn test_statements() {
+    // Expressions as statements need semicolons
+    let x = 1;
+    do_something();
+    x + 1;  // Expression statement
+
+    // Control flow doesn't need trailing semicolon in block
+    if condition {
+        action()
+    }
+
+    // But can have one
+    if condition {
+        action();
+    }
+
+    // Return as last expression
+    42
+}
+
+// Function body doesn't need semicolon after block
+fn no_trailing() -> Int {
+    42
+}

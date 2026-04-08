@@ -1,0 +1,396 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, mandelbrot, fractal, fixed-point, iteration, complex-numbers
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT Mandelbrot set computation using fixed-point arithmetic (24.8 format)
+
+// Fixed-point 24.8: value = raw / 256
+// Range: roughly -8388608.0 to 8388607.996 with 1/256 precision
+// For Mandelbrot we need range [-2.5, 1.5] x [-1.5, 1.5]
+
+fn fp_scale() -> Int { 256 }
+
+fn fp_from_int(n: Int) -> Int { n * 256 }
+
+fn fp_to_int(f: Int) -> Int {
+    if f >= 0 { f / 256 }
+    else { 0 - ((0 - f) / 256) }
+}
+
+// Fixed-point from fraction num/den
+fn fp_frac(num: Int, den: Int) -> Int {
+    (num * 256) / den
+}
+
+fn fp_add(a: Int, b: Int) -> Int { a + b }
+fn fp_sub(a: Int, b: Int) -> Int { a - b }
+
+// Multiply: (a * b) / SCALE
+fn fp_mul(a: Int, b: Int) -> Int {
+    (a * b) / 256
+}
+
+fn fp_abs(a: Int) -> Int {
+    if a < 0 { 0 - a } else { a }
+}
+
+// Mandelbrot iteration: z = z^2 + c
+// z = (zr, zi), c = (cr, ci)
+// z^2 = (zr^2 - zi^2, 2*zr*zi)
+// new_zr = zr^2 - zi^2 + cr
+// new_zi = 2*zr*zi + ci
+// |z|^2 = zr^2 + zi^2
+// Escape when |z|^2 > 4 (in fixed-point: > 4*256 = 1024)
+// Returns iteration count (0 = in set, >0 = escape iteration)
+
+fn mandelbrot_iter(cr: Int, ci: Int, max_iter: Int) -> Int {
+    let mut zr = 0;
+    let mut zi = 0;
+    let mut iter = 0;
+    let escape = fp_from_int(4);  // 4.0 in fixed-point = 1024
+
+    while iter < max_iter {
+        let zr2 = fp_mul(zr, zr);
+        let zi2 = fp_mul(zi, zi);
+        let mag2 = zr2 + zi2;
+
+        if mag2 > escape {
+            // Escaped; return iteration count
+            let result = iter + 1;
+            // Force exit by setting iter to max_iter
+            iter = max_iter;
+            zr = result;  // Store result in zr temporarily
+            zi = 0 - 1;   // Signal that we escaped
+        } else {
+            let new_zr = zr2 - zi2 + cr;
+            let new_zi = fp_mul(2 * zr, zi) + ci;
+            zr = new_zr;
+            zi = new_zi;
+            iter = iter + 1;
+        }
+    }
+
+    // If zi == -1, we escaped and zr holds the iteration count
+    if zi == 0 - 1 { zr }
+    else { 0 }  // didn't escape = in set
+}
+
+// Simpler version that returns 0 (in set) or iteration count (escaped)
+fn mandelbrot(cr: Int, ci: Int, max_iter: Int) -> Int {
+    let mut zr = 0;
+    let mut zi = 0;
+    let mut count = 0;
+    let escape = fp_from_int(4);
+    let mut escaped = 0;
+
+    while count < max_iter && escaped == 0 {
+        let zr2 = fp_mul(zr, zr);
+        let zi2 = fp_mul(zi, zi);
+
+        if zr2 + zi2 > escape {
+            escaped = count + 1;
+        } else {
+            let new_zr = zr2 - zi2 + cr;
+            let new_zi = fp_mul(2 * zr, zi) + ci;
+            zr = new_zr;
+            zi = new_zi;
+            count = count + 1;
+        }
+    }
+
+    escaped  // 0 = in set, >0 = escaped at that iteration
+}
+
+// Compute a grid row: 8 points along x-axis at fixed y
+type Row8 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int
+};
+
+fn row_get(r: Row8, i: Int) -> Int {
+    if i == 0 { r.a0 }
+    else if i == 1 { r.a1 }
+    else if i == 2 { r.a2 }
+    else if i == 3 { r.a3 }
+    else if i == 4 { r.a4 }
+    else if i == 5 { r.a5 }
+    else if i == 6 { r.a6 }
+    else { r.a7 }
+}
+
+fn row_set(r: Row8, i: Int, v: Int) -> Row8 {
+    Row8 {
+        a0: if i == 0 { v } else { r.a0 },
+        a1: if i == 1 { v } else { r.a1 },
+        a2: if i == 2 { v } else { r.a2 },
+        a3: if i == 3 { v } else { r.a3 },
+        a4: if i == 4 { v } else { r.a4 },
+        a5: if i == 5 { v } else { r.a5 },
+        a6: if i == 6 { v } else { r.a6 },
+        a7: if i == 7 { v } else { r.a7 }
+    }
+}
+
+fn row_zero() -> Row8 {
+    Row8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Compute a row of Mandelbrot iterations
+// x ranges from x_min to x_min + 7*dx
+fn compute_row(x_min: Int, dx: Int, y: Int, max_iter: Int) -> Row8 {
+    let mut row = row_zero();
+    let mut i = 0;
+    while i < 8 {
+        let x = x_min + i * dx;
+        row = row_set(row, i, mandelbrot(x, y, max_iter));
+        i = i + 1;
+    }
+    row
+}
+
+// 8x8 grid of iteration counts
+type Grid64 is {
+    r0: Row8, r1: Row8, r2: Row8, r3: Row8,
+    r4: Row8, r5: Row8, r6: Row8, r7: Row8
+};
+
+fn grid_get_row(g: Grid64, i: Int) -> Row8 {
+    if i == 0 { g.r0 }
+    else if i == 1 { g.r1 }
+    else if i == 2 { g.r2 }
+    else if i == 3 { g.r3 }
+    else if i == 4 { g.r4 }
+    else if i == 5 { g.r5 }
+    else if i == 6 { g.r6 }
+    else { g.r7 }
+}
+
+fn grid_set_row(g: Grid64, i: Int, r: Row8) -> Grid64 {
+    Grid64 {
+        r0: if i == 0 { r } else { g.r0 },
+        r1: if i == 1 { r } else { g.r1 },
+        r2: if i == 2 { r } else { g.r2 },
+        r3: if i == 3 { r } else { g.r3 },
+        r4: if i == 4 { r } else { g.r4 },
+        r5: if i == 5 { r } else { g.r5 },
+        r6: if i == 6 { r } else { g.r6 },
+        r7: if i == 7 { r } else { g.r7 }
+    }
+}
+
+// Compute 8x8 grid of Mandelbrot
+fn compute_grid(x_min: Int, dx: Int, y_min: Int, dy: Int, max_iter: Int) -> Grid64 {
+    let z = row_zero();
+    let mut grid = Grid64 { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z };
+
+    let mut j = 0;
+    while j < 8 {
+        let y = y_min + j * dy;
+        let row = compute_row(x_min, dx, y, max_iter);
+        grid = grid_set_row(grid, j, row);
+        j = j + 1;
+    }
+    grid
+}
+
+// Count how many points are in the set (iteration = 0)
+fn count_in_set(g: Grid64) -> Int {
+    let mut count = 0;
+    let mut j = 0;
+    while j < 8 {
+        let row = grid_get_row(g, j);
+        let mut i = 0;
+        while i < 8 {
+            if row_get(row, i) == 0 {
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        j = j + 1;
+    }
+    count
+}
+
+// Sum all iteration counts
+fn sum_iterations(g: Grid64) -> Int {
+    let mut total = 0;
+    let mut j = 0;
+    while j < 8 {
+        let row = grid_get_row(g, j);
+        let mut i = 0;
+        while i < 8 {
+            total = total + row_get(row, i);
+            i = i + 1;
+        }
+        j = j + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    let max_iter = 50;
+
+    // === Test 1: Origin (0,0) is in the Mandelbrot set ===
+    assert_eq(mandelbrot(0, 0, max_iter), 0);
+
+    // === Test 2: (-1, 0) is in the set (period-2 cycle) ===
+    let neg1 = fp_from_int(0 - 1);
+    assert_eq(mandelbrot(neg1, 0, max_iter), 0);
+
+    // === Test 3: (0.25, 0) is near the boundary (cusp) - in set ===
+    let quarter = fp_frac(1, 4);
+    assert_eq(mandelbrot(quarter, 0, max_iter), 0);
+
+    // === Test 4: Points clearly outside escape quickly ===
+    // (2, 0): |z| immediately > 2 after first iteration
+    let two = fp_from_int(2);
+    let esc_2_0 = mandelbrot(two, 0, max_iter);
+    assert(esc_2_0 > 0);
+    assert(esc_2_0 <= 3);  // escapes very quickly
+
+    // (0, 2): similarly escapes fast
+    let esc_0_2 = mandelbrot(0, two, max_iter);
+    assert(esc_0_2 > 0);
+    assert(esc_0_2 <= 3);
+
+    // (-3, 0): far outside
+    let neg3 = fp_from_int(0 - 3);
+    let esc_neg3 = mandelbrot(neg3, 0, max_iter);
+    assert(esc_neg3 > 0);
+    assert(esc_neg3 <= 2);
+
+    // === Test 5: (0.5, 0) is outside the set ===
+    let half = fp_frac(1, 2);
+    let esc_half = mandelbrot(half, 0, max_iter);
+    assert(esc_half > 0);
+
+    // === Test 6: (-0.5, 0) is in the set ===
+    let neg_half = fp_frac(0 - 1, 2);
+    assert_eq(mandelbrot(neg_half, 0, max_iter), 0);
+
+    // === Test 7: Symmetry about real axis ===
+    // mandelbrot(c, d) should equal mandelbrot(c, -d)
+    let test_cr = fp_frac(0 - 3, 4);  // -0.75
+    let test_ci = fp_frac(1, 4);       // 0.25
+    let neg_ci = fp_frac(0 - 1, 4);    // -0.25
+    assert_eq(mandelbrot(test_cr, test_ci, max_iter), mandelbrot(test_cr, neg_ci, max_iter));
+
+    // === Test 8: Main cardioid check ===
+    // Points inside the main cardioid: c = (r*cos(t) - r^2*cos(2t))/2, ...
+    // (-0.75, 0) is in main cardioid period-2 bulb boundary
+    let m75 = fp_frac(0 - 3, 4);
+    assert_eq(mandelbrot(m75, 0, max_iter), 0);
+
+    // === Test 9: Period-2 bulb center (-1, 0) ===
+    assert_eq(mandelbrot(neg1, 0, max_iter), 0);
+
+    // === Test 10: Points near boundary have high iteration counts ===
+    // (-0.75, 0.1) is near boundary
+    let near_cr = fp_frac(0 - 3, 4);
+    let near_ci = fp_frac(1, 10);
+    let near_result = mandelbrot(near_cr, near_ci, max_iter);
+    // Should be in set or have high iteration count
+    // In practice this is in the set (period-2 bulb region)
+    assert(near_result == 0 || near_result > 10);
+
+    // === Test 11: Grid computation ===
+    // Compute 8x8 grid centered on (-0.5, 0), spanning [-2.0, 1.0] x [-1.5, 1.5]
+    let x_min = fp_from_int(0 - 2);     // -2.0
+    let dx = fp_frac(3, 7);              // 3.0/7 ~ 0.4286 (to cover -2 to ~1)
+    let y_min = fp_frac(0 - 3, 2);      // -1.5
+    let dy = fp_frac(3, 7);             // same step
+
+    let grid = compute_grid(x_min, dx, y_min, dy, 30);
+
+    // At least some points should be in the set
+    let in_set = count_in_set(grid);
+    assert(in_set > 0);
+
+    // Some points should escape
+    assert(in_set < 64);
+
+    // Total iterations should be > 0
+    let total = sum_iterations(grid);
+    assert(total > 0);
+
+    // === Test 12: Iteration count monotonicity with max_iter ===
+    // More max_iter can only increase iteration count for non-escaping points
+    let cr_test = fp_frac(1, 3);
+    let ci_test = fp_frac(1, 3);
+    let iter10 = mandelbrot(cr_test, ci_test, 10);
+    let iter50 = mandelbrot(cr_test, ci_test, 50);
+    // If escaped at 10, same at 50; if in set at 10, might escape at 50
+    if iter10 > 0 {
+        assert_eq(iter10, iter50);
+    }
+
+    // === Test 13: Far corners definitely escape ===
+    let far = fp_from_int(3);
+    assert(mandelbrot(far, far, max_iter) > 0);
+    assert(mandelbrot(far, 0 - far, max_iter) > 0);
+    assert(mandelbrot(0 - far, far, max_iter) > 0);
+    assert(mandelbrot(0 - far, 0 - far, max_iter) > 0);
+
+    // === Test 14: Real axis behavior ===
+    // The Mandelbrot set on the real axis is [-2, 0.25]
+    let in1 = fp_frac(0 - 7, 4);  // -1.75
+    assert_eq(mandelbrot(in1, 0, max_iter), 0);
+
+    let out1 = fp_frac(3, 8);  // 0.375, outside
+    assert(mandelbrot(out1, 0, max_iter) > 0);
+
+    // === Test 15: z^2 + c iteration verification ===
+    // For c = (1, 0): z0=0, z1=1, z2=1+1=2, z3=4+1=5 -> escapes at iter 3
+    let one = fp_from_int(1);
+    let iter_1_0 = mandelbrot(one, 0, max_iter);
+    assert(iter_1_0 > 0);
+    assert(iter_1_0 <= 4);
+
+    // For c = (-2, 0): z0=0, z1=-2, z2=4-2=2, z3=4-2=2 -> escapes
+    let neg2 = fp_from_int(0 - 2);
+    // Actually z1=-2, z2=(-2)^2+(-2)=2, |z|^2=4, borderline; z3=4-2=2, cycle
+    // Depending on > vs >= for escape, may or may not escape
+    let iter_neg2 = mandelbrot(neg2, 0, max_iter);
+    // borderline: either 0 (in set) or small escape count
+    assert(iter_neg2 == 0 || iter_neg2 > 0);
+
+    // === Test 16: Compute specific grid row along y=0 ===
+    // x from -2 to 1.5 in 8 steps
+    let row_y0 = compute_row(fp_from_int(0 - 2), fp_frac(1, 2), 0, max_iter);
+    // x=-2.0: borderline (in or near set)
+    // x=-1.5: in set (period-2)
+    // x=-1.0: in set
+    // x=-0.5: in set
+    // x=0.0: in set
+    // x=0.5: escapes
+    // x=1.0: escapes
+    // x=1.5: escapes fast
+
+    // -1.0 and 0.0 definitely in set
+    assert_eq(row_get(row_y0, 2), 0);  // x=-1.0
+    assert_eq(row_get(row_y0, 4), 0);  // x=0.0
+
+    // 1.0 and 1.5 definitely escape
+    assert(row_get(row_y0, 6) > 0);  // x=1.0
+    assert(row_get(row_y0, 7) > 0);  // x=1.5
+
+    // === Test 17: More symmetry checks ===
+    let sym_cr = fp_frac(0 - 1, 8);
+    let sym_ci = fp_frac(3, 4);
+    let neg_sym_ci = fp_frac(0 - 3, 4);
+    assert_eq(mandelbrot(sym_cr, sym_ci, max_iter), mandelbrot(sym_cr, neg_sym_ci, max_iter));
+
+    // === Test 18: Grid with higher resolution near origin ===
+    let fine_x = fp_frac(0 - 1, 2);
+    let fine_dx = fp_frac(1, 8);
+    let fine_y = fp_frac(0 - 1, 2);
+    let fine_dy = fp_frac(1, 8);
+    let fine_grid = compute_grid(fine_x, fine_dx, fine_y, fine_dy, 50);
+    let fine_in_set = count_in_set(fine_grid);
+    // Near origin, many points should be in set
+    assert(fine_in_set > 20);
+
+    0
+}

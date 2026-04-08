@@ -1,0 +1,202 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, generics
+// @description: Type inference with generic functions and constraints
+
+/// Test for type inference with generic functions.
+/// Generic parameters are inferred from usage context.
+
+// Generic identity function
+fn id<T>(x: T) -> T {
+    x
+}
+
+// Generic with multiple parameters
+fn pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+// Generic with higher-order function
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U {
+    f(x)
+}
+
+// Generic returning Maybe
+fn wrap<T>(x: T) -> Maybe<T> {
+    Some(x)
+}
+
+fn text_len(s: Text) -> Int { s.len() }
+
+// Generic unwrap with default
+fn unwrap_or<T>(opt: Maybe<T>, default: T) -> T {
+    match opt {
+        Some(x) => x,
+        None => default,
+    }
+}
+
+// Generic with bounds: uses built-in comparison operators
+fn max_of_two<T: Clone>(a: T, b: T, gt: fn(T, T) -> Bool) -> T {
+    if gt(a.clone(), b.clone()) { a } else { b }
+}
+
+fn max_of_three<T: Clone>(a: T, b: T, c: T, gt: fn(T, T) -> Bool) -> T {
+    let ab_max = max_of_two(a, b, gt);
+    max_of_two(ab_max, c, gt)
+}
+
+// Generic struct construction
+type Container<T> is { value: T };
+
+implement<T> Container<T> {
+    fn new(v: T) -> Container<T> {
+        Container { value: v }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+}
+
+// Generic with multiple bounds
+type Printable is protocol {
+    fn to_text(&self) -> Text;
+};
+
+fn print_and_return<T: Clone + Printable>(x: T) -> T {
+    print(x.to_text());
+    x.clone()
+}
+
+type NamedValue is {
+    name: Text,
+    val: Int,
+};
+
+implement Printable for NamedValue {
+    fn to_text(&self) -> Text {
+        f"{self.name}={self.val}"
+    }
+}
+
+implement Clone for NamedValue {
+    fn clone(&self) -> NamedValue {
+        NamedValue { name: self.name.clone(), val: self.val }
+    }
+}
+
+// Generic list operations
+fn first<T>(list: List<T>) -> Maybe<T> {
+    if list.is_empty() { None } else { Some(list[0]) }
+}
+
+fn last<T>(list: List<T>) -> Maybe<T> {
+    let n = list.len();
+    if n == 0 { None } else { Some(list[n - 1]) }
+}
+
+fn map_generic<A, B>(list: List<A>, f: fn(A) -> B) -> List<B> {
+    let mut result: List<B> = [];
+    for item in list {
+        result.push(f(item));
+    }
+    result
+}
+
+fn filter_generic<T: Clone>(list: List<T>, pred: fn(T) -> Bool) -> List<T> {
+    let mut result: List<T> = [];
+    for item in list {
+        if pred(item.clone()) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+fn main() {
+    // Basic generic inference: T = Int inferred from argument
+    let y = id(42);
+    assert(y == 42);
+
+    // T = Text inferred
+    let z = id("hello");
+    assert(z == "hello");
+
+    // Multiple parameter inference: A = Int, B = Text
+    let p = pair(1, "two");
+    assert(p.0 == 1 && p.1 == "two");
+
+    // T = Bool inferred
+    let b = pair(true, false);
+    assert(b.0 == true && b.1 == false);
+
+    // Higher-order function inference: T = Int, U = Int
+    let doubled = apply(|n: Int| n * 2, 21);
+    assert(doubled == 42);
+
+    // T = Text, U = Int
+    let len = apply(text_len, "hello");
+    assert(len == 5);
+
+    // Inference in chained calls: all T = Int
+    let chained = id(id(id(42)));
+    assert(chained == 42);
+
+    // Wrap inference: T = Int -> Maybe<Int>
+    let wrapped = wrap(42);
+    assert(wrapped == Some(42));
+
+    // Nested generic: Maybe<Maybe<Int>>
+    let double_wrapped = wrap(wrap(42));
+    match double_wrapped {
+        Some(inner) => match inner {
+            Some(n) => assert(n == 42),
+            None => unreachable(),
+        },
+        None => unreachable(),
+    }
+
+    // max_of_three with Int gt function
+    let max_int = max_of_three(10, 25, 15, |a: Int, b: Int| a > b);
+    assert(max_int == 25);
+
+    // Generic struct: T = Int inferred
+    let c = Container { value: 42 };
+    assert(*c.get() == 42);
+
+    // T = Text inferred
+    let cs = Container { value: "hello" };
+    assert(*cs.get() == "hello");
+
+    // unwrap_or
+    assert(unwrap_or(Some(42), 0) == 42);
+    assert(unwrap_or(None, 99) == 99);
+
+    // print_and_return
+    let nv = NamedValue { name: "score", val: 100 };
+    let returned = print_and_return(nv);
+    assert(returned.val == 100);
+
+    // Generic list operations
+    let nums = [1, 2, 3, 4, 5];
+
+    let f = first(nums);
+    assert(f == Some(1));
+
+    let l = last(nums);
+    assert(l == Some(5));
+
+    // map_generic: A=Int, B=Int
+    let doubled_list = map_generic(nums, |x: Int| x * 2);
+    assert(doubled_list == [2, 4, 6, 8, 10]);
+
+    // map_generic: A=Int, B=Text
+    let text_list = map_generic([1, 2, 3], |x: Int| f"n{x}");
+    assert(text_list[0] == "n1");
+
+    // filter_generic: T=Int
+    let evens = filter_generic(nums, |x: Int| x % 2 == 0);
+    assert(evens == [2, 4]);
+}

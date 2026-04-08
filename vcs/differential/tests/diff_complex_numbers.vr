@@ -1,0 +1,112 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, complex, numbers, math
+// @timeout: 10000
+
+// Complex numbers as (real, imag) pairs
+type Complex is { re: Int, im: Int };
+
+fn c_add(a: Complex, b: Complex) -> Complex {
+    Complex { re: a.re + b.re, im: a.im + b.im }
+}
+
+fn c_sub(a: Complex, b: Complex) -> Complex {
+    Complex { re: a.re - b.re, im: a.im - b.im }
+}
+
+fn c_mul(a: Complex, b: Complex) -> Complex {
+    Complex {
+        re: a.re * b.re - a.im * b.im,
+        im: a.re * b.im + a.im * b.re
+    }
+}
+
+fn c_conj(a: Complex) -> Complex {
+    Complex { re: a.re, im: -a.im }
+}
+
+fn c_norm_sq(a: Complex) -> Int {
+    a.re * a.re + a.im * a.im
+}
+
+fn c_eq(a: Complex, b: Complex) -> Int {
+    if a.re == b.re { if a.im == b.im { 1 } else { 0 } } else { 0 }
+}
+
+// Power by repeated squaring
+fn c_pow(base: Complex, n: Int) -> Complex {
+    let mut result = Complex { re: 1, im: 0 };
+    let mut b = base;
+    let mut e = n;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = c_mul(result, b);
+        }
+        b = c_mul(b, b);
+        e = e / 2;
+    }
+    result
+}
+
+fn main() -> Int {
+    let zero = Complex { re: 0, im: 0 };
+    let one = Complex { re: 1, im: 0 };
+    let i_unit = Complex { re: 0, im: 1 };
+
+    // i^2 = -1
+    let i_sq = c_mul(i_unit, i_unit);
+    assert_eq(i_sq.re, -1);
+    assert_eq(i_sq.im, 0);
+
+    // (1+i) * (1-i) = 1 - i^2 = 2
+    let a = Complex { re: 1, im: 1 };
+    let b = Complex { re: 1, im: -1 };
+    let prod = c_mul(a, b);
+    assert_eq(prod.re, 2);
+    assert_eq(prod.im, 0);
+
+    // (2+3i) + (4+5i) = (6+8i)
+    let c = Complex { re: 2, im: 3 };
+    let d = Complex { re: 4, im: 5 };
+    let sum = c_add(c, d);
+    assert_eq(sum.re, 6);
+    assert_eq(sum.im, 8);
+
+    // (2+3i) * (4+5i) = 8+10i+12i+15i^2 = (8-15)+(10+12)i = -7+22i
+    let prod2 = c_mul(c, d);
+    assert_eq(prod2.re, -7);
+    assert_eq(prod2.im, 22);
+
+    // Conjugate: conj(2+3i) = 2-3i
+    let conj_c = c_conj(c);
+    assert_eq(conj_c.re, 2);
+    assert_eq(conj_c.im, -3);
+
+    // z * conj(z) = |z|^2 (real)
+    let z_conj = c_mul(c, c_conj(c));
+    assert_eq(z_conj.im, 0);
+    assert_eq(z_conj.re, c_norm_sq(c));  // 4+9=13
+
+    // Power: i^4 = 1
+    let i4 = c_pow(i_unit, 4);
+    assert_eq(i4.re, 1);
+    assert_eq(i4.im, 0);
+
+    // (1+i)^2 = 2i
+    let a_sq = c_pow(a, 2);
+    assert_eq(a_sq.re, 0);
+    assert_eq(a_sq.im, 2);
+
+    // Distributive: z1*(z2+z3) = z1*z2 + z1*z3
+    let z1 = Complex { re: 2, im: 1 };
+    let z2 = Complex { re: 3, im: -1 };
+    let z3 = Complex { re: -1, im: 2 };
+    let lhs = c_mul(z1, c_add(z2, z3));
+    let rhs = c_add(c_mul(z1, z2), c_mul(z1, z3));
+    assert_eq(c_eq(lhs, rhs), 1);
+
+    print("DIFF_OK: complex_numbers");
+    0
+}

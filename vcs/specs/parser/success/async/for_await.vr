@@ -1,0 +1,456 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for async iteration (for await loops)
+
+// ============================================================================
+// Basic For Await Loops
+// ============================================================================
+
+async fn test_basic_for_await() {
+    // Simple for await
+    for await item in async_stream {
+        process(item);
+    }
+
+    // For await (no type annotation on pattern - use typed stream)
+    for await item in typed_stream {
+        handle(item);
+    }
+
+    // For await over async generator
+    for await page in fetch_pages() {
+        display(page);
+    }
+
+    // For await with method call source
+    for await message in channel.recv_stream() {
+        handle_message(message);
+    }
+}
+
+// ============================================================================
+// For Await with Pattern Destructuring
+// ============================================================================
+
+async fn test_for_await_patterns() {
+    // Tuple destructuring
+    for await (key, value) in async_entries {
+        insert(key, value);
+    }
+
+    // Struct destructuring
+    for await Point { x, y } in point_stream {
+        plot(x, y);
+    }
+
+    // Nested destructuring
+    for await (id, User { name, age }) in user_stream {
+        register(id, name, age);
+    }
+
+    // Option pattern
+    for await Some(data) in maybe_stream {
+        use_data(data);
+    }
+
+    // Result pattern
+    for await Ok(value) in result_stream {
+        process_success(value);
+    }
+
+    // Wildcard in pattern
+    for await (_, value) in pairs {
+        use_value(value);
+    }
+
+    // Complex pattern
+    for await Record { id, data: Data { value, .. }, .. } in records {
+        store(id, value);
+    }
+}
+
+// ============================================================================
+// For Await with Loop Annotations
+// ============================================================================
+
+async fn test_for_await_annotations() {
+    // For await with invariant
+    for await item in stream
+        invariant count >= 0
+    {
+        process(item);
+        count += 1;
+    }
+
+    // For await with decreases
+    for await item in bounded_stream
+        decreases remaining
+    {
+        remaining -= 1;
+        handle(item);
+    }
+
+    // Multiple annotations
+    for await data in verified_stream
+        invariant processed_count <= total_count
+        decreases total_count - processed_count
+    {
+        process(data);
+        processed_count += 1;
+    }
+}
+
+// ============================================================================
+// For Await with Await in Body
+// ============================================================================
+
+async fn test_for_await_nested_async() {
+    // Await in loop body
+    for await url in url_stream {
+        let response = fetch(url).await;
+        process(response);
+    }
+
+    // Multiple awaits in body
+    for await task in task_stream {
+        let prepared = prepare(task).await;
+        let executed = execute(prepared).await;
+        report(executed).await;
+    }
+
+    // Conditional await in body
+    for await item in mixed_stream {
+        if needs_async_processing(item) {
+            async_process(item).await;
+        } else {
+            sync_process(item);
+        }
+    }
+
+    // Await with error handling
+    for await request in request_stream {
+        let response = handle_request(request).await?;
+        send_response(response).await;
+    }
+}
+
+// ============================================================================
+// For Await with Control Flow
+// ============================================================================
+
+async fn test_for_await_control_flow() {
+    // Break from for await
+    for await item in infinite_stream {
+        if is_done(item) {
+            break;
+        }
+        process(item);
+    }
+
+    // Continue in for await
+    for await data in data_stream {
+        if should_skip(data) {
+            continue;
+        }
+        process(data);
+    }
+
+    // Early return from for await
+    for await candidate in search_stream {
+        if matches_criteria(candidate) {
+            return Some(candidate);
+        }
+    }
+    return None;
+
+    // Break with value (in labeled block context)
+    let found = loop {
+        for await item in stream {
+            if is_target(item) {
+                break item;
+            }
+        }
+    };
+}
+
+// ============================================================================
+// Nested For Await Loops
+// ============================================================================
+
+async fn test_nested_for_await() {
+    // Simple nesting
+    for await outer in outer_stream {
+        for await inner in inner_stream {
+            combine(outer, inner);
+        }
+    }
+
+    // Nested with outer reference
+    for await container in container_stream {
+        for await item in container.items() {
+            process_item(container.id, item);
+        }
+    }
+
+    // Triple nesting
+    for await level1 in stream1 {
+        for await level2 in stream2 {
+            for await level3 in stream3 {
+                combine_all(level1, level2, level3);
+            }
+        }
+    }
+
+    // Mixed for and for await
+    for await outer in async_stream {
+        for inner in sync_collection {
+            process(outer, inner);
+        }
+    }
+}
+
+// ============================================================================
+// For Await with Different Stream Sources
+// ============================================================================
+
+async fn test_for_await_sources() {
+    // Async generator function
+    for await page in fetch_all_pages(url) {
+        display(page);
+    }
+
+    // Channel as stream
+    for await message in receiver.into_stream() {
+        handle(message);
+    }
+
+    // Transformed stream
+    for await processed in raw_stream.map(transform) {
+        use_processed(processed);
+    }
+
+    // Filtered stream
+    for await valid in stream.filter(is_valid) {
+        process_valid(valid);
+    }
+
+    // Buffered stream
+    for await batch in stream.chunks(10) {
+        process_batch(batch);
+    }
+
+    // Merged streams
+    for await item in stream_a.merge(stream_b) {
+        handle_merged(item);
+    }
+
+    // Zipped streams
+    for await (a, b) in stream_a.zip(stream_b) {
+        combine(a, b);
+    }
+}
+
+// ============================================================================
+// For Await in Different Contexts
+// ============================================================================
+
+async fn test_for_await_contexts() using [Database, Logger] {
+    // For await using context
+    for await record in database.stream_records() {
+        log(f"Processing: {record.id}");
+        update_record(record).await;
+    }
+
+    // For await in nursery spawn
+    nursery {
+        spawn async {
+            for await item in stream1 {
+                process1(item);
+            }
+        };
+        spawn async {
+            for await item in stream2 {
+                process2(item);
+            }
+        };
+    }
+
+    // For await after select
+    select {
+        source = pick_source().await => {
+            for await item in source {
+                handle(item);
+            }
+        },
+        _ = timeout.await => cancel()
+    };
+}
+
+// ============================================================================
+// For Await with Error Handling
+// ============================================================================
+
+async fn test_for_await_error_handling() {
+    // For await with try/recover
+    try {
+        for await item in risky_stream {
+            process_risky(item).await?;
+        }
+    } recover {
+        StreamError => handle_stream_error(),
+        ProcessError(e) => handle_process_error(e)
+    };
+
+    // For await with defer
+    defer cleanup();
+    for await item in stream {
+        process(item);
+    }
+
+    // For await with errdefer
+    errdefer rollback();
+    for await transaction in transaction_stream {
+        commit(transaction).await?;
+    }
+
+    // Question mark in for await body
+    for await data in fallible_stream {
+        let validated = validate(data)?;
+        let processed = process(validated).await?;
+        store(processed).await?;
+    }
+}
+
+// ============================================================================
+// For Await as Expression
+// ============================================================================
+
+async fn test_for_await_expression() {
+    // Collect results in loop
+    let mut results = List.new();
+    for await item in source_stream {
+        results.push(process(item));
+    }
+
+    // Accumulate in loop
+    let mut sum = 0;
+    for await value in number_stream {
+        sum += value;
+    }
+
+    // Find first match
+    let mut found = None;
+    for await candidate in search_stream {
+        if matches(candidate) {
+            found = Some(candidate);
+            break;
+        }
+    }
+
+    // Count items
+    let mut count = 0;
+    for await _ in countable_stream {
+        count += 1;
+    }
+}
+
+// ============================================================================
+// For Await with Complex Stream Expressions
+// ============================================================================
+
+async fn test_for_await_complex_streams() {
+    // Chained stream operations
+    for await item in source
+        .filter(predicate)
+        .map(transform)
+        .take(100)
+    {
+        use_item(item);
+    }
+
+    // Stream with flat_map
+    for await inner_item in outer_stream.flat_map(|x| x.expand()) {
+        process(inner_item);
+    }
+
+    // Conditional stream selection
+    let stream = if use_fast { fast_stream } else { slow_stream };
+    for await item in stream {
+        process(item);
+    }
+
+    // Stream from async closure
+    for await value in (async || generate_stream().await)() {
+        handle(value);
+    }
+}
+
+// ============================================================================
+// For Await Over Async Generator Results
+// ============================================================================
+
+async fn test_for_await_generators() {
+    // Basic async generator consumption
+    async fn* number_generator() -> Int {
+        for i in 0..100 {
+            yield i;
+        }
+    }
+
+    for await num in number_generator() {
+        process(num);
+    }
+
+    // Async generator with parameters
+    async fn* range_generator(start: Int, end: Int) -> Int {
+        for i in start..end {
+            yield i;
+        }
+    }
+
+    for await n in range_generator(10, 20) {
+        print(n);
+    }
+
+    // Generator with await inside
+    async fn* fetch_items(ids: List<Int>) -> Item using [Database] {
+        for id in ids {
+            let item = fetch_item(id).await;
+            yield item;
+        }
+    }
+
+    for await item in fetch_items(id_list) {
+        display(item);
+    }
+}
+
+// ============================================================================
+// For Await with Typed Streams
+// ============================================================================
+
+async fn test_for_await_types() {
+    // For await with typed stream (type inferred from stream)
+    for await item in stream {
+        process_record(item);
+    }
+
+    // Generic for await
+    for await item in generic_stream {
+        handle_generic(item);
+    }
+
+    // Tuple pattern destructuring
+    for await (num, text) in pair_stream {
+        combine(num, text);
+    }
+
+    // Result pattern matching via match
+    for await result in result_stream {
+        match result {
+            Ok(data) => use_data(data),
+            Err(e) => handle_error(e)
+        }
+    }
+}

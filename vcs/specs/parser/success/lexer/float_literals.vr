@@ -1,0 +1,320 @@
+// @test: parse-pass
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, floats
+// @description: Comprehensive tests for float literal parsing per grammar/verum.ebnf
+//
+// Grammar productions tested:
+//   float_lit = decimal_lit , '.' , decimal_lit , [ exponent ] , [ float_suffix ]
+//   exponent = ( 'e' | 'E' ) , [ '+' | '-' ] , decimal_lit
+//   float_suffix = 'f32' | 'f64'
+//   decimal_lit = dec_digit , { dec_digit | '_' }
+
+fn test_basic_floats() {
+    // Simplest float literals
+    let a = 0.0;
+    let b = 1.0;
+    let c = 9.9;
+
+    // Various decimal places
+    let d = 3.14;
+    let e = 3.141592653589793;
+    let f = 0.1;
+    let g = 0.01;
+    let h = 0.001;
+    let i = 0.0001;
+    let j = 0.00001;
+
+    // Larger whole parts
+    let k = 10.5;
+    let l = 100.25;
+    let m = 1000.125;
+    let n = 123456.789;
+    let o = 999999.999999;
+}
+
+fn test_floats_with_underscores() {
+    // Underscores in whole part
+    let a = 1_000.0;
+    let b = 1_000_000.0;
+    let c = 1_2_3.4;
+
+    // Underscores in fractional part
+    let d = 0.000_001;
+    let e = 3.141_592_653;
+    let f = 1.234_567_890;
+
+    // Underscores in both parts
+    let g = 1_000.000_001;
+    let h = 1_234_567.890_123;
+    let i = 999_999.999_999;
+
+    // Multiple consecutive underscores
+    let j = 1__000.0;
+    let k = 1.000__001;
+}
+
+fn test_scientific_notation_lowercase() {
+    // Basic e notation
+    let a = 1e0;
+    let b = 1e1;
+    let c = 1e2;
+    let d = 1e10;
+    let e = 1e100;
+
+    // With decimal point
+    let f = 1.0e0;
+    let g = 1.5e1;
+    let h = 2.5e10;
+    let i = 3.14e0;
+    let j = 6.022e23;
+
+    // With explicit positive sign
+    let k = 1e+0;
+    let l = 1e+1;
+    let m = 1e+10;
+    let n = 1.5e+5;
+    let o = 2.5e+100;
+
+    // With negative exponent
+    let p = 1e-0;
+    let q = 1e-1;
+    let r = 1e-10;
+    let s = 1.5e-5;
+    let t = 2.5e-100;
+
+    // More complex values
+    let u = 6.674e-11;   // Gravitational constant
+    let v = 2.998e8;     // Speed of light
+    let w = 9.109e-31;   // Electron mass
+}
+
+fn test_scientific_notation_uppercase() {
+    // Basic E notation
+    let a = 1E0;
+    let b = 1E1;
+    let c = 1E2;
+    let d = 1E10;
+    let e = 1E100;
+
+    // With decimal point
+    let f = 1.0E0;
+    let g = 1.5E1;
+    let h = 2.5E10;
+    let i = 3.14E0;
+    let j = 6.022E23;
+
+    // With explicit positive sign
+    let k = 1E+0;
+    let l = 1E+1;
+    let m = 1E+10;
+    let n = 1.5E+5;
+    let o = 2.5E+100;
+
+    // With negative exponent
+    let p = 1E-0;
+    let q = 1E-1;
+    let r = 1E-10;
+    let s = 1.5E-5;
+    let t = 2.5E-100;
+}
+
+fn test_scientific_with_underscores() {
+    // Underscores in mantissa
+    let a = 1_000e0;
+    let b = 1_000_000e0;
+    let c = 1_234.567e0;
+
+    // Underscores in exponent
+    let d = 1e1_0;
+    let e = 1e10_0;
+    let f = 1e+1_0;
+    let g = 1e-1_0;
+
+    // Underscores in both
+    let h = 1_000.000_001e1_0;
+    let i = 6.022_140_76e2_3;
+}
+
+fn test_f32_suffix() {
+    // Basic floats with f32
+    let a = 0.0f32;
+    let b = 1.0f32;
+    let c = 3.14f32;
+    let d = 123.456f32;
+
+    // With underscores
+    let e = 1_000.0f32;
+    let f = 3.141_592f32;
+    let g = 1_234.567_890f32;
+
+    // Scientific notation with f32
+    let h = 1e0f32;
+    let i = 1e10f32;
+    let j = 1e+10f32;
+    let k = 1e-10f32;
+    let l = 1.5e5f32;
+    let m = 2.5e-3f32;
+    let n = 1E10f32;
+    let o = 1E+10f32;
+    let p = 1E-10f32;
+
+    // Edge values for f32
+    let q = 3.4028235e38f32;   // Approx max
+    let r = 1.1754944e-38f32;  // Approx min positive
+}
+
+fn test_f64_suffix() {
+    // Basic floats with f64
+    let a = 0.0f64;
+    let b = 1.0f64;
+    let c = 3.14f64;
+    let d = 123.456f64;
+
+    // With underscores
+    let e = 1_000.0f64;
+    let f = 3.141_592_653_589_793f64;
+    let g = 1_234.567_890_123_456f64;
+
+    // Scientific notation with f64
+    let h = 1e0f64;
+    let i = 1e10f64;
+    let j = 1e+10f64;
+    let k = 1e-10f64;
+    let l = 1.5e5f64;
+    let m = 2.5e-3f64;
+    let n = 1E10f64;
+    let o = 1E+10f64;
+    let p = 1E-10f64;
+
+    // Edge values for f64
+    let q = 1.7976931348623157e308f64;  // Approx max
+    let r = 2.2250738585072014e-308f64; // Approx min positive
+}
+
+fn test_special_values() {
+    // Very small numbers
+    let a = 0.000000001;
+    let b = 1e-100;
+    let c = 1e-308;
+
+    // Very large numbers
+    let d = 999999999999.999999999999;
+    let e = 1e100;
+    let f = 1e308;
+
+    // Zero variations
+    let g = 0.0;
+    let h = 0.00;
+    let i = 0.000000;
+    let j = 0.0e0;
+    let k = 0.0e+0;
+    let l = 0.0e-0;
+    let m = 0.0f32;
+    let n = 0.0f64;
+
+    // One variations
+    let o = 1.0;
+    let p = 1.00;
+    let q = 1.000000;
+    let r = 1.0e0;
+    let s = 1.0e+0;
+    let t = 1.0e-0;
+}
+
+fn test_mathematical_constants() {
+    // Pi approximations
+    let pi_short = 3.14;
+    let pi_medium = 3.14159;
+    let pi_long = 3.14159265358979323846;
+
+    // Euler's number
+    let e_short = 2.71;
+    let e_medium = 2.71828;
+    let e_long = 2.71828182845904523536;
+
+    // Golden ratio
+    let phi = 1.61803398874989484820;
+
+    // Square root of 2
+    let sqrt2 = 1.41421356237309504880;
+
+    // Natural logarithm of 2
+    let ln2 = 0.69314718055994530941;
+}
+
+fn test_physical_constants() {
+    // Speed of light (m/s)
+    let c = 2.99792458e8;
+
+    // Planck constant (J*s)
+    let h = 6.62607015e-34;
+
+    // Gravitational constant (m^3/(kg*s^2))
+    let G = 6.67430e-11;
+
+    // Electron mass (kg)
+    let m_e = 9.1093837015e-31;
+
+    // Proton mass (kg)
+    let m_p = 1.67262192369e-27;
+
+    // Avogadro constant (mol^-1)
+    let N_A = 6.02214076e23;
+
+    // Boltzmann constant (J/K)
+    let k_B = 1.380649e-23;
+}
+
+fn test_floats_in_expressions() {
+    // Basic arithmetic
+    let sum = 1.5 + 2.5;
+    let diff = 10.0 - 3.5;
+    let prod = 2.0 * 3.14159;
+    let quot = 10.0 / 3.0;
+
+    // Mixed with scientific notation
+    let mixed = 1.5e2 + 2.5e-1;
+
+    // With suffixes
+    let typed_sum = 1.0f32 + 2.0f32;
+    let typed_diff = 10.0f64 - 3.5f64;
+
+    // In function calls
+    let result = compute(3.14, 2.718);
+
+    // In array literals
+    let arr = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let sci_arr = [1e0, 1e1, 1e2, 1e3];
+}
+
+fn test_edge_cases() {
+    // Leading zeros in fractional part
+    let a = 1.01;
+    let b = 1.001;
+    let c = 1.0001;
+    let d = 1.00001;
+
+    // Multiple digits before decimal
+    let e = 12.34;
+    let f = 123.456;
+    let g = 1234.5678;
+
+    // Long exponents
+    let h = 1e123;
+    let i = 1e+123;
+    let j = 1e-123;
+
+    // Exponent with leading zeros (if allowed)
+    let k = 1e01;
+    let l = 1e001;
+
+    // Mix of all features
+    let complex = 1_234.567_890e+1_2f64;
+}
+
+// Helper function for expression tests
+fn compute(x: Float, y: Float) -> Float {
+    x * y
+}

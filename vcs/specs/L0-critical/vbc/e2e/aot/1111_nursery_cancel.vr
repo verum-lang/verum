@@ -1,0 +1,120 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, pool, unsigned-rem, correctness
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Channel correctness with unsigned remainder — verify head/tail wrap works
+
+fn producer(ch: Channel<Int>, count: Int) -> Int {
+    let mut i = 0;
+    while i < count {
+        ch.send(i * 10);
+        i = i + 1;
+    }
+    count
+}
+
+fn test_channel_wrap() -> Int {
+    // Use a small channel (cap=4) and send many messages
+    // This forces head and tail to wrap around multiple times
+    // Tests that unsigned rem works correctly for wrapping
+    let ch = Channel.new(4);
+
+    // Producer in thread, consumer on main thread
+    let p = spawn {
+        let mut i = 0;
+        while i < 20 {
+            ch.send(i);
+            i = i + 1;
+        }
+        ch.send(-1);  // sentinel
+        0
+    };
+
+    let mut sum = 0;
+    let mut done = false;
+    while !done {
+        match ch.recv() {
+            Some(v) => {
+                if v == -1 {
+                    done = true;
+                } else {
+                    sum = sum + v;
+                }
+            }
+            None => { done = true; }
+        }
+    }
+
+    p.await;
+
+    // Sum of 0..19 = 190
+    if sum != 190 {
+        print(f"FAIL: expected 190, got {sum}");
+        return 1;
+    }
+    0
+}
+
+fn test_bidirectional_channels() -> Int {
+    // Two channels, bidirectional communication
+    let to_worker = Channel.new(4);
+    let from_worker = Channel.new(4);
+
+    let w = spawn {
+        let mut sum = 0;
+        let mut running = true;
+        while running {
+            match to_worker.recv() {
+                Some(v) => {
+                    if v == -1 {
+                        running = false;
+                        from_worker.send(sum);
+                    } else {
+                        sum = sum + v;
+                    }
+                }
+                None => { running = false; }
+            }
+        }
+        sum
+    };
+
+    // Send 15 values
+    let mut i = 1;
+    while i <= 15 {
+        to_worker.send(i);
+        i = i + 1;
+    }
+    to_worker.send(-1);
+
+    let mut result = 0;
+    match from_worker.recv() {
+        Some(v) => { result = v; }
+        None => {}
+    }
+
+    w.await;
+
+    // 1+2+...+15 = 120
+    if result != 120 {
+        print(f"FAIL: expected 120, got {result}");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    if test_channel_wrap() == 0 { pass = pass + 1; } else { print("FAIL1"); }
+    if test_bidirectional_channels() == 0 { pass = pass + 1; } else { print("FAIL2"); }
+
+    print(f"pass = {pass}/2");
+    if pass == 2 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

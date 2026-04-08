@@ -1,0 +1,2108 @@
+// =============================================================================
+// btree_test.vr - Comprehensive tests for BTreeMap<K, V> and BTreeSet<T>
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @note: VBC runtime has struct field offset bug with Maybe<Heap<...>>
+// @tags: collections, btree, ordered-map, ordered-set, core
+// @description: Comprehensive tests for BTreeMap<K, V> and BTreeSet<T> types
+// =============================================================================
+
+mount core.collections.btree.{BTreeMap, BTreeSet, BTreeEntry};
+mount core.collections.list.List;
+mount core.maybe.{Maybe, Some, None};
+mount core.base.ordering.Ordering;
+
+// =============================================================================
+// PART 1: BTreeMap Tests
+// =============================================================================
+
+// =============================================================================
+// Section 1.1: BTreeMap Construction Tests
+// =============================================================================
+
+@test
+fn test_btreemap_new() {
+    let empty: BTreeMap<Int, Text> = BTreeMap.new();
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+}
+
+@test
+fn test_btreemap_default() {
+    let map: BTreeMap<Int, Text> = BTreeMap.default();
+    assert(map.is_empty());
+    assert_eq(map.len(), 0);
+}
+
+// =============================================================================
+// Section 1.2: BTreeMap Insert and Get Tests
+// =============================================================================
+
+@test
+fn test_btreemap_insert_single() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+
+    let old = map.insert(1, "one");
+    match old {
+        None => {} // Expected
+        Some(_) => panic("Expected None for first insert"),
+    }
+
+    assert_eq(map.len(), 1);
+    assert(!map.is_empty());
+}
+
+@test
+fn test_btreemap_insert_multiple() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+
+    assert_eq(map.len(), 3);
+}
+
+@test
+fn test_btreemap_insert_overwrite() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+
+    let old1 = map.insert(1, "one");
+    match old1 {
+        None => {} // First insert
+        Some(_) => panic("Expected None"),
+    }
+
+    let old2 = map.insert(1, "ONE");
+    match old2 {
+        Some(v) => assert_eq(v, "one"), // Returns old value
+        None => panic("Expected Some for overwrite"),
+    }
+
+    // Verify new value
+    match map.get(&1) {
+        Some(v) => assert_eq(*v, "ONE"),
+        None => panic("Expected Some"),
+    }
+
+    // Length unchanged
+    assert_eq(map.len(), 1);
+}
+
+@test
+fn test_btreemap_get() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(42, "answer");
+
+    match map.get(&42) {
+        Some(v) => assert_eq(*v, "answer"),
+        None => panic("Expected Some"),
+    }
+
+    match map.get(&99) {
+        None => {} // Expected
+        Some(_) => panic("Expected None for missing key"),
+    }
+}
+
+@test
+fn test_btreemap_get_mut() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+
+    // Modify value through mutable reference
+    match map.get_mut(&1) {
+        Some(v) => *v = 20,
+        None => panic("Expected Some"),
+    }
+
+    // Verify modification
+    match map.get(&1) {
+        Some(v) => assert_eq(*v, 20),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_btreemap_contains_key() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+
+    assert(map.contains_key(&1));
+    assert(map.contains_key(&2));
+    assert(!map.contains_key(&3));
+    assert(!map.contains_key(&0));
+}
+
+// =============================================================================
+// Section 1.3: BTreeMap Remove and Clear Tests
+// =============================================================================
+
+@test
+fn test_btreemap_remove() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+
+    // Remove existing key
+    let removed = map.remove(&2);
+    match removed {
+        Some(v) => assert_eq(v, "two"),
+        None => panic("Expected Some"),
+    }
+
+    assert_eq(map.len(), 2);
+    assert(!map.contains_key(&2));
+
+    // Remove non-existent key
+    let removed2 = map.remove(&99);
+    match removed2 {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    assert_eq(map.len(), 2);
+}
+
+@test
+fn test_btreemap_remove_all() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+
+    map.remove(&1);
+    map.remove(&2);
+    map.remove(&3);
+
+    assert(map.is_empty());
+    assert_eq(map.len(), 0);
+}
+
+@test
+fn test_btreemap_clear() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+
+    assert_eq(map.len(), 3);
+
+    map.clear();
+
+    assert(map.is_empty());
+    assert_eq(map.len(), 0);
+    assert(!map.contains_key(&1));
+}
+
+// =============================================================================
+// Section 1.4: BTreeMap Ordered Iteration Tests (Key Functionality)
+// =============================================================================
+
+@test
+fn test_btreemap_iter_sorted_order() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+
+    // Insert in random order
+    map.insert(5, "five");
+    map.insert(2, "two");
+    map.insert(8, "eight");
+    map.insert(1, "one");
+    map.insert(9, "nine");
+    map.insert(3, "three");
+
+    // Iteration should be in sorted key order
+    let mut prev_key = 0;
+    let mut count = 0;
+    for (k, _v) in map.iter() {
+        assert(*k > prev_key); // Keys must be strictly increasing
+        prev_key = *k;
+        count = count + 1;
+    }
+    assert_eq(count, 6);
+}
+
+@test
+fn test_btreemap_keys_sorted() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(30, "thirty");
+    map.insert(10, "ten");
+    map.insert(20, "twenty");
+
+    let mut expected_order = List.from([10, 20, 30]);
+    let mut idx = 0;
+    for k in map.keys() {
+        assert_eq(k, expected_order[idx]);
+        idx = idx + 1;
+    }
+}
+
+@test
+fn test_btreemap_values_in_key_order() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(3, "c");
+    map.insert(1, "a");
+    map.insert(2, "b");
+
+    let mut expected_values = List.from(["a", "b", "c"]);
+    let mut idx = 0;
+    for v in map.values() {
+        assert_eq(v, expected_values[idx]);
+        idx = idx + 1;
+    }
+}
+
+// =============================================================================
+// Section 1.5: BTreeMap First/Last Operations
+// =============================================================================
+
+@test
+fn test_btreemap_first_key_value() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+
+    // Empty map
+    match map.first_key_value() {
+        None => {} // Expected
+        Some(_) => panic("Expected None for empty map"),
+    }
+
+    map.insert(5, "five");
+    map.insert(2, "two");
+    map.insert(8, "eight");
+
+    match map.first_key_value() {
+        Some((k, v)) => {
+            assert_eq(*k, 2);
+            assert_eq(*v, "two");
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_btreemap_last_key_value() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+
+    // Empty map
+    match map.last_key_value() {
+        None => {} // Expected
+        Some(_) => panic("Expected None for empty map"),
+    }
+
+    map.insert(5, "five");
+    map.insert(2, "two");
+    map.insert(8, "eight");
+
+    match map.last_key_value() {
+        Some((k, v)) => {
+            assert_eq(*k, 8);
+            assert_eq(*v, "eight");
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_btreemap_first_last_single_element() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(42, "answer");
+
+    match map.first_key_value() {
+        Some((k, v)) => {
+            assert_eq(*k, 42);
+            assert_eq(*v, "answer");
+        }
+        None => panic("Expected Some"),
+    }
+
+    match map.last_key_value() {
+        Some((k, v)) => {
+            assert_eq(*k, 42);
+            assert_eq(*v, "answer");
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 1.6: BTreeMap Range Queries (O(log n + k) Performance)
+// =============================================================================
+
+@test
+fn test_btreemap_range_basic() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    for i in 0..10 {
+        map.insert(i, i * 10);
+    }
+
+    // Range 3..7 should yield keys 3, 4, 5, 6
+    let mut count = 0;
+    let mut sum = 0;
+    for (k, v) in map.range(3..7) {
+        assert(*k >= 3);
+        assert(*k < 7);
+        sum = sum + *k;
+        count = count + 1;
+    }
+    assert_eq(count, 4);
+    assert_eq(sum, 3 + 4 + 5 + 6);
+}
+
+@test
+fn test_btreemap_range_inclusive() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    for i in 0..10 {
+        map.insert(i, i * 10);
+    }
+
+    // Range 3..=7 should yield keys 3, 4, 5, 6, 7
+    let mut count = 0;
+    for (k, _v) in map.range(3..=7) {
+        assert(*k >= 3);
+        assert(*k <= 7);
+        count = count + 1;
+    }
+    assert_eq(count, 5);
+}
+
+@test
+fn test_btreemap_range_empty_result() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+
+    // Range 10..20 should be empty
+    let mut count = 0;
+    for (_k, _v) in map.range(10..20) {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_btreemap_range_full() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+
+    // Full range should yield all elements
+    let mut count = 0;
+    for (_k, _v) in map.range(..) {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// Section 1.7: BTreeMap Entry API
+// =============================================================================
+
+@test
+fn test_btreemap_entry_or_insert_vacant() {
+    let mut map: BTreeMap<Text, Int> = BTreeMap.new();
+
+    // Entry for non-existent key
+    let value = map.entry("key").or_insert(42);
+    assert_eq(value, 42);
+
+    // Key should now exist
+    match map.get(&"key") {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_btreemap_entry_or_insert_occupied() {
+    let mut map: BTreeMap<Text, Int> = BTreeMap.new();
+    map.insert("key", 100);
+
+    // Entry for existing key should return existing value
+    let value = map.entry("key").or_insert(42);
+    assert_eq(value, 100); // Original value, not 42
+}
+
+@test
+fn test_btreemap_entry_or_insert_with() {
+    let mut map: BTreeMap<Text, List<Int>> = BTreeMap.new();
+
+    // Insert with default constructor
+    let list = map.entry("numbers").or_insert_with(|| List.new());
+    list.push(1);
+    list.push(2);
+
+    match map.get(&"numbers") {
+        Some(l) => assert_eq(l.len(), 2),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_btreemap_entry_modify() {
+    let mut map: BTreeMap<Text, Int> = BTreeMap.new();
+    map.insert("counter", 0);
+
+    // Increment through entry API
+    *map.entry("counter").or_insert(0) = *map.entry("counter").or_insert(0) + 1;
+
+    match map.get(&"counter") {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 1.8: BTreeMap Clone
+// =============================================================================
+
+@test
+fn test_btreemap_clone() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+
+    let cloned = map.clone();
+
+    // Verify clone has same content
+    assert_eq(cloned.len(), 3);
+    match cloned.get(&1) {
+        Some(v) => assert_eq(*v, "one"),
+        None => panic("Expected Some"),
+    }
+
+    // Verify independence - modify original
+    map.insert(4, "four");
+    assert_eq(map.len(), 4);
+    assert_eq(cloned.len(), 3); // Clone unchanged
+}
+
+// =============================================================================
+// Section 1.9: BTreeMap Edge Cases
+// =============================================================================
+
+@test
+fn test_btreemap_empty_operations() {
+    let empty: BTreeMap<Int, Int> = BTreeMap.new();
+
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+    assert(!empty.contains_key(&1));
+
+    match empty.get(&1) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    match empty.first_key_value() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    match empty.last_key_value() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_btreemap_single_element() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(42, 100);
+
+    assert_eq(map.len(), 1);
+    assert(map.contains_key(&42));
+
+    // First and last should be same element
+    match (map.first_key_value(), map.last_key_value()) {
+        (Some((k1, v1)), Some((k2, v2))) => {
+            assert_eq(*k1, *k2);
+            assert_eq(*v1, *v2);
+        }
+        _ => panic("Expected Some for both"),
+    }
+}
+
+@test
+fn test_btreemap_negative_keys() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(-5, "negative five");
+    map.insert(0, "zero");
+    map.insert(5, "five");
+
+    assert_eq(map.len(), 3);
+
+    match map.first_key_value() {
+        Some((k, _)) => assert_eq(*k, -5),
+        None => panic("Expected Some"),
+    }
+
+    match map.last_key_value() {
+        Some((k, _)) => assert_eq(*k, 5),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_btreemap_string_keys() {
+    let mut map: BTreeMap<Text, Int> = BTreeMap.new();
+    map.insert("banana", 2);
+    map.insert("apple", 1);
+    map.insert("cherry", 3);
+
+    // Should be alphabetically sorted
+    let mut expected_keys = List.from(["apple", "banana", "cherry"]);
+    let mut idx = 0;
+    for k in map.keys() {
+        assert_eq(k, expected_keys[idx]);
+        idx = idx + 1;
+    }
+}
+
+// =============================================================================
+// Section 1.10: BTreeMap Large Scale Tests (B-Tree Node Splitting)
+// =============================================================================
+
+@test
+fn test_btreemap_many_inserts() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    // Insert enough elements to cause node splits (B=6, MAX_KEYS=11)
+    for i in 0..100 {
+        map.insert(i, i * 2);
+    }
+
+    assert_eq(map.len(), 100);
+
+    // Verify all elements present
+    for i in 0..100 {
+        assert(map.contains_key(&i));
+        match map.get(&i) {
+            Some(v) => assert_eq(*v, i * 2),
+            None => panic(f"Missing key {i}"),
+        }
+    }
+}
+
+@test
+fn test_btreemap_many_inserts_reverse_order() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    // Insert in reverse order to test different split patterns
+    for i in (0..100).rev() {
+        map.insert(i, i);
+    }
+
+    assert_eq(map.len(), 100);
+
+    // Verify sorted iteration
+    let mut prev = -1;
+    for (k, _) in map.iter() {
+        assert(*k > prev);
+        prev = *k;
+    }
+}
+
+@test
+fn test_btreemap_many_inserts_random_order() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    // Insert in "random" order (actually a specific pattern)
+    let order = List.from([50, 25, 75, 12, 37, 62, 87, 6, 18, 31, 43, 56, 68, 81, 93]);
+    for i in order.iter() {
+        map.insert(*i, *i * 10);
+    }
+
+    assert_eq(map.len(), 15);
+
+    // Verify sorted iteration
+    let mut prev = -1;
+    for (k, _) in map.iter() {
+        assert(*k > prev);
+        prev = *k;
+    }
+}
+
+@test
+fn test_btreemap_many_removes() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    // Insert many elements
+    for i in 0..50 {
+        map.insert(i, i);
+    }
+
+    // Remove half of them
+    for i in 0..25 {
+        let removed = map.remove(&(i * 2)); // Remove even numbers
+        assert(removed.is_some());
+    }
+
+    assert_eq(map.len(), 25);
+
+    // Verify only odd numbers remain
+    for i in 0..50 {
+        if i % 2 == 0 {
+            assert(!map.contains_key(&i));
+        } else {
+            assert(map.contains_key(&i));
+        }
+    }
+}
+
+@test
+fn test_btreemap_insert_remove_interleaved() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    // Interleaved inserts and removes
+    for i in 0..20 {
+        map.insert(i, i);
+        if i > 0 && i % 3 == 0 {
+            map.remove(&(i - 1));
+        }
+    }
+
+    // Verify B-tree properties maintained (sorted iteration works)
+    let mut prev = -100;
+    for (k, _) in map.iter() {
+        assert(*k > prev);
+        prev = *k;
+    }
+}
+
+// =============================================================================
+// PART 2: BTreeSet Tests
+// =============================================================================
+
+// =============================================================================
+// Section 2.1: BTreeSet Construction Tests
+// =============================================================================
+
+@test
+fn test_btreeset_new() {
+    let empty: BTreeSet<Int> = BTreeSet.new();
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+}
+
+@test
+fn test_btreeset_default() {
+    let set: BTreeSet<Int> = BTreeSet.default();
+    assert(set.is_empty());
+}
+
+// =============================================================================
+// Section 2.2: BTreeSet Insert and Contains Tests
+// =============================================================================
+
+@test
+fn test_btreeset_insert() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+
+    // First insert returns true
+    assert(set.insert(1));
+    assert(set.insert(2));
+    assert(set.insert(3));
+
+    assert_eq(set.len(), 3);
+}
+
+@test
+fn test_btreeset_insert_duplicate() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+
+    assert(set.insert(1)); // First insert
+    assert(!set.insert(1)); // Duplicate returns false
+
+    assert_eq(set.len(), 1);
+}
+
+@test
+fn test_btreeset_contains() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(10);
+    set.insert(20);
+    set.insert(30);
+
+    assert(set.contains(&10));
+    assert(set.contains(&20));
+    assert(set.contains(&30));
+    assert(!set.contains(&15));
+    assert(!set.contains(&0));
+}
+
+// =============================================================================
+// Section 2.3: BTreeSet Remove and Clear Tests
+// =============================================================================
+
+@test
+fn test_btreeset_remove() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+
+    // Remove existing element
+    assert(set.remove(&2));
+    assert_eq(set.len(), 2);
+    assert(!set.contains(&2));
+
+    // Remove non-existent element
+    assert(!set.remove(&99));
+    assert_eq(set.len(), 2);
+}
+
+@test
+fn test_btreeset_clear() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+
+    set.clear();
+
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+}
+
+// =============================================================================
+// Section 2.4: BTreeSet Ordered Iteration Tests
+// =============================================================================
+
+@test
+fn test_btreeset_iter_sorted() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+
+    // Insert in random order
+    set.insert(5);
+    set.insert(2);
+    set.insert(8);
+    set.insert(1);
+    set.insert(9);
+
+    // Iteration should be in sorted order
+    let mut prev = 0;
+    for x in set.iter() {
+        assert(*x > prev);
+        prev = *x;
+    }
+}
+
+@test
+fn test_btreeset_first() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+
+    // Empty set
+    match set.first() {
+        None => {} // Expected
+        Some(_) => panic("Expected None for empty set"),
+    }
+
+    set.insert(5);
+    set.insert(2);
+    set.insert(8);
+
+    match set.first() {
+        Some(x) => assert_eq(*x, 2),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_btreeset_last() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+
+    // Empty set
+    match set.last() {
+        None => {} // Expected
+        Some(_) => panic("Expected None for empty set"),
+    }
+
+    set.insert(5);
+    set.insert(2);
+    set.insert(8);
+
+    match set.last() {
+        Some(x) => assert_eq(*x, 8),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 2.5: BTreeSet Range Queries
+// =============================================================================
+
+@test
+fn test_btreeset_range() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    for i in 0..10 {
+        set.insert(i);
+    }
+
+    // Range 3..7 should yield 3, 4, 5, 6
+    let mut count = 0;
+    for x in set.range(3..7) {
+        assert(*x >= 3);
+        assert(*x < 7);
+        count = count + 1;
+    }
+    assert_eq(count, 4);
+}
+
+@test
+fn test_btreeset_range_inclusive() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    for i in 0..10 {
+        set.insert(i);
+    }
+
+    // Range 3..=7 should yield 3, 4, 5, 6, 7
+    let mut count = 0;
+    for x in set.range(3..=7) {
+        assert(*x >= 3);
+        assert(*x <= 7);
+        count = count + 1;
+    }
+    assert_eq(count, 5);
+}
+
+// =============================================================================
+// Section 2.6: BTreeSet Set Operations
+// =============================================================================
+
+@test
+fn test_btreeset_is_disjoint_true() {
+    let mut set1: BTreeSet<Int> = BTreeSet.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(3);
+
+    let mut set2: BTreeSet<Int> = BTreeSet.new();
+    set2.insert(4);
+    set2.insert(5);
+    set2.insert(6);
+
+    assert(set1.is_disjoint(&set2));
+    assert(set2.is_disjoint(&set1));
+}
+
+@test
+fn test_btreeset_is_disjoint_false() {
+    let mut set1: BTreeSet<Int> = BTreeSet.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(3);
+
+    let mut set2: BTreeSet<Int> = BTreeSet.new();
+    set2.insert(3);
+    set2.insert(4);
+    set2.insert(5);
+
+    assert(!set1.is_disjoint(&set2)); // 3 is common
+    assert(!set2.is_disjoint(&set1));
+}
+
+@test
+fn test_btreeset_is_disjoint_empty() {
+    let empty: BTreeSet<Int> = BTreeSet.new();
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+
+    // Empty set is disjoint with everything
+    assert(empty.is_disjoint(&set));
+    assert(set.is_disjoint(&empty));
+}
+
+@test
+fn test_btreeset_is_subset_true() {
+    let mut subset: BTreeSet<Int> = BTreeSet.new();
+    subset.insert(2);
+    subset.insert(3);
+
+    let mut superset: BTreeSet<Int> = BTreeSet.new();
+    superset.insert(1);
+    superset.insert(2);
+    superset.insert(3);
+    superset.insert(4);
+
+    assert(subset.is_subset(&superset));
+}
+
+@test
+fn test_btreeset_is_subset_false() {
+    let mut set1: BTreeSet<Int> = BTreeSet.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(5); // 5 not in set2
+
+    let mut set2: BTreeSet<Int> = BTreeSet.new();
+    set2.insert(1);
+    set2.insert(2);
+    set2.insert(3);
+    set2.insert(4);
+
+    assert(!set1.is_subset(&set2));
+}
+
+@test
+fn test_btreeset_is_subset_equal() {
+    let mut set1: BTreeSet<Int> = BTreeSet.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(3);
+
+    let mut set2: BTreeSet<Int> = BTreeSet.new();
+    set2.insert(1);
+    set2.insert(2);
+    set2.insert(3);
+
+    // Equal sets are subsets of each other
+    assert(set1.is_subset(&set2));
+    assert(set2.is_subset(&set1));
+}
+
+@test
+fn test_btreeset_is_subset_empty() {
+    let empty: BTreeSet<Int> = BTreeSet.new();
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+
+    // Empty set is subset of everything
+    assert(empty.is_subset(&set));
+    assert(empty.is_subset(&empty));
+}
+
+@test
+fn test_btreeset_is_superset() {
+    let mut superset: BTreeSet<Int> = BTreeSet.new();
+    superset.insert(1);
+    superset.insert(2);
+    superset.insert(3);
+    superset.insert(4);
+
+    let mut subset: BTreeSet<Int> = BTreeSet.new();
+    subset.insert(2);
+    subset.insert(3);
+
+    assert(superset.is_superset(&subset));
+    assert(!subset.is_superset(&superset));
+}
+
+// =============================================================================
+// Section 2.7: BTreeSet Clone
+// =============================================================================
+
+@test
+fn test_btreeset_clone() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+
+    let cloned = set.clone();
+
+    assert_eq(cloned.len(), 3);
+    assert(cloned.contains(&1));
+    assert(cloned.contains(&2));
+    assert(cloned.contains(&3));
+
+    // Verify independence
+    set.insert(4);
+    assert_eq(set.len(), 4);
+    assert_eq(cloned.len(), 3); // Clone unchanged
+}
+
+// =============================================================================
+// Section 2.8: BTreeSet Edge Cases
+// =============================================================================
+
+@test
+fn test_btreeset_empty_operations() {
+    let empty: BTreeSet<Int> = BTreeSet.new();
+
+    assert(empty.is_empty());
+    assert(!empty.contains(&1));
+
+    match empty.first() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    match empty.last() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_btreeset_single_element() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(42);
+
+    assert_eq(set.len(), 1);
+    assert(set.contains(&42));
+
+    match (set.first(), set.last()) {
+        (Some(f), Some(l)) => {
+            assert_eq(*f, 42);
+            assert_eq(*l, 42);
+        }
+        _ => panic("Expected Some for both"),
+    }
+}
+
+@test
+fn test_btreeset_string_elements() {
+    let mut set: BTreeSet<Text> = BTreeSet.new();
+    set.insert("banana");
+    set.insert("apple");
+    set.insert("cherry");
+
+    // Should be alphabetically sorted
+    let mut expected = List.from(["apple", "banana", "cherry"]);
+    let mut idx = 0;
+    for x in set.iter() {
+        assert_eq(*x, expected[idx]);
+        idx = idx + 1;
+    }
+}
+
+// =============================================================================
+// Section 2.9: BTreeSet Large Scale Tests
+// =============================================================================
+
+@test
+fn test_btreeset_many_inserts() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+
+    for i in 0..100 {
+        set.insert(i);
+    }
+
+    assert_eq(set.len(), 100);
+
+    // Verify sorted iteration
+    let mut prev = -1;
+    for x in set.iter() {
+        assert(*x > prev);
+        prev = *x;
+    }
+}
+
+@test
+fn test_btreeset_many_removes() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+
+    for i in 0..100 {
+        set.insert(i);
+    }
+
+    // Remove even numbers
+    for i in 0..50 {
+        set.remove(&(i * 2));
+    }
+
+    assert_eq(set.len(), 50);
+
+    // Verify only odd numbers remain
+    for i in 0..100 {
+        if i % 2 == 0 {
+            assert(!set.contains(&i));
+        } else {
+            assert(set.contains(&i));
+        }
+    }
+}
+
+// =============================================================================
+// PART 3: Construction from Iterators Tests
+// =============================================================================
+
+@test
+fn test_btreemap_build_from_list() {
+    // Build a BTreeMap from a list of pairs manually
+    let pairs = List.from([(1, "one"), (2, "two"), (3, "three")]);
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    for (k, v) in pairs.into_iter() {
+        map.insert(k, v);
+    }
+
+    assert_eq(map.len(), 3);
+    match map.get(&1) {
+        Some(v) => assert_eq(*v, "one"),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_btreeset_build_from_list() {
+    // Build a BTreeSet from a list manually (with duplicates)
+    let values = List.from([3, 1, 2, 1, 3]);
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    for x in values.into_iter() {
+        set.insert(x);
+    }
+
+    assert_eq(set.len(), 3); // Duplicates ignored
+    assert(set.contains(&1));
+    assert(set.contains(&2));
+    assert(set.contains(&3));
+}
+
+// =============================================================================
+// Section: Pop First / Pop Last
+// =============================================================================
+
+@test
+fn test_btree_pop_first() {
+    let mut tree: BTreeMap<Int, Text> = BTreeMap.new();
+    tree.insert(3, "three");
+    tree.insert(1, "one");
+    tree.insert(5, "five");
+    tree.insert(2, "two");
+
+    let first = tree.pop_first();
+    assert(first.is_some());
+    let pair = first.unwrap();
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, "one");
+    assert_eq(tree.len(), 3);
+    assert(!tree.contains_key(&1));
+}
+
+@test
+fn test_btree_pop_last() {
+    let mut tree: BTreeMap<Int, Text> = BTreeMap.new();
+    tree.insert(3, "three");
+    tree.insert(1, "one");
+    tree.insert(5, "five");
+    tree.insert(2, "two");
+
+    let last = tree.pop_last();
+    assert(last.is_some());
+    let pair = last.unwrap();
+    assert_eq(pair.0, 5);
+    assert_eq(pair.1, "five");
+    assert_eq(tree.len(), 3);
+    assert(!tree.contains_key(&5));
+}
+
+@test
+fn test_btree_pop_first_empty() {
+    let mut tree: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(tree.pop_first().is_none());
+}
+
+@test
+fn test_btree_pop_last_empty() {
+    let mut tree: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(tree.pop_last().is_none());
+}
+
+@test
+fn test_btree_pop_first_repeated() {
+    let mut tree: BTreeMap<Int, Int> = BTreeMap.new();
+    tree.insert(1, 10);
+    tree.insert(2, 20);
+    tree.insert(3, 30);
+
+    let a = tree.pop_first().unwrap();
+    assert_eq(a.0, 1);
+    let b = tree.pop_first().unwrap();
+    assert_eq(b.0, 2);
+    let c = tree.pop_first().unwrap();
+    assert_eq(c.0, 3);
+    assert(tree.pop_first().is_none());
+    assert_eq(tree.len(), 0);
+}
+
+// =============================================================================
+// pop_first / pop_last Tests
+// =============================================================================
+
+@test
+fn test_btreemap_pop_first() {
+    let mut bt = BTreeMap.new();
+    bt.insert(3, "three");
+    bt.insert(1, "one");
+    bt.insert(2, "two");
+
+    let first = bt.pop_first();
+    assert(first.is_some());
+    let (k, v) = first.unwrap();
+    assert_eq(k, 1);
+    assert_eq(v, "one");
+    assert_eq(bt.len(), 2);
+}
+
+@test
+fn test_btreemap_pop_last() {
+    let mut bt = BTreeMap.new();
+    bt.insert(3, "three");
+    bt.insert(1, "one");
+    bt.insert(2, "two");
+
+    let last = bt.pop_last();
+    assert(last.is_some());
+    let (k, v) = last.unwrap();
+    assert_eq(k, 3);
+    assert_eq(v, "three");
+    assert_eq(bt.len(), 2);
+}
+
+@test
+fn test_btreemap_pop_first_empty() {
+    let mut bt: BTreeMap<Int, Text> = BTreeMap.new();
+    assert(bt.pop_first().is_none());
+}
+
+@test
+fn test_btreemap_pop_last_empty() {
+    let mut bt: BTreeMap<Int, Text> = BTreeMap.new();
+    assert(bt.pop_last().is_none());
+}
+
+@test
+fn test_btreemap_pop_first_all() {
+    let mut bt = BTreeMap.new();
+    bt.insert(5, "e");
+    bt.insert(3, "c");
+    bt.insert(1, "a");
+    bt.insert(4, "d");
+    bt.insert(2, "b");
+
+    // Pop all in sorted order
+    let f1 = bt.pop_first().unwrap();
+    assert_eq(f1.0, 1);
+    let f2 = bt.pop_first().unwrap();
+    assert_eq(f2.0, 2);
+    let f3 = bt.pop_first().unwrap();
+    assert_eq(f3.0, 3);
+    let f4 = bt.pop_first().unwrap();
+    assert_eq(f4.0, 4);
+    let f5 = bt.pop_first().unwrap();
+    assert_eq(f5.0, 5);
+    assert(bt.is_empty());
+}
+
+@test
+fn test_btreemap_pop_last_all() {
+    let mut bt = BTreeMap.new();
+    bt.insert(1, "a");
+    bt.insert(3, "c");
+    bt.insert(2, "b");
+
+    // Pop all in reverse sorted order
+    let l1 = bt.pop_last().unwrap();
+    assert_eq(l1.0, 3);
+    let l2 = bt.pop_last().unwrap();
+    assert_eq(l2.0, 2);
+    let l3 = bt.pop_last().unwrap();
+    assert_eq(l3.0, 1);
+    assert(bt.is_empty());
+}
+
+// =============================================================================
+// Large Tree Behavior
+// =============================================================================
+
+@test
+fn test_btreemap_large_sorted_order() {
+    let mut bt = BTreeMap.new();
+    // Insert in reverse order
+    let mut i = 100;
+    while i > 0 {
+        bt.insert(i, i * 10);
+        i = i - 1;
+    }
+    assert_eq(bt.len(), 100);
+
+    // Verify first and last
+    let first = bt.first_key_value();
+    assert(first.is_some());
+    let (fk, _) = first.unwrap();
+    assert_eq(*fk, 1);
+
+    let last = bt.last_key_value();
+    assert(last.is_some());
+    let (lk, _) = last.unwrap();
+    assert_eq(*lk, 100);
+}
+
+@test
+fn test_btreemap_sorted_iteration() {
+    let mut bt = BTreeMap.new();
+    bt.insert(5, "e");
+    bt.insert(1, "a");
+    bt.insert(3, "c");
+    bt.insert(2, "b");
+    bt.insert(4, "d");
+
+    // Iterate and verify sorted order
+    let mut prev = 0;
+    let mut iter = bt.keys();
+    loop {
+        match iter.next() {
+            Some(k) => {
+                assert(k > prev);
+                prev = k;
+            },
+            None => break,
+        }
+    }
+    assert_eq(prev, 5); // Last key should be 5
+}
+
+@test
+fn test_btreemap_entry_or_insert() {
+    let mut bt = BTreeMap.new();
+    bt.entry(1).or_insert("one");
+    bt.entry(2).or_insert("two");
+    bt.entry(1).or_insert("ONE"); // Should not overwrite
+
+    assert_eq(bt.len(), 2);
+    assert_eq(*bt.get(&1).unwrap(), "one");
+}
+
+// =============================================================================
+// BTreeSet: Set Algebra Operations
+// =============================================================================
+
+@test
+fn test_btreeset_union_basic() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(3);
+    b.insert(4);
+    b.insert(5);
+
+    let result = a.union(&b);
+    assert_eq(result.len(), 5);
+    assert(result.contains(&1));
+    assert(result.contains(&2));
+    assert(result.contains(&3));
+    assert(result.contains(&4));
+    assert(result.contains(&5));
+}
+
+@test
+fn test_btreeset_union_disjoint() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(3);
+    b.insert(4);
+
+    let result = a.union(&b);
+    assert_eq(result.len(), 4);
+}
+
+@test
+fn test_btreeset_union_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+
+    let result = a.union(&b);
+    assert_eq(result.len(), 2);
+}
+
+@test
+fn test_btreeset_intersection_basic() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    a.insert(4);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(2);
+    b.insert(4);
+    b.insert(6);
+
+    let result = a.intersection(&b);
+    assert_eq(result.len(), 2);
+    assert(result.contains(&2));
+    assert(result.contains(&4));
+}
+
+@test
+fn test_btreeset_intersection_empty_result() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(3);
+    b.insert(4);
+
+    let result = a.intersection(&b);
+    assert(result.is_empty());
+}
+
+@test
+fn test_btreeset_intersection_identical() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let result = a.intersection(&a);
+    assert_eq(result.len(), 3);
+}
+
+@test
+fn test_btreeset_difference_basic() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    a.insert(4);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(2);
+    b.insert(4);
+
+    let result = a.difference(&b);
+    assert_eq(result.len(), 2);
+    assert(result.contains(&1));
+    assert(result.contains(&3));
+}
+
+@test
+fn test_btreeset_difference_no_overlap() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(3);
+    b.insert(4);
+
+    let result = a.difference(&b);
+    assert_eq(result.len(), 2);
+}
+
+@test
+fn test_btreeset_difference_all_overlap() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+
+    let result = a.difference(&b);
+    assert(result.is_empty());
+}
+
+@test
+fn test_btreeset_symmetric_difference_basic() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+
+    let result = a.symmetric_difference(&b);
+    assert_eq(result.len(), 2);
+    assert(result.contains(&1));
+    assert(result.contains(&4));
+}
+
+@test
+fn test_btreeset_symmetric_difference_identical() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let result = a.symmetric_difference(&a);
+    assert(result.is_empty());
+}
+
+@test
+fn test_btreeset_symmetric_difference_disjoint() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(3);
+    b.insert(4);
+
+    let result = a.symmetric_difference(&b);
+    assert_eq(result.len(), 4);
+}
+
+@test
+fn test_btreeset_pop_first() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(5);
+    s.insert(2);
+
+    let first = s.pop_first();
+    assert_eq(first, Some(1));
+    assert_eq(s.len(), 3);
+    assert(!s.contains(&1));
+}
+
+@test
+fn test_btreeset_pop_last() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(5);
+    s.insert(2);
+
+    let last = s.pop_last();
+    assert_eq(last, Some(5));
+    assert_eq(s.len(), 3);
+    assert(!s.contains(&5));
+}
+
+@test
+fn test_btreeset_pop_first_empty() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    assert(s.pop_first().is_none());
+}
+
+@test
+fn test_btreeset_pop_last_empty() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    assert(s.pop_last().is_none());
+}
+
+@test
+fn test_btreeset_pop_first_all() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(2);
+
+    assert_eq(s.pop_first(), Some(1));
+    assert_eq(s.pop_first(), Some(2));
+    assert_eq(s.pop_first(), Some(3));
+    assert(s.pop_first().is_none());
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+// =============================================================================
+// PART 4: Additional BTreeMap Tests
+// =============================================================================
+
+// =============================================================================
+// Section 4.1: BTreeMap Range Edge Cases
+// =============================================================================
+
+@test
+fn test_btreemap_range_single_element() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(5, 50);
+
+    // Range that includes single element
+    let mut count = 0;
+    for (k, v) in map.range(5..=5) {
+        assert_eq(*k, 5);
+        assert_eq(*v, 50);
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+@test
+fn test_btreemap_range_before_all() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(10, 100);
+    map.insert(20, 200);
+
+    let mut count = 0;
+    for (_k, _v) in map.range(0..5) {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_btreemap_range_after_all() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(10, 100);
+    map.insert(20, 200);
+
+    let mut count = 0;
+    for (_k, _v) in map.range(30..40) {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_btreemap_range_on_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    let mut count = 0;
+    for (_k, _v) in map.range(0..10) {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_btreemap_range_all_elements() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+
+    let mut count = 0;
+    for (_k, _v) in map.range(0..100) {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// Section 4.2: BTreeMap get_mut Edge Cases
+// =============================================================================
+
+@test
+fn test_btreemap_get_mut_missing_key() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+
+    match map.get_mut(&99) {
+        None => {} // Expected
+        Some(_) => panic("Expected None for missing key"),
+    }
+}
+
+@test
+fn test_btreemap_get_mut_empty_map() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    match map.get_mut(&1) {
+        None => {} // Expected
+        Some(_) => panic("Expected None for empty map"),
+    }
+}
+
+@test
+fn test_btreemap_get_mut_multiple_modifications() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 0);
+
+    // Increment several times
+    let mut i = 0;
+    while i < 5 {
+        match map.get_mut(&1) {
+            Some(v) => *v = *v + 1,
+            None => panic("Expected Some"),
+        }
+        i = i + 1;
+    }
+
+    assert_eq(*map.get(&1).unwrap(), 5);
+}
+
+// =============================================================================
+// Section 4.3: BTreeMap Insert/Remove Stress
+// =============================================================================
+
+@test
+fn test_btreemap_insert_remove_same_key_repeatedly() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    let mut i = 0;
+    while i < 20 {
+        map.insert(1, i);
+        assert_eq(map.len(), 1);
+        let removed = map.remove(&1);
+        assert_eq(removed, Some(i));
+        assert(map.is_empty());
+        i = i + 1;
+    }
+}
+
+@test
+fn test_btreemap_remove_non_existent() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+
+    // Remove keys that don't exist
+    assert(map.remove(&0).is_none());
+    assert(map.remove(&3).is_none());
+    assert(map.remove(&100).is_none());
+
+    // Original elements still intact
+    assert_eq(map.len(), 2);
+    assert(map.contains_key(&1));
+    assert(map.contains_key(&2));
+}
+
+// =============================================================================
+// Section 4.4: BTreeMap Iteration Count Tests
+// =============================================================================
+
+@test
+fn test_btreemap_keys_count() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+
+    let mut count = 0;
+    for _k in map.keys() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_btreemap_values_count() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+
+    let mut sum = 0;
+    for v in map.values() {
+        sum = sum + v;
+    }
+    assert_eq(sum, 60);
+}
+
+@test
+fn test_btreemap_iter_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    let mut count = 0;
+    for (_k, _v) in map.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// PART 5: Additional BTreeSet Tests
+// =============================================================================
+
+// =============================================================================
+// Section 5.1: BTreeSet Set Operations with Empty Sets
+// =============================================================================
+
+@test
+fn test_btreeset_union_both_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let b: BTreeSet<Int> = BTreeSet.new();
+
+    let result = a.union(&b);
+    assert(result.is_empty());
+}
+
+@test
+fn test_btreeset_intersection_both_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let b: BTreeSet<Int> = BTreeSet.new();
+
+    let result = a.intersection(&b);
+    assert(result.is_empty());
+}
+
+@test
+fn test_btreeset_difference_both_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let b: BTreeSet<Int> = BTreeSet.new();
+
+    let result = a.difference(&b);
+    assert(result.is_empty());
+}
+
+@test
+fn test_btreeset_symmetric_difference_both_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let b: BTreeSet<Int> = BTreeSet.new();
+
+    let result = a.symmetric_difference(&b);
+    assert(result.is_empty());
+}
+
+@test
+fn test_btreeset_intersection_with_empty() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let b: BTreeSet<Int> = BTreeSet.new();
+
+    let result = a.intersection(&b);
+    assert(result.is_empty());
+}
+
+@test
+fn test_btreeset_difference_from_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+
+    let result = a.difference(&b);
+    assert(result.is_empty());
+}
+
+// =============================================================================
+// Section 5.2: BTreeSet Range Tests
+// =============================================================================
+
+@test
+fn test_btreeset_range_full() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+    set.insert(3);
+    set.insert(5);
+
+    let mut count = 0;
+    for _x in set.range(..) {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_btreeset_range_empty_result() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+
+    let mut count = 0;
+    for _x in set.range(10..20) {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_btreeset_range_on_empty() {
+    let set: BTreeSet<Int> = BTreeSet.new();
+
+    let mut count = 0;
+    for _x in set.range(0..10) {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_btreeset_range_single_element() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(5);
+
+    let mut count = 0;
+    for x in set.range(5..=5) {
+        assert_eq(*x, 5);
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+// =============================================================================
+// Section 5.3: BTreeSet Pop Operations Extended
+// =============================================================================
+
+@test
+fn test_btreeset_pop_last_all() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(2);
+
+    assert_eq(s.pop_last(), Some(3));
+    assert_eq(s.pop_last(), Some(2));
+    assert_eq(s.pop_last(), Some(1));
+    assert(s.pop_last().is_none());
+    assert(s.is_empty());
+}
+
+@test
+fn test_btreeset_pop_first_single() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(42);
+
+    assert_eq(s.pop_first(), Some(42));
+    assert(s.is_empty());
+}
+
+@test
+fn test_btreeset_pop_last_single() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(42);
+
+    assert_eq(s.pop_last(), Some(42));
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// Section 5.4: BTreeSet Subset/Superset Edge Cases
+// =============================================================================
+
+@test
+fn test_btreeset_is_superset_of_empty() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+
+    let empty: BTreeSet<Int> = BTreeSet.new();
+
+    // Any set is superset of empty
+    assert(set.is_superset(&empty));
+    // Empty is superset of empty
+    assert(empty.is_superset(&empty));
+}
+
+@test
+fn test_btreeset_is_disjoint_both_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let b: BTreeSet<Int> = BTreeSet.new();
+    assert(a.is_disjoint(&b));
+}
+
+@test
+fn test_btreeset_is_disjoint_self() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+
+    // A set is never disjoint with itself (unless empty)
+    assert(!set.is_disjoint(&set));
+}
+
+@test
+fn test_btreeset_is_disjoint_empty_self() {
+    let empty: BTreeSet<Int> = BTreeSet.new();
+    assert(empty.is_disjoint(&empty));
+}
+
+// =============================================================================
+// Section 5.5: BTreeMap/Set with Various Types
+// =============================================================================
+
+@test
+fn test_btreemap_int_values() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 100);
+    map.insert(2, 200);
+    map.insert(3, 300);
+
+    let mut total = 0;
+    for (_k, v) in map.iter() {
+        total = total + *v;
+    }
+    assert_eq(total, 600);
+}
+
+@test
+fn test_btreeset_negative_values() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(-10);
+    set.insert(-5);
+    set.insert(0);
+    set.insert(5);
+    set.insert(10);
+
+    assert_eq(set.len(), 5);
+
+    match set.first() {
+        Some(v) => assert_eq(*v, -10),
+        None => panic("Expected Some"),
+    }
+
+    match set.last() {
+        Some(v) => assert_eq(*v, 10),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_btreeset_large_range_query() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    let mut i = 0;
+    while i < 50 {
+        set.insert(i * 2); // Even numbers 0..98
+        i = i + 1;
+    }
+
+    // Range 20..=40 should capture 20,22,24,...,40 = 11 elements
+    let mut count = 0;
+    for x in set.range(20..=40) {
+        assert(*x >= 20);
+        assert(*x <= 40);
+        count = count + 1;
+    }
+    assert_eq(count, 11);
+}
+
+@test
+fn test_btreemap_clone_deep() {
+    let mut map: BTreeMap<Int, List<Int>> = BTreeMap.new();
+    map.insert(1, List.from([10, 20]));
+    map.insert(2, List.from([30, 40]));
+
+    let cloned = map.clone();
+
+    assert_eq(cloned.len(), 2);
+    assert(cloned.contains_key(&1));
+    assert(cloned.contains_key(&2));
+
+    // Verify independence
+    map.insert(3, List.from([50]));
+    assert_eq(map.len(), 3);
+    assert_eq(cloned.len(), 2);
+}
+
+@test
+fn test_btreemap_entry_word_count() {
+    let mut counts: BTreeMap<Text, Int> = BTreeMap.new();
+    let words = List.from(["the", "cat", "sat", "on", "the", "mat", "the"]);
+
+    for word in words.iter() {
+        let count = counts.entry(*word).or_insert(0);
+        *count = *count + 1;
+    }
+
+    assert_eq(*counts.get(&"the").unwrap(), 3);
+    assert_eq(*counts.get(&"cat").unwrap(), 1);
+    assert_eq(*counts.get(&"sat").unwrap(), 1);
+    assert_eq(*counts.get(&"on").unwrap(), 1);
+    assert_eq(*counts.get(&"mat").unwrap(), 1);
+    assert_eq(counts.len(), 5);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

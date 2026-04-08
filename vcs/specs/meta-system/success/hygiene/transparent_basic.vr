@@ -1,0 +1,70 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, transparent, attribute
+// @description: Test basic @transparent attribute for macro expansion hygiene control
+
+// =============================================================================
+// @TRANSPARENT ATTRIBUTE - BASIC FUNCTIONALITY
+// =============================================================================
+//
+// The @transparent attribute disables hygienic identifier renaming in macros.
+// This allows macros to intentionally capture variables from the expansion site.
+//
+// In contrast to default hygienic mode where identifiers are gensym'd:
+// - Hygienic (default): `quote { x }` becomes `quote { x__gensym_123 }`
+// - Transparent (@transparent): `quote { x }` remains `quote { x }`
+//
+
+// =============================================================================
+// SIMPLE META FUNCTIONS FOR TESTING @TRANSPARENT
+// =============================================================================
+
+// Simple transparent meta function that returns a value
+@transparent
+meta fn transparent_returns_42() -> Int {
+    42
+}
+
+// Simple transparent meta function with parameter
+@transparent
+meta fn transparent_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Simple transparent meta function with local binding
+@transparent
+meta fn transparent_with_local() -> Int {
+    let x = 10;
+    let y = 20;
+    x + y
+}
+
+// =============================================================================
+// NON-TRANSPARENT (HYGIENIC) META FUNCTIONS FOR COMPARISON
+// =============================================================================
+
+// Simple hygienic meta function
+meta fn hygienic_returns_24() -> Int {
+    24
+}
+
+// Hygienic meta function with parameter
+meta fn hygienic_multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Test transparent meta functions
+    @const assert_eq(transparent_returns_42(), 42);
+    @const assert_eq(transparent_add(10, 5), 15);
+    @const assert_eq(transparent_with_local(), 30);
+
+    // Test hygienic meta functions for comparison
+    @const assert_eq(hygienic_returns_24(), 24);
+    @const assert_eq(hygienic_multiply(6, 7), 42);
+}

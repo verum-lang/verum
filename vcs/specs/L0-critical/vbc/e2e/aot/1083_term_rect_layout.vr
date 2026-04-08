@@ -1,0 +1,215 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, term, rect, layout, geometry
+// @expected-exit: 0
+// @description: Terminal Rect layout type with area, inner margins, intersection, union, contains
+
+fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+type Rect is { x: Int, y: Int, width: Int, height: Int };
+type Margin is { top: Int, right: Int, bottom: Int, left: Int };
+
+implement Rect {
+    pub fn new(x: Int, y: Int, w: Int, h: Int) -> Rect {
+        Rect { x: x, y: y, width: w, height: h }
+    }
+
+    pub fn area(&self) -> Int {
+        self.width * self.height
+    }
+
+    pub fn left(&self) -> Int { self.x }
+    pub fn right(&self) -> Int { self.x + self.width }
+    pub fn top(&self) -> Int { self.y }
+    pub fn bottom(&self) -> Int { self.y + self.height }
+
+    pub fn inner(&self, m: Margin) -> Rect {
+        let w = max(self.width - m.left - m.right, 0);
+        let h = max(self.height - m.top - m.bottom, 0);
+        Rect.new(self.x + m.left, self.y + m.top, w, h)
+    }
+
+    pub fn intersection(&self, other: &Rect) -> Rect {
+        let ix = max(self.x, other.x);
+        let iy = max(self.y, other.y);
+        let ir = min(self.right(), other.right());
+        let ib = min(self.bottom(), other.bottom());
+        Rect.new(ix, iy, max(ir - ix, 0), max(ib - iy, 0))
+    }
+
+    pub fn union_rect(&self, other: &Rect) -> Rect {
+        let ux = min(self.x, other.x);
+        let uy = min(self.y, other.y);
+        let ur = max(self.right(), other.right());
+        let ub = max(self.bottom(), other.bottom());
+        Rect.new(ux, uy, ur - ux, ub - uy)
+    }
+
+    pub fn contains(&self, px: Int, py: Int) -> Bool {
+        px >= self.x && px < self.right() && py >= self.y && py < self.bottom()
+    }
+
+    pub fn is_empty(&self) -> Bool {
+        self.width <= 0 || self.height <= 0
+    }
+}
+
+fn test_basic_rect() -> Int {
+    let r = Rect.new(10, 20, 80, 40);
+    if r.area() != 3200 {
+        print(f"FAIL area: {r.area()}");
+        return 1;
+    }
+    if r.left() != 10 {
+        print(f"FAIL left: {r.left()}");
+        return 1;
+    }
+    if r.right() != 90 {
+        print(f"FAIL right: {r.right()}");
+        return 1;
+    }
+    if r.top() != 20 {
+        print(f"FAIL top: {r.top()}");
+        return 1;
+    }
+    if r.bottom() != 60 {
+        print(f"FAIL bottom: {r.bottom()}");
+        return 1;
+    }
+    0
+}
+
+fn test_inner_margin() -> Int {
+    let r = Rect.new(0, 0, 100, 50);
+    let m = Margin { top: 5, right: 10, bottom: 5, left: 10 };
+    let inner = r.inner(m);
+    if inner.x != 10 {
+        print(f"FAIL inner x: {inner.x}");
+        return 1;
+    }
+    if inner.y != 5 {
+        print(f"FAIL inner y: {inner.y}");
+        return 1;
+    }
+    if inner.width != 80 {
+        print(f"FAIL inner width: {inner.width}");
+        return 1;
+    }
+    if inner.height != 40 {
+        print(f"FAIL inner height: {inner.height}");
+        return 1;
+    }
+    // Margin bigger than rect should clamp to zero
+    let big_m = Margin { top: 30, right: 60, bottom: 30, left: 60 };
+    let tiny = r.inner(big_m);
+    if tiny.width != 0 {
+        print(f"FAIL clamp width: {tiny.width}");
+        return 1;
+    }
+    if tiny.height != 0 {
+        print(f"FAIL clamp height: {tiny.height}");
+        return 1;
+    }
+    0
+}
+
+fn test_intersection() -> Int {
+    let a = Rect.new(0, 0, 20, 20);
+    let b = Rect.new(10, 10, 20, 20);
+    let inter = a.intersection(&b);
+    if inter.x != 10 {
+        print(f"FAIL inter x: {inter.x}");
+        return 1;
+    }
+    if inter.y != 10 {
+        print(f"FAIL inter y: {inter.y}");
+        return 1;
+    }
+    if inter.width != 10 {
+        print(f"FAIL inter width: {inter.width}");
+        return 1;
+    }
+    if inter.height != 10 {
+        print(f"FAIL inter height: {inter.height}");
+        return 1;
+    }
+    // Non-overlapping
+    let c = Rect.new(100, 100, 10, 10);
+    let no_inter = a.intersection(&c);
+    if !no_inter.is_empty() {
+        print("FAIL non-overlapping should be empty");
+        return 1;
+    }
+    0
+}
+
+fn test_union() -> Int {
+    let a = Rect.new(5, 5, 10, 10);
+    let b = Rect.new(20, 20, 10, 10);
+    let u = a.union_rect(&b);
+    if u.x != 5 {
+        print(f"FAIL union x: {u.x}");
+        return 1;
+    }
+    if u.y != 5 {
+        print(f"FAIL union y: {u.y}");
+        return 1;
+    }
+    if u.right() != 30 {
+        print(f"FAIL union right: {u.right()}");
+        return 1;
+    }
+    if u.bottom() != 30 {
+        print(f"FAIL union bottom: {u.bottom()}");
+        return 1;
+    }
+    0
+}
+
+fn test_contains() -> Int {
+    let r = Rect.new(10, 10, 20, 20);
+    if !r.contains(10, 10) {
+        print("FAIL contains top-left");
+        return 1;
+    }
+    if !r.contains(15, 15) {
+        print("FAIL contains center");
+        return 1;
+    }
+    // Right/bottom edges are exclusive
+    if r.contains(30, 15) {
+        print("FAIL should not contain right edge");
+        return 1;
+    }
+    if r.contains(15, 30) {
+        print("FAIL should not contain bottom edge");
+        return 1;
+    }
+    if r.contains(5, 5) {
+        print("FAIL should not contain outside");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let r = test_basic_rect();
+    if r != 0 { return r; }
+    let r2 = test_inner_margin();
+    if r2 != 0 { return r2; }
+    let r3 = test_intersection();
+    if r3 != 0 { return r3; }
+    let r4 = test_union();
+    if r4 != 0 { return r4; }
+    let r5 = test_contains();
+    if r5 != 0 { return r5; }
+    print("PASS: term_rect_layout");
+    0
+}

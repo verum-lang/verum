@@ -1,0 +1,170 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, refinements, contracts
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// Refinement Types - Type System Refinement Test Seed
+// Tests refinement types and dependent typing features
+// =============================================================================
+
+// Inline refinement syntax
+type PositiveInt is Int {> 0};
+type NonNegativeInt is Int {>= 0};
+type NonZeroInt is Int {!= 0};
+type Percentage is Int {>= 0, <= 100};
+type Byte is Int {>= 0, <= 255};
+
+// Multi-constraint refinements
+type BoundedInt is Int {>= -100, <= 100};
+type EvenNumber is Int {>= 0, % 2 == 0};
+type PowerOfTwo is Int {> 0, (it & (it - 1)) == 0};
+
+// Named refinement predicates
+fn is_positive(x: Int) -> Bool { x > 0 }
+fn is_valid_port(x: Int) -> Bool { x >= 1 && x <= 65535 }
+fn is_ascii(c: Char) -> Bool { (c as Int) < 128 }
+
+type PositiveNamed is Int where is_positive;
+type Port is Int where is_valid_port;
+type AsciiChar is Char where is_ascii;
+
+// Lambda refinements
+type EvenInt is Int where |x| x % 2 == 0;
+type OddInt is Int where |x| x % 2 == 1;
+type DivisibleBy3 is Int where |x| x % 3 == 0;
+
+// Sigma-type refinements (dependent pairs)
+type NonEmptyList<T> is list: List<T> where list.len() > 0;
+type SortedList<T> is list: List<T> where is_sorted(list);
+type ValidConfig is config: Config where config.validate();
+
+// Function refinements
+fn divide(a: Int, b: Int {!= 0}) -> Int {
+    a / b
+}
+
+fn sqrt(x: Float {>= 0.0}) -> Float {>= 0.0} {
+    x.sqrt()
+}
+
+fn array_get<T, N: meta Int>(
+    arr: [T; N],
+    idx: Int {>= 0, < N}
+) -> T {
+    arr[idx]
+}
+
+// Return type refinements
+fn abs(x: Int) -> Int {>= 0} {
+    if x >= 0 { x } else { -x }
+}
+
+fn clamp(x: Int, min: Int, max: Int) -> result: Int
+    where result >= min && result <= max
+{
+    if x < min { min }
+    else if x > max { max }
+    else { x }
+}
+
+// Refinements with ensures clause
+fn factorial(n: Int {>= 0}) -> Int
+    where ensures result >= 1
+{
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+// Refinement inference
+fn auto_refined() {
+    let pos: PositiveInt = 42;   // Type checks: 42 > 0
+    let pct: Percentage = 75;    // Type checks: 0 <= 75 <= 100
+    let byte: Byte = 0xFF;       // Type checks: 0 <= 255 <= 255
+}
+
+// Refinement propagation
+fn refined_chain(x: PositiveInt) -> PositiveInt {
+    let doubled = x * 2;  // Still positive
+    doubled + 1           // Still positive
+}
+
+// Protocol with refinements
+type SafeMath is protocol {
+    fn safe_div(a: Int, b: Int {!= 0}) -> Int;
+    fn safe_mod(a: Int, b: Int {!= 0}) -> Int;
+    fn safe_sqrt(x: Float {>= 0.0}) -> Float {>= 0.0};
+};
+
+// Struct with refined fields
+type Rectangle is {
+    width: Float {> 0.0},
+    height: Float {> 0.0},
+};
+
+type ValidEmail is {
+    local: Text {len > 0},
+    domain: Text {len > 0, contains(".")},
+};
+
+type BoundedBuffer<T, N: meta Int> is {
+    data: [T; N],
+    len: Int {>= 0, <= N},
+};
+
+// Variant with refinements
+type NonEmptyResult<T, E> is
+    | Ok(value: T where value != default())
+    | Err(E);
+
+// Complex refinement examples
+type Matrix<M: meta Int, N: meta Int> is {
+    rows: Int {== M},
+    cols: Int {== N},
+    data: [Float; M * N],
+};
+
+fn matrix_multiply<M: meta Int, K: meta Int, N: meta Int>(
+    a: Matrix<M, K>,
+    b: Matrix<K, N>,
+) -> Matrix<M, N> {
+    // Implementation...
+}
+
+// Runtime vs static refinement checking
+@verify(static)
+fn statically_verified(x: PositiveInt) -> PositiveInt {
+    x + 1  // Provably positive
+}
+
+@verify(runtime)
+fn runtime_checked(x: Int) -> PositiveInt {
+    assert(x > 0);
+    x
+}
+
+// Refinement with meta parameters
+fn sized_array<N: meta Int>(
+    n: Int {== N}
+) -> [Int; N] {
+    [0; N]
+}
+
+// Predicate composition
+fn is_valid_username(s: Text) -> Bool {
+    s.len() >= 3 && s.len() <= 20 && s.chars().all(is_alphanumeric)
+}
+
+type Username is Text where is_valid_username;
+
+// Refinement subtyping
+fn use_positive(x: PositiveInt) {}
+fn use_non_negative(x: NonNegativeInt) {}
+
+fn subtype_demo() {
+    let pos: PositiveInt = 10;
+    use_positive(pos);      // OK
+    use_non_negative(pos);  // OK: PositiveInt <: NonNegativeInt
+}

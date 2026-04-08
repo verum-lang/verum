@@ -1,0 +1,488 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: cbgr, performance, memory-safety, fat-ref, slices
+// @description: FatRef CBGR check latency benchmark (target: < 20ns per check, 24 bytes per FatRef)
+
+/// FatRef CBGR Check Latency Benchmark
+///
+/// FatRef is the extended reference type for slices and dynamic-length data.
+/// Layout: 24 bytes (ptr: 8 bytes + generation: 4 bytes + epoch_caps: 4 bytes + len: 8 bytes)
+///
+/// This benchmark measures the latency of CBGR validation for FatRef:
+/// 1. Generation check - validates reference hasn't been invalidated
+/// 2. Epoch capability check - validates access is within valid epoch
+/// 3. Bounds check - validates index is within slice bounds
+/// 4. Pointer dereference - actual memory access
+///
+/// Target: < 20ns per CBGR check (includes bounds checking)
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+module vcs.specs.l4.cbgr_latency.fat_ref_check;
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// FatRef memory layout verification
+type FatRefLayout is {
+    ptr: *const (),      // 8 bytes - raw pointer
+    generation: u32,     // 4 bytes - generation counter
+    epoch_caps: u32,     // 4 bytes - epoch capability bits
+    len: u64,            // 8 bytes - slice length
+};
+
+fn main() {
+    let results = BenchmarkResults.new("FatRef CBGR Check Latency");
+
+    // Core FatRef benchmarks
+    results.add(benchmark_fat_ref_single_access());
+    results.add(benchmark_fat_ref_sequential_access());
+    results.add(benchmark_fat_ref_random_access());
+    results.add(benchmark_fat_ref_bounds_check());
+    results.add(benchmark_fat_ref_vs_thin_ref());
+    results.add(benchmark_fat_ref_vs_raw_slice());
+    results.add(benchmark_fat_ref_iteration());
+    results.add(benchmark_fat_ref_memory_layout());
+    results.add(benchmark_fat_ref_subslice());
+    results.add(benchmark_fat_ref_length_query());
+
+    results.report();
+    assert(results.all_pass(), "FatRef CBGR check latency exceeds 20ns target");
+}
+
+/// Single FatRef element access with full CBGR check + bounds check
+fn benchmark_fat_ref_single_access() -> BenchmarkResult {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let fat_ref: &[Int] = &data[..];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(fat_ref[0]);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Each access performs:
+        // 1. Load generation (4 bytes)
+        // 2. Validate generation
+        // 3. Load epoch_caps (4 bytes)
+        // 4. Check epoch validity
+        // 5. Load len (8 bytes)
+        // 6. Bounds check (index < len)
+        // 7. Dereference pointer + offset
+        black_box(fat_ref[0]);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "fat_ref_single_access",
+        metric: "ns/access",
+        value: per_check_ns,
+        target: 20.0,
+        passed: per_check_ns < 20.0,
+    }
+}
+
+/// Sequential access through FatRef slice
+fn benchmark_fat_ref_sequential_access() -> BenchmarkResult {
+    let data: List<Int> = List.with_capacity(1000);
+    for i in 0..1000 {
+        data.push(i);
+    }
+    let fat_ref: &[Int] = &data[..];
+    let mut sum: Int = 0;
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 1000) {
+        for i in 0..fat_ref.len() {
+            sum += fat_ref[i];
+        }
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1000) {
+        for i in 0..fat_ref.len() {
+            sum += fat_ref[i];
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Sequential access benefits from prefetching
+    BenchmarkResult {
+        name: "fat_ref_sequential_access",
+        metric: "ns/access",
+        value: per_check_ns,
+        target: 15.0,
+        passed: per_check_ns < 15.0,
+    }
+}
+
+/// Random access through FatRef slice
+fn benchmark_fat_ref_random_access() -> BenchmarkResult {
+    let data: List<Int> = List.with_capacity(1000);
+    for i in 0..1000 {
+        data.push(i);
+    }
+    let fat_ref: &[Int] = &data[..];
+
+    // Pre-generate random indices
+    let indices: List<Int> = List.with_capacity(BENCHMARK_ITERATIONS);
+    let mut rng = Rng.with_seed(12345);
+    for _ in 0..BENCHMARK_ITERATIONS {
+        indices.push(rng.next_int() % 1000);
+    }
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for idx in indices.iter() {
+        sum += fat_ref[*idx];
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Random access may have cache misses
+    BenchmarkResult {
+        name: "fat_ref_random_access",
+        metric: "ns/access",
+        value: per_check_ns,
+        target: 30.0,  // Higher due to cache misses
+        passed: per_check_ns < 30.0,
+    }
+}
+
+/// Isolated bounds check overhead
+fn benchmark_fat_ref_bounds_check() -> BenchmarkResult {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let fat_ref: &[Int] = &data[..];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let in_bounds = cbgr_check_bounds(fat_ref, 2);
+        black_box(in_bounds);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let in_bounds = cbgr_check_bounds(fat_ref, 2);
+        black_box(in_bounds);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Pure bounds check should be ~2-3ns
+    BenchmarkResult {
+        name: "fat_ref_bounds_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 3.0,
+        passed: per_check_ns < 3.0,
+    }
+}
+
+/// Compare FatRef to ThinRef overhead
+fn benchmark_fat_ref_vs_thin_ref() -> BenchmarkResult {
+    let value: Int = 42;
+    let thin_ref: &Int = &value;
+
+    let data: List<Int> = [42];
+    let fat_ref: &[Int] = &data[..];
+
+    // Measure ThinRef time
+    let timer_thin = Timer.new();
+    timer_thin.start();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(*thin_ref);
+    }
+    let thin_ns = timer_thin.elapsed_ns();
+
+    // Measure FatRef time
+    let timer_fat = Timer.new();
+    timer_fat.start();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(fat_ref[0]);
+    }
+    let fat_ns = timer_fat.elapsed_ns();
+
+    let overhead_ns = (fat_ns - thin_ns) as Float / BENCHMARK_ITERATIONS as Float;
+
+    // FatRef should add ~3-5ns for bounds checking
+    BenchmarkResult {
+        name: "fat_ref_vs_thin_ref_overhead",
+        metric: "ns overhead",
+        value: overhead_ns,
+        target: 5.0,
+        passed: overhead_ns < 5.0,
+    }
+}
+
+/// Compare FatRef overhead to raw slice access
+fn benchmark_fat_ref_vs_raw_slice() -> BenchmarkResult {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let fat_ref: &[Int] = &data[..];
+    let raw_slice: *const [Int] = &data[..] as *const [Int];
+
+    // Measure FatRef time
+    let timer_fat = Timer.new();
+    timer_fat.start();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(fat_ref[2]);
+    }
+    let fat_ns = timer_fat.elapsed_ns();
+
+    // Measure raw slice time (unsafe, for comparison)
+    let timer_raw = Timer.new();
+    timer_raw.start();
+    for _ in 0..BENCHMARK_ITERATIONS {
+        unsafe {
+            black_box((*raw_slice)[2]);
+        }
+    }
+    let raw_ns = timer_raw.elapsed_ns();
+
+    let overhead_ns = (fat_ns - raw_ns) as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Total CBGR overhead should be < 20ns
+    BenchmarkResult {
+        name: "fat_ref_vs_raw_slice_overhead",
+        metric: "ns overhead",
+        value: overhead_ns,
+        target: 20.0,
+        passed: overhead_ns < 20.0,
+    }
+}
+
+/// FatRef iteration performance
+fn benchmark_fat_ref_iteration() -> BenchmarkResult {
+    let data: List<Int> = List.with_capacity(1000);
+    for i in 0..1000 {
+        data.push(i);
+    }
+    let fat_ref: &[Int] = &data[..];
+    let mut sum: Int = 0;
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 1000) {
+        for elem in fat_ref.iter() {
+            sum += *elem;
+        }
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1000) {
+        for elem in fat_ref.iter() {
+            sum += *elem;
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_element_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Iterator should be as fast as indexed access
+    BenchmarkResult {
+        name: "fat_ref_iteration",
+        metric: "ns/element",
+        value: per_element_ns,
+        target: 15.0,
+        passed: per_element_ns < 15.0,
+    }
+}
+
+/// Verify FatRef memory layout is exactly 24 bytes
+fn benchmark_fat_ref_memory_layout() -> BenchmarkResult {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let fat_ref: &[Int] = &data[..];
+
+    let size = size_of_fat_ref(fat_ref);
+    let expected_size = 24;  // ptr(8) + generation(4) + epoch_caps(4) + len(8)
+
+    BenchmarkResult {
+        name: "fat_ref_memory_layout",
+        metric: "bytes",
+        value: size as Float,
+        target: expected_size as Float,
+        passed: size == expected_size,
+    }
+}
+
+/// Subslice creation performance
+fn benchmark_fat_ref_subslice() -> BenchmarkResult {
+    let data: List<Int> = List.with_capacity(1000);
+    for i in 0..1000 {
+        data.push(i);
+    }
+    let fat_ref: &[Int] = &data[..];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let sub = &fat_ref[100..200];
+        black_box(sub.len());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let sub = &fat_ref[100..200];
+        black_box(sub.len());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Subslice should just be pointer arithmetic + bounds check
+    BenchmarkResult {
+        name: "fat_ref_subslice",
+        metric: "ns/op",
+        value: per_op_ns,
+        target: 10.0,
+        passed: per_op_ns < 10.0,
+    }
+}
+
+/// Length query performance
+fn benchmark_fat_ref_length_query() -> BenchmarkResult {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let fat_ref: &[Int] = &data[..];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(fat_ref.len());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(fat_ref.len());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Length query is just a field access
+    BenchmarkResult {
+        name: "fat_ref_length_query",
+        metric: "ns/op",
+        value: per_op_ns,
+        target: 2.0,
+        passed: per_op_ns < 2.0,
+    }
+}
+
+// CBGR intrinsic functions (provided by runtime)
+@extern("verum_cbgr")
+fn cbgr_check_bounds<T>(r: &[T], index: Int) -> Bool;
+
+@extern("verum_cbgr")
+fn size_of_fat_ref<T>(r: &[T]) -> Int;
+
+// Benchmark infrastructure types
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+// Utility to prevent compiler optimization
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;
+
+// Random number generator for random access test
+type Rng is {
+    state: u64,
+};
+
+implement Rng {
+    fn with_seed(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_int(&mut self) -> Int {
+        // Simple LCG for reproducible random numbers
+        self.state = self.state * 6364136223846793005 + 1442695040888963407;
+        (self.state >> 32) as Int
+    }
+}

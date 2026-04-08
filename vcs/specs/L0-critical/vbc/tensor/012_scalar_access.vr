@@ -1,0 +1,136 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, scalar, get, set, swap, shift
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Scalar get/set access patterns
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+type Arr5 is { d0: Float, d1: Float, d2: Float, d3: Float, d4: Float };
+
+fn arr5_get(a: Arr5, idx: Int) -> Float {
+    if idx == 0 { a.d0 }
+    else if idx == 1 { a.d1 }
+    else if idx == 2 { a.d2 }
+    else if idx == 3 { a.d3 }
+    else { a.d4 }
+}
+
+fn arr5_set(a: Arr5, idx: Int, val: Float) -> Arr5 {
+    let v0 = if idx == 0 { val } else { a.d0 };
+    let v1 = if idx == 1 { val } else { a.d1 };
+    let v2 = if idx == 2 { val } else { a.d2 };
+    let v3 = if idx == 3 { val } else { a.d3 };
+    let v4 = if idx == 4 { val } else { a.d4 };
+    Arr5 { d0: v0, d1: v1, d2: v2, d3: v3, d4: v4 }
+}
+
+fn arr5_swap(a: Arr5, i: Int, j: Int) -> Arr5 {
+    let vi = arr5_get(a, i);
+    let vj = arr5_get(a, j);
+    let tmp = arr5_set(a, i, vj);
+    arr5_set(tmp, j, vi)
+}
+
+// shift_left: move every element one position to the left, last becomes 0.0
+fn arr5_shift_left(a: Arr5) -> Arr5 {
+    Arr5 { d0: a.d1, d1: a.d2, d2: a.d3, d3: a.d4, d4: 0.0 }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_get_by_index() {
+    let data = Arr5 { d0: 10.0, d1: 20.0, d2: 30.0, d3: 40.0, d4: 50.0 };
+
+    assert_eq(arr5_get(data, 0), 10.0);
+    assert_eq(arr5_get(data, 1), 20.0);
+    assert_eq(arr5_get(data, 2), 30.0);
+    assert_eq(arr5_get(data, 3), 40.0);
+    assert_eq(arr5_get(data, 4), 50.0);
+    print("  test_get_by_index: ok");
+}
+
+@test
+fn test_set_by_index() {
+    let data = Arr5 { d0: 0.0, d1: 0.0, d2: 0.0, d3: 0.0, d4: 0.0 };
+
+    // Set each position and verify
+    let a1 = arr5_set(data, 0, 100.0);
+    assert_eq(a1.d0, 100.0);
+    assert_eq(a1.d1, 0.0);
+
+    let a2 = arr5_set(data, 2, 42.0);
+    assert_eq(a2.d0, 0.0);
+    assert_eq(a2.d2, 42.0);
+    assert_eq(a2.d4, 0.0);
+
+    let a3 = arr5_set(data, 4, -7.5);
+    assert_eq(a3.d4, -7.5);
+    assert_eq(a3.d3, 0.0);
+    print("  test_set_by_index: ok");
+}
+
+@test
+fn test_swap_elements() {
+    let data = Arr5 { d0: 1.0, d1: 2.0, d2: 3.0, d3: 4.0, d4: 5.0 };
+
+    // Swap positions 0 and 4
+    let swapped = arr5_swap(data, 0, 4);
+    assert_eq(swapped.d0, 5.0);
+    assert_eq(swapped.d1, 2.0);
+    assert_eq(swapped.d2, 3.0);
+    assert_eq(swapped.d3, 4.0);
+    assert_eq(swapped.d4, 1.0);
+
+    // Swap positions 1 and 3
+    let swapped2 = arr5_swap(data, 1, 3);
+    assert_eq(swapped2.d0, 1.0);
+    assert_eq(swapped2.d1, 4.0);
+    assert_eq(swapped2.d2, 3.0);
+    assert_eq(swapped2.d3, 2.0);
+    assert_eq(swapped2.d4, 5.0);
+    print("  test_swap_elements: ok");
+}
+
+@test
+fn test_shift_elements() {
+    let data = Arr5 { d0: 10.0, d1: 20.0, d2: 30.0, d3: 40.0, d4: 50.0 };
+
+    // Shift left by one: [10,20,30,40,50] -> [20,30,40,50,0]
+    let shifted = arr5_shift_left(data);
+    assert_eq(shifted.d0, 20.0);
+    assert_eq(shifted.d1, 30.0);
+    assert_eq(shifted.d2, 40.0);
+    assert_eq(shifted.d3, 50.0);
+    assert_eq(shifted.d4, 0.0);
+
+    // Shift again: [20,30,40,50,0] -> [30,40,50,0,0]
+    let shifted2 = arr5_shift_left(shifted);
+    assert_eq(shifted2.d0, 30.0);
+    assert_eq(shifted2.d1, 40.0);
+    assert_eq(shifted2.d2, 50.0);
+    assert_eq(shifted2.d3, 0.0);
+    assert_eq(shifted2.d4, 0.0);
+    print("  test_shift_elements: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_get_by_index();
+    test_set_by_index();
+    test_swap_elements();
+    test_shift_elements();
+
+    print("[OK] 012_scalar_access");
+    0
+}

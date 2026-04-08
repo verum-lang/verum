@@ -1,0 +1,140 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, threading, parallel, work
+// @expected-exit: 0
+
+// Test: multiple independent computations simulating parallel work.
+
+fn square_sum(n: Int) -> Int {
+    // Sum of squares: 1^2 + 2^2 + ... + n^2 = n*(n+1)*(2n+1)/6
+    let mut acc = 0;
+    let mut i = 1;
+    while (i <= n) {
+        acc = acc + i * i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn cube_sum(n: Int) -> Int {
+    // Sum of cubes: 1^3 + 2^3 + ... + n^3 = (n*(n+1)/2)^2
+    let mut acc = 0;
+    let mut i = 1;
+    while (i <= n) {
+        acc = acc + i * i * i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn triangular(n: Int) -> Int {
+    // n-th triangular number: n*(n+1)/2
+    n * (n + 1) / 2
+}
+
+fn is_prime(n: Int) -> Int {
+    if (n < 2) { return 0; }
+    if (n == 2) { return 1; }
+    if (n % 2 == 0) { return 0; }
+    let mut d = 3;
+    while (d * d <= n) {
+        if (n % d == 0) { return 0; }
+        d = d + 2;
+    }
+    1
+}
+
+fn count_primes(limit: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 2;
+    while (i < limit) {
+        cnt = cnt + is_prime(i);
+        i = i + 1;
+    }
+    cnt
+}
+
+fn main() -> Int {
+    // square_sum(100) = 100*101*201/6 = 338350
+    let ss = square_sum(100);
+    if (ss != 338350) {
+        print(f"FAIL: square_sum(100)={ss}, expected=338350");
+        return 1;
+    }
+
+    // cube_sum(10) = (10*11/2)^2 = 55^2 = 3025
+    let cs = cube_sum(10);
+    if (cs != 3025) {
+        print(f"FAIL: cube_sum(10)={cs}, expected=3025");
+        return 1;
+    }
+
+    // cube_sum(50) = (50*51/2)^2 = 1275^2 = 1625625
+    let cs50 = cube_sum(50);
+    if (cs50 != 1625625) {
+        print(f"FAIL: cube_sum(50)={cs50}, expected=1625625");
+        return 1;
+    }
+
+    // Verify identity: cube_sum(n) == triangular(n)^2
+    let t50 = triangular(50);
+    if (cs50 != t50 * t50) {
+        print(f"FAIL: cube_sum(50)={cs50} != triangular(50)^2={t50 * t50}");
+        return 1;
+    }
+
+    // Simulate parallel work: 4 independent computations
+    let work1 = square_sum(50);    // 50*51*101/6 = 42925
+    let work2 = cube_sum(20);      // (20*21/2)^2 = 210^2 = 44100
+    let work3 = count_primes(100); // 25 primes below 100
+    let work4 = triangular(200);   // 200*201/2 = 20100
+
+    if (work1 != 42925) {
+        print(f"FAIL: square_sum(50)={work1}, expected=42925");
+        return 1;
+    }
+    if (work2 != 44100) {
+        print(f"FAIL: cube_sum(20)={work2}, expected=44100");
+        return 1;
+    }
+    if (work3 != 25) {
+        print(f"FAIL: count_primes(100)={work3}, expected=25");
+        return 1;
+    }
+    if (work4 != 20100) {
+        print(f"FAIL: triangular(200)={work4}, expected=20100");
+        return 1;
+    }
+
+    // Combine all results as a checksum
+    let checksum = work1 + work2 + work3 + work4;
+    // 42925 + 44100 + 25 + 20100 = 107150
+    if (checksum != 107150) {
+        print(f"FAIL: checksum={checksum}, expected=107150");
+        return 1;
+    }
+
+    // Count primes in ranges (simulating parallel prime counting)
+    let mut prime_total = 0;
+    let mut seg = 0;
+    while (seg < 5) {
+        let seg_start = seg * 100 + 2;
+        let seg_end = (seg + 1) * 100 + 2;
+        let mut j = seg_start;
+        while (j < seg_end) {
+            prime_total = prime_total + is_prime(j);
+            j = j + 1;
+        }
+        seg = seg + 1;
+    }
+    // Primes below 502: 95
+    let expected_primes = count_primes(502);
+    if (prime_total != expected_primes) {
+        print(f"FAIL: segmented prime count={prime_total}, expected={expected_primes}");
+        return 1;
+    }
+
+    print("855_parallel_work: PASS");
+    0
+}

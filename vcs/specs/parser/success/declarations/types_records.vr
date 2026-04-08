@@ -1,0 +1,248 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, types, records
+// @description: Test record type definition parsing (struct-like types)
+
+// Minimal record - single field
+type Single is {
+    value: Int
+};
+
+// Two fields
+type Point is {
+    x: Float,
+    y: Float
+};
+
+// Multiple fields
+type Person is {
+    name: Text,
+    age: Int,
+    email: Text
+};
+
+// Many fields
+type ComplexRecord is {
+    id: Int,
+    name: Text,
+    description: Text,
+    created_at: DateTime,
+    updated_at: DateTime,
+    version: Int,
+    active: Bool,
+    data: Map<Text, Value>
+};
+
+// Field visibility modifiers
+type WithVisibility is {
+    pub id: Int,
+    internal data: Text,
+    protected secret: Int,
+    private_field: Bool
+};
+
+// Fields with default values
+type Config is {
+    host: Text = "localhost",
+    port: Int = 8080,
+    debug: Bool = false,
+    timeout_ms: Int = 5000
+};
+
+// Complex default values
+type ComplexDefaults is {
+    items: List<Int> = List.new(),
+    map: Map<Text, Int> = Map.new(),
+    config: Config = Config.default()
+};
+
+// Record with trailing comma
+type TrailingComma is {
+    x: Int,
+    y: Int,
+};
+
+// Generic record
+type Container<T> is {
+    value: T,
+    count: Int
+};
+
+// Multiple type parameters
+type Pair<A, B> is {
+    first: A,
+    second: B
+};
+
+type Triple<A, B, C> is {
+    first: A,
+    second: B,
+    third: C
+};
+
+// Generic with bounds
+type BoundedContainer<T: Clone> is {
+    value: T
+};
+
+type MultipleBounds<K: Hash + Eq, V: Clone> is {
+    key: K,
+    value: V
+};
+
+// Nested record types
+type Address is {
+    street: Text,
+    city: Text,
+    zip: Text
+};
+
+type Customer is {
+    name: Text,
+    billing_address: Address,
+    shipping_address: Address
+};
+
+// Self-referential through Heap
+type LinkedNode<T> is {
+    value: T,
+    next: Maybe<Heap<LinkedNode<T>>>
+};
+
+type BinaryTree<T> is {
+    value: T,
+    left: Maybe<Heap<BinaryTree<T>>>,
+    right: Maybe<Heap<BinaryTree<T>>>
+};
+
+// Record with function field
+type Handler is {
+    on_start: fn() -> (),
+    on_data: fn(Data) -> Bool,
+    on_error: fn(Error) -> ()
+};
+
+// Record with function field (sync versions)
+type SyncHandler is {
+    fetch: fn(Text) -> Response,
+    process: fn(Data) -> Result<(), Error>
+};
+
+// Record with context-requiring function
+type ServiceHandler is {
+    query: fn(Text) -> List<Row> using [Database],
+    log: fn(Text) using [Logger]
+};
+
+// Record with generic function field
+type Transformer<A, B> is {
+    transform: fn(A) -> B,
+    reverse: fn(B) -> A
+};
+
+// Rank-2 polymorphic function field
+type Transducer<A, B> is {
+    transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>
+};
+
+// Record with reference fields
+type View<T> is {
+    data: &T,
+    start: Int,
+    end: Int
+};
+
+type MutableView<T> is {
+    data: &mut T,
+    offset: Int
+};
+
+// Record with checked/unsafe references
+type CheckedView<T> is {
+    data: &checked T
+};
+
+type UnsafeView<T> is {
+    data: &unsafe T
+};
+
+// Record with array field
+type FixedBuffer is {
+    data: [u8; 1024],
+    len: Int
+};
+
+// Record with slice field
+type DynamicBuffer is {
+    data: [u8],
+    capacity: Int
+};
+
+// Record with attributes
+@derive(Clone, Debug, Eq)
+type DerivedRecord is {
+    id: Int,
+    name: Text
+};
+
+@derive(Serialize, Deserialize)
+@repr(C)
+type FFICompatible is {
+    id: u64,
+    flags: u32
+};
+
+// Field attributes
+type FieldAttrs is {
+    @serialize(rename = "user_id")
+    id: Int,
+
+    @validate(min = 0, max = 150)
+    age: Int,
+
+    @deprecated
+    old_field: Text
+};
+
+// Public record
+pub type PublicRecord is {
+    data: Text
+};
+
+// Internal record
+internal type InternalRecord is {
+    secret: Int
+};
+
+// Protected record
+protected type ProtectedRecord is {
+    value: Float
+};
+
+// Record with refinement - use type-level constraint instead
+type PositivePoint is {
+    x: Float,
+    y: Float
+};
+
+// Record with complex refinement - use type-level constraint instead
+type ValidRange is {
+    min: Int,
+    max: Int
+};
+
+// Affine record type
+type affine UniqueResource is {
+    handle: Int,
+    name: Text
+};
+
+// Record with only regular fields (const fields not supported in record body)
+type Constants is {
+    version: Int,
+    mutable_field: Text
+};
+
+// Empty record (unit-like but named)
+type EmptyMarker is {
+};

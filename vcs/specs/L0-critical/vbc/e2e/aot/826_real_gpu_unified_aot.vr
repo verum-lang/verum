@@ -1,0 +1,56 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, gpu, real-opcode, unified
+// @expected-exit: 0
+
+// Tests REAL GPU unified memory intrinsics through AOT (LLVM) pipeline.
+// Mirror of interpreter test 206. Exercises gpu_malloc_managed,
+// gpu_prefetch, with gpu_memset and gpu_free.
+
+// GPU unified memory intrinsic declarations
+fn gpu_malloc_managed(size: Int) -> Int { @intrinsic("GPU_MALLOC_MANAGED", size) }
+fn gpu_prefetch(ptr: Int, size: Int, device: Int) -> Int { @intrinsic("GPU_PREFETCH", ptr, size, device) }
+fn gpu_memset(ptr: Int, value: Int, size: Int) -> Int { @intrinsic("GPU_MEMSET", ptr, value, size) }
+fn gpu_free(ptr: Int) -> Int { @intrinsic("GPU_FREE", ptr) }
+
+fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
+
+fn main() -> Int {
+    if gpu_get_device() == 0 {
+        print("SKIP: No GPU device available");
+        return 0;
+    }
+
+    let mut errors = 0;
+
+    // Test 1: Allocate managed (unified) memory
+    let ptr = gpu_malloc_managed(4096);
+    if ptr == 0 { errors = errors + 1; }
+
+    // Test 2: Prefetch to device 0
+    let pf = gpu_prefetch(ptr, 4096, 0);
+    if pf != 0 { errors = errors + 1; }
+
+    // Test 3: Memset on managed memory
+    let ms = gpu_memset(ptr, 0, 4096);
+    if ms != 0 { errors = errors + 1; }
+
+    // Test 4: Free managed memory
+    let f = gpu_free(ptr);
+    if f != 0 { errors = errors + 1; }
+
+    // Test 5: Multiple managed allocations
+    let p1 = gpu_malloc_managed(1024);
+    let p2 = gpu_malloc_managed(2048);
+    if p1 == 0 { errors = errors + 1; }
+    if p2 == 0 { errors = errors + 1; }
+    if p1 == p2 { errors = errors + 1; }
+
+    let f1 = gpu_free(p1);
+    let f2 = gpu_free(p2);
+    if f1 != 0 { errors = errors + 1; }
+    if f2 != 0 { errors = errors + 1; }
+
+    errors
+}

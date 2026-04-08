@@ -1,0 +1,16 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M301
+// @description: Tests that unsafe constructs are forbidden in meta evaluation
+// @tags: meta-system, sandbox, unsafe
+
+// Attempting to call std.mem.transmute should fail
+meta fn unsafe_transmute() -> Int {
+    // std.mem.transmute is forbidden in meta context
+    // as it can be used for type-unsafe operations
+    std.mem.transmute(42)  // ERROR: M301 ForbiddenOperation
+}
+
+fn main() {
+    @const assert(unsafe_transmute() > 0);
+}

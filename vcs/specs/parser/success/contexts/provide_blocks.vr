@@ -1,0 +1,27 @@
+// @test: parse-pass
+// @tier: 0
+// @category: contexts
+
+fn test_provide() {
+    // Basic provide statement
+    provide Logger = ConsoleLogger.new();
+
+    // Provide with alias
+    provide Database as primary = MainDB.new();
+
+    // Provide in scoped block
+    provide Logger = FileLogger.new() in {
+        log_message("hello");
+    };
+
+    // Multiple provides
+    provide Database = PostgresDB.connect(url);
+    provide Logger = FileLogger.new("app.log");
+
+    // Nested provides
+    provide Database = TestDatabase.new() in {
+        provide Logger = TestLogger.new() in {
+            do_work();
+        }
+    };
+}

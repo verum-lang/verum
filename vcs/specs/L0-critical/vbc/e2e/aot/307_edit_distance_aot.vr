@@ -1,0 +1,229 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, edit-distance, levenshtein, dynamic-programming
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Levenshtein edit distance between integer sequences
+
+// Sequences stored in Arr8 (d0 = length, d1..d7 = elements)
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+// DP row (max length 8, so we need 9 entries for DP: 0..8)
+type DPRow is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int, d8: Int
+};
+
+fn dp_get(r: DPRow, i: Int) -> Int {
+    if i == 0 { r.d0 } else if i == 1 { r.d1 } else if i == 2 { r.d2 }
+    else if i == 3 { r.d3 } else if i == 4 { r.d4 } else if i == 5 { r.d5 }
+    else if i == 6 { r.d6 } else if i == 7 { r.d7 } else { r.d8 }
+}
+
+fn dp_set(r: DPRow, i: Int, v: Int) -> DPRow {
+    DPRow {
+        d0: if i == 0 { v } else { r.d0 }, d1: if i == 1 { v } else { r.d1 },
+        d2: if i == 2 { v } else { r.d2 }, d3: if i == 3 { v } else { r.d3 },
+        d4: if i == 4 { v } else { r.d4 }, d5: if i == 5 { v } else { r.d5 },
+        d6: if i == 6 { v } else { r.d6 }, d7: if i == 7 { v } else { r.d7 },
+        d8: if i == 8 { v } else { r.d8 }
+    }
+}
+
+fn min2(a: Int, b_val: Int) -> Int {
+    if a < b_val { a } else { b_val }
+}
+
+fn min3(a: Int, b_val: Int, c: Int) -> Int {
+    min2(min2(a, b_val), c)
+}
+
+// Levenshtein distance between seq_a (length m) and seq_b (length n)
+// Uses two-row DP approach
+// seq_a elements at indices 1..m (a8_get(seq_a, i) for i in 1..m)
+// seq_b elements at indices 1..n
+fn edit_distance(seq_a: Arr8, seq_b: Arr8) -> Int {
+    let m = a8_get(seq_a, 0);
+    let n = a8_get(seq_b, 0);
+
+    // Initialize previous row: [0, 1, 2, ..., n]
+    let mut prev = DPRow { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, d8: 0 };
+    let mut j = 0;
+    while j <= n {
+        prev = dp_set(prev, j, j);
+        j = j + 1;
+    }
+
+    // Fill row by row
+    let mut i = 1;
+    while i <= m {
+        let mut curr = DPRow { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, d8: 0 };
+        curr = dp_set(curr, 0, i);  // first column
+
+        let mut k = 1;
+        while k <= n {
+            let cost = if a8_get(seq_a, i) == a8_get(seq_b, k) { 0 } else { 1 };
+            let delete_op = dp_get(prev, k) + 1;
+            let insert_op = dp_get(curr, k - 1) + 1;
+            let replace_op = dp_get(prev, k - 1) + cost;
+            curr = dp_set(curr, k, min3(delete_op, insert_op, replace_op));
+            k = k + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+
+    dp_get(prev, n)
+}
+
+// Longest common subsequence length (related problem)
+fn lcs_length(seq_a: Arr8, seq_b: Arr8) -> Int {
+    let m = a8_get(seq_a, 0);
+    let n = a8_get(seq_b, 0);
+
+    let mut prev = DPRow { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, d8: 0 };
+
+    let mut i = 1;
+    while i <= m {
+        let mut curr = DPRow { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, d8: 0 };
+        let mut k = 1;
+        while k <= n {
+            if a8_get(seq_a, i) == a8_get(seq_b, k) {
+                curr = dp_set(curr, k, dp_get(prev, k - 1) + 1);
+            } else {
+                curr = dp_set(curr, k, max2(dp_get(prev, k), dp_get(curr, k - 1)));
+            }
+            k = k + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+
+    dp_get(prev, n)
+}
+
+fn max2(a: Int, b_val: Int) -> Int {
+    if a > b_val { a } else { b_val }
+}
+
+fn test_identical() {
+    // Same sequences: distance = 0
+    let a = Arr8 { d0: 4, d1: 1, d2: 2, d3: 3, d4: 4, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a, a), 0);
+}
+
+fn test_empty_sequences() {
+    let empty = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let nonempty = Arr8 { d0: 3, d1: 1, d2: 2, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+
+    // Empty to empty
+    assert_eq(edit_distance(empty, empty), 0);
+    // Empty to [1,2,3]: 3 insertions
+    assert_eq(edit_distance(empty, nonempty), 3);
+    // [1,2,3] to empty: 3 deletions
+    assert_eq(edit_distance(nonempty, empty), 3);
+}
+
+fn test_single_substitution() {
+    // [1, 2, 3] vs [1, 9, 3]: one substitution
+    let a = Arr8 { d0: 3, d1: 1, d2: 2, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 3, d1: 1, d2: 9, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a, b), 1);
+}
+
+fn test_single_insertion() {
+    // [1, 3] vs [1, 2, 3]: one insertion
+    let a = Arr8 { d0: 2, d1: 1, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 3, d1: 1, d2: 2, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a, b), 1);
+}
+
+fn test_single_deletion() {
+    // [1, 2, 3] vs [1, 3]: one deletion
+    let a = Arr8 { d0: 3, d1: 1, d2: 2, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 2, d1: 1, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a, b), 1);
+}
+
+fn test_completely_different() {
+    // [1, 2, 3] vs [4, 5, 6]: 3 substitutions
+    let a = Arr8 { d0: 3, d1: 1, d2: 2, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 3, d1: 4, d2: 5, d3: 6, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a, b), 3);
+}
+
+fn test_different_lengths() {
+    // [1, 2] vs [1, 2, 3, 4, 5]: 3 insertions
+    let a = Arr8 { d0: 2, d1: 1, d2: 2, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 5, d1: 1, d2: 2, d3: 3, d4: 4, d5: 5, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a, b), 3);
+}
+
+fn test_symmetry() {
+    // edit_distance(a, b) == edit_distance(b, a)
+    let a = Arr8 { d0: 4, d1: 1, d2: 2, d3: 3, d4: 4, d5: 0, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 3, d1: 2, d2: 4, d3: 6, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a, b), edit_distance(b, a));
+}
+
+fn test_classic_example() {
+    // "kitten" vs "sitting" encoded as integers
+    // k=1, i=2, t=3, e=4, n=5, s=6, g=7
+    // kitten: [1, 2, 3, 3, 4, 5]
+    // sitting: [6, 2, 3, 3, 2, 5, 7]
+    let a = Arr8 { d0: 6, d1: 1, d2: 2, d3: 3, d4: 3, d5: 4, d6: 5, d7: 0 };
+    let b = Arr8 { d0: 7, d1: 6, d2: 2, d3: 3, d4: 3, d5: 2, d6: 5, d7: 7 };
+    assert_eq(edit_distance(a, b), 3);  // s/k->s, s/e->i, i/->g
+}
+
+fn test_lcs() {
+    // LCS([1,2,3,4], [2,4,6]) = [2,4], length 2
+    let a = Arr8 { d0: 4, d1: 1, d2: 2, d3: 3, d4: 4, d5: 0, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 3, d1: 2, d2: 4, d3: 6, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(lcs_length(a, b), 2);
+
+    // LCS of identical sequences
+    let c = Arr8 { d0: 3, d1: 1, d2: 2, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(lcs_length(c, c), 3);
+
+    // LCS of disjoint sequences
+    let d_seq = Arr8 { d0: 2, d1: 1, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e_seq = Arr8 { d0: 2, d1: 2, d2: 4, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(lcs_length(d_seq, e_seq), 0);
+}
+
+fn test_edit_distance_triangle_inequality() {
+    // d(a,c) <= d(a,b) + d(b,c) — triangle inequality
+    let a = Arr8 { d0: 3, d1: 1, d2: 2, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 3, d1: 1, d2: 9, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let c = Arr8 { d0: 3, d1: 4, d2: 5, d3: 6, d4: 0, d5: 0, d6: 0, d7: 0 };
+
+    let dab = edit_distance(a, b);
+    let dbc = edit_distance(b, c);
+    let dac = edit_distance(a, c);
+    // Triangle inequality
+    assert_eq(dac <= dab + dbc, true);
+}
+
+fn main() -> Int {
+    test_identical();
+    test_empty_sequences();
+    test_single_substitution();
+    test_single_insertion();
+    test_single_deletion();
+    test_completely_different();
+    test_different_lengths();
+    test_symmetry();
+    test_classic_example();
+    test_lcs();
+    test_edit_distance_triangle_inequality();
+    print("[OK] 307_edit_distance_aot");
+    0
+}

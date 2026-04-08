@@ -1,0 +1,208 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, error-handling, result-type, propagation
+// @timeout: 5000
+// @expected-exit: 0
+//
+// End-to-end: error handling patterns through VBC interpreter
+
+// ============================================================================
+// Result type simulation
+// ============================================================================
+
+type Outcome is { is_ok: Bool, value: Int };
+
+fn ok(v: Int) -> Outcome { Outcome { is_ok: true, value: v } }
+fn err(e: Int) -> Outcome { Outcome { is_ok: false, value: e } }
+fn is_ok(r: Outcome) -> Bool { r.is_ok }
+fn unwrap(r: Outcome) -> Int { r.value }
+
+// ============================================================================
+// Safe operations with error handling
+// ============================================================================
+
+fn safe_div(a: Int, b: Int) -> Outcome {
+    if b == 0 { err(1) } else { ok(a / b) }
+}
+
+fn safe_mod(a: Int, b: Int) -> Outcome {
+    if b == 0 { err(2) } else { ok(a % b) }
+}
+
+fn test_safe_division() {
+    let r1 = safe_div(10, 2);
+    assert(is_ok(r1));
+    assert_eq(unwrap(r1), 5);
+
+    let r2 = safe_div(10, 0);
+    assert(!is_ok(r2));
+    assert_eq(unwrap(r2), 1);
+
+    let r3 = safe_div(0, 5);
+    assert(is_ok(r3));
+    assert_eq(unwrap(r3), 0);
+}
+
+// ============================================================================
+// Error propagation chain
+// ============================================================================
+
+fn validate_range(x: Int, lo: Int, hi: Int) -> Outcome {
+    if x < lo { err(10) }
+    else if x > hi { err(11) }
+    else { ok(x) }
+}
+
+fn process(x: Int) -> Outcome {
+    let v = validate_range(x, 0, 100);
+    if !is_ok(v) { v }
+    else {
+        let val = unwrap(v);
+        safe_div(1000, val)
+    }
+}
+
+fn test_error_propagation() {
+    let r1 = process(10);
+    assert(is_ok(r1));
+    assert_eq(unwrap(r1), 100);
+
+    let r2 = process(-5);
+    assert(!is_ok(r2));
+    assert_eq(unwrap(r2), 10); // range error
+
+    let r3 = process(200);
+    assert(!is_ok(r3));
+    assert_eq(unwrap(r3), 11); // range error
+
+    let r4 = process(0);
+    assert(!is_ok(r4));
+    assert_eq(unwrap(r4), 1); // division by zero
+}
+
+// ============================================================================
+// Retry pattern
+// ============================================================================
+
+fn try_values(a: Int, b: Int, c: Int) -> Outcome {
+    let r1 = safe_div(100, a);
+    if is_ok(r1) { r1 }
+    else {
+        let r2 = safe_div(100, b);
+        if is_ok(r2) { r2 }
+        else { safe_div(100, c) }
+    }
+}
+
+fn test_retry_pattern() {
+    assert_eq(unwrap(try_values(5, 0, 0)), 20);   // first succeeds
+    assert_eq(unwrap(try_values(0, 4, 0)), 25);   // second succeeds
+    assert_eq(unwrap(try_values(0, 0, 2)), 50);   // third succeeds
+    assert(!is_ok(try_values(0, 0, 0)));           // all fail
+}
+
+// ============================================================================
+// Accumulating validation errors
+// ============================================================================
+
+fn count_errors(a: Int, b: Int, c: Int, d: Int) -> Int {
+    let mut errors = 0;
+    if !is_ok(validate_range(a, 0, 100)) { errors = errors + 1; }
+    if !is_ok(validate_range(b, 0, 100)) { errors = errors + 1; }
+    if !is_ok(validate_range(c, 0, 100)) { errors = errors + 1; }
+    if !is_ok(validate_range(d, 0, 100)) { errors = errors + 1; }
+    errors
+}
+
+fn test_error_accumulation() {
+    assert_eq(count_errors(10, 20, 30, 40), 0);
+    assert_eq(count_errors(-1, 20, 200, 40), 2);
+    assert_eq(count_errors(-1, -2, 200, 300), 4);
+    assert_eq(count_errors(0, 100, 50, 75), 0);
+}
+
+// ============================================================================
+// Chained operations with error handling
+// ============================================================================
+
+fn chain_ops(x: Int) -> Outcome {
+    // Step 1: validate
+    let v1 = validate_range(x, 1, 50);
+    if !is_ok(v1) { err(100) }
+    else {
+        // Step 2: multiply
+        let val = unwrap(v1) * 3;
+        // Step 3: divide by (val - 30)
+        let v2 = safe_div(1000, val - 30);
+        if !is_ok(v2) { err(200) }
+        else {
+            // Step 4: add and validate result
+            let result = unwrap(v2) + x;
+            if result > 500 { err(300) }
+            else { ok(result) }
+        }
+    }
+}
+
+fn test_chained_operations() {
+    // x=10: 10*3=30, 1000/(30-30) = div by zero → err(200)
+    assert(!is_ok(chain_ops(10)));
+    assert_eq(unwrap(chain_ops(10)), 200);
+
+    // x=20: 20*3=60, 1000/(60-30) = 33, 33+20 = 53 → ok(53)
+    assert(is_ok(chain_ops(20)));
+    assert_eq(unwrap(chain_ops(20)), 53);
+
+    // x=0: out of range → err(100)
+    assert_eq(unwrap(chain_ops(0)), 100);
+
+    // x=5: 5*3=15, 1000/(15-30) = 1000/(-15) = -66, -66+5 = -61 → ok(-61)
+    assert(is_ok(chain_ops(5)));
+    assert_eq(unwrap(chain_ops(5)), -61);
+}
+
+// ============================================================================
+// Optional type simulation
+// ============================================================================
+
+type OptInt is { has_value: Bool, value: Int };
+
+fn some(v: Int) -> OptInt { OptInt { has_value: true, value: v } }
+fn none() -> OptInt { OptInt { has_value: false, value: 0 } }
+
+fn opt_map(o: OptInt, add: Int) -> OptInt {
+    if o.has_value { some(o.value + add) }
+    else { none() }
+}
+
+fn opt_flat_map_div(o: OptInt, divisor: Int) -> OptInt {
+    if !o.has_value { none() }
+    else if divisor == 0 { none() }
+    else { some(o.value / divisor) }
+}
+
+fn test_optional_chaining() {
+    let v = some(100);
+    let v2 = opt_map(v, 50);      // Some(150)
+    let v3 = opt_flat_map_div(v2, 3); // Some(50)
+    assert(v3.has_value);
+    assert_eq(v3.value, 50);
+
+    let v4 = opt_flat_map_div(v3, 0); // None (div by zero)
+    assert(!v4.has_value);
+
+    let v5 = opt_map(v4, 100);    // None (stays None)
+    assert(!v5.has_value);
+}
+
+fn main() -> Int {
+    test_safe_division();
+    test_error_propagation();
+    test_retry_pattern();
+    test_error_accumulation();
+    test_chained_operations();
+    test_optional_chaining();
+    print("[OK] 018_error_patterns");
+    0
+}

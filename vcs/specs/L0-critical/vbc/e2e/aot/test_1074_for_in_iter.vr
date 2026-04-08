@@ -1,0 +1,156 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: for-in, iteration, range
+// @description: Test for-in loops with ranges, lists, and inclusive ranges
+
+fn test_range_sum() -> Int {
+    // Sum 0..10 = 0+1+...+9 = 45
+    let mut sum = 0;
+    for i in 0..10 {
+        sum = sum + i;
+    }
+    if sum != 45 {
+        print(f"FAIL range_sum: {sum}, expected 45");
+        return 1;
+    }
+    print("  range_sum: OK");
+    0
+}
+
+fn test_inclusive_range() -> Int {
+    // Sum 1..=5 = 1+2+3+4+5 = 15
+    let mut sum = 0;
+    for i in 1..=5 {
+        sum = sum + i;
+    }
+    if sum != 15 {
+        print(f"FAIL inclusive: {sum}, expected 15");
+        return 1;
+    }
+    print("  inclusive_range: OK");
+    0
+}
+
+fn test_for_list() -> Int {
+    let items = [10, 20, 30, 40, 50];
+    let mut sum = 0;
+    for item in items {
+        sum = sum + item;
+    }
+    if sum != 150 {
+        print(f"FAIL for_list: sum={sum}, expected 150");
+        return 1;
+    }
+    print("  for_list: OK");
+    0
+}
+
+fn test_nested_for() -> Int {
+    // Count pairs (i,j) where i < j in 0..5
+    let mut count = 0;
+    for i in 0..5 {
+        for j in 0..5 {
+            if i < j {
+                count = count + 1;
+            }
+        }
+    }
+    // C(5,2) = 10
+    if count != 10 {
+        print(f"FAIL nested_for: count={count}, expected 10");
+        return 1;
+    }
+    print("  nested_for: OK");
+    0
+}
+
+fn test_for_with_break() -> Int {
+    let mut found = -1;
+    let nums = [3, 7, 12, 4, 9, 15, 2];
+    for n in nums {
+        if n > 10 {
+            found = n;
+            break;
+        }
+    }
+    if found != 12 {
+        print(f"FAIL for_break: found={found}, expected 12");
+        return 1;
+    }
+    print("  for_break: OK");
+    0
+}
+
+fn test_for_continue() -> Int {
+    // Sum only even numbers from 0..10
+    let mut sum = 0;
+    for i in 0..10 {
+        if i % 2 != 0 {
+            continue;
+        }
+        sum = sum + i;
+    }
+    // 0+2+4+6+8 = 20
+    if sum != 20 {
+        print(f"FAIL for_continue: sum={sum}, expected 20");
+        return 1;
+    }
+    print("  for_continue: OK");
+    0
+}
+
+fn test_fibonacci_for() -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    for _ in 0..10 {
+        let tmp = b;
+        b = a + b;
+        a = tmp;
+    }
+    // fib(10) = 55
+    if a != 55 {
+        print(f"FAIL fibonacci: fib(10)={a}, expected 55");
+        return 1;
+    }
+    print("  fibonacci: OK");
+    0
+}
+
+fn test_collect_pattern() -> Int {
+    // Build a list using for loop
+    let mut squares = List.new();
+    for i in 1..=5 {
+        squares.push(i * i);
+    }
+    if squares.len() != 5 {
+        print(f"FAIL collect: len={squares.len()}, expected 5");
+        return 1;
+    }
+    if squares[0] != 1 || squares[4] != 25 {
+        print(f"FAIL collect: [0]={squares[0]}, [4]={squares[4]}");
+        return 1;
+    }
+    print("  collect: OK");
+    0
+}
+
+fn main() -> Int {
+    print("For-In Iteration Tests:");
+    let mut failures = 0;
+    failures = failures + test_range_sum();
+    failures = failures + test_inclusive_range();
+    failures = failures + test_for_list();
+    failures = failures + test_nested_for();
+    failures = failures + test_for_with_break();
+    failures = failures + test_for_continue();
+    failures = failures + test_fibonacci_for();
+    failures = failures + test_collect_pattern();
+
+    if failures == 0 {
+        print("All for-in iteration tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

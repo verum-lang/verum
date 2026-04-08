@@ -1,0 +1,271 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, char, character
+
+// ============================================================================
+// SECTION 1: Basic Character Literals
+// ============================================================================
+
+fn test_basic_characters() {
+    // Basic character literals
+    let a = 'a';
+    let z = 'z';
+    let A = 'A';
+    let Z = 'Z';
+
+    // Digit characters
+    let zero = '0';
+    let nine = '9';
+
+    // Special characters
+    let space = ' ';
+    let tab = '\t';
+    let newline = '\n';
+    let carriage_return = '\r';
+    let backslash = '\\';
+    let single_quote = '\'';
+    let double_quote = '"';
+
+    // Null character
+    let null = '\0';
+}
+
+// ============================================================================
+// SECTION 2: Escape Sequences
+// ============================================================================
+
+fn test_escape_sequences() {
+    // Escape sequences
+    let bell = '\x07';
+    let backspace = '\x08';
+    let form_feed = '\x0C';
+    let vertical_tab = '\x0B';
+
+    // Hex escape sequences
+    let hex_a = '\x61';
+    let hex_ff = '\xFF';
+    let hex_00 = '\x00';
+}
+
+fn test_unicode_escapes() {
+    // Unicode escape sequences
+    let unicode_a = '\u{61}';
+    let unicode_heart = '\u{2764}';
+    let unicode_smiley = '\u{1F600}';
+    let unicode_max = '\u{10FFFF}';
+
+    // Unicode characters directly
+    let euro = '\u{20AC}';
+    let copyright = '\u{00A9}';
+    let degree = '\u{00B0}';
+}
+
+fn test_unicode_scripts() {
+    // Characters from various scripts
+    let greek_alpha = '\u{03B1}';
+    let cyrillic_a = '\u{0430}';
+    let chinese_char = '\u{4E2D}';
+    let japanese_hiragana = '\u{3042}';
+    let arabic_alef = '\u{0627}';
+    let hebrew_aleph = '\u{05D0}';
+}
+
+// ============================================================================
+// SECTION 3: Characters in Expressions
+// ============================================================================
+
+fn test_char_expressions() {
+    // Characters in expressions
+    let next_char = 'a' + 1;
+    let char_code = 'A' as Int;
+}
+
+fn test_char_comparisons(c: Char) {
+    // Characters in comparisons
+    let is_lower = c >= 'a' && c <= 'z';
+    let is_upper = c >= 'A' && c <= 'Z';
+    let is_digit = c >= '0' && c <= '9';
+}
+
+fn test_char_match(c: Char) {
+    fn lowercase() {}
+    fn uppercase() {}
+    fn digit() {}
+    fn whitespace() {}
+    fn other() {}
+
+    // Characters in match
+    match c {
+        'a'..='z' => lowercase(),
+        'A'..='Z' => uppercase(),
+        '0'..='9' => digit(),
+        ' ' | '\t' | '\n' => whitespace(),
+        _ => other(),
+    }
+}
+
+// ============================================================================
+// SECTION 4: Characters in Function Calls
+// ============================================================================
+
+fn test_char_function_calls() {
+    fn is_alphabetic(c: Char) -> Bool { true }
+    fn to_uppercase(c: Char) -> Char { c }
+
+    // Character in function calls
+    let is_alpha = is_alphabetic('x');
+    let to_upper = to_uppercase('a');
+}
+
+fn test_char_methods() {
+    // Character methods
+    let upper = 'a'.to_uppercase();
+    let lower = 'A'.to_lowercase();
+    let is_digit = '5'.is_digit();
+}
+
+// ============================================================================
+// SECTION 5: Characters in Collections
+// ============================================================================
+
+fn test_char_in_array() {
+    // Characters in array
+    let vowels = ['a', 'e', 'i', 'o', 'u'];
+    let digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+}
+
+fn test_char_in_tuple() {
+    // Character in tuple
+    let pair = ('a', 'b');
+}
+
+fn test_char_type_annotation() {
+    // Character with type annotation
+    let explicit: Char = 'x';
+}
+
+fn test_char_in_struct() {
+    type Token is {
+        char: Char,
+        position: Int,
+    };
+
+    // Character in struct
+    let token = Token {
+        char: 'a',
+        position: 0,
+    };
+}
+
+fn test_char_in_map() {
+    // Character in map key
+    let char_map = {
+        'a': 1,
+        'b': 2,
+        'c': 3,
+    };
+}
+
+// ============================================================================
+// SECTION 6: Character Pattern Matching
+// ============================================================================
+
+fn test_char_pattern_matching(response: Char) {
+    fn confirm() {}
+
+    // Character in pattern matching
+    if let 'y' | 'Y' = response {
+        confirm();
+    }
+}
+
+fn test_char_iteration() {
+    // Character iteration
+    for c in "hello".chars() {
+        print(c);
+    }
+}
+
+// ============================================================================
+// SECTION 7: Character Conversions
+// ============================================================================
+
+fn test_char_conversion() {
+    // Character conversion
+    let code: Int = 'A' as Int;
+    let char: Char = (65 as Char);
+}
+
+fn test_char_in_closure() {
+    // Character in closure
+    let is_vowel = |c| match c {
+        'a' | 'e' | 'i' | 'o' | 'u' => true,
+        'A' | 'E' | 'I' | 'O' | 'U' => true,
+        _ => false,
+    };
+}
+
+// ============================================================================
+// SECTION 8: Escape Sequence Edge Cases
+// ============================================================================
+
+fn test_escape_edge_cases() {
+    // Escape sequence edge cases
+    let double_backslash = '\\';
+    let escaped_quote = '\'';
+}
+
+fn test_control_characters() {
+    // Control characters by name
+    let nul = '\0';
+    let alert = '\x07';
+    let bs = '\x08';
+    let ht = '\t';
+    let lf = '\n';
+    let vt = '\x0B';
+    let ff = '\x0C';
+    let cr = '\r';
+}
+
+// ============================================================================
+// SECTION 9: Unicode Boundaries
+// ============================================================================
+
+fn test_unicode_boundaries() {
+    // Maximum codepoint
+    let max_unicode = '\u{10FFFF}';
+
+    // BMP and beyond
+    let bmp = '\u{FFFF}';
+    let supplementary = '\u{10000}';
+}
+
+// ============================================================================
+// SECTION 10: Character Constants
+// ============================================================================
+
+const NEWLINE: Char = '\n';
+const SPACE: Char = ' ';
+const NULL: Char = '\0';
+
+fn test_char_ranges() {
+    // Character in range
+    let alpha_range = 'a'..='z';
+    let digit_range = '0'..='9';
+}
+
+fn test_unicode_special() {
+    // Unicode normalization characters
+    let combining = '\u{0301}';  // combining acute accent
+    let ligature = '\u{FB01}';   // fi ligature
+
+    // Right-to-left characters
+    let rtl_mark = '\u{200F}';
+    let ltr_mark = '\u{200E}';
+
+    // Zero-width characters
+    let zwsp = '\u{200B}';
+    let zwnj = '\u{200C}';
+    let zwj = '\u{200D}';
+}

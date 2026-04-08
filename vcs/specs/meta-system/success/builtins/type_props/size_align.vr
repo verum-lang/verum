@@ -1,0 +1,151 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, type_props, size_of, align_of
+// @description: Test size_of and align_of builtins for type layout introspection
+// @contexts: MetaTypes
+
+// =============================================================================
+// TEST TYPES
+// =============================================================================
+
+type Point is { x: Float, y: Float };
+
+type Color is Red | Green | Blue;
+
+type Wrapper is (Int);
+
+type Empty is { };
+
+type Large is {
+    a: Int,
+    b: Int,
+    c: Int,
+    d: Int,
+    e: Int,
+    f: Int,
+    g: Int,
+    h: Int
+};
+
+// =============================================================================
+// SIZE_OF TESTS
+// =============================================================================
+
+// Test size_of primitive types
+meta fn test_size_of_int() -> Int using [MetaTypes] {
+    size_of(Int)  // Platform-dependent, typically 8
+}
+
+meta fn test_size_of_bool() -> Int using [MetaTypes] {
+    size_of(Bool)  // Typically 1
+}
+
+meta fn test_size_of_u8() -> Int using [MetaTypes] {
+    size_of(U8)  // Should be 1
+}
+
+meta fn test_size_of_u16() -> Int using [MetaTypes] {
+    size_of(U16)  // Should be 2
+}
+
+meta fn test_size_of_u32() -> Int using [MetaTypes] {
+    size_of(U32)  // Should be 4
+}
+
+meta fn test_size_of_u64() -> Int using [MetaTypes] {
+    size_of(U64)  // Should be 8
+}
+
+// Test size_of struct types
+meta fn test_size_of_point() -> Int using [MetaTypes] {
+    size_of(Point)  // 2 * sizeof(Float)
+}
+
+// Test size_of empty struct
+meta fn test_size_of_empty() -> Int using [MetaTypes] {
+    size_of(Empty)  // Zero-sized type
+}
+
+// Test size_of enum
+meta fn test_size_of_enum() -> Int using [MetaTypes] {
+    size_of(Color)  // Small enum, typically 1 byte
+}
+
+// =============================================================================
+// ALIGN_OF TESTS
+// =============================================================================
+
+// Test align_of primitive types
+meta fn test_align_of_int() -> Int using [MetaTypes] {
+    align_of(Int)  // Typically 8 on 64-bit
+}
+
+meta fn test_align_of_u8() -> Int using [MetaTypes] {
+    align_of(U8)  // Should be 1
+}
+
+meta fn test_align_of_u16() -> Int using [MetaTypes] {
+    align_of(U16)  // Should be 2
+}
+
+meta fn test_align_of_u32() -> Int using [MetaTypes] {
+    align_of(U32)  // Should be 4
+}
+
+// Test align_of struct
+meta fn test_align_of_point() -> Int using [MetaTypes] {
+    align_of(Point)  // Aligned to Float
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test size is multiple of alignment
+meta fn test_size_alignment_invariant<T>() -> Bool using [MetaTypes] {
+    let size = size_of(T);
+    let align = align_of(T);
+    // Size should be multiple of alignment (or zero for ZST)
+    size == 0 || size % align == 0
+}
+
+// Test comparing sizes
+meta fn test_size_comparison() -> Bool using [MetaTypes] {
+    // U8 < U16 < U32 < U64
+    size_of(U8) < size_of(U16) &&
+    size_of(U16) < size_of(U32) &&
+    size_of(U32) < size_of(U64)
+}
+
+// Test comparing alignments
+meta fn test_align_comparison() -> Bool using [MetaTypes] {
+    // Alignments should follow size hierarchy
+    align_of(U8) <= align_of(U16) &&
+    align_of(U16) <= align_of(U32) &&
+    align_of(U32) <= align_of(U64)
+}
+
+// Main test function
+fn main() {
+    // Basic size tests
+    @const assert(test_size_of_u8() == 1);
+    @const assert(test_size_of_u16() == 2);
+    @const assert(test_size_of_u32() == 4);
+    @const assert(test_size_of_u64() == 8);
+
+    // Alignment tests
+    @const assert(test_align_of_u8() == 1);
+    @const assert(test_align_of_u16() == 2);
+    @const assert(test_align_of_u32() == 4);
+
+    // Invariant tests
+    @const assert(test_size_alignment_invariant<Int>());
+    @const assert(test_size_alignment_invariant<Point>());
+    @const assert(test_size_alignment_invariant<Color>());
+    @const assert(test_size_alignment_invariant<Empty>());
+
+    // Comparison tests
+    @const assert(test_size_comparison());
+    @const assert(test_align_comparison());
+}

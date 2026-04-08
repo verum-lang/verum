@@ -408,12 +408,9 @@ impl TestDiscovery {
                     }
                 }
 
-                // Match against pattern — normalize to forward slashes so glob
-                // patterns work identically on Windows and Unix.
+                // Match against pattern
                 let relative_path = path.strip_prefix(base_path).unwrap_or(path);
                 let path_str = relative_path.to_string_lossy();
-                #[cfg(windows)]
-                let path_str = std::borrow::Cow::Owned(path_str.replace('\\', "/"));
 
                 if !pattern.matches(&path_str) {
                     continue;

@@ -1,0 +1,516 @@
+// =============================================================================
+// panic_test.vr - Tests for PanicInfo, Location, and assert functions
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, panic, assert, location, core
+// @description: Tests for panic infrastructure types and assertion functions
+// =============================================================================
+
+mount core.base.panic.*;
+
+// =============================================================================
+// Section 1: Location Construction and Access
+// =============================================================================
+
+@test
+fn test_location_new() {
+    let loc = Location.new("test.vr", 42, 10);
+    assert_eq(loc.file, "test.vr");
+    assert_eq(loc.line, 42);
+    assert_eq(loc.column, 10);
+}
+
+@test
+fn test_location_various_files() {
+    let loc1 = Location.new("src/main.vr", 1, 1);
+    assert_eq(loc1.file, "src/main.vr");
+
+    let loc2 = Location.new("core/base/ops.vr", 100, 25);
+    assert_eq(loc2.file, "core/base/ops.vr");
+    assert_eq(loc2.line, 100);
+    assert_eq(loc2.column, 25);
+}
+
+@test
+fn test_location_zero_values() {
+    let loc = Location.new("", 0, 0);
+    assert_eq(loc.file, "");
+    assert_eq(loc.line, 0);
+    assert_eq(loc.column, 0);
+}
+
+// =============================================================================
+// Section 2: PanicInfo Construction and Access
+// =============================================================================
+
+@test
+fn test_panic_info_with_location() {
+    let loc = Location.new("test.vr", 42, 10);
+    let info = PanicInfo {
+        message: "something went wrong",
+        location: Some(loc),
+    };
+
+    assert_eq(info.message(), "something went wrong");
+    assert(info.location().is_some());
+}
+
+@test
+fn test_panic_info_without_location() {
+    let info = PanicInfo {
+        message: "unknown location",
+        location: None,
+    };
+
+    assert_eq(info.message(), "unknown location");
+    assert(info.location().is_none());
+}
+
+@test
+fn test_panic_info_message_access() {
+    let info = PanicInfo {
+        message: "test error",
+        location: None,
+    };
+
+    let msg = info.message();
+    assert_eq(msg, "test error");
+}
+
+@test
+fn test_panic_info_location_access() {
+    let loc = Location.new("foo.vr", 10, 5);
+    let info = PanicInfo {
+        message: "error",
+        location: Some(loc),
+    };
+
+    let loc_ref = info.location().unwrap();
+    assert_eq(loc_ref.file, "foo.vr");
+    assert_eq(loc_ref.line, 10);
+    assert_eq(loc_ref.column, 5);
+}
+
+// =============================================================================
+// Section 3: Assert Functions (positive cases)
+// =============================================================================
+
+@test
+fn test_assert_true() {
+    assert(1 == 1);
+    assert(1 == 1, "custom message");
+}
+
+@test
+fn test_assert_eq_integers() {
+    assert_eq(42, 42);
+    assert_eq(0, 0);
+    assert_eq(-1, -1);
+}
+
+@test
+fn test_assert_eq_booleans() {
+    assert_eq(true, true);
+    assert_eq(false, false);
+}
+
+@test
+fn test_assert_eq_text() {
+    assert_eq("hello", "hello");
+    assert_eq("", "");
+}
+
+@test
+fn test_assert_ne_integers() {
+    assert_ne(1, 2);
+    assert_ne(0, 1);
+    assert_ne(-1, 1);
+}
+
+@test
+fn test_assert_ne_text() {
+    assert_ne("hello", "world");
+    assert_ne("", "notempty");
+}
+
+@test
+fn test_assert_some() {
+    let val: Maybe<Int> = Some(42);
+    let result = assert_some(val);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_assert_some_text() {
+    let val: Maybe<Text> = Some("hello");
+    let result = assert_some(val);
+    assert_eq(result, "hello");
+}
+
+@test
+fn test_assert_none() {
+    let val: Maybe<Int> = None;
+    assert_none(val);
+}
+
+@test
+fn test_assert_ok() {
+    let val: Result<Int, Text> = Ok(42);
+    let result = assert_ok(val);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_assert_err() {
+    let val: Result<Int, Text> = Err("failure");
+    let result = assert_err(val);
+    assert_eq(result, "failure");
+}
+
+// =============================================================================
+// Section 4: Assert with Custom Messages
+// =============================================================================
+
+@test
+fn test_assert_eq_custom_message() {
+    assert_eq(42, 42, "values should be equal");
+}
+
+@test
+fn test_assert_ne_custom_message() {
+    assert_ne(1, 2, "values should differ");
+}
+
+@test
+fn test_assert_some_custom_message() {
+    let val: Maybe<Int> = Some(1);
+    assert_some(val, "expected Some value");
+}
+
+@test
+fn test_assert_none_custom_message() {
+    let val: Maybe<Int> = None;
+    assert_none(val, "expected None");
+}
+
+@test
+fn test_assert_ok_custom_message() {
+    let val: Result<Int, Text> = Ok(1);
+    assert_ok(val, "expected Ok");
+}
+
+@test
+fn test_assert_err_custom_message() {
+    let val: Result<Int, Text> = Err("e");
+    assert_err(val, "expected Err");
+}
+
+// =============================================================================
+// Section 5: Debug Assert (positive cases)
+// =============================================================================
+
+@test
+fn test_debug_assert_true() {
+    debug_assert(1 == 1);
+    debug_assert(1 == 1, "custom message");
+}
+
+@test
+fn test_debug_assert_eq() {
+    debug_assert_eq(42, 42);
+    debug_assert_eq(42, 42, "custom message");
+}
+
+@test
+fn test_debug_assert_ne() {
+    debug_assert_ne(1, 2);
+    debug_assert_ne(1, 2, "custom message");
+}
+
+// =============================================================================
+// Section 6: Assert Composability
+// =============================================================================
+
+@test
+fn test_assert_chain() {
+    let x = 42;
+    assert(x > 0);
+    assert(x < 100);
+    assert_eq(x, 42);
+    assert_ne(x, 0);
+}
+
+@test
+fn test_assert_with_expressions() {
+    assert(1 + 1 == 2);
+    assert(10 > 5);
+    assert("hello".len() == 5);
+}
+
+@test
+fn test_assert_some_chained() {
+    let val: Maybe<Int> = Some(42);
+    let x = assert_some(val);
+    assert_eq(x, 42);
+    assert(x > 0);
+}
+
+@test
+fn test_assert_ok_chained() {
+    let val: Result<Int, Text> = Ok(100);
+    let x = assert_ok(val);
+    assert(x >= 100);
+    assert_eq(x, 100);
+}
+
+// =============================================================================
+// Section 7: Location Edge Cases
+// =============================================================================
+
+@test
+fn test_location_large_line_numbers() {
+    let loc = Location.new("big_file.vr", 999999, 200);
+    assert_eq(loc.line, 999999);
+    assert_eq(loc.column, 200);
+}
+
+@test
+fn test_location_long_path() {
+    let loc = Location.new("src/very/deep/nested/module/file.vr", 1, 1);
+    assert_eq(loc.file, "src/very/deep/nested/module/file.vr");
+}
+
+// =============================================================================
+// Section 8: PanicInfo Edge Cases
+// =============================================================================
+
+@test
+fn test_panic_info_empty_message() {
+    let info = PanicInfo {
+        message: "",
+        location: None,
+    };
+    assert_eq(info.message(), "");
+}
+
+@test
+fn test_panic_info_with_multiline_message() {
+    let info = PanicInfo {
+        message: "line1\nline2\nline3",
+        location: None,
+    };
+    assert(info.message().contains(&"line1"));
+    assert(info.message().contains(&"line2"));
+}
+
+@test
+fn test_panic_info_location_preserves_all_fields() {
+    let loc = Location.new("mod.vr", 55, 12);
+    let info = PanicInfo {
+        message: "test",
+        location: Some(loc),
+    };
+    let l = info.location().unwrap();
+    assert_eq(l.file, "mod.vr");
+    assert_eq(l.line, 55);
+    assert_eq(l.column, 12);
+}
+
+// =============================================================================
+// Section 9: Assert with Various Types
+// =============================================================================
+
+@test
+fn test_assert_eq_float() {
+    assert_eq(3.14, 3.14);
+}
+
+@test
+fn test_assert_ne_bool() {
+    assert_ne(true, false);
+}
+
+@test
+fn test_assert_with_logical_ops() {
+    assert(true && true);
+    assert(true || false);
+    assert(!false);
+}
+
+@test
+fn test_assert_some_with_text() {
+    let val: Maybe<Text> = Some("world");
+    let result = assert_some(val);
+    assert(result.len() == 5);
+}
+
+@test
+fn test_assert_ok_with_bool() {
+    let val: Result<Bool, Text> = Ok(true);
+    let result = assert_ok(val);
+    assert(result);
+}
+
+@test
+fn test_assert_err_with_int_error() {
+    let val: Result<Text, Int> = Err(404);
+    let result = assert_err(val);
+    assert_eq(result, 404);
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+// =============================================================================
+// Section 10: Location Equality and Comparison
+// =============================================================================
+
+@test
+fn test_location_same_fields_equal() {
+    let loc1 = Location.new("test.vr", 10, 5);
+    let loc2 = Location.new("test.vr", 10, 5);
+    assert_eq(loc1.file, loc2.file);
+    assert_eq(loc1.line, loc2.line);
+    assert_eq(loc1.column, loc2.column);
+}
+
+@test
+fn test_location_different_files() {
+    let loc1 = Location.new("a.vr", 10, 5);
+    let loc2 = Location.new("b.vr", 10, 5);
+    assert_ne(loc1.file, loc2.file);
+}
+
+@test
+fn test_location_column_one() {
+    let loc = Location.new("main.vr", 1, 1);
+    assert_eq(loc.line, 1);
+    assert_eq(loc.column, 1);
+}
+
+@test
+fn test_location_different_lines() {
+    let loc1 = Location.new("test.vr", 1, 1);
+    let loc2 = Location.new("test.vr", 2, 1);
+    assert_eq(loc1.file, loc2.file);
+    assert_ne(loc1.line, loc2.line);
+}
+
+// =============================================================================
+// Section 11: Additional Assert Type Patterns
+// =============================================================================
+
+@test
+fn test_assert_eq_negative_integers() {
+    assert_eq(-42, -42);
+    assert_eq(-1, -1);
+    assert_eq(-999, -999);
+}
+
+@test
+fn test_assert_ne_same_sign_different_values() {
+    assert_ne(1, 2);
+    assert_ne(10, 20);
+    assert_ne(-1, -2);
+    assert_ne(-10, -20);
+}
+
+@test
+fn test_assert_some_bool() {
+    let val: Maybe<Bool> = Some(true);
+    let result = assert_some(val);
+    assert(result);
+}
+
+@test
+fn test_assert_ok_text_value() {
+    let val: Result<Text, Int> = Ok("success");
+    let result = assert_ok(val);
+    assert_eq(result, "success");
+}
+
+@test
+fn test_debug_assert_complex_expression() {
+    debug_assert(1 + 1 == 2);
+    debug_assert(10 > 5 && 5 > 1);
+    debug_assert(!(3 > 7));
+}
+
+@test
+fn test_panic_info_two_different_messages() {
+    let info1 = PanicInfo {
+        message: "first error",
+        location: None,
+    };
+    let info2 = PanicInfo {
+        message: "second error",
+        location: None,
+    };
+    assert_ne(info1.message(), info2.message());
+}
+
+// =============================================================================
+// Section 12: Additional Panic Tests
+// =============================================================================
+
+@test
+fn test_location_file_access() {
+    let loc = Location.new("panic.vr", 100, 25);
+    assert_eq(loc.file, "panic.vr");
+}
+
+@test
+fn test_location_large_line_number() {
+    let loc = Location.new("big.vr", 999999, 1);
+    assert_eq(loc.line, 999999);
+}
+
+@test
+fn test_panic_info_with_location() {
+    let loc = Location.new("test.vr", 42, 10);
+    let info = PanicInfo {
+        message: "test panic",
+        location: Some(loc),
+    };
+    assert(info.location().is_some());
+    assert_eq(info.message(), "test panic");
+}
+
+@test
+fn test_panic_info_empty_message() {
+    let info = PanicInfo {
+        message: "",
+        location: None,
+    };
+    assert_eq(info.message(), "");
+}
+
+@test
+fn test_assert_eq_bool_true() {
+    assert_eq(true, true);
+}
+
+@test
+fn test_assert_eq_bool_false() {
+    assert_eq(false, false);
+}
+
+@test
+fn test_assert_ne_different_signs() {
+    assert_ne(1, -1);
+    assert_ne(100, -100);
+}
+
+@test
+fn test_debug_assert_true() {
+    debug_assert(!false);
+    debug_assert(1 == 1);
+    debug_assert(0 == 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

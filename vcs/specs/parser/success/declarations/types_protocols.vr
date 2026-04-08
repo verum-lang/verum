@@ -1,0 +1,237 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, types, protocols
+// @description: Test protocol type definition parsing (trait-like interfaces)
+
+// Minimal protocol
+type Minimal is protocol {
+};
+
+// Protocol with single method
+type Displayable is protocol {
+    fn display(&self) -> Text;
+};
+
+// Protocol with multiple methods
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+    fn has_next(&self) -> Bool;
+};
+
+// Protocol with associated type
+type Collection is protocol {
+    type Element;
+    fn len(&self) -> Int;
+    fn is_empty(&self) -> Bool;
+    fn contains(&self, elem: &Self.Element) -> Bool;
+};
+
+// Protocol with associated const
+type Bounded is protocol {
+    const MIN: Self;
+    const MAX: Self;
+};
+
+// Protocol with default implementation
+type Default is protocol {
+    fn default() -> Self = Self.zero();
+};
+
+// Protocol with multiple default implementations
+type Numeric is protocol {
+    fn add(self, other: Self) -> Self;
+    fn sub(self, other: Self) -> Self;
+    fn mul(self, other: Self) -> Self;
+    fn div(self, other: Self) -> Self;
+
+    fn double(self) -> Self = self.add(self);
+    fn square(self) -> Self = self.mul(self);
+};
+
+// Generic protocol
+type Container<T> is protocol {
+    fn get(&self) -> &T;
+    fn set(&mut self, value: T);
+};
+
+// Protocol with multiple type parameters
+type Converter<A, B> is protocol {
+    fn convert(a: A) -> B;
+    fn unconvert(b: B) -> A;
+};
+
+// Protocol with bounds on associated type
+type OrderedCollection is protocol {
+    type Item: Ord;
+    fn sort(&mut self);
+    fn min(&self) -> Maybe<Self.Item>;
+    fn max(&self) -> Maybe<Self.Item>;
+};
+
+// Protocol extension
+type PartialOrd is protocol extends PartialEq {
+    fn partial_cmp(&self, other: &Self) -> Maybe<Ordering>;
+};
+
+type Ord is protocol extends PartialOrd + Eq {
+    fn cmp(&self, other: &Self) -> Ordering;
+};
+
+// Multiple extension
+type Stringifiable is protocol extends Display + Debug {
+    fn to_json(&self) -> Text;
+};
+
+// Protocol with where clause
+type Mappable<F> is protocol
+    where type F: Functor
+{
+    fn map<A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+// Protocol with generic associated types - simplified syntax
+type LendingIterator is protocol {
+    type Item<T>;
+    fn next<T>(&mut self) -> Maybe<Self.Item<T>>;
+};
+
+type StreamingIterator is protocol {
+    type Item<T>;
+    fn next<T>(&mut self) -> Maybe<Self.Item<T>>;
+};
+
+// Protocol with async methods
+type AsyncReader is protocol {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<Int, IoError>;
+    async fn read_all(&mut self) -> Result<List<u8>, IoError>;
+};
+
+type AsyncIterator is protocol {
+    type Item;
+    async fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// Protocol with context requirements
+type DatabaseService is protocol {
+    fn query(&self, sql: Text) -> List<Row> using [Database];
+    fn execute(&mut self, sql: Text) -> Int using [Database, Logger];
+};
+
+// Protocol with pure method
+type PureComputation is protocol {
+    pure fn compute(&self, x: Int) -> Int;
+};
+
+// Protocol with unsafe method
+type UnsafeAccess is protocol {
+    unsafe fn raw_ptr(&self) -> *const u8;
+};
+
+// Protocol with meta method
+type Reflectable is protocol {
+    meta fn type_name() -> Text;
+    meta fn fields() -> List<FieldInfo>;
+};
+
+// Complex protocol with all features - without const default value
+type ComplexProtocol<T, U> is protocol extends Base + Other
+    where type T: Clone,
+          type U: Display
+{
+    type Output;
+    type Error: Display;
+
+    const DEFAULT_TIMEOUT: Int;
+
+    fn process(&self, input: T) -> Result<Self.Output, Self.Error>;
+    async fn async_process(&self, input: T) -> Result<Self.Output, Self.Error>;
+    pure fn validate(&self, input: &T) -> Bool;
+
+    fn with_default(input: T) -> Self.Output = {
+        let instance = Self.new();
+        instance.process(input).unwrap()
+    };
+};
+
+// Protocol for higher-kinded types
+type Functor is protocol {
+    type F<_>;
+    fn map<A, B>(fa: Self.F<A>, f: fn(A) -> B) -> Self.F<B>;
+};
+
+type Applicative is protocol extends Functor {
+    fn pure<A>(a: A) -> Self.F<A>;
+    fn ap<A, B>(ff: Self.F<fn(A) -> B>, fa: Self.F<A>) -> Self.F<B>;
+};
+
+type Monad is protocol extends Applicative {
+    fn flat_map<A, B>(fa: Self.F<A>, f: fn(A) -> Self.F<B>) -> Self.F<B>;
+
+    fn map<A, B>(fa: Self.F<A>, f: fn(A) -> B) -> Self.F<B> = {
+        Self.flat_map(fa, |a| Self.pure(f(a)))
+    };
+};
+
+// Protocol with negative bounds
+type ThreadUnsafe is protocol {
+    // Explicitly not Send or Sync
+    fn local_only(&self);
+};
+
+// Protocol with refinement on methods
+type BoundedQueue is protocol {
+    fn push(&mut self, item: Int)
+        where Self.len() < Self.capacity();
+    fn pop(&mut self) -> Int
+        where Self.len() > 0;
+    fn len(&self) -> Int;
+    fn capacity(&self) -> Int;
+};
+
+// Public protocol
+pub type PublicProtocol is protocol {
+    fn public_method(&self);
+};
+
+// Internal protocol
+internal type InternalProtocol is protocol {
+    fn internal_method(&self);
+};
+
+// Protocol with visibility on items - simplified without pub/internal on methods
+type MixedVisibility is protocol {
+    fn public_fn(&self);
+    fn internal_fn(&self);
+};
+
+// Protocol with attributes
+@derive(Clone)
+type CloneableProtocol is protocol {
+    fn clone(&self) -> Self;
+};
+
+// Protocol inheriting from multiple
+type MultiInherit is protocol extends A + B + C + D {
+    fn combined(&self);
+};
+
+// Protocol with Self bounds
+type Equatable is protocol {
+    fn equals(&self, other: &Self) -> Bool;
+};
+
+type Comparable is protocol extends Equatable {
+    fn compare(&self, other: &Self) -> Ordering;
+};
+
+// Protocol with return type refinement - simplified
+type Positive is protocol {
+    fn abs(&self) -> Int;
+};
+
+// Protocol with type alias in body
+type Aliased is protocol {
+    type Inner = Int;
+    fn get_inner(&self) -> Self.Inner;
+};

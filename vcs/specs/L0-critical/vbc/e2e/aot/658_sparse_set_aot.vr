@@ -1,0 +1,233 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, sparse-set, data-structure, bitset
+// @timeout: 30000
+
+// Sparse set and bitset operations using integer bit-packing
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(val: Int, pos: Int) -> Int { (val / pow2(pos)) % 2 }
+
+// Bitset operations (using a single Int, up to 16 elements)
+fn bs_empty() -> Int { 0 }
+fn bs_add(set: Int, elem: Int) -> Int {
+    if get_bit(set, elem) == 0 { set + pow2(elem) } else { set }
+}
+fn bs_remove(set: Int, elem: Int) -> Int {
+    if get_bit(set, elem) == 1 { set - pow2(elem) } else { set }
+}
+fn bs_contains(set: Int, elem: Int) -> Int { get_bit(set, elem) }
+
+fn bs_union(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) == 1 { result = result + pow2(i); }
+        else if get_bit(b, i) == 1 { result = result + pow2(i); }
+        i = i + 1;
+    }
+    result
+}
+
+fn bs_intersect(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) == 1 {
+            if get_bit(b, i) == 1 {
+                result = result + pow2(i);
+            }
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn bs_diff(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) == 1 {
+            if get_bit(b, i) == 0 {
+                result = result + pow2(i);
+            }
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn bs_symmetric_diff(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) != get_bit(b, i) {
+            result = result + pow2(i);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn bs_size(set: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(set, i) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn bs_is_subset(a: Int, b: Int) -> Int {
+    // a is subset of b if a & b == a
+    if bs_intersect(a, b) == a { 1 } else { 0 }
+}
+
+fn bs_is_empty(set: Int) -> Int {
+    if set == 0 { 1 } else { 0 }
+}
+
+fn bs_complement_n(set: Int, n: Int) -> Int {
+    // Complement within universe {0..n-1}
+    let mut result = 0;
+    let mut i = 0;
+    while i < n {
+        if get_bit(set, i) == 0 {
+            result = result + pow2(i);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_basic_ops() -> Int {
+    let mut s = bs_empty();
+    assert_eq(bs_is_empty(s), 1);
+    assert_eq(bs_size(s), 0);
+    s = bs_add(s, 3);
+    s = bs_add(s, 5);
+    s = bs_add(s, 7);
+    assert_eq(bs_contains(s, 3), 1);
+    assert_eq(bs_contains(s, 5), 1);
+    assert_eq(bs_contains(s, 4), 0);
+    assert_eq(bs_size(s), 3);
+    s = bs_remove(s, 5);
+    assert_eq(bs_contains(s, 5), 0);
+    assert_eq(bs_size(s), 2);
+    // Idempotent add/remove
+    s = bs_add(s, 3); // already present
+    assert_eq(bs_size(s), 2);
+    s = bs_remove(s, 5); // already absent
+    assert_eq(bs_size(s), 2);
+    1
+}
+
+fn test_set_ops() -> Int {
+    // A = {1, 2, 3}, B = {2, 3, 4}
+    let mut a = bs_empty();
+    a = bs_add(a, 1);
+    a = bs_add(a, 2);
+    a = bs_add(a, 3);
+    let mut b = bs_empty();
+    b = bs_add(b, 2);
+    b = bs_add(b, 3);
+    b = bs_add(b, 4);
+    // Union = {1,2,3,4}
+    let u = bs_union(a, b);
+    assert_eq(bs_size(u), 4);
+    assert_eq(bs_contains(u, 1), 1);
+    assert_eq(bs_contains(u, 4), 1);
+    // Intersection = {2,3}
+    let inter = bs_intersect(a, b);
+    assert_eq(bs_size(inter), 2);
+    assert_eq(bs_contains(inter, 2), 1);
+    assert_eq(bs_contains(inter, 3), 1);
+    // Difference A-B = {1}
+    let d = bs_diff(a, b);
+    assert_eq(bs_size(d), 1);
+    assert_eq(bs_contains(d, 1), 1);
+    // Symmetric difference = {1, 4}
+    let sd = bs_symmetric_diff(a, b);
+    assert_eq(bs_size(sd), 2);
+    assert_eq(bs_contains(sd, 1), 1);
+    assert_eq(bs_contains(sd, 4), 1);
+    1
+}
+
+fn test_subset() -> Int {
+    let mut a = bs_empty();
+    a = bs_add(a, 2);
+    a = bs_add(a, 3);
+    let mut b = bs_empty();
+    b = bs_add(b, 1);
+    b = bs_add(b, 2);
+    b = bs_add(b, 3);
+    b = bs_add(b, 4);
+    assert_eq(bs_is_subset(a, b), 1); // {2,3} subset of {1,2,3,4}
+    assert_eq(bs_is_subset(b, a), 0); // not the other way
+    assert_eq(bs_is_subset(a, a), 1); // reflexive
+    assert_eq(bs_is_subset(bs_empty(), a), 1); // empty subset of all
+    1
+}
+
+fn test_complement() -> Int {
+    // Universe = {0,1,2,3,4}, S = {1,3}
+    let mut s = bs_empty();
+    s = bs_add(s, 1);
+    s = bs_add(s, 3);
+    let comp = bs_complement_n(s, 5);
+    assert_eq(bs_contains(comp, 0), 1);
+    assert_eq(bs_contains(comp, 1), 0);
+    assert_eq(bs_contains(comp, 2), 1);
+    assert_eq(bs_contains(comp, 3), 0);
+    assert_eq(bs_contains(comp, 4), 1);
+    assert_eq(bs_size(comp), 3);
+    // S union complement = universe
+    let u = bs_union(s, comp);
+    assert_eq(bs_size(u), 5);
+    // S intersect complement = empty
+    let inter = bs_intersect(s, comp);
+    assert_eq(bs_is_empty(inter), 1);
+    1
+}
+
+fn test_set_identities() -> Int {
+    let mut a = bs_empty();
+    a = bs_add(a, 0);
+    a = bs_add(a, 2);
+    a = bs_add(a, 4);
+    let mut b = bs_empty();
+    b = bs_add(b, 1);
+    b = bs_add(b, 2);
+    b = bs_add(b, 3);
+    // A union B = B union A (commutative)
+    assert_eq(bs_union(a, b), bs_union(b, a));
+    // A intersect B = B intersect A
+    assert_eq(bs_intersect(a, b), bs_intersect(b, a));
+    // A symmetric_diff B = B symmetric_diff A
+    assert_eq(bs_symmetric_diff(a, b), bs_symmetric_diff(b, a));
+    // A symmetric_diff A = empty
+    assert_eq(bs_symmetric_diff(a, a), 0);
+    // A union A = A
+    assert_eq(bs_union(a, a), a);
+    // A intersect A = A
+    assert_eq(bs_intersect(a, a), a);
+    1
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_set_ops();
+    test_subset();
+    test_complement();
+    test_set_identities();
+    print("[OK] 658_sparse_set_aot");
+    0
+}

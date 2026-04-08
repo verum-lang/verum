@@ -1,0 +1,13 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, integer-overflow, subtraction
+// @description: Tests that subtraction underflow is detected
+
+fn main() {
+    // Use -MAX - 1 to get MIN, then subtract 1 to cause underflow
+    let min_int = -9223372036854775807 - 1;  // Int.MIN
+
+    // Subtracting from minimum value causes underflow
+    let _ = min_int - 1;  // Panic: Integer overflow (underflow)
+}

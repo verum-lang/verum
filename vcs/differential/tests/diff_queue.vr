@@ -1,0 +1,116 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, queue, circular-buffer
+// @timeout: 10000
+
+type Queue8 is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int,
+    head: Int, tail: Int, count: Int
+};
+
+fn queue_new() -> Queue8 {
+    Queue8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, head: 0, tail: 0, count: 0 }
+}
+
+fn queue_get(q: Queue8, i: Int) -> Int {
+    let idx = i % 8;
+    if idx == 0 { q.d0 } else if idx == 1 { q.d1 } else if idx == 2 { q.d2 }
+    else if idx == 3 { q.d3 } else if idx == 4 { q.d4 } else if idx == 5 { q.d5 }
+    else if idx == 6 { q.d6 } else { q.d7 }
+}
+
+fn queue_set(q: Queue8, i: Int, v: Int) -> Queue8 {
+    let idx = i % 8;
+    Queue8 {
+        d0: if idx == 0 { v } else { q.d0 }, d1: if idx == 1 { v } else { q.d1 },
+        d2: if idx == 2 { v } else { q.d2 }, d3: if idx == 3 { v } else { q.d3 },
+        d4: if idx == 4 { v } else { q.d4 }, d5: if idx == 5 { v } else { q.d5 },
+        d6: if idx == 6 { v } else { q.d6 }, d7: if idx == 7 { v } else { q.d7 },
+        head: q.head, tail: q.tail, count: q.count
+    }
+}
+
+fn enqueue(q: Queue8, v: Int) -> Queue8 {
+    let q2 = queue_set(q, q.tail, v);
+    Queue8 {
+        d0: q2.d0, d1: q2.d1, d2: q2.d2, d3: q2.d3, d4: q2.d4, d5: q2.d5, d6: q2.d6, d7: q2.d7,
+        head: q.head, tail: (q.tail + 1) % 8, count: q.count + 1
+    }
+}
+
+fn dequeue_val(q: Queue8) -> Int {
+    queue_get(q, q.head)
+}
+
+fn dequeue(q: Queue8) -> Queue8 {
+    Queue8 {
+        d0: q.d0, d1: q.d1, d2: q.d2, d3: q.d3, d4: q.d4, d5: q.d5, d6: q.d6, d7: q.d7,
+        head: (q.head + 1) % 8, tail: q.tail, count: q.count - 1
+    }
+}
+
+fn is_empty(q: Queue8) -> Int {
+    if q.count == 0 { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut q = queue_new();
+    assert_eq(is_empty(q), 1);
+
+    // Enqueue 10, 20, 30
+    q = enqueue(q, 10);
+    q = enqueue(q, 20);
+    q = enqueue(q, 30);
+    assert_eq(q.count, 3);
+    assert_eq(is_empty(q), 0);
+
+    // Dequeue should give FIFO order
+    assert_eq(dequeue_val(q), 10);
+    q = dequeue(q);
+    assert_eq(dequeue_val(q), 20);
+    q = dequeue(q);
+    assert_eq(dequeue_val(q), 30);
+    q = dequeue(q);
+    assert_eq(is_empty(q), 1);
+
+    // Wraparound: fill, drain, fill again
+    let mut q2 = queue_new();
+    let mut i = 0;
+    while i < 8 {
+        q2 = enqueue(q2, i * 10);
+        i = i + 1;
+    }
+    assert_eq(q2.count, 8);
+
+    // Drain 4
+    let mut j = 0;
+    while j < 4 {
+        assert_eq(dequeue_val(q2), j * 10);
+        q2 = dequeue(q2);
+        j = j + 1;
+    }
+    assert_eq(q2.count, 4);
+
+    // Enqueue 4 more (wrapping around)
+    q2 = enqueue(q2, 80);
+    q2 = enqueue(q2, 90);
+    q2 = enqueue(q2, 100);
+    q2 = enqueue(q2, 110);
+    assert_eq(q2.count, 8);
+
+    // Dequeue remaining — should be 40,50,60,70,80,90,100,110
+    assert_eq(dequeue_val(q2), 40); q2 = dequeue(q2);
+    assert_eq(dequeue_val(q2), 50); q2 = dequeue(q2);
+    assert_eq(dequeue_val(q2), 60); q2 = dequeue(q2);
+    assert_eq(dequeue_val(q2), 70); q2 = dequeue(q2);
+    assert_eq(dequeue_val(q2), 80); q2 = dequeue(q2);
+    assert_eq(dequeue_val(q2), 90); q2 = dequeue(q2);
+    assert_eq(dequeue_val(q2), 100); q2 = dequeue(q2);
+    assert_eq(dequeue_val(q2), 110); q2 = dequeue(q2);
+    assert_eq(is_empty(q2), 1);
+
+    print("DIFF_OK: queue");
+    0
+}

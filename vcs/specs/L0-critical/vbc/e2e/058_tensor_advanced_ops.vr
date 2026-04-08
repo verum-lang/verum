@@ -1,0 +1,1025 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, advanced, nn
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Interpreter tensor advanced ops — conv, pooling, batch norm, softmax, relu, clamp, where, argmax, topk, cumsum
+
+// ============================================================================
+// Array types — simulate fixed-length arrays with struct fields
+// ============================================================================
+
+type Arr4 is {
+    e0: Int, e1: Int, e2: Int, e3: Int
+};
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+type Arr3 is {
+    e0: Int, e1: Int, e2: Int
+};
+
+// ============================================================================
+// Arr4 helpers
+// ============================================================================
+
+fn arr4_new(a: Int, b: Int, c: Int, d: Int) -> Arr4 {
+    Arr4 { e0: a, e1: b, e2: c, e3: d }
+}
+
+fn arr4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, val: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 }
+    }
+}
+
+// ============================================================================
+// Arr8 helpers
+// ============================================================================
+
+fn arr8_new(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: g, e7: h }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+// ============================================================================
+// Arr3 helpers
+// ============================================================================
+
+fn arr3_new(a: Int, b: Int, c: Int) -> Arr3 {
+    Arr3 { e0: a, e1: b, e2: c }
+}
+
+fn arr3_get(a: Arr3, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else { a.e2 }
+}
+
+// ============================================================================
+// Utility functions
+// ============================================================================
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+// ============================================================================
+// Test 1: ReLU — max(0, x) element-wise
+// ============================================================================
+
+fn relu(x: Int) -> Int {
+    if x > 0 { x } else { 0 }
+}
+
+fn arr4_relu(a: Arr4) -> Arr4 {
+    Arr4 {
+        e0: relu(a.e0),
+        e1: relu(a.e1),
+        e2: relu(a.e2),
+        e3: relu(a.e3)
+    }
+}
+
+@test
+fn test_relu() {
+    // Positive values pass through
+    let a = arr4_new(3, 7, 1, 10);
+    let r = arr4_relu(a);
+    assert_eq(arr4_get(r, 0), 3);
+    assert_eq(arr4_get(r, 1), 7);
+    assert_eq(arr4_get(r, 2), 1);
+    assert_eq(arr4_get(r, 3), 10);
+
+    // Negative values become 0
+    let b = arr4_new(-5, -1, -100, -3);
+    let r2 = arr4_relu(b);
+    assert_eq(arr4_get(r2, 0), 0);
+    assert_eq(arr4_get(r2, 1), 0);
+    assert_eq(arr4_get(r2, 2), 0);
+    assert_eq(arr4_get(r2, 3), 0);
+
+    // Mixed
+    let c = arr4_new(-3, 5, 0, -7);
+    let r3 = arr4_relu(c);
+    assert_eq(arr4_get(r3, 0), 0);
+    assert_eq(arr4_get(r3, 1), 5);
+    assert_eq(arr4_get(r3, 2), 0);
+    assert_eq(arr4_get(r3, 3), 0);
+
+    // Zero stays zero
+    let d = arr4_new(0, 0, 0, 0);
+    let r4 = arr4_relu(d);
+    assert_eq(arr4_get(r4, 0), 0);
+    assert_eq(arr4_get(r4, 1), 0);
+    assert_eq(arr4_get(r4, 2), 0);
+    assert_eq(arr4_get(r4, 3), 0);
+
+    print("test_relu passed");
+}
+
+// ============================================================================
+// Test 2: Leaky ReLU — x if x > 0, x/10 otherwise (integer approx)
+// ============================================================================
+
+fn leaky_relu(x: Int) -> Int {
+    if x > 0 { x } else { x / 10 }
+}
+
+fn arr4_leaky_relu(a: Arr4) -> Arr4 {
+    Arr4 {
+        e0: leaky_relu(a.e0),
+        e1: leaky_relu(a.e1),
+        e2: leaky_relu(a.e2),
+        e3: leaky_relu(a.e3)
+    }
+}
+
+@test
+fn test_leaky_relu() {
+    // Positive values unchanged
+    let a = arr4_new(10, 20, 30, 40);
+    let r = arr4_leaky_relu(a);
+    assert_eq(arr4_get(r, 0), 10);
+    assert_eq(arr4_get(r, 1), 20);
+    assert_eq(arr4_get(r, 2), 30);
+    assert_eq(arr4_get(r, 3), 40);
+
+    // Negative values scaled by 1/10
+    let b = arr4_new(-100, -50, -30, -10);
+    let r2 = arr4_leaky_relu(b);
+    assert_eq(arr4_get(r2, 0), -10);
+    assert_eq(arr4_get(r2, 1), -5);
+    assert_eq(arr4_get(r2, 2), -3);
+    assert_eq(arr4_get(r2, 3), -1);
+
+    // Mixed positive and negative
+    let c = arr4_new(-20, 15, -70, 5);
+    let r3 = arr4_leaky_relu(c);
+    assert_eq(arr4_get(r3, 0), -2);
+    assert_eq(arr4_get(r3, 1), 15);
+    assert_eq(arr4_get(r3, 2), -7);
+    assert_eq(arr4_get(r3, 3), 5);
+
+    // Small negatives truncate toward zero
+    let d = arr4_new(-1, -5, -9, 0);
+    let r4 = arr4_leaky_relu(d);
+    assert_eq(arr4_get(r4, 0), 0);   // -1/10 = 0 in integer
+    assert_eq(arr4_get(r4, 1), 0);   // -5/10 = 0 in integer
+    assert_eq(arr4_get(r4, 2), 0);   // -9/10 = 0 in integer
+    assert_eq(arr4_get(r4, 3), 0);
+
+    print("test_leaky_relu passed");
+}
+
+// ============================================================================
+// Test 3: Clamp — clamp values to [lo, hi]
+// ============================================================================
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+fn arr4_clamp(a: Arr4, lo: Int, hi: Int) -> Arr4 {
+    Arr4 {
+        e0: clamp(a.e0, lo, hi),
+        e1: clamp(a.e1, lo, hi),
+        e2: clamp(a.e2, lo, hi),
+        e3: clamp(a.e3, lo, hi)
+    }
+}
+
+@test
+fn test_clamp() {
+    // All within range — unchanged
+    let a = arr4_new(3, 5, 7, 9);
+    let r = arr4_clamp(a, 0, 10);
+    assert_eq(arr4_get(r, 0), 3);
+    assert_eq(arr4_get(r, 1), 5);
+    assert_eq(arr4_get(r, 2), 7);
+    assert_eq(arr4_get(r, 3), 9);
+
+    // Values below lo clamped up
+    let b = arr4_new(-10, -5, 0, 1);
+    let r2 = arr4_clamp(b, 0, 100);
+    assert_eq(arr4_get(r2, 0), 0);
+    assert_eq(arr4_get(r2, 1), 0);
+    assert_eq(arr4_get(r2, 2), 0);
+    assert_eq(arr4_get(r2, 3), 1);
+
+    // Values above hi clamped down
+    let c = arr4_new(50, 75, 100, 200);
+    let r3 = arr4_clamp(c, 0, 50);
+    assert_eq(arr4_get(r3, 0), 50);
+    assert_eq(arr4_get(r3, 1), 50);
+    assert_eq(arr4_get(r3, 2), 50);
+    assert_eq(arr4_get(r3, 3), 50);
+
+    // Mixed below, within, above
+    let d = arr4_new(-20, 5, 15, 30);
+    let r4 = arr4_clamp(d, 0, 10);
+    assert_eq(arr4_get(r4, 0), 0);
+    assert_eq(arr4_get(r4, 1), 5);
+    assert_eq(arr4_get(r4, 2), 10);
+    assert_eq(arr4_get(r4, 3), 10);
+
+    print("test_clamp passed");
+}
+
+// ============================================================================
+// Test 4: Where/Select — conditional select from two arrays
+// ============================================================================
+
+fn arr4_where_select(cond: Arr4, a: Arr4, b: Arr4) -> Arr4 {
+    // cond[i] != 0 => a[i], else b[i]
+    Arr4 {
+        e0: if cond.e0 != 0 { a.e0 } else { b.e0 },
+        e1: if cond.e1 != 0 { a.e1 } else { b.e1 },
+        e2: if cond.e2 != 0 { a.e2 } else { b.e2 },
+        e3: if cond.e3 != 0 { a.e3 } else { b.e3 }
+    }
+}
+
+@test
+fn test_where_select() {
+    let cond = arr4_new(1, 0, 1, 0);
+    let a = arr4_new(10, 20, 30, 40);
+    let b = arr4_new(100, 200, 300, 400);
+    let r = arr4_where_select(cond, a, b);
+    assert_eq(arr4_get(r, 0), 10);   // cond=1 => a
+    assert_eq(arr4_get(r, 1), 200);  // cond=0 => b
+    assert_eq(arr4_get(r, 2), 30);   // cond=1 => a
+    assert_eq(arr4_get(r, 3), 400);  // cond=0 => b
+
+    // All true
+    let cond2 = arr4_new(1, 1, 1, 1);
+    let r2 = arr4_where_select(cond2, a, b);
+    assert_eq(arr4_get(r2, 0), 10);
+    assert_eq(arr4_get(r2, 1), 20);
+    assert_eq(arr4_get(r2, 2), 30);
+    assert_eq(arr4_get(r2, 3), 40);
+
+    // All false
+    let cond3 = arr4_new(0, 0, 0, 0);
+    let r3 = arr4_where_select(cond3, a, b);
+    assert_eq(arr4_get(r3, 0), 100);
+    assert_eq(arr4_get(r3, 1), 200);
+    assert_eq(arr4_get(r3, 2), 300);
+    assert_eq(arr4_get(r3, 3), 400);
+
+    // Non-zero values other than 1 also count as true
+    let cond4 = arr4_new(5, 0, -3, 0);
+    let r4 = arr4_where_select(cond4, a, b);
+    assert_eq(arr4_get(r4, 0), 10);
+    assert_eq(arr4_get(r4, 1), 200);
+    assert_eq(arr4_get(r4, 2), 30);
+    assert_eq(arr4_get(r4, 3), 400);
+
+    print("test_where_select passed");
+}
+
+// ============================================================================
+// Test 5: 1D Convolution — 4-element signal with 3-element kernel
+// Output length = signal_len - kernel_len + 1 = 4 - 3 + 1 = 2
+// ============================================================================
+
+fn conv1d(signal: Arr4, kernel: Arr3) -> Arr4 {
+    // out[i] = sum(signal[i+j] * kernel[j]) for j in 0..kernel_len
+    // signal_len=4, kernel_len=3, output_len=2
+    let out0 = arr4_get(signal, 0) * arr3_get(kernel, 0)
+             + arr4_get(signal, 1) * arr3_get(kernel, 1)
+             + arr4_get(signal, 2) * arr3_get(kernel, 2);
+    let out1 = arr4_get(signal, 1) * arr3_get(kernel, 0)
+             + arr4_get(signal, 2) * arr3_get(kernel, 1)
+             + arr4_get(signal, 3) * arr3_get(kernel, 2);
+    arr4_new(out0, out1, 0, 0)
+}
+
+@test
+fn test_conv1d() {
+    // Signal: [1, 2, 3, 4], Kernel: [1, 0, -1]
+    // out[0] = 1*1 + 2*0 + 3*(-1) = 1 + 0 - 3 = -2
+    // out[1] = 2*1 + 3*0 + 4*(-1) = 2 + 0 - 4 = -2
+    let sig = arr4_new(1, 2, 3, 4);
+    let kern = arr3_new(1, 0, -1);
+    let r = conv1d(sig, kern);
+    assert_eq(arr4_get(r, 0), -2);
+    assert_eq(arr4_get(r, 1), -2);
+
+    // Identity-like kernel [0, 1, 0] — copies center
+    // out[0] = 1*0 + 2*1 + 3*0 = 2
+    // out[1] = 2*0 + 3*1 + 4*0 = 3
+    let kern2 = arr3_new(0, 1, 0);
+    let r2 = conv1d(sig, kern2);
+    assert_eq(arr4_get(r2, 0), 2);
+    assert_eq(arr4_get(r2, 1), 3);
+
+    // Averaging kernel [1, 1, 1] (unnormalized)
+    // out[0] = 1 + 2 + 3 = 6
+    // out[1] = 2 + 3 + 4 = 9
+    let kern3 = arr3_new(1, 1, 1);
+    let r3 = conv1d(sig, kern3);
+    assert_eq(arr4_get(r3, 0), 6);
+    assert_eq(arr4_get(r3, 1), 9);
+
+    // Edge detection kernel [1, -2, 1]
+    // out[0] = 1*1 + 2*(-2) + 3*1 = 1 - 4 + 3 = 0
+    // out[1] = 2*1 + 3*(-2) + 4*1 = 2 - 6 + 4 = 0
+    let kern4 = arr3_new(1, -2, 1);
+    let r4 = conv1d(sig, kern4);
+    assert_eq(arr4_get(r4, 0), 0);
+    assert_eq(arr4_get(r4, 1), 0);
+
+    print("test_conv1d passed");
+}
+
+// ============================================================================
+// Test 6: Max Pooling — stride 2 on 8 elements -> 4 elements
+// ============================================================================
+
+fn max_pool_stride2(a: Arr8) -> Arr4 {
+    // Pool pairs: (e0,e1), (e2,e3), (e4,e5), (e6,e7)
+    Arr4 {
+        e0: int_max(a.e0, a.e1),
+        e1: int_max(a.e2, a.e3),
+        e2: int_max(a.e4, a.e5),
+        e3: int_max(a.e6, a.e7)
+    }
+}
+
+@test
+fn test_max_pool() {
+    // Basic max pooling
+    let a = arr8_new(1, 3, 2, 5, 4, 6, 7, 8);
+    let r = max_pool_stride2(a);
+    assert_eq(arr4_get(r, 0), 3);   // max(1, 3)
+    assert_eq(arr4_get(r, 1), 5);   // max(2, 5)
+    assert_eq(arr4_get(r, 2), 6);   // max(4, 6)
+    assert_eq(arr4_get(r, 3), 8);   // max(7, 8)
+
+    // All equal
+    let b = arr8_new(5, 5, 5, 5, 5, 5, 5, 5);
+    let r2 = max_pool_stride2(b);
+    assert_eq(arr4_get(r2, 0), 5);
+    assert_eq(arr4_get(r2, 1), 5);
+    assert_eq(arr4_get(r2, 2), 5);
+    assert_eq(arr4_get(r2, 3), 5);
+
+    // Negative values
+    let c = arr8_new(-10, -5, -3, -1, -8, -2, -7, -4);
+    let r3 = max_pool_stride2(c);
+    assert_eq(arr4_get(r3, 0), -5);  // max(-10, -5)
+    assert_eq(arr4_get(r3, 1), -1);  // max(-3, -1)
+    assert_eq(arr4_get(r3, 2), -2);  // max(-8, -2)
+    assert_eq(arr4_get(r3, 3), -4);  // max(-7, -4)
+
+    // First element always larger
+    let d = arr8_new(10, 1, 20, 2, 30, 3, 40, 4);
+    let r4 = max_pool_stride2(d);
+    assert_eq(arr4_get(r4, 0), 10);
+    assert_eq(arr4_get(r4, 1), 20);
+    assert_eq(arr4_get(r4, 2), 30);
+    assert_eq(arr4_get(r4, 3), 40);
+
+    print("test_max_pool passed");
+}
+
+// ============================================================================
+// Test 7: Average Pooling — stride 2 on 8 elements -> 4 elements
+// ============================================================================
+
+fn avg_pool_stride2(a: Arr8) -> Arr4 {
+    // Pool pairs: (e0,e1), (e2,e3), (e4,e5), (e6,e7)
+    // Integer average: (a + b) / 2
+    Arr4 {
+        e0: (a.e0 + a.e1) / 2,
+        e1: (a.e2 + a.e3) / 2,
+        e2: (a.e4 + a.e5) / 2,
+        e3: (a.e6 + a.e7) / 2
+    }
+}
+
+@test
+fn test_avg_pool() {
+    // Even sums divide cleanly
+    let a = arr8_new(2, 4, 6, 8, 10, 12, 14, 16);
+    let r = avg_pool_stride2(a);
+    assert_eq(arr4_get(r, 0), 3);   // (2+4)/2
+    assert_eq(arr4_get(r, 1), 7);   // (6+8)/2
+    assert_eq(arr4_get(r, 2), 11);  // (10+12)/2
+    assert_eq(arr4_get(r, 3), 15);  // (14+16)/2
+
+    // Odd sums truncate
+    let b = arr8_new(1, 2, 3, 4, 5, 6, 7, 8);
+    let r2 = avg_pool_stride2(b);
+    assert_eq(arr4_get(r2, 0), 1);  // (1+2)/2 = 1 (truncated)
+    assert_eq(arr4_get(r2, 1), 3);  // (3+4)/2 = 3 (truncated)
+    assert_eq(arr4_get(r2, 2), 5);  // (5+6)/2 = 5 (truncated)
+    assert_eq(arr4_get(r2, 3), 7);  // (7+8)/2 = 7 (truncated)
+
+    // All same
+    let c = arr8_new(10, 10, 10, 10, 10, 10, 10, 10);
+    let r3 = avg_pool_stride2(c);
+    assert_eq(arr4_get(r3, 0), 10);
+    assert_eq(arr4_get(r3, 1), 10);
+    assert_eq(arr4_get(r3, 2), 10);
+    assert_eq(arr4_get(r3, 3), 10);
+
+    // Negative values
+    let d = arr8_new(-10, -20, -4, -6, 0, 0, 100, -100);
+    let r4 = avg_pool_stride2(d);
+    assert_eq(arr4_get(r4, 0), -15); // (-10 + -20)/2
+    assert_eq(arr4_get(r4, 1), -5);  // (-4 + -6)/2
+    assert_eq(arr4_get(r4, 2), 0);   // (0 + 0)/2
+    assert_eq(arr4_get(r4, 3), 0);   // (100 + -100)/2
+
+    print("test_avg_pool passed");
+}
+
+// ============================================================================
+// Test 8: Batch Normalization (integer approximation)
+// batch_norm(x) = (x - mean) * scale / std
+// We use scaled integers: values multiplied by 100 for precision
+// ============================================================================
+
+fn batch_norm_arr4(a: Arr4, mean: Int, std_val: Int, scale: Int) -> Arr4 {
+    // Compute (x - mean) * scale / std for each element
+    // All values are assumed to be scaled by 100
+    Arr4 {
+        e0: (a.e0 - mean) * scale / std_val,
+        e1: (a.e1 - mean) * scale / std_val,
+        e2: (a.e2 - mean) * scale / std_val,
+        e3: (a.e3 - mean) * scale / std_val
+    }
+}
+
+@test
+fn test_batch_norm() {
+    // Values: [200, 400, 600, 800] (scaled by 100 -> real: 2, 4, 6, 8)
+    // Mean: 500 (real: 5), Std: 200 (real: 2), Scale: 100 (real: 1)
+    // Result: (-300*100/200, -100*100/200, 100*100/200, 300*100/200)
+    //       = (-150, -50, 50, 150)
+    let a = arr4_new(200, 400, 600, 800);
+    let r = batch_norm_arr4(a, 500, 200, 100);
+    assert_eq(arr4_get(r, 0), -150);
+    assert_eq(arr4_get(r, 1), -50);
+    assert_eq(arr4_get(r, 2), 50);
+    assert_eq(arr4_get(r, 3), 150);
+
+    // All same values — result should be all zeros
+    let b = arr4_new(500, 500, 500, 500);
+    let r2 = batch_norm_arr4(b, 500, 100, 100);
+    assert_eq(arr4_get(r2, 0), 0);
+    assert_eq(arr4_get(r2, 1), 0);
+    assert_eq(arr4_get(r2, 2), 0);
+    assert_eq(arr4_get(r2, 3), 0);
+
+    // Scale factor of 200 (real: 2) doubles the normalized values
+    let c = arr4_new(100, 300, 500, 700);
+    // mean=400, std=100, scale=200
+    // (-300*200/100, -100*200/100, 100*200/100, 300*200/100)
+    // = (-600, -200, 200, 600)
+    let r3 = batch_norm_arr4(c, 400, 100, 200);
+    assert_eq(arr4_get(r3, 0), -600);
+    assert_eq(arr4_get(r3, 1), -200);
+    assert_eq(arr4_get(r3, 2), 200);
+    assert_eq(arr4_get(r3, 3), 600);
+
+    print("test_batch_norm passed");
+}
+
+// ============================================================================
+// Test 9: Argmax — find index of maximum element
+// ============================================================================
+
+fn arr4_argmax(a: Arr4) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = a.e0;
+    if a.e1 > best_val {
+        best_val = a.e1;
+        best_idx = 1;
+    }
+    if a.e2 > best_val {
+        best_val = a.e2;
+        best_idx = 2;
+    }
+    if a.e3 > best_val {
+        best_idx = 3;
+    }
+    best_idx
+}
+
+fn arr8_argmax(a: Arr8) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = a.e0;
+    let mut i = 1;
+    while i < 8 {
+        let v = arr8_get(a, i);
+        if v > best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+@test
+fn test_argmax() {
+    // Max at end
+    let a = arr4_new(1, 2, 3, 4);
+    assert_eq(arr4_argmax(a), 3);
+
+    // Max at start
+    let b = arr4_new(99, 2, 3, 4);
+    assert_eq(arr4_argmax(b), 0);
+
+    // Max in middle
+    let c = arr4_new(1, 50, 3, 4);
+    assert_eq(arr4_argmax(c), 1);
+
+    // All negative
+    let d = arr4_new(-10, -5, -3, -20);
+    assert_eq(arr4_argmax(d), 2);
+
+    // 8-element argmax
+    let e = arr8_new(5, 3, 9, 1, 7, 2, 8, 4);
+    assert_eq(arr8_argmax(e), 2);
+
+    // 8-element, max at last position
+    let f = arr8_new(1, 2, 3, 4, 5, 6, 7, 100);
+    assert_eq(arr8_argmax(f), 7);
+
+    print("test_argmax passed");
+}
+
+// ============================================================================
+// Test 10: Argmin — find index of minimum element
+// ============================================================================
+
+fn arr4_argmin(a: Arr4) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = a.e0;
+    if a.e1 < best_val {
+        best_val = a.e1;
+        best_idx = 1;
+    }
+    if a.e2 < best_val {
+        best_val = a.e2;
+        best_idx = 2;
+    }
+    if a.e3 < best_val {
+        best_idx = 3;
+    }
+    best_idx
+}
+
+fn arr8_argmin(a: Arr8) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = a.e0;
+    let mut i = 1;
+    while i < 8 {
+        let v = arr8_get(a, i);
+        if v < best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+@test
+fn test_argmin() {
+    // Min at start
+    let a = arr4_new(1, 2, 3, 4);
+    assert_eq(arr4_argmin(a), 0);
+
+    // Min at end
+    let b = arr4_new(10, 20, 30, 1);
+    assert_eq(arr4_argmin(b), 3);
+
+    // Min in middle
+    let c = arr4_new(10, 1, 30, 40);
+    assert_eq(arr4_argmin(c), 1);
+
+    // All negative — smallest negative
+    let d = arr4_new(-1, -5, -3, -2);
+    assert_eq(arr4_argmin(d), 1);
+
+    // 8-element argmin
+    let e = arr8_new(5, 3, 9, 1, 7, 2, 8, 4);
+    assert_eq(arr8_argmin(e), 3);
+
+    // 8-element, min at first position
+    let f = arr8_new(-100, 2, 3, 4, 5, 6, 7, 8);
+    assert_eq(arr8_argmin(f), 0);
+
+    print("test_argmin passed");
+}
+
+// ============================================================================
+// Test 11: Top-K — find top-k elements (returns sorted descending)
+// We implement top-2 and top-3 for Arr4
+// ============================================================================
+
+type TopK2 is { val0: Int, idx0: Int, val1: Int, idx1: Int };
+type TopK3 is { val0: Int, idx0: Int, val1: Int, idx1: Int, val2: Int, idx2: Int };
+
+fn arr4_topk2(a: Arr4) -> TopK2 {
+    // Find top 2 elements with their indices
+    let mut v0 = a.e0;
+    let mut i0 = 0;
+    let mut v1 = a.e1;
+    let mut i1 = 1;
+
+    // Ensure v0 >= v1
+    if v1 > v0 {
+        let tmp_v = v0;
+        let tmp_i = i0;
+        v0 = v1;
+        i0 = i1;
+        v1 = tmp_v;
+        i1 = tmp_i;
+    }
+
+    // Check e2
+    let c2 = a.e2;
+    if c2 > v0 {
+        v1 = v0;
+        i1 = i0;
+        v0 = c2;
+        i0 = 2;
+    } else if c2 > v1 {
+        v1 = c2;
+        i1 = 2;
+    }
+
+    // Check e3
+    let c3 = a.e3;
+    if c3 > v0 {
+        v1 = v0;
+        i1 = i0;
+        v0 = c3;
+        i0 = 3;
+    } else if c3 > v1 {
+        v1 = c3;
+        i1 = 3;
+    }
+
+    TopK2 { val0: v0, idx0: i0, val1: v1, idx1: i1 }
+}
+
+fn arr4_topk3(a: Arr4) -> TopK3 {
+    // Find top 3 by sorting all 4 and taking first 3
+    // Simple selection approach
+    let mut vals = a;
+    let mut idxs = arr4_new(0, 1, 2, 3);
+
+    // Bubble sort passes to get top 3 in descending order
+    let mut i = 0;
+    while i < 3 {
+        let mut j = i + 1;
+        while j < 4 {
+            if arr4_get(vals, j) > arr4_get(vals, i) {
+                // Swap values
+                let tmp_v = arr4_get(vals, i);
+                vals = arr4_set(vals, i, arr4_get(vals, j));
+                vals = arr4_set(vals, j, tmp_v);
+                // Swap indices
+                let tmp_i = arr4_get(idxs, i);
+                idxs = arr4_set(idxs, i, arr4_get(idxs, j));
+                idxs = arr4_set(idxs, j, tmp_i);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    TopK3 {
+        val0: arr4_get(vals, 0), idx0: arr4_get(idxs, 0),
+        val1: arr4_get(vals, 1), idx1: arr4_get(idxs, 1),
+        val2: arr4_get(vals, 2), idx2: arr4_get(idxs, 2)
+    }
+}
+
+@test
+fn test_topk() {
+    // Top 2 of [10, 40, 20, 30]
+    let a = arr4_new(10, 40, 20, 30);
+    let tk2 = arr4_topk2(a);
+    assert_eq(tk2.val0, 40);
+    assert_eq(tk2.idx0, 1);
+    assert_eq(tk2.val1, 30);
+    assert_eq(tk2.idx1, 3);
+
+    // Top 2 of [100, 1, 2, 3]
+    let b = arr4_new(100, 1, 2, 3);
+    let tk2b = arr4_topk2(b);
+    assert_eq(tk2b.val0, 100);
+    assert_eq(tk2b.idx0, 0);
+    assert_eq(tk2b.val1, 3);
+    assert_eq(tk2b.idx1, 3);
+
+    // Top 3 of [5, 15, 25, 10]
+    let c = arr4_new(5, 15, 25, 10);
+    let tk3 = arr4_topk3(c);
+    assert_eq(tk3.val0, 25);
+    assert_eq(tk3.idx0, 2);
+    assert_eq(tk3.val1, 15);
+    assert_eq(tk3.idx1, 1);
+    assert_eq(tk3.val2, 10);
+    assert_eq(tk3.idx2, 3);
+
+    // Top 3 with negatives [-1, -5, -2, -3]
+    let d = arr4_new(-1, -5, -2, -3);
+    let tk3d = arr4_topk3(d);
+    assert_eq(tk3d.val0, -1);
+    assert_eq(tk3d.idx0, 0);
+    assert_eq(tk3d.val1, -2);
+    assert_eq(tk3d.idx1, 2);
+    assert_eq(tk3d.val2, -3);
+    assert_eq(tk3d.idx2, 3);
+
+    print("test_topk passed");
+}
+
+// ============================================================================
+// Test 12: Cumulative Sum
+// ============================================================================
+
+fn arr4_cumsum(a: Arr4) -> Arr4 {
+    let s0 = a.e0;
+    let s1 = s0 + a.e1;
+    let s2 = s1 + a.e2;
+    let s3 = s2 + a.e3;
+    Arr4 { e0: s0, e1: s1, e2: s2, e3: s3 }
+}
+
+fn arr8_cumsum(a: Arr8) -> Arr8 {
+    let s0 = a.e0;
+    let s1 = s0 + a.e1;
+    let s2 = s1 + a.e2;
+    let s3 = s2 + a.e3;
+    let s4 = s3 + a.e4;
+    let s5 = s4 + a.e5;
+    let s6 = s5 + a.e6;
+    let s7 = s6 + a.e7;
+    Arr8 { e0: s0, e1: s1, e2: s2, e3: s3, e4: s4, e5: s5, e6: s6, e7: s7 }
+}
+
+@test
+fn test_cumsum() {
+    // Simple increasing
+    let a = arr4_new(1, 2, 3, 4);
+    let r = arr4_cumsum(a);
+    assert_eq(arr4_get(r, 0), 1);
+    assert_eq(arr4_get(r, 1), 3);   // 1+2
+    assert_eq(arr4_get(r, 2), 6);   // 1+2+3
+    assert_eq(arr4_get(r, 3), 10);  // 1+2+3+4
+
+    // All ones
+    let b = arr4_new(1, 1, 1, 1);
+    let r2 = arr4_cumsum(b);
+    assert_eq(arr4_get(r2, 0), 1);
+    assert_eq(arr4_get(r2, 1), 2);
+    assert_eq(arr4_get(r2, 2), 3);
+    assert_eq(arr4_get(r2, 3), 4);
+
+    // Mixed positive/negative
+    let c = arr4_new(5, -3, 2, -1);
+    let r3 = arr4_cumsum(c);
+    assert_eq(arr4_get(r3, 0), 5);
+    assert_eq(arr4_get(r3, 1), 2);  // 5-3
+    assert_eq(arr4_get(r3, 2), 4);  // 5-3+2
+    assert_eq(arr4_get(r3, 3), 3);  // 5-3+2-1
+
+    // 8-element cumulative sum
+    let d = arr8_new(1, 1, 1, 1, 1, 1, 1, 1);
+    let r4 = arr8_cumsum(d);
+    assert_eq(arr8_get(r4, 0), 1);
+    assert_eq(arr8_get(r4, 1), 2);
+    assert_eq(arr8_get(r4, 2), 3);
+    assert_eq(arr8_get(r4, 3), 4);
+    assert_eq(arr8_get(r4, 4), 5);
+    assert_eq(arr8_get(r4, 5), 6);
+    assert_eq(arr8_get(r4, 6), 7);
+    assert_eq(arr8_get(r4, 7), 8);
+
+    print("test_cumsum passed");
+}
+
+// ============================================================================
+// Test 13: Cumulative Product
+// ============================================================================
+
+fn arr4_cumprod(a: Arr4) -> Arr4 {
+    let p0 = a.e0;
+    let p1 = p0 * a.e1;
+    let p2 = p1 * a.e2;
+    let p3 = p2 * a.e3;
+    Arr4 { e0: p0, e1: p1, e2: p2, e3: p3 }
+}
+
+@test
+fn test_cumprod() {
+    // Factorial-like: [1, 2, 3, 4] -> [1, 2, 6, 24]
+    let a = arr4_new(1, 2, 3, 4);
+    let r = arr4_cumprod(a);
+    assert_eq(arr4_get(r, 0), 1);
+    assert_eq(arr4_get(r, 1), 2);
+    assert_eq(arr4_get(r, 2), 6);
+    assert_eq(arr4_get(r, 3), 24);
+
+    // Powers of 2: [2, 2, 2, 2] -> [2, 4, 8, 16]
+    let b = arr4_new(2, 2, 2, 2);
+    let r2 = arr4_cumprod(b);
+    assert_eq(arr4_get(r2, 0), 2);
+    assert_eq(arr4_get(r2, 1), 4);
+    assert_eq(arr4_get(r2, 2), 8);
+    assert_eq(arr4_get(r2, 3), 16);
+
+    // With a zero — kills everything after
+    let c = arr4_new(5, 0, 3, 7);
+    let r3 = arr4_cumprod(c);
+    assert_eq(arr4_get(r3, 0), 5);
+    assert_eq(arr4_get(r3, 1), 0);
+    assert_eq(arr4_get(r3, 2), 0);
+    assert_eq(arr4_get(r3, 3), 0);
+
+    // Negatives: [1, -1, 1, -1] -> [1, -1, -1, 1]
+    let d = arr4_new(1, -1, 1, -1);
+    let r4 = arr4_cumprod(d);
+    assert_eq(arr4_get(r4, 0), 1);
+    assert_eq(arr4_get(r4, 1), -1);
+    assert_eq(arr4_get(r4, 2), -1);
+    assert_eq(arr4_get(r4, 3), 1);
+
+    // Larger values: [3, 5, 2, 1] -> [3, 15, 30, 30]
+    let e = arr4_new(3, 5, 2, 1);
+    let r5 = arr4_cumprod(e);
+    assert_eq(arr4_get(r5, 0), 3);
+    assert_eq(arr4_get(r5, 1), 15);
+    assert_eq(arr4_get(r5, 2), 30);
+    assert_eq(arr4_get(r5, 3), 30);
+
+    print("test_cumprod passed");
+}
+
+// ============================================================================
+// Test 14: Softmax Approximation (integer-scaled)
+//
+// Real softmax: softmax(x_i) = exp(x_i) / sum(exp(x_j))
+// Integer approximation: use shifted values and linear approximation
+//   1. Subtract max for numerical stability: z_i = x_i - max(x)
+//   2. Approximate exp with (1000 + z_i * 8) clamped to [1, ...)
+//   3. Normalize: out_i = approx_i * 1000 / sum(approx_j)
+// Output is in range [0..1000] representing probability * 1000
+// ============================================================================
+
+fn softmax_approx_arr4(a: Arr4) -> Arr4 {
+    // Step 1: find max
+    let mx = int_max(int_max(a.e0, a.e1), int_max(a.e2, a.e3));
+
+    // Step 2: shifted approximate exp (linear approx, clamped to >= 1)
+    let exp0 = int_max(1, 1000 + (a.e0 - mx) * 8);
+    let exp1 = int_max(1, 1000 + (a.e1 - mx) * 8);
+    let exp2 = int_max(1, 1000 + (a.e2 - mx) * 8);
+    let exp3 = int_max(1, 1000 + (a.e3 - mx) * 8);
+
+    // Step 3: normalize to [0..1000]
+    let total = exp0 + exp1 + exp2 + exp3;
+    Arr4 {
+        e0: exp0 * 1000 / total,
+        e1: exp1 * 1000 / total,
+        e2: exp2 * 1000 / total,
+        e3: exp3 * 1000 / total
+    }
+}
+
+@test
+fn test_softmax_approx() {
+    // All equal inputs => equal outputs (each ~250 out of 1000)
+    let a = arr4_new(100, 100, 100, 100);
+    let r = softmax_approx_arr4(a);
+    assert_eq(arr4_get(r, 0), 250);
+    assert_eq(arr4_get(r, 1), 250);
+    assert_eq(arr4_get(r, 2), 250);
+    assert_eq(arr4_get(r, 3), 250);
+
+    // One element much larger — should dominate
+    let b = arr4_new(0, 0, 200, 0);
+    let rb = softmax_approx_arr4(b);
+    // z = [-200, -200, 0, -200]
+    // exp: max(1, 1000+(-200)*8) = max(1, -600) = 1
+    // exp for max: 1000 + 0 = 1000
+    // total = 1 + 1 + 1000 + 1 = 1003
+    // out[2] = 1000*1000/1003 = 997 (dominates)
+    assert(arr4_get(rb, 2) > 900);
+    // Others should be very small
+    assert(arr4_get(rb, 0) < 50);
+    assert(arr4_get(rb, 1) < 50);
+    assert(arr4_get(rb, 3) < 50);
+
+    // Sum of outputs should be ~1000 (rounding may lose a few)
+    let sum_b = arr4_get(rb, 0) + arr4_get(rb, 1) + arr4_get(rb, 2) + arr4_get(rb, 3);
+    assert(sum_b >= 996);
+    assert(sum_b <= 1000);
+
+    // Gradient: [0, 10, 20, 30] — higher gets more probability
+    let c = arr4_new(0, 10, 20, 30);
+    let rc = softmax_approx_arr4(c);
+    // Should be monotonically increasing
+    assert(arr4_get(rc, 0) < arr4_get(rc, 1));
+    assert(arr4_get(rc, 1) < arr4_get(rc, 2));
+    assert(arr4_get(rc, 2) < arr4_get(rc, 3));
+    // Sum check
+    let sum_c = arr4_get(rc, 0) + arr4_get(rc, 1) + arr4_get(rc, 2) + arr4_get(rc, 3);
+    assert(sum_c >= 996);
+    assert(sum_c <= 1000);
+
+    // Negative values work too
+    let d = arr4_new(-50, -25, -25, -50);
+    let rd = softmax_approx_arr4(d);
+    // Symmetric: e0==e3, e1==e2
+    assert_eq(arr4_get(rd, 0), arr4_get(rd, 3));
+    assert_eq(arr4_get(rd, 1), arr4_get(rd, 2));
+    // Middle pair should be larger
+    assert(arr4_get(rd, 1) > arr4_get(rd, 0));
+
+    print("test_softmax_approx passed");
+}
+
+// ============================================================================
+// Main — run all tests
+// ============================================================================
+
+fn main() -> Int {
+    test_relu();
+    test_leaky_relu();
+    test_clamp();
+    test_where_select();
+    test_conv1d();
+    test_max_pool();
+    test_avg_pool();
+    test_batch_norm();
+    test_argmax();
+    test_argmin();
+    test_topk();
+    test_cumsum();
+    test_cumprod();
+    test_softmax_approx();
+    print("[OK] 058_tensor_advanced_ops");
+    0
+}

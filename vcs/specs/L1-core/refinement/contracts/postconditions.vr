@@ -1,0 +1,344 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: contracts, postconditions, ensures
+// @timeout: 5000
+
+/// Postconditions: the `ensures` clause for function contracts.
+/// Specifies conditions that must hold when a function returns.
+
+// ============================================================================
+// Basic postconditions
+// ============================================================================
+
+@verify(proof)
+fn absolute(x: Int) -> Int
+    ensures result >= 0
+{
+    if x >= 0 { x } else { -x }
+}
+
+@verify(proof)
+fn max(a: Int, b: Int) -> Int
+    ensures result >= a
+    ensures result >= b
+    ensures result == a || result == b
+{
+    if a >= b { a } else { b }
+}
+
+@verify(proof)
+fn min(a: Int, b: Int) -> Int
+    ensures result <= a
+    ensures result <= b
+    ensures result == a || result == b
+{
+    if a <= b { a } else { b }
+}
+
+// ============================================================================
+// Postconditions relating input to output
+// ============================================================================
+
+@verify(proof)
+fn increment(x: Int) -> Int
+    ensures result == x + 1
+{
+    x + 1
+}
+
+@verify(proof)
+fn double(x: Int) -> Int
+    ensures result == x * 2
+{
+    x + x
+}
+
+@verify(proof)
+fn square(x: Int) -> Int
+    ensures result == x * x
+    ensures result >= 0
+{
+    x * x
+}
+
+// ============================================================================
+// Postconditions on collections
+// ============================================================================
+
+@verify(proof)
+fn append<T>(arr: List<T>, elem: T) -> List<T>
+    ensures len(result) == len(arr) + 1
+    ensures result[len(result) - 1] == elem
+{
+    let mut new_arr = arr.clone();
+    new_arr.push(elem);
+    new_arr
+}
+
+@verify(proof)
+fn concat<T>(a: List<T>, b: List<T>) -> List<T>
+    ensures len(result) == len(a) + len(b)
+{
+    let mut result = a.clone();
+    for elem in b {
+        result.push(elem);
+    }
+    result
+}
+
+@verify(proof)
+fn reverse<T>(arr: List<T>) -> List<T>
+    ensures len(result) == len(arr)
+    ensures forall i in 0..len(arr) => result[i] == arr[len(arr) - 1 - i]
+{
+    let mut result: List<T> = [];
+    let mut i = arr.len();
+    while i > 0 {
+        i -= 1;
+        result.push(arr[i]);
+    }
+    result
+}
+
+// ============================================================================
+// Postconditions with quantifiers
+// ============================================================================
+
+@verify(proof)
+fn fill<T: Clone>(value: T, n: Int{>= 0}) -> List<T>
+    ensures len(result) == n
+    ensures forall x in result => x == value
+{
+    let mut arr: List<T> = [];
+    for _ in 0..n {
+        arr.push(value.clone());
+    }
+    arr
+}
+
+@verify(proof)
+fn filter_positive(arr: List<Int>) -> List<Int>
+    ensures forall x in result => x > 0
+    ensures len(result) <= len(arr)
+{
+    let mut positives: List<Int> = [];
+    for x in arr {
+        if x > 0 {
+            positives.push(x);
+        }
+    }
+    positives
+}
+
+@verify(proof)
+fn sort(arr: List<Int>) -> List<Int>
+    ensures len(result) == len(arr)
+    ensures forall i in 0..(len(result) - 1) => result[i] <= result[i + 1]
+{
+    // Implementation using insertion sort
+    let mut sorted = arr.clone();
+    for i in 1..sorted.len() {
+        let key = sorted[i];
+        let mut j = i;
+        while j > 0 && sorted[j - 1] > key {
+            sorted[j] = sorted[j - 1];
+            j -= 1;
+        }
+        sorted[j] = key;
+    }
+    sorted
+}
+
+// ============================================================================
+// Postconditions with old values
+// ============================================================================
+
+@verify(proof)
+fn increment_all(arr: &mut List<Int>)
+    ensures len(arr) == old(len(arr))
+    ensures forall i in 0..len(arr) => arr[i] == old(arr[i]) + 1
+{
+    for i in 0..arr.len() {
+        arr[i] += 1;
+    }
+}
+
+@verify(proof)
+fn double_all(arr: &mut List<Int>)
+    ensures len(arr) == old(len(arr))
+    ensures forall i in 0..len(arr) => arr[i] == old(arr[i]) * 2
+{
+    for i in 0..arr.len() {
+        arr[i] *= 2;
+    }
+}
+
+// ============================================================================
+// Postconditions with complex expressions
+// ============================================================================
+
+@verify(proof)
+fn clamp(x: Int, lo: Int, hi: Int) -> Int
+    requires lo <= hi
+    ensures result >= lo
+    ensures result <= hi
+    ensures x < lo => result == lo
+    ensures x > hi => result == hi
+    ensures x >= lo && x <= hi => result == x
+{
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+@verify(proof)
+fn binary_search(arr: List<Int>, target: Int) -> Maybe<Int>
+    requires forall i in 0..(len(arr) - 1) => arr[i] <= arr[i + 1]
+    ensures match result {
+        Some(idx) => idx >= 0 && idx < len(arr) && arr[idx] == target,
+        None => forall x in arr => x != target,
+    }
+{
+    if arr.len() == 0 {
+        return None;
+    }
+
+    let mut lo = 0;
+    let mut hi = arr.len() - 1;
+
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        if arr[mid] == target {
+            return Some(mid);
+        } else if arr[mid] < target {
+            lo = mid + 1;
+        } else {
+            if mid == 0 { break; }
+            hi = mid - 1;
+        }
+    }
+    None
+}
+
+// ============================================================================
+// Postconditions on structs
+// ============================================================================
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+@verify(proof)
+fn distance_squared(a: Point, b: Point) -> Int
+    ensures result >= 0
+{
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
+@verify(proof)
+fn midpoint(a: Point, b: Point) -> Point
+    ensures result.x * 2 == a.x + b.x
+    ensures result.y * 2 == a.y + b.y
+{
+    Point {
+        x: (a.x + b.x) / 2,
+        y: (a.y + b.y) / 2,
+    }
+}
+
+// ============================================================================
+// Postconditions in methods
+// ============================================================================
+
+type Counter is {
+    value: Int,
+};
+
+implement Counter {
+    @verify(proof)
+    fn increment(&mut self)
+        ensures self.value == old(self.value) + 1
+    {
+        self.value += 1;
+    }
+
+    @verify(proof)
+    fn reset(&mut self)
+        ensures self.value == 0
+    {
+        self.value = 0;
+    }
+
+    @verify(proof)
+    fn get(&self) -> Int
+        ensures result == self.value
+    {
+        self.value
+    }
+}
+
+// ============================================================================
+// Postconditions with implication
+// ============================================================================
+
+@verify(proof)
+fn safe_divide(x: Int, y: Int) -> Maybe<Int>
+    ensures y == 0 => result == None
+    ensures y != 0 => result == Some(x / y)
+{
+    if y == 0 {
+        None
+    } else {
+        Some(x / y)
+    }
+}
+
+@verify(proof)
+fn find_first<T: Eq>(arr: List<T>, target: T) -> Maybe<Int>
+    ensures match result {
+        Some(idx) => idx >= 0 && idx < len(arr) && arr[idx] == target &&
+                     forall j in 0..idx => arr[j] != target,
+        None => forall x in arr => x != target,
+    }
+{
+    for (i, x) in arr.iter().enumerate() {
+        if x == target {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn main() {
+    // Basic postconditions
+    let abs = absolute(-5);
+    assert(abs == 5);
+    assert(abs >= 0);
+
+    let m = max(3, 7);
+    assert(m == 7);
+
+    // Collection postconditions
+    let arr = [1, 2, 3];
+    let appended = append(arr, 4);
+    assert(appended.len() == 4);
+
+    let sorted = sort([3, 1, 2]);
+    assert(sorted == [1, 2, 3]);
+
+    // Struct postconditions
+    let mut counter = Counter { value: 0 };
+    counter.increment();
+    assert(counter.get() == 1);
+
+    // Safe operations
+    let div = safe_divide(10, 2);
+    assert(div == Some(5));
+
+    let div_zero = safe_divide(10, 0);
+    assert(div_zero == None);
+}

@@ -1,0 +1,67 @@
+// @test: run
+// Closure return type tracking — closures returning List, Text, and custom types
+// must have correct dispatch for downstream operations.
+
+fn apply_fn(f: fn(Int) -> List<Int>, x: Int) -> List<Int> {
+    f(x)
+}
+
+fn text_fn(f: fn(Int) -> Text, x: Int) -> Text {
+    f(x)
+}
+
+fn main() -> Int {
+    let mut passed = 0;
+    let mut failed = 0;
+
+    // Test 1: Closure returning List — len() must use header read, not strlen
+    let make_list = |n: Int| -> List<Int> {
+        let mut result = List.new();
+        let mut i = 0;
+        while (i < n) {
+            result.push(i);
+            i = i + 1;
+        }
+        result
+    };
+    let list = make_list(5);
+    if (list.len() == 5) { passed = passed + 1; }
+    else { print(f"FAIL 1: len={list.len()}"); failed = failed + 1; }
+
+    // Test 2: Closure returning List passed through higher-order fn
+    let list2 = apply_fn(make_list, 3);
+    if (list2.len() == 3) { passed = passed + 1; }
+    else { print(f"FAIL 2: len={list2.len()}"); failed = failed + 1; }
+
+    // Test 3: Closure returning Text — string comparison must work
+    let greeting = |n: Int| -> Text {
+        if (n > 0) { "hello" }
+        else { "bye" }
+    };
+    let msg = greeting(1);
+    if (msg == "hello") { passed = passed + 1; }
+    else { print(f"FAIL 3: msg={msg}"); failed = failed + 1; }
+
+    // Test 4: Text closure through higher-order fn
+    let msg2 = text_fn(greeting, 0);
+    if (msg2 == "bye") { passed = passed + 1; }
+    else { print(f"FAIL 4: msg2={msg2}"); failed = failed + 1; }
+
+    // Test 5: Closure returning List — element access
+    let list3 = make_list(4);
+    if (list3[0] == 0 && list3[3] == 3) { passed = passed + 1; }
+    else { print(f"FAIL 5: list3[0]={list3[0]} list3[3]={list3[3]}"); failed = failed + 1; }
+
+    // Test 6: Closure returning List — push after return
+    let mut list4 = make_list(2);
+    list4.push(99);
+    if (list4.len() == 3 && list4[2] == 99) { passed = passed + 1; }
+    else { print(f"FAIL 6: len={list4.len()} [2]={list4[2]}"); failed = failed + 1; }
+
+    if (failed > 0) {
+        print(f"closure_return_types: {passed}/{passed + failed} passed");
+        return 1;
+    }
+    print(f"closure_return_types: PASS ({passed}/{passed} tests)");
+    0
+}

@@ -1,0 +1,290 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, invalid, error, diagnostics, error-recovery
+// @description: Extended error diagnostics for pattern syntax errors
+//
+// Tests for error messages and recovery in pattern parsing.
+// Each section tests a specific pattern type's error handling.
+
+// =============================================================================
+// SECTION 1: Stream Pattern Errors
+// =============================================================================
+
+// ERROR: Empty stream pattern prefix without brackets
+let stream = value;  // 'stream' alone is identifier, not pattern
+
+// ERROR: Missing closing bracket in stream pattern
+let stream[a, b = iter;
+
+// ERROR: Multiple rest patterns in stream
+let stream[a, ...x, ...y] = iter;
+
+// ERROR: Rest pattern not at end in stream
+let stream[...rest, a, b] = iter;
+
+// ERROR: Invalid stream pattern - rest without identifier after head
+let stream[a, ... b] = iter;  // Space before identifier
+
+// ERROR: Stream pattern with invalid separator
+let stream[a; b; c] = iter;  // Semicolons instead of commas
+
+// ERROR: Stream pattern in non-iterable context
+let stream[a, b] = 42;  // Int is not iterable - type error, not parse error
+
+// ERROR: Nested stream patterns (if disallowed)
+let stream[stream[a], ...rest] = nested_iter;
+
+// =============================================================================
+// SECTION 2: TypeTest (is) Pattern Errors
+// =============================================================================
+
+// ERROR: TypeTest without type name
+let x is = value;
+
+// ERROR: TypeTest with invalid type expression
+let x is 42 = value;
+let x is (Int) = value;  // Parens around type may be invalid
+
+// ERROR: TypeTest without binding
+let is Int = value;  // Missing binding identifier
+
+// ERROR: TypeTest with multiple is operators (chained)
+let x is Int is Float = value;
+
+// ERROR: TypeTest in invalid position
+let (x is Int, y) = tuple;  // Is-pattern in tuple element
+
+// ERROR: TypeTest combined incorrectly with other patterns
+let x is & Int = value;  // & before type
+let x is Int & y = value;  // And pattern after is
+
+// =============================================================================
+// SECTION 3: And (&) Pattern Errors
+// =============================================================================
+
+// ERROR: And pattern with no left operand
+let & y = value;
+
+// ERROR: And pattern with no right operand
+let x & = value;
+
+// ERROR: Multiple consecutive & operators
+let x & & y = value;
+
+// ERROR: And pattern with invalid operand types
+let x & 1 + 2 = value;  // Expression instead of pattern
+
+// ERROR: And pattern in let without match context (semantic, if applicable)
+// Note: And patterns in let ARE allowed syntactically in Verum
+
+// ERROR: Empty and chain
+let & & & = value;
+
+// ERROR: And with mismatched structure expectations
+// (This is more of a type error, but syntax should allow it)
+
+// =============================================================================
+// SECTION 4: Active Pattern Errors
+// =============================================================================
+
+// ERROR: Active pattern without parentheses
+let Even = value;  // This is just an identifier binding
+
+// ERROR: Active pattern with unclosed parentheses
+let Even( = value;
+let InRange(1, 10( = value;
+
+// ERROR: Active pattern with missing parameter parens
+let InRange 1, 10 () = value;
+
+// ERROR: Active pattern with expression as name
+let (Even + Odd)() = value;
+
+// ERROR: Active pattern with invalid parameter
+let InRange(,)() = value;
+let InRange(1,, 10)() = value;
+
+// ERROR: Nested active pattern with errors
+let Outer(Inner()() = value;  // Missing closing parens
+
+// =============================================================================
+// SECTION 5: Range Pattern Errors
+// =============================================================================
+
+// ERROR: Range with invalid bounds
+let ..true = value;  // Bool not valid for range
+let "a".."z" = value;  // Text ranges may be invalid
+
+// ERROR: Range without any bounds
+let .. = value;  // Open range in pattern (if disallowed)
+
+// ERROR: Range with expression bounds
+let (1+2)..(3+4) = value;
+
+// ERROR: Range with wrong delimiter
+let 1...10 = value;  // Three dots
+let 1....10 = value;  // Four dots
+let 1.=10 = value;  // Missing dot
+
+// ERROR: Exclusive range bound issues
+let 1..=..=10 = value;
+let 1..10..=20 = value;  // Chained ranges
+
+// =============================================================================
+// SECTION 6: Or (|) Pattern Errors
+// =============================================================================
+
+// ERROR: Or pattern with no alternatives
+let | = value;
+
+// ERROR: Or pattern with trailing pipe
+let a | b | = value;
+
+// ERROR: Or pattern with leading pipe
+let | a | b = value;
+
+// ERROR: Or pattern with empty alternative
+let a | | b = value;
+
+// ERROR: Or pattern with expression alternative
+let a | 1 + 2 = value;
+
+// =============================================================================
+// SECTION 7: Record/Struct Pattern Errors (Extended)
+// =============================================================================
+
+// ERROR: Record pattern with computed field name
+let Point { [key]: value } = point;  // Computed keys not in patterns
+
+// ERROR: Record pattern with spread operator instead of rest
+let Point { x, ...rest } = point;  // Should be .. not ...
+
+// ERROR: Record pattern with both .. and explicit fields after
+let Point { .., x, y } = point;  // Rest must be last
+
+// ERROR: Record pattern with shorthand and explicit mixed incorrectly
+let Point { x:, y } = point;  // Colon without value
+
+// ERROR: Record pattern with duplicate rest
+let Config { .., .. } = config;
+
+// =============================================================================
+// SECTION 8: Tuple Pattern Errors (Extended)
+// =============================================================================
+
+// ERROR: Single element tuple without trailing comma
+let (x) = value;  // This is just parenthesized, not tuple
+
+// ERROR: Tuple with rest in wrong position
+let (...rest, a, b) = tuple;
+
+// ERROR: Tuple with multiple rest patterns
+let (a, ...x, ...y, b) = tuple;
+
+// ERROR: Tuple with invalid delimiter
+let (a; b; c) = tuple;
+
+// =============================================================================
+// SECTION 9: Guard Expression Errors
+// =============================================================================
+
+// ERROR: Guard without condition
+let x if = value;
+
+// ERROR: Guard with invalid condition syntax
+let x if then = value;
+let x if || y = value;  // Binary without left operand
+
+// ERROR: Multiple guards (if disallowed)
+let x if cond1 if cond2 = value;
+
+// ERROR: Guard with statement instead of expression
+let x if { let y = 1; } = value;
+
+// =============================================================================
+// SECTION 10: Reference Pattern Errors (Extended)
+// =============================================================================
+
+// ERROR: Double reference
+let &&x = value;
+let &mut &mut x = value;
+
+// ERROR: Reference with invalid mutability placement
+let mut&x = value;  // mut before & wrong
+let &x mut = value;  // mut after identifier wrong
+
+// ERROR: Reference to expression
+let &(1 + 2) = value;
+
+// =============================================================================
+// SECTION 11: @ Binding Pattern Errors (Extended)
+// =============================================================================
+
+// ERROR: @ without pattern after
+let x @ = value;
+
+// ERROR: @ with expression
+let x @ 1 + 2 = value;
+
+// ERROR: Multiple @ bindings
+let x @ y @ z = value;
+
+// ERROR: @ on non-identifier
+let 42 @ x = value;
+
+// ERROR: @ with conflicting bindings
+let x @ x = value;  // Duplicate binding name
+
+// =============================================================================
+// SECTION 12: Complex Combined Pattern Errors
+// =============================================================================
+
+// ERROR: All operators with invalid combinations
+let x & | y = value;  // & then | without operand
+let x | & y = value;  // | then & without operand
+
+// ERROR: Deeply nested invalid pattern
+let ((a @ (b | (c & (d is Int))))) = value;  // Check nesting limits
+
+// ERROR: Pattern with async/await keywords
+let async x = value;
+let await y = value;
+
+// ERROR: Pattern with type annotation in wrong place
+let x: Int @ y = value;  // Annotation before @
+
+// ERROR: Unicode in pattern identifiers (if restricted)
+// let α = value;  // Greek letters - depends on language spec
+
+// =============================================================================
+// SECTION 13: View Pattern Errors (if supported)
+// =============================================================================
+
+// ERROR: View pattern without arrow
+let view x = value;
+
+// ERROR: View pattern with invalid function
+let (1 + 2 -> x) = value;
+
+// ERROR: View pattern with missing result pattern
+let (f ->) = value;
+
+// =============================================================================
+// SECTION 14: Literal Pattern Edge Cases
+// =============================================================================
+
+// ERROR: Incomplete string literal
+let "unclosed = value;
+
+// ERROR: Invalid numeric literal
+let 0x = value;  // Incomplete hex
+let 0b2 = value;  // Invalid binary digit
+let 1e = value;   // Incomplete exponent
+
+// ERROR: Invalid character literal
+let '' = value;   // Empty char
+let 'ab' = value; // Multiple chars
+
+// ERROR: Invalid escape in string pattern
+let "hello\z" = value;  // Invalid escape sequence

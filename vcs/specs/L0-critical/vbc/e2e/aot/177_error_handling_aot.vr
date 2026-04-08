@@ -1,0 +1,87 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, error-handling, result, maybe, question-mark
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for error handling: Result, Maybe, ? operator, early return
+
+fn parse_positive(n: Int) -> Result<Int, Text> {
+    if n < 0 { Err("negative") } else { Ok(n) }
+}
+
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 { Err("div_zero") } else { Ok(a / b) }
+}
+
+fn double_positive(n: Int) -> Result<Int, Text> {
+    let val = parse_positive(n)?;
+    Ok(val * 2)
+}
+
+fn chain_ops(a: Int, b: Int) -> Result<Int, Text> {
+    let x = parse_positive(a)?;
+    let y = safe_divide(x, b)?;
+    Ok(y + 1)
+}
+
+fn validate(a: Int, b: Int) -> Result<Int, Text> {
+    if a < 0 {
+        return Err("a_neg");
+    }
+    if b == 0 {
+        return Err("b_zero");
+    }
+    Ok(a / b)
+}
+
+fn safe_div_maybe(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 { None } else { Some(a / b) }
+}
+
+fn main() -> Int {
+    // ? operator Ok path
+    let r1 = double_positive(5);
+    let v1 = match r1 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v1, 10);
+
+    // ? operator Err path
+    let r2 = double_positive(-3);
+    let v2 = match r2 { Ok(_) => 0, Err(_) => -1 };
+    assert_eq(v2, -1);
+
+    // Chained ?
+    let r3 = chain_ops(100, 5);
+    let v3 = match r3 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v3, 21);
+
+    let r4 = chain_ops(-5, 2);
+    let v4 = match r4 { Ok(_) => 0, Err(_) => -1 };
+    assert_eq(v4, -1);
+
+    let r5 = chain_ops(100, 0);
+    let v5 = match r5 { Ok(_) => 0, Err(_) => -1 };
+    assert_eq(v5, -1);
+
+    // Early return
+    let r6 = validate(10, 2);
+    let v6 = match r6 { Ok(v) => v, Err(_) => -1 };
+    assert_eq(v6, 5);
+
+    let r7 = validate(-1, 2);
+    let v7 = match r7 { Ok(_) => 0, Err(_) => -1 };
+    assert_eq(v7, -1);
+
+    // Maybe
+    let m1 = safe_div_maybe(10, 3);
+    let u1 = match m1 { Some(v) => v, None => -1 };
+    assert_eq(u1, 3);
+
+    let m2 = safe_div_maybe(10, 0);
+    let u2 = match m2 { Some(v) => v, None => -1 };
+    assert_eq(u2, -1);
+
+    print("[OK] 177_error_handling_aot");
+    0
+}

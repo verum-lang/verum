@@ -1,0 +1,142 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @was-skip: missing stdlib methods (push on arrays)
+// @tags: reference_system, cbgr, access_rules, splitting
+
+/// Test borrow splitting - borrowing different fields simultaneously.
+/// Different fields of a struct can be borrowed mutably at the same time
+/// because they are disjoint and don't alias.
+
+type State is {
+    input: Text,
+    output: Text,
+    counter: Int,
+    buffer: List<Int>,
+};
+
+type Point3D is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+fn main() {
+    // Basic field splitting
+    let mut state = State {
+        input: Text.from("hello"),
+        output: Text.from(""),
+        counter: 0,
+        buffer: List.new(),
+    };
+
+    // Borrow different fields mutably at the same time
+    let input_ref = &state.input;       // Immutable reference of input
+    let output_ref = &mut state.output; // Mutable borrow of output
+
+    // Use both borrows simultaneously
+    output_ref.push_str(&*input_ref);
+    print(*input_ref);
+
+    // After borrows end
+    assert(state.output == "hello");
+
+    // Split mutable references
+    let mut point = Point3D { x: 1, y: 2, z: 3 };
+
+    let x_ref = &mut point.x;
+    let y_ref = &mut point.y;
+    let z_ref = &mut point.z;
+
+    // All three can be modified simultaneously
+    *x_ref += 10;
+    *y_ref += 20;
+    *z_ref += 30;
+
+    assert(point.x == 11);
+    assert(point.y == 22);
+    assert(point.z == 33);
+
+    // Split tuple - access elements directly
+    let mut tuple = (Text.from("first"), Text.from("second"), 42);
+
+    // Access tuple elements through mutable references
+    let first = &mut tuple.0;
+    let second = &mut tuple.1;
+    let num = &mut tuple.2;
+    first.push_str("!");
+    second.push_str("!");
+    *num = 100;
+
+    // Split pair
+    let mut pair = Pair {
+        first: [1, 2, 3],
+        second: [4, 5, 6],
+    };
+
+    let first_ref = &mut pair.first;
+    let second_ref = &mut pair.second;
+
+    first_ref.push(4);
+    second_ref.push(7);
+
+    assert(pair.first.len() == 4);
+    assert(pair.second.len() == 4);
+
+    // Split nested structs
+    let mut nested = Container {
+        header: Header { name: Text.from("header"), id: 1 },
+        body: Body { content: Text.from("body"), size: 100 },
+    };
+
+    let header_ref = &mut nested.header;
+    let body_ref = &mut nested.body;
+
+    header_ref.name.push_str(" modified");
+    body_ref.content.push_str(" modified");
+
+    // Split array - access different indices
+    let mut array = [1, 2, 3, 4, 5];
+
+    // Access different array elements through indices
+    array[0] = 10;
+    array[2] = 30;
+
+    assert(array[0] == 10);
+    assert(array[2] == 30);
+
+    // Split in function
+    process_state(&mut state);
+    assert(state.counter == 1);
+}
+
+fn process_state(state: &mut State) {
+    // Split borrows in function body
+    let input = &state.input;
+    let output = &mut state.output;
+    let counter = &mut state.counter;
+
+    output.push_str(" processed: ");
+    output.push_str(input);
+    *counter += 1;
+}
+
+type Header is {
+    name: Text,
+    id: Int,
+};
+
+type Body is {
+    content: Text,
+    size: Int,
+};
+
+type Container is {
+    header: Header,
+    body: Body,
+};

@@ -1,0 +1,262 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, where-clauses
+
+/// Test for where clauses in generic declarations.
+/// Where clauses provide a cleaner syntax for complex bounds.
+
+// ============================================================================
+// Helper
+// ============================================================================
+
+fn cons<T>(head: T, tail: List<T>) -> List<T> {
+    let mut result: List<T> = [];
+    result.push(head);
+    let mut t = tail;
+    result.append(&mut t);
+    result
+}
+
+// ============================================================================
+// Basic where clause syntax
+// ============================================================================
+
+fn pick_larger<T>(a: T, b: T) -> T
+where
+    T: Ord,
+{
+    if a >= b { a } else { b }
+}
+
+fn pick_smaller<T>(a: T, b: T) -> T
+where
+    T: Ord,
+{
+    if a <= b { a } else { b }
+}
+
+fn are_equal<T>(a: T, b: T) -> Bool
+where
+    T: Eq,
+{
+    a == b
+}
+
+// ============================================================================
+// Multiple bounds per type parameter
+// ============================================================================
+
+fn sort_pair<T>(a: T, b: T) -> (T, T)
+where
+    T: Ord + Clone,
+{
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+fn compare_and_pick<T>(a: T, b: T) -> T
+where
+    T: Ord + Clone,
+{
+    if a >= b { a } else { b }
+}
+
+@allow(unbounded_recursion)
+fn is_sorted_list<T>(items: List<T>) -> Bool
+where
+    T: Ord,
+{
+    match items {
+        [] => true,
+        [_] => true,
+        [a, b, ..rest] => a <= b && is_sorted_list(cons(b, rest)),
+    }
+}
+
+// ============================================================================
+// Where clauses on structs and implement blocks
+// ============================================================================
+
+type OrderedPair<T: Ord> is {
+    smaller: T,
+    larger: T,
+};
+
+implement<T: Ord + Clone> OrderedPair<T> {
+    fn new(a: T, b: T) -> OrderedPair<T> {
+        if a <= b {
+            OrderedPair { smaller: a, larger: b }
+        } else {
+            OrderedPair { smaller: b, larger: a }
+        }
+    }
+
+    fn contains(&self, value: T) -> Bool {
+        value >= self.smaller && value <= self.larger
+    }
+
+    fn has_span(&self) -> Bool {
+        self.smaller != self.larger
+    }
+}
+
+// ============================================================================
+// Where clauses on higher-order functions
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn map_fn<T, U, F>(items: List<T>, f: F) -> List<U>
+where
+    F: fn(T) -> U,
+{
+    match items {
+        [] => [],
+        [head, ..tail] => cons(f(head), map_fn(tail, f)),
+    }
+}
+
+@allow(unbounded_recursion)
+fn fold_fn<T, A, F>(items: List<T>, init: A, f: F) -> A
+where
+    F: fn(A, T) -> A,
+{
+    match items {
+        [] => init,
+        [head, ..tail] => fold_fn(tail, f(init, head), f),
+    }
+}
+
+@allow(unbounded_recursion)
+fn filter_fn<T: Clone, P>(items: List<T>, predicate: P) -> List<T>
+where
+    P: fn(T) -> Bool,
+{
+    match items {
+        [] => [],
+        [head, ..tail] if predicate(head.clone()) => cons(head, filter_fn(tail, predicate)),
+        [_, ..tail] => filter_fn(tail, predicate),
+    }
+}
+
+// ============================================================================
+// Where clause with inter-dependent bounds
+// ============================================================================
+
+fn apply_twice<T, F>(f: F, x: T) -> T
+where
+    F: fn(T) -> T,
+{
+    f(f(x))
+}
+
+fn compose_where<A, B, C, F, G>(f: F, g: G) -> fn(A) -> C
+where
+    F: fn(A) -> B,
+    G: fn(B) -> C,
+{
+    |x: A| g(f(x))
+}
+
+// ============================================================================
+// Where clauses on generic container
+// ============================================================================
+
+type BoundedBox<T: Clone + Eq> is {
+    value: T,
+};
+
+implement<T: Clone + Eq> BoundedBox<T> {
+    fn new(value: T) -> BoundedBox<T> {
+        BoundedBox { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn matches(&self, other: &BoundedBox<T>) -> Bool {
+        self.value == other.value
+    }
+
+    fn clone_box(&self) -> BoundedBox<T> {
+        BoundedBox { value: self.value.clone() }
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Basic where clauses
+    assert(pick_larger(10, 20) == 20);
+    assert(pick_larger("apple", "banana") == "banana");
+    assert(pick_smaller(10, 20) == 10);
+
+    assert(are_equal(42, 42));
+    assert(!are_equal(1, 2));
+
+    // Compound bounds
+    let (lo, hi) = sort_pair(20, 5);
+    assert(lo == 5 && hi == 20);
+
+    let (lo2, hi2) = sort_pair("zebra", "apple");
+    assert(lo2 == "apple" && hi2 == "zebra");
+
+    assert(compare_and_pick(15, 7) == 15);
+
+    // is_sorted_list
+    assert(is_sorted_list([1, 2, 3, 4, 5]));
+    assert(!is_sorted_list([1, 3, 2, 4, 5]));
+    assert(is_sorted_list([]));
+    assert(is_sorted_list([1]));
+
+    // OrderedPair
+    let pair = OrderedPair.new(20, 5);
+    assert(pair.smaller == 5);
+    assert(pair.larger == 20);
+    assert(pair.contains(10));
+    assert(!pair.contains(25));
+    assert(pair.has_span());
+
+    let same = OrderedPair.new(5, 5);
+    assert(!same.has_span());
+
+    // Higher-order with where
+    let doubled = map_fn([1, 2, 3], |x: Int| x * 2);
+    assert(doubled == [2, 4, 6]);
+
+    let text_list = map_fn([1, 2, 3], |x: Int| f"n{x}");
+    assert(text_list == ["n1", "n2", "n3"]);
+
+    let sum = fold_fn([1, 2, 3, 4], 0, |acc: Int, x: Int| acc + x);
+    assert(sum == 10);
+
+    let filtered = filter_fn([1, 2, 3, 4, 5], |x: Int| x > 2);
+    assert(filtered == [3, 4, 5]);
+
+    // apply_twice
+    assert(apply_twice(|x: Int| x * 2, 5) == 20);
+    assert(apply_twice(|s: Text| f"[{s}]", "hi") == "[[hi]]");
+
+    // compose_where
+    let double_str = compose_where(|x: Int| x * 2, |x: Int| f"{x}");
+    assert(double_str(21) == "42");
+
+    // BoundedBox
+    let b1 = BoundedBox.new(42);
+    let b2 = BoundedBox.new(42);
+    let b3 = BoundedBox.new(99);
+    assert(*b1.get() == 42);
+    assert(b1.matches(&b2));
+    assert(!b1.matches(&b3));
+
+    let b4 = b1.clone_box();
+    assert(*b4.get() == 42);
+
+    print("Where clause tests passed!");
+}

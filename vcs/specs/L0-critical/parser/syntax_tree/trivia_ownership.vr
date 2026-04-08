@@ -1,0 +1,397 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: lexer, trivia, ownership, lossless, whitespace, comments
+// @description: Test trivia ownership rules including leading/trailing assignment and newline boundaries
+// @expect: pass
+
+// ============================================================================
+// SECTION 1: Leading Trivia Assignment
+// ============================================================================
+
+// Test that whitespace before token becomes leading trivia
+fn leading_whitespace() {
+    let    x = 1;  // Whitespace before 'x' is leading trivia for 'x'
+}
+
+// Test that line comments become leading trivia for next significant token
+// Comment below is leading trivia for 'let'
+fn leading_line_comment() {
+    // This comment is leading trivia
+    let x = 1;
+}
+
+// Test that block comments become leading trivia
+fn leading_block_comment() {
+    /* Block comment leading trivia */
+    let x = 1;
+}
+
+// Test that multiple consecutive comments are all leading trivia
+fn leading_multiple_comments() {
+    // First comment
+    // Second comment
+    // Third comment
+    let x = 1;  // All three are leading trivia for 'let'
+}
+
+// Test doc comments as leading trivia
+/// Doc comment for the function
+fn leading_doc_comment() { }
+
+// Test inner doc comments
+//! Module-level inner doc
+fn leading_inner_doc() { }
+
+// Test leading trivia at start of file
+// This comment is leading trivia for the first function
+
+fn leading_trivia_file_start() { }
+
+// ============================================================================
+// SECTION 2: Trailing Trivia (Up to Newline)
+// ============================================================================
+
+// Test that inline comment becomes trailing trivia
+fn trailing_inline_comment() {
+    let x = 1;  // This is trailing trivia for semicolon
+}
+
+// Test that spaces after token become trailing trivia
+fn trailing_spaces() {
+    let x = 1   ;  // Spaces before semicolon are trailing trivia for '1'
+}
+
+// Test that block comment on same line is trailing trivia
+fn trailing_block_comment() {
+    let x = 1; /* inline block comment */
+}
+
+// Test trailing trivia stops at newline
+fn trailing_stops_at_newline() {
+    let x = 1;  // Trailing for semicolon
+    let y = 2;  // This is a different statement
+}
+
+// Test trailing trivia with CRLF
+fn trailing_with_crlf() {
+    let x = 1;  // Trailing comment ends at \r\n
+}
+
+// ============================================================================
+// SECTION 3: Newline Ownership Boundary
+// ============================================================================
+
+// Test that newline belongs to leading trivia of next token
+fn newline_belongs_to_next() {
+    let x = 1;
+    let y = 2;  // Newline after x's semicolon is leading for 'let y'
+}
+
+// Test multiple newlines
+fn multiple_newlines() {
+    let x = 1;
+
+
+    let y = 2;  // Both newlines are leading trivia for 'let y'
+}
+
+// Test newline in multi-line expressions
+fn newline_in_expression() {
+    let x = 1
+        + 2
+        + 3;  // Newlines are trivia between tokens
+}
+
+// Test newline boundary with inline comment
+fn newline_boundary_with_comment() {
+    let x = 1;  // Comment
+    // This newline ends trailing, starts leading
+    let y = 2;
+}
+
+// ============================================================================
+// SECTION 4: Mixed Trivia Sequences
+// ============================================================================
+
+// Test alternating whitespace and comments
+fn mixed_trivia_alternating() {
+    let x = 1;  /* block */ // line
+    let y = 2;
+}
+
+// Test tabs and spaces
+fn mixed_tabs_spaces() {
+	let tab = 1;
+    let space = 2;
+	    let mixed = 3;
+}
+
+// Test complex trivia sequence
+fn mixed_complex() {
+    /* A */ let /* B */ x /* C */ = /* D */ 1 /* E */ ; /* F */
+    // G
+    let y = 2;
+}
+
+// ============================================================================
+// SECTION 5: Trivia in Delimiters
+// ============================================================================
+
+// Test trivia after opening paren
+fn trivia_after_open_paren(
+    a: Int,
+    b: Int
+) { }
+
+// Test trivia before closing paren
+fn trivia_before_close_paren(a: Int, b: Int
+    ) { }
+
+// Test trivia in braces
+fn trivia_in_braces() {
+    {   let x = 1;   }
+}
+
+// Test trivia in brackets
+fn trivia_in_brackets() {
+    let arr = [   1, 2, 3   ];
+}
+
+// Test trivia in angle brackets
+fn trivia_in_angles<   T   >() { }
+
+// ============================================================================
+// SECTION 6: Trivia in Type Definitions
+// ============================================================================
+
+// Test trivia in record type
+type TriviaRecord is {
+    // Field comment
+    name: Text,    // Trailing for name
+    // Another comment
+    value: Int,
+};
+
+// Test trivia in sum type
+type TriviaSum is
+    // Variant comment
+    | First     // Trailing for First
+    // Another variant
+    | Second(Int);
+
+// Test trivia in protocol
+type TriviaProtocol is protocol {
+    // Type comment
+    type Item;
+    // Method comment
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// ============================================================================
+// SECTION 7: Trivia Preservation for Source Reconstruction
+// ============================================================================
+
+// Test exact whitespace preservation
+fn exact_whitespace_preservation() {
+    let   x   =   1   ;  // Exact spacing must be preserved
+}
+
+// Test alignment preservation
+fn alignment_preservation() {
+    let short  = 1;
+    let longer = 2;
+    let x      = 3;
+}
+
+// Test indentation preservation with tabs
+fn indentation_tabs() {
+	let level1 = 1;
+		let level2 = 2;
+			let level3 = 3;
+}
+
+// Test indentation preservation with spaces
+fn indentation_spaces() {
+    let level1 = 1;
+        let level2 = 2;
+            let level3 = 3;
+}
+
+// ============================================================================
+// SECTION 8: Comment Content Preservation
+// ============================================================================
+
+// Test line comment content
+fn comment_content_line() {
+    // This exact text should be preserved!
+    let x = 1;
+}
+
+// Test block comment content
+fn comment_content_block() {
+    /* This exact
+       multi-line
+       content should
+       be preserved! */
+    let x = 1;
+}
+
+// Test doc comment content
+/// This is documentation that must be preserved exactly.
+/// Including multiple lines.
+fn comment_content_doc() { }
+
+// ============================================================================
+// SECTION 9: Nested Block Comments
+// ============================================================================
+
+// Test nested block comment preservation
+fn nested_block_comment() {
+    /* outer /* inner */ end */
+    let x = 1;
+}
+
+// Test deeply nested block comments
+fn deeply_nested_block_comment() {
+    /* level1 /* level2 /* level3 */ back2 */ back1 */
+    let x = 1;
+}
+
+// ============================================================================
+// SECTION 10: Edge Cases for Trivia Ownership
+// ============================================================================
+
+// Test trivia at EOF
+fn trivia_at_eof() {
+    let x = 1;
+}
+// Final comment before EOF
+
+// Test trivia between comma-separated items
+fn trivia_comma_separated(a: Int,  /* comment */  b: Int,  c: Int) { }
+
+// Test trivia in empty constructs
+fn trivia_empty_body(/* empty */) { /* also empty */ }
+
+// Test trivia after operators
+fn trivia_after_operators() {
+    let x = 1 + /* comment */ 2;
+    type A is { field: Int };
+    let a = A { field: 5 };
+    let y = a. /* between */ field;
+}
+
+// Test trivia in match arms
+fn trivia_match_arms(x: Maybe<Int>) -> Int {
+    match x {
+        // Some case
+        Some(n) => n,  // Handle some
+        // None case
+        None => 0,     // Handle none
+    }
+}
+
+// ============================================================================
+// SECTION 11: Trivia and Token Spans
+// ============================================================================
+
+// Test that trivia doesn't affect token spans
+fn trivia_token_spans() {
+    let     x     =     1     ;  // Token spans are just the tokens
+}
+
+// Test full_span includes trivia
+fn trivia_full_span() {
+    /* leading */ let x = 1; /* trailing */
+    // Full span includes both comments
+}
+
+// ============================================================================
+// SECTION 12: Unicode in Trivia
+// ============================================================================
+
+// Test unicode in comments
+fn unicode_comments() {
+    // Unicode: hello minna-san, sekai (world)
+    let x = 1;
+    /* More unicode: cafe, naive, resume */
+    let y = 2;
+}
+
+// ============================================================================
+// SECTION 13: RichToken Full Text Reconstruction
+// ============================================================================
+
+// Test full_text method produces correct output
+fn rich_token_full_text() {
+    let x = 1;  // Comment
+}
+
+// Test full_text with complex trivia
+fn rich_token_complex_trivia() {
+    /* before */ let /* mid */ x /* also */ = /* more */ 1 /* end */ ; /* trailing */
+}
+
+// ============================================================================
+// SECTION 14: Trivia Kind Classification
+// ============================================================================
+
+// Test whitespace classification
+fn trivia_kind_whitespace() {
+    let    x = 1;  // Spaces and tabs are TriviaKind::Whitespace
+}
+
+// Test newline classification
+fn trivia_kind_newline() {
+    let x = 1;
+    let y = 2;  // Newline is TriviaKind::Newline
+}
+
+// Test line comment classification
+fn trivia_kind_line_comment() {
+    // TriviaKind::LineComment
+    let x = 1;
+}
+
+// Test block comment classification
+fn trivia_kind_block_comment() {
+    /* TriviaKind::BlockComment */
+    let x = 1;
+}
+
+/// TriviaKind::DocComment
+fn trivia_kind_doc_comment() { }
+
+//! TriviaKind::InnerDocComment
+fn trivia_kind_inner_doc() { }
+
+// ============================================================================
+// SECTION 15: Lossless Roundtrip Tests
+// ============================================================================
+
+// Test complete roundtrip with all trivia types
+fn roundtrip_complete() {
+    // Line comment
+    let a = 1;  /* inline block */
+
+    /// Doc style
+    let b = 2;
+
+    /* Multi
+       line
+       block */
+    let c = 3;
+}
+
+// Test roundtrip with unusual formatting
+fn    roundtrip_unusual_format   (    a  :  Int  ,  b  :  Int    )    ->    Int    {
+    a  +  b
+}
+
+// Test roundtrip with mixed indentation
+fn roundtrip_mixed_indent() {
+	let tab_indent = 1;
+    let space_indent = 2;
+    	let mixed_indent = 3;
+}

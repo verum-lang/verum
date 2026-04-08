@@ -1,0 +1,52 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, types, capability, comprehensive
+// @description: Test comprehensive capability type parsing per grammar/verum.ebnf
+
+// Single capability
+fn read_only(db: Database with [Read]) -> Int { 0 }
+
+// Multiple capabilities
+fn read_write(db: Database with [Read, Write]) -> Int { 0 }
+
+// All standard capability names
+fn all_std_caps(
+    ctx: AppCtx with [Read, Write, ReadWrite, Admin, Transaction, Network, FileSystem, Query, Execute, Logging, Metrics, Config, Cache, Auth]
+) -> Int { 0 }
+
+// Custom capability names
+fn custom(ctx: AppCtx with [MyCustomCap, AnotherCap]) -> Int { 0 }
+
+// Capability in return position
+fn get_readonly() -> Database with [Read] {
+    get_db()
+}
+
+// Capability in let binding type annotation
+fn test_let_binding() {
+    let db: Database with [Read] = get_db();
+}
+
+// Capability in struct fields
+type ServiceConfig is {
+    db: Database with [Read, Write],
+    cache: CacheCtx with [Read],
+};
+
+// Capability with generic type
+fn process<T>(resource: T with [Read]) -> Int { 0 }
+
+// Capability in list type
+fn get_readers() -> List<Database with [Read]> {
+    List.new()
+}
+
+// Helper types
+type Database is { _marker: Int };
+type AppCtx is { _marker: Int };
+type CacheCtx is { _marker: Int };
+
+fn get_db() -> Database { Database { _marker: 0 } }
+
+fn main() -> Int { 0 }

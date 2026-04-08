@@ -1,0 +1,83 @@
+// @test: parse-pass
+// @tier: 0
+// @category: comprehensions
+// @description: Test basic list comprehension parsing
+
+fn test_basic_list_comprehensions() {
+    // Simplest form: expression for variable in iterator
+    let doubled = [x * 2 for x in items];
+
+    // With function call as expression
+    let processed = [transform(x) for x in data];
+
+    // With method call
+    let lengths = [s.len() for s in strings];
+
+    // With binary operation
+    let sums = [x + y for (x, y) in pairs];
+
+    // With field access
+    let names = [user.name for user in users];
+
+    // With index access
+    let firsts = [arr[0] for arr in arrays];
+
+    // With range iterator
+    let squares = [i * i for i in 0..10];
+
+    // Inclusive range
+    let cubes = [i * i * i for i in 1..=5];
+
+    // With slice iterator
+    let doubled_slice = [x * 2 for x in items[0..5]];
+
+    // With function result as iterator
+    let results = [x for x in get_items()];
+
+    // With method call as iterator
+    let values = [x for x in collection.iter()];
+
+    // Negative numbers in expression
+    let negated = [-x for x in positives];
+
+    // Logical not in expression
+    let flipped = [!b for b in booleans];
+
+    // Bitwise operations
+    let shifted = [x << 1 for x in values];
+
+    // Complex expression
+    let complex = [(x * x + y * y).sqrt() for (x, y) in coords];
+}
+
+fn test_list_comprehension_expressions() {
+    // Conditional expression in body
+    let clamped = [if x > max { max } else { x } for x in values];
+
+    // Match expression in body
+    let unwrapped = [match opt { Some(v) => v, None => 0 } for opt in options];
+
+    // Block expression in body
+    let computed = [{
+        let temp = x * 2;
+        temp + 1
+    } for x in items];
+
+    // Tuple construction
+    let tuples = [(i, i * 2) for i in 0..10];
+
+    // Record construction
+    let points = [Point { x: i, y: i * 2 } for i in 0..5];
+
+    // Array construction
+    let arrays = [[i, i + 1, i + 2] for i in 0..3];
+
+    // Pipeline in expression
+    let piped = [x |> double |> increment for x in items];
+
+    // Optional chaining
+    let maybe_names = [user?.name for user in maybe_users];
+
+    // Null coalesce
+    let names_or_default = [name ?? "unknown" for name in maybe_names];
+}

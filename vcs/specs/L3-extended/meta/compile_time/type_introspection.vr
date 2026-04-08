@@ -1,0 +1,220 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, compile-time, type-introspection
+
+/// Type introspection - интроспекция типов во время компиляции
+///
+/// Verum предоставляет базовые возможности для получения информации
+/// о типах во время компиляции через встроенные intrinsics.
+/// Тесты используют только базовые возможности языка без stdlib.
+
+// ============================================================
+// БАЗОВАЯ ИНТРОСПЕКЦИЯ ТИПОВ
+// ============================================================
+
+// Примитивные типы и их размеры
+const INT_SIZE: Int = @size_of(Int);
+const INT_ALIGN: Int = @align_of(Int);
+
+const BOOL_SIZE: Int = @size_of(Bool);
+const BOOL_ALIGN: Int = @align_of(Bool);
+
+const FLOAT64_SIZE: Int = @size_of(Float64);
+const FLOAT64_ALIGN: Int = @align_of(Float64);
+
+// Type alias for pointer (needed for @size_of)
+type IntPtr is *const Int;
+const PTR_SIZE: Int = @size_of(IntPtr);
+const PTR_ALIGN: Int = @align_of(IntPtr);
+
+// ============================================================
+// ПОЛЬЗОВАТЕЛЬСКИЕ ТИПЫ
+// ============================================================
+
+// Простая структура
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+const POINT_SIZE: Int = @size_of(Point);
+const POINT_ALIGN: Int = @align_of(Point);
+
+// Структура с различными полями
+type MixedRecord is {
+    flag: Bool,
+    count: Int,
+    value: Float64,
+};
+
+const MIXED_SIZE: Int = @size_of(MixedRecord);
+const MIXED_ALIGN: Int = @align_of(MixedRecord);
+
+// ============================================================
+// SUM TYPES (ENUMS)
+// ============================================================
+
+type SimpleEnum is
+    | First
+    | Second
+    | Third;
+
+const SIMPLE_ENUM_SIZE: Int = @size_of(SimpleEnum);
+const SIMPLE_ENUM_ALIGN: Int = @align_of(SimpleEnum);
+
+type DataEnum is
+    | Empty
+    | Single(Int)
+    | Pair { x: Int, y: Int };
+
+const DATA_ENUM_SIZE: Int = @size_of(DataEnum);
+const DATA_ENUM_ALIGN: Int = @align_of(DataEnum);
+
+// ============================================================
+// GENERIC TYPES
+// ============================================================
+
+type Wrapper<T> is {
+    value: T,
+};
+
+type WrapperInt is Wrapper<Int>;
+type WrapperBool is Wrapper<Bool>;
+
+const WRAPPER_INT_SIZE: Int = @size_of(WrapperInt);
+const WRAPPER_BOOL_SIZE: Int = @size_of(WrapperBool);
+
+// Pair type
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+type IntBoolPair is Pair<Int, Bool>;
+const PAIR_SIZE: Int = @size_of(IntBoolPair);
+
+// ============================================================
+// МАССИВЫ
+// ============================================================
+
+const ARRAY_4_SIZE: Int = @size_of([Int; 4]);
+const ARRAY_8_SIZE: Int = @size_of([Int; 8]);
+const ARRAY_16_SIZE: Int = @size_of([Int; 16]);
+
+// Массив структур
+const POINT_ARRAY_SIZE: Int = @size_of([Point; 4]);
+
+// ============================================================
+// NEWTYPES
+// ============================================================
+
+type UserId is (Int);
+type Timestamp is (Int64);
+
+const USERID_SIZE: Int = @size_of(UserId);
+const TIMESTAMP_SIZE: Int = @size_of(Timestamp);
+
+// ============================================================
+// COMPILE-TIME ASSERTIONS
+// ============================================================
+
+// Проверки размеров типов
+const _INT_SIZE_CHECK: () = {
+    @static_assert(@size_of(Int) == 8);
+};
+
+const _BOOL_SIZE_CHECK: () = {
+    @static_assert(@size_of(Bool) == 1);
+};
+
+const _PTR_SIZE_CHECK: () = {
+    @static_assert(@size_of(IntPtr) == 8);
+};
+
+// Проверки выравнивания
+const _INT_ALIGN_CHECK: () = {
+    @static_assert(@align_of(Int) >= 4);
+};
+
+const _FLOAT_ALIGN_CHECK: () = {
+    @static_assert(@align_of(Float64) >= 4);
+};
+
+// ============================================================
+// META ФУНКЦИИ ДЛЯ РАБОТЫ С ТИПАМИ
+// ============================================================
+
+// Проверка что тип помещается в заданный размер
+meta fn fits_in_bytes(type_size: Int, max_size: Int) -> Bool {
+    type_size <= max_size
+}
+
+// Вычисление padding для выравнивания
+meta fn padding_for_alignment(offset: Int, alignment: Int) -> Int {
+    let remainder = offset % alignment;
+    if remainder == 0 { 0 }
+    else { alignment - remainder }
+}
+
+// Вычисление aligned size
+meta fn aligned_size(size: Int, alignment: Int) -> Int {
+    size + padding_for_alignment(size, alignment)
+}
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ META ФУНКЦИЙ
+// ============================================================
+
+const INT_FITS_8: Bool = fits_in_bytes(@size_of(Int), 8);
+const POINT_FITS_32: Bool = fits_in_bytes(@size_of(Point), 32);
+
+const PADDING_EXAMPLE: Int = padding_for_alignment(5, 8);  // 3
+const ALIGNED_EXAMPLE: Int = aligned_size(5, 8);           // 8
+
+// ============================================================
+// CONST GENERICS С TYPE INFO
+// ============================================================
+
+type FixedBuffer<const N: Int> is {
+    data: [UInt8; N],
+};
+
+// Размер буфера вычисляется во время компиляции
+const SMALL_BUFFER_SIZE: Int = @size_of(FixedBuffer<16>);
+const LARGE_BUFFER_SIZE: Int = @size_of(FixedBuffer<256>);
+
+// ============================================================
+// СЛОЖНЫЕ ТИПЫ
+// ============================================================
+
+type Node<T> is {
+    value: T,
+    next: *mut Node<T>,
+};
+
+type NodeInt is Node<Int>;
+const NODE_SIZE: Int = @size_of(NodeInt);
+
+// Optional-like type
+type Maybe<T> is
+    | None
+    | Some(T);
+
+type MaybeInt is Maybe<Int>;
+const MAYBE_INT_SIZE: Int = @size_of(MaybeInt);
+
+// Result-like type
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type IntResult is Result<Int, Int>;
+const RESULT_SIZE: Int = @size_of(IntResult);
+
+fn main() {
+    // Compile-time computed values available at runtime
+    let int_size = INT_SIZE;
+    let point_size = POINT_SIZE;
+    let array_size = ARRAY_4_SIZE;
+}

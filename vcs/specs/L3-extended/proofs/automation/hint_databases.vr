@@ -1,0 +1,351 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, automation, hints
+// @timeout: 15000
+// @description: Tests hint database management for proof automation
+
+/// ============================================================
+/// HINT DATABASES
+/// ============================================================
+///
+/// Hint databases store lemmas and tactics that automated provers
+/// can use. They enable modular and reusable proof automation.
+
+// ------------------------------------------------------------
+// Declaring Hint Databases
+// ------------------------------------------------------------
+
+/// Create a new hint database
+@create_hint_db(arithmetic_hints)
+/// Hints for arithmetic reasoning
+
+@create_hint_db(list_hints)
+/// Hints for list operations
+
+@create_hint_db(set_hints)
+/// Hints for set theory
+
+@create_hint_db(order_hints)
+/// Hints for ordering relations
+
+// ------------------------------------------------------------
+// Adding Hints to Databases
+// ------------------------------------------------------------
+
+/// Add lemma as resolve hint (for backward reasoning)
+@hint_db(arithmetic_hints)
+@resolve
+lemma add_pos_preserve(a: Int, b: Int)
+    requires a > 0
+    requires b > 0
+    ensures a + b > 0
+{ proof by omega }
+
+@hint_db(arithmetic_hints)
+@resolve
+lemma mul_pos_preserve(a: Int, b: Int)
+    requires a > 0
+    requires b > 0
+    ensures a * b > 0
+{ proof by omega }
+
+/// Add lemma as immediate hint (for forward reasoning)
+@hint_db(list_hints)
+@immediate
+lemma list_length_nonneg<T>(xs: List<T>): len(xs) >= 0 {
+    proof by induction on xs
+}
+
+@hint_db(list_hints)
+@immediate
+lemma list_append_length<T>(xs: List<T>, ys: List<T>):
+    len(xs ++ ys) == len(xs) + len(ys)
+{
+    proof by induction on xs
+}
+
+/// Add lemma as unfold hint (for definition unfolding)
+@hint_db(set_hints)
+@unfold
+lemma set_union_def<T>(x: T, A: Set<T>, B: Set<T>):
+    x in A.union(B) == (x in A || x in B)
+{
+    proof by definition
+}
+
+@hint_db(set_hints)
+@unfold
+lemma set_inter_def<T>(x: T, A: Set<T>, B: Set<T>):
+    x in A.inter(B) == (x in A && x in B)
+{
+    proof by definition
+}
+
+// ------------------------------------------------------------
+// Hint Database Operations
+// ------------------------------------------------------------
+
+/// Using hints from a database
+theorem use_arith_hints(x: Int, y: Int, z: Int)
+    requires x > 0
+    requires y > 0
+    requires z > 0
+    ensures (x + y) * z > 0
+{
+    proof by auto using hints [arithmetic_hints]
+}
+
+/// Using multiple databases
+theorem use_multi_hints<T>(xs: List<T>, ys: List<T>)
+    requires len(xs) > 0
+    requires len(ys) > 0
+    ensures len(xs ++ ys) > 1
+{
+    proof by auto using hints [list_hints, arithmetic_hints]
+}
+
+/// Excluding specific hints
+theorem exclude_hints(a: Int, b: Int)
+    requires a > 0
+    requires b > 0
+    ensures a + b > 0
+{
+    proof by auto using hints [arithmetic_hints - mul_pos_preserve]
+}
+
+// ------------------------------------------------------------
+// Hint Types
+// ------------------------------------------------------------
+
+/// Resolve hints (backward chaining)
+@hint_db(order_hints)
+@resolve
+lemma lt_trans(a: Int, b: Int, c: Int)
+    requires a < b
+    requires b < c
+    ensures a < c
+{ proof by omega }
+
+/// Immediate hints (forward chaining)
+@hint_db(order_hints)
+@immediate
+lemma le_refl(a: Int): a <= a {
+    proof by omega
+}
+
+/// Extern hints (call external tactic)
+@hint_db(arithmetic_hints)
+@extern(omega)
+/// Use omega decision procedure for linear arithmetic
+
+/// Constructors as hints
+@hint_db(list_hints)
+@constructor
+/// Try list constructors ([] and .) when building lists
+
+/// Pattern hints (for rewriting)
+@hint_db(list_hints)
+@pattern(xs ++ [])
+@rewrite_to(xs)
+/// Rewrite xs ++ [] to xs
+
+// ------------------------------------------------------------
+// Hint Priority
+// ------------------------------------------------------------
+
+/// High priority hint (tried first)
+@hint_db(arithmetic_hints)
+@resolve
+@priority(high)
+lemma zero_unique(n: Int)
+    requires n >= 0
+    requires n <= 0
+    ensures n == 0
+{ proof by omega }
+
+/// Low priority hint (tried last)
+@hint_db(arithmetic_hints)
+@resolve
+@priority(low)
+lemma general_arith(a: Int, b: Int, c: Int)
+    requires a + b == c
+    ensures c - a == b
+{ proof by omega }
+
+/// Numeric priority
+@hint_db(order_hints)
+@resolve
+@priority(100)  // Higher number = higher priority
+lemma lt_irrefl_contra(a: Int)
+    requires a < a
+    ensures false
+{ proof by omega }
+
+// ------------------------------------------------------------
+// Conditional Hints
+// ------------------------------------------------------------
+
+/// Hint with side conditions
+@hint_db(arithmetic_hints)
+@resolve
+@when(b != 0)
+lemma div_mul_cancel(a: Int, b: Int)
+    requires b != 0
+    ensures (a * b) / b == a
+{ proof by arithmetic }
+
+/// Hint with type conditions
+@hint_db(list_hints)
+@resolve
+@when(T: Eq)
+lemma list_contains_head<T: Eq>(x: T, xs: List<T>)
+    ensures x in (x . xs)
+{ proof by definition }
+
+// ------------------------------------------------------------
+// Local Hint Scopes
+// ------------------------------------------------------------
+
+/// Temporary hints for a proof block
+theorem local_hints(xs: List<Int>)
+    requires forall x: Int. x in xs implies x > 0
+    ensures forall x: Int. x in xs implies x >= 0
+{
+    proof {
+        // Add temporary hint
+        with_hints [pos_implies_nonneg] {
+            auto
+        }
+    }
+}
+
+@resolve
+lemma pos_implies_nonneg(x: Int)
+    requires x > 0
+    ensures x >= 0
+{ proof by omega }
+
+/// Scoped database modifications
+theorem scoped_db(a: Int, b: Int)
+    requires a > b
+    requires b > 0
+    ensures a > 0
+{
+    proof {
+        // Temporarily add hint
+        extend_db arithmetic_hints with [lt_trans];
+        auto
+    }
+}
+
+// ------------------------------------------------------------
+// Hint Database Inheritance
+// ------------------------------------------------------------
+
+/// Create derived database
+@create_hint_db(extended_arithmetic)
+/// Extends arithmetic_hints with more lemmas
+
+@hint_db(extended_arithmetic)
+@resolve
+lemma square_nonneg(x: Int): x * x >= 0 {
+    proof by omega
+}
+
+/// Using parent and child hints
+theorem use_extended_hints(x: Int)
+    requires x > 0
+    ensures x * x > 0 && x + x > 0
+{
+    proof by auto using hints [extended_arithmetic]
+    // Uses hints from both extended_arithmetic and arithmetic_hints
+}
+
+// ------------------------------------------------------------
+// Hint Database Introspection
+// ------------------------------------------------------------
+
+/// List hints in a database
+@print_hints(arithmetic_hints)
+/// Prints: add_pos_preserve, mul_pos_preserve, ...
+
+/// Check if hint exists
+@has_hint(arithmetic_hints, add_pos_preserve)
+/// Returns: true
+
+/// Get hint priority
+@hint_priority(arithmetic_hints, zero_unique)
+/// Returns: high
+
+// ------------------------------------------------------------
+// Dynamic Hint Management
+// ------------------------------------------------------------
+
+// Hint registration and clearing are compile-time meta operations
+// @runtime_hint { lemma ... } and @clear_hints(...) are used
+// to dynamically manage hint databases
+
+// ------------------------------------------------------------
+// Hint Database Best Practices
+// ------------------------------------------------------------
+
+/// Group related hints
+@hint_db(list_transform_hints)
+@resolve
+lemma map_id<T>(xs: List<T>): xs.map(|x| x) == xs { proof by induction }
+
+@hint_db(list_transform_hints)
+@resolve
+lemma map_compose<A, B, C>(xs: List<A>, f: fn(A) -> B, g: fn(B) -> C):
+    xs.map(f).map(g) == xs.map(|x| g(f(x)))
+{ proof by induction }
+
+@hint_db(list_transform_hints)
+@resolve
+lemma filter_true<T>(xs: List<T>): xs.filter(|_| true) == xs { proof by induction }
+
+@hint_db(list_transform_hints)
+@resolve
+lemma filter_false<T>(xs: List<T>): xs.filter(|_| false) == [] { proof by induction }
+
+/// Use specialized databases for complex proofs
+theorem list_transform_theorem<A, B, C>(
+    xs: List<A>,
+    f: fn(A) -> B,
+    g: fn(B) -> C,
+    pred: fn(C) -> Bool
+):
+    xs.map(f).map(g).filter(pred) == xs.map(|x| g(f(x))).filter(pred)
+{
+    proof by auto using hints [list_transform_hints]
+}
+
+// ------------------------------------------------------------
+// Hint Debugging
+// ------------------------------------------------------------
+
+/// Verbose hint application
+theorem debug_hints(a: Int, b: Int)
+    requires a > 0
+    requires b >= 0
+    ensures a + b >= 0
+{
+    proof by auto {
+        hints: [arithmetic_hints],
+        trace_hints: true,
+        // Output: Trying add_pos_preserve... failed (b >= 0, not b > 0)
+        // Output: Trying omega... success
+    }
+}
+
+/// Show which hints were used
+theorem show_used_hints(xs: List<Int>, ys: List<Int>):
+    len(xs ++ ys) >= len(xs)
+{
+    proof by auto {
+        hints: [list_hints, arithmetic_hints],
+        report_used: true,
+        // Output: Used hints: list_append_length, omega
+    }
+}

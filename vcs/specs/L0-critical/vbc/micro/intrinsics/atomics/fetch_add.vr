@@ -1,0 +1,13 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Test increment patterns that would use fetch_add
+    let mut x = 10;
+    x = x + 5;
+    assert_eq(x, 15);
+
+    x = x + 10;
+    assert_eq(x, 25);
+}

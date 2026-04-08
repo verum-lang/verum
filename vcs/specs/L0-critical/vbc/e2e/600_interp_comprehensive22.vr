@@ -1,0 +1,384 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone_600, rod_cutting, majority_element, next_greater_element, max_product_subarray, modular_inverse, graph_diameter, towers_of_hanoi, edit_distance
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #22 — MILESTONE: 600 interpreter test files.
+//
+// This pipeline test combines 6 algorithms from tests 591-599:
+//   1. Rod cutting (592)          — generate "prices" from prime counting
+//   2. Boyer-Moore majority (593) — find majority in derived sequence
+//   3. Next greater element (594) — NGE on the rod-cut DP table
+//   4. Max product subarray (598) — compute on NGE-derived sequence
+//   5. Modular inverse (597)      — use gcd and inverse in final checksum
+//   6. Edit distance (595)        — compare two integer sequences end-to-end
+//
+// Each stage feeds derived data into the next, forming an end-to-end pipeline.
+
+// ============================================================
+// Stage 1: Rod cutting
+// ============================================================
+
+fn rc_cut(n: Int, price: [Int; 16], dp: [Int; 16]) {
+    dp[0] = 0;
+    let mut j = 1;
+    while j <= n {
+        let mut best = 0;
+        let mut i = 1;
+        while i <= j {
+            let c = price[i] + dp[j - i];
+            if c > best { best = c; }
+            i = i + 1;
+        }
+        dp[j] = best;
+        j = j + 1;
+    }
+}
+
+fn test_stage_rod_cutting() {
+    // price[1..8] = [1,3,5,6,9,11,13,15].
+    // dp[1]=1 (price[1]=1).
+    // dp[2]=3 (price[2]=3).
+    // dp[3]=5 (price[3]=5; best: 5+dp[0]=5, 3+dp[1]=4, 1+dp[2]=4).
+    // dp[4]=6 (price[4]=6; best: 6+dp[0]=6, 5+dp[1]=6, 3+dp[2]=6, 1+dp[3]=6).
+    // dp[5]=9 (price[5]=9; best: 9+dp[0]=9, 6+dp[1]=7, 5+dp[2]=8, 3+dp[3]=8, 1+dp[4]=7).
+    // dp[6]=11 (price[6]=11; best: 11, 9+1=10, 6+3=9, 5+5=10, 3+6=9, 1+9=10).
+    // dp[7]=13 (price[7]=13; best: 13, 11+1=12, 9+3=12, 6+5=11, 5+6=11, 3+9=12, 1+11=12).
+    // dp[8]=15 (price[8]=15; best: 15, 13+1=14, 11+3=14, 9+5=14, 6+6=12, 5+9=14, 3+11=14, 1+13=14).
+    let mut price = [0,1,3,5,6,9,11,13,15,0,0,0,0,0,0,0];
+    let mut dp    = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    rc_cut(8, price, dp);
+    assert_eq(dp[1], 1);
+    assert_eq(dp[2], 3);
+    assert_eq(dp[3], 5);
+    assert_eq(dp[5], 9);
+    assert_eq(dp[8], 15);
+    print("stage_rod_cutting: ok");
+}
+
+// ============================================================
+// Stage 2: Boyer-Moore majority element
+// ============================================================
+
+fn bm_majority(arr: [Int; 16], n: Int) -> Int {
+    let mut cand = 0;
+    let mut cnt  = 0;
+    let mut i = 0;
+    while i < n {
+        if cnt == 0 { cand = arr[i]; cnt = 1; }
+        else {
+            if arr[i] == cand { cnt = cnt + 1; }
+            else { cnt = cnt - 1; }
+        }
+        i = i + 1;
+    }
+    cand
+}
+
+fn count_occ_16(arr: [Int; 16], n: Int, val: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < n { if arr[i] == val { c = c + 1; } i = i + 1; }
+    c
+}
+
+fn test_stage_majority() {
+    // Sequence where 5 is the majority: [5,5,3,5,2,5,5,4,5,5,1,2,5,5,3,5].
+    // Count of 5: positions 0,1,3,5,6,8,9,12,13,15 → 10 times out of 16. 10*2=20 > 16. ✓
+    let mut arr = [5,5,3,5,2,5,5,4,5,5,1,2,5,5,3,5];
+    let cand = bm_majority(arr, 16);
+    assert_eq(cand, 5);
+    assert_eq(count_occ_16(arr, 16, 5), 10);
+    // No majority: [1,2,3,4,5,6,7,8,1,2,3,4,5,6,7,8]. 1..8 each 2 times. No majority.
+    let mut arr2 = [1,2,3,4,5,6,7,8,1,2,3,4,5,6,7,8];
+    let cand2 = bm_majority(arr2, 16);
+    let occ2  = count_occ_16(arr2, 16, cand2);
+    // Verify no majority (occ2 * 2 <= 16).
+    let is_maj = if occ2 * 2 > 16 { 1 } else { 0 };
+    assert_eq(is_maj, 0);
+    print("stage_majority: ok");
+}
+
+// ============================================================
+// Stage 3: Next greater element on DP values
+// ============================================================
+
+fn nge_on_dp(dp: [Int; 16], n: Int, res: [Int; 16],
+             stk: [Int; 16], stk_top: [Int; 4]) {
+    let mut i = 0;
+    while i < n { res[i] = -1; i = i + 1; }
+    stk_top[0] = 0;
+    i = 0;
+    while i < n {
+        while stk_top[0] > 0 && dp[stk[stk_top[0]-1]] < dp[i] {
+            let idx = stk[stk_top[0]-1];
+            res[idx] = dp[i];
+            stk_top[0] = stk_top[0] - 1;
+        }
+        stk[stk_top[0]] = i;
+        stk_top[0] = stk_top[0] + 1;
+        i = i + 1;
+    }
+}
+
+fn test_stage_nge() {
+    // dp values [0,1,3,6,7,9,11,13,15] (9 elements, n=9, indices 0..8).
+    // NGE: 0→1, 1→3, 3→6, 6→7, 7→9, 9→11, 11→13, 13→15, 15→-1.
+    let mut dp  = [0,1,3,6,7,9,11,13,15,0,0,0,0,0,0,0];
+    let mut res = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut stk = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut top = [0,0,0,0];
+    nge_on_dp(dp, 9, res, stk, top);
+    assert_eq(res[0], 1);
+    assert_eq(res[1], 3);
+    assert_eq(res[4], 9);
+    assert_eq(res[7], 15);
+    assert_eq(res[8], -1);
+    print("stage_nge: ok");
+}
+
+// ============================================================
+// Stage 4: Max product subarray
+// ============================================================
+
+fn mps_max3(a: Int, b: Int, c: Int) -> Int {
+    let m = if a > b { a } else { b };
+    if m > c { m } else { c }
+}
+
+fn mps_min3(a: Int, b: Int, c: Int) -> Int {
+    let m = if a < b { a } else { b };
+    if m < c { m } else { c }
+}
+
+fn max_product_16(arr: [Int; 16], n: Int) -> Int {
+    let mut cur_max = arr[0];
+    let mut cur_min = arr[0];
+    let mut best    = arr[0];
+    let mut i = 1;
+    while i < n {
+        let a = arr[i];
+        let p1 = cur_max * a;
+        let p2 = cur_min * a;
+        cur_max = mps_max3(a, p1, p2);
+        cur_min = mps_min3(a, p1, p2);
+        if cur_max > best { best = cur_max; }
+        i = i + 1;
+    }
+    best
+}
+
+fn test_stage_max_product() {
+    // [-3,1,2,-4,6,-2,3]: max product subarray.
+    // Let's trace: cur_max=-3,cur_min=-3,best=-3.
+    // i=1(1): p1=-3,p2=-3. max3(1,-3,-3)=1. min3(1,-3,-3)=-3. best=1.
+    // i=2(2): p1=2,p2=-6. max3(2,2,-6)=2. min3(2,2,-6)=-6. best=2.
+    // i=3(-4): p1=-8,p2=24. max3(-4,-8,24)=24. min3(-4,-8,24)=-8. best=24.
+    // i=4(6): p1=144,p2=-48. max3(6,144,-48)=144. min3(6,144,-48)=-48. best=144.
+    // i=5(-2): p1=-288,p2=96. max3(-2,-288,96)=96. min3(-2,-288,96)=-288. best=144.
+    // i=6(3): p1=288,p2=-864. max3(3,288,-864)=288. min3(3,288,-864)=-864. best=288.
+    // Result=288.
+    let mut arr = [-3,1,2,-4,6,-2,3,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product_16(arr, 7), 288);
+
+    // [2,3,4,5]: all positive. max = 2*3*4*5=120.
+    let mut arr2 = [2,3,4,5,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(max_product_16(arr2, 4), 120);
+    print("stage_max_product: ok");
+}
+
+// ============================================================
+// Stage 5: Extended GCD and modular inverse
+// ============================================================
+
+@allow(unbounded_recursion)
+fn eg_extgcd(a: Int, b: Int, out: [Int; 4]) {
+    if b == 0 { out[0] = a; out[1] = 1; out[2] = 0; return; }
+    eg_extgcd(b, a - (a / b) * b, out);
+    let g = out[0]; let x = out[1]; let y = out[2];
+    out[0] = g; out[1] = y; out[2] = x - (a / b) * y;
+}
+
+fn eg_mod_inv(a: Int, m: Int) -> Int {
+    let mut out = [0,0,0,0];
+    eg_extgcd(a, m, out);
+    if out[0] != 1 { return -1; }
+    let x = out[1];
+    let r = x - (x / m) * m;
+    if r < 0 { r + m } else { r }
+}
+
+fn eg_gcd(a: Int, b: Int) -> Int {
+    let mut x = a; let mut y = b;
+    while y != 0 { let t = x - (x / y) * y; x = y; y = t; }
+    x
+}
+
+fn test_stage_modular_inverse() {
+    // Pipeline: use rod-cut revenue values to form a checksum via modular inverse.
+    // Revenue dp[8]=15. Use 15 and prime 17. gcd(15,17)=1. inv(15,17).
+    // 15*x ≡ 1 mod 17. Try: 15*8=120=7*17+1. x=8.
+    assert_eq(eg_mod_inv(15, 17), 8);
+    assert_eq(eg_gcd(15, 17), 1);
+    // Verify: 15 * 8 mod 17 = 120 mod 17 = 120 - 7*17 = 120 - 119 = 1. ✓
+    let prod = 15 * 8;
+    let rem  = prod - (prod / 17) * 17;
+    assert_eq(rem, 1);
+
+    // Another: inv(9, 13). 9*x ≡ 1 mod 13. 9*3=27=2*13+1. x=3.
+    assert_eq(eg_mod_inv(9, 13), 3);
+    print("stage_modular_inverse: ok");
+}
+
+// ============================================================
+// Stage 6: Edit distance between sequences
+// ============================================================
+
+fn ed_dist(a: [Int; 8], la: Int, b: [Int; 8], lb: Int,
+           dp: [Int; 81]) -> Int {
+    let mut i = 0;
+    while i <= la { dp[i * 9 + 0] = i; i = i + 1; }
+    let mut j = 0;
+    while j <= lb { dp[0 * 9 + j] = j; j = j + 1; }
+    i = 1;
+    while i <= la {
+        j = 1;
+        while j <= lb {
+            if a[i-1] == b[j-1] {
+                dp[i*9+j] = dp[(i-1)*9+(j-1)];
+            } else {
+                let c1 = dp[(i-1)*9+(j-1)] + 1;
+                let c2 = dp[(i-1)*9+j]     + 1;
+                let c3 = dp[i*9+(j-1)]     + 1;
+                let best = if c1 < c2 { c1 } else { c2 };
+                dp[i*9+j] = if best < c3 { best } else { c3 };
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    dp[la * 9 + lb]
+}
+
+fn test_stage_edit_distance() {
+    // Compare rod-cut dp[1..5] = [1,3,6,7,9] with [1,3,5,7,9].
+    // Differ at index 2: 6 vs 5. Cost=1 (one replace).
+    let mut a  = [1,3,6,7,9,0,0,0];
+    let mut b  = [1,3,5,7,9,0,0,0];
+    let mut dp = [0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,
+                  0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,
+                  0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0];
+    assert_eq(ed_dist(a, 5, b, 5, dp), 1);
+
+    // [1,2,3,4] vs [2,3,4,5]: delete 1, insert 5 → cost 2.
+    let mut a2  = [1,2,3,4,0,0,0,0];
+    let mut b2  = [2,3,4,5,0,0,0,0];
+    let mut dp2 = [0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0];
+    assert_eq(ed_dist(a2, 4, b2, 4, dp2), 2);
+    print("stage_edit_distance: ok");
+}
+
+// ============================================================
+// Milestone pipeline: chain all stages together
+// ============================================================
+
+fn test_milestone_pipeline() {
+    // Step 1: Rod cutting with prices [0,2,5,8,9,10,17,17,20].
+    // dp[1..8] computed.
+    // dp[1]=2, dp[2]=5, dp[3]=max(2+5=7,5+2=7,8)=8,
+    // dp[4]=max(2+8=10,5+5=10,8+2=10,9)=10,
+    // dp[5]=max(2+10=12,5+8=13,8+5=13,9+2=11,10)=13,
+    // dp[6]=max(2+13=15,5+10=15,8+8=16,9+5=14,10+2=12,17)=17,
+    // dp[7]=max(2+17=19,5+13=18,8+10=18,9+8=17,10+5=15,17+2=19,17)=19,
+    // dp[8]=max(2+19=21,5+17=22,8+13=21,9+10=19,10+8=18,17+5=22,17+2=19,20)=22.
+    let mut price_p = [0,2,5,8,9,10,17,17,20,0,0,0,0,0,0,0];
+    let mut dp_p    = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    rc_cut(8, price_p, dp_p);
+    assert_eq(dp_p[2], 5);
+    assert_eq(dp_p[6], 17);
+    assert_eq(dp_p[8], 22);
+
+    // Step 2: Majority in a sequence built from dp values.
+    // Sequence: [dp[1],dp[2],dp[1],dp[3],dp[1],dp[2],dp[1],dp[4],
+    //            dp[1],dp[1],dp[5],dp[1],dp[1],dp[6],dp[1],dp[1]]
+    // = [2,5,2,8,2,5,2,10, 2,2,13,2,2,17,2,2].
+    // dp[1]=2 appears at indices 0,2,4,6,8,9,11,12,14,15 → 10 times. Majority!
+    let mut maj_arr = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    maj_arr[0]  = dp_p[1]; maj_arr[1]  = dp_p[2]; maj_arr[2]  = dp_p[1];
+    maj_arr[3]  = dp_p[3]; maj_arr[4]  = dp_p[1]; maj_arr[5]  = dp_p[2];
+    maj_arr[6]  = dp_p[1]; maj_arr[7]  = dp_p[4]; maj_arr[8]  = dp_p[1];
+    maj_arr[9]  = dp_p[1]; maj_arr[10] = dp_p[5]; maj_arr[11] = dp_p[1];
+    maj_arr[12] = dp_p[1]; maj_arr[13] = dp_p[6]; maj_arr[14] = dp_p[1];
+    maj_arr[15] = dp_p[1];
+    let maj_cand = bm_majority(maj_arr, 16);
+    assert_eq(maj_cand, dp_p[1]);  // dp[1]=2
+    assert_eq(count_occ_16(maj_arr, 16, dp_p[1]), 10);
+
+    // Step 3: NGE on dp values dp[0..7] = [0,2,5,8,10,13,17,19].
+    // NGE: 0→2, 2→5, 5→8, 8→10, 10→13, 13→17, 17→19, 19→-1.
+    let mut nge_in  = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nge_out = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nstk    = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut ntop    = [0,0,0,0];
+    let mut k = 0;
+    while k < 8 { nge_in[k] = dp_p[k]; k = k + 1; }
+    nge_on_dp(nge_in, 8, nge_out, nstk, ntop);
+    assert_eq(nge_out[0], dp_p[1]);   // 0 → 2
+    assert_eq(nge_out[1], dp_p[2]);   // 2 → 5
+    assert_eq(nge_out[6], dp_p[7]);   // 17 → 19
+    assert_eq(nge_out[7], -1);        // 19 → none
+
+    // Step 4: Max product on the 6-element sequence [2,5,8,10,13,17].
+    // All positive → product of all = 2*5*8*10*13*17 = 176800.
+    // But that's huge — just use arr[0..5] for a shorter sequence.
+    // 2*5=10, 10*8=80, 80*10=800, 800*13=10400, 10400*17=176800.
+    let mut mps_in = [2,5,8,10,13,17,0,0,0,0,0,0,0,0,0,0];
+    let mps_val = max_product_16(mps_in, 6);
+    assert_eq(mps_val, 176800);
+
+    // Step 5: Modular inverse checksum.
+    // Use dp[8]=22 and prime 23. inv(22, 23).
+    // 22 ≡ -1 mod 23. (-1)*(-1)=1 mod 23. inv(22,23)=22.
+    assert_eq(eg_mod_inv(22, 23), 22);
+    // Checksum: (mps_val + dp[8]) mod 23.
+    // 176800 + 22 = 176822. 176822 mod 23: 176822 / 23 = 7688 rem 18.
+    // 23*7688=176824. Wait: 23*7688=23*7000+23*688=161000+15824=176824. Too big.
+    // 23*7687=176824-23=176801. Still big. 176801-176800=1. 23*7687=176801? Let's recompute.
+    // 23*7000=161000. 23*600=13800. 23*80=1840. 23*7=161. 23*7687=161000+13800+1840+161=176801.
+    // 176822 - 176801 = 21. So 176822 mod 23 = 21.
+    let cksum_val = mps_val + dp_p[8];
+    let cksum_mod = cksum_val - (cksum_val / 23) * 23;
+    assert_eq(cksum_mod, 21);
+
+    // Step 6: Edit distance between dp[1..5] and nge_out[0..4].
+    // dp_p[1..5] = [2,5,8,10,13].
+    // nge_out[0..4] = [2,5,8,10,13].  (same values!)
+    // Edit distance = 0.
+    let mut ed_a  = [0,0,0,0,0,0,0,0];
+    let mut ed_b  = [0,0,0,0,0,0,0,0];
+    ed_a[0]=dp_p[1]; ed_a[1]=dp_p[2]; ed_a[2]=dp_p[3]; ed_a[3]=dp_p[4]; ed_a[4]=dp_p[5];
+    ed_b[0]=nge_out[0]; ed_b[1]=nge_out[1]; ed_b[2]=nge_out[2]; ed_b[3]=nge_out[3]; ed_b[4]=nge_out[4];
+    let mut ed_dp = [0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0];
+    let ed_val = ed_dist(ed_a, 5, ed_b, 5, ed_dp);
+    assert_eq(ed_val, 0);
+
+    print("milestone_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_stage_rod_cutting();
+    test_stage_majority();
+    test_stage_nge();
+    test_stage_max_product();
+    test_stage_modular_inverse();
+    test_stage_edit_distance();
+    test_milestone_pipeline();
+    print("[OK] 600_interp_comprehensive22");
+    0
+}

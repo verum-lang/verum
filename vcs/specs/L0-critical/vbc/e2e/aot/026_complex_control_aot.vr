@@ -1,0 +1,175 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, control-flow, nested, complex
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT complex control flow: nested conditions, early returns, complex while patterns
+
+fn abs(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn sign(x: Int) -> Int {
+    if x < 0 {
+        -1
+    } else if x > 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo {
+        lo
+    } else if x > hi {
+        hi
+    } else {
+        x
+    }
+}
+
+fn min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// Collatz sequence length
+fn collatz_len(n_in: Int) -> Int {
+    let mut n = n_in;
+    let mut steps = 0;
+    while n > 1 {
+        if n - (n / 2) * 2 == 0 {
+            n = n / 2;
+        } else {
+            n = n * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+// Integer square root (Newton's method)
+fn isqrt(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else {
+        let mut x = n;
+        let mut y = (x + 1) / 2;
+        while y < x {
+            x = y;
+            y = (x + n / x) / 2;
+        }
+        x
+    }
+}
+
+// Sieve-like: count primes up to n
+fn is_prime(n: Int) -> Bool {
+    if n < 2 {
+        false
+    } else if n < 4 {
+        true
+    } else if n - (n / 2) * 2 == 0 {
+        false
+    } else {
+        let mut i = 3;
+        let mut is_p = true;
+        let limit = isqrt(n);
+        while i <= limit {
+            if n - (n / i) * i == 0 {
+                is_p = false;
+            }
+            i = i + 2;
+        }
+        is_p
+    }
+}
+
+fn count_primes(up_to: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i <= up_to {
+        if is_prime(i) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Binary search
+fn binary_search_sqrt(n: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        let sq = mid * mid;
+        if sq == n {
+            lo = mid;
+            hi = mid - 1;  // Exit loop
+        } else if sq < n {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    if lo * lo > n { lo - 1 } else { lo }
+}
+
+fn main() -> Int {
+    // Basic functions
+    assert_eq(abs(-5), 5);
+    assert_eq(abs(5), 5);
+    assert_eq(abs(0), 0);
+
+    assert_eq(sign(-10), -1);
+    assert_eq(sign(0), 0);
+    assert_eq(sign(10), 1);
+
+    assert_eq(clamp(5, 0, 10), 5);
+    assert_eq(clamp(-5, 0, 10), 0);
+    assert_eq(clamp(15, 0, 10), 10);
+
+    assert_eq(min(3, 7), 3);
+    assert_eq(max(3, 7), 7);
+    assert_eq(min(5, 5), 5);
+
+    // Collatz
+    assert_eq(collatz_len(1), 0);
+    assert_eq(collatz_len(2), 1);
+    assert_eq(collatz_len(6), 8);
+    assert_eq(collatz_len(27), 111);
+
+    // Integer square root
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(8), 2);   // floor(sqrt(8)) = 2
+
+    // Prime counting
+    assert(is_prime(2));
+    assert(is_prime(3));
+    assert(!is_prime(4));
+    assert(is_prime(5));
+    assert(!is_prime(9));
+    assert(is_prime(97));
+    assert_eq(count_primes(10), 4);   // 2,3,5,7
+    assert_eq(count_primes(30), 10);  // 2,3,5,7,11,13,17,19,23,29
+    assert_eq(count_primes(100), 25);
+
+    // Binary search sqrt
+    assert_eq(binary_search_sqrt(0), 0);
+    assert_eq(binary_search_sqrt(1), 1);
+    assert_eq(binary_search_sqrt(4), 2);
+    assert_eq(binary_search_sqrt(9), 3);
+    assert_eq(binary_search_sqrt(100), 10);
+
+    0
+}

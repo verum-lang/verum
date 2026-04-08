@@ -1,0 +1,185 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, color, space, conversion
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for color space operations (integer approximations)
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo { lo } else if x > hi { hi } else { x }
+}
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// RGB color (0-255 per channel)
+type RGB is { r: Int, g: Int, b: Int };
+
+fn rgb_eq(a: RGB, b: RGB) -> Bool {
+    a.r == b.r && a.g == b.g && a.b == b.b
+}
+
+fn rgb_pack(c: RGB) -> Int {
+    (c.r << 16) | (c.g << 8) | c.b
+}
+
+fn rgb_unpack(packed: Int) -> RGB {
+    RGB { r: (packed >> 16) & 255, g: (packed >> 8) & 255, b: packed & 255 }
+}
+
+fn rgb_lerp(a: RGB, b: RGB, t: Int) -> RGB {
+    // t in [0, 100], linear interpolation
+    RGB {
+        r: a.r + (b.r - a.r) * t / 100,
+        g: a.g + (b.g - a.g) * t / 100,
+        b: a.b + (b.b - a.b) * t / 100
+    }
+}
+
+fn rgb_brightness(c: RGB) -> Int {
+    // Perceived brightness (integer approximation of 0.299R + 0.587G + 0.114B)
+    // Using fixed-point: (299R + 587G + 114B) / 1000
+    (299 * c.r + 587 * c.g + 114 * c.b) / 1000
+}
+
+fn rgb_grayscale(c: RGB) -> RGB {
+    let gray = rgb_brightness(c);
+    RGB { r: gray, g: gray, b: gray }
+}
+
+fn rgb_invert(c: RGB) -> RGB {
+    RGB { r: 255 - c.r, g: 255 - c.g, b: 255 - c.b }
+}
+
+fn rgb_blend(a: RGB, b: RGB) -> RGB {
+    // 50/50 blend
+    RGB { r: (a.r + b.r) / 2, g: (a.g + b.g) / 2, b: (a.b + b.b) / 2 }
+}
+
+fn rgb_distance_sq(a: RGB, b: RGB) -> Int {
+    let dr = a.r - b.r;
+    let dg = a.g - b.g;
+    let db = a.b - b.b;
+    dr * dr + dg * dg + db * db
+}
+
+fn rgb_max_channel(c: RGB) -> Int {
+    max2(max2(c.r, c.g), c.b)
+}
+
+fn rgb_min_channel(c: RGB) -> Int {
+    min2(min2(c.r, c.g), c.b)
+}
+
+// Saturation approximation: (max - min) * 100 / max
+fn rgb_saturation(c: RGB) -> Int {
+    let mx = rgb_max_channel(c);
+    let mn = rgb_min_channel(c);
+    if mx == 0 { 0 } else { (mx - mn) * 100 / mx }
+}
+
+fn test_pack_unpack() {
+    let c = RGB { r: 255, g: 128, b: 64 };
+    let packed = rgb_pack(c);
+    let unpacked = rgb_unpack(packed);
+    assert_eq(rgb_eq(c, unpacked), true);
+
+    // Test known values
+    assert_eq(rgb_pack(RGB { r: 255, g: 0, b: 0 }), 0xFF0000);
+    assert_eq(rgb_pack(RGB { r: 0, g: 255, b: 0 }), 0x00FF00);
+    assert_eq(rgb_pack(RGB { r: 0, g: 0, b: 255 }), 0x0000FF);
+    assert_eq(rgb_pack(RGB { r: 255, g: 255, b: 255 }), 0xFFFFFF);
+}
+
+fn test_lerp() {
+    let black = RGB { r: 0, g: 0, b: 0 };
+    let white = RGB { r: 255, g: 255, b: 255 };
+
+    // 0% = start
+    let l0 = rgb_lerp(black, white, 0);
+    assert_eq(rgb_eq(l0, black), true);
+
+    // 100% = end
+    let l100 = rgb_lerp(black, white, 100);
+    assert_eq(rgb_eq(l100, white), true);
+
+    // 50% = midpoint
+    let l50 = rgb_lerp(black, white, 50);
+    assert_eq(l50.r, 127);
+    assert_eq(l50.g, 127);
+}
+
+fn test_brightness() {
+    let white = RGB { r: 255, g: 255, b: 255 };
+    let black = RGB { r: 0, g: 0, b: 0 };
+    let red = RGB { r: 255, g: 0, b: 0 };
+    let green = RGB { r: 0, g: 255, b: 0 };
+
+    assert_eq(rgb_brightness(white), 255);
+    assert_eq(rgb_brightness(black), 0);
+    // Green is perceived brighter than red
+    let rb = rgb_brightness(red);
+    let gb = rgb_brightness(green);
+    assert_eq(gb > rb, true);
+}
+
+fn test_invert() {
+    let c = RGB { r: 100, g: 150, b: 200 };
+    let inv = rgb_invert(c);
+    assert_eq(inv.r, 155);
+    assert_eq(inv.g, 105);
+    assert_eq(inv.b, 55);
+
+    // Double invert = original
+    assert_eq(rgb_eq(rgb_invert(inv), c), true);
+}
+
+fn test_blend() {
+    let red = RGB { r: 255, g: 0, b: 0 };
+    let blue = RGB { r: 0, g: 0, b: 255 };
+    let blended = rgb_blend(red, blue);
+    assert_eq(blended.r, 127);
+    assert_eq(blended.g, 0);
+    assert_eq(blended.b, 127);
+}
+
+fn test_distance() {
+    let black = RGB { r: 0, g: 0, b: 0 };
+    let white = RGB { r: 255, g: 255, b: 255 };
+    let red = RGB { r: 255, g: 0, b: 0 };
+
+    assert_eq(rgb_distance_sq(black, black), 0);
+    assert_eq(rgb_distance_sq(black, white), 255 * 255 * 3);
+
+    // Red is closer to black than white
+    let d_rb = rgb_distance_sq(red, black);
+    let d_rw = rgb_distance_sq(red, white);
+    assert_eq(d_rb < d_rw, true);
+}
+
+fn test_saturation() {
+    let gray = RGB { r: 128, g: 128, b: 128 };
+    assert_eq(rgb_saturation(gray), 0);  // No saturation
+
+    let red = RGB { r: 255, g: 0, b: 0 };
+    assert_eq(rgb_saturation(red), 100);  // Full saturation
+
+    let pastel = RGB { r: 255, g: 200, b: 200 };
+    let s = rgb_saturation(pastel);
+    assert_eq(s > 0, true);
+    assert_eq(s < 100, true);
+}
+
+fn main() -> Int {
+    test_pack_unpack();
+    test_lerp();
+    test_brightness();
+    test_invert();
+    test_blend();
+    test_distance();
+    test_saturation();
+    print("[OK] 227_color_space_aot");
+    0
+}

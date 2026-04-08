@@ -1,0 +1,160 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, counting-sort, sorting, linear
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Counting sort for values in range [0, max_val]
+// max_val must be <= 7
+fn counting_sort(data: Arr8, n: Int, max_val: Int) -> Arr8 {
+    // Count frequencies
+    let mut count = zeros();
+    let mut i = 0;
+    while i < n {
+        let v = get(data, i);
+        count = set(count, v, get(count, v) + 1);
+        i = i + 1;
+    }
+
+    // Reconstruct sorted array
+    let mut result = zeros();
+    let mut pos = 0;
+    let mut v = 0;
+    while v <= max_val {
+        let mut c = 0;
+        while c < get(count, v) {
+            result = set(result, pos, v);
+            pos = pos + 1;
+            c = c + 1;
+        }
+        v = v + 1;
+    }
+    result
+}
+
+fn is_sorted(a: Arr8, n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if get(a, i) < get(a, i - 1) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Check that sorted version is a permutation of original
+fn same_elements(a: Arr8, b_arr: Arr8, n: Int, max_val: Int) -> Int {
+    let mut i = 0;
+    while i <= max_val {
+        let mut ca = 0;
+        let mut cb = 0;
+        let mut j = 0;
+        while j < n {
+            if get(a, j) == i { ca = ca + 1; }
+            if get(b_arr, j) == i { cb = cb + 1; }
+            j = j + 1;
+        }
+        if ca != cb { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Bucket sort variant: sort by digit (for radix sort building block)
+fn bucket_by_digit(data: Arr8, n: Int, divisor: Int) -> Arr8 {
+    // Extract digit and sort by it using counting sort on digits 0-9
+    let mut count = zeros();
+    let mut i = 0;
+    while i < n {
+        let digit = (get(data, i) / divisor) % 8;
+        count = set(count, digit, get(count, digit) + 1);
+        i = i + 1;
+    }
+
+    // Prefix sums for stable sort positions
+    let mut prefix = zeros();
+    prefix = set(prefix, 0, 0);
+    let mut d = 1;
+    while d < 8 {
+        prefix = set(prefix, d, get(prefix, d - 1) + get(count, d - 1));
+        d = d + 1;
+    }
+
+    // Place elements
+    let mut result = zeros();
+    let mut i2 = 0;
+    while i2 < n {
+        let digit = (get(data, i2) / divisor) % 8;
+        let pos = get(prefix, digit);
+        result = set(result, pos, get(data, i2));
+        prefix = set(prefix, digit, pos + 1);
+        i2 = i2 + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Basic counting sort
+    let data1 = Arr8 { d0: 3, d1: 1, d2: 4, d3: 1, d4: 5, d5: 2, d6: 0, d7: 3 };
+    let sorted1 = counting_sort(data1, 8, 5);
+    assert_eq(is_sorted(sorted1, 8), 1);
+    assert_eq(same_elements(data1, sorted1, 8, 5), 1);
+    assert_eq(get(sorted1, 0), 0);
+    assert_eq(get(sorted1, 7), 5);
+
+    // Already sorted
+    let data2 = Arr8 { d0: 0, d1: 1, d2: 2, d3: 3, d4: 4, d5: 5, d6: 6, d7: 7 };
+    let sorted2 = counting_sort(data2, 8, 7);
+    assert_eq(is_sorted(sorted2, 8), 1);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(get(sorted2, i), i);
+        i = i + 1;
+    }
+
+    // Reverse sorted
+    let data3 = Arr8 { d0: 7, d1: 6, d2: 5, d3: 4, d4: 3, d5: 2, d6: 1, d7: 0 };
+    let sorted3 = counting_sort(data3, 8, 7);
+    assert_eq(is_sorted(sorted3, 8), 1);
+    assert_eq(same_elements(data3, sorted3, 8, 7), 1);
+
+    // All same
+    let data4 = Arr8 { d0: 3, d1: 3, d2: 3, d3: 3, d4: 3, d5: 3, d6: 3, d7: 3 };
+    let sorted4 = counting_sort(data4, 8, 3);
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(get(sorted4, j), 3);
+        j = j + 1;
+    }
+
+    // Small array
+    let data5 = Arr8 { d0: 2, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let sorted5 = counting_sort(data5, 1, 2);
+    assert_eq(get(sorted5, 0), 2);
+
+    // Bucket by digit test
+    let data6 = Arr8 { d0: 5, d1: 3, d2: 1, d3: 7, d4: 2, d5: 6, d6: 4, d7: 0 };
+    let bucketed = bucket_by_digit(data6, 8, 1);
+    assert_eq(is_sorted(bucketed, 8), 1); // single digit = fully sorted
+
+    print("DIFF_OK: counting_sort");
+    0
+}

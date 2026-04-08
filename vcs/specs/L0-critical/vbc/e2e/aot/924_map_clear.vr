@@ -1,0 +1,65 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, map, clear
+// @expected-exit: 0
+
+// Test: Map.clear() and re-insertion after clearing.
+
+fn main() -> Int {
+    // Test 1: Basic clear
+    let mut m = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+
+    if (m.len() != 3) {
+        print(f"FAIL test1a: len={m.len()}, expected 3");
+        return 1;
+    }
+
+    m.clear();
+
+    if (m.len() != 0) {
+        print(f"FAIL test1b: len after clear={m.len()}, expected 0");
+        return 1;
+    }
+
+    // Test 2: Contains returns false after clear
+    if (m.contains_key(1) != false) {
+        print("FAIL test2: should not contain 1 after clear");
+        return 1;
+    }
+
+    // Test 3: Re-insert after clear
+    m.insert(10, 1000);
+    m.insert(20, 2000);
+    if (m.len() != 2) {
+        print(f"FAIL test3a: len after re-insert={m.len()}, expected 2");
+        return 1;
+    }
+    if (m.get(10) != 1000) {
+        print(f"FAIL test3b: get(10)={m.get(10)}, expected 1000");
+        return 1;
+    }
+
+    // Test 4: Clear string-keyed map
+    let mut m2 = Map.new();
+    m2.insert("hello", 42);
+    m2.insert("world", 99);
+    m2.clear();
+    if (m2.len() != 0) {
+        print(f"FAIL test4: str map len after clear={m2.len()}, expected 0");
+        return 1;
+    }
+
+    // Test 5: Re-insert strings after clear
+    m2.insert("new_key", 555);
+    if (m2.get("new_key") != 555) {
+        print(f"FAIL test5: get after re-insert={m2.get("new_key")}, expected 555");
+        return 1;
+    }
+
+    print("924_map_clear: PASS");
+    0
+}

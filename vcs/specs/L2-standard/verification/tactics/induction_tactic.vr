@@ -1,0 +1,136 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, tactics, induction
+// @timeout: 15000
+// @description: Induction tactic for recursive properties
+
+/// Induction tactic for proving properties over recursive structures
+
+// Natural number induction
+@verify(proof)
+fn factorial(n: Int) -> Int {
+    contract#"
+        requires n >= 0;
+        ensures result >= 1;
+        ensures n == 0 implies result == 1;
+        ensures n > 0 implies result == n * factorial(n - 1);
+        decreases n;
+    ";
+    if n == 0 { 1 } else { n * factorial(n - 1) }
+}
+
+// List induction
+@verify(proof)
+fn list_length<T>(list: &List<T>) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result == 0 iff list.is_empty();
+        decreases list.len();
+    ";
+    if list.is_empty() {
+        0
+    } else {
+        1 + list_length(&list.tail())
+    }
+}
+
+// Structural induction on tree
+type Tree<T> is
+    | Leaf(T)
+    | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+@verify(proof)
+fn tree_size<T>(tree: &Tree<T>) -> Int {
+    contract#"
+        ensures result >= 1;
+        decreases tree;
+    ";
+    match tree {
+        Tree.Leaf(_) => 1,
+        Tree.Node { left, right } => {
+            1 + tree_size(left.as_ref()) + tree_size(right.as_ref())
+        }
+    }
+}
+
+// Mutual recursion with induction
+@verify(proof)
+fn is_even(n: Int) -> Bool {
+    contract#"
+        requires n >= 0;
+        ensures result == (n % 2 == 0);
+        decreases n;
+    ";
+    if n == 0 { true }
+    else { is_odd(n - 1) }
+}
+
+@verify(proof)
+fn is_odd(n: Int) -> Bool {
+    contract#"
+        requires n >= 0;
+        ensures result == (n % 2 == 1);
+        decreases n;
+    ";
+    if n == 0 { false }
+    else { is_even(n - 1) }
+}
+
+// Induction with accumulator
+@verify(proof)
+fn reverse_helper<T>(list: List<T>, acc: List<T>) -> List<T> {
+    contract#"
+        ensures result.len() == list.len() + acc.len();
+        decreases list.len();
+    ";
+    if list.is_empty() {
+        acc
+    } else {
+        let (head, tail) = list.split_first().unwrap();
+        reverse_helper(tail, [head] + acc)
+    }
+}
+
+@verify(proof)
+fn reverse<T>(list: List<T>) -> List<T> {
+    contract#"
+        ensures result.len() == list.len();
+    ";
+    reverse_helper(list, [])
+}
+
+// Strong induction
+@verify(proof)
+fn fibonacci(n: Int) -> Int {
+    contract#"
+        requires n >= 0;
+        ensures result >= 0;
+        ensures n <= 1 implies result == n;
+        ensures n > 1 implies result == fibonacci(n-1) + fibonacci(n-2);
+        decreases n;
+    ";
+    if n <= 1 { n }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+// Well-founded recursion on custom measure
+@verify(proof)
+fn gcd(a: Int, b: Int) -> Int {
+    contract#"
+        requires a > 0 && b > 0;
+        ensures result > 0;
+        ensures a % result == 0 && b % result == 0;
+        decreases b;
+    ";
+    if b == 0 { a }
+    else { gcd(b, a % b) }
+}
+
+fn main() {
+    assert(factorial(5) == 120);
+    assert(is_even(10) == true);
+    assert(is_odd(7) == true);
+    assert(fibonacci(10) == 55);
+    assert(gcd(48, 18) == 6);
+}

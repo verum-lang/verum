@@ -1,0 +1,342 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, sorting, counting-sort, radix-sort
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Counting sort for small range integers.
+// Also implement radix sort for 2-digit numbers. Verify sorted output.
+
+// =============================================================================
+// Arr8 for data arrays
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// Arr10 for count arrays (values 0..9)
+type Arr10 is {
+    e0: Int, e1: Int, e2: Int, e3: Int, e4: Int,
+    e5: Int, e6: Int, e7: Int, e8: Int, e9: Int
+};
+
+fn arr10_new() -> Arr10 {
+    Arr10 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 }
+}
+
+fn arr10_get(a: Arr10, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else { a.e9 }
+}
+
+fn arr10_set(a: Arr10, i: Int, v: Int) -> Arr10 {
+    Arr10 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 }
+    }
+}
+
+// =============================================================================
+// Counting sort: sorts array of values in range [0, max_val]
+// =============================================================================
+
+fn counting_sort(arr: Arr8, len: Int, max_val: Int) -> Arr8 {
+    // Step 1: Count occurrences
+    let mut counts = arr10_new();
+    let mut i = 0;
+    while i < len {
+        let v = arr8_get(arr, i);
+        counts = arr10_set(counts, v, arr10_get(counts, v) + 1);
+        i = i + 1;
+    }
+
+    // Step 2: Build sorted output from counts
+    let mut output = arr8_new();
+    let mut pos = 0;
+    let mut val = 0;
+    while val <= max_val {
+        let cnt = arr10_get(counts, val);
+        let mut c = 0;
+        while c < cnt {
+            output = arr8_set(output, pos, val);
+            pos = pos + 1;
+            c = c + 1;
+        }
+        val = val + 1;
+    }
+
+    output
+}
+
+// =============================================================================
+// Helper: check if array is sorted
+// =============================================================================
+
+fn is_sorted(arr: Arr8, len: Int) -> Int {
+    let mut i = 1;
+    while i < len {
+        if arr8_get(arr, i) < arr8_get(arr, i - 1) {
+            return 0;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+// =============================================================================
+// Test: counting sort basic
+// =============================================================================
+
+fn test_counting_sort_basic() {
+    let arr = Arr8 { e0: 4, e1: 2, e2: 2, e3: 8, e4: 3, e5: 3, e6: 1, e7: 0 };
+    let sorted = counting_sort(arr, 7, 8);
+    assert_eq(is_sorted(sorted, 7), 1);
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 1), 2);
+    assert_eq(arr8_get(sorted, 2), 2);
+    assert_eq(arr8_get(sorted, 3), 3);
+    assert_eq(arr8_get(sorted, 4), 3);
+    assert_eq(arr8_get(sorted, 5), 4);
+    assert_eq(arr8_get(sorted, 6), 8);
+}
+
+// =============================================================================
+// Test: already sorted
+// =============================================================================
+
+fn test_counting_sort_already_sorted() {
+    let arr = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let sorted = counting_sort(arr, 5, 5);
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 1), 2);
+    assert_eq(arr8_get(sorted, 2), 3);
+    assert_eq(arr8_get(sorted, 3), 4);
+    assert_eq(arr8_get(sorted, 4), 5);
+}
+
+// =============================================================================
+// Test: reverse sorted
+// =============================================================================
+
+fn test_counting_sort_reverse() {
+    let arr = Arr8 { e0: 5, e1: 4, e2: 3, e3: 2, e4: 1, e5: 0, e6: 0, e7: 0 };
+    let sorted = counting_sort(arr, 5, 5);
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 1), 2);
+    assert_eq(arr8_get(sorted, 2), 3);
+    assert_eq(arr8_get(sorted, 3), 4);
+    assert_eq(arr8_get(sorted, 4), 5);
+}
+
+// =============================================================================
+// Test: all same values
+// =============================================================================
+
+fn test_counting_sort_all_same() {
+    let arr = Arr8 { e0: 3, e1: 3, e2: 3, e3: 3, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sorted = counting_sort(arr, 4, 3);
+    let mut i = 0;
+    while i < 4 {
+        assert_eq(arr8_get(sorted, i), 3);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Test: single element
+// =============================================================================
+
+fn test_counting_sort_single() {
+    let arr = Arr8 { e0: 7, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sorted = counting_sort(arr, 1, 7);
+    assert_eq(arr8_get(sorted, 0), 7);
+}
+
+// =============================================================================
+// Radix sort for 2-digit numbers (0-99)
+// Sort by ones digit first, then tens digit, using counting sort as subroutine
+// =============================================================================
+
+fn get_digit(n: Int, d: Int) -> Int {
+    // d=0 => ones digit, d=1 => tens digit
+    if d == 0 {
+        n % 10
+    } else {
+        (n / 10) % 10
+    }
+}
+
+fn radix_sort_pass(arr: Arr8, len: Int, digit: Int) -> Arr8 {
+    // Counting sort on specified digit (0-9)
+    let mut counts = arr10_new();
+
+    // Count occurrences of each digit
+    let mut i = 0;
+    while i < len {
+        let d = get_digit(arr8_get(arr, i), digit);
+        counts = arr10_set(counts, d, arr10_get(counts, d) + 1);
+        i = i + 1;
+    }
+
+    // Compute prefix sums for stable sort positions
+    let mut prefix = arr10_new();
+    prefix = arr10_set(prefix, 0, 0);
+    let mut v = 1;
+    while v <= 9 {
+        let prev = arr10_get(prefix, v - 1) + arr10_get(counts, v - 1);
+        prefix = arr10_set(prefix, v, prev);
+        v = v + 1;
+    }
+
+    // Build output (stable: process left to right)
+    let mut output = arr8_new();
+    let mut j = 0;
+    while j < len {
+        let val = arr8_get(arr, j);
+        let d = get_digit(val, digit);
+        let pos = arr10_get(prefix, d);
+        output = arr8_set(output, pos, val);
+        prefix = arr10_set(prefix, d, pos + 1);
+        j = j + 1;
+    }
+
+    output
+}
+
+fn radix_sort(arr: Arr8, len: Int) -> Arr8 {
+    // Sort by ones digit, then tens digit
+    let pass1 = radix_sort_pass(arr, len, 0);  // ones
+    let pass2 = radix_sort_pass(pass1, len, 1);  // tens
+    pass2
+}
+
+// =============================================================================
+// Test: radix sort basic
+// =============================================================================
+
+fn test_radix_sort_basic() {
+    let arr = Arr8 { e0: 53, e1: 17, e2: 89, e3: 42, e4: 31, e5: 5, e6: 0, e7: 0 };
+    let sorted = radix_sort(arr, 6);
+    assert_eq(is_sorted(sorted, 6), 1);
+    assert_eq(arr8_get(sorted, 0), 5);
+    assert_eq(arr8_get(sorted, 1), 17);
+    assert_eq(arr8_get(sorted, 2), 31);
+    assert_eq(arr8_get(sorted, 3), 42);
+    assert_eq(arr8_get(sorted, 4), 53);
+    assert_eq(arr8_get(sorted, 5), 89);
+}
+
+// =============================================================================
+// Test: radix sort all same
+// =============================================================================
+
+fn test_radix_sort_same() {
+    let arr = Arr8 { e0: 55, e1: 55, e2: 55, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sorted = radix_sort(arr, 3);
+    assert_eq(arr8_get(sorted, 0), 55);
+    assert_eq(arr8_get(sorted, 1), 55);
+    assert_eq(arr8_get(sorted, 2), 55);
+}
+
+// =============================================================================
+// Test: radix sort single digits
+// =============================================================================
+
+fn test_radix_sort_single_digits() {
+    let arr = Arr8 { e0: 9, e1: 3, e2: 7, e3: 1, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let sorted = radix_sort(arr, 5);
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 1), 3);
+    assert_eq(arr8_get(sorted, 2), 5);
+    assert_eq(arr8_get(sorted, 3), 7);
+    assert_eq(arr8_get(sorted, 4), 9);
+}
+
+// =============================================================================
+// Test: radix sort stability — elements with same tens digit preserve order
+// =============================================================================
+
+fn test_radix_sort_stability() {
+    // 21, 23, 22 should become 21, 22, 23 (stable by ones within same tens)
+    let arr = Arr8 { e0: 21, e1: 23, e2: 22, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sorted = radix_sort(arr, 3);
+    assert_eq(arr8_get(sorted, 0), 21);
+    assert_eq(arr8_get(sorted, 1), 22);
+    assert_eq(arr8_get(sorted, 2), 23);
+}
+
+// =============================================================================
+// Test: radix sort with zeros
+// =============================================================================
+
+fn test_radix_sort_with_zeros() {
+    let arr = Arr8 { e0: 30, e1: 10, e2: 0, e3: 20, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sorted = radix_sort(arr, 4);
+    assert_eq(arr8_get(sorted, 0), 0);
+    assert_eq(arr8_get(sorted, 1), 10);
+    assert_eq(arr8_get(sorted, 2), 20);
+    assert_eq(arr8_get(sorted, 3), 30);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_counting_sort_basic();
+    test_counting_sort_already_sorted();
+    test_counting_sort_reverse();
+    test_counting_sort_all_same();
+    test_counting_sort_single();
+    test_radix_sort_basic();
+    test_radix_sort_same();
+    test_radix_sort_single_digits();
+    test_radix_sort_stability();
+    test_radix_sort_with_zeros();
+    print("[OK] 277_interp_counting_sort");
+    0
+}

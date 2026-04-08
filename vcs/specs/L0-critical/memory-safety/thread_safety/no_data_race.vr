@@ -1,0 +1,168 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, thread-safety, data-race, compile-time, concurrency
+// @description: Tests compile-time detection of potential data races
+
+mount core.sync.atomic.{AtomicInt, Ordering};
+mount core.sync.Mutex;
+mount core.sync.mpsc;
+
+/// Verum prevents data races at compile time using:
+/// - Send trait: types safe to transfer between threads
+/// - Sync trait: types safe to share references between threads
+/// - Ownership tracking across thread boundaries
+/// - Required synchronization for shared mutable state
+///
+/// A data race occurs when:
+/// 1. Two or more threads access same memory
+/// 2. At least one access is a write
+/// 3. Accesses are not synchronized
+
+fn main() {
+    test_unsynchronized_write();
+    test_non_send_type();
+    test_non_sync_type();
+    test_mutable_aliasing_across_threads();
+}
+
+fn test_unsynchronized_write() {
+    let mut counter = 0;
+
+    // INVALID: Mutable access from multiple threads without sync
+    let handle1 = spawn(|| {
+        counter += 1;  // ERROR: Data race: shared mutable access without synchronization
+    });
+
+    let handle2 = spawn(|| {
+        counter += 1;  // ERROR: Data race: shared mutable access without synchronization
+    });
+
+    handle1.join();
+    handle2.join();
+}
+
+fn test_non_send_type() {
+    // Rc is not Send - single-threaded reference counting
+    let rc = Rc.new(42);
+
+    // INVALID: Cannot send Rc across thread boundary
+    let handle = spawn(move || {
+        print(f"{*rc}");  // ERROR: Cannot send non-Send type across threads
+    });
+
+    handle.join();
+}
+
+fn test_non_sync_type() {
+    // RefCell is not Sync - interior mutability without synchronization
+    let cell = RefCell.new(0);
+    let cell_ref = &cell;
+
+    // INVALID: Cannot share RefCell reference between threads
+    let handle = spawn(|| {
+        let mut borrow = cell_ref.borrow_mut();  // ERROR: Cannot share non-Sync type between threads
+        *borrow += 1;
+    });
+
+    handle.join();
+}
+
+fn test_mutable_aliasing_across_threads() {
+    let mut data = [1, 2, 3, 4, 5];
+
+    // INVALID: Mutable references cannot be shared
+    let handle1 = spawn(|| {
+        data.push(6);  // ERROR: Cannot have mutable reference in multiple threads
+    });
+
+    let handle2 = spawn(|| {
+        data.push(7);  // ERROR: Cannot have mutable reference in multiple threads
+    });
+
+    handle1.join();
+    handle2.join();
+}
+
+// VALID: Properly synchronized patterns
+
+fn valid_atomic_counter() {
+    let counter = AtomicInt.new(0);
+    let counter_ref = &counter;  // AtomicInt is Sync
+
+    let handles: List<JoinHandle<()>> = (0..10)
+        .map(|_| {
+            spawn(move || {
+                counter_ref.fetch_add(1, Ordering.SeqCst);
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join();
+    }
+
+    assert(counter.load(Ordering.SeqCst) == 10);
+}
+
+fn valid_mutex_protected() {
+    let data = Mutex.new([1, 2, 3]);
+    let data_ref = &data;  // Mutex<T> is Sync when T is Send
+
+    let handles: List<JoinHandle<()>> = (0..10)
+        .map(|i| {
+            spawn(move || {
+                let mut guard = data_ref.lock().unwrap();
+                guard.push(i);  // Safe: exclusive access via lock
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join();
+    }
+
+    let final_data = data.lock().unwrap();
+    assert(final_data.len() == 13);
+}
+
+fn valid_shared_read() {
+    let data = Shared.new([1, 2, 3, 4, 5]);
+
+    // Shared<T> allows multiple readers
+    let handles: List<JoinHandle<Int>> = (0..10)
+        .map(|_| {
+            let data_clone = data.clone();
+            spawn(move || {
+                data_clone.iter().sum()  // Read-only access is safe
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        let sum = handle.join().unwrap();
+        assert(sum == 15);
+    }
+}
+
+fn valid_channel_communication() {
+    let (tx, rx) = mpsc.channel<Int>();
+
+    let producer = spawn(move || {
+        for i in 0..10 {
+            tx.send(i).unwrap();  // Ownership transferred through channel
+        }
+    });
+
+    let consumer = spawn(move || {
+        let mut sum = 0;
+        for received in rx {
+            sum += received;
+        }
+        sum
+    });
+
+    producer.join();
+    let total = consumer.join().unwrap();
+    assert(total == 45);
+}

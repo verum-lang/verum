@@ -1,0 +1,215 @@
+// @test: parse-fail
+// @expected-error: E006
+// @tier: 0
+// @level: L1
+// @tags: refinement, errors, parse, syntax
+// @description: Parse-level errors in refinement syntax
+
+/// Error E0001: Parse error in refinement
+/// Occurs when the refinement predicate syntax is malformed.
+/// These errors are detected during parsing, before type checking.
+
+// ============================================================================
+// Missing delimiters
+// ============================================================================
+
+/// ERROR: Missing closing brace in refinement
+type MissingCloseBrace is Int{> 0;
+
+/// ERROR: Missing opening brace in refinement
+type MissingOpenBrace is Int > 0};
+
+/// ERROR: Unbalanced parentheses in refinement
+type UnbalancedParen is Int{(it > 0};
+
+/// ERROR: Missing closing paren
+type MissingCloseParen is Int{len(it > 0};
+
+// ============================================================================
+// Invalid operators
+// ============================================================================
+
+/// ERROR: Invalid operator in refinement
+type InvalidOp is Int{it <> 0};  // <> is not valid
+
+/// ERROR: Triple equals not valid
+type TripleEquals is Int{it === 0};
+
+/// ERROR: Single ampersand for logical and (should be &&)
+type SingleAnd is Int{it > 0 & it < 100};
+
+/// ERROR: Single pipe for logical or (should be ||)
+type SingleOr is Int{it < 0 | it > 100};
+
+// ============================================================================
+// Missing operands
+// ============================================================================
+
+/// ERROR: Missing left operand
+type MissingLeft is Int{&& it > 0};
+
+/// ERROR: Missing right operand
+type MissingRight is Int{it > };
+
+/// ERROR: Missing both operands
+type MissingBoth is Int{>};
+
+/// ERROR: Dangling operator
+type DanglingOp is Int{it > 0 &&};
+
+// ============================================================================
+// Invalid expressions
+// ============================================================================
+
+/// ERROR: Assignment in refinement (should be comparison)
+type AssignmentInRef is Int{it = 5};
+
+/// ERROR: Statement in refinement
+type StatementInRef is Int{let x = 5; x > 0};
+
+/// ERROR: Multiple expressions without operator
+type MultipleExprs is Int{it 5};
+
+// ============================================================================
+// Keyword misuse
+// ============================================================================
+
+/// ERROR: if-else not valid in refinement predicate (use ternary or logical)
+type IfInRef is Int{if it > 0 then true else false};
+
+/// ERROR: for loop in refinement
+type ForInRef is Int{for x in [1,2,3] { x }};
+
+/// ERROR: return in refinement
+type ReturnInRef is Int{return it > 0};
+
+// ============================================================================
+// Malformed where clauses
+// ============================================================================
+
+/// ERROR: where without predicate
+type EmptyWhere is Int where;
+
+/// ERROR: Multiple where clauses
+type DoubleWhere is Int where it > 0 where it < 100;
+
+/// ERROR: where and braces mixed incorrectly
+type MixedSyntax is Int{> 0} where < 100;
+
+// ============================================================================
+// Invalid identifiers
+// ============================================================================
+
+/// ERROR: Numeric identifier not valid
+type NumericIdent is Int{123abc > 0};
+
+/// ERROR: Special characters in identifier
+type SpecialChars is Int{my$var > 0};
+
+/// ERROR: Reserved keyword as identifier
+type ReservedKeyword is Int{fn > 0};
+
+// ============================================================================
+// Invalid literals
+// ============================================================================
+
+/// ERROR: Malformed numeric literal
+type BadNumeric is Int{it > 12.34.56};
+
+/// ERROR: Unclosed string in refinement
+type UnclosedString is Text{it == "hello};
+
+/// ERROR: Invalid escape sequence
+type BadEscape is Text{it == "hello\q"};
+
+// ============================================================================
+// Type annotation errors
+// ============================================================================
+
+/// ERROR: Type annotation inside refinement predicate
+type TypeInPredicate is Int{(it: Int) > 0};
+
+/// ERROR: Generic in wrong position
+type BadGeneric is Int<T>{it > 0};
+
+// ============================================================================
+// Lambda/closure syntax errors
+// ============================================================================
+
+/// ERROR: Malformed lambda in refinement
+type BadLambda is Int where |x| -> x > 0;  // -> instead of =>
+
+/// ERROR: Missing lambda body
+type NoLambdaBody is Int where |x|;
+
+/// ERROR: Multiple arrows
+type MultipleArrows is Int where |x| => => x > 0;
+
+// ============================================================================
+// Quantifier syntax errors
+// ============================================================================
+
+/// ERROR: forall without body
+type ForallNobody is List<Int>{forall x in it};
+
+/// ERROR: exists without predicate
+type ExistsNoPred is List<Int>{exists x in it =>};
+
+/// ERROR: Missing 'in' keyword
+type MissingIn is List<Int>{forall x it => x > 0};
+
+// ============================================================================
+// Comment errors in refinements
+// ============================================================================
+
+/// ERROR: Unclosed block comment in refinement
+type UnclosedComment is Int{/* comment it > 0};
+
+// ============================================================================
+// Whitespace/newline issues
+// ============================================================================
+
+/// ERROR: Unexpected end of line (if newlines matter in refinements)
+type UnexpectedEOL is Int{it >
+    // continuation error
+};
+
+// ============================================================================
+// Empty refinements
+// ============================================================================
+
+/// ERROR: Empty braces in refinement (no predicate)
+type EmptyRefinement is Int{};
+
+/// ERROR: Only whitespace in refinement
+type WhitespaceOnly is Int{   };
+
+// ============================================================================
+// Nested refinement syntax errors
+// ============================================================================
+
+/// ERROR: Double braces
+type DoubleBraces is Int{{> 0}};
+
+/// ERROR: Refinement on refinement with bad syntax
+type NestedBad is Int{> 0}{< 100};
+
+// ============================================================================
+// Expected diagnostics
+// ============================================================================
+
+// Expected error message format:
+// error[E0001]: parse error
+//   --> refinement_parse_error.vr:12:32
+//    |
+// 12 | type MissingCloseBrace is Int{> 0;
+//    |                                  ^
+//    |                                  |
+//    |                                  expected `}`
+//    |
+//    = note: unclosed refinement predicate
+//    = help: add closing `}` to complete the refinement
+
+fn main() {
+    // This file should not parse - all refinements have syntax errors
+}

@@ -1,0 +1,102 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: memory-safety, uninitialized, compile-time, definite-assignment
+// @description: Tests that reading uninitialized variables is caught at compile time via definite assignment analysis
+// NOTE: When implemented, should produce errors like:
+// - E201 "Use of uninitialized variable 'x'"
+// - E201 "Use of uninitialized variable 'y'"
+// - E201 "Use of possibly uninitialized variable 'z'"
+
+/// Verum uses definite assignment analysis to ensure all variables
+/// are initialized before use. This is a COMPILE-TIME check, distinct
+/// from CBGR runtime memory safety. This prevents:
+/// - Reading garbage memory values
+/// - Undefined behavior from uninitialized reads
+/// - Security vulnerabilities from information leaks
+///
+/// Note: E201 errors are definite assignment errors, NOT borrow checker errors (E30x).
+/// Verum does not have a compile-time borrow checker - CBGR handles memory safety at runtime.
+
+fn main() {
+    // INVALID: declaration without initialization, then use
+    let x: Int;
+    print(f"x = {x}");  // ERROR: Use of uninitialized variable 'x'
+
+    // INVALID: conditional initialization (not all paths)
+    let y: Int;
+    if some_condition() {
+        y = 10;
+    }
+    // y might not be initialized if condition is false
+    print(f"y = {y}");  // ERROR: Use of uninitialized variable 'y'
+
+    // INVALID: loop might not execute
+    let z: Int;
+    for i in 0..maybe_zero() {
+        z = i;
+    }
+    // z might never be assigned if loop body doesn't execute
+    print(f"z = {z}");  // ERROR: Use of possibly uninitialized variable 'z'
+}
+
+fn some_condition() -> Bool {
+    true
+}
+
+fn maybe_zero() -> Int {
+    0  // Loop won't execute
+}
+
+// Additional test cases for initialization analysis
+
+fn test_conditional_full_coverage() {
+    let x: Int;
+    if some_condition() {
+        x = 1;
+    } else {
+        x = 2;
+    }
+    // OK: x is initialized on all paths
+    print(f"x = {x}");  // This would be VALID
+}
+
+fn test_match_full_coverage() {
+    let value = get_variant();
+    let x: Int;
+
+    match value {
+        Variant.A => x = 1,
+        Variant.B => x = 2,
+        Variant.C => x = 3,
+    }
+    // OK: exhaustive match initializes x on all paths
+    print(f"x = {x}");  // This would be VALID
+}
+
+fn test_loop_with_break() {
+    let x: Int;
+
+    loop {
+        x = 42;
+        break;
+    }
+    // OK: loop definitely executes at least once and initializes x
+    print(f"x = {x}");  // This would be VALID
+}
+
+fn test_early_return() {
+    let x: Int;
+
+    if some_condition() {
+        return;  // Function exits, x not used
+    }
+    x = 10;
+    print(f"x = {x}");  // OK: only reached when x is initialized
+}
+
+type Variant is A | B | C;
+
+fn get_variant() -> Variant {
+    Variant.A
+}

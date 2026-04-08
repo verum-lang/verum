@@ -1,0 +1,265 @@
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1
+// @tags: types, throws, type-checking
+// @description: Test throws clause type validation and error type propagation
+
+/// Tests for throws clause type checking (positive tests - valid throws usage).
+/// The throws clause provides typed error boundaries for functions.
+/// Note: This file is in the errors folder but tests VALID throws patterns.
+/// Spec: grammar/verum.ebnf Section 2.4 - throws_clause
+
+// === Basic Error Types ===
+
+type ParseError is
+    | SyntaxError { line: Int, message: Text }
+    | UnexpectedToken(Text)
+    | UnexpectedEof;
+
+type ValidationError is
+    | InvalidFormat(Text)
+    | OutOfRange { min: Int, max: Int, actual: Int }
+    | MissingField(Text);
+
+type IoError is
+    | FileNotFound(Text)
+    | PermissionDenied(Text)
+    | NetworkError(Text);
+
+type CompositeError is
+    | Parse(ParseError)
+    | Validation(ValidationError)
+    | Io(IoError);
+
+// === Basic throws clause - single error type ===
+
+/// Function with single throws type
+fn parse_integer(input: &Text) throws(ParseError) -> Int {
+    if input.is_empty() {
+        throw ParseError.UnexpectedEof;
+    }
+    match input.parse<Int>() {
+        Some(n) => n,
+        None => throw ParseError.SyntaxError {
+            line: 1,
+            message: format("Invalid integer: {}", input)
+        }
+    }
+}
+
+/// Function with different single throws type
+fn validate_age(age: Int) throws(ValidationError) -> Int {
+    if age < 0 || age > 150 {
+        throw ValidationError.OutOfRange { min: 0, max: 150, actual: age };
+    }
+    age
+}
+
+// === Union throws clause - multiple error types ===
+
+/// Function that can throw either ParseError or ValidationError
+fn parse_and_validate_age(input: &Text) throws(ParseError | ValidationError) -> Int {
+    // This can throw ParseError
+    let age = parse_integer(input)?;
+
+    // This can throw ValidationError
+    validate_age(age)?
+}
+
+/// Function with three possible error types
+fn read_and_parse(path: &Text) throws(IoError | ParseError | ValidationError) -> Int {
+    // Would throw IoError
+    let content = read_file(path)?;
+
+    // Can throw ParseError or ValidationError
+    parse_and_validate_age(&content)?
+}
+
+fn read_file(path: &Text) throws(IoError) -> Text {
+    if !path.starts_with("/") {
+        throw IoError.FileNotFound(path.clone());
+    }
+    "42" // Simulated file content
+}
+
+// === Error type propagation ===
+
+/// Propagation: called function's throws must be subset of caller's throws
+fn process_input(input: &Text) throws(ParseError | ValidationError) -> Int {
+    // parse_integer throws ParseError - subset of our throws
+    let n = parse_integer(input)?;
+
+    // validate_age throws ValidationError - subset of our throws
+    validate_age(n)?
+}
+
+/// Propagation with error conversion
+fn process_with_conversion(input: &Text) throws(CompositeError) -> Int {
+    // Convert ParseError to CompositeError.Parse
+    let n = parse_integer(input)
+        .map_err(|e| CompositeError.Parse(e))?;
+
+    // Convert ValidationError to CompositeError.Validation
+    validate_age(n)
+        .map_err(|e| CompositeError.Validation(e))?
+}
+
+// === Throws with generics ===
+
+/// Generic function with throws clause
+fn parse_item<T>(input: &Text, parser: fn(&Text) -> Result<T, ParseError>) throws(ParseError) -> T {
+    parser(input)?
+}
+
+/// Generic error type
+fn fallible_map<T, U, E>(value: T, f: fn(T) -> Result<U, E>) throws(E) -> U {
+    f(value)?
+}
+
+// === Throws clause interaction with Result ===
+
+/// Throws can be used alongside Result for recoverable operations
+fn try_parse_or_default(input: &Text) -> Int {
+    // Call throwing function, recover with default
+    try {
+        parse_integer(input)?
+    } recover {
+        _ => 0
+    }
+}
+
+/// Converting throws to Result explicitly
+fn as_result(input: &Text) -> Result<Int, ParseError> {
+    try {
+        Ok(parse_integer(input)?)
+    } recover {
+        e => Err(e)
+    }
+}
+
+// === Type checking: subtyping in throws ===
+
+/// More specific throws can call less specific (covariance for errors)
+type BaseError is Text;
+
+type SpecificError is
+    | Specific1(Text)
+    | Specific2(Int);
+
+implement From<SpecificError> for BaseError {
+    fn from(e: SpecificError) -> BaseError {
+        match e {
+            SpecificError.Specific1(msg) => msg,
+            SpecificError.Specific2(code) => format("Error code: {}", code)
+        }
+    }
+}
+
+fn throws_specific() throws(SpecificError) -> Int {
+    throw SpecificError.Specific1("specific error");
+}
+
+fn throws_base() throws(BaseError) -> Int {
+    // Can call throws_specific because SpecificError converts to BaseError
+    throws_specific().map_err(BaseError.from)?
+}
+
+// === Throws with protocols ===
+
+type Parser is protocol {
+    type Output;
+    type Error;
+
+    fn parse(&self, input: &Text) throws(Self.Error) -> Self.Output;
+}
+
+type IntParser is ();
+
+implement Parser for IntParser {
+    type Output is Int;
+    type Error is ParseError;
+
+    fn parse(&self, input: &Text) throws(ParseError) -> Int {
+        parse_integer(input)?
+    }
+}
+
+// === Throws in closures ===
+
+fn with_throwing_closure() throws(ParseError) -> Int {
+    let parser: fn(&Text) -> Result<Int, ParseError> = |s| {
+        parse_integer(s)?
+    };
+
+    parser("42")?
+}
+
+// === Empty throws (never throws) ===
+
+/// Function marked as never throwing - must handle all errors internally
+fn safe_parse(input: &Text) -> Int {
+    try {
+        parse_integer(input)?
+    } recover {
+        _ => 0
+    }
+}
+
+// === Verification tests ===
+
+fn main() {
+    // Test basic throws
+    let result1 = try {
+        parse_integer("42")?
+    } recover {
+        _ => -1
+    };
+    assert(result1 == 42);
+
+    // Test throws propagation
+    let result2 = try {
+        parse_and_validate_age("25")?
+    } recover {
+        _ => -1
+    };
+    assert(result2 == 25);
+
+    // Test union throws
+    let result3 = try {
+        process_input("100")?
+    } recover {
+        ParseError.UnexpectedEof => -1,
+        ParseError.SyntaxError { .. } => -2,
+        ParseError.UnexpectedToken(_) => -3,
+        ValidationError.OutOfRange { .. } => -4,
+        ValidationError.InvalidFormat(_) => -5,
+        ValidationError.MissingField(_) => -6
+    };
+    assert(result3 == 100);
+
+    // Test error conversion
+    let result4 = try {
+        process_with_conversion("50")?
+    } recover {
+        CompositeError.Parse(_) => -1,
+        CompositeError.Validation(_) => -2,
+        CompositeError.Io(_) => -3
+    };
+    assert(result4 == 50);
+
+    // Test safe (non-throwing) function
+    let result5 = safe_parse("invalid");
+    assert(result5 == 0);
+
+    let result6 = safe_parse("123");
+    assert(result6 == 123);
+
+    // Test protocol with throws
+    let parser = IntParser {};
+    let result7 = try {
+        parser.parse("999")?
+    } recover {
+        _ => -1
+    };
+    assert(result7 == 999);
+}

@@ -1,0 +1,103 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: btreemap, collections, ordered-map
+// @description: BTreeMap ordered map operations
+
+fn test_basic() -> Int {
+    let mut pass = 0;
+    let mut m = BTreeMap.new();
+    m.insert(3, 30);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    if m.len() == 3 { pass = pass + 1; }
+
+    let k1 = 1;
+    match m.get(&k1) {
+        Some(v) => { if v == 10 { pass = pass + 1; } },
+        None => {},
+    }
+    let k2 = 2;
+    match m.get(&k2) {
+        Some(v) => { if v == 20 { pass = pass + 1; } },
+        None => {},
+    }
+    let k3 = 3;
+    match m.get(&k3) {
+        Some(v) => { if v == 30 { pass = pass + 1; } },
+        None => {},
+    }
+    pass
+}
+
+fn test_overwrite() -> Int {
+    let mut pass = 0;
+    let mut m = BTreeMap.new();
+    m.insert(1, 100);
+    m.insert(1, 200);
+    if m.len() == 1 { pass = pass + 1; }
+    let k = 1;
+    match m.get(&k) {
+        Some(v) => { if v == 200 { pass = pass + 1; } },
+        None => {},
+    }
+    pass
+}
+
+fn test_missing() -> Int {
+    let mut pass = 0;
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    let k = 99;
+    match m.get(&k) {
+        Some(_) => {},
+        None => { pass = pass + 1; },
+    }
+    pass
+}
+
+fn test_contains() -> Int {
+    let mut pass = 0;
+    let mut m = BTreeMap.new();
+    m.insert(5, 50);
+    m.insert(10, 100);
+    let k5 = 5;
+    let k7 = 7;
+    if m.contains_key(&k5) { pass = pass + 1; }
+    if !m.contains_key(&k7) { pass = pass + 1; }
+    pass
+}
+
+fn test_remove() -> Int {
+    let mut pass = 0;
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let k = 2;
+    m.remove(&k);
+    if m.len() == 2 { pass = pass + 1; }
+    if !m.contains_key(&k) { pass = pass + 1; }
+    pass
+}
+
+fn main() -> Int {
+    let r1 = test_basic();
+    print(f"  basic: {r1}/4");
+    let r2 = test_overwrite();
+    print(f"  overwrite: {r2}/2");
+    let r3 = test_missing();
+    print(f"  missing: {r3}/1");
+    let r4 = test_contains();
+    print(f"  contains: {r4}/2");
+    let r5 = test_remove();
+    print(f"  remove: {r5}/2");
+    let total = r1 + r2 + r3 + r4 + r5;
+    print(f"BTreeMap: pass = {total}/11");
+    if total == 11 {
+        print("BTreeMap tests passed!");
+        0
+    } else {
+        1
+    }
+}

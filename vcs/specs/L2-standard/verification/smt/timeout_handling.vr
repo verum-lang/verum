@@ -1,0 +1,138 @@
+// @test: verify-fail
+// @timeout: 100
+// @tier: 0
+// @level: L2
+// @tags: smt, timeout
+// @expected-error: VerificationTimeout
+
+/// Tests for SMT solver timeout handling
+/// These examples are designed to be undecidable or very slow
+
+/// Exponential blowup with nested quantifiers
+@verify(proof)
+fn nested_quantifiers_explosion(n: Int) -> Bool {
+    contract#"
+        // This has exponential instantiation complexity
+        ensures forall a, b, c, d, e, f, g, h.
+            0 <= a < n && 0 <= b < n && 0 <= c < n && 0 <= d < n &&
+            0 <= e < n && 0 <= f < n && 0 <= g < n && 0 <= h < n
+            implies a + b + c + d + e + f + g + h >= 0;
+    ";
+    true
+}
+
+/// Non-linear arithmetic (undecidable in general)
+@verify(proof)
+fn nonlinear_puzzle(x: Int, y: Int, z: Int) -> Bool {
+    contract#"
+        // Fermat's Last Theorem for n=3 (undecidable without special theory)
+        ensures x > 0 && y > 0 && z > 0 implies x*x*x + y*y*y != z*z*z;
+    ";
+    true
+}
+
+/// Complex recursive predicate
+@verify(proof)
+fn ackermann(m: Int{>= 0}, n: Int{>= 0}) -> Int {
+    contract#"
+        requires m >= 0 && n >= 0;
+        ensures result > n;
+        ensures m > 0 implies result > ackermann(m - 1, 0);
+        decreases (m, n);
+    ";
+    if m == 0 {
+        n + 1
+    } else if n == 0 {
+        ackermann(m - 1, 1)
+    } else {
+        ackermann(m - 1, ackermann(m, n - 1))
+    }
+}
+
+/// Unbounded loop analysis
+@verify(proof)
+fn collatz(n: Int{> 0}) -> Int {
+    contract#"
+        requires n > 0;
+        // Collatz conjecture - undecidable
+        ensures result == 1;
+        decreases ?;  // Unknown termination measure
+    ";
+    let mut x = n;
+    while x != 1 {
+        if x % 2 == 0 {
+            x = x / 2;
+        } else {
+            x = 3 * x + 1;
+        }
+    }
+    x
+}
+
+/// Exponential state space
+@verify(proof)
+fn permutation_check(arr: &List<Int>) -> Bool {
+    contract#"
+        // Check all n! permutations
+        ensures result == exists perm: List<Int>.
+            is_permutation(perm, arr) && is_sorted(&perm);
+    ";
+    // This is O(n!) to verify
+    true
+}
+
+/// High-degree polynomial constraints
+@verify(proof)
+fn polynomial_roots(coeffs: &List<Float>) -> List<Float> {
+    contract#"
+        requires coeffs.len() > 0;
+        // Finding all roots is computationally expensive
+        ensures forall i: Int. 0 <= i < result.len() implies
+            evaluate_polynomial(coeffs, result[i]) == 0.0;
+    ";
+    // Complex algebraic computation
+    find_roots(coeffs)
+}
+
+/// Quantifier alternation depth
+@verify(proof)
+fn game_winning_strategy(board: &Board) -> Bool {
+    contract#"
+        // Three-level alternation: exists-forall-exists
+        ensures result == exists my_move.
+            forall opponent_move.
+                exists my_response.
+                    is_winning(apply_moves(board, [my_move, opponent_move, my_response]));
+    ";
+    minimax(board, 3) > 0
+}
+
+/// Bit-vector with large width
+@verify(proof)
+fn hash_collision(data1: &[u8; 256], data2: &[u8; 256]) -> Bool {
+    contract#"
+        // Finding hash collisions is computationally hard
+        ensures !result || (data1 != data2 && hash(data1) == hash(data2));
+    ";
+    false  // Assume no collisions found
+}
+
+/// Floating-point precision issues
+@verify(proof)
+fn floating_point_associativity(a: Float, b: Float, c: Float) -> Bool {
+    contract#"
+        // Floating-point is NOT associative - verification is complex
+        ensures (a + b) + c == a + (b + c);  // This may fail!
+    ";
+    true  // Incorrect assumption
+}
+
+/// Timeout recovery annotation
+@verify(proof, timeout_fallback: compile_time)
+fn with_fallback(x: Int) -> Int {
+    contract#"
+        ensures result >= x;
+        // If SMT times out, fall back to static checking
+    ";
+    if x < 0 { -x } else { x }
+}

@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: Index out of bounds
+// @tags: meta, builtins, text, manipulation, errors
+// @description: Tests error handling for text manipulation builtins
+
+// Test text_substring out of bounds - main error we test
+meta fn test_substring_out_of_bounds() -> Text {
+    let text = "Hello";
+    text_substring(text, 0, 100)  // ERROR: Index out of bounds
+}
+
+fn main() {
+    @const {
+        let _ = test_substring_out_of_bounds();
+    };
+}

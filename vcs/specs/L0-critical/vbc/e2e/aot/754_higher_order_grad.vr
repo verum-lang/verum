@@ -1,0 +1,183 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, autodiff, higher-order, hessian, taylor
+// @expected-exit: 0
+
+// Tests higher-order gradient computation.
+// Verifies second/third derivatives, Hessian matrices, and Taylor series.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// f(x) = x^4
+// f'(x) = 4x^3
+// f''(x) = 12x^2
+// f'''(x) = 24x
+// f''''(x) = 24
+fn f_quartic(x: Int) -> Int { x * x * x * x }
+fn df_quartic(x: Int) -> Int { 4 * x * x * x }
+fn d2f_quartic(x: Int) -> Int { 12 * x * x }
+fn d3f_quartic(x: Int) -> Int { 24 * x }
+fn d4f_quartic() -> Int { 24 }
+
+// g(x) = x^5 - 3x^3 + 2x
+// g'(x) = 5x^4 - 9x^2 + 2
+// g''(x) = 20x^3 - 18x
+// g'''(x) = 60x^2 - 18
+fn g_poly(x: Int) -> Int { x*x*x*x*x - 3*x*x*x + 2*x }
+fn dg_poly(x: Int) -> Int { 5*x*x*x*x - 9*x*x + 2 }
+fn d2g_poly(x: Int) -> Int { 20*x*x*x - 18*x }
+fn d3g_poly(x: Int) -> Int { 60*x*x - 18 }
+
+// Hessian of f(x,y) = x^2*y + x*y^3
+// ∂f/∂x = 2xy + y^3
+// ∂f/∂y = x^2 + 3xy^2
+// H = [[2y, 2x+3y^2], [2x+3y^2, 6xy]]
+fn hf(x: Int, y: Int) -> Int { x*x*y + x*y*y*y }
+fn hf_xx(y: Int) -> Int { 2 * y }
+fn hf_xy(x: Int, y: Int) -> Int { 2 * x + 3 * y * y }
+fn hf_yy(x: Int, y: Int) -> Int { 6 * x * y }
+
+// Finite difference second derivative: f''(x) ≈ (f(x+1) - 2f(x) + f(x-1))
+fn fd_second_deriv(f_plus: Int, f_zero: Int, f_minus: Int) -> Int {
+    f_plus - 2 * f_zero + f_minus
+}
+
+fn main() -> Int {
+    // Test 1: Second derivative of x^4
+    // f''(2) = 12*4 = 48
+    assert_eq(d2f_quartic(2), 48);
+    // Verify via finite difference of first derivative
+    let fd_d2 = (df_quartic(3) - df_quartic(1)) / 2;
+    // df(3) = 108, df(1) = 4, fd = (108-4)/2 = 52
+    // (Not exact due to h=1, but close)
+    assert_eq(fd_d2, 52);
+    // More accurate: fd2 = (f(x+1) - 2*f(x) + f(x-1))
+    let fd2_accurate = fd_second_deriv(f_quartic(3), f_quartic(2), f_quartic(1));
+    // f(3)=81, f(2)=16, f(1)=1 → 81 - 32 + 1 = 50
+    assert_eq(fd2_accurate, 50);
+
+    // Test 2: Third derivative of x^4
+    // f'''(2) = 24*2 = 48
+    assert_eq(d3f_quartic(2), 48);
+    // Fourth derivative is constant
+    assert_eq(d4f_quartic(), 24);
+
+    // Test 3: Higher derivatives of polynomial
+    // g(x) = x^5 - 3x^3 + 2x at x=1
+    assert_eq(g_poly(1), 0);         // 1 - 3 + 2 = 0
+    assert_eq(dg_poly(1), -2);       // 5 - 9 + 2 = -2
+    assert_eq(d2g_poly(1), 2);       // 20 - 18 = 2
+    assert_eq(d3g_poly(1), 42);      // 60 - 18 = 42
+
+    // Test 4: Higher derivatives at x=0
+    assert_eq(g_poly(0), 0);
+    assert_eq(dg_poly(0), 2);        // Only constant term survives
+    assert_eq(d2g_poly(0), 0);       // All terms have x factor
+    assert_eq(d3g_poly(0), -18);     // -18
+
+    // Test 5: Hessian matrix at (1, 2)
+    let hxx = hf_xx(2);           // 2*2 = 4
+    let hxy = hf_xy(1, 2);       // 2*1 + 3*4 = 14
+    let hyy = hf_yy(1, 2);       // 6*1*2 = 12
+    assert_eq(hxx, 4);
+    assert_eq(hxy, 14);
+    assert_eq(hyy, 12);
+
+    // Hessian determinant
+    let det = hxx * hyy - hxy * hxy;
+    // 4*12 - 14*14 = 48 - 196 = -148
+    assert_eq(det, -148);
+    // Negative determinant → saddle point
+
+    // Test 6: Symmetry of Hessian (Schwarz's theorem)
+    // ∂²f/∂x∂y = ∂²f/∂y∂x
+    let hyx = hf_xy(1, 2);  // Same formula due to symmetry
+    assert_eq(hxy, hyx);
+
+    // Test 7: Taylor expansion verification
+    // f(x+h) ≈ f(x) + f'(x)*h + f''(x)*h^2/2 + f'''(x)*h^3/6
+    // For f(x) = x^4, x=2, h=1:
+    // f(3) = 81
+    // Taylor: 16 + 32*1 + 48/2 + 48/6 + 24/24
+    //       = 16 + 32 + 24 + 8 + 1 = 81 ✓ (exact for degree 4 poly)
+    let taylor = f_quartic(2)
+        + df_quartic(2) * 1
+        + d2f_quartic(2) * 1 / 2
+        + d3f_quartic(2) * 1 / 6
+        + d4f_quartic() * 1 / 24;
+    assert_eq(taylor, 81);
+    assert_eq(f_quartic(3), 81);
+
+    // Test 8: Newton's method using second derivative
+    // For f(x) = x^2 - 4, find root
+    // Newton: x_{n+1} = x_n - f(x_n)/f'(x_n)
+    // f'(x) = 2x
+    // Starting at x=3: x1 = 3 - (9-4)/6 = 3 - 5/6 ≈ 2 (integer)
+    let newton_x = 3;
+    let newton_f = newton_x * newton_x - 4;  // 5
+    let newton_fp = 2 * newton_x;             // 6
+    let newton_x1 = newton_x - newton_f / newton_fp;  // 3 - 0 = 3 (int div 5/6=0)
+    // Better: scaled Newton
+    // x1 = x - f/f' = (x*f' - f)/f' = (18 - 5)/6 = 13/6 = 2
+    let newton_x1_scaled = (newton_x * newton_fp - newton_f) / newton_fp;
+    assert_eq(newton_x1_scaled, 2);
+
+    // Halley's method uses f'' too: x1 = x - 2*f*f' / (2*f'^2 - f*f'')
+    // f''(x) = 2
+    let halley_num = 2 * newton_f * newton_fp;  // 2*5*6 = 60
+    let halley_den = 2 * newton_fp * newton_fp - newton_f * 2;  // 72 - 10 = 62
+    let halley_x1 = newton_x - halley_num / halley_den;  // 3 - 60/62 = 3 - 0 = 3 (int)
+    // Scaled: (x*den - num)/den = (186 - 60)/62 = 126/62 = 2
+    let halley_x1_scaled = (newton_x * halley_den - halley_num) / halley_den;
+    assert_eq(halley_x1_scaled, 2);
+
+    // Test 9: Curvature analysis
+    // f(x) = x^4 - 2x^2
+    // f'(x) = 4x^3 - 4x
+    // f''(x) = 12x^2 - 4
+    // Inflection points where f''(x) = 0: 12x^2 = 4 → x = ±1/√3
+    // At x=0: f''(0) = -4 (concave down) → local maximum
+    // At x=1: f''(1) = 8 (concave up) → local minimum candidate
+    let curv_0 = 12 * 0 * 0 - 4;  // -4
+    let curv_1 = 12 * 1 * 1 - 4;  // 8
+    let curv_2 = 12 * 4 - 4;      // 44
+    assert_eq(curv_0, -4);
+    assert(curv_0 < 0);  // Concave down at 0
+    assert_eq(curv_1, 8);
+    assert(curv_1 > 0);  // Concave up at 1
+    assert_eq(curv_2, 44);
+
+    // Test 10: Derivative tower consistency
+    // For p(x) = x^5: p, p', p'', p''', p^(4), p^(5) at x=1
+    // p(1) = 1
+    // p'(1) = 5
+    // p''(1) = 20
+    // p'''(1) = 60
+    // p^(4)(1) = 120
+    // p^(5)(1) = 120
+    let p = 1;          // 1^5
+    let p1 = 5;         // 5*1^4
+    let p2 = 20;        // 20*1^3
+    let p3 = 60;        // 60*1^2
+    let p4 = 120;       // 120*1
+    let p5 = 120;       // 120
+
+    // Verify: n-th derivative of x^5 = 5!/(5-n)! * x^(5-n)
+    assert_eq(p1, 5);            // 5!/4! = 5
+    assert_eq(p2, 5 * 4);       // 5!/3! = 20
+    assert_eq(p3, 5 * 4 * 3);   // 5!/2! = 60
+    assert_eq(p4, 5 * 4 * 3 * 2);   // 5!/1! = 120
+    assert_eq(p5, 5 * 4 * 3 * 2 * 1); // 5!/0! = 120
+
+    // Reconstruct via Taylor at x=1, h=1: f(2) = sum(p^(n)/n!)
+    // f(2) = 1 + 5 + 20/2 + 60/6 + 120/24 + 120/120
+    //       = 1 + 5 + 10 + 10 + 5 + 1 = 32 = 2^5 ✓
+    let taylor5 = p + p1 + p2/2 + p3/6 + p4/24 + p5/120;
+    assert_eq(taylor5, 32);
+
+    print("Higher order grad: PASS");
+    0
+}

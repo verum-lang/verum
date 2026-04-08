@@ -1,0 +1,332 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, hash-table, data-structures, linear-probing
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT open-addressing hash table with 16 slots and linear probing
+
+// Hash table with 16 slots: key-value pairs + occupied flags
+type HT16 is {
+    k0: Int, k1: Int, k2: Int, k3: Int,
+    k4: Int, k5: Int, k6: Int, k7: Int,
+    k8: Int, k9: Int, k10: Int, k11: Int,
+    k12: Int, k13: Int, k14: Int, k15: Int,
+    v0: Int, v1: Int, v2: Int, v3: Int,
+    v4: Int, v5: Int, v6: Int, v7: Int
+};
+
+// Separate occupied flags and values in second half
+type HT is {
+    keys: HT16,
+    occ0: Int, occ1: Int, occ2: Int, occ3: Int,
+    occ4: Int, occ5: Int, occ6: Int, occ7: Int,
+    occ8: Int, occ9: Int, occ10: Int, occ11: Int,
+    occ12: Int, occ13: Int, occ14: Int, occ15: Int,
+    count: Int
+};
+
+// Too many fields in nested record. Let me use a flat approach instead.
+// Use 3 arrays: keys[16], vals[16], occupied[16] encoded in a single flat record.
+
+// Flat hash table: 16 key slots, 16 value slots, 16 occupied flags, count
+// Total: 49 fields -- too many. Let me use a simpler approach with fewer slots.
+
+// 8-slot hash table to keep field count manageable
+type HashTab is {
+    k0: Int, k1: Int, k2: Int, k3: Int,
+    k4: Int, k5: Int, k6: Int, k7: Int,
+    v0: Int, v1: Int, v2: Int, v3: Int,
+    v4: Int, v5: Int, v6: Int, v7: Int,
+    o0: Int, o1: Int, o2: Int, o3: Int,
+    o4: Int, o5: Int, o6: Int, o7: Int,
+    count: Int
+};
+
+fn ht_new() -> HashTab {
+    HashTab {
+        k0: 0, k1: 0, k2: 0, k3: 0, k4: 0, k5: 0, k6: 0, k7: 0,
+        v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        o0: 0, o1: 0, o2: 0, o3: 0, o4: 0, o5: 0, o6: 0, o7: 0,
+        count: 0
+    }
+}
+
+fn ht_get_key(h: HashTab, i: Int) -> Int {
+    if i == 0 { h.k0 } else if i == 1 { h.k1 }
+    else if i == 2 { h.k2 } else if i == 3 { h.k3 }
+    else if i == 4 { h.k4 } else if i == 5 { h.k5 }
+    else if i == 6 { h.k6 } else { h.k7 }
+}
+
+fn ht_get_val(h: HashTab, i: Int) -> Int {
+    if i == 0 { h.v0 } else if i == 1 { h.v1 }
+    else if i == 2 { h.v2 } else if i == 3 { h.v3 }
+    else if i == 4 { h.v4 } else if i == 5 { h.v5 }
+    else if i == 6 { h.v6 } else { h.v7 }
+}
+
+fn ht_get_occ(h: HashTab, i: Int) -> Int {
+    if i == 0 { h.o0 } else if i == 1 { h.o1 }
+    else if i == 2 { h.o2 } else if i == 3 { h.o3 }
+    else if i == 4 { h.o4 } else if i == 5 { h.o5 }
+    else if i == 6 { h.o6 } else { h.o7 }
+}
+
+fn ht_set_key(h: HashTab, i: Int, v: Int) -> HashTab {
+    HashTab {
+        k0: if i == 0 { v } else { h.k0 },
+        k1: if i == 1 { v } else { h.k1 },
+        k2: if i == 2 { v } else { h.k2 },
+        k3: if i == 3 { v } else { h.k3 },
+        k4: if i == 4 { v } else { h.k4 },
+        k5: if i == 5 { v } else { h.k5 },
+        k6: if i == 6 { v } else { h.k6 },
+        k7: if i == 7 { v } else { h.k7 },
+        v0: h.v0, v1: h.v1, v2: h.v2, v3: h.v3,
+        v4: h.v4, v5: h.v5, v6: h.v6, v7: h.v7,
+        o0: h.o0, o1: h.o1, o2: h.o2, o3: h.o3,
+        o4: h.o4, o5: h.o5, o6: h.o6, o7: h.o7,
+        count: h.count
+    }
+}
+
+fn ht_set_val(h: HashTab, i: Int, v: Int) -> HashTab {
+    HashTab {
+        k0: h.k0, k1: h.k1, k2: h.k2, k3: h.k3,
+        k4: h.k4, k5: h.k5, k6: h.k6, k7: h.k7,
+        v0: if i == 0 { v } else { h.v0 },
+        v1: if i == 1 { v } else { h.v1 },
+        v2: if i == 2 { v } else { h.v2 },
+        v3: if i == 3 { v } else { h.v3 },
+        v4: if i == 4 { v } else { h.v4 },
+        v5: if i == 5 { v } else { h.v5 },
+        v6: if i == 6 { v } else { h.v6 },
+        v7: if i == 7 { v } else { h.v7 },
+        o0: h.o0, o1: h.o1, o2: h.o2, o3: h.o3,
+        o4: h.o4, o5: h.o5, o6: h.o6, o7: h.o7,
+        count: h.count
+    }
+}
+
+fn ht_set_occ(h: HashTab, i: Int, v: Int) -> HashTab {
+    HashTab {
+        k0: h.k0, k1: h.k1, k2: h.k2, k3: h.k3,
+        k4: h.k4, k5: h.k5, k6: h.k6, k7: h.k7,
+        v0: h.v0, v1: h.v1, v2: h.v2, v3: h.v3,
+        v4: h.v4, v5: h.v5, v6: h.v6, v7: h.v7,
+        o0: if i == 0 { v } else { h.o0 },
+        o1: if i == 1 { v } else { h.o1 },
+        o2: if i == 2 { v } else { h.o2 },
+        o3: if i == 3 { v } else { h.o3 },
+        o4: if i == 4 { v } else { h.o4 },
+        o5: if i == 5 { v } else { h.o5 },
+        o6: if i == 6 { v } else { h.o6 },
+        o7: if i == 7 { v } else { h.o7 },
+        count: h.count
+    }
+}
+
+fn ht_set_count(h: HashTab, c: Int) -> HashTab {
+    HashTab {
+        k0: h.k0, k1: h.k1, k2: h.k2, k3: h.k3,
+        k4: h.k4, k5: h.k5, k6: h.k6, k7: h.k7,
+        v0: h.v0, v1: h.v1, v2: h.v2, v3: h.v3,
+        v4: h.v4, v5: h.v5, v6: h.v6, v7: h.v7,
+        o0: h.o0, o1: h.o1, o2: h.o2, o3: h.o3,
+        o4: h.o4, o5: h.o5, o6: h.o6, o7: h.o7,
+        count: c
+    }
+}
+
+// Simple hash: positive modulo 8
+fn hash_fn(key: Int) -> Int {
+    let h = key % 8;
+    if h < 0 { h + 8 } else { h }
+}
+
+// Insert key-value. Returns updated table.
+fn ht_insert(h: HashTab, key: Int, val: Int) -> HashTab {
+    if h.count >= 8 { h }
+    else {
+        let start = hash_fn(key);
+        let mut idx = start;
+        let mut ht = h;
+        let mut found = false;
+        let mut probes = 0;
+        while probes < 8 && !found {
+            if ht_get_occ(ht, idx) == 0 {
+                // Empty slot
+                ht = ht_set_key(ht, idx, key);
+                ht = ht_set_val(ht, idx, val);
+                ht = ht_set_occ(ht, idx, 1);
+                ht = ht_set_count(ht, ht.count + 1);
+                found = true;
+            } else if ht_get_key(ht, idx) == key {
+                // Update existing
+                ht = ht_set_val(ht, idx, val);
+                found = true;
+            } else {
+                idx = (idx + 1) % 8;
+                probes = probes + 1;
+            }
+        }
+        ht
+    }
+}
+
+// Lookup key. Returns value or -999 if not found.
+fn ht_lookup(h: HashTab, key: Int) -> Int {
+    let start = hash_fn(key);
+    let mut idx = start;
+    let mut probes = 0;
+    let mut result = -999;
+    let mut found = false;
+    while probes < 8 && !found {
+        if ht_get_occ(h, idx) == 0 {
+            found = true;  // empty slot = not found
+        } else if ht_get_key(h, idx) == key {
+            result = ht_get_val(h, idx);
+            found = true;
+        } else {
+            idx = (idx + 1) % 8;
+            probes = probes + 1;
+        }
+    }
+    result
+}
+
+// Contains key
+fn ht_contains(h: HashTab, key: Int) -> Bool {
+    ht_lookup(h, key) != -999
+}
+
+// Delete key. Uses lazy deletion (mark as deleted with occ=2).
+// For simplicity, we do re-insert of remaining elements after removal.
+fn ht_delete(h: HashTab, key: Int) -> HashTab {
+    let start = hash_fn(key);
+    let mut idx = start;
+    let mut probes = 0;
+    let mut ht = h;
+    let mut found = false;
+    while probes < 8 && !found {
+        if ht_get_occ(ht, idx) == 0 {
+            found = true;  // not found, nothing to delete
+        } else if ht_get_key(ht, idx) == key {
+            // Found it - remove and rehash following cluster
+            ht = ht_set_occ(ht, idx, 0);
+            ht = ht_set_count(ht, ht.count - 1);
+            // Rehash entries that follow in the same cluster
+            let mut ri = (idx + 1) % 8;
+            let mut rp = 0;
+            while rp < 7 && ht_get_occ(ht, ri) == 1 {
+                let rk = ht_get_key(ht, ri);
+                let rv = ht_get_val(ht, ri);
+                ht = ht_set_occ(ht, ri, 0);
+                ht = ht_set_count(ht, ht.count - 1);
+                ht = ht_insert(ht, rk, rv);
+                ri = (ri + 1) % 8;
+                rp = rp + 1;
+            }
+            found = true;
+        } else {
+            idx = (idx + 1) % 8;
+            probes = probes + 1;
+        }
+    }
+    ht
+}
+
+fn main() -> Int {
+    // === Empty table ===
+    let h0 = ht_new();
+    assert_eq(h0.count, 0);
+    assert_eq(ht_lookup(h0, 42), -999);
+    assert(!ht_contains(h0, 1));
+
+    // === Insert and lookup ===
+    let h1 = ht_insert(h0, 10, 100);
+    assert_eq(h1.count, 1);
+    assert_eq(ht_lookup(h1, 10), 100);
+    assert(ht_contains(h1, 10));
+    assert(!ht_contains(h1, 20));
+
+    // === Multiple inserts ===
+    let mut h2 = h0;
+    h2 = ht_insert(h2, 1, 10);
+    h2 = ht_insert(h2, 2, 20);
+    h2 = ht_insert(h2, 3, 30);
+    assert_eq(h2.count, 3);
+    assert_eq(ht_lookup(h2, 1), 10);
+    assert_eq(ht_lookup(h2, 2), 20);
+    assert_eq(ht_lookup(h2, 3), 30);
+
+    // === Update existing key ===
+    let h3 = ht_insert(h2, 2, 200);
+    assert_eq(h3.count, 3);  // count unchanged
+    assert_eq(ht_lookup(h3, 2), 200);
+    assert_eq(ht_lookup(h3, 1), 10);   // others unchanged
+    assert_eq(ht_lookup(h3, 3), 30);
+
+    // === Collision handling (keys that hash to same slot) ===
+    // Keys 0, 8, 16 all hash to slot 0
+    let mut h4 = h0;
+    h4 = ht_insert(h4, 0, 1000);
+    h4 = ht_insert(h4, 8, 2000);
+    h4 = ht_insert(h4, 16, 3000);
+    assert_eq(h4.count, 3);
+    assert_eq(ht_lookup(h4, 0), 1000);
+    assert_eq(ht_lookup(h4, 8), 2000);
+    assert_eq(ht_lookup(h4, 16), 3000);
+
+    // === Delete ===
+    let h5 = ht_delete(h4, 8);
+    assert_eq(h5.count, 2);
+    assert_eq(ht_lookup(h5, 0), 1000);
+    assert_eq(ht_lookup(h5, 8), -999);   // deleted
+    assert_eq(ht_lookup(h5, 16), 3000);  // still findable after rehash
+
+    // === Delete non-existent key ===
+    let h6 = ht_delete(h5, 999);
+    assert_eq(h6.count, 2);  // unchanged
+
+    // === Fill table ===
+    let mut hf = h0;
+    let mut i = 0;
+    while i < 8 {
+        hf = ht_insert(hf, i * 3, i * 100);
+        i = i + 1;
+    }
+    assert_eq(hf.count, 8);
+    assert_eq(ht_lookup(hf, 0), 0);
+    assert_eq(ht_lookup(hf, 3), 100);
+    assert_eq(ht_lookup(hf, 6), 200);
+    assert_eq(ht_lookup(hf, 21), 700);
+
+    // === Insert on full table is no-op ===
+    let hf2 = ht_insert(hf, 999, 999);
+    assert_eq(hf2.count, 8);
+    assert_eq(ht_lookup(hf2, 999), -999);
+
+    // === Delete and re-insert ===
+    let mut hd = hf;
+    hd = ht_delete(hd, 0);
+    hd = ht_delete(hd, 6);
+    assert_eq(hd.count, 6);
+    hd = ht_insert(hd, 100, 5555);
+    hd = ht_insert(hd, 200, 6666);
+    assert_eq(hd.count, 8);
+    assert_eq(ht_lookup(hd, 100), 5555);
+    assert_eq(ht_lookup(hd, 200), 6666);
+    assert_eq(ht_lookup(hd, 0), -999);
+
+    // === Negative keys ===
+    let mut hn = h0;
+    hn = ht_insert(hn, -5, 50);
+    hn = ht_insert(hn, -13, 130);
+    assert_eq(hn.count, 2);
+    assert_eq(ht_lookup(hn, -5), 50);
+    assert_eq(ht_lookup(hn, -13), 130);
+
+    0
+}

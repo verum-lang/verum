@@ -1,0 +1,130 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, modular_exponentiation, fast_power, fermat_little_theorem, number_theory
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Modular exponentiation (fast power): compute base^exp mod m in O(log exp) time.
+// Uses repeated squaring: if exp is even, (base^2)^(exp/2); if odd, base * base^(exp-1).
+// Verifies Fermat's little theorem: for prime p, a^(p-1) ≡ 1 (mod p) when p does not divide a.
+
+// Iterative modular exponentiation.
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    if m == 1 { return 0; }
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % m;
+        }
+        b = (b * b) % m;
+        e = e / 2;
+    }
+    result
+}
+
+// Check if n is prime (trial division).
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n == 2 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut d = 3;
+    while d * d <= n {
+        if n % d == 0 { return 0; }
+        d = d + 2;
+    }
+    1
+}
+
+// Modular inverse via Fermat: a^(p-2) mod p (p prime, p does not divide a).
+fn mod_inv_fermat(a: Int, p: Int) -> Int {
+    mod_pow(a, p - 2, p)
+}
+
+fn test_basic_mod_pow() {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    // 3^4 mod 5 = 81 mod 5 = 1
+    assert_eq(mod_pow(3, 4, 5), 1);
+    // 7^0 mod 13 = 1
+    assert_eq(mod_pow(7, 0, 13), 1);
+    // 5^1 mod 7 = 5
+    assert_eq(mod_pow(5, 1, 7), 5);
+    print("basic_mod_pow: ok");
+}
+
+fn test_fermat_little_theorem() {
+    // For prime p and gcd(a,p)=1: a^(p-1) ≡ 1 (mod p).
+    // Test with several primes.
+    let p1 = 7;
+    let mut a = 1;
+    while a < p1 {
+        assert_eq(mod_pow(a, p1 - 1, p1), 1);
+        a = a + 1;
+    }
+
+    let p2 = 11;
+    let mut b = 1;
+    while b < p2 {
+        assert_eq(mod_pow(b, p2 - 1, p2), 1);
+        b = b + 1;
+    }
+
+    let p3 = 13;
+    assert_eq(mod_pow(5, p3 - 1, p3), 1);
+    assert_eq(mod_pow(9, p3 - 1, p3), 1);
+
+    print("fermat_little_theorem: ok");
+}
+
+fn test_mod_inverse() {
+    // mod_inv_fermat(a, p) * a ≡ 1 (mod p).
+    // inv(3, 7) = 3^5 mod 7 = 243 mod 7 = 5; 3*5=15 mod 7 = 1.
+    let inv37 = mod_inv_fermat(3, 7);
+    assert_eq((3 * inv37) % 7, 1);
+
+    // inv(2, 11) = 2^9 mod 11 = 512 mod 11 = 6; 2*6=12 mod 11 = 1.
+    let inv211 = mod_inv_fermat(2, 11);
+    assert_eq((2 * inv211) % 11, 1);
+
+    // inv(4, 13): 4*inv ≡ 1 (mod 13).
+    let inv413 = mod_inv_fermat(4, 13);
+    assert_eq((4 * inv413) % 13, 1);
+
+    print("mod_inverse: ok");
+}
+
+fn test_large_exponents() {
+    // 2^20 mod 100 = 1048576 mod 100 = 76
+    assert_eq(mod_pow(2, 20, 100), 76);
+    // 3^100 mod 101: Fermat -> 3^100 ≡ 1 (mod 101) since 101 is prime.
+    assert_eq(is_prime(101), 1);
+    assert_eq(mod_pow(3, 100, 101), 1);
+    // 2^30 mod 1000000007 — a well-known prime.
+    // 2^30 = 1073741824, mod 1000000007 = 73741817
+    assert_eq(mod_pow(2, 30, 1000000007), 73741817);
+    print("large_exponents: ok");
+}
+
+fn test_edge_cases() {
+    // Base 0: 0^n = 0 for n>0, 0^0 = 1 by convention (our impl returns 1).
+    assert_eq(mod_pow(0, 5, 7), 0);
+    assert_eq(mod_pow(0, 0, 7), 1);
+    // m=1: always 0.
+    assert_eq(mod_pow(999, 999, 1), 0);
+    // Base larger than m.
+    assert_eq(mod_pow(15, 3, 7), mod_pow(15 % 7, 3, 7));
+    print("edge_cases: ok");
+}
+
+fn main() -> Int {
+    test_basic_mod_pow();
+    test_fermat_little_theorem();
+    test_mod_inverse();
+    test_large_exponents();
+    test_edge_cases();
+    print("[OK] 537_interp_modular_exponentiation");
+    0
+}

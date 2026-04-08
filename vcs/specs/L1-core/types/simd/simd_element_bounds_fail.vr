@@ -1,0 +1,17 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: simd, type-system, bounds
+// @expected-error: E400
+// @description: Type error with vector element types
+
+/// Vector operations require matching element types.
+
+fn simd_add(a: (Int, Int, Int, Int), b: (Int, Int, Int, Int)) -> (Int, Int, Int, Int) {
+    (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3)
+}
+
+fn main() {
+    // ERROR E400: Text tuple cannot be passed as Int tuple
+    let bad: (Int, Int, Int, Int) = ("a", "b", "c", "d");
+}

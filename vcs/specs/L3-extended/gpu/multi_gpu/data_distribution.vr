@@ -1,0 +1,231 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, multi_gpu, distribution
+
+fn main() {
+    let devices = Device.all_gpus();
+    let num_devices = devices.len();
+
+    if num_devices < 2 {
+        // Skip multi-GPU tests if only one GPU
+        return;
+    }
+
+    let device0 = devices[0];
+    let device1 = devices[1];
+
+    // Enable peer access for efficient transfers
+    device0.enable_peer_access(device1);
+    device1.enable_peer_access(device0);
+
+    // Simple data partitioning
+    let full_data: Tensor<f32, [10000]> = Tensor.arange(0.0, 10000.0, 1.0);
+
+    // Split data across devices
+    let chunk_size = full_data.len() / num_devices;
+
+    let chunk0 = full_data[0..chunk_size].to(device0);
+    let chunk1 = full_data[chunk_size..].to(device1);
+
+    assert(chunk0.device() == device0);
+    assert(chunk1.device() == device1);
+    assert(chunk0.len() + chunk1.len() == full_data.len());
+
+    // Distributed tensor abstraction
+    let distributed: DistributedTensor<f32, [10000]> = DistributedTensor.scatter(
+        full_data,
+        devices,
+        strategy: DistributionStrategy.EvenSplit
+    );
+
+    assert(distributed.num_shards() == num_devices);
+    assert(distributed.shard(0).device() == device0);
+    assert(distributed.shard(1).device() == device1);
+
+    // Gather distributed data back to single tensor
+    let gathered = distributed.gather();
+    assert(gathered.shape() == [10000]);
+    assert(gathered[0] == 0.0);
+    assert(gathered[9999] == 9999.0);
+
+    // 2D data distribution (for matrices)
+    let matrix: Tensor<f32, [1000, 2000]> = Tensor.ones();
+
+    // Row-wise distribution
+    let row_dist: DistributedTensor<f32, [1000, 2000]> = DistributedTensor.scatter(
+        matrix,
+        devices,
+        strategy: DistributionStrategy.RowSplit
+    );
+
+    // Each device has rows/num_devices rows
+    assert(row_dist.shard(0).shape()[0] == 500);
+    assert(row_dist.shard(0).shape()[1] == 2000);
+
+    // Column-wise distribution
+    let col_dist: DistributedTensor<f32, [1000, 2000]> = DistributedTensor.scatter(
+        matrix,
+        devices,
+        strategy: DistributionStrategy.ColumnSplit
+    );
+
+    assert(col_dist.shard(0).shape()[0] == 1000);
+    assert(col_dist.shard(0).shape()[1] == 1000);
+
+    // Block distribution (2D tiling)
+    if num_devices >= 4 {
+        let large_matrix: Tensor<f32, [2000, 2000]> = Tensor.ones();
+
+        let block_dist: DistributedTensor<f32, [2000, 2000]> = DistributedTensor.scatter(
+            large_matrix,
+            devices[0..4],
+            strategy: DistributionStrategy.Block2D { rows: 2, cols: 2 }
+        );
+
+        // Each device has 1000x1000 block
+        assert(block_dist.shard(0).shape() == [1000, 1000]);
+    }
+
+    // Replicated distribution (same data on all devices)
+    let replicated: DistributedTensor<f32, [1000]> = DistributedTensor.replicate(
+        Tensor.ones(),
+        devices
+    );
+
+    assert(replicated.shard(0)[0] == 1.0);
+    assert(replicated.shard(1)[0] == 1.0);
+
+    // Data parallel processing
+    @kernel(block_size = 256)
+    fn process_kernel(data: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N {
+            data[idx] *= 2.0;
+        }
+    }
+
+    // Launch on all devices in parallel
+    let streams: List<Stream> = devices.iter().map(|d| Stream.new(*d)).collect();
+
+    for (i, shard) in row_dist.shards_mut().enumerate() {
+        with_device(shard.device(), || {
+// LAUNCH:             process_kernel<<<auto, 256, streams[i]>>>(shard);
+        });
+    }
+
+    // Wait for all devices
+    Stream.synchronize_all(streams);
+
+    // Verify processing
+    let result = row_dist.gather();
+    assert(result[0, 0] == 2.0);
+
+    // Overlap computation with data movement
+    let input: Tensor<f32, [8000]> = Tensor.ones();
+    let chunks: List<Tensor<f32, [4000]> > = [
+        input[0..4000],
+        input[4000..]
+    ];
+
+    let transfer_stream0 = Stream.new(device0);
+    let transfer_stream1 = Stream.new(device1);
+    let compute_stream0 = Stream.new(device0);
+    let compute_stream1 = Stream.new(device1);
+
+    // Start transfers
+    let dev_chunk0 = chunks[0].to_async(device0, transfer_stream0);
+    let dev_chunk1 = chunks[1].to_async(device1, transfer_stream1);
+
+    // Events for synchronization
+    let transfer_done0 = Event.new(device0);
+    let transfer_done1 = Event.new(device1);
+
+    transfer_stream0.record(transfer_done0);
+    transfer_stream1.record(transfer_done1);
+
+    // Compute streams wait for transfers
+    compute_stream0.wait(transfer_done0);
+    compute_stream1.wait(transfer_done1);
+
+    // Launch compute kernels
+// LAUNCH:     process_kernel<<<auto, 256, compute_stream0>>>(&mut dev_chunk0);
+// LAUNCH:     process_kernel<<<auto, 256, compute_stream1>>>(&mut dev_chunk1);
+
+    Stream.synchronize_all([compute_stream0, compute_stream1]);
+
+// DEVICE:     // Load balancing based on device capabilities
+    fn distribute_balanced(
+        data: &Tensor<f32, [_]>,
+        devices: &List<Device>
+    ) -> DistributedTensor<f32, [_]> {
+        // Get relative compute power of each device
+        let compute_power: List<f32> = devices.iter()
+            .map(|d| {
+                let props = d.properties();
+                (props.multiprocessor_count * props.clock_rate) as f32
+            })
+            .collect();
+
+        let total_power: f32 = compute_power.iter().sum();
+        let fractions: List<f32> = compute_power.iter()
+            .map(|p| p / total_power)
+            .collect();
+
+        // Distribute proportionally
+        DistributedTensor.scatter(
+            *data,
+            *devices,
+            strategy: DistributionStrategy.Weighted(fractions)
+        )
+    }
+
+    // Ring-based data exchange
+    fn ring_exchange<T: Copy>(
+        shards: &mut List<Tensor<T, [N]> >,
+        devices: &List<Device>
+    ) {
+        let n = devices.len();
+
+        for step in 0..n-1 {
+            // Each device sends to next, receives from previous
+            for i in 0..n {
+                let send_to = (i + 1) % n;
+                let recv_from = (i + n - 1) % n;
+
+                // Create temp for received data
+                let mut temp: Tensor<T, [N]> = Tensor.zeros().to(devices[i]);
+
+                // Async send and receive
+                shards[i].copy_to_async(&mut temp, devices[send_to]);
+            }
+        }
+    }
+
+    // Halo exchange for stencil computations
+    fn halo_exchange(
+        distributed: &mut DistributedTensor<f32, [_]>,
+        halo_width: usize
+    ) {
+        let n = distributed.num_shards();
+
+        for i in 0..n {
+            let shard = distributed.shard_mut(i);
+
+            // Send right halo to next device
+            if i < n - 1 {
+                let right_halo = shard[shard.len()-halo_width..];
+                let next_shard = distributed.shard_mut(i + 1);
+                right_halo.copy_to(&mut next_shard[..halo_width]);
+            }
+
+            // Send left halo to previous device
+            if i > 0 {
+                let left_halo = shard[..halo_width];
+                let prev_shard = distributed.shard_mut(i - 1);
+                left_halo.copy_to(&mut prev_shard[prev_shard.len()-halo_width..]);
+            }
+        }
+    }
+}

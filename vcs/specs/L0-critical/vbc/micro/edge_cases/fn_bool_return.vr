@@ -1,0 +1,15 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn is_even(n: Int) -> Bool {
+    n % 2 == 0
+}
+
+fn main() {
+    assert(is_even(0));
+    assert(is_even(2));
+    assert(is_even(100));
+    assert(!is_even(1));
+    assert(!is_even(99));
+}

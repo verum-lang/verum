@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, assignment, lhs, error
+// @description: Test assignment with invalid left-hand side (literal)
+// @expected-error: E046
+
+fn test() {
+    5 = x;
+}

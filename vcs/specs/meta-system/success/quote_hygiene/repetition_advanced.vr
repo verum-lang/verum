@@ -1,0 +1,330 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, quote, hygiene, repetition, advanced
+// @description: Tests advanced repetition patterns with hygiene preservation
+
+// =============================================================================
+// NESTED REPETITIONS
+// =============================================================================
+
+// Double-nested repetition with proper scope isolation
+meta fn nested_matrix(rows: Int, cols: Int) -> TokenStream {
+    let row_indices = (0..rows).collect();
+    let col_indices = (0..cols).collect();
+
+    quote {
+        let matrix = [
+            $[for r in row_indices {
+                [
+                    $[for c in col_indices {
+                        ${r * cols + c},
+                    }]
+                ],
+            }]
+        ];
+        matrix
+    }
+}
+
+// Triple-nested repetition
+meta fn cube_init(size: Int) -> TokenStream {
+    let indices = (0..size).collect();
+    quote {
+        let cube = [
+            $[for x in indices {
+                [
+                    $[for y in indices {
+                        [
+                            $[for z in indices {
+                                ${x * size * size + y * size + z},
+                            }]
+                        ],
+                    }]
+                ],
+            }]
+        ];
+        cube
+    }
+}
+
+// =============================================================================
+// REPETITION WITH CONDITIONALS
+// =============================================================================
+
+// Conditional code generation within repetition
+meta fn filter_gen(items: List<Int>, threshold: Int) -> TokenStream {
+    quote {
+        let results = [];
+        $[for item in items {
+            if ${item >= threshold} {
+                results.push($item);
+            }
+        }]
+        results
+    }
+}
+
+// Alternating pattern generation
+meta fn alternating_gen(count: Int) -> TokenStream {
+    let indices = (0..count).collect();
+    quote {
+        let values = [];
+        $[for (i, _) in indices.enumerate() {
+            if ${i % 2 == 0} {
+                values.push("even");
+            } else {
+                values.push("odd");
+            }
+        }]
+        values
+    }
+}
+
+// =============================================================================
+// REPETITION WITH GENSYM
+// =============================================================================
+
+// Each iteration generates unique identifiers
+meta fn unique_bindings(names: List<Text>) -> TokenStream {
+    quote {
+        $[for name in names {
+            let ${gensym(name)} = ${name};
+        }]
+    }
+}
+
+// Paired gensym across iterations
+meta fn paired_bindings(count: Int) -> TokenStream {
+    let pairs: List<(Ident, Ident)> = (0..count)
+        .map(|i| (gensym(f"key_{i}"), gensym(f"val_{i}")))
+        .collect();
+
+    quote {
+        let map = Map::new();
+        $[for (k, v) in pairs {
+            let $k = ${k.as_str()};
+            let $v = ${v.as_str()};
+            map.insert($k, $v);
+        }]
+        map
+    }
+}
+
+// =============================================================================
+// REPETITION WITH CROSS-REFERENCES
+// =============================================================================
+
+// Reference previous iteration's binding (using accumulator pattern)
+meta fn cumulative_sum(values: List<Int>) -> TokenStream {
+    let acc = gensym("acc");
+    quote {
+        let mut $acc = 0;
+        $[for v in values {
+            $acc = $acc + $v;
+        }]
+        $acc
+    }
+}
+
+// Build linked structure
+meta fn linked_list_gen(values: List<Int>) -> TokenStream {
+    quote {
+        let mut list = LinkedList::new();
+        $[for v in values {
+            list.push_back($v);
+        }]
+        list
+    }
+}
+
+// =============================================================================
+// REPETITION IN DIFFERENT CONTEXTS
+// =============================================================================
+
+// Repetition in function parameters
+meta fn multi_param_fn(param_names: List<Ident>, param_types: List<Type>) -> TokenStream {
+    let params: List<(Ident, Type)> = param_names.iter()
+        .zip(param_types.iter())
+        .collect();
+
+    quote {
+        fn generated($[for (name, ty) in params { $name: $ty }],) {
+            // Function body
+        }
+    }
+}
+
+// Repetition in match arms
+meta fn match_gen(variants: List<Ident>, handlers: List<TokenStream>) -> TokenStream {
+    let arms: List<(Ident, TokenStream)> = variants.iter()
+        .zip(handlers.iter())
+        .collect();
+
+    quote {
+        fn handle(val: Value) -> Result {
+            match val {
+                $[for (v, h) in arms {
+                    Value::$v(inner) => { $h },
+                }]
+            }
+        }
+    }
+}
+
+// Repetition in type definition
+meta fn variant_type_gen(name: Ident, variants: List<VariantDef>) -> TokenStream {
+    quote {
+        type $name is
+            $[for (i, v) in variants.enumerate() {
+                if ${i > 0} { | }
+                $v.name $(if v.has_payload { (${v.payload_ty}) })
+            }];
+    }
+}
+
+// =============================================================================
+// REPETITION WITH SEPARATOR HANDLING
+// =============================================================================
+
+// Comma-separated items
+meta fn comma_sep(items: List<TokenStream>) -> TokenStream {
+    quote {
+        ($[for (i, item) in items.enumerate() {
+            if ${i > 0} { , }
+            $item
+        }])
+    }
+}
+
+// Pipe-separated variants
+meta fn pipe_sep(items: List<Ident>) -> TokenStream {
+    quote {
+        type Generated is $[for (i, item) in items.enumerate() {
+            if ${i > 0} { | }
+            $item
+        }];
+    }
+}
+
+// Custom separator
+meta fn custom_sep(items: List<TokenStream>, sep: TokenStream) -> TokenStream {
+    quote {
+        $[for (i, item) in items.enumerate() {
+            if ${i > 0} { $sep }
+            $item
+        }]
+    }
+}
+
+// =============================================================================
+// REPETITION WITH EARLY EXIT
+// =============================================================================
+
+// Take while condition
+meta fn take_while_gen(items: List<Int>, limit: Int) -> TokenStream {
+    let taken: List<Int> = items.iter()
+        .take_while(|x| *x < limit)
+        .collect();
+
+    quote {
+        let values = [$[for v in taken { $v, }]];
+        values
+    }
+}
+
+// Skip and take
+meta fn skip_take_gen(items: List<Int>, skip: Int, take: Int) -> TokenStream {
+    let selected: List<Int> = items.iter()
+        .skip(skip)
+        .take(take)
+        .collect();
+
+    quote {
+        let values = [$[for v in selected { $v, }]];
+        values
+    }
+}
+
+// =============================================================================
+// REPETITION WITH TRANSFORMATION
+// =============================================================================
+
+// Map transformation
+meta fn map_gen(items: List<Int>, transform: fn(Int) -> Int) -> TokenStream {
+    let transformed: List<Int> = items.iter().map(transform).collect();
+    quote {
+        let values = [$[for v in transformed { $v, }]];
+        values
+    }
+}
+
+// Filter-map combination
+meta fn filter_map_gen(items: List<Int>) -> TokenStream {
+    let processed: List<Int> = items.iter()
+        .filter(|x| *x > 0)
+        .map(|x| x * 2)
+        .collect();
+
+    quote {
+        let values = [$[for v in processed { $v, }]];
+        values
+    }
+}
+
+// Flat map expansion
+meta fn flat_map_gen(nested: List<List<Int>>) -> TokenStream {
+    let flattened: List<Int> = nested.iter().flatten().collect();
+    quote {
+        let values = [$[for v in flattened { $v, }]];
+        values
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_nested_matrix() {
+    let m = @nested_matrix(2, 3);
+    assert(m.len() == 2);
+    assert(m[0].len() == 3);
+    assert(m[0][0] == 0);
+    assert(m[0][2] == 2);
+    assert(m[1][0] == 3);
+}
+
+fn test_filter_gen() {
+    let result = @filter_gen([1, 5, 3, 7, 2], 4);
+    assert(result.len() == 2);
+    assert(result[0] == 5);
+    assert(result[1] == 7);
+}
+
+fn test_alternating_gen() {
+    let result = @alternating_gen(4);
+    assert(result.len() == 4);
+    assert(result[0] == "even");
+    assert(result[1] == "odd");
+    assert(result[2] == "even");
+    assert(result[3] == "odd");
+}
+
+fn test_cumulative_sum() {
+    let result = @cumulative_sum([1, 2, 3, 4, 5]);
+    assert(result == 15);
+}
+
+fn test_comma_sep() {
+    let items = [quote{1}, quote{2}, quote{3}];
+    let result = @comma_sep(items);
+    // Should produce (1, 2, 3)
+}
+
+fn main() {
+    test_nested_matrix();
+    test_filter_gen();
+    test_alternating_gen();
+    test_cumulative_sum();
+    test_comma_sep();
+}

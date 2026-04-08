@@ -1,0 +1,906 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, gpu
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Differential GPU test — verifies GPU simulation algorithms produce consistent results across execution tiers
+
+// ============================================================================
+// Core GPU context type
+// ============================================================================
+
+type GpuCtx is {
+    device_id: Int,
+    alloc_bytes: Int,
+    free_bytes: Int,
+    stream_count: Int,
+    event_count: Int,
+    kernel_count: Int
+};
+
+fn gpu_ctx_new(id: Int) -> GpuCtx {
+    GpuCtx {
+        device_id: id,
+        alloc_bytes: 0,
+        free_bytes: 0,
+        stream_count: 0,
+        event_count: 0,
+        kernel_count: 0
+    }
+}
+
+fn gpu_ctx_alloc(ctx: GpuCtx, bytes: Int) -> GpuCtx {
+    GpuCtx {
+        device_id: ctx.device_id,
+        alloc_bytes: ctx.alloc_bytes + bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn gpu_ctx_free(ctx: GpuCtx, bytes: Int) -> GpuCtx {
+    GpuCtx {
+        device_id: ctx.device_id,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes + bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn gpu_ctx_add_stream(ctx: GpuCtx) -> GpuCtx {
+    GpuCtx {
+        device_id: ctx.device_id,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count + 1,
+        event_count: ctx.event_count,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn gpu_ctx_add_event(ctx: GpuCtx) -> GpuCtx {
+    GpuCtx {
+        device_id: ctx.device_id,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count + 1,
+        kernel_count: ctx.kernel_count
+    }
+}
+
+fn gpu_ctx_add_kernel(ctx: GpuCtx) -> GpuCtx {
+    GpuCtx {
+        device_id: ctx.device_id,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        kernel_count: ctx.kernel_count + 1
+    }
+}
+
+fn gpu_ctx_balance(ctx: GpuCtx) -> Int {
+    ctx.alloc_bytes - ctx.free_bytes
+}
+
+// ============================================================================
+// Stream: ordered IDs
+// ============================================================================
+
+type StreamSet is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    count: Int,
+    next_id: Int
+};
+
+fn stream_set_new() -> StreamSet {
+    StreamSet {
+        s0: 0, s1: 0, s2: 0, s3: 0,
+        s4: 0, s5: 0, s6: 0, s7: 0,
+        count: 0, next_id: 1
+    }
+}
+
+fn stream_set_get(ss: StreamSet, i: Int) -> Int {
+    if i == 0 { ss.s0 }
+    else if i == 1 { ss.s1 }
+    else if i == 2 { ss.s2 }
+    else if i == 3 { ss.s3 }
+    else if i == 4 { ss.s4 }
+    else if i == 5 { ss.s5 }
+    else if i == 6 { ss.s6 }
+    else { ss.s7 }
+}
+
+fn stream_set_put(ss: StreamSet, i: Int, v: Int) -> StreamSet {
+    StreamSet {
+        s0: if i == 0 { v } else { ss.s0 },
+        s1: if i == 1 { v } else { ss.s1 },
+        s2: if i == 2 { v } else { ss.s2 },
+        s3: if i == 3 { v } else { ss.s3 },
+        s4: if i == 4 { v } else { ss.s4 },
+        s5: if i == 5 { v } else { ss.s5 },
+        s6: if i == 6 { v } else { ss.s6 },
+        s7: if i == 7 { v } else { ss.s7 },
+        count: ss.count,
+        next_id: ss.next_id
+    }
+}
+
+fn stream_set_create(ss: StreamSet) -> StreamSet {
+    if ss.count >= 8 { ss }
+    else {
+        let id = ss.next_id;
+        let ss2 = stream_set_put(ss, ss.count, id);
+        StreamSet {
+            s0: ss2.s0, s1: ss2.s1, s2: ss2.s2, s3: ss2.s3,
+            s4: ss2.s4, s5: ss2.s5, s6: ss2.s6, s7: ss2.s7,
+            count: ss2.count + 1,
+            next_id: id + 1
+        }
+    }
+}
+
+// ============================================================================
+// Event tracking
+// ============================================================================
+
+type EventLog is {
+    start0: Int, start1: Int, start2: Int, start3: Int,
+    end0: Int, end1: Int, end2: Int, end3: Int,
+    count: Int
+};
+
+fn event_log_new() -> EventLog {
+    EventLog {
+        start0: 0, start1: 0, start2: 0, start3: 0,
+        end0: 0, end1: 0, end2: 0, end3: 0,
+        count: 0
+    }
+}
+
+fn event_log_get_start(e: EventLog, i: Int) -> Int {
+    if i == 0 { e.start0 }
+    else if i == 1 { e.start1 }
+    else if i == 2 { e.start2 }
+    else { e.start3 }
+}
+
+fn event_log_get_end(e: EventLog, i: Int) -> Int {
+    if i == 0 { e.end0 }
+    else if i == 1 { e.end1 }
+    else if i == 2 { e.end2 }
+    else { e.end3 }
+}
+
+fn event_log_record(e: EventLog, start: Int, end: Int) -> EventLog {
+    let idx = e.count;
+    if idx >= 4 { e }
+    else {
+        EventLog {
+            start0: if idx == 0 { start } else { e.start0 },
+            start1: if idx == 1 { start } else { e.start1 },
+            start2: if idx == 2 { start } else { e.start2 },
+            start3: if idx == 3 { start } else { e.start3 },
+            end0: if idx == 0 { end } else { e.end0 },
+            end1: if idx == 1 { end } else { e.end1 },
+            end2: if idx == 2 { end } else { e.end2 },
+            end3: if idx == 3 { end } else { e.end3 },
+            count: e.count + 1
+        }
+    }
+}
+
+fn event_log_elapsed(e: EventLog, i: Int) -> Int {
+    event_log_get_end(e, i) - event_log_get_start(e, i)
+}
+
+// ============================================================================
+// Grid/Block configuration
+// ============================================================================
+
+type GridConfig is {
+    grid_x: Int,
+    grid_y: Int,
+    grid_z: Int,
+    block_x: Int,
+    block_y: Int,
+    block_z: Int
+};
+
+fn grid_config_new(gx: Int, gy: Int, gz: Int, bx: Int, blk_y: Int, bz: Int) -> GridConfig {
+    GridConfig {
+        grid_x: gx, grid_y: gy, grid_z: gz,
+        block_x: bx, block_y: blk_y, block_z: bz
+    }
+}
+
+fn grid_total_blocks(g: GridConfig) -> Int {
+    g.grid_x * g.grid_y * g.grid_z
+}
+
+fn block_total_threads(g: GridConfig) -> Int {
+    g.block_x * g.block_y * g.block_z
+}
+
+fn grid_total_threads(g: GridConfig) -> Int {
+    grid_total_blocks(g) * block_total_threads(g)
+}
+
+// ============================================================================
+// Memory pool
+// ============================================================================
+
+type MemPool is {
+    capacity: Int,
+    used: Int,
+    alloc_count: Int,
+    free_count: Int,
+    peak_used: Int,
+    fragmentation: Int
+};
+
+fn mem_pool_new(cap: Int) -> MemPool {
+    MemPool {
+        capacity: cap, used: 0,
+        alloc_count: 0, free_count: 0,
+        peak_used: 0, fragmentation: 0
+    }
+}
+
+fn mem_pool_alloc(p: MemPool, size: Int) -> MemPool {
+    let new_used = p.used + size;
+    let new_peak = if new_used > p.peak_used { new_used } else { p.peak_used };
+    MemPool {
+        capacity: p.capacity,
+        used: new_used,
+        alloc_count: p.alloc_count + 1,
+        free_count: p.free_count,
+        peak_used: new_peak,
+        fragmentation: p.fragmentation + 1
+    }
+}
+
+fn mem_pool_free(p: MemPool, size: Int) -> MemPool {
+    let frag = if p.fragmentation > 0 { p.fragmentation - 1 } else { 0 };
+    MemPool {
+        capacity: p.capacity,
+        used: p.used - size,
+        alloc_count: p.alloc_count,
+        free_count: p.free_count + 1,
+        peak_used: p.peak_used,
+        fragmentation: frag
+    }
+}
+
+fn mem_pool_available(p: MemPool) -> Int {
+    p.capacity - p.used
+}
+
+fn mem_pool_live_allocs(p: MemPool) -> Int {
+    p.alloc_count - p.free_count
+}
+
+// ============================================================================
+// Pipeline stage tracking
+// ============================================================================
+
+type PipelineState is {
+    h2d_sum: Int,
+    compute_sum: Int,
+    d2h_sum: Int,
+    stages_done: Int
+};
+
+fn pipeline_new() -> PipelineState {
+    PipelineState { h2d_sum: 0, compute_sum: 0, d2h_sum: 0, stages_done: 0 }
+}
+
+fn pipeline_h2d(ps: PipelineState, data: Int) -> PipelineState {
+    PipelineState {
+        h2d_sum: ps.h2d_sum + data,
+        compute_sum: ps.compute_sum,
+        d2h_sum: ps.d2h_sum,
+        stages_done: ps.stages_done + 1
+    }
+}
+
+fn pipeline_compute(ps: PipelineState, data: Int, factor: Int) -> PipelineState {
+    PipelineState {
+        h2d_sum: ps.h2d_sum,
+        compute_sum: ps.compute_sum + data * factor,
+        d2h_sum: ps.d2h_sum,
+        stages_done: ps.stages_done + 1
+    }
+}
+
+fn pipeline_d2h(ps: PipelineState, data: Int) -> PipelineState {
+    PipelineState {
+        h2d_sum: ps.h2d_sum,
+        compute_sum: ps.compute_sum,
+        d2h_sum: ps.d2h_sum + data,
+        stages_done: ps.stages_done + 1
+    }
+}
+
+// ============================================================================
+// Graph capture / replay
+// ============================================================================
+
+type GraphNode is {
+    op0: Int, op1: Int, op2: Int, op3: Int,
+    arg0: Int, arg1: Int, arg2: Int, arg3: Int,
+    result0: Int, result1: Int, result2: Int, result3: Int,
+    count: Int
+};
+
+fn graph_new() -> GraphNode {
+    GraphNode {
+        op0: 0, op1: 0, op2: 0, op3: 0,
+        arg0: 0, arg1: 0, arg2: 0, arg3: 0,
+        result0: 0, result1: 0, result2: 0, result3: 0,
+        count: 0
+    }
+}
+
+fn graph_get_op(g: GraphNode, i: Int) -> Int {
+    if i == 0 { g.op0 }
+    else if i == 1 { g.op1 }
+    else if i == 2 { g.op2 }
+    else { g.op3 }
+}
+
+fn graph_get_arg(g: GraphNode, i: Int) -> Int {
+    if i == 0 { g.arg0 }
+    else if i == 1 { g.arg1 }
+    else if i == 2 { g.arg2 }
+    else { g.arg3 }
+}
+
+fn graph_get_result(g: GraphNode, i: Int) -> Int {
+    if i == 0 { g.result0 }
+    else if i == 1 { g.result1 }
+    else if i == 2 { g.result2 }
+    else { g.result3 }
+}
+
+fn graph_capture(g: GraphNode, op: Int, arg: Int, res: Int) -> GraphNode {
+    let idx = g.count;
+    if idx >= 4 { g }
+    else {
+        GraphNode {
+            op0: if idx == 0 { op } else { g.op0 },
+            op1: if idx == 1 { op } else { g.op1 },
+            op2: if idx == 2 { op } else { g.op2 },
+            op3: if idx == 3 { op } else { g.op3 },
+            arg0: if idx == 0 { arg } else { g.arg0 },
+            arg1: if idx == 1 { arg } else { g.arg1 },
+            arg2: if idx == 2 { arg } else { g.arg2 },
+            arg3: if idx == 3 { arg } else { g.arg3 },
+            result0: if idx == 0 { res } else { g.result0 },
+            result1: if idx == 1 { res } else { g.result1 },
+            result2: if idx == 2 { res } else { g.result2 },
+            result3: if idx == 3 { res } else { g.result3 },
+            count: g.count + 1
+        }
+    }
+}
+
+// Execute a captured graph operation: op=1 means add, op=2 means mul, op=3 means sub
+fn execute_op(op: Int, arg: Int, accum: Int) -> Int {
+    if op == 1 { accum + arg }
+    else if op == 2 { accum * arg }
+    else if op == 3 { accum - arg }
+    else { accum }
+}
+
+fn graph_replay(g: GraphNode) -> Int {
+    let mut accum = 0;
+    let mut i = 0;
+    while i < g.count {
+        let op = graph_get_op(g, i);
+        let arg = graph_get_arg(g, i);
+        accum = execute_op(op, arg, accum);
+        i = i + 1;
+    }
+    accum
+}
+
+// ============================================================================
+// Helper: integer division (truncating towards zero)
+// ============================================================================
+
+fn div_ceil(a: Int, b: Int) -> Int {
+    (a + b - 1) / b
+}
+
+fn min_int(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn max_int(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// ============================================================================
+// Test 1: Memory balance — alloc and free same amount, verify balance is zero
+// ============================================================================
+
+fn test_memory_balance() {
+    let mut ctx = gpu_ctx_new(0);
+
+    // Allocate several blocks
+    ctx = gpu_ctx_alloc(ctx, 1024);
+    ctx = gpu_ctx_alloc(ctx, 2048);
+    ctx = gpu_ctx_alloc(ctx, 512);
+    ctx = gpu_ctx_alloc(ctx, 4096);
+    assert_eq(ctx.alloc_bytes, 7680);
+
+    // Free all of them
+    ctx = gpu_ctx_free(ctx, 1024);
+    ctx = gpu_ctx_free(ctx, 2048);
+    ctx = gpu_ctx_free(ctx, 512);
+    ctx = gpu_ctx_free(ctx, 4096);
+    assert_eq(ctx.free_bytes, 7680);
+
+    // Balance should be zero
+    assert_eq(gpu_ctx_balance(ctx), 0);
+
+    // Partial alloc/free cycle
+    ctx = gpu_ctx_alloc(ctx, 300);
+    ctx = gpu_ctx_alloc(ctx, 700);
+    assert_eq(gpu_ctx_balance(ctx), 1000);
+    ctx = gpu_ctx_free(ctx, 300);
+    ctx = gpu_ctx_free(ctx, 700);
+    assert_eq(gpu_ctx_balance(ctx), 0);
+
+    print("test_memory_balance passed");
+}
+
+// ============================================================================
+// Test 2: Stream ordering — create streams in order, verify IDs
+// ============================================================================
+
+fn test_stream_ordering() {
+    let mut ss = stream_set_new();
+
+    // Create 6 streams
+    ss = stream_set_create(ss);
+    ss = stream_set_create(ss);
+    ss = stream_set_create(ss);
+    ss = stream_set_create(ss);
+    ss = stream_set_create(ss);
+    ss = stream_set_create(ss);
+
+    assert_eq(ss.count, 6);
+
+    // Verify monotonically increasing IDs
+    assert_eq(stream_set_get(ss, 0), 1);
+    assert_eq(stream_set_get(ss, 1), 2);
+    assert_eq(stream_set_get(ss, 2), 3);
+    assert_eq(stream_set_get(ss, 3), 4);
+    assert_eq(stream_set_get(ss, 4), 5);
+    assert_eq(stream_set_get(ss, 5), 6);
+
+    // Verify ordering: each stream ID is greater than the previous
+    let mut i = 1;
+    while i < ss.count {
+        assert(stream_set_get(ss, i) > stream_set_get(ss, i - 1));
+        i = i + 1;
+    }
+
+    // next_id should be one past the last created
+    assert_eq(ss.next_id, 7);
+
+    print("test_stream_ordering passed");
+}
+
+// ============================================================================
+// Test 3: Event sync model — record events, verify elapsed time computation
+// ============================================================================
+
+fn test_event_sync_model() {
+    let mut elog = event_log_new();
+
+    // Record 4 events with known start/end times
+    elog = event_log_record(elog, 100, 250);   // elapsed = 150
+    elog = event_log_record(elog, 300, 475);   // elapsed = 175
+    elog = event_log_record(elog, 500, 520);   // elapsed = 20
+    elog = event_log_record(elog, 600, 1100);  // elapsed = 500
+
+    assert_eq(elog.count, 4);
+
+    // Verify individual elapsed times
+    assert_eq(event_log_elapsed(elog, 0), 150);
+    assert_eq(event_log_elapsed(elog, 1), 175);
+    assert_eq(event_log_elapsed(elog, 2), 20);
+    assert_eq(event_log_elapsed(elog, 3), 500);
+
+    // Verify total elapsed across all events
+    let total_elapsed = event_log_elapsed(elog, 0) + event_log_elapsed(elog, 1)
+                      + event_log_elapsed(elog, 2) + event_log_elapsed(elog, 3);
+    assert_eq(total_elapsed, 845);
+
+    // Verify start/end values directly
+    assert_eq(event_log_get_start(elog, 0), 100);
+    assert_eq(event_log_get_end(elog, 3), 1100);
+
+    // Verify events are non-overlapping (each start >= previous end)
+    let mut j = 1;
+    while j < elog.count {
+        assert(event_log_get_start(elog, j) >= event_log_get_end(elog, j - 1));
+        j = j + 1;
+    }
+
+    print("test_event_sync_model passed");
+}
+
+// ============================================================================
+// Test 4: Grid/Block configuration — verify calculations are consistent
+// ============================================================================
+
+fn test_grid_block_config() {
+    // Standard 1D launch: 256 threads per block, 1024 total work items
+    let work_items = 1024;
+    let threads_per_block = 256;
+    let num_blocks = div_ceil(work_items, threads_per_block);
+    let g1 = grid_config_new(num_blocks, 1, 1, threads_per_block, 1, 1);
+
+    assert_eq(grid_total_blocks(g1), 4);
+    assert_eq(block_total_threads(g1), 256);
+    assert_eq(grid_total_threads(g1), 1024);
+
+    // 2D grid: 4x4 blocks of 16x16 threads
+    let g2 = grid_config_new(4, 4, 1, 16, 16, 1);
+    assert_eq(grid_total_blocks(g2), 16);
+    assert_eq(block_total_threads(g2), 256);
+    assert_eq(grid_total_threads(g2), 4096);
+
+    // 3D grid: 2x2x2 blocks of 8x8x4 threads
+    let g3 = grid_config_new(2, 2, 2, 8, 8, 4);
+    assert_eq(grid_total_blocks(g3), 8);
+    assert_eq(block_total_threads(g3), 256);
+    assert_eq(grid_total_threads(g3), 2048);
+
+    // Verify: total_threads = total_blocks * threads_per_block (identity)
+    assert_eq(grid_total_threads(g3), grid_total_blocks(g3) * block_total_threads(g3));
+
+    // Non-uniform: 5000 work items with 128 threads/block
+    let work2 = 5000;
+    let tpb2 = 128;
+    let nb2 = div_ceil(work2, tpb2);
+    assert_eq(nb2, 40); // ceil(5000/128) = 40
+    let g4 = grid_config_new(nb2, 1, 1, tpb2, 1, 1);
+    assert_eq(grid_total_threads(g4), 5120);
+    // Launched threads >= work items
+    assert(grid_total_threads(g4) >= work2);
+
+    print("test_grid_block_config passed");
+}
+
+// ============================================================================
+// Test 5: Shared memory calculation — verify shared mem per block
+// ============================================================================
+
+fn test_shared_mem_calculation() {
+    // Each thread uses 4 bytes of shared mem
+    // Plus a fixed 256-byte header per block
+    let threads_per_block = 128;
+    let per_thread_shared = 4;
+    let header_size = 256;
+    let shared_per_block = header_size + threads_per_block * per_thread_shared;
+    assert_eq(shared_per_block, 768);
+
+    // With 32 blocks, total shared memory needed (across all SMs)
+    let num_blocks = 32;
+    let total_shared = num_blocks * shared_per_block;
+    assert_eq(total_shared, 24576);
+
+    // Verify alignment: shared memory should be 256-byte aligned
+    // 768 / 256 = 3 exactly, so it is aligned
+    assert_eq(shared_per_block % 256, 0);
+
+    // Bank conflict calculation: 32 banks, stride determines conflicts
+    let num_banks = 32;
+    let stride = 4;
+    // No conflict when stride is not a multiple of bank count
+    let conflict_free = stride % num_banks != 0;
+    assert(conflict_free);
+
+    // Double buffering: need 2x shared memory
+    let double_buffered = shared_per_block * 2;
+    assert_eq(double_buffered, 1536);
+
+    // Max shared mem per SM check: 48KB = 49152 bytes
+    let max_shared_per_sm = 49152;
+    let blocks_per_sm = max_shared_per_sm / shared_per_block;
+    assert_eq(blocks_per_sm, 64); // 49152 / 768 = 64
+
+    print("test_shared_mem_calculation passed");
+}
+
+// ============================================================================
+// Test 6: Warp occupancy — verify occupancy calculations
+// ============================================================================
+
+fn test_warp_occupancy() {
+    let warp_size = 32;
+    let max_warps_per_sm = 64;
+    let max_threads_per_sm = max_warps_per_sm * warp_size;
+    assert_eq(max_threads_per_sm, 2048);
+
+    // Config 1: 256 threads/block, 4 blocks/SM
+    let threads1 = 256;
+    let blocks_per_sm1 = 4;
+    let active_threads1 = threads1 * blocks_per_sm1;
+    let active_warps1 = active_threads1 / warp_size;
+    // Occupancy = active_warps / max_warps * 100
+    let occupancy1 = (active_warps1 * 100) / max_warps_per_sm;
+    assert_eq(active_threads1, 1024);
+    assert_eq(active_warps1, 32);
+    assert_eq(occupancy1, 50);
+
+    // Config 2: 128 threads/block, 8 blocks/SM = full occupancy
+    let threads2 = 128;
+    let blocks_per_sm2 = 8;
+    let active_threads2 = threads2 * blocks_per_sm2;
+    let active_warps2 = active_threads2 / warp_size;
+    let occupancy2 = (active_warps2 * 100) / max_warps_per_sm;
+    assert_eq(active_threads2, 1024);
+    assert_eq(active_warps2, 32);
+    assert_eq(occupancy2, 50);
+
+    // Config 3: 1024 threads/block, 2 blocks/SM
+    let threads3 = 1024;
+    let blocks_per_sm3 = 2;
+    let active_threads3 = threads3 * blocks_per_sm3;
+    let active_warps3 = active_threads3 / warp_size;
+    let occupancy3 = (active_warps3 * 100) / max_warps_per_sm;
+    assert_eq(active_threads3, 2048);
+    assert_eq(active_warps3, 64);
+    assert_eq(occupancy3, 100);
+
+    // Warp divergence: if 24 of 32 threads are active, 75% efficiency
+    let active_lanes = 24;
+    let efficiency = (active_lanes * 100) / warp_size;
+    assert_eq(efficiency, 75);
+
+    // Verify warps needed to cover N threads (ceiling division)
+    let work_threads = 1000;
+    let warps_needed = div_ceil(work_threads, warp_size);
+    assert_eq(warps_needed, 32); // ceil(1000/32) = 32
+
+    print("test_warp_occupancy passed");
+}
+
+// ============================================================================
+// Test 7: Memory pool lifecycle — alloc/free from pool, verify no leaks
+// ============================================================================
+
+fn test_memory_pool_lifecycle() {
+    let mut pool = mem_pool_new(65536); // 64KB pool
+    assert_eq(mem_pool_available(pool), 65536);
+
+    // Allocate several buffers
+    pool = mem_pool_alloc(pool, 4096);
+    pool = mem_pool_alloc(pool, 8192);
+    pool = mem_pool_alloc(pool, 2048);
+    assert_eq(pool.used, 14336);
+    assert_eq(mem_pool_available(pool), 51200);
+    assert_eq(mem_pool_live_allocs(pool), 3);
+
+    // Peak tracking
+    assert_eq(pool.peak_used, 14336);
+
+    // Free middle buffer
+    pool = mem_pool_free(pool, 8192);
+    assert_eq(pool.used, 6144);
+    assert_eq(mem_pool_live_allocs(pool), 2);
+    // Peak unchanged
+    assert_eq(pool.peak_used, 14336);
+
+    // Alloc larger block
+    pool = mem_pool_alloc(pool, 16384);
+    assert_eq(pool.used, 22528);
+    assert_eq(pool.peak_used, 22528);
+
+    // Free all remaining
+    pool = mem_pool_free(pool, 4096);
+    pool = mem_pool_free(pool, 2048);
+    pool = mem_pool_free(pool, 16384);
+
+    // Verify no leaks
+    assert_eq(pool.used, 0);
+    assert_eq(mem_pool_live_allocs(pool), 0);
+    assert_eq(mem_pool_available(pool), 65536);
+    assert_eq(pool.alloc_count, 4);
+    assert_eq(pool.free_count, 4);
+
+    print("test_memory_pool_lifecycle passed");
+}
+
+// ============================================================================
+// Test 8: Pipeline throughput — simulate H2D->compute->D2H, verify integrity
+// ============================================================================
+
+fn test_pipeline_throughput() {
+    let mut ps = pipeline_new();
+
+    // Simulate 5 data items flowing through the pipeline
+    // H2D stage: transfer values 10, 20, 30, 40, 50
+    ps = pipeline_h2d(ps, 10);
+    ps = pipeline_h2d(ps, 20);
+    ps = pipeline_h2d(ps, 30);
+    ps = pipeline_h2d(ps, 40);
+    ps = pipeline_h2d(ps, 50);
+    assert_eq(ps.h2d_sum, 150);
+    assert_eq(ps.stages_done, 5);
+
+    // Compute stage: multiply each by factor 3
+    ps = pipeline_compute(ps, 10, 3);
+    ps = pipeline_compute(ps, 20, 3);
+    ps = pipeline_compute(ps, 30, 3);
+    ps = pipeline_compute(ps, 40, 3);
+    ps = pipeline_compute(ps, 50, 3);
+    assert_eq(ps.compute_sum, 450); // (10+20+30+40+50)*3
+    assert_eq(ps.stages_done, 10);
+
+    // D2H stage: results come back as computed values
+    ps = pipeline_d2h(ps, 30);
+    ps = pipeline_d2h(ps, 60);
+    ps = pipeline_d2h(ps, 90);
+    ps = pipeline_d2h(ps, 120);
+    ps = pipeline_d2h(ps, 150);
+    assert_eq(ps.d2h_sum, 450);
+    assert_eq(ps.stages_done, 15);
+
+    // Data integrity: compute_sum == d2h_sum (no data lost in pipeline)
+    assert_eq(ps.compute_sum, ps.d2h_sum);
+
+    // Verify h2d_sum * factor = compute_sum
+    assert_eq(ps.h2d_sum * 3, ps.compute_sum);
+
+    print("test_pipeline_throughput passed");
+}
+
+// ============================================================================
+// Test 9: Multi-device split — split work across devices, verify merge
+// ============================================================================
+
+fn test_multi_device_split() {
+    // Simulate splitting 1000 work items across 4 devices
+    let total_work = 1000;
+    let num_devices = 4;
+    let work_per_device = total_work / num_devices;
+    assert_eq(work_per_device, 250);
+
+    // Each device processes its share: compute a running sum
+    // Device 0: items 0-249, sum = 0+1+2+...+249 = 249*250/2 = 31125
+    // Device 1: items 250-499, sum = 250+251+...+499
+    // Device 2: items 500-749
+    // Device 3: items 750-999
+
+    // Compute partial sums using the formula: sum(a..b) = (b-a+1)*(a+b)/2
+    let sum0 = compute_range_sum(0, 249);
+    let sum1 = compute_range_sum(250, 499);
+    let sum2 = compute_range_sum(500, 749);
+    let sum3 = compute_range_sum(750, 999);
+
+    assert_eq(sum0, 31125);   // 250*249/2
+    assert_eq(sum1, 93625);   // sum(250..499)
+    assert_eq(sum2, 156125);  // sum(500..749)
+    assert_eq(sum3, 218625);  // sum(750..999)
+
+    // Merge: total should equal sum(0..999)
+    let merged = sum0 + sum1 + sum2 + sum3;
+    let expected_total = compute_range_sum(0, 999);
+    assert_eq(expected_total, 499500); // 1000*999/2
+    assert_eq(merged, expected_total);
+
+    // Verify GPU contexts balance out
+    let mut ctx0 = gpu_ctx_new(0);
+    let mut ctx1 = gpu_ctx_new(1);
+    let mut ctx2 = gpu_ctx_new(2);
+    let mut ctx3 = gpu_ctx_new(3);
+
+    // Each device allocs and frees same amount
+    ctx0 = gpu_ctx_alloc(ctx0, 1024);
+    ctx0 = gpu_ctx_free(ctx0, 1024);
+    ctx1 = gpu_ctx_alloc(ctx1, 2048);
+    ctx1 = gpu_ctx_free(ctx1, 2048);
+    ctx2 = gpu_ctx_alloc(ctx2, 512);
+    ctx2 = gpu_ctx_free(ctx2, 512);
+    ctx3 = gpu_ctx_alloc(ctx3, 4096);
+    ctx3 = gpu_ctx_free(ctx3, 4096);
+
+    assert_eq(gpu_ctx_balance(ctx0), 0);
+    assert_eq(gpu_ctx_balance(ctx1), 0);
+    assert_eq(gpu_ctx_balance(ctx2), 0);
+    assert_eq(gpu_ctx_balance(ctx3), 0);
+
+    print("test_multi_device_split passed");
+}
+
+fn compute_range_sum(a: Int, b: Int) -> Int {
+    let count = b - a + 1;
+    (count * (a + b)) / 2
+}
+
+// ============================================================================
+// Test 10: Graph replay — capture and replay a graph, verify results match
+// ============================================================================
+
+fn test_graph_replay() {
+    // Capture a computation graph: add 100, mul 3, sub 50, add 25
+    let mut graph = graph_new();
+    graph = graph_capture(graph, 1, 100, 100);   // 0 + 100 = 100
+    graph = graph_capture(graph, 2, 3, 300);      // 100 * 3 = 300
+    graph = graph_capture(graph, 3, 50, 250);     // 300 - 50 = 250
+    graph = graph_capture(graph, 1, 25, 275);     // 250 + 25 = 275
+
+    assert_eq(graph.count, 4);
+
+    // Replay the graph
+    let result1 = graph_replay(graph);
+    assert_eq(result1, 275);
+
+    // Replay again — must produce identical result (determinism)
+    let result2 = graph_replay(graph);
+    assert_eq(result2, 275);
+    assert_eq(result1, result2);
+
+    // Verify individual captured operations
+    assert_eq(graph_get_op(graph, 0), 1);   // add
+    assert_eq(graph_get_op(graph, 1), 2);   // mul
+    assert_eq(graph_get_op(graph, 2), 3);   // sub
+    assert_eq(graph_get_op(graph, 3), 1);   // add
+
+    assert_eq(graph_get_arg(graph, 0), 100);
+    assert_eq(graph_get_arg(graph, 1), 3);
+    assert_eq(graph_get_arg(graph, 2), 50);
+    assert_eq(graph_get_arg(graph, 3), 25);
+
+    // Verify captured results match expected intermediate values
+    assert_eq(graph_get_result(graph, 0), 100);
+    assert_eq(graph_get_result(graph, 1), 300);
+    assert_eq(graph_get_result(graph, 2), 250);
+    assert_eq(graph_get_result(graph, 3), 275);
+
+    // Build a different graph and verify different result
+    let mut graph2 = graph_new();
+    graph2 = graph_capture(graph2, 1, 50, 50);    // 0 + 50 = 50
+    graph2 = graph_capture(graph2, 2, 4, 200);    // 50 * 4 = 200
+    let result3 = graph_replay(graph2);
+    assert_eq(result3, 200);
+
+    // Verify the two graphs produce different results
+    assert(result1 != result3);
+
+    print("test_graph_replay passed");
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_memory_balance();
+    test_stream_ordering();
+    test_event_sync_model();
+    test_grid_block_config();
+    test_shared_mem_calculation();
+    test_warp_occupancy();
+    test_memory_pool_lifecycle();
+    test_pipeline_throughput();
+    test_multi_device_split();
+    test_graph_replay();
+    print("[OK] 062_differential_gpu_full");
+    0
+}

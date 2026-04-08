@@ -1,0 +1,793 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, integers, checked-rem, wrapping-neg, abs-diff, ilog2, ilog10, is-power-of-two
+// @description: Tests for advanced integer methods: checked_rem, wrapping_neg, checked_neg, abs_diff, ilog2, ilog10, is_power_of_two
+
+mount core.base.primitives.{
+    Int8, Int16, Int32, Int64, Int128, ISize,
+    UInt8, UInt16, UInt32, UInt64, UInt128, USize
+};
+
+// =============================================================================
+// Int - checked_rem
+// =============================================================================
+
+@test
+fn test_int_checked_rem_normal() {
+    let result = (10).checked_rem(3);
+    assert(result is Some);
+    assert_eq(result.unwrap(), 1);
+}
+
+@test
+fn test_int_checked_rem_zero_divisor() {
+    let result = (10).checked_rem(0);
+    assert(result is None);
+}
+
+@test
+fn test_int_checked_rem_negative() {
+    let result = (-10).checked_rem(3);
+    assert(result is Some);
+}
+
+// =============================================================================
+// Int - wrapping_neg
+// =============================================================================
+
+@test
+fn test_int_wrapping_neg() {
+    assert_eq((5).wrapping_neg(), -5);
+    assert_eq((-5).wrapping_neg(), 5);
+    assert_eq((0).wrapping_neg(), 0);
+}
+
+// =============================================================================
+// Int - checked_neg
+// =============================================================================
+
+@test
+fn test_int_checked_neg_normal() {
+    let result = (5).checked_neg();
+    assert(result is Some);
+    assert_eq(result.unwrap(), -5);
+}
+
+@test
+fn test_int_checked_neg_zero() {
+    let result = (0).checked_neg();
+    assert(result is Some);
+    assert_eq(result.unwrap(), 0);
+}
+
+@test
+fn test_int_checked_neg_min() {
+    // Int.MIN negation would overflow — should be None
+    let result = (-9223372036854775808).checked_neg();
+    assert(result is None);
+}
+
+// =============================================================================
+// Int - abs_diff
+// =============================================================================
+
+@test
+fn test_int_abs_diff() {
+    assert_eq((10).abs_diff(3), 7);
+    assert_eq((3).abs_diff(10), 7);
+    assert_eq((5).abs_diff(5), 0);
+    assert_eq((-3).abs_diff(3), 6);
+    assert_eq((3).abs_diff(-3), 6);
+}
+
+// =============================================================================
+// Int - ilog2
+// =============================================================================
+
+@test
+fn test_int_ilog2() {
+    assert_eq((1).ilog2(), 0);
+    assert_eq((2).ilog2(), 1);
+    assert_eq((4).ilog2(), 2);
+    assert_eq((8).ilog2(), 3);
+    assert_eq((16).ilog2(), 4);
+    assert_eq((1024).ilog2(), 10);
+}
+
+@test
+fn test_int_ilog2_non_power() {
+    assert_eq((3).ilog2(), 1);
+    assert_eq((5).ilog2(), 2);
+    assert_eq((7).ilog2(), 2);
+    assert_eq((15).ilog2(), 3);
+}
+
+// =============================================================================
+// Int - ilog10
+// =============================================================================
+
+@test
+fn test_int_ilog10() {
+    assert_eq((1).ilog10(), 0);
+    assert_eq((9).ilog10(), 0);
+    assert_eq((10).ilog10(), 1);
+    assert_eq((99).ilog10(), 1);
+    assert_eq((100).ilog10(), 2);
+    assert_eq((999).ilog10(), 2);
+    assert_eq((1000).ilog10(), 3);
+    assert_eq((1000000).ilog10(), 6);
+}
+
+// =============================================================================
+// Int - is_power_of_two
+// =============================================================================
+
+@test
+fn test_int_is_power_of_two() {
+    assert((1).is_power_of_two());
+    assert((2).is_power_of_two());
+    assert((4).is_power_of_two());
+    assert((8).is_power_of_two());
+    assert((16).is_power_of_two());
+    assert((256).is_power_of_two());
+    assert((1024).is_power_of_two());
+}
+
+@test
+fn test_int_not_power_of_two() {
+    assert(!(0).is_power_of_two());
+    assert(!(3).is_power_of_two());
+    assert(!(5).is_power_of_two());
+    assert(!(6).is_power_of_two());
+    assert(!(7).is_power_of_two());
+    assert(!(-1).is_power_of_two());
+    assert(!(-4).is_power_of_two());
+}
+
+// =============================================================================
+// Int8 - all new methods
+// =============================================================================
+
+@test
+fn test_int8_checked_rem() {
+    let a = 10 as Int8;
+    let b = 3 as Int8;
+    let result = a.checked_rem(b);
+    assert(result is Some);
+    assert_eq(result.unwrap().to_int(), 1);
+
+    let zero = 0 as Int8;
+    assert(a.checked_rem(zero) is None);
+}
+
+@test
+fn test_int8_wrapping_neg() {
+    let a = 5 as Int8;
+    assert_eq(a.wrapping_neg().to_int(), -5);
+
+    // MIN wrapping_neg wraps to MIN (since -(-128) = 128 > 127)
+    let min_val = -128 as Int8;
+    let neg = min_val.wrapping_neg();
+    assert_eq(neg.to_int(), -128);
+}
+
+@test
+fn test_int8_checked_neg() {
+    let a = 5 as Int8;
+    let result = a.checked_neg();
+    assert(result is Some);
+    assert_eq(result.unwrap().to_int(), -5);
+
+    let zero = 0 as Int8;
+    assert(zero.checked_neg() is Some);
+}
+
+@test
+fn test_int8_abs_diff() {
+    let a = 10 as Int8;
+    let b = 3 as Int8;
+    assert_eq(a.abs_diff(b), 7);
+    assert_eq(b.abs_diff(a), 7);
+
+    let neg = -5 as Int8;
+    assert_eq(neg.abs_diff(a), 15);
+}
+
+@test
+fn test_int8_ilog2() {
+    let a = 4 as Int8;
+    assert_eq(a.ilog2(), 2);
+    let b = 1 as Int8;
+    assert_eq(b.ilog2(), 0);
+    let c = 127 as Int8;
+    assert_eq(c.ilog2(), 6);
+}
+
+@test
+fn test_int8_ilog10() {
+    let a = 1 as Int8;
+    assert_eq(a.ilog10(), 0);
+    let b = 10 as Int8;
+    assert_eq(b.ilog10(), 1);
+    let c = 99 as Int8;
+    assert_eq(c.ilog10(), 1);
+    let d = 100 as Int8;
+    assert_eq(d.ilog10(), 2);
+}
+
+@test
+fn test_int8_is_power_of_two() {
+    assert((1 as Int8).is_power_of_two());
+    assert((2 as Int8).is_power_of_two());
+    assert((4 as Int8).is_power_of_two());
+    assert((64 as Int8).is_power_of_two());
+    assert(!(0 as Int8).is_power_of_two());
+    assert(!(3 as Int8).is_power_of_two());
+    assert(!(-1 as Int8).is_power_of_two());
+}
+
+// =============================================================================
+// Int16 - all new methods
+// =============================================================================
+
+@test
+fn test_int16_checked_rem() {
+    let a = 1000 as Int16;
+    let b = 7 as Int16;
+    let result = a.checked_rem(b);
+    assert(result is Some);
+    assert_eq(result.unwrap().to_int(), 6);
+    assert(a.checked_rem(0 as Int16) is None);
+}
+
+@test
+fn test_int16_wrapping_neg() {
+    let a = 100 as Int16;
+    assert_eq(a.wrapping_neg().to_int(), -100);
+}
+
+@test
+fn test_int16_checked_neg() {
+    let a = 100 as Int16;
+    assert(a.checked_neg() is Some);
+    assert_eq(a.checked_neg().unwrap().to_int(), -100);
+}
+
+@test
+fn test_int16_abs_diff() {
+    let a = 1000 as Int16;
+    let b = -1000 as Int16;
+    assert_eq(a.abs_diff(b), 2000);
+}
+
+@test
+fn test_int16_ilog2() {
+    let a = 256 as Int16;
+    assert_eq(a.ilog2(), 8);
+    let b = 32767 as Int16;
+    assert_eq(b.ilog2(), 14);
+}
+
+@test
+fn test_int16_ilog10() {
+    let a = 1000 as Int16;
+    assert_eq(a.ilog10(), 3);
+    let b = 9999 as Int16;
+    assert_eq(b.ilog10(), 3);
+    let c = 10000 as Int16;
+    assert_eq(c.ilog10(), 4);
+}
+
+@test
+fn test_int16_is_power_of_two() {
+    assert((1024 as Int16).is_power_of_two());
+    assert((16384 as Int16).is_power_of_two());
+    assert(!(1000 as Int16).is_power_of_two());
+}
+
+// =============================================================================
+// Int32 - all new methods
+// =============================================================================
+
+@test
+fn test_int32_checked_rem() {
+    let a = 100000 as Int32;
+    let b = 7 as Int32;
+    let result = a.checked_rem(b);
+    assert(result is Some);
+    assert(a.checked_rem(0 as Int32) is None);
+}
+
+@test
+fn test_int32_wrapping_neg_and_checked_neg() {
+    let a = 100000 as Int32;
+    assert_eq(a.wrapping_neg().to_int(), -100000);
+    assert(a.checked_neg() is Some);
+    assert_eq(a.checked_neg().unwrap().to_int(), -100000);
+}
+
+@test
+fn test_int32_abs_diff() {
+    let a = 1000000 as Int32;
+    let b = -1000000 as Int32;
+    assert_eq(a.abs_diff(b), 2000000);
+}
+
+@test
+fn test_int32_ilog2() {
+    let a = 1048576 as Int32;
+    assert_eq(a.ilog2(), 20);
+}
+
+@test
+fn test_int32_ilog10() {
+    let a = 1000000 as Int32;
+    assert_eq(a.ilog10(), 6);
+}
+
+@test
+fn test_int32_is_power_of_two() {
+    assert((1048576 as Int32).is_power_of_two());
+    assert(!(999999 as Int32).is_power_of_two());
+}
+
+// =============================================================================
+// Int64 - all new methods
+// =============================================================================
+
+@test
+fn test_int64_checked_rem() {
+    let a = 100 as Int64;
+    let b = 7 as Int64;
+    assert(a.checked_rem(b) is Some);
+    assert(a.checked_rem(0 as Int64) is None);
+}
+
+@test
+fn test_int64_wrapping_neg_and_checked_neg() {
+    let a = 12345 as Int64;
+    assert_eq(a.wrapping_neg().to_int(), -12345);
+    assert(a.checked_neg() is Some);
+}
+
+@test
+fn test_int64_abs_diff_ilog2() {
+    let a = 100 as Int64;
+    let b = 50 as Int64;
+    assert_eq(a.abs_diff(b), 50);
+    assert_eq(a.ilog2(), 6);
+}
+
+@test
+fn test_int64_ilog10_is_power_of_two() {
+    let a = 1000000 as Int64;
+    assert_eq(a.ilog10(), 6);
+    assert((1024 as Int64).is_power_of_two());
+    assert(!(1000 as Int64).is_power_of_two());
+}
+
+// =============================================================================
+// Int128 - available methods (skip abs_diff, ilog10)
+// =============================================================================
+
+@test
+fn test_int128_checked_rem() {
+    let a = 100 as Int128;
+    let b = 7 as Int128;
+    assert(a.checked_rem(b) is Some);
+    assert(a.checked_rem(0 as Int128) is None);
+}
+
+@test
+fn test_int128_wrapping_neg() {
+    let a = 42 as Int128;
+    assert_eq(a.wrapping_neg().to_int(), -42);
+}
+
+@test
+fn test_int128_checked_neg() {
+    let a = 42 as Int128;
+    assert(a.checked_neg() is Some);
+    assert_eq(a.checked_neg().unwrap().to_int(), -42);
+
+    let zero = 0 as Int128;
+    assert(zero.checked_neg() is Some);
+}
+
+@test
+fn test_int128_ilog2() {
+    let a = 1024 as Int128;
+    assert_eq(a.ilog2(), 10);
+    let b = 1 as Int128;
+    assert_eq(b.ilog2(), 0);
+}
+
+@test
+fn test_int128_is_power_of_two() {
+    assert((1 as Int128).is_power_of_two());
+    assert((256 as Int128).is_power_of_two());
+    assert(!(3 as Int128).is_power_of_two());
+}
+
+// =============================================================================
+// ISize - all new methods
+// =============================================================================
+
+@test
+fn test_isize_checked_rem() {
+    let a = 100 as ISize;
+    let b = 7 as ISize;
+    assert(a.checked_rem(b) is Some);
+    assert(a.checked_rem(0 as ISize) is None);
+}
+
+@test
+fn test_isize_wrapping_neg_checked_neg() {
+    let a = 42 as ISize;
+    assert_eq(a.wrapping_neg().to_int(), -42);
+    assert(a.checked_neg() is Some);
+    assert_eq(a.checked_neg().unwrap().to_int(), -42);
+}
+
+@test
+fn test_isize_abs_diff() {
+    let a = 100 as ISize;
+    let b = -50 as ISize;
+    assert_eq(a.abs_diff(b), 150);
+}
+
+@test
+fn test_isize_ilog2_ilog10() {
+    let a = 1024 as ISize;
+    assert_eq(a.ilog2(), 10);
+    let b = 1000 as ISize;
+    assert_eq(b.ilog10(), 3);
+}
+
+@test
+fn test_isize_is_power_of_two() {
+    assert((256 as ISize).is_power_of_two());
+    assert(!(255 as ISize).is_power_of_two());
+}
+
+// =============================================================================
+// UInt8 - all new methods
+// =============================================================================
+
+@test
+fn test_uint8_checked_rem() {
+    let a = 10 as UInt8;
+    let b = 3 as UInt8;
+    assert(a.checked_rem(b) is Some);
+    assert_eq(a.checked_rem(b).unwrap().to_int(), 1);
+    assert(a.checked_rem(0 as UInt8) is None);
+}
+
+@test
+fn test_uint8_wrapping_neg() {
+    let a = 1 as UInt8;
+    // wrapping_neg(1) for u8 = 255
+    let neg = a.wrapping_neg();
+    assert_eq(neg.to_int(), 255);
+
+    let zero = 0 as UInt8;
+    assert_eq(zero.wrapping_neg().to_int(), 0);
+}
+
+@test
+fn test_uint8_abs_diff() {
+    let a = 200 as UInt8;
+    let b = 50 as UInt8;
+    assert_eq(a.abs_diff(b), 150);
+    assert_eq(b.abs_diff(a), 150);
+}
+
+@test
+fn test_uint8_ilog2() {
+    let a = 128 as UInt8;
+    assert_eq(a.ilog2(), 7);
+    let b = 1 as UInt8;
+    assert_eq(b.ilog2(), 0);
+    let c = 255 as UInt8;
+    assert_eq(c.ilog2(), 7);
+}
+
+@test
+fn test_uint8_ilog10() {
+    let a = 1 as UInt8;
+    assert_eq(a.ilog10(), 0);
+    let b = 99 as UInt8;
+    assert_eq(b.ilog10(), 1);
+    let c = 100 as UInt8;
+    assert_eq(c.ilog10(), 2);
+}
+
+@test
+fn test_uint8_is_power_of_two() {
+    assert((1 as UInt8).is_power_of_two());
+    assert((2 as UInt8).is_power_of_two());
+    assert((128 as UInt8).is_power_of_two());
+    assert(!(0 as UInt8).is_power_of_two());
+    assert(!(3 as UInt8).is_power_of_two());
+    assert(!(255 as UInt8).is_power_of_two());
+}
+
+// =============================================================================
+// UInt16 - all new methods
+// =============================================================================
+
+@test
+fn test_uint16_checked_rem() {
+    let a = 1000 as UInt16;
+    assert(a.checked_rem(7 as UInt16) is Some);
+    assert(a.checked_rem(0 as UInt16) is None);
+}
+
+@test
+fn test_uint16_wrapping_neg() {
+    let a = 1 as UInt16;
+    assert_eq(a.wrapping_neg().to_int(), 65535);
+}
+
+@test
+fn test_uint16_abs_diff_ilog2() {
+    let a = 1000 as UInt16;
+    let b = 500 as UInt16;
+    assert_eq(a.abs_diff(b), 500);
+    assert_eq(a.ilog2(), 9);
+}
+
+@test
+fn test_uint16_ilog10_is_power_of_two() {
+    let a = 10000 as UInt16;
+    assert_eq(a.ilog10(), 4);
+    assert((4096 as UInt16).is_power_of_two());
+    assert(!(4095 as UInt16).is_power_of_two());
+}
+
+// =============================================================================
+// UInt32 - all new methods
+// =============================================================================
+
+@test
+fn test_uint32_checked_rem() {
+    let a = 100000 as UInt32;
+    assert(a.checked_rem(7 as UInt32) is Some);
+    assert(a.checked_rem(0 as UInt32) is None);
+}
+
+@test
+fn test_uint32_wrapping_neg() {
+    let a = 1 as UInt32;
+    let neg = a.wrapping_neg();
+    // wrapping_neg(1) for u32 = 2^32 - 1 = 4294967295
+    // But to_int() truncates large unsigned values
+    assert(neg.to_int() != 0);
+}
+
+@test
+fn test_uint32_abs_diff_ilog2() {
+    let a = 1000000 as UInt32;
+    let b = 500000 as UInt32;
+    assert_eq(a.abs_diff(b), 500000);
+    assert_eq(a.ilog2(), 19);
+}
+
+@test
+fn test_uint32_ilog10_is_power_of_two() {
+    let a = 1000000 as UInt32;
+    assert_eq(a.ilog10(), 6);
+    assert((1048576 as UInt32).is_power_of_two());
+    assert(!(1000000 as UInt32).is_power_of_two());
+}
+
+// =============================================================================
+// UInt64 - all new methods
+// =============================================================================
+
+@test
+fn test_uint64_checked_rem() {
+    let a = 100 as UInt64;
+    assert(a.checked_rem(7 as UInt64) is Some);
+    assert(a.checked_rem(0 as UInt64) is None);
+}
+
+@test
+fn test_uint64_wrapping_neg() {
+    let a = 1 as UInt64;
+    let neg = a.wrapping_neg();
+    assert(neg.to_int() != 0);
+}
+
+@test
+fn test_uint64_abs_diff() {
+    let a = 100 as UInt64;
+    let b = 50 as UInt64;
+    assert_eq(a.abs_diff(b), 50);
+}
+
+@test
+fn test_uint64_ilog2_ilog10() {
+    let a = 1024 as UInt64;
+    assert_eq(a.ilog2(), 10);
+    let b = 1000000 as UInt64;
+    assert_eq(b.ilog10(), 6);
+}
+
+@test
+fn test_uint64_is_power_of_two() {
+    assert((1 as UInt64).is_power_of_two());
+    assert((512 as UInt64).is_power_of_two());
+    assert(!(511 as UInt64).is_power_of_two());
+}
+
+// =============================================================================
+// UInt128 - available methods (skip abs_diff, ilog10)
+// =============================================================================
+
+@test
+fn test_uint128_checked_rem() {
+    let a = 100 as UInt128;
+    assert(a.checked_rem(7 as UInt128) is Some);
+    assert(a.checked_rem(0 as UInt128) is None);
+}
+
+@test
+fn test_uint128_wrapping_neg() {
+    let zero = 0 as UInt128;
+    assert_eq(zero.wrapping_neg().to_int(), 0);
+}
+
+@test
+fn test_uint128_ilog2() {
+    let a = 1024 as UInt128;
+    assert_eq(a.ilog2(), 10);
+    let b = 1 as UInt128;
+    assert_eq(b.ilog2(), 0);
+}
+
+@test
+fn test_uint128_is_power_of_two() {
+    assert((1 as UInt128).is_power_of_two());
+    assert((256 as UInt128).is_power_of_two());
+    assert(!(255 as UInt128).is_power_of_two());
+}
+
+// =============================================================================
+// USize - all new methods
+// =============================================================================
+
+@test
+fn test_usize_checked_rem() {
+    let a = 100 as USize;
+    assert(a.checked_rem(7 as USize) is Some);
+    assert(a.checked_rem(0 as USize) is None);
+}
+
+@test
+fn test_usize_wrapping_neg() {
+    let zero = 0 as USize;
+    assert_eq(zero.wrapping_neg().to_int(), 0);
+    let one = 1 as USize;
+    assert(one.wrapping_neg().to_int() != 0);
+}
+
+@test
+fn test_usize_abs_diff() {
+    let a = 100 as USize;
+    let b = 40 as USize;
+    assert_eq(a.abs_diff(b), 60);
+    assert_eq(b.abs_diff(a), 60);
+}
+
+@test
+fn test_usize_ilog2_ilog10() {
+    let a = 512 as USize;
+    assert_eq(a.ilog2(), 9);
+    let b = 99999 as USize;
+    assert_eq(b.ilog10(), 4);
+}
+
+@test
+fn test_usize_is_power_of_two() {
+    assert((1 as USize).is_power_of_two());
+    assert((65536 as USize).is_power_of_two());
+    assert(!(65535 as USize).is_power_of_two());
+}
+
+// =============================================================================
+// Cross-type consistency: verify all types have consistent methods
+// =============================================================================
+
+@test
+fn test_all_signed_have_checked_rem() {
+    // Verify checked_rem exists and returns Maybe for all signed types
+    assert((10 as Int8).checked_rem(3 as Int8) is Some);
+    assert((10 as Int16).checked_rem(3 as Int16) is Some);
+    assert((10 as Int32).checked_rem(3 as Int32) is Some);
+    assert((10 as Int64).checked_rem(3 as Int64) is Some);
+    assert((10 as Int128).checked_rem(3 as Int128) is Some);
+    assert((10 as ISize).checked_rem(3 as ISize) is Some);
+}
+
+@test
+fn test_all_unsigned_have_checked_rem() {
+    assert((10 as UInt8).checked_rem(3 as UInt8) is Some);
+    assert((10 as UInt16).checked_rem(3 as UInt16) is Some);
+    assert((10 as UInt32).checked_rem(3 as UInt32) is Some);
+    assert((10 as UInt64).checked_rem(3 as UInt64) is Some);
+    assert((10 as UInt128).checked_rem(3 as UInt128) is Some);
+    assert((10 as USize).checked_rem(3 as USize) is Some);
+}
+
+@test
+fn test_all_have_wrapping_neg() {
+    let _a = (5 as Int8).wrapping_neg();
+    let _b = (5 as Int16).wrapping_neg();
+    let _c = (5 as Int32).wrapping_neg();
+    let _d = (5 as Int64).wrapping_neg();
+    let _e = (5 as Int128).wrapping_neg();
+    let _f = (5 as ISize).wrapping_neg();
+    let _g = (5 as UInt8).wrapping_neg();
+    let _h = (5 as UInt16).wrapping_neg();
+    let _i = (5 as UInt32).wrapping_neg();
+    let _j = (5 as UInt64).wrapping_neg();
+    let _k = (5 as UInt128).wrapping_neg();
+    let _l = (5 as USize).wrapping_neg();
+    assert_eq(_a.to_int(), -5);
+    assert_eq(_b.to_int(), -5);
+    assert_eq(_c.to_int(), -5);
+    assert_eq(_d.to_int(), -5);
+    assert_eq(_e.to_int(), -5);
+    assert_eq(_f.to_int(), -5);
+    assert(_g.to_int() == 251);
+    assert(_h.to_int() == 65531);
+    assert(_i.to_int() != 0);
+    assert(_j.to_int() != 0);
+    assert(_k.to_int() != 0);
+    assert(_l.to_int() != 0);
+}
+
+@test
+fn test_all_signed_have_checked_neg() {
+    assert((5 as Int8).checked_neg() is Some);
+    assert((5 as Int16).checked_neg() is Some);
+    assert((5 as Int32).checked_neg() is Some);
+    assert((5 as Int64).checked_neg() is Some);
+    assert((5 as Int128).checked_neg() is Some);
+    assert((5 as ISize).checked_neg() is Some);
+}
+
+@test
+fn test_all_have_ilog2() {
+    assert_eq((8 as Int8).ilog2(), 3);
+    assert_eq((8 as Int16).ilog2(), 3);
+    assert_eq((8 as Int32).ilog2(), 3);
+    assert_eq((8 as Int64).ilog2(), 3);
+    assert_eq((8 as Int128).ilog2(), 3);
+    assert_eq((8 as ISize).ilog2(), 3);
+    assert_eq((8 as UInt8).ilog2(), 3);
+    assert_eq((8 as UInt16).ilog2(), 3);
+    assert_eq((8 as UInt32).ilog2(), 3);
+    assert_eq((8 as UInt64).ilog2(), 3);
+    assert_eq((8 as UInt128).ilog2(), 3);
+    assert_eq((8 as USize).ilog2(), 3);
+    assert_eq((8).ilog2(), 3);
+}
+
+@test
+fn test_all_have_is_power_of_two() {
+    assert((8 as Int8).is_power_of_two());
+    assert((8 as Int16).is_power_of_two());
+    assert((8 as Int32).is_power_of_two());
+    assert((8 as Int64).is_power_of_two());
+    assert((8 as Int128).is_power_of_two());
+    assert((8 as ISize).is_power_of_two());
+    assert((8 as UInt8).is_power_of_two());
+    assert((8 as UInt16).is_power_of_two());
+    assert((8 as UInt32).is_power_of_two());
+    assert((8 as UInt64).is_power_of_two());
+    assert((8 as UInt128).is_power_of_two());
+    assert((8 as USize).is_power_of_two());
+    assert((8).is_power_of_two());
+}

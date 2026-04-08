@@ -1,0 +1,369 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, or, alternatives, advanced
+//
+// Tests or-patterns (A | B | C) for matching multiple alternatives in a single arm.
+// Or-patterns reduce code duplication when multiple patterns share the same action.
+
+//------------------------------------------------------------------------------
+// Basic Or-Patterns with Literals
+//------------------------------------------------------------------------------
+
+/// Or-pattern with integer literals.
+fn match_int_or(n: Int) -> Text {
+    match n {
+        0 | 1 => "binary digit",
+        2 | 3 | 4 | 5 | 6 | 7 => "octal digit",
+        8 | 9 => "decimal only",
+        _ => "not a digit",
+    }
+}
+
+/// Or-pattern with character literals.
+fn match_char_or(c: Char) -> Bool {
+    match c {
+        'a' | 'e' | 'i' | 'o' | 'u' |
+        'A' | 'E' | 'I' | 'O' | 'U' => true,
+        _ => false,
+    }
+}
+
+/// Or-pattern with boolean (exhaustive).
+fn match_bool_or(b: Bool) -> Text {
+    match b {
+        true | false => "boolean value",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Or-Patterns with Enum Variants
+//------------------------------------------------------------------------------
+
+type Weekday is
+    | Monday
+    | Tuesday
+    | Wednesday
+    | Thursday
+    | Friday
+    | Saturday
+    | Sunday;
+
+type Color is
+    | Red
+    | Orange
+    | Yellow
+    | Green
+    | Blue
+    | Indigo
+    | Violet;
+
+type Status is
+    | Active(Int)
+    | Pending(Int)
+    | Completed(Int)
+    | Failed(Text);
+
+/// Or-pattern with unit variants.
+fn is_weekend(day: Weekday) -> Bool {
+    match day {
+        Saturday | Sunday => true,
+        Monday | Tuesday | Wednesday | Thursday | Friday => false,
+    }
+}
+
+/// Or-pattern with different variant groups.
+fn color_temperature(c: Color) -> Text {
+    match c {
+        Red | Orange | Yellow => "warm",
+        Green => "neutral",
+        Blue | Indigo | Violet => "cool",
+    }
+}
+
+/// Or-pattern with primary colors.
+fn is_primary(c: Color) -> Bool {
+    match c {
+        Red | Yellow | Blue => true,
+        Orange | Green | Indigo | Violet => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Or-Patterns with Bindings
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+/// Or-pattern with consistent bindings across alternatives.
+fn extract_status_id(s: Status) -> Int {
+    match s {
+        Active(id) | Pending(id) | Completed(id) => id,
+        Failed(_) => -1,
+    }
+}
+
+/// Or-pattern extracting from either Result variant.
+fn extract_either<T>(r: Result<T, T>) -> T {
+    match r {
+        Ok(x) | Err(x) => x,
+    }
+}
+
+/// First non-none value.
+fn first_some<T>(a: Maybe<T>, b: Maybe<T>) -> Maybe<T> {
+    match (a, b) {
+        (Some(x), _) | (None, Some(x)) => Some(x),
+        (None, None) => None,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Or-Patterns in Tuple Matching
+//------------------------------------------------------------------------------
+
+/// Or-pattern in tuple elements.
+fn classify_point(point: (Int, Int)) -> Text {
+    match point {
+        (0, 0) => "origin",
+        (0, _) | (_, 0) => "on axis",
+        (1, 1) | (-1, -1) | (1, -1) | (-1, 1) => "unit square corner",
+        (x, y) if x == y => "on main diagonal",
+        (x, y) if x == -y => "on anti-diagonal",
+        _ => "other",
+    }
+}
+
+/// Or-pattern with multiple tuple alternatives.
+fn special_pairs(pair: (Int, Int)) -> Bool {
+    match pair {
+        (0, 0) | (1, 0) | (0, 1) | (1, 1) => true,
+        _ => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Or-Patterns in Struct Matching
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+/// Or-pattern with struct literals.
+fn is_origin_or_unit(p: Point) -> Bool {
+    match p {
+        Point { x: 0, y: 0 } | Point { x: 1, y: 0 } | Point { x: 0, y: 1 } => true,
+        _ => false,
+    }
+}
+
+/// Or-pattern on struct fields.
+fn on_axis(p: Point) -> Bool {
+    match p {
+        Point { x: 0, .. } | Point { y: 0, .. } => true,
+        _ => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Or-Patterns
+//------------------------------------------------------------------------------
+
+/// Nested or within tuple.
+fn nested_or(pair: (Int, Int)) -> Text {
+    match pair {
+        (0 | 1, 0 | 1) => "binary pair",
+        (0 | 1, _) => "first binary",
+        (_, 0 | 1) => "second binary",
+        _ => "other",
+    }
+}
+
+/// Or-pattern inside Maybe.
+fn maybe_special(m: Maybe<Int>) -> Bool {
+    match m {
+        Some(0 | 1 | -1) => true,
+        Some(_) => false,
+        None => false,
+    }
+}
+
+/// Or-pattern in struct field position.
+fn point_near_axis(p: Point) -> Bool {
+    match p {
+        Point { x: -1 | 0 | 1, y } if y.abs() > 10 => true,
+        Point { x, y: -1 | 0 | 1 } if x.abs() > 10 => true,
+        _ => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Or-Patterns with Guards
+//------------------------------------------------------------------------------
+
+/// Guard applying to entire or-pattern.
+fn guarded_or(n: Int) -> Text {
+    match n {
+        1 | 2 | 3 if n % 2 == 1 => "odd small",
+        1 | 2 | 3 if n % 2 == 0 => "even small",
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        0 => "zero",
+    }
+}
+
+/// Complex guard with or-pattern.
+fn complex_guarded_or(pair: (Int, Int)) -> Text {
+    match pair {
+        (x, y) if (x == 0 || y == 0) && x + y > 5 => "on axis, far",
+        (x, y) if x == 0 || y == 0 => "on axis, near",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Or-Patterns with Ranges
+//------------------------------------------------------------------------------
+
+/// Range alternatives (different ranges).
+fn classify_age(age: Int) -> Text {
+    match age {
+        0..=12 => "child",
+        13..=19 => "teen",
+        20..=64 => "adult",
+        65.. => "senior",
+        _ => "invalid",
+    }
+}
+
+/// Mix of literals and ranges.
+fn http_category(code: Int) -> Text {
+    match code {
+        100 | 101 | 102 => "informational",
+        200..=299 => "success",
+        300..=399 => "redirect",
+        400 | 401 | 403 | 404 | 405 => "common client error",
+        400..=499 => "other client error",
+        500 | 502 | 503 | 504 => "common server error",
+        500..=599 => "other server error",
+        _ => "unknown",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Large Or-Patterns
+//------------------------------------------------------------------------------
+
+/// Many alternatives.
+fn is_small_prime(n: Int) -> Bool {
+    match n {
+        2 | 3 | 5 | 7 | 11 | 13 | 17 | 19 | 23 | 29 |
+        31 | 37 | 41 | 43 | 47 | 53 | 59 | 61 | 67 | 71 |
+        73 | 79 | 83 | 89 | 97 => true,
+        _ => false,
+    }
+}
+
+/// Full keyboard row.
+fn keyboard_row(c: Char) -> Int {
+    match c {
+        '`' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0' | '-' | '=' => 1,
+        'q' | 'w' | 'e' | 'r' | 't' | 'y' | 'u' | 'i' | 'o' | 'p' | '[' | ']' | '\\' => 2,
+        'a' | 's' | 'd' | 'f' | 'g' | 'h' | 'j' | 'k' | 'l' | ';' | '\'' => 3,
+        'z' | 'x' | 'c' | 'v' | 'b' | 'n' | 'm' | ',' | '.' | '/' => 4,
+        ' ' => 5,
+        _ => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Or-Patterns in Different Contexts
+//------------------------------------------------------------------------------
+
+/// Or-pattern in if-let.
+fn if_let_or(m: Maybe<Int>) -> Bool {
+    if let Some(0 | 1 | 2) = m {
+        true
+    } else {
+        false
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Integer or
+    assert(match_int_or(0) == "binary digit");
+    assert(match_int_or(1) == "binary digit");
+    assert(match_int_or(5) == "octal digit");
+    assert(match_int_or(9) == "decimal only");
+    assert(match_int_or(10) == "not a digit");
+
+    // Character or
+    assert(match_char_or('a') == true);
+    assert(match_char_or('E') == true);
+    assert(match_char_or('b') == false);
+
+    // Weekday
+    assert(is_weekend(Saturday) == true);
+    assert(is_weekend(Sunday) == true);
+    assert(is_weekend(Monday) == false);
+    assert(is_weekend(Friday) == false);
+
+    // Color
+    assert(color_temperature(Red) == "warm");
+    assert(color_temperature(Blue) == "cool");
+    assert(color_temperature(Green) == "neutral");
+    assert(is_primary(Red) == true);
+    assert(is_primary(Orange) == false);
+
+    // Bindings
+    assert(extract_status_id(Active(42)) == 42);
+    assert(extract_status_id(Pending(100)) == 100);
+    assert(extract_status_id(Failed("error")) == -1);
+
+    // Tuple
+    assert(classify_point((0, 0)) == "origin");
+    assert(classify_point((0, 5)) == "on axis");
+    assert(classify_point((1, 1)) == "unit square corner");
+
+    // Struct
+    assert(is_origin_or_unit(Point { x: 0, y: 0 }) == true);
+    assert(is_origin_or_unit(Point { x: 1, y: 0 }) == true);
+    assert(is_origin_or_unit(Point { x: 2, y: 2 }) == false);
+
+    // Nested
+    assert(nested_or((0, 0)) == "binary pair");
+    assert(nested_or((1, 1)) == "binary pair");
+    assert(nested_or((0, 5)) == "first binary");
+
+    // Guards
+    assert(guarded_or(1) == "odd small");
+    assert(guarded_or(2) == "even small");
+    assert(guarded_or(3) == "odd small");
+
+    // HTTP
+    assert(http_category(200) == "success");
+    assert(http_category(404) == "common client error");
+    assert(http_category(418) == "other client error");
+
+    // Primes
+    assert(is_small_prime(2) == true);
+    assert(is_small_prime(97) == true);
+    assert(is_small_prime(100) == false);
+
+    // If-let
+    assert(if_let_or(Some(1)) == true);
+    assert(if_let_or(Some(5)) == false);
+    assert(if_let_or(None) == false);
+}

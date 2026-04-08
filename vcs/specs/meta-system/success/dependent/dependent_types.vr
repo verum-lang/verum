@@ -1,0 +1,179 @@
+// @test: meta-pass
+// @level: L2
+// @tier: 0
+// @tags: meta, dependent, types, compile-time
+// @description: Tests compile-time type-dependent computations in meta-system
+
+// =============================================================================
+// COMPILE-TIME COMPUTATIONS (simulating dependent type patterns)
+// =============================================================================
+
+// Meta function that computes factorial at compile time
+meta fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+// Meta function that computes fibonacci at compile time
+meta fn fib(n: Int) -> Int {
+    if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+// Meta function that validates array bounds
+meta fn validate_index(len: Int, idx: Int) -> Bool {
+    idx >= 0 && idx < len
+}
+
+// Meta function for safe array element selection
+meta fn safe_select(arr: List<Int>, idx: Int) -> Int {
+    if validate_index(list_len(arr), idx) {
+        maybe_unwrap(list_get(arr, idx))
+    } else {
+        -1  // sentinel value
+    }
+}
+
+// =============================================================================
+// TYPE-LEVEL LISTS
+// =============================================================================
+
+// Meta list operations that mimic dependent type patterns
+meta fn repeat(value: Int, n: Int) -> List<Int> {
+    let mut result = [];
+    let mut i = 0;
+    while i < n {
+        result = list_push(result, value);
+        i = i + 1;
+    }
+    result
+}
+
+meta fn range(start: Int, end: Int) -> List<Int> {
+    let mut result = [];
+    let mut i = start;
+    while i < end {
+        result = list_push(result, i);
+        i = i + 1;
+    }
+    result
+}
+
+meta fn list_sum(lst: List<Int>) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < list_len(lst) {
+        sum = sum + maybe_unwrap(list_get(lst, i));
+        i = i + 1;
+    }
+    sum
+}
+
+meta fn list_product(lst: List<Int>) -> Int {
+    let mut prod = 1;
+    let mut i = 0;
+    while i < list_len(lst) {
+        prod = prod * maybe_unwrap(list_get(lst, i));
+        i = i + 1;
+    }
+    prod
+}
+
+// =============================================================================
+// MATRIX-LIKE OPERATIONS
+// =============================================================================
+
+// 2D list representing a matrix
+meta fn make_matrix(rows: Int, cols: Int, fill: Int) -> List<List<Int>> {
+    let mut result = [];
+    let mut i = 0;
+    while i < rows {
+        let mut row = [];
+        let mut j = 0;
+        while j < cols {
+            row = list_push(row, fill);
+            j = j + 1;
+        }
+        result = list_push(result, row);
+        i = i + 1;
+    }
+    result
+}
+
+meta fn matrix_rows(m: List<List<Int>>) -> Int {
+    list_len(m)
+}
+
+meta fn matrix_cols(m: List<List<Int>>) -> Int {
+    if list_len(m) > 0 { list_len(maybe_unwrap(list_get(m, 0))) } else { 0 }
+}
+
+// =============================================================================
+// BOUNDED VALUES
+// =============================================================================
+
+// Check if value is in bounds
+meta fn in_bounds(value: Int, low: Int, high: Int) -> Bool {
+    value >= low && value <= high
+}
+
+// Clamp value to bounds
+meta fn clamp(value: Int, low: Int, high: Int) -> Int {
+    if value < low { low }
+    else if value > high { high }
+    else { value }
+}
+
+// Percentage validation (0-100)
+meta fn valid_percentage(value: Int) -> Bool {
+    in_bounds(value, 0, 100)
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Test factorial computations
+    @const assert_eq(factorial(5), 120);
+    @const assert_eq(factorial(6), 720);
+    @const assert_eq(factorial(10), 3628800);
+
+    // Test fibonacci computations
+    @const assert_eq(fib(10), 55);
+    @const assert_eq(fib(15), 610);
+
+    // Test array bounds validation
+    @const assert(validate_index(5, 0));
+    @const assert(validate_index(5, 4));
+    @const assert(!validate_index(5, 5));
+    @const assert(!validate_index(5, -1));
+
+    // Test safe select
+    @const assert_eq(safe_select([10, 20, 30], 1), 20);
+    @const assert_eq(safe_select([10, 20, 30], 5), -1);
+
+    // Test repeat and range
+    @const assert_eq(list_len(repeat(42, 5)), 5);
+    @const assert_eq(list_len(range(0, 10)), 10);
+
+    // Test list operations
+    @const assert_eq(list_sum(range(1, 6)), 15);
+    @const assert_eq(list_product(range(1, 6)), 120);
+
+    // Test matrix operations
+    @const assert_eq(matrix_rows(make_matrix(3, 4, 0)), 3);
+    @const assert_eq(matrix_cols(make_matrix(3, 4, 0)), 4);
+
+    // Test bounds checking
+    @const assert(in_bounds(5, 0, 10));
+    @const assert(!in_bounds(15, 0, 10));
+    @const assert_eq(clamp(15, 0, 10), 10);
+    @const assert_eq(clamp(-5, 0, 10), 0);
+    @const assert_eq(clamp(5, 0, 10), 5);
+
+    // Test percentage validation
+    @const assert(valid_percentage(50));
+    @const assert(valid_percentage(0));
+    @const assert(valid_percentage(100));
+    @const assert(!valid_percentage(-1));
+    @const assert(!valid_percentage(101));
+}

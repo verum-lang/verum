@@ -1,0 +1,849 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, advanced, where, masked, cmp
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT advanced tensor operations — where, masked_fill, masked_select, cmp, nonzero, lerp, cast, einsum
+
+// ============================================================================
+// Utility helpers
+// ============================================================================
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// ============================================================================
+// 4-element array type (simulated tensor)
+// ============================================================================
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+fn arr4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+fn arr4_sum(a: Arr4) -> Int {
+    a.e0 + a.e1 + a.e2 + a.e3
+}
+
+// 4-element boolean mask (1 = true, 0 = false)
+type Mask4 is { m0: Int, m1: Int, m2: Int, m3: Int };
+
+fn mask4_get(m: Mask4, i: Int) -> Int {
+    if i == 0 { m.m0 } else if i == 1 { m.m1 } else if i == 2 { m.m2 } else { m.m3 }
+}
+
+// ============================================================================
+// 2x2 matrix for batch matmul
+// ============================================================================
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2_mul(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+// ============================================================================
+// 8-element array for scatter/gather and larger operations
+// ============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// Test 1: Where (conditional select between two arrays)
+// where(mask, a, b) -> for each i: if mask[i] then a[i] else b[i]
+// ============================================================================
+
+fn arr4_where(mask: Mask4, a: Arr4, b: Arr4) -> Arr4 {
+    Arr4 {
+        e0: if mask.m0 != 0 { a.e0 } else { b.e0 },
+        e1: if mask.m1 != 0 { a.e1 } else { b.e1 },
+        e2: if mask.m2 != 0 { a.e2 } else { b.e2 },
+        e3: if mask.m3 != 0 { a.e3 } else { b.e3 }
+    }
+}
+
+fn test_where() {
+    let mask = Mask4 { m0: 1, m1: 0, m2: 1, m3: 0 };
+    let a = Arr4 { e0: 10, e1: 20, e2: 30, e3: 40 };
+    let b = Arr4 { e0: 99, e1: 88, e2: 77, e3: 66 };
+    let out = arr4_where(mask, a, b);
+    // mask[0]=1 -> a[0]=10, mask[1]=0 -> b[1]=88, mask[2]=1 -> a[2]=30, mask[3]=0 -> b[3]=66
+    assert_eq(arr4_get(out, 0), 10);
+    assert_eq(arr4_get(out, 1), 88);
+    assert_eq(arr4_get(out, 2), 30);
+    assert_eq(arr4_get(out, 3), 66);
+
+    // All true mask
+    let all_true = Mask4 { m0: 1, m1: 1, m2: 1, m3: 1 };
+    let out2 = arr4_where(all_true, a, b);
+    assert_eq(arr4_get(out2, 0), 10);
+    assert_eq(arr4_get(out2, 1), 20);
+    assert_eq(arr4_get(out2, 2), 30);
+    assert_eq(arr4_get(out2, 3), 40);
+
+    // All false mask
+    let all_false = Mask4 { m0: 0, m1: 0, m2: 0, m3: 0 };
+    let out3 = arr4_where(all_false, a, b);
+    assert_eq(arr4_get(out3, 0), 99);
+    assert_eq(arr4_get(out3, 1), 88);
+    assert_eq(arr4_get(out3, 2), 77);
+    assert_eq(arr4_get(out3, 3), 66);
+}
+
+// ============================================================================
+// Test 2: Masked fill (fill with a constant value where mask is true)
+// ============================================================================
+
+fn arr4_masked_fill(a: Arr4, mask: Mask4, fill_val: Int) -> Arr4 {
+    Arr4 {
+        e0: if mask.m0 != 0 { fill_val } else { a.e0 },
+        e1: if mask.m1 != 0 { fill_val } else { a.e1 },
+        e2: if mask.m2 != 0 { fill_val } else { a.e2 },
+        e3: if mask.m3 != 0 { fill_val } else { a.e3 }
+    }
+}
+
+fn test_masked_fill() {
+    let a = Arr4 { e0: 5, e1: 10, e2: 15, e3: 20 };
+    let mask = Mask4 { m0: 0, m1: 1, m2: 0, m3: 1 };
+    let out = arr4_masked_fill(a, mask, -1);
+    // mask[0]=0 -> keep 5, mask[1]=1 -> -1, mask[2]=0 -> keep 15, mask[3]=1 -> -1
+    assert_eq(arr4_get(out, 0), 5);
+    assert_eq(arr4_get(out, 1), -1);
+    assert_eq(arr4_get(out, 2), 15);
+    assert_eq(arr4_get(out, 3), -1);
+
+    // Fill with zero where negative (simulate masking out negatives)
+    let b = Arr4 { e0: -3, e1: 7, e2: -1, e3: 4 };
+    let neg_mask = Mask4 {
+        m0: if b.e0 < 0 { 1 } else { 0 },
+        m1: if b.e1 < 0 { 1 } else { 0 },
+        m2: if b.e2 < 0 { 1 } else { 0 },
+        m3: if b.e3 < 0 { 1 } else { 0 }
+    };
+    let out2 = arr4_masked_fill(b, neg_mask, 0);
+    assert_eq(arr4_get(out2, 0), 0);
+    assert_eq(arr4_get(out2, 1), 7);
+    assert_eq(arr4_get(out2, 2), 0);
+    assert_eq(arr4_get(out2, 3), 4);
+}
+
+// ============================================================================
+// Test 3: Masked select (extract values where mask is true, packed)
+// Returns: packed array and count
+// ============================================================================
+
+type SelectResult is { data: Arr4, count: Int };
+
+fn arr4_masked_select(a: Arr4, mask: Mask4) -> SelectResult {
+    let mut out = arr4_zeros();
+    let mut idx = 0;
+    let mut i = 0;
+    while i < 4 {
+        if mask4_get(mask, i) != 0 {
+            out = arr4_set(out, idx, arr4_get(a, i));
+            idx = idx + 1;
+        }
+        i = i + 1;
+    }
+    SelectResult { data: out, count: idx }
+}
+
+fn test_masked_select() {
+    let a = Arr4 { e0: 100, e1: 200, e2: 300, e3: 400 };
+    let mask = Mask4 { m0: 1, m1: 0, m2: 1, m3: 0 };
+    let result = arr4_masked_select(a, mask);
+    assert_eq(result.count, 2);
+    assert_eq(arr4_get(result.data, 0), 100);
+    assert_eq(arr4_get(result.data, 1), 300);
+
+    // All selected
+    let all_mask = Mask4 { m0: 1, m1: 1, m2: 1, m3: 1 };
+    let result2 = arr4_masked_select(a, all_mask);
+    assert_eq(result2.count, 4);
+    assert_eq(arr4_get(result2.data, 0), 100);
+    assert_eq(arr4_get(result2.data, 3), 400);
+
+    // None selected
+    let none_mask = Mask4 { m0: 0, m1: 0, m2: 0, m3: 0 };
+    let result3 = arr4_masked_select(a, none_mask);
+    assert_eq(result3.count, 0);
+}
+
+// ============================================================================
+// Test 4: Element-wise comparison (eq, ne, lt, le, gt, ge)
+// Each comparison returns a Mask4 (1/0 per element)
+// ============================================================================
+
+fn arr4_eq(a: Arr4, b: Arr4) -> Mask4 {
+    Mask4 {
+        m0: if a.e0 == b.e0 { 1 } else { 0 },
+        m1: if a.e1 == b.e1 { 1 } else { 0 },
+        m2: if a.e2 == b.e2 { 1 } else { 0 },
+        m3: if a.e3 == b.e3 { 1 } else { 0 }
+    }
+}
+
+fn arr4_ne(a: Arr4, b: Arr4) -> Mask4 {
+    Mask4 {
+        m0: if a.e0 != b.e0 { 1 } else { 0 },
+        m1: if a.e1 != b.e1 { 1 } else { 0 },
+        m2: if a.e2 != b.e2 { 1 } else { 0 },
+        m3: if a.e3 != b.e3 { 1 } else { 0 }
+    }
+}
+
+fn arr4_lt(a: Arr4, b: Arr4) -> Mask4 {
+    Mask4 {
+        m0: if a.e0 < b.e0 { 1 } else { 0 },
+        m1: if a.e1 < b.e1 { 1 } else { 0 },
+        m2: if a.e2 < b.e2 { 1 } else { 0 },
+        m3: if a.e3 < b.e3 { 1 } else { 0 }
+    }
+}
+
+fn arr4_le(a: Arr4, b: Arr4) -> Mask4 {
+    Mask4 {
+        m0: if a.e0 <= b.e0 { 1 } else { 0 },
+        m1: if a.e1 <= b.e1 { 1 } else { 0 },
+        m2: if a.e2 <= b.e2 { 1 } else { 0 },
+        m3: if a.e3 <= b.e3 { 1 } else { 0 }
+    }
+}
+
+fn arr4_gt(a: Arr4, b: Arr4) -> Mask4 {
+    Mask4 {
+        m0: if a.e0 > b.e0 { 1 } else { 0 },
+        m1: if a.e1 > b.e1 { 1 } else { 0 },
+        m2: if a.e2 > b.e2 { 1 } else { 0 },
+        m3: if a.e3 > b.e3 { 1 } else { 0 }
+    }
+}
+
+fn arr4_ge(a: Arr4, b: Arr4) -> Mask4 {
+    Mask4 {
+        m0: if a.e0 >= b.e0 { 1 } else { 0 },
+        m1: if a.e1 >= b.e1 { 1 } else { 0 },
+        m2: if a.e2 >= b.e2 { 1 } else { 0 },
+        m3: if a.e3 >= b.e3 { 1 } else { 0 }
+    }
+}
+
+fn test_elementwise_cmp() {
+    let a = Arr4 { e0: 1, e1: 5, e2: 3, e3: 7 };
+    let b = Arr4 { e0: 1, e1: 2, e2: 6, e3: 7 };
+
+    // eq: [1==1, 5==2, 3==6, 7==7] = [1, 0, 0, 1]
+    let eq_mask = arr4_eq(a, b);
+    assert_eq(eq_mask.m0, 1);
+    assert_eq(eq_mask.m1, 0);
+    assert_eq(eq_mask.m2, 0);
+    assert_eq(eq_mask.m3, 1);
+
+    // ne: [1!=1, 5!=2, 3!=6, 7!=7] = [0, 1, 1, 0]
+    let ne_mask = arr4_ne(a, b);
+    assert_eq(ne_mask.m0, 0);
+    assert_eq(ne_mask.m1, 1);
+    assert_eq(ne_mask.m2, 1);
+    assert_eq(ne_mask.m3, 0);
+
+    // lt: [1<1, 5<2, 3<6, 7<7] = [0, 0, 1, 0]
+    let lt_mask = arr4_lt(a, b);
+    assert_eq(lt_mask.m0, 0);
+    assert_eq(lt_mask.m1, 0);
+    assert_eq(lt_mask.m2, 1);
+    assert_eq(lt_mask.m3, 0);
+
+    // le: [1<=1, 5<=2, 3<=6, 7<=7] = [1, 0, 1, 1]
+    let le_mask = arr4_le(a, b);
+    assert_eq(le_mask.m0, 1);
+    assert_eq(le_mask.m1, 0);
+    assert_eq(le_mask.m2, 1);
+    assert_eq(le_mask.m3, 1);
+
+    // gt: [1>1, 5>2, 3>6, 7>7] = [0, 1, 0, 0]
+    let gt_mask = arr4_gt(a, b);
+    assert_eq(gt_mask.m0, 0);
+    assert_eq(gt_mask.m1, 1);
+    assert_eq(gt_mask.m2, 0);
+    assert_eq(gt_mask.m3, 0);
+
+    // ge: [1>=1, 5>=2, 3>=6, 7>=7] = [1, 1, 0, 1]
+    let ge_mask = arr4_ge(a, b);
+    assert_eq(ge_mask.m0, 1);
+    assert_eq(ge_mask.m1, 1);
+    assert_eq(ge_mask.m2, 0);
+    assert_eq(ge_mask.m3, 1);
+}
+
+// ============================================================================
+// Test 5: Nonzero indices
+// Returns indices where array elements are nonzero, packed into result
+// ============================================================================
+
+fn arr4_nonzero(a: Arr4) -> SelectResult {
+    let mut out = arr4_zeros();
+    let mut idx = 0;
+    let mut i = 0;
+    while i < 4 {
+        if arr4_get(a, i) != 0 {
+            out = arr4_set(out, idx, i);
+            idx = idx + 1;
+        }
+        i = i + 1;
+    }
+    SelectResult { data: out, count: idx }
+}
+
+fn test_nonzero() {
+    let a = Arr4 { e0: 0, e1: 5, e2: 0, e3: -3 };
+    let result = arr4_nonzero(a);
+    assert_eq(result.count, 2);
+    assert_eq(arr4_get(result.data, 0), 1);  // index 1
+    assert_eq(arr4_get(result.data, 1), 3);  // index 3
+
+    // All nonzero
+    let b = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let result2 = arr4_nonzero(b);
+    assert_eq(result2.count, 4);
+    assert_eq(arr4_get(result2.data, 0), 0);
+    assert_eq(arr4_get(result2.data, 1), 1);
+    assert_eq(arr4_get(result2.data, 2), 2);
+    assert_eq(arr4_get(result2.data, 3), 3);
+
+    // All zero
+    let c = arr4_zeros();
+    let result3 = arr4_nonzero(c);
+    assert_eq(result3.count, 0);
+}
+
+// ============================================================================
+// Test 6: Lerp (linear interpolation with integer math)
+// lerp(a, b, t) = a + t * (b - a) / 10   (t in 0..10 maps to 0.0..1.0)
+// ============================================================================
+
+fn arr4_lerp(a: Arr4, b: Arr4, t: Int) -> Arr4 {
+    Arr4 {
+        e0: a.e0 + t * (b.e0 - a.e0) / 10,
+        e1: a.e1 + t * (b.e1 - a.e1) / 10,
+        e2: a.e2 + t * (b.e2 - a.e2) / 10,
+        e3: a.e3 + t * (b.e3 - a.e3) / 10
+    }
+}
+
+fn test_lerp() {
+    let a = Arr4 { e0: 0, e1: 100, e2: 50, e3: 200 };
+    let b = Arr4 { e0: 100, e1: 0, e2: 150, e3: 200 };
+
+    // t=0: should be a
+    let out0 = arr4_lerp(a, b, 0);
+    assert_eq(arr4_get(out0, 0), 0);
+    assert_eq(arr4_get(out0, 1), 100);
+    assert_eq(arr4_get(out0, 2), 50);
+    assert_eq(arr4_get(out0, 3), 200);
+
+    // t=10: should be b
+    let out10 = arr4_lerp(a, b, 10);
+    assert_eq(arr4_get(out10, 0), 100);
+    assert_eq(arr4_get(out10, 1), 0);
+    assert_eq(arr4_get(out10, 2), 150);
+    assert_eq(arr4_get(out10, 3), 200);
+
+    // t=5: midpoint
+    // e0: 0 + 5*(100-0)/10 = 50
+    // e1: 100 + 5*(0-100)/10 = 100 + 5*(-100)/10 = 100 + (-500)/10 = 100 - 50 = 50
+    // e2: 50 + 5*(150-50)/10 = 50 + 5*100/10 = 50 + 50 = 100
+    // e3: 200 + 5*(200-200)/10 = 200
+    let out5 = arr4_lerp(a, b, 5);
+    assert_eq(arr4_get(out5, 0), 50);
+    assert_eq(arr4_get(out5, 1), 50);
+    assert_eq(arr4_get(out5, 2), 100);
+    assert_eq(arr4_get(out5, 3), 200);
+
+    // t=3: 30% interpolation
+    // e0: 0 + 3*100/10 = 30
+    // e1: 100 + 3*(-100)/10 = 100 - 30 = 70
+    let out3 = arr4_lerp(a, b, 3);
+    assert_eq(arr4_get(out3, 0), 30);
+    assert_eq(arr4_get(out3, 1), 70);
+}
+
+// ============================================================================
+// Test 7: Batch matmul simulation
+// Apply same transform matrix to batch of 2x2 matrices
+// ============================================================================
+
+type Batch4Mat2 is { m0: Mat2, m1: Mat2, m2: Mat2, m3: Mat2 };
+
+fn batch_mat2_mul(batch: Batch4Mat2, transform: Mat2) -> Batch4Mat2 {
+    Batch4Mat2 {
+        m0: mat2_mul(batch.m0, transform),
+        m1: mat2_mul(batch.m1, transform),
+        m2: mat2_mul(batch.m2, transform),
+        m3: mat2_mul(batch.m3, transform)
+    }
+}
+
+fn test_batch_matmul() {
+    let batch = Batch4Mat2 {
+        m0: Mat2 { a: 1, b: 0, c: 0, d: 1 },  // identity
+        m1: Mat2 { a: 2, b: 0, c: 0, d: 2 },  // 2x scale
+        m2: Mat2 { a: 1, b: 1, c: 0, d: 1 },  // shear
+        m3: Mat2 { a: 0, b: 1, c: 1, d: 0 }   // swap
+    };
+    let t = Mat2 { a: 3, b: 1, c: 0, d: 2 };
+    let result = batch_mat2_mul(batch, t);
+
+    // m0 * t = I * t = [3 1; 0 2]
+    assert_eq(result.m0.a, 3);
+    assert_eq(result.m0.b, 1);
+    assert_eq(result.m0.c, 0);
+    assert_eq(result.m0.d, 2);
+
+    // m1 * t = [2 0; 0 2] * [3 1; 0 2] = [6 2; 0 4]
+    assert_eq(result.m1.a, 6);
+    assert_eq(result.m1.b, 2);
+    assert_eq(result.m1.c, 0);
+    assert_eq(result.m1.d, 4);
+
+    // m2 * t = [1 1; 0 1] * [3 1; 0 2] = [3 3; 0 2]
+    assert_eq(result.m2.a, 3);
+    assert_eq(result.m2.b, 3);
+    assert_eq(result.m2.c, 0);
+    assert_eq(result.m2.d, 2);
+
+    // m3 * t = [0 1; 1 0] * [3 1; 0 2] = [0 2; 3 1]
+    assert_eq(result.m3.a, 0);
+    assert_eq(result.m3.b, 2);
+    assert_eq(result.m3.c, 3);
+    assert_eq(result.m3.d, 1);
+}
+
+// ============================================================================
+// Test 8: Scatter and gather index operations
+// gather(src, indices) -> for each i: out[i] = src[indices[i]]
+// scatter(src, indices, dest) -> for each i: dest[indices[i]] = src[i]
+// ============================================================================
+
+fn arr8_gather(src: Arr8, indices: Arr4) -> Arr4 {
+    Arr4 {
+        e0: arr8_get(src, arr4_get(indices, 0)),
+        e1: arr8_get(src, arr4_get(indices, 1)),
+        e2: arr8_get(src, arr4_get(indices, 2)),
+        e3: arr8_get(src, arr4_get(indices, 3))
+    }
+}
+
+fn arr8_scatter(values: Arr4, indices: Arr4, dest: Arr8) -> Arr8 {
+    let mut out = dest;
+    let mut i = 0;
+    while i < 4 {
+        let idx = arr4_get(indices, i);
+        let val = arr4_get(values, i);
+        out = arr8_set(out, idx, val);
+        i = i + 1;
+    }
+    out
+}
+
+fn test_scatter_gather() {
+    let src = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+
+    // Gather: pick elements at indices [7, 0, 3, 5]
+    let indices = Arr4 { e0: 7, e1: 0, e2: 3, e3: 5 };
+    let gathered = arr8_gather(src, indices);
+    assert_eq(arr4_get(gathered, 0), 80);  // src[7]
+    assert_eq(arr4_get(gathered, 1), 10);  // src[0]
+    assert_eq(arr4_get(gathered, 2), 40);  // src[3]
+    assert_eq(arr4_get(gathered, 3), 60);  // src[5]
+
+    // Scatter: write values [99, 88, 77, 66] into positions [1, 3, 5, 7] of zeros
+    let values = Arr4 { e0: 99, e1: 88, e2: 77, e3: 66 };
+    let scatter_idx = Arr4 { e0: 1, e1: 3, e2: 5, e3: 7 };
+    let scattered = arr8_scatter(values, scatter_idx, arr8_zeros());
+    assert_eq(arr8_get(scattered, 0), 0);   // untouched
+    assert_eq(arr8_get(scattered, 1), 99);  // values[0]
+    assert_eq(arr8_get(scattered, 2), 0);   // untouched
+    assert_eq(arr8_get(scattered, 3), 88);  // values[1]
+    assert_eq(arr8_get(scattered, 4), 0);   // untouched
+    assert_eq(arr8_get(scattered, 5), 77);  // values[2]
+    assert_eq(arr8_get(scattered, 6), 0);   // untouched
+    assert_eq(arr8_get(scattered, 7), 66);  // values[3]
+
+    // Round-trip: scatter then gather should recover original values
+    let round_trip = arr8_gather(scattered, scatter_idx);
+    assert_eq(arr4_get(round_trip, 0), 99);
+    assert_eq(arr4_get(round_trip, 1), 88);
+    assert_eq(arr4_get(round_trip, 2), 77);
+    assert_eq(arr4_get(round_trip, 3), 66);
+}
+
+// ============================================================================
+// Test 9: Simple FFT magnitude approximation
+// For a 4-element signal, compute sum of absolute values as a proxy for
+// spectral energy. Also compute simple DFT-like dot products with basis
+// functions (cosine approximated as [1,0,-1,0] and [1,-1,1,-1]).
+// ============================================================================
+
+fn arr4_abs_sum(a: Arr4) -> Int {
+    int_abs(a.e0) + int_abs(a.e1) + int_abs(a.e2) + int_abs(a.e3)
+}
+
+fn arr4_dot(a: Arr4, b: Arr4) -> Int {
+    a.e0 * b.e0 + a.e1 * b.e1 + a.e2 * b.e2 + a.e3 * b.e3
+}
+
+fn test_fft_magnitude_approx() {
+    // Signal: [4, -2, 3, -1]
+    let signal = Arr4 { e0: 4, e1: -2, e2: 3, e3: -1 };
+
+    // Energy proxy: sum of absolute values = 4+2+3+1 = 10
+    let energy = arr4_abs_sum(signal);
+    assert_eq(energy, 10);
+
+    // DC component (sum): 4 + (-2) + 3 + (-1) = 4
+    let dc = arr4_sum(signal);
+    assert_eq(dc, 4);
+
+    // Basis function for Nyquist: [1, -1, 1, -1]
+    // Dot product: 4*1 + (-2)*(-1) + 3*1 + (-1)*(-1) = 4 + 2 + 3 + 1 = 10
+    let nyquist_basis = Arr4 { e0: 1, e1: -1, e2: 1, e3: -1 };
+    let nyquist_coeff = arr4_dot(signal, nyquist_basis);
+    assert_eq(nyquist_coeff, 10);
+
+    // Basis function for mid-freq cosine approx: [1, 0, -1, 0]
+    // Dot product: 4*1 + (-2)*0 + 3*(-1) + (-1)*0 = 4 - 3 = 1
+    let cos_basis = Arr4 { e0: 1, e1: 0, e2: -1, e3: 0 };
+    let cos_coeff = arr4_dot(signal, cos_basis);
+    assert_eq(cos_coeff, 1);
+
+    // Basis function for mid-freq sine approx: [0, 1, 0, -1]
+    // Dot product: 4*0 + (-2)*1 + 3*0 + (-1)*(-1) = -2 + 1 = -1
+    let sin_basis = Arr4 { e0: 0, e1: 1, e2: 0, e3: -1 };
+    let sin_coeff = arr4_dot(signal, sin_basis);
+    assert_eq(sin_coeff, -1);
+
+    // Magnitude of mid-freq: |cos|+|sin| = 1+1 = 2 (L1 norm approximation)
+    let mid_magnitude = int_abs(cos_coeff) + int_abs(sin_coeff);
+    assert_eq(mid_magnitude, 2);
+}
+
+// ============================================================================
+// Test 10: Clamp (element-wise clamping to [lo, hi] range)
+// ============================================================================
+
+fn arr4_clamp(a: Arr4, lo: Int, hi: Int) -> Arr4 {
+    Arr4 {
+        e0: int_max(lo, int_min(hi, a.e0)),
+        e1: int_max(lo, int_min(hi, a.e1)),
+        e2: int_max(lo, int_min(hi, a.e2)),
+        e3: int_max(lo, int_min(hi, a.e3))
+    }
+}
+
+fn test_clamp() {
+    let a = Arr4 { e0: -5, e1: 3, e2: 15, e3: 7 };
+    let out = arr4_clamp(a, 0, 10);
+    assert_eq(arr4_get(out, 0), 0);   // -5 clamped to 0
+    assert_eq(arr4_get(out, 1), 3);   // 3 within range
+    assert_eq(arr4_get(out, 2), 10);  // 15 clamped to 10
+    assert_eq(arr4_get(out, 3), 7);   // 7 within range
+
+    // Clamp with negative range
+    let b = Arr4 { e0: -100, e1: 0, e2: 50, e3: -20 };
+    let out2 = arr4_clamp(b, -10, 10);
+    assert_eq(arr4_get(out2, 0), -10);
+    assert_eq(arr4_get(out2, 1), 0);
+    assert_eq(arr4_get(out2, 2), 10);
+    assert_eq(arr4_get(out2, 3), -10);
+}
+
+// ============================================================================
+// Test 11: Einsum-like contraction (vector-vector outer product then trace)
+// Simulates einsum("i,i->", a, b) which is just dot product, and
+// einsum("i,j->ij", a, b) which is outer product stored in Arr4 (2x2).
+// ============================================================================
+
+type Vec2 is { x: Int, y: Int };
+
+fn test_einsum_patterns() {
+    let u = Vec2 { x: 3, y: 4 };
+    let v = Vec2 { x: 5, y: 6 };
+
+    // einsum("i,i->") = dot product: 3*5 + 4*6 = 15 + 24 = 39
+    let dot = u.x * v.x + u.y * v.y;
+    assert_eq(dot, 39);
+
+    // einsum("i,j->ij") = outer product stored as 2x2 in Arr4
+    // [3*5, 3*6; 4*5, 4*6] = [15, 18; 20, 24]
+    let outer = Arr4 {
+        e0: u.x * v.x,
+        e1: u.x * v.y,
+        e2: u.y * v.x,
+        e3: u.y * v.y
+    };
+    assert_eq(arr4_get(outer, 0), 15);
+    assert_eq(arr4_get(outer, 1), 18);
+    assert_eq(arr4_get(outer, 2), 20);
+    assert_eq(arr4_get(outer, 3), 24);
+
+    // einsum("ii->") = trace of the outer product = 15 + 24 = 39
+    // (same as dot product, as expected by Einstein summation)
+    let trace = arr4_get(outer, 0) + arr4_get(outer, 3);
+    assert_eq(trace, 39);
+    assert_eq(trace, dot);
+
+    // einsum("ij->ji") = transpose of 2x2 stored in Arr4
+    let transposed = Arr4 {
+        e0: arr4_get(outer, 0),
+        e1: arr4_get(outer, 2),
+        e2: arr4_get(outer, 1),
+        e3: arr4_get(outer, 3)
+    };
+    assert_eq(arr4_get(transposed, 0), 15);
+    assert_eq(arr4_get(transposed, 1), 20);
+    assert_eq(arr4_get(transposed, 2), 18);
+    assert_eq(arr4_get(transposed, 3), 24);
+}
+
+// ============================================================================
+// Test 12: Cumulative sum (cumsum) and cumulative product (cumprod)
+// ============================================================================
+
+fn arr4_cumsum(a: Arr4) -> Arr4 {
+    let s0 = a.e0;
+    let s1 = s0 + a.e1;
+    let s2 = s1 + a.e2;
+    let s3 = s2 + a.e3;
+    Arr4 { e0: s0, e1: s1, e2: s2, e3: s3 }
+}
+
+fn arr4_cumprod(a: Arr4) -> Arr4 {
+    let p0 = a.e0;
+    let p1 = p0 * a.e1;
+    let p2 = p1 * a.e2;
+    let p3 = p2 * a.e3;
+    Arr4 { e0: p0, e1: p1, e2: p2, e3: p3 }
+}
+
+fn test_cumsum_cumprod() {
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+
+    // cumsum: [1, 3, 6, 10]
+    let cs = arr4_cumsum(a);
+    assert_eq(arr4_get(cs, 0), 1);
+    assert_eq(arr4_get(cs, 1), 3);
+    assert_eq(arr4_get(cs, 2), 6);
+    assert_eq(arr4_get(cs, 3), 10);
+
+    // cumprod: [1, 2, 6, 24]
+    let cp = arr4_cumprod(a);
+    assert_eq(arr4_get(cp, 0), 1);
+    assert_eq(arr4_get(cp, 1), 2);
+    assert_eq(arr4_get(cp, 2), 6);
+    assert_eq(arr4_get(cp, 3), 24);
+
+    // cumsum of negative values: [-3, 5, -2, 4]
+    let b = Arr4 { e0: -3, e1: 5, e2: -2, e3: 4 };
+    let cs2 = arr4_cumsum(b);
+    assert_eq(arr4_get(cs2, 0), -3);
+    assert_eq(arr4_get(cs2, 1), 2);   // -3 + 5
+    assert_eq(arr4_get(cs2, 2), 0);   // 2 + (-2)
+    assert_eq(arr4_get(cs2, 3), 4);   // 0 + 4
+}
+
+// ============================================================================
+// Test 13: Where + comparison pipeline (threshold-based selection)
+// ============================================================================
+
+fn test_where_with_cmp() {
+    let values = Arr4 { e0: 10, e1: 50, e2: 30, e3: 80 };
+    let threshold = Arr4 { e0: 25, e1: 25, e2: 25, e3: 25 };
+
+    // Find elements > threshold
+    let gt_mask = arr4_gt(values, threshold);
+    // [10>25, 50>25, 30>25, 80>25] = [0, 1, 1, 1]
+    assert_eq(gt_mask.m0, 0);
+    assert_eq(gt_mask.m1, 1);
+    assert_eq(gt_mask.m2, 1);
+    assert_eq(gt_mask.m3, 1);
+
+    // Use where to select: above threshold keep value, below set to 0
+    let zeros = arr4_zeros();
+    let filtered = arr4_where(gt_mask, values, zeros);
+    assert_eq(arr4_get(filtered, 0), 0);
+    assert_eq(arr4_get(filtered, 1), 50);
+    assert_eq(arr4_get(filtered, 2), 30);
+    assert_eq(arr4_get(filtered, 3), 80);
+
+    // Sum only the elements that passed the threshold
+    let total = arr4_sum(filtered);
+    assert_eq(total, 160);  // 50 + 30 + 80
+
+    // Masked select: extract only values above threshold
+    let selected = arr4_masked_select(values, gt_mask);
+    assert_eq(selected.count, 3);
+    assert_eq(arr4_get(selected.data, 0), 50);
+    assert_eq(arr4_get(selected.data, 1), 30);
+    assert_eq(arr4_get(selected.data, 2), 80);
+}
+
+// ============================================================================
+// Test 14: Argmax and argmin
+// ============================================================================
+
+fn arr4_argmax(a: Arr4) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = arr4_get(a, 0);
+    let mut i = 1;
+    while i < 4 {
+        let v = arr4_get(a, i);
+        if v > best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn arr4_argmin(a: Arr4) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = arr4_get(a, 0);
+    let mut i = 1;
+    while i < 4 {
+        let v = arr4_get(a, i);
+        if v < best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn test_argmax_argmin() {
+    let a = Arr4 { e0: 3, e1: 7, e2: 1, e3: 5 };
+    assert_eq(arr4_argmax(a), 1);  // 7 is at index 1
+    assert_eq(arr4_argmin(a), 2);  // 1 is at index 2
+
+    // Negative values
+    let b = Arr4 { e0: -10, e1: -3, e2: -20, e3: -1 };
+    assert_eq(arr4_argmax(b), 3);  // -1 is largest
+    assert_eq(arr4_argmin(b), 2);  // -20 is smallest
+
+    // All same
+    let c = Arr4 { e0: 5, e1: 5, e2: 5, e3: 5 };
+    assert_eq(arr4_argmax(c), 0);  // first occurrence
+    assert_eq(arr4_argmin(c), 0);  // first occurrence
+
+    // Max at end
+    let d = Arr4 { e0: 1, e1: 2, e2: 3, e3: 100 };
+    assert_eq(arr4_argmax(d), 3);
+    assert_eq(arr4_argmin(d), 0);
+}
+
+// ============================================================================
+// Test 15: Top-k selection (find k largest values)
+// ============================================================================
+
+fn test_topk() {
+    let a = Arr4 { e0: 30, e1: 10, e2: 50, e3: 20 };
+
+    // Top-1: find the largest
+    let idx0 = arr4_argmax(a);
+    assert_eq(idx0, 2);
+    assert_eq(arr4_get(a, idx0), 50);
+
+    // Top-2: find two largest by zeroing out the first and finding next
+    let after_first = arr4_set(a, idx0, -99999);
+    let idx1 = arr4_argmax(after_first);
+    assert_eq(idx1, 0);  // 30 is second largest
+    assert_eq(arr4_get(a, idx1), 30);
+
+    // Top-3: zero second, find third
+    let after_second = arr4_set(after_first, idx1, -99999);
+    let idx2 = arr4_argmax(after_second);
+    assert_eq(idx2, 3);  // 20 is third largest
+    assert_eq(arr4_get(a, idx2), 20);
+
+    // Verify top-3 sum: 50 + 30 + 20 = 100
+    let top3_sum = arr4_get(a, idx0) + arr4_get(a, idx1) + arr4_get(a, idx2);
+    assert_eq(top3_sum, 100);
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_where();
+    test_masked_fill();
+    test_masked_select();
+    test_elementwise_cmp();
+    test_nonzero();
+    test_lerp();
+    test_batch_matmul();
+    test_scatter_gather();
+    test_fft_magnitude_approx();
+    test_clamp();
+    test_einsum_patterns();
+    test_cumsum_cumprod();
+    test_where_with_cmp();
+    test_argmax_argmin();
+    test_topk();
+    print("ALL PASSED");
+    0
+}

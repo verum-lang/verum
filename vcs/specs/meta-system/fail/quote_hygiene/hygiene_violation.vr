@@ -1,0 +1,22 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M402
+// @description: Tests hygiene violation detection in @transparent macros
+// @tags: meta-system, quote, hygiene
+
+// M402 is triggered when @transparent macro creates bindings that could
+// shadow the caller's bindings, leading to accidental capture
+
+@transparent
+meta fn shadow_binding() -> TokenStream {
+    // ERROR M402: @transparent macro creates binding 'result' which
+    // could shadow caller's binding with the same name
+    quote {
+        let result = 100;
+        result
+    }
+}
+
+fn main() {
+    @const assert(true);
+}

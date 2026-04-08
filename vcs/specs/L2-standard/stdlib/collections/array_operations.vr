@@ -1,0 +1,540 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, collections, array
+
+/// Comprehensive test suite for fixed-size array operations.
+/// Arrays have compile-time known size and are stack-allocated.
+/// Tests creation, indexing, slicing, and all array-specific operations.
+
+fn main() {
+    test_array_creation();
+    test_array_indexing();
+    test_array_iteration();
+    test_array_slicing();
+    test_array_modification();
+    test_array_methods();
+    test_array_comparison();
+    test_multidimensional_arrays();
+    test_array_conversions();
+    test_array_const_generics();
+}
+
+/// Test various ways to create arrays
+fn test_array_creation() {
+    // Basic array with explicit size
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+    assert(arr.len() == 5);
+
+    // Array with type inference
+    let inferred = [1, 2, 3];
+    assert(inferred.len() == 3);
+
+    // Array with repeat syntax
+    let zeros: [Int; 10] = [0; 10];
+    assert(zeros.len() == 10);
+    for elem in zeros.iter() {
+        assert(*elem == 0);
+    }
+
+    // Array with boolean repeat
+    let bools: [Bool; 5] = [true; 5];
+    assert(bools[0] && bools[4]);
+
+    // Empty array (zero-sized)
+    let empty: [Int; 0] = [];
+    assert(empty.len() == 0);
+    assert(empty.is_empty());
+
+    // Array of floats
+    let floats: [Float; 3] = [1.0, 2.5, 3.14];
+    assert((floats[2] - 3.14).abs() < 0.001);
+
+    // Array of text
+    let texts: [Text; 3] = ["hello", "world", "!"];
+    assert(texts[0] == "hello");
+
+    // Array from function
+    fn make_array() -> [Int; 4] {
+        [10, 20, 30, 40]
+    }
+    let from_fn: [Int; 4] = make_array();
+    assert(from_fn[3] == 40);
+
+    // Array using initializer
+    let computed: [Int; 5] = [0, 1, 4, 9, 16];
+    assert(computed == [0, 1, 4, 9, 16]);
+
+    // Const array
+    const PRIMES: [Int; 5] = [2, 3, 5, 7, 11];
+    assert(PRIMES[4] == 11);
+}
+
+/// Test array element access
+fn test_array_indexing() {
+    let arr: [Int; 5] = [10, 20, 30, 40, 50];
+
+    // Direct indexing
+    assert(arr[0] == 10);
+    assert(arr[2] == 30);
+    assert(arr[4] == 50);
+
+    // Safe access with get() - returns Maybe<&T>
+    let valid: Maybe<&Int> = arr.get(2);
+    assert(valid == Some(&30));
+
+    let invalid: Maybe<&Int> = arr.get(10);
+    assert(invalid.is_none());
+
+    // First and last
+    let first: Maybe<&Int> = arr.first();
+    let last: Maybe<&Int> = arr.last();
+    assert(first == Some(&10));
+    assert(last == Some(&50));
+
+    // Empty array edge cases
+    let empty: [Int; 0] = [];
+    assert(empty.first().is_none());
+    assert(empty.last().is_none());
+
+    // Mutable indexing
+    let mut mutable: [Int; 3] = [1, 2, 3];
+    mutable[0] = 100;
+    mutable[1] = 200;
+    mutable[2] = 300;
+    assert(mutable == [100, 200, 300]);
+
+    // get_mut for safe mutable access
+    match mutable.get_mut(1) {
+        Some(v) => *v = 999,
+        None => panic("index should be valid"),
+    }
+    assert(mutable[1] == 999);
+}
+
+/// Test array iteration patterns
+fn test_array_iteration() {
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    // Immutable iteration
+    let mut sum: Int = 0;
+    for elem in arr.iter() {
+        sum += *elem;
+    }
+    assert(sum == 15);
+
+    // Mutable iteration
+    let mut mutable: [Int; 4] = [1, 2, 3, 4];
+    for elem in mutable.iter_mut() {
+        *elem *= 2;
+    }
+    assert(mutable == [2, 4, 6, 8]);
+
+    // Consuming iteration (into_iter)
+    let to_consume: [Int; 3] = [10, 20, 30];
+    let consumed_sum: Int = to_consume.into_iter().sum();
+    assert(consumed_sum == 60);
+
+    // Enumerated iteration
+    let chars: [Text; 3] = ["a", "b", "c"];
+    for (i, elem) in chars.iter().enumerate() {
+        match i {
+            0 => assert(*elem == "a"),
+            1 => assert(*elem == "b"),
+            2 => assert(*elem == "c"),
+            _ => panic("unexpected index"),
+        }
+    }
+
+    // Reverse iteration
+    let mut reversed: List<Int> = List.new();
+    for elem in arr.iter().rev() {
+        reversed.push(*elem);
+    }
+    assert(reversed == [5, 4, 3, 2, 1]);
+
+    // Zip with another array
+    let arr_a: [Int; 3] = [1, 2, 3];
+    let arr_b: [Text; 3] = ["one", "two", "three"];
+    for (num, text) in arr_a.iter().zip(arr_b.iter()) {
+        match *num {
+            1 => assert(*text == "one"),
+            2 => assert(*text == "two"),
+            3 => assert(*text == "three"),
+            _ => panic("unexpected"),
+        }
+    }
+
+    // Windows
+    let nums: [Int; 5] = [1, 2, 3, 4, 5];
+    let mut window_sums: List<Int> = List.new();
+    for window in nums.windows(2) {
+        window_sums.push(window[0] + window[1]);
+    }
+    assert(window_sums == [3, 5, 7, 9]);
+
+    // Chunks
+    let data: [Int; 6] = [1, 2, 3, 4, 5, 6];
+    let mut chunk_sums: List<Int> = List.new();
+    for chunk in data.chunks(2) {
+        chunk_sums.push(chunk.iter().sum());
+    }
+    assert(chunk_sums == [3, 7, 11]);
+}
+
+/// Test array slicing operations
+fn test_array_slicing() {
+    let arr: [Int; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // Full slice
+    let full: &[Int] = &arr[..];
+    assert(full.len() == 10);
+
+    // Start slice
+    let start: &[Int] = &arr[..3];
+    assert(start.len() == 3);
+    assert(start[0] == 0);
+    assert(start[2] == 2);
+
+    // End slice
+    let end: &[Int] = &arr[7..];
+    assert(end.len() == 3);
+    assert(end[0] == 7);
+    assert(end[2] == 9);
+
+    // Middle slice
+    let middle: &[Int] = &arr[3..7];
+    assert(middle.len() == 4);
+    assert(middle[0] == 3);
+    assert(middle[3] == 6);
+
+    // Mutable slice
+    let mut mutable: [Int; 5] = [1, 2, 3, 4, 5];
+    let slice_mut: &mut [Int] = &mut mutable[1..4];
+    slice_mut[0] = 20;
+    slice_mut[1] = 30;
+    slice_mut[2] = 40;
+    assert(mutable == [1, 20, 30, 40, 5]);
+
+    // Split at index
+    let (left, right) = arr.split_at(5);
+    assert(left.len() == 5);
+    assert(right.len() == 5);
+    assert(left[4] == 4);
+    assert(right[0] == 5);
+
+    // Split first and last
+    let with_data: [Int; 4] = [10, 20, 30, 40];
+    let (first, rest) = with_data.split_first().unwrap();
+    assert(*first == 10);
+    assert(rest.len() == 3);
+
+    let (last, init) = with_data.split_last().unwrap();
+    assert(*last == 40);
+    assert(init.len() == 3);
+
+    // rsplit_array (split from end)
+    let rsplit_data: [Int; 5] = [1, 2, 3, 4, 5];
+    let (front, back): (&[Int; 3], &[Int; 2]) = rsplit_data.rsplit_array_ref();
+    assert(front == &[1, 2, 3]);
+    assert(back == &[4, 5]);
+}
+
+/// Test array modification operations
+fn test_array_modification() {
+    // swap elements
+    let mut arr: [Int; 4] = [1, 2, 3, 4];
+    arr.swap(0, 3);
+    assert(arr == [4, 2, 3, 1]);
+
+    // reverse in place
+    let mut to_reverse: [Int; 5] = [1, 2, 3, 4, 5];
+    to_reverse.reverse();
+    assert(to_reverse == [5, 4, 3, 2, 1]);
+
+    // rotate left
+    let mut to_rotate: [Int; 5] = [1, 2, 3, 4, 5];
+    to_rotate.rotate_left(2);
+    assert(to_rotate == [3, 4, 5, 1, 2]);
+
+    // rotate right
+    to_rotate.rotate_right(2);
+    assert(to_rotate == [1, 2, 3, 4, 5]);
+
+    // fill with value
+    let mut to_fill: [Int; 4] = [1, 2, 3, 4];
+    to_fill.fill(42);
+    assert(to_fill == [42, 42, 42, 42]);
+
+    // fill_with (lazy)
+    let mut counter: Int = 0;
+    let mut lazy_fill: [Int; 3] = [0, 0, 0];
+    lazy_fill.fill_with(|| {
+        counter += 1;
+        counter * 10
+    });
+    assert(lazy_fill == [10, 20, 30]);
+
+    // copy_from_slice
+    let source: [Int; 3] = [100, 200, 300];
+    let mut dest: [Int; 3] = [0, 0, 0];
+    dest.copy_from_slice(&source);
+    assert(dest == source);
+
+    // clone_from_slice (for non-Copy types)
+    let text_source: [Text; 2] = ["hello", "world"];
+    let mut text_dest: [Text; 2] = ["", ""];
+    text_dest.clone_from_slice(&text_source);
+    assert(text_dest == text_source);
+
+    // swap_with_slice
+    let mut a: [Int; 3] = [1, 2, 3];
+    let mut b: [Int; 3] = [4, 5, 6];
+    a.swap_with_slice(&mut b);
+    assert(a == [4, 5, 6]);
+    assert(b == [1, 2, 3]);
+
+    // sort (for arrays of Ord types)
+    let mut unsorted: [Int; 5] = [3, 1, 4, 1, 5];
+    unsorted.sort();
+    assert(unsorted == [1, 1, 3, 4, 5]);
+
+    // sort_by
+    let mut to_sort_desc: [Int; 4] = [1, 4, 2, 3];
+    to_sort_desc.sort_by(|a, b| b.cmp(a));
+    assert(to_sort_desc == [4, 3, 2, 1]);
+}
+
+/// Test array methods
+fn test_array_methods() {
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    // len - compile-time constant
+    const LEN: usize = arr.len();
+    assert(LEN == 5);
+
+    // is_empty
+    assert(!arr.is_empty());
+    let empty: [Int; 0] = [];
+    assert(empty.is_empty());
+
+    // contains (via slice)
+    assert(arr.contains(&3));
+    assert(!arr.contains(&10));
+
+    // starts_with
+    assert(arr.starts_with(&[1, 2]));
+    assert(!arr.starts_with(&[2, 3]));
+
+    // ends_with
+    assert(arr.ends_with(&[4, 5]));
+    assert(!arr.ends_with(&[3, 4]));
+
+    // binary_search (on sorted array)
+    let sorted: [Int; 5] = [10, 20, 30, 40, 50];
+    match sorted.binary_search(&30) {
+        Ok(idx) => assert(idx == 2),
+        Err(_) => panic("should find element"),
+    }
+    match sorted.binary_search(&35) {
+        Ok(_) => panic("should not find"),
+        Err(idx) => assert(idx == 3),  // Insertion point
+    }
+
+    // position
+    let pos: Maybe<usize> = arr.iter().position(|x| *x == 3);
+    assert(pos == Some(2));
+
+    // rposition
+    let arr_dups: [Int; 5] = [1, 2, 3, 2, 1];
+    let rpos: Maybe<usize> = arr_dups.iter().rposition(|x| *x == 2);
+    assert(rpos == Some(3));
+
+    // map array elements
+    let mapped: [Int; 5] = arr.map(|x| x * 2);
+    assert(mapped == [2, 4, 6, 8, 10]);
+
+    // each_ref - convert array of T to array of &T
+    let refs: [&Int; 5] = arr.each_ref();
+    assert(*refs[0] == 1);
+
+    // each_mut - convert mutable array to array of &mut T
+    let mut mutable: [Int; 3] = [1, 2, 3];
+    let mut_refs: [&mut Int; 3] = mutable.each_mut();
+    *mut_refs[0] = 10;
+    assert(mutable[0] == 10);
+
+    // Commented out: try_map() not yet in stdlib
+    // let nums: [Text; 3] = ["1", "2", "3"];
+    // let parsed: Result<[Int; 3], ParseIntError> = nums.try_map(|s| s.parse<Int>());
+    // assert(parsed == Ok([1, 2, 3]));
+}
+
+/// Test array comparisons
+fn test_array_comparison() {
+    let arr_a: [Int; 3] = [1, 2, 3];
+    let arr_b: [Int; 3] = [1, 2, 3];
+    let arr_c: [Int; 3] = [1, 2, 4];
+    let arr_d: [Int; 3] = [0, 2, 3];
+
+    // Equality
+    assert(arr_a == arr_b);
+    assert(arr_a != arr_c);
+    assert(arr_a != arr_d);
+
+    // Ordering (lexicographic)
+    assert(arr_a < arr_c);  // 3 < 4 at index 2
+    assert(arr_d < arr_a);  // 0 < 1 at index 0
+
+    // Partial ordering for floats
+    let f1: [Float; 2] = [1.0, 2.0];
+    let f2: [Float; 2] = [1.0, 3.0];
+    assert(f1 < f2);
+
+    // Different sizes cannot be compared (compile error)
+    // let small: [Int; 2] = [1, 2];
+    // let large: [Int; 3] = [1, 2, 3];
+    // assert(small < large);  // ERROR: different types
+
+    // Empty arrays
+    let empty1: [Int; 0] = [];
+    let empty2: [Int; 0] = [];
+    assert(empty1 == empty2);
+}
+
+/// Test multidimensional arrays
+fn test_multidimensional_arrays() {
+    // 2D array (matrix)
+    let matrix: [[Int; 3]; 2] = [
+        [1, 2, 3],
+        [4, 5, 6],
+    ];
+    assert(matrix[0][0] == 1);
+    assert(matrix[1][2] == 6);
+    assert(matrix.len() == 2);
+    assert(matrix[0].len() == 3);
+
+    // 3D array
+    let cube: [[[Int; 2]; 2]; 2] = [
+        [[1, 2], [3, 4]],
+        [[5, 6], [7, 8]],
+    ];
+    assert(cube[0][0][0] == 1);
+    assert(cube[1][1][1] == 8);
+
+    // Mutable 2D array
+    let mut grid: [[Int; 3]; 3] = [[0; 3]; 3];
+    grid[0][0] = 1;
+    grid[1][1] = 1;
+    grid[2][2] = 1;  // Diagonal
+    assert(grid[0][0] + grid[1][1] + grid[2][2] == 3);
+
+    // Iterate over 2D array
+    let mut total: Int = 0;
+    for row in matrix.iter() {
+        for elem in row.iter() {
+            total += *elem;
+        }
+    }
+    assert(total == 21);  // 1+2+3+4+5+6
+
+    // Flatten 2D to 1D
+    let flat: List<Int> = matrix.iter()
+        .flat_map(|row| row.iter().copied())
+        .collect();
+    assert(flat == [1, 2, 3, 4, 5, 6]);
+
+    // Matrix transpose (manual)
+    let original: [[Int; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
+    let mut transposed: [[Int; 2]; 3] = [[0; 2]; 3];
+    for i in 0..2 {
+        for j in 0..3 {
+            transposed[j][i] = original[i][j];
+        }
+    }
+    assert(transposed == [[1, 4], [2, 5], [3, 6]]);
+}
+
+/// Test array conversions
+fn test_array_conversions() {
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    // To slice reference
+    let slice: &[Int] = &arr;
+    assert(slice.len() == 5);
+
+    // To list
+    let list: List<Int> = arr.to_list();
+    assert(list == [1, 2, 3, 4, 5]);
+
+    // From list (with exact size)
+    let from_list: [Int; 3] = [10, 20, 30].try_into().unwrap();
+    assert(from_list == [10, 20, 30]);
+
+    // Slice to array (try_into)
+    let slice2: &[Int] = &[1, 2, 3, 4];
+    let arr_from_slice: Result<[Int; 4], TryFromSliceError> = slice2.try_into();
+    assert(arr_from_slice.is_ok());
+
+    // Wrong size returns error
+    let wrong_size: &[Int] = &[1, 2, 3];
+    let result: Result<[Int; 5], TryFromSliceError> = wrong_size.try_into();
+    assert(result.is_err());
+
+    // To iterator
+    let sum: Int = arr.into_iter().sum();
+    assert(sum == 15);
+
+    // Commented out: Heap() constructor type mismatch for array literals
+    // let boxed: Heap<[Int; 5]> = Heap([1, 2, 3, 4, 5]);
+    // assert(boxed[0] == 1);
+
+    // Convert array of one type to another
+    let ints: [i32; 3] = [1, 2, 3];
+    let floats: [Float; 3] = ints.map(|x| x as Float);
+    assert((floats[0] - 1.0).abs() < 0.001);
+}
+
+/// Test const generic arrays
+fn test_array_const_generics() {
+    // Generic function over array size
+    fn sum_array<N: Int>(arr: [Int; N]) -> Int {
+        arr.into_iter().sum()
+    }
+    assert(sum_array([1, 2, 3]) == 6);
+    assert(sum_array([1, 2, 3, 4, 5]) == 15);
+
+    // Generic type with array
+    type Buffer<N: Int> is {
+        data: [u8; N],
+    };
+
+    let small: Buffer<4> = Buffer { data: [0; 4] };
+    let large: Buffer<1024> = Buffer { data: [0; 1024] };
+    assert(small.data.len() == 4);
+    assert(large.data.len() == 1024);
+
+    // Split array at compile-time known index
+    let arr = [1, 2, 3, 4];
+    let (left, right) = arr.split_at(2);
+    assert(left == [1, 2]);
+    assert(right == [3, 4]);
+
+    // Concatenate arrays at compile time
+    fn concat_arrays<M: Int, N: Int>(
+        a: [Int; M],
+        b: [Int; N],
+    ) -> [Int; M + N]
+    {
+        let mut result = [0; M + N];
+        for i in 0..M {
+            result[i] = a[i];
+        }
+        for i in 0..N {
+            result[M + i] = b[i];
+        }
+        result
+    }
+    let concatenated = concat_arrays([1, 2], [3, 4, 5]);
+    assert(concatenated == [1, 2, 3, 4, 5]);
+}

@@ -1,0 +1,58 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: modules, circular, types, dependencies
+
+/// Circular type dependencies ARE allowed in Verum.
+/// Types can reference each other through references or pointers.
+/// This is a valid pattern for mutual recursion.
+
+module node_a {
+    mount cog.node_b.NodeB;
+
+    pub type NodeA is {
+        value: Int,
+        ref_link: Maybe<&NodeB>
+    };
+
+    pub fn create_a(v: Int) -> NodeA {
+        NodeA { value: v, ref_link: Maybe.None }
+    }
+}
+
+module node_b {
+    mount cog.node_a.NodeA;
+
+    pub type NodeB is {
+        name: Text,
+        ref_to_a: Maybe<&NodeA>
+    };
+
+    pub fn create_b(n: Text) -> NodeB {
+        NodeB { name: n, ref_to_a: Maybe.None }
+    }
+}
+
+// Mutual function recursion is also allowed
+module mutual_a {
+    mount cog.mutual_b.func_b;
+
+    pub fn func_a(n: Int) -> Int {
+        if n == 0 { 0 }
+        else { func_b(n - 1) + 1 }
+    }
+}
+
+module mutual_b {
+    mount cog.mutual_a.func_a;
+
+    pub fn func_b(n: Int) -> Int {
+        if n == 0 { 1 }
+        else { func_a(n - 1) * 2 }
+    }
+}
+
+fn main() -> Int {
+    // Valid circular type dependencies
+    0
+}

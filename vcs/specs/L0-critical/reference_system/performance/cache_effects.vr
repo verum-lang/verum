@@ -1,0 +1,140 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, cache, memory
+
+/// Benchmark cache effects of CBGR metadata.
+/// Larger references (16 vs 8 bytes) affect cache utilization.
+/// Measure impact on cache-sensitive workloads.
+/// Spec: 26-cbgr-implementation.md#cache-considerations
+
+
+
+fn main() {
+    let bench = Benchmark.new("CBGR Cache Effects");
+    let mut b = Bencher.new();
+
+    benchmark_ref_array(&mut b);
+    benchmark_pointer_chasing(&mut b);
+    benchmark_random_access(&mut b);
+    benchmark_working_set(&mut b);
+
+    bench.report();
+}
+
+/// Benchmark traversing array of references
+@benchmark
+fn benchmark_ref_array(b: &mut Bencher) {
+    // 64-byte cache line
+    // ThinRef (16 bytes): 4 refs per cache line
+    // Raw pointer (8 bytes): 8 ptrs per cache line
+    // 2x more cache misses with managed refs
+
+    let values: List<Int> = (0..10_000).collect();
+    let refs: List<&Int> = values.iter().collect();
+
+    b.iter(|| {
+        let mut sum = 0;
+        for r in &refs {
+            sum += **r;  // Each access may cache miss on ref + target
+        }
+        sum
+    });
+}
+
+/// Benchmark pointer-chasing (worst case for caching)
+@benchmark
+fn benchmark_pointer_chasing(b: &mut Bencher) {
+    // Array-based pointer chasing proxy
+    let values: List<Int> = (0..1000).collect();
+
+    b.iter(|| {
+        let mut sum = 0;
+        for v in &values {
+            sum += *v;
+        }
+        sum
+    });
+}
+
+/// Benchmark random access pattern
+@benchmark
+fn benchmark_random_access(b: &mut Bencher) {
+    let values: List<Int> = (0..10_000).collect();
+    let refs: List<&Int> = values.iter().collect();
+
+    // Pre-generate random indices
+    let indices: List<Int> = (0..1000)
+        .map(|i| (i * 7919) % 10_000)  // Pseudo-random
+        .collect();
+
+    b.iter(|| {
+        let mut sum = 0;
+        for &idx in &indices {
+            sum += *refs[idx];
+        }
+        sum
+    });
+}
+
+/// Benchmark effect of working set size
+@benchmark
+fn benchmark_working_set(b: &mut Bencher) {
+    // Test with different working set sizes
+    // L1 cache: ~32KB
+    // L2 cache: ~256KB
+    // L3 cache: ~8MB
+
+    fn measure_working_set(count: Int) -> Duration {
+        let values: List<Int> = (0..count).map(|i| i as Int).collect();
+        let refs: List<&Int> = values.iter().collect();
+
+        let start = Time.now();
+        let mut sum = 0;
+        for _ in 0..1000 {
+            for r in &refs {
+                sum += **r;
+            }
+        }
+        Time.now() - start
+    }
+
+    // Small working set (fits in L1)
+    let small_time = measure_working_set(100);
+
+    // Medium working set (L2)
+    let medium_time = measure_working_set(10_000);
+
+    // Large working set (exceeds L3)
+    let large_time = measure_working_set(1_000_000);
+
+    print("Small (L1): " + small_time.as_millis().to_string() + "ms");
+    print("Medium (L2): " + medium_time.as_millis().to_string() + "ms");
+    print("Large (>L3): " + large_time.as_millis().to_string() + "ms");
+
+    // Verify expected scaling
+    assert(medium_time > small_time);
+}
+
+/// Document cache optimization strategies
+module cache_optimization {
+    // 1. Use value types when possible (avoid refs)
+    // 2. Prefer contiguous layouts (arrays > linked lists)
+    // 3. Group frequently accessed refs together
+    // 4. Consider &checked for hot paths
+    // 5. Profile actual cache behavior with perf counters
+}
+
+// Benchmark framework stubs
+type Benchmark is { name: Text };
+type Bencher is { iterations: Int };
+
+implement Benchmark {
+    fn new(name: Text) -> Benchmark { Benchmark { name: name } }
+    fn report(&self) { print("Benchmark report: " + self.name); }
+}
+
+implement Bencher {
+    fn new() -> Bencher { Bencher { iterations: 1000 } }
+    fn iter<F>(&mut self, _f: F) { /* stub */ }
+}

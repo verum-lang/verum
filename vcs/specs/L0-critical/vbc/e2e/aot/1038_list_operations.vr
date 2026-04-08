@@ -1,0 +1,119 @@
+// @test: run
+// List operations — push, pop, indexing, slicing, building
+
+fn sum_list(xs: List<Int>) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < xs.len() {
+        total = total + xs[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn reverse_list(xs: List<Int>) -> List<Int> {
+    let result = List.new();
+    let mut i = xs.len() - 1;
+    while i >= 0 {
+        result.push(xs[i]);
+        i = i - 1;
+    }
+    result
+}
+
+fn take(xs: List<Int>, n: Int) -> List<Int> {
+    let result = List.new();
+    let mut i = 0;
+    let limit = if (n < xs.len()) { n } else { xs.len() };
+    while i < limit {
+        result.push(xs[i]);
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: Build list dynamically
+    let xs = List.new();
+    let mut i = 0;
+    while i < 20 {
+        xs.push(i);
+        i = i + 1;
+    }
+    if (xs.len() != 20) {
+        print(f"FAIL test1: len = {xs.len()}");
+        return 1;
+    }
+    if (xs[0] != 0 || xs[19] != 19) {
+        print("FAIL test1: values");
+        return 1;
+    }
+    print("test1 build: OK");
+
+    // Test 2: Array literal
+    let arr = [10, 20, 30, 40, 50];
+    if (sum_list(arr) != 150) {
+        print(f"FAIL test2: sum = {sum_list(arr)}");
+        return 1;
+    }
+    print("test2 literal: OK");
+
+    // Test 3: Reverse
+    let data = [1, 2, 3, 4, 5];
+    let rev = reverse_list(data);
+    if (rev[0] != 5 || rev[4] != 1) {
+        print(f"FAIL test3: rev[0]={rev[0]}, rev[4]={rev[4]}");
+        return 1;
+    }
+    print("test3 reverse: OK");
+
+    // Test 4: Take
+    let items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let first3 = take(items, 3);
+    if (first3.len() != 3) {
+        print(f"FAIL test4: len = {first3.len()}");
+        return 1;
+    }
+    if (first3[0] != 1 || first3[2] != 3) {
+        print("FAIL test4: values");
+        return 1;
+    }
+    print("test4 take: OK");
+
+    // Test 5: Index assignment
+    let mut nums = [0, 0, 0, 0, 0];
+    nums[0] = 10;
+    nums[2] = 30;
+    nums[4] = 50;
+    if (nums[0] != 10 || nums[2] != 30 || nums[4] != 50) {
+        print("FAIL test5: index assign");
+        return 1;
+    }
+    if (nums[1] != 0 || nums[3] != 0) {
+        print("FAIL test5: unchanged");
+        return 1;
+    }
+    print("test5 index assign: OK");
+
+    // Test 6: Large list operations
+    let big = List.new();
+    let mut j = 0;
+    while j < 1000 {
+        big.push(j);
+        j = j + 1;
+    }
+    if (big.len() != 1000) {
+        print(f"FAIL test6: len = {big.len()}");
+        return 1;
+    }
+    // Sum 0..999 = 999*1000/2 = 499500
+    let total = sum_list(big);
+    if (total != 499500) {
+        print(f"FAIL test6: sum = {total}");
+        return 1;
+    }
+    print("test6 large list: OK");
+
+    print("1038_list_operations: PASS");
+    0
+}

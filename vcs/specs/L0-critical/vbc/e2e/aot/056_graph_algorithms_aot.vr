@@ -1,0 +1,195 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, graphs, adjacency, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT graph algorithms using adjacency matrix (6-node graph)
+
+// Adjacency matrix for 6 nodes, stored as 6 rows of 6 values
+type Row6 is { c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int };
+type Graph6 is { r0: Row6, r1: Row6, r2: Row6, r3: Row6, r4: Row6, r5: Row6 };
+
+fn row_get(r: Row6, j: Int) -> Int {
+    if j == 0 { r.c0 }
+    else if j == 1 { r.c1 }
+    else if j == 2 { r.c2 }
+    else if j == 3 { r.c3 }
+    else if j == 4 { r.c4 }
+    else { r.c5 }
+}
+
+fn graph_get(g: Graph6, i: Int, j: Int) -> Int {
+    if i == 0 { row_get(g.r0, j) }
+    else if i == 1 { row_get(g.r1, j) }
+    else if i == 2 { row_get(g.r2, j) }
+    else if i == 3 { row_get(g.r3, j) }
+    else if i == 4 { row_get(g.r4, j) }
+    else { row_get(g.r5, j) }
+}
+
+fn zero_row() -> Row6 {
+    Row6 { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0 }
+}
+
+fn empty_graph() -> Graph6 {
+    Graph6 { r0: zero_row(), r1: zero_row(), r2: zero_row(), r3: zero_row(), r4: zero_row(), r5: zero_row() }
+}
+
+// Count edges (directed)
+fn count_edges(g: Graph6, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            if graph_get(g, i, j) > 0 {
+                count = count + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Out-degree of node
+fn out_degree(g: Graph6, node: Int, n: Int) -> Int {
+    let mut deg = 0;
+    let mut j = 0;
+    while j < n {
+        if graph_get(g, node, j) > 0 {
+            deg = deg + 1;
+        }
+        j = j + 1;
+    }
+    deg
+}
+
+// In-degree of node
+fn in_degree(g: Graph6, node: Int, n: Int) -> Int {
+    let mut deg = 0;
+    let mut i = 0;
+    while i < n {
+        if graph_get(g, i, node) > 0 {
+            deg = deg + 1;
+        }
+        i = i + 1;
+    }
+    deg
+}
+
+// Check if path exists from src to dst (BFS using bitset visited)
+fn has_path(g: Graph6, src: Int, dst: Int, n: Int) -> Bool {
+    if src == dst { true }
+    else {
+        // Use bitset for visited: bit i = node i visited
+        let mut visited = 1 << src;
+        let mut changed = true;
+        while changed {
+            changed = false;
+            let mut i = 0;
+            while i < n {
+                if (visited >> i) & 1 == 1 {
+                    // Node i is visited, check its neighbors
+                    let mut j = 0;
+                    while j < n {
+                        if graph_get(g, i, j) > 0 && (visited >> j) & 1 == 0 {
+                            visited = visited | (1 << j);
+                            changed = true;
+                        }
+                        j = j + 1;
+                    }
+                }
+                i = i + 1;
+            }
+        }
+        (visited >> dst) & 1 == 1
+    }
+}
+
+// Count reachable nodes from src
+fn count_reachable(g: Graph6, src: Int, n: Int) -> Int {
+    let mut visited = 1 << src;
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let mut i = 0;
+        while i < n {
+            if (visited >> i) & 1 == 1 {
+                let mut j = 0;
+                while j < n {
+                    if graph_get(g, i, j) > 0 && (visited >> j) & 1 == 0 {
+                        visited = visited | (1 << j);
+                        changed = true;
+                    }
+                    j = j + 1;
+                }
+            }
+            i = i + 1;
+        }
+    }
+    // Count bits in visited
+    let mut count = 0;
+    let mut k = 0;
+    while k < n {
+        if (visited >> k) & 1 == 1 {
+            count = count + 1;
+        }
+        k = k + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Build a directed graph: 0->1, 0->2, 1->3, 2->3, 3->4
+    let g = Graph6 {
+        r0: Row6 { c0: 0, c1: 1, c2: 1, c3: 0, c4: 0, c5: 0 },
+        r1: Row6 { c0: 0, c1: 0, c2: 0, c3: 1, c4: 0, c5: 0 },
+        r2: Row6 { c0: 0, c1: 0, c2: 0, c3: 1, c4: 0, c5: 0 },
+        r3: Row6 { c0: 0, c1: 0, c2: 0, c3: 0, c4: 1, c5: 0 },
+        r4: zero_row(),
+        r5: zero_row(),
+    };
+
+    assert_eq(count_edges(g, 5), 5);
+
+    // Degrees
+    assert_eq(out_degree(g, 0, 5), 2);  // 0->1, 0->2
+    assert_eq(out_degree(g, 1, 5), 1);  // 1->3
+    assert_eq(out_degree(g, 3, 5), 1);  // 3->4
+    assert_eq(out_degree(g, 4, 5), 0);  // sink
+
+    assert_eq(in_degree(g, 0, 5), 0);   // source
+    assert_eq(in_degree(g, 3, 5), 2);   // 1->3, 2->3
+    assert_eq(in_degree(g, 4, 5), 1);   // 3->4
+
+    // Path existence
+    assert(has_path(g, 0, 4, 5));   // 0->1->3->4 or 0->2->3->4
+    assert(has_path(g, 0, 3, 5));   // 0->1->3
+    assert(!has_path(g, 4, 0, 5));  // No path back
+    assert(!has_path(g, 1, 0, 5));  // No path back
+    assert(has_path(g, 0, 0, 5));   // Self-path
+
+    // Reachability
+    assert_eq(count_reachable(g, 0, 5), 5);   // Can reach all 5 nodes
+    assert_eq(count_reachable(g, 3, 5), 2);   // 3 can reach {3, 4}
+    assert_eq(count_reachable(g, 4, 5), 1);   // 4 is a sink
+
+    // Complete graph K3 (on nodes 0,1,2)
+    let k3 = Graph6 {
+        r0: Row6 { c0: 0, c1: 1, c2: 1, c3: 0, c4: 0, c5: 0 },
+        r1: Row6 { c0: 1, c1: 0, c2: 1, c3: 0, c4: 0, c5: 0 },
+        r2: Row6 { c0: 1, c1: 1, c2: 0, c3: 0, c4: 0, c5: 0 },
+        r3: zero_row(),
+        r4: zero_row(),
+        r5: zero_row(),
+    };
+    assert_eq(count_edges(k3, 3), 6);  // 3*2 directed edges
+    assert_eq(out_degree(k3, 0, 3), 2);
+    assert(has_path(k3, 0, 2, 3));
+    assert(has_path(k3, 2, 0, 3));
+    assert_eq(count_reachable(k3, 0, 3), 3);
+
+    0
+}

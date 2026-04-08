@@ -1,0 +1,171 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: aot, term, tree, widget, selection, flatten
+// @expected-exit: 0
+// @description: Tree widget data model — flat node representation with depth tracking
+
+// Flat tree node (avoids recursive types which are complex in AOT)
+type TreeEntry is {
+    text: Text,
+    depth: Int,
+    has_children: Bool,
+    expanded: Bool,
+    parent_idx: Int,   // -1 for root nodes
+};
+
+implement TreeEntry {
+    pub fn root(text: Text, has_children: Bool) -> TreeEntry {
+        TreeEntry { text: text, depth: 0, has_children: has_children, expanded: true, parent_idx: -1 }
+    }
+
+    pub fn child(text: Text, depth: Int, parent: Int, has_children: Bool) -> TreeEntry {
+        TreeEntry { text: text, depth: depth, has_children: has_children, expanded: false, parent_idx: parent }
+    }
+
+    pub fn is_leaf(&self) -> Bool { !self.has_children }
+    pub fn is_root(&self) -> Bool { self.parent_idx == -1 }
+}
+
+// Build a test tree as flat entries
+fn build_test_tree() -> List<TreeEntry> {
+    let mut entries = List.new();
+    // Root: "A" (expanded, has children, index 0)
+    entries.push(TreeEntry.root("A", true));
+    //   Child: "A1" (leaf, index 1)
+    entries.push(TreeEntry.child("A1", 1, 0, false));
+    //   Child: "A2" (has children, index 2)
+    entries.push(TreeEntry.child("A2", 1, 0, true));
+    //     Grandchild: "A2a" (leaf, index 3)
+    entries.push(TreeEntry.child("A2a", 2, 2, false));
+    // Root: "B" (expanded, leaf, index 4)
+    entries.push(TreeEntry.root("B", false));
+    entries
+}
+
+// Count visible entries (considering expand state)
+fn count_visible(entries: &List<TreeEntry>) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < entries.len() {
+        let entry = &entries[i];
+        // A node is visible if all its ancestors are expanded
+        let visible = is_visible(entries, i);
+        if visible { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+@allow(unbounded_recursion)
+fn is_visible(entries: &List<TreeEntry>, idx: Int) -> Bool {
+    if idx < 0 || idx >= entries.len() { return false; }
+    let entry = &entries[idx];
+    if entry.parent_idx == -1 { return true; }  // Root always visible
+    let parent = &entries[entry.parent_idx];
+    if !parent.expanded { return false; }
+    is_visible(entries, entry.parent_idx)
+}
+
+fn test_tree_structure() -> Int {
+    let tree = build_test_tree();
+    // Should have 5 entries total
+    if tree.len() != 5 {
+        print(f"FAIL: expected 5 entries, got {tree.len()}");
+        return 1;
+    }
+    // First entry is root "A"
+    if tree[0].text != "A" {
+        print("FAIL: first entry should be A");
+        return 1;
+    }
+    if !tree[0].has_children {
+        print("FAIL: A should have children");
+        return 1;
+    }
+    // Last entry is root "B" (leaf)
+    if tree[4].text != "B" {
+        print("FAIL: last entry should be B");
+        return 1;
+    }
+    if tree[4].has_children {
+        print("FAIL: B should be leaf");
+        return 1;
+    }
+    0
+}
+
+fn test_depth_tracking() -> Int {
+    let tree = build_test_tree();
+    // Root nodes at depth 0
+    if tree[0].depth != 0 {
+        print("FAIL: A depth should be 0");
+        return 1;
+    }
+    // Children at depth 1
+    if tree[1].depth != 1 {
+        print("FAIL: A1 depth should be 1");
+        return 1;
+    }
+    // Grandchildren at depth 2
+    if tree[3].depth != 2 {
+        print("FAIL: A2a depth should be 2");
+        return 1;
+    }
+    0
+}
+
+fn test_parent_links() -> Int {
+    let tree = build_test_tree();
+    // Root nodes have parent -1
+    if tree[0].parent_idx != -1 { return 1; }
+    if tree[4].parent_idx != -1 { return 1; }
+    // A1 parent is A (index 0)
+    if tree[1].parent_idx != 0 { return 1; }
+    // A2a parent is A2 (index 2)
+    if tree[3].parent_idx != 2 { return 1; }
+    0
+}
+
+fn test_leaf_detection() -> Int {
+    let tree = build_test_tree();
+    if tree[0].is_leaf() { return 1; }   // A has children
+    if !tree[1].is_leaf() { return 1; }  // A1 is leaf
+    if tree[2].is_leaf() { return 1; }   // A2 has children
+    if !tree[3].is_leaf() { return 1; }  // A2a is leaf
+    if !tree[4].is_leaf() { return 1; }  // B is leaf
+    0
+}
+
+fn test_toggle_expand() -> Int {
+    let mut tree = build_test_tree();
+    // A2 is expanded — collapse it
+    tree[2].expanded = false;
+    // Now A2a should not be visible (parent collapsed)
+    // A2 at depth 1 is child of A (expanded), so A2 is visible
+    // A2a at depth 2 is child of A2 (collapsed), so A2a is NOT visible
+    if !tree[2].has_children {
+        print("FAIL: A2 should have children");
+        return 1;
+    }
+    if tree[2].expanded {
+        print("FAIL: A2 should be collapsed");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_tree_structure();
+    if r1 != 0 { return r1; }
+    let r2 = test_depth_tracking();
+    if r2 != 0 { return r2; }
+    let r3 = test_parent_links();
+    if r3 != 0 { return r3; }
+    let r4 = test_leaf_detection();
+    if r4 != 0 { return r4; }
+    let r5 = test_toggle_expand();
+    if r5 != 0 { return r5; }
+    print("PASS: term_tree_widget");
+    0
+}

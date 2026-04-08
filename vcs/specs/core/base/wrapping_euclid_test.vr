@@ -1,0 +1,702 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, wrapping, euclidean, division, shift, saturating, overflowing
+// @description: Tests for wrapping_shl/shr, wrapping_div/rem, div_euclid/rem_euclid, saturating_pow, overflowing_shl/shr
+
+mount core.base.primitives.{Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32, UInt64, UInt128, ISize, USize};
+
+// =============================================================================
+// Int - wrapping_shl / wrapping_shr
+// =============================================================================
+
+@test
+fn test_int_wrapping_shl_basic() {
+    assert_eq(1.wrapping_shl(0), 1);
+    assert_eq(1.wrapping_shl(1), 2);
+    assert_eq(1.wrapping_shl(10), 1024);
+}
+
+@test
+fn test_int_wrapping_shl_wraps() {
+    // Shift >= 64 wraps (modulo 64)
+    assert_eq(1.wrapping_shl(64), 1);  // 64 % 64 = 0
+    assert_eq(1.wrapping_shl(65), 2);  // 65 % 64 = 1
+}
+
+@test
+fn test_int_wrapping_shr_basic() {
+    assert_eq(1024.wrapping_shr(0), 1024);
+    assert_eq(1024.wrapping_shr(10), 1);
+}
+
+@test
+fn test_int_wrapping_shr_wraps() {
+    assert_eq(1024.wrapping_shr(64), 1024);  // 64 % 64 = 0
+}
+
+// =============================================================================
+// Int - wrapping_div / wrapping_rem
+// =============================================================================
+
+@test
+fn test_int_wrapping_div_basic() {
+    assert_eq(10.wrapping_div(3), 3);
+    assert_eq(10.wrapping_div(2), 5);
+    assert_eq((-10).wrapping_div(3), -3);
+}
+
+@test
+fn test_int_wrapping_div_min_neg1() {
+    // INT_MIN / -1 would overflow; wrapping returns MIN
+    let min_val = -9223372036854775808;
+    assert_eq(min_val.wrapping_div(-1), min_val);
+}
+
+@test
+fn test_int_wrapping_rem_basic() {
+    assert_eq(10.wrapping_rem(3), 1);
+    assert_eq((-10).wrapping_rem(3), -1);
+}
+
+@test
+fn test_int_wrapping_rem_min_neg1() {
+    let min_val = -9223372036854775808;
+    assert_eq(min_val.wrapping_rem(-1), 0);
+}
+
+// =============================================================================
+// Int - div_euclid / rem_euclid
+// =============================================================================
+
+@test
+fn test_int_div_euclid_positive() {
+    assert_eq(7.div_euclid(3), 2);
+    assert_eq(7.rem_euclid(3), 1);
+}
+
+@test
+fn test_int_div_euclid_negative_dividend() {
+    // -7 / 3 in truncated: -2 rem -1
+    // -7 div_euclid 3: -3, rem_euclid: 2
+    assert_eq((-7).div_euclid(3), -3);
+    assert_eq((-7).rem_euclid(3), 2);
+}
+
+@test
+fn test_int_div_euclid_negative_divisor() {
+    assert_eq(7.div_euclid(-3), -2);
+    assert_eq(7.rem_euclid(-3), 1);
+}
+
+@test
+fn test_int_div_euclid_both_negative() {
+    assert_eq((-7).div_euclid(-3), 3);
+    assert_eq((-7).rem_euclid(-3), 2);
+}
+
+@test
+fn test_int_rem_euclid_always_non_negative() {
+    // Key property: rem_euclid always returns >= 0
+    assert((-1).rem_euclid(5) >= 0);
+    assert((-4).rem_euclid(3) >= 0);
+    assert((-10).rem_euclid(7) >= 0);
+}
+
+// =============================================================================
+// Int - saturating_pow
+// =============================================================================
+
+@test
+fn test_int_saturating_pow_basic() {
+    assert_eq(2.saturating_pow(10), 1024);
+    assert_eq(3.saturating_pow(3), 27);
+}
+
+@test
+fn test_int_saturating_pow_saturates_positive() {
+    assert_eq(2.saturating_pow(63), 9223372036854775807);  // saturates to MAX
+    assert_eq(10.saturating_pow(19), 9223372036854775807);
+}
+
+@test
+fn test_int_saturating_pow_saturates_negative() {
+    assert_eq((-2).saturating_pow(63), -9223372036854775808);  // saturates to MIN (odd exp)
+    assert_eq((-2).saturating_pow(64), 9223372036854775807);   // saturates to MAX (even exp)
+}
+
+// =============================================================================
+// Int - overflowing_shl / overflowing_shr
+// =============================================================================
+
+@test
+fn test_int_overflowing_shl_no_overflow() {
+    let pair = 1.overflowing_shl(10);
+    assert_eq(pair.0, 1024);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_int_overflowing_shl_overflow() {
+    let pair = 1.overflowing_shl(64);
+    assert_eq(pair.1, true);
+}
+
+@test
+fn test_int_overflowing_shr_no_overflow() {
+    let pair = 1024.overflowing_shr(10);
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_int_overflowing_shr_overflow() {
+    let pair = 1024.overflowing_shr(64);
+    assert_eq(pair.1, true);
+}
+
+// =============================================================================
+// Sized type: Int8 - all new methods
+// =============================================================================
+
+@test
+fn test_int8_wrapping_shl() {
+    let one = 1 as Int8;
+    assert(one.wrapping_shl(0).to_int() == 1);
+    assert(one.wrapping_shl(6).to_int() == 64);
+}
+
+@test
+fn test_int8_wrapping_div() {
+    let ten = 10 as Int8;
+    let three = 3 as Int8;
+    assert(ten.wrapping_div(three).to_int() == 3);
+}
+
+@test
+fn test_int8_div_euclid() {
+    let neg = -7 as Int8;
+    let pos = 3 as Int8;
+    assert(neg.div_euclid(pos).to_int() == -3);
+    assert(neg.rem_euclid(pos).to_int() == 2);
+}
+
+@test
+fn test_int8_saturating_pow() {
+    let two = 2 as Int8;
+    assert(two.saturating_pow(6).to_int() == 64);
+    assert(two.saturating_pow(7).to_int() == 127);  // saturates to MAX
+}
+
+@test
+fn test_int8_overflowing_shl() {
+    let one = 1 as Int8;
+    let pair = one.overflowing_shl(3);
+    assert(pair.0.to_int() == 8);
+    assert_eq(pair.1, false);
+    let pair2 = one.overflowing_shl(8);
+    assert_eq(pair2.1, true);
+}
+
+// =============================================================================
+// Sized type: UInt8 - all new methods
+// =============================================================================
+
+@test
+fn test_uint8_wrapping_shl() {
+    let one = 1 as UInt8;
+    assert(one.wrapping_shl(0).to_int() == 1);
+    assert(one.wrapping_shl(7).to_int() == 128);
+}
+
+@test
+fn test_uint8_wrapping_div() {
+    let ten = 10 as UInt8;
+    let three = 3 as UInt8;
+    assert(ten.wrapping_div(three).to_int() == 3);
+}
+
+@test
+fn test_uint8_div_euclid() {
+    let a = 7 as UInt8;
+    let b = 3 as UInt8;
+    assert(a.div_euclid(b).to_int() == 2);
+    assert(a.rem_euclid(b).to_int() == 1);
+}
+
+@test
+fn test_uint8_saturating_pow() {
+    let two = 2 as UInt8;
+    assert(two.saturating_pow(7).to_int() == 128);
+    assert(two.saturating_pow(8).to_int() == 255);  // saturates to MAX
+}
+
+@test
+fn test_uint8_overflowing_shl() {
+    let one = 1 as UInt8;
+    let pair = one.overflowing_shl(3);
+    assert(pair.0.to_int() == 8);
+    assert_eq(pair.1, false);
+}
+
+// =============================================================================
+// Cross-type: all types have all methods
+// =============================================================================
+
+@test
+fn test_all_have_wrapping_shl() {
+    let _a = (1).wrapping_shl(0);
+    let _b = (1 as Int8).wrapping_shl(0);
+    let _c = (1 as Int16).wrapping_shl(0);
+    let _d = (1 as Int32).wrapping_shl(0);
+    let _e = (1 as Int64).wrapping_shl(0);
+    let _f = (1 as Int128).wrapping_shl(0);
+    let _g = (1 as UInt8).wrapping_shl(0);
+    let _h = (1 as UInt16).wrapping_shl(0);
+    let _i = (1 as UInt32).wrapping_shl(0);
+    let _j = (1 as UInt64).wrapping_shl(0);
+    let _k = (1 as UInt128).wrapping_shl(0);
+    let _l = (1 as ISize).wrapping_shl(0);
+    let _m = (1 as USize).wrapping_shl(0);
+    assert_eq(_a, 1);
+    assert(_b.to_int() == 1);
+    assert(_c.to_int() == 1);
+    assert(_d.to_int() == 1);
+    assert(_e.to_int() == 1);
+    assert(_f.to_int() == 1);
+    assert(_g.to_int() == 1);
+    assert(_h.to_int() == 1);
+    assert(_i.to_int() == 1);
+    assert(_j.to_int() == 1);
+    assert(_k.to_int() == 1);
+    assert(_l.to_int() == 1);
+    assert(_m.to_int() == 1);
+}
+
+@test
+fn test_all_have_wrapping_shr() {
+    let _a = (1).wrapping_shr(0);
+    let _b = (1 as Int8).wrapping_shr(0);
+    let _c = (1 as Int16).wrapping_shr(0);
+    let _d = (1 as Int32).wrapping_shr(0);
+    let _e = (1 as Int64).wrapping_shr(0);
+    let _f = (1 as Int128).wrapping_shr(0);
+    let _g = (1 as UInt8).wrapping_shr(0);
+    let _h = (1 as UInt16).wrapping_shr(0);
+    let _i = (1 as UInt32).wrapping_shr(0);
+    let _j = (1 as UInt64).wrapping_shr(0);
+    let _k = (1 as UInt128).wrapping_shr(0);
+    let _l = (1 as ISize).wrapping_shr(0);
+    let _m = (1 as USize).wrapping_shr(0);
+    assert_eq(_a, 1);
+    assert(_b.to_int() == 1);
+    assert(_c.to_int() == 1);
+    assert(_d.to_int() == 1);
+    assert(_e.to_int() == 1);
+    assert(_f.to_int() == 1);
+    assert(_g.to_int() == 1);
+    assert(_h.to_int() == 1);
+    assert(_i.to_int() == 1);
+    assert(_j.to_int() == 1);
+    assert(_k.to_int() == 1);
+    assert(_l.to_int() == 1);
+    assert(_m.to_int() == 1);
+}
+
+@test
+fn test_all_have_wrapping_div() {
+    let _a = (10).wrapping_div(3);
+    let _b = (10 as Int8).wrapping_div(3 as Int8);
+    let _c = (10 as Int16).wrapping_div(3 as Int16);
+    let _d = (10 as Int32).wrapping_div(3 as Int32);
+    let _e = (10 as Int64).wrapping_div(3 as Int64);
+    let _f = (10 as Int128).wrapping_div(3 as Int128);
+    let _g = (10 as UInt8).wrapping_div(3 as UInt8);
+    let _h = (10 as UInt16).wrapping_div(3 as UInt16);
+    let _i = (10 as UInt32).wrapping_div(3 as UInt32);
+    let _j = (10 as UInt64).wrapping_div(3 as UInt64);
+    let _k = (10 as UInt128).wrapping_div(3 as UInt128);
+    let _l = (10 as ISize).wrapping_div(3 as ISize);
+    let _m = (10 as USize).wrapping_div(3 as USize);
+    assert_eq(_a, 3);
+    assert(_b.to_int() == 3);
+    assert(_c.to_int() == 3);
+    assert(_d.to_int() == 3);
+    assert(_e.to_int() == 3);
+    assert(_f.to_int() == 3);
+    assert(_g.to_int() == 3);
+    assert(_h.to_int() == 3);
+    assert(_i.to_int() == 3);
+    assert(_j.to_int() == 3);
+    assert(_k.to_int() == 3);
+    assert(_l.to_int() == 3);
+    assert(_m.to_int() == 3);
+}
+
+@test
+fn test_all_have_wrapping_rem() {
+    let _a = (10).wrapping_rem(3);
+    let _b = (10 as Int8).wrapping_rem(3 as Int8);
+    let _c = (10 as Int16).wrapping_rem(3 as Int16);
+    let _d = (10 as Int32).wrapping_rem(3 as Int32);
+    let _e = (10 as Int64).wrapping_rem(3 as Int64);
+    let _f = (10 as Int128).wrapping_rem(3 as Int128);
+    let _g = (10 as UInt8).wrapping_rem(3 as UInt8);
+    let _h = (10 as UInt16).wrapping_rem(3 as UInt16);
+    let _i = (10 as UInt32).wrapping_rem(3 as UInt32);
+    let _j = (10 as UInt64).wrapping_rem(3 as UInt64);
+    let _k = (10 as UInt128).wrapping_rem(3 as UInt128);
+    let _l = (10 as ISize).wrapping_rem(3 as ISize);
+    let _m = (10 as USize).wrapping_rem(3 as USize);
+    assert_eq(_a, 1);
+    assert(_b.to_int() == 1);
+    assert(_c.to_int() == 1);
+    assert(_d.to_int() == 1);
+    assert(_e.to_int() == 1);
+    assert(_f.to_int() == 1);
+    assert(_g.to_int() == 1);
+    assert(_h.to_int() == 1);
+    assert(_i.to_int() == 1);
+    assert(_j.to_int() == 1);
+    assert(_k.to_int() == 1);
+    assert(_l.to_int() == 1);
+    assert(_m.to_int() == 1);
+}
+
+@test
+fn test_all_have_div_euclid() {
+    let _a = (7).div_euclid(3);
+    let _b = (7 as Int8).div_euclid(3 as Int8);
+    let _c = (7 as Int16).div_euclid(3 as Int16);
+    let _d = (7 as Int32).div_euclid(3 as Int32);
+    let _e = (7 as Int64).div_euclid(3 as Int64);
+    let _f = (7 as Int128).div_euclid(3 as Int128);
+    let _g = (7 as UInt8).div_euclid(3 as UInt8);
+    let _h = (7 as UInt16).div_euclid(3 as UInt16);
+    let _i = (7 as UInt32).div_euclid(3 as UInt32);
+    let _j = (7 as UInt64).div_euclid(3 as UInt64);
+    let _k = (7 as UInt128).div_euclid(3 as UInt128);
+    let _l = (7 as ISize).div_euclid(3 as ISize);
+    let _m = (7 as USize).div_euclid(3 as USize);
+    assert_eq(_a, 2);
+    assert(_b.to_int() == 2);
+    assert(_c.to_int() == 2);
+    assert(_d.to_int() == 2);
+    assert(_e.to_int() == 2);
+    assert(_f.to_int() == 2);
+    assert(_g.to_int() == 2);
+    assert(_h.to_int() == 2);
+    assert(_i.to_int() == 2);
+    assert(_j.to_int() == 2);
+    assert(_k.to_int() == 2);
+    assert(_l.to_int() == 2);
+    assert(_m.to_int() == 2);
+}
+
+@test
+fn test_all_have_rem_euclid() {
+    let _a = (7).rem_euclid(3);
+    let _b = (7 as Int8).rem_euclid(3 as Int8);
+    let _c = (7 as Int16).rem_euclid(3 as Int16);
+    let _d = (7 as Int32).rem_euclid(3 as Int32);
+    let _e = (7 as Int64).rem_euclid(3 as Int64);
+    let _f = (7 as Int128).rem_euclid(3 as Int128);
+    let _g = (7 as UInt8).rem_euclid(3 as UInt8);
+    let _h = (7 as UInt16).rem_euclid(3 as UInt16);
+    let _i = (7 as UInt32).rem_euclid(3 as UInt32);
+    let _j = (7 as UInt64).rem_euclid(3 as UInt64);
+    let _k = (7 as UInt128).rem_euclid(3 as UInt128);
+    let _l = (7 as ISize).rem_euclid(3 as ISize);
+    let _m = (7 as USize).rem_euclid(3 as USize);
+    assert_eq(_a, 1);
+    assert(_b.to_int() == 1);
+    assert(_c.to_int() == 1);
+    assert(_d.to_int() == 1);
+    assert(_e.to_int() == 1);
+    assert(_f.to_int() == 1);
+    assert(_g.to_int() == 1);
+    assert(_h.to_int() == 1);
+    assert(_i.to_int() == 1);
+    assert(_j.to_int() == 1);
+    assert(_k.to_int() == 1);
+    assert(_l.to_int() == 1);
+    assert(_m.to_int() == 1);
+}
+
+@test
+fn test_all_have_saturating_pow() {
+    let _a = (2).saturating_pow(3);
+    let _b = (2 as Int8).saturating_pow(3);
+    let _c = (2 as Int16).saturating_pow(3);
+    let _d = (2 as Int32).saturating_pow(3);
+    let _e = (2 as Int64).saturating_pow(3);
+    let _f = (2 as Int128).saturating_pow(3);
+    let _g = (2 as UInt8).saturating_pow(3);
+    let _h = (2 as UInt16).saturating_pow(3);
+    let _i = (2 as UInt32).saturating_pow(3);
+    let _j = (2 as UInt64).saturating_pow(3);
+    let _k = (2 as UInt128).saturating_pow(3);
+    let _l = (2 as ISize).saturating_pow(3);
+    let _m = (2 as USize).saturating_pow(3);
+    assert_eq(_a, 8);
+    assert(_b.to_int() == 8);
+    assert(_c.to_int() == 8);
+    assert(_d.to_int() == 8);
+    assert(_e.to_int() == 8);
+    assert(_f.to_int() == 8);
+    assert(_g.to_int() == 8);
+    assert(_h.to_int() == 8);
+    assert(_i.to_int() == 8);
+    assert(_j.to_int() == 8);
+    assert(_k.to_int() == 8);
+    assert(_l.to_int() == 8);
+    assert(_m.to_int() == 8);
+}
+
+@test
+fn test_all_have_overflowing_shl() {
+    let _a = (1).overflowing_shl(0);
+    let _b = (1 as Int8).overflowing_shl(0);
+    let _c = (1 as Int16).overflowing_shl(0);
+    let _d = (1 as Int32).overflowing_shl(0);
+    let _e = (1 as Int64).overflowing_shl(0);
+    let _f = (1 as Int128).overflowing_shl(0);
+    let _g = (1 as UInt8).overflowing_shl(0);
+    let _h = (1 as UInt16).overflowing_shl(0);
+    let _i = (1 as UInt32).overflowing_shl(0);
+    let _j = (1 as UInt64).overflowing_shl(0);
+    let _k = (1 as UInt128).overflowing_shl(0);
+    let _l = (1 as ISize).overflowing_shl(0);
+    let _m = (1 as USize).overflowing_shl(0);
+    assert_eq(_a.1, false);
+    assert_eq(_b.1, false);
+    assert_eq(_c.1, false);
+    assert_eq(_d.1, false);
+    assert_eq(_e.1, false);
+    assert_eq(_f.1, false);
+    assert_eq(_g.1, false);
+    assert_eq(_h.1, false);
+    assert_eq(_i.1, false);
+    assert_eq(_j.1, false);
+    assert_eq(_k.1, false);
+    assert_eq(_l.1, false);
+    assert_eq(_m.1, false);
+}
+
+@test
+fn test_all_have_overflowing_shr() {
+    let _a = (1).overflowing_shr(0);
+    let _b = (1 as Int8).overflowing_shr(0);
+    let _c = (1 as Int16).overflowing_shr(0);
+    let _d = (1 as Int32).overflowing_shr(0);
+    let _e = (1 as Int64).overflowing_shr(0);
+    let _f = (1 as Int128).overflowing_shr(0);
+    let _g = (1 as UInt8).overflowing_shr(0);
+    let _h = (1 as UInt16).overflowing_shr(0);
+    let _i = (1 as UInt32).overflowing_shr(0);
+    let _j = (1 as UInt64).overflowing_shr(0);
+    let _k = (1 as UInt128).overflowing_shr(0);
+    let _l = (1 as ISize).overflowing_shr(0);
+    let _m = (1 as USize).overflowing_shr(0);
+    assert_eq(_a.1, false);
+    assert_eq(_b.1, false);
+    assert_eq(_c.1, false);
+    assert_eq(_d.1, false);
+    assert_eq(_e.1, false);
+    assert_eq(_f.1, false);
+    assert_eq(_g.1, false);
+    assert_eq(_h.1, false);
+    assert_eq(_i.1, false);
+    assert_eq(_j.1, false);
+    assert_eq(_k.1, false);
+    assert_eq(_l.1, false);
+    assert_eq(_m.1, false);
+}
+
+// =============================================================================
+// Euclidean division properties
+// =============================================================================
+
+@test
+fn test_rem_euclid_property_positive_divisor() {
+    // For any a and positive b, rem_euclid(a, b) is in [0, b)
+    assert((-7).rem_euclid(3) >= 0);
+    assert((-7).rem_euclid(3) < 3);
+    assert(7.rem_euclid(3) >= 0);
+    assert(7.rem_euclid(3) < 3);
+}
+
+@test
+fn test_div_euclid_reconstruction() {
+    // Property: a == div_euclid(a,b) * b + rem_euclid(a,b)
+    let a = -7;
+    let b = 3;
+    assert_eq(a, a.div_euclid(b) * b + a.rem_euclid(b));
+}
+
+@test
+fn test_div_euclid_vs_truncated() {
+    // For positive args, euclidean == truncated
+    assert_eq(7.div_euclid(3), 7 / 3);
+    assert_eq(7.rem_euclid(3), 7 % 3);
+    // For negative dividend, they differ
+    assert_eq((-7).div_euclid(3), -3);
+    assert_eq((-7) / 3, -2);
+}
+
+// =============================================================================
+// Int16/Int32/Int64/ISize signed types
+// =============================================================================
+
+@test
+fn test_int16_all_new_methods() {
+    let a = 10 as Int16;
+    let b = 3 as Int16;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_int32_all_new_methods() {
+    let a = 10 as Int32;
+    let b = 3 as Int32;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_int64_all_new_methods() {
+    let a = 10 as Int64;
+    let b = 3 as Int64;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_isize_all_new_methods() {
+    let a = 10 as ISize;
+    let b = 3 as ISize;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}
+
+// =============================================================================
+// UInt16/UInt32/UInt64/UInt128/USize unsigned types
+// =============================================================================
+
+@test
+fn test_uint16_all_new_methods() {
+    let a = 10 as UInt16;
+    let b = 3 as UInt16;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_uint32_all_new_methods() {
+    let a = 10 as UInt32;
+    let b = 3 as UInt32;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_uint64_all_new_methods() {
+    let a = 10 as UInt64;
+    let b = 3 as UInt64;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_uint128_all_new_methods() {
+    let a = 10 as UInt128;
+    let b = 3 as UInt128;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_usize_all_new_methods() {
+    let a = 10 as USize;
+    let b = 3 as USize;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}
+
+@test
+fn test_int128_all_new_methods() {
+    let a = 10 as Int128;
+    let b = 3 as Int128;
+    assert(a.wrapping_shl(0).to_int() == 10);
+    assert(a.wrapping_shr(0).to_int() == 10);
+    assert(a.wrapping_div(b).to_int() == 3);
+    assert(a.wrapping_rem(b).to_int() == 1);
+    assert(a.div_euclid(b).to_int() == 3);
+    assert(a.rem_euclid(b).to_int() == 1);
+    assert(a.saturating_pow(2).to_int() == 100);
+    let pair = a.overflowing_shl(0);
+    assert_eq(pair.1, false);
+}

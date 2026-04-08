@@ -1,0 +1,252 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, sha256, hash, cryptography, bitwise, round-functions
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT SHA-256 core round functions and partial hash computation using 32-bit integer simulation
+
+// SHA-256 works on 32-bit unsigned words. We simulate with Int, masking to 32 bits.
+
+fn u32(x: Int) -> Int { x & 4294967295 }
+fn add32(a: Int, b: Int) -> Int { (a + b) & 4294967295 }
+fn not32(a: Int) -> Int { (!(a)) & 4294967295 }
+
+fn rotr32(x: Int, n: Int) -> Int {
+    u32((x >> n) | (x << (32 - n)))
+}
+
+fn big_sigma0(x: Int) -> Int {
+    rotr32(x, 2) ^ rotr32(x, 13) ^ rotr32(x, 22)
+}
+
+fn big_sigma1(x: Int) -> Int {
+    rotr32(x, 6) ^ rotr32(x, 11) ^ rotr32(x, 25)
+}
+
+fn ch(x: Int, y: Int, z: Int) -> Int {
+    u32((x & y) ^ (not32(x) & z))
+}
+
+fn maj(x: Int, y: Int, z: Int) -> Int {
+    u32((x & y) ^ (x & z) ^ (y & z))
+}
+
+type Hash8 is {
+    h0: Int, h1: Int, h2: Int, h3: Int,
+    h4: Int, h5: Int, h6: Int, h7: Int
+};
+
+fn sha256_init() -> Hash8 {
+    Hash8 {
+        h0: 1779033703, h1: 3144134277, h2: 1013904242, h3: 2773480762,
+        h4: 1359893119, h5: 2600822924, h6: 528734635, h7: 1541459225
+    }
+}
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn arr_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn arr_zero() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+fn k_constants() -> Arr16 {
+    Arr16 {
+        a0: 1116352408, a1: 1899447441, a2: 3049323471, a3: 3921009573,
+        a4: 961987163, a5: 1508970993, a6: 2453635748, a7: 2870763221,
+        a8: 3624381080, a9: 310598401, a10: 607225278, a11: 1426881987,
+        a12: 1925078388, a13: 2162078206, a14: 2614888103, a15: 3248222580
+    }
+}
+
+fn sha256_round(state: Hash8, k_i: Int, w_i: Int) -> Hash8 {
+    let a = state.h0;
+    let b = state.h1;
+    let c = state.h2;
+    let d = state.h3;
+    let e = state.h4;
+    let f = state.h5;
+    let g = state.h6;
+    let h = state.h7;
+    let t1 = add32(add32(add32(add32(h, big_sigma1(e)), ch(e, f, g)), k_i), w_i);
+    let t2 = add32(big_sigma0(a), maj(a, b, c));
+    Hash8 {
+        h0: add32(t1, t2), h1: a, h2: b, h3: c,
+        h4: add32(d, t1), h5: e, h6: f, h7: g
+    }
+}
+
+fn sha256_compress_16(init: Hash8, msg: Arr16) -> Hash8 {
+    let k = k_constants();
+    let mut state = init;
+    let mut i = 0;
+    while i < 16 {
+        state = sha256_round(state, arr_get(k, i), arr_get(msg, i));
+        i = i + 1;
+    }
+    Hash8 {
+        h0: add32(init.h0, state.h0), h1: add32(init.h1, state.h1),
+        h2: add32(init.h2, state.h2), h3: add32(init.h3, state.h3),
+        h4: add32(init.h4, state.h4), h5: add32(init.h5, state.h5),
+        h6: add32(init.h6, state.h6), h7: add32(init.h7, state.h7)
+    }
+}
+
+fn hash_diff_count(a: Hash8, b: Hash8) -> Int {
+    let mut d = 0;
+    if a.h0 != b.h0 { d = d + 1; }
+    if a.h1 != b.h1 { d = d + 1; }
+    if a.h2 != b.h2 { d = d + 1; }
+    if a.h3 != b.h3 { d = d + 1; }
+    if a.h4 != b.h4 { d = d + 1; }
+    if a.h5 != b.h5 { d = d + 1; }
+    if a.h6 != b.h6 { d = d + 1; }
+    if a.h7 != b.h7 { d = d + 1; }
+    d
+}
+
+fn main() -> Int {
+    // === 32-bit masking (5 asserts) ===
+    assert_eq(u32(0), 0);
+    assert_eq(u32(255), 255);
+    assert_eq(u32(4294967295), 4294967295);
+    assert_eq(u32(4294967296), 0);
+    assert_eq(u32(4294967297), 1);
+
+    // === 32-bit addition (4 asserts) ===
+    assert_eq(add32(1, 2), 3);
+    assert_eq(add32(4294967295, 1), 0);
+    assert_eq(add32(4294967295, 2), 1);
+    assert_eq(add32(2147483647, 1), 2147483648);
+
+    // === 32-bit NOT (4 asserts) ===
+    assert_eq(not32(0), 4294967295);
+    assert_eq(not32(4294967295), 0);
+    assert_eq(not32(1), 4294967294);
+    assert_eq(not32(not32(42)), 42);
+
+    // === Rotation (5 asserts) ===
+    assert_eq(rotr32(1, 1), 2147483648);
+    assert_eq(rotr32(2147483648, 1), 1073741824);
+    assert_eq(rotr32(12345, 0), 12345);
+    assert_eq(rotr32(12345, 32), 12345);
+    assert_eq(rotr32(255, 8), 4278190080);
+
+    // === Ch function (4 asserts) ===
+    assert_eq(ch(4294967295, 42, 99), 42);
+    assert_eq(ch(0, 42, 99), 99);
+    assert_eq(ch(255, 170, 85), 170);
+    assert_eq(ch(12345, 99, 99), 99);
+
+    // === Maj function (4 asserts) ===
+    assert_eq(maj(255, 255, 0), 255);
+    assert_eq(maj(0, 0, 0), 0);
+    assert_eq(maj(240, 15, 255), 255);
+    assert_eq(maj(12345, 12345, 99), 12345);
+
+    // === Sigma functions (4 asserts) ===
+    assert_eq(big_sigma0(0), 0);
+    assert_eq(big_sigma1(0), 0);
+    let bs0_1 = rotr32(1, 2) ^ rotr32(1, 13) ^ rotr32(1, 22);
+    assert_eq(big_sigma0(1), u32(bs0_1));
+    let bs1_1 = rotr32(1, 6) ^ rotr32(1, 11) ^ rotr32(1, 25);
+    assert_eq(big_sigma1(1), u32(bs1_1));
+
+    // === Init and constants (4 asserts) ===
+    let init = sha256_init();
+    assert_eq(init.h0, 1779033703);
+    assert_eq(init.h7, 1541459225);
+    let kk = k_constants();
+    assert_eq(arr_get(kk, 0), 1116352408);
+    assert_eq(arr_get(kk, 15), 3248222580);
+
+    // === Round structure (6 asserts) ===
+    let round0 = sha256_round(init, arr_get(kk, 0), 0);
+    assert_eq(round0.h1, init.h0);
+    assert_eq(round0.h2, init.h1);
+    assert_eq(round0.h3, init.h2);
+    assert_eq(round0.h5, init.h4);
+    assert_eq(round0.h6, init.h5);
+    assert_eq(round0.h7, init.h6);
+
+    // === Compression determinism (4 asserts) ===
+    let ha = sha256_compress_16(init, arr_zero());
+    let hb = sha256_compress_16(init, arr_zero());
+    assert_eq(ha.h0, hb.h0);
+    assert_eq(ha.h1, hb.h1);
+    assert_eq(ha.h6, hb.h6);
+    assert_eq(ha.h7, hb.h7);
+
+    // === Hash values are valid 32-bit (4 asserts) ===
+    assert(ha.h0 <= 4294967295);
+    assert(ha.h3 <= 4294967295);
+    assert(ha.h4 <= 4294967295);
+    assert(ha.h7 <= 4294967295);
+
+    // === Different messages -> different hashes (2 asserts) ===
+    let h1 = sha256_compress_16(init, arr_set(arr_zero(), 0, 1));
+    let h2 = sha256_compress_16(init, arr_set(arr_zero(), 0, 2));
+    assert(hash_diff_count(h1, h2) > 0);
+    assert(hash_diff_count(ha, h1) >= 4);
+
+    // === Rotation composition (2 asserts) ===
+    let test_x = 305419896;
+    assert_eq(rotr32(rotr32(test_x, 5), 3), rotr32(test_x, 8));
+    assert_eq(rotr32(rotr32(test_x, 16), 16), test_x);
+
+    // === Bitwise identities (2 asserts) ===
+    assert_eq(42 ^ 42, 0);
+    assert_eq(42 ^ 0, 42);
+
+    0
+}

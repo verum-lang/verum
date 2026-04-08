@@ -1,0 +1,33 @@
+// @test: parse
+// @level: L0
+// @tags: parser, types, function
+// @description: Test function type parsing
+
+fn test_function_types() {
+    // No parameters
+    let a: fn() = func;
+    let b: fn() -> Int = func;
+
+    // Single parameter
+    let c: fn(Int) = func;
+    let d: fn(Int) -> Int = func;
+
+    // Multiple parameters
+    let e: fn(Int, Text) -> Bool = func;
+    let f: fn(Int, Int, Int) -> Int = func;
+
+    // Higher-order functions
+    let g: fn(fn(Int) -> Int) -> Int = higher;
+    let h: fn(Int) -> fn(Int) -> Int = curried;
+
+    // Function types with context
+    let k: fn() using [Database] = db_func;
+    let l: fn(Int) -> Text using [Logger] = logging_func;
+
+    // Rank-2 function types
+    let n: fn<R>(Reducer<B, R>) -> Reducer<A, R> = transducer;
+    let o: fn<T: Clone>(T) -> (T, T) = duplicator;
+
+    // Complex combinations
+    let p: fn(fn<T>(T) -> T) -> Int = rank2_consumer;
+}

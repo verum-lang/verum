@@ -1,0 +1,142 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, sieve, primes, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Sieve of Eratosthenes using bitset
+
+fn bnot(x: Int) -> Int { !x }
+
+// Bitset sieve for numbers up to 63
+// bit i represents whether i is composite (1=composite, 0=possibly prime)
+fn sieve_64() -> Int {
+    let mut composite = 0;
+    // Mark 0 and 1 as non-prime
+    composite = composite | 1;  // bit 0
+    composite = composite | 2;  // bit 1
+
+    let mut p = 2;
+    while p * p <= 63 {
+        if ((composite >> p) & 1) == 0 {
+            // p is prime, mark multiples
+            let mut m = p * p;
+            while m <= 63 {
+                composite = composite | (1 << m);
+                m = m + p;
+            }
+        }
+        p = p + 1;
+    }
+    composite
+}
+
+fn is_prime_sieve(composite: Int, n: Int) -> Bool {
+    if n < 0 || n > 63 { return false; }
+    ((composite >> n) & 1) == 0
+}
+
+fn count_primes_sieve(composite: Int, limit: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i <= limit {
+        if is_prime_sieve(composite, i) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Nth prime from sieve
+fn nth_prime_sieve(composite: Int, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i <= 63 {
+        if is_prime_sieve(composite, i) {
+            count = count + 1;
+            if count == n { return i; }
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Sum of primes up to limit
+fn sum_primes(composite: Int, limit: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 2;
+    while i <= limit {
+        if is_prime_sieve(composite, i) { sum = sum + i; }
+        i = i + 1;
+    }
+    sum
+}
+
+// Twin primes (p, p+2 both prime)
+fn count_twin_primes(composite: Int, limit: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i + 2 <= limit {
+        if is_prime_sieve(composite, i) && is_prime_sieve(composite, i + 2) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_basic_primes() {
+    let sieve = sieve_64();
+    assert_eq(is_prime_sieve(sieve, 2), true);
+    assert_eq(is_prime_sieve(sieve, 3), true);
+    assert_eq(is_prime_sieve(sieve, 4), false);
+    assert_eq(is_prime_sieve(sieve, 5), true);
+    assert_eq(is_prime_sieve(sieve, 7), true);
+    assert_eq(is_prime_sieve(sieve, 9), false);
+    assert_eq(is_prime_sieve(sieve, 11), true);
+    assert_eq(is_prime_sieve(sieve, 13), true);
+    assert_eq(is_prime_sieve(sieve, 0), false);
+    assert_eq(is_prime_sieve(sieve, 1), false);
+}
+
+fn test_count() {
+    let sieve = sieve_64();
+    assert_eq(count_primes_sieve(sieve, 10), 4);   // 2,3,5,7
+    assert_eq(count_primes_sieve(sieve, 20), 8);   // +11,13,17,19
+    assert_eq(count_primes_sieve(sieve, 30), 10);  // +23,29
+    assert_eq(count_primes_sieve(sieve, 50), 15);
+}
+
+fn test_nth_prime() {
+    let sieve = sieve_64();
+    assert_eq(nth_prime_sieve(sieve, 1), 2);
+    assert_eq(nth_prime_sieve(sieve, 2), 3);
+    assert_eq(nth_prime_sieve(sieve, 3), 5);
+    assert_eq(nth_prime_sieve(sieve, 4), 7);
+    assert_eq(nth_prime_sieve(sieve, 5), 11);
+    assert_eq(nth_prime_sieve(sieve, 10), 29);
+}
+
+fn test_sum_primes() {
+    let sieve = sieve_64();
+    // Sum of primes up to 10: 2+3+5+7 = 17
+    assert_eq(sum_primes(sieve, 10), 17);
+    // Sum of primes up to 20: 17+11+13+17+19 = 77
+    assert_eq(sum_primes(sieve, 20), 77);
+}
+
+fn test_twin_primes() {
+    let sieve = sieve_64();
+    // Twin primes up to 50: (3,5),(5,7),(11,13),(17,19),(29,31),(41,43)
+    assert_eq(count_twin_primes(sieve, 50), 6);
+}
+
+fn main() -> Int {
+    test_basic_primes();
+    test_count();
+    test_nth_prime();
+    test_sum_primes();
+    test_twin_primes();
+    print("[OK] 258_sieve_primes_aot");
+    0
+}

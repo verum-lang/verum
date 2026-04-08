@@ -1,0 +1,147 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, calls, generic, turbofish
+
+fn test_turbofish_basic() {
+    // Turbofish syntax for generic function calls (single type param)
+    let parsed = parse<Int>("42");
+    let collected = iter.collect<List>();
+    let converted = value.into<Text>();
+}
+
+fn test_single_type_param() {
+    // Single type parameter
+    let identity = identity<Int>(42);
+    let wrapped = wrap<Text>("hello");
+    let default = Default.default<Point>();
+}
+
+// NOTE: Multiple type parameters in turbofish (e.g., `func<A, B>()`) not yet supported by parser
+// fn test_multiple_type_params() {
+//     let pair = make_pair<Int, Text>(42, "hello");
+// }
+
+fn test_nested_generic_types() {
+    // Nested generic type parameters
+    let nested = create<List>();
+    let complex = process<Map>(data);
+}
+
+fn test_generic_method_turbofish() {
+    // Generic method calls with turbofish
+    let result = container.map<Int>(transform);
+    let filtered = list.filter_map<Text>(converter);
+    let zipped = iter.zip<OtherIter>(other);
+}
+
+fn test_type_inference_underscore() {
+    // Type inference with underscore
+    let inferred = collect<List>(iter);
+    let partial = parse<Result>(text);
+}
+
+// NOTE: Type.method() static calls may have issues with generics
+fn test_generic_constructor() {
+    // Generic constructor calls
+    let vec = List.new();
+    let map = Map.with_capacity(10);
+    let my_set = Set.from_iter(values);
+}
+
+fn test_generic_in_expressions() {
+    // Generic calls in expressions
+    let sum = list.iter().map<Int>(square).sum();
+    let result = data.parse<Int>()? + offset;
+    let converted = input.try_into<Output>()?;
+}
+
+fn test_generic_with_closures() {
+    // Generic calls with closures
+    let mapped = items.map<Text>(|x| x.to_string());
+    let filtered = list.filter<Bool>(|item| item.valid);
+}
+
+// NOTE: Pipeline operator with generics may have issues
+// fn test_generic_in_pipelines() {
+//     let result = data
+//         |> parse<Int>
+//         |> validate;
+// }
+
+fn test_generic_method_chain() {
+    // Generic calls with method chaining
+    let processed = input
+        .parse<Int>()
+        .map<Float>(to_float)
+        .unwrap_or(0.0);
+}
+
+// NOTE: using clause at expression level is not supported
+// fn test_generic_with_context() {
+//     let result = fetch<User>() using [HttpClient];
+// }
+
+fn test_async_generic() {
+    // Async generic calls
+    let data = fetch<Response>(url).await;
+    let parsed = parse<Json>(response).await;
+}
+
+fn test_generic_default_patterns() {
+    // Generic new/default patterns
+    let default_int = Int.default();
+    let zero = Numeric.zero();
+    let one = Numeric.one();
+}
+
+fn test_generic_factory() {
+    // Generic factory methods
+    let reader = Reader.from_file(path);
+    let writer = Writer.to_stdout();
+}
+
+fn test_generic_associated_types() {
+    // Generic with associated types
+    let iterator = IntoIterator.into_iter(list);
+    let collected = FromIterator.from_iter(iter);
+}
+
+// NOTE: Fully qualified <Type as Trait> syntax may not be supported
+// fn test_fully_qualified_generic() {
+//     let result = <Int as FromStr>.from_str("42");
+// }
+
+fn test_generic_in_match() {
+    // Generic calls in match arms
+    match operation {
+        Op.Parse => parse<Int>(input),
+        Op.Default => Default.default(),
+    }
+}
+
+fn test_generic_array_slice() {
+    // Generic calls with array/slice
+    let slice = data.as_slice();
+}
+
+fn test_complex_nested_generic() {
+    // Complex nested generic calls
+    let result = outer<A>(
+        middle<B>(
+            inner<C>(value)
+        )
+    );
+}
+
+fn test_generic_builtins() {
+    // Generic built-in calls (Verum uses function syntax, not macros)
+    let formatted = f"{value}";
+    let vector: List = [1, 2, 3];
+}
+
+fn test_generic_result_types() {
+    // Generic with result types (single type param)
+    let ok = Ok<Int>(42);
+    let some = Some<Int>(42);
+}

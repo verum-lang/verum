@@ -1,0 +1,456 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, csp, processes, synchronous, communication, alternation
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: CSP (Communicating Sequential Processes) simulation.
+// Models processes that communicate via synchronous message passing.
+// Each process has a state and communicates through rendezvous-style channels.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Synchronous channel (rendezvous):
+// Both sender and receiver must be ready for transfer to occur.
+// Unlike a buffered channel, no data is stored.
+// =============================================================================
+
+type RendezvousChan is {
+    has_sender: Int,    // 1 if sender is waiting
+    has_receiver: Int,  // 1 if receiver is waiting
+    send_value: Int,    // value offered by sender
+    transfer_count: Int // total successful transfers
+};
+
+fn rchan_new() -> RendezvousChan {
+    RendezvousChan { has_sender: 0, has_receiver: 0, send_value: 0, transfer_count: 0 }
+}
+
+// Sender offers a value
+fn rchan_offer(ch: RendezvousChan, val: Int) -> RendezvousChan {
+    RendezvousChan {
+        has_sender: 1,
+        has_receiver: ch.has_receiver,
+        send_value: val,
+        transfer_count: ch.transfer_count
+    }
+}
+
+// Receiver signals readiness
+fn rchan_request(ch: RendezvousChan) -> RendezvousChan {
+    RendezvousChan {
+        has_sender: ch.has_sender,
+        has_receiver: 1,
+        send_value: ch.send_value,
+        transfer_count: ch.transfer_count
+    }
+}
+
+// Check if rendezvous can happen
+fn rchan_ready(ch: RendezvousChan) -> Int {
+    if ch.has_sender == 1 && ch.has_receiver == 1 { 1 } else { 0 }
+}
+
+// Perform rendezvous: returns (channel_after, transferred_value)
+type RchanResult is { chan: RendezvousChan, value: Int, ok: Int };
+
+fn rchan_sync(ch: RendezvousChan) -> RchanResult {
+    if rchan_ready(ch) == 1 {
+        RchanResult {
+            chan: RendezvousChan {
+                has_sender: 0, has_receiver: 0, send_value: 0,
+                transfer_count: ch.transfer_count + 1
+            },
+            value: ch.send_value,
+            ok: 1
+        }
+    } else {
+        RchanResult { chan: ch, value: 0, ok: 0 }
+    }
+}
+
+// =============================================================================
+// Process: simple state machine with local variables
+// =============================================================================
+
+type Proc is {
+    pc: Int,        // program counter
+    local_a: Int,   // general purpose local
+    local_b: Int,   // general purpose local
+    done: Int       // 1 when process has finished
+};
+
+fn proc_new() -> Proc {
+    Proc { pc: 0, local_a: 0, local_b: 0, done: 0 }
+}
+
+// =============================================================================
+// Tests: Manual CSP patterns
+// =============================================================================
+
+fn test_basic_rendezvous() {
+    let ch = rchan_new();
+    assert_eq(rchan_ready(ch), 0);
+
+    // Only sender ready
+    let ch2 = rchan_offer(ch, 42);
+    assert_eq(rchan_ready(ch2), 0);
+
+    // Both ready
+    let ch3 = rchan_request(ch2);
+    assert_eq(rchan_ready(ch3), 1);
+
+    // Sync
+    let r = rchan_sync(ch3);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 42);
+    assert_eq(r.chan.transfer_count, 1);
+    assert_eq(rchan_ready(r.chan), 0);
+}
+
+fn test_sync_not_ready() {
+    // No sender, receiver only
+    let ch = rchan_request(rchan_new());
+    let r = rchan_sync(ch);
+    assert_eq(r.ok, 0);
+
+    // No receiver, sender only
+    let ch2 = rchan_offer(rchan_new(), 99);
+    let r2 = rchan_sync(ch2);
+    assert_eq(r2.ok, 0);
+}
+
+fn test_producer_consumer_manual() {
+    // Producer sends 10, 20, 30 to consumer via rendezvous
+    let mut ch = rchan_new();
+    let mut consumer_sum = 0;
+
+    // Round 1: send 10
+    ch = rchan_offer(ch, 10);
+    ch = rchan_request(ch);
+    let r1 = rchan_sync(ch);
+    assert_eq(r1.ok, 1);
+    consumer_sum = consumer_sum + r1.value;
+    ch = r1.chan;
+
+    // Round 2: send 20
+    ch = rchan_offer(ch, 20);
+    ch = rchan_request(ch);
+    let r2 = rchan_sync(ch);
+    assert_eq(r2.ok, 1);
+    consumer_sum = consumer_sum + r2.value;
+    ch = r2.chan;
+
+    // Round 3: send 30
+    ch = rchan_offer(ch, 30);
+    ch = rchan_request(ch);
+    let r3 = rchan_sync(ch);
+    assert_eq(r3.ok, 1);
+    consumer_sum = consumer_sum + r3.value;
+    ch = r3.chan;
+
+    assert_eq(consumer_sum, 60);
+    assert_eq(ch.transfer_count, 3);
+}
+
+fn test_ping_pong() {
+    // Pinger sends 1, ponger doubles it and sends back 2
+    // Pinger sends 2, ponger returns 4, etc.
+    let mut ch_ping = rchan_new();  // pinger -> ponger
+    let mut ch_pong = rchan_new();  // ponger -> pinger
+    let mut pinger_recv_sum = 0;
+
+    // Round 1: ping 1, pong 2
+    ch_ping = rchan_offer(ch_ping, 1);
+    ch_ping = rchan_request(ch_ping);
+    let r1 = rchan_sync(ch_ping);
+    ch_ping = r1.chan;
+    let ponger_got = r1.value;  // 1
+
+    ch_pong = rchan_offer(ch_pong, ponger_got * 2);
+    ch_pong = rchan_request(ch_pong);
+    let r2 = rchan_sync(ch_pong);
+    ch_pong = r2.chan;
+    pinger_recv_sum = pinger_recv_sum + r2.value;
+
+    // Round 2: ping 2, pong 4
+    ch_ping = rchan_offer(ch_ping, 2);
+    ch_ping = rchan_request(ch_ping);
+    let r3 = rchan_sync(ch_ping);
+    ch_ping = r3.chan;
+    let ponger_got2 = r3.value;
+
+    ch_pong = rchan_offer(ch_pong, ponger_got2 * 2);
+    ch_pong = rchan_request(ch_pong);
+    let r4 = rchan_sync(ch_pong);
+    ch_pong = r4.chan;
+    pinger_recv_sum = pinger_recv_sum + r4.value;
+
+    // Round 3: ping 3, pong 6
+    ch_ping = rchan_offer(ch_ping, 3);
+    ch_ping = rchan_request(ch_ping);
+    let r5 = rchan_sync(ch_ping);
+    ch_ping = r5.chan;
+    let ponger_got3 = r5.value;
+
+    ch_pong = rchan_offer(ch_pong, ponger_got3 * 2);
+    ch_pong = rchan_request(ch_pong);
+    let r6 = rchan_sync(ch_pong);
+    ch_pong = r6.chan;
+    pinger_recv_sum = pinger_recv_sum + r6.value;
+
+    assert_eq(pinger_recv_sum, 12);  // 2+4+6
+    assert_eq(ch_ping.transfer_count, 3);
+    assert_eq(ch_pong.transfer_count, 3);
+}
+
+fn test_pipeline_processes() {
+    // Pipeline: A -> B -> C
+    // A sends values, B doubles them and forwards, C triples and accumulates
+    let mut ch_ab = rchan_new();
+    let mut ch_bc = rchan_new();
+    let mut final_sum = 0;
+
+    let mut i = 1;
+    while i <= 4 {
+        // A sends i to B
+        ch_ab = rchan_offer(ch_ab, i);
+        ch_ab = rchan_request(ch_ab);
+        let r1 = rchan_sync(ch_ab);
+        ch_ab = r1.chan;
+        let b_got = r1.value;
+
+        // B sends b_got * 2 to C
+        ch_bc = rchan_offer(ch_bc, b_got * 2);
+        ch_bc = rchan_request(ch_bc);
+        let r2 = rchan_sync(ch_bc);
+        ch_bc = r2.chan;
+        let c_got = r2.value;
+
+        // C accumulates c_got * 3
+        final_sum = final_sum + c_got * 3;
+
+        i = i + 1;
+    }
+
+    // Values: A sends 1,2,3,4
+    // B doubles: 2,4,6,8
+    // C triples: 6,12,18,24
+    // Sum: 60
+    assert_eq(final_sum, 60);
+    assert_eq(ch_ab.transfer_count, 4);
+    assert_eq(ch_bc.transfer_count, 4);
+}
+
+fn test_alternation() {
+    // Process tries to send on channel A. If not ready, tries channel B.
+    let mut ch_a = rchan_new();
+    let mut ch_b = rchan_new();
+
+    // Only B has a receiver ready
+    ch_b = rchan_request(ch_b);
+
+    // Offer to A first
+    let ch_a_offered = rchan_offer(ch_a, 42);
+    let ra = rchan_sync(ch_a_offered);
+
+    if ra.ok == 1 {
+        // Shouldn't happen (A has no receiver)
+        assert(false);
+    } else {
+        // Try B instead
+        let ch_b_offered = rchan_offer(ch_b, 42);
+        let rb = rchan_sync(ch_b_offered);
+        assert_eq(rb.ok, 1);
+        assert_eq(rb.value, 42);
+        ch_b = rb.chan;
+    }
+
+    assert_eq(ch_b.transfer_count, 1);
+}
+
+fn test_selective_recv() {
+    // Receiver selects from whichever channel has data
+    let mut ch_a = rchan_new();
+    let mut ch_b = rchan_new();
+
+    // Channel A has sender with value 100
+    ch_a = rchan_offer(ch_a, 100);
+    // Channel B has sender with value 200
+    ch_b = rchan_offer(ch_b, 200);
+
+    // Receiver checks A first
+    let ch_a_req = rchan_request(ch_a);
+    let ra = rchan_sync(ch_a_req);
+    assert_eq(ra.ok, 1);
+    assert_eq(ra.value, 100);
+    ch_a = ra.chan;
+
+    // Then checks B
+    let ch_b_req = rchan_request(ch_b);
+    let rb = rchan_sync(ch_b_req);
+    assert_eq(rb.ok, 1);
+    assert_eq(rb.value, 200);
+    ch_b = rb.chan;
+}
+
+fn test_multiple_channels_loop() {
+    // Send on channel A for even values, channel B for odd values
+    let mut ch_a = rchan_new();
+    let mut ch_b = rchan_new();
+    let mut sum_a = 0;
+    let mut sum_b = 0;
+
+    let mut i = 1;
+    while i <= 6 {
+        if i % 2 == 0 {
+            ch_a = rchan_offer(ch_a, i);
+            ch_a = rchan_request(ch_a);
+            let r = rchan_sync(ch_a);
+            ch_a = r.chan;
+            sum_a = sum_a + r.value;
+        } else {
+            ch_b = rchan_offer(ch_b, i);
+            ch_b = rchan_request(ch_b);
+            let r = rchan_sync(ch_b);
+            ch_b = r.chan;
+            sum_b = sum_b + r.value;
+        }
+        i = i + 1;
+    }
+
+    assert_eq(sum_a, 12);  // 2+4+6
+    assert_eq(sum_b, 9);   // 1+3+5
+    assert_eq(ch_a.transfer_count, 3);
+    assert_eq(ch_b.transfer_count, 3);
+}
+
+fn test_barrier_sync() {
+    // Simulate barrier: N processes must all reach a point before any proceed
+    // Using counter: each process "arrives" by incrementing, barrier opens when count == N
+    let n = 4;
+    let mut barrier_count = 0;
+    let mut arrivals = a8_zeros();
+
+    // Simulate 4 processes arriving
+    let mut p = 0;
+    while p < n {
+        barrier_count = barrier_count + 1;
+        arrivals = a8_set(arrivals, p, 1);
+        p = p + 1;
+    }
+
+    // Check barrier is satisfied
+    assert_eq(barrier_count, n);
+
+    // Verify all arrived
+    let mut all_arrived = 1;
+    let mut k = 0;
+    while k < n {
+        if a8_get(arrivals, k) != 1 {
+            all_arrived = 0;
+        }
+        k = k + 1;
+    }
+    assert_eq(all_arrived, 1);
+}
+
+fn test_accumulator_process() {
+    // An accumulator process receives values and maintains running sum
+    let mut ch = rchan_new();
+    let mut accum = 0;
+
+    // Send sequence of values: 10, 20, 30, 40, 50
+    let mut i = 1;
+    while i <= 5 {
+        let val = i * 10;
+        ch = rchan_offer(ch, val);
+        ch = rchan_request(ch);
+        let r = rchan_sync(ch);
+        ch = r.chan;
+        accum = accum + r.value;
+        i = i + 1;
+    }
+
+    assert_eq(accum, 150);  // 10+20+30+40+50
+    assert_eq(ch.transfer_count, 5);
+}
+
+fn test_filter_process() {
+    // Filter process: only forward even values
+    let mut ch_in = rchan_new();
+    let mut ch_out = rchan_new();
+    let mut output_sum = 0;
+    let mut output_count = 0;
+
+    let mut i = 1;
+    while i <= 8 {
+        // Send i to filter
+        ch_in = rchan_offer(ch_in, i);
+        ch_in = rchan_request(ch_in);
+        let r_in = rchan_sync(ch_in);
+        ch_in = r_in.chan;
+        let val = r_in.value;
+
+        // Filter: only forward if even
+        if val % 2 == 0 {
+            ch_out = rchan_offer(ch_out, val);
+            ch_out = rchan_request(ch_out);
+            let r_out = rchan_sync(ch_out);
+            ch_out = r_out.chan;
+            output_sum = output_sum + r_out.value;
+            output_count = output_count + 1;
+        }
+
+        i = i + 1;
+    }
+
+    assert_eq(output_count, 4);  // 2,4,6,8
+    assert_eq(output_sum, 20);   // 2+4+6+8
+}
+
+fn main() -> Int {
+    test_basic_rendezvous();
+    test_sync_not_ready();
+    test_producer_consumer_manual();
+    test_ping_pong();
+    test_pipeline_processes();
+    test_alternation();
+    test_selective_recv();
+    test_multiple_channels_loop();
+    test_barrier_sync();
+    test_accumulator_process();
+    test_filter_process();
+    print("[OK] 349_interp_csp_sim");
+    0
+}

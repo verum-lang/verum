@@ -1,0 +1,420 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, async, oracle
+// @timeout: 30000
+
+/// Async Oracle Tests
+/// Compare async behavior between Tier 0 (interpreter) and Tier 3 (AOT)
+/// to ensure semantic equivalence for all async operations.
+///
+/// These tests cover:
+/// - Basic async/await
+/// - Concurrent execution with spawn
+/// - Channel communication
+/// - Async error handling
+/// - Timeout behavior
+/// - Async closures
+
+fn test_async_basic() {
+    async fn simple_async() -> Int {
+        42
+    }
+
+    let result = await simple_async();
+    println(f"simple async result: {result}");
+}
+
+fn test_async_with_await() {
+    async fn compute(n: Int) -> Int {
+        n * 2
+    }
+
+    async fn chain() -> Int {
+        let a = await compute(10);
+        let b = await compute(a);
+        let c = await compute(b);
+        c
+    }
+
+    let result = await chain();
+    println(f"chained async result: {result}");  // 10 * 2 * 2 * 2 = 80
+}
+
+fn test_async_concurrent() {
+    async fn slow_compute(id: Int, delay_ms: Int) -> Int {
+        // Simulate work
+        await sleep(delay_ms);
+        println(f"compute {id} done");
+        id * 10
+    }
+
+    // Run concurrently
+    async fn run_concurrent() -> (Int, Int, Int) {
+        let a = spawn slow_compute(1, 100);
+        let b = spawn slow_compute(2, 50);
+        let c = spawn slow_compute(3, 75);
+
+        // Wait for all
+        let result_a = await a;
+        let result_b = await b;
+        let result_c = await c;
+
+        (result_a, result_b, result_c)
+    }
+
+    let (a, b, c) = await run_concurrent();
+    println(f"concurrent results: {a}, {b}, {c}");
+}
+
+fn test_async_ordering() {
+    // Test that async operations maintain proper ordering
+    async fn step(n: Int) -> Int {
+        println(f"step {n} start");
+        await yield_now();  // Give up time slice
+        println(f"step {n} end");
+        n
+    }
+
+    async fn ordered_sequence() {
+        let a = await step(1);
+        let b = await step(2);
+        let c = await step(3);
+        println(f"sequence complete: {a}, {b}, {c}");
+    }
+
+    await ordered_sequence();
+}
+
+fn test_channel_send_receive() {
+    let (tx, rx) = channel<Int>();
+
+    // Sender task
+    spawn async {
+        for i in 1..=5 {
+            tx.send(i);
+            println(f"sent: {i}");
+        }
+        tx.close();
+    };
+
+    // Receiver
+    loop {
+        match await rx.recv() {
+            Some(val) => println(f"received: {val}"),
+            None => {
+                println("channel closed");
+                break;
+            }
+        }
+    }
+}
+
+fn test_channel_buffered() {
+    let (tx, rx) = channel<Int>(capacity: 3);
+
+    // Fill buffer
+    tx.send(1);
+    tx.send(2);
+    tx.send(3);
+    println("buffer filled");
+
+    // This would block if buffer was full
+    spawn async {
+        tx.send(4);
+        println("sent 4 after space freed");
+    };
+
+    // Free space
+    let val = await rx.recv();
+    println(f"received: {val}");
+
+    // Receive rest
+    while let Some(v) = await rx.recv_timeout(100) {
+        println(f"received: {v}");
+    }
+}
+
+fn test_select() {
+    let (tx1, rx1) = channel<Int>();
+    let (tx2, rx2) = channel<Text>();
+
+    // Send on different channels
+    spawn async {
+        await sleep(50);
+        tx1.send(42);
+    };
+
+    spawn async {
+        await sleep(25);
+        tx2.send("hello");
+    };
+
+    // Select from multiple channels
+    for _ in 0..2 {
+        match select {
+            val = rx1.recv() => println(f"got int: {val}"),
+            val = rx2.recv() => println(f"got text: {val}"),
+        }
+    }
+}
+
+fn test_async_error_handling() {
+    async fn might_fail(succeed: Bool) -> Result<Int, Text> {
+        if succeed {
+            Ok(42)
+        } else {
+            Err("operation failed")
+        }
+    }
+
+    async fn propagate_error() -> Result<Int, Text> {
+        let a = await might_fail(true)?;
+        let b = await might_fail(true)?;
+        Ok(a + b)
+    }
+
+    async fn handle_error() {
+        match await propagate_error() {
+            Ok(v) => println(f"success: {v}"),
+            Err(e) => println(f"error: {e}"),
+        }
+
+        match await might_fail(false) {
+            Ok(v) => println(f"unexpected success: {v}"),
+            Err(e) => println(f"expected error: {e}"),
+        }
+    }
+
+    await handle_error();
+}
+
+fn test_async_try_block() {
+    async fn risky_operation(n: Int) -> Result<Int, Text> {
+        if n < 0 {
+            Err("negative input")
+        } else {
+            Ok(n * 2)
+        }
+    }
+
+    async fn with_try() {
+        let result = try {
+            let a = await risky_operation(5)?;
+            let b = await risky_operation(10)?;
+            a + b
+        } recover {
+            Err(e) => {
+                println(f"recovered from: {e}");
+                0
+            }
+        };
+
+        println(f"try result: {result}");
+    }
+
+    await with_try();
+}
+
+fn test_timeout() {
+    async fn slow_operation() -> Int {
+        await sleep(1000);
+        42
+    }
+
+    async fn with_timeout() {
+        match await timeout(100, slow_operation()) {
+            Ok(val) => println(f"completed: {val}"),
+            Err(_) => println("timed out"),
+        }
+    }
+
+    await with_timeout();
+}
+
+fn test_async_closure() {
+    let multiplier = 2;
+
+    let async_fn = async |x: Int| -> Int {
+        await sleep(10);
+        x * multiplier
+    };
+
+    let result = await async_fn(21);
+    println(f"async closure result: {result}");  // 42
+}
+
+fn test_async_iteration() {
+    async fn generate_numbers() -> impl AsyncIterator<Item = Int> {
+        for i in 1..=5 {
+            await sleep(10);
+            yield i;
+        }
+    }
+
+    async fn consume_stream() {
+        for await num in generate_numbers() {
+            println(f"stream value: {num}");
+        }
+        println("stream exhausted");
+    }
+
+    await consume_stream();
+}
+
+fn test_spawn_detached() {
+    // Spawned tasks that we don't await
+    spawn async {
+        await sleep(50);
+        println("detached 1 complete");
+    };
+
+    spawn async {
+        await sleep(25);
+        println("detached 2 complete");
+    };
+
+    // Wait for spawned tasks to complete
+    await sleep(100);
+    println("main continued");
+}
+
+fn test_async_mutex() {
+    let counter = Shared(AsyncMutex(0));
+
+    async fn increment(counter: Shared<AsyncMutex<Int>>) {
+        for _ in 0..10 {
+            let mut guard = await counter.lock();
+            *guard = *guard + 1;
+        }
+    }
+
+    // Run multiple increment tasks concurrently
+    let tasks = [];
+    for _ in 0..3 {
+        let c = counter.clone();
+        tasks.push(spawn increment(c));
+    }
+
+    // Wait for all
+    for t in tasks {
+        await t;
+    }
+
+    let final_value = await counter.lock();
+    println(f"final counter: {*final_value}");  // Should be 30
+}
+
+fn test_async_once() {
+    let lazy = AsyncOnce.new(async {
+        println("initializing...");
+        await sleep(50);
+        42
+    });
+
+    // First access initializes
+    let val1 = await lazy.get();
+    println(f"first access: {val1}");
+
+    // Second access returns cached value
+    let val2 = await lazy.get();
+    println(f"second access: {val2}");
+}
+
+fn test_join_all() {
+    async fn compute(n: Int) -> Int {
+        await sleep(n * 10);
+        n * n
+    }
+
+    async fn run_all() {
+        let futures = [
+            compute(1),
+            compute(2),
+            compute(3),
+            compute(4),
+            compute(5),
+        ];
+
+        let results = await join_all(futures);
+        for (i, r) in results.enumerate() {
+            println(f"result[{i}] = {r}");
+        }
+    }
+
+    await run_all();
+}
+
+fn test_race() {
+    async fn fast() -> Int {
+        await sleep(10);
+        1
+    }
+
+    async fn slow() -> Int {
+        await sleep(100);
+        2
+    }
+
+    async fn racing() {
+        let winner = await race([fast(), slow()]);
+        println(f"race winner: {winner}");  // Should be 1
+    }
+
+    await racing();
+}
+
+fn main() {
+    println("=== Async Basic ===");
+    await test_async_basic();
+
+    println("\n=== Async With Await ===");
+    await test_async_with_await();
+
+    println("\n=== Async Concurrent ===");
+    await test_async_concurrent();
+
+    println("\n=== Async Ordering ===");
+    await test_async_ordering();
+
+    println("\n=== Channel Send/Receive ===");
+    await test_channel_send_receive();
+
+    println("\n=== Channel Buffered ===");
+    await test_channel_buffered();
+
+    println("\n=== Select ===");
+    await test_select();
+
+    println("\n=== Async Error Handling ===");
+    await test_async_error_handling();
+
+    println("\n=== Async Try Block ===");
+    await test_async_try_block();
+
+    println("\n=== Timeout ===");
+    await test_timeout();
+
+    println("\n=== Async Closure ===");
+    await test_async_closure();
+
+    println("\n=== Async Iteration ===");
+    await test_async_iteration();
+
+    println("\n=== Spawn Detached ===");
+    await test_spawn_detached();
+
+    println("\n=== Async Mutex ===");
+    await test_async_mutex();
+
+    println("\n=== Async Once ===");
+    await test_async_once();
+
+    println("\n=== Join All ===");
+    await test_join_all();
+
+    println("\n=== Race ===");
+    await test_race();
+
+    println("\n=== All async tests complete ===");
+}

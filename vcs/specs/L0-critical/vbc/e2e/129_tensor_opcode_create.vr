@@ -1,0 +1,161 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, create
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Tensor creation simulation — zeros, full, from_values, get/set on flat 8-element arrays
+
+// ============================================================================
+// Tensor8: Fixed-size flat tensor of 8 Ints with shape info
+// ============================================================================
+
+type Tensor8 is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    len: Int, rows: Int, cols: Int
+};
+
+fn tensor_new(rows: Int, cols: Int) -> Tensor8 {
+    Tensor8 {
+        d0: 0, d1: 0, d2: 0, d3: 0,
+        d4: 0, d5: 0, d6: 0, d7: 0,
+        len: rows * cols, rows: rows, cols: cols
+    }
+}
+
+fn tensor_full(rows: Int, cols: Int, val: Int) -> Tensor8 {
+    Tensor8 {
+        d0: val, d1: val, d2: val, d3: val,
+        d4: val, d5: val, d6: val, d7: val,
+        len: rows * cols, rows: rows, cols: cols
+    }
+}
+
+fn tensor_get(t: Tensor8, i: Int) -> Int {
+    if i == 0 { t.d0 } else if i == 1 { t.d1 } else if i == 2 { t.d2 }
+    else if i == 3 { t.d3 } else if i == 4 { t.d4 } else if i == 5 { t.d5 }
+    else if i == 6 { t.d6 } else { t.d7 }
+}
+
+fn tensor_set(t: Tensor8, i: Int, v: Int) -> Tensor8 {
+    Tensor8 {
+        d0: if i == 0 { v } else { t.d0 },
+        d1: if i == 1 { v } else { t.d1 },
+        d2: if i == 2 { v } else { t.d2 },
+        d3: if i == 3 { v } else { t.d3 },
+        d4: if i == 4 { v } else { t.d4 },
+        d5: if i == 5 { v } else { t.d5 },
+        d6: if i == 6 { v } else { t.d6 },
+        d7: if i == 7 { v } else { t.d7 },
+        len: t.len, rows: t.rows, cols: t.cols
+    }
+}
+
+fn tensor_from_values(a: Int, b: Int, c: Int, d: Int, n: Int) -> Tensor8 {
+    Tensor8 {
+        d0: a, d1: b, d2: c, d3: d,
+        d4: 0, d5: 0, d6: 0, d7: 0,
+        len: n, rows: 1, cols: n
+    }
+}
+
+// ============================================================================
+// Test 1: Create zeros tensor
+// ============================================================================
+
+@test
+fn test_tensor_zeros() {
+    let t = tensor_new(2, 3);
+    assert_eq(t.rows, 2);
+    assert_eq(t.cols, 3);
+    assert_eq(t.len, 6);
+    assert_eq(tensor_get(t, 0), 0);
+    assert_eq(tensor_get(t, 5), 0);
+    print("  test_tensor_zeros: ok");
+}
+
+// ============================================================================
+// Test 2: Create full tensor
+// ============================================================================
+
+@test
+fn test_tensor_full() {
+    let t = tensor_full(2, 4, 7);
+    assert_eq(t.len, 8);
+    assert_eq(tensor_get(t, 0), 7);
+    assert_eq(tensor_get(t, 3), 7);
+    assert_eq(tensor_get(t, 7), 7);
+    print("  test_tensor_full: ok");
+}
+
+// ============================================================================
+// Test 3: Create from values
+// ============================================================================
+
+@test
+fn test_tensor_from_values() {
+    let t = tensor_from_values(10, 20, 30, 40, 4);
+    assert_eq(t.len, 4);
+    assert_eq(tensor_get(t, 0), 10);
+    assert_eq(tensor_get(t, 1), 20);
+    assert_eq(tensor_get(t, 2), 30);
+    assert_eq(tensor_get(t, 3), 40);
+    print("  test_tensor_from_values: ok");
+}
+
+// ============================================================================
+// Test 4: Get and set operations
+// ============================================================================
+
+@test
+fn test_tensor_get_set() {
+    let mut t = tensor_new(1, 8);
+    t = tensor_set(t, 0, 100);
+    t = tensor_set(t, 3, 300);
+    t = tensor_set(t, 7, 700);
+    assert_eq(tensor_get(t, 0), 100);
+    assert_eq(tensor_get(t, 1), 0);
+    assert_eq(tensor_get(t, 3), 300);
+    assert_eq(tensor_get(t, 7), 700);
+
+    // Overwrite existing value
+    t = tensor_set(t, 3, 999);
+    assert_eq(tensor_get(t, 3), 999);
+    print("  test_tensor_get_set: ok");
+}
+
+// ============================================================================
+// Test 5: Shape properties
+// ============================================================================
+
+@test
+fn test_tensor_shape() {
+    let t1 = tensor_new(1, 8);
+    assert_eq(t1.rows, 1);
+    assert_eq(t1.cols, 8);
+    assert_eq(t1.len, 8);
+
+    let t2 = tensor_new(4, 2);
+    assert_eq(t2.rows, 4);
+    assert_eq(t2.cols, 2);
+    assert_eq(t2.len, 8);
+
+    let t3 = tensor_new(2, 2);
+    assert_eq(t3.len, 4);
+    print("  test_tensor_shape: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_tensor_zeros();
+    test_tensor_full();
+    test_tensor_from_values();
+    test_tensor_get_set();
+    test_tensor_shape();
+    print("[OK] 129_tensor_opcode_create");
+    0
+}

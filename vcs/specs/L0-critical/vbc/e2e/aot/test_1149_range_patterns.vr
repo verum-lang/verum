@@ -1,0 +1,92 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: match, range-pattern, pattern-matching
+// @description: Test range patterns in match arms
+
+fn classify_number(n: Int) -> Int {
+    match n {
+        0 => 0,
+        1..10 => 1,
+        10..100 => 2,
+        _ => 3,
+    }
+}
+
+fn test_range_match() -> Int {
+    if classify_number(0) != 0 {
+        print(f"FAIL range(0): {classify_number(0)}");
+        return 1;
+    }
+    if classify_number(5) != 1 {
+        print(f"FAIL range(5): {classify_number(5)}");
+        return 1;
+    }
+    if classify_number(9) != 1 {
+        print(f"FAIL range(9): {classify_number(9)}");
+        return 1;
+    }
+    if classify_number(50) != 2 {
+        print(f"FAIL range(50): {classify_number(50)}");
+        return 1;
+    }
+    if classify_number(999) != 3 {
+        print(f"FAIL range(999): {classify_number(999)}");
+        return 1;
+    }
+    print("  range_match: OK");
+    0
+}
+
+fn grade_score(score: Int) -> Text {
+    match score {
+        90..=100 => "A",
+        80..90 => "B",
+        70..80 => "C",
+        60..70 => "D",
+        _ => "F",
+    }
+}
+
+fn test_grade_ranges() -> Int {
+    if grade_score(95) != "A" {
+        print(f"FAIL grade(95): {grade_score(95)}");
+        return 1;
+    }
+    if grade_score(100) != "A" {
+        print(f"FAIL grade(100): {grade_score(100)}");
+        return 1;
+    }
+    if grade_score(85) != "B" {
+        print(f"FAIL grade(85): {grade_score(85)}");
+        return 1;
+    }
+    if grade_score(72) != "C" {
+        print(f"FAIL grade(72): {grade_score(72)}");
+        return 1;
+    }
+    if grade_score(65) != "D" {
+        print(f"FAIL grade(65): {grade_score(65)}");
+        return 1;
+    }
+    if grade_score(30) != "F" {
+        print(f"FAIL grade(30): {grade_score(30)}");
+        return 1;
+    }
+    print("  grade_ranges: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Range Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_range_match();
+    failures = failures + test_grade_ranges();
+
+    if failures == 0 {
+        print("All range pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

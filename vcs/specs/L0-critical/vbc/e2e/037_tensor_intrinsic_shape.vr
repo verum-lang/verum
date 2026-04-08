@@ -1,0 +1,716 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, shape
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: shape manipulation operations through VBC interpreter.
+// Slice, permute/transpose, gather, concat, stack, split, flatten.
+// All using flat struct arrays with pure scalar arithmetic.
+
+// ============================================================================
+// 8-element flat array
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// 16-element flat array
+// ============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// ============================================================================
+// 4-element array (for small results)
+// ============================================================================
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn arr4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+// ============================================================================
+// Slice: extract sub-array from arr16[start..start+len] -> arr8
+// ============================================================================
+
+fn slice_16_to_8(src: Arr16, start: Int, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr16_get(src, start + i));
+        i = i + 1;
+    }
+    out
+}
+
+// Slice within arr8: extract sub-array arr8[start..start+len] -> arr8
+fn slice_8(src: Arr8, start: Int, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(src, start + i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Permute / Transpose: swap row/col indexing on 2D data
+// Data in arr16 interpreted as rows x cols (row-major)
+// Transpose: swap to cols x rows
+// ============================================================================
+
+fn transpose_2d(src: Arr16, rows: Int, cols: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut r = 0;
+    while r < rows {
+        let mut c = 0;
+        while c < cols {
+            out = arr16_set(out, c * rows + r, arr16_get(src, r * cols + c));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    out
+}
+
+// Permute a 1D array by a permutation index array
+// out[i] = src[perm[i]]
+fn permute_by_index(src: Arr8, perm: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(src, arr8_get(perm, i)));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Gather: index array by another array of indices
+// out[i] = data[indices[i]]
+// ============================================================================
+
+fn gather_16(data: Arr16, indices: Arr8, num_indices: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < num_indices {
+        out = arr8_set(out, i, arr16_get(data, arr8_get(indices, i)));
+        i = i + 1;
+    }
+    out
+}
+
+fn gather_8(data: Arr8, indices: Arr4, num_indices: Int) -> Arr4 {
+    Arr4 {
+        e0: if num_indices > 0 { arr8_get(data, arr4_get(indices, 0)) } else { 0 },
+        e1: if num_indices > 1 { arr8_get(data, arr4_get(indices, 1)) } else { 0 },
+        e2: if num_indices > 2 { arr8_get(data, arr4_get(indices, 2)) } else { 0 },
+        e3: if num_indices > 3 { arr8_get(data, arr4_get(indices, 3)) } else { 0 }
+    }
+}
+
+// ============================================================================
+// Concat: join two arr8 arrays -> arr16
+// ============================================================================
+
+fn concat_8_8(a: Arr8, a_len: Int, b: Arr8, b_len: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < a_len {
+        out = arr16_set(out, i, arr8_get(a, i));
+        i = i + 1;
+    }
+    i = 0;
+    while i < b_len {
+        out = arr16_set(out, a_len + i, arr8_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Stack: interleave two arr8 arrays element by element -> arr16
+// out = [a[0], b[0], a[1], b[1], ...]
+// ============================================================================
+
+fn stack_interleave(a: Arr8, b: Arr8, len: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr16_set(out, i * 2, arr8_get(a, i));
+        out = arr16_set(out, i * 2 + 1, arr8_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+// Stack as rows: a becomes row 0, b becomes row 1 in a 2 x len matrix
+fn stack_rows(a: Arr8, b: Arr8, len: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr16_set(out, i, arr8_get(a, i));
+        out = arr16_set(out, len + i, arr8_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Split: divide arr16 into two halves -> two arr8
+// Returns first half; caller gets second half separately
+// ============================================================================
+
+fn split_first_half(src: Arr16, total_len: Int) -> Arr8 {
+    let half = total_len / 2;
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < half {
+        out = arr8_set(out, i, arr16_get(src, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn split_second_half(src: Arr16, total_len: Int) -> Arr8 {
+    let half = total_len / 2;
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < total_len - half {
+        out = arr8_set(out, i, arr16_get(src, half + i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Flatten: convert 2D row/col indexing to 1D
+// Given arr16 as rows x cols, flatten is identity (already row-major)
+// But we verify the indexing mapping explicitly
+// ============================================================================
+
+fn flatten_index(row: Int, col: Int, num_cols: Int) -> Int {
+    row * num_cols + col
+}
+
+fn unflatten_row(flat_idx: Int, num_cols: Int) -> Int {
+    flat_idx / num_cols
+}
+
+fn unflatten_col(flat_idx: Int, num_cols: Int) -> Int {
+    flat_idx - (flat_idx / num_cols) * num_cols
+}
+
+// ============================================================================
+// Reverse: reverse first `len` elements of arr8
+// ============================================================================
+
+fn reverse_8(src: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(src, len - 1 - i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Tests: Slice
+// ============================================================================
+
+fn test_slice_from_16() {
+    let src = Arr16 {
+        e0: 10, e1: 20, e2: 30, e3: 40,
+        e4: 50, e5: 60, e6: 70, e7: 80,
+        e8: 90, e9: 100, e10: 110, e11: 120,
+        e12: 130, e13: 140, e14: 150, e15: 160
+    };
+
+    // Slice [2..6)
+    let s = slice_16_to_8(src, 2, 4);
+    assert_eq(arr8_get(s, 0), 30);
+    assert_eq(arr8_get(s, 1), 40);
+    assert_eq(arr8_get(s, 2), 50);
+    assert_eq(arr8_get(s, 3), 60);
+
+    // Slice from the end
+    let s2 = slice_16_to_8(src, 12, 4);
+    assert_eq(arr8_get(s2, 0), 130);
+    assert_eq(arr8_get(s2, 1), 140);
+    assert_eq(arr8_get(s2, 2), 150);
+    assert_eq(arr8_get(s2, 3), 160);
+
+    // Slice of length 1
+    let s3 = slice_16_to_8(src, 7, 1);
+    assert_eq(arr8_get(s3, 0), 80);
+}
+
+fn test_slice_within_8() {
+    let src = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+
+    // Slice [3..6)
+    let s = slice_8(src, 3, 3);
+    assert_eq(arr8_get(s, 0), 4);
+    assert_eq(arr8_get(s, 1), 5);
+    assert_eq(arr8_get(s, 2), 6);
+
+    // Full slice
+    let s2 = slice_8(src, 0, 8);
+    assert_eq(arr8_get(s2, 0), 1);
+    assert_eq(arr8_get(s2, 7), 8);
+}
+
+// ============================================================================
+// Tests: Transpose / Permute
+// ============================================================================
+
+fn test_transpose_2x4() {
+    // 2x4 matrix stored in arr16:
+    // Row 0: [1, 2, 3, 4]
+    // Row 1: [5, 6, 7, 8]
+    let m = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4,
+        e4: 5, e5: 6, e6: 7, e7: 8,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    // Transpose to 4x2:
+    // Col 0 of original -> Row 0 of result: [1, 5]
+    // Col 1 -> Row 1: [2, 6]
+    // Col 2 -> Row 2: [3, 7]
+    // Col 3 -> Row 3: [4, 8]
+    let t = transpose_2d(m, 2, 4);
+    assert_eq(arr16_get(t, 0), 1); assert_eq(arr16_get(t, 1), 5);
+    assert_eq(arr16_get(t, 2), 2); assert_eq(arr16_get(t, 3), 6);
+    assert_eq(arr16_get(t, 4), 3); assert_eq(arr16_get(t, 5), 7);
+    assert_eq(arr16_get(t, 6), 4); assert_eq(arr16_get(t, 7), 8);
+}
+
+fn test_transpose_3x3() {
+    // 3x3 matrix:
+    // [1 2 3; 4 5 6; 7 8 9]
+    let m = Arr16 {
+        e0: 1, e1: 2, e2: 3,
+        e3: 4, e4: 5, e5: 6,
+        e6: 7, e7: 8, e8: 9,
+        e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let t = transpose_2d(m, 3, 3);
+    // [1 4 7; 2 5 8; 3 6 9]
+    assert_eq(arr16_get(t, 0), 1); assert_eq(arr16_get(t, 1), 4); assert_eq(arr16_get(t, 2), 7);
+    assert_eq(arr16_get(t, 3), 2); assert_eq(arr16_get(t, 4), 5); assert_eq(arr16_get(t, 5), 8);
+    assert_eq(arr16_get(t, 6), 3); assert_eq(arr16_get(t, 7), 6); assert_eq(arr16_get(t, 8), 9);
+
+    // Double transpose = original
+    let tt = transpose_2d(t, 3, 3);
+    assert_eq(arr16_get(tt, 0), 1); assert_eq(arr16_get(tt, 1), 2); assert_eq(arr16_get(tt, 2), 3);
+    assert_eq(arr16_get(tt, 3), 4); assert_eq(arr16_get(tt, 4), 5); assert_eq(arr16_get(tt, 5), 6);
+    assert_eq(arr16_get(tt, 6), 7); assert_eq(arr16_get(tt, 7), 8); assert_eq(arr16_get(tt, 8), 9);
+}
+
+fn test_permute_by_index() {
+    let data = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+    // Reverse permutation: [7, 6, 5, 4, 3, 2, 1, 0]
+    let perm = Arr8 { e0: 7, e1: 6, e2: 5, e3: 4, e4: 3, e5: 2, e6: 1, e7: 0 };
+    let out = permute_by_index(data, perm, 8);
+    assert_eq(arr8_get(out, 0), 80);
+    assert_eq(arr8_get(out, 1), 70);
+    assert_eq(arr8_get(out, 2), 60);
+    assert_eq(arr8_get(out, 3), 50);
+    assert_eq(arr8_get(out, 4), 40);
+    assert_eq(arr8_get(out, 5), 30);
+    assert_eq(arr8_get(out, 6), 20);
+    assert_eq(arr8_get(out, 7), 10);
+
+    // Shift permutation: [1, 2, 3, 4, 5, 6, 7, 0]
+    let shift = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 0 };
+    let out2 = permute_by_index(data, shift, 8);
+    assert_eq(arr8_get(out2, 0), 20);
+    assert_eq(arr8_get(out2, 7), 10);
+}
+
+// ============================================================================
+// Tests: Gather
+// ============================================================================
+
+fn test_gather_from_16() {
+    let data = Arr16 {
+        e0: 100, e1: 200, e2: 300, e3: 400,
+        e4: 500, e5: 600, e6: 700, e7: 800,
+        e8: 900, e9: 1000, e10: 1100, e11: 1200,
+        e12: 1300, e13: 1400, e14: 1500, e15: 1600
+    };
+    // Gather elements at indices [3, 7, 11, 15, 0]
+    let indices = Arr8 { e0: 3, e1: 7, e2: 11, e3: 15, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = gather_16(data, indices, 5);
+    assert_eq(arr8_get(out, 0), 400);
+    assert_eq(arr8_get(out, 1), 800);
+    assert_eq(arr8_get(out, 2), 1200);
+    assert_eq(arr8_get(out, 3), 1600);
+    assert_eq(arr8_get(out, 4), 100);
+}
+
+fn test_gather_from_8() {
+    let data = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+    // Gather specific indices
+    let indices = Arr4 { e0: 5, e1: 2, e2: 7, e3: 0 };
+    let out = gather_8(data, indices, 4);
+    assert_eq(arr4_get(out, 0), 60);
+    assert_eq(arr4_get(out, 1), 30);
+    assert_eq(arr4_get(out, 2), 80);
+    assert_eq(arr4_get(out, 3), 10);
+
+    // Gather with duplicates
+    let dup_indices = Arr4 { e0: 3, e1: 3, e2: 3, e3: 3 };
+    let out2 = gather_8(data, dup_indices, 4);
+    assert_eq(arr4_get(out2, 0), 40);
+    assert_eq(arr4_get(out2, 1), 40);
+    assert_eq(arr4_get(out2, 2), 40);
+    assert_eq(arr4_get(out2, 3), 40);
+}
+
+// ============================================================================
+// Tests: Concat
+// ============================================================================
+
+fn test_concat_full() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let b = Arr8 { e0: 9, e1: 10, e2: 11, e3: 12, e4: 13, e5: 14, e6: 15, e7: 16 };
+    let c = concat_8_8(a, 8, b, 8);
+    assert_eq(arr16_get(c, 0), 1);
+    assert_eq(arr16_get(c, 7), 8);
+    assert_eq(arr16_get(c, 8), 9);
+    assert_eq(arr16_get(c, 15), 16);
+}
+
+fn test_concat_partial() {
+    let a = Arr8 { e0: 10, e1: 20, e2: 30, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 40, e1: 50, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let c = concat_8_8(a, 3, b, 2);
+    assert_eq(arr16_get(c, 0), 10);
+    assert_eq(arr16_get(c, 1), 20);
+    assert_eq(arr16_get(c, 2), 30);
+    assert_eq(arr16_get(c, 3), 40);
+    assert_eq(arr16_get(c, 4), 50);
+}
+
+// ============================================================================
+// Tests: Stack
+// ============================================================================
+
+fn test_stack_interleave() {
+    let a = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 2, e1: 4, e2: 6, e3: 8, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let s = stack_interleave(a, b, 4);
+    // [1, 2, 3, 4, 5, 6, 7, 8]
+    assert_eq(arr16_get(s, 0), 1);
+    assert_eq(arr16_get(s, 1), 2);
+    assert_eq(arr16_get(s, 2), 3);
+    assert_eq(arr16_get(s, 3), 4);
+    assert_eq(arr16_get(s, 4), 5);
+    assert_eq(arr16_get(s, 5), 6);
+    assert_eq(arr16_get(s, 6), 7);
+    assert_eq(arr16_get(s, 7), 8);
+}
+
+fn test_stack_rows() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 5, e1: 6, e2: 7, e3: 8, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let s = stack_rows(a, b, 4);
+    // 2x4 matrix: row 0 = [1,2,3,4], row 1 = [5,6,7,8]
+    assert_eq(arr16_get(s, 0), 1);
+    assert_eq(arr16_get(s, 1), 2);
+    assert_eq(arr16_get(s, 2), 3);
+    assert_eq(arr16_get(s, 3), 4);
+    assert_eq(arr16_get(s, 4), 5);
+    assert_eq(arr16_get(s, 5), 6);
+    assert_eq(arr16_get(s, 6), 7);
+    assert_eq(arr16_get(s, 7), 8);
+}
+
+// ============================================================================
+// Tests: Split
+// ============================================================================
+
+fn test_split_even() {
+    let src = Arr16 {
+        e0: 10, e1: 20, e2: 30, e3: 40,
+        e4: 50, e5: 60, e6: 70, e7: 80,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let first = split_first_half(src, 8);
+    let second = split_second_half(src, 8);
+
+    assert_eq(arr8_get(first, 0), 10);
+    assert_eq(arr8_get(first, 1), 20);
+    assert_eq(arr8_get(first, 2), 30);
+    assert_eq(arr8_get(first, 3), 40);
+
+    assert_eq(arr8_get(second, 0), 50);
+    assert_eq(arr8_get(second, 1), 60);
+    assert_eq(arr8_get(second, 2), 70);
+    assert_eq(arr8_get(second, 3), 80);
+}
+
+fn test_split_odd() {
+    // 6 elements: split into 3 + 3
+    let src = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6,
+        e6: 0, e7: 0, e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let first = split_first_half(src, 6);
+    let second = split_second_half(src, 6);
+
+    assert_eq(arr8_get(first, 0), 1);
+    assert_eq(arr8_get(first, 1), 2);
+    assert_eq(arr8_get(first, 2), 3);
+
+    assert_eq(arr8_get(second, 0), 4);
+    assert_eq(arr8_get(second, 1), 5);
+    assert_eq(arr8_get(second, 2), 6);
+}
+
+fn test_split_and_concat_roundtrip() {
+    let src = Arr16 {
+        e0: 11, e1: 22, e2: 33, e3: 44,
+        e4: 55, e5: 66, e6: 77, e7: 88,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let first = split_first_half(src, 8);
+    let second = split_second_half(src, 8);
+    let rejoined = concat_8_8(first, 4, second, 4);
+
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(arr16_get(rejoined, i), arr16_get(src, i));
+        i = i + 1;
+    }
+}
+
+// ============================================================================
+// Tests: Flatten / unflatten indexing
+// ============================================================================
+
+fn test_flatten_index() {
+    // 4x4 matrix
+    assert_eq(flatten_index(0, 0, 4), 0);
+    assert_eq(flatten_index(0, 3, 4), 3);
+    assert_eq(flatten_index(1, 0, 4), 4);
+    assert_eq(flatten_index(2, 1, 4), 9);
+    assert_eq(flatten_index(3, 3, 4), 15);
+
+    // 3x5 matrix
+    assert_eq(flatten_index(0, 0, 5), 0);
+    assert_eq(flatten_index(1, 2, 5), 7);
+    assert_eq(flatten_index(2, 4, 5), 14);
+}
+
+fn test_unflatten_index() {
+    // 4x4 matrix
+    assert_eq(unflatten_row(0, 4), 0);
+    assert_eq(unflatten_col(0, 4), 0);
+    assert_eq(unflatten_row(5, 4), 1);
+    assert_eq(unflatten_col(5, 4), 1);
+    assert_eq(unflatten_row(11, 4), 2);
+    assert_eq(unflatten_col(11, 4), 3);
+    assert_eq(unflatten_row(15, 4), 3);
+    assert_eq(unflatten_col(15, 4), 3);
+}
+
+fn test_flatten_roundtrip() {
+    // For every (row, col) in a 4x3 matrix, flatten then unflatten = original
+    let mut r = 0;
+    while r < 4 {
+        let mut c = 0;
+        while c < 3 {
+            let flat = flatten_index(r, c, 3);
+            assert_eq(unflatten_row(flat, 3), r);
+            assert_eq(unflatten_col(flat, 3), c);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+}
+
+// ============================================================================
+// Tests: Reverse
+// ============================================================================
+
+fn test_reverse() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let r = reverse_8(a, 8);
+    assert_eq(arr8_get(r, 0), 8);
+    assert_eq(arr8_get(r, 1), 7);
+    assert_eq(arr8_get(r, 2), 6);
+    assert_eq(arr8_get(r, 3), 5);
+    assert_eq(arr8_get(r, 4), 4);
+    assert_eq(arr8_get(r, 5), 3);
+    assert_eq(arr8_get(r, 6), 2);
+    assert_eq(arr8_get(r, 7), 1);
+
+    // Double reverse = original
+    let rr = reverse_8(r, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(arr8_get(rr, i), arr8_get(a, i));
+        i = i + 1;
+    }
+}
+
+fn test_reverse_partial() {
+    let a = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 0, e6: 0, e7: 0 };
+    let r = reverse_8(a, 5);
+    assert_eq(arr8_get(r, 0), 50);
+    assert_eq(arr8_get(r, 1), 40);
+    assert_eq(arr8_get(r, 2), 30);
+    assert_eq(arr8_get(r, 3), 20);
+    assert_eq(arr8_get(r, 4), 10);
+}
+
+// ============================================================================
+// Tests: combined shape operations
+// ============================================================================
+
+fn test_transpose_then_gather() {
+    // 3x3 matrix, transpose, then gather diagonal
+    let m = Arr16 {
+        e0: 1, e1: 2, e2: 3,
+        e3: 4, e4: 5, e5: 6,
+        e6: 7, e7: 8, e8: 9,
+        e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let t = transpose_2d(m, 3, 3);
+    // Diagonal of transposed = diagonal of original (symmetric property of diagonal)
+    let diag_idx = Arr8 { e0: 0, e1: 4, e2: 8, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let diag = gather_16(t, diag_idx, 3);
+    assert_eq(arr8_get(diag, 0), 1);
+    assert_eq(arr8_get(diag, 1), 5);
+    assert_eq(arr8_get(diag, 2), 9);
+}
+
+fn test_slice_then_reverse() {
+    let src = Arr16 {
+        e0: 0, e1: 0, e2: 10, e3: 20, e4: 30, e5: 40, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let sliced = slice_16_to_8(src, 2, 4);
+    assert_eq(arr8_get(sliced, 0), 10);
+    assert_eq(arr8_get(sliced, 3), 40);
+
+    let rev = reverse_8(sliced, 4);
+    assert_eq(arr8_get(rev, 0), 40);
+    assert_eq(arr8_get(rev, 1), 30);
+    assert_eq(arr8_get(rev, 2), 20);
+    assert_eq(arr8_get(rev, 3), 10);
+}
+
+fn main() -> Int {
+    test_slice_from_16();
+    test_slice_within_8();
+    test_transpose_2x4();
+    test_transpose_3x3();
+    test_permute_by_index();
+    test_gather_from_16();
+    test_gather_from_8();
+    test_concat_full();
+    test_concat_partial();
+    test_stack_interleave();
+    test_stack_rows();
+    test_split_even();
+    test_split_odd();
+    test_split_and_concat_roundtrip();
+    test_flatten_index();
+    test_unflatten_index();
+    test_flatten_roundtrip();
+    test_reverse();
+    test_reverse_partial();
+    test_transpose_then_gather();
+    test_slice_then_reverse();
+    print("[OK] 037_tensor_intrinsic_shape");
+    0
+}

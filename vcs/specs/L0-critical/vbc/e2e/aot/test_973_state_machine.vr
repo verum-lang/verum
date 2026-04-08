@@ -1,0 +1,165 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: state-machine, variants, channels, spawn
+// @description: Full state machine with channels for communication
+
+type State is
+    Idle
+    | Processing(Int)
+    | Done(Int)
+    | Error(Text);
+
+fn state_name(s: &State) -> Text {
+    match s {
+        Idle => "idle",
+        Processing(_) => "processing",
+        Done(_) => "done",
+        Error(_) => "error",
+    }
+}
+
+fn transition(s: State, input: Int) -> State {
+    match s {
+        Idle => {
+            if input > 0 { Processing(input) }
+            else if input == 0 { Error("zero input") }
+            else { Error("negative input") }
+        }
+        Processing(val) => {
+            if input == 0 { Done(val) }
+            else { Processing(val + input) }
+        }
+        Done(val) => {
+            if input > 0 { Processing(input) }
+            else { Done(val) }
+        }
+        Error(_) => {
+            if input > 0 { Processing(input) }
+            else { Error("still in error") }
+        }
+    }
+}
+
+fn test_basic_transitions() -> Int {
+    let s0 = Idle;
+    let s1 = transition(s0, 5);
+    let name = state_name(&s1);
+    if name != "processing" {
+        print(f"FAIL basic: expected processing, got {name}");
+        return 1;
+    }
+    let s2 = transition(s1, 10);
+    let s3 = transition(s2, 0);
+    let final_val = match s3 { Done(v) => v, _ => -1 };
+    if final_val != 15 {
+        print(f"FAIL basic done: expected 15, got {final_val}");
+        return 1;
+    }
+    print("  basic_transitions: OK");
+    0
+}
+
+fn test_error_transition() -> Int {
+    let s0 = Idle;
+    let s1 = transition(s0, 0);
+    let is_err = match s1 { Error(_) => true, _ => false };
+    if !is_err {
+        print("FAIL error: expected Error state");
+        return 1;
+    }
+    let s2 = transition(s1, 42);
+    let name = state_name(&s2);
+    if name != "processing" {
+        print(f"FAIL recovery: expected processing, got {name}");
+        return 1;
+    }
+    print("  error_transition: OK");
+    0
+}
+
+fn run_machine(inputs: &List<Int>) -> Int {
+    let mut state = Idle;
+    let mut i = 0;
+    while i < inputs.len() {
+        state = transition(state, inputs[i]);
+        i = i + 1;
+    }
+    match state { Done(v) => v, Processing(v) => v, _ => -1 }
+}
+
+fn test_full_cycle() -> Int {
+    let mut inputs = List.new();
+    inputs.push(10);
+    inputs.push(20);
+    inputs.push(30);
+    inputs.push(0);
+    let result = run_machine(&inputs);
+    if result != 60 {
+        print(f"FAIL full_cycle: expected 60, got {result}");
+        return 1;
+    }
+    print("  full_cycle: OK");
+    0
+}
+
+fn test_spawn_machine() -> Int {
+    let cmd_ch = Channel.new(8);
+    let result_ch = Channel.new(4);
+
+    let worker = spawn {
+        let c1 = match cmd_ch.recv() { Some(x) => x, None => 0 };
+        let c2 = match cmd_ch.recv() { Some(x) => x, None => 0 };
+        let c3 = match cmd_ch.recv() { Some(x) => x, None => 0 };
+        // c1=5, c2=15, c3=25, sum=45
+        result_ch.send(c1 + c2 + c3);
+        0
+    };
+
+    cmd_ch.send(5);
+    cmd_ch.send(15);
+    cmd_ch.send(25);
+
+    let result = match result_ch.recv() { Some(x) => x, None => 0 };
+    worker.await;
+
+    if result != 45 {
+        print(f"FAIL spawn_machine: expected 45, got {result}");
+        return 1;
+    }
+    print("  spawn_machine: OK");
+    0
+}
+
+fn test_restarts() -> Int {
+    let mut inputs = List.new();
+    inputs.push(10);
+    inputs.push(20);
+    inputs.push(0);
+    inputs.push(5);
+    inputs.push(5);
+    let result = run_machine(&inputs);
+    if result != 10 {
+        print(f"FAIL restarts: expected 10, got {result}");
+        return 1;
+    }
+    print("  restarts: OK");
+    0
+}
+
+fn main() -> Int {
+    print("State Machine Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_transitions();
+    failures = failures + test_error_transition();
+    failures = failures + test_full_cycle();
+    failures = failures + test_spawn_machine();
+    failures = failures + test_restarts();
+
+    if failures == 0 {
+        print("All state machine tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

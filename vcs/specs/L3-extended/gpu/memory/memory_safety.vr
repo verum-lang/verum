@@ -1,0 +1,297 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @tags: gpu, memory, safety
+
+// This file tests that unsafe GPU memory operations are caught at compile time
+// or handled safely at runtime through the CBGR system.
+
+// Device lifetime tracking
+fn device_lifetime_valid() {
+    let device = Device.gpu(0);
+    let t: Tensor<f32, [100]> = Tensor.zeros().to(device);
+
+    // OK: device is still valid when t is used
+    let val = t[0];
+}
+
+// Tensor outlives kernel execution
+fn kernel_completion_safety() {
+    let device = Device.gpu(0);
+    let mut output: Tensor<f32, [100]> = Tensor.zeros().to(device);
+
+    @kernel(block_size = 256)
+    fn fill(data: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N {
+            data[idx] = idx as f32;
+        }
+    }
+
+// LAUNCH:     fill<<<auto, 256>>>(&mut output);
+
+    // Type system ensures synchronization before read
+    device.synchronize();
+    let val = output[0];  // Safe: kernel completed
+}
+
+// Reference validity across device boundaries
+fn cross_device_reference_safety() {
+    let device = Device.gpu(0);
+    let host_data: Tensor<f32, [100]> = Tensor.ones();
+
+    // Transfer creates new tensor, doesn't alias
+    let device_data = host_data.to(device);
+
+    // Modifying host doesn't affect device (they're copies)
+    // host_data[0] = 2.0;  // Would be a different buffer
+    // assert(device_data[0] == 1.0);  // Still 1.0
+}
+
+// Kernel reference constraints
+fn kernel_reference_constraints() {
+    let device = Device.gpu(0);
+    let a: Tensor<f32, [100]> = Tensor.ones().to(device);
+    let b: Tensor<f32, [100]> = Tensor.ones().to(device);
+    let mut c: Tensor<f32, [100]> = Tensor.zeros().to(device);
+
+    @kernel(block_size = 256)
+    fn add(
+        x: &Tensor<f32, [N]>,      // Immutable reference
+        y: &Tensor<f32, [N]>,      // Immutable reference
+        z: &mut Tensor<f32, [N]>   // Mutable reference
+    ) {
+        let idx = global_id().x;
+        if idx < N {
+            z[idx] = x[idx] + y[idx];
+        }
+    }
+
+    // OK: a and b are immutable, c is mutable
+// LAUNCH:     add<<<auto, 256>>>(&a, &b, &mut c);
+
+    // ERROR: Would be caught by borrow checker - can't have &a and &mut a
+// LAUNCH:     // add<<<auto, 256>>>(&a, &a, &mut a);
+}
+
+// Stream synchronization requirements
+fn stream_sync_requirements() {
+    let device = Device.gpu(0);
+    let stream1 = Stream.new(device);
+    let stream2 = Stream.new(device);
+
+    let mut shared: Tensor<f32, [100]> = Tensor.zeros().to(device);
+
+    @kernel(block_size = 256)
+    fn write_kernel(data: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N {
+            data[idx] = 1.0;
+        }
+    }
+
+    @kernel(block_size = 256)
+    fn read_kernel(data: &Tensor<f32, [N]>, out: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N {
+            out[idx] = data[idx] * 2.0;
+        }
+    }
+
+    // Launch on stream1
+// LAUNCH:     write_kernel<<<auto, 256, stream1>>>(&mut shared);
+
+    // Need event to synchronize between streams
+    let event = Event.new(device);
+    stream1.record(event);
+    stream2.wait(event);
+
+    let mut output: Tensor<f32, [100]> = Tensor.zeros().to(device);
+// LAUNCH:     read_kernel<<<auto, 256, stream2>>>(&shared, &mut output);
+
+    // Type system or runtime ensures proper ordering
+}
+
+// Bounds checking
+fn bounds_checking() {
+    let device = Device.gpu(0);
+    let t2: Tensor<f32, [100]> = Tensor.ones().to(device);
+
+    // Compile-time bounds check for constant indices
+    let val = t2[50];  // OK
+    // let oob = t2[100];  // ERROR: Index out of bounds (caught at compile time)
+
+    // Runtime bounds check for dynamic indices
+    fn access_dynamic(t: &Tensor<f32, [100]>, idx: Int) -> f32 {
+        // Will panic at runtime if idx >= 100
+        t[idx]
+    }
+
+    // Safe dynamic access
+    fn safe_access(t: &Tensor<f32, [100]>, idx: Int) -> Maybe<f32> {
+        t.get(idx)
+    }
+
+    let safe_val = safe_access(&t2, 50);  // Some(1.0)
+    let safe_oob = safe_access(&t2, 100); // None
+}
+
+// Memory pool safety
+fn memory_pool_safety() {
+    let device = Device.gpu(0);
+    let pool = MemoryPool.new(device, capacity: 1024 * 1024);
+
+    let tensor_a: Tensor<f32, [1000]> = pool.allocate();
+
+    // Pool tracks allocations
+    assert(pool.allocated_bytes() >= 4000);
+
+    // Release back to pool
+    pool.release(tensor_a);
+
+    // tensor_a is now invalid (consumed by release)
+    // let val = tensor_a[0];  // ERROR: Use after release
+
+    // Can allocate new tensor from pool
+    let tensor_b: Tensor<f32, [1000]> = pool.allocate();
+}
+
+// Unified memory coherence
+fn unified_memory_coherence() {
+    let device = Device.gpu(0);
+    let unified: UnifiedTensor<f32, [100]> = UnifiedTensor.new(Tensor.zeros());
+
+    // CPU write
+    unified[0] = 42.0;
+
+    @kernel(block_size = 256)
+    fn check_kernel(data: &UnifiedTensor<f32, [N]>, result: &mut bool) {
+        if global_id().x == 0 {
+            // GPU sees CPU write (after implicit synchronization)
+            *result = data[0] == 42.0;
+        }
+    }
+
+    let mut ok: bool = false;
+// DEVICE: // LAUNCH:     check_kernel<<<1, 256>>>(&unified, &mut ok on device);
+    device.synchronize();
+
+    // Coherence is maintained by unified memory system
+}
+
+// Atomic operation type safety
+fn atomic_type_safety() {
+    let device = Device.gpu(0);
+
+    // Atomics only on supported types
+    let atomic_int: Tensor<i32, [1]> = tensor<1>i32{0}.to(device);
+    let atomic_uint: Tensor<u32, [1]> = tensor<1>u32{0}.to(device);
+    let atomic_float: Tensor<f32, [1]> = tensor<1>f32{0.0}.to(device);
+
+    @kernel(block_size = 256)
+    fn atomic_test(
+        i: &mut Tensor<i32, [1]>,
+        u: &mut Tensor<u32, [1]>,
+        f: &mut Tensor<f32, [1]>
+    ) {
+        atomic_add(&mut i[0], 1);
+        atomic_add(&mut u[0], 1);
+        atomic_add(&mut f[0], 1.0);
+
+        // Bitwise atomics only on integers
+        atomic_or(&mut u[0], 0xFF);
+        // atomic_or(&mut f[0], 0xFF);  // ERROR: Not available for floats
+
+        // CAS available for all
+        atomic_compare_exchange(&mut i[0], 0, 1);
+        atomic_compare_exchange(&mut f[0], 0.0, 1.0);
+    }
+}
+
+// Shared memory lifetime
+fn shared_memory_lifetime() {
+    @kernel(block_size = 256)
+    fn shared_lifetime_kernel(output: &mut Tensor<f32, [N]>) {
+        @shared let sdata: [f32; 256];
+
+        let tid = local_id().x;
+        let idx = global_id().x;
+
+        // Shared memory is valid within kernel
+        sdata[tid] = idx as f32;
+        barrier();
+
+        // Can read any laneps shared data
+        let neighbor = (tid + 1) % 256;
+        if idx < N {
+            output[idx] = sdata[neighbor];
+        }
+
+        // Shared memory is invalid after kernel ends
+    }
+
+    // Cannot return reference to shared memory
+    // fn bad_shared() -> &[f32; 256] {
+    //     @shared let sdata: [f32; 256];
+    //     &sdata  // ERROR: sdata doesn't live long enough
+    // }
+}
+
+// Device pointer validity
+fn device_pointer_validity() {
+    let device = Device.gpu(0);
+    let t3: Tensor<f32, [100]> = Tensor.ones().to(device);
+
+    // Get raw pointer (requires explicit unsafe or checked context)
+    let ptr: DevicePtr<f32> = t3.device_ptr();
+
+    // Pointer is tied to t3's lifetime
+    // drop(t3);
+    // let val = *ptr;  // ERROR: dangling pointer
+
+    // Safe API ensures pointer validity
+    t3.with_ptr(|ptr| {
+        // ptr is valid within this closure
+    });
+}
+
+// Multi-device memory consistency
+fn multi_device_consistency() {
+    let device0 = Device.gpu(0);
+    let device1 = Device.gpu_if_available(1).unwrap_or(device0);
+
+    if device0 != device1 {
+        device0.enable_peer_access(device1);
+
+        let on_dev0: Tensor<f32, [100]> = Tensor.ones().to(device0);
+
+        // Transfer maintains data consistency
+        let on_dev1 = on_dev0.to(device1);
+
+        // They are independent copies
+        // Modifications to one don't affect the other
+    }
+}
+
+// CBGR integration for GPU references
+fn cbgr_gpu_integration() {
+    let device = Device.gpu(0);
+
+    // CBGR-managed GPU tensor reference
+    let t4: &Tensor<f32, [100]> = &Tensor.ones().to(device);
+
+    // Reference checking works across GPU operations
+    fn use_ref(t: &Tensor<f32, [100]>) {
+        let val = t[0];
+    }
+
+    use_ref(t4);  // OK: reference is valid
+
+    // Mutable CBGR reference
+    let mut mutable: Tensor<f32, [100]> = Tensor.zeros().to(device);
+    let mref: &mut Tensor<f32, [100]> = &mut mutable;
+
+    mref[0] = 42.0;  // OK: exclusive access
+
+    // CBGR generation checks catch use-after-free
+}

@@ -1,0 +1,362 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, coin-change, dynamic-programming
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: coin change problem (minimum coins to make amount)
+
+// =============================================================================
+// Coin array (up to 6 coin denominations)
+// =============================================================================
+
+type Coins6 is { c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int };
+
+fn coins6_new() -> Coins6 {
+    Coins6 { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0 }
+}
+
+fn coins6_get(c: Coins6, i: Int) -> Int {
+    if i == 0 { c.c0 }
+    else if i == 1 { c.c1 }
+    else if i == 2 { c.c2 }
+    else if i == 3 { c.c3 }
+    else if i == 4 { c.c4 }
+    else if i == 5 { c.c5 }
+    else { 0 }
+}
+
+fn coins6_set(c: Coins6, i: Int, val: Int) -> Coins6 {
+    Coins6 {
+        c0: if i == 0 { val } else { c.c0 },
+        c1: if i == 1 { val } else { c.c1 },
+        c2: if i == 2 { val } else { c.c2 },
+        c3: if i == 3 { val } else { c.c3 },
+        c4: if i == 4 { val } else { c.c4 },
+        c5: if i == 5 { val } else { c.c5 }
+    }
+}
+
+// =============================================================================
+// DP array (amount up to 20)
+// =============================================================================
+
+type Dp21 is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int,
+    d7: Int, d8: Int, d9: Int, d10: Int, d11: Int, d12: Int, d13: Int,
+    d14: Int, d15: Int, d16: Int, d17: Int, d18: Int, d19: Int, d20: Int
+};
+
+fn dp21_new(val: Int) -> Dp21 {
+    Dp21 {
+        d0: val, d1: val, d2: val, d3: val, d4: val, d5: val, d6: val,
+        d7: val, d8: val, d9: val, d10: val, d11: val, d12: val, d13: val,
+        d14: val, d15: val, d16: val, d17: val, d18: val, d19: val, d20: val
+    }
+}
+
+fn dp21_get(d: Dp21, i: Int) -> Int {
+    if i == 0 { d.d0 }
+    else if i == 1 { d.d1 }
+    else if i == 2 { d.d2 }
+    else if i == 3 { d.d3 }
+    else if i == 4 { d.d4 }
+    else if i == 5 { d.d5 }
+    else if i == 6 { d.d6 }
+    else if i == 7 { d.d7 }
+    else if i == 8 { d.d8 }
+    else if i == 9 { d.d9 }
+    else if i == 10 { d.d10 }
+    else if i == 11 { d.d11 }
+    else if i == 12 { d.d12 }
+    else if i == 13 { d.d13 }
+    else if i == 14 { d.d14 }
+    else if i == 15 { d.d15 }
+    else if i == 16 { d.d16 }
+    else if i == 17 { d.d17 }
+    else if i == 18 { d.d18 }
+    else if i == 19 { d.d19 }
+    else if i == 20 { d.d20 }
+    else { 0 }
+}
+
+fn dp21_set(d: Dp21, i: Int, val: Int) -> Dp21 {
+    Dp21 {
+        d0: if i == 0 { val } else { d.d0 },
+        d1: if i == 1 { val } else { d.d1 },
+        d2: if i == 2 { val } else { d.d2 },
+        d3: if i == 3 { val } else { d.d3 },
+        d4: if i == 4 { val } else { d.d4 },
+        d5: if i == 5 { val } else { d.d5 },
+        d6: if i == 6 { val } else { d.d6 },
+        d7: if i == 7 { val } else { d.d7 },
+        d8: if i == 8 { val } else { d.d8 },
+        d9: if i == 9 { val } else { d.d9 },
+        d10: if i == 10 { val } else { d.d10 },
+        d11: if i == 11 { val } else { d.d11 },
+        d12: if i == 12 { val } else { d.d12 },
+        d13: if i == 13 { val } else { d.d13 },
+        d14: if i == 14 { val } else { d.d14 },
+        d15: if i == 15 { val } else { d.d15 },
+        d16: if i == 16 { val } else { d.d16 },
+        d17: if i == 17 { val } else { d.d17 },
+        d18: if i == 18 { val } else { d.d18 },
+        d19: if i == 19 { val } else { d.d19 },
+        d20: if i == 20 { val } else { d.d20 }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn min2(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+// Use a large sentinel for "infinity" (impossible)
+fn inf() -> Int {
+    999999
+}
+
+// =============================================================================
+// Minimum coins to make amount (1D DP)
+// coins: denominations, num_coins: number of denominations, amount: target
+// Returns minimum number of coins, or -1 if impossible
+// =============================================================================
+
+fn min_coins(coins: Coins6, num_coins: Int, amount: Int) -> Int {
+    if amount == 0 {
+        return 0;
+    }
+    // dp[i] = minimum coins to make amount i
+    let mut dp = dp21_new(inf());
+    dp = dp21_set(dp, 0, 0);
+
+    let mut a = 1;
+    while a <= amount {
+        let mut ci = 0;
+        while ci < num_coins {
+            let coin = coins6_get(coins, ci);
+            if coin <= a {
+                let prev = dp21_get(dp, a - coin);
+                if prev < inf() {
+                    dp = dp21_set(dp, a, min2(dp21_get(dp, a), prev + 1));
+                }
+            }
+            ci = ci + 1;
+        }
+        a = a + 1;
+    }
+
+    let result = dp21_get(dp, amount);
+    if result >= inf() { -1 } else { result }
+}
+
+// =============================================================================
+// Count number of ways to make amount (coin combinations)
+// =============================================================================
+
+fn count_ways(coins: Coins6, num_coins: Int, amount: Int) -> Int {
+    let mut dp = dp21_new(0);
+    dp = dp21_set(dp, 0, 1);
+
+    let mut ci = 0;
+    while ci < num_coins {
+        let coin = coins6_get(coins, ci);
+        let mut a = coin;
+        while a <= amount {
+            let curr = dp21_get(dp, a);
+            let from_prev = dp21_get(dp, a - coin);
+            dp = dp21_set(dp, a, curr + from_prev);
+            a = a + 1;
+        }
+        ci = ci + 1;
+    }
+
+    dp21_get(dp, amount)
+}
+
+// =============================================================================
+// Tests — Minimum coins
+// =============================================================================
+
+fn test_standard_coins() {
+    // US coins: 1, 5, 10
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 1);
+    coins = coins6_set(coins, 1, 5);
+    coins = coins6_set(coins, 2, 10);
+
+    assert_eq(min_coins(coins, 3, 0), 0);
+    assert_eq(min_coins(coins, 3, 1), 1);
+    assert_eq(min_coins(coins, 3, 5), 1);
+    assert_eq(min_coins(coins, 3, 6), 2);   // 5+1
+    assert_eq(min_coins(coins, 3, 10), 1);
+    assert_eq(min_coins(coins, 3, 11), 2);  // 10+1
+    assert_eq(min_coins(coins, 3, 15), 2);  // 10+5
+    assert_eq(min_coins(coins, 3, 20), 2);  // 10+10
+}
+
+fn test_greedy_fails() {
+    // Coins: 1, 3, 4
+    // For amount 6: greedy would pick 4+1+1=3 coins, but optimal is 3+3=2 coins
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 1);
+    coins = coins6_set(coins, 1, 3);
+    coins = coins6_set(coins, 2, 4);
+
+    assert_eq(min_coins(coins, 3, 6), 2);   // 3+3
+    assert_eq(min_coins(coins, 3, 8), 2);   // 4+4
+    assert_eq(min_coins(coins, 3, 9), 3);   // 3+3+3
+    assert_eq(min_coins(coins, 3, 12), 3);  // 4+4+4
+}
+
+fn test_single_denomination() {
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 3);
+
+    assert_eq(min_coins(coins, 1, 0), 0);
+    assert_eq(min_coins(coins, 1, 3), 1);
+    assert_eq(min_coins(coins, 1, 6), 2);
+    assert_eq(min_coins(coins, 1, 9), 3);
+    // Impossible amounts
+    assert_eq(min_coins(coins, 1, 1), -1);
+    assert_eq(min_coins(coins, 1, 2), -1);
+    assert_eq(min_coins(coins, 1, 4), -1);
+    assert_eq(min_coins(coins, 1, 5), -1);
+}
+
+fn test_impossible() {
+    // Coins: 3, 7
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 3);
+    coins = coins6_set(coins, 1, 7);
+
+    assert_eq(min_coins(coins, 2, 1), -1);
+    assert_eq(min_coins(coins, 2, 2), -1);
+    assert_eq(min_coins(coins, 2, 4), -1);
+    assert_eq(min_coins(coins, 2, 5), -1);
+    assert_eq(min_coins(coins, 2, 8), -1);
+    assert_eq(min_coins(coins, 2, 11), -1);
+    // Possible amounts
+    assert_eq(min_coins(coins, 2, 3), 1);
+    assert_eq(min_coins(coins, 2, 6), 2);
+    assert_eq(min_coins(coins, 2, 7), 1);
+    assert_eq(min_coins(coins, 2, 10), 2);  // 3+7
+}
+
+fn test_coin_1_always_possible() {
+    // With coin=1, any amount is possible
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 1);
+    coins = coins6_set(coins, 1, 7);
+
+    let mut a = 0;
+    while a <= 20 {
+        assert(min_coins(coins, 2, a) >= 0);
+        a = a + 1;
+    }
+}
+
+fn test_large_coins() {
+    // Coins: 5, 7
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 5);
+    coins = coins6_set(coins, 1, 7);
+
+    assert_eq(min_coins(coins, 2, 12), 2);  // 5+7
+    assert_eq(min_coins(coins, 2, 14), 2);  // 7+7
+    assert_eq(min_coins(coins, 2, 15), 3);  // 5+5+5
+    assert_eq(min_coins(coins, 2, 17), 3);  // 5+5+7
+    assert_eq(min_coins(coins, 2, 19), 3);  // 5+7+7
+}
+
+// =============================================================================
+// Tests — Count ways
+// =============================================================================
+
+fn test_count_ways_basic() {
+    // Coins: 1, 2, 5
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 1);
+    coins = coins6_set(coins, 1, 2);
+    coins = coins6_set(coins, 2, 5);
+
+    assert_eq(count_ways(coins, 3, 0), 1);  // empty set
+    assert_eq(count_ways(coins, 3, 1), 1);  // {1}
+    assert_eq(count_ways(coins, 3, 2), 2);  // {1,1}, {2}
+    assert_eq(count_ways(coins, 3, 3), 2);  // {1,1,1}, {1,2}
+    assert_eq(count_ways(coins, 3, 4), 3);  // {1,1,1,1}, {1,1,2}, {2,2}
+    assert_eq(count_ways(coins, 3, 5), 4);  // {1,1,1,1,1}, {1,1,1,2}, {1,2,2}, {5}
+}
+
+fn test_count_ways_single_coin() {
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 1);
+    // Only one way to make any amount with just 1s
+    assert_eq(count_ways(coins, 1, 0), 1);
+    assert_eq(count_ways(coins, 1, 5), 1);
+    assert_eq(count_ways(coins, 1, 10), 1);
+}
+
+fn test_count_ways_two_coins() {
+    // Coins: 1, 2
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 1);
+    coins = coins6_set(coins, 1, 2);
+    // Ways to make n with {1,2}: floor(n/2)+1
+    assert_eq(count_ways(coins, 2, 1), 1);
+    assert_eq(count_ways(coins, 2, 2), 2);
+    assert_eq(count_ways(coins, 2, 3), 2);
+    assert_eq(count_ways(coins, 2, 4), 3);
+    assert_eq(count_ways(coins, 2, 5), 3);
+    assert_eq(count_ways(coins, 2, 6), 4);
+    assert_eq(count_ways(coins, 2, 10), 6);
+}
+
+fn test_count_ways_no_solution() {
+    // Coins: 3, 5 — amount 1 has 0 ways
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 3);
+    coins = coins6_set(coins, 1, 5);
+    assert_eq(count_ways(coins, 2, 1), 0);
+    assert_eq(count_ways(coins, 2, 2), 0);
+    assert_eq(count_ways(coins, 2, 4), 0);
+}
+
+fn test_monotonicity() {
+    // min_coins should be non-decreasing for consecutive amounts (with coin 1)
+    let mut coins = coins6_new();
+    coins = coins6_set(coins, 0, 1);
+    coins = coins6_set(coins, 1, 5);
+    coins = coins6_set(coins, 2, 10);
+
+    // min_coins with coin=1 never decreases by more than... actually it can:
+    // min_coins(9)=5 (5+1+1+1+1), min_coins(10)=1 (10). So not monotonic.
+    // But min_coins(a) <= min_coins(a-1) + 1 always holds (add one more coin=1)
+    let mut a = 1;
+    while a <= 20 {
+        let curr = min_coins(coins, 3, a);
+        let prev = min_coins(coins, 3, a - 1);
+        assert(curr <= prev + 1);
+        a = a + 1;
+    }
+}
+
+fn main() -> Int {
+    test_standard_coins();
+    test_greedy_fails();
+    test_single_denomination();
+    test_impossible();
+    test_coin_1_always_possible();
+    test_large_coins();
+    test_count_ways_basic();
+    test_count_ways_single_coin();
+    test_count_ways_two_coins();
+    test_count_ways_no_solution();
+    test_monotonicity();
+    print("[OK] 250_interp_coin_change");
+    0
+}

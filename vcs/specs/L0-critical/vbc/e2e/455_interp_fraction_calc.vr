@@ -1,0 +1,258 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, fraction, gcd, rational_arithmetic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Fraction calculator with GCD simplification.
+// Operations: add, sub, mul, div fractions, compare fractions.
+// Fractions stored as (numerator, denominator) pairs.
+
+type Frac is { num: Int, den: Int };
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = if a < 0 { 0 - a } else { a };
+    let mut y = if b < 0 { 0 - b } else { b };
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+fn frac_new(num: Int, den: Int) -> Frac {
+    // Normalize: denominator always positive, apply GCD reduction
+    let sign = if den < 0 { -1 } else { 1 };
+    let n = num * sign;
+    let d = den * sign;
+    let g = gcd(n, d);
+    if g == 0 {
+        Frac { num: 0, den: 1 }
+    } else {
+        Frac { num: n / g, den: d / g }
+    }
+}
+
+fn frac_add(a: Frac, b: Frac) -> Frac {
+    // a/b + c/d = (a*d + c*b) / (b*d)
+    frac_new(a.num * b.den + b.num * a.den, a.den * b.den)
+}
+
+fn frac_sub(a: Frac, b: Frac) -> Frac {
+    frac_new(a.num * b.den - b.num * a.den, a.den * b.den)
+}
+
+fn frac_mul(a: Frac, b: Frac) -> Frac {
+    frac_new(a.num * b.num, a.den * b.den)
+}
+
+fn frac_div(a: Frac, b: Frac) -> Frac {
+    frac_new(a.num * b.den, a.den * b.num)
+}
+
+// Compare a and b: returns -1 if a<b, 0 if equal, 1 if a>b
+fn frac_cmp(a: Frac, b: Frac) -> Int {
+    // a/b cmp c/d  <=>  a*d cmp c*b (assuming denominators positive)
+    let lhs = a.num * b.den;
+    let rhs = b.num * a.den;
+    if lhs < rhs { -1 } else if lhs == rhs { 0 } else { 1 }
+}
+
+fn test_gcd() {
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(0, 5), 5);
+    assert_eq(gcd(36, 48), 12);
+    assert_eq(gcd(1, 1000000), 1);
+    print("gcd: ok");
+}
+
+fn test_frac_simplification() {
+    // 6/4 -> 3/2
+    let f1 = frac_new(6, 4);
+    assert_eq(f1.num, 3);
+    assert_eq(f1.den, 2);
+
+    // 10/5 -> 2/1
+    let f2 = frac_new(10, 5);
+    assert_eq(f2.num, 2);
+    assert_eq(f2.den, 1);
+
+    // -3/6 -> -1/2
+    let f3 = frac_new(-3, 6);
+    assert_eq(f3.num, -1);
+    assert_eq(f3.den, 2);
+
+    // 3/-4 -> -3/4 (normalize sign to denominator)
+    let f4 = frac_new(3, -4);
+    assert_eq(f4.num, -3);
+    assert_eq(f4.den, 4);
+
+    // 0/7 -> 0/1 (GCD of 0 and 7 is 7... but gcd(0,7)=7 so 0/7/7=0/1)
+    // Actually gcd(0,7)=7, num=0/7=0, den=7/7=1
+    let f5 = frac_new(0, 7);
+    assert_eq(f5.num, 0);
+    assert_eq(f5.den, 1);
+
+    // 100/100 -> 1/1
+    let f6 = frac_new(100, 100);
+    assert_eq(f6.num, 1);
+    assert_eq(f6.den, 1);
+
+    print("frac_simplification: ok");
+}
+
+fn test_frac_addition() {
+    // 1/2 + 1/3 = 3/6 + 2/6 = 5/6
+    let a = frac_new(1, 2);
+    let b = frac_new(1, 3);
+    let s = frac_add(a, b);
+    assert_eq(s.num, 5);
+    assert_eq(s.den, 6);
+
+    // 1/4 + 3/4 = 4/4 = 1/1
+    let c = frac_new(1, 4);
+    let d = frac_new(3, 4);
+    let s2 = frac_add(c, d);
+    assert_eq(s2.num, 1);
+    assert_eq(s2.den, 1);
+
+    // 2/3 + 1/6 = 4/6 + 1/6 = 5/6
+    let e = frac_new(2, 3);
+    let f = frac_new(1, 6);
+    let s3 = frac_add(e, f);
+    assert_eq(s3.num, 5);
+    assert_eq(s3.den, 6);
+
+    // -1/4 + 3/8 = -2/8 + 3/8 = 1/8
+    let g = frac_new(-1, 4);
+    let h = frac_new(3, 8);
+    let s4 = frac_add(g, h);
+    assert_eq(s4.num, 1);
+    assert_eq(s4.den, 8);
+
+    print("frac_addition: ok");
+}
+
+fn test_frac_subtraction() {
+    // 3/4 - 1/4 = 2/4 = 1/2
+    let a = frac_new(3, 4);
+    let b = frac_new(1, 4);
+    let d = frac_sub(a, b);
+    assert_eq(d.num, 1);
+    assert_eq(d.den, 2);
+
+    // 1/2 - 2/3 = 3/6 - 4/6 = -1/6
+    let c = frac_new(1, 2);
+    let e = frac_new(2, 3);
+    let d2 = frac_sub(c, e);
+    assert_eq(d2.num, -1);
+    assert_eq(d2.den, 6);
+
+    // 5/6 - 1/4 = 10/12 - 3/12 = 7/12
+    let f = frac_new(5, 6);
+    let g = frac_new(1, 4);
+    let d3 = frac_sub(f, g);
+    assert_eq(d3.num, 7);
+    assert_eq(d3.den, 12);
+
+    print("frac_subtraction: ok");
+}
+
+fn test_frac_multiplication() {
+    // 2/3 * 3/4 = 6/12 = 1/2
+    let a = frac_new(2, 3);
+    let b = frac_new(3, 4);
+    let p = frac_mul(a, b);
+    assert_eq(p.num, 1);
+    assert_eq(p.den, 2);
+
+    // 5/6 * 6/5 = 30/30 = 1/1
+    let c = frac_new(5, 6);
+    let d = frac_new(6, 5);
+    let p2 = frac_mul(c, d);
+    assert_eq(p2.num, 1);
+    assert_eq(p2.den, 1);
+
+    // 3/8 * 4/9 = 12/72 = 1/6
+    let e = frac_new(3, 8);
+    let f = frac_new(4, 9);
+    let p3 = frac_mul(e, f);
+    assert_eq(p3.num, 1);
+    assert_eq(p3.den, 6);
+
+    // -2/5 * 5/4 = -10/20 = -1/2
+    let g = frac_new(-2, 5);
+    let h = frac_new(5, 4);
+    let p4 = frac_mul(g, h);
+    assert_eq(p4.num, -1);
+    assert_eq(p4.den, 2);
+
+    print("frac_multiplication: ok");
+}
+
+fn test_frac_division() {
+    // (2/3) / (4/9) = 2/3 * 9/4 = 18/12 = 3/2
+    let a = frac_new(2, 3);
+    let b = frac_new(4, 9);
+    let q = frac_div(a, b);
+    assert_eq(q.num, 3);
+    assert_eq(q.den, 2);
+
+    // (1/2) / (1/4) = 1/2 * 4/1 = 4/2 = 2/1
+    let c = frac_new(1, 2);
+    let d = frac_new(1, 4);
+    let q2 = frac_div(c, d);
+    assert_eq(q2.num, 2);
+    assert_eq(q2.den, 1);
+
+    // (3/5) / (6/10) = 3/5 * 10/6 = 30/30 = 1/1
+    let e = frac_new(3, 5);
+    let f = frac_new(6, 10);
+    let q3 = frac_div(e, f);
+    assert_eq(q3.num, 1);
+    assert_eq(q3.den, 1);
+
+    print("frac_division: ok");
+}
+
+fn test_frac_comparison() {
+    // 1/3 < 1/2 (2 < 3)
+    let a = frac_new(1, 3);
+    let b = frac_new(1, 2);
+    assert_eq(frac_cmp(a, b), -1);
+    assert_eq(frac_cmp(b, a), 1);
+    assert_eq(frac_cmp(a, a), 0);
+
+    // 2/4 == 3/6 (both = 1/2)
+    let c = frac_new(2, 4); // reduces to 1/2
+    let d = frac_new(3, 6); // reduces to 1/2
+    assert_eq(frac_cmp(c, d), 0);
+
+    // 7/8 > 5/6 ? 7*6=42 vs 5*8=40 -> 42>40 -> yes
+    let e = frac_new(7, 8);
+    let f = frac_new(5, 6);
+    assert_eq(frac_cmp(e, f), 1);
+
+    // -1/3 < 1/4 ? -1*4=-4 vs 1*3=3 -> -4<3 -> yes
+    let g = frac_new(-1, 3);
+    let h = frac_new(1, 4);
+    assert_eq(frac_cmp(g, h), -1);
+
+    print("frac_comparison: ok");
+}
+
+fn main() -> Int {
+    test_gcd();
+    test_frac_simplification();
+    test_frac_addition();
+    test_frac_subtraction();
+    test_frac_multiplication();
+    test_frac_division();
+    test_frac_comparison();
+    print("[OK] 455_interp_fraction_calc");
+    0
+}

@@ -1,0 +1,127 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, combinatorics, factorial, permutation, combination, catalan
+// @expected-exit: 0
+
+// Tests factorial, permutations, combinations, Pascal's triangle, and Catalan numbers.
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if (n <= 1) { 1 }
+    else { n * factorial(n - 1) }
+}
+
+fn permutations(n: Int, r: Int) -> Int {
+    // P(n, r) = n! / (n-r)!
+    let mut result = 1;
+    let mut i = 0;
+    while (i < r) {
+        result = result * (n - i);
+        i = i + 1;
+    }
+    result
+}
+
+fn combinations(n: Int, r: Int) -> Int {
+    // C(n, r) = P(n, r) / r!
+    // Use iterative to avoid overflow: C(n,r) = product(n-i, i=0..r-1) / r!
+    if (r > n) { 0 }
+    else {
+        // Use smaller r for efficiency
+        let rv = if (r > n - r) { n - r } else { r };
+        let mut result = 1;
+        let mut i = 0;
+        while (i < rv) {
+            result = result * (n - i);
+            result = result / (i + 1);
+            i = i + 1;
+        }
+        result
+    }
+}
+
+@allow(unbounded_recursion)
+fn catalan(n: Int) -> Int {
+    // C_n = C(2n, n) / (n + 1)
+    combinations(2 * n, n) / (n + 1)
+}
+
+fn main() -> Int {
+    // Test 1: Factorial base cases and small values
+    // 0! = 1, 1! = 1, 5! = 120, 7! = 5040
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(7), 5040);
+
+    // Test 2: Permutations
+    // P(5, 2) = 5*4 = 20
+    // P(5, 5) = 5! = 120
+    // P(10, 3) = 10*9*8 = 720
+    assert_eq(permutations(5, 2), 20);
+    assert_eq(permutations(5, 5), 120);
+    assert_eq(permutations(10, 3), 720);
+
+    // Test 3: Combinations
+    // C(5, 2) = 10, C(10, 3) = 120, C(6, 3) = 20
+    assert_eq(combinations(5, 2), 10);
+    assert_eq(combinations(10, 3), 120);
+    assert_eq(combinations(6, 3), 20);
+
+    // Test 4: Combination identities
+    // C(n, 0) = 1, C(n, n) = 1, C(n, 1) = n
+    assert_eq(combinations(10, 0), 1);
+    assert_eq(combinations(10, 10), 1);
+    assert_eq(combinations(10, 1), 10);
+
+    // Test 5: Symmetry: C(n, r) = C(n, n-r)
+    assert_eq(combinations(8, 3), combinations(8, 5));
+    assert_eq(combinations(10, 4), combinations(10, 6));
+
+    // Test 6: Pascal's triangle row
+    // Row 5: C(5,0), C(5,1), C(5,2), C(5,3), C(5,4), C(5,5) = 1, 5, 10, 10, 5, 1
+    let mut pascal_row = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut k = 0;
+    while (k <= 5) {
+        pascal_row[k] = combinations(5, k);
+        k = k + 1;
+    }
+    assert_eq(pascal_row[0], 1);
+    assert_eq(pascal_row[1], 5);
+    assert_eq(pascal_row[2], 10);
+    assert_eq(pascal_row[3], 10);
+    assert_eq(pascal_row[4], 5);
+    assert_eq(pascal_row[5], 1);
+
+    // Test 7: Pascal's identity: C(n, k) = C(n-1, k-1) + C(n-1, k)
+    // C(7, 3) = C(6, 2) + C(6, 3)
+    // 35 = 15 + 20
+    assert_eq(combinations(7, 3), combinations(6, 2) + combinations(6, 3));
+
+    // Test 8: Sum of row = 2^n
+    // Row 5 sum: 1+5+10+10+5+1 = 32 = 2^5
+    let mut row_sum = 0;
+    k = 0;
+    while (k <= 5) {
+        row_sum = row_sum + pascal_row[k];
+        k = k + 1;
+    }
+    assert_eq(row_sum, 32);
+
+    // Test 9: Catalan numbers
+    // C_0 = 1, C_1 = 1, C_2 = 2, C_3 = 5, C_4 = 14, C_5 = 42
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+
+    // Test 10: P(n, r) = C(n, r) * r!
+    // P(8, 3) = C(8, 3) * 3! = 56 * 6 = 336
+    assert_eq(permutations(8, 3), combinations(8, 3) * factorial(3));
+
+    print("Combinatorics: PASS");
+    0
+}

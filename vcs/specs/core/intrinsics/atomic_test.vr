@@ -1,0 +1,539 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/atomic_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, atomic, concurrency, memory-ordering, fence
+// @description: Comprehensive tests for atomic operation intrinsics.
+//
+// Coverage:
+// - Memory ordering enum: Relaxed, Acquire, Release, AcqRel, SeqCst
+// - Ordering constants: ORDERING_RELAXED through ORDERING_SEQ_CST
+// - Fence operations: atomic_fence, compiler_fence with all orderings
+// - VBC-specific function import verification
+// - Generic function import verification
+// - Compatibility alias verification
+//
+// Test Strategy:
+// - Test ordering enum values are distinct
+// - Test ordering constants have correct values
+// - Test fence operations don't crash
+// - Verify all function imports resolve correctly
+// =============================================================================
+
+module test.stdlib.intrinsics.atomic_test;
+
+mount core.intrinsics.atomic.{
+    // Memory ordering
+    MemoryOrder, Relaxed, Acquire, Release, AcqRel, SeqCst,
+    // Ordering constants
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL, ORDERING_SEQ_CST,
+    // Generic atomics
+    atomic_load, atomic_store, atomic_xchg,
+    atomic_cmpxchg, atomic_cmpxchg_weak,
+    atomic_add, atomic_sub, atomic_max, atomic_min,
+    atomic_umax, atomic_umin,
+    atomic_and, atomic_nand, atomic_or, atomic_xor,
+    // VBC-specific atomics
+    atomic_load_u32, atomic_store_u32, atomic_cas_u32,
+    atomic_load_u64, atomic_store_u64, atomic_cas_u64,
+    atomic_load_u8, atomic_load_u16,
+    atomic_store_u8, atomic_store_u16,
+    atomic_load_i32, atomic_store_i32, atomic_cas_i32,
+    atomic_fetch_add_u32, atomic_fetch_sub_u32,
+    atomic_fetch_add_u64, atomic_fetch_sub_u64,
+    atomic_fetch_add_u16,
+    atomic_fetch_and_u64, atomic_fetch_and_u16,
+    atomic_fetch_or_u64, atomic_fetch_xor_u64,
+    atomic_exchange_u32, atomic_exchange_u64, atomic_exchange_i32,
+    // Int helpers
+    atomic_load_int, atomic_store_int, atomic_cmpxchg_int, atomic_fetch_add_int,
+    // Compatibility aliases
+    atomic_compare_exchange_u32, atomic_compare_exchange_u64, atomic_compare_exchange_i32,
+    // Fences
+    atomic_fence, compiler_fence,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Memory Ordering Constants
+// =============================================================================
+
+@test
+fn test_ordering_constant_values() {
+    assert(ORDERING_RELAXED == (0 as UInt8));
+    assert(ORDERING_ACQUIRE == (1 as UInt8));
+    assert(ORDERING_RELEASE == (2 as UInt8));
+    assert(ORDERING_ACQ_REL == (3 as UInt8));
+    assert(ORDERING_SEQ_CST == (4 as UInt8));
+}
+
+@test
+fn test_ordering_constants_distinct() {
+    assert(ORDERING_RELAXED != ORDERING_ACQUIRE);
+    assert(ORDERING_ACQUIRE != ORDERING_RELEASE);
+    assert(ORDERING_RELEASE != ORDERING_ACQ_REL);
+    assert(ORDERING_ACQ_REL != ORDERING_SEQ_CST);
+    assert(ORDERING_RELAXED != ORDERING_SEQ_CST);
+}
+
+@test
+fn test_ordering_constants_type() {
+    let _: UInt8 = ORDERING_RELAXED;
+    let _: UInt8 = ORDERING_ACQUIRE;
+    let _: UInt8 = ORDERING_RELEASE;
+    let _: UInt8 = ORDERING_ACQ_REL;
+    let _: UInt8 = ORDERING_SEQ_CST;
+}
+
+// =============================================================================
+// Memory Ordering Enum — Variant Existence
+// =============================================================================
+
+@test
+fn test_ordering_enum_relaxed() {
+    let o: MemoryOrder = Relaxed;
+    match o {
+        Relaxed => {},
+        _ => panic("Expected Relaxed"),
+    }
+}
+
+@test
+fn test_ordering_enum_acquire() {
+    let o: MemoryOrder = Acquire;
+    match o {
+        Acquire => {},
+        _ => panic("Expected Acquire"),
+    }
+}
+
+@test
+fn test_ordering_enum_release() {
+    let o: MemoryOrder = Release;
+    match o {
+        Release => {},
+        _ => panic("Expected Release"),
+    }
+}
+
+@test
+fn test_ordering_enum_acqrel() {
+    let o: MemoryOrder = AcqRel;
+    match o {
+        AcqRel => {},
+        _ => panic("Expected AcqRel"),
+    }
+}
+
+@test
+fn test_ordering_enum_seqcst() {
+    let o: MemoryOrder = SeqCst;
+    match o {
+        SeqCst => {},
+        _ => panic("Expected SeqCst"),
+    }
+}
+
+@test
+fn test_ordering_enum_all_variants() {
+    let _: MemoryOrder = Relaxed;
+    let _: MemoryOrder = Acquire;
+    let _: MemoryOrder = Release;
+    let _: MemoryOrder = AcqRel;
+    let _: MemoryOrder = SeqCst;
+}
+
+// =============================================================================
+// Fences — atomic_fence
+// =============================================================================
+
+@test
+fn test_atomic_fence_acquire() {
+    atomic_fence(Acquire);
+}
+
+@test
+fn test_atomic_fence_release() {
+    atomic_fence(Release);
+}
+
+@test
+fn test_atomic_fence_acqrel() {
+    atomic_fence(AcqRel);
+}
+
+@test
+fn test_atomic_fence_seqcst() {
+    atomic_fence(SeqCst);
+}
+
+@test
+fn test_atomic_fence_loop() {
+    let mut i = 0;
+    while i < 5 {
+        atomic_fence(SeqCst);
+        i = i + 1;
+    }
+    assert(i == 5);
+}
+
+// =============================================================================
+// Fences — compiler_fence
+// =============================================================================
+
+@test
+fn test_compiler_fence_acquire() {
+    compiler_fence(Acquire);
+}
+
+@test
+fn test_compiler_fence_release() {
+    compiler_fence(Release);
+}
+
+@test
+fn test_compiler_fence_acqrel() {
+    compiler_fence(AcqRel);
+}
+
+@test
+fn test_compiler_fence_seqcst() {
+    compiler_fence(SeqCst);
+}
+
+@test
+fn test_compiler_fence_loop() {
+    let mut i = 0;
+    while i < 5 {
+        compiler_fence(SeqCst);
+        i = i + 1;
+    }
+    assert(i == 5);
+}
+
+// =============================================================================
+// Generic Atomic Imports
+// =============================================================================
+
+@test
+fn test_generic_atomic_imports() {
+    let _ = atomic_load;
+    let _ = atomic_store;
+    let _ = atomic_xchg;
+    let _ = atomic_cmpxchg;
+    let _ = atomic_cmpxchg_weak;
+}
+
+@test
+fn test_generic_arithmetic_imports() {
+    let _ = atomic_add;
+    let _ = atomic_sub;
+    let _ = atomic_max;
+    let _ = atomic_min;
+    let _ = atomic_umax;
+    let _ = atomic_umin;
+}
+
+@test
+fn test_generic_bitwise_imports() {
+    let _ = atomic_and;
+    let _ = atomic_nand;
+    let _ = atomic_or;
+    let _ = atomic_xor;
+}
+
+// =============================================================================
+// VBC-Specific Atomic Imports
+// =============================================================================
+
+@test
+fn test_vbc_load_store_imports() {
+    let _ = atomic_load_u8;
+    let _ = atomic_load_u16;
+    let _ = atomic_load_u32;
+    let _ = atomic_load_u64;
+    let _ = atomic_load_i32;
+    let _ = atomic_store_u8;
+    let _ = atomic_store_u16;
+    let _ = atomic_store_u32;
+    let _ = atomic_store_u64;
+    let _ = atomic_store_i32;
+}
+
+@test
+fn test_vbc_cas_imports() {
+    let _ = atomic_cas_u32;
+    let _ = atomic_cas_u64;
+    let _ = atomic_cas_i32;
+}
+
+@test
+fn test_vbc_fetch_add_sub_imports() {
+    let _ = atomic_fetch_add_u32;
+    let _ = atomic_fetch_sub_u32;
+    let _ = atomic_fetch_add_u64;
+    let _ = atomic_fetch_sub_u64;
+    let _ = atomic_fetch_add_u16;
+}
+
+@test
+fn test_vbc_fetch_bitwise_imports() {
+    let _ = atomic_fetch_and_u64;
+    let _ = atomic_fetch_and_u16;
+    let _ = atomic_fetch_or_u64;
+    let _ = atomic_fetch_xor_u64;
+}
+
+@test
+fn test_vbc_exchange_imports() {
+    let _ = atomic_exchange_u32;
+    let _ = atomic_exchange_u64;
+    let _ = atomic_exchange_i32;
+}
+
+// =============================================================================
+// Int Helper Imports
+// =============================================================================
+
+@test
+fn test_int_helper_imports() {
+    let _ = atomic_load_int;
+    let _ = atomic_store_int;
+    let _ = atomic_cmpxchg_int;
+    let _ = atomic_fetch_add_int;
+}
+
+// =============================================================================
+// Compatibility Alias Imports
+// =============================================================================
+
+@test
+fn test_compatibility_alias_imports() {
+    let _ = atomic_compare_exchange_u32;
+    let _ = atomic_compare_exchange_u64;
+    let _ = atomic_compare_exchange_i32;
+}
+
+// =============================================================================
+// Mixed Fence Sequences
+// =============================================================================
+
+@test
+fn test_mixed_fence_sequence() {
+    atomic_fence(Acquire);
+    compiler_fence(Release);
+    atomic_fence(SeqCst);
+    compiler_fence(AcqRel);
+    atomic_fence(Release);
+    compiler_fence(Acquire);
+}
+
+// =============================================================================
+// Memory Ordering Enum — Distinctness
+// =============================================================================
+
+@test
+fn test_ordering_enum_relaxed_not_others() {
+    let o: MemoryOrder = Relaxed;
+    assert(o is Relaxed);
+    assert(!(o is Acquire));
+    assert(!(o is Release));
+    assert(!(o is AcqRel));
+    assert(!(o is SeqCst));
+}
+
+@test
+fn test_ordering_enum_acquire_not_others() {
+    let o: MemoryOrder = Acquire;
+    assert(o is Acquire);
+    assert(!(o is Relaxed));
+    assert(!(o is Release));
+    assert(!(o is AcqRel));
+    assert(!(o is SeqCst));
+}
+
+@test
+fn test_ordering_enum_seqcst_not_others() {
+    let o: MemoryOrder = SeqCst;
+    assert(o is SeqCst);
+    assert(!(o is Relaxed));
+    assert(!(o is Acquire));
+    assert(!(o is Release));
+    assert(!(o is AcqRel));
+}
+
+// =============================================================================
+// Memory Ordering Constants — Ordering
+// =============================================================================
+
+@test
+fn test_ordering_constants_monotonic() {
+    assert(ORDERING_RELAXED < ORDERING_ACQUIRE);
+    assert(ORDERING_ACQUIRE < ORDERING_RELEASE);
+    assert(ORDERING_RELEASE < ORDERING_ACQ_REL);
+    assert(ORDERING_ACQ_REL < ORDERING_SEQ_CST);
+}
+
+// =============================================================================
+// Memory Ordering Enum — Match Exhaustive
+// =============================================================================
+
+@test
+fn test_ordering_enum_match_exhaustive() {
+    let o: MemoryOrder = AcqRel;
+    let val = match o {
+        Relaxed => 0,
+        Acquire => 1,
+        Release => 2,
+        AcqRel => 3,
+        SeqCst => 4,
+    };
+    assert_eq(val, 3);
+}
+
+@test
+fn test_ordering_enum_match_all_branches() {
+    let orders: List<MemoryOrder> = List.from([Relaxed, Acquire, Release, AcqRel, SeqCst]);
+    let mut sum = 0;
+    for o in orders.iter() {
+        let val = match o {
+            Relaxed => 1,
+            Acquire => 2,
+            Release => 4,
+            AcqRel => 8,
+            SeqCst => 16,
+        };
+        sum = sum + val;
+    }
+    assert_eq(sum, 31); // 1+2+4+8+16
+}
+
+// =============================================================================
+// Alternating Fences
+// =============================================================================
+
+@test
+fn test_alternating_atomic_compiler_fences() {
+    for _ in 0..5 {
+        atomic_fence(Acquire);
+        compiler_fence(Release);
+    }
+}
+
+@test
+fn test_all_orderings_atomic_fence() {
+    let orders: List<MemoryOrder> = List.from([Acquire, Release, AcqRel, SeqCst]);
+    for o in orders.iter() {
+        atomic_fence(*o);
+    }
+}
+
+@test
+fn test_all_orderings_compiler_fence() {
+    let orders: List<MemoryOrder> = List.from([Acquire, Release, AcqRel, SeqCst]);
+    for o in orders.iter() {
+        compiler_fence(*o);
+    }
+}
+
+// =============================================================================
+// Additional Memory Ordering Enum Tests
+// =============================================================================
+
+@test
+fn test_ordering_enum_release_not_others() {
+    let o: MemoryOrder = Release;
+    assert(o is Release);
+    assert(!(o is Relaxed));
+    assert(!(o is Acquire));
+    assert(!(o is AcqRel));
+    assert(!(o is SeqCst));
+}
+
+@test
+fn test_ordering_enum_acqrel_not_others() {
+    let o: MemoryOrder = AcqRel;
+    assert(o is AcqRel);
+    assert(!(o is Relaxed));
+    assert(!(o is Acquire));
+    assert(!(o is Release));
+    assert(!(o is SeqCst));
+}
+
+@test
+fn test_ordering_enum_five_variants_count() {
+    let orders: List<MemoryOrder> = List.from([Relaxed, Acquire, Release, AcqRel, SeqCst]);
+    assert_eq(orders.len(), 5);
+}
+
+// =============================================================================
+// Additional Fence Tests
+// =============================================================================
+
+@test
+fn test_fence_interleaved_with_computation() {
+    let mut sum = 0;
+    atomic_fence(Acquire);
+    sum = sum + 1;
+    compiler_fence(Release);
+    sum = sum + 2;
+    atomic_fence(SeqCst);
+    sum = sum + 3;
+    compiler_fence(AcqRel);
+    assert_eq(sum, 6);
+}
+
+@test
+fn test_compiler_fence_does_not_affect_state() {
+    let mut x = 42;
+    compiler_fence(SeqCst);
+    assert_eq(x, 42);
+    compiler_fence(Acquire);
+    x = x + 1;
+    compiler_fence(Release);
+    assert_eq(x, 43);
+}
+
+@test
+fn test_ordering_constant_range() {
+    // All constants should be in 0..=4
+    assert(ORDERING_RELAXED <= (4 as UInt8));
+    assert(ORDERING_ACQUIRE <= (4 as UInt8));
+    assert(ORDERING_RELEASE <= (4 as UInt8));
+    assert(ORDERING_ACQ_REL <= (4 as UInt8));
+    assert(ORDERING_SEQ_CST <= (4 as UInt8));
+}
+
+@test
+fn test_multiple_fence_types_in_sequence() {
+    atomic_fence(Acquire);
+    atomic_fence(Release);
+    atomic_fence(AcqRel);
+    atomic_fence(SeqCst);
+    compiler_fence(Acquire);
+    compiler_fence(Release);
+    compiler_fence(AcqRel);
+    compiler_fence(SeqCst);
+}
+
+@test
+fn test_ordering_match_returns_value() {
+    let o: MemoryOrder = Release;
+    let val = match o {
+        Relaxed => 0,
+        Acquire => 1,
+        Release => 2,
+        AcqRel => 3,
+        SeqCst => 4,
+    };
+    assert_eq(val, 2);
+}

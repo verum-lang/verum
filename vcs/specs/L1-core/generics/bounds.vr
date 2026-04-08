@@ -1,0 +1,184 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, bounds, traits, constraints
+//
+// Tests generic functions with trait bounds.
+// Bounds constrain type parameters to types that implement specific protocols.
+
+// =============================================================================
+// SECTION 1: Ordering Bound (Ord)
+// =============================================================================
+
+/// Maximum of two comparable values
+fn max<T: Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+/// Minimum of two comparable values
+fn min<T: Ord>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+/// Clamp a value between min and max bounds
+fn clamp<T: Ord>(value: T, min_val: T, max_val: T) -> T {
+    if value < min_val {
+        min_val
+    } else if value > max_val {
+        max_val
+    } else {
+        value
+    }
+}
+
+// =============================================================================
+// SECTION 2: Clone Bound
+// =============================================================================
+
+/// Prepend an element to a list (helper to avoid spread-in-expression)
+fn cons<T>(head: T, tail: List<T>) -> List<T> {
+    let mut result: List<T> = [];
+    result.push(head);
+    let mut t = tail;
+    result.append(&mut t);
+    result
+}
+
+/// Duplicate a value by cloning
+fn triple_clone<T: Clone>(x: T) -> (T, T, T) {
+    (x.clone(), x.clone(), x)
+}
+
+/// Create n copies of a value
+@allow(unbounded_recursion)
+fn replicate<T: Clone>(x: T, n: Int) -> List<T> {
+    if n <= 0 {
+        []
+    } else {
+        cons(x.clone(), replicate(x, n - 1))
+    }
+}
+
+// =============================================================================
+// SECTION 3: Compound Bounds
+// =============================================================================
+
+/// Sort two values, returning them in order (min, max)
+fn sort_pair<T: Ord + Clone>(a: T, b: T) -> (T, T) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Check if two values are equal using Eq bound (which Int/Text already impl)
+fn are_equal<T: Eq>(a: T, b: T) -> Bool {
+    a == b
+}
+
+/// Check all elements equal in list
+@allow(unbounded_recursion)
+fn all_equal<T: Eq + Clone>(items: List<T>) -> Bool {
+    match items {
+        [] => true,
+        [_] => true,
+        [first, second, ..rest] => {
+            if first == second {
+                all_equal(cons(second, rest))
+            } else {
+                false
+            }
+        }
+    }
+}
+
+// =============================================================================
+// SECTION 4: Bounds on Struct Definitions
+// =============================================================================
+
+/// Min-Max tracker
+type MinMax<T: Ord> is {
+    min_val: T,
+    max_val: T,
+};
+
+implement<T: Ord + Clone> MinMax<T> {
+    fn new(initial: T) -> MinMax<T> {
+        MinMax { min_val: initial.clone(), max_val: initial }
+    }
+
+    fn update(self, value: T) -> MinMax<T> {
+        MinMax {
+            min_val: if value < self.min_val { value.clone() } else { self.min_val },
+            max_val: if value > self.max_val { value } else { self.max_val },
+        }
+    }
+
+    fn range(&self) -> Bool {
+        self.max_val > self.min_val
+    }
+}
+
+// =============================================================================
+// SECTION 5: Display Bound
+// =============================================================================
+
+/// Convert to display string
+fn to_display<T: Display>(x: T) -> Text {
+    f"{x}"
+}
+
+// =============================================================================
+// SECTION 6: Main Test Cases
+// =============================================================================
+
+fn main() {
+    // Test Ord bounds
+    assert(max(10, 20) == 20);
+    assert(max("apple", "banana") == "banana");
+    assert(max(3.14, 2.71) == 3.14);
+
+    assert(min(10, 20) == 10);
+    assert(min("apple", "banana") == "apple");
+
+    assert(clamp(5, 0, 10) == 5);
+    assert(clamp(-5, 0, 10) == 0);
+    assert(clamp(15, 0, 10) == 10);
+
+    // Test Clone bounds
+    let (a, b, c) = triple_clone(42);
+    assert(a == 42);
+    assert(b == 42);
+    assert(c == 42);
+
+    let copies = replicate("hello", 3);
+    assert(copies == ["hello", "hello", "hello"]);
+
+    // Test compound bounds
+    let (lo, hi) = sort_pair(20, 5);
+    assert(lo == 5 && hi == 20);
+
+    let (lo2, hi2) = sort_pair("apple", "zebra");
+    assert(lo2 == "apple" && hi2 == "zebra");
+
+    assert(are_equal(42, 42));
+    assert(!are_equal(1, 2));
+
+    assert(all_equal([1, 1, 1]));
+    assert(!all_equal([1, 2, 1]));
+    assert(all_equal([]));
+
+    // Test MinMax
+    let mm = MinMax.new(5);
+    let mm2 = mm.update(3);
+    let mm3 = mm2.update(8);
+    assert(mm3.min_val == 3);
+    assert(mm3.max_val == 8);
+    assert(mm3.range());
+
+    // Test Display bound
+    assert(to_display(42) == "42");
+    assert(to_display(true) == "true");
+    assert(to_display(3.14) == "3.14");
+}

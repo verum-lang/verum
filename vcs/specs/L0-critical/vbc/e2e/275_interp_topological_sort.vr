@@ -1,0 +1,348 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, topological-sort, kahn
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Topological sort on a DAG represented as adjacency matrix.
+// Uses Kahn's algorithm (BFS-based). Verify valid ordering.
+
+// =============================================================================
+// Adjacency matrix for up to 8 nodes (8x8 = 64 entries)
+// We use a flat record. adj[i*8+j] = 1 means edge from i to j.
+// =============================================================================
+
+// Arr8 for in-degree, queue, and result arrays
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// 64-entry flat adjacency matrix
+type AdjMat is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int,
+    a16: Int, a17: Int, a18: Int, a19: Int, a20: Int, a21: Int, a22: Int, a23: Int,
+    a24: Int, a25: Int, a26: Int, a27: Int, a28: Int, a29: Int, a30: Int, a31: Int,
+    a32: Int, a33: Int, a34: Int, a35: Int, a36: Int, a37: Int, a38: Int, a39: Int,
+    a40: Int, a41: Int, a42: Int, a43: Int, a44: Int, a45: Int, a46: Int, a47: Int,
+    a48: Int, a49: Int, a50: Int, a51: Int, a52: Int, a53: Int, a54: Int, a55: Int,
+    a56: Int, a57: Int, a58: Int, a59: Int, a60: Int, a61: Int, a62: Int, a63: Int
+};
+
+fn adj_new() -> AdjMat {
+    AdjMat {
+        a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0,
+        a16: 0, a17: 0, a18: 0, a19: 0, a20: 0, a21: 0, a22: 0, a23: 0,
+        a24: 0, a25: 0, a26: 0, a27: 0, a28: 0, a29: 0, a30: 0, a31: 0,
+        a32: 0, a33: 0, a34: 0, a35: 0, a36: 0, a37: 0, a38: 0, a39: 0,
+        a40: 0, a41: 0, a42: 0, a43: 0, a44: 0, a45: 0, a46: 0, a47: 0,
+        a48: 0, a49: 0, a50: 0, a51: 0, a52: 0, a53: 0, a54: 0, a55: 0,
+        a56: 0, a57: 0, a58: 0, a59: 0, a60: 0, a61: 0, a62: 0, a63: 0
+    }
+}
+
+fn adj_get(m: AdjMat, idx: Int) -> Int {
+    if idx == 0 { m.a0 } else if idx == 1 { m.a1 } else if idx == 2 { m.a2 } else if idx == 3 { m.a3 }
+    else if idx == 4 { m.a4 } else if idx == 5 { m.a5 } else if idx == 6 { m.a6 } else if idx == 7 { m.a7 }
+    else if idx == 8 { m.a8 } else if idx == 9 { m.a9 } else if idx == 10 { m.a10 } else if idx == 11 { m.a11 }
+    else if idx == 12 { m.a12 } else if idx == 13 { m.a13 } else if idx == 14 { m.a14 } else if idx == 15 { m.a15 }
+    else if idx == 16 { m.a16 } else if idx == 17 { m.a17 } else if idx == 18 { m.a18 } else if idx == 19 { m.a19 }
+    else if idx == 20 { m.a20 } else if idx == 21 { m.a21 } else if idx == 22 { m.a22 } else if idx == 23 { m.a23 }
+    else if idx == 24 { m.a24 } else if idx == 25 { m.a25 } else if idx == 26 { m.a26 } else if idx == 27 { m.a27 }
+    else if idx == 28 { m.a28 } else if idx == 29 { m.a29 } else if idx == 30 { m.a30 } else if idx == 31 { m.a31 }
+    else if idx == 32 { m.a32 } else if idx == 33 { m.a33 } else if idx == 34 { m.a34 } else if idx == 35 { m.a35 }
+    else if idx == 36 { m.a36 } else if idx == 37 { m.a37 } else if idx == 38 { m.a38 } else if idx == 39 { m.a39 }
+    else if idx == 40 { m.a40 } else if idx == 41 { m.a41 } else if idx == 42 { m.a42 } else if idx == 43 { m.a43 }
+    else if idx == 44 { m.a44 } else if idx == 45 { m.a45 } else if idx == 46 { m.a46 } else if idx == 47 { m.a47 }
+    else if idx == 48 { m.a48 } else if idx == 49 { m.a49 } else if idx == 50 { m.a50 } else if idx == 51 { m.a51 }
+    else if idx == 52 { m.a52 } else if idx == 53 { m.a53 } else if idx == 54 { m.a54 } else if idx == 55 { m.a55 }
+    else if idx == 56 { m.a56 } else if idx == 57 { m.a57 } else if idx == 58 { m.a58 } else if idx == 59 { m.a59 }
+    else if idx == 60 { m.a60 } else if idx == 61 { m.a61 } else if idx == 62 { m.a62 }
+    else { m.a63 }
+}
+
+fn adj_set(m: AdjMat, idx: Int, v: Int) -> AdjMat {
+    AdjMat {
+        a0: if idx == 0 { v } else { m.a0 }, a1: if idx == 1 { v } else { m.a1 },
+        a2: if idx == 2 { v } else { m.a2 }, a3: if idx == 3 { v } else { m.a3 },
+        a4: if idx == 4 { v } else { m.a4 }, a5: if idx == 5 { v } else { m.a5 },
+        a6: if idx == 6 { v } else { m.a6 }, a7: if idx == 7 { v } else { m.a7 },
+        a8: if idx == 8 { v } else { m.a8 }, a9: if idx == 9 { v } else { m.a9 },
+        a10: if idx == 10 { v } else { m.a10 }, a11: if idx == 11 { v } else { m.a11 },
+        a12: if idx == 12 { v } else { m.a12 }, a13: if idx == 13 { v } else { m.a13 },
+        a14: if idx == 14 { v } else { m.a14 }, a15: if idx == 15 { v } else { m.a15 },
+        a16: if idx == 16 { v } else { m.a16 }, a17: if idx == 17 { v } else { m.a17 },
+        a18: if idx == 18 { v } else { m.a18 }, a19: if idx == 19 { v } else { m.a19 },
+        a20: if idx == 20 { v } else { m.a20 }, a21: if idx == 21 { v } else { m.a21 },
+        a22: if idx == 22 { v } else { m.a22 }, a23: if idx == 23 { v } else { m.a23 },
+        a24: if idx == 24 { v } else { m.a24 }, a25: if idx == 25 { v } else { m.a25 },
+        a26: if idx == 26 { v } else { m.a26 }, a27: if idx == 27 { v } else { m.a27 },
+        a28: if idx == 28 { v } else { m.a28 }, a29: if idx == 29 { v } else { m.a29 },
+        a30: if idx == 30 { v } else { m.a30 }, a31: if idx == 31 { v } else { m.a31 },
+        a32: if idx == 32 { v } else { m.a32 }, a33: if idx == 33 { v } else { m.a33 },
+        a34: if idx == 34 { v } else { m.a34 }, a35: if idx == 35 { v } else { m.a35 },
+        a36: if idx == 36 { v } else { m.a36 }, a37: if idx == 37 { v } else { m.a37 },
+        a38: if idx == 38 { v } else { m.a38 }, a39: if idx == 39 { v } else { m.a39 },
+        a40: if idx == 40 { v } else { m.a40 }, a41: if idx == 41 { v } else { m.a41 },
+        a42: if idx == 42 { v } else { m.a42 }, a43: if idx == 43 { v } else { m.a43 },
+        a44: if idx == 44 { v } else { m.a44 }, a45: if idx == 45 { v } else { m.a45 },
+        a46: if idx == 46 { v } else { m.a46 }, a47: if idx == 47 { v } else { m.a47 },
+        a48: if idx == 48 { v } else { m.a48 }, a49: if idx == 49 { v } else { m.a49 },
+        a50: if idx == 50 { v } else { m.a50 }, a51: if idx == 51 { v } else { m.a51 },
+        a52: if idx == 52 { v } else { m.a52 }, a53: if idx == 53 { v } else { m.a53 },
+        a54: if idx == 54 { v } else { m.a54 }, a55: if idx == 55 { v } else { m.a55 },
+        a56: if idx == 56 { v } else { m.a56 }, a57: if idx == 57 { v } else { m.a57 },
+        a58: if idx == 58 { v } else { m.a58 }, a59: if idx == 59 { v } else { m.a59 },
+        a60: if idx == 60 { v } else { m.a60 }, a61: if idx == 61 { v } else { m.a61 },
+        a62: if idx == 62 { v } else { m.a62 }, a63: if idx == 63 { v } else { m.a63 }
+    }
+}
+
+fn add_edge(m: AdjMat, from: Int, to: Int) -> AdjMat {
+    adj_set(m, from * 8 + to, 1)
+}
+
+fn has_edge(m: AdjMat, from: Int, to: Int) -> Int {
+    adj_get(m, from * 8 + to)
+}
+
+// =============================================================================
+// Kahn's algorithm for topological sort
+// Returns: result array and count of sorted nodes
+// =============================================================================
+
+type TopoResult is { order: Arr8, count: Int };
+
+fn topo_sort(adj: AdjMat, n: Int) -> TopoResult {
+    // Step 1: Compute in-degrees
+    let mut indeg = arr8_new();
+    let mut j = 0;
+    while j < n {
+        let mut deg = 0;
+        let mut i = 0;
+        while i < n {
+            deg = deg + has_edge(adj, i, j);
+            i = i + 1;
+        }
+        indeg = arr8_set(indeg, j, deg);
+        j = j + 1;
+    }
+
+    // Step 2: Initialize queue with nodes of in-degree 0
+    let mut queue = arr8_new();
+    let mut q_front = 0;
+    let mut q_back = 0;
+    let mut k = 0;
+    while k < n {
+        if arr8_get(indeg, k) == 0 {
+            queue = arr8_set(queue, q_back, k);
+            q_back = q_back + 1;
+        }
+        k = k + 1;
+    }
+
+    // Step 3: BFS
+    let mut order = arr8_new();
+    let mut count = 0;
+
+    while q_front < q_back {
+        let node = arr8_get(queue, q_front);
+        q_front = q_front + 1;
+        order = arr8_set(order, count, node);
+        count = count + 1;
+
+        // Decrease in-degree of neighbors
+        let mut nb = 0;
+        while nb < n {
+            if has_edge(adj, node, nb) == 1 {
+                let new_deg = arr8_get(indeg, nb) - 1;
+                indeg = arr8_set(indeg, nb, new_deg);
+                if new_deg == 0 {
+                    queue = arr8_set(queue, q_back, nb);
+                    q_back = q_back + 1;
+                }
+            }
+            nb = nb + 1;
+        }
+    }
+
+    TopoResult { order: order, count: count }
+}
+
+// =============================================================================
+// Verify topological ordering: for every edge (u,v), u appears before v
+// =============================================================================
+
+fn verify_topo_order(adj: AdjMat, order: Arr8, n: Int) -> Int {
+    // Build position map: pos[node] = index in order
+    let mut pos = arr8_new();
+    let mut i = 0;
+    while i < n {
+        let node = arr8_get(order, i);
+        pos = arr8_set(pos, node, i);
+        i = i + 1;
+    }
+
+    // Check all edges
+    let mut valid = 1;
+    let mut u = 0;
+    while u < n {
+        let mut v = 0;
+        while v < n {
+            if has_edge(adj, u, v) == 1 {
+                if arr8_get(pos, u) >= arr8_get(pos, v) {
+                    valid = 0;
+                }
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    valid
+}
+
+// =============================================================================
+// Test: simple linear chain 0 -> 1 -> 2 -> 3
+// =============================================================================
+
+fn test_linear_chain() {
+    let mut adj = adj_new();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 1, 2);
+    adj = add_edge(adj, 2, 3);
+
+    let r = topo_sort(adj, 4);
+    assert_eq(r.count, 4);
+    assert_eq(verify_topo_order(adj, r.order, 4), 1);
+
+    // Only valid order is 0, 1, 2, 3
+    assert_eq(arr8_get(r.order, 0), 0);
+    assert_eq(arr8_get(r.order, 1), 1);
+    assert_eq(arr8_get(r.order, 2), 2);
+    assert_eq(arr8_get(r.order, 3), 3);
+}
+
+// =============================================================================
+// Test: diamond DAG
+//     0
+//    / \
+//   1   2
+//    \ /
+//     3
+// =============================================================================
+
+fn test_diamond() {
+    let mut adj = adj_new();
+    adj = add_edge(adj, 0, 1);
+    adj = add_edge(adj, 0, 2);
+    adj = add_edge(adj, 1, 3);
+    adj = add_edge(adj, 2, 3);
+
+    let r = topo_sort(adj, 4);
+    assert_eq(r.count, 4);
+    assert_eq(verify_topo_order(adj, r.order, 4), 1);
+    // 0 must be first, 3 must be last
+    assert_eq(arr8_get(r.order, 0), 0);
+    assert_eq(arr8_get(r.order, 3), 3);
+}
+
+// =============================================================================
+// Test: disconnected nodes (no edges)
+// =============================================================================
+
+fn test_no_edges() {
+    let adj = adj_new();
+    let r = topo_sort(adj, 4);
+    assert_eq(r.count, 4);
+    // Any order is valid
+    assert_eq(verify_topo_order(adj, r.order, 4), 1);
+}
+
+// =============================================================================
+// Test: complex DAG with 6 nodes
+//   5 -> 0, 5 -> 2
+//   4 -> 0, 4 -> 1
+//   2 -> 3
+//   3 -> 1
+// =============================================================================
+
+fn test_complex_dag() {
+    let mut adj = adj_new();
+    adj = add_edge(adj, 5, 0);
+    adj = add_edge(adj, 5, 2);
+    adj = add_edge(adj, 4, 0);
+    adj = add_edge(adj, 4, 1);
+    adj = add_edge(adj, 2, 3);
+    adj = add_edge(adj, 3, 1);
+
+    let r = topo_sort(adj, 6);
+    assert_eq(r.count, 6);
+    assert_eq(verify_topo_order(adj, r.order, 6), 1);
+}
+
+// =============================================================================
+// Test: single node
+// =============================================================================
+
+fn test_single_node() {
+    let adj = adj_new();
+    let r = topo_sort(adj, 1);
+    assert_eq(r.count, 1);
+    assert_eq(arr8_get(r.order, 0), 0);
+}
+
+// =============================================================================
+// Test: two nodes, one edge
+// =============================================================================
+
+fn test_two_nodes() {
+    let mut adj = adj_new();
+    adj = add_edge(adj, 0, 1);
+    let r = topo_sort(adj, 2);
+    assert_eq(r.count, 2);
+    assert_eq(arr8_get(r.order, 0), 0);
+    assert_eq(arr8_get(r.order, 1), 1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_linear_chain();
+    test_diamond();
+    test_no_edges();
+    test_complex_dag();
+    test_single_node();
+    test_two_nodes();
+    print("[OK] 275_interp_topological_sort");
+    0
+}

@@ -1,0 +1,124 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: lexer, operators, comprehensive
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// All Verum Operators - Comprehensive Lexer Test Seed
+// Tests all operators for correct tokenization
+// =============================================================================
+
+fn arithmetic_operators() {
+    let a = 1 + 2;      // addition
+    let b = 5 - 3;      // subtraction
+    let c = 4 * 2;      // multiplication
+    let d = 8 / 4;      // division
+    let e = 7 % 3;      // modulo
+    let f = 2 ** 8;     // power
+}
+
+fn comparison_operators() {
+    let eq = 1 == 1;    // equality
+    let ne = 1 != 2;    // not equal
+    let lt = 1 < 2;     // less than
+    let gt = 2 > 1;     // greater than
+    let le = 1 <= 2;    // less or equal
+    let ge = 2 >= 1;    // greater or equal
+}
+
+fn logical_operators() {
+    let and = true && false;    // logical and
+    let or = true || false;     // logical or
+    let not = !true;            // logical not
+}
+
+fn bitwise_operators() {
+    let band = 0xFF & 0x0F;     // bitwise and
+    let bor = 0xF0 | 0x0F;      // bitwise or
+    let xor = 0xFF ^ 0x0F;      // bitwise xor
+    let shl = 1 << 4;           // shift left
+    let shr = 16 >> 2;          // shift right
+    let bnot = ~0xFF;           // bitwise not
+}
+
+fn assignment_operators() {
+    let mut x = 0;
+    x = 10;             // simple assignment
+    x += 5;             // add assign
+    x -= 3;             // sub assign
+    x *= 2;             // mul assign
+    x /= 4;             // div assign
+    x %= 3;             // mod assign
+    x &= 0xFF;          // and assign
+    x |= 0x0F;          // or assign
+    x ^= 0xF0;          // xor assign
+    x <<= 2;            // shift left assign
+    x >>= 1;            // shift right assign
+}
+
+fn range_operators() {
+    let exclusive = 0..10;      // exclusive range
+    let inclusive = 0..=10;     // inclusive range
+}
+
+fn pipe_operators() {
+    let result = data
+        |> transform
+        |> filter
+        |> collect;
+}
+
+fn compose_operators() {
+    let composed = f >> g;      // forward compose
+    let reverse = g << f;       // reverse compose
+}
+
+fn arrow_operators() {
+    fn arrow_fn(x: Int) -> Int { x }
+    let closure = |x| => x * 2;
+}
+
+fn optional_operators() {
+    let value = maybe_value?.field;     // optional chain
+    let default = none ?? fallback;     // null coalesce
+}
+
+fn punctuation_test() {
+    let tuple = (1, 2, 3);              // parentheses
+    let array = [1, 2, 3];              // brackets
+    let record = Point { x: 1, y: 2 };  // braces
+    let generic = List<Int>;            // angle brackets
+    let path = std.collections.Map;     // dot
+    let typed: Int = 42;                // colon
+    let end;                            // semicolon
+    @attribute fn decorated() {}        // at sign
+    let maybe: Maybe<Int>;              // question mark
+    let ref = &value;                   // ampersand
+    let alt = A | B;                    // pipe
+    let mod = x % 2;                    // percent
+    let neg = !flag;                    // exclamation
+    let tag = sql#"SELECT *";           // hash
+    let wild = _;                       // underscore
+}
+
+fn complex_operator_combinations() {
+    // Chained comparisons
+    let cmp = a < b && b < c;
+
+    // Nested arithmetic
+    let math = (a + b) * (c - d) / (e % f);
+
+    // Pipeline with methods
+    let pipe = items
+        |> map(|x| x * 2)
+        |> filter(|x| x > 0)
+        |> fold(0, |a, b| a + b);
+
+    // Optional chaining with null coalesce
+    let safe = obj?.field?.subfield ?? default;
+
+    // Complex bitwise
+    let bits = (a & 0xFF) | ((b << 8) & 0xFF00);
+}

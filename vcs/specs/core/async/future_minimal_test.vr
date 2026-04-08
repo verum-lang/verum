@@ -1,0 +1,35 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, future, minimal
+// @description: Minimal test to isolate stack overflow in future types
+
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.async.future.{
+    Future, ReadyFuture, PendingFuture,
+    ready, pending,
+};
+mount core.async.waker.{Waker, Context, noop_waker};
+
+@test
+fn test_ready_basic() {
+    let fut: ReadyFuture<Int> = ready(42);
+}
+
+@test
+fn test_pending_basic() {
+    let fut: PendingFuture<Int> = pending();
+}
+
+@test
+fn test_poll_ready() {
+    let mut fut: ReadyFuture<Int> = ready(42);
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let result: Poll<Int> = fut.poll(&mut cx);
+    assert(result.is_ready());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

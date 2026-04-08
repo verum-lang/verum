@@ -1,0 +1,33 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: ffi, errno, error-protocol
+// @description: FFI errno protocol — validates errno clearing and return value checking
+// @expected-exit: 0
+
+// Extern block for time functions (always succeed on valid input)
+@ffi("libSystem.B.dylib")
+extern {
+    fn time(tloc: Int) -> Int;
+    fn getpid() -> Int;
+}
+
+fn main() {
+    // time(0) returns current epoch seconds — should always succeed
+    let t = time(0);
+    assert(t > 1000000000); // After ~2001
+
+    // getpid always succeeds
+    let pid = getpid();
+    assert(pid > 0);
+
+    // Multiple calls should not interfere
+    let t2 = time(0);
+    assert(t2 >= t);
+
+    let pid2 = getpid();
+    assert(pid2 == pid); // Same process
+
+    print(f"time={t}, pid={pid}");
+    print("FFI errno protocol: PASS");
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, existential, empty, error
+// @description: Test detection of existential type without bounds
+// @expected-error: E050
+
+// Existential type must have bounds after colon
+fn test() -> some T: {}

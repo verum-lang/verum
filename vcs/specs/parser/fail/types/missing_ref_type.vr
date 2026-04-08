@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, references, missing, error
+// @description: Test detection of reference without a type
+// @expected-error: E087
+
+// Reference must have a type following it
+fn test(x: &) {}

@@ -1,0 +1,412 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, graphql, gql
+
+// GraphQL Tagged Literals
+// Tests for gql#"""...""" syntax
+
+// ============================================================================
+// SECTION 1: Basic GraphQL Queries
+// ============================================================================
+
+fn test_gql_simple_query() {
+    let query = gql#"""
+query {
+    users {
+        id
+        name
+    }
+}
+""";
+}
+
+fn test_gql_query_with_args() {
+    let query = gql#"""
+query {
+    user(id: "123") {
+        id
+        name
+        email
+    }
+}
+""";
+}
+
+fn test_gql_named_query() {
+    let query = gql#"""
+query GetUser {
+    user(id: "123") {
+        id
+        name
+    }
+}
+""";
+}
+
+// ============================================================================
+// SECTION 2: GraphQL Variables
+// ============================================================================
+
+fn test_gql_with_variables() {
+    let query = gql#"""
+query GetUser($id: ID!) {
+    user(id: $id) {
+        id
+        name
+        email
+    }
+}
+""";
+}
+
+fn test_gql_multiple_variables() {
+    let query = gql#"""
+query SearchUsers($name: String, $limit: Int = 10, $offset: Int = 0) {
+    users(name: $name, limit: $limit, offset: $offset) {
+        id
+        name
+    }
+}
+""";
+}
+
+fn test_gql_input_types() {
+    let query = gql#"""
+query GetPosts($filter: PostFilter!, $sort: SortOrder) {
+    posts(filter: $filter, sort: $sort) {
+        id
+        title
+        author {
+            name
+        }
+    }
+}
+""";
+}
+
+// ============================================================================
+// SECTION 3: GraphQL Mutations
+// ============================================================================
+
+fn test_gql_simple_mutation() {
+    let mutation = gql#"""
+mutation {
+    createUser(name: "Alice", email: "alice@example.com") {
+        id
+        name
+    }
+}
+""";
+}
+
+fn test_gql_mutation_with_variables() {
+    let mutation = gql#"""
+mutation CreateUser($input: CreateUserInput!) {
+    createUser(input: $input) {
+        user {
+            id
+            name
+            email
+        }
+        errors {
+            field
+            message
+        }
+    }
+}
+""";
+}
+
+fn test_gql_update_mutation() {
+    let mutation = gql#"""
+mutation UpdateUser($id: ID!, $input: UpdateUserInput!) {
+    updateUser(id: $id, input: $input) {
+        user {
+            id
+            name
+            updatedAt
+        }
+    }
+}
+""";
+}
+
+fn test_gql_delete_mutation() {
+    let mutation = gql#"""
+mutation DeleteUser($id: ID!) {
+    deleteUser(id: $id) {
+        success
+        message
+    }
+}
+""";
+}
+
+// ============================================================================
+// SECTION 4: GraphQL Subscriptions
+// ============================================================================
+
+fn test_gql_subscription() {
+    let subscription = gql#"""
+subscription OnMessageCreated($channelId: ID!) {
+    messageCreated(channelId: $channelId) {
+        id
+        content
+        author {
+            name
+        }
+        createdAt
+    }
+}
+""";
+}
+
+// ============================================================================
+// SECTION 5: GraphQL Fragments
+// ============================================================================
+
+fn test_gql_fragment_definition() {
+    let query = gql#"""
+fragment UserFields on User {
+    id
+    name
+    email
+    avatar
+}
+
+query GetUsers {
+    users {
+        ...UserFields
+    }
+}
+""";
+}
+
+fn test_gql_multiple_fragments() {
+    let query = gql#"""
+fragment UserBasic on User {
+    id
+    name
+}
+
+fragment UserDetails on User {
+    email
+    phone
+    address
+}
+
+query GetUser($id: ID!) {
+    user(id: $id) {
+        ...UserBasic
+        ...UserDetails
+    }
+}
+""";
+}
+
+fn test_gql_inline_fragment() {
+    let query = gql#"""
+query GetNode($id: ID!) {
+    node(id: $id) {
+        id
+        ... on User {
+            name
+            email
+        }
+        ... on Post {
+            title
+            content
+        }
+    }
+}
+""";
+}
+
+// ============================================================================
+// SECTION 6: GraphQL Directives
+// ============================================================================
+
+fn test_gql_skip_directive() {
+    let query = gql#"""
+query GetUser($id: ID!, $includeEmail: Boolean!) {
+    user(id: $id) {
+        id
+        name
+        email @include(if: $includeEmail)
+    }
+}
+""";
+}
+
+fn test_gql_deprecated() {
+    let query = gql#"""
+query {
+    user(id: "123") {
+        id
+        name
+        oldField @deprecated(reason: "Use newField instead")
+    }
+}
+""";
+}
+
+// ============================================================================
+// SECTION 7: GraphQL Aliases
+// ============================================================================
+
+fn test_gql_aliases() {
+    let query = gql#"""
+query {
+    alice: user(id: "1") {
+        name
+    }
+    bob: user(id: "2") {
+        name
+    }
+}
+""";
+}
+
+fn test_gql_field_aliases() {
+    let query = gql#"""
+query GetUser($id: ID!) {
+    user(id: $id) {
+        userId: id
+        userName: name
+        userEmail: email
+    }
+}
+""";
+}
+
+// ============================================================================
+// SECTION 8: Complex GraphQL Queries
+// ============================================================================
+
+fn test_gql_nested_query() {
+    let query = gql#"""
+query GetUserWithPosts($userId: ID!, $first: Int = 10) {
+    user(id: $userId) {
+        id
+        name
+        posts(first: $first) {
+            edges {
+                node {
+                    id
+                    title
+                    comments(first: 5) {
+                        edges {
+                            node {
+                                id
+                                content
+                                author {
+                                    name
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
+        }
+    }
+}
+""";
+}
+
+fn test_gql_relay_connection() {
+    let query = gql#"""
+query GetUsers($first: Int, $after: String) {
+    users(first: $first, after: $after) {
+        edges {
+            node {
+                id
+                name
+            }
+            cursor
+        }
+        pageInfo {
+            hasNextPage
+            hasPreviousPage
+            startCursor
+            endCursor
+        }
+        totalCount
+    }
+}
+""";
+}
+
+// ============================================================================
+// SECTION 9: GraphQL in Expressions
+// ============================================================================
+
+fn test_gql_in_function() {
+    fn execute_query(q: GraphqlQuery) -> Int { 0 }
+
+    let result = execute_query(gql#"""
+query { users { id } }
+""");
+}
+
+fn test_gql_in_conditional() {
+    let fetch_all = true;
+
+    let query = if fetch_all {
+        gql#"""
+query { users { id name email } }
+"""
+    } else {
+        gql#"""
+query { users { id name } }
+"""
+    };
+}
+
+fn test_gql_in_array() {
+    let queries = [
+        gql#"""query { users { id } }""",
+        gql#"""query { posts { id } }""",
+    ];
+}
+
+// ============================================================================
+// SECTION 10: Edge Cases
+// ============================================================================
+
+fn test_gql_empty_selection() {
+    let query = gql#"""
+query {
+    __typename
+}
+""";
+}
+
+fn test_gql_introspection() {
+    let query = gql#"""
+query {
+    __schema {
+        types {
+            name
+        }
+    }
+}
+""";
+}
+
+fn test_gql_comments() {
+    let query = gql#"""
+# This is a comment
+query GetUser($id: ID!) {
+    # Get user by ID
+    user(id: $id) {
+        id
+        name  # User's display name
+    }
+}
+""";
+}

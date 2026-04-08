@@ -1,0 +1,1418 @@
+// =============================================================================
+// condvar_test.vr - Tests for Condvar and related types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: sync, condvar, condition, concurrency, core
+// @description: Comprehensive tests for Condvar, CondvarNotifyGuard, WaitTimeoutResult
+// =============================================================================
+
+mount core.sync.condvar.{Condvar, CondvarNotifyGuard, WaitTimeoutResult, producer_consumer_pair};
+mount core.sync.mutex.{Mutex, MutexGuard, LockResult};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Condvar Construction Tests
+// =============================================================================
+
+@test
+fn test_condvar_new() {
+    let cv: Condvar = Condvar.new();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_default() {
+    let cv: Condvar = Condvar.default();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 2: Condvar Notify Tests (No Waiters)
+// =============================================================================
+
+@test
+fn test_condvar_notify_one_no_waiters() {
+    let cv: Condvar = Condvar.new();
+
+    // Should not block or panic even with no waiters
+    cv.notify_one();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_notify_all_no_waiters() {
+    let cv: Condvar = Condvar.new();
+
+    // Should not block or panic even with no waiters
+    cv.notify_all();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_notify_one_multiple_times() {
+    let cv: Condvar = Condvar.new();
+
+    cv.notify_one();
+    cv.notify_one();
+    cv.notify_one();
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_notify_all_multiple_times() {
+    let cv: Condvar = Condvar.new();
+
+    cv.notify_all();
+    cv.notify_all();
+    cv.notify_all();
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 3: Condvar waiter_count Tests
+// =============================================================================
+
+@test
+fn test_condvar_waiter_count_initial() {
+    let cv: Condvar = Condvar.new();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 4: WaitTimeoutResult Tests
+// =============================================================================
+
+@test
+fn test_wait_timeout_result_timed_out_true() {
+    let result: WaitTimeoutResult = WaitTimeoutResult { timed_out: true };
+    assert(result.timed_out());
+}
+
+@test
+fn test_wait_timeout_result_timed_out_false() {
+    let result: WaitTimeoutResult = WaitTimeoutResult { timed_out: false };
+    assert(!result.timed_out());
+}
+
+// =============================================================================
+// Section 5: CondvarNotifyGuard Tests
+// =============================================================================
+
+@test
+fn test_condvar_notify_one_guard() {
+    let cv: Condvar = Condvar.new();
+
+    {
+        let guard: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+        // Guard is held here
+        // When dropped, it will call notify_one
+    }
+
+    // Guard dropped, notify_one called
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_notify_all_guard() {
+    let cv: Condvar = Condvar.new();
+
+    {
+        let guard: CondvarNotifyGuard = CondvarNotifyGuard.notify_all_guard(&cv);
+        // Guard is held here
+        // When dropped, it will call notify_all
+    }
+
+    // Guard dropped, notify_all called
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_notify_guard_nested() {
+    let cv: Condvar = Condvar.new();
+
+    {
+        let guard1: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+        {
+            let guard2: CondvarNotifyGuard = CondvarNotifyGuard.notify_all_guard(&cv);
+            // Both guards held
+        }
+        // guard2 dropped, notify_all called
+    }
+    // guard1 dropped, notify_one called
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 6: producer_consumer_pair Tests
+// =============================================================================
+
+@test
+fn test_producer_consumer_pair_int() {
+    let (mutex, condvar): (Mutex<Int>, Condvar) = producer_consumer_pair(0);
+
+    let result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 0);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert_eq(condvar.waiter_count(), 0);
+}
+
+@test
+fn test_producer_consumer_pair_text() {
+    let (mutex, condvar): (Mutex<Text>, Condvar) = producer_consumer_pair("hello");
+
+    let result: LockResult<MutexGuard<Text>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Text = guard.data();
+            assert_eq(*val, "hello");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert_eq(condvar.waiter_count(), 0);
+}
+
+@test
+fn test_producer_consumer_pair_bool() {
+    let (mutex, condvar): (Mutex<Bool>, Condvar) = producer_consumer_pair(false);
+
+    let result: LockResult<MutexGuard<Bool>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Bool = guard.data();
+            assert_eq(*val, false);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert_eq(condvar.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 7: Condvar with Mutex Pattern Tests
+// =============================================================================
+
+@test
+fn test_condvar_with_mutex_basic() {
+    let mutex: Mutex<Int> = Mutex.new(0);
+    let cv: Condvar = Condvar.new();
+
+    // Modify value under lock
+    {
+        let result: LockResult<MutexGuard<Int>> = mutex.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = 42;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Notify (no one waiting, but should work)
+    cv.notify_one();
+
+    // Verify value
+    let result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 42);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_multiple_modifications() {
+    let mutex: Mutex<Int> = Mutex.new(0);
+    let cv: Condvar = Condvar.new();
+
+    for i in 0..5 {
+        {
+            let result: LockResult<MutexGuard<Int>> = mutex.lock();
+            match result {
+                Ok(mut guard) => {
+                    let data = guard.data_mut();
+                    *data = *data + 1;
+                }
+                Err(_) => panic("Expected Ok"),
+            }
+        }
+        cv.notify_one();
+    }
+
+    let result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 5);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 8: wait_timeout Type Signature Tests
+// =============================================================================
+// Note: These tests verify the wait_timeout method type-checks correctly.
+// In typecheck-pass mode, the code is never executed (wait_timeout would block).
+
+@test
+fn test_condvar_wait_timeout_signature_int() {
+    let mutex: Mutex<Int> = Mutex.new(42);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            // wait_timeout returns LockResult<(MutexGuard<T>, Bool)>
+            let result: LockResult<(MutexGuard<Int>, Bool)> = cv.wait_timeout(guard, 1000);
+            match result {
+                Ok((new_guard, timed_out)) => {
+                    let _val: &Int = new_guard.data();
+                    let _timeout: Bool = timed_out;
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_timeout_signature_text() {
+    let mutex: Mutex<Text> = Mutex.new("hello");
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Text>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let result: LockResult<(MutexGuard<Text>, Bool)> = cv.wait_timeout(guard, 5000);
+            match result {
+                Ok((new_guard, timed_out)) => {
+                    let _val: &Text = new_guard.data();
+                    let _: Bool = timed_out;
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_timeout_zero_timeout() {
+    let mutex: Mutex<Int> = Mutex.new(0);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            // Zero timeout should be valid
+            let _result: LockResult<(MutexGuard<Int>, Bool)> = cv.wait_timeout(guard, 0);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_timeout_large_timeout() {
+    let mutex: Mutex<Int> = Mutex.new(0);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            // Large timeout should be valid
+            let _result: LockResult<(MutexGuard<Int>, Bool)> = cv.wait_timeout(guard, 1_000_000_000);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 9: wait_while Type Signature Tests
+// =============================================================================
+
+@test
+fn test_condvar_wait_while_signature() {
+    let mutex: Mutex<Int> = Mutex.new(0);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            // wait_while takes a predicate fn(&T) -> Bool
+            let result: LockResult<MutexGuard<Int>> = cv.wait_while(guard, |data: &Int| *data == 0);
+            match result {
+                Ok(new_guard) => {
+                    let _val: &Int = new_guard.data();
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_while_signature_text() {
+    let mutex: Mutex<Text> = Mutex.new("");
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Text>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let result: LockResult<MutexGuard<Text>> = cv.wait_while(guard, |data: &Text| data.is_empty());
+            match result {
+                Ok(new_guard) => {
+                    let _val: &Text = new_guard.data();
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_while_always_false_predicate() {
+    let mutex: Mutex<Int> = Mutex.new(42);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            // Predicate always returns false -> wait_while returns immediately
+            let result: LockResult<MutexGuard<Int>> = cv.wait_while(guard, |_data: &Int| false);
+            match result {
+                Ok(_) => {}
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 10: wait Type Signature Tests
+// =============================================================================
+
+@test
+fn test_condvar_wait_signature_int() {
+    let mutex: Mutex<Int> = Mutex.new(42);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            // wait returns LockResult<MutexGuard<T>>
+            let _result: LockResult<MutexGuard<Int>> = cv.wait(guard);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_signature_bool() {
+    let mutex: Mutex<Bool> = Mutex.new(false);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Bool>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let _result: LockResult<MutexGuard<Bool>> = cv.wait(guard);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 11: Edge Cases
+// =============================================================================
+
+@test
+fn test_condvar_multiple_condvars_same_mutex() {
+    let mutex: Mutex<Int> = Mutex.new(0);
+    let cv1: Condvar = Condvar.new();
+    let cv2: Condvar = Condvar.new();
+
+    // Multiple condvars can use the same mutex
+    cv1.notify_one();
+    cv2.notify_all();
+
+    assert_eq(cv1.waiter_count(), 0);
+    assert_eq(cv2.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_created_independently() {
+    let cv1: Condvar = Condvar.new();
+    let cv2: Condvar = Condvar.new();
+    let cv3: Condvar = Condvar.new();
+
+    assert_eq(cv1.waiter_count(), 0);
+    assert_eq(cv2.waiter_count(), 0);
+    assert_eq(cv3.waiter_count(), 0);
+
+    cv1.notify_one();
+    cv2.notify_all();
+    cv3.notify_one();
+
+    assert_eq(cv1.waiter_count(), 0);
+    assert_eq(cv2.waiter_count(), 0);
+    assert_eq(cv3.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_notify_interleaved() {
+    let cv: Condvar = Condvar.new();
+
+    // Interleave notify_one and notify_all
+    cv.notify_one();
+    cv.notify_all();
+    cv.notify_one();
+    cv.notify_all();
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_with_mutex_list() {
+    let mutex: Mutex<List<Int>> = Mutex.new(List.new());
+    let cv: Condvar = Condvar.new();
+
+    let result: LockResult<MutexGuard<List<Int>>> = mutex.lock();
+    match result {
+        Ok(mut guard) => {
+            let data = guard.data_mut();
+            data.push(1);
+            data.push(2);
+            data.push(3);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    cv.notify_all();
+
+    let result2: LockResult<MutexGuard<List<Int>>> = mutex.lock();
+    match result2 {
+        Ok(guard) => {
+            assert_eq(guard.data().len(), 3);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_with_mutex_maybe() {
+    let mutex: Mutex<Maybe<Int>> = Mutex.new(None);
+    let cv: Condvar = Condvar.new();
+
+    let result: LockResult<MutexGuard<Maybe<Int>>> = mutex.lock();
+    match result {
+        Ok(mut guard) => {
+            let data = guard.data_mut();
+            *data = Some(42);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    cv.notify_one();
+
+    let result2: LockResult<MutexGuard<Maybe<Int>>> = mutex.lock();
+    match result2 {
+        Ok(guard) => {
+            assert(guard.data().is_some());
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 12: WaitTimeoutResult Extended Tests
+// =============================================================================
+
+@test
+fn test_wait_timeout_result_construction_patterns() {
+    // Test both possible states
+    let signaled = WaitTimeoutResult { timed_out: false };
+    let expired = WaitTimeoutResult { timed_out: true };
+
+    assert(!signaled.timed_out());
+    assert(expired.timed_out());
+}
+
+@test
+fn test_wait_timeout_result_in_conditional() {
+    let result = WaitTimeoutResult { timed_out: true };
+    assert(result.timed_out());
+}
+
+// =============================================================================
+// Section 13: Condvar Construction Additional Tests
+// =============================================================================
+
+@test
+fn test_condvar_new_waiter_count_zero() {
+    let cv: Condvar = Condvar.new();
+    let count: Int = cv.waiter_count();
+    assert_eq(count, 0);
+    assert(count >= 0);
+}
+
+@test
+fn test_condvar_default_waiter_count_zero() {
+    let cv: Condvar = Condvar.default();
+    let count: Int = cv.waiter_count();
+    assert_eq(count, 0);
+    assert(count >= 0);
+}
+
+@test
+fn test_multiple_condvars_independent_state() {
+    let cv1: Condvar = Condvar.new();
+    let cv2: Condvar = Condvar.new();
+    let cv3: Condvar = Condvar.default();
+    let cv4: Condvar = Condvar.default();
+
+    // Each condvar has its own independent waiter count
+    assert_eq(cv1.waiter_count(), 0);
+    assert_eq(cv2.waiter_count(), 0);
+    assert_eq(cv3.waiter_count(), 0);
+    assert_eq(cv4.waiter_count(), 0);
+
+    // Notifying one doesn't affect the others
+    cv1.notify_one();
+    cv2.notify_all();
+
+    assert_eq(cv1.waiter_count(), 0);
+    assert_eq(cv2.waiter_count(), 0);
+    assert_eq(cv3.waiter_count(), 0);
+    assert_eq(cv4.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 14: Notify Guard Extended Tests
+// =============================================================================
+
+@test
+fn test_notify_one_guard_is_held() {
+    let cv: Condvar = Condvar.new();
+    let guard: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+
+    // Guard is active while held
+    assert_eq(cv.waiter_count(), 0);
+
+    // Drop explicitly by going out of scope
+    drop(guard);
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_notify_all_guard_is_held() {
+    let cv: Condvar = Condvar.new();
+    let guard: CondvarNotifyGuard = CondvarNotifyGuard.notify_all_guard(&cv);
+
+    // Guard is active while held
+    assert_eq(cv.waiter_count(), 0);
+
+    drop(guard);
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_notify_guard_drop_in_scope() {
+    let cv: Condvar = Condvar.new();
+
+    {
+        let _g1: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+        // g1 will notify_one on drop at end of scope
+    }
+    // g1 has been dropped, notify_one was called
+
+    {
+        let _g2: CondvarNotifyGuard = CondvarNotifyGuard.notify_all_guard(&cv);
+        // g2 will notify_all on drop at end of scope
+    }
+    // g2 has been dropped, notify_all was called
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_notify_guard_multiple_same_condvar() {
+    let cv: Condvar = Condvar.new();
+
+    // Multiple guards on the same condvar
+    {
+        let g1: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+        let g2: CondvarNotifyGuard = CondvarNotifyGuard.notify_all_guard(&cv);
+        let g3: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+        // All three dropped here
+    }
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_notify_guard_different_condvars() {
+    let cv1: Condvar = Condvar.new();
+    let cv2: Condvar = Condvar.new();
+
+    {
+        let _g1: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv1);
+        let _g2: CondvarNotifyGuard = CondvarNotifyGuard.notify_all_guard(&cv2);
+    }
+
+    assert_eq(cv1.waiter_count(), 0);
+    assert_eq(cv2.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 15: WaitTimeoutResult Extended Patterns
+// =============================================================================
+
+@test
+fn test_wait_timeout_result_conditional_timed_out() {
+    let result = WaitTimeoutResult { timed_out: true };
+    let mut handled: Bool = false;
+
+    if result.timed_out() {
+        handled = true;
+    }
+
+    assert(handled);
+}
+
+@test
+fn test_wait_timeout_result_conditional_not_timed_out() {
+    let result = WaitTimeoutResult { timed_out: false };
+    let mut handled: Bool = false;
+
+    if !result.timed_out() {
+        handled = true;
+    }
+
+    assert(handled);
+}
+
+@test
+fn test_wait_timeout_result_multiple_checks() {
+    let r1 = WaitTimeoutResult { timed_out: true };
+    let r2 = WaitTimeoutResult { timed_out: false };
+    let r3 = WaitTimeoutResult { timed_out: true };
+
+    // Check multiple results
+    assert(r1.timed_out());
+    assert(!r2.timed_out());
+    assert(r3.timed_out());
+
+    // Consistency: calling timed_out() multiple times on same result
+    assert_eq(r1.timed_out(), true);
+    assert_eq(r1.timed_out(), true);
+    assert_eq(r2.timed_out(), false);
+    assert_eq(r2.timed_out(), false);
+}
+
+@test
+fn test_wait_timeout_result_in_variable_binding() {
+    let result = WaitTimeoutResult { timed_out: false };
+    let did_timeout: Bool = result.timed_out();
+    assert_eq(did_timeout, false);
+
+    let result2 = WaitTimeoutResult { timed_out: true };
+    let did_timeout2: Bool = result2.timed_out();
+    assert_eq(did_timeout2, true);
+}
+
+// =============================================================================
+// Section 16: producer_consumer_pair with Various Types
+// =============================================================================
+
+@test
+fn test_producer_consumer_pair_float() {
+    let (mutex, condvar): (Mutex<Float>, Condvar) = producer_consumer_pair(3.14);
+
+    let result: LockResult<MutexGuard<Float>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Float = guard.data();
+            assert_eq(*val, 3.14);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert_eq(condvar.waiter_count(), 0);
+}
+
+@test
+fn test_producer_consumer_pair_list_int() {
+    let initial: List<Int> = List.new();
+    let (mutex, condvar): (Mutex<List<Int>>, Condvar) = producer_consumer_pair(initial);
+
+    let result: LockResult<MutexGuard<List<Int>>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.data().len(), 0);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert_eq(condvar.waiter_count(), 0);
+}
+
+@test
+fn test_producer_consumer_pair_tuple() {
+    let (mutex, condvar): (Mutex<(Int, Bool)>, Condvar) = producer_consumer_pair((42, true));
+
+    let result: LockResult<MutexGuard<(Int, Bool)>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            let val: &(Int, Bool) = guard.data();
+            assert_eq(val.0, 42);
+            assert_eq(val.1, true);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert_eq(condvar.waiter_count(), 0);
+}
+
+@test
+fn test_producer_consumer_pair_maybe_int() {
+    let (mutex, condvar): (Mutex<Maybe<Int>>, Condvar) = producer_consumer_pair(None);
+
+    let result: LockResult<MutexGuard<Maybe<Int>>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            assert(guard.data().is_none());
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert_eq(condvar.waiter_count(), 0);
+}
+
+@test
+fn test_producer_consumer_pair_modify_value() {
+    let (mutex, condvar): (Mutex<Int>, Condvar) = producer_consumer_pair(0);
+
+    // Modify under lock
+    {
+        let result: LockResult<MutexGuard<Int>> = mutex.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = 100;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    condvar.notify_one();
+
+    // Verify modified value
+    let result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            assert_eq(*guard.data(), 100);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 17: Condvar with Mutex Various Types
+// =============================================================================
+
+@test
+fn test_condvar_with_mutex_text() {
+    let mutex: Mutex<Text> = Mutex.new("initial");
+    let cv: Condvar = Condvar.new();
+
+    {
+        let result: LockResult<MutexGuard<Text>> = mutex.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = "updated";
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    cv.notify_one();
+
+    let result: LockResult<MutexGuard<Text>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            assert_eq(*guard.data(), "updated");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_with_mutex_bool() {
+    let mutex: Mutex<Bool> = Mutex.new(false);
+    let cv: Condvar = Condvar.new();
+
+    {
+        let result: LockResult<MutexGuard<Bool>> = mutex.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = true;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    cv.notify_all();
+
+    let result: LockResult<MutexGuard<Bool>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            assert_eq(*guard.data(), true);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_with_mutex_float() {
+    let mutex: Mutex<Float> = Mutex.new(0.0);
+    let cv: Condvar = Condvar.new();
+
+    {
+        let result: LockResult<MutexGuard<Float>> = mutex.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = 99.99;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    cv.notify_one();
+
+    let result: LockResult<MutexGuard<Float>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            assert_eq(*guard.data(), 99.99);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 18: Multiple Condvars on Different Mutexes
+// =============================================================================
+
+@test
+fn test_two_condvars_different_mutexes() {
+    let mutex1: Mutex<Int> = Mutex.new(10);
+    let mutex2: Mutex<Text> = Mutex.new("hello");
+    let cv1: Condvar = Condvar.new();
+    let cv2: Condvar = Condvar.new();
+
+    // Modify first mutex
+    {
+        let result: LockResult<MutexGuard<Int>> = mutex1.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = 20;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    cv1.notify_one();
+
+    // Modify second mutex
+    {
+        let result: LockResult<MutexGuard<Text>> = mutex2.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = "world";
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    cv2.notify_all();
+
+    // Verify both independently
+    assert_eq(cv1.waiter_count(), 0);
+    assert_eq(cv2.waiter_count(), 0);
+
+    let r1: LockResult<MutexGuard<Int>> = mutex1.lock();
+    match r1 {
+        Ok(guard) => { assert_eq(*guard.data(), 20); }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    let r2: LockResult<MutexGuard<Text>> = mutex2.lock();
+    match r2 {
+        Ok(guard) => { assert_eq(*guard.data(), "world"); }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvars_created_and_used_independently() {
+    let cv_a: Condvar = Condvar.new();
+    let cv_b: Condvar = Condvar.default();
+
+    let mutex_a: Mutex<Int> = Mutex.new(0);
+    let mutex_b: Mutex<Int> = Mutex.new(0);
+
+    // Use cv_a with mutex_a
+    cv_a.notify_one();
+    assert_eq(cv_a.waiter_count(), 0);
+
+    // Use cv_b with mutex_b
+    cv_b.notify_all();
+    assert_eq(cv_b.waiter_count(), 0);
+
+    // Verify mutexes are unaffected by condvar operations
+    let r_a: LockResult<MutexGuard<Int>> = mutex_a.lock();
+    match r_a {
+        Ok(guard) => { assert_eq(*guard.data(), 0); }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    let r_b: LockResult<MutexGuard<Int>> = mutex_b.lock();
+    match r_b {
+        Ok(guard) => { assert_eq(*guard.data(), 0); }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 19: wait_timeout Signature Extended Tests
+// =============================================================================
+
+@test
+fn test_condvar_wait_timeout_zero_timeout_text() {
+    let mutex: Mutex<Text> = Mutex.new("test");
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Text>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let _result: LockResult<(MutexGuard<Text>, Bool)> = cv.wait_timeout(guard, 0);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_timeout_large_timeout_bool() {
+    let mutex: Mutex<Bool> = Mutex.new(true);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Bool>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let _result: LockResult<(MutexGuard<Bool>, Bool)> = cv.wait_timeout(guard, 999_999_999);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_timeout_signature_float() {
+    let mutex: Mutex<Float> = Mutex.new(2.718);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Float>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let result: LockResult<(MutexGuard<Float>, Bool)> = cv.wait_timeout(guard, 500);
+            match result {
+                Ok((new_guard, timed_out)) => {
+                    let _val: &Float = new_guard.data();
+                    let _: Bool = timed_out;
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_timeout_signature_list() {
+    let mutex: Mutex<List<Int>> = Mutex.new(List.new());
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<List<Int>>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let result: LockResult<(MutexGuard<List<Int>>, Bool)> = cv.wait_timeout(guard, 100);
+            match result {
+                Ok((new_guard, timed_out)) => {
+                    let _len: Int = new_guard.data().len();
+                    let _: Bool = timed_out;
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 20: wait_while Signature Extended Tests
+// =============================================================================
+
+@test
+fn test_condvar_wait_while_always_true_predicate() {
+    let mutex: Mutex<Bool> = Mutex.new(false);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Bool>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            // Predicate always true means wait_while would block forever in real execution
+            // In typecheck-pass mode, just verify it type-checks
+            let _result: LockResult<MutexGuard<Bool>> = cv.wait_while(guard, |_data: &Bool| true);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_while_signature_bool() {
+    let mutex: Mutex<Bool> = Mutex.new(true);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Bool>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let result: LockResult<MutexGuard<Bool>> = cv.wait_while(guard, |data: &Bool| *data);
+            match result {
+                Ok(new_guard) => {
+                    let _val: &Bool = new_guard.data();
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_while_signature_float() {
+    let mutex: Mutex<Float> = Mutex.new(0.0);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Float>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let result: LockResult<MutexGuard<Float>> = cv.wait_while(guard, |data: &Float| *data < 1.0);
+            match result {
+                Ok(new_guard) => {
+                    let _val: &Float = new_guard.data();
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_while_with_list() {
+    let mutex: Mutex<List<Int>> = Mutex.new(List.new());
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<List<Int>>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let result: LockResult<MutexGuard<List<Int>>> = cv.wait_while(guard, |data: &List<Int>| data.is_empty());
+            match result {
+                Ok(new_guard) => {
+                    let _len: Int = new_guard.data().len();
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 21: Sequential Notify Patterns
+// =============================================================================
+
+@test
+fn test_notify_one_in_loop_10_times() {
+    let cv: Condvar = Condvar.new();
+
+    for _i in 0..10 {
+        cv.notify_one();
+    }
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_notify_all_in_loop_5_times() {
+    let cv: Condvar = Condvar.new();
+
+    for _i in 0..5 {
+        cv.notify_all();
+    }
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_alternating_notify_in_loop() {
+    let cv: Condvar = Condvar.new();
+
+    for i in 0..8 {
+        if i % 2 == 0 {
+            cv.notify_one();
+        } else {
+            cv.notify_all();
+        }
+    }
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_notify_with_mutex_modifications_in_loop() {
+    let mutex: Mutex<Int> = Mutex.new(0);
+    let cv: Condvar = Condvar.new();
+
+    for _i in 0..10 {
+        {
+            let result: LockResult<MutexGuard<Int>> = mutex.lock();
+            match result {
+                Ok(mut guard) => {
+                    let data = guard.data_mut();
+                    *data = *data + 1;
+                }
+                Err(_) => panic("Expected Ok"),
+            }
+        }
+        cv.notify_all();
+    }
+
+    let result: LockResult<MutexGuard<Int>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            assert_eq(*guard.data(), 10);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 22: CondvarNotifyGuard Additional Patterns
+// =============================================================================
+
+@test
+fn test_condvar_notify_guard_one_guard_fields() {
+    let cv: Condvar = Condvar.new();
+
+    // notify_one_guard creates a guard that calls notify_one on drop
+    {
+        let guard: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+        // Guard exists, will call notify_one when it drops
+        assert_eq(cv.waiter_count(), 0);
+    }
+    // Guard dropped, notify_one called
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_notify_guard_all_guard_fields() {
+    let cv: Condvar = Condvar.new();
+
+    // notify_all_guard creates a guard that calls notify_all on drop
+    {
+        let guard: CondvarNotifyGuard = CondvarNotifyGuard.notify_all_guard(&cv);
+        assert_eq(cv.waiter_count(), 0);
+    }
+    // Guard dropped, notify_all called
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_notify_guard_sequential_creation() {
+    let cv: Condvar = Condvar.new();
+
+    // Create and drop guards one at a time
+    {
+        let _g: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+    }
+    assert_eq(cv.waiter_count(), 0);
+
+    {
+        let _g: CondvarNotifyGuard = CondvarNotifyGuard.notify_all_guard(&cv);
+    }
+    assert_eq(cv.waiter_count(), 0);
+
+    {
+        let _g: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+    }
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 23: wait Signature Additional Tests
+// =============================================================================
+
+@test
+fn test_condvar_wait_signature_text() {
+    let mutex: Mutex<Text> = Mutex.new("waiting");
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Text>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let _result: LockResult<MutexGuard<Text>> = cv.wait(guard);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_signature_float() {
+    let mutex: Mutex<Float> = Mutex.new(1.23);
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Float>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let _result: LockResult<MutexGuard<Float>> = cv.wait(guard);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_signature_list() {
+    let mutex: Mutex<List<Int>> = Mutex.new(List.new());
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<List<Int>>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let _result: LockResult<MutexGuard<List<Int>>> = cv.wait(guard);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_condvar_wait_signature_maybe() {
+    let mutex: Mutex<Maybe<Int>> = Mutex.new(Some(42));
+    let cv: Condvar = Condvar.new();
+
+    let guard_result: LockResult<MutexGuard<Maybe<Int>>> = mutex.lock();
+    match guard_result {
+        Ok(guard) => {
+            let _result: LockResult<MutexGuard<Maybe<Int>>> = cv.wait(guard);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 24: Edge Case Combinations
+// =============================================================================
+
+@test
+fn test_condvar_notify_then_check_waiter_count_repeatedly() {
+    let cv: Condvar = Condvar.new();
+
+    assert_eq(cv.waiter_count(), 0);
+    cv.notify_one();
+    assert_eq(cv.waiter_count(), 0);
+    cv.notify_all();
+    assert_eq(cv.waiter_count(), 0);
+    cv.notify_one();
+    assert_eq(cv.waiter_count(), 0);
+    cv.notify_all();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_with_mutex_modify_and_notify_multiple() {
+    let mutex: Mutex<List<Int>> = Mutex.new(List.new());
+    let cv: Condvar = Condvar.new();
+
+    // Add elements in separate lock/unlock cycles
+    for i in 0..5 {
+        {
+            let result: LockResult<MutexGuard<List<Int>>> = mutex.lock();
+            match result {
+                Ok(mut guard) => {
+                    let data = guard.data_mut();
+                    data.push(i);
+                }
+                Err(_) => panic("Expected Ok"),
+            }
+        }
+        cv.notify_one();
+    }
+
+    // Verify all elements were added
+    let result: LockResult<MutexGuard<List<Int>>> = mutex.lock();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.data().len(), 5);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_with_guard_and_direct_notify_mixed() {
+    let cv: Condvar = Condvar.new();
+
+    // Mix guard-based and direct notification
+    cv.notify_one();
+
+    {
+        let _g: CondvarNotifyGuard = CondvarNotifyGuard.notify_all_guard(&cv);
+    }
+
+    cv.notify_all();
+
+    {
+        let _g: CondvarNotifyGuard = CondvarNotifyGuard.notify_one_guard(&cv);
+    }
+
+    cv.notify_one();
+
+    assert_eq(cv.waiter_count(), 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

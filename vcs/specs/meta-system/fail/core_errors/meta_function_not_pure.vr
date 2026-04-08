@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M301
+// @description: Tests that process operations (impure) are forbidden in meta functions
+// @tags: meta-system, core, purity
+
+// Meta functions must be pure - process operations are forbidden
+// The sandbox catches attempts to spawn processes and returns M301 ForbiddenOperation
+
+meta fn impure_function() -> Int {
+    // ERROR M301: std.process.exec is a process operation, forbidden in meta context
+    std.process.exec("echo hello")
+}
+
+fn main() {
+    @const assert(impure_function() == 0);
+}

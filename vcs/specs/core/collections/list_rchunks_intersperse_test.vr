@@ -1,0 +1,335 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, list, rchunks, intersperse
+// @description: Tests for List.rchunks, rchunks_exact, rchunks_exact_remainder, intersperse, intersperse_with
+
+mount core.collections.list.{List};
+
+// =============================================================================
+// rchunks tests
+// =============================================================================
+
+@test
+fn test_rchunks_basic() {
+    let list = [1, 2, 3, 4, 5];
+    let chunks = list.rchunks(2);
+    // rchunks goes from end: [4,5], [2,3], [1]
+    assert_eq(chunks.len(), 3);
+    assert_eq(chunks[0].len(), 2);  // [4, 5]
+    assert_eq(chunks[0][0], 4);
+    assert_eq(chunks[0][1], 5);
+    assert_eq(chunks[1].len(), 2);  // [2, 3]
+    assert_eq(chunks[1][0], 2);
+    assert_eq(chunks[1][1], 3);
+    assert_eq(chunks[2].len(), 1);  // [1]
+    assert_eq(chunks[2][0], 1);
+}
+
+@test
+fn test_rchunks_even_split() {
+    let list = [10, 20, 30, 40];
+    let chunks = list.rchunks(2);
+    assert_eq(chunks.len(), 2);
+    assert_eq(chunks[0][0], 30);
+    assert_eq(chunks[0][1], 40);
+    assert_eq(chunks[1][0], 10);
+    assert_eq(chunks[1][1], 20);
+}
+
+@test
+fn test_rchunks_single_element_chunks() {
+    let list = [1, 2, 3];
+    let chunks = list.rchunks(1);
+    assert_eq(chunks.len(), 3);
+    assert_eq(chunks[0][0], 3);
+    assert_eq(chunks[1][0], 2);
+    assert_eq(chunks[2][0], 1);
+}
+
+@test
+fn test_rchunks_chunk_larger_than_list() {
+    let list = [1, 2, 3];
+    let chunks = list.rchunks(10);
+    assert_eq(chunks.len(), 1);
+    assert_eq(chunks[0].len(), 3);
+    assert_eq(chunks[0][0], 1);
+    assert_eq(chunks[0][1], 2);
+    assert_eq(chunks[0][2], 3);
+}
+
+@test
+fn test_rchunks_empty_list() {
+    let list: List<Int> = [];
+    let chunks = list.rchunks(3);
+    assert_eq(chunks.len(), 0);
+}
+
+@test
+fn test_rchunks_exact_size() {
+    let list = [1, 2, 3, 4, 5, 6];
+    let chunks = list.rchunks(3);
+    assert_eq(chunks.len(), 2);
+    assert_eq(chunks[0][0], 4);
+    assert_eq(chunks[0][1], 5);
+    assert_eq(chunks[0][2], 6);
+    assert_eq(chunks[1][0], 1);
+    assert_eq(chunks[1][1], 2);
+    assert_eq(chunks[1][2], 3);
+}
+
+// =============================================================================
+// rchunks_exact tests
+// =============================================================================
+
+@test
+fn test_rchunks_exact_basic() {
+    let list = [1, 2, 3, 4, 5];
+    let chunks = list.rchunks_exact(2);
+    // Drops remainder [1], returns [[4,5], [2,3]]
+    assert_eq(chunks.len(), 2);
+    assert_eq(chunks[0][0], 4);
+    assert_eq(chunks[0][1], 5);
+    assert_eq(chunks[1][0], 2);
+    assert_eq(chunks[1][1], 3);
+}
+
+@test
+fn test_rchunks_exact_even_split() {
+    let list = [10, 20, 30, 40];
+    let chunks = list.rchunks_exact(2);
+    assert_eq(chunks.len(), 2);
+    assert_eq(chunks[0][0], 30);
+    assert_eq(chunks[0][1], 40);
+    assert_eq(chunks[1][0], 10);
+    assert_eq(chunks[1][1], 20);
+}
+
+@test
+fn test_rchunks_exact_drops_remainder() {
+    let list = [1, 2, 3, 4, 5, 6, 7];
+    let chunks = list.rchunks_exact(3);
+    // Drops [1], keeps [[5,6,7], [2,3,4]]
+    assert_eq(chunks.len(), 2);
+    assert_eq(chunks[0][0], 5);
+    assert_eq(chunks[0][1], 6);
+    assert_eq(chunks[0][2], 7);
+    assert_eq(chunks[1][0], 2);
+    assert_eq(chunks[1][1], 3);
+    assert_eq(chunks[1][2], 4);
+}
+
+@test
+fn test_rchunks_exact_chunk_larger_than_list() {
+    let list = [1, 2, 3];
+    let chunks = list.rchunks_exact(10);
+    assert_eq(chunks.len(), 0);
+}
+
+@test
+fn test_rchunks_exact_empty_list() {
+    let list: List<Int> = [];
+    let chunks = list.rchunks_exact(3);
+    assert_eq(chunks.len(), 0);
+}
+
+@test
+fn test_rchunks_exact_size_one() {
+    let list = [1, 2, 3];
+    let chunks = list.rchunks_exact(1);
+    assert_eq(chunks.len(), 3);
+    assert_eq(chunks[0][0], 3);
+    assert_eq(chunks[1][0], 2);
+    assert_eq(chunks[2][0], 1);
+}
+
+// =============================================================================
+// rchunks_exact_remainder tests
+// =============================================================================
+
+@test
+fn test_rchunks_exact_remainder_basic() {
+    let list = [1, 2, 3, 4, 5];
+    let remainder = list.rchunks_exact_remainder(2);
+    // 5 % 2 = 1, so remainder is [1]
+    assert_eq(remainder.len(), 1);
+    assert_eq(remainder[0], 1);
+}
+
+@test
+fn test_rchunks_exact_remainder_no_remainder() {
+    let list = [1, 2, 3, 4];
+    let remainder = list.rchunks_exact_remainder(2);
+    assert_eq(remainder.len(), 0);
+}
+
+@test
+fn test_rchunks_exact_remainder_large() {
+    let list = [1, 2, 3, 4, 5, 6, 7];
+    let remainder = list.rchunks_exact_remainder(3);
+    // 7 % 3 = 1, so remainder is [1]
+    assert_eq(remainder.len(), 1);
+    assert_eq(remainder[0], 1);
+}
+
+@test
+fn test_rchunks_exact_remainder_two_elements() {
+    let list = [1, 2, 3, 4, 5];
+    let remainder = list.rchunks_exact_remainder(3);
+    // 5 % 3 = 2, so remainder is [1, 2]
+    assert_eq(remainder.len(), 2);
+    assert_eq(remainder[0], 1);
+    assert_eq(remainder[1], 2);
+}
+
+@test
+fn test_rchunks_exact_remainder_empty_list() {
+    let list: List<Int> = [];
+    let remainder = list.rchunks_exact_remainder(3);
+    assert_eq(remainder.len(), 0);
+}
+
+// =============================================================================
+// intersperse tests
+// =============================================================================
+
+@test
+fn test_intersperse_basic() {
+    let list = [1, 2, 3];
+    let result = list.intersperse(0);
+    assert_eq(result.len(), 5);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 0);
+    assert_eq(result[2], 2);
+    assert_eq(result[3], 0);
+    assert_eq(result[4], 3);
+}
+
+@test
+fn test_intersperse_single_element() {
+    let list = [42];
+    let result = list.intersperse(0);
+    assert_eq(result.len(), 1);
+    assert_eq(result[0], 42);
+}
+
+@test
+fn test_intersperse_empty_list() {
+    let list: List<Int> = [];
+    let result = list.intersperse(99);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_intersperse_two_elements() {
+    let list = [10, 20];
+    let result = list.intersperse(0);
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 10);
+    assert_eq(result[1], 0);
+    assert_eq(result[2], 20);
+}
+
+@test
+fn test_intersperse_separator_matches_elements() {
+    let list = [1, 1, 1];
+    let result = list.intersperse(1);
+    assert_eq(result.len(), 5);
+    // All elements are 1
+    for i in range(0, 5) {
+        assert_eq(result[i], 1);
+    }
+}
+
+@test
+fn test_intersperse_preserves_original() {
+    let list = [1, 2, 3];
+    let _result = list.intersperse(0);
+    // Original list unchanged
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+}
+
+// =============================================================================
+// intersperse_with tests
+// =============================================================================
+
+@test
+fn test_intersperse_with_basic() {
+    let mut counter = 0;
+    let list = [10, 20, 30];
+    let result = list.intersperse_with(|| {
+        counter = counter + 1;
+        counter
+    });
+    assert_eq(result.len(), 5);
+    assert_eq(result[0], 10);
+    // separator values are 1, 2, ...
+    assert_eq(result[2], 20);
+    assert_eq(result[4], 30);
+}
+
+@test
+fn test_intersperse_with_empty() {
+    let list: List<Int> = [];
+    let result = list.intersperse_with(|| 99);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_intersperse_with_single() {
+    let list = [42];
+    let result = list.intersperse_with(|| 0);
+    assert_eq(result.len(), 1);
+    assert_eq(result[0], 42);
+}
+
+@test
+fn test_intersperse_with_constant() {
+    let list = [1, 2, 3, 4];
+    let result = list.intersperse_with(|| 0);
+    assert_eq(result.len(), 7);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 0);
+    assert_eq(result[2], 2);
+    assert_eq(result[3], 0);
+    assert_eq(result[4], 3);
+    assert_eq(result[5], 0);
+    assert_eq(result[6], 4);
+}
+
+// =============================================================================
+// Combined / integration tests
+// =============================================================================
+
+@test
+fn test_rchunks_vs_rchunks_exact_relationship() {
+    // For evenly divisible list, rchunks and rchunks_exact produce same result
+    let list = [1, 2, 3, 4, 5, 6];
+    let chunks = list.rchunks(3);
+    let exact = list.rchunks_exact(3);
+    assert_eq(chunks.len(), exact.len());
+    // Both should have 2 chunks of size 3
+    assert_eq(chunks[0].len(), 3);
+    assert_eq(exact[0].len(), 3);
+}
+
+@test
+fn test_rchunks_exact_plus_remainder_covers_all() {
+    let list = [1, 2, 3, 4, 5, 6, 7];
+    let chunks = list.rchunks_exact(3);
+    let remainder = list.rchunks_exact_remainder(3);
+    // Total elements should equal original list length
+    let mut total = remainder.len();
+    for i in range(0, chunks.len()) {
+        total = total + chunks[i].len();
+    }
+    assert_eq(total, list.len());
+}
+
+@test
+fn test_intersperse_length_formula() {
+    // For list of N elements, intersperse produces 2*N-1 elements (N > 0)
+    let list = [1, 2, 3, 4, 5];
+    let result = list.intersperse(0);
+    assert_eq(result.len(), list.len() * 2 - 1);
+}

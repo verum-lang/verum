@@ -1,0 +1,21 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, gensym, collision, error
+// @expected-error: M403
+// @description: Using gensym-like identifier directly triggers M403
+
+// Direct use of __verum_gensym_* identifiers in user code is forbidden
+// as it would collide with compiler-generated hygienic names
+
+meta fn trigger_gensym_collision() -> TokenStream {
+    quote {
+        // Directly using a gensym-like identifier is forbidden
+        let __verum_gensym_user_defined = 42;
+        __verum_gensym_user_defined
+    }
+}
+
+fn main() {
+    @trigger_gensym_collision();
+}

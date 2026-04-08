@@ -1,0 +1,55 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: errdefer, error, cleanup, e2e
+// @description: Test errdefer for cleanup on error paths
+
+type MyError is BadInput | Overflow;
+
+fn risky_divide(a: Int, b: Int) -> Result<Int, MyError> {
+    errdefer {
+        print("  errdefer: cleanup on error");
+    }
+    if b == 0 {
+        return Err(MyError.BadInput);
+    }
+    Ok(a / b)
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: errdefer NOT triggered on success
+    print("Test 1: success path");
+    match risky_divide(10, 2) {
+        Ok(v) => {
+            if v != 5 {
+                print(f"FAIL 1: expected 5, got {v}");
+                f = f + 1;
+            } else {
+                print("  divide_ok: OK");
+            }
+        }
+        Err(_) => {
+            print("FAIL 1: unexpected error");
+            f = f + 1;
+        }
+    }
+
+    // Test 2: errdefer triggered on error
+    print("Test 2: error path");
+    match risky_divide(10, 0) {
+        Ok(_) => {
+            print("FAIL 2: expected error");
+            f = f + 1;
+        }
+        Err(e) => {
+            print("  divide_err: OK");
+        }
+    }
+
+    if f == 0 {
+        print("All errdefer tests passed");
+    }
+    f
+}

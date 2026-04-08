@@ -1,0 +1,218 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, automaton, rule110
+// @timeout: 30000
+
+// Milestone: Rule 110 cellular automaton and pattern detection
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Apply a 1D cellular automaton rule
+// rule_num encodes 8 transitions for neighborhoods 000..111
+fn ca_rule(rule_num: Int, left: Int, center: Int, right: Int) -> Int {
+    let idx = left * 4 + center * 2 + right;
+    let mut r = rule_num;
+    let mut i = 0;
+    while i < idx { r = r / 2; i = i + 1; }
+    r % 2
+}
+
+// Step a CA state (stored as bitmask, width bits)
+fn ca_step(state: Int, width: Int, rule_num: Int) -> Int {
+    let mut next = 0;
+    let mut i = 0;
+    while i < width {
+        let left = if i == 0 { 0 } else { (state / pow2(i - 1)) % 2 };
+        let center = (state / pow2(i)) % 2;
+        let right = if i == width - 1 { 0 } else { (state / pow2(i + 1)) % 2 };
+        let new_bit = ca_rule(rule_num, left, center, right);
+        next = next + new_bit * pow2(i);
+        i = i + 1;
+    }
+    next
+}
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+// Count live cells
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 {
+        count = count + x % 2;
+        x = x / 2;
+    }
+    count
+}
+
+// Run CA for n steps and return final state
+fn ca_run(initial: Int, width: Int, rule_num: Int, steps: Int) -> Int {
+    let mut state = initial;
+    let mut i = 0;
+    while i < steps {
+        state = ca_step(state, width, rule_num);
+        i = i + 1;
+    }
+    state
+}
+
+// Record states as Arr8 (up to 8 states)
+fn ca_history(initial: Int, width: Int, rule_num: Int, steps: Int) -> Arr8 {
+    let mut hist = zeros();
+    hist = set8(hist, 0, initial);
+    let mut state = initial;
+    let mut i = 0;
+    while i < steps {
+        state = ca_step(state, width, rule_num);
+        if i + 1 < 8 {
+            hist = set8(hist, i + 1, state);
+        }
+        i = i + 1;
+    }
+    hist
+}
+
+// Check if CA reaches a cycle within max_steps
+fn ca_cycle_len(initial: Int, width: Int, rule_num: Int, max_steps: Int) -> Int {
+    let mut state = initial;
+    let mut i = 0;
+    while i < max_steps {
+        state = ca_step(state, width, rule_num);
+        i = i + 1;
+        if state == initial { return i; }
+    }
+    0 // no cycle found
+}
+
+fn test_rule110() -> Int {
+    // Rule 110 is Turing-complete
+    // 110 = 01101110 in binary
+    // Neighborhood 111→0, 110→1, 101→1, 100→0, 011→1, 010→1, 001→1, 000→0
+
+    // Single bit in center of width 7: bit 3 = 8
+    let s0 = 8; // 0001000
+    let s1 = ca_step(s0, 7, 110);
+    // Center is 1, left=0, right=0 → neighborhood 010 → rule 110 bit 2 = 1
+    // Bit 3 stays on. Also check neighbors.
+    // i=2: left=0, center=0, right=1 → 001 → bit 1 of 110 = 1 → on
+    // i=4: left=1, center=0, right=0 → 100 → bit 4 of 110 = 0 → off
+    // i=3: left=0, center=1, right=0 → 010 → bit 2 of 110 = 1 → on
+    // So s1 has bits 2 and 3 set = 4+8=12
+    assert_eq(s1, 12);
+
+    let s2 = ca_step(s1, 7, 110);
+    // State 12 = 0001100
+    // i=0: 0,0,0 → 000→0
+    // i=1: 0,0,1 → 001→1
+    // i=2: 0,1,1 → 011→1
+    // i=3: 1,1,0 → 110→1
+    // i=4: 1,0,0 → 100→0
+    // i=5: 0,0,0 → 0
+    // i=6: 0,0,0 → 0
+    // s2 = bits 1,2,3 = 2+4+8 = 14
+    assert_eq(s2, 14);
+    1
+}
+
+fn test_rule30() -> Int {
+    // Rule 30: chaotic behavior
+    // 30 = 00011110
+    let s0 = 16; // bit 4 set, width 8
+
+    let s1 = ca_step(s0, 8, 30);
+    // i=3: 0,0,1→001→bit1=1 → on
+    // i=4: 0,1,0→010→bit2=1 → on
+    // i=5: 1,0,0→100→bit4=1 → on
+    // Others: 000→0
+    // s1 = bits 3,4,5 = 8+16+32 = 56
+    assert_eq(s1, 56);
+
+    // Rule 30 is chaotic - population should grow
+    let s5 = ca_run(16, 8, 30, 5);
+    assert(popcount(s5) > 0);
+    1
+}
+
+fn test_rule90() -> Int {
+    // Rule 90: XOR automaton (Sierpinski triangle)
+    // 90 = 01011010
+    let s0 = 8; // bit 3 set, width 7
+
+    let s1 = ca_step(s0, 7, 90);
+    // i=2: 0,0,1→001→bit0=0. i=3: 0,1,0→010→bit1=1. i=4: 1,0,0→100→bit4=0
+    // Wait, let me check rule 90 bits:
+    // 90 = 01011010
+    // 000→0, 001→1, 010→0, 011→1, 100→1, 101→0, 110→1, 111→0
+    // i=2: 0,0,1→001→1 → on
+    // i=3: 0,1,0→010→0 → off
+    // i=4: 1,0,0→100→1 → on
+    // s1 = bits 2,4 = 4+16 = 20
+    assert_eq(s1, 20);
+
+    // XOR rule: state XORs neighbors
+    let s2 = ca_step(s1, 7, 90);
+    // State 20 = 0010100
+    // i=1: 0,0,1→001→1
+    // i=2: 0,1,0→010→0
+    // i=3: 1,0,1→101→0
+    // i=4: 0,1,0→010→0
+    // i=5: 1,0,0→100→1
+    // s2 = bits 1,5 = 2+32 = 34
+    assert_eq(s2, 34);
+    1
+}
+
+fn test_cycle_detection() -> Int {
+    // Rule 0: all cells die → cycle length 1 if starting from 0
+    assert_eq(ca_cycle_len(0, 7, 0, 10), 1); // 0→0, cycle of 1
+
+    // Rule 204: identity rule (204=11001100, center bit preserved)
+    // 204: 000→0, 001→0, 010→1, 011→1, 100→0, 101→0, 110→1, 111→1
+    // This means only center matters: state stays same
+    assert_eq(ca_cycle_len(42, 7, 204, 10), 1);
+    1
+}
+
+fn test_history() -> Int {
+    let hist = ca_history(8, 7, 110, 3);
+    assert_eq(get8(hist, 0), 8);  // initial
+    assert_eq(get8(hist, 1), 12); // step 1
+    assert_eq(get8(hist, 2), 14); // step 2
+    1
+}
+
+fn main() -> Int {
+    test_rule110();
+    test_rule30();
+    test_rule90();
+    test_cycle_detection();
+    test_history();
+    print("[OK] 495_milestone_aot");
+    0
+}

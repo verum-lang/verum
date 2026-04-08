@@ -1,0 +1,379 @@
+// =============================================================================
+// iterator_zip_longest_test.vr - Tests for zip_longest iterator adapter
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: iterator, zip_longest, adapters
+// @description: Tests for the zip_longest adapter which zips two iterators,
+//               continuing until BOTH are exhausted. Each element is a pair
+//               of Maybe values: (Maybe<A>, Maybe<B>).
+// =============================================================================
+
+mount core.base.iterator.{Iterator, ExactSizeIterator, ZipLongestIter};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Basic zip_longest Behavior
+// =============================================================================
+
+@test
+fn test_zip_longest_equal_length() {
+    let a = [1, 2, 3].into_iter();
+    let b = [10, 20, 30].into_iter();
+    let mut zl = a.zip_longest(b);
+
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    // Both exhausted
+    assert(zl.next() is None);
+}
+
+@test
+fn test_zip_longest_left_longer() {
+    let a = [1, 2, 3, 4].into_iter();
+    let b = [10, 20].into_iter();
+    let mut zl = a.zip_longest(b);
+
+    // Continues for left's length
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is None);
+}
+
+@test
+fn test_zip_longest_right_longer() {
+    let a = [1, 2].into_iter();
+    let b = [10, 20, 30, 40].into_iter();
+    let mut zl = a.zip_longest(b);
+
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is None);
+}
+
+@test
+fn test_zip_longest_left_empty() {
+    let a: List<Int> = [];
+    let b = [10, 20, 30].into_iter();
+    let mut zl = a.into_iter().zip_longest(b);
+
+    // Right still yields
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is None);
+}
+
+@test
+fn test_zip_longest_right_empty() {
+    let a = [1, 2, 3].into_iter();
+    let b: List<Int> = [];
+    let mut zl = a.zip_longest(b.into_iter());
+
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is None);
+}
+
+@test
+fn test_zip_longest_both_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+    let mut zl = a.into_iter().zip_longest(b.into_iter());
+
+    assert(zl.next() is None);
+}
+
+@test
+fn test_zip_longest_single_vs_single() {
+    let a = [1].into_iter();
+    let b = [10].into_iter();
+    let mut zl = a.zip_longest(b);
+
+    assert(zl.next() is Some);
+    assert(zl.next() is None);
+}
+
+@test
+fn test_zip_longest_single_vs_many() {
+    let a = [1].into_iter();
+    let b = [10, 20, 30].into_iter();
+    let mut zl = a.zip_longest(b);
+
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is None);
+}
+
+// =============================================================================
+// Section 2: Count
+// =============================================================================
+
+@test
+fn test_zip_longest_count_equal() {
+    let c = [1, 2, 3].into_iter().zip_longest([10, 20, 30].into_iter()).count();
+    assert_eq(c, 3);
+}
+
+@test
+fn test_zip_longest_count_left_longer() {
+    let c = [1, 2, 3, 4, 5].into_iter().zip_longest([10, 20].into_iter()).count();
+    assert_eq(c, 5);
+}
+
+@test
+fn test_zip_longest_count_right_longer() {
+    let c = [1, 2].into_iter().zip_longest([10, 20, 30, 40, 50].into_iter()).count();
+    assert_eq(c, 5);
+}
+
+@test
+fn test_zip_longest_count_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+    let c = a.into_iter().zip_longest(b.into_iter()).count();
+    assert_eq(c, 0);
+}
+
+@test
+fn test_zip_longest_count_one_empty() {
+    let b: List<Int> = [];
+    let c = [1, 2, 3].into_iter().zip_longest(b.into_iter()).count();
+    assert_eq(c, 3);
+}
+
+// =============================================================================
+// Section 3: size_hint
+// =============================================================================
+
+@test
+fn test_zip_longest_size_hint_equal() {
+    let a = [1, 2, 3].into_iter();
+    let b = [10, 20, 30].into_iter();
+    let zl = a.zip_longest(b);
+    let hint = zl.size_hint();
+    assert_eq(hint.0, 3);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 3),
+        None => panic("should have upper bound"),
+    }
+}
+
+@test
+fn test_zip_longest_size_hint_left_longer() {
+    let a = [1, 2, 3, 4, 5].into_iter();
+    let b = [10, 20].into_iter();
+    let zl = a.zip_longest(b);
+    let hint = zl.size_hint();
+    // Lower bound is max(5, 2) = 5
+    assert_eq(hint.0, 5);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 5),
+        None => panic("should have upper bound"),
+    }
+}
+
+@test
+fn test_zip_longest_size_hint_right_longer() {
+    let a = [1, 2].into_iter();
+    let b = [10, 20, 30, 40].into_iter();
+    let zl = a.zip_longest(b);
+    let hint = zl.size_hint();
+    assert_eq(hint.0, 4);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 4),
+        None => panic("should have upper bound"),
+    }
+}
+
+@test
+fn test_zip_longest_size_hint_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+    let zl = a.into_iter().zip_longest(b.into_iter());
+    let hint = zl.size_hint();
+    assert_eq(hint.0, 0);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 0),
+        None => panic("should have upper bound"),
+    }
+}
+
+@test
+fn test_zip_longest_size_hint_one_empty() {
+    let b: List<Int> = [];
+    let zl = [1, 2, 3].into_iter().zip_longest(b.into_iter());
+    let hint = zl.size_hint();
+    assert_eq(hint.0, 3);
+    match hint.1 {
+        Some(upper) => assert_eq(upper, 3),
+        None => panic("should have upper bound"),
+    }
+}
+
+// =============================================================================
+// Section 4: Chaining with other combinators
+// =============================================================================
+
+@test
+fn test_zip_longest_with_take() {
+    let c = [1, 2, 3, 4, 5].into_iter()
+        .zip_longest([10, 20, 30, 40, 50].into_iter())
+        .take(3)
+        .count();
+    assert_eq(c, 3);
+}
+
+@test
+fn test_zip_longest_with_skip() {
+    let c = [1, 2, 3].into_iter()
+        .zip_longest([10, 20, 30].into_iter())
+        .skip(1)
+        .count();
+    assert_eq(c, 2);
+}
+
+@test
+fn test_zip_longest_with_enumerate() {
+    let mut iter = [1, 2].into_iter()
+        .zip_longest([10, 20].into_iter())
+        .enumerate();
+    assert(iter.next() is Some);
+    assert(iter.next() is Some);
+    assert(iter.next() is None);
+}
+
+@test
+fn test_zip_longest_with_take_while() {
+    // take_while on outer Some/None
+    let mut iter = [1, 2, 3].into_iter()
+        .zip_longest([10, 20, 30].into_iter())
+        .take(2);
+    let c = iter.count();
+    assert_eq(c, 2);
+}
+
+// =============================================================================
+// Section 5: vs Regular zip
+// =============================================================================
+
+@test
+fn test_zip_longest_vs_zip_equal_length() {
+    let zip_count = [1, 2, 3].into_iter().zip([10, 20, 30].into_iter()).count();
+    let zl_count = [1, 2, 3].into_iter().zip_longest([10, 20, 30].into_iter()).count();
+    assert_eq(zip_count, zl_count);
+}
+
+@test
+fn test_zip_longest_vs_zip_unequal_length() {
+    let zip_count = [1, 2, 3].into_iter().zip([10, 20].into_iter()).count();
+    let zl_count = [1, 2, 3].into_iter().zip_longest([10, 20].into_iter()).count();
+    assert_eq(zip_count, 2);  // zip stops at shorter
+    assert_eq(zl_count, 3);   // zip_longest continues
+}
+
+@test
+fn test_zip_vs_zip_longest_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+    let zip_count = a.clone().into_iter().zip(b.clone().into_iter()).count();
+    let zl_count = a.into_iter().zip_longest(b.into_iter()).count();
+    assert_eq(zip_count, 0);
+    assert_eq(zl_count, 0);
+}
+
+// =============================================================================
+// Section 6: Fused Behavior
+// =============================================================================
+
+@test
+fn test_zip_longest_stays_exhausted() {
+    let mut zl = [1].into_iter().zip_longest([10].into_iter());
+
+    assert(zl.next() is Some);
+    assert(zl.next() is None);
+    // Should stay exhausted
+    assert(zl.next() is None);
+    assert(zl.next() is None);
+}
+
+@test
+fn test_zip_longest_exhaustion_after_longer() {
+    let mut zl = [1].into_iter().zip_longest([10, 20, 30].into_iter());
+
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is Some);
+    assert(zl.next() is None);
+    assert(zl.next() is None);
+}
+
+// =============================================================================
+// Section 7: Different Element Types
+// =============================================================================
+
+@test
+fn test_zip_longest_int_and_text() {
+    let c = [1, 2, 3].into_iter()
+        .zip_longest(["a", "b"].into_iter())
+        .count();
+    assert_eq(c, 3);
+}
+
+@test
+fn test_zip_longest_bool_and_float() {
+    let c = [true, false].into_iter()
+        .zip_longest([3.14, 2.718, 1.0].into_iter())
+        .count();
+    assert_eq(c, 3);
+}
+
+@test
+fn test_zip_longest_text_and_text() {
+    let c = ["hello", "world"].into_iter()
+        .zip_longest(["foo", "bar", "baz"].into_iter())
+        .count();
+    assert_eq(c, 3);
+}
+
+// =============================================================================
+// Section 8: Type Annotation and Construction
+// =============================================================================
+
+@test
+fn test_zip_longest_type_annotation() {
+    let a = [1, 2].into_iter();
+    let b = [10, 20].into_iter();
+    let zl: ZipLongestIter<_, _> = a.zip_longest(b);
+    let hint = zl.size_hint();
+    assert_eq(hint.0, 2);
+}
+
+@test
+fn test_zip_longest_large_difference() {
+    let a = [1].into_iter();
+    let b = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].into_iter();
+    let c = a.zip_longest(b).count();
+    assert_eq(c, 10);
+}
+
+@test
+fn test_zip_longest_symmetric() {
+    // zip_longest(a, b).count() == zip_longest(b, a).count()
+    let c1 = [1, 2, 3].into_iter().zip_longest([10, 20].into_iter()).count();
+    let c2 = [10, 20].into_iter().zip_longest([1, 2, 3].into_iter()).count();
+    assert_eq(c1, c2);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

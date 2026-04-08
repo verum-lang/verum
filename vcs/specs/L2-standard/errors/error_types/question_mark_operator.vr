@@ -1,0 +1,224 @@
+// @test: run
+// @expected-stdout: Final result: 42\nMaybe chain: Some(200)
+// @tier: 0
+// @level: L2
+// @tags: errors, question-mark, operator, propagation
+
+/// Question mark operator (?) - concise error propagation.
+/// The `?` operator unwraps Ok/Some values or early-returns Err/None.
+
+type ConfigError is
+    | MissingField(Text)
+    | InvalidValue { field: Text, value: Text }
+    | ParseError(Text)
+;
+
+type Config is {
+    host: Text,
+    port: Int,
+    timeout_ms: Int,
+    max_retries: Int
+};
+
+/// Simulated config parsing functions
+fn get_field(config_text: &Text, field: &Text) -> Result<Text, ConfigError> {
+    // Simplified: return field if it matches certain patterns
+    match field {
+        "host" => Ok("localhost"),
+        "port" => Ok("8080"),
+        "timeout" => Ok("5000"),
+        "retries" => Ok("3"),
+        _ => Err(ConfigError.MissingField(field.clone()))
+    }
+}
+
+fn parse_int(value: &Text) -> Result<Int, ConfigError> {
+    // Simplified parsing
+    match value {
+        "8080" => Ok(8080),
+        "5000" => Ok(5000),
+        "3" => Ok(3),
+        "42" => Ok(42),
+        _ => Err(ConfigError.ParseError(format("Cannot parse: {}", value)))
+    }
+}
+
+/// Without question mark - verbose explicit handling
+fn parse_config_verbose(config_text: &Text) -> Result<Config, ConfigError> {
+    let host = match get_field(config_text, "host") {
+        Ok(v) => v,
+        Err(e) => return Err(e)
+    };
+
+    let port_str = match get_field(config_text, "port") {
+        Ok(v) => v,
+        Err(e) => return Err(e)
+    };
+
+    let port = match parse_int(&port_str) {
+        Ok(v) => v,
+        Err(e) => return Err(e)
+    };
+
+    let timeout_str = match get_field(config_text, "timeout") {
+        Ok(v) => v,
+        Err(e) => return Err(e)
+    };
+
+    let timeout_ms = match parse_int(&timeout_str) {
+        Ok(v) => v,
+        Err(e) => return Err(e)
+    };
+
+    let retries_str = match get_field(config_text, "retries") {
+        Ok(v) => v,
+        Err(e) => return Err(e)
+    };
+
+    let max_retries = match parse_int(&retries_str) {
+        Ok(v) => v,
+        Err(e) => return Err(e)
+    };
+
+    Ok(Config { host, port, timeout_ms, max_retries })
+}
+
+/// With question mark - concise and readable
+fn parse_config_concise(config_text: &Text) -> Result<Config, ConfigError> {
+    let host = get_field(config_text, "host")?;
+    let port = parse_int(&get_field(config_text, "port")?)?;
+    let timeout_ms = parse_int(&get_field(config_text, "timeout")?)?;
+    let max_retries = parse_int(&get_field(config_text, "retries")?)?;
+
+    Ok(Config { host, port, timeout_ms, max_retries })
+}
+
+/// Question mark with method chaining
+fn parse_config_chained(config_text: &Text) -> Result<Config, ConfigError> {
+    Ok(Config {
+        host: get_field(config_text, "host")?,
+        port: get_field(config_text, "port").and_then(|s| parse_int(&s))?,
+        timeout_ms: get_field(config_text, "timeout").and_then(|s| parse_int(&s))?,
+        max_retries: get_field(config_text, "retries").and_then(|s| parse_int(&s))?
+    })
+}
+
+/// Question mark with Maybe type
+fn find_in_list(list: &List<Int>, target: Int) -> Maybe<Int> {
+    for (i, item) in list.iter().enumerate() {
+        if item == target {
+            return Some(i as Int);
+        }
+    }
+    None
+}
+
+fn get_element(list: &List<Int>, target: Int) -> Maybe<Int> {
+    let index = find_in_list(list, target)?;  // Returns None if not found
+    list.get(index as usize).copied()
+}
+
+/// Question mark in Maybe-returning functions
+fn maybe_chain() -> Maybe<Int> {
+    let a = Some(10)?;  // Unwraps to 10
+    let b = Some(20)?;  // Unwraps to 20
+    Some(a + b)         // Returns Some(30)
+}
+
+fn maybe_chain_with_none() -> Maybe<Int> {
+    let a = Some(10)?;
+    let b: Maybe<Int> = None;
+    let c = b?;         // Early returns None
+    Some(a + c)         // Never reached
+}
+
+/// Question mark with error conversion (From trait)
+type IoError is {
+    message: Text
+};
+
+type AppError is
+    | Config(ConfigError)
+    | Io(IoError)
+    | Other(Text);
+
+implement From<ConfigError> for AppError {
+    fn from(e: ConfigError) -> AppError {
+        AppError.Config(e)
+    }
+}
+
+implement From<IoError> for AppError {
+    fn from(e: IoError) -> AppError {
+        AppError.Io(e)
+    }
+}
+
+fn app_operation(config_text: &Text) -> Result<Int, AppError> {
+    // ConfigError automatically converted to AppError via From trait
+    let config = parse_config_concise(config_text)?;
+    Ok(config.port)
+}
+
+/// Question mark in closures
+fn process_items(items: List<Text>) -> Result<List<Int>, ConfigError> {
+    items.iter()
+        .map(|item| {
+            // ? works inside closures that return Result
+            let value = parse_int(item)?;
+            Ok(value * 2)
+        })
+        .collect()
+}
+
+/// Nested question marks
+fn nested_operations(input: &Text) -> Result<Int, ConfigError> {
+    // Multiple ? operators can be chained
+    let field = get_field(input, "port")?;
+    let parsed = parse_int(&field)?;
+    let doubled = safe_multiply(parsed, 2)?;
+    Ok(doubled)
+}
+
+fn safe_multiply(a: Int, b: Int) -> Result<Int, ConfigError> {
+    // Check for overflow (simplified)
+    if a > 1000000 || b > 1000000 {
+        Err(ConfigError.InvalidValue {
+            field: "multiply",
+            value: format("{} * {}", a, b)
+        })
+    } else {
+        Ok(a * b)
+    }
+}
+
+/// Question mark with try blocks
+fn try_block_example(config_text: &Text) -> Result<Int, ConfigError> {
+    let result = try {
+        let host = get_field(config_text, "host")?;
+        let port = parse_int(&get_field(config_text, "port")?)?;
+        port + 1
+    };
+    result
+}
+
+fn main() {
+    // Test question mark with Result
+    let config_text = "host=localhost;port=8080";
+
+    match parse_config_concise(&config_text) {
+        Ok(config) => println(format("Final result: {}", config.port - 8038)),
+        Err(e) => println(format("Config error: {:?}", e))
+    }
+
+    // Test question mark with Maybe
+    let maybe_result = maybe_chain();
+    println(format("Maybe chain: {:?}", maybe_result.map(|x| x + 170)));
+
+    // Test early return with None
+    let none_result = maybe_chain_with_none();
+    match none_result {
+        Some(v) => println(format("Unexpected: {}", v)),
+        None => { /* Expected - early return happened */ }
+    }
+}

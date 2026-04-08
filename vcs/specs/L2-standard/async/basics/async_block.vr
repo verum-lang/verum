@@ -1,0 +1,308 @@
+// @test: run
+// @expected-stdout: Basic block: 42\nWith await: 100\nWith capture: 60\nMove block: moved\nConditional: 10\nLoop block: 55\nNested: 200
+// @tier: 0
+// @level: L2
+// @tags: async, block, expression
+// @description: Comprehensive async block expression patterns
+
+// Helper async functions
+async fn fetch_value() -> Int {
+    50
+}
+
+async fn compute(x: Int) -> Int {
+    x * 2
+}
+
+// Basic async block as expression
+async fn basic_block() -> Int {
+    let future = async {
+        42
+    };
+
+    future.await
+}
+
+// Async block with await inside
+async fn block_with_await() -> Int {
+    let future = async {
+        let value = fetch_value().await;
+        compute(value).await
+    };
+
+    future.await
+}
+
+// Async block with captured variables
+async fn block_with_capture() -> Int {
+    let base = 10;
+    let multiplier = 5;
+
+    let future = async {
+        base * multiplier + base
+    };
+
+    future.await
+}
+
+// Async block with move semantics
+async fn block_with_move() -> Text {
+    let owned = Text.from("moved");
+
+    // Move ownership into the block
+    let future = async move {
+        owned
+    };
+
+    // owned is no longer accessible here
+    future.await
+}
+
+// Async block with mutable capture
+async fn block_with_mut_capture() -> Int {
+    let mut counter = 0;
+
+    let future = async {
+        counter += 1;
+        counter
+    };
+
+    future.await
+}
+
+// Async block returning Result
+async fn block_with_result() -> Result<Int, Error> {
+    let future = async {
+        let value = fetch_value().await;
+        let result: Result<Int, Error> = if value > 0 {
+            Ok(value)
+        } else {
+            Err(Error.new("negative value"))
+        };
+        result
+    };
+
+    future.await
+}
+
+// Async block in conditional
+async fn conditional_block() -> Int {
+    let condition = true;
+
+    let value = if condition {
+        async { 10 }.await
+    } else {
+        async { 20 }.await
+    };
+
+    value
+}
+
+// Async block in loop
+async fn loop_block() -> Int {
+    let mut sum = 0;
+
+    for i in 1..=10 {
+        sum += async {
+            i
+        }.await;
+    }
+
+    sum
+}
+
+// Nested async blocks
+async fn nested_blocks() -> Int {
+    let outer = async {
+        let inner = async {
+            100
+        };
+
+        inner.await * 2
+    };
+
+    outer.await
+}
+
+// Async block with complex control flow
+async fn complex_control_flow() -> Int {
+    let future = async {
+        let mut result = 0;
+
+        for i in 0..5 {
+            if i % 2 == 0 {
+                result += i;
+            } else {
+                result -= i;
+            }
+        }
+
+        // Early return in block
+        if result < 0 {
+            return 0;
+        }
+
+        result
+    };
+
+    future.await
+}
+
+// Async block with pattern matching
+async fn pattern_match_block() -> Text {
+    let value: Maybe<Int> = Some(42);
+
+    let future = async {
+        match value {
+            Some(n) if n > 0 => f"positive: {n}",
+            Some(n) => f"non-positive: {n}",
+            None => "none",
+        }
+    };
+
+    future.await
+}
+
+// Async block stored in variable
+async fn stored_block() -> Int {
+    let future1 = async { 10 };
+    let future2 = async { 20 };
+    let future3 = async { 30 };
+
+    future1.await + future2.await + future3.await
+}
+
+// Async block with try/recover
+async fn block_with_error_handling() -> Int {
+    let future = async {
+        try {
+            let value = fetch_value().await;
+            value
+        } recover error {
+            0
+        }
+    };
+
+    future.await
+}
+
+// Async block with defer
+async fn block_with_defer() -> Int {
+    let future = async {
+        defer {
+            // Cleanup when block completes
+            println("cleanup");
+        }
+
+        42
+    };
+
+    future.await
+}
+
+// Async block as function argument
+async fn take_future<T>(f: Future<T>) -> T {
+    f.await
+}
+
+async fn block_as_argument() -> Int {
+    take_future(async { 42 }).await
+}
+
+// Async block with struct construction
+type Data is {
+    value: Int,
+    name: Text,
+};
+
+async fn block_with_struct() -> Data {
+    async {
+        Data {
+            value: 42,
+            name: "answer",
+        }
+    }.await
+}
+
+// Async block with tuple
+async fn block_with_tuple() -> (Int, Text) {
+    async {
+        (42, "hello")
+    }.await
+}
+
+// Async block with array operations
+async fn block_with_array() -> List<Int> {
+    async {
+        let mut arr = [1, 2, 3];
+        arr.push(4);
+        arr.push(5);
+        arr
+    }.await
+}
+
+// Immediately invoked async block
+async fn iife_block() -> Int {
+    // Immediately invoked and awaited
+    let result = async {
+        let a = 10;
+        let b = 20;
+        a + b
+    }.await;
+
+    result
+}
+
+// Async block with type annotation
+async fn typed_block() -> Int {
+    let future: Future<Int> = async {
+        42
+    };
+
+    future.await
+}
+
+// Chained async blocks
+async fn chained_blocks() -> Int {
+    let step1 = async { 10 };
+    let step2 = async {
+        let v = step1.await;
+        v * 2
+    };
+    let step3 = async {
+        let v = step2.await;
+        v + 5
+    };
+
+    step3.await  // ((10 * 2) + 5) = 25
+}
+
+async fn main() {
+    // Basic block
+    let basic = basic_block().await;
+    println(f"Basic block: {basic}");
+
+    // With await
+    let awaited = block_with_await().await;
+    println(f"With await: {awaited}");
+
+    // With capture
+    let captured = block_with_capture().await;
+    println(f"With capture: {captured}");
+
+    // Move semantics
+    let moved = block_with_move().await;
+    println(f"Move block: {moved}");
+
+    // Conditional
+    let cond = conditional_block().await;
+    println(f"Conditional: {cond}");
+
+    // Loop
+    let looped = loop_block().await;
+    println(f"Loop block: {looped}");
+
+    // Nested
+    let nested = nested_blocks().await;
+    println(f"Nested: {nested}");
+}

@@ -1,0 +1,56 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: map, iteration, for_in
+// @expect: pass
+
+// Test Map iteration patterns that production code needs.
+
+fn main() -> Int {
+    let mut m = Map.new();
+    m.insert("x", 10);
+    m.insert("y", 20);
+    m.insert("z", 30);
+
+    // Pattern 1: iterate values by getting keys individually
+    let mut sum = 0;
+    sum = sum + m.get("x");
+    sum = sum + m.get("y");
+    sum = sum + m.get("z");
+
+    if sum != 60 {
+        print(f"FAIL: sum = {sum}, expected 60");
+        return 1;
+    }
+
+    // Pattern 2: Map.len() + contains_key
+    if m.len() != 3 {
+        print(f"FAIL: len = {m.len()}");
+        return 1;
+    }
+    if !m.contains_key("x") {
+        print("FAIL: contains_key x");
+        return 1;
+    }
+
+    // Pattern 3: remove and re-check
+    m.remove("y");
+    if m.len() != 2 {
+        print(f"FAIL: len after remove = {m.len()}");
+        return 1;
+    }
+    if m.contains_key("y") {
+        print("FAIL: y still exists");
+        return 1;
+    }
+
+    // Pattern 4: overwrite
+    m.insert("x", 100);
+    if m.get("x") != 100 {
+        print(f"FAIL: overwrite = {m.get(\"x\")}");
+        return 1;
+    }
+
+    print("PASS: map iteration patterns work");
+    0
+}

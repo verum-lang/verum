@@ -1,0 +1,230 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, blocks, basic
+
+// Basic block expressions
+
+fn test_empty_block() {
+    // Empty block
+    let empty = {};
+}
+
+fn test_single_expression_blocks() {
+    // Single expression block
+    let single = { 42 };
+    let single_str = { "hello" };
+    let single_bool = { true };
+}
+
+fn test_block_with_single_statement() {
+    // Block with single statement
+    let with_stmt = {
+        let x = 5;
+        x
+    };
+}
+
+fn test_block_with_multiple_statements() {
+    // Block with multiple statements
+    let multi = {
+        let a = 1;
+        let b = 2;
+        a + b
+    };
+}
+
+fn test_block_unit_return() {
+    fn do_something() {}
+
+    // Block with no trailing expression (Unit)
+    let unit_block = {
+        do_something()
+    };
+}
+
+fn test_nested_blocks() {
+    // Nested blocks
+    let nested = {
+        let outer = 10;
+        {
+            let inner = 20;
+            outer + inner
+        }
+    };
+}
+
+fn test_deeply_nested_blocks() {
+    // Deeply nested blocks
+    let deep = {
+        {
+            {
+                {
+                    42
+                }
+            }
+        }
+    };
+}
+
+// Block as function body
+fn compute() -> Int {
+    let x = 10;
+    let y = 20;
+    x + y
+}
+
+fn test_block_in_conditional() {
+    fn calculate() -> Int { 10 }
+    fn transform(x: Int) -> Int { x * 2 }
+    fn default_value() -> Int { 0 }
+
+    let condition = true;
+
+    // Block in conditional
+    let cond_block = if condition {
+        let temp = calculate();
+        transform(temp)
+    } else {
+        default_value()
+    };
+}
+
+fn test_block_in_match() {
+    fn prepare() -> Int { 1 }
+    fn process(x: Int) -> Int { x }
+    fn cleanup() {}
+
+    let value = 1;
+
+    // Block in match arms
+    let match_block = match value {
+        1 => {
+            let x = prepare();
+            process(x)
+        },
+        2 => {
+            cleanup();
+            42
+        },
+        _ => { 0 }
+    };
+}
+
+fn test_block_in_loop() {
+    type Item is { done: Bool };
+
+    fn next() -> Item { Item { done: true } }
+    fn is_done(i: &Item) -> Bool { i.done }
+    fn process(i: Item) {}
+
+    // Block in loop
+    loop {
+        let item = next();
+        if is_done(&item) {
+            break;
+        }
+        process(item);
+    }
+}
+
+fn test_block_in_while() {
+    type Status is { stop: Bool };
+
+    fn check() -> Status { Status { stop: false } }
+    fn should_stop(s: &Status) -> Bool { s.stop }
+
+    let mut running = true;
+
+    // Block in while
+    while running {
+        let status = check();
+        if should_stop(&status) {
+            running = false;
+        }
+    }
+}
+
+fn test_block_in_for() {
+    fn transform(x: Int) -> Int { x * 2 }
+
+    let collection = [1, 2, 3];
+    let mut results = [];
+
+    // Block in for
+    for item in collection {
+        let processed = transform(item);
+        results.push(processed);
+    }
+}
+
+// Block with early return
+fn with_return(x: Int) -> Int {
+    if x < 0 {
+        return 0;
+    }
+    x * 2
+}
+
+fn test_block_with_break_value() {
+    fn condition() -> Bool { true }
+
+    // Block with break value
+    let loop_result = loop {
+        if condition() {
+            break 42;
+        }
+    };
+}
+
+fn test_block_shadowing() {
+    // Block shadowing
+    let shadowed = {
+        let x = 1;
+        let x = x + 1;  // Shadows previous x
+        let x = x * 2;  // Shadows again
+        x              // Returns 4
+    };
+}
+
+fn test_block_with_mutable_bindings() {
+    // Block with mutable bindings
+    let with_mut = {
+        let mut counter = 0;
+        counter += 1;
+        counter += 2;
+        counter
+    };
+}
+
+// Block as argument
+fn takes_block(f: fn() -> Int) -> Int {
+    f()
+}
+
+fn test_block_in_struct_initialization() {
+    fn expensive() -> Int { 42 }
+
+    // Block in struct initialization
+    type Container is {
+        value: Int,
+    };
+
+    let container = Container {
+        value: {
+            let computed = expensive();
+            computed * 2
+        }
+    };
+}
+
+fn test_block_with_defer() {
+    fn cleanup() {}
+    fn do_work() -> Int { 42 }
+
+    // Block with deferred execution
+    let with_defer = {
+        defer { cleanup(); };
+        do_work()
+    };
+}

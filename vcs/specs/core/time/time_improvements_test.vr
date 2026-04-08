@@ -1,0 +1,326 @@
+// =============================================================================
+// time_improvements_test.vr - Tests for time module improvements
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: time, duration, instant, system_time, display, core
+// @description: Tests for Duration.max_value, Display for Instant and
+//               SystemTime, time arithmetic
+// =============================================================================
+
+mount core.time.duration.Duration;
+mount core.time.instant.Instant;
+mount core.time.system_time.SystemTime;
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Duration.max_value
+// =============================================================================
+
+@test
+fn test_duration_max_value_not_zero() {
+    let m = Duration.max_value();
+    assert(!m.is_zero());
+}
+
+@test
+fn test_duration_max_value_equals_itself() {
+    assert(Duration.max_value() == Duration.max_value());
+}
+
+@test
+fn test_duration_zero_less_than_max() {
+    assert(Duration.zero() < Duration.max_value());
+}
+
+@test
+fn test_duration_saturating_add_to_max() {
+    let big = Duration.max_value();
+    let result = big.saturating_add(Duration.secs(1));
+    // Should saturate at max
+    assert(result == Duration.max_value());
+}
+
+@test
+fn test_duration_saturating_sub_to_zero() {
+    let small = Duration.secs(1);
+    let result = small.saturating_sub(Duration.secs(100));
+    assert(result == Duration.zero());
+}
+
+@test
+fn test_duration_max_greater_than_hours() {
+    let big = Duration.hours(1_000_000);
+    assert(Duration.max_value() >= big);
+}
+
+// =============================================================================
+// Section 2: Duration core operations
+// =============================================================================
+
+@test
+fn test_duration_zero_is_zero() {
+    assert(Duration.zero().is_zero());
+}
+
+@test
+fn test_duration_secs_as_millis() {
+    let d = Duration.secs(3);
+    assert_eq(d.as_millis(), 3000);
+}
+
+@test
+fn test_duration_millis_as_secs() {
+    let d = Duration.millis(5500);
+    assert_eq(d.as_secs(), 5);
+}
+
+@test
+fn test_duration_add() {
+    let a = Duration.secs(2);
+    let b = Duration.secs(3);
+    let c = a + b;
+    assert_eq(c.as_secs(), 5);
+}
+
+@test
+fn test_duration_sub() {
+    let a = Duration.secs(5);
+    let b = Duration.secs(3);
+    let c = a - b;
+    assert_eq(c.as_secs(), 2);
+}
+
+@test
+fn test_duration_mul() {
+    let a = Duration.millis(100);
+    let b = a * 5;
+    assert_eq(b.as_millis(), 500);
+}
+
+@test
+fn test_duration_div() {
+    let a = Duration.secs(10);
+    let b = a / 2;
+    assert_eq(b.as_secs(), 5);
+}
+
+@test
+fn test_duration_checked_add_overflow() {
+    let big = Duration.max_value();
+    let result = big.checked_add(Duration.secs(1));
+    assert(result.is_none());
+}
+
+@test
+fn test_duration_checked_sub_underflow() {
+    let small = Duration.secs(1);
+    let result = small.checked_sub(Duration.secs(100));
+    assert(result.is_none());
+}
+
+@test
+fn test_duration_checked_mul_overflow() {
+    let big = Duration.max_value();
+    let result = big.checked_mul(2);
+    assert(result.is_none());
+}
+
+@test
+fn test_duration_checked_div_zero() {
+    let d = Duration.secs(10);
+    let result = d.checked_div(0);
+    assert(result.is_none());
+}
+
+@test
+fn test_duration_eq() {
+    let a = Duration.millis(500);
+    let b = Duration.millis(500);
+    assert(a == b);
+}
+
+@test
+fn test_duration_neq() {
+    let a = Duration.millis(500);
+    let b = Duration.millis(600);
+    assert(a != b);
+}
+
+@test
+fn test_duration_ord() {
+    let a = Duration.millis(100);
+    let b = Duration.millis(200);
+    assert(a < b);
+    assert(b > a);
+}
+
+@test
+fn test_duration_clone() {
+    let a = Duration.secs(42);
+    let b = a.clone();
+    assert(a == b);
+}
+
+@test
+fn test_duration_default() {
+    let d = Duration.default();
+    assert(d.is_zero());
+}
+
+@test
+fn test_duration_new_secs_nanos() {
+    let d = Duration.new(1, 500_000_000);
+    assert_eq(d.as_millis(), 1500);
+}
+
+@test
+fn test_duration_subsec_nanos() {
+    let d = Duration.new(2, 123_000_000);
+    assert_eq(d.subsec_millis(), 123);
+}
+
+@test
+fn test_duration_from_micros() {
+    let d = Duration.micros(1500);
+    assert_eq(d.as_micros(), 1500);
+}
+
+@test
+fn test_duration_from_minutes() {
+    let d = Duration.mins(2);
+    assert_eq(d.as_secs(), 120);
+}
+
+@test
+fn test_duration_from_hours() {
+    let d = Duration.hours(1);
+    assert_eq(d.as_secs(), 3600);
+}
+
+// =============================================================================
+// Section 3: Instant (using now() since opaque)
+// =============================================================================
+
+@test
+fn test_instant_now_returns() {
+    let i = Instant.now();
+    // Just verify it doesn't panic and returns a value
+    let d = i.elapsed();
+    assert(d >= Duration.zero());
+}
+
+@test
+fn test_instant_checked_add() {
+    let i = Instant.now();
+    let result = i.checked_add(Duration.secs(10));
+    assert(result.is_some());
+}
+
+@test
+fn test_instant_checked_sub() {
+    let i = Instant.now();
+    // Subtracting a huge duration should return None
+    let result = i.checked_sub(Duration.max_value());
+    // May or may not be None depending on current time
+    // Just verify it doesn't panic
+    let _ = result;
+}
+
+// =============================================================================
+// Section 4: SystemTime
+// =============================================================================
+
+@test
+fn test_system_time_unix_epoch() {
+    let epoch = SystemTime.UNIX_EPOCH();
+    let d = epoch.duration_since_epoch();
+    assert(d.is_zero());
+}
+
+@test
+fn test_system_time_from_timestamp() {
+    let t = SystemTime.from_timestamp(1000);
+    let d = t.duration_since_epoch();
+    assert_eq(d.as_secs(), 1000);
+}
+
+@test
+fn test_system_time_from_timestamp_millis() {
+    let t = SystemTime.from_timestamp_millis(2500);
+    let d = t.duration_since_epoch();
+    assert_eq(d.as_millis(), 2500);
+}
+
+@test
+fn test_system_time_timestamp() {
+    let t = SystemTime.from_timestamp(42);
+    assert_eq(t.timestamp(), 42);
+}
+
+@test
+fn test_system_time_eq() {
+    let a = SystemTime.from_timestamp(100);
+    let b = SystemTime.from_timestamp(100);
+    assert(a == b);
+}
+
+@test
+fn test_system_time_neq() {
+    let a = SystemTime.from_timestamp(100);
+    let b = SystemTime.from_timestamp(200);
+    assert(a != b);
+}
+
+@test
+fn test_system_time_ord() {
+    let a = SystemTime.from_timestamp(10);
+    let b = SystemTime.from_timestamp(20);
+    assert(a < b);
+}
+
+@test
+fn test_system_time_add_duration() {
+    let t = SystemTime.from_timestamp(100);
+    let d = Duration.secs(50);
+    let result = t + d;
+    assert_eq(result.timestamp(), 150);
+}
+
+@test
+fn test_system_time_sub_duration() {
+    let t = SystemTime.from_timestamp(100);
+    let d = Duration.secs(30);
+    let result = t - d;
+    assert_eq(result.timestamp(), 70);
+}
+
+@test
+fn test_system_time_checked_add() {
+    let t = SystemTime.from_timestamp(100);
+    let result = t.checked_add(Duration.secs(50));
+    assert(result.is_some());
+}
+
+@test
+fn test_system_time_clone() {
+    let t = SystemTime.from_timestamp(42);
+    let t2 = t.clone();
+    assert(t == t2);
+}
+
+@test
+fn test_system_time_duration_since_epoch() {
+    let t = SystemTime.from_timestamp(999);
+    let d = t.duration_since_epoch();
+    assert_eq(d.as_secs(), 999);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

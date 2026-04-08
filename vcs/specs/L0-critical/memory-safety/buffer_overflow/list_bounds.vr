@@ -1,0 +1,15 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-check, list
+// @description: Tests that List access beyond bounds causes a panic
+
+fn main() {
+    let items: List<Int> = [10, 20, 30, 40, 50];
+
+    // Valid access
+    let _ = items[4];  // Last element - OK
+
+    // Invalid access - index beyond list size
+    let _ = items[5];  // Panic: Index out of bounds
+}

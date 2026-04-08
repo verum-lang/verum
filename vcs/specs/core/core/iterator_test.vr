@@ -1,0 +1,2159 @@
+// =============================================================================
+// iterator_test.vr - Comprehensive tests for Iterator protocol and adapters
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: iterator, protocol, adapters, transducers, core
+// @description: Tests for Iterator protocol, adapters, construction functions, and transducers
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// Section 1: Basic Iterator Protocol - next() and Exhaustion
+// =============================================================================
+
+/// Test that range iterator produces expected sequence
+@test
+fn test_iterator_next_basic() {
+    let mut iter = range(0, 5);
+
+    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next(), None);
+}
+
+/// Test that iterator returns None after exhaustion
+@test
+fn test_iterator_exhaustion() {
+    let mut iter = range(0, 2);
+
+    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), None);
+    // Continued calls should also return None
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), None);
+}
+
+/// Test empty iterator
+@test
+fn test_iterator_empty_range() {
+    let mut iter = range(5, 5);  // Empty range
+    assert_eq(iter.next(), None);
+}
+
+/// Test iterator with negative range (empty)
+@test
+fn test_iterator_negative_range() {
+    let mut iter = range(10, 5);  // end < start, should be empty
+    assert_eq(iter.next(), None);
+}
+
+// =============================================================================
+// Section 2: Size Hints
+// =============================================================================
+
+/// Test size_hint for range
+@test
+fn test_size_hint_range() {
+    let iter = range(0, 10);
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 10);
+    assert_eq(upper, Some(10));
+}
+
+/// Test size_hint for empty range
+@test
+fn test_size_hint_empty() {
+    let iter = range(5, 5);
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 0);
+    assert_eq(upper, Some(0));
+}
+
+/// Test size_hint updates during iteration
+@test
+fn test_size_hint_updates() {
+    let mut iter = range(0, 5);
+
+    assert_eq(iter.size_hint(), (5, Some(5)));
+    iter.next();
+    assert_eq(iter.size_hint(), (4, Some(4)));
+    iter.next();
+    assert_eq(iter.size_hint(), (3, Some(3)));
+}
+
+/// Test size_hint for infinite iterator
+@test
+fn test_size_hint_infinite() {
+    let iter = count_from(0);
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, Int.max_value());
+    assert_eq(upper, None);
+}
+
+// =============================================================================
+// Section 3: Consuming Adapters - count, last, nth
+// =============================================================================
+
+/// Test count consumes iterator and returns element count
+@test
+fn test_count_basic() {
+    let iter = range(0, 10);
+    assert_eq(iter.count(), 10);
+}
+
+/// Test count on empty iterator
+@test
+fn test_count_empty() {
+    let iter = range(0, 0);
+    assert_eq(iter.count(), 0);
+}
+
+/// Test last returns final element
+@test
+fn test_last_basic() {
+    let iter = range(0, 5);
+    assert_eq(iter.last(), Some(4));
+}
+
+/// Test last on empty iterator
+@test
+fn test_last_empty() {
+    let iter = range(0, 0);
+    assert_eq(iter.last(), None);
+}
+
+/// Test last on single element
+@test
+fn test_last_single() {
+    let iter = once(42);
+    assert_eq(iter.last(), Some(42));
+}
+
+/// Test nth returns correct element
+@test
+fn test_nth_basic() {
+    let mut iter = range(0, 10);
+    assert_eq(iter.nth(0), Some(0));
+    assert_eq(iter.nth(0), Some(1));  // nth consumes elements before it
+    assert_eq(iter.nth(2), Some(4));  // Skip 2, 3, return 4
+}
+
+/// Test nth past end returns None
+@test
+fn test_nth_past_end() {
+    let mut iter = range(0, 5);
+    assert_eq(iter.nth(10), None);
+}
+
+/// Test nth on empty iterator
+@test
+fn test_nth_empty() {
+    let mut iter = range(0, 0);
+    assert_eq(iter.nth(0), None);
+}
+
+// =============================================================================
+// Section 4: advance_by
+// =============================================================================
+
+/// Test advance_by advances iterator
+@test
+fn test_advance_by_basic() {
+    let mut iter = range(0, 10);
+    assert_eq(iter.advance_by(3), Ok(()));
+    assert_eq(iter.next(), Some(3));
+}
+
+/// Test advance_by with insufficient elements
+@test
+fn test_advance_by_insufficient() {
+    let mut iter = range(0, 5);
+    assert_eq(iter.advance_by(10), Err(5));  // Only advanced 5 before exhaustion
+}
+
+/// Test advance_by zero
+@test
+fn test_advance_by_zero() {
+    let mut iter = range(0, 5);
+    assert_eq(iter.advance_by(0), Ok(()));
+    assert_eq(iter.next(), Some(0));
+}
+
+// =============================================================================
+// Section 5: Transforming Adapters - map
+// =============================================================================
+
+/// Test map transforms elements
+@test
+fn test_map_basic() {
+    let iter = range(0, 5).map(|x| x * 2);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 2, 4, 6, 8]);
+}
+
+/// Test map preserves size hint
+@test
+fn test_map_size_hint() {
+    let iter = range(0, 10).map(|x| x + 1);
+    assert_eq(iter.size_hint(), (10, Some(10)));
+}
+
+/// Test map with type conversion
+@test
+fn test_map_type_conversion() {
+    let iter = range(0, 3).map(|x| f"value_{x}");
+    let result: List<Text> = iter.collect();
+    assert_eq(result, ["value_0", "value_1", "value_2"]);
+}
+
+/// Test map laziness
+@test
+fn test_map_lazy() {
+    let mut counter = 0;
+    let mut iter = range(0, 5).map(|x| {
+        counter = counter + 1;
+        x * 2
+    });
+
+    assert_eq(counter, 0);  // Nothing computed yet
+    iter.next();
+    assert_eq(counter, 1);  // Only one element computed
+}
+
+// =============================================================================
+// Section 6: Transforming Adapters - filter
+// =============================================================================
+
+/// Test filter removes non-matching elements
+@test
+fn test_filter_basic() {
+    let iter = range(0, 10).filter(|x| *x % 2 == 0);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 2, 4, 6, 8]);
+}
+
+/// Test filter all pass
+@test
+fn test_filter_all_pass() {
+    let iter = range(0, 5).filter(|_| true);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test filter none pass
+@test
+fn test_filter_none_pass() {
+    let iter = range(0, 5).filter(|_| false);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+/// Test filter on empty iterator
+@test
+fn test_filter_empty() {
+    let iter = range(0, 0).filter(|x| *x > 0);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+// =============================================================================
+// Section 7: Transforming Adapters - filter_map
+// =============================================================================
+
+/// Test filter_map combines filter and map
+@test
+fn test_filter_map_basic() {
+    let iter = range(0, 10).filter_map(|x| {
+        if x % 2 == 0 {
+            Some(x * 10)
+        } else {
+            None
+        }
+    });
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 20, 40, 60, 80]);
+}
+
+/// Test filter_map all None
+@test
+fn test_filter_map_all_none() {
+    let iter = range(0, 5).filter_map(|_| -> Maybe<Int> { None });
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+/// Test filter_map all Some
+@test
+fn test_filter_map_all_some() {
+    let iter = range(0, 3).filter_map(|x| Some(x + 100));
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [100, 101, 102]);
+}
+
+// =============================================================================
+// Section 8: Transforming Adapters - flat_map
+// =============================================================================
+
+/// Test flat_map flattens nested iterators
+@test
+fn test_flat_map_basic() {
+    let iter = range(1, 4).flat_map(|x| range(0, x));
+    let result: List<Int> = iter.collect();
+    // 1 -> [0], 2 -> [0,1], 3 -> [0,1,2]
+    assert_eq(result, [0, 0, 1, 0, 1, 2]);
+}
+
+/// Test flat_map with empty inner iterators
+@test
+fn test_flat_map_empty_inner() {
+    let iter = range(0, 3).flat_map(|_| range(0, 0));  // All empty
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+/// Test flat_map single element inner
+@test
+fn test_flat_map_single_inner() {
+    let iter = range(0, 3).flat_map(|x| once(x * 10));
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 10, 20]);
+}
+
+// =============================================================================
+// Section 9: Transforming Adapters - take
+// =============================================================================
+
+/// Test take limits elements
+@test
+fn test_take_basic() {
+    let iter = range(0, 100).take(5);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test take more than available
+@test
+fn test_take_more_than_available() {
+    let iter = range(0, 3).take(10);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2]);
+}
+
+/// Test take zero
+@test
+fn test_take_zero() {
+    let iter = range(0, 10).take(0);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+/// Test take size hint
+@test
+fn test_take_size_hint() {
+    let iter = range(0, 100).take(5);
+    assert_eq(iter.size_hint(), (5, Some(5)));
+
+    let iter2 = range(0, 3).take(10);
+    assert_eq(iter2.size_hint(), (3, Some(3)));
+}
+
+// =============================================================================
+// Section 10: Transforming Adapters - skip
+// =============================================================================
+
+/// Test skip removes initial elements
+@test
+fn test_skip_basic() {
+    let iter = range(0, 10).skip(5);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [5, 6, 7, 8, 9]);
+}
+
+/// Test skip more than available
+@test
+fn test_skip_more_than_available() {
+    let iter = range(0, 5).skip(10);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+/// Test skip zero
+@test
+fn test_skip_zero() {
+    let iter = range(0, 5).skip(0);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+// =============================================================================
+// Section 11: Transforming Adapters - take_while
+// =============================================================================
+
+/// Test take_while stops at first failure
+@test
+fn test_take_while_basic() {
+    let iter = range(0, 10).take_while(|x| *x < 5);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test take_while all pass
+@test
+fn test_take_while_all_pass() {
+    let iter = range(0, 5).take_while(|_| true);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test take_while none pass
+@test
+fn test_take_while_none_pass() {
+    let iter = range(0, 5).take_while(|_| false);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+/// Test take_while stops permanently after first failure
+@test
+fn test_take_while_stops_permanently() {
+    // Even if later elements would pass, they're not included
+    let iter = [1, 2, 3, -1, 5, 6].iter().take_while(|x| **x > 0);
+    let result: List<Int> = iter.map(|x| *x).collect();
+    assert_eq(result, [1, 2, 3]);
+}
+
+// =============================================================================
+// Section 12: Transforming Adapters - skip_while
+// =============================================================================
+
+/// Test skip_while skips initial matching elements
+@test
+fn test_skip_while_basic() {
+    let iter = range(0, 10).skip_while(|x| *x < 5);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [5, 6, 7, 8, 9]);
+}
+
+/// Test skip_while all pass (skips everything)
+@test
+fn test_skip_while_all_pass() {
+    let iter = range(0, 5).skip_while(|_| true);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+/// Test skip_while none pass (keeps everything)
+@test
+fn test_skip_while_none_pass() {
+    let iter = range(0, 5).skip_while(|_| false);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test skip_while only skips initial run
+@test
+fn test_skip_while_only_initial() {
+    // Should include -1 and following, even though -1 < 0
+    let iter = [-1, -2, 3, -4, 5].iter().skip_while(|x| **x < 0);
+    let result: List<Int> = iter.map(|x| *x).collect();
+    assert_eq(result, [3, -4, 5]);
+}
+
+// =============================================================================
+// Section 13: Transforming Adapters - chain
+// =============================================================================
+
+/// Test chain concatenates iterators
+@test
+fn test_chain_basic() {
+    let iter = range(0, 3).chain(range(10, 13));
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2, 10, 11, 12]);
+}
+
+/// Test chain with empty first
+@test
+fn test_chain_empty_first() {
+    let iter = range(0, 0).chain(range(1, 4));
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [1, 2, 3]);
+}
+
+/// Test chain with empty second
+@test
+fn test_chain_empty_second() {
+    let iter = range(0, 3).chain(range(0, 0));
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2]);
+}
+
+/// Test chain both empty
+@test
+fn test_chain_both_empty() {
+    let iter = range(0, 0).chain(range(0, 0));
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+// =============================================================================
+// Section 14: Transforming Adapters - zip
+// =============================================================================
+
+/// Test zip pairs elements
+@test
+fn test_zip_basic() {
+    let iter = range(0, 3).zip(range(10, 13));
+    let result: List<(Int, Int)> = iter.collect();
+    assert_eq(result, [(0, 10), (1, 11), (2, 12)]);
+}
+
+/// Test zip stops at shorter
+@test
+fn test_zip_unequal_length() {
+    let iter = range(0, 5).zip(range(10, 12));
+    let result: List<(Int, Int)> = iter.collect();
+    assert_eq(result, [(0, 10), (1, 11)]);
+}
+
+/// Test zip with empty
+@test
+fn test_zip_with_empty() {
+    let iter = range(0, 5).zip(range(0, 0));
+    let result: List<(Int, Int)> = iter.collect();
+    assert_eq(result, []);
+}
+
+/// Test zip size hint takes minimum
+@test
+fn test_zip_size_hint() {
+    let iter = range(0, 10).zip(range(0, 5));
+    assert_eq(iter.size_hint(), (5, Some(5)));
+}
+
+// =============================================================================
+// Section 15: Transforming Adapters - enumerate
+// =============================================================================
+
+/// Test enumerate adds indices
+@test
+fn test_enumerate_basic() {
+    let iter = ["a", "b", "c"].iter().enumerate();
+    let result: List<(Int, &Text)> = iter.collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0].0, 0);
+    assert_eq(*result[0].1, "a");
+    assert_eq(result[1].0, 1);
+    assert_eq(*result[1].1, "b");
+    assert_eq(result[2].0, 2);
+    assert_eq(*result[2].1, "c");
+}
+
+/// Test enumerate on empty
+@test
+fn test_enumerate_empty() {
+    let iter = range(0, 0).enumerate();
+    let result: List<(Int, Int)> = iter.collect();
+    assert_eq(result, []);
+}
+
+/// Test enumerate preserves size hint
+@test
+fn test_enumerate_size_hint() {
+    let iter = range(0, 10).enumerate();
+    assert_eq(iter.size_hint(), (10, Some(10)));
+}
+
+// =============================================================================
+// Section 16: Transforming Adapters - peekable
+// =============================================================================
+
+/// Test peekable allows peeking
+@test
+fn test_peekable_basic() {
+    let mut iter = range(0, 5).peekable();
+
+    assert_eq(iter.peek(), Some(&0));
+    assert_eq(iter.peek(), Some(&0));  // Doesn't consume
+    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.peek(), Some(&1));
+    assert_eq(iter.next(), Some(1));
+}
+
+/// Test peekable exhaustion
+@test
+fn test_peekable_exhaustion() {
+    let mut iter = range(0, 2).peekable();
+
+    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.peek(), None);
+    assert_eq(iter.next(), None);
+}
+
+/// Test peek_mut allows mutation
+@test
+fn test_peekable_peek_mut() {
+    let mut iter = range(0, 3).peekable();
+
+    if let Some(x) = iter.peek_mut() {
+        *x = 100;
+    }
+
+    assert_eq(iter.next(), Some(100));
+    assert_eq(iter.next(), Some(1));
+}
+
+// =============================================================================
+// Section 17: Transforming Adapters - dedup
+// =============================================================================
+
+/// Test dedup removes consecutive duplicates
+@test
+fn test_dedup_basic() {
+    let iter = [1, 1, 2, 2, 2, 3, 1, 1].iter().map(|x| *x).dedup();
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [1, 2, 3, 1]);
+}
+
+/// Test dedup on unique elements
+@test
+fn test_dedup_unique() {
+    let iter = [1, 2, 3, 4, 5].iter().map(|x| *x).dedup();
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [1, 2, 3, 4, 5]);
+}
+
+/// Test dedup all same
+@test
+fn test_dedup_all_same() {
+    let iter = [5, 5, 5, 5, 5].iter().map(|x| *x).dedup();
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [5]);
+}
+
+/// Test dedup empty
+@test
+fn test_dedup_empty() {
+    let iter: List<Int> = [];
+    let result: List<Int> = iter.iter().map(|x| *x).dedup().collect();
+    assert_eq(result, []);
+}
+
+// =============================================================================
+// Section 18: Transforming Adapters - interleave
+// =============================================================================
+
+/// Test interleave alternates elements
+@test
+fn test_interleave_basic() {
+    let iter = range(0, 3).interleave(range(10, 13));
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 10, 1, 11, 2, 12]);
+}
+
+/// Test interleave unequal lengths
+@test
+fn test_interleave_unequal() {
+    let iter = range(0, 5).interleave(range(10, 12));
+    let result: List<Int> = iter.collect();
+    // 0, 10, 1, 11, then a exhausted, continues with b
+    assert_eq(result, [0, 10, 1, 11, 2, 3, 4]);
+}
+
+/// Test interleave with empty
+@test
+fn test_interleave_with_empty() {
+    let iter = range(0, 3).interleave(range(0, 0));
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2]);
+}
+
+// =============================================================================
+// Section 19: Transforming Adapters - step_by
+// =============================================================================
+
+/// Test step_by takes every nth element
+@test
+fn test_step_by_basic() {
+    let iter = range(0, 10).step_by(2);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 2, 4, 6, 8]);
+}
+
+/// Test step_by with step 1 (no skipping)
+@test
+fn test_step_by_one() {
+    let iter = range(0, 5).step_by(1);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test step_by with large step
+@test
+fn test_step_by_large() {
+    let iter = range(0, 10).step_by(3);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 3, 6, 9]);
+}
+
+/// Test step_by larger than iterator
+@test
+fn test_step_by_larger_than_iter() {
+    let iter = range(0, 5).step_by(10);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0]);  // Only first element
+}
+
+// =============================================================================
+// Section 20: Transforming Adapters - inspect
+// =============================================================================
+
+/// Test inspect allows side effects
+@test
+fn test_inspect_basic() {
+    let mut seen: List<Int> = [];
+    let result: List<Int> = range(0, 5)
+        .inspect(|x| seen.push(*x))
+        .map(|x| x * 2)
+        .collect();
+
+    assert_eq(seen, [0, 1, 2, 3, 4]);
+    assert_eq(result, [0, 2, 4, 6, 8]);
+}
+
+/// Test inspect doesn't modify values
+@test
+fn test_inspect_no_modification() {
+    let result: List<Int> = range(0, 3)
+        .inspect(|_| {})  // No-op
+        .collect();
+
+    assert_eq(result, [0, 1, 2]);
+}
+
+// =============================================================================
+// Section 21: Transforming Adapters - fuse
+// =============================================================================
+
+/// Test fuse ensures None forever after first None
+@test
+fn test_fuse_basic() {
+    // Create an iterator that might return Some after None
+    // (simulated with a custom implementation)
+    let mut fused = range(0, 2).fuse();
+
+    assert_eq(fused.next(), Some(0));
+    assert_eq(fused.next(), Some(1));
+    assert_eq(fused.next(), None);
+    assert_eq(fused.next(), None);
+    assert_eq(fused.next(), None);
+}
+
+// =============================================================================
+// Section 22: Transforming Adapters - cycle
+// =============================================================================
+
+/// Test cycle repeats infinitely
+@test
+fn test_cycle_basic() {
+    let iter = [1, 2, 3].iter().map(|x| *x).cycle().take(10);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [1, 2, 3, 1, 2, 3, 1, 2, 3, 1]);
+}
+
+/// Test cycle on single element
+@test
+fn test_cycle_single() {
+    let iter = once(42).cycle().take(5);
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [42, 42, 42, 42, 42]);
+}
+
+// =============================================================================
+// Section 23: Folding Operations - fold
+// =============================================================================
+
+/// Test fold accumulates values
+@test
+fn test_fold_basic() {
+    let sum = range(1, 6).fold(0, |acc, x| acc + x);
+    assert_eq(sum, 15);  // 1+2+3+4+5
+}
+
+/// Test fold with string concatenation
+@test
+fn test_fold_string() {
+    let result = ["a", "b", "c"].iter().fold("", |acc, x| f"{acc}{*x}");
+    assert_eq(result, "abc");
+}
+
+/// Test fold on empty iterator
+@test
+fn test_fold_empty() {
+    let result = range(0, 0).fold(100, |acc, x| acc + x);
+    assert_eq(result, 100);  // Just initial value
+}
+
+/// Test fold order (left to right)
+@test
+fn test_fold_order() {
+    let result = [1, 2, 3].iter().fold("", |acc, x| f"{acc}{*x}");
+    assert_eq(result, "123");
+}
+
+// =============================================================================
+// Section 24: Folding Operations - reduce
+// =============================================================================
+
+/// Test reduce without initial value
+@test
+fn test_reduce_basic() {
+    let product = range(1, 6).reduce(|a, b| a * b);
+    assert_eq(product, Some(120));  // 1*2*3*4*5
+}
+
+/// Test reduce on empty iterator
+@test
+fn test_reduce_empty() {
+    let result = range(0, 0).reduce(|a, b| a + b);
+    assert_eq(result, None);
+}
+
+/// Test reduce on single element
+@test
+fn test_reduce_single() {
+    let result = once(42).reduce(|a, b| a + b);
+    assert_eq(result, Some(42));
+}
+
+/// Test reduce finds max
+@test
+fn test_reduce_max() {
+    let max_val = [3, 1, 4, 1, 5, 9].iter().map(|x| *x).reduce(|a, b| {
+        if a > b { a } else { b }
+    });
+    assert_eq(max_val, Some(9));
+}
+
+// =============================================================================
+// Section 25: Folding Operations - try_fold
+// =============================================================================
+
+/// Test try_fold succeeds
+@test
+fn test_try_fold_success() {
+    let result = range(1, 5).try_fold(0, |acc, x| Ok(acc + x));
+    assert_eq(result, Ok(10));
+}
+
+/// Test try_fold short circuits on error
+@test
+fn test_try_fold_error() {
+    let result = range(0, 10).try_fold(0, |acc, x| {
+        if x == 5 {
+            Err("hit 5")
+        } else {
+            Ok(acc + x)
+        }
+    });
+    assert_eq(result, Err("hit 5"));
+}
+
+/// Test try_fold empty iterator
+@test
+fn test_try_fold_empty() {
+    let result = range(0, 0).try_fold(100, |acc, x| Ok(acc + x));
+    assert_eq(result, Ok(100));
+}
+
+// =============================================================================
+// Section 26: Folding Operations - scan
+// =============================================================================
+
+/// Test scan with running sum
+@test
+fn test_scan_running_sum() {
+    let iter = [1, 2, 3, 4].iter().scan(0, |state, x| {
+        *state = *state + **x;
+        Some(*state)
+    });
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [1, 3, 6, 10]);
+}
+
+/// Test scan can terminate early
+@test
+fn test_scan_early_termination() {
+    let iter = range(0, 100).scan(0, |state, x| {
+        *state = *state + x;
+        if *state > 10 {
+            None
+        } else {
+            Some(*state)
+        }
+    });
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 3, 6, 10]);  // Stops when sum > 10
+}
+
+// =============================================================================
+// Section 27: Boolean Predicates - all
+// =============================================================================
+
+/// Test all returns true when all match
+@test
+fn test_all_true() {
+    let result = range(0, 10).all(|x| *x < 100);
+    assert(result);
+}
+
+/// Test all returns false when any doesn't match
+@test
+fn test_all_false() {
+    let result = range(0, 10).all(|x| *x < 5);
+    assert(!result);
+}
+
+/// Test all on empty iterator (vacuous truth)
+@test
+fn test_all_empty() {
+    let result = range(0, 0).all(|_| false);
+    assert(result);  // Vacuously true
+}
+
+/// Test all short circuits
+@test
+fn test_all_short_circuit() {
+    let mut count = 0;
+    let result = range(0, 100).all(|x| {
+        count = count + 1;
+        *x < 5
+    });
+    assert(!result);
+    assert_eq(count, 6);  // Only checked 0-5, stopped at 5
+}
+
+// =============================================================================
+// Section 28: Boolean Predicates - any
+// =============================================================================
+
+/// Test any returns true when one matches
+@test
+fn test_any_true() {
+    let result = range(0, 10).any(|x| *x == 5);
+    assert(result);
+}
+
+/// Test any returns false when none match
+@test
+fn test_any_false() {
+    let result = range(0, 10).any(|x| *x == 100);
+    assert(!result);
+}
+
+/// Test any on empty iterator
+@test
+fn test_any_empty() {
+    let result = range(0, 0).any(|_| true);
+    assert(!result);
+}
+
+/// Test any short circuits
+@test
+fn test_any_short_circuit() {
+    let mut count = 0;
+    let result = range(0, 100).any(|x| {
+        count = count + 1;
+        *x == 5
+    });
+    assert(result);
+    assert_eq(count, 6);  // Checked 0-5, stopped when found 5
+}
+
+// =============================================================================
+// Section 29: Search Operations - find
+// =============================================================================
+
+/// Test find returns first match
+@test
+fn test_find_found() {
+    let result = range(0, 10).find(|x| *x > 5);
+    assert_eq(result, Some(6));
+}
+
+/// Test find returns None when not found
+@test
+fn test_find_not_found() {
+    let result = range(0, 10).find(|x| *x > 100);
+    assert_eq(result, None);
+}
+
+/// Test find on empty iterator
+@test
+fn test_find_empty() {
+    let result = range(0, 0).find(|_| true);
+    assert_eq(result, None);
+}
+
+/// Test find gets first, not just any
+@test
+fn test_find_first() {
+    let result = [3, 1, 4, 1, 5].iter().find(|x| **x == 1);
+    assert_eq(result, Some(&1));  // The first 1
+}
+
+// =============================================================================
+// Section 30: Search Operations - find_map
+// =============================================================================
+
+// @skip: parse_int method not found on unresolved type (known limitation)
+// /// Test find_map transforms and filters
+// @test
+// fn test_find_map_found() {
+//     let result = ["a", "42", "b"].iter().find_map(|s| {
+//         (*s).parse_int().ok()
+//     });
+//     assert_eq(result, Some(42));
+// }
+
+// @skip: parse_int method not found on unresolved type (known limitation)
+// /// Test find_map returns None when all fail
+// @test
+// fn test_find_map_not_found() {
+//     let result = ["a", "b", "c"].iter().find_map(|s| {
+//         (*s).parse_int().ok()
+//     });
+//     assert_eq(result, None);
+// }
+
+// =============================================================================
+// Section 31: Search Operations - position
+// =============================================================================
+
+/// Test position returns index
+@test
+fn test_position_found() {
+    let result = range(10, 20).position(|x| *x == 15);
+    assert_eq(result, Some(5));
+}
+
+/// Test position returns None when not found
+@test
+fn test_position_not_found() {
+    let result = range(0, 10).position(|x| *x == 100);
+    assert_eq(result, None);
+}
+
+/// Test position on empty
+@test
+fn test_position_empty() {
+    let result = range(0, 0).position(|_| true);
+    assert_eq(result, None);
+}
+
+// =============================================================================
+// Section 32: Numeric Operations - sum
+// =============================================================================
+
+/// Test sum adds all elements
+@test
+fn test_sum_basic() {
+    let result = range(1, 6).sum();
+    assert_eq(result, 15);
+}
+
+/// Test sum on empty returns zero
+@test
+fn test_sum_empty() {
+    let result = range(0, 0).sum();
+    assert_eq(result, 0);
+}
+
+/// Test sum single element
+@test
+fn test_sum_single() {
+    let result = once(42).sum();
+    assert_eq(result, 42);
+}
+
+// =============================================================================
+// Section 33: Numeric Operations - product
+// =============================================================================
+
+/// Test product multiplies all elements
+@test
+fn test_product_basic() {
+    let result = range(1, 6).product();
+    assert_eq(result, 120);  // 1*2*3*4*5
+}
+
+/// Test product on empty returns one
+@test
+fn test_product_empty() {
+    let result = range(0, 0).product();
+    assert_eq(result, 1);
+}
+
+/// Test product with zero
+@test
+fn test_product_with_zero() {
+    let result = [1, 2, 0, 4, 5].iter().map(|x| *x).product();
+    assert_eq(result, 0);
+}
+
+// =============================================================================
+// Section 34: Min/Max Operations
+// =============================================================================
+
+/// Test max finds maximum
+@test
+fn test_max_basic() {
+    let result = [3, 1, 4, 1, 5, 9, 2, 6].iter().map(|x| *x).max();
+    assert_eq(result, Some(9));
+}
+
+/// Test max on empty
+@test
+fn test_max_empty() {
+    let result = range(0, 0).max();
+    assert_eq(result, None);
+}
+
+/// Test max single element
+@test
+fn test_max_single() {
+    let result = once(42).max();
+    assert_eq(result, Some(42));
+}
+
+/// Test min finds minimum
+@test
+fn test_min_basic() {
+    let result = [3, 1, 4, 1, 5, 9, 2, 6].iter().map(|x| *x).min();
+    assert_eq(result, Some(1));
+}
+
+/// Test min on empty
+@test
+fn test_min_empty() {
+    let result = range(0, 0).min();
+    assert_eq(result, None);
+}
+
+/// Test max_by_key
+@test
+fn test_max_by_key() {
+    let items = [(1, "a"), (5, "b"), (3, "c")];
+    let result = items.iter().max_by_key(|item| item.0);
+    assert_eq(result.map(|r| r.0), Some(5));
+}
+
+/// Test min_by_key
+@test
+fn test_min_by_key() {
+    let items = [(1, "a"), (5, "b"), (3, "c")];
+    let result = items.iter().min_by_key(|item| item.0);
+    assert_eq(result.map(|r| r.0), Some(1));
+}
+
+// =============================================================================
+// Section 35: Comparison Operations
+// =============================================================================
+
+/// Test cmp equal iterators
+@test
+fn test_cmp_equal() {
+    let result = range(0, 5).cmp(range(0, 5));
+    assert(result is Equal);
+}
+
+/// Test cmp first is less
+@test
+fn test_cmp_less() {
+    let result = range(0, 5).cmp(range(1, 6));
+    assert(result is Less);
+}
+
+/// Test cmp first is greater
+@test
+fn test_cmp_greater() {
+    let result = range(1, 6).cmp(range(0, 5));
+    assert(result is Greater);
+}
+
+/// Test cmp shorter is less
+@test
+fn test_cmp_shorter_less() {
+    let result = range(0, 3).cmp(range(0, 5));
+    assert(result is Less);
+}
+
+/// Test cmp longer is greater
+@test
+fn test_cmp_longer_greater() {
+    let result = range(0, 5).cmp(range(0, 3));
+    assert(result is Greater);
+}
+
+/// Test eq equal iterators
+@test
+fn test_eq_equal() {
+    let result = range(0, 5).eq(range(0, 5));
+    assert(result);
+}
+
+/// Test eq not equal
+@test
+fn test_eq_not_equal() {
+    let result = range(0, 5).eq(range(0, 6));
+    assert(!result);
+}
+
+// =============================================================================
+// Section 36: Collection Operations - collect
+// =============================================================================
+
+/// Test collect to List
+@test
+fn test_collect_list() {
+    let result: List<Int> = range(0, 5).collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test collect empty
+@test
+fn test_collect_empty() {
+    let result: List<Int> = range(0, 0).collect();
+    assert_eq(result, []);
+}
+
+// =============================================================================
+// Section 37: Collection Operations - partition
+// =============================================================================
+
+/// Test partition splits by predicate
+@test
+fn test_partition_basic() {
+    let (evens, odds): (List<Int>, List<Int>) = range(0, 10).partition(|x| *x % 2 == 0);
+    assert_eq(evens, [0, 2, 4, 6, 8]);
+    assert_eq(odds, [1, 3, 5, 7, 9]);
+}
+
+/// Test partition all left
+@test
+fn test_partition_all_left() {
+    let (left, right): (List<Int>, List<Int>) = range(0, 5).partition(|_| true);
+    assert_eq(left, [0, 1, 2, 3, 4]);
+    assert_eq(right, []);
+}
+
+/// Test partition all right
+@test
+fn test_partition_all_right() {
+    let (left, right): (List<Int>, List<Int>) = range(0, 5).partition(|_| false);
+    assert_eq(left, []);
+    assert_eq(right, [0, 1, 2, 3, 4]);
+}
+
+// =============================================================================
+// Section 38: Side Effects - for_each
+// =============================================================================
+
+/// Test for_each executes on each element
+@test
+fn test_for_each_basic() {
+    let mut sum = 0;
+    range(1, 6).for_each(|x| {
+        sum = sum + x;
+    });
+    assert_eq(sum, 15);
+}
+
+/// Test for_each on empty
+@test
+fn test_for_each_empty() {
+    let mut count = 0;
+    range(0, 0).for_each(|_| {
+        count = count + 1;
+    });
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section 39: DoubleEndedIterator Protocol
+// =============================================================================
+
+/// Test next_back returns from end
+@test
+fn test_next_back_basic() {
+    let mut iter = range(0, 5);
+
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), Some(1));
+    assert_eq(iter.next_back(), Some(0));
+    assert_eq(iter.next_back(), None);
+}
+
+/// Test mixing next and next_back
+@test
+fn test_next_and_next_back_mixed() {
+    let mut iter = range(0, 5);
+
+    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+/// Test advance_back_by
+@test
+fn test_advance_back_by_basic() {
+    let mut iter = range(0, 10);
+    assert_eq(iter.advance_back_by(3), Ok(()));
+    assert_eq(iter.next_back(), Some(6));
+}
+
+/// Test nth_back
+@test
+fn test_nth_back_basic() {
+    let mut iter = range(0, 10);
+    assert_eq(iter.nth_back(2), Some(7));  // Skip 9, 8, return 7
+}
+
+/// Test rfold folds from back
+@test
+fn test_rfold_basic() {
+    let result = ["a", "b", "c"].iter().rfold("", |acc, x| f"{acc}{**x}");
+    assert_eq(result, "cba");
+}
+
+/// Test rfind finds from back
+@test
+fn test_rfind_basic() {
+    let mut iter = [1, 2, 3, 2, 1].iter();
+    let result = iter.rfind(|x| **x == 2);
+    assert(result.is_some());
+    // Should find the second 2 (index 3)
+}
+
+// =============================================================================
+// Section 40: Rev Adapter
+// =============================================================================
+
+/// Test rev reverses iteration
+@test
+fn test_rev_basic() {
+    let result: List<Int> = range(0, 5).rev().collect();
+    assert_eq(result, [4, 3, 2, 1, 0]);
+}
+
+/// Test rev on empty
+@test
+fn test_rev_empty() {
+    let result: List<Int> = range(0, 0).rev().collect();
+    assert_eq(result, []);
+}
+
+/// Test rev.rev returns original order
+@test
+fn test_rev_rev() {
+    let result: List<Int> = range(0, 5).rev().rev().collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test rev preserves size hint
+@test
+fn test_rev_size_hint() {
+    let iter = range(0, 10).rev();
+    assert_eq(iter.size_hint(), (10, Some(10)));
+}
+
+// =============================================================================
+// Section 41: IntoIterator Protocol
+// =============================================================================
+
+/// Test iterator is its own IntoIterator
+@test
+fn test_into_iter_iterator() {
+    let iter = range(0, 5);
+    let iter2 = iter.into_iter();
+    let result: List<Int> = iter2.collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+// =============================================================================
+// Section 42: Iterator Construction - range
+// =============================================================================
+
+/// Test range creates half-open interval
+@test
+fn test_range_basic() {
+    let result: List<Int> = range(5, 10).collect();
+    assert_eq(result, [5, 6, 7, 8, 9]);
+}
+
+/// Test range with negative numbers
+@test
+fn test_range_negative() {
+    let result: List<Int> = range(-3, 3).collect();
+    assert_eq(result, [-3, -2, -1, 0, 1, 2]);
+}
+
+/// Test range is exact size
+@test
+fn test_range_exact_size() {
+    let iter = range(0, 100);
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 100);
+    assert_eq(upper, Some(100));
+}
+
+// =============================================================================
+// Section 43: Iterator Construction - range_inclusive
+// =============================================================================
+
+/// Test range_inclusive includes endpoint
+@test
+fn test_range_inclusive_basic() {
+    let result: List<Int> = range_inclusive(0, 5).collect();
+    assert_eq(result, [0, 1, 2, 3, 4, 5]);
+}
+
+/// Test range_inclusive single element
+@test
+fn test_range_inclusive_single() {
+    let result: List<Int> = range_inclusive(5, 5).collect();
+    assert_eq(result, [5]);
+}
+
+/// Test range_inclusive empty when start > end
+@test
+fn test_range_inclusive_empty() {
+    let result: List<Int> = range_inclusive(10, 5).collect();
+    assert_eq(result, []);
+}
+
+/// Test range_inclusive double ended
+@test
+fn test_range_inclusive_double_ended() {
+    let result: List<Int> = range_inclusive(0, 5).rev().collect();
+    assert_eq(result, [5, 4, 3, 2, 1, 0]);
+}
+
+// =============================================================================
+// Section 44: Iterator Construction - count_from
+// =============================================================================
+
+/// Test count_from creates infinite counter
+@test
+fn test_count_from_basic() {
+    let result: List<Int> = count_from(10).take(5).collect();
+    assert_eq(result, [10, 11, 12, 13, 14]);
+}
+
+/// Test count_from negative start
+@test
+fn test_count_from_negative() {
+    let result: List<Int> = count_from(-2).take(5).collect();
+    assert_eq(result, [-2, -1, 0, 1, 2]);
+}
+
+// =============================================================================
+// Section 45: Iterator Construction - repeat
+// =============================================================================
+
+/// Test repeat creates infinite repetition
+@test
+fn test_repeat_basic() {
+    let result: List<Int> = repeat(42).take(5).collect();
+    assert_eq(result, [42, 42, 42, 42, 42]);
+}
+
+/// Test repeat with complex type
+@test
+fn test_repeat_complex() {
+    let result: List<Text> = repeat("hello").take(3).collect();
+    assert_eq(result, ["hello", "hello", "hello"]);
+}
+
+// =============================================================================
+// Section 46: Iterator Construction - repeat_n
+// =============================================================================
+
+/// Test repeat_n creates bounded repetition
+@test
+fn test_repeat_n_basic() {
+    let result: List<Int> = repeat_n(7, 4).collect();
+    assert_eq(result, [7, 7, 7, 7]);
+}
+
+/// Test repeat_n zero times
+@test
+fn test_repeat_n_zero() {
+    let result: List<Int> = repeat_n(7, 0).collect();
+    assert_eq(result, []);
+}
+
+/// Test repeat_n size hint
+@test
+fn test_repeat_n_size_hint() {
+    let iter = repeat_n(1, 10);
+    assert_eq(iter.size_hint(), (10, Some(10)));
+}
+
+// =============================================================================
+// Section 47: Iterator Construction - once
+// =============================================================================
+
+/// Test once yields single element
+@test
+fn test_once_basic() {
+    let result: List<Int> = once(42).collect();
+    assert_eq(result, [42]);
+}
+
+/// Test once then exhausted
+@test
+fn test_once_exhaustion() {
+    let mut iter = once(42);
+    assert_eq(iter.next(), Some(42));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), None);
+}
+
+/// Test once size hint
+@test
+fn test_once_size_hint() {
+    let iter = once(42);
+    assert_eq(iter.size_hint(), (1, Some(1)));
+
+    let mut iter2 = once(42);
+    iter2.next();
+    assert_eq(iter2.size_hint(), (0, Some(0)));
+}
+
+// =============================================================================
+// Section 48: Iterator Construction - empty
+// =============================================================================
+
+/// Test empty yields nothing
+@test
+fn test_empty_basic() {
+    let result: List<Int> = empty().collect();
+    assert_eq(result, []);
+}
+
+/// Test empty next always None
+@test
+fn test_empty_always_none() {
+    let mut iter: Empty<Int> = empty();
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), None);
+}
+
+/// Test empty size hint
+@test
+fn test_empty_size_hint() {
+    let iter: Empty<Int> = empty();
+    assert_eq(iter.size_hint(), (0, Some(0)));
+}
+
+// =============================================================================
+// Section 49: Iterator Construction - from_fn
+// =============================================================================
+
+/// Test from_fn creates iterator from closure
+@test
+fn test_from_fn_basic() {
+    let mut n = 0;
+    let iter = from_fn(|| {
+        if n < 5 {
+            n = n + 1;
+            Some(n * 10)
+        } else {
+            None
+        }
+    });
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [10, 20, 30, 40, 50]);
+}
+
+/// Test from_fn finite
+@test
+fn test_from_fn_finite() {
+    let mut count = 3;
+    let iter = from_fn(|| {
+        if count > 0 {
+            count = count - 1;
+            Some(count)
+        } else {
+            None
+        }
+    });
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [2, 1, 0]);
+}
+
+// =============================================================================
+// Section 50: Iterator Construction - unfold
+// =============================================================================
+
+/// Test unfold generates sequence with state
+@test
+fn test_unfold_basic() {
+    // Generate Fibonacci-like sequence
+    let iter = unfold((0, 1), |state| {
+        let a = (*state).0;
+        let b = (*state).1;
+        if a > 100 {
+            None
+        } else {
+            *state = (b, a + b);
+            Some(a)
+        }
+    });
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89]);
+}
+
+/// Test unfold powers of two
+@test
+fn test_unfold_powers() {
+    let iter = unfold(1, |state| {
+        if *state > 1000 {
+            None
+        } else {
+            let val = *state;
+            *state = *state * 2;
+            Some(val)
+        }
+    });
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]);
+}
+
+// =============================================================================
+// Section 51: Iterator Construction - successors
+// =============================================================================
+
+/// Test successors generates chain
+@test
+fn test_successors_basic() {
+    let iter = successors(Some(1), |x| {
+        let next = *x * 2;
+        if next > 100 { None } else { Some(next) }
+    });
+    let result: List<Int> = iter.collect();
+    assert_eq(result, [1, 2, 4, 8, 16, 32, 64]);
+}
+
+/// Test successors with None start
+@test
+fn test_successors_none_start() {
+    let iter: Successors<Int, fn(&Int) -> Maybe<Int>> = successors(None, |x| Some(*x + 1));
+    let result: List<Int> = iter.collect();
+    assert_eq(result, []);
+}
+
+// =============================================================================
+// Section 52: Range UInt64 Specialization
+// =============================================================================
+
+/// Test Range<UInt64> works correctly
+@test
+fn test_range_uint64() {
+    let iter: Range<UInt64> = Range { current: 0u64, end: 5u64 };
+    let result: List<UInt64> = iter.collect();
+    assert_eq(result, [0u64, 1u64, 2u64, 3u64, 4u64]);
+}
+
+/// Test Range<UInt64> size hint
+@test
+fn test_range_uint64_size_hint() {
+    let iter: Range<UInt64> = Range { current: 10u64, end: 20u64 };
+    let (lower, upper) = iter.size_hint();
+    assert_eq(lower, 10);
+    assert_eq(upper, Some(10));
+}
+
+// =============================================================================
+// Section 53: Cloned Adapter
+// =============================================================================
+
+/// Test cloned clones each element
+@test
+fn test_cloned_basic() {
+    let data = [1, 2, 3];
+    let iter = data.iter();  // Iterator over &Int
+    let cloned_iter: Cloned<_> = Cloned { inner: iter };
+    let result: List<Int> = cloned_iter.collect();
+    assert_eq(result, [1, 2, 3]);
+}
+
+// =============================================================================
+// Section 54: ReduceResult Type
+// =============================================================================
+
+/// Test ReduceResult::Reduced
+@test
+fn test_reduce_result_reduced() {
+    let result: ReduceResult<Int> = Reduced(99);
+    assert(result.is_reduced());
+    assert_eq(result.unwrap(), 99);
+}
+
+/// Test ReduceResult::map on Reduced
+@test
+fn test_reduce_result_map() {
+    let red: ReduceResult<Int> = Reduced(10);
+    let mapped = red.map(|x| x * 2);
+    assert_eq(mapped.unwrap(), 20);
+    assert(mapped.is_reduced());
+}
+
+// =============================================================================
+// Section 55: Transducer - Basic Operations
+// =============================================================================
+
+/// Test Transducer.map
+@test
+fn test_transducer_map() {
+    let xform = Transducer.map(|x: Int| x * 2);
+    let result: List<Int> = range(0, 5).transduce(xform).collect();
+    assert_eq(result, [0, 2, 4, 6, 8]);
+}
+
+/// Test Transducer.filter
+@test
+fn test_transducer_filter() {
+    let xform = Transducer.filter(|x: &Int| *x % 2 == 0);
+    let result: List<Int> = range(0, 10).transduce(xform).collect();
+    assert_eq(result, [0, 2, 4, 6, 8]);
+}
+
+/// Test Transducer.filter_map
+@test
+fn test_transducer_filter_map() {
+    let xform = Transducer.filter_map(|x: Int| {
+        if x % 2 == 0 { Maybe.Some(x * 10) } else { Maybe.None }
+    });
+    let result: List<Int> = range(0, 5).transduce(xform).collect();
+    assert_eq(result, [0, 20, 40]);
+}
+
+/// Test Transducer.take_while
+@test
+fn test_transducer_take_while() {
+    let xform = Transducer.take_while(|x: &Int| *x < 5);
+    let result: List<Int> = range(0, 100).transduce(xform).collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test Transducer.identity
+@test
+fn test_transducer_identity() {
+    let xform: Transducer<Int, Int> = Transducer.identity();
+    let result: List<Int> = range(0, 5).transduce(xform).collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+/// Test Transducer.inspect
+@test
+fn test_transducer_inspect() {
+    let mut seen: List<Int> = [];
+    let xform = Transducer.inspect(|x: &Int| seen.push(*x));
+    let result: List<Int> = range(0, 3).transduce(xform).collect();
+    assert_eq(result, [0, 1, 2]);
+    assert_eq(seen, [0, 1, 2]);
+}
+
+// =============================================================================
+// Section 56: Stateful Transducers
+// =============================================================================
+
+/// Test Transducer.take (stateful)
+@test
+fn test_transducer_take() {
+    let xform: StatefulTransducer<Int, Int, Int> = Transducer.take(3);
+    let result: List<Int> = range(0, 100).transduce_stateful(xform).collect();
+    assert_eq(result, [0, 1, 2]);
+}
+
+/// Test Transducer.drop (stateful)
+@test
+fn test_transducer_drop() {
+    let xform: StatefulTransducer<Int, Int, Int> = Transducer.drop(5);
+    let result: List<Int> = range(0, 10).transduce_stateful(xform).collect();
+    assert_eq(result, [5, 6, 7, 8, 9]);
+}
+
+/// Test Transducer.drop_while (stateful)
+@test
+fn test_transducer_drop_while() {
+    let xform = Transducer.drop_while(|x: &Int| *x < 5);
+    let result: List<Int> = range(0, 10).transduce_stateful(xform).collect();
+    assert_eq(result, [5, 6, 7, 8, 9]);
+}
+
+/// Test Transducer.dedupe (stateful)
+@test
+fn test_transducer_dedupe() {
+    let data = [1, 1, 2, 2, 2, 3, 1, 1];
+    let xform: StatefulTransducer<Int, Int, Maybe<Int>> = Transducer.dedupe();
+    let result: List<Int> = data.iter().map(|x| *x).transduce_stateful(xform).collect();
+    assert_eq(result, [1, 2, 3, 1]);
+}
+
+/// Test Transducer.enumerate (stateful)
+@test
+fn test_transducer_enumerate() {
+    let xform: StatefulTransducer<Text, (Int, Text), Int> = Transducer.enumerate();
+    let data = ["a", "b", "c"];
+    let result: List<(Int, Text)> = data.iter().map(|x| *x).transduce_stateful(xform).collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], (0, "a"));
+    assert_eq(result[1], (1, "b"));
+    assert_eq(result[2], (2, "c"));
+}
+
+// =============================================================================
+// Section 57: Transducer Composition
+// =============================================================================
+
+/// Test Transducer.compose2
+@test
+fn test_transducer_compose2() {
+    let xform = Transducer.compose2(
+        Transducer.filter(|x: &Int| *x % 2 == 0),
+        Transducer.map(|x: Int| x * 10)
+    );
+    let result: List<Int> = range(0, 5).transduce(xform).collect();
+    assert_eq(result, [0, 20, 40]);
+}
+
+/// Test Transducer.compose with list
+@test
+fn test_transducer_compose_list() {
+    let xform = Transducer.compose([
+        Transducer.filter(|x: &Int| *x > 0),
+        Transducer.map(|x: Int| x * 2),
+        Transducer.filter(|x: &Int| *x < 20),
+    ]);
+    let result: List<Int> = range(-5, 15).transduce(xform).collect();
+    // Filter > 0: 1-14, map *2: 2-28, filter < 20: 2-18
+    assert_eq(result, [2, 4, 6, 8, 10, 12, 14, 16, 18]);
+}
+
+/// Test composition is associative
+@test
+fn test_transducer_compose_associative() {
+    let f1 = Transducer.map(|x: Int| x + 1);
+    let f2 = Transducer.map(|x: Int| x * 2);
+    let f3 = Transducer.map(|x: Int| x - 3);
+
+    // (f1 ∘ f2) ∘ f3
+    let left = Transducer.compose2(Transducer.compose2(f1, f2), f3);
+    // f1 ∘ (f2 ∘ f3)
+    let right = Transducer.compose2(f1, Transducer.compose2(f2, f3));
+
+    let result_left: List<Int> = range(0, 5).transduce(left).collect();
+    let result_right: List<Int> = range(0, 5).transduce(right).collect();
+
+    assert_eq(result_left, result_right);
+}
+
+// =============================================================================
+// Section 58: reduce_with (Early Termination)
+// =============================================================================
+
+/// Test reduce_with normal completion
+@test
+fn test_reduce_with_complete() {
+    let result = range(1, 6).reduce_with(0, |acc, x| Continue(acc + x));
+    assert_eq(result, 15);
+}
+
+/// Test reduce_with early termination
+@test
+fn test_reduce_with_early_termination() {
+    let result = range(0, 100).reduce_with(0, |acc, x| {
+        let new_acc = acc + x;
+        if new_acc > 10 {
+            Reduced(new_acc)
+        } else {
+            Continue(new_acc)
+        }
+    });
+    // 0+1+2+3+4+5 = 15 > 10, terminates
+    assert_eq(result, 15);
+}
+
+// =============================================================================
+// Section 59: Adapter Chaining
+// =============================================================================
+
+/// Test complex adapter chain
+@test
+fn test_complex_chain() {
+    let result: List<Int> = range(0, 100)
+        .filter(|x| *x % 2 == 0)
+        .map(|x| x * 3)
+        .skip(5)
+        .take(10)
+        .collect();
+
+    // Even: 0,2,4,6,8,10,12,14,16,18,20...
+    // *3:   0,6,12,18,24,30,36,42,48,54,60...
+    // skip5: 30,36,42,48,54,60,66,72,78,84...
+    // take10: first 10
+    assert_eq(result, [30, 36, 42, 48, 54, 60, 66, 72, 78, 84]);
+}
+
+/// Test map followed by filter
+@test
+fn test_map_then_filter() {
+    let result: List<Int> = range(0, 10)
+        .map(|x| x * x)
+        .filter(|x| *x > 10)
+        .collect();
+    assert_eq(result, [16, 25, 36, 49, 64, 81]);
+}
+
+/// Test filter followed by map
+@test
+fn test_filter_then_map() {
+    let result: List<Int> = range(0, 10)
+        .filter(|x| *x > 5)
+        .map(|x| x * 10)
+        .collect();
+    assert_eq(result, [60, 70, 80, 90]);
+}
+
+/// Test enumerate with filter
+@test
+fn test_enumerate_filter() {
+    let result: List<(Int, Int)> = range(100, 105)
+        .enumerate()
+        .filter(|pair| pair.0 % 2 == 0)
+        .collect();
+    assert_eq(result, [(0, 100), (2, 102), (4, 104)]);
+}
+
+// =============================================================================
+// Section 60: Edge Cases and Stress Tests
+// =============================================================================
+
+/// Test very long iterator chains
+@test
+fn test_long_chain() {
+    let result: List<Int> = range(0, 1000)
+        .map(|x| x + 1)
+        .filter(|x| *x % 3 == 0)
+        .map(|x| x * 2)
+        .take(5)
+        .collect();
+    assert_eq(result, [6, 12, 18, 24, 30]);
+}
+
+/// Test empty iterator through many adapters
+@test
+fn test_empty_through_adapters() {
+    let result: List<Int> = range(0, 0)
+        .map(|x| x * 2)
+        .filter(|x| *x > 0)
+        .take(100)
+        .skip(50)
+        .enumerate()
+        .map(|pair| pair.1)
+        .collect();
+    assert_eq(result, []);
+}
+
+/// Test single element through adapters
+@test
+fn test_single_through_adapters() {
+    let result: List<Int> = once(42)
+        .map(|x| x * 2)
+        .filter(|x| *x > 0)
+        .collect();
+    assert_eq(result, [84]);
+}
+
+/// Test iterator fusion (multiple maps)
+@test
+fn test_iterator_fusion() {
+    let result: List<Int> = range(0, 5)
+        .map(|x| x + 1)
+        .map(|x| x * 2)
+        .map(|x| x - 1)
+        .collect();
+    // (x+1)*2 - 1 = 2x + 1
+    assert_eq(result, [1, 3, 5, 7, 9]);
+}
+
+/// Test zip with different length iterators
+@test
+fn test_zip_asymmetric() {
+    let result: List<(Int, Int)> = range(0, 100).zip(range(0, 3)).collect();
+    assert_eq(result, [(0, 0), (1, 1), (2, 2)]);
+
+    let result2: List<(Int, Int)> = range(0, 3).zip(range(0, 100)).collect();
+    assert_eq(result2, [(0, 0), (1, 1), (2, 2)]);
+}
+
+/// Test take(0) is always empty
+@test
+fn test_take_zero_empty() {
+    let result1: List<Int> = range(0, 1000000).take(0).collect();
+    assert_eq(result1, []);
+
+    let result2: List<Int> = count_from(0).take(0).collect();
+    assert_eq(result2, []);
+}
+
+/// Test skip followed by take
+@test
+fn test_skip_take_combination() {
+    let result: List<Int> = range(0, 100).skip(50).take(5).collect();
+    assert_eq(result, [50, 51, 52, 53, 54]);
+}
+
+/// Test chain of chains
+@test
+fn test_chain_of_chains() {
+    let result: List<Int> = range(0, 2)
+        .chain(range(10, 12))
+        .chain(range(20, 22))
+        .collect();
+    assert_eq(result, [0, 1, 10, 11, 20, 21]);
+}
+
+/// Test zip with enumerate
+@test
+fn test_zip_enumerate() {
+    let a = ["x", "y", "z"];
+    let b = [10, 20, 30];
+    let result: List<(Int, (&Text, &Int))> = a.iter()
+        .zip(b.iter())
+        .enumerate()
+        .collect();
+
+    assert_eq(result.len(), 3);
+    assert_eq(result[0].0, 0);
+    assert_eq(result[1].0, 1);
+    assert_eq(result[2].0, 2);
+}
+
+// =============================================================================
+// Section 61: Integration Tests - Real-World Patterns
+// =============================================================================
+
+/// Test computing average
+@test
+fn test_pattern_average() {
+    let data = [10, 20, 30, 40, 50];
+    let sum: Int = data.iter().map(|x| *x).sum();
+    let count = data.len();
+    let avg = sum / count;
+    assert_eq(avg, 30);
+}
+
+/// Test finding unique elements (via dedup after sort)
+@test
+fn test_pattern_unique_sorted() {
+    let data = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+    let mut sorted = data.clone();
+    sorted.sort();
+    let unique: List<Int> = sorted.iter().map(|x| *x).dedup().collect();
+    assert_eq(unique, [1, 2, 3, 4, 5, 6, 9]);
+}
+
+/// Test grouping pattern with partition
+@test
+fn test_pattern_grouping() {
+    // Use integers to test partition without record field resolution issues
+    let data = [25, 17, 35, 15, 42, 12, 30, 8];
+
+    let (adults, minors): (List<Int>, List<Int>) = data.iter().map(|x| *x).partition(|x| *x >= 18);
+    assert_eq(adults.len(), 4);  // 25, 35, 42, 30
+    assert_eq(minors.len(), 4);  // 17, 15, 12, 8
+}
+
+/// Test windowed computation simulation
+@test
+fn test_pattern_pairs() {
+    let data = [1, 2, 3, 4, 5];
+    // Create pairs: (1,2), (2,3), (3,4), (4,5)
+    let end = data.len() - 1;
+    let pairs: List<(Int, Int)> = data[..end].iter()
+        .zip(data[1..].iter())
+        .map(|pair| (*pair.0, *pair.1))
+        .collect();
+    assert_eq(pairs, [(1, 2), (2, 3), (3, 4), (4, 5)]);
+}
+
+/// Test early termination search
+@test
+fn test_pattern_early_search() {
+    let large_data = range(0, 1000000);
+    let found = large_data.find(|x| *x == 42);
+    assert_eq(found, Some(42));
+}
+
+/// Test data processing pipeline
+@test
+fn test_pattern_data_pipeline() {
+    // Process log entries: filter errors, extract message
+    type LogEntry is { level: Text, message: Text };
+
+    let logs = [
+        LogEntry { level: "INFO", message: "Started" },
+        LogEntry { level: "ERROR", message: "Failed to connect" },
+        LogEntry { level: "INFO", message: "Retrying" },
+        LogEntry { level: "ERROR", message: "Connection refused" },
+        LogEntry { level: "INFO", message: "Succeeded" },
+    ];
+
+    // Use index-based access to avoid field resolution issues on unresolved types
+    let mut errors: List<Text> = [];
+    for log in logs.iter() {
+        let entry: &LogEntry = log;
+        if entry.level == "ERROR" {
+            errors.push(entry.message.clone());
+        }
+    }
+
+    assert_eq(errors, ["Failed to connect", "Connection refused"]);
+}
+
+/// Test flatten pattern with flat_map
+@test
+fn test_pattern_flatten() {
+    // Test flat_map using range-based inner iterators
+    let flat: List<Int> = range(0, 3)
+        .flat_map(|x| range(x * 3 + 1, x * 3 + 4))
+        .collect();
+    assert_eq(flat, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

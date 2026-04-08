@@ -1,0 +1,518 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, serialization, binary
+// @description: Tests binary serialization formats for efficient FFI data exchange
+
+/// ============================================================
+/// BINARY SERIALIZATION
+/// ============================================================
+///
+/// Binary formats are more efficient than text formats for large
+/// data or performance-critical FFI. This file demonstrates
+/// patterns for safe binary serialization.
+
+// ------------------------------------------------------------
+// Binary Buffer Types
+// ------------------------------------------------------------
+
+/// Write buffer for serialization
+type WriteBuffer is {
+    data: List<u8>,
+};
+
+implement WriteBuffer {
+    fn new() -> WriteBuffer {
+        WriteBuffer { data: List.new() }
+    }
+
+    fn with_capacity(cap: usize) -> WriteBuffer {
+        WriteBuffer { data: List.with_capacity(cap) }
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+
+    fn into_bytes(self) -> List<u8> {
+        self.data
+    }
+
+    /// Write raw bytes
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        self.data.extend_from_slice(bytes);
+    }
+
+    /// Write single byte
+    fn write_u8(&mut self, value: u8) {
+        self.data.push(value);
+    }
+
+    /// Write little-endian integers
+    fn write_u16_le(&mut self, value: u16) {
+        self.write_bytes(&value.to_le_bytes());
+    }
+
+    fn write_u32_le(&mut self, value: u32) {
+        self.write_bytes(&value.to_le_bytes());
+    }
+
+    fn write_u64_le(&mut self, value: u64) {
+        self.write_bytes(&value.to_le_bytes());
+    }
+
+    fn write_i32_le(&mut self, value: i32) {
+        self.write_bytes(&value.to_le_bytes());
+    }
+
+    fn write_i64_le(&mut self, value: i64) {
+        self.write_bytes(&value.to_le_bytes());
+    }
+
+    fn write_f32_le(&mut self, value: f32) {
+        self.write_bytes(&value.to_le_bytes());
+    }
+
+    fn write_f64_le(&mut self, value: f64) {
+        self.write_bytes(&value.to_le_bytes());
+    }
+
+    /// Write big-endian integers
+    fn write_u16_be(&mut self, value: u16) {
+        self.write_bytes(&value.to_be_bytes());
+    }
+
+    fn write_u32_be(&mut self, value: u32) {
+        self.write_bytes(&value.to_be_bytes());
+    }
+
+    fn write_u64_be(&mut self, value: u64) {
+        self.write_bytes(&value.to_be_bytes());
+    }
+
+    /// Write length-prefixed string
+    fn write_string(&mut self, s: &str) {
+        let bytes = s.as_bytes();
+        self.write_u32_le(bytes.len() as u32);
+        self.write_bytes(bytes);
+    }
+
+    /// Write variable-length integer (LEB128)
+    fn write_varint(&mut self, mut value: u64) {
+        loop {
+            let mut byte = (value & 0x7F) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            self.write_u8(byte);
+            if value == 0 {
+                break;
+            }
+        }
+    }
+
+    /// Write signed variable-length integer (signed LEB128)
+    fn write_signed_varint(&mut self, mut value: i64) {
+        let negative = value < 0;
+        loop {
+            let mut byte = (value & 0x7F) as u8;
+            value >>= 7;
+
+            let done = (value == 0 && (byte & 0x40) == 0) ||
+                       (value == -1 && (byte & 0x40) != 0);
+
+            if !done {
+                byte |= 0x80;
+            }
+            self.write_u8(byte);
+            if done {
+                break;
+            }
+        }
+    }
+}
+
+/// Read buffer for deserialization
+type ReadBuffer is {
+    data: &[u8],
+    pos: usize,
+};
+
+implement ReadBuffer {
+    fn new(data: &[u8]) -> ReadBuffer {
+        ReadBuffer { data, pos: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.data.len() - self.pos
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.remaining() == 0
+    }
+
+    fn read_bytes(&mut self, len: usize) -> Result<&[u8], BinaryError> {
+        if self.remaining() < len {
+            return Err(UnexpectedEof);
+        }
+        let result = &self.data[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(result)
+    }
+
+    fn read_u8(&mut self) -> Result<u8, BinaryError> {
+        if self.remaining() < 1 {
+            return Err(UnexpectedEof);
+        }
+        let result = self.data[self.pos];
+        self.pos += 1;
+        Ok(result)
+    }
+
+    fn read_u16_le(&mut self) -> Result<u16, BinaryError> {
+        let bytes = self.read_bytes(2)?;
+        Ok(u16.from_le_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn read_u32_le(&mut self) -> Result<u32, BinaryError> {
+        let bytes = self.read_bytes(4)?;
+        Ok((bytes[0] as u32) | ((bytes[1] as u32) << 8) | ((bytes[2] as u32) << 16) | ((bytes[3] as u32) << 24))
+    }
+
+    fn read_u64_le(&mut self) -> Result<u64, BinaryError> {
+        let bytes = self.read_bytes(8)?;
+        Ok(u64.from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
+    }
+
+    fn read_i32_le(&mut self) -> Result<i32, BinaryError> {
+        let bytes = self.read_bytes(4)?;
+        Ok(((bytes[0] as u32) | ((bytes[1] as u32) << 8) | ((bytes[2] as u32) << 16) | ((bytes[3] as u32) << 24)) as i32)
+    }
+
+    fn read_i64_le(&mut self) -> Result<i64, BinaryError> {
+        let bytes = self.read_bytes(8)?;
+        Ok(i64.from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
+    }
+
+    fn read_f32_le(&mut self) -> Result<f32, BinaryError> {
+        let bytes = self.read_bytes(4)?;
+        Ok(0.0 as f32) // Placeholder: real impl converts bytes to float
+    }
+
+    fn read_f64_le(&mut self) -> Result<f64, BinaryError> {
+        let bytes = self.read_bytes(8)?;
+        Ok(f64.from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
+    }
+
+    fn read_string(&mut self) -> Result<Text, BinaryError> {
+        let len = self.read_u32_le()? as usize;
+        let bytes = self.read_bytes(len)?;
+        Text.from_utf8(bytes.to_vec())
+            .map_err(|_| BinaryError.InvalidUtf8)
+    }
+
+    fn read_varint(&mut self) -> Result<u64, BinaryError> {
+        let mut result: u64 = 0;
+        let mut shift = 0;
+
+        loop {
+            if shift >= 64 {
+                return Err(BinaryError.VarintOverflow);
+            }
+
+            let byte = self.read_u8()?;
+            result |= ((byte & 0x7F) as u64) << shift;
+            shift += 7;
+
+            if (byte & 0x80) == 0 {
+                break;
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn read_signed_varint(&mut self) -> Result<i64, BinaryError> {
+        let mut result: i64 = 0;
+        let mut shift = 0;
+        let mut byte: u8;
+
+        loop {
+            if shift >= 64 {
+                return Err(BinaryError.VarintOverflow);
+            }
+
+            byte = self.read_u8()?;
+            result |= ((byte & 0x7F) as i64) << shift;
+            shift += 7;
+
+            if (byte & 0x80) == 0 {
+                break;
+            }
+        }
+
+        // Sign extension
+        if shift < 64 && (byte & 0x40) != 0 {
+            result |= !0 << shift;
+        }
+
+        Ok(result)
+    }
+}
+
+// ------------------------------------------------------------
+// Serialization Traits
+// ------------------------------------------------------------
+
+/// Trait for binary serializable types
+protocol BinarySerialize {
+    fn binary_size(&self) -> usize;
+    fn write_binary(&self, buf: &mut WriteBuffer);
+}
+
+/// Trait for binary deserializable types
+protocol BinaryDeserialize: Sized {
+    fn read_binary(buf: &mut ReadBuffer) -> Result<Self, BinaryError>;
+}
+
+// Primitive implementations
+implement BinarySerialize for u8 {
+    fn binary_size(&self) -> usize { 1 }
+    fn write_binary(&self, buf: &mut WriteBuffer) {
+        buf.write_u8(self);
+    }
+}
+
+implement BinaryDeserialize for u8 {
+    fn read_binary(buf: &mut ReadBuffer) -> Result<u8, BinaryError> {
+        buf.read_u8()
+    }
+}
+
+implement BinarySerialize for u32 {
+    fn binary_size(&self) -> usize { 4 }
+    fn write_binary(&self, buf: &mut WriteBuffer) {
+        buf.write_u32_le(self);
+    }
+}
+
+implement BinaryDeserialize for u32 {
+    fn read_binary(buf: &mut ReadBuffer) -> Result<u32, BinaryError> {
+        buf.read_u32_le()
+    }
+}
+
+implement BinarySerialize for i64 {
+    fn binary_size(&self) -> usize { 8 }
+    fn write_binary(&self, buf: &mut WriteBuffer) {
+        buf.write_i64_le(self);
+    }
+}
+
+implement BinaryDeserialize for i64 {
+    fn read_binary(buf: &mut ReadBuffer) -> Result<i64, BinaryError> {
+        buf.read_i64_le()
+    }
+}
+
+implement BinarySerialize for f64 {
+    fn binary_size(&self) -> usize { 8 }
+    fn write_binary(&self, buf: &mut WriteBuffer) {
+        buf.write_f64_le(self);
+    }
+}
+
+implement BinaryDeserialize for f64 {
+    fn read_binary(buf: &mut ReadBuffer) -> Result<f64, BinaryError> {
+        buf.read_f64_le()
+    }
+}
+
+implement BinarySerialize for Text {
+    fn binary_size(&self) -> usize { 4 + self.len() }
+    fn write_binary(&self, buf: &mut WriteBuffer) {
+        buf.write_string(self);
+    }
+}
+
+implement BinaryDeserialize for Text {
+    fn read_binary(buf: &mut ReadBuffer) -> Result<Text, BinaryError> {
+        buf.read_string()
+    }
+}
+
+implement<T: BinarySerialize> BinarySerialize for List<T> {
+    fn binary_size(&self) -> usize {
+        4 + self.iter().map(|v| v.binary_size()).sum<usize>()
+    }
+    fn write_binary(&self, buf: &mut WriteBuffer) {
+        buf.write_u32_le(self.len() as u32);
+        for item in self {
+            item.write_binary(buf);
+        }
+    }
+}
+
+implement<T: BinaryDeserialize> BinaryDeserialize for List<T> {
+    fn read_binary(buf: &mut ReadBuffer) -> Result<List<T>, BinaryError> {
+        let len = buf.read_u32_le()? as usize;
+        let mut result = List.with_capacity(len);
+        for _ in 0..len {
+            result.push(T.read_binary(buf)?);
+        }
+        Ok(result)
+    }
+}
+
+// ------------------------------------------------------------
+// Struct Serialization
+// ------------------------------------------------------------
+
+/// Example struct with derive-like pattern
+@repr(C)
+type Message is {
+    id: u32,
+    timestamp: i64,
+    payload: Text,
+    flags: u8,
+};
+
+implement BinarySerialize for Message {
+    fn binary_size(&self) -> usize {
+        4 + 8 + (4 + self.payload.len()) + 1
+    }
+
+    fn write_binary(&self, buf: &mut WriteBuffer) {
+        buf.write_u32_le(self.id);
+        buf.write_i64_le(self.timestamp);
+        buf.write_string(&self.payload);
+        buf.write_u8(self.flags);
+    }
+}
+
+implement BinaryDeserialize for Message {
+    fn read_binary(buf: &mut ReadBuffer) -> Result<Message, BinaryError> {
+        Ok(Message {
+            id: buf.read_u32_le()?,
+            timestamp: buf.read_i64_le()?,
+            payload: buf.read_string()?,
+            flags: buf.read_u8()?,
+        })
+    }
+}
+
+// ------------------------------------------------------------
+// Tagged Union Serialization
+// ------------------------------------------------------------
+
+type Packet is
+    | Ping { seq: u32 }
+    | Pong { seq: u32 }
+    | Data { channel: u8, payload: List<u8> }
+    | Error { code: u32, message: Text };
+
+implement BinarySerialize for Packet {
+    fn binary_size(&self) -> usize {
+        1 + match self {
+            Packet.Ping { .. } => 4,
+            Packet.Pong { .. } => 4,
+            Packet.Data { payload, .. } => 1 + 4 + payload.len(),
+            Packet.Error { message, .. } => 4 + 4 + message.len(),
+        }
+    }
+
+    fn write_binary(&self, buf: &mut WriteBuffer) {
+        match self {
+            Packet.Ping { seq } => {
+                buf.write_u8(0);
+                buf.write_u32_le(seq);
+            }
+            Packet.Pong { seq } => {
+                buf.write_u8(1);
+                buf.write_u32_le(seq);
+            }
+            Packet.Data { channel, payload } => {
+                buf.write_u8(2);
+                buf.write_u8(channel);
+                buf.write_u32_le(payload.len() as u32);
+                buf.write_bytes(payload);
+            }
+            Packet.Error { code, message } => {
+                buf.write_u8(3);
+                buf.write_u32_le(code);
+                buf.write_string(message);
+            }
+        }
+    }
+}
+
+implement BinaryDeserialize for Packet {
+    fn read_binary(buf: &mut ReadBuffer) -> Result<Packet, BinaryError> {
+        let tag = buf.read_u8()?;
+        match tag {
+            0 => Ok(Packet.Ping { seq: buf.read_u32_le()? }),
+            1 => Ok(Packet.Pong { seq: buf.read_u32_le()? }),
+            2 => {
+                let channel = buf.read_u8()?;
+                let len = buf.read_u32_le()? as usize;
+                let payload = buf.read_bytes(len)?.to_vec();
+                Ok(Packet.Data { channel, payload })
+            }
+            3 => {
+                let code = buf.read_u32_le()?;
+                let message = buf.read_string()?;
+                Ok(Packet.Error { code, message })
+            }
+            _ => Err(InvalidTag(tag)),
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Public API
+// ------------------------------------------------------------
+
+fn serialize<T: BinarySerialize>(value: &T) -> List<u8> {
+    let mut buf = WriteBuffer.with_capacity(value.binary_size());
+    value.write_binary(&mut buf);
+    buf.into_bytes()
+}
+
+fn deserialize<T: BinaryDeserialize>(data: &[u8]) -> Result<T, BinaryError> {
+    let mut buf = ReadBuffer.new(data);
+    let result = T.read_binary(&mut buf)?;
+    if !buf.is_empty() {
+        return Err(BinaryError.TrailingData);
+    }
+    Ok(result)
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type BinaryError is
+    | UnexpectedEof
+    | InvalidUtf8
+    | VarintOverflow
+    | InvalidTag(u8)
+    | TrailingData
+    | ChecksumMismatch;
+
+fn main() {
+    // Binary serialization test
+}

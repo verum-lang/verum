@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: interrupt, handler, systems
+// @timeout: 5000
+// @description: Verify @interrupt attribute and handler signatures compile correctly.
+
+module interrupt_handler_test;
+
+mount core.sys.interrupt.{ExceptionFrame};
+mount core.sys.mmio.{Register, AccessMode, WriteOneToClear, ReadWrite};
+
+// Mock timer registers for testing
+const TIMER_BASE: USize = 0x4000_0000 as USize;
+const TIMER_STATUS: Register<UInt32, WriteOneToClear> = Register.at(TIMER_BASE);
+const TIMER_COUNT: Register<UInt32, ReadWrite> = Register.at(TIMER_BASE + (4 as USize));
+
+const TIMER_PENDING: UInt32 = (1 as UInt32) << (0 as UInt32);
+const TIMER_OVERFLOW: UInt32 = (1 as UInt32) << (1 as UInt32);
+
+/// Simple interrupt handler with @interrupt attribute.
+@interrupt(regular)
+fn simple_timer_handler(frame: &mut ExceptionFrame) {
+    // Clear the interrupt
+    TIMER_STATUS.clear(TIMER_PENDING);
+}
+
+/// Interrupt handler with vector number.
+@interrupt(regular, vector = 0x20)
+fn timer_handler_with_vector(frame: &mut ExceptionFrame) {
+    TIMER_STATUS.clear(TIMER_PENDING | TIMER_OVERFLOW);
+}
+
+/// NMI handler (non-maskable).
+@interrupt(nmi)
+fn nmi_handler(frame: &mut ExceptionFrame) {
+    // NMI cannot be disabled - handle critical errors
+    // Typically log error and halt
+}
+
+/// Exception handler for divide by zero.
+@interrupt(exception)
+fn divide_by_zero_handler(frame: &mut ExceptionFrame) {
+    panic("Division by zero in interrupt handler");
+}
+
+/// System call handler.
+@interrupt(trap)
+fn syscall_handler(frame: &mut ExceptionFrame) {
+    // Handle system call
+    // Frame contains syscall number and arguments
+}
+
+/// Fast interrupt handler (FIQ on ARM).
+@interrupt(fast)
+fn fast_irq_handler(frame: &mut ExceptionFrame) {
+    // Minimal processing for fast response
+    TIMER_STATUS.clear(TIMER_PENDING);
+}
+
+/// Naked interrupt for custom assembly.
+@interrupt(fast, naked = true)
+fn custom_fast_handler() {
+    // Must use inline assembly for entire function body
+    @asm {
+        // Custom fast path handling
+        "ret"
+    }
+}
+
+/// Handler with FPU save enabled.
+@interrupt(regular, save_fpu = true)
+fn handler_with_fpu_save(frame: &mut ExceptionFrame) {
+    // This handler may use floating point operations
+    // FPU registers are saved/restored automatically
+    let x: Float = 1.0 + 2.0;
+    TIMER_STATUS.clear(TIMER_PENDING);
+}
+
+/// Handler with priority (for NVIC-style controllers).
+@interrupt(regular, vector = 0x21, priority = 3)
+fn prioritized_handler(frame: &mut ExceptionFrame) {
+    TIMER_STATUS.clear(TIMER_OVERFLOW);
+}
+
+fn main() -> Int {
+    // Handlers are not called directly - they're invoked by hardware
+    // This test just verifies they compile correctly
+    0
+}

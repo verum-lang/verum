@@ -1,0 +1,62 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, concurrent, thread-safety, generation
+
+/// Test CBGR generation tracking in concurrent scenarios.
+/// Generation counters must be thread-safe.
+/// Spec: 26-cbgr-implementation.md#thread-safety
+
+mount core.sync.{Mutex, AtomicU32, AtomicInt, MemoryOrdering};
+
+fn main() {
+    test_unique_generations();
+    test_shared_reference_generations();
+    test_atomic_generation_counter();
+}
+
+/// Test that allocations get unique generations
+fn test_unique_generations() {
+    let allocs_count = 100;
+    let mut generations = Set.new();
+
+    for _ in 0..allocs_count {
+        let alloc = Heap.new(42);
+        let generation = alloc.generation();
+        generations.insert(generation);
+    }
+
+    // All generations should be unique
+    assert(generations.len() == allocs_count);
+    print("Unique generations test passed");
+}
+
+/// Test generations are consistent through Shared references
+fn test_shared_reference_generations() {
+    let shared_value = Shared.new(Heap.new(100));
+
+    // Multiple clones see the same underlying generation
+    let sv1 = shared_value.clone();
+    let sv2 = shared_value.clone();
+    let sv3 = shared_value.clone();
+
+    // All clones refer to the same Heap allocation
+    // In a concurrent setting, each thread would hold a clone
+    // and see the same generation
+    print("Shared reference generations test passed");
+}
+
+/// Test atomic generation counter pattern
+fn test_atomic_generation_counter() {
+    // Simulate CBGR's atomic generation counter
+    let counter = AtomicU32.new(0);
+    let num_increments = 1000;
+
+    for _ in 0..num_increments {
+        counter.fetch_add(1, MemoryOrdering.SeqCst);
+    }
+
+    let final_count = counter.load(MemoryOrdering.SeqCst);
+    assert(final_count == num_increments);
+    print("Atomic generation counter test passed");
+}

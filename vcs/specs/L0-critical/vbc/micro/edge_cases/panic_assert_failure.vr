@@ -1,0 +1,12 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, panic, assert
+// @timeout: 5000
+// @expected-panic: Assertion failed
+
+fn main() {
+    let x = 5;
+    let y = 10;
+    assert(x == y);
+}

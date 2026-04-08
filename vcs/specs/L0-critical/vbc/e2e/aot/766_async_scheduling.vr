@@ -1,0 +1,240 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, scheduling, priority, fairness
+// @expected-exit: 0
+
+// Tests task scheduling patterns: priority queues, fair scheduling,
+// deadline-based scheduling, and cooperative yielding.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if (a > b) { a } else { b }
+}
+
+fn min_val(a: Int, b: Int) -> Int {
+    if (a < b) { a } else { b }
+}
+
+fn main() -> Int {
+    // Test 1: Round-robin scheduling
+    let n_tasks = 4;
+    let time_quantum = 3;
+    let mut task_remaining = [10, 5, 8, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut total_time = 0;
+    let mut completed = 0;
+
+    while (completed < n_tasks) {
+        let mut i = 0;
+        while (i < n_tasks) {
+            if (task_remaining[i] > 0) {
+                let run_time = min_val(time_quantum, task_remaining[i]);
+                task_remaining[i] = task_remaining[i] - run_time;
+                total_time = total_time + run_time;
+                if (task_remaining[i] == 0) {
+                    completed = completed + 1;
+                }
+            }
+            i = i + 1;
+        }
+    }
+    assert_eq(total_time, 26);  // 10+5+8+3
+    assert_eq(completed, 4);
+
+    // Test 2: Priority scheduling (highest priority first)
+    // priority: higher number = higher priority
+    let mut priorities = [2, 5, 1, 4, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut exec_order = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut order_idx = 0;
+
+    // Simple selection sort by priority (descending)
+    let mut sorted_ids = [0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < 5) {
+        let mut max_j = i;
+        let mut j = i + 1;
+        while (j < 5) {
+            if (priorities[sorted_ids[j]] > priorities[sorted_ids[max_j]]) {
+                max_j = j;
+            }
+            j = j + 1;
+        }
+        // Swap
+        let temp = sorted_ids[i];
+        sorted_ids[i] = sorted_ids[max_j];
+        sorted_ids[max_j] = temp;
+        i = i + 1;
+    }
+    // Execution order by priority: task 1(5), task 3(4), task 4(3), task 0(2), task 2(1)
+    assert_eq(sorted_ids[0], 1);
+    assert_eq(sorted_ids[1], 3);
+    assert_eq(sorted_ids[4], 2);
+
+    // Test 3: Shortest job first (SJF)
+    let mut durations = [8, 3, 5, 2, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sjf_order = [0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Sort by duration ascending
+    i = 0;
+    while (i < 5) {
+        let mut min_j = i;
+        let mut j = i + 1;
+        while (j < 5) {
+            if (durations[sjf_order[j]] < durations[sjf_order[min_j]]) {
+                min_j = j;
+            }
+            j = j + 1;
+        }
+        let temp = sjf_order[i];
+        sjf_order[i] = sjf_order[min_j];
+        sjf_order[min_j] = temp;
+        i = i + 1;
+    }
+    // SJF order: task 3(2), task 1(3), task 2(5), task 4(7), task 0(8)
+    assert_eq(sjf_order[0], 3);
+    assert_eq(sjf_order[1], 1);
+    assert_eq(sjf_order[4], 0);
+
+    // Average waiting time for SJF
+    let mut wait_time = 0;
+    let mut cumulative = 0;
+    i = 0;
+    while (i < 5) {
+        wait_time = wait_time + cumulative;
+        cumulative = cumulative + durations[sjf_order[i]];
+        i = i + 1;
+    }
+    // Waits: 0, 2, 5, 10, 17 → total = 34
+    assert_eq(wait_time, 34);
+
+    // Test 4: Deadline-based scheduling (EDF)
+    let mut deadlines = [15, 5, 10, 20, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut edf_order = [0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Sort by deadline (earliest first)
+    i = 0;
+    while (i < 5) {
+        let mut min_j = i;
+        let mut j = i + 1;
+        while (j < 5) {
+            if (deadlines[edf_order[j]] < deadlines[edf_order[min_j]]) {
+                min_j = j;
+            }
+            j = j + 1;
+        }
+        let temp = edf_order[i];
+        edf_order[i] = edf_order[min_j];
+        edf_order[min_j] = temp;
+        i = i + 1;
+    }
+    // EDF order: task 1(5), task 4(8), task 2(10), task 0(15), task 3(20)
+    assert_eq(edf_order[0], 1);
+    assert_eq(edf_order[1], 4);
+    assert_eq(edf_order[4], 3);
+
+    // Test 5: Fairness verification (equal CPU time)
+    let mut cpu_time = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total_slots = 100;
+    let n_fair_tasks = 4;
+    i = 0;
+    while (i < total_slots) {
+        let task = i % n_fair_tasks;
+        cpu_time[task] = cpu_time[task] + 1;
+        i = i + 1;
+    }
+    assert_eq(cpu_time[0], 25);
+    assert_eq(cpu_time[1], 25);
+    assert_eq(cpu_time[2], 25);
+    assert_eq(cpu_time[3], 25);
+
+    // Test 6: Cooperative yielding
+    let mut task_progress = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let tasks = 3;
+    let yield_interval = 5;
+    let total_work = 15;
+
+    let mut work_done = 0;
+    while (work_done < total_work) {
+        let current_task = work_done / yield_interval % tasks;
+        task_progress[current_task] = task_progress[current_task] + yield_interval;
+        work_done = work_done + yield_interval;
+    }
+    assert_eq(task_progress[0], 5);
+    assert_eq(task_progress[1], 5);
+    assert_eq(task_progress[2], 5);
+
+    // Test 7: Task starvation detection
+    let mut run_counts = [10, 10, 0, 10, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut starved = 0;
+    i = 0;
+    while (i < 5) {
+        if (run_counts[i] == 0) {
+            starved = starved + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(starved, 1);  // Task 2 is starved
+
+    // Test 8: Weighted fair scheduling
+    let mut weights = [4, 2, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total_weight = 10;  // 4+2+1+3
+    let time_pool = 100;
+    let mut allocations = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 4) {
+        allocations[i] = weights[i] * time_pool / total_weight;
+        i = i + 1;
+    }
+    assert_eq(allocations[0], 40);  // 4/10 * 100
+    assert_eq(allocations[1], 20);  // 2/10 * 100
+    assert_eq(allocations[2], 10);  // 1/10 * 100
+    assert_eq(allocations[3], 30);  // 3/10 * 100
+
+    // Test 9: Multi-level feedback queue
+    // 3 priority levels: 0=high, 1=medium, 2=low
+    let mut queue_0 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut queue_1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut queue_2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut q0_count = 0;
+    let mut q1_count = 0;
+    let mut q2_count = 0;
+
+    // New tasks start at high priority
+    queue_0[q0_count] = 1; q0_count = q0_count + 1;
+    queue_0[q0_count] = 2; q0_count = q0_count + 1;
+
+    // After time quantum, demote to medium
+    while (q0_count > 0) {
+        q0_count = q0_count - 1;
+        queue_1[q1_count] = queue_0[q0_count];
+        q1_count = q1_count + 1;
+    }
+    assert_eq(q0_count, 0);
+    assert_eq(q1_count, 2);
+
+    // After another quantum, demote to low
+    while (q1_count > 0) {
+        q1_count = q1_count - 1;
+        queue_2[q2_count] = queue_1[q1_count];
+        q2_count = q2_count + 1;
+    }
+    assert_eq(q2_count, 2);
+
+    // Test 10: Scheduling overhead measurement
+    let mut context_switches = 0;
+    let mut last_task = -1;
+    let schedule = [0, 1, 0, 2, 1, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 8) {
+        if (schedule[i] != last_task) {
+            context_switches = context_switches + 1;
+            last_task = schedule[i];
+        }
+        i = i + 1;
+    }
+    assert_eq(context_switches, 8);  // Every slot differs from previous (including initial -1→0)
+
+    print("Async scheduling: PASS");
+    0
+}

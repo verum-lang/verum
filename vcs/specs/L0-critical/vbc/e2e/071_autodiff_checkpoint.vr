@@ -1,0 +1,684 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, ml, autodiff, checkpoint
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Autodiff checkpointing — gradient accumulation, tape segments, recomputation
+
+// ============================================================================
+// Helper: absolute value for floats
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+// Round float*1000 to integer (3 decimal places of precision as integer)
+fn round_milli(x: Float) -> Int {
+    let scaled = x * 1000.0;
+    if scaled >= 0.0 {
+        (scaled + 0.5) as Int
+    } else {
+        (scaled - 0.5) as Int
+    }
+}
+
+// ============================================================================
+// Types
+// ============================================================================
+
+type GradState is { val: Float, grad: Float };
+type Checkpoint is { x: Float, y: Float, step: Int };
+type OpRecord is { op_type: Int, input_val: Float, output_val: Float };
+
+// Op types: 0 = square, 1 = add_const, 2 = multiply_const
+
+// ============================================================================
+// GradState helpers
+// ============================================================================
+
+fn gs_new(v: Float, g: Float) -> GradState {
+    GradState { val: v, grad: g }
+}
+
+fn gs_zero_grad(s: GradState) -> GradState {
+    GradState { val: s.val, grad: 0.0 }
+}
+
+// ============================================================================
+// 4-element GradState array (for multi-variable tests)
+// ============================================================================
+
+type GradArr4 is {
+    e0: GradState, e1: GradState, e2: GradState, e3: GradState
+};
+
+fn ga4_new(a: GradState, b: GradState, c: GradState, d: GradState) -> GradArr4 {
+    GradArr4 { e0: a, e1: b, e2: c, e3: d }
+}
+
+fn ga4_get(arr: GradArr4, i: Int) -> GradState {
+    if i == 0 { arr.e0 }
+    else if i == 1 { arr.e1 }
+    else if i == 2 { arr.e2 }
+    else { arr.e3 }
+}
+
+fn ga4_set(arr: GradArr4, i: Int, v: GradState) -> GradArr4 {
+    GradArr4 {
+        e0: if i == 0 { v } else { arr.e0 },
+        e1: if i == 1 { v } else { arr.e1 },
+        e2: if i == 2 { v } else { arr.e2 },
+        e3: if i == 3 { v } else { arr.e3 }
+    }
+}
+
+// ============================================================================
+// 8-element OpRecord tape
+// ============================================================================
+
+type Tape8 is {
+    e0: OpRecord, e1: OpRecord, e2: OpRecord, e3: OpRecord,
+    e4: OpRecord, e5: OpRecord, e6: OpRecord, e7: OpRecord
+};
+
+fn op_new(otype: Int, inp: Float, out: Float) -> OpRecord {
+    OpRecord { op_type: otype, input_val: inp, output_val: out }
+}
+
+fn op_zero() -> OpRecord {
+    OpRecord { op_type: -1, input_val: 0.0, output_val: 0.0 }
+}
+
+fn tape8_empty() -> Tape8 {
+    let z = op_zero();
+    Tape8 { e0: z, e1: z, e2: z, e3: z, e4: z, e5: z, e6: z, e7: z }
+}
+
+fn tape8_get(t: Tape8, i: Int) -> OpRecord {
+    if i == 0 { t.e0 } else if i == 1 { t.e1 }
+    else if i == 2 { t.e2 } else if i == 3 { t.e3 }
+    else if i == 4 { t.e4 } else if i == 5 { t.e5 }
+    else if i == 6 { t.e6 } else { t.e7 }
+}
+
+fn tape8_set(t: Tape8, i: Int, op: OpRecord) -> Tape8 {
+    Tape8 {
+        e0: if i == 0 { op } else { t.e0 },
+        e1: if i == 1 { op } else { t.e1 },
+        e2: if i == 2 { op } else { t.e2 },
+        e3: if i == 3 { op } else { t.e3 },
+        e4: if i == 4 { op } else { t.e4 },
+        e5: if i == 5 { op } else { t.e5 },
+        e6: if i == 6 { op } else { t.e6 },
+        e7: if i == 7 { op } else { t.e7 }
+    }
+}
+
+// ============================================================================
+// Checkpoint array (4 checkpoints)
+// ============================================================================
+
+type CkptArr4 is {
+    e0: Checkpoint, e1: Checkpoint, e2: Checkpoint, e3: Checkpoint
+};
+
+fn ckpt_new(cx: Float, cy: Float, s: Int) -> Checkpoint {
+    Checkpoint { x: cx, y: cy, step: s }
+}
+
+fn ckpt_zero() -> Checkpoint {
+    Checkpoint { x: 0.0, y: 0.0, step: 0 }
+}
+
+fn ckpt4_empty() -> CkptArr4 {
+    let z = ckpt_zero();
+    CkptArr4 { e0: z, e1: z, e2: z, e3: z }
+}
+
+fn ckpt4_get(arr: CkptArr4, i: Int) -> Checkpoint {
+    if i == 0 { arr.e0 }
+    else if i == 1 { arr.e1 }
+    else if i == 2 { arr.e2 }
+    else { arr.e3 }
+}
+
+fn ckpt4_set(arr: CkptArr4, i: Int, c: Checkpoint) -> CkptArr4 {
+    CkptArr4 {
+        e0: if i == 0 { c } else { arr.e0 },
+        e1: if i == 1 { c } else { arr.e1 },
+        e2: if i == 2 { c } else { arr.e2 },
+        e3: if i == 3 { c } else { arr.e3 }
+    }
+}
+
+// ============================================================================
+// Test 1: Gradient accumulation from multiple loss terms
+// ============================================================================
+
+// Simulate: total_loss = loss1 + loss2 + loss3
+// grad(total_loss) = grad(loss1) + grad(loss2) + grad(loss3)
+//
+// loss1(x) = x^2          => grad = 2*x
+// loss2(x) = 3*x          => grad = 3
+// loss3(x) = (x - 1)^2    => grad = 2*(x - 1)
+// At x=2: g1=4, g2=3, g3=2 => total grad = 9
+
+fn loss1_grad(x: Float) -> Float {
+    2.0 * x
+}
+
+fn loss2_grad(x: Float) -> Float {
+    3.0
+}
+
+fn loss3_grad(x: Float) -> Float {
+    2.0 * (x - 1.0)
+}
+
+fn test_gradient_accumulation() {
+    let x = 2.0;
+
+    // Accumulate gradients
+    let mut total_grad = 0.0;
+    total_grad = total_grad + loss1_grad(x);   // +4.0
+    total_grad = total_grad + loss2_grad(x);   // +3.0
+    total_grad = total_grad + loss3_grad(x);   // +2.0
+
+    assert_eq(round_milli(total_grad), 9000);  // 9.0
+
+    // Verify individual gradients
+    assert_eq(round_milli(loss1_grad(x)), 4000);
+    assert_eq(round_milli(loss2_grad(x)), 3000);
+    assert_eq(round_milli(loss3_grad(x)), 2000);
+
+    // Test at x=0: g1=0, g2=3, g3=-2 => total=1
+    let x0 = 0.0;
+    let g0 = loss1_grad(x0) + loss2_grad(x0) + loss3_grad(x0);
+    assert_eq(round_milli(g0), 1000);
+
+    // Test at x=-1: g1=-2, g2=3, g3=-4 => total=-3
+    let xn = 0.0 - 1.0;
+    let gn = loss1_grad(xn) + loss2_grad(xn) + loss3_grad(xn);
+    assert_eq(round_milli(gn), 0 - 3000);
+
+    // Weighted gradient accumulation: w1*g1 + w2*g2 + w3*g3
+    // weights: 0.5, 0.3, 0.2 at x=2
+    let w1 = 0.5;
+    let w2 = 0.3;
+    let w3 = 0.2;
+    let weighted = w1 * loss1_grad(x) + w2 * loss2_grad(x) + w3 * loss3_grad(x);
+    // 0.5*4 + 0.3*3 + 0.2*2 = 2.0 + 0.9 + 0.4 = 3.3
+    assert_eq(round_milli(weighted), 3300);
+
+    print("  test_gradient_accumulation: ok");
+}
+
+// ============================================================================
+// Test 2: Gradient clipping
+// ============================================================================
+
+// If |grad| > max_norm, scale: grad *= max_norm / |grad|
+
+fn sqrt_newton(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let mut guess = x;
+        let mut i = 0;
+        while i < 50 {
+            guess = (guess + x / guess) / 2.0;
+            i = i + 1;
+        }
+        guess
+    }
+}
+
+fn grad_norm_2d(gx: Float, gy: Float) -> Float {
+    sqrt_newton(gx * gx + gy * gy)
+}
+
+fn test_gradient_clipping() {
+    // 2D gradient vector (gx, gy) = (3.0, 4.0), norm = 5.0
+    let gx = 3.0;
+    let gy = 4.0;
+    let norm = grad_norm_2d(gx, gy);
+    assert_eq(round_milli(norm), 5000);  // 5.0
+
+    // Clip to max_norm = 2.0
+    let max_norm = 2.0;
+    let mut clipped_gx = gx;
+    let mut clipped_gy = gy;
+    if norm > max_norm {
+        let scale = max_norm / norm;
+        clipped_gx = gx * scale;
+        clipped_gy = gy * scale;
+    }
+
+    // After clipping: (3*2/5, 4*2/5) = (1.2, 1.6)
+    assert_eq(round_milli(clipped_gx), 1200);
+    assert_eq(round_milli(clipped_gy), 1600);
+
+    // Verify clipped norm = max_norm
+    let clipped_norm = grad_norm_2d(clipped_gx, clipped_gy);
+    assert_eq(round_milli(clipped_norm), 2000);
+
+    // Test: no clipping needed when norm < max_norm
+    let small_gx = 0.5;
+    let small_gy = 0.5;
+    let small_norm = grad_norm_2d(small_gx, small_gy);
+    let big_max = 10.0;
+    let mut out_gx = small_gx;
+    let mut out_gy = small_gy;
+    if small_norm > big_max {
+        let sc = big_max / small_norm;
+        out_gx = small_gx * sc;
+        out_gy = small_gy * sc;
+    }
+    // Should be unchanged
+    assert_eq(round_milli(out_gx), 500);
+    assert_eq(round_milli(out_gy), 500);
+
+    // Test clipping with a single scalar gradient
+    let big_grad = 100.0;
+    let scalar_max = 1.0;
+    let mut clipped_scalar = big_grad;
+    if abs_f(big_grad) > scalar_max {
+        if big_grad > 0.0 {
+            clipped_scalar = scalar_max;
+        } else {
+            clipped_scalar = 0.0 - scalar_max;
+        }
+    }
+    assert_eq(round_milli(clipped_scalar), 1000);
+
+    print("  test_gradient_clipping: ok");
+}
+
+// ============================================================================
+// Test 3: Checkpoint save/restore
+// ============================================================================
+
+// Simulate: save state at checkpoints, forward compute, restore and recompute
+// forward: y = x^2 + 2*x (step by step)
+
+fn forward_step(x: Float, step: Int) -> Float {
+    // step 0: compute x^2
+    // step 1: compute 2*x
+    // step 2: add them
+    if step == 0 { x * x }
+    else if step == 1 { 2.0 * x }
+    else { 0.0 }
+}
+
+fn test_checkpoint_save_restore() {
+    let x0 = 3.0;
+
+    // Save checkpoint at initial state
+    let mut ckpts = ckpt4_empty();
+    ckpts = ckpt4_set(ckpts, 0, ckpt_new(x0, 0.0, 0));
+
+    // Forward pass step 0: y0 = x^2 = 9
+    let y0 = forward_step(x0, 0);
+    assert_eq(round_milli(y0), 9000);
+    ckpts = ckpt4_set(ckpts, 1, ckpt_new(x0, y0, 1));
+
+    // Forward pass step 1: y1 = 2*x = 6
+    let y1 = forward_step(x0, 1);
+    assert_eq(round_milli(y1), 6000);
+    ckpts = ckpt4_set(ckpts, 2, ckpt_new(x0, y1, 2));
+
+    // Final result: y = y0 + y1 = 15
+    let y_final = y0 + y1;
+    assert_eq(round_milli(y_final), 15000);
+
+    // Restore from checkpoint 0 and recompute
+    let restored = ckpt4_get(ckpts, 0);
+    assert_eq(round_milli(restored.x), 3000);
+    assert_eq(restored.step, 0);
+
+    // Recompute from checkpoint
+    let recomputed_y0 = forward_step(restored.x, 0);
+    let recomputed_y1 = forward_step(restored.x, 1);
+    let recomputed_final = recomputed_y0 + recomputed_y1;
+
+    // Must match original
+    assert_eq(round_milli(recomputed_final), round_milli(y_final));
+
+    // Restore from checkpoint 1 (only need step 1 onward)
+    let mid_ckpt = ckpt4_get(ckpts, 1);
+    assert_eq(mid_ckpt.step, 1);
+    assert_eq(round_milli(mid_ckpt.y), 9000);  // y0 was saved
+
+    // Recompute only step 1 from checkpoint
+    let partial_y1 = forward_step(mid_ckpt.x, 1);
+    let partial_final = mid_ckpt.y + partial_y1;
+    assert_eq(round_milli(partial_final), 15000);
+
+    // Verify all checkpoints stored correctly
+    let c0 = ckpt4_get(ckpts, 0);
+    let c1 = ckpt4_get(ckpts, 1);
+    let c2 = ckpt4_get(ckpts, 2);
+    assert_eq(c0.step, 0);
+    assert_eq(c1.step, 1);
+    assert_eq(c2.step, 2);
+
+    print("  test_checkpoint_save_restore: ok");
+}
+
+// ============================================================================
+// Test 4: Tape segment — record ops, then replay backward for gradient
+// ============================================================================
+
+// Forward: x -> square -> add_const(5) -> multiply_const(2)
+// If x=3: 3 -> 9 -> 14 -> 28
+//
+// Backward replay (chain rule):
+//   d(multiply_const(2))/dy = 2           upstream_grad = 1*2 = 2
+//   d(add_const(5))/dy = 1                upstream_grad = 2*1 = 2
+//   d(square(x))/dx = 2*x = 2*3 = 6      upstream_grad = 2*6 = 12
+//
+// So df/dx = 12. Let us verify: f(x) = 2*(x^2+5), f'(x) = 4x, f'(3) = 12. Correct!
+
+fn apply_op_forward(op_type: Int, input: Float) -> Float {
+    if op_type == 0 {
+        // square
+        input * input
+    } else if op_type == 1 {
+        // add_const(5)
+        input + 5.0
+    } else if op_type == 2 {
+        // multiply_const(2)
+        input * 2.0
+    } else {
+        input
+    }
+}
+
+fn local_grad_of_op(op_type: Int, input_val: Float) -> Float {
+    if op_type == 0 {
+        // d(x^2)/dx = 2*x
+        2.0 * input_val
+    } else if op_type == 1 {
+        // d(x+5)/dx = 1
+        1.0
+    } else if op_type == 2 {
+        // d(2*x)/dx = 2
+        2.0
+    } else {
+        1.0
+    }
+}
+
+fn test_tape_segment() {
+    let x = 3.0;
+    let mut tape = tape8_empty();
+    let mut tape_len = 0;
+
+    // Forward pass: record operations
+    let mut current = x;
+
+    // Op 0: square
+    let out0 = apply_op_forward(0, current);
+    tape = tape8_set(tape, tape_len, op_new(0, current, out0));
+    tape_len = tape_len + 1;
+    current = out0;
+    assert_eq(round_milli(current), 9000);  // 3^2 = 9
+
+    // Op 1: add_const(5)
+    let out1 = apply_op_forward(1, current);
+    tape = tape8_set(tape, tape_len, op_new(1, current, out1));
+    tape_len = tape_len + 1;
+    current = out1;
+    assert_eq(round_milli(current), 14000);  // 9 + 5 = 14
+
+    // Op 2: multiply_const(2)
+    let out2 = apply_op_forward(2, current);
+    tape = tape8_set(tape, tape_len, op_new(2, current, out2));
+    tape_len = tape_len + 1;
+    current = out2;
+    assert_eq(round_milli(current), 28000);  // 14 * 2 = 28
+
+    assert_eq(tape_len, 3);
+
+    // Backward pass: replay tape in reverse, accumulating gradient
+    let mut upstream_grad = 1.0;  // df/df = 1
+    let mut idx = tape_len - 1;
+    while idx >= 0 {
+        let rec = tape8_get(tape, idx);
+        let lg = local_grad_of_op(rec.op_type, rec.input_val);
+        upstream_grad = upstream_grad * lg;
+        idx = idx - 1;
+    }
+
+    // f(x) = 2*(x^2+5), f'(x) = 4x, f'(3) = 12
+    assert_eq(round_milli(upstream_grad), 12000);
+
+    // Verify with different input x=1: f(1) = 2*(1+5) = 12, f'(1) = 4
+    let x1 = 1.0;
+    let mut tape1 = tape8_empty();
+    let mut len1 = 0;
+    let mut cur1 = x1;
+
+    let o0 = apply_op_forward(0, cur1);
+    tape1 = tape8_set(tape1, len1, op_new(0, cur1, o0));
+    len1 = len1 + 1;
+    cur1 = o0;
+
+    let o1 = apply_op_forward(1, cur1);
+    tape1 = tape8_set(tape1, len1, op_new(1, cur1, o1));
+    len1 = len1 + 1;
+    cur1 = o1;
+
+    let o2 = apply_op_forward(2, cur1);
+    tape1 = tape8_set(tape1, len1, op_new(2, cur1, o2));
+    len1 = len1 + 1;
+    cur1 = o2;
+
+    assert_eq(round_milli(cur1), 12000);  // f(1) = 12
+
+    let mut ug1 = 1.0;
+    let mut j = len1 - 1;
+    while j >= 0 {
+        let r = tape8_get(tape1, j);
+        let lg1 = local_grad_of_op(r.op_type, r.input_val);
+        ug1 = ug1 * lg1;
+        j = j - 1;
+    }
+    assert_eq(round_milli(ug1), 4000);  // f'(1) = 4
+
+    print("  test_tape_segment: ok");
+}
+
+// ============================================================================
+// Test 5: Multi-variable gradient
+// ============================================================================
+
+// f(x, y) = x^2 + x*y + y^2
+// df/dx = 2x + y
+// df/dy = x + 2y
+//
+// Numerical gradient via finite differences:
+// df/dx ~ (f(x+h, y) - f(x-h, y)) / (2*h)
+// df/dy ~ (f(x, y+h) - f(x, y-h)) / (2*h)
+
+fn f_xy(x: Float, y: Float) -> Float {
+    x * x + x * y + y * y
+}
+
+fn df_dx_analytical(x: Float, y: Float) -> Float {
+    2.0 * x + y
+}
+
+fn df_dy_analytical(x: Float, y: Float) -> Float {
+    x + 2.0 * y
+}
+
+fn test_multi_variable_gradient() {
+    // Test at (x=3, y=2)
+    let x = 3.0;
+    let y = 2.0;
+
+    // f(3, 2) = 9 + 6 + 4 = 19
+    assert_eq(round_milli(f_xy(x, y)), 19000);
+
+    // Analytical gradients
+    let grad_x = df_dx_analytical(x, y);  // 2*3 + 2 = 8
+    let grad_y = df_dy_analytical(x, y);  // 3 + 2*2 = 7
+    assert_eq(round_milli(grad_x), 8000);
+    assert_eq(round_milli(grad_y), 7000);
+
+    // Numerical gradients (finite differences)
+    let h = 0.001;
+    let num_grad_x = (f_xy(x + h, y) - f_xy(x - h, y)) / (2.0 * h);
+    let num_grad_y = (f_xy(x, y + h) - f_xy(x, y - h)) / (2.0 * h);
+
+    // Should match analytical to within ~0.01
+    let err_x = abs_f(num_grad_x - grad_x);
+    let err_y = abs_f(num_grad_y - grad_y);
+    assert(err_x < 0.01);
+    assert(err_y < 0.01);
+
+    // Test at (x=0, y=0): f=0, df/dx=0, df/dy=0
+    assert_eq(round_milli(f_xy(0.0, 0.0)), 0);
+    assert_eq(round_milli(df_dx_analytical(0.0, 0.0)), 0);
+    assert_eq(round_milli(df_dy_analytical(0.0, 0.0)), 0);
+
+    // Test at (x=-1, y=1): f=1-1+1=1, df/dx=-2+1=-1, df/dy=-1+2=1
+    let xn = 0.0 - 1.0;
+    let yn = 1.0;
+    assert_eq(round_milli(f_xy(xn, yn)), 1000);
+    assert_eq(round_milli(df_dx_analytical(xn, yn)), 0 - 1000);
+    assert_eq(round_milli(df_dy_analytical(xn, yn)), 1000);
+
+    // Gradient descent step: x_new = x - lr * df/dx, y_new = y - lr * df/dy
+    let lr = 0.1;
+    let x_new = x - lr * grad_x;   // 3 - 0.1*8 = 3 - 0.8 = 2.2
+    let y_new = y - lr * grad_y;   // 2 - 0.1*7 = 2 - 0.7 = 1.3
+
+    assert_eq(round_milli(x_new), 2200);
+    assert_eq(round_milli(y_new), 1300);
+
+    // f should decrease after gradient step
+    let f_before = f_xy(x, y);          // 19
+    let f_after = f_xy(x_new, y_new);   // 2.2^2 + 2.2*1.3 + 1.3^2
+    // = 4.84 + 2.86 + 1.69 = 9.39
+    assert_eq(round_milli(f_after), 9390);
+    assert(f_after < f_before);
+
+    print("  test_multi_variable_gradient: ok");
+}
+
+// ============================================================================
+// Test 6: Gradient zeroing before each iteration
+// ============================================================================
+
+fn test_gradient_zeroing() {
+    // Simulate 3 parameters with accumulated gradients
+    let mut p0 = gs_new(1.0, 0.0);
+    let mut p1 = gs_new(2.0, 0.0);
+    let mut p2 = gs_new(3.0, 0.0);
+
+    // Iteration 1: accumulate gradients
+    p0 = GradState { val: p0.val, grad: p0.grad + 2.5 };
+    p1 = GradState { val: p1.val, grad: p1.grad + 1.3 };
+    p2 = GradState { val: p2.val, grad: p2.grad + 0.7 };
+
+    assert_eq(round_milli(p0.grad), 2500);
+    assert_eq(round_milli(p1.grad), 1300);
+    assert_eq(round_milli(p2.grad), 700);
+
+    // Apply gradient update: val -= lr * grad
+    let lr = 0.01;
+    p0 = GradState { val: p0.val - lr * p0.grad, grad: p0.grad };
+    p1 = GradState { val: p1.val - lr * p1.grad, grad: p1.grad };
+    p2 = GradState { val: p2.val - lr * p2.grad, grad: p2.grad };
+
+    // p0.val = 1.0 - 0.01*2.5 = 0.975
+    assert_eq(round_milli(p0.val), 975);
+    // p1.val = 2.0 - 0.01*1.3 = 1.987
+    assert_eq(round_milli(p1.val), 1987);
+    // p2.val = 3.0 - 0.01*0.7 = 2.993
+    assert_eq(round_milli(p2.val), 2993);
+
+    // Zero gradients before iteration 2
+    p0 = gs_zero_grad(p0);
+    p1 = gs_zero_grad(p1);
+    p2 = gs_zero_grad(p2);
+
+    assert_eq(round_milli(p0.grad), 0);
+    assert_eq(round_milli(p1.grad), 0);
+    assert_eq(round_milli(p2.grad), 0);
+
+    // Values should be preserved after zeroing
+    assert_eq(round_milli(p0.val), 975);
+    assert_eq(round_milli(p1.val), 1987);
+    assert_eq(round_milli(p2.val), 2993);
+
+    // Iteration 2: accumulate new gradients (different values)
+    p0 = GradState { val: p0.val, grad: p0.grad + 3.1 };
+    p1 = GradState { val: p1.val, grad: p1.grad + 0.8 };
+    p2 = GradState { val: p2.val, grad: p2.grad + 1.5 };
+
+    // Should be fresh gradients, not accumulated with old ones
+    assert_eq(round_milli(p0.grad), 3100);
+    assert_eq(round_milli(p1.grad), 800);
+    assert_eq(round_milli(p2.grad), 1500);
+
+    // Apply update again
+    p0 = GradState { val: p0.val - lr * p0.grad, grad: p0.grad };
+    p1 = GradState { val: p1.val - lr * p1.grad, grad: p1.grad };
+    p2 = GradState { val: p2.val - lr * p2.grad, grad: p2.grad };
+
+    // p0.val = 0.975 - 0.01*3.1 = 0.975 - 0.031 = 0.944
+    assert_eq(round_milli(p0.val), 944);
+    // p1.val = 1.987 - 0.01*0.8 = 1.987 - 0.008 = 1.979
+    assert_eq(round_milli(p1.val), 1979);
+    // p2.val = 2.993 - 0.01*1.5 = 2.993 - 0.015 = 2.978
+    assert_eq(round_milli(p2.val), 2978);
+
+    // Using GradArr4 for batch zeroing
+    let mut params = ga4_new(
+        gs_new(10.0, 5.0),
+        gs_new(20.0, 3.0),
+        gs_new(30.0, 7.0),
+        gs_new(40.0, 1.0)
+    );
+
+    // Zero all gradients
+    let mut k = 0;
+    while k < 4 {
+        let p = ga4_get(params, k);
+        params = ga4_set(params, k, gs_zero_grad(p));
+        k = k + 1;
+    }
+
+    // All grads should be zero, values preserved
+    let mut m = 0;
+    while m < 4 {
+        let p = ga4_get(params, m);
+        assert_eq(round_milli(p.grad), 0);
+        m = m + 1;
+    }
+    assert_eq(round_milli(ga4_get(params, 0).val), 10000);
+    assert_eq(round_milli(ga4_get(params, 1).val), 20000);
+    assert_eq(round_milli(ga4_get(params, 2).val), 30000);
+    assert_eq(round_milli(ga4_get(params, 3).val), 40000);
+
+    print("  test_gradient_zeroing: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_gradient_accumulation();
+    test_gradient_clipping();
+    test_checkpoint_save_restore();
+    test_tape_segment();
+    test_multi_variable_gradient();
+    test_gradient_zeroing();
+    print("[OK] 071_autodiff_checkpoint");
+    0
+}

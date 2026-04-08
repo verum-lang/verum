@@ -1,0 +1,344 @@
+// @test: run
+// @expected-stdout: Cleanup executed\nResult: default content\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, recovery, try, recover, finally
+// @description: Full try { } recover { pattern => expr } finally { } expression
+
+/// Full try expression - combining try, recover, and finally.
+/// Provides both error recovery and guaranteed cleanup.
+
+type FileError is
+    | OpenFailed(Text)
+    | ReadFailed(Text)
+    | WriteFailed(Text)
+    | CloseFailed(Text)
+    | NotFound(Text);
+
+type FileHandle is {
+    path: Text,
+    is_open: Bool
+};
+
+fn open_file(path: &Text) -> Result<FileHandle, FileError> {
+    if path.starts_with("/valid") {
+        Ok(FileHandle { path: path.clone(), is_open: true })
+    } else {
+        Err(FileError.NotFound(path.clone()))
+    }
+}
+
+fn close_file(handle: &mut FileHandle) {
+    if handle.is_open {
+        println(f"Closing: {handle.path}");
+        handle.is_open = false;
+    }
+}
+
+fn read_contents(handle: &FileHandle) -> Result<Text, FileError> {
+    if handle.is_open {
+        Ok("file contents")
+    } else {
+        Err(FileError.ReadFailed("File not open"))
+    }
+}
+
+/// Full try-recover-finally pattern
+fn full_error_handling(path: &Text) -> Text {
+    let mut file: Maybe<FileHandle> = None;
+
+    try {
+        file = Some(open_file(path)?);
+        read_contents(file.as_ref().unwrap())?
+    } recover {
+        FileError.NotFound(p) => f"File {p} not found, using default",
+        FileError.OpenFailed(p) => f"Could not open {p}, using default",
+        FileError.ReadFailed(msg) => f"Read failed: {msg}, using default",
+        _ => "default content"
+    } finally {
+        // Cleanup runs regardless of success or recovery
+        if let Some(ref mut f) = file {
+            close_file(f);
+        }
+        println("Cleanup executed");
+    }
+}
+
+/// Execution order: try -> (recover if error) -> finally
+fn execution_order_demo() -> Text {
+    let mut log: List<Text> = List.new();
+
+    let result = try {
+        log.push("1. Try body start");
+        let r: Result<Int, Text> = Err("simulated error");
+        let _ = r?;
+        log.push("2. Try body end - not reached");
+        "success"
+    } recover {
+        e => {
+            log.push(f"3. Recover: {e}");
+            "recovered"
+        }
+    } finally {
+        log.push("4. Finally - always runs");
+    };
+
+    // Log: ["1. Try body start", "3. Recover: simulated error", "4. Finally - always runs"]
+    result
+}
+
+/// Successful path - recover skipped, finally still runs
+fn success_path_demo() -> Text {
+    let mut log: List<Text> = List.new();
+
+    let result = try {
+        log.push("1. Try body");
+        "success"
+    } recover {
+        _ => {
+            log.push("2. Recover - skipped on success");
+            "recovered"
+        }
+    } finally {
+        log.push("3. Finally - always runs");
+    };
+
+    // Log: ["1. Try body", "3. Finally - always runs"]
+    result
+}
+
+/// Resource management with recovery
+type Resource is {
+    id: Int,
+    name: Text,
+    acquired: Bool
+};
+
+type ResourceError is
+    | AcquisitionFailed(Text)
+    | OperationFailed(Text)
+    | InvalidState;
+
+fn acquire_resource(id: Int) -> Result<Resource, ResourceError> {
+    if id > 0 {
+        Ok(Resource { id, name: f"Resource_{id}", acquired: true })
+    } else {
+        Err(ResourceError.AcquisitionFailed("Invalid ID"))
+    }
+}
+
+fn release_resource(r: &mut Resource) {
+    if r.acquired {
+        println(f"Releasing: {r.name}");
+        r.acquired = false;
+    }
+}
+
+fn use_resource(r: &Resource) -> Result<Int, ResourceError> {
+    if r.acquired {
+        Ok(r.id * 10)
+    } else {
+        Err(ResourceError.InvalidState)
+    }
+}
+
+fn safe_resource_operation(id: Int) -> Int {
+    let mut resource: Maybe<Resource> = None;
+
+    try {
+        resource = Some(acquire_resource(id)?);
+        use_resource(resource.as_ref().unwrap())?
+    } recover {
+        ResourceError.AcquisitionFailed(msg) => {
+            println(f"Acquisition failed: {msg}");
+            -1
+        },
+        ResourceError.OperationFailed(msg) => {
+            println(f"Operation failed: {msg}");
+            0
+        },
+        ResourceError.InvalidState => {
+            println("Invalid resource state");
+            -2
+        }
+    } finally {
+        if let Some(ref mut r) = resource {
+            release_resource(r);
+        }
+    }
+}
+
+/// Database transaction pattern
+type DbError is
+    | ConnectionFailed
+    | QueryFailed(Text)
+    | CommitFailed
+    | RollbackFailed;
+
+type DbConnection is {
+    active: Bool,
+    in_transaction: Bool
+};
+
+fn connect_db() -> Result<DbConnection, DbError> {
+    Ok(DbConnection { active: true, in_transaction: false })
+}
+
+fn begin_transaction(conn: &mut DbConnection) {
+    conn.in_transaction = true;
+}
+
+fn commit_transaction(conn: &mut DbConnection) {
+    conn.in_transaction = false;
+}
+
+fn rollback_transaction(conn: &mut DbConnection) {
+    conn.in_transaction = false;
+}
+
+fn close_connection(conn: &mut DbConnection) {
+    conn.active = false;
+}
+
+fn execute_query(conn: &DbConnection, query: &Text) -> Result<Int, DbError> {
+    if conn.active && query != "fail" {
+        Ok(42)
+    } else {
+        Err(DbError.QueryFailed(query.clone()))
+    }
+}
+
+fn database_operation(query: &Text) -> Int {
+    let mut conn: Maybe<DbConnection> = None;
+    let mut transaction_started = false;
+    let mut success = false;
+
+    try {
+        conn = Some(connect_db()?);
+        let c = conn.as_mut().unwrap();
+
+        begin_transaction(c);
+        transaction_started = true;
+
+        let result = execute_query(c, query)?;
+
+        commit_transaction(c);
+        success = true;
+
+        result
+    } recover {
+        DbError.QueryFailed(q) if q == "retry" => 0,
+        _ => -1
+    } finally {
+        if let Some(ref mut c) = conn {
+            if transaction_started && !success {
+                rollback_transaction(c);
+            }
+            close_connection(c);
+        }
+    }
+}
+
+/// Nested try-recover-finally
+fn nested_full_try() -> Text {
+    try {
+        let inner = try {
+            let r: Result<Int, Text> = Err("inner error");
+            r?
+        } recover {
+            _ => 0
+        } finally {
+            println("Inner finally");
+        };
+
+        f"Inner result: {inner}"
+    } recover {
+        _ => "Outer recovery"
+    } finally {
+        println("Outer finally");
+    }
+}
+
+/// Async version
+async fn async_full_try() -> Int {
+    let mut resource_acquired = false;
+
+    try {
+        resource_acquired = true;
+        async_operation().await?
+    } recover {
+        error => {
+            println(f"Recovering from async error: {error}");
+            0
+        }
+    } finally {
+        if resource_acquired {
+            async_cleanup().await;
+        }
+    }
+}
+
+async fn async_operation() -> Result<Int, Text> {
+    Ok(42)
+}
+
+async fn async_cleanup() {
+    // Cleanup
+}
+
+/// Practical example: Config loading with fallback
+type Config is {
+    value: Int,
+    source: Text
+};
+
+type ConfigError is
+    | FileNotFound(Text)
+    | ParseError(Text)
+    | ValidationError(Text);
+
+fn load_config(path: &Text) -> Result<Config, ConfigError> {
+    if path == "/app/config.toml" {
+        Ok(Config { value: 100, source: path.clone() })
+    } else {
+        Err(ConfigError.FileNotFound(path.clone()))
+    }
+}
+
+fn default_config() -> Config {
+    Config { value: 42, source: "default" }
+}
+
+fn get_config_with_metrics(path: &Text) -> Config {
+    let start = now();
+
+    try {
+        load_config(path)?
+    } recover {
+        ConfigError.FileNotFound(p) => {
+            println(f"Config {p} not found, using default");
+            default_config()
+        },
+        ConfigError.ParseError(msg) => {
+            println(f"Parse error: {msg}, using default");
+            default_config()
+        },
+        ConfigError.ValidationError(msg) => {
+            println(f"Invalid config: {msg}, using default");
+            default_config()
+        }
+    } finally {
+        let elapsed = now() - start;
+        println(f"Config load took {elapsed}ms");
+    }
+}
+
+fn now() -> Int { 0 }
+
+fn main() {
+    // Full error handling demonstration
+    let content = full_error_handling("/invalid/path.txt");
+    println(f"Result: {content}");
+
+    println("Operation completed");
+}

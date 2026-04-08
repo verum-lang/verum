@@ -1,0 +1,30 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M407
+// @tags: meta, quote, hygiene, stage, escape, invalid
+// @description: Tests detection of invalid stage escape attempts
+
+// =============================================================================
+// INVALID STAGE ESCAPE
+// =============================================================================
+
+// M407: Stage escape error - attempting to reference future stage binding
+
+meta fn invalid_forward_stage_ref() -> TokenStream {
+    quote {
+        let future_val = 42;
+
+        meta fn inner() -> TokenStream {
+            // ERROR: Cannot reference 'future_val' from outer stage
+            // before it's defined in that stage's execution
+            quote {
+                let x = $$future_val;  // M407: Invalid stage escape
+            }
+        }
+    }
+}
+
+fn main() {
+    @invalid_forward_stage_ref();
+}

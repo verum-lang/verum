@@ -1,0 +1,152 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, interpreter, variants, recursion, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT simple arithmetic expression interpreter/evaluator
+
+// AST for arithmetic expressions
+type Expr is
+    Lit(Int)
+  | Neg(Expr)
+  | Add { left: Expr, right: Expr }
+  | Sub { left: Expr, right: Expr }
+  | Mul { left: Expr, right: Expr }
+  | Div { left: Expr, right: Expr };
+
+fn eval(e: Expr) -> Int {
+    match e {
+        Lit(n) => n,
+        Neg(inner) => 0 - eval(inner),
+        Add { left, right } => eval(left) + eval(right),
+        Sub { left, right } => eval(left) - eval(right),
+        Mul { left, right } => eval(left) * eval(right),
+        Div { left, right } => {
+            let r = eval(right);
+            if r == 0 { 0 }  // safe division
+            else { eval(left) / r }
+        },
+    }
+}
+
+// Count number of nodes in expression
+fn node_count(e: Expr) -> Int {
+    match e {
+        Lit(_) => 1,
+        Neg(inner) => 1 + node_count(inner),
+        Add { left, right } => 1 + node_count(left) + node_count(right),
+        Sub { left, right } => 1 + node_count(left) + node_count(right),
+        Mul { left, right } => 1 + node_count(left) + node_count(right),
+        Div { left, right } => 1 + node_count(left) + node_count(right),
+    }
+}
+
+// Depth of expression tree
+fn depth(e: Expr) -> Int {
+    match e {
+        Lit(_) => 1,
+        Neg(inner) => 1 + depth(inner),
+        Add { left, right } => {
+            let ld = depth(left);
+            let rd = depth(right);
+            if ld > rd { 1 + ld } else { 1 + rd }
+        },
+        Sub { left, right } => {
+            let ld = depth(left);
+            let rd = depth(right);
+            if ld > rd { 1 + ld } else { 1 + rd }
+        },
+        Mul { left, right } => {
+            let ld = depth(left);
+            let rd = depth(right);
+            if ld > rd { 1 + ld } else { 1 + rd }
+        },
+        Div { left, right } => {
+            let ld = depth(left);
+            let rd = depth(right);
+            if ld > rd { 1 + ld } else { 1 + rd }
+        },
+    }
+}
+
+// Check if expression is a constant (just a literal)
+fn is_constant(e: Expr) -> Bool {
+    e is Lit
+}
+
+fn main() -> Int {
+    // Simple literals
+    assert_eq(eval(Lit(42)), 42);
+    assert_eq(eval(Lit(0)), 0);
+
+    // Negation
+    assert_eq(eval(Neg(Lit(5))), -5);
+    assert_eq(eval(Neg(Neg(Lit(3)))), 3);
+
+    // Binary operations: (3 + 4) = 7
+    let e1 = Add { left: Lit(3), right: Lit(4) };
+    assert_eq(eval(e1), 7);
+
+    // (10 - 3) = 7
+    let e2 = Sub { left: Lit(10), right: Lit(3) };
+    assert_eq(eval(e2), 7);
+
+    // (6 * 7) = 42
+    let e3 = Mul { left: Lit(6), right: Lit(7) };
+    assert_eq(eval(e3), 42);
+
+    // (20 / 4) = 5
+    let e4 = Div { left: Lit(20), right: Lit(4) };
+    assert_eq(eval(e4), 5);
+
+    // Division by zero returns 0
+    assert_eq(eval(Div { left: Lit(5), right: Lit(0) }), 0);
+
+    // Nested: (3 + 4) * (10 - 3) = 7 * 7 = 49
+    let e5 = Mul {
+        left: Add { left: Lit(3), right: Lit(4) },
+        right: Sub { left: Lit(10), right: Lit(3) },
+    };
+    assert_eq(eval(e5), 49);
+
+    // Deeper nesting: ((2 * 3) + (4 * 5)) - (6 / 2) = (6 + 20) - 3 = 23
+    let e6 = Sub {
+        left: Add {
+            left: Mul { left: Lit(2), right: Lit(3) },
+            right: Mul { left: Lit(4), right: Lit(5) },
+        },
+        right: Div { left: Lit(6), right: Lit(2) },
+    };
+    assert_eq(eval(e6), 23);
+    assert_eq(node_count(e6), 11);
+    assert_eq(depth(e6), 4);
+
+    // Properties
+    assert(is_constant(Lit(5)));
+    assert(!is_constant(e1));
+
+    // Neg chain
+    let neg3 = Neg(Neg(Neg(Lit(7))));
+    assert_eq(eval(neg3), -7);
+    assert_eq(depth(neg3), 4);
+
+    // Complex expression tree
+    // ((1 + 2) * (3 + 4)) + ((5 + 6) * (7 + 8))
+    // = (3 * 7) + (11 * 15)
+    // = 21 + 165 = 186
+    let big = Add {
+        left: Mul {
+            left: Add { left: Lit(1), right: Lit(2) },
+            right: Add { left: Lit(3), right: Lit(4) },
+        },
+        right: Mul {
+            left: Add { left: Lit(5), right: Lit(6) },
+            right: Add { left: Lit(7), right: Lit(8) },
+        },
+    };
+    assert_eq(eval(big), 186);
+    assert_eq(node_count(big), 15);
+
+    0
+}

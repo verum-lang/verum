@@ -1,0 +1,129 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: spawn, closures, text, list, advanced
+// @description: Advanced spawn tests - text captures, list captures, function captures
+
+fn test_text_capture() -> Int {
+    let msg = "hello";
+    let h = spawn { msg.len() };
+    let result = h.await;
+    if result != 5 {
+        print(f"FAIL text_capture: expected 5, got {result}");
+        return 1;
+    }
+    print("  text_capture: OK");
+    0
+}
+
+fn test_list_capture_len() -> Int {
+    let items = [10, 20, 30, 40, 50];
+    let h = spawn { items.len() };
+    let result = h.await;
+    if result != 5 {
+        print(f"FAIL list_capture_len: expected 5, got {result}");
+        return 1;
+    }
+    print("  list_capture_len: OK");
+    0
+}
+
+fn test_list_capture_index() -> Int {
+    let items = [100, 200, 300];
+    let h = spawn { items[1] };
+    let result = h.await;
+    if result != 200 {
+        print(f"FAIL list_capture_index: expected 200, got {result}");
+        return 1;
+    }
+    print("  list_capture_index: OK");
+    0
+}
+
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn test_function_call_in_spawn() -> Int {
+    let val = 21;
+    let h = spawn { double(val) };
+    let result = h.await;
+    if result != 42 {
+        print(f"FAIL func_in_spawn: expected 42, got {result}");
+        return 1;
+    }
+    print("  function_call_in_spawn: OK");
+    0
+}
+
+fn test_spawn_with_conditional() -> Int {
+    let x = 10;
+    let h = spawn {
+        if x > 5 {
+            x * 10
+        } else {
+            x + 10
+        }
+    };
+    let result = h.await;
+    if result != 100 {
+        print(f"FAIL spawn_conditional: expected 100, got {result}");
+        return 1;
+    }
+    print("  spawn_with_conditional: OK");
+    0
+}
+
+fn test_parallel_computation() -> Int {
+    let h1 = spawn { 1 + 2 + 3 + 4 + 5 };
+    let h2 = spawn { 6 + 7 + 8 + 9 + 10 };
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let total = r1 + r2;
+    if total != 55 {
+        print(f"FAIL parallel_comp: expected 55, got {total}");
+        return 1;
+    }
+    print("  parallel_computation: OK");
+    0
+}
+
+fn test_capture_bool() -> Int {
+    let flag = true;
+    let val = 42;
+    let h = spawn {
+        if flag {
+            val
+        } else {
+            0
+        }
+    };
+    let result = h.await;
+    if result != 42 {
+        print(f"FAIL capture_bool: expected 42, got {result}");
+        return 1;
+    }
+    print("  capture_bool: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Advanced Spawn Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_text_capture();
+    failures = failures + test_list_capture_len();
+    failures = failures + test_list_capture_index();
+    failures = failures + test_function_call_in_spawn();
+    failures = failures + test_spawn_with_conditional();
+    failures = failures + test_parallel_computation();
+    failures = failures + test_capture_bool();
+
+    if failures == 0 {
+        print("All advanced spawn tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+
+    failures
+}

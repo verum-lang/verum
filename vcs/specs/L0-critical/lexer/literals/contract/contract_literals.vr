@@ -1,0 +1,377 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: lexer, literals, contract, verification
+
+// Contract literal tests for design-by-contract specifications
+// Reference: contract_literal = 'contract' , '#' , ( plain_string | raw_string );
+// Grammar: grammar/verum.ebnf lines 263-264
+
+fn main() {
+    test_requires_clauses();
+    test_ensures_clauses();
+    test_invariant_clauses();
+    test_complex_contracts();
+    test_quantified_contracts();
+    test_temporal_contracts();
+}
+
+// =============================================================================
+// 1. Precondition (requires) Contracts
+// =============================================================================
+
+fn test_requires_clauses() {
+    // Basic positive requirement
+    let req_positive = contract#"requires x > 0";
+
+    // Non-negative requirement
+    let req_nonneg = contract#"requires x >= 0";
+
+    // Multiple conditions with AND
+    let req_multiple = contract#"requires x > 0 && y > 0";
+
+    // Multiple conditions with OR
+    let req_or = contract#"requires x > 0 || y > 0";
+
+    // Null check
+    let req_not_null = contract#"requires input != null";
+
+    // Length requirement
+    let req_length = contract#"requires arr.len() > 0";
+
+    // Bounded parameter
+    let req_bounded = contract#"requires x >= min && x <= max";
+
+    // Type check
+    let req_type = contract#"requires value is Int";
+
+    // Collection non-empty
+    let req_nonempty = contract#"requires !list.is_empty()";
+
+    // Valid index
+    let req_index = contract#"requires index >= 0 && index < arr.len()";
+
+    // Divisor non-zero
+    let req_divisor = contract#"requires divisor != 0";
+
+    // Sorted precondition
+    let req_sorted = contract#"requires arr.is_sorted()";
+}
+
+// =============================================================================
+// 2. Postcondition (ensures) Contracts
+// =============================================================================
+
+fn test_ensures_clauses() {
+    // Result positive
+    let ens_positive = contract#"ensures result > 0";
+
+    // Result non-negative
+    let ens_nonneg = contract#"ensures result >= 0";
+
+    // Result bounded
+    let ens_bounded = contract#"ensures result >= min && result <= max";
+
+    // Result equals expression
+    let ens_equals = contract#"ensures result == x + y";
+
+    // Result greater than input
+    let ens_greater = contract#"ensures result > input";
+
+    // Result less than or equal
+    let ens_leq = contract#"ensures result <= input";
+
+    // Result in range
+    let ens_range = contract#"ensures result in 0..100";
+
+    // Result type
+    let ens_type = contract#"ensures result is Some";
+
+    // Result length
+    let ens_length = contract#"ensures result.len() == input.len()";
+
+    // Result sorted
+    let ens_sorted = contract#"ensures result.is_sorted()";
+
+    // Result contains element
+    let ens_contains = contract#"ensures result.contains(element)";
+
+    // Result is subset
+    let ens_subset = contract#"ensures result.is_subset_of(input)";
+}
+
+// =============================================================================
+// 3. Invariant Contracts
+// =============================================================================
+
+fn test_invariant_clauses() {
+    // Balance non-negative
+    let inv_balance = contract#"invariant balance >= 0";
+
+    // Count matches size
+    let inv_count = contract#"invariant count == items.len()";
+
+    // Capacity exceeds size
+    let inv_capacity = contract#"invariant capacity >= size";
+
+    // Head and tail consistency
+    let inv_headtail = contract#"invariant head <= tail";
+
+    // Sorted invariant
+    let inv_sorted = contract#"invariant is_sorted(data)";
+
+    // Heap property
+    let inv_heap = contract#"invariant is_heap(data)";
+
+    // Binary search tree property
+    let inv_bst = contract#"invariant is_bst(root)";
+
+    // Linked list integrity
+    let inv_list = contract#"invariant head == null iff tail == null";
+
+    // Reference count positive
+    let inv_refcount = contract#"invariant ref_count > 0";
+
+    // Valid state
+    let inv_state = contract#"invariant state in [Ready, Running, Stopped]";
+
+    // Sum conservation
+    let inv_sum = contract#"invariant total == sum(balances)";
+
+    // Bounds consistency
+    let inv_bounds = contract#"invariant min_value <= max_value";
+}
+
+// =============================================================================
+// 4. Complex Contract Specifications
+// =============================================================================
+
+fn test_complex_contracts() {
+    // Combined requires and ensures
+    let combined = contract#"requires x > 0; ensures result > x";
+
+    // Multiple requires
+    let multi_req = contract#"requires x > 0; requires y > 0; requires x != y";
+
+    // Multiple ensures
+    let multi_ens = contract#"ensures result >= 0; ensures result < input";
+
+    // Full specification
+    let full_spec = contract#"requires input >= 0; ensures result == input * 2; invariant result % 2 == 0";
+
+    // Nested conditions
+    let nested = contract#"requires (x > 0 && y > 0) || (x < 0 && y < 0)";
+
+    // Conditional ensures
+    let cond_ens = contract#"ensures x > 0 implies result > 0";
+
+    // Equivalence
+    let equiv = contract#"ensures result == 0 iff input == 0";
+
+    // Not equals
+    let not_eq = contract#"requires a != b; ensures result != 0";
+
+    // Absolute value
+    let abs_val = contract#"ensures result >= 0 && (result == x || result == -x)";
+
+    // Min/max contracts
+    let minmax = contract#"ensures result == max(a, b) || result == min(a, b)";
+}
+
+// =============================================================================
+// 5. Quantified Contracts
+// =============================================================================
+
+fn test_quantified_contracts() {
+    // Universal quantifier (forall)
+    let forall_basic = contract#"forall i in 0..len: arr[i] >= 0";
+
+    // Existential quantifier (exists)
+    let exists_basic = contract#"exists i in 0..len: arr[i] == target";
+
+    // Forall with condition
+    let forall_cond = contract#"forall i in 0..len: i < j implies arr[i] <= arr[j]";
+
+    // Forall pairs
+    let forall_pairs = contract#"forall i, j in 0..len: i < j implies keys[i] < keys[j]";
+
+    // Unique elements
+    let unique = contract#"forall i, j in 0..len: i != j implies arr[i] != arr[j]";
+
+    // At least one
+    let at_least_one = contract#"exists i in 0..len: arr[i] > threshold";
+
+    // Exactly one
+    let exactly_one = contract#"exists! i in 0..len: arr[i] == target";
+
+    // No duplicates
+    let no_dup = contract#"forall i, j in 0..len: arr[i] == arr[j] implies i == j";
+
+    // Sorted forall
+    let sorted_forall = contract#"forall i in 0..len-1: arr[i] <= arr[i+1]";
+
+    // Sum constraint
+    let sum_constraint = contract#"ensures sum(result) == sum(input)";
+
+    // Count constraint
+    let count_constraint = contract#"ensures count(result, pred) >= count(input, pred)";
+}
+
+// =============================================================================
+// 6. Temporal and State Contracts
+// =============================================================================
+
+fn test_temporal_contracts() {
+    // Old value reference
+    let old_basic = contract#"ensures result == old(x) + 1";
+
+    // Old array value
+    let old_array = contract#"ensures arr[i] == old(arr[i]) + delta";
+
+    // Old length
+    let old_len = contract#"ensures result.len() == old(input.len()) + 1";
+
+    // Unchanged constraint
+    let unchanged = contract#"ensures other == old(other)";
+
+    // Modified constraint
+    let modified = contract#"ensures target != old(target)";
+
+    // History constraint
+    let history = contract#"ensures history.contains(old(state))";
+
+    // State transition
+    let transition = contract#"requires state == Ready; ensures state == Running";
+
+    // Monotonic increase
+    let monotonic = contract#"ensures counter >= old(counter)";
+
+    // Frame condition
+    let frame = contract#"ensures forall x in unrelated: x == old(x)";
+
+    // Termination
+    let terminates = contract#"decreases distance_to_goal";
+}
+
+// =============================================================================
+// Using contract literals in function specifications
+// =============================================================================
+
+fn divide(numerator: Int, denominator: Int) -> Int {
+    // Contract for division
+    let spec = contract#"requires denominator != 0; ensures result * denominator <= numerator";
+    numerator / denominator
+}
+
+fn sqrt(x: Float) -> Float {
+    // Contract for square root
+    let spec = contract#"requires x >= 0.0; ensures result >= 0.0 && (result * result - x).abs() < 0.0001";
+    x.sqrt()
+}
+
+fn binary_search(arr: &[Int], target: Int) -> Maybe<Int> {
+    // Contract for binary search
+    let spec = contract#"requires arr.is_sorted(); ensures result.is_some() implies arr[result.unwrap()] == target";
+    // Implementation...
+    None
+}
+
+fn sort_in_place(arr: &mut [Int]) {
+    // Contract for in-place sort
+    let spec = contract#"ensures arr.is_sorted(); ensures arr.len() == old(arr.len()); forall x: count(arr, x) == count(old(arr), x)";
+    // Implementation...
+}
+
+fn push<T>(stack: &mut Stack<T>, value: T) {
+    // Contract for stack push
+    let spec = contract#"ensures stack.len() == old(stack.len()) + 1; ensures stack.top() == value";
+    // Implementation...
+}
+
+fn pop<T>(stack: &mut Stack<T>) -> T {
+    // Contract for stack pop
+    let spec = contract#"requires !stack.is_empty(); ensures stack.len() == old(stack.len()) - 1; ensures result == old(stack.top())";
+    // Implementation - placeholder
+    panic("not implemented")
+}
+
+// =============================================================================
+// Contract literals in type definitions
+// =============================================================================
+
+type PositiveInt is Int where contract#"invariant self > 0";
+
+type BoundedInt is Int where contract#"invariant self >= 0 && self <= 100";
+
+type NonEmptyList<T> is List<T> where contract#"invariant self.len() > 0";
+
+type SortedList<T> is List<T> where contract#"invariant self.is_sorted()";
+
+type ValidEmail is Text where contract#"invariant self.contains('@') && self.len() > 3";
+
+// =============================================================================
+// Contract literals in protocol definitions
+// =============================================================================
+
+// NOTE: Protocol function where clauses with contracts are a future feature.
+// For now, contracts in protocols would be specified as type constraints:
+
+type Stack<T> is protocol {
+    fn push(&mut self, value: T);
+    fn pop(&mut self) -> T;
+    fn top(&self) -> &T;
+    fn is_empty(&self) -> Bool;
+    fn len(&self) -> Int;
+};
+
+type Queue<T> is protocol {
+    fn enqueue(&mut self, value: T);
+    fn dequeue(&mut self) -> T;
+    fn peek(&self) -> &T;
+};
+
+// Contract literals can still be used within function bodies:
+fn demonstrate_protocol_contracts() {
+    // These are example contracts that would apply to protocol methods
+    let push_contract = contract#"ensures self.len() == old(self.len()) + 1";
+    let pop_requires = contract#"requires !self.is_empty()";
+    let pop_ensures = contract#"ensures self.len() == old(self.len()) - 1";
+    let top_contract = contract#"requires !self.is_empty()";
+    let len_contract = contract#"ensures result >= 0";
+}
+
+// =============================================================================
+// Contract literals in collections
+// =============================================================================
+
+fn test_contracts_in_collections() {
+    // Array of contracts for validation
+    let validation_contracts = [
+        contract#"requires x > 0",
+        contract#"requires x < 100",
+        contract#"requires x % 2 == 0",
+    ];
+
+    // Map of named contracts
+    let named_contracts = {
+        "positive": contract#"requires value > 0",
+        "bounded": contract#"requires value >= min && value <= max",
+        "non_null": contract#"requires value != null",
+    };
+}
+
+// =============================================================================
+// Raw string contract literals
+// =============================================================================
+
+fn test_raw_contract_strings() {
+    // Complex contract with special characters using raw string
+    // Syntax: contract#r#"..."# (hash count must match on both sides)
+    let complex_raw = contract#r#"requires x > 0 && y > 0 && (x + y) < MAX"#;
+
+    // Multi-condition raw
+    let multi_raw = contract#r#"ensures result >= min && result <= max && result != 0"#;
+
+    // Quantified raw
+    let quant_raw = contract#r#"forall i in 0..n: arr[i] >= 0 && arr[i] < MAX_VALUE"#;
+}

@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: all
+// @tags: errors, recovery, try, recover, nested
+// @description: Tests nested try/recover blocks and error propagation through layers.
+
+type IoError is
+    | FileNotFound(Text)
+    | PermissionDenied(Text);
+
+type AppError is
+    | Io(IoError)
+    | Config(Text)
+    | Runtime(Text);
+
+fn read_file(path: Text) -> Result<Text, IoError> {
+    if path == "missing.txt" {
+        return Err(FileNotFound(path));
+    }
+    Ok("file contents")
+}
+
+fn load_config(path: Text) -> Result<Text, AppError> {
+    let content = try {
+        read_file(path)?
+    } recover err {
+        return Err(Io(err));
+    };
+    Ok(content)
+}
+
+fn initialize() -> Result<Int, AppError> {
+    let config = try {
+        let raw = load_config("config.txt")?;
+        42
+    } recover err {
+        match err {
+            Io(io_err) => {
+                // Fallback to defaults
+                0
+            },
+            _ => return Err(err),
+        }
+    };
+    Ok(config)
+}
+
+fn main() {
+    let result = initialize();
+    match result {
+        Ok(val) => print(f"Initialized: {val}"),
+        Err(e) => print("Failed to initialize"),
+    }
+}

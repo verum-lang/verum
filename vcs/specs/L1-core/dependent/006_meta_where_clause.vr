@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, meta-where, compile-time-constraint
+
+/// Meta where clauses on type definitions and functions.
+/// Grammar: meta_where_clause = 'where' 'meta' meta_constraint_list ;
+/// These are compile-time constraints verified statically.
+
+// Meta where clause constraining relationship between parameters
+type Concat<T, M: meta Int, N: meta Int>
+    where meta M >= 0, N >= 0
+is {
+    data: [T; M + N],
+};
+
+// Dependent on meta arithmetic
+type Blocked<T, BlockSize: meta Int, NumBlocks: meta Int>
+    where meta BlockSize > 0, NumBlocks > 0
+is {
+    data: [T; BlockSize * NumBlocks],
+};
+
+// Meta where with power-of-two constraint
+type AlignedBuffer<T, N: meta Int>
+    where meta N > 0, N & (N - 1) == 0
+is {
+    data: [T; N],
+};
+
+// Function with meta where clause
+fn transpose<T, R: meta Int, C: meta Int>(
+    m: Matrix<T, R, C>
+) -> Matrix<T, C, R>
+    where meta R > 0, C > 0
+{
+    // Implementation would reorder elements
+    // For now just construct a result with the transposed dimensions
+    Matrix { data: m.data }
+}
+
+// Meta constraint: sizes must match for element-wise operations
+fn add_matrices<R: meta Int, C: meta Int>(
+    a: Matrix<Float, R, C>,
+    b: Matrix<Float, R, C>,
+) -> Matrix<Float, R, C>
+    where meta R > 0, C > 0
+{
+    // Element-wise addition
+    a
+}
+
+type Matrix<T, R: meta Int, C: meta Int> is {
+    data: [T; R * C],
+};
+
+fn main() {
+    let buf: AlignedBuffer<Int, 16> = AlignedBuffer { data: [0; 16] };
+    assert(buf.data.len() == 16);
+
+    let blocked: Blocked<Float, 4, 3> = Blocked { data: [0.0; 12] };
+    assert(blocked.data.len() == 12);
+}

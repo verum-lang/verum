@@ -1,0 +1,6 @@
+// Minimal: Simple for loop
+fn main() {
+    for i in 0..10 {
+        let x = i * 2;
+    }
+}

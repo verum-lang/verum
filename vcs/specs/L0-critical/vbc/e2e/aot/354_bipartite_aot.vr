@@ -1,0 +1,332 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, graph, bipartite, bfs, coloring
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for graph bipartiteness check using BFS-based 2-coloring.
+// A graph is bipartite if vertices can be colored with 2 colors such
+// that no edge connects vertices of the same color.
+// Uses 8-node adjacency matrix and BFS queue.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 { Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 } }
+fn a8_fill(v: Int) -> Arr8 { Arr8 { a0: v, a1: v, a2: v, a3: v, a4: v, a5: v, a6: v, a7: v } }
+
+// 8x8 adjacency matrix (undirected graph)
+type Graph8 is {
+    r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8,
+    r4: Arr8, r5: Arr8, r6: Arr8, r7: Arr8
+};
+
+fn g8_row(g: Graph8, r: Int) -> Arr8 {
+    if r == 0 { g.r0 } else if r == 1 { g.r1 }
+    else if r == 2 { g.r2 } else if r == 3 { g.r3 }
+    else if r == 4 { g.r4 } else if r == 5 { g.r5 }
+    else if r == 6 { g.r6 } else { g.r7 }
+}
+
+fn g8_edge(g: Graph8, u: Int, v: Int) -> Int {
+    a8_get(g8_row(g, u), v)
+}
+
+fn g8_empty() -> Graph8 {
+    let z = a8_zero();
+    Graph8 { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z }
+}
+
+fn g8_set_row(g: Graph8, r: Int, row: Arr8) -> Graph8 {
+    if r == 0 { Graph8 { r0: row, r1: g.r1, r2: g.r2, r3: g.r3, r4: g.r4, r5: g.r5, r6: g.r6, r7: g.r7 } }
+    else if r == 1 { Graph8 { r0: g.r0, r1: row, r2: g.r2, r3: g.r3, r4: g.r4, r5: g.r5, r6: g.r6, r7: g.r7 } }
+    else if r == 2 { Graph8 { r0: g.r0, r1: g.r1, r2: row, r3: g.r3, r4: g.r4, r5: g.r5, r6: g.r6, r7: g.r7 } }
+    else if r == 3 { Graph8 { r0: g.r0, r1: g.r1, r2: g.r2, r3: row, r4: g.r4, r5: g.r5, r6: g.r6, r7: g.r7 } }
+    else if r == 4 { Graph8 { r0: g.r0, r1: g.r1, r2: g.r2, r3: g.r3, r4: row, r5: g.r5, r6: g.r6, r7: g.r7 } }
+    else if r == 5 { Graph8 { r0: g.r0, r1: g.r1, r2: g.r2, r3: g.r3, r4: g.r4, r5: row, r6: g.r6, r7: g.r7 } }
+    else if r == 6 { Graph8 { r0: g.r0, r1: g.r1, r2: g.r2, r3: g.r3, r4: g.r4, r5: g.r5, r6: row, r7: g.r7 } }
+    else { Graph8 { r0: g.r0, r1: g.r1, r2: g.r2, r3: g.r3, r4: g.r4, r5: g.r5, r6: g.r6, r7: row } }
+}
+
+// Add undirected edge between u and v
+fn add_edge(g: Graph8, u: Int, v: Int) -> Graph8 {
+    let row_u = g8_row(g, u);
+    let row_v = g8_row(g, v);
+    let g2 = g8_set_row(g, u, a8_set(row_u, v, 1));
+    g8_set_row(g2, v, a8_set(row_v, u, 1))
+}
+
+// BFS queue (circular buffer, max 8 elements)
+type Queue is { data: Arr8, front: Int, back: Int, sz: Int };
+
+fn q_new() -> Queue { Queue { data: a8_zero(), front: 0, back: 0, sz: 0 } }
+
+fn q_push(q: Queue, v: Int) -> Queue {
+    let d = a8_set(q.data, q.back, v);
+    Queue { data: d, front: q.front, back: (q.back + 1) % 8, sz: q.sz + 1 }
+}
+
+fn q_pop(q: Queue) -> Queue {
+    Queue { data: q.data, front: (q.front + 1) % 8, back: q.back, sz: q.sz - 1 }
+}
+
+fn q_front(q: Queue) -> Int { a8_get(q.data, q.front) }
+
+// BFS bipartite check for a connected component starting at `start`
+// colors: -1 = uncolored, 0 = color A, 1 = color B
+// Returns (colors, is_bipartite) packed in a record
+type BfsResult is { colors: Arr8, bipartite: Int };
+
+fn bfs_bipartite(g: Graph8, n: Int, start: Int, colors: Arr8) -> BfsResult {
+    let mut c = a8_set(colors, start, 0);
+    let mut q = q_new();
+    q = q_push(q, start);
+    let mut ok = 1;
+
+    while q.sz > 0 {
+        let u = q_front(q);
+        q = q_pop(q);
+        let cu = a8_get(c, u);
+        let next_color = if cu == 0 { 1 } else { 0 };
+        let mut v = 0;
+        while v < n {
+            if g8_edge(g, u, v) == 1 {
+                let cv = a8_get(c, v);
+                if cv == -1 {
+                    c = a8_set(c, v, next_color);
+                    q = q_push(q, v);
+                } else if cv == cu {
+                    ok = 0;
+                }
+            }
+            v = v + 1;
+        }
+    }
+
+    BfsResult { colors: c, bipartite: ok }
+}
+
+// Check bipartiteness for entire graph (may be disconnected)
+fn is_bipartite(g: Graph8, n: Int) -> Int {
+    let mut colors = a8_fill(-1);
+    let mut ok = 1;
+    let mut i = 0;
+    while i < n {
+        if a8_get(colors, i) == -1 {
+            let result = bfs_bipartite(g, n, i, colors);
+            colors = result.colors;
+            if result.bipartite == 0 {
+                ok = 0;
+            }
+        }
+        i = i + 1;
+    }
+    ok
+}
+
+// Count edges in graph
+fn count_edges(g: Graph8, n: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if g8_edge(g, i, j) == 1 { cnt = cnt + 1; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+// === Tests ===
+
+fn test_empty_graph() {
+    let g = g8_empty();
+    assert_eq(is_bipartite(g, 4), 1);
+}
+
+fn test_single_edge() {
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    assert_eq(is_bipartite(g, 2), 1);
+}
+
+fn test_triangle_not_bipartite() {
+    // Triangle: 0-1, 1-2, 0-2 (odd cycle)
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 1, 2);
+    g = add_edge(g, 0, 2);
+    assert_eq(is_bipartite(g, 3), 0);
+}
+
+fn test_square_bipartite() {
+    // Square: 0-1, 1-2, 2-3, 3-0 (even cycle)
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 1, 2);
+    g = add_edge(g, 2, 3);
+    g = add_edge(g, 3, 0);
+    assert_eq(is_bipartite(g, 4), 1);
+}
+
+fn test_pentagon_not_bipartite() {
+    // Pentagon: 0-1-2-3-4-0 (5-cycle, odd)
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 1, 2);
+    g = add_edge(g, 2, 3);
+    g = add_edge(g, 3, 4);
+    g = add_edge(g, 4, 0);
+    assert_eq(is_bipartite(g, 5), 0);
+}
+
+fn test_hexagon_bipartite() {
+    // Hexagon: 6-cycle (even)
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 1, 2);
+    g = add_edge(g, 2, 3);
+    g = add_edge(g, 3, 4);
+    g = add_edge(g, 4, 5);
+    g = add_edge(g, 5, 0);
+    assert_eq(is_bipartite(g, 6), 1);
+}
+
+fn test_complete_bipartite_k23() {
+    // K_{2,3}: vertices {0,1} fully connected to {2,3,4}
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 2);
+    g = add_edge(g, 0, 3);
+    g = add_edge(g, 0, 4);
+    g = add_edge(g, 1, 2);
+    g = add_edge(g, 1, 3);
+    g = add_edge(g, 1, 4);
+    assert_eq(is_bipartite(g, 5), 1);
+    assert_eq(count_edges(g, 5), 6);
+}
+
+fn test_star_graph() {
+    // Star: center 0 connected to 1,2,3,4,5
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 0, 2);
+    g = add_edge(g, 0, 3);
+    g = add_edge(g, 0, 4);
+    g = add_edge(g, 0, 5);
+    assert_eq(is_bipartite(g, 6), 1);
+}
+
+fn test_disconnected_bipartite() {
+    // Two separate edges: 0-1 and 2-3
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 2, 3);
+    assert_eq(is_bipartite(g, 4), 1);
+}
+
+fn test_disconnected_with_triangle() {
+    // Edge 0-1 (bipartite) + triangle 2-3-4 (not bipartite)
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 2, 3);
+    g = add_edge(g, 3, 4);
+    g = add_edge(g, 2, 4);
+    assert_eq(is_bipartite(g, 5), 0);
+}
+
+fn test_path_graph() {
+    // Path: 0-1-2-3-4-5 (always bipartite)
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 1, 2);
+    g = add_edge(g, 2, 3);
+    g = add_edge(g, 3, 4);
+    g = add_edge(g, 4, 5);
+    assert_eq(is_bipartite(g, 6), 1);
+}
+
+fn test_tree_bipartite() {
+    // Tree: 0-1, 0-2, 1-3, 1-4, 2-5 (trees are always bipartite)
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 0, 2);
+    g = add_edge(g, 1, 3);
+    g = add_edge(g, 1, 4);
+    g = add_edge(g, 2, 5);
+    assert_eq(is_bipartite(g, 6), 1);
+}
+
+fn test_k4_not_bipartite() {
+    // Complete graph K4: every pair connected
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 0, 2);
+    g = add_edge(g, 0, 3);
+    g = add_edge(g, 1, 2);
+    g = add_edge(g, 1, 3);
+    g = add_edge(g, 2, 3);
+    assert_eq(is_bipartite(g, 4), 0);
+    assert_eq(count_edges(g, 4), 6);
+}
+
+fn test_coloring_valid() {
+    // Check that the coloring is actually valid
+    let mut g = g8_empty();
+    g = add_edge(g, 0, 1);
+    g = add_edge(g, 1, 2);
+    g = add_edge(g, 2, 3);
+    g = add_edge(g, 3, 0);
+    let colors = a8_fill(-1);
+    let result = bfs_bipartite(g, 4, 0, colors);
+    assert_eq(result.bipartite, 1);
+    // Verify each edge has different colored endpoints
+    let c0 = a8_get(result.colors, 0);
+    let c1 = a8_get(result.colors, 1);
+    let c2 = a8_get(result.colors, 2);
+    let c3 = a8_get(result.colors, 3);
+    // 0-1 different colors
+    assert_eq(c0 == c1, false);
+    // 1-2 different
+    assert_eq(c1 == c2, false);
+    // 2-3 different
+    assert_eq(c2 == c3, false);
+    // 3-0 different
+    assert_eq(c3 == c0, false);
+}
+
+fn main() -> Int {
+    test_empty_graph();
+    test_single_edge();
+    test_triangle_not_bipartite();
+    test_square_bipartite();
+    test_pentagon_not_bipartite();
+    test_hexagon_bipartite();
+    test_complete_bipartite_k23();
+    test_star_graph();
+    test_disconnected_bipartite();
+    test_disconnected_with_triangle();
+    test_path_graph();
+    test_tree_bipartite();
+    test_k4_not_bipartite();
+    test_coloring_valid();
+    print("[OK] 354_bipartite_aot");
+    0
+}

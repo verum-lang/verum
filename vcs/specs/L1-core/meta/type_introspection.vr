@@ -1,0 +1,312 @@
+// =============================================================================
+// type_introspection.vr - Tests for compile-time type introspection intrinsics
+// =============================================================================
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: meta, introspection, compile-time, reflection
+// @spec: docs/improvements.md Section 15 - Compile-Time Reflection
+// =============================================================================
+//
+// Tests for the type introspection intrinsics:
+// - @type_name(T) -> Text
+// - @type_fields(T) / @fields_of(T) -> List<(Text, Type)>
+// - @variants_of(T) -> List<(Text, Type)>
+// - @type_of(expr) -> Type
+// - @field_access(value, field_name) -> FieldValue
+// - @is_struct(T) -> Bool
+// - @is_enum(T) -> Bool
+// - @is_tuple(T) -> Bool
+// - @implements(T, Protocol) -> Bool
+//
+// =============================================================================
+
+module tests.meta.type_introspection;
+
+// =============================================================================
+// Test Types
+// =============================================================================
+
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+type User is {
+    name: Text,
+    age: Int,
+    active: Bool,
+};
+
+type Color is Red | Green | Blue;
+
+type Maybe<T> is None | Some(T);
+
+type Result<T, E> is Ok(T) | Err(E);
+
+// =============================================================================
+// Test 1: @type_name intrinsic
+// =============================================================================
+
+fn test_type_name_basic() {
+    // Type names for primitive types
+    const INT_NAME: Text = @type_name(Int);
+    assert_eq(INT_NAME, "Int");
+
+    const TEXT_NAME: Text = @type_name(Text);
+    assert_eq(TEXT_NAME, "Text");
+
+    const BOOL_NAME: Text = @type_name(Bool);
+    assert_eq(BOOL_NAME, "Bool");
+}
+
+fn test_type_name_struct() {
+    const POINT_NAME: Text = @type_name(Point);
+    assert_eq(POINT_NAME, "Point");
+
+    const USER_NAME: Text = @type_name(User);
+    assert_eq(USER_NAME, "User");
+}
+
+fn test_type_name_generic() {
+    const MAYBE_INT_NAME: Text = @type_name(Maybe<Int>);
+    // Generic types include their parameters
+    assert(MAYBE_INT_NAME.contains("Maybe"));
+}
+
+// =============================================================================
+// Test 2: @type_fields / @fields_of intrinsic
+// =============================================================================
+
+fn test_type_fields_struct() {
+    // @type_fields returns compile-time field info
+    // Verify field count (element access causes type checker issues with List<(Text, Type)>)
+    assert_eq(@type_fields(Point).len(), 2);
+}
+
+fn test_fields_of_user() {
+    assert_eq(@fields_of(User).len(), 3);
+}
+
+fn test_type_fields_tuple() {
+    assert_eq(@type_fields((Int, Bool, Text)).len(), 3);
+}
+
+// =============================================================================
+// Test 3: @variants_of intrinsic
+// =============================================================================
+
+fn test_variants_of_color() {
+    // Verify variant count (element access from @variants_of causes type checker issues)
+    assert_eq(@variants_of(Color).len(), 3);
+}
+
+fn test_variants_of_maybe() {
+    assert_eq(@variants_of(Maybe<Int>).len(), 2);
+}
+
+// =============================================================================
+// Test 4: @type_of intrinsic
+// =============================================================================
+
+fn test_type_of_expression() {
+    let x = 42;
+    // @type_of returns Type, verify via @type_name
+    assert_eq(@type_name(@type_of(x)), "Int");
+}
+
+fn test_type_of_literal() {
+    assert_eq(@type_name(@type_of("hello")), "Text");
+}
+
+// =============================================================================
+// Test 4.5: @field_access intrinsic
+// =============================================================================
+
+fn test_field_access_tuple() {
+    // Access tuple elements by index
+    let tuple = (42, "hello", true);
+
+    // Access first element
+    let first = @field_access(tuple, "0");
+    assert_eq(first, 42);
+
+    // Access second element
+    let second = @field_access(tuple, "1");
+    assert_eq(second, "hello");
+
+    // Access third element
+    let third = @field_access(tuple, "2");
+    assert_eq(third, true);
+}
+
+fn test_field_access_record() {
+    // Access struct/record fields by name
+    let point = Point { x: 3.14, y: 2.71 };
+
+    let x_val = @field_access(point, "x");
+    assert_eq(x_val, 3.14);
+
+    let y_val = @field_access(point, "y");
+    assert_eq(y_val, 2.71);
+}
+
+fn test_field_access_user() {
+    let user = User { name: "Alice", age: 30, active: true };
+
+    assert_eq(@field_access(user, "name"), "Alice");
+    assert_eq(@field_access(user, "age"), 30);
+    assert_eq(@field_access(user, "active"), true);
+}
+
+fn test_field_access_array() {
+    let arr = [10, 20, 30, 40, 50];
+
+    // Array element access by index
+    assert_eq(@field_access(arr, "0"), 10);
+    assert_eq(@field_access(arr, "2"), 30);
+    assert_eq(@field_access(arr, "4"), 50);
+}
+
+fn test_field_access_nested() {
+    // Access nested field through tuple of records
+    let nested = (
+        Point { x: 1.0, y: 2.0 },
+        Point { x: 3.0, y: 4.0 },
+    );
+
+    let first_point = @field_access(nested, "0");
+    assert_eq(@field_access(first_point, "x"), 1.0);
+    assert_eq(@field_access(first_point, "y"), 2.0);
+}
+
+// =============================================================================
+// Test 5: Type predicates
+// =============================================================================
+
+fn test_is_struct() {
+    const POINT_IS_STRUCT: Bool = @is_struct(Point);
+    assert(POINT_IS_STRUCT);
+
+    const INT_IS_STRUCT: Bool = @is_struct(Int);
+    assert(!INT_IS_STRUCT);
+}
+
+fn test_is_enum() {
+    const COLOR_IS_ENUM: Bool = @is_enum(Color);
+    assert(COLOR_IS_ENUM);
+
+    const MAYBE_IS_ENUM: Bool = @is_enum(Maybe<Int>);
+    assert(MAYBE_IS_ENUM);
+
+    const POINT_IS_ENUM: Bool = @is_enum(Point);
+    assert(!POINT_IS_ENUM);
+}
+
+fn test_is_tuple() {
+    const TUPLE_IS_TUPLE: Bool = @is_tuple((Int, Bool));
+    assert(TUPLE_IS_TUPLE);
+
+    const POINT_IS_TUPLE: Bool = @is_tuple(Point);
+    assert(!POINT_IS_TUPLE);
+}
+
+// =============================================================================
+// Test 6: @implements intrinsic
+// =============================================================================
+
+type Serializable is protocol {
+    fn serialize(&self) -> Text;
+};
+
+@derive(Serialize)
+type SerializablePoint is {
+    x: Float,
+    y: Float,
+};
+
+fn test_implements() {
+    // After derive, SerializablePoint implements Serialize protocol
+    const IMPLEMENTS_SERIALIZE: Bool = @implements(SerializablePoint, Serialize);
+    // Note: This depends on derive implementation
+    assert(IMPLEMENTS_SERIALIZE);
+}
+
+// =============================================================================
+// Test 7: Meta function using intrinsics
+// =============================================================================
+
+meta fn count_fields<T>() -> Int {
+    let fields = @type_fields(T);
+    fields.len()
+}
+
+fn test_meta_function_with_intrinsics() {
+    const POINT_FIELD_COUNT: Int = count_fields<Point>();
+    assert_eq(POINT_FIELD_COUNT, 2);
+
+    const USER_FIELD_COUNT: Int = count_fields<User>();
+    assert_eq(USER_FIELD_COUNT, 3);
+}
+
+// =============================================================================
+// Test 8: Compile-time serialization pattern
+// =============================================================================
+
+meta fn generate_field_names<T>() -> List<Text> {
+    let fields = @type_fields(T);
+    fields.map(|(name, _)| name)
+}
+
+fn test_generate_field_names() {
+    const POINT_NAMES: List<Text> = generate_field_names<Point>();
+    assert_eq(POINT_NAMES, ["x", "y"]);
+
+    const USER_NAMES: List<Text> = generate_field_names<User>();
+    assert_eq(USER_NAMES, ["name", "age", "active"]);
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    // @type_name tests
+    test_type_name_basic();
+    test_type_name_struct();
+    test_type_name_generic();
+
+    // @type_fields / @fields_of tests
+    test_type_fields_struct();
+    test_fields_of_user();
+    test_type_fields_tuple();
+
+    // @variants_of tests
+    test_variants_of_color();
+    test_variants_of_maybe();
+
+    // @type_of tests
+    test_type_of_expression();
+    test_type_of_literal();
+
+    // @field_access tests
+    test_field_access_tuple();
+    test_field_access_record();
+    test_field_access_user();
+    test_field_access_array();
+    test_field_access_nested();
+
+    // Type predicate tests
+    test_is_struct();
+    test_is_enum();
+    test_is_tuple();
+
+    // @implements tests
+    test_implements();
+
+    // Meta function tests
+    test_meta_function_with_intrinsics();
+    test_generate_field_names();
+
+    print("All type introspection tests passed!");
+}

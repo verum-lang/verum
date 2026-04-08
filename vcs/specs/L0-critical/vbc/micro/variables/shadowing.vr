@@ -1,0 +1,43 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: vbc, registers, shadowing
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Test variable shadowing with proper scope management
+
+fn main() {
+    let x: Int = 10;
+    assert_eq(x, 10);
+    {
+        let x: Int = 20;
+        assert_eq(x, 20);
+        {
+            let x: Int = 30;
+            assert_eq(x, 30);
+        }
+        assert_eq(x, 20);
+    }
+    assert_eq(x, 10);
+
+    // Shadowing with different types
+    let y: Int = 42;
+    assert_eq(y, 42);
+    {
+        let y: Bool = true;
+        assert(y);
+    }
+    assert_eq(y, 42);
+
+    // Multiple variables shadowed in same scope
+    let a: Int = 1;
+    let b: Int = 2;
+    let c: Int = 3;
+    {
+        let a: Int = 10;
+        let b: Int = 20;
+        let c: Int = 30;
+        assert_eq(a + b + c, 60);
+    }
+    assert_eq(a + b + c, 6);
+}

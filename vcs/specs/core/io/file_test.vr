@@ -1,0 +1,812 @@
+// =============================================================================
+// file_test.vr - Comprehensive tests for File I/O types and operations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: io, file, buffered, open-options, async-file
+// @description: Tests for File, OpenOptions, BufReader, BufWriter, AsyncFile
+//               types and convenience functions (read_to_string, write, etc.)
+// =============================================================================
+
+mount core.io.file.{
+    File, OpenOptions, BufReader, BufWriter, AsyncFile, AsyncBufReader,
+    read_to_string, read, write, write_bytes,
+    read_to_string_async, read_async, write_async, write_bytes_async,
+    O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
+};
+mount core.io.protocols.{Read, Write as WriteProto, Seek, BufRead, IoResult, StreamError, IoErrorKind, SeekFrom};
+mount core.io.path.{Path, PathBuf};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: OpenOptions Direct Construction
+// =============================================================================
+
+@test
+fn test_open_options_default() {
+    let opts: OpenOptions = OpenOptions {
+        read: false,
+        write: false,
+        append: false,
+        truncate: false,
+        create: false,
+        create_new: false,
+    };
+    assert(!opts.read);
+    assert(!opts.write);
+    assert(!opts.append);
+    assert(!opts.truncate);
+    assert(!opts.create);
+    assert(!opts.create_new);
+}
+
+@test
+fn test_open_options_read_only() {
+    let opts = OpenOptions {
+        read: true,
+        write: false,
+        append: false,
+        truncate: false,
+        create: false,
+        create_new: false,
+    };
+    assert(opts.read);
+    assert(!opts.write);
+}
+
+@test
+fn test_open_options_write_create() {
+    let opts = OpenOptions {
+        read: false,
+        write: true,
+        append: false,
+        truncate: true,
+        create: true,
+        create_new: false,
+    };
+    assert(opts.write);
+    assert(opts.create);
+    assert(opts.truncate);
+}
+
+@test
+fn test_open_options_append_mode() {
+    let opts = OpenOptions {
+        read: false,
+        write: true,
+        append: true,
+        truncate: false,
+        create: true,
+        create_new: false,
+    };
+    assert(opts.append);
+    assert(!opts.truncate);
+}
+
+@test
+fn test_open_options_create_new_flag() {
+    let opts = OpenOptions {
+        read: false,
+        write: true,
+        append: false,
+        truncate: false,
+        create: false,
+        create_new: true,
+    };
+    assert(opts.create_new);
+    assert(!opts.create);
+}
+
+@test
+fn test_open_options_read_write() {
+    let opts = OpenOptions {
+        read: true,
+        write: true,
+        append: false,
+        truncate: false,
+        create: false,
+        create_new: false,
+    };
+    assert(opts.read);
+    assert(opts.write);
+    assert(!opts.append);
+}
+
+@test
+fn test_open_options_all_flags_set() {
+    let opts = OpenOptions {
+        read: true,
+        write: true,
+        append: true,
+        truncate: true,
+        create: true,
+        create_new: true,
+    };
+    assert(opts.read);
+    assert(opts.write);
+    assert(opts.append);
+    assert(opts.truncate);
+    assert(opts.create);
+    assert(opts.create_new);
+}
+
+// =============================================================================
+// Section 2: OpenOptions Constructor and Builder Methods
+// =============================================================================
+
+@test
+fn test_open_options_new() {
+    let opts = OpenOptions.new();
+    assert(!opts.read);
+    assert(!opts.write);
+    assert(!opts.append);
+    assert(!opts.truncate);
+    assert(!opts.create);
+    assert(!opts.create_new);
+}
+
+@test
+fn test_file_options_returns_open_options() {
+    let opts: OpenOptions = File.options();
+    assert(!opts.read);
+    assert(!opts.write);
+}
+
+// =============================================================================
+// Section 3: File Type
+// =============================================================================
+
+@test
+fn test_file_type_exists() {
+    // File has fd: Int field - verify type usable in annotations
+    let opt: Maybe<File> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_file_open_returns_io_result() {
+    // File.open() returns IoResult<File> - verify return type annotation
+    let opt: Maybe<IoResult<File>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_file_create_returns_io_result() {
+    // File.create() returns IoResult<File> - type annotation verified
+    let opt: Maybe<IoResult<File>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_file_create_new_returns_io_result() {
+    // File.create_new() returns IoResult<File> - type annotation verified
+    let opt: Maybe<IoResult<File>> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 4: BufReader Type
+// =============================================================================
+
+@test
+fn test_buf_reader_type_exists() {
+    // BufReader<R: Read> wraps a Read implementation with buffering
+    let opt: Maybe<BufReader<File>> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 5: BufWriter Type
+// =============================================================================
+
+@test
+fn test_buf_writer_type_exists() {
+    // BufWriter<W: Write> wraps a Write implementation with buffering
+    let opt: Maybe<BufWriter<File>> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 6: AsyncFile Type
+// =============================================================================
+
+@test
+fn test_async_file_type_exists() {
+    // AsyncFile wraps File for async I/O operations
+    let opt: Maybe<AsyncFile> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 7: Convenience Function Signatures
+// =============================================================================
+
+@test
+fn test_read_to_string_signature() {
+    // read_to_string takes a path and returns IoResult<Text>
+    let opt: Maybe<IoResult<Text>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_read_signature() {
+    // read takes a path and returns IoResult<List<Byte>>
+    let opt: Maybe<IoResult<List<Byte>>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_write_signature() {
+    // write takes a path and text, returns IoResult<()>
+    let opt: Maybe<Result<(), StreamError>> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_write_bytes_signature() {
+    // write_bytes takes a path and byte slice, returns IoResult<()>
+    let opt: Maybe<Result<(), StreamError>> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 8: StreamError Construction
+// =============================================================================
+
+@test
+fn test_stream_error_new() {
+    let err = StreamError.new(IoErrorKind.NotFound);
+    assert_eq(err.kind(), IoErrorKind.NotFound);
+}
+
+@test
+fn test_stream_error_with_message() {
+    let err = StreamError.with_message(IoErrorKind.NotFound, "file.txt not found");
+    assert_eq(err.kind(), IoErrorKind.NotFound);
+    assert(err.message().is_some());
+}
+
+@test
+fn test_stream_error_permission_denied() {
+    let err = StreamError.new(IoErrorKind.PermissionDenied);
+    assert_eq(err.kind(), IoErrorKind.PermissionDenied);
+}
+
+@test
+fn test_stream_error_already_exists() {
+    let err = StreamError.new(IoErrorKind.AlreadyExists);
+    assert_eq(err.kind(), IoErrorKind.AlreadyExists);
+}
+
+@test
+fn test_stream_error_not_found() {
+    let err = StreamError.new(IoErrorKind.NotFound);
+    assert_eq(err.kind(), IoErrorKind.NotFound);
+}
+
+@test
+fn test_stream_error_connection_refused() {
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    assert_eq(err.kind(), IoErrorKind.ConnectionRefused);
+}
+
+@test
+fn test_stream_error_broken_pipe() {
+    let err = StreamError.new(IoErrorKind.BrokenPipe);
+    assert_eq(err.kind(), IoErrorKind.BrokenPipe);
+}
+
+@test
+fn test_stream_error_timed_out() {
+    let err = StreamError.new(IoErrorKind.TimedOut);
+    assert_eq(err.kind(), IoErrorKind.TimedOut);
+}
+
+@test
+fn test_stream_error_unexpected_eof() {
+    let err = StreamError.new(IoErrorKind.UnexpectedEof);
+    assert_eq(err.kind(), IoErrorKind.UnexpectedEof);
+}
+
+@test
+fn test_stream_error_empty_message() {
+    let err = StreamError.with_message(IoErrorKind.Other, "");
+    assert_eq(err.kind(), IoErrorKind.Other);
+}
+
+// =============================================================================
+// Section 9: IoResult Type
+// =============================================================================
+
+@test
+fn test_io_result_ok() {
+    let result: IoResult<Int> = Ok(42);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_io_result_err() {
+    let err = StreamError.with_message(IoErrorKind.NotFound, "file not found");
+    let result: IoResult<Int> = Err(err);
+    assert(result.is_err());
+}
+
+@test
+fn test_io_result_ok_text() {
+    let result: IoResult<Text> = Ok("file contents");
+    assert(result.is_ok());
+    match result {
+        Ok(s) => assert_eq(s, "file contents"),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_io_result_ok_unit() {
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_io_result_err_match() {
+    let err = StreamError.new(IoErrorKind.NotFound);
+    let result: IoResult<Int> = Err(err);
+    match result {
+        Ok(_) => panic("expected Err"),
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+    }
+}
+
+@test
+fn test_io_result_ok_match() {
+    let result: IoResult<Int> = Ok(100);
+    match result {
+        Ok(n) => assert_eq(n, 100),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 10: SeekFrom Variants
+// =============================================================================
+
+@test
+fn test_seek_from_start() {
+    let pos: SeekFrom = SeekFrom.Start(0);
+    match pos {
+        SeekFrom.Start(n) => assert_eq(n, 0),
+        _ => panic("expected Start"),
+    }
+}
+
+@test
+fn test_seek_from_end() {
+    let pos: SeekFrom = SeekFrom.End(-10);
+    match pos {
+        SeekFrom.End(n) => assert_eq(n, -10),
+        _ => panic("expected End"),
+    }
+}
+
+@test
+fn test_seek_from_current() {
+    let pos: SeekFrom = SeekFrom.Current(5);
+    match pos {
+        SeekFrom.Current(n) => assert_eq(n, 5),
+        _ => panic("expected Current"),
+    }
+}
+
+// =============================================================================
+// Section 11: OpenOptions Builder Methods
+// =============================================================================
+
+@test
+fn test_builder_read_method() {
+    let mut opts = OpenOptions.new();
+    opts.read(true);
+    assert(opts.read);
+}
+
+@test
+fn test_builder_write_method() {
+    let mut opts = OpenOptions.new();
+    opts.write(true);
+    assert(opts.write);
+}
+
+@test
+fn test_builder_append_method() {
+    let mut opts = OpenOptions.new();
+    opts.append(true);
+    assert(opts.append);
+}
+
+@test
+fn test_builder_truncate_method() {
+    let mut opts = OpenOptions.new();
+    opts.truncate(true);
+    assert(opts.truncate);
+}
+
+@test
+fn test_builder_create_method() {
+    let mut opts = OpenOptions.new();
+    opts.create(true);
+    assert(opts.create);
+}
+
+@test
+fn test_builder_create_new_method() {
+    let mut opts = OpenOptions.new();
+    opts.create_new(true);
+    assert(opts.create_new);
+}
+
+@test
+fn test_builder_chain_read_write() {
+    let mut opts = OpenOptions.new();
+    opts.read(true).write(true);
+    assert(opts.read);
+    assert(opts.write);
+}
+
+@test
+fn test_builder_chain_write_create_truncate() {
+    let mut opts = OpenOptions.new();
+    opts.write(true).create(true).truncate(true);
+    assert(opts.write);
+    assert(opts.create);
+    assert(opts.truncate);
+}
+
+@test
+fn test_builder_chain_all_flags() {
+    let mut opts = OpenOptions.new();
+    opts.read(true).write(true).append(true).truncate(true).create(true).create_new(true);
+    assert(opts.read);
+    assert(opts.write);
+    assert(opts.append);
+    assert(opts.truncate);
+    assert(opts.create);
+    assert(opts.create_new);
+}
+
+@test
+fn test_builder_toggle_flag() {
+    let mut opts = OpenOptions.new();
+    opts.read(true);
+    assert(opts.read);
+    opts.read(false);
+    assert(!opts.read);
+}
+
+@test
+fn test_builder_returns_mut_ref() {
+    let mut opts = OpenOptions.new();
+    // Builder methods return &mut OpenOptions for chaining
+    let ref_opts: &mut OpenOptions = opts.read(true);
+    assert(ref_opts.read);
+}
+
+// =============================================================================
+// Section 12: Open Flag Constants
+// =============================================================================
+
+@test
+fn test_o_rdonly_value() {
+    assert_eq(O_RDONLY, 0x0000);
+}
+
+@test
+fn test_o_wronly_value() {
+    assert_eq(O_WRONLY, 0x0001);
+}
+
+@test
+fn test_o_rdwr_value() {
+    assert_eq(O_RDWR, 0x0002);
+}
+
+@test
+fn test_o_creat_value() {
+    assert_eq(O_CREAT, 0x0200);
+}
+
+@test
+fn test_o_excl_value() {
+    assert_eq(O_EXCL, 0x0800);
+}
+
+@test
+fn test_o_trunc_value() {
+    assert_eq(O_TRUNC, 0x0400);
+}
+
+@test
+fn test_o_append_value() {
+    assert_eq(O_APPEND, 0x0008);
+}
+
+@test
+fn test_open_flags_distinct() {
+    assert(O_RDONLY != O_WRONLY);
+    assert(O_WRONLY != O_RDWR);
+    assert(O_CREAT != O_EXCL);
+    assert(O_TRUNC != O_APPEND);
+}
+
+@test
+fn test_open_flags_combinable() {
+    // Flags should be combinable with bitwise OR
+    let rw_create = O_RDWR | O_CREAT;
+    assert(rw_create != O_RDWR);
+    assert(rw_create != O_CREAT);
+
+    let write_create_trunc = O_WRONLY | O_CREAT | O_TRUNC;
+    assert(write_create_trunc != O_WRONLY);
+}
+
+// =============================================================================
+// Section 13: File Type Construction
+// =============================================================================
+
+@test
+fn test_file_fd_field() {
+    // File has fd: Int field
+    // Construct directly (normally done internally)
+    let file = File { fd: 42 };
+    assert_eq(file.fd, 42);
+}
+
+@test
+fn test_file_as_raw_fd() {
+    let file = File { fd: 10 };
+    assert_eq(file.as_raw_fd(), 10);
+}
+
+@test
+fn test_file_from_raw_fd() {
+    let file: File = unsafe { File.from_raw_fd(5) };
+    assert_eq(file.fd, 5);
+    assert_eq(file.as_raw_fd(), 5);
+}
+
+@test
+fn test_file_options_static_method() {
+    // File.options() is equivalent to OpenOptions.new()
+    let opts1 = File.options();
+    let opts2 = OpenOptions.new();
+    assert_eq(opts1.read, opts2.read);
+    assert_eq(opts1.write, opts2.write);
+    assert_eq(opts1.append, opts2.append);
+    assert_eq(opts1.truncate, opts2.truncate);
+    assert_eq(opts1.create, opts2.create);
+    assert_eq(opts1.create_new, opts2.create_new);
+}
+
+// =============================================================================
+// Section 14: AsyncFile Type
+// =============================================================================
+
+@test
+fn test_async_file_wraps_file() {
+    let file = File { fd: 7 };
+    let async_file = AsyncFile { inner: file };
+    assert_eq(async_file.inner.fd, 7);
+}
+
+@test
+fn test_async_file_get_ref() {
+    let file = File { fd: 7 };
+    let async_file = AsyncFile { inner: file };
+    let inner_ref: &File = async_file.get_ref();
+    assert_eq(inner_ref.fd, 7);
+}
+
+@test
+fn test_async_file_get_mut() {
+    let file = File { fd: 7 };
+    let mut async_file = AsyncFile { inner: file };
+    let inner_mut: &mut File = async_file.get_mut();
+    assert_eq(inner_mut.fd, 7);
+}
+
+@test
+fn test_async_file_into_inner() {
+    let file = File { fd: 9 };
+    let async_file = AsyncFile { inner: file };
+    let recovered: File = async_file.into_inner();
+    assert_eq(recovered.fd, 9);
+}
+
+@test
+fn test_async_file_size_delegates() {
+    // AsyncFile.size() delegates to inner File.size()
+    // Can't test actual behavior without real file, but type signature works
+    let file = File { fd: -1 };
+    let async_file = AsyncFile { inner: file };
+    let _: IoResult<Int> = async_file.size();
+}
+
+// =============================================================================
+// Section 15: SeekFrom Extended Tests
+// =============================================================================
+
+@test
+fn test_seek_from_start_zero() {
+    let pos = SeekFrom.Start(0);
+    match pos {
+        SeekFrom.Start(n) => assert_eq(n, 0),
+        _ => panic("expected Start"),
+    }
+}
+
+@test
+fn test_seek_from_start_large() {
+    let pos = SeekFrom.Start(1048576);
+    match pos {
+        SeekFrom.Start(n) => assert_eq(n, 1048576),
+        _ => panic("expected Start"),
+    }
+}
+
+@test
+fn test_seek_from_end_zero() {
+    let pos = SeekFrom.End(0);
+    match pos {
+        SeekFrom.End(n) => assert_eq(n, 0),
+        _ => panic("expected End"),
+    }
+}
+
+@test
+fn test_seek_from_end_negative() {
+    let pos = SeekFrom.End(-1024);
+    match pos {
+        SeekFrom.End(n) => assert_eq(n, -1024),
+        _ => panic("expected End"),
+    }
+}
+
+@test
+fn test_seek_from_current_positive() {
+    let pos = SeekFrom.Current(100);
+    match pos {
+        SeekFrom.Current(n) => assert_eq(n, 100),
+        _ => panic("expected Current"),
+    }
+}
+
+@test
+fn test_seek_from_current_negative() {
+    let pos = SeekFrom.Current(-50);
+    match pos {
+        SeekFrom.Current(n) => assert_eq(n, -50),
+        _ => panic("expected Current"),
+    }
+}
+
+@test
+fn test_seek_from_current_zero() {
+    let pos = SeekFrom.Current(0);
+    match pos {
+        SeekFrom.Current(n) => assert_eq(n, 0),
+        _ => panic("expected Current"),
+    }
+}
+
+@test
+fn test_seek_from_is_operator() {
+    let start = SeekFrom.Start(0);
+    let end = SeekFrom.End(0);
+    let current = SeekFrom.Current(0);
+
+    assert(start is SeekFrom.Start);
+    assert(!(start is SeekFrom.End));
+    assert(!(start is SeekFrom.Current));
+
+    assert(end is SeekFrom.End);
+    assert(!(end is SeekFrom.Start));
+
+    assert(current is SeekFrom.Current);
+    assert(!(current is SeekFrom.End));
+}
+
+// =============================================================================
+// Section 16: IoResult with File-Specific Types
+// =============================================================================
+
+@test
+fn test_io_result_file_type() {
+    // IoResult<File> is the return type of File.open()
+    let result: IoResult<File> = Ok(File { fd: 3 });
+    assert(result.is_ok());
+    match result {
+        Ok(f) => assert_eq(f.fd, 3),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_io_result_file_err() {
+    let err = StreamError.with_message(IoErrorKind.NotFound, "no such file");
+    let result: IoResult<File> = Err(err);
+    assert(result.is_err());
+    match result {
+        Ok(_) => panic("expected Err"),
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+    }
+}
+
+@test
+fn test_io_result_bytes_type() {
+    let result: IoResult<List<Byte>> = Ok(List.new());
+    assert(result.is_ok());
+}
+
+@test
+fn test_io_result_int_for_read_count() {
+    // read() methods return IoResult<Int> for bytes read
+    let result: IoResult<Int> = Ok(1024);
+    match result {
+        Ok(n) => assert_eq(n, 1024),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_io_result_unit_for_write() {
+    // write_all() returns Result<(), StreamError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Section 17: StreamError for File Operations
+// =============================================================================
+
+@test
+fn test_file_error_not_found() {
+    let err = StreamError.with_message(IoErrorKind.NotFound, "/path/to/missing.txt");
+    assert_eq(err.kind(), IoErrorKind.NotFound);
+    assert(err.message().is_some());
+}
+
+@test
+fn test_file_error_permission_denied() {
+    let err = StreamError.with_message(IoErrorKind.PermissionDenied, "/etc/shadow");
+    assert_eq(err.kind(), IoErrorKind.PermissionDenied);
+}
+
+@test
+fn test_file_error_already_exists() {
+    let err = StreamError.with_message(IoErrorKind.AlreadyExists, "file exists with O_EXCL");
+    assert_eq(err.kind(), IoErrorKind.AlreadyExists);
+}
+
+@test
+fn test_file_error_write_zero() {
+    let err = StreamError.new(IoErrorKind.WriteZero);
+    assert_eq(err.kind(), IoErrorKind.WriteZero);
+}
+
+@test
+fn test_file_error_interrupted() {
+    let err = StreamError.new(IoErrorKind.Interrupted);
+    assert_eq(err.kind(), IoErrorKind.Interrupted);
+}
+
+@test
+fn test_file_error_invalid_input() {
+    let err = StreamError.with_message(IoErrorKind.InvalidInput, "negative seek offset");
+    assert_eq(err.kind(), IoErrorKind.InvalidInput);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

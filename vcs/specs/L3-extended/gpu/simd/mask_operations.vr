@@ -1,0 +1,180 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: SIMD tests can parse without runtime
+// @tags: simd, mask
+
+fn main() {
+    // Create mask from comparison
+    let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let b: f32x4 = f32x4(2.0, 2.0, 2.0, 2.0);
+
+    let mask = a > b;  // [false, false, true, true]
+
+    // Mask as explicit type
+    let mask_explicit: maskx4 = a.cmp_gt(b);
+
+    // Create mask from bits
+    let from_bits: maskx4 = maskx4.from_bitmask(0b1010);
+    assert(from_bits[0] == false);
+    assert(from_bits[1] == true);
+    assert(from_bits[2] == false);
+    assert(from_bits[3] == true);
+
+    // Create mask from array
+    let from_array: maskx4 = maskx4.from_array([true, false, true, false]);
+    assert(from_array[0] == true);
+    assert(from_array[1] == false);
+
+    // Mask logical operations
+    let mask_a: maskx4 = maskx4.from_bitmask(0b1100);  // [F, F, T, T]
+    let mask_b: maskx4 = maskx4.from_bitmask(0b1010);  // [F, T, F, T]
+
+    // AND
+    let mask_and = mask_a & mask_b;  // [F, F, F, T]
+    assert(mask_and.to_bitmask() == 0b1000);
+
+    // OR
+    let mask_or = mask_a | mask_b;  // [F, T, T, T]
+    assert(mask_or.to_bitmask() == 0b1110);
+
+    // XOR
+    let mask_xor = mask_a ^ mask_b;  // [F, T, T, F]
+    assert(mask_xor.to_bitmask() == 0b0110);
+
+    // NOT
+    let mask_not = !mask_a;  // [T, T, F, F]
+    assert(mask_not.to_bitmask() == 0b0011);
+
+    // Select/blend operation
+    let vals_true: f32x4 = f32x4(10.0, 20.0, 30.0, 40.0);
+    let vals_false: f32x4 = f32x4(100.0, 200.0, 300.0, 400.0);
+
+    let blended = mask_a.select(vals_true, vals_false);
+    // mask_a = [F, F, T, T], so:
+    assert(blended[0] == 100.0);  // false -> vals_false
+    assert(blended[1] == 200.0);  // false -> vals_false
+    assert(blended[2] == 30.0);   // true -> vals_true
+    assert(blended[3] == 40.0);   // true -> vals_true
+
+    // Blend with immediate mask (compile-time)
+    let blend_imm = vals_true.blend.<0b0101>(vals_false);
+    // Pattern 0b0101: lanes 0,2 from first, lanes 1,3 from second
+    assert(blend_imm[0] == 10.0);
+    assert(blend_imm[1] == 200.0);
+    assert(blend_imm[2] == 30.0);
+    assert(blend_imm[3] == 400.0);
+
+    // Masked load
+    let arr: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+    let default: f32x4 = f32x4.splat(0.0);
+
+    let masked_load = f32x4.load_masked(&arr[0], mask_a, default);
+    // Loads only where mask is true, else uses default
+    assert(masked_load[0] == 0.0);   // mask false -> default
+    assert(masked_load[1] == 0.0);   // mask false -> default
+    assert(masked_load[2] == 3.0);   // mask true -> arr[2]
+    assert(masked_load[3] == 4.0);   // mask true -> arr[3]
+
+    // Masked store
+    let mut out_arr: [f32; 4] = [100.0, 200.0, 300.0, 400.0];
+    let to_store: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+
+    to_store.store_masked(&mut out_arr[0], mask_a);
+    // Stores only where mask is true
+    assert(out_arr[0] == 100.0);  // mask false -> unchanged
+    assert(out_arr[1] == 200.0);  // mask false -> unchanged
+    assert(out_arr[2] == 3.0);    // mask true -> stored
+    assert(out_arr[3] == 4.0);    // mask true -> stored
+
+    // Mask reductions
+    let full_mask: maskx4 = maskx4.from_bitmask(0b1111);
+    let partial_mask: maskx4 = maskx4.from_bitmask(0b1010);
+    let empty_mask: maskx4 = maskx4.from_bitmask(0b0000);
+
+    assert(full_mask.all() == true);
+    assert(partial_mask.all() == false);
+
+    assert(full_mask.any() == true);
+    assert(partial_mask.any() == true);
+    assert(empty_mask.any() == false);
+
+    assert(empty_mask.none() == true);
+    assert(partial_mask.none() == false);
+
+    assert(partial_mask.count_ones() == 2);
+    assert(full_mask.count_ones() == 4);
+
+    // First/last set bit
+    let sparse_mask: maskx4 = maskx4.from_bitmask(0b1010);
+    assert(sparse_mask.first_set() == Some(1));
+    assert(sparse_mask.last_set() == Some(3));
+
+    // Compress (gather true lanes)
+    let values: f32x4 = f32x4(10.0, 20.0, 30.0, 40.0);
+    let compress_mask: maskx4 = maskx4.from_bitmask(0b1010);  // Lanes 1,3
+
+    let compressed = values.compress(compress_mask);
+    // Moves selected values to the beginning
+    assert(compressed[0] == 20.0);  // Was at lane 1
+    assert(compressed[1] == 40.0);  // Was at lane 3
+    // Lanes 2,3 are undefined after compress
+
+    // Expand (scatter to true lanes)
+    let src: f32x4 = f32x4(100.0, 200.0, 0.0, 0.0);
+    let expand_mask: maskx4 = maskx4.from_bitmask(0b1010);
+    let dst: f32x4 = f32x4.splat(0.0);
+
+    let expanded = src.expand(expand_mask, dst);
+    // Spreads first values to true lanes
+    assert(expanded[0] == 0.0);    // Mask false -> unchanged
+    assert(expanded[1] == 100.0);  // Mask true -> src[0]
+    assert(expanded[2] == 0.0);    // Mask false -> unchanged
+    assert(expanded[3] == 200.0);  // Mask true -> src[1]
+
+    // 8-wide masks
+    let wide_mask: maskx8 = maskx8.from_bitmask(0b10101010);
+    let wide_a: f32x8 = f32x8.splat(1.0);
+    let wide_b: f32x8 = f32x8.splat(2.0);
+
+    let wide_blend = wide_mask.select(wide_a, wide_b);
+    assert(wide_blend[0] == 2.0);  // false
+    assert(wide_blend[1] == 1.0);  // true
+    assert(wide_blend[7] == 1.0);  // true
+
+    // 16-wide masks (for u8x16, i8x16)
+    let byte_mask: maskx16 = maskx16.from_bitmask(0xFF00);
+    assert(byte_mask.count_ones() == 8);
+
+    // Mask splat
+    let all_true: maskx4 = maskx4.splat(true);
+    let all_false: maskx4 = maskx4.splat(false);
+    assert(all_true.all() == true);
+    assert(all_false.none() == true);
+
+    // Conditional zero
+    let data: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let zero_mask: maskx4 = maskx4.from_bitmask(0b0110);
+
+    let zeroed = data.and_not(zero_mask.to_f32x4());
+    // Zeroes lanes where mask is true
+    assert(zeroed[0] == 1.0);
+    assert(zeroed[1] == 0.0);
+    assert(zeroed[2] == 0.0);
+    assert(zeroed[3] == 4.0);
+
+    // Mask from sign bits of float vector
+    let signed_data: f32x4 = f32x4(1.0, -2.0, 3.0, -4.0);
+    let sign_mask = signed_data.sign_mask();  // [F, T, F, T]
+    assert(sign_mask.to_bitmask() == 0b1010);
+
+    // Convert mask to integer vector (all 1s or all 0s)
+    let int_mask: i32x4 = mask_a.to_i32x4();
+    // All bits set where mask is true
+    assert(int_mask[2] == -1);  // All 1s = -1 in twops complement
+    assert(int_mask[0] == 0);
+
+    // Use integer mask for bit manipulation
+    let bit_select = (vals_true.as_i32x4() & int_mask) | (vals_false.as_i32x4() & !int_mask);
+    // Same as blend, but via bitwise ops
+}

@@ -1,0 +1,39 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, float, debug
+// @description: Minimal debug for float comparison
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_sqrt_f64(x: Float) -> Float;
+}
+
+fn main() {
+    let sqrt4 = ffi_sqrt_f64(4.0);
+    print("sqrt4=");
+    print(sqrt4);
+    print("\n");
+
+    // Direct comparison
+    let cmp1 = sqrt4 == 2.0;
+    print("sqrt4 == 2.0: ");
+    print(cmp1);
+    print("\n");
+
+    // Subtraction
+    let diff = sqrt4 - 2.0;
+    print("diff=");
+    print(diff);
+    print("\n");
+
+    // Less than
+    let lt = diff < 0.001;
+    print("diff < 0.001: ");
+    print(lt);
+    print("\n");
+
+    print("done\n");
+}

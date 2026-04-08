@@ -1,0 +1,48 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, arithmetic, integer
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Integer arithmetic: add, sub, mul, div, mod, negation, precedence
+
+fn main() -> Int {
+    // Basic operations
+    assert_eq(2 + 3, 5);
+    assert_eq(100 - 37, 63);
+    assert_eq(7 * 8, 56);
+    assert_eq(17 / 3, 5);
+    assert_eq(17 % 3, 2);
+
+    // Negation
+    assert_eq(-(-42), 42);
+    assert_eq(-1 * -1, 1);
+    assert_eq(-100 + 50, -50);
+
+    // Truncation toward zero
+    assert_eq(-7 / 2, -3);
+    assert_eq(-7 % 2, -1);
+    assert_eq(7 / -2, -3);
+
+    // Precedence
+    assert_eq(2 + 3 * 4, 14);
+    assert_eq((2 + 3) * 4, 20);
+    assert_eq(10 - 2 * 3 + 1, 5);
+
+    // Large values
+    assert_eq(1000000 * 1000000, 1000000000000);
+    assert_eq(999999 * 999999, 999998000001);
+
+    // Chain of ops
+    let mut acc = 0;
+    let mut i = 1;
+    while i <= 100 {
+        acc = acc + i;
+        i = i + 1;
+    }
+    assert_eq(acc, 5050);
+
+    print("diff_int_arithmetic: ok");
+    0
+}

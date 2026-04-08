@@ -1,0 +1,37 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, equality, axioms, error
+// @expected-error: E400 "Type mismatch"
+
+/// Refl/symmetry/transitivity - failure cases
+
+/// Equality witness type
+type EqWitness<T> is | EqRefl;
+
+/// ERROR: Wrong return type from symmetry
+fn symm_wrong(p: EqWitness<Int>) -> Text {
+    match p { EqRefl => EqRefl }  // ERROR: EqWitness<Int> != Text
+}
+
+/// ERROR: Wrong return type from transitivity
+fn trans_wrong(p: EqWitness<Int>, q: EqWitness<Int>) -> Float {
+    match (p, q) { (EqRefl, EqRefl) => EqRefl }  // ERROR: EqWitness<Int> != Float
+}
+
+/// ERROR: Congruence with incompatible types
+fn cong_wrong(p: EqWitness<Int>) -> EqWitness<Text> {
+    // EqRefl of Int type, but claiming Text result
+    match p { EqRefl => 42 }  // ERROR: Int != EqWitness<Text>
+}
+
+/// ERROR: Using proof as non-proof type
+fn proof_as_number(p: EqWitness<Int>) -> Int {
+    p  // ERROR: EqWitness<Int> != Int
+}
+
+fn main() {
+    let r: EqWitness<Int> = EqRefl;
+    let _ = symm_wrong(r);
+    let _ = proof_as_number(r);
+}

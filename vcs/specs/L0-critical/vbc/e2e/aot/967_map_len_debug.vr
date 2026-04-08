@@ -1,0 +1,33 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, map, compiled
+// @expected-exit: 0
+
+fn main() -> Int {
+    let mut m = Map.new();
+    let mut i = 0;
+    while (i < 14) {
+        m.insert(i, i * 100);
+        // Check ALL keys after each insert
+        let mut bad = 0;
+        let mut j = 0;
+        while (j <= i) {
+            let v = m.get(j);
+            if v != j * 100 {
+                if bad == 0 {
+                    print(f"after insert({i}): get({j})={v} expected={j * 100}");
+                }
+                bad = bad + 1;
+            }
+            j = j + 1;
+        }
+        if bad > 0 {
+            print(f"  total {bad} keys wrong after insert({i}), len={m.len()}");
+            return 1;
+        }
+        i = i + 1;
+    }
+    print(f"PASS: all 14 inserts correct, len={m.len()}");
+    0
+}

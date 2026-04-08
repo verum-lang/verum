@@ -1,0 +1,446 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/comparison_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, comparison, ordering
+// @description: Comprehensive tests for comparison intrinsics that provide
+//               type-safe comparisons for various types.
+//
+// Coverage:
+// - Equality: eq, ne
+// - Ordering: lt, le, gt, ge
+// - Type coverage: integers, floats, bools, chars, pointers
+// - Special cases: NaN comparisons, pointer comparisons
+//
+// Test Strategy:
+// - All comparison operators for each type
+// - Boundary values and edge cases
+// - Float special values (infinity, NaN)
+// - Transitivity and reflexivity properties
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.comparison_test;
+
+// Note: Basic comparison operators are built into the language,
+// but we test them comprehensively here to ensure correctness.
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Integer Comparison Tests
+// =============================================================================
+
+@test
+fn test_int_comparisons() {
+    // Equality
+    assert(0 == 0);
+    assert(42 == 42);
+    assert(-1 == -1);
+    assert(!(1 == 2));
+
+    // Inequality
+    assert(1 != 2);
+    assert(-1 != 1);
+    assert(!(42 != 42));
+
+    // Less than
+    assert(0 < 1);
+    assert(-1 < 0);
+    assert(-100 < 100);
+    assert(!(1 < 1));
+    assert(!(2 < 1));
+
+    // Less than or equal
+    assert(0 <= 1);
+    assert(0 <= 0);
+    assert(-1 <= 0);
+    assert(!(1 <= 0));
+
+    // Greater than
+    assert(1 > 0);
+    assert(0 > -1);
+    assert(100 > -100);
+    assert(!(1 > 1));
+    assert(!(0 > 1));
+
+    // Greater than or equal
+    assert(1 >= 0);
+    assert(1 >= 1);
+    assert(0 >= -1);
+    assert(!(0 >= 1));
+
+    // Boundary values (64-bit)
+    let max_int: Int = 9223372036854775807;
+    let min_int: Int = -9223372036854775808;
+
+    assert(max_int > min_int);
+    assert(min_int < max_int);
+    assert(max_int >= max_int);
+    assert(min_int <= min_int);
+
+    // Near zero
+    assert(-1 < 0);
+    assert(0 < 1);
+    assert(-1 < 1);
+
+    print("Int comparison tests passed");
+}
+
+// =============================================================================
+// Unsigned Integer Comparison Tests
+// =============================================================================
+
+@test
+fn test_uint_comparisons() {
+    let zero: UInt64 = 0;
+    let one: UInt64 = 1;
+    let max: UInt64 = 0xFFFFFFFFFFFFFFFF;
+
+    // Basic comparisons
+    assert(zero == zero);
+    assert(one == one);
+    assert(zero != one);
+
+    // Ordering
+    assert(zero < one);
+    assert(one > zero);
+    assert(one <= one);
+    assert(zero >= zero);
+
+    // Boundary
+    assert(max > zero);
+    assert(max > one);
+    assert(max >= max);
+    assert(!(max < one));
+
+    // UInt32
+    let u32_max: UInt32 = 0xFFFFFFFF;
+    let u32_zero: UInt32 = 0;
+
+    assert(u32_max > u32_zero);
+    assert(u32_max == u32_max);
+
+    // UInt8
+    let byte_max: Byte = 255;
+    let byte_zero: Byte = 0;
+
+    assert(byte_max > byte_zero);
+    assert(byte_max == 255);
+
+    print("UInt comparison tests passed");
+}
+
+// =============================================================================
+// Float Comparison Tests
+// =============================================================================
+
+@test
+fn test_float_comparisons() {
+    // Equality
+    assert(0.0 == 0.0);
+    assert(1.0 == 1.0);
+    assert(3.14 == 3.14);
+    assert(!(1.0 == 2.0));
+
+    // Inequality
+    assert(1.0 != 2.0);
+    assert(!(1.0 != 1.0));
+
+    // Less than
+    assert(0.0 < 1.0);
+    assert(-1.0 < 0.0);
+    assert(0.5 < 1.0);
+    assert(!(1.0 < 1.0));
+
+    // Less than or equal
+    assert(0.0 <= 1.0);
+    assert(1.0 <= 1.0);
+    assert(-0.5 <= 0.5);
+
+    // Greater than
+    assert(1.0 > 0.0);
+    assert(0.0 > -1.0);
+    assert(!(1.0 > 1.0));
+
+    // Greater than or equal
+    assert(1.0 >= 0.0);
+    assert(1.0 >= 1.0);
+
+    // Small differences
+    assert(1.0000001 > 1.0);
+    assert(0.9999999 < 1.0);
+
+    // Large values
+    assert(1.0e100 > 1.0e99);
+    assert(1.0e-100 < 1.0e-99);
+
+    // Negative values
+    assert(-2.0 < -1.0);
+    assert(-1.0 > -2.0);
+    assert(-0.5 > -1.0);
+
+    print("Float comparison tests passed");
+}
+
+// =============================================================================
+// Float Special Values Tests
+// =============================================================================
+
+@test
+fn test_float_special_values() {
+    let pos_inf: Float = 1.0 / 0.0;
+    let neg_inf: Float = -1.0 / 0.0;
+    let nan: Float = 0.0 / 0.0;
+    let zero: Float = 0.0;
+    let neg_zero: Float = -0.0;
+
+    // Infinity comparisons
+    assert(pos_inf > 0.0);
+    assert(pos_inf > 1.0e308);
+    assert(neg_inf < 0.0);
+    assert(neg_inf < -1.0e308);
+    assert(pos_inf > neg_inf);
+
+    // Infinity equality
+    assert(pos_inf == pos_inf);
+    assert(neg_inf == neg_inf);
+    assert(pos_inf != neg_inf);
+
+    // NaN comparisons - NaN is not equal to anything, including itself
+    assert(!(nan == nan));
+    assert(nan != nan);
+    assert(!(nan < 0.0));
+    assert(!(nan > 0.0));
+    assert(!(nan <= 0.0));
+    assert(!(nan >= 0.0));
+
+    // Zero comparisons
+    assert(zero == neg_zero);  // Positive and negative zero are equal
+    assert(!(zero < neg_zero));
+    assert(!(zero > neg_zero));
+
+    // NaN with infinity
+    assert(!(nan == pos_inf));
+    assert(!(nan == neg_inf));
+    assert(!(nan < pos_inf));
+    assert(!(nan > neg_inf));
+
+    // Infinity ordering
+    assert(neg_inf < pos_inf);
+    assert(pos_inf > neg_inf);
+    assert(neg_inf <= neg_inf);
+    assert(pos_inf >= pos_inf);
+
+    print("Float special values tests passed");
+}
+
+// =============================================================================
+// Bool Comparison Tests
+// =============================================================================
+
+@test
+fn test_bool_comparisons() {
+    // Equality
+    assert(true == true);
+    assert(false == false);
+    assert(!(true == false));
+    assert(!(false == true));
+
+    // Inequality
+    assert(true != false);
+    assert(false != true);
+    assert(!(true != true));
+    assert(!(false != false));
+
+    // Ordering (false < true in most implementations)
+    // This may or may not be defined for bools
+    // assert(false < true);
+    // assert(!(true < false));
+
+    print("Bool comparison tests passed");
+}
+
+// =============================================================================
+// Char Comparison Tests
+// =============================================================================
+
+@test
+fn test_char_comparisons() {
+    // ASCII ordering
+    assert('a' == 'a');
+    assert('a' != 'b');
+    assert('a' < 'b');
+    assert('A' < 'a');  // Uppercase before lowercase in ASCII
+    assert('0' < '9');
+    assert('9' > '0');
+
+    // Character equality
+    assert('x' == 'x');
+    assert(!('x' == 'y'));
+
+    // Ordering within ranges
+    assert('A' < 'Z');
+    assert('Z' > 'A');
+    assert('a' < 'z');
+
+    // Space and symbols
+    assert(' ' < 'a');  // Space is 0x20, 'a' is 0x61
+    assert('!' < 'A');
+
+    // Digits
+    for i in 0..9 {
+        let c1 = ('0' as Int + i) as Char;
+        let c2 = ('0' as Int + i + 1) as Char;
+        assert(c1 < c2);
+    }
+
+    // Unicode ordering (by code point)
+    assert('a' < 'é');  // Basic Latin before Latin Extended
+    assert('z' < 'α');  // Latin before Greek
+
+    print("Char comparison tests passed");
+}
+
+// =============================================================================
+// Pointer Comparison Tests
+// =============================================================================
+
+@test
+fn test_pointer_comparisons() {
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    let ptr0: *const Int = &arr[0] as *const Int;
+    let ptr1: *const Int = &arr[1] as *const Int;
+    let ptr2: *const Int = &arr[2] as *const Int;
+
+    // Same pointer equality
+    assert(ptr0 == ptr0);
+    assert(ptr1 == ptr1);
+
+    // Different pointer inequality
+    assert(ptr0 != ptr1);
+    assert(ptr1 != ptr2);
+
+    // Pointer ordering (increasing addresses in array)
+    assert((ptr0 as Int) < (ptr1 as Int));
+    assert((ptr1 as Int) < (ptr2 as Int));
+    assert((ptr0 as Int) < (ptr2 as Int));
+
+    // Null pointer
+    mount core.intrinsics.{null_ptr};
+    let null_p: *const Int = null_ptr();
+
+    assert(null_p == null_p);
+    assert(null_p != ptr0);
+
+    // Null pointer ordering
+    assert((null_p as Int) < (ptr0 as Int));
+
+    print("Pointer comparison tests passed");
+}
+
+// =============================================================================
+// Comparison Properties Tests
+// =============================================================================
+
+@test
+fn test_comparison_properties() {
+    // Reflexivity: a == a
+    let values: [Int; 5] = [-100, -1, 0, 1, 100];
+    for i in 0..5 {
+        assert(values[i] == values[i]);
+        assert(values[i] <= values[i]);
+        assert(values[i] >= values[i]);
+        assert(!(values[i] != values[i]));
+        assert(!(values[i] < values[i]));
+        assert(!(values[i] > values[i]));
+    }
+
+    // Antisymmetry: if a < b then !(b < a)
+    for i in 0..5 {
+        for j in 0..5 {
+            if values[i] < values[j] {
+                assert(!(values[j] < values[i]));
+                assert(values[j] > values[i]);
+            }
+        }
+    }
+
+    // Transitivity: if a < b and b < c then a < c
+    for i in 0..5 {
+        for j in 0..5 {
+            for k in 0..5 {
+                if values[i] < values[j] && values[j] < values[k] {
+                    assert(values[i] < values[k]);
+                }
+            }
+        }
+    }
+
+    // Trichotomy: exactly one of a < b, a == b, a > b is true
+    for i in 0..5 {
+        for j in 0..5 {
+            let lt = values[i] < values[j];
+            let eq = values[i] == values[j];
+            let gt = values[i] > values[j];
+
+            // Exactly one is true
+            let count = (if lt { 1 } else { 0 }) +
+                       (if eq { 1 } else { 0 }) +
+                       (if gt { 1 } else { 0 });
+            assert(count == 1);
+        }
+    }
+
+    // Consistency: a <= b iff (a < b or a == b)
+    for i in 0..5 {
+        for j in 0..5 {
+            let le = values[i] <= values[j];
+            let lt_or_eq = values[i] < values[j] || values[i] == values[j];
+            assert(le == lt_or_eq);
+        }
+    }
+
+    print("Comparison properties tests passed");
+}
+
+// =============================================================================
+// Multi-Type Comparison Edge Cases
+// =============================================================================
+
+@test
+fn test_comparison_edge_cases() {
+    // Int boundary comparisons
+    let max_i32: Int32 = 2147483647;
+    let min_i32: Int32 = -2147483648;
+
+    assert(max_i32 > min_i32);
+    assert(min_i32 < max_i32);
+    assert(max_i32 == max_i32);
+
+    // Float epsilon comparisons
+    let a: Float = 1.0;
+    let b: Float = 1.0 + 1.0e-15;
+    // These may or may not be equal depending on precision
+    // assert(a == b || a < b);
+
+    // Near-max float comparisons
+    let large1: Float = 1.0e308;
+    let large2: Float = 1.0e307;
+    assert(large1 > large2);
+
+    // Near-zero float comparisons
+    let small1: Float = 1.0e-308;
+    let small2: Float = 1.0e-307;
+    assert(small1 < small2);
+
+    print("Comparison edge cases tests passed");
+}

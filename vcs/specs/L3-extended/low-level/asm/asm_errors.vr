@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: low-level, inline-assembly, asm-errors
+// @description: Test inline assembly error detection
+// @expected-error: E400
+
+/// ERROR: Type mismatch - asm result assigned to wrong type
+fn test_asm_type_mismatch() -> Text {
+    let res: Int = 0;
+    @asm("mov {res}, #42", options(volatile));
+    // ERROR: returning Int where Text is expected
+    res
+}
+
+fn main() {
+    let _ = test_asm_type_mismatch();
+}

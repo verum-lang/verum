@@ -1,0 +1,687 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, gpu, device
+// @timeout: 30000
+// @expected-exit: 0
+// @description: AOT GPU device management simulation — mirror of interpreter test 021. Device ID tracking, memory alloc/free counting, stream create/destroy, event lifecycle, kernel launch counter.
+
+// ============================================================================
+// Device info record
+// ============================================================================
+
+type DeviceInfo is {
+    device_id: Int,
+    total_memory: Int,
+    free_memory: Int,
+    is_available: Int
+};
+
+fn make_default_device() -> DeviceInfo {
+    DeviceInfo {
+        device_id: 0,
+        total_memory: 0,
+        free_memory: 0,
+        is_available: 0
+    }
+}
+
+// ============================================================================
+// Simulated GPU device manager
+// ============================================================================
+
+type DeviceManager is {
+    current_device: Int,
+    device_count: Int,
+    next_stream_id: Int,
+    next_event_id: Int,
+    alloc_count: Int,
+    free_count: Int,
+    kernel_launches: Int,
+    stream0: Int, stream1: Int, stream2: Int, stream3: Int,
+    stream4: Int, stream5: Int, stream6: Int, stream7: Int,
+    stream_count: Int,
+    event0: Int, event1: Int, event2: Int, event3: Int,
+    event4: Int, event5: Int, event6: Int, event7: Int,
+    event_count: Int
+};
+
+fn dm_new() -> DeviceManager {
+    DeviceManager {
+        current_device: 0,
+        device_count: 0,
+        next_stream_id: 1,
+        next_event_id: 1,
+        alloc_count: 0,
+        free_count: 0,
+        kernel_launches: 0,
+        stream0: 0, stream1: 0, stream2: 0, stream3: 0,
+        stream4: 0, stream5: 0, stream6: 0, stream7: 0,
+        stream_count: 0,
+        event0: 0, event1: 0, event2: 0, event3: 0,
+        event4: 0, event5: 0, event6: 0, event7: 0,
+        event_count: 0
+    }
+}
+
+// ============================================================================
+// Stream accessors
+// ============================================================================
+
+fn dm_get_stream(dm: DeviceManager, idx: Int) -> Int {
+    if idx == 0 { dm.stream0 }
+    else if idx == 1 { dm.stream1 }
+    else if idx == 2 { dm.stream2 }
+    else if idx == 3 { dm.stream3 }
+    else if idx == 4 { dm.stream4 }
+    else if idx == 5 { dm.stream5 }
+    else if idx == 6 { dm.stream6 }
+    else { dm.stream7 }
+}
+
+fn dm_set_stream(dm: DeviceManager, idx: Int, val: Int) -> DeviceManager {
+    DeviceManager {
+        current_device: dm.current_device,
+        device_count: dm.device_count,
+        next_stream_id: dm.next_stream_id,
+        next_event_id: dm.next_event_id,
+        alloc_count: dm.alloc_count,
+        free_count: dm.free_count,
+        kernel_launches: dm.kernel_launches,
+        stream0: if idx == 0 { val } else { dm.stream0 },
+        stream1: if idx == 1 { val } else { dm.stream1 },
+        stream2: if idx == 2 { val } else { dm.stream2 },
+        stream3: if idx == 3 { val } else { dm.stream3 },
+        stream4: if idx == 4 { val } else { dm.stream4 },
+        stream5: if idx == 5 { val } else { dm.stream5 },
+        stream6: if idx == 6 { val } else { dm.stream6 },
+        stream7: if idx == 7 { val } else { dm.stream7 },
+        stream_count: dm.stream_count,
+        event0: dm.event0, event1: dm.event1, event2: dm.event2, event3: dm.event3,
+        event4: dm.event4, event5: dm.event5, event6: dm.event6, event7: dm.event7,
+        event_count: dm.event_count
+    }
+}
+
+// ============================================================================
+// Event accessors
+// ============================================================================
+
+fn dm_get_event(dm: DeviceManager, idx: Int) -> Int {
+    if idx == 0 { dm.event0 }
+    else if idx == 1 { dm.event1 }
+    else if idx == 2 { dm.event2 }
+    else if idx == 3 { dm.event3 }
+    else if idx == 4 { dm.event4 }
+    else if idx == 5 { dm.event5 }
+    else if idx == 6 { dm.event6 }
+    else { dm.event7 }
+}
+
+fn dm_set_event(dm: DeviceManager, idx: Int, val: Int) -> DeviceManager {
+    DeviceManager {
+        current_device: dm.current_device,
+        device_count: dm.device_count,
+        next_stream_id: dm.next_stream_id,
+        next_event_id: dm.next_event_id,
+        alloc_count: dm.alloc_count,
+        free_count: dm.free_count,
+        kernel_launches: dm.kernel_launches,
+        stream0: dm.stream0, stream1: dm.stream1, stream2: dm.stream2, stream3: dm.stream3,
+        stream4: dm.stream4, stream5: dm.stream5, stream6: dm.stream6, stream7: dm.stream7,
+        stream_count: dm.stream_count,
+        event0: if idx == 0 { val } else { dm.event0 },
+        event1: if idx == 1 { val } else { dm.event1 },
+        event2: if idx == 2 { val } else { dm.event2 },
+        event3: if idx == 3 { val } else { dm.event3 },
+        event4: if idx == 4 { val } else { dm.event4 },
+        event5: if idx == 5 { val } else { dm.event5 },
+        event6: if idx == 6 { val } else { dm.event6 },
+        event7: if idx == 7 { val } else { dm.event7 },
+        event_count: dm.event_count
+    }
+}
+
+// ============================================================================
+// Device management operations
+// ============================================================================
+
+fn dm_set_current_device(dm: DeviceManager, id: Int) -> DeviceManager {
+    DeviceManager {
+        current_device: id,
+        device_count: dm.device_count,
+        next_stream_id: dm.next_stream_id,
+        next_event_id: dm.next_event_id,
+        alloc_count: dm.alloc_count,
+        free_count: dm.free_count,
+        kernel_launches: dm.kernel_launches,
+        stream0: dm.stream0, stream1: dm.stream1, stream2: dm.stream2, stream3: dm.stream3,
+        stream4: dm.stream4, stream5: dm.stream5, stream6: dm.stream6, stream7: dm.stream7,
+        stream_count: dm.stream_count,
+        event0: dm.event0, event1: dm.event1, event2: dm.event2, event3: dm.event3,
+        event4: dm.event4, event5: dm.event5, event6: dm.event6, event7: dm.event7,
+        event_count: dm.event_count
+    }
+}
+
+fn dm_get_memory_info(dm: DeviceManager) -> DeviceInfo {
+    DeviceInfo {
+        device_id: dm.current_device,
+        total_memory: 0,
+        free_memory: 0,
+        is_available: 0
+    }
+}
+
+// ============================================================================
+// Memory alloc/free tracking
+// ============================================================================
+
+fn dm_alloc(dm: DeviceManager) -> DeviceManager {
+    DeviceManager {
+        current_device: dm.current_device,
+        device_count: dm.device_count,
+        next_stream_id: dm.next_stream_id,
+        next_event_id: dm.next_event_id,
+        alloc_count: dm.alloc_count + 1,
+        free_count: dm.free_count,
+        kernel_launches: dm.kernel_launches,
+        stream0: dm.stream0, stream1: dm.stream1, stream2: dm.stream2, stream3: dm.stream3,
+        stream4: dm.stream4, stream5: dm.stream5, stream6: dm.stream6, stream7: dm.stream7,
+        stream_count: dm.stream_count,
+        event0: dm.event0, event1: dm.event1, event2: dm.event2, event3: dm.event3,
+        event4: dm.event4, event5: dm.event5, event6: dm.event6, event7: dm.event7,
+        event_count: dm.event_count
+    }
+}
+
+fn dm_free(dm: DeviceManager) -> DeviceManager {
+    DeviceManager {
+        current_device: dm.current_device,
+        device_count: dm.device_count,
+        next_stream_id: dm.next_stream_id,
+        next_event_id: dm.next_event_id,
+        alloc_count: dm.alloc_count,
+        free_count: dm.free_count + 1,
+        kernel_launches: dm.kernel_launches,
+        stream0: dm.stream0, stream1: dm.stream1, stream2: dm.stream2, stream3: dm.stream3,
+        stream4: dm.stream4, stream5: dm.stream5, stream6: dm.stream6, stream7: dm.stream7,
+        stream_count: dm.stream_count,
+        event0: dm.event0, event1: dm.event1, event2: dm.event2, event3: dm.event3,
+        event4: dm.event4, event5: dm.event5, event6: dm.event6, event7: dm.event7,
+        event_count: dm.event_count
+    }
+}
+
+fn dm_active_allocs(dm: DeviceManager) -> Int {
+    dm.alloc_count - dm.free_count
+}
+
+// ============================================================================
+// Stream operations
+// ============================================================================
+
+fn dm_create_stream(dm: DeviceManager) -> DeviceManager {
+    let sid = dm.next_stream_id;
+    let idx = dm.stream_count;
+    let dm2 = dm_set_stream(dm, idx, sid);
+    DeviceManager {
+        current_device: dm2.current_device,
+        device_count: dm2.device_count,
+        next_stream_id: sid + 1,
+        next_event_id: dm2.next_event_id,
+        alloc_count: dm2.alloc_count,
+        free_count: dm2.free_count,
+        kernel_launches: dm2.kernel_launches,
+        stream0: dm2.stream0, stream1: dm2.stream1, stream2: dm2.stream2, stream3: dm2.stream3,
+        stream4: dm2.stream4, stream5: dm2.stream5, stream6: dm2.stream6, stream7: dm2.stream7,
+        stream_count: dm2.stream_count + 1,
+        event0: dm2.event0, event1: dm2.event1, event2: dm2.event2, event3: dm2.event3,
+        event4: dm2.event4, event5: dm2.event5, event6: dm2.event6, event7: dm2.event7,
+        event_count: dm2.event_count
+    }
+}
+
+fn dm_destroy_stream(dm: DeviceManager, sid: Int) -> DeviceManager {
+    let mut found = -1;
+    let mut i = 0;
+    let mut dm2 = dm;
+    while i < dm.stream_count {
+        if dm_get_stream(dm, i) == sid {
+            found = i;
+        }
+        i = i + 1;
+    }
+    if found >= 0 {
+        let mut j = found;
+        while j < dm.stream_count - 1 {
+            dm2 = dm_set_stream(dm2, j, dm_get_stream(dm2, j + 1));
+            j = j + 1;
+        }
+        dm2 = dm_set_stream(dm2, dm.stream_count - 1, 0);
+        DeviceManager {
+            current_device: dm2.current_device,
+            device_count: dm2.device_count,
+            next_stream_id: dm2.next_stream_id,
+            next_event_id: dm2.next_event_id,
+            alloc_count: dm2.alloc_count,
+            free_count: dm2.free_count,
+            kernel_launches: dm2.kernel_launches,
+            stream0: dm2.stream0, stream1: dm2.stream1, stream2: dm2.stream2, stream3: dm2.stream3,
+            stream4: dm2.stream4, stream5: dm2.stream5, stream6: dm2.stream6, stream7: dm2.stream7,
+            stream_count: dm2.stream_count - 1,
+            event0: dm2.event0, event1: dm2.event1, event2: dm2.event2, event3: dm2.event3,
+            event4: dm2.event4, event5: dm2.event5, event6: dm2.event6, event7: dm2.event7,
+            event_count: dm2.event_count
+        }
+    } else {
+        dm2
+    }
+}
+
+// ============================================================================
+// Event operations
+// ============================================================================
+
+fn dm_create_event(dm: DeviceManager) -> DeviceManager {
+    let eid = dm.next_event_id;
+    let idx = dm.event_count;
+    let dm2 = dm_set_event(dm, idx, eid);
+    DeviceManager {
+        current_device: dm2.current_device,
+        device_count: dm2.device_count,
+        next_stream_id: dm2.next_stream_id,
+        next_event_id: eid + 1,
+        alloc_count: dm2.alloc_count,
+        free_count: dm2.free_count,
+        kernel_launches: dm2.kernel_launches,
+        stream0: dm2.stream0, stream1: dm2.stream1, stream2: dm2.stream2, stream3: dm2.stream3,
+        stream4: dm2.stream4, stream5: dm2.stream5, stream6: dm2.stream6, stream7: dm2.stream7,
+        stream_count: dm2.stream_count,
+        event0: dm2.event0, event1: dm2.event1, event2: dm2.event2, event3: dm2.event3,
+        event4: dm2.event4, event5: dm2.event5, event6: dm2.event6, event7: dm2.event7,
+        event_count: dm2.event_count + 1
+    }
+}
+
+fn dm_destroy_event(dm: DeviceManager, eid: Int) -> DeviceManager {
+    let mut found = -1;
+    let mut i = 0;
+    let mut dm2 = dm;
+    while i < dm.event_count {
+        if dm_get_event(dm, i) == eid {
+            found = i;
+        }
+        i = i + 1;
+    }
+    if found >= 0 {
+        let mut j = found;
+        while j < dm.event_count - 1 {
+            dm2 = dm_set_event(dm2, j, dm_get_event(dm2, j + 1));
+            j = j + 1;
+        }
+        dm2 = dm_set_event(dm2, dm.event_count - 1, 0);
+        DeviceManager {
+            current_device: dm2.current_device,
+            device_count: dm2.device_count,
+            next_stream_id: dm2.next_stream_id,
+            next_event_id: dm2.next_event_id,
+            alloc_count: dm2.alloc_count,
+            free_count: dm2.free_count,
+            kernel_launches: dm2.kernel_launches,
+            stream0: dm2.stream0, stream1: dm2.stream1, stream2: dm2.stream2, stream3: dm2.stream3,
+            stream4: dm2.stream4, stream5: dm2.stream5, stream6: dm2.stream6, stream7: dm2.stream7,
+            stream_count: dm2.stream_count,
+            event0: dm2.event0, event1: dm2.event1, event2: dm2.event2, event3: dm2.event3,
+            event4: dm2.event4, event5: dm2.event5, event6: dm2.event6, event7: dm2.event7,
+            event_count: dm2.event_count - 1
+        }
+    } else {
+        dm2
+    }
+}
+
+// ============================================================================
+// Kernel launch tracking
+// ============================================================================
+
+fn dm_launch_kernel(dm: DeviceManager) -> DeviceManager {
+    DeviceManager {
+        current_device: dm.current_device,
+        device_count: dm.device_count,
+        next_stream_id: dm.next_stream_id,
+        next_event_id: dm.next_event_id,
+        alloc_count: dm.alloc_count,
+        free_count: dm.free_count,
+        kernel_launches: dm.kernel_launches + 1,
+        stream0: dm.stream0, stream1: dm.stream1, stream2: dm.stream2, stream3: dm.stream3,
+        stream4: dm.stream4, stream5: dm.stream5, stream6: dm.stream6, stream7: dm.stream7,
+        stream_count: dm.stream_count,
+        event0: dm.event0, event1: dm.event1, event2: dm.event2, event3: dm.event3,
+        event4: dm.event4, event5: dm.event5, event6: dm.event6, event7: dm.event7,
+        event_count: dm.event_count
+    }
+}
+
+// ============================================================================
+// Reset
+// ============================================================================
+
+fn dm_device_reset(dm: DeviceManager) -> DeviceManager {
+    DeviceManager {
+        current_device: dm.current_device,
+        device_count: dm.device_count,
+        next_stream_id: 1,
+        next_event_id: 1,
+        alloc_count: 0,
+        free_count: 0,
+        kernel_launches: 0,
+        stream0: 0, stream1: 0, stream2: 0, stream3: 0,
+        stream4: 0, stream5: 0, stream6: 0, stream7: 0,
+        stream_count: 0,
+        event0: 0, event1: 0, event2: 0, event3: 0,
+        event4: 0, event5: 0, event6: 0, event7: 0,
+        event_count: 0
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_device_id_tracking() {
+    let dm = dm_new();
+    assert_eq(dm.current_device, 0);
+
+    let dm2 = dm_set_current_device(dm, 1);
+    assert_eq(dm2.current_device, 1);
+
+    let dm3 = dm_set_current_device(dm2, 3);
+    assert_eq(dm3.current_device, 3);
+
+    let dm4 = dm_set_current_device(dm3, 0);
+    assert_eq(dm4.current_device, 0);
+
+    let info = dm_get_memory_info(dm3);
+    assert_eq(info.device_id, 3);
+    assert_eq(info.total_memory, 0);
+    assert_eq(info.is_available, 0);
+}
+
+fn test_memory_alloc_free() {
+    let dm = dm_new();
+    assert_eq(dm.alloc_count, 0);
+    assert_eq(dm.free_count, 0);
+    assert_eq(dm_active_allocs(dm), 0);
+
+    // Allocate 3 buffers
+    let dm2 = dm_alloc(dm_alloc(dm_alloc(dm)));
+    assert_eq(dm2.alloc_count, 3);
+    assert_eq(dm2.free_count, 0);
+    assert_eq(dm_active_allocs(dm2), 3);
+
+    // Free 1 buffer
+    let dm3 = dm_free(dm2);
+    assert_eq(dm3.alloc_count, 3);
+    assert_eq(dm3.free_count, 1);
+    assert_eq(dm_active_allocs(dm3), 2);
+
+    // Free remaining
+    let dm4 = dm_free(dm_free(dm3));
+    assert_eq(dm_active_allocs(dm4), 0);
+}
+
+fn test_memory_alloc_many() {
+    let mut dm = dm_new();
+    let mut i = 0;
+    while i < 5 {
+        dm = dm_alloc(dm);
+        i = i + 1;
+    }
+    assert_eq(dm.alloc_count, 5);
+    assert_eq(dm_active_allocs(dm), 5);
+
+    // Free 3
+    i = 0;
+    while i < 3 {
+        dm = dm_free(dm);
+        i = i + 1;
+    }
+    assert_eq(dm_active_allocs(dm), 2);
+}
+
+fn test_stream_lifecycle() {
+    let dm = dm_new();
+    assert_eq(dm.stream_count, 0);
+
+    let dm2 = dm_create_stream(dm);
+    assert_eq(dm2.stream_count, 1);
+    assert_eq(dm_get_stream(dm2, 0), 1);
+
+    let dm3 = dm_create_stream(dm2);
+    assert_eq(dm3.stream_count, 2);
+    assert_eq(dm_get_stream(dm3, 0), 1);
+    assert_eq(dm_get_stream(dm3, 1), 2);
+
+    // Destroy first stream
+    let dm4 = dm_destroy_stream(dm3, 1);
+    assert_eq(dm4.stream_count, 1);
+    assert_eq(dm_get_stream(dm4, 0), 2);
+
+    // Destroy remaining
+    let dm5 = dm_destroy_stream(dm4, 2);
+    assert_eq(dm5.stream_count, 0);
+}
+
+fn test_stream_multiple() {
+    let mut dm = dm_new();
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    assert_eq(dm.stream_count, 5);
+    assert_eq(dm_get_stream(dm, 0), 1);
+    assert_eq(dm_get_stream(dm, 4), 5);
+
+    // Destroy middle stream (ID 3)
+    dm = dm_destroy_stream(dm, 3);
+    assert_eq(dm.stream_count, 4);
+    assert_eq(dm_get_stream(dm, 0), 1);
+    assert_eq(dm_get_stream(dm, 1), 2);
+    assert_eq(dm_get_stream(dm, 2), 4);
+    assert_eq(dm_get_stream(dm, 3), 5);
+
+    // New stream gets next ID (6)
+    dm = dm_create_stream(dm);
+    assert_eq(dm.stream_count, 5);
+    assert_eq(dm_get_stream(dm, 4), 6);
+}
+
+fn test_event_lifecycle() {
+    let dm = dm_new();
+    assert_eq(dm.event_count, 0);
+
+    let dm2 = dm_create_event(dm);
+    assert_eq(dm2.event_count, 1);
+    assert_eq(dm_get_event(dm2, 0), 1);
+
+    let dm3 = dm_create_event(dm2);
+    assert_eq(dm3.event_count, 2);
+    assert_eq(dm_get_event(dm3, 1), 2);
+
+    let dm4 = dm_destroy_event(dm3, 1);
+    assert_eq(dm4.event_count, 1);
+    assert_eq(dm_get_event(dm4, 0), 2);
+
+    let dm5 = dm_destroy_event(dm4, 2);
+    assert_eq(dm5.event_count, 0);
+}
+
+fn test_event_multiple() {
+    let mut dm = dm_new();
+    dm = dm_create_event(dm);
+    dm = dm_create_event(dm);
+    dm = dm_create_event(dm);
+    dm = dm_create_event(dm);
+    assert_eq(dm.event_count, 4);
+    assert_eq(dm_get_event(dm, 0), 1);
+    assert_eq(dm_get_event(dm, 3), 4);
+
+    // Destroy event 2 (middle)
+    dm = dm_destroy_event(dm, 2);
+    assert_eq(dm.event_count, 3);
+    assert_eq(dm_get_event(dm, 0), 1);
+    assert_eq(dm_get_event(dm, 1), 3);
+    assert_eq(dm_get_event(dm, 2), 4);
+}
+
+fn test_kernel_launch_counter() {
+    let dm = dm_new();
+    assert_eq(dm.kernel_launches, 0);
+
+    let dm2 = dm_launch_kernel(dm);
+    assert_eq(dm2.kernel_launches, 1);
+
+    let dm3 = dm_launch_kernel(dm_launch_kernel(dm_launch_kernel(dm2)));
+    assert_eq(dm3.kernel_launches, 4);
+
+    // 10 kernel launches
+    let mut dm4 = dm_new();
+    let mut i = 0;
+    while i < 10 {
+        dm4 = dm_launch_kernel(dm4);
+        i = i + 1;
+    }
+    assert_eq(dm4.kernel_launches, 10);
+}
+
+fn test_device_reset() {
+    let mut dm = dm_new();
+    dm = dm_create_stream(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_create_event(dm);
+    dm = dm_create_event(dm);
+    dm = dm_create_event(dm);
+    dm = dm_alloc(dm);
+    dm = dm_alloc(dm);
+    dm = dm_launch_kernel(dm);
+    dm = dm_set_current_device(dm, 2);
+
+    assert_eq(dm.stream_count, 2);
+    assert_eq(dm.event_count, 3);
+    assert_eq(dm.alloc_count, 2);
+    assert_eq(dm.kernel_launches, 1);
+
+    let dm2 = dm_device_reset(dm);
+    assert_eq(dm2.stream_count, 0);
+    assert_eq(dm2.event_count, 0);
+    assert_eq(dm2.alloc_count, 0);
+    assert_eq(dm2.free_count, 0);
+    assert_eq(dm2.kernel_launches, 0);
+    assert_eq(dm2.next_stream_id, 1);
+    assert_eq(dm2.next_event_id, 1);
+    // Device selection preserved
+    assert_eq(dm2.current_device, 2);
+}
+
+fn test_interleaved_operations() {
+    let mut dm = dm_new();
+
+    // Interleave all operation types
+    dm = dm_create_stream(dm);
+    dm = dm_alloc(dm);
+    dm = dm_create_event(dm);
+    dm = dm_launch_kernel(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_alloc(dm);
+    dm = dm_create_event(dm);
+    dm = dm_launch_kernel(dm);
+    dm = dm_create_stream(dm);
+
+    assert_eq(dm.stream_count, 3);
+    assert_eq(dm.event_count, 2);
+    assert_eq(dm.alloc_count, 2);
+    assert_eq(dm.kernel_launches, 2);
+
+    assert_eq(dm_get_stream(dm, 0), 1);
+    assert_eq(dm_get_stream(dm, 1), 2);
+    assert_eq(dm_get_stream(dm, 2), 3);
+    assert_eq(dm_get_event(dm, 0), 1);
+    assert_eq(dm_get_event(dm, 1), 2);
+
+    // Destroy event 1, stream 2
+    dm = dm_destroy_event(dm, 1);
+    dm = dm_destroy_stream(dm, 2);
+    dm = dm_free(dm);
+
+    assert_eq(dm.stream_count, 2);
+    assert_eq(dm.event_count, 1);
+    assert_eq(dm_active_allocs(dm), 1);
+    assert_eq(dm_get_stream(dm, 0), 1);
+    assert_eq(dm_get_stream(dm, 1), 3);
+    assert_eq(dm_get_event(dm, 0), 2);
+}
+
+fn test_destroy_nonexistent() {
+    let mut dm = dm_new();
+    dm = dm_create_stream(dm);
+    assert_eq(dm.stream_count, 1);
+
+    // Destroying non-existent: no-op
+    dm = dm_destroy_stream(dm, 999);
+    assert_eq(dm.stream_count, 1);
+
+    dm = dm_destroy_event(dm, 999);
+    assert_eq(dm.event_count, 0);
+}
+
+fn test_full_workflow() {
+    let mut dm = dm_new();
+    dm = dm_set_current_device(dm, 0);
+
+    // Allocate resources
+    dm = dm_alloc(dm);
+    dm = dm_alloc(dm);
+    dm = dm_create_stream(dm);
+    dm = dm_create_event(dm);
+
+    // Launch kernels
+    dm = dm_launch_kernel(dm);
+    dm = dm_launch_kernel(dm);
+    dm = dm_launch_kernel(dm);
+
+    // Check state
+    assert_eq(dm.alloc_count, 2);
+    assert_eq(dm.stream_count, 1);
+    assert_eq(dm.event_count, 1);
+    assert_eq(dm.kernel_launches, 3);
+
+    // Cleanup
+    dm = dm_destroy_event(dm, 1);
+    dm = dm_destroy_stream(dm, 1);
+    dm = dm_free(dm);
+    dm = dm_free(dm);
+
+    assert_eq(dm.stream_count, 0);
+    assert_eq(dm.event_count, 0);
+    assert_eq(dm_active_allocs(dm), 0);
+    assert_eq(dm.kernel_launches, 3);
+}
+
+fn main() -> Int {
+    test_device_id_tracking();
+    test_memory_alloc_free();
+    test_memory_alloc_many();
+    test_stream_lifecycle();
+    test_stream_multiple();
+    test_event_lifecycle();
+    test_event_multiple();
+    test_kernel_launch_counter();
+    test_device_reset();
+    test_interleaved_operations();
+    test_destroy_nonexistent();
+    test_full_workflow();
+    print("[OK] 134_gpu_ops_aot");
+    0
+}

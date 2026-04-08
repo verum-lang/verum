@@ -1,0 +1,227 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, stack-machine, expression-eval
+// @timeout: 30000
+
+// Milestone: Stack-based expression evaluator and simple VM with conditional jumps
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Stack machine: opcodes
+// 1=PUSH(next), 2=ADD, 3=SUB, 4=MUL, 5=DUP, 6=SWAP, 7=NEG, 8=MOD
+// Program and data in separate arrays
+
+type VMState is { stack: Arr8, sp: Int };
+
+fn vm_push(st: VMState, val: Int) -> VMState {
+    VMState { stack: set8(st.stack, st.sp, val), sp: st.sp + 1 }
+}
+
+fn vm_pop_val(st: VMState) -> Int {
+    get8(st.stack, st.sp - 1)
+}
+
+fn vm_pop(st: VMState) -> VMState {
+    VMState { stack: st.stack, sp: st.sp - 1 }
+}
+
+fn run_stack_vm(prog: Arr8, prog_len: Int) -> Int {
+    let mut st = VMState { stack: zeros(), sp: 0 };
+    let mut pc = 0;
+    while pc < prog_len {
+        let op = get8(prog, pc);
+        if op == 1 {
+            // PUSH: next value
+            pc = pc + 1;
+            st = vm_push(st, get8(prog, pc));
+        } else if op == 2 {
+            // ADD
+            let b = vm_pop_val(st);
+            st = vm_pop(st);
+            let a = vm_pop_val(st);
+            st = vm_pop(st);
+            st = vm_push(st, a + b);
+        } else if op == 3 {
+            // SUB
+            let b = vm_pop_val(st);
+            st = vm_pop(st);
+            let a = vm_pop_val(st);
+            st = vm_pop(st);
+            st = vm_push(st, a - b);
+        } else if op == 4 {
+            // MUL
+            let b = vm_pop_val(st);
+            st = vm_pop(st);
+            let a = vm_pop_val(st);
+            st = vm_pop(st);
+            st = vm_push(st, a * b);
+        } else if op == 5 {
+            // DUP
+            let a = vm_pop_val(st);
+            st = vm_push(st, a);
+        } else if op == 6 {
+            // SWAP
+            let b = vm_pop_val(st);
+            st = vm_pop(st);
+            let a = vm_pop_val(st);
+            st = vm_pop(st);
+            st = vm_push(st, b);
+            st = vm_push(st, a);
+        } else if op == 7 {
+            // NEG
+            let a = vm_pop_val(st);
+            st = vm_pop(st);
+            st = vm_push(st, 0 - a);
+        } else if op == 8 {
+            // MOD
+            let b = vm_pop_val(st);
+            st = vm_pop(st);
+            let a = vm_pop_val(st);
+            st = vm_pop(st);
+            st = vm_push(st, a % b);
+        }
+        pc = pc + 1;
+    }
+    vm_pop_val(st)
+}
+
+// Simple register VM with conditional jumps
+// Opcodes: opcode(3 bits) + operands encoded
+// Packed: opcode * 1000 + arg
+// 1xxx = LOAD_IMM reg, val (reg in hundreds, val in ones) → 1000 + reg*100 + val
+// 2xxx = ADD rd, rs (rd*10 + rs)
+// 3xxx = SUB rd, rs
+// 4xxx = JNZ offset (jump if r0 != 0, offset relative)
+// 5xxx = DEC rd (decrement register)
+// 9000 = HALT
+
+fn reg_vm_run(prog: Arr8, prog_len: Int) -> Arr8 {
+    let mut regs = zeros();
+    let mut pc = 0;
+    let mut steps = 0;
+    while pc < prog_len {
+        let instr = get8(prog, pc);
+        let op = instr / 1000;
+        let arg = instr % 1000;
+        if op == 1 {
+            // LOAD_IMM: reg = arg/100, val = arg%100
+            let reg = arg / 100;
+            let val = arg % 100;
+            regs = set8(regs, reg, val);
+        } else if op == 2 {
+            // ADD: rd = arg/10, rs = arg%10
+            let rd = arg / 10;
+            let rs = arg % 10;
+            regs = set8(regs, rd, get8(regs, rd) + get8(regs, rs));
+        } else if op == 3 {
+            // SUB: rd = arg/10, rs = arg%10
+            let rd = arg / 10;
+            let rs = arg % 10;
+            regs = set8(regs, rd, get8(regs, rd) - get8(regs, rs));
+        } else if op == 4 {
+            // JNZ: if r0 != 0, jump backward by arg
+            if get8(regs, 0) != 0 {
+                pc = pc - arg;
+                steps = steps + 1;
+                if steps > 200 { pc = prog_len; } // safety
+                // Don't increment pc at end since we already set it
+                pc = pc - 1; // compensate for pc+1 at bottom
+            }
+        } else if op == 5 {
+            // DEC register
+            regs = set8(regs, arg, get8(regs, arg) - 1);
+        } else if op == 9 {
+            pc = prog_len; // HALT
+            pc = pc - 1;
+        }
+        pc = pc + 1;
+    }
+    regs
+}
+
+fn test_stack_arithmetic() -> Int {
+    // Compute (3 + 4) * 2 = 14
+    // PUSH 3, PUSH 4, ADD, PUSH 2, MUL
+    let prog = Arr8 { v0: 1, v1: 3, v2: 1, v3: 4, v4: 2, v5: 1, v6: 2, v7: 4 };
+    assert_eq(run_stack_vm(prog, 8), 14);
+    1
+}
+
+fn test_stack_sub_neg() -> Int {
+    // Compute 10 - 3 = 7
+    // PUSH 10, PUSH 3, SUB
+    let prog = Arr8 { v0: 1, v1: 10, v2: 1, v3: 3, v4: 3, v5: 0, v6: 0, v7: 0 };
+    assert_eq(run_stack_vm(prog, 5), 7);
+    1
+}
+
+fn test_stack_dup() -> Int {
+    // Compute 5 * 5 = 25 using DUP
+    // PUSH 5, DUP, MUL
+    let prog = Arr8 { v0: 1, v1: 5, v2: 5, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(run_stack_vm(prog, 4), 25);
+    1
+}
+
+fn test_stack_mod() -> Int {
+    // 17 % 5 = 2
+    // PUSH 17, PUSH 5, MOD
+    let prog = Arr8 { v0: 1, v1: 17, v2: 1, v3: 5, v4: 8, v5: 0, v6: 0, v7: 0 };
+    assert_eq(run_stack_vm(prog, 5), 2);
+    1
+}
+
+fn test_reg_vm_simple() -> Int {
+    // Load r0=5, r1=3, ADD r0, r1 → r0=8
+    // LOAD r0 5 = 1005, LOAD r1 3 = 1103, ADD r0 r1 = 2001, HALT = 9000
+    let prog = Arr8 { v0: 1005, v1: 1103, v2: 2001, v3: 9000, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let regs = reg_vm_run(prog, 4);
+    assert_eq(get8(regs, 0), 8);
+    assert_eq(get8(regs, 1), 3);
+    1
+}
+
+fn test_reg_vm_loop() -> Int {
+    // Multiply 5 * 3 using repeated addition
+    // r0 = 3 (counter), r1 = 5 (addend), r2 = 0 (accumulator)
+    // Loop: ADD r2, r1; DEC r0; JNZ -2 (back to ADD)
+    // LOAD r0 3 = 1003, LOAD r1 5 = 1105, LOAD r2 0 = 1200
+    // ADD r2 r1 = 2021, DEC r0 = 5000, JNZ 2 = 4002, HALT = 9000
+    let prog = Arr8 { v0: 1003, v1: 1105, v2: 1200, v3: 2021, v4: 5000, v5: 4002, v6: 9000, v7: 0 };
+    let regs = reg_vm_run(prog, 7);
+    assert_eq(get8(regs, 0), 0); // counter exhausted
+    assert_eq(get8(regs, 2), 15); // 5*3 = 15
+    1
+}
+
+fn main() -> Int {
+    test_stack_arithmetic();
+    test_stack_sub_neg();
+    test_stack_dup();
+    test_stack_mod();
+    test_reg_vm_simple();
+    test_reg_vm_loop();
+    print("[OK] 490_milestone_aot");
+    0
+}

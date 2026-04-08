@@ -1,0 +1,523 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: type, local, scoping, definition
+// @description: Comprehensive tests for local type definitions
+//               Tests type definitions inside functions
+
+module specs.stdlib.core.local_type_test;
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// LOCAL TYPE DEFINITION TEST SUITE
+// =============================================================================
+//
+// Issue Reference: docs/audit.md Section 4.1
+//
+// This suite tests local type definitions - types defined inside functions.
+// Local types should be visible within their enclosing scope and usable
+// for creating values and in type annotations.
+//
+// Current Status: Testing current behavior and expected functionality.
+
+// -----------------------------------------------------------------------------
+// Section 1: Local Record Type Definition
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_record_type() {
+    // Define a local record type
+    type LocalPoint is { x: Int, y: Int };
+
+    // Use the local type
+    let p: LocalPoint = LocalPoint { x: 10, y: 20 };
+
+    assert_eq(p.x, 10);
+    assert_eq(p.y, 20);
+}
+
+@test
+fn test_local_record_with_methods() {
+    type LocalRect is { width: Int, height: Int };
+
+    // Local function using local type
+    fn area(r: &LocalRect) -> Int {
+        r.width * r.height
+    }
+
+    let rect = LocalRect { width: 5, height: 10 };
+    assert_eq(area(&rect), 50);
+}
+
+// -----------------------------------------------------------------------------
+// Section 2: Local Variant Type Definition
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_variant_type() {
+    // Define a local variant type
+    type LocalOption is Some(Int) | None;
+
+    let some_val: LocalOption = Some(42);
+    let none_val: LocalOption = None;
+
+    match some_val {
+        Some(v) => assert_eq(v, 42),
+        None => assert(false),
+    }
+
+    assert(none_val is None);
+}
+
+@test
+fn test_local_enum_variant() {
+    type Color is Red | Green | Blue;
+
+    let c: Color = Green;
+
+    assert(c is Green);
+}
+
+@test
+fn test_local_variant_with_data() {
+    type Shape is
+        | Circle(Float)
+        | Rectangle { width: Float, height: Float }
+        | Point;
+
+    let circle: Shape = Circle(5.0);
+    let rect: Shape = Rectangle { width: 10.0, height: 20.0 };
+    let point: Shape = Point;
+
+    match circle {
+        Circle(r) => assert(r > 4.9 && r < 5.1),
+        _ => assert(false),
+    }
+
+    match rect {
+        Rectangle { width, height } => {
+            assert(width > 9.9 && width < 10.1);
+            assert(height > 19.9 && height < 20.1);
+        },
+        _ => assert(false),
+    }
+
+    assert(point is Point);
+}
+
+// -----------------------------------------------------------------------------
+// Section 3: Local Newtype Definition
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_newtype() {
+    // Newtype wrapping an Int
+    type UserId is (Int);
+
+    let id: UserId = UserId(42);
+
+    // Access inner value
+    match id {
+        UserId(n) => assert_eq(n, 42),
+    }
+}
+
+@test
+fn test_local_newtype_wrapper() {
+    type Meters is (Float);
+    type Kilometers is (Float);
+
+    let distance_m: Meters = Meters(1000.0);
+    let distance_km: Kilometers = Kilometers(1.0);
+
+    // Type safety: can't mix Meters and Kilometers
+    fn add_meters(a: Meters, b: Meters) -> Meters {
+        match (a, b) {
+            (Meters(x), Meters(y)) => Meters(x + y),
+        }
+    }
+
+    let total = add_meters(distance_m, Meters(500.0));
+    match total {
+        Meters(m) => assert(m > 1499.9 && m < 1500.1),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 4: Nested Local Types
+// -----------------------------------------------------------------------------
+
+@test
+fn test_nested_local_types() {
+    type Outer is { inner: Inner };
+    type Inner is { value: Int };
+
+    let obj: Outer = Outer {
+        inner: Inner { value: 42 },
+    };
+
+    assert_eq(obj.inner.value, 42);
+}
+
+@test
+fn test_local_type_in_nested_function() {
+    fn outer() -> Int {
+        type LocalData is { x: Int };
+
+        fn inner(d: LocalData) -> Int {
+            d.x * 2
+        }
+
+        let data = LocalData { x: 21 };
+        inner(data)
+    }
+
+    assert_eq(outer(), 42);
+}
+
+// -----------------------------------------------------------------------------
+// Section 5: Local Generic Type Definition
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_generic_type() {
+    // Generic wrapper type
+    type Wrapper<T> is { value: T };
+
+    let int_wrapper: Wrapper<Int> = Wrapper { value: 42 };
+    let text_wrapper: Wrapper<Text> = Wrapper { value: "hello" };
+
+    assert_eq(int_wrapper.value, 42);
+    assert_eq(text_wrapper.value, "hello");
+}
+
+@test
+fn test_local_generic_variant() {
+    type LocalResult<T, E> is Ok(T) | Err(E);
+
+    let success: LocalResult<Int, Text> = Ok(100);
+    let failure: LocalResult<Int, Text> = Err("failed");
+
+    match success {
+        Ok(v) => assert_eq(v, 100),
+        Err(_) => assert(false),
+    }
+
+    match failure {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "failed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 6: Local Type with Implement Block
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_type_with_implement() {
+    type Counter is { value: Int };
+
+    implement Counter {
+        fn new() -> Counter {
+            Counter { value: 0 }
+        }
+
+        fn increment(&mut self) {
+            self.value = self.value + 1;
+        }
+
+        fn get(&self) -> Int {
+            self.value
+        }
+    }
+
+    let mut counter = Counter.new();
+    counter.increment();
+    counter.increment();
+    counter.increment();
+
+    assert_eq(counter.get(), 3);
+}
+
+// -----------------------------------------------------------------------------
+// Section 7: Local Type Shadowing
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_type_shadowing_outer() {
+    // Define a module-level type used in outer scope
+    type Data is { x: Int };
+
+    fn inner_scope() -> Int {
+        // Shadow with a different local type
+        type Data is { x: Int, y: Int };
+
+        let d: Data = Data { x: 10, y: 20 };
+        d.x + d.y
+    }
+
+    // Outer type still has only x
+    let outer_data: Data = Data { x: 42 };
+    let inner_result = inner_scope();
+
+    assert_eq(outer_data.x, 42);
+    assert_eq(inner_result, 30);
+}
+
+// -----------------------------------------------------------------------------
+// Section 8: Local Type in Control Flow
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_type_in_if_block() {
+    let condition = true;
+
+    let result = if condition {
+        type TrueResult is { success: Bool, value: Int };
+        let r = TrueResult { success: true, value: 100 };
+        r.value
+    } else {
+        0
+    };
+
+    assert_eq(result, 100);
+}
+
+@test
+fn test_local_type_in_match_arm() {
+    let variant = Some(42);
+
+    let result = match variant {
+        Some(n) => {
+            type Computed is { original: Int, doubled: Int };
+            let c = Computed { original: n, doubled: n * 2 };
+            c.doubled
+        },
+        None => 0,
+    };
+
+    assert_eq(result, 84);
+}
+
+// -----------------------------------------------------------------------------
+// Section 9: Local Type with Functions
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_type_as_function_param() {
+    type Request is { method: Text, path: Text };
+
+    fn process_request(req: Request) -> Text {
+        f"{req.method} {req.path}"
+    }
+
+    let req = Request { method: "GET", path: "/api/users" };
+    let result = process_request(req);
+
+    assert_eq(result, "GET /api/users");
+}
+
+@test
+fn test_local_type_as_function_return() {
+    type Response is { status: Int, body: Text };
+
+    fn create_response(status: Int, body: Text) -> Response {
+        Response { status, body }
+    }
+
+    let resp = create_response(200, "OK");
+
+    assert_eq(resp.status, 200);
+    assert_eq(resp.body, "OK");
+}
+
+// -----------------------------------------------------------------------------
+// Section 10: Local Type with Collections
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_type_in_list() {
+    type Item is { id: Int, name: Text };
+
+    let items: List<Item> = [
+        Item { id: 1, name: "First" },
+        Item { id: 2, name: "Second" },
+        Item { id: 3, name: "Third" },
+    ];
+
+    assert_eq(items.len(), 3);
+
+    match items.get(0) {
+        Some(item) => assert_eq(item.id, 1),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_local_type_in_array() {
+    type Pair is { first: Int, second: Int };
+
+    let pairs: [Pair; 3] = [
+        Pair { first: 1, second: 2 },
+        Pair { first: 3, second: 4 },
+        Pair { first: 5, second: 6 },
+    ];
+
+    assert_eq(pairs[0].first, 1);
+    assert_eq(pairs[2].second, 6);
+}
+
+// -----------------------------------------------------------------------------
+// Section 11: Local Type Unit/Empty Definition
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_unit_type() {
+    type Signal is ();
+
+    let s: Signal = ();
+
+    // Unit type comparison
+    let s2: Signal = ();
+    // s == s2 should be true (unit types are equal)
+}
+
+@test
+fn test_local_marker_type() {
+    type Marker is ();
+
+    fn process_with_marker(_marker: Marker) -> Int {
+        42
+    }
+
+    let result = process_with_marker(());
+    assert_eq(result, 42);
+}
+
+// -----------------------------------------------------------------------------
+// Section 12: Local Type Visibility Scope
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_type_not_visible_outside_scope() {
+    fn scope_a() -> Int {
+        type LocalA is { value: Int };
+        let a = LocalA { value: 10 };
+        a.value
+    }
+
+    fn scope_b() -> Int {
+        // LocalA from scope_a is not visible here
+        type LocalA is { value: Int, extra: Int };  // Different type with same name
+        let a = LocalA { value: 20, extra: 5 };
+        a.value + a.extra
+    }
+
+    assert_eq(scope_a(), 10);
+    assert_eq(scope_b(), 25);
+}
+
+// -----------------------------------------------------------------------------
+// Section 13: Local Type with References
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_type_with_reference_field() {
+    type Container<'a> is { data: &'a Int };
+
+    let value = 42;
+    let container: Container = Container { data: &value };
+
+    assert_eq(*container.data, 42);
+}
+
+@test
+fn test_local_type_reference_parameter() {
+    type Data is { x: Int };
+
+    fn read_data(data: &Data) -> Int {
+        data.x
+    }
+
+    fn modify_data(data: &mut Data) {
+        data.x = data.x * 2;
+    }
+
+    let mut d = Data { x: 21 };
+    // Scope immutable borrow
+    {
+        let val = read_data(&d);
+        assert_eq(val, 21);
+    }
+
+    // Now take mutable borrow
+    modify_data(&mut d);
+
+    // And read again
+    {
+        let val = read_data(&d);
+        assert_eq(val, 42);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 14: Complex Local Type Composition
+// -----------------------------------------------------------------------------
+
+@test
+fn test_complex_local_type_composition() {
+    type Id is (Int);
+    type Name is { first: Text, last: Text };
+    type Person is { id: Id, name: Name };
+
+    let person = Person {
+        id: Id(1),
+        name: Name { first: "John", last: "Doe" },
+    };
+
+    match person.id {
+        Id(n) => assert_eq(n, 1),
+    }
+
+    assert_eq(person.name.first, "John");
+    assert_eq(person.name.last, "Doe");
+}
+
+// -----------------------------------------------------------------------------
+// Section 15: Local Type Pattern Matching
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_type_pattern_destructuring() {
+    type Coord is { x: Int, y: Int, z: Int };
+
+    let coord = Coord { x: 1, y: 2, z: 3 };
+
+    // Destructure in let
+    let Coord { x, y, z } = coord;
+    assert_eq(x, 1);
+    assert_eq(y, 2);
+    assert_eq(z, 3);
+}
+
+@test
+fn test_local_variant_pattern_exhaustive() {
+    type Status is Pending | Running | Completed | Failed(Text);
+
+    fn describe_status(status: Status) -> Text {
+        match status {
+            Pending => "waiting to start",
+            Running => "in progress",
+            Completed => "finished successfully",
+            Failed(reason) => f"failed: {reason}",
+        }
+    }
+
+    assert_eq(describe_status(Pending), "waiting to start");
+    assert_eq(describe_status(Running), "in progress");
+    assert_eq(describe_status(Completed), "finished successfully");
+    assert_eq(describe_status(Failed("timeout")), "failed: timeout");
+}

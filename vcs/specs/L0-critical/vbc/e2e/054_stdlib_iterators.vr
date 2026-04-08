@@ -1,0 +1,442 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, stdlib, iterators
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: Iterator composition via function chaining.
+// Tests map, filter, fold, zip, enumerate, take_while, scan, chain.
+
+// ============================================================================
+// 8-element flat array
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// "Pair" for zip / enumerate results
+// ============================================================================
+
+type Pair8 is {
+    a0: Int, b0: Int, a1: Int, b1: Int,
+    a2: Int, b2: Int, a3: Int, b3: Int,
+    a4: Int, b4: Int, a5: Int, b5: Int,
+    a6: Int, b6: Int, a7: Int, b7: Int
+};
+
+fn pair8_zeros() -> Pair8 {
+    Pair8 {
+        a0: 0, b0: 0, a1: 0, b1: 0, a2: 0, b2: 0, a3: 0, b3: 0,
+        a4: 0, b4: 0, a5: 0, b5: 0, a6: 0, b6: 0, a7: 0, b7: 0
+    }
+}
+
+fn pair8_get_a(p: Pair8, i: Int) -> Int {
+    if i == 0 { p.a0 } else if i == 1 { p.a1 }
+    else if i == 2 { p.a2 } else if i == 3 { p.a3 }
+    else if i == 4 { p.a4 } else if i == 5 { p.a5 }
+    else if i == 6 { p.a6 } else { p.a7 }
+}
+
+fn pair8_get_b(p: Pair8, i: Int) -> Int {
+    if i == 0 { p.b0 } else if i == 1 { p.b1 }
+    else if i == 2 { p.b2 } else if i == 3 { p.b3 }
+    else if i == 4 { p.b4 } else if i == 5 { p.b5 }
+    else if i == 6 { p.b6 } else { p.b7 }
+}
+
+fn pair8_set(p: Pair8, i: Int, a: Int, b: Int) -> Pair8 {
+    Pair8 {
+        a0: if i == 0 { a } else { p.a0 }, b0: if i == 0 { b } else { p.b0 },
+        a1: if i == 1 { a } else { p.a1 }, b1: if i == 1 { b } else { p.b1 },
+        a2: if i == 2 { a } else { p.a2 }, b2: if i == 2 { b } else { p.b2 },
+        a3: if i == 3 { a } else { p.a3 }, b3: if i == 3 { b } else { p.b3 },
+        a4: if i == 4 { a } else { p.a4 }, b4: if i == 4 { b } else { p.b4 },
+        a5: if i == 5 { a } else { p.a5 }, b5: if i == 5 { b } else { p.b5 },
+        a6: if i == 6 { a } else { p.a6 }, b6: if i == 6 { b } else { p.b6 },
+        a7: if i == 7 { a } else { p.a7 }, b7: if i == 7 { b } else { p.b7 }
+    }
+}
+
+// ============================================================================
+// Map: apply fn to each element
+// ============================================================================
+
+fn iter_map_square(a: Arr8, len: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        let v = arr8_get(a, i);
+        result = arr8_set(result, i, v * v);
+        i = i + 1;
+    }
+    result
+}
+
+fn iter_map_negate(a: Arr8, len: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        result = arr8_set(result, i, -arr8_get(a, i));
+        i = i + 1;
+    }
+    result
+}
+
+fn iter_map_add(a: Arr8, len: Int, offset: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        result = arr8_set(result, i, arr8_get(a, i) + offset);
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Filter: select matching elements, returns (result_array, count)
+// ============================================================================
+
+type FilterOutcome is { arr: Arr8, count: Int };
+
+fn iter_filter_positive(a: Arr8, len: Int) -> FilterOutcome {
+    let mut result = arr8_zeros();
+    let mut j = 0;
+    let mut i = 0;
+    while i < len {
+        if arr8_get(a, i) > 0 {
+            result = arr8_set(result, j, arr8_get(a, i));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    FilterOutcome { arr: result, count: j }
+}
+
+fn iter_filter_even(a: Arr8, len: Int) -> FilterOutcome {
+    let mut result = arr8_zeros();
+    let mut j = 0;
+    let mut i = 0;
+    while i < len {
+        if arr8_get(a, i) % 2 == 0 {
+            result = arr8_set(result, j, arr8_get(a, i));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    FilterOutcome { arr: result, count: j }
+}
+
+// ============================================================================
+// Fold / reduce
+// ============================================================================
+
+fn iter_fold_sum(a: Arr8, len: Int) -> Int {
+    let mut acc = 0;
+    let mut i = 0;
+    while i < len {
+        acc = acc + arr8_get(a, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn iter_fold_product(a: Arr8, len: Int) -> Int {
+    let mut acc = 1;
+    let mut i = 0;
+    while i < len {
+        acc = acc * arr8_get(a, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn iter_fold_max(a: Arr8, len: Int) -> Int {
+    let mut mx = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        let v = arr8_get(a, i);
+        if v > mx { mx = v; }
+        i = i + 1;
+    }
+    mx
+}
+
+// ============================================================================
+// Zip: pair two arrays element-wise
+// ============================================================================
+
+fn iter_zip(a: Arr8, b: Arr8, len: Int) -> Pair8 {
+    let mut result = pair8_zeros();
+    let mut i = 0;
+    while i < len {
+        result = pair8_set(result, i, arr8_get(a, i), arr8_get(b, i));
+        i = i + 1;
+    }
+    result
+}
+
+// Dot product via zip + fold
+fn iter_zip_dot(a: Arr8, b: Arr8, len: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < len {
+        total = total + arr8_get(a, i) * arr8_get(b, i);
+        i = i + 1;
+    }
+    total
+}
+
+// ============================================================================
+// Enumerate: add index to each element
+// ============================================================================
+
+fn iter_enumerate(a: Arr8, len: Int) -> Pair8 {
+    let mut result = pair8_zeros();
+    let mut i = 0;
+    while i < len {
+        result = pair8_set(result, i, i, arr8_get(a, i));
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Take_while: take elements while predicate holds
+// ============================================================================
+
+fn iter_take_while_positive(a: Arr8, len: Int) -> FilterOutcome {
+    let mut result = arr8_zeros();
+    let mut i = 0;
+    let mut done = false;
+    while i < len && !done {
+        if arr8_get(a, i) > 0 {
+            result = arr8_set(result, i, arr8_get(a, i));
+            i = i + 1;
+        } else {
+            done = true;
+        }
+    }
+    FilterOutcome { arr: result, count: i }
+}
+
+// ============================================================================
+// Scan: running accumulation (like fold but keeps intermediates)
+// ============================================================================
+
+fn iter_scan_sum(a: Arr8, len: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut acc = 0;
+    let mut i = 0;
+    while i < len {
+        acc = acc + arr8_get(a, i);
+        result = arr8_set(result, i, acc);
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Chain: concatenate two arrays
+// ============================================================================
+
+fn iter_chain(a: Arr8, a_len: Int, b: Arr8, b_len: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut i = 0;
+    while i < a_len {
+        result = arr8_set(result, i, arr8_get(a, i));
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < b_len {
+        result = arr8_set(result, a_len + j, arr8_get(b, j));
+        j = j + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Composition: map then filter then fold
+// ============================================================================
+
+fn map_filter_fold_pipeline(a: Arr8, len: Int) -> Int {
+    // Step 1: Square each element
+    let squared = iter_map_square(a, len);
+    // Step 2: Filter those > 10
+    let mut filtered = arr8_zeros();
+    let mut fc = 0;
+    let mut i = 0;
+    while i < len {
+        if arr8_get(squared, i) > 10 {
+            filtered = arr8_set(filtered, fc, arr8_get(squared, i));
+            fc = fc + 1;
+        }
+        i = i + 1;
+    }
+    // Step 3: Sum the filtered
+    iter_fold_sum(filtered, fc)
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_map() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+
+    let sq = iter_map_square(a, 5);
+    assert_eq(arr8_get(sq, 0), 1);
+    assert_eq(arr8_get(sq, 1), 4);
+    assert_eq(arr8_get(sq, 2), 9);
+    assert_eq(arr8_get(sq, 3), 16);
+    assert_eq(arr8_get(sq, 4), 25);
+
+    let neg = iter_map_negate(a, 5);
+    assert_eq(arr8_get(neg, 0), -1);
+    assert_eq(arr8_get(neg, 4), -5);
+
+    let added = iter_map_add(a, 5, 10);
+    assert_eq(arr8_get(added, 0), 11);
+    assert_eq(arr8_get(added, 4), 15);
+}
+
+fn test_filter() {
+    let a = Arr8 { e0: -3, e1: 5, e2: -1, e3: 7, e4: -4, e5: 2, e6: 0, e7: 0 };
+    let pos = iter_filter_positive(a, 6);
+    assert_eq(pos.count, 3);
+    assert_eq(arr8_get(pos.arr, 0), 5);
+    assert_eq(arr8_get(pos.arr, 1), 7);
+    assert_eq(arr8_get(pos.arr, 2), 2);
+
+    let b = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let evens = iter_filter_even(b, 8);
+    assert_eq(evens.count, 4);
+    assert_eq(arr8_get(evens.arr, 0), 2);
+    assert_eq(arr8_get(evens.arr, 1), 4);
+    assert_eq(arr8_get(evens.arr, 2), 6);
+    assert_eq(arr8_get(evens.arr, 3), 8);
+}
+
+fn test_fold() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    assert_eq(iter_fold_sum(a, 5), 15);
+    assert_eq(iter_fold_product(a, 5), 120);
+    assert_eq(iter_fold_max(a, 5), 5);
+
+    let b = Arr8 { e0: -3, e1: 5, e2: -1, e3: 7, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(iter_fold_max(b, 4), 7);
+    assert_eq(iter_fold_sum(b, 4), 8);
+}
+
+fn test_zip() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 0, e5: 0, e6: 0, e7: 0 };
+
+    let zipped = iter_zip(a, b, 4);
+    assert_eq(pair8_get_a(zipped, 0), 1);
+    assert_eq(pair8_get_b(zipped, 0), 10);
+    assert_eq(pair8_get_a(zipped, 3), 4);
+    assert_eq(pair8_get_b(zipped, 3), 40);
+
+    // Dot product
+    let dot = iter_zip_dot(a, b, 4);
+    // 1*10 + 2*20 + 3*30 + 4*40 = 10+40+90+160 = 300
+    assert_eq(dot, 300);
+}
+
+fn test_enumerate() {
+    let a = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let en = iter_enumerate(a, 4);
+
+    assert_eq(pair8_get_a(en, 0), 0);
+    assert_eq(pair8_get_b(en, 0), 10);
+    assert_eq(pair8_get_a(en, 1), 1);
+    assert_eq(pair8_get_b(en, 1), 20);
+    assert_eq(pair8_get_a(en, 3), 3);
+    assert_eq(pair8_get_b(en, 3), 40);
+}
+
+fn test_take_while() {
+    let a = Arr8 { e0: 5, e1: 3, e2: 7, e3: -1, e4: 4, e5: 0, e6: 0, e7: 0 };
+    let tw = iter_take_while_positive(a, 5);
+    assert_eq(tw.count, 3);
+    assert_eq(arr8_get(tw.arr, 0), 5);
+    assert_eq(arr8_get(tw.arr, 1), 3);
+    assert_eq(arr8_get(tw.arr, 2), 7);
+}
+
+fn test_scan() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let scanned = iter_scan_sum(a, 5);
+    assert_eq(arr8_get(scanned, 0), 1);
+    assert_eq(arr8_get(scanned, 1), 3);
+    assert_eq(arr8_get(scanned, 2), 6);
+    assert_eq(arr8_get(scanned, 3), 10);
+    assert_eq(arr8_get(scanned, 4), 15);
+}
+
+fn test_chain() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 4, e1: 5, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let chained = iter_chain(a, 3, b, 2);
+    assert_eq(arr8_get(chained, 0), 1);
+    assert_eq(arr8_get(chained, 1), 2);
+    assert_eq(arr8_get(chained, 2), 3);
+    assert_eq(arr8_get(chained, 3), 4);
+    assert_eq(arr8_get(chained, 4), 5);
+    assert_eq(iter_fold_sum(chained, 5), 15);
+}
+
+fn test_pipeline() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    // Square: [1, 4, 9, 16, 25], filter > 10: [16, 25], sum = 41
+    let result = map_filter_fold_pipeline(a, 5);
+    assert_eq(result, 41);
+
+    let b = Arr8 { e0: 1, e1: 1, e2: 1, e3: 1, e4: 0, e5: 0, e6: 0, e7: 0 };
+    // Square: [1, 1, 1, 1], filter > 10: [], sum = 0
+    let result2 = map_filter_fold_pipeline(b, 4);
+    assert_eq(result2, 0);
+}
+
+fn main() -> Int {
+    test_map();
+    test_filter();
+    test_fold();
+    test_zip();
+    test_enumerate();
+    test_take_while();
+    test_scan();
+    test_chain();
+    test_pipeline();
+    print("[OK] 054_stdlib_iterators");
+    0
+}

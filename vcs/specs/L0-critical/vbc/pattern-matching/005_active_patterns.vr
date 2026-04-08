@@ -1,0 +1,138 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, pattern-matching, active-patterns, variant-returning, total, partial
+// @timeout: 5000
+// @expect: pass
+// @expected-exit: 0
+//
+// Test: Active pattern matching at VBC interpreter level
+// Verifies total, partial, and variant-returning active patterns
+//
+// Grammar reference: grammar/verum.ebnf line 1817 (pattern_def)
+// Pattern invocation: grammar/verum.ebnf line 1752 (active_pattern)
+//
+// Syntax:
+//   Declaration: pattern Name(params) -> ReturnType = body;
+//   Invocation:  Name()          - total, no params, no bindings
+//                Name()(binding) - total/partial with bindings
+//                Name(p1, p2)()  - parameterized, no bindings
+
+// =============================================================================
+// Type definitions
+// =============================================================================
+
+type Maybe<T> is None | Some(T);
+
+type NumberClass is
+    Zero
+    | Positive(Int)
+    | Negative(Int)
+    | Even(Int)
+    | Odd(Int);
+
+// =============================================================================
+// Section 1: Total Active Patterns (always succeed)
+// =============================================================================
+
+// Total active pattern: categorize any integer
+pattern Classify(n: Int) -> NumberClass =
+    if n == 0 { Zero }
+    else if n > 0 { Positive(n) }
+    else { Negative(n) };
+
+fn describe_number(n: Int) -> Text =
+    match n {
+        Classify()(Zero) => "zero",
+        Classify()(Positive(p)) => f"positive: {p}",
+        Classify()(Negative(neg)) => f"negative: {neg}"
+    };
+
+fn test_total_active_patterns() {
+    assert_eq(describe_number(0), "zero");
+    assert_eq(describe_number(42), "positive: 42");
+    assert_eq(describe_number(-10), "negative: -10");
+    assert_eq(describe_number(1), "positive: 1");
+    assert_eq(describe_number(-1), "negative: -1");
+}
+
+// =============================================================================
+// Section 2: Partial Active Patterns (may fail)
+// =============================================================================
+
+// Partial active pattern: check if even
+pattern IsEven(n: Int) -> Maybe<Int> =
+    if n % 2 == 0 { Some(n / 2) } else { None };
+
+fn describe_even(n: Int) -> Text =
+    match n {
+        IsEven()(half) => f"even, half is {half}",
+        _ => "odd"
+    };
+
+fn test_partial_active_patterns() {
+    assert_eq(describe_even(10), "even, half is 5");
+    assert_eq(describe_even(7), "odd");
+    assert_eq(describe_even(0), "even, half is 0");
+    assert_eq(describe_even(-4), "even, half is -2");
+}
+
+// =============================================================================
+// Section 3: Active Patterns with Guards
+// =============================================================================
+
+pattern Parity(n: Int) -> NumberClass =
+    if n % 2 == 0 { Even(n) } else { Odd(n) };
+
+fn describe_parity_and_sign(n: Int) -> Text =
+    match n {
+        Parity()(Even(e)) if e > 0 => f"positive even: {e}",
+        Parity()(Even(e)) if e < 0 => f"negative even: {e}",
+        Parity()(Even(0)) => "zero (even)",
+        Parity()(Odd(o)) if o > 0 => f"positive odd: {o}",
+        Parity()(Odd(o)) if o < 0 => f"negative odd: {o}",
+        _ => "unreachable"
+    };
+
+fn test_active_patterns_with_guards() {
+    assert_eq(describe_parity_and_sign(4), "positive even: 4");
+    assert_eq(describe_parity_and_sign(-6), "negative even: -6");
+    assert_eq(describe_parity_and_sign(0), "zero (even)");
+    assert_eq(describe_parity_and_sign(7), "positive odd: 7");
+    assert_eq(describe_parity_and_sign(-3), "negative odd: -3");
+}
+
+// =============================================================================
+// Section 4: Combining Multiple Active Patterns
+// =============================================================================
+
+fn complex_classification(n: Int) -> Text =
+    match n {
+        Classify()(Zero) => "zero",
+        Classify()(Positive(p)) if p < 10 => f"small positive: {p}",
+        Classify()(Negative(neg)) if neg > -10 => f"small negative: {neg}",
+        Parity()(Even(e)) => f"even: {e}",
+        Parity()(Odd(o)) => f"odd: {o}",
+        _ => "other"
+    };
+
+fn test_combined_active_patterns() {
+    assert_eq(complex_classification(0), "zero");
+    assert_eq(complex_classification(5), "small positive: 5");
+    assert_eq(complex_classification(-5), "small negative: -5");
+    assert_eq(complex_classification(24), "even: 24");
+    assert_eq(complex_classification(17), "odd: 17");
+}
+
+// =============================================================================
+// Main - run all tests
+// =============================================================================
+
+fn main() {
+    test_total_active_patterns();
+    test_partial_active_patterns();
+    test_active_patterns_with_guards();
+    test_combined_active_patterns();
+
+    print("All active pattern tests passed!");
+}

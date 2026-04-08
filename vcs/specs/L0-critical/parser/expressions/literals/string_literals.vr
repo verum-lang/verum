@@ -1,0 +1,216 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, string
+
+// String literal expressions
+
+// ============================================================================
+// SECTION 1: Simple Strings
+// ============================================================================
+
+fn test_simple_strings() {
+    let empty = "";
+    let hello = "hello";
+    let world = "world";
+    let sentence = "Hello, World!";
+}
+
+fn test_strings_with_spaces() {
+    let with_spaces = "hello world";
+    let padded = "  padded  ";
+    let tabs = "tab\there";
+}
+
+// ============================================================================
+// SECTION 2: Escape Sequences
+// ============================================================================
+
+fn test_basic_escape_sequences() {
+    let newline = "line1\nline2";
+    let tab = "col1\tcol2";
+    let carriage = "old\rmac";
+    let backslash = "path\\to\\file";
+    let double_quote = "He said \"hello\"";
+    let single_q = "It\'s okay";
+}
+
+fn test_hex_escapes() {
+    let null_char = "\x00";
+    let bell = "\x07";
+    let space = "\x20";
+    let tilde = "\x7E";
+}
+
+fn test_unicode_escapes() {
+    let snowflake = "\u{2744}";
+    let heart = "\u{2665}";
+    let emoji = "\u{1F600}";
+    let chinese = "\u{4E2D}\u{6587}";
+}
+
+// ============================================================================
+// SECTION 3: Raw Strings
+// ============================================================================
+
+fn test_raw_strings() {
+    // Verum uses triple-quoted strings for raw/no-escape content
+    let raw = """no\escape\sequences""";
+    let raw_quotes = """contains "quotes" """;
+    let raw_with_hash = """contains # and "quotes" """;
+}
+
+// ============================================================================
+// SECTION 4: Multiline Strings
+// ============================================================================
+
+fn test_multiline_strings() {
+    let multi = """
+    This is a
+    multiline string
+    with multiple lines
+""";
+
+    let multi_indent = """
+    First line
+    Second line
+    Third line
+""";
+}
+
+// ============================================================================
+// SECTION 5: Format Strings
+// ============================================================================
+
+fn test_basic_format_strings() {
+    let name = "Alice";
+    let age = 30;
+    let greeting = f"Hello, {name}!";
+    let info = f"Name: {name}, Age: {age}";
+    let computed = f"Sum: {1 + 2 + 3}";
+}
+
+fn test_format_with_expressions() {
+    fn calculate() -> Int { 42 }
+    let text = "hello";
+    let x = 5;
+
+    let formatted = f"Value: {calculate()}";
+    let method = f"Length: {text.len()}";
+    let nested = f"Result: {if x > 0 { "positive" } else { "negative" }}";
+}
+
+// ============================================================================
+// SECTION 6: Tagged Strings
+// ============================================================================
+
+fn test_sql_safe_strings() {
+    let user_id = 1;
+    let msg = "hello";
+
+    let query = sql#"SELECT * FROM users WHERE id = {user_id}";
+    let insert = sql#"INSERT INTO logs (message) VALUES ({msg})";
+}
+
+fn test_html_safe_strings() {
+    let content = "Hello";
+    let text = "World";
+
+    let html_str = html#"<p>{content}</p>";
+    let escaped = html#"<div class='item'>{text}</div>";
+}
+
+fn test_regex_strings() {
+    let pattern = rx#"[a-zA-Z]+";
+    let email = rx#"[\w.]+@[\w.]+";
+}
+
+// ============================================================================
+// SECTION 7: String Operations
+// ============================================================================
+
+fn test_string_concatenation() {
+    let combined = "Hello" + " " + "World";
+    let s1 = "a";
+    let s2 = "b";
+    let s3 = "c";
+    let s4 = "d";
+    let multi_concat = s1 + s2 + s3 + s4;
+}
+
+fn test_string_methods() {
+    let upper = "hello".to_uppercase();
+    let lower = "WORLD".to_lowercase();
+    let trimmed = "  text  ".trim();
+}
+
+// ============================================================================
+// SECTION 8: Strings in Contexts
+// ============================================================================
+
+fn greet(name: Text) -> Text {
+    f"Hello, {name}!"
+}
+
+fn test_string_in_function_call() {
+    let message = greet("Bob");
+}
+
+fn test_string_in_arrays() {
+    let words = ["one", "two", "three"];
+    let lines = ["first\n", "second\n", "third\n"];
+}
+
+fn test_string_in_struct() {
+    type Person is { name: Text, greeting: Text };
+    let person = Person {
+        name: "Charlie",
+        greeting: "Hi there!",
+    };
+}
+
+fn test_string_in_match() {
+    let command = "start";
+
+    fn start() -> Int { 1 }
+    fn stop() -> Int { 2 }
+    fn help() -> Int { 3 }
+    fn unrecognized() -> Int { 0 }
+
+    match command {
+        "start" => start(),
+        "stop" => stop(),
+        "help" => help(),
+        _ => unrecognized(),
+    };
+}
+
+// ============================================================================
+// SECTION 9: String Comparisons
+// ============================================================================
+
+fn test_empty_string_checks() {
+    let text = "hello";
+    let is_empty = text == "";
+    let not_empty = text != "";
+    let len_check = text.len() == 0;
+}
+
+fn test_string_with_length_specification() {
+    let fixed: [Char; 5] = "hello".to_chars();
+}
+
+// ============================================================================
+// SECTION 10: String Edge Cases
+// ============================================================================
+
+fn test_single_char_strings() {
+    let single = "a";
+    let single_escape = "\n";
+    let single_unicode = "\u{0041}";
+}
+
+fn test_long_strings() {
+    let long = "This is a longer string with many words and characters to test parsing of extended text content";
+    let repeated = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+}

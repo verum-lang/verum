@@ -1,0 +1,164 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, rabin, fingerprint, rolling_hash, substring_matching, hashing
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Rabin fingerprint rolling hash for substring matching.
+// Uses base B and modulus M.  The fingerprint of s[i..i+L) is:
+//   H = (s[i]*B^(L-1) + s[i+1]*B^(L-2) + ... + s[i+L-1]) mod M
+// Rolling update:
+//   H_new = (H - s[i]*B^(L-1)) * B + s[i+L]  (all mod M)
+// Strings encoded as integer arrays [Int; 32].
+// Searches for ALL occurrences of pattern in text; stores match starts in
+// matches[] and count in nm[0].
+//
+// B = 31, M = 1_000_003 (prime).
+
+fn rabin_base_pow(base: Int, exp: Int, modm: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modm;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b) % modm; }
+        b = (b * b) % modm;
+        e = e / 2;
+    }
+    result
+}
+
+fn rabin_hash(s: [Int; 32], start: Int, len: Int, base: Int, modm: Int) -> Int {
+    let mut h = 0;
+    let mut i = 0;
+    while i < len {
+        h = (h * base + s[start + i]) % modm;
+        i = i + 1;
+    }
+    h
+}
+
+// Find all occurrences of pattern (length plen) in text (length tlen).
+// Returns number of matches; match start indices stored in matches[].
+fn rabin_search(text: [Int; 32], tlen: Int,
+                pat: [Int; 32], plen: Int,
+                base: Int, modm: Int,
+                matches: [Int; 16], nm: [Int; 8]) -> Int {
+    nm[0] = 0;
+    if plen > tlen { return 0; }
+    let ph = rabin_hash(pat, 0, plen, base, modm);
+    let mut th = rabin_hash(text, 0, plen, base, modm);
+    // highest power: base^(plen-1) mod M
+    let hp = rabin_base_pow(base, plen - 1, modm);
+    // Check first window
+    if th == ph {
+        // Naive verify
+        let mut ok = 1;
+        let mut k = 0;
+        while k < plen {
+            if text[k] != pat[k] { ok = 0; }
+            k = k + 1;
+        }
+        if ok == 1 { matches[nm[0]] = 0; nm[0] = nm[0] + 1; }
+    }
+    let mut i = 1;
+    while i <= tlen - plen {
+        // Roll: remove text[i-1], add text[i+plen-1]
+        th = (th - (text[i - 1] * hp) % modm + modm) % modm;
+        th = (th * base + text[i + plen - 1]) % modm;
+        if th == ph {
+            // Verify
+            let mut ok2 = 1;
+            let mut k2 = 0;
+            while k2 < plen {
+                if text[i + k2] != pat[k2] { ok2 = 0; }
+                k2 = k2 + 1;
+            }
+            if ok2 == 1 { matches[nm[0]] = i; nm[0] = nm[0] + 1; }
+        }
+        i = i + 1;
+    }
+    nm[0]
+}
+
+fn test_single_occurrence() {
+    // text = [1,2,3,4,5], pat = [3,4]. Match at index 2.
+    let mut text = [1,2,3,4,5,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut pat  = [3,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut matches = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nm = [0,0,0,0,0,0,0,0];
+    let count = rabin_search(text, 5, pat, 2, 31, 1000003, matches, nm);
+    assert_eq(count, 1);
+    assert_eq(matches[0], 2);
+    print("single_occurrence: ok");
+}
+
+fn test_multiple_occurrences() {
+    // text = [1,2,1,2,1], pat = [1,2]. Matches at 0, 2.
+    let mut text = [1,2,1,2,1,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut pat  = [1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut matches = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nm = [0,0,0,0,0,0,0,0];
+    let count = rabin_search(text, 5, pat, 2, 31, 1000003, matches, nm);
+    assert_eq(count, 2);
+    assert_eq(matches[0], 0);
+    assert_eq(matches[1], 2);
+    print("multiple_occurrences: ok");
+}
+
+fn test_no_occurrence() {
+    // text = [1,2,3], pat = [4,5]. No match.
+    let mut text = [1,2,3,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut pat  = [4,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut matches = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nm = [0,0,0,0,0,0,0,0];
+    let count = rabin_search(text, 3, pat, 2, 31, 1000003, matches, nm);
+    assert_eq(count, 0);
+    print("no_occurrence: ok");
+}
+
+fn test_hash_consistency() {
+    // Hash of [5,6,7] with base=31, mod=1000003.
+    // H = (5*31 + 6)*31 + 7 = (155 + 6)*31 + 7 = 161*31 + 7 = 4991 + 7 = 4998.
+    let mut s = [5,6,7,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let h = rabin_hash(s, 0, 3, 31, 1000003);
+    assert_eq(h, 4998);
+    // Power: 31^2 mod 1000003 = 961.
+    let p2 = rabin_base_pow(31, 2, 1000003);
+    assert_eq(p2, 961);
+    // Power: 31^0 = 1.
+    let p0 = rabin_base_pow(31, 0, 1000003);
+    assert_eq(p0, 1);
+    print("hash_consistency: ok");
+}
+
+fn test_full_text_match() {
+    // Pattern equals full text: one match at index 0.
+    let mut text = [7,8,9,10,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut pat  = [7,8,9,10,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut matches = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut nm = [0,0,0,0,0,0,0,0];
+    let count = rabin_search(text, 4, pat, 4, 31, 1000003, matches, nm);
+    assert_eq(count, 1);
+    assert_eq(matches[0], 0);
+    print("full_text_match: ok");
+}
+
+fn main() -> Int {
+    test_single_occurrence();
+    test_multiple_occurrences();
+    test_no_occurrence();
+    test_hash_consistency();
+    test_full_text_match();
+    print("[OK] 572_interp_rabin_fingerprint");
+    0
+}

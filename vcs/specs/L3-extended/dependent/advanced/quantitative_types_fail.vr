@@ -1,0 +1,43 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, linear-types, quantitative, advanced, error
+// @expected-error: E400 "Type mismatch"
+
+/// Quantitative types - failure cases
+
+/// Affine file handle
+type affine FileHandle is {
+    path: Text,
+    fd: Int,
+};
+
+/// Resource type
+type Resource<T> is {
+    value: T,
+    count: Int,
+};
+
+/// ERROR: Wrong field type in Resource
+fn resource_wrong() -> Resource<Int> {
+    Resource { value: "wrong", count: 0 }  // ERROR: Text != Int
+}
+
+/// ERROR: Wrong return type
+fn handle_wrong() -> FileHandle {
+    42  // ERROR: Int != FileHandle
+}
+
+/// Linear pair
+type LinPair<A, B> is { fst: A, snd: B };
+
+/// ERROR: Wrong field types in pair
+fn pair_wrong() -> LinPair<Int, Text> {
+    LinPair { fst: "wrong", snd: 42 }  // ERROR: Text != Int, Int != Text
+}
+
+fn main() {
+    let _ = resource_wrong();
+    let _ = handle_wrong();
+    let _ = pair_wrong();
+}

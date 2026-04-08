@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, closure, arrow, error
+// @description: Closure with return type missing -> before body
+// @expected-error: E010
+
+fn test() {
+    let f = |x| Int x;  // Missing -> before return type
+}

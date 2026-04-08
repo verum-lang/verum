@@ -1,0 +1,279 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, abi, varargs, variadic-functions
+// @timeout: 5000
+
+/// FFI Variadic Functions (varargs)
+///
+/// Demonstrates calling and exporting variadic functions
+/// for C interoperability.
+
+type c_int is i32;
+type c_char is i8;
+type c_double is f64;
+type c_void is ();
+
+// ------------------------------------------------------------
+// Calling variadic C functions
+// ------------------------------------------------------------
+
+ffi libc {
+    /// printf - variadic function
+    @extern("C", variadic)
+    fn printf(format: *const c_char, ...) -> c_int;
+
+    /// sprintf - variadic into buffer
+    @extern("C", variadic)
+    fn sprintf(buf: *mut c_char, format: *const c_char, ...) -> c_int;
+
+    /// snprintf - safe sprintf with length
+    @extern("C", variadic)
+    fn snprintf(
+        buf: *mut c_char,
+        size: usize,
+        format: *const c_char,
+        ...
+    ) -> c_int;
+
+    /// sscanf - variadic input parsing
+    @extern("C", variadic)
+    fn sscanf(str: *const c_char, format: *const c_char, ...) -> c_int;
+}
+
+/// Safe printf wrapper
+fn print_formatted(format: &Text, args: &[FormatArg]) {
+    // Convert format and call printf
+    let c_format = format.to_c_string();
+
+    unsafe {
+        // Use type-safe dispatch based on argument types
+        args.match {
+            [] => printf(c_format.as_ptr()),
+            [FmtInt(a)] =>
+                printf(c_format.as_ptr(), a),
+            [FmtFloat(a)] =>
+                printf(c_format.as_ptr(), a),
+            [FmtStr(a)] =>
+                printf(c_format.as_ptr(), a.to_c_string().as_ptr()),
+            [FmtInt(a), FmtInt(b)] =>
+                printf(c_format.as_ptr(), a, b),
+            [FmtInt(a), FmtFloat(b)] =>
+                printf(c_format.as_ptr(), a, b),
+            // ... more patterns as needed
+            _ => panic("Unsupported format argument combination"),
+        };
+    }
+}
+
+type FormatArg is
+    | FmtInt(c_int)
+    | FmtFloat(c_double)
+    | FmtStr(Text)
+    | FmtPtr(*const c_void);
+
+type FmtError is
+    | UnsupportedArgs
+    | FormatError
+    | BufferTooSmall { needed: usize };
+
+/// Safe snprintf wrapper
+fn format_into(buf: &mut [c_char], format: &Text, args: &[FormatArg]) -> Result<usize, FmtError> {
+    let c_format = format.to_c_string();
+
+    let written = unsafe {
+        // Dispatch based on args
+        args.match {
+            [] =>
+                snprintf(buf.as_mut_ptr(), buf.len(), c_format.as_ptr()),
+            [FmtInt(a)] =>
+                snprintf(buf.as_mut_ptr(), buf.len(), c_format.as_ptr(), a),
+            [FmtInt(a), FmtInt(b)] =>
+                snprintf(buf.as_mut_ptr(), buf.len(), c_format.as_ptr(), a, b),
+            _ => return Err(UnsupportedArgs),
+        }
+    };
+
+    if written < 0 {
+        Err(FormatError)
+    } else if written as usize >= buf.len() {
+        Err(BufferTooSmall { needed: written as usize + 1 })
+    } else {
+        Ok(written as usize)
+    }
+}
+
+// ------------------------------------------------------------
+// Parsing with sscanf
+// ------------------------------------------------------------
+
+fn parse_int(input: &Text) -> Maybe<c_int> {
+    let c_input = input.to_c_string();
+    let mut value: c_int = 0;
+
+    let parsed = unsafe {
+        sscanf(c_input.as_ptr(), "%d\0".as_ptr() as *const c_char, &mut value)
+    };
+
+    if parsed == 1 {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+fn parse_two_ints(input: &Text) -> Maybe<(c_int, c_int)> {
+    let c_input = input.to_c_string();
+    let mut a: c_int = 0;
+    let mut b: c_int = 0;
+
+    let parsed = unsafe {
+        sscanf(
+            c_input.as_ptr(),
+            "%d %d\0".as_ptr() as *const c_char,
+            &mut a,
+            &mut b
+        )
+    };
+
+    if parsed == 2 {
+        Some((a, b))
+    } else {
+        None
+    }
+}
+
+// ------------------------------------------------------------
+// VaList access for receiving variadic arguments
+// ------------------------------------------------------------
+
+/// Opaque type for C va_list
+@repr(C)
+@opaque
+type VaList is ();
+
+ffi stdarg {
+    /// Start variadic argument processing
+    @extern("C")
+    fn va_start(ap: *mut VaList, last_fixed: *const c_void);
+
+    /// Get next argument (returns c_int)
+    @extern("C")
+    fn va_arg(ap: *mut VaList) -> c_int;
+
+    /// Copy va_list
+    @extern("C")
+    fn va_copy(dest: *mut VaList, src: *const VaList);
+
+    /// End variadic argument processing
+    @extern("C")
+    fn va_end(ap: *mut VaList);
+}
+
+/// Example variadic function implementation
+@extern("C", variadic)
+fn my_sum(count: c_int, ...) -> c_int {
+    let mut ap: *mut VaList = null as *mut VaList;
+    let mut sum: c_int = 0;
+
+    unsafe {
+        stdarg.va_start(ap, &count as *const _ as *const c_void);
+
+        for _ in 0..count {
+            sum += stdarg.va_arg(ap);
+        }
+
+        stdarg.va_end(ap);
+    }
+
+    sum
+}
+
+/// Variadic max function
+@extern("C", variadic)
+fn my_max(count: c_int, ...) -> c_int {
+    let mut ap: *mut VaList = null as *mut VaList;
+
+    unsafe {
+        stdarg.va_start(ap, &count as *const _ as *const c_void);
+
+        let mut max = if count > 0 {
+            stdarg.va_arg(ap)
+        } else {
+            c_int.MIN
+        };
+
+        for _ in 1..count {
+            let val = stdarg.va_arg(ap);
+            if val > max {
+                max = val;
+            }
+        }
+
+        stdarg.va_end(ap);
+        max
+    }
+}
+
+// ------------------------------------------------------------
+// Type-safe variadic wrapper
+// ------------------------------------------------------------
+
+/// A type-safe wrapper for printf-style formatting
+fn safe_printf(format: &Text, args: &[FormatArg]) -> c_int {
+    // Verify format string matches argument types at runtime
+    let expected = parse_format_specifiers(format);
+    assert(expected.len() == args.len(), "Format/argument count mismatch");
+
+    for (spec, arg) in expected.iter().zip(args.iter()) {
+        let matches = (spec, arg).match {
+            ("%d" | "%i", FmtInt(_)) => true,
+            ("%f" | "%lf", FmtFloat(_)) => true,
+            ("%s", FmtStr(_)) => true,
+            ("%p", FmtPtr(_)) => true,
+            _ => false,
+        };
+        assert(matches, "Format specifier doesn't match argument type");
+    }
+
+    // Now safe to call printf
+    let c_format = format.to_c_string();
+    unsafe {
+        // Actual call with type-matched args
+        libc.printf(c_format.as_ptr())
+    }
+}
+
+fn parse_format_specifiers(format: &Text) -> List<Text> {
+    let mut specs = List.new();
+    let mut in_spec = false;
+    let mut current = Text.new();
+
+    for c in format.chars() {
+        if c == '%' && !in_spec {
+            in_spec = true;
+            current.push(c);
+        } else if in_spec {
+            current.push(c);
+            if c.is_alphabetic() {
+                specs.push(current.clone());
+                current.clear();
+                in_spec = false;
+            }
+        }
+    }
+
+    specs
+}
+
+fn main() {
+    // Call printf with a simple argument
+    unsafe {
+        libc.printf("Hello, World!\n\0".as_ptr() as *const c_char);
+    }
+
+    // Parsing
+    let num = parse_int("42");
+
+    let pair = parse_two_ints("10 20");
+}

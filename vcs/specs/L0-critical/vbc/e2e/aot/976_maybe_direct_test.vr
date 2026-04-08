@@ -1,0 +1,57 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: maybe, unwrap, direct
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Test Maybe construction and unwrap with direct values (no list.get)
+
+type Maybe2<T> is None2 | Some2(T);
+
+fn make_some(x: Int) -> Maybe2<Int> {
+    Some2(x)
+}
+
+fn make_none() -> Maybe2<Int> {
+    None2
+}
+
+fn main() -> Int {
+    // Test 1: Direct user-defined Maybe
+    let m1 = make_some(42);
+    match m1 {
+        Some2(v) => {
+            print(f"Direct Some: {v}");
+            if v != 42 {
+                print("FAIL: expected 42");
+                return 1;
+            }
+        },
+        None2 => {
+            print("FAIL: expected Some2");
+            return 1;
+        }
+    }
+
+    // Test 2: list element access via index (GetE) - should work
+    let list = [10, 20, 30];
+    let val = list[1];
+    print(f"list[1] = {val}");
+    if val != 20 {
+        print("FAIL: expected 20");
+        return 1;
+    }
+
+    // Test 3: list.get() - the problematic path
+    let maybe_ref = list.get(1);
+    // Check is_some without unwrap first
+    if maybe_ref.is_some() {
+        print("list.get(1) is Some - correct");
+    } else {
+        print("FAIL: list.get(1) returned None");
+        return 1;
+    }
+
+    print("All direct Maybe tests passed");
+    0
+}

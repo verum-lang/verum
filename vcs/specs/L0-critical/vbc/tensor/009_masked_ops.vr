@@ -1,0 +1,158 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, masked, fill, select, count
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Masked tensor operations — MaskedFill, MaskedSelect
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+type Arr6 is { d0: Float, d1: Float, d2: Float, d3: Float, d4: Float, d5: Float };
+type Mask6 is { m0: Int, m1: Int, m2: Int, m3: Int, m4: Int, m5: Int };
+
+fn arr6_get(a: Arr6, idx: Int) -> Float {
+    if idx == 0 { a.d0 }
+    else if idx == 1 { a.d1 }
+    else if idx == 2 { a.d2 }
+    else if idx == 3 { a.d3 }
+    else if idx == 4 { a.d4 }
+    else { a.d5 }
+}
+
+fn mask6_get(m: Mask6, idx: Int) -> Int {
+    if idx == 0 { m.m0 }
+    else if idx == 1 { m.m1 }
+    else if idx == 2 { m.m2 }
+    else if idx == 3 { m.m3 }
+    else if idx == 4 { m.m4 }
+    else { m.m5 }
+}
+
+// masked_fill: where mask is true (1), replace with fill_val; otherwise keep original
+fn masked_fill(a: Arr6, m: Mask6, fill_val: Float) -> Arr6 {
+    let r0 = if m.m0 == 1 { fill_val } else { a.d0 };
+    let r1 = if m.m1 == 1 { fill_val } else { a.d1 };
+    let r2 = if m.m2 == 1 { fill_val } else { a.d2 };
+    let r3 = if m.m3 == 1 { fill_val } else { a.d3 };
+    let r4 = if m.m4 == 1 { fill_val } else { a.d4 };
+    let r5 = if m.m5 == 1 { fill_val } else { a.d5 };
+    Arr6 { d0: r0, d1: r1, d2: r2, d3: r3, d4: r4, d5: r5 }
+}
+
+// masked_select: collect elements where mask is true, return count and values
+// Returns (selected values in first N positions, count)
+fn masked_select_count(a: Arr6, m: Mask6) -> Int {
+    let mut count = 0;
+    if m.m0 == 1 { count = count + 1; }
+    if m.m1 == 1 { count = count + 1; }
+    if m.m2 == 1 { count = count + 1; }
+    if m.m3 == 1 { count = count + 1; }
+    if m.m4 == 1 { count = count + 1; }
+    if m.m5 == 1 { count = count + 1; }
+    count
+}
+
+fn masked_select_sum(a: Arr6, m: Mask6) -> Float {
+    let mut sum = 0.0;
+    if m.m0 == 1 { sum = sum + a.d0; }
+    if m.m1 == 1 { sum = sum + a.d1; }
+    if m.m2 == 1 { sum = sum + a.d2; }
+    if m.m3 == 1 { sum = sum + a.d3; }
+    if m.m4 == 1 { sum = sum + a.d4; }
+    if m.m5 == 1 { sum = sum + a.d5; }
+    sum
+}
+
+fn mask_count_true(m: Mask6) -> Int {
+    let mut count = 0;
+    if m.m0 == 1 { count = count + 1; }
+    if m.m1 == 1 { count = count + 1; }
+    if m.m2 == 1 { count = count + 1; }
+    if m.m3 == 1 { count = count + 1; }
+    if m.m4 == 1 { count = count + 1; }
+    if m.m5 == 1 { count = count + 1; }
+    count
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_masked_fill_true() {
+    // All mask bits true -> all elements replaced with fill value
+    let data = Arr6 { d0: 1.0, d1: 2.0, d2: 3.0, d3: 4.0, d4: 5.0, d5: 6.0 };
+    let mask = Mask6 { m0: 1, m1: 1, m2: 1, m3: 1, m4: 1, m5: 1 };
+    let filled = masked_fill(data, mask, 99.0);
+
+    assert_eq(filled.d0, 99.0);
+    assert_eq(filled.d1, 99.0);
+    assert_eq(filled.d2, 99.0);
+    assert_eq(filled.d3, 99.0);
+    assert_eq(filled.d4, 99.0);
+    assert_eq(filled.d5, 99.0);
+    print("  test_masked_fill_true: ok");
+}
+
+@test
+fn test_masked_fill_false() {
+    // All mask bits false -> all elements unchanged
+    let data = Arr6 { d0: 1.0, d1: 2.0, d2: 3.0, d3: 4.0, d4: 5.0, d5: 6.0 };
+    let mask = Mask6 { m0: 0, m1: 0, m2: 0, m3: 0, m4: 0, m5: 0 };
+    let filled = masked_fill(data, mask, 99.0);
+
+    assert_eq(filled.d0, 1.0);
+    assert_eq(filled.d1, 2.0);
+    assert_eq(filled.d2, 3.0);
+    assert_eq(filled.d3, 4.0);
+    assert_eq(filled.d4, 5.0);
+    assert_eq(filled.d5, 6.0);
+    print("  test_masked_fill_false: ok");
+}
+
+@test
+fn test_masked_select() {
+    // Select elements where mask is true, verify sum matches expected
+    let data = Arr6 { d0: 10.0, d1: 20.0, d2: 30.0, d3: 40.0, d4: 50.0, d5: 60.0 };
+    let mask = Mask6 { m0: 1, m1: 0, m2: 1, m3: 0, m4: 0, m5: 1 };
+
+    // Selected: d0=10, d2=30, d5=60 -> sum = 100
+    let count = masked_select_count(data, mask);
+    let sum = masked_select_sum(data, mask);
+
+    assert_eq(count, 3);
+    assert_eq(sum, 100.0);
+    print("  test_masked_select: ok");
+}
+
+@test
+fn test_masked_count() {
+    // Count true elements in various masks
+    let all_true = Mask6 { m0: 1, m1: 1, m2: 1, m3: 1, m4: 1, m5: 1 };
+    let all_false = Mask6 { m0: 0, m1: 0, m2: 0, m3: 0, m4: 0, m5: 0 };
+    let mixed = Mask6 { m0: 1, m1: 0, m2: 0, m3: 1, m4: 1, m5: 0 };
+    let single = Mask6 { m0: 0, m1: 0, m2: 0, m3: 0, m4: 1, m5: 0 };
+
+    assert_eq(mask_count_true(all_true), 6);
+    assert_eq(mask_count_true(all_false), 0);
+    assert_eq(mask_count_true(mixed), 3);
+    assert_eq(mask_count_true(single), 1);
+    print("  test_masked_count: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_masked_fill_true();
+    test_masked_fill_false();
+    test_masked_select();
+    test_masked_count();
+
+    print("[OK] 009_masked_ops");
+    0
+}

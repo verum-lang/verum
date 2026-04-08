@@ -1,0 +1,91 @@
+// @test: typecheck-fail
+// @expected-error: E400
+// @tier: 0
+// @level: L2
+// @tags: contexts, async, mismatch, error
+// @description: Tests detection of async/sync context mismatches
+//
+// When a context is declared as `context async X`, it must be used in async
+// functions. Calling async context methods from a sync function is an error.
+// Similarly, some context implementations may require async runtime features.
+
+// Async context - requires async runtime
+context async Database {
+    async fn query(sql: Text) -> List<Row>;
+    async fn execute(sql: Text) -> Int;
+}
+
+// Sync context - no async requirements
+context Logger {
+    fn info(message: Text);
+    fn error(message: Text);
+}
+
+// Another async context
+context async HttpClient {
+    async fn get(url: Text) -> Result<Response, HttpError>;
+    async fn post(url: Text, body: Text) -> Result<Response, HttpError>;
+}
+
+type Row is Map<Text, Text>;
+type DbError is Failed(Text);
+type HttpError is NetworkError(Text);
+type Response is { status: Int, body: Text };
+
+// ERROR: Sync function trying to use async context
+fn sync_function_with_async_context() -> List<Row> using [Database] {
+    // E804: Async context mismatch: Cannot use async context 'Database' in sync function
+    // Hint: Either make 'sync_function_with_async_context' async, or use a sync context
+    Database.query("SELECT * FROM users")
+    //       ^^^^^ Error: 'query' is async but called from sync context
+}
+
+// ERROR: Mixing async and sync contexts incorrectly
+fn another_sync_error() using [Logger, Database] {
+    Logger.info("Starting");  // OK: Logger is sync
+
+    // E804: Async context mismatch: Cannot call async method 'Database.query'
+    //       from sync function 'another_sync_error'
+    let results = Database.query("SELECT 1");  // ERROR: async in sync context
+
+    Logger.info("Done");
+}
+
+// ERROR: Sync function with using clause for async-only context
+fn process_http_request(url: Text) -> Response using [HttpClient] {
+    // E804: Async context mismatch: Context 'HttpClient' is async-only
+    //       but used in sync function 'process_http_request'
+    HttpClient.get(url)  // ERROR
+}
+
+// This is CORRECT - async function with async context
+async fn correct_async_usage() -> List<Row> using [Database, Logger] {
+    Logger.info("Fetching data");  // OK: sync context in async function
+    let rows = Database.query("SELECT * FROM users").await;  // OK: async context with await
+    Logger.info("Fetched " + rows.len().to_text() + " rows");
+    rows
+}
+
+// This is CORRECT - sync function with sync context only
+fn correct_sync_usage() using [Logger] {
+    Logger.info("This is fine");
+    Logger.error("Sync contexts work in sync functions");
+}
+
+// ERROR: Using .await in sync function
+fn sync_with_await() -> List<Row> using [Database] {
+    // E804: Cannot use '.await' in sync function 'sync_with_await'
+    // Additionally: Database is an async context
+    Database.query("SELECT 1").await  // ERROR: .await in sync function
+}
+
+// ERROR: Calling async context method without await in async function
+async fn async_without_await() -> List<Row> using [Database] {
+    // E804: Async context method 'Database.query' must be awaited
+    // This returns Future<List<Row>>, not List<Row>
+    Database.query("SELECT 1")  // ERROR: missing .await
+}
+
+fn main() {
+    // This code should not compile due to async context mismatches
+}

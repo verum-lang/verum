@@ -1,0 +1,13 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, if, branch
+// @description: Unsafe blocks in if branches
+fn main() {
+    let cond: Bool = true;
+    let result: Int = if cond {
+        unsafe { 100 }
+    } else {
+        unsafe { 200 }
+    };
+    assert_eq(result, 100);
+}

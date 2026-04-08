@@ -1,0 +1,88 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, map, remove, contains
+// @expected-exit: 0
+
+// Test: Advanced map operations — remove, contains_key, overwrite, stress.
+
+fn main() -> Int {
+    // Test 1: contains_key
+    let mut m = Map.new();
+    m.insert(10, 100);
+    m.insert(20, 200);
+    if (m.contains_key(10) != true) {
+        print("FAIL test1a: contains_key(10) should be true");
+        return 1;
+    }
+    if (m.contains_key(99) != false) {
+        print("FAIL test1b: contains_key(99) should be false");
+        return 1;
+    }
+
+    // Test 2: overwrite and verify
+    m.insert(10, 999);
+    let v = m.get(10);
+    if (v != 999) {
+        print(f"FAIL test2: get(10)={v}, expected 999");
+        return 1;
+    }
+    // Length should NOT increase on overwrite
+    let len = m.len();
+    if (len != 2) {
+        print(f"FAIL test2b: len={len}, expected 2");
+        return 1;
+    }
+
+    // Test 3: remove
+    let removed = m.remove(10);
+    if (removed != 999) {
+        print(f"FAIL test3a: remove(10)={removed}, expected 999");
+        return 1;
+    }
+    let len2 = m.len();
+    if (len2 != 1) {
+        print(f"FAIL test3b: len after remove={len2}, expected 1");
+        return 1;
+    }
+    // Verify removed key is gone
+    if (m.contains_key(10) != false) {
+        print("FAIL test3c: contains_key(10) should be false after remove");
+        return 1;
+    }
+    // Other key still there
+    let v2 = m.get(20);
+    if (v2 != 200) {
+        print(f"FAIL test3d: get(20)={v2} after remove(10)");
+        return 1;
+    }
+
+    // Test 4: stress - insert many, verify all
+    let mut big = Map.new();
+    let mut i = 0;
+    while (i < 200) {
+        big.insert(i, i * 3);
+        i = i + 1;
+    }
+    let big_len = big.len();
+    if (big_len != 200) {
+        print(f"FAIL test4a: big map len={big_len}");
+        return 1;
+    }
+    // Spot check several keys
+    if (big.get(0) != 0) {
+        print(f"FAIL test4b: get(0)={big.get(0)}");
+        return 1;
+    }
+    if (big.get(99) != 297) {
+        print(f"FAIL test4c: get(99)={big.get(99)}");
+        return 1;
+    }
+    if (big.get(199) != 597) {
+        print(f"FAIL test4d: get(199)={big.get(199)}");
+        return 1;
+    }
+
+    print("904_map_advanced: PASS");
+    0
+}

@@ -1,0 +1,186 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: async, io, spawn, channels, file-io, patterns
+// @description: Async I/O patterns - spawn-based file operations and producer-consumer
+
+fn file_write_all(path: Text, data: Text) -> Int { 0 }
+fn file_read_all(path: Text) -> Text { "" }
+fn file_exists(path: Text) -> Int { 0 }
+fn file_delete(path: Text) -> Int { 0 }
+fn sleep_ms(millis: Int) -> Int { 0 }
+fn time_now_ms() -> Int { 0 }
+
+fn test_spawn_file_io() -> Int {
+    // Spawn file write in background, read when done
+    let path = "/tmp/verum_test_1062.txt";
+    let ch = Channel.new(1);
+
+    let writer = spawn {
+        file_write_all(path, "async hello world");
+        ch.send(1);
+        0
+    };
+
+    // Wait for write to complete
+    let _ = match ch.recv() { Some(v) => v, None => 0 };
+    writer.await;
+
+    let content = file_read_all(path);
+    file_delete(path);
+
+    if content != "async hello world" {
+        print(f"FAIL spawn_file_io: got '{content}'");
+        return 1;
+    }
+    print("  spawn_file_io: OK");
+    0
+}
+
+fn test_parallel_file_writes() -> Int {
+    // Write multiple files in parallel
+    let ch = Channel.new(4);
+
+    let t1 = spawn { file_write_all("/tmp/verum_1062_a.txt", "file_a"); ch.send(1); 0 };
+    let t2 = spawn { file_write_all("/tmp/verum_1062_b.txt", "file_b"); ch.send(2); 0 };
+    let t3 = spawn { file_write_all("/tmp/verum_1062_c.txt", "file_c"); ch.send(3); 0 };
+
+    // Wait for all
+    let _ = match ch.recv() { Some(v) => v, None => 0 };
+    let _ = match ch.recv() { Some(v) => v, None => 0 };
+    let _ = match ch.recv() { Some(v) => v, None => 0 };
+    t1.await;
+    t2.await;
+    t3.await;
+
+    // Verify all files
+    let a = file_read_all("/tmp/verum_1062_a.txt");
+    let b = file_read_all("/tmp/verum_1062_b.txt");
+    let c = file_read_all("/tmp/verum_1062_c.txt");
+
+    // Cleanup
+    file_delete("/tmp/verum_1062_a.txt");
+    file_delete("/tmp/verum_1062_b.txt");
+    file_delete("/tmp/verum_1062_c.txt");
+
+    if a != "file_a" || b != "file_b" || c != "file_c" {
+        print(f"FAIL parallel_writes: a='{a}', b='{b}', c='{c}'");
+        return 1;
+    }
+    print("  parallel_writes: OK");
+    0
+}
+
+fn test_producer_consumer_pipeline() -> Int {
+    // Producer generates data, consumer processes it
+    let data_ch = Channel.new(8);
+    let result_ch = Channel.new(1);
+
+    // Producer: generates numbers
+    let producer = spawn {
+        let mut i = 0;
+        while i < 10 {
+            data_ch.send(i * i);
+            i = i + 1;
+        }
+        data_ch.send(-1);  // sentinel
+        0
+    };
+
+    // Consumer: sums numbers until sentinel
+    let consumer = spawn {
+        let mut sum = 0;
+        loop {
+            let val = match data_ch.recv() { Some(v) => v, None => -1 };
+            if val == -1 { break; }
+            sum = sum + val;
+        }
+        result_ch.send(sum);
+        0
+    };
+
+    producer.await;
+    consumer.await;
+
+    let total = match result_ch.recv() { Some(v) => v, None => -999 };
+    // sum of i^2 for i=0..9 = 0+1+4+9+16+25+36+49+64+81 = 285
+    if total != 285 {
+        print(f"FAIL producer_consumer: expected 285, got {total}");
+        return 1;
+    }
+    print("  producer_consumer: OK");
+    0
+}
+
+fn test_scatter_gather() -> Int {
+    // Scatter work across N workers, gather results
+    let result_ch = Channel.new(4);
+
+    // Worker 1: compute sum 0..25
+    let w1 = spawn {
+        let mut sum = 0;
+        let mut i = 0;
+        while i < 25 { sum = sum + i; i = i + 1; }
+        result_ch.send(sum);
+        0
+    };
+    // Worker 2: compute sum 25..50
+    let w2 = spawn {
+        let mut sum = 0;
+        let mut i = 25;
+        while i < 50 { sum = sum + i; i = i + 1; }
+        result_ch.send(sum);
+        0
+    };
+    // Worker 3: compute sum 50..75
+    let w3 = spawn {
+        let mut sum = 0;
+        let mut i = 50;
+        while i < 75 { sum = sum + i; i = i + 1; }
+        result_ch.send(sum);
+        0
+    };
+    // Worker 4: compute sum 75..100
+    let w4 = spawn {
+        let mut sum = 0;
+        let mut i = 75;
+        while i < 100 { sum = sum + i; i = i + 1; }
+        result_ch.send(sum);
+        0
+    };
+
+    w1.await;
+    w2.await;
+    w3.await;
+    w4.await;
+
+    let s1 = match result_ch.recv() { Some(v) => v, None => 0 };
+    let s2 = match result_ch.recv() { Some(v) => v, None => 0 };
+    let s3 = match result_ch.recv() { Some(v) => v, None => 0 };
+    let s4 = match result_ch.recv() { Some(v) => v, None => 0 };
+    let total = s1 + s2 + s3 + s4;
+
+    // sum(0..100) = 99*100/2 = 4950
+    if total != 4950 {
+        print(f"FAIL scatter_gather: expected 4950, got {total}");
+        return 1;
+    }
+    print("  scatter_gather: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Async I/O Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_spawn_file_io();
+    failures = failures + test_parallel_file_writes();
+    failures = failures + test_producer_consumer_pipeline();
+    failures = failures + test_scatter_gather();
+
+    if failures == 0 {
+        print("All async I/O pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

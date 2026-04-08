@@ -1,0 +1,40 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: refinement, types, verification
+// @expect: pass
+
+// Test refinement types with compile-time verification.
+
+// Positive integer type
+type Positive is Int where self > 0;
+
+// Non-empty text type
+type NonEmpty is Text where self.len() > 0;
+
+fn double_positive(x: Positive) -> Positive {
+    x * 2
+}
+
+fn greet(name: NonEmpty) -> Text {
+    f"Hello, {name}!"
+}
+
+fn main() -> Int {
+    // These should pass refinement checks
+    let a: Positive = 42;
+    let b = double_positive(a);
+    print(f"double_positive(42) = {b}");
+
+    if b != 84 {
+        print(f"FAIL: b = {b}");
+        return 1;
+    }
+
+    let name: NonEmpty = "World";
+    let msg = greet(name);
+    print(msg);
+
+    print("PASS: refinement types work");
+    0
+}

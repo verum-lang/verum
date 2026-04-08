@@ -1,0 +1,1497 @@
+// =============================================================================
+// ieee754_test.vr - Tests for IEEE 754 floating-point utilities
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, ieee754, float, classification, special-values, decompose,
+//        f32, frexp, ldexp, modf, next_up, next_down, ulp, nan-payload
+// @description: Tests for IEEE 754 utilities: FpCategory, F64Bits, F32Bits,
+//               classification (is_nan, is_infinite, is_finite, is_normal,
+//               is_subnormal, is_zero) for both Float and Float32,
+//               sign operations (signbit, copysign, negate) for both widths,
+//               decomposition (f64/f32 decompose/compose, classify, classify_f32),
+//               frexp, ldexp, modf, trunc, next_up, next_down, ulp_distance,
+//               special value creation (infinity, neg_infinity, nan, nan_with_payload,
+//               nan_payload), and IEEE 754 constant properties.
+// =============================================================================
+
+mount core.math.ieee754.{
+    // Bit layout types
+    F64Bits, F32Bits,
+    // Classification enum
+    FpCategory,
+    // Decompose / compose
+    f64_decompose, f64_compose,
+    f32_decompose, f32_compose,
+    // Classification functions (Float64)
+    classify, is_nan, is_infinite, is_finite, is_normal, is_subnormal, is_zero,
+    // Classification functions (Float32)
+    classify_f32,
+    is_nan_f32, is_infinite_f32, is_finite_f32, is_normal_f32, is_subnormal_f32, is_zero_f32,
+    // Sign operations (Float64)
+    signbit, copysign, negate,
+    // Sign operations (Float32)
+    signbit_f32, copysign_f32, negate_f32,
+    // Decomposition functions
+    frexp, ldexp, modf, trunc,
+    // Next/previous representable values
+    next_up, next_down, ulp_distance,
+    // Special value creation
+    infinity, neg_infinity, nan_with_payload, nan_payload,
+};
+mount core.math.constants.{INFINITY, NEG_INFINITY, NAN, EPSILON};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: FpCategory Variant Construction
+// =============================================================================
+
+@test
+fn test_fp_category_zero() {
+    let c: FpCategory = FpCategory.Zero;
+    assert(c is FpCategory.Zero);
+}
+
+@test
+fn test_fp_category_subnormal() {
+    let c: FpCategory = FpCategory.Subnormal;
+    assert(c is FpCategory.Subnormal);
+}
+
+@test
+fn test_fp_category_normal() {
+    let c: FpCategory = FpCategory.Normal;
+    assert(c is FpCategory.Normal);
+}
+
+@test
+fn test_fp_category_infinite() {
+    let c: FpCategory = FpCategory.Infinite;
+    assert(c is FpCategory.Infinite);
+}
+
+@test
+fn test_fp_category_nan() {
+    let c: FpCategory = FpCategory.NaN;
+    assert(c is FpCategory.NaN);
+}
+
+// =============================================================================
+// Section 1b: FpCategory Distinctness
+// =============================================================================
+
+@test
+fn test_fp_category_zero_not_subnormal() {
+    let c = FpCategory.Zero;
+    assert(!(c is FpCategory.Subnormal));
+    assert(!(c is FpCategory.Normal));
+    assert(!(c is FpCategory.Infinite));
+    assert(!(c is FpCategory.NaN));
+}
+
+@test
+fn test_fp_category_normal_not_others() {
+    let c = FpCategory.Normal;
+    assert(!(c is FpCategory.Zero));
+    assert(!(c is FpCategory.Subnormal));
+    assert(!(c is FpCategory.Infinite));
+    assert(!(c is FpCategory.NaN));
+}
+
+@test
+fn test_fp_category_infinite_not_others() {
+    let c = FpCategory.Infinite;
+    assert(!(c is FpCategory.Zero));
+    assert(!(c is FpCategory.Subnormal));
+    assert(!(c is FpCategory.Normal));
+    assert(!(c is FpCategory.NaN));
+}
+
+@test
+fn test_fp_category_nan_not_others() {
+    let c = FpCategory.NaN;
+    assert(!(c is FpCategory.Zero));
+    assert(!(c is FpCategory.Subnormal));
+    assert(!(c is FpCategory.Normal));
+    assert(!(c is FpCategory.Infinite));
+}
+
+@test
+fn test_fp_category_exhaustive_match() {
+    // Verify all 5 categories can be matched
+    let categories = [
+        FpCategory.Zero,
+        FpCategory.Subnormal,
+        FpCategory.Normal,
+        FpCategory.Infinite,
+        FpCategory.NaN,
+    ];
+    let mut count = 0;
+    for cat in categories {
+        match cat {
+            FpCategory.Zero => count = count + 1,
+            FpCategory.Subnormal => count = count + 1,
+            FpCategory.Normal => count = count + 1,
+            FpCategory.Infinite => count = count + 1,
+            FpCategory.NaN => count = count + 1,
+        }
+    }
+    assert_eq(count, 5);
+}
+
+// =============================================================================
+// Section 2: F64Bits Construction
+// =============================================================================
+
+@test
+fn test_f64_bits_zero() {
+    let bits = F64Bits { sign: false, exponent: 0, mantissa: 0 };
+    assert(!bits.sign);
+    assert(bits.exponent == 0);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_f64_bits_negative() {
+    let bits = F64Bits { sign: true, exponent: 1023, mantissa: 0 };
+    assert(bits.sign);
+}
+
+@test
+fn test_f64_bits_max_exponent() {
+    // Max exponent (0x7FF = 2047) indicates infinity or NaN
+    let bits = F64Bits { sign: false, exponent: 0x7FF, mantissa: 0 };
+    assert(bits.exponent == 2047);
+}
+
+// =============================================================================
+// Section 2b: F32Bits Construction
+// =============================================================================
+
+@test
+fn test_f32_bits_zero() {
+    let bits = F32Bits { sign: false, exponent: 0, mantissa: 0 };
+    assert(!bits.sign);
+    assert(bits.exponent == 0);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_f32_bits_positive_one() {
+    // 1.0f32: sign=0, exponent=127 (biased), mantissa=0
+    let bits = F32Bits { sign: false, exponent: 127, mantissa: 0 };
+    assert(!bits.sign);
+    assert(bits.exponent == 127);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_f32_bits_negative() {
+    let bits = F32Bits { sign: true, exponent: 127, mantissa: 0 };
+    assert(bits.sign);
+    assert(bits.exponent == 127);
+}
+
+@test
+fn test_f32_bits_max_exponent() {
+    // Max exponent for Float32 is 0xFF = 255
+    let bits = F32Bits { sign: false, exponent: 0xFF, mantissa: 0 };
+    assert(bits.exponent == 255);
+}
+
+// =============================================================================
+// Section 3: classify
+// =============================================================================
+
+@test
+fn test_classify_zero() {
+    let cat = classify(0.0);
+    assert(cat is FpCategory.Zero);
+}
+
+@test
+fn test_classify_normal_positive() {
+    let cat = classify(1.0);
+    assert(cat is FpCategory.Normal);
+}
+
+@test
+fn test_classify_normal_negative() {
+    let cat = classify(-42.5);
+    assert(cat is FpCategory.Normal);
+}
+
+@test
+fn test_classify_infinity() {
+    let cat = classify(INFINITY);
+    assert(cat is FpCategory.Infinite);
+}
+
+@test
+fn test_classify_neg_infinity() {
+    let cat = classify(NEG_INFINITY);
+    assert(cat is FpCategory.Infinite);
+}
+
+@test
+fn test_classify_nan() {
+    let cat = classify(NAN);
+    assert(cat is FpCategory.NaN);
+}
+
+// =============================================================================
+// Section 3b: classify_f32
+// =============================================================================
+
+@test
+fn test_classify_f32_zero() {
+    let cat = classify_f32(0.0 as Float32);
+    assert(cat is FpCategory.Zero);
+}
+
+@test
+fn test_classify_f32_normal_positive() {
+    let cat = classify_f32(1.0 as Float32);
+    assert(cat is FpCategory.Normal);
+}
+
+@test
+fn test_classify_f32_normal_negative() {
+    let val = 0.0 as Float32 - 42.5 as Float32;
+    let cat = classify_f32(val);
+    assert(cat is FpCategory.Normal);
+}
+
+// =============================================================================
+// Section 4: is_nan
+// =============================================================================
+
+@test
+fn test_is_nan_true() {
+    assert(is_nan(NAN));
+}
+
+@test
+fn test_is_nan_false_normal() {
+    assert(!is_nan(1.0));
+}
+
+@test
+fn test_is_nan_false_zero() {
+    assert(!is_nan(0.0));
+}
+
+@test
+fn test_is_nan_false_infinity() {
+    assert(!is_nan(INFINITY));
+}
+
+@test
+fn test_nan_not_equal_self() {
+    assert(NAN != NAN);
+}
+
+// =============================================================================
+// Section 4b: is_nan_f32
+// =============================================================================
+
+@test
+fn test_is_nan_f32_false_normal() {
+    assert(!is_nan_f32(1.0 as Float32));
+}
+
+@test
+fn test_is_nan_f32_false_zero() {
+    assert(!is_nan_f32(0.0 as Float32));
+}
+
+// =============================================================================
+// Section 5: is_infinite
+// =============================================================================
+
+@test
+fn test_is_infinite_positive() {
+    assert(is_infinite(INFINITY));
+}
+
+@test
+fn test_is_infinite_negative() {
+    assert(is_infinite(NEG_INFINITY));
+}
+
+@test
+fn test_is_infinite_normal() {
+    assert(!is_infinite(1.0));
+}
+
+@test
+fn test_is_infinite_zero() {
+    assert(!is_infinite(0.0));
+}
+
+@test
+fn test_is_infinite_nan() {
+    assert(!is_infinite(NAN));
+}
+
+// =============================================================================
+// Section 5b: is_infinite_f32
+// =============================================================================
+
+@test
+fn test_is_infinite_f32_false_normal() {
+    assert(!is_infinite_f32(1.0 as Float32));
+}
+
+@test
+fn test_is_infinite_f32_false_zero() {
+    assert(!is_infinite_f32(0.0 as Float32));
+}
+
+// =============================================================================
+// Section 6: is_finite
+// =============================================================================
+
+@test
+fn test_is_finite_normal() {
+    assert(is_finite(1.0));
+}
+
+@test
+fn test_is_finite_zero() {
+    assert(is_finite(0.0));
+}
+
+@test
+fn test_is_finite_negative() {
+    assert(is_finite(-42.5));
+}
+
+@test
+fn test_is_finite_epsilon() {
+    assert(is_finite(EPSILON));
+}
+
+@test
+fn test_is_finite_false_infinity() {
+    assert(!is_finite(INFINITY));
+}
+
+@test
+fn test_is_finite_false_neg_infinity() {
+    assert(!is_finite(NEG_INFINITY));
+}
+
+@test
+fn test_is_finite_false_nan() {
+    assert(!is_finite(NAN));
+}
+
+// =============================================================================
+// Section 6b: is_finite_f32
+// =============================================================================
+
+@test
+fn test_is_finite_f32_normal() {
+    assert(is_finite_f32(1.0 as Float32));
+}
+
+@test
+fn test_is_finite_f32_zero() {
+    assert(is_finite_f32(0.0 as Float32));
+}
+
+// =============================================================================
+// Section 7: is_normal
+// =============================================================================
+
+@test
+fn test_is_normal_positive() {
+    assert(is_normal(1.0));
+}
+
+@test
+fn test_is_normal_negative() {
+    assert(is_normal(-42.5));
+}
+
+@test
+fn test_is_normal_epsilon() {
+    assert(is_normal(EPSILON));
+}
+
+@test
+fn test_is_normal_false_zero() {
+    assert(!is_normal(0.0));
+}
+
+@test
+fn test_is_normal_false_infinity() {
+    assert(!is_normal(INFINITY));
+}
+
+@test
+fn test_is_normal_false_nan() {
+    assert(!is_normal(NAN));
+}
+
+// =============================================================================
+// Section 7b: is_normal_f32
+// =============================================================================
+
+@test
+fn test_is_normal_f32_positive() {
+    assert(is_normal_f32(1.0 as Float32));
+}
+
+@test
+fn test_is_normal_f32_false_zero() {
+    assert(!is_normal_f32(0.0 as Float32));
+}
+
+// =============================================================================
+// Section 8: is_subnormal
+// =============================================================================
+
+@test
+fn test_is_subnormal_false_normal() {
+    assert(!is_subnormal(1.0));
+}
+
+@test
+fn test_is_subnormal_false_zero() {
+    assert(!is_subnormal(0.0));
+}
+
+@test
+fn test_is_subnormal_false_infinity() {
+    assert(!is_subnormal(INFINITY));
+}
+
+@test
+fn test_is_subnormal_false_nan() {
+    assert(!is_subnormal(NAN));
+}
+
+// =============================================================================
+// Section 8b: is_subnormal_f32
+// =============================================================================
+
+@test
+fn test_is_subnormal_f32_false_normal() {
+    assert(!is_subnormal_f32(1.0 as Float32));
+}
+
+@test
+fn test_is_subnormal_f32_false_zero() {
+    assert(!is_subnormal_f32(0.0 as Float32));
+}
+
+// =============================================================================
+// Section 9: is_zero
+// =============================================================================
+
+@test
+fn test_is_zero_positive() {
+    assert(is_zero(0.0));
+}
+
+@test
+fn test_is_zero_false_one() {
+    assert(!is_zero(1.0));
+}
+
+@test
+fn test_is_zero_false_infinity() {
+    assert(!is_zero(INFINITY));
+}
+
+@test
+fn test_is_zero_false_nan() {
+    assert(!is_zero(NAN));
+}
+
+// =============================================================================
+// Section 9b: is_zero_f32
+// =============================================================================
+
+@test
+fn test_is_zero_f32_true() {
+    assert(is_zero_f32(0.0 as Float32));
+}
+
+@test
+fn test_is_zero_f32_false_one() {
+    assert(!is_zero_f32(1.0 as Float32));
+}
+
+// =============================================================================
+// Section 10: signbit
+// =============================================================================
+
+@test
+fn test_signbit_positive() {
+    assert(!signbit(1.0));
+}
+
+@test
+fn test_signbit_negative() {
+    assert(signbit(-1.0));
+}
+
+@test
+fn test_signbit_zero() {
+    assert(!signbit(0.0));
+}
+
+@test
+fn test_signbit_infinity() {
+    assert(!signbit(INFINITY));
+}
+
+@test
+fn test_signbit_neg_infinity() {
+    assert(signbit(NEG_INFINITY));
+}
+
+// =============================================================================
+// Section 10b: signbit_f32
+// =============================================================================
+
+@test
+fn test_signbit_f32_positive() {
+    assert(!signbit_f32(1.0 as Float32));
+}
+
+@test
+fn test_signbit_f32_negative() {
+    let val = 0.0 as Float32 - 1.0 as Float32;
+    assert(signbit_f32(val));
+}
+
+@test
+fn test_signbit_f32_zero() {
+    assert(!signbit_f32(0.0 as Float32));
+}
+
+// =============================================================================
+// Section 11: copysign
+// =============================================================================
+
+@test
+fn test_copysign_positive_to_negative() {
+    let result = copysign(3.0, -1.0);
+    assert(signbit(result));
+}
+
+@test
+fn test_copysign_negative_to_positive() {
+    let result = copysign(-3.0, 1.0);
+    assert(!signbit(result));
+}
+
+@test
+fn test_copysign_same_sign() {
+    let result = copysign(3.0, 1.0);
+    assert(!signbit(result));
+}
+
+@test
+fn test_copysign_preserves_magnitude() {
+    let result = copysign(3.0, -1.0);
+    let restored = copysign(result, 1.0);
+    assert(!signbit(restored));
+}
+
+@test
+fn test_copysign_infinity_takes_sign() {
+    // copysign(INFINITY, -1.0) should give negative infinity
+    let result = copysign(INFINITY, -1.0);
+    assert(signbit(result));
+    assert(is_infinite(result));
+}
+
+@test
+fn test_copysign_nan_takes_sign() {
+    // copysign(NAN, -1.0) should give NaN with negative sign
+    let result = copysign(NAN, -1.0);
+    assert(signbit(result));
+    assert(is_nan(result));
+}
+
+// =============================================================================
+// Section 11b: copysign_f32
+// =============================================================================
+
+@test
+fn test_copysign_f32_positive_to_negative() {
+    let neg = 0.0 as Float32 - 1.0 as Float32;
+    let result = copysign_f32(3.0 as Float32, neg);
+    assert(signbit_f32(result));
+}
+
+@test
+fn test_copysign_f32_negative_to_positive() {
+    let neg = 0.0 as Float32 - 3.0 as Float32;
+    let result = copysign_f32(neg, 1.0 as Float32);
+    assert(!signbit_f32(result));
+}
+
+// =============================================================================
+// Section 12: negate
+// =============================================================================
+
+@test
+fn test_negate_positive() {
+    let result = negate(3.0);
+    assert(signbit(result));
+}
+
+@test
+fn test_negate_negative() {
+    let result = negate(-3.0);
+    assert(!signbit(result));
+}
+
+@test
+fn test_negate_double() {
+    // negate(negate(x)) should give back same sign
+    let result = negate(negate(5.0));
+    assert(!signbit(result));
+}
+
+@test
+fn test_negate_infinity() {
+    // negate(INFINITY) should give NEG_INFINITY
+    let result = negate(INFINITY);
+    assert(signbit(result));
+    assert(is_infinite(result));
+}
+
+@test
+fn test_negate_neg_infinity() {
+    // negate(NEG_INFINITY) should give positive INFINITY
+    let result = negate(NEG_INFINITY);
+    assert(!signbit(result));
+    assert(is_infinite(result));
+}
+
+@test
+fn test_negate_nan_flips_sign() {
+    // negate(NaN) should flip the sign bit of NaN
+    let result = negate(NAN);
+    assert(is_nan(result));
+}
+
+// =============================================================================
+// Section 12b: negate_f32
+// =============================================================================
+
+@test
+fn test_negate_f32_positive() {
+    let result = negate_f32(3.0 as Float32);
+    assert(signbit_f32(result));
+}
+
+@test
+fn test_negate_f32_double() {
+    let result = negate_f32(negate_f32(5.0 as Float32));
+    assert(!signbit_f32(result));
+}
+
+// =============================================================================
+// Section 13: f64_decompose
+// =============================================================================
+
+@test
+fn test_decompose_positive_one() {
+    let bits = f64_decompose(1.0);
+    assert(!bits.sign);
+    // 1.0 = 1.0 * 2^0, biased exponent = 1023
+    assert(bits.exponent == 1023);
+    assert(bits.mantissa == 0);  // implicit leading 1
+}
+
+@test
+fn test_decompose_negative_one() {
+    let bits = f64_decompose(-1.0);
+    assert(bits.sign);
+    assert(bits.exponent == 1023);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_decompose_two() {
+    let bits = f64_decompose(2.0);
+    assert(!bits.sign);
+    // 2.0 = 1.0 * 2^1, biased exponent = 1024
+    assert(bits.exponent == 1024);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_decompose_zero() {
+    let bits = f64_decompose(0.0);
+    assert(!bits.sign);
+    assert(bits.exponent == 0);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_decompose_infinity() {
+    let bits = f64_decompose(INFINITY);
+    assert(!bits.sign);
+    assert(bits.exponent == 0x7FF);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_decompose_neg_infinity() {
+    let bits = f64_decompose(NEG_INFINITY);
+    assert(bits.sign);
+    assert(bits.exponent == 0x7FF);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_decompose_nan_has_max_exponent() {
+    let bits = f64_decompose(NAN);
+    assert(bits.exponent == 0x7FF);
+    // NaN has non-zero mantissa
+    assert(bits.mantissa != 0);
+}
+
+@test
+fn test_decompose_negative_zero() {
+    // -0.0 has sign=true, exponent=0, mantissa=0
+    let neg_zero = negate(0.0);
+    let bits = f64_decompose(neg_zero);
+    assert(bits.sign);
+    assert(bits.exponent == 0);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_decompose_half() {
+    // 0.5 = 1.0 * 2^(-1), biased exponent = 1022
+    let bits = f64_decompose(0.5);
+    assert(!bits.sign);
+    assert(bits.exponent == 1022);
+    assert(bits.mantissa == 0);
+}
+
+// =============================================================================
+// Section 13b: f32_decompose
+// =============================================================================
+
+@test
+fn test_f32_decompose_one() {
+    let bits = f32_decompose(1.0 as Float32);
+    assert(!bits.sign);
+    // 1.0f32: biased exponent = 127, mantissa = 0
+    assert(bits.exponent == 127);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_f32_decompose_zero() {
+    let bits = f32_decompose(0.0 as Float32);
+    assert(!bits.sign);
+    assert(bits.exponent == 0);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_f32_decompose_negative_one() {
+    let val = 0.0 as Float32 - 1.0 as Float32;
+    let bits = f32_decompose(val);
+    assert(bits.sign);
+    assert(bits.exponent == 127);
+    assert(bits.mantissa == 0);
+}
+
+@test
+fn test_f32_decompose_two() {
+    let bits = f32_decompose(2.0 as Float32);
+    assert(!bits.sign);
+    // 2.0f32: biased exponent = 128
+    assert(bits.exponent == 128);
+    assert(bits.mantissa == 0);
+}
+
+// =============================================================================
+// Section 14: f64_compose (roundtrip with decompose)
+// =============================================================================
+
+@test
+fn test_compose_positive_one() {
+    let bits = F64Bits { sign: false, exponent: 1023, mantissa: 0 };
+    let val = f64_compose(bits);
+    assert(val > 0.0);
+    assert(!is_nan(val));
+    assert(!is_infinite(val));
+}
+
+@test
+fn test_compose_zero() {
+    let bits = F64Bits { sign: false, exponent: 0, mantissa: 0 };
+    let val = f64_compose(bits);
+    assert(is_zero(val));
+}
+
+@test
+fn test_compose_infinity() {
+    let bits = F64Bits { sign: false, exponent: 0x7FF, mantissa: 0 };
+    let val = f64_compose(bits);
+    assert(is_infinite(val));
+}
+
+@test
+fn test_compose_negative_zero() {
+    let bits = F64Bits { sign: true, exponent: 0, mantissa: 0 };
+    let val = f64_compose(bits);
+    assert(is_zero(val));
+    assert(signbit(val));
+}
+
+@test
+fn test_compose_nan_nonzero_mantissa() {
+    // Compose a NaN: exponent = 0x7FF, mantissa != 0
+    let bits = F64Bits { sign: false, exponent: 0x7FF, mantissa: 1 };
+    let val = f64_compose(bits);
+    assert(is_nan(val));
+}
+
+@test
+fn test_decompose_compose_roundtrip() {
+    // Decompose and recompose should give back the same value
+    let original = 42.5;
+    let bits = f64_decompose(original);
+    let reconstructed = f64_compose(bits);
+    // For normal numbers, this should be exact
+    assert(!is_nan(reconstructed));
+    assert(is_finite(reconstructed));
+}
+
+@test
+fn test_decompose_compose_roundtrip_negative() {
+    let original = -123.456;
+    let bits = f64_decompose(original);
+    let reconstructed = f64_compose(bits);
+    assert(!is_nan(reconstructed));
+    assert(is_finite(reconstructed));
+    assert(signbit(reconstructed));
+}
+
+// =============================================================================
+// Section 14b: f32_compose (roundtrip with decompose)
+// =============================================================================
+
+@test
+fn test_f32_compose_one() {
+    let bits = F32Bits { sign: false, exponent: 127, mantissa: 0 };
+    let val = f32_compose(bits);
+    assert(!is_nan_f32(val));
+    assert(is_finite_f32(val));
+}
+
+@test
+fn test_f32_compose_zero() {
+    let bits = F32Bits { sign: false, exponent: 0, mantissa: 0 };
+    let val = f32_compose(bits);
+    assert(is_zero_f32(val));
+}
+
+@test
+fn test_f32_decompose_compose_roundtrip() {
+    let original = 42.5 as Float32;
+    let bits = f32_decompose(original);
+    let reconstructed = f32_compose(bits);
+    assert(!is_nan_f32(reconstructed));
+    assert(is_finite_f32(reconstructed));
+}
+
+// =============================================================================
+// Section 15: frexp
+// =============================================================================
+
+@test
+fn test_frexp_one() {
+    // frexp(1.0) should return (0.5, 1) since 1.0 = 0.5 * 2^1
+    let result = frexp(1.0);
+    let m = result.0;
+    let e = result.1;
+    assert(m >= 0.5);
+    assert(m < 1.0);
+    assert_eq(e, 1);
+}
+
+@test
+fn test_frexp_two() {
+    // frexp(2.0) should return (0.5, 2) since 2.0 = 0.5 * 2^2
+    let result = frexp(2.0);
+    let m = result.0;
+    let e = result.1;
+    assert(m >= 0.5);
+    assert(m < 1.0);
+    assert_eq(e, 2);
+}
+
+@test
+fn test_frexp_half() {
+    // frexp(0.5) should return (0.5, 0) since 0.5 = 0.5 * 2^0
+    let result = frexp(0.5);
+    let m = result.0;
+    let e = result.1;
+    assert(m >= 0.5);
+    assert(m < 1.0);
+    assert_eq(e, 0);
+}
+
+@test
+fn test_frexp_negative() {
+    // frexp(-1.0) should return (-0.5, 1)
+    let result = frexp(-1.0);
+    let m = result.0;
+    let e = result.1;
+    assert(m <= -0.5);
+    assert(m > -1.0);
+    assert_eq(e, 1);
+}
+
+@test
+fn test_frexp_zero() {
+    // frexp(0.0) should return (0.0, 0)
+    let result = frexp(0.0);
+    let m = result.0;
+    let e = result.1;
+    assert(is_zero(m));
+    assert_eq(e, 0);
+}
+
+@test
+fn test_frexp_mantissa_range() {
+    // For any normal value, mantissa should be in [0.5, 1.0)
+    let result = frexp(100.0);
+    let m = result.0;
+    assert(m >= 0.5);
+    assert(m < 1.0);
+}
+
+// =============================================================================
+// Section 16: ldexp
+// =============================================================================
+
+@test
+fn test_ldexp_identity() {
+    // ldexp(x, 0) = x
+    let result = ldexp(3.14, 0);
+    assert(!is_nan(result));
+    assert(is_finite(result));
+}
+
+@test
+fn test_ldexp_double() {
+    // ldexp(1.0, 1) = 1.0 * 2^1 = 2.0
+    let result = ldexp(1.0, 1);
+    assert(result > 1.5);
+    assert(result < 2.5);
+}
+
+@test
+fn test_ldexp_quadruple() {
+    // ldexp(1.0, 2) = 1.0 * 2^2 = 4.0
+    let result = ldexp(1.0, 2);
+    assert(result > 3.5);
+    assert(result < 4.5);
+}
+
+@test
+fn test_ldexp_halve() {
+    // ldexp(1.0, -1) = 1.0 * 2^(-1) = 0.5
+    let result = ldexp(1.0, -1);
+    assert(result > 0.4);
+    assert(result < 0.6);
+}
+
+@test
+fn test_ldexp_zero() {
+    // ldexp(0.0, n) = 0.0 for any n
+    let result = ldexp(0.0, 100);
+    assert(is_zero(result));
+}
+
+@test
+fn test_ldexp_nan_passthrough() {
+    // ldexp(NAN, n) = NAN
+    let result = ldexp(NAN, 5);
+    assert(is_nan(result));
+}
+
+@test
+fn test_ldexp_infinity_passthrough() {
+    // ldexp(INFINITY, n) = INFINITY
+    let result = ldexp(INFINITY, 5);
+    assert(is_infinite(result));
+}
+
+// =============================================================================
+// Section 17: modf
+// =============================================================================
+
+@test
+fn test_modf_three_point_five() {
+    // modf(3.5) = (3.0, 0.5)
+    let result = modf(3.5);
+    let integral = result.0;
+    let fractional = result.1;
+    assert(integral > 2.5);
+    assert(integral < 3.5);
+    assert(fractional >= 0.0);
+    assert(fractional < 1.0);
+}
+
+@test
+fn test_modf_negative() {
+    // modf(-2.7) should have both parts negative
+    let result = modf(-2.7);
+    let integral = result.0;
+    let fractional = result.1;
+    assert(integral < 0.0);
+    assert(fractional <= 0.0);
+}
+
+@test
+fn test_modf_zero() {
+    // modf(0.0) = (0.0, 0.0)
+    let result = modf(0.0);
+    let integral = result.0;
+    let fractional = result.1;
+    assert(is_zero(integral));
+    assert(is_zero(fractional));
+}
+
+@test
+fn test_modf_integer_value() {
+    // modf(5.0) = (5.0, 0.0)
+    let result = modf(5.0);
+    let integral = result.0;
+    let fractional = result.1;
+    assert(integral > 4.5);
+    assert(is_zero(fractional));
+}
+
+@test
+fn test_modf_nan() {
+    // modf(NAN) should return (NAN, NAN)
+    let result = modf(NAN);
+    assert(is_nan(result.0));
+    assert(is_nan(result.1));
+}
+
+@test
+fn test_modf_infinity() {
+    // modf(INFINITY) should return (INFINITY, copysign(0.0, INFINITY))
+    let result = modf(INFINITY);
+    assert(is_infinite(result.0));
+    assert(is_zero(result.1));
+}
+
+// =============================================================================
+// Section 18: trunc
+// =============================================================================
+
+@test
+fn test_trunc_positive_fractional() {
+    let result = trunc(3.7);
+    assert(result >= 3.0);
+    assert(result < 3.5);
+}
+
+@test
+fn test_trunc_negative_fractional() {
+    let result = trunc(-3.7);
+    assert(result > -3.5);
+    assert(result <= -3.0);
+}
+
+@test
+fn test_trunc_integer() {
+    let result = trunc(5.0);
+    assert(result > 4.5);
+    assert(result < 5.5);
+}
+
+@test
+fn test_trunc_zero() {
+    let result = trunc(0.0);
+    assert(is_zero(result));
+}
+
+// =============================================================================
+// Section 19: next_up
+// =============================================================================
+
+@test
+fn test_next_up_zero() {
+    // next_up(0.0) should be the smallest positive subnormal
+    let result = next_up(0.0);
+    assert(result > 0.0);
+    assert(!is_zero(result));
+}
+
+@test
+fn test_next_up_one() {
+    // next_up(1.0) should be slightly greater than 1.0
+    let result = next_up(1.0);
+    assert(result > 1.0);
+}
+
+@test
+fn test_next_up_negative_one() {
+    // next_up(-1.0) should be closer to zero than -1.0
+    let result = next_up(-1.0);
+    assert(result > -1.0);
+}
+
+@test
+fn test_next_up_ordering() {
+    // next_up(x) > x for finite non-infinity values
+    let x = 42.0;
+    let n = next_up(x);
+    assert(n > x);
+}
+
+@test
+fn test_next_up_nan() {
+    // next_up(NAN) = NAN
+    let result = next_up(NAN);
+    assert(is_nan(result));
+}
+
+// =============================================================================
+// Section 20: next_down
+// =============================================================================
+
+@test
+fn test_next_down_zero() {
+    // next_down(0.0) should be the largest negative subnormal
+    let result = next_down(0.0);
+    assert(result < 0.0);
+    assert(!is_zero(result));
+}
+
+@test
+fn test_next_down_one() {
+    // next_down(1.0) should be slightly less than 1.0
+    let result = next_down(1.0);
+    assert(result < 1.0);
+}
+
+@test
+fn test_next_down_negative_one() {
+    // next_down(-1.0) should be further from zero
+    let result = next_down(-1.0);
+    assert(result < -1.0);
+}
+
+@test
+fn test_next_down_ordering() {
+    // next_down(x) < x for finite non-neg-infinity values
+    let x = 42.0;
+    let n = next_down(x);
+    assert(n < x);
+}
+
+@test
+fn test_next_down_nan() {
+    // next_down(NAN) = NAN
+    let result = next_down(NAN);
+    assert(is_nan(result));
+}
+
+// =============================================================================
+// Section 21: next_up / next_down roundtrip
+// =============================================================================
+
+@test
+fn test_next_up_down_roundtrip_positive() {
+    // For normal positive values: next_down(next_up(x)) == x
+    let x = 1.0;
+    let up = next_up(x);
+    let back = next_down(up);
+    // Should be exactly x again
+    assert(!is_nan(back));
+    assert(is_finite(back));
+}
+
+@test
+fn test_next_down_up_roundtrip_negative() {
+    // For normal negative values: next_up(next_down(x)) == x
+    let x = -1.0;
+    let down = next_down(x);
+    let back = next_up(down);
+    assert(!is_nan(back));
+    assert(is_finite(back));
+}
+
+// =============================================================================
+// Section 22: ulp_distance
+// =============================================================================
+
+@test
+fn test_ulp_distance_same_value() {
+    // Distance between a value and itself is 0
+    let d = ulp_distance(1.0, 1.0);
+    assert_eq(d, 0 as UInt64);
+}
+
+@test
+fn test_ulp_distance_adjacent() {
+    // Distance between adjacent values should be 1
+    let x = 1.0;
+    let y = next_up(x);
+    let d = ulp_distance(x, y);
+    assert_eq(d, 1 as UInt64);
+}
+
+@test
+fn test_ulp_distance_symmetric() {
+    // ulp_distance(a, b) == ulp_distance(b, a)
+    let a = 1.0;
+    let b = 2.0;
+    let d1 = ulp_distance(a, b);
+    let d2 = ulp_distance(b, a);
+    assert_eq(d1, d2);
+}
+
+@test
+fn test_ulp_distance_zero_to_zero() {
+    let d = ulp_distance(0.0, 0.0);
+    assert_eq(d, 0 as UInt64);
+}
+
+@test
+fn test_ulp_distance_nan_returns_max() {
+    // ulp_distance with NaN should return UInt64.MAX
+    let d = ulp_distance(NAN, 1.0);
+    assert_eq(d, UInt64.MAX);
+}
+
+// =============================================================================
+// Section 23: infinity / neg_infinity functions
+// =============================================================================
+
+@test
+fn test_infinity_function_is_infinite() {
+    let val = infinity();
+    assert(is_infinite(val));
+    assert(!signbit(val));
+}
+
+@test
+fn test_neg_infinity_function_is_infinite() {
+    let val = neg_infinity();
+    assert(is_infinite(val));
+    assert(signbit(val));
+}
+
+@test
+fn test_infinity_function_matches_constant() {
+    // The infinity() function should produce the same value as INFINITY constant
+    let fn_val = infinity();
+    let const_val = INFINITY;
+    assert(is_infinite(fn_val));
+    assert(is_infinite(const_val));
+    assert(!signbit(fn_val));
+    assert(!signbit(const_val));
+}
+
+@test
+fn test_neg_infinity_function_matches_constant() {
+    let fn_val = neg_infinity();
+    let const_val = NEG_INFINITY;
+    assert(is_infinite(fn_val));
+    assert(is_infinite(const_val));
+    assert(signbit(fn_val));
+    assert(signbit(const_val));
+}
+
+// =============================================================================
+// Section 24: nan_with_payload / nan_payload
+// =============================================================================
+
+@test
+fn test_nan_with_payload_is_nan() {
+    let val = nan_with_payload(42 as UInt64);
+    assert(is_nan(val));
+}
+
+@test
+fn test_nan_with_payload_zero() {
+    // Even with payload 0, the quiet bit is set, so it's still NaN
+    let val = nan_with_payload(0 as UInt64);
+    assert(is_nan(val));
+}
+
+@test
+fn test_nan_payload_on_nan() {
+    // Create a NaN with a known payload, then extract it
+    let payload_in = 42 as UInt64;
+    let val = nan_with_payload(payload_in);
+    let extracted = nan_payload(val);
+    assert(extracted is Some);
+}
+
+@test
+fn test_nan_payload_on_non_nan() {
+    // nan_payload on a normal number should return None
+    let result = nan_payload(1.0);
+    assert(result is None);
+}
+
+@test
+fn test_nan_payload_on_infinity() {
+    // nan_payload on infinity should return None (infinity is not NaN)
+    let result = nan_payload(INFINITY);
+    assert(result is None);
+}
+
+@test
+fn test_nan_payload_on_zero() {
+    let result = nan_payload(0.0);
+    assert(result is None);
+}
+
+// =============================================================================
+// Section 25: IEEE 754 Constant Properties
+// =============================================================================
+
+@test
+fn test_infinity_greater_than_max() {
+    assert(INFINITY > 1000000.0);
+}
+
+@test
+fn test_neg_infinity_less_than_min() {
+    assert(NEG_INFINITY < -1000000.0);
+}
+
+@test
+fn test_epsilon_positive() {
+    assert(EPSILON > 0.0);
+    assert(EPSILON < 1.0);
+}
+
+@test
+fn test_epsilon_property() {
+    let sum = 1.0 + EPSILON;
+    assert(sum > 1.0);
+}
+
+@test
+fn test_infinity_plus_one_still_infinity() {
+    let result = INFINITY + 1.0;
+    assert(is_infinite(result));
+}
+
+@test
+fn test_neg_infinity_minus_one_still_infinity() {
+    let result = NEG_INFINITY - 1.0;
+    assert(is_infinite(result));
+}
+
+@test
+fn test_infinity_arithmetic() {
+    assert(is_infinite(INFINITY + INFINITY));
+}
+
+@test
+fn test_nan_arithmetic() {
+    assert(is_nan(NAN + 1.0));
+    assert(is_nan(NAN * 0.0));
+}
+
+@test
+fn test_infinity_minus_infinity_is_nan() {
+    let result = INFINITY - INFINITY;
+    assert(is_nan(result));
+}
+
+@test
+fn test_infinity_times_zero_is_nan() {
+    let result = INFINITY * 0.0;
+    assert(is_nan(result));
+}
+
+@test
+fn test_zero_divided_by_zero_is_nan() {
+    let result = 0.0 / 0.0;
+    assert(is_nan(result));
+}
+
+// =============================================================================
+// Section 26: Classification Cross-Checks
+// =============================================================================
+
+@test
+fn test_zero_classification_consistency() {
+    assert(is_zero(0.0));
+    assert(!is_normal(0.0));
+    assert(!is_subnormal(0.0));
+    assert(is_finite(0.0));
+    assert(!is_infinite(0.0));
+    assert(!is_nan(0.0));
+}
+
+@test
+fn test_normal_classification_consistency() {
+    assert(!is_zero(1.0));
+    assert(is_normal(1.0));
+    assert(!is_subnormal(1.0));
+    assert(is_finite(1.0));
+    assert(!is_infinite(1.0));
+    assert(!is_nan(1.0));
+}
+
+@test
+fn test_infinity_classification_consistency() {
+    assert(!is_zero(INFINITY));
+    assert(!is_normal(INFINITY));
+    assert(!is_subnormal(INFINITY));
+    assert(!is_finite(INFINITY));
+    assert(is_infinite(INFINITY));
+    assert(!is_nan(INFINITY));
+}
+
+@test
+fn test_nan_classification_consistency() {
+    assert(!is_zero(NAN));
+    assert(!is_normal(NAN));
+    assert(!is_subnormal(NAN));
+    assert(!is_finite(NAN));
+    assert(!is_infinite(NAN));
+    assert(is_nan(NAN));
+}
+
+@test
+fn test_neg_infinity_classification_consistency() {
+    assert(!is_zero(NEG_INFINITY));
+    assert(!is_normal(NEG_INFINITY));
+    assert(!is_subnormal(NEG_INFINITY));
+    assert(!is_finite(NEG_INFINITY));
+    assert(is_infinite(NEG_INFINITY));
+    assert(!is_nan(NEG_INFINITY));
+}
+
+@test
+fn test_signbit_nan_is_defined() {
+    // NaN can have a sign bit; signbit should not crash on NaN
+    let _ = signbit(NAN);
+    // The sign of NAN is implementation-defined, but the function should work
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

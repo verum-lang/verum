@@ -1,0 +1,110 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: strings, text, parsing, split, find, slice, byte_at
+// Exercises text parsing patterns: CSV parsing, key-value extraction, word counting
+
+fn get_byte(s: Text, i: Int) -> Int {
+    // byte_at returns Maybe<Int>, unwrap with default -1
+    match s.byte_at(i) {
+        Some(b) => b,
+        None => -1,
+    }
+}
+
+fn parse_int_manual(s: Text) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    let len = s.len();
+    let mut negative = 0;
+    if (len > 0) {
+        let first = get_byte(s, 0);
+        if (first == 45) { negative = 1; i = 1; }
+    }
+    while (i < len) {
+        let b = get_byte(s, i);
+        if (b >= 48) {
+            if (b <= 57) {
+                result = result * 10 + (b - 48);
+            }
+        }
+        i = i + 1;
+    }
+    if (negative != 0) { 0 - result } else { result }
+}
+
+fn count_words(text: Text) -> Int {
+    let mut count = 0;
+    let mut in_word = 0;
+    let mut i = 0;
+    let len = text.len();
+    while (i < len) {
+        let b = get_byte(text, i);
+        if (b == 32 || b == 9 || b == 10) {
+            in_word = 0;
+        } else {
+            if (in_word == 0) {
+                count = count + 1;
+                in_word = 1;
+            }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // 1. Manual integer parsing
+    let n1 = parse_int_manual("42");
+    if (n1 != 42) { print(f"FAIL: parse1={n1}"); return 1; }
+    let n2 = parse_int_manual("-7");
+    if (n2 != -7) { print(f"FAIL: parse2={n2}"); return 1; }
+    let n3 = parse_int_manual("0");
+    if (n3 != 0) { print(f"FAIL: parse3={n3}"); return 1; }
+
+    // 2. CSV parsing via split
+    let csv = "Alice,30,Engineer";
+    let fields = csv.split(",");
+    if (fields.len() != 3) { print(f"FAIL: csv fields={fields.len()}"); return 1; }
+    if (fields[0] != "Alice") { return 1; }
+    let age = parse_int_manual(fields[1]);
+    if (age != 30) { print(f"FAIL: age={age}"); return 1; }
+    if (fields[2] != "Engineer") { return 1; }
+
+    // 3. Word counting
+    let wc1 = count_words("hello world");
+    if (wc1 != 2) { print(f"FAIL: wc1={wc1}"); return 1; }
+    let wc2 = count_words("  multiple   spaces  ");
+    if (wc2 != 2) { print(f"FAIL: wc2={wc2}"); return 1; }
+
+    // 4. String searching and extraction
+    let url = "https://example.com/path?key=value";
+    let qpos = match url.find("?") { Some(i) => i, None => -1, };
+    if (qpos < 0) { print("FAIL: no ?"); return 1; }
+    let query = url.slice(qpos + 1, url.len());
+    if (query != "key=value") { print(f"FAIL: query={query}"); return 1; }
+
+    let eqpos = match query.find("=") { Some(i) => i, None => -1, };
+    if (eqpos < 0) { print("FAIL: no ="); return 1; }
+    let key = query.slice(0, eqpos);
+    let val = query.slice(eqpos + 1, query.len());
+    if (key != "key") { print(f"FAIL: key={key}"); return 1; }
+    if (val != "value") { print(f"FAIL: val={val}"); return 1; }
+
+    // 5. String building
+    let mut result = "";
+    let mut i = 0;
+    while (i < 5) {
+        if (i > 0) { result = result + ","; }
+        result = result + f"{i}";
+        i = i + 1;
+    }
+    if (result != "0,1,2,3,4") { print(f"FAIL: build={result}"); return 1; }
+
+    // 6. Replace + chain
+    let cleaned = "  Hello   World  ".trim().replace("   ", " ");
+    if (cleaned != "Hello World") { print(f"FAIL: clean={cleaned}"); return 1; }
+
+    print("951_text_parsing: PASS");
+    0
+}

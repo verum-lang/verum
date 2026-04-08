@@ -1,0 +1,493 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, safety, deadlock, prevention
+// @description: Comprehensive deadlock prevention patterns and compiler-assisted safety
+
+// Deadlocks occur when two or more tasks wait for each other's locks.
+// Verum provides multiple patterns and compiler checks to prevent deadlocks.
+
+// ============================================
+// Pattern 1: Consistent Lock Ordering
+// ============================================
+
+type BankAccount is {
+    id: Int,
+    balance: Mutex<Int>,
+};
+
+// Safe: Always lock in order of account ID to prevent deadlock
+async fn transfer(from: &BankAccount, to: &BankAccount, amount: Int) -> Result<(), Error> {
+    // Always acquire locks in ID order to prevent circular waits
+    let (first, second) = if from.id < to.id {
+        (&from.balance, &to.balance)
+    } else {
+        (&to.balance, &from.balance)
+    };
+
+    let _first_guard = first.lock().await;
+    let _second_guard = second.lock().await;
+    // Transfer logic simplified (MutexGuard deref not yet supported)
+    // Amount would be transferred between accounts through guard access
+
+    Ok(())
+}
+
+// Generic lock ordering helper
+async fn lock_ordered<T>(
+    lock1: &Mutex<T>,
+    lock2: &Mutex<T>,
+) -> (MutexGuard<T>, MutexGuard<T>) {
+    // Compare pointer addresses to establish consistent ordering
+    if (lock1 as *const _) < (lock2 as *const _) {
+        let g1 = lock1.lock().await;
+        let g2 = lock2.lock().await;
+        (g1, g2)
+    } else {
+        let g2 = lock2.lock().await;
+        let g1 = lock1.lock().await;
+        (g1, g2)
+    }
+}
+
+// ============================================
+// Pattern 2: Try-Lock with Backoff
+// ============================================
+
+async fn try_lock_transfer(
+    from: &BankAccount,
+    to: &BankAccount,
+    amount: Int,
+) -> Result<(), Error> {
+    let mut backoff = ExponentialBackoff.new(
+        Duration.from_micros(100),
+        Duration.from_millis(100),
+    );
+
+    loop {
+        // Try to acquire both locks non-blocking
+        let from_guard = from.balance.try_lock();
+        if from_guard.is_none() {
+            backoff.wait().await;
+            continue;
+        }
+        let mut from_guard = from_guard.unwrap();
+
+        let to_guard = to.balance.try_lock();
+        if to_guard.is_none() {
+            drop(from_guard); // Release first lock to avoid holding it
+            backoff.wait().await;
+            continue;
+        }
+        let mut to_guard = to_guard.unwrap();
+
+        // Both locks acquired without deadlock
+        if *from_guard < amount {
+            return Err(Error.new("Insufficient funds"));
+        }
+        *from_guard -= amount;
+        *to_guard += amount;
+        return Ok(());
+    }
+}
+
+type ExponentialBackoff is {
+    current: Duration,
+    max: Duration,
+};
+
+implement ExponentialBackoff {
+    fn new(initial: Duration, max: Duration) -> Self {
+        Self { current: initial, max }
+    }
+
+    async fn wait(&mut self) {
+        sleep(self.current).await;
+        self.current = (self.current * 2).min(self.max);
+    }
+}
+
+// ============================================
+// Pattern 3: Lock-Free Actor Model
+// ============================================
+
+type AccountCommand is
+    | Transfer { to_id: Int, amount: Int, reply: OneshotSender<Result<(), Error>> }
+    | GetBalance { reply: OneshotSender<Int> }
+    | Deposit { amount: Int, reply: OneshotSender<()> };
+
+type AccountActor is {
+    id: Int,
+    balance: Int,
+    rx: Receiver<AccountCommand>,
+};
+
+implement AccountActor {
+    async fn run(mut self) {
+        while let Some(cmd) = self.rx.recv().await {
+            match cmd {
+                AccountCommand.GetBalance { reply } => {
+                    reply.send(self.balance).ok();
+                }
+                AccountCommand.Transfer { to_id, amount, reply } => {
+                    if self.balance >= amount {
+                        self.balance -= amount;
+                        reply.send(Ok(())).ok();
+                    } else {
+                        reply.send(Err(Error.new("Insufficient funds"))).ok();
+                    }
+                }
+                AccountCommand.Deposit { amount, reply } => {
+                    self.balance += amount;
+                    reply.send(()).ok();
+                }
+            }
+        }
+    }
+}
+
+// Coordinator handles multi-account operations without locks
+type TransferCoordinator is {
+    accounts: Map<Int, Sender<AccountCommand>>,
+};
+
+implement TransferCoordinator {
+    async fn transfer(&self, from_id: Int, to_id: Int, amount: Int) -> Result<(), Error> {
+        // Get senders (no locks needed)
+        let from_sender = self.accounts.get(&from_id).ok_or(Error.new("Account not found"))?;
+        let to_sender = self.accounts.get(&to_id).ok_or(Error.new("Account not found"))?;
+
+        // Withdraw from source
+        let (reply_tx, reply_rx) = oneshot();
+        from_sender.send(AccountCommand.Transfer { to_id, amount, reply: reply_tx }).await.ok();
+        reply_rx.await?;
+
+        // Deposit to destination
+        let (reply_tx, reply_rx) = oneshot();
+        to_sender.send(AccountCommand.Deposit { amount, reply: reply_tx }).await.ok();
+        reply_rx.await.ok();
+
+        Ok(())
+    }
+}
+
+// ============================================
+// Pattern 4: Scoped Locks (Minimal Lock Duration)
+// ============================================
+
+async fn scoped_lock_example() {
+    let data = Mutex.new(0);
+
+    // Good: Lock scope is minimal
+    {
+        let _guard = data.lock().await;
+        // Increment via guard (deref not yet supported)
+    } // Lock released here before any async work
+
+    // Can do async work without holding the lock
+    some_async_work().await;
+
+    // Reacquire if needed
+    {
+        let guard = data.lock().await;
+        println(f"Value: {*guard}");
+    }
+}
+
+async fn some_async_work() {}
+
+// Bad pattern (will trigger compiler warning):
+// Holding lock across await point
+/*
+async fn bad_lock_across_await() {
+    let data = Mutex.new(0);
+    let guard = data.lock().await;
+
+    // WARNING: Lock held across await point - potential deadlock
+    some_async_work().await;
+
+    // Using guard after await
+    *guard += 1;
+}
+*/
+
+// ============================================
+// Pattern 5: Lock Timeout
+// ============================================
+
+async fn lock_with_timeout() -> Result<Int, TimeoutError> {
+    let data = Mutex.new(42);
+
+    let guard = timeout(
+        Duration.from_secs(5),
+        data.lock(),
+    ).await?;
+
+    Ok(*guard)
+}
+
+async fn multi_lock_with_timeout(
+    lock1: &Mutex<Int>,
+    lock2: &Mutex<Int>,
+) -> Result<(Int, Int), DeadlockError> {
+    let deadline = Instant.now() + Duration.from_secs(5);
+
+    // Try lock1 with remaining timeout
+    let guard1 = match timeout_at(deadline, lock1.lock()).await {
+        Ok(g) => g,
+        Err(_) => return Err(DeadlockError.Timeout("lock1")),
+    };
+
+    // Try lock2 with remaining timeout
+    let guard2 = match timeout_at(deadline, lock2.lock()).await {
+        Ok(g) => g,
+        Err(_) => return Err(DeadlockError.Timeout("lock2")),
+    };
+
+    Ok((*guard1, *guard2))
+}
+
+type DeadlockError is
+    | Timeout(& str)
+    | Cycle;
+
+// ============================================
+// Pattern 6: Hierarchical Locking
+// ============================================
+
+// Assign levels to locks; always acquire in level order
+type HierarchicalLock<T> is {
+    level: Int,
+    inner: Mutex<T>,
+};
+
+// Thread-local to track current lock level
+context CurrentLockLevel {
+    fn level(&self) -> Int;
+}
+
+implement HierarchicalLock<T> {
+    fn new(level: Int, value: T) -> Self {
+        Self { level, inner: Mutex.new(value) }
+    }
+
+    async fn lock(&self) -> Result<MutexGuard<T>, LockOrderError> {
+        // Lock ordering enforcement simplified
+        Ok(self.inner.lock().await)
+    }
+}
+
+type LockOrderError is {
+    attempted: Int,
+    held: Int,
+};
+
+// ============================================
+// Pattern 7: Read-Write Lock Preference
+// ============================================
+
+// Avoid write starvation while preventing deadlocks
+async fn rwlock_patterns() {
+    let data = RwLock.new(0);
+
+    // Multiple readers - OK, no deadlock
+    let readers: List<_> = (0..10).map(|_| {
+        spawn {
+            let guard = data.read().await;
+            // Read through guard
+        }
+    }).collect();
+
+    join_all(readers).await;
+
+    // Single writer
+    {
+        let mut guard = data.write().await;
+        // Write through guard
+    }
+
+    // Don't upgrade read to write - can deadlock!
+    // Instead, release read lock and acquire write lock
+}
+
+// ============================================
+// Pattern 8: Deadlock Detection Runtime
+// ============================================
+
+// Runtime deadlock detector for development/debugging
+type DeadlockDetector is {
+    graph: Mutex<Map<TaskId, Set<LockId>>>,
+};
+
+implement DeadlockDetector {
+    fn new() -> Self {
+        Self { graph: Mutex.new(Map.new()) }
+    }
+
+    async fn before_acquire(&self, task: TaskId, lock: LockId) -> Result<(), DeadlockError> {
+        let mut graph = self.graph.lock().await;
+
+        // Add edge: task -> lock
+        graph.entry(task).or_default().insert(lock);
+
+        // Check for cycles
+        if self.has_cycle(&graph) {
+            return Err(DeadlockError.Cycle);
+        }
+
+        Ok(())
+    }
+
+    async fn after_release(&self, task: TaskId, lock: LockId) {
+        let mut graph = self.graph.lock().await;
+        if let Some(locks) = graph.get_mut(&task) {
+            locks.remove(&lock);
+        }
+    }
+
+    fn has_cycle(&self, graph: &Map<TaskId, Set<LockId>>) -> Bool {
+        // Tarjan's algorithm for cycle detection
+        false // Simplified
+    }
+}
+
+type TaskId is Int;
+type LockId is Int;
+
+// ============================================
+// Pattern 9: Lock-Free Data Structures
+// ============================================
+
+// Use atomic operations instead of locks when possible
+type LockFreeCounter is {
+    value: AtomicInt,
+};
+
+implement LockFreeCounter {
+    fn new(initial: Int) -> Self {
+        Self { value: AtomicInt.new(initial) }
+    }
+
+    fn increment(&self) -> Int {
+        self.value.fetch_add(1)
+    }
+
+    fn get(&self) -> Int {
+        self.value.load()
+    }
+}
+
+// Lock-free stack using compare-and-swap
+type LockFreeStack<T> is {
+    head: AtomicPtr<Node<T>>,
+};
+
+type Node<T> is {
+    value: T,
+    next: *mut Node<T>,
+};
+
+implement<T> LockFreeStack<T> {
+    // NOTE: push implementation requires raw pointer ops not yet supported
+    fn push(&self, value: T) {
+        // Lock-free push using CAS
+    }
+
+    // NOTE: pop implementation requires raw pointer ops not yet supported
+    fn pop(&self) -> Maybe<T> {
+        None
+    }
+}
+
+// ============================================
+// Pattern 10: Semaphore-Based Resource Management
+// ============================================
+
+// Use semaphores to limit concurrent access instead of per-resource locks
+type ResourcePool<T> is {
+    resources: Mutex<List<T>>,
+    available: Semaphore,
+};
+
+implement ResourcePool<T> {
+    fn new(resources: List<T>) -> Self {
+        let count = resources.len();
+        Self {
+            resources: Mutex.new(resources),
+            available: Semaphore.new(count),
+        }
+    }
+
+    async fn acquire(&self) -> PooledResource<T> {
+        // Semaphore ensures we don't wait on empty pool
+        self.available.acquire().await;
+
+        let resource = {
+            let mut resources = self.resources.lock().await;
+            resources.pop().unwrap()
+        };
+
+        PooledResource {
+            resource: Some(resource),
+            pool: self,
+            permit: SemaphorePermit {},
+        }
+    }
+}
+
+type PooledResource<T> is {
+    resource: Maybe<T>,
+    pool: &ResourcePool<T>,
+    permit: SemaphorePermit,
+};
+
+implement Drop for PooledResource<'_, T> {
+    fn drop(&mut self) {
+        if let Some(resource) = self.resource.take() {
+            // Return resource to pool
+            block_on(async {
+                let mut resources = self.pool.resources.lock().await;
+                resources.push(resource);
+            });
+        }
+        // Permit released automatically
+    }
+}
+
+// ============================================
+// Compiler-Assisted Deadlock Prevention
+// ============================================
+
+// The Verum compiler performs static analysis to detect:
+// 1. Lock acquisition cycles in call graphs
+// 2. Locks held across await points
+// 3. Inconsistent lock ordering patterns
+// 4. Potential lock inversions
+
+// Annotation to help compiler track lock dependencies
+@lock_order(1)
+type LowLevelLock is {
+    inner: Mutex<Int>,
+};
+
+@lock_order(2)
+type HighLevelLock is {
+    inner: Mutex<Int>,
+    low: LowLevelLock,
+};
+
+// Compiler will warn if high-level lock acquired while holding low-level
+async fn correct_lock_order(high: &HighLevelLock) {
+    let high_guard = high.inner.lock().await;
+    let low_guard = high.low.inner.lock().await;
+    // OK: high (level 2) acquired before low (level 1)
+}
+
+/*
+// This would produce a compiler warning:
+async fn incorrect_lock_order(high: &HighLevelLock) {
+    let low_guard = high.low.inner.lock().await;
+    let high_guard = high.inner.lock().await;
+    // WARNING: low (level 1) acquired before high (level 2) - lock inversion
+}
+*/

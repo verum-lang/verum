@@ -1,0 +1,64 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, type, annotation, error
+// @description: Test invalid type annotation in pattern
+// @expected-error: E043
+
+type Option<T> is None | Some(T);
+
+fn test_empty_type_annotation() {
+    let value: Int = 42;
+
+    // Invalid: colon with empty/missing type
+    let x:  = value;
+}
+
+fn test_type_annotation_missing_type() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: pattern type annotation with missing type
+    match opt {
+        Some(x: ) => print("missing type"),
+        None => print("none"),
+    }
+}
+
+fn test_double_colon_type() {
+    let value = 42;
+
+    // Invalid: double colon in type annotation
+    match value {
+        x:: Int => print("double colon"),
+        _ => print("other"),
+    }
+}
+
+fn test_type_without_colon() {
+    let value = 42;
+
+    // Invalid: type annotation without colon
+    match value {
+        x Int => print("no colon"),
+        _ => print("other"),
+    }
+}
+
+fn test_arrow_instead_of_colon() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: arrow instead of colon for type annotation
+    match opt {
+        Some(x -> Int) => print("arrow type"),
+        None => print("none"),
+    }
+}
+
+fn test_type_before_identifier() {
+    let value = 42;
+
+    // Invalid: type before identifier
+    match value {
+        Int: x => print("reversed"),
+        _ => print("other"),
+    }
+}

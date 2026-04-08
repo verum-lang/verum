@@ -1,0 +1,106 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, ambiguous
+// @expected-error: expects 0 argument
+
+/// Test for ambiguous type inference errors.
+/// These examples have multiple valid type solutions or insufficient constraints.
+
+fn main() {
+    // E404: Empty collection with no context
+    let empty: List<_> = List.new();  // ERROR: cannot infer element type for empty list
+
+    // E404: None without type context
+    let nothing = None;  // ERROR: cannot infer type for Maybe<?>
+
+    // E404: Default without context
+    let default_value = Default.default();  // ERROR: cannot infer type for default
+
+    // E404: Parse without target type
+    let parsed = "42".parse();  // ERROR: cannot infer parse result type
+
+    // E404: Collect without collection type
+    let collected = (1..10).collect();  // ERROR: cannot infer collection type
+
+    // E404: From conversion without target
+    let converted = Into.into(42);  // ERROR: cannot infer Into target type
+
+    // E404: Read with ambiguous numeric type
+    let bytes = read_file("data.bin");
+    let number = bytes[0..4].to_number();  // ERROR: which numeric type?
+
+    // E404: Generic function with unconstrained type parameter
+    fn unconstrained<T, U>(x: T) -> T {
+        x  // U is never used, but may cause inference issues
+    }
+    let result = unconstrained(42);  // May or may not error depending on U
+
+    // E404: Overloaded function (if supported)
+    fn overloaded(x: Int) -> Int { x }
+    fn overloaded(x: Text) -> Text { x }
+    let ambiguous = overloaded(if true { 42 } else { 43 });  // Which overload?
+
+    // E404: Closure with ambiguous parameter
+    let closure = |x| x;  // ERROR: cannot infer type of x
+    // Later use doesn't help:
+    let y = closure(42);
+    let z = closure("text");  // By now, closure type is already ambiguous
+
+    // E404: Numeric literal in polymorphic context
+    fn poly<T: From<Int>>(x: T) -> T { x }
+    let num = poly(42);  // ERROR: many types implement From<Int>
+
+    // E404: Associated type without concrete type
+    type Container is protocol {
+        type Item;
+        fn get(&self) -> Self.Item;
+    };
+
+    fn get_item<C: Container>() -> C.Item {
+        panic("no instance")  // ERROR: C is unconstrained
+    }
+    let item = get_item();  // ERROR: cannot infer C
+
+    // E404: Multiple trait implementations
+    type Converter<T> is protocol {
+        fn convert(&self) -> T;
+    };
+
+    implement Converter<Int> for Text {
+        fn convert(&self) -> Int { self.len() }
+    }
+
+    implement Converter<Bool> for Text {
+        fn convert(&self) -> Bool { !self.is_empty() }
+    }
+
+    let text = "hello";
+    let converted2 = text.convert();  // ERROR: which Converter<T>?
+
+    // E404: Return type inference with multiple options
+    fn ambiguous_return<T: Default>() -> T {
+        Default.default()
+    }
+    let val = ambiguous_return();  // ERROR: cannot infer T
+
+    // E404: Bidirectional inference failure
+    fn transform<A, B>(x: A, f: fn(A) -> B) -> B {
+        f(x)
+    }
+    let result2 = transform(42, |x| x);  // OK: A = B = Int
+    let result3 = transform(42, |x| Default.default());  // ERROR: B is ambiguous
+
+    // E404: Type-level computation ambiguity
+    fn select_val<T, U>(flag: Bool, t: T, u: U) -> T {
+        if flag { t } else { panic("wrong branch") }
+    }
+    // The unused U still needs a type
+
+    // E404: Phantom type inference
+    type Phantom<T> is ();
+    let p = Phantom;  // ERROR: cannot infer T in Phantom<T>
+}
+
+// All examples above should produce E404 "Ambiguous type" error
+// The compiler cannot determine a unique type from the available information

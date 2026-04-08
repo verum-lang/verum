@@ -1,0 +1,157 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, game-of-life, cellular-automaton
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Conway's Game of Life on 8x8 grid
+
+// 8x8 grid stored as 8 rows of 8 bits packed into ints
+type Grid is { r0: Int, r1: Int, r2: Int, r3: Int, r4: Int, r5: Int, r6: Int, r7: Int };
+
+fn grid_zero() -> Grid {
+    Grid { r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0 }
+}
+
+fn get_row(g: Grid, r: Int) -> Int {
+    if r == 0 { g.r0 } else if r == 1 { g.r1 } else if r == 2 { g.r2 }
+    else if r == 3 { g.r3 } else if r == 4 { g.r4 } else if r == 5 { g.r5 }
+    else if r == 6 { g.r6 } else { g.r7 }
+}
+
+fn set_row(g: Grid, r: Int, v: Int) -> Grid {
+    Grid {
+        r0: if r == 0 { v } else { g.r0 }, r1: if r == 1 { v } else { g.r1 },
+        r2: if r == 2 { v } else { g.r2 }, r3: if r == 3 { v } else { g.r3 },
+        r4: if r == 4 { v } else { g.r4 }, r5: if r == 5 { v } else { g.r5 },
+        r6: if r == 6 { v } else { g.r6 }, r7: if r == 7 { v } else { g.r7 }
+    }
+}
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(row: Int, col: Int) -> Int {
+    (row / pow2(col)) % 2
+}
+
+fn set_bit(row: Int, col: Int, val: Int) -> Int {
+    let mask = pow2(col);
+    let cleared = row - get_bit(row, col) * mask;
+    cleared + val * mask
+}
+
+fn get_cell(g: Grid, r: Int, c: Int) -> Int {
+    if r < 0 { return 0; }
+    if r > 7 { return 0; }
+    if c < 0 { return 0; }
+    if c > 7 { return 0; }
+    get_bit(get_row(g, r), c)
+}
+
+fn count_neighbors(g: Grid, r: Int, c: Int) -> Int {
+    get_cell(g, r-1, c-1) + get_cell(g, r-1, c) + get_cell(g, r-1, c+1) +
+    get_cell(g, r, c-1) + get_cell(g, r, c+1) +
+    get_cell(g, r+1, c-1) + get_cell(g, r+1, c) + get_cell(g, r+1, c+1)
+}
+
+fn step_grid(g: Grid) -> Grid {
+    let mut next = grid_zero();
+    let mut r = 0;
+    while r < 8 {
+        let mut row_val = 0;
+        let mut c = 0;
+        while c < 8 {
+            let alive = get_cell(g, r, c);
+            let neighbors = count_neighbors(g, r, c);
+            let next_alive = if alive == 1 {
+                if neighbors == 2 { 1 } else if neighbors == 3 { 1 } else { 0 }
+            } else {
+                if neighbors == 3 { 1 } else { 0 }
+            };
+            row_val = set_bit(row_val, c, next_alive);
+            c = c + 1;
+        }
+        next = set_row(next, r, row_val);
+        r = r + 1;
+    }
+    next
+}
+
+fn count_alive(g: Grid) -> Int {
+    let mut total = 0;
+    let mut r = 0;
+    while r < 8 {
+        let mut c = 0;
+        while c < 8 {
+            total = total + get_cell(g, r, c);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    total
+}
+
+fn grids_equal(a: Grid, b: Grid) -> Int {
+    if a.r0 != b.r0 { return 0; }
+    if a.r1 != b.r1 { return 0; }
+    if a.r2 != b.r2 { return 0; }
+    if a.r3 != b.r3 { return 0; }
+    if a.r4 != b.r4 { return 0; }
+    if a.r5 != b.r5 { return 0; }
+    if a.r6 != b.r6 { return 0; }
+    if a.r7 != b.r7 { return 0; }
+    1
+}
+
+fn main() -> Int {
+    // Blinker: period 2 oscillator
+    // . X .     . . .
+    // . X .  -> X X X  -> back
+    // . X .     . . .
+    let mut blinker = grid_zero();
+    blinker = set_row(blinker, 2, set_bit(0, 3, 1));
+    blinker = set_row(blinker, 3, set_bit(0, 3, 1));
+    blinker = set_row(blinker, 4, set_bit(0, 3, 1));
+
+    let gen1 = step_grid(blinker);
+    let gen2 = step_grid(gen1);
+    // Period 2: gen2 should equal gen0
+    assert_eq(grids_equal(blinker, gen2), 1);
+    // gen1 should differ
+    assert_eq(grids_equal(blinker, gen1), 0);
+    // Population stays at 3
+    assert_eq(count_alive(blinker), 3);
+    assert_eq(count_alive(gen1), 3);
+
+    // Block: still life (2x2 square)
+    // X X
+    // X X
+    let mut block = grid_zero();
+    block = set_row(block, 2, set_bit(set_bit(0, 2, 1), 3, 1));
+    block = set_row(block, 3, set_bit(set_bit(0, 2, 1), 3, 1));
+
+    let block1 = step_grid(block);
+    assert_eq(grids_equal(block, block1), 1);
+    assert_eq(count_alive(block), 4);
+
+    // Empty grid stays empty
+    let empty = grid_zero();
+    let empty1 = step_grid(empty);
+    assert_eq(count_alive(empty1), 0);
+
+    // Single cell dies
+    let mut single = grid_zero();
+    single = set_row(single, 3, set_bit(0, 3, 1));
+    assert_eq(count_alive(single), 1);
+    let single1 = step_grid(single);
+    assert_eq(count_alive(single1), 0);
+
+    print("[OK] 298_game_of_life_aot");
+    0
+}

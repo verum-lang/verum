@@ -1,0 +1,84 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: strings, escapes, newline, tab
+// @description: Test string escape sequences
+
+fn test_newline() -> Int {
+    let s = "hello\nworld";
+    if s.len() != 11 {
+        print(f"FAIL newline: len={s.len()}, expected 11");
+        return 1;
+    }
+    print("  newline_escape: OK");
+    0
+}
+
+fn test_tab() -> Int {
+    let s = "a\tb";
+    if s.len() != 3 {
+        print(f"FAIL tab: len={s.len()}, expected 3");
+        return 1;
+    }
+    print("  tab_escape: OK");
+    0
+}
+
+fn test_backslash() -> Int {
+    let s = "a\\b";
+    if s.len() != 3 {
+        print(f"FAIL backslash: len={s.len()}, expected 3");
+        return 1;
+    }
+    print("  backslash_escape: OK");
+    0
+}
+
+fn test_quote() -> Int {
+    let s = "say \"hi\"";
+    if s.len() != 8 {
+        print(f"FAIL quote: len={s.len()}, expected 8");
+        return 1;
+    }
+    print("  quote_escape: OK");
+    0
+}
+
+fn test_empty_string() -> Int {
+    let s = "";
+    if s.len() != 0 {
+        print(f"FAIL empty: len={s.len()}, expected 0");
+        return 1;
+    }
+    print("  empty_string: OK");
+    0
+}
+
+fn test_multichar_escape() -> Int {
+    let s = "line1\nline2\nline3";
+    // 5 + 1 + 5 + 1 + 5 = 17
+    if s.len() != 17 {
+        print(f"FAIL multi_escape: len={s.len()}, expected 17");
+        return 1;
+    }
+    print("  multichar_escape: OK");
+    0
+}
+
+fn main() -> Int {
+    print("String Escape Tests:");
+    let mut failures = 0;
+    failures = failures + test_newline();
+    failures = failures + test_tab();
+    failures = failures + test_backslash();
+    failures = failures + test_quote();
+    failures = failures + test_empty_string();
+    failures = failures + test_multichar_escape();
+
+    if failures == 0 {
+        print("All string escape tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

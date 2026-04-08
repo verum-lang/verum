@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M503
+// @description: Tests M503 SMTVerificationFailed error code
+// @tags: meta-system, type-level, smt, error-codes
+
+// M503 is triggered when SMT solver can't verify a type constraint.
+// This test uses trigger_smt_verification_failed to validate the error code.
+
+meta fn cause_smt_verification_failure() -> Int {
+    // Trigger M503 SMTVerificationFailed error
+    trigger_smt_verification_failed("x > 10 && x < 5", "constraint is unsatisfiable")
+}
+
+fn main() {
+    // This will fail at compile time with M503
+    @const assert(cause_smt_verification_failure() == 0);
+}

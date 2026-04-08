@@ -1,0 +1,269 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, arithmetic, float-extended
+// @timeout: 10000
+
+/// Tests atan2, hypot, copysign, pow, and fmod consistency between tiers.
+/// Uses manual implementations to avoid relying on platform math libraries.
+
+fn main() {
+    test_atan2_manual();
+    test_hypot_manual();
+    test_copysign();
+    test_integer_power();
+    test_fmod_manual();
+}
+
+/// Newton's sqrt
+fn newton_sqrt(x: Float) -> Float {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    let mut guess = if x > 1.0 { x / 2.0 } else { 1.0 };
+    let mut i = 0;
+    while i < 12 {
+        guess = (guess + x / guess) / 2.0;
+        i = i + 1;
+    }
+    guess
+}
+
+/// Manual atan(x) via Taylor series for |x| <= 1
+/// atan(x) = x - x^3/3 + x^5/5 - x^7/7 + ...
+fn taylor_atan_small(x: Float) -> Float {
+    let mut sum = 0.0;
+    let mut term = x;
+    let mut n = 0;
+    while n < 20 {
+        let denom = (2 * n + 1) as Float;
+        sum = sum + term / denom;
+        term = -term * x * x;
+        n = n + 1;
+    }
+    sum
+}
+
+/// Manual atan(x) for any x, using identity: atan(x) = pi/2 - atan(1/x) for x > 1
+fn manual_atan(x: Float) -> Float {
+    let pi_half = 1.5707963267948966;
+    if x < 0.0 {
+        return -manual_atan(-x);
+    }
+    if x > 1.0 {
+        return pi_half - taylor_atan_small(1.0 / x);
+    }
+    taylor_atan_small(x)
+}
+
+/// Manual atan2(y, x) — four-quadrant arctangent
+fn manual_atan2(y: Float, x: Float) -> Float {
+    let pi = 3.141592653589793;
+    let pi_half = 1.5707963267948966;
+
+    if x > 0.0 {
+        return manual_atan(y / x);
+    }
+    if x < 0.0 {
+        if y >= 0.0 {
+            return manual_atan(y / x) + pi;
+        } else {
+            return manual_atan(y / x) - pi;
+        }
+    }
+    // x == 0
+    if y > 0.0 {
+        return pi_half;
+    }
+    if y < 0.0 {
+        return -pi_half;
+    }
+    0.0 // atan2(0,0) = 0 by convention
+}
+
+/// atan2 tests across all quadrants
+fn test_atan2_manual() {
+    println("=== atan2 (manual) ===");
+
+    // Quadrant I: (+y, +x)
+    let r1 = manual_atan2(1.0, 1.0);
+    println(f"atan2(1, 1): {r1}");
+
+    // Quadrant II: (+y, -x)
+    let r2 = manual_atan2(1.0, -1.0);
+    println(f"atan2(1, -1): {r2}");
+
+    // Quadrant III: (-y, -x)
+    let r3 = manual_atan2(-1.0, -1.0);
+    println(f"atan2(-1, -1): {r3}");
+
+    // Quadrant IV: (-y, +x)
+    let r4 = manual_atan2(-1.0, 1.0);
+    println(f"atan2(-1, 1): {r4}");
+
+    // Axis cases
+    let r5 = manual_atan2(0.0, 1.0);
+    println(f"atan2(0, 1): {r5}");
+
+    let r6 = manual_atan2(1.0, 0.0);
+    println(f"atan2(1, 0): {r6}");
+
+    let r7 = manual_atan2(0.0, -1.0);
+    println(f"atan2(0, -1): {r7}");
+
+    let r8 = manual_atan2(-1.0, 0.0);
+    println(f"atan2(-1, 0): {r8}");
+
+    // Specific values
+    let r9 = manual_atan2(3.0, 4.0);
+    println(f"atan2(3, 4): {r9}");
+
+    let r10 = manual_atan2(5.0, 12.0);
+    println(f"atan2(5, 12): {r10}");
+}
+
+/// hypot(x, y) = sqrt(x^2 + y^2) without overflow
+fn test_hypot_manual() {
+    println("\n=== hypot (manual) ===");
+
+    // Basic cases
+    let h1 = newton_sqrt(3.0 * 3.0 + 4.0 * 4.0);
+    println(f"hypot(3, 4): {h1}");
+
+    let h2 = newton_sqrt(5.0 * 5.0 + 12.0 * 12.0);
+    println(f"hypot(5, 12): {h2}");
+
+    let h3 = newton_sqrt(8.0 * 8.0 + 15.0 * 15.0);
+    println(f"hypot(8, 15): {h3}");
+
+    // With negatives (hypot uses absolute values)
+    let h4 = newton_sqrt((-3.0) * (-3.0) + 4.0 * 4.0);
+    println(f"hypot(-3, 4): {h4}");
+
+    let h5 = newton_sqrt((-5.0) * (-5.0) + (-12.0) * (-12.0));
+    println(f"hypot(-5, -12): {h5}");
+
+    // Zero cases
+    let h6 = newton_sqrt(0.0 * 0.0 + 5.0 * 5.0);
+    println(f"hypot(0, 5): {h6}");
+
+    let h7 = newton_sqrt(0.0 * 0.0 + 0.0 * 0.0);
+    println(f"hypot(0, 0): {h7}");
+
+    // Equal components
+    let h8 = newton_sqrt(1.0 * 1.0 + 1.0 * 1.0);
+    println(f"hypot(1, 1): {h8}");
+
+    // Distance computation: point (3,4) to point (6,8)
+    let dx = 6.0 - 3.0;
+    let dy = 8.0 - 4.0;
+    let dist = newton_sqrt(dx * dx + dy * dy);
+    println(f"distance((3,4),(6,8)): {dist}");
+}
+
+/// copysign: magnitude of first arg, sign of second arg
+fn test_copysign() {
+    println("\n=== copysign ===");
+
+    // Manual copysign: |a| with sign of b
+    fn manual_copysign(mag: Float, sign: Float) -> Float {
+        let abs_mag = if mag < 0.0 { -mag } else { mag };
+        if sign < 0.0 {
+            -abs_mag
+        } else {
+            abs_mag
+        }
+    }
+
+    println(f"copysign(5.0, 1.0): {manual_copysign(5.0, 1.0)}");
+    println(f"copysign(5.0, -1.0): {manual_copysign(5.0, -1.0)}");
+    println(f"copysign(-5.0, 1.0): {manual_copysign(-5.0, 1.0)}");
+    println(f"copysign(-5.0, -1.0): {manual_copysign(-5.0, -1.0)}");
+    println(f"copysign(0.0, 1.0): {manual_copysign(0.0, 1.0)}");
+    println(f"copysign(0.0, -1.0): {manual_copysign(0.0, -1.0)}");
+    println(f"copysign(3.14, -2.0): {manual_copysign(3.14, -2.0)}");
+    println(f"copysign(-2.71, 1.0): {manual_copysign(-2.71, 1.0)}");
+}
+
+/// Integer power: x^n via repeated squaring (exact for integer exponents)
+fn test_integer_power() {
+    println("\n=== Integer Power ===");
+
+    fn int_pow(base: Float, exp: Int) -> Float {
+        if exp == 0 {
+            return 1.0;
+        }
+        let mut result = 1.0;
+        let mut b = base;
+        let mut e = if exp < 0 { -exp } else { exp };
+        while e > 0 {
+            if e % 2 == 1 {
+                result = result * b;
+            }
+            b = b * b;
+            e = e / 2;
+        }
+        if exp < 0 {
+            1.0 / result
+        } else {
+            result
+        }
+    }
+
+    println(f"2^0: {int_pow(2.0, 0)}");
+    println(f"2^1: {int_pow(2.0, 1)}");
+    println(f"2^10: {int_pow(2.0, 10)}");
+    println(f"2^20: {int_pow(2.0, 20)}");
+    println(f"3^5: {int_pow(3.0, 5)}");
+    println(f"10^6: {int_pow(10.0, 6)}");
+    println(f"0.5^3: {int_pow(0.5, 3)}");
+    println(f"2^(-3): {int_pow(2.0, -3)}");
+    println(f"(-2)^3: {int_pow(-2.0, 3)}");
+    println(f"(-2)^4: {int_pow(-2.0, 4)}");
+    println(f"1.5^6: {int_pow(1.5, 6)}");
+}
+
+/// fmod: floating-point remainder a - trunc(a/b)*b
+fn test_fmod_manual() {
+    println("\n=== fmod (manual) ===");
+
+    fn manual_fmod(a: Float, b: Float) -> Float {
+        if b == 0.0 {
+            return 0.0;
+        }
+        let quotient = a / b;
+        // Truncate toward zero
+        let truncated = if quotient >= 0.0 {
+            let t = quotient + 0.5;
+            // floor for positive
+            let floored = (t as Int) as Float;
+            if floored > quotient { floored - 1.0 } else { floored }
+        } else {
+            let t = -quotient + 0.5;
+            let floored = (t as Int) as Float;
+            if floored > -quotient { -(floored - 1.0) } else { -floored }
+        };
+        a - truncated * b
+    }
+
+    // Simple cases
+    println(f"fmod(7.0, 3.0): {manual_fmod(7.0, 3.0)}");
+    println(f"fmod(10.0, 3.0): {manual_fmod(10.0, 3.0)}");
+    println(f"fmod(6.0, 3.0): {manual_fmod(6.0, 3.0)}");
+    println(f"fmod(5.5, 2.0): {manual_fmod(5.5, 2.0)}");
+    println(f"fmod(1.0, 0.3): {manual_fmod(1.0, 0.3)}");
+
+    // Negative dividend
+    println(f"fmod(-7.0, 3.0): {manual_fmod(-7.0, 3.0)}");
+    println(f"fmod(-10.0, 3.0): {manual_fmod(-10.0, 3.0)}");
+
+    // Negative divisor
+    println(f"fmod(7.0, -3.0): {manual_fmod(7.0, -3.0)}");
+
+    // Both negative
+    println(f"fmod(-7.0, -3.0): {manual_fmod(-7.0, -3.0)}");
+
+    // Dividend smaller than divisor
+    println(f"fmod(2.0, 5.0): {manual_fmod(2.0, 5.0)}");
+    println(f"fmod(0.0, 5.0): {manual_fmod(0.0, 5.0)}");
+}

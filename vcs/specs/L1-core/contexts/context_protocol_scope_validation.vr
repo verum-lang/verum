@@ -1,0 +1,35 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: context, injectable, scope, thread_safety, singleton
+// @expected-error: not thread-safe
+// @description: Singleton-scoped @injectable types are shared across threads,
+//   so they must be Send + Sync. Types containing non-thread-safe fields
+//   (Cell, RefCell, Rc, UnsafeCell, RawPtr) produce a compile-time error
+//   when marked @injectable(Scope.Singleton).
+
+type Config is {
+    host: Text,
+    port: Int,
+};
+
+// ERROR: Singleton with Rc field is not thread-safe
+// Rc<T> is not Send/Sync -- use Shared<T> instead
+@injectable(Scope.Singleton)
+type CacheService is {
+    config: Config,
+    data: Rc<List<Text>>,
+};
+
+implement CacheService {
+    @inject
+    fn new(config: Config) -> Self {
+        Self {
+            config,
+            data: Rc(List.new()),
+        }
+    }
+}
+
+fn main() -> Int {
+    0
+}

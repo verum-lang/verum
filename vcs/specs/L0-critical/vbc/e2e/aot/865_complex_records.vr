@@ -1,0 +1,117 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, record, implement, methods, complex
+// @expected-exit: 0
+
+// Test: complex record types with methods
+// Validates record construction, field access, implement blocks.
+
+type Vec3 is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+fn vec3_new(x: Int, y: Int, z: Int) -> Vec3 {
+    Vec3 { x: x, y: y, z: z }
+}
+
+fn vec3_dot(a: Vec3, b: Vec3) -> Int {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn vec3_mag_sq(v: Vec3) -> Int {
+    v.x * v.x + v.y * v.y + v.z * v.z
+}
+
+fn vec3_add(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+}
+
+fn vec3_scale(v: Vec3, factor: Int) -> Vec3 {
+    Vec3 { x: v.x * factor, y: v.y * factor, z: v.z * factor }
+}
+
+type Matrix2 is {
+    a: Int,
+    b: Int,
+    c: Int,
+    d: Int,
+};
+
+fn mat2_identity() -> Matrix2 {
+    Matrix2 { a: 1, b: 0, c: 0, d: 1 }
+}
+
+fn mat2_det(m: Matrix2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn mat2_mul(m1: Matrix2, m2: Matrix2) -> Matrix2 {
+    Matrix2 {
+        a: m1.a * m2.a + m1.b * m2.c,
+        b: m1.a * m2.b + m1.b * m2.d,
+        c: m1.c * m2.a + m1.d * m2.c,
+        d: m1.c * m2.b + m1.d * m2.d,
+    }
+}
+
+fn main() -> Int {
+    // Vec3 basics
+    let v1 = vec3_new(1, 2, 3);
+    assert_eq(v1.x, 1);
+    assert_eq(v1.y, 2);
+    assert_eq(v1.z, 3);
+
+    let v2 = vec3_new(4, 5, 6);
+
+    // Dot product: 1*4 + 2*5 + 3*6 = 32
+    let dp = vec3_dot(v1, v2);
+    assert_eq(dp, 32);
+
+    // Magnitude squared: 1 + 4 + 9 = 14
+    assert_eq(vec3_mag_sq(v1), 14);
+
+    // Add vectors: (5, 7, 9)
+    let v3 = vec3_add(v1, v2);
+    assert_eq(v3.x, 5);
+    assert_eq(v3.y, 7);
+    assert_eq(v3.z, 9);
+
+    // Scale: (2, 4, 6)
+    let v4 = vec3_scale(v1, 2);
+    assert_eq(v4.x, 2);
+    assert_eq(v4.y, 4);
+    assert_eq(v4.z, 6);
+
+    // Matrix identity
+    let id = mat2_identity();
+    assert_eq(mat2_det(id), 1);
+
+    // Matrix determinant
+    let m = Matrix2 { a: 3, b: 7, c: 1, d: 4 };
+    // det = 3*4 - 7*1 = 5
+    assert_eq(mat2_det(m), 5);
+
+    // Matrix multiply: identity * m = m
+    let product = mat2_mul(id, m);
+    assert_eq(product.a, 3);
+    assert_eq(product.b, 7);
+    assert_eq(product.c, 1);
+    assert_eq(product.d, 4);
+
+    // Self-multiply
+    let m2 = mat2_mul(m, m);
+    // a: 3*3+7*1=16, b: 3*7+7*4=49, c: 1*3+4*1=7, d: 1*7+4*4=23
+    assert_eq(m2.a, 16);
+    assert_eq(m2.b, 49);
+    assert_eq(m2.c, 7);
+    assert_eq(m2.d, 23);
+
+    // Verify: det(m*m) = det(m)^2 = 25
+    assert_eq(mat2_det(m2), 25);
+
+    print("complex_records: PASS");
+    0
+}

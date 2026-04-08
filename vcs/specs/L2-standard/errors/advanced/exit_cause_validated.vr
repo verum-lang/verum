@@ -1,0 +1,651 @@
+// =============================================================================
+// exit_cause_validated.vr - Tests for Exit, Cause, and Validated types
+// =============================================================================
+// @test: unit
+// @tier: 2
+// @level: L2
+// @tags: errors, exit, cause, validated, two-channel, accumulation
+// @spec: docs/improvements.md Section 16 - Error Handling Evolution
+// =============================================================================
+//
+// Tests for advanced error handling types:
+// - Exit<E, A>: Two-channel error model (Expected vs Defect)
+// - Cause<E>: Lossless error chain
+// - Validated<E, A>: Error accumulation
+//
+// =============================================================================
+
+module tests.errors.advanced.exit_cause_validated;
+
+mount core.*;
+
+// =============================================================================
+// Test Error Types
+// =============================================================================
+
+type ValidationError is
+    | FieldRequired(Text)
+    | InvalidFormat(Text, Text)
+    | OutOfRange(Text, Int, Int);
+
+implement Clone for ValidationError {
+    fn clone(&self) -> ValidationError {
+        match self {
+            FieldRequired(name) => FieldRequired(name.clone()),
+            InvalidFormat(field, msg) => InvalidFormat(field.clone(), msg.clone()),
+            OutOfRange(field, min, max) => OutOfRange(field.clone(), *min, *max),
+        }
+    }
+}
+
+implement Debug for ValidationError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            FieldRequired(name) => f.write_str(f"FieldRequired({name})"),
+            InvalidFormat(field, msg) => f.write_str(f"InvalidFormat({field}: {msg})"),
+            OutOfRange(field, min, max) => f.write_str(f"OutOfRange({field}: {min}-{max})"),
+        }
+    }
+}
+
+type ProcessError is Text;
+
+// =============================================================================
+// PART 1: Exit<E, A> Tests
+// =============================================================================
+
+fn test_exit_success() {
+    let exit: Exit<ProcessError, Int> = Exit.succeed(42);
+
+    assert(exit.is_success());
+    assert(!exit.is_failure());
+    assert(!exit.is_defect());
+}
+
+fn test_exit_failure() {
+    let exit: Exit<ProcessError, Int> = Exit.fail("something went wrong");
+
+    assert(!exit.is_success());
+    assert(exit.is_failure());
+    assert(!exit.is_defect());
+}
+
+fn test_exit_defect() {
+    let exit: Exit<ProcessError, Int> = Exit.die("unexpected error");
+
+    assert(!exit.is_success());
+    assert(!exit.is_failure());
+    assert(exit.is_defect());
+}
+
+fn test_exit_defect_with_location() {
+    let exit: Exit<ProcessError, Int> = Exit.die_at(
+        "null pointer",
+        "process_data:42"
+    );
+
+    assert(exit.is_defect());
+    match exit {
+        Defect(info) => {
+            assert_eq(info.message, "null pointer");
+            assert_eq(info.location, Some("process_data:42"));
+        }
+        _ => assert(false),
+    }
+}
+
+fn test_exit_to_result_success() {
+    let exit: Exit<ProcessError, Int> = Exit.succeed(100);
+    let result = exit.to_result();
+
+    assert_eq(result, Ok(100));
+}
+
+fn test_exit_to_result_failure() {
+    let exit: Exit<ProcessError, Int> = Exit.fail("error");
+    let result = exit.to_result();
+
+    assert_eq(result, Err("error"));
+}
+
+fn test_exit_map_success() {
+    let exit: Exit<ProcessError, Int> = Exit.succeed(10);
+    let mapped = exit.map(|x| x * 2);
+
+    match mapped {
+        Success(v) => assert_eq(v, 20),
+        _ => assert(false),
+    }
+}
+
+fn test_exit_map_failure() {
+    let exit: Exit<ProcessError, Int> = Exit.fail("error");
+    let mapped = exit.map(|x| x * 2);
+
+    match mapped {
+        Failure(e) => assert_eq(e, "error"),
+        _ => assert(false),
+    }
+}
+
+fn test_exit_map_error() {
+    let exit: Exit<Text, Int> = Exit.fail("error");
+    let mapped = exit.map_error(|e| e.len());
+
+    match mapped {
+        Failure(len) => assert_eq(len, 5),
+        _ => assert(false),
+    }
+}
+
+fn test_exit_flat_map() {
+    let exit1: Exit<Text, Int> = Exit.succeed(10);
+    let result = exit1.flat_map(|x| Exit.succeed(x * 3));
+
+    match result {
+        Success(v) => assert_eq(v, 30),
+        _ => assert(false),
+    }
+}
+
+fn test_exit_flat_map_short_circuits() {
+    let exit: Exit<Text, Int> = Exit.fail("first error");
+    let result = exit.flat_map(|x| Exit.succeed(x * 3));
+
+    match result {
+        Failure(e) => assert_eq(e, "first error"),
+        _ => assert(false),
+    }
+}
+
+fn test_exit_fold() {
+    let success: Exit<Text, Int> = Exit.succeed(42);
+    let msg1 = success.fold(
+        |v| f"value: {v}",
+        |e| f"error: {e}",
+        |d| f"defect: {d.message}"
+    );
+    assert_eq(msg1, "value: 42");
+
+    let failure: Exit<Text, Int> = Exit.fail("oops");
+    let msg2 = failure.fold(
+        |v| f"value: {v}",
+        |e| f"error: {e}",
+        |d| f"defect: {d.message}"
+    );
+    assert_eq(msg2, "error: oops");
+
+    let defect: Exit<Text, Int> = Exit.die("crash");
+    let msg3 = defect.fold(
+        |v| f"value: {v}",
+        |e| f"error: {e}",
+        |d| f"defect: {d.message}"
+    );
+    assert_eq(msg3, "defect: crash");
+}
+
+// =============================================================================
+// PART 2: Cause<E> Tests
+// =============================================================================
+
+fn test_cause_fail() {
+    let cause: Cause<Text> = Cause.fail("error message");
+
+    let failures = cause.failures();
+    assert_eq(failures.len(), 1);
+    assert_eq(*failures[0], "error message");
+}
+
+fn test_cause_die() {
+    let cause: Cause<Text> = Cause.die("unexpected crash");
+
+    let failures = cause.failures();
+    assert(failures.is_empty());
+
+    let defects = cause.defects();
+    assert_eq(defects.len(), 1);
+    assert_eq(defects[0].message, "unexpected crash");
+}
+
+fn test_cause_empty() {
+    let cause: Cause<Text> = Empty;
+
+    assert(cause.is_empty());
+    assert(cause.failures().is_empty());
+    assert(cause.defects().is_empty());
+}
+
+fn test_cause_then_sequential() {
+    let cause1: Cause<Text> = Cause.fail("first");
+    let cause2: Cause<Text> = Cause.fail("second");
+    let combined = cause1.then(cause2);
+
+    let failures = combined.failures();
+    assert_eq(failures.len(), 2);
+    // Sequential: first caused second
+}
+
+fn test_cause_both_parallel() {
+    let cause1: Cause<Text> = Cause.fail("error A");
+    let cause2: Cause<Text> = Cause.fail("error B");
+    let combined = cause1.both(cause2);
+
+    let failures = combined.failures();
+    assert_eq(failures.len(), 2);
+    // Parallel: independent errors
+}
+
+fn test_cause_then_with_empty() {
+    let cause: Cause<Text> = Cause.fail("only");
+    let empty: Cause<Text> = Empty;
+
+    // Empty + X = X
+    let result1 = empty.clone().then(cause.clone());
+    assert_eq(result1.failures().len(), 1);
+
+    // X + Empty = X
+    let result2 = cause.then(empty);
+    assert_eq(result2.failures().len(), 1);
+}
+
+fn test_cause_complex_tree() {
+    // Build a complex error tree
+    let e1: Cause<Text> = Cause.fail("validation failed");
+    let e2: Cause<Text> = Cause.fail("network timeout");
+    let e3: Cause<Text> = Cause.fail("disk full");
+    let d1: Cause<Text> = Cause.die("null pointer");
+
+    // (e1 then e2) both (e3 then d1)
+    let left = e1.then(e2);
+    let right = e3.then(d1);
+    let tree = left.both(right);
+
+    let failures = tree.failures();
+    assert_eq(failures.len(), 3);  // 3 Fail nodes
+
+    let defects = tree.defects();
+    assert_eq(defects.len(), 1);   // 1 Die node
+}
+
+// =============================================================================
+// PART 3: Validated<E, A> Tests
+// =============================================================================
+
+fn test_validated_valid() {
+    let v: Validated<Text, Int> = Validated.valid(42);
+
+    assert(v.is_valid());
+    assert(!v.is_invalid());
+    assert(v.errors().is_empty());
+}
+
+fn test_validated_invalid_single() {
+    let v: Validated<Text, Int> = Validated.invalid("error");
+
+    assert(!v.is_valid());
+    assert(v.is_invalid());
+
+    let errors = v.errors();
+    assert_eq(errors.len(), 1);
+    assert_eq(errors[0], "error");
+}
+
+fn test_validated_invalid_multiple() {
+    let v: Validated<Text, Int> = Validated.invalid_all(["e1", "e2", "e3"]);
+
+    assert(v.is_invalid());
+
+    let errors = v.errors();
+    assert_eq(errors.len(), 3);
+}
+
+fn test_validated_map() {
+    let v: Validated<Text, Int> = Validated.valid(10);
+    let mapped = v.map(|x| x * 5);
+
+    match mapped {
+        Valid(value) => assert_eq(value, 50),
+        Invalid(_) => assert(false),
+    }
+}
+
+fn test_validated_map_errors() {
+    let v: Validated<Text, Int> = Validated.invalid_all(["a", "bb", "ccc"]);
+    let mapped = v.map_errors(|s| s.len());
+
+    match mapped {
+        Invalid(errors) => assert_eq(errors, [1, 2, 3]),
+        Valid(_) => assert(false),
+    }
+}
+
+fn test_validated_from_result_ok() {
+    let result: Result<Int, Text> = Ok(100);
+    let validated = Validated.from_result(result);
+
+    match validated {
+        Valid(v) => assert_eq(v, 100),
+        Invalid(_) => assert(false),
+    }
+}
+
+fn test_validated_from_result_err() {
+    let result: Result<Int, Text> = Err("oops");
+    let validated = Validated.from_result(result);
+
+    match validated {
+        Invalid(errors) => {
+            assert_eq(errors.len(), 1);
+            assert_eq(errors[0], "oops");
+        }
+        Valid(_) => assert(false),
+    }
+}
+
+fn test_validated_to_result_valid() {
+    let v: Validated<Text, Int> = Validated.valid(42);
+    let result = v.to_result();
+
+    assert_eq(result, Ok(42));
+}
+
+fn test_validated_to_result_invalid() {
+    let v: Validated<Text, Int> = Validated.invalid_all(["e1", "e2"]);
+    let result = v.to_result();
+
+    match result {
+        Err(errors) => assert_eq(errors.len(), 2),
+        Ok(_) => assert(false),
+    }
+}
+
+fn test_validated_zip_with_both_valid() {
+    let v1: Validated<Text, Int> = Validated.valid(10);
+    let v2: Validated<Text, Int> = Validated.valid(20);
+
+    let combined = v1.zip_with(v2, |a, b| a + b);
+
+    match combined {
+        Valid(sum) => assert_eq(sum, 30),
+        Invalid(_) => assert(false),
+    }
+}
+
+fn test_validated_zip_with_first_invalid() {
+    let v1: Validated<Text, Int> = Validated.invalid("error 1");
+    let v2: Validated<Text, Int> = Validated.valid(20);
+
+    let combined = v1.zip_with(v2, |a, b| a + b);
+
+    match combined {
+        Invalid(errors) => {
+            assert_eq(errors.len(), 1);
+            assert_eq(errors[0], "error 1");
+        }
+        Valid(_) => assert(false),
+    }
+}
+
+fn test_validated_zip_with_second_invalid() {
+    let v1: Validated<Text, Int> = Validated.valid(10);
+    let v2: Validated<Text, Int> = Validated.invalid("error 2");
+
+    let combined = v1.zip_with(v2, |a, b| a + b);
+
+    match combined {
+        Invalid(errors) => {
+            assert_eq(errors.len(), 1);
+            assert_eq(errors[0], "error 2");
+        }
+        Valid(_) => assert(false),
+    }
+}
+
+fn test_validated_zip_with_both_invalid_accumulates() {
+    let v1: Validated<Text, Int> = Validated.invalid_all(["e1", "e2"]);
+    let v2: Validated<Text, Int> = Validated.invalid_all(["e3", "e4"]);
+
+    let combined = v1.zip_with(v2, |a, b| a + b);
+
+    match combined {
+        Invalid(errors) => {
+            // Should have all 4 errors
+            assert_eq(errors.len(), 4);
+        }
+        Valid(_) => assert(false),
+    }
+}
+
+fn test_validated_and() {
+    let v1: Validated<Text, Int> = Validated.valid(10);
+    let v2: Validated<Text, Text> = Validated.valid("hello");
+
+    let combined = v1.and(v2);
+
+    match combined {
+        Valid(s) => assert_eq(s, "hello"),
+        Invalid(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// PART 4: Validated Module Functions
+// =============================================================================
+
+fn test_validated_validate_all_success() {
+    let items: List<Validated<Text, Int>> = [
+        Validated.valid(1),
+        Validated.valid(2),
+        Validated.valid(3),
+    ];
+
+    let result = Validated.validate_all(items);
+
+    match result {
+        Valid(values) => assert_eq(values, [1, 2, 3]),
+        Invalid(_) => assert(false),
+    }
+}
+
+fn test_validated_validate_all_with_errors() {
+    let items: List<Validated<Text, Int>> = [
+        Validated.valid(1),
+        Validated.invalid("error A"),
+        Validated.valid(3),
+        Validated.invalid_all(["error B", "error C"]),
+    ];
+
+    let result = Validated.validate_all(items);
+
+    match result {
+        Invalid(errors) => {
+            assert_eq(errors.len(), 3);  // A, B, C
+        }
+        Valid(_) => assert(false),
+    }
+}
+
+fn test_validated_traverse() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    fn validate_positive(n: Int) -> Validated<Text, Int> {
+        if n > 0 {
+            Validated.valid(n)
+        } else {
+            Validated.invalid(f"not positive: {n}")
+        }
+    }
+
+    let result = Validated.traverse(numbers, validate_positive);
+
+    match result {
+        Valid(values) => assert_eq(values, [1, 2, 3, 4, 5]),
+        Invalid(_) => assert(false),
+    }
+}
+
+fn test_validated_traverse_with_errors() {
+    let numbers = [1, -2, 3, -4, 5];
+
+    fn validate_positive(n: Int) -> Validated<Text, Int> {
+        if n > 0 {
+            Validated.valid(n)
+        } else {
+            Validated.invalid(f"not positive: {n}")
+        }
+    }
+
+    let result = Validated.traverse(numbers, validate_positive);
+
+    match result {
+        Invalid(errors) => {
+            assert_eq(errors.len(), 2);  // -2 and -4
+        }
+        Valid(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// PART 5: Real-world Validation Example
+// =============================================================================
+
+type UserForm is {
+    name: Text,
+    email: Text,
+    age: Int,
+};
+
+fn validate_name(name: Text) -> Validated<ValidationError, Text> {
+    if name.is_empty() {
+        Validated.invalid(FieldRequired("name"))
+    } else if name.len() > 100 {
+        Validated.invalid(InvalidFormat("name", "too long"))
+    } else {
+        Validated.valid(name)
+    }
+}
+
+fn validate_email(email: Text) -> Validated<ValidationError, Text> {
+    if email.is_empty() {
+        Validated.invalid(FieldRequired("email"))
+    } else if !email.contains("@") {
+        Validated.invalid(InvalidFormat("email", "missing @"))
+    } else {
+        Validated.valid(email)
+    }
+}
+
+fn validate_age(age: Int) -> Validated<ValidationError, Int> {
+    if age < 0 || age > 150 {
+        Validated.invalid(OutOfRange("age", 0, 150))
+    } else {
+        Validated.valid(age)
+    }
+}
+
+fn test_form_validation_all_valid() {
+    let form = UserForm {
+        name: "Alice",
+        email: "alice@example.com",
+        age: 30,
+    };
+
+    let name_v = validate_name(form.name);
+    let email_v = validate_email(form.email);
+    let age_v = validate_age(form.age);
+
+    // Combine all validations
+    let result = name_v
+        .zip_with(email_v, |n, e| (n, e))
+        .zip_with(age_v, |(n, e), a| UserForm { name: n, email: e, age: a });
+
+    match result {
+        Valid(user) => {
+            assert_eq(user.name, "Alice");
+            assert_eq(user.email, "alice@example.com");
+            assert_eq(user.age, 30);
+        }
+        Invalid(_) => assert(false),
+    }
+}
+
+fn test_form_validation_multiple_errors() {
+    let form = UserForm {
+        name: "",          // Invalid: empty
+        email: "invalid",  // Invalid: no @
+        age: 200,          // Invalid: out of range
+    };
+
+    let name_v = validate_name(form.name);
+    let email_v = validate_email(form.email);
+    let age_v = validate_age(form.age);
+
+    let result = name_v
+        .zip_with(email_v, |n, e| (n, e))
+        .zip_with(age_v, |(n, e), a| UserForm { name: n, email: e, age: a });
+
+    match result {
+        Invalid(errors) => {
+            // Should have 3 errors: name required, email format, age range
+            assert_eq(errors.len(), 3);
+        }
+        Valid(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    // Exit tests
+    test_exit_success();
+    test_exit_failure();
+    test_exit_defect();
+    test_exit_defect_with_location();
+    test_exit_to_result_success();
+    test_exit_to_result_failure();
+    test_exit_map_success();
+    test_exit_map_failure();
+    test_exit_map_error();
+    test_exit_flat_map();
+    test_exit_flat_map_short_circuits();
+    test_exit_fold();
+
+    // Cause tests
+    test_cause_fail();
+    test_cause_die();
+    test_cause_empty();
+    test_cause_then_sequential();
+    test_cause_both_parallel();
+    test_cause_then_with_empty();
+    test_cause_complex_tree();
+
+    // Validated tests
+    test_validated_valid();
+    test_validated_invalid_single();
+    test_validated_invalid_multiple();
+    test_validated_map();
+    test_validated_map_errors();
+    test_validated_from_result_ok();
+    test_validated_from_result_err();
+    test_validated_to_result_valid();
+    test_validated_to_result_invalid();
+    test_validated_zip_with_both_valid();
+    test_validated_zip_with_first_invalid();
+    test_validated_zip_with_second_invalid();
+    test_validated_zip_with_both_invalid_accumulates();
+    test_validated_and();
+
+    // Validated module tests
+    test_validated_validate_all_success();
+    test_validated_validate_all_with_errors();
+    test_validated_traverse();
+    test_validated_traverse_with_errors();
+
+    // Real-world validation
+    test_form_validation_all_valid();
+    test_form_validation_multiple_errors();
+
+    print("All Exit, Cause, and Validated tests passed!");
+}

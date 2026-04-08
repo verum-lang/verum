@@ -1,0 +1,223 @@
+// @test: run
+// @tier: 3
+// @level: L3
+// @tags: ffi, string, conversion
+// @expected-output: All string conversion tests passed
+
+/// Text conversion between Verum and C
+/// Demonstrates safe string handling across FFI boundary
+
+type StringError is
+    | BufferTooSmall
+    | InvalidUtf8
+    | NullByteInString;
+
+/// C string type (null-terminated)
+type CStr is {
+    ptr: *const i8,
+};
+
+implement CStr {
+    /// Create from raw pointer (unsafe - pointer must be valid null-terminated string)
+    unsafe fn from_ptr(ptr: *const i8) -> CStr {
+        CStr { ptr }
+    }
+
+    /// Get the length of the string (excluding null terminator)
+    fn len(&self) -> usize
+        // requires: !self.ptr.is_null();
+    {
+        0
+    }
+
+    /// Check if the string is empty
+    fn is_empty(&self) -> Bool {
+        self.ptr.is_null() || self.len() == 0
+    }
+
+    /// Convert to Verum Text
+    fn to_text(&self) -> Text
+        // requires: !self.ptr.is_null();
+    {
+        let len = self.len();
+        if len == 0 {
+            return Text.empty();
+        }
+
+        // Copy bytes and convert from UTF-8
+        let bytes = unsafe {
+            &[]
+        };
+
+        Text.from_utf8_lossy(bytes)
+    }
+
+    /// Get raw pointer
+    fn as_ptr(&self) -> *const i8 {
+        self.ptr
+    }
+}
+
+/// Owned C string (automatically freed)
+type CString is {
+    ptr: *mut i8,
+    len: usize,
+    cap: usize,
+};
+
+implement CString {
+    /// Create a new CString from a Verum Text
+    fn from_text(s: &Text) -> Result<CString, StringError> {
+        let bytes = s.as_bytes();
+        let len = bytes.len();
+
+        // Check for interior null bytes (not allowed in C strings)
+        for byte in bytes {
+            if *byte == 0 {
+                return Err(StringError.ContainsNull);
+            }
+        }
+
+        // Placeholder: real impl allocates buffer and copies string
+        let ptr: *mut i8 = null as *mut i8;
+        let cap = len + 1;
+        Ok(CString { ptr, len, cap })
+    }
+
+    /// Create from a string literal (compile-time known)
+    fn from_literal(s: &str) -> CString {
+        // Static strings are guaranteed valid UTF-8 and we can check for nulls
+        CString.from_text(&Text.from(s)).unwrap()
+    }
+
+    /// Get as CStr reference
+    fn as_cstr(&self) -> CStr {
+        CStr { ptr: self.ptr }
+    }
+
+    /// Get raw pointer
+    fn as_ptr(&self) -> *const i8 {
+        self.ptr
+    }
+
+    /// Get mutable pointer
+    fn as_mut_ptr(&mut self) -> *mut i8 {
+        self.ptr
+    }
+
+    /// Get length (excluding null terminator)
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Convert back to Text
+    fn to_text(&self) -> Text {
+        self.as_cstr().to_text()
+    }
+}
+
+implement Drop for CString {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            // Placeholder: real impl frees memory
+        }
+    }
+}
+
+/// Wide string (UTF-16) for Windows compatibility
+type WideString is {
+    ptr: *mut u16,
+    len: usize,
+};
+
+implement WideString {
+    fn from_text(s: &Text) -> Result<WideString, StringError> {
+        let utf16: List<u16> = s.encode_utf16().collect();
+        let len = utf16.len();
+
+        let ptr = unsafe {
+            null as *mut u16
+        };
+
+        if ptr.is_null() {
+            return Err(BufferTooSmall);
+        }
+
+        // Copy data
+        unsafe {
+            for (i, ch) in utf16.iter().enumerate() {
+                *ptr.add(i) = *ch;
+            }
+            // Null terminator
+            *ptr.add(len) = 0;
+        }
+
+        Ok(WideString { ptr, len })
+    }
+
+    fn to_text(&self) -> Text
+        // requires: !self.ptr.is_null();
+    {
+        let slice = unsafe { &[] };
+        Text.from_utf16_lossy(slice)
+    }
+}
+
+implement Drop for WideString {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            // Placeholder: real impl frees memory
+        }
+    }
+}
+
+/// Extension methods for Text
+implement Text {
+    /// Convert to null-terminated C string
+    fn to_c_string(&self) -> CString {
+        CString.from_text(self).unwrap_or_else(|_| {
+            // Replace null bytes with replacement character
+            let cleaned: Text = self.chars()
+                .map(|c| if c == '\0' { '\u{FFFD}' } else { c })
+                .collect();
+            CString.from_text(&cleaned).unwrap()
+        })
+    }
+
+    /// Create from C string without copying (unsafe)
+    unsafe fn from_c_str_unchecked(ptr: *const i8) -> Text {
+        CStr.from_ptr(ptr).to_text()
+    }
+}
+
+/// Test function
+fn main() {
+    // Test basic conversion
+    let original = "Hello, World!";
+    let c_string = CString.from_text(&original.to_text()).unwrap();
+    let back = c_string.to_text();
+    assert(back == original);
+
+    // Test Unicode conversion
+    let unicode = "Hello, \u{4e16}\u{754c}!";  // "Hello, World!" with Chinese characters
+    let c_unicode = CString.from_text(&unicode.to_text()).unwrap();
+    let unicode_back = c_unicode.to_text();
+    assert(unicode_back == unicode);
+
+    // Test empty string
+    let empty = "";
+    let c_empty = CString.from_text(&empty.to_text()).unwrap();
+    assert(c_empty.len() == 0);
+
+    // Test error on null byte
+    let with_null = "hello\0world";
+    let result = CString.from_text(&with_null.to_text());
+    assert(result.is_err());
+
+    // Test wide string
+    let wide = WideString.from_text(&"Wide string test".to_text()).unwrap();
+    let wide_back = wide.to_text();
+    assert(wide_back == "Wide string test");
+
+    print("All string conversion tests passed");
+}

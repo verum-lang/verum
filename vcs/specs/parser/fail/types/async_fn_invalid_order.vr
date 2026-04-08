@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, async, error
+// @description: Test detection of async keyword in wrong position
+// @expected-error: E018
+
+// async must come before fn, not after
+type Callback is fn async () -> Int;

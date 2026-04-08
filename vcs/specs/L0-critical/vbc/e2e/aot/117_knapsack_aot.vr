@@ -1,0 +1,377 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, knapsack, dynamic-programming, optimization, combinatorial
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT 0/1 and unbounded knapsack using DP with flat record arrays
+
+// Items: up to 8 items
+type Items8 is {
+    w0: Int, w1: Int, w2: Int, w3: Int,
+    w4: Int, w5: Int, w6: Int, w7: Int,
+    v0: Int, v1: Int, v2: Int, v3: Int,
+    v4: Int, v5: Int, v6: Int, v7: Int,
+    count: Int
+};
+
+fn item_w(items: Items8, i: Int) -> Int {
+    if i == 0 { items.w0 }
+    else if i == 1 { items.w1 }
+    else if i == 2 { items.w2 }
+    else if i == 3 { items.w3 }
+    else if i == 4 { items.w4 }
+    else if i == 5 { items.w5 }
+    else if i == 6 { items.w6 }
+    else { items.w7 }
+}
+
+fn item_v(items: Items8, i: Int) -> Int {
+    if i == 0 { items.v0 }
+    else if i == 1 { items.v1 }
+    else if i == 2 { items.v2 }
+    else if i == 3 { items.v3 }
+    else if i == 4 { items.v4 }
+    else if i == 5 { items.v5 }
+    else if i == 6 { items.v6 }
+    else { items.v7 }
+}
+
+// Array of 16 elements for DP row (capacity up to 15)
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn arr_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn arr_zero() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// 0/1 Knapsack: each item can be taken at most once
+// Returns optimal value for given capacity
+fn knapsack_01(items: Items8, capacity: Int) -> Int {
+    let n = items.count;
+    let mut prev = arr_zero();
+
+    let mut i = 1;
+    while i <= n {
+        let wi = item_w(items, i - 1);
+        let vi = item_v(items, i - 1);
+        let mut curr = arr_zero();
+        let mut w = 0;
+        while w <= capacity {
+            let skip = arr_get(prev, w);
+            let take = if w >= wi { arr_get(prev, w - wi) + vi } else { 0 };
+            curr = arr_set(curr, w, max_val(skip, take));
+            w = w + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+
+    arr_get(prev, capacity)
+}
+
+// Unbounded Knapsack: each item can be taken unlimited times
+// Uses single 1D DP array: dp[w] = max value with capacity w
+fn knapsack_unbounded(items: Items8, capacity: Int) -> Int {
+    let n = items.count;
+    let mut dp = arr_zero();
+
+    let mut w = 1;
+    while w <= capacity {
+        let mut best = 0;
+        let mut i = 0;
+        while i < n {
+            let wi = item_w(items, i);
+            let vi = item_v(items, i);
+            if wi <= w {
+                let candidate = arr_get(dp, w - wi) + vi;
+                best = max_val(best, candidate);
+            }
+            i = i + 1;
+        }
+        dp = arr_set(dp, w, best);
+        w = w + 1;
+    }
+
+    arr_get(dp, capacity)
+}
+
+// Full DP table for 0/1 knapsack (for reconstruction)
+type DPTable is {
+    r0: Arr16, r1: Arr16, r2: Arr16, r3: Arr16,
+    r4: Arr16, r5: Arr16, r6: Arr16, r7: Arr16, r8: Arr16
+};
+
+fn dp_get_row(t: DPTable, i: Int) -> Arr16 {
+    if i == 0 { t.r0 }
+    else if i == 1 { t.r1 }
+    else if i == 2 { t.r2 }
+    else if i == 3 { t.r3 }
+    else if i == 4 { t.r4 }
+    else if i == 5 { t.r5 }
+    else if i == 6 { t.r6 }
+    else if i == 7 { t.r7 }
+    else { t.r8 }
+}
+
+fn dp_set_row(t: DPTable, i: Int, r: Arr16) -> DPTable {
+    DPTable {
+        r0: if i == 0 { r } else { t.r0 },
+        r1: if i == 1 { r } else { t.r1 },
+        r2: if i == 2 { r } else { t.r2 },
+        r3: if i == 3 { r } else { t.r3 },
+        r4: if i == 4 { r } else { t.r4 },
+        r5: if i == 5 { r } else { t.r5 },
+        r6: if i == 6 { r } else { t.r6 },
+        r7: if i == 7 { r } else { t.r7 },
+        r8: if i == 8 { r } else { t.r8 }
+    }
+}
+
+fn knapsack_01_table(items: Items8, capacity: Int) -> DPTable {
+    let n = items.count;
+    let z = arr_zero();
+    let mut table = DPTable { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z, r8: z };
+
+    let mut i = 1;
+    while i <= n {
+        let wi = item_w(items, i - 1);
+        let vi = item_v(items, i - 1);
+        let prev = dp_get_row(table, i - 1);
+        let mut curr = arr_zero();
+        let mut w = 0;
+        while w <= capacity {
+            let skip = arr_get(prev, w);
+            let take = if w >= wi { arr_get(prev, w - wi) + vi } else { 0 };
+            curr = arr_set(curr, w, max_val(skip, take));
+            w = w + 1;
+        }
+        table = dp_set_row(table, i, curr);
+        i = i + 1;
+    }
+    table
+}
+
+// Reconstruct selected items from 0/1 knapsack
+fn reconstruct(table: DPTable, items: Items8, capacity: Int) -> Arr16 {
+    let n = items.count;
+    let mut selected = arr_zero();
+    let mut w = capacity;
+    let mut i = n;
+    while i > 0 {
+        let cur_val = arr_get(dp_get_row(table, i), w);
+        let prev_val = arr_get(dp_get_row(table, i - 1), w);
+        if cur_val != prev_val {
+            selected = arr_set(selected, i - 1, 1);
+            w = w - item_w(items, i - 1);
+        }
+        i = i - 1;
+    }
+    selected
+}
+
+fn main() -> Int {
+    // === Test Set 1: 0/1 Knapsack basic ===
+    // Items: (weight, value) = (2,6), (3,5), (4,8), (5,9), (7,12)
+    let items1 = Items8 {
+        w0: 2, w1: 3, w2: 4, w3: 5, w4: 7, w5: 0, w6: 0, w7: 0,
+        v0: 6, v1: 5, v2: 8, v3: 9, v4: 12, v5: 0, v6: 0, v7: 0,
+        count: 5
+    };
+
+    // Capacity 10: optimal is items 0,1,3 = w:10, v:20
+    assert_eq(knapsack_01(items1, 10), 20);
+    // Capacity 0: nothing fits
+    assert_eq(knapsack_01(items1, 0), 0);
+    // Capacity 2: only item 0 fits (w=2, v=6)
+    assert_eq(knapsack_01(items1, 2), 6);
+    // Capacity 1: nothing fits
+    assert_eq(knapsack_01(items1, 1), 0);
+    // Capacity 5: items 0+1 (w=5, v=11) beats item 3 (w=5, v=9)
+    assert_eq(knapsack_01(items1, 5), 11);
+
+    // === Test Set 2: Reconstruction ===
+    let table1 = knapsack_01_table(items1, 10);
+    let sel1 = reconstruct(table1, items1, 10);
+    assert_eq(arr_get(sel1, 0), 1);  // item 0 taken
+    assert_eq(arr_get(sel1, 1), 1);  // item 1 taken
+    assert_eq(arr_get(sel1, 2), 0);  // item 2 not taken
+    assert_eq(arr_get(sel1, 3), 1);  // item 3 taken
+    assert_eq(arr_get(sel1, 4), 0);  // item 4 not taken
+
+    // Verify reconstruction is consistent
+    let mut total_w = 0;
+    let mut total_v = 0;
+    let mut k = 0;
+    while k < 5 {
+        if arr_get(sel1, k) == 1 {
+            total_w = total_w + item_w(items1, k);
+            total_v = total_v + item_v(items1, k);
+        }
+        k = k + 1;
+    }
+    assert_eq(total_v, 20);
+    assert(total_w <= 10);
+    assert_eq(total_w, 10);  // exact fit
+
+    // === Test Set 3: All items fit ===
+    let items2 = Items8 {
+        w0: 1, w1: 1, w2: 1, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 10, v1: 20, v2: 30, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 3
+    };
+    assert_eq(knapsack_01(items2, 15), 60);
+    assert_eq(knapsack_01(items2, 3), 60);
+
+    // === Test Set 4: No items fit ===
+    let items3 = Items8 {
+        w0: 10, w1: 10, w2: 10, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 100, v1: 200, v2: 300, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 3
+    };
+    assert_eq(knapsack_01(items3, 5), 0);
+
+    // === Test Set 5: Equal weight items ===
+    let items4 = Items8 {
+        w0: 3, w1: 3, w2: 3, w3: 3, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 1, v1: 5, v2: 3, v3: 7, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 4
+    };
+    // Capacity 6: pick 2 best = items 1(5) + 3(7) = 12
+    assert_eq(knapsack_01(items4, 6), 12);
+    // Capacity 9: pick 3 best = items 1(5) + 2(3) + 3(7) = 15
+    assert_eq(knapsack_01(items4, 9), 15);
+
+    // === Test Set 6: Unbounded knapsack ===
+    // Items: (weight, value) = (2,3), (3,5), (5,8)
+    let items5 = Items8 {
+        w0: 2, w1: 3, w2: 5, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 3, v1: 5, v2: 8, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 3
+    };
+
+    // Capacity 0: 0
+    assert_eq(knapsack_unbounded(items5, 0), 0);
+    // Capacity 2: one item0 (v=3)
+    assert_eq(knapsack_unbounded(items5, 2), 3);
+    // Capacity 3: one item1 (v=5)
+    assert_eq(knapsack_unbounded(items5, 3), 5);
+    // Capacity 5: item1+item0 (v=5+3=8) or item2 (v=8) -> 8
+    assert_eq(knapsack_unbounded(items5, 5), 8);
+    // Capacity 6: two item1s (v=10) or three item0s (v=9) -> 10
+    assert_eq(knapsack_unbounded(items5, 6), 10);
+    // Capacity 10: try combos; 3*item1+0.5? No; 2*item2=16, 5*item0=15,
+    // 3*item1(15)+item0? w=9+2=11 no. 3*item1=15,w=9+item0? w=11>10
+    // 2*item2=16,w=10 exactly -> 16
+    assert_eq(knapsack_unbounded(items5, 10), 16);
+
+    // === Test Set 7: Unbounded vs 0/1 comparison ===
+    // For unbounded, same items can repeat, so value >= 0/1
+    let ub_10 = knapsack_unbounded(items5, 10);
+    let zo_10 = knapsack_01(items5, 10);
+    assert(ub_10 >= zo_10);
+
+    // === Test Set 8: Single item unbounded ===
+    let items6 = Items8 {
+        w0: 3, w1: 0, w2: 0, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 7, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 1
+    };
+    // Capacity 9: 3 copies = 21
+    assert_eq(knapsack_unbounded(items6, 9), 21);
+    // Capacity 10: still 3 copies (can't fit 4th, w=12>10)
+    assert_eq(knapsack_unbounded(items6, 10), 21);
+    // Capacity 12: 4 copies = 28
+    assert_eq(knapsack_unbounded(items6, 12), 28);
+
+    // === Test Set 9: DP monotonicity ===
+    // 0/1 knapsack: increasing capacity never decreases value
+    let mut cap = 1;
+    while cap <= 10 {
+        assert(knapsack_01(items1, cap) >= knapsack_01(items1, cap - 1));
+        cap = cap + 1;
+    }
+
+    // Unbounded knapsack: same monotonicity
+    let mut cap2 = 1;
+    while cap2 <= 10 {
+        assert(knapsack_unbounded(items5, cap2) >= knapsack_unbounded(items5, cap2 - 1));
+        cap2 = cap2 + 1;
+    }
+
+    // === Test Set 10: Fractional-greedy example ===
+    // Greedy by value/weight picks item with best ratio first
+    // But 0/1 knapsack may disagree
+    let items7 = Items8 {
+        w0: 6, w1: 3, w2: 3, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 30, v1: 14, v2: 14, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 3
+    };
+    // Capacity 6: greedy takes item0 (ratio 5, v=30); items1+2 (v=28) < 30
+    // Actually greedy wins here
+    assert_eq(knapsack_01(items7, 6), 30);
+
+    // But with different values:
+    let items8 = Items8 {
+        w0: 6, w1: 3, w2: 3, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0,
+        v0: 25, v1: 14, v2: 14, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        count: 3
+    };
+    // Capacity 6: item0 = 25; items1+2 = 28. DP picks 28.
+    assert_eq(knapsack_01(items8, 6), 28);
+
+    0
+}

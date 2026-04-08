@@ -1,0 +1,20 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, function, chained
+// @description: Chained unsafe function calls within unsafe block
+unsafe fn add_one(x: Int) -> Int {
+    x + 1
+}
+
+unsafe fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn main() {
+    let result: Int = unsafe {
+        let a: Int = add_one(5);
+        let b: Int = double(a);
+        add_one(b)
+    };
+    assert_eq(result, 13);
+}

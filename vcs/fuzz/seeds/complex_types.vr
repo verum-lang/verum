@@ -1,0 +1,352 @@
+// Complex types in Verum
+// Tests generics, refinement types, and advanced type features
+
+use verum_core.base.{List, Text, Map, Maybe, Set, Result}
+
+fn main() {
+    test_generic_types();
+    test_refinement_types();
+    test_associated_types();
+    test_type_aliases();
+    test_higher_kinded();
+}
+
+// Generic types
+fn test_generic_types() {
+    // Generic struct
+    type Pair<A, B> is {
+        first: A,
+        second: B,
+    };
+
+    let p1: Pair<Int, Text> = Pair { first: 42, second: "hello" };
+    let p2: Pair<Bool, Float> = Pair { first: true, second: 3.14 };
+
+    // Nested generics
+    let nested: Pair<List<Int>, Maybe<Text>> = Pair {
+        first: [1, 2, 3],
+        second: Some("nested"),
+    };
+
+    // Generic with constraints
+    type Bounded<T> is {
+        min: T,
+        max: T,
+    } where T: Ord;
+
+    let b: Bounded<Int> = Bounded { min: 0, max: 100 };
+
+    // Multiple constraints
+    type Multi<T> is {
+        value: T,
+    } where T: Eq + Hash + Clone;
+
+    // Generic enum
+    type Either<L, R> is
+        Left(L) |
+        Right(R);
+
+    let e1: Either<Int, Text> = Either.Left(42);
+    let e2: Either<Int, Text> = Either.Right("hello");
+
+    // Generic function usage
+    let swapped = swap(p1);
+    let mapped = map_pair(p2, |b| !b, |f| f * 2.0);
+}
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: pair.second, second: pair.first }
+}
+
+fn map_pair<A, B, C, D>(
+    pair: Pair<A, B>,
+    f: function(A) -> C,
+    g: function(B) -> D,
+) -> Pair<C, D> {
+    Pair { first: f(pair.first), second: g(pair.second) }
+}
+
+// Refinement types
+fn test_refinement_types() {
+    // Simple refinement
+    type Positive is Int where self > 0;
+    type NonNegative is Int where self >= 0;
+    type Percentage is Int where 0 <= self && self <= 100;
+
+    let pos: Positive = 42;
+    let pct: Percentage = 75;
+
+    // Refined function parameters
+    let result = safe_divide(100, 4);
+
+    // Refined return types
+    let abs_val = absolute(-42);
+    assert abs_val >= 0;
+
+    // List with length constraint
+    type NonEmptyList<T> is List<T> where len(self) > 0;
+    type BoundedList<T> is List<T> where len(self) <= 100;
+
+    let ne: NonEmptyList<Int> = [1, 2, 3];
+
+    // Complex refinement predicates
+    type SortedList is List<Int> where is_sorted(self);
+    type UniqueList<T> is List<T> where all_unique(self);
+
+    // Dependent refinements
+    type IndexedAccess<T> is {
+        list: List<T>,
+        index: Int where 0 <= self && self < len(list),
+    };
+
+    // Refinement with quantifiers
+    type AllPositive is List<Int> where forall i in 0..len(self). self[i] > 0;
+}
+
+fn safe_divide(a: Int, b: Int where b != 0) -> Int {
+    a / b
+}
+
+fn absolute(x: Int) -> Int where result >= 0 {
+    if x >= 0 { x } else { -x }
+}
+
+fn is_sorted(list: List<Int>) -> Bool {
+    for i in 1..len(list) {
+        if list[i] < list[i - 1] {
+            return false;
+        }
+    }
+    true
+}
+
+fn all_unique<T: Eq>(list: List<T>) -> Bool {
+    for i in 0..len(list) {
+        for j in i + 1..len(list) {
+            if list[i] == list[j] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+// Associated types
+fn test_associated_types() {
+    protocol Container {
+        type Item;
+        type Iter: Iterator<Item = Self.Item>;
+
+        fn iter(&self) -> Self.Iter;
+        fn add(&mut self, item: Self.Item);
+    }
+
+    type IntList is {
+        data: List<Int>,
+    };
+
+    implement Container for IntList {
+        type Item = Int;
+        type Iter = ListIterator<Int>;
+
+        fn iter(&self) -> Self.Iter {
+            self.data.iter()
+        }
+
+        fn add(&mut self, item: Int) {
+            self.data.push(item);
+        }
+    }
+
+    // Generic with associated type constraint
+    fn process<C: Container>(container: &C) where C.Item: Display {
+        for item in container.iter() {
+            println("{}", item);
+        }
+    }
+
+    // Associated type in return position
+    protocol Factory {
+        type Product;
+        fn create() -> Self.Product;
+    }
+}
+
+// Type aliases
+fn test_type_aliases() {
+    // Simple alias
+    type Integer is Int;
+    type String is Text;
+
+    // Generic alias
+    type IntList is List<Int>;
+    type StringMap<V> is Map<Text, V>;
+    type MaybeInt is Maybe<Int>;
+
+    // Complex alias
+    type Handler<T> is function(T) -> Result<T, Text>;
+    type Callback is function() -> Unit;
+
+    // Nested alias
+    type NestedMap is Map<Text, Map<Text, Int>>;
+
+    // Usage
+    let list: IntList = [1, 2, 3];
+    let map: StringMap<Int> = {"a": 1, "b": 2};
+    let handler: Handler<Int> = |x| Ok(x * 2);
+}
+
+// Higher-kinded types (if supported)
+fn test_higher_kinded() {
+    // Functor-like pattern
+    protocol Mappable<F> {
+        fn map<A, B>(fa: F<A>, f: function(A) -> B) -> F<B>;
+    }
+
+    // Monad-like pattern
+    protocol Chainable<M> {
+        fn pure<A>(a: A) -> M<A>;
+        fn flat_map<A, B>(ma: M<A>, f: function(A) -> M<B>) -> M<B>;
+    }
+
+    // Traverse pattern
+    protocol Traversable<T, F> {
+        fn traverse<A, B>(ta: T<A>, f: function(A) -> F<B>) -> F<T<B>>;
+    }
+}
+
+// CBGR reference types
+fn test_cbgr_types() {
+    // Tier 0: Managed references
+    let value = 42;
+    let managed: &Int = &value;
+
+    // Tier 1: Checked references (compiler-proven safe)
+    let checked: &checked Int = &value;
+
+    // Tier 2: Unsafe references (manual proof required)
+    // SAFETY: value is valid and not borrowed mutably
+    let unsafe_ref: &unsafe Int = unsafe { &value };
+
+    // Reference to reference
+    let ref_ref: &&Int = &&value;
+
+    // Mutable references
+    let mut mutable = 42;
+    let mut_ref: &mut Int = &mut mutable;
+
+    // Slice references
+    let list = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &list[1..3];
+
+    // Fat pointer (slice/dyn)
+    let fat: &[Int] = &list;
+
+    // Thin pointer
+    let thin: &Int = &value;
+}
+
+// Existential types
+fn test_existential_types() {
+    protocol Animal {
+        fn speak(&self) -> Text;
+    }
+
+    type Dog is { name: Text };
+    type Cat is { name: Text };
+
+    implement Animal for Dog {
+        fn speak(&self) -> Text { "woof" }
+    }
+
+    implement Animal for Cat {
+        fn speak(&self) -> Text { "meow" }
+    }
+
+    // Dynamic dispatch
+    let animals: List<&Animal> = [&Dog { name: "Rex" }, &Cat { name: "Whiskers" }];
+
+    for animal in animals {
+        println("{}", animal.speak());
+    }
+
+    // Return existential
+    fn get_animal(is_dog: Bool) -> impl Animal {
+        if is_dog {
+            Dog { name: "Buddy" }
+        } else {
+            Cat { name: "Luna" }
+        }
+    }
+}
+
+// Recursive types
+fn test_recursive_types() {
+    // Self-referential struct
+    type BinaryTree<T> is
+        Leaf(T) |
+        Node {
+            value: T,
+            left: Heap<BinaryTree<T>>,
+            right: Heap<BinaryTree<T>>,
+        };
+
+    // Linked list
+    type LinkedList<T> is {
+        head: Maybe<Heap<Node<T>>>,
+    };
+
+    type Node<T> is {
+        value: T,
+        next: Maybe<Heap<Node<T>>>,
+    };
+
+    // Mutually recursive
+    type Expression is
+        Literal(Int) |
+        Add(Heap<Expression>, Heap<Expression>) |
+        If(Heap<Condition>, Heap<Expression>, Heap<Expression>);
+
+    type Condition is
+        True |
+        False |
+        Compare(Heap<Expression>, Heap<Expression>);
+
+    // Create instances
+    let tree: BinaryTree<Int> = BinaryTree.Node {
+        value: 1,
+        left: Heap(BinaryTree.Leaf(2)),
+        right: Heap(BinaryTree.Leaf(3)),
+    };
+}
+
+// Phantom types
+fn test_phantom_types() {
+    use std.marker.PhantomData;
+
+    // Type-level markers
+    type Meters is {};
+    type Feet is {};
+
+    // Phantom-typed distance
+    type Distance<Unit> is {
+        value: Float,
+        _unit: PhantomData<Unit>,
+    };
+
+    implement<U> Distance<U> {
+        fn new(value: Float) -> Self {
+            Distance { value, _unit: PhantomData }
+        }
+    }
+
+    // Type-safe operations
+    fn add_distances<U>(a: Distance<U>, b: Distance<U>) -> Distance<U> {
+        Distance.new(a.value + b.value)
+    }
+
+    // This would be a type error:
+    // let meters: Distance<Meters> = Distance.new(100.0);
+    // let feet: Distance<Feet> = Distance.new(328.0);
+    // let mixed = add_distances(meters, feet); // Error!
+}

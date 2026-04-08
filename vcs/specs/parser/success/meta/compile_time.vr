@@ -1,0 +1,26 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+
+// Const evaluation
+const SIZE: Int = 1024;
+const BUFFER_SIZE: Int = SIZE * 4;
+
+// Const generics
+type Array<T, const N: Int> is { data: [T; N] };
+type Buffer is Array<Byte, 1024>;
+
+// Static values
+static INSTANCE: Counter = Counter.new();
+static mut GLOBAL_STATE: State = State.default();
+
+// Compile-time function
+@const
+fn compute_hash(s: Text) -> Int {
+    // Evaluated at compile time
+    s.bytes().fold(0, |acc, b| acc * 31 + b)
+}
+
+// Type alias
+type IntList is List<Int>;
+type StringMap<V> is Map<Text, V>;

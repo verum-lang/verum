@@ -1,0 +1,52 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, control-flow, for, range
+// @timeout: 10000
+// @expected-exit: 0
+// @description: For-in loops with ranges: exclusive, accumulation
+
+fn main() -> Int {
+    // Basic for-in range
+    let mut sum = 0;
+    for i in 0..10 {
+        sum = sum + i;
+    }
+    assert_eq(sum, 45);
+
+    // Inclusive range
+    let mut sum2 = 0;
+    for i in 1..=10 {
+        sum2 = sum2 + i;
+    }
+    assert_eq(sum2, 55);
+
+    // Factorial via loop
+    let mut fact = 1;
+    for i in 1..=10 {
+        fact = fact * i;
+    }
+    assert_eq(fact, 3628800);
+
+    // Nested for-in
+    let mut count = 0;
+    for i in 0..5 {
+        for j in 0..5 {
+            if i == j {
+                count = count + 1;
+            }
+        }
+    }
+    assert_eq(count, 5);
+
+    // Sum of squares
+    let mut sq_sum = 0;
+    for i in 1..=10 {
+        sq_sum = sq_sum + i * i;
+    }
+    assert_eq(sq_sum, 385);
+
+    print("diff_for_in_range: ok");
+    0
+}

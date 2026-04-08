@@ -1,0 +1,134 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: arithmetic, bitwise, comparison, numeric
+// @description: Test numeric operations - arithmetic, bitwise, comparison
+
+fn test_arithmetic() -> Int {
+    let a = 100;
+    let b = 37;
+    if a + b != 137 {
+        print("FAIL add");
+        return 1;
+    }
+    if a - b != 63 {
+        print("FAIL sub");
+        return 1;
+    }
+    if a * b != 3700 {
+        print("FAIL mul");
+        return 1;
+    }
+    if a / b != 2 {
+        print("FAIL div");
+        return 1;
+    }
+    if a % b != 26 {
+        print("FAIL mod");
+        return 1;
+    }
+    print("  arithmetic: OK");
+    0
+}
+
+fn test_negative() -> Int {
+    let a = -10;
+    let b = 3;
+    if a + b != -7 {
+        print(f"FAIL neg_add: {a + b}");
+        return 1;
+    }
+    if a * b != -30 {
+        print(f"FAIL neg_mul: {a * b}");
+        return 1;
+    }
+    if a / b != -3 {
+        print(f"FAIL neg_div: {a / b}");
+        return 1;
+    }
+    print("  negative: OK");
+    0
+}
+
+fn test_comparison() -> Int {
+    if !(3 < 5) {
+        print("FAIL 3 < 5");
+        return 1;
+    }
+    if !(5 > 3) {
+        print("FAIL 5 > 3");
+        return 1;
+    }
+    if !(3 <= 3) {
+        print("FAIL 3 <= 3");
+        return 1;
+    }
+    if !(5 >= 5) {
+        print("FAIL 5 >= 5");
+        return 1;
+    }
+    if !(3 == 3) {
+        print("FAIL 3 == 3");
+        return 1;
+    }
+    if !(3 != 4) {
+        print("FAIL 3 != 4");
+        return 1;
+    }
+    print("  comparison: OK");
+    0
+}
+
+fn test_boolean_logic() -> Int {
+    if !(true && true) {
+        print("FAIL and_tt");
+        return 1;
+    }
+    if true && false {
+        print("FAIL and_tf");
+        return 1;
+    }
+    if !(true || false) {
+        print("FAIL or_tf");
+        return 1;
+    }
+    if false || false {
+        print("FAIL or_ff");
+        return 1;
+    }
+    if !!false {
+        print("FAIL not_false");
+        return 1;
+    }
+    print("  boolean_logic: OK");
+    0
+}
+
+fn test_overflow_safe() -> Int {
+    // Large numbers
+    let big = 1000000;
+    let result = big * big;
+    if result != 1000000000000 {
+        print(f"FAIL big_mul: {result}");
+        return 1;
+    }
+    print("  overflow_safe: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Numeric Operations Tests:");
+    let mut failures = 0;
+    failures = failures + test_arithmetic();
+    failures = failures + test_negative();
+    failures = failures + test_comparison();
+    failures = failures + test_boolean_logic();
+    failures = failures + test_overflow_safe();
+
+    if failures == 0 {
+        print("All numeric operations tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

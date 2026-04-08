@@ -1,0 +1,161 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, widget, layer5
+// @description: Verify core.term.widget types — Widget protocol, Block, Paragraph, etc.
+
+/// Layer 5: Widget Library — all 18 widgets with builder APIs.
+
+mount core.term.widget.*;
+mount core.term.style.{Style, Color, Modifier};
+mount core.term.layout.{Rect, Margin, Constraint};
+mount core.term.render.Buffer;
+
+fn test_widget_protocol() {
+    // Widget protocol: fn render(self, area: Rect, buf: &mut Buffer)
+    // StatefulWidget: fn render(self, area: Rect, buf: &mut Buffer, state: &mut State)
+}
+
+fn test_block_builder() {
+    let block = Block.new()
+        .title("My Panel")
+        .borders(Borders.ALL)
+        .border_type(BorderType.Rounded)
+        .border_style(Style.new().fg(Color.Blue))
+        .padding(Margin.uniform(1));
+
+    let area = Rect.new(0, 0, 40, 10);
+    let inner = block.inner(area);
+    // Inner should be smaller due to borders + padding
+    assert(inner.width < area.width);
+    assert(inner.height < area.height);
+}
+
+fn test_paragraph() {
+    let para = Paragraph.new()
+        .text(List.new())
+        .block(Block.new().borders(Borders.ALL).title("Text"))
+        .wrap(Wrap.WordWrap)
+        .alignment(Alignment.Center);
+}
+
+fn test_span_and_line() {
+    let s1 = Span.raw("Hello ");
+    let s2 = Span.styled("World", Style.new().fg(Color.Red).bold());
+
+    // Chain spans into a line
+    let line = s1.then(s2);
+    assert_eq(line.spans.len(), 2);
+
+    // Line from raw text
+    let plain = Line.raw("Simple text");
+    assert_eq(plain.spans.len(), 1);
+}
+
+fn test_table() {
+    let header = Row.new(List.new());
+    let mut rows = List.new();
+    let mut widths = List.new();
+    widths.push(Constraint.Length(10));
+    widths.push(Constraint.Fill(1));
+
+    let table = Table.new(rows, widths)
+        .header(Row.new(List.new()))
+        .highlight_style(Style.new().reversed())
+        .highlight_symbol("▸ ")
+        .column_spacing(2);
+}
+
+fn test_table_state() {
+    let mut state = TableState.new();
+    state.next(10);
+    assert(state.selected.is_some());
+    state.previous();
+    state.first();
+    assert_eq(state.selected, Some(0));
+    state.last(10);
+    assert_eq(state.selected, Some(9));
+}
+
+fn test_list_state() {
+    let mut state = ListState.new();
+    state.next(5);
+    assert(state.selected.is_some());
+    state.previous(5);
+}
+
+fn test_text_input() {
+    let input = TextInput.new()
+        .placeholder("Type here...")
+        .cursor_style(Style.new().reversed())
+        .mask('*');
+
+    let mut state = TextInputState.new();
+    state.insert_char('H');
+    state.insert_char('i');
+    assert_eq(state.value, "Hi");
+    assert_eq(state.cursor_position, 2);
+
+    state.move_left();
+    assert_eq(state.cursor_position, 1);
+
+    state.delete_backward();
+    assert_eq(state.value, "i");
+}
+
+fn test_gauge() {
+    let gauge = Gauge.new()
+        .percent(42)
+        .label(Span.raw("42%"))
+        .gauge_style(Style.new().fg(Color.Green))
+        .use_unicode(true);
+}
+
+fn test_tabs() {
+    let mut titles = List.new();
+    titles.push("Tab 1");
+    titles.push("Tab 2");
+    titles.push("Tab 3");
+    let tabs = Tabs.new(titles)
+        .select(1)
+        .highlight_style(Style.new().bold().reversed());
+}
+
+fn test_scrollbar() {
+    let sb = Scrollbar.vertical()
+        .thumb_style(Style.new().fg(Color.White))
+        .track_symbol("░")
+        .thumb_symbol("█");
+
+    let mut state = ScrollbarState.new(100, 20);
+    state.next();
+    assert_eq(state.position, 1);
+    state.last();
+    assert_eq(state.position, 80);
+}
+
+fn test_spinner() {
+    let spinner = Spinner.new(SpinnerFrames.dots())
+        .label(Span.raw("Loading..."));
+}
+
+fn test_notification() {
+    let n = Notification.info("Operation complete")
+        .title("Success")
+        .width(40);
+}
+
+fn main() {
+    test_block_builder();
+    test_paragraph();
+    test_span_and_line();
+    test_table();
+    test_table_state();
+    test_list_state();
+    test_text_input();
+    test_gauge();
+    test_tabs();
+    test_scrollbar();
+    test_spinner();
+    test_notification();
+}

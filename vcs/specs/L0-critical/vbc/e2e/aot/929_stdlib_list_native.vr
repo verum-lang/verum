@@ -1,0 +1,23 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stdlib, list, native
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Test: core.collections.list compiled natively through VBC → LLVM.
+// This imports the real list module and calls methods on it.
+
+mount core.collections.list;
+
+fn main() -> Int {
+    // For now, just verify the module compiles without errors.
+    // Once CallM interceptions are removed, List methods will
+    // route through the compiled VBC from list.vr.
+    let mut arr = List.new();
+    arr.push(10);
+    arr.push(20);
+    arr.push(30);
+    assert_eq(arr.len(), 3);
+    0
+}

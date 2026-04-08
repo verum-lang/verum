@@ -1,0 +1,7 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, meta, pattern, error
+// @description: Test invalid pattern definition without name or body
+// @expected-error: E018
+
+pattern;

@@ -1,0 +1,27 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, theorem, generics
+// @timeout: 5000
+
+/// Generic theorem declarations with type parameters.
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+// Theorem with generic type parameter
+theorem reflexivity<T: Eq>(x: T)
+    proof by auto;
+
+// Theorem with multiple generic parameters
+theorem symmetry<T: Eq>(a: T, b: T)
+    proof by auto;
+
+// Theorem with generic and requires
+theorem transitivity<T: Eq>(a: T, b: T, c: T)
+    requires a.eq(&b), b.eq(&c)
+    proof by auto;
+
+fn main() {
+    print("Generic theorem tests parsed");
+}

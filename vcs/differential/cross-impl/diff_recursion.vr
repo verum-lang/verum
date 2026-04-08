@@ -1,0 +1,76 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, recursion, function
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Recursive functions: fibonacci, factorial, binary search, tower of hanoi count
+
+fn fibonacci(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+fn sum_recursive(n: Int) -> Int {
+    if n <= 0 { 0 } else { n + sum_recursive(n - 1) }
+}
+
+fn binary_search(arr: List<Int>, target: Int, lo: Int, hi: Int) -> Int {
+    if lo > hi { return -1; }
+    let mid = lo + (hi - lo) / 2;
+    if arr[mid] == target {
+        mid
+    } else if arr[mid] < target {
+        binary_search(arr, target, mid + 1, hi)
+    } else {
+        binary_search(arr, target, lo, mid - 1)
+    }
+}
+
+fn hanoi_moves(n: Int) -> Int {
+    if n <= 0 { 0 } else { 2 * hanoi_moves(n - 1) + 1 }
+}
+
+fn main() -> Int {
+    // Fibonacci
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(5), 5);
+    assert_eq(fibonacci(10), 55);
+    assert_eq(fibonacci(15), 610);
+
+    // Factorial
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+
+    // Sum
+    assert_eq(sum_recursive(100), 5050);
+
+    // Binary search
+    let mut sorted = List.new();
+    let mut i = 0;
+    while i < 20 {
+        sorted.push(i * 3);
+        i = i + 1;
+    }
+    assert_eq(binary_search(sorted, 0, 0, 19), 0);
+    assert_eq(binary_search(sorted, 15, 0, 19), 5);
+    assert_eq(binary_search(sorted, 57, 0, 19), 19);
+    assert_eq(binary_search(sorted, 7, 0, 19), -1);
+
+    // Hanoi moves
+    assert_eq(hanoi_moves(1), 1);
+    assert_eq(hanoi_moves(3), 7);
+    assert_eq(hanoi_moves(10), 1023);
+
+    print("diff_recursion: ok");
+    0
+}

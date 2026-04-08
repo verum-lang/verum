@@ -1,0 +1,39 @@
+// @test: parse-pass
+// @tier: 0
+// @category: generics
+
+type Stack<T> is { items: List<T> };
+
+// Generic implementation
+implement<T> Stack<T> {
+    fn new() -> Self {
+        Stack { items: List.new() }
+    }
+
+    fn push(&mut self, item: T) {
+        self.items.push(item);
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        self.items.pop()
+    }
+}
+
+// Generic protocol implementation
+implement<T: Display> Display for Stack<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write(f, "[");
+        for (i, item) in self.items.iter().enumerate() {
+            if i > 0 { write(f, ", "); }
+            item.fmt(f)?;
+        }
+        write(f, "]")
+    }
+}
+
+// Conditional implementation
+implement<T: Clone> Clone for Stack<T> {
+    fn clone(&self) -> Self {
+        Stack { items: self.items.clone() }
+    }
+}

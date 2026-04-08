@@ -1,0 +1,357 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: ffi, errors, callback, lifetime, unsafe
+// @expected-error: E400
+// @description: Tests detection of dangling callback and lifetime errors in FFI
+
+/// ============================================================
+/// DANGLING CALLBACK ERRORS
+/// ============================================================
+///
+/// E713: Dangling callback pointer
+/// E714: Callback lifetime violation
+/// E715: User data lifetime violation
+/// E716: Captured variable escapes in callback
+/// E717: Invalid callback signature
+/// E718: Callback thread safety violation
+
+// ============================================================
+// TYPE DEFINITIONS
+// ============================================================
+
+type c_int is i32;
+type c_float is f32;
+type c_void is ();
+
+type Callback is extern "C" fn(c_int) -> c_int;
+type DataCallback is extern "C" fn(*mut c_void, c_int) -> c_int;
+
+// ============================================================
+// FFI DECLARATIONS
+// ============================================================
+
+ffi register_callback_api {
+    @extern("C")
+    fn register_callback(cb: DataCallback, user_data: *mut c_void) -> c_int;
+}
+
+ffi store_callback_api {
+    @extern("C")
+    fn store_callback(cb: Callback) -> c_int;
+}
+
+ffi invoke_later_api {
+    @extern("C")
+    fn invoke_later(cb: Callback, delay_ms: c_int);
+}
+
+ffi threaded_callback_api {
+    @extern("C")
+    fn register_threaded_callback(cb: Callback);
+}
+
+ffi signature_check_api {
+    @extern("C")
+    fn register_int_callback(cb: extern "C" fn(c_int) -> c_int);
+}
+
+ffi void_callback_api {
+    @extern("C")
+    fn register_void_callback(cb: extern "C" fn());
+}
+
+// ============================================================
+// E713: DANGLING CALLBACK POINTER
+// ============================================================
+
+// ------------------------------------------------------------
+// Closure converted to function pointer escapes scope
+// ------------------------------------------------------------
+
+fn dangling_closure_callback() {
+    let multiplier = 2;
+
+    // Create a function that captures local variable
+    // @expected-error: E713 "Dangling callback pointer: captures local variable"
+    fn callback_from_closure(x: c_int) -> c_int {
+        // This captures `multiplier` which goes out of scope
+        x * multiplier  // ERROR: multiplier is captured
+    }
+
+    unsafe {
+        // The captured environment will be invalid after this function returns
+        store_callback_api.store_callback(callback_from_closure);  // ERROR
+    }
+}
+
+// ------------------------------------------------------------
+// Function pointer to local nested function with captures
+// ------------------------------------------------------------
+
+fn dangling_nested_function() {
+    let local_value = 42;
+
+    // @expected-error: E716 "Captured variable escapes in callback"
+    @export("C")
+    fn local_callback(x: c_int) -> c_int {
+        x + local_value  // ERROR: local_value won't exist
+    }
+
+    unsafe {
+        // @expected-error: E713 "Dangling callback pointer"
+        invoke_later_api.invoke_later(local_callback, 1000);
+    }
+    // After return, local_callbackps captures are invalid
+}
+
+// ============================================================
+// E714: CALLBACK LIFETIME VIOLATION
+// ============================================================
+
+// ------------------------------------------------------------
+// Callback stored beyond lifetime of referenced data
+// ------------------------------------------------------------
+
+fn callback_lifetime_violation() {
+    let data: [c_int; 4] = [1, 2, 3, 4];
+    let ptr = data.as_ptr();
+
+    // @expected-error: E714 "Callback lifetime violation: 'ptrp may not live long enough"
+    @export("C")
+    fn process_callback(idx: c_int) -> c_int {
+        unsafe { *ptr.add(idx as usize) }  // ERROR: ptr may be dangling
+    }
+
+    unsafe {
+        // callback_api will store this and call it later
+        // But `data` goes out of scope after this function
+        store_callback_api.store_callback(process_callback);
+    }
+}
+// data is dropped here, but callback might still be registered!
+
+// ============================================================
+// E715: USER DATA LIFETIME VIOLATION
+// ============================================================
+
+// ------------------------------------------------------------
+// User data pointer to stack variable
+// ------------------------------------------------------------
+
+fn user_data_stack_violation() {
+    let mut counter: c_int = 0;
+    let counter_ptr: *mut c_void = &mut counter as *mut c_int as *mut c_void;
+
+    @export("C")
+    fn increment_callback(user_data: *mut c_void, value: c_int) -> c_int {
+        // This will be called after counter is gone!
+        unsafe {
+            let counter = user_data as *mut c_int;
+            *counter = *counter + value;
+            *counter
+        }
+    }
+
+    unsafe {
+        // @expected-error: E715 "User data lifetime violation: 'counterp may not live long enough"
+        register_callback_api.register_callback(increment_callback, counter_ptr);  // ERROR
+    }
+}
+// counter goes out of scope, but callback has pointer to it!
+
+// ------------------------------------------------------------
+// Correct: Heap-allocated user data
+// ------------------------------------------------------------
+
+fn user_data_heap_correct() {
+    let counter = Heap(0_c_int);
+    let counter_ptr = Heap.into_raw(counter) as *mut c_void;
+
+    @export("C")
+    fn increment_callback(user_data: *mut c_void, value: c_int) -> c_int {
+        unsafe {
+            let counter = user_data as *mut c_int;
+            *counter = *counter + value;
+            *counter
+        }
+    }
+
+    unsafe {
+        // OK: counter is on heap and won't be automatically freed
+        register_callback_api.register_callback(increment_callback, counter_ptr);
+    }
+    // Must manually free counter_ptr later!
+}
+
+// ============================================================
+// E716: CAPTURED VARIABLE ESCAPES
+// ============================================================
+
+fn captured_variable_escapes() {
+    let local_buffer: [u8; 256] = [0; 256];
+
+    // Closure captures local_buffer
+    let process = |x: c_int| -> c_int {
+        // @expected-error: E716 "Captured variable escapes in callback"
+        local_buffer[x as usize] as c_int  // ERROR
+    };
+
+    // Trying to convert closure to function pointer
+    // @expected-error: E716 "Captured variable escapes in callback: cannot convert capturing closure to fn pointer"
+    let fn_ptr: Callback = process;  // ERROR: closure captures environment
+}
+
+// ============================================================
+// E717: INVALID CALLBACK SIGNATURE
+// ============================================================
+
+@export("C")
+fn wrong_return_type(x: c_int) {
+    // Returns void, but callback expects c_int
+}
+
+@export("C")
+fn wrong_param_type(x: c_float) -> c_int {
+    x as c_int
+}
+
+@export("C")
+fn too_many_params(x: c_int, y: c_int) -> c_int {
+    x + y
+}
+
+fn invalid_callback_signature() {
+    // @expected-error: E717 "Invalid callback signature: expected 'fn(c_int) -> c_intp, found 'fn(c_int)'"
+    unsafe {
+        signature_check_api.register_int_callback(wrong_return_type);  // ERROR
+    }
+
+    // @expected-error: E717 "Invalid callback signature: expected 'fn(c_int) -> c_intp, found 'fn(c_float) -> c_intp"
+    unsafe {
+        signature_check_api.register_int_callback(wrong_param_type);  // ERROR
+    }
+
+    // @expected-error: E717 "Invalid callback signature: parameter count mismatch"
+    unsafe {
+        signature_check_api.register_int_callback(too_many_params);  // ERROR
+    }
+}
+
+// ============================================================
+// E718: CALLBACK THREAD SAFETY VIOLATION
+// ============================================================
+
+static mut GLOBAL_STATE: c_int = 0;  // Not thread-safe!
+
+@export("C")
+fn unsafe_callback(x: c_int) -> c_int {
+    // @expected-error: E718 "Callback thread safety violation: accesses mutable static"
+    unsafe {
+        GLOBAL_STATE = GLOBAL_STATE + x;  // ERROR: Not thread-safe
+        GLOBAL_STATE
+    }
+}
+
+fn thread_unsafe_callback_registration() {
+    // @expected-error: E718 "Callback thread safety violation: callback is not thread-safe"
+    unsafe {
+        threaded_callback_api.register_threaded_callback(unsafe_callback);  // ERROR
+    }
+}
+
+// ============================================================
+// CORRECT PATTERNS
+// ============================================================
+
+// ------------------------------------------------------------
+// Static function callback (correct)
+// ------------------------------------------------------------
+
+@export("C")
+fn static_callback(x: c_int) -> c_int {
+    x * 2  // No captures, pure function
+}
+
+fn correct_static_callback() {
+    // OK: static_callback has 'static lifetime
+    unsafe {
+        store_callback_api.store_callback(static_callback);
+    }
+}
+
+// ------------------------------------------------------------
+// Boxed context pattern (correct)
+// ------------------------------------------------------------
+
+type Context is {
+    multiplier: c_int,
+    offset: c_int,
+};
+
+@export("C")
+fn context_callback(user_data: *mut c_void, x: c_int) -> c_int {
+    // SAFETY: user_data is a valid Context pointer
+    unsafe {
+        let ctx = &*(user_data as *const Context);
+        x * ctx.multiplier + ctx.offset
+    }
+}
+
+fn correct_boxed_context() {
+    let ctx = Heap(Context { multiplier: 2, offset: 10 });
+    let ctx_ptr = Heap.into_raw(ctx) as *mut c_void;
+
+    // OK: ctx is heap-allocated
+    unsafe {
+        register_callback_api.register_callback(context_callback, ctx_ptr);
+    }
+
+    // Later, when unregistering:
+    // unsafe { drop(Heap.from_raw(ctx_ptr as *mut Context)); }
+}
+
+// ------------------------------------------------------------
+// Thread-safe callback with atomics (correct)
+// ------------------------------------------------------------
+
+type AtomicI32 is {
+    value: c_int,
+};
+
+implement AtomicI32 {
+    fn new(value: c_int) -> AtomicI32 {
+        AtomicI32 { value }
+    }
+
+    fn fetch_add(&self, val: c_int) -> c_int {
+        // Placeholder - would use actual atomic operations
+        let old = self.value;
+        old
+    }
+}
+
+static ATOMIC_COUNTER: AtomicI32 = AtomicI32 { value: 0 };
+
+@export("C")
+fn thread_safe_callback(x: c_int) -> c_int {
+    // OK: Uses atomic operations
+    ATOMIC_COUNTER.fetch_add(x)
+}
+
+fn correct_thread_safe_callback() {
+    // OK: Callback uses thread-safe atomics
+    unsafe {
+        threaded_callback_api.register_threaded_callback(thread_safe_callback);
+    }
+}
+
+// ============================================================
+// MAIN
+// ============================================================
+
+fn main() {
+    // This file tests error detection - it should fail type checking
+    // with the expected errors listed above
+    print("Dangling callback error tests");
+}

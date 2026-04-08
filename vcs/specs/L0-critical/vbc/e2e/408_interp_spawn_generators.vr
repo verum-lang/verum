@@ -1,0 +1,118 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, spawn, generators, combined
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests combining spawn/await with generators and closures.
+
+fn* range(start: Int, end_excl: Int) -> Int {
+    let mut i = start;
+    while i < end_excl {
+        yield i;
+        i = i + 1;
+    }
+}
+
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int {
+    if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn compute_sum(n: Int) -> Int {
+    let mut total = 0;
+    for i in range(1, n + 1) {
+        total = total + i;
+    }
+    total
+}
+
+fn factorial(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 2;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_spawn_basic() {
+    let t = spawn fib(10);
+    let result = t.await;
+    assert_eq(result, 55);
+    print("spawn_basic: ok");
+}
+
+fn test_spawn_multiple() {
+    let t1 = spawn fib(8);
+    let t2 = spawn fib(9);
+    let t3 = spawn fib(10);
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+    assert_eq(r1, 21);
+    assert_eq(r2, 34);
+    assert_eq(r3, 55);
+    assert_eq(r1 + r2 + r3, 110);
+    print("spawn_multiple: ok");
+}
+
+fn test_spawn_with_generator_func() {
+    let t = spawn compute_sum(100);
+    let result = t.await;
+    assert_eq(result, 5050);
+    print("spawn_with_generator_func: ok");
+}
+
+fn test_spawn_factorial() {
+    let t1 = spawn factorial(6);
+    let t2 = spawn factorial(8);
+    let r1 = t1.await;
+    let r2 = t2.await;
+    assert_eq(r1, 720);
+    assert_eq(r2, 40320);
+    print("spawn_factorial: ok");
+}
+
+fn test_spawn_in_loop() {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 5 {
+        let t = spawn factorial(i);
+        total = total + t.await;
+        i = i + 1;
+    }
+    // 1! + 2! + 3! + 4! + 5! = 1 + 2 + 6 + 24 + 120 = 153
+    assert_eq(total, 153);
+    print("spawn_in_loop: ok");
+}
+
+fn test_generator_after_spawn() {
+    // First spawn a computation, then iterate with generator
+    let t = spawn fib(12);
+    let fib_result = t.await;
+    assert_eq(fib_result, 144);
+
+    let mut gen_sum = 0;
+    for i in range(1, 13) {
+        gen_sum = gen_sum + i;
+    }
+    assert_eq(gen_sum, 78);
+
+    // Combined result
+    assert_eq(fib_result + gen_sum, 222);
+    print("generator_after_spawn: ok");
+}
+
+fn main() -> Int {
+    test_spawn_basic();
+    test_spawn_multiple();
+    test_spawn_with_generator_func();
+    test_spawn_factorial();
+    test_spawn_in_loop();
+    test_generator_after_spawn();
+    print("[OK] 408_interp_spawn_generators");
+    0
+}

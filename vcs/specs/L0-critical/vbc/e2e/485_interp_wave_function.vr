@@ -1,0 +1,226 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, wave_function_collapse, constraint_propagation, domain_reduction
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Wave Function Collapse simplified: constraint propagation on a 1D grid.
+//
+// Each cell in a grid of size N has a "domain" represented as a bitmask of
+// possible values (tiles). E.g., domain=0b0111 means values {0,1,2} are possible.
+//
+// Constraints: adjacent cells cannot both have a "forbidden pair".
+// For simplicity, constraint: if cell i is collapsed to value V, then
+// adjacent cells lose value V from their domain (no two adjacent cells same value).
+//
+// Algorithm:
+//   1. Collapse cell with fewest options (lowest popcount > 0).
+//   2. Assign the lowest-bit set value.
+//   3. Propagate: remove that value from neighbours' domains.
+//   4. Repeat until all collapsed or contradiction.
+
+// Count set bits in a bitmask.
+fn popcount(mask: Int) -> Int {
+    let mut v = mask;
+    let mut cnt = 0;
+    while v > 0 {
+        cnt = cnt + (v & 1);
+        v = v / 2;
+    }
+    cnt
+}
+
+// Lowest set bit index (0-indexed).
+fn lowest_bit(mask: Int) -> Int {
+    let mut v = mask;
+    let mut idx = 0;
+    while v > 0 && (v & 1) == 0 {
+        v = v / 2;
+        idx = idx + 1;
+    }
+    idx
+}
+
+// Remove value v from domain mask.
+fn domain_remove(mask: Int, v: Int) -> Int {
+    mask & (0 - (1 + (1 << v)))  // clear bit v
+}
+
+// Check if value v is in domain mask.
+fn domain_has(mask: Int, v: Int) -> Int {
+    if (mask >> v) & 1 == 1 { 1 } else { 0 }
+}
+
+// Find cell with minimum domain size > 0 that is not yet fully collapsed.
+// "Collapsed" means popcount == 1.
+// Returns index or -1 if all collapsed.
+fn wfc_find_min(domains: [Int; 32], n: Int) -> Int {
+    let mut best_idx = 0 - 1;
+    let mut best_pc  = 1000;
+    let mut i = 0;
+    while i < n {
+        let pc = popcount(domains[i]);
+        if pc > 1 && pc < best_pc {
+            best_pc  = pc;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+// Propagate: after collapsing cell `idx` to bit-value `val`,
+// remove `val` from immediate neighbours (1D, left and right).
+fn wfc_propagate(domains: [Int; 32], n: Int, idx: Int, val: Int) {
+    if idx > 0 {
+        domains[idx - 1] = domain_remove(domains[idx - 1], val);
+    }
+    if idx < n - 1 {
+        domains[idx + 1] = domain_remove(domains[idx + 1], val);
+    }
+}
+
+// Collapse cell `idx` to its lowest-bit value and propagate.
+fn wfc_collapse_one(domains: [Int; 32], n: Int, idx: Int) -> Int {
+    let val = lowest_bit(domains[idx]);
+    // Set domain to only this value (single bit)
+    domains[idx] = 1 << val;
+    wfc_propagate(domains, n, idx, val);
+    val
+}
+
+// Run full WFC collapse until no uncollapsed cells remain or contradiction.
+// Returns 1 if successful, 0 if contradiction (empty domain encountered).
+fn wfc_run(domains: [Int; 32], n: Int) -> Int {
+    let mut steps = 0;
+    while steps < n * 2 {
+        let idx = wfc_find_min(domains, n);
+        if idx < 0 { return 1; } // All collapsed
+        wfc_collapse_one(domains, n, idx);
+        // Check for contradiction
+        let mut i = 0;
+        while i < n {
+            if domains[i] == 0 { return 0; }
+            i = i + 1;
+        }
+        steps = steps + 1;
+    }
+    1
+}
+
+fn test_wfc_popcount() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(3), 2);   // 0b11
+    assert_eq(popcount(7), 3);   // 0b111
+    assert_eq(popcount(15), 4);  // 0b1111
+    // 0b1010 = 10 -> 2 bits set
+    assert_eq(popcount(10), 2);
+    // 0b1111111 = 127 -> 7 bits set
+    assert_eq(popcount(127), 7);
+    print("wfc_popcount: ok");
+}
+
+fn test_wfc_domain_ops() {
+    // domain = 0b1111 (values 0,1,2,3)
+    let d = 15;
+    assert_eq(domain_has(d, 0), 1);
+    assert_eq(domain_has(d, 3), 1);
+
+    // Remove value 2: 0b1111 & ~0b0100 = 0b1011 = 11
+    let d2 = domain_remove(d, 2);
+    assert_eq(domain_has(d2, 2), 0);
+    assert_eq(domain_has(d2, 0), 1);
+    assert_eq(domain_has(d2, 1), 1);
+    assert_eq(domain_has(d2, 3), 1);
+
+    // lowest_bit
+    assert_eq(lowest_bit(1),  0);
+    assert_eq(lowest_bit(2),  1);
+    assert_eq(lowest_bit(4),  2);
+    assert_eq(lowest_bit(6),  1);  // 0b110: lowest is bit 1
+    assert_eq(lowest_bit(12), 2);  // 0b1100: lowest is bit 2
+
+    print("wfc_domain_ops: ok");
+}
+
+fn test_wfc_simple_collapse() {
+    // 4 cells, each starting with domain 0b0111 (values 0,1,2).
+    // After collapsing cell 0 to value 0 (lowest bit):
+    //   cell 0 = 0b001 (value 0)
+    //   cell 1 loses value 0: 0b0111 & ~1 = 0b0110 (values 1,2)
+    let mut domains = [7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 4;
+    let v = wfc_collapse_one(domains, n, 0);
+    assert_eq(v, 0);
+    assert_eq(domains[0], 1);   // only value 0
+    // cell 1: was 7 = 0b111, remove bit 0: 0b110 = 6
+    assert_eq(domains[1], 6);
+    // cell 2: unchanged (not adjacent to 0)
+    assert_eq(domains[2], 7);
+    assert_eq(domains[3], 7);
+    print("wfc_simple_collapse: ok");
+}
+
+fn test_wfc_full_run() {
+    // 6 cells, domain = 0b0111 (3 tile types: 0,1,2).
+    // Run WFC and verify:
+    //   - All cells collapsed (popcount 1).
+    //   - No empty domains (0).
+    //   - Adjacent cells differ (constraint enforced).
+    let mut domains = [7, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 6;
+    let ok = wfc_run(domains, n);
+    assert_eq(ok, 1);
+
+    // All domains have popcount 1 (fully collapsed)
+    let mut i = 0;
+    while i < n {
+        assert_eq(popcount(domains[i]), 1);
+        i = i + 1;
+    }
+
+    // Adjacent cells do not share the same single value
+    // (because each collapse removes the value from neighbours)
+    i = 0;
+    while i < n - 1 {
+        // domains[i] and domains[i+1] should differ
+        assert(domains[i] != domains[i + 1]);
+        i = i + 1;
+    }
+    print("wfc_full_run: ok");
+}
+
+fn test_wfc_larger_grid() {
+    // 8 cells, domain 0b1111 (4 tile types). Run and verify consistency.
+    let mut domains = [15, 15, 15, 15, 15, 15, 15, 15,
+                       0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 8;
+    let ok = wfc_run(domains, n);
+    assert_eq(ok, 1);
+
+    let mut total_domains = 0;
+    let mut i = 0;
+    while i < n {
+        total_domains = total_domains + popcount(domains[i]);
+        i = i + 1;
+    }
+    // Each cell fully collapsed -> total popcount = n
+    assert_eq(total_domains, 8);
+    print(f"wfc_larger_grid: all_collapsed total_popcount={total_domains} ok");
+}
+
+fn main() -> Int {
+    test_wfc_popcount();
+    test_wfc_domain_ops();
+    test_wfc_simple_collapse();
+    test_wfc_full_run();
+    test_wfc_larger_grid();
+    print("[OK] 485_interp_wave_function");
+    0
+}

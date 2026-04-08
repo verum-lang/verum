@@ -1,0 +1,302 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, tensor, convolution, cnn
+
+/// Tensor convolution operations for neural networks including
+/// 1D, 2D, 3D convolutions, transposed convolutions, and dilated convolutions.
+
+fn main() {
+    let device = Device.gpu(0);
+
+    // 1D convolution
+    test_conv1d(device);
+
+    // 2D convolution
+    test_conv2d(device);
+
+    // 3D convolution
+    test_conv3d(device);
+
+    // Transposed convolution
+    test_conv_transpose(device);
+
+    // Dilated convolution
+    test_dilated_conv(device);
+
+    // Grouped convolution
+    test_grouped_conv(device);
+
+    // Depthwise separable convolution
+    test_depthwise_separable(device);
+}
+
+fn test_conv1d(device: Device) {
+    // Input: (batch, channels, length)
+    let input: Tensor<f32, [4, 3, 100]> = Tensor.randn().to(device);
+
+    // Kernel: (out_channels, in_channels, kernel_size)
+    let kernel: Tensor<f32, [8, 3, 5]> = Tensor.randn().to(device);
+
+    // Basic 1D convolution (no padding, stride 1)
+    let output = input.conv1d(kernel, stride: 1, padding: 0);
+    assert(output.shape() == [4, 8, 96]);  // (100 - 5 + 1) = 96
+
+    // With padding (same size output)
+    let output_same = input.conv1d(kernel, stride: 1, padding: 2);
+    assert(output_same.shape() == [4, 8, 100]);
+
+    // With stride
+    let output_strided = input.conv1d(kernel, stride: 2, padding: 2);
+    assert(output_strided.shape() == [4, 8, 50]);
+
+    // With bias
+    let bias: Tensor<f32, [8]> = Tensor.zeros().to(device);
+    let output_bias = input.conv1d(kernel, stride: 1, padding: 2, bias: Some(bias));
+
+    // Causal padding (for autoregressive models)
+    let causal_output = input.conv1d(kernel, stride: 1, padding: "causal");
+    assert(causal_output.shape() == [4, 8, 100]);
+}
+
+fn test_conv2d(device: Device) {
+    // Input: (batch, channels, height, width)
+    let input: Tensor<f32, [4, 3, 32, 32]> = Tensor.randn().to(device);
+
+    // Kernel: (out_channels, in_channels, kernel_h, kernel_w)
+    let kernel: Tensor<f32, [16, 3, 3, 3]> = Tensor.randn().to(device);
+
+    // Basic 2D convolution
+    let output = input.conv2d(kernel, stride: 1, padding: 0);
+    assert(output.shape() == [4, 16, 30, 30]);  // (32 - 3 + 1) = 30
+
+    // Same padding
+    let output_same = input.conv2d(kernel, stride: 1, padding: 1);
+    assert(output_same.shape() == [4, 16, 32, 32]);
+
+    // Stride 2 (downsampling)
+    let output_stride = input.conv2d(kernel, stride: 2, padding: 1);
+    assert(output_stride.shape() == [4, 16, 16, 16]);
+
+    // Asymmetric padding
+    let output_asym = input.conv2d(kernel, stride: 1, padding: [1, 2, 1, 2]);
+    // padding: [top, bottom, left, right]
+
+    // Different stride per dimension
+    let output_diff_stride = input.conv2d(kernel, stride: [1, 2], padding: 1);
+    assert(output_diff_stride.shape() == [4, 16, 32, 16]);
+
+    // Large kernel (7x7 for first layer)
+    let large_kernel: Tensor<f32, [64, 3, 7, 7]> = Tensor.randn().to(device);
+    let large_input: Tensor<f32, [4, 3, 224, 224]> = Tensor.randn().to(device);
+
+    let large_output = large_input.conv2d(large_kernel, stride: 2, padding: 3);
+    assert(large_output.shape() == [4, 64, 112, 112]);
+}
+
+fn test_conv3d(device: Device) {
+    // Input: (batch, channels, depth, height, width)
+    let input: Tensor<f32, [2, 3, 16, 32, 32]> = Tensor.randn().to(device);
+
+    // Kernel: (out_channels, in_channels, k_d, k_h, k_w)
+    let kernel: Tensor<f32, [8, 3, 3, 3, 3]> = Tensor.randn().to(device);
+
+    // Basic 3D convolution
+    let output = input.conv3d(kernel, stride: 1, padding: 1);
+    assert(output.shape() == [2, 8, 16, 32, 32]);
+
+    // Stride in all dimensions
+    let output_strided = input.conv3d(kernel, stride: [1, 2, 2], padding: 1);
+    assert(output_strided.shape() == [2, 8, 16, 16, 16]);
+
+    // Video convolution (2+1D style)
+    // Spatial kernel
+    let spatial_kernel: Tensor<f32, [8, 3, 1, 3, 3]> = Tensor.randn().to(device);
+    let spatial_out = input.conv3d(spatial_kernel, stride: 1, padding: [0, 1, 1]);
+
+    // Temporal kernel
+    let temporal_kernel: Tensor<f32, [8, 8, 3, 1, 1]> = Tensor.randn().to(device);
+    let temporal_out = spatial_out.conv3d(temporal_kernel, stride: 1, padding: [1, 0, 0]);
+}
+
+fn test_conv_transpose(device: Device) {
+    // Transposed convolution (upsampling)
+    let input: Tensor<f32, [4, 16, 16, 16]> = Tensor.randn().to(device);
+    let kernel: Tensor<f32, [16, 8, 4, 4]> = Tensor.randn().to(device);
+    // Note: kernel shape is (in_channels, out_channels, k_h, k_w) for transpose
+
+    // Basic transposed convolution
+    let output = input.conv_transpose2d(kernel, stride: 2, padding: 1);
+    assert(output.shape() == [4, 8, 32, 32]);  // 2x upsampling
+
+    // With output padding for precise size control
+    let output_pad = input.conv_transpose2d(
+        kernel,
+        stride: 2,
+        padding: 1,
+        output_padding: 1
+    );
+
+    // 4x upsampling
+    let kernel_4x: Tensor<f32, [16, 8, 8, 8]> = Tensor.randn().to(device);
+    let output_4x = input.conv_transpose2d(kernel_4x, stride: 4, padding: 2);
+    assert(output_4x.shape() == [4, 8, 64, 64]);
+
+    // 1D transposed convolution
+    let input_1d: Tensor<f32, [4, 8, 50]> = Tensor.randn().to(device);
+    let kernel_1d: Tensor<f32, [8, 4, 4]> = Tensor.randn().to(device);
+
+    let output_1d = input_1d.conv_transpose1d(kernel_1d, stride: 2, padding: 1);
+    assert(output_1d.shape() == [4, 4, 100]);
+}
+
+fn test_dilated_conv(device: Device) {
+    // Dilated (atrous) convolution for increased receptive field
+    let input: Tensor<f32, [4, 3, 64, 64]> = Tensor.randn().to(device);
+    let kernel: Tensor<f32, [16, 3, 3, 3]> = Tensor.randn().to(device);
+
+    // Dilation rate 1 (standard convolution)
+    let output_d1 = input.conv2d(kernel, stride: 1, padding: 1, dilation: 1);
+    assert(output_d1.shape() == [4, 16, 64, 64]);
+
+    // Dilation rate 2 (effective kernel size 5x5)
+    let output_d2 = input.conv2d(kernel, stride: 1, padding: 2, dilation: 2);
+    assert(output_d2.shape() == [4, 16, 64, 64]);
+
+    // Dilation rate 4 (effective kernel size 9x9)
+    let output_d4 = input.conv2d(kernel, stride: 1, padding: 4, dilation: 4);
+    assert(output_d4.shape() == [4, 16, 64, 64]);
+
+    // Different dilation per dimension
+    let output_asym = input.conv2d(kernel, stride: 1, padding: [1, 2], dilation: [1, 2]);
+
+    // Dilated convolution chain (ASPP-style)
+    let rates = [1, 6, 12, 18];
+    let outputs: List<Tensor<f32, [4, 16, 64, 64]> > = rates.iter()
+        .map(|&rate| {
+            let pad = rate;  // Padding to maintain size
+            input.conv2d(kernel, stride: 1, padding: pad, dilation: rate)
+        })
+        .collect();
+
+    // Concatenate multi-scale features
+    let concatenated = Tensor.cat(outputs, axis: 1);
+    assert(concatenated.shape() == [4, 64, 64, 64]);
+}
+
+fn test_grouped_conv(device: Device) {
+    // Grouped convolution (used in ResNeXt, ShuffleNet)
+    let input: Tensor<f32, [4, 32, 28, 28]> = Tensor.randn().to(device);
+
+    // Kernel: (out_channels, in_channels/groups, k_h, k_w)
+    let kernel: Tensor<f32, [64, 8, 3, 3]> = Tensor.randn().to(device);
+
+    // 4 groups: each group processes 32/4 = 8 input channels
+    let output = input.conv2d(kernel, stride: 1, padding: 1, groups: 4);
+    assert(output.shape() == [4, 64, 28, 28]);
+
+    // Channel shuffle for grouped convolution
+    fn channel_shuffle(x: Tensor<f32, [B, C, H, W]>, groups: usize) -> Tensor<f32, [B, C, H, W]> {
+        let (b, c, h, w) = x.shape();
+        let channels_per_group = c / groups;
+
+        // Reshape to (B, groups, channels_per_group, H, W)
+        let reshaped = x.reshape([b, groups, channels_per_group, h, w]);
+
+        // Transpose groups and channels: (B, channels_per_group, groups, H, W)
+        let transposed = reshaped.permute([0, 2, 1, 3, 4]);
+
+        // Flatten back: (B, C, H, W)
+        transposed.reshape([b, c, h, w])
+    }
+
+    let shuffled = channel_shuffle(output, 4);
+    assert(shuffled.shape() == [4, 64, 28, 28]);
+}
+
+fn test_depthwise_separable(device: Device) {
+    // Depthwise separable convolution (MobileNet-style)
+    let input: Tensor<f32, [4, 32, 28, 28]> = Tensor.randn().to(device);
+
+    // Depthwise: each channel has its own filter
+    // Kernel: (channels, 1, k_h, k_w) with groups=channels
+    let dw_kernel: Tensor<f32, [32, 1, 3, 3]> = Tensor.randn().to(device);
+    let dw_output = input.conv2d(dw_kernel, stride: 1, padding: 1, groups: 32);
+    assert(dw_output.shape() == [4, 32, 28, 28]);
+
+    // Pointwise: 1x1 convolution to mix channels
+    let pw_kernel: Tensor<f32, [64, 32, 1, 1]> = Tensor.randn().to(device);
+    let pw_output = dw_output.conv2d(pw_kernel, stride: 1, padding: 0);
+    assert(pw_output.shape() == [4, 64, 28, 28]);
+
+    // Combined depthwise separable
+    fn depthwise_separable_conv(
+        input: Tensor<f32, [B, C_IN, H, W]>,
+        dw_kernel: Tensor<f32, [C_IN, 1, KH, KW]>,
+        pw_kernel: Tensor<f32, [C_OUT, C_IN, 1, 1]>,
+        stride: usize,
+        padding: usize
+    ) -> Tensor<f32, [B, C_OUT, H_OUT, W_OUT]> {
+        let dw = input.conv2d(dw_kernel, stride, padding, groups: C_IN);
+        dw.conv2d(pw_kernel, stride: 1, padding: 0)
+    }
+
+    // Inverted residual block (MobileNetV2)
+    fn inverted_residual(
+        input: Tensor<f32, [B, C, H, W]>,
+        expand_ratio: f32,
+        out_channels: usize,
+        stride: usize
+    ) -> Tensor<f32, [B, OUT_C, H_OUT, W_OUT]> {
+        let in_channels = input.shape()[1];
+        let hidden_dim = (in_channels as f32 * expand_ratio) as usize;
+
+        // Expansion (pointwise)
+        let pw1_kernel: Tensor<f32, [hidden_dim, in_channels, 1, 1]> = Tensor.randn();
+        let expanded = input.conv2d(pw1_kernel, stride: 1, padding: 0).relu6();
+
+        // Depthwise
+        let dw_kernel: Tensor<f32, [hidden_dim, 1, 3, 3]> = Tensor.randn();
+        let dw = expanded.conv2d(dw_kernel, stride, padding: 1, groups: hidden_dim).relu6();
+
+        // Projection (pointwise, no activation)
+        let pw2_kernel: Tensor<f32, [out_channels, hidden_dim, 1, 1]> = Tensor.randn();
+        let projected = dw.conv2d(pw2_kernel, stride: 1, padding: 0);
+
+        // Residual connection if same size
+        if stride == 1 && in_channels == out_channels {
+            input + projected
+        } else {
+            projected
+        }
+    }
+}
+
+// Pooling operations (often used with convolutions)
+fn test_pooling(device: Device) {
+    let input: Tensor<f32, [4, 16, 32, 32]> = Tensor.randn().to(device);
+
+    // Max pooling
+    let max_pool = input.max_pool2d(kernel_size: 2, stride: 2);
+    assert(max_pool.shape() == [4, 16, 16, 16]);
+
+    // Average pooling
+    let avg_pool = input.avg_pool2d(kernel_size: 2, stride: 2);
+    assert(avg_pool.shape() == [4, 16, 16, 16]);
+
+    // Global average pooling
+    let global_avg = input.mean(axes: [2, 3]);
+    assert(global_avg.shape() == [4, 16]);
+
+    // Adaptive pooling (output size specified)
+    let adaptive = input.adaptive_avg_pool2d([7, 7]);
+    assert(adaptive.shape() == [4, 16, 7, 7]);
+}
+
+// Helper function to extend Tensor with relu6
+implement Tensor<f32, [B, C, H, W]> {
+    fn relu6(self) -> Self {
+        self.clamp(0.0, 6.0)
+    }
+}

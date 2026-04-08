@@ -1,0 +1,435 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, control_flow, oracle
+// @timeout: 15000
+
+/// Control Flow Oracle Tests
+/// Compare control flow behavior between Tier 0 (interpreter) and Tier 3 (AOT)
+/// to ensure semantic equivalence for all control flow constructs.
+///
+/// These tests cover:
+/// - If/else branching
+/// - Match expressions with guards
+/// - Loops (while, for, loop)
+/// - Break and continue
+/// - Short-circuit evaluation
+/// - Recursion (including tail recursion)
+
+fn test_if_basic() {
+    let x = 42;
+
+    if x > 0 {
+        println("x is positive");
+    }
+
+    if x < 0 {
+        println("x is negative");
+    } else {
+        println("x is non-negative");
+    }
+
+    if x == 0 {
+        println("zero");
+    } else if x < 10 {
+        println("single digit");
+    } else if x < 100 {
+        println("double digit");
+    } else {
+        println("large number");
+    }
+}
+
+fn test_if_expression() {
+    let x = 10;
+
+    // If as expression
+    let result = if x > 5 { "big" } else { "small" };
+    println(f"result: {result}");
+
+    // Nested if expressions
+    let category = if x < 0 {
+        "negative"
+    } else if x == 0 {
+        "zero"
+    } else if x < 10 {
+        "small positive"
+    } else {
+        "large positive"
+    };
+    println(f"category: {category}");
+}
+
+fn test_if_complex_conditions() {
+    let a = true;
+    let b = false;
+    let c = true;
+
+    // Logical AND
+    if a && b {
+        println("a && b: true");
+    } else {
+        println("a && b: false");
+    }
+
+    // Logical OR
+    if a || b {
+        println("a || b: true");
+    } else {
+        println("a || b: false");
+    }
+
+    // Combined
+    if (a || b) && c {
+        println("(a || b) && c: true");
+    }
+
+    // Negation
+    if !b {
+        println("!b: true");
+    }
+
+    // Complex
+    if (a && !b) || (!a && c) {
+        println("complex condition: true");
+    }
+}
+
+fn test_short_circuit() {
+    let mut counter = 0;
+
+    fn increment(c: &mut Int) -> Bool {
+        *c = *c + 1;
+        true
+    }
+
+    // Short-circuit AND - second operand should not be evaluated
+    if false && increment(&mut counter) {
+        println("should not reach");
+    }
+    println(f"counter after false && ...: {counter}");  // Should be 0
+
+    // Short-circuit OR - second operand should not be evaluated
+    if true || increment(&mut counter) {
+        println("true || ... triggered");
+    }
+    println(f"counter after true || ...: {counter}");  // Should still be 0
+
+    // Non-short-circuit case
+    if true && increment(&mut counter) {
+        println("true && ... triggered");
+    }
+    println(f"counter after true && increment: {counter}");  // Should be 1
+}
+
+fn test_match_basic() {
+    let x = 2;
+
+    match x {
+        1 => println("one"),
+        2 => println("two"),
+        3 => println("three"),
+        _ => println("other"),
+    }
+
+    // Match as expression
+    let name = match x {
+        1 => "one",
+        2 => "two",
+        3 => "three",
+        _ => "other",
+    };
+    println(f"name: {name}");
+}
+
+fn test_match_patterns() {
+    // Multiple patterns
+    let x = 5;
+    match x {
+        1 | 2 | 3 => println("small"),
+        4 | 5 | 6 => println("medium"),
+        _ => println("large"),
+    }
+
+    // Range patterns
+    match x {
+        1..=3 => println("1-3"),
+        4..=6 => println("4-6"),
+        7..=9 => println("7-9"),
+        _ => println("out of range"),
+    }
+}
+
+fn test_match_guards() {
+    let x = 42;
+
+    // Match with guards using 'if'
+    match x {
+        n if n < 0 => println("negative"),
+        n if n == 0 => println("zero"),
+        n if n < 10 => println("single digit"),
+        n if n < 100 => println("double digit"),
+        _ => println("large"),
+    }
+
+    // Match with guards using 'where' (Verum-style)
+    let y = -5;
+    match y {
+        n where n < 0 => println(f"negative: {n}"),
+        n where n > 0 => println(f"positive: {n}"),
+        _ => println("zero"),
+    }
+}
+
+fn test_match_destructure() {
+    // Tuple destructuring
+    let point = (10, 20);
+    match point {
+        (0, 0) => println("origin"),
+        (x, 0) => println(f"on x-axis at {x}"),
+        (0, y) => println(f"on y-axis at {y}"),
+        (x, y) => println(f"point at ({x}, {y})"),
+    }
+
+    // Maybe destructuring
+    let maybe_val: Maybe<Int> = Some(42);
+    match maybe_val {
+        Some(v) => println(f"has value: {v}"),
+        None => println("no value"),
+    }
+
+    let empty: Maybe<Int> = None;
+    match empty {
+        Some(v) => println(f"has value: {v}"),
+        None => println("no value"),
+    }
+}
+
+fn test_while_loop() {
+    let mut i = 0;
+
+    while i < 5 {
+        println(f"while i = {i}");
+        i = i + 1;
+    }
+    println(f"final i = {i}");
+
+    // While with complex condition
+    let mut a = 0;
+    let mut b = 10;
+    while a < b && b > 5 {
+        a = a + 1;
+        b = b - 1;
+        println(f"a = {a}, b = {b}");
+    }
+}
+
+fn test_for_loop() {
+    // Range iteration
+    for i in 0..5 {
+        println(f"for i = {i}");
+    }
+
+    // Inclusive range
+    for i in 1..=3 {
+        println(f"inclusive i = {i}");
+    }
+
+    // Descending (if supported)
+    for i in (0..5).rev() {
+        println(f"reverse i = {i}");
+    }
+
+    // With step
+    for i in (0..10).step_by(2) {
+        println(f"step i = {i}");
+    }
+}
+
+fn test_for_collection() {
+    let list = [10, 20, 30, 40, 50];
+
+    // Iterate values
+    for item in list {
+        println(f"item: {item}");
+    }
+
+    // Iterate with index
+    for (idx, item) in list.enumerate() {
+        println(f"list[{idx}] = {item}");
+    }
+}
+
+fn test_infinite_loop() {
+    let mut count = 0;
+
+    loop {
+        count = count + 1;
+        println(f"loop count: {count}");
+
+        if count >= 5 {
+            break;
+        }
+    }
+    println(f"exited loop at count: {count}");
+}
+
+fn test_break_continue() {
+    println("=== break ===");
+    for i in 0..10 {
+        if i == 5 {
+            println("breaking at 5");
+            break;
+        }
+        println(f"i = {i}");
+    }
+
+    println("=== continue ===");
+    for i in 0..10 {
+        if i % 2 == 0 {
+            continue;
+        }
+        println(f"odd i = {i}");
+    }
+
+    println("=== nested break ===");
+    for i in 0..3 {
+        for j in 0..3 {
+            if j == 2 {
+                break;  // Only breaks inner loop
+            }
+            println(f"i={i}, j={j}");
+        }
+    }
+}
+
+fn test_loop_with_value() {
+    // Loop can return a value on break
+    let mut counter = 0;
+    let result = loop {
+        counter = counter + 1;
+        if counter == 10 {
+            break counter * 2;
+        }
+    };
+    println(f"loop result: {result}");  // Should be 20
+}
+
+fn test_recursion() {
+    fn count_down(n: Int) {
+        if n <= 0 {
+            println("liftoff!");
+        } else {
+            println(f"countdown: {n}");
+            count_down(n - 1);
+        }
+    }
+
+    count_down(5);
+}
+
+fn test_tail_recursion() {
+    fn sum_to(n: Int, acc: Int) -> Int {
+        if n <= 0 {
+            acc
+        } else {
+            sum_to(n - 1, acc + n)
+        }
+    }
+
+    println(f"sum 1..10 = {sum_to(10, 0)}");  // 55
+    println(f"sum 1..100 = {sum_to(100, 0)}"); // 5050
+}
+
+fn test_mutual_recursion() {
+    fn is_even(n: Int) -> Bool {
+        if n == 0 { true }
+        else { is_odd(n - 1) }
+    }
+
+    fn is_odd(n: Int) -> Bool {
+        if n == 0 { false }
+        else { is_even(n - 1) }
+    }
+
+    println(f"is_even(0): {is_even(0)}");   // true
+    println(f"is_even(1): {is_even(1)}");   // false
+    println(f"is_even(10): {is_even(10)}"); // true
+    println(f"is_odd(7): {is_odd(7)}");     // true
+}
+
+fn test_nested_control_flow() {
+    for i in 1..=5 {
+        if i % 2 == 0 {
+            let mut j = 0;
+            while j < i {
+                match j {
+                    0 => println(f"  [{i}] start"),
+                    n if n == i - 1 => println(f"  [{i}] end"),
+                    n => println(f"  [{i}] middle {n}"),
+                }
+                j = j + 1;
+            }
+        } else {
+            println(f"odd: {i}");
+        }
+    }
+}
+
+fn main() {
+    println("=== If Basic ===");
+    test_if_basic();
+
+    println("\n=== If Expression ===");
+    test_if_expression();
+
+    println("\n=== If Complex Conditions ===");
+    test_if_complex_conditions();
+
+    println("\n=== Short Circuit ===");
+    test_short_circuit();
+
+    println("\n=== Match Basic ===");
+    test_match_basic();
+
+    println("\n=== Match Patterns ===");
+    test_match_patterns();
+
+    println("\n=== Match Guards ===");
+    test_match_guards();
+
+    println("\n=== Match Destructure ===");
+    test_match_destructure();
+
+    println("\n=== While Loop ===");
+    test_while_loop();
+
+    println("\n=== For Loop ===");
+    test_for_loop();
+
+    println("\n=== For Collection ===");
+    test_for_collection();
+
+    println("\n=== Infinite Loop ===");
+    test_infinite_loop();
+
+    println("\n=== Break Continue ===");
+    test_break_continue();
+
+    println("\n=== Loop With Value ===");
+    test_loop_with_value();
+
+    println("\n=== Recursion ===");
+    test_recursion();
+
+    println("\n=== Tail Recursion ===");
+    test_tail_recursion();
+
+    println("\n=== Mutual Recursion ===");
+    test_mutual_recursion();
+
+    println("\n=== Nested Control Flow ===");
+    test_nested_control_flow();
+
+    println("\n=== All control flow tests complete ===");
+}

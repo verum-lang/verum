@@ -1,0 +1,310 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, protocols, associated-types
+// @description: Associated types in protocol definitions
+
+/// Test for associated types in protocols.
+/// Associated types allow protocols to define placeholder types.
+
+// ============================================================================
+// Basic associated type
+// ============================================================================
+
+type Iterator is protocol {
+    type Item;
+
+    fn next(&mut self) -> Maybe<Self.Item>;
+    fn has_next(&self) -> Bool;
+};
+
+type IntoIterator is protocol {
+    type Item;
+    type IntoIter: Iterator<Item = Self.Item>;
+
+    fn into_iter(self) -> Self.IntoIter;
+};
+
+// ============================================================================
+// Associated type with bounds
+// ============================================================================
+
+type Container is protocol {
+    type Element: Clone;
+
+    fn get(&self, index: Int) -> Maybe<&Self.Element>;
+    fn len(&self) -> Int;
+    fn is_empty(&self) -> Bool;
+};
+
+type MutableContainer is protocol {
+    type Element: Clone;
+
+    fn get_mut(&mut self, index: Int) -> Maybe<&mut Self.Element>;
+    fn push(&mut self, item: Self.Element);
+    fn pop(&mut self) -> Maybe<Self.Element>;
+};
+
+// ============================================================================
+// Multiple associated types
+// ============================================================================
+
+type Graph is protocol {
+    type Node: Eq + Hash;
+    type Edge: Clone;
+
+    fn nodes(&self) -> List<Self.Node>;
+    fn edges(&self, from: &Self.Node) -> List<Self.Edge>;
+    fn has_node(&self, node: &Self.Node) -> Bool;
+    fn has_edge(&self, from: &Self.Node, to: &Self.Node) -> Bool;
+};
+
+type KeyValue is protocol {
+    type Key: Eq + Hash;
+    type Value;
+
+    fn get(&self, key: &Self.Key) -> Maybe<&Self.Value>;
+    fn set(&mut self, key: Self.Key, value: Self.Value);
+    fn keys(&self) -> List<&Self.Key>;
+    fn values(&self) -> List<&Self.Value>;
+};
+
+// ============================================================================
+// Associated type in output position
+// ============================================================================
+
+type Add is protocol {
+    type Output;
+
+    fn add(&self, other: &Self) -> Self.Output;
+};
+
+type Mul is protocol {
+    type Output;
+
+    fn mul(&self, other: &Self) -> Self.Output;
+};
+
+type Deref is protocol {
+    type Target;
+
+    fn deref(&self) -> &Self.Target;
+};
+
+type DerefMut is protocol {
+    type Target;
+
+    fn deref_mut(&mut self) -> &mut Self.Target;
+};
+
+// ============================================================================
+// Generic Associated Types (GATs)
+// NOTE: Lifetime-parameterized GATs (type Item<'a>) not yet supported by parser
+// ============================================================================
+
+type HKTContainer is protocol {
+    type Wrapped<T>;
+
+    fn wrap<T>(value: T) -> Self.Wrapped<T>;
+    fn unwrap<T>(wrapped: Self.Wrapped<T>) -> T;
+};
+
+// ============================================================================
+// Implementations with associated types
+// ============================================================================
+
+type RangeIterator is {
+    current: Int,
+    end: Int,
+};
+
+implement Iterator for RangeIterator {
+    type Item is Int;
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end {
+            let value = self.current;
+            self.current += 1;
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    fn has_next(&self) -> Bool {
+        self.current < self.end
+    }
+}
+
+type CharIterator is {
+    text: Text,
+    index: Int,
+};
+
+implement Iterator for CharIterator {
+    type Item is Char;
+
+    fn next(&mut self) -> Maybe<Char> {
+        if self.index < self.text.len() {
+            match self.text.char_at(self.index) {
+                Some(ch) => {
+                    self.index += 1;
+                    Some(ch)
+                },
+                None => None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn has_next(&self) -> Bool {
+        self.index < self.text.len()
+    }
+}
+
+type VecContainer<T: Clone> is {
+    items: List<T>,
+};
+
+implement<T: Clone> Container for VecContainer<T> {
+    type Element is T;
+
+    fn get(&self, index: Int) -> Maybe<&T> {
+        self.items.get(index)
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.items.is_empty()
+    }
+}
+
+implement<T: Clone> MutableContainer for VecContainer<T> {
+    type Element is T;
+
+    fn get_mut(&mut self, index: Int) -> Maybe<&mut T> {
+        self.items.get_mut(index)
+    }
+
+    fn push(&mut self, item: T) {
+        self.items.push(item);
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        self.items.pop()
+    }
+}
+
+// ============================================================================
+// Add implementation with associated Output type
+// ============================================================================
+
+type Vector2D is {
+    x: Float,
+    y: Float,
+};
+
+implement Add for Vector2D {
+    type Output is Vector2D;
+
+    fn add(&self, other: &Vector2D) -> Vector2D {
+        Vector2D {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+
+implement Mul for Vector2D {
+    type Output is Float;  // Dot product returns scalar
+
+    fn mul(&self, other: &Vector2D) -> Float {
+        self.x * other.x + self.y * other.y
+    }
+}
+
+// ============================================================================
+// Deref implementation
+// ============================================================================
+
+type SmartPtr<T> is {
+    inner: Heap<T>,
+};
+
+implement<T> Deref for SmartPtr<T> {
+    type Target is T;
+
+    fn deref(&self) -> &T {
+        &*self.inner
+    }
+}
+
+implement<T> DerefMut for SmartPtr<T> {
+    type Target is T;
+
+    fn deref_mut(&mut self) -> &mut T {
+        &mut *self.inner
+    }
+}
+
+// ============================================================================
+// Using associated types in functions
+// ============================================================================
+
+// NOTE: Generic functions using associated type projection (I.Item, T.Output)
+// are not yet fully supported by the type checker. Commented out for now.
+
+// fn collect_iterator<I: Iterator>(mut iter: I) -> List<I.Item> { ... }
+// fn sum_iterator<I>(mut iter: I) -> I.Item where I.Item: Add + Default { ... }
+// fn container_first<C: Container>(c: &C) -> Maybe<C.Element> { ... }
+// fn add_vectors<T: Add>(a: T, b: T) -> T.Output { ... }
+// fn dot_product<T: Mul>(a: T, b: T) -> T.Output { ... }
+
+// ============================================================================
+// Associated type equality constraints
+// ============================================================================
+
+// NOTE: Functions using associated type projections (A.Item, B.Item) in
+// generic where clauses not yet supported by type checker.
+// fn zip_iterators<A, B>(mut a: A, mut b: B) -> List<(A.Item, B.Item)> { ... }
+// fn same_type_iterators<A, B>(mut a: A, mut b: B) -> List<A.Item> { ... }
+
+fn main() {
+    // Test RangeIterator (concrete impl, no generic dispatch)
+    let mut range = RangeIterator { current: 0, end: 3 };
+    assert(range.has_next());
+    assert(range.next() is Some(0));
+    assert(range.next() is Some(1));
+    assert(range.next() is Some(2));
+    assert(range.next() is None);
+
+    // Test Container impl
+    let container: VecContainer<Int> = VecContainer { items: [10, 20, 30] };
+    assert(container.len() == 3);
+    assert(!container.is_empty());
+
+    // Test MutableContainer impl
+    let mut mc: VecContainer<Text> = VecContainer { items: [] };
+    mc.push("hello");
+    mc.push("world");
+    assert(mc.len() == 2);
+    let popped = mc.pop();
+    assert(popped is Some("world"));
+
+    // Test Add with associated Output type (concrete)
+    let v1 = Vector2D { x: 1.0, y: 2.0 };
+    let v2 = Vector2D { x: 3.0, y: 4.0 };
+    let sum = v1.add(&v2);
+    assert(sum.x == 4.0);
+    assert(sum.y == 6.0);
+
+    // Test Mul with associated Output type (concrete dot product)
+    let v3 = Vector2D { x: 1.0, y: 0.0 };
+    let v4 = Vector2D { x: 0.0, y: 1.0 };
+    let dot = v3.mul(&v4);
+    assert(dot == 0.0);
+}

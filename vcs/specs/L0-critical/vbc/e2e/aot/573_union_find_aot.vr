@@ -1,0 +1,191 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, union-find, disjoint-set, data-structure
+// @timeout: 30000
+
+// Union-Find (Disjoint Set Union) with path compression
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// parent[i] = parent of element i. parent[i] == i means root
+fn make_set() -> Arr8 {
+    // Each element is its own parent
+    Arr8 { v0: 0, v1: 1, v2: 2, v3: 3, v4: 4, v5: 5, v6: 6, v7: 7 }
+}
+
+// Find root with path compression
+fn find_root(parent: Arr8, x: Int) -> Int {
+    let mut p = parent;
+    let mut curr = x;
+    // Walk up to root
+    while get8(p, curr) != curr {
+        curr = get8(p, curr);
+    }
+    curr
+}
+
+// Find root and flatten path (returns new parent array and root)
+fn find_with_compression(parent: Arr8, x: Int) -> Arr8 {
+    let root = find_root(parent, x);
+    // Path compression: set all nodes on path to point to root
+    let mut p = parent;
+    let mut curr = x;
+    while curr != root {
+        let next = get8(p, curr);
+        p = set8(p, curr, root);
+        curr = next;
+    }
+    p
+}
+
+fn union_sets(parent: Arr8, rank: Arr8, x: Int, y: Int) -> Arr8 {
+    let rx = find_root(parent, x);
+    let ry = find_root(parent, y);
+    if rx == ry { return parent; } // already same set
+    // Union by rank
+    let rank_rx = get8(rank, rx);
+    let rank_ry = get8(rank, ry);
+    if rank_rx < rank_ry {
+        set8(parent, rx, ry)
+    } else {
+        set8(parent, ry, rx)
+    }
+}
+
+fn union_rank(rank: Arr8, parent: Arr8, x: Int, y: Int) -> Arr8 {
+    let rx = find_root(parent, x);
+    let ry = find_root(parent, y);
+    if rx == ry { return rank; }
+    let rank_rx = get8(rank, rx);
+    let rank_ry = get8(rank, ry);
+    if rank_rx == rank_ry {
+        set8(rank, rx, rank_rx + 1)
+    } else {
+        rank
+    }
+}
+
+fn same_set(parent: Arr8, x: Int, y: Int) -> Int {
+    if find_root(parent, x) == find_root(parent, y) { 1 } else { 0 }
+}
+
+fn count_sets(parent: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if find_root(parent, i) == i { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_initial() -> Int {
+    let p = make_set();
+    // Each element in its own set
+    assert_eq(count_sets(p, 8), 8);
+    assert_eq(same_set(p, 0, 1), 0);
+    assert_eq(same_set(p, 0, 0), 1);
+    1
+}
+
+fn test_basic_union() -> Int {
+    let mut p = make_set();
+    let mut r = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Union 0 and 1
+    r = union_rank(r, p, 0, 1);
+    p = union_sets(p, r, 0, 1);
+    assert_eq(same_set(p, 0, 1), 1);
+    assert_eq(count_sets(p, 8), 7);
+
+    // Union 2 and 3
+    r = union_rank(r, p, 2, 3);
+    p = union_sets(p, r, 2, 3);
+    assert_eq(same_set(p, 2, 3), 1);
+    assert_eq(same_set(p, 0, 2), 0); // different sets
+    assert_eq(count_sets(p, 8), 6);
+    1
+}
+
+fn test_transitive() -> Int {
+    let mut p = make_set();
+    let mut r = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Union {0,1} then {1,2} → {0,1,2} all connected
+    r = union_rank(r, p, 0, 1);
+    p = union_sets(p, r, 0, 1);
+    r = union_rank(r, p, 1, 2);
+    p = union_sets(p, r, 1, 2);
+    assert_eq(same_set(p, 0, 2), 1); // transitive
+    assert_eq(count_sets(p, 8), 6);
+    1
+}
+
+fn test_merge_chains() -> Int {
+    let mut p = make_set();
+    let mut r = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Chain: {0,1,2,3}
+    r = union_rank(r, p, 0, 1); p = union_sets(p, r, 0, 1);
+    r = union_rank(r, p, 1, 2); p = union_sets(p, r, 1, 2);
+    r = union_rank(r, p, 2, 3); p = union_sets(p, r, 2, 3);
+    // Chain: {4,5,6,7}
+    r = union_rank(r, p, 4, 5); p = union_sets(p, r, 4, 5);
+    r = union_rank(r, p, 5, 6); p = union_sets(p, r, 5, 6);
+    r = union_rank(r, p, 6, 7); p = union_sets(p, r, 6, 7);
+
+    assert_eq(count_sets(p, 8), 2);
+    assert_eq(same_set(p, 0, 3), 1);
+    assert_eq(same_set(p, 4, 7), 1);
+    assert_eq(same_set(p, 0, 4), 0);
+
+    // Merge the two chains
+    r = union_rank(r, p, 3, 4); p = union_sets(p, r, 3, 4);
+    assert_eq(count_sets(p, 8), 1);
+    assert_eq(same_set(p, 0, 7), 1);
+    1
+}
+
+fn test_path_compression() -> Int {
+    let mut p = make_set();
+    // Build chain: 0→1→2→3
+    p = set8(p, 0, 1);
+    p = set8(p, 1, 2);
+    p = set8(p, 2, 3);
+
+    // Before compression: 0→1→2→3
+    assert_eq(find_root(p, 0), 3);
+
+    // After compression: 0→3, 1→3, 2→3
+    p = find_with_compression(p, 0);
+    assert_eq(get8(p, 0), 3); // direct to root
+    assert_eq(get8(p, 1), 3);
+    assert_eq(get8(p, 2), 3);
+    1
+}
+
+fn main() -> Int {
+    test_initial();
+    test_basic_union();
+    test_transitive();
+    test_merge_chains();
+    test_path_compression();
+    print("[OK] 573_union_find_aot");
+    0
+}

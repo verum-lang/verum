@@ -1,0 +1,242 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, encoding
+// @expected-exit: 0
+
+// Integer encoding schemes
+
+// --- Run-length encoding ---
+// Input: array of values, Output: pairs (value, count)
+// Returns length of encoded output
+fn rle_encode(data: List<Int>, data_len: Int, out: List<Int>) -> Int {
+    let mut o = out;
+    let mut enc_idx = 0;
+    let mut i = 0;
+    while i < data_len {
+        let val = data[i];
+        let mut count = 1;
+        let mut k = i + 1;
+        while k < data_len {
+            if data[k] == val {
+                count = count + 1;
+                k = k + 1;
+            } else {
+                k = data_len; // break
+            }
+        }
+        o[enc_idx] = val;
+        enc_idx = enc_idx + 1;
+        o[enc_idx] = count;
+        enc_idx = enc_idx + 1;
+        i = i + count;
+    }
+    enc_idx
+}
+
+// --- Run-length decoding ---
+// Input: encoded pairs, Output: decoded array
+// Returns length of decoded output
+fn rle_decode(encoded: List<Int>, enc_len: Int, out: List<Int>) -> Int {
+    let mut o = out;
+    let mut dec_idx = 0;
+    let mut i = 0;
+    while i < enc_len {
+        let val = encoded[i];
+        let count = encoded[i + 1];
+        let mut j = 0;
+        while j < count {
+            o[dec_idx] = val;
+            dec_idx = dec_idx + 1;
+            j = j + 1;
+        }
+        i = i + 2;
+    }
+    dec_idx
+}
+
+// --- Delta encoding ---
+// Stores differences between consecutive elements
+// First element stored as-is
+fn delta_encode(data: List<Int>, data_len: Int, out: List<Int>) -> Int {
+    let mut o = out;
+    if data_len > 0 {
+        o[0] = data[0];
+        let mut i = 1;
+        while i < data_len {
+            o[i] = data[i] - data[i - 1];
+            i = i + 1;
+        }
+    }
+    data_len
+}
+
+// --- Delta decoding ---
+fn delta_decode(encoded: List<Int>, enc_len: Int, out: List<Int>) -> Int {
+    let mut o = out;
+    if enc_len > 0 {
+        o[0] = encoded[0];
+        let mut i = 1;
+        while i < enc_len {
+            o[i] = o[i - 1] + encoded[i];
+            i = i + 1;
+        }
+    }
+    enc_len
+}
+
+// --- Zigzag encoding (for signed integers) ---
+// Maps signed to unsigned: 0->0, -1->1, 1->2, -2->3, 2->4, ...
+// Formula: (n << 1) ^ (n >> 63) but simplified for small values
+fn zigzag_encode(n: Int) -> Int {
+    if n >= 0 {
+        n * 2
+    } else {
+        (0 - n) * 2 - 1
+    }
+}
+
+fn zigzag_decode(z: Int) -> Int {
+    if z % 2 == 0 {
+        z / 2
+    } else {
+        0 - (z + 1) / 2
+    }
+}
+
+// --- Binary representation ---
+// Converts integer to array of bits (LSB first), returns bit count
+fn to_binary(n: Int, out: List<Int>) -> Int {
+    let mut o = out;
+    if n == 0 {
+        o[0] = 0;
+        1
+    } else {
+        let mut val = n;
+        let mut idx = 0;
+        while val > 0 {
+            o[idx] = val % 2;
+            val = val / 2;
+            idx = idx + 1;
+        }
+        idx
+    }
+}
+
+// --- Binary to integer ---
+fn from_binary(bits: List<Int>, bit_count: Int) -> Int {
+    let mut result = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < bit_count {
+        result = result + bits[i] * power;
+        power = power * 2;
+        i = i + 1;
+    }
+    result
+}
+
+// --- Gray code ---
+// Binary to Gray: G = n ^ (n >> 1)
+// For small positive integers, implement manually
+fn to_gray(n: Int) -> Int {
+    // Convert n to binary, then XOR adjacent bits
+    let mut bits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bit_count = to_binary(n, bits);
+
+    let mut gray_bits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // MSB of gray = MSB of binary
+    if bit_count > 0 {
+        gray_bits[bit_count - 1] = bits[bit_count - 1];
+        let mut i = bit_count - 2;
+        while i >= 0 {
+            // Gray[i] = bits[i+1] XOR bits[i]
+            if bits[i + 1] == bits[i] {
+                gray_bits[i] = 0;
+            } else {
+                gray_bits[i] = 1;
+            }
+            i = i - 1;
+        }
+    }
+
+    from_binary(gray_bits, bit_count)
+}
+
+// --- Gray to binary ---
+fn from_gray(g: Int) -> Int {
+    let mut bits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bit_count = to_binary(g, bits);
+
+    let mut bin_bits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    if bit_count > 0 {
+        // MSB same
+        bin_bits[bit_count - 1] = bits[bit_count - 1];
+        let mut i = bit_count - 2;
+        while i >= 0 {
+            // bin[i] = bin[i+1] XOR gray[i]
+            if bin_bits[i + 1] == bits[i] {
+                bin_bits[i] = 0;
+            } else {
+                bin_bits[i] = 1;
+            }
+            i = i - 1;
+        }
+    }
+
+    from_binary(bin_bits, bit_count)
+}
+
+fn main() -> Int {
+    // Test 1: RLE encode [1,1,1,2,2,3] -> [1,3,2,2,3,1] (6 values)
+    let data1 = [1, 1, 1, 2, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut enc1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let enc_len = rle_encode(data1, 6, enc1);
+    assert_eq(enc_len, 6);
+
+    // Test 2: RLE decode back
+    let mut dec1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dec_len = rle_decode(enc1, enc_len, dec1);
+    assert_eq(dec_len, 6);
+
+    // Test 3: Delta encode [10, 13, 15, 20, 25] -> [10, 3, 2, 5, 5]
+    let data2 = [10, 13, 15, 20, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut denc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let denc_len = delta_encode(data2, 5, denc);
+    assert_eq(denc[1], 3);
+
+    // Test 4: Delta decode back
+    let mut ddec = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ddec_len = delta_decode(denc, denc_len, ddec);
+    assert_eq(ddec[4], 25);
+
+    // Test 5: Zigzag encode positive
+    let z1 = zigzag_encode(3);
+    assert_eq(z1, 6); // 3 -> 6
+
+    // Test 6: Zigzag encode negative
+    let z2 = zigzag_encode(-2);
+    assert_eq(z2, 3); // -2 -> 3
+
+    // Test 7: Zigzag roundtrip
+    let z3 = zigzag_decode(zigzag_encode(-5));
+    assert_eq(z3, -5);
+
+    // Test 8: Binary representation of 13 = 1101 -> LSB first [1,0,1,1], 4 bits
+    let mut bin_out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bit_count = to_binary(13, bin_out);
+    assert_eq(bit_count, 4);
+
+    // Test 9: Binary roundtrip
+    let val_back = from_binary(bin_out, bit_count);
+    assert_eq(val_back, 13);
+
+    // Test 10: Gray code: 5 (binary 101) -> Gray 111 = 7
+    // n=5=101, n>>1=010, XOR=111=7
+    // to_gray(5): bits=[1,0,1], gray MSB=bits[2]=1, gray[1]=1^0=1, gray[0]=0^1=1 -> [1,1,1]=7
+    let g = to_gray(5);
+    assert_eq(g, 7);
+
+    print("786_encoding_decoding: PASS");
+    0
+}

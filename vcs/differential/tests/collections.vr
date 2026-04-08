@@ -1,0 +1,263 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, collections
+// @timeout: 15000
+
+/// Collection operations for differential testing.
+/// Tests List, Map, Set operations and iteration.
+
+fn main() {
+    test_list_operations();
+    test_map_operations();
+    test_set_operations();
+    test_collection_transforms();
+    test_sorting_and_searching();
+}
+
+/// List operations
+fn test_list_operations() {
+    println("=== List Operations ===");
+
+    // Creation
+    let empty: List<Int> = [];
+    let nums = [1, 2, 3, 4, 5];
+    let repeated = List.repeat(0, 5);
+
+    println(f"empty: {empty}");
+    println(f"nums: {nums}");
+    println(f"repeated: {repeated}");
+
+    // Access
+    println(f"nums[0]: {nums[0]}");
+    println(f"nums[4]: {nums[4]}");
+    println(f"nums.first(): {nums.first()}");
+    println(f"nums.last(): {nums.last()}");
+
+    // Length
+    println(f"empty.len(): {empty.len()}");
+    println(f"nums.len(): {nums.len()}");
+    println(f"empty.is_empty(): {empty.is_empty()}");
+    println(f"nums.is_empty(): {nums.is_empty()}");
+
+    // Mutation
+    let mut mutable = [10, 20, 30];
+    mutable.push(40);
+    println(f"after push: {mutable}");
+
+    let popped = mutable.pop();
+    println(f"popped: {popped}");
+    println(f"after pop: {mutable}");
+
+    mutable.insert(1, 15);
+    println(f"after insert at 1: {mutable}");
+
+    mutable.remove(1);
+    println(f"after remove at 1: {mutable}");
+
+    // Slicing
+    let long = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    println(f"slice [2..5]: {long[2..5]}");
+    println(f"slice [..3]: {long[..3]}");
+    println(f"slice [7..]: {long[7..]}");
+
+    // Concatenation
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let combined = a + b;
+    println(f"concatenated: {combined}");
+}
+
+/// Map operations
+fn test_map_operations() {
+    println("\n=== Map Operations ===");
+
+    // Creation
+    let empty: Map<Text, Int> = {};
+    let scores = {"alice": 95, "bob": 87, "charlie": 92};
+
+    println(f"empty: {empty}");
+    println(f"scores: {scores}");
+
+    // Access
+    println(f"scores['alice']: {scores['alice']}");
+    println(f"scores.get('bob'): {scores.get('bob')}");
+    println(f"scores.get('dave'): {scores.get('dave')}");
+
+    // Mutation
+    let mut mutable = {"a": 1, "b": 2};
+    mutable.insert("c", 3);
+    println(f"after insert: {mutable}");
+
+    mutable["a"] = 10;
+    println(f"after update: {mutable}");
+
+    let removed = mutable.remove("b");
+    println(f"removed: {removed}");
+    println(f"after remove: {mutable}");
+
+    // Queries
+    println(f"contains 'alice': {scores.contains_key('alice')}");
+    println(f"contains 'dave': {scores.contains_key('dave')}");
+    println(f"len: {scores.len()}");
+
+    // Iteration (order may vary, use sorted for determinism)
+    println("entries (sorted):");
+    for (key, value) in scores.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {key}: {value}");
+    }
+
+    // Keys and values
+    println(f"keys: {scores.keys().sorted().collect()}");
+    println(f"values sum: {scores.values().sum()}");
+
+    // Merge
+    let more = {"dave": 88, "eve": 91};
+    let merged = scores.merge(more);
+    println(f"merged len: {merged.len()}");
+}
+
+/// Set operations
+fn test_set_operations() {
+    println("\n=== Set Operations ===");
+
+    // Creation
+    let empty: Set<Int> = {};
+    let primes = {2, 3, 5, 7, 11};
+    let evens = {2, 4, 6, 8, 10};
+
+    println(f"primes: {primes}");
+    println(f"evens: {evens}");
+
+    // Membership
+    println(f"7 in primes: {primes.contains(7)}");
+    println(f"4 in primes: {primes.contains(4)}");
+
+    // Set operations
+    let union = primes.union(evens);
+    let intersection = primes.intersection(evens);
+    let difference = primes.difference(evens);
+    let symmetric = primes.symmetric_difference(evens);
+
+    println(f"union: {union.sorted().collect()}");
+    println(f"intersection: {intersection.sorted().collect()}");
+    println(f"primes - evens: {difference.sorted().collect()}");
+    println(f"symmetric diff: {symmetric.sorted().collect()}");
+
+    // Subset/superset
+    let small = {2, 3};
+    println(f"small subset of primes: {small.is_subset(primes)}");
+    println(f"primes superset of small: {primes.is_superset(small)}");
+
+    // Mutation
+    let mut mutable = {1, 2, 3};
+    mutable.insert(4);
+    println(f"after insert 4: {mutable}");
+
+    mutable.remove(2);
+    println(f"after remove 2: {mutable}");
+
+    // From list with duplicates
+    let with_dups = [1, 2, 2, 3, 3, 3, 4];
+    let unique = Set.from(with_dups);
+    println(f"unique from [1,2,2,3,3,3,4]: {unique}");
+}
+
+/// Collection transformations
+fn test_collection_transforms() {
+    println("\n=== Transforms ===");
+
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Map
+    let doubled = nums.map(|n| n * 2);
+    println(f"doubled: {doubled}");
+
+    // Filter
+    let evens = nums.filter(|n| n % 2 == 0);
+    println(f"evens: {evens}");
+
+    // Filter-map
+    let even_squares = nums
+        .filter(|n| n % 2 == 0)
+        .map(|n| n * n);
+    println(f"even squares: {even_squares}");
+
+    // Fold/reduce
+    let sum = nums.fold(0, |acc, n| acc + n);
+    let product = nums.fold(1, |acc, n| acc * n);
+    println(f"sum: {sum}");
+    println(f"product: {product}");
+
+    // Flat map
+    let nested = [[1, 2], [3, 4], [5, 6]];
+    let flattened = nested.flat_map(|inner| inner);
+    println(f"flattened: {flattened}");
+
+    // Take and skip
+    println(f"take 3: {nums.take(3).collect()}");
+    println(f"skip 7: {nums.skip(7).collect()}");
+    println(f"take while < 5: {nums.take_while(|n| n < 5).collect()}");
+
+    // Partition
+    let (small, large) = nums.partition(|n| n <= 5);
+    println(f"<= 5: {small}");
+    println(f"> 5: {large}");
+
+    // Zip
+    let letters = ['a', 'b', 'c', 'd', 'e'];
+    let zipped = nums.take(5).zip(letters).collect();
+    println(f"zipped: {zipped}");
+
+    // Enumerate
+    let enumerated = ['x', 'y', 'z'].enumerate().collect();
+    println(f"enumerated: {enumerated}");
+
+    // Chunk
+    let chunks = nums.chunks(3).collect();
+    println(f"chunks of 3: {chunks}");
+}
+
+/// Sorting and searching
+fn test_sorting_and_searching() {
+    println("\n=== Sorting and Searching ===");
+
+    let unsorted = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+
+    // Sort
+    let sorted = unsorted.sorted().collect();
+    println(f"sorted: {sorted}");
+
+    let reversed = unsorted.sorted().rev().collect();
+    println(f"reversed: {reversed}");
+
+    // Sort by
+    let words = ["banana", "apple", "cherry", "date"];
+    let by_length = words.sorted_by_key(|s| s.len()).collect();
+    println(f"by length: {by_length}");
+
+    // Search
+    println(f"find 5: {unsorted.find(|n| n == 5)}");
+    println(f"find 10: {unsorted.find(|n| n == 10)}");
+
+    println(f"position of 9: {unsorted.position(|n| n == 9)}");
+    println(f"position of 10: {unsorted.position(|n| n == 10)}");
+
+    // Binary search (on sorted)
+    let sorted_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    println(f"binary search 5: {sorted_list.binary_search(5)}");
+    println(f"binary search 11: {sorted_list.binary_search(11)}");
+
+    // Min/max
+    println(f"min: {unsorted.min()}");
+    println(f"max: {unsorted.max()}");
+
+    // Any/all
+    println(f"any > 8: {unsorted.any(|n| n > 8)}");
+    println(f"all > 0: {unsorted.all(|n| n > 0)}");
+    println(f"all < 10: {unsorted.all(|n| n < 10)}");
+
+    // Count
+    println(f"count of 5: {unsorted.filter(|n| n == 5).count()}");
+    println(f"count > 3: {unsorted.filter(|n| n > 3).count()}");
+}

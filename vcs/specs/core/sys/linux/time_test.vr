@@ -1,0 +1,469 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/linux/time_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, linux, time, clock
+// @description: Tests for Linux time and clock operations.
+//
+// Coverage:
+// - Timespec, Duration, Instant, Stopwatch: Time types
+// - clock_gettime: Clock access
+// - monotonic_nanos, monotonic_micros, monotonic_millis: Monotonic time
+// - realtime_nanos, unix_timestamp: Real time
+// - sleep, sleep_ms, sleep_us: Sleep operations
+// - rdtsc, rdtscp: CPU cycle counter
+// - time_it: Timing utility
+// - Clock IDs (CLOCK_REALTIME, CLOCK_MONOTONIC, etc.)
+//
+// Test Strategy:
+// - Verify monotonicity of time sources
+// - Test sleep accuracy with tolerance
+// - Verify clock ID constants
+// - Cross-validate different time sources
+//
+// Platform: Linux x86_64
+// =============================================================================
+
+@cfg(target_os = "linux")
+module test.stdlib.sys.linux.time_test;
+
+mount core.sys.linux.time.{
+    Timespec, Duration, Instant, Stopwatch,
+    clock_gettime,
+    monotonic_nanos, monotonic_micros, monotonic_millis,
+    monotonic_raw_nanos, monotonic_coarse_nanos,
+    realtime_nanos, unix_timestamp,
+    boottime_nanos, thread_cputime_nanos, process_cputime_nanos,
+    sleep, sleep_ms, sleep_us, sleep_until, clock_nanosleep,
+    rdtsc, rdtscp, rdtsc_serialized,
+    time_it,
+    CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW,
+    CLOCK_BOOTTIME, CLOCK_THREAD_CPUTIME_ID,
+    TIMER_ABSTIME,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Clock Constants Tests
+// =============================================================================
+
+@test
+fn test_clock_constants() {
+    // Standard clock IDs
+    assert(CLOCK_REALTIME == 0);
+    assert(CLOCK_MONOTONIC == 1);
+    assert(CLOCK_MONOTONIC_RAW == 4);
+    assert(CLOCK_BOOTTIME == 7);
+    assert(CLOCK_THREAD_CPUTIME_ID == 3);
+
+    // Timer flags
+    assert(TIMER_ABSTIME == 1);
+
+    print("Clock constants tests passed");
+}
+
+// =============================================================================
+// Timespec Tests
+// =============================================================================
+
+@test
+fn test_timespec() {
+    // Create timespec
+    let ts = Timespec {
+        tv_sec: 10,
+        tv_nsec: 500_000_000,  // 0.5 seconds
+    };
+
+    assert(ts.tv_sec == 10);
+    assert(ts.tv_nsec == 500_000_000);
+
+    // Total nanoseconds
+    let total_ns = ts.tv_sec * 1_000_000_000 + ts.tv_nsec;
+    assert(total_ns == 10_500_000_000);
+
+    // Zero timespec
+    let zero_ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    assert(zero_ts.tv_sec == 0);
+    assert(zero_ts.tv_nsec == 0);
+
+    // Max nanoseconds (just under 1 second)
+    let max_ns_ts = Timespec { tv_sec: 0, tv_nsec: 999_999_999 };
+    assert(max_ns_ts.tv_nsec == 999_999_999);
+
+    print("Timespec tests passed");
+}
+
+// =============================================================================
+// Duration Tests
+// =============================================================================
+
+@test
+fn test_duration() {
+    // Create from seconds
+    let d1 = Duration.from_secs(5);
+    assert(d1.as_secs() == 5);
+    assert(d1.as_nanos() == 5_000_000_000);
+
+    // Create from milliseconds
+    let d2 = Duration.from_millis(1500);
+    assert(d2.as_millis() == 1500);
+    assert(d2.as_secs() == 1);
+
+    // Create from microseconds
+    let d3 = Duration.from_micros(2_500_000);
+    assert(d3.as_micros() == 2_500_000);
+    assert(d3.as_millis() == 2500);
+
+    // Create from nanoseconds
+    let d4 = Duration.from_nanos(1_234_567_890);
+    assert(d4.as_nanos() == 1_234_567_890);
+
+    // Zero duration
+    let zero = Duration.ZERO;
+    assert(zero.as_nanos() == 0);
+    assert(zero.is_zero());
+
+    // Duration comparison
+    assert(d1 > d2);
+    assert(d3 > d2);
+    assert(d4 < d2);
+
+    print("Duration tests passed");
+}
+
+// =============================================================================
+// Instant Tests
+// =============================================================================
+
+@test
+fn test_instant() {
+    // Get current instant
+    let now = Instant.now();
+
+    // Do some work
+    let mut sum = 0;
+    for i in 0..10000 {
+        sum += i;
+    }
+
+    // Get another instant
+    let later = Instant.now();
+
+    // Later should be after or equal to now
+    assert(later >= now);
+
+    // Calculate elapsed time
+    let elapsed = later.duration_since(now);
+    assert(elapsed.as_nanos() >= 0);
+
+    // Elapsed convenience method
+    let elapsed2 = now.elapsed();
+    assert(elapsed2 >= elapsed);
+
+    print("Instant tests passed");
+}
+
+// =============================================================================
+// Monotonic Time Tests
+// =============================================================================
+
+@test
+fn test_monotonic_time() {
+    // Get monotonic nanoseconds
+    let t1 = monotonic_nanos();
+    let t2 = monotonic_nanos();
+    let t3 = monotonic_nanos();
+
+    // Time should never go backward
+    assert(t2 >= t1);
+    assert(t3 >= t2);
+
+    // Get different resolutions
+    let millis = monotonic_millis();
+    let micros = monotonic_micros();
+    let nanos = monotonic_nanos();
+
+    // Verify relationships (with tolerance for time passing)
+    // nanos >= micros * 1000 >= millis * 1000000
+    // Note: Times may have advanced between calls
+    assert(nanos >= millis * 1_000_000 - 10_000_000);  // 10ms tolerance
+    assert(micros >= millis * 1000 - 10_000);  // 10ms tolerance
+
+    // Test monotonicity with many samples
+    let mut prev = monotonic_nanos();
+    for _ in 0..100 {
+        let curr = monotonic_nanos();
+        assert(curr >= prev);
+        prev = curr;
+    }
+
+    // Test monotonic_raw_nanos (not affected by NTP)
+    let raw1 = monotonic_raw_nanos();
+    let raw2 = monotonic_raw_nanos();
+    assert(raw2 >= raw1);
+
+    // Test coarse monotonic (faster but less precise)
+    let coarse1 = monotonic_coarse_nanos();
+    let coarse2 = monotonic_coarse_nanos();
+    assert(coarse2 >= coarse1);
+
+    print("Monotonic time tests passed");
+}
+
+// =============================================================================
+// Realtime Tests
+// =============================================================================
+
+@test
+fn test_realtime() {
+    // Get realtime nanoseconds
+    let rt = realtime_nanos();
+
+    // Should be positive (we're past Unix epoch)
+    assert(rt > 0);
+
+    // Get Unix timestamp
+    let ts = unix_timestamp();
+
+    // Should be in reasonable range (2024-2030)
+    // 2024-01-01: 1704067200
+    // 2030-01-01: 1893456000
+    assert(ts >= 1704067200);
+    assert(ts < 1893456000);
+
+    // Realtime and timestamp should be consistent
+    let rt_secs = rt / 1_000_000_000;
+    assert(rt_secs >= ts - 1);  // Allow 1 second tolerance
+    assert(rt_secs <= ts + 1);
+
+    // Multiple calls should advance or stay same
+    let ts1 = unix_timestamp();
+    let ts2 = unix_timestamp();
+    assert(ts2 >= ts1);
+
+    print(f"Unix timestamp: {ts}");
+}
+
+// =============================================================================
+// Sleep Tests
+// =============================================================================
+
+@test
+fn test_sleep_operations() {
+    // Test sleep_ms (10ms)
+    let before_ms = monotonic_nanos();
+    sleep_ms(10);
+    let after_ms = monotonic_nanos();
+
+    let elapsed_ms = after_ms - before_ms;
+    // Should have slept at least 9ms, no more than 100ms
+    assert(elapsed_ms >= 9_000_000);
+    assert(elapsed_ms < 100_000_000);
+
+    // Test sleep_us (1000us = 1ms)
+    let before_us = monotonic_nanos();
+    sleep_us(1000);
+    let after_us = monotonic_nanos();
+
+    let elapsed_us = after_us - before_us;
+    // Should have slept at least 900us, no more than 50ms
+    assert(elapsed_us >= 900_000);
+    assert(elapsed_us < 50_000_000);
+
+    // Test sleep with Duration
+    let duration = Duration.from_millis(5);
+    let before_d = monotonic_nanos();
+    sleep(duration);
+    let after_d = monotonic_nanos();
+
+    let elapsed_d = after_d - before_d;
+    assert(elapsed_d >= 4_000_000);  // At least 4ms
+    assert(elapsed_d < 100_000_000); // Less than 100ms
+
+    print("Sleep operations tests passed");
+}
+
+// =============================================================================
+// RDTSC Tests
+// =============================================================================
+
+@test
+fn test_rdtsc() {
+    // Note: RDTSC is x86_64 specific
+
+    // Get cycle count
+    let c1 = rdtsc();
+
+    // Do some work
+    let mut sum = 0;
+    for i in 0..1000 {
+        sum += i;
+    }
+
+    let c2 = rdtsc();
+
+    // Cycles should advance
+    assert(c2 > c1);
+
+    // Test rdtscp (includes processor ID)
+    let (c3, _aux) = rdtscp();
+    assert(c3 >= c2);
+
+    // Test serialized rdtsc
+    let c4 = rdtsc_serialized();
+    assert(c4 >= c3);
+
+    // Verify reasonable cycle difference
+    // Modern CPUs run at ~3GHz, so 1000 iterations should be
+    // at least a few thousand cycles
+    let cycle_diff = c2 - c1;
+    assert(cycle_diff > 100);  // At least 100 cycles
+    assert(cycle_diff < 1_000_000_000);  // Less than 1 billion
+
+    print(f"RDTSC cycle difference: {cycle_diff}");
+}
+
+// =============================================================================
+// Stopwatch Tests
+// =============================================================================
+
+@test
+fn test_stopwatch() {
+    // Create and start stopwatch
+    let mut sw = Stopwatch.new();
+
+    // Initially should show near-zero elapsed
+    let initial = sw.elapsed();
+    assert(initial.as_nanos() < 1_000_000);  // Less than 1ms
+
+    // Do some work
+    sleep_ms(10);
+
+    // Check elapsed
+    let elapsed1 = sw.elapsed();
+    assert(elapsed1.as_millis() >= 9);  // At least 9ms
+
+    // Stop the stopwatch
+    sw.stop();
+    let stopped_elapsed = sw.elapsed();
+
+    // Sleep more
+    sleep_ms(10);
+
+    // Elapsed should not change after stop
+    let after_stop = sw.elapsed();
+    assert(after_stop == stopped_elapsed);
+
+    // Restart
+    sw.start();
+    sleep_ms(5);
+
+    // Elapsed should have increased
+    let restarted_elapsed = sw.elapsed();
+    assert(restarted_elapsed > stopped_elapsed);
+
+    // Reset
+    sw.reset();
+    let after_reset = sw.elapsed();
+    assert(after_reset.as_nanos() < 1_000_000);  // Near zero
+
+    print("Stopwatch tests passed");
+}
+
+// =============================================================================
+// time_it Utility Tests
+// =============================================================================
+
+@test
+fn test_time_it() {
+    // Time a closure
+    let (result, duration) = time_it(|| {
+        let mut sum = 0;
+        for i in 0..10000 {
+            sum += i;
+        }
+        sum
+    });
+
+    // Result should be correct
+    assert(result == 49995000);
+
+    // Duration should be positive
+    assert(duration.as_nanos() > 0);
+
+    // Duration should be reasonable (less than 1 second)
+    assert(duration.as_secs() < 1);
+
+    print("time_it tests passed");
+}
+
+// =============================================================================
+// CPU Time Tests
+// =============================================================================
+
+@test
+fn test_cpu_time() {
+    // Get initial CPU times
+    let thread_cpu1 = thread_cputime_nanos();
+    let process_cpu1 = process_cputime_nanos();
+
+    // Do CPU-intensive work
+    let mut sum = 0;
+    for i in 0..100000 {
+        sum += i * i;
+    }
+
+    // Get final CPU times
+    let thread_cpu2 = thread_cputime_nanos();
+    let process_cpu2 = process_cputime_nanos();
+
+    // CPU time should have advanced
+    assert(thread_cpu2 >= thread_cpu1);
+    assert(process_cpu2 >= process_cpu1);
+
+    // Thread CPU should be <= process CPU (single-threaded)
+    // May not be exact due to timing
+    let thread_delta = thread_cpu2 - thread_cpu1;
+    let process_delta = process_cpu2 - process_cpu1;
+
+    // Both should show some CPU usage
+    // (May be 0 if resolution is too low)
+    print(f"Thread CPU delta: {thread_delta}ns, Process CPU delta: {process_delta}ns");
+}
+
+// =============================================================================
+// Boottime Tests
+// =============================================================================
+
+@test
+fn test_boottime() {
+    // Get boottime
+    let bt1 = boottime_nanos();
+
+    // Should be positive (system has been running)
+    assert(bt1 > 0);
+
+    // Sleep briefly
+    sleep_ms(10);
+
+    let bt2 = boottime_nanos();
+
+    // Boottime should advance
+    assert(bt2 > bt1);
+
+    // Difference should be close to sleep time
+    let diff = bt2 - bt1;
+    assert(diff >= 9_000_000);  // At least 9ms
+    assert(diff < 100_000_000); // Less than 100ms
+
+    print("Boottime tests passed");
+}

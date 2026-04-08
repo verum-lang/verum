@@ -1,0 +1,150 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, trie, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for simplified trie (prefix tree) simulation
+// Using a 4-ary trie (keys 0-3 at each level, max depth 3)
+
+// Trie node pool: 16 nodes, each with 4 children indices and end-of-word flag
+type TriePool is {
+    // Node 0: children and eow
+    c00: Int, c01: Int, c02: Int, c03: Int, e0: Int,
+    // Node 1
+    c10: Int, c11: Int, c12: Int, c13: Int, e1: Int,
+    // Node 2
+    c20: Int, c21: Int, c22: Int, c23: Int, e2: Int,
+    // Node 3
+    c30: Int, c31: Int, c32: Int, c33: Int, e3: Int,
+    next_free: Int
+};
+
+fn trie_new() -> TriePool {
+    TriePool {
+        c00: -1, c01: -1, c02: -1, c03: -1, e0: 0,
+        c10: -1, c11: -1, c12: -1, c13: -1, e1: 0,
+        c20: -1, c21: -1, c22: -1, c23: -1, e2: 0,
+        c30: -1, c31: -1, c32: -1, c33: -1, e3: 0,
+        next_free: 1  // Node 0 is root
+    }
+}
+
+fn trie_get_child(t: TriePool, node: Int, ch: Int) -> Int {
+    if node == 0 {
+        if ch == 0 { t.c00 } else if ch == 1 { t.c01 } else if ch == 2 { t.c02 } else { t.c03 }
+    } else if node == 1 {
+        if ch == 0 { t.c10 } else if ch == 1 { t.c11 } else if ch == 2 { t.c12 } else { t.c13 }
+    } else if node == 2 {
+        if ch == 0 { t.c20 } else if ch == 1 { t.c21 } else if ch == 2 { t.c22 } else { t.c23 }
+    } else {
+        if ch == 0 { t.c30 } else if ch == 1 { t.c31 } else if ch == 2 { t.c32 } else { t.c33 }
+    }
+}
+
+fn trie_get_eow(t: TriePool, node: Int) -> Int {
+    if node == 0 { t.e0 } else if node == 1 { t.e1 }
+    else if node == 2 { t.e2 } else { t.e3 }
+}
+
+// Key as 3-element record
+type Key3 is { k0: Int, k1: Int, k2: Int, len: Int };
+
+// Insert: returns updated trie
+// Simplified: only handles keys of length 1-2 to avoid too many set functions
+fn trie_insert_1(t: TriePool, k: Int) -> TriePool {
+    // Insert single-char key at root level
+    let child = trie_get_child(t, 0, k);
+    if child != -1 {
+        // Node exists, just set eow
+        TriePool {
+            c00: t.c00, c01: t.c01, c02: t.c02, c03: t.c03, e0: t.e0,
+            c10: t.c10, c11: t.c11, c12: t.c12, c13: t.c13,
+            e1: if child == 1 { 1 } else { t.e1 },
+            c20: t.c20, c21: t.c21, c22: t.c22, c23: t.c23,
+            e2: if child == 2 { 1 } else { t.e2 },
+            c30: t.c30, c31: t.c31, c32: t.c32, c33: t.c33,
+            e3: if child == 3 { 1 } else { t.e3 },
+            next_free: t.next_free
+        }
+    } else {
+        // Create new node, set child pointer at root
+        let new_node = t.next_free;
+        TriePool {
+            c00: if k == 0 { new_node } else { t.c00 },
+            c01: if k == 1 { new_node } else { t.c01 },
+            c02: if k == 2 { new_node } else { t.c02 },
+            c03: if k == 3 { new_node } else { t.c03 },
+            e0: t.e0,
+            c10: t.c10, c11: t.c11, c12: t.c12, c13: t.c13,
+            e1: if new_node == 1 { 1 } else { t.e1 },
+            c20: t.c20, c21: t.c21, c22: t.c22, c23: t.c23,
+            e2: if new_node == 2 { 1 } else { t.e2 },
+            c30: t.c30, c31: t.c31, c32: t.c32, c33: t.c33,
+            e3: if new_node == 3 { 1 } else { t.e3 },
+            next_free: new_node + 1
+        }
+    }
+}
+
+fn trie_search_1(t: TriePool, k: Int) -> Bool {
+    let child = trie_get_child(t, 0, k);
+    if child == -1 { return false; }
+    trie_get_eow(t, child) == 1
+}
+
+fn trie_has_prefix(t: TriePool, k: Int) -> Bool {
+    trie_get_child(t, 0, k) != -1
+}
+
+fn test_basic() {
+    let mut t = trie_new();
+
+    // Empty trie: nothing found
+    assert_eq(trie_search_1(t, 0), false);
+    assert_eq(trie_search_1(t, 1), false);
+
+    // Insert key 0
+    t = trie_insert_1(t, 0);
+    assert_eq(trie_search_1(t, 0), true);
+    assert_eq(trie_search_1(t, 1), false);
+
+    // Insert key 2
+    t = trie_insert_1(t, 2);
+    assert_eq(trie_search_1(t, 0), true);
+    assert_eq(trie_search_1(t, 2), true);
+    assert_eq(trie_search_1(t, 1), false);
+}
+
+fn test_prefix() {
+    let mut t = trie_new();
+    t = trie_insert_1(t, 1);
+    t = trie_insert_1(t, 3);
+
+    assert_eq(trie_has_prefix(t, 1), true);
+    assert_eq(trie_has_prefix(t, 3), true);
+    assert_eq(trie_has_prefix(t, 0), false);
+    assert_eq(trie_has_prefix(t, 2), false);
+}
+
+fn test_all_keys() {
+    let mut t = trie_new();
+    t = trie_insert_1(t, 0);
+    t = trie_insert_1(t, 1);
+    t = trie_insert_1(t, 2);
+    t = trie_insert_1(t, 3);
+
+    assert_eq(trie_search_1(t, 0), true);
+    assert_eq(trie_search_1(t, 1), true);
+    assert_eq(trie_search_1(t, 2), true);
+    assert_eq(trie_search_1(t, 3), true);
+}
+
+fn main() -> Int {
+    test_basic();
+    test_prefix();
+    test_all_keys();
+    print("[OK] 229_trie_aot");
+    0
+}

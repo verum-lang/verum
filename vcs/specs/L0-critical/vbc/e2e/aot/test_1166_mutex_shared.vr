@@ -1,0 +1,80 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: mutex, threading, shared-state, spawn
+// @description: Test Mutex for shared mutable state across threads
+
+fn __mutex_new_raw() -> Int {
+    0 // intrinsic
+}
+fn __mutex_lock_raw(mtx: Int) -> Int {
+    0 // intrinsic
+}
+fn __mutex_unlock_raw(mtx: Int) -> Int {
+    0 // intrinsic
+}
+
+fn test_mutex_basic() -> Int {
+    let mtx = __mutex_new_raw();
+    __mutex_lock_raw(mtx);
+    __mutex_unlock_raw(mtx);
+    // If we get here without deadlocking, it works
+    print("  mutex_basic: OK");
+    0
+}
+
+fn test_mutex_spawn() -> Int {
+    let mtx = __mutex_new_raw();
+    let ch = Channel.new(10);
+
+    // Use channel to accumulate results from threads
+    let n_threads = 4;
+    let mut i = 0;
+    while i < n_threads {
+        spawn {
+            let mut local_sum = 0;
+            let mut j = 0;
+            while j < 100 {
+                __mutex_lock_raw(mtx);
+                local_sum = local_sum + 1;
+                __mutex_unlock_raw(mtx);
+                j = j + 1;
+            }
+            ch.send(local_sum);
+        };
+        i = i + 1;
+    }
+
+    // Collect results
+    let mut total = 0;
+    i = 0;
+    while i < n_threads {
+        let val = match ch.recv() {
+            Some(v) => v,
+            None => 0,
+        };
+        total = total + val;
+        i = i + 1;
+    }
+
+    if total != 400 {
+        print(f"FAIL mutex_spawn: total={total}, expected 400");
+        return 1;
+    }
+    print("  mutex_spawn: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Mutex Tests:");
+    let mut failures = 0;
+    failures = failures + test_mutex_basic();
+    failures = failures + test_mutex_spawn();
+
+    if failures == 0 {
+        print("All mutex tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

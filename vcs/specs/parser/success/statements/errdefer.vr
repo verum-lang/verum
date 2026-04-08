@@ -1,0 +1,257 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @level: L0
+// @tags: parser, statements, errdefer, defer, error-handling, cleanup
+// @description: Comprehensive tests for defer and errdefer statements
+
+// ============================================================================
+// Basic Defer Statements
+// Grammar: defer_stmt = 'defer' , defer_body
+// Grammar: defer_body = expression , ';' | block_expr
+// ============================================================================
+
+fn test_defer_expression() {
+    let file = open("data.txt");
+    defer file.close();
+    // Use file...
+}
+
+fn test_defer_block() {
+    let resource = acquire();
+    defer {
+        log("Cleaning up resource");
+        resource.release();
+    }
+}
+
+fn test_multiple_defers() {
+    let a = acquire_a();
+    defer a.release();
+
+    let b = acquire_b();
+    defer b.release();
+
+    let c = acquire_c();
+    defer c.release();
+
+    // Defers execute in reverse order: c, b, a
+}
+
+// ============================================================================
+// Errdefer Statements
+// Grammar: defer_stmt = 'errdefer' , defer_body
+// ============================================================================
+
+fn test_errdefer_expression() {
+    let file = create("new.txt");
+    errdefer delete("new.txt");  // Only on error path
+
+    write_data(file)?;
+    file.close();
+}
+
+fn test_errdefer_block() {
+    let transaction = db.begin();
+    errdefer {
+        log("Rolling back transaction due to error");
+        transaction.rollback();
+    }
+
+    perform_updates(transaction)?;
+    transaction.commit();
+}
+
+fn test_errdefer_with_capture() {
+    let partial_results: List<Result> = [];
+
+    for item in items {
+        errdefer {
+            // Clean up partial results on error
+            for result in partial_results {
+                result.undo();
+            }
+        }
+
+        let result = process(item)?;
+        partial_results.push(result);
+    }
+}
+
+// ============================================================================
+// Combined Defer and Errdefer
+// ============================================================================
+
+fn test_defer_and_errdefer() {
+    let file = open_for_write("output.txt");
+
+    // Always close the file
+    defer file.close();
+
+    // Delete file only if we fail
+    errdefer delete("output.txt");
+
+    write_header(file)?;
+    write_body(file)?;
+    write_footer(file)?;
+}
+
+fn test_resource_pattern() {
+    let conn = Connection.open(url)?;
+    defer conn.close();
+    errdefer log(f"Connection to {url} failed");
+
+    let session = conn.create_session()?;
+    defer session.end();
+    errdefer session.abort();
+
+    let result = session.execute(query)?;
+    result
+}
+
+// ============================================================================
+// Defer in Loops
+// ============================================================================
+
+fn test_defer_in_loop() {
+    for file_name in file_names {
+        let file = open(file_name)?;
+        defer file.close();
+
+        process(file);
+        // Each file is closed at end of loop iteration
+    }
+}
+
+fn test_errdefer_in_loop() {
+    for i in 0..n {
+        let resource = create_resource(i)?;
+        errdefer {
+            log(f"Failed at iteration {i}");
+            resource.cleanup();
+        }
+
+        validate_resource(resource)?;
+        resources.push(resource);
+    }
+}
+
+// ============================================================================
+// Defer with Complex Expressions
+// ============================================================================
+
+fn test_defer_method_call() {
+    let lock = mutex.lock();
+    defer mutex.unlock();
+}
+
+fn test_defer_chained() {
+    defer log("Done").flush().close();
+}
+
+fn test_defer_conditional() {
+    let handle = acquire();
+    defer {
+        if handle.is_valid() {
+            handle.release();
+        }
+    }
+}
+
+// ============================================================================
+// Errdefer with Error Information
+// ============================================================================
+
+fn test_errdefer_error_context() -> Result<Data, Error> {
+    let file = open("data.txt")?;
+    errdefer {
+        log("Failed to process data.txt");
+    }
+
+    let parsed = parse(file)?;
+    errdefer {
+        log(f"Failed after parsing {parsed.len()} records");
+    }
+
+    validate(parsed)?;
+    Ok(processed)
+}
+
+// ============================================================================
+// Nested Scopes
+// ============================================================================
+
+fn test_nested_defer() {
+    let outer = acquire_outer();
+    defer outer.release();
+
+    {
+        let inner = acquire_inner();
+        defer inner.release();
+
+        use_both(outer, inner);
+    }
+    // inner released here
+
+    use_outer(outer);
+}
+// outer released here
+
+fn test_nested_errdefer() {
+    errdefer log("Outer error");
+
+    {
+        errdefer log("Inner error");
+        may_fail()?;
+    }
+
+    more_work()?;
+}
+
+// ============================================================================
+// Defer with Async
+// ============================================================================
+
+async fn test_async_defer() {
+    let conn = connect().await;
+    defer conn.close().await;
+
+    send_data(conn).await;
+}
+
+async fn test_async_errdefer() {
+    let session = start_session().await;
+    defer session.end().await;
+    errdefer session.rollback().await;
+
+    execute_transaction(session).await?;
+    session.commit().await?;
+}
+
+// ============================================================================
+// Practical Patterns
+// ============================================================================
+
+fn allocator_pattern() {
+    let ptr = allocate(1024);
+    defer free(ptr);
+
+    // Use ptr safely knowing it will be freed
+}
+
+fn file_transaction_pattern() -> Result<(), Error> {
+    let backup = create_backup("data.db")?;
+    errdefer restore_backup(backup);
+    defer delete_backup(backup);
+
+    modify_database("data.db")?;
+    Ok(())
+}
+
+fn connection_pool_pattern() -> Result<Data, Error> {
+    let conn = pool.acquire()?;
+    defer pool.release(conn);
+    errdefer log("Query failed, releasing connection");
+
+    conn.query("SELECT * FROM users")
+}

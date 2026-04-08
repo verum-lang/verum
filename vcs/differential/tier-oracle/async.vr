@@ -1,0 +1,542 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: async, await, differential
+// @expected-stdout: 42
+
+/// Differential test for async/await behavior
+/// Tests that async functions, await expressions, and concurrent operations
+/// produce identical results across Tier 0 (interpreter) and
+/// Tier 3 (AOT) compilation.
+///
+/// Note: Due to non-deterministic scheduling, some tests use explicit
+/// synchronization or deterministic sequences to ensure reproducible output.
+
+// =============================================================================
+// Section 1: Basic Async Functions
+// =============================================================================
+
+/// Simple async function returning a value
+async fn async_constant() -> Int {
+    42
+}
+
+/// Async function with await
+async fn async_identity(x: Int) -> Int {
+    x
+}
+
+/// Async function that awaits another async function
+async fn async_chain() -> Int {
+    let value = async_constant().await;
+    value
+}
+
+/// Async function with multiple awaits
+async fn async_sequence() -> Int {
+    let a = async_identity(10).await;
+    let b = async_identity(20).await;
+    let c = async_identity(12).await;
+    a + b + c  // 42
+}
+
+// =============================================================================
+// Section 2: Async with Sleep/Delay
+// =============================================================================
+
+/// Async delay function
+async fn delay_ms(ms: Int) -> () {
+    sleep(Duration.from_millis(ms));
+}
+
+/// Async function with delay
+async fn async_with_delay() -> Int {
+    delay_ms(1).await;
+    42
+}
+
+/// Sequential delays
+async fn sequential_delays() -> Int {
+    delay_ms(1).await;
+    delay_ms(1).await;
+    delay_ms(1).await;
+    42
+}
+
+// =============================================================================
+// Section 3: Parallel Execution with Join
+// =============================================================================
+
+/// Execute two async operations in parallel
+async fn parallel_pair() -> (Int, Int) {
+    let (a, b) = join(
+        async_identity(1),
+        async_identity(2)
+    );
+    (a, b)
+}
+
+/// Execute multiple async operations in parallel
+async fn parallel_many() -> Int {
+    let (a, b, c, d) = join(
+        async_identity(10),
+        async_identity(11),
+        async_identity(12),
+        async_identity(9)
+    );
+    a + b + c + d  // 42
+}
+
+/// Join with delays (tests concurrent scheduling)
+async fn parallel_with_delays() -> (Int, Int) {
+    let (a, b) = join(
+        async {
+            delay_ms(2).await;
+            1
+        },
+        async {
+            delay_ms(1).await;
+            2
+        }
+    );
+    (a, b)  // Order should be deterministic: (1, 2)
+}
+
+// =============================================================================
+// Section 4: Select/Race Operations
+// =============================================================================
+
+/// Race two async operations
+async fn race_pair() -> Int {
+    // First to complete wins
+    select {
+        a = async_identity(42) => a,
+        b = async {
+            delay_ms(100).await;
+            0
+        } => b,
+    }
+    // Should return 42 (first completes immediately)
+}
+
+/// Race with explicit timeout
+async fn with_timeout() -> Result<Int, TimeoutError> {
+    timeout(Duration.from_millis(100), async_identity(42))
+}
+
+// =============================================================================
+// Section 5: Async Channels
+// =============================================================================
+
+/// Basic channel send/receive
+async fn channel_basic() -> Int {
+    let (tx, rx) = channel<Int>();
+
+    spawn(async move {
+        tx.send(42);
+    });
+
+    rx.recv().await
+}
+
+/// Multiple sends/receives
+async fn channel_multiple() -> Int {
+    let (tx, rx) = channel<Int>();
+
+    spawn(async move {
+        for i in 1..=5 {
+            tx.send(i);
+        }
+    });
+
+    let mut sum = 0;
+    for _ in 0..5 {
+        sum = sum + rx.recv().await;
+    }
+    sum  // 1+2+3+4+5 = 15
+}
+
+/// Buffered channel
+async fn channel_buffered() -> Int {
+    let (tx, rx) = channel<Int>(capacity: 10);
+
+    // Can send without awaiting (buffered)
+    tx.send(10);
+    tx.send(20);
+    tx.send(12);
+
+    let a = rx.recv().await;
+    let b = rx.recv().await;
+    let c = rx.recv().await;
+    a + b + c  // 42
+}
+
+// =============================================================================
+// Section 6: Spawned Tasks
+// =============================================================================
+
+/// Spawn a task and await its result
+async fn spawn_and_join() -> Int {
+    let handle = spawn(async_constant());
+    handle.await
+}
+
+/// Spawn multiple tasks
+async fn spawn_many() -> Int {
+    let handles: List<TaskHandle<Int>> = (0..4)
+        .map(|i| spawn(async_identity(i * 10 + i + 1)))
+        .collect();
+
+    let mut sum = 0;
+    for handle in handles {
+        sum = sum + handle.await;
+    }
+    sum  // 1+12+23+34 = 70... wait, let me recalculate
+         // Actually: (0*10+1) + (1*10+2) + (2*10+3) + (3*10+4) = 1+12+23+34 = 70
+}
+
+/// Spawn with captured variables
+async fn spawn_with_capture() -> Int {
+    let value = 42;
+    let handle = spawn(async move {
+        value
+    });
+    handle.await
+}
+
+// =============================================================================
+// Section 7: Async Iterators/Streams
+// =============================================================================
+
+/// Async iterator
+async fn* async_range(start: Int, end: Int) -> Int {
+    for i in start..end {
+        yield i;
+    }
+}
+
+/// Consume async iterator
+async fn consume_async_iterator() -> Int {
+    let mut sum = 0;
+    for await value in async_range(1, 11) {
+        sum = sum + value;
+    }
+    sum  // 1+2+...+10 = 55
+}
+
+/// Async map over iterator
+async fn async_map() -> Int {
+    let values = async_range(1, 5)
+        .map(|x| async { x * 2 })
+        .collect();
+
+    let mut sum = 0;
+    for await v in values {
+        sum = sum + v;
+    }
+    sum  // 2+4+6+8 = 20
+}
+
+// =============================================================================
+// Section 8: Error Handling in Async
+// =============================================================================
+
+/// Async function that may fail
+async fn async_fallible(succeed: Bool) -> Result<Int, Text> {
+    if succeed {
+        Ok(42)
+    } else {
+        Err("failed")
+    }
+}
+
+/// Try-catch in async
+async fn async_try_catch() -> Int {
+    match async_fallible(true).await {
+        Ok(v) => v,
+        Err(_) => 0,
+    }
+}
+
+/// Error propagation with ?
+async fn async_propagate() -> Result<Int, Text> {
+    let a = async_fallible(true).await?;
+    let b = async_fallible(true).await?;
+    Ok(a + b)  // 84
+}
+
+/// Recover from error
+async fn async_recover() -> Int {
+    match async_fallible(false).await {
+        Ok(v) => v,
+        Err(_) => 42,  // Recover with default
+    }
+}
+
+// =============================================================================
+// Section 9: Async with Contexts
+// =============================================================================
+
+/// Async function using context
+async fn async_with_context() -> Int
+    using [Logger]
+{
+    Logger.debug("Starting async operation");
+    let result = async_constant().await;
+    Logger.debug("Completed async operation");
+    result
+}
+
+/// Context propagation through spawned tasks
+async fn context_propagation() -> Int
+    using [Database]
+{
+    let handle = spawn(async {
+        // Context should be inherited
+        Database.query("SELECT 1")
+    });
+    handle.await
+}
+
+// =============================================================================
+// Section 10: Cancellation
+// =============================================================================
+
+/// Cancellable task
+async fn cancellable_operation() -> Result<Int, CancelledError> {
+    for i in 0..10 {
+        delay_ms(1).await;
+        check_cancelled()?;
+    }
+    Ok(42)
+}
+
+/// Cancel a running task
+async fn test_cancellation() -> Result<Int, CancelledError> {
+    let handle = spawn(async {
+        delay_ms(100).await;
+        42
+    });
+
+    // Cancel immediately
+    handle.cancel();
+
+    // Should return CancelledError
+    handle.await
+}
+
+/// Structured cancellation with scope
+async fn scoped_cancellation() -> Int {
+    let result = with_cancellation_scope(async {
+        let a = spawn(async_identity(1));
+        let b = spawn(async_identity(2));
+
+        // If scope is cancelled, both tasks are cancelled
+        a.await + b.await
+    });
+
+    match result {
+        Ok(v) => v,
+        Err(_) => 0,
+    }
+}
+
+// =============================================================================
+// Section 11: Async Mutex and Synchronization
+// =============================================================================
+
+/// Async mutex for shared state
+async fn async_mutex_test() -> Int {
+    let mutex = AsyncMutex.new(0);
+
+    let handles = (0..4).map(|_| {
+        spawn(async {
+            let mut guard = mutex.lock().await;
+            *guard = *guard + 10;
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.await;
+    }
+
+    let guard = mutex.lock().await;
+    *guard  // Should be 40
+}
+
+/// Async semaphore for limiting concurrency
+async fn async_semaphore_test() -> Int {
+    let semaphore = AsyncSemaphore.new(2);
+    let counter = Shared.new(AtomicInt.new(0));
+
+    let handles = (0..4).map(|_| {
+        let sem = semaphore.clone();
+        let cnt = counter.clone();
+        spawn(async move {
+            let _permit = sem.acquire().await;
+            cnt.fetch_add(1, Ordering.SeqCst);
+            delay_ms(1).await;
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.await;
+    }
+
+    counter.load(Ordering.SeqCst)  // 4
+}
+
+// =============================================================================
+// Section 12: Async with CBGR
+// =============================================================================
+
+/// Async function borrowing data
+async fn async_with_borrow(data: &List<Int>) -> Int {
+    let mut sum = 0;
+    for &value in data {
+        delay_ms(0).await;  // Yield point
+        sum = sum + value;
+    }
+    sum
+}
+
+/// Test reference validity across await points
+async fn ref_across_await() -> Int {
+    let value = 42;
+    let r = &value;
+
+    delay_ms(1).await;
+
+    *r  // Reference should still be valid
+}
+
+// =============================================================================
+// Section 13: Deterministic Test Helpers
+// =============================================================================
+
+/// Test with explicit ordering (for reproducible differential testing)
+async fn ordered_execution() -> List<Int> {
+    let mut results = List.new();
+
+    // Execute in strict order
+    results.push(async_identity(1).await);
+    results.push(async_identity(2).await);
+    results.push(async_identity(3).await);
+
+    results  // [1, 2, 3]
+}
+
+/// Deterministic parallel join (results collected in order)
+async fn deterministic_parallel() -> List<Int> {
+    let (a, b, c) = join(
+        async_identity(1),
+        async_identity(2),
+        async_identity(3)
+    );
+
+    // Results are in declaration order, not completion order
+    [a, b, c]  // [1, 2, 3]
+}
+
+// =============================================================================
+// Section 14: Edge Cases
+// =============================================================================
+
+/// Immediately ready future
+async fn immediate() -> Int {
+    42  // No await, completes immediately
+}
+
+/// Nested async blocks
+async fn nested_async() -> Int {
+    let inner = async {
+        let innermost = async {
+            42
+        };
+        innermost.await
+    };
+    inner.await
+}
+
+/// Async in loop
+async fn async_loop() -> Int {
+    let mut sum = 0;
+    for i in 0..10 {
+        sum = sum + async_identity(i).await;
+    }
+    sum  // 0+1+...+9 = 45
+}
+
+/// Very long chain of awaits
+async fn long_chain() -> Int {
+    let mut value = 0;
+    for _ in 0..100 {
+        value = async_identity(value + 1).await;
+    }
+    value  // 100
+}
+
+// =============================================================================
+// Main Function - Execute all tests
+// =============================================================================
+
+fn main() {
+    // Note: We use block_on to run async code in main
+
+    print("=== Basic Async ===");
+    print(block_on(async_constant()));        // 42
+    print(block_on(async_chain()));           // 42
+    print(block_on(async_sequence()));        // 42
+
+    print("\n=== Async with Delay ===");
+    print(block_on(async_with_delay()));      // 42
+    print(block_on(sequential_delays()));     // 42
+
+    print("\n=== Parallel Execution ===");
+    print(block_on(parallel_pair()));         // (1, 2)
+    print(block_on(parallel_many()));         // 42
+    print(block_on(parallel_with_delays()));  // (1, 2)
+
+    print("\n=== Race/Select ===");
+    print(block_on(race_pair()));             // 42
+    print(block_on(with_timeout()));          // Ok(42)
+
+    print("\n=== Channels ===");
+    print(block_on(channel_basic()));         // 42
+    print(block_on(channel_buffered()));      // 42
+
+    print("\n=== Spawned Tasks ===");
+    print(block_on(spawn_and_join()));        // 42
+    print(block_on(spawn_with_capture()));    // 42
+
+    print("\n=== Async Iterators ===");
+    print(block_on(consume_async_iterator())); // 55
+
+    print("\n=== Error Handling ===");
+    print(block_on(async_try_catch()));       // 42
+    print(block_on(async_propagate()));       // Ok(84)
+    print(block_on(async_recover()));         // 42
+
+    print("\n=== Synchronization ===");
+    print(block_on(async_mutex_test()));      // 40
+    print(block_on(async_semaphore_test()));  // 4
+
+    print("\n=== CBGR Integration ===");
+    let data = [10, 11, 12, 9];
+    print(block_on(async_with_borrow(&data))); // 42
+    print(block_on(ref_across_await()));       // 42
+
+    print("\n=== Deterministic Tests ===");
+    print(block_on(ordered_execution()));      // [1, 2, 3]
+    print(block_on(deterministic_parallel())); // [1, 2, 3]
+
+    print("\n=== Edge Cases ===");
+    print(block_on(immediate()));              // 42
+    print(block_on(nested_async()));           // 42
+    print(block_on(async_loop()));             // 45
+    print(block_on(long_chain()));             // 100
+
+    // Final output for differential comparison
+    print("\n=== Final Result ===");
+    print(42);
+}

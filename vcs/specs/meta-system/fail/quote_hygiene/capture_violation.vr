@@ -1,0 +1,37 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M408
+// @tags: meta, quote, hygiene, capture, violation
+// @description: Tests detection of undeclared variable capture in quote
+
+// =============================================================================
+// UNDEFINED IDENTIFIER IN QUOTE
+// =============================================================================
+
+// M404: Scope resolution failed - identifier cannot be resolved from macro's perspective
+// Note: At macro expansion time, we cannot see caller's scope, so undefined
+// identifiers in quotes result in scope resolution failure (M404) rather than
+// capture violation (M402). The hygiene system prevents accidental capture by
+// not allowing undefined identifiers to resolve to caller's bindings.
+
+// Macro that uses an identifier not defined in its scope
+meta fn capture_violation() -> TokenStream {
+    // 'x' is not defined in meta scope or locally in the quote
+    // At macro expansion time, we cannot resolve 'x' -> M404
+    quote {
+        // 'x' cannot be resolved from macro's perspective
+        let result = x + 10;  // ERROR: M404 - Cannot resolve 'x'
+        result
+    }
+}
+
+fn caller_context() {
+    let x = 42;
+    let result = @capture_violation();
+    // The macro shouldn't be able to see our 'x'
+}
+
+fn main() {
+    caller_context();
+}

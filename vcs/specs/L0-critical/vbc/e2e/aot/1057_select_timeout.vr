@@ -1,0 +1,82 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: select, timeout, channels
+// @expect: pass
+
+// Select on channels with timeout simulation.
+
+fn __time_monotonic_nanos_raw() -> Int { 0 }
+fn __time_sleep_nanos_raw(ns: Int) -> Int { 0 }
+
+fn main() -> Int {
+    let ch1 = Channel.new(1);
+    let ch2 = Channel.new(1);
+
+    // Producer 1: sends after 100ms
+    let p1 = spawn {
+        __time_sleep_nanos_raw(100000000); // 100ms
+        ch1.send(100);
+        1
+    };
+
+    // Producer 2: sends after 50ms
+    let p2 = spawn {
+        __time_sleep_nanos_raw(50000000); // 50ms
+        ch2.send(200);
+        2
+    };
+
+    // Wait for at least one channel to have data
+    // Select will return the first ready channel
+    let start = __time_monotonic_nanos_raw();
+
+    // Simple polling approach: try both channels
+    let mut got_ch1 = false;
+    let mut got_ch2 = false;
+    let mut val1 = 0;
+    let mut val2 = 0;
+
+    // Wait for ch2 first (should arrive sooner)
+    match ch2.recv() {
+        Some(v) => {
+            val2 = v;
+            got_ch2 = true;
+        },
+        None => {}
+    }
+
+    // Then ch1
+    match ch1.recv() {
+        Some(v) => {
+            val1 = v;
+            got_ch1 = true;
+        },
+        None => {}
+    }
+
+    let elapsed = __time_monotonic_nanos_raw() - start;
+
+    p1.await;
+    p2.await;
+
+    if !got_ch1 {
+        print("FAIL: did not receive from ch1");
+        return 1;
+    }
+    if !got_ch2 {
+        print("FAIL: did not receive from ch2");
+        return 1;
+    }
+    if val1 != 100 {
+        print(f"FAIL: ch1 value = {val1}, expected 100");
+        return 1;
+    }
+    if val2 != 200 {
+        print(f"FAIL: ch2 value = {val2}, expected 200");
+        return 1;
+    }
+
+    print(f"PASS: select-like channel receive, elapsed ~{elapsed / 1000000}ms");
+    0
+}

@@ -1,0 +1,252 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, max-flow, edmonds-karp, bfs
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Edmonds-Karp max flow algorithm (BFS-based Ford-Fulkerson).
+// Uses 4x4 capacity and flow matrices (Arr16). Finds maximum flow from source to sink.
+
+// =============================================================================
+// Arr16 for 4x4 matrix, Arr4 for BFS arrays
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn cap_get(m: Arr16, i: Int, j: Int) -> Int { a16_get(m, i * 4 + j) }
+fn cap_set(m: Arr16, i: Int, j: Int, v: Int) -> Arr16 { a16_set(m, i * 4 + j, v) }
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn arr4_fill(v: Int) -> Arr4 {
+    Arr4 { e0: v, e1: v, e2: v, e3: v }
+}
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+fn min_val(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+// =============================================================================
+// BFS to find augmenting path
+// =============================================================================
+
+type BFSResult is { parent: Arr4, found: Int };
+
+fn bfs_path(cap: Arr16, flow: Arr16, n: Int, src: Int, sink: Int) -> BFSResult {
+    let mut visited = arr4_fill(0);
+    let mut parent = arr4_fill(-1);
+    let mut queue = arr4_fill(0);
+    let mut q_front = 0;
+    let mut q_back = 0;
+
+    visited = arr4_set(visited, src, 1);
+    queue = arr4_set(queue, q_back, src);
+    q_back = q_back + 1;
+    let mut found = 0;
+
+    while q_front < q_back {
+        let u = arr4_get(queue, q_front);
+        q_front = q_front + 1;
+        let mut v = 0;
+        while v < n {
+            let residual = cap_get(cap, u, v) - cap_get(flow, u, v);
+            if arr4_get(visited, v) == 0 && residual > 0 {
+                visited = arr4_set(visited, v, 1);
+                parent = arr4_set(parent, v, u);
+                if v == sink { found = 1; }
+                queue = arr4_set(queue, q_back, v);
+                q_back = q_back + 1;
+            }
+            v = v + 1;
+        }
+    }
+
+    BFSResult { parent: parent, found: found }
+}
+
+// =============================================================================
+// Edmonds-Karp max flow
+// =============================================================================
+
+fn edmonds_karp(cap: Arr16, n: Int, src: Int, sink: Int) -> Int {
+    let mut flow = a16_zeros();
+    let mut total_flow = 0;
+    let mut iterations = 0;
+
+    while iterations < 50 {
+        let bfs = bfs_path(cap, flow, n, src, sink);
+        if bfs.found == 0 {
+            iterations = 50;
+        } else {
+            // Find bottleneck
+            let mut bottleneck = 999999;
+            let mut v = sink;
+            while v != src {
+                let u = arr4_get(bfs.parent, v);
+                let residual = cap_get(cap, u, v) - cap_get(flow, u, v);
+                bottleneck = min_val(bottleneck, residual);
+                v = u;
+            }
+            // Update flow
+            v = sink;
+            while v != src {
+                let u = arr4_get(bfs.parent, v);
+                flow = cap_set(flow, u, v, cap_get(flow, u, v) + bottleneck);
+                flow = cap_set(flow, v, u, cap_get(flow, v, u) - bottleneck);
+                v = u;
+            }
+            total_flow = total_flow + bottleneck;
+            iterations = iterations + 1;
+        }
+    }
+    total_flow
+}
+
+// =============================================================================
+// Test 1: Simple 2-node flow
+// =============================================================================
+
+fn test_simple_flow() {
+    let mut cap = a16_zeros();
+    cap = cap_set(cap, 0, 1, 10);
+    assert_eq(edmonds_karp(cap, 2, 0, 1), 10);
+}
+
+// =============================================================================
+// Test 2: Two parallel paths
+//   0->1:5, 1->3:5, 0->2:3, 2->3:3
+//   Max flow = 8
+// =============================================================================
+
+fn test_parallel_paths() {
+    let mut cap = a16_zeros();
+    cap = cap_set(cap, 0, 1, 5);
+    cap = cap_set(cap, 1, 3, 5);
+    cap = cap_set(cap, 0, 2, 3);
+    cap = cap_set(cap, 2, 3, 3);
+    assert_eq(edmonds_karp(cap, 4, 0, 3), 8);
+}
+
+// =============================================================================
+// Test 3: Bottleneck in the middle
+//   0->1:100, 1->2:1, 2->3:100 => max flow = 1
+// =============================================================================
+
+fn test_bottleneck() {
+    let mut cap = a16_zeros();
+    cap = cap_set(cap, 0, 1, 100);
+    cap = cap_set(cap, 1, 2, 1);
+    cap = cap_set(cap, 2, 3, 100);
+    assert_eq(edmonds_karp(cap, 4, 0, 3), 1);
+}
+
+// =============================================================================
+// Test 4: No path from source to sink
+// =============================================================================
+
+fn test_no_path() {
+    let mut cap = a16_zeros();
+    cap = cap_set(cap, 0, 1, 10);
+    cap = cap_set(cap, 2, 3, 10);
+    assert_eq(edmonds_karp(cap, 4, 0, 3), 0);
+}
+
+// =============================================================================
+// Test 5: Diamond with unequal capacities
+//   0->1:3, 1->3:2, 0->2:2, 2->3:3
+//   Max flow = min(3,2) + min(2,3) = 2 + 2 = 4
+// =============================================================================
+
+fn test_diamond() {
+    let mut cap = a16_zeros();
+    cap = cap_set(cap, 0, 1, 3);
+    cap = cap_set(cap, 1, 3, 2);
+    cap = cap_set(cap, 0, 2, 2);
+    cap = cap_set(cap, 2, 3, 3);
+    assert_eq(edmonds_karp(cap, 4, 0, 3), 4);
+}
+
+// =============================================================================
+// Test 6: Cross-flow with intermediate nodes
+//   0->1:10, 0->2:10, 1->2:1, 1->3:8, 2->3:10
+//   Max flow: 10 via 0->2->3 and 8 via 0->1->3 + 1 via 0->1->2->3 = nope
+//   Actually: 0->1 can send 10. From 1: 8 to 3, 1 to 2. From 2: 10+1=11 but cap 10.
+//   0 sends 10 to 1, 10 to 2. 1 sends 8 to 3, 1 to 2. 2 has 10+1=11 but cap to 3 is 10.
+//   So: 8+10=18. But 0->2 only 10, plus 1 from 1->2 = 11 to 2, cap 2->3=10, send 10.
+//   Total = 8+10 = 18.
+// =============================================================================
+
+fn test_cross_flow() {
+    let mut cap = a16_zeros();
+    cap = cap_set(cap, 0, 1, 10);
+    cap = cap_set(cap, 0, 2, 10);
+    cap = cap_set(cap, 1, 2, 1);
+    cap = cap_set(cap, 1, 3, 8);
+    cap = cap_set(cap, 2, 3, 10);
+    assert_eq(edmonds_karp(cap, 4, 0, 3), 18);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_simple_flow();
+    test_parallel_paths();
+    test_bottleneck();
+    test_no_path();
+    test_diamond();
+    test_cross_flow();
+    print("[OK] 323_interp_max_flow");
+    0
+}

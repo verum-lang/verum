@@ -1,0 +1,20 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, nested, deep
+// @description: Deeply nested unsafe blocks (stress test context management)
+fn main() {
+    let result: Int = unsafe {
+        let a: Int = 1;
+        unsafe {
+            let b: Int = 2;
+            unsafe {
+                let c: Int = 3;
+                unsafe {
+                    let d: Int = 4;
+                    a + b + c + d
+                }
+            }
+        }
+    };
+    assert_eq(result, 10);
+}

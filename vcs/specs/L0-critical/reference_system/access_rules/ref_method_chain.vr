@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, method-chain
+
+/// Test borrowing through method chains.
+/// Chained method calls should correctly manage borrows.
+/// Spec: 04-memory-model.md#aliasing-rules
+
+fn main() {
+    test_immutable_access();
+    test_mutable_access();
+    test_mixed_access();
+    test_builder_pattern();
+}
+
+/// Test immutable references for data access
+fn test_immutable_access() {
+    let values = [1, 2, 3, 4, 5];
+    let text = Text.from("test");
+
+    // Access values and compute sum - elements > 2: 3+4+5 = 12
+    let mut result = 0;
+    result = result + values[2];  // 3
+    result = result + values[3];  // 4
+    result = result + values[4];  // 5
+
+    assert(result == 12);
+    // text is still valid
+    assert(text.len() == 4);
+}
+
+/// Test mutable references for modifications
+fn test_mutable_access() {
+    let mut content = [0, 0, 0, 0, 0];
+    let mut len = 0;
+
+    // Push values
+    content[len] = 1;
+    len = len + 1;
+    content[len] = 2;
+    len = len + 1;
+    content[len] = 3;
+    len = len + 1;
+
+    // Double all values
+    content[0] = content[0] * 2;
+    content[1] = content[1] * 2;
+    content[2] = content[2] * 2;
+
+    assert(len == 3);
+    assert(content[0] == 2);
+}
+
+/// Test mixed borrow - read then modify
+fn test_mixed_access() {
+    let mut items = [10, 20, 30, 0];
+
+    // Compute sum
+    let sum = items[0] + items[1] + items[2];
+
+    // Add sum to array
+    items[3] = sum;
+
+    assert(sum == 60);
+    assert(items[3] == 60);
+}
+
+/// Test builder pattern
+fn test_builder_pattern() {
+    // Build the config directly
+    let name = Text.from("app");
+    let version = 1;
+    let debug_mode = true;
+
+    // Verify results
+    assert(name.len() == 3);
+    assert(version == 1);
+    assert(debug_mode == true);
+}

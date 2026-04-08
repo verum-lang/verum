@@ -1,0 +1,98 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-verification, contradiction
+// @timeout: 20000
+
+/// Proof by contradiction for formal verification
+
+theorem no_largest_nat(): !exists n: Nat. forall m: Nat. m <= n {
+    proof by contradiction {
+        assume exists n: Nat. forall m: Nat. m <= n;
+        have: false by successor_larger;
+        contradiction
+    }
+}
+
+theorem lt_irreflexive(x: Int): !(x < x) {
+    proof by contradiction {
+        assume x < x;
+        have: !(x < x) by strict_order;
+        contradiction
+    }
+}
+
+theorem empty_has_no_elements<T>(x: T): !(x in Set.empty()) {
+    proof by contradiction {
+        assume h: x in Set.empty();
+        have: false by empty_set_definition;
+        contradiction
+    }
+}
+
+theorem not_both_true_false(p: Bool): !(p == true && p == false) {
+    proof by contradiction {
+        assume h: p == true && p == false;
+        have: true == false by substitution;
+        contradiction
+    }
+}
+
+theorem sqrt2_not_rational(): !is_rational_sqrt(2) {
+    proof by contradiction {
+        assume h: is_rational_sqrt(2);
+        have: false by irrationality_proof;
+        contradiction
+    }
+}
+
+fn is_rational_sqrt(n: Nat) -> Bool;
+
+theorem infinite_primes(): !exists n: Nat. is_largest_prime(n) {
+    proof by contradiction {
+        assume h: exists n: Nat. is_largest_prime(n);
+        have: false by euclid_construction;
+        contradiction
+    }
+}
+
+fn is_largest_prime(n: Nat) -> Bool;
+
+theorem pigeonhole<T>(boxes: Nat, items: Nat)
+    requires items > boxes
+    requires boxes > 0
+    ensures exists_collision(items, boxes)
+{
+    proof by contradiction {
+        assume h: !exists_collision(items, boxes);
+        have: items <= boxes by no_collision_bound;
+        have: items > boxes by precondition;
+        contradiction
+    }
+}
+
+fn exists_collision(items: Nat, boxes: Nat) -> Bool;
+
+theorem cantor_diagonal(): !exists_surjection_nat_to_reals() {
+    proof by contradiction {
+        assume h: exists_surjection_nat_to_reals();
+        have: false by diagonal_argument;
+        contradiction
+    }
+}
+
+fn exists_surjection_nat_to_reals() -> Bool;
+
+theorem double_neg_elim<P: Prop>() requires !!P ensures P {
+    proof by contradiction {
+        assume h: !P;
+        have: !!P by precondition;
+        contradiction
+    }
+}
+
+theorem excluded_middle<P: Prop>(): P || !P {
+    proof by auto
+}
+
+fn main() {}

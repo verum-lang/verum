@@ -1,0 +1,34 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: io_engine, async_io, kqueue, epoll
+// @expect: pass
+
+// IO Engine: create, poll, destroy lifecycle test.
+
+// Stub declarations — LLVM lowering intercepts these by name
+fn __io_engine_new_raw(capacity: Int) -> Int { 0 }
+fn __io_engine_destroy_raw(engine: Int) -> Int { 0 }
+fn __io_poll_raw(engine: Int, max: Int, timeout_ns: Int) -> Int { 0 }
+
+fn main() -> Int {
+    // Create an IO engine
+    let engine = __io_engine_new_raw(64);
+    if engine == 0 {
+        print("FAIL: could not create IO engine");
+        return 1;
+    }
+    print(f"IO engine created: handle={engine}");
+
+    // Poll with 0 timeout (non-blocking, no fds registered)
+    let ready = __io_poll_raw(engine, 16, 0);
+    // Should return 0 (no events ready) — kqueue returns 0 for empty set
+    print(f"Poll with no fds: ready={ready}");
+
+    // Destroy engine
+    __io_engine_destroy_raw(engine);
+    print("IO engine destroyed");
+
+    print("PASS: IO engine lifecycle works");
+    0
+}

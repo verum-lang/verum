@@ -1,0 +1,19 @@
+// @test: typecheck-fail
+// @expected-error: "type mismatch"
+// @tier: all
+// @level: L0
+// @tags: builtin-syntax, meta, type-checking, negative-test
+// @description: Tests type errors with meta-functions
+
+/// Type mismatch tests for meta-functions
+
+fn main() {
+    // @line returns Int, not Text
+    let bad_line: Text = @line;  // ERROR: type mismatch
+
+    // @file returns Text, not Int
+    let bad_file: Int = @file;  // ERROR: type mismatch
+
+    // @cfg returns Bool, not Int
+    let bad_cfg: Int = @cfg(test);  // ERROR: type mismatch
+}

@@ -1,0 +1,9 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, unit, return
+// @description: Unsafe block returning unit type
+fn main() {
+    let _: () = unsafe {
+        let x: Int = 42;
+    };
+}

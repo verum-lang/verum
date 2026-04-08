@@ -1,0 +1,128 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: struct, record, fields, nested
+// @description: Test struct/record type patterns
+
+type Point is { x: Int, y: Int };
+type Rect is { origin: Point, width: Int, height: Int };
+
+fn make_point(x: Int, y: Int) -> Point {
+    Point { x: x, y: y }
+}
+
+fn distance_sq(a: Point, b: Point) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
+fn test_basic_struct() -> Int {
+    let p = make_point(3, 4);
+    if p.x != 3 || p.y != 4 {
+        print(f"FAIL basic: ({p.x}, {p.y})");
+        return 1;
+    }
+    print("  basic_struct: OK");
+    0
+}
+
+fn test_distance() -> Int {
+    let a = make_point(0, 0);
+    let b = make_point(3, 4);
+    let d = distance_sq(a, b);
+    if d != 25 {
+        print(f"FAIL distance: {d}, expected 25");
+        return 1;
+    }
+    print("  distance: OK");
+    0
+}
+
+fn test_nested_struct() -> Int {
+    let r = Rect { origin: Point { x: 10, y: 20 }, width: 100, height: 50 };
+    if r.origin.x != 10 {
+        print(f"FAIL nested: origin.x={r.origin.x}");
+        return 1;
+    }
+    if r.width != 100 {
+        print(f"FAIL nested: width={r.width}");
+        return 1;
+    }
+    let area = r.width * r.height;
+    if area != 5000 {
+        print(f"FAIL nested: area={area}");
+        return 1;
+    }
+    print("  nested_struct: OK");
+    0
+}
+
+fn test_struct_list() -> Int {
+    let mut points = List.new();
+    let mut i = 0;
+    while i < 5 {
+        points.push(make_point(i, i * i));
+        i = i + 1;
+    }
+    if points.len() != 5 {
+        print(f"FAIL struct_list: len={points.len()}");
+        return 1;
+    }
+    let p3 = points[3];
+    if p3.x != 3 || p3.y != 9 {
+        print(f"FAIL struct_list: p3=({p3.x}, {p3.y})");
+        return 1;
+    }
+    print("  struct_list: OK");
+    0
+}
+
+type RGB is { r: Int, g: Int, b: Int };
+
+implement RGB {
+    fn new(r: Int, g: Int, b: Int) -> RGB {
+        RGB { r: r, g: g, b: b }
+    }
+
+    fn brightness(&self) -> Int {
+        (self.r + self.g + self.b) / 3
+    }
+
+    fn mix(&self, other: RGB) -> RGB {
+        RGB { r: (self.r + other.r) / 2, g: (self.g + other.g) / 2, b: (self.b + other.b) / 2 }
+    }
+}
+
+fn test_rgb() -> Int {
+    let red = RGB.new(255, 0, 0);
+    let blue = RGB.new(0, 0, 255);
+    let mix = red.mix(blue);
+    if mix.r != 127 || mix.b != 127 {
+        print(f"FAIL rgb mix: ({mix.r}, {mix.g}, {mix.b})");
+        return 1;
+    }
+    if red.brightness() != 85 {
+        print(f"FAIL rgb brightness: {red.brightness()}");
+        return 1;
+    }
+    print("  rgb: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Struct Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_struct();
+    failures = failures + test_distance();
+    failures = failures + test_nested_struct();
+    failures = failures + test_struct_list();
+    failures = failures + test_rgb();
+
+    if failures == 0 {
+        print("All struct pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,115 @@
+// @test: parse-pass
+// @tier: 0
+// @category: contexts
+// @description: Test provide statement parsing for context injection
+
+fn test_basic_provide() {
+    // Simple provide
+    provide Logger = ConsoleLogger.new();
+
+    // Provide with constructor call
+    provide Database = PostgresDatabase.connect("postgres://localhost/db");
+
+    // Provide with factory method
+    provide Cache = LruCache.with_capacity(1000);
+
+    // Provide with variable
+    let logger = FileLogger.new("app.log");
+    provide Logger = logger;
+
+    // Provide with expression
+    provide Config = if production { ProdConfig.load() } else { DevConfig.default() };
+}
+
+fn test_provide_with_alias() {
+    // Alias for different instances of same type
+    provide Database as primary = PostgresDatabase.connect(primary_url);
+    provide Database as replica = PostgresDatabase.connect(replica_url);
+
+    // Alias for clarity
+    provide Logger as app_logger = FileLogger.new("app.log");
+    provide Logger as audit_logger = FileLogger.new("audit.log");
+
+    // Alias with specific context names
+    provide UserRepository as user_repo = UserRepository.new(db);
+    provide OrderRepository as order_repo = OrderRepository.new(db);
+}
+
+fn test_provide_with_semicolon() {
+    // Provides followed by usage
+    provide Logger = ConsoleLogger.new();
+    Logger.log("Hello");
+
+    provide Database = InMemoryDb.new();
+    let result = Database.query("SELECT 1");
+
+    // Multiple provides in sequence
+    provide Logger = FileLogger.new("app.log");
+    provide Database = PostgresDatabase.connect(url);
+    provide Cache = RedisCache.connect(redis_url);
+
+    do_work();
+}
+
+fn test_provide_expressions() {
+    // Match expression
+    provide Logger = match env {
+        "production" => SyslogLogger.new(),
+        "development" => ConsoleLogger.new(),
+        _ => NullLogger.new()
+    };
+
+    // Block expression
+    provide Database = {
+        let config = load_config();
+        let pool = ConnectionPool.new(config.pool_size);
+        PostgresDatabase.with_pool(config.url, pool)
+    };
+
+    // Closure result
+    provide Config = (|| {
+        let mut cfg = Config.default();
+        cfg.load_from_env();
+        cfg
+    })();
+
+    // Method chain (wrapped in parentheses for multi-line)
+    provide HttpClient = (HttpClient.builder()
+        .timeout(30.seconds)
+        .retry(3)
+        .build());
+
+    // Pipeline (wrapped in parentheses)
+    provide Logger = (base_logger |> add_timestamp |> add_context);
+}
+
+fn test_provide_context() {
+    // Named context
+    provide UserRepository = PostgresRepository.new(db);
+
+    // Cache context
+    provide JsonCache = LruCache.new(1000);
+
+    // Event repository
+    provide EventRepository = EventRepository.new();
+}
+
+fn test_provide_complex_paths() {
+    // Module path - using simple identifier (qualified paths in provide context)
+    provide Logger = logging.ConsoleLogger.new();
+
+    // Nested module
+    provide Connection = database.sql.PostgresConnection.new(url);
+}
+
+fn test_provide_result_handling() {
+    // Provide with try - must extract result first
+    let db = PostgresDatabase.connect(url)?;
+    provide Database = db;
+
+    // Provide with unwrap
+    provide Config = Config.load().unwrap();
+
+    // Provide with default (wrapped to ensure expression parsing)
+    provide Logger = (Logger.from_env() ?? ConsoleLogger.new());
+}

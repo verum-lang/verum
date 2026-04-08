@@ -1,0 +1,45 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, range, open, error
+// @description: Test open-ended range patterns that may not be allowed in pattern context
+// @expected-error: E018
+
+fn test_prefix_range_pattern() {
+    let value = 5;
+
+    // Invalid: prefix range (..b) may not be allowed in patterns
+    match value {
+        ..10 => print("prefix range"),
+        _ => print("other"),
+    }
+}
+
+fn test_prefix_inclusive_range() {
+    let value = 5;
+
+    // Invalid: prefix inclusive range
+    match value {
+        ..=10 => print("prefix inclusive"),
+        _ => print("other"),
+    }
+}
+
+fn test_double_open_range() {
+    let value = 5;
+
+    // Invalid: both ends open is meaningless
+    match value {
+        .._ => print("both open"),
+        _ => print("other"),
+    }
+}
+
+fn test_half_open_with_identifier() {
+    let value = 5;
+
+    // Invalid: identifier as range bound in pattern
+    match value {
+        x..y => print("identifier bounds"),
+        _ => print("other"),
+    }
+}

@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, smt-guards, pattern-matching
+// @description: SMT-verified guard exhaustiveness checking
+
+type Maybe<T> is None | Some(T);
+
+// Guard combination covers all integers
+// SMT can verify: n < 0 || n == 0 || n > 0 is always true
+fn sign(n: Int) -> Int =
+    match n {
+        _ if n < 0 => -1,
+        _ if n == 0 => 0,
+        _ if n > 0 => 1
+    };
+
+// Three-way partition via guards
+fn trichotomy(a: Int, b: Int) -> Text =
+    match a {
+        _ if a < b => "less",
+        _ if a == b => "equal",
+        _ if a > b => "greater"
+    };
+
+// Bounded guards with disjoint conditions
+fn grade(score: Int) -> Text =
+    match score {
+        _ if score >= 90 => "A",
+        _ if score >= 80 => "B",
+        _ if score >= 70 => "C",
+        _ if score >= 60 => "D",
+        _ => "F"
+    };
+
+// Numeric categorization with guards
+fn categorize_age(age: Int) -> Text =
+    match age {
+        _ if age < 0 => "invalid",
+        _ if age < 13 => "child",
+        _ if age < 20 => "teenager",
+        _ if age < 65 => "adult",
+        _ => "senior"
+    };
+
+// Boolean guards combining multiple conditions
+fn quadrant(x: Int, y: Int) -> Int =
+    match (x, y) {
+        _ if x > 0 && y > 0 => 1,
+        _ if x < 0 && y > 0 => 2,
+        _ if x < 0 && y < 0 => 3,
+        _ if x > 0 && y < 0 => 4,
+        _ => 0  // on axis
+    };
+
+// Guards with pattern bindings
+fn find_special(n: Int) -> Maybe<Text> =
+    match n {
+        x if x == 0 => Some("zero"),
+        x if x == 1 => Some("one"),
+        x if x == 42 => Some("answer"),
+        x if x < 0 => Some("negative"),
+        _ => None
+    };
+
+// Overlapping guards with priority
+fn classify_number(n: Int) -> Text =
+    match n {
+        _ if n % 15 == 0 => "fizzbuzz",
+        _ if n % 3 == 0 => "fizz",
+        _ if n % 5 == 0 => "buzz",
+        _ => "number"
+    };
+
+// Guard with arithmetic
+@allow(unbounded_recursion)
+fn power_of_two_check(n: Int) -> Bool =
+    match n {
+        _ if n <= 0 => false,
+        _ if n == 1 => true,
+        _ if n % 2 == 0 => power_of_two_check(n / 2),
+        _ => false
+    };
+
+// Exhaustive with modular arithmetic
+fn mod_class(n: Int) -> Int =
+    match n % 4 {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        3 => 3,
+        -3 => 1,  // Handle negative remainders
+        -2 => 2,
+        -1 => 3,
+        _ => 0  // Unreachable for modulo 4
+    };
+
+// Combined patterns and guards
+type Point is { x: Int, y: Int };
+
+fn point_location(p: Point) -> Text =
+    match p {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x: 0, y } if y > 0 => "positive y-axis",
+        Point { x: 0, y } if y < 0 => "negative y-axis",
+        Point { x, y: 0 } if x > 0 => "positive x-axis",
+        Point { x, y: 0 } if x < 0 => "negative x-axis",
+        _ => "general position"
+    };
+
+fn main() {
+    assert(sign(-5) == -1);
+    assert(sign(0) == 0);
+    assert(sign(5) == 1);
+
+    assert(trichotomy(1, 2) == "less");
+    assert(trichotomy(2, 2) == "equal");
+    assert(trichotomy(3, 2) == "greater");
+
+    assert(grade(95) == "A");
+    assert(grade(55) == "F");
+
+    assert(quadrant(1, 1) == 1);
+    assert(quadrant(-1, -1) == 3);
+    assert(quadrant(0, 0) == 0);
+
+    assert(classify_number(15) == "fizzbuzz");
+    assert(classify_number(9) == "fizz");
+    assert(classify_number(10) == "buzz");
+
+    assert(power_of_two_check(8));
+    assert(!power_of_two_check(7));
+
+    let origin = Point { x: 0, y: 0 };
+    assert(point_location(origin) == "origin");
+}

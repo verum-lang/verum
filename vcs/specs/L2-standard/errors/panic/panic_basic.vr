@@ -1,0 +1,192 @@
+// @test: run
+// @expected-exit-code: 1
+// @expected-stderr: panic: Assertion failed: index out of bounds
+// @tier: 0
+// @level: L2
+// @tags: errors, panic, basic
+
+/// Basic panic - unrecoverable program termination.
+/// Panic is used for programming errors that cannot be reasonably recovered.
+
+/// Simple panic with default message
+fn demonstrate_simple_panic() {
+    // This will terminate the program
+    panic();
+}
+
+/// Panic with a reason
+fn demonstrate_panic_with_message() {
+    panic("Something went terribly wrong");
+}
+
+/// Panic in assert-like scenarios
+fn assert_positive(value: Int) {
+    if value <= 0 {
+        panic("Value must be positive, got: {}", value);
+    }
+}
+
+/// Panic on impossible conditions (unreachable code)
+fn process_status(status: Status) -> Text {
+    match status {
+        Status.Active => "active",
+        Status.Pending => "pending",
+        Status.Completed => "completed",
+        // If Status is an enum with only these variants,
+        // this should never be reached
+        _ => panic("Unreachable: unknown status variant")
+    }
+}
+
+type Status is
+    | Active
+    | Pending
+    | Completed;
+
+/// Panic for unimplemented functionality
+fn future_feature() {
+    panic("Not yet implemented: this feature is coming in v2.0");
+}
+
+/// Panic for invariant violations
+type BoundedInt is {
+    value: Int,
+    min: Int,
+    max: Int
+};
+
+fn create_bounded_int(value: Int, min: Int, max: Int) -> BoundedInt {
+    if min > max {
+        panic("Invalid bounds: min ({}) > max ({})", min, max);
+    }
+    if value < min || value > max {
+        panic("Value {} out of bounds [{}, {}]", value, min, max);
+    }
+    BoundedInt { value, min, max }
+}
+
+/// Panic for contract violations
+fn divide(x: Int, y: Int) -> Int {
+    // Precondition check - panic if violated
+    if y == 0 {
+        panic("Division by zero: cannot divide {} by 0", x);
+    }
+    x / y
+}
+
+/// Panic in array access (bounds checking)
+fn safe_array_access(arr: &List<Int>, index: Int) -> Int {
+    if index < 0 || index >= arr.len() as Int {
+        panic("Index {} out of bounds for array of length {}", index, arr.len());
+    }
+    arr[index as usize]
+}
+
+/// Panic for type invariants
+type NonEmptyList<T> is {
+    items: List<T>
+};
+
+fn create_non_empty_list<T>(items: List<T>) -> NonEmptyList<T> {
+    if items.is_empty() {
+        panic("Cannot create NonEmptyList from empty list");
+    }
+    NonEmptyList { items }
+}
+
+/// Conditional panic based on debug/release
+fn debug_assert(condition: Bool, message: &Text) {
+    @cfg(debug)
+    if !condition {
+        panic("Debug assertion failed: {}", message);
+    }
+    // In release mode, this is a no-op
+}
+
+/// Panic with formatted complex data
+type Transaction is {
+    id: Int,
+    amount: Float,
+    status: TransactionStatus
+};
+
+type TransactionStatus is
+    | Pending
+    | Processed
+    | Failed;
+
+fn validate_transaction(tx: &Transaction) {
+    if tx.amount < 0.0 {
+        panic(
+            "Invalid transaction {}: negative amount {}",
+            tx.id,
+            tx.amount
+        );
+    }
+
+    match tx.status {
+        TransactionStatus.Processed => {
+            // Cannot re-process
+            panic(
+                "Transaction {} already processed, cannot modify",
+                tx.id
+            );
+        },
+        _ => { /* OK */ }
+    }
+}
+
+/// Panic in initialization
+static CONFIG: LazyStatic<Config> = LazyStatic.new(|| {
+    match load_config() {
+        Ok(c) => c,
+        Err(e) => panic("Failed to load required config: {:?}", e)
+    }
+});
+
+type Config is { value: Int };
+
+fn load_config() -> Result<Config, Text> {
+    Ok(Config { value: 42 })
+}
+
+/// Panic alternatives - when to use what
+fn alternatives_demo() {
+    // Use panic! for:
+    // 1. Programming errors (bugs)
+    // 2. Invariant violations
+    // 3. Unreachable code
+
+    // Use Result for:
+    // 1. Expected failure modes
+    // 2. User input validation
+    // 3. I/O operations
+
+    // Use Maybe for:
+    // 1. Optional values
+    // 2. Lookups that might not find anything
+}
+
+/// Panic in tests (expected behavior)
+@test
+fn test_that_panics() {
+    // This test expects a panic
+    assert_panics(|| {
+        panic("Expected panic in test");
+    });
+}
+
+@test
+@should_panic(expected = "out of bounds")
+fn test_array_bounds() {
+    let arr = [1, 2, 3];
+    safe_array_access(&arr, 10);  // Should panic
+}
+
+fn main() {
+    // Example that will panic
+    let arr = [1, 2, 3, 4, 5];
+
+    // This will panic with a bounds error
+    let _ = safe_array_access(&arr, 10);
+}

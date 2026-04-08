@@ -1,0 +1,117 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L0
+// @category: comprehensions
+// @tags: parser, comprehensions, map, errors
+// @description: Invalid map comprehension syntax that should fail to parse
+
+// ============================================================================
+// MISSING REQUIRED ELEMENTS
+// ============================================================================
+
+fn test_map_missing_colon() {
+    // ERROR: Missing colon between key and value
+    let bad = {x v for x in items};
+}
+
+fn test_map_missing_for_keyword() {
+    // ERROR: Missing 'for' keyword
+    let bad = {k: v (k, v) in pairs};
+}
+
+fn test_map_missing_in_keyword() {
+    // ERROR: Missing 'in' keyword
+    let bad = {k: v for (k, v) pairs};
+}
+
+fn test_map_missing_closing_brace() {
+    // ERROR: Missing closing brace
+    let bad = {k: v for (k, v) in pairs;
+}
+
+fn test_map_missing_key_expression() {
+    // ERROR: Missing key expression
+    let bad = {: v for x in items};
+}
+
+fn test_map_missing_value_expression() {
+    // ERROR: Missing value expression
+    let bad = {k: for x in items};
+}
+
+fn test_map_missing_iterator_expression() {
+    // ERROR: Missing iterator expression
+    let bad = {k: v for x in};
+}
+
+fn test_map_missing_pattern() {
+    // ERROR: Missing pattern after 'for'
+    let bad = {k: v for in items};
+}
+
+// ============================================================================
+// INVALID CLAUSE SYNTAX
+// ============================================================================
+
+fn test_map_invalid_if_clause() {
+    // ERROR: 'if' without condition
+    let bad = {k: v for (k, v) in pairs if};
+}
+
+fn test_map_invalid_let_clause_no_equals() {
+    // ERROR: 'let' without '='
+    let bad = {k: v for x in items let y x * 2};
+}
+
+fn test_map_invalid_let_clause_no_value() {
+    // ERROR: 'let' without value
+    let bad = {k: v for x in items let y =};
+}
+
+fn test_map_invalid_nested_for_no_in() {
+    // ERROR: Nested 'for' without 'in'
+    let bad = {k: v for x in xs for y ys};
+}
+
+// ============================================================================
+// SYNTAX CONFUSION
+// ============================================================================
+
+fn test_map_using_arrow_instead_of_colon() {
+    // ERROR: Using -> instead of : for key-value
+    let bad = {k -> v for (k, v) in pairs};
+}
+
+fn test_map_using_equals_instead_of_colon() {
+    // ERROR: Using = instead of : for key-value
+    let bad = {k = v for (k, v) in pairs};
+}
+
+fn test_map_using_where_instead_of_if() {
+    // ERROR: Using 'where' instead of 'if'
+    let bad = {k: v for (k, v) in pairs where v > 0};
+}
+
+fn test_map_double_colon() {
+    // ERROR: Double colon
+    let bad = {k:: v for x in items};
+}
+
+// ============================================================================
+// STRUCTURAL ERRORS
+// ============================================================================
+
+fn test_map_extra_closing_brace() {
+    // ERROR: Extra closing brace
+    let bad = {k: v for x in items}};
+}
+
+fn test_map_mismatched_braces() {
+    // ERROR: Using bracket instead of brace
+    let bad = {k: v for x in items];
+}
+
+fn test_map_empty_comprehension() {
+    // ERROR: Empty comprehension (just 'for' without expressions)
+    let bad = {for x in items};
+}

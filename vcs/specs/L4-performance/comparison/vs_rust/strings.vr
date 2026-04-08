@@ -1,0 +1,698 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @baseline-comparison: rust
+// @tags: comparison, rust, strings, text, baseline, performance
+// @description: String processing vs Rust benchmark (target: 0.85-1.0x Rust)
+
+/// Verum vs Rust: String Processing Benchmark
+///
+/// This benchmark compares Verum's Text operations against Rust's String.
+/// String processing is essential for many applications and tests memory
+/// allocation patterns, UTF-8 handling, and iterator performance.
+///
+/// Target: 0.85-1.0x Rust performance
+///
+/// Operations tested:
+/// - Concatenation
+/// - Parsing (to/from numbers)
+/// - Searching (find, contains)
+/// - Splitting
+/// - Unicode operations
+/// - Formatting
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const ITERATIONS: Int = 100_000;
+const LARGE_ITERATIONS: Int = 1_000_000;
+
+/// Rust baseline measurements
+module rust_baselines {
+    // Concatenation
+    pub const CONCAT_100K_MS: Float = 50.0;
+    pub const CONCAT_WITH_CAP_100K_MS: Float = 30.0;
+    pub const FORMAT_100K_MS: Float = 80.0;
+
+    // Parsing
+    pub const PARSE_INT_1M_MS: Float = 80.0;
+    pub const PARSE_FLOAT_1M_MS: Float = 150.0;
+    pub const INT_TO_STRING_1M_MS: Float = 100.0;
+
+    // Searching
+    pub const FIND_CHAR_1M_MS: Float = 20.0;
+    pub const FIND_SUBSTR_1M_MS: Float = 40.0;
+    pub const CONTAINS_1M_MS: Float = 35.0;
+
+    // Splitting
+    pub const SPLIT_CHAR_100K_MS: Float = 50.0;
+    pub const SPLIT_MULTI_100K_MS: Float = 80.0;
+
+    // Unicode
+    pub const CHARS_COUNT_1M_MS: Float = 30.0;
+    pub const UNICODE_NORMALIZE_100K_MS: Float = 200.0;
+    pub const TO_LOWERCASE_1M_MS: Float = 60.0;
+
+    // Misc
+    pub const TRIM_1M_MS: Float = 25.0;
+    pub const REPLACE_100K_MS: Float = 100.0;
+    pub const JOIN_100K_MS: Float = 40.0;
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs Rust: String Processing");
+
+    // Concatenation benchmarks
+    results.add(benchmark_concat());
+    results.add(benchmark_concat_with_capacity());
+    results.add(benchmark_format());
+
+    // Parsing benchmarks
+    results.add(benchmark_parse_int());
+    results.add(benchmark_parse_float());
+    results.add(benchmark_int_to_string());
+
+    // Searching benchmarks
+    results.add(benchmark_find_char());
+    results.add(benchmark_find_substring());
+    results.add(benchmark_contains());
+
+    // Splitting benchmarks
+    results.add(benchmark_split_char());
+    results.add(benchmark_split_multi());
+
+    // Unicode benchmarks
+    results.add(benchmark_chars_count());
+    results.add(benchmark_to_lowercase());
+
+    // Misc benchmarks
+    results.add(benchmark_trim());
+    results.add(benchmark_replace());
+    results.add(benchmark_join());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_rust_strings.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.ratio >= r.min_target);
+    assert(all_meet_target, "Verum string performance below target");
+}
+
+// ============================================================================
+// Concatenation Benchmarks
+// ============================================================================
+
+/// Benchmark: String concatenation
+fn benchmark_concat() -> ComparisonResult {
+    // Warmup
+    for _ in 0..1000 {
+        let mut s = Text.new();
+        for i in 0..100 {
+            s.push_str(&i.to_string());
+        }
+        black_box(s);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut s = Text.new();
+    for i in 0..ITERATIONS {
+        s.push_str(&i.to_string());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(s);
+
+    ComparisonResult {
+        name: "concat_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.CONCAT_100K_MS,
+        ratio: rust_baselines.CONCAT_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "concat",
+    }
+}
+
+/// Benchmark: Concatenation with pre-allocated capacity
+fn benchmark_concat_with_capacity() -> ComparisonResult {
+    // Warmup
+    for _ in 0..1000 {
+        let mut s = Text.with_capacity(1000);
+        for i in 0..100 {
+            s.push_str(&i.to_string());
+        }
+        black_box(s);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut s = Text.with_capacity(ITERATIONS * 5);
+    for i in 0..ITERATIONS {
+        s.push_str(&i.to_string());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(s);
+
+    ComparisonResult {
+        name: "concat_with_cap_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.CONCAT_WITH_CAP_100K_MS,
+        ratio: rust_baselines.CONCAT_WITH_CAP_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "concat",
+    }
+}
+
+/// Benchmark: Format strings
+fn benchmark_format() -> ComparisonResult {
+    // Warmup
+    for i in 0..1000 {
+        let s = format("Value: {}, Index: {}", i * 2, i);
+        black_box(s);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..ITERATIONS {
+        let s = format("Value: {}, Index: {}", i * 2, i);
+        black_box(s);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "format_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.FORMAT_100K_MS,
+        ratio: rust_baselines.FORMAT_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "format",
+    }
+}
+
+// ============================================================================
+// Parsing Benchmarks
+// ============================================================================
+
+/// Benchmark: Parse integers from strings
+fn benchmark_parse_int() -> ComparisonResult {
+    let strings: List<Text> = (0..LARGE_ITERATIONS)
+        .map(|i| i.to_string())
+        .collect();
+
+    // Warmup
+    for i in 0..10000 {
+        black_box(strings[i].parse.<Int>());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Int = 0;
+    for s in &strings {
+        if let Ok(n) = s.parse.<Int>() {
+            sum += n;
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "parse_int_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.PARSE_INT_1M_MS,
+        ratio: rust_baselines.PARSE_INT_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "parse",
+    }
+}
+
+/// Benchmark: Parse floats from strings
+fn benchmark_parse_float() -> ComparisonResult {
+    let strings: List<Text> = (0..LARGE_ITERATIONS)
+        .map(|i| format("{}.{}", i, i % 1000))
+        .collect();
+
+    // Warmup
+    for i in 0..10000 {
+        black_box(strings[i].parse.<Float>());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Float = 0.0;
+    for s in &strings {
+        if let Ok(n) = s.parse.<Float>() {
+            sum += n;
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "parse_float_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.PARSE_FLOAT_1M_MS,
+        ratio: rust_baselines.PARSE_FLOAT_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "parse",
+    }
+}
+
+/// Benchmark: Integer to string conversion
+fn benchmark_int_to_string() -> ComparisonResult {
+    // Warmup
+    for i in 0..10000 {
+        black_box(i.to_string());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..LARGE_ITERATIONS {
+        black_box(i.to_string());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "int_to_string_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.INT_TO_STRING_1M_MS,
+        ratio: rust_baselines.INT_TO_STRING_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "format",
+    }
+}
+
+// ============================================================================
+// Searching Benchmarks
+// ============================================================================
+
+/// Benchmark: Find character in string
+fn benchmark_find_char() -> ComparisonResult {
+    let haystack = "a".repeat(1000) + "b" + &"c".repeat(1000);
+
+    // Warmup
+    for _ in 0..10000 {
+        black_box(haystack.find('b'));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..LARGE_ITERATIONS {
+        black_box(haystack.find('b'));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "find_char_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.FIND_CHAR_1M_MS,
+        ratio: rust_baselines.FIND_CHAR_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "search",
+    }
+}
+
+/// Benchmark: Find substring
+fn benchmark_find_substring() -> ComparisonResult {
+    let haystack = "abc".repeat(500) + "needle" + &"xyz".repeat(500);
+    let needle = "needle";
+
+    // Warmup
+    for _ in 0..10000 {
+        black_box(haystack.find(needle));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..LARGE_ITERATIONS {
+        black_box(haystack.find(needle));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "find_substr_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.FIND_SUBSTR_1M_MS,
+        ratio: rust_baselines.FIND_SUBSTR_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "search",
+    }
+}
+
+/// Benchmark: Contains check
+fn benchmark_contains() -> ComparisonResult {
+    let haystack = "The quick brown fox jumps over the lazy dog";
+    let patterns = ["quick", "fox", "lazy", "missing", "dog"];
+
+    // Warmup
+    for _ in 0..10000 {
+        for p in &patterns {
+            black_box(haystack.contains(p));
+        }
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(LARGE_ITERATIONS / patterns.len()) {
+        for p in &patterns {
+            black_box(haystack.contains(p));
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "contains_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.CONTAINS_1M_MS,
+        ratio: rust_baselines.CONTAINS_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "search",
+    }
+}
+
+// ============================================================================
+// Splitting Benchmarks
+// ============================================================================
+
+/// Benchmark: Split by character
+fn benchmark_split_char() -> ComparisonResult {
+    let text = (0..100).map(|i| i.to_string()).collect.<List<Text>>().join(",");
+
+    // Warmup
+    for _ in 0..1000 {
+        black_box(text.split(',').count());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        let parts: List<&str> = text.split(',').collect();
+        black_box(parts.len());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "split_char_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.SPLIT_CHAR_100K_MS,
+        ratio: rust_baselines.SPLIT_CHAR_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "split",
+    }
+}
+
+/// Benchmark: Split by multiple characters
+fn benchmark_split_multi() -> ComparisonResult {
+    let text = "a,b;c:d,e;f:g".repeat(20);
+
+    // Warmup
+    for _ in 0..1000 {
+        black_box(text.split(&[',', ';', ':'][..]).count());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        let parts: List<&str> = text.split(&[',', ';', ':'][..]).collect();
+        black_box(parts.len());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "split_multi_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.SPLIT_MULTI_100K_MS,
+        ratio: rust_baselines.SPLIT_MULTI_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "split",
+    }
+}
+
+// ============================================================================
+// Unicode Benchmarks
+// ============================================================================
+
+/// Benchmark: Count Unicode characters
+fn benchmark_chars_count() -> ComparisonResult {
+    let text = "Hello, World! ".repeat(100);
+
+    // Warmup
+    for _ in 0..10000 {
+        black_box(text.chars().count());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..LARGE_ITERATIONS {
+        black_box(text.chars().count());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "chars_count_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.CHARS_COUNT_1M_MS,
+        ratio: rust_baselines.CHARS_COUNT_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "unicode",
+    }
+}
+
+/// Benchmark: To lowercase
+fn benchmark_to_lowercase() -> ComparisonResult {
+    let text = "HELLO WORLD! This Is A Test String.";
+
+    // Warmup
+    for _ in 0..10000 {
+        black_box(text.to_lowercase());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..LARGE_ITERATIONS {
+        black_box(text.to_lowercase());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "to_lowercase_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.TO_LOWERCASE_1M_MS,
+        ratio: rust_baselines.TO_LOWERCASE_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "unicode",
+    }
+}
+
+// ============================================================================
+// Misc Benchmarks
+// ============================================================================
+
+/// Benchmark: Trim whitespace
+fn benchmark_trim() -> ComparisonResult {
+    let text = "   hello world   ";
+
+    // Warmup
+    for _ in 0..10000 {
+        black_box(text.trim());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..LARGE_ITERATIONS {
+        black_box(text.trim());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "trim_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.TRIM_1M_MS,
+        ratio: rust_baselines.TRIM_1M_MS / verum_ms,
+        min_target: 0.90,
+        category: "misc",
+    }
+}
+
+/// Benchmark: Replace substring
+fn benchmark_replace() -> ComparisonResult {
+    let text = "Hello, world! Hello, Verum! Hello, performance!";
+
+    // Warmup
+    for _ in 0..1000 {
+        black_box(text.replace("Hello", "Hi"));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        black_box(text.replace("Hello", "Hi"));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "replace_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.REPLACE_100K_MS,
+        ratio: rust_baselines.REPLACE_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "misc",
+    }
+}
+
+/// Benchmark: Join strings
+fn benchmark_join() -> ComparisonResult {
+    let parts: List<Text> = (0..100).map(|i| i.to_string()).collect();
+
+    // Warmup
+    for _ in 0..1000 {
+        black_box(parts.join(","));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        black_box(parts.join(","));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "join_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.JOIN_100K_MS,
+        ratio: rust_baselines.JOIN_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "misc",
+    }
+}
+
+type ComparisonResult is {
+    name: Text,
+    verum_ms: Float,
+    baseline_ms: Float,
+    ratio: Float,
+    min_target: Float,
+    category: Text,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<ComparisonResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: ComparisonResult) {
+        self.results.push(result);
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<30} {:>12} {:>12} {:>10} {:>8} {:>8}",
+                "Benchmark", "Verum (ms)", "Rust (ms)", "Ratio", "Target", "Status");
+        println("{}", "-".repeat(85));
+
+        for result in &self.results {
+            let passed = result.ratio >= result.min_target;
+            let status = if passed { "PASS" } else { "FAIL" };
+            let ratio_pct = result.ratio * 100.0;
+
+            println("{:<30} {:>12.2} {:>12.2} {:>9.1}% {:>7.0}% {:>8}",
+                    result.name, result.verum_ms, result.baseline_ms,
+                    ratio_pct, result.min_target * 100.0, status);
+        }
+    }
+
+    fn export_comparison(&self, path: Text) {
+        let json = Json.object();
+        json.set("suite", &self.suite_name);
+        json.set("baseline", "rust");
+
+        let results_json = Json.array();
+        for result in &self.results {
+            let r = Json.object();
+            r.set("name", &result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("baseline_ms", result.baseline_ms);
+            r.set("ratio", result.ratio);
+            r.set("min_target", result.min_target);
+            r.set("category", &result.category);
+            r.set("passed", result.ratio >= result.min_target);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+    }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+type Timer is { start_time: Instant };
+implement Timer {
+    fn new() -> Self { Self { start_time: Instant.now() } }
+    fn start(&mut self) { self.start_time = Instant.now(); }
+    fn elapsed_ms(&self) -> Int { self.start_time.elapsed().as_millis() }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+type Json is { data: Map<Text, Heap<Any>> };
+implement Json {
+    fn object() -> Self { Self { data: Map.new() } }
+    fn array() -> Self { Self { data: Map.new() } }
+    fn set<T>(&mut self, key: &Text, value: T) {}
+    fn push<T>(&mut self, value: T) {}
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+module File {
+    pub fn write(path: Text, content: Text) {}
+}

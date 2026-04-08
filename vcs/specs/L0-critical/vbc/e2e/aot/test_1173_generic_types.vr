@@ -1,0 +1,92 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: generics, type-params, implement, e2e
+// @description: Test generic type definitions and implement blocks
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+implement<A, B> Pair<A, B> {
+    fn new(a: A, b: B) -> Pair<A, B> {
+        Pair { first: a, second: b }
+    }
+}
+
+type Stack<T> is {
+    items: List<T>,
+};
+
+implement<T> Stack<T> {
+    fn new() -> Stack<T> {
+        Stack { items: List.new() }
+    }
+
+    fn push(&mut self, val: T) {
+        self.items.push(val);
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+}
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn first_of<T>(a: T, b: T) -> T {
+    a
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Generic pair
+    let p = Pair.new(10, 20);
+    if p.first != 10 {
+        print(f"FAIL: pair.first expected 10, got {p.first}");
+        failures = failures + 1;
+    }
+    if p.second != 20 {
+        print(f"FAIL: pair.second expected 20, got {p.second}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  generic_pair: OK");
+    }
+
+    // Test 2: Generic stack
+    let mut stack = Stack.new();
+    stack.push(1);
+    stack.push(2);
+    stack.push(3);
+    if stack.len() != 3 {
+        print(f"FAIL: stack.len expected 3, got {stack.len()}");
+        failures = failures + 1;
+    } else {
+        print("  generic_stack: OK");
+    }
+
+    // Test 3: Generic functions
+    let val = identity(42);
+    if val != 42 {
+        print(f"FAIL: identity expected 42, got {val}");
+        failures = failures + 1;
+    }
+    let chosen = first_of(100, 200);
+    if chosen != 100 {
+        print(f"FAIL: first_of expected 100, got {chosen}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  generic_functions: OK");
+    }
+
+    if failures == 0 {
+        print("All generic type tests passed");
+    }
+    failures
+}

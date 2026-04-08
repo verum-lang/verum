@@ -1,0 +1,608 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, linalg, wiring
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Tensor linalg wiring — Cholesky, Einsum, Diag, Triu, Tril simulation
+
+// ============================================================================
+// Vector type (3-element)
+// ============================================================================
+
+type Vec3 is { x: Int, y: Int, z: Int };
+
+// ============================================================================
+// 2x2 Matrix: row-major [a00 a01; a10 a11]
+// ============================================================================
+
+type Mat2x2 is { a00: Int, a01: Int, a10: Int, a11: Int };
+
+fn mat2x2_get(m: Mat2x2, row: Int, col: Int) -> Int {
+    if row == 0 && col == 0 { m.a00 }
+    else if row == 0 && col == 1 { m.a01 }
+    else if row == 1 && col == 0 { m.a10 }
+    else { m.a11 }
+}
+
+fn mat2x2_mul(x: Mat2x2, y: Mat2x2) -> Mat2x2 {
+    Mat2x2 {
+        a00: x.a00 * y.a00 + x.a01 * y.a10,
+        a01: x.a00 * y.a01 + x.a01 * y.a11,
+        a10: x.a10 * y.a00 + x.a11 * y.a10,
+        a11: x.a10 * y.a01 + x.a11 * y.a11
+    }
+}
+
+fn mat2x2_transpose(m: Mat2x2) -> Mat2x2 {
+    Mat2x2 { a00: m.a00, a01: m.a10, a10: m.a01, a11: m.a11 }
+}
+
+// ============================================================================
+// 3x3 Matrix: row-major
+// ============================================================================
+
+type Mat3x3 is {
+    m00: Int, m01: Int, m02: Int,
+    m10: Int, m11: Int, m12: Int,
+    m20: Int, m21: Int, m22: Int
+};
+
+fn mat3x3_zero() -> Mat3x3 {
+    Mat3x3 {
+        m00: 0, m01: 0, m02: 0,
+        m10: 0, m11: 0, m12: 0,
+        m20: 0, m21: 0, m22: 0
+    }
+}
+
+fn mat3x3_get(m: Mat3x3, row: Int, col: Int) -> Int {
+    if row == 0 && col == 0 { m.m00 }
+    else if row == 0 && col == 1 { m.m01 }
+    else if row == 0 && col == 2 { m.m02 }
+    else if row == 1 && col == 0 { m.m10 }
+    else if row == 1 && col == 1 { m.m11 }
+    else if row == 1 && col == 2 { m.m12 }
+    else if row == 2 && col == 0 { m.m20 }
+    else if row == 2 && col == 1 { m.m21 }
+    else { m.m22 }
+}
+
+fn mat3x3_mul(x: Mat3x3, y: Mat3x3) -> Mat3x3 {
+    Mat3x3 {
+        m00: x.m00 * y.m00 + x.m01 * y.m10 + x.m02 * y.m20,
+        m01: x.m00 * y.m01 + x.m01 * y.m11 + x.m02 * y.m21,
+        m02: x.m00 * y.m02 + x.m01 * y.m12 + x.m02 * y.m22,
+        m10: x.m10 * y.m00 + x.m11 * y.m10 + x.m12 * y.m20,
+        m11: x.m10 * y.m01 + x.m11 * y.m11 + x.m12 * y.m21,
+        m12: x.m10 * y.m02 + x.m11 * y.m12 + x.m12 * y.m22,
+        m20: x.m20 * y.m00 + x.m21 * y.m10 + x.m22 * y.m20,
+        m21: x.m20 * y.m01 + x.m21 * y.m11 + x.m22 * y.m21,
+        m22: x.m20 * y.m02 + x.m21 * y.m12 + x.m22 * y.m22
+    }
+}
+
+fn mat3x3_trace(m: Mat3x3) -> Int {
+    m.m00 + m.m11 + m.m22
+}
+
+// ============================================================================
+// Triu helper: extract upper triangular (zero below diagonal)
+// ============================================================================
+
+fn mat3x3_triu(m: Mat3x3) -> Mat3x3 {
+    Mat3x3 {
+        m00: m.m00, m01: m.m01, m02: m.m02,
+        m10: 0,     m11: m.m11, m12: m.m12,
+        m20: 0,     m21: 0,     m22: m.m22
+    }
+}
+
+// ============================================================================
+// Tril helper: extract lower triangular (zero above diagonal)
+// ============================================================================
+
+fn mat3x3_tril(m: Mat3x3) -> Mat3x3 {
+    Mat3x3 {
+        m00: m.m00, m01: 0,     m02: 0,
+        m10: m.m10, m11: m.m11, m12: 0,
+        m20: m.m20, m21: m.m21, m22: m.m22
+    }
+}
+
+// ============================================================================
+// Diag helpers: extract diagonal from matrix, create diagonal matrix
+// ============================================================================
+
+fn mat3x3_diag_extract(m: Mat3x3) -> Vec3 {
+    Vec3 { x: m.m00, y: m.m11, z: m.m22 }
+}
+
+fn mat3x3_diag_create(v: Vec3) -> Mat3x3 {
+    Mat3x3 {
+        m00: v.x, m01: 0,   m02: 0,
+        m10: 0,   m11: v.y, m12: 0,
+        m20: 0,   m21: 0,   m22: v.z
+    }
+}
+
+// ============================================================================
+// Integer square root (floor) for Cholesky decomposition
+// ============================================================================
+
+fn isqrt(n: Int) -> Int {
+    if n == 0 { 0 }
+    else {
+        let mut guess = n;
+        let mut prev = 0;
+        while guess != prev {
+            prev = guess;
+            guess = (guess + n / guess) / 2;
+            // Newton's method converges from above for positive n
+            // Stop when it stabilizes or oscillates by 1
+            if guess == prev + 1 {
+                guess = prev;
+            } else {
+                0; // continue
+            }
+        }
+        guess
+    }
+}
+
+// ============================================================================
+// Test 1: Extract diagonal from 3x3 matrix
+// ============================================================================
+
+fn test_diag_extract() {
+    let m = Mat3x3 {
+        m00: 10, m01: 20, m02: 30,
+        m10: 40, m11: 50, m12: 60,
+        m20: 70, m21: 80, m22: 90
+    };
+
+    let d = mat3x3_diag_extract(m);
+    assert_eq(d.x, 10);
+    assert_eq(d.y, 50);
+    assert_eq(d.z, 90);
+
+    // Sum of diagonal = trace
+    assert_eq(d.x + d.y + d.z, mat3x3_trace(m));
+
+    // Diagonal of identity is (1, 1, 1)
+    let id = Mat3x3 {
+        m00: 1, m01: 0, m02: 0,
+        m10: 0, m11: 1, m12: 0,
+        m20: 0, m21: 0, m22: 1
+    };
+    let id_diag = mat3x3_diag_extract(id);
+    assert_eq(id_diag.x, 1);
+    assert_eq(id_diag.y, 1);
+    assert_eq(id_diag.z, 1);
+
+    // Diagonal of zero matrix is (0, 0, 0)
+    let z = mat3x3_zero();
+    let z_diag = mat3x3_diag_extract(z);
+    assert_eq(z_diag.x, 0);
+    assert_eq(z_diag.y, 0);
+    assert_eq(z_diag.z, 0);
+
+    print("test_diag_extract passed");
+}
+
+// ============================================================================
+// Test 2: Create diagonal matrix from vector
+// ============================================================================
+
+fn test_diag_create() {
+    let v = Vec3 { x: 3, y: 7, z: 11 };
+    let m = mat3x3_diag_create(v);
+
+    // Diagonal elements match input vector
+    assert_eq(mat3x3_get(m, 0, 0), 3);
+    assert_eq(mat3x3_get(m, 1, 1), 7);
+    assert_eq(mat3x3_get(m, 2, 2), 11);
+
+    // Off-diagonal elements are zero
+    assert_eq(mat3x3_get(m, 0, 1), 0);
+    assert_eq(mat3x3_get(m, 0, 2), 0);
+    assert_eq(mat3x3_get(m, 1, 0), 0);
+    assert_eq(mat3x3_get(m, 1, 2), 0);
+    assert_eq(mat3x3_get(m, 2, 0), 0);
+    assert_eq(mat3x3_get(m, 2, 1), 0);
+
+    // Trace of diagonal matrix = sum of vector elements
+    assert_eq(mat3x3_trace(m), 3 + 7 + 11);
+
+    // Roundtrip: create diagonal then extract gives back original
+    let d = mat3x3_diag_extract(m);
+    assert_eq(d.x, v.x);
+    assert_eq(d.y, v.y);
+    assert_eq(d.z, v.z);
+
+    // Product of two diagonal matrices is diagonal with element-wise product
+    let v2 = Vec3 { x: 2, y: 5, z: 4 };
+    let m2 = mat3x3_diag_create(v2);
+    let product = mat3x3_mul(m, m2);
+    assert_eq(mat3x3_get(product, 0, 0), 3 * 2);
+    assert_eq(mat3x3_get(product, 1, 1), 7 * 5);
+    assert_eq(mat3x3_get(product, 2, 2), 11 * 4);
+    assert_eq(mat3x3_get(product, 0, 1), 0);
+    assert_eq(mat3x3_get(product, 1, 0), 0);
+
+    print("test_diag_create passed");
+}
+
+// ============================================================================
+// Test 3: Upper triangular extraction (triu)
+// ============================================================================
+
+fn test_triu() {
+    let m = Mat3x3 {
+        m00: 1, m01: 2, m02: 3,
+        m10: 4, m11: 5, m12: 6,
+        m20: 7, m21: 8, m22: 9
+    };
+
+    let u = mat3x3_triu(m);
+
+    // Upper part preserved
+    assert_eq(mat3x3_get(u, 0, 0), 1);
+    assert_eq(mat3x3_get(u, 0, 1), 2);
+    assert_eq(mat3x3_get(u, 0, 2), 3);
+    assert_eq(mat3x3_get(u, 1, 1), 5);
+    assert_eq(mat3x3_get(u, 1, 2), 6);
+    assert_eq(mat3x3_get(u, 2, 2), 9);
+
+    // Below diagonal is zero
+    assert_eq(mat3x3_get(u, 1, 0), 0);
+    assert_eq(mat3x3_get(u, 2, 0), 0);
+    assert_eq(mat3x3_get(u, 2, 1), 0);
+
+    // Trace is unchanged
+    assert_eq(mat3x3_trace(u), mat3x3_trace(m));
+
+    // Triu of identity is identity
+    let id = Mat3x3 {
+        m00: 1, m01: 0, m02: 0,
+        m10: 0, m11: 1, m12: 0,
+        m20: 0, m21: 0, m22: 1
+    };
+    let id_u = mat3x3_triu(id);
+    assert_eq(mat3x3_get(id_u, 0, 0), 1);
+    assert_eq(mat3x3_get(id_u, 1, 1), 1);
+    assert_eq(mat3x3_get(id_u, 2, 2), 1);
+    assert_eq(mat3x3_get(id_u, 1, 0), 0);
+    assert_eq(mat3x3_get(id_u, 2, 0), 0);
+    assert_eq(mat3x3_get(id_u, 2, 1), 0);
+
+    // Triu of zero is zero
+    let z = mat3x3_zero();
+    let z_u = mat3x3_triu(z);
+    assert_eq(mat3x3_get(z_u, 0, 0), 0);
+    assert_eq(mat3x3_get(z_u, 1, 1), 0);
+    assert_eq(mat3x3_get(z_u, 2, 2), 0);
+
+    print("test_triu passed");
+}
+
+// ============================================================================
+// Test 4: Lower triangular extraction (tril)
+// ============================================================================
+
+fn test_tril() {
+    let m = Mat3x3 {
+        m00: 1, m01: 2, m02: 3,
+        m10: 4, m11: 5, m12: 6,
+        m20: 7, m21: 8, m22: 9
+    };
+
+    let lo = mat3x3_tril(m);
+
+    // Lower part preserved
+    assert_eq(mat3x3_get(lo, 0, 0), 1);
+    assert_eq(mat3x3_get(lo, 1, 0), 4);
+    assert_eq(mat3x3_get(lo, 1, 1), 5);
+    assert_eq(mat3x3_get(lo, 2, 0), 7);
+    assert_eq(mat3x3_get(lo, 2, 1), 8);
+    assert_eq(mat3x3_get(lo, 2, 2), 9);
+
+    // Above diagonal is zero
+    assert_eq(mat3x3_get(lo, 0, 1), 0);
+    assert_eq(mat3x3_get(lo, 0, 2), 0);
+    assert_eq(mat3x3_get(lo, 1, 2), 0);
+
+    // Trace is unchanged
+    assert_eq(mat3x3_trace(lo), mat3x3_trace(m));
+
+    // triu + tril share only the diagonal; verify diagonal consistency
+    let u = mat3x3_triu(m);
+    // triu diagonal + tril diagonal - original diagonal = original diagonal
+    let triu_diag = mat3x3_diag_extract(u);
+    let tril_diag = mat3x3_diag_extract(lo);
+    let orig_diag = mat3x3_diag_extract(m);
+    assert_eq(triu_diag.x, orig_diag.x);
+    assert_eq(triu_diag.y, orig_diag.y);
+    assert_eq(triu_diag.z, orig_diag.z);
+    assert_eq(tril_diag.x, orig_diag.x);
+    assert_eq(tril_diag.y, orig_diag.y);
+    assert_eq(tril_diag.z, orig_diag.z);
+
+    // Tril of identity is identity
+    let id = Mat3x3 {
+        m00: 1, m01: 0, m02: 0,
+        m10: 0, m11: 1, m12: 0,
+        m20: 0, m21: 0, m22: 1
+    };
+    let id_lo = mat3x3_tril(id);
+    assert_eq(mat3x3_get(id_lo, 0, 0), 1);
+    assert_eq(mat3x3_get(id_lo, 1, 1), 1);
+    assert_eq(mat3x3_get(id_lo, 2, 2), 1);
+    assert_eq(mat3x3_get(id_lo, 0, 1), 0);
+    assert_eq(mat3x3_get(id_lo, 0, 2), 0);
+
+    print("test_tril passed");
+}
+
+// ============================================================================
+// Test 5: Cholesky decomposition of 2x2 SPD matrix
+// We use scaled integer arithmetic to avoid floats.
+//
+// A = [[4, 2], [2, 3]]  (symmetric positive definite)
+// Cholesky: A = L * L^T where L is lower triangular
+//
+// L = [[l00, 0], [l10, l11]]
+// l00 = sqrt(4) = 2
+// l10 = a10 / l00 = 2 / 2 = 1
+// l11 = sqrt(a11 - l10^2) = sqrt(3 - 1) = sqrt(2)
+//
+// Since sqrt(2) is irrational, we verify using scaled integers:
+// We check L * L^T * scale^2 = A * scale^2
+// Using scale = 100: l00=200, l10=100, l11 = isqrt(20000) = 141 (approx)
+//
+// Alternatively, verify the exact integer steps of Cholesky:
+// l00^2 = a00 = 4, l10*l00 = a10 = 2, l10^2 + l11^2 = a11 = 3
+// So l00=2, l10=1, l11^2 = 3-1 = 2 (exact check without sqrt)
+// ============================================================================
+
+fn test_cholesky_2x2() {
+    // A = [[4, 2], [2, 3]]
+    let a00 = 4;
+    let a01 = 2;
+    let a10 = 2;
+    let a11 = 3;
+
+    // Cholesky step 1: l00^2 = a00
+    let l00_sq = a00;
+    assert_eq(l00_sq, 4);
+
+    // l00 = sqrt(a00) = 2 (exact integer)
+    let l00 = isqrt(a00);
+    assert_eq(l00, 2);
+
+    // Cholesky step 2: l10 = a10 / l00
+    let l10 = a10 / l00;
+    assert_eq(l10, 1);
+
+    // Cholesky step 3: l11^2 = a11 - l10^2
+    let l11_sq = a11 - l10 * l10;
+    assert_eq(l11_sq, 2);  // l11 = sqrt(2), irrational
+
+    // Verify L * L^T = A using the squared form:
+    // (L * L^T)[0][0] = l00^2 = 4 = a00
+    assert_eq(l00 * l00, a00);
+
+    // (L * L^T)[1][0] = l10 * l00 = 1 * 2 = 2 = a10
+    assert_eq(l10 * l00, a10);
+
+    // (L * L^T)[0][1] = l00 * l10 = 2 * 1 = 2 = a01 (symmetric)
+    assert_eq(l00 * l10, a01);
+
+    // (L * L^T)[1][1] = l10^2 + l11^2 = 1 + 2 = 3 = a11
+    assert_eq(l10 * l10 + l11_sq, a11);
+
+    // Test with a perfect-square Cholesky: A = [[9, 6], [6, 8]]
+    // l00 = sqrt(9) = 3, l10 = 6/3 = 2, l11^2 = 8 - 4 = 4, l11 = 2
+    let b00 = 9;
+    let b01 = 6;
+    let b10 = 6;
+    let b11 = 8;
+    let bl00 = isqrt(b00);
+    assert_eq(bl00, 3);
+    let bl10 = b10 / bl00;
+    assert_eq(bl10, 2);
+    let bl11_sq = b11 - bl10 * bl10;
+    assert_eq(bl11_sq, 4);
+    let bl11 = isqrt(bl11_sq);
+    assert_eq(bl11, 2);
+
+    // Full reconstruction: L * L^T = A
+    let bl = Mat2x2 { a00: bl00, a01: 0, a10: bl10, a11: bl11 };
+    let blt = mat2x2_transpose(bl);
+    let reconstructed = mat2x2_mul(bl, blt);
+    assert_eq(mat2x2_get(reconstructed, 0, 0), b00);
+    assert_eq(mat2x2_get(reconstructed, 0, 1), b01);
+    assert_eq(mat2x2_get(reconstructed, 1, 0), b10);
+    assert_eq(mat2x2_get(reconstructed, 1, 1), b11);
+
+    print("test_cholesky_2x2 passed");
+}
+
+// ============================================================================
+// Test 6: Einsum dot product "i,i->" = sum of element-wise products
+// ============================================================================
+
+fn test_einsum_dot() {
+    // einsum("i,i->", a, b) = sum_i(a[i] * b[i]) = dot product
+    let a = Vec3 { x: 2, y: 3, z: 4 };
+    let b = Vec3 { x: 5, y: 6, z: 7 };
+
+    // Simulate einsum "i,i->"
+    let dot = a.x * b.x + a.y * b.y + a.z * b.z;
+    // 2*5 + 3*6 + 4*7 = 10 + 18 + 28 = 56
+    assert_eq(dot, 56);
+
+    // Dot product is commutative
+    let dot_rev = b.x * a.x + b.y * a.y + b.z * a.z;
+    assert_eq(dot, dot_rev);
+
+    // Dot with self gives squared norm
+    let norm_sq = a.x * a.x + a.y * a.y + a.z * a.z;
+    // 4 + 9 + 16 = 29
+    assert_eq(norm_sq, 29);
+
+    // Dot with zero vector gives zero
+    let z = Vec3 { x: 0, y: 0, z: 0 };
+    let dot_zero = a.x * z.x + a.y * z.y + a.z * z.z;
+    assert_eq(dot_zero, 0);
+
+    // Distributive: a.(b+c) = a.b + a.c
+    let c = Vec3 { x: 1, y: 1, z: 1 };
+    let bc_sum = Vec3 { x: b.x + c.x, y: b.y + c.y, z: b.z + c.z };
+    let dot_bc = a.x * bc_sum.x + a.y * bc_sum.y + a.z * bc_sum.z;
+    let dot_b = a.x * b.x + a.y * b.y + a.z * b.z;
+    let dot_c = a.x * c.x + a.y * c.y + a.z * c.z;
+    assert_eq(dot_bc, dot_b + dot_c);
+
+    print("test_einsum_dot passed");
+}
+
+// ============================================================================
+// Test 7: Einsum outer product "i,j->ij"
+// ============================================================================
+
+fn test_einsum_outer() {
+    // einsum("i,j->ij", a, b) = outer product: result[i][j] = a[i] * b[j]
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+
+    // Simulate einsum "i,j->ij"
+    let outer = Mat3x3 {
+        m00: a.x * b.x, m01: a.x * b.y, m02: a.x * b.z,
+        m10: a.y * b.x, m11: a.y * b.y, m12: a.y * b.z,
+        m20: a.z * b.x, m21: a.z * b.y, m22: a.z * b.z
+    };
+
+    // Expected: [[4,5,6],[8,10,12],[12,15,18]]
+    assert_eq(mat3x3_get(outer, 0, 0), 4);
+    assert_eq(mat3x3_get(outer, 0, 1), 5);
+    assert_eq(mat3x3_get(outer, 0, 2), 6);
+    assert_eq(mat3x3_get(outer, 1, 0), 8);
+    assert_eq(mat3x3_get(outer, 1, 1), 10);
+    assert_eq(mat3x3_get(outer, 1, 2), 12);
+    assert_eq(mat3x3_get(outer, 2, 0), 12);
+    assert_eq(mat3x3_get(outer, 2, 1), 15);
+    assert_eq(mat3x3_get(outer, 2, 2), 18);
+
+    // Trace of outer product = dot product of the two vectors
+    let trace_val = mat3x3_trace(outer);
+    let dot = a.x * b.x + a.y * b.y + a.z * b.z;
+    assert_eq(trace_val, dot);
+    // 4 + 10 + 18 = 32
+    assert_eq(trace_val, 32);
+
+    // Outer product of any vectors with a zero vector is zero matrix
+    let z = Vec3 { x: 0, y: 0, z: 0 };
+    let outer_z = Mat3x3 {
+        m00: a.x * z.x, m01: a.x * z.y, m02: a.x * z.z,
+        m10: a.y * z.x, m11: a.y * z.y, m12: a.y * z.z,
+        m20: a.z * z.x, m21: a.z * z.y, m22: a.z * z.z
+    };
+    assert_eq(mat3x3_get(outer_z, 0, 0), 0);
+    assert_eq(mat3x3_get(outer_z, 1, 1), 0);
+    assert_eq(mat3x3_get(outer_z, 2, 2), 0);
+
+    print("test_einsum_outer passed");
+}
+
+// ============================================================================
+// Test 8: Einsum matrix multiplication "ij,jk->ik"
+// ============================================================================
+
+fn test_einsum_matmul() {
+    // einsum("ij,jk->ik", A, B) = matrix multiplication C[i][k] = sum_j A[i][j]*B[j][k]
+
+    // A = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+    let a_mat = Mat3x3 {
+        m00: 1, m01: 2, m02: 3,
+        m10: 4, m11: 5, m12: 6,
+        m20: 7, m21: 8, m22: 9
+    };
+
+    // B = [[9, 8, 7], [6, 5, 4], [3, 2, 1]]
+    let b_mat = Mat3x3 {
+        m00: 9, m01: 8, m02: 7,
+        m10: 6, m11: 5, m12: 4,
+        m20: 3, m21: 2, m22: 1
+    };
+
+    // C = A * B (einsum "ij,jk->ik")
+    let c_mat = mat3x3_mul(a_mat, b_mat);
+
+    // C[0][0] = 1*9 + 2*6 + 3*3 = 9 + 12 + 9 = 30
+    assert_eq(mat3x3_get(c_mat, 0, 0), 30);
+
+    // C[0][1] = 1*8 + 2*5 + 3*2 = 8 + 10 + 6 = 24
+    assert_eq(mat3x3_get(c_mat, 0, 1), 24);
+
+    // C[0][2] = 1*7 + 2*4 + 3*1 = 7 + 8 + 3 = 18
+    assert_eq(mat3x3_get(c_mat, 0, 2), 18);
+
+    // C[1][0] = 4*9 + 5*6 + 6*3 = 36 + 30 + 18 = 84
+    assert_eq(mat3x3_get(c_mat, 1, 0), 84);
+
+    // C[1][1] = 4*8 + 5*5 + 6*2 = 32 + 25 + 12 = 69
+    assert_eq(mat3x3_get(c_mat, 1, 1), 69);
+
+    // C[1][2] = 4*7 + 5*4 + 6*1 = 28 + 20 + 6 = 54
+    assert_eq(mat3x3_get(c_mat, 1, 2), 54);
+
+    // C[2][0] = 7*9 + 8*6 + 9*3 = 63 + 48 + 27 = 138
+    assert_eq(mat3x3_get(c_mat, 2, 0), 138);
+
+    // C[2][1] = 7*8 + 8*5 + 9*2 = 56 + 40 + 18 = 114
+    assert_eq(mat3x3_get(c_mat, 2, 1), 114);
+
+    // C[2][2] = 7*7 + 8*4 + 9*1 = 49 + 32 + 9 = 90
+    assert_eq(mat3x3_get(c_mat, 2, 2), 90);
+
+    // Verify identity property: A * I = A
+    let id = Mat3x3 {
+        m00: 1, m01: 0, m02: 0,
+        m10: 0, m11: 1, m12: 0,
+        m20: 0, m21: 0, m22: 1
+    };
+    let ai = mat3x3_mul(a_mat, id);
+    assert_eq(mat3x3_get(ai, 0, 0), 1);
+    assert_eq(mat3x3_get(ai, 0, 1), 2);
+    assert_eq(mat3x3_get(ai, 0, 2), 3);
+    assert_eq(mat3x3_get(ai, 1, 0), 4);
+    assert_eq(mat3x3_get(ai, 1, 1), 5);
+    assert_eq(mat3x3_get(ai, 1, 2), 6);
+    assert_eq(mat3x3_get(ai, 2, 0), 7);
+    assert_eq(mat3x3_get(ai, 2, 1), 8);
+    assert_eq(mat3x3_get(ai, 2, 2), 9);
+
+    // Einsum trace contraction: "ii->" on C
+    // trace(C) = 30 + 69 + 90 = 189
+    assert_eq(mat3x3_trace(c_mat), 189);
+
+    print("test_einsum_matmul passed");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_diag_extract();
+    test_diag_create();
+    test_triu();
+    test_tril();
+    test_cholesky_2x2();
+    test_einsum_dot();
+    test_einsum_outer();
+    test_einsum_matmul();
+    print("[OK] 066_tensor_linalg_wiring");
+    0
+}

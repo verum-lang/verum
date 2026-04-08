@@ -1,0 +1,43 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M409
+// @tags: meta, quote, hygiene, repetition, mismatch
+// @description: Tests detection of mismatched repetition lengths
+
+// =============================================================================
+// REPETITION LENGTH MISMATCH
+// =============================================================================
+
+meta fn repetition_length_mismatch() -> TokenStream {
+    let names = [ident("a"), ident("b"), ident("c")];  // 3 elements
+    let values = [1, 2];  // 2 elements
+
+    quote {
+        // names and values have different lengths - error
+        $[for (n, v) in zip(names, values) {
+            let $n = $v;
+        }]  // ERROR: M409 - Repetition mismatch: 'names' has 3 elements, 'values' has 2
+    }
+}
+
+// At-least-one repetition with empty list
+meta fn repetition_empty_plus() -> TokenStream {
+    let items: List<Ident> = [];  // Empty
+
+    quote {
+        // + requires at least one element
+        $[for item in items+ {
+            process($item);
+        }]  // ERROR: M409 - At-least-one repetition (+) requires non-empty list
+    }
+}
+
+fn test_mismatch() {
+    // This invocation should fail with M409
+    let result = @repetition_length_mismatch();
+}
+
+fn main() {
+    test_mismatch();
+}

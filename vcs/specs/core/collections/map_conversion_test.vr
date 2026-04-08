@@ -1,0 +1,272 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, map, btreemap, to_entries, keys_list, values_list, conversion
+// @description: Tests for Map/BTreeMap conversion methods
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Map.to_entries
+// =============================================================================
+
+@test
+fn test_map_to_entries_basic() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let entries = m.to_entries();
+    assert_eq(entries.len(), 3);
+    // Order unspecified but all entries present
+    let mut found = 0;
+    let mut i = 0;
+    while i < entries.len() {
+        let k = entries[i].0;
+        let v = entries[i].1;
+        if k == 1 && v == 10 { found = found + 1; }
+        if k == 2 && v == 20 { found = found + 1; }
+        if k == 3 && v == 30 { found = found + 1; }
+        i = i + 1;
+    }
+    assert_eq(found, 3);
+}
+
+@test
+fn test_map_to_entries_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let entries = m.to_entries();
+    assert(entries.is_empty());
+}
+
+@test
+fn test_map_to_entries_preserves_map() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let _ = m.to_entries();
+    assert_eq(m.len(), 2);
+    assert_eq(*m.get(&1).unwrap(), 10);
+}
+
+// =============================================================================
+// Section 2: Map.keys_list
+// =============================================================================
+
+@test
+fn test_map_keys_list_basic() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(10, 1);
+    m.insert(20, 2);
+    m.insert(30, 3);
+    let keys = m.keys_list();
+    assert_eq(keys.len(), 3);
+    assert(keys.contains(&10));
+    assert(keys.contains(&20));
+    assert(keys.contains(&30));
+}
+
+@test
+fn test_map_keys_list_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let keys = m.keys_list();
+    assert(keys.is_empty());
+}
+
+// =============================================================================
+// Section 3: Map.values_list
+// =============================================================================
+
+@test
+fn test_map_values_list_basic() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+    let vals = m.values_list();
+    assert_eq(vals.len(), 3);
+    assert(vals.contains(&100));
+    assert(vals.contains(&200));
+    assert(vals.contains(&300));
+}
+
+@test
+fn test_map_values_list_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let vals = m.values_list();
+    assert(vals.is_empty());
+}
+
+// =============================================================================
+// Section 4: BTreeMap.to_entries
+// =============================================================================
+
+@test
+fn test_btreemap_to_entries_basic() {
+    let mut m = BTreeMap.new();
+    m.insert(3, 30);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let entries = m.to_entries();
+    assert_eq(entries.len(), 3);
+    // BTreeMap entries should be in sorted key order
+    assert_eq(entries[0].0, 1);
+    assert_eq(entries[0].1, 10);
+    assert_eq(entries[1].0, 2);
+    assert_eq(entries[1].1, 20);
+    assert_eq(entries[2].0, 3);
+    assert_eq(entries[2].1, 30);
+}
+
+@test
+fn test_btreemap_to_entries_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let entries = m.to_entries();
+    assert(entries.is_empty());
+}
+
+@test
+fn test_btreemap_to_entries_preserves_map() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    let _ = m.to_entries();
+    assert_eq(m.len(), 1);
+}
+
+// =============================================================================
+// Section 5: Integration
+// =============================================================================
+
+@test
+fn test_map_roundtrip_via_entries() {
+    let mut original: Map<Int, Int> = Map.new();
+    original.insert(1, 100);
+    original.insert(2, 200);
+    original.insert(3, 300);
+    let entries = original.to_entries();
+    // Rebuild from entries
+    let mut rebuilt: Map<Int, Int> = Map.new();
+    let mut i = 0;
+    while i < entries.len() {
+        let k = entries[i].0;
+        let v = entries[i].1;
+        rebuilt.insert(k, v);
+        i = i + 1;
+    }
+    assert_eq(rebuilt.len(), original.len());
+}
+
+@test
+fn test_keys_values_consistency() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let keys = m.keys_list();
+    let vals = m.values_list();
+    let entries = m.to_entries();
+    assert_eq(keys.len(), entries.len());
+    assert_eq(vals.len(), entries.len());
+}
+
+// =============================================================================
+// Section 6: Map.from_entries
+// =============================================================================
+
+@test
+fn test_map_from_entries_basic() {
+    let mut entries: List<(Int, Int)> = [];
+    entries.push((1, 10));
+    entries.push((2, 20));
+    entries.push((3, 30));
+    let m = Map.from_entries(&entries);
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&1).unwrap(), 10);
+    assert_eq(*m.get(&2).unwrap(), 20);
+    assert_eq(*m.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_map_from_entries_empty() {
+    let entries: List<(Int, Int)> = [];
+    let m = Map.from_entries(&entries);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_from_entries_duplicate_keys() {
+    let mut entries: List<(Int, Int)> = [];
+    entries.push((1, 10));
+    entries.push((1, 20)); // duplicate key
+    entries.push((2, 30));
+    let m = Map.from_entries(&entries);
+    assert_eq(m.len(), 2);
+    assert_eq(*m.get(&1).unwrap(), 20); // last value wins
+}
+
+@test
+fn test_map_from_entries_roundtrip() {
+    let mut original: Map<Int, Int> = Map.new();
+    original.insert(1, 100);
+    original.insert(2, 200);
+    original.insert(3, 300);
+    let entries = original.to_entries();
+    let rebuilt = Map.from_entries(&entries);
+    assert_eq(rebuilt.len(), original.len());
+    assert_eq(*rebuilt.get(&1).unwrap(), 100);
+    assert_eq(*rebuilt.get(&2).unwrap(), 200);
+    assert_eq(*rebuilt.get(&3).unwrap(), 300);
+}
+
+// =============================================================================
+// Section 7: BTreeMap.from_entries
+// =============================================================================
+
+@test
+fn test_btreemap_from_entries_basic() {
+    let mut entries: List<(Int, Int)> = [];
+    entries.push((3, 30));
+    entries.push((1, 10));
+    entries.push((2, 20));
+    let m = BTreeMap.from_entries(&entries);
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&1).unwrap(), 10);
+    assert_eq(*m.get(&2).unwrap(), 20);
+    assert_eq(*m.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_btreemap_from_entries_empty() {
+    let entries: List<(Int, Int)> = [];
+    let m = BTreeMap.from_entries(&entries);
+    assert(m.is_empty());
+}
+
+@test
+fn test_btreemap_from_entries_sorted() {
+    let mut entries: List<(Int, Int)> = [];
+    entries.push((5, 50));
+    entries.push((1, 10));
+    entries.push((3, 30));
+    let m = BTreeMap.from_entries(&entries);
+    // BTreeMap should maintain sorted order
+    let out = m.to_entries();
+    assert_eq(out[0].0, 1);
+    assert_eq(out[1].0, 3);
+    assert_eq(out[2].0, 5);
+}
+
+@test
+fn test_btreemap_from_entries_roundtrip() {
+    let mut original = BTreeMap.new();
+    original.insert(1, 100);
+    original.insert(2, 200);
+    original.insert(3, 300);
+    let entries = original.to_entries();
+    let rebuilt = BTreeMap.from_entries(&entries);
+    assert_eq(rebuilt.len(), original.len());
+    assert_eq(*rebuilt.get(&1).unwrap(), 100);
+    assert_eq(*rebuilt.get(&2).unwrap(), 200);
+    assert_eq(*rebuilt.get(&3).unwrap(), 300);
+}

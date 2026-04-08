@@ -1,0 +1,37 @@
+// @test: parse
+// @level: L0
+// @tags: parser, comprehensions, list
+// @description: Test list comprehension parsing
+
+fn test_list_comprehensions() {
+    // Basic comprehension
+    let a = [x * 2 for x in items];
+
+    // With filter
+    let b = [x for x in items if x > 0];
+
+    // Multiple generators
+    let c = [(x, y) for x in xs for y in ys];
+
+    // Nested with filter
+    let d = [x + y for x in xs if x > 0 for y in ys if y > 0];
+
+    // With let binding
+    let e = [y for x in items let y = transform(x)];
+
+    // Complex expression
+    let f = [compute(x, y) for x in range(10) for y in range(x) if is_valid(x, y)];
+
+    // Nested comprehension
+    let g = [[y for y in row] for row in matrix];
+
+    // With pattern
+    let h = [a + b for (a, b) in pairs];
+    let i = [x for Some(x) in maybes];
+
+    // Multiple lets
+    let j = [result for x in items
+             let doubled = x * 2
+             let squared = doubled * doubled
+             if squared < 1000];
+}

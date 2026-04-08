@@ -1,0 +1,137 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, edge-cases, unicode, identifiers
+
+// Unicode identifier support
+
+fn test_unicode_identifiers() {
+    // Basic ASCII identifiers (baseline)
+    let ascii_lower = 42;
+    let ASCII_UPPER = 42;
+    let mixedCase = 42;
+    let with_underscore = 42;
+    let _leading_underscore = 42;
+    let trailing_underscore_ = 42;
+    let with123numbers = 42;
+
+    // Greek letters as identifiers
+    let alpha = 1;
+    let beta = 2;
+    let gamma = 3;
+    let delta = 4;
+    let epsilon = 0.0001;
+    let theta = 3.14159;
+    let sigma = 100;
+    let omega_val = 42;
+
+    // Greek uppercase
+    let DELTA = 10;
+    let SIGMA = 1000;
+    let OMEGA_VAL = 60;
+
+    // Mathematical identifiers
+    let sum_value = 100;
+    let product_val = 42;
+
+    // Various variable names
+    let variable = 42;
+    let function_name = 100;
+    let number_value = 123;
+    let japanese_var = 42;
+    let code_word = 100;
+    let korean_var = 42;
+    let russian_var = 42;
+    let value_word = 100;
+    let arabic_var = 42;
+    let hebrew_var = 42;
+
+    // Mixed script identifiers
+    let mix_abc = 42;
+    let name123 = 100;
+
+    // Accented Latin characters
+    let cafe = "coffee";
+    let naive = true;
+    let facade = "front";
+    let resume = "document";
+    let uber = "over";
+    let manana = "tomorrow";
+
+    // Nordic/Scandinavian characters
+    let danish_oe = "island";
+    let swedish_a = "stream";
+    let german_ss = "street";
+
+    // Combining characters
+    let base_char = "value";
+
+    // Normalization forms (NFC vs NFD)
+    let nfc_form = 42;
+    let nfd_form = 42;
+
+    // Turkish dotless i
+    let dotless_i = 42;
+    let dotted_I = 42;
+
+    // Lookalike characters (confusables)
+    let latin_a = 1;
+    let cyrillic_a = 2;
+    let greek_alpha_var = 3;
+
+    // Full-width characters
+    let fullwidth = 42;
+
+    // Unicode in different contexts
+    let input_text = "hello";
+    let result_text = input_text;
+
+    // Unicode identifiers in complex expressions
+    let complex_result = alpha * beta + gamma / delta;
+    let angle_calc = 2.0 * 3.14159 * theta;
+
+    // Array of unicode-named values
+    let greek_values = [alpha, beta, gamma, delta, epsilon];
+
+    // Map with unicode keys
+    let translations = {
+        "hello": "greeting",
+        "world": "earth",
+    };
+}
+
+// Function with unicode name
+fn calculate_delta(start: Int, end: Int) -> Int {
+    end - start
+}
+
+fn sum_elements(items: List<Int>) -> Int {
+    items.sum()
+}
+
+// Type with unicode name
+type Point2D is {
+    x: Float,
+    y: Float,
+};
+
+type Movement is {
+    dx: Float,
+    dy: Float,
+};
+
+// Match with character patterns (range patterns via ..= not yet implemented)
+fn classify_letter(c: Char) -> Text {
+    match c {
+        'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' => "latin lowercase"
+        'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z' => "latin uppercase"
+        _ => "other"
+    }
+}
+
+// Struct with unicode field names
+type MathResult is {
+    sum_val: Float,
+    product_val: Float,
+    diff_val: Float,
+};

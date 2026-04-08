@@ -1,0 +1,561 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, platform, windows
+// @description: Tests Windows API FFI bindings
+
+/// ============================================================
+/// WINDOWS FFI BINDINGS
+/// ============================================================
+///
+/// Windows APIs (Win32/Win64) for system-level programming.
+
+@cfg(target_os = "windows")
+
+// ------------------------------------------------------------
+// Windows Types
+// ------------------------------------------------------------
+
+type HANDLE is *mut c_void;
+type HMODULE is *mut c_void;
+type HWND is *mut c_void;
+type HDC is *mut c_void;
+type HINSTANCE is *mut c_void;
+type LPVOID is *mut c_void;
+type LPCVOID is *const c_void;
+type DWORD is u32;
+type WORD is u16;
+type BYTE is u8;
+type BOOL is c_int;
+type LONG is c_long;
+type LPSTR is *mut c_char;
+type LPCSTR is *const c_char;
+type LPWSTR is *mut u16;
+type LPCWSTR is *const u16;
+type SIZE_T is usize;
+
+const INVALID_HANDLE_VALUE: HANDLE = -1isize as HANDLE;
+const NULL_HANDLE: HANDLE = 0 as HANDLE;
+
+const TRUE: BOOL = 1;
+const FALSE: BOOL = 0;
+
+// ------------------------------------------------------------
+// File Operations
+// ------------------------------------------------------------
+
+@link(name = "kernel32")
+ffi kernel32 {
+    @extern("system")
+    fn CreateFileA(
+        lpFileName: LPCSTR,
+        dwDesiredAccess: DWORD,
+        dwShareMode: DWORD,
+        lpSecurityAttributes: LPVOID,
+        dwCreationDisposition: DWORD,
+        dwFlagsAndAttributes: DWORD,
+        hTemplateFile: HANDLE
+    ) -> HANDLE;
+
+    @extern("system")
+    fn CreateFileW(
+        lpFileName: LPCWSTR,
+        dwDesiredAccess: DWORD,
+        dwShareMode: DWORD,
+        lpSecurityAttributes: LPVOID,
+        dwCreationDisposition: DWORD,
+        dwFlagsAndAttributes: DWORD,
+        hTemplateFile: HANDLE
+    ) -> HANDLE;
+
+    @extern("system")
+    fn CloseHandle(hObject: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn ReadFile(
+        hFile: HANDLE,
+        lpBuffer: LPVOID,
+        nNumberOfBytesToRead: DWORD,
+        lpNumberOfBytesRead: *mut DWORD,
+        lpOverlapped: LPVOID
+    ) -> BOOL;
+
+    @extern("system")
+    fn WriteFile(
+        hFile: HANDLE,
+        lpBuffer: LPCVOID,
+        nNumberOfBytesToWrite: DWORD,
+        lpNumberOfBytesWritten: *mut DWORD,
+        lpOverlapped: LPVOID
+    ) -> BOOL;
+
+    @extern("system")
+    fn SetFilePointer(
+        hFile: HANDLE,
+        lDistanceToMove: LONG,
+        lpDistanceToMoveHigh: *mut LONG,
+        dwMoveMethod: DWORD
+    ) -> DWORD;
+
+    @extern("system")
+    fn GetFileSize(hFile: HANDLE, lpFileSizeHigh: *mut DWORD) -> DWORD;
+
+    @extern("system")
+    fn FlushFileBuffers(hFile: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn DeleteFileA(lpFileName: LPCSTR) -> BOOL;
+
+    @extern("system")
+    fn MoveFileA(lpExistingFileName: LPCSTR, lpNewFileName: LPCSTR) -> BOOL;
+
+    @extern("system")
+    fn CopyFileA(lpExistingFileName: LPCSTR, lpNewFileName: LPCSTR, bFailIfExists: BOOL) -> BOOL;
+}
+
+// Access rights
+const GENERIC_READ: DWORD = 0x80000000;
+const GENERIC_WRITE: DWORD = 0x40000000;
+const GENERIC_EXECUTE: DWORD = 0x20000000;
+const GENERIC_ALL: DWORD = 0x10000000;
+
+// Share modes
+const FILE_SHARE_READ: DWORD = 0x00000001;
+const FILE_SHARE_WRITE: DWORD = 0x00000002;
+const FILE_SHARE_DELETE: DWORD = 0x00000004;
+
+// Creation disposition
+const CREATE_NEW: DWORD = 1;
+const CREATE_ALWAYS: DWORD = 2;
+const OPEN_EXISTING: DWORD = 3;
+const OPEN_ALWAYS: DWORD = 4;
+const TRUNCATE_EXISTING: DWORD = 5;
+
+// File attributes
+const FILE_ATTRIBUTE_NORMAL: DWORD = 0x80;
+const FILE_ATTRIBUTE_READONLY: DWORD = 0x01;
+const FILE_ATTRIBUTE_HIDDEN: DWORD = 0x02;
+const FILE_ATTRIBUTE_DIRECTORY: DWORD = 0x10;
+
+/// Safe Windows file handle
+type WinFile is {
+    handle: HANDLE,
+    invariant handle != INVALID_HANDLE_VALUE,
+};
+
+implement WinFile {
+    fn open(path: &str, access: DWORD, disposition: DWORD) -> Result<WinFile, WinError> {
+        let c_path = path.to_cstring();
+
+        // SAFETY: c_path is valid null-terminated string
+        let handle = unsafe {
+            kernel32.CreateFileA(
+                c_path.as_ptr(),
+                access,
+                FILE_SHARE_READ,
+                std.ptr.null as *mut c_void,
+                disposition,
+                FILE_ATTRIBUTE_NORMAL,
+                NULL_HANDLE
+            )
+        };
+
+        if handle == INVALID_HANDLE_VALUE {
+            Err(WinError.from_last_error())
+        } else {
+            Ok(WinFile { handle })
+        }
+    }
+
+    fn read(&self, buf: &mut [u8]) -> Result<usize, WinError> {
+        let mut bytes_read: DWORD = 0;
+
+        // SAFETY: handle is valid, buf is valid
+        let result = unsafe {
+            kernel32.ReadFile(
+                self.handle,
+                buf.as_mut_ptr() as LPVOID,
+                buf.len() as DWORD,
+                &mut bytes_read,
+                std.ptr.null as *mut c_void
+            )
+        };
+
+        if result == FALSE {
+            Err(WinError.from_last_error())
+        } else {
+            Ok(bytes_read as usize)
+        }
+    }
+
+    fn write(&self, buf: &[u8]) -> Result<usize, WinError> {
+        let mut bytes_written: DWORD = 0;
+
+        // SAFETY: handle is valid, buf is valid
+        let result = unsafe {
+            kernel32.WriteFile(
+                self.handle,
+                buf.as_ptr() as LPCVOID,
+                buf.len() as DWORD,
+                &mut bytes_written,
+                std.ptr.null as *mut c_void
+            )
+        };
+
+        if result == FALSE {
+            Err(WinError.from_last_error())
+        } else {
+            Ok(bytes_written as usize)
+        }
+    }
+
+    fn flush(&self) -> Result<(), WinError> {
+        // SAFETY: handle is valid
+        let result = unsafe { kernel32.FlushFileBuffers(self.handle) };
+        if result == FALSE {
+            Err(WinError.from_last_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+implement Drop for WinFile {
+    fn drop(&mut self) {
+        // SAFETY: handle is valid
+        unsafe { kernel32.CloseHandle(self.handle) };
+    }
+}
+
+// ------------------------------------------------------------
+// Memory Operations
+// ------------------------------------------------------------
+
+@link(name = "kernel32")
+ffi kernel32 {
+    @extern("system")
+    fn VirtualAlloc(
+        lpAddress: LPVOID,
+        dwSize: SIZE_T,
+        flAllocationType: DWORD,
+        flProtect: DWORD
+    ) -> LPVOID;
+
+    @extern("system")
+    fn VirtualFree(
+        lpAddress: LPVOID,
+        dwSize: SIZE_T,
+        dwFreeType: DWORD
+    ) -> BOOL;
+
+    @extern("system")
+    fn VirtualProtect(
+        lpAddress: LPVOID,
+        dwSize: SIZE_T,
+        flNewProtect: DWORD,
+        lpflOldProtect: *mut DWORD
+    ) -> BOOL;
+
+    @extern("system")
+    fn VirtualQuery(
+        lpAddress: LPCVOID,
+        lpBuffer: *mut MEMORY_BASIC_INFORMATION,
+        dwLength: SIZE_T
+    ) -> SIZE_T;
+
+    @extern("system")
+    fn HeapCreate(flOptions: DWORD, dwInitialSize: SIZE_T, dwMaximumSize: SIZE_T) -> HANDLE;
+
+    @extern("system")
+    fn HeapDestroy(hHeap: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn HeapAlloc(hHeap: HANDLE, dwFlags: DWORD, dwBytes: SIZE_T) -> LPVOID;
+
+    @extern("system")
+    fn HeapFree(hHeap: HANDLE, dwFlags: DWORD, lpMem: LPVOID) -> BOOL;
+
+    @extern("system")
+    fn GetProcessHeap() -> HANDLE;
+}
+
+// Memory allocation types
+const MEM_COMMIT: DWORD = 0x1000;
+const MEM_RESERVE: DWORD = 0x2000;
+const MEM_RELEASE: DWORD = 0x8000;
+
+// Page protection
+const PAGE_NOACCESS: DWORD = 0x01;
+const PAGE_READONLY: DWORD = 0x02;
+const PAGE_READWRITE: DWORD = 0x04;
+const PAGE_EXECUTE: DWORD = 0x10;
+const PAGE_EXECUTE_READ: DWORD = 0x20;
+const PAGE_EXECUTE_READWRITE: DWORD = 0x40;
+
+@repr(C)
+type MEMORY_BASIC_INFORMATION is {
+    BaseAddress: LPVOID,
+    AllocationBase: LPVOID,
+    AllocationProtect: DWORD,
+    RegionSize: SIZE_T,
+    State: DWORD,
+    Protect: DWORD,
+    Type: DWORD,
+};
+
+type VirtualMemory is {
+    addr: *mut u8,
+    size: usize,
+};
+
+implement VirtualMemory {
+    fn alloc(size: usize) -> Result<VirtualMemory, WinError> {
+        let addr: LPVOID = unsafe {
+            kernel32.VirtualAlloc(
+                0 as *mut c_void,
+                size,
+                MEM_COMMIT | MEM_RESERVE,
+                PAGE_READWRITE
+            )
+        };
+
+        if addr == (0 as *mut c_void) {
+            Err(WinError.from_last_error())
+        } else {
+            Ok(VirtualMemory { addr: addr as *mut u8, size })
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe { std.slice.from_raw_parts(self.addr, self.size) }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { std.slice.from_raw_parts_mut(self.addr, self.size) }
+    }
+}
+
+implement Drop for VirtualMemory {
+    fn drop(&mut self) {
+        unsafe { kernel32.VirtualFree(self.addr as LPVOID, 0, MEM_RELEASE) };
+    }
+}
+
+// ------------------------------------------------------------
+// Threading
+// ------------------------------------------------------------
+
+@link(name = "kernel32")
+ffi kernel32 {
+    @extern("system")
+    fn CreateThread(
+        lpThreadAttributes: LPVOID,
+        dwStackSize: SIZE_T,
+        lpStartAddress: extern "system" fn(LPVOID) -> DWORD,
+        lpParameter: LPVOID,
+        dwCreationFlags: DWORD,
+        lpThreadId: *mut DWORD
+    ) -> HANDLE;
+
+    @extern("system")
+    fn ExitThread(dwExitCode: DWORD) -> !;
+
+    @extern("system")
+    fn GetCurrentThread() -> HANDLE;
+
+    @extern("system")
+    fn GetCurrentThreadId() -> DWORD;
+
+    @extern("system")
+    fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: DWORD) -> DWORD;
+
+    @extern("system")
+    fn WaitForMultipleObjects(
+        nCount: DWORD,
+        lpHandles: *const HANDLE,
+        bWaitAll: BOOL,
+        dwMilliseconds: DWORD
+    ) -> DWORD;
+
+    @extern("system")
+    fn Sleep(dwMilliseconds: DWORD);
+
+    @extern("system")
+    fn SwitchToThread() -> BOOL;
+}
+
+const INFINITE: DWORD = 0xFFFFFFFF;
+const WAIT_OBJECT_0: DWORD = 0;
+const WAIT_TIMEOUT: DWORD = 0x102;
+const WAIT_FAILED: DWORD = 0xFFFFFFFF;
+
+// ------------------------------------------------------------
+// Synchronization
+// ------------------------------------------------------------
+
+@link(name = "kernel32")
+ffi kernel32 {
+    @extern("system")
+    fn InitializeCriticalSection(lpCriticalSection: *mut CRITICAL_SECTION);
+
+    @extern("system")
+    fn DeleteCriticalSection(lpCriticalSection: *mut CRITICAL_SECTION);
+
+    @extern("system")
+    fn EnterCriticalSection(lpCriticalSection: *mut CRITICAL_SECTION);
+
+    @extern("system")
+    fn LeaveCriticalSection(lpCriticalSection: *mut CRITICAL_SECTION);
+
+    @extern("system")
+    fn TryEnterCriticalSection(lpCriticalSection: *mut CRITICAL_SECTION) -> BOOL;
+
+    @extern("system")
+    fn CreateMutexA(
+        lpMutexAttributes: LPVOID,
+        bInitialOwner: BOOL,
+        lpName: LPCSTR
+    ) -> HANDLE;
+
+    @extern("system")
+    fn ReleaseMutex(hMutex: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn CreateEventA(
+        lpEventAttributes: LPVOID,
+        bManualReset: BOOL,
+        bInitialState: BOOL,
+        lpName: LPCSTR
+    ) -> HANDLE;
+
+    @extern("system")
+    fn SetEvent(hEvent: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn ResetEvent(hEvent: HANDLE) -> BOOL;
+}
+
+@repr(C)
+type CRITICAL_SECTION is {
+    DebugInfo: LPVOID,
+    LockCount: LONG,
+    RecursionCount: LONG,
+    OwningThread: HANDLE,
+    LockSemaphore: HANDLE,
+    SpinCount: SIZE_T,
+};
+
+type CriticalSection is {
+    inner: CRITICAL_SECTION,
+};
+
+implement CriticalSection {
+    fn new() -> CriticalSection {
+        let mut cs = CRITICAL_SECTION {
+            DebugInfo: std.ptr.null as *mut c_void,
+            LockCount: 0,
+            RecursionCount: 0,
+            OwningThread: NULL_HANDLE,
+            LockSemaphore: NULL_HANDLE,
+            SpinCount: 0,
+        };
+        unsafe { kernel32.InitializeCriticalSection(&mut cs) };
+        CriticalSection { inner: cs }
+    }
+
+    fn lock(&mut self) {
+        unsafe { kernel32.EnterCriticalSection(&mut self.inner) };
+    }
+
+    fn unlock(&mut self) {
+        unsafe { kernel32.LeaveCriticalSection(&mut self.inner) };
+    }
+
+    fn try_lock(&mut self) -> Bool {
+        unsafe { kernel32.TryEnterCriticalSection(&mut self.inner) != FALSE }
+    }
+}
+
+implement Drop for CriticalSection {
+    fn drop(&mut self) {
+        unsafe { kernel32.DeleteCriticalSection(&mut self.inner) };
+    }
+}
+
+// ------------------------------------------------------------
+// Error Handling
+// ------------------------------------------------------------
+
+@link(name = "kernel32")
+ffi kernel32 {
+    @extern("system")
+    fn GetLastError() -> DWORD;
+
+    @extern("system")
+    fn SetLastError(dwErrCode: DWORD);
+
+    @extern("system")
+    fn FormatMessageA(
+        dwFlags: DWORD,
+        lpSource: LPCVOID,
+        dwMessageId: DWORD,
+        dwLanguageId: DWORD,
+        lpBuffer: LPSTR,
+        nSize: DWORD,
+        Arguments: LPVOID
+    ) -> DWORD;
+}
+
+type WinError is
+    | FileNotFound        // ERROR_FILE_NOT_FOUND (2)
+    | AccessDenied        // ERROR_ACCESS_DENIED (5)
+    | InvalidHandle       // ERROR_INVALID_HANDLE (6)
+    | OutOfMemory         // ERROR_NOT_ENOUGH_MEMORY (8)
+    | InvalidParameter    // ERROR_INVALID_PARAMETER (87)
+    | AlreadyExists       // ERROR_ALREADY_EXISTS (183)
+    | Unknown(DWORD);
+
+implement WinError {
+    fn from_last_error() -> WinError {
+        let code = unsafe { kernel32.GetLastError() };
+        match code {
+            2 => WinError.FileNotFound,
+            5 => WinError.AccessDenied,
+            6 => WinError.InvalidHandle,
+            8 => WinError.OutOfMemory,
+            87 => WinError.InvalidParameter,
+            183 => WinError.AlreadyExists,
+            _ => WinError.Unknown(code),
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_char is i8;
+type c_int is i32;
+type c_long is i32;  // Note: LONG is 32-bit on Windows
+
+type ToCString is protocol {
+    fn to_cstring(&self) -> CString;
+}
+
+implement ToCString for str {
+    fn to_cstring(&self) -> CString {
+        let mut data = self.as_bytes().to_vec();
+        data.push(0);
+        CString { data }
+    }
+}
+
+type CString is { data: List<u8> };
+implement CString {
+    fn as_ptr(&self) -> LPCSTR { self.data.as_ptr() as LPCSTR }
+}
+
+fn main() {
+    // Windows FFI test
+}

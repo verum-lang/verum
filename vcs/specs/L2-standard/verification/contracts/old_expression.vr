@@ -1,0 +1,162 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, old
+// @timeout: 5000
+
+/// Tests for old() expression in contracts
+/// Captures the value of an expression at function entry
+
+@verify(proof)
+fn increment(x: &mut Int) {
+    contract#"
+        ensures *x == old(*x) + 1;
+    ";
+    *x += 1;
+}
+
+@verify(proof)
+fn double_in_place(x: &mut Int) {
+    contract#"
+        ensures *x == old(*x) * 2;
+    ";
+    *x *= 2;
+}
+
+@verify(proof)
+fn swap(a: &mut Int, b: &mut Int) {
+    contract#"
+        ensures *a == old(*b);
+        ensures *b == old(*a);
+    ";
+    let temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+/// Old with collections
+@verify(proof)
+fn push_item<T>(list: &mut List<T>, item: T) {
+    contract#"
+        ensures list.len() == old(list.len()) + 1;
+        ensures list[list.len() - 1] == item;
+        ensures forall i: Int. 0 <= i < old(list.len()) implies list[i] == old(list[i]);
+    ";
+    list.push(item);
+}
+
+@verify(proof)
+fn pop_item<T>(list: &mut List<T>) -> T {
+    contract#"
+        requires list.len() > 0;
+        ensures list.len() == old(list.len()) - 1;
+        ensures result == old(list[list.len() - 1]);
+        ensures forall i: Int. 0 <= i < list.len() implies list[i] == old(list[i]);
+    ";
+    list.pop().unwrap()
+}
+
+/// Error type for insufficient funds
+type InsufficientFunds is ();
+
+/// Stub for current time
+fn now() -> Int { 0 }
+
+/// Old with structs
+type Account is {
+    balance: Float,
+    transactions: List<Transaction>,
+};
+
+type Transaction is {
+    amount: Float,
+    timestamp: Int,
+};
+
+@verify(proof)
+fn deposit(account: &mut Account, amount: Float{> 0.0}) {
+    contract#"
+        requires amount > 0.0;
+        ensures account.balance == old(account.balance) + amount;
+        ensures account.transactions.len() == old(account.transactions.len()) + 1;
+    ";
+    account.balance += amount;
+    account.transactions.push(Transaction {
+        amount,
+        timestamp: now(),
+    });
+}
+
+@verify(proof)
+fn withdraw(account: &mut Account, amount: Float{> 0.0}) -> Result<(), InsufficientFunds> {
+    contract#"
+        requires amount > 0.0;
+        ensures match result {
+            Ok(_) => account.balance == old(account.balance) - amount,
+            Err(_) => account.balance == old(account.balance)
+        };
+    ";
+    if account.balance < amount {
+        return Err(InsufficientFunds);
+    }
+    account.balance -= amount;
+    Ok(())
+}
+
+/// Old with nested access
+type Node<T> is {
+    value: T,
+    next: Maybe<Heap<Node<T>>>,
+};
+
+@verify(proof)
+fn set_value<T>(node: &mut Node<T>, new_value: T) -> T {
+    contract#"
+        ensures node.value == new_value;
+        ensures result == old(node.value);
+        ensures node.next == old(node.next);  // Unchanged
+    ";
+    let old_value = node.value;
+    node.value = new_value;
+    old_value
+}
+
+/// Old in frame conditions
+@verify(proof)
+fn update_first(arr: &mut List<Int>, value: Int) {
+    contract#"
+        requires arr.len() > 0;
+        ensures arr[0] == value;
+        ensures arr.len() == old(arr.len());
+        // Frame: all other elements unchanged
+        ensures forall i: Int. 1 <= i < arr.len() implies arr[i] == old(arr[i]);
+    ";
+    arr[0] = value;
+}
+
+/// Old with complex expressions
+@verify(proof)
+fn rotate_left(arr: &mut List<Int>) {
+    contract#"
+        requires arr.len() > 0;
+        ensures arr.len() == old(arr.len());
+        ensures forall i: Int. 0 <= i < arr.len() - 1 implies arr[i] == old(arr[i + 1]);
+        ensures arr[arr.len() - 1] == old(arr[0]);
+    ";
+    let first = arr[0];
+    for i in 0..arr.len() - 1 {
+        arr[i] = arr[i + 1];
+    }
+    arr[arr.len() - 1] = first;
+}
+
+/// Multiple old references in same expression
+@verify(proof)
+fn add_to_both(a: &mut Int, b: &mut Int, delta: Int) {
+    contract#"
+        ensures *a + *b == old(*a) + old(*b) + 2 * delta;
+        ensures *a - *b == old(*a) - old(*b);  // Difference preserved
+    ";
+    *a += delta;
+    *b += delta;
+}

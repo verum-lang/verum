@@ -1,0 +1,101 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, old, error
+// @timeout: 5000
+// @expected-error: E604 "Old expression verification failed"
+
+/// Tests for old() expression verification failures
+/// Postconditions using old() that cannot be proven
+
+/// Modification not matching old() relationship
+@verify(proof)
+fn wrong_increment(x: &mut Int) {
+    contract#"
+        ensures *x == old(*x) + 1;
+    ";
+    // ERROR: Adds 2, not 1
+    *x += 2;
+}
+
+/// Swap with wrong old() correspondence
+@verify(proof)
+fn broken_swap(a: &mut Int, b: &mut Int) {
+    contract#"
+        ensures *a == old(*b);
+        ensures *b == old(*a);
+    ";
+    // ERROR: Only copies a to b, doesn't swap
+    *b = *a;
+}
+
+/// Collection modification not preserving frame
+@verify(proof)
+fn frame_violation(arr: &mut List<Int>, idx: Int, value: Int) {
+    contract#"
+        requires idx >= 0 && idx < arr.len();
+        ensures arr[idx] == value;
+        // ERROR: Claims ALL elements unchanged including arr[idx]
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == old(arr[i]);
+    ";
+    arr[idx] = value;
+}
+
+/// Missing preservation of unmodified fields
+type Account is {
+    balance: Float,
+    name: Text,
+};
+
+@verify(proof)
+fn update_balance(account: &mut Account, delta: Float) {
+    contract#"
+        ensures account.balance == old(account.balance) + delta;
+        // ERROR: Accidentally modifies name too
+    ";
+    account.balance += delta;
+    account.name = "";  // Unintended side effect
+}
+
+/// Complex old() expression computed incorrectly
+@verify(proof)
+fn rotate_left(arr: &mut List<Int>) {
+    contract#"
+        requires arr.len() > 0;
+        ensures arr.len() == old(arr.len());
+        // ERROR: Off-by-one in index mapping
+        ensures forall i: Int. 0 <= i < arr.len() - 1 implies arr[i] == old(arr[i + 2]);
+    ";
+    let first = arr[0];
+    for i in 0..arr.len() - 1 {
+        arr[i] = arr[i + 1];
+    }
+    arr[arr.len() - 1] = first;
+}
+
+/// Multiple old() references with wrong relationship
+@verify(proof)
+fn scale_both(a: &mut Int, b: &mut Int, factor: Int) {
+    contract#"
+        ensures *a + *b == (old(*a) + old(*b)) * factor;  // ERROR
+        ensures *a == old(*a) * factor;
+        ensures *b == old(*b) * factor;
+    ";
+    // First two ensures clauses are correct,
+    // but the third isn't: (a+b)*factor != a*factor + b*factor in general...
+    // Actually it IS equal. Let's make the real error:
+    *a = *a * factor;
+    *b = *b * (factor + 1);  // ERROR: Uses factor+1 instead of factor
+}
+
+/// Old of computed expression
+@verify(proof)
+fn wrong_sum_preservation(arr: &mut List<Int>, idx: Int, delta: Int) {
+    contract#"
+        requires idx >= 0 && idx < arr.len();
+        ensures arr.iter().sum() == old(arr.iter().sum()) + delta;
+    ";
+    // ERROR: Adds delta twice
+    arr[idx] += delta;
+    arr[0] += delta;  // Extra modification
+}

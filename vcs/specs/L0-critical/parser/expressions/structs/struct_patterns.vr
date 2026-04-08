@@ -1,0 +1,184 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, structs, patterns
+
+// Struct patterns
+
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int, active: Bool };
+type Container<T> is { value: T, count: Int };
+type Rectangle is { top_left: Point, bottom_right: Point };
+type Config is {
+    host: Maybe<Text>,
+    port: Maybe<Int>,
+};
+type Response is {
+    status: Int,
+    body: Text,
+    error: Maybe<Text>,
+};
+
+// Test basic struct destructuring
+fn test_basic_destructuring() {
+    let point = Point { x: 10, y: 20 };
+    let Point { x, y } = point;
+    let Point { x: px, y: py } = point;  // Rename bindings
+}
+
+// Test partial destructuring
+fn test_partial_destructuring() {
+    let point = Point { x: 10, y: 20 };
+    let person = Person { name: "Alice", age: 30, active: true };
+
+    let Point { x, .. } = point;  // Ignore other fields
+    let Person { name, .. } = person;  // Only get name
+}
+
+// Test destructuring with type annotation
+fn test_destructuring_type_annotation() {
+    let point = Point { x: 10, y: 20 };
+    let Point { x, y }: Point = point;
+}
+
+// Test nested struct destructuring
+fn test_nested_destructuring() {
+    let rect = Rectangle {
+        top_left: Point { x: 0, y: 0 },
+        bottom_right: Point { x: 100, y: 50 },
+    };
+
+    let Rectangle {
+        top_left: Point { x: x1, y: y1 },
+        bottom_right: Point { x: x2, y: y2 },
+    } = rect;
+}
+
+// Struct patterns in match
+fn describe_point(p: Point) -> Text {
+    match p {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x: 0, y } => f"on y-axis at {y}",
+        Point { x, y: 0 } => f"on x-axis at {x}",
+        Point { x, y } if x == y => f"on diagonal at {x}",
+        Point { x, y } => f"at ({x}, {y})",
+    }
+}
+
+// Struct patterns with guards
+fn check_person(p: Person) -> Text {
+    match p {
+        Person { active: false, .. } => "inactive",
+        Person { age, .. } if age < 18 => "minor",
+        Person { age, .. } if age >= 65 => "senior",
+        Person { name, .. } => f"adult: {name}",
+    }
+}
+
+// Test struct patterns in if-let
+fn test_if_let_pattern() {
+    let maybe_point = Some(Point { x: 0, y: 5 });
+    if let Some(Point { x: 0, y }) = maybe_point {
+        // Only matches points on y-axis
+        let _ = y;
+    }
+}
+
+// Test struct patterns in while-let
+fn test_while_let_pattern() {
+    let mut people: List<Person> = [];
+    let mut iter = people.iter();
+    while let Some(Person { name, age, .. }) = iter.next() {
+        print(f"{name} is {age} years old")
+    }
+}
+
+// Test struct patterns in for loop
+fn test_for_pattern() {
+    let points: List<Point> = [];
+    for Point { x, y } in points {
+        print(f"({x}, {y})")
+    }
+}
+
+// Struct patterns in function parameters
+fn process_point(Point { x, y }: Point) -> Int {
+    x + y
+}
+
+fn update_person(Person { name, age, .. }: Person) -> Person {
+    Person { name, age: age + 1, active: true }
+}
+
+// Test mutable binding with struct pattern
+fn test_mutable_pattern() {
+    let point = Point { x: 10, y: 20 };
+    let Point { x, y } = point;
+    // Variables extracted from struct patterns
+    let mut mx = x;
+    let mut my = y;
+    mx += 1;
+    my += 1;
+}
+
+// Struct pattern with @ binding
+fn classify(p: Point) -> Text {
+    match p {
+        point @ Point { x: 0, y: 0 } => {
+            let _ = point;
+            "origin"
+        },
+        point @ Point { x, y } if x == y => {
+            let _ = point;
+            "diagonal"
+        },
+        _ => "other",
+    }
+}
+
+// Test or patterns with structs
+fn test_or_pattern() {
+    let person = Person { name: "Bob", age: 15, active: true };
+    match person {
+        Person { active: true, .. } | Person { age: 0..18, .. } => {
+            // special handling
+        },
+        _ => {
+            // normal handling
+        },
+    }
+}
+
+// Test struct patterns with optionals
+fn test_optional_patterns() {
+    let config = Config { host: Some("localhost"), port: Some(8080) };
+    fn connect(h: Text, p: Int) {}
+    fn use_default() {}
+
+    match config {
+        Config { host: Some(h), port: Some(p) } => connect(h, p),
+        Config { host: Some(h), port: None } => connect(h, 80),
+        Config { host: None, .. } => use_default(),
+    }
+}
+
+// Generic struct patterns
+fn unwrap_container<T>(Container { value, count }: Container<T>) -> (T, Int) {
+    (value, count)
+}
+
+// Test struct pattern with literal fields
+fn test_literal_pattern() {
+    fn handle_success(body: Text) {}
+    fn handle_not_found() {}
+    fn handle_error(error: Maybe<Text>) {}
+    fn handle_unknown(status: Int) {}
+
+    let response = Response { status: 200, body: "OK", error: None };
+    match response {
+        Response { status: 200, body, .. } => handle_success(body),
+        Response { status: 404, .. } => handle_not_found(),
+        Response { status: 500, error, .. } => handle_error(error),
+        Response { status, .. } => handle_unknown(status),
+    }
+}

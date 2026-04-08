@@ -1,0 +1,208 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, string-matching, pattern, search
+// @timeout: 30000
+
+// String matching algorithms using integer sequences
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Naive pattern matching: find first occurrence of pattern in text
+// Returns index or -1 if not found
+fn naive_search(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let mut i = 0;
+    while i <= tlen - plen {
+        let mut j = 0;
+        let mut match_found = 1;
+        while j < plen {
+            if get8(text, i + j) != get8(pat, j) {
+                match_found = 0;
+                j = plen; // break
+            }
+            j = j + 1;
+        }
+        if match_found == 1 { return i; }
+        i = i + 1;
+    }
+    -1
+}
+
+// Count all occurrences of pattern in text
+fn count_matches(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i <= tlen - plen {
+        let mut j = 0;
+        let mut match_found = 1;
+        while j < plen {
+            if get8(text, i + j) != get8(pat, j) {
+                match_found = 0;
+                j = plen;
+            }
+            j = j + 1;
+        }
+        if match_found == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// KMP failure function (partial match table)
+fn kmp_failure(pat: Arr8, plen: Int) -> Arr8 {
+    let mut fail = zeros(); // fail[0] = 0
+    let mut k = 0;
+    let mut i = 1;
+    while i < plen {
+        let mut cont = 1;
+        while cont == 1 {
+            if k > 0 {
+                if get8(pat, i) != get8(pat, k) {
+                    k = get8(fail, k - 1);
+                } else {
+                    cont = 0;
+                }
+            } else {
+                cont = 0;
+            }
+        }
+        if get8(pat, i) == get8(pat, k) {
+            k = k + 1;
+        }
+        fail = set8(fail, i, k);
+        i = i + 1;
+    }
+    fail
+}
+
+// KMP search using failure function
+fn kmp_search(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    if plen == 0 { return 0; }
+    let fail = kmp_failure(pat, plen);
+    let mut j = 0;
+    let mut i = 0;
+    while i < tlen {
+        let mut cont = 1;
+        while cont == 1 {
+            if j > 0 {
+                if get8(text, i) != get8(pat, j) {
+                    j = get8(fail, j - 1);
+                } else { cont = 0; }
+            } else { cont = 0; }
+        }
+        if get8(text, i) == get8(pat, j) {
+            j = j + 1;
+        }
+        if j == plen { return i - plen + 1; }
+        i = i + 1;
+    }
+    -1
+}
+
+// Check if sequence is a palindrome
+fn is_palindrome(arr: Arr8, n: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo < hi {
+        if get8(arr, lo) != get8(arr, hi) { return 0; }
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+    1
+}
+
+fn test_naive_found() -> Int {
+    // text: [1,2,3,4,5,6,7,8], pattern: [3,4,5]
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let pat = Arr8 { v0: 3, v1: 4, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(naive_search(text, 8, pat, 3), 2);
+    1
+}
+
+fn test_naive_not_found() -> Int {
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let pat = Arr8 { v0: 9, v1: 10, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(naive_search(text, 8, pat, 2), -1);
+    1
+}
+
+fn test_naive_at_start() -> Int {
+    let text = Arr8 { v0: 5, v1: 6, v2: 7, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let pat = Arr8 { v0: 5, v1: 6, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(naive_search(text, 3, pat, 2), 0);
+    1
+}
+
+fn test_count() -> Int {
+    // text: [1,2,1,2,1,2,1,0], pattern: [1,2]
+    let text = Arr8 { v0: 1, v1: 2, v2: 1, v3: 2, v4: 1, v5: 2, v6: 1, v7: 0 };
+    let pat = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_matches(text, 7, pat, 2), 3);
+    1
+}
+
+fn test_kmp_failure_fn() -> Int {
+    // Pattern: [1,2,1,2,3] → failure: [0,0,1,2,0]
+    let pat = Arr8 { v0: 1, v1: 2, v2: 1, v3: 2, v4: 3, v5: 0, v6: 0, v7: 0 };
+    let fail = kmp_failure(pat, 5);
+    assert_eq(get8(fail, 0), 0);
+    assert_eq(get8(fail, 1), 0);
+    assert_eq(get8(fail, 2), 1);
+    assert_eq(get8(fail, 3), 2);
+    assert_eq(get8(fail, 4), 0);
+    1
+}
+
+fn test_kmp_search() -> Int {
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let pat = Arr8 { v0: 4, v1: 5, v2: 6, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(kmp_search(text, 8, pat, 3), 3);
+
+    // Same result as naive
+    assert_eq(kmp_search(text, 8, pat, 3), naive_search(text, 8, pat, 3));
+    1
+}
+
+fn test_palindrome() -> Int {
+    let pal = Arr8 { v0: 1, v1: 2, v2: 3, v3: 2, v4: 1, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_palindrome(pal, 5), 1);
+
+    let not_pal = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_palindrome(not_pal, 4), 0);
+
+    // Single element
+    assert_eq(is_palindrome(pal, 1), 1);
+    1
+}
+
+fn main() -> Int {
+    test_naive_found();
+    test_naive_not_found();
+    test_naive_at_start();
+    test_count();
+    test_kmp_failure_fn();
+    test_kmp_search();
+    test_palindrome();
+    print("[OK] 523_string_matching_aot");
+    0
+}

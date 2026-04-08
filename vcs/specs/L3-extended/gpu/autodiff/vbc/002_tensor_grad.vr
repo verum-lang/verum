@@ -1,0 +1,88 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, autodiff, tensor
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Tensor gradient operations — simulated forward pass with shapes
+
+// Simulated tensor with shape tracking
+type SimTensor is { rows: Int, cols: Int };
+
+fn ones(r: Int, c: Int) -> SimTensor { SimTensor { rows: r, cols: c } }
+fn full(r: Int, c: Int, v: Float) -> SimTensor { SimTensor { rows: r, cols: c } }
+
+fn shape_eq(t: SimTensor, r: Int, c: Int) -> Bool {
+    t.rows == r && t.cols == c
+}
+
+fn t_add(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_mul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_matmul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.cols, b.rows);
+    SimTensor { rows: a.rows, cols: b.cols }
+}
+
+fn t_sum(a: SimTensor) -> SimTensor {
+    SimTensor { rows: 1, cols: 1 }
+}
+
+fn t_exp(a: SimTensor) -> SimTensor {
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+@test
+fn test_tensor_grad_add() {
+    let a = ones(3, 3);
+    let b = ones(3, 3);
+    let c = t_add(a, b);
+    assert(shape_eq(c, 3, 3));
+}
+
+@test
+fn test_tensor_grad_matmul() {
+    let a = ones(2, 3);
+    let b = ones(3, 4);
+    let c = t_matmul(a, b);
+    assert(shape_eq(c, 2, 4));
+}
+
+@test
+fn test_tensor_grad_elementwise() {
+    let a = full(1, 4, 2.0);
+    let b = full(1, 4, 3.0);
+    let c = t_mul(a, b);
+    assert(shape_eq(c, 1, 4));
+}
+
+@test
+fn test_tensor_grad_sum() {
+    let a = ones(5, 5);
+    let s = t_sum(a);
+    assert(shape_eq(s, 1, 1));
+}
+
+@test
+fn test_tensor_grad_unary() {
+    let a = full(1, 3, 1.0);
+    let b = t_exp(a);
+    assert(shape_eq(b, 1, 3));
+}
+
+fn main() {
+    test_tensor_grad_add();
+    test_tensor_grad_matmul();
+    test_tensor_grad_elementwise();
+    test_tensor_grad_sum();
+    test_tensor_grad_unary();
+}

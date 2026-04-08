@@ -1,0 +1,10 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    assert_eq(true, true);
+    assert_eq(false, false);
+    assert(true != false);
+    assert(!(true == false));
+}

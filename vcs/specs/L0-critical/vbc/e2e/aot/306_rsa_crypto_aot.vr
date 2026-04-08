@@ -1,0 +1,297 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, rsa, crypto, modular-arithmetic
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for RSA-like cryptography with small primes
+// Demonstrates modular exponentiation, Euler's totient, and encrypt/decrypt
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// Greatest common divisor
+fn gcd(a: Int, b_val: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b_val);
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+// Extended Euclidean algorithm: returns (g, x, y) such that a*x + b*y = g
+// We return the modular inverse coefficient x
+type ExtGcdResult is { gcd_val: Int, coeff_x: Int, coeff_y: Int };
+
+fn ext_gcd_x(a: Int, b_val: Int) -> Int {
+    let mut old_r = a;
+    let mut r = b_val;
+    let mut old_s = 1;
+    let mut s = 0;
+    while r != 0 {
+        let q = old_r / r;
+        let temp_r = r;
+        r = old_r - q * r;
+        old_r = temp_r;
+        let temp_s = s;
+        s = old_s - q * s;
+        old_s = temp_s;
+    }
+    old_s
+}
+
+// Modular inverse: a^(-1) mod m (assuming gcd(a, m) = 1)
+fn mod_inverse(a: Int, m: Int) -> Int {
+    let x = ext_gcd_x(a, m);
+    // Make positive
+    ((x % m) + m) % m
+}
+
+// Modular exponentiation: base^exp mod modulus
+fn mod_exp(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % modulus;
+        }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+// Primality test
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut d = 3;
+    while d * d <= n {
+        if n % d == 0 { return 0; }
+        d = d + 2;
+    }
+    1
+}
+
+// Euler's totient for n = p * q (both prime)
+fn totient_pq(p: Int, q: Int) -> Int {
+    (p - 1) * (q - 1)
+}
+
+// RSA key generation (small primes)
+// Returns (n, e, d) where n = p*q, e = public exponent, d = private exponent
+// We choose the smallest valid e (coprime with totient)
+fn find_public_exp(totient: Int) -> Int {
+    let mut e = 3;
+    while e < totient {
+        if gcd(e, totient) == 1 {
+            return e;
+        }
+        e = e + 2;
+    }
+    // Should not reach here for valid inputs
+    0
+}
+
+// Encrypt: c = m^e mod n
+fn rsa_encrypt(msg: Int, e: Int, n: Int) -> Int {
+    mod_exp(msg, e, n)
+}
+
+// Decrypt: m = c^d mod n
+fn rsa_decrypt(cipher: Int, d: Int, n: Int) -> Int {
+    mod_exp(cipher, d, n)
+}
+
+// Array for batch encrypt/decrypt
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 }
+}
+
+fn test_mod_exp() {
+    assert_eq(mod_exp(2, 10, 1000), 24);      // 1024 % 1000
+    assert_eq(mod_exp(3, 5, 100), 43);         // 243 % 100
+    assert_eq(mod_exp(2, 0, 100), 1);          // any^0 = 1
+    assert_eq(mod_exp(0, 5, 100), 0);          // 0^n = 0
+    assert_eq(mod_exp(7, 1, 100), 7);          // x^1 = x
+
+    // Fermat's little theorem: a^(p-1) = 1 mod p (for prime p, gcd(a,p)=1)
+    assert_eq(mod_exp(2, 12, 13), 1);
+    assert_eq(mod_exp(3, 16, 17), 1);
+    assert_eq(mod_exp(5, 22, 23), 1);
+}
+
+fn test_mod_inverse() {
+    // 3 * 7 = 21 = 1 mod 10 => inv(3, 10) = 7
+    assert_eq(mod_inverse(3, 10), 7);
+    assert_eq((3 * mod_inverse(3, 10)) % 10, 1);
+
+    // inv(7, 11) = 8 since 7*8 = 56 = 1 mod 11
+    assert_eq(mod_inverse(7, 11), 8);
+    assert_eq((7 * 8) % 11, 1);
+
+    // inv(3, 26) = 9 since 3*9 = 27 = 1 mod 26
+    assert_eq(mod_inverse(3, 26), 9);
+}
+
+fn test_rsa_small() {
+    // p=3, q=11 => n=33, totient=20
+    let p = 3;
+    let q = 11;
+    let n = p * q;  // 33
+    let phi = totient_pq(p, q);  // 20
+    assert_eq(n, 33);
+    assert_eq(phi, 20);
+
+    // Public exponent: smallest coprime with 20
+    let e = find_public_exp(phi);
+    assert_eq(e, 3);  // gcd(3, 20) = 1
+
+    // Private exponent: d = e^(-1) mod phi
+    let d = mod_inverse(e, phi);
+    assert_eq((e * d) % phi, 1);
+
+    // Encrypt and decrypt message m=7
+    let msg = 7;
+    let cipher = rsa_encrypt(msg, e, n);
+    let decrypted = rsa_decrypt(cipher, d, n);
+    assert_eq(decrypted, msg);
+}
+
+fn test_rsa_medium() {
+    // p=17, q=19 => n=323, totient=288
+    let p = 17;
+    let q = 19;
+    let n = p * q;  // 323
+    let phi = totient_pq(p, q);  // 288
+    assert_eq(n, 323);
+    assert_eq(phi, 288);
+
+    let e = find_public_exp(phi);
+    assert_eq(gcd(e, phi), 1);
+    let d = mod_inverse(e, phi);
+    assert_eq((e * d) % phi, 1);
+
+    // Test multiple messages
+    let mut i = 2;
+    while i < 20 {
+        let c = rsa_encrypt(i, e, n);
+        let m = rsa_decrypt(c, d, n);
+        assert_eq(m, i);
+        i = i + 3;
+    }
+}
+
+fn test_rsa_larger() {
+    // p=61, q=53 => n=3233, totient=3120
+    let p = 61;
+    let q = 53;
+    let n = p * q;  // 3233
+    let phi = totient_pq(p, q);  // 3120
+    assert_eq(n, 3233);
+    assert_eq(phi, 3120);
+
+    // Use e=17 (coprime with 3120)
+    let e = 17;
+    assert_eq(gcd(e, phi), 1);
+    let d = mod_inverse(e, phi);
+    assert_eq((e * d) % phi, 1);
+
+    // Encrypt/decrypt
+    let msg = 42;
+    let c = rsa_encrypt(msg, e, n);
+    let m = rsa_decrypt(c, d, n);
+    assert_eq(m, 42);
+
+    // Another message
+    let msg2 = 100;
+    let c2 = rsa_encrypt(msg2, e, n);
+    let m2 = rsa_decrypt(c2, d, n);
+    assert_eq(m2, 100);
+}
+
+fn test_batch_encrypt_decrypt() {
+    // p=7, q=13 => n=91, totient=72
+    let p = 7;
+    let q = 13;
+    let n = p * q;  // 91
+    let phi = totient_pq(p, q);  // 72
+    let e = 5;  // gcd(5, 72) = 1
+    assert_eq(gcd(e, phi), 1);
+    let d = mod_inverse(e, phi);
+
+    // Batch encrypt messages [2, 5, 10, 15, 20, 30, 50, 80]
+    let msgs = Arr8 { d0: 2, d1: 5, d2: 10, d3: 15, d4: 20, d5: 30, d6: 50, d7: 80 };
+    let mut ciphers = a8_zero();
+    let mut i = 0;
+    while i < 8 {
+        ciphers = a8_set(ciphers, i, rsa_encrypt(a8_get(msgs, i), e, n));
+        i = i + 1;
+    }
+
+    // Decrypt and verify
+    let mut j = 0;
+    while j < 8 {
+        let decr = rsa_decrypt(a8_get(ciphers, j), d, n);
+        assert_eq(decr, a8_get(msgs, j));
+        j = j + 1;
+    }
+}
+
+fn test_gcd_properties() {
+    assert_eq(gcd(12, 18), 6);
+    assert_eq(gcd(35, 49), 7);
+    assert_eq(gcd(17, 13), 1);  // coprime
+    assert_eq(gcd(0, 5), 5);
+    assert_eq(gcd(100, 75), 25);
+    // Commutativity
+    assert_eq(gcd(12, 18), gcd(18, 12));
+}
+
+fn test_primality() {
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(17), 1);
+    assert_eq(is_prime(19), 1);
+    assert_eq(is_prime(20), 0);
+    assert_eq(is_prime(97), 1);
+    assert_eq(is_prime(100), 0);
+}
+
+fn main() -> Int {
+    test_mod_exp();
+    test_mod_inverse();
+    test_rsa_small();
+    test_rsa_medium();
+    test_rsa_larger();
+    test_batch_encrypt_decrypt();
+    test_gcd_properties();
+    test_primality();
+    print("[OK] 306_rsa_crypto_aot");
+    0
+}

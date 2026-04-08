@@ -1,0 +1,281 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, number-theory
+// @timeout: 60000
+// @expected-exit: 0
+
+// Number theory stress: GCD chains, modular exponentiation, prime factorization, Euler's totient
+
+fn abs_v(x: Int) -> Int { if (x < 0) { 0 - x } else { x } }
+
+// GCD
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if (b == 0) { return a; }
+    gcd(b, a % b)
+}
+
+// LCM via GCD
+fn lcm(a: Int, b: Int) -> Int { (a / gcd(a, b)) * b }
+
+// Extended GCD: returns gcd (ax + by = gcd)
+// We return gcd only since records would be needed for full output
+@allow(unbounded_recursion)
+fn ext_gcd(a: Int, b: Int) -> Int {
+    gcd(abs_v(a), abs_v(b))
+}
+
+// Modular exponentiation
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut acc = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while (e > 0) {
+        if (e % 2 == 1) { acc = (acc * b) % m; }
+        e = e / 2;
+        b = (b * b) % m;
+    }
+    acc
+}
+
+// Integer square root
+fn isqrt(n: Int) -> Int {
+    if (n <= 0) { return 0; }
+    if (n == 1) { return 1; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while (y < x) { x = y; y = (x + n / x) / 2; }
+    x
+}
+
+// Primality test
+fn is_prime(n: Int) -> Int {
+    if (n < 2) { return 0; }
+    if (n < 4) { return 1; }
+    if (n % 2 == 0) { return 0; }
+    if (n % 3 == 0) { return 0; }
+    let limit = isqrt(n);
+    let mut d = 5;
+    while (d <= limit) {
+        if (n % d == 0) { return 0; }
+        if (n % (d + 2) == 0) { return 0; }
+        d = d + 6;
+    }
+    1
+}
+
+// Count prime factors (with multiplicity)
+fn count_prime_factors(n: Int) -> Int {
+    let mut val = n;
+    let mut count = 0;
+    let mut d = 2;
+    while (d * d <= val) {
+        while (val % d == 0) {
+            count = count + 1;
+            val = val / d;
+        }
+        d = d + 1;
+    }
+    if (val > 1) { count = count + 1; }
+    count
+}
+
+// Largest prime factor
+fn largest_prime_factor(n: Int) -> Int {
+    let mut val = n;
+    let mut largest = 1;
+    let mut d = 2;
+    while (d * d <= val) {
+        while (val % d == 0) {
+            largest = d;
+            val = val / d;
+        }
+        d = d + 1;
+    }
+    if (val > 1) { largest = val; }
+    largest
+}
+
+// Count distinct prime factors
+fn count_distinct_factors(n: Int) -> Int {
+    let mut val = n;
+    let mut count = 0;
+    let mut d = 2;
+    while (d * d <= val) {
+        if (val % d == 0) {
+            count = count + 1;
+            while (val % d == 0) { val = val / d; }
+        }
+        d = d + 1;
+    }
+    if (val > 1) { count = count + 1; }
+    count
+}
+
+// Euler's totient: count integers 1..n coprime with n
+fn euler_totient(n: Int) -> Int {
+    let mut result = n;
+    let mut val = n;
+    let mut p = 2;
+    while (p * p <= val) {
+        if (val % p == 0) {
+            while (val % p == 0) { val = val / p; }
+            result = result - result / p;
+        }
+        p = p + 1;
+    }
+    if (val > 1) {
+        result = result - result / val;
+    }
+    result
+}
+
+// Sum of divisors
+fn sum_divisors(n: Int) -> Int {
+    let mut sum = 0;
+    let mut d = 1;
+    while (d * d <= n) {
+        if (n % d == 0) {
+            sum = sum + d;
+            if (d != n / d) {
+                sum = sum + n / d;
+            }
+        }
+        d = d + 1;
+    }
+    sum
+}
+
+// Count divisors
+fn count_divisors(n: Int) -> Int {
+    let mut count = 0;
+    let mut d = 1;
+    while (d * d <= n) {
+        if (n % d == 0) {
+            count = count + 1;
+            if (d != n / d) { count = count + 1; }
+        }
+        d = d + 1;
+    }
+    count
+}
+
+// Check if perfect number (sum of proper divisors == n)
+fn is_perfect(n: Int) -> Int {
+    if (n < 2) { return 0; }
+    if (sum_divisors(n) - n == n) { 1 } else { 0 }
+}
+
+// Fibonacci mod m
+fn fib_mod(n: Int, m: Int) -> Int {
+    if (n == 0) { return 0; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while (i <= n) {
+        let c = (a + b) % m;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b % m
+}
+
+fn main() -> Int {
+    // GCD tests
+    assert_eq(gcd(48, 18), 6);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(1000000, 500000), 500000);
+    assert_eq(gcd(12345, 6789), 3);
+    assert_eq(gcd(97, 1), 1);
+    assert_eq(gcd(0, 5), 5);
+
+    // GCD chain: gcd(gcd(a,b), c)
+    assert_eq(gcd(gcd(120, 84), 36), 12);
+    assert_eq(gcd(gcd(42, 56), 98), 14);
+
+    // LCM
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(12, 18), 36);
+    assert_eq(lcm(7, 13), 91);
+    assert_eq(lcm(1, 100), 100);
+
+    // Modular exponentiation
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    assert_eq(mod_pow(3, 7, 100), 87);
+    assert_eq(mod_pow(2, 12, 13), 1);    // Fermat
+    assert_eq(mod_pow(3, 6, 7), 1);      // Fermat
+    assert_eq(mod_pow(5, 0, 100), 1);
+    assert_eq(mod_pow(2, 16, 65537), 65536);
+
+    // Primality
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(17), 1);
+    assert_eq(is_prime(97), 1);
+    assert_eq(is_prime(100), 0);
+    assert_eq(is_prime(101), 1);
+    assert_eq(is_prime(997), 1);
+    assert_eq(is_prime(1000), 0);
+
+    // Prime factor counting
+    assert_eq(count_prime_factors(12), 3);      // 2,2,3
+    assert_eq(count_prime_factors(60), 4);      // 2,2,3,5
+    assert_eq(count_prime_factors(97), 1);      // 97
+    assert_eq(count_prime_factors(1024), 10);   // 2^10
+    assert_eq(count_prime_factors(30), 3);      // 2,3,5
+
+    // Largest prime factor
+    assert_eq(largest_prime_factor(12), 3);
+    assert_eq(largest_prime_factor(60), 5);
+    assert_eq(largest_prime_factor(97), 97);
+    assert_eq(largest_prime_factor(100), 5);
+
+    // Distinct prime factors
+    assert_eq(count_distinct_factors(12), 2);   // 2,3
+    assert_eq(count_distinct_factors(60), 3);   // 2,3,5
+    assert_eq(count_distinct_factors(1024), 1); // just 2
+    assert_eq(count_distinct_factors(210), 4);  // 2,3,5,7
+
+    // Euler's totient
+    assert_eq(euler_totient(1), 1);
+    assert_eq(euler_totient(2), 1);
+    assert_eq(euler_totient(6), 2);
+    assert_eq(euler_totient(10), 4);
+    assert_eq(euler_totient(12), 4);
+    assert_eq(euler_totient(97), 96);   // prime: p-1
+
+    // Sum and count of divisors
+    assert_eq(sum_divisors(12), 28);        // 1+2+3+4+6+12
+    assert_eq(sum_divisors(28), 56);        // 1+2+4+7+14+28
+    assert_eq(count_divisors(12), 6);
+    assert_eq(count_divisors(1), 1);
+    assert_eq(count_divisors(100), 9);      // 1,2,4,5,10,20,25,50,100
+
+    // Perfect numbers
+    assert_eq(is_perfect(6), 1);            // 1+2+3=6
+    assert_eq(is_perfect(28), 1);           // 1+2+4+7+14=28
+    assert_eq(is_perfect(12), 0);
+
+    // Fibonacci mod
+    assert_eq(fib_mod(10, 1000), 55);
+    assert_eq(fib_mod(20, 1000), 765);      // fib(20)=6765, mod 1000=765
+    assert_eq(fib_mod(100, 997), fib_mod(100, 997));  // deterministic
+
+    // Stress: check many GCDs
+    let mut gcd_sum = 0;
+    let mut i = 1;
+    while (i <= 100) {
+        gcd_sum = gcd_sum + gcd(i * 7, i * 11);
+        i = i + 1;
+    }
+    // gcd(7i, 11i) = i * gcd(7,11) = i * 1 = i
+    // sum = 100*101/2 = 5050
+    assert_eq(gcd_sum, 5050);
+
+    print("842_stress_number_theory: PASS");
+    0
+}

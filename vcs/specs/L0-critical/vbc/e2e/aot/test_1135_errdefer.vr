@@ -1,0 +1,105 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: defer, errdefer, cleanup, error-path
+// @description: Test errdefer cleanup on error paths
+
+// Test that defer always runs, errdefer only on error
+
+fn cleanup_always(log: List<Text>) {
+    log.push("start");
+    defer { log.push("defer_cleanup"); }
+    log.push("work");
+    // Normal exit — defer runs
+}
+
+fn test_defer_always() -> Int {
+    let mut log = List.new();
+    cleanup_always(log);
+    if log.len() != 3 {
+        print(f"FAIL defer_always: len={log.len()}, expected 3");
+        return 1;
+    }
+    if log[2] != "defer_cleanup" {
+        print(f"FAIL defer_always: last={log[2]}");
+        return 1;
+    }
+    print("  defer_always: OK");
+    0
+}
+
+// Multiple defers in order
+fn multi_cleanup(log: List<Text>) {
+    defer { log.push("last"); }
+    defer { log.push("middle"); }
+    defer { log.push("first"); }
+    log.push("body");
+}
+
+fn test_multi_cleanup() -> Int {
+    let mut log = List.new();
+    multi_cleanup(log);
+    // body, then LIFO: first, middle, last
+    if log.len() != 4 {
+        print(f"FAIL multi: len={log.len()}");
+        return 1;
+    }
+    if log[0] != "body" {
+        print(f"FAIL multi[0]: {log[0]}");
+        return 1;
+    }
+    if log[1] != "first" {
+        print(f"FAIL multi[1]: {log[1]}");
+        return 1;
+    }
+    if log[2] != "middle" {
+        print(f"FAIL multi[2]: {log[2]}");
+        return 1;
+    }
+    if log[3] != "last" {
+        print(f"FAIL multi[3]: {log[3]}");
+        return 1;
+    }
+    print("  multi_cleanup: OK");
+    0
+}
+
+// Defer with computation
+fn defer_computation(log: List<Int>) {
+    let mut val = 0;
+    defer { log.push(val); }
+    val = 42;
+    log.push(val);
+    // Note: defer captures the variable, which is 42 at scope exit
+}
+
+fn test_defer_computation() -> Int {
+    let mut log = List.new();
+    defer_computation(log);
+    // body pushes 42, defer pushes val (42)
+    if log.len() != 2 {
+        print(f"FAIL defer_comp: len={log.len()}");
+        return 1;
+    }
+    if log[0] != 42 {
+        print(f"FAIL defer_comp[0]: {log[0]}");
+        return 1;
+    }
+    print("  defer_computation: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Errdefer Tests:");
+    let mut failures = 0;
+    failures = failures + test_defer_always();
+    failures = failures + test_multi_cleanup();
+    failures = failures + test_defer_computation();
+
+    if failures == 0 {
+        print("All errdefer tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,698 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, linalg, matrix
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT tensor linear algebra operations — det, trace, diag, triu, tril, dot, outer, inverse, kron, cross
+
+// ============================================================================
+// Utility helpers
+// ============================================================================
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// ============================================================================
+// 2x2 matrix (row-major: [a b; c d])
+// ============================================================================
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2_new(a: Int, b: Int, c: Int, d: Int) -> Mat2 {
+    Mat2 { a: a, b: b, c: c, d: d }
+}
+
+fn mat2_identity() -> Mat2 {
+    Mat2 { a: 1, b: 0, c: 0, d: 1 }
+}
+
+fn mat2_det(m: Mat2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn mat2_trace(m: Mat2) -> Int {
+    m.a + m.d
+}
+
+fn mat2_triu(m: Mat2) -> Mat2 {
+    // Upper triangular: zero below diagonal
+    Mat2 { a: m.a, b: m.b, c: 0, d: m.d }
+}
+
+fn mat2_tril(m: Mat2) -> Mat2 {
+    // Lower triangular: zero above diagonal
+    Mat2 { a: m.a, b: 0, c: m.c, d: m.d }
+}
+
+fn mat2_mul(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+fn mat2_scale(m: Mat2, s: Int) -> Mat2 {
+    Mat2 { a: m.a * s, b: m.b * s, c: m.c * s, d: m.d * s }
+}
+
+// ============================================================================
+// 3x3 matrix (row-major: 9 elements)
+// ============================================================================
+
+type Mat3 is {
+    e00: Int, e01: Int, e02: Int,
+    e10: Int, e11: Int, e12: Int,
+    e20: Int, e21: Int, e22: Int
+};
+
+fn mat3_identity() -> Mat3 {
+    Mat3 {
+        e00: 1, e01: 0, e02: 0,
+        e10: 0, e11: 1, e12: 0,
+        e20: 0, e21: 0, e22: 1
+    }
+}
+
+fn mat3_det(m: Mat3) -> Int {
+    m.e00 * (m.e11 * m.e22 - m.e12 * m.e21)
+    - m.e01 * (m.e10 * m.e22 - m.e12 * m.e20)
+    + m.e02 * (m.e10 * m.e21 - m.e11 * m.e20)
+}
+
+fn mat3_trace(m: Mat3) -> Int {
+    m.e00 + m.e11 + m.e22
+}
+
+fn mat3_triu(m: Mat3) -> Mat3 {
+    // Upper triangular: zero below diagonal
+    Mat3 {
+        e00: m.e00, e01: m.e01, e02: m.e02,
+        e10: 0,     e11: m.e11, e12: m.e12,
+        e20: 0,     e21: 0,     e22: m.e22
+    }
+}
+
+fn mat3_tril(m: Mat3) -> Mat3 {
+    // Lower triangular: zero above diagonal
+    Mat3 {
+        e00: m.e00, e01: 0,     e02: 0,
+        e10: m.e10, e11: m.e11, e12: 0,
+        e20: m.e20, e21: m.e21, e22: m.e22
+    }
+}
+
+// ============================================================================
+// Vec2 and Vec3 types
+// ============================================================================
+
+type Vec2 is { x: Int, y: Int };
+
+type Vec3 is { x: Int, y: Int, z: Int };
+
+fn vec3_dot(a: Vec3, b: Vec3) -> Int {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn vec3_cross(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x
+    }
+}
+
+fn vec3_length_sq(v: Vec3) -> Int {
+    v.x * v.x + v.y * v.y + v.z * v.z
+}
+
+// ============================================================================
+// 4x4 matrix type for Kronecker product results
+// ============================================================================
+
+type Mat4 is {
+    r00: Int, r01: Int, r02: Int, r03: Int,
+    r10: Int, r11: Int, r12: Int, r13: Int,
+    r20: Int, r21: Int, r22: Int, r23: Int,
+    r30: Int, r31: Int, r32: Int, r33: Int
+};
+
+// Kronecker product of two 2x2 matrices produces a 4x4 matrix
+fn mat2_kron(a: Mat2, b: Mat2) -> Mat4 {
+    Mat4 {
+        r00: a.a * b.a, r01: a.a * b.b, r02: a.b * b.a, r03: a.b * b.b,
+        r10: a.a * b.c, r11: a.a * b.d, r12: a.b * b.c, r13: a.b * b.d,
+        r20: a.c * b.a, r21: a.c * b.b, r22: a.d * b.a, r23: a.d * b.b,
+        r30: a.c * b.c, r31: a.c * b.d, r32: a.d * b.c, r33: a.d * b.d
+    }
+}
+
+// ============================================================================
+// Outer product: Vec3 x Vec3 -> Mat3
+// ============================================================================
+
+fn vec3_outer(a: Vec3, b: Vec3) -> Mat3 {
+    Mat3 {
+        e00: a.x * b.x, e01: a.x * b.y, e02: a.x * b.z,
+        e10: a.y * b.x, e11: a.y * b.y, e12: a.y * b.z,
+        e20: a.z * b.x, e21: a.z * b.y, e22: a.z * b.z
+    }
+}
+
+// ============================================================================
+// 2x2 integer inverse via adjugate (scaled by det to stay in Int)
+// For invertible M with det != 0: M_adj = [d -b; -c a], M * M_adj = det(M) * I
+// ============================================================================
+
+fn mat2_adjugate(m: Mat2) -> Mat2 {
+    Mat2 { a: m.d, b: -m.b, c: -m.c, d: m.a }
+}
+
+// ============================================================================
+// Test 1: 2x2 determinant
+// ============================================================================
+
+fn test_det_2x2() {
+    let m = mat2_new(3, 8, 4, 6);
+    // det = 3*6 - 8*4 = 18 - 32 = -14
+    assert_eq(mat2_det(m), -14);
+
+    let n = mat2_new(1, 2, 3, 4);
+    // det = 1*4 - 2*3 = 4 - 6 = -2
+    assert_eq(mat2_det(n), -2);
+
+    // Singular matrix: det = 0
+    let s = mat2_new(2, 4, 1, 2);
+    assert_eq(mat2_det(s), 0);
+
+    // Identity: det = 1
+    assert_eq(mat2_det(mat2_identity()), 1);
+
+    // Negative entries
+    let p = mat2_new(-3, 5, 7, -2);
+    // det = (-3)*(-2) - 5*7 = 6 - 35 = -29
+    assert_eq(mat2_det(p), -29);
+}
+
+// ============================================================================
+// Test 2: 2x2 trace
+// ============================================================================
+
+fn test_trace_2x2() {
+    let m = mat2_new(3, 8, 4, 6);
+    assert_eq(mat2_trace(m), 9);
+
+    let id = mat2_identity();
+    assert_eq(mat2_trace(id), 2);
+
+    let n = mat2_new(-5, 10, 20, 15);
+    assert_eq(mat2_trace(n), 10);
+
+    // Zero matrix
+    let z = mat2_new(0, 0, 0, 0);
+    assert_eq(mat2_trace(z), 0);
+}
+
+// ============================================================================
+// Test 3: 3x3 trace
+// ============================================================================
+
+fn test_trace_3x3() {
+    let m = Mat3 {
+        e00: 5, e01: 2, e02: 3,
+        e10: 4, e11: 7, e12: 6,
+        e20: 1, e21: 8, e22: 9
+    };
+    assert_eq(mat3_trace(m), 21);
+
+    let id = mat3_identity();
+    assert_eq(mat3_trace(id), 3);
+
+    // Trace is additive: tr(A+B) = tr(A) + tr(B)
+    // We verify this indirectly with a specific case
+    let n = Mat3 {
+        e00: 10, e01: 0, e02: 0,
+        e10: 0, e11: 20, e12: 0,
+        e20: 0, e21: 0, e22: 30
+    };
+    assert_eq(mat3_trace(n), 60);
+}
+
+// ============================================================================
+// Test 4: Extract diagonal from 2x2 matrix
+// ============================================================================
+
+fn test_diag_2x2() {
+    let m = mat2_new(7, 3, 9, 11);
+    // Diagonal elements: a=7, d=11
+    let diag0 = m.a;
+    let diag1 = m.d;
+    assert_eq(diag0, 7);
+    assert_eq(diag1, 11);
+    // Trace = sum of diagonal
+    assert_eq(diag0 + diag1, mat2_trace(m));
+}
+
+// ============================================================================
+// Test 5: Extract diagonal from 3x3 matrix
+// ============================================================================
+
+fn test_diag_3x3() {
+    let m = Mat3 {
+        e00: 100, e01: 2, e02: 3,
+        e10: 4, e11: 200, e12: 6,
+        e20: 7, e21: 8, e22: 300
+    };
+    let d0 = m.e00;
+    let d1 = m.e11;
+    let d2 = m.e22;
+    assert_eq(d0, 100);
+    assert_eq(d1, 200);
+    assert_eq(d2, 300);
+    assert_eq(d0 + d1 + d2, mat3_trace(m));
+}
+
+// ============================================================================
+// Test 6: Upper triangular (triu) for 2x2
+// ============================================================================
+
+fn test_triu_2x2() {
+    let m = mat2_new(1, 2, 3, 4);
+    let u = mat2_triu(m);
+    assert_eq(u.a, 1);
+    assert_eq(u.b, 2);
+    assert_eq(u.c, 0);  // Below diagonal zeroed
+    assert_eq(u.d, 4);
+
+    // triu of identity is identity
+    let id = mat2_identity();
+    let uid = mat2_triu(id);
+    assert_eq(uid.a, 1);
+    assert_eq(uid.b, 0);
+    assert_eq(uid.c, 0);
+    assert_eq(uid.d, 1);
+}
+
+// ============================================================================
+// Test 7: Upper triangular (triu) for 3x3
+// ============================================================================
+
+fn test_triu_3x3() {
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let u = mat3_triu(m);
+    // Row 0: unchanged
+    assert_eq(u.e00, 1); assert_eq(u.e01, 2); assert_eq(u.e02, 3);
+    // Row 1: e10 zeroed
+    assert_eq(u.e10, 0); assert_eq(u.e11, 5); assert_eq(u.e12, 6);
+    // Row 2: e20, e21 zeroed
+    assert_eq(u.e20, 0); assert_eq(u.e21, 0); assert_eq(u.e22, 9);
+
+    // det(triu) = product of diagonal = 1 * 5 * 9 = 45
+    assert_eq(mat3_det(u), 45);
+}
+
+// ============================================================================
+// Test 8: Lower triangular (tril) for 2x2
+// ============================================================================
+
+fn test_tril_2x2() {
+    let m = mat2_new(1, 2, 3, 4);
+    let l = mat2_tril(m);
+    assert_eq(l.a, 1);
+    assert_eq(l.b, 0);  // Above diagonal zeroed
+    assert_eq(l.c, 3);
+    assert_eq(l.d, 4);
+
+    // tril of identity is identity
+    let id = mat2_identity();
+    let lid = mat2_tril(id);
+    assert_eq(lid.a, 1);
+    assert_eq(lid.b, 0);
+    assert_eq(lid.c, 0);
+    assert_eq(lid.d, 1);
+}
+
+// ============================================================================
+// Test 9: Lower triangular (tril) for 3x3
+// ============================================================================
+
+fn test_tril_3x3() {
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let l = mat3_tril(m);
+    // Row 0: e01, e02 zeroed
+    assert_eq(l.e00, 1); assert_eq(l.e01, 0); assert_eq(l.e02, 0);
+    // Row 1: e12 zeroed
+    assert_eq(l.e10, 4); assert_eq(l.e11, 5); assert_eq(l.e12, 0);
+    // Row 2: unchanged
+    assert_eq(l.e20, 7); assert_eq(l.e21, 8); assert_eq(l.e22, 9);
+
+    // det(tril) = product of diagonal = 1 * 5 * 9 = 45
+    assert_eq(mat3_det(l), 45);
+}
+
+// ============================================================================
+// Test 10: triu + tril reconstructs matrix (with diagonal counted once)
+// ============================================================================
+
+fn test_triu_tril_sum() {
+    // For any matrix M: triu(M) + tril(M) - diag(M) = M
+    // We verify element by element for a 2x2
+    let m = mat2_new(5, 7, 11, 13);
+    let u = mat2_triu(m);
+    let l = mat2_tril(m);
+    // triu.a + tril.a - diag.a = 5 + 5 - 5 = 5
+    assert_eq(u.a + l.a - m.a, m.a);
+    assert_eq(u.b + l.b - 0, m.b);     // b: 7+0-0 = 7
+    assert_eq(u.c + l.c - 0, m.c);     // c: 0+11-0 = 11
+    assert_eq(u.d + l.d - m.d, m.d);   // d: 13+13-13 = 13
+}
+
+// ============================================================================
+// Test 11: Dot product of integer vectors
+// ============================================================================
+
+fn test_dot_product() {
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+    // 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
+    assert_eq(vec3_dot(a, b), 32);
+
+    // Orthogonal vectors: dot = 0
+    let i = Vec3 { x: 1, y: 0, z: 0 };
+    let j = Vec3 { x: 0, y: 1, z: 0 };
+    assert_eq(vec3_dot(i, j), 0);
+
+    // Self-dot = squared length
+    let v = Vec3 { x: 3, y: 4, z: 0 };
+    assert_eq(vec3_dot(v, v), 25);
+
+    // Antiparallel vectors: dot < 0
+    let p = Vec3 { x: 1, y: 2, z: 3 };
+    let q = Vec3 { x: -1, y: -2, z: -3 };
+    assert_eq(vec3_dot(p, q), -14);
+}
+
+// ============================================================================
+// Test 12: Dot product commutativity
+// ============================================================================
+
+fn test_dot_commutative() {
+    let a = Vec3 { x: 7, y: -3, z: 5 };
+    let b = Vec3 { x: 2, y: 8, z: -1 };
+    assert_eq(vec3_dot(a, b), vec3_dot(b, a));
+}
+
+// ============================================================================
+// Test 13: Outer product
+// ============================================================================
+
+fn test_outer_product() {
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+    let o = vec3_outer(a, b);
+    // o[i][j] = a[i] * b[j]
+    assert_eq(o.e00, 4);  assert_eq(o.e01, 5);  assert_eq(o.e02, 6);
+    assert_eq(o.e10, 8);  assert_eq(o.e11, 10); assert_eq(o.e12, 12);
+    assert_eq(o.e20, 12); assert_eq(o.e21, 15); assert_eq(o.e22, 18);
+
+    // Rank of outer product is 1 (all rows proportional)
+    // Row1 = 2 * Row0, Row2 = 3 * Row0 => det = 0
+    assert_eq(mat3_det(o), 0);
+}
+
+// ============================================================================
+// Test 14: Outer product symmetry
+// ============================================================================
+
+fn test_outer_symmetry() {
+    // outer(a, a) is symmetric: o[i][j] = o[j][i]
+    let a = Vec3 { x: 2, y: 3, z: 5 };
+    let o = vec3_outer(a, a);
+    assert_eq(o.e01, o.e10);
+    assert_eq(o.e02, o.e20);
+    assert_eq(o.e12, o.e21);
+
+    // Diagonal = squared components
+    assert_eq(o.e00, 4);
+    assert_eq(o.e11, 9);
+    assert_eq(o.e22, 25);
+}
+
+// ============================================================================
+// Test 15: Kronecker product of 2x2 matrices
+// ============================================================================
+
+fn test_kronecker_product() {
+    // kron(I2, I2) = I4
+    let id = mat2_identity();
+    let ki = mat2_kron(id, id);
+    assert_eq(ki.r00, 1); assert_eq(ki.r01, 0); assert_eq(ki.r02, 0); assert_eq(ki.r03, 0);
+    assert_eq(ki.r10, 0); assert_eq(ki.r11, 1); assert_eq(ki.r12, 0); assert_eq(ki.r13, 0);
+    assert_eq(ki.r20, 0); assert_eq(ki.r21, 0); assert_eq(ki.r22, 1); assert_eq(ki.r23, 0);
+    assert_eq(ki.r30, 0); assert_eq(ki.r31, 0); assert_eq(ki.r32, 0); assert_eq(ki.r33, 1);
+}
+
+// ============================================================================
+// Test 16: Kronecker product with non-identity
+// ============================================================================
+
+fn test_kronecker_non_identity() {
+    // A = [1 2; 3 4], B = [0 5; 6 7]
+    // kron(A, B) = [A[0,0]*B  A[0,1]*B;  A[1,0]*B  A[1,1]*B]
+    //            = [0  5  0  10; 6  7  12 14; 0  15 0  20; 18 21 24 28]
+    let a = mat2_new(1, 2, 3, 4);
+    let b = mat2_new(0, 5, 6, 7);
+    let k = mat2_kron(a, b);
+
+    // Block (0,0) = 1*B
+    assert_eq(k.r00, 0);  assert_eq(k.r01, 5);
+    assert_eq(k.r10, 6);  assert_eq(k.r11, 7);
+
+    // Block (0,1) = 2*B
+    assert_eq(k.r02, 0);  assert_eq(k.r03, 10);
+    assert_eq(k.r12, 12); assert_eq(k.r13, 14);
+
+    // Block (1,0) = 3*B
+    assert_eq(k.r20, 0);  assert_eq(k.r21, 15);
+    assert_eq(k.r30, 18); assert_eq(k.r31, 21);
+
+    // Block (1,1) = 4*B
+    assert_eq(k.r22, 0);  assert_eq(k.r23, 20);
+    assert_eq(k.r32, 24); assert_eq(k.r33, 28);
+}
+
+// ============================================================================
+// Test 17: Cross product
+// ============================================================================
+
+fn test_cross_product() {
+    // Standard basis cross products
+    let i = Vec3 { x: 1, y: 0, z: 0 };
+    let j = Vec3 { x: 0, y: 1, z: 0 };
+    let k = Vec3 { x: 0, y: 0, z: 1 };
+
+    // i x j = k
+    let ij = vec3_cross(i, j);
+    assert_eq(ij.x, 0); assert_eq(ij.y, 0); assert_eq(ij.z, 1);
+
+    // j x k = i
+    let jk = vec3_cross(j, k);
+    assert_eq(jk.x, 1); assert_eq(jk.y, 0); assert_eq(jk.z, 0);
+
+    // k x i = j
+    let ki = vec3_cross(k, i);
+    assert_eq(ki.x, 0); assert_eq(ki.y, 1); assert_eq(ki.z, 0);
+
+    // General case: (1,2,3) x (4,5,6) = (2*6-3*5, 3*4-1*6, 1*5-2*4) = (-3, 6, -3)
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+    let c = vec3_cross(a, b);
+    assert_eq(c.x, -3);
+    assert_eq(c.y, 6);
+    assert_eq(c.z, -3);
+}
+
+// ============================================================================
+// Test 18: Cross product properties
+// ============================================================================
+
+fn test_cross_properties() {
+    let a = Vec3 { x: 2, y: 3, z: 5 };
+    let b = Vec3 { x: 7, y: 11, z: 13 };
+
+    // Anti-commutativity: a x b = -(b x a)
+    let ab = vec3_cross(a, b);
+    let ba = vec3_cross(b, a);
+    assert_eq(ab.x, -ba.x);
+    assert_eq(ab.y, -ba.y);
+    assert_eq(ab.z, -ba.z);
+
+    // Cross product is perpendicular to both operands
+    assert_eq(vec3_dot(ab, a), 0);
+    assert_eq(vec3_dot(ab, b), 0);
+
+    // Self cross product = zero
+    let aa = vec3_cross(a, a);
+    assert_eq(aa.x, 0);
+    assert_eq(aa.y, 0);
+    assert_eq(aa.z, 0);
+}
+
+// ============================================================================
+// Test 19: Matrix rank (simplified: count non-zero diagonal of triu form)
+// For these test cases, we directly check diagonal elements of the matrix
+// as a proxy for rank in simple integer cases.
+// ============================================================================
+
+fn test_matrix_rank_proxy() {
+    // Full rank 3x3 (all diagonal non-zero)
+    let full = Mat3 {
+        e00: 5, e01: 0, e02: 0,
+        e10: 0, e11: 3, e12: 0,
+        e20: 0, e21: 0, e22: 7
+    };
+    let mut rank = 0;
+    if full.e00 != 0 { rank = rank + 1; }
+    if full.e11 != 0 { rank = rank + 1; }
+    if full.e22 != 0 { rank = rank + 1; }
+    assert_eq(rank, 3);
+    // Also confirm non-zero determinant for full rank
+    assert_eq(mat3_det(full), 105);
+
+    // Rank 2: one zero on diagonal
+    let rank2 = Mat3 {
+        e00: 4, e01: 0, e02: 0,
+        e10: 0, e11: 0, e12: 0,
+        e20: 0, e21: 0, e22: 9
+    };
+    let mut r2 = 0;
+    if rank2.e00 != 0 { r2 = r2 + 1; }
+    if rank2.e11 != 0 { r2 = r2 + 1; }
+    if rank2.e22 != 0 { r2 = r2 + 1; }
+    assert_eq(r2, 2);
+    // det = 0 for rank-deficient
+    assert_eq(mat3_det(rank2), 0);
+
+    // Rank 0: zero matrix
+    let zero = Mat3 {
+        e00: 0, e01: 0, e02: 0,
+        e10: 0, e11: 0, e12: 0,
+        e20: 0, e21: 0, e22: 0
+    };
+    let mut r0 = 0;
+    if zero.e00 != 0 { r0 = r0 + 1; }
+    if zero.e11 != 0 { r0 = r0 + 1; }
+    if zero.e22 != 0 { r0 = r0 + 1; }
+    assert_eq(r0, 0);
+    assert_eq(mat3_det(zero), 0);
+}
+
+// ============================================================================
+// Test 20: 2x2 integer inverse via adjugate
+// M * adj(M) = det(M) * I
+// ============================================================================
+
+fn test_inverse_adjugate() {
+    let m = mat2_new(3, 1, 5, 2);
+    let d = mat2_det(m);
+    // det = 3*2 - 1*5 = 1
+    assert_eq(d, 1);
+
+    let adj = mat2_adjugate(m);
+    // adj = [2 -1; -5 3]
+    assert_eq(adj.a, 2);
+    assert_eq(adj.b, -1);
+    assert_eq(adj.c, -5);
+    assert_eq(adj.d, 3);
+
+    // M * adj(M) should = det * I = 1 * I = I
+    let product = mat2_mul(m, adj);
+    assert_eq(product.a, 1);
+    assert_eq(product.b, 0);
+    assert_eq(product.c, 0);
+    assert_eq(product.d, 1);
+
+    // Another invertible matrix with det != 1
+    let n = mat2_new(4, 7, 2, 6);
+    let dn = mat2_det(n);
+    // det = 4*6 - 7*2 = 24 - 14 = 10
+    assert_eq(dn, 10);
+
+    let adjn = mat2_adjugate(n);
+    // adj = [6 -7; -2 4]
+    let pn = mat2_mul(n, adjn);
+    // Should be det * I = [10 0; 0 10]
+    assert_eq(pn.a, 10);
+    assert_eq(pn.b, 0);
+    assert_eq(pn.c, 0);
+    assert_eq(pn.d, 10);
+}
+
+// ============================================================================
+// Test 21: Scalar triple product (a . (b x c)) = det([a; b; c])
+// ============================================================================
+
+fn test_scalar_triple_product() {
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+    let c = Vec3 { x: 7, y: 8, z: 10 };
+
+    // Scalar triple product
+    let bxc = vec3_cross(b, c);
+    let stp = vec3_dot(a, bxc);
+
+    // Same as determinant of matrix with rows a, b, c
+    let m = Mat3 {
+        e00: a.x, e01: a.y, e02: a.z,
+        e10: b.x, e11: b.y, e12: b.z,
+        e20: c.x, e21: c.y, e22: c.z
+    };
+    assert_eq(stp, mat3_det(m));
+
+    // For the specific values:
+    // det = 1*(5*10-6*8) - 2*(4*10-6*7) + 3*(4*8-5*7)
+    //     = 1*(50-48) - 2*(40-42) + 3*(32-35)
+    //     = 2 + 4 - 9 = -3
+    assert_eq(stp, -3);
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_det_2x2();
+    test_trace_2x2();
+    test_trace_3x3();
+    test_diag_2x2();
+    test_diag_3x3();
+    test_triu_2x2();
+    test_triu_3x3();
+    test_tril_2x2();
+    test_tril_3x3();
+    test_triu_tril_sum();
+    test_dot_product();
+    test_dot_commutative();
+    test_outer_product();
+    test_outer_symmetry();
+    test_kronecker_product();
+    test_kronecker_non_identity();
+    test_cross_product();
+    test_cross_properties();
+    test_matrix_rank_proxy();
+    test_inverse_adjugate();
+    test_scalar_triple_product();
+    print("ALL PASSED");
+    0
+}

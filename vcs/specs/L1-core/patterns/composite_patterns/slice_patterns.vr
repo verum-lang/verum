@@ -1,0 +1,287 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, slices, composite
+//
+// Tests list/sequence patterns for matching dynamically-sized sequences.
+// In Verum, sequences are List<T> using [head, ..rest] patterns.
+
+//------------------------------------------------------------------------------
+// Basic List Pattern Matching
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+/// Match empty list.
+fn match_empty(lst: List<Int>) -> Bool {
+    match lst {
+        [] => true,
+        _ => false,
+    }
+}
+
+/// Match single element.
+fn match_single(lst: List<Int>) -> Maybe<Int> {
+    match lst {
+        [x] => Some(x),
+        _ => None,
+    }
+}
+
+/// Match exactly two elements.
+fn match_pair(lst: List<Int>) -> Maybe<(Int, Int)> {
+    match lst {
+        [a, b] => Some((a, b)),
+        _ => None,
+    }
+}
+
+/// Match by different lengths.
+fn classify_length(lst: List<Int>) -> Text {
+    match lst {
+        [] => "empty",
+        [_] => "single",
+        [_, _] => "pair",
+        [_, _, _] => "triple",
+        _ => "many",
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with Head/Tail Split
+//------------------------------------------------------------------------------
+
+/// Extract head element.
+fn head(lst: List<Int>) -> Maybe<Int> {
+    match lst {
+        [first, ..] => Some(first),
+        [] => None,
+    }
+}
+
+/// Split into head and tail.
+fn uncons(lst: List<Int>) -> Maybe<(Int, List<Int>)> {
+    match lst {
+        [h, ..tail] => Some((h, tail)),
+        [] => None,
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with Init/Last Split
+//------------------------------------------------------------------------------
+
+/// Extract last element.
+fn last(lst: List<Int>) -> Maybe<Int> {
+    match lst {
+        [.., last] => Some(last),
+        [] => None,
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with First and Last
+//------------------------------------------------------------------------------
+
+/// Extract both ends.
+fn ends(lst: List<Int>) -> Maybe<(Int, Int)> {
+    match lst {
+        [first, .., last] => Some((first, last)),
+        [single] => Some((single, single)),
+        [] => None,
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with Literals
+//------------------------------------------------------------------------------
+
+/// Match specific patterns.
+fn match_specific(lst: List<Int>) -> Text {
+    match lst {
+        [] => "empty",
+        [0] => "single zero",
+        [1] => "single one",
+        [0, 0] => "two zeros",
+        [1, 2, 3] => "one two three",
+        [0, ..] => "starts with zero",
+        [.., 0] => "ends with zero",
+        _ => "other",
+    }
+}
+
+/// Match with guards on literals.
+fn match_literal_guard(lst: List<Int>) -> Text {
+    match lst {
+        [x] if x == 0 => "single zero",
+        [x, y] if x == y => "equal pair",
+        [x, y] if x + y == 0 => "opposite pair",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Recursive List Processing
+//------------------------------------------------------------------------------
+
+/// Sum elements recursively.
+@allow(unbounded_recursion)
+fn sum_recursive(lst: List<Int>) -> Int {
+    match lst {
+        [] => 0,
+        [head, ..tail] => head + sum_recursive(tail),
+    }
+}
+
+/// Find maximum element.
+@allow(unbounded_recursion)
+fn max_recursive(lst: List<Int>) -> Maybe<Int> {
+    match lst {
+        [] => None,
+        [x] => Some(x),
+        [head, ..tail] => {
+            match max_recursive(tail) {
+                Some(tail_max) if head > tail_max => Some(head),
+                Some(tail_max) => Some(tail_max),
+                None => Some(head),
+            }
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with Multiple Branches
+//------------------------------------------------------------------------------
+
+/// Complex multi-branch matching.
+fn classify_list(lst: List<Int>) -> Text {
+    match lst {
+        [] => "empty",
+        [x] if x == 0 => "single zero",
+        [x] if x > 0 => "single positive",
+        [x] if x < 0 => "single negative",
+        [a, b] if a == b => "equal pair",
+        [a, b] if a < b => "ascending pair",
+        [a, b] if a > b => "descending pair",
+        [0, ..] => "starts zero",
+        [.., 0] => "ends zero",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// List of Complex Types
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+/// List of structs.
+fn process_points(points: List<Point>) -> Int {
+    match points {
+        [] => 0,
+        [p] => p.x + p.y,
+        [first, .., last] => first.x + last.y,
+    }
+}
+
+/// List of tuples.
+fn process_pairs(pairs: List<(Int, Int)>) -> Int {
+    match pairs {
+        [] => 0,
+        [(a, b)] => a + b,
+        [(a, _), .., (_, d)] => a + d,
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns in Different Contexts
+//------------------------------------------------------------------------------
+
+/// List in if-let.
+fn list_if_let(lst: List<Int>) -> Int {
+    if let [first, second, ..] = lst {
+        first + second
+    } else if let [single] = lst {
+        single
+    } else {
+        0
+    }
+}
+
+/// List in while-let (iterator-like).
+fn list_while_let(mut lst: List<Int>) -> Int {
+    let mut sum = 0;
+    while let [head, ..rest] = lst {
+        sum = sum + head;
+        lst = rest;
+    }
+    sum
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Empty matching
+    assert(match_empty([]) == true);
+    assert(match_empty([1, 2, 3]) == false);
+
+    // Single element
+    assert(match_single([42]) == Some(42));
+    assert(match_single([]) == None);
+    assert(match_single([1, 2]) == None);
+
+    // Classification
+    assert(classify_length([]) == "empty");
+    assert(classify_length([1]) == "single");
+    assert(classify_length([1, 2]) == "pair");
+    assert(classify_length([1, 2, 3]) == "triple");
+    assert(classify_length([1, 2, 3, 4]) == "many");
+
+    // Head/tail
+    assert(head([1, 2, 3]) == Some(1));
+    assert(head([]) == None);
+    assert(last([1, 2, 3]) == Some(3));
+    assert(last([]) == None);
+
+    // Ends
+    assert(ends([1, 2, 3]) == Some((1, 3)));
+    assert(ends([42]) == Some((42, 42)));
+    assert(ends([]) == None);
+
+    // Specific patterns
+    assert(match_specific([]) == "empty");
+    assert(match_specific([0]) == "single zero");
+    assert(match_specific([1, 2, 3]) == "one two three");
+    assert(match_specific([0, 5, 6]) == "starts with zero");
+
+    // Recursive sum
+    assert(sum_recursive([1, 2, 3, 4, 5]) == 15);
+    assert(sum_recursive([]) == 0);
+
+    // Max
+    assert(max_recursive([3, 1, 4, 1, 5]) == Some(5));
+    assert(max_recursive([42]) == Some(42));
+    assert(max_recursive([]) == None);
+
+    // Complex classification
+    assert(classify_list([]) == "empty");
+    assert(classify_list([0]) == "single zero");
+    assert(classify_list([5]) == "single positive");
+    assert(classify_list([3, 3]) == "equal pair");
+    assert(classify_list([1, 5]) == "ascending pair");
+
+    // If-let
+    assert(list_if_let([1, 2, 3]) == 3);
+    assert(list_if_let([5]) == 5);
+    assert(list_if_let([]) == 0);
+
+    // While-let
+    assert(list_while_let([1, 2, 3, 4]) == 10);
+}

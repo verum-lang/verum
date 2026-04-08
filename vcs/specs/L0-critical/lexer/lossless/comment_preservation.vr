@@ -1,0 +1,44 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: lexer, lossless, trivia, comments
+// @description: Test that all comment types are preserved during lexing
+
+// Line comment at start of file
+
+// Simple line comment
+fn foo() { }
+
+// Comment after statement
+fn example_with_inline_comment() {
+    let x = 1; // inline comment
+}
+
+// Multiple line comments
+// Comment 1
+// Comment 2
+// Comment 3
+fn bar() { }
+
+/* Block comment */
+fn baz() { }
+
+/* Multi-line
+   block comment
+   with multiple lines */
+fn qux() { }
+
+/* Nested /* block */ comment */
+fn quux() { }
+
+/// Doc comment
+fn documented() { }
+
+/// Multi-line
+/// doc comment
+fn multi_doc() { }
+
+//! Inner doc comment
+fn inner_doc() { }
+
+// Comment at end of file

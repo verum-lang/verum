@@ -1,0 +1,353 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, escape-analysis, cbgr, tier-transitions, optimization
+// @timeout: 5000
+// @description: Tests CBGR tier transition decisions based on escape analysis
+
+/// Tier transition analysis.
+/// The verification phase analyzes escape patterns to determine optimal
+/// CBGR tier for each reference:
+/// - Tier 0: Full validation (~15ns overhead) - default
+/// - Tier 1: Compile-time proven safe (0ns overhead)
+/// - Tier 2: Unsafe, manual proof required (0ns overhead)
+
+// =============================================================================
+// Tier 0 -> Tier 1 promotion candidates
+// =============================================================================
+
+/// Reference doesn't escape function - candidate for Tier 1
+fn tier1_candidate_local(x: Int) -> Int {
+    let r: &Int = &x;
+    // Reference is function-local, compiler can prove safety
+    // EXPECTED: Promote to Tier 1
+    *r * 2
+}
+
+/// Loop-invariant reference - strong Tier 1 candidate
+fn tier1_candidate_loop_invariant(arr: [Int; 10]) -> Int {
+    let r: &[Int; 10] = &arr;
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    // r is invariant across loop iterations
+    // EXPECTED: Promote to Tier 1, eliminate repeated validation
+    while i < 10 {
+        sum = sum + r[i];
+        i = i + 1;
+    }
+    sum
+}
+
+/// Reference within basic block - Tier 1 promotion
+fn tier1_candidate_basic_block(a: Int, b: Int) -> Int {
+    let ra: &Int = &a;
+    let rb: &Int = &b;
+    // Both references used only in this basic block
+    // EXPECTED: Promote both to Tier 1
+    *ra + *rb
+}
+
+/// Multiple derefs of same reference - optimize validation
+fn tier1_candidate_repeated_deref(x: Int) -> Int {
+    let r: &Int = &x;
+    // Multiple derefs of same reference
+    // EXPECTED: Single validation, promote to Tier 1
+    *r + *r + *r
+}
+
+/// Nested references all local
+fn tier1_candidate_nested_local(x: Int) -> Int {
+    let r1: &Int = &x;
+    let r2: &Int = r1;  // Reborrow
+    let r3: &Int = r2;  // Another reborrow
+    // All references are function-local
+    // EXPECTED: Promote entire chain to Tier 1
+    *r3 * 3
+}
+
+// =============================================================================
+// Must remain Tier 0 - escape detected
+// =============================================================================
+
+/// Reference escapes via return - must stay Tier 0
+fn tier0_required_return_escape(x: &Int) -> &Int {
+    // Reference escapes via return
+    // EXPECTED: Remain Tier 0 with full CBGR validation
+    x
+}
+
+/// Reference stored in struct field - must stay Tier 0
+type RefWrapper is { r: &Int };
+
+fn tier0_required_field_escape(x: &Int) -> RefWrapper {
+    // Reference escapes via struct field
+    // EXPECTED: Remain Tier 0
+    RefWrapper { r: x }
+}
+
+/// Reference escapes via closure - must stay Tier 0
+fn tier0_required_closure_escape(x: Int) -> fn() -> Int {
+    let r: &Int = &x;
+    // Reference captured by escaping closure
+    // EXPECTED: Remain Tier 0
+    || *r
+}
+
+/// Reference in array escapes - must stay Tier 0
+fn tier0_required_array_escape(a: &Int, b: &Int) -> [&Int; 2] {
+    // References escape via array
+    // EXPECTED: Both remain Tier 0
+    [a, b]
+}
+
+// =============================================================================
+// Mixed tier usage in single function
+// =============================================================================
+
+fn mixed_tiers_local_and_escape(a: Int, b: &Int) -> (Int, &Int) {
+    // ra: local only - can be Tier 1
+    let ra: &Int = &a;
+    let local_result = *ra * 2;
+
+    // b: escapes via return - must be Tier 0
+    (local_result, b)
+}
+
+fn mixed_tiers_conditional(flag: Bool, x: Int) -> Int {
+    let r: &Int = &x;
+
+    if flag {
+        // Local use - Tier 1 candidate
+        *r + 10
+    } else {
+        // Also local use - Tier 1 candidate
+        *r * 2
+    }
+}
+
+// =============================================================================
+// Loop escape patterns
+// =============================================================================
+
+fn loop_local_ref(arr: [Int; 10]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 10 {
+        // Reference created and consumed within iteration
+        // EXPECTED: Tier 1 for each iteration's reference
+        let r: &Int = &arr[i];
+        sum = sum + *r;
+        i = i + 1;
+    }
+    sum
+}
+
+fn loop_invariant_outer_ref(arr: [Int; 10]) -> Int {
+    let outer_ref: &[Int; 10] = &arr;
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+
+    while i < 10 {
+        // outer_ref is loop-invariant
+        // EXPECTED: Promote to Tier 1, single validation before loop
+        sum = sum + outer_ref[i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn loop_with_inner_and_outer_refs(arr: [Int; 10]) -> Int {
+    let outer: &[Int; 10] = &arr;  // Loop-invariant, Tier 1 candidate
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+
+    while i < 10 {
+        let elem = outer[i];
+        let inner: &Int = &elem;  // Loop-local, Tier 1 candidate
+        sum = sum + *inner;
+        i = i + 1;
+    }
+    sum
+}
+
+// =============================================================================
+// Struct field access patterns
+// =============================================================================
+
+type Point is { x: Float, y: Float };
+
+fn field_ref_no_escape(p: Point) -> Float {
+    let rx: &Float = &p.x;
+    let ry: &Float = &p.y;
+    // Field references don't escape
+    // EXPECTED: Tier 1
+    *rx + *ry
+}
+
+type PointRefs is { x_ref: &Float, y_ref: &Float };
+
+fn field_ref_escapes(p: &Point) -> PointRefs {
+    // Field references escape via struct
+    // EXPECTED: Tier 0
+    PointRefs { x_ref: &p.x, y_ref: &p.y }
+}
+
+// =============================================================================
+// Conditional escape analysis
+// =============================================================================
+
+type MaybeRef is None | Some { val: &Int };
+
+fn conditional_escape(flag: Bool, x: &Int) -> MaybeRef {
+    if flag {
+        // Escapes in this branch
+        // EXPECTED: x must be Tier 0 for entire function
+        MaybeRef.Some { val: x }
+    } else {
+        // Doesn't escape in this branch
+        MaybeRef.None
+    }
+}
+
+fn conditional_all_escape(flag: Bool, x: &Int, y: &Int) -> &Int {
+    // Both x and y escape via conditional return
+    // EXPECTED: Both Tier 0
+    if flag { x } else { y }
+}
+
+// =============================================================================
+// Nested function analysis
+// =============================================================================
+
+fn outer_with_nested(x: Int) -> Int {
+    fn inner_no_escape(r: &Int) -> Int {
+        // Inner function doesn't let reference escape
+        *r * 2
+    }
+
+    let r: &Int = &x;
+    // Reference passed to non-escaping nested function
+    // EXPECTED: May allow Tier 1 if inner is inlined
+    inner_no_escape(r)
+}
+
+fn call_chain_no_escape(x: Int) -> Int {
+    fn step1(r: &Int) -> Int { *r + 1 }
+    fn step2(r: &Int) -> Int { *r * 2 }
+
+    let r: &Int = &x;
+    // Chain of non-escaping calls
+    step2(&step1(r))
+}
+
+// =============================================================================
+// Escape through function calls
+// =============================================================================
+
+fn helper_no_escape(r: &Int) -> Int {
+    // Reference doesn't escape helper
+    *r + 1
+}
+
+fn helper_escapes(r: &Int) -> &Int {
+    // Reference escapes from helper
+    r
+}
+
+fn caller_with_non_escaping_call(x: Int) -> Int {
+    let r: &Int = &x;
+    // Call to non-escaping function
+    // EXPECTED: May allow Tier 1
+    helper_no_escape(r)
+}
+
+fn caller_with_escaping_call(x: &Int) -> &Int {
+    // Call to escaping function - forces Tier 0
+    helper_escapes(x)
+}
+
+// =============================================================================
+// Complex patterns
+// =============================================================================
+
+fn multiple_refs_same_value(x: Int) -> Int {
+    let r1: &Int = &x;
+    let r2: &Int = &x;
+    let r3: &Int = &x;
+    // All references to same value, all local
+    // EXPECTED: All Tier 1
+    *r1 + *r2 + *r3
+}
+
+fn ref_to_ref_local(x: Int) -> Int {
+    let r: &Int = &x;
+    let rr: &&Int = &r;
+    // Reference to reference, both local
+    // EXPECTED: Both Tier 1
+    **rr * 2
+}
+
+fn array_of_local_refs(a: Int, b: Int, c: Int) -> Int {
+    let ra: &Int = &a;
+    let rb: &Int = &b;
+    let rc: &Int = &c;
+    // Array created and consumed locally
+    let refs = [ra, rb, rc];
+    // If array doesn't escape, all refs can be Tier 1
+    *refs[0] + *refs[1] + *refs[2]
+}
+
+// =============================================================================
+// Main - validation
+// =============================================================================
+
+fn main() {
+    // Tier 1 candidates
+    assert(tier1_candidate_local(21) == 42);
+
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    assert(tier1_candidate_loop_invariant(arr) == 55);
+
+    assert(tier1_candidate_basic_block(10, 20) == 30);
+    assert(tier1_candidate_repeated_deref(10) == 30);
+    assert(tier1_candidate_nested_local(10) == 30);
+
+    // Tier 0 required - return escape
+    let x = 42;
+    let escaped = tier0_required_return_escape(&x);
+    assert(*escaped == 42);
+
+    // Tier 0 required - closure escape
+    let closure = tier0_required_closure_escape(100);
+    assert(closure() == 100);
+
+    // Mixed tiers
+    let y = 50;
+    let (local, ref_out) = mixed_tiers_local_and_escape(10, &y);
+    assert(local == 20);
+    assert(*ref_out == 50);
+
+    assert(mixed_tiers_conditional(true, 10) == 20);
+    assert(mixed_tiers_conditional(false, 10) == 20);
+
+    // Loop patterns
+    assert(loop_local_ref(arr) == 55);
+    assert(loop_invariant_outer_ref(arr) == 55);
+    assert(loop_with_inner_and_outer_refs(arr) == 55);
+
+    // Field access
+    let p = Point { x: 3.0, y: 4.0 };
+    assert(field_ref_no_escape(p) == 7.0);
+
+    // Nested functions
+    assert(outer_with_nested(21) == 42);
+    assert(call_chain_no_escape(10) == 22);  // (10 + 1) * 2
+
+    // Helper calls
+    assert(caller_with_non_escaping_call(10) == 11);
+
+    // Complex patterns
+    assert(multiple_refs_same_value(10) == 30);
+    assert(ref_to_ref_local(21) == 42);
+    assert(array_of_local_refs(10, 20, 30) == 60);
+}

@@ -1,0 +1,113 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, closures, lambda, capture, environment
+
+// Test capture by reference (default)
+fn test_capture_by_reference() {
+    let x = 10;
+    let add_x = |y| x + y;
+    let result = add_x(5);  // 15
+}
+
+// Test capture multiple variables
+fn test_capture_multiple() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let sum = || a + b + c;
+}
+
+// Test capture and modify (closure over mutable)
+fn test_capture_and_modify() {
+    let mut counter = 0;
+    let increment = || {
+        counter += 1;
+        counter
+    };
+}
+
+// Test move capture (ownership transfer)
+fn test_move_capture() {
+    let data = create_large_data();
+    let processor = move || {
+        consume(data)
+    };
+}
+
+// Test partial move capture
+fn test_partial_move_capture() {
+    let text = "hello";
+    let owned = Text.from("world");
+    let closure = move || {
+        // text is copied/borrowed, owned is moved
+        text.len() + owned.len()
+    };
+}
+
+// Test capture by mutable reference
+fn test_capture_mutable_ref() {
+    let mut list = [];
+    let pusher = || {
+        list.push(1);
+    };
+    pusher();
+    pusher();
+}
+
+// Test capture in nested closures
+fn test_capture_nested() {
+    let outer_val = 10;
+    let outer = || {
+        let inner_val = 20;
+        let inner = || {
+            outer_val + inner_val
+        };
+        inner()
+    };
+}
+
+// Test capture struct field
+fn test_capture_struct_field() {
+    let point = Point { x: 1, y: 2 };
+    let get_x = || point.x;
+    let get_y = || point.y;
+}
+
+// Test capture with pattern matching
+fn test_capture_pattern_match() {
+    let pair = (1, 2);
+    let sum_pair = || {
+        let (a, b) = pair;
+        a + b
+    };
+}
+
+// Test thread-safe capture
+fn test_thread_safe_capture() {
+    let shared = Arc.new(Mutex.new(0));
+    let safe_increment = move || {
+        let mut guard = shared.lock();
+        *guard += 1;
+    };
+}
+
+// Test capture environment in async context
+fn test_capture_async_context() {
+    let config = load_config();
+    let async_processor = async move || {
+        process_with_config(config).await
+    };
+}
+
+// Test capture with conditional usage
+fn test_capture_conditional() {
+    let maybe = Some(42);
+    let use_maybe = || {
+        if let Some(x) = maybe {
+            x * 2
+        } else {
+            0
+        }
+    };
+}

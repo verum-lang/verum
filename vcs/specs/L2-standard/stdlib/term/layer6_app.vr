@@ -1,0 +1,78 @@
+// @test: parse
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, app, layer6, elm
+// @description: Verify core.term.app types parse correctly
+
+/// Layer 6: Application Framework — Model protocol, Command type,
+/// AppMessage, run(), prompts, accessibility zones.
+
+mount core.term.app.*;
+mount core.term.event.{Event, KeyEvent, KeyCode, Modifiers};
+mount core.term.render.Frame;
+mount core.term.style.Style;
+
+fn test_command_types() {
+    // All Command variants
+    let c1 = Command.None;
+    let c2 = Command.Quit;
+    // Command.Perform, Batch, Sequence, Tick require function values
+}
+
+fn test_command_helpers() {
+    let n = none();
+    let q = quit();
+}
+
+fn test_app_message() {
+    // NOTE: AppMessage not exported from term.app (cross-module resolution limitation).
+    // Testing local message types instead.
+    type MyMsg is Click | Save;
+    let m1 = MyMsg.Click;
+    let m2 = MyMsg.Save;
+}
+
+fn test_semantic_zones() {
+    // OSC 133 semantic zones for accessibility
+    let zones = [
+        SemanticZone.Prompt,
+        SemanticZone.CommandInput,
+        SemanticZone.CommandOutput,
+        SemanticZone.CommandEnd { exit_code: 0 },
+    ];
+    assert_eq(zones.len(), 4);
+}
+
+fn test_elm_pattern() {
+    // The Elm Architecture: Model → Update → View
+    // Define a simple counter model
+    type CounterMsg is Increment | Decrement | Reset;
+    type Counter is { count: Int };
+
+    // Update function (pure)
+    fn update(model: &mut Counter, msg: CounterMsg) -> Command<CounterMsg> {
+        match msg {
+            Increment => { model.count = model.count + 1; Command.None }
+            Decrement => { model.count = model.count - 1; Command.None }
+            Reset => { model.count = 0; Command.None }
+        }
+    }
+
+    // Simulate update loop
+    let mut model = Counter { count: 0 };
+    update(&mut model, CounterMsg.Increment);
+    assert_eq(model.count, 1);
+    update(&mut model, CounterMsg.Increment);
+    assert_eq(model.count, 2);
+    update(&mut model, CounterMsg.Decrement);
+    assert_eq(model.count, 1);
+    update(&mut model, CounterMsg.Reset);
+    assert_eq(model.count, 0);
+}
+
+fn main() {
+    test_command_types();
+    test_command_helpers();
+    test_semantic_zones();
+    test_elm_pattern();
+}

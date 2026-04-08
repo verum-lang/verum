@@ -1,0 +1,133 @@
+// @test: differential
+// @tier: all
+// @level: L0
+// @tags: differential, control-flow, closures, patterns, generics
+// @timeout: 30000
+// @description: Differential test: verify control flow, closures, patterns match across tiers
+
+type Shape is Circle(Int) | Rect { w: Int, h: Int } | Triangle { base: Int, height: Int };
+
+fn shape_area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,  // approximate pi*r^2 as 3*r^2
+        Rect { w, h } => w * h,
+        Triangle { base, height } => base * height / 2,
+    }
+}
+
+type MaybeInt is Nothing | Just(Int);
+
+fn safe_div(a: Int, b: Int) -> MaybeInt {
+    if b == 0 { Nothing } else { Just(a / b) }
+}
+
+fn unwrap_or(m: MaybeInt, default_val: Int) -> Int {
+    match m {
+        Nothing => default_val,
+        Just(v) => v,
+    }
+}
+
+fn identity_int(x: Int) -> Int { x }
+fn double(x: Int) -> Int { x * 2 }
+fn square(x: Int) -> Int { x * x }
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int { f(g(x)) }
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+@allow(unbounded_recursion)
+fn fib_rec(n: Int) -> Int {
+    if n <= 1 { n } else { fib_rec(n - 1) + fib_rec(n - 2) }
+}
+
+fn main() -> Int {
+    // ---- Pattern matching ----
+    let c = Circle(5);
+    let r = Rect { w: 4, h: 6 };
+    let t = Triangle { base: 10, height: 3 };
+    assert_eq(shape_area(c), 75);
+    assert_eq(shape_area(r), 24);
+    assert_eq(shape_area(t), 15);
+
+    // ---- Maybe type ----
+    let ok = safe_div(10, 3);
+    let err = safe_div(10, 0);
+    assert_eq(unwrap_or(ok, -1), 3);
+    assert_eq(unwrap_or(err, -1), -1);
+
+    // ---- is checks ----
+    assert_eq(ok is Just, true);
+    assert_eq(ok is Nothing, false);
+    assert_eq(err is Nothing, true);
+
+    // ---- Higher-order functions ----
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(square, 4), 16);
+    assert_eq(apply(identity_int, 42), 42);
+
+    // Composition
+    assert_eq(compose(double, square, 3), 18);  // double(square(3)) = double(9) = 18
+    assert_eq(compose(square, double, 3), 36);  // square(double(3)) = square(6) = 36
+
+    // ---- Closures ----
+    let add5 = |x: Int| -> Int { x + 5 };
+    assert_eq(add5(10), 15);
+    assert_eq(add5(0), 5);
+
+    let mul3 = |x: Int| -> Int { x * 3 };
+    assert_eq(apply(mul3, 7), 21);
+
+    // Closure capturing
+    let offset = 100;
+    let add_offset = |x: Int| -> Int { x + offset };
+    assert_eq(add_offset(5), 105);
+
+    // ---- Recursion ----
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+
+    assert_eq(fib_rec(0), 0);
+    assert_eq(fib_rec(1), 1);
+    assert_eq(fib_rec(10), 55);
+    assert_eq(fib_rec(15), 610);
+
+    // ---- Loop patterns ----
+    // While with break condition
+    let mut sum = 0;
+    let mut n = 1;
+    while n <= 100 {
+        sum = sum + n;
+        n = n + 1;
+    }
+    assert_eq(sum, 5050);
+
+    // Nested loops
+    let mut count = 0;
+    let mut ii = 0;
+    while ii < 10 {
+        let mut jj = 0;
+        while jj < 10 {
+            if ii + jj == 15 {
+                count = count + 1;
+            }
+            jj = jj + 1;
+        }
+        ii = ii + 1;
+    }
+    // Pairs where i+j=15 with i,j in [0,9]: (6,9),(7,8),(8,7),(9,6) = 4
+    assert_eq(count, 4);
+
+    // ---- Early return ----
+    let result = safe_div(100, 4);
+    assert_eq(unwrap_or(result, 0), 25);
+
+    print("differential control flow ok");
+    0
+}

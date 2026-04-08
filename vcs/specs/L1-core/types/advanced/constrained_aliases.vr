@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1
+// @tags: type-alias, constrained, generics, advanced-type-syntax
+// @description: Constrained type alias syntax tests
+// Note: Uses typecheck-pass because test uses methods not in stdlib
+// @spec: 03-type-system.md Section 13. 3.6
+
+// Test 1: Basic constrained type alias
+type NumList<T: Num> is List<T>;
+
+// Test 2: Multiple constraints
+type SortedDisplayList<T: Ord + Display> is List<T>;
+
+// Test 3: Constrained alias with where clause
+type ValidatedMap<K, V> is Map<K, V>
+    where type K: Hash + Eq,
+          type V: Clone;
+
+// Test 4: Higher-kinded constrained alias
+type MonadContainer<M<_>: Monad, T> is M<T>;
+
+// Test 5: Nested constrained alias
+type NumericContainer<C<_>: Container, T: Num> is C<T>;
+
+// Test 6: Constrained alias with refinement
+type PositiveList<T: Num> is List<T{> 0}>;
+
+// Test 7: Usage of constrained aliases
+fn process_nums(list: NumList<Int>) -> NumList<Float> {
+    list.iter().map(|x| x.to_float()).collect()
+}
+
+fn display_sorted(list: SortedDisplayList<Text>) {
+    for item in list.sorted() {
+        print(item.display());
+    }
+}
+
+// Test 8: Error case - constraint violation
+// This should fail type checking:
+// let invalid: NumList<Text> = ["a", "b"];  // ERROR: Text: !Num
+
+fn main() {
+    let ints: NumList<Int> = [1, 2, 3];
+    let sorted: SortedDisplayList<Int> = [3, 1, 2];
+
+    assert(ints.len() == 3);
+    assert(sorted.len() == 3);
+}

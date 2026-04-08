@@ -1,0 +1,323 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, gpu-graph
+// @timeout: 10000
+
+/// Tests GPU graph API lifecycle simulation: node creation, dependency edges,
+/// topological execution ordering, and state transitions.
+/// All computation is pure integer/array arithmetic (no actual GPU needed).
+
+fn main() {
+    test_graph_node_lifecycle();
+    test_dependency_edges();
+    test_topological_sort();
+    test_graph_execution_states();
+}
+
+/// Simulate GPU graph node creation and property tracking
+fn test_graph_node_lifecycle() {
+    println("=== Graph Node Lifecycle ===");
+
+    // Node types: 0=kernel, 1=memcpy, 2=memset, 3=event
+    let node_types = [0, 0, 1, 0, 2, 3, 0, 1];
+    let num_nodes = 8;
+
+    // Create nodes with IDs and types
+    let mut i = 0;
+    while i < num_nodes {
+        let type_name = if node_types[i] == 0 {
+            "kernel"
+        } else if node_types[i] == 1 {
+            "memcpy"
+        } else if node_types[i] == 2 {
+            "memset"
+        } else {
+            "event"
+        };
+        println(f"node[{i}]: type={type_name}, id={i}");
+        i = i + 1;
+    }
+
+    // Node state transitions: created -> configured -> ready -> launched -> completed
+    let states = ["created", "configured", "ready", "launched", "completed"];
+    println("state transitions for node 0:");
+    let mut s = 0;
+    while s < 5 {
+        println(f"  state: {states[s]}");
+        s = s + 1;
+    }
+
+    // Count nodes by type
+    let mut kernel_count = 0;
+    let mut memcpy_count = 0;
+    let mut memset_count = 0;
+    let mut event_count = 0;
+    let mut j = 0;
+    while j < num_nodes {
+        if node_types[j] == 0 { kernel_count = kernel_count + 1; }
+        if node_types[j] == 1 { memcpy_count = memcpy_count + 1; }
+        if node_types[j] == 2 { memset_count = memset_count + 1; }
+        if node_types[j] == 3 { event_count = event_count + 1; }
+        j = j + 1;
+    }
+    println(f"summary: kernels={kernel_count}, memcpy={memcpy_count}, memset={memset_count}, events={event_count}");
+}
+
+/// Simulate dependency edges in a GPU graph using an adjacency matrix
+fn test_dependency_edges() {
+    println("\n=== Dependency Edges ===");
+
+    // 6-node graph represented as adjacency list (flattened)
+    // Edge: from -> to (from must complete before to starts)
+    let num_nodes = 6;
+    // Edges: 0->1, 0->2, 1->3, 2->3, 2->4, 3->5, 4->5
+    let edge_from = [0, 0, 1, 2, 2, 3, 4];
+    let edge_to   = [1, 2, 3, 3, 4, 5, 5];
+    let num_edges = 7;
+
+    // Print edges
+    let mut e = 0;
+    while e < num_edges {
+        println(f"edge: {edge_from[e]} -> {edge_to[e]}");
+        e = e + 1;
+    }
+
+    // Compute in-degree for each node
+    let mut in_degree = [0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < num_edges {
+        in_degree[edge_to[i]] = in_degree[edge_to[i]] + 1;
+        i = i + 1;
+    }
+
+    println("in-degrees:");
+    let mut j = 0;
+    while j < num_nodes {
+        println(f"  node {j}: in-degree={in_degree[j]}");
+        j = j + 1;
+    }
+
+    // Compute out-degree for each node
+    let mut out_degree = [0, 0, 0, 0, 0, 0];
+    let mut k = 0;
+    while k < num_edges {
+        out_degree[edge_from[k]] = out_degree[edge_from[k]] + 1;
+        k = k + 1;
+    }
+
+    println("out-degrees:");
+    let mut m = 0;
+    while m < num_nodes {
+        println(f"  node {m}: out-degree={out_degree[m]}");
+        m = m + 1;
+    }
+
+    // Find source nodes (in-degree 0) and sink nodes (out-degree 0)
+    let mut sources = 0;
+    let mut sinks = 0;
+    let mut n = 0;
+    while n < num_nodes {
+        if in_degree[n] == 0 {
+            println(f"source node: {n}");
+            sources = sources + 1;
+        }
+        if out_degree[n] == 0 {
+            println(f"sink node: {n}");
+            sinks = sinks + 1;
+        }
+        n = n + 1;
+    }
+    println(f"sources: {sources}, sinks: {sinks}");
+}
+
+/// Topological sort of a DAG using Kahn's algorithm (BFS-based)
+fn test_topological_sort() {
+    println("\n=== Topological Sort ===");
+
+    // Same 6-node graph
+    let num_nodes = 6;
+    let edge_from = [0, 0, 1, 2, 2, 3, 4];
+    let edge_to   = [1, 2, 3, 3, 4, 5, 5];
+    let num_edges = 7;
+
+    // Compute in-degree
+    let mut in_degree = [0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < num_edges {
+        in_degree[edge_to[i]] = in_degree[edge_to[i]] + 1;
+        i = i + 1;
+    }
+
+    // Kahn's algorithm: process nodes with in-degree 0
+    let mut order = [0, 0, 0, 0, 0, 0];
+    let mut order_len = 0;
+    let mut processed = [false, false, false, false, false, false];
+
+    // Repeat until all nodes processed
+    let mut iteration = 0;
+    while order_len < num_nodes {
+        // Find next unprocessed node with in-degree 0
+        // (pick smallest index for deterministic output)
+        let mut found = -1;
+        let mut n = 0;
+        while n < num_nodes {
+            if in_degree[n] == 0 {
+                if processed[n] == false {
+                    found = n;
+                    n = num_nodes; // break
+                }
+            }
+            n = n + 1;
+        }
+
+        if found < 0 {
+            println("error: cycle detected");
+            return;
+        }
+
+        processed[found] = true;
+        order[order_len] = found;
+        order_len = order_len + 1;
+
+        // Decrease in-degree of successors
+        let mut e = 0;
+        while e < num_edges {
+            if edge_from[e] == found {
+                in_degree[edge_to[e]] = in_degree[edge_to[e]] - 1;
+            }
+            e = e + 1;
+        }
+
+        iteration = iteration + 1;
+    }
+
+    println("topological order:");
+    let mut j = 0;
+    while j < order_len {
+        println(f"  step {j}: node {order[j]}");
+        j = j + 1;
+    }
+
+    // Verify: for every edge (u, v), u appears before v in the order
+    let mut valid = true;
+    let mut e2 = 0;
+    while e2 < num_edges {
+        let u = edge_from[e2];
+        let v = edge_to[e2];
+        // Find positions
+        let mut pos_u = -1;
+        let mut pos_v = -1;
+        let mut p = 0;
+        while p < order_len {
+            if order[p] == u { pos_u = p; }
+            if order[p] == v { pos_v = p; }
+            p = p + 1;
+        }
+        if pos_u >= pos_v {
+            valid = false;
+        }
+        e2 = e2 + 1;
+    }
+    println(f"order valid: {valid}");
+}
+
+/// Simulate graph execution state machine with timing
+fn test_graph_execution_states() {
+    println("\n=== Graph Execution States ===");
+
+    // Execution model: each node has a simulated duration
+    let num_nodes = 6;
+    let durations = [10, 20, 15, 25, 10, 30];
+    let edge_from = [0, 0, 1, 2, 2, 3, 4];
+    let edge_to   = [1, 2, 3, 3, 4, 5, 5];
+    let num_edges = 7;
+
+    // Compute earliest start time using topological order: [0, 1, 2, 3, 4, 5]
+    let topo_order = [0, 1, 2, 3, 4, 5];
+    let mut earliest_start = [0, 0, 0, 0, 0, 0];
+    let mut earliest_finish = [0, 0, 0, 0, 0, 0];
+
+    let mut i = 0;
+    while i < num_nodes {
+        let node = topo_order[i];
+        // Start time = max of all predecessor finish times
+        let mut max_pred_finish = 0;
+        let mut e = 0;
+        while e < num_edges {
+            if edge_to[e] == node {
+                let pred = edge_from[e];
+                if earliest_finish[pred] > max_pred_finish {
+                    max_pred_finish = earliest_finish[pred];
+                }
+            }
+            e = e + 1;
+        }
+        earliest_start[node] = max_pred_finish;
+        earliest_finish[node] = max_pred_finish + durations[node];
+        println(f"node {node}: start={earliest_start[node]}, finish={earliest_finish[node]}, duration={durations[node]}");
+        i = i + 1;
+    }
+
+    // Critical path length = max finish time
+    let mut critical_path = 0;
+    let mut j = 0;
+    while j < num_nodes {
+        if earliest_finish[j] > critical_path {
+            critical_path = earliest_finish[j];
+        }
+        j = j + 1;
+    }
+    println(f"critical_path_length: {critical_path}");
+
+    // Total work (sum of all durations)
+    let mut total_work = 0;
+    let mut k = 0;
+    while k < num_nodes {
+        total_work = total_work + durations[k];
+        k = k + 1;
+    }
+    println(f"total_work: {total_work}");
+
+    // Parallelism ratio
+    let parallelism = total_work * 100 / critical_path;
+    println(f"parallelism_ratio: {parallelism}%");
+
+    // Slack for each node: latest_start - earliest_start
+    // For simplicity, compute latest start from critical path backward
+    let mut latest_finish = [0, 0, 0, 0, 0, 0];
+    let mut m = 0;
+    while m < num_nodes {
+        latest_finish[m] = critical_path; // initialize to max
+        m = m + 1;
+    }
+
+    // Process in reverse topological order
+    let mut ri = num_nodes - 1;
+    while ri >= 0 {
+        let node = topo_order[ri];
+        // latest_finish[node] = min of latest_start of all successors
+        let mut min_succ_start = critical_path;
+        let mut e = 0;
+        while e < num_edges {
+            if edge_from[e] == node {
+                let succ = edge_to[e];
+                let succ_latest_start = latest_finish[succ] - durations[succ];
+                if succ_latest_start < min_succ_start {
+                    min_succ_start = succ_latest_start;
+                }
+            }
+            e = e + 1;
+        }
+        latest_finish[node] = min_succ_start;
+        let slack = latest_finish[node] - durations[node] - earliest_start[node];
+        println(f"node {node}: slack={slack}");
+
+        if ri == 0 {
+            ri = ri - 1; // will underflow but loop ends
+        } else {
+            ri = ri - 1;
+        }
+    }
+}

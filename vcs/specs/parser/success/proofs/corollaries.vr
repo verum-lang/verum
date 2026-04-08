@@ -1,0 +1,193 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, corollary, theorem, formal-verification
+// @description: Comprehensive tests for corollary declarations
+
+// ============================================================================
+// Basic Corollary Declaration
+// Grammar: corollary_decl = 'corollary' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
+//          ':' , proposition , proof_body
+// Note: The 'from' clause is a future extension not currently supported
+// ============================================================================
+
+// First, define a theorem that corollaries reference
+theorem commutativity(a: Int, b: Int): a + b == b + a {
+    proof by ring
+}
+
+theorem associativity(a: Int, b: Int, c: Int): (a + b) + c == a + (b + c) {
+    proof by ring
+}
+
+// Basic corollary (consequence of commutativity)
+corollary add_comm_zero(a: Int): a + 0 == 0 + a {
+    proof by simp
+}
+
+corollary add_assoc_special(a: Int, b: Int): (a + b) + 0 == a + (b + 0) {
+    proof by simp
+}
+
+// ============================================================================
+// Corollary with Requires Clause
+// ============================================================================
+
+theorem positive_sum(a: Int, b: Int)
+    requires a > 0 && b > 0
+    ensures a + b > 0
+{
+    proof by omega
+}
+
+corollary positive_double(a: Int): a > 0 => a + a > 0 {
+    proof by omega
+}
+
+corollary triple_positive(a: Int, b: Int, c: Int): a > 0 && b > 0 && c > 0 => a + b + c > 0 {
+    proof by omega
+}
+
+// ============================================================================
+// Corollary with Generic Parameters
+// ============================================================================
+
+theorem list_append_length<T>(xs: List<T>, ys: List<T>)
+    ensures (xs.concat(ys)).len() == xs.len() + ys.len()
+{
+    proof by induction(xs)
+}
+
+corollary append_empty_length<T>(xs: List<T>): xs.concat([]).len() == xs.len() {
+    proof by simp
+}
+
+corollary append_single_length<T>(xs: List<T>, x: T): xs.concat([x]).len() == xs.len() + 1 {
+    proof by simp
+}
+
+// ============================================================================
+// Corollary with Return Type
+// ============================================================================
+
+theorem div_mod_identity(a: Int, b: Int)
+    requires b > 0
+    ensures (a / b) * b + a % b == a
+{
+    proof by omega
+}
+
+corollary mod_range(a: Int, b: Int): b > 0 => a % b >= 0 && a % b < b {
+    proof by omega
+}
+
+// ============================================================================
+// Complex Corollaries
+// ============================================================================
+
+theorem transitivity<T: Ord>(a: T, b: T, c: T)
+    requires a <= b && b <= c
+    ensures a <= c
+{
+    proof by auto
+}
+
+corollary transitivity_strict<T: Ord>(a: T, b: T, c: T): a < b && b < c => a < c {
+    proof by auto
+}
+
+corollary transitivity_mixed<T: Ord>(a: T, b: T, c: T): a <= b && b < c => a < c {
+    proof by auto
+}
+
+// ============================================================================
+// Corollary with Structured Proof
+// ============================================================================
+
+theorem sum_formula(n: Int)
+    requires n >= 0
+    ensures 2 * sum(0..n) == n * (n + 1)
+{
+    proof by induction(n)
+}
+
+corollary sum_even(n: Int): n >= 0 => n * (n + 1) % 2 == 0 {
+    proof {
+        // Either n or n+1 is even
+        // Product of consecutive integers is always even
+        show (n * (n + 1)) % 2 == 0 by omega;
+    }
+}
+
+// ============================================================================
+// Chain of Corollaries
+// ============================================================================
+
+theorem base_theorem(x: Int): x * 0 == 0 {
+    proof by ring
+}
+
+corollary first_corollary(x: Int): 0 * x == 0 {
+    proof by ring
+}
+
+corollary second_corollary(x: Int, y: Int): (x - x) * y == 0 {
+    proof by ring
+}
+
+corollary third_corollary(x: Int): x + (-x) == 0 {
+    proof by ring
+}
+
+// ============================================================================
+// Multiple Lemmas and Corollaries
+// ============================================================================
+
+theorem lemma_a(x: Int): x + 1 > x {
+    proof by omega
+}
+
+theorem lemma_b(x: Int): x - 1 < x {
+    proof by omega
+}
+
+corollary combined(x: Int): x - 1 < x && x < x + 1 {
+    proof {
+        have h1: x + 1 > x by omega;
+        have h2: x - 1 < x by omega;
+        show x - 1 < x && x < x + 1 by auto;
+    }
+}
+
+// ============================================================================
+// Visibility
+// ============================================================================
+
+pub theorem pub_theorem(x: Int): x == x {
+    proof by auto
+}
+
+pub corollary pub_corollary(x: Int, y: Int): x + y == y + x {
+    proof by ring
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Corollary with no parameters
+theorem zero_is_zero(): 0 == 0 {
+    proof by auto
+}
+
+corollary still_zero(): 0 == 0 {
+    proof by auto
+}
+
+// Corollary with complex requires (combined as implication)
+corollary complex_requires(a: Int, b: Int, c: Int):
+    (a > 0 && b > 0 && c > 0 && a + b > c && b + c > a && a + c > b) => a + b + c > 0
+{
+    proof by omega
+}

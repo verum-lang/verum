@@ -1,0 +1,281 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, bigint, multi-word, arithmetic, carry
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT multi-word integer simulation using a pair of Ints with 30-bit low word and arbitrary high bits
+
+// BigInt: hi contains high bits, lo contains low 30 bits (0..1073741823)
+type BigInt is { hi: Int, lo: Int };
+
+// Mask for low 30 bits
+fn lo_mask() -> Int {
+    1073741823  // (1 << 30) - 1 = 0x3FFFFFFF
+}
+
+fn lo_bits() -> Int {
+    30
+}
+
+fn big_new(h: Int, l: Int) -> BigInt {
+    BigInt { hi: h, lo: l & lo_mask() }
+}
+
+fn big_from_int(v: Int) -> BigInt {
+    // For non-negative values, split into hi and lo
+    if v >= 0 {
+        BigInt { hi: v >> lo_bits(), lo: v & lo_mask() }
+    } else {
+        // For negative, just store in lo with hi = -1 as sign indicator
+        BigInt { hi: 0 - 1, lo: v }
+    }
+}
+
+fn big_to_int(b: BigInt) -> Int {
+    // Reconstruct: hi * (1 << 30) + lo
+    b.hi * 1073741824 + b.lo
+}
+
+fn big_add(a: BigInt, b: BigInt) -> BigInt {
+    let lo_sum = a.lo + b.lo;
+    let carry = lo_sum >> lo_bits();
+    let new_lo = lo_sum & lo_mask();
+    let new_hi = a.hi + b.hi + carry;
+    BigInt { hi: new_hi, lo: new_lo }
+}
+
+fn big_sub(a: BigInt, b: BigInt) -> BigInt {
+    let lo_diff = a.lo - b.lo;
+    if lo_diff >= 0 {
+        BigInt { hi: a.hi - b.hi, lo: lo_diff }
+    } else {
+        // Borrow from hi
+        BigInt { hi: a.hi - b.hi - 1, lo: lo_diff + 1073741824 }
+    }
+}
+
+fn big_mul_small(a: BigInt, k: Int) -> BigInt {
+    // Multiply by a small integer k (fits in ~30 bits)
+    let lo_prod = a.lo * k;
+    let carry = lo_prod >> lo_bits();
+    let new_lo = lo_prod & lo_mask();
+    let new_hi = a.hi * k + carry;
+    BigInt { hi: new_hi, lo: new_lo }
+}
+
+fn big_compare(a: BigInt, b: BigInt) -> Int {
+    // Returns -1 if a < b, 0 if a == b, 1 if a > b
+    if a.hi < b.hi { 0 - 1 }
+    else if a.hi > b.hi { 1 }
+    else if a.lo < b.lo { 0 - 1 }
+    else if a.lo > b.lo { 1 }
+    else { 0 }
+}
+
+fn big_eq(a: BigInt, b: BigInt) -> Bool {
+    a.hi == b.hi && a.lo == b.lo
+}
+
+fn big_shift_left(a: BigInt, n: Int) -> BigInt {
+    // Shift left by n bits (n < 30)
+    if n == 0 { a }
+    else {
+        let overflow = a.lo >> (lo_bits() - n);
+        let new_lo = (a.lo << n) & lo_mask();
+        let new_hi = (a.hi << n) | overflow;
+        BigInt { hi: new_hi, lo: new_lo }
+    }
+}
+
+fn big_shift_right(a: BigInt, n: Int) -> BigInt {
+    // Shift right by n bits (n < 30)
+    if n == 0 { a }
+    else {
+        let underflow = (a.hi & ((1 << n) - 1)) << (lo_bits() - n);
+        let new_lo = (a.lo >> n) | underflow;
+        let new_hi = a.hi >> n;
+        BigInt { hi: new_hi, lo: new_lo }
+    }
+}
+
+fn big_is_zero(a: BigInt) -> Bool {
+    a.hi == 0 && a.lo == 0
+}
+
+fn big_double(a: BigInt) -> BigInt {
+    big_add(a, a)
+}
+
+fn main() -> Int {
+    // === Test 1: Construction and conversion ===
+    let zero = big_new(0, 0);
+    assert_eq(big_to_int(zero), 0);
+    assert(big_is_zero(zero));
+
+    let one = big_new(0, 1);
+    assert_eq(big_to_int(one), 1);
+    assert(!big_is_zero(one));
+
+    let large = big_new(1, 0);  // 1 * 2^30 = 1073741824
+    assert_eq(big_to_int(large), 1073741824);
+
+    let mixed = big_new(2, 100);  // 2 * 2^30 + 100
+    assert_eq(big_to_int(mixed), 2 * 1073741824 + 100);
+
+    // === Test 2: big_from_int round-trip ===
+    let val42 = big_from_int(42);
+    assert_eq(big_to_int(val42), 42);
+    assert_eq(val42.hi, 0);
+    assert_eq(val42.lo, 42);
+
+    let val_big = big_from_int(2000000000);
+    assert_eq(big_to_int(val_big), 2000000000);
+    // 2000000000 >> 30 = 1, 2000000000 & mask = 2000000000 - 1073741824 = 926258176
+    assert_eq(val_big.hi, 1);
+    assert_eq(val_big.lo, 926258176);
+
+    // === Test 3: Addition without carry ===
+    let a = big_new(0, 100);
+    let b = big_new(0, 200);
+    let sum = big_add(a, b);
+    assert_eq(big_to_int(sum), 300);
+    assert_eq(sum.hi, 0);
+    assert_eq(sum.lo, 300);
+
+    // === Test 4: Addition with carry ===
+    let c = big_new(0, 1073741800);  // close to max lo
+    let d = big_new(0, 100);
+    let sum2 = big_add(c, d);
+    // 1073741800 + 100 = 1073741900 -> lo = 1073741900 - 1073741824 = 76, hi = 1
+    assert_eq(sum2.hi, 1);
+    assert_eq(sum2.lo, 76);
+    assert_eq(big_to_int(sum2), 1073741900);
+
+    // === Test 5: Addition with both hi and lo ===
+    let e = big_new(3, 500000000);
+    let f = big_new(2, 700000000);
+    let sum3 = big_add(e, f);
+    // lo: 500000000 + 700000000 = 1200000000 -> carry = 1, lo = 1200000000 - 1073741824 = 126258176
+    // hi: 3 + 2 + 1 = 6
+    assert_eq(sum3.hi, 6);
+    assert_eq(sum3.lo, 126258176);
+
+    // === Test 6: Subtraction without borrow ===
+    let g = big_new(5, 800);
+    let h = big_new(2, 300);
+    let diff = big_sub(g, h);
+    assert_eq(diff.hi, 3);
+    assert_eq(diff.lo, 500);
+
+    // === Test 7: Subtraction with borrow ===
+    let i = big_new(5, 100);
+    let j = big_new(2, 300);
+    let diff2 = big_sub(i, j);
+    // lo: 100 - 300 = -200 -> borrow, new_lo = -200 + 1073741824 = 1073741624, hi = 5 - 2 - 1 = 2
+    assert_eq(diff2.hi, 2);
+    assert_eq(diff2.lo, 1073741624);
+    // Verify: 2 * 1073741824 + 1073741624 = 2147483648 + 1073741624 = 3221225272
+    // Original: 5 * 1073741824 + 100 = 5368709220, minus 2 * 1073741824 + 300 = 2147483948
+    // 5368709220 - 2147483948 = 3221225272
+    assert_eq(big_to_int(diff2), 3221225272);
+
+    // === Test 8: Multiply small ===
+    let k = big_new(0, 1000000);
+    let prod = big_mul_small(k, 1000);
+    // 1000000 * 1000 = 1000000000 -> lo = 1000000000 (fits in 30 bits? 1000000000 < 1073741824 = yes)
+    assert_eq(prod.lo, 1000000000);
+    assert_eq(prod.hi, 0);
+    assert_eq(big_to_int(prod), 1000000000);
+
+    // Multiply with overflow into hi
+    let m = big_new(0, 600000000);
+    let prod2 = big_mul_small(m, 3);
+    // 600000000 * 3 = 1800000000 -> 1800000000 >> 30 = 1, 1800000000 & mask = 726258176
+    assert_eq(prod2.hi, 1);
+    assert_eq(prod2.lo, 726258176);
+    assert_eq(big_to_int(prod2), 1800000000);
+
+    // === Test 9: Compare ===
+    assert_eq(big_compare(big_new(0, 5), big_new(0, 5)), 0);
+    assert_eq(big_compare(big_new(0, 3), big_new(0, 5)), 0 - 1);
+    assert_eq(big_compare(big_new(0, 7), big_new(0, 5)), 1);
+    assert_eq(big_compare(big_new(1, 0), big_new(0, 999999999)), 1);
+    assert_eq(big_compare(big_new(2, 100), big_new(2, 200)), 0 - 1);
+
+    // === Test 10: Equality ===
+    assert(big_eq(big_new(3, 42), big_new(3, 42)));
+    assert(!big_eq(big_new(3, 42), big_new(3, 43)));
+    assert(!big_eq(big_new(3, 42), big_new(4, 42)));
+
+    // === Test 11: Shift left ===
+    let sl = big_shift_left(big_new(0, 1), 10);
+    // 1 << 10 = 1024
+    assert_eq(big_to_int(sl), 1024);
+
+    // Shift that overflows lo into hi
+    let sl2 = big_shift_left(big_new(0, 1 << 25), 5);
+    // (1 << 25) << 5 = 1 << 30 -> lo = 0, hi = 1
+    assert_eq(sl2.hi, 1);
+    assert_eq(sl2.lo, 0);
+
+    // === Test 12: Shift right ===
+    let sr = big_shift_right(big_new(0, 1024), 5);
+    assert_eq(big_to_int(sr), 32);
+
+    // Shift from hi into lo
+    let sr2 = big_shift_right(big_new(1, 0), 1);
+    // hi: 1 >> 1 = 0, underflow: (1 & 1) << 29 = 536870912
+    assert_eq(sr2.hi, 0);
+    assert_eq(sr2.lo, 536870912);
+
+    // === Test 13: Double ===
+    let dbl = big_double(big_new(0, 500));
+    assert_eq(big_to_int(dbl), 1000);
+
+    let dbl2 = big_double(big_new(0, 600000000));
+    assert_eq(big_to_int(dbl2), 1200000000);
+
+    // === Test 14: Repeated doubling (powers of 2) ===
+    let mut pow2 = big_new(0, 1);
+    let mut iter = 0;
+    while iter < 10 {
+        pow2 = big_double(pow2);
+        iter = iter + 1;
+    }
+    // 2^10 = 1024
+    assert_eq(big_to_int(pow2), 1024);
+
+    // === Test 15: Addition identity and commutativity ===
+    let x = big_new(1, 42);
+    let y = big_new(2, 99);
+    assert(big_eq(big_add(x, zero), x));
+    assert(big_eq(big_add(zero, x), x));
+    assert(big_eq(big_add(x, y), big_add(y, x)));
+
+    // === Test 16: Sub then add recovers original ===
+    let orig = big_new(4, 777);
+    let delta = big_new(1, 500);
+    let after = big_add(big_sub(orig, delta), delta);
+    assert(big_eq(after, orig));
+
+    // === Test 17: Factorial-like accumulation: 10! = 3628800 ===
+    let mut fact = big_new(0, 1);
+    let mut n = 1;
+    while n <= 10 {
+        fact = big_mul_small(fact, n);
+        n = n + 1;
+    }
+    assert_eq(big_to_int(fact), 3628800);
+
+    // === Test 18: Partial factorial 12! = 479001600 ===
+    let mut fact2 = big_new(0, 1);
+    let mut n2 = 1;
+    while n2 <= 12 {
+        fact2 = big_mul_small(fact2, n2);
+        n2 = n2 + 1;
+    }
+    assert_eq(big_to_int(fact2), 479001600);
+
+    0
+}

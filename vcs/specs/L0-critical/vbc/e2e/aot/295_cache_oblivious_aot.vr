@@ -1,0 +1,340 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, cache-oblivious, matrix, transpose, divide-conquer
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for cache-oblivious patterns: recursive matrix transpose and divide-and-conquer
+
+// 4x4 matrix using flat record (16 elements, row-major)
+type Mat4 is {
+    m00: Int, m01: Int, m02: Int, m03: Int,
+    m10: Int, m11: Int, m12: Int, m13: Int,
+    m20: Int, m21: Int, m22: Int, m23: Int,
+    m30: Int, m31: Int, m32: Int, m33: Int
+};
+
+fn mat4_get(m: Mat4, r: Int, c: Int) -> Int {
+    let idx = r * 4 + c;
+    if idx == 0 { m.m00 } else if idx == 1 { m.m01 }
+    else if idx == 2 { m.m02 } else if idx == 3 { m.m03 }
+    else if idx == 4 { m.m10 } else if idx == 5 { m.m11 }
+    else if idx == 6 { m.m12 } else if idx == 7 { m.m13 }
+    else if idx == 8 { m.m20 } else if idx == 9 { m.m21 }
+    else if idx == 10 { m.m22 } else if idx == 11 { m.m23 }
+    else if idx == 12 { m.m30 } else if idx == 13 { m.m31 }
+    else if idx == 14 { m.m32 } else { m.m33 }
+}
+
+fn mat4_set(m: Mat4, r: Int, c: Int, v: Int) -> Mat4 {
+    let idx = r * 4 + c;
+    Mat4 {
+        m00: if idx == 0 { v } else { m.m00 }, m01: if idx == 1 { v } else { m.m01 },
+        m02: if idx == 2 { v } else { m.m02 }, m03: if idx == 3 { v } else { m.m03 },
+        m10: if idx == 4 { v } else { m.m10 }, m11: if idx == 5 { v } else { m.m11 },
+        m12: if idx == 6 { v } else { m.m12 }, m13: if idx == 7 { v } else { m.m13 },
+        m20: if idx == 8 { v } else { m.m20 }, m21: if idx == 9 { v } else { m.m21 },
+        m22: if idx == 10 { v } else { m.m22 }, m23: if idx == 11 { v } else { m.m23 },
+        m30: if idx == 12 { v } else { m.m30 }, m31: if idx == 13 { v } else { m.m31 },
+        m32: if idx == 14 { v } else { m.m32 }, m33: if idx == 15 { v } else { m.m33 }
+    }
+}
+
+fn mat4_zero() -> Mat4 {
+    Mat4 {
+        m00: 0, m01: 0, m02: 0, m03: 0,
+        m10: 0, m11: 0, m12: 0, m13: 0,
+        m20: 0, m21: 0, m22: 0, m23: 0,
+        m30: 0, m31: 0, m32: 0, m33: 0
+    }
+}
+
+// Simple (iterative) transpose
+fn mat4_transpose(m: Mat4) -> Mat4 {
+    let mut result = mat4_zero();
+    let mut r = 0;
+    while r < 4 {
+        let mut c = 0;
+        while c < 4 {
+            result = mat4_set(result, c, r, mat4_get(m, r, c));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+// Recursive block transpose (cache-oblivious style)
+// Operates on a sub-region [r0..r0+sz) x [c0..c0+sz) of the matrix
+// For 4x4, this divides into 2x2 blocks recursively
+@allow(unbounded_recursion)
+fn recursive_transpose_helper(src: Mat4, dst: Mat4, r0: Int, c0: Int, sz: Int) -> Mat4 {
+    if sz == 1 {
+        // Base case: single element
+        return mat4_set(dst, c0, r0, mat4_get(src, r0, c0));
+    }
+    let half = sz / 2;
+    // Transpose 4 quadrants:
+    // Top-left (r0, c0, half)
+    let d1 = recursive_transpose_helper(src, dst, r0, c0, half);
+    // Top-right (r0, c0+half, half)
+    let d2 = recursive_transpose_helper(src, d1, r0, c0 + half, half);
+    // Bottom-left (r0+half, c0, half)
+    let d3 = recursive_transpose_helper(src, d2, r0 + half, c0, half);
+    // Bottom-right (r0+half, c0+half, half)
+    recursive_transpose_helper(src, d3, r0 + half, c0 + half, half)
+}
+
+fn recursive_transpose(m: Mat4) -> Mat4 {
+    recursive_transpose_helper(m, mat4_zero(), 0, 0, 4)
+}
+
+// Matrix multiply (standard)
+fn mat4_mul(a: Mat4, b_mat: Mat4) -> Mat4 {
+    let mut result = mat4_zero();
+    let mut r = 0;
+    while r < 4 {
+        let mut c = 0;
+        while c < 4 {
+            let mut sum = 0;
+            let mut k = 0;
+            while k < 4 {
+                sum = sum + mat4_get(a, r, k) * mat4_get(b_mat, k, c);
+                k = k + 1;
+            }
+            result = mat4_set(result, r, c, sum);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+// Recursive matrix multiply (divide and conquer, cache-oblivious pattern)
+// For 4x4: split into 2x2 blocks of 2x2 submatrices
+// C[i,j] = sum(A[i,k] * B[k,j]) for each block
+
+// Extract 2x2 sub-block from a 4x4 matrix
+type Mat2 is { e00: Int, e01: Int, e10: Int, e11: Int };
+
+fn mat4_subblock(m: Mat4, br: Int, bc: Int) -> Mat2 {
+    let r0 = br * 2;
+    let c0 = bc * 2;
+    Mat2 {
+        e00: mat4_get(m, r0, c0),
+        e01: mat4_get(m, r0, c0 + 1),
+        e10: mat4_get(m, r0 + 1, c0),
+        e11: mat4_get(m, r0 + 1, c0 + 1)
+    }
+}
+
+fn mat2_mul(a: Mat2, b_mat: Mat2) -> Mat2 {
+    Mat2 {
+        e00: a.e00 * b_mat.e00 + a.e01 * b_mat.e10,
+        e01: a.e00 * b_mat.e01 + a.e01 * b_mat.e11,
+        e10: a.e10 * b_mat.e00 + a.e11 * b_mat.e10,
+        e11: a.e10 * b_mat.e01 + a.e11 * b_mat.e11
+    }
+}
+
+fn mat2_add(a: Mat2, b_mat: Mat2) -> Mat2 {
+    Mat2 {
+        e00: a.e00 + b_mat.e00, e01: a.e01 + b_mat.e01,
+        e10: a.e10 + b_mat.e10, e11: a.e11 + b_mat.e11
+    }
+}
+
+// Place a 2x2 block into a 4x4 matrix
+fn mat4_set_block(m: Mat4, br: Int, bc: Int, blk: Mat2) -> Mat4 {
+    let r0 = br * 2;
+    let c0 = bc * 2;
+    let m1 = mat4_set(m, r0, c0, blk.e00);
+    let m2 = mat4_set(m1, r0, c0 + 1, blk.e01);
+    let m3 = mat4_set(m2, r0 + 1, c0, blk.e10);
+    mat4_set(m3, r0 + 1, c0 + 1, blk.e11)
+}
+
+// Block multiply: C = A * B using 2x2 block decomposition
+fn block_multiply(a: Mat4, b_mat: Mat4) -> Mat4 {
+    let mut result = mat4_zero();
+    let mut br = 0;
+    while br < 2 {
+        let mut bc = 0;
+        while bc < 2 {
+            // C[br, bc] = sum over k of A[br,k] * B[k,bc]
+            let mut accum = Mat2 { e00: 0, e01: 0, e10: 0, e11: 0 };
+            let mut k = 0;
+            while k < 2 {
+                let a_blk = mat4_subblock(a, br, k);
+                let b_blk = mat4_subblock(b_mat, k, bc);
+                accum = mat2_add(accum, mat2_mul(a_blk, b_blk));
+                k = k + 1;
+            }
+            result = mat4_set_block(result, br, bc, accum);
+            bc = bc + 1;
+        }
+        br = br + 1;
+    }
+    result
+}
+
+// Matrix equality check
+fn mat4_eq(a: Mat4, b_mat: Mat4) -> Bool {
+    let mut r = 0;
+    while r < 4 {
+        let mut c = 0;
+        while c < 4 {
+            if mat4_get(a, r, c) != mat4_get(b_mat, r, c) { return false; }
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    true
+}
+
+// Sum all elements
+fn mat4_sum(m: Mat4) -> Int {
+    let mut s = 0;
+    let mut r = 0;
+    while r < 4 {
+        let mut c = 0;
+        while c < 4 {
+            s = s + mat4_get(m, r, c);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    s
+}
+
+// Trace (sum of diagonal)
+fn mat4_trace(m: Mat4) -> Int {
+    mat4_get(m, 0, 0) + mat4_get(m, 1, 1) + mat4_get(m, 2, 2) + mat4_get(m, 3, 3)
+}
+
+fn test_transpose_simple() {
+    let m = Mat4 {
+        m00: 1,  m01: 2,  m02: 3,  m03: 4,
+        m10: 5,  m11: 6,  m12: 7,  m13: 8,
+        m20: 9,  m21: 10, m22: 11, m23: 12,
+        m30: 13, m31: 14, m32: 15, m33: 16
+    };
+    let t = mat4_transpose(m);
+    assert_eq(mat4_get(t, 0, 0), 1);
+    assert_eq(mat4_get(t, 0, 1), 5);
+    assert_eq(mat4_get(t, 0, 2), 9);
+    assert_eq(mat4_get(t, 0, 3), 13);
+    assert_eq(mat4_get(t, 1, 0), 2);
+    assert_eq(mat4_get(t, 3, 3), 16);
+
+    // Transpose of transpose is identity
+    assert_eq(mat4_eq(mat4_transpose(t), m), true);
+}
+
+fn test_recursive_transpose() {
+    let m = Mat4 {
+        m00: 1,  m01: 2,  m02: 3,  m03: 4,
+        m10: 5,  m11: 6,  m12: 7,  m13: 8,
+        m20: 9,  m21: 10, m22: 11, m23: 12,
+        m30: 13, m31: 14, m32: 15, m33: 16
+    };
+
+    let rt = recursive_transpose(m);
+    let it = mat4_transpose(m);
+    // Recursive and iterative transpose should give same result
+    assert_eq(mat4_eq(rt, it), true);
+}
+
+fn test_transpose_symmetric() {
+    // Symmetric matrix: transpose == self
+    let m = Mat4 {
+        m00: 1, m01: 2, m02: 3, m03: 4,
+        m10: 2, m11: 5, m12: 6, m13: 7,
+        m20: 3, m21: 6, m22: 8, m23: 9,
+        m30: 4, m31: 7, m32: 9, m33: 10
+    };
+    assert_eq(mat4_eq(mat4_transpose(m), m), true);
+    assert_eq(mat4_eq(recursive_transpose(m), m), true);
+}
+
+fn test_block_multiply() {
+    let a = Mat4 {
+        m00: 1, m01: 2, m02: 0, m03: 0,
+        m10: 3, m11: 4, m12: 0, m13: 0,
+        m20: 0, m21: 0, m22: 1, m23: 0,
+        m30: 0, m31: 0, m32: 0, m33: 1
+    };
+    let b_mat = Mat4 {
+        m00: 5, m01: 6, m02: 0, m03: 0,
+        m10: 7, m11: 8, m12: 0, m13: 0,
+        m20: 0, m21: 0, m22: 1, m23: 0,
+        m30: 0, m31: 0, m32: 0, m33: 1
+    };
+
+    let standard = mat4_mul(a, b_mat);
+    let blocked = block_multiply(a, b_mat);
+    assert_eq(mat4_eq(standard, blocked), true);
+
+    // Check specific values: top-left 2x2
+    // [1,2]*[5,6] = [1*5+2*7, 1*6+2*8] = [19, 22]
+    // [3,4] [7,8]   [3*5+4*7, 3*6+4*8]   [43, 50]
+    assert_eq(mat4_get(standard, 0, 0), 19);
+    assert_eq(mat4_get(standard, 0, 1), 22);
+    assert_eq(mat4_get(standard, 1, 0), 43);
+    assert_eq(mat4_get(standard, 1, 1), 50);
+}
+
+fn test_multiply_identity() {
+    let id = Mat4 {
+        m00: 1, m01: 0, m02: 0, m03: 0,
+        m10: 0, m11: 1, m12: 0, m13: 0,
+        m20: 0, m21: 0, m22: 1, m23: 0,
+        m30: 0, m31: 0, m32: 0, m33: 1
+    };
+    let m = Mat4 {
+        m00: 2, m01: 3, m02: 5, m03: 7,
+        m10: 11, m11: 13, m12: 17, m13: 19,
+        m20: 23, m21: 29, m22: 31, m23: 37,
+        m30: 41, m31: 43, m32: 47, m33: 53
+    };
+
+    assert_eq(mat4_eq(mat4_mul(m, id), m), true);
+    assert_eq(mat4_eq(block_multiply(m, id), m), true);
+    assert_eq(mat4_eq(mat4_mul(id, m), m), true);
+}
+
+fn test_transpose_preserves_trace() {
+    let m = Mat4 {
+        m00: 5, m01: 1, m02: 2, m03: 3,
+        m10: 4, m11: 10, m12: 6, m13: 7,
+        m20: 8, m21: 9, m22: 15, m23: 11,
+        m30: 12, m31: 13, m32: 14, m33: 20
+    };
+    assert_eq(mat4_trace(m), mat4_trace(mat4_transpose(m)));
+    assert_eq(mat4_trace(m), 50);  // 5+10+15+20
+}
+
+fn test_sum_invariant() {
+    let m = Mat4 {
+        m00: 1,  m01: 2,  m02: 3,  m03: 4,
+        m10: 5,  m11: 6,  m12: 7,  m13: 8,
+        m20: 9,  m21: 10, m22: 11, m23: 12,
+        m30: 13, m31: 14, m32: 15, m33: 16
+    };
+    // Sum should be preserved by transpose
+    assert_eq(mat4_sum(m), mat4_sum(mat4_transpose(m)));
+    assert_eq(mat4_sum(m), 136);  // sum 1..16 = 16*17/2 = 136
+}
+
+fn main() -> Int {
+    test_transpose_simple();
+    test_recursive_transpose();
+    test_transpose_symmetric();
+    test_block_multiply();
+    test_multiply_identity();
+    test_transpose_preserves_trace();
+    test_sum_invariant();
+    print("[OK] 295_cache_oblivious_aot");
+    0
+}

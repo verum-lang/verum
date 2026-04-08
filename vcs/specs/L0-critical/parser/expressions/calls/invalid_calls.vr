@@ -1,0 +1,88 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, calls, invalid, error
+
+// ERROR: Missing closing parenthesis
+func(a, b;
+process(1, 2, 3;
+
+// ERROR: Missing opening parenthesis
+func a, b);
+compute 1);
+
+// ERROR: Double comma
+func(a,, b);
+process(,);
+
+// ERROR: Leading comma
+func(, a, b);
+process(,1);
+
+// ERROR: Expression as callee (if not supported)
+(1 + 2)();  // Might be valid as IIFE
+let f = func;
+f()();  // Double call - might be valid
+
+// ERROR: Missing function name
+(1, 2, 3);  // Just a tuple, not a call
+();  // Empty parens
+
+// ERROR: Keyword as function name
+fn();  // fn is keyword
+let();  // let is keyword
+type();  // type is keyword
+
+// ERROR: Invalid argument syntax
+func(let x = 5);
+func(type T);
+func(fn foo() {});  // Function declaration as argument
+
+// ERROR: Invalid generic syntax in call
+func<>(x);
+func<,>(x);
+func<T,>(x);  // Trailing comma in generics might be error
+
+// ERROR: Unclosed generic
+func<Int(x);
+process<T, U(args);
+
+// ERROR: Assignment in argument
+func(x = 5);  // Unless named args syntax
+func(a := b);
+
+// ERROR: Missing argument after comma
+func(a, );  // Trailing comma might be OK
+func(a, , b);
+
+// ERROR: Invalid operator in argument list
+func(a + );
+func( * b);
+
+// ERROR: Statement in argument position
+func(let x = 5; x);
+func(if a { b });  // This might be valid
+
+// ERROR: Spread without expression
+func(...);
+func(..., a);
+
+// ERROR: Multiple spreads (if not supported)
+func(...a, ...b);
+
+// ERROR: Invalid turbofish
+func.<>(x);
+func.< >(x);
+func<T >(x);  // Space before >
+
+// ERROR: Call with block but no parens (if blocks require parens)
+func { body };
+
+// ERROR: Semicolon inside argument list
+func(a; b);
+func(a, b;);
+
+// ERROR: Return/break in argument
+func(return 5);
+func(break);
+func(continue);

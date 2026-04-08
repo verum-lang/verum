@@ -1,0 +1,247 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control_flow, loop, label, break, continue
+
+fn test_simple_labeled_loop() {
+    // Simple labeled loop
+    'outer: loop {
+        inner_work();
+        break 'outer;
+    }
+}
+
+fn test_labeled_for_loop() {
+    // Labeled for loop
+    'items: for item in collection {
+        if should_stop(item) {
+            break 'items;
+        }
+        process(item);
+    }
+}
+
+fn test_labeled_while_loop() {
+    // Labeled while loop
+    'processing: while condition {
+        if done() {
+            break 'processing;
+        }
+        continue 'processing;
+    }
+}
+
+fn test_nested_labeled_loops() {
+    // Nested loops with labels
+    'outer: for i in 0..n {
+        'inner: for j in 0..m {
+            if matrix[i][j] == target {
+                break 'outer;
+            }
+            if matrix[i][j] < 0 {
+                continue 'inner;
+            }
+        }
+    }
+}
+
+fn test_break_outer_nested() {
+    // Break from outer loop in nested structure
+    'search: for row in 0..height {
+        for col in 0..width {
+            if grid[row][col] == needle {
+                found_at = (row, col);
+                break 'search;
+            }
+        }
+    }
+}
+
+fn test_continue_outer() {
+    // Continue outer loop from inner
+    'rows: for row in data {
+        for cell in row {
+            if cell.is_invalid() {
+                continue 'rows;
+            }
+            process(cell);
+        }
+    }
+}
+
+fn test_multiple_labeled_loops() {
+    // Multiple labeled loops
+    'a: loop {
+        'b: loop {
+            'c: loop {
+                if condition_c {
+                    break 'c;
+                }
+                if condition_b {
+                    break 'b;
+                }
+                if condition_a {
+                    break 'a;
+                }
+            }
+        }
+    }
+}
+
+fn test_labeled_loop_value() {
+    // Labeled loop with value
+    let result = 'find: loop {
+        if let Maybe.Some(value) = search() {
+            break 'find value;
+        }
+    };
+}
+
+fn test_labeled_for_expression() {
+    // Labeled loop with expression break
+    let found = 'search: loop {
+        for i in 0..len {
+            if items[i] == target {
+                break 'search Maybe.Some(i);
+            }
+        }
+        break 'search Maybe.None;
+    };
+}
+
+fn test_labeled_loop_result() {
+    // Labeled loop with result
+    'attempt: loop {
+        for retry in 0..max_retries {
+            if let Result.Ok(value) = try_operation() {
+                return value;
+            }
+        }
+        return fail("Max retries exceeded");
+    }
+}
+
+fn test_complex_nested_labeled() {
+    // Complex nested labeled loops
+    'matrix: for i in 0..rows {
+        'row: for j in 0..cols {
+            'cell: loop {
+                let value = compute(i, j);
+                if value == 0 {
+                    continue 'cell;
+                }
+                if value < 0 {
+                    continue 'row;
+                }
+                if value > threshold {
+                    break 'matrix;
+                }
+                break 'cell;
+            }
+        }
+    }
+}
+
+fn find_first<T: Eq>(matrix: &[[T]], target: &T) -> Maybe<(Int, Int)> {
+    // Labeled loop in function
+    'outer: for i in 0..matrix.len() {
+        for j in 0..matrix[i].len() {
+            if matrix[i][j] == *target {
+                return Maybe.Some((i, j));
+            }
+        }
+    }
+    Maybe.None
+}
+
+fn test_labeled_loop_match() {
+    // Labeled loop with match
+    'process: for event in events {
+        match event {
+            Event.Stop => break 'process,
+            Event.Skip => continue 'process,
+            Event.Data(d) => handle(d),
+        }
+    }
+}
+
+fn test_labeled_loop_let_if() {
+    // Labeled loop with let-if
+    'scan: for item in items {
+        if let Maybe.Some(valid) = validate(item) {
+            process(valid);
+        } else {
+            continue 'scan;
+        }
+    }
+}
+
+fn test_labeled_loop_try() {
+    // Labeled loop with try
+    'try_loop: loop {
+        try {
+            risky_operation()?;
+            break 'try_loop;
+        } recover {
+            e if should_retry(e) => {
+                log_error(e);
+                continue 'try_loop
+            },
+            e => {
+                log_error(e);
+                break 'try_loop
+            }
+        }
+    }
+}
+
+fn test_labeled_loop_data() {
+    // Unicode label names (if supported)
+    'outer_loop: for x in data {
+        process(x);
+    }
+}
+
+fn test_labeled_loop_closure() {
+    // Labeled loop in closure
+    let finder = |items: &[Int]| {
+        'search: for item in items {
+            if is_match(item) {
+                break 'search Maybe.Some(item);
+            }
+        }
+        Maybe.None
+    };
+}
+
+fn test_multiple_breaks_same_label() {
+    // Multiple breaks to same label
+    'main: loop {
+        if condition1 {
+            break 'main value1;
+        }
+        if condition2 {
+            break 'main value2;
+        }
+        if condition3 {
+            break 'main value3;
+        }
+    }
+}
+
+fn test_labeled_loop_invariant() {
+    // Labeled loop with invariant
+    'verified: for i in 0..n invariant i >= 0 && i <= n {
+        compute(i);
+    }
+}
+
+fn test_labeled_loop_decreases() {
+    // Labeled loop with decreases
+    'terminating: while condition decreases counter {
+        counter -= 1;
+        if done() {
+            break 'terminating;
+        }
+    }
+}

@@ -1,0 +1,32 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+
+// Attribute macros
+@derive(Debug, Clone, PartialEq)
+type User is { name: Text, age: Int };
+
+@repr(C)
+type CStruct is { x: i32, y: i32 };
+
+// Custom attribute
+@deprecated("Use new_function instead")
+fn old_function() { }
+
+// Conditional compilation
+@cfg(target_os = "linux")
+fn linux_only() { }
+
+@cfg(feature = "experimental")
+type ExperimentalType is { data: Bytes };
+
+// Multiple attributes
+@inline
+@must_use
+fn important_compute() -> Int { 42 }
+
+// Test attribute
+@test
+fn test_addition() {
+    assert_eq(1 + 1, 2);
+}

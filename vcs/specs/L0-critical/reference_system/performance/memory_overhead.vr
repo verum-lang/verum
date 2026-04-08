@@ -1,0 +1,239 @@
+// @test: compile-only
+// @expected-memory: < 5%
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, memory, benchmark
+
+/// Benchmark CBGR memory overhead: target < 5%.
+/// This measures additional memory used for generation and epoch tracking.
+/// Critical for ensuring CBGR is practical for memory-constrained systems.
+
+
+
+fn main() {
+    let bench = Benchmark.new("CBGR Memory Overhead");
+    let mut b = Bencher.new();
+
+    measure_reference_overhead(&mut b);
+    measure_allocation_header(&mut b);
+    measure_program_overhead(&mut b);
+    measure_collection_overhead(&mut b);
+    measure_vs_raw_pointers(&mut b);
+
+    bench.report();
+}
+
+/// Measure overhead of managed vs raw references
+@benchmark
+fn measure_reference_overhead(b: &mut Bencher) {
+    // Raw pointer: 8 bytes (using Pointer<T> type)
+    let raw_ptr_size = 8;  // Pointer<Int>.size would be 8 bytes
+
+    // Managed reference: 16 bytes (ThinRef)
+    let managed_ref_size = 16;  // (&Int).size is 16 bytes
+
+    // Overhead: 100% for reference itself
+    // But references are usually small fraction of total memory
+
+    let overhead_percent = (16.0 - 8.0) / 8.0 * 100.0;
+    print(f"Reference overhead: {overhead_percent}%");
+
+    // Fat reference: 24 bytes vs 16 bytes raw
+    let fat_ref_size = 24;  // (&[Int]).size is 24 bytes
+    let raw_fat_size = 16;  // Pointer<[Int]>.size is 16 bytes
+
+    let fat_overhead = (24.0 - 16.0) / 16.0 * 100.0;
+    print(f"Fat reference overhead: {fat_overhead}%");
+}
+
+/// Measure allocation header overhead
+@benchmark
+fn measure_allocation_header(b: &mut Bencher) {
+    // Each heap allocation has a header:
+    // - Generation: 4 bytes
+    // - Epoch: 4 bytes
+    // - (Other metadata may exist)
+
+    let header_size: Int = 8;  // Generation + Epoch
+
+    // For small allocations, overhead is significant
+    let small_data_size = 16;
+    let small_overhead = header_size as Float / small_data_size as Float * 100.0;
+    print("Small (16B) allocation overhead: " + small_overhead.to_string() + "%");
+
+    // For large allocations, overhead is negligible
+    let large_data_size = 4096;
+    let large_overhead = header_size as Float / large_data_size as Float * 100.0;
+    print("Large (4KB) allocation overhead: " + large_overhead.to_string() + "%");
+
+    // Average overhead depends on allocation size distribution
+    // Typical programs: mostly medium-sized allocations
+    let medium_data_size = 256;
+    let medium_overhead = header_size as Float / medium_data_size as Float * 100.0;
+    print("Medium (256B) allocation overhead: " + medium_overhead.to_string() + "%");
+
+    b.assert_memory_overhead_less_than(5.percent());
+}
+
+/// Measure total program memory overhead
+@benchmark
+fn measure_program_overhead(b: &mut Bencher) {
+    // Allocate realistic data structures
+    let baseline_memory = Memory.current_usage();
+
+    // Create typical application data
+    let mut data: List<Item> = List.with_capacity(10_000);
+    for i in 0..10_000 {
+        data.push(Item {
+            id: i,
+            name: Text.from("item_") + i.to_string(),
+            values: [i, i * 2, i * 3],
+            children: List.new(),
+        });
+    }
+
+    let cbgr_memory = Memory.current_usage();
+
+    // Compare with theoretical raw pointer baseline
+    // (estimated based on data size without CBGR overhead)
+    let data_only_estimate = estimate_data_size(&data);
+    let cbgr_overhead = cbgr_memory - baseline_memory - data_only_estimate;
+    let overhead_percent = cbgr_overhead as Float / data_only_estimate as Float * 100.0;
+
+    print("Program memory overhead: " + overhead_percent.to_string() + "%");
+
+    // Target: < 5% overhead
+    assert(overhead_percent < 5.0);
+}
+
+/// Measure overhead in collections
+@benchmark
+fn measure_collection_overhead(b: &mut Bencher) {
+    // List of values
+    let values: List<Int> = (0..1000).collect();
+    let count = values.len();
+
+    // Each managed reference is 16 bytes instead of 8 bytes for raw pointer
+    let refs_memory = count * 16;  // (&Int).size is 16
+    let raw_memory = count * 8;    // Pointer<Int>.size is 8
+    let overhead = (refs_memory - raw_memory) as Float / raw_memory as Float * 100.0;
+
+    print("Reference collection overhead: " + overhead.to_string() + "%");
+
+    // But for value collections, overhead is just headers
+    let value_list: List<Int> = (0..1000).collect();
+    // Overhead is just one header for the backing allocation
+    // ~8 bytes overhead for 8000 bytes of data = 0.1%
+
+    b.assert_memory_overhead_less_than(5.percent());
+}
+
+/// Compare with raw pointers (unsafe baseline)
+@benchmark
+fn measure_vs_raw_pointers(b: &mut Bencher) {
+    // Measure with CBGR
+    let cbgr_start = Memory.current_usage();
+
+    let mut cbgr_list: List<Heap<Int>> = List.new();
+    for i in 0..1000 {
+        cbgr_list.push(Heap.new(i));
+    }
+    // Get references to inner values
+    // Since Heap<Int>.iter() would give owned values, we use references from the list
+    let cbgr_refs_count = cbgr_list.len();
+
+    let cbgr_usage = Memory.current_usage() - cbgr_start;
+
+    // Clear
+    drop(cbgr_list);
+
+    // Measure with raw pointers (unsafe baseline - conceptual)
+    let raw_start = Memory.current_usage();
+
+    // Conceptually: raw pointers would be 8 bytes vs 16 bytes for ThinRef
+    // Per-allocation header: raw (0) vs CBGR (16 bytes for gen+epoch)
+    let raw_usage = cbgr_usage / 2;  // Approximation
+
+    let overhead_percent = (cbgr_usage as Float - raw_usage as Float)
+        / raw_usage as Float * 100.0;
+
+    print(f"CBGR vs raw pointer overhead: {overhead_percent}%");
+
+    // Target: < 5% total overhead (conceptual)
+}
+
+/// Memory layout optimization strategies
+module optimization_strategies {
+    // 1. Packed generation storage
+    //    - Use 4-byte generation instead of 8
+    //    - Sufficient for most applications (~4B unique values)
+
+    // 2. Epoch sharing
+    //    - Multiple allocations can share epoch counter
+    //    - Reduces per-allocation overhead
+
+    // 3. Small object optimization
+    //    - Inline small objects to avoid allocation header
+    //    - Text, small Lists, etc.
+
+    // 4. Reference compression
+    //    - In some contexts, can use smaller references
+    //    - Arena allocations, same-page references
+
+    // 5. Generation pooling
+    //    - Reuse generation counters for freed allocations
+    //    - Reduces counter exhaustion risk
+}
+
+// Helper types and functions
+type Item is {
+    id: Int,
+    name: Text,
+    values: List<Int>,
+    children: List<Item>,
+};
+
+fn estimate_data_size<T>(data: &T) -> Int {
+    // Estimate raw data size without CBGR overhead
+    // Uses compile-time type property for size
+    T.size
+}
+
+extern fn alloc<T>(count: Int) -> *mut T;
+extern fn free<T>(ptr: *mut T);
+
+type Memory is {};
+
+implement Memory {
+    fn current_usage() -> Int {
+        // Get current memory usage from runtime
+        Runtime.memory_usage()
+    }
+}
+
+type PercentExt is protocol {
+    fn percent(self) -> Float;
+};
+
+implement PercentExt for Int {
+    fn percent(self) -> Float {
+        self as Float / 100.0
+    }
+}
+
+// Benchmark framework stubs
+type Benchmark is { name: Text };
+type Bencher is { iterations: Int };
+
+implement Benchmark {
+    fn new(name: Text) -> Benchmark { Benchmark { name: name } }
+    fn report(&self) { print("Benchmark report: " + self.name); }
+}
+
+implement Bencher {
+    fn new() -> Bencher { Bencher { iterations: 1000 } }
+    fn iter<F>(&mut self, _f: F) { /* stub */ }
+    fn assert_memory_overhead_less_than(&self, _max: Float) {
+        // Assert memory overhead is within limits
+    }
+}

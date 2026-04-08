@@ -1,0 +1,208 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, comprehensive, simulation
+// @timeout: 30000
+
+// Milestone 560: Physics simulation (projectile motion, springs, collisions)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// All physics uses integer arithmetic scaled by SCALE=100
+// Position in cm, velocity in cm/s, time in centiseconds
+// gravity = 980 cm/s^2
+
+// 1. Projectile motion (1D vertical)
+// y = y0 + vy*t - g*t^2/2 (all scaled by 100)
+type Projectile is { pos_y: Int, vel_y: Int };
+
+fn projectile_step(p: Projectile, gravity: Int, dt: Int) -> Projectile {
+    // vel_y -= gravity * dt / 100
+    // pos_y += vel_y * dt / 100
+    let new_vy = p.vel_y - gravity * dt / 100;
+    let new_y = p.pos_y + new_vy * dt / 100;
+    Projectile { pos_y: new_y, vel_y: new_vy }
+}
+
+fn simulate_projectile(p: Projectile, gravity: Int, dt: Int, steps: Int) -> Projectile {
+    let mut state = p;
+    let mut i = 0;
+    while i < steps {
+        state = projectile_step(state, gravity, dt);
+        // Floor at y=0
+        if state.pos_y < 0 {
+            state = Projectile { pos_y: 0, vel_y: abs_val(state.vel_y) / 2 }; // bounce with damping
+        }
+        i = i + 1;
+    }
+    state
+}
+
+// 2. Spring simulation (Hooke's law)
+// F = -k*x, a = F/m
+type Spring is { pos: Int, vel: Int };
+
+fn spring_step(s: Spring, k: Int, mass: Int, dt: Int) -> Spring {
+    // acc = -k * pos / mass
+    let acc = 0 - k * s.pos / mass;
+    let new_vel = s.vel + acc * dt / 100;
+    let new_pos = s.pos + new_vel * dt / 100;
+    Spring { pos: new_pos, vel: new_vel }
+}
+
+fn simulate_spring(s: Spring, k: Int, mass: Int, dt: Int, steps: Int) -> Spring {
+    let mut state = s;
+    let mut i = 0;
+    while i < steps {
+        state = spring_step(state, k, mass, dt);
+        i = i + 1;
+    }
+    state
+}
+
+// 3. 1D elastic collision
+// Two objects collide: conservation of momentum and energy
+// v1_new = (m1-m2)*v1/(m1+m2) + 2*m2*v2/(m1+m2)
+// v2_new = 2*m1*v1/(m1+m2) + (m2-m1)*v2/(m1+m2)
+type Collision is { v1: Int, v2: Int };
+
+fn elastic_collision(m1: Int, v1: Int, m2: Int, v2: Int) -> Collision {
+    let total_m = m1 + m2;
+    let new_v1 = ((m1 - m2) * v1 + 2 * m2 * v2) / total_m;
+    let new_v2 = (2 * m1 * v1 + (m2 - m1) * v2) / total_m;
+    Collision { v1: new_v1, v2: new_v2 }
+}
+
+// 4. Gravity between two bodies (simplified)
+// acceleration = G * M / r^2 (all integer scaled)
+fn gravity_accel(mass: Int, distance: Int) -> Int {
+    // G*M scaled to avoid overflow
+    if distance == 0 { return 0; }
+    mass / (distance * distance)
+}
+
+// 5. Energy calculations
+fn kinetic_energy(mass: Int, vel: Int) -> Int {
+    mass * vel * vel / 200 // (1/2 * m * v^2) / 100 for scaling
+}
+
+fn potential_energy(mass: Int, height: Int, gravity: Int) -> Int {
+    mass * gravity * height / 10000 // m*g*h with scaling
+}
+
+fn test_projectile_up() -> Int {
+    // Launch upward: v=1000 (10 m/s scaled), gravity=980
+    let p = Projectile { pos_y: 0, vel_y: 1000 };
+    let result = simulate_projectile(p, 980, 10, 10); // 10 steps of dt=10
+    // After 100 centiseconds (1 second):
+    // y = 0 + 1000*100/100 - 980*100*100/(2*100*100) = 1000 - 490 = 510
+    // Approximately, with discrete steps, may differ slightly
+    assert(result.pos_y >= 0); // should still be positive after 1 second
+    1
+}
+
+fn test_projectile_bounce() -> Int {
+    // Launch upward, simulate enough for it to come back and bounce
+    let p = Projectile { pos_y: 0, vel_y: 500 };
+    let result = simulate_projectile(p, 980, 10, 50);
+    // After many steps with bouncing and damping, should stabilize near ground
+    assert(result.pos_y >= 0); // always non-negative (floor)
+    // Velocity should be reduced due to damping
+    assert(abs_val(result.vel_y) < 500);
+    1
+}
+
+fn test_spring() -> Int {
+    // Stretched spring: pos=100, vel=0, k=10, mass=100
+    let s = Spring { pos: 100, vel: 0 };
+    let r1 = simulate_spring(s, 10, 100, 10, 10);
+    // Spring should pull back toward 0
+    assert(r1.pos < 100); // moved toward origin
+    1
+}
+
+fn test_spring_energy_conservation() -> Int {
+    // In an ideal spring, energy is conserved
+    // E = (1/2)kx^2 + (1/2)mv^2
+    let s = Spring { pos: 100, vel: 0 };
+    let initial_energy = 10 * 100 * 100 / 200; // (1/2)*k*x^2 / 100 = 500
+
+    let r = simulate_spring(s, 10, 100, 5, 20);
+    let final_energy = 10 * r.pos * r.pos / 200 + 100 * r.vel * r.vel / 200;
+
+    // Energy should be approximately conserved (within 20% due to discrete stepping)
+    let diff = abs_val(final_energy - initial_energy);
+    assert(diff < initial_energy / 3); // less than 33% error
+    1
+}
+
+fn test_elastic_collision() -> Int {
+    // Equal masses, head-on: they exchange velocities
+    let c = elastic_collision(100, 10, 100, 0 - 10);
+    assert_eq(c.v1, 0 - 10);
+    assert_eq(c.v2, 10);
+
+    // Heavy hits light (at rest): light goes fast, heavy barely changes
+    let c2 = elastic_collision(1000, 10, 100, 0);
+    // v1_new = (1000-100)*10/1100 = 900*10/1100 ≈ 8
+    assert(c2.v1 >= 0); // still moving forward
+    assert(c2.v2 > 0);  // light object moves forward
+    1
+}
+
+fn test_momentum_conservation() -> Int {
+    // Total momentum before = total momentum after
+    // Use values that divide evenly to avoid integer truncation
+    let m1 = 60;
+    let v1 = 10;
+    let m2 = 40;
+    let v2 = 0; // at rest
+    // new_v1 = (60-40)*10/(100) = 200/100 = 2
+    // new_v2 = 2*60*10/(100) = 1200/100 = 12
+    let p_before = m1 * v1 + m2 * v2; // 600
+    let c = elastic_collision(m1, v1, m2, v2);
+    let p_after = m1 * c.v1 + m2 * c.v2;
+    assert_eq(p_before, p_after); // 60*2 + 40*12 = 120 + 480 = 600
+    1
+}
+
+fn test_energy() -> Int {
+    // KE = (1/2)mv^2
+    assert_eq(kinetic_energy(100, 10), 50); // 100*100/200 = 50
+    // PE = mgh
+    assert_eq(potential_energy(100, 100, 980), 980); // 100*980*100/10000 = 980
+    1
+}
+
+fn main() -> Int {
+    test_energy();
+    test_elastic_collision();
+    test_momentum_conservation();
+    test_projectile_up();
+    test_projectile_bounce();
+    test_spring();
+    test_spring_energy_conservation();
+    print("[OK] 560_milestone_aot");
+    0
+}

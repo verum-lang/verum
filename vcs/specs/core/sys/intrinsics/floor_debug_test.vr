@@ -1,0 +1,29 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Floor debug test
+
+module test.stdlib.sys.intrinsics.floor_debug_test;
+
+mount core.intrinsics.{floor_f64};
+
+fn main() {
+    // Just the floor call - no comparison
+    let x: Float64 = 3.7;
+    print(f"x = {x}");
+
+    let floor_result = floor_f64(x);
+    print(f"floor_result = {floor_result}");
+
+    // Create a separate float value
+    let three: Float64 = 3.0;
+    print(f"three = {three}");
+
+    // Now try the comparison
+    print("About to compare...");
+    let eq = floor_result == three;
+    print(f"eq = {eq}");
+
+    print("Done");
+}

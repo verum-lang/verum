@@ -1,0 +1,286 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, edit-distance, levenshtein, dynamic-programming
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Levenshtein (edit) distance using dynamic programming.
+// Since AOT doesn't support string character indexing well, we encode
+// "strings" as integer sequences where each int represents a character.
+// Also tests: triangle inequality, metric properties, and LCS.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// "Word" is a sequence of up to 7 characters encoded as integers
+type Word is { chars: Arr8, len: Int };
+
+fn word_get(w: Word, i: Int) -> Int {
+    a8_get(w.chars, i)
+}
+
+fn min3(a: Int, b: Int, c: Int) -> Int {
+    let ab = if a < b { a } else { b };
+    if ab < c { ab } else { c }
+}
+
+// DP table: 8x8 matrix using 8 Arr8 rows
+type DPMat is { r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8, r4: Arr8, r5: Arr8, r6: Arr8, r7: Arr8 };
+
+fn dp_get_row(m: DPMat, r: Int) -> Arr8 {
+    if r == 0 { m.r0 } else if r == 1 { m.r1 }
+    else if r == 2 { m.r2 } else if r == 3 { m.r3 }
+    else if r == 4 { m.r4 } else if r == 5 { m.r5 }
+    else if r == 6 { m.r6 } else { m.r7 }
+}
+
+fn dp_set_row(m: DPMat, r: Int, row: Arr8) -> DPMat {
+    DPMat {
+        r0: if r == 0 { row } else { m.r0 },
+        r1: if r == 1 { row } else { m.r1 },
+        r2: if r == 2 { row } else { m.r2 },
+        r3: if r == 3 { row } else { m.r3 },
+        r4: if r == 4 { row } else { m.r4 },
+        r5: if r == 5 { row } else { m.r5 },
+        r6: if r == 6 { row } else { m.r6 },
+        r7: if r == 7 { row } else { m.r7 }
+    }
+}
+
+fn dp_get(m: DPMat, r: Int, c: Int) -> Int {
+    a8_get(dp_get_row(m, r), c)
+}
+
+fn dp_set(m: DPMat, r: Int, c: Int, v: Int) -> DPMat {
+    let row = dp_get_row(m, r);
+    let new_row = a8_set(row, c, v);
+    dp_set_row(m, r, new_row)
+}
+
+fn dp_zero() -> DPMat {
+    let z = a8_zero();
+    DPMat { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z }
+}
+
+// Levenshtein distance between two words
+// Uses space-optimized approach: only need current and previous row
+fn edit_distance(a: Word, b: Word) -> Int {
+    let m = a.len;
+    let n = b.len;
+
+    // prev row: dp[i-1][*], curr row: dp[i][*]
+    // Initialize prev = [0, 1, 2, ..., n]
+    let mut prev = a8_zero();
+    let mut j = 0;
+    while j <= n {
+        prev = a8_set(prev, j, j);
+        j = j + 1;
+    }
+
+    let mut i = 1;
+    while i <= m {
+        let mut curr = a8_zero();
+        curr = a8_set(curr, 0, i);
+
+        j = 1;
+        while j <= n {
+            let cost = if word_get(a, i - 1) == word_get(b, j - 1) { 0 } else { 1 };
+            let del = a8_get(prev, j) + 1;
+            let ins = a8_get(curr, j - 1) + 1;
+            let sub = a8_get(prev, j - 1) + cost;
+            curr = a8_set(curr, j, min3(del, ins, sub));
+            j = j + 1;
+        }
+
+        prev = curr;
+        i = i + 1;
+    }
+
+    a8_get(prev, n)
+}
+
+// LCS length (longest common subsequence) using full DP matrix
+fn lcs_length(a: Word, b: Word) -> Int {
+    let m = a.len;
+    let n = b.len;
+
+    let mut prev = a8_zero();
+    let mut i = 1;
+    while i <= m {
+        let mut curr = a8_zero();
+        let mut j = 1;
+        while j <= n {
+            if word_get(a, i - 1) == word_get(b, j - 1) {
+                curr = a8_set(curr, j, a8_get(prev, j - 1) + 1);
+            } else {
+                let up = a8_get(prev, j);
+                let left = a8_get(curr, j - 1);
+                curr = a8_set(curr, j, if up > left { up } else { left });
+            }
+            j = j + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+
+    a8_get(prev, n)
+}
+
+// Encode words: a=1, b=2, c=3, ..., z=26
+fn make_word(c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int, c6: Int, n: Int) -> Word {
+    let chars = Arr8 { a0: c0, a1: c1, a2: c2, a3: c3, a4: c4, a5: c5, a6: c6, a7: 0 };
+    Word { chars: chars, len: n }
+}
+
+fn test_equal_words() {
+    // "abc" vs "abc" -> distance 0
+    let a = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    let b = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    assert_eq(edit_distance(a, b), 0);
+}
+
+fn test_empty_words() {
+    let empty = make_word(0, 0, 0, 0, 0, 0, 0, 0);
+    let abc = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    assert_eq(edit_distance(empty, empty), 0);
+    assert_eq(edit_distance(empty, abc), 3);
+    assert_eq(edit_distance(abc, empty), 3);
+}
+
+fn test_single_char() {
+    let a = make_word(1, 0, 0, 0, 0, 0, 0, 1);
+    let b = make_word(2, 0, 0, 0, 0, 0, 0, 1);
+    assert_eq(edit_distance(a, b), 1); // substitution
+    assert_eq(edit_distance(a, a), 0);
+}
+
+fn test_insertion_only() {
+    // "ac" vs "abc" -> 1 insertion
+    let ac = make_word(1, 3, 0, 0, 0, 0, 0, 2);
+    let abc = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    assert_eq(edit_distance(ac, abc), 1);
+}
+
+fn test_deletion_only() {
+    // "abc" vs "ac" -> 1 deletion
+    let abc = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    let ac = make_word(1, 3, 0, 0, 0, 0, 0, 2);
+    assert_eq(edit_distance(abc, ac), 1);
+}
+
+fn test_substitution_only() {
+    // "abc" vs "axc" -> 1 substitution
+    let abc = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    let axc = make_word(1, 24, 3, 0, 0, 0, 0, 3);
+    assert_eq(edit_distance(abc, axc), 1);
+}
+
+fn test_completely_different() {
+    // "abc" vs "xyz" -> 3 substitutions
+    let abc = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    let xyz = make_word(24, 25, 26, 0, 0, 0, 0, 3);
+    assert_eq(edit_distance(abc, xyz), 3);
+}
+
+fn test_kitten_sitting() {
+    // "kitten" vs "sitting" -> 3
+    // k=11, i=9, t=20, e=5, n=14, s=19, g=7
+    let kitten = make_word(11, 9, 20, 20, 5, 14, 0, 6);
+    let sitting = make_word(19, 9, 20, 20, 9, 14, 7, 7);
+    assert_eq(edit_distance(kitten, sitting), 3);
+}
+
+fn test_symmetry() {
+    // d(a, b) == d(b, a)
+    let abc = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    let axyz = make_word(1, 24, 25, 26, 0, 0, 0, 4);
+    assert_eq(edit_distance(abc, axyz), edit_distance(axyz, abc));
+}
+
+fn test_triangle_inequality() {
+    // d(a, c) <= d(a, b) + d(b, c)
+    let a = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    let b = make_word(1, 24, 3, 0, 0, 0, 0, 3);
+    let c = make_word(24, 25, 26, 0, 0, 0, 0, 3);
+    let dac = edit_distance(a, c);
+    let dab = edit_distance(a, b);
+    let dbc = edit_distance(b, c);
+    assert_eq(dac <= dab + dbc, true);
+}
+
+fn test_lcs_basic() {
+    // LCS of "abcde" and "ace" is "ace" = length 3
+    let abcde = make_word(1, 2, 3, 4, 5, 0, 0, 5);
+    let ace = make_word(1, 3, 5, 0, 0, 0, 0, 3);
+    assert_eq(lcs_length(abcde, ace), 3);
+}
+
+fn test_lcs_empty() {
+    let empty = make_word(0, 0, 0, 0, 0, 0, 0, 0);
+    let abc = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    assert_eq(lcs_length(empty, abc), 0);
+    assert_eq(lcs_length(abc, empty), 0);
+}
+
+fn test_lcs_equal() {
+    let abc = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    assert_eq(lcs_length(abc, abc), 3);
+}
+
+fn test_lcs_disjoint() {
+    // No common characters
+    let abc = make_word(1, 2, 3, 0, 0, 0, 0, 3);
+    let xyz = make_word(24, 25, 26, 0, 0, 0, 0, 3);
+    assert_eq(lcs_length(abc, xyz), 0);
+}
+
+fn test_edit_lcs_relation() {
+    // For strings of lengths m, n:
+    // edit_distance >= max(m, n) - lcs_length
+    let a = make_word(1, 2, 3, 4, 5, 0, 0, 5);
+    let b = make_word(1, 3, 5, 7, 0, 0, 0, 4);
+    let ed = edit_distance(a, b);
+    let lcs = lcs_length(a, b);
+    let max_len = if a.len > b.len { a.len } else { b.len };
+    assert_eq(ed >= max_len - lcs, true);
+}
+
+fn main() -> Int {
+    test_equal_words();
+    test_empty_words();
+    test_single_char();
+    test_insertion_only();
+    test_deletion_only();
+    test_substitution_only();
+    test_completely_different();
+    test_kitten_sitting();
+    test_symmetry();
+    test_triangle_inequality();
+    test_lcs_basic();
+    test_lcs_empty();
+    test_lcs_equal();
+    test_lcs_disjoint();
+    test_edit_lcs_relation();
+    print("[OK] 363_edit_distance_aot");
+    0
+}

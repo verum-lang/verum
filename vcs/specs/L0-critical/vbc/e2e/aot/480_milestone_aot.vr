@@ -1,0 +1,228 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, calculator, expression-eval
+// @timeout: 30000
+
+// Milestone test: Simple arithmetic expression evaluator
+// Expressions encoded as integer arrays using RPN (Reverse Polish Notation)
+// Values: 0-999 are literals, 1000=add, 1001=sub, 1002=mul, 1003=div, 1004=neg, 1005=dup
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Op codes
+fn op_add() -> Int { 1000 }
+fn op_sub() -> Int { 1001 }
+fn op_mul() -> Int { 1002 }
+fn op_div() -> Int { 1003 }
+fn op_neg() -> Int { 1004 }
+fn op_dup() -> Int { 1005 }
+
+fn is_op(token: Int) -> Int {
+    if token >= 1000 { 1 } else { 0 }
+}
+
+// Evaluate RPN expression
+// Returns the top of stack after evaluation
+fn eval_rpn(expr: Arr8, len: Int) -> Int {
+    let mut stack = zeros();
+    let mut sp = 0; // stack pointer (next free)
+
+    let mut i = 0;
+    while i < len {
+        let token = get8(expr, i);
+        if is_op(token) == 0 {
+            // Push literal
+            stack = set8(stack, sp, token);
+            sp = sp + 1;
+        } else if token == op_add() {
+            let b = get8(stack, sp - 1);
+            let a = get8(stack, sp - 2);
+            sp = sp - 2;
+            stack = set8(stack, sp, a + b);
+            sp = sp + 1;
+        } else if token == op_sub() {
+            let b = get8(stack, sp - 1);
+            let a = get8(stack, sp - 2);
+            sp = sp - 2;
+            stack = set8(stack, sp, a - b);
+            sp = sp + 1;
+        } else if token == op_mul() {
+            let b = get8(stack, sp - 1);
+            let a = get8(stack, sp - 2);
+            sp = sp - 2;
+            stack = set8(stack, sp, a * b);
+            sp = sp + 1;
+        } else if token == op_div() {
+            let b = get8(stack, sp - 1);
+            let a = get8(stack, sp - 2);
+            sp = sp - 2;
+            stack = set8(stack, sp, a / b);
+            sp = sp + 1;
+        } else if token == op_neg() {
+            let a = get8(stack, sp - 1);
+            stack = set8(stack, sp - 1, 0 - a);
+        } else if token == op_dup() {
+            let a = get8(stack, sp - 1);
+            stack = set8(stack, sp, a);
+            sp = sp + 1;
+        }
+        i = i + 1;
+    }
+    get8(stack, sp - 1)
+}
+
+// Simple register machine: 4 registers, 8 instructions
+// Instruction encoding: op*1000 + arg
+// Ops: 0=load_imm(reg, val), 1=add(dst, src), 2=sub(dst, src), 3=mul(dst, src)
+fn reg_op(instr: Int) -> Int { instr / 1000 }
+fn reg_arg(instr: Int) -> Int { instr % 1000 }
+
+// Decode register pair: arg = dst*10 + src for 2-reg ops
+// For load_imm: arg = reg*100 + value
+fn exec_reg_machine(prog: Arr8, len: Int) -> Arr8 {
+    let mut regs = zeros(); // r0-r3
+    let mut i = 0;
+    while i < len {
+        let instr = get8(prog, i);
+        let op = reg_op(instr);
+        let arg = reg_arg(instr);
+
+        if op == 0 {
+            // load_imm: reg = arg/100, val = arg%100
+            let reg = arg / 100;
+            let val = arg % 100;
+            regs = set8(regs, reg, val);
+        } else if op == 1 {
+            // add: dst = arg/10, src = arg%10
+            let dst = arg / 10;
+            let src = arg % 10;
+            regs = set8(regs, dst, get8(regs, dst) + get8(regs, src));
+        } else if op == 2 {
+            // sub
+            let dst = arg / 10;
+            let src = arg % 10;
+            regs = set8(regs, dst, get8(regs, dst) - get8(regs, src));
+        } else if op == 3 {
+            // mul
+            let dst = arg / 10;
+            let src = arg % 10;
+            regs = set8(regs, dst, get8(regs, dst) * get8(regs, src));
+        }
+        i = i + 1;
+    }
+    regs
+}
+
+fn test_rpn_basic() -> Int {
+    // 3 + 4 = 7 → RPN: 3 4 +
+    let expr = Arr8 { v0: 3, v1: 4, v2: 1000, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr, 3), 7);
+
+    // 10 - 3 = 7 → RPN: 10 3 -
+    let expr2 = Arr8 { v0: 10, v1: 3, v2: 1001, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr2, 3), 7);
+
+    // 6 * 7 = 42 → RPN: 6 7 *
+    let expr3 = Arr8 { v0: 6, v1: 7, v2: 1002, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr3, 3), 42);
+    1
+}
+
+fn test_rpn_complex() -> Int {
+    // (3 + 4) * 2 = 14 → RPN: 3 4 + 2 *
+    let expr = Arr8 { v0: 3, v1: 4, v2: 1000, v3: 2, v4: 1002, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr, 5), 14);
+
+    // 3 + 4 * 2 = 11 → RPN: 3 4 2 * +
+    let expr2 = Arr8 { v0: 3, v1: 4, v2: 2, v3: 1002, v4: 1000, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr2, 5), 11);
+
+    // (5 - 3) * (8 + 2) = 20 → RPN: 5 3 - 8 2 + *
+    let expr3 = Arr8 { v0: 5, v1: 3, v2: 1001, v3: 8, v4: 2, v5: 1000, v6: 1002, v7: 0 };
+    assert_eq(eval_rpn(expr3, 7), 20);
+    1
+}
+
+fn test_rpn_dup_neg() -> Int {
+    // 5 dup * = 25 (5 squared)
+    let expr = Arr8 { v0: 5, v1: 1005, v2: 1002, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr, 3), 25);
+
+    // 7 neg = -7
+    let expr2 = Arr8 { v0: 7, v1: 1004, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr2, 2), -7);
+
+    // 3 4 - neg = 1 (negate -1)
+    let expr3 = Arr8 { v0: 3, v1: 4, v2: 1001, v3: 1004, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr3, 4), 1);
+    1
+}
+
+fn test_rpn_division() -> Int {
+    // 100 / 10 = 10
+    let expr = Arr8 { v0: 100, v1: 10, v2: 1003, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr, 3), 10);
+
+    // 7 / 2 = 3 (integer division)
+    let expr2 = Arr8 { v0: 7, v1: 2, v2: 1003, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_rpn(expr2, 3), 3);
+    1
+}
+
+fn test_register_machine() -> Int {
+    // Program: r0 = 10, r1 = 20, r0 = r0 + r1 (result: r0 = 30)
+    // load_imm r0, 10: 0*1000 + 0*100 + 10 = 10
+    // load_imm r1, 20: 0*1000 + 1*100 + 20 = 120
+    // add r0, r1: 1*1000 + 0*10 + 1 = 1001
+    let prog = Arr8 { v0: 10, v1: 120, v2: 1001, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let regs = exec_reg_machine(prog, 3);
+    assert_eq(get8(regs, 0), 30);
+    assert_eq(get8(regs, 1), 20);
+    1
+}
+
+fn test_register_machine_complex() -> Int {
+    // Compute (5 + 3) * 7:
+    // r0 = 5, r1 = 3, r0 += r1 (r0=8), r2 = 7, r0 *= r2 (r0=56)
+    // load r0, 5:  0*1000 + 0*100 + 5 = 5
+    // load r1, 3:  0*1000 + 1*100 + 3 = 103
+    // add r0, r1:  1*1000 + 0*10 + 1 = 1001
+    // load r2, 7:  0*1000 + 2*100 + 7 = 207
+    // mul r0, r2:  3*1000 + 0*10 + 2 = 3002
+    let prog = Arr8 { v0: 5, v1: 103, v2: 1001, v3: 207, v4: 3002, v5: 0, v6: 0, v7: 0 };
+    let regs = exec_reg_machine(prog, 5);
+    assert_eq(get8(regs, 0), 56);
+    1
+}
+
+fn main() -> Int {
+    test_rpn_basic();
+    test_rpn_complex();
+    test_rpn_dup_neg();
+    test_rpn_division();
+    test_register_machine();
+    test_register_machine_complex();
+    print("[OK] 480_milestone_aot");
+    0
+}

@@ -1,0 +1,342 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, generators, async, negative, errors
+// @expected-error: E018
+
+/// Test for generator function type errors.
+/// Generator functions (fn*) and async generator functions (async fn*) have specific
+/// type constraints that must be enforced by the type checker.
+/// Spec: grammar/verum.ebnf - fn_keyword, yield_expr, for_await_loop
+/// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+
+// ============================================================================
+// 1. YIELD OUTSIDE GENERATOR CONTEXT
+// ============================================================================
+
+// E420: yield in regular function (not fn*)
+fn not_a_generator() -> Int {
+    yield 1;  // ERROR: yield is only valid inside fn* or async fn* body
+    42
+}
+
+// E420: yield in async function (not async fn*)
+async fn async_but_not_generator() -> Int {
+    yield 1;  // ERROR: yield is only valid inside fn* or async fn* body
+    42
+}
+
+// E420: yield in closure
+fn closure_yield() {
+    let f = |x: Int| {
+        yield x;  // ERROR: yield not valid in closure
+    };
+}
+
+// E420: yield in nested function
+fn* outer_generator() -> Int {
+    fn inner_not_generator() {
+        yield 1;  // ERROR: yield not valid in nested regular function
+    }
+    yield 42;
+}
+
+// E420: yield in method (not fn*)
+type Counter is { value: Int };
+
+implement Counter {
+    fn increment(&mut self) -> Int {
+        yield self.value;  // ERROR: yield only valid in fn* method
+        self.value += 1;
+        self.value
+    }
+}
+
+// Record type for testing
+type Point is { x: Float, y: Float };
+type Vector is { dx: Float, dy: Float };
+
+// ============================================================================
+// 2. MIXED YIELD TYPES
+// ============================================================================
+
+// E420: yield expressions with incompatible types
+fn* mixed_int_text() -> Int {
+    yield 1;
+    yield "hello";  // ERROR: expected Int, found Text
+    yield 3;
+}
+
+// E420: yield with different numeric types (no auto-coercion)
+fn* mixed_numeric() -> Int {
+    yield 1;
+    yield 2;
+    yield 3.14;  // ERROR: expected Int, found Float
+}
+
+// E420: yield with Maybe vs bare value
+fn* mixed_maybe() -> Int {
+    yield 1;
+    yield Some(2);  // ERROR: expected Int, found Maybe<Int>
+}
+
+// E420: yield with different complex types
+fn* mixed_records() -> Point {
+    yield Point { x: 0.0, y: 0.0 };
+    yield Vector { dx: 1.0, dy: 1.0 };  // ERROR: expected Point, found Vector
+}
+
+// E420: yield with incompatible generic instantiations
+fn* mixed_generics() -> List<Int> {
+    yield [1, 2, 3];
+    yield ["a", "b"];  // ERROR: expected List<Int>, found List<Text>
+}
+
+// ============================================================================
+// 3. RETURN WITH VALUE IN GENERATOR
+// ============================================================================
+
+// E420: return with value in sync generator (only bare return allowed)
+fn* bad_return_sync() -> Int {
+    yield 1;
+    yield 2;
+    return 42;  // ERROR: generators cannot return values, use bare 'return' to finish
+}
+
+// E420: return with value in async generator
+async fn* bad_return_async() -> Int {
+    yield compute(1).await;
+    return 100;  // ERROR: generators cannot return values
+}
+
+// E420: return with Result in generator (still not allowed)
+fn* return_result() -> Int {
+    yield 1;
+    return Ok(42);  // ERROR: generators cannot return values
+}
+
+// ============================================================================
+// 4. FOR AWAIT OUTSIDE ASYNC CONTEXT
+// ============================================================================
+
+// E420: for await in sync function
+fn not_async_for_await() {
+    async fn* numbers() -> Int {
+        yield 1;
+        yield 2;
+    }
+
+    for await x in numbers() {  // ERROR: for await requires async context
+        process(x);
+    }
+}
+
+// E420: for await in sync generator (fn*)
+fn* sync_generator_for_await() -> Int {
+    async fn* source() -> Int {
+        yield 1;
+    }
+
+    for await x in source() {  // ERROR: for await requires async context
+        yield x;
+    }
+}
+
+// ============================================================================
+// 5. WRONG ITERATOR CONSUMPTION SYNTAX
+// ============================================================================
+
+// E420: regular for on async generator (need for await)
+async fn wrong_consume_async_gen() {
+    async fn* async_numbers() -> Int {
+        yield 1;
+        yield 2;
+    }
+
+    for x in async_numbers() {  // ERROR: use 'for await' for async generators
+        process(x);
+    }
+}
+
+// E420: for await on sync generator (need regular for)
+async fn wrong_consume_sync_gen() {
+    fn* sync_numbers() -> Int {
+        yield 1;
+        yield 2;
+    }
+
+    for await x in sync_numbers() {  // ERROR: use 'for' for sync generators
+        process(x);
+    }
+}
+
+// ============================================================================
+// 6. GENERATOR RETURN TYPE MISMATCH
+// ============================================================================
+
+// E420: declared return type doesn't match yielded type
+fn* return_type_mismatch() -> Text {
+    yield 1;  // ERROR: expected Text, found Int
+    yield 2;
+}
+
+// E420: async generator return type mismatch
+async fn* async_return_mismatch() -> Float {
+    yield "hello";  // ERROR: expected Float, found Text
+}
+
+// E420: empty generator with non-unit return type
+fn* empty_generator() -> Int {
+    // No yield statements
+    // ERROR: generator must yield at least one value compatible with Int
+}
+
+// ============================================================================
+// 7. YIELD TYPE INFERENCE ERRORS
+// ============================================================================
+
+// E420: cannot infer yield type from context
+fn process_ints(iter: Iterator<Item = Int>) { }
+
+fn main_inference() {
+    // Explicit annotation needed when type can't be inferred
+    let gen = fn* {
+        yield if random() { 1 } else { "text" };  // ERROR: branches have different types
+    };
+}
+
+// E420: yield in conditional with incompatible branches
+fn* conditional_yield_error(flag: Bool) -> Int {
+    if flag {
+        yield 1;
+    } else {
+        yield "text";  // ERROR: expected Int from earlier yield
+    }
+}
+
+// ============================================================================
+// 8. ASYNC GENERATOR AWAIT ERRORS
+// ============================================================================
+
+// E420: await outside async context in fn*
+fn* sync_gen_with_await() -> Int {
+    let x = fetch().await;  // ERROR: await requires async context
+    yield x;
+}
+
+// E420: missing await on async operation in async fn*
+async fn* async_gen_missing_await() -> Int {
+    let future = fetch_number();
+    yield future;  // ERROR: expected Int, found Future<Int>
+}
+
+// ============================================================================
+// 9. GENERATOR PROTOCOL IMPLEMENTATION ERRORS
+// ============================================================================
+
+type IteratorProto is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type AsyncIteratorProto is protocol {
+    type Item;
+    async fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// E420: fn* return type doesn't satisfy Iterator protocol
+fn* wrong_protocol() -> Text {
+    yield "hello";
+    // Return type is Iterator<Item = Text> but assignment expects AsyncIterator
+}
+
+fn consume_async(iter: &AsyncIteratorProto<Item = Text>) { }
+
+fn use_wrong_protocol() {
+    let gen = wrong_protocol();
+    consume_async(&gen);  // ERROR: expected AsyncIteratorProto, found IteratorProto
+}
+
+// ============================================================================
+// 10. NESTED GENERATOR ERRORS
+// ============================================================================
+
+// E420: yield from nested async block in sync generator
+fn* sync_with_async_block() -> Int {
+    let x = async {
+        yield 1;  // ERROR: yield in async block, but outer function is fn* not async fn*
+    };
+    yield 2;
+}
+
+// E420: Type mismatch in nested generator delegation
+fn* outer() -> Int {
+    fn* inner() -> Text {
+        yield "hello";
+    }
+
+    for x in inner() {
+        yield x;  // ERROR: expected Int, found Text
+    }
+}
+
+// ============================================================================
+// 11. GENERATOR WITH CONTEXT ERRORS
+// ============================================================================
+
+context Database {
+    async fn query(sql: Text) -> List<Row>;
+}
+
+type Row is { columns: Map<Text, Text> };
+
+// E420: context used in sync generator (context requires async)
+fn* sync_gen_with_context() -> Row using [Database] {
+    let rows = Database.query("SELECT * FROM users").await;  // ERROR: await in sync generator
+    for row in rows {
+        yield row;
+    }
+}
+
+// ============================================================================
+// 12. MOVE SEMANTICS IN GENERATORS
+// ============================================================================
+
+type UniqueHandle is { id: Int, resource: Heap<Int> };
+
+// E420: yield after move
+fn* yield_after_move() -> UniqueHandle {
+    let handle = UniqueHandle { id: 1, resource: Heap(42) };
+    yield handle;  // handle is moved
+    yield handle;  // ERROR: use of moved value 'handle'
+}
+
+// E420: borrow after yield that moved
+fn* borrow_after_yield() -> &UniqueHandle {
+    let handle = UniqueHandle { id: 1, resource: Heap(42) };
+    yield &handle;  // yield borrow
+    drop(handle);   // handle still exists
+    yield &handle;  // ERROR: reference to handle invalidated
+}
+
+// ============================================================================
+// 13. REFINEMENT VIOLATIONS IN GENERATORS
+// ============================================================================
+
+// E420: yield value violates refinement
+fn* positive_numbers() -> Int{> 0} {
+    yield 1;   // OK
+    yield 5;   // OK
+    yield 0;   // ERROR: 0 does not satisfy refinement {> 0}
+    yield -1;  // ERROR: -1 does not satisfy refinement {> 0}
+}
+
+// E420: yield Maybe but refinement expects Some
+fn* always_some() -> Maybe<Int>{is Some(_)} {
+    yield Some(1);  // OK
+    yield None;     // ERROR: None does not satisfy refinement {is Some(_)}
+}
+
+fn main() {
+    // All examples above should produce E420 "Generator type error"
+}

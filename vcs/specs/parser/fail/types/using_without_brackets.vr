@@ -1,0 +1,7 @@
+// @test: parse-pass
+// @level: L0
+// @tags: parser, types, function, using, context
+// @description: Single context without brackets is valid per grammar (context_spec = single_context_spec | extended_context_list)
+
+// Grammar allows using with a single context without brackets
+type Callback is fn() using Database;

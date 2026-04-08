@@ -1,0 +1,249 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, hash-table, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Open-addressing hash table with linear probing (8 slots)
+
+// ============================================================================
+// Slot and HashTable types
+// ============================================================================
+
+// Each slot: key, value, occupied (1=yes, 0=no)
+type HTable is {
+    k0: Int, v0: Int, o0: Int,
+    k1: Int, v1: Int, o1: Int,
+    k2: Int, v2: Int, o2: Int,
+    k3: Int, v3: Int, o3: Int,
+    k4: Int, v4: Int, o4: Int,
+    k5: Int, v5: Int, o5: Int,
+    k6: Int, v6: Int, o6: Int,
+    k7: Int, v7: Int, o7: Int,
+    size: Int
+};
+
+fn ht_new() -> HTable {
+    HTable {
+        k0: 0, v0: 0, o0: 0,
+        k1: 0, v1: 0, o1: 0,
+        k2: 0, v2: 0, o2: 0,
+        k3: 0, v3: 0, o3: 0,
+        k4: 0, v4: 0, o4: 0,
+        k5: 0, v5: 0, o5: 0,
+        k6: 0, v6: 0, o6: 0,
+        k7: 0, v7: 0, o7: 0,
+        size: 0
+    }
+}
+
+// ============================================================================
+// Slot access helpers
+// ============================================================================
+
+fn get_key(ht: HTable, i: Int) -> Int {
+    if i == 0 { ht.k0 } else if i == 1 { ht.k1 }
+    else if i == 2 { ht.k2 } else if i == 3 { ht.k3 }
+    else if i == 4 { ht.k4 } else if i == 5 { ht.k5 }
+    else if i == 6 { ht.k6 } else { ht.k7 }
+}
+
+fn get_val(ht: HTable, i: Int) -> Int {
+    if i == 0 { ht.v0 } else if i == 1 { ht.v1 }
+    else if i == 2 { ht.v2 } else if i == 3 { ht.v3 }
+    else if i == 4 { ht.v4 } else if i == 5 { ht.v5 }
+    else if i == 6 { ht.v6 } else { ht.v7 }
+}
+
+fn get_occ(ht: HTable, i: Int) -> Int {
+    if i == 0 { ht.o0 } else if i == 1 { ht.o1 }
+    else if i == 2 { ht.o2 } else if i == 3 { ht.o3 }
+    else if i == 4 { ht.o4 } else if i == 5 { ht.o5 }
+    else if i == 6 { ht.o6 } else { ht.o7 }
+}
+
+fn set_slot(ht: HTable, i: Int, key: Int, val: Int, occ: Int) -> HTable {
+    HTable {
+        k0: if i == 0 { key } else { ht.k0 },
+        v0: if i == 0 { val } else { ht.v0 },
+        o0: if i == 0 { occ } else { ht.o0 },
+        k1: if i == 1 { key } else { ht.k1 },
+        v1: if i == 1 { val } else { ht.v1 },
+        o1: if i == 1 { occ } else { ht.o1 },
+        k2: if i == 2 { key } else { ht.k2 },
+        v2: if i == 2 { val } else { ht.v2 },
+        o2: if i == 2 { occ } else { ht.o2 },
+        k3: if i == 3 { key } else { ht.k3 },
+        v3: if i == 3 { val } else { ht.v3 },
+        o3: if i == 3 { occ } else { ht.o3 },
+        k4: if i == 4 { key } else { ht.k4 },
+        v4: if i == 4 { val } else { ht.v4 },
+        o4: if i == 4 { occ } else { ht.o4 },
+        k5: if i == 5 { key } else { ht.k5 },
+        v5: if i == 5 { val } else { ht.v5 },
+        o5: if i == 5 { occ } else { ht.o5 },
+        k6: if i == 6 { key } else { ht.k6 },
+        v6: if i == 6 { val } else { ht.v6 },
+        o6: if i == 6 { occ } else { ht.o6 },
+        k7: if i == 7 { key } else { ht.k7 },
+        v7: if i == 7 { val } else { ht.v7 },
+        o7: if i == 7 { occ } else { ht.o7 },
+        size: ht.size
+    }
+}
+
+// ============================================================================
+// Hash function (positive mod 8)
+// ============================================================================
+
+fn hash_key(key: Int) -> Int {
+    let m = key - (key / 8) * 8;
+    if m < 0 { m + 8 } else { m }
+}
+
+// ============================================================================
+// Operations
+// ============================================================================
+
+fn ht_insert(ht: HTable, key: Int, val: Int) -> HTable {
+    let start = hash_key(key);
+    let mut i = 0;
+    let mut result = ht;
+    let mut done = 0;
+    while i < 8 {
+        if done == 0 {
+            let slot = (start + i) - ((start + i) / 8) * 8;
+            let occ = get_occ(result, slot);
+            if occ == 0 {
+                // Empty slot, insert here
+                result = set_slot(result, slot, key, val, 1);
+                result = HTable {
+                    k0: result.k0, v0: result.v0, o0: result.o0,
+                    k1: result.k1, v1: result.v1, o1: result.o1,
+                    k2: result.k2, v2: result.v2, o2: result.o2,
+                    k3: result.k3, v3: result.v3, o3: result.o3,
+                    k4: result.k4, v4: result.v4, o4: result.o4,
+                    k5: result.k5, v5: result.v5, o5: result.o5,
+                    k6: result.k6, v6: result.v6, o6: result.o6,
+                    k7: result.k7, v7: result.v7, o7: result.o7,
+                    size: ht.size + 1
+                };
+                done = 1;
+            } else {
+                let k = get_key(result, slot);
+                if k == key {
+                    // Update existing key
+                    result = set_slot(result, slot, key, val, 1);
+                    done = 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn ht_get(ht: HTable, key: Int) -> Int {
+    // Returns value if found, -1 if not found
+    let start = hash_key(key);
+    let mut i = 0;
+    let mut found_val = -1;
+    while i < 8 {
+        let slot = (start + i) - ((start + i) / 8) * 8;
+        let occ = get_occ(ht, slot);
+        if occ == 1 {
+            let k = get_key(ht, slot);
+            if k == key {
+                found_val = get_val(ht, slot);
+                i = 8;  // stop
+            }
+        } else {
+            i = 8;  // empty slot means key not present
+        }
+        i = i + 1;
+    }
+    found_val
+}
+
+fn ht_contains(ht: HTable, key: Int) -> Int {
+    let v = ht_get(ht, key);
+    if v == -1 { 0 } else { 1 }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_insert_and_get() -> Int {
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 10, 100);
+    ht = ht_insert(ht, 20, 200);
+    ht = ht_insert(ht, 30, 300);
+    assert_eq(ht_get(ht, 10), 100);
+    assert_eq(ht_get(ht, 20), 200);
+    assert_eq(ht_get(ht, 30), 300);
+    assert_eq(ht.size, 3);
+    0
+}
+
+@test
+fn test_not_found() -> Int {
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 5, 50);
+    assert_eq(ht_get(ht, 5), 50);
+    assert_eq(ht_get(ht, 99), -1);
+    assert_eq(ht_contains(ht, 5), 1);
+    assert_eq(ht_contains(ht, 99), 0);
+    0
+}
+
+@test
+fn test_update_existing() -> Int {
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 7, 70);
+    assert_eq(ht_get(ht, 7), 70);
+    // Update value for same key
+    ht = ht_insert(ht, 7, 777);
+    assert_eq(ht_get(ht, 7), 777);
+    0
+}
+
+@test
+fn test_collision_handling() -> Int {
+    // Keys 3 and 11 both hash to slot 3 (3 mod 8 = 3, 11 mod 8 = 3)
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 3, 30);
+    ht = ht_insert(ht, 11, 110);
+    // Both should be retrievable via linear probing
+    assert_eq(ht_get(ht, 3), 30);
+    assert_eq(ht_get(ht, 11), 110);
+    assert_eq(ht.size, 2);
+    0
+}
+
+@test
+fn test_multiple_collisions() -> Int {
+    // Keys 0, 8 both hash to slot 0
+    // Keys 1, 9 both hash to slot 1
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 0, 1000);
+    ht = ht_insert(ht, 8, 2000);
+    ht = ht_insert(ht, 1, 3000);
+    ht = ht_insert(ht, 9, 4000);
+    assert_eq(ht_get(ht, 0), 1000);
+    assert_eq(ht_get(ht, 8), 2000);
+    assert_eq(ht_get(ht, 1), 3000);
+    assert_eq(ht_get(ht, 9), 4000);
+    0
+}
+
+fn main() -> Int {
+    test_insert_and_get();
+    test_not_found();
+    test_update_existing();
+    test_collision_handling();
+    test_multiple_collisions();
+    print("[OK] 099_hash_table");
+    0
+}

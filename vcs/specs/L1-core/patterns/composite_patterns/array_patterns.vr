@@ -1,0 +1,267 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, arrays, composite
+//
+// Tests list/array patterns for matching and destructuring sequences.
+// In Verum, arrays are List<T> and use [a, b, c] or [head, ..rest] patterns.
+
+//------------------------------------------------------------------------------
+// Basic List Pattern Matching
+//------------------------------------------------------------------------------
+
+/// Match exact list contents.
+fn match_list_3(arr: List<Int>) -> Int {
+    match arr {
+        [a, b, c] => a + b + c,
+        _ => 0,
+    }
+}
+
+/// Match with different element patterns.
+fn match_list_mixed(arr: List<Int>) -> Text {
+    match arr {
+        [0, 0, 0] => "all zeros",
+        [1, 1, 1] => "all ones",
+        [a, b, c] if a == b && b == c => "all same",
+        [a, b, c] => f"{a}, {b}, {c}",
+        _ => "other length",
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with Wildcards
+//------------------------------------------------------------------------------
+
+/// Ignore some elements.
+fn list_ignore_middle(arr: List<Int>) -> Int {
+    match arr {
+        [first, _, last] => first + last,
+        _ => 0,
+    }
+}
+
+/// Ignore all but one.
+fn list_extract_second(arr: List<Int>) -> Int {
+    match arr {
+        [_, second, ..] => second,
+        _ => 0,
+    }
+}
+
+/// All wildcards.
+fn list_all_wildcards(arr: List<Int>) -> Text {
+    match arr {
+        [_, _, _] => "has three elements",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with Rest (..)
+//------------------------------------------------------------------------------
+
+/// Rest at end - extract first.
+fn list_first(arr: List<Int>) -> Int {
+    match arr {
+        [first, ..] => first,
+        [] => 0,
+    }
+}
+
+/// Rest at start - extract last.
+fn list_last(arr: List<Int>) -> Int {
+    match arr {
+        [.., last] => last,
+        [] => 0,
+    }
+}
+
+/// Rest in middle - extract ends.
+fn list_ends(arr: List<Int>) -> (Int, Int) {
+    match arr {
+        [first, .., last] => (first, last),
+        [x] => (x, x),
+        [] => (0, 0),
+    }
+}
+
+/// First two elements.
+fn list_first_two(arr: List<Int>) -> (Int, Int) {
+    match arr {
+        [a, b, ..] => (a, b),
+        _ => (0, 0),
+    }
+}
+
+/// Last two elements.
+fn list_last_two(arr: List<Int>) -> (Int, Int) {
+    match arr {
+        [.., a, b] => (a, b),
+        _ => (0, 0),
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with Literals
+//------------------------------------------------------------------------------
+
+/// Match specific list values.
+fn list_specific(arr: List<Int>) -> Text {
+    match arr {
+        [0, 0] => "origin",
+        [1, 0] => "unit x",
+        [0, 1] => "unit y",
+        [1, 1] => "diagonal",
+        _ => "other",
+    }
+}
+
+/// Match with some literals, some bindings.
+fn list_partial_literal(arr: List<Int>) -> Int {
+    match arr {
+        [0, middle, 0] => middle,
+        [1, middle, 1] => middle * 2,
+        [a, _, b] => a + b,
+        _ => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with Guards
+//------------------------------------------------------------------------------
+
+/// Guard on list elements.
+fn list_guard(arr: List<Int>) -> Text {
+    match arr {
+        [a, b, c] if a + b + c > 100 => "large sum",
+        [a, b, c] if a + b + c > 10 => "medium sum",
+        [a, b, c] if a + b + c > 0 => "small sum",
+        [0, 0, 0] => "zero",
+        _ => "negative sum or other length",
+    }
+}
+
+/// Guard checking sorted property.
+fn list_sorted(arr: List<Int>) -> Bool {
+    match arr {
+        [a, b, c] if a <= b && b <= c => true,
+        _ => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns with Enums
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+/// List of Maybe.
+fn list_maybes(arr: List<Maybe<Int>>) -> Int {
+    match arr {
+        [Some(a), Some(b), Some(c)] => a + b + c,
+        [Some(a), Some(b), None] => a + b,
+        [Some(a), None, Some(c)] => a + c,
+        [None, Some(b), Some(c)] => b + c,
+        [Some(a), None, None] => a,
+        [None, Some(b), None] => b,
+        [None, None, Some(c)] => c,
+        [None, None, None] => 0,
+        _ => -1,
+    }
+}
+
+//------------------------------------------------------------------------------
+// List Patterns in Different Contexts
+//------------------------------------------------------------------------------
+
+/// List in let binding.
+fn list_let() -> Int {
+    let arr = [1, 2, 3];
+    let [a, b, c] = arr;
+    a + b + c
+}
+
+/// List in if-let.
+fn list_if_let(arr: List<Int>) -> Text {
+    if let [0, _] = arr {
+        "starts with zero"
+    } else if let [_, 0] = arr {
+        "ends with zero"
+    } else {
+        "no zeros"
+    }
+}
+
+/// List in for loop.
+fn list_for() -> Int {
+    let arr = [10, 20, 30];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    sum
+}
+
+//------------------------------------------------------------------------------
+// Empty and Single Element Lists
+//------------------------------------------------------------------------------
+
+/// Empty list matching.
+fn match_empty(arr: List<Int>) -> Text {
+    match arr {
+        [] => "empty",
+        _ => "non-empty",
+    }
+}
+
+/// Single element list.
+fn match_single(arr: List<Int>) -> Int {
+    match arr {
+        [x] => x * 2,
+        _ => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Basic matching
+    assert(match_list_3([1, 2, 3]) == 6);
+    assert(match_list_mixed([0, 0, 0]) == "all zeros");
+    assert(match_list_mixed([5, 5, 5]) == "all same");
+
+    // Wildcards
+    assert(list_ignore_middle([1, 100, 3]) == 4);
+    assert(list_extract_second([0, 42, 1, 0]) == 42);
+
+    // Rest patterns
+    assert(list_first([10, 20, 30, 40, 50]) == 10);
+    assert(list_last([10, 20, 30, 40, 50]) == 50);
+    assert(list_ends([10, 20, 30, 40, 50]) == (10, 50));
+    assert(list_first_two([10, 20, 30, 40, 50]) == (10, 20));
+    assert(list_last_two([10, 20, 30, 40, 50]) == (40, 50));
+
+    // Literals
+    assert(list_specific([0, 0]) == "origin");
+    assert(list_specific([1, 0]) == "unit x");
+    assert(list_specific([2, 2]) == "other");
+
+    // Guards
+    assert(list_guard([50, 40, 30]) == "large sum");
+    assert(list_guard([5, 4, 3]) == "medium sum");
+    assert(list_sorted([1, 2, 3]) == true);
+    assert(list_sorted([3, 2, 1]) == false);
+
+    // Contexts
+    assert(list_let() == 6);
+    assert(list_for() == 60);
+
+    // Edge cases
+    assert(match_empty([]) == "empty");
+    assert(match_single([5]) == 10);
+}

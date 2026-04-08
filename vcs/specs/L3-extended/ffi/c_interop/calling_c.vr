@@ -1,0 +1,521 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, calling
+// @description: Tests calling C functions from Verum code with proper safety handling
+
+/// ============================================================
+/// CALLING C FUNCTIONS
+/// ============================================================
+///
+/// Demonstrates safe patterns for calling C library functions
+/// from Verum code, including error handling and resource management.
+
+// ------------------------------------------------------------
+// C Library Declarations
+// ------------------------------------------------------------
+
+ffi libc {
+    @extern("C")
+    fn malloc(size: c_size) -> *mut c_void;
+
+    @extern("C")
+    fn calloc(nmemb: c_size, size: c_size) -> *mut c_void;
+
+    @extern("C")
+    fn realloc(ptr: *mut c_void, size: c_size) -> *mut c_void;
+
+    @extern("C")
+    fn free(ptr: *mut c_void);
+
+    @extern("C")
+    fn memcpy(dest: *mut c_void, src: *const c_void, n: c_size) -> *mut c_void;
+
+    @extern("C")
+    fn memset(s: *mut c_void, c: c_int, n: c_size) -> *mut c_void;
+
+    @extern("C")
+    fn memmove(dest: *mut c_void, src: *const c_void, n: c_size) -> *mut c_void;
+
+    @extern("C")
+    fn memcmp(s1: *const c_void, s2: *const c_void, n: c_size) -> c_int;
+
+    @extern("C")
+    fn strlen(s: *const c_char) -> c_size;
+
+    @extern("C")
+    fn strcmp(s1: *const c_char, s2: *const c_char) -> c_int;
+
+    @extern("C")
+    fn strcpy(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+
+    @extern("C")
+    fn strncpy(dest: *mut c_char, src: *const c_char, n: c_size) -> *mut c_char;
+
+    @extern("C")
+    fn strcat(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+
+    @extern("C")
+    fn printf(format: *const c_char, ...) -> c_int;
+
+    @extern("C")
+    fn snprintf(str: *mut c_char, size: c_size, format: *const c_char, ...) -> c_int;
+}
+
+ffi file_io {
+    @extern("C")
+    fn fopen(path: *const c_char, mode: *const c_char) -> *mut FILE;
+
+    @extern("C")
+    fn fclose(stream: *mut FILE) -> c_int;
+
+    @extern("C")
+    fn fread(ptr: *mut c_void, size: c_size, nmemb: c_size, stream: *mut FILE) -> c_size;
+
+    @extern("C")
+    fn fwrite(ptr: *const c_void, size: c_size, nmemb: c_size, stream: *mut FILE) -> c_size;
+
+    @extern("C")
+    fn fseek(stream: *mut FILE, offset: c_long, whence: c_int) -> c_int;
+
+    @extern("C")
+    fn ftell(stream: *mut FILE) -> c_long;
+
+    @extern("C")
+    fn fflush(stream: *mut FILE) -> c_int;
+
+    @extern("C")
+    fn ferror(stream: *mut FILE) -> c_int;
+
+    @extern("C")
+    fn feof(stream: *mut FILE) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Safe Wrappers for Memory Functions
+// ------------------------------------------------------------
+
+/// Safe malloc wrapper with typed result
+fn safe_malloc<T>(count: usize) -> Result<*mut T, AllocError> {
+    let size = count * T.size
+        .ok_or(SizeOverflow)?;
+
+    // SAFETY: malloc is safe to call with any size
+    let ptr = unsafe { libc.malloc(size) };
+
+    if ptr.is_null() {
+        Err(OutOfMemory)
+    } else {
+        Ok(ptr as *mut T)
+    }
+}
+
+/// Safe calloc wrapper (zeroed memory)
+fn safe_calloc<T>(count: usize) -> Result<*mut T, AllocError> {
+    if count == 0 {
+        return Err(ZeroSize);
+    }
+
+    // SAFETY: calloc is safe to call
+    let ptr = unsafe { libc.calloc(count, T.size) };
+
+    if ptr.is_null() {
+        Err(OutOfMemory)
+    } else {
+        Ok(ptr as *mut T)
+    }
+}
+
+/// Safe realloc wrapper
+fn safe_realloc<T>(ptr: *mut T, new_count: usize) -> Result<*mut T, AllocError> {
+    let new_size = new_count * T.size
+        .ok_or(SizeOverflow)?;
+
+    // SAFETY: realloc is safe to call with valid pointer or null
+    let new_ptr = unsafe { libc.realloc(ptr as *mut c_void, new_size) };
+
+    if new_ptr.is_null() && new_size > 0 {
+        Err(OutOfMemory)
+    } else {
+        Ok(new_ptr as *mut T)
+    }
+}
+
+/// Safe free wrapper
+fn safe_free<T>(ptr: *mut T) {
+    if !ptr.is_null() {
+        // SAFETY: ptr is either valid or null (which free handles)
+        unsafe { libc.free(ptr as *mut c_void) };
+    }
+}
+
+// ------------------------------------------------------------
+// Safe Memory Operations
+// ------------------------------------------------------------
+
+/// Safe memcpy with bounds checking
+fn safe_memcpy<T: Copy>(dest: &mut [T], src: &[T]) -> Result<(), MemoryError> {
+    if dest.len() < src.len() {
+        return Err(MemoryError.BufferTooSmall);
+    }
+
+    let byte_count = src.len() * T.size;
+
+    // SAFETY: Both slices are valid and we verified dest is large enough
+    unsafe {
+        libc.memcpy(
+            dest.as_mut_ptr() as *mut c_void,
+            src.as_ptr() as *const c_void,
+            byte_count
+        );
+    }
+
+    Ok(())
+}
+
+/// Safe memset (zero-fill)
+fn safe_memset_zero<T>(dest: &mut [T]) {
+    let byte_count = dest.len() * T.size;
+
+    // SAFETY: dest slice is valid
+    unsafe {
+        libc.memset(dest.as_mut_ptr() as *mut c_void, 0, byte_count);
+    }
+}
+
+/// Safe memmove (handles overlap)
+fn safe_memmove<T: Copy>(dest: &mut [T], src: &[T]) -> Result<(), MemoryError> {
+    if dest.len() < src.len() {
+        return Err(MemoryError.BufferTooSmall);
+    }
+
+    let byte_count = src.len() * T.size;
+
+    // SAFETY: Both slices are valid, memmove handles overlap
+    unsafe {
+        libc.memmove(
+            dest.as_mut_ptr() as *mut c_void,
+            src.as_ptr() as *const c_void,
+            byte_count
+        );
+    }
+
+    Ok(())
+}
+
+/// Safe memcmp
+fn safe_memcmp<T>(a: &[T], b: &[T]) -> Ordering {
+    let len = min(a.len(), b.len()) * T.size;
+
+    // SAFETY: Both slices are valid
+    let result = unsafe {
+        libc.memcmp(
+            a.as_ptr() as *const c_void,
+            b.as_ptr() as *const c_void,
+            len
+        )
+    };
+
+    if result < 0 {
+        Less
+    } else if result > 0 {
+        Greater
+    } else if a.len() < b.len() {
+        Less
+    } else if a.len() > b.len() {
+        Greater
+    } else {
+        Equal
+    }
+}
+
+// ------------------------------------------------------------
+// Safe File I/O
+// ------------------------------------------------------------
+
+/// Safe file handle
+type SafeFile is {
+    handle: *mut FILE,
+    invariant handle != null,
+};
+
+implement SafeFile {
+    /// Open file safely
+    fn open(path: &str, mode: &str) -> Result<SafeFile, IoError> {
+        let c_path_result = CString.new(path);
+        let c_path = match c_path_result {
+            Ok(s) => s,
+            Err(_e) => return Err(IoError.OpenFailed(f"invalid path: {path}")),
+        };
+        let c_mode_result = CString.new(mode);
+        let c_mode = match c_mode_result {
+            Ok(s) => s,
+            Err(_e) => return Err(IoError.OpenFailed(f"invalid mode: {mode}")),
+        };
+
+        // SAFETY: Both strings are valid null-terminated C strings
+        let handle = unsafe {
+            file_io.fopen(c_path.as_ptr(), c_mode.as_ptr())
+        };
+
+        if handle.is_null() {
+            Err(OpenFailed(path.to_owned()))
+        } else {
+            Ok(SafeFile { handle })
+        }
+    }
+
+    /// Read bytes from file
+    fn read(&mut self, buffer: &mut [u8]) -> Result<usize, IoError> {
+        // SAFETY: handle is valid, buffer is valid
+        let bytes_read = unsafe {
+            file_io.fread(
+                buffer.as_mut_ptr() as *mut c_void,
+                1,
+                buffer.len(),
+                self.handle
+            )
+        };
+
+        // Check for errors
+        let error = unsafe { file_io.ferror(self.handle) };
+        if error != 0 {
+            Err(ReadFailed)
+        } else {
+            Ok(bytes_read)
+        }
+    }
+
+    /// Write bytes to file
+    fn write(&mut self, data: &[u8]) -> Result<usize, IoError> {
+        // SAFETY: handle is valid, data is valid
+        let bytes_written = unsafe {
+            file_io.fwrite(
+                data.as_ptr() as *const c_void,
+                1,
+                data.len(),
+                self.handle
+            )
+        };
+
+        if bytes_written < data.len() {
+            Err(WriteFailed)
+        } else {
+            Ok(bytes_written)
+        }
+    }
+
+    /// Seek to position
+    fn seek(&mut self, offset: i64, whence: SeekFrom) -> Result<(), IoError> {
+        let whence_c = match whence {
+            SeekFrom.Start => SEEK_SET,
+            SeekFrom.Current => SEEK_CUR,
+            SeekFrom.End => SEEK_END,
+        };
+
+        // SAFETY: handle is valid
+        let result = unsafe {
+            file_io.fseek(self.handle, offset as c_long, whence_c)
+        };
+
+        if result != 0 {
+            Err(SeekFailed)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Get current position
+    fn tell(&self) -> Result<i64, IoError> {
+        // SAFETY: handle is valid
+        let pos = unsafe { file_io.ftell(self.handle) };
+
+        if pos < 0 {
+            Err(TellFailed)
+        } else {
+            Ok(pos as i64)
+        }
+    }
+
+    /// Flush buffers
+    fn flush(&mut self) -> Result<(), IoError> {
+        // SAFETY: handle is valid
+        let result = unsafe { file_io.fflush(self.handle) };
+
+        if result != 0 {
+            Err(FlushFailed)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Check for end of file
+    fn is_eof(&self) -> Bool {
+        // SAFETY: handle is valid
+        unsafe { file_io.feof(self.handle) != 0 }
+    }
+}
+
+implement Drop for SafeFile {
+    fn drop(&mut self) {
+        // SAFETY: handle is valid due to invariant
+        unsafe { file_io.fclose(self.handle) };
+    }
+}
+
+// ------------------------------------------------------------
+// Text Calling Patterns
+// ------------------------------------------------------------
+
+/// Get length of C string
+fn c_string_length(s: &CStr) -> usize {
+    // SAFETY: CStr guarantees null-terminated valid string
+    unsafe { libc.strlen(s.as_ptr()) }
+}
+
+/// Compare two C strings
+fn c_string_compare(s1: &CStr, s2: &CStr) -> Ordering {
+    // SAFETY: Both CStr instances are valid null-terminated strings
+    let result = unsafe { libc.strcmp(s1.as_ptr(), s2.as_ptr()) };
+
+    if result < 0 {
+        Less
+    } else if result > 0 {
+        Greater
+    } else {
+        Equal
+    }
+}
+
+/// Copy C string safely
+fn c_string_copy(dest: &mut [c_char], src: &CStr) -> Result<(), StringError> {
+    let src_len = c_string_length(src);
+
+    if dest.len() <= src_len {
+        return Err(StringError.BufferTooSmall);
+    }
+
+    // SAFETY: We verified destination is large enough
+    unsafe {
+        libc.strncpy(dest.as_mut_ptr(), src.as_ptr(), dest.len() - 1);
+        // Ensure null termination
+        let last_idx = dest.len() - 1;
+        dest[last_idx] = 0;
+    }
+
+    Ok(())
+}
+
+// ------------------------------------------------------------
+// Error Handling Patterns
+// ------------------------------------------------------------
+
+/// Handle errno-based errors
+fn handle_errno_error<T>(result: T, error_value: T) -> Result<T, ErrnoError>
+where T: Eq
+{
+    if result == error_value {
+        let errno = get_errno();
+        Err(ErrnoError.from_code(errno))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Get current errno value (platform stub)
+@extern("C")
+fn get_errno() -> c_int;
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_int is i32;
+type c_long is i64;
+type c_size is usize;
+type c_void is ();
+
+@opaque
+type FILE is ();
+
+const SEEK_SET: c_int = 0;
+const SEEK_CUR: c_int = 1;
+const SEEK_END: c_int = 2;
+
+type AllocError is
+    | OutOfMemory
+    | SizeOverflow
+    | ZeroSize;
+
+type MemoryError is
+    | BufferTooSmall
+    | NullPointer;
+
+type IoError is
+    | OpenFailed(Text)
+    | ReadFailed
+    | WriteFailed
+    | SeekFailed
+    | TellFailed
+    | FlushFailed;
+
+type StringError is
+    | BufferTooSmall
+    | InvalidUtf8
+    | NullByteInString;
+
+type ErrnoError is
+    | PermissionDenied
+    | FileNotFound
+    | IoError
+    | Unknown(c_int);
+
+implement ErrnoError {
+    fn from_code(code: c_int) -> ErrnoError {
+        match code {
+            1 => ErrnoError.PermissionDenied,
+            2 => ErrnoError.FileNotFound,
+            5 => ErrnoError.IoError,
+            _ => Unknown(code),
+        }
+    }
+}
+
+type SeekFrom is
+    | Start
+    | Current
+    | End;
+
+type Ordering is
+    | Less
+    | Equal
+    | Greater;
+
+type CStr is { ptr: *const c_char };
+implement CStr {
+    fn as_ptr(&self) -> *const c_char { self.ptr }
+}
+
+type CString is { data: List<c_char> };
+implement CString {
+    fn new(s: &str) -> Result<CString, StringError> {
+        if s.bytes().any(|b| b == 0) {
+            return Err(NullByteInString);
+        }
+        let mut data: List<c_char> = s.bytes().map(|b| b as c_char).collect();
+        data.push(0);
+        Ok(CString { data })
+    }
+
+    fn as_ptr(&self) -> *const c_char {
+        self.data.as_ptr()
+    }
+}
+
+// Type properties: use T.size instead of deprecated size_of<T>()
+fn min(a: usize, b: usize) -> usize { if a < b { a } else { b } }
+
+fn main() {
+    // FFI calling test
+}

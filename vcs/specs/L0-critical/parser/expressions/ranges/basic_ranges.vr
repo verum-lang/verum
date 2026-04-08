@@ -1,0 +1,191 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, ranges, basic
+
+// Basic range expressions
+
+// Test exclusive ranges (start..end)
+fn test_exclusive_ranges() {
+    let exclusive = 0..10;        // 0, 1, 2, ..., 9
+    let from_one = 1..11;         // 1, 2, 3, ..., 10
+    let negative = -5..5;         // -5, -4, ..., 4
+}
+
+// Test inclusive ranges (start..=end)
+fn test_inclusive_ranges() {
+    let inclusive = 0..=10;       // 0, 1, 2, ..., 10
+    let one_to_ten = 1..=10;      // 1, 2, 3, ..., 10
+    let neg_inc = -5..=5;         // -5, -4, ..., 5
+}
+
+// Test range from start (start..)
+fn test_from_start_ranges() {
+    let from_start = 5..;         // 5, 6, 7, 8, ...
+    let from_zero = 0..;          // 0, 1, 2, 3, ...
+    let from_neg = -10..;         // -10, -9, -8, ...
+}
+
+// Test range to end (..end)
+fn test_to_end_ranges() {
+    let to_end = ..10;            // ..., 7, 8, 9
+    let to_inclusive = ..=10;     // ..., 8, 9, 10
+}
+
+// Test full range (..)
+fn test_full_range() {
+    let full = ..;                // All elements
+}
+
+// Test range with expressions
+fn test_expr_ranges() {
+    let start = 5;
+    let end = 15;
+    let a = 2;
+    let b = 3;
+    let c = 4;
+    let d = 5;
+    let expr_range = start..end;
+    let computed = (a + b)..(c * d);
+}
+
+// Test range in for loop
+fn test_range_in_for_loop() {
+    for i in 0..10 {
+        print(i);
+    }
+
+    for i in 1..=100 {
+        process(i);
+    }
+}
+
+// Test range with step (if supported)
+fn test_range_with_step() {
+    for i in (0..100).step_by(2) {
+        // Even numbers: 0, 2, 4, ..., 98
+    }
+}
+
+// Test reverse range
+fn test_reverse_range() {
+    for i in (0..10).rev() {
+        // 9, 8, 7, ..., 0
+    }
+}
+
+// Test range as slice index
+fn test_range_as_slice_index() {
+    let arr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let first_five = arr[0..5];
+    let middle = arr[3..7];
+    let last_five = arr[5..];
+    let first_three = arr[..3];
+    let all = arr[..];
+}
+
+// Test inclusive slice
+fn test_inclusive_slice() {
+    let arr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let with_end = arr[0..=4];  // Includes index 4
+}
+
+// Test range in match
+fn test_range_in_match(n: Int) -> Text {
+    match n {
+        0..10 => "single digit",
+        10..100 => "double digit",
+        100..1000 => "triple digit",
+        _ => "large number",
+    }
+}
+
+// Test range with inclusive bounds in match
+fn test_char_range_in_match(ch: Char) -> Text {
+    match ch {
+        'a'..='z' => "lowercase",
+        'A'..='Z' => "uppercase",
+        '0'..='9' => "digit",
+        _ => "other",
+    }
+}
+
+// Test range methods
+fn test_range_methods() {
+    let r = 0..100;
+    let contains_50 = r.contains(&50);
+    let is_empty = r.is_empty();
+}
+
+// Test range length (for bounded ranges)
+fn test_range_length() {
+    let len = (0..10).len();  // 10
+    let inc_len = (0..=10).len();  // 11
+}
+
+// Test range as iterator
+fn test_range_as_iterator() {
+    let sum: Int = (1..=100).sum();
+    let count = (0..10).count();
+    let collected: List<Int> = (0..5).collect();
+}
+
+// Test chained range operations
+fn test_chained_range_operations() {
+    let result = (0..100)
+        .filter(|x| x % 2 == 0)
+        .map(|x| x * x)
+        .take(10)
+        .collect();
+}
+
+// Test float ranges (if supported)
+fn test_float_ranges() {
+    let float_range = 0.0..1.0;
+    let angle_range = 0.0..=360.0;
+}
+
+// Test character ranges
+fn test_character_ranges() {
+    let lowercase = 'a'..='z';
+    let digits = '0'..='9';
+
+    for ch in 'a'..='z' {
+        print(ch);
+    }
+}
+
+// Test range in array literal (spread)
+fn test_range_in_array_literal() {
+    let ones_to_ten = [1..=10];  // If supported
+}
+
+// Test range comparison
+fn test_range_comparison() {
+    let r1 = 0..10;
+    let r2 = 0..10;
+    let equal = r1 == r2;
+}
+
+// Main function that calls all tests
+fn main() {
+    test_exclusive_ranges();
+    test_inclusive_ranges();
+    test_from_start_ranges();
+    test_to_end_ranges();
+    test_full_range();
+    test_expr_ranges();
+    test_range_in_for_loop();
+    test_range_with_step();
+    test_reverse_range();
+    test_range_as_slice_index();
+    test_inclusive_slice();
+    test_range_methods();
+    test_range_length();
+    test_range_as_iterator();
+    test_chained_range_operations();
+    test_float_ranges();
+    test_character_ranges();
+    test_range_in_array_literal();
+    test_range_comparison();
+}

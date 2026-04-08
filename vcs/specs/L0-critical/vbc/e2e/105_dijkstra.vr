@@ -1,0 +1,272 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, graph, dijkstra, shortest-path
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Dijkstra's shortest path on a 4-node weighted graph using adjacency matrix
+
+// ============================================================================
+// Fixed-size 4-element array
+// ============================================================================
+
+type Arr4 is {
+    e0: Int, e1: Int, e2: Int, e3: Int
+};
+
+fn a4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+
+fn a4_set(a: Arr4, i: Int, val: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 }
+    }
+}
+
+fn a4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+fn a4_fill(v: Int) -> Arr4 {
+    Arr4 { e0: v, e1: v, e2: v, e3: v }
+}
+
+// ============================================================================
+// 4x4 adjacency matrix (flattened into 16 fields)
+// 9999 = no direct edge
+// ============================================================================
+
+type Mat4x4 is {
+    r0c0: Int, r0c1: Int, r0c2: Int, r0c3: Int,
+    r1c0: Int, r1c1: Int, r1c2: Int, r1c3: Int,
+    r2c0: Int, r2c1: Int, r2c2: Int, r2c3: Int,
+    r3c0: Int, r3c1: Int, r3c2: Int, r3c3: Int
+};
+
+fn mat_get(m: Mat4x4, r: Int, c: Int) -> Int {
+    let idx = r * 4 + c;
+    if idx == 0 { m.r0c0 }
+    else if idx == 1 { m.r0c1 }
+    else if idx == 2 { m.r0c2 }
+    else if idx == 3 { m.r0c3 }
+    else if idx == 4 { m.r1c0 }
+    else if idx == 5 { m.r1c1 }
+    else if idx == 6 { m.r1c2 }
+    else if idx == 7 { m.r1c3 }
+    else if idx == 8 { m.r2c0 }
+    else if idx == 9 { m.r2c1 }
+    else if idx == 10 { m.r2c2 }
+    else if idx == 11 { m.r2c3 }
+    else if idx == 12 { m.r3c0 }
+    else if idx == 13 { m.r3c1 }
+    else if idx == 14 { m.r3c2 }
+    else { m.r3c3 }
+}
+
+// ============================================================================
+// Dijkstra's algorithm for 4 nodes
+// Returns dist array (shortest distances from source)
+// ============================================================================
+
+fn find_min_unvisited(dist: Arr4, visited: Arr4) -> Int {
+    let mut min_val = 9999;
+    let mut min_idx = -1;
+    let mut i = 0;
+    while i < 4 {
+        if a4_get(visited, i) == 0 {
+            let d = a4_get(dist, i);
+            if d < min_val {
+                min_val = d;
+                min_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+    min_idx
+}
+
+fn dijkstra(graph: Mat4x4, source: Int) -> Arr4 {
+    let inf = 9999;
+    let mut dist = a4_fill(inf);
+    let mut visited = a4_zeros();
+
+    // Distance to source is 0
+    dist = a4_set(dist, source, 0);
+
+    let mut step = 0;
+    while step < 4 {
+        // Find unvisited node with minimum distance
+        let u = find_min_unvisited(dist, visited);
+        if u == -1 {
+            // All remaining nodes are unreachable
+            step = 4;
+        } else {
+            visited = a4_set(visited, u, 1);
+
+            // Relax all neighbors of u
+            let mut v = 0;
+            while v < 4 {
+                if a4_get(visited, v) == 0 {
+                    let edge_w = mat_get(graph, u, v);
+                    if edge_w < inf {
+                        let new_dist = a4_get(dist, u) + edge_w;
+                        if new_dist < a4_get(dist, v) {
+                            dist = a4_set(dist, v, new_dist);
+                        }
+                    }
+                }
+                v = v + 1;
+            }
+            step = step + 1;
+        }
+    }
+
+    dist
+}
+
+// ============================================================================
+// Test 1: Simple linear graph 0->1->2->3
+// ============================================================================
+
+@test
+fn test_linear_graph() {
+    let inf = 9999;
+    // 0 -1-> 1 -2-> 2 -3-> 3
+    let g = Mat4x4 {
+        r0c0: 0,   r0c1: 1,   r0c2: inf, r0c3: inf,
+        r1c0: inf, r1c1: 0,   r1c2: 2,   r1c3: inf,
+        r2c0: inf, r2c1: inf, r2c2: 0,   r2c3: 3,
+        r3c0: inf, r3c1: inf, r3c2: inf, r3c3: 0
+    };
+
+    let dist = dijkstra(g, 0);
+    assert_eq(a4_get(dist, 0), 0);
+    assert_eq(a4_get(dist, 1), 1);
+    assert_eq(a4_get(dist, 2), 3);   // 1 + 2
+    assert_eq(a4_get(dist, 3), 6);   // 1 + 2 + 3
+
+    print("  test_linear_graph: ok");
+}
+
+// ============================================================================
+// Test 2: Graph with shortcut — shorter path via intermediate node
+// ============================================================================
+
+@test
+fn test_shortcut_graph() {
+    let inf = 9999;
+    // 0 -10-> 1
+    // 0 -3->  2, 2 -3-> 1  (shorter path: 0->2->1 = 6 < 10)
+    // 1 -1->  3
+    // 2 -8->  3
+    let g = Mat4x4 {
+        r0c0: 0,   r0c1: 10,  r0c2: 3,   r0c3: inf,
+        r1c0: inf, r1c1: 0,   r1c2: inf, r1c3: 1,
+        r2c0: inf, r2c1: 3,   r2c2: 0,   r2c3: 8,
+        r3c0: inf, r3c1: inf, r3c2: inf, r3c3: 0
+    };
+
+    let dist = dijkstra(g, 0);
+    assert_eq(a4_get(dist, 0), 0);
+    assert_eq(a4_get(dist, 1), 6);   // 0->2->1 = 3+3
+    assert_eq(a4_get(dist, 2), 3);   // 0->2
+    assert_eq(a4_get(dist, 3), 7);   // 0->2->1->3 = 3+3+1
+
+    print("  test_shortcut_graph: ok");
+}
+
+// ============================================================================
+// Test 3: Fully connected graph
+// ============================================================================
+
+@test
+fn test_fully_connected() {
+    // All edges weight 5, but diagonal shortcuts exist
+    let g = Mat4x4 {
+        r0c0: 0, r0c1: 5, r0c2: 5, r0c3: 5,
+        r1c0: 5, r1c1: 0, r1c2: 5, r1c3: 5,
+        r2c0: 5, r2c1: 5, r2c2: 0, r2c3: 5,
+        r3c0: 5, r3c1: 5, r3c2: 5, r3c3: 0
+    };
+
+    let dist = dijkstra(g, 0);
+    assert_eq(a4_get(dist, 0), 0);
+    assert_eq(a4_get(dist, 1), 5);
+    assert_eq(a4_get(dist, 2), 5);
+    assert_eq(a4_get(dist, 3), 5);
+
+    // From node 2
+    let dist2 = dijkstra(g, 2);
+    assert_eq(a4_get(dist2, 0), 5);
+    assert_eq(a4_get(dist2, 2), 0);
+
+    print("  test_fully_connected: ok");
+}
+
+// ============================================================================
+// Test 4: Disconnected node
+// ============================================================================
+
+@test
+fn test_disconnected_node() {
+    let inf = 9999;
+    // Node 3 is unreachable from node 0
+    let g = Mat4x4 {
+        r0c0: 0,   r0c1: 2,   r0c2: 4,   r0c3: inf,
+        r1c0: inf, r1c1: 0,   r1c2: 1,   r1c3: inf,
+        r2c0: inf, r2c1: inf, r2c2: 0,   r2c3: inf,
+        r3c0: inf, r3c1: inf, r3c2: inf, r3c3: 0
+    };
+
+    let dist = dijkstra(g, 0);
+    assert_eq(a4_get(dist, 0), 0);
+    assert_eq(a4_get(dist, 1), 2);
+    assert_eq(a4_get(dist, 2), 3);    // 0->1->2 = 2+1
+    assert_eq(a4_get(dist, 3), inf);  // unreachable
+
+    print("  test_disconnected_node: ok");
+}
+
+// ============================================================================
+// Test 5: Diamond graph — two paths, pick shorter
+// ============================================================================
+
+@test
+fn test_diamond_graph() {
+    let inf = 9999;
+    // 0 -1-> 1, 0 -4-> 2
+    // 1 -2-> 3, 2 -1-> 3
+    // Top path: 0->1->3 = 3, Bottom path: 0->2->3 = 5
+    let g = Mat4x4 {
+        r0c0: 0,   r0c1: 1,   r0c2: 4,   r0c3: inf,
+        r1c0: inf, r1c1: 0,   r1c2: inf, r1c3: 2,
+        r2c0: inf, r2c1: inf, r2c2: 0,   r2c3: 1,
+        r3c0: inf, r3c1: inf, r3c2: inf, r3c3: 0
+    };
+
+    let dist = dijkstra(g, 0);
+    assert_eq(a4_get(dist, 0), 0);
+    assert_eq(a4_get(dist, 1), 1);
+    assert_eq(a4_get(dist, 2), 4);
+    assert_eq(a4_get(dist, 3), 3);  // via 0->1->3, not 0->2->3
+
+    print("  test_diamond_graph: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_linear_graph();
+    test_shortcut_graph();
+    test_fully_connected();
+    test_disconnected_node();
+    test_diamond_graph();
+    print("[OK] 105_dijkstra");
+    0
+}

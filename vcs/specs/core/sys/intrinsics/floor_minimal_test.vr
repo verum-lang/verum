@@ -1,0 +1,21 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Minimal floor test
+
+module test.stdlib.sys.intrinsics.floor_minimal_test;
+
+mount core.intrinsics.{floor_f64};
+
+fn main() {
+    let x: Float64 = 3.7;
+    let result = floor_f64(x);
+    print(f"floor(3.7) = {result}");
+
+    let y: Float64 = 3.0;
+    let result2 = floor_f64(y);
+    print(f"floor(3.0) = {result2}");
+
+    print("Done");
+}

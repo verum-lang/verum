@@ -1,0 +1,216 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, impl, methods, chaining, user-types
+// @expected-exit: 0
+
+// Test: multiple impl blocks and method chaining — defining methods on
+//       user types, calling them, and chaining return values.
+
+type Point2D is {
+    x: Int,
+    y: Int,
+};
+
+implement Point2D {
+    fn new(x: Int, y: Int) -> Point2D {
+        Point2D { x: x, y: y }
+    }
+
+    fn translate(&self, dx: Int, dy: Int) -> Point2D {
+        Point2D { x: self.x + dx, y: self.y + dy }
+    }
+
+    fn scale(&self, factor: Int) -> Point2D {
+        Point2D { x: self.x * factor, y: self.y * factor }
+    }
+
+    fn distance_sq(&self, other: &Point2D) -> Int {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        dx * dx + dy * dy
+    }
+
+    fn get_x(&self) -> Int {
+        self.x
+    }
+
+    fn get_y(&self) -> Int {
+        self.y
+    }
+}
+
+type Accumulator is {
+    value: Int,
+};
+
+implement Accumulator {
+    fn new() -> Accumulator {
+        Accumulator { value: 0 }
+    }
+
+    fn add(&mut self, n: Int) {
+        self.value = self.value + n;
+    }
+
+    fn multiply(&mut self, n: Int) {
+        self.value = self.value * n;
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+
+    fn reset(&mut self) {
+        self.value = 0;
+    }
+}
+
+type Bounds is {
+    min_val: Int,
+    max_val: Int,
+    count: Int,
+};
+
+implement Bounds {
+    fn new() -> Bounds {
+        Bounds { min_val: 999999, max_val: 0 - 999999, count: 0 }
+    }
+
+    fn update(&mut self, val: Int) {
+        if (val < self.min_val) {
+            self.min_val = val;
+        }
+        if (val > self.max_val) {
+            self.max_val = val;
+        }
+        self.count = self.count + 1;
+    }
+
+    fn range(&self) -> Int {
+        self.max_val - self.min_val
+    }
+
+    fn get_min(&self) -> Int {
+        self.min_val
+    }
+
+    fn get_max(&self) -> Int {
+        self.max_val
+    }
+
+    fn get_count(&self) -> Int {
+        self.count
+    }
+}
+
+fn main() -> Int {
+    // Test 1: basic constructor and getters
+    let p = Point2D.new(3, 4);
+    if (p.get_x() != 3) {
+        print(f"FAIL test1a: x={p.get_x()}");
+        return 1;
+    }
+    if (p.get_y() != 4) {
+        print(f"FAIL test1b: y={p.get_y()}");
+        return 1;
+    }
+
+    // Test 2: translate returns new Point2D
+    let p2 = p.translate(10, 20);
+    if (p2.get_x() != 13) {
+        print(f"FAIL test2a: x={p2.get_x()}");
+        return 1;
+    }
+    if (p2.get_y() != 24) {
+        print(f"FAIL test2b: y={p2.get_y()}");
+        return 1;
+    }
+
+    // Test 3: scale
+    let p3 = Point2D.new(5, 3).scale(4);
+    if (p3.get_x() != 20) {
+        print(f"FAIL test3a: x={p3.get_x()}");
+        return 1;
+    }
+    if (p3.get_y() != 12) {
+        print(f"FAIL test3b: y={p3.get_y()}");
+        return 1;
+    }
+
+    // Test 4: distance_sq between two points
+    let a = Point2D.new(0, 0);
+    let b = Point2D.new(3, 4);
+    let dsq = a.distance_sq(&b);
+    // 3*3 + 4*4 = 25
+    if (dsq != 25) {
+        print(f"FAIL test4: distance_sq={dsq}");
+        return 1;
+    }
+
+    // Test 5: mutable accumulator with add/multiply
+    let mut acc = Accumulator.new();
+    acc.add(10);
+    acc.add(20);
+    acc.multiply(3);
+    // (0 + 10 + 20) * 3 = 90
+    if (acc.get() != 90) {
+        print(f"FAIL test5a: acc={acc.get()}");
+        return 1;
+    }
+    acc.reset();
+    if (acc.get() != 0) {
+        print(f"FAIL test5b: after reset={acc.get()}");
+        return 1;
+    }
+
+    // Test 6: accumulator in a loop
+    let mut acc2 = Accumulator.new();
+    let mut i = 1;
+    while (i <= 10) {
+        acc2.add(i);
+        i = i + 1;
+    }
+    // 1+2+...+10 = 55
+    if (acc2.get() != 55) {
+        print(f"FAIL test6: sum={acc2.get()}");
+        return 1;
+    }
+
+    // Test 7: Bounds tracker
+    let mut tracker = Bounds.new();
+    let values = [42, 17, 93, 5, 68, 31, 85, 2, 56];
+    let mut j = 0;
+    while (j < values.len()) {
+        tracker.update(values[j]);
+        j = j + 1;
+    }
+    if (tracker.get_min() != 2) {
+        print(f"FAIL test7a: min={tracker.get_min()}");
+        return 1;
+    }
+    if (tracker.get_max() != 93) {
+        print(f"FAIL test7b: max={tracker.get_max()}");
+        return 1;
+    }
+    if (tracker.get_count() != 9) {
+        print(f"FAIL test7c: count={tracker.get_count()}");
+        return 1;
+    }
+    let r = tracker.range();
+    // 93 - 2 = 91
+    if (r != 91) {
+        print(f"FAIL test7d: range={r}");
+        return 1;
+    }
+
+    // Test 8: method call on freshly constructed value
+    let origin_x = Point2D.new(0, 0).translate(7, 11).get_x();
+    if (origin_x != 7) {
+        print(f"FAIL test8: origin_x={origin_x}");
+        return 1;
+    }
+
+    print("901_impl_method_chaining: PASS");
+    0
+}

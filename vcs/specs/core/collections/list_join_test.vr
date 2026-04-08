@@ -1,0 +1,234 @@
+// =============================================================================
+// list_join_test.vr - Tests for List join utility functions
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, list, join, text
+// @description: Comprehensive tests for join_text and join_ints utility
+//               functions that join list elements into Text with separators.
+// =============================================================================
+
+mount core.collections.list.{List, join_text, join_ints};
+
+// =============================================================================
+// Section 1: join_text Basic Tests
+// =============================================================================
+
+@test
+fn test_join_text_basic() {
+    let words: List<Text> = ["hello", "world"];
+    let result = join_text(&words, " ");
+    assert_eq(result, "hello world");
+}
+
+@test
+fn test_join_text_comma_separator() {
+    let items: List<Text> = ["a", "b", "c"];
+    let result = join_text(&items, ", ");
+    assert_eq(result, "a, b, c");
+}
+
+@test
+fn test_join_text_empty_separator() {
+    let items: List<Text> = ["foo", "bar", "baz"];
+    let result = join_text(&items, "");
+    assert_eq(result, "foobarbaz");
+}
+
+@test
+fn test_join_text_single_element() {
+    let items: List<Text> = ["alone"];
+    let result = join_text(&items, ", ");
+    assert_eq(result, "alone");
+}
+
+@test
+fn test_join_text_empty_list() {
+    let items: List<Text> = [];
+    let result = join_text(&items, ", ");
+    assert_eq(result, "");
+}
+
+@test
+fn test_join_text_two_elements() {
+    let items: List<Text> = ["left", "right"];
+    let result = join_text(&items, " | ");
+    assert_eq(result, "left | right");
+}
+
+@test
+fn test_join_text_dash_separator() {
+    let items: List<Text> = ["2026", "02", "18"];
+    let result = join_text(&items, "-");
+    assert_eq(result, "2026-02-18");
+}
+
+@test
+fn test_join_text_newline_separator() {
+    let items: List<Text> = ["line1", "line2", "line3"];
+    let result = join_text(&items, "\n");
+    assert_eq(result, "line1\nline2\nline3");
+}
+
+@test
+fn test_join_text_long_separator() {
+    let items: List<Text> = ["a", "b"];
+    let result = join_text(&items, " --- ");
+    assert_eq(result, "a --- b");
+}
+
+@test
+fn test_join_text_empty_strings() {
+    let items: List<Text> = ["", "", ""];
+    let result = join_text(&items, ",");
+    assert_eq(result, ",,");
+}
+
+@test
+fn test_join_text_mixed_empty() {
+    let items: List<Text> = ["a", "", "c"];
+    let result = join_text(&items, ",");
+    assert_eq(result, "a,,c");
+}
+
+@test
+fn test_join_text_path_separator() {
+    let parts: List<Text> = ["usr", "local", "bin"];
+    let result = join_text(&parts, "/");
+    assert_eq(result, "usr/local/bin");
+}
+
+// =============================================================================
+// Section 2: join_ints Basic Tests
+// =============================================================================
+
+@test
+fn test_join_ints_basic() {
+    let nums: List<Int> = [1, 2, 3];
+    let result = join_ints(&nums, ", ");
+    assert_eq(result, "1, 2, 3");
+}
+
+@test
+fn test_join_ints_dash_separator() {
+    let nums: List<Int> = [10, 20, 30];
+    let result = join_ints(&nums, "-");
+    assert_eq(result, "10-20-30");
+}
+
+@test
+fn test_join_ints_single_element() {
+    let nums: List<Int> = [42];
+    let result = join_ints(&nums, ", ");
+    assert_eq(result, "42");
+}
+
+@test
+fn test_join_ints_empty_list() {
+    let nums: List<Int> = [];
+    let result = join_ints(&nums, ", ");
+    assert_eq(result, "");
+}
+
+@test
+fn test_join_ints_empty_separator() {
+    let nums: List<Int> = [1, 2, 3];
+    let result = join_ints(&nums, "");
+    assert_eq(result, "123");
+}
+
+@test
+fn test_join_ints_negative_numbers() {
+    let nums: List<Int> = [-1, 0, 1];
+    let result = join_ints(&nums, " ");
+    assert_eq(result, "-1 0 1");
+}
+
+@test
+fn test_join_ints_large_numbers() {
+    let nums: List<Int> = [1000000, 2000000];
+    let result = join_ints(&nums, "+");
+    assert_eq(result, "1000000+2000000");
+}
+
+@test
+fn test_join_ints_two_elements() {
+    let nums: List<Int> = [0, 0];
+    let result = join_ints(&nums, ":");
+    assert_eq(result, "0:0");
+}
+
+// =============================================================================
+// Section 3: join_text Edge Cases
+// =============================================================================
+
+@test
+fn test_join_text_unicode_separator() {
+    let items: List<Text> = ["a", "b", "c"];
+    let result = join_text(&items, " | ");
+    assert_eq(result, "a | b | c");
+}
+
+@test
+fn test_join_text_many_elements() {
+    let mut items: List<Text> = [];
+    items.push("a");
+    items.push("b");
+    items.push("c");
+    items.push("d");
+    items.push("e");
+    items.push("f");
+    items.push("g");
+    items.push("h");
+    items.push("i");
+    items.push("j");
+    let result = join_text(&items, ",");
+    assert_eq(result, "a,b,c,d,e,f,g,h,i,j");
+}
+
+@test
+fn test_join_text_csv_format() {
+    let headers: List<Text> = ["name", "age", "city"];
+    let result = join_text(&headers, ",");
+    assert_eq(result, "name,age,city");
+}
+
+@test
+fn test_join_text_sql_format() {
+    let columns: List<Text> = ["id", "name", "email"];
+    let result = join_text(&columns, ", ");
+    assert_eq(result, "id, name, email");
+}
+
+// =============================================================================
+// Section 4: join_ints Edge Cases
+// =============================================================================
+
+@test
+fn test_join_ints_many_elements() {
+    let mut nums: List<Int> = [];
+    for i in 0..10 {
+        nums.push(i);
+    }
+    let result = join_ints(&nums, ",");
+    assert_eq(result, "0,1,2,3,4,5,6,7,8,9");
+}
+
+@test
+fn test_join_ints_all_same() {
+    let nums: List<Int> = [5, 5, 5, 5];
+    let result = join_ints(&nums, "-");
+    assert_eq(result, "5-5-5-5");
+}
+
+@test
+fn test_join_ints_zero() {
+    let nums: List<Int> = [0];
+    let result = join_ints(&nums, "x");
+    assert_eq(result, "0");
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

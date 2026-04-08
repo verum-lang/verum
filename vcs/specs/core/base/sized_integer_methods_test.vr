@@ -1,0 +1,851 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: sized-integers, methods, consistency
+// @description: Tests for consistency gap fills in sized integer methods:
+//   Int16: checked_mul, saturating_mul, leading_zeros, trailing_zeros, count_ones, count_zeros, rotate_left, rotate_right
+//   Int32: wrapping_mul, saturating_mul, count_zeros
+//   Int64: wrapping_mul, saturating_mul, count_zeros
+//   Int128: wrapping_mul, saturating_mul, count_zeros, rotate_left, rotate_right
+//   UInt16: leading_zeros, trailing_zeros, count_ones, count_zeros, rotate_left, rotate_right
+//   ISize: full method suite (abs, signum, min, max, clamp, checked_*, wrapping_*, saturating_*, bit ops)
+//   USize: full method suite (min, max, clamp, checked_*, wrapping_*, saturating_*, bit ops)
+
+mount core.base.{Maybe, Eq, Ord, Clone, Default, Debug, Display};
+
+// =============================================================================
+// Int16 — newly added methods
+// =============================================================================
+
+@test
+fn test_int16_checked_mul_normal() {
+    let a = 10 as Int16;
+    let b = 20 as Int16;
+    let result = a.checked_mul(b);
+    assert(result is Some);
+}
+
+@test
+fn test_int16_checked_mul_overflow() {
+    let a = 32767 as Int16;  // Int16.MAX
+    let b = 2 as Int16;
+    let result = a.checked_mul(b);
+    assert(result is None);
+}
+
+@test
+fn test_int16_checked_mul_zero() {
+    let a = 0 as Int16;
+    let b = 32767 as Int16;
+    let result = a.checked_mul(b);
+    assert(result is Some);
+}
+
+@test
+fn test_int16_saturating_mul_normal() {
+    let a = 10 as Int16;
+    let b = 20 as Int16;
+    let result = a.saturating_mul(b);
+    assert_eq(result, 200 as Int16);
+}
+
+@test
+fn test_int16_saturating_mul_overflow() {
+    let a = 32767 as Int16;
+    let b = 2 as Int16;
+    let result = a.saturating_mul(b);
+    assert_eq(result, 32767 as Int16);  // Saturates to MAX
+}
+
+@test
+fn test_int16_leading_zeros() {
+    let val = 1 as Int16;
+    let lz = val.leading_zeros();
+    assert(lz == 15);
+}
+
+@test
+fn test_int16_leading_zeros_zero() {
+    let val = 0 as Int16;
+    let lz = val.leading_zeros();
+    assert(lz == 16);
+}
+
+@test
+fn test_int16_trailing_zeros() {
+    let val = 8 as Int16;  // 0b1000
+    let tz = val.trailing_zeros();
+    assert(tz == 3);
+}
+
+@test
+fn test_int16_trailing_zeros_one() {
+    let val = 1 as Int16;
+    let tz = val.trailing_zeros();
+    assert(tz == 0);
+}
+
+@test
+fn test_int16_count_ones() {
+    let val = 7 as Int16;  // 0b0111
+    let ones = val.count_ones();
+    assert(ones == 3);
+}
+
+@test
+fn test_int16_count_ones_max() {
+    let val = 32767 as Int16;  // all 15 lower bits set
+    let ones = val.count_ones();
+    assert(ones == 15);
+}
+
+@test
+fn test_int16_count_zeros() {
+    let val = 0 as Int16;
+    let zeros = val.count_zeros();
+    assert(zeros == 16);
+}
+
+@test
+fn test_int16_count_zeros_all_ones() {
+    // -1 as Int16 = 0xFFFF = all bits set
+    let val = 32767 as Int16;
+    let ones = val.count_ones();
+    let zeros = val.count_zeros();
+    assert_eq(ones + zeros, 16);
+}
+
+@test
+fn test_int16_rotate_left() {
+    let val = 1 as Int16;
+    let rotated = val.rotate_left(4);
+    assert_eq(rotated, 16);
+}
+
+@test
+fn test_int16_rotate_right() {
+    let val = 16 as Int16;  // 0b10000
+    let rotated = val.rotate_right(4);
+    assert_eq(rotated, 1);
+}
+
+// =============================================================================
+// Int32 — newly added methods
+// =============================================================================
+
+@test
+fn test_int32_wrapping_mul_normal() {
+    let a = 100 as Int32;
+    let b = 200 as Int32;
+    let result = a.wrapping_mul(b);
+    assert_eq(result, 20000 as Int32);
+}
+
+@test
+fn test_int32_wrapping_mul_overflow() {
+    let a = 2147483647 as Int32;  // Int32.MAX
+    let b = 2 as Int32;
+    let result = a.wrapping_mul(b);
+    // Wraps around — result is -2
+    assert(result != 2147483647 as Int32);
+}
+
+@test
+fn test_int32_saturating_mul_normal() {
+    let a = 100 as Int32;
+    let b = 200 as Int32;
+    let result = a.saturating_mul(b);
+    assert_eq(result, 20000 as Int32);
+}
+
+@test
+fn test_int32_saturating_mul_overflow() {
+    let a = 2147483647 as Int32;
+    let b = 2 as Int32;
+    let result = a.saturating_mul(b);
+    assert_eq(result, 2147483647 as Int32);  // Saturates to MAX
+}
+
+@test
+fn test_int32_count_zeros() {
+    let val = 0 as Int32;
+    let zeros = val.count_zeros();
+    assert(zeros == 32);
+}
+
+@test
+fn test_int32_count_zeros_consistency() {
+    let val = 255 as Int32;  // 8 ones
+    let ones = val.count_ones();
+    let zeros = val.count_zeros();
+    assert_eq(ones + zeros, 32);
+}
+
+// =============================================================================
+// Int64 — newly added methods
+// =============================================================================
+
+@test
+fn test_int64_wrapping_mul_normal() {
+    let a = 1000 as Int64;
+    let b = 2000 as Int64;
+    let result = a.wrapping_mul(b);
+    assert_eq(result, 2000000 as Int64);
+}
+
+@test
+fn test_int64_wrapping_mul_overflow() {
+    let a = 9223372036854775807 as Int64;  // Int64.MAX
+    let b = 2 as Int64;
+    let result = a.wrapping_mul(b);
+    assert(result != 9223372036854775807 as Int64);  // Wrapped
+}
+
+@test
+fn test_int64_saturating_mul_normal() {
+    let a = 1000 as Int64;
+    let b = 2000 as Int64;
+    let result = a.saturating_mul(b);
+    assert_eq(result, 2000000 as Int64);
+}
+
+@test
+fn test_int64_saturating_mul_overflow() {
+    let a = 9223372036854775807 as Int64;
+    let b = 2 as Int64;
+    let result = a.saturating_mul(b);
+    assert_eq(result, 9223372036854775807 as Int64);  // Saturates to MAX
+}
+
+@test
+fn test_int64_count_zeros() {
+    let val = 0 as Int64;
+    let zeros = val.count_zeros();
+    assert(zeros == 64);
+}
+
+@test
+fn test_int64_count_zeros_consistency() {
+    let val = 42 as Int64;
+    let ones = val.count_ones();
+    let zeros = val.count_zeros();
+    assert_eq(ones + zeros, 64);
+}
+
+// =============================================================================
+// Int128 — newly added methods
+// =============================================================================
+
+@test
+fn test_int128_wrapping_mul_normal() {
+    let a = 1000 as Int128;
+    let b = 2000 as Int128;
+    let result = a.wrapping_mul(b);
+    assert_eq(result, 2000000 as Int128);
+}
+
+@test
+fn test_int128_saturating_mul_normal() {
+    let a = 1000 as Int128;
+    let b = 2000 as Int128;
+    let result = a.saturating_mul(b);
+    assert_eq(result, 2000000 as Int128);
+}
+
+@test
+fn test_int128_count_zeros() {
+    let val = 0 as Int128;
+    let zeros = val.count_zeros();
+    assert(zeros == 128);
+}
+
+@test
+fn test_int128_count_zeros_consistency() {
+    let val = 255 as Int128;
+    let ones = val.count_ones();
+    let zeros = val.count_zeros();
+    assert_eq(ones + zeros, 128);
+}
+
+@test
+fn test_int128_rotate_left() {
+    let val = 1 as Int128;
+    let rotated = val.rotate_left(8);
+    assert_eq(rotated, 256);
+}
+
+@test
+fn test_int128_rotate_right() {
+    let val = 256 as Int128;
+    let rotated = val.rotate_right(8);
+    assert_eq(rotated, 1);
+}
+
+// =============================================================================
+// UInt16 — newly added methods
+// =============================================================================
+
+@test
+fn test_uint16_leading_zeros() {
+    let val = 1 as UInt16;
+    let lz = val.leading_zeros();
+    assert(lz == 15);
+}
+
+@test
+fn test_uint16_leading_zeros_zero() {
+    let val = 0 as UInt16;
+    let lz = val.leading_zeros();
+    assert(lz == 16);
+}
+
+@test
+fn test_uint16_leading_zeros_max() {
+    let val = 65535 as UInt16;
+    let lz = val.leading_zeros();
+    assert(lz == 0);
+}
+
+@test
+fn test_uint16_trailing_zeros() {
+    let val = 16 as UInt16;  // 0b10000
+    let tz = val.trailing_zeros();
+    assert(tz == 4);
+}
+
+@test
+fn test_uint16_trailing_zeros_one() {
+    let val = 1 as UInt16;
+    let tz = val.trailing_zeros();
+    assert(tz == 0);
+}
+
+@test
+fn test_uint16_count_ones() {
+    let val = 7 as UInt16;  // 0b111
+    let ones = val.count_ones();
+    assert(ones == 3);
+}
+
+@test
+fn test_uint16_count_ones_max() {
+    let val = 65535 as UInt16;
+    let ones = val.count_ones();
+    assert(ones == 16);
+}
+
+@test
+fn test_uint16_count_zeros() {
+    let val = 0 as UInt16;
+    let zeros = val.count_zeros();
+    assert(zeros == 16);
+}
+
+@test
+fn test_uint16_count_zeros_consistency() {
+    let val = 255 as UInt16;
+    let ones = val.count_ones();
+    let zeros = val.count_zeros();
+    assert_eq(ones + zeros, 16);
+}
+
+@test
+fn test_uint16_rotate_left() {
+    let val = 1 as UInt16;
+    let rotated = val.rotate_left(4);
+    assert_eq(rotated, 16);
+}
+
+@test
+fn test_uint16_rotate_right() {
+    let val = 16 as UInt16;
+    let rotated = val.rotate_right(4);
+    assert_eq(rotated, 1);
+}
+
+// =============================================================================
+// ISize — full method suite (all new)
+// =============================================================================
+
+@test
+fn test_isize_abs_positive() {
+    let val = 42 as ISize;
+    assert_eq(val.abs(), 42 as ISize);
+}
+
+@test
+fn test_isize_abs_negative() {
+    let val = 0 as ISize;
+    let neg = val - (42 as ISize);
+    let result = neg.abs();
+    assert_eq(result, 42 as ISize);
+}
+
+@test
+fn test_isize_signum_positive() {
+    let val = 100 as ISize;
+    assert_eq(val.signum(), 1 as ISize);
+}
+
+@test
+fn test_isize_signum_zero() {
+    let val = 0 as ISize;
+    assert_eq(val.signum(), 0 as ISize);
+}
+
+@test
+fn test_isize_min() {
+    let a = 10 as ISize;
+    let b = 20 as ISize;
+    assert_eq(a.min(b), 10 as ISize);
+}
+
+@test
+fn test_isize_max() {
+    let a = 10 as ISize;
+    let b = 20 as ISize;
+    assert_eq(a.max(b), 20 as ISize);
+}
+
+@test
+fn test_isize_clamp() {
+    let val = 100 as ISize;
+    let result = val.clamp(0 as ISize, 50 as ISize);
+    assert_eq(result, 50 as ISize);
+}
+
+@test
+fn test_isize_clamp_within() {
+    let val = 25 as ISize;
+    let result = val.clamp(0 as ISize, 50 as ISize);
+    assert_eq(result, 25 as ISize);
+}
+
+@test
+fn test_isize_checked_add_normal() {
+    let a = 10 as ISize;
+    let b = 20 as ISize;
+    let result = a.checked_add(b);
+    assert(result is Some);
+}
+
+@test
+fn test_isize_checked_sub_normal() {
+    let a = 20 as ISize;
+    let b = 10 as ISize;
+    let result = a.checked_sub(b);
+    assert(result is Some);
+}
+
+@test
+fn test_isize_checked_mul_normal() {
+    let a = 10 as ISize;
+    let b = 20 as ISize;
+    let result = a.checked_mul(b);
+    assert(result is Some);
+}
+
+@test
+fn test_isize_wrapping_add() {
+    let a = 10 as ISize;
+    let b = 20 as ISize;
+    let result = a.wrapping_add(b);
+    assert_eq(result, 30 as ISize);
+}
+
+@test
+fn test_isize_wrapping_sub() {
+    let a = 30 as ISize;
+    let b = 10 as ISize;
+    let result = a.wrapping_sub(b);
+    assert_eq(result, 20 as ISize);
+}
+
+@test
+fn test_isize_wrapping_mul() {
+    let a = 10 as ISize;
+    let b = 20 as ISize;
+    let result = a.wrapping_mul(b);
+    assert_eq(result, 200 as ISize);
+}
+
+@test
+fn test_isize_saturating_add() {
+    let a = 10 as ISize;
+    let b = 20 as ISize;
+    let result = a.saturating_add(b);
+    assert_eq(result, 30 as ISize);
+}
+
+@test
+fn test_isize_saturating_sub() {
+    let a = 30 as ISize;
+    let b = 10 as ISize;
+    let result = a.saturating_sub(b);
+    assert_eq(result, 20 as ISize);
+}
+
+@test
+fn test_isize_saturating_mul() {
+    let a = 10 as ISize;
+    let b = 20 as ISize;
+    let result = a.saturating_mul(b);
+    assert_eq(result, 200 as ISize);
+}
+
+@test
+fn test_isize_leading_zeros() {
+    let val = 1 as ISize;
+    let lz = val.leading_zeros();
+    assert(lz == 63);
+}
+
+@test
+fn test_isize_trailing_zeros() {
+    let val = 8 as ISize;
+    let tz = val.trailing_zeros();
+    assert(tz == 3);
+}
+
+@test
+fn test_isize_count_ones() {
+    let val = 7 as ISize;
+    let ones = val.count_ones();
+    assert(ones == 3);
+}
+
+@test
+fn test_isize_count_zeros() {
+    let val = 0 as ISize;
+    let zeros = val.count_zeros();
+    assert(zeros == 64);
+}
+
+@test
+fn test_isize_count_consistency() {
+    let val = 42 as ISize;
+    let ones = val.count_ones();
+    let zeros = val.count_zeros();
+    assert_eq(ones + zeros, 64);
+}
+
+@test
+fn test_isize_rotate_left() {
+    let val = 1 as ISize;
+    let rotated = val.rotate_left(8);
+    assert_eq(rotated, 256 as ISize);
+}
+
+@test
+fn test_isize_rotate_right() {
+    let val = 256 as ISize;
+    let rotated = val.rotate_right(8);
+    assert_eq(rotated, 1 as ISize);
+}
+
+@test
+fn test_isize_swap_bytes() {
+    let val = 1 as ISize;
+    let swapped = val.swap_bytes();
+    // On 64-bit: 0x0100000000000000
+    assert(swapped != 1 as ISize);
+}
+
+@test
+fn test_isize_to_int() {
+    let val = 42 as ISize;
+    let result = val.to_int();
+    assert_eq(result, 42);
+}
+
+// =============================================================================
+// USize — full method suite (all new)
+// =============================================================================
+
+@test
+fn test_usize_min() {
+    let a = 10 as USize;
+    let b = 20 as USize;
+    assert_eq(a.min(b), 10 as USize);
+}
+
+@test
+fn test_usize_max() {
+    let a = 10 as USize;
+    let b = 20 as USize;
+    assert_eq(a.max(b), 20 as USize);
+}
+
+@test
+fn test_usize_clamp() {
+    let val = 100 as USize;
+    let result = val.clamp(0 as USize, 50 as USize);
+    assert_eq(result, 50 as USize);
+}
+
+@test
+fn test_usize_clamp_within() {
+    let val = 25 as USize;
+    let result = val.clamp(0 as USize, 50 as USize);
+    assert_eq(result, 25 as USize);
+}
+
+@test
+fn test_usize_checked_add() {
+    let a = 10 as USize;
+    let b = 20 as USize;
+    let result = a.checked_add(b);
+    assert(result is Some);
+}
+
+@test
+fn test_usize_checked_sub_normal() {
+    let a = 20 as USize;
+    let b = 10 as USize;
+    let result = a.checked_sub(b);
+    assert(result is Some);
+}
+
+@test
+fn test_usize_checked_sub_underflow() {
+    let a = 5 as USize;
+    let b = 10 as USize;
+    let result = a.checked_sub(b);
+    assert(result is None);
+}
+
+@test
+fn test_usize_checked_mul() {
+    let a = 10 as USize;
+    let b = 20 as USize;
+    let result = a.checked_mul(b);
+    assert(result is Some);
+}
+
+@test
+fn test_usize_wrapping_add() {
+    let a = 10 as USize;
+    let b = 20 as USize;
+    let result = a.wrapping_add(b);
+    assert_eq(result, 30 as USize);
+}
+
+@test
+fn test_usize_wrapping_sub() {
+    let a = 30 as USize;
+    let b = 10 as USize;
+    let result = a.wrapping_sub(b);
+    assert_eq(result, 20 as USize);
+}
+
+@test
+fn test_usize_wrapping_mul() {
+    let a = 10 as USize;
+    let b = 20 as USize;
+    let result = a.wrapping_mul(b);
+    assert_eq(result, 200 as USize);
+}
+
+@test
+fn test_usize_saturating_add() {
+    let a = 10 as USize;
+    let b = 20 as USize;
+    let result = a.saturating_add(b);
+    assert_eq(result, 30 as USize);
+}
+
+@test
+fn test_usize_saturating_sub() {
+    let a = 30 as USize;
+    let b = 10 as USize;
+    let result = a.saturating_sub(b);
+    assert_eq(result, 20 as USize);
+}
+
+@test
+fn test_usize_saturating_sub_underflow() {
+    let a = 5 as USize;
+    let b = 10 as USize;
+    let result = a.saturating_sub(b);
+    assert_eq(result, 0 as USize);
+}
+
+@test
+fn test_usize_saturating_mul() {
+    let a = 10 as USize;
+    let b = 20 as USize;
+    let result = a.saturating_mul(b);
+    assert_eq(result, 200 as USize);
+}
+
+@test
+fn test_usize_leading_zeros() {
+    let val = 1 as USize;
+    let lz = val.leading_zeros();
+    assert(lz == 63);
+}
+
+@test
+fn test_usize_leading_zeros_zero() {
+    let val = 0 as USize;
+    let lz = val.leading_zeros();
+    assert(lz == 64);
+}
+
+@test
+fn test_usize_trailing_zeros() {
+    let val = 8 as USize;
+    let tz = val.trailing_zeros();
+    assert(tz == 3);
+}
+
+@test
+fn test_usize_count_ones() {
+    let val = 7 as USize;
+    let ones = val.count_ones();
+    assert(ones == 3);
+}
+
+@test
+fn test_usize_count_zeros() {
+    let val = 0 as USize;
+    let zeros = val.count_zeros();
+    assert(zeros == 64);
+}
+
+@test
+fn test_usize_count_consistency() {
+    let val = 42 as USize;
+    let ones = val.count_ones();
+    let zeros = val.count_zeros();
+    assert_eq(ones + zeros, 64);
+}
+
+@test
+fn test_usize_rotate_left() {
+    let val = 1 as USize;
+    let rotated = val.rotate_left(8);
+    assert_eq(rotated, 256 as USize);
+}
+
+@test
+fn test_usize_rotate_right() {
+    let val = 256 as USize;
+    let rotated = val.rotate_right(8);
+    assert_eq(rotated, 1 as USize);
+}
+
+@test
+fn test_usize_swap_bytes() {
+    let val = 1 as USize;
+    let swapped = val.swap_bytes();
+    assert(swapped != 1 as USize);
+}
+
+@test
+fn test_usize_to_int() {
+    let val = 42 as USize;
+    let result = val.to_int();
+    assert_eq(result, 42);
+}
+
+// =============================================================================
+// Cross-type consistency checks
+// =============================================================================
+
+@test
+fn test_all_signed_have_count_zeros() {
+    // Verify count_zeros exists and is consistent for all signed types
+    let i16_zeros = (0 as Int16).count_zeros();
+    let i32_zeros = (0 as Int32).count_zeros();
+    let i64_zeros = (0 as Int64).count_zeros();
+    let i128_zeros = (0 as Int128).count_zeros();
+    let isize_zeros = (0 as ISize).count_zeros();
+
+    assert_eq(i16_zeros, 16);
+    assert_eq(i32_zeros, 32);
+    assert_eq(i64_zeros, 64);
+    assert_eq(i128_zeros, 128);
+    assert_eq(isize_zeros, 64);
+}
+
+@test
+fn test_all_unsigned_have_count_zeros() {
+    let u16_zeros = (0 as UInt16).count_zeros();
+    let u32_zeros = (0 as UInt32).count_zeros();
+    let u64_zeros = (0 as UInt64).count_zeros();
+    let u128_zeros = (0 as UInt128).count_zeros();
+    let usize_zeros = (0 as USize).count_zeros();
+
+    assert_eq(u16_zeros, 16);
+    assert_eq(u32_zeros, 32);
+    assert_eq(u64_zeros, 64);
+    assert_eq(u128_zeros, 128);
+    assert_eq(usize_zeros, 64);
+}
+
+@test
+fn test_all_signed_have_saturating_mul() {
+    let i8_r = (10 as Int8).saturating_mul(10 as Int8);
+    let i16_r = (10 as Int16).saturating_mul(10 as Int16);
+    let i32_r = (10 as Int32).saturating_mul(10 as Int32);
+    let i64_r = (10 as Int64).saturating_mul(10 as Int64);
+    let i128_r = (10 as Int128).saturating_mul(10 as Int128);
+    let isize_r = (10 as ISize).saturating_mul(10 as ISize);
+
+    assert_eq(i8_r, 100 as Int8);
+    assert_eq(i16_r, 100 as Int16);
+    assert_eq(i32_r, 100 as Int32);
+    assert_eq(i64_r, 100 as Int64);
+    assert_eq(i128_r, 100 as Int128);
+    assert_eq(isize_r, 100 as ISize);
+}
+
+@test
+fn test_all_unsigned_have_saturating_mul() {
+    let u8_r = (10 as UInt8).saturating_mul(10 as UInt8);
+    let u16_r = (10 as UInt16).saturating_mul(10 as UInt16);
+    let u32_r = (10 as UInt32).saturating_mul(10 as UInt32);
+    let u64_r = (10 as UInt64).saturating_mul(10 as UInt64);
+    let u128_r = (10 as UInt128).saturating_mul(10 as UInt128);
+    let usize_r = (10 as USize).saturating_mul(10 as USize);
+
+    assert_eq(u8_r, 100 as UInt8);
+    assert_eq(u16_r, 100 as UInt16);
+    assert_eq(u32_r, 100 as UInt32);
+    assert_eq(u64_r, 100 as UInt64);
+    assert_eq(u128_r, 100 as UInt128);
+    assert_eq(usize_r, 100 as USize);
+}
+
+@test
+fn test_all_wrapping_mul() {
+    let i8_r = (10 as Int8).wrapping_mul(10 as Int8);
+    let i16_r = (10 as Int16).wrapping_mul(10 as Int16);
+    let i32_r = (10 as Int32).wrapping_mul(10 as Int32);
+    let i64_r = (10 as Int64).wrapping_mul(10 as Int64);
+    let i128_r = (10 as Int128).wrapping_mul(10 as Int128);
+    let isize_r = (10 as ISize).wrapping_mul(10 as ISize);
+
+    assert_eq(i8_r, 100 as Int8);
+    assert_eq(i16_r, 100 as Int16);
+    assert_eq(i32_r, 100 as Int32);
+    assert_eq(i64_r, 100 as Int64);
+    assert_eq(i128_r, 100 as Int128);
+    assert_eq(isize_r, 100 as ISize);
+}
+
+@test
+fn test_all_have_to_int() {
+    assert_eq((42 as Int8).to_int(), 42);
+    assert_eq((42 as Int16).to_int(), 42);
+    assert_eq((42 as Int32).to_int(), 42);
+    assert_eq((42 as Int64).to_int(), 42);
+    assert_eq((42 as Int128).to_int(), 42);
+    assert_eq((42 as ISize).to_int(), 42);
+    assert_eq((42 as UInt8).to_int(), 42);
+    assert_eq((42 as UInt16).to_int(), 42);
+    assert_eq((42 as UInt32).to_int(), 42);
+    assert_eq((42 as UInt64).to_int(), 42);
+    assert_eq((42 as UInt128).to_int(), 42);
+    assert_eq((42 as USize).to_int(), 42);
+}

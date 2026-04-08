@@ -1,0 +1,14 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, undefined, variable, error
+// @description: Test undefined variable detection
+// @expected-error: E100
+
+meta fn test_undefined_var() -> Int {
+    x  // 'x' is not defined
+}
+
+fn main() {
+    @const assert_eq(test_undefined_var(), 0);
+}

@@ -1,0 +1,56 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, or, leading, error
+// @description: Test leading pipe in or-pattern at invalid positions
+// @expected-error: E088
+
+type Color is Red | Green | Blue;
+type Option<T> is None | Some(T);
+
+fn test_leading_pipe_first_arm() {
+    let color = Red;
+
+    // Invalid: leading pipe on first match arm (depending on grammar)
+    // Note: Some languages allow this as a style choice, but it may be invalid in Verum
+    match color {
+        | Red | Green => print("warm"),
+        | Blue => print("cool"),
+    }
+}
+
+fn test_leading_pipe_in_tuple() {
+    let pair = (1, 2);
+
+    // Invalid: leading pipe inside tuple pattern
+    match pair {
+        (| 1 | 2, y) => print("first is small"),
+        _ => print("other"),
+    }
+}
+
+fn test_leading_pipe_in_array() {
+    let arr = [1, 2, 3];
+
+    // Invalid: leading pipe inside array pattern
+    match arr {
+        [| 1 | 2, ..] => print("starts small"),
+        _ => print("other"),
+    }
+}
+
+fn test_leading_pipe_in_let() {
+    let color = Red;
+
+    // Invalid: leading pipe in let pattern
+    let | Red | Green = color;
+}
+
+fn test_double_leading_pipe() {
+    let color = Red;
+
+    // Invalid: double leading pipe
+    match color {
+        || Red => print("red"),
+        _ => print("other"),
+    }
+}

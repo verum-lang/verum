@@ -1,0 +1,154 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tuples, edge-cases
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Comprehensive edge case tests for tuple support
+
+fn main() {
+    // === Test 1: Empty tuple (unit type) ===
+    fn return_unit() -> () {
+        return ();
+    }
+    let u = return_unit();
+    // Unit should work without issues
+
+    // === Test 2: Single-element "tuple" (parenthesized value) ===
+    let single = (42);
+    assert_eq(single, 42);
+
+    // === Test 3: Two-element tuple ===
+    let pair = (10, 20);
+    let (a, b) = pair;
+    assert_eq(a, 10);
+    assert_eq(b, 20);
+
+    // === Test 4: Three-element tuple ===
+    let triple = (1, 2, 3);
+    let (x, y, z) = triple;
+    assert_eq(x, 1);
+    assert_eq(y, 2);
+    assert_eq(z, 3);
+
+    // === Test 5: Four-element tuple ===
+    let quad = (100, 200, 300, 400);
+    let (q1, q2, q3, q4) = quad;
+    assert_eq(q1, 100);
+    assert_eq(q2, 200);
+    assert_eq(q3, 300);
+    assert_eq(q4, 400);
+
+    // === Test 6: Five-element tuple ===
+    let quint = (5, 10, 15, 20, 25);
+    let (e1, e2, e3, e4, e5) = quint;
+    assert_eq(e1, 5);
+    assert_eq(e2, 10);
+    assert_eq(e3, 15);
+    assert_eq(e4, 20);
+    assert_eq(e5, 25);
+
+    // === Test 7: Computed tuple elements (the critical bug fix) ===
+    fn compute_triple(n: Int) -> (Int, Int, Int) {
+        return (n, n + 1, n + 2);
+    }
+    let (c1, c2, c3) = compute_triple(100);
+    assert_eq(c1, 100);
+    assert_eq(c2, 101);
+    assert_eq(c3, 102);
+
+    // === Test 8: Multiple computations in tuple ===
+    fn complex_compute(a: Int, b: Int) -> (Int, Int, Int) {
+        return (a + b, a - b, a * b);
+    }
+    let (sum, diff, prod) = complex_compute(10, 3);
+    assert_eq(sum, 13);
+    assert_eq(diff, 7);
+    assert_eq(prod, 30);
+
+    // === Test 9: Tuple with same variable used multiple times ===
+    fn repeat_var(v: Int) -> (Int, Int, Int, Int) {
+        return (v, v, v, v);
+    }
+    let (r1, r2, r3, r4) = repeat_var(42);
+    assert_eq(r1, 42);
+    assert_eq(r2, 42);
+    assert_eq(r3, 42);
+    assert_eq(r4, 42);
+
+    // === Test 10: Sequential tuple unpacking ===
+    let t1 = (1, 2);
+    let t2 = (3, 4);
+    let t3 = (5, 6);
+    let (v1, v2) = t1;
+    let (v3, v4) = t2;
+    let (v5, v6) = t3;
+    assert_eq(v1, 1);
+    assert_eq(v2, 2);
+    assert_eq(v3, 3);
+    assert_eq(v4, 4);
+    assert_eq(v5, 5);
+    assert_eq(v6, 6);
+
+    // === Test 11: Tuple passed as parameter and returned ===
+    fn identity_tuple(t: (Int, Int)) -> (Int, Int) {
+        return t;
+    }
+    let orig = (55, 66);
+    let copy = identity_tuple(orig);
+    let (i1, i2) = copy;
+    assert_eq(i1, 55);
+    assert_eq(i2, 66);
+
+    // === Test 12: Tuple swap ===
+    fn swap(t: (Int, Int)) -> (Int, Int) {
+        let (x, y) = t;
+        return (y, x);
+    }
+    let before = (10, 20);
+    let after = swap(before);
+    let (s1, s2) = after;
+    assert_eq(s1, 20);
+    assert_eq(s2, 10);
+
+    // === Test 13: Chained tuple operations ===
+    fn increment_all(t: (Int, Int, Int)) -> (Int, Int, Int) {
+        let (a, b, c) = t;
+        return (a + 1, b + 1, c + 1);
+    }
+    let chain1 = (0, 0, 0);
+    let chain2 = increment_all(chain1);
+    let chain3 = increment_all(chain2);
+    let chain4 = increment_all(chain3);
+    let (f1, f2, f3) = chain4;
+    assert_eq(f1, 3);
+    assert_eq(f2, 3);
+    assert_eq(f3, 3);
+
+    // === Test 14: Tuple in nested function ===
+    fn outer(n: Int) -> (Int, Int) {
+        fn inner(x: Int) -> (Int, Int) {
+            return (x, x * 2);
+        }
+        return inner(n + 10);
+    }
+    let (o1, o2) = outer(5);
+    assert_eq(o1, 15);
+    assert_eq(o2, 30);
+
+    // === Test 15: Deep nesting with tuples ===
+    fn level1(a: Int) -> (Int, Int) {
+        fn level2(b: Int) -> (Int, Int) {
+            fn level3(c: Int) -> (Int, Int) {
+                return (c, c + 100);
+            }
+            let (x, y) = level3(b);
+            return (x + 10, y + 10);
+        }
+        let (m, n) = level2(a);
+        return (m + 1, n + 1);
+    }
+    let (d1, d2) = level1(5);
+    assert_eq(d1, 16);   // 5 + 10 + 1 = 16
+    assert_eq(d2, 116);  // 5 + 100 + 10 + 1 = 116
+}

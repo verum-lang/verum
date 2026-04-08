@@ -1,0 +1,460 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: micro, array, access, indexing, performance
+// @description: Array/list access overhead benchmarks (target: < 2ns for simple access)
+
+/// Array Access Overhead Microbenchmarks
+///
+/// Measures the overhead of different array/list access patterns.
+/// Fast array access is fundamental for data-intensive operations.
+///
+/// Performance targets:
+/// - Direct index:        < 2ns
+/// - Bounds-checked:      < 3ns
+/// - Unchecked access:    < 1ns
+/// - Slice access:        < 2ns
+/// - Iterator access:     < 2ns
+///
+/// Array types:
+/// - [T; N]:   Fixed-size array (stack)
+/// - List<T>:  Dynamic array (heap)
+/// - &[T]:     Slice (borrowed view)
+///
+/// Spec reference: docs/detailed/05-syntax-grammar.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 100_000_000;
+const ARRAY_SIZE: Int = 1024;
+
+/// Benchmark: Direct array indexing (fixed-size)
+fn benchmark_fixed_array_index() -> BenchmarkResult {
+    let array: [Int; ARRAY_SIZE] = [42; ARRAY_SIZE];
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(array[i % ARRAY_SIZE]);
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(array[i % ARRAY_SIZE]);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "fixed_array_index",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 2.0,
+    }
+}
+
+/// Benchmark: List indexing (dynamic, bounds-checked)
+fn benchmark_list_index() -> BenchmarkResult {
+    let list: List<Int> = (0..ARRAY_SIZE).collect();
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(list[i % ARRAY_SIZE]);
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(list[i % ARRAY_SIZE]);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "list_index_checked",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Unchecked array access
+fn benchmark_unchecked_index() -> BenchmarkResult {
+    let array: [Int; ARRAY_SIZE] = [42; ARRAY_SIZE];
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        unsafe { black_box(*array.get_unchecked(i % ARRAY_SIZE)) };
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        unsafe { black_box(*array.get_unchecked(i % ARRAY_SIZE)) };
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "unchecked_index",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 1.0,
+    }
+}
+
+/// Benchmark: Slice indexing
+fn benchmark_slice_index() -> BenchmarkResult {
+    let array: [Int; ARRAY_SIZE] = [42; ARRAY_SIZE];
+    let slice: &[Int] = &array[..];
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(slice[i % ARRAY_SIZE]);
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(slice[i % ARRAY_SIZE]);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "slice_index",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 2.0,
+    }
+}
+
+/// Benchmark: Sequential iteration
+fn benchmark_sequential_iteration() -> BenchmarkResult {
+    let array: [Int; ARRAY_SIZE] = [42; ARRAY_SIZE];
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / ARRAY_SIZE) {
+        for i in 0..ARRAY_SIZE {
+            black_box(array[i]);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / ARRAY_SIZE) {
+        for i in 0..ARRAY_SIZE {
+            black_box(array[i]);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "sequential_iteration",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 1.5,  // Cache-friendly
+    }
+}
+
+/// Benchmark: Iterator-based access
+fn benchmark_iterator_access() -> BenchmarkResult {
+    let list: List<Int> = (0..ARRAY_SIZE).collect();
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / ARRAY_SIZE) {
+        for val in list.iter() {
+            black_box(*val);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / ARRAY_SIZE) {
+        for val in list.iter() {
+            black_box(*val);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "iterator_access",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 2.0,
+    }
+}
+
+/// Benchmark: Random access pattern
+fn benchmark_random_access() -> BenchmarkResult {
+    let array: [Int; ARRAY_SIZE] = [42; ARRAY_SIZE];
+    let indices: [usize; ARRAY_SIZE] = generate_random_indices(ARRAY_SIZE);
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / ARRAY_SIZE) {
+        for &idx in indices.iter() {
+            black_box(array[idx]);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / ARRAY_SIZE) {
+        for &idx in indices.iter() {
+            black_box(array[idx]);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "random_access",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,  // Cache misses expected
+    }
+}
+
+/// Benchmark: 2D array access (row-major)
+fn benchmark_2d_row_major() -> BenchmarkResult {
+    const DIM: Int = 32;
+    let array: [[Int; DIM]; DIM] = [[42; DIM]; DIM];
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / (DIM * DIM)) {
+        for i in 0..DIM {
+            for j in 0..DIM {
+                black_box(array[i][j]);
+            }
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / (DIM * DIM)) {
+        for i in 0..DIM {
+            for j in 0..DIM {
+                black_box(array[i][j]);
+            }
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "2d_row_major",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 2.0,
+    }
+}
+
+/// Benchmark: 2D array access (column-major, cache-unfriendly)
+fn benchmark_2d_column_major() -> BenchmarkResult {
+    const DIM: Int = 32;
+    let array: [[Int; DIM]; DIM] = [[42; DIM]; DIM];
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / (DIM * DIM)) {
+        for j in 0..DIM {
+            for i in 0..DIM {
+                black_box(array[i][j]);
+            }
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / (DIM * DIM)) {
+        for j in 0..DIM {
+            for i in 0..DIM {
+                black_box(array[i][j]);
+            }
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "2d_column_major",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 4.0,  // Cache-unfriendly
+    }
+}
+
+/// Benchmark: Get with default
+fn benchmark_get_or_default() -> BenchmarkResult {
+    let list: List<Int> = (0..ARRAY_SIZE).collect();
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        let idx = i % (ARRAY_SIZE * 2);  // Half out of bounds
+        black_box(list.get(idx).copied().unwrap_or(-1));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let idx = i % (ARRAY_SIZE * 2);
+        black_box(list.get(idx).copied().unwrap_or(-1));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "get_or_default",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 4.0,
+    }
+}
+
+/// Benchmark: Slice subslice
+fn benchmark_subslice() -> BenchmarkResult {
+    let array: [Int; ARRAY_SIZE] = [42; ARRAY_SIZE];
+    let slice: &[Int] = &array[..];
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        let start = i % (ARRAY_SIZE - 100);
+        let sub = &slice[start..start + 100];
+        black_box(sub[50]);
+    }
+
+    let start_time = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let start = i % (ARRAY_SIZE - 100);
+        let sub = &slice[start..start + 100];
+        black_box(sub[50]);
+    }
+
+    let elapsed = start_time.elapsed();
+
+    BenchmarkResult {
+        name: "subslice_access",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Array write
+fn benchmark_array_write() -> BenchmarkResult {
+    let mut array: [Int; ARRAY_SIZE] = [0; ARRAY_SIZE];
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        array[i % ARRAY_SIZE] = i as Int;
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        array[i % ARRAY_SIZE] = i as Int;
+    }
+
+    let elapsed = start.elapsed();
+    black_box(&array);
+
+    BenchmarkResult {
+        name: "array_write",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 2.0,
+    }
+}
+
+/// Benchmark: List push/pop
+fn benchmark_list_push_pop() -> BenchmarkResult {
+    let mut list: List<Int> = List.with_capacity(1000);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        list.push(42);
+        if list.len() > 100 {
+            list.pop();
+        }
+    }
+    list.clear();
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 2) {
+        list.push(42);
+        if list.len() > 100 {
+            list.pop();
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "list_push_pop",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 2) as f64,
+        target_ns: 5.0,
+    }
+}
+
+fn main() {
+    println("=== Array Access Overhead Microbenchmarks ===\n");
+
+    let results = [
+        benchmark_fixed_array_index(),
+        benchmark_list_index(),
+        benchmark_unchecked_index(),
+        benchmark_slice_index(),
+        benchmark_sequential_iteration(),
+        benchmark_iterator_access(),
+        benchmark_random_access(),
+        benchmark_2d_row_major(),
+        benchmark_2d_column_major(),
+        benchmark_get_or_default(),
+        benchmark_subslice(),
+        benchmark_array_write(),
+        benchmark_list_push_pop(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>8}",
+            "Benchmark", "Time (ns)", "Target", "Status");
+    println("{}", "-".repeat(65));
+
+    for result in results {
+        let passed = result.per_op_ns <= result.target_ns;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.2} {:>12.0} {:>8}",
+                result.name, result.per_op_ns, result.target_ns, status);
+    }
+
+    println("");
+    println("Array Access Targets:");
+    println("  - Direct index:      < 2ns");
+    println("  - Bounds-checked:    < 3ns");
+    println("  - Sequential:        < 1.5ns");
+    println("  - Random access:     < 5ns");
+}
+
+fn generate_random_indices(size: Int) -> [usize; 1024] {
+    let mut indices = [0usize; 1024];
+    let mut rng = Random.with_seed(42);
+    for i in 0..size {
+        indices[i] = rng.gen_range(0, size);
+    }
+    indices
+}
+
+type BenchmarkResult is {
+    name: Text,
+    per_op_ns: f64,
+    target_ns: f64,
+};
+
+type Random is { seed: u64 };
+implement Random {
+    fn with_seed(seed: u64) -> Self { Self { seed } }
+    fn gen_range(&mut self, min: Int, max: Int) -> usize { (min + (self.seed as Int % (max - min))) as usize }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }

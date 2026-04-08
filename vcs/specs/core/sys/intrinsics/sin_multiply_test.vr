@@ -1,0 +1,21 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Test sin multiply
+
+module test.stdlib.sys.intrinsics.sin_multiply_test;
+
+mount core.intrinsics.{sin_f64};
+
+fn main() {
+    print("Testing sin_f64...");
+    let s = sin_f64(0.0);
+    print(f"sin(0) = {s}");
+
+    print("Testing multiply...");
+    let s_sq = s * s;
+    print(f"sin^2 = {s_sq}");
+
+    print("All tests passed!");
+}

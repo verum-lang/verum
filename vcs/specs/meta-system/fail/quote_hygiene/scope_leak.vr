@@ -1,0 +1,33 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M402
+// @tags: meta, quote, hygiene, scope, leak
+// @description: Tests detection of scope leak violations
+
+// =============================================================================
+// SCOPE LEAK
+// =============================================================================
+
+// M402: Scope leak - macro-internal binding escapes to caller scope
+
+// Macro that incorrectly allows internal binding to be visible outside
+@transparent  // Forces full transparency - internal bindings visible
+meta fn scope_leak() -> TokenStream {
+    quote {
+        let internal_secret = 42;  // Should be macro-internal
+        internal_secret
+    }
+}
+
+fn test_scope_leak() {
+    let result = @scope_leak();
+
+    // ERROR: M402 - 'internal_secret' should not be visible here
+    // but transparency mode allows it to leak
+    let leaked = internal_secret;  // Scope leak detected
+}
+
+fn main() {
+    test_scope_leak();
+}

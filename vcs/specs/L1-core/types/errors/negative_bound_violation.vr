@@ -1,0 +1,299 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, bounds, negative
+// @expected-error: E018
+
+/// Test for negative bound violation errors.
+/// These examples should fail with E412 when types violate negative bounds.
+///
+/// Negative bounds (T: !Protocol) specify that a type must NOT implement a protocol.
+/// This is useful for:
+///   - Preventing accidental trait implementation
+///   - Ensuring types are NOT Send/Sync for safety
+///   - Specialization disambiguation
+///   - Marker trait exclusion
+
+// === Protocol Definitions ===
+
+type Send is protocol {
+    // Marker: can be safely sent between threads
+};
+
+type Sync is protocol {
+    // Marker: can be safely shared between threads
+};
+
+type Copy is protocol {
+    // Marker: can be bitwise copied
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Drop is protocol {
+    fn drop(&mut self);
+};
+
+// A type that is Send but not Sync
+type SendOnly is {
+    data: Int,
+};
+
+implement Send for SendOnly {}
+// Note: Sync is NOT implemented for SendOnly
+
+// A type that is neither Send nor Sync
+type ThreadLocal is {
+    handle: *mut (),  // Raw pointer - not thread safe
+};
+
+// A type that implements Copy
+type Copyable is {
+    x: Int,
+    y: Int,
+};
+
+implement Copy for Copyable {}
+implement Clone for Copyable {
+    fn clone(&self) -> Self {
+        *self  // Copy semantics
+    }
+}
+
+// A type that is NOT Copy (has heap allocation)
+type NonCopyable is {
+    data: Heap<Int>,
+};
+
+implement Clone for NonCopyable {
+    fn clone(&self) -> Self {
+        NonCopyable { data: Heap(*self.data) }
+    }
+}
+
+fn main() {
+    // === Basic Negative Bound Violations ===
+
+    // E412: Type implements protocol when it shouldn't
+    fn requires_not_copy<T: !Copy>(x: T) {
+        // T must NOT implement Copy
+    }
+
+    fn violate_not_copy() {
+        let c = Copyable { x: 1, y: 2 };
+        requires_not_copy(c);  // ERROR: Copyable implements Copy, but T: !Copy required
+    }
+
+    // E412: Type must not be Send
+    fn thread_unsafe<T: !Send>(x: T) {
+        // Intentionally non-thread-safe operation
+    }
+
+    fn violate_not_send() {
+        let s = SendOnly { data: 42 };
+        thread_unsafe(s);  // ERROR: SendOnly implements Send, but T: !Send required
+    }
+
+    // === Negative Bounds in Implementations ===
+
+    // E412: Implementation requires negative bound
+    type Wrapper<T> is { value: T };
+
+    // Special implementation for non-Copy types
+    implement<T: !Copy> Wrapper<T> {
+        fn take(self) -> T {
+            self.value  // Move semantics required
+        }
+    }
+
+    fn violate_impl_bound() {
+        let w = Wrapper { value: Copyable { x: 1, y: 2 } };
+        w.take();  // ERROR: Copyable: Copy, but implementation requires T: !Copy
+    }
+
+    // === Conflicting Bounds ===
+
+    // E412: Positive and negative bound conflict
+    fn conflicting_bounds<T: Copy + !Copy>(x: T) {  // ERROR at definition
+        // T cannot be both Copy and !Copy
+    }
+
+    // E412: Transitive conflict
+    fn transitive_conflict<T: Clone + !Clone>(x: T) {  // ERROR at definition
+        // Direct contradiction
+    }
+
+    // === Negative Bounds with Where Clauses ===
+
+    // E412: Where clause with negative bound
+    fn with_where<T>(x: T) where T: !Sync {
+        // T must not be Sync
+    }
+
+    fn violate_where() {
+        let i: Int = 42;  // Int is Sync
+        with_where(i);  // ERROR: Int: Sync, but where T: !Sync
+    }
+
+    // === Negative Bounds in Generic Structs ===
+
+    // E412: Struct with negative bound constraint
+    type NotCopyContainer<T: !Copy> is {
+        value: T,
+    };
+
+    fn violate_struct_bound() {
+        // Copyable implements Copy, violates T: !Copy
+        let bad = NotCopyContainer { value: Copyable { x: 1, y: 2 } };  // ERROR
+    }
+
+    // === Negative Bounds in Protocols ===
+
+    // Protocol requiring implementors to NOT implement another protocol
+    type Exclusive is protocol where Self: !Copy {
+        fn consume(self);
+    };
+
+    // E412: Implementing Exclusive for Copy type
+    implement Exclusive for Copyable {  // ERROR: Copyable: Copy, but Exclusive requires !Copy
+        fn consume(self) {}
+    }
+
+    // OK: Implementing Exclusive for non-Copy type
+    implement Exclusive for NonCopyable {
+        fn consume(self) {
+            // self is moved, cannot be copied
+        }
+    }
+
+    // === Negative Bounds for Specialization ===
+
+    type Printable is protocol {
+        fn print(&self);
+    };
+
+    // Default implementation for all T
+    implement<T> Printable for Wrapper<T> {
+        default fn print(&self) {
+            print("Wrapper<T>");
+        }
+    }
+
+    // Specialized implementation for non-Copy T
+    implement<T: !Copy> Printable for Wrapper<T> {
+        fn print(&self) {
+            print("Wrapper<non-Copy>");
+        }
+    }
+
+    // E412: Ambiguous call when both could apply
+    fn specialization_conflict() {
+        // For types where both impls could apply, negative bound determines selection
+        let w = Wrapper { value: Copyable { x: 1, y: 2 } };
+        w.print();  // Uses default impl because Copyable: Copy
+
+        let w2 = Wrapper { value: NonCopyable { data: Heap(42) } };
+        w2.print();  // Uses specialized impl because NonCopyable: !Copy
+    }
+
+    // === Multiple Negative Bounds ===
+
+    // E412: Multiple negative bound violation
+    fn multiple_negatives<T: !Send + !Sync>(x: T) {
+        // T must be neither Send nor Sync
+    }
+
+    fn violate_multiple() {
+        let s = SendOnly { data: 42 };
+        // SendOnly: Send but !Sync
+        multiple_negatives(s);  // ERROR: SendOnly: Send, but T: !Send required
+    }
+
+    // === Negative Bounds on Associated Types ===
+
+    type Producer is protocol {
+        type Output: !Copy;  // Output must not be Copy
+        fn produce(&self) -> Self.Output;
+    };
+
+    type BadProducer is ();
+    implement Producer for BadProducer {
+        type Output is Int;  // ERROR: Int: Copy, but Output: !Copy required
+        fn produce(&self) -> Self.Output {
+            42
+        }
+    }
+
+    type GoodProducer is ();
+    implement Producer for GoodProducer {
+        type Output is NonCopyable;  // OK: NonCopyable: !Copy
+        fn produce(&self) -> Self.Output {
+            NonCopyable { data: Heap(42) }
+        }
+    }
+
+    // === Negative Bounds in Closures ===
+
+    // E412: Closure capturing type that violates negative bound
+    fn closure_bound<F, T>(f: F) where F: fn() -> T, T: !Copy {
+        let result = f();
+        // result cannot be copied
+    }
+
+    fn violate_closure_bound() {
+        let c = || 42;  // Returns Int which is Copy
+        closure_bound(c);  // ERROR: Int: Copy, but T: !Copy required
+    }
+
+    // === Negative Bounds with Generic Constraints ===
+
+    // E412: Generic function with complex negative bounds
+    fn complex_negatives<A, B, C>(a: A, b: B, c: C)
+    where
+        A: Clone + !Copy,  // Must be cloneable but not copyable
+        B: Send + !Sync,   // Can send but not share
+        C: !Drop,          // Must not have custom drop
+    {
+        // Implementation
+    }
+
+    fn violate_complex() {
+        let a = Copyable { x: 1, y: 2 };  // Copy (violates !Copy)
+        let b = ThreadLocal { handle: 0 as *mut () };  // !Send (violates Send)
+        let c = NonCopyable { data: Heap(42) };  // Has Drop
+        complex_negatives(a, b, c);  // ERROR: multiple violations
+    }
+
+    // === Negative Bounds Inheritance ===
+
+    // E412: Negative bound not preserved in subtype
+    type Restricted is protocol where Self: !Send {
+        fn local_only(&self);
+    };
+
+    type Extended is protocol extends Restricted {
+        fn extra(&self);
+    };
+
+    // Type implementing Extended must still satisfy !Send
+    implement Extended for SendOnly {  // ERROR: SendOnly: Send violates Restricted's !Send
+        fn local_only(&self) {}
+        fn extra(&self) {}
+    }
+
+    // === Negative Bounds with Default Types ===
+
+    // E412: Default type parameter violates negative bound
+    type Holder<T: !Copy = Int> is {  // ERROR: Int: Copy, but T: !Copy
+        value: T,
+    };
+
+    // Correct default:
+    type GoodHolder<T: !Copy = NonCopyable> is {
+        value: T,
+    };
+}
+
+// All examples above should produce E412 "Negative bound violation" error

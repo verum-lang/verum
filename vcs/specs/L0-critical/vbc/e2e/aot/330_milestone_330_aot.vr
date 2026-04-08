@@ -1,0 +1,463 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, comprehensive, number-theory, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+//
+// MILESTONE 330: Comprehensive number theory and algorithms integration test.
+// Tests: Euler's totient, Mobius function, extended GCD, Chinese Remainder Theorem,
+// Miller-Rabin style primality, Sieve of Eratosthenes, Catalan numbers,
+// and combinatorial identities.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// === GCD and Extended GCD ===
+fn gcd(a: Int, b_val: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b_val);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+fn lcm(a: Int, b_val: Int) -> Int {
+    if a == 0 { return 0; }
+    if b_val == 0 { return 0; }
+    abs_val(a) / gcd(a, b_val) * abs_val(b_val)
+}
+
+// Extended GCD helper: compute gcd
+fn ext_gcd_g(a: Int, b_val: Int) -> Int { gcd(a, b_val) }
+
+// Extended GCD: compute Bezout coefficient x such that a*x + b*y = gcd(a,b)
+fn ext_gcd_x(a: Int, b_val: Int) -> Int {
+    let mut old_r = a;
+    let mut r = b_val;
+    let mut old_s = 1;
+    let mut s = 0;
+    while r != 0 {
+        let q = old_r / r;
+        let tmp_r = r;
+        r = old_r - q * r;
+        old_r = tmp_r;
+        let tmp_s = s;
+        s = old_s - q * s;
+        old_s = tmp_s;
+    }
+    old_s
+}
+
+// Extended GCD: compute Bezout coefficient y
+fn ext_gcd_y(a: Int, b_val: Int) -> Int {
+    let mut old_r = a;
+    let mut r = b_val;
+    let mut old_t = 0;
+    let mut t = 1;
+    while r != 0 {
+        let q = old_r / r;
+        let tmp_r = r;
+        r = old_r - q * r;
+        old_r = tmp_r;
+        let tmp_t = t;
+        t = old_t - q * t;
+        old_t = tmp_t;
+    }
+    old_t
+}
+
+// === Euler's Totient ===
+fn euler_totient(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut result = n;
+    let mut p = 2;
+    let mut nn = n;
+    while p * p <= nn {
+        if nn % p == 0 {
+            while nn % p == 0 { nn = nn / p; }
+            result = result - result / p;
+        }
+        p = p + 1;
+    }
+    if nn > 1 { result = result - result / nn; }
+    result
+}
+
+// === Modular Exponentiation ===
+fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b_val = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b_val) % modulus; }
+        e = e / 2;
+        b_val = (b_val * b_val) % modulus;
+    }
+    result
+}
+
+// === Primality Test ===
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    if n % 3 == 0 { return 0; }
+    let mut d = 5;
+    while d * d <= n {
+        if n % d == 0 { return 0; }
+        if n % (d + 2) == 0 { return 0; }
+        d = d + 6;
+    }
+    1
+}
+
+// === Sieve of Eratosthenes (small, up to 30 using bit packing in Int) ===
+// Returns count of primes up to n (n <= 30)
+fn sieve_count(n: Int) -> Int {
+    // Bit i of `sieve` is 1 if i is composite
+    let mut sieve = 0;
+    // Mark 0 and 1 as composite
+    sieve = sieve + 1 + 2;  // bits 0 and 1
+    let mut p = 2;
+    while p * p <= n {
+        // Check if p is prime (bit p not set)
+        let bit_p = (sieve / pow2(p)) % 2;
+        if bit_p == 0 {
+            // Mark multiples of p
+            let mut m = p * p;
+            while m <= n {
+                let bit_m = (sieve / pow2(m)) % 2;
+                if bit_m == 0 {
+                    sieve = sieve + pow2(m);
+                }
+                m = m + p;
+            }
+        }
+        p = p + 1;
+    }
+    // Count primes
+    let mut count = 0;
+    let mut i = 2;
+    while i <= n {
+        let bit_i = (sieve / pow2(i)) % 2;
+        if bit_i == 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+// === Mobius Function ===
+fn mobius(n: Int) -> Int {
+    if n == 1 { return 1; }
+    let mut nn = n;
+    let mut p = 2;
+    let mut num_factors = 0;
+    while p * p <= nn {
+        if nn % p == 0 {
+            nn = nn / p;
+            if nn % p == 0 { return 0; }  // p^2 divides n
+            num_factors = num_factors + 1;
+        }
+        p = p + 1;
+    }
+    if nn > 1 { num_factors = num_factors + 1; }
+    if num_factors % 2 == 0 { 1 } else { -1 }
+}
+
+// === Binomial Coefficient ===
+fn binom(n: Int, k: Int) -> Int {
+    if k > n { return 0; }
+    let mut kk = k;
+    if kk > n - kk { kk = n - kk; }
+    let mut result = 1;
+    let mut i = 0;
+    while i < kk {
+        result = result * (n - i) / (i + 1);
+        i = i + 1;
+    }
+    result
+}
+
+// === Catalan Number: C_n = C(2n,n)/(n+1) ===
+fn catalan(n: Int) -> Int {
+    binom(2 * n, n) / (n + 1)
+}
+
+// === Fibonacci ===
+fn fib(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b_val = 1;
+    let mut i = 2;
+    while i <= n { let c = a + b_val; a = b_val; b_val = c; i = i + 1; }
+    b_val
+}
+
+// === Digit Sum ===
+fn digit_sum(n: Int) -> Int {
+    let mut x = abs_val(n);
+    let mut sum = 0;
+    while x > 0 { sum = sum + x % 10; x = x / 10; }
+    sum
+}
+
+// === Count Divisors ===
+fn count_divisors(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i * i <= n {
+        if n % i == 0 {
+            count = count + 1;
+            if i != n / i { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// === Sum of Divisors ===
+fn sum_divisors(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i * i <= n {
+        if n % i == 0 {
+            sum = sum + i;
+            if i != n / i { sum = sum + n / i; }
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_gcd_and_lcm() {
+    assert_eq(gcd(12, 18), 6);
+    assert_eq(gcd(35, 49), 7);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(0, 5), 5);
+    assert_eq(gcd(100, 75), 25);
+
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(3, 5), 15);
+    assert_eq(lcm(12, 18), 36);
+
+    // Identity: gcd * lcm = |a * b|
+    assert_eq(gcd(12, 18) * lcm(12, 18), 12 * 18);
+}
+
+fn test_extended_gcd() {
+    // ext_gcd(12, 8): gcd=4
+    let g1 = ext_gcd_g(12, 8);
+    let x1 = ext_gcd_x(12, 8);
+    let y1 = ext_gcd_y(12, 8);
+    assert_eq(g1, 4);
+    assert_eq(12 * x1 + 8 * y1, 4);
+
+    // ext_gcd(35, 15): gcd=5
+    let g2 = ext_gcd_g(35, 15);
+    let x2 = ext_gcd_x(35, 15);
+    let y2 = ext_gcd_y(35, 15);
+    assert_eq(g2, 5);
+    assert_eq(35 * x2 + 15 * y2, 5);
+
+    // ext_gcd(17, 13): gcd=1 (coprime)
+    let g3 = ext_gcd_g(17, 13);
+    let x3 = ext_gcd_x(17, 13);
+    let y3 = ext_gcd_y(17, 13);
+    assert_eq(g3, 1);
+    assert_eq(17 * x3 + 13 * y3, 1);
+}
+
+fn test_euler_totient() {
+    assert_eq(euler_totient(1), 1);
+    assert_eq(euler_totient(2), 1);
+    assert_eq(euler_totient(6), 2);    // 1, 5
+    assert_eq(euler_totient(10), 4);   // 1, 3, 7, 9
+    assert_eq(euler_totient(12), 4);   // 1, 5, 7, 11
+    assert_eq(euler_totient(7), 6);    // prime: p-1
+    assert_eq(euler_totient(13), 12);  // prime: p-1
+
+    // For prime p: totient(p) = p-1
+    assert_eq(euler_totient(17), 16);
+    assert_eq(euler_totient(23), 22);
+
+    // Euler's theorem: a^phi(n) = 1 (mod n) when gcd(a,n)=1
+    let phi_15 = euler_totient(15);
+    assert_eq(phi_15, 8);
+    assert_eq(mod_pow(2, phi_15, 15), 1);
+    assert_eq(mod_pow(7, phi_15, 15), 1);
+}
+
+fn test_modular_arithmetic() {
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    assert_eq(mod_pow(3, 5, 100), 43);
+
+    // Fermat's little theorem: a^(p-1) = 1 (mod p) for prime p
+    assert_eq(mod_pow(2, 12, 13), 1);
+    assert_eq(mod_pow(5, 6, 7), 1);
+    assert_eq(mod_pow(3, 16, 17), 1);
+}
+
+fn test_primality() {
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(17), 1);
+    assert_eq(is_prime(97), 1);
+    assert_eq(is_prime(100), 0);
+    assert_eq(is_prime(1), 0);
+    assert_eq(is_prime(49), 0);  // 7*7
+    assert_eq(is_prime(51), 0);  // 3*17
+}
+
+fn test_sieve() {
+    // Primes up to 30: 2,3,5,7,11,13,17,19,23,29 = 10 primes
+    assert_eq(sieve_count(30), 10);
+    assert_eq(sieve_count(10), 4);   // 2,3,5,7
+    assert_eq(sieve_count(2), 1);    // just 2
+    assert_eq(sieve_count(20), 8);   // 2,3,5,7,11,13,17,19
+}
+
+fn test_mobius_function() {
+    assert_eq(mobius(1), 1);
+    assert_eq(mobius(2), -1);   // prime
+    assert_eq(mobius(3), -1);   // prime
+    assert_eq(mobius(4), 0);    // 2^2
+    assert_eq(mobius(5), -1);   // prime
+    assert_eq(mobius(6), 1);    // 2*3, even number of prime factors
+    assert_eq(mobius(7), -1);   // prime
+    assert_eq(mobius(8), 0);    // 2^3
+    assert_eq(mobius(10), 1);   // 2*5
+    assert_eq(mobius(30), -1);  // 2*3*5, three distinct primes
+
+    // Mobius sum property: sum of mobius(d) for d|n equals 0 for n>1
+    // For n=6, divisors: 1,2,3,6 -> mu: 1,-1,-1,1 -> sum=0
+    assert_eq(mobius(1) + mobius(2) + mobius(3) + mobius(6), 0);
+}
+
+fn test_catalan_numbers() {
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+
+    // Catalan recurrence: C_n = sum(C_i * C_{n-1-i}) for i=0..n-1
+    // C_4 = C_0*C_3 + C_1*C_2 + C_2*C_1 + C_3*C_0
+    //     = 1*5 + 1*2 + 2*1 + 5*1 = 14
+    let c4_recurrence = catalan(0)*catalan(3) + catalan(1)*catalan(2) + catalan(2)*catalan(1) + catalan(3)*catalan(0);
+    assert_eq(c4_recurrence, catalan(4));
+}
+
+fn test_binomial_identities() {
+    // Pascal's identity: C(n,k) = C(n-1,k-1) + C(n-1,k)
+    assert_eq(binom(8, 3), binom(7, 2) + binom(7, 3));
+    assert_eq(binom(10, 4), binom(9, 3) + binom(9, 4));
+
+    // Symmetry: C(n,k) = C(n, n-k)
+    assert_eq(binom(10, 3), binom(10, 7));
+
+    // Sum of row: C(n,0) + C(n,1) + ... + C(n,n) = 2^n
+    let mut row_sum = 0;
+    let mut k = 0;
+    while k <= 6 {
+        row_sum = row_sum + binom(6, k);
+        k = k + 1;
+    }
+    assert_eq(row_sum, 64);  // 2^6
+
+    // Vandermonde's identity: C(m+n, r) = sum(C(m,k)*C(n,r-k))
+    // C(6, 3) = C(3,0)*C(3,3) + C(3,1)*C(3,2) + C(3,2)*C(3,1) + C(3,3)*C(3,0)
+    let vand = binom(3,0)*binom(3,3) + binom(3,1)*binom(3,2) + binom(3,2)*binom(3,1) + binom(3,3)*binom(3,0);
+    assert_eq(vand, binom(6, 3));  // 20
+}
+
+fn test_divisor_functions() {
+    assert_eq(count_divisors(1), 1);
+    assert_eq(count_divisors(6), 4);    // 1,2,3,6
+    assert_eq(count_divisors(12), 6);   // 1,2,3,4,6,12
+    assert_eq(count_divisors(7), 2);    // prime: 1,7
+    assert_eq(count_divisors(28), 6);   // 1,2,4,7,14,28
+
+    assert_eq(sum_divisors(1), 1);
+    assert_eq(sum_divisors(6), 12);     // 1+2+3+6
+    assert_eq(sum_divisors(28), 56);    // Perfect number: sigma(28) = 2*28
+
+    // 6 is perfect: sum of proper divisors = 6
+    assert_eq(sum_divisors(6) - 6, 6);
+    // 28 is perfect: sum of proper divisors = 28
+    assert_eq(sum_divisors(28) - 28, 28);
+}
+
+fn test_fibonacci_identities() {
+    // Cassini's identity: F(n-1)*F(n+1) - F(n)^2 = (-1)^n
+    // For n=6: F(5)*F(7) - F(6)^2 = 5*13 - 8^2 = 65-64 = 1
+    assert_eq(fib(5) * fib(7) - fib(6) * fib(6), 1);
+    // For n=7: F(6)*F(8) - F(7)^2 = 8*21 - 13^2 = 168-169 = -1
+    assert_eq(fib(6) * fib(8) - fib(7) * fib(7), -1);
+
+    // GCD property: gcd(F(m), F(n)) = F(gcd(m,n))
+    assert_eq(gcd(fib(6), fib(9)), fib(gcd(6, 9)));  // gcd(8,34)=2=F(3)
+}
+
+fn test_integration() {
+    // Sum of euler totient for divisors of n equals n
+    // For n=12: totient(1)+totient(2)+totient(3)+totient(4)+totient(6)+totient(12)
+    //         = 1+1+2+2+2+4 = 12
+    let tot_sum = euler_totient(1) + euler_totient(2) + euler_totient(3) + euler_totient(4) + euler_totient(6) + euler_totient(12);
+    assert_eq(tot_sum, 12);
+
+    // Count twin primes up to 30: (3,5), (5,7), (11,13), (17,19), (29,31) but 31>30
+    // So: (3,5), (5,7), (11,13), (17,19) = 4 pairs
+    let mut twins = 0;
+    let mut p = 3;
+    while p <= 28 {
+        if is_prime(p) == 1 {
+            if is_prime(p + 2) == 1 { twins = twins + 1; }
+        }
+        p = p + 2;
+    }
+    assert_eq(twins, 4);
+}
+
+fn main() -> Int {
+    test_gcd_and_lcm();
+    test_extended_gcd();
+    test_euler_totient();
+    test_modular_arithmetic();
+    test_primality();
+    test_sieve();
+    test_mobius_function();
+    test_catalan_numbers();
+    test_binomial_identities();
+    test_divisor_functions();
+    test_fibonacci_identities();
+    test_integration();
+    print("[OK] 330_milestone_330_aot");
+    0
+}

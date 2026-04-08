@@ -1,0 +1,119 @@
+// Refinement type edge cases
+// Tests refinement type verification and inference
+
+use verum_core.base.{List, Maybe}
+
+// Basic refinement types
+type Positive is Int{> 0};
+type NonNegative is Int{>= 0};
+type Percentage is Int{>= 0 && <= 100};
+type NonZero is Int{!= 0};
+
+// Multiple constraints
+type SmallPositive is Int{> 0 && < 100};
+type EvenPositive is Int{> 0 && % 2 == 0};
+
+// Array length refinements
+type NonEmptyList<T> is List<T>{len > 0};
+type BoundedList<T> is List<T>{len <= 100};
+
+// Function with refined parameters
+fn divide(numerator: Int, denominator: NonZero) -> Int {
+    numerator / denominator
+}
+
+fn sqrt_positive(x: NonNegative) -> Float {
+    // Can safely take square root
+    x.sqrt()
+}
+
+fn percentage_of(value: Int, percent: Percentage) -> Int {
+    value * percent / 100
+}
+
+// Refinement in return types
+fn abs(x: Int) -> NonNegative {
+    if x < 0 { -x } else { x }
+}
+
+fn clamp_percentage(x: Int) -> Percentage {
+    if x < 0 { 0 }
+    else if x > 100 { 100 }
+    else { x }
+}
+
+// Refinement propagation
+fn double_positive(x: Positive) -> Positive {
+    // Should infer result is positive
+    x * 2
+}
+
+fn add_positives(a: Positive, b: Positive) -> Positive {
+    // Sum of positives is positive
+    a + b
+}
+
+// Refinement with generics
+fn first_of_nonempty<T>(list: NonEmptyList<T>) -> T {
+    // Safe because list is non-empty
+    list[0]
+}
+
+// Complex predicates
+type ValidIndex<N: meta usize> is Int{>= 0 && < N};
+
+fn safe_index<T, N: meta usize>(list: List<T>{len == N}, idx: ValidIndex<N>) -> T {
+    list[idx]
+}
+
+// Refinement narrowing through control flow
+fn process_maybe_positive(x: Maybe<Int>) -> NonNegative {
+    match x {
+        Some(n) if n > 0 => n,      // n is Positive here
+        Some(n) if n == 0 => 0,      // n is exactly 0 here
+        Some(n) => -n,               // n is negative here
+        None => 0,
+    }
+}
+
+// Boundary refinements
+type ByteValue is Int{>= 0 && <= 255};
+type SignedByte is Int{>= -128 && <= 127};
+
+fn byte_to_signed(b: ByteValue) -> SignedByte {
+    if b > 127 { b - 256 } else { b }
+}
+
+// Refinement with where clause
+fn process_bounded<T>(list: List<T>) -> Int
+where
+    meta len(list) > 0,
+    meta len(list) < 1000
+{
+    len(list)
+}
+
+fn main() {
+    // Create refined values
+    let p: Positive = 5;
+    let n: NonNegative = 0;
+    let pct: Percentage = 50;
+    let nz: NonZero = 1;
+
+    // Use in operations
+    let result = divide(100, nz);
+    assert result == 100;
+
+    let doubled = double_positive(p);
+    assert doubled == 10;
+
+    let clamped = clamp_percentage(150);
+    assert clamped == 100;
+
+    // Refinement through control flow
+    let x = 42;
+    if x > 0 {
+        // x is now Positive in this branch
+        let y: Positive = x;
+    }
+}

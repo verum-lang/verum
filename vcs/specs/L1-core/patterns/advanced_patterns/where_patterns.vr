@@ -1,0 +1,343 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, where, constraints, advanced
+//
+// Tests where-patterns for expressing semantic constraints on pattern bindings.
+// Where clauses provide a more expressive way to constrain patterns than guards.
+
+//------------------------------------------------------------------------------
+// Basic Where Patterns
+//------------------------------------------------------------------------------
+
+/// Simple where clause with predicate.
+fn filter_positive(n: Int) -> Maybe<Int> {
+    match n {
+        x where x > 0 => Some(x),
+        _ => None,
+    }
+}
+
+/// Where clause with named predicate function.
+fn is_valid(n: Int) -> Bool {
+    n >= 0 && n <= 100
+}
+
+fn filter_valid(n: Int) -> Maybe<Int> {
+    match n {
+        x where is_valid(x) => Some(x),
+        _ => None,
+    }
+}
+
+/// Where clause with complex condition.
+fn classify_where(n: Int) -> Text {
+    match n {
+        x where x > 0 && x % 2 == 0 => "positive even",
+        x where x > 0 && x % 2 == 1 => "positive odd",
+        x where x < 0 && x % 2 == 0 => "negative even",
+        x where x < 0 && x % 2 == 1 => "negative odd",
+        0 => "zero",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Where Patterns with Multiple Bindings
+//------------------------------------------------------------------------------
+
+/// Where clause using multiple bound variables.
+fn compare_pair(pair: (Int, Int)) -> Text {
+    match pair {
+        (a, b) where a == b => "equal",
+        (a, b) where a < b => "ascending",
+        (a, b) where a > b => "descending",
+    }
+}
+
+/// Where clause with arithmetic relationship.
+fn check_sum(triple: (Int, Int, Int)) -> Bool {
+    match triple {
+        (a, b, c) where a + b == c => true,
+        (a, b, c) where a + c == b => true,
+        (a, b, c) where b + c == a => true,
+        _ => false,
+    }
+}
+
+/// Where clause checking pythagorean triple.
+fn is_pythagorean(triple: (Int, Int, Int)) -> Bool {
+    match triple {
+        (a, b, c) where a*a + b*b == c*c => true,
+        (a, b, c) where a*a + c*c == b*b => true,
+        (a, b, c) where b*b + c*c == a*a => true,
+        _ => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Where Patterns with Struct Fields
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Rectangle is {
+    width: Int,
+    height: Int,
+};
+
+/// Where clause on struct fields.
+fn point_location(p: Point) -> Text {
+    match p {
+        Point { x, y } where x == 0 && y == 0 => "origin",
+        Point { x, y } where x == y => "on diagonal",
+        Point { x, y } where x == -y => "on anti-diagonal",
+        Point { x, y } where x * x + y * y < 100 => "near origin",
+        _ => "far from origin",
+    }
+}
+
+/// Where clause comparing fields.
+fn rect_orientation(r: Rectangle) -> Text {
+    match r {
+        Rectangle { width, height } where width == height => "square",
+        Rectangle { width, height } where width > height * 2 => "very wide",
+        Rectangle { width, height } where height > width * 2 => "very tall",
+        Rectangle { width, height } where width > height => "wide",
+        Rectangle { width, height } where height > width => "tall",
+        _ => "error",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Where Patterns with Enum Variants
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+/// Where clause in enum matching.
+fn filter_some(m: Maybe<Int>) -> Maybe<Int> {
+    match m {
+        Some(x) where x >= 0 => Some(x),
+        Some(x) where x < 0 => Some(-x),
+        None => None,
+    }
+}
+
+/// Where clause distinguishing error codes.
+fn categorize_error(r: Result<Int, Int>) -> Text {
+    match r {
+        Ok(_) => "success",
+        Err(code) where code >= 400 && code < 500 => "client error",
+        Err(code) where code >= 500 && code < 600 => "server error",
+        Err(code) where code >= 100 && code < 400 => "redirect or info",
+        Err(_) => "unknown error",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Where Patterns with Predicates
+//------------------------------------------------------------------------------
+
+/// Predicate function.
+fn is_prime(n: Int) -> Bool {
+    if n <= 1 { return false; }
+    if n <= 3 { return true; }
+    if n % 2 == 0 || n % 3 == 0 { return false; }
+    let mut i = 5;
+    while i * i <= n {
+        if n % i == 0 || n % (i + 2) == 0 { return false; }
+        i = i + 6;
+    }
+    true
+}
+
+/// Using predicate in where clause.
+fn classify_number(n: Int) -> Text {
+    match n {
+        x where x <= 0 => "non-positive",
+        x where is_prime(x) => "prime",
+        x where x % 2 == 0 => "even composite",
+        _ => "odd composite",
+    }
+}
+
+/// Multiple predicate checks.
+fn is_power_of_two(n: Int) -> Bool {
+    n > 0 && (n & (n - 1)) == 0
+}
+
+fn classify_special(n: Int) -> Text {
+    match n {
+        x where is_prime(x) && x > 100 => "large prime",
+        x where is_prime(x) => "small prime",
+        x where is_power_of_two(x) => "power of two",
+        _ => "regular",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Where Patterns with Text
+//------------------------------------------------------------------------------
+
+/// Where clause on text properties.
+fn classify_string(s: Text) -> Text {
+    match s {
+        s where s.len() == 0 => "empty",
+        s where s.len() == 1 => "single char",
+        s where s.starts_with("http://") => "http url",
+        s where s.starts_with("https://") => "https url",
+        s where s.ends_with(".txt") => "text file",
+        s where s.ends_with(".rs") => "rust file",
+        _ => "other",
+    }
+}
+
+/// Where clause with string validation.
+fn is_valid_email(email: Text) -> Bool {
+    email.contains("@") && email.contains(".")
+}
+
+fn validate_email(s: Text) -> Maybe<Text> {
+    match s {
+        email where is_valid_email(email) => Some(email),
+        _ => None,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Where Patterns with Lists
+//------------------------------------------------------------------------------
+
+/// Where clause on list properties.
+fn analyze_list(lst: List<Int>) -> Text {
+    match lst {
+        [] => "empty",
+        [x] where x == 0 => "single zero",
+        [a, b] where a + b == 0 => "opposite pair",
+        arr where arr.len() > 10 => "large",
+        _ => "regular",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Where Patterns vs Guards
+//------------------------------------------------------------------------------
+
+/// Where clause (more semantic).
+fn using_where(n: Int) -> Bool {
+    match n {
+        x where x > 0 => true,
+        _ => false,
+    }
+}
+
+/// Equivalent guard (more operational).
+fn using_guard(n: Int) -> Bool {
+    match n {
+        x if x > 0 => true,
+        _ => false,
+    }
+}
+
+/// Where clause emphasizes invariant.
+fn validate_percentage(n: Int) -> Result<Int, Text> {
+    match n {
+        p where p >= 0 && p <= 100 => Ok(p),
+        _ => Err("percentage must be 0-100"),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Chained Where Clauses
+//------------------------------------------------------------------------------
+
+/// Multiple conditions in where.
+fn complex_validation(data: (Int, Int, Int)) -> Bool {
+    match data {
+        (a, b, c) where a > 0 && b > 0 && c > 0 && a + b > c && b + c > a && a + c > b => true,
+        _ => false,
+    }
+}
+
+/// Where with binding.
+fn transform_where(m: Maybe<Int>) -> Maybe<Int> {
+    match m {
+        Some(x) where x > 0 => Some(x * 2),
+        Some(x) where x < 0 => Some(x * -2),
+        Some(0) => Some(0),
+        None => None,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Basic where
+    assert(filter_positive(5) == Some(5));
+    assert(filter_positive(-5) == None);
+    assert(filter_positive(0) == None);
+
+    // Valid filter
+    assert(filter_valid(50) == Some(50));
+    assert(filter_valid(150) == None);
+    assert(filter_valid(-10) == None);
+
+    // Classify
+    assert(classify_where(4) == "positive even");
+    assert(classify_where(3) == "positive odd");
+    assert(classify_where(-4) == "negative even");
+    assert(classify_where(0) == "zero");
+
+    // Pair comparison
+    assert(compare_pair((5, 5)) == "equal");
+    assert(compare_pair((3, 7)) == "ascending");
+    assert(compare_pair((7, 3)) == "descending");
+
+    // Sum check
+    assert(check_sum((3, 4, 7)) == true);
+    assert(check_sum((1, 2, 5)) == false);
+
+    // Pythagorean
+    assert(is_pythagorean((3, 4, 5)) == true);
+    assert(is_pythagorean((5, 12, 13)) == true);
+    assert(is_pythagorean((2, 3, 4)) == false);
+
+    // Point location
+    assert(point_location(Point { x: 0, y: 0 }) == "origin");
+    assert(point_location(Point { x: 5, y: 5 }) == "on diagonal");
+    assert(point_location(Point { x: 3, y: -3 }) == "on anti-diagonal");
+
+    // Rectangle
+    assert(rect_orientation(Rectangle { width: 5, height: 5 }) == "square");
+    assert(rect_orientation(Rectangle { width: 30, height: 10 }) == "very wide");
+
+    // Number classification
+    assert(classify_number(7) == "prime");
+    assert(classify_number(8) == "even composite");
+    assert(classify_number(9) == "odd composite");
+
+    // Special numbers
+    assert(classify_special(101) == "large prime");
+    assert(classify_special(7) == "small prime");
+    assert(classify_special(16) == "power of two");
+
+    // Text classification
+    assert(classify_string("") == "empty");
+    assert(classify_string("https://example.com") == "https url");
+    assert(classify_string("file.txt") == "text file");
+
+    // Triangle inequality
+    assert(complex_validation((3, 4, 5)) == true);
+    assert(complex_validation((1, 2, 10)) == false);
+}

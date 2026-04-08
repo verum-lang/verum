@@ -1,0 +1,95 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, inline-assembly, arm64
+// @description: ARM64-specific inline assembly tests
+
+/// Read system timer (CNTVCT)
+fn read_timer() -> U64 {
+    let res: U64 = 0;
+    @asm("mrs {res}, cntvct_el0", options(nomem, nostack));
+    res
+}
+
+/// Data memory barrier
+fn dmb() {
+    @asm("dmb sy", options(nostack));
+}
+
+/// Data synchronization barrier
+fn dsb() {
+    @asm("dsb sy", options(nostack));
+}
+
+/// Instruction synchronization barrier
+fn isb() {
+    @asm("isb", options(nostack));
+}
+
+/// Wait for interrupt (puts CPU in low-power state)
+fn wfi() {
+    @asm("wfi", options(nostack, nomem));
+}
+
+/// Wait for event
+fn wfe() {
+    @asm("wfe", options(nostack, nomem));
+}
+
+/// Send event
+fn sev() {
+    @asm("sev", options(nostack, nomem));
+}
+
+/// Count leading zeros
+fn clz(x: U64) -> U32 {
+    let res: U32 = 0;
+    @asm("clz {res}, {x}", options(nomem, nostack));
+    res
+}
+
+/// Reverse bits
+fn rbit(x: U64) -> U64 {
+    let res: U64 = 0;
+    @asm("rbit {res}, {x}", options(nomem, nostack));
+    res
+}
+
+/// Atomic load-acquire
+fn ldapr(ptr: &U64) -> U64 {
+    let res: U64 = 0;
+    @asm("ldapr {res}, [{ptr}]", options(readonly));
+    res
+}
+
+/// Atomic store-release
+fn stlr(ptr: &mut U64, val: U64) {
+    @asm("stlr {val}, [{ptr}]", options(volatile));
+}
+
+/// Compare and swap
+fn cas(ptr: &mut U64, expected: U64, desired: U64) -> (Bool, U64) {
+    let mut current = expected;
+    @asm("casa {current}, {desired}, [{ptr}]", options(volatile));
+    (current == expected, current)
+}
+
+/// Atomic add
+fn ldadd(ptr: &mut I64, val: I64) -> I64 {
+    let prev: I64 = 0;
+    @asm("ldadd {val}, {prev}, [{ptr}]", options(volatile));
+    prev
+}
+
+fn main() {
+    let timer = read_timer();
+    assert(timer > 0);
+
+    dmb();
+    dsb();
+    isb();
+    sev();
+
+    let zeros = clz(0x0F);
+    assert(zeros == 60);
+}

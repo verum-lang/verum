@@ -1,0 +1,22 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: error, negative-bound, advanced-type-syntax
+// @expect: error(NegativeBoundViolation)
+// @description: Error test for negative bound violation
+// @spec: 03-type-system.md Section 13. 3.5
+
+type Copy is protocol {
+    fn copy(&self) -> Self;
+};
+
+// This function requires types that are NOT Copy
+fn takes_not_copy<T: Clone + !Copy>(value: T) {
+    // ...
+}
+
+// Int is Copy in this test, so it should fail
+fn test_negative_bound() {
+    let x: Int = 42;
+    takes_not_copy(x);  // ERROR: Int implements Copy, but !Copy is required
+}

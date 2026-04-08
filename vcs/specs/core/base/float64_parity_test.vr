@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, float64, parity
+// @description: Tests Float64 methods that are in addition to those it inherits as Float alias
+
+mount core.base.primitives.{Float64};
+
+@test
+fn test_float64_is_normal() {
+    let normal = 1.0 as Float64;
+    assert(normal.is_normal());
+
+    let zero = 0.0 as Float64;
+    assert(!zero.is_normal());
+
+    let inf = Float64.infinity();
+    assert(!inf.is_normal());
+
+    let nan = Float64.nan();
+    assert(!nan.is_normal());
+}
+
+@test
+fn test_float64_exp_m1() {
+    // exp_m1(0) = e^0 - 1 = 0
+    let val = 0.0 as Float64;
+    let result: Float64 = val.exp_m1();
+    assert(result == 0.0 || result.abs() < 0.001);
+}
+
+@test
+fn test_float64_ln_1p() {
+    // ln_1p(0) = ln(1) = 0
+    let val = 0.0 as Float64;
+    let result: Float64 = val.ln_1p();
+    assert(result == 0.0 || result.abs() < 0.001);
+}
+
+@test
+fn test_float64_log_base() {
+    let val = 8.0 as Float64;
+    let result: Float64 = val.log_base(2.0 as Float64);
+    // log_2(8) = 3
+    assert(result > 2.9);
+    assert(result < 3.1);
+}
+
+@test
+fn test_float64_sin_cos() {
+    let angle = 0.0 as Float64;
+    let pair: (Float64, Float64) = angle.sin_cos();
+    let sin_val = pair.0;
+    let cos_val = pair.1;
+    // sin(0) = 0, cos(0) = 1
+    assert(sin_val.abs() < 0.001);
+    assert(cos_val > 0.999);
+}
+
+@test
+fn test_float64_special_values() {
+    let inf = Float64.infinity();
+    let neg_inf = Float64.neg_infinity();
+    let nan = Float64.nan();
+
+    assert(inf.is_infinite());
+    assert(neg_inf.is_infinite());
+    assert(nan.is_nan());
+    assert(!inf.is_normal());
+    assert(!nan.is_normal());
+}
+
+@test
+fn test_float64_constants() {
+    assert(Float64.MIN < 0.0);
+    assert(Float64.MAX > 0.0);
+    assert(Float64.MIN_POSITIVE > 0.0);
+    assert(Float64.EPSILON > 0.0);
+    assert_eq(Float64.BITS, 64);
+}
+
+@test
+fn test_float64_basic_math() {
+    let val = 2.5 as Float64;
+    // Note: intrinsic-backed methods may resolve as Float rather than Float64
+    // so we avoid explicit Float64 type annotations on results
+    let _abs = val.abs();
+    let _sqrt = val.sqrt();
+    let _exp = val.exp();
+    let _ln = val.ln();
+    let _sin = val.sin();
+    let _cos = val.cos();
+    let _floor = val.floor();
+    let _ceil = val.ceil();
+    let _round = val.round();
+    let _trunc = val.trunc();
+    assert(_floor == 2.0);
+    assert(_ceil == 3.0);
+    assert(_round == 3.0);
+}
+
+@test
+fn test_float64_copysign() {
+    let val = 3.0 as Float64;
+    let neg_sign = val.copysign(-1.0 as Float64);
+    assert(neg_sign < 0.0);
+}
+
+@test
+fn test_float64_to_bits_from_bits() {
+    let val = 1.0 as Float64;
+    let bits: UInt64 = val.to_bits();
+    let restored: Float64 = Float64.from_bits(bits);
+    assert(restored == 1.0);
+}

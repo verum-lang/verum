@@ -1,0 +1,556 @@
+// @test: parse-pass
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, escape-sequences
+// @description: Comprehensive tests for escape sequence parsing per grammar/verum.ebnf
+//
+// Grammar productions tested:
+//   escape_seq = '\' , ( 'n' | 'r' | 't' | '0' | 'a' | 'b' | 'f' | 'v'
+//              | '\' | '"' | "'"
+//              | 'x' , hex_digit , hex_digit
+//              | 'u' , '{' , hex_sequence , '}' )
+//   hex_sequence = hex_digit | hex_digit , hex_sequence
+//   byte_escape_seq = '\' , ( 'n' | 'r' | 't' | '0' | '\' | "'" | '"'
+//                   | ( 'x' , hex_digit , hex_digit ) )
+
+// ============================================================================
+// STANDARD ESCAPE SEQUENCES IN STRINGS
+// ============================================================================
+
+fn test_newline_escape() {
+    // Single newline
+    let a = "\n";
+
+    // Multiple newlines
+    let b = "\n\n\n";
+
+    // Newline in context
+    let c = "line1\nline2";
+    let d = "hello\nworld";
+    let e = "before\n\nafter";  // Double newline
+
+    // At boundaries
+    let f = "\nhello";
+    let g = "hello\n";
+    let h = "\n";
+}
+
+fn test_carriage_return_escape() {
+    // Single carriage return
+    let a = "\r";
+
+    // Multiple
+    let b = "\r\r\r";
+
+    // In context
+    let c = "line1\rline2";
+    let d = "before\rafter";
+
+    // CRLF combination
+    let e = "\r\n";
+    let f = "line1\r\nline2";
+    let g = "windows\r\nstyle\r\nlines";
+}
+
+fn test_tab_escape() {
+    // Single tab
+    let a = "\t";
+
+    // Multiple tabs
+    let b = "\t\t\t";
+
+    // In context
+    let c = "col1\tcol2\tcol3";
+    let d = "\tindented";
+    let e = "value\t";
+
+    // Mixed with spaces
+    let f = " \t ";
+    let g = "\t \t";
+}
+
+fn test_null_escape() {
+    // Single null
+    let a = "\0";
+
+    // Multiple nulls
+    let b = "\0\0\0";
+
+    // In context (embedded null)
+    let c = "before\0after";
+    let d = "\0start";
+    let e = "end\0";
+
+    // With other escapes
+    let f = "\0\n\0";
+    let g = "text\0\0text";
+}
+
+fn test_bell_alert_escape() {
+    // Single bell/alert
+    let a = "\a";
+
+    // Multiple
+    let b = "\a\a\a";
+
+    // In context
+    let c = "alert\ahere";
+    let d = "\aalert";
+    let e = "alert\a";
+}
+
+fn test_backspace_escape() {
+    // Single backspace
+    let a = "\b";
+
+    // Multiple
+    let b = "\b\b\b";
+
+    // In context
+    let c = "back\bspace";
+    let d = "\bstart";
+    let e = "end\b";
+}
+
+fn test_form_feed_escape() {
+    // Single form feed
+    let a = "\f";
+
+    // Multiple
+    let b = "\f\f\f";
+
+    // In context
+    let c = "page1\fpage2";
+    let d = "\fstart";
+    let e = "end\f";
+}
+
+fn test_vertical_tab_escape() {
+    // Single vertical tab
+    let a = "\v";
+
+    // Multiple
+    let b = "\v\v\v";
+
+    // In context
+    let c = "line1\vline2";
+    let d = "\vstart";
+    let e = "end\v";
+}
+
+fn test_backslash_escape() {
+    // Single backslash
+    let a = "\\";
+
+    // Multiple backslashes
+    let b = "\\\\";
+    let c = "\\\\\\";
+    let d = "\\\\\\\\";
+
+    // In context
+    let e = "path\\to\\file";
+    let f = "C:\\Users\\Name";
+    let g = "\\\\server\\share";
+
+    // Mixed
+    let h = "back\\slash";
+    let i = "\\start";
+    let j = "end\\";
+}
+
+fn test_double_quote_escape() {
+    // Single quote
+    let a = "\"";
+
+    // Multiple quotes
+    let b = "\"\"";
+    let c = "\"\"\"";
+
+    // In context
+    let d = "say \"hello\"";
+    let e = "\"quoted\"";
+    let f = "he said \"hi\"";
+
+    // Nested
+    let g = "outer \"inner\" outer";
+    let h = "a\"b\"c\"d";
+}
+
+fn test_single_quote_escape() {
+    // Single apostrophe (in strings)
+    let a = "\'";
+
+    // Multiple
+    let b = "\'\'";
+    let c = "\'\'\'";
+
+    // In context
+    let d = "it\'s working";
+    let e = "don\'t stop";
+    let f = "\'quoted\'";
+}
+
+// ============================================================================
+// HEX ESCAPE SEQUENCES
+// ============================================================================
+
+fn test_hex_escape_basic() {
+    // Single digit hex values
+    let a = "\x00";
+    let b = "\x01";
+    let c = "\x09";
+    let d = "\x0a";
+    let e = "\x0f";
+    let f = "\x0A";
+    let g = "\x0F";
+
+    // Two digit hex values
+    let h = "\x10";
+    let i = "\x1F";
+    let j = "\x20";  // space
+    let k = "\x7F";  // DEL
+    let l = "\x80";
+    let m = "\xFF";
+}
+
+fn test_hex_escape_ascii() {
+    // Printable ASCII via hex
+    let a = "\x41";  // 'A'
+    let b = "\x42";  // 'B'
+    let c = "\x5A";  // 'Z'
+    let d = "\x61";  // 'a'
+    let e = "\x62";  // 'b'
+    let f = "\x7A";  // 'z'
+    let g = "\x30";  // '0'
+    let h = "\x39";  // '9'
+    let i = "\x20";  // space
+    let j = "\x21";  // '!'
+    let k = "\x40";  // '@'
+}
+
+fn test_hex_escape_special_values() {
+    // Control characters
+    let null = "\x00";
+    let soh = "\x01";
+    let stx = "\x02";
+    let etx = "\x03";
+    let eot = "\x04";
+    let enq = "\x05";
+    let ack = "\x06";
+    let bel = "\x07";
+    let bs = "\x08";
+    let ht = "\x09";
+    let lf = "\x0A";
+    let vt = "\x0B";
+    let ff = "\x0C";
+    let cr = "\x0D";
+    let so = "\x0E";
+    let si = "\x0F";
+
+    // More control characters
+    let dle = "\x10";
+    let esc = "\x1B";
+    let del = "\x7F";
+}
+
+fn test_hex_escape_mixed_case() {
+    // Same value, different case
+    let a1 = "\x0a";
+    let a2 = "\x0A";
+    let b1 = "\x0b";
+    let b2 = "\x0B";
+    let c1 = "\x0c";
+    let c2 = "\x0C";
+    let d1 = "\x0d";
+    let d2 = "\x0D";
+    let e1 = "\x0e";
+    let e2 = "\x0E";
+    let f1 = "\x0f";
+    let f2 = "\x0F";
+
+    // Mixed case in same literal
+    let mixed1 = "\xaB";
+    let mixed2 = "\xAb";
+    let mixed3 = "\xAB";
+    let mixed4 = "\xab";
+}
+
+fn test_hex_escape_in_context() {
+    // Hex escapes mixed with text
+    let a = "Hello\x20World";  // space
+    let b = "A\x42C";          // "ABC"
+    let c = "\x48\x65\x6C\x6C\x6F";  // "Hello"
+
+    // Multiple hex escapes
+    let d = "\x00\x01\x02\x03\x04\x05";
+    let e = "\xFF\xFE\xFD\xFC\xFB\xFA";
+
+    // Mixed with other escapes
+    let f = "\x41\n\x42";
+    let g = "\t\x48\t";
+}
+
+// ============================================================================
+// UNICODE ESCAPE SEQUENCES
+// ============================================================================
+
+fn test_unicode_escape_single_digit() {
+    // Single hex digit
+    let a = "\u{0}";
+    let b = "\u{1}";
+    let c = "\u{9}";
+    let d = "\u{a}";
+    let e = "\u{A}";
+    let f = "\u{f}";
+    let g = "\u{F}";
+}
+
+fn test_unicode_escape_two_digits() {
+    // Two hex digits
+    let a = "\u{00}";
+    let b = "\u{01}";
+    let c = "\u{41}";  // 'A'
+    let d = "\u{7F}";
+    let e = "\u{80}";
+    let f = "\u{FF}";
+}
+
+fn test_unicode_escape_three_digits() {
+    // Three hex digits
+    let a = "\u{000}";
+    let b = "\u{041}";
+    let c = "\u{100}";
+    let d = "\u{3B1}";  // Greek alpha
+    let e = "\u{3C0}";  // Greek pi
+    let f = "\u{FFF}";
+}
+
+fn test_unicode_escape_four_digits() {
+    // Four hex digits - BMP characters
+    let a = "\u{0000}";
+    let b = "\u{0041}";  // 'A'
+    let c = "\u{0100}";  // Latin Extended
+    let d = "\u{03B1}";  // alpha
+    let e = "\u{03C0}";  // pi
+    let f = "\u{4E2D}";  // CJK
+    let g = "\u{FFFF}";
+}
+
+fn test_unicode_escape_five_digits() {
+    // Five hex digits - beyond BMP
+    let a = "\u{10000}";
+    let b = "\u{1F600}";  // Grinning face
+    let c = "\u{1F601}";  // Grinning face with smiling eyes
+    let d = "\u{1F602}";  // Face with tears of joy
+    let e = "\u{1F60D}";  // Smiling face with heart-eyes
+}
+
+fn test_unicode_escape_six_digits() {
+    // Six hex digits - full range
+    let a = "\u{000000}";
+    let b = "\u{00041}";
+    let c = "\u{01F600}";
+    let d = "\u{10FFFF}";  // Maximum valid Unicode
+}
+
+fn test_unicode_escape_common_symbols() {
+    // Currency
+    let dollar = "\u{24}";
+    let euro = "\u{20AC}";
+    let pound = "\u{A3}";
+    let yen = "\u{A5}";
+
+    // Math
+    let plus_minus = "\u{B1}";
+    let multiplication = "\u{D7}";
+    let division = "\u{F7}";
+    let infinity = "\u{221E}";
+    let sqrt = "\u{221A}";
+
+    // Arrows
+    let left_arrow = "\u{2190}";
+    let right_arrow = "\u{2192}";
+    let up_arrow = "\u{2191}";
+    let down_arrow = "\u{2193}";
+
+    // Greek letters
+    let alpha = "\u{3B1}";
+    let beta = "\u{3B2}";
+    let gamma = "\u{3B3}";
+    let delta = "\u{3B4}";
+    let pi = "\u{3C0}";
+}
+
+fn test_unicode_escape_emoji() {
+    // Common emoji
+    let smile = "\u{1F600}";
+    let laugh = "\u{1F602}";
+    let heart = "\u{2764}";
+    let thumbs_up = "\u{1F44D}";
+    let fire = "\u{1F525}";
+    let star = "\u{2B50}";
+    let check = "\u{2705}";
+    let cross = "\u{274C}";
+}
+
+fn test_unicode_escape_mixed_case() {
+    // Same codepoint, different case
+    let a1 = "\u{abcd}";
+    let a2 = "\u{ABCD}";
+    let a3 = "\u{AbCd}";
+    let a4 = "\u{aBcD}";
+
+    let b1 = "\u{1f600}";
+    let b2 = "\u{1F600}";
+    let b3 = "\u{1f600}";
+}
+
+fn test_unicode_escape_in_context() {
+    // Mixed with plain text
+    let a = "Hello \u{1F600}!";
+    let b = "\u{03C0} = 3.14159";
+    let c = "Price: \u{20AC}100";
+
+    // Multiple unicode escapes
+    let d = "\u{1F600}\u{1F601}\u{1F602}";
+
+    // Mixed with other escapes
+    let e = "\u{0041}\n\u{0042}";
+    let f = "\t\u{2192}\t";
+}
+
+// ============================================================================
+// ESCAPE SEQUENCES IN CHARACTER LITERALS
+// ============================================================================
+
+fn test_char_escape_basic() {
+    let a = '\n';
+    let b = '\r';
+    let c = '\t';
+    let d = '\0';
+    let e = '\\';
+    let f = '\'';
+    let g = '\"';
+}
+
+fn test_char_escape_additional() {
+    let a = '\a';  // bell
+    let b = '\b';  // backspace
+    let c = '\f';  // form feed
+    let d = '\v';  // vertical tab
+}
+
+fn test_char_hex_escape() {
+    let a = '\x00';
+    let b = '\x41';  // 'A'
+    let c = '\x7F';
+    let d = '\xFF';
+
+    let e = '\x0a';
+    let f = '\x0A';
+    let g = '\xAB';
+    let h = '\xab';
+}
+
+fn test_char_unicode_escape() {
+    let a = '\u{0}';
+    let b = '\u{41}';    // 'A'
+    let c = '\u{3C0}';   // pi
+    let d = '\u{1F600}'; // emoji
+    let e = '\u{10FFFF}'; // max
+}
+
+// ============================================================================
+// ESCAPE SEQUENCES IN BYTE STRINGS
+// ============================================================================
+
+fn test_byte_string_escape_basic() {
+    let a = b"\n";
+    let b_var = b"\r";
+    let c = b"\t";
+    let d = b"\0";
+    let e = b"\\";
+    let f = b"\'";
+    let g = b"\"";
+}
+
+fn test_byte_string_hex_escape() {
+    let a = b"\x00";
+    let b_var = b"\x41";
+    let c = b"\x7F";
+    let d = b"\xFF";
+
+    // Multiple hex escapes
+    let e = b"\x00\x01\x02\x03";
+    let f = b"\xFF\xFE\xFD\xFC";
+
+    // Mixed with text
+    let g = b"A\x42C";
+    let h = b"\x48ello";
+}
+
+// ============================================================================
+// COMBINED AND COMPLEX ESCAPE SEQUENCES
+// ============================================================================
+
+fn test_combined_escapes() {
+    // All basic escapes in one string
+    let all = "\n\r\t\0\a\b\f\v\\\"\'";
+
+    // Alternating escapes and text
+    let alternating = "a\nb\tc\0d\\e\"f\'g";
+
+    // Multiple same escapes
+    let newlines = "\n\n\n\n";
+    let tabs = "\t\t\t\t";
+    let backslashes = "\\\\\\\\";
+
+    // Escape sequences at various positions
+    let start = "\nstart";
+    let middle = "mid\ndle";
+    let end = "end\n";
+    let both = "\nboth\n";
+}
+
+fn test_complex_escape_patterns() {
+    // Table-like structure
+    let table = "Name\tAge\tCity\nAlice\t30\tNYC\nBob\t25\tLA";
+
+    // JSON-like string
+    let json_like = "{\"key\": \"value\\nwith newline\"}";
+
+    // Path with escapes
+    let path = "C:\\Users\\Name\\Documents\\file.txt";
+
+    // Mixed escapes
+    let mixed = "\x41\u{42}\n\x43\u{44}";
+
+    // Quotes within quotes
+    let nested_quotes = "He said \"Hello\\nWorld\"";
+}
+
+fn test_escape_edge_cases() {
+    // Consecutive different escapes
+    let a = "\n\r";
+    let b = "\r\n";
+    let c = "\t\n";
+    let d = "\n\t";
+    let e = "\\\n";
+    let f = "\n\\";
+
+    // Escape followed by similar character
+    let g = "\nn";  // escape n, then literal n
+    let h = "\tt";  // escape t, then literal t
+    let i = "\\\\"; // two backslashes
+    let j = "\"\""; // two quotes
+
+    // Hex escape followed by hex char
+    let k = "\x41a";  // 'A' then 'a'
+    let l = "\x61A";  // 'a' then 'A'
+    let m = "\x00\x00";
+
+    // Unicode escape followed by similar
+    let n = "\u{41}A";
+    let o = "\u{61}a";
+}

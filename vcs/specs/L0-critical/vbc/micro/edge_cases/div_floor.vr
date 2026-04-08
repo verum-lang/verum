@@ -1,0 +1,10 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    assert_eq(7 / 3, 2);
+    assert_eq(-7 / 3, -2);
+    assert_eq(7 / -3, -2);
+    assert_eq(-7 / -3, 2);
+}

@@ -1,0 +1,151 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, primitives, int
+
+/// Test for Int primitive type.
+/// Int represents arbitrary precision integers (BigInt semantics).
+
+fn main() {
+    // Basic integer literals
+    let i: Int = 42;
+    let negative: Int = -100;
+    let zero: Int = 0;
+
+    // Large integers (arbitrary precision)
+    let big: Int = 9999999999999999999999999999999999999999;
+    let negative_big: Int = -9999999999999999999999999999999999999999;
+    let huge: Int = 123456789012345678901234567890123456789012345678901234567890;
+
+    // Different bases
+    let hex: Int = 0xFF;        // 255
+    let octal: Int = 0o77;      // 63
+    let binary: Int = 0b1010;   // 10
+    let hex_upper: Int = 0xABCDEF;
+    let hex_lower: Int = 0xabcdef;
+    let binary_long: Int = 0b11111111_00000000_11111111_00000000;
+
+    // Underscores for readability
+    let million: Int = 1_000_000;
+    let billion: Int = 1_000_000_000;
+    let with_underscores: Int = 1_2_3_4_5;
+
+    // Arithmetic operations
+    let sum: Int = i + negative;
+    let product: Int = i * 2;
+    let quotient: Int = i / 7;
+    let remainder: Int = i % 7;
+    let power: Int = i ** 2;
+    let difference: Int = 100 - 42;
+    let neg_result: Int = -i;
+
+    // Compound assignment operations
+    let mut mutable: Int = 10;
+    mutable += 5;
+    assert(mutable == 15);
+    mutable -= 3;
+    assert(mutable == 12);
+    mutable *= 2;
+    assert(mutable == 24);
+    mutable /= 4;
+    assert(mutable == 6);
+    mutable %= 4;
+    assert(mutable == 2);
+
+    // Comparison operations
+    let less: Bool = 5 < 10;
+    let greater: Bool = 10 > 5;
+    let less_eq: Bool = 5 <= 5;
+    let greater_eq: Bool = 10 >= 10;
+    let equal: Bool = 42 == 42;
+    let not_equal: Bool = 42 != 43;
+
+    // Integer overflow handling (arbitrary precision - no overflow)
+    let max_i64: Int = 9223372036854775807;
+    let beyond_i64: Int = max_i64 + 1;  // Still works - arbitrary precision
+
+    // Negative number operations
+    let neg_product: Int = -5 * -3;
+    let neg_quotient: Int = -15 / 3;
+    let neg_remainder: Int = -17 % 5;
+
+    // Absolute value
+    let abs_pos: Int = 42.abs();
+    let abs_neg: Int = (-42).abs();
+
+    // Sign operations
+    let sign_pos: Int = 42.signum();
+    let sign_neg: Int = (-42).signum();
+    let sign_zero: Int = 0.signum();
+
+    // Min and max
+    let min_val: Int = Int.min(10, 20);
+    let max_val: Int = Int.max(10, 20);
+
+    // Integer in collections
+    let int_list: List<Int> = [1, 2, 3, 4, 5];
+    // let int_sum: Int = int_list.iter().sum();
+
+    // Integer parsing
+    // let parsed: Int = "42".parse<Int>().unwrap();
+    // let parsed_neg: Int = "-100".parse<Int>().unwrap();
+
+    // Integer to string
+    let str_repr: Text = 42.to_string();
+
+    // Default value
+    let default_int: Int = Int.default();
+
+    // Function with Int parameters
+    fn factorial(n: Int) -> Int {
+        if n <= 1 { 1 }
+        else { n * factorial(n - 1) }
+    }
+
+    fn gcd(a: Int, b: Int) -> Int {
+        // Non-recursive Euclidean algorithm (recursive version triggers E321)
+        let mut x: Int = a;
+        let mut y: Int = b;
+        while y != 0 {
+            let t: Int = y;
+            y = x % y;
+            x = t;
+        }
+        x
+    }
+
+    let fact_5: Int = factorial(5);
+    let gcd_result: Int = gcd(48, 18);
+
+    // Assertions
+    assert(i == 42);
+    assert(hex == 255);
+    assert(octal == 63);
+    assert(binary == 10);
+    assert(hex_upper == 11259375);
+    assert(hex_lower == 11259375);
+    assert(million == 1000000);
+    assert(sum == -58);
+    assert(product == 84);
+    assert(quotient == 6);
+    assert(remainder == 0);
+    assert(power == 1764);
+    assert(difference == 58);
+    assert(neg_result == -42);
+    assert(less == true);
+    assert(greater == true);
+    assert(beyond_i64 == 9223372036854775808);
+    assert(neg_product == 15);
+    assert(neg_quotient == -5);
+    assert(abs_pos == 42);
+    assert(abs_neg == 42);
+    assert(sign_pos == 1);
+    assert(sign_neg == -1);
+    assert(sign_zero == 0);
+    assert(min_val == 10);
+    assert(max_val == 20);
+    assert(str_repr == "42");
+    assert(default_int == 0);
+    assert(fact_5 == 120);
+    assert(gcd_result == 6);
+}

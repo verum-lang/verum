@@ -1,0 +1,185 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, nn, conv2d, pooling, max_pool, avg_pool
+// @expected-exit: 0
+
+// Tests 2D convolution and pooling operations with known results.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if (a > b) { a } else { b }
+}
+
+// 2D convolution: input(h,w) * kernel(kh,kw) -> output(oh,ow)
+// No padding, stride=1
+fn conv2d_naive(input: List<Int>, h: Int, w: Int,
+                kernel: List<Int>, kh: Int, kw: Int) -> List<Int> {
+    let oh = h - kh + 1;
+    let ow = w - kw + 1;
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < oh) {
+        let mut j = 0;
+        while (j < ow) {
+            let mut sum = 0;
+            let mut ki = 0;
+            while (ki < kh) {
+                let mut kj = 0;
+                while (kj < kw) {
+                    sum = sum + input[(i + ki) * w + (j + kj)] * kernel[ki * kw + kj];
+                    kj = kj + 1;
+                }
+                ki = ki + 1;
+            }
+            out[i * ow + j] = sum;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// Max pooling: pool_size x pool_size, stride = pool_size
+fn max_pool2d(input: List<Int>, h: Int, w: Int, pool: Int) -> List<Int> {
+    let oh = h / pool;
+    let ow = w / pool;
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < oh) {
+        let mut j = 0;
+        while (j < ow) {
+            let mut mx = input[(i * pool) * w + (j * pool)];
+            let mut ki = 0;
+            while (ki < pool) {
+                let mut kj = 0;
+                while (kj < pool) {
+                    let val = input[(i * pool + ki) * w + (j * pool + kj)];
+                    if (val > mx) { mx = val; }
+                    kj = kj + 1;
+                }
+                ki = ki + 1;
+            }
+            out[i * ow + j] = mx;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// Average pooling
+fn avg_pool2d(input: List<Int>, h: Int, w: Int, pool: Int) -> List<Int> {
+    let oh = h / pool;
+    let ow = w / pool;
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < oh) {
+        let mut j = 0;
+        while (j < ow) {
+            let mut sum = 0;
+            let mut ki = 0;
+            while (ki < pool) {
+                let mut kj = 0;
+                while (kj < pool) {
+                    sum = sum + input[(i * pool + ki) * w + (j * pool + kj)];
+                    kj = kj + 1;
+                }
+                ki = ki + 1;
+            }
+            out[i * ow + j] = sum / (pool * pool);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn main() -> Int {
+    // Test 1: Identity convolution (1x1 kernel = [1])
+    let input = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 0, 0, 0, 0, 0, 0]; // 3x3
+    let id_kernel = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let id_out = conv2d_naive(input, 3, 3, id_kernel, 1, 1);
+    assert_eq(id_out[0], 1);
+    assert_eq(id_out[4], 5);
+    assert_eq(id_out[8], 9);
+
+    // Test 2: Edge detection kernel (Sobel-like horizontal)
+    // kernel = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]
+    let sobel_h = [-1, 0, 1, -2, 0, 2, -1, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+    // Input 3x3 with vertical gradient: [[1,2,3],[1,2,3],[1,2,3]]
+    let vert_grad = [1, 2, 3, 1, 2, 3, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0];
+    let edge = conv2d_naive(vert_grad, 3, 3, sobel_h, 3, 3);
+    // Output is 1x1: sum of all kernel * input
+    // = -1*1+0*2+1*3 + -2*1+0*2+2*3 + -1*1+0*2+1*3 = 2+4+2 = 8
+    assert_eq(edge[0], 8);
+
+    // Test 3: Averaging kernel 2x2 = [[1,1],[1,1]]
+    let avg_k = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Input: [[1,2,3],[4,5,6],[7,8,9]], Output: 2x2
+    let avg_out = conv2d_naive(input, 3, 3, avg_k, 2, 2);
+    // [0,0]: 1+2+4+5 = 12
+    // [0,1]: 2+3+5+6 = 16
+    // [1,0]: 4+5+7+8 = 24
+    // [1,1]: 5+6+8+9 = 28
+    assert_eq(avg_out[0], 12);
+    assert_eq(avg_out[1], 16);
+    assert_eq(avg_out[2], 24);
+    assert_eq(avg_out[3], 28);
+
+    // Test 4: Max pooling 2x2 on 4x4 input
+    let big_input = [1, 3, 2, 4, 5, 7, 6, 8, 9, 11, 10, 12, 13, 15, 14, 16];
+    let mp = max_pool2d(big_input, 4, 4, 2);
+    // Pool [1,3,5,7] → max=7, [2,4,6,8] → max=8
+    // Pool [9,11,13,15] → max=15, [10,12,14,16] → max=16
+    assert_eq(mp[0], 7);
+    assert_eq(mp[1], 8);
+    assert_eq(mp[2], 15);
+    assert_eq(mp[3], 16);
+
+    // Test 5: Average pooling 2x2 on 4x4 input
+    let ap = avg_pool2d(big_input, 4, 4, 2);
+    // Pool [1,3,5,7] → avg=4, [2,4,6,8] → avg=5
+    // Pool [9,11,13,15] → avg=12, [10,12,14,16] → avg=13
+    assert_eq(ap[0], 4);   // (1+3+5+7)/4
+    assert_eq(ap[1], 5);   // (2+4+6+8)/4
+    assert_eq(ap[2], 12);  // (9+11+13+15)/4
+    assert_eq(ap[3], 13);  // (10+12+14+16)/4
+
+    // Test 6: Convolution is linear
+    // conv(a*X + b*Y, K) = a*conv(X, K) + b*conv(Y, K)
+    let x = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+    let y = [0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+    let k = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cx = conv2d_naive(x, 3, 3, k, 2, 2);
+    let cy = conv2d_naive(y, 3, 3, k, 2, 2);
+    // 2*X + 3*Y
+    let mut combined = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ci = 0;
+    while (ci < 9) {
+        combined[ci] = 2 * x[ci] + 3 * y[ci];
+        ci = ci + 1;
+    }
+    let c_combined = conv2d_naive(combined, 3, 3, k, 2, 2);
+    // Verify linearity: conv(2X+3Y) = 2*conv(X) + 3*conv(Y)
+    let mut vi = 0;
+    while (vi < 4) {
+        assert_eq(c_combined[vi], 2 * cx[vi] + 3 * cy[vi]);
+        vi = vi + 1;
+    }
+
+    // Test 7: Max pooling is non-expansive
+    // |max_pool(X) - max_pool(Y)| <= max|X - Y|
+    // For identical inputs: max_pool(X) = max_pool(X)
+    let mp2 = max_pool2d(big_input, 4, 4, 2);
+    assert_eq(mp[0], mp2[0]);
+    assert_eq(mp[1], mp2[1]);
+    assert_eq(mp[2], mp2[2]);
+    assert_eq(mp[3], mp2[3]);
+
+    print("Conv2d pooling: PASS");
+    0
+}

@@ -1,0 +1,21 @@
+// @test: parse-pass
+// @tier: 0
+// @category: concurrency
+
+fn test_rwlock() {
+    // RwLock creation
+    let cache: RwLock<Map<Text, Int>> = RwLock.new(Map.new());
+
+    // Read lock
+    let read = cache.read();
+    let value = read.get("key");
+
+    // Write lock
+    let mut write = cache.write();
+    write.insert("key", 42);
+
+    // Multiple readers
+    let r1 = cache.read();
+    let r2 = cache.read();
+    let sum = r1.get("a").unwrap_or(0) + r2.get("b").unwrap_or(0);
+}

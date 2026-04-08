@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, contexts, provide, missing-context, error
+// @description: Test provide statement without context name
+// @expected-error: E018
+
+fn test() {
+    provide = db_impl;
+}

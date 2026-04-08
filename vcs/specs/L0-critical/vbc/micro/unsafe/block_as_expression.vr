@@ -1,0 +1,8 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, expression, value
+// @description: Unsafe block as expression returning a value
+fn main() {
+    let x: Int = unsafe { 42 };
+    assert_eq(x, 42);
+}

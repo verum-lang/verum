@@ -1,0 +1,495 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L1
+// @tags: types, function-types, contexts, advanced, rank2, cluster4
+// @description: Advanced context patterns in function type expressions
+// Grammar: function_type = [ 'async' ] , 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
+// Grammar: context_clause = 'using' , context_spec ;
+// Grammar: context_spec = single_context_spec | extended_context_list ;
+// Grammar: extended_context_item = negative_context | conditional_context | transformed_context | named_context | simple_context ;
+
+// =============================================================================
+// Context Definitions for Tests
+// =============================================================================
+
+context Database<T> {
+    fn find(id: Id) -> Maybe<T>;
+    fn save(entity: T) -> Result<(), DbError>;
+    fn delete(id: Id) -> Result<(), DbError>;
+    fn transactional() -> Self;
+}
+
+context Logger {
+    fn log(level: LogLevel, message: Text);
+    fn debug(message: Text);
+    fn info(message: Text);
+    fn error(message: Text);
+    fn scoped(scope: Text) -> Self;
+}
+
+context Cache<K, V> {
+    fn get(key: K) -> Maybe<V>;
+    fn set(key: K, value: V);
+    fn invalidate(key: K);
+    fn scoped(scope: Text) -> Self;
+}
+
+context Network {
+    fn fetch(url: Text) -> Result<Response, NetworkError>;
+}
+
+context FileSystem {
+    fn read(path: Text) -> Result<Text, IoError>;
+    fn write(path: Text, content: Text) -> Result<(), IoError>;
+}
+
+context Allocator {
+    fn allocate(size: Int) -> Ptr;
+    fn deallocate(ptr: Ptr);
+}
+
+type Id is Int;
+type LogLevel is Info | Debug | Error | Warn;
+type DbError is { message: Text };
+type NetworkError is { code: Int, message: Text };
+type IoError is { kind: Text, message: Text };
+type Response is { status: Int, body: Text };
+type Ptr is Int;
+type User is { id: Id, name: Text };
+type Order is { id: Id, total: Float };
+
+// =============================================================================
+// Section 1: Named Contexts in Function Types
+// Grammar: named_context = identifier , ':' , context_path ;
+// =============================================================================
+
+/// Function type with named context
+fn test_named_context_in_type() {
+    // Single named context
+    let f1: fn() using [db: Database<User>] = || {};
+
+    // Named context with return type
+    let f2: fn(Id) -> Maybe<User> using [db: Database<User>] = |id| db.find(id);
+
+    // Multiple named contexts
+    let f3: fn(User) -> Result<(), DbError> using [db: Database<User>, log: Logger] =
+        |user| {
+            log.info(f"Saving user {user.id}");
+            db.save(user)
+        };
+
+    // Named context with type arguments
+    let f4: fn(Text) -> Maybe<Text> using [cache: Cache<Text, Text>] =
+        |key| cache.get(key);
+
+    // Named context in higher-order function type
+    let f5: fn(fn() using [db: Database<User>]) -> Int = |f| { f(); 0 };
+}
+
+/// Named contexts with aliases
+fn test_named_context_with_alias() {
+    // Named context with alias
+    let f1: fn() using [userDb: Database<User> as db] = || {};
+
+    // Multiple named contexts with aliases
+    let f2: fn() using [
+        userDb: Database<User> as db,
+        logger: Logger as log
+    ] = || {};
+}
+
+// =============================================================================
+// Section 2: Context Type Arguments in Function Types
+// Grammar: simple_context = context_path , [ type_args ] ;
+// =============================================================================
+
+/// Function types with parametric contexts
+fn test_context_type_args_in_type() {
+    // Context with single type argument
+    let f1: fn() using [Database<User>] = || {};
+    let f2: fn() using [Database<Order>] = || {};
+
+    // Context with multiple type arguments
+    let f3: fn() using [Cache<Text, Int>] = || {};
+    let f4: fn() using [Cache<Id, User>] = || {};
+
+    // Multiple parametric contexts
+    let f5: fn() using [Database<User>, Cache<Id, User>] = || {};
+
+    // Nested type arguments
+    let f6: fn() using [Cache<Text, List<User>>] = || {};
+    let f7: fn() using [Cache<Id, Maybe<User>>] = || {};
+
+    // Generic function with parametric context
+    let f8: fn<T>(T) -> Maybe<T> using [Database<T>] = |x| Some(x);
+}
+
+// =============================================================================
+// Section 3: Negative Contexts in Function Types
+// Grammar: negative_context = '!' , context_path ;
+// =============================================================================
+
+/// Function types with negative (excluded) contexts
+fn test_negative_context_in_type() {
+    // Single negative context - proves function does NOT use database
+    let f1: fn() using [!Database<User>] = || {};
+
+    // Negative context with positive contexts
+    let f2: fn() using [Logger, !Database<User>] = || {};
+    let f3: fn() using [!Network, Logger] = || {};
+
+    // Multiple negative contexts
+    let f4: fn() using [!Database<User>, !Network] = || {};
+
+    // Negative context with parametric type
+    let f5: fn() using [!Cache<Text, Int>] = || {};
+
+    // Pure function (no IO, no database)
+    let pure_fn: fn(Int) -> Int using [!Database<User>, !Network, !FileSystem] = |x| x * 2;
+}
+
+// =============================================================================
+// Section 4: Context Aliases in Function Types
+// Grammar: context_alias = 'as' , identifier ;
+// =============================================================================
+
+/// Function types with context aliases
+fn test_context_alias_in_type() {
+    // Single context with alias
+    let f1: fn() using [Database<User> as db] = || {};
+
+    // Alias allows shorter names in body
+    let f2: fn(Id) -> Maybe<User> using [Database<User> as db] = |id| db.find(id);
+
+    // Multiple aliased contexts
+    let f3: fn() using [Database<User> as db, Logger as log] = || {};
+
+    // Alias with parametric context
+    let f4: fn() using [Cache<Text, Int> as c] = || {};
+
+    // Complex alias patterns
+    let f5: fn() using [
+        Database<User> as userDb,
+        Database<Order> as orderDb,
+        Logger as log
+    ] = || {};
+}
+
+// =============================================================================
+// Section 5: Conditional Contexts in Function Types
+// Grammar: conditional_context = context_path , [ context_alias ] , 'if' , compile_time_condition ;
+// =============================================================================
+
+/// Function types with conditional context requirements
+fn test_conditional_context_in_type() {
+    // Context required only if config flag is set
+    let f1: fn() using [Logger if cfg.logging] = || {};
+
+    // Conditional with type constraint
+    let f2: fn<T>(T) using [Database<T> if T: Entity] = |x| {};
+
+    // Multiple conditions
+    let f3: fn() using [
+        Logger if cfg.logging,
+        Database<User> if cfg.persistence
+    ] = || {};
+
+    // Conditional with alias
+    let f4: fn() using [Database<User> as db if cfg.enabled] = || {};
+
+    // Conditional with parametric context
+    let f5: fn() using [Cache<Text, Int> if cfg.caching] = || {};
+
+    // Boolean conditions
+    let f6: fn() using [Logger if cfg.debug && cfg.verbose] = || {};
+    let f7: fn() using [Network if cfg.online || cfg.fallback] = || {};
+
+    // Platform conditions
+    let f8: fn() using [FileSystem if platform.unix] = || {};
+}
+
+// =============================================================================
+// Section 6: Transformed Contexts in Function Types
+// Grammar: transformed_context = context_path , context_transform , { context_transform } , [ context_alias ] ;
+// Grammar: context_transform = '.' , identifier , '(' , [ expression_list ] , ')' ;
+// =============================================================================
+
+/// Function types with context transformations
+fn test_transformed_context_in_type() {
+    // Single transform
+    let f1: fn() using [Database<User>.transactional()] = || {};
+
+    // Transform with argument
+    let f2: fn() using [Logger.scoped("user-service")] = || {};
+
+    // Transform with alias
+    let f3: fn() using [Database<User>.transactional() as txDb] = || {};
+
+    // Multiple transforms (chained)
+    let f4: fn() using [Cache<Text, Int>.scoped("session")] = || {};
+
+    // Transform with parametric context
+    let f5: fn() using [Cache<Id, User>.scoped("users")] = || {};
+
+    // Multiple transformed contexts
+    let f6: fn() using [
+        Database<User>.transactional(),
+        Logger.scoped("tx"),
+        Cache<Id, User>.scoped("tx-cache")
+    ] = || {};
+
+    // Transform preserves typing
+    let f7: fn(User) -> Result<(), DbError> using [Database<User>.transactional() as db] =
+        |user| db.save(user);
+}
+
+// =============================================================================
+// Section 7: Combined Advanced Context Patterns in Function Types
+// =============================================================================
+
+/// Complex combinations of advanced context features
+fn test_combined_context_patterns_in_type() {
+    // Named + transformed
+    let f1: fn() using [db: Database<User>.transactional()] = || {};
+
+    // Named + conditional
+    let f2: fn() using [db: Database<User> if cfg.persistence] = || {};
+
+    // Named + alias (redundant but valid)
+    let f3: fn() using [db: Database<User> as database] = || {};
+
+    // Negative + positive mixed
+    let f4: fn() using [Logger, !Network, Database<User>] = || {};
+
+    // Conditional + alias
+    let f5: fn() using [Database<User> as db if cfg.enabled] = || {};
+
+    // Transformed + alias + conditional
+    let f6: fn() using [Database<User>.transactional() as db if cfg.tx] = || {};
+
+    // Complex real-world pattern
+    let f7: fn(Order) -> Result<(), DbError> using [
+        db: Database<Order>.transactional() if cfg.persistence,
+        log: Logger.scoped("orders"),
+        cache: Cache<Id, Order>.scoped("orders") if cfg.caching,
+        !Network
+    ] = |order| db.save(order);
+}
+
+// =============================================================================
+// Section 8: Single Context Without Brackets in Function Types
+// Grammar: context_spec = single_context_spec | extended_context_list ;
+// =============================================================================
+
+/// Function types with single context (no brackets required)
+fn test_single_context_no_brackets_in_type() {
+    // Simple single context
+    let f1: fn() using Logger = || {};
+    let f2: fn(Int) -> Int using Logger = |x| x;
+
+    // Single context with type args
+    let f3: fn() using Database<User> = || {};
+    let f4: fn(Id) -> Maybe<User> using Database<User> = |id| None;
+
+    // Single context with alias
+    let f5: fn() using Database<User> as db = || {};
+
+    // Single context with transform
+    let f6: fn() using Database<User>.transactional() = || {};
+
+    // Single negative context
+    let f7: fn(Int) -> Int using !Network = |x| x;
+
+    // Single conditional context
+    let f8: fn() using Logger if cfg.logging = || {};
+
+    // Single named context
+    let f9: fn() using db: Database<User> = || {};
+}
+
+// =============================================================================
+// Section 9: Rank-2 Function Types with Advanced Contexts
+// Grammar: rank2_function_type = [ 'async' ] , 'fn' , generics , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
+// =============================================================================
+
+/// Rank-2 polymorphic function types with advanced context patterns
+fn test_rank2_with_advanced_contexts() {
+    // Rank-2 with named context
+    let f1: fn<R>(R) -> R using [db: Database<User>] = |x| x;
+
+    // Rank-2 with transformed context
+    let f2: fn<R>(R) -> R using [Database<User>.transactional()] = |x| x;
+
+    // Rank-2 with conditional context
+    let f3: fn<T: Entity>(T) -> Maybe<T> using [Database<T> if T: Entity] = |x| Some(x);
+
+    // Rank-2 with negative context
+    let f4: fn<R>(R) -> R using [!Network] = |x| x;
+
+    // Rank-2 transducer with contexts
+    type Reducer<A, R> is fn(R, A) -> R;
+    let f5: fn<R>(Reducer<Int, R>) -> Reducer<Text, R> using [Logger] =
+        |reducer| |r, s| reducer(r, s.len());
+
+    // Rank-2 with complex context combination
+    let f6: fn<T: Clone>(T) -> (T, T) using [
+        db: Database<User>.transactional() if cfg.persistence,
+        log: Logger.scoped("clone-op")
+    ] = |x| (x.clone(), x);
+}
+
+// =============================================================================
+// Section 10: Async Function Types with Advanced Contexts
+// =============================================================================
+
+/// Async function types with advanced context patterns
+fn test_async_with_advanced_contexts() {
+    // Async with named context
+    let f1: async fn() -> Int using [db: Database<User>] = async || 42;
+
+    // Async with transformed context
+    let f2: async fn() -> Int using [Database<User>.transactional()] = async || 42;
+
+    // Async with conditional context
+    let f3: async fn() -> Int using [Logger if cfg.logging] = async || 42;
+
+    // Async with negative context (no blocking IO)
+    let f4: async fn() -> Int using [!FileSystem] = async || 42;
+
+    // Async with complex pattern
+    let f5: async fn(Id) -> Result<User, DbError> using [
+        db: Database<User>.transactional(),
+        cache: Cache<Id, User>.scoped("users") if cfg.caching,
+        log: Logger.scoped("async-fetch")
+    ] = async |id| {
+        log.debug(f"Fetching user {id}");
+        db.find(id).ok_or(DbError { message: "not found" })
+    };
+}
+
+// =============================================================================
+// Section 11: Higher-Order Function Types with Advanced Contexts
+// =============================================================================
+
+/// Higher-order functions with advanced context patterns in types
+fn test_higher_order_with_advanced_contexts() {
+    // Function taking function with contexts
+    let f1: fn(fn() using [Logger]) -> Int = |callback| { callback(); 0 };
+
+    // Function taking function with named contexts
+    let f2: fn(fn() using [db: Database<User>]) -> Int = |callback| 0;
+
+    // Function returning function with contexts
+    let f3: fn() -> fn() using [Logger] = || (|| Logger.info("hi"));
+
+    // Function returning function with transformed context
+    let f4: fn() -> fn() using [Database<User>.transactional()] = || (|| {});
+
+    // Nested contexts in higher-order types
+    let f5: fn(fn(fn() using [Logger]) using [Database<User>]) using [Cache<Text, Int>] =
+        |outer| outer(|| {});
+
+    // Higher-order with negative context propagation
+    let f6: fn(fn() using [!Network]) -> Int using [!Network] = |f| { f(); 0 };
+}
+
+// =============================================================================
+// Section 12: Function Types in Type Definitions with Advanced Contexts
+// =============================================================================
+
+/// Type aliases using advanced context patterns
+type LoggingFn is fn() using [Logger];
+type TransactionalFn<T> is fn(T) -> Result<(), DbError> using [Database<T>.transactional()];
+type ConditionalLoggingFn is fn() using [Logger if cfg.logging];
+type PureFn is fn(Int) -> Int using [!Database<User>, !Network, !FileSystem];
+type NamedContextFn is fn() using [db: Database<User>, log: Logger];
+type CachingFn<K, V> is fn(K) -> Maybe<V> using [cache: Cache<K, V>.scoped("default")];
+
+/// Record with advanced context function fields
+type ServiceHandler is {
+    handle_request: fn(Request) -> Response using [Logger, Database<User>.transactional()],
+    cleanup: fn() using [log: Logger.scoped("cleanup")],
+    health_check: fn() -> Bool using [!Network],
+};
+
+/// Protocol with advanced context methods
+type Transactional<T> is protocol {
+    fn begin(&self) -> fn() using [Database<T>.transactional()];
+    fn commit(&self) -> Result<(), DbError> using [db: Database<T>];
+    fn rollback(&self) using [db: Database<T>.transactional(), log: Logger];
+};
+
+// =============================================================================
+// Section 13: Context Polymorphism in Function Types
+// =============================================================================
+
+/// Context polymorphism with type variables
+fn test_context_polymorphism() {
+    // Function with context variable (C unifies with callback's contexts)
+    // This is context polymorphism - the function propagates whatever contexts the callback needs
+    fn map_with_ctx<T, U, using C>(
+        items: List<T>,
+        f: fn(T) -> U using C
+    ) -> List<U> using C {
+        items.map(f)
+    }
+
+    // Higher-order function preserving context requirements
+    fn compose_with_ctx<A, B, C, using Ctx>(
+        f: fn(A) -> B using Ctx,
+        g: fn(B) -> C using Ctx
+    ) -> fn(A) -> C using Ctx {
+        |x| g(f(x))
+    }
+
+    // Usage: context variable unifies with concrete contexts
+    let mapped = map_with_ctx(
+        List.of(1, 2, 3),
+        |x| {
+            Logger.info(f"Processing {x}");
+            x * 2
+        }
+    );
+}
+
+// =============================================================================
+// Section 14: Edge Cases for Advanced Context Parsing
+// =============================================================================
+
+/// Edge cases that test parser robustness
+fn test_advanced_context_edge_cases() {
+    // Empty-looking but valid
+    let f1: fn() using [Logger] = || {};
+
+    // Long context list
+    let f2: fn() using [
+        Database<User>,
+        Database<Order>,
+        Logger,
+        Cache<Text, Int>,
+        Cache<Id, User>,
+        Network,
+        FileSystem,
+        Allocator
+    ] = || {};
+
+    // Deeply nested type arguments in context
+    let f3: fn() using [Cache<Text, List<Map<Id, User>>>] = || {};
+
+    // Context with tuple type argument
+    let f4: fn() using [Cache<(Int, Text), User>] = || {};
+
+    // Multiple transforms (hypothetical chaining)
+    let f5: fn() using [Logger.scoped("outer")] = || {};
+
+    // All features combined
+    let f6: fn<T: Entity>(T) -> Result<T, DbError> using [
+        db: Database<T>.transactional() as database if cfg.persistence,
+        log: Logger.scoped("entity-op") as logger,
+        !Network
+    ] = |entity| database.save(entity).map(|_| entity);
+}
+
+fn main() {
+    print("Advanced context patterns in function types parse successfully");
+}

@@ -1,0 +1,73 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, process, exec, args, exit-code
+// @expected-exit: 0
+
+// Test: process execution with various argument patterns.
+// Verifies argument passing, exit codes, and error handling.
+
+fn __process_exec_raw(program: Text, args: List<Text>) -> Int {
+    -1
+}
+
+fn main() -> Int {
+    // Test 1: Program with no args
+    let r1 = __process_exec_raw("/usr/bin/true", []);
+    if (r1 != 0) {
+        print(f"FAIL test1: true returned {r1}");
+        return 1;
+    }
+
+    // Test 2: Program with single arg
+    let r2 = __process_exec_raw("/bin/echo", ["hello"]);
+    if (r2 != 0) {
+        print(f"FAIL test2: echo returned {r2}");
+        return 1;
+    }
+
+    // Test 3: Program with multiple args
+    let r3 = __process_exec_raw("/bin/echo", ["one", "two", "three", "four", "five"]);
+    if (r3 != 0) {
+        print(f"FAIL test3: echo 5 args returned {r3}");
+        return 1;
+    }
+
+    // Test 4: Program that exits with specific code
+    // /usr/bin/false always exits with 1
+    let r4 = __process_exec_raw("/usr/bin/false", []);
+    if (r4 != 1) {
+        print(f"FAIL test4: false returned {r4}, expected 1");
+        return 1;
+    }
+
+    // Test 5: sh -c "exit 42" for custom exit code
+    let r5 = __process_exec_raw("/bin/sh", ["-c", "exit 42"]);
+    if (r5 != 42) {
+        print(f"FAIL test5: sh exit 42 returned {r5}, expected 42");
+        return 1;
+    }
+
+    // Test 6: args with special characters (spaces, quotes)
+    let r6 = __process_exec_raw("/bin/echo", ["hello world", "it's", "a \"test\""]);
+    if (r6 != 0) {
+        print(f"FAIL test6: echo with special chars returned {r6}");
+        return 1;
+    }
+
+    // Test 7: Sequential process execution (pipeline simulation)
+    let mut total_code = 0;
+    let mut i = 0;
+    while (i < 5) {
+        let r = __process_exec_raw("/usr/bin/true", []);
+        total_code = total_code + r;
+        i = i + 1;
+    }
+    if (total_code != 0) {
+        print(f"FAIL test7: sequential total={total_code}, expected 0");
+        return 1;
+    }
+
+    print("877_process_exec_args: PASS");
+    0
+}

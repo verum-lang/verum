@@ -1,0 +1,290 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: format, display, debug, sized-integers, float32
+// @description: Test Display/Debug formatting for all sized integer and float types
+
+mount core.*;
+mount core.text.format.{format_display, format_debug};
+
+// =============================================================================
+// Section 1: Display formatting for signed integer types
+// =============================================================================
+
+@test
+fn test_format_display_int8() {
+    let val: Int8 = -5 as Int8;
+    let text = format_display(&val);
+    assert_eq(text, "-5");
+}
+
+@test
+fn test_format_display_int8_zero() {
+    let val: Int8 = 0 as Int8;
+    let text = format_display(&val);
+    assert_eq(text, "0");
+}
+
+@test
+fn test_format_display_int8_max() {
+    let val: Int8 = 127 as Int8;
+    let text = format_display(&val);
+    assert_eq(text, "127");
+}
+
+@test
+fn test_format_display_int16() {
+    let val: Int16 = 1000 as Int16;
+    let text = format_display(&val);
+    assert_eq(text, "1000");
+}
+
+@test
+fn test_format_display_int16_negative() {
+    let val: Int16 = -500 as Int16;
+    let text = format_display(&val);
+    assert_eq(text, "-500");
+}
+
+@test
+fn test_format_display_int32() {
+    let val: Int32 = 42 as Int32;
+    let text = format_display(&val);
+    assert_eq(text, "42");
+}
+
+@test
+fn test_format_display_int32_negative() {
+    let val: Int32 = -100000 as Int32;
+    let text = format_display(&val);
+    assert_eq(text, "-100000");
+}
+
+@test
+fn test_format_display_int64() {
+    let val: Int64 = 9999999 as Int64;
+    let text = format_display(&val);
+    assert_eq(text, "9999999");
+}
+
+@test
+fn test_format_display_int64_negative() {
+    let val: Int64 = -42 as Int64;
+    let text = format_display(&val);
+    assert_eq(text, "-42");
+}
+
+@test
+fn test_format_display_int128() {
+    let val: Int128 = 123456 as Int128;
+    let text = format_display(&val);
+    assert_eq(text, "123456");
+}
+
+@test
+fn test_format_display_isize() {
+    let val: ISize = 77 as ISize;
+    let text = format_display(&val);
+    assert_eq(text, "77");
+}
+
+@test
+fn test_format_display_isize_negative() {
+    let val: ISize = -33 as ISize;
+    let text = format_display(&val);
+    assert_eq(text, "-33");
+}
+
+// =============================================================================
+// Section 2: Display formatting for unsigned integer types
+// =============================================================================
+
+@test
+fn test_format_display_uint8() {
+    let val: UInt8 = 255 as UInt8;
+    let text = format_display(&val);
+    assert_eq(text, "255");
+}
+
+@test
+fn test_format_display_uint8_zero() {
+    let val: UInt8 = 0 as UInt8;
+    let text = format_display(&val);
+    assert_eq(text, "0");
+}
+
+@test
+fn test_format_display_uint16() {
+    let val: UInt16 = 50000 as UInt16;
+    let text = format_display(&val);
+    assert_eq(text, "50000");
+}
+
+@test
+fn test_format_display_uint32() {
+    let val: UInt32 = 100 as UInt32;
+    let text = format_display(&val);
+    assert_eq(text, "100");
+}
+
+@test
+fn test_format_display_uint64() {
+    let val: UInt64 = 12345 as UInt64;
+    let text = format_display(&val);
+    assert_eq(text, "12345");
+}
+
+@test
+fn test_format_display_uint128() {
+    let val: UInt128 = 999999 as UInt128;
+    let text = format_display(&val);
+    assert_eq(text, "999999");
+}
+
+@test
+fn test_format_display_usize() {
+    let val: USize = 64 as USize;
+    let text = format_display(&val);
+    assert_eq(text, "64");
+}
+
+// =============================================================================
+// Section 3: Display formatting for Float32
+// =============================================================================
+
+@test
+fn test_format_display_float32() {
+    let val: Float32 = 3.0 as Float32;
+    let text = format_display(&val);
+    assert(text.contains("3"));
+}
+
+@test
+fn test_format_display_float32_zero() {
+    let val: Float32 = 0.0 as Float32;
+    let text = format_display(&val);
+    assert(text.contains("0"));
+}
+
+// =============================================================================
+// Section 4: Debug formatting for all types
+// =============================================================================
+
+@test
+fn test_format_debug_int8() {
+    let val: Int8 = 42 as Int8;
+    let text = format_debug(&val);
+    assert_eq(text, "42");
+}
+
+@test
+fn test_format_debug_int16() {
+    let val: Int16 = -200 as Int16;
+    let text = format_debug(&val);
+    assert_eq(text, "-200");
+}
+
+@test
+fn test_format_debug_int32() {
+    let val: Int32 = 42 as Int32;
+    let text = format_debug(&val);
+    assert_eq(text, "42");
+}
+
+@test
+fn test_format_debug_int64() {
+    let val: Int64 = 100 as Int64;
+    let text = format_debug(&val);
+    assert_eq(text, "100");
+}
+
+@test
+fn test_format_debug_int128() {
+    let val: Int128 = 0 as Int128;
+    let text = format_debug(&val);
+    assert_eq(text, "0");
+}
+
+@test
+fn test_format_debug_isize() {
+    let val: ISize = -1 as ISize;
+    let text = format_debug(&val);
+    assert_eq(text, "-1");
+}
+
+@test
+fn test_format_debug_uint8() {
+    let val: UInt8 = 128 as UInt8;
+    let text = format_debug(&val);
+    assert_eq(text, "128");
+}
+
+@test
+fn test_format_debug_uint16() {
+    let val: UInt16 = 1024 as UInt16;
+    let text = format_debug(&val);
+    assert_eq(text, "1024");
+}
+
+@test
+fn test_format_debug_uint32() {
+    let val: UInt32 = 0 as UInt32;
+    let text = format_debug(&val);
+    assert_eq(text, "0");
+}
+
+@test
+fn test_format_debug_uint64() {
+    let val: UInt64 = 1 as UInt64;
+    let text = format_debug(&val);
+    assert_eq(text, "1");
+}
+
+@test
+fn test_format_debug_uint128() {
+    let val: UInt128 = 42 as UInt128;
+    let text = format_debug(&val);
+    assert_eq(text, "42");
+}
+
+@test
+fn test_format_debug_usize() {
+    let val: USize = 8 as USize;
+    let text = format_debug(&val);
+    assert_eq(text, "8");
+}
+
+@test
+fn test_format_debug_float32() {
+    let val: Float32 = 1.5 as Float32;
+    let text = format_debug(&val);
+    assert(text.contains("1"));
+}
+
+// =============================================================================
+// Section 5: Display/Debug consistency — both produce same output for integers
+// =============================================================================
+
+@test
+fn test_display_debug_consistency_int32() {
+    let val: Int32 = 99 as Int32;
+    let disp = format_display(&val);
+    let dbg = format_debug(&val);
+    assert_eq(disp, dbg);
+}
+
+@test
+fn test_display_debug_consistency_uint64() {
+    let val: UInt64 = 555 as UInt64;
+    let disp = format_display(&val);
+    let dbg = format_debug(&val);
+    assert_eq(disp, dbg);
+}
+
+@test
+fn test_display_debug_consistency_isize() {
+    let val: ISize = -10 as ISize;
+    let disp = format_display(&val);
+    let dbg = format_debug(&val);
+    assert_eq(disp, dbg);
+}

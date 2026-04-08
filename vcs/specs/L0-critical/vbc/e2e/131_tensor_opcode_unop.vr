@@ -1,0 +1,158 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, unary
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Tensor unary operations — negate, abs, scale on flat 8-element arrays
+
+// ============================================================================
+// Tensor8: Fixed-size flat tensor of 8 Ints
+// ============================================================================
+
+type Tensor8 is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    len: Int
+};
+
+fn t_get(t: Tensor8, i: Int) -> Int {
+    if i == 0 { t.d0 } else if i == 1 { t.d1 } else if i == 2 { t.d2 }
+    else if i == 3 { t.d3 } else if i == 4 { t.d4 } else if i == 5 { t.d5 }
+    else if i == 6 { t.d6 } else { t.d7 }
+}
+
+fn t_from4(a: Int, b: Int, c: Int, d: Int) -> Tensor8 {
+    Tensor8 { d0: a, d1: b, d2: c, d3: d, d4: 0, d5: 0, d6: 0, d7: 0, len: 4 }
+}
+
+fn t_from6(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> Tensor8 {
+    Tensor8 { d0: a, d1: b, d2: c, d3: d, d4: e, d5: f, d6: 0, d7: 0, len: 6 }
+}
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn tensor_negate(t: Tensor8) -> Tensor8 {
+    Tensor8 {
+        d0: 0 - t.d0, d1: 0 - t.d1, d2: 0 - t.d2, d3: 0 - t.d3,
+        d4: 0 - t.d4, d5: 0 - t.d5, d6: 0 - t.d6, d7: 0 - t.d7,
+        len: t.len
+    }
+}
+
+fn tensor_abs_val(t: Tensor8) -> Tensor8 {
+    Tensor8 {
+        d0: int_abs(t.d0), d1: int_abs(t.d1),
+        d2: int_abs(t.d2), d3: int_abs(t.d3),
+        d4: int_abs(t.d4), d5: int_abs(t.d5),
+        d6: int_abs(t.d6), d7: int_abs(t.d7),
+        len: t.len
+    }
+}
+
+fn tensor_scale(t: Tensor8, s: Int) -> Tensor8 {
+    Tensor8 {
+        d0: t.d0 * s, d1: t.d1 * s, d2: t.d2 * s, d3: t.d3 * s,
+        d4: t.d4 * s, d5: t.d5 * s, d6: t.d6 * s, d7: t.d7 * s,
+        len: t.len
+    }
+}
+
+// ============================================================================
+// Test 1: Negate
+// ============================================================================
+
+@test
+fn test_tensor_negate() {
+    let t = t_from4(1, -2, 3, -4);
+    let neg = tensor_negate(t);
+    assert_eq(t_get(neg, 0), -1);
+    assert_eq(t_get(neg, 1), 2);
+    assert_eq(t_get(neg, 2), -3);
+    assert_eq(t_get(neg, 3), 4);
+
+    // Double negate = identity
+    let nn = tensor_negate(tensor_negate(t));
+    assert_eq(t_get(nn, 0), 1);
+    assert_eq(t_get(nn, 1), -2);
+    print("  test_tensor_negate: ok");
+}
+
+// ============================================================================
+// Test 2: Absolute value
+// ============================================================================
+
+@test
+fn test_tensor_abs() {
+    let t = t_from6(-5, 3, -1, 0, -100, 42);
+    let a = tensor_abs_val(t);
+    assert_eq(t_get(a, 0), 5);
+    assert_eq(t_get(a, 1), 3);
+    assert_eq(t_get(a, 2), 1);
+    assert_eq(t_get(a, 3), 0);
+    assert_eq(t_get(a, 4), 100);
+    assert_eq(t_get(a, 5), 42);
+    print("  test_tensor_abs: ok");
+}
+
+// ============================================================================
+// Test 3: Scale
+// ============================================================================
+
+@test
+fn test_tensor_scale() {
+    let t = t_from4(2, 4, 6, 8);
+    let s3 = tensor_scale(t, 3);
+    assert_eq(t_get(s3, 0), 6);
+    assert_eq(t_get(s3, 1), 12);
+    assert_eq(t_get(s3, 2), 18);
+    assert_eq(t_get(s3, 3), 24);
+
+    // Scale by 0
+    let s0 = tensor_scale(t, 0);
+    assert_eq(t_get(s0, 0), 0);
+    assert_eq(t_get(s0, 3), 0);
+
+    // Scale by -1 = negate
+    let sm1 = tensor_scale(t, -1);
+    assert_eq(t_get(sm1, 0), -2);
+    assert_eq(t_get(sm1, 3), -8);
+    print("  test_tensor_scale: ok");
+}
+
+// ============================================================================
+// Test 4: Combined unary operations
+// ============================================================================
+
+@test
+fn test_combined_unary() {
+    let t = t_from4(-3, 5, -7, 2);
+    // abs then scale by 10
+    let result = tensor_scale(tensor_abs_val(t), 10);
+    assert_eq(t_get(result, 0), 30);
+    assert_eq(t_get(result, 1), 50);
+    assert_eq(t_get(result, 2), 70);
+    assert_eq(t_get(result, 3), 20);
+
+    // negate then abs = abs
+    let na = tensor_abs_val(tensor_negate(t));
+    let a = tensor_abs_val(t);
+    assert_eq(t_get(na, 0), t_get(a, 0));
+    assert_eq(t_get(na, 2), t_get(a, 2));
+    print("  test_combined_unary: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_tensor_negate();
+    test_tensor_abs();
+    test_tensor_scale();
+    test_combined_unary();
+    print("[OK] 131_tensor_opcode_unop");
+    0
+}

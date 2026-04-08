@@ -1,0 +1,54 @@
+// @test: parse
+// @level: L1
+// @tags: meta, const, type-properties, introspection
+// @timeout: 5000
+
+/// Type properties — compile-time type introspection via Type.property syntax.
+/// Grammar (from Section 2.17):
+///   Type.size, Type.alignment, Type.stride, Type.min, Type.max,
+///   Type.bits, Type.name, Type.id
+
+fn test_primitive_properties() {
+    // Size in bytes
+    assert_eq(Int.size, 8);
+    assert_eq(Float.size, 8);
+    assert_eq(Bool.size, 1);
+
+    // Alignment
+    assert_eq(Int.alignment, 8);
+    assert_eq(Float.alignment, 8);
+
+    // Bit width
+    assert_eq(Int.bits, 64);
+
+    // Type name as text
+    assert_eq(Int.name, "Int");
+    assert_eq(Float.name, "Float");
+    assert_eq(Bool.name, "Bool");
+}
+
+fn test_numeric_bounds() {
+    // Min and max values
+    let int_min = Int.min;
+    let int_max = Int.max;
+    assert(int_min < 0);
+    assert(int_max > 0);
+}
+
+fn test_stride() {
+    // Stride for array layout
+    let int_stride = Int.stride;
+    assert_eq(int_stride, 8);
+}
+
+// Type properties in const context
+const INT_SIZE: Int = Int.size;
+const FLOAT_ALIGNMENT: Int = Float.alignment;
+
+fn main() {
+    test_primitive_properties();
+    test_numeric_bounds();
+    test_stride();
+    assert_eq(INT_SIZE, 8);
+    print("Type properties tests parsed");
+}

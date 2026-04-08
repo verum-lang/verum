@@ -1,0 +1,192 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: lsp, formatting, trivia, comments, whitespace
+// @description: Tests formatting with trivia (comments, whitespace) preservation.
+//              Verifies comments are not lost during reformatting.
+
+// ============================================================================
+// This file tests that formatting preserves comments and meaningful whitespace.
+// Comments in various positions should be maintained after formatting.
+// ============================================================================
+
+// Test 1: Leading comment preservation
+// This comment should be preserved before the function
+fn function_with_leading_comment() -> Int {
+    42
+}
+
+// Test 2: Trailing comment preservation
+fn function_with_trailing() -> Int { // trailing comment
+    42 // end of line comment
+}
+
+// Test 3: Block comment preservation
+/*
+ * This is a documentation block comment.
+ * It spans multiple lines.
+ * It should be preserved exactly.
+ */
+fn documented_function() -> Int {
+    42
+}
+
+// Test 4: Inline comments in expressions
+fn inline_comments() -> Int {
+    let a = 1; // first variable
+    let b = 2; // second variable
+    let c = a + // addition
+            b;  // second operand
+    c
+}
+
+// Test 5: Comments between statements
+fn between_statements() {
+    let first = 1;
+
+    // Comment between statements
+    // More comment lines
+
+    let second = 2;
+
+    /* Block comment between */
+
+    let third = 3;
+    first + second + third
+}
+
+// Test 6: Comments in control flow
+fn comments_in_control_flow(x: Int) -> Int {
+    // Before if
+    if x > 0 {
+        // Inside if
+        1
+    } else {
+        // Inside else
+        -1
+    }
+    // After if
+}
+
+// Test 7: Comments in match arms
+fn comments_in_match(opt: Maybe<Int>) -> Int {
+    match opt {
+        // Comment before Some
+        Some(x) => x, // after Some
+        // Comment before None
+        None => 0,    // after None
+    }
+}
+
+// Test 8: Comments in type definitions
+// Type documentation comment
+type CommentedType is {
+    // Field comment
+    field_a: Int, // trailing field comment
+
+    /* Block comment for field */
+    field_b: Text,
+};
+
+// Test 9: Comments in implement blocks
+implement CommentedType {
+    // Method documentation
+    fn method_one(self) -> Int {
+        // Inside method
+        self.field_a
+    }
+
+    /*
+     * Block documentation for method
+     */
+    fn method_two(self) -> Text {
+        self.field_b
+    }
+}
+
+// Test 10: Whitespace preservation in multi-line expressions
+fn multi_line_expression() -> Int {
+    let result = 1
+        + 2
+        + 3
+        + 4
+        + 5;
+    result
+}
+
+// Test 11: Indentation preservation in nested blocks
+fn nested_indentation() {
+    if true {
+        if true {
+            if true {
+                let deeply_nested = 42;
+                deeply_nested;
+            }
+        }
+    }
+}
+
+// Test 12: Blank line preservation
+fn blank_lines() {
+    let a = 1;
+
+    let b = 2;
+
+
+    let c = 3;
+
+    a + b + c
+}
+
+// Test 13: Comments in parameter lists
+fn param_comments(
+    // First parameter
+    first: Int,
+    // Second parameter
+    second: Int, // inline comment
+    /* Block comment */ third: Int
+) -> Int {
+    first + second + third
+}
+
+// Test 14: Comments in array literals
+fn array_comments() -> List<Int> {
+    [
+        1, // first
+        2, // second
+        3, // third
+        // Comment at end
+    ]
+}
+
+// Test 15: Comments in record literals
+fn record_comments() -> CommentedType {
+    CommentedType {
+        // Setting field_a
+        field_a: 42,
+        // Setting field_b
+        field_b: "text", // trailing
+    }
+}
+
+// Test 16: Preserved comment alignment
+fn aligned_comments() {
+    let short   = 1;  // aligned
+    let medium  = 2;  // comments
+    let longest = 3;  // here
+    short + medium + longest
+}
+
+// Test 17: Doc comments (if supported)
+/// This is a doc comment for the function below
+fn doc_commented() -> Int {
+    42
+}
+
+// Test 18: Empty line comment preservation
+fn empty_comments() {
+    //
+    let x = 1;
+    //
+    x
+}

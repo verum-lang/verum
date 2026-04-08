@@ -1,0 +1,82 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, requires, error
+// @timeout: 5000
+// @expected-error: E100
+
+/// Tests for requires clause violations
+/// Preconditions that cannot be proven at call site
+
+/// Function with clear precondition
+@verify(proof)
+fn safe_divide(a: Float, b: Float) -> Float {
+    contract#"
+        requires b != 0.0;
+        ensures result == a / b;
+    ";
+    a / b
+}
+
+/// ERROR: Calling without proving precondition
+fn call_without_proof() -> Float {
+    let x = 10.0;
+    let y = read_from_input();  // Unknown value at compile time
+    // E601: Cannot prove y != 0.0
+    safe_divide(x, y)
+}
+
+/// Function with multiple requires - one not satisfied
+@verify(proof)
+fn bounded_operation(value: Int, lower: Int, upper: Int) -> Int {
+    contract#"
+        requires lower <= upper;
+        requires value >= lower;
+        requires value <= upper;
+    ";
+    value
+}
+
+/// ERROR: Second precondition violated
+fn partial_precondition_check() {
+    let lower = 0;
+    let upper = 100;
+    let value = -5;  // Violates: value >= lower
+    // E601: Cannot prove value >= lower
+    bounded_operation(value, lower, upper);
+}
+
+/// Requires with implication not satisfied
+@verify(proof)
+fn conditional_requires(x: Int, positive: Bool) -> Int {
+    contract#"
+        requires positive implies x > 0;
+    ";
+    if positive { x } else { -x }
+}
+
+/// ERROR: Implication antecedent true but consequent false
+fn violate_implication() {
+    let positive = true;
+    let x = -10;  // positive is true, but x is not > 0
+    // E601: Cannot prove positive implies x > 0
+    conditional_requires(x, positive);
+}
+
+/// Requires referencing array bounds
+@verify(proof)
+fn array_at(arr: &List<Int>, idx: Int) -> Int {
+    contract#"
+        requires idx >= 0;
+        requires idx < arr.len();
+    ";
+    arr[idx]
+}
+
+/// ERROR: Index could be out of bounds
+fn potential_out_of_bounds() {
+    let arr = [1, 2, 3];
+    let idx = 5;  // Out of bounds
+    // E601: Cannot prove idx < arr.len()
+    array_at(&arr, idx);
+}

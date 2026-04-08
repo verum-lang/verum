@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @tier: 0
+// @category: meta
+// @description: meta(0) is invalid - stage must be >= 1
+// @expected-error: M006
+
+// Stage 0 is runtime, not meta - this should fail
+meta(0) fn invalid_stage_zero() {
+    let x = 1;
+}

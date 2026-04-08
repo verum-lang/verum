@@ -1,0 +1,36 @@
+// @test: parse
+// @level: L0
+// @tags: parser, operators, arithmetic
+// @description: Test arithmetic operator parsing
+
+fn test_arithmetic_operators() {
+    let a = 1 + 2;
+    let b = 5 - 3;
+    let c = 4 * 2;
+    let d = 10 / 2;
+    let e = 10 % 3;
+    let f = 2 ** 8;
+
+    // Chained operations
+    let g = 1 + 2 + 3;
+    let h = 10 - 5 - 2;
+    let i = 2 * 3 * 4;
+    let j = 100 / 10 / 2;
+
+    // Mixed precedence
+    let k = 1 + 2 * 3;
+    let l = (1 + 2) * 3;
+    let m = 10 - 4 / 2;
+    let n = 2 ** 3 ** 2;
+    let o = (2 ** 3) ** 2;
+
+    // With parentheses
+    let p = ((1 + 2) * 3) / 4;
+    let q = 1 + (2 * (3 + 4));
+
+    // Unary minus
+    let r = -5;
+    let s = --5;
+    let t = 1 + -2;
+    let u = -a + b;
+}

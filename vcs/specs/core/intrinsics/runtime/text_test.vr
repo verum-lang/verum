@@ -1,0 +1,167 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/runtime/text_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, intrinsics, runtime, text, char, utf8, parsing, formatting
+// @description: Tests for text/string intrinsics including text creation,
+//               parsing, formatting, UTF-8 operations, and character
+//               classification/conversion functions.
+//
+// Coverage:
+// - Text creation: text_from_static
+// - Parsing: text_parse_int, text_parse_float
+// - Formatting: int_to_text, float_to_text
+// - UTF-8: utf8_decode_char, utf8_decode_char_len, char_encode_utf8
+// - Character classification: is_alphabetic, is_numeric, is_alphanumeric,
+//   is_whitespace, is_control, is_uppercase, is_lowercase
+// - Character conversion: to_uppercase, to_lowercase, general_category,
+//   escape_debug
+// - Panic/debug: panic, debug_assert
+//
+// Test Strategy:
+// - Verify function imports resolve
+// - Verify function type signatures
+// =============================================================================
+
+module specs.core.intrinsics.runtime.text_test;
+
+mount core.intrinsics.runtime.text.{
+    text_parse_int,
+    text_parse_float,
+    int_to_text,
+    float_to_text,
+    utf8_decode_char,
+    utf8_decode_char_len,
+    char_encode_utf8,
+    char_is_alphabetic,
+    char_is_numeric,
+    char_is_alphanumeric,
+    char_is_whitespace,
+    char_is_control,
+    char_is_uppercase,
+    char_is_lowercase,
+    char_to_uppercase,
+    char_to_lowercase,
+    char_general_category,
+    char_escape_debug,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Parsing Function Tests
+// =============================================================================
+
+@test
+fn test_text_parse_int_exists() {
+    let _ = text_parse_int;
+}
+
+@test
+fn test_text_parse_float_exists() {
+    let _ = text_parse_float;
+}
+
+// =============================================================================
+// Formatting Function Tests
+// =============================================================================
+
+@test
+fn test_int_to_text_exists() {
+    let _ = int_to_text;
+}
+
+@test
+fn test_float_to_text_exists() {
+    let _ = float_to_text;
+}
+
+// =============================================================================
+// UTF-8 Function Tests
+// =============================================================================
+
+@test
+fn test_utf8_decode_char_exists() {
+    let _ = utf8_decode_char;
+}
+
+@test
+fn test_utf8_decode_char_len_exists() {
+    let _ = utf8_decode_char_len;
+}
+
+@test
+fn test_char_encode_utf8_exists() {
+    let _ = char_encode_utf8;
+}
+
+// =============================================================================
+// Character Classification Function Tests
+// =============================================================================
+
+@test
+fn test_char_is_alphabetic_exists() {
+    let _ = char_is_alphabetic;
+}
+
+@test
+fn test_char_is_numeric_exists() {
+    let _ = char_is_numeric;
+}
+
+@test
+fn test_char_is_alphanumeric_exists() {
+    let _ = char_is_alphanumeric;
+}
+
+@test
+fn test_char_is_whitespace_exists() {
+    let _ = char_is_whitespace;
+}
+
+@test
+fn test_char_is_control_exists() {
+    let _ = char_is_control;
+}
+
+@test
+fn test_char_is_uppercase_exists() {
+    let _ = char_is_uppercase;
+}
+
+@test
+fn test_char_is_lowercase_exists() {
+    let _ = char_is_lowercase;
+}
+
+// =============================================================================
+// Character Conversion Function Tests
+// =============================================================================
+
+@test
+fn test_char_to_uppercase_exists() {
+    let _ = char_to_uppercase;
+}
+
+@test
+fn test_char_to_lowercase_exists() {
+    let _ = char_to_lowercase;
+}
+
+@test
+fn test_char_general_category_exists() {
+    let _ = char_general_category;
+}
+
+@test
+fn test_char_escape_debug_exists() {
+    let _ = char_escape_debug;
+}

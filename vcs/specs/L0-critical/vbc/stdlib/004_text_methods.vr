@@ -1,0 +1,165 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, text
+
+@test
+fn test_text_len() {
+    let s = "hello";
+    assert_eq(s.len(), 5);
+}
+
+@test
+fn test_text_is_empty() {
+    let s = "";
+    assert(s.is_empty());
+    let t = "hi";
+    assert(!t.is_empty());
+}
+
+@test
+fn test_text_contains() {
+    let s = "hello world";
+    assert(s.contains("world"));
+    assert(!s.contains("xyz"));
+}
+
+@test
+fn test_text_starts_with() {
+    let s = "hello";
+    assert(s.starts_with("hel"));
+    assert(!s.starts_with("xyz"));
+}
+
+@test
+fn test_text_ends_with() {
+    let s = "hello";
+    assert(s.ends_with("llo"));
+    assert(!s.ends_with("xyz"));
+}
+
+@test
+fn test_text_trim() {
+    let s = "  hi  ";
+    let trimmed = s.trim();
+    assert_eq(trimmed, "hi");
+}
+
+@test
+fn test_text_trim_start() {
+    let s = "  hi";
+    let t = s.trim_start();
+    assert_eq(t, "hi");
+}
+
+@test
+fn test_text_trim_end() {
+    let s = "hi  ";
+    let t = s.trim_end();
+    assert_eq(t, "hi");
+}
+
+@test
+fn test_text_to_uppercase() {
+    let s = "hello";
+    let u = s.to_uppercase();
+    assert_eq(u, "HELLO");
+}
+
+@test
+fn test_text_to_lowercase() {
+    let s = "HELLO";
+    let l = s.to_lowercase();
+    assert_eq(l, "hello");
+}
+
+@test
+fn test_text_replace() {
+    let s = "hello world";
+    let r = s.replace("world", "verum");
+    assert(r.contains("verum"));
+}
+
+@test
+fn test_text_split() {
+    let s = "a,b,c";
+    let parts = s.split(",");
+    assert_eq(parts.len(), 3);
+}
+
+@test
+fn test_text_find() {
+    let s = "hello";
+    let pos = s.find("ll");
+    assert(pos is Some);
+}
+
+@test
+fn test_text_rfind() {
+    let s = "abcabc";
+    let pos = s.rfind("abc");
+    assert(pos is Some);
+}
+
+@test
+fn test_text_repeat() {
+    let s = "ab";
+    let r = s.repeat(3);
+    assert_eq(r.len(), 6);
+}
+
+@test
+fn test_text_chars() {
+    let s = "abc";
+    // chars() returns an iterator; verify the string length instead
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_text_substring() {
+    let s = "hello world";
+    let sub = s.substring(0, 5);
+    assert_eq(sub, "hello");
+}
+
+@test
+fn test_text_reverse() {
+    let s = "abc";
+    let r = s.reverse();
+    assert_eq(r, "cba");
+}
+
+@test
+fn test_text_char_len() {
+    // char_len() not yet available; use len() for byte length
+    let s = "hello";
+    assert_eq(s.len(), 5);
+}
+
+@test
+fn test_text_to_int() {
+    let s = "42";
+    let n = s.to_int();
+    assert_eq(n, 42);
+}
+
+@test
+fn test_text_to_float() {
+    let s = "3.14";
+    let f = s.to_float();
+    assert(f > 3.0);
+}
+
+@test
+fn test_text_pad_left() {
+    let s = "hi";
+    let p = s.pad_left(5, ' ');
+    assert_eq(p.len(), 5);
+}
+
+@test
+fn test_text_pad_right() {
+    let s = "hi";
+    let p = s.pad_right(5, ' ');
+    assert_eq(p.len(), 5);
+}

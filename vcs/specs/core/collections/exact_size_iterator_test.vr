@@ -1,0 +1,387 @@
+// =============================================================================
+// exact_size_iterator_test.vr - ExactSizeIterator for all collection iterators
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, collections, iterator, exact_size
+// @description: Tests that all collection iterator types implement ExactSizeIterator
+//               with correct len() tracking as elements are consumed.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.collections.set.{Set};
+mount core.collections.deque.{Deque};
+mount core.collections.heap.{BinaryHeap};
+mount core.collections.btree.{BTreeMap, BTreeSet};
+
+// =============================================================================
+// SECTION 1: List iterators ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_list_iter_exact_size() {
+    let list: List<Int> = [1, 2, 3, 4, 5];
+    let mut iter = list.iter();
+    assert_eq(iter.len(), 5);
+    iter.next();
+    assert_eq(iter.len(), 4);
+    iter.next();
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_list_iter_mut_exact_size() {
+    let mut list: List<Int> = [10, 20, 30];
+    let mut iter = list.iter_mut();
+    assert_eq(iter.len(), 3);
+    iter.next();
+    assert_eq(iter.len(), 2);
+}
+
+@test
+fn test_list_drain_exact_size() {
+    let mut list: List<Int> = [1, 2, 3];
+    let mut drain = list.drain(0, 3);
+    assert_eq(drain.len(), 3);
+    drain.next();
+    assert_eq(drain.len(), 2);
+}
+
+// =============================================================================
+// SECTION 2: Map iterators ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_map_iter_exact_size() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    let mut iter = map.iter();
+    assert_eq(iter.len(), 3);
+    iter.next();
+    assert_eq(iter.len(), 2);
+    iter.next();
+    assert_eq(iter.len(), 1);
+    iter.next();
+    assert_eq(iter.len(), 0);
+}
+
+@test
+fn test_map_keys_exact_size() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut iter = map.keys();
+    assert_eq(iter.len(), 2);
+    iter.next();
+    assert_eq(iter.len(), 1);
+}
+
+@test
+fn test_map_values_exact_size() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut iter = map.values();
+    assert_eq(iter.len(), 2);
+    iter.next();
+    assert_eq(iter.len(), 1);
+}
+
+@test
+fn test_map_values_mut_exact_size() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut iter = map.values_mut();
+    assert_eq(iter.len(), 2);
+    iter.next();
+    assert_eq(iter.len(), 1);
+}
+
+@test
+fn test_map_iter_mut_exact_size() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let mut iter = map.iter_mut();
+    assert_eq(iter.len(), 2);
+    iter.next();
+    assert_eq(iter.len(), 1);
+}
+
+@test
+fn test_empty_map_iter_exact_size() {
+    let map: Map<Int, Int> = Map.new();
+    let iter = map.iter();
+    assert_eq(iter.len(), 0);
+}
+
+// =============================================================================
+// SECTION 3: Set iterators ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_set_iter_exact_size() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    let mut iter = set.iter();
+    assert_eq(iter.len(), 3);
+    iter.next();
+    assert_eq(iter.len(), 2);
+}
+
+@test
+fn test_empty_set_iter_exact_size() {
+    let set: Set<Int> = Set.new();
+    let iter = set.iter();
+    assert_eq(iter.len(), 0);
+}
+
+// =============================================================================
+// SECTION 4: Deque iterators ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_deque_iter_exact_size() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+    let mut iter = deque.iter();
+    assert_eq(iter.len(), 3);
+    iter.next();
+    assert_eq(iter.len(), 2);
+}
+
+@test
+fn test_deque_iter_mut_exact_size() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    let mut iter = deque.iter_mut();
+    assert_eq(iter.len(), 2);
+    iter.next();
+    assert_eq(iter.len(), 1);
+}
+
+// =============================================================================
+// SECTION 5: BinaryHeap iterators ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_heap_iter_exact_size() {
+    let mut heap = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(2);
+    let mut iter = heap.iter();
+    assert_eq(iter.len(), 3);
+    iter.next();
+    assert_eq(iter.len(), 2);
+}
+
+@test
+fn test_empty_heap_iter_exact_size() {
+    let heap: BinaryHeap<Int> = BinaryHeap.new();
+    let iter = heap.iter();
+    assert_eq(iter.len(), 0);
+}
+
+// =============================================================================
+// SECTION 6: BTreeMap iterators ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_btreemap_iter_exact_size() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    map.insert(3, "c");
+    let mut iter = map.iter();
+    assert_eq(iter.len(), 3);
+    iter.next();
+    assert_eq(iter.len(), 2);
+    iter.next();
+    assert_eq(iter.len(), 1);
+    iter.next();
+    assert_eq(iter.len(), 0);
+}
+
+@test
+fn test_btreemap_keys_exact_size() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    let mut iter = map.keys();
+    assert_eq(iter.len(), 2);
+    iter.next();
+    assert_eq(iter.len(), 1);
+}
+
+@test
+fn test_btreemap_values_exact_size() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    let mut iter = map.values();
+    assert_eq(iter.len(), 2);
+    iter.next();
+    assert_eq(iter.len(), 1);
+}
+
+@test
+fn test_empty_btreemap_iter_exact_size() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    let iter = map.iter();
+    assert_eq(iter.len(), 0);
+}
+
+// =============================================================================
+// SECTION 7: BTreeSet iterators ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_btreeset_iter_exact_size() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    let mut iter = set.iter();
+    assert_eq(iter.len(), 3);
+    iter.next();
+    assert_eq(iter.len(), 2);
+}
+
+// =============================================================================
+// SECTION 8: Slice iterators ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_slice_iter_exact_size() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let slice = data.as_slice();
+    let mut iter = slice.iter();
+    assert_eq(iter.len(), 5);
+    iter.next();
+    assert_eq(iter.len(), 4);
+}
+
+@test
+fn test_slice_chunks_exact_size() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let slice = data.as_slice();
+    let mut chunks = slice.chunks(2);
+    assert_eq(chunks.len(), 3);  // ceil(5/2) = 3
+    chunks.next();
+    assert_eq(chunks.len(), 2);
+}
+
+@test
+fn test_slice_windows_exact_size() {
+    let data: List<Int> = [1, 2, 3, 4, 5];
+    let slice = data.as_slice();
+    let mut windows = slice.windows(3);
+    assert_eq(windows.len(), 3);  // 5 - 3 + 1 = 3
+    windows.next();
+    assert_eq(windows.len(), 2);
+}
+
+// =============================================================================
+// SECTION 9: ExactSizeIterator consistency with count()
+// =============================================================================
+
+@test
+fn test_map_iter_len_consistent_with_count() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    let mut iter = map.iter();
+    let len_before = iter.len();
+    let count = iter.count();
+    assert_eq(len_before, count);
+}
+
+@test
+fn test_btreemap_iter_len_consistent_with_count() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    map.insert(3, "c");
+    let mut iter = map.iter();
+    let len_before = iter.len();
+    let count = iter.count();
+    assert_eq(len_before, count);
+}
+
+@test
+fn test_set_iter_len_consistent_with_count() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(10);
+    set.insert(20);
+    set.insert(30);
+    let mut iter = set.iter();
+    let len_before = iter.len();
+    let count = iter.count();
+    assert_eq(len_before, count);
+}
+
+@test
+fn test_heap_iter_len_consistent_with_count() {
+    let mut heap = BinaryHeap.new();
+    heap.push(5);
+    heap.push(3);
+    heap.push(8);
+    heap.push(1);
+    let mut iter = heap.iter();
+    let len_before = iter.len();
+    let count = iter.count();
+    assert_eq(len_before, count);
+}
+
+// =============================================================================
+// SECTION 10: ExactSizeIterator after partial consumption
+// =============================================================================
+
+@test
+fn test_map_iter_partial_exact_size() {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in range(0, 10) {
+        let val = i;
+        map.insert(val, val * 10);
+    }
+    let mut iter = map.iter();
+    assert_eq(iter.len(), 10);
+    // Consume 5 elements
+    for _ in range(0, 5) {
+        iter.next();
+    }
+    assert_eq(iter.len(), 5);
+    // Consume remaining
+    while iter.next().is_some() {}
+    assert_eq(iter.len(), 0);
+}
+
+@test
+fn test_btreemap_iter_partial_exact_size() {
+    let mut map = BTreeMap.new();
+    for i in range(0, 10) {
+        let val = i;
+        map.insert(val, val * 10);
+    }
+    let mut iter = map.iter();
+    assert_eq(iter.len(), 10);
+    for _ in range(0, 5) {
+        iter.next();
+    }
+    assert_eq(iter.len(), 5);
+    while iter.next().is_some() {}
+    assert_eq(iter.len(), 0);
+}

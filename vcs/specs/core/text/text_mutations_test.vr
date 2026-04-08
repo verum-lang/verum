@@ -1,0 +1,523 @@
+// =============================================================================
+// text_mutations_test.vr - Tests for Text mutating methods and new iterators
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, mutation, iterator, truncate, insert, remove, matches
+// @description: Tests for Text mutating methods and new iterators
+
+mount core.text.text.{Chars, CharIndices};
+mount core.collections.List;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result};
+
+// =============================================================================
+// Section 1: truncate() - Truncate text to byte length
+// =============================================================================
+
+@test
+fn test_truncate_basic() {
+    let mut s: Text = ("hello world");
+    s.truncate(5);
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_truncate_empty() {
+    let mut s: Text = ("hello");
+    s.truncate(0);
+    assert_eq(s, "");
+    assert(s.is_empty());
+}
+
+@test
+fn test_truncate_no_change() {
+    let mut s: Text = ("hello");
+    s.truncate(10); // longer than string
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_truncate_exact_length() {
+    let mut s: Text = ("hello");
+    s.truncate(5);
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_truncate_preserves_utf8() {
+    // UTF-8 multi-byte: 'é' is 2 bytes, so truncating at byte 1 should panic
+    // or truncate to 0. We expect truncate to snap to char boundary.
+    let mut s: Text = ("héllo");
+    // 'h' = 1 byte, 'é' = 2 bytes, so byte 1 is inside 'é'
+    // Truncate should snap down to byte 0 or 1 (char boundary)
+    s.truncate(1);
+    assert_eq(s, "h");
+}
+
+@test
+fn test_truncate_multibyte_char_boundary() {
+    let mut s: Text = ("héllo");
+    // 'h'=1 byte, 'é'=2 bytes → byte 3 is start of 'l'
+    s.truncate(3);
+    assert_eq(s, "hé");
+}
+
+// =============================================================================
+// Section 2: insert() - Insert character at byte position
+// =============================================================================
+
+@test
+fn test_insert_at_start() {
+    let mut s: Text = ("ello");
+    s.insert(0, 'h');
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_insert_at_end() {
+    let mut s: Text = ("hell");
+    s.insert(4, 'o');
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_insert_in_middle() {
+    let mut s: Text = ("hllo");
+    s.insert(1, 'e');
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_insert_into_empty() {
+    let mut s = Text.new();
+    s.insert(0, 'a');
+    assert_eq(s, "a");
+}
+
+@test
+fn test_insert_multiple() {
+    let mut s = Text.new();
+    s.insert(0, 'c');
+    s.insert(0, 'b');
+    s.insert(0, 'a');
+    assert_eq(s, "abc");
+}
+
+@test
+fn test_insert_unicode() {
+    let mut s: Text = ("hllo");
+    s.insert(1, 'é');
+    assert_eq(s.char_count(), 5);
+    assert(s.starts_with("hé"));
+}
+
+// =============================================================================
+// Section 3: remove() - Remove character at byte position
+// =============================================================================
+
+@test
+fn test_remove_first() {
+    let mut s: Text = ("hello");
+    let ch = s.remove(0);
+    assert_eq(ch, 'h');
+    assert_eq(s, "ello");
+}
+
+@test
+fn test_remove_last() {
+    let mut s: Text = ("hello");
+    let ch = s.remove(4);
+    assert_eq(ch, 'o');
+    assert_eq(s, "hell");
+}
+
+@test
+fn test_remove_middle() {
+    let mut s: Text = ("hello");
+    let ch = s.remove(2);
+    assert_eq(ch, 'l');
+    assert_eq(s, "helo");
+}
+
+@test
+fn test_remove_single_char() {
+    let mut s: Text = ("x");
+    let ch = s.remove(0);
+    assert_eq(ch, 'x');
+    assert(s.is_empty());
+}
+
+@test
+fn test_remove_unicode() {
+    let mut s: Text = ("héllo");
+    // 'h'=1 byte, 'é' starts at byte 1
+    let ch = s.remove(1);
+    assert_eq(ch, 'é');
+    assert_eq(s, "hllo");
+}
+
+// =============================================================================
+// Section 4: matches() - Iterator over pattern matches
+// =============================================================================
+
+@test
+fn test_matches_basic() {
+    let s = "abcabcabc";
+    let found: List<Text> = s.matches("abc").collect();
+    assert_eq(found.len(), 3);
+    assert_eq(found[0], "abc");
+    assert_eq(found[1], "abc");
+    assert_eq(found[2], "abc");
+}
+
+@test
+fn test_matches_no_match() {
+    let s = "hello world";
+    let found: List<Text> = s.matches("xyz").collect();
+    assert_eq(found.len(), 0);
+}
+
+@test
+fn test_matches_single_char() {
+    let s = "banana";
+    let found: List<Text> = s.matches("a").collect();
+    assert_eq(found.len(), 3);
+}
+
+@test
+fn test_matches_overlapping_not_found() {
+    let s = "aaa";
+    // Non-overlapping: should find "aa" once, then remaining "a" doesn't match
+    let found: List<Text> = s.matches("aa").collect();
+    assert_eq(found.len(), 1);
+}
+
+@test
+fn test_matches_empty_string() {
+    let s = "";
+    let found: List<Text> = s.matches("x").collect();
+    assert_eq(found.len(), 0);
+}
+
+// =============================================================================
+// Section 5: match_indices() - Iterator over (index, match) pairs
+// =============================================================================
+
+@test
+fn test_match_indices_basic() {
+    let s = "abXabXab";
+    let found: List<(Int, Text)> = s.match_indices("ab").collect();
+    assert_eq(found.len(), 3);
+    assert_eq(found[0].0, 0);
+    assert_eq(found[1].0, 3);
+    assert_eq(found[2].0, 6);
+}
+
+@test
+fn test_match_indices_no_match() {
+    let s = "hello";
+    let found: List<(Int, Text)> = s.match_indices("xyz").collect();
+    assert_eq(found.len(), 0);
+}
+
+@test
+fn test_match_indices_single_char() {
+    let s = "a.b.c";
+    let found: List<(Int, Text)> = s.match_indices(".").collect();
+    assert_eq(found.len(), 2);
+    assert_eq(found[0].0, 1);
+    assert_eq(found[1].0, 3);
+}
+
+// =============================================================================
+// Section 6: replace_n() - Replace first N occurrences
+// =============================================================================
+
+@test
+fn test_replacen_basic() {
+    let s = "aaa";
+    assert_eq(s.replacen("a", "b", 2), "bba");
+}
+
+@test
+fn test_replacen_zero() {
+    let s = "aaa";
+    assert_eq(s.replacen("a", "b", 0), "aaa");
+}
+
+@test
+fn test_replacen_more_than_exists() {
+    let s = "aba";
+    assert_eq(s.replacen("a", "x", 10), "xbx");
+}
+
+@test
+fn test_replacen_multi_char() {
+    let s = "foo bar foo baz foo";
+    assert_eq(s.replacen("foo", "qux", 2), "qux bar qux baz foo");
+}
+
+// =============================================================================
+// Section 7: to_ascii_uppercase / to_ascii_lowercase
+// =============================================================================
+
+@test
+fn test_to_ascii_uppercase() {
+    assert_eq("hello".to_ascii_uppercase(), "HELLO");
+    assert_eq("Hello World".to_ascii_uppercase(), "HELLO WORLD");
+    assert_eq("123".to_ascii_uppercase(), "123");
+}
+
+@test
+fn test_to_ascii_lowercase() {
+    assert_eq("HELLO".to_ascii_lowercase(), "hello");
+    assert_eq("Hello World".to_ascii_lowercase(), "hello world");
+    assert_eq("123".to_ascii_lowercase(), "123");
+}
+
+@test
+fn test_ascii_case_non_ascii_unchanged() {
+    // Non-ASCII characters should be unchanged by ASCII case conversion
+    assert_eq("café".to_ascii_uppercase(), "CAFé");
+}
+
+// =============================================================================
+// Section 8: is_numeric / is_alphabetic / is_alphanumeric (for Text)
+// =============================================================================
+
+@test
+fn test_is_numeric() {
+    assert("12345".is_numeric());
+    assert(!"12a45".is_numeric());
+    assert(!"".is_numeric());
+    assert(!"hello".is_numeric());
+}
+
+@test
+fn test_is_alphabetic() {
+    assert("hello".is_alphabetic());
+    assert(!"hello1".is_alphabetic());
+    assert(!"".is_alphabetic());
+    assert(!"123".is_alphabetic());
+}
+
+@test
+fn test_is_alphanumeric() {
+    assert("hello123".is_alphanumeric());
+    assert(!"hello 123".is_alphanumeric());
+    assert(!"".is_alphanumeric());
+}
+
+// =============================================================================
+// Section 9: retain() - Keep only characters matching predicate
+// =============================================================================
+
+@test
+fn test_retain_keep_digits() {
+    let mut s: Text = ("h3ll0 w0rld");
+    s.retain(|ch| ch.is_ascii_digit());
+    assert_eq(s, "300");
+}
+
+@test
+fn test_retain_keep_alpha() {
+    let mut s: Text = ("h3ll0 w0rld");
+    s.retain(|ch| ch.is_alphabetic());
+    assert_eq(s, "hll wrld");
+}
+
+@test
+fn test_retain_empty_result() {
+    let mut s: Text = ("12345");
+    s.retain(|ch| ch.is_alphabetic());
+    assert(s.is_empty());
+}
+
+@test
+fn test_retain_all_kept() {
+    let mut s: Text = ("hello");
+    s.retain(|ch| ch.is_alphabetic());
+    assert_eq(s, "hello");
+}
+
+// =============================================================================
+// Section 10: clear()
+// =============================================================================
+
+@test
+fn test_clear() {
+    let mut s: Text = ("hello world");
+    s.clear();
+    assert(s.is_empty());
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_clear_preserves_capacity() {
+    let mut s = Text.with_capacity(100);
+    s.push_str("hello");
+    let cap_before = s.capacity();
+    s.clear();
+    assert(s.is_empty());
+    // Capacity should still be >= what it was
+    assert(s.capacity() >= cap_before);
+}
+
+// =============================================================================
+// Section 11: pop() - Remove and return last character
+// =============================================================================
+
+@test
+fn test_pop_basic() {
+    let mut s: Text = ("hello");
+    let ch = s.pop();
+    assert_eq(ch, Some('o'));
+    assert_eq(s, "hell");
+}
+
+@test
+fn test_pop_empty() {
+    let mut s = Text.new();
+    let ch = s.pop();
+    assert_eq(ch, None);
+}
+
+@test
+fn test_pop_until_empty() {
+    let mut s: Text = ("ab");
+    assert_eq(s.pop(), Some('b'));
+    assert_eq(s.pop(), Some('a'));
+    assert_eq(s.pop(), None);
+}
+
+@test
+fn test_pop_unicode() {
+    let mut s: Text = ("café");
+    let ch = s.pop();
+    assert_eq(ch, Some('é'));
+    assert_eq(s, "caf");
+}
+
+// =============================================================================
+// Section 12: Additional truncate edge cases
+// =============================================================================
+
+@test
+fn test_truncate_to_one() {
+    let mut s: Text = ("hello");
+    s.truncate(1);
+    assert_eq(s, "h");
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_truncate_already_empty() {
+    let mut s = Text.new();
+    s.truncate(0);
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// Section 13: Additional insert edge cases
+// =============================================================================
+
+@test
+fn test_insert_build_string_at_end() {
+    let mut s = Text.new();
+    s.insert(0, 'h');
+    s.insert(1, 'e');
+    s.insert(2, 'l');
+    s.insert(3, 'l');
+    s.insert(4, 'o');
+    assert_eq(s, "hello");
+}
+
+// =============================================================================
+// Section 14: Additional remove edge cases
+// =============================================================================
+
+@test
+fn test_remove_all_until_empty() {
+    let mut s: Text = ("abc");
+    let c1 = s.remove(0);
+    assert_eq(c1, 'a');
+    let c2 = s.remove(0);
+    assert_eq(c2, 'b');
+    let c3 = s.remove(0);
+    assert_eq(c3, 'c');
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// Section 15: Additional matches edge cases
+// =============================================================================
+
+@test
+fn test_matches_full_string() {
+    let s = "hello";
+    let found: List<Text> = s.matches("hello").collect();
+    assert_eq(found.len(), 1);
+    assert_eq(found[0], "hello");
+}
+
+@test
+fn test_matches_single_char_no_match() {
+    let s = "bbb";
+    let found: List<Text> = s.matches("a").collect();
+    assert_eq(found.len(), 0);
+}
+
+// =============================================================================
+// Section 16: Additional ASCII case edge cases
+// =============================================================================
+
+@test
+fn test_to_ascii_uppercase_empty() {
+    assert_eq("".to_ascii_uppercase(), "");
+}
+
+@test
+fn test_to_ascii_lowercase_empty() {
+    assert_eq("".to_ascii_lowercase(), "");
+}
+
+@test
+fn test_to_ascii_uppercase_single_char() {
+    assert_eq("a".to_ascii_uppercase(), "A");
+    assert_eq("Z".to_ascii_uppercase(), "Z");
+}
+
+@test
+fn test_to_ascii_lowercase_single_char() {
+    assert_eq("A".to_ascii_lowercase(), "a");
+    assert_eq("z".to_ascii_lowercase(), "z");
+}
+
+// =============================================================================
+// Section 17: Additional retain/clear/pop edge cases
+// =============================================================================
+
+@test
+fn test_retain_on_empty() {
+    let mut s = Text.new();
+    s.retain(|ch| ch.is_alphabetic());
+    assert(s.is_empty());
+}
+
+@test
+fn test_clear_already_empty() {
+    let mut s = Text.new();
+    s.clear();
+    assert(s.is_empty());
+    assert_eq(s.len(), 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,217 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: smt, arrays
+// @timeout: 5000
+
+/// SMT verification for array/list operations
+/// Tests array theory and quantified reasoning
+
+/// Array bounds verification
+@verify(proof)
+fn safe_get<T>(arr: &List<T>, index: Int) -> Maybe<&T> {
+    contract#"
+        ensures match result {
+            Some(val) => index >= 0 && index < arr.len() && val == &arr[index],
+            None => index < 0 || index >= arr.len()
+        };
+    ";
+    if index >= 0 && index < arr.len() {
+        Some(&arr[index])
+    } else {
+        None
+    }
+}
+
+/// Array initialization
+@verify(proof)
+fn create_filled<T: Clone>(size: Int{>= 0}, value: T) -> List<T> {
+    contract#"
+        requires size >= 0;
+        ensures result.len() == size;
+        ensures forall i: Int. 0 <= i < size implies result[i] == value;
+    ";
+    let mut arr = List.with_capacity(size);
+    for _ in 0..size {
+        arr.push(value.clone());
+    }
+    arr
+}
+
+/// Array copy verification
+@verify(proof)
+fn copy_array<T: Clone>(src: &List<T>) -> List<T> {
+    contract#"
+        ensures result.len() == src.len();
+        ensures forall i: Int. 0 <= i < src.len() implies result[i] == src[i];
+    ";
+    src.clone()
+}
+
+/// Array swap verification
+@verify(proof)
+fn swap<T>(arr: &mut List<T>, i: Int, j: Int) {
+    contract#"
+        requires i >= 0 && i < arr.len();
+        requires j >= 0 && j < arr.len();
+        ensures arr[i] == old(arr[j]);
+        ensures arr[j] == old(arr[i]);
+        ensures forall k: Int. 0 <= k < arr.len() && k != i && k != j
+            implies arr[k] == old(arr[k]);
+    ";
+    let temp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = temp;
+}
+
+/// Array reversal
+@verify(proof)
+fn reverse<T>(arr: &mut List<T>) {
+    contract#"
+        ensures arr.len() == old(arr.len());
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == old(arr[arr.len() - 1 - i]);
+    ";
+    let n = arr.len();
+    for i in 0..n / 2 {
+        contract#"invariant 
+            forall j: Int. 0 <= j < i implies arr[j] == old(arr[n - 1 - j]);
+            forall j: Int. 0 <= j < i implies arr[n - 1 - j] == old(arr[j]);
+            forall j: Int. i <= j < n - i implies arr[j] == old(arr[j]);
+        ";
+        arr.swap(i, n - 1 - i);
+    }
+}
+
+/// Array rotation
+@verify(proof)
+fn rotate_left<T>(arr: &mut List<T>, k: Int) {
+    contract#"
+        requires k >= 0;
+        ensures arr.len() == old(arr.len());
+        ensures forall i: Int. 0 <= i < arr.len() implies
+            arr[i] == old(arr[(i + k) % arr.len()]);
+    ";
+    let n = arr.len();
+    let k = k % n;
+    if k == 0 { return; }
+
+    reverse(&mut arr[0..k]);
+    reverse(&mut arr[k..n]);
+    reverse(arr);
+}
+
+/// Subarray operations
+@verify(proof)
+fn copy_subarray<T: Clone>(
+    src: &List<T>,
+    start: Int,
+    len: Int
+) -> List<T> {
+    contract#"
+        requires start >= 0;
+        requires len >= 0;
+        requires start + len <= src.len();
+        ensures result.len() == len;
+        ensures forall i: Int. 0 <= i < len implies result[i] == src[start + i];
+    ";
+    src[start..start + len].to_list()
+}
+
+/// Array search
+@verify(proof)
+fn linear_search<T: Eq>(arr: &List<T>, target: &T) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < arr.len() && arr[idx] == *target,
+            None => forall i: Int. 0 <= i < arr.len() implies arr[i] != *target
+        };
+    ";
+    for i in 0..arr.len() {
+        contract#"invariant 
+            i >= 0 && i <= arr.len();
+            forall j: Int. 0 <= j < i implies arr[j] != *target;
+        ";
+        if arr[i] == *target {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Array sorting verification
+@verify(proof)
+fn is_sorted<T: Ord>(arr: &List<T>) -> Bool {
+    contract#"
+        ensures result == forall i: Int, j: Int. 0 <= i < j < arr.len() implies arr[i] <= arr[j];
+    ";
+    for i in 0..arr.len() - 1 {
+        if arr[i] > arr[i + 1] {
+            return false;
+        }
+    }
+    true
+}
+
+/// Partition for quicksort
+@verify(proof)
+fn partition<T: Ord>(arr: &mut List<T>, low: Int, high: Int) -> Int {
+    contract#"
+        requires low >= 0 && high < arr.len() && low <= high;
+        ensures result >= low && result <= high;
+        ensures forall i: Int. low <= i < result implies arr[i] <= arr[result];
+        ensures forall i: Int. result < i <= high implies arr[i] >= arr[result];
+    ";
+    let pivot = arr[high];
+    let mut i = low - 1;
+
+    for j in low..high {
+        contract#"invariant 
+            i >= low - 1 && i < j && j <= high;
+            forall k: Int. low <= k <= i implies arr[k] <= pivot;
+            forall k: Int. i < k < j implies arr[k] > pivot;
+        ";
+        if arr[j] <= pivot {
+            i += 1;
+            arr.swap(i, j);
+        }
+    }
+    arr.swap(i + 1, high);
+    i + 1
+}
+
+/// Two-dimensional array access
+@verify(proof)
+fn get_2d<T>(matrix: &List<List<T>>, row: Int, col: Int) -> Maybe<&T> {
+    contract#"
+        ensures match result {
+            Some(val) => row >= 0 && row < matrix.len() &&
+                         col >= 0 && col < matrix[row].len() &&
+                         val == &matrix[row][col],
+            None => row < 0 || row >= matrix.len() ||
+                    col < 0 || col >= matrix[row].len()
+        };
+    ";
+    if row >= 0 && row < matrix.len() {
+        if col >= 0 && col < matrix[row].len() {
+            return Some(&matrix[row][col]);
+        }
+    }
+    None
+}
+
+/// Array permutation check
+@verify(proof)
+fn is_permutation<T: Ord + Eq>(a: &List<T>, b: &List<T>) -> Bool {
+    contract#"
+        ensures result implies a.len() == b.len();
+        ensures result implies forall x: Int. a.count(&x) == b.count(&x);
+    ";
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut a_sorted = a.clone();
+    let mut b_sorted = b.clone();
+    a_sorted.sort();
+    b_sorted.sort();
+    a_sorted == b_sorted
+}

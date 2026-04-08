@@ -1,0 +1,39 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: gpu, metal, apple_silicon
+// @expect: pass
+
+// Test Metal GPU detection on Apple Silicon.
+
+fn __metal_get_device() -> Int { 0 }
+fn __metal_max_memory() -> Int { 0 }
+fn __metal_max_threads_per_threadgroup() -> Int { 0 }
+
+fn main() -> Int {
+    let device = __metal_get_device();
+    if device == 0 {
+        print("SKIP: No Metal GPU device available");
+        return 0;
+    }
+
+    let max_mem = __metal_max_memory();
+    let max_threads = __metal_max_threads_per_threadgroup();
+
+    print(f"Metal GPU detected:");
+    print(f"  Device handle: {device}");
+    print(f"  Max memory: {max_mem / (1024 * 1024)} MB");
+    print(f"  Max threads/threadgroup: {max_threads}");
+
+    if max_mem <= 0 {
+        print("FAIL: max_memory should be > 0");
+        return 1;
+    }
+    if max_threads <= 0 {
+        print("FAIL: max_threads should be > 0");
+        return 1;
+    }
+
+    print("PASS: Metal GPU detected and functional");
+    0
+}

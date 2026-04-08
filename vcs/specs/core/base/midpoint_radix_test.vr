@@ -1,0 +1,280 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, midpoint, from_str_radix, ne_bytes
+// @description: Tests for midpoint, from_str_radix, to_ne_bytes/from_ne_bytes
+
+mount core.base.primitives.{Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32, UInt64, UInt128, ISize, USize};
+
+// =============================================================================
+// Int - midpoint
+// =============================================================================
+
+@test
+fn test_int_midpoint_basic() {
+    assert_eq(0.midpoint(10), 5);
+    assert_eq(2.midpoint(8), 5);
+    assert_eq(1.midpoint(4), 2); // rounds towards lower
+}
+
+@test
+fn test_int_midpoint_same() {
+    assert_eq(5.midpoint(5), 5);
+    assert_eq(0.midpoint(0), 0);
+}
+
+@test
+fn test_int_midpoint_negative() {
+    assert_eq((-10).midpoint(10), 0);
+    assert_eq((-3).midpoint(-1), -2);
+}
+
+@test
+fn test_int_midpoint_no_overflow() {
+    // Large values that would overflow with (a+b)/2
+    let large = 9223372036854775807;
+    assert(large.midpoint(large) > 0);
+    assert_eq(large.midpoint(large), large);
+}
+
+// =============================================================================
+// Int - from_str_radix
+// =============================================================================
+
+@test
+fn test_int_from_str_radix_decimal() {
+    let s = "42";
+    assert_eq(Int.from_str_radix(&s, 10), Some(42));
+}
+
+@test
+fn test_int_from_str_radix_binary() {
+    let s = "1010";
+    assert_eq(Int.from_str_radix(&s, 2), Some(10));
+}
+
+@test
+fn test_int_from_str_radix_hex() {
+    let s = "ff";
+    assert_eq(Int.from_str_radix(&s, 16), Some(255));
+}
+
+@test
+fn test_int_from_str_radix_hex_upper() {
+    let s = "FF";
+    assert_eq(Int.from_str_radix(&s, 16), Some(255));
+}
+
+@test
+fn test_int_from_str_radix_octal() {
+    let s = "77";
+    assert_eq(Int.from_str_radix(&s, 8), Some(63));
+}
+
+@test
+fn test_int_from_str_radix_negative() {
+    let s = "-42";
+    assert_eq(Int.from_str_radix(&s, 10), Some(-42));
+}
+
+@test
+fn test_int_from_str_radix_plus_sign() {
+    let s = "+42";
+    assert_eq(Int.from_str_radix(&s, 10), Some(42));
+}
+
+@test
+fn test_int_from_str_radix_zero() {
+    let s = "0";
+    assert_eq(Int.from_str_radix(&s, 10), Some(0));
+    assert_eq(Int.from_str_radix(&s, 2), Some(0));
+    assert_eq(Int.from_str_radix(&s, 16), Some(0));
+}
+
+@test
+fn test_int_from_str_radix_invalid() {
+    let s = "xyz";
+    assert(Int.from_str_radix(&s, 10) is None);
+}
+
+@test
+fn test_int_from_str_radix_empty() {
+    let s = "";
+    assert(Int.from_str_radix(&s, 10) is None);
+}
+
+@test
+fn test_int_from_str_radix_invalid_radix() {
+    let s = "42";
+    assert(Int.from_str_radix(&s, 1) is None);
+    assert(Int.from_str_radix(&s, 37) is None);
+}
+
+@test
+fn test_int_from_str_radix_base36() {
+    let s = "z";
+    assert_eq(Int.from_str_radix(&s, 36), Some(35));
+}
+
+@test
+fn test_int_from_str_radix_sign_only() {
+    let s = "-";
+    assert(Int.from_str_radix(&s, 10) is None);
+    let s2 = "+";
+    assert(Int.from_str_radix(&s2, 10) is None);
+}
+
+// =============================================================================
+// Int - to_ne_bytes / from_ne_bytes
+// =============================================================================
+
+@test
+fn test_int_ne_bytes_roundtrip() {
+    let val = 42;
+    let bytes = val.to_ne_bytes();
+    let restored = Int.from_ne_bytes(bytes);
+    assert_eq(restored, 42);
+}
+
+@test
+fn test_int_ne_bytes_zero() {
+    let bytes = 0.to_ne_bytes();
+    assert_eq(Int.from_ne_bytes(bytes), 0);
+}
+
+// =============================================================================
+// All types have midpoint
+// =============================================================================
+
+@test
+fn test_all_have_midpoint() {
+    let _a = (1).midpoint(3);
+    let _b = (1 as Int8).midpoint(3 as Int8);
+    let _c = (1 as Int16).midpoint(3 as Int16);
+    let _d = (1 as Int32).midpoint(3 as Int32);
+    let _e = (1 as Int64).midpoint(3 as Int64);
+    let _f = (1 as Int128).midpoint(3 as Int128);
+    let _g = (1 as UInt8).midpoint(3 as UInt8);
+    let _h = (1 as UInt16).midpoint(3 as UInt16);
+    let _i = (1 as UInt32).midpoint(3 as UInt32);
+    let _j = (1 as UInt64).midpoint(3 as UInt64);
+    let _k = (1 as UInt128).midpoint(3 as UInt128);
+    let _l = (1 as ISize).midpoint(3 as ISize);
+    let _m = (1 as USize).midpoint(3 as USize);
+    assert_eq(_a, 2);
+    assert(_b.to_int() == 2);
+    assert(_c.to_int() == 2);
+    assert(_d.to_int() == 2);
+    assert(_e.to_int() == 2);
+    assert(_f.to_int() == 2);
+    assert(_g.to_int() == 2);
+    assert(_h.to_int() == 2);
+    assert(_i.to_int() == 2);
+    assert(_j.to_int() == 2);
+    assert(_k.to_int() == 2);
+    assert(_l.to_int() == 2);
+    assert(_m.to_int() == 2);
+}
+
+// =============================================================================
+// All types have to_ne_bytes / from_ne_bytes
+// =============================================================================
+
+@test
+fn test_all_have_ne_bytes() {
+    let _a = (42).to_ne_bytes();
+    let _b = (42 as Int8).to_ne_bytes();
+    let _c = (42 as Int16).to_ne_bytes();
+    let _d = (42 as Int32).to_ne_bytes();
+    let _e = (42 as Int64).to_ne_bytes();
+    let _f = (42 as Int128).to_ne_bytes();
+    let _g = (42 as UInt8).to_ne_bytes();
+    let _h = (42 as UInt16).to_ne_bytes();
+    let _i = (42 as UInt32).to_ne_bytes();
+    let _j = (42 as UInt64).to_ne_bytes();
+    let _k = (42 as UInt128).to_ne_bytes();
+    let _l = (42 as ISize).to_ne_bytes();
+    let _m = (42 as USize).to_ne_bytes();
+    assert_eq(_a.len(), 8);
+    assert_eq(_b.len(), 1);
+    assert_eq(_c.len(), 2);
+    assert_eq(_d.len(), 4);
+    assert_eq(_e.len(), 8);
+    assert_eq(_f.len(), 16);
+    assert_eq(_g.len(), 1);
+    assert_eq(_h.len(), 2);
+    assert_eq(_i.len(), 4);
+    assert_eq(_j.len(), 8);
+    assert_eq(_k.len(), 16);
+    assert_eq(_l.len(), 8);
+    assert_eq(_m.len(), 8);
+}
+
+// =============================================================================
+// Sized type midpoint tests
+// =============================================================================
+
+@test
+fn test_int8_midpoint() {
+    let a = 10 as Int8;
+    let b = 20 as Int8;
+    assert(a.midpoint(b).to_int() == 15);
+}
+
+@test
+fn test_uint8_midpoint() {
+    let a = 100 as UInt8;
+    let b = 200 as UInt8;
+    assert(a.midpoint(b).to_int() == 150);
+}
+
+@test
+fn test_int32_midpoint() {
+    let a = 100 as Int32;
+    let b = 200 as Int32;
+    assert(a.midpoint(b).to_int() == 150);
+}
+
+@test
+fn test_uint32_midpoint() {
+    let a = 1000 as UInt32;
+    let b = 2000 as UInt32;
+    assert(a.midpoint(b).to_int() == 1500);
+}
+
+@test
+fn test_uint64_midpoint() {
+    let a = 10 as UInt64;
+    let b = 20 as UInt64;
+    assert(a.midpoint(b).to_int() == 15);
+}
+
+@test
+fn test_isize_midpoint() {
+    let a = 10 as ISize;
+    let b = 20 as ISize;
+    assert(a.midpoint(b).to_int() == 15);
+}
+
+@test
+fn test_usize_midpoint() {
+    let a = 10 as USize;
+    let b = 20 as USize;
+    assert(a.midpoint(b).to_int() == 15);
+}
+
+// =============================================================================
+// Midpoint edge cases
+// =============================================================================
+
+@test
+fn test_midpoint_adjacent_values() {
+    // Midpoint of 3 and 4 should be 3 (floor)
+    assert_eq(3.midpoint(4), 3);
+    assert_eq(4.midpoint(3), 3);
+}
+
+@test
+fn test_midpoint_zero_and_one() {
+    assert_eq(0.midpoint(1), 0);
+    assert_eq(1.midpoint(0), 0);
+}

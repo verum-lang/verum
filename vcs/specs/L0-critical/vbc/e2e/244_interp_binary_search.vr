@@ -1,0 +1,270 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, binary-search, search
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: binary search on sorted fixed-size record arrays
+
+// =============================================================================
+// Array type and accessors (10 elements)
+// =============================================================================
+
+type Arr10 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, a8: Int, a9: Int };
+
+fn arr_new() -> Arr10 {
+    Arr10 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, a8: 0, a9: 0 }
+}
+
+fn arr_get(arr: Arr10, idx: Int) -> Int {
+    if idx == 0 { arr.a0 }
+    else if idx == 1 { arr.a1 }
+    else if idx == 2 { arr.a2 }
+    else if idx == 3 { arr.a3 }
+    else if idx == 4 { arr.a4 }
+    else if idx == 5 { arr.a5 }
+    else if idx == 6 { arr.a6 }
+    else if idx == 7 { arr.a7 }
+    else if idx == 8 { arr.a8 }
+    else if idx == 9 { arr.a9 }
+    else { -1 }
+}
+
+fn arr_set(arr: Arr10, idx: Int, val: Int) -> Arr10 {
+    Arr10 {
+        a0: if idx == 0 { val } else { arr.a0 },
+        a1: if idx == 1 { val } else { arr.a1 },
+        a2: if idx == 2 { val } else { arr.a2 },
+        a3: if idx == 3 { val } else { arr.a3 },
+        a4: if idx == 4 { val } else { arr.a4 },
+        a5: if idx == 5 { val } else { arr.a5 },
+        a6: if idx == 6 { val } else { arr.a6 },
+        a7: if idx == 7 { val } else { arr.a7 },
+        a8: if idx == 8 { val } else { arr.a8 },
+        a9: if idx == 9 { val } else { arr.a9 },
+    }
+}
+
+// =============================================================================
+// Binary search: returns index of target, or -1 if not found
+// Searches in range [lo..hi)
+// =============================================================================
+
+fn binary_search(arr: Arr10, target: Int, lo: Int, hi: Int) -> Int {
+    let mut left = lo;
+    let mut right = hi;
+    let mut result = -1;
+    while left < right {
+        let mid = left + (right - left) / 2;
+        let val = arr_get(arr, mid);
+        if val == target {
+            result = mid;
+            left = right;  // break
+        } else if val < target {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    result
+}
+
+// =============================================================================
+// Lower bound: first index where arr[i] >= target
+// =============================================================================
+
+fn lower_bound(arr: Arr10, target: Int, lo: Int, hi: Int) -> Int {
+    let mut left = lo;
+    let mut right = hi;
+    while left < right {
+        let mid = left + (right - left) / 2;
+        if arr_get(arr, mid) < target {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    left
+}
+
+// =============================================================================
+// Upper bound: first index where arr[i] > target
+// =============================================================================
+
+fn upper_bound(arr: Arr10, target: Int, lo: Int, hi: Int) -> Int {
+    let mut left = lo;
+    let mut right = hi;
+    while left < right {
+        let mid = left + (right - left) / 2;
+        if arr_get(arr, mid) <= target {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    left
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_find_existing() {
+    // Sorted array: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    let mut a = arr_new();
+    let mut i = 0;
+    while i < 10 {
+        a = arr_set(a, i, (i + 1) * 10);
+        i = i + 1;
+    }
+    // Find each element
+    assert_eq(binary_search(a, 10, 0, 10), 0);
+    assert_eq(binary_search(a, 20, 0, 10), 1);
+    assert_eq(binary_search(a, 50, 0, 10), 4);
+    assert_eq(binary_search(a, 90, 0, 10), 8);
+    assert_eq(binary_search(a, 100, 0, 10), 9);
+}
+
+fn test_missing_elements() {
+    let mut a = arr_new();
+    let mut i = 0;
+    while i < 10 {
+        a = arr_set(a, i, (i + 1) * 10);
+        i = i + 1;
+    }
+    // Elements not in array
+    assert_eq(binary_search(a, 5, 0, 10), -1);
+    assert_eq(binary_search(a, 15, 0, 10), -1);
+    assert_eq(binary_search(a, 55, 0, 10), -1);
+    assert_eq(binary_search(a, 105, 0, 10), -1);
+    assert_eq(binary_search(a, 0, 0, 10), -1);
+    assert_eq(binary_search(a, -1, 0, 10), -1);
+}
+
+fn test_single_element() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 42);
+    // Find the only element
+    assert_eq(binary_search(a, 42, 0, 1), 0);
+    // Not found
+    assert_eq(binary_search(a, 41, 0, 1), -1);
+    assert_eq(binary_search(a, 43, 0, 1), -1);
+}
+
+fn test_empty_range() {
+    let a = arr_new();
+    assert_eq(binary_search(a, 0, 0, 0), -1);
+    assert_eq(binary_search(a, 5, 3, 3), -1);
+}
+
+fn test_subrange_search() {
+    // Sorted array: [2, 5, 8, 11, 14, 17, 20, 23, 26, 29]
+    let mut a = arr_new();
+    let mut i = 0;
+    while i < 10 {
+        a = arr_set(a, i, 2 + i * 3);
+        i = i + 1;
+    }
+    // Search only in range [3..7)
+    assert_eq(binary_search(a, 11, 3, 7), 3);
+    assert_eq(binary_search(a, 17, 3, 7), 5);
+    assert_eq(binary_search(a, 2, 3, 7), -1);   // exists but outside range
+    assert_eq(binary_search(a, 23, 3, 7), -1);   // exists but outside range
+}
+
+fn test_first_and_last() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 1);
+    a = arr_set(a, 1, 3);
+    a = arr_set(a, 2, 5);
+    a = arr_set(a, 3, 7);
+    a = arr_set(a, 4, 9);
+    a = arr_set(a, 5, 11);
+    a = arr_set(a, 6, 13);
+    a = arr_set(a, 7, 15);
+    a = arr_set(a, 8, 17);
+    a = arr_set(a, 9, 19);
+    // First element
+    assert_eq(binary_search(a, 1, 0, 10), 0);
+    // Last element
+    assert_eq(binary_search(a, 19, 0, 10), 9);
+}
+
+fn test_lower_bound() {
+    // Sorted array with duplicates: [1, 3, 3, 5, 5, 5, 7, 9, 9, 11]
+    let mut a = arr_new();
+    a = arr_set(a, 0, 1);
+    a = arr_set(a, 1, 3);
+    a = arr_set(a, 2, 3);
+    a = arr_set(a, 3, 5);
+    a = arr_set(a, 4, 5);
+    a = arr_set(a, 5, 5);
+    a = arr_set(a, 6, 7);
+    a = arr_set(a, 7, 9);
+    a = arr_set(a, 8, 9);
+    a = arr_set(a, 9, 11);
+    // Lower bound: first position where value >= target
+    assert_eq(lower_bound(a, 3, 0, 10), 1);
+    assert_eq(lower_bound(a, 5, 0, 10), 3);
+    assert_eq(lower_bound(a, 9, 0, 10), 7);
+    // Target not present: returns insertion point
+    assert_eq(lower_bound(a, 4, 0, 10), 3);
+    assert_eq(lower_bound(a, 6, 0, 10), 6);
+    assert_eq(lower_bound(a, 0, 0, 10), 0);   // before all
+    assert_eq(lower_bound(a, 12, 0, 10), 10);  // after all
+}
+
+fn test_upper_bound() {
+    // Same array: [1, 3, 3, 5, 5, 5, 7, 9, 9, 11]
+    let mut a = arr_new();
+    a = arr_set(a, 0, 1);
+    a = arr_set(a, 1, 3);
+    a = arr_set(a, 2, 3);
+    a = arr_set(a, 3, 5);
+    a = arr_set(a, 4, 5);
+    a = arr_set(a, 5, 5);
+    a = arr_set(a, 6, 7);
+    a = arr_set(a, 7, 9);
+    a = arr_set(a, 8, 9);
+    a = arr_set(a, 9, 11);
+    // Upper bound: first position where value > target
+    assert_eq(upper_bound(a, 3, 0, 10), 3);
+    assert_eq(upper_bound(a, 5, 0, 10), 6);
+    assert_eq(upper_bound(a, 9, 0, 10), 9);
+    // Count of value 5: upper_bound - lower_bound
+    let count_5 = upper_bound(a, 5, 0, 10) - lower_bound(a, 5, 0, 10);
+    assert_eq(count_5, 3);
+    let count_3 = upper_bound(a, 3, 0, 10) - lower_bound(a, 3, 0, 10);
+    assert_eq(count_3, 2);
+    let count_7 = upper_bound(a, 7, 0, 10) - lower_bound(a, 7, 0, 10);
+    assert_eq(count_7, 1);
+}
+
+fn test_negative_values() {
+    // [-20, -15, -10, -5, 0, 5, 10, 15, 20, 25]
+    let mut a = arr_new();
+    let mut i = 0;
+    while i < 10 {
+        a = arr_set(a, i, -20 + i * 5);
+        i = i + 1;
+    }
+    assert_eq(binary_search(a, -20, 0, 10), 0);
+    assert_eq(binary_search(a, 0, 0, 10), 4);
+    assert_eq(binary_search(a, 25, 0, 10), 9);
+    assert_eq(binary_search(a, -12, 0, 10), -1);
+}
+
+fn main() -> Int {
+    test_find_existing();
+    test_missing_elements();
+    test_single_element();
+    test_empty_range();
+    test_subrange_search();
+    test_first_and_last();
+    test_lower_bound();
+    test_upper_bound();
+    test_negative_values();
+    print("[OK] 244_interp_binary_search");
+    0
+}

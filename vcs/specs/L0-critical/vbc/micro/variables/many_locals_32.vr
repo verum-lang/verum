@@ -1,0 +1,46 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: vbc, registers, stress
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Register allocation stress test with 32 local variables
+
+fn main() {
+    let v0: Int = 0;
+    let v1: Int = 1;
+    let v2: Int = 2;
+    let v3: Int = 3;
+    let v4: Int = 4;
+    let v5: Int = 5;
+    let v6: Int = 6;
+    let v7: Int = 7;
+    let v8: Int = 8;
+    let v9: Int = 9;
+    let v10: Int = 10;
+    let v11: Int = 11;
+    let v12: Int = 12;
+    let v13: Int = 13;
+    let v14: Int = 14;
+    let v15: Int = 15;
+    let v16: Int = 16;
+    let v17: Int = 17;
+    let v18: Int = 18;
+    let v19: Int = 19;
+    let v20: Int = 20;
+    let v21: Int = 21;
+    let v22: Int = 22;
+    let v23: Int = 23;
+    let v24: Int = 24;
+    let v25: Int = 25;
+    let v26: Int = 26;
+    let v27: Int = 27;
+    let v28: Int = 28;
+    let v29: Int = 29;
+    let v30: Int = 30;
+    let v31: Int = 31;
+
+    let sum = v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 +
+              v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31;
+    assert_eq(sum, 496);
+}

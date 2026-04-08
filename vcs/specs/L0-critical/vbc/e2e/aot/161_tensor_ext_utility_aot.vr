@@ -1,0 +1,167 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, utility
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT TensorExt utility — DFT manual, scatter, contiguous check, random LCG
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn cos_approx(x: Float) -> Float {
+    // Taylor series for cos(x): 1 - x^2/2! + x^4/4! - x^6/6!
+    let x2 = x * x;
+    let x4 = x2 * x2;
+    let x6 = x4 * x2;
+    let x8 = x6 * x2;
+    1.0 - x2 / 2.0 + x4 / 24.0 - x6 / 720.0 + x8 / 40320.0
+}
+
+fn sin_approx(x: Float) -> Float {
+    // Taylor series for sin(x): x - x^3/3! + x^5/5! - x^7/7!
+    let x2 = x * x;
+    let x3 = x2 * x;
+    let x5 = x3 * x2;
+    let x7 = x5 * x2;
+    x - x3 / 6.0 + x5 / 120.0 - x7 / 5040.0
+}
+
+// ============================================================================
+// Test 1: Manual DFT of 4 real values
+// DFT X[k] = sum_{n=0}^{N-1} x[n] * exp(-2pi*i*k*n/N)
+// For real input, we compute real and imaginary parts separately
+// ============================================================================
+
+fn test_dft_4pt() {
+    // Input: [1, 0, -1, 0]
+    let x0 = 1.0; let x1 = 0.0; let x2 = -1.0; let x3 = 0.0;
+    let pi = 3.14159265358979;
+
+    // X[0] = sum of all = 1 + 0 + (-1) + 0 = 0
+    let re0 = x0 + x1 + x2 + x3;
+    assert_eq(abs_f(re0) < 0.01, true);
+
+    // X[1]: angles are 0, -pi/2, -pi, -3pi/2
+    let re1 = x0 * cos_approx(0.0) + x1 * cos_approx(0.0 - pi / 2.0)
+            + x2 * cos_approx(0.0 - pi) + x3 * cos_approx(0.0 - 3.0 * pi / 2.0);
+    let im1 = x0 * sin_approx(0.0) + x1 * sin_approx(0.0 - pi / 2.0)
+            + x2 * sin_approx(0.0 - pi) + x3 * sin_approx(0.0 - 3.0 * pi / 2.0);
+    // X[1] should be 2+0i for input [1,0,-1,0]
+    assert_eq(abs_f(re1 - 2.0) < 0.1, true);
+    assert_eq(abs_f(im1) < 0.1, true);
+
+    print("test_dft_4pt passed");
+}
+
+// ============================================================================
+// Test 2: Scatter operation (index-based write)
+// ============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn test_scatter() {
+    // Scatter: write values [10,20,30] to indices [2,5,7]
+    let mut out = arr8_zeros();
+    out = arr8_set(out, 2, 10);
+    out = arr8_set(out, 5, 20);
+    out = arr8_set(out, 7, 30);
+
+    assert_eq(arr8_get(out, 0), 0);
+    assert_eq(arr8_get(out, 2), 10);
+    assert_eq(arr8_get(out, 5), 20);
+    assert_eq(arr8_get(out, 7), 30);
+    assert_eq(arr8_get(out, 1), 0);
+    assert_eq(arr8_get(out, 3), 0);
+
+    print("test_scatter passed");
+}
+
+// ============================================================================
+// Test 3: Contiguous check (strides match shape)
+// ============================================================================
+
+fn test_contiguous_check() {
+    // A 2x3 row-major tensor has strides [3, 1]
+    // It is contiguous if stride[i] = product(shape[i+1:])
+    let rows = 2; let cols = 3;
+    let stride0 = 3; let stride1 = 1;
+    let expected_stride0 = cols;
+    let expected_stride1 = 1;
+    let is_contiguous = if stride0 == expected_stride0 && stride1 == expected_stride1 { 1 } else { 0 };
+    assert_eq(is_contiguous, 1);
+
+    // Non-contiguous example: transposed view has strides [1, 3]
+    let t_stride0 = 1; let t_stride1 = 3;
+    let is_cont2 = if t_stride0 == expected_stride0 && t_stride1 == expected_stride1 { 1 } else { 0 };
+    assert_eq(is_cont2, 0);
+
+    print("test_contiguous_check passed");
+}
+
+// ============================================================================
+// Test 4: Linear congruential generator (LCG) pseudo-random
+// ============================================================================
+
+fn lcg_next(state: Int) -> Int {
+    // LCG: next = (a * state + c) mod m
+    let a = 1103515245;
+    let c = 12345;
+    let m = 2147483648; // 2^31
+    let raw = a * state + c;
+    // Manual modulo for positive result
+    let result = raw - (raw / m) * m;
+    if result < 0 { result + m } else { result }
+}
+
+fn test_lcg_random() {
+    let s0 = 42;
+    let s1 = lcg_next(s0);
+    let s2 = lcg_next(s1);
+    let s3 = lcg_next(s2);
+
+    // Each state should be different
+    assert_eq(s0 == s1, false);
+    assert_eq(s1 == s2, false);
+    assert_eq(s2 == s3, false);
+
+    // All should be non-negative and less than 2^31
+    assert_eq(s1 >= 0, true);
+    assert_eq(s2 >= 0, true);
+    assert_eq(s3 >= 0, true);
+
+    print("test_lcg_random passed");
+}
+
+fn main() -> Int {
+    test_dft_4pt();
+    test_scatter();
+    test_contiguous_check();
+    test_lcg_random();
+    print("ALL PASSED");
+    0
+}

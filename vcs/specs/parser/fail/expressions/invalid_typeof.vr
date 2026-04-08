@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, typeof, error
+// @description: typeof expression without argument
+// @expected-error: E018
+
+fn test() {
+    let t = typeof();  // typeof requires argument
+}

@@ -1,0 +1,203 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, generics, polymorphism
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// Generic Types - Type System Generics Test Seed
+// Tests generic type definitions and usage
+// =============================================================================
+
+// Simple generic type
+type Container<T> is {
+    value: T,
+};
+
+// Multiple type parameters
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+type Triple<A, B, C> is {
+    a: A,
+    b: B,
+    c: C,
+};
+
+// Generic variant types
+type Maybe<T> is None | Some(T);
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Either<L, R> is Left(L) | Right(R);
+
+// Bounded generics
+type CloneableContainer<T> is {
+    value: T,
+} where type T: Clone;
+
+type ComparableContainer<T> is {
+    value: T,
+} where type T: Ord + Eq;
+
+type MultiBounded<T, U> is {
+    t: T,
+    u: U,
+} where type T: Clone + Debug
+  where type U: Hash + Eq;
+
+// Generic with lifetime-like semantics
+type Borrowed<T> is {
+    reference: &T,
+};
+
+type MutBorrowed<T> is {
+    reference: &mut T,
+};
+
+// Recursive generics
+type List<T> is Nil | Cons(T, Heap<List<T>>);
+
+type Tree<T> is
+    | Leaf(T)
+    | Node {
+        value: T,
+        left: Heap<Tree<T>>,
+        right: Heap<Tree<T>>,
+    };
+
+// Higher-kinded type patterns
+type Functor is protocol {
+    type F<_>;
+    fn map<A, B>(self: Self.F<A>, f: fn(A) -> B) -> Self.F<B>;
+};
+
+type Applicative is protocol extends Functor {
+    fn pure<A>(value: A) -> Self.F<A>;
+    fn apply<A, B>(self: Self.F<fn(A) -> B>, arg: Self.F<A>) -> Self.F<B>;
+};
+
+type Monad is protocol extends Applicative {
+    fn flat_map<A, B>(self: Self.F<A>, f: fn(A) -> Self.F<B>) -> Self.F<B>;
+};
+
+// Generic implementations
+implement<T> Container<T> {
+    fn new(value: T) -> Self {
+        Container { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+implement<T> Clone for Container<T> where type T: Clone {
+    fn clone(&self) -> Self {
+        Container { value: self.value.clone() }
+    }
+}
+
+implement<A, B> Pair<A, B> {
+    fn new(first: A, second: B) -> Self {
+        Pair { first, second }
+    }
+
+    fn swap(self) -> Pair<B, A> {
+        Pair { first: self.second, second: self.first }
+    }
+}
+
+// Generic functions
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn swap<A, B>(pair: (A, B)) -> (B, A) {
+    (pair.1, pair.0)
+}
+
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |a| g(f(a))
+}
+
+fn map<T, U>(list: List<T>, f: fn(T) -> U) -> List<U> {
+    match list {
+        Nil => Nil,
+        Cons(head, tail) => Cons(f(head), Heap(map(*tail, f))),
+    }
+}
+
+fn fold<T, U>(list: List<T>, init: U, f: fn(U, T) -> U) -> U {
+    match list {
+        Nil => init,
+        Cons(head, tail) => fold(*tail, f(init, head), f),
+    }
+}
+
+// Generic with multiple constraints
+fn complex_generic<T, U, V>(t: T, u: U, v: V) -> T
+where type T: Clone + Debug + Default
+where type U: Hash + Eq + Ord
+where type V: Send + Sync
+{
+    t.clone()
+}
+
+// Generic associated types
+type Collection is protocol {
+    type Item;
+    type Iter<T>;
+
+    fn iter(&self) -> Self.Iter<Self.Item>;
+    fn collect<T>(iter: Self.Iter<T>) -> Self where type T: Clone;
+};
+
+// Conditional implementations
+implement<T> Debug for Container<T> where type T: Debug {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write(f, "Container({:?})", self.value)
+    }
+}
+
+implement<T> Default for Container<T> where type T: Default {
+    fn default() -> Self {
+        Container { value: T.default() }
+    }
+}
+
+// Generic variance
+type Covariant<T> is { value: T };           // Covariant in T
+type Contravariant<T> is { f: fn(T) };       // Contravariant in T
+type Invariant<T> is { f: fn(T) -> T };      // Invariant in T
+
+// Phantom types
+type PhantomData<T> is ();
+
+type Tagged<T, Tag> is {
+    value: T,
+    _phantom: PhantomData<Tag>,
+};
+
+// Type-level programming
+type TypeEq<A, B> is protocol {
+    fn cast(a: A) -> B;
+};
+
+implement<T> TypeEq<T, T> for T {
+    fn cast(a: T) -> T { a }
+}
+
+// Generic newtype wrappers
+type Wrapper<T> is (T);
+
+type Id<T> is (T);
+
+type NonEmpty<T> is (List<T>); // Semantic: non-empty list

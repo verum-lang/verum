@@ -1,0 +1,481 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, error-handling, error-protocol, c-interop
+// @timeout: 10000
+// @description: Tests FFI error handling patterns and protocols
+
+/// ============================================================
+/// FFI ERROR HANDLING PROTOCOL
+/// ============================================================
+///
+/// Different C libraries use different error handling conventions.
+/// This file demonstrates patterns for safely handling errors
+/// across the FFI boundary.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+type ssize_t is isize;
+
+// ============================================================
+// ERROR PROTOCOL 1: RETURN CODES
+// ============================================================
+
+// ------------------------------------------------------------
+// Negative Return = Error (POSIX style)
+// ------------------------------------------------------------
+
+ffi posix_style {
+    /// Returns -1 on error, sets errno
+    @extern("C")
+    fn posix_read(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t;
+
+    /// Returns non-zero on error
+    @extern("C")
+    fn posix_close(fd: c_int) -> c_int;
+}
+
+ffi libc {
+    @extern("C")
+    fn __errno_location() -> *mut c_int;
+}
+
+/// Get errno value
+fn get_errno() -> c_int {
+    unsafe { *libc.__errno_location() }
+}
+
+/// Set errno value
+fn set_errno(value: c_int) {
+    unsafe { *libc.__errno_location() = value; }
+}
+
+/// POSIX error codes
+const EPERM: c_int = 1;
+const ENOENT: c_int = 2;
+const ESRCH: c_int = 3;
+const EINTR: c_int = 4;
+const EIO: c_int = 5;
+const EAGAIN: c_int = 11;
+const ENOMEM: c_int = 12;
+const EACCES: c_int = 13;
+const EINVAL: c_int = 22;
+
+/// Safe wrapper for POSIX read
+fn safe_read(fd: c_int, buf: &mut [u8]) -> Result<usize, IoError> {
+    let result = unsafe {
+        posix_style.posix_read(fd, buf.as_mut_ptr() as *mut c_void, buf.len())
+    };
+
+    if result < 0 {
+        Err(IoError.from_errno(get_errno()))
+    } else {
+        Ok(result as usize)
+    }
+}
+
+type IoError is
+    | PermissionDenied
+    | NotFound
+    | Interrupted
+    | WouldBlock
+    | InvalidArgument
+    | OutOfMemory
+    | Unknown(c_int);
+
+implement IoError {
+    fn from_errno(errno: c_int) -> IoError {
+        errno.match {
+            1 | 13 => PermissionDenied,  // EPERM, EACCES
+            2 => NotFound,                // ENOENT
+            4 => IoError.Interrupted,             // EINTR
+            11 => IoError.WouldBlock,             // EAGAIN
+            12 => IoError.OutOfMemory,            // ENOMEM
+            22 => IoError.InvalidArgument,        // EINVAL
+            e => IoError.Unknown(e),
+        }
+    }
+
+    fn to_errno(&self) -> c_int {
+        self.match {
+            PermissionDenied => EACCES,
+            NotFound => ENOENT,
+            Interrupted => EINTR,
+            WouldBlock => EAGAIN,
+            OutOfMemory => ENOMEM,
+            InvalidArgument => EINVAL,
+            Unknown(e) => e,
+        }
+    }
+}
+
+// ============================================================
+// ERROR PROTOCOL 2: NULLABLE RETURN
+// ============================================================
+
+// ------------------------------------------------------------
+// NULL = Error (malloc style)
+// ------------------------------------------------------------
+
+ffi malloc_style {
+    /// Returns NULL on error
+    @extern("C")
+    fn malloc_alloc(size: size_t) -> *mut c_void;
+
+    /// Returns NULL if key not found
+    @extern("C")
+    fn get_value(key: *const c_char) -> *mut c_void;
+}
+
+/// Safe allocation wrapper
+fn allocate(size: size_t) -> Result<*mut c_void, AllocError> {
+    let ptr = unsafe { malloc_style.malloc_alloc(size) };
+
+    if ptr.is_null() {
+        Err(OutOfMemory)
+    } else {
+        Ok(ptr)
+    }
+}
+
+type AllocError is
+    | OutOfMemory
+    | InvalidSize;
+
+// ============================================================
+// ERROR PROTOCOL 3: OUT PARAMETER
+// ============================================================
+
+// ------------------------------------------------------------
+// Error via Out Parameter
+// ------------------------------------------------------------
+
+ffi out_param_style {
+    /// Success returns 0, error info in out param
+    @extern("C")
+    fn operation_with_error(
+        input: c_int,
+        result: *mut c_int,
+        error: *mut ErrorInfo
+    ) -> c_int;
+}
+
+@repr(C)
+type ErrorInfo is {
+    code: c_int,
+    message: [c_char; 256],
+};
+
+/// Safe wrapper using out parameters
+fn safe_operation(input: c_int) -> Result<c_int, ErrorInfo> {
+    let mut result: c_int = 0;
+    let mut error = ErrorInfo {
+        code: 0,
+        message: [0; 256],
+    };
+
+    let status = unsafe {
+        out_param_style.operation_with_error(input, &mut result, &mut error)
+    };
+
+    if status != 0 {
+        Err(error)
+    } else {
+        Ok(result)
+    }
+}
+
+// ============================================================
+// ERROR PROTOCOL 4: GLOBAL ERROR STATE
+// ============================================================
+
+// ------------------------------------------------------------
+// Global Last Error (GetLastError style)
+// ------------------------------------------------------------
+
+@cfg(target_os = "windows")
+ffi windows {
+    @extern("stdcall")
+    fn GetLastError() -> c_uint;
+
+    @extern("stdcall")
+    fn SetLastError(dwErrCode: c_uint);
+
+    @extern("stdcall")
+    fn FormatMessageA(
+        dwFlags: c_uint,
+        lpSource: *const c_void,
+        dwMessageId: c_uint,
+        dwLanguageId: c_uint,
+        lpBuffer: *mut c_char,
+        nSize: c_uint,
+        Arguments: *mut c_void
+    ) -> c_uint;
+}
+
+@cfg(target_os = "windows")
+fn get_last_error() -> c_uint {
+    unsafe { windows.GetLastError() }
+}
+
+@cfg(target_os = "windows")
+fn get_error_message(code: c_uint) -> Text {
+    let mut buffer: [c_char; 256] = [0; 256];
+    const FORMAT_MESSAGE_FROM_SYSTEM: c_uint = 0x1000;
+
+    let len = unsafe {
+        windows.FormatMessageA(
+            FORMAT_MESSAGE_FROM_SYSTEM,
+            std.ptr.null(),
+            code,
+            0,
+            buffer.as_mut_ptr(),
+            buffer.len() as c_uint,
+            std.ptr.null as *mut c_void
+        )
+    };
+
+    if len > 0 {
+        unsafe { Text.from("error") }
+    } else {
+        Text.from("Unknown error")
+    }
+}
+
+// ============================================================
+// ERROR PROTOCOL 5: ERROR OBJECT
+// ============================================================
+
+// ------------------------------------------------------------
+// Error Object Pattern (GLib style)
+// ------------------------------------------------------------
+
+/// Opaque error type
+@opaque
+type GError is ();
+
+ffi glib_style {
+    /// Function that may set error
+    @extern("C")
+    fn operation(input: c_int, error: *mut *mut GError) -> c_int;
+
+    /// Free error
+    @extern("C")
+    fn g_error_free(error: *mut GError);
+
+    /// Get error message
+    @extern("C")
+    fn g_error_get_message(error: *const GError) -> *const c_char;
+
+    /// Get error code
+    @extern("C")
+    fn g_error_get_code(error: *const GError) -> c_int;
+}
+
+/// Safe wrapper for GError-style API
+fn glib_operation(input: c_int) -> Result<c_int, GLibError> {
+    let mut error: *mut GError = 0 as *mut GError;
+
+    let result = unsafe {
+        glib_style.operation(input, &mut error)
+    };
+
+    if !error.is_null() {
+        let err = unsafe {
+            let message = Text.from("error");
+            let code = glib_style.g_error_get_code(error);
+            glib_style.g_error_free(error);
+            GLibError { code, message }
+        };
+        Err(err)
+    } else {
+        Ok(result)
+    }
+}
+
+type GLibError is {
+    code: c_int,
+    message: Text,
+};
+
+// ============================================================
+// ERROR PROTOCOL 6: EXCEPTION (C++)
+// ============================================================
+
+// ------------------------------------------------------------
+// C++ Exception Handling at FFI Boundary
+// ------------------------------------------------------------
+
+/// C++ function that may throw
+ffi cpp_throws {
+    /// Catches C++ exceptions and converts to error code
+    @extern("C")
+    fn try_cpp_operation(
+        input: c_int,
+        result: *mut c_int,
+        exception_type: *mut c_int,
+        exception_message: *mut c_char,
+        message_len: size_t
+    ) -> c_int;  // 0 = success, non-zero = exception caught;
+}
+
+type CppException is {
+    exception_type: c_int,
+    message: Text,
+};
+
+fn call_cpp_safely(input: c_int) -> Result<c_int, CppException> {
+    let mut result: c_int = 0;
+    let mut exc_type: c_int = 0;
+    let mut message: [c_char; 256] = [0; 256];
+
+    let status = unsafe {
+        cpp_throws.try_cpp_operation(
+            input,
+            &mut result,
+            &mut exc_type,
+            message.as_mut_ptr(),
+            message.len()
+        )
+    };
+
+    if status != 0 {
+        Err(CppException {
+            exception_type: exc_type,
+            message: Text.from("exception"),
+        })
+    } else {
+        Ok(result)
+    }
+}
+
+// ============================================================
+// UNIFIED ERROR TYPE
+// ============================================================
+
+/// Unified error type for FFI operations
+type FfiError is
+    | Posix(IoError)
+    | Alloc(AllocError)
+    | Windows(c_uint)
+    | Cpp(CppException)
+    | Custom { code: c_int, message: Text };
+
+implement FfiError {
+    fn code(&self) -> c_int {
+        self.match {
+            Posix(e) => e.to_errno(),
+            Alloc(_) => ENOMEM,
+            Windows(code) => code as c_int,
+            Cpp(e) => e.exception_type,
+            Custom { code, .. } => code,
+        }
+    }
+
+    fn message(&self) -> Text {
+        self.match {
+            Posix(e) => e.match {
+                PermissionDenied => "Permission denied",
+                NotFound => "Not found",
+                Interrupted => "Interrupted",
+                WouldBlock => "Would block",
+                InvalidArgument => "Invalid argument",
+                OutOfMemory => "Out of memory",
+                Unknown(c) => f"Unknown error: {c}",
+            },
+            Alloc(e) => e.match {
+                OutOfMemory => "Out of memory",
+                InvalidSize => "Invalid size",
+            },
+            Windows(code) => f"Windows error: {code}",
+            Cpp(e) => e.message.clone(),
+            Custom { message, .. } => message.clone(),
+        }
+    }
+}
+
+// ============================================================
+// ERROR PROPAGATION HELPERS
+// ============================================================
+
+/// Check and propagate POSIX error
+meta check_posix(e: expr) {
+    e => {
+        let result = e;
+        if result < 0 {
+            return Err(FfiError.Posix(IoError.from_errno(get_errno())));
+        }
+        result
+    }
+}
+
+/// Check and propagate null pointer
+meta check_null(e: expr) {
+    e => {
+        let ptr = e;
+        if ptr.is_null() {
+            return Err(FfiError.Alloc(OutOfMemory));
+        }
+        ptr
+    }
+}
+
+// ============================================================
+// EXPORTING VERUM ERRORS TO C
+// ============================================================
+
+/// Convert Verum Result to C-style return
+fn result_to_c<T: Default>(result: Result<T, FfiError>) -> (T, c_int) {
+    result.match {
+        Ok(value) => (value, 0),
+        Err(e) => (T.default(), e.code()),
+    }
+}
+
+/// Export function with C error convention
+@extern("C")
+fn verum_export(input: c_int, output: *mut c_int) -> c_int {
+    let result = internal_operation(input);
+
+    result.match {
+        Ok(value) => {
+            if !output.is_null() {
+                unsafe { *output = value; }
+            }
+            0
+        }
+        Err(e) => {
+            set_errno(e.code());
+            -1
+        }
+    }
+}
+
+fn internal_operation(input: c_int) -> Result<c_int, FfiError> {
+    if input < 0 {
+        Err(FfiError.Custom {
+            code: EINVAL,
+            message: "Input must be non-negative".to_text(),
+        })
+    } else {
+        Ok(input * 2)
+    }
+}
+
+fn main() {
+    // Test POSIX error
+    let io_err = IoError.from_errno(ENOENT);
+    assert(io_err.to_errno() == ENOENT);
+
+    // Test unified error
+    let ffi_err = FfiError.Posix(NotFound);
+    assert(ffi_err.code() == ENOENT);
+}

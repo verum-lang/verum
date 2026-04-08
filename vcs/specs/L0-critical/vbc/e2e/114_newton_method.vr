@@ -1,0 +1,184 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, newton, numeric
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Newton's method for square roots and cube roots using Float
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+// Newton's method for sqrt: x_{n+1} = (x_n + S/x_n) / 2
+fn sqrt_newton(s: Float) -> Float {
+    let mut guess = s / 2.0;
+    if guess < 1.0 { guess = 1.0; }
+    let tol = 0.000001;
+    let mut i = 0;
+    while i < 100 {
+        let next = (guess + s / guess) / 2.0;
+        let diff = abs_f(next - guess);
+        if diff < tol {
+            i = 100;  // break
+        } else {
+            guess = next;
+        }
+        i = i + 1;
+    }
+    guess
+}
+
+// Newton's method for cube root: x_{n+1} = (2*x_n + S/(x_n^2)) / 3
+fn cbrt_newton(s: Float) -> Float {
+    let mut guess = s / 3.0;
+    if abs_f(guess) < 1.0 { guess = 1.0; }
+    let tol = 0.000001;
+    let mut i = 0;
+    while i < 100 {
+        let g2 = guess * guess;
+        let next = (2.0 * guess + s / g2) / 3.0;
+        let diff = abs_f(next - guess);
+        if diff < tol {
+            i = 100;  // break
+        } else {
+            guess = next;
+        }
+        i = i + 1;
+    }
+    guess
+}
+
+// Check if two floats are within tolerance
+fn approx_eq(a: Float, b: Float, tol: Float) -> Int {
+    if abs_f(a - b) < tol { 1 } else { 0 }
+}
+
+// ============================================================================
+// Test 1: Square root of perfect squares
+// ============================================================================
+
+@test
+fn test_sqrt_perfect_squares() {
+    let s4 = sqrt_newton(4.0);
+    assert_eq(approx_eq(s4, 2.0, 0.0001), 1);
+
+    let s9 = sqrt_newton(9.0);
+    assert_eq(approx_eq(s9, 3.0, 0.0001), 1);
+
+    let s16 = sqrt_newton(16.0);
+    assert_eq(approx_eq(s16, 4.0, 0.0001), 1);
+
+    let s100 = sqrt_newton(100.0);
+    assert_eq(approx_eq(s100, 10.0, 0.0001), 1);
+
+    print("  test_sqrt_perfect_squares: ok");
+}
+
+// ============================================================================
+// Test 2: Square root of non-perfect (sqrt(2) ~ 1.41421356)
+// ============================================================================
+
+@test
+fn test_sqrt_irrational() {
+    let s2 = sqrt_newton(2.0);
+    // sqrt(2) ~ 1.41421356
+    assert_eq(approx_eq(s2, 1.41421356, 0.0001), 1);
+
+    // Verify: s2 * s2 ~ 2.0
+    let sq = s2 * s2;
+    assert_eq(approx_eq(sq, 2.0, 0.001), 1);
+
+    let s3 = sqrt_newton(3.0);
+    // sqrt(3) ~ 1.7320508
+    assert_eq(approx_eq(s3, 1.7320508, 0.0001), 1);
+
+    print("  test_sqrt_irrational: ok");
+}
+
+// ============================================================================
+// Test 3: Cube root
+// ============================================================================
+
+@test
+fn test_cube_root() {
+    let c27 = cbrt_newton(27.0);
+    assert_eq(approx_eq(c27, 3.0, 0.001), 1);
+
+    let c8 = cbrt_newton(8.0);
+    assert_eq(approx_eq(c8, 2.0, 0.001), 1);
+
+    let c64 = cbrt_newton(64.0);
+    assert_eq(approx_eq(c64, 4.0, 0.001), 1);
+
+    // Verify: c27^3 ~ 27.0
+    let cubed = c27 * c27 * c27;
+    assert_eq(approx_eq(cubed, 27.0, 0.01), 1);
+
+    print("  test_cube_root: ok");
+}
+
+// ============================================================================
+// Test 4: Convergence — successive approximations get closer
+// ============================================================================
+
+@test
+fn test_convergence() {
+    // Manual steps of Newton for sqrt(2), starting from 1.0
+    let s = 2.0;
+    let x0 = 1.0;
+    let x1 = (x0 + s / x0) / 2.0;  // 1.5
+    let x2 = (x1 + s / x1) / 2.0;  // 1.4166...
+    let x3 = (x2 + s / x2) / 2.0;  // 1.41421568...
+
+    let target = 1.41421356;
+
+    // Each step should be closer to target
+    let d0 = abs_f(x0 - target);
+    let d1 = abs_f(x1 - target);
+    let d2 = abs_f(x2 - target);
+    let d3 = abs_f(x3 - target);
+
+    // d0 > d1 > d2 > d3 (monotonic convergence)
+    assert_eq(if d0 > d1 { 1 } else { 0 }, 1);
+    assert_eq(if d1 > d2 { 1 } else { 0 }, 1);
+    assert_eq(if d2 > d3 { 1 } else { 0 }, 1);
+
+    // x3 should be very close
+    assert_eq(approx_eq(x3, target, 0.0001), 1);
+
+    print("  test_convergence: ok");
+}
+
+// ============================================================================
+// Test 5: Large values
+// ============================================================================
+
+@test
+fn test_sqrt_large() {
+    let s10000 = sqrt_newton(10000.0);
+    assert_eq(approx_eq(s10000, 100.0, 0.001), 1);
+
+    let s1000000 = sqrt_newton(1000000.0);
+    assert_eq(approx_eq(s1000000, 1000.0, 0.01), 1);
+
+    print("  test_sqrt_large: ok");
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_sqrt_perfect_squares();
+    test_sqrt_irrational();
+    test_cube_root();
+    test_convergence();
+    test_sqrt_large();
+    print("[OK] 114_newton_method");
+    0
+}

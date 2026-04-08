@@ -1,0 +1,151 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, contexts, provide, using, pipeline
+// @timeout: 5000
+// @expect: pass
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies context-based dependency injection through the full pipeline
+
+// =============================================================================
+// Context type definitions
+// =============================================================================
+
+type AppConfig is { max_retries: Int, timeout: Int, debug: Bool };
+type Counter is { count: Int };
+
+// =============================================================================
+// Basic provide/using
+// =============================================================================
+
+fn get_timeout() -> Int using [AppConfig] {
+    AppConfig.timeout
+}
+
+fn get_max_retries() -> Int using [AppConfig] {
+    AppConfig.max_retries
+}
+
+fn is_debug() -> Bool using [AppConfig] {
+    AppConfig.debug
+}
+
+@test
+fn test_basic_provide() {
+    provide AppConfig = AppConfig { max_retries: 3, timeout: 5000, debug: true } in {
+        assert_eq(get_timeout(), 5000);
+        assert_eq(get_max_retries(), 3);
+        assert(is_debug());
+    }
+}
+
+@test
+fn test_different_config() {
+    provide AppConfig = AppConfig { max_retries: 1, timeout: 100, debug: false } in {
+        assert_eq(get_timeout(), 100);
+        assert_eq(get_max_retries(), 1);
+        assert(!is_debug());
+    }
+}
+
+// =============================================================================
+// Multiple contexts
+// =============================================================================
+
+fn get_count() -> Int using [Counter] {
+    Counter.count
+}
+
+fn config_and_count() -> Int using [AppConfig, Counter] {
+    get_timeout() + get_count()
+}
+
+@test
+fn test_multiple_contexts() {
+    provide AppConfig = AppConfig { max_retries: 2, timeout: 1000, debug: false } in {
+        provide Counter = Counter { count: 42 } in {
+            assert_eq(config_and_count(), 1042);
+        }
+    }
+}
+
+@test
+fn test_independent_contexts() {
+    provide AppConfig = AppConfig { max_retries: 5, timeout: 2000, debug: true } in {
+        assert_eq(get_timeout(), 2000);
+
+        provide Counter = Counter { count: 10 } in {
+            assert_eq(get_count(), 10);
+            assert_eq(get_timeout(), 2000);
+        }
+    }
+}
+
+// =============================================================================
+// Context shadowing
+// =============================================================================
+
+@test
+fn test_context_shadowing() {
+    provide AppConfig = AppConfig { max_retries: 1, timeout: 100, debug: false } in {
+        assert_eq(get_timeout(), 100);
+
+        provide AppConfig = AppConfig { max_retries: 5, timeout: 9999, debug: true } in {
+            assert_eq(get_timeout(), 9999);
+            assert(is_debug());
+        }
+
+        // Outer context restored
+        assert_eq(get_timeout(), 100);
+        assert(!is_debug());
+    }
+}
+
+@test
+fn test_nested_shadowing_restores() {
+    provide Counter = Counter { count: 1 } in {
+        assert_eq(get_count(), 1);
+
+        provide Counter = Counter { count: 2 } in {
+            assert_eq(get_count(), 2);
+
+            provide Counter = Counter { count: 3 } in {
+                assert_eq(get_count(), 3);
+            }
+
+            assert_eq(get_count(), 2);
+        }
+
+        assert_eq(get_count(), 1);
+    }
+}
+
+// =============================================================================
+// Context in functions with logic
+// =============================================================================
+
+fn retry_allowed() -> Bool using [AppConfig] {
+    AppConfig.max_retries > 0
+}
+
+fn effective_timeout() -> Int using [AppConfig] {
+    if AppConfig.debug {
+        AppConfig.timeout * 10
+    } else {
+        AppConfig.timeout
+    }
+}
+
+@test
+fn test_context_in_logic() {
+    provide AppConfig = AppConfig { max_retries: 0, timeout: 500, debug: false } in {
+        assert(!retry_allowed());
+        assert_eq(effective_timeout(), 500);
+    }
+
+    provide AppConfig = AppConfig { max_retries: 3, timeout: 500, debug: true } in {
+        assert(retry_allowed());
+        assert_eq(effective_timeout(), 5000);
+    }
+}

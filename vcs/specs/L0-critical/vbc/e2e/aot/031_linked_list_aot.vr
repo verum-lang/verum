@@ -1,0 +1,134 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, data-structures, linked-list, variants, recursion
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT linked list using variants and records (cons-list)
+
+// Cons-list: either Nil or a Cons cell with value and tail
+type IntList is Nil | Cons { val: Int, tail: IntList };
+
+fn list_len(lst: IntList) -> Int {
+    match lst {
+        Nil => 0,
+        Cons { val: _, tail } => 1 + list_len(tail),
+    }
+}
+
+fn list_sum(lst: IntList) -> Int {
+    match lst {
+        Nil => 0,
+        Cons { val: v, tail } => v + list_sum(tail),
+    }
+}
+
+fn list_head(lst: IntList, default: Int) -> Int {
+    match lst {
+        Nil => default,
+        Cons { val: v, tail: _ } => v,
+    }
+}
+
+fn list_contains(lst: IntList, target: Int) -> Bool {
+    match lst {
+        Nil => false,
+        Cons { val: v, tail } => {
+            if v == target { true }
+            else { list_contains(tail, target) }
+        },
+    }
+}
+
+fn list_prepend(lst: IntList, v: Int) -> IntList {
+    Cons { val: v, tail: lst }
+}
+
+// Build a list [1, 2, 3, ..., n] (head is n, tail towards 1)
+fn build_list(n: Int) -> IntList {
+    let mut result = Nil;
+    let mut i = 1;
+    while i <= n {
+        result = list_prepend(result, i);
+        i = i + 1;
+    }
+    result
+}
+
+// Reverse a list
+fn list_reverse(lst: IntList) -> IntList {
+    let mut acc = Nil;
+    let mut curr = lst;
+    let mut done = false;
+    while !done {
+        match curr {
+            Nil => { done = true; },
+            Cons { val: v, tail } => {
+                acc = Cons { val: v, tail: acc };
+                curr = tail;
+            },
+        }
+    }
+    acc
+}
+
+// Map function: multiply each element by a factor
+fn list_map_mul(lst: IntList, factor: Int) -> IntList {
+    match lst {
+        Nil => Nil,
+        Cons { val: v, tail } => {
+            Cons { val: v * factor, tail: list_map_mul(tail, factor) }
+        },
+    }
+}
+
+fn main() -> Int {
+    // Empty list
+    let empty = Nil;
+    assert_eq(list_len(empty), 0);
+    assert_eq(list_sum(empty), 0);
+    assert_eq(list_head(empty, -1), -1);
+    assert(!list_contains(empty, 5));
+
+    // Single element
+    let one = Cons { val: 42, tail: Nil };
+    assert_eq(list_len(one), 1);
+    assert_eq(list_sum(one), 42);
+    assert_eq(list_head(one, 0), 42);
+    assert(list_contains(one, 42));
+    assert(!list_contains(one, 43));
+
+    // Build a list [5, 4, 3, 2, 1]
+    let lst5 = build_list(5);
+    assert_eq(list_len(lst5), 5);
+    assert_eq(list_sum(lst5), 15);
+    assert_eq(list_head(lst5, 0), 5);
+    assert(list_contains(lst5, 1));
+    assert(list_contains(lst5, 3));
+    assert(list_contains(lst5, 5));
+    assert(!list_contains(lst5, 6));
+
+    // Reverse
+    let rev = list_reverse(lst5);
+    assert_eq(list_len(rev), 5);
+    assert_eq(list_sum(rev), 15);
+    assert_eq(list_head(rev, 0), 1);
+
+    // Map: multiply by 10
+    let scaled = list_map_mul(lst5, 10);
+    assert_eq(list_sum(scaled), 150);
+    assert_eq(list_head(scaled, 0), 50);
+
+    // Build larger list
+    let lst10 = build_list(10);
+    assert_eq(list_len(lst10), 10);
+    assert_eq(list_sum(lst10), 55);  // 1+2+...+10
+
+    // Prepend
+    let lst11 = list_prepend(lst10, 100);
+    assert_eq(list_len(lst11), 11);
+    assert_eq(list_sum(lst11), 155);
+    assert_eq(list_head(lst11, 0), 100);
+
+    0
+}

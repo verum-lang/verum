@@ -1,0 +1,220 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, attributes, registry, validation, errors
+// @expect: pass
+// @description: Attribute registry validation tests
+// @spec: docs/detailed/31-attribute-registry.md
+
+// Helper types
+type Maybe<T> is None | Some(T);
+
+// =============================================================================
+// Test 1: Valid attribute targets
+// Registry validates attributes are used on correct targets
+// =============================================================================
+
+// @inline is valid on Function
+@inline
+fn valid_inline_on_function() -> Int { 42 }
+
+// @cold is valid on Function and MatchArm
+@cold
+fn valid_cold_on_function() {}
+
+// @derive is valid on Type
+@derive(Clone, Debug)
+type ValidDeriveOnType is { value: Int };
+
+// @serialize is valid on Type, Field, and Variant
+@serialize
+type ValidSerializeOnType is {
+    @serialize(rename = "user_id")
+    id: Int,
+};
+
+// @default is valid on Variant
+type ValidDefaultOnVariant is
+    @default
+    None
+    | Some(Int);
+
+// @unused is valid on Param
+fn valid_unused_on_param(@unused _x: Int) {}
+
+// @hot is valid on MatchArm
+fn valid_hot_on_match_arm(x: Int) -> Int {
+    match x {
+        @hot
+        n if n > 0 => n * 2,
+        _ => 0,
+    }
+}
+
+// =============================================================================
+// Test 2: Attribute argument validation
+// Registry validates argument types and counts
+// =============================================================================
+
+// @inline with valid modes
+@inline(always)
+fn inline_always() {}
+
+@inline(never)
+fn inline_never() {}
+
+@inline(release)
+fn inline_release() {}
+
+// @align with valid integer argument
+@align(16)
+type Aligned16 is { data: Int };
+
+@align(4096)
+type PageAligned is { data: Int };
+
+// @unroll with valid count
+fn with_unroll() {
+    @unroll(4)
+    for i in 0..100 {
+        // loop body
+    }
+}
+
+// @deprecated with named arguments
+@deprecated(since = "2.0", reason = "Use new_function")
+fn deprecated_with_args() {}
+
+// @validate with named arguments
+type UserInput is {
+    @validate(min_length = 1, max_length = 100)
+    username: Text,
+
+    @range(min = 0, max = 150)
+    age: Int,
+
+    @pattern("^[\\w.-]+@[\\w.-]+\\.\\w+$")
+    email: Text,
+};
+
+// =============================================================================
+// Test 3: Multiple valid attributes on same item
+// =============================================================================
+
+@derive(Clone, Debug, PartialEq)
+@serialize
+type MultiAttrType is {
+    @serialize(rename = "user_id")
+    @validate(min = 1)
+    id: Int,
+
+    @deprecated(since = "2.0")
+    @skip_serialize
+    legacy_field: Maybe<Text>,
+};
+
+@inline(always)
+@hot
+@must_use
+fn multi_attr_function() -> Int { 42 }
+
+// =============================================================================
+// Test 4: Repeatable attributes
+// Some attributes like @doc can appear multiple times
+// =============================================================================
+
+@doc("First line of documentation")
+@doc("Second line of documentation")
+@doc("Third line of documentation")
+fn documented_function() {}
+
+// =============================================================================
+// Test 5: Valid target combinations
+// Testing all extended attribute positions from Grammar v2.7
+// =============================================================================
+
+// All positions in one type
+@derive(Clone)
+type CompleteExample is {
+    // Field attributes
+    @serialize(rename = "id")
+    @validate(min = 1)
+    identifier: Int,
+};
+
+// Sum type with variant attributes
+type StatusCode is
+    @serialize(value = 200)
+    @doc("Success")
+    Ok
+    | @serialize(value = 404)
+      NotFound
+    | @serialize(value = 500)
+      @deprecated(since = "3.0")
+      ServerError;
+
+// Function with parameter and match arm attributes
+fn complex_handler(
+    @unused _context: Int,
+    @must_use result: Int,
+) -> Int {
+    match result {
+        @hot
+        @likely
+        n if n > 100 => n * 2,
+
+        @cold
+        @unlikely
+        n if n < 0 => 0,
+
+        @default
+        n => n,
+    }
+}
+
+// =============================================================================
+// Test 6: Category-specific attribute tests
+// =============================================================================
+
+// Optimization attributes
+@inline(always)
+@vectorize
+fn optimized() {}
+
+// Layout attributes
+@repr(C)
+@packed
+type CLayout is { a: u8, b: u32 };
+
+@repr(C)
+@align(16)
+type AlignedLayout is { data: [u8; 64] };
+
+// Safety attributes
+@verify(static)
+fn verified_static() {}
+
+@must_use("Result must be handled")
+fn returns_important() -> Int { 42 }
+
+// Module control attributes
+@profile(application)
+module app_module {}
+
+// =============================================================================
+// Main function to run tests
+// =============================================================================
+
+fn main() {
+    // Validate that compilation succeeds with all valid attributes
+    let t = ValidDeriveOnType { value: 42 };
+    assert(t.value == 42);
+
+    let m = MultiAttrType { id: 1, legacy_field: Maybe.None };
+    assert(m.id == 1);
+
+    let result = multi_attr_function();
+    assert(result == 42);
+
+    print("All attribute registry validation tests passed!");
+}

@@ -1,0 +1,85 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, data-movement, mov, register
+// @timeout: 5000
+// @expect: pass
+//
+// Test: MOV opcode - register-to-register moves
+// Verifies value copying preserves NaN-boxing encoding
+
+fn test_mov_integer() {
+    let a: Int = 42;
+    let b: Int = a;
+    let c: Int = b;
+
+    assert_eq(a, 42);
+    assert_eq(b, 42);
+    assert_eq(c, 42);
+
+    // Modify original, copy should be independent
+    let a2: Int = 100;
+    assert_eq(b, 42);  // b retains original value
+}
+
+fn test_mov_float() {
+    let x: Float = 3.14159;
+    let y: Float = x;
+    let z: Float = y;
+
+    assert_eq(x, y);
+    assert_eq(y, z);
+}
+
+fn test_mov_boolean() {
+    let t: Bool = true;
+    let t_copy: Bool = t;
+    let f: Bool = false;
+    let f_copy: Bool = f;
+
+    assert(t_copy);
+    assert(!f_copy);
+}
+
+fn test_mov_chain() {
+    // Long chain of moves
+    let v0: Int = 12345;
+    let v1: Int = v0;
+    let v2: Int = v1;
+    let v3: Int = v2;
+    let v4: Int = v3;
+    let v5: Int = v4;
+    let v6: Int = v5;
+    let v7: Int = v6;
+    let v8: Int = v7;
+    let v9: Int = v8;
+
+    assert_eq(v9, 12345);
+}
+
+fn test_mov_preserves_nan_tag() {
+    // Each type should preserve its NaN-box tag through moves
+    let i: Int = -999;
+    let f: Float = -999.999;
+    let b: Bool = true;
+    let u: () = ();
+
+    let i2: Int = i;
+    let f2: Float = f;
+    let b2: Bool = b;
+    let u2: () = u;
+
+    assert_eq(i2, -999);
+    assert_eq(f2, -999.999);
+    assert(b2);
+    assert_eq(u2, ());
+}
+
+fn main() {
+    test_mov_integer();
+    test_mov_float();
+    test_mov_boolean();
+    test_mov_chain();
+    test_mov_preserves_nan_tag();
+    print("002_mov_register: PASSED");
+}

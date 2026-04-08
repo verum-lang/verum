@@ -1,0 +1,382 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, trie, prefix-tree, autocomplete, common-prefix
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for prefix tree (trie) operations:
+// 1. Insert words (encoded as int arrays with letter indices a=0..z=25)
+// 2. Search for exact word
+// 3. Check if any word starts with prefix
+// 4. Count words with given prefix (autocomplete)
+// Trie stored as flat array: each node has 4 children slots (a,b,c,d only)
+// plus a "word_end" flag. Node 0 is root.
+
+// Each trie node: children indices (0 = null/empty), is_end flag
+// We support up to 32 nodes with 4 possible children per node (a=0, b=1, c=2, d=3)
+// Flat layout: node i at positions i*5: [child_a, child_b, child_c, child_d, is_end]
+
+// Using a 160-element flat array for 32 nodes * 5 fields
+// But that's too large for a record. Instead, use smaller alphabet and fewer nodes.
+
+// Simplified: 16 nodes max, 4 children each, flat array of 80 ints
+// We'll use parallel arrays for each field instead.
+
+type Arr16 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+                a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int };
+
+fn ar_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn ar_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn ar_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+// Trie with 16 nodes max, 4-letter alphabet (a=0,b=1,c=2,d=3)
+// For each node: 4 child pointers (0=none) and 1 end marker
+// child_a[i], child_b[i], child_c[i], child_d[i], is_end[i]
+type Trie is { ca: Arr16, cb: Arr16, cc: Arr16, cd: Arr16, ends: Arr16, next_id: Int };
+
+fn trie_new() -> Trie {
+    // Node 0 is root, next available is 1
+    Trie { ca: ar_zero(), cb: ar_zero(), cc: ar_zero(), cd: ar_zero(), ends: ar_zero(), next_id: 1 }
+}
+
+fn get_child(t: Trie, node: Int, ch: Int) -> Int {
+    if ch == 0 { ar_get(t.ca, node) }
+    else if ch == 1 { ar_get(t.cb, node) }
+    else if ch == 2 { ar_get(t.cc, node) }
+    else { ar_get(t.cd, node) }
+}
+
+fn set_child(t: Trie, node: Int, ch: Int, val: Int) -> Trie {
+    if ch == 0 { Trie { ca: ar_set(t.ca, node, val), cb: t.cb, cc: t.cc, cd: t.cd, ends: t.ends, next_id: t.next_id } }
+    else if ch == 1 { Trie { ca: t.ca, cb: ar_set(t.cb, node, val), cc: t.cc, cd: t.cd, ends: t.ends, next_id: t.next_id } }
+    else if ch == 2 { Trie { ca: t.ca, cb: t.cb, cc: ar_set(t.cc, node, val), cd: t.cd, ends: t.ends, next_id: t.next_id } }
+    else { Trie { ca: t.ca, cb: t.cb, cc: t.cc, cd: ar_set(t.cd, node, val), ends: t.ends, next_id: t.next_id } }
+}
+
+// Word representation: up to 6 chars stored in Arr16 (using first 6 slots), length in slot 6
+type Word is { chars: Arr16 };
+
+fn word_len(w: Word) -> Int { ar_get(w.chars, 6) }
+fn word_char(w: Word, i: Int) -> Int { ar_get(w.chars, i) }
+
+fn make_word1(c0: Int) -> Word {
+    let mut cs = ar_zero();
+    cs = ar_set(cs, 0, c0);
+    cs = ar_set(cs, 6, 1);
+    Word { chars: cs }
+}
+
+fn make_word2(c0: Int, c1: Int) -> Word {
+    let mut cs = ar_zero();
+    cs = ar_set(cs, 0, c0);
+    cs = ar_set(cs, 1, c1);
+    cs = ar_set(cs, 6, 2);
+    Word { chars: cs }
+}
+
+fn make_word3(c0: Int, c1: Int, c2: Int) -> Word {
+    let mut cs = ar_zero();
+    cs = ar_set(cs, 0, c0);
+    cs = ar_set(cs, 1, c1);
+    cs = ar_set(cs, 2, c2);
+    cs = ar_set(cs, 6, 3);
+    Word { chars: cs }
+}
+
+fn make_word4(c0: Int, c1: Int, c2: Int, c3: Int) -> Word {
+    let mut cs = ar_zero();
+    cs = ar_set(cs, 0, c0);
+    cs = ar_set(cs, 1, c1);
+    cs = ar_set(cs, 2, c2);
+    cs = ar_set(cs, 3, c3);
+    cs = ar_set(cs, 6, 4);
+    Word { chars: cs }
+}
+
+// Insert word into trie
+fn trie_insert(t: Trie, w: Word) -> Trie {
+    let mut trie = t;
+    let mut node = 0;
+    let mut i = 0;
+    while i < word_len(w) {
+        let ch = word_char(w, i);
+        let child = get_child(trie, node, ch);
+        if child == 0 {
+            // Allocate new node
+            let nid = trie.next_id;
+            trie = set_child(trie, node, ch, nid);
+            trie = Trie { ca: trie.ca, cb: trie.cb, cc: trie.cc, cd: trie.cd,
+                          ends: trie.ends, next_id: nid + 1 };
+            node = nid;
+        } else {
+            node = child;
+        }
+        i = i + 1;
+    }
+    // Mark end of word
+    Trie { ca: trie.ca, cb: trie.cb, cc: trie.cc, cd: trie.cd,
+           ends: ar_set(trie.ends, node, 1), next_id: trie.next_id }
+}
+
+// Search for exact word: returns 1 if found, 0 otherwise
+fn trie_search(t: Trie, w: Word) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    let mut found = 1;
+    while i < word_len(w) {
+        let ch = word_char(w, i);
+        let child = get_child(t, node, ch);
+        if child == 0 {
+            found = 0;
+            i = word_len(w); // break
+        } else {
+            node = child;
+        }
+        i = i + 1;
+    }
+    if found == 1 { ar_get(t.ends, node) } else { 0 }
+}
+
+// Check if any word starts with prefix: returns 1 if exists
+fn trie_has_prefix(t: Trie, w: Word) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    let mut ok = 1;
+    while i < word_len(w) {
+        let ch = word_char(w, i);
+        let child = get_child(t, node, ch);
+        if child == 0 {
+            ok = 0;
+            i = word_len(w); // break
+        } else {
+            node = child;
+        }
+        i = i + 1;
+    }
+    ok
+}
+
+// Count words under a given node (DFS count of end markers)
+// Since we can't recurse easily, use iterative approach with a small stack
+fn count_words_under(t: Trie, start_node: Int) -> Int {
+    if start_node == 0 { return 0; }
+    // Use Arr16 as a node stack
+    let mut stk = ar_zero();
+    let mut sp = 0;
+    stk = ar_set(stk, 0, start_node);
+    sp = 1;
+    let mut total = 0;
+
+    while sp > 0 {
+        sp = sp - 1;
+        let nd = ar_get(stk, sp);
+        if ar_get(t.ends, nd) == 1 { total = total + 1; }
+        // Push children
+        let mut c = 0;
+        while c < 4 {
+            let child = get_child(t, nd, c);
+            if child != 0 {
+                stk = ar_set(stk, sp, child);
+                sp = sp + 1;
+            }
+            c = c + 1;
+        }
+    }
+    total
+}
+
+// Count words with prefix w (autocomplete count)
+fn trie_count_prefix(t: Trie, w: Word) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    let mut ok = 1;
+    while i < word_len(w) {
+        let ch = word_char(w, i);
+        let child = get_child(t, node, ch);
+        if child == 0 {
+            ok = 0;
+            i = word_len(w);
+        } else {
+            node = child;
+        }
+        i = i + 1;
+    }
+    if ok == 0 { 0 }
+    else { count_words_under(t, node) + ar_get(t.ends, node) }
+}
+
+// Wait - count_words_under already counts end at start_node, so we'd double count.
+// Fix: just use count_words_under which includes the start node.
+fn trie_count_prefix_v2(t: Trie, w: Word) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    let mut ok = 1;
+    while i < word_len(w) {
+        let ch = word_char(w, i);
+        let child = get_child(t, node, ch);
+        if child == 0 {
+            ok = 0;
+            i = word_len(w);
+        } else {
+            node = child;
+        }
+        i = i + 1;
+    }
+    if ok == 0 { 0 }
+    else { count_words_under_inclusive(t, node) }
+}
+
+fn count_words_under_inclusive(t: Trie, start_node: Int) -> Int {
+    let mut stk = ar_zero();
+    let mut sp = 0;
+    stk = ar_set(stk, 0, start_node);
+    sp = 1;
+    let mut total = 0;
+
+    while sp > 0 {
+        sp = sp - 1;
+        let nd = ar_get(stk, sp);
+        if ar_get(t.ends, nd) == 1 { total = total + 1; }
+        let mut c = 0;
+        while c < 4 {
+            let child = get_child(t, nd, c);
+            if child != 0 {
+                stk = ar_set(stk, sp, child);
+                sp = sp + 1;
+            }
+            c = c + 1;
+        }
+    }
+    total
+}
+
+fn test_basic_insert_search() {
+    let mut t = trie_new();
+    // Insert "ab" (0,1), "abc" (0,1,2), "b" (1)
+    t = trie_insert(t, make_word2(0, 1));
+    t = trie_insert(t, make_word3(0, 1, 2));
+    t = trie_insert(t, make_word1(1));
+
+    assert_eq(trie_search(t, make_word2(0, 1)), 1);
+    assert_eq(trie_search(t, make_word3(0, 1, 2)), 1);
+    assert_eq(trie_search(t, make_word1(1)), 1);
+    // "a" not inserted as complete word
+    assert_eq(trie_search(t, make_word1(0)), 0);
+    // "bc" not inserted
+    assert_eq(trie_search(t, make_word2(1, 2)), 0);
+}
+
+fn test_prefix_check() {
+    let mut t = trie_new();
+    t = trie_insert(t, make_word3(0, 1, 2));  // "abc"
+    t = trie_insert(t, make_word3(0, 1, 3));  // "abd"
+    t = trie_insert(t, make_word2(2, 3));      // "cd"
+
+    // Prefix "a" exists (abc, abd start with a)
+    assert_eq(trie_has_prefix(t, make_word1(0)), 1);
+    // Prefix "ab" exists
+    assert_eq(trie_has_prefix(t, make_word2(0, 1)), 1);
+    // Prefix "d" does not exist
+    assert_eq(trie_has_prefix(t, make_word1(3)), 0);
+    // Prefix "c" exists (cd)
+    assert_eq(trie_has_prefix(t, make_word1(2)), 1);
+}
+
+fn test_autocomplete_count() {
+    let mut t = trie_new();
+    // Insert: "ab", "abc", "abd", "abcd", "cd"
+    t = trie_insert(t, make_word2(0, 1));
+    t = trie_insert(t, make_word3(0, 1, 2));
+    t = trie_insert(t, make_word3(0, 1, 3));
+    t = trie_insert(t, make_word4(0, 1, 2, 3));
+    t = trie_insert(t, make_word2(2, 3));
+
+    // Words with prefix "ab": ab, abc, abd, abcd = 4
+    assert_eq(trie_count_prefix_v2(t, make_word2(0, 1)), 4);
+    // Words with prefix "abc": abc, abcd = 2
+    assert_eq(trie_count_prefix_v2(t, make_word3(0, 1, 2)), 2);
+    // Words with prefix "c": cd = 1
+    assert_eq(trie_count_prefix_v2(t, make_word1(2)), 1);
+    // Words with prefix "d": none = 0
+    assert_eq(trie_count_prefix_v2(t, make_word1(3)), 0);
+}
+
+fn test_duplicate_insert() {
+    let mut t = trie_new();
+    t = trie_insert(t, make_word2(0, 1));
+    t = trie_insert(t, make_word2(0, 1)); // duplicate
+    assert_eq(trie_search(t, make_word2(0, 1)), 1);
+    // Count should still be 1 (same end marker)
+    assert_eq(trie_count_prefix_v2(t, make_word1(0)), 1);
+}
+
+fn test_empty_trie() {
+    let t = trie_new();
+    assert_eq(trie_search(t, make_word1(0)), 0);
+    assert_eq(trie_has_prefix(t, make_word1(0)), 0);
+    assert_eq(trie_count_prefix_v2(t, make_word1(0)), 0);
+}
+
+fn test_single_char_words() {
+    let mut t = trie_new();
+    t = trie_insert(t, make_word1(0)); // "a"
+    t = trie_insert(t, make_word1(1)); // "b"
+    t = trie_insert(t, make_word1(2)); // "c"
+    t = trie_insert(t, make_word1(3)); // "d"
+
+    assert_eq(trie_search(t, make_word1(0)), 1);
+    assert_eq(trie_search(t, make_word1(1)), 1);
+    assert_eq(trie_search(t, make_word1(2)), 1);
+    assert_eq(trie_search(t, make_word1(3)), 1);
+    assert_eq(trie_search(t, make_word2(0, 1)), 0);
+}
+
+fn test_common_prefix_sharing() {
+    let mut t = trie_new();
+    // "abcd", "abce" share prefix "abc"
+    t = trie_insert(t, make_word4(0, 1, 2, 3));
+    t = trie_insert(t, make_word4(0, 1, 2, 0));
+    // Node count: root, a, ab, abc, abcd, abca = 6 nodes used
+    assert_eq(t.next_id, 6);
+    assert_eq(trie_search(t, make_word4(0, 1, 2, 3)), 1);
+    assert_eq(trie_search(t, make_word4(0, 1, 2, 0)), 1);
+    assert_eq(trie_search(t, make_word3(0, 1, 2)), 0); // "abc" not a complete word
+}
+
+fn main() -> Int {
+    test_basic_insert_search();
+    test_prefix_check();
+    test_autocomplete_count();
+    test_duplicate_insert();
+    test_empty_trie();
+    test_single_char_words();
+    test_common_prefix_sharing();
+    print("[OK] 342_prefix_tree_aot");
+    0
+}

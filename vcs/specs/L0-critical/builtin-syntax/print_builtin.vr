@@ -1,0 +1,28 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: builtin-syntax, print, io
+// @timeout: 5000
+//
+// Tests that print() is a built-in function called without ! suffix.
+// Spec: grammar/verum.ebnf Section 2.20.1 - builtin_io
+
+fn main() -> Int {
+    // Basic print (NOT println!)
+    print("Hello, World!");
+
+    // Print with format literal (NOT println!("{}", x))
+    let name: Text = "Verum";
+    print(f"Hello, {name}!");
+
+    // Print with expression
+    let x: Int = 42;
+    let y: Int = 58;
+    print(f"Sum: {x + y}");
+
+    // Error print (NOT eprintln!)
+    eprint("This is an error message");
+    eprint(f"Error value: {x}");
+
+    0
+}

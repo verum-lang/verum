@@ -1,0 +1,147 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, splice, quote, interpolation
+// @description: Test all splice forms in quote expressions
+
+// =============================================================================
+// IDENTIFIER SPLICE: $var
+// =============================================================================
+// Simple identifier substitution - the identifier is replaced with its value
+
+meta fn splice_identifier(value: Int) -> TokenStream {
+    let name = ident("x");
+    quote {
+        let $name = $value;
+    }
+}
+
+meta fn test_ident_splice() -> TokenStream {
+    let field_name = ident("my_field");
+    let field_value = 42;
+
+    quote {
+        fn get_value() -> Int {
+            $field_value
+        }
+    }
+}
+
+// =============================================================================
+// EXPRESSION SPLICE: ${expr}
+// =============================================================================
+// Evaluate expression and splice the result
+
+meta fn splice_expression(x: Int, y: Int) -> TokenStream {
+    quote {
+        let sum = ${x + y};
+        let product = ${x * y};
+        let computed = ${(x + y) * 2};
+    }
+}
+
+meta fn test_expr_splice() -> TokenStream {
+    let base = 10;
+
+    quote {
+        let a = ${base};           // Simple expression
+        let b = ${base + 5};       // Binary expression
+        let c = ${base * base};    // More complex expression
+    }
+}
+
+// =============================================================================
+// REPETITION: $[for pattern in expr { body }]
+// =============================================================================
+// Iterate over a list and generate repeated code
+
+meta fn gen_sequence(count: Int) -> TokenStream {
+    let indices = range(0, count);
+
+    quote {
+        fn process_all() {
+            $[for i in indices {
+                process_item(${i});
+            }]
+        }
+    }
+}
+
+meta fn gen_list_items(items: List<Int>) -> TokenStream {
+    quote {
+        fn sum_items() -> Int {
+            let mut total = 0;
+            $[for item in items {
+                total = total + ${item};
+            }]
+            total
+        }
+    }
+}
+
+// =============================================================================
+// NESTED SPLICES
+// =============================================================================
+
+meta fn nested_splice_example() -> TokenStream {
+    let outer = 10;
+    let items = [1, 2, 3];
+
+    quote {
+        let base = ${outer};
+        fn add_to_base() -> Int {
+            let mut sum = base;
+            $[for item in items {
+                sum = sum + ${item};
+            }]
+            sum
+        }
+    }
+}
+
+// =============================================================================
+// SPLICE IN DIFFERENT CONTEXTS
+// =============================================================================
+
+meta fn splice_in_type_position(type_name: Ident) -> TokenStream {
+    quote {
+        fn process(x: $type_name) -> $type_name {
+            x
+        }
+    }
+}
+
+meta fn splice_in_path(module_name: Ident, func_name: Ident) -> TokenStream {
+    quote {
+        fn call_it() {
+            $module_name.$func_name();
+        }
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_identifier_splice() {
+    @splice_identifier(100);
+    assert(x == 100);
+}
+
+fn test_expression_splice() {
+    @splice_expression(5, 3);
+    assert(sum == 8);
+    assert(product == 15);
+    assert(computed == 16);
+}
+
+fn test_gen_list() {
+    @gen_list_items([1, 2, 3, 4]);
+    assert(sum_items() == 10);
+}
+
+fn main() {
+    test_identifier_splice();
+    test_expression_splice();
+    test_gen_list();
+}

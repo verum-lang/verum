@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, loop, body, error
+// @description: Infinite loop missing body block
+// @expected-error: E018
+
+fn test() {
+    loop
+    let x = 1;
+}

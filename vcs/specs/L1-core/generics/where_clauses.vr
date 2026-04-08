@@ -1,0 +1,196 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, where-clauses, bounds, constraints
+//
+// Tests where clauses in generic declarations.
+// Where clauses provide a cleaner syntax for complex bounds.
+
+// =============================================================================
+// SECTION 0: Helper
+// =============================================================================
+
+/// Prepend an element to a list (helper to avoid spread-in-expression)
+fn cons<T>(head: T, tail: List<T>) -> List<T> {
+    let mut result: List<T> = [];
+    result.push(head);
+    let mut t = tail;
+    result.append(&mut t);
+    result
+}
+
+// =============================================================================
+// SECTION 1: Basic Where Clause Syntax
+// =============================================================================
+
+/// Return the larger of two comparable values
+fn compare_and_pick<T>(a: T, b: T) -> T
+where
+    T: Ord,
+{
+    if a >= b { a } else { b }
+}
+
+/// Check equality of two values
+fn equal<T>(a: T, b: T) -> Bool
+where
+    T: Eq,
+{
+    a == b
+}
+
+/// Process value requiring Clone
+fn clone_if_positive<T>(x: T) -> (T, T)
+where
+    T: Clone,
+{
+    (x.clone(), x)
+}
+
+// =============================================================================
+// SECTION 2: Multiple Bounds per Type Parameter
+// =============================================================================
+
+/// Sort and return in order with Clone
+fn sort_pair<T>(a: T, b: T) -> (T, T)
+where
+    T: Ord + Clone,
+{
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Check if list is sorted
+@allow(unbounded_recursion)
+fn is_sorted<T>(items: List<T>) -> Bool
+where
+    T: Ord,
+{
+    match items {
+        [] => true,
+        [_] => true,
+        [a, b, ..rest] => a <= b && is_sorted(cons(b, rest)),
+    }
+}
+
+// =============================================================================
+// SECTION 3: Where Clauses on Struct Definitions
+// =============================================================================
+
+/// Ordered pair - maintains that first <= second
+type OrderedPair<T: Ord> is {
+    smaller: T,
+    larger: T,
+};
+
+implement<T: Ord + Clone> OrderedPair<T> {
+    fn new(a: T, b: T) -> OrderedPair<T> {
+        if a <= b {
+            OrderedPair { smaller: a, larger: b }
+        } else {
+            OrderedPair { smaller: b, larger: a }
+        }
+    }
+
+    fn contains(&self, value: T) -> Bool {
+        value >= self.smaller && value <= self.larger
+    }
+
+    fn span(&self) -> Bool {
+        self.smaller != self.larger
+    }
+}
+
+// =============================================================================
+// SECTION 4: Higher-Order Function Type Constraints
+// =============================================================================
+
+/// Map with where clause on function type
+@allow(unbounded_recursion)
+fn map_with<T, U, F>(items: List<T>, f: F) -> List<U>
+where
+    F: fn(T) -> U,
+{
+    match items {
+        [] => [],
+        [head, ..tail] => cons(f(head), map_with(tail, f)),
+    }
+}
+
+/// Fold with constraints
+@allow(unbounded_recursion)
+fn fold_with<T, A, F>(items: List<T>, init: A, f: F) -> A
+where
+    F: fn(A, T) -> A,
+{
+    match items {
+        [] => init,
+        [head, ..tail] => fold_with(tail, f(init, head), f),
+    }
+}
+
+/// Filter with complex predicate
+@allow(unbounded_recursion)
+fn filter_by<T: Clone, P>(items: List<T>, predicate: P) -> List<T>
+where
+    P: fn(T) -> Bool,
+{
+    match items {
+        [] => [],
+        [head, ..tail] if predicate(head.clone()) => cons(head, filter_by(tail, predicate)),
+        [_, ..tail] => filter_by(tail, predicate),
+    }
+}
+
+// =============================================================================
+// SECTION 5: Main Test Cases
+// =============================================================================
+
+fn main() {
+    // Test basic where clauses
+    assert(compare_and_pick(10, 20) == 20);
+    assert(compare_and_pick("apple", "banana") == "banana");
+
+    assert(equal(42, 42));
+    assert(!equal(1, 2));
+
+    let (a, b) = clone_if_positive(42);
+    assert(a == 42 && b == 42);
+
+    // Test compound bounds
+    let (lo, hi) = sort_pair(20, 5);
+    assert(lo == 5 && hi == 20);
+
+    let (lo2, hi2) = sort_pair("apple", "zebra");
+    assert(lo2 == "apple" && hi2 == "zebra");
+
+    // Test is_sorted
+    assert(is_sorted([1, 2, 3, 4, 5]));
+    assert(!is_sorted([1, 3, 2, 4, 5]));
+    assert(is_sorted([]));
+    assert(is_sorted([1]));
+
+    // Test OrderedPair
+    let pair = OrderedPair.new(20, 5);
+    assert(pair.smaller == 5);
+    assert(pair.larger == 20);
+    assert(pair.contains(10));
+    assert(!pair.contains(25));
+    assert(pair.span());
+
+    let same = OrderedPair.new(5, 5);
+    assert(!same.span());
+
+    // Test higher-order functions with where clauses
+    let doubled = map_with([1, 2, 3], |x| x * 2);
+    assert(doubled == [2, 4, 6]);
+
+    let sum = fold_with([1, 2, 3, 4], 0, |acc, x| acc + x);
+    assert(sum == 10);
+
+    let filtered = filter_by([1, 2, 3, 4, 5], |x| x > 2);
+    assert(filtered == [3, 4, 5]);
+}

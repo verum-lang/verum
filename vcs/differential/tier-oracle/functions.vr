@@ -1,0 +1,334 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: functions, differential
+// @expected-stdout: 42
+
+/// Differential test for function calls and recursion
+/// Tests that function definitions, calls, recursion, and higher-order
+/// functions produce identical results across Tier 0 (interpreter) and
+/// Tier 3 (AOT) compilation.
+
+// =============================================================================
+// Section 1: Basic Function Definitions and Calls
+// =============================================================================
+
+/// Simple function returning a constant
+fn constant() -> Int {
+    42
+}
+
+/// Function with a single parameter
+fn identity(x: Int) -> Int {
+    x
+}
+
+/// Function with multiple parameters
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+/// Function with multiple parameters of different types
+fn combine(n: Int, s: Text) -> Text {
+    format("{}: {}", n, s)
+}
+
+// =============================================================================
+// Section 2: Recursion
+// =============================================================================
+
+/// Classic factorial function (non-tail recursive)
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+/// Tail-recursive factorial with accumulator
+fn factorial_tail(n: Int, acc: Int) -> Int {
+    if n <= 1 {
+        acc
+    } else {
+        factorial_tail(n - 1, n * acc)
+    }
+}
+
+/// Fibonacci function (exponential recursion)
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+/// Tail-recursive Fibonacci with accumulators
+fn fibonacci_tail(n: Int, a: Int, b: Int) -> Int {
+    if n == 0 {
+        a
+    } else if n == 1 {
+        b
+    } else {
+        fibonacci_tail(n - 1, b, a + b)
+    }
+}
+
+/// Mutual recursion: is_even and is_odd
+fn is_even(n: Int) -> Bool {
+    if n == 0 {
+        true
+    } else {
+        is_odd(n - 1)
+    }
+}
+
+fn is_odd(n: Int) -> Bool {
+    if n == 0 {
+        false
+    } else {
+        is_even(n - 1)
+    }
+}
+
+/// Ackermann function (tests deep recursion)
+fn ackermann(m: Int, n: Int) -> Int {
+    if m == 0 {
+        n + 1
+    } else if n == 0 {
+        ackermann(m - 1, 1)
+    } else {
+        ackermann(m - 1, ackermann(m, n - 1))
+    }
+}
+
+// =============================================================================
+// Section 3: Higher-Order Functions
+// =============================================================================
+
+/// Function that takes a function as parameter
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+/// Function that returns a function
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    fn add(x: Int) -> Int {
+        x + n
+    }
+    add
+}
+
+/// Function composition
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    fn composed(x: Int) -> Int {
+        f(g(x))
+    }
+    composed
+}
+
+/// Apply function n times
+fn apply_n(f: fn(Int) -> Int, n: Int, x: Int) -> Int {
+    if n == 0 {
+        x
+    } else {
+        apply_n(f, n - 1, f(x))
+    }
+}
+
+// =============================================================================
+// Section 4: Generic Functions
+// =============================================================================
+
+/// Generic identity function
+fn id<T>(x: T) -> T {
+    x
+}
+
+/// Generic swap function
+fn swap<T, U>(pair: (T, U)) -> (U, T) {
+    (pair.1, pair.0)
+}
+
+/// Generic map function for pairs
+fn map_pair<T, U, V>(pair: (T, T), f: fn(T) -> U) -> (U, U) {
+    (f(pair.0), f(pair.1))
+}
+
+// =============================================================================
+// Section 5: Functions with Default Parameters
+// =============================================================================
+
+/// Function with default parameter
+fn greet(name: Text = "World") -> Text {
+    format("Hello, {}!", name)
+}
+
+/// Function with multiple defaults
+fn configure(
+    host: Text = "localhost",
+    port: Int = 8080,
+    secure: Bool = false
+) -> Text {
+    format("{}://{}:{}", if secure { "https" } else { "http" }, host, port)
+}
+
+// =============================================================================
+// Section 6: Variadics and Rest Parameters
+// =============================================================================
+
+/// Sum of variable number of arguments
+fn sum(...args: List<Int>) -> Int {
+    let mut total = 0;
+    for arg in args {
+        total = total + arg;
+    }
+    total
+}
+
+/// Find maximum of variable arguments
+fn max_of(...args: List<Int>) -> Maybe<Int> {
+    if args.is_empty() {
+        None
+    } else {
+        let mut m = args[0];
+        for arg in args.skip(1) {
+            if arg > m {
+                m = arg;
+            }
+        }
+        Some(m)
+    }
+}
+
+// =============================================================================
+// Section 7: Functions with Guards and Contracts
+// =============================================================================
+
+/// Function with precondition
+fn divide(a: Int, b: Int) -> Result<Int, Text>
+    where b != 0
+{
+    Ok(a / b)
+}
+
+/// Function with postcondition
+fn abs(n: Int) -> Int
+    ensures result >= 0
+{
+    if n < 0 { -n } else { n }
+}
+
+/// Function with both pre and post conditions
+fn clamp(value: Int, min: Int, max: Int) -> Int
+    where min <= max
+    ensures result >= min && result <= max
+{
+    if value < min {
+        min
+    } else if value > max {
+        max
+    } else {
+        value
+    }
+}
+
+// =============================================================================
+// Section 8: Edge Cases and Boundary Tests
+// =============================================================================
+
+/// Test zero arguments function
+fn zero_args() -> Int {
+    42
+}
+
+/// Test many arguments
+fn many_args(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int {
+    a + b + c + d + e + f + g + h
+}
+
+/// Deeply nested calls
+fn nested_calls(n: Int) -> Int {
+    identity(identity(identity(identity(identity(n)))))
+}
+
+/// Chain of function calls
+fn chain(n: Int) -> Int {
+    add(identity(n), identity(add(1, 1)))
+}
+
+// =============================================================================
+// Main Function - Execute all tests
+// =============================================================================
+
+fn main() {
+    // Basic function calls
+    print("=== Basic Functions ===");
+    print(constant());                    // 42
+    print(identity(10));                  // 10
+    print(add(3, 4));                     // 7
+    print(combine(42, "answer"));         // "42: answer"
+
+    // Recursion
+    print("\n=== Recursion ===");
+    print(factorial(5));                  // 120
+    print(factorial_tail(5, 1));          // 120
+    print(fibonacci(10));                 // 55
+    print(fibonacci_tail(10, 0, 1));      // 55
+    print(is_even(10));                   // true
+    print(is_odd(10));                    // false
+    print(is_even(7));                    // false
+    print(ackermann(2, 3));               // 9
+
+    // Higher-order functions
+    print("\n=== Higher-Order Functions ===");
+    let double = fn(x: Int) -> Int { x * 2 };
+    print(apply(double, 21));             // 42
+    let add5 = make_adder(5);
+    print(add5(37));                      // 42
+    let double_then_add5 = compose(add5, double);
+    print(double_then_add5(18));          // 41 (18*2+5)
+    print(apply_n(double, 3, 5));         // 40 (5*2*2*2)
+
+    // Generic functions
+    print("\n=== Generic Functions ===");
+    print(id(42));                        // 42
+    print(id("hello"));                   // "hello"
+    let (b, a) = swap((1, 2));
+    print(a);                             // 1
+    print(b);                             // 2
+
+    // Default parameters
+    print("\n=== Default Parameters ===");
+    print(greet());                       // "Hello, World!"
+    print(greet("Verum"));                // "Hello, Verum!"
+    print(configure());                   // "http://localhost:8080"
+    print(configure(secure: true));       // "https://localhost:8080"
+
+    // Variadics
+    print("\n=== Variadic Functions ===");
+    print(sum(1, 2, 3, 4, 5));           // 15
+    print(sum());                         // 0
+    print(max_of(3, 1, 4, 1, 5, 9));      // Some(9)
+    print(max_of());                      // None
+
+    // Contracts
+    print("\n=== Contracts ===");
+    print(divide(10, 2));                 // Ok(5)
+    print(abs(-42));                      // 42
+    print(clamp(50, 0, 100));             // 50
+    print(clamp(-10, 0, 100));            // 0
+    print(clamp(150, 0, 100));            // 100
+
+    // Edge cases
+    print("\n=== Edge Cases ===");
+    print(zero_args());                   // 42
+    print(many_args(1, 2, 3, 4, 5, 6, 7, 8)); // 36
+    print(nested_calls(42));              // 42
+    print(chain(40));                     // 42
+
+    // Final output for differential comparison
+    print("\n=== Final Result ===");
+    print(42);
+}

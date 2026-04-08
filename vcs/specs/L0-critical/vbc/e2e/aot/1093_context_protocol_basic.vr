@@ -1,0 +1,46 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: context, protocol, kind_modifier
+// @expected-exit: 0
+// @description: Context protocol — declared with `context protocol`, usable as type bound
+
+context protocol Displayable {
+    fn show(&self) -> Text;
+}
+
+type Point is { x: Int, y: Int };
+
+implement Displayable for Point {
+    fn show(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+// Use as constraint bound (compile-time, zero overhead)
+fn show_item<T: Displayable>(item: T) -> Text {
+    item.show()
+}
+
+fn main() -> Int {
+    let p = Point { x: 3, y: 4 };
+
+    // Test 1: Direct method call
+    let s1 = p.show();
+    if s1 != "(3, 4)" {
+        print(f"FAIL test1: got {s1}");
+        return 1;
+    }
+    print("test1 direct call: OK");
+
+    // Test 2: Through generic constraint
+    let s2 = show_item(Point { x: 10, y: 20 });
+    if s2 != "(10, 20)" {
+        print(f"FAIL test2: got {s2}");
+        return 1;
+    }
+    print("test2 constraint bound: OK");
+
+    print("1093_context_protocol_basic: PASS");
+    0
+}

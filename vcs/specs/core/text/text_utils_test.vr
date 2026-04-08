@@ -1,0 +1,309 @@
+// =============================================================================
+// text_utils_test.vr - Tests for Text from_char, split_at, parse_int_radix,
+//                      FromIterator<Char>, From<Char>
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, from_char, split_at, parse_radix, from_iterator, core
+// @description: Tests for new Text utility methods and protocol implementations.
+// =============================================================================
+
+module specs.core.text.text_utils_test;
+
+mount core.*;
+
+// =============================================================================
+// Section 1: Text.from_char() Tests
+// =============================================================================
+
+@test
+fn test_from_char_ascii() {
+    let t = Text.from_char('A');
+    assert_eq(t.len(), 1);
+    assert_eq(t, "A");
+}
+
+@test
+fn test_from_char_digit() {
+    let t = Text.from_char('5');
+    assert_eq(t, "5");
+}
+
+@test
+fn test_from_char_space() {
+    let t = Text.from_char(' ');
+    assert_eq(t, " ");
+}
+
+@test
+fn test_from_char_newline() {
+    let t = Text.from_char('\n');
+    assert_eq(t.len(), 1);
+}
+
+@test
+fn test_from_char_not_empty() {
+    let t = Text.from_char('x');
+    assert(!t.is_empty());
+}
+
+// =============================================================================
+// Section 2: Text.split_at() Tests
+// =============================================================================
+
+@test
+fn test_split_at_middle() {
+    let t: Text = "HelloWorld";
+    let pair = t.split_at(5);
+    assert_eq(pair.0, "Hello");
+    assert_eq(pair.1, "World");
+}
+
+@test
+fn test_split_at_start() {
+    let t: Text = "Hello";
+    let pair = t.split_at(0);
+    assert_eq(pair.0, "");
+    assert_eq(pair.1, "Hello");
+}
+
+@test
+fn test_split_at_end() {
+    let t: Text = "Hello";
+    let pair = t.split_at(5);
+    assert_eq(pair.0, "Hello");
+    assert_eq(pair.1, "");
+}
+
+@test
+fn test_split_at_single_char() {
+    let t: Text = "A";
+    let pair = t.split_at(1);
+    assert_eq(pair.0, "A");
+    assert_eq(pair.1, "");
+}
+
+@test
+fn test_split_at_empty() {
+    let t: Text = "";
+    let pair = t.split_at(0);
+    assert_eq(pair.0, "");
+    assert_eq(pair.1, "");
+}
+
+@test
+fn test_split_at_preserves_content() {
+    let t: Text = "abcdef";
+    let pair = t.split_at(3);
+    let left = pair.0;
+    let right = pair.1;
+    assert_eq(left.len() + right.len(), t.len());
+    assert_eq(left, "abc");
+    assert_eq(right, "def");
+}
+
+@test
+fn test_split_at_one_char_in() {
+    let t: Text = "Hello";
+    let pair = t.split_at(1);
+    assert_eq(pair.0, "H");
+    assert_eq(pair.1, "ello");
+}
+
+// =============================================================================
+// Section 3: Text.parse_int_radix() Tests
+// =============================================================================
+
+@test
+fn test_parse_int_radix_hex() {
+    let t: Text = "FF";
+    let result = t.parse_int_radix(16);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 255);
+}
+
+@test
+fn test_parse_int_radix_hex_lowercase() {
+    let t: Text = "ff";
+    let result = t.parse_int_radix(16);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 255);
+}
+
+@test
+fn test_parse_int_radix_binary() {
+    let t: Text = "1010";
+    let result = t.parse_int_radix(2);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 10);
+}
+
+@test
+fn test_parse_int_radix_octal() {
+    let t: Text = "777";
+    let result = t.parse_int_radix(8);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 511);
+}
+
+@test
+fn test_parse_int_radix_decimal() {
+    let t: Text = "42";
+    let result = t.parse_int_radix(10);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_parse_int_radix_base36() {
+    let t: Text = "Z";
+    let result = t.parse_int_radix(36);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 35);
+}
+
+@test
+fn test_parse_int_radix_zero() {
+    let t: Text = "0";
+    let result = t.parse_int_radix(16);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 0);
+}
+
+@test
+fn test_parse_int_radix_negative() {
+    let t: Text = "-A";
+    let result = t.parse_int_radix(16);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), -10);
+}
+
+@test
+fn test_parse_int_radix_positive_sign() {
+    let t: Text = "+42";
+    let result = t.parse_int_radix(10);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_parse_int_radix_invalid_digit() {
+    let t: Text = "G";
+    let result = t.parse_int_radix(16);
+    // G is valid in base 17+ but not in base 16
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_int_radix_invalid_for_binary() {
+    let t: Text = "2";
+    let result = t.parse_int_radix(2);
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_int_radix_empty() {
+    let t: Text = "";
+    let result = t.parse_int_radix(10);
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_int_radix_invalid_radix_low() {
+    let t: Text = "1";
+    let result = t.parse_int_radix(1);
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_int_radix_invalid_radix_high() {
+    let t: Text = "1";
+    let result = t.parse_int_radix(37);
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_int_radix_hex_large() {
+    let t: Text = "1A2B";
+    let result = t.parse_int_radix(16);
+    assert(result.is_ok());
+    // 1*16^3 + 10*16^2 + 2*16 + 11 = 4096 + 2560 + 32 + 11 = 6699
+    assert_eq(result.unwrap(), 6699);
+}
+
+@test
+fn test_parse_int_radix_binary_8bit() {
+    let t: Text = "11111111";
+    let result = t.parse_int_radix(2);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 255);
+}
+
+@test
+fn test_parse_int_radix_only_sign() {
+    let t: Text = "-";
+    let result = t.parse_int_radix(10);
+    assert(result.is_err());
+}
+
+@test
+fn test_parse_int_radix_mixed_case() {
+    let t: Text = "aAbB";
+    let result = t.parse_int_radix(16);
+    assert(result.is_ok());
+    // 10*16^3 + 10*16^2 + 11*16 + 11 = 40960 + 2560 + 176 + 11 = 43707
+    assert_eq(result.unwrap(), 43707);
+}
+
+// =============================================================================
+// Section 4: From<Char> for Text Tests
+// =============================================================================
+
+@test
+fn test_from_char_protocol() {
+    let t: Text = Text.from_char('Z');
+    assert_eq(t, "Z");
+    assert_eq(t.len(), 1);
+}
+
+// =============================================================================
+// Section 5: Integration Tests
+// =============================================================================
+
+@test
+fn test_split_at_then_concat() {
+    let t: Text = "HelloWorld";
+    let pair = t.split_at(5);
+    let reassembled = pair.0.concat(&pair.1);
+    assert_eq(reassembled, t);
+}
+
+@test
+fn test_from_char_multiple_pushed() {
+    let mut t = Text.from_char('H');
+    t.push('i');
+    assert_eq(t, "Hi");
+    assert_eq(t.len(), 2);
+}
+
+@test
+fn test_parse_radix_agreement_with_parse_int() {
+    let t: Text = "123";
+    let r1 = t.parse_int();
+    let r2 = t.parse_int_radix(10);
+    assert(r1.is_ok());
+    assert(r2.is_ok());
+    assert_eq(r1.unwrap(), r2.unwrap());
+}
+
+@test
+fn test_split_at_various_positions() {
+    let t: Text = "abcde";
+    for i in range(0, 6) {
+        let pair = t.split_at(i);
+        let left = pair.0;
+        let right = pair.1;
+        assert_eq(left.len() + right.len(), 5);
+    }
+}

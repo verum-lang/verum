@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, rereference
+
+/// Test rereferencing semantics.
+/// A mutable reference can be rereferenceed as either mutable or immutable.
+/// During rereference, the original reference is temporarily unusable.
+
+fn read_value(s: &Text) {
+    print(*s);
+}
+
+fn modify_value(s: &mut Text) {
+    s.push_str(" modified");
+}
+
+fn process_point(p: &mut Point) {
+    // Rereference as immutable for reading
+    let x_ref = &p.x;
+    let y_ref = &p.y;
+    print(f"x = {x_ref}");
+    print(f"y = {y_ref}");
+    // Immutable rereferences end
+
+    // Now can rereference as mutable for modification
+    p.x += 10;
+    p.y += 10;
+}
+
+fn main() {
+    // Rereference mutable as immutable
+    let mut data = Text.from("original");
+    let ref_mut = &mut data;
+
+    // Rereference as immutable
+    read_value(&*ref_mut);
+
+    // Continue using mutable reference after rereference ends
+    ref_mut.push_str(" changed");
+
+    // Multiple levels of rereferencing
+    let mut value = Text.from("deep");
+    let r1 = &mut value;
+    {
+        let r2 = &mut *r1;  // Rereference from r1
+        {
+            let r3 = &mut *r2;  // Rereference from r2
+            r3.push_str("!");
+        }
+        // r3 ends, r2 usable again
+        r2.push_str("!");
+    }
+    // r2 ends, r1 usable again
+    r1.push_str("!");
+    print(value);  // "deep!!!"
+
+    // Rereference in function call chain
+    let mut point = Point { x: 5, y: 10 };
+    let ref_point = &mut point;
+    process_point(ref_point);
+    // ref_point is usable again after function returns
+    ref_point.x = 100;
+    assert(point.x == 100);
+
+    // Rereference to split struct
+    let mut pair = Pair {
+        left: Text.from("left"),
+        right: Text.from("right"),
+    };
+    let ref_pair = &mut pair;
+
+    // Rereference individual fields
+    let left_ref = &mut ref_pair.left;
+    left_ref.push_str("!");
+
+    // After left_ref ends, can rereference right
+    let right_ref = &mut ref_pair.right;
+    right_ref.push_str("!");
+
+    print(pair.left);   // "left!"
+    print(pair.right);  // "right!"
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Pair is {
+    left: Text,
+    right: Text,
+};

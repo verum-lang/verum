@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, continue, error
+// @description: continue with unexpected value (unlike break, continue takes no value)
+// @expected-error: E049
+
+fn test() {
+    for x in items {
+        continue 42;  // continue takes no value
+    }
+}

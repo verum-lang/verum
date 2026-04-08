@@ -1,0 +1,106 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tuples, edge-cases, numeric
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Tuple edge cases with various numeric values
+
+fn main() {
+    // === Test 1: Zero values ===
+    let zeros = (0, 0, 0);
+    let (z1, z2, z3) = zeros;
+    assert_eq(z1, 0);
+    assert_eq(z2, 0);
+    assert_eq(z3, 0);
+
+    // === Test 2: Negative values ===
+    let negatives = (-1, -10, -100);
+    let (n1, n2, n3) = negatives;
+    assert_eq(n1, -1);
+    assert_eq(n2, -10);
+    assert_eq(n3, -100);
+
+    // === Test 3: Mixed positive and negative ===
+    let mixed = (-5, 0, 5);
+    let (m1, m2, m3) = mixed;
+    assert_eq(m1, -5);
+    assert_eq(m2, 0);
+    assert_eq(m3, 5);
+
+    // === Test 4: Large numbers ===
+    let large = (1000000, 2000000, 3000000);
+    let (l1, l2, l3) = large;
+    assert_eq(l1, 1000000);
+    assert_eq(l2, 2000000);
+    assert_eq(l3, 3000000);
+
+    // === Test 5: Computed negative values ===
+    fn negate_tuple(a: Int, b: Int, c: Int) -> (Int, Int, Int) {
+        return (-a, -b, -c);
+    }
+    let (neg1, neg2, neg3) = negate_tuple(1, 2, 3);
+    assert_eq(neg1, -1);
+    assert_eq(neg2, -2);
+    assert_eq(neg3, -3);
+
+    // === Test 6: Subtraction in tuple (can produce negatives) ===
+    fn diff_tuple(x: Int, y: Int) -> (Int, Int, Int) {
+        return (x - y, y - x, 0);
+    }
+    let (d1, d2, d3) = diff_tuple(3, 7);
+    assert_eq(d1, -4);
+    assert_eq(d2, 4);
+    assert_eq(d3, 0);
+
+    // === Test 7: Sequential arithmetic across tuples ===
+    fn add_tuples(t1: (Int, Int), t2: (Int, Int)) -> (Int, Int) {
+        let (a, b) = t1;
+        let (c, d) = t2;
+        return (a + c, b + d);
+    }
+    let sum1 = add_tuples((10, 20), (30, 40));
+    let (s1, s2) = sum1;
+    assert_eq(s1, 40);
+    assert_eq(s2, 60);
+
+    let sum2 = add_tuples((-5, 10), (5, -10));
+    let (r1, r2) = sum2;
+    assert_eq(r1, 0);
+    assert_eq(r2, 0);
+
+    // === Test 8: Division in tuple ===
+    fn div_tuple(x: Int, divisor: Int) -> (Int, Int, Int) {
+        return (x / divisor, x % divisor, x);
+    }
+    let (quot, rem, orig) = div_tuple(17, 5);
+    assert_eq(quot, 3);
+    assert_eq(rem, 2);
+    assert_eq(orig, 17);
+
+    // === Test 9: Nested computation with parameters ===
+    fn nested_compute(a: Int, b: Int) -> (Int, Int, Int) {
+        let sum = a + b;
+        let diff = a - b;
+        let prod = a * b;
+        return (sum, diff, prod);
+    }
+    let (nc1, nc2, nc3) = nested_compute(-3, 4);
+    assert_eq(nc1, 1);    // -3 + 4 = 1
+    assert_eq(nc2, -7);   // -3 - 4 = -7
+    assert_eq(nc3, -12);  // -3 * 4 = -12
+
+    // === Test 10: Accumulator pattern ===
+    fn accumulate(t: (Int, Int, Int), add: Int) -> (Int, Int, Int) {
+        let (a, b, c) = t;
+        return (a + add, b + add, c + add);
+    }
+    let acc0 = (0, 10, 20);
+    let acc1 = accumulate(acc0, 5);
+    let acc2 = accumulate(acc1, 5);
+    let acc3 = accumulate(acc2, 5);
+    let (final1, final2, final3) = acc3;
+    assert_eq(final1, 15);  // 0 + 5 + 5 + 5
+    assert_eq(final2, 25);  // 10 + 5 + 5 + 5
+    assert_eq(final3, 35);  // 20 + 5 + 5 + 5
+}

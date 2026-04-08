@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, generics, default, error
+// @description: Test invalid default type parameter syntax
+// @expected-error: E018
+
+// Default type params with invalid expression
+type Container<T = > is {
+    data: T,
+};

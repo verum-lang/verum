@@ -1,0 +1,168 @@
+// @test: parse-pass
+// @tier: 0
+// @category: contexts
+// @description: Test context-aware function definitions and provide patterns
+
+// Function that provides context to callees
+fn with_database<T>(url: Text, f: fn() -> T using Database) -> T {
+    provide Database = PostgresDatabase.connect(url) in {
+        f()
+    }
+}
+
+// Higher-order function with context forwarding
+fn with_logging<T>(f: fn() -> T using Logger) -> T using Logger {
+    Logger.info("Starting operation");
+    let result = f();
+    Logger.info("Operation complete");
+    result
+}
+
+// Function that creates and provides multiple contexts
+fn with_test_env<T>(f: fn() -> T using [Database, Logger, Cache]) -> T {
+    provide Database = InMemoryDb.new() in {
+        provide Logger = TestLogger.new() in {
+            provide Cache = NoOpCache.new() in {
+                f()
+            }
+        }
+    }
+}
+
+// Context factory function
+fn create_production_env() using [Database, Logger, Cache] {
+    provide Database = PostgresDb.connect(PROD_URL);
+    provide Logger = SyslogLogger.new();
+    provide Cache = RedisCache.connect(REDIS_URL);
+}
+
+// Function that transforms context
+fn with_transaction<T>(f: fn() -> T using Database) -> Result<T, DbError> using Database {
+    let tx = Database.begin_transaction();
+    provide Database = tx in {
+        try {
+            let result = f();
+            Database.commit();
+            Ok(result)
+        } recover |e| {
+            Database.rollback();
+            Err(e)
+        }
+    }
+}
+
+// Async function with context - takes regular function that returns async result
+async fn fetch_with_retry<T>(
+    f: fn() -> Result<T, Error> using Network
+) -> Result<T, Error> using [Network, Config] {
+    let max_retries = Config.get("max_retries").unwrap_or(3);
+    let mut attempt = 0;
+
+    loop {
+        match f() {
+            Ok(result) => return Ok(result),
+            Err(e) if attempt < max_retries => {
+                attempt += 1;
+                // wait and retry
+            },
+            Err(e) => return Err(e)
+        }
+    }
+}
+
+// Context-polymorphic map
+fn map_ctx<T, U, using C>(items: List<T>, f: fn(T) -> U using C) -> List<U> using C {
+    let mut result = List.new();
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+// Context-polymorphic filter
+fn filter_ctx<T, using C>(items: List<T>, pred: fn(T) -> Bool using C) -> List<T> using C {
+    let mut result = List.new();
+    for item in items {
+        if pred(item) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+// Compose context-aware functions
+fn compose_ctx<A, B, C, using Ctx>(
+    f: fn(A) -> B using Ctx,
+    g: fn(B) -> C using Ctx
+) -> fn(A) -> C using Ctx {
+    |a| g(f(a))
+}
+
+// Function with optional context
+fn maybe_log(msg: Text) using [Logger if cfg.logging] {
+    Logger.info(msg);
+}
+
+// Function that wraps context
+fn scoped<T>(scope_name: Text, f: fn() -> T using Logger) -> T using Logger {
+    Logger.push_scope(scope_name);
+    defer Logger.pop_scope();
+    f()
+}
+
+// Multiple overloads with different contexts
+fn process(data: Data) using Database {
+    Database.save(data);
+}
+
+fn process_cached(data: Data) using [Database, Cache] {
+    Database.save(data);
+    Cache.invalidate(data.key);
+}
+
+fn process_logged(data: Data) using [Database, Logger] {
+    Logger.info(f"Processing {data.id}");
+    Database.save(data);
+    Logger.info("Done");
+}
+
+// Provide in function body
+fn setup_and_run() {
+    // Create contexts
+    let db = PostgresDatabase.connect(url);
+    let logger = FileLogger.new("app.log");
+
+    // Provide them
+    provide Database = db;
+    provide Logger = logger;
+
+    // Use them
+    main_logic();
+}
+
+// Nested context provision
+fn run_with_nested_contexts<T>(f: fn() -> T using [A, B, C]) -> T {
+    provide A = create_a() in {
+        provide B = create_b() in {
+            provide C = create_c() in {
+                f()
+            }
+        }
+    }
+}
+
+// Conditional context provision
+fn run_with_optional_cache<T>(
+    use_cache: Bool,
+    f: fn() -> T using [Database, Cache]
+) -> T using Database {
+    if use_cache {
+        provide Cache = RedisCache.connect() in {
+            f()
+        }
+    } else {
+        provide Cache = NoOpCache.new() in {
+            f()
+        }
+    }
+}

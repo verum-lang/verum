@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 2
+// @level: L1
+// @tags: types, collections, list
+// @timeout: 30000
+// @description: Tests List<T> collection type operations
+
+fn main() {
+    // List creation with literal syntax
+    let empty: List<Int> = [];
+    let numbers: List<Int> = [1, 2, 3, 4, 5];
+    let strings: List<Text> = ["hello", "world"];
+
+    // Basic property access
+    assert_eq(empty.len(), 0);
+    assert_eq(numbers.len(), 5);
+    assert_eq(strings.len(), 2);
+
+    // Index access
+    assert_eq(numbers[0], 1);
+    assert_eq(numbers[4], 5);
+    assert_eq(strings[0], "hello");
+
+    // is_empty check
+    assert(empty.is_empty());
+    assert(!numbers.is_empty());
+
+    // first and last
+    assert(numbers.first() is Some(1));
+    assert(numbers.last() is Some(5));
+    assert(empty.first() is None);
+    assert(empty.last() is None);
+
+    // Mutable list operations
+    let mut items: List<Int> = [10, 20, 30];
+
+    // push - add to end
+    items.push(40);
+    assert_eq(items.len(), 4);
+    assert_eq(items[3], 40);
+
+    // pop - remove from end
+    let popped = items.pop();
+    assert(popped is Some(40));
+    assert_eq(items.len(), 3);
+
+    // insert at index
+    items.insert(1, 15);
+    assert_eq(items[1], 15);
+    assert_eq(items.len(), 4);
+
+    // remove at index
+    let removed = items.remove(1);
+    assert_eq(removed, 15);
+    assert_eq(items.len(), 3);
+
+    // clear
+    let mut to_clear: List<Int> = [1, 2, 3];
+    to_clear.clear();
+    assert(to_clear.is_empty());
+
+    // contains
+    let haystack: List<Int> = [1, 2, 3, 4, 5];
+    assert(haystack.contains(3));
+    assert(!haystack.contains(10));
+
+    // get - safe index access
+    assert(haystack.get(2) is Some(3));
+    assert(haystack.get(100) is None);
+
+    // List with repeat syntax
+    let zeros: List<Int> = [0; 5];
+    assert_eq(zeros.len(), 5);
+    assert_eq(zeros[0], 0);
+    assert_eq(zeros[4], 0);
+
+    // Nested lists
+    let matrix: List<List<Int>> = [[1, 2], [3, 4], [5, 6]];
+    assert_eq(matrix.len(), 3);
+    assert_eq(matrix[0][0], 1);
+    assert_eq(matrix[1][1], 4);
+
+    // Clone and equality
+    let original: List<Int> = [1, 2, 3];
+    let cloned = original.clone();
+    assert_eq(original, cloned);
+
+    print("List tests passed!");
+}

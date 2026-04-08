@@ -1,0 +1,29 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Truncation toward zero (default)
+    let f1: Float = 3.7;
+    let i1: Int = f1 as Int;
+    assert_eq(i1, 3);  // Truncated
+
+    let f2: Float = -3.7;
+    let i2: Int = f2 as Int;
+    assert_eq(i2, -3);  // Truncated toward zero
+
+    // Whole numbers
+    let f3: Float = 5.0;
+    let i3: Int = f3 as Int;
+    assert_eq(i3, 5);
+
+    // Small decimals
+    let f4: Float = 0.9;
+    let i4: Int = f4 as Int;
+    assert_eq(i4, 0);  // Truncated
+
+    // Negative small decimals
+    let f5: Float = -0.9;
+    let i5: Int = f5 as Int;
+    assert_eq(i5, 0);  // Truncated toward zero
+}

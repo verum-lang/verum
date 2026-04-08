@@ -1,0 +1,203 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: patterns, errors, is, negative
+// @expected-error: not a defined constant
+
+/// Test for is pattern expression errors.
+/// The `is` keyword is used for pattern testing (replaces Rust's matches! macro).
+/// These examples demonstrate type errors in is expressions.
+/// Spec: grammar/verum.ebnf - is expression is pattern test
+
+// === Type Definitions ===
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb(Int, Int, Int);
+
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { a: Float, b: Float, c: Float };
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Tree<T> is
+    | Leaf(T)
+    | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+type Animal is
+    | Dog { name: Text, breed: Text }
+    | Cat { name: Text, indoor: Bool }
+    | Bird { species: Text };
+
+// ============================================================================
+// 1. TYPE MISMATCH IN IS EXPRESSION
+// ============================================================================
+
+fn type_mismatch_basic() {
+    let x: Int = 42;
+
+    // E502: Testing Int against Text pattern
+    if x is "hello" {  // ERROR: pattern type Text incompatible with Int
+        print("impossible");
+    }
+
+    // E502: Testing Int against Color pattern
+    if x is Red {  // ERROR: Color pattern cannot match Int
+        print("also impossible");
+    }
+}
+
+fn type_mismatch_struct() {
+    let c: Color = Red;
+
+    // E502: Testing Color against Shape pattern
+    if c is Circle { radius: _ } {  // ERROR: Shape pattern cannot match Color
+        print("type mismatch");
+    }
+
+    // E502: Testing Color against wrong variant type entirely
+    if c is Some(_) {  // ERROR: Maybe pattern cannot match Color
+        print("wrong type");
+    }
+}
+
+fn type_mismatch_generic() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // E502: Pattern uses wrong type argument
+    if result is Ok("string") {  // ERROR: Ok expects Int, not Text
+        print("mismatch");
+    }
+
+    // E502: Pattern uses wrong error type
+    if result is Err(123) {  // ERROR: Err expects Text, not Int
+        print("mismatch");
+    }
+}
+
+// ============================================================================
+// 2. INVALID BINDING IN IS EXPRESSION
+// ============================================================================
+
+fn binding_undefined_field() {
+    let animal: Animal = Dog { name: "Rex", breed: "Labrador" };
+
+    // E502: Binding non-existent field
+    if animal is Dog { age: a } {  // ERROR: Dog has no field 'age'
+        print(f"age: {a}");
+    }
+}
+
+fn binding_wrong_arity() {
+    let color: Color = Rgb(255, 0, 0);
+
+    // E502: Wrong number of bindings in tuple variant
+    if color is Rgb(r, g) {  // ERROR: Rgb has 3 components, not 2
+        print(f"r: {r}, g: {g}");
+    }
+
+    // E502: Too many bindings
+    if color is Rgb(r, g, b, a) {  // ERROR: Rgb has 3 components, not 4
+        print(f"rgba: {r},{g},{b},{a}");
+    }
+}
+
+// ============================================================================
+// 3. INVALID PATTERN STRUCTURE IN IS
+// ============================================================================
+
+fn invalid_variant_pattern() {
+    let color: Color = Red;
+
+    // E502: Non-existent variant
+    if color is Yellow {  // ERROR: Yellow is not a variant of Color
+        print("yellow");
+    }
+
+    // E502: Treating unit variant as tuple
+    if color is Red(x) {  // ERROR: Red is unit variant, not tuple
+        print(f"red: {x}");
+    }
+
+    // E502: Treating tuple variant as unit
+    if color is Rgb {  // ERROR: Rgb requires tuple pattern
+        print("rgb");
+    }
+}
+
+fn invalid_struct_pattern() {
+    let shape: Shape = Circle { radius: 5.0 };
+
+    // E502: Unknown field in struct pattern
+    if shape is Circle { radius: r, diameter: d } {  // ERROR: no field 'diameter'
+        print(f"r: {r}, d: {d}");
+    }
+
+    // E502: Missing field without rest pattern
+    if shape is Rectangle { width: w } {  // ERROR: missing 'height' (no ..)
+        print(f"width: {w}");
+    }
+}
+
+fn invalid_nested_pattern() {
+    type Wrapper is { inner: Maybe<Int> };
+    let w: Wrapper = Wrapper { inner: Some(42) };
+
+    // E502: Nested pattern type mismatch
+    if w is Wrapper { inner: Some("text") } {  // ERROR: inner is Maybe<Int>, not Maybe<Text>
+        print("mismatch");
+    }
+}
+
+// ============================================================================
+// 4. IS PATTERN WITH GUARDS - TYPE ERRORS
+// ============================================================================
+
+// ============================================================================
+// 5. OR PATTERN ERRORS IN IS
+// ============================================================================
+
+fn or_pattern_binding_mismatch() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // E502: Or pattern with inconsistent bindings
+    if result is Ok(x) | Err(_) {  // ERROR: x not bound in Err branch
+        print(f"value: {x}");  // x may be unbound
+    }
+}
+
+fn or_pattern_type_mismatch() {
+    let x: Int = 42;
+
+    // E502: Or pattern with incompatible types
+    if x is 1 | "one" {  // ERROR: Int | Text incompatible
+        print("one");
+    }
+}
+
+// ============================================================================
+// 6. RECURSIVE TYPE PATTERN ERRORS
+// ============================================================================
+
+fn recursive_type_invalid_pattern() {
+    let tree: Tree<Int> = Leaf(42);
+
+    // E502: Wrong nested type in recursive pattern
+    if tree is Node { left: Leaf("text"), right: _ } {  // ERROR: Leaf(Text) for Tree<Int>
+        print("nested mismatch");
+    }
+}
+
+fn main() {
+    // All examples above should produce E502 "Invalid is pattern" error
+}

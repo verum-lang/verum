@@ -1,0 +1,360 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, segment-tree, range-query
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Segment tree for range queries (sum, min, max).
+// Array of N=8 elements, segment tree has 2*N nodes stored in flat array.
+// Uses 1-indexed tree: node i has children 2i and 2i+1, root at 1.
+
+// =============================================================================
+// Array infrastructure (we need Arr16 for segment tree of 8 elements = 16 nodes)
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_fill(v: Int) -> Arr16 {
+    Arr16 {
+        e0: v, e1: v, e2: v, e3: v,
+        e4: v, e5: v, e6: v, e7: v,
+        e8: v, e9: v, e10: v, e11: v,
+        e12: v, e13: v, e14: v, e15: v
+    }
+}
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// Segment Tree for Sum queries (N=8, using iterative bottom-up approach)
+// Tree is 1-indexed: leaves at indices 8..15, internal nodes at 1..7.
+// tree[i] = tree[2i] + tree[2i+1]
+// =============================================================================
+
+type SegTree is {
+    tree: Arr16,
+    sz: Int
+};
+
+fn seg_build(data: Arr8, n: Int) -> SegTree {
+    // Place data into leaves (positions n..2n-1)
+    let mut tree = arr16_fill(0);
+    let mut i = 0;
+    while i < n {
+        tree = arr16_set(tree, n + i, arr8_get(data, i));
+        i = i + 1;
+    }
+    // Build internal nodes bottom-up
+    let mut j = n - 1;
+    while j >= 1 {
+        let left_val = arr16_get(tree, 2 * j);
+        let right_val = arr16_get(tree, 2 * j + 1);
+        tree = arr16_set(tree, j, left_val + right_val);
+        j = j - 1;
+    }
+    SegTree { tree: tree, sz: n }
+}
+
+// Point update: set data[pos] = val
+fn seg_update(st: SegTree, pos: Int, val: Int) -> SegTree {
+    let mut p = pos + st.sz;  // leaf index
+    let mut tree = arr16_set(st.tree, p, val);
+    p = p / 2;
+    while p >= 1 {
+        let left_val = arr16_get(tree, 2 * p);
+        let right_val = arr16_get(tree, 2 * p + 1);
+        tree = arr16_set(tree, p, left_val + right_val);
+        p = p / 2;
+    }
+    SegTree { tree: tree, sz: st.sz }
+}
+
+// Range sum query [l, r) (0-indexed, exclusive end)
+fn seg_query_sum(st: SegTree, l_in: Int, r_in: Int) -> Int {
+    let mut sum = 0;
+    let mut l = l_in + st.sz;
+    let mut r = r_in + st.sz;
+    while l < r {
+        if l % 2 == 1 {
+            sum = sum + arr16_get(st.tree, l);
+            l = l + 1;
+        }
+        if r % 2 == 1 {
+            r = r - 1;
+            sum = sum + arr16_get(st.tree, r);
+        }
+        l = l / 2;
+        r = r / 2;
+    }
+    sum
+}
+
+// =============================================================================
+// Segment Tree for Min queries (separate tree)
+// =============================================================================
+
+fn min_val(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn seg_build_min(data: Arr8, n: Int) -> SegTree {
+    let mut tree = arr16_fill(999999);
+    let mut i = 0;
+    while i < n {
+        tree = arr16_set(tree, n + i, arr8_get(data, i));
+        i = i + 1;
+    }
+    let mut j = n - 1;
+    while j >= 1 {
+        tree = arr16_set(tree, j, min_val(arr16_get(tree, 2 * j), arr16_get(tree, 2 * j + 1)));
+        j = j - 1;
+    }
+    SegTree { tree: tree, sz: n }
+}
+
+fn seg_query_min(st: SegTree, l_in: Int, r_in: Int) -> Int {
+    let mut mn = 999999;
+    let mut l = l_in + st.sz;
+    let mut r = r_in + st.sz;
+    while l < r {
+        if l % 2 == 1 {
+            mn = min_val(mn, arr16_get(st.tree, l));
+            l = l + 1;
+        }
+        if r % 2 == 1 {
+            r = r - 1;
+            mn = min_val(mn, arr16_get(st.tree, r));
+        }
+        l = l / 2;
+        r = r / 2;
+    }
+    mn
+}
+
+// =============================================================================
+// Segment Tree for Max queries (separate tree)
+// =============================================================================
+
+fn seg_build_max(data: Arr8, n: Int) -> SegTree {
+    let mut tree = arr16_fill(-999999);
+    let mut i = 0;
+    while i < n {
+        tree = arr16_set(tree, n + i, arr8_get(data, i));
+        i = i + 1;
+    }
+    let mut j = n - 1;
+    while j >= 1 {
+        tree = arr16_set(tree, j, max_val(arr16_get(tree, 2 * j), arr16_get(tree, 2 * j + 1)));
+        j = j - 1;
+    }
+    SegTree { tree: tree, sz: n }
+}
+
+fn seg_query_max(st: SegTree, l_in: Int, r_in: Int) -> Int {
+    let mut mx = -999999;
+    let mut l = l_in + st.sz;
+    let mut r = r_in + st.sz;
+    while l < r {
+        if l % 2 == 1 {
+            mx = max_val(mx, arr16_get(st.tree, l));
+            l = l + 1;
+        }
+        if r % 2 == 1 {
+            r = r - 1;
+            mx = max_val(mx, arr16_get(st.tree, r));
+        }
+        l = l / 2;
+        r = r / 2;
+    }
+    mx
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_sum_full_range() {
+    // data = [1, 3, 5, 7, 9, 11, 13, 15]
+    let data = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 9, e5: 11, e6: 13, e7: 15 };
+    let st = seg_build(data, 8);
+    // Sum of all: 1+3+5+7+9+11+13+15 = 64
+    assert_eq(seg_query_sum(st, 0, 8), 64);
+}
+
+fn test_sum_subranges() {
+    let data = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 9, e5: 11, e6: 13, e7: 15 };
+    let st = seg_build(data, 8);
+    // Sum [0,1) = 1
+    assert_eq(seg_query_sum(st, 0, 1), 1);
+    // Sum [0,4) = 1+3+5+7 = 16
+    assert_eq(seg_query_sum(st, 0, 4), 16);
+    // Sum [4,8) = 9+11+13+15 = 48
+    assert_eq(seg_query_sum(st, 4, 8), 48);
+    // Sum [2,6) = 5+7+9+11 = 32
+    assert_eq(seg_query_sum(st, 2, 6), 32);
+    // Sum [3,5) = 7+9 = 16
+    assert_eq(seg_query_sum(st, 3, 5), 16);
+}
+
+fn test_sum_point_update() {
+    let data = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 9, e5: 11, e6: 13, e7: 15 };
+    let mut st = seg_build(data, 8);
+    // Update index 2: 5 -> 100
+    st = seg_update(st, 2, 100);
+    // Sum [0,8) = 64 - 5 + 100 = 159
+    assert_eq(seg_query_sum(st, 0, 8), 159);
+    // Sum [0,3) = 1+3+100 = 104
+    assert_eq(seg_query_sum(st, 0, 3), 104);
+    // Sum [3,8) unchanged = 7+9+11+13+15 = 55
+    assert_eq(seg_query_sum(st, 3, 8), 55);
+}
+
+fn test_min_queries() {
+    let data = Arr8 { e0: 5, e1: 2, e2: 8, e3: 1, e4: 9, e5: 3, e6: 7, e7: 4 };
+    let st = seg_build_min(data, 8);
+    // Min of all: 1
+    assert_eq(seg_query_min(st, 0, 8), 1);
+    // Min [0,4) = min(5,2,8,1) = 1
+    assert_eq(seg_query_min(st, 0, 4), 1);
+    // Min [4,8) = min(9,3,7,4) = 3
+    assert_eq(seg_query_min(st, 4, 8), 3);
+    // Min [1,3) = min(2,8) = 2
+    assert_eq(seg_query_min(st, 1, 3), 2);
+    // Min [5,7) = min(3,7) = 3
+    assert_eq(seg_query_min(st, 5, 7), 3);
+}
+
+fn test_max_queries() {
+    let data = Arr8 { e0: 5, e1: 2, e2: 8, e3: 1, e4: 9, e5: 3, e6: 7, e7: 4 };
+    let st = seg_build_max(data, 8);
+    // Max of all: 9
+    assert_eq(seg_query_max(st, 0, 8), 9);
+    // Max [0,4) = max(5,2,8,1) = 8
+    assert_eq(seg_query_max(st, 0, 4), 8);
+    // Max [4,8) = max(9,3,7,4) = 9
+    assert_eq(seg_query_max(st, 4, 8), 9);
+    // Max [2,5) = max(8,1,9) = 9
+    assert_eq(seg_query_max(st, 2, 5), 9);
+}
+
+fn test_single_element_range() {
+    let data = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+    let st = seg_build(data, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(seg_query_sum(st, i, i + 1), arr8_get(data, i));
+        i = i + 1;
+    }
+}
+
+fn test_all_same_values() {
+    let data = Arr8 { e0: 5, e1: 5, e2: 5, e3: 5, e4: 5, e5: 5, e6: 5, e7: 5 };
+    let st = seg_build(data, 8);
+    assert_eq(seg_query_sum(st, 0, 8), 40);
+    assert_eq(seg_query_sum(st, 2, 6), 20);
+    let st_min = seg_build_min(data, 8);
+    assert_eq(seg_query_min(st_min, 0, 8), 5);
+}
+
+fn test_update_then_query() {
+    let data = Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut st = seg_build(data, 8);
+    // Build from zeros, then set individual values
+    st = seg_update(st, 0, 10);
+    st = seg_update(st, 3, 20);
+    st = seg_update(st, 7, 30);
+    assert_eq(seg_query_sum(st, 0, 8), 60);
+    assert_eq(seg_query_sum(st, 0, 4), 30);
+    assert_eq(seg_query_sum(st, 4, 8), 30);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_sum_full_range();
+    test_sum_subranges();
+    test_sum_point_update();
+    test_min_queries();
+    test_max_queries();
+    test_single_element_range();
+    test_all_same_values();
+    test_update_then_query();
+    print("[OK] 295_interp_segment_tree");
+    0
+}

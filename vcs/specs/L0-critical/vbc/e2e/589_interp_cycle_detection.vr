@@ -1,0 +1,166 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cycle_detection, directed_graph, dfs, coloring, topological
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Cycle detection in directed graphs via DFS coloring.
+//
+// Three-color DFS:
+//   color[u] = 0: unvisited (white)
+//   color[u] = 1: in current DFS path (gray)
+//   color[u] = 2: fully processed (black)
+//
+// A back edge (u -> v where color[v]=1) indicates a cycle.
+//
+// Returns 1 if cycle detected, 0 if acyclic (DAG).
+//
+// Graph: adjacency matrix 8x8 stored as [Int; 64].
+
+fn dc_adj(adj: [Int; 64], u: Int, v: Int) -> Int { adj[u * 8 + v] }
+
+fn make_dc_adj() -> [Int; 64] {
+    [0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0]
+}
+
+// DFS from node u. found[0]=1 if cycle detected.
+@allow(unbounded_recursion)
+fn dc_dfs(adj: [Int; 64], n: Int, u: Int,
+          color: [Int; 8], found: [Int; 8]) {
+    if found[0] == 1 { return; }
+    color[u] = 1;
+    let mut v = 0;
+    while v < n {
+        if dc_adj(adj, u, v) == 1 {
+            if color[v] == 1 {
+                found[0] = 1;
+                return;
+            }
+            if color[v] == 0 {
+                dc_dfs(adj, n, v, color, found);
+            }
+        }
+        v = v + 1;
+    }
+    color[u] = 2;
+}
+
+// Check if directed graph has a cycle. Returns 1 if yes, 0 if no.
+fn has_cycle(adj: [Int; 64], n: Int, color: [Int; 8], found: [Int; 8]) -> Int {
+    let mut i = 0;
+    while i < n { color[i] = 0; i = i + 1; }
+    found[0] = 0;
+    i = 0;
+    while i < n {
+        if color[i] == 0 { dc_dfs(adj, n, i, color, found); }
+        if found[0] == 1 { return 1; }
+        i = i + 1;
+    }
+    0
+}
+
+// Topological sort (only valid if no cycle). Fills order[] in reverse finish order.
+// Uses a stack (top pointer in stk_top[0]).
+@allow(unbounded_recursion)
+fn topo_dfs(adj: [Int; 64], n: Int, u: Int,
+            vis: [Int; 8], order: [Int; 8], stk_top: [Int; 8]) {
+    vis[u] = 1;
+    let mut v = 0;
+    while v < n {
+        if dc_adj(adj, u, v) == 1 && vis[v] == 0 {
+            topo_dfs(adj, n, v, vis, order, stk_top);
+        }
+        v = v + 1;
+    }
+    order[stk_top[0]] = u;
+    stk_top[0] = stk_top[0] + 1;
+}
+
+fn topo_sort(adj: [Int; 64], n: Int, vis: [Int; 8], order: [Int; 8], stk_top: [Int; 8]) {
+    let mut i = 0;
+    while i < n { vis[i] = 0; i = i + 1; }
+    stk_top[0] = 0;
+    i = 0;
+    while i < n {
+        if vis[i] == 0 { topo_dfs(adj, n, i, vis, order, stk_top); }
+        i = i + 1;
+    }
+}
+
+fn test_simple_cycle() {
+    // 0->1->2->0: cycle present.
+    let mut adj = make_dc_adj();
+    adj[0*8+1] = 1; adj[1*8+2] = 1; adj[2*8+0] = 1;
+    let mut color = [0,0,0,0,0,0,0,0];
+    let mut found = [0,0,0,0,0,0,0,0];
+    assert_eq(has_cycle(adj, 3, color, found), 1);
+    print("simple_cycle: ok");
+}
+
+fn test_dag_no_cycle() {
+    // DAG: 0->1, 0->2, 1->3, 2->3. No cycle.
+    let mut adj = make_dc_adj();
+    adj[0*8+1] = 1; adj[0*8+2] = 1;
+    adj[1*8+3] = 1; adj[2*8+3] = 1;
+    let mut color = [0,0,0,0,0,0,0,0];
+    let mut found = [0,0,0,0,0,0,0,0];
+    assert_eq(has_cycle(adj, 4, color, found), 0);
+    // Also verify topological order is valid (3 appears after 1 and 2).
+    let mut vis   = [0,0,0,0,0,0,0,0];
+    let mut order = [0,0,0,0,0,0,0,0];
+    let mut top   = [0,0,0,0,0,0,0,0];
+    topo_sort(adj, 4, vis, order, top);
+    // order is in finish order (reversed topological), so order[3]=0 or 1.
+    // node 3 should appear at order[0] (finished first).
+    assert_eq(order[0], 3);
+    print("dag_no_cycle: ok");
+}
+
+fn test_self_loop_cycle() {
+    // Node 2 has a self-loop: 2->2. Cycle present.
+    let mut adj = make_dc_adj();
+    adj[0*8+1] = 1; adj[1*8+2] = 1; adj[2*8+2] = 1;
+    let mut color = [0,0,0,0,0,0,0,0];
+    let mut found = [0,0,0,0,0,0,0,0];
+    assert_eq(has_cycle(adj, 3, color, found), 1);
+    print("self_loop_cycle: ok");
+}
+
+fn test_disconnected_with_cycle() {
+    // Component 1: 0->1 (no cycle). Component 2: 2->3->2 (cycle).
+    let mut adj = make_dc_adj();
+    adj[0*8+1] = 1;
+    adj[2*8+3] = 1; adj[3*8+2] = 1;
+    let mut color = [0,0,0,0,0,0,0,0];
+    let mut found = [0,0,0,0,0,0,0,0];
+    assert_eq(has_cycle(adj, 4, color, found), 1);
+    print("disconnected_with_cycle: ok");
+}
+
+fn test_linear_chain_no_cycle() {
+    // 0->1->2->3->4->5: no cycle.
+    let mut adj = make_dc_adj();
+    adj[0*8+1] = 1; adj[1*8+2] = 1; adj[2*8+3] = 1;
+    adj[3*8+4] = 1; adj[4*8+5] = 1;
+    let mut color = [0,0,0,0,0,0,0,0];
+    let mut found = [0,0,0,0,0,0,0,0];
+    assert_eq(has_cycle(adj, 6, color, found), 0);
+    // All nodes colored black (2) after DFS.
+    assert_eq(color[0], 2);
+    assert_eq(color[5], 2);
+    print("linear_chain_no_cycle: ok");
+}
+
+fn main() -> Int {
+    test_simple_cycle();
+    test_dag_no_cycle();
+    test_self_loop_cycle();
+    test_disconnected_with_cycle();
+    test_linear_chain_no_cycle();
+    print("[OK] 589_interp_cycle_detection");
+    0
+}

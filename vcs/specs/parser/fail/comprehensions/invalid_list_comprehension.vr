@@ -1,0 +1,167 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L0
+// @category: comprehensions
+// @tags: parser, comprehensions, list, errors
+// @description: Invalid list comprehension syntax that should fail to parse
+
+// ============================================================================
+// MISSING REQUIRED ELEMENTS
+// ============================================================================
+
+fn test_list_missing_opening_bracket() {
+    // ERROR: Missing opening bracket
+    let bad = x * 2 for x in items];
+}
+
+fn test_list_missing_closing_bracket() {
+    // ERROR: Missing closing bracket
+    let bad = [x * 2 for x in items;
+}
+
+fn test_list_missing_for_keyword() {
+    // ERROR: Missing 'for' keyword
+    let bad = [x * 2 x in items];
+}
+
+fn test_list_missing_in_keyword() {
+    // ERROR: Missing 'in' keyword
+    let bad = [x * 2 for x items];
+}
+
+fn test_list_missing_expression() {
+    // ERROR: Missing element expression before 'for'
+    let bad = [for x in items];
+}
+
+fn test_list_missing_iterator() {
+    // ERROR: Missing iterator expression after 'in'
+    let bad = [x for x in];
+}
+
+fn test_list_missing_pattern() {
+    // ERROR: Missing pattern between 'for' and 'in'
+    let bad = [x for in items];
+}
+
+// ============================================================================
+// INVALID CLAUSE SYNTAX
+// ============================================================================
+
+fn test_list_invalid_if_clause() {
+    // ERROR: 'if' without condition
+    let bad = [x for x in items if];
+}
+
+fn test_list_invalid_let_clause_no_equals() {
+    // ERROR: 'let' without '=' operator
+    let bad = [y for x in items let y x * 2];
+}
+
+fn test_list_invalid_let_clause_no_value() {
+    // ERROR: 'let' without value after '='
+    let bad = [y for x in items let y =];
+}
+
+fn test_list_invalid_let_clause_no_pattern() {
+    // ERROR: 'let' without pattern before '='
+    let bad = [y for x in items let = x * 2];
+}
+
+fn test_list_invalid_nested_for_no_in() {
+    // ERROR: Nested 'for' without 'in' keyword
+    let bad = [x for x in xs for y ys];
+}
+
+// ============================================================================
+// SYNTAX CONFUSION
+// ============================================================================
+
+fn test_list_using_where_instead_of_if() {
+    // ERROR: 'where' is not valid, use 'if'
+    let bad = [x for x in items where x > 0];
+}
+
+fn test_list_using_colon_separator() {
+    // ERROR: Using ':' in list comprehension (that's map syntax)
+    let bad = [k: v for (k, v) in pairs];
+}
+
+fn test_list_using_semicolon_separator() {
+    // ERROR: Using ';' to separate clauses
+    let bad = [x for x in items; if x > 0];
+}
+
+fn test_list_using_comma_between_clauses() {
+    // ERROR: Using ',' between clauses
+    let bad = [x for x in items, if x > 0];
+}
+
+fn test_list_python_style_in_brackets() {
+    // ERROR: Expression outside brackets with for clause
+    let bad = x * 2 for x in items;
+}
+
+// ============================================================================
+// STRUCTURAL ERRORS
+// ============================================================================
+
+fn test_list_extra_closing_bracket() {
+    // ERROR: Extra closing bracket
+    let bad = [x for x in items]];
+}
+
+fn test_list_mismatched_brackets() {
+    // ERROR: Using brace instead of bracket
+    let bad = [x for x in items};
+}
+
+fn test_list_using_braces() {
+    // ERROR: Using braces for list comprehension (that's map/set syntax)
+    let bad = {x for x in items};  // Parsed as map without colon
+}
+
+fn test_list_empty_brackets() {
+    // ERROR: Empty list comprehension with just brackets
+    // Note: [] is valid empty list, but [for] is not
+    let bad = [for];
+}
+
+fn test_list_double_expression() {
+    // ERROR: Two expressions before 'for'
+    let bad = [x y for x in items];
+}
+
+// ============================================================================
+// PATTERN ERRORS
+// ============================================================================
+
+fn test_list_invalid_pattern_expression() {
+    // ERROR: Expression instead of pattern after 'for'
+    let bad = [x for x + 1 in items];
+}
+
+fn test_list_invalid_pattern_literal() {
+    // ERROR: Literal instead of binding pattern
+    let bad = [x for 42 in items];
+}
+
+fn test_list_invalid_destructure_missing_comma() {
+    // ERROR: Tuple pattern missing comma
+    let bad = [x for (a b) in pairs];
+}
+
+// ============================================================================
+// RANGE ERRORS IN COMPREHENSION
+// ============================================================================
+
+fn test_list_invalid_range_syntax() {
+    // ERROR: Invalid range syntax (three dots)
+    let bad = [x for x in 0...10];
+}
+
+fn test_list_range_missing_end() {
+    // ERROR: Range with missing end after '..'
+    // Note: `0..` is valid infinite range, but `0.. ]` is not
+    let bad = [x for x in 0.. ];
+}

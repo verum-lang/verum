@@ -1,0 +1,716 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, convolution, pooling, relu, softmax, advanced
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT advanced tensor operations — mirror of interpreter test 024. Convolution, pooling, ReLU, softmax, reductions, reshape, batch matmul.
+
+// ============================================================================
+// Utility helpers
+// ============================================================================
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// ============================================================================
+// 1D array (16 elements) for convolution / pooling operations
+// ============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn arr16_sum(a: Arr16, len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len {
+        s = s + arr16_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+// ============================================================================
+// 2x2 matrix (for batch operations)
+// ============================================================================
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2_mul(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+// ============================================================================
+// Convolution 1D: sliding window dot product
+// ============================================================================
+
+type Kernel5 is { k0: Int, k1: Int, k2: Int, k3: Int, k4: Int };
+
+fn kernel5_get(k: Kernel5, i: Int) -> Int {
+    if i == 0 { k.k0 } else if i == 1 { k.k1 } else if i == 2 { k.k2 }
+    else if i == 3 { k.k3 } else { k.k4 }
+}
+
+fn conv1d_valid(input: Arr16, input_len: Int, kernel: Kernel5, kernel_len: Int) -> Arr16 {
+    let out_len = input_len - kernel_len + 1;
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < out_len {
+        let mut sum = 0;
+        let mut k = 0;
+        while k < kernel_len {
+            sum = sum + arr16_get(input, i + k) * kernel5_get(kernel, k);
+            k = k + 1;
+        }
+        out = arr16_set(out, i, sum);
+        i = i + 1;
+    }
+    out
+}
+
+// Convolution with a kernel of size 3
+type Kernel3 is { k0: Int, k1: Int, k2: Int };
+
+fn kernel3_get(k: Kernel3, i: Int) -> Int {
+    if i == 0 { k.k0 } else if i == 1 { k.k1 } else { k.k2 }
+}
+
+fn conv1d_k3(input: Arr16, input_len: Int, kernel: Kernel3) -> Arr16 {
+    let out_len = input_len - 3 + 1;
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < out_len {
+        let sum = arr16_get(input, i) * kernel3_get(kernel, 0)
+                + arr16_get(input, i + 1) * kernel3_get(kernel, 1)
+                + arr16_get(input, i + 2) * kernel3_get(kernel, 2);
+        out = arr16_set(out, i, sum);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Pooling operations (1D, window_size=2, stride=2)
+// ============================================================================
+
+fn max_pool_1d(input: Arr16, input_len: Int) -> Arr16 {
+    let out_len = input_len / 2;
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < out_len {
+        let a = arr16_get(input, i * 2);
+        let b = arr16_get(input, i * 2 + 1);
+        out = arr16_set(out, i, int_max(a, b));
+        i = i + 1;
+    }
+    out
+}
+
+fn avg_pool_1d(input: Arr16, input_len: Int) -> Arr16 {
+    let out_len = input_len / 2;
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < out_len {
+        let a = arr16_get(input, i * 2);
+        let b = arr16_get(input, i * 2 + 1);
+        out = arr16_set(out, i, (a + b) / 2);
+        i = i + 1;
+    }
+    out
+}
+
+// Max pool with window=3, stride=1 (overlapping)
+fn max_pool_1d_w3(input: Arr16, input_len: Int) -> Arr16 {
+    let out_len = input_len - 2;
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < out_len {
+        let a = arr16_get(input, i);
+        let b = arr16_get(input, i + 1);
+        let c = arr16_get(input, i + 2);
+        out = arr16_set(out, i, int_max(int_max(a, b), c));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// ReLU: max(0, x)
+// ============================================================================
+
+fn relu(x: Int) -> Int {
+    if x > 0 { x } else { 0 }
+}
+
+fn arr16_relu(a: Arr16, len: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr16_set(out, i, relu(arr16_get(a, i)));
+        i = i + 1;
+    }
+    out
+}
+
+// Leaky ReLU (integer approx: negative values divided by 10)
+fn leaky_relu(x: Int) -> Int {
+    if x > 0 { x } else { x / 10 }
+}
+
+fn arr16_leaky_relu(a: Arr16, len: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr16_set(out, i, leaky_relu(arr16_get(a, i)));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Softmax approximation (integer arithmetic)
+// ============================================================================
+
+fn exp_approx(x: Int) -> Int {
+    let val = 1000 + x * 100;
+    if val < 1 { 1 } else { val }
+}
+
+fn softmax_int(input: Arr16, len: Int) -> Arr16 {
+    let mut exp_sum = 0;
+    let mut i = 0;
+    while i < len {
+        exp_sum = exp_sum + exp_approx(arr16_get(input, i));
+        i = i + 1;
+    }
+
+    let mut out = arr16_zeros();
+    i = 0;
+    while i < len {
+        let exp_val = exp_approx(arr16_get(input, i));
+        out = arr16_set(out, i, exp_val * 10000 / exp_sum);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Reduction along axis (simulate 2D tensor as flat array)
+// ============================================================================
+
+fn reduce_sum_rows(a: Arr16, rows: Int, cols: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut r = 0;
+    while r < rows {
+        let mut sum = 0;
+        let mut c = 0;
+        while c < cols {
+            sum = sum + arr16_get(a, r * cols + c);
+            c = c + 1;
+        }
+        out = arr16_set(out, r, sum);
+        r = r + 1;
+    }
+    out
+}
+
+fn reduce_sum_cols(a: Arr16, rows: Int, cols: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut c = 0;
+    while c < cols {
+        let mut sum = 0;
+        let mut r = 0;
+        while r < rows {
+            sum = sum + arr16_get(a, r * cols + c);
+            r = r + 1;
+        }
+        out = arr16_set(out, c, sum);
+        c = c + 1;
+    }
+    out
+}
+
+fn reduce_max_rows(a: Arr16, rows: Int, cols: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut r = 0;
+    while r < rows {
+        let mut mx = arr16_get(a, r * cols);
+        let mut c = 1;
+        while c < cols {
+            mx = int_max(mx, arr16_get(a, r * cols + c));
+            c = c + 1;
+        }
+        out = arr16_set(out, r, mx);
+        r = r + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Tensor reshape and transpose
+// ============================================================================
+
+fn reshape_get(a: Arr16, row: Int, col: Int, num_cols: Int) -> Int {
+    arr16_get(a, row * num_cols + col)
+}
+
+fn arr16_transpose(a: Arr16, rows: Int, cols: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut r = 0;
+    while r < rows {
+        let mut c = 0;
+        while c < cols {
+            out = arr16_set(out, c * rows + r, arr16_get(a, r * cols + c));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Batch matrix multiply simulation
+// ============================================================================
+
+type Batch4Mat2 is { m0: Mat2, m1: Mat2, m2: Mat2, m3: Mat2 };
+
+fn batch_mat2_mul(batch: Batch4Mat2, transform: Mat2) -> Batch4Mat2 {
+    Batch4Mat2 {
+        m0: mat2_mul(batch.m0, transform),
+        m1: mat2_mul(batch.m1, transform),
+        m2: mat2_mul(batch.m2, transform),
+        m3: mat2_mul(batch.m3, transform)
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_conv1d_identity_kernel() {
+    // Kernel [0, 1, 0] is like identity for convolution
+    let input = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let kernel = Kernel3 { k0: 0, k1: 1, k2: 0 };
+    let out = conv1d_k3(input, 8, kernel);
+    // Output should be [2, 3, 4, 5, 6, 7] (central elements)
+    assert_eq(arr16_get(out, 0), 2);
+    assert_eq(arr16_get(out, 1), 3);
+    assert_eq(arr16_get(out, 2), 4);
+    assert_eq(arr16_get(out, 3), 5);
+    assert_eq(arr16_get(out, 4), 6);
+    assert_eq(arr16_get(out, 5), 7);
+}
+
+fn test_conv1d_sum_kernel() {
+    // Kernel [1, 1, 1] sums 3 consecutive elements
+    let input = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let kernel = Kernel3 { k0: 1, k1: 1, k2: 1 };
+    let out = conv1d_k3(input, 5, kernel);
+    // out[0] = 1+2+3 = 6, out[1] = 2+3+4 = 9, out[2] = 3+4+5 = 12
+    assert_eq(arr16_get(out, 0), 6);
+    assert_eq(arr16_get(out, 1), 9);
+    assert_eq(arr16_get(out, 2), 12);
+}
+
+fn test_conv1d_derivative_kernel() {
+    // Kernel [1, -2, 1] is a second derivative (Laplacian-like)
+    let input = Arr16 {
+        e0: 0, e1: 1, e2: 4, e3: 9, e4: 16, e5: 25, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let kernel = Kernel3 { k0: 1, k1: -2, k2: 1 };
+    let out = conv1d_k3(input, 6, kernel);
+    // For x^2: second derivative is constant = 2
+    assert_eq(arr16_get(out, 0), 2);
+    assert_eq(arr16_get(out, 1), 2);
+    assert_eq(arr16_get(out, 2), 2);
+    assert_eq(arr16_get(out, 3), 2);
+}
+
+fn test_conv1d_k5() {
+    let input = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let kernel = Kernel5 { k0: 1, k1: 1, k2: 1, k3: 1, k4: 1 };
+    let out = conv1d_valid(input, 8, kernel, 5);
+    // out[0] = 1+2+3+4+5 = 15
+    // out[1] = 2+3+4+5+6 = 20
+    // out[2] = 3+4+5+6+7 = 25
+    // out[3] = 4+5+6+7+8 = 30
+    assert_eq(arr16_get(out, 0), 15);
+    assert_eq(arr16_get(out, 1), 20);
+    assert_eq(arr16_get(out, 2), 25);
+    assert_eq(arr16_get(out, 3), 30);
+}
+
+fn test_max_pool() {
+    let input = Arr16 {
+        e0: 1, e1: 4, e2: 2, e3: 8, e4: 5, e5: 3, e6: 9, e7: 6,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let out = max_pool_1d(input, 8);
+    // Pairs: (1,4)=4, (2,8)=8, (5,3)=5, (9,6)=9
+    assert_eq(arr16_get(out, 0), 4);
+    assert_eq(arr16_get(out, 1), 8);
+    assert_eq(arr16_get(out, 2), 5);
+    assert_eq(arr16_get(out, 3), 9);
+}
+
+fn test_avg_pool() {
+    let input = Arr16 {
+        e0: 2, e1: 4, e2: 6, e3: 8, e4: 10, e5: 12, e6: 14, e7: 16,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let out = avg_pool_1d(input, 8);
+    // (2+4)/2=3, (6+8)/2=7, (10+12)/2=11, (14+16)/2=15
+    assert_eq(arr16_get(out, 0), 3);
+    assert_eq(arr16_get(out, 1), 7);
+    assert_eq(arr16_get(out, 2), 11);
+    assert_eq(arr16_get(out, 3), 15);
+}
+
+fn test_max_pool_w3() {
+    let input = Arr16 {
+        e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let out = max_pool_1d_w3(input, 8);
+    // Window: (3,1,4)=4, (1,4,1)=4, (4,1,5)=5, (1,5,9)=9, (5,9,2)=9, (9,2,6)=9
+    assert_eq(arr16_get(out, 0), 4);
+    assert_eq(arr16_get(out, 1), 4);
+    assert_eq(arr16_get(out, 2), 5);
+    assert_eq(arr16_get(out, 3), 9);
+    assert_eq(arr16_get(out, 4), 9);
+    assert_eq(arr16_get(out, 5), 9);
+}
+
+fn test_relu() {
+    let input = Arr16 {
+        e0: -5, e1: 3, e2: -1, e3: 0, e4: 7, e5: -10, e6: 2, e7: -3,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let out = arr16_relu(input, 8);
+    assert_eq(arr16_get(out, 0), 0);  // -5 -> 0
+    assert_eq(arr16_get(out, 1), 3);  // 3 -> 3
+    assert_eq(arr16_get(out, 2), 0);  // -1 -> 0
+    assert_eq(arr16_get(out, 3), 0);  // 0 -> 0
+    assert_eq(arr16_get(out, 4), 7);  // 7 -> 7
+    assert_eq(arr16_get(out, 5), 0);  // -10 -> 0
+    assert_eq(arr16_get(out, 6), 2);  // 2 -> 2
+    assert_eq(arr16_get(out, 7), 0);  // -3 -> 0
+}
+
+fn test_leaky_relu() {
+    let input = Arr16 {
+        e0: -100, e1: 50, e2: -30, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let out = arr16_leaky_relu(input, 4);
+    assert_eq(arr16_get(out, 0), -10); // -100 / 10 = -10
+    assert_eq(arr16_get(out, 1), 50);  // positive unchanged
+    assert_eq(arr16_get(out, 2), -3);  // -30 / 10 = -3
+    assert_eq(arr16_get(out, 3), 0);   // 0 unchanged
+}
+
+fn test_softmax_uniform() {
+    // Equal inputs: each should get equal share
+    let input = Arr16 {
+        e0: 5, e1: 5, e2: 5, e3: 5, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let out = softmax_int(input, 4);
+    // Each exp_approx(5) = 1500, total = 6000
+    // Each normalized = 1500 * 10000 / 6000 = 2500
+    assert_eq(arr16_get(out, 0), 2500);
+    assert_eq(arr16_get(out, 1), 2500);
+    assert_eq(arr16_get(out, 2), 2500);
+    assert_eq(arr16_get(out, 3), 2500);
+}
+
+fn test_softmax_peaked() {
+    // One value much larger: should dominate
+    let input = Arr16 {
+        e0: 0, e1: 0, e2: 9, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let out = softmax_int(input, 4);
+    // exp_approx(0) = 1000, exp_approx(9) = 1900
+    // total = 1000 + 1000 + 1900 + 1000 = 4900
+    let peak = arr16_get(out, 2);
+    let other = arr16_get(out, 0);
+    assert(peak > other);  // peaked value should be largest
+    // Sum should be approximately 10000
+    let total = arr16_get(out, 0) + arr16_get(out, 1) + arr16_get(out, 2) + arr16_get(out, 3);
+    assert(total >= 9900);
+    assert(total <= 10100);
+}
+
+fn test_reduce_sum_rows() {
+    // 4x4 matrix:
+    // [1  2  3  4 ]    -> row sum = 10
+    // [5  6  7  8 ]    -> row sum = 26
+    // [9  10 11 12]    -> row sum = 42
+    // [13 14 15 16]    -> row sum = 58
+    let m = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4,
+        e4: 5, e5: 6, e6: 7, e7: 8,
+        e8: 9, e9: 10, e10: 11, e11: 12,
+        e12: 13, e13: 14, e14: 15, e15: 16
+    };
+    let row_sums = reduce_sum_rows(m, 4, 4);
+    assert_eq(arr16_get(row_sums, 0), 10);
+    assert_eq(arr16_get(row_sums, 1), 26);
+    assert_eq(arr16_get(row_sums, 2), 42);
+    assert_eq(arr16_get(row_sums, 3), 58);
+}
+
+fn test_reduce_sum_cols() {
+    let m = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4,
+        e4: 5, e5: 6, e6: 7, e7: 8,
+        e8: 9, e9: 10, e10: 11, e11: 12,
+        e12: 13, e13: 14, e14: 15, e15: 16
+    };
+    let col_sums = reduce_sum_cols(m, 4, 4);
+    // col0: 1+5+9+13 = 28, col1: 2+6+10+14 = 32
+    // col2: 3+7+11+15 = 36, col3: 4+8+12+16 = 40
+    assert_eq(arr16_get(col_sums, 0), 28);
+    assert_eq(arr16_get(col_sums, 1), 32);
+    assert_eq(arr16_get(col_sums, 2), 36);
+    assert_eq(arr16_get(col_sums, 3), 40);
+}
+
+fn test_reduce_max_rows() {
+    let m = Arr16 {
+        e0: 3, e1: 1, e2: 4, e3: 1,
+        e4: 5, e5: 9, e6: 2, e7: 6,
+        e8: 5, e9: 3, e10: 5, e11: 8,
+        e12: 9, e13: 7, e14: 9, e15: 3
+    };
+    let row_maxs = reduce_max_rows(m, 4, 4);
+    assert_eq(arr16_get(row_maxs, 0), 4);  // max(3,1,4,1)
+    assert_eq(arr16_get(row_maxs, 1), 9);  // max(5,9,2,6)
+    assert_eq(arr16_get(row_maxs, 2), 8);  // max(5,3,5,8)
+    assert_eq(arr16_get(row_maxs, 3), 9);  // max(9,7,9,3)
+}
+
+fn test_reshape_access() {
+    let data = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4,
+        e4: 5, e5: 6, e6: 7, e7: 8,
+        e8: 9, e9: 10, e10: 11, e11: 12,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+
+    // Access as 3x4: row 1, col 2 = index 6 = 7
+    assert_eq(reshape_get(data, 1, 2, 4), 7);
+
+    // Access as 4x3: row 1, col 2 = index 5 = 6
+    assert_eq(reshape_get(data, 1, 2, 3), 6);
+
+    // Access as 2x6: row 1, col 3 = index 9 = 10
+    assert_eq(reshape_get(data, 1, 3, 6), 10);
+}
+
+fn test_transpose_2d() {
+    // 3x4 matrix
+    let m = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4,
+        e4: 5, e5: 6, e6: 7, e7: 8,
+        e8: 9, e9: 10, e10: 11, e11: 12,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    // Transpose to 4x3
+    let t = arr16_transpose(m, 3, 4);
+    // Row 0 of transpose = col 0 of original: [1, 5, 9]
+    assert_eq(arr16_get(t, 0), 1);
+    assert_eq(arr16_get(t, 1), 5);
+    assert_eq(arr16_get(t, 2), 9);
+    // Row 1 of transpose = col 1 of original: [2, 6, 10]
+    assert_eq(arr16_get(t, 3), 2);
+    assert_eq(arr16_get(t, 4), 6);
+    assert_eq(arr16_get(t, 5), 10);
+    // Row 3 of transpose = col 3 of original: [4, 8, 12]
+    assert_eq(arr16_get(t, 9), 4);
+    assert_eq(arr16_get(t, 10), 8);
+    assert_eq(arr16_get(t, 11), 12);
+}
+
+fn test_batch_matmul() {
+    let batch = Batch4Mat2 {
+        m0: Mat2 { a: 1, b: 0, c: 0, d: 1 },  // identity
+        m1: Mat2 { a: 2, b: 0, c: 0, d: 2 },  // 2x scale
+        m2: Mat2 { a: 1, b: 1, c: 0, d: 1 },  // shear
+        m3: Mat2 { a: 0, b: 1, c: 1, d: 0 }   // swap
+    };
+    // Transform: [3 1; 0 2]
+    let t = Mat2 { a: 3, b: 1, c: 0, d: 2 };
+    let result = batch_mat2_mul(batch, t);
+
+    // m0 * t = I * t = [3 1; 0 2]
+    assert_eq(result.m0.a, 3);
+    assert_eq(result.m0.b, 1);
+    assert_eq(result.m0.c, 0);
+    assert_eq(result.m0.d, 2);
+
+    // m1 * t = [2 0; 0 2] * [3 1; 0 2] = [6 2; 0 4]
+    assert_eq(result.m1.a, 6);
+    assert_eq(result.m1.b, 2);
+    assert_eq(result.m1.c, 0);
+    assert_eq(result.m1.d, 4);
+
+    // m2 * t = [1 1; 0 1] * [3 1; 0 2] = [3 3; 0 2]
+    assert_eq(result.m2.a, 3);
+    assert_eq(result.m2.b, 3);
+    assert_eq(result.m2.c, 0);
+    assert_eq(result.m2.d, 2);
+
+    // m3 * t = [0 1; 1 0] * [3 1; 0 2] = [0 2; 3 1]
+    assert_eq(result.m3.a, 0);
+    assert_eq(result.m3.b, 2);
+    assert_eq(result.m3.c, 3);
+    assert_eq(result.m3.d, 1);
+}
+
+fn test_conv_relu_pool_pipeline() {
+    // Mini neural network layer: Conv1D -> ReLU -> MaxPool
+    let input = Arr16 {
+        e0: 1, e1: -2, e2: 3, e3: -1, e4: 4, e5: -3, e6: 2, e7: -1,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+
+    // Edge detection kernel: [-1, 2, -1]
+    let kernel = Kernel3 { k0: -1, k1: 2, k2: -1 };
+
+    // Step 1: Convolution (input_len=8, output_len=6)
+    let conv_out = conv1d_k3(input, 8, kernel);
+    assert_eq(arr16_get(conv_out, 0), -8);
+    assert_eq(arr16_get(conv_out, 1), 9);
+    assert_eq(arr16_get(conv_out, 2), -9);
+    assert_eq(arr16_get(conv_out, 3), 12);
+    assert_eq(arr16_get(conv_out, 4), -12);
+    assert_eq(arr16_get(conv_out, 5), 8);
+
+    // Step 2: ReLU
+    let relu_out = arr16_relu(conv_out, 6);
+    assert_eq(arr16_get(relu_out, 0), 0);   // -8 -> 0
+    assert_eq(arr16_get(relu_out, 1), 9);   // 9 -> 9
+    assert_eq(arr16_get(relu_out, 2), 0);   // -9 -> 0
+    assert_eq(arr16_get(relu_out, 3), 12);  // 12 -> 12
+    assert_eq(arr16_get(relu_out, 4), 0);   // -12 -> 0
+    assert_eq(arr16_get(relu_out, 5), 8);   // 8 -> 8
+
+    // Step 3: MaxPool (window=2, stride=2)
+    let pool_out = max_pool_1d(relu_out, 6);
+    // (0,9)=9, (0,12)=12, (0,8)=8
+    assert_eq(arr16_get(pool_out, 0), 9);
+    assert_eq(arr16_get(pool_out, 1), 12);
+    assert_eq(arr16_get(pool_out, 2), 8);
+}
+
+fn test_reduce_with_3x3() {
+    // Non-square: 3x3 stored in first 9 elements
+    let m = Arr16 {
+        e0: 1, e1: 2, e2: 3,
+        e3: 4, e4: 5, e5: 6,
+        e6: 7, e7: 8, e8: 9,
+        e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let row_sums = reduce_sum_rows(m, 3, 3);
+    assert_eq(arr16_get(row_sums, 0), 6);  // 1+2+3
+    assert_eq(arr16_get(row_sums, 1), 15); // 4+5+6
+    assert_eq(arr16_get(row_sums, 2), 24); // 7+8+9
+
+    let col_sums = reduce_sum_cols(m, 3, 3);
+    assert_eq(arr16_get(col_sums, 0), 12); // 1+4+7
+    assert_eq(arr16_get(col_sums, 1), 15); // 2+5+8
+    assert_eq(arr16_get(col_sums, 2), 18); // 3+6+9
+}
+
+fn main() -> Int {
+    test_conv1d_identity_kernel();
+    test_conv1d_sum_kernel();
+    test_conv1d_derivative_kernel();
+    test_conv1d_k5();
+    test_max_pool();
+    test_avg_pool();
+    test_max_pool_w3();
+    test_relu();
+    test_leaky_relu();
+    test_softmax_uniform();
+    test_softmax_peaked();
+    test_reduce_sum_rows();
+    test_reduce_sum_cols();
+    test_reduce_max_rows();
+    test_reshape_access();
+    test_transpose_2d();
+    test_batch_matmul();
+    test_conv_relu_pool_pipeline();
+    test_reduce_with_3x3();
+    print("[OK] 131_tensor_advanced_aot");
+    0
+}

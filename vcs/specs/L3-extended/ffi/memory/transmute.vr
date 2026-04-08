@@ -1,0 +1,92 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, memory, transmute, unsafe
+// @description: Tests type transmutation for FFI bit-level reinterpretation
+
+type c_int is i32;
+type c_void is ();
+type size_t is usize;
+
+/// Float to bits reinterpretation
+fn float_to_bits(f: f32) -> u32 {
+    unsafe { *((&f) as *const f32 as *const u32) }
+}
+
+fn bits_to_float(bits: u32) -> f32 {
+    unsafe { *((&bits) as *const u32 as *const f32) }
+}
+
+fn double_to_bits(f: f64) -> u64 {
+    unsafe { *((&f) as *const f64 as *const u64) }
+}
+
+fn bits_to_double(bits: u64) -> f64 {
+    unsafe { *((&bits) as *const u64 as *const f64) }
+}
+
+/// Network byte order conversion
+fn u32_to_be(val: u32) -> u32 {
+    ((val & 0xFF) << 24) |
+    ((val & 0xFF00) << 8) |
+    ((val & 0xFF0000) >> 8) |
+    ((val & 0xFF000000) >> 24)
+}
+
+fn u16_to_be(val: u16) -> u16 {
+    ((val & 0xFF) << 8) | ((val & 0xFF00) >> 8)
+}
+
+/// Reinterpret struct as bytes
+@repr(C)
+type Header is {
+    magic: u32,
+    version: u16,
+    flags: u16,
+};
+
+fn header_to_bytes(h: &Header) -> &[u8] {
+    unsafe {
+        let ptr = h as *const Header as *const u8;
+        &*std.ptr.slice_from_raw_parts(ptr, Header.size)
+    }
+}
+
+/// Safe transmute with size check
+fn safe_reinterpret<T, U>(val: &T) -> Result<&U, Text> {
+    if T.size != U.size {
+        Err(Text.from("Size mismatch"))
+    } else {
+        Ok(unsafe { &*(val as *const T as *const U) })
+    }
+}
+
+/// Zero-sized type transmutation
+type ZST is ();
+type AnotherZST is ();
+
+/// Pointer transmutation
+fn transmute_ptr(ptr: *const c_int) -> *const u32 {
+    ptr as *const u32
+}
+
+/// Endianness check
+fn is_little_endian() -> Bool {
+    let val: u32 = 1;
+    let first_byte = unsafe { *((&val) as *const u32 as *const u8) };
+    first_byte == 1
+}
+
+fn main() {
+    // Float bits roundtrip
+    let f: f32 = 3.14;
+    let bits = float_to_bits(f);
+    let f2 = bits_to_float(bits);
+
+    // Network byte order
+    let host_val: u32 = 0x12345678;
+    let network_val = u32_to_be(host_val);
+
+    // Endianness detection
+    let le = is_little_endian();
+}

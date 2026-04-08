@@ -1,0 +1,266 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, null-safety
+// @description: Tests null pointer safety across FFI boundaries
+
+/// ============================================================
+/// NULL SAFETY IN FFI
+/// ============================================================
+///
+/// C uses null pointers extensively, but Verum treats nullability
+/// as a type-level property. This file shows how to safely handle
+/// null pointers across the FFI boundary.
+
+// Type definitions
+type c_int is i32;
+type c_char is i8;
+type c_size is usize;
+type c_void is ();
+
+type NullError is
+    | UnexpectedNull;
+
+type Item is {
+    id: c_int,
+    value: c_int,
+};
+
+type ItemError is
+    | NotFound(Int);
+
+type AllocError is
+    | OutOfMemory { requested: usize }
+    | InvalidSize { size: usize };
+
+type ApiError is { code: c_int };
+implement ApiError {
+    fn from_code(code: c_int) -> ApiError { ApiError { code } }
+}
+
+type FfiResult is { data: c_int };
+
+// ------------------------------------------------------------
+// Nullable vs Non-Nullable Pointers
+// ------------------------------------------------------------
+
+/// Non-nullable pointer type
+type NonNullPtr<T> is {
+    ptr: *mut T,
+};
+
+/// Nullable pointer (explicit opt-in)
+type NullablePtr<T> is *mut T;  // May be null
+
+/// Option-based nullable pointer
+type MaybePtr<T> is Maybe<NonNullPtr<T>>;
+
+// ------------------------------------------------------------
+// FFI with Null Contracts
+// ------------------------------------------------------------
+
+ffi libc {
+    /// malloc - returns nullable pointer
+    @extern("C")
+    fn malloc(size: c_size) -> NullablePtr<c_void>;
+
+    /// strlen - requires non-null
+    @extern("C")
+    fn strlen(s: *const c_char) -> c_size;
+
+    /// realloc - mixed nullability
+    @extern("C")
+    fn realloc(ptr: NullablePtr<c_void>, size: c_size) -> NullablePtr<c_void>;
+}
+
+ffi custom {
+    @extern("C")
+    fn find_item(id: c_int) -> NullablePtr<Item>;
+}
+
+ffi output_api {
+    @extern("C")
+    fn get_result(out: *mut *mut FfiResult) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Safe Null Handling Patterns
+// ------------------------------------------------------------
+
+/// Wrapper that converts nullable to Option
+fn safe_malloc(size: usize) -> Maybe<NonNullPtr<c_void>> {
+    let ptr: *mut c_void = unsafe { libc.malloc(size) };
+    if ptr.is_null() {
+        None
+    } else {
+        Some(NonNullPtr { ptr })
+    }
+}
+
+/// Wrapper with Result for error handling
+fn alloc_or_error(count: usize, elem_size: usize) -> Result<NonNullPtr<c_void>, AllocError> {
+    let size = count * elem_size;
+    let ptr: *mut c_void = unsafe { libc.malloc(size) };
+
+    if ptr.is_null() {
+        Err(AllocError.OutOfMemory { requested: size })
+    } else {
+        Ok(NonNullPtr { ptr })
+    }
+}
+
+/// Non-null assertion (panics if null)
+fn assert_non_null(ptr: *mut c_void) -> NonNullPtr<c_void> {
+    if ptr.is_null() {
+        panic("Unexpected null pointer");
+    }
+    NonNullPtr { ptr }
+}
+
+// ------------------------------------------------------------
+// Null Checks and Branching
+// ------------------------------------------------------------
+
+/// Explicit null check before use
+fn use_maybe_null_string(s: *mut c_char) -> Text {
+    if s.is_null() {
+        Text.from("")
+    } else {
+        Text.from("non-null string")
+    }
+}
+
+/// Read from pointer with null check
+fn read_from_ptr(ptr: *mut c_int) -> Result<c_int, NullError> {
+    if ptr.is_null() {
+        return Err(NullError.UnexpectedNull);
+    }
+    Ok(unsafe { *ptr })
+}
+
+// ------------------------------------------------------------
+// Reference types are never null
+// ------------------------------------------------------------
+
+fn ref_to_ptr(r: &c_int) -> NonNullPtr<c_int> {
+    NonNullPtr { ptr: r as *const c_int as *mut c_int }
+}
+
+// ------------------------------------------------------------
+// Null-Returning Functions
+// ------------------------------------------------------------
+
+/// Safe wrapper with Option
+fn safe_find_item(id: Int) -> Maybe<NonNullPtr<Item>> {
+    let ptr: *mut Item = unsafe { custom.find_item(id as c_int) };
+    if ptr.is_null() {
+        None
+    } else {
+        Some(NonNullPtr { ptr })
+    }
+}
+
+/// Safe wrapper with Result
+fn find_item_or_error(id: Int) -> Result<NonNullPtr<Item>, ItemError> {
+    let ptr: *mut Item = unsafe { custom.find_item(id as c_int) };
+    if ptr.is_null() {
+        Err(ItemError.NotFound(id))
+    } else {
+        Ok(NonNullPtr { ptr })
+    }
+}
+
+// ------------------------------------------------------------
+// Double Pointer Null Safety
+// ------------------------------------------------------------
+
+/// Safe wrapper
+fn safe_get_result() -> Result<NonNullPtr<FfiResult>, ApiError> {
+    let mut result_ptr: *mut FfiResult = 0 as *mut FfiResult;
+    let status = unsafe { output_api.get_result(&mut result_ptr) };
+
+    if status != 0 {
+        Err(ApiError.from_code(status))
+    } else {
+        Ok(NonNullPtr { ptr: result_ptr })
+    }
+}
+
+// ------------------------------------------------------------
+// Null-Terminated Arrays
+// ------------------------------------------------------------
+
+/// C-style null-terminated array
+type NullTerminatedArray<T> is {
+    ptr: *const *const T,
+};
+
+/// Iterator for null-terminated arrays
+type NullTerminatedIter<T> is {
+    current: *const *const T,
+};
+
+implement<T> Iterator for NullTerminatedIter<T> {
+    type Item is &T;
+
+    fn next(&mut self) -> Maybe<&T> {
+        let ptr: *const T = unsafe { *self.current };
+        if ptr.is_null() {
+            None
+        } else {
+            self.current = unsafe { self.current.add(1) };
+            Some(unsafe { &*ptr })
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Null Safety Invariants
+// ------------------------------------------------------------
+
+/// Type with null-safety invariant
+type SafeBuffer is {
+    data: *mut u8,
+    len: usize,
+};
+
+implement SafeBuffer {
+    fn new() -> SafeBuffer {
+        SafeBuffer { data: 0 as *mut u8, len: 0 }
+    }
+
+    fn with_capacity(cap: usize) -> Result<SafeBuffer, AllocError> {
+        if cap == 0 {
+            Ok(SafeBuffer.new())
+        } else {
+            let data: *mut c_void = unsafe { libc.malloc(cap) };
+            if data.is_null() {
+                Err(AllocError.OutOfMemory { requested: cap })
+            } else {
+                Ok(SafeBuffer { data: data as *mut u8, len: cap })
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Null Coalescing
+// ------------------------------------------------------------
+
+/// Null coalescing for concrete pointer type
+fn null_or_default(ptr: *mut c_int) -> c_int {
+    if ptr.is_null() {
+        0
+    } else {
+        unsafe { *ptr }
+    }
+}
+
+/// Guard null check
+fn guard_null(ptr: *mut c_void) -> Maybe<NonNullPtr<c_void>> {
+    if ptr.is_null() { None } else { Some(NonNullPtr { ptr }) }
+}
+
+fn main() {
+    // Null safety test
+}

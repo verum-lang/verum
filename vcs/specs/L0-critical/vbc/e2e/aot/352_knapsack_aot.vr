@@ -1,0 +1,272 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, knapsack, dynamic-programming, optimization
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for 0/1 Knapsack problem using dynamic programming.
+// Given items with weights and values, find maximum value that fits
+// in a knapsack of given capacity. Uses a flat DP table.
+// Items stored in parallel arrays, DP table as flattened 2D array.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 { Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 } }
+
+// Larger array for DP table (need items+1 x capacity+1)
+// For small knapsack: max 5 items, max capacity 8 -> 6 x 9 = 54 cells
+// We use a flat array of 64 elements (8 rows of 8 columns each -> indices [row*8+col])
+// But we need 9 columns (capacity 0-8). Use a different approach:
+// Store DP as 6 rows (Arr8 each), treating each row as capacity 0-7.
+// Max capacity = 7 for simplicity.
+
+type DPTable is {
+    r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8, r4: Arr8, r5: Arr8
+};
+
+fn dp_get(dp: DPTable, row: Int, col: Int) -> Int {
+    let r = if row == 0 { dp.r0 }
+            else if row == 1 { dp.r1 }
+            else if row == 2 { dp.r2 }
+            else if row == 3 { dp.r3 }
+            else if row == 4 { dp.r4 }
+            else { dp.r5 };
+    a8_get(r, col)
+}
+
+fn dp_set(dp: DPTable, row: Int, col: Int, val: Int) -> DPTable {
+    if row == 0 { DPTable { r0: a8_set(dp.r0, col, val), r1: dp.r1, r2: dp.r2, r3: dp.r3, r4: dp.r4, r5: dp.r5 } }
+    else if row == 1 { DPTable { r0: dp.r0, r1: a8_set(dp.r1, col, val), r2: dp.r2, r3: dp.r3, r4: dp.r4, r5: dp.r5 } }
+    else if row == 2 { DPTable { r0: dp.r0, r1: dp.r1, r2: a8_set(dp.r2, col, val), r3: dp.r3, r4: dp.r4, r5: dp.r5 } }
+    else if row == 3 { DPTable { r0: dp.r0, r1: dp.r1, r2: dp.r2, r3: a8_set(dp.r3, col, val), r4: dp.r4, r5: dp.r5 } }
+    else if row == 4 { DPTable { r0: dp.r0, r1: dp.r1, r2: dp.r2, r3: dp.r3, r4: a8_set(dp.r4, col, val), r5: dp.r5 } }
+    else { DPTable { r0: dp.r0, r1: dp.r1, r2: dp.r2, r3: dp.r3, r4: dp.r4, r5: a8_set(dp.r5, col, val) } }
+}
+
+fn dp_zero() -> DPTable {
+    let z = a8_zero();
+    DPTable { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z }
+}
+
+fn max_val(a: Int, bv: Int) -> Int {
+    if a > bv { a } else { bv }
+}
+
+// Solve 0/1 knapsack: n items (max 5), capacity W (max 7)
+// weights and values are Arr8 arrays indexed 0..n-1
+// Returns maximum value
+fn knapsack(weights: Arr8, values: Arr8, n: Int, cap: Int) -> Int {
+    // dp[i][w] = max value using first i items with capacity w
+    // dp[0][w] = 0 for all w
+    let mut dp = dp_zero();
+    let mut i = 1;
+    while i <= n {
+        let wi = a8_get(weights, i - 1);
+        let vi = a8_get(values, i - 1);
+        let mut w = 0;
+        while w <= cap {
+            // Don't take item i
+            let skip = dp_get(dp, i - 1, w);
+            if wi <= w {
+                // Take item i
+                let take = dp_get(dp, i - 1, w - wi) + vi;
+                dp = dp_set(dp, i, w, max_val(skip, take));
+            } else {
+                dp = dp_set(dp, i, w, skip);
+            }
+            w = w + 1;
+        }
+        i = i + 1;
+    }
+    dp_get(dp, n, cap)
+}
+
+// Backtrack to find which items were selected
+// Returns Arr8 where selected[i] = 1 if item i was taken
+fn knapsack_items(weights: Arr8, values: Arr8, n: Int, cap: Int) -> Arr8 {
+    // First build the DP table
+    let mut dp = dp_zero();
+    let mut i = 1;
+    while i <= n {
+        let wi = a8_get(weights, i - 1);
+        let vi = a8_get(values, i - 1);
+        let mut w = 0;
+        while w <= cap {
+            let skip = dp_get(dp, i - 1, w);
+            if wi <= w {
+                let take = dp_get(dp, i - 1, w - wi) + vi;
+                dp = dp_set(dp, i, w, max_val(skip, take));
+            } else {
+                dp = dp_set(dp, i, w, skip);
+            }
+            w = w + 1;
+        }
+        i = i + 1;
+    }
+    // Backtrack
+    let mut selected = a8_zero();
+    let mut w = cap;
+    i = n;
+    while i > 0 {
+        if dp_get(dp, i, w) != dp_get(dp, i - 1, w) {
+            selected = a8_set(selected, i - 1, 1);
+            w = w - a8_get(weights, i - 1);
+        }
+        i = i - 1;
+    }
+    selected
+}
+
+// === Tests ===
+
+fn test_empty_knapsack() {
+    let w = a8_zero();
+    let v = a8_zero();
+    assert_eq(knapsack(w, v, 0, 7), 0);
+}
+
+fn test_single_item_fits() {
+    // Item: weight=3, value=10, capacity=5
+    let w = Arr8 { a0: 3, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 10, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(w, v, 1, 5), 10);
+}
+
+fn test_single_item_no_fit() {
+    // Item: weight=6, value=10, capacity=5
+    let w = Arr8 { a0: 6, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 10, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(w, v, 1, 5), 0);
+}
+
+fn test_classic_knapsack() {
+    // Items: (weight, value) = (1,1), (3,4), (4,5), (5,7)
+    // Capacity = 7
+    // Best: items 1,3 (weights 3+4=7, values 4+5=9)
+    let w = Arr8 { a0: 1, a1: 3, a2: 4, a3: 5, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 1, a1: 4, a2: 5, a3: 7, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(w, v, 4, 7), 9);
+}
+
+fn test_all_items_fit() {
+    // Items: (1,2), (1,3), (1,4) capacity=7
+    // All fit, total value = 9
+    let w = Arr8 { a0: 1, a1: 1, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 2, a1: 3, a2: 4, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(w, v, 3, 7), 9);
+}
+
+fn test_greedy_suboptimal() {
+    // Greedy by value/weight fails here
+    // Items: (3,4), (4,5), (2,3)
+    // Capacity = 6
+    // Greedy: item 2 (v/w=1.5), item 0 (v/w=1.33) -> w=5, v=7, can add item 2 w=2 -> w=7 no
+    // Optimal: items 0 and 2: w=3+2=5, v=4+3=7. OR items 0 and 1: w=3+4=7>6 no
+    // Items 1 and 2: w=4+2=6, v=5+3=8
+    let w = Arr8 { a0: 3, a1: 4, a2: 2, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 4, a1: 5, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(w, v, 3, 6), 8);
+}
+
+fn test_equal_weights() {
+    // All items weight 2, values differ, capacity 4 -> pick 2 most valuable
+    // Items: (2,1), (2,5), (2,3), (2,2)
+    // Best: items 1,2 value=5+3=8
+    let w = Arr8 { a0: 2, a1: 2, a2: 2, a3: 2, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 1, a1: 5, a2: 3, a3: 2, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(w, v, 4, 4), 8);
+}
+
+fn test_backtrack_items() {
+    // Items: (1,1), (3,4), (4,5), (5,7) capacity=7
+    // Optimal: items 1 and 2 (index 1 and 2), weight 3+4=7, value 4+5=9
+    let w = Arr8 { a0: 1, a1: 3, a2: 4, a3: 5, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 1, a1: 4, a2: 5, a3: 7, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let sel = knapsack_items(w, v, 4, 7);
+    // Items 1 and 2 selected
+    assert_eq(a8_get(sel, 1), 1);
+    assert_eq(a8_get(sel, 2), 1);
+    // Check total weight of selected
+    let total_w = a8_get(sel, 0) * a8_get(w, 0) +
+                  a8_get(sel, 1) * a8_get(w, 1) +
+                  a8_get(sel, 2) * a8_get(w, 2) +
+                  a8_get(sel, 3) * a8_get(w, 3);
+    assert_eq(total_w <= 7, true);
+    // Check total value
+    let total_v = a8_get(sel, 0) * a8_get(v, 0) +
+                  a8_get(sel, 1) * a8_get(v, 1) +
+                  a8_get(sel, 2) * a8_get(v, 2) +
+                  a8_get(sel, 3) * a8_get(v, 3);
+    assert_eq(total_v, 9);
+}
+
+fn test_capacity_zero() {
+    let w = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 10, a1: 20, a2: 30, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(w, v, 3, 0), 0);
+}
+
+fn test_heavy_items() {
+    // All items heavier than capacity
+    let w = Arr8 { a0: 5, a1: 6, a2: 7, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 10, a1: 20, a2: 30, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(w, v, 3, 4), 0);
+}
+
+fn test_five_items() {
+    // 5 items, capacity 7
+    // Items: (2,3), (3,4), (4,5), (1,2), (2,4)
+    // Best combination: items 1,3,4 -> w=3+1+2=6, v=4+2+4=10
+    // Or items 0,1,4 -> w=2+3+2=7, v=3+4+4=11
+    let w = Arr8 { a0: 2, a1: 3, a2: 4, a3: 1, a4: 2, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 3, a1: 4, a2: 5, a3: 2, a4: 4, a5: 0, a6: 0, a7: 0 };
+    assert_eq(knapsack(w, v, 5, 7), 11);
+}
+
+fn test_knapsack_monotonic() {
+    // Increasing capacity should not decrease optimal value
+    let w = Arr8 { a0: 2, a1: 3, a2: 4, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let v = Arr8 { a0: 3, a1: 4, a2: 5, a3: 2, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let mut prev = 0;
+    let mut c = 0;
+    while c <= 7 {
+        let cur = knapsack(w, v, 4, c);
+        assert_eq(cur >= prev, true);
+        prev = cur;
+        c = c + 1;
+    }
+}
+
+fn main() -> Int {
+    test_empty_knapsack();
+    test_single_item_fits();
+    test_single_item_no_fit();
+    test_classic_knapsack();
+    test_all_items_fit();
+    test_greedy_suboptimal();
+    test_equal_weights();
+    test_backtrack_items();
+    test_capacity_zero();
+    test_heavy_items();
+    test_five_items();
+    test_knapsack_monotonic();
+    print("[OK] 352_knapsack_aot");
+    0
+}

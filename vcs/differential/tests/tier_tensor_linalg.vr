@@ -1,0 +1,397 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, tensor, linalg
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for linear algebra
+/// operations. Tests matrix multiplication, transpose, determinant, trace, and vector
+/// operations using struct-based matrix simulation.
+
+// ============================================================================
+// 2x2 matrix (row-major: [a b; c d])
+// ============================================================================
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2_new(a: Int, b: Int, c: Int, d: Int) -> Mat2 {
+    Mat2 { a: a, b: b, c: c, d: d }
+}
+
+fn mat2_identity() -> Mat2 {
+    Mat2 { a: 1, b: 0, c: 0, d: 1 }
+}
+
+fn mat2_add(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 { a: m.a + n.a, b: m.b + n.b, c: m.c + n.c, d: m.d + n.d }
+}
+
+fn mat2_sub(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 { a: m.a - n.a, b: m.b - n.b, c: m.c - n.c, d: m.d - n.d }
+}
+
+fn mat2_mul(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+fn mat2_scale(m: Mat2, s: Int) -> Mat2 {
+    Mat2 { a: m.a * s, b: m.b * s, c: m.c * s, d: m.d * s }
+}
+
+fn mat2_transpose(m: Mat2) -> Mat2 {
+    Mat2 { a: m.a, b: m.c, c: m.b, d: m.d }
+}
+
+fn mat2_det(m: Mat2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn mat2_trace(m: Mat2) -> Int {
+    m.a + m.d
+}
+
+/// Print a 2x2 matrix
+fn mat2_print(label: Text, m: Mat2) {
+    println(f"  {label}[0,0]: {m.a}");
+    println(f"  {label}[0,1]: {m.b}");
+    println(f"  {label}[1,0]: {m.c}");
+    println(f"  {label}[1,1]: {m.d}");
+}
+
+// ============================================================================
+// 3x3 matrix (row-major: 9 elements)
+// ============================================================================
+
+type Mat3 is {
+    e00: Int, e01: Int, e02: Int,
+    e10: Int, e11: Int, e12: Int,
+    e20: Int, e21: Int, e22: Int
+};
+
+fn mat3_identity() -> Mat3 {
+    Mat3 {
+        e00: 1, e01: 0, e02: 0,
+        e10: 0, e11: 1, e12: 0,
+        e20: 0, e21: 0, e22: 1
+    }
+}
+
+fn mat3_mul(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        e00: a.e00 * b.e00 + a.e01 * b.e10 + a.e02 * b.e20,
+        e01: a.e00 * b.e01 + a.e01 * b.e11 + a.e02 * b.e21,
+        e02: a.e00 * b.e02 + a.e01 * b.e12 + a.e02 * b.e22,
+        e10: a.e10 * b.e00 + a.e11 * b.e10 + a.e12 * b.e20,
+        e11: a.e10 * b.e01 + a.e11 * b.e11 + a.e12 * b.e21,
+        e12: a.e10 * b.e02 + a.e11 * b.e12 + a.e12 * b.e22,
+        e20: a.e20 * b.e00 + a.e21 * b.e10 + a.e22 * b.e20,
+        e21: a.e20 * b.e01 + a.e21 * b.e11 + a.e22 * b.e21,
+        e22: a.e20 * b.e02 + a.e21 * b.e12 + a.e22 * b.e22
+    }
+}
+
+fn mat3_transpose(m: Mat3) -> Mat3 {
+    Mat3 {
+        e00: m.e00, e01: m.e10, e02: m.e20,
+        e10: m.e01, e11: m.e11, e12: m.e21,
+        e20: m.e02, e21: m.e12, e22: m.e22
+    }
+}
+
+fn mat3_det(m: Mat3) -> Int {
+    m.e00 * (m.e11 * m.e22 - m.e12 * m.e21)
+    - m.e01 * (m.e10 * m.e22 - m.e12 * m.e20)
+    + m.e02 * (m.e10 * m.e21 - m.e11 * m.e20)
+}
+
+fn mat3_trace(m: Mat3) -> Int {
+    m.e00 + m.e11 + m.e22
+}
+
+/// Print a 3x3 matrix
+fn mat3_print(label: Text, m: Mat3) {
+    println(f"  {label}[0,0]: {m.e00}");
+    println(f"  {label}[0,1]: {m.e01}");
+    println(f"  {label}[0,2]: {m.e02}");
+    println(f"  {label}[1,0]: {m.e10}");
+    println(f"  {label}[1,1]: {m.e11}");
+    println(f"  {label}[1,2]: {m.e12}");
+    println(f"  {label}[2,0]: {m.e20}");
+    println(f"  {label}[2,1]: {m.e21}");
+    println(f"  {label}[2,2]: {m.e22}");
+}
+
+// ============================================================================
+// Vector type
+// ============================================================================
+
+type Vec3 is { x: Int, y: Int, z: Int };
+
+fn vec3_dot(a: Vec3, b: Vec3) -> Int {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn vec3_add(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+}
+
+fn vec3_cross(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x
+    }
+}
+
+fn mat3_vec_mul(m: Mat3, v: Vec3) -> Vec3 {
+    Vec3 {
+        x: m.e00 * v.x + m.e01 * v.y + m.e02 * v.z,
+        y: m.e10 * v.x + m.e11 * v.y + m.e12 * v.z,
+        z: m.e20 * v.x + m.e21 * v.y + m.e22 * v.z
+    }
+}
+
+// ============================================================================
+// Test functions
+// ============================================================================
+
+/// Test 2x2 matrix multiplication
+fn test_mat2_multiply() {
+    println("=== 2x2 Matrix Multiplication ===");
+
+    // [1 2; 3 4] * [5 6; 7 8] = [19 22; 43 50]
+    let m = mat2_new(1, 2, 3, 4);
+    let n = mat2_new(5, 6, 7, 8);
+    let p = mat2_mul(m, n);
+    println(f"[1 2; 3 4] * [5 6; 7 8]:");
+    mat2_print("p", p);
+
+    // Identity multiplication
+    let id = mat2_identity();
+    let mid = mat2_mul(m, id);
+    println(f"M * I:");
+    mat2_print("mid", mid);
+
+    let idm = mat2_mul(id, m);
+    println(f"I * M:");
+    mat2_print("idm", idm);
+
+    // Fibonacci matrix powers: [1 1; 1 0]^n
+    let fib = mat2_new(1, 1, 1, 0);
+    let f2 = mat2_mul(fib, fib);
+    let f3 = mat2_mul(f2, fib);
+    let f4 = mat2_mul(f3, fib);
+    let f5 = mat2_mul(f4, fib);
+    println(f"Fib matrix^2 top-left: {f2.a}");
+    println(f"Fib matrix^3 top-left: {f3.a}");
+    println(f"Fib matrix^4 top-left: {f4.a}");
+    println(f"Fib matrix^5 top-left: {f5.a}");
+
+    // Non-commutativity: M*N != N*M in general
+    let nm = mat2_mul(n, m);
+    println(f"N * M (compare to M*N above):");
+    mat2_print("nm", nm);
+}
+
+/// Test transpose operations
+fn test_transpose() {
+    println("\n=== Transpose ===");
+
+    // 2x2 transpose
+    let m = mat2_new(1, 2, 3, 4);
+    let mt = mat2_transpose(m);
+    println(f"transpose([1 2; 3 4]):");
+    mat2_print("mt", mt);
+
+    // Double transpose = original
+    let mtt = mat2_transpose(mt);
+    println(f"double transpose:");
+    mat2_print("mtt", mtt);
+
+    // Symmetric matrix: transpose == self
+    let sym = mat2_new(5, 3, 3, 7);
+    let symt = mat2_transpose(sym);
+    let sym_equal = sym.a == symt.a && sym.b == symt.b && sym.c == symt.c && sym.d == symt.d;
+    println(f"symmetric transpose == self: {sym_equal}");
+
+    // 3x3 transpose
+    let m3 = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    let m3t = mat3_transpose(m3);
+    println(f"transpose(3x3 [1..9]):");
+    mat3_print("m3t", m3t);
+
+    // (A*B)^T == B^T * A^T
+    let a = mat2_new(1, 2, 3, 4);
+    let b = mat2_new(5, 6, 7, 8);
+    let ab_t = mat2_transpose(mat2_mul(a, b));
+    let bt_at = mat2_mul(mat2_transpose(b), mat2_transpose(a));
+    let transpose_rule = ab_t.a == bt_at.a && ab_t.b == bt_at.b && ab_t.c == bt_at.c && ab_t.d == bt_at.d;
+    println(f"(A*B)^T == B^T*A^T: {transpose_rule}");
+}
+
+/// Test determinant computations
+fn test_determinant() {
+    println("\n=== Determinant ===");
+
+    // det([1 2; 3 4]) = 1*4 - 2*3 = -2
+    let m = mat2_new(1, 2, 3, 4);
+    println(f"det([1 2; 3 4]): {mat2_det(m)}");
+
+    // det(I) = 1
+    let id = mat2_identity();
+    println(f"det(I_2x2): {mat2_det(id)}");
+
+    // Singular matrix: det = 0
+    let sing = mat2_new(2, 4, 1, 2);
+    println(f"det([2 4; 1 2]) singular: {mat2_det(sing)}");
+
+    // det(A*B) = det(A)*det(B)
+    let a = mat2_new(2, 3, 1, 4);
+    let b = mat2_new(5, 1, 2, 3);
+    let ab = mat2_mul(a, b);
+    println(f"det(A): {mat2_det(a)}");
+    println(f"det(B): {mat2_det(b)}");
+    println(f"det(A*B): {mat2_det(ab)}");
+    println(f"det(A)*det(B): {mat2_det(a) * mat2_det(b)}");
+
+    // det(A^T) == det(A)
+    println(f"det(A^T): {mat2_det(mat2_transpose(a))}");
+
+    // det(cA) = c^2 * det(A) for 2x2
+    let scaled = mat2_scale(a, 3);
+    println(f"det(3*A): {mat2_det(scaled)}");
+    println(f"9*det(A): {9 * mat2_det(a)}");
+
+    // 3x3 determinants
+    let m3 = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    println(f"det(3x3 [1..9]): {mat3_det(m3)}");
+
+    let primes = Mat3 {
+        e00: 2, e01: 3, e02: 5,
+        e10: 7, e11: 11, e12: 13,
+        e20: 17, e21: 19, e22: 23
+    };
+    println(f"det(3x3 primes): {mat3_det(primes)}");
+
+    println(f"det(I_3x3): {mat3_det(mat3_identity())}");
+}
+
+/// Test trace computations
+fn test_trace() {
+    println("\n=== Trace ===");
+
+    let m = mat2_new(1, 2, 3, 4);
+    println(f"trace([1 2; 3 4]): {mat2_trace(m)}");
+
+    let id = mat2_identity();
+    println(f"trace(I_2x2): {mat2_trace(id)}");
+
+    // trace(A + B) = trace(A) + trace(B)
+    let a = mat2_new(1, 2, 3, 4);
+    let b = mat2_new(5, 6, 7, 8);
+    let ab_sum = mat2_add(a, b);
+    println(f"trace(A): {mat2_trace(a)}");
+    println(f"trace(B): {mat2_trace(b)}");
+    println(f"trace(A+B): {mat2_trace(ab_sum)}");
+    println(f"trace(A)+trace(B): {mat2_trace(a) + mat2_trace(b)}");
+
+    // trace(A^T) = trace(A)
+    println(f"trace(A^T): {mat2_trace(mat2_transpose(a))}");
+
+    // 3x3 traces
+    let m3 = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 9
+    };
+    println(f"trace(3x3 [1..9]): {mat3_trace(m3)}");
+    println(f"trace(I_3x3): {mat3_trace(mat3_identity())}");
+}
+
+/// Test vector and matrix-vector operations
+fn test_vector_ops() {
+    println("\n=== Vector Operations ===");
+
+    let u = Vec3 { x: 1, y: 2, z: 3 };
+    let v = Vec3 { x: 4, y: 5, z: 6 };
+
+    // Dot product
+    println(f"dot([1,2,3], [4,5,6]): {vec3_dot(u, v)}");
+
+    // Self-dot = sum of squares
+    println(f"dot([1,2,3], [1,2,3]): {vec3_dot(u, u)}");
+
+    // Orthogonal vectors dot = 0
+    let i_hat = Vec3 { x: 1, y: 0, z: 0 };
+    let j_hat = Vec3 { x: 0, y: 1, z: 0 };
+    let k_hat = Vec3 { x: 0, y: 0, z: 1 };
+    println(f"dot(i, j): {vec3_dot(i_hat, j_hat)}");
+    println(f"dot(i, k): {vec3_dot(i_hat, k_hat)}");
+    println(f"dot(j, k): {vec3_dot(j_hat, k_hat)}");
+
+    // Cross product
+    let cross_uv = vec3_cross(u, v);
+    println(f"cross([1,2,3], [4,5,6]): ({cross_uv.x}, {cross_uv.y}, {cross_uv.z})");
+
+    // i x j = k
+    let ixj = vec3_cross(i_hat, j_hat);
+    println(f"i x j: ({ixj.x}, {ixj.y}, {ixj.z})");
+
+    // j x k = i
+    let jxk = vec3_cross(j_hat, k_hat);
+    println(f"j x k: ({jxk.x}, {jxk.y}, {jxk.z})");
+
+    // Anti-commutativity: u x v = -(v x u)
+    let cross_vu = vec3_cross(v, u);
+    println(f"cross([4,5,6], [1,2,3]): ({cross_vu.x}, {cross_vu.y}, {cross_vu.z})");
+
+    // Matrix-vector multiply: I*v = v
+    let id = mat3_identity();
+    let iv = mat3_vec_mul(id, u);
+    println(f"I * [1,2,3]: ({iv.x}, {iv.y}, {iv.z})");
+
+    // Scale matrix * v
+    let scale = Mat3 {
+        e00: 2, e01: 0, e02: 0,
+        e10: 0, e11: 3, e12: 0,
+        e20: 0, e21: 0, e22: 4
+    };
+    let sv = mat3_vec_mul(scale, u);
+    println(f"diag(2,3,4) * [1,2,3]: ({sv.x}, {sv.y}, {sv.z})");
+
+    // Distributive: M*(u+v) = M*u + M*v
+    let m = Mat3 {
+        e00: 2, e01: 0, e02: 1,
+        e10: 0, e11: 3, e12: 0,
+        e20: 1, e21: 0, e22: 2
+    };
+    let uv_sum = vec3_add(u, v);
+    let m_uv = mat3_vec_mul(m, uv_sum);
+    let mu = mat3_vec_mul(m, u);
+    let mv = mat3_vec_mul(m, v);
+    let mu_mv = vec3_add(mu, mv);
+    let distrib = m_uv.x == mu_mv.x && m_uv.y == mu_mv.y && m_uv.z == mu_mv.z;
+    println(f"M*(u+v) == M*u + M*v: {distrib}");
+}
+
+fn main() {
+    test_mat2_multiply();
+    test_transpose();
+    test_determinant();
+    test_trace();
+    test_vector_ops();
+}

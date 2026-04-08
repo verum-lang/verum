@@ -1,0 +1,368 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, convolution, image-processing, flat-array, kernel
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT 2D convolution / image processing with kernels applied to flat 2D grids
+
+// 6x6 grid stored as flat array of 36 elements (rows of 6)
+// We use two Arr16 records to hold up to 36 values
+type Grid6 is {
+    // Row 0-2 (indices 0-17)
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int,
+    a6: Int, a7: Int, a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int, a16: Int, a17: Int,
+    // Row 3-5 (indices 18-35)
+    a18: Int, a19: Int, a20: Int, a21: Int, a22: Int, a23: Int,
+    a24: Int, a25: Int, a26: Int, a27: Int, a28: Int, a29: Int,
+    a30: Int, a31: Int, a32: Int, a33: Int, a34: Int, a35: Int
+};
+
+fn grid_new(v: Int) -> Grid6 {
+    Grid6 {
+        a0: v, a1: v, a2: v, a3: v, a4: v, a5: v,
+        a6: v, a7: v, a8: v, a9: v, a10: v, a11: v,
+        a12: v, a13: v, a14: v, a15: v, a16: v, a17: v,
+        a18: v, a19: v, a20: v, a21: v, a22: v, a23: v,
+        a24: v, a25: v, a26: v, a27: v, a28: v, a29: v,
+        a30: v, a31: v, a32: v, a33: v, a34: v, a35: v
+    }
+}
+
+fn grid_get(g: Grid6, i: Int) -> Int {
+    if i == 0 { g.a0 } else if i == 1 { g.a1 } else if i == 2 { g.a2 }
+    else if i == 3 { g.a3 } else if i == 4 { g.a4 } else if i == 5 { g.a5 }
+    else if i == 6 { g.a6 } else if i == 7 { g.a7 } else if i == 8 { g.a8 }
+    else if i == 9 { g.a9 } else if i == 10 { g.a10 } else if i == 11 { g.a11 }
+    else if i == 12 { g.a12 } else if i == 13 { g.a13 } else if i == 14 { g.a14 }
+    else if i == 15 { g.a15 } else if i == 16 { g.a16 } else if i == 17 { g.a17 }
+    else if i == 18 { g.a18 } else if i == 19 { g.a19 } else if i == 20 { g.a20 }
+    else if i == 21 { g.a21 } else if i == 22 { g.a22 } else if i == 23 { g.a23 }
+    else if i == 24 { g.a24 } else if i == 25 { g.a25 } else if i == 26 { g.a26 }
+    else if i == 27 { g.a27 } else if i == 28 { g.a28 } else if i == 29 { g.a29 }
+    else if i == 30 { g.a30 } else if i == 31 { g.a31 } else if i == 32 { g.a32 }
+    else if i == 33 { g.a33 } else if i == 34 { g.a34 } else { g.a35 }
+}
+
+fn grid_set(g: Grid6, i: Int, v: Int) -> Grid6 {
+    Grid6 {
+        a0: if i == 0 { v } else { g.a0 }, a1: if i == 1 { v } else { g.a1 },
+        a2: if i == 2 { v } else { g.a2 }, a3: if i == 3 { v } else { g.a3 },
+        a4: if i == 4 { v } else { g.a4 }, a5: if i == 5 { v } else { g.a5 },
+        a6: if i == 6 { v } else { g.a6 }, a7: if i == 7 { v } else { g.a7 },
+        a8: if i == 8 { v } else { g.a8 }, a9: if i == 9 { v } else { g.a9 },
+        a10: if i == 10 { v } else { g.a10 }, a11: if i == 11 { v } else { g.a11 },
+        a12: if i == 12 { v } else { g.a12 }, a13: if i == 13 { v } else { g.a13 },
+        a14: if i == 14 { v } else { g.a14 }, a15: if i == 15 { v } else { g.a15 },
+        a16: if i == 16 { v } else { g.a16 }, a17: if i == 17 { v } else { g.a17 },
+        a18: if i == 18 { v } else { g.a18 }, a19: if i == 19 { v } else { g.a19 },
+        a20: if i == 20 { v } else { g.a20 }, a21: if i == 21 { v } else { g.a21 },
+        a22: if i == 22 { v } else { g.a22 }, a23: if i == 23 { v } else { g.a23 },
+        a24: if i == 24 { v } else { g.a24 }, a25: if i == 25 { v } else { g.a25 },
+        a26: if i == 26 { v } else { g.a26 }, a27: if i == 27 { v } else { g.a27 },
+        a28: if i == 28 { v } else { g.a28 }, a29: if i == 29 { v } else { g.a29 },
+        a30: if i == 30 { v } else { g.a30 }, a31: if i == 31 { v } else { g.a31 },
+        a32: if i == 32 { v } else { g.a32 }, a33: if i == 33 { v } else { g.a33 },
+        a34: if i == 34 { v } else { g.a34 }, a35: if i == 35 { v } else { g.a35 }
+    }
+}
+
+// Access grid as 2D: grid_get2d(g, row, col) with bounds checking
+fn grid_get2d(g: Grid6, row: Int, col: Int) -> Int {
+    if row < 0 || row >= 6 || col < 0 || col >= 6 { 0 }
+    else { grid_get(g, row * 6 + col) }
+}
+
+fn grid_set2d(g: Grid6, row: Int, col: Int, v: Int) -> Grid6 {
+    if row < 0 || row >= 6 || col < 0 || col >= 6 { g }
+    else { grid_set(g, row * 6 + col, v) }
+}
+
+// 3x3 kernel stored as 9 integers
+type Kernel3 is {
+    k0: Int, k1: Int, k2: Int,
+    k3: Int, k4: Int, k5: Int,
+    k6: Int, k7: Int, k8: Int
+};
+
+fn kern_get(k: Kernel3, r: Int, c: Int) -> Int {
+    let idx = r * 3 + c;
+    if idx == 0 { k.k0 } else if idx == 1 { k.k1 } else if idx == 2 { k.k2 }
+    else if idx == 3 { k.k3 } else if idx == 4 { k.k4 } else if idx == 5 { k.k5 }
+    else if idx == 6 { k.k6 } else if idx == 7 { k.k7 } else { k.k8 }
+}
+
+// Apply 3x3 convolution at a single pixel (row, col) with zero-padding
+fn convolve_pixel(g: Grid6, k: Kernel3, row: Int, col: Int) -> Int {
+    let mut sum = 0;
+    let mut kr = 0;
+    while kr < 3 {
+        let mut kc = 0;
+        while kc < 3 {
+            let gr = row + kr - 1;
+            let gc = col + kc - 1;
+            sum = sum + grid_get2d(g, gr, gc) * kern_get(k, kr, kc);
+            kc = kc + 1;
+        }
+        kr = kr + 1;
+    }
+    sum
+}
+
+// Apply 3x3 convolution to entire 6x6 grid
+fn convolve(g: Grid6, k: Kernel3) -> Grid6 {
+    let mut result = grid_new(0);
+    let mut r = 0;
+    while r < 6 {
+        let mut c = 0;
+        while c < 6 {
+            let v = convolve_pixel(g, k, r, c);
+            result = grid_set2d(result, r, c, v);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+// Clamp value to [lo, hi]
+fn clamp(v: Int, lo: Int, hi: Int) -> Int {
+    if v < lo { lo } else if v > hi { hi } else { v }
+}
+
+// Clamp all grid values to [0, 255]
+fn grid_clamp(g: Grid6) -> Grid6 {
+    let mut result = g;
+    let mut i = 0;
+    while i < 36 {
+        result = grid_set(result, i, clamp(grid_get(result, i), 0, 255));
+        i = i + 1;
+    }
+    result
+}
+
+// Sum all grid values
+fn grid_sum(g: Grid6) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < 36 {
+        s = s + grid_get(g, i);
+        i = i + 1;
+    }
+    s
+}
+
+// Max value in grid
+fn grid_max(g: Grid6) -> Int {
+    let mut m = grid_get(g, 0);
+    let mut i = 1;
+    while i < 36 {
+        let v = grid_get(g, i);
+        if v > m { m = v; }
+        i = i + 1;
+    }
+    m
+}
+
+// Min value in grid
+fn grid_min(g: Grid6) -> Int {
+    let mut m = grid_get(g, 0);
+    let mut i = 1;
+    while i < 36 {
+        let v = grid_get(g, i);
+        if v < m { m = v; }
+        i = i + 1;
+    }
+    m
+}
+
+// Absolute value
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+// Kernel sum (useful for normalization checking)
+fn kern_sum(k: Kernel3) -> Int {
+    k.k0 + k.k1 + k.k2 + k.k3 + k.k4 + k.k5 + k.k6 + k.k7 + k.k8
+}
+
+fn main() -> Int {
+    // Build a test image: gradient from top-left to bottom-right
+    let mut img = grid_new(0);
+    let mut r = 0;
+    while r < 6 {
+        let mut c = 0;
+        while c < 6 {
+            img = grid_set2d(img, r, c, r * 10 + c * 10);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+
+    // === Test 1: Verify image construction ===
+    assert_eq(grid_get2d(img, 0, 0), 0);
+    assert_eq(grid_get2d(img, 0, 5), 50);
+    assert_eq(grid_get2d(img, 5, 0), 50);
+    assert_eq(grid_get2d(img, 5, 5), 100);
+    assert_eq(grid_get2d(img, 2, 3), 50);
+
+    // === Test 2: Identity kernel ===
+    let identity = Kernel3 { k0: 0, k1: 0, k2: 0, k3: 0, k4: 1, k5: 0, k6: 0, k7: 0, k8: 0 };
+    let id_result = convolve(img, identity);
+    // Interior pixels should be unchanged
+    assert_eq(grid_get2d(id_result, 2, 2), grid_get2d(img, 2, 2));
+    assert_eq(grid_get2d(id_result, 3, 3), grid_get2d(img, 3, 3));
+    assert_eq(grid_get2d(id_result, 1, 4), grid_get2d(img, 1, 4));
+    // Edge pixel at (0,0): identity still gives same value (zero-padded doesn't affect center)
+    assert_eq(grid_get2d(id_result, 0, 0), 0);
+
+    // === Test 3: Box blur kernel (all 1s) ===
+    let box_blur = Kernel3 { k0: 1, k1: 1, k2: 1, k3: 1, k4: 1, k5: 1, k6: 1, k7: 1, k8: 1 };
+    assert_eq(kern_sum(box_blur), 9);
+    let blurred = convolve(img, box_blur);
+
+    // Center pixel (2,2): sum of 3x3 neighborhood
+    // (1,1)=20, (1,2)=30, (1,3)=40
+    // (2,1)=30, (2,2)=40, (2,3)=50
+    // (3,1)=40, (3,2)=50, (3,3)=60
+    // sum = 20+30+40+30+40+50+40+50+60 = 360
+    assert_eq(grid_get2d(blurred, 2, 2), 360);
+
+    // === Test 4: Box blur at corner (0,0) with zero-padding ===
+    // Neighbors: only (0,0)=0, (0,1)=10, (1,0)=10, (1,1)=20
+    assert_eq(grid_get2d(blurred, 0, 0), 40);  // 0+10+10+20=40
+
+    // === Test 5: Uniform image under box blur ===
+    let uniform = grid_new(10);
+    let uniform_blurred = convolve(uniform, box_blur);
+    // Interior pixel: 10*9 = 90
+    assert_eq(grid_get2d(uniform_blurred, 2, 2), 90);
+    assert_eq(grid_get2d(uniform_blurred, 3, 3), 90);
+    // Corner: 10*4 = 40 (only 4 of 9 pixels in bounds)
+    assert_eq(grid_get2d(uniform_blurred, 0, 0), 40);
+    // Edge (not corner): 10*6 = 60
+    assert_eq(grid_get2d(uniform_blurred, 0, 2), 60);
+
+    // === Test 6: Sobel horizontal edge detection ===
+    // Detects vertical edges (changes in x direction)
+    let sobel_x = Kernel3 { k0: -1, k1: 0, k2: 1, k3: -2, k4: 0, k5: 2, k6: -1, k7: 0, k8: 1 };
+    assert_eq(kern_sum(sobel_x), 0);  // Edge kernels sum to 0
+    let edges_x = convolve(img, sobel_x);
+
+    // For our diagonal gradient, horizontal Sobel should detect changes
+    // At (2,2): -20+40-2*30+2*50-40+60 = -20+40-60+100-40+60 = 80
+    assert_eq(grid_get2d(edges_x, 2, 2), 80);
+
+    // === Test 7: Sobel vertical edge detection ===
+    let sobel_y = Kernel3 { k0: -1, k1: -2, k2: -1, k3: 0, k4: 0, k5: 0, k6: 1, k7: 2, k8: 1 };
+    assert_eq(kern_sum(sobel_y), 0);
+    let edges_y = convolve(img, sobel_y);
+
+    // Same gradient, so Sobel Y response at (2,2) should equal Sobel X
+    assert_eq(grid_get2d(edges_y, 2, 2), 80);
+
+    // === Test 8: Horizontal stripe image ===
+    // rows 0-2 = 0, rows 3-5 = 100
+    let mut stripe_h = grid_new(0);
+    let mut sr = 3;
+    while sr < 6 {
+        let mut sc = 0;
+        while sc < 6 {
+            stripe_h = grid_set2d(stripe_h, sr, sc, 100);
+            sc = sc + 1;
+        }
+        sr = sr + 1;
+    }
+    assert_eq(grid_get2d(stripe_h, 2, 0), 0);
+    assert_eq(grid_get2d(stripe_h, 3, 0), 100);
+
+    // Sobel Y on horizontal stripe: should detect the edge at row 2-3 boundary
+    let stripe_edges = convolve(stripe_h, sobel_y);
+    // At (2,2): top row=0, middle row=0, bottom row=100
+    // (-1*0)+(-2*0)+(-1*0)+(0*0)+(0*0)+(0*0)+(1*100)+(2*100)+(1*100) = 400
+    assert_eq(grid_get2d(stripe_edges, 2, 2), 400);
+    // At (4,2): all neighbors are 100
+    // (-1+−2+−1+0+0+0+1+2+1)*100 = 0
+    assert_eq(grid_get2d(stripe_edges, 4, 2), 0);
+
+    // === Test 9: Sharpen kernel ===
+    let sharpen = Kernel3 { k0: 0, k1: -1, k2: 0, k3: -1, k4: 5, k5: -1, k6: 0, k7: -1, k8: 0 };
+    assert_eq(kern_sum(sharpen), 1);
+    let sharpened = convolve(uniform, sharpen);
+    // Uniform image: sharpening shouldn't change interior (Laplacian = 0)
+    assert_eq(grid_get2d(sharpened, 2, 2), 10);  // 5*10 - 4*10 = 10
+
+    // === Test 10: Emboss kernel ===
+    let emboss = Kernel3 { k0: -2, k1: -1, k2: 0, k3: -1, k4: 1, k5: 1, k6: 0, k7: 1, k8: 2 };
+    assert_eq(kern_sum(emboss), 1);
+    let embossed = convolve(img, emboss);
+    // Just verify it produces reasonable values
+    let emb_val = grid_get2d(embossed, 3, 3);
+    assert(emb_val != 0);  // Non-zero for gradient image
+
+    // === Test 11: Zero kernel produces zero output ===
+    let zero_kern = Kernel3 { k0: 0, k1: 0, k2: 0, k3: 0, k4: 0, k5: 0, k6: 0, k7: 0, k8: 0 };
+    let zero_result = convolve(img, zero_kern);
+    assert_eq(grid_sum(zero_result), 0);
+
+    // === Test 12: Scale kernel = scalar multiplication ===
+    let scale3 = Kernel3 { k0: 0, k1: 0, k2: 0, k3: 0, k4: 3, k5: 0, k6: 0, k7: 0, k8: 0 };
+    let scaled = convolve(img, scale3);
+    assert_eq(grid_get2d(scaled, 2, 2), 3 * grid_get2d(img, 2, 2));
+    assert_eq(grid_get2d(scaled, 4, 1), 3 * grid_get2d(img, 4, 1));
+
+    // === Test 13: Clamping ===
+    let big_vals = grid_new(300);
+    let clamped = grid_clamp(big_vals);
+    assert_eq(grid_get(clamped, 0), 255);
+    assert_eq(grid_get(clamped, 35), 255);
+
+    let neg_vals = grid_new(-50);
+    let clamped_neg = grid_clamp(neg_vals);
+    assert_eq(grid_get(clamped_neg, 0), 0);
+
+    // === Test 14: Single bright pixel ===
+    let mut point = grid_new(0);
+    point = grid_set2d(point, 3, 3, 100);
+    let point_blurred = convolve(point, box_blur);
+    // The 3x3 neighborhood around (3,3) all get 100
+    assert_eq(grid_get2d(point_blurred, 3, 3), 100);
+    assert_eq(grid_get2d(point_blurred, 2, 2), 100);
+    assert_eq(grid_get2d(point_blurred, 4, 4), 100);
+    // But (1,1) is outside the 3x3 neighborhood
+    assert_eq(grid_get2d(point_blurred, 1, 1), 0);
+
+    // === Test 15: Gradient magnitude approximation ===
+    // |Gx| + |Gy| at a point
+    let gx = abs_val(grid_get2d(edges_x, 2, 2));
+    let gy = abs_val(grid_get2d(edges_y, 2, 2));
+    let grad_mag = gx + gy;
+    assert_eq(grad_mag, 160);  // 80 + 80
+
+    // === Test 16: Laplacian kernel ===
+    let laplacian = Kernel3 { k0: 0, k1: 1, k2: 0, k3: 1, k4: -4, k5: 1, k6: 0, k7: 1, k8: 0 };
+    assert_eq(kern_sum(laplacian), 0);
+    let lap_result = convolve(uniform, laplacian);
+    // Uniform: Laplacian = 0 everywhere interior
+    assert_eq(grid_get2d(lap_result, 2, 2), 0);
+    assert_eq(grid_get2d(lap_result, 3, 3), 0);
+
+    // === Test 17: Grid statistics ===
+    assert_eq(grid_min(img), 0);
+    assert_eq(grid_max(img), 100);
+    // Sum: each row has values r*10+0, r*10+10, ..., r*10+50
+    // Row sum = 6*r*10 + (0+10+20+30+40+50) = 60r + 150
+    // Total = 60*(0+1+2+3+4+5) + 6*150 = 60*15 + 900 = 900 + 900 = 1800
+    assert_eq(grid_sum(img), 1800);
+
+    // === Test 18: Convolve preserves total energy with box blur ===
+    // For interior-heavy images, box blur * 9 ~ sum * 9 (approximately)
+    // Not exactly due to boundary effects, but grid_sum should be close
+    let blur_sum = grid_sum(blurred);
+    // Interior 4x4: each pixel sum of 9 neighbors. Boundary pixels less.
+    // Just verify blur_sum > 0
+    assert(blur_sum > 0);
+
+    0
+}

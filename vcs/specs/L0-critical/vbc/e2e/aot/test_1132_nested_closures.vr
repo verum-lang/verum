@@ -1,0 +1,104 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: closures, nested, capture, higher-order
+// @description: Test nested closure patterns and multi-level capture
+
+fn test_nested_capture() -> Int {
+    let x = 10;
+    let outer = |a: Int| -> Int {
+        let y = x + a;
+        let inner = |b: Int| -> Int { y + b };
+        inner(5)
+    };
+    let result = outer(3);
+    // x=10, a=3, y=13, b=5, result=18
+    if result != 18 {
+        print(f"FAIL nested_capture: {result}, expected 18");
+        return 1;
+    }
+    print("  nested_capture: OK");
+    0
+}
+
+fn test_closure_in_loop() -> Int {
+    let mut funcs = List.new();
+    let mut i = 0;
+    while i < 5 {
+        let val = i * 10;
+        funcs.push(|x: Int| -> Int { x + val });
+        i = i + 1;
+    }
+    // Each closure captures its own `val`
+    let r0 = funcs[0](1);  // 1 + 0 = 1
+    if r0 != 1 {
+        print(f"FAIL closure_loop[0]: {r0}, expected 1");
+        return 1;
+    }
+    let r3 = funcs[3](1);  // 1 + 30 = 31
+    if r3 != 31 {
+        print(f"FAIL closure_loop[3]: {r3}, expected 31");
+        return 1;
+    }
+    print("  closure_in_loop: OK");
+    0
+}
+
+fn apply_fn(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn test_closure_as_arg() -> Int {
+    let multiplier = 7;
+    let result = apply_fn(|x: Int| -> Int { x * multiplier }, 6);
+    if result != 42 {
+        print(f"FAIL closure_as_arg: {result}, expected 42");
+        return 1;
+    }
+    print("  closure_as_arg: OK");
+    0
+}
+
+fn test_closure_immediate() -> Int {
+    // Immediately invoked closure
+    let result = (|x: Int| -> Int { x * x })(7);
+    if result != 49 {
+        print(f"FAIL immediate: {result}, expected 49");
+        return 1;
+    }
+    print("  closure_immediate: OK");
+    0
+}
+
+fn test_closure_conditional() -> Int {
+    let use_add = true;
+    let op = if use_add {
+        |a: Int, b: Int| -> Int { a + b }
+    } else {
+        |a: Int, b: Int| -> Int { a * b }
+    };
+    let result = op(3, 4);
+    if result != 7 {
+        print(f"FAIL conditional: {result}, expected 7");
+        return 1;
+    }
+    print("  closure_conditional: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Nested Closure Tests:");
+    let mut failures = 0;
+    failures = failures + test_nested_capture();
+    failures = failures + test_closure_in_loop();
+    failures = failures + test_closure_as_arg();
+    failures = failures + test_closure_immediate();
+    failures = failures + test_closure_conditional();
+
+    if failures == 0 {
+        print("All nested closure tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

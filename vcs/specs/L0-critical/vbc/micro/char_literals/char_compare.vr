@@ -1,0 +1,14 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let a = 'A';
+    let b = 'B';
+    let a2 = 'A';
+
+    assert_eq(a, a2);
+    assert(a != b);
+    assert(a < b);
+    assert(b > a);
+}

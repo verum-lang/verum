@@ -1,0 +1,43 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, syntax
+// @description: Test single-function FFI declaration syntax
+
+// Test that @ffi("lib") extern fn ... syntax works for individual functions
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern fn ffi_add_i32(a: Int, b: Int) -> Int;
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern fn ffi_mul_i32(a: Int, b: Int) -> Int;
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern fn ffi_abs_i64(x: Int) -> Int;
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern fn ffi_sqrt_f64(x: Float) -> Float;
+
+fn main() {
+    // Test add (single-function FFI syntax)
+    let sum = ffi_add_i32(10, 20);
+    assert_eq(sum, 30);
+
+    // Test mul (single-function FFI syntax)
+    let prod = ffi_mul_i32(6, 7);
+    assert_eq(prod, 42);
+
+    // Test abs (single-function FFI syntax)
+    let abs_pos = ffi_abs_i64(5);
+    assert_eq(abs_pos, 5);
+
+    let abs_neg = ffi_abs_i64(-5);
+    assert_eq(abs_neg, 5);
+
+    // Test sqrt (single-function FFI syntax)
+    let sqrt_val = ffi_sqrt_f64(4.0);
+    assert(sqrt_val > 1.99 && sqrt_val < 2.01);
+
+    print("Single-function FFI syntax tests passed!\n");
+}

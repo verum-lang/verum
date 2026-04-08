@@ -1,0 +1,133 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: sum-types, methods, implement, enum
+// @description: Test sum type methods via implement blocks
+
+type Color is Red | Green | Blue | Custom(Int, Int, Int);
+
+implement Color {
+    fn name(&self) -> Text {
+        match self {
+            Red => "red",
+            Green => "green",
+            Blue => "blue",
+            Custom(_, _, _) => "custom",
+        }
+    }
+
+    fn is_primary(&self) -> Bool {
+        match self {
+            Red => true,
+            Green => false,
+            Blue => true,
+            Custom(_, _, _) => false,
+        }
+    }
+
+    fn brightness(&self) -> Int {
+        match self {
+            Red => 76,
+            Green => 150,
+            Blue => 29,
+            Custom(r, g, b) => (r + g + b) / 3,
+        }
+    }
+}
+
+fn test_color_name() -> Int {
+    let r = Red;
+    let g = Green;
+    let b = Blue;
+    let c = Custom(128, 64, 32);
+
+    if r.name() != "red" {
+        print(f"FAIL color_name: red={r.name()}");
+        return 1;
+    }
+    if g.name() != "green" {
+        print(f"FAIL color_name: green={g.name()}");
+        return 1;
+    }
+    if c.name() != "custom" {
+        print(f"FAIL color_name: custom={c.name()}");
+        return 1;
+    }
+    print("  color_name: OK");
+    0
+}
+
+fn test_is_primary() -> Int {
+    if !Red.is_primary() {
+        print("FAIL: Red should be primary");
+        return 1;
+    }
+    if Green.is_primary() {
+        print("FAIL: Green should not be primary");
+        return 1;
+    }
+    if !Blue.is_primary() {
+        print("FAIL: Blue should be primary");
+        return 1;
+    }
+    print("  is_primary: OK");
+    0
+}
+
+fn test_brightness() -> Int {
+    let rb = Red.brightness();
+    if rb != 76 {
+        print(f"FAIL brightness: red={rb}");
+        return 1;
+    }
+    let cb = Custom(90, 60, 30).brightness();
+    if cb != 60 {
+        print(f"FAIL brightness: custom={cb}, expected 60");
+        return 1;
+    }
+    print("  brightness: OK");
+    0
+}
+
+type Expr is Num(Int) | Add2(Heap<Expr>, Heap<Expr>) | Mul2(Heap<Expr>, Heap<Expr>);
+
+@allow(unbounded_recursion)
+fn eval_expr(e: Expr) -> Int {
+    match e {
+        Num(n) => n,
+        Add2(left, right) => eval_expr(*left) + eval_expr(*right),
+        Mul2(left, right) => eval_expr(*left) * eval_expr(*right),
+    }
+}
+
+fn test_expr_eval() -> Int {
+    // (2 + 3) * 4 = 20
+    let two = Heap(Num(2));
+    let three = Heap(Num(3));
+    let sum = Heap(Add2(two, three));
+    let four = Heap(Num(4));
+    let expr = Mul2(sum, four);
+    let result = eval_expr(expr);
+    if result != 20 {
+        print(f"FAIL expr_eval: {result}, expected 20");
+        return 1;
+    }
+    print("  expr_eval: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Enum Methods Tests:");
+    let mut failures = 0;
+    failures = failures + test_color_name();
+    failures = failures + test_is_primary();
+    failures = failures + test_brightness();
+    failures = failures + test_expr_eval();
+
+    if failures == 0 {
+        print("All enum method tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

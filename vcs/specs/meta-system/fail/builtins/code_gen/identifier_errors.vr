@@ -1,0 +1,25 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, code_gen, identifiers, error
+// @description: Tests error handling for identifier manipulation builtins
+// @expected-error: arguments
+
+// Test concat_idents with non-text argument
+meta fn test_concat_idents_wrong_arity() -> Text {
+    concat_idents()  // ERROR: requires at least one argument
+}
+
+// Test format_ident with no arguments
+meta fn test_format_ident_no_args() -> Text {
+    format_ident()  // ERROR: requires at least one argument
+}
+
+// Test stringify with too many arguments
+meta fn test_stringify_too_many() -> Text {
+    stringify("a", "b", "c")  // ERROR: expected 1 argument
+}
+
+fn main() {
+    @const test_concat_idents_wrong_arity();
+}

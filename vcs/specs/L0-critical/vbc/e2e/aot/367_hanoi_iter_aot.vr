@@ -1,0 +1,302 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, hanoi, tower-of-hanoi, iterative
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for iterative Tower of Hanoi.
+// Uses the binary algorithm: move disk (move_number & -move_number).
+// We track the state of 3 pegs, each holding up to 8 disks.
+// Also counts total moves and verifies 2^n - 1 moves for n disks.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Peg state: stack of disks (bottom at index 0, top at index top-1)
+// top = number of disks on peg
+type Peg is { disks: Arr8, top: Int };
+
+fn peg_empty() -> Peg {
+    Peg { disks: a8_zero(), top: 0 }
+}
+
+fn peg_push(p: Peg, disk: Int) -> Peg {
+    let new_disks = a8_set(p.disks, p.top, disk);
+    Peg { disks: new_disks, top: p.top + 1 }
+}
+
+fn peg_pop(p: Peg) -> Peg {
+    // Returns peg with top removed (caller must get peek first)
+    Peg { disks: p.disks, top: p.top - 1 }
+}
+
+fn peg_peek(p: Peg) -> Int {
+    // Returns top disk (0 if empty)
+    if p.top == 0 { 0 } else { a8_get(p.disks, p.top - 1) }
+}
+
+fn peg_is_empty(p: Peg) -> Int {
+    if p.top == 0 { 1 } else { 0 }
+}
+
+// Hanoi state: three pegs
+type HanoiState is { peg_a: Peg, peg_b: Peg, peg_c: Peg };
+
+fn get_peg(st: HanoiState, idx: Int) -> Peg {
+    if idx == 0 { st.peg_a } else if idx == 1 { st.peg_b } else { st.peg_c }
+}
+
+fn set_peg(st: HanoiState, idx: Int, p: Peg) -> HanoiState {
+    HanoiState {
+        peg_a: if idx == 0 { p } else { st.peg_a },
+        peg_b: if idx == 1 { p } else { st.peg_b },
+        peg_c: if idx == 2 { p } else { st.peg_c }
+    }
+}
+
+// Move top disk from peg 'from_idx' to peg 'to_idx'
+fn move_disk(st: HanoiState, from_idx: Int, to_idx: Int) -> HanoiState {
+    let from_peg = get_peg(st, from_idx);
+    let disk = peg_peek(from_peg);
+    let new_from = peg_pop(from_peg);
+    let to_peg = get_peg(st, to_idx);
+    let new_to = peg_push(to_peg, disk);
+    let st2 = set_peg(st, from_idx, new_from);
+    set_peg(st2, to_idx, new_to)
+}
+
+// Make a legal move between pegs at indices p1 and p2.
+// The smaller disk must go on top.
+fn make_legal_move(st: HanoiState, p1: Int, p2: Int) -> HanoiState {
+    let peg1 = get_peg(st, p1);
+    let peg2 = get_peg(st, p2);
+    if peg_is_empty(peg1) == 1 {
+        // Must move from p2 to p1
+        move_disk(st, p2, p1)
+    } else if peg_is_empty(peg2) == 1 {
+        // Must move from p1 to p2
+        move_disk(st, p1, p2)
+    } else {
+        let top1 = peg_peek(peg1);
+        let top2 = peg_peek(peg2);
+        if top1 < top2 {
+            move_disk(st, p1, p2)
+        } else {
+            move_disk(st, p2, p1)
+        }
+    }
+}
+
+// Initialize: all n disks on peg A (largest = n at bottom, 1 at top)
+fn init_hanoi(n: Int) -> HanoiState {
+    let mut peg_a = peg_empty();
+    let mut i = n;
+    while i >= 1 {
+        peg_a = peg_push(peg_a, i);
+        i = i - 1;
+    }
+    HanoiState { peg_a: peg_a, peg_b: peg_empty(), peg_c: peg_empty() }
+}
+
+// Iterative Hanoi solver.
+// For odd n: cycle is A<->C, A<->B, C<->B
+// For even n: cycle is A<->B, A<->C, B<->C
+fn solve_hanoi(n: Int) -> HanoiState {
+    let mut st = init_hanoi(n);
+    let total_moves = pow2(n) - 1;
+
+    // For odd n: pairs are (0,2), (0,1), (2,1)
+    // For even n: pairs are (0,1), (0,2), (1,2)
+    let mut p1a = 0;
+    let mut p1b = 0;
+    let mut p2a = 0;
+    let mut p2b = 0;
+    let mut p3a = 0;
+    let mut p3b = 0;
+    if n % 2 == 1 {
+        p1a = 0; p1b = 2;
+        p2a = 0; p2b = 1;
+        p3a = 2; p3b = 1;
+    } else {
+        p1a = 0; p1b = 1;
+        p2a = 0; p2b = 2;
+        p3a = 1; p3b = 2;
+    }
+
+    let mut step = 1;
+    while step <= total_moves {
+        let phase = step % 3;
+        if phase == 1 {
+            st = make_legal_move(st, p1a, p1b);
+        } else if phase == 2 {
+            st = make_legal_move(st, p2a, p2b);
+        } else {
+            st = make_legal_move(st, p3a, p3b);
+        }
+        step = step + 1;
+    }
+    st
+}
+
+fn pow2(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < n {
+        result = result * 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Check that a peg is valid: disks are in order (larger below smaller)
+fn peg_is_valid(p: Peg) -> Int {
+    if p.top <= 1 { return 1; }
+    let mut i = 0;
+    while i < p.top - 1 {
+        if a8_get(p.disks, i) <= a8_get(p.disks, i + 1) {
+            return 0;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+// Count total disks across all pegs
+fn total_disks(st: HanoiState) -> Int {
+    st.peg_a.top + st.peg_b.top + st.peg_c.top
+}
+
+// --- Tests ---
+
+fn test_hanoi_1() {
+    let st = solve_hanoi(1);
+    // 1 disk should be on peg C
+    assert_eq(st.peg_a.top, 0);
+    assert_eq(st.peg_b.top, 0);
+    assert_eq(st.peg_c.top, 1);
+    assert_eq(peg_peek(st.peg_c), 1);
+}
+
+fn test_hanoi_2() {
+    let st = solve_hanoi(2);
+    // 2 disks on peg C: [2, 1] (2 at bottom, 1 on top)
+    assert_eq(st.peg_a.top, 0);
+    assert_eq(st.peg_b.top, 0);
+    assert_eq(st.peg_c.top, 2);
+    assert_eq(a8_get(st.peg_c.disks, 0), 2);
+    assert_eq(a8_get(st.peg_c.disks, 1), 1);
+}
+
+fn test_hanoi_3() {
+    let st = solve_hanoi(3);
+    // All 3 disks on peg C
+    assert_eq(st.peg_c.top, 3);
+    assert_eq(a8_get(st.peg_c.disks, 0), 3);
+    assert_eq(a8_get(st.peg_c.disks, 1), 2);
+    assert_eq(a8_get(st.peg_c.disks, 2), 1);
+    assert_eq(peg_is_valid(st.peg_c), 1);
+}
+
+fn test_hanoi_4() {
+    let st = solve_hanoi(4);
+    assert_eq(st.peg_c.top, 4);
+    assert_eq(peg_is_valid(st.peg_c), 1);
+    assert_eq(total_disks(st), 4);
+}
+
+fn test_hanoi_5() {
+    let st = solve_hanoi(5);
+    assert_eq(st.peg_c.top, 5);
+    assert_eq(peg_is_valid(st.peg_c), 1);
+    assert_eq(total_disks(st), 5);
+}
+
+fn test_move_count() {
+    // Number of moves = 2^n - 1
+    assert_eq(pow2(1) - 1, 1);
+    assert_eq(pow2(2) - 1, 3);
+    assert_eq(pow2(3) - 1, 7);
+    assert_eq(pow2(4) - 1, 15);
+    assert_eq(pow2(5) - 1, 31);
+    assert_eq(pow2(6) - 1, 63);
+}
+
+fn test_init_state() {
+    let st = init_hanoi(4);
+    assert_eq(st.peg_a.top, 4);
+    assert_eq(st.peg_b.top, 0);
+    assert_eq(st.peg_c.top, 0);
+    // Bottom disk is 4, top is 1
+    assert_eq(a8_get(st.peg_a.disks, 0), 4);
+    assert_eq(a8_get(st.peg_a.disks, 3), 1);
+    assert_eq(peg_is_valid(st.peg_a), 1);
+}
+
+fn test_single_move() {
+    let st = init_hanoi(3);
+    // Move top disk (1) from peg A to peg C
+    let st2 = move_disk(st, 0, 2);
+    assert_eq(st2.peg_a.top, 2);
+    assert_eq(st2.peg_c.top, 1);
+    assert_eq(peg_peek(st2.peg_c), 1);
+    assert_eq(peg_peek(st2.peg_a), 2);
+}
+
+fn test_peg_operations() {
+    let mut p = peg_empty();
+    assert_eq(peg_is_empty(p), 1);
+    p = peg_push(p, 5);
+    p = peg_push(p, 3);
+    p = peg_push(p, 1);
+    assert_eq(p.top, 3);
+    assert_eq(peg_peek(p), 1);
+    assert_eq(peg_is_empty(p), 0);
+    p = peg_pop(p);
+    assert_eq(peg_peek(p), 3);
+    assert_eq(p.top, 2);
+}
+
+fn test_disk_conservation() {
+    // Across all moves, total disk count never changes
+    let n = 4;
+    let mut st = init_hanoi(n);
+    assert_eq(total_disks(st), n);
+    // After solving, still n disks
+    st = solve_hanoi(n);
+    assert_eq(total_disks(st), n);
+}
+
+fn main() -> Int {
+    test_hanoi_1();
+    test_hanoi_2();
+    test_hanoi_3();
+    test_hanoi_4();
+    test_hanoi_5();
+    test_move_count();
+    test_init_state();
+    test_single_move();
+    test_peg_operations();
+    test_disk_conservation();
+    print("[OK] 367_hanoi_iter_aot");
+    0
+}

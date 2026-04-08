@@ -1,0 +1,153 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, digit-operations, number-properties
+// @timeout: 10000
+
+// Count digits of a positive integer
+fn num_digits(n: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut count = 0;
+    let mut v = n;
+    while v > 0 { count = count + 1; v = v / 10; }
+    count
+}
+
+// Sum of digits
+fn digit_sum(n: Int) -> Int {
+    let mut sum = 0;
+    let mut v = n;
+    while v > 0 { sum = sum + v % 10; v = v / 10; }
+    sum
+}
+
+// Digital root (repeated digit sum until single digit)
+fn digital_root(n: Int) -> Int {
+    let mut v = n;
+    while v >= 10 { v = digit_sum(v); }
+    v
+}
+
+// Reverse digits
+fn reverse_digits(n: Int) -> Int {
+    let mut rev = 0;
+    let mut v = n;
+    while v > 0 {
+        rev = rev * 10 + v % 10;
+        v = v / 10;
+    }
+    rev
+}
+
+// Check if palindrome number
+fn is_palindrome(n: Int) -> Int {
+    if n == reverse_digits(n) { 1 } else { 0 }
+}
+
+// Check if Armstrong/narcissistic number (sum of digits^k where k = num digits)
+fn power(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < exp { result = result * base; i = i + 1; }
+    result
+}
+
+fn is_armstrong(n: Int) -> Int {
+    let k = num_digits(n);
+    let mut sum = 0;
+    let mut v = n;
+    while v > 0 {
+        let d = v % 10;
+        sum = sum + power(d, k);
+        v = v / 10;
+    }
+    if sum == n { 1 } else { 0 }
+}
+
+// Check if Harshad number (divisible by its digit sum)
+fn is_harshad(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let ds = digit_sum(n);
+    if n % ds == 0 { 1 } else { 0 }
+}
+
+// Product of digits
+fn digit_product(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut prod = 1;
+    let mut v = n;
+    while v > 0 {
+        prod = prod * (v % 10);
+        v = v / 10;
+    }
+    prod
+}
+
+fn main() -> Int {
+    // Digit count
+    assert_eq(num_digits(0), 1);
+    assert_eq(num_digits(5), 1);
+    assert_eq(num_digits(42), 2);
+    assert_eq(num_digits(100), 3);
+    assert_eq(num_digits(9999), 4);
+
+    // Digit sum
+    assert_eq(digit_sum(0), 0);
+    assert_eq(digit_sum(123), 6);
+    assert_eq(digit_sum(999), 27);
+
+    // Digital root: dr(n) = 1 + (n-1) % 9 for n > 0
+    assert_eq(digital_root(0), 0);
+    assert_eq(digital_root(5), 5);
+    assert_eq(digital_root(39), 3); // 3+9=12, 1+2=3
+    assert_eq(digital_root(123), 6);
+    assert_eq(digital_root(9999), 9);
+
+    // Cross-check: digital_root(n) = 1 + (n-1) % 9 for n > 0
+    let mut i = 1;
+    while i <= 100 {
+        assert_eq(digital_root(i), 1 + (i - 1) % 9);
+        i = i + 1;
+    }
+
+    // Reverse digits
+    assert_eq(reverse_digits(123), 321);
+    assert_eq(reverse_digits(1000), 1); // trailing zeros lost
+    assert_eq(reverse_digits(1), 1);
+    assert_eq(reverse_digits(12321), 12321);
+
+    // Palindrome numbers
+    assert_eq(is_palindrome(121), 1);
+    assert_eq(is_palindrome(12321), 1);
+    assert_eq(is_palindrome(123), 0);
+    assert_eq(is_palindrome(1), 1);
+    assert_eq(is_palindrome(11), 1);
+
+    // Armstrong numbers: 0,1,2,...,9,153,370,371,407
+    assert_eq(is_armstrong(0), 1);
+    assert_eq(is_armstrong(1), 1);
+    assert_eq(is_armstrong(153), 1); // 1^3+5^3+3^3 = 1+125+27 = 153
+    assert_eq(is_armstrong(370), 1); // 27+343+0 = 370
+    assert_eq(is_armstrong(371), 1); // 27+343+1 = 371
+    assert_eq(is_armstrong(407), 1); // 64+0+343 = 407
+    assert_eq(is_armstrong(100), 0);
+
+    // Harshad numbers: 1,2,...,9,10,12,18,20,...
+    assert_eq(is_harshad(1), 1);
+    assert_eq(is_harshad(10), 1);  // 10 % 1 = 0
+    assert_eq(is_harshad(12), 1);  // 12 % 3 = 0
+    assert_eq(is_harshad(18), 1);  // 18 % 9 = 0
+    assert_eq(is_harshad(11), 0);  // 11 % 2 = 1
+
+    // Digit product
+    assert_eq(digit_product(123), 6);
+    assert_eq(digit_product(999), 729);
+    assert_eq(digit_product(10), 0); // has a zero digit... wait:
+    // digit_product(10): v=10, prod=1*0=0, v=1, prod=0*1=0. Yes, 0.
+    assert_eq(digit_product(10), 0);
+    assert_eq(digit_product(22), 4);
+
+    print("DIFF_OK: digit_ops");
+    0
+}

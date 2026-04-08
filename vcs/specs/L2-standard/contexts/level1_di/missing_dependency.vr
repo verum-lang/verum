@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// NOTE: was typecheck-fail but compiler does not yet detect this error
+// @tier: 0
+// @level: L2
+// @tags: di, missing, error
+// @description: Tests detection of unregistered dependencies in DI container
+//
+// UserRepository depends on DatabaseConnection, but DatabaseConnection
+// is not marked as @injectable, so it cannot be resolved
+
+// NOT marked as @injectable - cannot be resolved by DI container
+type DatabaseConnection is {
+    connection_string: Text,
+};
+
+implement DatabaseConnection {
+    fn new(connection_string: Text) -> Self {
+        Self { connection_string }
+    }
+
+    fn execute(&self, query: Text) -> List<Map<Text, Text>> {
+        List.new()
+    }
+}
+
+@injectable(Scope.Singleton)
+type UserRepository is {
+    db: DatabaseConnection,  // ERROR: DatabaseConnection is not injectable
+};
+
+implement UserRepository {
+    @inject
+    fn new(db: DatabaseConnection) -> Self {
+        Self { db }
+    }
+
+    fn find_all(&self) -> List<User> {
+        let results = self.db.execute("SELECT * FROM users");
+        // Transform results to User objects
+        List.new()
+    }
+}
+
+type User is {
+    id: Int,
+    name: Text,
+};
+
+fn main() {
+    // This should fail at compile time:
+    // E802: Missing dependency 'DatabaseConnection' required by 'UserRepository'
+    // Hint: Add @injectable attribute to DatabaseConnection or provide it manually
+    let repo = inject UserRepository;
+}

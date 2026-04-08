@@ -1,0 +1,231 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, types, variants, sum-types
+// @description: Test variant type definition parsing (enum-like sum types)
+
+// Simple unit variants
+type Color is Red | Green | Blue;
+
+type Direction is North | South | East | West;
+
+// With leading pipe
+type Status is
+    | Pending
+    | Active
+    | Completed
+    | Cancelled;
+
+// Single variant
+type SingleVariant is Only;
+
+// Tuple variant
+type Maybe<T> is None | Some(T);
+
+type Result<T, E> is Ok(T) | Err(E);
+
+// Multiple fields in tuple variant
+type Message is
+    | Text(Text)
+    | Number(Int, Int)
+    | Coordinate(Float, Float, Float);
+
+// Record variant
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { a: Float, b: Float, c: Float };
+
+// Mixed variant types (unit, tuple, record)
+type Event is
+    | Click { x: Int, y: Int }
+    | KeyPress(Char)
+    | MouseMove(Int, Int)
+    | Resize { width: Int, height: Int }
+    | Close;
+
+// Generic variants
+type Option<T> is None | Some(T);
+
+type Either<L, R> is Left(L) | Right(R);
+
+type These<A, B> is This(A) | That(B) | Both(A, B);
+
+// Recursive variant through Heap
+type List<T> is Nil | Cons(T, Heap<List<T>>);
+
+type Tree<T> is
+    | Leaf(T)
+    | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+// Binary tree with values at nodes
+type BinaryTree<T> is
+    | Empty
+    | Branch { value: T, left: Heap<BinaryTree<T>>, right: Heap<BinaryTree<T>> };
+
+// Expression AST
+type Expr is
+    | IntLit(Int)
+    | FloatLit(Float)
+    | StringLit(Text)
+    | Var(Text)
+    | BinOp { op: Text, left: Heap<Expr>, right: Heap<Expr> }
+    | UnaryOp { op: Text, operand: Heap<Expr> }
+    | Call { func: Text, args: List<Heap<Expr>> }
+    | If { cond: Heap<Expr>, then_branch: Heap<Expr>, else_branch: Heap<Expr> };
+
+// Variant with multiple type parameters
+type Validated<T, E> is
+    | Valid(T)
+    | Invalid(List<E>);
+
+type AsyncResult<T, E> is
+    | Pending
+    | Ready(T)
+    | Failed(E);
+
+// Variant with bounds
+type Ordered<T: Ord> is
+    | Empty
+    | Single(T)
+    | Range(T, T);
+
+// Variant with attributes on cases
+type HttpMethod is
+    | @default Get
+    | Post
+    | Put
+    | Delete
+    | @deprecated Patch
+    | Head
+    | Options;
+
+// Variant with serialization attributes
+type ApiResponse<T> is
+    | @serialize(rename = "success") Success(T)
+    | @serialize(rename = "error") Error { code: Int, message: Text };
+
+// Complex nested variants
+type Json is
+    | Null
+    | Bool(Bool)
+    | Number(Float)
+    | String(Text)
+    | Array(List<Heap<Json>>)
+    | Object(Map<Text, Heap<Json>>);
+
+// Network state machine
+type ConnectionState is
+    | Disconnected
+    | Connecting { host: Text, port: Int }
+    | Connected { socket: Socket }
+    | Reconnecting { attempts: Int, last_error: Error };
+
+// Command pattern
+type Command is
+    | Insert { position: Int, text: Text }
+    | Delete { start: Int, end: Int }
+    | Replace { start: Int, end: Int, text: Text }
+    | Undo
+    | Redo;
+
+// Public variant
+pub type PublicResult<T> is Success(T) | Failure(Error);
+
+// Internal variant
+internal type InternalState is Init | Running | Stopped;
+
+// Protected variant
+protected type ProtectedEnum is A | B | C;
+
+// Variant with derive
+@derive(Clone, Debug, Eq, Hash)
+type DerivedEnum is First | Second | Third;
+
+@derive(Serialize, Deserialize)
+type SerializableResult<T> is Ok(T) | Err(Text);
+
+// Variant with refinement on data
+type NonEmptyList<T> is
+    | Single(T)
+    | Cons(T, Heap<NonEmptyList<T>>);
+
+// Variant with generic record data
+type Wrapper<T, M> is
+    | Empty
+    | Value { data: T, metadata: M };
+
+// Affine variant (move semantics)
+type affine UniqueHandle is
+    | Uninitialized
+    | Active(Int)
+    | Closed;
+
+// Complex type parameters
+type MapResult<K: Hash + Eq, V, E> is
+    | Found { key: K, value: V }
+    | NotFound { key: K }
+    | Error(E);
+
+// Variant as state machine
+type ProcessState<T> is
+    | Idle
+    | Processing { data: T, progress: Float }
+    | Completed { result: T }
+    | Failed { error: Error, partial: Maybe<T> };
+
+// Variant with function fields in record (sync versions)
+type Handler<E> is
+    | Sync { handle: fn(E) -> Bool }
+    | Callback { handle: fn(E) -> Bool }
+    | Filtered { predicate: fn(E) -> Bool, handler: fn(E) -> () };
+
+// Deeply nested
+type DeepNest is
+    | Level1 {
+        inner: Level2
+    };
+
+type Level2 is
+    | A { x: Int }
+    | B { y: Float };
+
+// Large number of variants
+type Token is
+    | Identifier(Text)
+    | IntegerLiteral(Int)
+    | FloatLiteral(Float)
+    | StringLiteral(Text)
+    | Plus
+    | Minus
+    | Star
+    | Slash
+    | Equals
+    | DoubleEquals
+    | NotEquals
+    | LessThan
+    | GreaterThan
+    | LessEquals
+    | GreaterEquals
+    | LeftParen
+    | RightParen
+    | LeftBrace
+    | RightBrace
+    | LeftBracket
+    | RightBracket
+    | Comma
+    | Semicolon
+    | Colon
+    | Arrow
+    | FatArrow
+    | Dot
+    | DoubleDot
+    | Ampersand
+    | Pipe
+    | Caret
+    | Tilde
+    | Bang
+    | Question
+    | At
+    | Hash
+    | Keyword(Keyword)
+    | Eof;

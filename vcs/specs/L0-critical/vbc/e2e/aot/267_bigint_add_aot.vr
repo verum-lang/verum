@@ -1,0 +1,214 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, bigint, addition, math
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for big integer addition using digit arrays (base 10000)
+
+// Big integer: up to 8 "digits" in base 10000
+type BigInt is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    len: Int, sign: Int  // sign: 1 or -1
+};
+
+fn bi_zero() -> BigInt {
+    BigInt { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 1, sign: 1 }
+}
+
+fn bi_get(b: BigInt, i: Int) -> Int {
+    if i == 0 { b.d0 } else if i == 1 { b.d1 }
+    else if i == 2 { b.d2 } else if i == 3 { b.d3 }
+    else if i == 4 { b.d4 } else if i == 5 { b.d5 }
+    else if i == 6 { b.d6 } else if i == 7 { b.d7 }
+    else { 0 }
+}
+
+fn bi_set(b: BigInt, i: Int, v: Int) -> BigInt {
+    BigInt {
+        d0: if i == 0 { v } else { b.d0 }, d1: if i == 1 { v } else { b.d1 },
+        d2: if i == 2 { v } else { b.d2 }, d3: if i == 3 { v } else { b.d3 },
+        d4: if i == 4 { v } else { b.d4 }, d5: if i == 5 { v } else { b.d5 },
+        d6: if i == 6 { v } else { b.d6 }, d7: if i == 7 { v } else { b.d7 },
+        len: b.len, sign: b.sign
+    }
+}
+
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+// Create BigInt from small integer (fits in one digit)
+fn bi_from(n: Int) -> BigInt {
+    if n == 0 { return bi_zero(); }
+    let sign = if n < 0 { -1 } else { 1 };
+    let abs_n = if n < 0 { -n } else { n };
+    if abs_n < 10000 {
+        BigInt { d0: abs_n, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 1, sign: sign }
+    } else {
+        BigInt { d0: abs_n % 10000, d1: abs_n / 10000, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 2, sign: sign }
+    }
+}
+
+// Add magnitudes (ignoring sign)
+fn bi_add_mag(a: BigInt, b: BigInt) -> BigInt {
+    let mut result = bi_zero();
+    let mut carry = 0;
+    let n = max2(a.len, b.len);
+    let mut i = 0;
+    while i < n || carry > 0 {
+        let sum = bi_get(a, i) + bi_get(b, i) + carry;
+        result = bi_set(result, i, sum % 10000);
+        carry = sum / 10000;
+        i = i + 1;
+    }
+    BigInt {
+        d0: result.d0, d1: result.d1, d2: result.d2, d3: result.d3,
+        d4: result.d4, d5: result.d5, d6: result.d6, d7: result.d7,
+        len: i, sign: 1
+    }
+}
+
+// Compare magnitudes: -1 if a < b, 0 if a == b, 1 if a > b
+fn bi_cmp_mag(a: BigInt, b: BigInt) -> Int {
+    if a.len != b.len {
+        return if a.len > b.len { 1 } else { -1 };
+    }
+    let mut i = a.len - 1;
+    while i >= 0 {
+        if bi_get(a, i) != bi_get(b, i) {
+            return if bi_get(a, i) > bi_get(b, i) { 1 } else { -1 };
+        }
+        i = i - 1;
+    }
+    0
+}
+
+// Subtract magnitudes (assumes a >= b)
+fn bi_sub_mag(a: BigInt, b: BigInt) -> BigInt {
+    let mut result = bi_zero();
+    let mut borrow = 0;
+    let mut i = 0;
+    while i < a.len {
+        let mut diff = bi_get(a, i) - bi_get(b, i) - borrow;
+        if diff < 0 {
+            diff = diff + 10000;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        result = bi_set(result, i, diff);
+        i = i + 1;
+    }
+    // Find actual length
+    let mut len = a.len;
+    while len > 1 && bi_get(result, len - 1) == 0 {
+        len = len - 1;
+    }
+    BigInt {
+        d0: result.d0, d1: result.d1, d2: result.d2, d3: result.d3,
+        d4: result.d4, d5: result.d5, d6: result.d6, d7: result.d7,
+        len: len, sign: 1
+    }
+}
+
+// Convert BigInt to regular int (if it fits)
+fn bi_to_int(b: BigInt) -> Int {
+    let mut result = 0;
+    let mut mult = 1;
+    let mut i = 0;
+    while i < b.len {
+        result = result + bi_get(b, i) * mult;
+        mult = mult * 10000;
+        i = i + 1;
+    }
+    result * b.sign
+}
+
+fn bi_eq(a: BigInt, b: BigInt) -> Bool {
+    if a.sign != b.sign { return false; }
+    if a.len != b.len { return false; }
+    bi_cmp_mag(a, b) == 0
+}
+
+fn test_from_and_to() {
+    let a = bi_from(12345);
+    assert_eq(bi_to_int(a), 12345);
+
+    let b = bi_from(0);
+    assert_eq(bi_to_int(b), 0);
+
+    let c = bi_from(9999);
+    assert_eq(bi_to_int(c), 9999);
+
+    let d = bi_from(10000);
+    assert_eq(bi_to_int(d), 10000);
+    assert_eq(d.len, 2);
+}
+
+fn test_add() {
+    let a = bi_from(9999);
+    let b = bi_from(1);
+    let sum = bi_add_mag(a, b);
+    assert_eq(bi_to_int(sum), 10000);
+    assert_eq(sum.len, 2);
+
+    let c = bi_from(12345);
+    let d = bi_from(67890);
+    let sum2 = bi_add_mag(c, d);
+    assert_eq(bi_to_int(sum2), 80235);
+}
+
+fn test_sub() {
+    let a = bi_from(10000);
+    let b = bi_from(1);
+    let diff = bi_sub_mag(a, b);
+    assert_eq(bi_to_int(diff), 9999);
+    assert_eq(diff.len, 1);
+
+    let c = bi_from(50000);
+    let d = bi_from(25000);
+    let diff2 = bi_sub_mag(c, d);
+    assert_eq(bi_to_int(diff2), 25000);
+}
+
+fn test_compare() {
+    let a = bi_from(100);
+    let b = bi_from(200);
+    assert_eq(bi_cmp_mag(a, b), -1);
+    assert_eq(bi_cmp_mag(b, a), 1);
+    assert_eq(bi_cmp_mag(a, a), 0);
+
+    let c = bi_from(10000);
+    let d = bi_from(9999);
+    assert_eq(bi_cmp_mag(c, d), 1);
+}
+
+fn test_carry_chain() {
+    // 9999 + 9999 = 19998
+    let a = bi_from(9999);
+    let sum = bi_add_mag(a, a);
+    assert_eq(bi_to_int(sum), 19998);
+
+    // 99990000 + 99990000 (approximate: two-digit BigInt)
+    let mut big = bi_zero();
+    big = bi_set(big, 0, 0);     // low digit
+    big = bi_set(big, 1, 9999);  // high digit
+    let big = BigInt { d0: big.d0, d1: big.d1, d2: big.d2, d3: big.d3, d4: big.d4, d5: big.d5, d6: big.d6, d7: big.d7, len: 2, sign: 1 };
+    let sum2 = bi_add_mag(big, big);
+    // 9999*10000 + 9999*10000 = 99990000 + 99990000 = 199980000
+    assert_eq(bi_get(sum2, 0), 0);
+    assert_eq(bi_get(sum2, 1), 9998);
+    assert_eq(bi_get(sum2, 2), 1);
+    assert_eq(sum2.len, 3);
+}
+
+fn main() -> Int {
+    test_from_and_to();
+    test_add();
+    test_sub();
+    test_compare();
+    test_carry_chain();
+    print("[OK] 267_bigint_add_aot");
+    0
+}

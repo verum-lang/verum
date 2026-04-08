@@ -1,0 +1,123 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, differential, data-structures
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT data structure operations — mirror of interpreter test for differential comparison
+
+type Point is { x: Int, y: Int };
+
+fn point_add(a: Point, b: Point) -> Point {
+    Point { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn point_dist_sq(a: Point, b: Point) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
+type Rect is { origin: Point, size: Point };
+
+fn rect_area(r: Rect) -> Int {
+    r.size.x * r.size.y
+}
+
+type Row4 is { c0: Int, c1: Int, c2: Int, c3: Int };
+type Mat4 is { r0: Row4, r1: Row4, r2: Row4, r3: Row4 };
+
+fn mat4_get(m: Mat4, row: Int, col: Int) -> Int {
+    let r = if row == 0 { m.r0 }
+        else if row == 1 { m.r1 }
+        else if row == 2 { m.r2 }
+        else { m.r3 };
+    if col == 0 { r.c0 }
+    else if col == 1 { r.c1 }
+    else if col == 2 { r.c2 }
+    else { r.c3 }
+}
+
+fn mat4_trace(m: Mat4) -> Int {
+    mat4_get(m, 0, 0) + mat4_get(m, 1, 1) + mat4_get(m, 2, 2) + mat4_get(m, 3, 3)
+}
+
+fn mat4_vec_mul(m: Mat4, v: Row4) -> Row4 {
+    Row4 {
+        c0: m.r0.c0 * v.c0 + m.r0.c1 * v.c1 + m.r0.c2 * v.c2 + m.r0.c3 * v.c3,
+        c1: m.r1.c0 * v.c0 + m.r1.c1 * v.c1 + m.r1.c2 * v.c2 + m.r1.c3 * v.c3,
+        c2: m.r2.c0 * v.c0 + m.r2.c1 * v.c1 + m.r2.c2 * v.c2 + m.r2.c3 * v.c3,
+        c3: m.r3.c0 * v.c0 + m.r3.c1 * v.c1 + m.r3.c2 * v.c2 + m.r3.c3 * v.c3
+    }
+}
+
+type Student is { id: Int, score1: Int, score2: Int, score3: Int };
+
+fn student_avg(s: Student) -> Int {
+    (s.score1 + s.score2 + s.score3) / 3
+}
+
+fn main() -> Int {
+    // Point operations
+    let p1 = Point { x: 3, y: 4 };
+    let p2 = Point { x: 1, y: 2 };
+    let sum = point_add(p1, p2);
+    assert_eq(sum.x, 4);
+    assert_eq(sum.y, 6);
+    assert_eq(point_dist_sq(p1, p2), 8);
+
+    // Rect
+    let r = Rect {
+        origin: Point { x: 10, y: 20 },
+        size: Point { x: 30, y: 40 }
+    };
+    assert_eq(rect_area(r), 1200);
+
+    // Matrix identity
+    let id = Mat4 {
+        r0: Row4 { c0: 1, c1: 0, c2: 0, c3: 0 },
+        r1: Row4 { c0: 0, c1: 1, c2: 0, c3: 0 },
+        r2: Row4 { c0: 0, c1: 0, c2: 1, c3: 0 },
+        r3: Row4 { c0: 0, c1: 0, c2: 0, c3: 1 }
+    };
+    assert_eq(mat4_trace(id), 4);
+
+    // Matrix-vector multiply
+    let v = Row4 { c0: 1, c1: 2, c2: 3, c3: 4 };
+    let result = mat4_vec_mul(id, v);
+    assert_eq(result.c0, 1);
+    assert_eq(result.c1, 2);
+    assert_eq(result.c2, 3);
+    assert_eq(result.c3, 4);
+
+    // Scale matrix
+    let scale = Mat4 {
+        r0: Row4 { c0: 2, c1: 0, c2: 0, c3: 0 },
+        r1: Row4 { c0: 0, c1: 3, c2: 0, c3: 0 },
+        r2: Row4 { c0: 0, c1: 0, c2: 4, c3: 0 },
+        r3: Row4 { c0: 0, c1: 0, c2: 0, c3: 5 }
+    };
+    let scaled = mat4_vec_mul(scale, v);
+    assert_eq(scaled.c0, 2);
+    assert_eq(scaled.c1, 6);
+    assert_eq(scaled.c2, 12);
+    assert_eq(scaled.c3, 20);
+
+    // Full 4x4 matrix
+    let m = Mat4 {
+        r0: Row4 { c0: 1, c1: 2, c2: 3, c3: 4 },
+        r1: Row4 { c0: 5, c1: 6, c2: 7, c3: 8 },
+        r2: Row4 { c0: 9, c1: 10, c2: 11, c3: 12 },
+        r3: Row4 { c0: 13, c1: 14, c2: 15, c3: 16 }
+    };
+    assert_eq(mat4_trace(m), 34);
+
+    // Student records
+    let alice = Student { id: 1, score1: 85, score2: 92, score3: 78 };
+    let bob = Student { id: 2, score1: 90, score2: 88, score3: 95 };
+    assert_eq(student_avg(alice), 85);
+    assert_eq(student_avg(bob), 91);
+
+    print("[OK] 126_data_structures_diff_aot");
+    0
+}

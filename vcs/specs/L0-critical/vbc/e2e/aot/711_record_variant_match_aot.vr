@@ -1,0 +1,31 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, match, record-variant
+// @expected-exit: 0
+
+type Shape is
+    Circle(Int)
+  | Rectangle(Int, Int);
+
+fn area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Rectangle(w, h) => w * h,
+    }
+}
+
+fn main() -> Int {
+    let c = Circle(5);
+    let r = Rectangle(4, 6);
+
+    let a1 = area(c);
+    print(a1);
+    assert_eq(a1, 75);
+
+    let a2 = area(r);
+    print(a2);
+    assert_eq(a2, 24);
+
+    0
+}

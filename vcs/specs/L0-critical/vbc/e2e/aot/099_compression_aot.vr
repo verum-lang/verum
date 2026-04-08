@@ -1,0 +1,332 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, compression, lz77, encoding, decoding
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT LZ77-style compression simulation with fixed-size buffers
+
+// Buffer of 16 ints (can hold up to 5 compression tokens of 3 ints each)
+type Buf16 is {
+    b0: Int, b1: Int, b2: Int, b3: Int,
+    b4: Int, b5: Int, b6: Int, b7: Int,
+    b8: Int, b9: Int, b10: Int, b11: Int,
+    b12: Int, b13: Int, b14: Int, b15: Int,
+    len: Int
+};
+
+fn buf_new() -> Buf16 {
+    Buf16 {
+        b0: 0, b1: 0, b2: 0, b3: 0,
+        b4: 0, b5: 0, b6: 0, b7: 0,
+        b8: 0, b9: 0, b10: 0, b11: 0,
+        b12: 0, b13: 0, b14: 0, b15: 0,
+        len: 0,
+    }
+}
+
+fn buf_get(a: Buf16, i: Int) -> Int {
+    if i == 0 { a.b0 } else if i == 1 { a.b1 } else if i == 2 { a.b2 }
+    else if i == 3 { a.b3 } else if i == 4 { a.b4 } else if i == 5 { a.b5 }
+    else if i == 6 { a.b6 } else if i == 7 { a.b7 } else if i == 8 { a.b8 }
+    else if i == 9 { a.b9 } else if i == 10 { a.b10 } else if i == 11 { a.b11 }
+    else if i == 12 { a.b12 } else if i == 13 { a.b13 } else if i == 14 { a.b14 }
+    else { a.b15 }
+}
+
+fn buf_set(a: Buf16, i: Int, v: Int) -> Buf16 {
+    Buf16 {
+        b0: if i == 0 { v } else { a.b0 },
+        b1: if i == 1 { v } else { a.b1 },
+        b2: if i == 2 { v } else { a.b2 },
+        b3: if i == 3 { v } else { a.b3 },
+        b4: if i == 4 { v } else { a.b4 },
+        b5: if i == 5 { v } else { a.b5 },
+        b6: if i == 6 { v } else { a.b6 },
+        b7: if i == 7 { v } else { a.b7 },
+        b8: if i == 8 { v } else { a.b8 },
+        b9: if i == 9 { v } else { a.b9 },
+        b10: if i == 10 { v } else { a.b10 },
+        b11: if i == 11 { v } else { a.b11 },
+        b12: if i == 12 { v } else { a.b12 },
+        b13: if i == 13 { v } else { a.b13 },
+        b14: if i == 14 { v } else { a.b14 },
+        b15: if i == 15 { v } else { a.b15 },
+        len: a.len,
+    }
+}
+
+fn buf_push(a: Buf16, v: Int) -> Buf16 {
+    let idx = a.len;
+    if idx >= 16 { a }
+    else {
+        let a2 = buf_set(a, idx, v);
+        Buf16 {
+            b0: a2.b0, b1: a2.b1, b2: a2.b2, b3: a2.b3,
+            b4: a2.b4, b5: a2.b5, b6: a2.b6, b7: a2.b7,
+            b8: a2.b8, b9: a2.b9, b10: a2.b10, b11: a2.b11,
+            b12: a2.b12, b13: a2.b13, b14: a2.b14, b15: a2.b15,
+            len: idx + 1,
+        }
+    }
+}
+
+fn buf_eq(a: Buf16, b: Buf16) -> Bool {
+    if a.len != b.len { false }
+    else {
+        let mut ok = true;
+        let mut i = 0;
+        while i < a.len {
+            if buf_get(a, i) != buf_get(b, i) { ok = false; }
+            i = i + 1;
+        }
+        ok
+    }
+}
+
+// Find longest match in data[0..pos-1] for data starting at pos
+// Returns (offset, length) packed as offset * 100 + length
+// Search window = 8, max match = 7
+fn find_match(data: Buf16, pos: Int) -> Int {
+    let data_len = data.len;
+    let mut best_off = 0;
+    let mut best_len = 0;
+
+    let mut start = if pos > 8 { pos - 8 } else { 0 };
+    while start < pos {
+        let mut match_len = 0;
+        let mut matching = true;
+        while pos + match_len < data_len && match_len < 7 && matching {
+            if buf_get(data, start + match_len) == buf_get(data, pos + match_len) {
+                match_len = match_len + 1;
+            } else {
+                matching = false;
+            }
+        }
+        if match_len > best_len {
+            best_len = match_len;
+            best_off = pos - start;
+        }
+        start = start + 1;
+    }
+    best_off * 100 + best_len
+}
+
+// Compress data into token buffer
+// Token format: (type, val1, val2) where type=0 is literal, type=1 is backref
+fn lz_compress(data: Buf16) -> Buf16 {
+    let mut out = buf_new();
+    let mut pos = 0;
+    while pos < data.len {
+        let packed = find_match(data, pos);
+        let offset = packed / 100;
+        let length = packed % 100;
+        if length >= 2 {
+            out = buf_push(out, 1);
+            out = buf_push(out, offset);
+            out = buf_push(out, length);
+            pos = pos + length;
+        } else {
+            out = buf_push(out, 0);
+            out = buf_push(out, buf_get(data, pos));
+            out = buf_push(out, 0);
+            pos = pos + 1;
+        }
+    }
+    out
+}
+
+// Decompress token buffer back to data
+fn lz_decompress(encoded: Buf16) -> Buf16 {
+    let mut out = buf_new();
+    let mut i = 0;
+    while i < encoded.len {
+        let token_type = buf_get(encoded, i);
+        let val1 = buf_get(encoded, i + 1);
+        let val2 = buf_get(encoded, i + 2);
+        if token_type == 0 {
+            out = buf_push(out, val1);
+        } else {
+            let start = out.len - val1;
+            let mut j = 0;
+            while j < val2 {
+                out = buf_push(out, buf_get(out, start + j));
+                j = j + 1;
+            }
+        }
+        i = i + 3;
+    }
+    out
+}
+
+// Count number of tokens
+fn count_tokens(encoded: Buf16) -> Int {
+    encoded.len / 3
+}
+
+// Count literals
+fn count_literals(encoded: Buf16) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < encoded.len {
+        if buf_get(encoded, i) == 0 { c = c + 1; }
+        i = i + 3;
+    }
+    c
+}
+
+// Count back-references
+fn count_backrefs(encoded: Buf16) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < encoded.len {
+        if buf_get(encoded, i) == 1 { c = c + 1; }
+        i = i + 3;
+    }
+    c
+}
+
+fn main() -> Int {
+    // === Test 1: Empty input ===
+    let empty = buf_new();
+    let enc_empty = lz_compress(empty);
+    assert_eq(enc_empty.len, 0);
+    let dec_empty = lz_decompress(enc_empty);
+    assert_eq(dec_empty.len, 0);
+
+    // === Test 2: Single element ===
+    let single = buf_push(buf_new(), 42);
+    let enc_single = lz_compress(single);
+    assert_eq(count_tokens(enc_single), 1);
+    assert_eq(count_literals(enc_single), 1);
+    let dec_single = lz_decompress(enc_single);
+    assert(buf_eq(dec_single, single));
+
+    // === Test 3: Two distinct elements [1,2] ===
+    let mut two = buf_new();
+    two = buf_push(two, 1);
+    two = buf_push(two, 2);
+    let enc_two = lz_compress(two);
+    assert_eq(count_literals(enc_two), 2);
+    assert_eq(count_backrefs(enc_two), 0);
+    let dec_two = lz_decompress(enc_two);
+    assert(buf_eq(dec_two, two));
+
+    // === Test 4: Repeated pattern [1,2,1,2,1,2] ===
+    // Expect: Lit(1), Lit(2), Backref(2,4) = 3 tokens = 9 ints
+    let mut rep = buf_new();
+    rep = buf_push(rep, 1);
+    rep = buf_push(rep, 2);
+    rep = buf_push(rep, 1);
+    rep = buf_push(rep, 2);
+    rep = buf_push(rep, 1);
+    rep = buf_push(rep, 2);
+    let enc_rep = lz_compress(rep);
+    assert(count_backrefs(enc_rep) > 0);
+    let dec_rep = lz_decompress(enc_rep);
+    assert(buf_eq(dec_rep, rep));
+
+    // === Test 5: All same [5,5,5,5,5,5] ===
+    // Expect: Lit(5), Backref(1,5) = 2 tokens = 6 ints
+    let mut all_same = buf_new();
+    let mut i = 0;
+    while i < 6 {
+        all_same = buf_push(all_same, 5);
+        i = i + 1;
+    }
+    let enc_same = lz_compress(all_same);
+    assert(count_backrefs(enc_same) > 0);
+    let dec_same = lz_decompress(enc_same);
+    assert(buf_eq(dec_same, all_same));
+
+    // === Test 6: Pattern [1,2,3,1,2,3,4] ===
+    // Expect: Lit(1), Lit(2), Lit(3), Backref(3,3), Lit(4) = 5 tokens = 15 ints
+    let mut pat = buf_new();
+    pat = buf_push(pat, 1);
+    pat = buf_push(pat, 2);
+    pat = buf_push(pat, 3);
+    pat = buf_push(pat, 1);
+    pat = buf_push(pat, 2);
+    pat = buf_push(pat, 3);
+    pat = buf_push(pat, 4);
+    let enc_pat = lz_compress(pat);
+    let dec_pat = lz_decompress(enc_pat);
+    assert(buf_eq(dec_pat, pat));
+
+    // === Test 7: Token counts ===
+    let ntok = count_tokens(enc_pat);
+    let nlit = count_literals(enc_pat);
+    let nref = count_backrefs(enc_pat);
+    assert_eq(ntok, nlit + nref);
+    assert_eq(nlit, 4);
+    assert_eq(nref, 1);
+
+    // === Test 8: Compression ratio ===
+    assert_eq(count_tokens(enc_same), 2);
+    assert_eq(count_tokens(enc_rep), 3);
+
+    // === Test 9: Verify specific encoded values ===
+    // For [5,5,5,5,5,5]: Lit(5) = (0,5,0), Backref(1,5) = (1,1,5)
+    assert_eq(buf_get(enc_same, 0), 0);
+    assert_eq(buf_get(enc_same, 1), 5);
+    assert_eq(buf_get(enc_same, 3), 1);
+    assert_eq(buf_get(enc_same, 4), 1);
+    assert_eq(buf_get(enc_same, 5), 5);
+
+    // === Test 10: Three distinct [7,8,9] -> 3 literals ===
+    let mut three = buf_new();
+    three = buf_push(three, 7);
+    three = buf_push(three, 8);
+    three = buf_push(three, 9);
+    let enc_three = lz_compress(three);
+    assert_eq(count_tokens(enc_three), 3);
+    assert_eq(count_literals(enc_three), 3);
+    assert_eq(count_backrefs(enc_three), 0);
+    let dec_three = lz_decompress(enc_three);
+    assert(buf_eq(dec_three, three));
+
+    // === Test 11: Long run [7,7,7,7,7,7,7,7,7,7,7,7] (12 sevens) ===
+    let mut long_run = buf_new();
+    let mut k = 0;
+    while k < 12 {
+        long_run = buf_push(long_run, 7);
+        k = k + 1;
+    }
+    let enc_long = lz_compress(long_run);
+    let dec_long = lz_decompress(enc_long);
+    assert(buf_eq(dec_long, long_run));
+    assert(count_tokens(enc_long) <= 3);
+
+    // === Test 12: Partially repeated [1,2,3,4,3,4] ===
+    let mut partial = buf_new();
+    partial = buf_push(partial, 1);
+    partial = buf_push(partial, 2);
+    partial = buf_push(partial, 3);
+    partial = buf_push(partial, 4);
+    partial = buf_push(partial, 3);
+    partial = buf_push(partial, 4);
+    let enc_partial = lz_compress(partial);
+    let dec_partial = lz_decompress(enc_partial);
+    assert(buf_eq(dec_partial, partial));
+    assert_eq(count_backrefs(enc_partial), 1);
+    assert_eq(count_literals(enc_partial), 4);
+
+    // === Test 13: Alternating [1,2,1,2] ===
+    let mut alt = buf_new();
+    alt = buf_push(alt, 1);
+    alt = buf_push(alt, 2);
+    alt = buf_push(alt, 1);
+    alt = buf_push(alt, 2);
+    let enc_alt = lz_compress(alt);
+    let dec_alt = lz_decompress(enc_alt);
+    assert(buf_eq(dec_alt, alt));
+    assert_eq(count_tokens(enc_alt), 3);
+
+    // === Test 14: Decompressed length matches original ===
+    assert_eq(dec_rep.len, rep.len);
+    assert_eq(dec_same.len, all_same.len);
+    assert_eq(dec_pat.len, pat.len);
+    assert_eq(dec_long.len, long_run.len);
+
+    0
+}

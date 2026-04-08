@@ -1,0 +1,121 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: map, struct, field-access
+// @description: Test Map with struct values and field access
+
+type Employee is { name: Text, salary: Int };
+
+fn test_map_basic() -> Int {
+    let mut m = Map.new();
+    m.insert("a", 10);
+    m.insert("b", 20);
+    m.insert("c", 30);
+
+    if m.len() != 3 {
+        print(f"FAIL map_basic: len={m.len()}, expected 3");
+        return 1;
+    }
+    let v = m.get("b");
+    if v != 20 {
+        print(f"FAIL map_basic: get(b)={v}, expected 20");
+        return 1;
+    }
+    if m.contains_key("a") == false {
+        print("FAIL map_basic: contains_key(a) should be true");
+        return 1;
+    }
+    if m.contains_key("z") == true {
+        print("FAIL map_basic: contains_key(z) should be false");
+        return 1;
+    }
+    print("  map_basic: OK");
+    0
+}
+
+fn test_map_overwrite() -> Int {
+    let mut m = Map.new();
+    m.insert("key", 100);
+    m.insert("key", 200);
+    let v = m.get("key");
+    if v != 200 {
+        print(f"FAIL overwrite: get(key)={v}, expected 200");
+        return 1;
+    }
+    if m.len() != 1 {
+        print(f"FAIL overwrite: len={m.len()}, expected 1");
+        return 1;
+    }
+    print("  overwrite: OK");
+    0
+}
+
+fn test_map_remove() -> Int {
+    let mut m = Map.new();
+    m.insert("x", 1);
+    m.insert("y", 2);
+    m.insert("z", 3);
+    m.remove("y");
+    if m.len() != 2 {
+        print(f"FAIL remove: len={m.len()}, expected 2");
+        return 1;
+    }
+    if m.contains_key("y") == true {
+        print("FAIL remove: y should be removed");
+        return 1;
+    }
+    let x = m.get("x");
+    let z = m.get("z");
+    if x != 1 || z != 3 {
+        print(f"FAIL remove: x={x}, z={z}");
+        return 1;
+    }
+    print("  remove: OK");
+    0
+}
+
+fn test_map_counter_pattern() -> Int {
+    // Count occurrences of values
+    let mut counts = Map.new();
+    let items = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+    let mut i = 0;
+    while i < items.len() {
+        let key = items[i];
+        if counts.contains_key(key) {
+            let old = counts.get(key);
+            counts.insert(key, old + 1);
+        } else {
+            counts.insert(key, 1);
+        }
+        i = i + 1;
+    }
+    // Check: 5 appears 3 times, 1 appears 2 times
+    let count_5 = counts.get(5);
+    let count_1 = counts.get(1);
+    if count_5 != 3 {
+        print(f"FAIL counter: count(5)={count_5}, expected 3");
+        return 1;
+    }
+    if count_1 != 2 {
+        print(f"FAIL counter: count(1)={count_1}, expected 2");
+        return 1;
+    }
+    print("  counter: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Map + Struct Value Tests:");
+    let mut failures = 0;
+    failures = failures + test_map_basic();
+    failures = failures + test_map_overwrite();
+    failures = failures + test_map_remove();
+    failures = failures + test_map_counter_pattern();
+
+    if failures == 0 {
+        print("All map struct tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

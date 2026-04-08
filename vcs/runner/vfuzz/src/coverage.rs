@@ -28,7 +28,6 @@
 //! - Lexer/Parser hooks (for AST coverage)
 //! - Error handler hooks (for error coverage)
 
-use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};

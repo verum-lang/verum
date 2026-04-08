@@ -1,0 +1,153 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, autodiff, forward-mode, jvp, dual-numbers
+// @expected-exit: 0
+
+// Tests forward-mode automatic differentiation using dual numbers.
+// Dual numbers: (value, derivative) with arithmetic rules that propagate derivatives.
+// This is the JVP (Jacobian-Vector Product) approach.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Dual number operations (scaled by 1000 for precision)
+// Each "dual" is stored as two ints: value and derivative
+
+// Dual addition: (a, a') + (b, b') = (a+b, a'+b')
+fn dual_add_val(av: Int, bv: Int) -> Int { av + bv }
+fn dual_add_der(ad: Int, bd: Int) -> Int { ad + bd }
+
+// Dual subtraction: (a, a') - (b, b') = (a-b, a'-b')
+fn dual_sub_val(av: Int, bv: Int) -> Int { av - bv }
+fn dual_sub_der(ad: Int, bd: Int) -> Int { ad - bd }
+
+// Dual multiplication: (a, a') * (b, b') = (a*b, a'*b + a*b')
+fn dual_mul_val(av: Int, bv: Int) -> Int { av * bv }
+fn dual_mul_der(av: Int, ad: Int, bv: Int, bd: Int) -> Int {
+    ad * bv + av * bd
+}
+
+// Dual squaring: (a, a')^2 = (a^2, 2*a*a')
+fn dual_sq_val(av: Int) -> Int { av * av }
+fn dual_sq_der(av: Int, ad: Int) -> Int { 2 * av * ad }
+
+// Dual cube: (a, a')^3 = (a^3, 3*a^2*a')
+fn dual_cube_val(av: Int) -> Int { av * av * av }
+fn dual_cube_der(av: Int, ad: Int) -> Int { 3 * av * av * ad }
+
+fn main() -> Int {
+    // Test 1: Forward-mode AD for f(x) = x^2
+    // Seed: x = (3, 1) (value=3, tangent=1)
+    // f(x) = (9, 6) → value=9, derivative=6 = 2*3 ✓
+    let xv = 3;
+    let xd = 1; // Seed tangent
+    let fv = dual_sq_val(xv);
+    let fd = dual_sq_der(xv, xd);
+    assert_eq(fv, 9);
+    assert_eq(fd, 6);
+
+    // Test 2: f(x) = x^3
+    // Seed: x = (2, 1)
+    // f(x) = (8, 12) → derivative = 3*4*1 = 12 ✓
+    let fv2 = dual_cube_val(2);
+    let fd2 = dual_cube_der(2, 1);
+    assert_eq(fv2, 8);
+    assert_eq(fd2, 12);
+
+    // Test 3: f(x) = x^2 + 3x + 1
+    // x = (2, 1), x^2 = (4, 4), 3x = (6, 3), 1 = (1, 0)
+    // f = (4+6+1, 4+3+0) = (11, 7)
+    // f'(2) = 2*2 + 3 = 7 ✓
+    let sq_v = dual_sq_val(2);
+    let sq_d = dual_sq_der(2, 1);
+    let lin_v = 3 * 2;
+    let lin_d = 3 * 1;
+    let poly_v = sq_v + lin_v + 1;
+    let poly_d = sq_d + lin_d + 0;
+    assert_eq(poly_v, 11);
+    assert_eq(poly_d, 7);
+
+    // Test 4: f(x,y) = x*y with directional derivative
+    // At (3, 4), direction (1, 0): ∂f/∂x = y = 4
+    let xy_v = dual_mul_val(3, 4);
+    let xy_d = dual_mul_der(3, 1, 4, 0);  // dx=1, dy=0
+    assert_eq(xy_v, 12);
+    assert_eq(xy_d, 4);
+
+    // At (3, 4), direction (0, 1): ∂f/∂y = x = 3
+    let xy_d2 = dual_mul_der(3, 0, 4, 1);  // dx=0, dy=1
+    assert_eq(xy_d2, 3);
+
+    // Test 5: Chain rule via dual numbers
+    // f(x) = (2x+1)^2, x = (3, 1)
+    // Step 1: u = 2x+1 = (7, 2)
+    let u_v = 2 * 3 + 1;
+    let u_d = 2 * 1;
+    // Step 2: f = u^2 = (49, 2*7*2) = (49, 28)
+    let chain_v = dual_sq_val(u_v);
+    let chain_d = dual_sq_der(u_v, u_d);
+    assert_eq(chain_v, 49);
+    assert_eq(chain_d, 28);
+    // f'(3) = 4(2*3+1) = 28 ✓
+
+    // Test 6: Product of two functions via dual
+    // f(x) = x^2 * (x+1), x = (2, 1)
+    // x^2 = (4, 4), x+1 = (3, 1)
+    // f = (12, 4*3 + 4*1) = (12, 16)
+    // f'(2) = 2*2*(2+1) + 4*1 = 12 + 4 = 16? No.
+    // f(x) = x^3 + x^2, f'(x) = 3x^2 + 2x, f'(2) = 12 + 4 = 16 ✓
+    let p_av = 4; let p_ad = 4;   // x^2 at x=2
+    let p_bv = 3; let p_bd = 1;   // x+1 at x=2
+    let prod_v = dual_mul_val(p_av, p_bv);
+    let prod_d = dual_mul_der(p_av, p_ad, p_bv, p_bd);
+    assert_eq(prod_v, 12);
+    assert_eq(prod_d, 16);
+
+    // Test 7: Dual number with different seed (directional derivative)
+    // f(x) = x^2 at x=3, seed v=2
+    // JVP: f'(x) * v = 2*3*2 = 12
+    let dir_d = dual_sq_der(3, 2);
+    assert_eq(dir_d, 12);
+
+    // Test 8: Gradient of sum = sum of gradients
+    // f(x) = x^2 + x^3 at x=2
+    // f'(x) = 2x + 3x^2, f'(2) = 4 + 12 = 16
+    let sum_d = dual_sq_der(2, 1) + dual_cube_der(2, 1);
+    assert_eq(sum_d, 16);
+
+    // Test 9: Forward mode for Jacobian computation
+    // f: R^2 → R^2, f(x,y) = (x^2 + y, x*y)
+    // Jacobian: [[2x, 1], [y, x]]
+    // At (2, 3): J = [[4, 1], [3, 2]]
+    // Column 1 (seed [1,0]): J * [1,0] = [4, 3]
+    let j11 = dual_sq_der(2, 1) + 0; // ∂(x^2+y)/∂x = 2x = 4
+    let j21 = dual_mul_der(2, 1, 3, 0); // ∂(xy)/∂x = y = 3
+    assert_eq(j11, 4);
+    assert_eq(j21, 3);
+    // Column 2 (seed [0,1]): J * [0,1] = [1, 2]
+    let j12 = dual_sq_der(2, 0) + 1; // ∂(x^2+y)/∂y = 1
+    let j22 = dual_mul_der(2, 0, 3, 1); // ∂(xy)/∂y = x = 2
+    assert_eq(j12, 1);
+    assert_eq(j22, 2);
+    // Jacobian determinant: 4*2 - 1*3 = 5
+    let jac_det = j11 * j22 - j12 * j21;
+    assert_eq(jac_det, 5);
+
+    // Test 10: Higher-order forward mode
+    // Second derivative via nested dual numbers
+    // f(x) = x^3, f'(x) = 3x^2, f''(x) = 6x
+    // First pass: (x, 1) → (x^3, 3x^2)
+    // To get second derivative, apply forward mode to f'(x) = 3x^2
+    // (x, 1) → (3x^2, 6x)
+    let x_val = 4;
+    let first_der = 3 * x_val * x_val;  // f'(4) = 48
+    assert_eq(first_der, 48);
+    // Apply forward mode to g(x) = 3x^2: g'(x) = 6x
+    let second_der = 6 * x_val;  // f''(4) = 24
+    assert_eq(second_der, 24);
+
+    print("Forward mode AD: PASS");
+    0
+}

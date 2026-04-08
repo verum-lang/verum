@@ -1,0 +1,437 @@
+// @test: differential
+// @tier: all
+// @impl: all
+// @level: L2
+// @tags: differential, unicode, cross-impl, text
+// @platform: any
+// @timeout: 15000
+
+/// Comprehensive Unicode handling tests for cross-implementation verification.
+/// Verifies that all Verum implementations correctly handle Unicode text
+/// encoding, normalization, grapheme clusters, and text operations.
+
+fn main() {
+    // ===== Basic Unicode =====
+    println("=== Basic Unicode ===");
+
+    let ascii = "Hello";
+    let cyrillic = "Привет";
+    let chinese = "你好";
+    let arabic = "مرحبا";
+    let hebrew = "שלום";
+    let japanese = "こんにちは";
+    let korean = "안녕하세요";
+
+    println(f"ASCII: \"{ascii}\" len={ascii.len()} chars={ascii.chars().len()}");
+    println(f"Cyrillic: \"{cyrillic}\" len={cyrillic.len()} chars={cyrillic.chars().len()}");
+    println(f"Chinese: \"{chinese}\" len={chinese.len()} chars={chinese.chars().len()}");
+    println(f"Arabic: \"{arabic}\" len={arabic.len()} chars={arabic.chars().len()}");
+    println(f"Hebrew: \"{hebrew}\" len={hebrew.len()} chars={hebrew.chars().len()}");
+    println(f"Japanese: \"{japanese}\" len={japanese.len()} chars={japanese.chars().len()}");
+    println(f"Korean: \"{korean}\" len={korean.len()} chars={korean.chars().len()}");
+
+    // ===== Emoji =====
+    println("\n=== Emoji ===");
+
+    let simple_emoji = "😀";
+    let skin_tone = "👋🏽";
+    let zwj_family = "👨‍👩‍👧‍👦";
+    let flag = "🇺🇸";
+
+    println(f"Simple: \"{simple_emoji}\" len={simple_emoji.len()} chars={simple_emoji.chars().len()}");
+    println(f"Skin tone: \"{skin_tone}\" len={skin_tone.len()} chars={skin_tone.chars().len()}");
+    println(f"ZWJ family: \"{zwj_family}\" len={zwj_family.len()} chars={zwj_family.chars().len()}");
+    println(f"Flag: \"{flag}\" len={flag.len()} chars={flag.chars().len()}");
+
+    // Grapheme clusters
+    println(f"ZWJ graphemes: {zwj_family.graphemes().len()}");
+
+    // ===== Combining characters =====
+    println("\n=== Combining Characters ===");
+
+    let e_acute_composed = "é";           // U+00E9
+    let e_acute_decomposed = "e\u{0301}"; // e + combining acute
+
+    println(f"Composed: \"{e_acute_composed}\" len={e_acute_composed.len()}");
+    println(f"Decomposed: \"{e_acute_decomposed}\" len={e_acute_decomposed.len()}");
+    println(f"Equal: {e_acute_composed == e_acute_decomposed}");
+
+    // NFC normalization
+    let nfc_composed = e_acute_decomposed.nfc();
+    println(f"NFC normalized: \"{nfc_composed}\" len={nfc_composed.len()}");
+    println(f"NFC == composed: {nfc_composed == e_acute_composed}");
+
+    // Multiple combining marks
+    let zalgo = "H\u{0336}\u{0335}\u{0334}e\u{0337}\u{0336}l\u{0335}\u{0334}l\u{0336}o";
+    println(f"Zalgo: \"{zalgo}\" len={zalgo.len()} chars={zalgo.chars().len()}");
+
+    // ===== String operations with Unicode =====
+    println("\n=== String Operations ===");
+
+    let text = "Привет мир";
+
+    // Length
+    println(f"len (bytes) = {text.len()}");
+    println(f"chars count = {text.chars().len()}");
+
+    // Indexing (by char, not byte)
+    println(f"text[0] = '{text.char_at(0)}'");
+    println(f"text[6] = '{text.char_at(6)}'");
+
+    // Slicing (by char indices)
+    println(f"text[0..6] = \"{text.char_slice(0, 6)}\"");
+    println(f"text[7..10] = \"{text.char_slice(7, 10)}\"");
+
+    // Case conversion
+    let mixed = "Привет Hello 你好";
+    println(f"uppercase: \"{mixed.to_uppercase()}\"");
+    println(f"lowercase: \"{mixed.to_lowercase()}\"");
+
+    // ===== Unicode categories =====
+    println("\n=== Unicode Categories ===");
+
+    let chars_to_test = ['A', 'a', '5', ' ', '\n', '!', 'ñ', '中', '😀'];
+
+    for c in chars_to_test {
+        println(f"'{c}': letter={c.is_letter()}, digit={c.is_digit()}, ws={c.is_whitespace()}, punct={c.is_punctuation()}");
+    }
+
+    // ===== Normalization =====
+    println("\n=== Normalization ===");
+
+    // Different representations of same text
+    let nfd = "café".nfd();  // Decomposed
+    let nfc = "café".nfc();  // Composed
+    let nfkd = "ﬁ".nfkd();   // Compatibility decomposed
+    let nfkc = "ﬁ".nfkc();   // Compatibility composed
+
+    println(f"NFD(café) len = {nfd.len()}");
+    println(f"NFC(café) len = {nfc.len()}");
+    println(f"NFKD(ﬁ) = \"{nfkd}\"");
+    println(f"NFKC(ﬁ) = \"{nfkc}\"");
+
+    // ===== Bidirectional text =====
+    println("\n=== Bidirectional Text ===");
+
+    let bidi = "Hello مرحبا World عالم";
+    println(f"BiDi text: \"{bidi}\"");
+    println(f"BiDi len = {bidi.len()}, chars = {bidi.chars().len()}");
+
+    // ===== Zero-width characters =====
+    println("\n=== Zero-Width Characters ===");
+
+    let zwsp = "Hello\u{200B}World";  // Zero-width space
+    let zwnj = "a\u{200C}b";          // Zero-width non-joiner
+    let zwj = "a\u{200D}b";           // Zero-width joiner
+
+    println(f"ZWSP: len={zwsp.len()}, visible=\"{zwsp}\"");
+    println(f"ZWNJ: len={zwnj.len()}");
+    println(f"ZWJ: len={zwj.len()}");
+
+    // ===== Line breaks =====
+    println("\n=== Line Breaks ===");
+
+    let unix_lines = "line1\nline2\nline3";
+    let windows_lines = "line1\r\nline2\r\nline3";
+    let mac_lines = "line1\rline2\rline3";
+
+    println(f"Unix lines count: {unix_lines.lines().len()}");
+    println(f"Windows lines count: {windows_lines.lines().len()}");
+    println(f"Mac lines count: {mac_lines.lines().len()}");
+
+    // ===== Collation =====
+    println("\n=== Collation ===");
+
+    let words = ["apple", "Banana", "cherry", "äpple", "Ångström"];
+
+    let sorted_default = words.sorted();
+    println(f"Default sort: {sorted_default}");
+
+    let sorted_locale = words.sorted_by(|a, b| a.locale_compare(b, "en"));
+    println(f"Locale sort (en): {sorted_locale}");
+
+    // Case-insensitive comparison
+    println(f"\"Hello\".eq_ignore_case(\"HELLO\") = {\"Hello\".eq_ignore_case(\"HELLO\")}");
+    println(f"\"Straße\".eq_ignore_case(\"STRASSE\") = {\"Straße\".eq_ignore_case(\"STRASSE\")}");
+
+    // ===== Regular expressions with Unicode =====
+    println("\n=== Regex with Unicode ===");
+
+    let text = "Hello 世界 123 мир";
+
+    // Unicode-aware character classes
+    let letters = text.matches(r"\p{L}+");
+    println(f"Letters: {letters}");
+
+    let non_ascii = text.matches(r"[^\x00-\x7F]+");
+    println(f"Non-ASCII: {non_ascii}");
+
+    // ===== Edge cases =====
+    println("\n=== Edge Cases ===");
+
+    // Surrogate pairs (in UTF-16 world)
+    let supplementary = "𝄞";  // Musical G clef, U+1D11E
+    println(f"Supplementary: \"{supplementary}\" len={supplementary.len()} chars={supplementary.chars().len()}");
+
+    // Private use area
+    let pua = "\u{E000}";
+    println(f"PUA: codepoint=U+E000, len={pua.len()}");
+
+    // Byte order mark
+    let with_bom = "\u{FEFF}Hello";
+    println(f"With BOM: len={with_bom.len()}, starts_with_bom={with_bom.starts_with(\"\u{FEFF}\")}");
+
+    // Null character
+    let with_null = "Hello\0World";
+    println(f"With null: len={with_null.len()}");
+
+    // Maximum codepoint
+    let max_codepoint = '\u{10FFFF}';
+    println(f"Max codepoint: U+10FFFF, len in bytes={max_codepoint.len_utf8()}");
+
+    // Additional cross-implementation tests
+    test_utf8_encoding();
+    test_codepoint_iteration();
+    test_text_boundary();
+    test_case_folding();
+    test_string_operations();
+}
+
+/// UTF-8 encoding details
+fn test_utf8_encoding() {
+    println("\n=== UTF-8 Encoding ===");
+
+    // 1-byte sequence (ASCII)
+    let ascii = 'A';
+    println(f"ASCII 'A': codepoint=U+{ascii as u32:04X}, bytes={ascii.len_utf8()}");
+
+    // 2-byte sequence
+    let latin = 'é';
+    println(f"Latin 'e': codepoint=U+{latin as u32:04X}, bytes={latin.len_utf8()}");
+
+    // 3-byte sequence
+    let cjk = '中';
+    println(f"CJK '中': codepoint=U+{cjk as u32:04X}, bytes={cjk.len_utf8()}");
+
+    // 4-byte sequence
+    let emoji = '😀';
+    println(f"Emoji '😀': codepoint=U+{emoji as u32:04X}, bytes={emoji.len_utf8()}");
+
+    // Byte representation
+    fn show_bytes(s: &Text) {
+        let bytes = s.as_bytes();
+        let hex: List<Text> = bytes.iter().map(|b| f"{b:02X}").collect();
+        println(f"\"{s}\" bytes: [{hex.join(" ")}]");
+    }
+
+    show_bytes("A");
+    show_bytes("é");
+    show_bytes("中");
+    show_bytes("😀");
+
+    // Roundtrip: string -> bytes -> string
+    let original = "Hello, 世界! 🌍";
+    let bytes = original.as_bytes();
+    let restored = Text.from_utf8(bytes).unwrap();
+    println(f"roundtrip match: {original == restored}");
+
+    // Invalid UTF-8 handling
+    let invalid_bytes: [U8; 3] = [0xFF, 0xFE, 0x00];
+    let result = Text.from_utf8(&invalid_bytes);
+    println(f"invalid UTF-8: {result.is_err()}");
+
+    // Lossy conversion
+    let lossy = Text.from_utf8_lossy(&invalid_bytes);
+    println(f"lossy conversion contains replacement: {lossy.contains('\u{FFFD}')}");
+}
+
+/// Codepoint iteration
+fn test_codepoint_iteration() {
+    println("\n=== Codepoint Iteration ===");
+
+    let text = "Héllo 世界 🌍";
+
+    // Iterate over chars (codepoints)
+    let chars: List<Char> = text.chars().collect();
+    println(f"chars count: {chars.len()}");
+
+    for (i, c) in chars.iter().enumerate() {
+        println(f"  [{i}] U+{*c as u32:04X} '{c}'");
+    }
+
+    // Iterate over bytes
+    let bytes: List<U8> = text.bytes().collect();
+    println(f"bytes count: {bytes.len()}");
+
+    // Char indices
+    for (byte_idx, char_val) in text.char_indices() {
+        println(f"  byte {byte_idx}: U+{char_val as u32:04X}");
+    }
+
+    // Reverse iteration
+    let reversed: Text = text.chars().rev().collect();
+    println(f"reversed: \"{reversed}\"");
+}
+
+/// Text boundary detection
+fn test_text_boundary() {
+    println("\n=== Text Boundaries ===");
+
+    // Word boundaries
+    let sentence = "Hello, world! How are you?";
+    let words: List<&Text> = sentence.split_whitespace().collect();
+    println(f"word count: {words.len()}");
+    for word in &words {
+        println(f"  word: \"{word}\"");
+    }
+
+    // Word boundaries with Unicode
+    let unicode_sentence = "Привет мир! 你好世界!";
+    let unicode_words: List<&Text> = unicode_sentence.unicode_words().collect();
+    println(f"unicode words: {unicode_words.len()}");
+
+    // Sentence boundaries
+    let paragraph = "First sentence. Second one! Third?";
+    let sentences: List<&Text> = paragraph.sentences().collect();
+    println(f"sentences: {sentences.len()}");
+
+    // Line boundaries
+    let multiline = "Line 1\nLine 2\r\nLine 3\rLine 4";
+    let lines: List<&Text> = multiline.lines().collect();
+    println(f"lines: {lines.len()}");
+    for (i, line) in lines.iter().enumerate() {
+        println(f"  line {i}: \"{line}\"");
+    }
+
+    // Grapheme cluster boundaries
+    let with_combining = "e\u{0301}\u{0327}";  // e + acute + cedilla
+    let graphemes: List<&Text> = with_combining.graphemes().collect();
+    println(f"grapheme clusters: {graphemes.len()}");
+
+    // Word wrap at grapheme boundaries
+    fn wrap_text(text: &Text, max_width: Int) -> List<Text> {
+        let mut lines = [];
+        let mut current_line = Text.new();
+
+        for grapheme in text.graphemes() {
+            if current_line.len() + grapheme.len() > max_width {
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                    current_line = Text.new();
+                }
+            }
+            current_line.push_str(grapheme);
+        }
+
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+
+        lines
+    }
+
+    let long_text = "Hello 世界! This is a test of word wrapping with Unicode.";
+    let wrapped = wrap_text(&long_text, 20);
+    println(f"wrapped lines: {wrapped.len()}");
+}
+
+/// Case folding and comparison
+fn test_case_folding() {
+    println("\n=== Case Folding ===");
+
+    // Simple case conversion
+    println(f"'a'.to_uppercase(): {['a'].to_uppercase().collect<List<_>>()}");
+    println(f"'A'.to_lowercase(): {['A'].to_lowercase().collect<List<_>>()}");
+
+    // Multi-char expansions
+    println(f"'ß'.to_uppercase(): {['ß'].to_uppercase().collect<List<_>>()}");
+    println(f"'ﬁ'.to_uppercase(): {['ﬁ'].to_uppercase().collect<List<_>>()}");
+
+    // Turkish I dotless
+    let dotless_i = 'ı';  // U+0131
+    let dotted_I = 'İ';   // U+0130
+    println(f"Turkish dotless i: '{dotless_i}'.to_uppercase() = {[dotless_i].to_uppercase().collect<List<_>>()}");
+    println(f"Turkish dotted I: '{dotted_I}'.to_lowercase() = {[dotted_I].to_lowercase().collect<List<_>>()}");
+
+    // Case-insensitive comparison
+    fn eq_ignore_case(a: &Text, b: &Text) -> Bool {
+        a.chars().flat_map(|c| c.to_lowercase())
+            .eq(b.chars().flat_map(|c| c.to_lowercase()))
+    }
+
+    println(f"eq_ignore_case(\"HELLO\", \"hello\"): {eq_ignore_case("HELLO", "hello")}");
+    println(f"eq_ignore_case(\"Straße\", \"STRASSE\"): {eq_ignore_case("Straße", "STRASSE")}");
+    println(f"eq_ignore_case(\"σ\", \"ς\"): {eq_ignore_case("σ", "ς")}");  // Greek sigma forms
+
+    // Title case
+    let title_input = "hello WORLD";
+    let title_case: Text = title_input.chars().enumerate()
+        .flat_map(|(i, c)| {
+            if i == 0 || title_input.chars().nth(i - 1).unwrap().is_whitespace() {
+                c.to_uppercase()
+            } else {
+                c.to_lowercase()
+            }
+        })
+        .collect();
+    println(f"title case: \"{title_case}\"");
+}
+
+/// String manipulation operations
+fn test_string_operations() {
+    println("\n=== String Operations ===");
+
+    let base = "Hello, 世界!";
+
+    // Concatenation
+    let concat = base + " Welcome!";
+    println(f"concat: \"{concat}\"");
+
+    // Repeat
+    let repeated = "ab".repeat(5);
+    println(f"repeat: \"{repeated}\"");
+
+    // Trim
+    let padded = "  \t Hello \n  ";
+    println(f"trim: \"{padded.trim()}\"");
+    println(f"trim_start: \"{padded.trim_start()}\"");
+    println(f"trim_end: \"{padded.trim_end()}\"");
+
+    // Split
+    let csv = "a,b,c,d,e";
+    let parts: List<&Text> = csv.split(',').collect();
+    println(f"split: {parts}");
+
+    // Join
+    let joined = parts.join(" - ");
+    println(f"join: \"{joined}\"");
+
+    // Replace
+    let original = "Hello Hello Hello";
+    let replaced = original.replace("Hello", "Hi");
+    let replace_first = original.replacen("Hello", "Hi", 1);
+    println(f"replace all: \"{replaced}\"");
+    println(f"replace first: \"{replace_first}\"");
+
+    // Contains, starts_with, ends_with
+    let text = "Hello, 世界!";
+    println(f"contains '世界': {text.contains("世界")}");
+    println(f"starts_with 'Hello': {text.starts_with("Hello")}");
+    println(f"ends_with '!': {text.ends_with("!")}");
+
+    // Find
+    println(f"find '世': {text.find("世")}");
+    println(f"rfind 'o': {text.rfind("o")}");
+
+    // Padding
+    let short = "Hi";
+    println(f"pad_start 10: \"{short.pad_start(10, ' ')}\"");
+    println(f"pad_end 10: \"{short.pad_end(10, '-')}\"");
+    println(f"center 10: \"{short.center(10, '*')}\"");
+
+    // Format alignment with Unicode
+    let names = ["Alice", "日本語", "🎉"];
+    for name in &names {
+        println(f"  |{name:>10}|{name:^10}|{name:<10}|");
+    }
+}

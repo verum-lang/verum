@@ -1,0 +1,366 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/linux/syscall_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, linux, syscall, ffi
+// @description: Tests for Linux raw syscall interface and basic wrappers.
+//
+// Coverage:
+// - syscall_raw: Direct syscall intrinsic
+// - read, write, close: Basic I/O operations
+// - mmap, munmap: Memory mapping
+// - getpid, gettid: Process/thread identification
+// - nanosleep: Sleep operations
+// - getrandom: Secure random bytes
+// - futex_wait, futex_wake: Basic futex operations
+// - Syscall number constants
+//
+// Test Strategy:
+// - Read-only syscalls for safety (getpid, gettid, getrandom)
+// - Memory operations with immediate cleanup
+// - Timeout-bounded blocking operations
+//
+// Platform: Linux x86_64
+// =============================================================================
+
+@cfg(target_os = "linux")
+module test.stdlib.sys.linux.syscall_test;
+
+mount core.sys.linux.{
+    syscall_raw,
+    read, write, close,
+    mmap, munmap,
+    getpid, gettid,
+    nanosleep, getrandom,
+    futex_wait, futex_wake,
+    SYS_READ, SYS_WRITE, SYS_CLOSE,
+    SYS_MMAP, SYS_MUNMAP, SYS_MPROTECT,
+    SYS_CLONE, SYS_CLONE3,
+    SYS_FUTEX,
+    SYS_IO_URING_SETUP, SYS_IO_URING_ENTER, SYS_IO_URING_REGISTER,
+    SYS_EPOLL_CREATE1, SYS_EPOLL_CTL, SYS_EPOLL_WAIT,
+};
+
+mount core.sys.linux.{
+    PROT_NONE, PROT_READ, PROT_WRITE,
+    MAP_PRIVATE, MAP_ANONYMOUS,
+};
+
+mount core.sys.common.{PAGE_SIZE};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Syscall Constants Tests
+// =============================================================================
+
+@test
+fn test_syscall_constants() {
+    // Verify syscall numbers are non-negative and distinct
+    assert(SYS_READ >= 0);
+    assert(SYS_WRITE >= 0);
+    assert(SYS_CLOSE >= 0);
+    assert(SYS_MMAP >= 0);
+    assert(SYS_MUNMAP >= 0);
+    assert(SYS_MPROTECT >= 0);
+    assert(SYS_CLONE >= 0);
+    assert(SYS_FUTEX >= 0);
+
+    // Common x86_64 syscall numbers
+    assert(SYS_READ == 0);
+    assert(SYS_WRITE == 1);
+    assert(SYS_CLOSE == 3);
+    assert(SYS_MMAP == 9);
+    assert(SYS_MUNMAP == 11);
+    assert(SYS_MPROTECT == 10);
+
+    // io_uring syscalls (Linux 5.1+)
+    assert(SYS_IO_URING_SETUP >= 0);
+    assert(SYS_IO_URING_ENTER >= 0);
+    assert(SYS_IO_URING_REGISTER >= 0);
+
+    // epoll syscalls
+    assert(SYS_EPOLL_CREATE1 >= 0);
+    assert(SYS_EPOLL_CTL >= 0);
+    assert(SYS_EPOLL_WAIT >= 0);
+
+    print("Syscall constants tests passed");
+}
+
+// =============================================================================
+// Process/Thread ID Tests
+// =============================================================================
+
+@test
+fn test_getpid_gettid() {
+    // Get process ID
+    let pid = getpid();
+    assert(pid > 0);
+
+    // Multiple calls return same PID
+    let pid2 = getpid();
+    let pid3 = getpid();
+    assert(pid == pid2);
+    assert(pid == pid3);
+
+    // Get thread ID
+    let tid = gettid();
+    assert(tid > 0);
+
+    // Multiple calls return same TID (single-threaded)
+    let tid2 = gettid();
+    let tid3 = gettid();
+    assert(tid == tid2);
+    assert(tid == tid3);
+
+    // In main thread, TID may equal PID
+    // (This is true for the main thread of a process)
+    // Note: Not guaranteed, so we just verify both are valid
+
+    // Verify reasonable ranges
+    assert(pid < 4194304);  // PID_MAX_LIMIT on most systems
+    assert(tid < 4194304);
+
+    print(f"PID: {pid}, TID: {tid}");
+}
+
+// =============================================================================
+// Memory Mapping Tests
+// =============================================================================
+
+@test
+fn test_mmap_munmap() {
+    // Map a single page anonymously
+    let result = mmap(
+        0 as &unsafe Byte,        // addr (NULL = kernel chooses)
+        PAGE_SIZE,                // size
+        PROT_READ | PROT_WRITE,   // prot
+        MAP_PRIVATE | MAP_ANONYMOUS,  // flags
+        -1,                       // fd (not used with MAP_ANONYMOUS)
+        0                         // offset
+    );
+
+    assert(result is Ok);
+    let ptr = result.unwrap();
+
+    // Pointer should be non-null and page-aligned
+    let addr = ptr as Int;
+    assert(addr != 0);
+    assert(addr % PAGE_SIZE == 0);
+
+    // Write to mapped memory
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        *int_ptr = 0xDEADBEEF;
+        assert(*int_ptr == 0xDEADBEEF);
+    }
+
+    // Unmap the memory
+    let unmap_result = munmap(ptr, PAGE_SIZE);
+    assert(unmap_result is Ok);
+
+    // Map multiple pages
+    let large_size = PAGE_SIZE * 16;
+    let large_result = mmap(
+        0 as &unsafe Byte,
+        large_size,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS,
+        -1,
+        0
+    );
+
+    assert(large_result is Ok);
+    let large_ptr = large_result.unwrap();
+
+    // Write to first and last page
+    unsafe {
+        let start_ptr = large_ptr as *mut Int;
+        let end_ptr = (large_ptr as Int + large_size - 8) as *mut Int;
+
+        *start_ptr = 100;
+        *end_ptr = 200;
+
+        assert(*start_ptr == 100);
+        assert(*end_ptr == 200);
+    }
+
+    // Unmap large allocation
+    let large_unmap = munmap(large_ptr, large_size);
+    assert(large_unmap is Ok);
+
+    print("mmap/munmap tests passed");
+}
+
+// =============================================================================
+// Random Number Tests
+// =============================================================================
+
+@test
+fn test_getrandom() {
+    // Get 8 random bytes
+    let mut buffer: [Byte; 8] = [0; 8];
+    let result = getrandom(&mut buffer as &mut [Byte], 8, 0);
+
+    assert(result is Ok);
+    let bytes_read = result.unwrap();
+    assert(bytes_read == 8);
+
+    // Buffer should have been modified (extremely unlikely to be all zeros)
+    let mut all_zero = true;
+    for i in 0..8 {
+        if buffer[i] != 0 {
+            all_zero = false;
+            break;
+        }
+    }
+    // Note: Could theoretically fail if getrandom returns all zeros,
+    // but probability is 1/2^64
+
+    // Get more random bytes
+    let mut buffer2: [Byte; 32] = [0; 32];
+    let result2 = getrandom(&mut buffer2 as &mut [Byte], 32, 0);
+    assert(result2 is Ok);
+    assert(result2.unwrap() == 32);
+
+    // Verify randomness: two calls should produce different results
+    let mut buffer3: [Byte; 8] = [0; 8];
+    let _ = getrandom(&mut buffer3 as &mut [Byte], 8, 0);
+
+    let mut same = true;
+    for i in 0..8 {
+        if buffer[i] != buffer3[i] {
+            same = false;
+            break;
+        }
+    }
+    // Probability of being same: 1/2^64
+    assert(!same);
+
+    print("getrandom tests passed");
+}
+
+// =============================================================================
+// Sleep Tests
+// =============================================================================
+
+@test
+fn test_nanosleep() {
+    mount core.sys.linux.time.{Timespec, monotonic_nanos};
+
+    // Sleep for 1 millisecond
+    let sleep_time = Timespec {
+        tv_sec: 0,
+        tv_nsec: 1_000_000,  // 1ms
+    };
+
+    let before = monotonic_nanos();
+    let result = nanosleep(&sleep_time, null);
+    let after = monotonic_nanos();
+
+    assert(result is Ok);
+
+    // Should have slept at least 0.9ms (allowing some tolerance)
+    let elapsed = after - before;
+    assert(elapsed >= 900_000);  // 0.9ms minimum
+
+    // Should not have slept for more than 100ms (allowing OS scheduler variance)
+    assert(elapsed < 100_000_000);  // 100ms maximum
+
+    // Sleep for 10 milliseconds
+    let sleep_time_10ms = Timespec {
+        tv_sec: 0,
+        tv_nsec: 10_000_000,  // 10ms
+    };
+
+    let before2 = monotonic_nanos();
+    let _ = nanosleep(&sleep_time_10ms, null);
+    let after2 = monotonic_nanos();
+
+    let elapsed2 = after2 - before2;
+    assert(elapsed2 >= 9_000_000);  // 9ms minimum
+    assert(elapsed2 < 100_000_000); // 100ms maximum
+
+    print("nanosleep tests passed");
+}
+
+// =============================================================================
+// Futex Tests
+// =============================================================================
+
+@test
+fn test_futex_basic() {
+    mount core.sys.linux.thread.{FUTEX_WAIT, FUTEX_WAKE, FUTEX_PRIVATE_FLAG};
+    mount core.sys.linux.errno.{EAGAIN, ETIMEDOUT};
+    mount core.sys.linux.time.{Timespec};
+
+    // Create a futex variable
+    let mut futex_var: Int = 0;
+
+    // futex_wait with wrong expected value should return EAGAIN immediately
+    let wait_result = futex_wait(&mut futex_var, 999, null);
+    match wait_result {
+        Err(e) => {
+            // Expected: EAGAIN because value doesn't match
+            assert(e == EAGAIN);
+        }
+        Ok(()) => {
+            // Should not succeed
+            assert(false);
+        }
+    }
+
+    // futex_wait with correct value but timeout
+    let timeout = Timespec {
+        tv_sec: 0,
+        tv_nsec: 1_000_000,  // 1ms timeout
+    };
+
+    let wait_timeout = futex_wait(&mut futex_var, 0, &timeout);
+    match wait_timeout {
+        Err(e) => {
+            // Expected: ETIMEDOUT
+            assert(e == ETIMEDOUT);
+        }
+        Ok(()) => {
+            // Might succeed if woken spuriously
+        }
+    }
+
+    // futex_wake with no waiters should return 0
+    let wake_result = futex_wake(&mut futex_var, 1);
+    assert(wake_result is Ok);
+    let woken = wake_result.unwrap();
+    assert(woken == 0);  // No waiters
+
+    print("futex basic tests passed");
+}
+
+// =============================================================================
+// File Descriptor Tests (Limited - using stdout)
+// =============================================================================
+
+@test
+fn test_write_stdout() {
+    mount core.sys.common.{FileDesc};
+
+    // Write to stdout (fd 1)
+    let message = "Test message to stdout\n";
+    let bytes = message.as_bytes();
+
+    let result = write(FileDesc.STDOUT, bytes.as_ptr(), bytes.len());
+    assert(result is Ok);
+
+    let bytes_written = result.unwrap();
+    assert(bytes_written == bytes.len() as Int);
+
+    print("write stdout tests passed");
+}

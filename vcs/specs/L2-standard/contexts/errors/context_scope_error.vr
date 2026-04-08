@@ -1,0 +1,104 @@
+// @test: typecheck-fail
+// @expected-error: E400
+// @tier: 0
+// @level: L2
+// @tags: contexts, scope, escape, error
+// @description: Tests detection of context references escaping their scope
+
+/// Contexts have well-defined scopes. References to context
+/// values cannot escape their providing scope.
+
+context Database {
+    fn query(&self, sql: Text) -> Result<Rows, DbError>;
+}
+
+type PostgresDb is { conn: Text };
+implement Database for PostgresDb {
+    fn query(&self, sql: Text) -> Result<Rows, DbError> { Ok(Rows.empty()) }
+}
+
+/// ERROR: Context reference escapes its scope
+fn escape_context_reference() -> &Database {
+    let db = PostgresDb { conn: "..." };
+
+    provide Database = db in {
+        // ERROR: Cannot return reference to context outside provide block
+        return Database;  // E0302: Context reference escapes scope
+    }
+}
+
+/// ERROR: Storing context reference in longer-lived structure
+fn store_context_reference() {
+    let db = PostgresDb { conn: "..." };
+    let mut stored: Maybe<&Database> = None;
+
+    provide Database = db in {
+        // ERROR: Cannot store context reference beyond provide scope
+        stored = Some(Database);  // E0302
+    }
+
+    // stored would be dangling here
+}
+
+/// ERROR: Closure capturing context
+fn capture_in_closure() -> fn() -> Result<Rows, DbError> {
+    let db = PostgresDb { conn: "..." };
+
+    provide Database = db in {
+        // ERROR: Closure captures context that goes out of scope
+        let closure = || {
+            Database.query("SELECT 1")  // E0302: Context captured by closure
+        };
+        return closure;  // Closure outlives provide scope
+    }
+}
+
+/// ERROR: Spawning task with context reference
+async fn spawn_with_context() {
+    let db = PostgresDb { conn: "..." };
+
+    provide Database = db in {
+        // ERROR: Spawned task may outlive provide scope
+        spawn {
+            Database.query("SELECT 1");  // E0302: Context may be invalid
+        };
+        // provide scope ends here, but spawned task continues
+    }
+}
+
+/// Correct: Clone or transfer ownership
+fn correct_context_usage() {
+    let db = PostgresDb { conn: "..." };
+
+    provide Database = db in {
+        // OK: Use within scope
+        let result = Database.query("SELECT 1");
+
+        // OK: Clone data, not context reference
+        let rows = match result {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        let data = rows.clone();
+    }
+
+    // data can be used here
+}
+
+/// Correct: Explicitly pass context to spawned tasks
+async fn spawn_with_context_transfer() {
+    let db = PostgresDb { conn: "..." };
+
+    provide Database = db in {
+        // OK: Context explicitly forwarded to spawned task
+        spawn using [Database] async {
+            Database.query("SELECT 1");
+        };
+    }
+}
+
+type Rows is { data: List<Text> };
+implement Rows {
+    fn empty() -> Self { Self { data: List.new() } }
+}
+type DbError is Failed;

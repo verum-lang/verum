@@ -1,0 +1,153 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, encoding, base64, hex
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for encoding/decoding algorithms
+
+// Encode a byte (0-255) to two hex digits as a combined value
+fn byte_to_hex_high(b: Int) -> Int {
+    let nibble = (b >> 4) & 0xF;
+    nibble
+}
+
+fn byte_to_hex_low(b: Int) -> Int {
+    b & 0xF
+}
+
+fn hex_digit_value(d: Int) -> Int {
+    // 0-9 = 0-9, 10-15 = A-F
+    d
+}
+
+fn hex_to_byte(high: Int, low: Int) -> Int {
+    (high << 4) | low
+}
+
+// Run-length encoding simulation
+// Encode a sequence of values into (value, count) pairs
+// Using flat arrays: values in positions 0-7, counts in positions 8-15
+type RLE16 is {
+    v0: Int, v1: Int, v2: Int, v3: Int,
+    v4: Int, v5: Int, v6: Int, v7: Int,
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    len: Int  // number of runs
+};
+
+fn rle_get_val(r: RLE16, i: Int) -> Int {
+    if i == 0 { r.v0 } else if i == 1 { r.v1 }
+    else if i == 2 { r.v2 } else if i == 3 { r.v3 }
+    else if i == 4 { r.v4 } else if i == 5 { r.v5 }
+    else if i == 6 { r.v6 } else { r.v7 }
+}
+
+fn rle_get_count(r: RLE16, i: Int) -> Int {
+    if i == 0 { r.c0 } else if i == 1 { r.c1 }
+    else if i == 2 { r.c2 } else if i == 3 { r.c3 }
+    else if i == 4 { r.c4 } else if i == 5 { r.c5 }
+    else if i == 6 { r.c6 } else { r.c7 }
+}
+
+fn rle_total_length(r: RLE16) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < r.len {
+        total = total + rle_get_count(r, i);
+        i = i + 1;
+    }
+    total
+}
+
+// Variable-length integer encoding (LEB128-style)
+fn leb128_encode_size(n: Int) -> Int {
+    // How many bytes needed for LEB128 encoding
+    if n == 0 { return 1; }
+    let mut x = n;
+    let mut bytes = 0;
+    while x > 0 {
+        bytes = bytes + 1;
+        x = x >> 7;
+    }
+    bytes
+}
+
+fn test_hex() {
+    // byte 0xAB = high nibble A (10), low nibble B (11)
+    assert_eq(byte_to_hex_high(0xAB), 0xA);
+    assert_eq(byte_to_hex_low(0xAB), 0xB);
+
+    // Reconstruct
+    assert_eq(hex_to_byte(0xA, 0xB), 0xAB);
+    assert_eq(hex_to_byte(0xF, 0xF), 0xFF);
+    assert_eq(hex_to_byte(0x0, 0x0), 0x00);
+
+    // Roundtrip
+    let b = 0xDE;
+    assert_eq(hex_to_byte(byte_to_hex_high(b), byte_to_hex_low(b)), b);
+}
+
+fn test_rle() {
+    // Encoding: AAABBBCCDDDDDD -> (A,3),(B,3),(C,2),(D,6)
+    let r = RLE16 {
+        v0: 65, v1: 66, v2: 67, v3: 68,
+        v4: 0, v5: 0, v6: 0, v7: 0,
+        c0: 3, c1: 3, c2: 2, c3: 6,
+        c4: 0, c5: 0, c6: 0, c7: 0,
+        len: 4
+    };
+
+    assert_eq(r.len, 4);
+    assert_eq(rle_total_length(r), 14);
+    assert_eq(rle_get_val(r, 0), 65);
+    assert_eq(rle_get_count(r, 0), 3);
+    assert_eq(rle_get_val(r, 3), 68);
+    assert_eq(rle_get_count(r, 3), 6);
+}
+
+fn test_leb128() {
+    assert_eq(leb128_encode_size(0), 1);
+    assert_eq(leb128_encode_size(1), 1);
+    assert_eq(leb128_encode_size(127), 1);
+    assert_eq(leb128_encode_size(128), 2);
+    assert_eq(leb128_encode_size(16383), 2);
+    assert_eq(leb128_encode_size(16384), 3);
+}
+
+fn test_checksum() {
+    // Simple XOR checksum
+    let mut checksum = 0;
+    let mut i = 0;
+    while i < 8 {
+        checksum = checksum ^ (i * 17 + 3);
+        i = i + 1;
+    }
+    // Verify by recomputing
+    let mut check2 = 0;
+    let mut j = 0;
+    while j < 8 {
+        check2 = check2 ^ (j * 17 + 3);
+        j = j + 1;
+    }
+    assert_eq(checksum, check2);
+
+    // Additive checksum
+    let mut asum = 0;
+    let mut k = 0;
+    while k < 10 {
+        asum = asum + k * k;
+        k = k + 1;
+    }
+    assert_eq(asum, 285);  // 0+1+4+9+16+25+36+49+64+81
+}
+
+fn main() -> Int {
+    test_hex();
+    test_rle();
+    test_leb128();
+    test_checksum();
+    print("[OK] 202_encoding_aot");
+    0
+}

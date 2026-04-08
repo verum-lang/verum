@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, parameters, error
+// @description: Test invalid function parameter detection
+// @expected-error: E035
+
+fn invalid_param(123) {}
+
+fn missing_comma(a: Int b: Int) {}
+
+fn double_colon(x:: Int) {}
+
+fn trailing_colon(x: Int,: Text) {}

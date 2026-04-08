@@ -1,0 +1,34 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, runtime, context, error
+// @description: Test that feature flag functions require MetaRuntime context
+// @expected-error: requires
+
+// =============================================================================
+// FEATURE FLAGS MISSING CONTEXT TESTS
+// =============================================================================
+
+// has_feature requires MetaRuntime context
+meta fn test_has_feature_no_context() -> Bool {
+    has_feature("std")  // ERROR: requires MetaRuntime context
+}
+
+// enabled_features requires MetaRuntime context
+meta fn test_enabled_features_no_context() -> List<Text> {
+    enabled_features()  // ERROR: requires MetaRuntime context
+}
+
+// env requires MetaRuntime context
+meta fn test_env_no_context() -> Maybe<Text> {
+    env("PATH")  // ERROR: requires MetaRuntime context
+}
+
+// is_ci requires MetaRuntime context
+meta fn test_is_ci_no_context() -> Bool {
+    is_ci()  // ERROR: requires MetaRuntime context
+}
+
+fn main() {
+    @const assert(test_has_feature_no_context());
+}

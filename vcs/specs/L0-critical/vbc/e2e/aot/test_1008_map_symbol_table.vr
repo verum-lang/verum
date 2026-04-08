@@ -1,0 +1,163 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, map, symbol-table, type-checker, name-resolution
+// @description: Map as symbol table — critical for type checker and name resolution
+// Note: Uses Map<Int, Int> because Map<Text, Int>.get() has tracking limitations
+
+fn test_basic_symbol_table() -> Int {
+    let mut symbols = Map.new();
+    symbols.insert(1, 100);  // "x" -> 100
+    symbols.insert(2, 200);  // "y" -> 200
+    symbols.insert(3, 300);  // "z" -> 300
+
+    if symbols.len() != 3 {
+        print(f"FAIL basic: expected 3 symbols, got {symbols.len()}");
+        return 1;
+    }
+
+    let x_val = symbols.get(1);
+    if x_val != 100 {
+        print(f"FAIL basic: x expected 100, got {x_val}");
+        return 1;
+    }
+    let y_val = symbols.get(2);
+    if y_val != 200 {
+        print(f"FAIL basic: y expected 200, got {y_val}");
+        return 1;
+    }
+    print("  basic_symbol_table: OK");
+    0
+}
+
+fn test_contains_key() -> Int {
+    let mut symbols = Map.new();
+    symbols.insert(42, 999);
+
+    if !symbols.contains_key(42) {
+        print("FAIL contains: key 42 should exist");
+        return 1;
+    }
+    print("  contains_key: OK");
+    0
+}
+
+fn test_overwrite() -> Int {
+    let mut symbols = Map.new();
+    symbols.insert(1, 10);
+    symbols.insert(1, 20);
+
+    let val = symbols.get(1);
+    if val != 20 {
+        print(f"FAIL overwrite: expected 20, got {val}");
+        return 1;
+    }
+    print("  overwrite: OK");
+    0
+}
+
+fn test_remove() -> Int {
+    let mut symbols = Map.new();
+    symbols.insert(1, 10);
+    symbols.insert(2, 20);
+    symbols.insert(3, 30);
+
+    symbols.remove(2);
+    if symbols.len() != 2 {
+        print(f"FAIL remove: expected 2, got {symbols.len()}");
+        return 1;
+    }
+
+    let a_val = symbols.get(1);
+    if a_val != 10 {
+        print(f"FAIL remove: key 1 expected 10, got {a_val}");
+        return 1;
+    }
+    let c_val = symbols.get(3);
+    if c_val != 30 {
+        print(f"FAIL remove: key 3 expected 30, got {c_val}");
+        return 1;
+    }
+    print("  remove: OK");
+    0
+}
+
+fn test_scope_simulation() -> Int {
+    // Simulate scope chain using separate maps
+    let mut outer = Map.new();
+    outer.insert(1, 10);   // x = 10
+    outer.insert(2, 20);   // y = 20
+
+    let mut inner = Map.new();
+    inner.insert(1, 100);  // x = 100 (shadows)
+    inner.insert(3, 300);  // z = 300
+
+    // Resolve: check inner first, then outer
+    let x_val = if inner.contains_key(1) { inner.get(1) } else { outer.get(1) };
+    if x_val != 100 {
+        print(f"FAIL scope: x expected 100 (inner), got {x_val}");
+        return 1;
+    }
+
+    let y_val = if inner.contains_key(2) { inner.get(2) } else { outer.get(2) };
+    if y_val != 20 {
+        print(f"FAIL scope: y expected 20 (outer), got {y_val}");
+        return 1;
+    }
+
+    let z_val = if inner.contains_key(3) { inner.get(3) } else { outer.get(3) };
+    if z_val != 300 {
+        print(f"FAIL scope: z expected 300, got {z_val}");
+        return 1;
+    }
+
+    print("  scope_simulation: OK");
+    0
+}
+
+fn test_many_entries() -> Int {
+    let mut table = Map.new();
+    let mut i = 0;
+    while i < 50 {
+        table.insert(i, i * 10);
+        i = i + 1;
+    }
+
+    if table.len() != 50 {
+        print(f"FAIL many: expected 50, got {table.len()}");
+        return 1;
+    }
+
+    let v0 = table.get(0);
+    if v0 != 0 {
+        print(f"FAIL many: key 0 expected 0, got {v0}");
+        return 1;
+    }
+    let v25 = table.get(25);
+    if v25 != 250 {
+        print(f"FAIL many: key 25 expected 250, got {v25}");
+        return 1;
+    }
+    let v49 = table.get(49);
+    if v49 != 490 {
+        print(f"FAIL many: key 49 expected 490, got {v49}");
+        return 1;
+    }
+    print("  many_entries: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_basic_symbol_table();
+    failures = failures + test_contains_key();
+    failures = failures + test_overwrite();
+    failures = failures + test_remove();
+    failures = failures + test_scope_simulation();
+    failures = failures + test_many_entries();
+
+    if failures == 0 {
+        print("All map symbol table tests passed");
+    }
+    failures
+}

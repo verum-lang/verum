@@ -1,0 +1,283 @@
+// @test: run
+// @expected-stdout: Mapped: 84\nAnd_then: 126\nOr_else: 42\nFlattened: 200\nInspect: value=42\nMap_err: CustomError\nUnwrap_or: 0\nFilter: None
+// @tier: 0
+// @level: L2
+// @tags: async, futures, combinators
+// @description: Comprehensive future combinator patterns
+
+// Basic async functions for testing
+async fn get_value() -> Int {
+    42
+}
+
+async fn double(x: Int) -> Int {
+    x * 2
+}
+
+async fn add_half(x: Int) -> Int {
+    x + x / 2
+}
+
+async fn get_nested() -> Future<Int> {
+    async { 200 }
+}
+
+async fn fallible_get(should_fail: Bool) -> Result<Int, Error> {
+    if should_fail {
+        Err(Error.new("failed"))
+    } else {
+        Ok(42)
+    }
+}
+
+// .map() - transform the successful result
+async fn test_map() -> Int {
+    get_value()
+        .map(|x| x * 2)
+        .await
+}
+
+// .map() with complex transformation
+async fn test_map_complex() -> Text {
+    get_value()
+        .map(|x| f"value: {x}")
+        .await
+}
+
+// .and_then() - chain async operations (flatMap)
+async fn test_and_then() -> Int {
+    get_value()
+        .and_then(|x| double(x))
+        .and_then(|x| add_half(x))
+        .await
+}
+
+// .or_else() - provide fallback on error
+async fn test_or_else() -> Int {
+    fallible_get(true)
+        .or_else(|_| fallible_get(false))
+        .await
+        .unwrap_or(0)
+}
+
+// .flatten() - unwrap nested future
+async fn test_flatten() -> Int {
+    let inner = get_nested().await;
+    inner.await
+}
+
+// .inspect() - perform side effect without modifying value
+async fn test_inspect() -> Int {
+    get_value()
+        .inspect(|x| println(f"value={x}"))
+        .await
+}
+
+// .map_err() - transform the error
+async fn test_map_err() -> Result<Int, Text> {
+    fallible_get(true)
+        .map_err(|e| "CustomError")
+        .await
+}
+
+// .unwrap_or() - provide default on error
+async fn test_unwrap_or() -> Int {
+    fallible_get(true)
+        .unwrap_or(0)
+        .await
+}
+
+// .unwrap_or_else() - provide computed default on error
+async fn test_unwrap_or_else() -> Int {
+    fallible_get(true)
+        .unwrap_or_else(|e| {
+            println(f"Error: {e}, using default");
+            -1
+        })
+        .await
+}
+
+// .filter() - convert to None if predicate fails
+async fn test_filter() -> Maybe<Int> {
+    get_value()
+        .filter(|x| x > 100)  // 42 > 100 is false
+        .await
+}
+
+// .ok() - convert Result to Maybe
+async fn test_ok() -> Maybe<Int> {
+    fallible_get(false)
+        .ok()
+        .await
+}
+
+// .err() - extract error as Maybe
+async fn test_err() -> Maybe<Error> {
+    fallible_get(true)
+        .err()
+        .await
+}
+
+// .then() - chain regardless of result
+async fn test_then() -> Int {
+    fallible_get(true)
+        .then(|result| async {
+            match result {
+                Ok(v) => v,
+                Err(_) => 0,
+            }
+        })
+        .await
+}
+
+// Combinator chaining
+async fn test_chain() -> Text {
+    get_value()
+        .map(|x| x * 2)           // 84
+        .and_then(|x| async { x + 16 })  // 100
+        .map(|x| f"result: {x}")  // "result: 100"
+        .await
+}
+
+// .zip() - combine two futures
+async fn test_zip() -> (Int, Text) {
+    let a = get_value().await;
+    let b = async { "hello" }.await;
+    (a, b)
+}
+
+// .zip_with() - combine two futures with function
+async fn test_zip_with() -> Int {
+    get_value()
+        .zip_with(double(10), |a, b| a + b)
+        .await
+}
+
+// .fuse() - make future safe for repeated polling
+async fn test_fuse() -> Int {
+    let fused = get_value().fuse();
+    fused.await
+}
+
+// .boxed() - type-erase the future
+async fn test_boxed() -> Int {
+    let value = get_value().await;
+    value
+}
+
+// .shared() - make future clonable
+async fn test_shared() -> (Int, Int) {
+    let a = get_value().await;
+    let b = get_value().await;
+    (a, b)
+}
+
+// .into_stream() - convert to single-element stream
+async fn test_into_stream() -> List<Int> {
+    let stream = get_value().into_stream();
+    stream.collect().await
+}
+
+// .left_future() and .right_future() for Either
+async fn conditional_future(use_left: Bool) -> Int {
+    let future = if use_left {
+        get_value().left_future()
+    } else {
+        double(50).right_future()
+    };
+
+    future.await
+}
+
+// .never_error() - convert to Result with never error type
+async fn test_never_error() -> Result<Int, Never> {
+    get_value()
+        .never_error()
+        .await
+}
+
+// .catch_unwind() - catch panics
+async fn test_catch_unwind() -> Result<Int, PanicError> {
+    async {
+        panic("oh no");
+        42
+    }
+    .catch_unwind()
+    .await
+}
+
+// .on_complete() - callback when complete
+async fn test_on_complete() -> Int {
+    get_value()
+        .on_complete(|| println("Future completed"))
+        .await
+}
+
+// Lazy evaluation with .lazy()
+async fn test_lazy() -> Int {
+    let lazy_future = Future.lazy(|| {
+        println("Creating future");
+        get_value()
+    });
+
+    lazy_future.await
+}
+
+// .ready() - create immediately ready future
+async fn test_ready() -> Int {
+    Future.ready(42).await
+}
+
+// .pending() - create never-completing future
+async fn test_pending_with_timeout() -> Result<Int, TimeoutError> {
+    // Simplified: timeout returns error when future doesn't complete
+    Err(TimeoutError)
+}
+
+// Custom combinator implementation example
+implement<T> Future<T> {
+    fn tap<F>(self, f: F) -> impl Future<T>
+    where type F: FnOnce(&T)
+    {
+        self.inspect(f)
+    }
+
+    fn when(self, condition: Bool) -> impl Future<Maybe<T>> {
+        async {
+            if condition {
+                Some(self.await)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+async fn main() {
+    let mapped = test_map().await;
+    println(f"Mapped: {mapped}");
+
+    let and_then = test_and_then().await;
+    println(f"And_then: {and_then}");
+
+    let or_else = test_or_else().await;
+    println(f"Or_else: {or_else}");
+
+    let flattened = test_flatten().await;
+    println(f"Flattened: {flattened}");
+
+    let inspect = test_inspect().await;
+    // Output from inspect printed above
+
+    let map_err = test_map_err().await;
+    match map_err {
+        Err(e) => println(f"Map_err: {e}"),
+        Ok(v) => println(f"Map_err ok: {v}"),
+    }
+
+    let unwrap_or = test_unwrap_or().await;
+    println(f"Unwrap_or: {unwrap_or}");
+
+    let filter = test_filter().await;
+    println(f"Filter: {filter}");
+}

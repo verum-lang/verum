@@ -1,0 +1,121 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, methods, contains, split, trim, replace
+// @expected-exit: 0
+
+// Test: String methods — contains, starts_with, ends_with, find, trim,
+// replace, split, slice.
+
+fn main() -> Int {
+    let s = "Hello, World!";
+
+    // Test 1: contains
+    if (s.contains("World") != true) {
+        print("FAIL test1a: contains('World')");
+        return 1;
+    }
+    if (s.contains("xyz") != false) {
+        print("FAIL test1b: contains('xyz') should be false");
+        return 1;
+    }
+    if (s.contains("") != true) {
+        print("FAIL test1c: contains('') should be true");
+        return 1;
+    }
+
+    // Test 2: starts_with
+    if (s.starts_with("Hello") != true) {
+        print("FAIL test2a: starts_with('Hello')");
+        return 1;
+    }
+    if (s.starts_with("World") != false) {
+        print("FAIL test2b: starts_with('World') should be false");
+        return 1;
+    }
+
+    // Test 3: ends_with
+    if (s.ends_with("World!") != true) {
+        print("FAIL test3a: ends_with('World!')");
+        return 1;
+    }
+    if (s.ends_with("Hello") != false) {
+        print("FAIL test3b: ends_with('Hello') should be false");
+        return 1;
+    }
+
+    // Test 4: find — returns Maybe<Int>
+    let idx = match s.find("World") { Some(i) => i, None => -1, };
+    if (idx != 7) {
+        print(f"FAIL test4a: find('World')={idx}");
+        return 1;
+    }
+    let not_found = match s.find("xyz") { Some(i) => i, None => -1, };
+    if (not_found != -1) {
+        print(f"FAIL test4b: find('xyz')={not_found}");
+        return 1;
+    }
+
+    // Test 5: trim
+    let padded = "  hello  ";
+    let trimmed = padded.trim();
+    if (trimmed != "hello") {
+        print(f"FAIL test5: trim='{trimmed}'");
+        return 1;
+    }
+
+    // Test 6: replace
+    let foo_str = "foo bar foo";
+    let replaced = foo_str.replace("foo", "baz");
+    if (replaced != "baz bar baz") {
+        print(f"FAIL test6: replace='{replaced}'");
+        return 1;
+    }
+
+    // Test 7: slice
+    let abc = "abcdef";
+    let sliced = abc.slice(1, 4);
+    if (sliced != "bcd") {
+        print(f"FAIL test7: slice='{sliced}'");
+        return 1;
+    }
+
+    // Test 8: split
+    let csv = "a,b,c,d";
+    let parts = csv.split(",");
+    if (parts.len() != 4) {
+        print(f"FAIL test8a: split len={parts.len()}");
+        return 1;
+    }
+    if (parts[0] != "a") {
+        print(f"FAIL test8b: parts[0]='{parts[0]}'");
+        return 1;
+    }
+    if (parts[3] != "d") {
+        print(f"FAIL test8c: parts[3]='{parts[3]}'");
+        return 1;
+    }
+
+    // Test 9: len on trimmed string
+    let t = trimmed.len();
+    if (t != 5) {
+        print(f"FAIL test9: trimmed.len()={t}");
+        return 1;
+    }
+
+    // Test 10: split with longer delimiter
+    let path = "/usr/local/bin";
+    let segs = path.split("/");
+    // ["", "usr", "local", "bin"]
+    if (segs.len() != 4) {
+        print(f"FAIL test10a: path split len={segs.len()}");
+        return 1;
+    }
+    if (segs[1] != "usr") {
+        print(f"FAIL test10b: segs[1]='{segs[1]}'");
+        return 1;
+    }
+
+    print("912_string_methods: PASS");
+    0
+}

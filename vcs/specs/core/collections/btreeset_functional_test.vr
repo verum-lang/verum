@@ -1,0 +1,210 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, btreeset, filter, map, partition, count_where, filter_map
+// @description: Tests for BTreeSet functional utility methods
+
+mount core.collections.btree.{BTreeSet};
+
+// =============================================================================
+// filter tests
+// =============================================================================
+
+@test
+fn test_btreeset_filter_basic() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+
+    let evens = s.filter(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert(evens.contains(&2));
+    assert(evens.contains(&4));
+}
+
+@test
+fn test_btreeset_filter_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    let result = s.filter(|_v| true);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_btreeset_filter_preserves_order() {
+    let mut s = BTreeSet.new();
+    s.insert(5);
+    s.insert(3);
+    s.insert(1);
+    s.insert(4);
+    s.insert(2);
+
+    let result = s.filter(|v| *v > 2);
+    let list = result.to_list();
+    // Should be in sorted order
+    assert_eq(list[0], 3);
+    assert_eq(list[1], 4);
+    assert_eq(list[2], 5);
+}
+
+// =============================================================================
+// map tests
+// =============================================================================
+
+@test
+fn test_btreeset_map_basic() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+
+    let doubled = s.map(|v| *v * 2);
+    assert_eq(doubled.len(), 3);
+    assert(doubled.contains(&2));
+    assert(doubled.contains(&4));
+    assert(doubled.contains(&6));
+}
+
+@test
+fn test_btreeset_map_deduplicates() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+
+    let result = s.map(|v| *v % 2);
+    assert_eq(result.len(), 2);
+}
+
+@test
+fn test_btreeset_map_preserves_order() {
+    let mut s = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(2);
+
+    let result = s.map(|v| *v * 10);
+    let list = result.to_list();
+    assert_eq(list[0], 10);
+    assert_eq(list[1], 20);
+    assert_eq(list[2], 30);
+}
+
+// =============================================================================
+// partition tests
+// =============================================================================
+
+@test
+fn test_btreeset_partition_basic() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+
+    let (evens, odds) = s.partition(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert_eq(odds.len(), 2);
+    assert(evens.contains(&2));
+    assert(evens.contains(&4));
+    assert(odds.contains(&1));
+    assert(odds.contains(&3));
+}
+
+@test
+fn test_btreeset_partition_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    let (a, b) = s.partition(|_v| true);
+    assert_eq(a.len(), 0);
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn test_btreeset_partition_preserves_total() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+
+    let (a, b) = s.partition(|v| *v > 3);
+    assert_eq(a.len() + b.len(), s.len());
+}
+
+// =============================================================================
+// count_where tests
+// =============================================================================
+
+@test
+fn test_btreeset_count_where_basic() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+
+    assert_eq(s.count_where(|v| *v > 3), 2);
+    assert_eq(s.count_where(|v| *v > 0), 5);
+    assert_eq(s.count_where(|v| *v > 10), 0);
+}
+
+@test
+fn test_btreeset_count_where_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    assert_eq(s.count_where(|_v| true), 0);
+}
+
+// =============================================================================
+// filter_map tests
+// =============================================================================
+
+@test
+fn test_btreeset_filter_map_basic() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+
+    let result = s.filter_map(|v| {
+        if *v % 2 == 0 {
+            Some(*v * 10)
+        } else {
+            None
+        }
+    });
+    assert_eq(result.len(), 2);
+    assert(result.contains(&20));
+    assert(result.contains(&40));
+}
+
+@test
+fn test_btreeset_filter_map_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    let result: BTreeSet<Int> = s.filter_map(|v| Some(*v));
+    assert_eq(result.len(), 0);
+}
+
+// =============================================================================
+// Integration tests
+// =============================================================================
+
+@test
+fn test_filter_then_map_btreeset() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+
+    let result = s.filter(|v| *v >= 3).map(|v| *v * 100);
+    assert_eq(result.len(), 3);
+    assert(result.contains(&300));
+    assert(result.contains(&400));
+    assert(result.contains(&500));
+}

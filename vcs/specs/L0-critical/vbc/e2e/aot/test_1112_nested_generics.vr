@@ -1,0 +1,111 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, nested, type-parameters
+// @description: Test nested generic type usage
+
+type Pair<A, B> is { first: A, second: B };
+
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a, second: b }
+}
+
+fn test_int_pair() -> Int {
+    let p = make_pair(10, 20);
+    if p.first != 10 || p.second != 20 {
+        print(f"FAIL int_pair: ({p.first}, {p.second})");
+        return 1;
+    }
+    print("  int_pair: OK");
+    0
+}
+
+fn test_mixed_pair() -> Int {
+    let p = make_pair(42, true);
+    if p.first != 42 {
+        print(f"FAIL mixed_pair: first={p.first}");
+        return 1;
+    }
+    print("  mixed_pair: OK");
+    0
+}
+
+type Triple<T> is { x: T, y: T, z: T };
+
+fn sum_triple(t: Triple<Int>) -> Int {
+    t.x + t.y + t.z
+}
+
+fn test_triple() -> Int {
+    let t = Triple { x: 1, y: 2, z: 3 };
+    let s = sum_triple(t);
+    if s != 6 {
+        print(f"FAIL triple: sum={s}, expected 6");
+        return 1;
+    }
+    print("  triple: OK");
+    0
+}
+
+// Generic function that works on any type
+fn first_of<T>(a: T, b: T) -> T {
+    a
+}
+
+fn second_of<T>(a: T, b: T) -> T {
+    b
+}
+
+fn test_generic_select() -> Int {
+    let a = first_of(10, 20);
+    if a != 10 {
+        print(f"FAIL generic_select: first={a}");
+        return 1;
+    }
+    let b = second_of(10, 20);
+    if b != 20 {
+        print(f"FAIL generic_select: second={b}");
+        return 1;
+    }
+    print("  generic_select: OK");
+    0
+}
+
+// List of pairs
+fn test_pair_list() -> Int {
+    let mut pairs = List.new();
+    pairs.push(make_pair(1, 10));
+    pairs.push(make_pair(2, 20));
+    pairs.push(make_pair(3, 30));
+
+    let mut total = 0;
+    let mut i = 0;
+    while i < pairs.len() {
+        let p = pairs[i];
+        total = total + p.first + p.second;
+        i = i + 1;
+    }
+    if total != 66 {
+        print(f"FAIL pair_list: total={total}, expected 66");
+        return 1;
+    }
+    print("  pair_list: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Nested Generics Tests:");
+    let mut failures = 0;
+    failures = failures + test_int_pair();
+    failures = failures + test_mixed_pair();
+    failures = failures + test_triple();
+    failures = failures + test_generic_select();
+    failures = failures + test_pair_list();
+
+    if failures == 0 {
+        print("All nested generics tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

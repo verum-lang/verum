@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, params, error
+// @description: Test detection of function type missing parameter list
+// @expected-error: E018
+
+// Function type must have parameter list, even if empty
+type Callback is fn -> Int;

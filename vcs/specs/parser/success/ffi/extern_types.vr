@@ -1,0 +1,439 @@
+// @test: parse-pass
+// @tier: 0
+// @category: ffi
+// @level: L0
+// @tags: parser, ffi, extern, types, type_def
+// @description: Comprehensive test for type declarations used with FFI
+
+// ============================================================
+// Type declarations used in FFI contexts
+// - @repr(C) for C-compatible layout
+// - @opaque for opaque types
+// - Pointer types and raw memory types
+// ============================================================
+
+// ------------------------------------------------------------
+// C-compatible struct types (repr C)
+// ------------------------------------------------------------
+
+@repr(C)
+type CPoint is {
+    x: i32,
+    y: i32,
+};
+
+@repr(C)
+type CRect is {
+    top_left: CPoint,
+    bottom_right: CPoint,
+};
+
+@repr(C)
+type CBuffer is {
+    data: *mut u8,
+    len: usize,
+    capacity: usize,
+};
+
+@repr(C)
+type CString is {
+    ptr: *const i8,
+    len: usize,
+};
+
+// C struct with function pointer field
+@repr(C)
+type CCallback is {
+    callback: fn(*mut (), Int) -> Int,
+    user_data: *mut (),
+};
+
+// C struct with nested structures
+@repr(C)
+type CComplex is {
+    header: CHeader,
+    body: CBody,
+    footer: CFooter,
+};
+
+@repr(C)
+type CHeader is {
+    magic: u32,
+    version: u16,
+    flags: u16,
+};
+
+@repr(C)
+type CBody is {
+    data: *const u8,
+    size: usize,
+};
+
+@repr(C)
+type CFooter is {
+    checksum: u32,
+};
+
+// ------------------------------------------------------------
+// C-compatible with alignment
+// ------------------------------------------------------------
+
+@repr(C, align(8))
+type AlignedStruct is {
+    value: i64,
+};
+
+@repr(C, align(16))
+type Aligned16Struct is {
+    a: i64,
+    b: i64,
+};
+
+@repr(C, align(4096))
+type PageAligned is {
+    data: [u8; 4096],
+};
+
+// ------------------------------------------------------------
+// Packed structures
+// ------------------------------------------------------------
+
+@repr(C, packed)
+type PackedStruct is {
+    a: u8,
+    b: u32,
+    c: u8,
+};
+
+@repr(C, packed(1))
+type Packed1Struct is {
+    header: u8,
+    value: u64,
+    tail: u8,
+};
+
+@repr(C, packed(2))
+type Packed2Struct is {
+    header: u16,
+    value: u32,
+    tail: u16,
+};
+
+// ------------------------------------------------------------
+// Opaque types (unknown internal layout)
+// ------------------------------------------------------------
+
+@opaque
+type OpaqueHandle is ();
+
+@opaque
+type FileHandle is ();
+
+@opaque
+type DatabaseConnection is ();
+
+@opaque
+type WindowHandle is ();
+
+@opaque
+type ThreadHandle is ();
+
+@opaque
+type MutexHandle is ();
+
+@opaque
+type SemaphoreHandle is ();
+
+// ------------------------------------------------------------
+// C-compatible union types (variant without data)
+// ------------------------------------------------------------
+
+@repr(C)
+type CUnion is
+    | IntValue(i32)
+    | FloatValue(f32)
+    | PtrValue(*mut ());
+
+@repr(C)
+type CResult is
+    | Ok(i32)
+    | Error(i32);
+
+@repr(C)
+type COption is
+    | None
+    | Some(i32);
+
+// ------------------------------------------------------------
+// C integer types (platform-specific)
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_schar is i8;
+type c_uchar is u8;
+type c_short is i16;
+type c_ushort is u16;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;   // Platform-dependent, assuming 64-bit
+type c_ulong is u64;
+type c_longlong is i64;
+type c_ulonglong is u64;
+type c_float is f32;
+type c_double is f64;
+type c_void is ();
+type size_t is usize;
+type ssize_t is isize;
+type ptrdiff_t is isize;
+type intptr_t is isize;
+type uintptr_t is usize;
+
+// Fixed-width integer types
+type int8_t is i8;
+type int16_t is i16;
+type int32_t is i32;
+type int64_t is i64;
+type uint8_t is u8;
+type uint16_t is u16;
+type uint32_t is u32;
+type uint64_t is u64;
+
+// ------------------------------------------------------------
+// Windows-specific types
+// ------------------------------------------------------------
+
+type BOOL is c_int;
+type BYTE is u8;
+type WORD is u16;
+type DWORD is u32;
+type QWORD is u64;
+type LONG is c_long;
+type ULONG is c_ulong;
+type HANDLE is *mut c_void;
+type HWND is *mut c_void;
+type HINSTANCE is *mut c_void;
+type HMODULE is *mut c_void;
+type LPARAM is isize;
+type WPARAM is usize;
+type LRESULT is isize;
+type LPVOID is *mut c_void;
+type LPCVOID is *const c_void;
+type LPSTR is *mut c_char;
+type LPCSTR is *const c_char;
+type LPWSTR is *mut u16;
+type LPCWSTR is *const u16;
+
+// ------------------------------------------------------------
+// POSIX types
+// ------------------------------------------------------------
+
+type pid_t is c_int;
+type uid_t is c_uint;
+type gid_t is c_uint;
+type mode_t is c_uint;
+type off_t is c_long;
+type time_t is c_long;
+type suseconds_t is c_long;
+type dev_t is c_ulong;
+type ino_t is c_ulong;
+type nlink_t is c_ulong;
+type blksize_t is c_long;
+type blkcnt_t is c_long;
+
+// ------------------------------------------------------------
+// Function pointer types for FFI
+// ------------------------------------------------------------
+
+type CCallbackFn is fn(*mut c_void) -> c_int;
+type CCompareFn is fn(*const c_void, *const c_void) -> c_int;
+type CThreadFn is fn(*mut c_void) -> *mut c_void;
+type CSignalHandler is fn(c_int);
+type CAtexitFn is fn();
+
+// Function pointer with calling convention
+type StdcallCallback is extern "stdcall" fn(HWND, c_uint, WPARAM, LPARAM) -> LRESULT;
+type CdeclCallback is extern "C" fn(c_int, c_int) -> c_int;
+type FastcallCallback is extern "fastcall" fn(c_int) -> c_int;
+
+// ------------------------------------------------------------
+// Complex C structures
+// ------------------------------------------------------------
+
+@repr(C)
+type timespec is {
+    tv_sec: time_t,
+    tv_nsec: c_long,
+};
+
+@repr(C)
+type timeval is {
+    tv_sec: time_t,
+    tv_usec: suseconds_t,
+};
+
+@repr(C)
+type stat is {
+    st_dev: dev_t,
+    st_ino: ino_t,
+    st_mode: mode_t,
+    st_nlink: nlink_t,
+    st_uid: uid_t,
+    st_gid: gid_t,
+    st_rdev: dev_t,
+    st_size: off_t,
+    st_blksize: blksize_t,
+    st_blocks: blkcnt_t,
+    st_atime: timespec,
+    st_mtime: timespec,
+    st_ctime: timespec,
+};
+
+@repr(C)
+type iovec is {
+    iov_base: *mut c_void,
+    iov_len: size_t,
+};
+
+@repr(C)
+type sockaddr is {
+    sa_family: u16,
+    sa_data: [c_char; 14],
+};
+
+@repr(C)
+type sockaddr_in is {
+    sin_family: u16,
+    sin_port: u16,
+    sin_addr: in_addr,
+    sin_zero: [u8; 8],
+};
+
+@repr(C)
+type in_addr is {
+    s_addr: u32,
+};
+
+// ------------------------------------------------------------
+// Generic FFI-safe types
+// ------------------------------------------------------------
+
+@repr(C)
+type CSlice<T> is {
+    ptr: *const T,
+    len: size_t,
+};
+
+@repr(C)
+type CMutSlice<T> is {
+    ptr: *mut T,
+    len: size_t,
+};
+
+@repr(C)
+type CBox<T> is {
+    ptr: *mut T,
+};
+
+@repr(C)
+type COption<T> is
+    | CNone
+    | CSome(T);
+
+@repr(C)
+type CResult<T, E> is
+    | COk(T)
+    | CErr(E);
+
+// ------------------------------------------------------------
+// Newtype wrappers for FFI
+// ------------------------------------------------------------
+
+type FileDescriptor is (c_int);
+type ProcessId is (pid_t);
+type UserId is (uid_t);
+type GroupId is (gid_t);
+type ErrorCode is (c_int);
+type ExitCode is (c_int);
+
+// ------------------------------------------------------------
+// Unit types for FFI
+// ------------------------------------------------------------
+
+type CUnit is ();
+type Void is ();
+
+// ------------------------------------------------------------
+// Array types for FFI
+// ------------------------------------------------------------
+
+@repr(C)
+type FixedBuffer is {
+    data: [u8; 256],
+    used: usize,
+};
+
+@repr(C)
+type Matrix4x4 is {
+    data: [[f32; 4]; 4],
+};
+
+@repr(C)
+type Vector3 is {
+    x: f32,
+    y: f32,
+    z: f32,
+};
+
+@repr(C)
+type Vector4 is {
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32,
+};
+
+// ------------------------------------------------------------
+// Bitfield-like types
+// ------------------------------------------------------------
+
+@repr(C)
+type Flags is (u32);
+
+@repr(C)
+type Permissions is (u16);
+
+@repr(C)
+type FileMode is (mode_t);
+
+// ------------------------------------------------------------
+// FFI blocks using these types
+// ------------------------------------------------------------
+
+ffi TypeUsageFfi {
+    @extern("C")
+    fn use_cpoint(p: CPoint) -> CPoint;
+
+    @extern("C")
+    fn use_crect(r: *const CRect) -> c_int;
+
+    @extern("C")
+    fn use_opaque(h: *mut OpaqueHandle) -> c_int;
+
+    @extern("C")
+    fn use_callback(cb: CCallbackFn, data: *mut c_void) -> c_int;
+
+    @extern("C")
+    fn use_slice(s: CSlice<u8>) -> size_t;
+
+    @extern("C")
+    fn use_timespec(ts: *const timespec) -> c_int;
+
+    @extern("C")
+    fn use_stat(path: *const c_char, buf: *mut stat) -> c_int;
+}
+
+extern "C" {
+    fn extern_use_cpoint(p: CPoint) -> CPoint;
+    fn extern_use_handle(h: *mut OpaqueHandle) -> c_int;
+    fn extern_use_callback(cb: CCallbackFn) -> c_int;
+}

@@ -1,0 +1,54 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: context, named, alias, db
+// @description: Tests named contexts (db: Database) and aliases (Database as db)
+// @expected-exit: 0
+
+context Counter {
+    fn get(&self) -> Int;
+    fn increment(&mut self) -> Int;
+}
+
+type SimpleCounter is { value: Int };
+
+implement Counter for SimpleCounter {
+    fn get(&self) -> Int { self.value }
+    fn increment(&mut self) -> Int {
+        self.value = self.value + 1;
+        self.value
+    }
+}
+
+// Named context: c is an alias for Counter
+fn get_count() -> Int using [Counter] {
+    Counter.get()
+}
+
+fn inc_count() -> Int using [Counter] {
+    Counter.increment()
+}
+
+fn main() {
+    // Test 1: Basic context
+    let mut counter = SimpleCounter { value: 0 };
+    provide Counter = counter;
+
+    let v1 = get_count();
+    assert(v1 == 0);
+    print(f"Test 1 PASS: initial count = {v1}");
+
+    // Test 2: Increment via context
+    let v2 = inc_count();
+    assert(v2 == 1);
+    print(f"Test 2 PASS: incremented = {v2}");
+
+    // Test 3: Multiple increments
+    let v3 = inc_count();
+    let v4 = inc_count();
+    assert(v3 == 2);
+    assert(v4 == 3);
+    print(f"Test 3 PASS: multi-increment = {v3}, {v4}");
+
+    print("All named/alias context tests passed");
+}

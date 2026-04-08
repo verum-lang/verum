@@ -1,0 +1,194 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, visibility, pub, public, internal
+
+// Public function
+pub fn public_function() {
+    // Visible everywhere
+}
+
+// Public function with full keyword
+public fn also_public() {
+    // Alternative syntax
+}
+
+// Internal function (module-level visibility)
+internal fn module_internal() {
+    // Visible within module
+}
+
+// Protected function (submodule visibility)
+protected fn submodule_visible() {
+    // Visible to submodules
+}
+
+// Private function (default, no modifier)
+fn private_function() {
+    // Only visible in current scope
+}
+
+// Public function with parameters
+pub fn public_with_params(x: Int, y: Int) -> Int {
+    x + y
+}
+
+// Public async function
+pub async fn public_async() {
+    operation().await;
+}
+
+// NOTE: `pub unsafe fn` is NOT supported - unsafe fn not supported at top level
+// Use unsafe blocks inside functions instead
+// pub unsafe fn public_unsafe() { ... }  // UNSUPPORTED
+
+// Public generic function
+pub fn public_generic<T: Clone>(x: T) -> T {
+    x.clone()
+}
+
+// Public function with context
+pub fn public_with_context() using [Database] {
+    Database.query("SELECT 1");
+}
+
+// Public function with where clause
+// Grammar: generic_where_clause = 'where' , 'type' , type_constraint_list ;
+pub fn public_with_where<T>(x: T) -> T
+where type T: Clone + Debug
+{
+    x
+}
+
+// Visibility in impl block
+implement MyType {
+    pub fn public_method(&self) { }
+
+    internal fn internal_method(&self) { }
+
+    fn private_method(&self) { }
+}
+
+// Visibility in protocol implementation
+implement Display for MyType {
+    pub fn display(&self) -> Text {
+        "MyType"
+    }
+}
+
+// Visibility with return type
+pub fn returns_value() -> Int { 42 }
+internal fn internal_return() -> Text { "internal" }
+
+// NOTE: `const fn` is NOT supported in Verum
+// The language uses meta functions for compile-time evaluation
+// pub const fn const_public() -> Int { 42 }  // UNSUPPORTED
+
+// Visibility ordering for async
+pub fn vis_first() { }
+pub async fn vis_before_async() { }
+
+// NOTE: `unsafe fn` modifier not supported - use unsafe blocks
+// pub unsafe fn vis_before_unsafe() { }  // UNSUPPORTED
+// pub async unsafe fn vis_before_both() { }  // UNSUPPORTED
+
+// Multiple functions with different visibility
+pub fn exported1() { }
+pub fn exported2() { }
+internal fn shared1() { }
+internal fn shared2() { }
+fn local1() { }
+fn local2() { }
+
+// Visibility in nested module
+module inner {
+    pub fn inner_public() { }
+    internal fn inner_internal() { }
+    fn inner_private() { }
+}
+
+// Re-export pattern
+pub fn facade() {
+    internal_impl()
+}
+
+fn internal_impl() { }
+
+// Visibility on associated functions
+implement Factory {
+    pub fn create() -> Self {
+        Factory { }
+    }
+
+    fn internal_create() -> Self {
+        Factory { }
+    }
+}
+
+// Visibility with doc comments
+// Public API function
+// Returns: The answer
+pub fn documented_public() -> Int {
+    42
+}
+
+// Visibility patterns for builders
+implement Builder {
+    pub fn new() -> Builder {
+        Builder { }
+    }
+
+    pub fn build(self) -> Result<Product, Error> {
+        Ok(Product { })
+    }
+
+    fn validate(&self) -> Bool {
+        true
+    }
+}
+
+// Visibility for getters/setters
+implement Config {
+    pub fn get_port(&self) -> Int {
+        self.port
+    }
+
+    pub fn set_port(&mut self, port: Int) {
+        self.port = port;
+    }
+}
+
+// Protected visibility for inheritance-like patterns
+implement BaseHandler {
+    protected fn template_method(&self) {
+        self.before();
+        self.process();
+        self.after();
+    }
+
+    protected fn before(&self) { }
+    protected fn after(&self) { }
+
+    // NOTE: Forward declarations (fn with ; instead of body) are not supported
+    // in implement blocks. Use empty body or protocol instead.
+    fn process(&self) { }
+}
+
+// Visibility for test helpers
+@cfg(test)
+pub fn test_helper() { }
+
+@cfg(test)
+internal fn test_internal() { }
+
+// Visibility in trait-like protocol
+// NOTE: Visibility modifiers on protocol methods are not supported
+type PublicProtocol is protocol {
+    fn public_method(&self);
+    fn private_method(&self);
+};
+
+// Visibility affecting export
+pub type PublicType is { value: Int };
+internal type InternalType is { secret: Text };
+type PrivateType is { hidden: Bool };

@@ -1,0 +1,267 @@
+// =============================================================================
+// iterator_basic_test.vr - Basic iterator tests without complex dependencies
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, iterator, basic, minimal
+// @description: Basic iterator functionality tests using List.iter()
+// =============================================================================
+
+mount core.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Test 1: Basic list iteration
+// =============================================================================
+
+@test
+fn test_list_iteration() {
+    let items: List<Int> = List.from([1, 2, 3, 4, 5]);
+    let mut count = 0;
+
+    for i in items.iter() {
+        count = count + 1;
+    }
+
+    assert_eq(count, 5);
+}
+
+// =============================================================================
+// Test 2: Iterator over list with value access
+// =============================================================================
+
+@test
+fn test_iterator_values() {
+    let items: List<Int> = List.from([10, 20, 30]);
+    let mut sum = 0;
+
+    for x in items.iter() {
+        sum = sum + *x;
+    }
+
+    assert_eq(sum, 60);
+}
+
+// =============================================================================
+// Test 3: Manual map implementation via for loop
+// =============================================================================
+
+@test
+fn test_manual_map() {
+    let items: List<Int> = List.from([1, 2, 3]);
+    let mut doubled: List<Int> = List.new();
+
+    for x in items.iter() {
+        doubled.push(*x * 2);
+    }
+
+    assert_eq(doubled.len(), 3);
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[1], 4);
+    assert_eq(doubled[2], 6);
+}
+
+// =============================================================================
+// Test 4: Manual filter implementation via for loop
+// =============================================================================
+
+@test
+fn test_manual_filter() {
+    let items: List<Int> = List.from([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    let mut evens: List<Int> = List.new();
+
+    for x in items.iter() {
+        if *x % 2 == 0 {
+            evens.push(*x);
+        }
+    }
+
+    assert_eq(evens.len(), 4);  // 2, 4, 6, 8
+    assert_eq(evens[0], 2);
+    assert_eq(evens[1], 4);
+}
+
+// =============================================================================
+// Test 5: Manual fold (sum) via for loop
+// =============================================================================
+
+@test
+fn test_manual_fold() {
+    let items: List<Int> = List.from([1, 2, 3, 4]);
+    let mut sum = 0;
+
+    for x in items.iter() {
+        sum = sum + *x;
+    }
+
+    assert_eq(sum, 10);  // 1 + 2 + 3 + 4
+}
+
+// =============================================================================
+// Test 6: Manual take via for loop with counter
+// =============================================================================
+
+@test
+fn test_manual_take() {
+    let items: List<Int> = List.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let mut first_five: List<Int> = List.new();
+    let mut count = 0;
+
+    for x in items.iter() {
+        if count >= 5 { break; }
+        first_five.push(*x);
+        count = count + 1;
+    }
+
+    assert_eq(first_five.len(), 5);
+    assert_eq(first_five[0], 1);
+    assert_eq(first_five[4], 5);
+}
+
+// =============================================================================
+// Test 7: Manual skip via for loop with counter
+// =============================================================================
+
+@test
+fn test_manual_skip() {
+    let items: List<Int> = List.from([1, 2, 3, 4, 5]);
+    let mut after_skip: List<Int> = List.new();
+    let mut idx = 0;
+
+    for x in items.iter() {
+        if idx >= 2 {
+            after_skip.push(*x);
+        }
+        idx = idx + 1;
+    }
+
+    assert_eq(after_skip.len(), 3);
+    assert_eq(after_skip[0], 3);
+    assert_eq(after_skip[1], 4);
+    assert_eq(after_skip[2], 5);
+}
+
+// =============================================================================
+// Test 8: Manual any() implementation
+// =============================================================================
+
+@test
+fn test_manual_any() {
+    let items: List<Int> = List.from([1, 2, 3, 4]);
+    let mut found_three = false;
+
+    for x in items.iter() {
+        if *x == 3 {
+            found_three = true;
+            break;
+        }
+    }
+
+    assert(found_three);
+}
+
+// =============================================================================
+// Test 9: Manual all() implementation
+// =============================================================================
+
+@test
+fn test_manual_all() {
+    let items: List<Int> = List.from([1, 2, 3, 4]);
+    let mut all_less_than_10 = true;
+
+    for x in items.iter() {
+        if *x >= 10 {
+            all_less_than_10 = false;
+            break;
+        }
+    }
+
+    assert(all_less_than_10);
+}
+
+// =============================================================================
+// Test 10: Manual find() implementation
+// =============================================================================
+
+@test
+fn test_manual_find() {
+    let items: List<Int> = List.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let mut found: Maybe<Int> = None;
+
+    for x in items.iter() {
+        if *x > 5 {
+            found = Some(*x);
+            break;
+        }
+    }
+
+    match found {
+        Some(v) => assert_eq(v, 6),
+        None => panic("Expected to find value"),
+    }
+}
+
+// =============================================================================
+// Test 11: Manual chain via concatenation
+// =============================================================================
+
+@test
+fn test_manual_chain() {
+    let list1: List<Int> = List.from([1, 2]);
+    let list2: List<Int> = List.from([10, 11]);
+    let mut chained: List<Int> = List.new();
+
+    for x in list1.iter() { chained.push(*x); }
+    for x in list2.iter() { chained.push(*x); }
+
+    assert_eq(chained.len(), 4);
+    assert_eq(chained[0], 1);
+    assert_eq(chained[1], 2);
+    assert_eq(chained[2], 10);
+    assert_eq(chained[3], 11);
+}
+
+// =============================================================================
+// Test 12: Manual sum and product
+// =============================================================================
+
+@test
+fn test_manual_sum_product() {
+    // Manual sum
+    let items1: List<Int> = List.from([1, 2, 3, 4]);
+    let mut sum = 0;
+    for x in items1.iter() { sum = sum + *x; }
+    assert_eq(sum, 10);  // 1+2+3+4
+
+    // Manual product
+    let items2: List<Int> = List.from([1, 2, 3, 4]);
+    let mut product = 1;
+    for x in items2.iter() { product = product * *x; }
+    assert_eq(product, 24);  // 1*2*3*4
+}
+
+// =============================================================================
+// Test 13: Manual enumerate via index tracking
+// =============================================================================
+
+@test
+fn test_manual_enumerate() {
+    let items: List<Text> = List.from(["a", "b", "c"]);
+    let mut enumerated: List<(Int, Text)> = List.new();
+    let mut idx = 0;
+
+    for item in items.iter() {
+        enumerated.push((idx, *item));
+        idx = idx + 1;
+    }
+
+    assert_eq(enumerated.len(), 3);
+    assert_eq(enumerated[0], (0, "a"));
+    assert_eq(enumerated[1], (1, "b"));
+    assert_eq(enumerated[2], (2, "c"));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,16 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, panic, unreachable
+// @timeout: 5000
+// @expected-panic: Unreachable
+
+fn main() {
+    let x = 3;
+    match x {
+        1 => print("one"),
+        2 => print("two"),
+        3 => unreachable(),
+        _ => print("other"),
+    }
+}

@@ -1,0 +1,83 @@
+// @test: typecheck-fail
+// @expected-error: "Array index out of bounds"
+// @tier: all
+// @level: L0
+// @tags: memory-safety, bounds-checking, static-analysis, compile-time
+// @description: Tests compile-time array bounds checking with known indices
+
+/// Verum performs static bounds checking when array size and index
+/// are known at compile time. This catches buffer overflows before
+/// the program even runs.
+///
+/// Static bounds checking catches:
+/// - Constant indices beyond array length
+/// - Negative indices (always invalid)
+/// - Arithmetic expressions with provable bounds violations
+
+fn main() {
+    // Fixed-size array with known length
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    // VALID: indices 0-4 are within bounds
+    let a = arr[0];  // OK: first element
+    let b = arr[4];  // OK: last element
+
+    // INVALID: constant index exceeds bounds
+    let c = arr[5];   // ERROR: index 5 >= length 5
+    let d = arr[10];  // ERROR: Array index out of bounds: index 10 exceeds array length 5
+
+    // INVALID: negative index
+    let e = arr[-1];  // ERROR: Array index out of bounds: negative index -1
+
+    // INVALID: computed constant still checked
+    const OFFSET: Int = 3;
+    let f = arr[OFFSET + 5];  // ERROR: index 8 >= length 5
+
+    // VALID: computed constant within bounds
+    let g = arr[OFFSET + 1];  // OK: index 4 < length 5
+}
+
+// Static checking also works for function parameters with refinement types
+fn get_element(arr: [Int; 10], idx: Int{>= 0 && < 10}) -> Int {
+    arr[idx]  // Safe: idx is proven in bounds by refinement type
+}
+
+fn test_refinement_bounds() {
+    let arr: [Int; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // VALID: literal satisfies refinement
+    let a = get_element(arr, 5);  // OK
+
+    // INVALID: literal violates refinement - caught statically
+    let b = get_element(arr, 15);  // ERROR: 15 does not satisfy idx{>= 0 && < 10}
+}
+
+// Compile-time loop bounds analysis
+fn test_loop_bounds() {
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    // VALID: loop range matches array bounds
+    for i in 0..5 {
+        let _ = arr[i];  // OK: i is always 0-4
+    }
+
+    // INVALID: loop range exceeds array bounds
+    for i in 0..10 {
+        let _ = arr[i];  // ERROR: loop may access index >= 5
+    }
+}
+
+// Multi-dimensional arrays
+fn test_multidim_bounds() {
+    let matrix: [[Int; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
+
+    // VALID: within bounds
+    let a = matrix[0][0];  // OK
+    let b = matrix[1][2];  // OK
+
+    // INVALID: outer dimension
+    let c = matrix[2][0];  // ERROR: index 2 >= length 2
+
+    // INVALID: inner dimension
+    let d = matrix[0][5];  // ERROR: index 5 >= length 3
+}

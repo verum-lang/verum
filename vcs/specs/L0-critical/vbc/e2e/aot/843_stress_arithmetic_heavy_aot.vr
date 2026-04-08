@@ -1,0 +1,244 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, matrix
+// @timeout: 60000
+// @expected-exit: 0
+
+// Matrix operations: 4x4 matrix multiply, determinant, inverse via cofactors (integer)
+
+type M4 is {
+    m00: Int, m01: Int, m02: Int, m03: Int,
+    m10: Int, m11: Int, m12: Int, m13: Int,
+    m20: Int, m21: Int, m22: Int, m23: Int,
+    m30: Int, m31: Int, m32: Int, m33: Int
+};
+
+fn m4_zeros() -> M4 {
+    M4 { m00: 0, m01: 0, m02: 0, m03: 0, m10: 0, m11: 0, m12: 0, m13: 0,
+         m20: 0, m21: 0, m22: 0, m23: 0, m30: 0, m31: 0, m32: 0, m33: 0 }
+}
+
+fn m4_identity() -> M4 {
+    M4 { m00: 1, m01: 0, m02: 0, m03: 0, m10: 0, m11: 1, m12: 0, m13: 0,
+         m20: 0, m21: 0, m22: 1, m23: 0, m30: 0, m31: 0, m32: 0, m33: 1 }
+}
+
+fn m4_get(m: M4, r: Int, c: Int) -> Int {
+    if (r == 0) { if (c == 0) { return m.m00; } if (c == 1) { return m.m01; }
+                  if (c == 2) { return m.m02; } return m.m03; }
+    if (r == 1) { if (c == 0) { return m.m10; } if (c == 1) { return m.m11; }
+                  if (c == 2) { return m.m12; } return m.m13; }
+    if (r == 2) { if (c == 0) { return m.m20; } if (c == 1) { return m.m21; }
+                  if (c == 2) { return m.m22; } return m.m23; }
+    if (c == 0) { return m.m30; } if (c == 1) { return m.m31; }
+    if (c == 2) { return m.m32; } m.m33
+}
+
+fn m4_set(m: M4, r: Int, c: Int, v: Int) -> M4 {
+    M4 {
+        m00: if (r == 0) { if (c == 0) { v } else { m.m00 } } else { m.m00 },
+        m01: if (r == 0) { if (c == 1) { v } else { m.m01 } } else { m.m01 },
+        m02: if (r == 0) { if (c == 2) { v } else { m.m02 } } else { m.m02 },
+        m03: if (r == 0) { if (c == 3) { v } else { m.m03 } } else { m.m03 },
+        m10: if (r == 1) { if (c == 0) { v } else { m.m10 } } else { m.m10 },
+        m11: if (r == 1) { if (c == 1) { v } else { m.m11 } } else { m.m11 },
+        m12: if (r == 1) { if (c == 2) { v } else { m.m12 } } else { m.m12 },
+        m13: if (r == 1) { if (c == 3) { v } else { m.m13 } } else { m.m13 },
+        m20: if (r == 2) { if (c == 0) { v } else { m.m20 } } else { m.m20 },
+        m21: if (r == 2) { if (c == 1) { v } else { m.m21 } } else { m.m21 },
+        m22: if (r == 2) { if (c == 2) { v } else { m.m22 } } else { m.m22 },
+        m23: if (r == 2) { if (c == 3) { v } else { m.m23 } } else { m.m23 },
+        m30: if (r == 3) { if (c == 0) { v } else { m.m30 } } else { m.m30 },
+        m31: if (r == 3) { if (c == 1) { v } else { m.m31 } } else { m.m31 },
+        m32: if (r == 3) { if (c == 2) { v } else { m.m32 } } else { m.m32 },
+        m33: if (r == 3) { if (c == 3) { v } else { m.m33 } } else { m.m33 }
+    }
+}
+
+fn m4_mul(a: M4, b: M4) -> M4 {
+    let mut result = m4_zeros();
+    let mut r = 0;
+    while (r < 4) {
+        let mut c = 0;
+        while (c < 4) {
+            let mut sum = 0;
+            let mut k = 0;
+            while (k < 4) {
+                sum = sum + m4_get(a, r, k) * m4_get(b, k, c);
+                k = k + 1;
+            }
+            result = m4_set(result, r, c, sum);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+fn m4_add(a: M4, b: M4) -> M4 {
+    let mut result = m4_zeros();
+    let mut r = 0;
+    while (r < 4) {
+        let mut c = 0;
+        while (c < 4) {
+            result = m4_set(result, r, c, m4_get(a, r, c) + m4_get(b, r, c));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+fn m4_scale(m: M4, s: Int) -> M4 {
+    let mut result = m4_zeros();
+    let mut r = 0;
+    while (r < 4) {
+        let mut c = 0;
+        while (c < 4) {
+            result = m4_set(result, r, c, m4_get(m, r, c) * s);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+fn m4_trace(m: M4) -> Int { m.m00 + m.m11 + m.m22 + m.m33 }
+
+fn m4_sum(m: M4) -> Int {
+    let mut s = 0;
+    let mut r = 0;
+    while (r < 4) {
+        let mut c = 0;
+        while (c < 4) { s = s + m4_get(m, r, c); c = c + 1; }
+        r = r + 1;
+    }
+    s
+}
+
+fn m4_transpose(m: M4) -> M4 {
+    let mut result = m4_zeros();
+    let mut r = 0;
+    while (r < 4) {
+        let mut c = 0;
+        while (c < 4) {
+            result = m4_set(result, r, c, m4_get(m, c, r));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+// 3x3 determinant for cofactor expansion
+fn det3(a00: Int, a01: Int, a02: Int, a10: Int, a11: Int, a12: Int, a20: Int, a21: Int, a22: Int) -> Int {
+    a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20)
+}
+
+// 4x4 determinant via cofactor expansion along first row
+fn m4_det(m: M4) -> Int {
+    let c00 = det3(m.m11, m.m12, m.m13, m.m21, m.m22, m.m23, m.m31, m.m32, m.m33);
+    let c01 = det3(m.m10, m.m12, m.m13, m.m20, m.m22, m.m23, m.m30, m.m32, m.m33);
+    let c02 = det3(m.m10, m.m11, m.m13, m.m20, m.m21, m.m23, m.m30, m.m31, m.m33);
+    let c03 = det3(m.m10, m.m11, m.m12, m.m20, m.m21, m.m22, m.m30, m.m31, m.m32);
+    m.m00 * c00 - m.m01 * c01 + m.m02 * c02 - m.m03 * c03
+}
+
+fn main() -> Int {
+    // Identity checks
+    let eye = m4_identity();
+    assert_eq(m4_trace(eye), 4);
+    assert_eq(m4_sum(eye), 4);
+    assert_eq(m4_det(eye), 1);
+
+    // I * I = I
+    let eye2 = m4_mul(eye, eye);
+    assert_eq(m4_trace(eye2), 4);
+    assert_eq(m4_sum(eye2), 4);
+
+    // A * I = A
+    let a = M4 { m00: 1, m01: 2, m02: 3, m03: 4, m10: 5, m11: 6, m12: 7, m13: 8,
+                 m20: 9, m21: 10, m22: 11, m23: 12, m30: 13, m31: 14, m32: 15, m33: 16 };
+    let ai = m4_mul(a, eye);
+    assert_eq(m4_sum(ai), 136);
+    assert_eq(m4_get(ai, 0, 0), 1);
+    assert_eq(m4_get(ai, 3, 3), 16);
+
+    // A * A
+    let aa = m4_mul(a, a);
+    assert_eq(m4_get(aa, 0, 0), 90);   // 1*1+2*5+3*9+4*13
+    assert_eq(m4_get(aa, 0, 1), 100);  // 1*2+2*6+3*10+4*14
+
+    // Determinant of singular matrix (rows are arithmetic progressions)
+    assert_eq(m4_det(a), 0);
+
+    // Determinant of non-singular matrix
+    let b = M4 { m00: 2, m01: 0, m02: 0, m03: 0, m10: 0, m11: 3, m12: 0, m13: 0,
+                 m20: 0, m21: 0, m22: 5, m23: 0, m30: 0, m31: 0, m32: 0, m33: 7 };
+    assert_eq(m4_det(b), 210);  // 2*3*5*7
+
+    // Upper triangular
+    let u = M4 { m00: 1, m01: 2, m02: 3, m03: 4, m10: 0, m11: 5, m12: 6, m13: 7,
+                 m20: 0, m21: 0, m22: 8, m23: 9, m30: 0, m31: 0, m32: 0, m33: 10 };
+    assert_eq(m4_det(u), 400);  // 1*5*8*10
+
+    // Transpose
+    let at = m4_transpose(a);
+    assert_eq(m4_get(at, 0, 1), 5);    // a[1][0] = 5
+    assert_eq(m4_get(at, 1, 0), 2);    // a[0][1] = 2
+    assert_eq(m4_sum(at), 136);
+
+    // (A^T)^T = A
+    let att = m4_transpose(at);
+    let mut r = 0;
+    while (r < 4) {
+        let mut c = 0;
+        while (c < 4) {
+            assert_eq(m4_get(att, r, c), m4_get(a, r, c));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+
+    // Matrix addition
+    let apb = m4_add(a, b);
+    assert_eq(m4_get(apb, 0, 0), 3);   // 1+2
+    assert_eq(m4_get(apb, 1, 1), 9);   // 6+3
+
+    // Scaling
+    let a3 = m4_scale(a, 3);
+    assert_eq(m4_get(a3, 0, 0), 3);
+    assert_eq(m4_sum(a3), 408);
+
+    // Matrix power: compute A^n via repeated squaring
+    let fib_mat = M4 { m00: 1, m01: 1, m02: 0, m03: 0, m10: 1, m11: 0, m12: 0, m13: 0,
+                       m20: 0, m21: 0, m22: 1, m23: 0, m30: 0, m31: 0, m32: 0, m33: 1 };
+    let f2 = m4_mul(fib_mat, fib_mat);
+    let f4 = m4_mul(f2, f2);
+    let f8 = m4_mul(f4, f4);
+    // fib_mat^n has fib(n+1) at [0,0], fib(n) at [0,1]
+    // f8 => fib(9)=34 at [0,0], fib(8)=21 at [0,1]
+    assert_eq(m4_get(f8, 0, 0), 34);
+    assert_eq(m4_get(f8, 0, 1), 21);
+    assert_eq(m4_get(f8, 1, 0), 21);
+    assert_eq(m4_get(f8, 1, 1), 13);
+
+    // Stress: multiply many matrices
+    let mut prod = m4_identity();
+    let inc = M4 { m00: 1, m01: 1, m02: 0, m03: 0, m10: 0, m11: 1, m12: 0, m13: 0,
+                   m20: 0, m21: 0, m22: 1, m23: 0, m30: 0, m31: 0, m32: 0, m33: 1 };
+    let mut i = 0;
+    while (i < 10) {
+        prod = m4_mul(prod, inc);
+        i = i + 1;
+    }
+    // inc^n = [[1,n,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
+    assert_eq(m4_get(prod, 0, 0), 1);
+    assert_eq(m4_get(prod, 0, 1), 10);
+    assert_eq(m4_get(prod, 1, 1), 1);
+    assert_eq(m4_det(prod), 1);
+
+    print("843_stress_matrix_ops: PASS");
+    0
+}

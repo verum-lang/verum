@@ -1,0 +1,88 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only, runtime needs GPU device
+// @tags: gpu, kernel, thread
+
+@kernel(block_size = 256)
+fn test_global_id(output: &mut Tensor<i32, [N]>) {
+    let idx = global_id().x;
+    if idx < N {
+        output[idx] = idx as i32;
+    }
+}
+
+@kernel(block_size = 256)
+fn test_local_id(output: &mut Tensor<i32, [N]>) {
+    let idx = global_id().x;
+    let local = local_id().x;
+    if idx < N {
+        output[idx] = local as i32;
+    }
+}
+
+@kernel(block_size = 256)
+fn test_group_id(output: &mut Tensor<i32, [N]>) {
+    let idx = global_id().x;
+    let group = group_id().x;
+    if idx < N {
+        output[idx] = group as i32;
+    }
+}
+
+@kernel(block_size = (16, 16), grid_size = auto)
+fn test_2d_ids(
+    global_x: &mut Tensor<i32, [M, N]>,
+    global_y: &mut Tensor<i32, [M, N]>,
+    local_x: &mut Tensor<i32, [M, N]>,
+    local_y: &mut Tensor<i32, [M, N]>,
+    group_x: &mut Tensor<i32, [M, N]>,
+    group_y: &mut Tensor<i32, [M, N]>
+) {
+    let gx = global_id().x;
+    let gy = global_id().y;
+
+    if gx < N && gy < M {
+        global_x[gy, gx] = gx as i32;
+        global_y[gy, gx] = gy as i32;
+        local_x[gy, gx] = local_id().x as i32;
+        local_y[gy, gx] = local_id().y as i32;
+        group_x[gy, gx] = group_id().x as i32;
+        group_y[gy, gx] = group_id().y as i32;
+    }
+}
+
+@kernel(block_size = (8, 8, 4), grid_size = auto)
+fn test_3d_ids(
+    output: &mut Tensor<i32, [D, H, W]>
+) {
+    let x = global_id().x;
+    let y = global_id().y;
+    let z = global_id().z;
+
+    if x < W && y < H && z < D {
+        // Encode all three indices into one value
+        output[z, y, x] = (z * 1000000 + y * 1000 + x) as i32;
+    }
+}
+
+@kernel(block_size = 256)
+fn test_block_dim(output: &mut Tensor<i32, [N]>) {
+    let idx = global_id().x;
+    if idx < N {
+        output[idx] = block_dim().x as i32;
+    }
+}
+
+@kernel(block_size = 256)
+fn test_grid_dim(output: &mut Tensor<i32, [N]>) {
+    let idx = global_id().x;
+    if idx < N {
+        output[idx] = grid_dim().x as i32;
+    }
+}
+
+fn main() {
+    // GPU kernel launch syntax (<<<grid, block>>>) requires runtime
+    // This test validates kernel function parsing only
+}

@@ -1,0 +1,145 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, trig, table, lookup
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for trigonometric lookup table (integer-scaled by 1000)
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// Sine table for 0..90 degrees, scaled by 1000
+// sin(0)=0, sin(15)=259, sin(30)=500, sin(45)=707, sin(60)=866, sin(75)=966, sin(90)=1000
+fn sin_table(deg: Int) -> Int {
+    if deg == 0 { 0 }
+    else if deg == 15 { 259 }
+    else if deg == 30 { 500 }
+    else if deg == 45 { 707 }
+    else if deg == 60 { 866 }
+    else if deg == 75 { 966 }
+    else if deg == 90 { 1000 }
+    else { -1 }
+}
+
+// Normalize angle to [0, 360)
+fn normalize_angle(deg: Int) -> Int {
+    let mut d = deg % 360;
+    if d < 0 { d = d + 360; }
+    d
+}
+
+// Sine using table + symmetry (only at 15-degree multiples)
+fn sin_approx(deg: Int) -> Int {
+    let d = normalize_angle(deg);
+    if d <= 90 { sin_table(d) }
+    else if d <= 180 { sin_table(180 - d) }
+    else if d <= 270 { -sin_table(d - 180) }
+    else { -sin_table(360 - d) }
+}
+
+// Cosine: cos(x) = sin(90 - x)
+fn cos_approx(deg: Int) -> Int {
+    sin_approx(90 - deg)
+}
+
+// Linear interpolation between table entries
+fn sin_lerp(deg: Int) -> Int {
+    let d = normalize_angle(deg);
+    let mut effective = d;
+    let mut sign = 1;
+
+    if d > 270 {
+        effective = 360 - d;
+        sign = -1;
+    } else if d > 180 {
+        effective = d - 180;
+        sign = -1;
+    } else if d > 90 {
+        effective = 180 - d;
+    }
+
+    // Find bracketing table entries (multiples of 15)
+    let lo = (effective / 15) * 15;
+    let hi = lo + 15;
+    if hi > 90 {
+        return sign * sin_table(90);
+    }
+
+    let s_lo = sin_table(lo);
+    let s_hi = sin_table(hi);
+    let frac = effective - lo;
+    let result = s_lo + (s_hi - s_lo) * frac / 15;
+    sign * result
+}
+
+fn test_basic_sin() {
+    assert_eq(sin_approx(0), 0);
+    assert_eq(sin_approx(30), 500);
+    assert_eq(sin_approx(90), 1000);
+    assert_eq(sin_approx(180), 0);
+    assert_eq(sin_approx(270), -1000);
+    assert_eq(sin_approx(360), 0);
+}
+
+fn test_basic_cos() {
+    assert_eq(cos_approx(0), 1000);
+    assert_eq(cos_approx(90), 0);
+    assert_eq(cos_approx(180), -1000);
+    assert_eq(cos_approx(270), 0);
+}
+
+fn test_symmetry() {
+    // sin(x) = sin(180 - x)
+    assert_eq(sin_approx(30), sin_approx(150));
+    assert_eq(sin_approx(45), sin_approx(135));
+
+    // sin(x) = -sin(x + 180)
+    assert_eq(sin_approx(30), -sin_approx(210));
+    assert_eq(sin_approx(45), -sin_approx(225));
+}
+
+fn test_pythagorean() {
+    // sin^2(x) + cos^2(x) ≈ 1000000 (within tolerance)
+    let s30 = sin_approx(30);
+    let c30 = cos_approx(30);
+    let sum30 = s30 * s30 + c30 * c30;
+    // sin(30)=500, cos(30)=866: 250000+749956=999956 ≈ 1000000
+    assert_eq(abs_val(sum30 - 1000000) < 1000, true);
+
+    let s45 = sin_approx(45);
+    let c45 = cos_approx(45);
+    let sum45 = s45 * s45 + c45 * c45;
+    // sin(45)=707, cos(45)=707: 499849+499849=999698 ≈ 1000000
+    assert_eq(abs_val(sum45 - 1000000) < 1000, true);
+}
+
+fn test_negative_angles() {
+    // sin(-30) = -sin(30)
+    assert_eq(sin_approx(-30), -sin_approx(30));
+    // cos(-30) = cos(30)
+    assert_eq(cos_approx(-30), cos_approx(30));
+}
+
+fn test_lerp() {
+    // Interpolated values should be between table entries
+    let s20 = sin_lerp(20);
+    assert_eq(s20 > sin_table(15), true);
+    assert_eq(s20 < sin_table(30), true);
+
+    // Table entries should be exact
+    assert_eq(sin_lerp(0), 0);
+    assert_eq(sin_lerp(30), 500);
+    assert_eq(sin_lerp(90), 1000);
+}
+
+fn main() -> Int {
+    test_basic_sin();
+    test_basic_cos();
+    test_symmetry();
+    test_pythagorean();
+    test_negative_angles();
+    test_lerp();
+    print("[OK] 278_trig_table_aot");
+    0
+}

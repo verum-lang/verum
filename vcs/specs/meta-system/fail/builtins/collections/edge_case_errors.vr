@@ -1,0 +1,45 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, collections, edge_cases, error
+// @description: Error tests for collection edge cases
+// @expected-error: None
+
+// =============================================================================
+// OUT OF BOUNDS ERRORS
+// =============================================================================
+
+// Test list_get negative index
+meta fn test_list_get_negative() -> Int {
+    maybe_unwrap(list_get([1, 2, 3], -1))  // ERROR: unwrap of None (negative index)
+}
+
+// Test list_get out of bounds
+meta fn test_list_get_out_of_bounds() -> Int {
+    maybe_unwrap(list_get([1, 2, 3], 10))  // ERROR: unwrap of None (index out of bounds)
+}
+
+// Test list_get exactly at length
+meta fn test_list_get_at_length() -> Int {
+    maybe_unwrap(list_get([1, 2, 3], 3))  // ERROR: unwrap of None (index 3 out of bounds, len=3)
+}
+
+// Test list_get on empty array
+meta fn test_list_get_empty() -> Int {
+    maybe_unwrap(list_get([], 0))  // ERROR: unwrap of None (empty list)
+}
+
+// Test nested access out of bounds
+meta fn test_nested_out_of_bounds() -> Int {
+    let xs = [[1, 2], [3, 4]];
+    // list_get returns Maybe<T>, unwrapping None causes panic
+    maybe_unwrap(list_get(maybe_unwrap(list_get(xs, 5)), 0))  // ERROR: unwrap of None (index 5 out of bounds)
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    @const test_list_get_out_of_bounds();
+}

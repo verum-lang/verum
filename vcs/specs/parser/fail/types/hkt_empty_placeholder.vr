@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, hkt, placeholder, error
+// @description: Test detection of empty HKT placeholder list
+// @expected-error: E082
+
+// HKT must have at least one placeholder
+fn transform<F<>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    fa
+}

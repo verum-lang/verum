@@ -1,0 +1,284 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, symbolic, differentiation, expression, algebra
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT symbolic differentiation of simple integer polynomial expressions
+
+// Symbolic expression type
+type SExpr is
+    SConst(Int)
+  | SVar
+  | SAdd { left: SExpr, right: SExpr }
+  | SMul { left: SExpr, right: SExpr };
+
+// Evaluate expression at x
+fn sexpr_eval(e: SExpr, x: Int) -> Int {
+    match e {
+        SConst(c) => c,
+        SVar => x,
+        SAdd { left, right } => sexpr_eval(left, x) + sexpr_eval(right, x),
+        SMul { left, right } => sexpr_eval(left, x) * sexpr_eval(right, x),
+    }
+}
+
+// Differentiate with respect to x
+// d/dx(const) = 0
+// d/dx(x) = 1
+// d/dx(a + b) = a' + b'
+// d/dx(a * b) = a'*b + a*b' (product rule)
+fn sexpr_diff(e: SExpr) -> SExpr {
+    match e {
+        SConst(_) => SConst(0),
+        SVar => SConst(1),
+        SAdd { left, right } => SAdd { left: sexpr_diff(left), right: sexpr_diff(right) },
+        SMul { left, right } => {
+            // product rule: d(l*r) = l'*r + l*r'
+            SAdd {
+                left: SMul { left: sexpr_diff(left), right: right },
+                right: SMul { left: left, right: sexpr_diff(right) },
+            }
+        },
+    }
+}
+
+// Simplify an expression (one pass)
+// Rules:
+//   0 + a = a, a + 0 = a
+//   0 * a = 0, a * 0 = 0
+//   1 * a = a, a * 1 = a
+//   const + const = const, const * const = const
+fn sexpr_simplify(e: SExpr) -> SExpr {
+    match e {
+        SConst(c) => SConst(c),
+        SVar => SVar,
+        SAdd { left, right } => {
+            let sl = sexpr_simplify(left);
+            let sr = sexpr_simplify(right);
+            // constant folding
+            let sl_const = sexpr_is_const(sl);
+            let sr_const = sexpr_is_const(sr);
+            if sl_const && sr_const {
+                SConst(sexpr_get_const(sl) + sexpr_get_const(sr))
+            } else if sl_const && sexpr_get_const(sl) == 0 {
+                sr
+            } else if sr_const && sexpr_get_const(sr) == 0 {
+                sl
+            } else {
+                SAdd { left: sl, right: sr }
+            }
+        },
+        SMul { left, right } => {
+            let sl = sexpr_simplify(left);
+            let sr = sexpr_simplify(right);
+            let sl_const = sexpr_is_const(sl);
+            let sr_const = sexpr_is_const(sr);
+            if sl_const && sr_const {
+                SConst(sexpr_get_const(sl) * sexpr_get_const(sr))
+            } else if sl_const && sexpr_get_const(sl) == 0 {
+                SConst(0)
+            } else if sr_const && sexpr_get_const(sr) == 0 {
+                SConst(0)
+            } else if sl_const && sexpr_get_const(sl) == 1 {
+                sr
+            } else if sr_const && sexpr_get_const(sr) == 1 {
+                sl
+            } else {
+                SMul { left: sl, right: sr }
+            }
+        },
+    }
+}
+
+fn sexpr_is_const(e: SExpr) -> Bool {
+    e is SConst(_)
+}
+
+fn sexpr_get_const(e: SExpr) -> Int {
+    match e {
+        SConst(c) => c,
+        _ => 0,
+    }
+}
+
+// Multi-pass simplification
+fn sexpr_simplify_n(e: SExpr, n: Int) -> SExpr {
+    let mut result = e;
+    let mut i = 0;
+    while i < n {
+        result = sexpr_simplify(result);
+        i = i + 1;
+    }
+    result
+}
+
+// Count nodes in expression tree
+fn sexpr_count(e: SExpr) -> Int {
+    match e {
+        SConst(_) => 1,
+        SVar => 1,
+        SAdd { left, right } => 1 + sexpr_count(left) + sexpr_count(right),
+        SMul { left, right } => 1 + sexpr_count(left) + sexpr_count(right),
+    }
+}
+
+// Depth of expression tree
+fn sexpr_tree_depth(e: SExpr) -> Int {
+    match e {
+        SConst(_) => 1,
+        SVar => 1,
+        SAdd { left, right } => {
+            let dl = sexpr_tree_depth(left);
+            let dr = sexpr_tree_depth(right);
+            1 + if dl > dr { dl } else { dr }
+        },
+        SMul { left, right } => {
+            let dl = sexpr_tree_depth(left);
+            let dr = sexpr_tree_depth(right);
+            1 + if dl > dr { dl } else { dr }
+        },
+    }
+}
+
+// Helper constructors
+fn sconst(c: Int) -> SExpr { SConst(c) }
+fn svar() -> SExpr { SVar }
+fn sadd(a: SExpr, b: SExpr) -> SExpr { SAdd { left: a, right: b } }
+fn smul(a: SExpr, b: SExpr) -> SExpr { SMul { left: a, right: b } }
+
+fn main() -> Int {
+    // === Test 1: Evaluate constants ===
+    assert_eq(sexpr_eval(sconst(42), 0), 42);
+    assert_eq(sexpr_eval(sconst(42), 100), 42);
+
+    // === Test 2: Evaluate variable ===
+    assert_eq(sexpr_eval(svar(), 7), 7);
+    assert_eq(sexpr_eval(svar(), 0), 0);
+
+    // === Test 3: Evaluate 3x + 5 ===
+    // 3x + 5
+    let expr1 = sadd(smul(sconst(3), svar()), sconst(5));
+    assert_eq(sexpr_eval(expr1, 0), 5);
+    assert_eq(sexpr_eval(expr1, 1), 8);
+    assert_eq(sexpr_eval(expr1, 10), 35);
+
+    // === Test 4: Evaluate x^2 = x * x ===
+    let x_sq = smul(svar(), svar());
+    assert_eq(sexpr_eval(x_sq, 0), 0);
+    assert_eq(sexpr_eval(x_sq, 3), 9);
+    assert_eq(sexpr_eval(x_sq, 5), 25);
+    assert_eq(sexpr_eval(x_sq, 10), 100);
+
+    // === Test 5: Derivative of constant = 0 ===
+    let dc = sexpr_diff(sconst(7));
+    assert_eq(sexpr_eval(dc, 100), 0);
+
+    // === Test 6: Derivative of x = 1 ===
+    let dx = sexpr_diff(svar());
+    assert_eq(sexpr_eval(dx, 0), 1);
+    assert_eq(sexpr_eval(dx, 100), 1);
+
+    // === Test 7: Derivative of 3x + 5 = 3 ===
+    let d_expr1 = sexpr_diff(expr1);
+    // Before simplification, the result evaluates correctly
+    assert_eq(sexpr_eval(d_expr1, 0), 3);
+    assert_eq(sexpr_eval(d_expr1, 7), 3);
+    assert_eq(sexpr_eval(d_expr1, 100), 3);
+
+    // After simplification
+    let d_expr1_s = sexpr_simplify_n(d_expr1, 3);
+    assert_eq(sexpr_eval(d_expr1_s, 0), 3);
+
+    // === Test 8: Derivative of x^2 = 2x ===
+    // d/dx(x*x) = 1*x + x*1 = 2x
+    let d_x_sq = sexpr_diff(x_sq);
+    assert_eq(sexpr_eval(d_x_sq, 0), 0);
+    assert_eq(sexpr_eval(d_x_sq, 1), 2);
+    assert_eq(sexpr_eval(d_x_sq, 3), 6);
+    assert_eq(sexpr_eval(d_x_sq, 5), 10);
+    assert_eq(sexpr_eval(d_x_sq, 10), 20);
+
+    // === Test 9: Derivative of 2x^2 + 3x + 1 ===
+    // 2x^2 + 3x + 1
+    let poly = sadd(sadd(smul(sconst(2), x_sq), smul(sconst(3), svar())), sconst(1));
+    // Verify evaluation: at x=4: 2*16 + 12 + 1 = 45
+    assert_eq(sexpr_eval(poly, 4), 45);
+
+    // Derivative: 4x + 3
+    let d_poly = sexpr_diff(poly);
+    assert_eq(sexpr_eval(d_poly, 0), 3);
+    assert_eq(sexpr_eval(d_poly, 1), 7);    // 4+3
+    assert_eq(sexpr_eval(d_poly, 5), 23);   // 20+3
+    assert_eq(sexpr_eval(d_poly, 10), 43);  // 40+3
+
+    // === Test 10: Second derivative of x^2 = 2 ===
+    let d2_x_sq = sexpr_diff(d_x_sq);
+    assert_eq(sexpr_eval(d2_x_sq, 0), 2);
+    assert_eq(sexpr_eval(d2_x_sq, 100), 2);
+
+    // === Test 11: Simplification of 0 + x ===
+    let e_zero_plus_x = sadd(sconst(0), svar());
+    let s1 = sexpr_simplify(e_zero_plus_x);
+    assert_eq(sexpr_eval(s1, 42), 42);
+    assert(s1 is SVar);
+
+    // === Test 12: Simplification of x * 1 ===
+    let e_x_times_one = smul(svar(), sconst(1));
+    let s2 = sexpr_simplify(e_x_times_one);
+    assert_eq(sexpr_eval(s2, 42), 42);
+    assert(s2 is SVar);
+
+    // === Test 13: Simplification of 0 * x = 0 ===
+    let e_zero_times_x = smul(sconst(0), svar());
+    let s3 = sexpr_simplify(e_zero_times_x);
+    assert_eq(sexpr_eval(s3, 42), 0);
+    assert(sexpr_is_const(s3));
+    assert_eq(sexpr_get_const(s3), 0);
+
+    // === Test 14: Constant folding ===
+    let e_const_add = sadd(sconst(3), sconst(7));
+    let s4 = sexpr_simplify(e_const_add);
+    assert(sexpr_is_const(s4));
+    assert_eq(sexpr_get_const(s4), 10);
+
+    let e_const_mul = smul(sconst(4), sconst(5));
+    let s5 = sexpr_simplify(e_const_mul);
+    assert(sexpr_is_const(s5));
+    assert_eq(sexpr_get_const(s5), 20);
+
+    // === Test 15: Node counting ===
+    // sconst(5) has 1 node
+    assert_eq(sexpr_count(sconst(5)), 1);
+    // svar() has 1 node
+    assert_eq(sexpr_count(svar()), 1);
+    // sadd(svar(), sconst(1)) has 3 nodes
+    assert_eq(sexpr_count(sadd(svar(), sconst(1))), 3);
+    // x*x has 3 nodes
+    assert_eq(sexpr_count(x_sq), 3);
+
+    // === Test 16: Simplification reduces node count ===
+    let unsimplified = sexpr_diff(x_sq);
+    let simplified = sexpr_simplify_n(unsimplified, 3);
+    assert(sexpr_count(simplified) <= sexpr_count(unsimplified));
+
+    // === Test 17: Derivative of (x+1)*(x+1) = 2(x+1) ===
+    let x_plus_1 = sadd(svar(), sconst(1));
+    let sq_x1 = smul(x_plus_1, x_plus_1);
+    // Verify: (x+1)^2 at x=4 = 25
+    assert_eq(sexpr_eval(sq_x1, 4), 25);
+
+    let d_sq_x1 = sexpr_diff(sq_x1);
+    // d/dx (x+1)^2 = 2(x+1)
+    assert_eq(sexpr_eval(d_sq_x1, 0), 2);
+    assert_eq(sexpr_eval(d_sq_x1, 1), 4);
+    assert_eq(sexpr_eval(d_sq_x1, 4), 10);
+
+    // === Test 18: Tree depth ===
+    assert_eq(sexpr_tree_depth(sconst(1)), 1);
+    assert_eq(sexpr_tree_depth(svar()), 1);
+    assert_eq(sexpr_tree_depth(sadd(svar(), sconst(1))), 2);
+    assert_eq(sexpr_tree_depth(smul(sadd(svar(), sconst(1)), svar())), 3);
+
+    0
+}

@@ -1,0 +1,306 @@
+// @test: parse-pass
+// @tier: 0
+// @category: syntax
+// @level: L0
+// @tags: parser, syntax, operators, precedence, associativity
+// @description: Comprehensive tests for operator precedence and associativity
+
+// ============================================================================
+// Pipeline Operator (lowest precedence)
+// Grammar: pipeline_expr = assignment_expr , { '|>' , assignment_expr }
+// ============================================================================
+
+fn test_pipeline_precedence() {
+    // Pipeline binds loosest
+    let a = x |> f |> g;           // (x |> f) |> g
+    let b = x + y |> f;            // (x + y) |> f
+    let c = x |> f + y;            // Parse error or (x |> f) + y
+    let d = 1 + 2 * 3 |> f;        // (1 + 2 * 3) |> f = 7 |> f
+}
+
+// ============================================================================
+// Assignment Operators
+// Grammar: assignment_expr = null_coalesce_expr , [ assign_op , assignment_expr ]
+// ============================================================================
+
+fn test_assignment_precedence() {
+    // Right-associative
+    x = y = z = 0;                 // x = (y = (z = 0))
+
+    // Compound assignment
+    x += 1;
+    x -= 2;
+    x *= 3;
+    x /= 4;
+    x %= 5;
+    x &= 0xFF;
+    x |= 0x0F;
+    x ^= 0xAA;
+    x <<= 2;
+    x >>= 3;
+}
+
+// ============================================================================
+// Null Coalescing Operator
+// Grammar: null_coalesce_expr = range_expr , { '??' , range_expr }
+// ============================================================================
+
+fn test_null_coalesce_precedence() {
+    // Left-associative chains
+    let a = x ?? y ?? z;           // (x ?? y) ?? z
+    let b = get_a() ?? get_b() ?? default;
+
+    // Higher than assignment
+    x = a ?? b;                    // x = (a ?? b)
+
+    // Lower than range
+    let c = a ?? 0..10;            // (a ?? 0)..10 or a ?? (0..10)?
+}
+
+// ============================================================================
+// Range Operators
+// Grammar: range_expr = logical_or_expr , [ range_op , logical_or_expr ]
+// ============================================================================
+
+fn test_range_precedence() {
+    // Range types
+    let a = 0..10;                 // Exclusive range
+    let b = 0..=10;                // Inclusive range
+    let c = ..10;                  // Range to
+    let d = 0..;                   // Range from
+    let e = ..;                    // Full range
+
+    // Range with expressions
+    let f = start..end;
+    let g = a + b..c + d;          // (a + b)..(c + d)
+    let h = x * 2..y * 2;          // (x * 2)..(y * 2)
+}
+
+// ============================================================================
+// Logical Operators
+// Grammar: logical_or_expr = logical_and_expr , { '||' , logical_and_expr }
+// Grammar: logical_and_expr = equality_expr , { '&&' , equality_expr }
+// ============================================================================
+
+fn test_logical_precedence() {
+    // && binds tighter than ||
+    let a = x || y && z;           // x || (y && z)
+    let b = x && y || z;           // (x && y) || z
+    let c = a || b && c || d;      // a || (b && c) || d
+
+    // With parentheses for clarity
+    let d = (x || y) && z;
+    let e = x && (y || z);
+
+    // Short-circuit evaluation order
+    let f = a() || b() && c();     // a() || (b() && c())
+}
+
+// ============================================================================
+// Equality and Relational Operators
+// Grammar: equality_expr = is_relational_expr , { ( '==' | '!=' ) , is_relational_expr }
+// Grammar: relational_expr = bitwise_expr , { ( '<' | '>' | '<=' | '>=' ) , bitwise_expr }
+// ============================================================================
+
+fn test_comparison_precedence() {
+    // Equality vs relational
+    let a = x < y == z < w;        // (x < y) == (z < w)
+    let b = x <= y != z >= w;      // (x <= y) != (z >= w)
+
+    // With logical operators
+    let c = x < y && y < z;        // (x < y) && (y < z)
+    let d = a == b || c == d;      // (a == b) || (c == d)
+
+    // Comparison chains (explicit)
+    let e = x < y && y < z && z < w;
+}
+
+// ============================================================================
+// Is Operator
+// Grammar: is_relational_expr = relational_expr , [ 'is' , [ 'not' ] , pattern ]
+// ============================================================================
+
+fn test_is_precedence() {
+    // Same level as relational
+    let a = x is Some(v) && y > 0;
+    let b = x < y || z is None;
+
+    // With negation
+    let c = x is not None;
+    let d = result is not Err(e);
+
+    // In conditions
+    if value is Some(x) && x > 0 {
+        use(x);
+    }
+}
+
+// ============================================================================
+// Bitwise Operators
+// Grammar: bitwise_expr = shift_expr , { ( '&' | '|' | '^' ) , shift_expr }
+// ============================================================================
+
+fn test_bitwise_precedence() {
+    // & binds tighter than ^, ^ tighter than |
+    let a = x & y | z;             // (x & y) | z
+    let b = x | y & z;             // x | (y & z)
+    let c = x ^ y & z;             // x ^ (y & z)
+    let d = x & y ^ z;             // (x & y) ^ z
+    let e = x | y ^ z;             // x | (y ^ z)
+
+    // Full chain
+    let f = a & b ^ c | d;         // ((a & b) ^ c) | d
+}
+
+// ============================================================================
+// Shift Operators
+// Grammar: shift_expr = additive_expr , { ( '<<' | '>>' ) , additive_expr }
+// ============================================================================
+
+fn test_shift_precedence() {
+    // Left-associative
+    let a = x << 2 << 3;           // (x << 2) << 3
+    let b = x >> 2 >> 3;           // (x >> 2) >> 3
+
+    // Tighter than bitwise
+    let c = x << 2 & mask;         // (x << 2) & mask
+    let d = x & mask << 2;         // x & (mask << 2)
+
+    // Looser than additive
+    let e = x + y << 2;            // (x + y) << 2
+    let f = x << 2 + y;            // x << (2 + y)
+}
+
+// ============================================================================
+// Additive Operators
+// Grammar: additive_expr = mult_expr , { ( '+' | '-' ) , mult_expr }
+// ============================================================================
+
+fn test_additive_precedence() {
+    // Left-associative
+    let a = x + y - z + w;         // ((x + y) - z) + w
+    let b = 1 - 2 + 3 - 4;         // ((1 - 2) + 3) - 4 = -2
+
+    // With multiplicative
+    let c = a + b * c;             // a + (b * c)
+    let d = a * b + c;             // (a * b) + c
+}
+
+// ============================================================================
+// Multiplicative Operators
+// Grammar: mult_expr = power_expr , { ( '*' | '/' | '%' ) , power_expr }
+// ============================================================================
+
+fn test_multiplicative_precedence() {
+    // Left-associative
+    let a = x * y / z * w;         // ((x * y) / z) * w
+    let b = 10 / 3 * 3;            // (10 / 3) * 3 = 9
+
+    // Modulo
+    let c = x % y * z;             // (x % y) * z
+    let d = x * y % z;             // (x * y) % z
+
+    // With power
+    let e = 2 * 3 ** 2;            // 2 * (3 ** 2) = 2 * 9 = 18
+    let f = 2 ** 3 * 4;            // (2 ** 3) * 4 = 8 * 4 = 32
+}
+
+// ============================================================================
+// Power Operator
+// Grammar: power_expr = unary_expr , [ '**' , power_expr ]
+// ============================================================================
+
+fn test_power_precedence() {
+    // Right-associative
+    let a = 2 ** 3 ** 2;           // 2 ** (3 ** 2) = 2 ** 9 = 512
+
+    // Tighter than multiplicative
+    let b = 2 * 3 ** 2;            // 2 * 9 = 18
+    let c = 3 ** 2 * 2;            // 9 * 2 = 18
+
+    // With unary
+    let d = -2 ** 2;               // -(2 ** 2) = -4 or (-2) ** 2 = 4?
+    let e = (-2) ** 2;             // 4
+}
+
+// ============================================================================
+// Unary Operators
+// Grammar: unary_expr = unary_op , unary_expr | postfix_expr
+// ============================================================================
+
+fn test_unary_precedence() {
+    // Unary operators
+    let a = -x;
+    let b = !flag;
+    let c = ~bits;
+    let d = &value;
+    let e = &mut value;
+    let f = *ptr;
+
+    // Chained unary
+    let g = --x;                   // -(-x)
+    let h = !!flag;                // !(!flag)
+    let i = **ptr;                 // *(*ptr)
+
+    // With postfix
+    let j = -arr[0];               // -(arr[0])
+    let k = !obj.flag;             // !(obj.flag)
+    let l = &struct.field;         // &(struct.field)
+}
+
+// ============================================================================
+// Postfix Operators
+// Grammar: postfix_expr = primary_expr , { postfix_op }
+// ============================================================================
+
+fn test_postfix_precedence() {
+    // Left-associative chain
+    let a = obj.field.method().result;
+    let b = arr[0][1][2];
+    let c = func()()(x);
+
+    // Mixed postfix
+    let d = obj.arr[0].method();
+    let e = func().field[0];
+
+    // Try operator
+    let f = result?;
+    let g = outer?.inner?.value;
+
+    // As cast
+    let h = value as Int as Float;
+    let i = (value as List<Int>).len();
+}
+
+// ============================================================================
+// Optional Chaining
+// Grammar: postfix_op = '?.' , identifier , [ type_args ] , [ call_args ]
+// ============================================================================
+
+fn test_optional_chaining() {
+    let a = obj?.field;
+    let b = obj?.method();
+    let c = obj?.nested?.deep?.value;
+    let d = arr?[0];               // Optional index?
+}
+
+// ============================================================================
+// Complex Expressions
+// ============================================================================
+
+fn test_complex_expressions() {
+    // Mixing everything
+    let result = data
+        |> filter(|x| x > 0 && x < 100)
+        |> map(|x| x ** 2 + 1)
+        |> fold(0, |a, b| a + b);
+
+    // Complex arithmetic
+    let formula = (a + b) * (c - d) / (e ** 2) + f % g << h & i | j ^ k;
+
+    // Conditional chains
+    let value = if a > b && c < d { x } else if e == f || g != h { y } else { z };
+
+    // Null coalesce chain with fallbacks
+    let config = primary_config ?? secondary_config ?? default_config ?? Config.default();
+}

@@ -1,0 +1,73 @@
+// @test: differential
+// @tier: all
+// @level: L2
+// @tags: modules, differential, imports
+
+/// Differential test for link resolution.
+/// Verifies that link resolution produces identical results across all tiers.
+
+module library {
+    pub module types {
+        pub type Point is {
+            x: Int,
+            y: Int
+        };
+
+        pub type Color is {
+            r: Int,
+            g: Int,
+            b: Int
+        };
+    }
+
+    pub module functions {
+        link super.types.Point;
+
+        pub fn distance(p1: &Point, p2: &Point) -> Float {
+            let dx = (p2.x - p1.x) as Float;
+            let dy = (p2.y - p1.y) as Float;
+            (dx * dx + dy * dy).sqrt()
+        }
+
+        pub fn add_points(p1: &Point, p2: &Point) -> Point {
+            Point {
+                x: p1.x + p2.x,
+                y: p1.y + p2.y
+            }
+        }
+    }
+
+    pub module constants {
+        pub const ORIGIN_X: Int = 0;
+        pub const ORIGIN_Y: Int = 0;
+        pub const DEFAULT_COLOR_R: Int = 255;
+        pub const DEFAULT_COLOR_G: Int = 255;
+        pub const DEFAULT_COLOR_B: Int = 255;
+    }
+}
+
+// Import from library using various patterns
+mount library.types.{Point, Color};
+mount library.functions.{distance, add_points};
+mount library.constants.*;
+
+fn main() {
+    // Create points using imported type
+    let p1 = Point { x: 0, y: 0 };
+    let p2 = Point { x: 3, y: 4 };
+
+    // Use imported functions
+    let dist = distance(&p1, &p2);
+    print(f"distance((0,0), (3,4)) = {dist}");
+
+    let sum = add_points(&p1, &p2);
+    print(f"add_points = ({sum.x}, {sum.y})");
+
+    // Use glob-imported constants
+    print(f"ORIGIN = ({ORIGIN_X}, {ORIGIN_Y})");
+    print(f"DEFAULT_COLOR = ({DEFAULT_COLOR_R}, {DEFAULT_COLOR_G}, {DEFAULT_COLOR_B})");
+
+    // Create color using imported type
+    let color = Color { r: 100, g: 150, b: 200 };
+    print(f"color = ({color.r}, {color.g}, {color.b})");
+}

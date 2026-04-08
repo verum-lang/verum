@@ -1,0 +1,180 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, records, ring-buffer, data-structures
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT ring buffer (circular queue) using fixed-size record
+
+// Ring buffer with 8 slots
+type Ring8 is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    head: Int, tail: Int, count: Int
+};
+
+fn ring_new() -> Ring8 {
+    Ring8 { s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0, s7: 0,
+            head: 0, tail: 0, count: 0 }
+}
+
+fn ring_get_slot(r: Ring8, idx: Int) -> Int {
+    let i = idx % 8;
+    if i == 0 { r.s0 }
+    else if i == 1 { r.s1 }
+    else if i == 2 { r.s2 }
+    else if i == 3 { r.s3 }
+    else if i == 4 { r.s4 }
+    else if i == 5 { r.s5 }
+    else if i == 6 { r.s6 }
+    else { r.s7 }
+}
+
+fn ring_set_slot(r: Ring8, idx: Int, val: Int) -> Ring8 {
+    let i = idx % 8;
+    Ring8 {
+        s0: if i == 0 { val } else { r.s0 },
+        s1: if i == 1 { val } else { r.s1 },
+        s2: if i == 2 { val } else { r.s2 },
+        s3: if i == 3 { val } else { r.s3 },
+        s4: if i == 4 { val } else { r.s4 },
+        s5: if i == 5 { val } else { r.s5 },
+        s6: if i == 6 { val } else { r.s6 },
+        s7: if i == 7 { val } else { r.s7 },
+        head: r.head, tail: r.tail, count: r.count,
+    }
+}
+
+fn ring_is_empty(r: Ring8) -> Bool { r.count == 0 }
+fn ring_is_full(r: Ring8) -> Bool { r.count == 8 }
+fn ring_size(r: Ring8) -> Int { r.count }
+
+fn ring_push(r: Ring8, val: Int) -> Ring8 {
+    if ring_is_full(r) { r }
+    else {
+        let r2 = ring_set_slot(r, r.tail, val);
+        Ring8 {
+            s0: r2.s0, s1: r2.s1, s2: r2.s2, s3: r2.s3,
+            s4: r2.s4, s5: r2.s5, s6: r2.s6, s7: r2.s7,
+            head: r.head, tail: (r.tail + 1) % 8, count: r.count + 1,
+        }
+    }
+}
+
+fn ring_pop_val(r: Ring8) -> Int {
+    if ring_is_empty(r) { -1 }
+    else { ring_get_slot(r, r.head) }
+}
+
+fn ring_pop(r: Ring8) -> Ring8 {
+    if ring_is_empty(r) { r }
+    else {
+        Ring8 {
+            s0: r.s0, s1: r.s1, s2: r.s2, s3: r.s3,
+            s4: r.s4, s5: r.s5, s6: r.s6, s7: r.s7,
+            head: (r.head + 1) % 8, tail: r.tail, count: r.count - 1,
+        }
+    }
+}
+
+fn ring_peek(r: Ring8) -> Int {
+    if ring_is_empty(r) { -1 }
+    else { ring_get_slot(r, r.head) }
+}
+
+fn ring_sum(r: Ring8) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    let mut idx = r.head;
+    while i < r.count {
+        total = total + ring_get_slot(r, idx);
+        idx = (idx + 1) % 8;
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // === Empty ring ===
+    let r0 = ring_new();
+    assert(ring_is_empty(r0));
+    assert(!ring_is_full(r0));
+    assert_eq(ring_size(r0), 0);
+    assert_eq(ring_peek(r0), -1);
+
+    // === Push single element ===
+    let r1 = ring_push(r0, 42);
+    assert(!ring_is_empty(r1));
+    assert_eq(ring_size(r1), 1);
+    assert_eq(ring_peek(r1), 42);
+
+    // === Push and pop ===
+    let r2 = ring_push(ring_push(ring_push(r0, 10), 20), 30);
+    assert_eq(ring_size(r2), 3);
+    assert_eq(ring_peek(r2), 10);  // FIFO: first in = 10
+
+    let v1 = ring_pop_val(r2);
+    let r3 = ring_pop(r2);
+    assert_eq(v1, 10);
+    assert_eq(ring_size(r3), 2);
+    assert_eq(ring_peek(r3), 20);
+
+    let v2 = ring_pop_val(r3);
+    let r4 = ring_pop(r3);
+    assert_eq(v2, 20);
+    assert_eq(ring_peek(r4), 30);
+
+    // === Fill to capacity ===
+    let mut rf = ring_new();
+    let mut i = 0;
+    while i < 8 {
+        rf = ring_push(rf, (i + 1) * 10);
+        i = i + 1;
+    }
+    assert(ring_is_full(rf));
+    assert_eq(ring_size(rf), 8);
+    assert_eq(ring_peek(rf), 10);
+    assert_eq(ring_sum(rf), 360);  // 10+20+30+40+50+60+70+80
+
+    // Push on full ring is no-op
+    let rf2 = ring_push(rf, 999);
+    assert_eq(ring_size(rf2), 8);
+    assert_eq(ring_peek(rf2), 10);  // unchanged
+
+    // === Pop all ===
+    let mut rp = rf;
+    let mut pop_sum = 0;
+    let mut j = 0;
+    while j < 8 {
+        pop_sum = pop_sum + ring_pop_val(rp);
+        rp = ring_pop(rp);
+        j = j + 1;
+    }
+    assert_eq(pop_sum, 360);
+    assert(ring_is_empty(rp));
+
+    // === Wrap-around: push 5, pop 3, push 5 more ===
+    let mut rw = ring_new();
+    rw = ring_push(rw, 1);
+    rw = ring_push(rw, 2);
+    rw = ring_push(rw, 3);
+    rw = ring_push(rw, 4);
+    rw = ring_push(rw, 5);
+    // Pop 3
+    rw = ring_pop(rw);
+    rw = ring_pop(rw);
+    rw = ring_pop(rw);
+    assert_eq(ring_size(rw), 2);
+    assert_eq(ring_peek(rw), 4);
+    // Push 5 more (wraps around)
+    rw = ring_push(rw, 6);
+    rw = ring_push(rw, 7);
+    rw = ring_push(rw, 8);
+    rw = ring_push(rw, 9);
+    rw = ring_push(rw, 10);
+    assert_eq(ring_size(rw), 7);
+    assert_eq(ring_peek(rw), 4);
+    assert_eq(ring_sum(rw), 49);  // 4+5+6+7+8+9+10 = 49
+
+    0
+}

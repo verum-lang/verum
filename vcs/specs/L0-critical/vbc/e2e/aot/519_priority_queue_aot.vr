@@ -1,0 +1,228 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, priority-queue, heap, data-structure
+// @timeout: 30000
+
+// Min-heap priority queue
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+type MinHeap is { data: Arr8, size: Int };
+
+fn heap_new() -> MinHeap { MinHeap { data: zeros(), size: 0 } }
+
+fn parent(i: Int) -> Int { (i - 1) / 2 }
+fn left_child(i: Int) -> Int { 2 * i + 1 }
+fn right_child(i: Int) -> Int { 2 * i + 2 }
+
+// Swap two elements in array
+fn swap8(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = get8(a, i);
+    let vj = get8(a, j);
+    let a2 = set8(a, i, vj);
+    set8(a2, j, vi)
+}
+
+// Sift up: move element at index i up to maintain heap property
+fn sift_up(data: Arr8, i: Int) -> Arr8 {
+    let mut d = data;
+    let mut idx = i;
+    while idx > 0 {
+        let p = parent(idx);
+        if get8(d, idx) < get8(d, p) {
+            d = swap8(d, idx, p);
+            idx = p;
+        } else {
+            idx = 0; // break
+        }
+    }
+    d
+}
+
+// Sift down: move element at index i down to maintain heap property
+fn sift_down(data: Arr8, i: Int, size: Int) -> Arr8 {
+    let mut d = data;
+    let mut idx = i;
+    let mut cont = 1;
+    while cont == 1 {
+        let l = left_child(idx);
+        let r = right_child(idx);
+        let mut smallest = idx;
+        if l < size {
+            if get8(d, l) < get8(d, smallest) { smallest = l; }
+        }
+        if r < size {
+            if get8(d, r) < get8(d, smallest) { smallest = r; }
+        }
+        if smallest != idx {
+            d = swap8(d, idx, smallest);
+            idx = smallest;
+        } else {
+            cont = 0;
+        }
+    }
+    d
+}
+
+fn heap_push(h: MinHeap, val: Int) -> MinHeap {
+    let d = set8(h.data, h.size, val);
+    let d2 = sift_up(d, h.size);
+    MinHeap { data: d2, size: h.size + 1 }
+}
+
+fn heap_peek(h: MinHeap) -> Int {
+    get8(h.data, 0)
+}
+
+fn heap_pop(h: MinHeap) -> MinHeap {
+    if h.size <= 1 { return heap_new(); }
+    let new_size = h.size - 1;
+    let d = set8(h.data, 0, get8(h.data, new_size));
+    let d2 = sift_down(d, 0, new_size);
+    MinHeap { data: d2, size: new_size }
+}
+
+// Verify min-heap property
+fn is_valid_heap(h: MinHeap) -> Int {
+    let mut i = 0;
+    while i < h.size {
+        let l = left_child(i);
+        let r = right_child(i);
+        if l < h.size {
+            if get8(h.data, l) < get8(h.data, i) { return 0; }
+        }
+        if r < h.size {
+            if get8(h.data, r) < get8(h.data, i) { return 0; }
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_basic_push_pop() -> Int {
+    let mut h = heap_new();
+    h = heap_push(h, 5);
+    h = heap_push(h, 3);
+    h = heap_push(h, 7);
+
+    assert_eq(h.size, 3);
+    assert_eq(heap_peek(h), 3); // minimum
+
+    h = heap_pop(h);
+    assert_eq(h.size, 2);
+    assert_eq(heap_peek(h), 5); // next minimum
+
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 7);
+
+    h = heap_pop(h);
+    assert_eq(h.size, 0);
+    1
+}
+
+fn test_sorted_insert() -> Int {
+    // Insert in sorted order
+    let mut h = heap_new();
+    h = heap_push(h, 1);
+    h = heap_push(h, 2);
+    h = heap_push(h, 3);
+    h = heap_push(h, 4);
+
+    assert_eq(is_valid_heap(h), 1);
+    assert_eq(heap_peek(h), 1);
+    1
+}
+
+fn test_reverse_insert() -> Int {
+    // Insert in reverse sorted order
+    let mut h = heap_new();
+    h = heap_push(h, 8);
+    h = heap_push(h, 6);
+    h = heap_push(h, 4);
+    h = heap_push(h, 2);
+
+    assert_eq(is_valid_heap(h), 1);
+    assert_eq(heap_peek(h), 2);
+    1
+}
+
+fn test_heapsort() -> Int {
+    // Push [5, 1, 4, 2, 8], pop all in sorted order
+    let mut h = heap_new();
+    h = heap_push(h, 5);
+    h = heap_push(h, 1);
+    h = heap_push(h, 4);
+    h = heap_push(h, 2);
+    h = heap_push(h, 8);
+
+    assert_eq(heap_peek(h), 1); h = heap_pop(h);
+    assert_eq(heap_peek(h), 2); h = heap_pop(h);
+    assert_eq(heap_peek(h), 4); h = heap_pop(h);
+    assert_eq(heap_peek(h), 5); h = heap_pop(h);
+    assert_eq(heap_peek(h), 8); h = heap_pop(h);
+    assert_eq(h.size, 0);
+    1
+}
+
+fn test_duplicates() -> Int {
+    let mut h = heap_new();
+    h = heap_push(h, 3);
+    h = heap_push(h, 3);
+    h = heap_push(h, 1);
+    h = heap_push(h, 3);
+
+    assert_eq(heap_peek(h), 1);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 3);
+    assert_eq(h.size, 3);
+    1
+}
+
+fn test_heap_validity() -> Int {
+    let mut h = heap_new();
+    h = heap_push(h, 10);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_push(h, 5);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_push(h, 15);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_push(h, 3);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_push(h, 8);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_push(h, 1);
+    assert_eq(is_valid_heap(h), 1);
+    1
+}
+
+fn main() -> Int {
+    test_basic_push_pop();
+    test_sorted_insert();
+    test_reverse_insert();
+    test_heapsort();
+    test_duplicates();
+    test_heap_validity();
+    print("[OK] 519_priority_queue_aot");
+    0
+}

@@ -1,0 +1,655 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: comparison, go, performance, gc
+// @description: Verum vs Go performance comparison (target: 1.0-1.5x Go performance)
+
+/// Verum vs Go Performance Comparison
+///
+/// This benchmark compares Verum's performance against Go.
+/// Go is a relevant comparison as both target similar use cases
+/// (systems programming, servers, concurrent applications).
+///
+/// Target: 1.0-1.5x Go performance (equal or better)
+///
+/// Key differences:
+/// - Go: GC-based memory management
+/// - Verum: CBGR with deterministic cleanup
+/// - Go: Goroutines with M:N scheduling
+/// - Verum: Async/await with work-stealing
+///
+/// Expected advantages for Verum:
+/// - Lower GC pause times
+/// - More predictable latency
+/// - Better cache locality
+///
+/// Spec reference: docs/detailed/04-memory-model.md
+
+const ITERATIONS: Int = 10_000_000;
+const DATA_SIZE: Int = 100_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs Go Performance");
+
+    // Compute benchmarks
+    results.add(benchmark_compute_intensive());
+    results.add(benchmark_json_encode_decode());
+
+    // Memory benchmarks (Go GC vs Verum CBGR)
+    results.add(benchmark_allocation_throughput());
+    results.add(benchmark_gc_pause_comparison());
+
+    // Collection benchmarks
+    results.add(benchmark_slice_operations());
+    results.add(benchmark_map_operations());
+
+    // String benchmarks
+    results.add(benchmark_string_operations());
+
+    // Concurrency benchmarks
+    results.add(benchmark_goroutine_vs_spawn());
+    results.add(benchmark_channel_throughput());
+    results.add(benchmark_mutex_contention());
+
+    // HTTP server simulation
+    results.add(benchmark_http_handler_latency());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_go.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.value >= 1.0);
+    assert(all_meet_target, "Verum performance below Go baseline");
+}
+
+/// Go baseline times (measured separately)
+module go_baselines {
+    /// Go compute intensive (fib + loops) in milliseconds
+    pub const COMPUTE_MS: Float = 600.0;
+
+    /// Go JSON encode/decode 10K objects in milliseconds
+    pub const JSON_MS: Float = 150.0;
+
+    /// Go 1M allocations in milliseconds
+    pub const ALLOC_1M_MS: Float = 80.0;
+
+    /// Go GC pause p99 in microseconds
+    pub const GC_PAUSE_P99_US: Float = 500.0;
+
+    /// Go slice append 1M elements in milliseconds
+    pub const SLICE_APPEND_MS: Float = 20.0;
+
+    /// Go map operations 1M in milliseconds
+    pub const MAP_OPS_MS: Float = 250.0;
+
+    /// Go string concat 100K in milliseconds
+    pub const STRING_CONCAT_MS: Float = 60.0;
+
+    /// Go spawn 100K goroutines in milliseconds
+    pub const GOROUTINE_SPAWN_MS: Float = 100.0;
+
+    /// Go channel send/recv 1M in milliseconds
+    pub const CHANNEL_1M_MS: Float = 80.0;
+
+    /// Go mutex lock/unlock 1M in milliseconds
+    pub const MUTEX_1M_MS: Float = 30.0;
+
+    /// Go HTTP handler latency p99 in microseconds
+    pub const HTTP_LATENCY_P99_US: Float = 200.0;
+}
+
+/// Benchmark: Compute intensive workload
+fn benchmark_compute_intensive() -> BenchmarkResult {
+    // Warmup
+    black_box(compute_workload(1000));
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result = compute_workload(10_000_000);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let go_ms = go_baselines.COMPUTE_MS;
+
+    black_box(result);
+
+    // Ratio > 1.0 means Verum is faster
+    let ratio = go_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "compute_intensive",
+        verum_ms: verum_ms,
+        go_ms: go_ms,
+        value: ratio,
+        target: 1.0,
+        passed: ratio >= 1.0,
+    }
+}
+
+fn compute_workload(iterations: Int) -> Int {
+    let mut sum = 0;
+    for i in 0..iterations {
+        sum += (i * 7 + 13) % 1000;
+        sum ^= sum >> 4;
+    }
+    sum
+}
+
+/// Benchmark: JSON encode/decode (common server workload)
+fn benchmark_json_encode_decode() -> BenchmarkResult {
+    let count = 10_000;
+
+    // Create test objects
+    let objects: List<TestObject> = (0..count).map(|i| {
+        TestObject {
+            id: i,
+            name: format("Object {}", i),
+            values: [1.0, 2.0, 3.0, 4.0, 5.0],
+            active: i % 2 == 0,
+        }
+    }).collect();
+
+    // Warmup
+    for obj in objects.iter().take(100) {
+        let json = Json.encode(obj);
+        let _ = Json.decode.<TestObject>(&json);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for obj in objects.iter() {
+        let json = Json.encode(obj);
+        let decoded = Json.decode.<TestObject>(&json);
+        black_box(decoded);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let go_ms = go_baselines.JSON_MS;
+
+    let ratio = go_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "json_encode_decode_10k",
+        verum_ms: verum_ms,
+        go_ms: go_ms,
+        value: ratio,
+        target: 0.9,  // JSON may be slightly slower
+        passed: ratio >= 0.9,
+    }
+}
+
+@derive(Serialize, Deserialize)
+type TestObject is {
+    id: Int,
+    name: Text,
+    values: List<Float>,
+    active: Bool,
+};
+
+/// Benchmark: Allocation throughput
+fn benchmark_allocation_throughput() -> BenchmarkResult {
+    let count = 1_000_000;
+
+    // Warmup
+    for _ in 0..10_000 {
+        let x = Heap.new([0u8; 64]);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..count {
+        let x = Heap.new([0u8; 64]);
+        black_box(&*x);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let go_ms = go_baselines.ALLOC_1M_MS;
+
+    let ratio = go_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "allocation_1m",
+        verum_ms: verum_ms,
+        go_ms: go_ms,
+        value: ratio,
+        target: 1.0,
+        passed: ratio >= 1.0,
+    }
+}
+
+/// Benchmark: GC pause comparison
+fn benchmark_gc_pause_comparison() -> BenchmarkResult {
+    // Create garbage to trigger collection
+    let mut pauses: List<Int> = List.new();
+
+    for _ in 0..100 {
+        // Generate garbage
+        for _ in 0..10_000 {
+            let garbage = Heap.new([0u8; 256]);
+            black_box(&*garbage);
+        }
+
+        // Measure GC pause
+        let timer = Timer.high_precision();
+        timer.start();
+        gc.collect();
+        pauses.push(timer.elapsed_us());
+    }
+
+    pauses.sort();
+    let p99 = pauses[(pauses.len() * 99) / 100];
+
+    let verum_us = p99 as Float;
+    let go_us = go_baselines.GC_PAUSE_P99_US;
+
+    // Lower is better for pause times
+    let ratio = go_us / verum_us;
+
+    BenchmarkResult {
+        name: "gc_pause_p99",
+        verum_ms: verum_us / 1000.0,
+        go_ms: go_us / 1000.0,
+        value: ratio,
+        target: 1.0,  // Verum should have lower pauses
+        passed: ratio >= 1.0,
+    }
+}
+
+/// Benchmark: Slice/List operations
+fn benchmark_slice_operations() -> BenchmarkResult {
+    let count = 1_000_000;
+
+    // Warmup
+    let mut warmup: List<Int> = List.new();
+    for i in 0..10_000 {
+        warmup.push(i);
+    }
+    black_box(warmup);
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut list: List<Int> = List.new();
+    for i in 0..count {
+        list.push(i);
+    }
+
+    // Sum elements
+    let sum: Int = list.iter().sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let go_ms = go_baselines.SLICE_APPEND_MS;
+
+    black_box(sum);
+
+    let ratio = go_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "slice_operations_1m",
+        verum_ms: verum_ms,
+        go_ms: go_ms,
+        value: ratio,
+        target: 1.0,
+        passed: ratio >= 1.0,
+    }
+}
+
+/// Benchmark: Map operations
+fn benchmark_map_operations() -> BenchmarkResult {
+    let count = 1_000_000;
+
+    // Warmup
+    let mut warmup: Map<Int, Int> = Map.new();
+    for i in 0..10_000 {
+        warmup.insert(i, i);
+        black_box(warmup.get(&i));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut map: Map<Int, Int> = Map.new();
+
+    // Insert
+    for i in 0..count {
+        map.insert(i, i * 2);
+    }
+
+    // Lookup
+    let mut sum = 0;
+    for i in 0..count {
+        sum += map.get(&i).unwrap_or(0);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let go_ms = go_baselines.MAP_OPS_MS;
+
+    black_box(sum);
+
+    let ratio = go_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "map_operations_1m",
+        verum_ms: verum_ms,
+        go_ms: go_ms,
+        value: ratio,
+        target: 1.0,
+        passed: ratio >= 1.0,
+    }
+}
+
+/// Benchmark: String operations
+fn benchmark_string_operations() -> BenchmarkResult {
+    let count = 100_000;
+
+    // Warmup
+    let mut warmup = Text.new();
+    for i in 0..1_000 {
+        warmup.push_str(&format("item{},", i));
+    }
+    black_box(warmup);
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut result = Text.with_capacity(count * 10);
+    for i in 0..count {
+        result.push_str(&format("item{},", i));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let go_ms = go_baselines.STRING_CONCAT_MS;
+
+    black_box(result);
+
+    let ratio = go_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "string_concat_100k",
+        verum_ms: verum_ms,
+        go_ms: go_ms,
+        value: ratio,
+        target: 0.9,
+        passed: ratio >= 0.9,
+    }
+}
+
+/// Benchmark: Spawn performance (goroutine vs async task)
+fn benchmark_goroutine_vs_spawn() -> BenchmarkResult {
+    let count = 100_000;
+
+    let runtime = Runtime.new();
+
+    runtime.block_on(async {
+        // Warmup
+        for _ in 0..1_000 {
+            spawn(async { black_box(1); }).await;
+        }
+
+        let timer = Timer.new();
+        timer.start();
+
+        let handles: List<_> = (0..count)
+            .map(|i| spawn(async move {
+                black_box(i * 2);
+            }))
+            .collect();
+
+        for handle in handles {
+            handle.await;
+        }
+
+        let verum_ms = timer.elapsed_ms() as Float;
+        let go_ms = go_baselines.GOROUTINE_SPAWN_MS;
+
+        let ratio = go_ms / verum_ms;
+
+        BenchmarkResult {
+            name: "spawn_100k",
+            verum_ms: verum_ms,
+            go_ms: go_ms,
+            value: ratio,
+            target: 1.0,
+            passed: ratio >= 1.0,
+        }
+    })
+}
+
+/// Benchmark: Channel throughput
+fn benchmark_channel_throughput() -> BenchmarkResult {
+    let count = 1_000_000;
+
+    let runtime = Runtime.new();
+
+    runtime.block_on(async {
+        let (tx, rx) = channel.bounded.<Int>(1000);
+
+        // Warmup
+        for i in 0..10_000 {
+            tx.send(i).await;
+            black_box(rx.recv().await);
+        }
+
+        let timer = Timer.new();
+        timer.start();
+
+        let sender = spawn(async move {
+            for i in 0..count {
+                tx.send(i).await;
+            }
+        });
+
+        let receiver = spawn(async move {
+            let mut sum = 0;
+            for _ in 0..count {
+                sum += rx.recv().await.unwrap_or(0);
+            }
+            sum
+        });
+
+        sender.await;
+        let sum = receiver.await;
+
+        let verum_ms = timer.elapsed_ms() as Float;
+        let go_ms = go_baselines.CHANNEL_1M_MS;
+
+        black_box(sum);
+
+        let ratio = go_ms / verum_ms;
+
+        BenchmarkResult {
+            name: "channel_1m",
+            verum_ms: verum_ms,
+            go_ms: go_ms,
+            value: ratio,
+            target: 1.0,
+            passed: ratio >= 1.0,
+        }
+    })
+}
+
+/// Benchmark: Mutex contention
+fn benchmark_mutex_contention() -> BenchmarkResult {
+    let count = 1_000_000;
+
+    let runtime = Runtime.new();
+
+    runtime.block_on(async {
+        let mutex = Mutex.new(0);
+
+        // Warmup
+        for _ in 0..10_000 {
+            let mut guard = mutex.lock().await;
+            *guard += 1;
+        }
+
+        let timer = Timer.new();
+        timer.start();
+
+        for _ in 0..count {
+            let mut guard = mutex.lock().await;
+            *guard += 1;
+        }
+
+        let verum_ms = timer.elapsed_ms() as Float;
+        let go_ms = go_baselines.MUTEX_1M_MS;
+
+        let ratio = go_ms / verum_ms;
+
+        BenchmarkResult {
+            name: "mutex_1m",
+            verum_ms: verum_ms,
+            go_ms: go_ms,
+            value: ratio,
+            target: 1.0,
+            passed: ratio >= 1.0,
+        }
+    })
+}
+
+/// Benchmark: HTTP handler latency (simulated)
+fn benchmark_http_handler_latency() -> BenchmarkResult {
+    let count = 10_000;
+    let mut latencies: List<Int> = List.new();
+
+    let runtime = Runtime.new();
+
+    runtime.block_on(async {
+        for _ in 0..count {
+            let timer = Timer.high_precision();
+            timer.start();
+
+            // Simulate HTTP handler work
+            let request = HttpRequest.mock();
+            let response = handle_request(request).await;
+            black_box(response);
+
+            latencies.push(timer.elapsed_us());
+        }
+
+        latencies.sort();
+        let p99 = latencies[(latencies.len() * 99) / 100];
+
+        let verum_us = p99 as Float;
+        let go_us = go_baselines.HTTP_LATENCY_P99_US;
+
+        let ratio = go_us / verum_us;
+
+        BenchmarkResult {
+            name: "http_handler_p99",
+            verum_ms: verum_us / 1000.0,
+            go_ms: go_us / 1000.0,
+            value: ratio,
+            target: 1.0,
+            passed: ratio >= 1.0,
+        }
+    })
+}
+
+async fn handle_request(req: HttpRequest) -> HttpResponse {
+    // Simulate typical handler work
+    let body = Json.encode(&req.params);
+    HttpResponse.ok(body)
+}
+
+type HttpRequest is {
+    path: Text,
+    params: Map<Text, Text>,
+};
+
+implement HttpRequest {
+    fn mock() -> Self {
+        Self {
+            path: "/api/test",
+            params: [("key", "value")].into_iter().collect(),
+        }
+    }
+}
+
+type HttpResponse is {
+    status: Int,
+    body: Text,
+};
+
+implement HttpResponse {
+    fn ok(body: Text) -> Self {
+        Self { status: 200, body }
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    verum_ms: Float,
+    go_ms: Float,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<25} {:>12} {:>12} {:>10} {:>8}",
+                "Benchmark", "Verum (ms)", "Go (ms)", "Ratio", "Status");
+        println("{}", "-".repeat(70));
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            let ratio_x = result.value;
+            println("{:<25} {:>12.2} {:>12.2} {:>9.2}x {:>8}",
+                    result.name, result.verum_ms, result.go_ms,
+                    ratio_x, status);
+        }
+
+        println("");
+        let avg_ratio = self.results.iter()
+            .map(|r| r.value)
+            .sum.<Float>() / self.results.len() as Float;
+        println("Average performance ratio: {:.2}x Go", avg_ratio);
+
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+
+    fn export_comparison(self, path: Text) {
+        let json = Json.object();
+        json.set("suite", self.suite_name);
+        json.set("comparison", "go");
+
+        let results_json = Json.array();
+        for result in self.results {
+            let r = Json.object();
+            r.set("name", result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("go_ms", result.go_ms);
+            r.set("ratio", result.value);
+            r.set("passed", result.passed);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+    }
+}

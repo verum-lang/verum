@@ -1,0 +1,154 @@
+// @test: verify-fail
+// @expected-error: E0500
+// @tier: 0
+// @level: L2
+// @tags: errors, diagnostics, verification
+// @description: Verification errors E0500
+
+/// Error E0500: Contract verification failed
+/// Occurs when the verifier cannot prove a contract holds.
+
+@verify(static)
+fn precondition_violation() {
+    // E0500: Precondition may be violated
+
+    fn divide(a: Int, b: Int) -> Int {
+        contract#"
+            requires b != 0;
+        ";
+        a / b
+    }
+
+    let x = 10;
+    let y = 0;
+    divide(x, y);  // Error: cannot prove y != 0
+}
+
+@verify(static)
+fn postcondition_violation() -> Int{> 0} {
+    contract#"
+        ensures result > 0;
+    ";
+    // E0500: Cannot prove postcondition
+    -1  // Error: -1 is not > 0
+}
+
+@verify(proof)
+fn invariant_violation() {
+    type Counter is {
+        value: Int,
+        invariant value >= 0,
+    };
+
+    fn decrement(mut c: Counter) -> Counter {
+        // E0500: Invariant may be violated
+        c.value -= 1;  // Error: cannot prove value >= 0 after decrement
+        c
+    }
+}
+
+@verify(proof)
+fn termination_failure() {
+    // E0500: Cannot prove termination
+
+    fn possibly_infinite(n: Int) -> Int {
+        contract#"
+            decreases n;
+        ";
+        if n == 0 {
+            0
+        } else {
+            // Error: n - 1 may not decrease (if n < 0)
+            possibly_infinite(n - 1)
+        }
+    }
+}
+
+@verify(proof)
+fn quantifier_failure() {
+    fn all_positive(list: List<Int>) -> Bool {
+        contract#"
+            ensures result implies forall i in 0..list.len() => list[i] > 0;
+        ";
+        // E0500: Cannot prove quantified postcondition
+        true  // Error: list may contain non-positive elements
+    }
+}
+
+@verify(static)
+fn refinement_subtype_failure() {
+    type PositiveInt = Int{> 0};
+    type SmallInt = Int{>= 0, <= 100};
+
+    fn convert(x: PositiveInt) -> SmallInt {
+        // E0500: Cannot prove refinement
+        x  // Error: PositiveInt is not a subtype of SmallInt
+           // (x could be > 100)
+    }
+}
+
+@verify(proof)
+fn frame_condition_violation() {
+    type Point is { x: Int, y: Int };
+
+    fn set_x(p: &mut Point, new_x: Int) {
+        contract#"
+            modifies p.x;
+            ensures p.y == old(p.y);  // Frame condition
+        ";
+        // E0500: Frame condition violated
+        p.x = new_x;
+        p.y = new_x;  // Error: modifying p.y which is not in modifies clause
+    }
+}
+
+@verify(proof)
+fn assertion_failure() {
+    fn compute(x: Int) -> Int {
+        let result = x * 2;
+
+        // E0500: Assertion cannot be verified
+        assert(result > x);  // Error: false when x <= 0
+
+        result
+    }
+}
+
+@verify(static)
+fn overflow_detection() {
+    fn add_positive(a: Int{> 0}, b: Int{> 0}) -> Int{> 0} {
+        contract#"
+            requires a > 0 && b > 0;
+            ensures result > 0;
+        ";
+        // E0500: Potential overflow not proven safe
+        a + b  // Error: a + b might overflow for large values
+    }
+}
+
+// Expected error message format:
+// error[E0500]: contract verification failed
+//   --> verification_error.vr:15:5
+//    |
+// 10 |     fn divide(a: Int, b: Int) -> Int {
+//    |        ------ in this function
+// 11 |         contract#"
+// 12 |             requires b != 0;
+//    |             --------------- this precondition
+// ...
+// 15 |     divide(x, y);
+//    |     ^^^^^^^^^^^^ precondition `b != 0` may be violated
+//    |
+// note: `y` is bound to the value `0` here
+//   --> verification_error.vr:14:9
+//    |
+// 14 |     let y = 0;
+//    |         ^^^^^
+//    |
+//    = help: add a check before the call:
+//            if y != 0 { divide(x, y) }
+//    = note: verification level is `static`, requiring compile-time proof
+
+fn main() {
+    // This file should not compile
+}

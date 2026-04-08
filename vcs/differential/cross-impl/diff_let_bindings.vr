@@ -1,0 +1,66 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, let, bindings, mutable
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Let bindings: immutable, mutable, shadowing, compound assignment
+
+fn main() -> Int {
+    // Immutable bindings
+    let x = 42;
+    let y = x + 8;
+    assert_eq(x, 42);
+    assert_eq(y, 50);
+
+    // Mutable bindings
+    let mut counter = 0;
+    counter = counter + 1;
+    counter = counter + 1;
+    counter = counter + 1;
+    assert_eq(counter, 3);
+
+    // Compound assignment
+    let mut val = 10;
+    val += 5;
+    assert_eq(val, 15);
+    val -= 3;
+    assert_eq(val, 12);
+    val *= 2;
+    assert_eq(val, 24);
+    val /= 4;
+    assert_eq(val, 6);
+    val %= 4;
+    assert_eq(val, 2);
+
+    // Shadowing
+    let z = 10;
+    let z = z + 5;
+    let z = z * 2;
+    assert_eq(z, 30);
+
+    // Type inference
+    let a = 100;
+    let b = 3.14;
+    let c = "hello";
+    let d = true;
+    assert_eq(a, 100);
+    assert_eq(c, "hello");
+    assert_eq(d, true);
+
+    // Multi-variable accumulation
+    let mut sum = 0;
+    let mut prod = 1;
+    let mut i = 1;
+    while i <= 5 {
+        sum += i;
+        prod *= i;
+        i += 1;
+    }
+    assert_eq(sum, 15);
+    assert_eq(prod, 120);
+
+    print("diff_let_bindings: ok");
+    0
+}

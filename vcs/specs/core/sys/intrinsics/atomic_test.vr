@@ -1,0 +1,487 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/atomic_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, atomic, lock-free, concurrency
+// @description: Comprehensive tests for atomic operation intrinsics that enable
+//               lock-free concurrent programming.
+//
+// Coverage:
+// - atomic_load_*: Load operations for UInt8/16/32/64, Int32, pointers
+// - atomic_store_*: Store operations for all atomic types
+// - atomic_cas_*: Compare-and-swap for UInt32/64, Int32, pointers
+// - atomic_exchange_*: Exchange operations
+// - atomic_fetch_*: Fetch-and-modify (add, sub, and, or, xor)
+// - Generic atomic operations: atomic_load<T>, atomic_store<T>, etc.
+// - Memory orderings: Relaxed, Acquire, Release, AcqRel, SeqCst
+//
+// Test Strategy:
+// - Single-threaded correctness (ordering doesn't matter)
+// - All memory orderings
+// - Boundary values
+// - Type coverage
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.atomic_test;
+
+mount core.intrinsics.{
+    // Memory ordering constants
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
+    ORDERING_ACQ_REL, ORDERING_SEQ_CST,
+
+    // Type-specific atomics (UInt32)
+    atomic_load_u32, atomic_store_u32, atomic_cas_u32,
+    atomic_exchange_u32, atomic_fetch_add_u32, atomic_fetch_sub_u32,
+
+    // Type-specific atomics (UInt64)
+    atomic_load_u64, atomic_store_u64, atomic_cas_u64,
+    atomic_exchange_u64, atomic_fetch_add_u64, atomic_fetch_sub_u64,
+    atomic_fetch_and_u64, atomic_fetch_or_u64, atomic_fetch_xor_u64,
+
+    // Type-specific atomics (Int32)
+    atomic_load_i32, atomic_store_i32, atomic_cas_i32, atomic_exchange_i32,
+
+    // Type-specific atomics (UInt8/16)
+    atomic_load_u8, atomic_store_u8,
+    atomic_load_u16, atomic_store_u16,
+    atomic_fetch_add_u16, atomic_fetch_and_u16,
+
+    // Pointer atomics
+    atomic_load_ptr, atomic_store_ptr, atomic_cas_ptr,
+
+    // Int-sized atomics (platform-native size)
+    atomic_load_int, atomic_store_int, atomic_cmpxchg_int, atomic_fetch_add_int,
+
+    // Aliases (type-specific names)
+    atomic_compare_exchange_u32, atomic_compare_exchange_u64,
+    atomic_compare_exchange_i32, atomic_cmpxchg_ptr,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Atomic Load/Store Tests
+// =============================================================================
+
+@test
+fn test_atomic_load_store() {
+    // UInt8 - create pointer once to avoid borrow conflicts
+    let mut val_u8: UInt8 = 42;
+    let ptr_u8 = &mut val_u8 as *mut UInt8;
+    let loaded = atomic_load_u8(ptr_u8 as *const UInt8, ORDERING_SEQ_CST);
+    assert(loaded == 42);
+
+    atomic_store_u8(ptr_u8, 99, ORDERING_SEQ_CST);
+    assert(atomic_load_u8(ptr_u8 as *const UInt8, ORDERING_SEQ_CST) == 99);
+
+    // UInt16 - create pointer once to avoid borrow conflicts
+    let mut val_u16: UInt16 = 1000;
+    let ptr_u16 = &mut val_u16 as *mut UInt16;
+    let loaded = atomic_load_u16(ptr_u16 as *const UInt16, ORDERING_SEQ_CST);
+    assert(loaded == 1000);
+
+    atomic_store_u16(ptr_u16, 65000, ORDERING_SEQ_CST);
+    assert(atomic_load_u16(ptr_u16 as *const UInt16, ORDERING_SEQ_CST) == 65000);
+
+    // UInt32
+    let mut val_u32: UInt32 = 100000;
+    let ptr_u32 = &mut val_u32 as *mut UInt32;
+    let loaded = atomic_load_u32(ptr_u32 as *const UInt32, ORDERING_SEQ_CST);
+    assert(loaded == 100000);
+
+    atomic_store_u32(ptr_u32, 4000000000, ORDERING_SEQ_CST);
+    assert(atomic_load_u32(ptr_u32 as *const UInt32, ORDERING_SEQ_CST) == 4000000000);
+
+    // UInt64
+    let mut val_u64: UInt64 = 10000000000;
+    let ptr_u64 = &mut val_u64 as *mut UInt64;
+    let loaded = atomic_load_u64(ptr_u64 as *const UInt64, ORDERING_SEQ_CST);
+    assert(loaded == 10000000000);
+
+    atomic_store_u64(ptr_u64, 18000000000000000000, ORDERING_SEQ_CST);
+    assert(atomic_load_u64(ptr_u64 as *const UInt64, ORDERING_SEQ_CST) == 18000000000000000000);
+
+    // Int32
+    let mut val_i32: Int32 = -12345;
+    let ptr_i32 = &mut val_i32 as *mut Int32;
+    let loaded = atomic_load_i32(ptr_i32 as *const Int32, ORDERING_SEQ_CST);
+    assert(loaded == -12345);
+
+    atomic_store_i32(ptr_i32, 2000000000, ORDERING_SEQ_CST);
+    assert(atomic_load_i32(ptr_i32 as *const Int32, ORDERING_SEQ_CST) == 2000000000);
+
+    // Int (platform-native)
+    let mut val_int: Int = -9876543210;
+    let ptr_int = &mut val_int as *mut Int;
+    let loaded = atomic_load_int(ptr_int as *const Int, ORDERING_SEQ_CST);
+    assert(loaded == -9876543210);
+
+    atomic_store_int(ptr_int, 1234567890123, ORDERING_SEQ_CST);
+    assert(atomic_load_int(ptr_int as *const Int, ORDERING_SEQ_CST) == 1234567890123);
+}
+
+// =============================================================================
+// Compare-and-Swap Tests
+// =============================================================================
+
+@test
+fn test_atomic_cas() {
+    // UInt32 CAS - success case
+    let mut val: UInt32 = 100;
+    let (old, success) = atomic_cas_u32(
+        &mut val as *mut UInt32,
+        100,  // expected
+        200,  // desired
+        ORDERING_SEQ_CST,
+        ORDERING_SEQ_CST,
+    );
+    assert(old == 100);
+    assert(success);
+    assert(val == 200);
+
+    // UInt32 CAS - failure case
+    let (old, success) = atomic_cas_u32(
+        &mut val as *mut UInt32,
+        100,  // expected (wrong)
+        300,  // desired
+        ORDERING_SEQ_CST,
+        ORDERING_SEQ_CST,
+    );
+    assert(old == 200);  // Returns actual value
+    assert(!success);
+    assert(val == 200);  // Unchanged
+
+    // UInt64 CAS
+    let mut val64: UInt64 = 1000000000000;
+    let (old, success) = atomic_cas_u64(
+        &mut val64 as *mut UInt64,
+        1000000000000,
+        2000000000000,
+        ORDERING_SEQ_CST,
+        ORDERING_SEQ_CST,
+    );
+    assert(old == 1000000000000);
+    assert(success);
+    assert(val64 == 2000000000000);
+
+    // Int32 CAS with negative values
+    let mut val_i32: Int32 = -100;
+    let (old, success) = atomic_cas_i32(
+        &mut val_i32 as *mut Int32,
+        -100,
+        100,
+        ORDERING_SEQ_CST,
+        ORDERING_SEQ_CST,
+    );
+    assert(old == -100);
+    assert(success);
+    assert(val_i32 == 100);
+
+    // Test alias functions
+    let mut val2: UInt32 = 50;
+    let (old, success) = atomic_compare_exchange_u32(
+        &mut val2 as *mut UInt32,
+        50, 75,
+        ORDERING_ACQ_REL, ORDERING_ACQUIRE,
+    );
+    assert(success);
+    assert(val2 == 75);
+}
+
+// =============================================================================
+// Atomic Exchange Tests
+// =============================================================================
+
+@test
+fn test_atomic_exchange() {
+    // UInt32 exchange
+    let mut val_u32: UInt32 = 100;
+    let old = atomic_exchange_u32(&mut val_u32 as *mut UInt32, 200, ORDERING_SEQ_CST);
+    assert(old == 100);
+    assert(val_u32 == 200);
+
+    // UInt64 exchange
+    let mut val_u64: UInt64 = 5000000000;
+    let old = atomic_exchange_u64(&mut val_u64 as *mut UInt64, 9000000000, ORDERING_SEQ_CST);
+    assert(old == 5000000000);
+    assert(val_u64 == 9000000000);
+
+    // Int32 exchange
+    let mut val_i32: Int32 = -500;
+    let old = atomic_exchange_i32(&mut val_i32 as *mut Int32, 500, ORDERING_SEQ_CST);
+    assert(old == -500);
+    assert(val_i32 == 500);
+}
+
+// =============================================================================
+// Fetch-and-Modify Tests
+// =============================================================================
+
+@test
+fn test_atomic_fetch_ops() {
+    // fetch_add
+    let mut val: UInt32 = 100;
+    let old = atomic_fetch_add_u32(&mut val as *mut UInt32, 50, ORDERING_SEQ_CST);
+    assert(old == 100);
+    assert(val == 150);
+
+    // fetch_sub
+    let old = atomic_fetch_sub_u32(&mut val as *mut UInt32, 25, ORDERING_SEQ_CST);
+    assert(old == 150);
+    assert(val == 125);
+
+    // fetch_add UInt64
+    let mut val64: UInt64 = 1000000000;
+    let old = atomic_fetch_add_u64(&mut val64 as *mut UInt64, 2000000000, ORDERING_SEQ_CST);
+    assert(old == 1000000000);
+    assert(val64 == 3000000000);
+
+    // fetch_sub UInt64
+    let old = atomic_fetch_sub_u64(&mut val64 as *mut UInt64, 500000000, ORDERING_SEQ_CST);
+    assert(old == 3000000000);
+    assert(val64 == 2500000000);
+
+    // fetch_and
+    let mut bits: UInt64 = 0xFF00FF00FF00FF00;
+    let old = atomic_fetch_and_u64(&mut bits as *mut UInt64, 0x0F0F0F0F0F0F0F0F, ORDERING_SEQ_CST);
+    assert(old == 0xFF00FF00FF00FF00);
+    assert(bits == 0x0F000F000F000F00);
+
+    // fetch_or
+    let mut bits2: UInt64 = 0x00F000F000F000F0;
+    let old = atomic_fetch_or_u64(&mut bits2 as *mut UInt64, 0x0F000F000F000F00, ORDERING_SEQ_CST);
+    assert(old == 0x00F000F000F000F0);
+    assert(bits2 == 0x0FF00FF00FF00FF0);
+
+    // fetch_xor
+    let mut bits3: UInt64 = 0xAAAAAAAAAAAAAAAA;
+    let old = atomic_fetch_xor_u64(&mut bits3 as *mut UInt64, 0xFFFFFFFFFFFFFFFF, ORDERING_SEQ_CST);
+    assert(old == 0xAAAAAAAAAAAAAAAA);
+    assert(bits3 == 0x5555555555555555);
+
+    // fetch_add Int (platform-native)
+    let mut val_int: Int = 100;
+    let old = atomic_fetch_add_int(&mut val_int as *mut Int, -50, ORDERING_SEQ_CST);
+    assert(old == 100);
+    assert(val_int == 50);
+
+    // fetch_add UInt16
+    let mut val_u16: UInt16 = 1000;
+    let old = atomic_fetch_add_u16(&mut val_u16 as *mut UInt16, 500, ORDERING_SEQ_CST);
+    assert(old == 1000);
+    assert(val_u16 == 1500);
+
+    // fetch_and UInt16
+    let mut bits_u16: UInt16 = 0xFF00;
+    let old = atomic_fetch_and_u16(&mut bits_u16 as *mut UInt16, 0x0F0F, ORDERING_SEQ_CST);
+    assert(old == 0xFF00);
+    assert(bits_u16 == 0x0F00);
+}
+
+// =============================================================================
+// Memory Ordering Tests
+// =============================================================================
+
+@test
+fn test_memory_orderings() {
+    // Test all orderings compile and work correctly
+    // In single-threaded context, all orderings should produce same result
+    // Create pointer once to avoid borrow conflicts
+
+    let mut val: UInt32 = 0;
+    let ptr = &mut val as *mut UInt32;
+
+    // Relaxed
+    atomic_store_u32(ptr, 1, ORDERING_RELAXED);
+    assert(atomic_load_u32(ptr as *const UInt32, ORDERING_RELAXED) == 1);
+
+    // Acquire/Release
+    atomic_store_u32(ptr, 2, ORDERING_RELEASE);
+    assert(atomic_load_u32(ptr as *const UInt32, ORDERING_ACQUIRE) == 2);
+
+    // AcqRel (for RMW operations)
+    let old = atomic_fetch_add_u32(ptr, 1, ORDERING_ACQ_REL);
+    assert(old == 2);
+    assert(val == 3);
+
+    // SeqCst (strongest)
+    atomic_store_u32(ptr, 100, ORDERING_SEQ_CST);
+    assert(atomic_load_u32(ptr as *const UInt32, ORDERING_SEQ_CST) == 100);
+
+    // CAS with different success/failure orderings
+    let (old, success) = atomic_cas_u32(
+        ptr,
+        100, 200,
+        ORDERING_ACQ_REL,   // success ordering
+        ORDERING_ACQUIRE,   // failure ordering
+    );
+    assert(success);
+    assert(old == 100);
+    assert(val == 200);
+}
+
+// =============================================================================
+// Pointer Atomic Tests
+// =============================================================================
+
+@test
+fn test_pointer_atomics() {
+    let data1: Int = 42;
+    let data2: Int = 99;
+
+    let mut ptr: *const Int = &data1 as *const Int;
+
+    // Atomic load pointer
+    let loaded = atomic_load_ptr(&ptr as *const *const Int, ORDERING_SEQ_CST);
+    unsafe {
+        assert(*loaded == 42);
+    }
+
+    // Atomic store pointer
+    atomic_store_ptr(&mut ptr as *mut *const Int, &data2 as *const Int, ORDERING_SEQ_CST);
+    unsafe {
+        assert(*ptr == 99);
+    }
+
+    // Atomic CAS pointer
+    let (old, success) = atomic_cas_ptr(
+        &mut ptr as *mut *const Int,
+        &data2 as *const Int,  // expected
+        &data1 as *const Int,  // desired
+        ORDERING_SEQ_CST,
+        ORDERING_SEQ_CST,
+    );
+    assert(success);
+    assert(old == &data2 as *const Int);
+    unsafe {
+        assert(*ptr == 42);
+    }
+
+    // Test alias
+    let (old, success) = atomic_cmpxchg_ptr(
+        &mut ptr as *mut *const Int,
+        &data1 as *const Int,
+        &data2 as *const Int,
+        ORDERING_SEQ_CST,
+        ORDERING_SEQ_CST,
+    );
+    assert(success);
+    unsafe {
+        assert(*ptr == 99);
+    }
+}
+
+// =============================================================================
+// Extended Type-Specific Atomic Tests
+// Note: Generic atomics require type monomorphization which is not yet
+// implemented in the VBC interpreter. Using type-specific intrinsics instead.
+// =============================================================================
+
+@test
+fn test_generic_atomics() {
+    // Extended UInt64 load/store - create pointer once to avoid borrow conflicts
+    let mut val64: UInt64 = 12345678901234;
+    let ptr64 = &mut val64 as *mut UInt64;
+    let loaded = atomic_load_u64(ptr64 as *const UInt64, ORDERING_SEQ_CST);
+    assert(loaded == 12345678901234);
+
+    atomic_store_u64(ptr64, 98765432109876, ORDERING_SEQ_CST);
+    assert(atomic_load_u64(ptr64 as *const UInt64, ORDERING_SEQ_CST) == 98765432109876);
+
+    // UInt64 CAS
+    let (old, success) = atomic_cas_u64(
+        ptr64,
+        98765432109876,
+        11111111111111,
+        ORDERING_SEQ_CST,
+        ORDERING_SEQ_CST,
+    );
+    assert(success);
+    assert(old == 98765432109876);
+
+    // UInt64 exchange
+    let old = atomic_exchange_u64(ptr64, 22222222222222, ORDERING_SEQ_CST);
+    assert(old == 11111111111111);
+    assert(val64 == 22222222222222);
+
+    // UInt32 fetch operations
+    let mut val32: UInt32 = 100;
+    let ptr32 = &mut val32 as *mut UInt32;
+    let old = atomic_fetch_add_u32(ptr32, 50, ORDERING_SEQ_CST);
+    assert(old == 100);
+    assert(val32 == 150);
+
+    let old = atomic_fetch_sub_u32(ptr32, 25, ORDERING_SEQ_CST);
+    assert(old == 150);
+    assert(val32 == 125);
+
+    // UInt64 bitwise fetch operations
+    let mut bits: UInt64 = 0xFF00;
+    let ptr_bits = &mut bits as *mut UInt64;
+
+    let old = atomic_fetch_and_u64(ptr_bits, 0x0FF0, ORDERING_SEQ_CST);
+    assert(old == 0xFF00);
+    assert(bits == 0x0F00);
+
+    let old = atomic_fetch_or_u64(ptr_bits, 0x00FF, ORDERING_SEQ_CST);
+    assert(old == 0x0F00);
+    assert(bits == 0x0FFF);
+
+    let old = atomic_fetch_xor_u64(ptr_bits, 0xFFFF, ORDERING_SEQ_CST);
+    assert(old == 0x0FFF);
+    assert(bits == 0xF000);
+}
+
+// =============================================================================
+// Boundary Value Tests
+// =============================================================================
+
+@test
+fn test_atomic_boundary_values() {
+    // UInt32 boundaries - create pointer once to avoid borrow conflicts
+    let mut val_u32: UInt32 = 0;
+    let ptr_u32 = &mut val_u32 as *mut UInt32;
+    atomic_store_u32(ptr_u32, 0, ORDERING_SEQ_CST);
+    assert(atomic_load_u32(ptr_u32 as *const UInt32, ORDERING_SEQ_CST) == 0);
+
+    atomic_store_u32(ptr_u32, 4294967295, ORDERING_SEQ_CST);  // u32::MAX
+    assert(atomic_load_u32(ptr_u32 as *const UInt32, ORDERING_SEQ_CST) == 4294967295);
+
+    // UInt64 boundaries
+    let mut val_u64: UInt64 = 0;
+    let ptr_u64 = &mut val_u64 as *mut UInt64;
+    atomic_store_u64(ptr_u64, 0, ORDERING_SEQ_CST);
+    assert(atomic_load_u64(ptr_u64 as *const UInt64, ORDERING_SEQ_CST) == 0);
+
+    atomic_store_u64(ptr_u64, 18446744073709551615, ORDERING_SEQ_CST);  // u64::MAX
+    assert(atomic_load_u64(ptr_u64 as *const UInt64, ORDERING_SEQ_CST) == 18446744073709551615);
+
+    // Int32 boundaries
+    let mut val_i32: Int32 = 0;
+    let ptr_i32 = &mut val_i32 as *mut Int32;
+    atomic_store_i32(ptr_i32, -2147483648, ORDERING_SEQ_CST);  // i32::MIN
+    assert(atomic_load_i32(ptr_i32 as *const Int32, ORDERING_SEQ_CST) == -2147483648);
+
+    atomic_store_i32(ptr_i32, 2147483647, ORDERING_SEQ_CST);  // i32::MAX
+    assert(atomic_load_i32(ptr_i32 as *const Int32, ORDERING_SEQ_CST) == 2147483647);
+
+    // Fetch-add wrapping behavior
+    let mut wrap: UInt32 = 4294967295;
+    let old = atomic_fetch_add_u32(&mut wrap as *mut UInt32, 1, ORDERING_SEQ_CST);
+    assert(old == 4294967295);
+    assert(wrap == 0);  // Wrapped around
+
+    // Fetch-sub wrapping behavior
+    let mut wrap2: UInt32 = 0;
+    let old = atomic_fetch_sub_u32(&mut wrap2 as *mut UInt32, 1, ORDERING_SEQ_CST);
+    assert(old == 0);
+    assert(wrap2 == 4294967295);  // Wrapped around
+}

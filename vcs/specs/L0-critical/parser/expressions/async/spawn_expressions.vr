@@ -1,0 +1,226 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, async, spawn
+
+// Spawn expressions for concurrent task creation
+
+// Basic spawn
+fn test_basic_spawn() {
+    let handle = spawn {
+        42
+    };
+}
+
+// Spawn with expression
+fn test_spawn_with_expression() {
+    let x = 10;
+    let handle = spawn {
+        x * 2
+    };
+}
+
+// Spawn and await immediately
+async fn test_spawn_and_await() {
+    let result = spawn { 42 }.await;
+}
+
+// Spawn multiple tasks
+fn test_spawn_multiple_tasks() {
+    let h1 = spawn { 1 };
+    let h2 = spawn { 2 };
+    let h3 = spawn { 3 };
+}
+
+// Spawn with capture
+fn test_spawn_with_capture() {
+    let data = 42;
+    let handle = spawn {
+        data * 2
+    };
+}
+
+// Spawn in loop
+fn test_spawn_in_loop() {
+    let items = [1, 2, 3, 4, 5];
+    let mut handles = [];
+
+    for item in items {
+        let h = spawn {
+            item * 2
+        };
+        handles.push(h);
+    }
+}
+
+// Spawn with nested block
+fn test_spawn_nested_block() {
+    let handle = spawn {
+        let a = 1;
+        let b = 2;
+        a + b
+    };
+}
+
+// Spawn with conditional
+fn test_spawn_conditional() {
+    let done = false;
+    let handle = spawn {
+        if done {
+            1
+        } else {
+            0
+        }
+    };
+}
+
+// Spawn with loop expression
+fn test_spawn_with_loop() {
+    let handle = spawn {
+        let mut i = 0;
+        loop {
+            i += 1;
+            if i >= 5 {
+                break i;
+            }
+        }
+    };
+}
+
+// Spawn returning struct
+fn test_spawn_returning_struct() {
+    type Result is { value: Int };
+
+    let handle = spawn {
+        Result { value: 42 }
+    };
+}
+
+// Spawn returning tuple
+fn test_spawn_returning_tuple() {
+    let handle = spawn {
+        (1, 2, 3)
+    };
+}
+
+// Spawn with match
+fn test_spawn_with_match() {
+    type Option<T> is None | Some(T);
+
+    let opt = Option.Some(42);
+    let handle = spawn {
+        match opt {
+            Option.Some(v) => v * 2,
+            Option.None => 0,
+        }
+    };
+}
+
+// Nested spawn
+fn test_nested_spawn() {
+    let outer = spawn {
+        let inner = spawn { 42 };
+        inner
+    };
+}
+
+// Spawn detached pattern
+fn test_spawn_detached() {
+    // Fire and forget spawn
+    let _ = spawn {
+        let x = 1 + 2;
+        x
+    };
+}
+
+// Spawn with complex expression
+fn test_spawn_complex_expression() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    let handle = spawn {
+        let sum = a + b + c;
+        let product = a * b * c;
+        sum + product
+    };
+}
+
+// Multiple spawns with dependencies
+async fn test_spawn_dependencies() {
+    let h1 = spawn { 10 };
+    let h2 = spawn { 20 };
+    let v1 = h1.await;
+    let v2 = h2.await;
+    let total = v1 + v2;
+}
+
+// Spawn in async function
+async fn test_spawn_in_async() {
+    let handle = spawn { 42 };
+    let result = handle.await;
+}
+
+// Spawn with defer
+fn test_spawn_with_defer() {
+    let handle = spawn {
+        defer { let _ = 1; };
+        42
+    };
+}
+
+// Spawn with try
+fn test_spawn_with_try() {
+    type Result<T, E> is Ok(T) | Err(E);
+    type Error is ();
+
+    let handle = spawn {
+        try {
+            42?
+        } recover {
+            _ => 0
+        }
+    };
+}
+
+// Empty spawn block
+fn test_empty_spawn() {
+    let handle = spawn {};
+}
+
+// Spawn with array literal
+fn test_spawn_array() {
+    let handle = spawn {
+        [1, 2, 3, 4, 5]
+    };
+}
+
+// Spawn with closure
+fn test_spawn_closure() {
+    let handle = spawn {
+        let f = |x| x * 2;
+        f(21)
+    };
+}
+
+// Spawn with while loop
+fn test_spawn_while() {
+    let handle = spawn {
+        let mut count = 0;
+        while count < 10 {
+            count += 1;
+        }
+        count
+    };
+}
+
+// Spawn with for loop
+fn test_spawn_for() {
+    let handle = spawn {
+        let mut sum = 0;
+        for i in 0..10 {
+            sum += i;
+        }
+        sum
+    };
+}

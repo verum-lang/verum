@@ -1,0 +1,100 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, async, spawn, await
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests that spawn/await correctly returns the computed result (not the task ID).
+// Verifies: spawn, .await, result retrieval, multiple tasks, nested spawns.
+
+fn square(x: Int) -> Int {
+    x * x
+}
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn test_basic_spawn_await() {
+    // spawn + await should return the actual result, not a task ID
+    let task = spawn square(7);
+    let result = task.await;
+    assert_eq(result, 49);
+    print("basic_spawn_await: ok");
+}
+
+fn test_multiple_tasks() {
+    let t1 = spawn square(3);
+    let t2 = spawn square(4);
+    let t3 = spawn square(5);
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+
+    assert_eq(r1, 9);
+    assert_eq(r2, 16);
+    assert_eq(r3, 25);
+    assert_eq(r1 + r2 + r3, 50);
+    print("multiple_tasks: ok");
+}
+
+fn test_spawn_with_multiple_args() {
+    let t = spawn add(100, 42);
+    let result = t.await;
+    assert_eq(result, 142);
+    print("spawn_multiple_args: ok");
+}
+
+fn test_spawn_factorial() {
+    let t = spawn factorial(10);
+    let result = t.await;
+    assert_eq(result, 3628800);
+    print("spawn_factorial: ok");
+}
+
+fn test_chained_computation() {
+    // Spawn two tasks, then use results together
+    let t1 = spawn square(6);
+    let t2 = spawn square(8);
+    let a = t1.await;
+    let b = t2.await;
+    let t3 = spawn add(a, b);
+    let result = t3.await;
+    assert_eq(result, 100);  // 36 + 64
+    print("chained_computation: ok");
+}
+
+fn test_spawn_in_loop() {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 5 {
+        let t = spawn square(i);
+        total = total + t.await;
+        i = i + 1;
+    }
+    // 1 + 4 + 9 + 16 + 25 = 55
+    assert_eq(total, 55);
+    print("spawn_in_loop: ok");
+}
+
+fn main() -> Int {
+    test_basic_spawn_await();
+    test_multiple_tasks();
+    test_spawn_with_multiple_args();
+    test_spawn_factorial();
+    test_chained_computation();
+    test_spawn_in_loop();
+    print("[OK] 391_interp_spawn_await_result");
+    0
+}

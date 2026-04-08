@@ -1,0 +1,122 @@
+// @test: run
+// @expected-stdout: Worker 0 started\nWorker 1 started\nWorker 2 started\nWorker 0 done\nWorker 1 done\nWorker 2 done\nAll workers complete
+// @tier: 0
+// @level: L2
+// @tags: async, structured-concurrency, nursery
+// @description: Nursery pattern for structured task management
+
+// Nursery manages a group of concurrent tasks
+type Nursery<T> is {
+    tasks: List<JoinHandle<Future<T>>>,
+    cancel_on_error: Bool,
+    first_error: Maybe<Error>,
+};
+
+type NurseryConfig is {
+    max_concurrent: Maybe<Int>,
+    cancel_on_first_error: Bool,
+    timeout: Maybe<Duration>,
+};
+
+implement NurseryConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent: None,
+            cancel_on_first_error: true,
+            timeout: None,
+        }
+    }
+
+    fn with_max_concurrent(self, n: Int) -> Self {
+        Self { max_concurrent: Some(n), ..self }
+    }
+
+    fn no_cancel_on_error(self) -> Self {
+        Self { cancel_on_first_error: false, ..self }
+    }
+}
+
+implement<T> Nursery<T> {
+    fn new() -> Self {
+        Self {
+            tasks: [],
+            cancel_on_error: true,
+            first_error: None,
+        }
+    }
+
+    fn with_config(config: NurseryConfig) -> Self {
+        Self {
+            tasks: [],
+            cancel_on_error: config.cancel_on_first_error,
+            first_error: None,
+        }
+    }
+
+    // Start a new child task
+    fn start(&mut self, task: async fn() -> T) {
+        let handle = spawn task();
+        self.tasks.push(handle);
+    }
+
+    // Start a fallible task with error handling
+    fn start_fallible(&mut self, task: async fn() -> Result<T, Error>) {
+        let handle = spawn {
+            match task().await {
+                Ok(v) => v,
+                Err(e) => {
+                    // Record error for nursery
+                    panic(f"Task failed: {e}");
+                }
+            }
+        };
+        self.tasks.push(handle);
+    }
+
+    // Wait for all tasks
+    async fn wait(self) -> Result<List<T>, Error> {
+        let mut results = [];
+
+        for handle in self.tasks {
+            match try { handle.await } {
+                Ok(result) => results.push(result),
+                Err(e) => {
+                    if self.cancel_on_error {
+                        // Cancel remaining tasks
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+}
+
+// Open nursery with closure
+async fn open_nursery<T>(f: fn(&mut Nursery<T>)) -> Result<List<T>, Error> {
+    let mut nursery = Nursery.new();
+    f(&mut nursery);
+    nursery.wait().await
+}
+
+// Worker function
+async fn worker(id: Int) -> Int {
+    println(f"Worker {id} started");
+    // Simulate work
+    println(f"Worker {id} done");
+    id * 10
+}
+
+async fn main() {
+    let results = open_nursery(|nursery| {
+        nursery.start(async || worker(0));
+        nursery.start(async || worker(1));
+        nursery.start(async || worker(2));
+    }).await;
+
+    match results {
+        Ok(_) => println("All workers complete"),
+        Err(e) => println(f"Nursery failed: {e}"),
+    }
+}

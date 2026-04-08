@@ -1,0 +1,157 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, sieve, eratosthenes, prime_generation, prime_counting, primality
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Sieve of Eratosthenes: prime generation, prime counting, primality test.
+//
+// Algorithm:
+//   sieve[i] = 1 if i is prime, 0 otherwise.
+//   Start with sieve[i]=1 for i>=2.
+//   For each i>=2 with sieve[i]=1, mark all multiples j=i*i,i*i+i,... as 0.
+//   Primes up to N are all i with sieve[i]=1.
+//
+// Primes up to 50: 2,3,5,7,11,13,17,19,23,29,31,37,41,43,47  (15 primes).
+// Primes up to 30: 2,3,5,7,11,13,17,19,23,29                   (10 primes).
+// Primes up to 20: 2,3,5,7,11,13,17,19                          (8 primes).
+
+// Run sieve up to limit (inclusive). sieve[i]=1 means i is prime.
+// limit <= 63 (uses [Int; 64]).
+fn run_sieve(limit: Int, sieve: [Int; 64]) {
+    let mut i = 0;
+    while i <= limit { sieve[i] = 0; i = i + 1; }
+    i = 2;
+    while i <= limit { sieve[i] = 1; i = i + 1; }
+    i = 2;
+    while i * i <= limit {
+        if sieve[i] == 1 {
+            let mut j = i * i;
+            while j <= limit {
+                sieve[j] = 0;
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+}
+
+// Count primes up to limit.
+fn count_primes(limit: Int, sieve: [Int; 64]) -> Int {
+    let mut cnt = 0;
+    let mut i = 2;
+    while i <= limit {
+        if sieve[i] == 1 { cnt = cnt + 1; }
+        i = i + 1;
+    }
+    cnt
+}
+
+// Primality check using the sieve array.
+fn is_prime(n: Int, sieve: [Int; 64]) -> Int {
+    if n < 2 { 0 } else { sieve[n] }
+}
+
+// Find the k-th prime (1-indexed) by scanning the sieve.
+fn kth_prime(k: Int, limit: Int, sieve: [Int; 64]) -> Int {
+    let mut cnt = 0;
+    let mut i = 2;
+    while i <= limit {
+        if sieve[i] == 1 {
+            cnt = cnt + 1;
+            if cnt == k { return i; }
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn test_primes_up_to_20() {
+    // Primes <= 20: 2,3,5,7,11,13,17,19 -> 8 primes.
+    let mut sieve = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    run_sieve(20, sieve);
+    assert_eq(count_primes(20, sieve), 8);
+    assert_eq(is_prime(2, sieve), 1);
+    assert_eq(is_prime(19, sieve), 1);
+    assert_eq(is_prime(20, sieve), 0);
+    assert_eq(is_prime(1, sieve), 0);
+    print("primes_up_to_20: ok");
+}
+
+fn test_primes_up_to_50() {
+    // Primes <= 50: 2,3,5,7,11,13,17,19,23,29,31,37,41,43,47 -> 15 primes.
+    let mut sieve = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    run_sieve(50, sieve);
+    assert_eq(count_primes(50, sieve), 15);
+    assert_eq(is_prime(47, sieve), 1);
+    assert_eq(is_prime(49, sieve), 0);
+    assert_eq(is_prime(50, sieve), 0);
+    print("primes_up_to_50: ok");
+}
+
+fn test_kth_prime() {
+    // 1st=2, 5th=11, 10th=29, 15th=47.
+    let mut sieve = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    run_sieve(50, sieve);
+    assert_eq(kth_prime(1, 50, sieve), 2);
+    assert_eq(kth_prime(5, 50, sieve), 11);
+    assert_eq(kth_prime(10, 50, sieve), 29);
+    assert_eq(kth_prime(15, 50, sieve), 47);
+    print("kth_prime: ok");
+}
+
+fn test_composite_detection() {
+    // Composites: 4,6,8,9,10,12,14,15,16,18,20 are all 0.
+    let mut sieve = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    run_sieve(30, sieve);
+    assert_eq(is_prime(4, sieve), 0);
+    assert_eq(is_prime(9, sieve), 0);
+    assert_eq(is_prime(25, sieve), 0);
+    // 3 and 7 and 29 are prime.
+    assert_eq(is_prime(3, sieve), 1);
+    assert_eq(is_prime(7, sieve), 1);
+    assert_eq(is_prime(29, sieve), 1);
+    print("composite_detection: ok");
+}
+
+fn test_prime_sum() {
+    // Sum of primes <= 30: 2+3+5+7+11+13+17+19+23+29 = 129.
+    let mut sieve = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    run_sieve(30, sieve);
+    let mut s = 0;
+    let mut i = 2;
+    while i <= 30 {
+        if sieve[i] == 1 { s = s + i; }
+        i = i + 1;
+    }
+    // 2+3=5, +5=10, +7=17, +11=28, +13=41, +17=58, +19=77, +23=100, +29=129
+    assert_eq(s, 129);
+    assert_eq(count_primes(30, sieve), 10);
+    print("prime_sum: ok");
+}
+
+fn main() -> Int {
+    test_primes_up_to_20();
+    test_primes_up_to_50();
+    test_kth_prime();
+    test_composite_detection();
+    test_prime_sum();
+    print("[OK] 581_interp_sieve");
+    0
+}

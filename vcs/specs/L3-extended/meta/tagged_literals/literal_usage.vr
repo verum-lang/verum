@@ -1,0 +1,195 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, tagged-literals, literal-usage
+
+/// Использование tagged literals в коде
+///
+/// Tagged literals преобразуются в типизированные значения
+/// во время компиляции с проверкой формата.
+/// Тест использует только базовые возможности языка без stdlib.
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ JSON LITERALS
+// ============================================================
+
+fn test_json_usage() {
+    // JSON литералы с escaped quotes - тип инферируется
+    let user_json = json#"{\"id\": 1, \"name\": \"Alice\", \"active\": true}";
+    let settings_json = json#"{\"theme\": \"dark\", \"notifications\": true}";
+
+    // Вложенный JSON
+    let nested_json = json#"{\"users\": [{\"id\": 1}, {\"id\": 2}], \"count\": 2}";
+
+    // JSON с массивом
+    let arr = json#"[1, 2, 3, 4, 5]";
+}
+
+fn test_json_in_expressions() {
+    // Условное использование JSON
+    let debug_mode = true;
+    let effective_config = if debug_mode {
+        json#"{\"debug\": true, \"verbose\": true}"
+    } else {
+        json#"{\"debug\": false, \"verbose\": false}"
+    };
+}
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ SQL LITERALS
+// ============================================================
+
+fn test_sql_usage() {
+    // SQL литералы в переменных - тип инферируется
+    let select_users = sql#"SELECT * FROM users";
+    let select_orders = sql#"SELECT * FROM orders WHERE status = 'pendingp";
+
+    // INSERT statement
+    let insert = sql#"INSERT INTO users (name, email) VALUES ('Johnp, 'john@example.comp)";
+
+    // UPDATE statement
+    let update = sql#"UPDATE users SET active = false WHERE id = 1";
+}
+
+fn test_sql_variations() {
+    // Различные типы SQL запросов
+    let select_cols = sql#"SELECT id, name, email FROM users";
+    let select_where = sql#"SELECT * FROM users WHERE active = true";
+    let delete = sql#"DELETE FROM users WHERE id = 1";
+}
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ REGEX LITERALS
+// ============================================================
+
+fn test_regex_usage() {
+    // Regex литералы для валидации - тип инферируется
+    let email_pattern = rx#"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+    let phone_pattern = rx#"^\\+?[1-9]\\d{1,14}$";
+    let username_pattern = rx#"^[a-zA-Z][a-zA-Z0-9_]{2,19}$";
+
+    // Простой паттерн
+    let word_pattern = rx#"\\w+";
+
+    // Date pattern (ISO 8601)
+    let date_pattern = rx#"\\d{4}-\\d{2}-\\d{2}";
+}
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ URL LITERALS
+// ============================================================
+
+fn test_url_usage() {
+    // URL литералы для API endpoints - тип инферируется
+    let api_base = url#"https://api.example.com/v1";
+    let users_endpoint = url#"https://api.example.com/v1/users";
+    let orders_endpoint = url#"https://api.example.com/v1/orders";
+}
+
+fn test_url_variations() {
+    // Различные типы URL
+    let http_url = url#"http://example.com";
+    let https_url = url#"https://example.com";
+    let file_url = url#"file:///home/user/document.txt";
+    let with_query = url#"https://example.com/search?q=test&page=1";
+    let with_fragment = url#"https://example.com/docs#section-1";
+}
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ XML LITERALS
+// ============================================================
+
+fn test_xml_usage() {
+    // XML литералы для конфигураций (escaped quotes) - тип инферируется
+    let user_xml = xml#"<user id=\"1\"><name>Alice</name></user>";
+    let config_xml = xml#"<config><debug>true</debug></config>";
+
+    // Self-closing element
+    let br_xml = xml#"<br/>";
+
+    // Nested elements
+    let nested = xml#"<root><child><value>data</value></child></root>";
+}
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ YAML LITERALS
+// ============================================================
+
+fn test_yaml_usage() {
+    // YAML литералы для конфигураций - тип инферируется
+    let simple_config = yaml#"debug: true";
+    let app_config = yaml#"name: myapp";
+}
+
+// ============================================================
+// КОМПЛЕКСНЫЕ ПРИМЕРЫ
+// ============================================================
+
+fn test_mixed_usage() {
+    // Комбинация разных типов tagged literals
+    let json_config = json#"{\"endpoint\": \"api\"}";
+    let sql_query = sql#"SELECT * FROM config";
+    let url_endpoint = url#"https://api.example.com";
+
+    // Tagged literals в match expression
+    let mode = 1;
+    let selected_query = match mode {
+        0 => sql#"SELECT * FROM users",
+        1 => sql#"SELECT * FROM orders",
+        _ => sql#"SELECT 1",
+    };
+}
+
+// ============================================================
+// MULTILINE TAGGED LITERALS
+// ============================================================
+
+fn test_multiline_usage() {
+    // Multiline JSON with triple quotes (no escaping needed)
+    let json_obj = json#"""
+    {
+        "users": [
+            {"id": 1, "name": "Alice"},
+            {"id": 2, "name": "Bob"}
+        ],
+        "total": 2
+    }
+    """;
+
+    // Multiline SQL
+    let complex_query = sql#"""
+    SELECT
+        u.id,
+        u.name,
+        COUNT(o.id) as order_count
+    FROM users u
+    LEFT JOIN orders o ON u.id = o.user_id
+    WHERE u.active = true
+    GROUP BY u.id
+    """;
+
+    // Multiline YAML
+    let yaml_config = yaml#"""
+    database:
+      host: localhost
+      port: 5432
+      name: myapp
+    server:
+      host: 0.0.0.0
+      port: 8080
+    """;
+}
+
+fn main() {
+    test_json_usage();
+    test_json_in_expressions();
+    test_sql_usage();
+    test_sql_variations();
+    test_regex_usage();
+    test_url_usage();
+    test_url_variations();
+    test_xml_usage();
+    test_yaml_usage();
+    test_mixed_usage();
+    test_multiline_usage();
+}

@@ -1,0 +1,50 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, float, math
+// @description: Test floating-point math operations through FFI
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_sqrt_f64(x: Float) -> Float;
+    fn ffi_floor_f64(x: Float) -> Float;
+    fn ffi_ceil_f64(x: Float) -> Float;
+    fn ffi_round_f64(x: Float) -> Float;
+}
+
+fn approx_eq(a: Float, b: Float, epsilon: Float) -> Bool {
+    let diff = a - b;
+    if diff < 0.0 {
+        -diff < epsilon
+    } else {
+        diff < epsilon
+    }
+}
+
+fn main() {
+    let epsilon = 0.0001;
+
+    // Test square root
+    let sqrt4 = ffi_sqrt_f64(4.0);
+    print("sqrt(4)="); print(sqrt4); print("\n");
+    assert(approx_eq(sqrt4, 2.0, epsilon));
+
+    // Test floor
+    let floor37 = ffi_floor_f64(3.7);
+    print("floor(3.7)="); print(floor37); print("\n");
+    assert(approx_eq(floor37, 3.0, epsilon));
+
+    // Test ceiling
+    let ceil32 = ffi_ceil_f64(3.2);
+    print("ceil(3.2)="); print(ceil32); print("\n");
+    assert(approx_eq(ceil32, 4.0, epsilon));
+
+    // Test round
+    let round34 = ffi_round_f64(3.4);
+    print("round(3.4)="); print(round34); print("\n");
+    assert(approx_eq(round34, 3.0, epsilon));
+
+    print("All float tests passed!\n");
+}

@@ -1,0 +1,228 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, turing-machine, automaton, computation
+// @timeout: 30000
+
+// Simple Turing machine simulation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Turing machine state:
+// tape: Arr8 (8 cells, values 0 or 1)
+// head: position (0-7)
+// state: machine state (0=start, negative=halt)
+// Transition: (state, read) -> (new_state, write, direction)
+// direction: 0=left, 1=right
+
+// TM 1: Binary increment
+// Tape: binary number (LSB at pos 0, MSB rightward)
+// States: 0=carry, -1=halt
+// Rules:
+//   state 0, read 0 -> write 1, halt, stay
+//   state 0, read 1 -> write 0, move right (carry propagation)
+// TM transition returns 3 separate values via helper functions
+// Use convention: halt state = 99
+fn tm_inc_ns(state: Int, read: Int) -> Int {
+    if state == 0 {
+        if read == 0 { 99 } // halt
+        else { 0 } // continue carry
+    } else { 99 }
+}
+
+fn tm_inc_write(state: Int, read: Int) -> Int {
+    if state == 0 {
+        if read == 0 { 1 } // write 1, done
+        else { 0 } // write 0, propagate carry
+    } else { read }
+}
+
+fn tm_inc_dir(state: Int, read: Int) -> Int {
+    // 0=left, 1=right, 2=stay
+    if state == 0 {
+        if read == 0 { 2 } // stay
+        else { 1 } // right
+    } else { 2 }
+}
+
+fn tm_run_increment(tape: Arr8) -> Arr8 {
+    let mut t = tape;
+    let mut head = 0;
+    let mut state = 0;
+    let mut steps = 0;
+    while state != 99 {
+        let read = get8(t, head);
+        let ns = tm_inc_ns(state, read);
+        let wr = tm_inc_write(state, read);
+        let dir = tm_inc_dir(state, read);
+        state = ns;
+        t = set8(t, head, wr);
+        if dir == 1 {
+            if head < 7 { head = head + 1; }
+        } else if dir == 0 {
+            if head > 0 { head = head - 1; }
+        }
+        steps = steps + 1;
+        if steps > 20 { state = 99; } // safety
+    }
+    t
+}
+
+// TM 2: Unary to binary counting (simplified)
+// Count 1s on tape (returns count)
+fn count_ones(tape: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(tape, i) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// TM 3: Pattern flipper (flip all 0→1, 1→0)
+// State 0: scanning right, flipping. Halts at end of tape.
+fn tm_flipper(tape: Arr8, n: Int) -> Arr8 {
+    let mut t = tape;
+    let mut i = 0;
+    while i < n {
+        let v = get8(t, i);
+        t = set8(t, i, if v == 0 { 1 } else { 0 });
+        i = i + 1;
+    }
+    t
+}
+
+// Binary value of tape (LSB at pos 0)
+fn tape_to_int(tape: Arr8, n: Int) -> Int {
+    let mut val = 0;
+    let mut pow = 1;
+    let mut i = 0;
+    while i < n {
+        if get8(tape, i) == 1 { val = val + pow; }
+        pow = pow * 2;
+        i = i + 1;
+    }
+    val
+}
+
+// Int to tape (LSB at pos 0)
+fn int_to_tape(val: Int, n: Int) -> Arr8 {
+    let mut t = zeros();
+    let mut v = val;
+    let mut i = 0;
+    while i < n {
+        t = set8(t, i, v % 2);
+        v = v / 2;
+        i = i + 1;
+    }
+    t
+}
+
+fn test_increment() -> Int {
+    // 5 (101) -> 6 (110)
+    let tape5 = int_to_tape(5, 8);
+    assert_eq(tape_to_int(tape5, 8), 5);
+    let tape6 = tm_run_increment(tape5);
+    assert_eq(tape_to_int(tape6, 8), 6);
+
+    // 3 (011) -> 4 (100)
+    let tape3 = int_to_tape(3, 8);
+    let tape4 = tm_run_increment(tape3);
+    assert_eq(tape_to_int(tape4, 8), 4);
+
+    // 0 (000) -> 1 (001)
+    let tape0 = int_to_tape(0, 8);
+    let tape1 = tm_run_increment(tape0);
+    assert_eq(tape_to_int(tape1, 8), 1);
+
+    // 7 (111) -> 8 (1000)
+    let tape7 = int_to_tape(7, 8);
+    let tape8 = tm_run_increment(tape7);
+    assert_eq(tape_to_int(tape8, 8), 8);
+    1
+}
+
+fn test_flipper() -> Int {
+    let tape = Arr8 { v0: 1, v1: 0, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let flipped = tm_flipper(tape, 4);
+    assert_eq(get8(flipped, 0), 0);
+    assert_eq(get8(flipped, 1), 1);
+    assert_eq(get8(flipped, 2), 0);
+    assert_eq(get8(flipped, 3), 0);
+    // Double flip = identity
+    let dbl = tm_flipper(flipped, 4);
+    assert_eq(get8(dbl, 0), 1);
+    assert_eq(get8(dbl, 1), 0);
+    assert_eq(get8(dbl, 2), 1);
+    assert_eq(get8(dbl, 3), 1);
+    1
+}
+
+fn test_count_ones_fn() -> Int {
+    let tape = Arr8 { v0: 1, v1: 0, v2: 1, v3: 1, v4: 0, v5: 1, v6: 0, v7: 0 };
+    assert_eq(count_ones(tape, 8), 4);
+    assert_eq(count_ones(zeros(), 8), 0);
+    let all1 = Arr8 { v0: 1, v1: 1, v2: 1, v3: 1, v4: 1, v5: 1, v6: 1, v7: 1 };
+    assert_eq(count_ones(all1, 8), 8);
+    1
+}
+
+fn test_tape_conversion() -> Int {
+    // Roundtrip: int -> tape -> int
+    assert_eq(tape_to_int(int_to_tape(0, 8), 8), 0);
+    assert_eq(tape_to_int(int_to_tape(1, 8), 8), 1);
+    assert_eq(tape_to_int(int_to_tape(42, 8), 8), 42);
+    assert_eq(tape_to_int(int_to_tape(255, 8), 8), 255);
+    // Check specific bits
+    let t42 = int_to_tape(42, 8); // 42 = 101010
+    assert_eq(get8(t42, 0), 0);
+    assert_eq(get8(t42, 1), 1);
+    assert_eq(get8(t42, 2), 0);
+    assert_eq(get8(t42, 3), 1);
+    assert_eq(get8(t42, 4), 0);
+    assert_eq(get8(t42, 5), 1);
+    1
+}
+
+fn test_increment_chain() -> Int {
+    // Increment 5 times starting from 0: should get 5
+    let mut tape = int_to_tape(0, 8);
+    tape = tm_run_increment(tape);
+    tape = tm_run_increment(tape);
+    tape = tm_run_increment(tape);
+    tape = tm_run_increment(tape);
+    tape = tm_run_increment(tape);
+    assert_eq(tape_to_int(tape, 8), 5);
+    1
+}
+
+fn main() -> Int {
+    test_increment();
+    test_flipper();
+    test_count_ones_fn();
+    test_tape_conversion();
+    test_increment_chain();
+    print("[OK] 592_turing_machine_aot");
+    0
+}

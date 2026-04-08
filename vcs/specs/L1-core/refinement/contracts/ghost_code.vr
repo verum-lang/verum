@@ -1,0 +1,376 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: contracts, ghost, verification, proof
+// @timeout: 5000
+
+/// Ghost Code: Code that exists only for verification purposes.
+/// Ghost code is erased during compilation but helps prove properties.
+
+// ============================================================================
+// Basic Ghost Variables
+// ============================================================================
+
+/// Ghost variable to track logical state
+fn count_elements<T>(arr: List<T>) -> Int {
+    @ghost let logical_count: Int = 0;
+
+    let mut count = 0;
+    for _ in arr {
+        count += 1;
+        @ghost { logical_count += 1; }
+    }
+
+    // Use ghost variable in proof
+    assert(count == logical_count);
+    count
+}
+
+/// Ghost variable for invariant tracking
+fn binary_search_verified(arr: List<Int>, target: Int) -> Maybe<Int>
+    requires is_sorted(arr)
+{
+    @ghost let original_arr = arr.clone();
+
+    let mut lo = 0;
+    let mut hi = len(arr);
+
+    while lo < hi
+        invariant lo <= hi
+        invariant hi <= len(arr)
+        @ghost invariant arr == original_arr  // Array unchanged
+    {
+        let mid = lo + (hi - lo) / 2;
+        if arr[mid] < target {
+            lo = mid + 1;
+        } else if arr[mid] > target {
+            hi = mid;
+        } else {
+            return Some(mid);
+        }
+    }
+
+    None
+}
+
+// ============================================================================
+// Ghost Functions
+// ============================================================================
+
+/// Ghost function - exists only for specification
+@ghost
+fn is_permutation<T: Eq>(a: List<T>, b: List<T>) -> Bool {
+    len(a) == len(b) &&
+    forall x in a => count(a, x) == count(b, x)
+}
+
+@ghost
+fn count<T: Eq>(arr: List<T>, elem: T) -> Int {
+    arr.filter(|x| x == elem).len()
+}
+
+/// Using ghost function in contract
+fn sort<T: Ord>(arr: List<T>) -> List<T>
+    ensures is_sorted(result)
+    @ghost ensures is_permutation(arr, result)
+{
+    // Implementation
+    let mut result = arr.clone();
+    // ... sorting algorithm
+    result
+}
+
+/// Ghost function for mathematical specification
+@ghost
+fn factorial(n: Int) -> Int
+    requires n >= 0
+{
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+fn compute_factorial(n: Int) -> Int
+    requires n >= 0
+    requires n <= 20  // Prevent overflow
+    ensures result == factorial(n)
+{
+    let mut result = 1;
+    let mut i = 1;
+    while i <= n
+        invariant i >= 1
+        invariant result == factorial(i - 1)
+    {
+        result *= i;
+        i += 1;
+    }
+    result
+}
+
+// ============================================================================
+// Ghost Parameters
+// ============================================================================
+
+/// Ghost parameter for proof purposes
+fn push_verified<T>(
+    list: &mut List<T>,
+    elem: T,
+    @ghost old_len: Int,
+)
+    requires old_len == len(*list)
+    ensures len(*list) == old_len + 1
+    ensures (*list)[old_len] == elem
+{
+    list.push(elem);
+}
+
+/// Ghost parameter capturing pre-state
+fn increment_all(arr: &mut List<Int>)
+    ensures len(*arr) == len(arr)
+{
+    @ghost let old_arr = arr.clone();
+
+    for i in 0..len(*arr) {
+        arr[i] += 1;
+    }
+}
+
+// ============================================================================
+// Ghost Fields in Types
+// ============================================================================
+
+/// Type with ghost field for verification
+type VerifiedStack<T> is {
+    data: List<T>,
+    @ghost capacity_invariant: Bool,  // Ghost: not stored at runtime
+};
+
+implement VerifiedStack<T> {
+    fn new(capacity: Int) -> Self
+        requires capacity >= 0
+    {
+        VerifiedStack {
+            data: List.with_capacity(capacity),
+            @ghost capacity_invariant: true,
+        }
+    }
+
+    fn push(&mut self, elem: T) {
+        @ghost let old_len = len(self.data);
+        self.data.push(elem);
+    }
+
+    fn pop(&mut self) -> Maybe<T>
+        requires len(self.data) > 0
+    {
+        @ghost let old_len = len(self.data);
+        self.data.pop()
+    }
+
+    @ghost
+    fn is_valid(&self) -> Bool {
+        self.capacity_invariant && len(self.data) >= 0
+    }
+}
+
+// ============================================================================
+// Ghost Blocks
+// ============================================================================
+
+/// Ghost block for complex invariant tracking
+fn merge_sorted<T: Ord>(a: List<T>, b: List<T>) -> List<T>
+    requires is_sorted(a)
+    requires is_sorted(b)
+    ensures is_sorted(result)
+    ensures len(result) == len(a) + len(b)
+{
+    let mut result: List<T> = [];
+    let mut i = 0;
+    let mut j = 0;
+
+    @ghost let mut ghost_a_remaining = len(a);
+    @ghost let mut ghost_b_remaining = len(b);
+
+    while i < len(a) || j < len(b)
+        invariant i <= len(a)
+        invariant j <= len(b)
+        invariant len(result) == i + j
+        invariant is_sorted(result)
+    {
+        if i >= len(a) {
+            result.push(b[j]);
+            j += 1;
+            @ghost { ghost_b_remaining -= 1; }
+        } else if j >= len(b) {
+            result.push(a[i]);
+            i += 1;
+            @ghost { ghost_a_remaining -= 1; }
+        } else if a[i] <= b[j] {
+            result.push(a[i]);
+            i += 1;
+            @ghost { ghost_a_remaining -= 1; }
+        } else {
+            result.push(b[j]);
+            j += 1;
+            @ghost { ghost_b_remaining -= 1; }
+        }
+    }
+
+    result
+}
+
+// ============================================================================
+// Ghost Assertions
+// ============================================================================
+
+/// Ghost assertion - checked only during verification
+fn safe_division(a: Int, b: Int) -> Int
+    requires b != 0
+{
+    @ghost assert(b != 0);  // Redundant but documents intent
+
+    let result = a / b;
+
+    @ghost assert(result * b + (a % b) == a);  // Mathematical property
+
+    result
+}
+
+/// Ghost assume - tell verifier to assume a property
+fn optimized_lookup(arr: List<Int>, idx: Int) -> Int
+    requires idx >= 0
+    requires idx < len(arr)
+{
+    // We know the compiler may have additional invariants
+    @ghost assume(len(arr) > 0);
+
+    arr[idx]
+}
+
+// ============================================================================
+// Ghost Predicates
+// ============================================================================
+
+/// Ghost predicate for specification
+@ghost
+predicate sorted_between(arr: List<Int>, lo: Int, hi: Int) -> Bool {
+    forall i in lo..(hi - 1) => arr[i] <= arr[i + 1]
+}
+
+@ghost
+predicate partitioned(arr: List<Int>, pivot_idx: Int) -> Bool {
+    let pivot = arr[pivot_idx];
+    (forall i in 0..pivot_idx => arr[i] <= pivot) &&
+    (forall i in (pivot_idx + 1)..len(arr) => arr[i] > pivot)
+}
+
+fn quicksort_partition(arr: &mut List<Int>, lo: Int, hi: Int) -> Int
+    requires 0 <= lo
+    requires lo < hi
+    requires hi <= len(*arr)
+    ensures lo <= result
+    ensures result < hi
+    @ghost ensures partitioned((*arr)[lo..hi], result - lo)
+{
+    let pivot = arr[hi - 1];
+    let mut i = lo;
+
+    for j in lo..(hi - 1)
+        invariant lo <= i
+        invariant i <= j
+        @ghost invariant forall k in lo..i => arr[k] <= pivot
+        @ghost invariant forall k in i..j => arr[k] > pivot
+    {
+        if arr[j] <= pivot {
+            arr.swap(i, j);
+            i += 1;
+        }
+    }
+
+    arr.swap(i, hi - 1);
+    i
+}
+
+// ============================================================================
+// Ghost for Termination Proofs
+// ============================================================================
+
+/// Ghost for termination metric
+fn ackermann(m: Int, n: Int) -> Int
+    requires m >= 0
+    requires n >= 0
+    decreases m, n  // Lexicographic ordering
+{
+    @ghost let measure = (m, n);  // Track for verification
+
+    if m == 0 {
+        n + 1
+    } else if n == 0 {
+        ackermann(m - 1, 1)
+    } else {
+        ackermann(m - 1, ackermann(m, n - 1))
+    }
+}
+
+/// Ghost variant function for loop termination
+fn gcd(mut a: Int, mut b: Int) -> Int
+    requires a > 0
+    requires b > 0
+    ensures result > 0
+    ensures a % result == 0
+    ensures b % result == 0
+{
+    @ghost let orig_a = a;
+    @ghost let orig_b = b;
+
+    while b != 0
+        invariant a > 0 || b > 0
+        invariant gcd_spec(a, b) == gcd_spec(orig_a, orig_b)
+        decreases b  // Termination metric
+    {
+        let temp = b;
+        b = a % b;
+        a = temp;
+    }
+
+    a
+}
+
+@ghost
+fn gcd_spec(a: Int, b: Int) -> Int {
+    if b == 0 { a }
+    else { gcd_spec(b, a % b) }
+}
+
+// ============================================================================
+// Helper Predicates
+// ============================================================================
+
+predicate is_sorted(arr: List<Int>) -> Bool {
+    forall i in 0..(len(arr) - 1) => arr[i] <= arr[i + 1]
+}
+
+fn main() {
+    // Test ghost variables don't affect runtime
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6];
+    let count = count_elements(arr);
+    assert(count == 8);
+
+    // Test binary search
+    let sorted = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let found = binary_search_verified(sorted, 5);
+    assert(found == Some(4));
+
+    // Test factorial
+    let fact5 = compute_factorial(5);
+    assert(fact5 == 120);
+
+    // Test GCD
+    let g = gcd(48, 18);
+    assert(g == 6);
+
+    // Test merge
+    let a = [1, 3, 5, 7];
+    let b = [2, 4, 6, 8];
+    let merged = merge_sorted(a, b);
+    assert(merged == [1, 2, 3, 4, 5, 6, 7, 8]);
+}

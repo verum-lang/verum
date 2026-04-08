@@ -1,0 +1,12 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, exit-code, nonzero
+// @timeout: 10000
+// @expected-exit: 1
+// @description: Non-zero exit code: main returns 1, both tiers must agree
+
+fn main() -> Int {
+    print("diff_nonzero_exit: returning 1");
+    1
+}

@@ -1,0 +1,37 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, equality, substitution, transport, error
+// @expected-error: E400 "Type mismatch"
+
+/// Substitution/transport - failure cases
+
+/// Equality witness
+type EqWitness<T> is | EqRefl;
+
+/// ERROR: Transport returns wrong type
+fn transport_wrong(proof: EqWitness<Int>, x: Int) -> Text {
+    match proof { EqRefl => x }  // ERROR: Int != Text
+}
+
+/// ERROR: Substitution with type mismatch
+fn subst_wrong(proof: EqWitness<Int>, x: Text) -> Int {
+    match proof { EqRefl => x }  // ERROR: Text != Int
+}
+
+/// ERROR: Using proof value as concrete type
+fn proof_as_value(p: EqWitness<Int>) -> Int {
+    p + 1  // ERROR: EqWitness<Int> is not numeric
+}
+
+/// ERROR: Coerce between incompatible types
+fn coerce_wrong(x: Int) -> Text {
+    let proof: EqWitness<Int> = EqRefl;
+    match proof { EqRefl => x }  // ERROR: Int != Text
+}
+
+fn main() {
+    let r: EqWitness<Int> = EqRefl;
+    let _ = transport_wrong(r, 42);
+    let _ = subst_wrong(r, "hello");
+}

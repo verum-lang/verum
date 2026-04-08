@@ -1,0 +1,597 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, platform, posix
+// @description: Tests POSIX API FFI bindings for Unix-like systems
+
+type c_void is ();
+type c_char is i8;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+type size_t is usize;
+type ssize_t is isize;
+
+/// ============================================================
+/// POSIX FFI BINDINGS
+/// ============================================================
+///
+/// POSIX APIs provide portable system interfaces across Unix-like
+/// operating systems (Linux, macOS, BSD, etc.).
+
+// ------------------------------------------------------------
+// POSIX Types
+// ------------------------------------------------------------
+
+type pid_t is i32;
+type uid_t is u32;
+type gid_t is u32;
+type off_t is i64;
+type ssize_t is isize;
+type size_t is usize;
+type mode_t is u32;
+type dev_t is u64;
+type ino_t is u64;
+type nlink_t is u64;
+type time_t is i64;
+
+// File descriptor
+type Fd is c_int;
+const STDIN_FILENO: Fd = 0;
+const STDOUT_FILENO: Fd = 1;
+const STDERR_FILENO: Fd = 2;
+
+// ------------------------------------------------------------
+// File Operations
+// ------------------------------------------------------------
+
+ffi posix {
+    @extern("C")
+    fn open(path: *const c_char, flags: c_int, ...) -> c_int;
+
+    @extern("C")
+    fn close(fd: c_int) -> c_int;
+
+    @extern("C")
+    fn read(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t;
+
+    @extern("C")
+    fn write(fd: c_int, buf: *const c_void, count: size_t) -> ssize_t;
+
+    @extern("C")
+    fn lseek(fd: c_int, offset: off_t, whence: c_int) -> off_t;
+
+    @extern("C")
+    fn pread(fd: c_int, buf: *mut c_void, count: size_t, offset: off_t) -> ssize_t;
+
+    @extern("C")
+    fn pwrite(fd: c_int, buf: *const c_void, count: size_t, offset: off_t) -> ssize_t;
+
+    @extern("C")
+    fn fsync(fd: c_int) -> c_int;
+
+    @extern("C")
+    fn fdatasync(fd: c_int) -> c_int;
+
+    @extern("C")
+    fn ftruncate(fd: c_int, length: off_t) -> c_int;
+
+    @extern("C")
+    fn dup(oldfd: c_int) -> c_int;
+
+    @extern("C")
+    fn dup2(oldfd: c_int, newfd: c_int) -> c_int;
+
+    @extern("C")
+    fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
+
+    @extern("C")
+    fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
+}
+
+// Open flags
+const O_RDONLY: c_int = 0;
+const O_WRONLY: c_int = 1;
+const O_RDWR: c_int = 2;
+const O_CREAT: c_int = 0x40;
+const O_EXCL: c_int = 0x80;
+const O_TRUNC: c_int = 0x200;
+const O_APPEND: c_int = 0x400;
+const O_NONBLOCK: c_int = 0x800;
+const O_CLOEXEC: c_int = 0x80000;
+
+// Seek whence
+const SEEK_SET: c_int = 0;
+const SEEK_CUR: c_int = 1;
+const SEEK_END: c_int = 2;
+
+/// Safe file descriptor wrapper
+type PosixFile is {
+    fd: Fd,
+    invariant fd >= 0,
+};
+
+implement PosixFile {
+    fn open(path: &str, flags: c_int, mode: mode_t) -> Result<PosixFile, PosixError> {
+        let c_path = CString.new(path)?;
+
+        // SAFETY: c_path is valid null-terminated string
+        let fd = unsafe {
+            posix.open(c_path.as_ptr(), flags, mode)
+        };
+
+        if fd < 0 {
+            Err(PosixError.from_errno())
+        } else {
+            Ok(PosixFile { fd })
+        }
+    }
+
+    fn read(&self, buf: &mut [u8]) -> Result<usize, PosixError> {
+        // SAFETY: fd is valid, buf is valid
+        let n = unsafe {
+            posix.read(self.fd, buf.as_mut_ptr() as *mut c_void, buf.len())
+        };
+
+        if n < 0 {
+            Err(PosixError.from_errno())
+        } else {
+            Ok(n as usize)
+        }
+    }
+
+    fn write(&self, buf: &[u8]) -> Result<usize, PosixError> {
+        // SAFETY: fd is valid, buf is valid
+        let n = unsafe {
+            posix.write(self.fd, buf.as_ptr() as *const c_void, buf.len())
+        };
+
+        if n < 0 {
+            Err(PosixError.from_errno())
+        } else {
+            Ok(n as usize)
+        }
+    }
+
+    fn seek(&self, offset: i64, whence: c_int) -> Result<i64, PosixError> {
+        // SAFETY: fd is valid
+        let pos = unsafe { posix.lseek(self.fd, offset, whence) };
+
+        if pos < 0 {
+            Err(PosixError.from_errno())
+        } else {
+            Ok(pos)
+        }
+    }
+
+    fn sync(&self) -> Result<(), PosixError> {
+        // SAFETY: fd is valid
+        let r = unsafe { posix.fsync(self.fd) };
+        if r < 0 { Err(PosixError.from_errno()) } else { Ok(()) }
+    }
+}
+
+implement Drop for PosixFile {
+    fn drop(&mut self) {
+        // SAFETY: fd is valid
+        unsafe { posix.close(self.fd) };
+    }
+}
+
+// ------------------------------------------------------------
+// Directory Operations
+// ------------------------------------------------------------
+
+ffi posix {
+    @extern("C")
+    fn mkdir(path: *const c_char, mode: mode_t) -> c_int;
+
+    @extern("C")
+    fn rmdir(path: *const c_char) -> c_int;
+
+    @extern("C")
+    fn chdir(path: *const c_char) -> c_int;
+
+    @extern("C")
+    fn getcwd(buf: *mut c_char, size: size_t) -> *mut c_char;
+
+    @extern("C")
+    fn opendir(name: *const c_char) -> *mut DIR;
+
+    @extern("C")
+    fn readdir(dirp: *mut DIR) -> *mut dirent;
+
+    @extern("C")
+    fn closedir(dirp: *mut DIR) -> c_int;
+}
+
+@opaque
+type DIR is ();
+
+@repr(C)
+type dirent is {
+    d_ino: ino_t,
+    d_off: off_t,
+    d_reclen: c_ushort,
+    d_type: c_uchar,
+    d_name: [c_char; 256],
+};
+
+fn create_directory(path: &str, mode: mode_t) -> Result<(), PosixError> {
+    let c_path = CString.new(path)?;
+    let r = unsafe { posix.mkdir(c_path.as_ptr(), mode) };
+    if r < 0 { Err(PosixError.from_errno()) } else { Ok(()) }
+}
+
+fn get_current_dir() -> Result<Text, PosixError> {
+    let mut buf: [c_char; 4096] = [0; 4096];
+    let ptr = unsafe { posix.getcwd(buf.as_mut_ptr(), buf.len()) };
+    if ptr.is_null() {
+        Err(PosixError.from_errno())
+    } else {
+        // SAFETY: getcwd null-terminates
+        let cstr = unsafe { CStr.from_ptr(ptr) };
+        cstr.to_text()
+    }
+}
+
+// ------------------------------------------------------------
+// Process Operations
+// ------------------------------------------------------------
+
+ffi posix {
+    @extern("C")
+    fn fork() -> pid_t;
+
+    @extern("C")
+    fn execve(path: *const c_char, argv: *const *const c_char, envp: *const *const c_char) -> c_int;
+
+    @extern("C")
+    fn waitpid(pid: pid_t, status: *mut c_int, options: c_int) -> pid_t;
+
+    @extern("C")
+    fn exit(status: c_int) -> !;
+
+    @extern("C")
+    fn _exit(status: c_int) -> !;
+
+    @extern("C")
+    fn getpid() -> pid_t;
+
+    @extern("C")
+    fn getppid() -> pid_t;
+
+    @extern("C")
+    fn getuid() -> uid_t;
+
+    @extern("C")
+    fn geteuid() -> uid_t;
+
+    @extern("C")
+    fn getgid() -> gid_t;
+
+    @extern("C")
+    fn getegid() -> gid_t;
+
+    @extern("C")
+    fn setuid(uid: uid_t) -> c_int;
+
+    @extern("C")
+    fn setgid(gid: gid_t) -> c_int;
+
+    @extern("C")
+    fn kill(pid: pid_t, sig: c_int) -> c_int;
+}
+
+// Signals
+const SIGTERM: c_int = 15;
+const SIGKILL: c_int = 9;
+const SIGINT: c_int = 2;
+const SIGUSR1: c_int = 10;
+const SIGUSR2: c_int = 12;
+
+fn get_process_id() -> pid_t {
+    unsafe { posix.getpid() }
+}
+
+fn send_signal(pid: pid_t, sig: c_int) -> Result<(), PosixError> {
+    let r = unsafe { posix.kill(pid, sig) };
+    if r < 0 { Err(PosixError.from_errno()) } else { Ok(()) }
+}
+
+// ------------------------------------------------------------
+// Memory Mapping
+// ------------------------------------------------------------
+
+ffi posix {
+    @extern("C")
+    fn mmap(
+        addr: *mut c_void,
+        length: size_t,
+        prot: c_int,
+        flags: c_int,
+        fd: c_int,
+        offset: off_t
+    ) -> *mut c_void;
+
+    @extern("C")
+    fn munmap(addr: *mut c_void, length: size_t) -> c_int;
+
+    @extern("C")
+    fn mprotect(addr: *mut c_void, len: size_t, prot: c_int) -> c_int;
+
+    @extern("C")
+    fn msync(addr: *mut c_void, length: size_t, flags: c_int) -> c_int;
+
+    @extern("C")
+    fn mlock(addr: *const c_void, len: size_t) -> c_int;
+
+    @extern("C")
+    fn munlock(addr: *const c_void, len: size_t) -> c_int;
+}
+
+// mmap protection flags
+const PROT_NONE: c_int = 0;
+const PROT_READ: c_int = 1;
+const PROT_WRITE: c_int = 2;
+const PROT_EXEC: c_int = 4;
+
+// mmap flags
+const MAP_SHARED: c_int = 1;
+const MAP_PRIVATE: c_int = 2;
+const MAP_ANONYMOUS: c_int = 0x20;
+const MAP_FIXED: c_int = 0x10;
+
+const MAP_FAILED: *mut c_void = !0 as *mut c_void;
+
+type MemoryMapping is {
+    addr: *mut u8,
+    len: usize,
+};
+
+implement MemoryMapping {
+    fn anonymous(len: usize, prot: c_int) -> Result<MemoryMapping, PosixError> {
+        let addr = unsafe {
+            posix.mmap(
+                std.ptr.null as *mut c_void,
+                len,
+                prot,
+                MAP_PRIVATE | MAP_ANONYMOUS,
+                -1,
+                0
+            )
+        };
+
+        if addr == MAP_FAILED {
+            Err(PosixError.from_errno())
+        } else {
+            Ok(MemoryMapping { addr: addr as *mut u8, len })
+        }
+    }
+
+    fn from_file(file: &PosixFile, len: usize, prot: c_int) -> Result<MemoryMapping, PosixError> {
+        let addr = unsafe {
+            posix.mmap(
+                std.ptr.null as *mut c_void,
+                len,
+                prot,
+                MAP_SHARED,
+                file.fd,
+                0
+            )
+        };
+
+        if addr == MAP_FAILED {
+            Err(PosixError.from_errno())
+        } else {
+            Ok(MemoryMapping { addr: addr as *mut u8, len })
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe { std.slice.from_raw_parts(self.addr, self.len) }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { std.slice.from_raw_parts_mut(self.addr, self.len) }
+    }
+}
+
+implement Drop for MemoryMapping {
+    fn drop(&mut self) {
+        unsafe { posix.munmap(self.addr as *mut c_void, self.len) };
+    }
+}
+
+// ------------------------------------------------------------
+// Pipes and FIFOs
+// ------------------------------------------------------------
+
+ffi posix {
+    @extern("C")
+    fn pipe(pipefd: *mut c_int) -> c_int;
+
+    @extern("C")
+    fn pipe2(pipefd: *mut c_int, flags: c_int) -> c_int;
+
+    @extern("C")
+    fn mkfifo(pathname: *const c_char, mode: mode_t) -> c_int;
+}
+
+type Pipe is {
+    read_fd: PosixFile,
+    write_fd: PosixFile,
+};
+
+implement Pipe {
+    fn new() -> Result<Pipe, PosixError> {
+        let mut fds: [c_int; 2] = [0; 2];
+        let r = unsafe { posix.pipe(fds.as_mut_ptr()) };
+
+        if r < 0 {
+            Err(PosixError.from_errno())
+        } else {
+            Ok(Pipe {
+                read_fd: PosixFile { fd: fds[0] },
+                write_fd: PosixFile { fd: fds[1] },
+            })
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Socket Operations
+// ------------------------------------------------------------
+
+ffi posix {
+    @extern("C")
+    fn socket(domain: c_int, type_: c_int, protocol: c_int) -> c_int;
+
+    @extern("C")
+    fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int;
+
+    @extern("C")
+    fn listen(sockfd: c_int, backlog: c_int) -> c_int;
+
+    @extern("C")
+    fn accept(sockfd: c_int, addr: *mut sockaddr, addrlen: *mut socklen_t) -> c_int;
+
+    @extern("C")
+    fn connect(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int;
+
+    @extern("C")
+    fn send(sockfd: c_int, buf: *const c_void, len: size_t, flags: c_int) -> ssize_t;
+
+    @extern("C")
+    fn recv(sockfd: c_int, buf: *mut c_void, len: size_t, flags: c_int) -> ssize_t;
+
+    @extern("C")
+    fn shutdown(sockfd: c_int, how: c_int) -> c_int;
+
+    @extern("C")
+    fn setsockopt(
+        sockfd: c_int,
+        level: c_int,
+        optname: c_int,
+        optval: *const c_void,
+        optlen: socklen_t
+    ) -> c_int;
+
+    @extern("C")
+    fn getsockopt(
+        sockfd: c_int,
+        level: c_int,
+        optname: c_int,
+        optval: *mut c_void,
+        optlen: *mut socklen_t
+    ) -> c_int;
+}
+
+type socklen_t is u32;
+
+@repr(C)
+type sockaddr is {
+    sa_family: u16,
+    sa_data: [c_char; 14],
+};
+
+@repr(C)
+type sockaddr_in is {
+    sin_family: u16,
+    sin_port: u16,
+    sin_addr: in_addr,
+    sin_zero: [u8; 8],
+};
+
+@repr(C)
+type in_addr is {
+    s_addr: u32,
+};
+
+// Socket domains
+const AF_UNIX: c_int = 1;
+const AF_INET: c_int = 2;
+const AF_INET6: c_int = 10;
+
+// Socket types
+const SOCK_STREAM: c_int = 1;
+const SOCK_DGRAM: c_int = 2;
+
+// ------------------------------------------------------------
+// Error Handling
+// ------------------------------------------------------------
+
+ffi posix {
+    @extern("C")
+    fn __errno_location() -> *mut c_int;
+}
+
+fn get_errno() -> c_int {
+    unsafe { *posix.__errno_location() }
+}
+
+type PosixError is
+    | PermissionDenied    // EACCES
+    | FileNotFound        // ENOENT
+    | FileExists          // EEXIST
+    | InvalidArgument     // EINVAL
+    | TooManyOpenFiles    // EMFILE
+    | NoSpace             // ENOSPC
+    | IoError             // EIO
+    | Interrupted         // EINTR
+    | WouldBlock          // EAGAIN/EWOULDBLOCK
+    | ConnectionRefused   // ECONNREFUSED
+    | Unknown(c_int);
+
+implement PosixError {
+    fn from_errno() -> PosixError {
+        match get_errno() {
+            13 => PosixError.PermissionDenied,
+            2 => PosixError.FileNotFound,
+            17 => PosixError.FileExists,
+            22 => PosixError.InvalidArgument,
+            24 => PosixError.TooManyOpenFiles,
+            28 => PosixError.NoSpace,
+            5 => PosixError.IoError,
+            4 => PosixError.Interrupted,
+            11 => PosixError.WouldBlock,
+            111 => PosixError.ConnectionRefused,
+            e => PosixError.Unknown(e),
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_char is i8;
+type c_uchar is u8;
+type c_short is i16;
+type c_ushort is u16;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+
+type CStr is { ptr: *const c_char };
+implement CStr {
+    unsafe fn from_ptr(ptr: *const c_char) -> CStr { CStr { ptr } }
+    fn to_text(&self) -> Result<Text, PosixError> { Ok(Text.new()) }
+}
+
+type CString is { data: List<u8> };
+implement CString {
+    fn new(s: &str) -> Result<CString, PosixError> {
+        let mut data = s.as_bytes().to_vec();
+        data.push(0);
+        Ok(CString { data })
+    }
+    fn as_ptr(&self) -> *const c_char { self.data.as_ptr() as *const c_char }
+}
+
+fn main() {
+    // POSIX FFI test
+}

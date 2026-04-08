@@ -1,0 +1,10 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "hello";
+    let n = s.len();
+    print(f"len={n}");
+    0
+}

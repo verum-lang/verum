@@ -1,0 +1,195 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, tagged, json
+
+// JSON literal syntax for embedded JSON data
+
+fn test_simple_json_values() {
+    // Simple JSON values
+    let null_val = json#"null";
+    let true_val = json#"true";
+    let false_val = json#"false";
+    let number_val = json#"42";
+    let float_val = json#"3.14";
+    let string_val = json#"\"hello\"";
+}
+
+fn test_empty_structures() {
+    // Empty structures
+    let empty_object = json#"{}";
+    let empty_array = json#"[]";
+}
+
+fn test_simple_object() {
+    // Simple object
+    let simple_obj = json#"{\"name\": \"Alice\", \"age\": 30}";
+}
+
+fn test_simple_array() {
+    // Simple array
+    let simple_arr = json#"[1, 2, 3, 4, 5]";
+}
+
+fn test_nested_object() {
+    // Nested object — using triple-quoted tagged literal
+    let nested_obj = json#"""{"user": {"name": "Bob", "email": "bob@example.com"}, "active": true}""";
+}
+
+fn test_array_of_objects() {
+    // Array of objects
+    let users_arr = json#"""[{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}, {"id": 3, "name": "Charlie"}]""";
+}
+
+fn test_mixed_types_array() {
+    // Mixed types array
+    let mixed_arr = json#"""[1, "two", true, null, {"key": "value"}]""";
+}
+
+fn test_complex_nested_structure() {
+    // Complex nested structure
+    let complex = json#"""{"name": "Project", "version": "1.0.0", "dependencies": {"library-a": "^2.0", "library-b": "~1.5"}, "scripts": {"build": "compile", "test": "test-runner"}, "keywords": ["verum", "json", "example"], "private": false, "count": 42, "rating": 4.5}""";
+}
+
+fn test_json_with_escapes() {
+    // JSON with escape sequences (raw: backslashes preserved)
+    let escaped = json#"""{"message": "Hello\nWorld", "path": "C:\\Users"}""";
+}
+
+fn test_json_with_unicode() {
+    // JSON with Unicode
+    let unicode_json = json#"""{"greeting": "Hello World", "symbol": "\u2764"}""";
+}
+
+fn test_scientific_notation() {
+    // Scientific notation in JSON
+    let scientific = json#"""{"small": 1.5e-10, "large": 6.022e23}""";
+}
+
+fn test_negative_numbers() {
+    // Negative numbers
+    let negative = json#"""{"negative": -42, "float": -3.14}""";
+}
+
+fn test_json_in_expressions() {
+    // JSON in expressions
+    let data = json#"""{"value": 42}""";
+    let value = data["value"];
+}
+
+// JSON parsing to typed value
+type Config is {
+    host: Text,
+    port: Int,
+    debug: Bool,
+};
+
+fn test_json_parsing_to_typed() {
+    let config_json = json#"""{"host": "localhost", "port": 8080, "debug": true}""";
+    let config: Config = Config.from_json(config_json);
+}
+
+// JSON in function parameters
+type Output is { name: Text, count: Int };
+
+fn process_data(data: Json) -> Result<Output, Error> {
+    let name_val = data["name"].as_text()?;
+    let count_val = data["count"].as_int()?;
+    Ok(Output { name: name_val, count: count_val })
+}
+
+fn test_json_function_params() {
+    let result = process_data(json#"""{"name": "test", "count": 10}""");
+}
+
+fn test_json_in_arrays() {
+    // JSON in arrays
+    let json_configs = [
+        json#"""{"env": "dev"}""",
+        json#"""{"env": "staging"}""",
+        json#"""{"env": "prod"}""",
+    ];
+}
+
+// JSON serialization
+type User is {
+    id: Int,
+    name: Text,
+    email: Text,
+};
+
+fn test_json_serialization() {
+    let user = User { id: 1, name: "Alice", email: "alice@example.com" };
+    let user_json = user.to_json();
+}
+
+fn test_json_path_access() {
+    // JSON path access
+    let deep_json = json#"""{"a": {"b": {"c": 42}}}""";
+    let deep_value = deep_json["a"]["b"]["c"];
+}
+
+fn test_json_modification() {
+    // JSON modification (returns new JSON)
+    let original = json#"""{"count": 1}""";
+    let updated = original.set("count", 2);
+    let extended = original.set("new_field", "value");
+}
+
+fn test_json_array_operations() {
+    // JSON array operations
+    let arr = json#"[1, 2, 3]";
+    let length = arr.len();
+    let first = arr[0];
+    let appended = arr.push(4);
+}
+
+fn test_json_type_checking() {
+    // JSON type checking
+    let val = json#"""{"key": "value"}""";
+    let is_object = val.is_object();
+    let is_array = val.is_array();
+    let is_string = val["key"].is_string();
+    let is_number = val["key"].is_number();
+}
+
+fn test_json_merge() {
+    // JSON merge
+    let base = json#"""{"a": 1, "b": 2}""";
+    let overlay = json#"""{"b": 3, "c": 4}""";
+    let merged = base.merge(overlay);
+}
+
+// JSON in match
+fn json_type_check(val: Json) -> Text {
+    match val {
+        Json.Null => "null",
+        Json.Bool(_) => "boolean",
+        Json.Number(_) => "number",
+        Json.String(_) => "string",
+        Json.Array(_) => "array",
+        Json.Object(_) => "object",
+    }
+}
+
+fn test_json_with_comments() {
+    // JSON with comments stripped (if supported)
+    let with_comments = json#"""{"key": "value"}""";
+}
+
+fn test_json_pretty_printing() {
+    // JSON pretty printing
+    let compact = json#"""{"a":1,"b":2}""";
+    let pretty = compact.to_pretty_string();
+}
+
+fn test_json_validation() {
+    // JSON validation — using triple-quoted strings
+    let valid = Json.is_valid("""{"valid": true}""");
+    let invalid = Json.is_valid("""{"broken": }""");
+}
+
+fn test_raw_json_string() {
+    // Raw JSON string for APIs
+    let api_body = json#"""{"method": "POST", "headers": {"Content-Type": "application/json"}, "body": {"data": [1, 2, 3]}}""";
+}

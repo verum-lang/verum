@@ -1,0 +1,207 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, callbacks, function-pointers
+// @timeout: 10000
+// @description: Tests function pointer types for C FFI
+
+/// ============================================================
+/// FUNCTION POINTERS FOR FFI
+/// ============================================================
+///
+/// Function pointers are the primary mechanism for callbacks in C.
+/// Verum supports extern "C" function pointer types for FFI.
+
+type c_int is i32;
+type c_void is ();
+type c_size is usize;
+
+// ============================================================
+// FUNCTION POINTER TYPE ALIASES
+// ============================================================
+
+/// Unary function pointer
+type UnaryFn is extern "C" fn(c_int) -> c_int;
+
+/// Binary function pointer
+type BinaryFn is extern "C" fn(c_int, c_int) -> c_int;
+
+/// Void callback
+type VoidCallback is extern "C" fn(*mut c_void);
+
+/// Data callback with user data
+type DataCallback is extern "C" fn(*mut c_void, c_int) -> c_int;
+
+/// Comparison callback for sorting
+type CompareCallback is extern "C" fn(*const c_void, *const c_void) -> c_int;
+
+/// Signal handler
+type SignalHandler is extern "C" fn(c_int);
+
+// ============================================================
+// FFI DECLARATIONS
+// ============================================================
+
+ffi callback_api {
+    @extern("C")
+    fn register_callback(
+        callback: DataCallback,
+        user_data: *mut c_void
+    ) -> c_int;
+
+    @extern("C")
+    fn unregister_callback(callback: DataCallback);
+
+    @extern("C")
+    fn qsort(
+        base: *mut c_void,
+        nmemb: c_size,
+        size: c_size,
+        compar: CompareCallback
+    );
+}
+
+// ============================================================
+// EXPORTED CALLBACK FUNCTIONS
+// ============================================================
+
+/// Double value callback
+@export("C")
+@extern("C")
+fn double_callback(x: c_int) -> c_int {
+    x * 2
+}
+
+/// Add callback
+@export("C")
+@extern("C")
+fn add_callback(a: c_int, b: c_int) -> c_int {
+    a + b
+}
+
+/// Integer comparison for sorting
+@export("C")
+@extern("C")
+fn compare_ints(a: *const c_void, b: *const c_void) -> c_int {
+    unsafe {
+        let a_val = *(a as *const c_int);
+        let b_val = *(b as *const c_int);
+
+        if a_val < b_val { -1 }
+        else if a_val > b_val { 1 }
+        else { 0 }
+    }
+}
+
+// ============================================================
+// TRAMPOLINE PATTERN
+// ============================================================
+
+/// Counter context for callback
+type CounterContext is {
+    count: c_int,
+    multiplier: c_int,
+};
+
+/// Trampoline for counter callback
+@extern("C")
+fn counter_trampoline(data: *mut c_void, value: c_int) -> c_int {
+    unsafe {
+        let ctx = &mut *(data as *mut CounterContext);
+        ctx.count += 1;
+        value * ctx.multiplier
+    }
+}
+
+/// Use counter callback
+fn use_counter_callback() {
+    let mut ctx = CounterContext { count: 0, multiplier: 2 };
+    let data_ptr = &mut ctx as *mut CounterContext as *mut c_void;
+
+    unsafe {
+        callback_api.register_callback(counter_trampoline, data_ptr);
+    }
+}
+
+// ============================================================
+// TYPED CALLBACK WRAPPER
+// ============================================================
+
+/// Type-safe callback wrapper
+type TypedCallback<T> is {
+    callback: DataCallback,
+    data: *mut T,
+};
+
+implement TypedCallback<CounterContext> {
+    fn invoke(&self, value: c_int) -> c_int {
+        (self.callback)(self.data as *mut c_void, value)
+    }
+}
+
+// ============================================================
+// FUNCTION POINTER ARRAYS (Dispatch Table)
+// ============================================================
+
+/// Dispatch table pattern
+type DispatchTable is {
+    add: BinaryFn,
+    sub: BinaryFn,
+    mul: BinaryFn,
+    div: BinaryFn,
+};
+
+@extern("C")
+fn dispatch_add(a: c_int, b: c_int) -> c_int { a + b }
+
+@extern("C")
+fn dispatch_sub(a: c_int, b: c_int) -> c_int { a - b }
+
+@extern("C")
+fn dispatch_mul(a: c_int, b: c_int) -> c_int { a * b }
+
+@extern("C")
+fn dispatch_div(a: c_int, b: c_int) -> c_int {
+    if b == 0 { 0 } else { a / b }
+}
+
+const MATH_DISPATCH: DispatchTable = DispatchTable {
+    add: dispatch_add,
+    sub: dispatch_sub,
+    mul: dispatch_mul,
+    div: dispatch_div,
+};
+
+/// Execute operation from dispatch table
+fn dispatch_op(table: &DispatchTable, op: c_int, a: c_int, b: c_int) -> c_int {
+    if op == 0 { (table.add)(a, b) }
+    else if op == 1 { (table.sub)(a, b) }
+    else if op == 2 { (table.mul)(a, b) }
+    else { (table.div)(a, b) }
+}
+
+// ============================================================
+// CALLBACK CHAINING
+// ============================================================
+
+/// Chain two callbacks
+fn chain_callbacks(first: UnaryFn, second: UnaryFn, input: c_int) -> c_int {
+    second(first(input))
+}
+
+type Error is
+    | RegistrationFailed
+    | InvalidCallback;
+
+fn main() {
+    // Test counter callback
+    use_counter_callback();
+
+    // Test dispatch table
+    let result = dispatch_op(&MATH_DISPATCH, 0, 10, 20);
+    assert(result == 30);
+
+    // Test chain
+    let chained = chain_callbacks(double_callback, double_callback, 5);
+    assert(chained == 20);
+}

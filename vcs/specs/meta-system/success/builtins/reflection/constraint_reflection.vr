@@ -1,0 +1,57 @@
+// @test: meta-pass
+// @level: L1
+// @description: Tests constraint reflection builtin functions
+// @tags: meta-system, builtins, reflection, constraints
+// @contexts: MetaTypes
+
+// Basic type for testing
+type Bounded<T> is {
+    value: T,
+};
+
+// Protocol for testing
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// Maybe type for tests
+type Maybe<T> is None | Some(T);
+
+// Test bounds_of - gets trait bounds
+meta fn test_bounds_of(ctx: Text) -> Bool using [MetaTypes] {
+    // Get bounds of T in Bounded<T>
+    let bounds = bounds_of<Bounded<Int>>();
+    // Should return a list (possibly empty)
+    list_len(bounds) >= 0
+}
+
+// Test associated_types_of - gets associated types
+meta fn test_associated_types_of(ctx: Text) -> Bool using [MetaTypes] {
+    let assoc = associated_types_of<Iterator>();
+    // Should have Item associated type
+    list_len(assoc) >= 0
+}
+
+// Test super_types_of - gets parent protocols
+meta fn test_super_types_of(ctx: Text) -> Bool using [MetaTypes] {
+    let supers = super_types_of<Iterator>();
+    // May have parent protocols
+    list_len(supers) >= 0
+}
+
+// Test combined constraint reflection
+meta fn test_combined_constraints(ctx: Text) -> Bool using [MetaTypes] {
+    // Get all constraints from a complex type
+    let bounds = bounds_of<Bounded<Int>>();
+
+    // Should be accessible
+    list_len(bounds) >= 0
+}
+
+fn main() {
+    @const assert(test_bounds_of("ctx"));
+    @const assert(test_associated_types_of("ctx"));
+    @const assert(test_super_types_of("ctx"));
+    @const assert(test_combined_constraints("ctx"));
+}

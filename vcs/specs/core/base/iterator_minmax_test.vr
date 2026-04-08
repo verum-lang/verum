@@ -1,0 +1,211 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, iterator, min_max, min_max_by_key
+// @description: Tests for Iterator.min_max and Iterator.min_max_by_key
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Iterator.min_max
+// =============================================================================
+
+@test
+fn test_min_max_basic() {
+    let list = [3, 1, 4, 1, 5, 9, 2, 6];
+    let result = list.iter().cloned().min_max();
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, 9);
+}
+
+@test
+fn test_min_max_single() {
+    let list = [42];
+    let result = list.iter().cloned().min_max();
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert_eq(pair.0, 42);
+    assert_eq(pair.1, 42);
+}
+
+@test
+fn test_min_max_empty() {
+    let list: List<Int> = [];
+    let result = list.iter().cloned().min_max();
+    assert(result.is_none());
+}
+
+@test
+fn test_min_max_two_elements() {
+    let list = [10, 20];
+    let result = list.iter().cloned().min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 10);
+    assert_eq(pair.1, 20);
+}
+
+@test
+fn test_min_max_two_elements_reversed() {
+    let list = [20, 10];
+    let result = list.iter().cloned().min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 10);
+    assert_eq(pair.1, 20);
+}
+
+@test
+fn test_min_max_all_same() {
+    let list = [7, 7, 7, 7];
+    let result = list.iter().cloned().min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 7);
+    assert_eq(pair.1, 7);
+}
+
+@test
+fn test_min_max_sorted_ascending() {
+    let list = [1, 2, 3, 4, 5];
+    let result = list.iter().cloned().min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, 5);
+}
+
+@test
+fn test_min_max_sorted_descending() {
+    let list = [5, 4, 3, 2, 1];
+    let result = list.iter().cloned().min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, 5);
+}
+
+@test
+fn test_min_max_negative() {
+    let list = [-10, 5, -3, 8, -1];
+    let result = list.iter().cloned().min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, -10);
+    assert_eq(pair.1, 8);
+}
+
+@test
+fn test_min_max_min_at_end() {
+    let list = [5, 4, 3, 2, 1];
+    let result = list.iter().cloned().min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 1);
+}
+
+@test
+fn test_min_max_max_at_start() {
+    let list = [100, 1, 2, 3, 4];
+    let result = list.iter().cloned().min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, 100);
+}
+
+// =============================================================================
+// Section 2: Iterator.min_max_by_key
+// =============================================================================
+
+@test
+fn test_min_max_by_key_basic() {
+    let list = [3, -1, 4, -5, 2];
+    fn abs_val(x: &Int) -> Int {
+        if *x < 0 { 0 - *x } else { *x }
+    }
+    let result = list.iter().cloned().min_max_by_key(abs_val);
+    assert(result.is_some());
+    let pair = result.unwrap();
+    // Min by abs: -1 (abs=1), Max by abs: -5 (abs=5)
+    assert_eq(pair.0, -1);
+    assert_eq(pair.1, -5);
+}
+
+@test
+fn test_min_max_by_key_single() {
+    let list = [42];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().cloned().min_max_by_key(identity);
+    let pair = result.unwrap();
+    assert_eq(pair.0, 42);
+    assert_eq(pair.1, 42);
+}
+
+@test
+fn test_min_max_by_key_empty() {
+    let list: List<Int> = [];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().cloned().min_max_by_key(identity);
+    assert(result.is_none());
+}
+
+@test
+fn test_min_max_by_key_negation() {
+    let list = [1, 2, 3, 4, 5];
+    fn negate(x: &Int) -> Int { 0 - *x }
+    let result = list.iter().cloned().min_max_by_key(negate);
+    let pair = result.unwrap();
+    // Min by negation: 5 (neg=-5), Max by negation: 1 (neg=-1)
+    assert_eq(pair.0, 5);
+    assert_eq(pair.1, 1);
+}
+
+@test
+fn test_min_max_by_key_modulo() {
+    let list = [10, 25, 37, 42, 53];
+    fn mod10(x: &Int) -> Int { *x % 10 }
+    let result = list.iter().cloned().min_max_by_key(mod10);
+    let pair = result.unwrap();
+    // Min by mod10: 10 (mod=0), Max by mod10: 37 (mod=7)
+    assert_eq(pair.0, 10);
+    assert_eq(pair.1, 37);
+}
+
+// =============================================================================
+// Section 3: Integration
+// =============================================================================
+
+@test
+fn test_min_max_with_range() {
+    let result = range(1, 101).min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, 100);
+}
+
+@test
+fn test_min_max_with_filter() {
+    let list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    fn is_even(x: &Int) -> Bool { *x % 2 == 0 }
+    let result = list.iter().cloned().filter(is_even).min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 2);
+    assert_eq(pair.1, 10);
+}
+
+@test
+fn test_min_max_with_map() {
+    let list = [1, 2, 3, 4, 5];
+    fn square(x: Int) -> Int { x * x }
+    let result = list.iter().cloned().map(square).min_max();
+    let pair = result.unwrap();
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, 25);
+}
+
+@test
+fn test_min_max_consistency_with_separate() {
+    let list = [5, 3, 8, 1, 7, 2, 9, 4, 6];
+    // min_max should match separate min() and max()
+    let pair = list.iter().cloned().min_max().unwrap();
+    let min_val = list.iter().cloned().min().unwrap();
+    let max_val = list.iter().cloned().max().unwrap();
+    assert_eq(pair.0, min_val);
+    assert_eq(pair.1, max_val);
+}

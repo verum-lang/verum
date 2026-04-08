@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, comma, error
+// @description: Test missing comma detection in various contexts
+// @expected-error: E018
+
+fn test_missing_comma() {
+    let arr = [1 2 3];
+    let tuple = (a b c);
+    foo(x y z);
+}

@@ -1,0 +1,30 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, fin, error
+// @expected-error: E500 "refinement constraint failed"
+
+/// Fin type - failure cases
+
+/// Bounded index type
+type Fin<N: meta Int> is { value: Int };
+
+/// ERROR: Return wrong type from Fin function
+fn fin_wrong() -> Fin<5> {
+    "hello"  // ERROR: Text != Fin<5>
+}
+
+/// ERROR: Wrong field type
+fn fin_field_wrong() -> Fin<5> {
+    Fin { value: "not a number" }  // ERROR: Text != Int
+}
+
+/// ERROR: Use Fin as Int directly
+fn fin_as_int(f: Fin<5>) -> Text {
+    f  // ERROR: Fin<5> != Text
+}
+
+fn main() {
+    let _ = fin_wrong();
+    let _ = fin_field_wrong();
+}

@@ -1,0 +1,199 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arrays, operations
+
+// Array operations and methods
+
+fn test_indexing() {
+    // Indexing
+    let arr = [1, 2, 3, 4, 5];
+    let first = arr[0];
+    let last = arr[4];
+    let middle = arr[2];
+}
+
+fn test_negative_indexing() {
+    // Negative indexing (if supported)
+    let arr = [1, 2, 3, 4, 5];
+    let last_neg = arr[-1];    // Last element
+    let second_last = arr[-2]; // Second to last
+}
+
+fn test_expression_indexing() {
+    // Index with expression
+    let arr = [1, 2, 3, 4, 5];
+    let i = 2;
+    let at_i = arr[i];
+    let computed = arr[i + 1];
+}
+
+fn test_range_slicing() {
+    // Range slicing
+    let arr = [1, 2, 3, 4, 5];
+    let slice = arr[1..4];      // [2, 3, 4]
+    let from_start = arr[..3];  // [1, 2, 3]
+    let to_end = arr[2..];      // [3, 4, 5]
+    let full = arr[..];         // Copy all
+    let inclusive = arr[1..=3]; // [2, 3, 4]
+}
+
+fn test_mutable_indexing() {
+    // Mutable indexing
+    let mut numbers = [10, 20, 30];
+    numbers[0] = 100;
+    numbers[1] += 5;
+    numbers[2] *= 2;
+}
+
+fn test_array_length() {
+    // Array length
+    let arr = [1, 2, 3, 4, 5];
+    let len = arr.len();
+    let is_empty = arr.is_empty();
+    let has_items = !arr.is_empty();
+}
+
+fn test_array_methods() {
+    // Array methods
+    let arr = [1, 2, 3, 4, 5];
+    let mapped = arr.map(|x| x * 2);
+    let filtered = arr.filter(|x| x > 2);
+    let found = arr.find(|x| x == 3);
+    let any_match = arr.any(|x| x > 4);
+    let all_match = arr.all(|x| x > 0);
+}
+
+fn test_chained_operations() {
+    // Chained operations
+    let arr = [1, 2, 3, 4, 5];
+    let result = arr
+        .filter(|x| x > 1)
+        .map(|x| x * 2)
+        .take(3)
+        .collect();
+}
+
+fn test_fold_reduce() {
+    // Fold/reduce
+    let arr = [1, 2, 3, 4, 5];
+    let sum = arr.fold(0, |acc, x| acc + x);
+    let product = arr.reduce(|a, b| a * b);
+}
+
+fn test_sort_operations() {
+    // Sort operations
+    let arr = [1, 2, 3, 4, 5];
+    let sorted = arr.sorted();
+    let sorted_by = arr.sorted_by(|a, b| b.cmp(a));  // Descending
+    let sorted_by_key = items.sorted_by_key(|item| item.priority);
+}
+
+fn test_search_operations() {
+    // Search operations
+    let arr = [1, 2, 3, 4, 5];
+    let contains = arr.contains(3);
+    let position = arr.position(|x| x == 3);
+    let binary_search = sorted_arr.binary_search(42);
+}
+
+fn test_iteration() {
+    // Iteration
+    let arr = [1, 2, 3, 4, 5];
+    for item in arr {
+        process(item);
+    }
+}
+
+fn test_enumerated_iteration() {
+    let arr = [1, 2, 3, 4, 5];
+    for (index, item) in arr.enumerate() {
+        process_with_index(index, item);
+    }
+}
+
+fn test_reverse_iteration() {
+    // Reverse iteration
+    let arr = [1, 2, 3, 4, 5];
+    for item in arr.rev() {
+        process(item);
+    }
+}
+
+fn test_zip_operations() {
+    // Zip operations
+    let a = [1, 2, 3];
+    let b = ["a", "b", "c"];
+    let zipped = a.zip(b);  // [(1, "a"), (2, "b"), (3, "c")]
+}
+
+fn test_unzip() {
+    // Unzip
+    let zipped = [(1, "a"), (2, "b"), (3, "c")];
+    let (numbers, letters) = zipped.unzip();
+}
+
+fn test_flatten() {
+    // Flatten
+    let nested = [[1, 2], [3, 4], [5, 6]];
+    let flat = nested.flatten();  // [1, 2, 3, 4, 5, 6]
+}
+
+fn test_flat_map() {
+    // Flat map
+    let words = ["hello world", "foo bar"];
+    let chars = words.flat_map(|s| s.chars());
+}
+
+fn test_take_skip() {
+    // Take and skip
+    let arr = [1, 2, 3, 4, 5];
+    let first_three = arr.take(3);
+    let after_two = arr.skip(2);
+}
+
+fn test_chunk_operations() {
+    // Chunk operations
+    let arr = [1, 2, 3, 4, 5];
+    let chunks = arr.chunks(2);  // [[1, 2], [3, 4], [5]]
+    let windows = arr.windows(3); // [[1,2,3], [2,3,4], [3,4,5]]
+}
+
+fn test_partition() {
+    // Partition
+    let arr = [1, 2, 3, 4, 5];
+    let (evens, odds) = arr.partition(|x| x % 2 == 0);
+}
+
+fn test_group_by() {
+    // Group by
+    let grouped = items.group_by(|item| item.category);
+}
+
+fn test_dedup() {
+    // Dedup
+    let with_dups = [1, 1, 2, 2, 3, 3];
+    let deduped = with_dups.dedup();  // [1, 2, 3]
+}
+
+fn test_join() {
+    // Join
+    let strs = ["a", "b", "c"];
+    let joined = strs.join(", ");  // "a, b, c"
+}
+
+fn test_min_max() {
+    // Min/max
+    let arr = [1, 2, 3, 4, 5];
+    let minimum = arr.min();
+    let maximum = arr.max();
+    let min_by = items.min_by_key(|x| x.value);
+    let max_by = items.max_by_key(|x| x.value);
+}
+
+fn test_first_last() {
+    // First/last
+    let arr = [1, 2, 3, 4, 5];
+    let first_opt = arr.first();
+    let last_opt = arr.last();
+}

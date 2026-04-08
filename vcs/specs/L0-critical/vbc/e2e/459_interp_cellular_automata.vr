@@ -1,0 +1,247 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cellular_automata, rule30, rule110, 1d_ca
+// @timeout: 15000
+// @expected-exit: 0
+//
+// 1D cellular automata: Rule 30 and Rule 110.
+// Each cell is 0 or 1. Next state of cell i depends on cells [i-1, i, i+1].
+// The 8 combinations (left, center, right) from 111 down to 000 give the rule number in binary.
+// Rule 30 = 00011110 in binary, Rule 110 = 01101110 in binary.
+
+// Apply one CA step using the given rule number.
+// grid: current state array of size n (with wrap-around boundary)
+// next: output array of size n
+// rule: rule number (0-255)
+fn ca_step(grid: [Int; 32], n: Int, next: [Int; 32], rule: Int) {
+    let mut i = 0;
+    while i < n {
+        let left   = if i == 0 { grid[n - 1] } else { grid[i - 1] };
+        let center = grid[i];
+        let right  = if i == n - 1 { grid[0] } else { grid[i + 1] };
+
+        // Compute index into rule: 4*left + 2*center + right
+        let idx = 4 * left + 2 * center + right;
+
+        // Extract bit idx from rule
+        // rule >> idx = rule / 2^idx; take lowest bit
+        let shift = if idx == 0 { 1 }
+                    else if idx == 1 { 2 }
+                    else if idx == 2 { 4 }
+                    else if idx == 3 { 8 }
+                    else if idx == 4 { 16 }
+                    else if idx == 5 { 32 }
+                    else if idx == 6 { 64 }
+                    else { 128 };
+        next[i] = (rule / shift) % 2;
+        i = i + 1;
+    }
+}
+
+// Copy src array to dst of size n.
+fn ca_copy(src: [Int; 32], dst: [Int; 32], n: Int) {
+    let mut i = 0;
+    while i < n { dst[i] = src[i]; i = i + 1; }
+}
+
+// Count live cells (1s) in array of size n.
+fn ca_count(grid: [Int; 32], n: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n { cnt = cnt + grid[i]; i = i + 1; }
+    cnt
+}
+
+fn test_rule30_single_seed() {
+    // Rule 30, starting with single cell in center of width 16.
+    // Let's use width=16 with seed at position 8 (0-indexed).
+    // Rule 30 = 30 = 0b00011110
+    //   pattern: 111->0, 110->0, 101->0, 100->1, 011->1, 010->1, 001->1, 000->0
+    //
+    // Generation 0: 0000000010000000  (1 at index 8, width 16, 0-indexed)
+    // Wait - let's use width=8 with seed at position 4 for easier manual verification.
+    // But actually let's use width=16 and position 8.
+    //
+    // Gen 0: ...0001000...  (only pos 8 = 1)
+    // For Rule 30 with a single 1 in the middle:
+    // Gen 1: Each cell looks at its neighborhood.
+    // Only positions 7, 8, 9 have nonzero contribution.
+    // pos 7: neighbors = (grid[6]=0, grid[7]=0, grid[8]=1) = 001 -> rule bit 1 -> 1
+    // pos 8: neighbors = (grid[7]=0, grid[8]=1, grid[9]=0) = 010 -> rule bit 2 -> 1
+    // pos 9: neighbors = (grid[8]=1, grid[9]=0, grid[10]=0) = 100 -> rule bit 4 -> 1
+    // All others = 000 -> rule bit 0 -> 0
+    // Gen 1: 0000000 1 1 1 000000 (positions 7,8,9 = 1)
+    //
+    // Gen 2: examine positions 6,7,8,9,10
+    // pos 6: (0,0,1)=001 -> 1
+    // pos 7: (0,1,1)=011 -> rule bit 3 -> 1
+    // pos 8: (1,1,1)=111 -> rule bit 7 -> (30/128)%2 = 0
+    // pos 9: (1,1,0)=110 -> rule bit 6 -> (30/64)%2 = 0
+    // pos 10: (1,0,0)=100 -> rule bit 4 -> (30/16)%2 = 1
+    // Gen 2: positions 6,7,10 = 1 -> count = 3
+
+    let n = 16;
+    let rule = 30;
+    let mut grid = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut next = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Gen 0: 1 live cell
+    assert_eq(ca_count(grid, n), 1);
+
+    // Gen 1
+    ca_step(grid, n, next, rule);
+    ca_copy(next, grid, n);
+    assert_eq(grid[7], 1);
+    assert_eq(grid[8], 1);
+    assert_eq(grid[9], 1);
+    assert_eq(ca_count(grid, n), 3);
+
+    // Gen 2
+    ca_step(grid, n, next, rule);
+    ca_copy(next, grid, n);
+    // pos 6: (0,0,1)=001 -> bit 1 of rule30 = 1
+    // pos 7: (0,1,1)=011 -> bit 3 of rule30 = 1
+    // pos 8: (1,1,1)=111 -> bit 7 of rule30 = 0
+    // pos 9: (1,1,0)=110 -> bit 6 of rule30 = 0
+    // pos 10: (1,0,0)=100 -> bit 4 of rule30 = 1
+    assert_eq(grid[6], 1);
+    assert_eq(grid[7], 1);
+    assert_eq(grid[8], 0);
+    assert_eq(grid[9], 0);
+    assert_eq(grid[10], 1);
+    assert_eq(ca_count(grid, n), 3);
+
+    print("rule30_single_seed: ok");
+}
+
+fn test_rule110_pattern() {
+    // Rule 110 = 01101110 in binary:
+    //   111->0, 110->1, 101->1, 100->0, 011->1, 010->1, 001->1, 000->0
+    // Rule 110 is Turing-complete!
+    //
+    // Start with a pattern: width=8, grid = [1,1,1,1,0,0,0,1] (positions 0-7)
+    // Gen 0: 1,1,1,1,0,0,0,1
+    //
+    // Compute Gen 1 with wrap-around:
+    // pos 0: left=grid[7]=1, center=grid[0]=1, right=grid[1]=1 -> 111 -> bit 7 of 110 -> (110/128)%2=0
+    // pos 1: (1,1,1)=111 -> 0
+    // pos 2: (1,1,1)=111 -> 0
+    // pos 3: (1,1,0)=110 -> bit 6 of 110 -> (110/64)%2=1
+    // pos 4: (1,0,0)=100 -> bit 4 of 110 -> (110/16)%2=0
+    // pos 5: (0,0,0)=000 -> bit 0 of 110 -> (110/1)%2=0
+    // pos 6: (0,0,1)=001 -> bit 1 of 110 -> (110/2)%2=1
+    // pos 7: (0,1,1)=011 -> bit 3 of 110 -> (110/8)%2=1... wait:
+    //   110 in binary: 64+32+8+4+2 = 110? Let's check: 64+32=96, +8=104, +4=108, +2=110. Yes.
+    //   So bit positions: bit0=0, bit1=1, bit2=1, bit3=1, bit4=0, bit5=1, bit6=1, bit7=0
+    // pos 7: neighbors=(grid[6]=0, grid[7]=1, grid[0]=1)=011 -> bit 3 -> 1
+    //
+    // Gen 1: [0, 0, 0, 1, 0, 0, 1, 1]  -> count = 3
+
+    let n = 8;
+    let rule = 110;
+    let mut grid = [1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut next = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    ca_step(grid, n, next, rule);
+    ca_copy(next, grid, n);
+
+    // Verify gen 1
+    assert_eq(grid[0], 0);
+    assert_eq(grid[1], 0);
+    assert_eq(grid[2], 0);
+    assert_eq(grid[3], 1);
+    assert_eq(grid[4], 0);
+    assert_eq(grid[5], 0);
+    assert_eq(grid[6], 1);
+    assert_eq(grid[7], 1);
+    assert_eq(ca_count(grid, n), 3);
+
+    print("rule110_pattern: ok");
+}
+
+fn test_rule_evolution_count() {
+    // Evolve Rule 30 for 5 generations and track live-cell counts.
+    // Starting with a single 1 at position 15 in a width-32 grid.
+    // Gen 0: count=1
+    // Gen 1: count=3 (positions 14,15,16)
+    // Gen 2: check...
+    // To avoid complex manual math, we just verify monotonicity properties
+    // and specific known counts.
+
+    let n = 32;
+    let rule = 30;
+    let mut grid = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut next = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let cnt0 = ca_count(grid, n);
+    assert_eq(cnt0, 1);
+
+    ca_step(grid, n, next, rule); ca_copy(next, grid, n);
+    let cnt1 = ca_count(grid, n);
+    assert_eq(cnt1, 3);
+
+    ca_step(grid, n, next, rule); ca_copy(next, grid, n);
+    let cnt2 = ca_count(grid, n);
+    // Gen 2 for Rule 30 single seed: positions 13,14,17 live
+    // pos 13: (0,0,1)=001 -> 1; pos 14: (0,1,1)=011 -> 1; pos 15: (1,1,1)=111 -> 0
+    // pos 16: (1,1,0)=110 -> 0; pos 17: (1,0,0)=100 -> 1 (same as width-8 case)
+    assert_eq(cnt2, 3);
+
+    ca_step(grid, n, next, rule); ca_copy(next, grid, n);
+    let cnt3 = ca_count(grid, n);
+    // Gen 3: live cells grow; Rule 30 grows by roughly 1-2 cells per gen
+    // Exact count: pos 12,13,16,17,18 are candidates
+    // pos 12: (0,0,1)=001->1; pos 13: (0,1,1)=011->1;
+    // pos 14: (1,1,0)=110->0; pos 15: (1,0,0)=100->1
+    // pos 16: (0,1,0)=010->1; pos 17: (1,1,0)=110->0; pos 18: (1,0,0)=100->1
+    // Wait: gen2 state at pos 13=1,14=1,17=1, others 0.
+    // pos 12: left=grid[11]=0, c=grid[12]=0, r=grid[13]=1 -> 001 -> 1
+    // pos 13: left=0, c=1, r=1 -> 011 -> 1
+    // pos 14: left=1, c=1, r=0 -> 110 -> 0
+    // pos 15: left=1, c=0, r=0 -> 100 -> 1  (bit4 of 30 = (30/16)%2 = 1)
+    // pos 16: left=0, c=0, r=1 -> 001 -> 1
+    // pos 17: left=0, c=1, r=0 -> 010 -> 1  (bit2 of 30 = (30/4)%2 = 1)
+    // pos 18: left=1, c=0, r=0 -> 100 -> 1
+    // Gen 3: positions 12,13,15,16,17,18 = 6 live cells
+    assert_eq(cnt3, 6);
+
+    print("rule_evolution_count: ok");
+}
+
+fn test_all_zeros_ca() {
+    // All-zeros grid stays all-zeros for any rule that maps 000->0.
+    // Rule 30 maps 000->0 (bit 0 of 30 = 0). Rule 110 maps 000->0 (bit 0 of 110 = 0).
+    let n = 8;
+    let mut grid = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut next = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    ca_step(grid, n, next, 30);
+    assert_eq(ca_count(next, n), 0);
+
+    ca_step(grid, n, next, 110);
+    assert_eq(ca_count(next, n), 0);
+
+    // Rule 255 maps everything to 1: all cells become 1
+    ca_step(grid, n, next, 255);
+    assert_eq(ca_count(next, n), 8);
+
+    print("all_zeros_ca: ok");
+}
+
+fn main() -> Int {
+    test_rule30_single_seed();
+    test_rule110_pattern();
+    test_rule_evolution_count();
+    test_all_zeros_ca();
+    print("[OK] 459_interp_cellular_automata");
+    0
+}

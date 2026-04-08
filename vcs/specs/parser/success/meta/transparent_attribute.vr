@@ -1,0 +1,104 @@
+// @test: parse-pass
+// @level: L0
+// @tier: 0
+// @category: meta
+// @tags: parser, meta, transparent, attribute
+// @description: Tests parsing of @transparent attribute on meta functions
+
+// =============================================================================
+// BASIC @TRANSPARENT ATTRIBUTE
+// =============================================================================
+
+// Transparent meta function - disables hygienic expansion
+@transparent
+meta fn transparent_simple() -> TokenStream {
+    quote { 1 + 2 }
+}
+
+// =============================================================================
+// @TRANSPARENT WITH OTHER ATTRIBUTES
+// =============================================================================
+
+// Transparent with inline
+@transparent
+@inline
+meta fn transparent_inline() -> TokenStream {
+    quote { x }
+}
+
+// Transparent with deprecated
+@deprecated("use new_macro instead")
+@transparent
+meta fn transparent_deprecated() -> TokenStream {
+    quote { old_code() }
+}
+
+// Multiple attributes with transparent
+@transparent
+@cfg(feature = "macros")
+meta fn transparent_multi_attr() -> TokenStream {
+    quote { complex }
+}
+
+// =============================================================================
+// @TRANSPARENT WITH PARAMETERS
+// =============================================================================
+
+// Transparent with parameters
+@transparent
+meta fn transparent_with_params(name: Ident, value: Int) -> TokenStream {
+    quote { let $name = $value; }
+}
+
+// Transparent with generic parameters
+@transparent
+meta fn transparent_generic<T>() -> TokenStream {
+    quote { default::<T>() }
+}
+
+// =============================================================================
+// @TRANSPARENT WITH WHERE CLAUSES
+// =============================================================================
+
+// Transparent with generic where clause
+@transparent
+meta fn transparent_where<T>() -> TokenStream
+    where T: Copy
+{
+    quote { copy::<T>() }
+}
+
+// =============================================================================
+// CONTRAST: NON-TRANSPARENT (HYGIENIC) META FUNCTIONS
+// =============================================================================
+
+// Default hygienic meta function (no @transparent)
+meta fn hygienic_default() -> TokenStream {
+    quote { temp_var }
+}
+
+// Explicitly non-transparent with other attributes
+@inline
+meta fn hygienic_inline() -> TokenStream {
+    quote { temp_var }
+}
+
+// =============================================================================
+// @TRANSPARENT WITH VISIBILITY
+// =============================================================================
+
+// Transparent with visibility
+@transparent
+pub meta fn transparent_pub() -> TokenStream {
+    quote { public_code() }
+}
+
+// Transparent with pure modifier
+@transparent
+pure meta fn transparent_pure() -> TokenStream {
+    quote { pure_expr }
+}
+
+fn main() {
+    // Just parse the file, no runtime execution needed
+}

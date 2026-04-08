@@ -1,0 +1,231 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, quote, hygiene, derive, macro
+// @description: Tests hygienic behavior in derive-style macros
+
+// =============================================================================
+// BASIC DERIVE MACRO
+// =============================================================================
+
+// Derive Debug implementation without hygiene violations
+meta fn derive_debug(type_info: TypeInfo) -> TokenStream {
+    let name = type_info.name;
+    let fields = type_info.fields;
+
+    quote {
+        implement Debug for $name {
+            fn debug_fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
+                f.write_str(${name.as_str()})?;
+                f.write_str("{")?;
+                $[for (idx, field) in fields.enumerate() {
+                    if ${idx} > 0 { f.write_str(", ")?; }
+                    f.write_str(${field.name.as_str()})?;
+                    f.write_str(": ")?;
+                    self.$field.debug_fmt(f)?;
+                }]
+                f.write_str("}")
+            }
+        }
+    }
+}
+
+// =============================================================================
+// DERIVE WITH HELPER FUNCTIONS
+// =============================================================================
+
+// Derive that uses internal helper variables
+meta fn derive_eq(type_info: TypeInfo) -> TokenStream {
+    let name = type_info.name;
+    let fields = type_info.fields;
+
+    // Generate field comparisons hygienically
+    quote {
+        implement Eq for $name {
+            fn eq(&self, other: &Self) -> Bool {
+                // 'result' is a macro-internal variable
+                let result = true;
+                $[for field in fields {
+                    result = result && self.$field == other.$field;
+                }]
+                result
+            }
+        }
+    }
+}
+
+// =============================================================================
+// DERIVE WITH TRAIT BOUNDS
+// =============================================================================
+
+// Derive Clone with proper field cloning
+meta fn derive_clone(type_info: TypeInfo) -> TokenStream {
+    let name = type_info.name;
+    let fields = type_info.fields;
+
+    quote {
+        implement Clone for $name
+        where $[for f in fields { ${f.ty}: Clone }],
+        {
+            fn clone(&self) -> Self {
+                Self {
+                    $[for f in fields {
+                        $f: self.$f.clone(),
+                    }]
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// DERIVE WITH VARIANT TYPES
+// =============================================================================
+
+// Derive for variant types (enums)
+meta fn derive_debug_variant(type_info: TypeInfo) -> TokenStream {
+    let name = type_info.name;
+    let variants = type_info.variants;
+
+    quote {
+        implement Debug for $name {
+            fn debug_fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
+                match self {
+                    $[for variant in variants {
+                        Self::$variant(inner) => {
+                            f.write_str(${variant.name.as_str()})?;
+                            f.write_str("(")?;
+                            inner.debug_fmt(f)?;
+                            f.write_str(")")
+                        },
+                    }]
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// DERIVE WITH GENERICS
+// =============================================================================
+
+// Derive for generic types
+meta fn derive_default_generic(type_info: TypeInfo) -> TokenStream {
+    let name = type_info.name;
+    let type_params = type_info.type_params;
+    let fields = type_info.fields;
+
+    quote {
+        implement<$[for T in type_params { $T }]> Default for $name<$[for T in type_params { $T }]>
+        where $[for T in type_params { $T: Default }],
+        {
+            fn default() -> Self {
+                Self {
+                    $[for f in fields {
+                        $f: Default::default(),
+                    }]
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// DERIVE WITH ATTRIBUTE PARAMETERS
+// =============================================================================
+
+// Derive with configuration via attributes
+meta fn derive_serialize(type_info: TypeInfo, options: SerializeOptions) -> TokenStream {
+    let name = type_info.name;
+    let fields = type_info.fields;
+    let format = options.format;
+
+    quote {
+        implement Serialize for $name {
+            fn serialize(&self, serializer: &mut Serializer) -> Result<(), SerError> {
+                serializer.begin_struct(${name.as_str()}, ${fields.len()})?;
+                $[for field in fields {
+                    let field_name = if ${options.rename_all == "snake_case"} {
+                        to_snake_case(${field.name.as_str()})
+                    } else {
+                        ${field.name.as_str()}
+                    };
+                    serializer.serialize_field(field_name, &self.$field)?;
+                }]
+                serializer.end_struct()
+            }
+        }
+    }
+}
+
+// =============================================================================
+// DERIVE INTERACTION WITH USER CODE
+// =============================================================================
+
+// Ensure derive doesn't interfere with user-defined methods
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+@derive(Debug, Clone, Eq)
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+implement Point {
+    // User-defined method coexists with derived impls
+    fn distance_from_origin(&self) -> Float {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+}
+
+// =============================================================================
+// DERIVE WITH PRIVATE FIELDS
+// =============================================================================
+
+// Derive handles visibility correctly
+@derive(Debug)
+type PrivateFields is {
+    pub x: Int,
+    y: Int,  // Private field
+    pub z: Int,
+};
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_point_derive() {
+    let p1 = Point { x: 3.0, y: 4.0 };
+    let p2 = p1.clone();
+
+    // Debug
+    let debug_str = f"{p1:?}";
+    assert(debug_str.contains("Point"));
+    assert(debug_str.contains("x"));
+    assert(debug_str.contains("y"));
+
+    // Clone
+    assert(p2.x == p1.x);
+    assert(p2.y == p1.y);
+
+    // Eq
+    assert(p1 == p2);
+
+    // User method still works
+    assert(p1.distance_from_origin() == 5.0);
+}
+
+fn test_private_fields_derive() {
+    let pf = PrivateFields { x: 1, y: 2, z: 3 };
+    let debug_str = f"{pf:?}";
+    // Private fields are still included in Debug
+    assert(debug_str.contains("y"));
+}
+
+fn main() {
+    test_point_derive();
+    test_private_fields_derive();
+}

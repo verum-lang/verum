@@ -1,0 +1,135 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, counting_sort, non_comparison_sort, algorithms
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Counting sort: non-comparison sort for integers in a bounded range [0, MAX].
+// Runs in O(n + k) where k = range size.
+// All arrays are fixed at [Int; 16] for consistency.
+
+// Count occurrences of each value in arr[0..n-1] into counts[0..k-1].
+fn build_counts(arr: [Int; 16], n: Int, counts: [Int; 16]) {
+    let mut i = 0;
+    while i < n {
+        let v = arr[i];
+        counts[v] = counts[v] + 1;
+        i = i + 1;
+    }
+}
+
+// Counting sort: sort arr[0..n-1] (values in [0, max_val]) into out[0..n-1].
+fn counting_sort(arr: [Int; 16], n: Int, max_val: Int, out: [Int; 16]) {
+    let mut counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_counts(arr, n, counts);
+    // Write sorted output
+    let mut pos = 0;
+    let mut v = 0;
+    while v <= max_val {
+        let mut c = 0;
+        while c < counts[v] {
+            out[pos] = v;
+            pos = pos + 1;
+            c = c + 1;
+        }
+        v = v + 1;
+    }
+}
+
+fn is_sorted(arr: [Int; 16], n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if arr[i] < arr[i - 1] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn arrays_equal(a: [Int; 16], b: [Int; 16], n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        if a[i] != b[i] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_basic_sort() {
+    let mut arr = [4, 2, 2, 8, 3, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 7;
+    counting_sort(arr, n, 8, out);
+    // Expected: [1, 2, 2, 3, 3, 4, 8]
+    assert_eq(out[0], 1);
+    assert_eq(out[1], 2);
+    assert_eq(out[2], 2);
+    assert_eq(out[3], 3);
+    assert_eq(out[4], 3);
+    assert_eq(out[5], 4);
+    assert_eq(out[6], 8);
+    assert_eq(is_sorted(out, n), 1);
+    print("basic_sort: ok");
+}
+
+fn test_all_same() {
+    // All elements equal: output should be same.
+    let mut arr = [5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 6;
+    counting_sort(arr, n, 9, out);
+    assert_eq(out[0], 5);
+    assert_eq(out[5], 5);
+    assert_eq(is_sorted(out, n), 1);
+    print("all_same: ok");
+}
+
+fn test_zero_and_max() {
+    // Values at boundary: 0 and 9 only.
+    let mut arr = [9, 0, 9, 0, 0, 9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 8;
+    counting_sort(arr, n, 9, out);
+    // 4 zeros then 4 nines
+    assert_eq(out[0], 0);
+    assert_eq(out[3], 0);
+    assert_eq(out[4], 9);
+    assert_eq(out[7], 9);
+    assert_eq(is_sorted(out, n), 1);
+    print("zero_and_max: ok");
+}
+
+fn test_single_element() {
+    let mut arr = [7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    counting_sort(arr, 1, 9, out);
+    assert_eq(out[0], 7);
+    assert_eq(is_sorted(out, 1), 1);
+    print("single_element: ok");
+}
+
+fn test_counts_are_correct() {
+    // Verify count building is accurate.
+    let mut arr = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 0, 0, 0, 0, 0, 0];
+    let mut counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_counts(arr, 10, counts);
+    // 1 appears twice, 3 appears twice, 5 appears twice
+    assert_eq(counts[1], 2);
+    assert_eq(counts[2], 1);
+    assert_eq(counts[3], 2);
+    assert_eq(counts[4], 1);
+    assert_eq(counts[5], 2);
+    assert_eq(counts[6], 1);
+    assert_eq(counts[9], 1);
+    print("counts_correct: ok");
+}
+
+fn main() -> Int {
+    test_basic_sort();
+    test_all_same();
+    test_zero_and_max();
+    test_single_element();
+    test_counts_are_correct();
+    print("[OK] 512_interp_counting_sort");
+    0
+}

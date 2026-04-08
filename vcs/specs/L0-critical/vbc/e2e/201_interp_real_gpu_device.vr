@@ -1,0 +1,35 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, gpu, real-opcode, device
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL GPU device management intrinsics through VBC interpreter.
+// Exercises gpu_get_device, gpu_set_device, gpu_device_reset.
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Get current device (should return 0, the default)
+    let dev = gpu_get_device();
+    if dev != 0 { errors = errors + 1; }
+
+    // Test 2: Set device to 0 (should succeed, return 0)
+    let status = gpu_set_device(0);
+    if status != 0 { errors = errors + 1; }
+
+    // Test 3: Get device again after set (still 0)
+    let dev2 = gpu_get_device();
+    if dev2 != 0 { errors = errors + 1; }
+
+    // Test 4: Device reset (should succeed, return 0)
+    let reset = gpu_device_reset();
+    if reset != 0 { errors = errors + 1; }
+
+    // Test 5: Device still works after reset
+    let dev3 = gpu_get_device();
+    if dev3 != 0 { errors = errors + 1; }
+
+    errors
+}

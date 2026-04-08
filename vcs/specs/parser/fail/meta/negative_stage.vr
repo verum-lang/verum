@@ -1,0 +1,52 @@
+// @test: parse-fail
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, stage, negative, error
+// @expected-error: M006
+// @description: Meta stage numbers must be positive integers (>= 1)
+
+// =============================================================================
+// Grammar Reference:
+// meta_function = 'meta' , [ '(' , stage_number , ')' ] , function_def ;
+// stage_number = integer_literal ;  (* Must be >= 1 *)
+// =============================================================================
+
+// ERROR: Negative stage number
+meta(-1) fn negative_stage_one() -> Int {
+    42
+}
+
+// ERROR: Negative stage number (larger)
+meta(-5) fn negative_stage_five() -> Text {
+    "hello"
+}
+
+// ERROR: Negative stage with minus sign
+meta(-100) fn large_negative_stage() -> Bool {
+    true
+}
+
+// ERROR: Negative stage in type definition context
+meta(-1) type NegativeStageType is { value: Int };
+
+// ERROR: Negative stage for const
+meta(-2) const NEGATIVE_CONST: Int = 42;
+
+// ERROR: Negative stage for static
+meta(-3) static NEGATIVE_STATIC: Text = "test";
+
+// ERROR: Combining negative stage with quote
+meta(-1) fn negative_with_quote() {
+    let code = quote {
+        let x = 1;
+    };
+}
+
+// ERROR: Negative stage with using clause
+meta(-1) fn negative_with_using() using [Logger] {
+    log("test");
+}
+
+// ERROR: Negative one is still invalid (edge case)
+meta(-1) fn minus_one_edge_case() {}

@@ -1,0 +1,221 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, dp, fibonacci
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Dynamic programming Fibonacci — recursive, iterative bottom-up, and memoized implementations
+
+// ============================================================================
+// Arr16: Fixed-size array of 16 Ints for memoization table
+// ============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        e8: if i == 8 { val } else { a.e8 },
+        e9: if i == 9 { val } else { a.e9 },
+        e10: if i == 10 { val } else { a.e10 },
+        e11: if i == 11 { val } else { a.e11 },
+        e12: if i == 12 { val } else { a.e12 },
+        e13: if i == 13 { val } else { a.e13 },
+        e14: if i == 14 { val } else { a.e14 },
+        e15: if i == 15 { val } else { a.e15 }
+    }
+}
+
+fn a16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// ============================================================================
+// 1. Recursive Fibonacci (naive, only for small n)
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn fib_recursive(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else { fib_recursive(n - 1) + fib_recursive(n - 2) }
+}
+
+// ============================================================================
+// 2. Iterative bottom-up Fibonacci
+// ============================================================================
+
+fn fib_iterative(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        let mut prev2 = 0;
+        let mut prev1 = 1;
+        let mut i = 2;
+        while i <= n {
+            let curr = prev1 + prev2;
+            prev2 = prev1;
+            prev1 = curr;
+            i = i + 1;
+        }
+        prev1
+    }
+}
+
+// ============================================================================
+// 3. Memoized Fibonacci using fixed array (bottom-up table fill)
+// ============================================================================
+
+fn fib_memo(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        let mut table = a16_zeros();
+        table = a16_set(table, 0, 0);
+        table = a16_set(table, 1, 1);
+        let mut i = 2;
+        while i <= n {
+            let val = a16_get(table, i - 1) + a16_get(table, i - 2);
+            table = a16_set(table, i, val);
+            i = i + 1;
+        }
+        a16_get(table, n)
+    }
+}
+
+// ============================================================================
+// Test 1: Base cases
+// ============================================================================
+
+@test
+fn test_base_cases() {
+    assert_eq(fib_recursive(0), 0);
+    assert_eq(fib_recursive(1), 1);
+    assert_eq(fib_iterative(0), 0);
+    assert_eq(fib_iterative(1), 1);
+    assert_eq(fib_memo(0), 0);
+    assert_eq(fib_memo(1), 1);
+
+    print("  test_base_cases: ok");
+}
+
+// ============================================================================
+// Test 2: Small values match across implementations
+// ============================================================================
+
+@test
+fn test_small_values() {
+    // fib(2)=1, fib(3)=2, fib(4)=3, fib(5)=5
+    assert_eq(fib_recursive(2), 1);
+    assert_eq(fib_recursive(3), 2);
+    assert_eq(fib_recursive(4), 3);
+    assert_eq(fib_recursive(5), 5);
+
+    assert_eq(fib_iterative(2), 1);
+    assert_eq(fib_iterative(3), 2);
+    assert_eq(fib_iterative(4), 3);
+    assert_eq(fib_iterative(5), 5);
+
+    assert_eq(fib_memo(2), 1);
+    assert_eq(fib_memo(3), 2);
+    assert_eq(fib_memo(4), 3);
+    assert_eq(fib_memo(5), 5);
+
+    print("  test_small_values: ok");
+}
+
+// ============================================================================
+// Test 3: fib(10) = 55
+// ============================================================================
+
+@test
+fn test_fib_10() {
+    assert_eq(fib_recursive(10), 55);
+    assert_eq(fib_iterative(10), 55);
+    assert_eq(fib_memo(10), 55);
+
+    print("  test_fib_10: ok");
+}
+
+// ============================================================================
+// Test 4: fib(15) = 610
+// ============================================================================
+
+@test
+fn test_fib_15() {
+    assert_eq(fib_iterative(15), 610);
+    assert_eq(fib_memo(15), 610);
+    // Recursive would be slow for 15 but should still work
+    assert_eq(fib_recursive(15), 610);
+
+    print("  test_fib_15: ok");
+}
+
+// ============================================================================
+// Test 5: All three implementations agree for range [0..15]
+// ============================================================================
+
+@test
+fn test_all_agree() {
+    // Compare iterative vs memo for 0..15
+    let mut i = 0;
+    while i <= 15 {
+        let it = fib_iterative(i);
+        let me = fib_memo(i);
+        assert_eq(it, me);
+        i = i + 1;
+    }
+
+    // Spot check known values
+    // fib sequence: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610
+    assert_eq(fib_iterative(6), 8);
+    assert_eq(fib_iterative(7), 13);
+    assert_eq(fib_iterative(8), 21);
+    assert_eq(fib_iterative(9), 34);
+    assert_eq(fib_iterative(11), 89);
+    assert_eq(fib_iterative(12), 144);
+    assert_eq(fib_iterative(13), 233);
+    assert_eq(fib_iterative(14), 377);
+
+    print("  test_all_agree: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_base_cases();
+    test_small_values();
+    test_fib_10();
+    test_fib_15();
+    test_all_agree();
+    print("[OK] 110_fibonacci_dp");
+    0
+}

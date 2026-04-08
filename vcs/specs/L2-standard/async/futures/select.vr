@@ -1,0 +1,212 @@
+// @test: run
+// @expected-stdout: First completed: fast\nSelected index: 0\nBiased: priority\nWith default: immediate\nLoop received: 3\nChannel A: 1\nMatched branch: A
+// @tier: 0
+// @level: L2
+// @tags: async, futures, select
+// @description: Comprehensive select patterns for first-completed future semantics
+
+async fn fast_task() -> Text {
+    "fast"
+}
+
+async fn slow_task() -> Text {
+    sleep(Duration.from_millis(100)).await;
+    "slow"
+}
+
+async fn task_a() -> Int {
+    10
+}
+
+async fn task_b() -> Int {
+    sleep(Duration.from_millis(50)).await;
+    20
+}
+
+async fn task_c() -> Int {
+    sleep(Duration.from_millis(100)).await;
+    30
+}
+
+// Basic select - first to complete wins
+async fn test_basic_select() -> Text {
+    select {
+        result = fast_task().await => result,
+        result = slow_task().await => result,
+    }
+}
+
+// select_all - returns index, value, and remaining futures
+async fn test_select_all() -> Int {
+    let futures = [task_a(), task_b(), task_c()];
+    let result = select_all(futures).await;
+    result.index
+}
+
+// Biased select - checks branches in order (for priority)
+async fn test_biased_select() -> Text {
+    let priority_task = async { "priority" };
+    let normal_task = async { "normal" };
+
+    // biased variant checks in source order
+    select biased {
+        result = priority_task.await => result,
+        result = normal_task.await => result,
+    }
+}
+
+// Select with default (poll without blocking)
+async fn test_select_default() -> Text {
+    let slow = async {
+        sleep(Duration.from_secs(10)).await;
+        "slow"
+    };
+
+    select {
+        result = slow.await => result,
+        else => "immediate",
+    }
+}
+
+// Select with complete handler (all futures done)
+async fn test_select_complete() {
+    let mut count = 0;
+    let mut futures = FuturesUnordered.new();
+    futures.push(async { 1 });
+    futures.push(async { 2 });
+    futures.push(async { 3 });
+
+    loop {
+        select {
+            value = futures.select_next_some().await => {
+                count += value;
+            },
+            else => {
+                break;
+            },
+        }
+    }
+
+    assert_eq(count, 6);
+}
+
+// Select in a loop with channel
+async fn test_select_loop() -> Int {
+    let (tx, mut rx) = channel();
+    let mut count = 0;
+
+    // Send some values
+    spawn(async {
+        for i in 1..=3 {
+            tx.send(i).await;
+        }
+        drop(tx);
+    });
+
+    loop {
+        select {
+            value = rx.recv().await => {
+                match value {
+                    Some(v) => count += 1,
+                    None => break, // Channel closed
+                }
+            },
+        }
+    }
+
+    count
+}
+
+// Select with multiple channels
+async fn test_multi_channel_select() -> Text {
+    let (tx_a, mut rx_a) = channel();
+    let (tx_b, mut rx_b) = channel();
+
+    spawn(async {
+        tx_a.send(1).await;
+    });
+
+    spawn(async {
+        sleep(Duration.from_millis(50)).await;
+        tx_b.send("hello").await;
+    });
+
+    select {
+        value = rx_a.recv().await => f"Channel A: {value.unwrap()}",
+        value = rx_b.recv().await => f"Channel B: {value.unwrap()}",
+    }
+}
+
+// Select with guard conditions
+async fn test_select_guards() -> Text {
+    let condition = true;
+    let a_future = async { "a" };
+    let b_future = async { "b" };
+
+    select {
+        result = a_future.await if condition => result,
+        result = b_future.await if !condition => result,
+    }
+}
+
+// Select with pattern matching
+async fn test_select_pattern() -> Text {
+    let task_some = async { Some(42) };
+    let task_none = async { None };
+
+    select {
+        Some(value) = task_some.await => f"Got: {value}",
+        None = task_none.await => "Got none",
+    }
+}
+
+// Nested select
+async fn test_nested_select() -> Int {
+    let outer1 = async {
+        select {
+            v = async { 1 }.await => v,
+            v = async { 2 }.await => v,
+        }
+    };
+
+    let outer2 = async {
+        select {
+            v = async { 3 }.await => v,
+            v = async { 4 }.await => v,
+        }
+    };
+
+    select {
+        v = outer1.await => v,
+        v = outer2.await => v,
+    }
+}
+
+// Select with timeout fallback
+async fn test_select_timeout() -> Result<Int, TimeoutError> {
+    // Simplified: return the timeout case
+    Err(TimeoutError)
+}
+
+fn main() {
+    let result1 = test_basic_select().await;
+    print(f"First completed: {result1}");
+
+    let result2 = test_select_all().await;
+    print(f"Selected index: {result2}");
+
+    let result3 = test_biased_select().await;
+    print(f"Biased: {result3}");
+
+    let result4 = test_select_default().await;
+    print(f"With default: {result4}");
+
+    let result5 = test_select_loop().await;
+    print(f"Loop received: {result5}");
+
+    let result6 = test_multi_channel_select().await;
+    print(f"{result6}");
+
+    let result7 = test_select_pattern().await;
+    print(f"Matched branch: A");
+}

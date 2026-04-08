@@ -1,0 +1,218 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, structs
+//
+// Tests struct pattern matching with field binding, renaming, and partial matching.
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Point3D is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    active: Bool,
+};
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+// Shorthand field binding: Point { x, y }
+fn origin_distance(p: Point) -> Int {
+    match p {
+        Point { x, y } => x * x + y * y,
+    }
+}
+
+// Renamed field binding: Point { x: a, y: b }
+fn swap_coords(p: Point) -> Point {
+    match p {
+        Point { x: a, y: b } => Point { x: b, y: a },
+    }
+}
+
+// Partial matching with ..
+fn get_x(p: Point) -> Int {
+    match p {
+        Point { x, .. } => x,
+    }
+}
+
+fn get_y(p: Point) -> Int {
+    match p {
+        Point { y, .. } => y,
+    }
+}
+
+// Match specific field values
+fn classify_point(p: Point) -> Text {
+    match p {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x: 0, y } => "on y-axis at " + y.to_string(),
+        Point { x, y: 0 } => "on x-axis at " + x.to_string(),
+        Point { x, y } if x == y => "on diagonal",
+        Point { x, y } if x == -y => "on anti-diagonal",
+        _ => "general point",
+    }
+}
+
+// Nested struct patterns
+fn project_xy(p: Point3D) -> Point {
+    match p {
+        Point3D { x, y, .. } => Point { x, y },
+    }
+}
+
+// Generic struct pattern
+fn get_first<A, B>(pair: Pair<A, B>) -> A {
+    match pair {
+        Pair { first, .. } => first,
+    }
+}
+
+fn get_second<A, B>(pair: Pair<A, B>) -> B {
+    match pair {
+        Pair { second, .. } => second,
+    }
+}
+
+// Complex struct matching
+fn describe_person(p: Person) -> Text {
+    match p {
+        Person { name, age, active: true } if age < 18 => name + " is a young active user",
+        Person { name, age, active: true } => name + " is an active adult",
+        Person { name, active: false, .. } => name + " is inactive",
+    }
+}
+
+// Let destructuring with structs
+fn add_points(p1: Point, p2: Point) -> Point {
+    let Point { x: x1, y: y1 } = p1;
+    let Point { x: x2, y: y2 } = p2;
+    Point { x: x1 + x2, y: y1 + y2 }
+}
+
+// Struct in function parameters
+fn scale_point(Point { x, y }: Point, factor: Int) -> Point {
+    Point { x: x * factor, y: y * factor }
+}
+
+// Nested struct in struct
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+fn area(rect: Rectangle) -> Int {
+    match rect {
+        Rectangle {
+            top_left: Point { x: x1, y: y1 },
+            bottom_right: Point { x: x2, y: y2 }
+        } => (x2 - x1).abs() * (y2 - y1).abs(),
+    }
+}
+
+// Trivial struct (renamed from Empty to avoid stdlib name conflict)
+type TrivialStruct is { tag: Bool };
+
+fn match_trivial(e: TrivialStruct) -> Text {
+    match e {
+        TrivialStruct { .. } => "trivial",
+    }
+}
+
+// Struct with single field
+type Wrapper<T> is {
+    value: T,
+};
+
+fn unwrap<T>(w: Wrapper<T>) -> T {
+    match w {
+        Wrapper { value } => value,
+    }
+}
+
+// Struct pattern with default values (if supported)
+type Config is {
+    host: Text,
+    port: Int,
+    timeout: Int,
+};
+
+fn get_host(c: Config) -> Text {
+    match c {
+        Config { host, .. } => host,
+    }
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 };
+
+    // Basic field binding
+    assert(origin_distance(p) == 25);
+
+    // Renamed binding
+    let swapped = swap_coords(p);
+    assert(swapped.x == 4 && swapped.y == 3);
+
+    // Partial matching
+    assert(get_x(p) == 3);
+    assert(get_y(p) == 4);
+
+    // Classification
+    assert(classify_point(Point { x: 0, y: 0 }) == "origin");
+    assert(classify_point(Point { x: 0, y: 5 }) == "on y-axis at 5");
+    assert(classify_point(Point { x: 5, y: 0 }) == "on x-axis at 5");
+    assert(classify_point(Point { x: 3, y: 3 }) == "on diagonal");
+    assert(classify_point(Point { x: 3, y: -3 }) == "on anti-diagonal");
+    assert(classify_point(Point { x: 1, y: 2 }) == "general point");
+
+    // 3D projection
+    let p3d = Point3D { x: 1, y: 2, z: 3 };
+    let projected = project_xy(p3d);
+    assert(projected.x == 1 && projected.y == 2);
+
+    // Generic struct
+    let pair = Pair { first: "hello", second: 42 };
+    assert(get_first(pair) == "hello");
+    assert(get_second(pair) == 42);
+
+    // Complex person matching
+    let young = Person { name: "Alice", age: 16, active: true };
+    let adult = Person { name: "Bob", age: 30, active: true };
+    let inactive = Person { name: "Charlie", age: 25, active: false };
+    assert(describe_person(young) == "Alice is a young active user");
+    assert(describe_person(adult) == "Bob is an active adult");
+    assert(describe_person(inactive) == "Charlie is inactive");
+
+    // Point addition
+    let sum = add_points(Point { x: 1, y: 2 }, Point { x: 3, y: 4 });
+    assert(sum.x == 4 && sum.y == 6);
+
+    // Scaling
+    let scaled = scale_point(Point { x: 2, y: 3 }, 5);
+    assert(scaled.x == 10 && scaled.y == 15);
+
+    // Rectangle area
+    let rect = Rectangle {
+        top_left: Point { x: 0, y: 10 },
+        bottom_right: Point { x: 5, y: 0 },
+    };
+    assert(area(rect) == 50);
+
+    // Trivial struct (renamed to avoid stdlib Empty type conflict)
+    assert(match_trivial(TrivialStruct { tag: false }) == "trivial");
+
+    // Wrapper
+    assert(unwrap(Wrapper { value: 42 }) == 42);
+}

@@ -1,0 +1,219 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, permutation, combinatorics, cycle
+// @timeout: 30000
+
+// Permutation operations: composition, inverse, cycle structure, order
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Identity permutation on n elements
+fn identity(n: Int) -> Arr8 {
+    let mut p = zeros();
+    let mut i = 0;
+    while i < n { p = set8(p, i, i); i = i + 1; }
+    p
+}
+
+// Compose permutations: (p ∘ q)(i) = p(q(i))
+fn compose(p: Arr8, q: Arr8, n: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        result = set8(result, i, get8(p, get8(q, i)));
+        i = i + 1;
+    }
+    result
+}
+
+// Inverse permutation: p^(-1)(p(i)) = i
+fn inverse(p: Arr8, n: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        result = set8(result, get8(p, i), i);
+        i = i + 1;
+    }
+    result
+}
+
+// Check if permutation is identity
+fn is_identity(p: Arr8, n: Int) -> Int {
+    let mut ok = 1;
+    let mut i = 0;
+    while i < n {
+        if get8(p, i) != i { ok = 0; }
+        i = i + 1;
+    }
+    ok
+}
+
+// Count fixed points
+fn fixed_points(p: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(p, i) == i { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Count inversions: pairs (i,j) where i < j but p(i) > p(j)
+fn inversions(p: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if get8(p, i) > get8(p, j) { count = count + 1; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Sign/parity: even permutation = +1, odd = -1
+fn perm_sign(p: Arr8, n: Int) -> Int {
+    if inversions(p, n) % 2 == 0 { 1 } else { 0 - 1 }
+}
+
+// Order: smallest k > 0 such that p^k = identity
+fn perm_order(p: Arr8, n: Int) -> Int {
+    let mut cur = p;
+    let mut k = 1;
+    while is_identity(cur, n) == 0 {
+        cur = compose(p, cur, n);
+        k = k + 1;
+    }
+    k
+}
+
+// Number of cycles
+fn cycle_count(p: Arr8, n: Int) -> Int {
+    let mut visited = 0; // bitset
+    let mut cycles = 0;
+    let mut i = 0;
+    while i < n {
+        let mut bit = 1;
+        let mut b = 0;
+        while b < i { bit = bit * 2; b = b + 1; }
+        if (visited / bit) % 2 == 0 {
+            // Start new cycle
+            cycles = cycles + 1;
+            let mut j = i;
+            let mut done = 0;
+            while done == 0 {
+                let mut bit_j = 1;
+                b = 0;
+                while b < j { bit_j = bit_j * 2; b = b + 1; }
+                if (visited / bit_j) % 2 == 0 {
+                    visited = visited + bit_j;
+                    j = get8(p, j);
+                } else {
+                    done = 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    cycles
+}
+
+fn test_identity_perm() -> Int {
+    let id = identity(5);
+    assert_eq(is_identity(id, 5), 1);
+    assert_eq(fixed_points(id, 5), 5);
+    assert_eq(inversions(id, 5), 0);
+    assert_eq(perm_sign(id, 5), 1);
+    assert_eq(perm_order(id, 5), 1);
+    assert_eq(cycle_count(id, 5), 5); // 5 fixed-point cycles
+    1
+}
+
+fn test_transposition() -> Int {
+    // Swap 0 and 1: (0 1)(2)(3)(4)
+    let p = Arr8 { v0: 1, v1: 0, v2: 2, v3: 3, v4: 4, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_identity(p, 5), 0);
+    assert_eq(fixed_points(p, 5), 3);
+    assert_eq(inversions(p, 5), 1); // only (0,1) pair
+    assert_eq(perm_sign(p, 5), 0 - 1); // odd
+    assert_eq(perm_order(p, 5), 2); // swap^2 = identity
+    assert_eq(cycle_count(p, 5), 4); // 1 swap cycle + 3 fixed
+    1
+}
+
+fn test_cycle_3() -> Int {
+    // 3-cycle: 0→1→2→0, 3 and 4 fixed
+    let p = Arr8 { v0: 1, v1: 2, v2: 0, v3: 3, v4: 4, v5: 0, v6: 0, v7: 0 };
+    assert_eq(fixed_points(p, 5), 2);
+    // p = [1,2,0,3,4], inversions: (0,2): 1>0 yes, (1,2): 2>0 yes. Total: 2
+    assert_eq(inversions(p, 5), 2);
+    assert_eq(perm_sign(p, 5), 1); // even (2 inversions)
+    assert_eq(perm_order(p, 5), 3);
+    assert_eq(cycle_count(p, 5), 3); // 1 three-cycle + 2 fixed
+    1
+}
+
+fn test_compose_inverse() -> Int {
+    let p = Arr8 { v0: 2, v1: 0, v2: 3, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let inv = inverse(p, 4);
+    // p ∘ p^(-1) = identity
+    let comp = compose(p, inv, 4);
+    assert_eq(is_identity(comp, 4), 1);
+    // p^(-1) ∘ p = identity
+    let comp2 = compose(inv, p, 4);
+    assert_eq(is_identity(comp2, 4), 1);
+    1
+}
+
+fn test_compose_assoc() -> Int {
+    // (p ∘ q) ∘ r = p ∘ (q ∘ r)
+    let p = Arr8 { v0: 1, v1: 2, v2: 0, v3: 3, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let q = Arr8 { v0: 2, v1: 0, v2: 3, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r = Arr8 { v0: 3, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let pq = compose(p, q, 4);
+    let left = compose(pq, r, 4);
+    let qr = compose(q, r, 4);
+    let right = compose(p, qr, 4);
+    let mut same = 1;
+    let mut i = 0;
+    while i < 4 {
+        if get8(left, i) != get8(right, i) { same = 0; }
+        i = i + 1;
+    }
+    assert_eq(same, 1);
+    1
+}
+
+fn main() -> Int {
+    test_identity_perm();
+    test_transposition();
+    test_cycle_3();
+    test_compose_inverse();
+    test_compose_assoc();
+    print("[OK] 688_permutation_aot");
+    0
+}

@@ -1,0 +1,107 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, expressions, if, else, control_flow
+// @description: Test if/else expression evaluation in meta functions
+
+// =============================================================================
+// BASIC IF/ELSE
+// =============================================================================
+
+meta fn test_if_true() -> Int {
+    if true { 1 } else { 0 }
+}
+
+meta fn test_if_false() -> Int {
+    if false { 1 } else { 0 }
+}
+
+meta fn test_if_condition() -> Int {
+    if 5 > 3 { 100 } else { 0 }
+}
+
+// =============================================================================
+// NESTED IF/ELSE
+// =============================================================================
+
+meta fn test_nested_if(x: Int) -> Text {
+    if x < 0 {
+        "negative"
+    } else if x == 0 {
+        "zero"
+    } else {
+        "positive"
+    }
+}
+
+meta fn test_deeply_nested() -> Int {
+    if true {
+        if false {
+            1
+        } else {
+            2
+        }
+    } else {
+        3
+    }
+}
+
+// =============================================================================
+// IF WITH COMPLEX EXPRESSIONS
+// =============================================================================
+
+meta fn test_if_with_arithmetic() -> Int {
+    let x = 10;
+    if x * 2 > 15 {
+        x + 5
+    } else {
+        x - 5
+    }
+}
+
+meta fn test_if_with_logic() -> Bool {
+    let a = true;
+    let b = false;
+    if a && !b {
+        true
+    } else {
+        false
+    }
+}
+
+// =============================================================================
+// IF AS EXPRESSION IN LARGER CONTEXT
+// =============================================================================
+
+meta fn test_if_in_arithmetic() -> Int {
+    let bonus = if true { 10 } else { 0 };
+    100 + bonus
+}
+
+meta fn test_multiple_ifs() -> Int {
+    let a = if true { 1 } else { 0 };
+    let b = if false { 1 } else { 0 };
+    a + b
+}
+
+// Main test function
+fn main() {
+    // Basic tests
+    @const assert_eq(test_if_true(), 1);
+    @const assert_eq(test_if_false(), 0);
+    @const assert_eq(test_if_condition(), 100);
+
+    // Nested tests
+    @const assert_eq(test_nested_if(-5), "negative");
+    @const assert_eq(test_nested_if(0), "zero");
+    @const assert_eq(test_nested_if(5), "positive");
+    @const assert_eq(test_deeply_nested(), 2);
+
+    // Complex expressions
+    @const assert_eq(test_if_with_arithmetic(), 15);
+    @const assert(test_if_with_logic());
+
+    // If as expression
+    @const assert_eq(test_if_in_arithmetic(), 110);
+    @const assert_eq(test_multiple_ifs(), 1);
+}

@@ -1,0 +1,14 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let mut count = 0;
+    while true {
+        count = count + 1;
+        if count >= 5 {
+            break;
+        }
+    }
+    assert_eq(count, 5);
+}

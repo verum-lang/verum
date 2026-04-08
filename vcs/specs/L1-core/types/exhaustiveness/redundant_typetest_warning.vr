@@ -1,0 +1,16 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, typetest-pattern, warning
+// @description: Redundant TypeTest pattern should produce W0605 warning
+// @expected-warning: W0605
+
+type Animal is Dog | Cat | Bird;
+
+// Redundant TypeTest: explicit is-pattern after exhaustive coverage
+fn animal_sound(a: Animal) -> Text =
+    match a {
+        Dog => "woof",
+        Cat => "meow",
+        Bird => "chirp",
+        b is Bird => "tweet"  // W0605: redundant TypeTest pattern (already covered)
+    };

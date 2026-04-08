@@ -1,0 +1,144 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, context, spawn, concurrency
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Context propagation with spawn under concurrent load — multiple threads using shared context values
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    // Test 1: Spawn 4 tasks, each does independent computation via channel
+    let log_ch = Channel.new(20);
+
+    let t1 = spawn {
+        log_ch.send(100);
+        100
+    };
+    let t2 = spawn {
+        log_ch.send(200);
+        200
+    };
+    let t3 = spawn {
+        log_ch.send(300);
+        300
+    };
+    let t4 = spawn {
+        log_ch.send(400);
+        400
+    };
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+    let r4 = t4.await;
+
+    // Verify all tasks completed with correct return values
+    let returns_sum = r1 + r2 + r3 + r4;
+    if returns_sum == 1000 { pass = pass + 1; } else { print(f"FAIL1a: returns_sum={returns_sum}"); }
+
+    // Verify all logged via channel
+    let mut log_sum = 0;
+    let mut count = 0;
+    while count < 4 {
+        match log_ch.recv() {
+            Some(v) => { log_sum = log_sum + v; }
+            None => {}
+        }
+        count = count + 1;
+    }
+    if log_sum == 1000 { pass = pass + 1; } else { print(f"FAIL1b: log_sum={log_sum}"); }
+
+    // Test 2: Shared configuration value across spawned tasks
+    let config_value = 42;
+    let results = Channel.new(10);
+
+    let s1 = spawn {
+        results.send(config_value * 1);
+        0
+    };
+    let s2 = spawn {
+        results.send(config_value * 2);
+        0
+    };
+    let s3 = spawn {
+        results.send(config_value * 3);
+        0
+    };
+
+    s1.await;
+    s2.await;
+    s3.await;
+
+    let mut config_sum = 0;
+    let mut j = 0;
+    while j < 3 {
+        match results.recv() {
+            Some(v) => { config_sum = config_sum + v; }
+            None => {}
+        }
+        j = j + 1;
+    }
+    // 42*1 + 42*2 + 42*3 = 42 + 84 + 126 = 252
+    if config_sum == 252 { pass = pass + 1; } else { print(f"FAIL2: expected 252, got {config_sum}"); }
+
+    // Test 3: Channel communication combined with context inheritance
+    let input_ch = Channel.new(10);
+    let output_ch = Channel.new(10);
+    let multiplier = 7;
+
+    // Producer
+    let prod = spawn {
+        let mut i = 1;
+        while i <= 5 {
+            input_ch.send(i);
+            i = i + 1;
+        }
+        input_ch.send(-1);
+        0
+    };
+
+    // Transformer that uses "context" (captured multiplier)
+    let xform = spawn {
+        let mut done = false;
+        while !done {
+            match input_ch.recv() {
+                Some(v) => {
+                    if v == -1 {
+                        output_ch.send(-1);
+                        done = true;
+                    } else {
+                        output_ch.send(v * multiplier);
+                    }
+                }
+                None => { done = true; }
+            }
+        }
+        0
+    };
+
+    prod.await;
+    xform.await;
+
+    let mut transformed_sum = 0;
+    let mut td = false;
+    while !td {
+        match output_ch.recv() {
+            Some(v) => {
+                if v == -1 { td = true; }
+                else { transformed_sum = transformed_sum + v; }
+            }
+            None => { td = true; }
+        }
+    }
+    // (1+2+3+4+5) * 7 = 15 * 7 = 105
+    if transformed_sum == 105 { pass = pass + 1; } else { print(f"FAIL3: expected 105, got {transformed_sum}"); }
+
+    print(f"pass = {pass}/4");
+    if pass == 4 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

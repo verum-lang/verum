@@ -1,0 +1,264 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, variants, stack-machine, rpn, calculator
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT stack-based calculator using variant IntStack with RPN evaluation
+
+// Stack of integers
+type IntStack is SEmpty | SPush { val: Int, rest: IntStack };
+
+// Push a value onto the stack
+fn push(stack: IntStack, v: Int) -> IntStack {
+    SPush { val: v, rest: stack }
+}
+
+// Get the top value (returns -9999 sentinel if empty)
+fn peek(stack: IntStack) -> Int {
+    match stack {
+        SEmpty => -9999,
+        SPush { val, rest: _ } => val,
+    }
+}
+
+// Pop the top value, returning the value
+fn pop_val(stack: IntStack) -> Int {
+    match stack {
+        SEmpty => -9999,
+        SPush { val, rest: _ } => val,
+    }
+}
+
+// Pop the top value, returning the remaining stack
+fn pop_rest(stack: IntStack) -> IntStack {
+    match stack {
+        SEmpty => SEmpty,
+        SPush { val: _, rest } => rest,
+    }
+}
+
+// Size of the stack
+fn stack_size(stack: IntStack) -> Int {
+    match stack {
+        SEmpty => 0,
+        SPush { val: _, rest } => 1 + stack_size(rest),
+    }
+}
+
+// Sum all values on the stack
+fn stack_sum(stack: IntStack) -> Int {
+    match stack {
+        SEmpty => 0,
+        SPush { val, rest } => val + stack_sum(rest),
+    }
+}
+
+// Check if the stack is empty
+fn stack_is_empty(stack: IntStack) -> Bool {
+    stack is SEmpty
+}
+
+// Reverse a stack
+fn stack_reverse_helper(src: IntStack, dst: IntStack) -> IntStack {
+    match src {
+        SEmpty => dst,
+        SPush { val, rest } => stack_reverse_helper(rest, push(dst, val)),
+    }
+}
+
+fn stack_reverse(stack: IntStack) -> IntStack {
+    stack_reverse_helper(stack, SEmpty)
+}
+
+// RPN operations as a variant type
+type Op is OpPush(Int) | OpAdd | OpSub | OpMul | OpDup | OpSwap;
+
+// Apply a single operation to a stack
+fn apply_op(stack: IntStack, op: Op) -> IntStack {
+    match op {
+        OpPush(v) => push(stack, v),
+        OpAdd => {
+            let a = pop_val(stack);
+            let rest1 = pop_rest(stack);
+            let b = pop_val(rest1);
+            let rest2 = pop_rest(rest1);
+            push(rest2, b + a)
+        },
+        OpSub => {
+            let a = pop_val(stack);
+            let rest1 = pop_rest(stack);
+            let b = pop_val(rest1);
+            let rest2 = pop_rest(rest1);
+            push(rest2, b - a)
+        },
+        OpMul => {
+            let a = pop_val(stack);
+            let rest1 = pop_rest(stack);
+            let b = pop_val(rest1);
+            let rest2 = pop_rest(rest1);
+            push(rest2, b * a)
+        },
+        OpDup => {
+            let v = peek(stack);
+            push(stack, v)
+        },
+        OpSwap => {
+            let a = pop_val(stack);
+            let rest1 = pop_rest(stack);
+            let b = pop_val(rest1);
+            let rest2 = pop_rest(rest1);
+            push(push(rest2, a), b)
+        },
+    }
+}
+
+// Execute a list of operations (represented as a variant list)
+type OpList is OpNil | OpCons { op: Op, next: OpList };
+
+fn eval_ops(stack: IntStack, ops: OpList) -> IntStack {
+    match ops {
+        OpNil => stack,
+        OpCons { op, next } => eval_ops(apply_op(stack, op), next),
+    }
+}
+
+fn main() -> Int {
+    // === Basic push/pop ===
+    let s0 = SEmpty;
+    assert(stack_is_empty(s0));
+    assert_eq(stack_size(s0), 0);
+
+    let s1 = push(s0, 10);
+    assert(!stack_is_empty(s1));
+    assert_eq(stack_size(s1), 1);
+    assert_eq(peek(s1), 10);
+
+    let s2 = push(s1, 20);
+    assert_eq(stack_size(s2), 2);
+    assert_eq(peek(s2), 20);
+
+    let s3 = push(s2, 30);
+    assert_eq(stack_size(s3), 3);
+    assert_eq(peek(s3), 30);
+
+    // Pop returns correct value and rest
+    assert_eq(pop_val(s3), 30);
+    let after_pop = pop_rest(s3);
+    assert_eq(peek(after_pop), 20);
+    assert_eq(stack_size(after_pop), 2);
+
+    // === Stack sum ===
+    assert_eq(stack_sum(s3), 60);  // 10+20+30
+    assert_eq(stack_sum(SEmpty), 0);
+
+    // === Stack reverse ===
+    let rev = stack_reverse(s3);
+    assert_eq(peek(rev), 10);  // was bottom, now top
+    assert_eq(pop_val(pop_rest(rev)), 20);
+    assert_eq(stack_sum(rev), 60);  // same sum
+
+    // === Pop from empty returns sentinel ===
+    assert_eq(peek(SEmpty), -9999);
+    assert_eq(pop_val(SEmpty), -9999);
+
+    // === Single operation: push ===
+    let pushed = apply_op(SEmpty, OpPush(42));
+    assert_eq(peek(pushed), 42);
+    assert_eq(stack_size(pushed), 1);
+
+    // === RPN: 3 + 4 = 7 ===
+    // Push 3, Push 4, Add
+    let rpn1 = apply_op(apply_op(apply_op(SEmpty, OpPush(3)), OpPush(4)), OpAdd);
+    assert_eq(peek(rpn1), 7);
+    assert_eq(stack_size(rpn1), 1);
+
+    // === RPN: 10 - 3 = 7 ===
+    let rpn2 = apply_op(apply_op(apply_op(SEmpty, OpPush(10)), OpPush(3)), OpSub);
+    assert_eq(peek(rpn2), 7);
+    assert_eq(stack_size(rpn2), 1);
+
+    // === RPN: 6 * 7 = 42 ===
+    let rpn3 = apply_op(apply_op(apply_op(SEmpty, OpPush(6)), OpPush(7)), OpMul);
+    assert_eq(peek(rpn3), 42);
+
+    // === RPN: (2 * 3) + 5 = 11 ===
+    // Push 2, Push 3, Mul, Push 5, Add
+    let mut st = SEmpty;
+    st = apply_op(st, OpPush(2));
+    st = apply_op(st, OpPush(3));
+    st = apply_op(st, OpMul);
+    assert_eq(peek(st), 6);
+    st = apply_op(st, OpPush(5));
+    st = apply_op(st, OpAdd);
+    assert_eq(peek(st), 11);
+    assert_eq(stack_size(st), 1);
+
+    // === RPN: (3 + 4) * (2 + 5) = 7 * 7 = 49 ===
+    let mut st2 = SEmpty;
+    st2 = apply_op(st2, OpPush(3));
+    st2 = apply_op(st2, OpPush(4));
+    st2 = apply_op(st2, OpAdd);
+    st2 = apply_op(st2, OpPush(2));
+    st2 = apply_op(st2, OpPush(5));
+    st2 = apply_op(st2, OpAdd);
+    st2 = apply_op(st2, OpMul);
+    assert_eq(peek(st2), 49);
+
+    // === Dup: Push 5, Dup, Mul => 5*5 = 25 ===
+    let mut st3 = SEmpty;
+    st3 = apply_op(st3, OpPush(5));
+    st3 = apply_op(st3, OpDup);
+    assert_eq(stack_size(st3), 2);
+    assert_eq(peek(st3), 5);
+    st3 = apply_op(st3, OpMul);
+    assert_eq(peek(st3), 25);
+
+    // === Swap: Push 10, Push 20, Swap => top=10, next=20 ===
+    let mut st4 = SEmpty;
+    st4 = apply_op(st4, OpPush(10));
+    st4 = apply_op(st4, OpPush(20));
+    st4 = apply_op(st4, OpSwap);
+    assert_eq(peek(st4), 10);
+    assert_eq(pop_val(pop_rest(st4)), 20);
+
+    // === Eval with OpList: (8 + 2) * 3 - 1 = 29 ===
+    let prog = OpCons { op: OpPush(8), next:
+               OpCons { op: OpPush(2), next:
+               OpCons { op: OpAdd, next:
+               OpCons { op: OpPush(3), next:
+               OpCons { op: OpMul, next:
+               OpCons { op: OpPush(1), next:
+               OpCons { op: OpSub, next: OpNil }}}}}}};
+    let result = eval_ops(SEmpty, prog);
+    assert_eq(peek(result), 29);
+    assert_eq(stack_size(result), 1);
+
+    // === Complex: Push 1..5, sum via adds ===
+    // Push 1, Push 2, Add, Push 3, Add, Push 4, Add, Push 5, Add => 15
+    let prog2 = OpCons { op: OpPush(1), next:
+                OpCons { op: OpPush(2), next:
+                OpCons { op: OpAdd, next:
+                OpCons { op: OpPush(3), next:
+                OpCons { op: OpAdd, next:
+                OpCons { op: OpPush(4), next:
+                OpCons { op: OpAdd, next:
+                OpCons { op: OpPush(5), next:
+                OpCons { op: OpAdd, next: OpNil }}}}}}}}};
+    let result2 = eval_ops(SEmpty, prog2);
+    assert_eq(peek(result2), 15);
+
+    // === Build a tall stack and verify ===
+    let mut tall = SEmpty;
+    let mut i = 0;
+    while i < 10 {
+        tall = push(tall, i * i);
+        i = i + 1;
+    }
+    assert_eq(stack_size(tall), 10);
+    assert_eq(peek(tall), 81);  // 9*9
+    // Sum of squares 0..9 = 0+1+4+9+16+25+36+49+64+81 = 285
+    assert_eq(stack_sum(tall), 285);
+
+    0
+}

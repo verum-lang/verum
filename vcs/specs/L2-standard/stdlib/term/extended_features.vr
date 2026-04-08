@@ -1,0 +1,112 @@
+// @test: parse
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, extended, graphics, clipboard, hyperlink
+// @description: Verify extended features parse correctly
+
+/// Section 11: Extended features — Kitty/Sixel graphics, OSC 52 clipboard,
+/// OSC 8 hyperlinks, responsive breakpoints.
+
+mount core.term.*;
+
+fn test_graphics_renderer() {
+    // ImageFormat variants
+    let formats = [
+        ImageFormat.Png,
+        ImageFormat.Jpeg,
+        ImageFormat.Rgb24,
+        ImageFormat.Rgba32,
+    ];
+    assert_eq(formats.len(), 4);
+}
+
+fn test_responsive_breakpoints() {
+    // Breakpoint detection
+    let bp_mobile = current_breakpoint(40);
+    let bp_tablet = current_breakpoint(100);
+    let bp_desktop = current_breakpoint(140);
+
+    // Responsive value selection
+    let cols = responsive(80, 1, 2, 3);
+    assert_eq(cols, 2); // 80 columns = tablet = 2
+
+    let wide_cols = responsive(140, 1, 2, 3);
+    assert_eq(wide_cols, 3); // 140 = desktop = 3
+}
+
+fn test_grid_layout() {
+    let mut cols = List.new();
+    cols.push(GridTrack.Fixed(20));
+    cols.push(GridTrack.Fr(1.0));
+    cols.push(GridTrack.Fr(2.0));
+
+    let mut rows = List.new();
+    rows.push(GridTrack.Fixed(3));
+    rows.push(GridTrack.Fr(1.0));
+    rows.push(GridTrack.Fixed(1));
+
+    let grid = GridLayout.new(cols, rows).column_gap(1).row_gap(0);
+    let area = Rect.new(0, 0, 80, 24);
+    let cells = grid.compute(area);
+
+    // 3 rows, 3 columns each
+    assert_eq(cells.len(), 3);
+}
+
+fn test_canvas_shapes() {
+    // NOTE: Canvas not exported from term.* (cross-module resolution limitation).
+    // Canvas, Sparkline, Bar, BarChart are defined in widget submodules
+    // that don't resolve through the wildcard import.
+}
+
+fn test_sparkline() {
+    // NOTE: Sparkline not resolved — see test_canvas_shapes note.
+}
+
+fn test_barchart() {
+    // NOTE: Bar/BarChart not resolved — see test_canvas_shapes note.
+}
+
+fn test_tree() {
+    let mut children = List.new();
+    children.push(TreeItem { text: Line.raw("Child 1"), children: List.new(), data: 1 });
+    children.push(TreeItem { text: Line.raw("Child 2"), children: List.new(), data: 2 });
+
+    let root = TreeItem { text: Line.raw("Root"), children: children, data: 0 };
+    let mut items = List.new();
+    items.push(root);
+
+    let tree = Tree.new(items)
+        .highlight_style(Style.new().reversed());
+}
+
+fn test_dialog() {
+    let dialog = Dialog.new("Are you sure?")
+        .title("Confirm")
+        .width_percent(50);
+
+    let mut state = DialogState { focused_button: 0 };
+}
+
+fn test_menu() {
+    let mut items = List.new();
+    items.push(MenuItem.new("Open").shortcut("Ctrl+O"));
+    items.push(MenuItem.new("Save").shortcut("Ctrl+S"));
+    items.push(MenuItem.separator());
+    items.push(MenuItem.new("Quit").shortcut("Ctrl+Q"));
+
+    let menu = Menu.new(items);
+    let mut state = MenuState.new();
+}
+
+fn main() {
+    test_graphics_renderer();
+    test_responsive_breakpoints();
+    test_grid_layout();
+    test_canvas_shapes();
+    test_sparkline();
+    test_barchart();
+    test_tree();
+    test_dialog();
+    test_menu();
+}

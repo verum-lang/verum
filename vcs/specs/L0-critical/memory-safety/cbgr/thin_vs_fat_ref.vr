@@ -1,0 +1,40 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, thin-ref, fat-ref
+// @description: Tests ThinRef vs FatRef automatic selection
+
+fn main() {
+    // ThinRef (16 bytes): ptr + generation + epoch_caps
+    // Used for fixed-size types
+    let value: Int = 42;
+    let thin_ref: &Int = &value;  // ThinRef selected
+    assert((&Int).size == 16);  // Type Property for reference size
+
+    // FatRef (24 bytes): ptr + generation + epoch_caps + len
+    // Used for dynamically-sized types (slices, trait objects)
+    let arr = [1, 2, 3, 4, 5];
+    let slice_ref: &[Int] = &arr[..];  // FatRef selected for slice
+    assert((&[Int]).size == 24);  // Type Property for slice reference size
+
+    // Protocol object also uses FatRef
+    let trait_obj: &Display = &value;
+    assert((&Display).size == 24);  // Type Property for protocol reference size
+
+    // Verify functionality is identical regardless of ref type
+    assert(*thin_ref == 42);
+    assert(slice_ref.len() == 5);
+    assert(slice_ref[0] == 1);
+
+    print("ThinRef vs FatRef test passed");
+}
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+implement Display for Int {
+    fn display(&self) -> Text {
+        format("{}", *self)
+    }
+}

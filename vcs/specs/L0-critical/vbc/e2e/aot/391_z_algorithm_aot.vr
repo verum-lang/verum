@@ -1,0 +1,334 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, z-algorithm, pattern-matching, string
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for the Z-algorithm: computes Z-array where Z[i] = length of the
+// longest substring starting from position i that is also a prefix of the string.
+// Used for efficient pattern matching in O(n+m) time.
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+fn min_val(a: Int, bv: Int) -> Int { if a < bv { a } else { bv } }
+
+// Compute Z-array for string s of length n.
+// Z[0] is defined as 0 by convention.
+// Z[i] = length of longest substring starting at i that matches a prefix of s.
+// Uses a done flag instead of break for the inner extension loop.
+fn z_array(s: Arr16, n: Int) -> Arr16 {
+    let mut z = a16_zero();
+    let mut l = 0;
+    let mut r = 0;
+    let mut i = 1;
+    while i < n {
+        let mut zi = 0;
+        if i < r {
+            zi = min_val(a16_get(z, i - l), r - i);
+        }
+        // Extend while characters match
+        let mut done = 0;
+        while done == 0 {
+            if i + zi < n {
+                if a16_get(s, zi) == a16_get(s, i + zi) {
+                    zi = zi + 1;
+                } else {
+                    done = 1;
+                }
+            } else {
+                done = 1;
+            }
+        }
+        z = a16_set(z, i, zi);
+        if i + zi > r {
+            l = i;
+            r = i + zi;
+        }
+        i = i + 1;
+    }
+    z
+}
+
+// Count occurrences of pattern in text using Z-algorithm.
+// Concatenates: pattern + sentinel(-1) + text, computes Z-array.
+// Pattern occurs at position i in text when Z[m+1+i] == m.
+fn count_matches(pattern: Arr16, m: Int, text: Arr16, n: Int) -> Int {
+    let mut concat = a16_zero();
+    let mut i = 0;
+    while i < m {
+        concat = a16_set(concat, i, a16_get(pattern, i));
+        i = i + 1;
+    }
+    concat = a16_set(concat, m, -1); // sentinel
+    i = 0;
+    while i < n {
+        concat = a16_set(concat, m + 1 + i, a16_get(text, i));
+        i = i + 1;
+    }
+    let total = m + 1 + n;
+    let z = z_array(concat, total);
+    let mut count = 0;
+    i = m + 1;
+    while i < total {
+        if a16_get(z, i) == m {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Find first match position (-1 if not found)
+fn find_first(pattern: Arr16, m: Int, text: Arr16, n: Int) -> Int {
+    let mut concat = a16_zero();
+    let mut i = 0;
+    while i < m {
+        concat = a16_set(concat, i, a16_get(pattern, i));
+        i = i + 1;
+    }
+    concat = a16_set(concat, m, -1);
+    i = 0;
+    while i < n {
+        concat = a16_set(concat, m + 1 + i, a16_get(text, i));
+        i = i + 1;
+    }
+    let total = m + 1 + n;
+    let z = z_array(concat, total);
+    i = m + 1;
+    while i < total {
+        if a16_get(z, i) == m {
+            return i - m - 1;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Compute the longest proper prefix that is also a suffix (using Z-array)
+fn longest_prefix_suffix(s: Arr16, n: Int) -> Int {
+    let z = z_array(s, n);
+    let mut best = 0;
+    let mut i = 1;
+    while i < n {
+        if a16_get(z, i) + i == n {
+            if a16_get(z, i) > best {
+                best = a16_get(z, i);
+            }
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// ========== Tests ==========
+
+fn test_z_basic() {
+    // s = [1,1,2,0,1,1] ("aabxaa")
+    // Z = [0, 1, 0, 0, 2, 1]
+    let s = Arr16 {
+        a0: 1, a1: 1, a2: 2, a3: 0, a4: 1, a5: 1,
+        a6: 0, a7: 0, a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let z = z_array(s, 6);
+    assert_eq(a16_get(z, 0), 0);
+    assert_eq(a16_get(z, 1), 1);
+    assert_eq(a16_get(z, 2), 0);
+    assert_eq(a16_get(z, 3), 0);
+    assert_eq(a16_get(z, 4), 2);
+    assert_eq(a16_get(z, 5), 1);
+}
+
+fn test_z_all_same() {
+    // s = [5,5,5,5] -> Z = [0, 3, 2, 1]
+    let s = Arr16 {
+        a0: 5, a1: 5, a2: 5, a3: 5,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let z = z_array(s, 4);
+    assert_eq(a16_get(z, 0), 0);
+    assert_eq(a16_get(z, 1), 3);
+    assert_eq(a16_get(z, 2), 2);
+    assert_eq(a16_get(z, 3), 1);
+}
+
+fn test_z_all_different() {
+    // s = [1,2,3,4,5] -> Z = [0, 0, 0, 0, 0]
+    let s = Arr16 {
+        a0: 1, a1: 2, a2: 3, a3: 4, a4: 5,
+        a5: 0, a6: 0, a7: 0, a8: 0, a9: 0,
+        a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let z = z_array(s, 5);
+    let mut i = 1;
+    while i < 5 {
+        assert_eq(a16_get(z, i), 0);
+        i = i + 1;
+    }
+}
+
+fn test_z_abab() {
+    // s = [1,2,1,2] -> Z = [0, 0, 2, 0]
+    let s = Arr16 {
+        a0: 1, a1: 2, a2: 1, a3: 2,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let z = z_array(s, 4);
+    assert_eq(a16_get(z, 0), 0);
+    assert_eq(a16_get(z, 1), 0);
+    assert_eq(a16_get(z, 2), 2);
+    assert_eq(a16_get(z, 3), 0);
+}
+
+fn test_pattern_match_two() {
+    // text = [1,2,3,1,2], pattern = [1,2] -> matches at 0 and 3
+    let pattern = Arr16 {
+        a0: 1, a1: 2, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let text = Arr16 {
+        a0: 1, a1: 2, a2: 3, a3: 1, a4: 2, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(count_matches(pattern, 2, text, 5), 2);
+    assert_eq(find_first(pattern, 2, text, 5), 0);
+}
+
+fn test_pattern_overlap() {
+    // text = [1,1,1,1], pattern = [1,1] -> matches at 0, 1, 2
+    let pattern = Arr16 {
+        a0: 1, a1: 1, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let text = Arr16 {
+        a0: 1, a1: 1, a2: 1, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(count_matches(pattern, 2, text, 4), 3);
+}
+
+fn test_pattern_no_match() {
+    let pattern = Arr16 {
+        a0: 4, a1: 5, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let text = Arr16 {
+        a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(count_matches(pattern, 2, text, 3), 0);
+    assert_eq(find_first(pattern, 2, text, 3), -1);
+}
+
+fn test_pattern_full_match() {
+    let p = Arr16 {
+        a0: 7, a1: 8, a2: 9, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(count_matches(p, 3, p, 3), 1);
+    assert_eq(find_first(p, 3, p, 3), 0);
+}
+
+fn test_lps_abab() {
+    // s = [1,2,1,2] -> longest prefix-suffix = [1,2] (length 2)
+    let s = Arr16 {
+        a0: 1, a1: 2, a2: 1, a3: 2,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(longest_prefix_suffix(s, 4), 2);
+}
+
+fn test_lps_aaa() {
+    // s = [5,5,5] -> longest prefix-suffix = [5,5] (length 2)
+    let s = Arr16 {
+        a0: 5, a1: 5, a2: 5, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(longest_prefix_suffix(s, 3), 2);
+}
+
+fn test_lps_none() {
+    // s = [1,2,3] -> no proper prefix-suffix
+    let s = Arr16 {
+        a0: 1, a1: 2, a2: 3, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(longest_prefix_suffix(s, 3), 0);
+}
+
+fn test_z_single() {
+    let s = Arr16 {
+        a0: 42, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let z = z_array(s, 1);
+    assert_eq(a16_get(z, 0), 0);
+}
+
+fn main() -> Int {
+    test_z_basic();
+    test_z_all_same();
+    test_z_all_different();
+    test_z_abab();
+    test_pattern_match_two();
+    test_pattern_overlap();
+    test_pattern_no_match();
+    test_pattern_full_match();
+    test_lps_abab();
+    test_lps_aaa();
+    test_lps_none();
+    test_z_single();
+    print("[OK] 391_z_algorithm_aot");
+    0
+}

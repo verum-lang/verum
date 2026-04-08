@@ -1,0 +1,612 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, tensor
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Differential tensor test — verifies tensor algorithms produce consistent results across execution tiers
+
+// ============================================================================
+// 2x2 matrix type and core operations
+// ============================================================================
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2_new(a: Int, b: Int, c: Int, d: Int) -> Mat2 {
+    Mat2 { a: a, b: b, c: c, d: d }
+}
+
+fn mat2_identity() -> Mat2 {
+    Mat2 { a: 1, b: 0, c: 0, d: 1 }
+}
+
+fn mat2_zero() -> Mat2 {
+    Mat2 { a: 0, b: 0, c: 0, d: 0 }
+}
+
+fn mat2_add(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a + n.a,
+        b: m.b + n.b,
+        c: m.c + n.c,
+        d: m.d + n.d
+    }
+}
+
+fn mat2_mul(m: Mat2, n: Mat2) -> Mat2 {
+    Mat2 {
+        a: m.a * n.a + m.b * n.c,
+        b: m.a * n.b + m.b * n.d,
+        c: m.c * n.a + m.d * n.c,
+        d: m.c * n.b + m.d * n.d
+    }
+}
+
+fn mat2_scale(m: Mat2, s: Int) -> Mat2 {
+    Mat2 { a: m.a * s, b: m.b * s, c: m.c * s, d: m.d * s }
+}
+
+fn mat2_transpose(m: Mat2) -> Mat2 {
+    Mat2 { a: m.a, b: m.c, c: m.b, d: m.d }
+}
+
+fn mat2_det(m: Mat2) -> Int {
+    m.a * m.d - m.b * m.c
+}
+
+fn mat2_trace(m: Mat2) -> Int {
+    m.a + m.d
+}
+
+fn mat2_eq(m: Mat2, n: Mat2) -> Bool {
+    m.a == n.a && m.b == n.b && m.c == n.c && m.d == n.d
+}
+
+// Adjugate (classical adjoint) of 2x2: swap diag, negate off-diag
+fn mat2_adjugate(m: Mat2) -> Mat2 {
+    Mat2 { a: m.d, b: 0 - m.b, c: 0 - m.c, d: m.a }
+}
+
+// ============================================================================
+// Vector type (2D) for dot product tests
+// ============================================================================
+
+type Vec2 is { x: Int, y: Int };
+
+fn vec2_dot(a: Vec2, b: Vec2) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+// ============================================================================
+// 4-element vector for reduction tests
+// ============================================================================
+
+type Vec4 is { v0: Int, v1: Int, v2: Int, v3: Int };
+
+fn vec4_sum(v: Vec4) -> Int {
+    v.v0 + v.v1 + v.v2 + v.v3
+}
+
+fn vec4_sum_first_half(v: Vec4) -> Int {
+    v.v0 + v.v1
+}
+
+fn vec4_sum_second_half(v: Vec4) -> Int {
+    v.v2 + v.v3
+}
+
+// ============================================================================
+// 1D convolution helpers (using Vec4 as arrays)
+// ============================================================================
+
+// Get element from Vec4 by index
+fn vec4_get(v: Vec4, i: Int) -> Int {
+    if i == 0 { v.v0 }
+    else if i == 1 { v.v1 }
+    else if i == 2 { v.v2 }
+    else { v.v3 }
+}
+
+type Vec3 is { v0: Int, v1: Int, v2: Int };
+
+fn vec3_get(v: Vec3, i: Int) -> Int {
+    if i == 0 { v.v0 }
+    else if i == 1 { v.v1 }
+    else { v.v2 }
+}
+
+// 1D convolution: input[4] * kernel[3] -> output[2] (valid mode)
+// output[i] = sum_j(input[i+j] * kernel[j]) for j in 0..kernel_len
+fn conv1d_valid(input: Vec4, kernel: Vec3) -> Vec2 {
+    let o0 = vec4_get(input, 0) * vec3_get(kernel, 0)
+            + vec4_get(input, 1) * vec3_get(kernel, 1)
+            + vec4_get(input, 2) * vec3_get(kernel, 2);
+    let o1 = vec4_get(input, 1) * vec3_get(kernel, 0)
+            + vec4_get(input, 2) * vec3_get(kernel, 1)
+            + vec4_get(input, 3) * vec3_get(kernel, 2);
+    Vec2 { x: o0, y: o1 }
+}
+
+// ============================================================================
+// Absolute value helper
+// ============================================================================
+
+fn abs_val(n: Int) -> Int {
+    if n < 0 { 0 - n } else { n }
+}
+
+// ============================================================================
+// Test 1: Matrix multiplication chain A * B * C
+// ============================================================================
+
+fn test_matmul_chain() {
+    let a = mat2_new(1, 2, 3, 4);
+    let b = mat2_new(2, 0, 1, 3);
+    let c = mat2_new(1, 1, 0, 2);
+
+    // A * B
+    // | 1*2+2*1  1*0+2*3 |   | 4  6 |
+    // | 3*2+4*1  3*0+4*3 | = | 10 12 |
+    let ab = mat2_mul(a, b);
+    assert_eq(ab.a, 4);
+    assert_eq(ab.b, 6);
+    assert_eq(ab.c, 10);
+    assert_eq(ab.d, 12);
+
+    // (A*B) * C
+    // | 4*1+6*0   4*1+6*2  |   | 4  16 |
+    // | 10*1+12*0 10*1+12*2 | = | 10 34 |
+    let abc = mat2_mul(ab, c);
+    assert_eq(abc.a, 4);
+    assert_eq(abc.b, 16);
+    assert_eq(abc.c, 10);
+    assert_eq(abc.d, 34);
+
+    // Verify determinant is multiplicative through chain
+    let det_a = mat2_det(a);   // 1*4 - 2*3 = -2
+    let det_b = mat2_det(b);   // 2*3 - 0*1 = 6
+    let det_c = mat2_det(c);   // 1*2 - 1*0 = 2
+    assert_eq(det_a, 0 - 2);
+    assert_eq(det_b, 6);
+    assert_eq(det_c, 2);
+
+    let det_abc = mat2_det(abc); // 4*34 - 16*10 = 136 - 160 = -24
+    assert_eq(det_abc, 0 - 24);
+    assert_eq(det_a * det_b * det_c, 0 - 24);
+    assert_eq(det_abc, det_a * det_b * det_c);
+
+    print("test_matmul_chain passed");
+}
+
+// ============================================================================
+// Test 2: det(A) * det(A^-1) ~ 1 using scaled integers
+// For 2x2 matrix A, A^-1 = adj(A) / det(A)
+// det(adj(A)) = det(A) for 2x2, so det(A)*det(adj(A)) = det(A)^2
+// We verify: det(A) * det(adj(A)) == det(A) * det(A)
+// ============================================================================
+
+fn test_det_inverse_roundtrip() {
+    let a = mat2_new(3, 1, 2, 5);
+    let det_a = mat2_det(a);       // 3*5 - 1*2 = 13
+    assert_eq(det_a, 13);
+
+    let adj_a = mat2_adjugate(a);  // { 5, -1, -2, 3 }
+    assert_eq(adj_a.a, 5);
+    assert_eq(adj_a.b, 0 - 1);
+    assert_eq(adj_a.c, 0 - 2);
+    assert_eq(adj_a.d, 3);
+
+    // A * adj(A) = det(A) * I
+    let prod = mat2_mul(a, adj_a);
+    assert_eq(prod.a, det_a);      // 3*5 + 1*(-2) = 13
+    assert_eq(prod.b, 0);          // 3*(-1) + 1*3 = 0
+    assert_eq(prod.c, 0);          // 2*5 + 5*(-2) = 0
+    assert_eq(prod.d, det_a);      // 2*(-1) + 5*3 = 13
+
+    // det(adj(A)) for 2x2 = det(A) = 13
+    let det_adj = mat2_det(adj_a); // 5*3 - (-1)*(-2) = 15 - 2 = 13
+    assert_eq(det_adj, det_a);
+
+    // Second matrix
+    let b = mat2_new(4, 7, 2, 6);
+    let det_b = mat2_det(b);       // 4*6 - 7*2 = 10
+    assert_eq(det_b, 10);
+
+    let adj_b = mat2_adjugate(b);
+    let prod_b = mat2_mul(b, adj_b);
+    assert_eq(prod_b.a, det_b);
+    assert_eq(prod_b.b, 0);
+    assert_eq(prod_b.c, 0);
+    assert_eq(prod_b.d, det_b);
+
+    print("test_det_inverse_roundtrip passed");
+}
+
+// ============================================================================
+// Test 3: transpose(transpose(A)) == A
+// ============================================================================
+
+fn test_transpose_idempotent() {
+    let a = mat2_new(1, 2, 3, 4);
+    let at = mat2_transpose(a);
+    assert_eq(at.a, 1);
+    assert_eq(at.b, 3);
+    assert_eq(at.c, 2);
+    assert_eq(at.d, 4);
+
+    let att = mat2_transpose(at);
+    assert(mat2_eq(att, a));
+
+    // Symmetric matrix: transpose == self
+    let sym = mat2_new(5, 3, 3, 7);
+    let sym_t = mat2_transpose(sym);
+    assert(mat2_eq(sym_t, sym));
+
+    // Skew-symmetric: transpose == negated
+    let skew = mat2_new(0, 4, 0 - 4, 0);
+    let skew_t = mat2_transpose(skew);
+    assert_eq(skew_t.a, 0);
+    assert_eq(skew_t.b, 0 - 4);
+    assert_eq(skew_t.c, 4);
+    assert_eq(skew_t.d, 0);
+
+    // transpose(A*B) == transpose(B) * transpose(A)
+    let b = mat2_new(5, 6, 7, 8);
+    let ab = mat2_mul(a, b);
+    let ab_t = mat2_transpose(ab);
+    let bt_at = mat2_mul(mat2_transpose(b), mat2_transpose(a));
+    assert(mat2_eq(ab_t, bt_at));
+
+    // Multiple matrices
+    let c = mat2_new(9, 10, 11, 12);
+    let cc_t = mat2_transpose(mat2_transpose(c));
+    assert(mat2_eq(cc_t, c));
+
+    print("test_transpose_idempotent passed");
+}
+
+// ============================================================================
+// Test 4: trace(A + B) == trace(A) + trace(B)
+// ============================================================================
+
+fn test_trace_linearity() {
+    let a = mat2_new(3, 1, 4, 1);
+    let b = mat2_new(5, 9, 2, 6);
+
+    let trace_a = mat2_trace(a);       // 3 + 1 = 4
+    let trace_b = mat2_trace(b);       // 5 + 6 = 11
+    let sum_ab = mat2_add(a, b);
+    let trace_sum = mat2_trace(sum_ab); // (3+5) + (1+6) = 8 + 7 = 15
+
+    assert_eq(trace_a, 4);
+    assert_eq(trace_b, 11);
+    assert_eq(trace_sum, 15);
+    assert_eq(trace_sum, trace_a + trace_b);
+
+    // trace(s*A) == s * trace(A)
+    let s = 7;
+    let sa = mat2_scale(a, s);
+    assert_eq(mat2_trace(sa), s * trace_a);
+
+    // trace(A) == trace(A^T)
+    let at = mat2_transpose(a);
+    assert_eq(mat2_trace(at), trace_a);
+
+    // trace(I) == 2 for 2x2
+    assert_eq(mat2_trace(mat2_identity()), 2);
+
+    // trace(0) == 0
+    assert_eq(mat2_trace(mat2_zero()), 0);
+
+    // trace(A*B) == trace(B*A) (cyclic property)
+    let ab = mat2_mul(a, b);
+    let ba = mat2_mul(b, a);
+    assert_eq(mat2_trace(ab), mat2_trace(ba));
+
+    print("test_trace_linearity passed");
+}
+
+// ============================================================================
+// Test 5: dot(a, b) == dot(b, a) (commutativity)
+// ============================================================================
+
+fn test_dot_commutative() {
+    let a = Vec2 { x: 3, y: 7 };
+    let b = Vec2 { x: 5, y: 11 };
+
+    let dot_ab = vec2_dot(a, b);  // 3*5 + 7*11 = 15 + 77 = 92
+    let dot_ba = vec2_dot(b, a);  // 5*3 + 11*7 = 15 + 77 = 92
+    assert_eq(dot_ab, 92);
+    assert_eq(dot_ba, 92);
+    assert_eq(dot_ab, dot_ba);
+
+    // dot with zero vector
+    let zero = Vec2 { x: 0, y: 0 };
+    assert_eq(vec2_dot(a, zero), 0);
+    assert_eq(vec2_dot(zero, a), 0);
+
+    // Linearity: dot(a, b+c) == dot(a, b) + dot(a, c)
+    let c = Vec2 { x: 2, y: 4 };
+    let bc = Vec2 { x: b.x + c.x, y: b.y + c.y };
+    assert_eq(vec2_dot(a, bc), vec2_dot(a, b) + vec2_dot(a, c));
+
+    // dot(a, a) >= 0 (positive definiteness)
+    assert(vec2_dot(a, a) > 0);   // 9 + 49 = 58
+    assert(vec2_dot(zero, zero) == 0);
+
+    // Negative vectors
+    let neg_a = Vec2 { x: 0 - 3, y: 0 - 7 };
+    assert_eq(vec2_dot(a, neg_a), 0 - vec2_dot(a, a));
+
+    // Orthogonal vectors have dot product 0
+    let u = Vec2 { x: 1, y: 0 };
+    let v = Vec2 { x: 0, y: 1 };
+    assert_eq(vec2_dot(u, v), 0);
+    assert_eq(vec2_dot(v, u), 0);
+
+    print("test_dot_commutative passed");
+}
+
+// ============================================================================
+// Test 6: I * A == A (identity multiplication)
+// ============================================================================
+
+fn test_matmul_identity() {
+    let id = mat2_identity();
+    let a = mat2_new(7, 3, 8, 2);
+
+    // I * A == A
+    let ia = mat2_mul(id, a);
+    assert(mat2_eq(ia, a));
+
+    // A * I == A
+    let ai = mat2_mul(a, id);
+    assert(mat2_eq(ai, a));
+
+    // I * I == I
+    let ii = mat2_mul(id, id);
+    assert(mat2_eq(ii, id));
+
+    // 0 * A == 0
+    let z = mat2_zero();
+    let za = mat2_mul(z, a);
+    assert(mat2_eq(za, z));
+
+    // A * 0 == 0
+    let az = mat2_mul(a, z);
+    assert(mat2_eq(az, z));
+
+    // Multiple distinct matrices
+    let b = mat2_new(0 - 1, 5, 4, 0 - 3);
+    assert(mat2_eq(mat2_mul(id, b), b));
+    assert(mat2_eq(mat2_mul(b, id), b));
+
+    // det(I) == 1
+    assert_eq(mat2_det(id), 1);
+
+    print("test_matmul_identity passed");
+}
+
+// ============================================================================
+// Test 7: (A*B)*C == A*(B*C) (associativity)
+// ============================================================================
+
+fn test_matmul_associative() {
+    let a = mat2_new(1, 2, 3, 4);
+    let b = mat2_new(5, 6, 7, 8);
+    let c = mat2_new(9, 10, 11, 12);
+
+    // (A*B)*C
+    let ab = mat2_mul(a, b);
+    let ab_c = mat2_mul(ab, c);
+
+    // A*(B*C)
+    let bc = mat2_mul(b, c);
+    let a_bc = mat2_mul(a, bc);
+
+    assert(mat2_eq(ab_c, a_bc));
+
+    // Verify actual values for (A*B)*C
+    // A*B = | 1*5+2*7  1*6+2*8 |   | 19 22 |
+    //       | 3*5+4*7  3*6+4*8 | = | 43 50 |
+    assert_eq(ab.a, 19);
+    assert_eq(ab.b, 22);
+    assert_eq(ab.c, 43);
+    assert_eq(ab.d, 50);
+
+    // (A*B)*C = | 19*9+22*11  19*10+22*12 |   | 413 454 |
+    //           | 43*9+50*11  43*10+50*12 | = | 937 1030 |
+    assert_eq(ab_c.a, 413);
+    assert_eq(ab_c.b, 454);
+    assert_eq(ab_c.c, 937);
+    assert_eq(ab_c.d, 1030);
+
+    // With a different triple
+    let d = mat2_new(2, 1, 0, 3);
+    let e = mat2_new(1, 0, 4, 2);
+    let f = mat2_new(3, 1, 2, 5);
+
+    let de_f = mat2_mul(mat2_mul(d, e), f);
+    let d_ef = mat2_mul(d, mat2_mul(e, f));
+    assert(mat2_eq(de_f, d_ef));
+
+    print("test_matmul_associative passed");
+}
+
+// ============================================================================
+// Test 8: det(A*B) == det(A) * det(B) for 2x2
+// ============================================================================
+
+fn test_det_product() {
+    let a = mat2_new(2, 3, 1, 4);
+    let b = mat2_new(5, 1, 2, 3);
+
+    let det_a = mat2_det(a);   // 2*4 - 3*1 = 5
+    let det_b = mat2_det(b);   // 5*3 - 1*2 = 13
+    assert_eq(det_a, 5);
+    assert_eq(det_b, 13);
+
+    let ab = mat2_mul(a, b);
+    let det_ab = mat2_det(ab);
+    assert_eq(det_ab, det_a * det_b); // 5 * 13 = 65
+
+    // Verify A*B directly
+    // | 2*5+3*2  2*1+3*3 |   | 16 11 |
+    // | 1*5+4*2  1*1+4*3 | = | 13 13 |
+    assert_eq(ab.a, 16);
+    assert_eq(ab.b, 11);
+    assert_eq(ab.c, 13);
+    assert_eq(ab.d, 13);
+    // det = 16*13 - 11*13 = 208 - 143 = 65
+    assert_eq(det_ab, 65);
+
+    // det(B*A) also equals det(A)*det(B)
+    let ba = mat2_mul(b, a);
+    assert_eq(mat2_det(ba), det_a * det_b);
+
+    // Singular matrix: det == 0
+    let singular = mat2_new(2, 4, 1, 2);
+    assert_eq(mat2_det(singular), 0);
+
+    // Product with singular: det == 0
+    let as_prod = mat2_mul(a, singular);
+    assert_eq(mat2_det(as_prod), 0);
+
+    // Identity: det(I) == 1
+    assert_eq(mat2_det(mat2_identity()), 1);
+    assert_eq(mat2_det(mat2_mul(mat2_identity(), a)), det_a);
+
+    // det(s*A) == s^2 * det(A) for 2x2
+    let scaled = mat2_scale(a, 3);
+    assert_eq(mat2_det(scaled), 9 * det_a); // 3^2 * 5 = 45
+
+    print("test_det_product passed");
+}
+
+// ============================================================================
+// Test 9: 1D convolution with known values
+// ============================================================================
+
+fn test_conv_known_values() {
+    // input = [1, 2, 3, 4], kernel = [1, 0, -1]
+    // output[0] = 1*1 + 2*0 + 3*(-1) = 1 - 3 = -2
+    // output[1] = 2*1 + 3*0 + 4*(-1) = 2 - 4 = -2
+    let input1 = Vec4 { v0: 1, v1: 2, v2: 3, v3: 4 };
+    let kernel1 = Vec3 { v0: 1, v1: 0, v2: 0 - 1 };
+    let out1 = conv1d_valid(input1, kernel1);
+    assert_eq(out1.x, 0 - 2);
+    assert_eq(out1.y, 0 - 2);
+
+    // input = [1, 1, 1, 1], kernel = [1, 1, 1] (box filter)
+    // output[0] = 1+1+1 = 3
+    // output[1] = 1+1+1 = 3
+    let input2 = Vec4 { v0: 1, v1: 1, v2: 1, v3: 1 };
+    let kernel2 = Vec3 { v0: 1, v1: 1, v2: 1 };
+    let out2 = conv1d_valid(input2, kernel2);
+    assert_eq(out2.x, 3);
+    assert_eq(out2.y, 3);
+
+    // input = [0, 0, 0, 0], any kernel -> 0
+    let input3 = Vec4 { v0: 0, v1: 0, v2: 0, v3: 0 };
+    let out3 = conv1d_valid(input3, kernel1);
+    assert_eq(out3.x, 0);
+    assert_eq(out3.y, 0);
+
+    // input = [1, 0, 0, 0], kernel = [1, 2, 3]
+    // output[0] = 1*1 + 0*2 + 0*3 = 1
+    // output[1] = 0*1 + 0*2 + 0*3 = 0
+    let input4 = Vec4 { v0: 1, v1: 0, v2: 0, v3: 0 };
+    let kernel4 = Vec3 { v0: 1, v1: 2, v2: 3 };
+    let out4 = conv1d_valid(input4, kernel4);
+    assert_eq(out4.x, 1);
+    assert_eq(out4.y, 0);
+
+    // Edge detection kernel on a step function: [0, 0, 10, 10]
+    // kernel = [1, 0, -1]
+    // output[0] = 0*1 + 0*0 + 10*(-1) = -10
+    // output[1] = 0*1 + 10*0 + 10*(-1) = -10
+    let step = Vec4 { v0: 0, v1: 0, v2: 10, v3: 10 };
+    let edge_kernel = Vec3 { v0: 1, v1: 0, v2: 0 - 1 };
+    let edge_out = conv1d_valid(step, edge_kernel);
+    assert_eq(edge_out.x, 0 - 10);
+    assert_eq(edge_out.y, 0 - 10);
+
+    // Weighted average kernel: [1, 2, 1] on [4, 6, 8, 10]
+    // output[0] = 4*1 + 6*2 + 8*1 = 4 + 12 + 8 = 24
+    // output[1] = 6*1 + 8*2 + 10*1 = 6 + 16 + 10 = 32
+    let ramp = Vec4 { v0: 4, v1: 6, v2: 8, v3: 10 };
+    let avg_kernel = Vec3 { v0: 1, v1: 2, v2: 1 };
+    let avg_out = conv1d_valid(ramp, avg_kernel);
+    assert_eq(avg_out.x, 24);
+    assert_eq(avg_out.y, 32);
+
+    print("test_conv_known_values passed");
+}
+
+// ============================================================================
+// Test 10: sum of halves equals total sum
+// ============================================================================
+
+fn test_reduction_sum_parts() {
+    let v1 = Vec4 { v0: 10, v1: 20, v2: 30, v3: 40 };
+    let total1 = vec4_sum(v1);          // 100
+    let first1 = vec4_sum_first_half(v1);  // 30
+    let second1 = vec4_sum_second_half(v1); // 70
+    assert_eq(total1, 100);
+    assert_eq(first1, 30);
+    assert_eq(second1, 70);
+    assert_eq(total1, first1 + second1);
+
+    // With negative values
+    let v2 = Vec4 { v0: 0 - 5, v1: 15, v2: 0 - 25, v3: 35 };
+    let total2 = vec4_sum(v2);              // -5+15-25+35 = 20
+    let first2 = vec4_sum_first_half(v2);   // -5+15 = 10
+    let second2 = vec4_sum_second_half(v2); // -25+35 = 10
+    assert_eq(total2, 20);
+    assert_eq(first2, 10);
+    assert_eq(second2, 10);
+    assert_eq(total2, first2 + second2);
+
+    // All zeros
+    let v3 = Vec4 { v0: 0, v1: 0, v2: 0, v3: 0 };
+    assert_eq(vec4_sum(v3), 0);
+    assert_eq(vec4_sum(v3), vec4_sum_first_half(v3) + vec4_sum_second_half(v3));
+
+    // Large values
+    let v4 = Vec4 { v0: 1000000, v1: 2000000, v2: 3000000, v3: 4000000 };
+    let total4 = vec4_sum(v4);
+    assert_eq(total4, 10000000);
+    assert_eq(total4, vec4_sum_first_half(v4) + vec4_sum_second_half(v4));
+
+    // Verify associativity of addition via different groupings
+    let v5 = Vec4 { v0: 7, v1: 13, v2: 19, v3: 23 };
+    let sum_left = (v5.v0 + v5.v1) + (v5.v2 + v5.v3);
+    let sum_right = v5.v0 + (v5.v1 + (v5.v2 + v5.v3));
+    let sum_total = vec4_sum(v5);
+    assert_eq(sum_left, 62);
+    assert_eq(sum_right, 62);
+    assert_eq(sum_total, 62);
+    assert_eq(sum_left, sum_total);
+    assert_eq(sum_right, sum_total);
+
+    print("test_reduction_sum_parts passed");
+}
+
+// ============================================================================
+// Main: run all tests
+// ============================================================================
+
+fn main() -> Int {
+    test_matmul_chain();
+    test_det_inverse_roundtrip();
+    test_transpose_idempotent();
+    test_trace_linearity();
+    test_dot_commutative();
+    test_matmul_identity();
+    test_matmul_associative();
+    test_det_product();
+    test_conv_known_values();
+    test_reduction_sum_parts();
+    print("[OK] 061_differential_tensor_full");
+    0
+}

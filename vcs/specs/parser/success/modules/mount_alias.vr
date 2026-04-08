@@ -1,0 +1,44 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Simple alias
+mount core.io as io;
+
+// Alias with different name
+mount core.collections.HashMap as Map;
+
+// Alias long path to short name
+mount very.long.path.to.module as m;
+
+// Alias to underscore-prefixed name
+mount core.internal as _internal;
+
+// Alias with number
+mount mymod.item as item2;
+
+// Alias full path
+mount a.b.c.d.e as short;
+
+// Multiple aliased mounts
+mount core.fs as filesystem;
+mount core.net as network;
+mount core.sync as synchronization;
+
+// Alias type names
+mount core.collections.List as MyList;
+mount core.collections.Set as MySet;
+mount core.collections.Map as MyMap;
+
+// Alias to match local naming convention
+mount external_lib.HttpClient as Client;
+mount external_lib.HttpRequest as Request;
+mount external_lib.HttpResponse as Response;
+
+// Alias module with similar names
+mount database.connection.Connection as DbConnection;
+mount network.connection.Connection as NetConnection;
+
+// Alias to avoid naming conflicts
+mount graphics.Color as GraphicsColor;
+mount terminal.Color as TerminalColor;

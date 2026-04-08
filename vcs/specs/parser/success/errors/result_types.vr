@@ -1,0 +1,200 @@
+// @test: parse-pass
+// @tier: 0
+// @category: errors
+// @description: Test Result and error type declarations and usage
+
+// Basic Result type usage
+type ParseResult is Result<Ast, ParseError>;
+
+// Error enum definition
+type ParseError is
+    | UnexpectedToken(Token, Position)
+    | UnexpectedEof
+    | InvalidSyntax { message: Text, span: Span }
+    | MultipleErrors(List<ParseError>);
+
+// Simple error type
+type IoError is
+    | NotFound(Text)
+    | PermissionDenied
+    | AlreadyExists
+    | Other(Text);
+
+// Error with associated data
+type NetworkError is {
+    code: Int,
+    message: Text,
+    cause: Maybe<Heap<NetworkError>>,
+};
+
+// Error protocol for custom errors
+type ErrorInfo is protocol {
+    fn message(&self) -> Text;
+    fn code(&self) -> Int;
+    fn cause(&self) -> Maybe<&dyn ErrorInfo>;
+};
+
+// Implement error protocol
+implement ErrorInfo for ParseError {
+    fn message(&self) -> Text {
+        match self {
+            UnexpectedToken(t, _) => f"Unexpected token: {t}",
+            UnexpectedEof => "Unexpected end of file",
+            InvalidSyntax { message, .. } => message,
+            MultipleErrors(errs) => f"{errs.len()} errors occurred"
+        }
+    }
+
+    fn code(&self) -> Int {
+        match self {
+            UnexpectedToken(_, _) => 100,
+            UnexpectedEof => 101,
+            InvalidSyntax { .. } => 102,
+            MultipleErrors(_) => 103
+        }
+    }
+
+    fn cause(&self) -> Maybe<&dyn ErrorInfo> {
+        None
+    }
+}
+
+// Result construction
+fn demonstrate_results() {
+    // Ok variant
+    let success: Result<Int, Error> = Ok(42);
+
+    // Err variant
+    let failure: Result<Int, Error> = Err(Error.new("Failed"));
+
+    // Inference
+    let ok_value = Ok(compute_value());
+    let err_value = Err(ValidationError.Empty);
+}
+
+// Result methods
+fn result_methods() {
+    let result: Result<Int, Error> = get_result();
+
+    // is_ok / is_err
+    if result.is_ok() {
+        process();
+    }
+
+    // unwrap (panics on Err)
+    let value = result.unwrap();
+
+    // unwrap_or
+    let value_or_default = result.unwrap_or(0);
+
+    // unwrap_or_else
+    let value_or_computed = result.unwrap_or_else(|e| compute_default(e));
+
+    // expect (unwrap with message)
+    let value = result.expect("Result should be Ok");
+
+    // map
+    let mapped: Result<Text, Error> = result.map(|x| x.to_string());
+
+    // map_err
+    let remapped: Result<Int, OtherError> = result.map_err(|e| OtherError.from(e));
+
+    // and_then (flatMap)
+    let chained = result.and_then(|x| validate(x));
+
+    // or_else
+    let fallback = result.or_else(|e| try_alternative());
+
+    // ok() - convert to Maybe
+    let maybe_value: Maybe<Int> = result.ok();
+
+    // err() - get error as Maybe
+    let maybe_error: Maybe<Error> = result.err();
+}
+
+// Result with pattern matching
+fn match_result(result: Result<Data, Error>) -> Output {
+    match result {
+        Ok(data) => process(data),
+        Err(Error.NotFound) => default_output(),
+        Err(Error.Invalid(msg)) => {
+            log_error(msg);
+            error_output()
+        },
+        Err(e) => {
+            report_error(e);
+            panic("Unhandled error")
+        }
+    }
+}
+
+// Result with is operator
+fn result_is_pattern(result: Result<Int, Error>) {
+    // Pattern test
+    if result is Ok(value) {
+        use_value(value);
+    }
+
+    if result is Err(Error.NotFound) {
+        handle_not_found();
+    }
+
+    // is not
+    if result is not Err(_) {
+        proceed_safely();
+    }
+}
+
+// Nested Result types
+type NestedResult is Result<Result<Int, InnerError>, OuterError>;
+
+// Result with generic error
+fn generic_error<E: ErrorInfo>(operation: fn() -> Result<Data, E>) -> Result<Data, E> {
+    operation()
+}
+
+// Union error types
+fn union_errors() throws(IoError | ParseError | NetworkError) -> Data {
+    let file = File.open(path)?;
+    let content = file.read_all()?;
+    let parsed = parse(content)?;
+    let fetched = fetch(parsed.url)?;
+    Ok(fetched)
+}
+
+// Error composition
+fn compose_errors() {
+    // Wrap errors
+    let wrapped = inner_operation()
+        .map_err(|e| OuterError.Wrapped(Heap.new(e)));
+
+    // Add context
+    let with_context = operation()
+        .map_err(|e| e.with_context("During batch processing"));
+
+    // Collect multiple errors
+    let all_results: List<Result<Item, Error>> = items.iter()
+        .map(|item| process(item))
+        .collect();
+
+    let (successes, failures): (List<Item>, List<Error>) = all_results
+        .partition_results();
+}
+
+// Result in async context
+async fn async_results() -> Result<Response, NetworkError> {
+    let conn = connect().await?;
+    let response = conn.send(request).await?;
+    Ok(response)
+}
+
+// Custom Result alias
+type DbResult<T> is Result<T, DbError>;
+type ApiResult<T> is Result<T, ApiError>;
+type ValidationResult<T> is Result<T, List<ValidationError>>;
+
+fn use_aliases() -> DbResult<User> {
+    let row = Database.query(sql)?;
+    let user = User.from_row(row)?;
+    Ok(user)
+}

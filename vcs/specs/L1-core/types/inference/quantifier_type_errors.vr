@@ -1,0 +1,79 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: types, inference, quantifiers, errors, forall, exists
+// @expected-error: E400
+// @description: Type error detection tests for quantifier expressions
+
+// Note: Tests for missing type information (forall x . ...) are parse-level errors,
+// not type-level errors, and belong in parser/fail/ tests.
+
+// ============================================================================
+// Section 1: Body Type Errors (body must be Bool)
+// ============================================================================
+
+/// ERROR: Body is not Bool - returns Int
+fn test_body_not_bool_int() {
+    // ERROR: Body expression has type Int, expected Bool
+    let invalid: Bool = forall x: Int . x + 1;
+}
+
+/// ERROR: Body is not Bool - returns Text
+fn test_body_not_bool_text() {
+    // ERROR: Body expression has type Text, expected Bool
+    let invalid: Bool = exists s: Text . s;
+}
+
+// ============================================================================
+// Section 2: Type Mismatch in Body
+// ============================================================================
+
+/// ERROR: Comparison type mismatch in body
+fn test_body_comparison_mismatch() {
+    // ERROR: Cannot compare Int with Text
+    let invalid: Bool = forall x: Int . x == "hello";
+}
+
+/// ERROR: Function argument type mismatch in body
+fn test_body_function_arg_mismatch() {
+    // ERROR: Expected Int, got Text
+    let invalid: Bool = forall s: Text . process_int(s) > 0;
+}
+
+fn process_int(n: Int) -> Int { n * 2 }
+
+// ============================================================================
+// Section 3: Result Type Errors
+// ============================================================================
+
+/// ERROR: Assigning quantifier Bool result to Int variable
+fn test_result_type_mismatch_int() {
+    // ERROR: Cannot assign Bool to Int
+    let n: Int = forall x: Int . x == x;
+}
+
+/// ERROR: Assigning quantifier Bool result to Text variable
+fn test_result_type_mismatch_text() {
+    // ERROR: Cannot assign Bool to Text
+    let s: Text = exists x: Int . x > 0;
+}
+
+/// ERROR: Function return type mismatch
+fn wrong_return() -> Int {
+    // ERROR: Cannot return Bool as Int
+    forall x: Int . x >= 0
+}
+
+// ============================================================================
+// Section 4: Nested Quantifier Errors
+// ============================================================================
+
+/// ERROR: Inner quantifier body not Bool
+fn test_nested_inner_not_bool() {
+    // ERROR: Inner body has type Int, expected Bool
+    let invalid: Bool = forall x: Int . exists y: Int . x + y;
+}
+
+fn main() {
+    // Type error tests - this file should not compile
+    print("This should not compile");
+}

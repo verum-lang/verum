@@ -1,0 +1,263 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, advanced
+// @timeout: 15000
+// @expected-exit: 0
+//
+// CBGR advanced reference test: Factory functions returning records,
+// then mutating via &mut ref. Tests record construction in helper
+// functions, field mutation through refs, and chained factory patterns.
+
+// ============================================================================
+// Type definitions
+// ============================================================================
+
+type Particle is { px: Int, py: Int, vx: Int, vy: Int, mass: Int };
+type ColorRGB is { r: Int, g: Int, b: Int };
+type RectShape is { rx: Int, ry: Int, rw: Int, rh: Int };
+type StatsBag is { total: Int, count: Int, vmin: Int, vmax: Int };
+
+// ============================================================================
+// Factory functions
+// ============================================================================
+
+fn make_particle(px: Int, py: Int, vx: Int, vy: Int, mass: Int) -> Particle {
+    Particle { px: px, py: py, vx: vx, vy: vy, mass: mass }
+}
+
+fn make_color(r: Int, g: Int, b: Int) -> ColorRGB {
+    ColorRGB { r: r, g: g, b: b }
+}
+
+fn make_rect(rx: Int, ry: Int, rw: Int, rh: Int) -> RectShape {
+    RectShape { rx: rx, ry: ry, rw: rw, rh: rh }
+}
+
+fn make_stats() -> StatsBag {
+    StatsBag { total: 0, count: 0, vmin: 999999, vmax: -999999 }
+}
+
+// ============================================================================
+// Mutation functions via &mut ref
+// ============================================================================
+
+fn particle_step(p: &mut Particle) {
+    (*p).px = (*p).px + (*p).vx;
+    (*p).py = (*p).py + (*p).vy;
+}
+
+fn particle_apply_gravity(p: &mut Particle, g: Int) {
+    (*p).vy = (*p).vy + g;
+}
+
+fn particle_bounce_x(p: &mut Particle, wall: Int) {
+    if (*p).px > wall {
+        (*p).px = wall;
+        (*p).vx = 0 - (*p).vx;
+    }
+    if (*p).px < 0 {
+        (*p).px = 0;
+        (*p).vx = 0 - (*p).vx;
+    }
+}
+
+fn color_brighten(c: &mut ColorRGB, amount: Int) {
+    (*c).r = (*c).r + amount;
+    if (*c).r > 255 { (*c).r = 255; }
+    (*c).g = (*c).g + amount;
+    if (*c).g > 255 { (*c).g = 255; }
+    (*c).b = (*c).b + amount;
+    if (*c).b > 255 { (*c).b = 255; }
+}
+
+fn color_darken(c: &mut ColorRGB, amount: Int) {
+    (*c).r = (*c).r - amount;
+    if (*c).r < 0 { (*c).r = 0; }
+    (*c).g = (*c).g - amount;
+    if (*c).g < 0 { (*c).g = 0; }
+    (*c).b = (*c).b - amount;
+    if (*c).b < 0 { (*c).b = 0; }
+}
+
+fn rect_translate(r: &mut RectShape, dx: Int, dy: Int) {
+    (*r).rx = (*r).rx + dx;
+    (*r).ry = (*r).ry + dy;
+}
+
+fn rect_grow(r: &mut RectShape, dw: Int, dh: Int) {
+    (*r).rw = (*r).rw + dw;
+    (*r).rh = (*r).rh + dh;
+}
+
+fn rect_area(r: &RectShape) -> Int {
+    (*r).rw * (*r).rh
+}
+
+fn stats_add(s: &mut StatsBag, val: Int) {
+    (*s).total = (*s).total + val;
+    (*s).count = (*s).count + 1;
+    if val < (*s).vmin { (*s).vmin = val; }
+    if val > (*s).vmax { (*s).vmax = val; }
+}
+
+fn stats_average(s: &StatsBag) -> Int {
+    if (*s).count == 0 { return 0; }
+    (*s).total / (*s).count
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_particle_factory() {
+    let p = make_particle(10, 20, 3, -2, 5);
+    assert_eq(p.px, 10);
+    assert_eq(p.py, 20);
+    assert_eq(p.vx, 3);
+    assert_eq(p.vy, -2);
+    assert_eq(p.mass, 5);
+}
+
+fn test_particle_step() {
+    let mut p = make_particle(0, 0, 5, 3, 1);
+    particle_step(&mut p);
+    assert_eq(p.px, 5);
+    assert_eq(p.py, 3);
+    particle_step(&mut p);
+    assert_eq(p.px, 10);
+    assert_eq(p.py, 6);
+}
+
+fn test_particle_gravity() {
+    let mut p = make_particle(0, 100, 0, 0, 1);
+    let mut i = 0;
+    while i < 5 {
+        particle_apply_gravity(&mut p, 2);
+        particle_step(&mut p);
+        i = i + 1;
+    }
+    // vy after 5 steps of gravity=2: 2,4,6,8,10
+    assert_eq(p.vy, 10);
+    // py: 100+2=102, 102+4=106, 106+6=112, 112+8=120, 120+10=130
+    assert_eq(p.py, 130);
+}
+
+fn test_particle_bounce() {
+    let mut p = make_particle(90, 0, 20, 0, 1);
+    particle_step(&mut p);
+    // px = 110, wall = 100 -> bounces
+    particle_bounce_x(&mut p, 100);
+    assert_eq(p.px, 100);
+    assert_eq(p.vx, -20);
+}
+
+fn test_color_factory_and_modify() {
+    let mut c = make_color(100, 150, 200);
+    color_brighten(&mut c, 50);
+    assert_eq(c.r, 150);
+    assert_eq(c.g, 200);
+    assert_eq(c.b, 250);
+}
+
+fn test_color_clamp() {
+    let mut c = make_color(240, 10, 200);
+    color_brighten(&mut c, 30);
+    assert_eq(c.r, 255); // clamped
+    assert_eq(c.g, 40);
+    assert_eq(c.b, 230);
+}
+
+fn test_color_darken_clamp() {
+    let mut c = make_color(20, 100, 5);
+    color_darken(&mut c, 30);
+    assert_eq(c.r, 0); // clamped
+    assert_eq(c.g, 70);
+    assert_eq(c.b, 0); // clamped
+}
+
+fn test_rect_operations() {
+    let mut r = make_rect(10, 20, 50, 30);
+    let area1 = r.rw * r.rh;
+    assert_eq(area1, 1500);
+    rect_translate(&mut r, 5, -3);
+    assert_eq(r.rx, 15);
+    assert_eq(r.ry, 17);
+    rect_grow(&mut r, 10, 10);
+    let area2 = r.rw * r.rh;
+    assert_eq(area2, 2400); // 60*40
+}
+
+fn test_stats_accumulation() {
+    let mut s = make_stats();
+    stats_add(&mut s, 10);
+    stats_add(&mut s, 20);
+    stats_add(&mut s, 5);
+    stats_add(&mut s, 30);
+    stats_add(&mut s, 15);
+    assert_eq(s.total, 80);
+    assert_eq(s.count, 5);
+    assert_eq(s.vmin, 5);
+    assert_eq(s.vmax, 30);
+    assert_eq(stats_average(&s), 16);
+}
+
+fn test_stats_loop() {
+    let mut s = make_stats();
+    let mut i = 1;
+    while i <= 100 {
+        stats_add(&mut s, i);
+        i = i + 1;
+    }
+    assert_eq(s.total, 5050);
+    assert_eq(s.count, 100);
+    assert_eq(s.vmin, 1);
+    assert_eq(s.vmax, 100);
+    assert_eq(stats_average(&s), 50);
+}
+
+fn test_chained_factory() {
+    let mut p1 = make_particle(0, 0, 1, 1, 1);
+    let mut p2 = make_particle(50, 50, -1, -1, 2);
+    let mut i = 0;
+    while i < 10 {
+        particle_step(&mut p1);
+        particle_step(&mut p2);
+        i = i + 1;
+    }
+    assert_eq(p1.px, 10);
+    assert_eq(p1.py, 10);
+    assert_eq(p2.px, 40);
+    assert_eq(p2.py, 40);
+}
+
+fn test_multiple_rects() {
+    let mut r1 = make_rect(0, 0, 10, 10);
+    let mut r2 = make_rect(5, 5, 20, 20);
+    rect_grow(&mut r1, 5, 5);
+    rect_translate(&mut r2, 10, 10);
+    let a1 = r1.rw * r1.rh;
+    assert_eq(a1, 225); // 15*15
+    assert_eq(r2.rx, 15);
+    assert_eq(r2.ry, 15);
+    let a2 = r2.rw * r2.rh;
+    let total_area = a1 + a2;
+    assert_eq(total_area, 625); // 225 + 400
+}
+
+fn main() -> Int {
+    test_particle_factory();
+    test_particle_step();
+    test_particle_gravity();
+    test_particle_bounce();
+    test_color_factory_and_modify();
+    test_color_clamp();
+    test_color_darken_clamp();
+    test_rect_operations();
+    test_stats_accumulation();
+    test_stats_loop();
+    test_chained_factory();
+    test_multiple_rects();
+    print("[OK] 362_interp_cbgr_ref_array_sim");
+    0
+}

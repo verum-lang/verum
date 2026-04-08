@@ -1,0 +1,12 @@
+fn main() -> Int {
+    let mut s = Set.new();
+    print(f"created set, len={s.len()}");
+    s.insert(10);
+    print(f"inserted 10, len={s.len()}");
+    if (s.len() != 1) {
+        print(f"FAIL: len={s.len()}, expected 1");
+        return 1;
+    }
+    print("968_set_minimal: PASS");
+    0
+}

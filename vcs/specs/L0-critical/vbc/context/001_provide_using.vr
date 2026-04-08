@@ -1,0 +1,358 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, context, provide, using, dependency-injection
+// @timeout: 5000
+// @expect: pass
+//
+// Test: CTX_GET, CTX_PROVIDE, CTX_END, PUSH_CONTEXT, POP_CONTEXT
+// Verifies context-based dependency injection system
+
+// =============================================================================
+// Context type definitions
+// =============================================================================
+
+type Logger is protocol {
+    fn log(&self, msg: Text);
+    fn level(&self) -> Int;
+};
+
+type Database is protocol {
+    fn query(&self, sql: Text) -> List<Map<Text, Text>>;
+    fn execute(&mut self, sql: Text) -> Int;
+};
+
+type Config is { debug: Bool, max_connections: Int, timeout_ms: Int };
+
+// =============================================================================
+// Basic context usage
+// =============================================================================
+
+fn test_simple_provide() using [Logger] {
+    type ConsoleLogger is {};
+
+    implement Logger for ConsoleLogger {
+        fn log(&self, msg: Text) { print(msg); }
+        fn level(&self) -> Int { 0 }
+    }
+
+    fn inner() using [Logger] {
+        Logger.log("test message");
+    }
+
+    provide Logger = ConsoleLogger {} {
+        inner();
+    }
+}
+
+fn test_context_access() using [Config] {
+    fn get_timeout() using [Config] -> Int {
+        Config.timeout_ms
+    }
+
+    provide Config = Config { debug: true, max_connections: 10, timeout_ms: 5000 } {
+        let timeout = get_timeout();
+        assert_eq(timeout, 5000);
+    }
+}
+
+fn test_multiple_contexts() using [Logger, Config] {
+    type TestLogger is {};
+
+    implement Logger for TestLogger {
+        fn log(&self, msg: Text) {}
+        fn level(&self) -> Int { 1 }
+    }
+
+    fn use_both() using [Logger, Config] -> (Int, Int) {
+        (Logger.level(), Config.max_connections)
+    }
+
+    provide Logger = TestLogger {}, Config = Config { debug: false, max_connections: 5, timeout_ms: 1000 } {
+        let (level, conns) = use_both();
+        assert_eq(level, 1);
+        assert_eq(conns, 5);
+    }
+}
+
+// =============================================================================
+// Nested context scopes
+// =============================================================================
+
+fn test_nested_provide() using [Config] {
+    fn get_debug() using [Config] -> Bool {
+        Config.debug
+    }
+
+    provide Config = Config { debug: false, max_connections: 10, timeout_ms: 1000 } {
+        assert(!get_debug());
+
+        // Inner scope shadows outer
+        provide Config = Config { debug: true, max_connections: 20, timeout_ms: 2000 } {
+            assert(get_debug());
+        }
+
+        // Back to outer scope
+        assert(!get_debug());
+    }
+}
+
+fn test_partial_shadow() using [Logger, Config] {
+    type LoggerA is {};
+    type LoggerB is {};
+
+    implement Logger for LoggerA {
+        fn log(&self, msg: Text) {}
+        fn level(&self) -> Int { 1 }
+    }
+
+    implement Logger for LoggerB {
+        fn log(&self, msg: Text) {}
+        fn level(&self) -> Int { 2 }
+    }
+
+    provide Logger = LoggerA {}, Config = Config { debug: true, max_connections: 10, timeout_ms: 1000 } {
+        assert_eq(Logger.level(), 1);
+        assert(Config.debug);
+
+        // Only shadow Logger
+        provide Logger = LoggerB {} {
+            assert_eq(Logger.level(), 2);
+            assert(Config.debug);  // Config unchanged
+        }
+
+        assert_eq(Logger.level(), 1);
+    }
+}
+
+// =============================================================================
+// Context in functions
+// =============================================================================
+
+fn requires_logger() using [Logger] {
+    Logger.log("function called");
+}
+
+fn requires_config() using [Config] -> Int {
+    Config.timeout_ms
+}
+
+fn requires_both() using [Logger, Config] {
+    Logger.log(f"timeout: {Config.timeout_ms}");
+}
+
+fn test_function_contexts() {
+    type TestLogger is {};
+    implement Logger for TestLogger {
+        fn log(&self, msg: Text) {}
+        fn level(&self) -> Int { 0 }
+    }
+
+    let cfg = Config { debug: true, max_connections: 5, timeout_ms: 3000 };
+
+    provide Logger = TestLogger {}, Config = cfg {
+        requires_logger();
+        let timeout = requires_config();
+        assert_eq(timeout, 3000);
+        requires_both();
+    }
+}
+
+fn test_context_propagation() {
+    type TestLogger is {};
+    implement Logger for TestLogger {
+        fn log(&self, msg: Text) {}
+        fn level(&self) -> Int { 5 }
+    }
+
+    fn outer() using [Logger] {
+        fn middle() using [Logger] {
+            fn inner() using [Logger] -> Int {
+                Logger.level()
+            }
+            assert_eq(inner(), 5);
+        }
+        middle();
+    }
+
+    provide Logger = TestLogger {} {
+        outer();
+    }
+}
+
+// =============================================================================
+// Context with closures
+// =============================================================================
+
+fn test_closure_captures_context() using [Config] {
+    provide Config = Config { debug: true, max_connections: 10, timeout_ms: 5000 } {
+        let get_timeout = fn() using [Config] -> Int {
+            Config.timeout_ms
+        };
+
+        assert_eq(get_timeout(), 5000);
+    }
+}
+
+fn test_closure_in_collection() using [Logger] {
+    type TestLogger is { prefix: Text };
+    implement Logger for TestLogger {
+        fn log(&self, msg: Text) { print(f"{self.prefix}: {msg}"); }
+        fn level(&self) -> Int { 0 }
+    }
+
+    let callbacks: List<fn() using [Logger]> = [
+        fn() using [Logger] { Logger.log("callback 1"); },
+        fn() using [Logger] { Logger.log("callback 2"); },
+        fn() using [Logger] { Logger.log("callback 3"); }
+    ];
+
+    provide Logger = TestLogger { prefix: "TEST" } {
+        for callback in callbacks {
+            callback();
+        }
+    }
+}
+
+// =============================================================================
+// Context attentuation
+// =============================================================================
+
+fn test_attenuate_context() using [Database] {
+    type FullDatabase is { data: Map<Text, Text> };
+
+    implement Database for FullDatabase {
+        fn query(&self, sql: Text) -> List<Map<Text, Text>> { [] }
+        fn execute(&mut self, sql: Text) -> Int { 1 }
+    }
+
+    fn read_only_operation() using [Database @readonly] {
+        // Can only call query, not execute
+        let _ = Database.query("SELECT * FROM users");
+        // Database.execute("DELETE FROM users");  // Would be compile error
+    }
+
+    provide Database = FullDatabase { data: {} } {
+        // Full access here
+        let _ = Database.execute("INSERT INTO users VALUES (...)");
+
+        // Attenuate to read-only
+        attenuate Database @readonly {
+            read_only_operation();
+        }
+    }
+}
+
+// =============================================================================
+// Default contexts
+// =============================================================================
+
+fn test_default_context() using [Config = default] {
+    // Config has a default value if not provided
+    fn get_with_default() using [Config = Config { debug: false, max_connections: 1, timeout_ms: 100 }] -> Int {
+        Config.timeout_ms
+    }
+
+    // Without explicit provide, uses default
+    let timeout = get_with_default();
+    assert_eq(timeout, 100);
+
+    // With provide, uses provided
+    provide Config = Config { debug: true, max_connections: 50, timeout_ms: 10000 } {
+        let timeout2 = get_with_default();
+        assert_eq(timeout2, 10000);
+    }
+}
+
+// =============================================================================
+// Context errors
+// =============================================================================
+
+fn test_missing_context_error() {
+    fn needs_logger() using [Logger] {
+        Logger.log("test");
+    }
+
+    // Calling without providing context should fail
+    let result = @catch(fn() {
+        needs_logger();  // No Logger provided!
+    });
+
+    assert(result is Err);
+}
+
+fn test_context_type_mismatch() {
+    type WrongType is { x: Int };
+
+    // This should be a compile error - WrongType doesn't implement Logger
+    // provide Logger = WrongType { x: 42 } { ... }
+}
+
+// =============================================================================
+// Async contexts
+// =============================================================================
+
+async fn test_async_context() using [Logger] {
+    type AsyncLogger is {};
+    implement Logger for AsyncLogger {
+        fn log(&self, msg: Text) {}
+        fn level(&self) -> Int { 0 }
+    }
+
+    async fn async_with_logger() using [Logger] {
+        Logger.log("async operation");
+    }
+
+    provide Logger = AsyncLogger {} {
+        async_with_logger().await;
+    }
+}
+
+async fn test_context_across_await() using [Config] {
+    async fn delayed() -> Int { 42 }
+
+    provide Config = Config { debug: true, max_connections: 10, timeout_ms: 1000 } {
+        // Context should persist across await
+        let before = Config.timeout_ms;
+        let _ = delayed().await;
+        let after = Config.timeout_ms;
+
+        assert_eq(before, after);
+    }
+}
+
+fn main() {
+    // Basic usage
+    test_simple_provide();
+    test_context_access();
+    test_multiple_contexts();
+
+    // Nesting
+    test_nested_provide();
+    test_partial_shadow();
+
+    // Functions
+    test_function_contexts();
+    test_context_propagation();
+
+    // Closures
+    test_closure_captures_context();
+    test_closure_in_collection();
+
+    // Attenuation
+    test_attenuate_context();
+
+    // Defaults
+    test_default_context();
+
+    // Errors
+    test_missing_context_error();
+
+    // Async
+    @block_on(async {
+        test_async_context().await;
+        test_context_across_await().await;
+    });
+
+    print("001_provide_using: PASSED");
+}

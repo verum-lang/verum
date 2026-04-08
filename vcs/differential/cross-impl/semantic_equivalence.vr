@@ -1,0 +1,570 @@
+// @test: differential
+// @tier: 0, 3
+// @impl: all
+// @level: L2
+// @tags: differential, semantic, cross-impl, core
+// @timeout: 30000
+// @platform: any
+
+/// Semantic Equivalence Tests
+/// Core semantic tests that must produce identical results across all
+/// implementations of the Verum language (interpreter, AOT, future JIT, etc.)
+///
+/// These tests serve as the canonical specification of Verum semantics.
+/// Any implementation that passes these tests conforms to the language spec.
+///
+/// Categories:
+/// - Expression evaluation order
+/// - Scope and binding rules
+/// - Type system behavior
+/// - Control flow semantics
+/// - Function call conventions
+/// - Memory semantics
+
+// ============================================================================
+// EXPRESSION EVALUATION ORDER
+// ============================================================================
+
+fn test_evaluation_order_simple() {
+    // Left-to-right evaluation of function arguments
+    let mut log = [];
+
+    fn side_effect(name: Text, val: Int, log: &mut List<Text>) -> Int {
+        log.push(name);
+        val
+    }
+
+    fn take_three(a: Int, b: Int, c: Int) -> Int {
+        a + b + c
+    }
+
+    let result = take_three(
+        side_effect("first", 1, &mut log),
+        side_effect("second", 2, &mut log),
+        side_effect("third", 3, &mut log),
+    );
+
+    println(f"evaluation order: {log.join(\", \")}");  // Should be: first, second, third
+    println(f"result: {result}");
+}
+
+fn test_evaluation_order_operators() {
+    let mut log = [];
+
+    fn track(name: Text, val: Int, log: &mut List<Text>) -> Int {
+        log.push(name);
+        val
+    }
+
+    // Binary operators: left operand evaluated before right
+    let _ = track("left", 1, &mut log) + track("right", 2, &mut log);
+    println(f"binary op order: {log.join(\", \")}");
+
+    log.clear();
+
+    // Chained operations
+    let _ = track("a", 1, &mut log) + track("b", 2, &mut log) * track("c", 3, &mut log);
+    println(f"chained order: {log.join(\", \")}");  // a, b, c (left-to-right, then precedence)
+}
+
+fn test_evaluation_order_short_circuit() {
+    let mut log = [];
+
+    fn check(name: Text, val: Bool, log: &mut List<Text>) -> Bool {
+        log.push(name);
+        val
+    }
+
+    // AND short-circuit
+    let _ = check("and-left-false", false, &mut log) && check("and-right", true, &mut log);
+    println(f"AND short-circuit (false first): {log.join(\", \")}");  // Only "and-left-false"
+
+    log.clear();
+    let _ = check("and-left-true", true, &mut log) && check("and-right", true, &mut log);
+    println(f"AND no short-circuit: {log.join(\", \")}");  // Both
+
+    log.clear();
+
+    // OR short-circuit
+    let _ = check("or-left-true", true, &mut log) || check("or-right", false, &mut log);
+    println(f"OR short-circuit (true first): {log.join(\", \")}");  // Only "or-left-true"
+
+    log.clear();
+    let _ = check("or-left-false", false, &mut log) || check("or-right", true, &mut log);
+    println(f"OR no short-circuit: {log.join(\", \")}");  // Both
+}
+
+// ============================================================================
+// SCOPE AND BINDING RULES
+// ============================================================================
+
+fn test_scope_basic() {
+    let x = 1;
+    println(f"outer x: {x}");
+
+    {
+        let x = 2;
+        println(f"inner x (shadow): {x}");
+    }
+
+    println(f"outer x after block: {x}");  // Still 1
+}
+
+fn test_scope_closure_capture() {
+    let x = 42;
+    let y = 10;
+
+    let closure = |a| x + y + a;
+
+    println(f"closure result: {closure(5)}");  // 42 + 10 + 5 = 57
+
+    // Closure captures at definition time
+    // Even if we could rebind x here, closure still has old value
+}
+
+fn test_scope_closure_capture_by_ref() {
+    let mut counter = 0;
+
+    let increment = || {
+        counter = counter + 1;
+        counter
+    };
+
+    println(f"call 1: {increment()}");  // 1
+    println(f"call 2: {increment()}");  // 2
+    println(f"call 3: {increment()}");  // 3
+    println(f"counter: {counter}");     // 3
+}
+
+fn test_scope_nested_functions() {
+    let outer_val = 100;
+
+    fn outer(x: Int) -> Int {
+        let inner_val = 10;
+
+        fn inner(y: Int) -> Int {
+            // inner can access outer_val from enclosing scope
+            outer_val + y
+        }
+
+        inner(x) + inner_val
+    }
+
+    println(f"nested result: {outer(5)}");  // 100 + 5 + 10 = 115
+}
+
+fn test_variable_shadowing() {
+    let x = "string";
+    println(f"x as string: {x}");
+
+    let x = 42;
+    println(f"x as int: {x}");
+
+    let x = [1, 2, 3];
+    println(f"x as list: {x}");
+
+    // Type changes with shadowing
+}
+
+// ============================================================================
+// TYPE SYSTEM BEHAVIOR
+// ============================================================================
+
+fn test_type_inference() {
+    // Numeric literals
+    let int_val = 42;
+    let float_val = 3.14;
+
+    // Collection type inference
+    let int_list = [1, 2, 3];
+    let str_list = ["a", "b", "c"];
+
+    // Empty collection needs type annotation
+    let empty: List<Int> = [];
+
+    println(f"int: {int_val}");
+    println(f"float: {float_val}");
+    println(f"int_list: {int_list}");
+    println(f"str_list: {str_list}");
+    println(f"empty len: {empty.len()}");
+}
+
+fn test_maybe_type() {
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    // Matching
+    match some_val {
+        Some(v) => println(f"Some: {v}"),
+        None => println("None"),
+    }
+
+    match none_val {
+        Some(v) => println(f"Some: {v}"),
+        None => println("None"),
+    }
+
+    // Methods
+    println(f"some_val.unwrap_or(0): {some_val.unwrap_or(0)}");
+    println(f"none_val.unwrap_or(0): {none_val.unwrap_or(0)}");
+
+    println(f"some_val.is_some(): {some_val.is_some()}");
+    println(f"none_val.is_none(): {none_val.is_none()}");
+}
+
+fn test_result_type() {
+    fn divide(a: Int, b: Int) -> Result<Int, Text> {
+        if b == 0 {
+            Err("division by zero")
+        } else {
+            Ok(a / b)
+        }
+    }
+
+    match divide(10, 2) {
+        Ok(v) => println(f"10 / 2 = {v}"),
+        Err(e) => println(f"error: {e}"),
+    }
+
+    match divide(10, 0) {
+        Ok(v) => println(f"10 / 0 = {v}"),
+        Err(e) => println(f"error: {e}"),
+    }
+
+    // Chaining with ?
+    fn chain_divide() -> Result<Int, Text> {
+        let a = divide(100, 5)?;  // Ok(20)
+        let b = divide(a, 4)?;    // Ok(5)
+        Ok(b)
+    }
+
+    match chain_divide() {
+        Ok(v) => println(f"chain result: {v}"),
+        Err(e) => println(f"chain error: {e}"),
+    }
+}
+
+fn test_tuple_type() {
+    let pair = (1, "hello");
+    println(f"pair.0: {pair.0}");
+    println(f"pair.1: {pair.1}");
+
+    // Destructuring
+    let (a, b) = pair;
+    println(f"destructured: {a}, {b}");
+
+    // Nested tuples
+    let nested = ((1, 2), (3, 4));
+    let ((x1, y1), (x2, y2)) = nested;
+    println(f"nested: ({x1}, {y1}), ({x2}, {y2})");
+
+    // Unit type
+    let unit: () = ();
+    println(f"unit: {unit}");
+}
+
+fn test_record_type() {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 10, y: 20 };
+    println(f"point: ({p.x}, {p.y})");
+
+    // Functional update
+    let p2 = Point { x: 30, ..p };
+    println(f"updated point: ({p2.x}, {p2.y})");
+
+    // Pattern matching
+    match p {
+        Point { x: 0, y: 0 } => println("origin"),
+        Point { x, y: 0 } => println(f"on x-axis at {x}"),
+        Point { x: 0, y } => println(f"on y-axis at {y}"),
+        Point { x, y } => println(f"at ({x}, {y})"),
+    }
+}
+
+fn test_sum_type() {
+    type Shape is
+        | Circle(Float)
+        | Rectangle { width: Float, height: Float }
+        | Triangle { base: Float, height: Float };
+
+    fn area(s: Shape) -> Float {
+        match s {
+            Circle(r) => 3.14159 * r * r,
+            Rectangle { width, height } => width * height,
+            Triangle { base, height } => 0.5 * base * height,
+        }
+    }
+
+    println(f"circle area: {area(Circle(5.0))}");
+    println(f"rectangle area: {area(Rectangle { width: 4.0, height: 6.0 })}");
+    println(f"triangle area: {area(Triangle { base: 10.0, height: 5.0 })}");
+}
+
+// ============================================================================
+// CONTROL FLOW SEMANTICS
+// ============================================================================
+
+fn test_if_as_expression() {
+    let x = 10;
+
+    let result = if x > 5 { "big" } else { "small" };
+    println(f"if expression: {result}");
+
+    // All branches must have same type
+    let val = if x > 100 {
+        1
+    } else if x > 50 {
+        2
+    } else if x > 10 {
+        3
+    } else {
+        4
+    };
+    println(f"multi-branch: {val}");
+}
+
+fn test_match_exhaustiveness() {
+    type Color is Red | Green | Blue;
+
+    fn name(c: Color) -> Text {
+        match c {
+            Red => "red",
+            Green => "green",
+            Blue => "blue",
+            // No wildcard needed - exhaustive
+        }
+    }
+
+    println(f"Red: {name(Red)}");
+    println(f"Green: {name(Green)}");
+    println(f"Blue: {name(Blue)}");
+}
+
+fn test_loop_as_expression() {
+    let mut i = 0;
+    let result = loop {
+        i = i + 1;
+        if i == 5 {
+            break i * 10;
+        }
+    };
+    println(f"loop result: {result}");  // 50
+}
+
+fn test_for_as_expression() {
+    // for loops can collect results
+    let squares: List<Int> = for i in 1..=5 {
+        i * i
+    };
+    println(f"squares: {squares}");  // [1, 4, 9, 16, 25]
+}
+
+// ============================================================================
+// FUNCTION CALL CONVENTIONS
+// ============================================================================
+
+fn test_pass_by_value() {
+    fn modify_copy(mut x: Int) -> Int {
+        x = x + 1;
+        x
+    }
+
+    let val = 10;
+    let result = modify_copy(val);
+    println(f"original: {val}");  // 10 (unchanged)
+    println(f"result: {result}"); // 11
+}
+
+fn test_pass_by_reference() {
+    fn modify_ref(x: &mut Int) {
+        *x = *x + 1;
+    }
+
+    let mut val = 10;
+    modify_ref(&mut val);
+    println(f"after modify_ref: {val}");  // 11
+}
+
+fn test_return_value() {
+    fn multi_return() -> (Int, Text, Bool) {
+        (42, "hello", true)
+    }
+
+    let (a, b, c) = multi_return();
+    println(f"multi_return: {a}, {b}, {c}");
+}
+
+fn test_higher_order_functions() {
+    fn apply<T, U>(f: fn(T) -> U, x: T) -> U {
+        f(x)
+    }
+
+    fn double(x: Int) -> Int {
+        x * 2
+    }
+
+    let result = apply(double, 21);
+    println(f"apply result: {result}");  // 42
+
+    // With closures
+    let multiplier = 3;
+    let triple = |x| x * multiplier;
+    println(f"triple 10: {apply(triple, 10)}");  // 30
+}
+
+fn test_variadic_like() {
+    // Verum uses lists for variadic-like behavior
+    fn sum_all(nums: List<Int>) -> Int {
+        nums.iter().fold(0, |acc, n| acc + n)
+    }
+
+    println(f"sum_all: {sum_all([1, 2, 3, 4, 5])}");  // 15
+}
+
+fn test_default_parameters() {
+    fn greet(name: Text, greeting: Text = "Hello") -> Text {
+        f"{greeting}, {name}!"
+    }
+
+    println(greet("World"));              // "Hello, World!"
+    println(greet("World", "Hi"));        // "Hi, World!"
+}
+
+fn test_named_arguments() {
+    fn create_point(x: Int, y: Int, z: Int = 0) -> (Int, Int, Int) {
+        (x, y, z)
+    }
+
+    let p1 = create_point(1, 2);
+    let p2 = create_point(x: 1, y: 2, z: 3);
+    let p3 = create_point(y: 5, x: 10);
+
+    println(f"p1: {p1}");
+    println(f"p2: {p2}");
+    println(f"p3: {p3}");
+}
+
+// ============================================================================
+// MEMORY SEMANTICS
+// ============================================================================
+
+fn test_copy_types() {
+    // Primitives are copied
+    let a = 42;
+    let b = a;
+    println(f"a: {a}, b: {b}");  // Both valid and equal
+
+    // Modification doesn't affect original
+    let mut c = a;
+    c = c + 1;
+    println(f"a: {a}, c: {c}");  // a unchanged
+}
+
+fn test_move_types() {
+    // Heap types are moved
+    let s1 = Heap("hello");
+    let s2 = s1;  // s1 moved to s2
+    // println(f"s1: {*s1}");  // Error: s1 moved
+    println(f"s2: {*s2}");
+}
+
+fn test_clone() {
+    // Explicit clone for deep copy
+    let v1 = [1, 2, 3];
+    let v2 = v1.clone();
+
+    println(f"v1: {v1}");
+    println(f"v2: {v2}");
+    println(f"v1 == v2: {v1 == v2}");
+}
+
+fn test_equality() {
+    // Structural equality
+    let a = [1, 2, 3];
+    let b = [1, 2, 3];
+    let c = [1, 2, 4];
+
+    println(f"a == b: {a == b}");  // true
+    println(f"a == c: {a == c}");  // false
+
+    // Reference equality (if supported)
+    let x = Shared(42);
+    let y = x.clone();
+    let z = x;
+
+    println(f"x == y (value): {*x == *y}");  // true
+    // println(f"x === z (ref): {x === z}");  // true if same reference
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    println("=== EXPRESSION EVALUATION ORDER ===");
+    test_evaluation_order_simple();
+    println();
+    test_evaluation_order_operators();
+    println();
+    test_evaluation_order_short_circuit();
+
+    println("\n=== SCOPE AND BINDING RULES ===");
+    test_scope_basic();
+    println();
+    test_scope_closure_capture();
+    println();
+    test_scope_closure_capture_by_ref();
+    println();
+    test_scope_nested_functions();
+    println();
+    test_variable_shadowing();
+
+    println("\n=== TYPE SYSTEM BEHAVIOR ===");
+    test_type_inference();
+    println();
+    test_maybe_type();
+    println();
+    test_result_type();
+    println();
+    test_tuple_type();
+    println();
+    test_record_type();
+    println();
+    test_sum_type();
+
+    println("\n=== CONTROL FLOW SEMANTICS ===");
+    test_if_as_expression();
+    println();
+    test_match_exhaustiveness();
+    println();
+    test_loop_as_expression();
+    println();
+    test_for_as_expression();
+
+    println("\n=== FUNCTION CALL CONVENTIONS ===");
+    test_pass_by_value();
+    println();
+    test_pass_by_reference();
+    println();
+    test_return_value();
+    println();
+    test_higher_order_functions();
+    println();
+    test_variadic_like();
+    println();
+    test_default_parameters();
+    println();
+    test_named_arguments();
+
+    println("\n=== MEMORY SEMANTICS ===");
+    test_copy_types();
+    println();
+    test_move_types();
+    println();
+    test_clone();
+    println();
+    test_equality();
+
+    println("\n=== ALL SEMANTIC EQUIVALENCE TESTS COMPLETE ===");
+}

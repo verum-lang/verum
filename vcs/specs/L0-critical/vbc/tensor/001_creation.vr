@@ -1,0 +1,343 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, creation, new, full, rand, arange
+// @timeout: 5000
+// @expect: pass
+// @skip-disabled: Tensor const generic syntax and named arguments now supported by parser
+//
+// Test: TENSOR_NEW, TENSOR_FULL, TENSOR_FROM_SLICE, TENSOR_ARANGE, TENSOR_LINSPACE, TENSOR_RAND
+// Verifies tensor creation operations
+
+// =============================================================================
+// Basic tensor creation
+// =============================================================================
+
+fn test_tensor_new() {
+    // Create uninitialized tensor with shape
+    let t: Tensor<Float, [3, 4]> = Tensor.new([3, 4]);
+
+    assert_eq(t.shape(), [3, 4]);
+    assert_eq(t.ndim(), 2);
+    assert_eq(t.numel(), 12);
+}
+
+fn test_tensor_zeros() {
+    let t = Tensor.zeros([2, 3]);
+
+    assert_eq(t.shape(), [2, 3]);
+    for i in 0..2 {
+        for j in 0..3 {
+            assert_eq(t[[i, j]], 0.0);
+        }
+    }
+}
+
+fn test_tensor_ones() {
+    let t = Tensor.ones([3, 2]);
+
+    assert_eq(t.shape(), [3, 2]);
+    for i in 0..3 {
+        for j in 0..2 {
+            assert_eq(t[[i, j]], 1.0);
+        }
+    }
+}
+
+fn test_tensor_full() {
+    let t = Tensor.full([2, 2], 42.0);
+
+    assert_eq(t[[0, 0]], 42.0);
+    assert_eq(t[[0, 1]], 42.0);
+    assert_eq(t[[1, 0]], 42.0);
+    assert_eq(t[[1, 1]], 42.0);
+}
+
+// =============================================================================
+// From data
+// =============================================================================
+
+fn test_tensor_from_slice() {
+    let data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let t = Tensor.from_slice(&data, [2, 3]);
+
+    assert_eq(t.shape(), [2, 3]);
+    assert_eq(t[[0, 0]], 1.0);
+    assert_eq(t[[0, 2]], 3.0);
+    assert_eq(t[[1, 0]], 4.0);
+    assert_eq(t[[1, 2]], 6.0);
+}
+
+fn test_tensor_from_nested() {
+    let t = Tensor.from([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+
+    assert_eq(t.shape(), [2, 3]);
+    assert_eq(t[[0, 1]], 2.0);
+    assert_eq(t[[1, 1]], 5.0);
+}
+
+fn test_tensor_1d() {
+    let t = Tensor.from([1.0, 2.0, 3.0, 4.0, 5.0]);
+
+    assert_eq(t.shape(), [5]);
+    assert_eq(t.ndim(), 1);
+    assert_eq(t[2], 3.0);
+}
+
+fn test_tensor_3d() {
+    let t = Tensor.zeros([2, 3, 4]);
+
+    assert_eq(t.shape(), [2, 3, 4]);
+    assert_eq(t.ndim(), 3);
+    assert_eq(t.numel(), 24);
+}
+
+// =============================================================================
+// Range tensors
+// =============================================================================
+
+fn test_tensor_arange() {
+    let t = Tensor.arange(0.0, 5.0, 1.0);
+
+    assert_eq(t.shape(), [5]);
+    assert_eq(t[0], 0.0);
+    assert_eq(t[1], 1.0);
+    assert_eq(t[4], 4.0);
+}
+
+fn test_tensor_arange_float_step() {
+    let t = Tensor.arange(0.0, 1.0, 0.2);
+
+    assert_eq(t.shape(), [5]);
+    assert(t[0] < 0.01);
+    assert(@abs(t[1] - 0.2) < 0.001);
+    assert(@abs(t[4] - 0.8) < 0.001);
+}
+
+fn test_tensor_linspace() {
+    let t = Tensor.linspace(0.0, 1.0, 5);
+
+    assert_eq(t.shape(), [5]);
+    assert_eq(t[0], 0.0);
+    assert_eq(t[4], 1.0);
+    assert_eq(t[2], 0.5);
+}
+
+fn test_tensor_linspace_negative() {
+    let t = Tensor.linspace(-1.0, 1.0, 5);
+
+    assert_eq(t[0], -1.0);
+    assert_eq(t[2], 0.0);
+    assert_eq(t[4], 1.0);
+}
+
+// =============================================================================
+// Random tensors
+// =============================================================================
+
+fn test_tensor_rand_uniform() {
+    let t = Tensor.rand([100], uniform: (0.0, 1.0));
+
+    assert_eq(t.shape(), [100]);
+
+    // All values should be in [0, 1)
+    for i in 0..100 {
+        assert(t[i] >= 0.0);
+        assert(t[i] < 1.0);
+    }
+}
+
+fn test_tensor_rand_normal() {
+    let t = Tensor.rand([1000], normal: (0.0, 1.0));
+
+    assert_eq(t.shape(), [1000]);
+
+    // Check approximate mean is near 0
+    let sum: Float = 0.0;
+    for i in 0..1000 {
+        sum = sum + t[i];
+    }
+    let mean = sum / 1000.0;
+    assert(@abs(mean) < 0.2);  // Should be close to 0
+}
+
+fn test_tensor_rand_xavier() {
+    // Xavier initialization for neural networks
+    let t = Tensor.rand([100, 50], xavier: true);
+
+    assert_eq(t.shape(), [100, 50]);
+
+    // Variance should be ~2/(fan_in + fan_out) = 2/150
+    let expected_std = @sqrt(2.0 / 150.0);
+    // Actual std should be close
+}
+
+fn test_tensor_rand_kaiming() {
+    // Kaiming/He initialization
+    let t = Tensor.rand([100, 50], kaiming: "relu");
+
+    assert_eq(t.shape(), [100, 50]);
+}
+
+// =============================================================================
+// Special tensors
+// =============================================================================
+
+fn test_tensor_identity() {
+    let t = Tensor.identity(3);
+
+    assert_eq(t.shape(), [3, 3]);
+    assert_eq(t[[0, 0]], 1.0);
+    assert_eq(t[[1, 1]], 1.0);
+    assert_eq(t[[2, 2]], 1.0);
+    assert_eq(t[[0, 1]], 0.0);
+    assert_eq(t[[1, 0]], 0.0);
+}
+
+fn test_tensor_eye() {
+    // Non-square identity-like matrix
+    let t = Tensor.eye(3, 4);
+
+    assert_eq(t.shape(), [3, 4]);
+    assert_eq(t[[0, 0]], 1.0);
+    assert_eq(t[[1, 1]], 1.0);
+    assert_eq(t[[2, 2]], 1.0);
+    assert_eq(t[[0, 3]], 0.0);
+}
+
+fn test_tensor_diag() {
+    let diag_values = Tensor.from([1.0, 2.0, 3.0]);
+    let t = Tensor.diag(diag_values);
+
+    assert_eq(t.shape(), [3, 3]);
+    assert_eq(t[[0, 0]], 1.0);
+    assert_eq(t[[1, 1]], 2.0);
+    assert_eq(t[[2, 2]], 3.0);
+    assert_eq(t[[0, 1]], 0.0);
+}
+
+// =============================================================================
+// Clone and copy
+// =============================================================================
+
+fn test_tensor_clone() {
+    let t1 = Tensor.from([1.0, 2.0, 3.0]);
+    let t2 = t1.clone();
+
+    // Independent copies
+    assert_eq(t1[0], t2[0]);
+    assert_eq(t1[1], t2[1]);
+    assert_eq(t1[2], t2[2]);
+
+    // Different storage
+    // (modifying one doesn't affect other)
+}
+
+fn test_tensor_contiguous() {
+    let t1 = Tensor.from([[1.0, 2.0], [3.0, 4.0]]);
+    let t2 = t1.T();  // Transpose creates non-contiguous view
+
+    assert(!t2.is_contiguous());
+
+    let t3 = t2.contiguous();
+    assert(t3.is_contiguous());
+}
+
+// =============================================================================
+// Type casting
+// =============================================================================
+
+fn test_tensor_dtype() {
+    let t_float = Tensor.from([1.0, 2.0, 3.0]);
+    assert_eq(t_float.dtype(), Float64);
+
+    let t_int = Tensor.from([1, 2, 3]);
+    assert_eq(t_int.dtype(), Int64);
+}
+
+fn test_tensor_cast() {
+    let t_float = Tensor.from([1.5, 2.7, 3.2]);
+    let t_int = t_float.to(Int64);
+
+    assert_eq(t_int[0], 1);
+    assert_eq(t_int[1], 2);
+    assert_eq(t_int[2], 3);
+}
+
+fn test_tensor_to_float16() {
+    let t = Tensor.from([1.0, 2.0, 3.0]);
+    let t_fp16 = t.to(Float16);
+
+    assert_eq(t_fp16.dtype(), Float16);
+    // Values should be approximately preserved
+    assert(@abs(t_fp16[0] as Float - 1.0) < 0.01);
+}
+
+// =============================================================================
+// Device placement
+// =============================================================================
+
+fn test_tensor_device() {
+    let t = Tensor.zeros([10, 10]);
+
+    assert_eq(t.device(), Device.CPU);
+}
+
+fn test_tensor_to_device() {
+    let t_cpu = Tensor.from([1.0, 2.0, 3.0]);
+
+    // This might fail if no GPU available
+    if @has_gpu() {
+        let t_gpu = t_cpu.to(Device.GPU(0));
+        assert_eq(t_gpu.device(), Device.GPU(0));
+
+        let t_back = t_gpu.to(Device.CPU);
+        assert_eq(t_back[0], 1.0);
+    }
+}
+
+fn main() {
+    // Basic creation
+    test_tensor_new();
+    test_tensor_zeros();
+    test_tensor_ones();
+    test_tensor_full();
+
+    // From data
+    test_tensor_from_slice();
+    test_tensor_from_nested();
+    test_tensor_1d();
+    test_tensor_3d();
+
+    // Range tensors
+    test_tensor_arange();
+    test_tensor_arange_float_step();
+    test_tensor_linspace();
+    test_tensor_linspace_negative();
+
+    // Random tensors
+    test_tensor_rand_uniform();
+    test_tensor_rand_normal();
+    test_tensor_rand_xavier();
+    test_tensor_rand_kaiming();
+
+    // Special tensors
+    test_tensor_identity();
+    test_tensor_eye();
+    test_tensor_diag();
+
+    // Clone and copy
+    test_tensor_clone();
+    test_tensor_contiguous();
+
+    // Type casting
+    test_tensor_dtype();
+    test_tensor_cast();
+    test_tensor_to_float16();
+
+    // Device
+    test_tensor_device();
+    test_tensor_to_device();
+
+    print("001_creation: PASSED");
+}

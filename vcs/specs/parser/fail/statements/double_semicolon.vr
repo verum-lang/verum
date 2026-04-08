@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, semicolon, double, error
+// @description: Test double semicolon between statements
+// @expected-error: E018
+
+fn test() {
+    let x = 5;; let y = 6;
+}

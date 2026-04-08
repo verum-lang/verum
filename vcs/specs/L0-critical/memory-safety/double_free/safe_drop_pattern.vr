@@ -1,0 +1,24 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, double-free, safe-pattern
+// @description: Tests safe patterns that prevent double-free
+
+fn main() {
+    // Pattern 1: Take ownership and let scope handle cleanup
+    {
+        let data = Heap.new(42);
+        // data is automatically dropped at end of scope - once only
+    }
+
+    // Pattern 2: Explicit drop with ownership transfer
+    let data1 = Heap.new(100);
+    drop(data1);  // Ownership transferred to drop, can't use again
+
+    // Pattern 3: Replace before drop
+    let mut data2 = Heap.new(300);
+    data2 = Heap.new(400);  // Old value automatically dropped
+    drop(data2);  // Only drops the new value
+
+    print("Safe drop patterns test passed");
+}

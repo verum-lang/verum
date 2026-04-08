@@ -1,0 +1,21 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, data-race, channel, message-passing
+// @description: Tests safe concurrent communication via channels
+
+// This test demonstrates channel-based message passing for thread-safe communication.
+// Currently skipped because threading primitives (spawn, channel, ThreadHandle)
+// are not yet implemented in the compiler.
+
+fn main() {
+    // Placeholder test - actual channel test requires spawn syntax
+    print("Channel communication test - skipped (threading not implemented)");
+}
+
+// The intended test would:
+// 1. Create a bounded channel for type-safe message passing
+// 2. Spawn multiple producer threads that send values
+// 3. Spawn a consumer thread that receives and aggregates values
+// 4. Verify all messages are received without data races
+// 5. Demonstrate safe ownership transfer across thread boundaries

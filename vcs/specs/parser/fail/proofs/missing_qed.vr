@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, qed, error
+// @description: Test proof block without proper termination
+// @expected-error: E029
+
+theorem simple()
+    ensures true
+proof {
+    have step1: true by trivial

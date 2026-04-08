@@ -1,0 +1,123 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, partition_numbers, integer_partitions, dynamic_programming, combinatorics
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Partition numbers: p(n) = number of ways to write n as an ordered-descending
+// sum of positive integers (unordered partitions).
+//
+// Recurrence via pentagonal numbers (Euler's pentagonal theorem):
+//   p(n) = sum_{k!=0} (-1)^{k+1} * p(n - k*(3k-1)/2)
+// where k ranges over all non-zero integers and the pentagonal numbers are
+// g(k) = k*(3k-1)/2 for k=1,-1,2,-2,...
+//
+// Alternatively, use the simpler DP via coin-change style:
+//   dp[n] = number of partitions of n using parts of size 1..n.
+//   Outer loop: part size s from 1..n.
+//   Inner loop: j from s..n: dp[j] += dp[j-s].
+//   Start: dp[0]=1, dp[1..n]=0.
+//
+// We use the coin-change DP (parts unordered) which gives unordered partition count.
+// p(0)=1, p(1)=1, p(2)=2, p(3)=3, p(4)=5, p(5)=7, p(6)=11, p(7)=15,
+// p(8)=22, p(9)=30, p(10)=42.
+
+fn partition(n_max: Int, dp: [Int; 32]) -> Int {
+    let mut i = 0;
+    while i <= n_max { dp[i] = 0; i = i + 1; }
+    dp[0] = 1;
+    let mut s = 1;
+    while s <= n_max {
+        let mut j = s;
+        while j <= n_max {
+            dp[j] = dp[j] + dp[j - s];
+            j = j + 1;
+        }
+        s = s + 1;
+    }
+    dp[n_max]
+}
+
+fn test_small_values() {
+    // p(0)=1, p(1)=1, p(2)=2.
+    let mut dp = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let r0 = partition(0, dp);
+    assert_eq(r0, 1);
+    let mut dp1 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let r1 = partition(1, dp1);
+    assert_eq(r1, 1);
+    let mut dp2 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let r2 = partition(2, dp2);
+    assert_eq(r2, 2);
+    print("small_values: ok");
+}
+
+fn test_p4_p5() {
+    // p(4)=5: {4},{3+1},{2+2},{2+1+1},{1+1+1+1}
+    // p(5)=7: {5},{4+1},{3+2},{3+1+1},{2+2+1},{2+1+1+1},{1+1+1+1+1}
+    let mut dp4 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let r4 = partition(4, dp4);
+    assert_eq(r4, 5);
+    let mut dp5 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let r5 = partition(5, dp5);
+    assert_eq(r5, 7);
+    print("p4_p5: ok");
+}
+
+fn test_p6_to_p9() {
+    // p(6)=11, p(7)=15, p(8)=22, p(9)=30.
+    let mut dp6 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(partition(6, dp6), 11);
+    let mut dp7 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(partition(7, dp7), 15);
+    let mut dp8 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(partition(8, dp8), 22);
+    let mut dp9 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(partition(9, dp9), 30);
+    print("p6_to_p9: ok");
+}
+
+fn test_p10() {
+    // p(10)=42.
+    let mut dp = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let r = partition(10, dp);
+    assert_eq(r, 42);
+    // Also check intermediate values stored in dp:
+    // dp[3]=3, dp[5]=7, dp[10]=42.
+    assert_eq(dp[3], 3);
+    assert_eq(dp[5], 7);
+    print("p10: ok");
+}
+
+fn test_table_consistency() {
+    // Build table up to 12 and verify p(11)=56, p(12)=77.
+    let mut dp = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let r12 = partition(12, dp);
+    assert_eq(r12, 77);
+    assert_eq(dp[11], 56);
+    assert_eq(dp[0], 1);
+    assert_eq(dp[1], 1);
+    print("table_consistency: ok");
+}
+
+fn main() -> Int {
+    test_small_values();
+    test_p4_p5();
+    test_p6_to_p9();
+    test_p10();
+    test_table_consistency();
+    print("[OK] 577_interp_partition_numbers");
+    0
+}

@@ -1,0 +1,240 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, meta, macros, metaprogramming
+// @description: Test meta definition and macro-related parsing
+
+// Basic meta definition
+meta simple_meta() {
+    _ => { 42 }
+}
+
+// Meta with single parameter
+meta with_param(x: expr) {
+    _ => { x + 1 }
+}
+
+// Meta with multiple parameters - use tt for type since 'type' is keyword
+meta add_fields(name: ident, ty: tt) {
+    _ => { (name, ty) }
+}
+
+// Meta with pattern matching
+meta conditional(cond: expr) {
+    true => { "yes" }
+    | false => { "no" }
+}
+
+// Meta with complex patterns - use tt since 'type' is keyword
+meta match_type(t: tt) {
+    Int => { 0 }
+    | Float => { 0.0 }
+    | Text => { "" }
+    | _ => { default() }
+}
+
+// Meta with statement fragment
+meta debug_stmt(s: stmt) {
+    _ => {
+        Logger.debug("Executing statement");
+        s
+    }
+}
+
+// Meta with block fragment
+meta timed_block(b: block) {
+    _ => {
+        let start = Time.now();
+        b;
+        let elapsed = Time.now() - start;
+        Logger.info(f"Took {elapsed}ms")
+    }
+}
+
+// Meta with path fragment
+meta import_all(p: path) {
+    _ => { p }
+}
+
+// Meta with token tree
+meta passthrough(tt: tt) {
+    _ => { tt }
+}
+
+// Meta with item fragment
+meta wrap_item(i: item) {
+    _ => { i }
+}
+
+// Meta function (compile-time function)
+meta fn compile_time_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Meta function with type parameter
+meta fn generic_meta<T>() -> TokenStream {
+    let type_name = T.name;
+    type_name
+}
+
+// Multi-stage meta function
+meta(1) fn stage_one_meta() -> TokenStream {
+    42
+}
+
+meta(2) fn stage_two_meta() -> TokenStream {
+    "stage two"
+}
+
+meta(3) fn stage_three_meta() -> TokenStream {
+    "stage three"
+}
+
+// Meta call invocations (@ prefix)
+@derive(Clone, Debug)
+type DerivedType is {
+    value: Int
+};
+
+@derive(Serialize, Deserialize, Eq)
+type SerializableType is {
+    id: Int,
+    name: Text
+};
+
+// Meta call with parentheses
+@cfg(target_os = "linux")
+fn linux_only() {}
+
+@cfg(feature = "async")
+async fn async_feature() {}
+
+// Meta call with string argument (not brackets - those aren't supported)
+@sql_query("SELECT * FROM users WHERE id = ?")
+fn get_user(id: Int) -> User;
+
+// Meta call with nested arguments (not braces - those aren't supported)
+@json_schema(object, properties = "(name: string, age: integer)")
+type SchemaType is {
+    name: Text,
+    age: Int
+};
+
+// Built-in meta functions (@ prefix)
+const FILE: Text = @file();
+const LINE: Int = @line();
+const COLUMN: Int = @column();
+const MODULE: Text = @module_path();
+
+// Conditional compilation
+@cfg(debug)
+fn debug_only() {
+    print("Debug mode");
+}
+
+@cfg(not(debug))
+fn release_only() {
+    // Optimized
+}
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn unix_like() {}
+
+@cfg(all(feature = "async", feature = "networking"))
+async fn async_networking() {}
+
+// Const evaluation
+const COMPUTED: Int = @const { 1 + 2 + 3 };
+
+const ARRAY_SIZE: Int = @const {
+    let base = 10;
+    let multiplier = 4;
+    base * multiplier
+};
+
+// Meta expression
+fn contains_meta() {
+    let computed = meta { 1 + 2 };
+    let also_computed = meta {
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+}
+
+// Public meta
+pub meta public_macro(x: expr) {
+    _ => { x }
+}
+
+// Meta with visibility
+internal meta internal_macro(x: expr) {
+    _ => { x }
+}
+
+// Complex meta with all features
+meta complex_macro(
+    name: ident,
+    fields: tt,
+    methods: tt
+) {
+    _ => {
+        (name, fields, methods)
+    }
+}
+
+// Attribute-style meta
+@test
+fn test_function() {
+    assert(true);
+}
+
+@bench
+fn benchmark_function() {
+    // Benchmarked code
+}
+
+@deprecated("Use new_function instead")
+fn old_function() {}
+
+@inline(always)
+fn inlined_function() {}
+
+@cold
+fn rarely_called() {}
+
+@hot
+fn frequently_called() {}
+
+// Quote expressions at module level - these should parse if quote is supported
+fn uses_quote() {
+    let generated = quote { 42 };
+    let with_interp = quote { fn hello() -> Int { 42 } };
+}
+
+// Meta fn with quote
+meta fn generate_getter(field_name: Text, ty: Type) -> TokenStream {
+    quote {
+        fn get_field(&self) -> ty {
+            self.field_name
+        }
+    }
+}
+
+// Meta fn with repetition patterns
+meta fn generate_tuple_impl(n: Int) -> TokenStream {
+    let fields_str = (0..n).map(|i| f"field_{i}").join(", ");
+    fields_str
+}
+
+// Meta derive implementation
+meta fn derive_debug(type_info: TypeInfo) -> TokenStream {
+    let name = type_info.name;
+    name
+}
+
+// Meta for builder pattern
+meta fn derive_builder(type_info: TypeInfo) -> TokenStream {
+    let name = type_info.name;
+    let builder_name = f"{name}Builder";
+    builder_name
+}

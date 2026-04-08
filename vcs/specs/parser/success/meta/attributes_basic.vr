@@ -1,0 +1,240 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, attributes
+// @description: Test basic attribute parsing - grammar production: attribute, attribute_item
+
+// ============================================================================
+// BASIC ATTRIBUTES (identifier only)
+// Grammar: attribute = identifier
+// ============================================================================
+
+@inline
+fn inlined() {}
+
+@cold
+fn rarely_called() {}
+
+@hot
+fn frequently_called() {}
+
+@noinline
+fn never_inlined() {}
+
+@must_use
+fn returns_important_value() -> Int { 42 }
+
+// Note: 'pure' is a function modifier, not an attribute
+// See functions_modifiers.vr for pure fn examples
+@purity_hint
+fn no_side_effects(x: Int) -> Int { x * 2 }
+
+@deprecated
+fn old_api() {}
+
+@test
+fn test_example() {}
+
+// ============================================================================
+// ATTRIBUTES WITH SIMPLE ARGUMENTS
+// Grammar: attribute = identifier '(' attribute_args ')'
+// ============================================================================
+
+@inline(always)
+fn always_inline() {}
+
+@inline(never)
+fn never_inline_explicit() {}
+
+@cold(likely = 0.01)
+fn very_cold() {}
+
+@align(16)
+fn aligned_function() {}
+
+@optimize(speed)
+fn optimized_for_speed() {}
+
+@optimize(size)
+fn optimized_for_size() {}
+
+// ============================================================================
+// ATTRIBUTES WITH STRING ARGUMENTS
+// ============================================================================
+
+@deprecated("Use new_api instead")
+fn deprecated_with_message() {}
+
+@doc("This function does something important")
+fn documented_function() {}
+
+@link_name("c_function_name")
+fn renamed_external() {}
+
+// ============================================================================
+// ATTRIBUTES WITH NAMED ARGUMENTS
+// Grammar: attribute_args = expression_list (supports named args)
+// ============================================================================
+
+@deprecated(since = "1.0", note = "Use new_version instead")
+fn deprecated_full() {}
+
+@unstable(feature = "experimental", issue = "42")
+fn experimental_feature() {}
+
+@allow(unused = true, reason = "placeholder")
+fn placeholder() {}
+
+@cfg(target_os = "linux", feature = "full")
+fn platform_feature() {}
+
+// ============================================================================
+// MULTIPLE ATTRIBUTES ON SAME ITEM
+// ============================================================================
+
+@inline
+@must_use
+fn both_inline_and_must_use() -> Int { 1 }
+
+@deprecated("old")
+@inline(never)
+@cold
+fn triple_attributed() {}
+
+@purity_hint
+@inline
+@must_use
+@doc("Inlined with purity hint, must use")
+fn quadruple_attributed() -> Int { 0 }
+
+// ============================================================================
+// ATTRIBUTES ON DIFFERENT DECLARATION TYPES
+// ============================================================================
+
+// On type definitions
+@derive(Clone)
+type SimplePoint is { x: Int, y: Int };
+
+@repr(C)
+type CLayout is { a: i32, b: i32 };
+
+@align(64)
+type CacheAligned is { data: [Byte; 64] };
+
+// On constants
+@deprecated("Use NEW_VALUE")
+const OLD_VALUE: Int = 42;
+
+// On statics
+@thread_local
+static COUNTER: Int = 0;
+
+// On modules
+@cfg(feature = "extras")
+module extras;
+
+// ============================================================================
+// NESTED ATTRIBUTES (attributes within attributed items)
+// ============================================================================
+
+@derive(Clone)
+type NestedAttrs is {
+    @serialize(rename = "identifier")
+    id: Int,
+
+    @serialize(skip)
+    internal: Text,
+
+    @validate(min = 0, max = 100)
+    percentage: Int
+};
+
+// ============================================================================
+// ATTRIBUTES ON PROTOCOL ITEMS
+// ============================================================================
+
+type Drawable is protocol {
+    @deprecated("Use render instead")
+    fn draw(&self);
+
+    @must_use
+    fn render(&self) -> Image;
+};
+
+// ============================================================================
+// ATTRIBUTES ON IMPLEMENT BLOCKS
+// ============================================================================
+
+@specialize
+implement Display for Int {
+    fn fmt(&self) -> Text {
+        self.to_string()
+    }
+}
+
+// ============================================================================
+// ATTRIBUTES WITH COMPLEX EXPRESSIONS AS ARGUMENTS
+// ============================================================================
+
+@cfg(all(target_os = "linux", feature = "async"))
+fn complex_cfg() {}
+
+@cfg(any(debug, test))
+fn debug_or_test() {}
+
+@cfg(not(release))
+fn not_release() {}
+
+@timeout(5 * 1000)
+fn test_with_timeout() {}
+
+// ============================================================================
+// @std ATTRIBUTE (special form)
+// Grammar: std_attribute = 'std' [ '(' context_group_identifier ')' ]
+// ============================================================================
+
+@std
+type StandardType is { value: Int };
+
+@std(core)
+type CoreType is { x: Float };
+
+@std(collections)
+type CollectionHelper is { items: List<Int> };
+
+@std(io)
+fn std_io_function() {}
+
+// ============================================================================
+// ATTRIBUTE ON VARIANT
+// ============================================================================
+
+type Status is
+    | @default Active
+    | @deprecated("Use Active instead") Legacy
+    | @serialize(rename = "err") Error(Text);
+
+// ============================================================================
+// ATTRIBUTE ON PARAMETERS
+// ============================================================================
+
+fn with_param_attrs(
+    @unused x: Int,
+    @must_use result: &mut Int
+) {}
+
+fn self_with_attr(@unused &self) {}
+
+// ============================================================================
+// ATTRIBUTE ON MATCH ARMS
+// ============================================================================
+
+fn match_with_attrs(x: Int) -> Text {
+    match x {
+        @cold 0 => "zero",
+        @likely 1 => "one",
+        @unlikely n if n > 1000 => "large",
+        _ => "other"
+    }
+}

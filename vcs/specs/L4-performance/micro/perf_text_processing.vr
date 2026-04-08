@@ -1,0 +1,107 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: micro, text, string, performance, throughput
+// @description: Text processing throughput benchmarks (concat, contains, length)
+
+/// Text Processing Throughput Benchmark
+
+fn bench_concat(count: Int) -> Int {
+    let mut s = "";
+    let mut i = 0;
+    while i < count {
+        s = s + "x";
+        i = i + 1;
+    }
+    s.len()
+}
+
+fn bench_fstring(count: Int) -> Int {
+    let mut total_len = 0;
+    let mut i = 0;
+    while i < count {
+        let s = f"item_{i}";
+        total_len = total_len + s.len();
+        i = i + 1;
+    }
+    total_len
+}
+
+fn bench_contains(count: Int) -> Int {
+    let haystack = "the quick brown fox jumps over the lazy dog";
+    let mut found = 0;
+    let mut i = 0;
+    while i < count {
+        if haystack.contains("fox") {
+            found = found + 1;
+        }
+        if haystack.contains("cat") {
+            found = found + 1;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+fn bench_length(count: Int) -> Int {
+    let s = "hello world this is a test string for length measurement";
+    let mut total = 0;
+    let mut i = 0;
+    while i < count {
+        total = total + s.len();
+        i = i + 1;
+    }
+    total
+}
+
+fn bench_comparison(count: Int) -> Int {
+    let a = "hello";
+    let b = "hello";
+    let c = "world";
+    let mut matches = 0;
+    let mut i = 0;
+    while i < count {
+        if a == b { matches = matches + 1; }
+        if a != c { matches = matches + 1; }
+        i = i + 1;
+    }
+    matches
+}
+
+fn main() -> Int {
+    let count = 10000;
+    print("=== Text Processing Benchmarks ===");
+    print(f"Iterations: {count}");
+
+    let r1 = bench_concat(count);
+    print(f"  concat: done (len={r1})");
+
+    let r2 = bench_fstring(count);
+    print(f"  fstring: done (total_len={r2})");
+
+    let r3 = bench_contains(count);
+    print(f"  contains: done (found={r3})");
+
+    let r4 = bench_length(count);
+    print(f"  length: done (total={r4})");
+
+    let r5 = bench_comparison(count);
+    print(f"  comparison: done (matches={r5})");
+
+    // Verify
+    if r1 != count {
+        print("FAIL: concat len wrong");
+        return 1;
+    }
+    if r3 != count {
+        print("FAIL: contains found wrong");
+        return 1;
+    }
+    if r5 != count * 2 {
+        print("FAIL: comparison matches wrong");
+        return 1;
+    }
+
+    print("All text processing benchmarks completed");
+    0
+}

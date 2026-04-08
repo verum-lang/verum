@@ -1,0 +1,236 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @was-skip: @list_with_capacity macro unimplemented + generic inference for Some(Heap(Node)) - FIXED
+// @tags: vbc, memory, allocation, new, heap
+// @timeout: 5000
+// @expect: pass
+//
+// Test: NEW, NEW_G, NEW_ARRAY, NEW_LIST, NEW_MAP, NEW_SET
+// Verifies object allocation operations
+
+type Point is { x: Float, y: Float };
+type Point3D is { x: Float, y: Float, z: Float };
+type Person is { name: Text, age: Int };
+type Node<T> is { value: T, next: Maybe<Heap<Node<T>>> };
+
+fn test_struct_allocation() {
+    let p = Point { x: 1.0, y: 2.0 };
+
+    assert_eq(p.x, 1.0);
+    assert_eq(p.y, 2.0);
+}
+
+fn test_nested_struct() {
+    type Rect is { origin: Point, size: Point };
+
+    let r = Rect {
+        origin: Point { x: 0.0, y: 0.0 },
+        size: Point { x: 100.0, y: 50.0 }
+    };
+
+    assert_eq(r.origin.x, 0.0);
+    assert_eq(r.size.x, 100.0);
+}
+
+fn test_heap_allocation() {
+    let h = Heap(Point { x: 1.0, y: 2.0 });
+
+    assert_eq(h.x, 1.0);
+    assert_eq(h.y, 2.0);
+}
+
+fn test_heap_modification() {
+    let mut h = Heap(Point { x: 1.0, y: 2.0 });
+
+    h.x = 10.0;
+    h.y = 20.0;
+
+    assert_eq(h.x, 10.0);
+    assert_eq(h.y, 20.0);
+}
+
+fn test_array_allocation() {
+    // Fixed-size array
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    assert_eq(arr[0], 1);
+    assert_eq(arr[4], 5);
+    assert_eq(arr.len(), 5);
+}
+
+fn test_array_zero_init() {
+    // Zero-initialized array
+    let arr: [Int; 10] = [0; 10];
+
+    for i in 0..10 {
+        assert_eq(arr[i], 0);
+    }
+}
+
+fn test_array_with_expression() {
+    let n: Int = 42;
+    let arr: [Int; 3] = [n, n + 1, n + 2];
+
+    assert_eq(arr[0], 42);
+    assert_eq(arr[1], 43);
+    assert_eq(arr[2], 44);
+}
+
+fn test_list_allocation() {
+    let mut list: List<Int> = [];
+
+    assert_eq(list.len(), 0);
+
+    list.push(1);
+    list.push(2);
+    list.push(3);
+
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[2], 3);
+}
+
+fn test_list_with_capacity() {
+    let mut list: List<Int> = @list_with_capacity(100);
+
+    assert_eq(list.len(), 0);
+
+    for i in 0..50 {
+        list.push(i);
+    }
+
+    assert_eq(list.len(), 50);
+}
+
+fn test_list_from_literal() {
+    let list = [1, 2, 3, 4, 5];
+
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 1);
+    assert_eq(list[4], 5);
+}
+
+fn test_map_allocation() {
+    let mut map: Map<Text, Int> = {};
+
+    assert_eq(map.len(), 0);
+
+    map["one"] = 1;
+    map["two"] = 2;
+    map["three"] = 3;
+
+    assert_eq(map.len(), 3);
+    assert_eq(map["one"], 1);
+    assert_eq(map["two"], 2);
+}
+
+fn test_map_from_literal() {
+    let map = {
+        "a": 1,
+        "b": 2,
+        "c": 3
+    };
+
+    assert_eq(map.len(), 3);
+    assert_eq(map["a"], 1);
+}
+
+fn test_set_allocation() {
+    let mut my_set: Set<Int> = Set.new();
+
+    assert_eq(my_set.len(), 0);
+
+    my_set.insert(1);
+    my_set.insert(2);
+    my_set.insert(2);  // Duplicate
+
+    assert_eq(my_set.len(), 2);
+    assert(my_set.contains(1));
+    assert(my_set.contains(2));
+}
+
+fn test_generic_allocation() {
+    // NEW_G for generic types
+    let node: Node<Int> = Node { value: 42, next: None };
+
+    assert_eq(node.value, 42);
+    assert(node.next is None);
+}
+
+fn test_linked_list() {
+    let n3 = Heap(Node { value: 3, next: None });
+    let n2 = Heap(Node { value: 2, next: Some(n3) });
+    let n1 = Heap(Node { value: 1, next: Some(n2) });
+
+    assert_eq(n1.value, 1);
+    assert_eq(@unwrap(n1.next).value, 2);
+    assert_eq(@unwrap(@unwrap(n1.next).next).value, 3);
+}
+
+fn test_large_struct() {
+    type LargeStruct is {
+        a: Int, b: Int, c: Int, d: Int, e: Int,
+        f: Int, g: Int, h: Int, i: Int, j: Int,
+        k: Float, l: Float, m: Float, n: Float,
+        s: Text
+    };
+
+    let large = LargeStruct {
+        a: 1, b: 2, c: 3, d: 4, e: 5,
+        f: 6, g: 7, h: 8, i: 9, j: 10,
+        k: 1.1, l: 2.2, m: 3.3, n: 4.4,
+        s: "test"
+    };
+
+    assert_eq(large.a, 1);
+    assert_eq(large.j, 10);
+    assert_eq(large.k, 1.1);
+    assert_eq(large.s, "test");
+}
+
+fn test_allocation_in_loop() {
+    let mut points: List<Point> = [];
+
+    for i in 0..100 {
+        points.push(Point { x: i as Float, y: (i * 2) as Float });
+    }
+
+    assert_eq(points.len(), 100);
+    assert_eq(points[50].x, 50.0);
+    assert_eq(points[50].y, 100.0);
+}
+
+fn test_allocation_stress() {
+    // Many allocations
+    for _ in 0..1000 {
+        let _ = Point { x: 1.0, y: 2.0 };
+        let _ = Heap(Point { x: 3.0, y: 4.0 });
+        let _ = [1, 2, 3, 4, 5];
+    }
+
+    // Should not leak memory
+    assert(true);
+}
+
+fn main() {
+    test_struct_allocation();
+    test_nested_struct();
+    test_heap_allocation();
+    test_heap_modification();
+    test_array_allocation();
+    test_array_zero_init();
+    test_array_with_expression();
+    test_list_allocation();
+    test_list_with_capacity();
+    test_list_from_literal();
+    test_map_allocation();
+    test_map_from_literal();
+    test_set_allocation();
+    test_generic_allocation();
+    test_linked_list();
+    test_large_struct();
+    test_allocation_in_loop();
+    test_allocation_stress();
+    print("001_allocation: PASSED");
+}

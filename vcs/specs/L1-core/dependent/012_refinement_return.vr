@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, return-types
+
+/// Refined return types -- functions that guarantee properties
+/// about their return values.
+
+type Natural is Int{>= 0};
+type Positive is Int{> 0};
+type Byte is Int{>= 0, < 256};
+type Probability is Float{>= 0.0, <= 1.0};
+
+// Return a refined type directly
+fn abs_val(x: Int) -> Natural {
+    if x >= 0 { x } else { -x }
+}
+
+// Return type with ensures
+fn factorial(n: Natural) -> Positive
+    where ensures result >= 1
+{
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+// Return refined type via conditional
+fn to_byte(x: Int) -> Byte {
+    if x < 0 { 0 }
+    else if x > 255 { 255 }
+    else { x }
+}
+
+// Return probability
+fn sigmoid(x: Float) -> Probability {
+    1.0 / (1.0 + (-x).exp())
+}
+
+// Named return with where clause
+fn string_length(s: Text) -> result: Int where result >= 0 {
+    s.len()
+}
+
+// Return Maybe<Refined> for fallible operations
+fn parse_byte(s: Text) -> Maybe<Byte> {
+    let n = s.parse_int();
+    match n {
+        Ok(v) if v >= 0 && v < 256 => Some(v),
+        _ => None,
+    }
+}
+
+// Return a tuple where components are refined
+fn min_max(xs: List<Int>) -> Maybe<(Int, Int)>
+    where ensures match result {
+        Some((lo, hi)) => lo <= hi,
+        None => true,
+    }
+{
+    if xs.len() == 0 {
+        None
+    } else {
+        let mut lo = xs[0];
+        let mut hi = xs[0];
+        for x in xs {
+            if x < lo { lo = x; }
+            if x > hi { hi = x; }
+        }
+        Some((lo, hi))
+    }
+}
+
+fn main() {
+    assert(abs_val(-10) == 10);
+    assert(abs_val(5) == 5);
+
+    assert(factorial(5) == 120);
+
+    assert(to_byte(-10) == 0);
+    assert(to_byte(300) == 255);
+    assert(to_byte(128) == 128);
+
+    let sig = sigmoid(0.0);
+    assert(sig == 0.5);
+
+    assert(string_length("hello") == 5);
+
+    assert(parse_byte("100") == Some(100));
+    assert(parse_byte("999") == None);
+
+    let mm = min_max([3, 1, 4, 1, 5]);
+    match mm {
+        Some((lo, hi)) => {
+            assert(lo == 1);
+            assert(hi == 5);
+        },
+        None => panic("should not be None"),
+    }
+}

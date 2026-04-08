@@ -1,0 +1,204 @@
+// Complex: Protocol implementations
+// Tests protocol system with multiple implementations
+
+use verum_core.base.{List, Maybe, Text}
+
+// Basic protocol
+protocol Display {
+    fn display(self: &Self) -> Text;
+}
+
+protocol Debug {
+    fn debug(self: &Self) -> Text;
+}
+
+// Protocol with associated type
+protocol Iterator {
+    type Item;
+    fn next(self: &mut Self) -> Maybe<Self.Item>;
+
+    // Default method
+    fn count(self: &mut Self) -> Int {
+        let mut n = 0;
+        while let Some(_) = self.next() {
+            n = n + 1;
+        }
+        n
+    }
+}
+
+// Protocol with constraints
+protocol Comparable: Eq {
+    fn compare(self: &Self, other: &Self) -> Ordering;
+
+    fn lt(self: &Self, other: &Self) -> Bool {
+        self.compare(other) == Ordering.Less
+    }
+
+    fn gt(self: &Self, other: &Self) -> Bool {
+        self.compare(other) == Ordering.Greater
+    }
+}
+
+type Ordering is
+    Less |
+    Equal |
+    Greater;
+
+// Generic protocol
+protocol Container<T> {
+    fn add(self: &mut Self, item: T);
+    fn remove(self: &mut Self) -> Maybe<T>;
+    fn len(self: &Self) -> Int;
+    fn is_empty(self: &Self) -> Bool {
+        self.len() == 0
+    }
+}
+
+// Struct implementing multiple protocols
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+implement Display for Point {
+    fn display(self: &Self) -> Text {
+        format("({}, {})", self.x, self.y)
+    }
+}
+
+implement Debug for Point {
+    fn debug(self: &Self) -> Text {
+        format("Point {{ x: {}, y: {} }}", self.x, self.y)
+    }
+}
+
+implement Eq for Point {
+    fn eq(self: &Self, other: &Self) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+implement Comparable for Point {
+    fn compare(self: &Self, other: &Self) -> Ordering {
+        // Compare by distance from origin
+        let self_dist = self.x * self.x + self.y * self.y;
+        let other_dist = other.x * other.x + other.y * other.y;
+        if self_dist < other_dist {
+            Ordering.Less
+        } else if self_dist > other_dist {
+            Ordering.Greater
+        } else {
+            Ordering.Equal
+        }
+    }
+}
+
+// Generic struct with protocol bounds
+type SortedList<T: Comparable> is {
+    items: List<T>,
+};
+
+implement<T: Comparable> SortedList<T> {
+    fn new() -> Self {
+        SortedList { items: [] }
+    }
+
+    fn insert(self: &mut Self, item: T) {
+        let mut idx = 0;
+        for existing in &self.items {
+            if item.lt(existing) {
+                break;
+            }
+            idx = idx + 1;
+        }
+        self.items.insert(idx, item);
+    }
+}
+
+implement<T: Comparable> Container<T> for SortedList<T> {
+    fn add(self: &mut Self, item: T) {
+        self.insert(item);
+    }
+
+    fn remove(self: &mut Self) -> Maybe<T> {
+        if self.items.is_empty() {
+            None
+        } else {
+            Some(self.items.remove(0))
+        }
+    }
+
+    fn len(self: &Self) -> Int {
+        self.items.len()
+    }
+}
+
+// Protocol object (dynamic dispatch)
+fn print_all(items: &List<Display>) {
+    for item in items {
+        println(item.display());
+    }
+}
+
+// Generic function with protocol bounds
+fn find_max<T: Comparable>(items: &List<T>) -> Maybe<&T> {
+    if items.is_empty() {
+        return None;
+    }
+
+    let mut max = &items[0];
+    for item in items {
+        if item.gt(max) {
+            max = item;
+        }
+    }
+    Some(max)
+}
+
+// Extension trait pattern
+protocol IteratorExt: Iterator {
+    fn map<U>(self: Self, f: function(Self.Item) -> U) -> Map<Self, F>
+    where
+        Self: Sized
+    {
+        Map { iter: self, f }
+    }
+
+    fn filter(self: Self, pred: function(&Self.Item) -> Bool) -> Filter<Self>
+    where
+        Self: Sized
+    {
+        Filter { iter: self, pred }
+    }
+}
+
+implement<I: Iterator> IteratorExt for I {}
+
+fn main() {
+    // Create points
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 3, y: 4 };
+    let p3 = Point { x: 0, y: 1 };
+
+    // Display
+    println(p1.display());
+    println(p2.debug());
+
+    // Compare
+    assert p3.lt(&p1);
+    assert p2.gt(&p1);
+
+    // Sorted list
+    let mut sorted: SortedList<Point> = SortedList.new();
+    sorted.add(p2);
+    sorted.add(p1);
+    sorted.add(p3);
+
+    assert sorted.len() == 3;
+
+    // Find max
+    let points = [p1, p2, p3];
+    let max = find_max(&points);
+    assert max == Some(&p2);
+}

@@ -1,0 +1,112 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, requires
+// @timeout: 5000
+
+/// Tests for requires clauses in contracts
+/// Preconditions that must hold when a function is called
+
+@verify(proof)
+fn sqrt(x: Float) -> Float {
+    contract#"
+        requires x >= 0.0;
+        ensures result * result == x;
+    ";
+    x.sqrt()
+}
+
+@verify(proof)
+fn divide(numerator: Float, denominator: Float) -> Float {
+    contract#"
+        requires denominator != 0.0;
+        ensures result * denominator == numerator;
+    ";
+    numerator / denominator
+}
+
+@verify(proof)
+fn array_get<T>(arr: &List<T>, index: Int) -> &T {
+    contract#"
+        requires index >= 0;
+        requires index < arr.len();
+    ";
+    &arr[index]
+}
+
+/// Multiple requires clauses
+@verify(proof)
+fn safe_substring(s: &Text, start: Int, end: Int) -> Text {
+    contract#"
+        requires start >= 0;
+        requires end >= start;
+        requires end <= s.len();
+    ";
+    s.slice(start, end)
+}
+
+/// Requires with complex boolean expressions
+@verify(proof)
+fn in_range(value: Int, min: Int, max: Int) -> Bool {
+    contract#"
+        requires min <= max;
+    ";
+    value >= min && value <= max
+}
+
+/// Requires with implications
+@verify(proof)
+fn conditional_op(x: Int, use_positive: Bool) -> Int {
+    contract#"
+        requires use_positive implies x > 0;
+        requires !use_positive implies x < 0;
+    ";
+    if use_positive { x } else { -x }
+}
+
+/// Requires referencing other function results
+fn is_valid_index(arr: &List<Int>, idx: Int) -> Bool {
+    idx >= 0 && idx < arr.len()
+}
+
+@verify(proof)
+fn safe_access(arr: &List<Int>, idx: Int) -> Int {
+    contract#"
+        requires is_valid_index(arr, idx);
+    ";
+    arr[idx]
+}
+
+/// Requires with type constraints
+@verify(proof)
+fn process_non_empty<T>(list: &List<T>) -> &T {
+    contract#"
+        requires list.len() > 0;
+    ";
+    &list[0]
+}
+
+/// Requires with arithmetic relationships
+@verify(proof)
+fn triangle_perimeter(a: Float, b: Float, c: Float) -> Float {
+    contract#"
+        requires a > 0.0 && b > 0.0 && c > 0.0;
+        requires a + b > c;
+        requires b + c > a;
+        requires a + c > b;
+    ";
+    a + b + c
+}
+
+/// Requires inherited from type refinement
+type NonNegative is Int where value >= 0;
+type Positive is Int where value > 0;
+
+@verify(proof)
+fn factorial(n: NonNegative) -> Positive {
+    contract#"
+        requires n >= 0;  // Reinforces type constraint
+        ensures result > 0;
+    ";
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}

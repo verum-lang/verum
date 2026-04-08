@@ -1,0 +1,253 @@
+// @test: typecheck-pass
+// @tier: 1
+// @level: L4
+// @tags: cbgr, latency, elimination, optimization
+// @description: CBGR check elimination through escape analysis (target: 0ns overhead when checks eliminated)
+
+/// CBGR Check Elimination Benchmark
+///
+/// Tier 1 (&checked T) eliminates runtime checks when the compiler can
+/// prove safety through escape analysis. This benchmark measures the
+/// effectiveness of check elimination.
+///
+/// Target: 0ns overhead compared to raw pointer when checks are eliminated
+
+const ITERATIONS: Int = 1_000_000;
+
+/// Case 1: Local reference never escapes
+/// Compiler should eliminate all checks
+fn benchmark_local_only() -> BenchmarkResult {
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        // Reference is purely local - checks can be eliminated
+        let data = 42i64;
+        let local_ref: &checked i64 = &data;
+        black_box(*local_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "local_only_ref",
+        iterations: ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / ITERATIONS as f64,
+        checks_expected: 0,
+    }
+}
+
+/// Case 2: Reference passed to inline function
+/// Checks should be eliminated after inlining
+@inline(always)
+fn read_value(r: &checked i64) -> i64 {
+    *r
+}
+
+fn benchmark_inlined_call() -> BenchmarkResult {
+    let data = 42i64;
+    let local_ref: &checked i64 = &data;
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        black_box(read_value(local_ref));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "inlined_call",
+        iterations: ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / ITERATIONS as f64,
+        checks_expected: 0,
+    }
+}
+
+/// Case 3: Reference in loop with known bounds
+/// Checks should be hoisted out of loop
+fn benchmark_loop_hoisting() -> BenchmarkResult {
+    let data: [i64; 1024] = [0; 1024];
+    let slice: &checked [i64] = &data[..];
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS / 1024 {
+        // Bounds check should be hoisted outside loop
+        for i in 0..1024 {
+            black_box(slice[i]);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "loop_hoisted",
+        iterations: ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / ITERATIONS as f64,
+        checks_expected: ITERATIONS / 1024,  // One check per outer iteration
+    }
+}
+
+/// Case 4: Iterator-based access
+/// No bounds checks needed with iterators
+fn benchmark_iterator_access() -> BenchmarkResult {
+    let data: [i64; 1024] = [0; 1024];
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS / 1024 {
+        // Iterator guarantees valid access - no checks
+        for value in &data {
+            black_box(*value);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "iterator_access",
+        iterations: ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / ITERATIONS as f64,
+        checks_expected: 0,
+    }
+}
+
+/// Case 5: Reference stored in struct (may escape)
+/// Checks might not be eliminable
+type Wrapper<'a> is {
+    ref_field: &'a i64,
+};
+
+fn benchmark_struct_field() -> BenchmarkResult {
+    let data = 42i64;
+    let wrapper = Wrapper { ref_field: &data };
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        black_box(*wrapper.ref_field);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "struct_field_ref",
+        iterations: ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / ITERATIONS as f64,
+        checks_expected: ITERATIONS,  // Conservative: all checks
+    }
+}
+
+/// Case 6: Provably non-escaping closure
+fn benchmark_closure_non_escape() -> BenchmarkResult {
+    let data = 42i64;
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        // Closure doesn't escape, reference can be checked
+        let closure = || *(&data);
+        black_box(closure());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "closure_non_escape",
+        iterations: ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / ITERATIONS as f64,
+        checks_expected: 0,
+    }
+}
+
+/// Case 7: Multiple references to same allocation
+fn benchmark_aliased_refs() -> BenchmarkResult {
+    let data = 42i64;
+    let ref1: &checked i64 = &data;
+    let ref2: &checked i64 = &data;
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS / 2 {
+        // Both refs point to same valid data
+        black_box(*ref1);
+        black_box(*ref2);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "aliased_refs",
+        iterations: ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / ITERATIONS as f64,
+        checks_expected: 0,  // Same allocation, same validity
+    }
+}
+
+/// Case 8: Reference with compile-time known lifetime
+fn benchmark_static_lifetime() -> BenchmarkResult {
+    static DATA: i64 = 42;
+    let static_ref: &'static checked i64 = &DATA;
+
+    let start = Instant.now();
+
+    for _ in 0..ITERATIONS {
+        // Static lifetime - always valid
+        black_box(*static_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "static_lifetime",
+        iterations: ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / ITERATIONS as f64,
+        checks_expected: 0,
+    }
+}
+
+fn main() {
+    println("=== CBGR Check Elimination Benchmark ===\n");
+
+    let results = [
+        benchmark_local_only(),
+        benchmark_inlined_call(),
+        benchmark_loop_hoisting(),
+        benchmark_iterator_access(),
+        benchmark_struct_field(),
+        benchmark_closure_non_escape(),
+        benchmark_aliased_refs(),
+        benchmark_static_lifetime(),
+    ];
+
+    for result in results {
+        let status = if result.per_op_ns < 5.0 { "ELIM" }
+                     else if result.per_op_ns < 15.0 { "PART" }
+                     else { "NONE" };
+
+        println("[{}] {}", status, result.name);
+        println("  Time per op:      {:.2}ns", result.per_op_ns);
+        println("  Expected checks:  {}", result.checks_expected);
+        println("");
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    per_op_ns: f64,
+    checks_expected: Int,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }

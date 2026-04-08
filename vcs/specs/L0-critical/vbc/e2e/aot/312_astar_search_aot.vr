@@ -1,0 +1,312 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, astar, pathfinding, grid, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for A* search on a small grid with Manhattan distance heuristic
+// Uses a 6x6 grid. Cells are 0=open, 1=wall.
+// Grid stored as 6 rows packed in a record. Open list is a simple array.
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn min2(a: Int, b_val: Int) -> Int { if a < b_val { a } else { b_val } }
+
+// 6x6 grid: 6 rows, each an int where bit i=1 means wall at column i
+type Grid6 is { r0: Int, r1: Int, r2: Int, r3: Int, r4: Int, r5: Int };
+
+fn grid_get_row(g: Grid6, r: Int) -> Int {
+    if r == 0 { g.r0 } else if r == 1 { g.r1 } else if r == 2 { g.r2 }
+    else if r == 3 { g.r3 } else if r == 4 { g.r4 } else { g.r5 }
+}
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(val: Int, pos: Int) -> Int {
+    (val / pow2(pos)) % 2
+}
+
+fn is_wall(g: Grid6, r: Int, c: Int) -> Int {
+    if r < 0 { return 1; }
+    if r > 5 { return 1; }
+    if c < 0 { return 1; }
+    if c > 5 { return 1; }
+    get_bit(grid_get_row(g, r), c)
+}
+
+fn manhattan(r1: Int, c1: Int, r2: Int, c2: Int) -> Int {
+    abs_val(r1 - r2) + abs_val(c1 - c2)
+}
+
+// Encode (row, col) as single int: row * 6 + col
+fn encode(r: Int, c: Int) -> Int { r * 6 + c }
+fn decode_row(code: Int) -> Int { code / 6 }
+fn decode_col(code: Int) -> Int { code % 6 }
+
+// Node store: 36 entries (6x6 grid), storing g_cost, parent, and closed flag
+// We use 3 arrays of 8 for the 36 cells (using indices 0-35, only first 36)
+// For simplicity, use a flat array approach with get/set via cascading ifs
+
+// 36-element array stored as 5 Arr8-like records, but let's use a simpler approach:
+// Store g_cost, parent, closed in separate arrays of size 36
+// We'll use 5 groups of 8 = 40 slots
+
+type Arr36 is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int, d12: Int, d13: Int, d14: Int, d15: Int,
+    d16: Int, d17: Int, d18: Int, d19: Int, d20: Int, d21: Int, d22: Int, d23: Int,
+    d24: Int, d25: Int, d26: Int, d27: Int, d28: Int, d29: Int, d30: Int, d31: Int,
+    d32: Int, d33: Int, d34: Int, d35: Int
+};
+
+fn a36_zero() -> Arr36 {
+    Arr36 {
+        d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0,
+        d8: 0, d9: 0, d10: 0, d11: 0, d12: 0, d13: 0, d14: 0, d15: 0,
+        d16: 0, d17: 0, d18: 0, d19: 0, d20: 0, d21: 0, d22: 0, d23: 0,
+        d24: 0, d25: 0, d26: 0, d27: 0, d28: 0, d29: 0, d30: 0, d31: 0,
+        d32: 0, d33: 0, d34: 0, d35: 0
+    }
+}
+
+fn a36_fill(val: Int) -> Arr36 {
+    Arr36 {
+        d0: val, d1: val, d2: val, d3: val, d4: val, d5: val, d6: val, d7: val,
+        d8: val, d9: val, d10: val, d11: val, d12: val, d13: val, d14: val, d15: val,
+        d16: val, d17: val, d18: val, d19: val, d20: val, d21: val, d22: val, d23: val,
+        d24: val, d25: val, d26: val, d27: val, d28: val, d29: val, d30: val, d31: val,
+        d32: val, d33: val, d34: val, d35: val
+    }
+}
+
+fn a36_get(a: Arr36, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else if i == 7 { a.d7 } else if i == 8 { a.d8 }
+    else if i == 9 { a.d9 } else if i == 10 { a.d10 } else if i == 11 { a.d11 }
+    else if i == 12 { a.d12 } else if i == 13 { a.d13 } else if i == 14 { a.d14 }
+    else if i == 15 { a.d15 } else if i == 16 { a.d16 } else if i == 17 { a.d17 }
+    else if i == 18 { a.d18 } else if i == 19 { a.d19 } else if i == 20 { a.d20 }
+    else if i == 21 { a.d21 } else if i == 22 { a.d22 } else if i == 23 { a.d23 }
+    else if i == 24 { a.d24 } else if i == 25 { a.d25 } else if i == 26 { a.d26 }
+    else if i == 27 { a.d27 } else if i == 28 { a.d28 } else if i == 29 { a.d29 }
+    else if i == 30 { a.d30 } else if i == 31 { a.d31 } else if i == 32 { a.d32 }
+    else if i == 33 { a.d33 } else if i == 34 { a.d34 } else { a.d35 }
+}
+
+fn a36_set(a: Arr36, i: Int, v: Int) -> Arr36 {
+    Arr36 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 },
+        d8: if i == 8 { v } else { a.d8 }, d9: if i == 9 { v } else { a.d9 },
+        d10: if i == 10 { v } else { a.d10 }, d11: if i == 11 { v } else { a.d11 },
+        d12: if i == 12 { v } else { a.d12 }, d13: if i == 13 { v } else { a.d13 },
+        d14: if i == 14 { v } else { a.d14 }, d15: if i == 15 { v } else { a.d15 },
+        d16: if i == 16 { v } else { a.d16 }, d17: if i == 17 { v } else { a.d17 },
+        d18: if i == 18 { v } else { a.d18 }, d19: if i == 19 { v } else { a.d19 },
+        d20: if i == 20 { v } else { a.d20 }, d21: if i == 21 { v } else { a.d21 },
+        d22: if i == 22 { v } else { a.d22 }, d23: if i == 23 { v } else { a.d23 },
+        d24: if i == 24 { v } else { a.d24 }, d25: if i == 25 { v } else { a.d25 },
+        d26: if i == 26 { v } else { a.d26 }, d27: if i == 27 { v } else { a.d27 },
+        d28: if i == 28 { v } else { a.d28 }, d29: if i == 29 { v } else { a.d29 },
+        d30: if i == 30 { v } else { a.d30 }, d31: if i == 31 { v } else { a.d31 },
+        d32: if i == 32 { v } else { a.d32 }, d33: if i == 33 { v } else { a.d33 },
+        d34: if i == 34 { v } else { a.d34 }, d35: if i == 35 { v } else { a.d35 }
+    }
+}
+
+// A* state: g_cost, parent, closed arrays + open list
+type AstarState is {
+    g_cost: Arr36,
+    parent: Arr36,
+    closed: Arr36
+};
+
+// A* search: returns path length (-1 if no path)
+// start_r, start_c -> goal_r, goal_c
+fn astar(g: Grid6, sr: Int, sc: Int, gr: Int, gc: Int) -> Int {
+    let start = encode(sr, sc);
+    let goal = encode(gr, gc);
+
+    // Initialize costs to large value
+    let mut g_cost = a36_fill(9999);
+    let mut parent = a36_fill(-1);
+    let mut closed = a36_zero();
+
+    g_cost = a36_set(g_cost, start, 0);
+
+    // Simple open list: iterate all nodes, find min f-cost unclosed node
+    let mut iterations = 0;
+    let max_iter = 100;
+
+    while iterations < max_iter {
+        // Find unclosed node with minimum f = g + h
+        let mut best = -1;
+        let mut best_f = 99999;
+        let mut n = 0;
+        while n < 36 {
+            if a36_get(closed, n) == 0 {
+                let gc_val = a36_get(g_cost, n);
+                if gc_val < 9999 {
+                    let h = manhattan(decode_row(n), decode_col(n), gr, gc);
+                    let f = gc_val + h;
+                    if f < best_f {
+                        best_f = f;
+                        best = n;
+                    }
+                }
+            }
+            n = n + 1;
+        }
+
+        // No more open nodes
+        if best == -1 { return -1; }
+
+        // Goal reached
+        if best == goal {
+            return a36_get(g_cost, goal);
+        }
+
+        // Close this node
+        closed = a36_set(closed, best, 1);
+
+        let cr = decode_row(best);
+        let cc = decode_col(best);
+        let cur_g = a36_get(g_cost, best);
+
+        // Explore 4 neighbors (up, down, left, right)
+        let mut dir = 0;
+        while dir < 4 {
+            let nr = if dir == 0 { cr - 1 } else if dir == 1 { cr + 1 } else { cr };
+            let nc = if dir == 2 { cc - 1 } else if dir == 3 { cc + 1 } else { cc };
+
+            if nr >= 0 {
+                if nr < 6 {
+                    if nc >= 0 {
+                        if nc < 6 {
+                            let nid = encode(nr, nc);
+                            if is_wall(g, nr, nc) == 0 {
+                                if a36_get(closed, nid) == 0 {
+                                    let new_g = cur_g + 1;
+                                    if new_g < a36_get(g_cost, nid) {
+                                        g_cost = a36_set(g_cost, nid, new_g);
+                                        parent = a36_set(parent, nid, best);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            dir = dir + 1;
+        }
+        iterations = iterations + 1;
+    }
+    -1  // Not found within iteration limit
+}
+
+// Reconstruct path length from parent array (for verification)
+fn path_len_from_parent(parent: Arr36, start: Int, goal: Int) -> Int {
+    let mut length = 0;
+    let mut cur = goal;
+    while cur != start {
+        if cur == -1 { return -1; }
+        cur = a36_get(parent, cur);
+        length = length + 1;
+        if length > 36 { return -1; }  // Safety: avoid infinite loop
+    }
+    length
+}
+
+fn test_straight_path() {
+    // Empty 6x6 grid: all zeros (no walls)
+    let grid = Grid6 { r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 };
+
+    // (0,0) to (0,5): straight horizontal path, length 5
+    let d1 = astar(grid, 0, 0, 0, 5);
+    assert_eq(d1, 5);
+
+    // (0,0) to (5,0): straight vertical path, length 5
+    let d2 = astar(grid, 0, 0, 5, 0);
+    assert_eq(d2, 5);
+
+    // (0,0) to (5,5): Manhattan distance = 10
+    let d3 = astar(grid, 0, 0, 5, 5);
+    assert_eq(d3, 10);
+
+    // Same start and goal
+    let d4 = astar(grid, 3, 3, 3, 3);
+    assert_eq(d4, 0);
+}
+
+fn test_with_walls() {
+    // Grid with a wall blocking direct path
+    // Row 2 is all wall except column 0 and 5
+    // Binary: columns 1,2,3,4 are walls = bits 1-4 set = 0b011110 = 30
+    let grid = Grid6 { r0: 0, r1: 0, r2: 30, r3: 0, r4: 0, r5: 0 };
+
+    // (0,3) to (4,3): must go around the wall
+    // Direct would be 4, but wall blocks at row 2
+    // Must go (0,3)->(1,3)->(1,0) or (1,5) then down
+    let d = astar(grid, 0, 3, 4, 3);
+    // Path must detour around: should be longer than 4
+    assert_eq(d > 4, true);
+    // Should still be reachable
+    assert_eq(d > 0, true);
+}
+
+fn test_no_path() {
+    // Grid with complete wall at row 2 (all 6 bits set = 63)
+    let grid = Grid6 { r0: 0, r1: 0, r2: 63, r3: 0, r4: 0, r5: 0 };
+
+    // (0,0) to (5,5): wall completely blocks
+    let d = astar(grid, 0, 0, 5, 5);
+    assert_eq(d, -1);
+}
+
+fn test_adjacent() {
+    let grid = Grid6 { r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 };
+    // Adjacent cells
+    assert_eq(astar(grid, 2, 3, 2, 4), 1);
+    assert_eq(astar(grid, 2, 3, 3, 3), 1);
+}
+
+fn test_manhattan_heuristic() {
+    // Manhattan distance is admissible: A* result >= manhattan distance
+    let grid = Grid6 { r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 };
+    let d = astar(grid, 0, 0, 5, 5);
+    let h = manhattan(0, 0, 5, 5);
+    assert_eq(d, h);  // On empty grid, optimal = manhattan
+    assert_eq(h, 10);
+}
+
+fn test_maze_like() {
+    // More complex maze:
+    // Row 1: walls at columns 1,2,3 (0b01110 = 14)
+    // Row 3: walls at columns 2,3,4 (0b11100 = 28)
+    let grid = Grid6 { r0: 0, r1: 14, r2: 0, r3: 28, r4: 0, r5: 0 };
+
+    // (0,0) to (5,5)
+    let d = astar(grid, 0, 0, 5, 5);
+    assert_eq(d > 0, true);
+    // Must be at least manhattan distance
+    assert_eq(d >= 10, true);
+}
+
+fn main() -> Int {
+    test_straight_path();
+    test_with_walls();
+    test_no_path();
+    test_adjacent();
+    test_manhattan_heuristic();
+    test_maze_like();
+    print("[OK] 312_astar_search_aot");
+    0
+}

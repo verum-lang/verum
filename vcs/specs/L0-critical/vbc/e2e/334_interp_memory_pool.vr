@@ -1,0 +1,299 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, memory, pool, freelist, cbgr
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Fixed-size memory pool with free-list.
+// Supports alloc/dealloc patterns with O(1) allocation from free list.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_fill(v: Int) -> Arr8 {
+    Arr8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// Memory Pool: 8 fixed-size slots
+// allocated[i]: 1 if slot i is in use, 0 if free
+// data[i]: stored value in slot i
+// free_next[i]: next free slot in free list (-1 = end)
+// free_head: head of free list (-1 = empty)
+// num_allocated: count of allocated slots
+// pool_size: total number of slots (max 8)
+// =============================================================================
+
+type MemPool is {
+    allocated: Arr8,
+    data: Arr8,
+    free_next: Arr8,
+    free_head: Int,
+    num_allocated: Int,
+    pool_size: Int
+};
+
+// Initialize pool with all slots free, chained in free list
+fn pool_new(sz: Int) -> MemPool {
+    // Build free list: 0 -> 1 -> 2 -> ... -> (sz-1) -> -1
+    let mut free_chain = a8_fill(-1);
+    let mut i = 0;
+    while i < sz - 1 {
+        free_chain = a8_set(free_chain, i, i + 1);
+        i = i + 1;
+    }
+    // Last slot points to -1 (end)
+    MemPool {
+        allocated: a8_new(),
+        data: a8_new(),
+        free_next: free_chain,
+        free_head: 0,
+        num_allocated: 0,
+        pool_size: sz
+    }
+}
+
+// Allocate a slot, store value, return (pool, slot_id) where slot_id=-1 on failure
+type PoolAllocPair is { pool: MemPool, slot: Int };
+
+fn pool_alloc(p: MemPool, val: Int) -> PoolAllocPair {
+    if p.free_head == -1 {
+        return PoolAllocPair { pool: p, slot: -1 };
+    }
+    let slot = p.free_head;
+    let next_free = a8_get(p.free_next, slot);
+    PoolAllocPair {
+        pool: MemPool {
+            allocated: a8_set(p.allocated, slot, 1),
+            data: a8_set(p.data, slot, val),
+            free_next: p.free_next,
+            free_head: next_free,
+            num_allocated: p.num_allocated + 1,
+            pool_size: p.pool_size
+        },
+        slot: slot
+    }
+}
+
+// Deallocate a slot (return to free list)
+fn pool_dealloc(p: MemPool, slot: Int) -> MemPool {
+    if a8_get(p.allocated, slot) == 0 {
+        return p;  // Already free
+    }
+    MemPool {
+        allocated: a8_set(p.allocated, slot, 0),
+        data: p.data,
+        free_next: a8_set(p.free_next, slot, p.free_head),
+        free_head: slot,
+        num_allocated: p.num_allocated - 1,
+        pool_size: p.pool_size
+    }
+}
+
+// Read value from slot
+fn pool_read(p: MemPool, slot: Int) -> Int {
+    a8_get(p.data, slot)
+}
+
+// Write value to slot
+fn pool_write(p: MemPool, slot: Int, val: Int) -> MemPool {
+    MemPool {
+        allocated: p.allocated,
+        data: a8_set(p.data, slot, val),
+        free_next: p.free_next,
+        free_head: p.free_head,
+        num_allocated: p.num_allocated,
+        pool_size: p.pool_size
+    }
+}
+
+// Count free slots
+fn pool_free_count(p: MemPool) -> Int {
+    p.pool_size - p.num_allocated
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_initial_state() {
+    let p = pool_new(8);
+    assert_eq(p.num_allocated, 0);
+    assert_eq(pool_free_count(p), 8);
+    assert_eq(p.free_head, 0);
+}
+
+fn test_single_alloc_dealloc() {
+    let p = pool_new(8);
+    let r = pool_alloc(p, 42);
+    assert_eq(r.slot, 0);
+    assert_eq(pool_read(r.pool, 0), 42);
+    assert_eq(r.pool.num_allocated, 1);
+
+    let p2 = pool_dealloc(r.pool, 0);
+    assert_eq(p2.num_allocated, 0);
+    assert_eq(pool_free_count(p2), 8);
+}
+
+fn test_multiple_allocs() {
+    let p = pool_new(8);
+    let r1 = pool_alloc(p, 10);
+    let r2 = pool_alloc(r1.pool, 20);
+    let r3 = pool_alloc(r2.pool, 30);
+    let r4 = pool_alloc(r3.pool, 40);
+
+    assert_eq(r1.slot, 0);
+    assert_eq(r2.slot, 1);
+    assert_eq(r3.slot, 2);
+    assert_eq(r4.slot, 3);
+
+    assert_eq(pool_read(r4.pool, 0), 10);
+    assert_eq(pool_read(r4.pool, 1), 20);
+    assert_eq(pool_read(r4.pool, 2), 30);
+    assert_eq(pool_read(r4.pool, 3), 40);
+
+    assert_eq(r4.pool.num_allocated, 4);
+    assert_eq(pool_free_count(r4.pool), 4);
+}
+
+fn test_dealloc_reuse() {
+    let p = pool_new(4);
+    let r1 = pool_alloc(p, 100);
+    let r2 = pool_alloc(r1.pool, 200);
+    let r3 = pool_alloc(r2.pool, 300);
+    // Slots: 0=100, 1=200, 2=300
+
+    // Free slot 1
+    let p2 = pool_dealloc(r3.pool, 1);
+    assert_eq(p2.num_allocated, 2);
+
+    // Allocate again -> should get slot 1 back (LIFO free list)
+    let r4 = pool_alloc(p2, 999);
+    assert_eq(r4.slot, 1);
+    assert_eq(pool_read(r4.pool, 1), 999);
+
+    // Other slots unchanged
+    assert_eq(pool_read(r4.pool, 0), 100);
+    assert_eq(pool_read(r4.pool, 2), 300);
+}
+
+fn test_exhaust_pool() {
+    let p = pool_new(4);
+    let r1 = pool_alloc(p, 1);
+    let r2 = pool_alloc(r1.pool, 2);
+    let r3 = pool_alloc(r2.pool, 3);
+    let r4 = pool_alloc(r3.pool, 4);
+
+    assert_eq(r4.pool.num_allocated, 4);
+    assert_eq(pool_free_count(r4.pool), 0);
+
+    // Try to allocate one more
+    let r5 = pool_alloc(r4.pool, 5);
+    assert_eq(r5.slot, -1);  // Failed
+}
+
+fn test_alloc_free_alloc_pattern() {
+    // Allocate all, free all, allocate all again
+    let p = pool_new(4);
+
+    // Fill up
+    let r1 = pool_alloc(p, 10);
+    let r2 = pool_alloc(r1.pool, 20);
+    let r3 = pool_alloc(r2.pool, 30);
+    let r4 = pool_alloc(r3.pool, 40);
+    assert_eq(r4.pool.num_allocated, 4);
+
+    // Free all (in reverse order)
+    let p2 = pool_dealloc(r4.pool, 3);
+    let p3 = pool_dealloc(p2, 2);
+    let p4 = pool_dealloc(p3, 1);
+    let p5 = pool_dealloc(p4, 0);
+    assert_eq(p5.num_allocated, 0);
+
+    // Reallocate (LIFO order: 0, 1, 2, 3)
+    let s1 = pool_alloc(p5, 100);
+    let s2 = pool_alloc(s1.pool, 200);
+    let s3 = pool_alloc(s2.pool, 300);
+    let s4 = pool_alloc(s3.pool, 400);
+    assert_eq(s4.pool.num_allocated, 4);
+
+    // Values correct (slots may be in different order due to LIFO)
+    assert_eq(pool_read(s4.pool, s1.slot), 100);
+    assert_eq(pool_read(s4.pool, s2.slot), 200);
+    assert_eq(pool_read(s4.pool, s3.slot), 300);
+    assert_eq(pool_read(s4.pool, s4.slot), 400);
+}
+
+fn test_write_updates() {
+    let p = pool_new(8);
+    let r1 = pool_alloc(p, 0);
+    let r2 = pool_alloc(r1.pool, 0);
+
+    // Write and verify
+    let p2 = pool_write(r2.pool, r1.slot, 111);
+    let p3 = pool_write(p2, r2.slot, 222);
+
+    assert_eq(pool_read(p3, r1.slot), 111);
+    assert_eq(pool_read(p3, r2.slot), 222);
+
+    // Overwrite
+    let p4 = pool_write(p3, r1.slot, 333);
+    assert_eq(pool_read(p4, r1.slot), 333);
+    assert_eq(pool_read(p4, r2.slot), 222);  // Unchanged
+}
+
+fn test_double_dealloc_safe() {
+    let p = pool_new(8);
+    let r = pool_alloc(p, 42);
+    let p2 = pool_dealloc(r.pool, r.slot);
+    assert_eq(p2.num_allocated, 0);
+
+    // Double dealloc should be safe (already free)
+    let p3 = pool_dealloc(p2, r.slot);
+    assert_eq(p3.num_allocated, 0);
+}
+
+fn main() -> Int {
+    test_initial_state();
+    test_single_alloc_dealloc();
+    test_multiple_allocs();
+    test_dealloc_reuse();
+    test_exhaust_pool();
+    test_alloc_free_alloc_pattern();
+    test_write_updates();
+    test_double_dealloc_safe();
+    print("[OK] 334_interp_memory_pool");
+    0
+}

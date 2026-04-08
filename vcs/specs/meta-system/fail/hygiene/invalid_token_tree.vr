@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, token, tree, error
+// @expected-error: parse
+// @description: Malformed token tree in quote should cause parse error
+
+// Unbalanced delimiters in quote cause parse errors
+meta fn unbalanced_parens() -> TokenStream {
+    quote {
+        let x = (1 + 2;  // Missing closing paren - causes parse error
+    }
+}
+
+fn main() {
+    @unbalanced_parens();
+}

@@ -1,0 +1,32 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "Hello";
+    let empty = "";
+
+    // Check lengths directly
+    print(f"s len = {s.len()}");
+    print(f"empty len = {empty.len()}");
+
+    // Test find with non-empty - should work
+    if s.contains("ell") {
+        print("contains ell: yes");
+    } else {
+        print("contains ell: no");
+    }
+
+    // Now test with empty string directly
+    // The issue is in find() - let's see if empty.len() == 0
+    let elen = empty.len();
+    print(f"elen = {elen}");
+
+    if elen == 0 {
+        print("empty len is zero");
+    } else {
+        print("empty len is NOT zero");
+    }
+
+    0
+}

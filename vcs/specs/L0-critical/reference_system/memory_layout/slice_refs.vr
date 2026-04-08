@@ -1,0 +1,236 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, slices
+
+/// Test slice reference types and their memory layout.
+/// Slices are fat references containing pointer + length.
+/// CBGR adds generation and epoch for safety.
+
+fn main() {
+    test_slice_creation();
+    test_slice_borrowing();
+    test_slice_operations();
+    test_slice_patterns();
+    test_mutable_slices();
+}
+
+fn test_slice_creation() {
+    // Slice from array
+    let array = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &array;
+    assert(slice.len() == 5);
+
+    // Slice from array range
+    let partial: &[Int] = &array[1..4];
+    assert(partial.len() == 3);
+    assert(partial[0] == 2);
+    assert(partial[2] == 4);
+
+    // Slice from List
+    let list = [10, 20, 30, 40, 50];
+    let list_slice: &[Int] = list.as_slice();
+    assert(list_slice.len() == 5);
+
+    // String slice
+    let text = Text.from("hello world");
+    let str_slice: &Text = text.as_str();
+    assert(str_slice.len() == 11);
+
+    // Empty slices
+    let empty_array: &[Int] = &[];
+    assert(empty_array.len() == 0);
+    assert(empty_array.is_empty());
+}
+
+fn test_slice_borrowing() {
+    let array = [1, 2, 3, 4, 5];
+
+    // Multiple immutable slice borrows
+    let slice1: &[Int] = &array;
+    let slice2: &[Int] = &array[0..3];
+    let slice3: &[Int] = &array[2..5];
+
+    // All valid simultaneously
+    assert(slice1.len() == 5);
+    assert(slice2.len() == 3);
+    assert(slice3.len() == 3);
+
+    // Slices of slices
+    let sub_slice: &[Int] = &slice1[1..4];
+    assert(sub_slice.len() == 3);
+    assert(sub_slice[0] == 2);
+}
+
+fn test_slice_operations() {
+    let array = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &array;
+
+    // Indexing
+    assert(slice[0] == 1);
+    assert(slice[4] == 5);
+
+    // Iteration
+    let mut sum = 0;
+    for item in slice {
+        sum += *item;
+    }
+    assert(sum == 15);
+
+    // First/Last
+    assert(*slice.first().unwrap() == 1);
+    assert(*slice.last().unwrap() == 5);
+
+    // Contains
+    assert(slice.contains(&3));
+    assert(!slice.contains(&10));
+
+    // Binary search (on sorted slice)
+    let result = slice.binary_search(&3);
+    assert(result == Result.Ok(2));
+
+    // Split
+    let (left, right) = slice.split_at(2);
+    assert(left.len() == 2);
+    assert(right.len() == 3);
+
+    // Chunks
+    for chunk in slice.chunks(2) {
+        assert(chunk.len() <= 2);
+    }
+
+    // Windows
+    for window in slice.windows(3) {
+        assert(window.len() == 3);
+    }
+}
+
+fn test_slice_patterns() {
+    let array = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &array;
+
+    // Pattern matching on slices
+    match slice {
+        [] => panic("unexpected empty"),
+        [single] => panic("unexpected single"),
+        [first, second] => panic("unexpected two"),
+        [first, rest @ ..] => {
+            assert(*first == 1);
+            assert(rest.len() == 4);
+        },
+    }
+
+    // Head and tail
+    if let [head, tail @ ..] = slice {
+        assert(*head == 1);
+        assert(tail.len() == 4);
+    }
+
+    // First two and rest
+    if let [a, b, rest @ ..] = slice {
+        assert(*a == 1);
+        assert(*b == 2);
+        assert(rest.len() == 3);
+    }
+
+    // Last element pattern
+    if let [init @ .., last] = slice {
+        assert(*last == 5);
+        assert(init.len() == 4);
+    }
+}
+
+fn test_mutable_slices() {
+    let mut array = [1, 2, 3, 4, 5];
+
+    // Mutable slice borrow
+    let slice: &mut [Int] = &mut array;
+
+    // Mutation through slice
+    slice[0] = 10;
+    slice[4] = 50;
+
+    assert(array[0] == 10);
+    assert(array[4] == 50);
+
+    // Mutable iteration
+    for item in &mut array {
+        *item *= 2;
+    }
+
+    assert(array[0] == 20);
+    assert(array[4] == 100);
+
+    // Split mutable slices
+    let mut data = [1, 2, 3, 4, 5, 6];
+    let (left, right) = data.split_at_mut(3);
+
+    // Can mutate both halves independently
+    left[0] = 100;
+    right[0] = 200;
+
+    assert(data[0] == 100);
+    assert(data[3] == 200);
+
+    // Swap elements
+    let mut swap_array = [1, 2, 3, 4, 5];
+    swap_array.swap(0, 4);
+    assert(swap_array[0] == 5);
+    assert(swap_array[4] == 1);
+
+    // Reverse
+    let mut rev_array = [1, 2, 3, 4, 5];
+    rev_array.reverse();
+    assert(rev_array == [5, 4, 3, 2, 1]);
+
+    // Sort
+    let mut unsorted = [3, 1, 4, 1, 5, 9, 2, 6];
+    unsorted.sort();
+    assert(unsorted == [1, 1, 2, 3, 4, 5, 6, 9]);
+}
+
+/// Slice reference layout verification
+fn verify_slice_layout() {
+    let array = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &array;
+
+    // FatRef layout for slice:
+    // ptr: 8 bytes (pointer to first element)
+    // generation: 4 bytes
+    // epoch_caps: 4 bytes
+    // len: 8 bytes (number of elements)
+
+    assert((&[Int]).size == 24);
+
+    // Length is embedded in the reference
+    assert(slice.len() == 5);
+
+    // Pointer arithmetic is bounds-checked
+    // slice[5] would panic at runtime
+}
+
+/// String slices (&Text)
+fn string_slices() {
+    let text = Text.from("hello world");
+
+    // &Text is a UTF-8 slice
+    let str_slice: &Text = &text;
+    assert(str_slice.len() == 11);
+
+    // Substring (must be at char boundaries)
+    let hello: &Text = &str_slice[0..5];
+    assert(hello == "hello");
+
+    let world: &Text = &str_slice[6..11];
+    assert(world == "world");
+
+    // Iteration over chars
+    for ch in str_slice.chars() {
+        // ch is a char
+    }
+
+    // Iteration over bytes
+    for byte in str_slice.bytes() {
+        // byte is a u8
+    }
+}

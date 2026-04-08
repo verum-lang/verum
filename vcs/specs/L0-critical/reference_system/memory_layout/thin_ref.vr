@@ -1,0 +1,163 @@
+// @test: compile-only
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, thin-ref
+
+/// Test ThinRef memory layout: 16 bytes.
+/// ThinRef is used for references to sized types.
+/// Layout: ptr (8 bytes) + generation (4 bytes) + epoch_caps (4 bytes)
+
+fn main() {
+    verify_size();
+    verify_layout();
+    verify_alignment();
+}
+
+/// Verify ThinRef is exactly 16 bytes
+fn verify_size() {
+    // ThinRef to primitive types
+    assert((&Int).size == 16);
+    assert((&Bool).size == 16);
+    assert((&Float).size == 16);
+    assert((&u8).size == 16);
+    assert((&u64).size == 16);
+
+    // ThinRef to struct types
+    assert((&Point).size == 16);
+    assert((&LargeStruct).size == 16);
+
+    // ThinRef to enum types
+    assert((&Maybe<Int>).size == 16);
+    assert((&Result<Int, Text>).size == 16);
+
+    // ThinRef to array types (fixed size)
+    assert((&[Int; 10]).size == 16);
+    assert((&[u8; 1000]).size == 16);
+
+    // Mutable ThinRef same size
+    assert((&mut Int).size == 16);
+    assert((&mut Point).size == 16);
+}
+
+/// Verify internal layout of ThinRef
+fn verify_layout() {
+    let value = 42;
+    let thin_ref: &Int = &value;
+
+    // Access raw components - use type annotation for transmute
+    let raw: ThinRefRaw = transmute(thin_ref);
+
+    // Offset 0: pointer (8 bytes)
+    assert(offset_of(ThinRefRaw, ptr) == 0);
+    // Raw pointer size is 8 bytes
+    assert(RawPtr.size == 8);
+
+    // Offset 8: generation (4 bytes)
+    assert(offset_of(ThinRefRaw, generation) == 8);
+    // Compile-time type property for field size
+    assert(u32.size == 4);
+
+    // Offset 12: epoch_caps (4 bytes)
+    assert(offset_of(ThinRefRaw, epoch_caps) == 12);
+    // Compile-time type property for field size
+    assert(u32.size == 4);
+
+    // Total: 8 + 4 + 4 = 16 bytes
+}
+
+/// Verify ThinRef alignment
+fn verify_alignment() {
+    // ThinRef aligned to pointer alignment (8 bytes)
+    assert((&Int).alignment == 8);
+    assert((&Point).alignment == 8);
+    assert((&mut Int).alignment == 8);
+
+    // Array of ThinRefs is tightly packed
+    let refs: [&Int; 4] = [&0, &0, &0, &0];
+    assert([&Int; 4].size == 64);  // 4 * 16 = 64
+}
+
+/// Raw representation of ThinRef
+@repr(C)
+type ThinRefRaw is {
+    ptr: RawPtr,            // 8 bytes: pointer to data
+    generation: u32,        // 4 bytes: allocation generation
+    epoch_caps: u32,        // 4 bytes: epoch (24 bits) + capabilities (8 bits)
+};
+
+/// Raw pointer type alias
+type RawPtr = Int;
+
+/// Show epoch_caps bit layout
+fn epoch_caps_layout() {
+    // epoch_caps is packed as:
+    // Bits 0-23:  Epoch counter (24 bits = ~16.7M unique epochs)
+    // Bits 24:    Read permission
+    // Bits 25:    Write permission
+    // Bits 26:    Thread affinity
+    // Bits 27-31: Reserved
+
+    let epoch_mask: u32 = 0x00FFFFFF;
+    let read_bit: u32 = 1 << 24;
+    let write_bit: u32 = 1 << 25;
+    let thread_bit: u32 = 1 << 26;
+
+    let value = 42;
+    let thin_ref: &Int = &value;
+
+    let epoch_caps_val = thin_ref.raw_epoch_caps();
+
+    let epoch = epoch_caps_val & epoch_mask;
+    let can_read = (epoch_caps_val & read_bit) != 0;
+    let can_write = (epoch_caps_val & write_bit) != 0;
+    let thread_affine = (epoch_caps_val & thread_bit) != 0;
+
+    // Immutable ref: can read, cannot write
+    assert(can_read);
+    assert(!can_write);
+}
+
+/// Comparison with other reference types
+fn compare_reference_sizes() {
+    // ThinRef (&T): 16 bytes
+    assert((&Int).size == 16);
+
+    // Checked ref (&checked T): 8 bytes (just pointer)
+    assert((&checked Int).size == 8);
+
+    // Unsafe ref (&unsafe T): 8 bytes (just pointer)
+    assert((&unsafe Int).size == 8);
+
+    // Raw pointer: 8 bytes
+    assert(RawPtr.size == 8);
+
+    // ThinRef overhead: 8 bytes for safety metadata
+}
+
+/// ThinRef vs raw pointer efficiency
+fn efficiency_comparison() {
+    // Cache line is 64 bytes
+    // ThinRef: 4 refs per cache line (64 / 16)
+    // Raw ptr: 8 ptrs per cache line (64 / 8)
+
+    // For pointer-heavy structures, 2x memory overhead
+    // But provides: use-after-free detection, generation tracking
+
+    type LinkedNode is {
+        value: Int,
+        next: Maybe<&LinkedNode>,  // 16 bytes for maybe + ref
+    };
+
+    // Node size with ThinRef
+    assert(LinkedNode.size >= 24);  // 8 (Int) + 16 (Maybe<&>)
+}
+
+// Types used in tests
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type LargeStruct is {
+    data: [u8; 1000],
+};

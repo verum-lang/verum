@@ -1,0 +1,58 @@
+// @test: parse-pass
+// @level: L0
+// @tags: parser, declarations, functions, self
+// @description: Test function self parameter parsing
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+implement Point {
+    // Immutable self
+    fn distance(&self) -> Float {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+
+    // Mutable self
+    fn scale(&mut self, factor: Float) {
+        self.x *= factor;
+        self.y *= factor;
+    }
+
+    // By value self
+    fn consume(self) -> (Float, Float) {
+        (self.x, self.y)
+    }
+
+    // Self with explicit type annotation
+    fn with_typed_self(self: Point) -> Float {
+        self.x + self.y
+    }
+
+    // Mutable self with explicit type
+    fn mut_typed_self(self: &mut Point) {
+        self.x = 0.0;
+    }
+}
+
+type Container<T> is {
+    value: T
+};
+
+implement<T> Container<T> {
+    // Generic self
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    // Mutable generic self
+    fn set(&mut self, value: T) {
+        self.value = value;
+    }
+
+    // By value generic self
+    fn into_inner(self) -> T {
+        self.value
+    }
+}

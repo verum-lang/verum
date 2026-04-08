@@ -1,0 +1,158 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, two-sum, search, algorithm
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Two sum: find indices i,j such that a[i]+a[j]=target
+// Returns i*8+j (packed), or -1 if not found
+fn two_sum(a: Arr8, n: Int, target: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if get(a, i) + get(a, j) == target {
+                return i * 8 + j;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Two sum on sorted array using two pointers
+fn two_sum_sorted(a: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo < hi {
+        let sum = get(a, lo) + get(a, hi);
+        if sum == target { return lo * 8 + hi; }
+        if sum < target { lo = lo + 1; }
+        else { hi = hi - 1; }
+    }
+    -1
+}
+
+// Three sum: find i,j,k such that a[i]+a[j]+a[k]=target
+fn three_sum(a: Arr8, n: Int, target: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            let mut k = j + 1;
+            while k < n {
+                if get(a, i) + get(a, j) + get(a, k) == target {
+                    return 1;
+                }
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    0
+}
+
+// Count pairs with given sum
+fn count_pairs_sum(a: Arr8, n: Int, target: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if get(a, i) + get(a, j) == target {
+                count = count + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Maximum subarray sum (Kadane's)
+fn max_subarray(a: Arr8, n: Int) -> Int {
+    let mut max_ending = get(a, 0);
+    let mut max_so_far = get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let v = get(a, i);
+        if max_ending + v > v { max_ending = max_ending + v; }
+        else { max_ending = v; }
+        if max_ending > max_so_far { max_so_far = max_ending; }
+        i = i + 1;
+    }
+    max_so_far
+}
+
+fn main() -> Int {
+    let data = Arr8 { d0: 2, d1: 7, d2: 11, d3: 15, d4: 1, d5: 8, d6: 3, d7: 5 };
+
+    // Two sum: 2 + 7 = 9, indices 0,1
+    let r1 = two_sum(data, 8, 9);
+    assert_eq(r1, 0 * 8 + 1); // i=0, j=1
+    assert_eq(get(data, r1 / 8) + get(data, r1 % 8), 9);
+
+    // Two sum: 11 + 5 = 16, indices 2,7
+    let r2 = two_sum(data, 8, 16);
+    assert_eq(get(data, r2 / 8) + get(data, r2 % 8), 16);
+
+    // No solution
+    assert_eq(two_sum(data, 8, 100), -1);
+
+    // Sorted two-pointer
+    let sorted = Arr8 { d0: 1, d1: 2, d2: 3, d3: 5, d4: 7, d5: 8, d6: 11, d7: 15 };
+    let r3 = two_sum_sorted(sorted, 8, 9);
+    assert_eq(r3 >= 0, true);
+    assert_eq(get(sorted, r3 / 8) + get(sorted, r3 % 8), 9);
+
+    let r4 = two_sum_sorted(sorted, 8, 16);
+    assert_eq(r4 >= 0, true);
+    assert_eq(get(sorted, r4 / 8) + get(sorted, r4 % 8), 16);
+
+    assert_eq(two_sum_sorted(sorted, 8, 100), -1);
+
+    // Three sum
+    assert_eq(three_sum(data, 8, 20), 1);  // 2+7+11=20
+    assert_eq(three_sum(data, 8, 6), 1);   // 2+1+3=6
+    assert_eq(three_sum(data, 8, 0), 0);   // no three elements sum to 0
+
+    // Count pairs
+    assert_eq(count_pairs_sum(data, 8, 9), 2);  // (2,7) and (1,8)
+    assert_eq(count_pairs_sum(data, 8, 10), 2); // (2,8) and (7,3)
+    assert_eq(count_pairs_sum(data, 8, 100), 0);
+
+    // Kadane's max subarray
+    let mix = Arr8 { d0: -2, d1: 1, d2: -3, d3: 4, d4: -1, d5: 2, d6: 1, d7: -5 };
+    assert_eq(max_subarray(mix, 8), 6); // [4,-1,2,1]
+
+    let all_neg = Arr8 { d0: -3, d1: -5, d2: -1, d3: -4, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_subarray(all_neg, 4), -1); // single element -1
+
+    let all_pos = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(max_subarray(all_pos, 4), 10); // sum of all
+
+    print("DIFF_OK: two_sum");
+    0
+}

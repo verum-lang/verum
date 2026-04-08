@@ -1,0 +1,776 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, gpu, device
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: GPU device management simulation through VBC interpreter.
+// Device manager, memory allocation tracking, stream lifecycle,
+// event lifecycle, kernel launch simulation, multi-stream work patterns.
+// All using struct-based simulation with pure scalar arithmetic.
+
+// ============================================================================
+// GPU state record
+// ============================================================================
+
+type GpuState is {
+    device_id: Int,
+    alloc_count: Int,
+    free_count: Int,
+    peak_mem: Int,
+    current_mem: Int,
+    stream_count: Int,
+    event_count: Int,
+    launch_count: Int
+};
+
+fn gpu_new() -> GpuState {
+    GpuState {
+        device_id: 0,
+        alloc_count: 0,
+        free_count: 0,
+        peak_mem: 0,
+        current_mem: 0,
+        stream_count: 0,
+        event_count: 0,
+        launch_count: 0
+    }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// ============================================================================
+// Device management operations
+// ============================================================================
+
+fn gpu_set_device(g: GpuState, dev: Int) -> GpuState {
+    GpuState {
+        device_id: dev,
+        alloc_count: g.alloc_count,
+        free_count: g.free_count,
+        peak_mem: g.peak_mem,
+        current_mem: g.current_mem,
+        stream_count: g.stream_count,
+        event_count: g.event_count,
+        launch_count: g.launch_count
+    }
+}
+
+fn gpu_get_device(g: GpuState) -> Int {
+    g.device_id
+}
+
+// ============================================================================
+// Memory allocation tracking
+// ============================================================================
+
+fn gpu_alloc(g: GpuState, size: Int) -> GpuState {
+    let new_mem = g.current_mem + size;
+    let new_peak = int_max(g.peak_mem, new_mem);
+    GpuState {
+        device_id: g.device_id,
+        alloc_count: g.alloc_count + 1,
+        free_count: g.free_count,
+        peak_mem: new_peak,
+        current_mem: new_mem,
+        stream_count: g.stream_count,
+        event_count: g.event_count,
+        launch_count: g.launch_count
+    }
+}
+
+fn gpu_free(g: GpuState, size: Int) -> GpuState {
+    let new_mem = g.current_mem - size;
+    GpuState {
+        device_id: g.device_id,
+        alloc_count: g.alloc_count,
+        free_count: g.free_count + 1,
+        peak_mem: g.peak_mem,
+        current_mem: new_mem,
+        stream_count: g.stream_count,
+        event_count: g.event_count,
+        launch_count: g.launch_count
+    }
+}
+
+fn gpu_get_current_mem(g: GpuState) -> Int {
+    g.current_mem
+}
+
+fn gpu_get_peak_mem(g: GpuState) -> Int {
+    g.peak_mem
+}
+
+fn gpu_has_leaks(g: GpuState) -> Bool {
+    g.current_mem != 0
+}
+
+// ============================================================================
+// Stream lifecycle (create / destroy with counter)
+// ============================================================================
+
+fn gpu_create_stream(g: GpuState) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_count: g.alloc_count,
+        free_count: g.free_count,
+        peak_mem: g.peak_mem,
+        current_mem: g.current_mem,
+        stream_count: g.stream_count + 1,
+        event_count: g.event_count,
+        launch_count: g.launch_count
+    }
+}
+
+fn gpu_destroy_stream(g: GpuState) -> GpuState {
+    let new_count = if g.stream_count > 0 { g.stream_count - 1 } else { 0 };
+    GpuState {
+        device_id: g.device_id,
+        alloc_count: g.alloc_count,
+        free_count: g.free_count,
+        peak_mem: g.peak_mem,
+        current_mem: g.current_mem,
+        stream_count: new_count,
+        event_count: g.event_count,
+        launch_count: g.launch_count
+    }
+}
+
+fn gpu_stream_sync(g: GpuState) -> GpuState {
+    // In interpreter mode, sync is a no-op (all streams complete immediately)
+    g
+}
+
+// ============================================================================
+// Event lifecycle (create / record / query with counter)
+// ============================================================================
+
+fn gpu_create_event(g: GpuState) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_count: g.alloc_count,
+        free_count: g.free_count,
+        peak_mem: g.peak_mem,
+        current_mem: g.current_mem,
+        stream_count: g.stream_count,
+        event_count: g.event_count + 1,
+        launch_count: g.launch_count
+    }
+}
+
+fn gpu_destroy_event(g: GpuState) -> GpuState {
+    let new_count = if g.event_count > 0 { g.event_count - 1 } else { 0 };
+    GpuState {
+        device_id: g.device_id,
+        alloc_count: g.alloc_count,
+        free_count: g.free_count,
+        peak_mem: g.peak_mem,
+        current_mem: g.current_mem,
+        stream_count: g.stream_count,
+        event_count: new_count,
+        launch_count: g.launch_count
+    }
+}
+
+fn gpu_record_event(g: GpuState) -> GpuState {
+    // Recording an event is a no-op in interpreter mode
+    g
+}
+
+fn gpu_query_event(g: GpuState) -> Bool {
+    // In interpreter mode, events are always complete
+    true
+}
+
+// ============================================================================
+// Kernel launch simulation
+// ============================================================================
+
+fn gpu_launch_kernel(g: GpuState, grid_x: Int, grid_y: Int, block_x: Int, block_y: Int) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_count: g.alloc_count,
+        free_count: g.free_count,
+        peak_mem: g.peak_mem,
+        current_mem: g.current_mem,
+        stream_count: g.stream_count,
+        event_count: g.event_count,
+        launch_count: g.launch_count + 1
+    }
+}
+
+fn gpu_total_threads(grid_x: Int, grid_y: Int, block_x: Int, block_y: Int) -> Int {
+    grid_x * grid_y * block_x * block_y
+}
+
+// ============================================================================
+// Reset device state
+// ============================================================================
+
+fn gpu_reset(g: GpuState) -> GpuState {
+    GpuState {
+        device_id: g.device_id,
+        alloc_count: 0,
+        free_count: 0,
+        peak_mem: 0,
+        current_mem: 0,
+        stream_count: 0,
+        event_count: 0,
+        launch_count: 0
+    }
+}
+
+// ============================================================================
+// Stream ID tracker (up to 8 active streams)
+// ============================================================================
+
+type StreamTracker is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    count: Int,
+    next_id: Int
+};
+
+fn st_new() -> StreamTracker {
+    StreamTracker {
+        s0: 0, s1: 0, s2: 0, s3: 0,
+        s4: 0, s5: 0, s6: 0, s7: 0,
+        count: 0,
+        next_id: 1
+    }
+}
+
+fn st_get(t: StreamTracker, i: Int) -> Int {
+    if i == 0 { t.s0 } else if i == 1 { t.s1 }
+    else if i == 2 { t.s2 } else if i == 3 { t.s3 }
+    else if i == 4 { t.s4 } else if i == 5 { t.s5 }
+    else if i == 6 { t.s6 } else { t.s7 }
+}
+
+fn st_set(t: StreamTracker, i: Int, v: Int) -> StreamTracker {
+    StreamTracker {
+        s0: if i == 0 { v } else { t.s0 },
+        s1: if i == 1 { v } else { t.s1 },
+        s2: if i == 2 { v } else { t.s2 },
+        s3: if i == 3 { v } else { t.s3 },
+        s4: if i == 4 { v } else { t.s4 },
+        s5: if i == 5 { v } else { t.s5 },
+        s6: if i == 6 { v } else { t.s6 },
+        s7: if i == 7 { v } else { t.s7 },
+        count: t.count,
+        next_id: t.next_id
+    }
+}
+
+fn st_create(t: StreamTracker) -> StreamTracker {
+    let sid = t.next_id;
+    let t2 = st_set(t, t.count, sid);
+    StreamTracker {
+        s0: t2.s0, s1: t2.s1, s2: t2.s2, s3: t2.s3,
+        s4: t2.s4, s5: t2.s5, s6: t2.s6, s7: t2.s7,
+        count: t2.count + 1,
+        next_id: sid + 1
+    }
+}
+
+fn st_destroy(t: StreamTracker, sid: Int) -> StreamTracker {
+    // Find the stream and shift remaining
+    let mut found = -1;
+    let mut i = 0;
+    while i < t.count {
+        if st_get(t, i) == sid {
+            found = i;
+        }
+        i = i + 1;
+    }
+    if found >= 0 {
+        let mut t2 = t;
+        let mut j = found;
+        while j < t.count - 1 {
+            t2 = st_set(t2, j, st_get(t2, j + 1));
+            j = j + 1;
+        }
+        t2 = st_set(t2, t.count - 1, 0);
+        StreamTracker {
+            s0: t2.s0, s1: t2.s1, s2: t2.s2, s3: t2.s3,
+            s4: t2.s4, s5: t2.s5, s6: t2.s6, s7: t2.s7,
+            count: t2.count - 1,
+            next_id: t2.next_id
+        }
+    } else {
+        t
+    }
+}
+
+// ============================================================================
+// Tests: Device management
+// ============================================================================
+
+fn test_device_management() {
+    let g = gpu_new();
+    assert_eq(gpu_get_device(g), 0);
+
+    let g2 = gpu_set_device(g, 1);
+    assert_eq(gpu_get_device(g2), 1);
+
+    let g3 = gpu_set_device(g2, 3);
+    assert_eq(gpu_get_device(g3), 3);
+
+    // Set back to 0
+    let g4 = gpu_set_device(g3, 0);
+    assert_eq(gpu_get_device(g4), 0);
+}
+
+// ============================================================================
+// Tests: Memory allocation tracking
+// ============================================================================
+
+fn test_memory_alloc_free() {
+    let g = gpu_new();
+    assert_eq(gpu_get_current_mem(g), 0);
+    assert_eq(gpu_get_peak_mem(g), 0);
+    assert(!gpu_has_leaks(g));
+
+    // Allocate 1024 bytes
+    let g2 = gpu_alloc(g, 1024);
+    assert_eq(gpu_get_current_mem(g2), 1024);
+    assert_eq(gpu_get_peak_mem(g2), 1024);
+    assert_eq(g2.alloc_count, 1);
+
+    // Allocate 2048 more
+    let g3 = gpu_alloc(g2, 2048);
+    assert_eq(gpu_get_current_mem(g3), 3072);
+    assert_eq(gpu_get_peak_mem(g3), 3072);
+    assert_eq(g3.alloc_count, 2);
+
+    // Free 1024
+    let g4 = gpu_free(g3, 1024);
+    assert_eq(gpu_get_current_mem(g4), 2048);
+    assert_eq(gpu_get_peak_mem(g4), 3072); // peak unchanged
+    assert_eq(g4.free_count, 1);
+
+    // Free remaining
+    let g5 = gpu_free(g4, 2048);
+    assert_eq(gpu_get_current_mem(g5), 0);
+    assert(!gpu_has_leaks(g5));
+    assert_eq(g5.free_count, 2);
+}
+
+fn test_memory_peak_tracking() {
+    let mut g = gpu_new();
+
+    // Allocate, free, allocate larger -> peak should track the maximum
+    g = gpu_alloc(g, 500);
+    assert_eq(g.peak_mem, 500);
+
+    g = gpu_alloc(g, 700);
+    assert_eq(g.peak_mem, 1200); // 500+700
+
+    g = gpu_free(g, 500);
+    assert_eq(g.current_mem, 700);
+    assert_eq(g.peak_mem, 1200); // still 1200
+
+    g = gpu_alloc(g, 300);
+    assert_eq(g.current_mem, 1000);
+    assert_eq(g.peak_mem, 1200); // 1000 < 1200
+
+    g = gpu_alloc(g, 500);
+    assert_eq(g.current_mem, 1500);
+    assert_eq(g.peak_mem, 1500); // new peak
+}
+
+fn test_memory_leak_detection() {
+    let mut g = gpu_new();
+    g = gpu_alloc(g, 100);
+    g = gpu_alloc(g, 200);
+    g = gpu_alloc(g, 300);
+    assert(gpu_has_leaks(g));
+    assert_eq(g.alloc_count, 3);
+
+    g = gpu_free(g, 100);
+    g = gpu_free(g, 200);
+    assert(gpu_has_leaks(g)); // still 300 remaining
+
+    g = gpu_free(g, 300);
+    assert(!gpu_has_leaks(g));
+    assert_eq(g.free_count, 3);
+    assert_eq(g.alloc_count, 3);
+}
+
+// ============================================================================
+// Tests: Stream lifecycle
+// ============================================================================
+
+fn test_stream_create_destroy() {
+    let g = gpu_new();
+    assert_eq(g.stream_count, 0);
+
+    let g2 = gpu_create_stream(g);
+    assert_eq(g2.stream_count, 1);
+
+    let g3 = gpu_create_stream(g2);
+    assert_eq(g3.stream_count, 2);
+
+    let g4 = gpu_destroy_stream(g3);
+    assert_eq(g4.stream_count, 1);
+
+    let g5 = gpu_destroy_stream(g4);
+    assert_eq(g5.stream_count, 0);
+
+    // Destroy on zero -> stays at zero
+    let g6 = gpu_destroy_stream(g5);
+    assert_eq(g6.stream_count, 0);
+}
+
+fn test_stream_sync() {
+    let mut g = gpu_new();
+    g = gpu_create_stream(g);
+    g = gpu_create_stream(g);
+
+    // Sync is a no-op in interpreter mode
+    let g2 = gpu_stream_sync(g);
+    assert_eq(g2.stream_count, g.stream_count);
+    assert_eq(g2.launch_count, g.launch_count);
+}
+
+fn test_stream_tracker() {
+    let mut st = st_new();
+    assert_eq(st.count, 0);
+
+    // Create 3 streams
+    st = st_create(st);
+    st = st_create(st);
+    st = st_create(st);
+    assert_eq(st.count, 3);
+    assert_eq(st_get(st, 0), 1);
+    assert_eq(st_get(st, 1), 2);
+    assert_eq(st_get(st, 2), 3);
+
+    // Destroy middle stream (ID=2)
+    st = st_destroy(st, 2);
+    assert_eq(st.count, 2);
+    assert_eq(st_get(st, 0), 1);
+    assert_eq(st_get(st, 1), 3); // shifted
+
+    // Create a new one (gets ID=4)
+    st = st_create(st);
+    assert_eq(st.count, 3);
+    assert_eq(st_get(st, 2), 4);
+}
+
+// ============================================================================
+// Tests: Event lifecycle
+// ============================================================================
+
+fn test_event_create_destroy() {
+    let g = gpu_new();
+    assert_eq(g.event_count, 0);
+
+    let g2 = gpu_create_event(g);
+    assert_eq(g2.event_count, 1);
+
+    let g3 = gpu_create_event(g2);
+    assert_eq(g3.event_count, 2);
+
+    let g4 = gpu_destroy_event(g3);
+    assert_eq(g4.event_count, 1);
+
+    let g5 = gpu_destroy_event(g4);
+    assert_eq(g5.event_count, 0);
+}
+
+fn test_event_record_query() {
+    let mut g = gpu_new();
+    g = gpu_create_event(g);
+
+    // Record event (no-op in interpreter)
+    let g2 = gpu_record_event(g);
+    assert_eq(g2.event_count, g.event_count);
+
+    // Query event (always complete in interpreter)
+    assert(gpu_query_event(g2));
+}
+
+fn test_event_multiple() {
+    let mut g = gpu_new();
+
+    // Create 5 events
+    let mut i = 0;
+    while i < 5 {
+        g = gpu_create_event(g);
+        i = i + 1;
+    }
+    assert_eq(g.event_count, 5);
+
+    // Destroy 3
+    g = gpu_destroy_event(g);
+    g = gpu_destroy_event(g);
+    g = gpu_destroy_event(g);
+    assert_eq(g.event_count, 2);
+
+    // All remaining events should be queryable
+    assert(gpu_query_event(g));
+}
+
+// ============================================================================
+// Tests: Kernel launch simulation
+// ============================================================================
+
+fn test_kernel_launch() {
+    let g = gpu_new();
+    assert_eq(g.launch_count, 0);
+
+    // Launch kernel with 4x4 grid, 16x16 blocks
+    let g2 = gpu_launch_kernel(g, 4, 4, 16, 16);
+    assert_eq(g2.launch_count, 1);
+    assert_eq(gpu_total_threads(4, 4, 16, 16), 4096);
+
+    // Launch another kernel
+    let g3 = gpu_launch_kernel(g2, 8, 8, 32, 32);
+    assert_eq(g3.launch_count, 2);
+    assert_eq(gpu_total_threads(8, 8, 32, 32), 65536);
+}
+
+fn test_kernel_launch_various_configs() {
+    // 1D grid
+    assert_eq(gpu_total_threads(256, 1, 256, 1), 65536);
+
+    // 2D grid
+    assert_eq(gpu_total_threads(16, 16, 16, 16), 65536);
+
+    // Small launch
+    assert_eq(gpu_total_threads(1, 1, 1, 1), 1);
+
+    // Single block
+    assert_eq(gpu_total_threads(1, 1, 32, 32), 1024);
+}
+
+fn test_multiple_kernel_launches() {
+    let mut g = gpu_new();
+
+    // Simulate a training step: multiple kernel launches
+    g = gpu_launch_kernel(g, 4, 1, 256, 1);   // forward pass 1
+    g = gpu_launch_kernel(g, 4, 1, 256, 1);   // forward pass 2
+    g = gpu_launch_kernel(g, 4, 1, 256, 1);   // loss computation
+    g = gpu_launch_kernel(g, 4, 1, 256, 1);   // backward pass 1
+    g = gpu_launch_kernel(g, 4, 1, 256, 1);   // backward pass 2
+    g = gpu_launch_kernel(g, 1, 1, 256, 1);   // optimizer step
+
+    assert_eq(g.launch_count, 6);
+}
+
+// ============================================================================
+// Tests: Multi-stream work submission pattern
+// ============================================================================
+
+fn test_multi_stream_pattern() {
+    let mut g = gpu_new();
+
+    // Create 3 streams for pipelining
+    g = gpu_create_stream(g);
+    g = gpu_create_stream(g);
+    g = gpu_create_stream(g);
+    assert_eq(g.stream_count, 3);
+
+    // Stream 0: data loading (alloc + kernel)
+    g = gpu_alloc(g, 4096);
+    g = gpu_launch_kernel(g, 1, 1, 256, 1);
+
+    // Stream 1: computation (kernel)
+    g = gpu_launch_kernel(g, 8, 8, 16, 16);
+
+    // Stream 2: data transfer back (alloc + kernel + free)
+    g = gpu_alloc(g, 2048);
+    g = gpu_launch_kernel(g, 1, 1, 128, 1);
+
+    // Create events for synchronization
+    g = gpu_create_event(g);
+    g = gpu_record_event(g);
+    g = gpu_create_event(g);
+    g = gpu_record_event(g);
+
+    assert_eq(g.stream_count, 3);
+    assert_eq(g.event_count, 2);
+    assert_eq(g.launch_count, 3);
+    assert_eq(g.alloc_count, 2);
+    assert_eq(g.current_mem, 6144);
+
+    // Cleanup
+    g = gpu_free(g, 4096);
+    g = gpu_free(g, 2048);
+    g = gpu_destroy_event(g);
+    g = gpu_destroy_event(g);
+    g = gpu_destroy_stream(g);
+    g = gpu_destroy_stream(g);
+    g = gpu_destroy_stream(g);
+
+    assert_eq(g.stream_count, 0);
+    assert_eq(g.event_count, 0);
+    assert(!gpu_has_leaks(g));
+}
+
+// ============================================================================
+// Tests: Reset
+// ============================================================================
+
+fn test_gpu_reset() {
+    let mut g = gpu_new();
+    g = gpu_set_device(g, 2);
+    g = gpu_alloc(g, 1000);
+    g = gpu_alloc(g, 2000);
+    g = gpu_create_stream(g);
+    g = gpu_create_event(g);
+    g = gpu_launch_kernel(g, 4, 4, 16, 16);
+
+    assert_eq(g.device_id, 2);
+    assert_eq(g.current_mem, 3000);
+    assert_eq(g.launch_count, 1);
+
+    let g2 = gpu_reset(g);
+    // Device preserved
+    assert_eq(g2.device_id, 2);
+    // Everything else zeroed
+    assert_eq(g2.alloc_count, 0);
+    assert_eq(g2.free_count, 0);
+    assert_eq(g2.peak_mem, 0);
+    assert_eq(g2.current_mem, 0);
+    assert_eq(g2.stream_count, 0);
+    assert_eq(g2.event_count, 0);
+    assert_eq(g2.launch_count, 0);
+}
+
+// ============================================================================
+// Tests: Full workflow simulation
+// ============================================================================
+
+fn test_full_training_step() {
+    let mut g = gpu_new();
+    g = gpu_set_device(g, 0);
+
+    // Setup: create stream, allocate weights + activations
+    g = gpu_create_stream(g);
+    g = gpu_alloc(g, 4096);  // weights
+    g = gpu_alloc(g, 2048);  // activations
+    g = gpu_alloc(g, 1024);  // gradients
+    assert_eq(g.current_mem, 7168);
+
+    // Forward pass: 2 kernel launches
+    g = gpu_launch_kernel(g, 4, 1, 256, 1);
+    g = gpu_launch_kernel(g, 4, 1, 256, 1);
+
+    // Loss + backward pass: 3 kernel launches
+    g = gpu_launch_kernel(g, 1, 1, 256, 1);
+    g = gpu_launch_kernel(g, 4, 1, 256, 1);
+    g = gpu_launch_kernel(g, 4, 1, 256, 1);
+
+    // Optimizer step
+    g = gpu_launch_kernel(g, 2, 1, 256, 1);
+    g = gpu_stream_sync(g);
+
+    assert_eq(g.launch_count, 6);
+    assert_eq(g.peak_mem, 7168);
+
+    // Free temporary buffers (keep weights)
+    g = gpu_free(g, 2048);  // activations
+    g = gpu_free(g, 1024);  // gradients
+    assert_eq(g.current_mem, 4096);
+
+    // Free weights
+    g = gpu_free(g, 4096);
+    assert(!gpu_has_leaks(g));
+
+    // Cleanup stream
+    g = gpu_destroy_stream(g);
+    assert_eq(g.stream_count, 0);
+}
+
+fn test_batch_inference() {
+    let mut g = gpu_new();
+
+    // Allocate model weights (once)
+    g = gpu_alloc(g, 8192);
+    let weight_mem = g.current_mem;
+
+    // Process 4 batches
+    let mut batch = 0;
+    while batch < 4 {
+        // Allocate input buffer for this batch
+        g = gpu_alloc(g, 1024);
+
+        // Run inference kernel
+        g = gpu_launch_kernel(g, 2, 1, 256, 1);
+
+        // Free input buffer
+        g = gpu_free(g, 1024);
+
+        batch = batch + 1;
+    }
+
+    assert_eq(g.launch_count, 4);
+    assert_eq(g.alloc_count, 5); // 1 weight + 4 batch
+    assert_eq(g.free_count, 4);  // 4 batch frees
+    assert_eq(g.current_mem, weight_mem); // only weights remain
+    assert_eq(g.peak_mem, 8192 + 1024); // weights + 1 batch
+
+    // Free weights
+    g = gpu_free(g, 8192);
+    assert(!gpu_has_leaks(g));
+}
+
+fn test_interleaved_streams_events() {
+    let mut g = gpu_new();
+
+    // Interleave creation of streams and events
+    g = gpu_create_stream(g);  // stream count = 1
+    g = gpu_create_event(g);   // event count = 1
+    g = gpu_create_stream(g);  // stream count = 2
+    g = gpu_create_event(g);   // event count = 2
+    g = gpu_create_stream(g);  // stream count = 3
+
+    assert_eq(g.stream_count, 3);
+    assert_eq(g.event_count, 2);
+
+    // Record events and launch kernels
+    g = gpu_record_event(g);
+    g = gpu_launch_kernel(g, 2, 2, 32, 32);
+    g = gpu_record_event(g);
+    g = gpu_launch_kernel(g, 4, 4, 16, 16);
+
+    assert_eq(g.launch_count, 2);
+
+    // Teardown in reverse order
+    g = gpu_destroy_stream(g);
+    g = gpu_destroy_event(g);
+    g = gpu_destroy_stream(g);
+    g = gpu_destroy_event(g);
+    g = gpu_destroy_stream(g);
+
+    assert_eq(g.stream_count, 0);
+    assert_eq(g.event_count, 0);
+}
+
+fn main() -> Int {
+    test_device_management();
+    test_memory_alloc_free();
+    test_memory_peak_tracking();
+    test_memory_leak_detection();
+    test_stream_create_destroy();
+    test_stream_sync();
+    test_stream_tracker();
+    test_event_create_destroy();
+    test_event_record_query();
+    test_event_multiple();
+    test_kernel_launch();
+    test_kernel_launch_various_configs();
+    test_multiple_kernel_launches();
+    test_multi_stream_pattern();
+    test_gpu_reset();
+    test_full_training_step();
+    test_batch_inference();
+    test_interleaved_streams_events();
+    print("[OK] 038_gpu_intrinsic_ops");
+    0
+}

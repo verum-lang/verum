@@ -1,0 +1,39 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: vbc, differential, recursion
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential test: recursion must produce same results in interpreter and AOT
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int {
+    if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+@allow(unbounded_recursion)
+fn sum_to(n: Int) -> Int {
+    if n <= 0 { 0 } else { n + sum_to(n - 1) }
+}
+
+fn main() -> Int {
+    assert_eq(factorial(10), 3628800);
+    assert_eq(fib(15), 610);
+    assert_eq(gcd(252, 105), 21);
+    assert_eq(sum_to(100), 5050);
+
+    print("differential recursion ok");
+    0
+}

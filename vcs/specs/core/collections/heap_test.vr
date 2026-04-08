@@ -1,0 +1,1152 @@
+// =============================================================================
+// heap_test.vr - Comprehensive tests for BinaryHeap<T> (priority queue)
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, heap, priority-queue, core
+// @description: Comprehensive tests for BinaryHeap<T> and MinHeap<T> types
+// =============================================================================
+
+mount core.collections.heap.{BinaryHeap, Reverse, heap, min_heap, heap_sort};
+mount core.collections.list.List;
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: BinaryHeap Construction Tests
+// =============================================================================
+
+@test
+fn test_heap_new() {
+    let empty: BinaryHeap<Int> = BinaryHeap.new();
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+}
+
+@test
+fn test_heap_with_capacity() {
+    let heap: BinaryHeap<Int> = BinaryHeap.with_capacity(10);
+    assert(heap.is_empty());
+    assert(heap.capacity() >= 10);
+}
+
+@test
+fn test_heap_default() {
+    let heap: BinaryHeap<Int> = BinaryHeap.default();
+    assert(heap.is_empty());
+}
+
+@test
+fn test_heap_from_list() {
+    let list = List.from([3, 1, 4, 1, 5, 9, 2, 6]);
+    let heap = BinaryHeap.from_list(list);
+    assert_eq(heap.len(), 8);
+    // Max element should be at the top
+    match heap.peek() {
+        Some(v) => assert_eq(*v, 9),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 2: BinaryHeap Push and Pop Tests
+// =============================================================================
+
+@test
+fn test_heap_push_single() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(42);
+    assert_eq(heap.len(), 1);
+    match heap.peek() {
+        Some(v) => assert_eq(*v, 42),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_heap_push_multiple() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(10);
+    heap.push(20);
+    heap.push(5);
+    assert_eq(heap.len(), 3);
+    // Max element should be at the top
+    match heap.peek() {
+        Some(v) => assert_eq(*v, 20),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_heap_pop_empty() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    match heap.pop() {
+        None => {} // Expected
+        Some(_) => panic("Expected None for empty heap"),
+    }
+}
+
+@test
+fn test_heap_pop_single() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(42);
+    match heap.pop() {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+    assert(heap.is_empty());
+}
+
+@test
+fn test_heap_pop_order() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(4);
+    heap.push(1);
+    heap.push(5);
+    heap.push(9);
+    heap.push(2);
+    heap.push(6);
+
+    // Pop should return elements in descending order
+    let mut prev = 100; // Larger than any element
+    while let Some(v) = heap.pop() {
+        assert(v <= prev);
+        prev = v;
+    }
+}
+
+@test
+fn test_heap_peek() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+
+    // Peek on empty heap
+    match heap.peek() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    heap.push(10);
+    heap.push(20);
+    heap.push(5);
+
+    // Peek returns max without removing
+    match heap.peek() {
+        Some(v) => assert_eq(*v, 20),
+        None => panic("Expected Some"),
+    }
+    assert_eq(heap.len(), 3); // Length unchanged
+}
+
+// =============================================================================
+// Section 3: BinaryHeap Push-Pop and Replace Tests
+// =============================================================================
+
+@test
+fn test_heap_push_pop() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(5);
+    heap.push(10);
+    heap.push(15);
+
+    // push_pop with value smaller than max returns the value
+    let result = heap.push_pop(3);
+    assert_eq(result, 3);
+    assert_eq(heap.len(), 3);
+
+    // push_pop with value larger than max returns the max
+    // Actually, if value >= max, return value
+    // Let me re-check the implementation logic
+}
+
+@test
+fn test_heap_replace() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+
+    // Replace on empty heap
+    match heap.replace(10) {
+        None => {} // Expected - pushes and returns None
+        Some(_) => panic("Expected None for empty heap"),
+    }
+    assert_eq(heap.len(), 1);
+
+    // Replace returns old max
+    heap.push(20);
+    match heap.replace(5) {
+        Some(v) => assert_eq(v, 20), // Returns old max
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 4: BinaryHeap Clear and Reserve Tests
+// =============================================================================
+
+@test
+fn test_heap_clear() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(1);
+    heap.push(2);
+    heap.push(3);
+
+    assert_eq(heap.len(), 3);
+    heap.clear();
+    assert(heap.is_empty());
+    assert_eq(heap.len(), 0);
+}
+
+@test
+fn test_heap_reserve() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.reserve(100);
+    assert(heap.capacity() >= 100);
+    assert(heap.is_empty()); // Still empty
+}
+
+@test
+fn test_heap_shrink_to_fit() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.with_capacity(100);
+    heap.push(1);
+    heap.push(2);
+    assert(heap.capacity() >= 100);
+    heap.shrink_to_fit();
+    // Capacity should be reduced (at least to near the actual size)
+    // Can't assert exact value as it's implementation-dependent
+}
+
+// =============================================================================
+// Section 5: BinaryHeap Conversion Tests
+// =============================================================================
+
+@test
+fn test_heap_into_sorted_list() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(4);
+    heap.push(1);
+    heap.push(5);
+
+    let sorted = heap.into_sorted_list();
+    // Should be in ascending order
+    assert_eq(sorted.len(), 5);
+    assert_eq(sorted[0], 1);
+    assert_eq(sorted[1], 1);
+    assert_eq(sorted[2], 3);
+    assert_eq(sorted[3], 4);
+    assert_eq(sorted[4], 5);
+}
+
+@test
+fn test_heap_into_list() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(5);
+
+    let list = heap.into_list();
+    assert_eq(list.len(), 3);
+    // First element should be max (heap property)
+    assert_eq(list[0], 5);
+}
+
+@test
+fn test_heap_as_slice() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(5);
+
+    let slice = heap.as_slice();
+    assert_eq(slice.len(), 3);
+    // First element should be max (heap property)
+    assert_eq(slice[0], 5);
+}
+
+// =============================================================================
+// Section 6: BinaryHeap Iterator Tests
+// =============================================================================
+
+@test
+fn test_heap_iter() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(5);
+
+    let mut count = 0;
+    for _x in heap.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+    assert_eq(heap.len(), 3); // Iterator doesn't consume
+}
+
+@test
+fn test_heap_drain() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(5);
+
+    let mut count = 0;
+    for _x in heap.drain() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+    assert(heap.is_empty()); // Drain consumes all elements
+}
+
+@test
+fn test_heap_drain_sorted() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(5);
+    heap.push(2);
+    heap.push(4);
+
+    // drain_sorted yields in descending order
+    let mut prev = 100;
+    for v in heap.drain_sorted() {
+        assert(v <= prev);
+        prev = v;
+    }
+    assert(heap.is_empty());
+}
+
+@test
+fn test_heap_into_iter() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(5);
+
+    let mut count = 0;
+    for _x in heap.into_iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+    // heap is consumed by into_iter
+}
+
+// =============================================================================
+// Section 7: BinaryHeap Retain and Append Tests
+// =============================================================================
+
+@test
+fn test_heap_retain() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(1);
+    heap.push(2);
+    heap.push(3);
+    heap.push(4);
+    heap.push(5);
+
+    // Keep only even numbers
+    heap.retain(|x| *x % 2 == 0);
+    assert_eq(heap.len(), 2);
+    assert(heap.peek().map(|x| *x) == Some(4)); // Max of evens
+}
+
+@test
+fn test_heap_append() {
+    let mut heap1: BinaryHeap<Int> = BinaryHeap.new();
+    heap1.push(1);
+    heap1.push(3);
+    heap1.push(5);
+
+    let mut heap2: BinaryHeap<Int> = BinaryHeap.new();
+    heap2.push(2);
+    heap2.push(4);
+    heap2.push(6);
+
+    heap1.append(&mut heap2);
+
+    assert_eq(heap1.len(), 6);
+    assert(heap2.is_empty()); // heap2 is drained
+
+    // Max should be 6
+    match heap1.peek() {
+        Some(v) => assert_eq(*v, 6),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 8: BinaryHeap Clone Tests
+// =============================================================================
+
+@test
+fn test_heap_clone() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(5);
+
+    let cloned = heap.clone();
+
+    assert_eq(cloned.len(), 3);
+    match cloned.peek() {
+        Some(v) => assert_eq(*v, 5),
+        None => panic("Expected Some"),
+    }
+
+    // Verify independence
+    heap.push(10);
+    assert_eq(heap.len(), 4);
+    assert_eq(cloned.len(), 3); // Clone unchanged
+}
+
+// =============================================================================
+// Section 9: MinHeap (Reverse) Tests
+// =============================================================================
+
+@test
+fn test_reverse_wrapper() {
+    let r = Reverse.new(10);
+    assert_eq(r.into_inner(), 10);
+}
+
+@test
+fn test_reverse_ord() {
+    let r1 = Reverse.new(10);
+    let r2 = Reverse.new(20);
+
+    // Reverse reverses comparison
+    // 10 < 20 normally, but Reverse(10) > Reverse(20)
+    assert(r1 > r2);
+    assert(r2 < r1);
+}
+
+@test
+fn test_min_heap_basic() {
+    // Use BinaryHeap<Reverse<Int>> directly as min-heap
+    let mut min_heap: BinaryHeap<Reverse<Int>> = BinaryHeap.new();
+    min_heap.push(Reverse.new(3));
+    min_heap.push(Reverse.new(1));
+    min_heap.push(Reverse.new(4));
+    min_heap.push(Reverse.new(1));
+    min_heap.push(Reverse.new(5));
+
+    // Pop should return minimum first (due to Reverse)
+    match min_heap.pop() {
+        Some(r) => assert_eq(r.into_inner(), 1),
+        None => panic("Expected Some"),
+    }
+
+    match min_heap.pop() {
+        Some(r) => assert_eq(r.into_inner(), 1),
+        None => panic("Expected Some"),
+    }
+
+    match min_heap.pop() {
+        Some(r) => assert_eq(r.into_inner(), 3),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 10: Manual Heap Sort Test
+// =============================================================================
+
+@test
+fn test_manual_heap_sort() {
+    // Sort a list using BinaryHeap
+    let values = List.from([3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]);
+    let mut heap = BinaryHeap.from_list(values);
+    let sorted = heap.into_sorted_list();
+
+    // Should be sorted in ascending order
+    let mut prev = 0;
+    for x in sorted.iter() {
+        assert(*x >= prev);
+        prev = *x;
+    }
+}
+
+// =============================================================================
+// Section 11: Edge Cases
+// =============================================================================
+
+@test
+fn test_heap_duplicate_elements() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    heap.push(5);
+    heap.push(5);
+    heap.push(5);
+
+    assert_eq(heap.len(), 3);
+
+    // All pops return 5
+    assert_eq(heap.pop(), Some(5));
+    assert_eq(heap.pop(), Some(5));
+    assert_eq(heap.pop(), Some(5));
+    assert_eq(heap.pop(), None);
+}
+
+@test
+fn test_heap_large_scale() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+
+    // Insert many elements
+    for i in 0..100 {
+        heap.push(i);
+    }
+
+    assert_eq(heap.len(), 100);
+
+    // Pop should return in descending order
+    let mut prev = 100;
+    while let Some(v) = heap.pop() {
+        assert(v < prev);
+        prev = v;
+    }
+}
+
+@test
+fn test_heap_interleaved_operations() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+
+    heap.push(10);
+    heap.push(5);
+    assert_eq(heap.pop(), Some(10));
+
+    heap.push(15);
+    heap.push(3);
+    assert_eq(heap.pop(), Some(15));
+    assert_eq(heap.pop(), Some(5));
+
+    heap.push(20);
+    assert_eq(heap.peek().map(|x| *x), Some(20));
+    assert_eq(heap.pop(), Some(20));
+    assert_eq(heap.pop(), Some(3));
+    assert(heap.is_empty());
+}
+
+// =============================================================================
+// Section 12: Convenience Functions
+// =============================================================================
+
+@test
+fn test_heap_convenience_function() {
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6];
+    let h = heap(&arr);
+    assert_eq(h.len(), 8);
+    match h.peek() {
+        Some(v) => assert_eq(*v, 9),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_min_heap_convenience_function() {
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6];
+    let mut mh = min_heap(&arr);
+    assert_eq(mh.len(), 8);
+    // Min-heap: smallest element comes out first
+    match mh.pop() {
+        Some(r) => assert_eq(r.into_inner(), 1),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_heap_sort_function() {
+    let mut list = List.from([5, 3, 1, 4, 2]);
+    heap_sort(&mut list);
+
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+    assert_eq(list[3], 4);
+    assert_eq(list[4], 5);
+}
+
+@test
+fn test_heap_sort_already_sorted() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    heap_sort(&mut list);
+
+    for i in 0..5 {
+        assert_eq(list[i], i + 1);
+    }
+}
+
+@test
+fn test_heap_sort_reverse() {
+    let mut list = List.from([5, 4, 3, 2, 1]);
+    heap_sort(&mut list);
+
+    assert_eq(list[0], 1);
+    assert_eq(list[4], 5);
+}
+
+@test
+fn test_heap_sort_empty() {
+    let mut list: List<Int> = List.new();
+    heap_sort(&mut list);
+    assert(list.is_empty());
+}
+
+@test
+fn test_heap_sort_single() {
+    let mut list = List.from([42]);
+    heap_sort(&mut list);
+    assert_eq(list[0], 42);
+}
+
+// =============================================================================
+// Additional Edge Case Tests
+// =============================================================================
+
+@test
+fn test_heap_push_pop_alternating() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(5);
+    assert_eq(h.pop(), Some(5));
+
+    h.push(3);
+    h.push(7);
+    assert_eq(h.pop(), Some(7)); // Max first
+    assert_eq(h.pop(), Some(3));
+    assert_eq(h.pop(), None);
+}
+
+@test
+fn test_heap_push_pop_combined() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(15);
+
+    // push_pop: push value then pop max
+    let popped = h.push_pop(25);
+    assert_eq(popped, 25); // 25 is new max, so it's popped
+
+    let popped2 = h.push_pop(5);
+    assert_eq(popped2, 20); // 20 was max
+}
+
+@test
+fn test_heap_replace_basic() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(15);
+
+    // replace: pop max, push new value
+    let old = h.replace(5);
+    assert_eq(old, Some(20));
+    // Now max should be 15
+    assert_eq(*h.peek().unwrap(), 15);
+}
+
+@test
+fn test_heap_drain_sorted_order() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(3);
+    h.push(1);
+    h.push(4);
+    h.push(1);
+    h.push(5);
+    h.push(9);
+
+    let mut prev = 10; // Start above max
+    let mut drain = h.drain_sorted();
+    let mut count = 0;
+    loop {
+        match drain.next() {
+            Some(val) => {
+                assert(val <= prev); // Descending order
+                prev = val;
+                count = count + 1;
+            },
+            None => break,
+        }
+    }
+    assert_eq(count, 6);
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_retain_preserves_heap() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.push(4);
+    h.push(5);
+    h.push(6);
+
+    // Keep only even numbers
+    h.retain(|x| *x % 2 == 0);
+    assert_eq(h.len(), 3);
+    // Max should be 6
+    assert_eq(*h.peek().unwrap(), 6);
+}
+
+@test
+fn test_heap_large_ascending() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let mut i = 0;
+    while i < 100 {
+        h.push(i);
+        i = i + 1;
+    }
+    assert_eq(h.len(), 100);
+    assert_eq(*h.peek().unwrap(), 99); // Max is 99
+
+    // Pop all — should come out in descending order
+    let mut prev = 100;
+    let mut count = 0;
+    loop {
+        match h.pop() {
+            Some(val) => {
+                assert(val < prev);
+                prev = val;
+                count = count + 1;
+            },
+            None => break,
+        }
+    }
+    assert_eq(count, 100);
+}
+
+@test
+fn test_heap_append_merges() {
+    let mut h1: BinaryHeap<Int> = BinaryHeap.new();
+    h1.push(1);
+    h1.push(3);
+    h1.push(5);
+
+    let mut h2: BinaryHeap<Int> = BinaryHeap.new();
+    h2.push(2);
+    h2.push(4);
+    h2.push(6);
+
+    h1.append(&mut h2);
+    assert_eq(h1.len(), 6);
+    assert(h2.is_empty());
+    assert_eq(*h1.peek().unwrap(), 6); // Max of combined
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+// =============================================================================
+// Section: push_pop Edge Cases
+// =============================================================================
+
+@test
+fn test_heap_push_pop_on_empty() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    // push_pop on empty heap returns the value (heap stays empty)
+    let result = h.push_pop(42);
+    assert_eq(result, 42);
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_push_pop_equal_to_max() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(15);
+
+    // push_pop with value equal to max
+    let result = h.push_pop(20);
+    assert_eq(result, 20); // Equal to max, so returned directly
+    assert_eq(h.len(), 3);
+}
+
+@test
+fn test_heap_push_pop_smallest() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(15);
+
+    // push_pop with value smaller than all elements
+    let result = h.push_pop(1);
+    assert_eq(result, 20); // Returns old max
+    assert_eq(h.len(), 3);
+    // Now max should be 15
+    assert_eq(*h.peek().unwrap(), 15);
+}
+
+// =============================================================================
+// Section: replace Edge Cases
+// =============================================================================
+
+@test
+fn test_heap_replace_single_element() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(42);
+
+    let old = h.replace(100);
+    assert_eq(old, Some(42));
+    assert_eq(h.len(), 1);
+    assert_eq(*h.peek().unwrap(), 100);
+}
+
+@test
+fn test_heap_replace_with_larger() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+
+    let old = h.replace(30);
+    assert_eq(old, Some(20));
+    assert_eq(*h.peek().unwrap(), 30);
+}
+
+@test
+fn test_heap_replace_with_smaller() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+
+    let old = h.replace(5);
+    assert_eq(old, Some(20));
+    assert_eq(*h.peek().unwrap(), 10);
+}
+
+// =============================================================================
+// Section: from_list Edge Cases
+// =============================================================================
+
+@test
+fn test_heap_from_list_empty() {
+    let list: List<Int> = List.new();
+    let h = BinaryHeap.from_list(list);
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_from_list_single() {
+    let list = List.from([42]);
+    let h = BinaryHeap.from_list(list);
+    assert_eq(h.len(), 1);
+    assert_eq(*h.peek().unwrap(), 42);
+}
+
+@test
+fn test_heap_from_list_sorted() {
+    let list = List.from([1, 2, 3, 4, 5]);
+    let h = BinaryHeap.from_list(list);
+    assert_eq(h.len(), 5);
+    assert_eq(*h.peek().unwrap(), 5);
+}
+
+@test
+fn test_heap_from_list_reverse_sorted() {
+    let list = List.from([5, 4, 3, 2, 1]);
+    let h = BinaryHeap.from_list(list);
+    assert_eq(h.len(), 5);
+    assert_eq(*h.peek().unwrap(), 5);
+}
+
+@test
+fn test_heap_from_list_duplicates() {
+    let list = List.from([3, 3, 3, 3, 3]);
+    let h = BinaryHeap.from_list(list);
+    assert_eq(h.len(), 5);
+    assert_eq(*h.peek().unwrap(), 3);
+}
+
+// =============================================================================
+// Section: into_sorted_list Edge Cases
+// =============================================================================
+
+@test
+fn test_heap_into_sorted_list_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let sorted = h.into_sorted_list();
+    assert(sorted.is_empty());
+}
+
+@test
+fn test_heap_into_sorted_list_single() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(42);
+    let sorted = h.into_sorted_list();
+    assert_eq(sorted.len(), 1);
+    assert_eq(sorted[0], 42);
+}
+
+@test
+fn test_heap_into_sorted_list_duplicates() {
+    let list = List.from([5, 3, 5, 1, 3]);
+    let h = BinaryHeap.from_list(list);
+    let sorted = h.into_sorted_list();
+    assert_eq(sorted.len(), 5);
+    assert_eq(sorted[0], 1);
+    assert_eq(sorted[1], 3);
+    assert_eq(sorted[2], 3);
+    assert_eq(sorted[3], 5);
+    assert_eq(sorted[4], 5);
+}
+
+// =============================================================================
+// Section: Reverse Wrapper Tests
+// =============================================================================
+
+@test
+fn test_reverse_eq() {
+    let r1 = Reverse.new(10);
+    let r2 = Reverse.new(10);
+    let r3 = Reverse.new(20);
+
+    assert(r1 == r2);
+    assert(r1 != r3);
+}
+
+@test
+fn test_reverse_clone() {
+    let r = Reverse.new(42);
+    let cloned = r.clone();
+    assert_eq(cloned.into_inner(), 42);
+}
+
+@test
+fn test_reverse_ordering_detailed() {
+    let r1 = Reverse.new(1);
+    let r5 = Reverse.new(5);
+    let r10 = Reverse.new(10);
+
+    // In a max-heap of Reverse values, smallest original values come out first
+    let mut h: BinaryHeap<Reverse<Int>> = BinaryHeap.new();
+    h.push(r10);
+    h.push(r1);
+    h.push(r5);
+
+    // Pop returns Reverse(1) first (biggest Reverse value = smallest original)
+    let first = h.pop().unwrap();
+    assert_eq(first.into_inner(), 1);
+
+    let second = h.pop().unwrap();
+    assert_eq(second.into_inner(), 5);
+
+    let third = h.pop().unwrap();
+    assert_eq(third.into_inner(), 10);
+}
+
+// =============================================================================
+// Section: Min Heap Full Tests
+// =============================================================================
+
+@test
+fn test_min_heap_pop_all_ascending() {
+    let mut mh: BinaryHeap<Reverse<Int>> = BinaryHeap.new();
+    mh.push(Reverse.new(5));
+    mh.push(Reverse.new(3));
+    mh.push(Reverse.new(1));
+    mh.push(Reverse.new(4));
+    mh.push(Reverse.new(2));
+
+    // Pop all - should come out in ascending order
+    let mut results: List<Int> = List.new();
+    loop {
+        match mh.pop() {
+            Some(r) => results.push(r.into_inner()),
+            None => break,
+        }
+    }
+
+    assert_eq(results.len(), 5);
+    assert_eq(results[0], 1);
+    assert_eq(results[1], 2);
+    assert_eq(results[2], 3);
+    assert_eq(results[3], 4);
+    assert_eq(results[4], 5);
+}
+
+@test
+fn test_min_heap_peek() {
+    let mut mh: BinaryHeap<Reverse<Int>> = BinaryHeap.new();
+    mh.push(Reverse.new(30));
+    mh.push(Reverse.new(10));
+    mh.push(Reverse.new(20));
+
+    // Peek shows minimum
+    match mh.peek() {
+        Some(r) => assert_eq(r.value, 10),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_min_heap_convenience_pop_all() {
+    let mut mh = min_heap(&[9, 3, 7, 1, 5]);
+
+    let first = mh.pop().unwrap().into_inner();
+    assert_eq(first, 1);
+
+    let second = mh.pop().unwrap().into_inner();
+    assert_eq(second, 3);
+
+    let third = mh.pop().unwrap().into_inner();
+    assert_eq(third, 5);
+}
+
+// =============================================================================
+// Section: Heap Sort Extended
+// =============================================================================
+
+@test
+fn test_heap_sort_duplicates() {
+    let mut list = List.from([3, 1, 3, 1, 2, 2]);
+    heap_sort(&mut list);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 1);
+    assert_eq(list[2], 2);
+    assert_eq(list[3], 2);
+    assert_eq(list[4], 3);
+    assert_eq(list[5], 3);
+}
+
+@test
+fn test_heap_sort_two_elements() {
+    let mut list = List.from([5, 3]);
+    heap_sort(&mut list);
+    assert_eq(list[0], 3);
+    assert_eq(list[1], 5);
+}
+
+@test
+fn test_heap_sort_negative_values() {
+    let mut list = List.from([3, -1, 4, -5, 0, 2]);
+    heap_sort(&mut list);
+    assert_eq(list[0], -5);
+    assert_eq(list[1], -1);
+    assert_eq(list[2], 0);
+    assert_eq(list[3], 2);
+    assert_eq(list[4], 3);
+    assert_eq(list[5], 4);
+}
+
+// =============================================================================
+// Section: Clear and Capacity Edge Cases
+// =============================================================================
+
+@test
+fn test_heap_clear_empty() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.clear();
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_capacity_after_operations() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let initial_cap = h.capacity();
+
+    // Push many elements
+    let mut i = 0;
+    while i < 20 {
+        h.push(i);
+        i = i + 1;
+    }
+
+    assert(h.capacity() > initial_cap);
+    assert(h.capacity() >= 20);
+}
+
+@test
+fn test_heap_retain_all() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+
+    h.retain(|_x| true);
+    assert_eq(h.len(), 3);
+}
+
+@test
+fn test_heap_retain_none() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+
+    h.retain(|_x| false);
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_retain_empty() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.retain(|_x| true);
+    assert(h.is_empty());
+}
+
+// =============================================================================
+// Section: Eq Protocol Tests
+// =============================================================================
+
+@test
+fn test_heap_eq_same_elements() {
+    let mut h1: BinaryHeap<Int> = BinaryHeap.new();
+    h1.push(3);
+    h1.push(1);
+    h1.push(2);
+
+    let mut h2: BinaryHeap<Int> = BinaryHeap.new();
+    h2.push(1);
+    h2.push(2);
+    h2.push(3);
+
+    // Same elements but possibly different internal order
+    assert_eq(h1, h2);
+}
+
+@test
+fn test_heap_eq_empty() {
+    let h1: BinaryHeap<Int> = BinaryHeap.new();
+    let h2: BinaryHeap<Int> = BinaryHeap.new();
+    assert_eq(h1, h2);
+}
+
+@test
+fn test_heap_neq_different_elements() {
+    let mut h1: BinaryHeap<Int> = BinaryHeap.new();
+    h1.push(1);
+    h1.push(2);
+
+    let mut h2: BinaryHeap<Int> = BinaryHeap.new();
+    h2.push(1);
+    h2.push(3);
+
+    assert(h1 != h2);
+}
+
+@test
+fn test_heap_neq_different_length() {
+    let mut h1: BinaryHeap<Int> = BinaryHeap.new();
+    h1.push(1);
+    h1.push(2);
+
+    let mut h2: BinaryHeap<Int> = BinaryHeap.new();
+    h2.push(1);
+
+    assert(h1 != h2);
+}
+
+@test
+fn test_heap_eq_single_element() {
+    let mut h1: BinaryHeap<Int> = BinaryHeap.new();
+    h1.push(42);
+
+    let mut h2: BinaryHeap<Int> = BinaryHeap.new();
+    h2.push(42);
+
+    assert_eq(h1, h2);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

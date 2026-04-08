@@ -1,0 +1,112 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: di, scope, compatibility
+// @description: Tests valid scope compatibility rules for DI
+//
+// Scope compatibility rules:
+// - Singleton can depend on: Singleton only
+// - Request can depend on: Singleton, Request
+// - Transient can depend on: Singleton, Request, Transient
+
+// Singleton scope - lives for entire application lifetime
+@injectable(Scope.Singleton)
+type ConfigService is {
+    app_name: Text,
+    debug_mode: Bool,
+};
+
+implement ConfigService {
+    @inject
+    fn new() -> Self {
+        Self {
+            app_name: "MyApp",
+            debug_mode: false,
+        }
+    }
+}
+
+// Another singleton - can depend on singleton
+@injectable(Scope.Singleton)
+type LoggerService is {
+    config: ConfigService,  // OK: Singleton -> Singleton
+};
+
+implement LoggerService {
+    @inject
+    fn new(config: ConfigService) -> Self {
+        Self { config }
+    }
+
+    fn log(&self, message: Text) {
+        if self.config.debug_mode {
+            println("[DEBUG] " + message);
+        }
+    }
+}
+
+// Request scope - can depend on singleton and request
+@injectable(Scope.Request)
+type RequestContext is {
+    request_id: Text,
+    logger: LoggerService,  // OK: Request -> Singleton
+};
+
+implement RequestContext {
+    @inject
+    fn new(logger: LoggerService) -> Self {
+        Self {
+            request_id: "req-123",
+            logger,
+        }
+    }
+}
+
+// Another request scope depending on request scope
+@injectable(Scope.Request)
+type AuthContext is {
+    request: RequestContext,  // OK: Request -> Request
+    user_id: Maybe<Int>,
+};
+
+implement AuthContext {
+    @inject
+    fn new(request: RequestContext) -> Self {
+        Self {
+            request,
+            user_id: None,
+        }
+    }
+}
+
+// Transient scope - can depend on anything
+@injectable(Scope.Transient)
+type QueryBuilder is {
+    config: ConfigService,      // OK: Transient -> Singleton
+    auth: AuthContext,          // OK: Transient -> Request
+};
+
+implement QueryBuilder {
+    @inject
+    fn new(config: ConfigService, auth: AuthContext) -> Self {
+        Self { config, auth }
+    }
+}
+
+// Transient depending on transient
+@injectable(Scope.Transient)
+type QueryExecutor is {
+    builder: QueryBuilder,  // OK: Transient -> Transient
+};
+
+implement QueryExecutor {
+    @inject
+    fn new(builder: QueryBuilder) -> Self {
+        Self { builder }
+    }
+}
+
+fn main() {
+    // This file tests type checking only
+    // All scope dependencies above are valid
+}

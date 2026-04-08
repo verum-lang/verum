@@ -1,0 +1,345 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/syscall_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, syscall, linux, low-level
+// @description: Tests for raw syscall intrinsics that provide direct kernel access.
+//
+// Coverage:
+// - syscall0 through syscall6: Raw syscall invocation with 0-6 arguments
+//
+// Test Strategy:
+// - Platform detection (syscalls are platform-specific)
+// - Safe syscalls that don't modify system state
+// - Read-only syscalls for system information
+// - Error handling for invalid syscalls
+//
+// Note: These tests only run on Linux where syscall intrinsics are supported.
+// The syscalls tested are read-only and do not modify system state.
+//
+// SAFETY: Only tests safe, read-only syscalls:
+// - getpid (39): Get process ID
+// - getuid (102): Get user ID
+// - gettid (186): Get thread ID
+// - time (201): Get current time
+// - getppid (110): Get parent process ID
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.syscall_test;
+
+mount core.intrinsics.{
+    syscall0, syscall1, syscall2, syscall3,
+    syscall4, syscall5, syscall6,
+    target_os,
+};
+
+// Linux syscall numbers (x86_64)
+const SYS_GETPID: Int = 39;
+const SYS_GETUID: Int = 102;
+const SYS_GETTID: Int = 186;
+const SYS_GETPPID: Int = 110;
+const SYS_TIME: Int = 201;
+const SYS_UNAME: Int = 63;
+const SYS_GETCWD: Int = 79;
+
+// Target OS constants
+const OS_LINUX: UInt8 = 1;
+const OS_MACOS: UInt8 = 2;
+const OS_WINDOWS: UInt8 = 3;
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// syscall0 Tests
+// =============================================================================
+
+@test
+fn test_syscall0_getpid() {
+    // getpid() - Get process ID
+    let pid = syscall0(SYS_GETPID);
+
+    // PID should be positive
+    assert(pid > 0);
+
+    // Multiple calls should return same PID
+    let pid2 = syscall0(SYS_GETPID);
+    assert(pid == pid2);
+
+    // PID should be reasonable (< 4 million on Linux)
+    assert(pid < 4194304);
+
+    print(f"Process ID: {pid}");
+}
+
+@test
+fn test_syscall0_getuid() {
+    // getuid() - Get user ID
+    let uid = syscall0(SYS_GETUID);
+
+    // UID should be non-negative
+    assert(uid >= 0);
+
+    // Multiple calls should return same UID
+    let uid2 = syscall0(SYS_GETUID);
+    assert(uid == uid2);
+
+    // UID should be reasonable (< 65536 for most systems)
+    // Actually can be higher with user namespaces, but typically < 100000
+    assert(uid < 100000);
+
+    print(f"User ID: {uid}");
+}
+
+@test
+fn test_syscall0_gettid() {
+    // gettid() - Get thread ID
+    let tid = syscall0(SYS_GETTID);
+
+    // TID should be positive
+    assert(tid > 0);
+
+    // Multiple calls should return same TID (single-threaded)
+    let tid2 = syscall0(SYS_GETTID);
+    assert(tid == tid2);
+
+    // In single-threaded process, TID usually equals PID
+    let pid = syscall0(SYS_GETPID);
+    // Not always true in all contexts, but typically true
+    // assert(tid == pid);
+
+    print(f"Thread ID: {tid}");
+}
+
+@test
+fn test_syscall0_getppid() {
+    // getppid() - Get parent process ID
+    let ppid = syscall0(SYS_GETPPID);
+
+    // PPID should be positive (except for init which has PPID 0)
+    assert(ppid >= 0);
+
+    // PPID should be different from PID (unless we are init)
+    let pid = syscall0(SYS_GETPID);
+    if pid != 1 {
+        // Can be same if parent died and we were reparented to pid 1
+        // So we just verify it's a valid PID
+        assert(ppid > 0);
+    }
+
+    // Multiple calls should return same PPID (in normal circumstances)
+    let ppid2 = syscall0(SYS_GETPPID);
+    assert(ppid == ppid2);
+
+    print(f"Parent Process ID: {ppid}");
+}
+
+// =============================================================================
+// syscall1 Tests
+// =============================================================================
+
+@test
+fn test_syscall1_time() {
+    // time(NULL) - Get current time in seconds since epoch
+    let time = syscall1(SYS_TIME, 0);
+
+    // Time should be positive and reasonable
+    // After 2024-01-01: > 1704067200
+    // Before 2100-01-01: < 4102444800
+    assert(time > 1704067200);
+    assert(time < 4102444800);
+
+    // Multiple calls should return same or increasing time
+    let time2 = syscall1(SYS_TIME, 0);
+    assert(time2 >= time);
+
+    print(f"Current time: {time}");
+}
+
+// =============================================================================
+// Syscall Consistency Tests
+// =============================================================================
+
+@test
+fn test_syscall_consistency() {
+    // Verify syscalls are consistent across multiple calls
+
+    // PID should never change
+    let pids: [Int; 10] = [0; 10];
+    for i in 0..10 {
+        pids[i] = syscall0(SYS_GETPID);
+    }
+    for i in 1..10 {
+        assert(pids[i] == pids[0]);
+    }
+
+    // UID should never change (without setuid)
+    let uids: [Int; 10] = [0; 10];
+    for i in 0..10 {
+        uids[i] = syscall0(SYS_GETUID);
+    }
+    for i in 1..10 {
+        assert(uids[i] == uids[0]);
+    }
+
+    // TID should be same in single-threaded context
+    let tids: [Int; 10] = [0; 10];
+    for i in 0..10 {
+        tids[i] = syscall0(SYS_GETTID);
+    }
+    for i in 1..10 {
+        assert(tids[i] == tids[0]);
+    }
+
+    print("Syscall consistency tests passed");
+}
+
+// =============================================================================
+// Syscall Error Handling Tests
+// =============================================================================
+
+@test
+fn test_syscall_error_handling() {
+    // Invalid syscall number should return -ENOSYS (-38)
+    // Note: This might vary by kernel version
+
+    // Use a very high syscall number that's definitely invalid
+    let result = syscall0(99999);
+
+    // Result should be negative (error)
+    // -ENOSYS is -38 on Linux
+    assert(result < 0);
+
+    // The error should be -ENOSYS (-38) or another small negative number
+    assert(result >= -1000);  // Reasonable error range
+
+    print("Syscall error handling tests passed");
+}
+
+// =============================================================================
+// Syscall with Multiple Arguments Tests
+// =============================================================================
+
+@test
+fn test_syscall_with_args() {
+    // getcwd(buf, size) - requires buffer and size
+    // This is more complex and requires memory setup
+
+    // For now, we verify the intrinsics don't crash with multiple args
+    // by calling with invalid arguments (will return error)
+
+    // syscall2 with invalid args
+    let result = syscall2(SYS_GETCWD, 0, 0);
+    // Should return -EFAULT or similar
+    assert(result < 0);
+
+    // syscall3 with invalid args
+    // read(fd, buf, count) with invalid fd
+    let result = syscall3(0, 9999, 0, 0);  // SYS_READ = 0
+    // Should return error
+    assert(result < 0);
+
+    print("Multi-argument syscall tests passed");
+}
+
+// =============================================================================
+// syscall4, syscall5, syscall6 Tests
+// =============================================================================
+
+// Linux syscall numbers for testing 4+ argument syscalls
+const SYS_PTRACE: Int = 101;       // ptrace(request, pid, addr, data)
+const SYS_SELECT: Int = 23;        // select(nfds, readfds, writefds, exceptfds, timeout)
+const SYS_MMAP: Int = 9;           // mmap(addr, len, prot, flags, fd, offset)
+const SYS_FUTEX: Int = 202;        // futex(uaddr, op, val, timeout, uaddr2, val3)
+const SYS_PPOLL: Int = 271;        // ppoll(fds, nfds, timeout, sigmask, sigsetsize)
+
+@test
+fn test_syscall456_variants() {
+    // Test syscall4 - ptrace with invalid request
+    // ptrace(PTRACE_TRACEME, 0, 0, 0) would succeed but modify state
+    // Use invalid request to get error
+    let result4 = syscall4(SYS_PTRACE, -1, 0, 0, 0);
+    // Should return -EPERM or -EINVAL
+    assert(result4 < 0);
+
+    // Test syscall5 - ppoll with invalid args
+    let result5 = syscall5(SYS_PPOLL, 0, 0, 0, 0, 0);
+    // Should return -EFAULT or 0 (no fds to poll)
+    // When nfds is 0 and timeout is NULL, may return 0 or error
+    // Just verify it doesn't crash
+    assert(result5 <= 0);
+
+    // Test syscall6 - mmap with invalid args
+    // MAP_FAILED typically indicates error
+    // mmap(NULL, 0, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+    // With size 0, should return -EINVAL
+    let map_private: Int = 0x02;
+    let map_anonymous: Int = 0x20;
+    let result6 = syscall6(SYS_MMAP, 0, 0, 0, map_private | map_anonymous, -1, 0);
+    // Should return -EINVAL (size 0 is invalid)
+    assert(result6 < 0);
+
+    // Test syscall6 with futex - another 6-arg syscall
+    // FUTEX_WAIT on invalid address
+    let futex_wait: Int = 0;
+    let result6_futex = syscall6(SYS_FUTEX, 0, futex_wait, 0, 0, 0, 0);
+    // Should return -EFAULT (invalid address)
+    assert(result6_futex < 0);
+
+    print("syscall4/5/6 variant tests passed");
+}
+
+// =============================================================================
+// Syscall Performance Test
+// =============================================================================
+
+@test
+fn test_syscall_performance() {
+    mount core.intrinsics.{monotonic_nanos};
+
+    let iterations = 1000;
+    let start = monotonic_nanos();
+
+    for i in 0..iterations {
+        let _ = syscall0(SYS_GETPID);
+    }
+
+    let end = monotonic_nanos();
+    let elapsed = end - start;
+    let ns_per_call = elapsed / iterations as UInt64;
+
+    print(f"{iterations} syscalls took {elapsed}ns ({ns_per_call}ns/call)");
+
+    // getpid is cached by glibc, but raw syscall should be < 1μs
+    // In VBC interpreter, might be slower due to interpretation overhead
+    assert(ns_per_call < 100000);  // < 100μs per call
+}
+
+// =============================================================================
+// Platform-Specific Notes
+// =============================================================================
+
+// Linux x86_64 syscall numbers used:
+// 0  - read
+// 1  - write
+// 39 - getpid
+// 63 - uname
+// 79 - getcwd
+// 102 - getuid
+// 110 - getppid
+// 186 - gettid
+// 201 - time
+//
+// macOS and Windows use different syscall mechanisms:
+// - macOS: mach ports and BSD syscalls with different numbers
+// - Windows: NtXxx functions through ntdll.dll
+//
+// The syscall intrinsics only work on Linux. On other platforms,
+// use the appropriate FFI mechanisms.

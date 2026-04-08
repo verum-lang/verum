@@ -1,0 +1,183 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine, basic
+
+/// Basic copy and affine semantics test.
+/// In Verum, regular types have COPY semantics (can be used after assignment).
+/// Only types declared with `type affine` have move semantics.
+/// Spec: 04-memory-model.md#copy-vs-affine-semantics
+
+fn main() {
+    test_copy_semantics();
+    test_struct_copy();
+    test_collection_copy();
+    test_affine_transfer();
+    test_copy_in_expression();
+    test_copy_primitive_types();
+    test_conditional_copy();
+}
+
+/// Test Text has copy semantics (not move)
+fn test_copy_semantics() {
+    // Text has copy semantics - both bindings valid
+    let s1 = Text.from("hello world");
+    let s2 = s1;  // s1 is COPIED to s2 (Text is not affine)
+
+    // Both s1 and s2 are valid
+    print(s1);
+    print(s2);
+    assert(s1.len() == 11);
+    assert(s2.len() == 11);
+}
+
+/// Test struct copy semantics
+fn test_struct_copy() {
+    // Regular structs have copy semantics
+    let point1 = Point { x: 10, y: 20 };
+    let point2 = point1;  // point1 is COPIED to point2
+
+    // Both are valid
+    assert(point1.x == 10);
+    assert(point2.x == 10);
+    assert(point1.y == 20);
+    assert(point2.y == 20);
+
+    // Nested struct copy
+    let outer = Outer {
+        inner: Inner { value: 42 },
+        name: Text.from("nested"),
+    };
+    let outer2 = outer;  // Copy entire nested structure
+
+    // Both valid
+    assert(outer.inner.value == 42);
+    assert(outer2.inner.value == 42);
+    assert(outer.name == "nested");
+    assert(outer2.name == "nested");
+}
+
+/// Test collection copy semantics
+fn test_collection_copy() {
+    // List has copy semantics
+    let list1 = [1, 2, 3, 4, 5];
+    let list2 = list1;  // list1 is COPIED
+
+    // Both valid
+    assert(list1.len() == 5);
+    assert(list2.len() == 5);
+    assert(list1[0] == 1);
+    assert(list2[0] == 1);
+
+    // Map has copy semantics
+    let mut map1 = Map.new();
+    map1.insert("key1", 100);
+    map1.insert("key2", 200);
+    let map2 = map1;
+
+    // Both valid
+    assert(map1.get("key1") == Maybe.Some(100));
+    assert(map2.get("key1") == Maybe.Some(100));
+}
+
+/// Test affine types have move semantics
+fn test_affine_transfer() {
+    // Affine types move on assignment
+    let a = Resource { id: 1, name: Text.from("resource") };
+    let b = a;  // a is MOVED to b (Resource is affine)
+
+    // Only b is valid now - using a would panic
+    assert(b.id == 1);
+    assert(b.name == "resource");
+}
+
+/// Test copy within expressions
+fn test_copy_in_expression() {
+    let s1 = Text.from("hello");
+    let s2 = Text.from(" world");
+
+    // s1 and s2 are copied into the concat operation
+    let result = s1 + s2;
+
+    // All three are valid
+    assert(result == "hello world");
+    assert(s1 == "hello");
+    assert(s2 == " world");
+
+    // Copy in tuple construction
+    let t1 = Text.from("first");
+    let t2 = Text.from("second");
+    let tuple = (t1, t2);  // Both copied into tuple
+
+    // All valid
+    assert(tuple.0 == "first");
+    assert(tuple.1 == "second");
+    assert(t1 == "first");
+    assert(t2 == "second");
+}
+
+/// Test primitive Copy semantics
+fn test_copy_primitive_types() {
+    // All primitives have copy semantics
+    let x: Int = 42;
+    let y = x;
+
+    // Both x and y are valid
+    assert(x == 42);
+    assert(y == 42);
+
+    // Same for other primitives
+    let a: Float = 3.14;
+    let b = a;
+    assert(a == 3.14);
+    assert(b == 3.14);
+
+    let c: Bool = true;
+    let d = c;
+    assert(c == true);
+    assert(d == true);
+
+    // Fixed-size arrays have copy semantics
+    let arr1 = [1, 2, 3];
+    let arr2 = arr1;
+    assert(arr1[0] == 1);
+    assert(arr2[0] == 1);
+}
+
+/// Test copy semantics in conditionals
+fn test_conditional_copy() {
+    let condition = true;
+    let value = Text.from("conditional");
+
+    let result = if condition {
+        value  // Copy (Text is not affine)
+    } else {
+        Text.from("alternative")
+    };
+
+    // Both value and result are valid
+    assert(result == "conditional");
+    assert(value == "conditional");
+}
+
+// Type definitions
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Inner is {
+    value: Int,
+};
+
+type Outer is {
+    inner: Inner,
+    name: Text,
+};
+
+// Affine type - has move semantics
+type affine Resource is {
+    id: Int,
+    name: Text,
+};

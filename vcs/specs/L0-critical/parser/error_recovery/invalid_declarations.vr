@@ -1,0 +1,82 @@
+// @test: parse-recover
+// @tier: 0
+// @level: L0
+// @tags: parser, error-recovery, declarations, type-definitions
+// @description: Tests parser recovery from invalid declarations.
+//              Parser should skip malformed declarations and continue parsing.
+
+// Test 1: Missing type name
+type is { x: Int };
+
+// Valid declaration after error
+type ValidPoint is { x: Int, y: Int };
+
+// Test 2: Missing 'is' keyword
+type Broken { x: Int };
+
+type ValidRecord is { name: Text };
+
+// Test 3: Incomplete variant type
+type Incomplete is |;
+
+type ValidColor is Red | Green | Blue;
+
+// Test 4: Missing function body
+fn no_body() -> Int
+
+fn valid_fn() -> Int {
+    42
+}
+
+// Test 5: Invalid parameter syntax
+fn bad_params(x Int, y: Int) -> Int {
+    x + y
+}
+
+fn good_params(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Test 6: Missing return type arrow
+fn missing_arrow() Int {
+    42
+}
+
+fn correct_arrow() -> Int {
+    100
+}
+
+// Test 7: Invalid implement block
+implement {
+    fn orphaned_method() -> Int { 0 }
+}
+
+implement ValidPoint {
+    fn sum(self) -> Int {
+        self.x + self.y
+    }
+}
+
+// Test 8: Duplicate type keyword
+type type Doubled is { val: Int };
+
+type Correct is { val: Int };
+
+// Test 9: Invalid generic constraints
+fn bad_generics<T where>() {}
+
+fn good_generics<T>(x: T) -> T {
+    x
+}
+
+// Test 10: Nested type definition (not allowed)
+fn contains_type() {
+    type Inner is { x: Int };
+    let y = 10;
+    y
+}
+
+// Final valid code to confirm recovery
+fn final_valid() -> Int {
+    42
+}

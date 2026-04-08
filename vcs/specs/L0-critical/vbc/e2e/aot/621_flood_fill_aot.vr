@@ -1,0 +1,229 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, flood-fill, grid, algorithm
+// @timeout: 30000
+
+// Flood fill on a 4x4 grid using bit-packed representation
+// Each cell has a color (0-3), packed 2 bits per cell, 32 bits total in one Int
+
+// Get color at position (r,c) in 4x4 grid
+fn grid_get(grid: Int, r: Int, c: Int) -> Int {
+    let pos = (r * 4 + c) * 2;
+    (grid / pow2(pos)) % 4
+}
+
+// Set color at position (r,c)
+fn grid_set(grid: Int, r: Int, c: Int, color: Int) -> Int {
+    let pos = (r * 4 + c) * 2;
+    let mask = 3 * pow2(pos);
+    let cleared = grid - (grid_get(grid, r, c) * pow2(pos));
+    cleared + color * pow2(pos)
+}
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+// Check if position is valid
+fn valid(r: Int, c: Int) -> Int {
+    if r < 0 { 0 }
+    else if r >= 4 { 0 }
+    else if c < 0 { 0 }
+    else if c >= 4 { 0 }
+    else { 1 }
+}
+
+// Visited set as a 16-bit mask
+fn is_visited(visited: Int, r: Int, c: Int) -> Int {
+    let bit = r * 4 + c;
+    (visited / pow2(bit)) % 2
+}
+
+fn mark_visited(visited: Int, r: Int, c: Int) -> Int {
+    let bit = r * 4 + c;
+    if is_visited(visited, r, c) == 1 { visited }
+    else { visited + pow2(bit) }
+}
+
+// Iterative flood fill using a stack (encoded in an Int as bit positions)
+// Returns the new grid after filling all connected cells of old_color with new_color
+fn flood_fill(grid: Int, sr: Int, sc: Int, new_color: Int) -> Int {
+    let old_color = grid_get(grid, sr, sc);
+    if old_color == new_color { grid }
+    else {
+        let mut g = grid;
+        let mut visited = 0;
+        // Use a simple queue: encode up to 16 positions as bits
+        // Process cells iteratively - mark current, check 4 neighbors
+        // Since grid is small (4x4=16 cells), we can iterate until stable
+        g = grid_set(g, sr, sc, new_color);
+        visited = mark_visited(visited, sr, sc);
+        // Repeat passes until no new cells found
+        let mut changed = 1;
+        while changed == 1 {
+            changed = 0;
+            let mut r = 0;
+            while r < 4 {
+                let mut c = 0;
+                while c < 4 {
+                    if is_visited(visited, r, c) == 1 {
+                        // Check 4 neighbors
+                        if valid(r - 1, c) == 1 {
+                            if is_visited(visited, r - 1, c) == 0 {
+                                if grid_get(g, r - 1, c) == old_color {
+                                    g = grid_set(g, r - 1, c, new_color);
+                                    visited = mark_visited(visited, r - 1, c);
+                                    changed = 1;
+                                }
+                            }
+                        }
+                        if valid(r + 1, c) == 1 {
+                            if is_visited(visited, r + 1, c) == 0 {
+                                if grid_get(g, r + 1, c) == old_color {
+                                    g = grid_set(g, r + 1, c, new_color);
+                                    visited = mark_visited(visited, r + 1, c);
+                                    changed = 1;
+                                }
+                            }
+                        }
+                        if valid(r, c - 1) == 1 {
+                            if is_visited(visited, r, c - 1) == 0 {
+                                if grid_get(g, r, c - 1) == old_color {
+                                    g = grid_set(g, r, c - 1, new_color);
+                                    visited = mark_visited(visited, r, c - 1);
+                                    changed = 1;
+                                }
+                            }
+                        }
+                        if valid(r, c + 1) == 1 {
+                            if is_visited(visited, r, c + 1) == 0 {
+                                if grid_get(g, r, c + 1) == old_color {
+                                    g = grid_set(g, r, c + 1, new_color);
+                                    visited = mark_visited(visited, r, c + 1);
+                                    changed = 1;
+                                }
+                            }
+                        }
+                    }
+                    c = c + 1;
+                }
+                r = r + 1;
+            }
+        }
+        g
+    }
+}
+
+// Count cells with a given color
+fn count_color(grid: Int, color: Int) -> Int {
+    let mut count = 0;
+    let mut r = 0;
+    while r < 4 {
+        let mut c = 0;
+        while c < 4 {
+            if grid_get(grid, r, c) == color { count = count + 1; }
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    count
+}
+
+fn test_grid_access() -> Int {
+    let mut g = 0; // All zeros (color 0)
+    g = grid_set(g, 0, 0, 1);
+    assert_eq(grid_get(g, 0, 0), 1);
+    assert_eq(grid_get(g, 0, 1), 0);
+    g = grid_set(g, 1, 2, 3);
+    assert_eq(grid_get(g, 1, 2), 3);
+    g = grid_set(g, 3, 3, 2);
+    assert_eq(grid_get(g, 3, 3), 2);
+    // Overwrite
+    g = grid_set(g, 0, 0, 2);
+    assert_eq(grid_get(g, 0, 0), 2);
+    1
+}
+
+fn test_fill_single() -> Int {
+    // Grid all color 0, fill (0,0) with color 1
+    // Should fill entire grid since all connected
+    let g = 0;
+    let filled = flood_fill(g, 0, 0, 1);
+    assert_eq(count_color(filled, 1), 16);
+    assert_eq(count_color(filled, 0), 0);
+    1
+}
+
+fn test_fill_with_barrier() -> Int {
+    // Create a barrier of color 1 across row 2
+    // 0 0 0 0
+    // 0 0 0 0
+    // 1 1 1 1
+    // 0 0 0 0
+    let mut g = 0;
+    g = grid_set(g, 2, 0, 1);
+    g = grid_set(g, 2, 1, 1);
+    g = grid_set(g, 2, 2, 1);
+    g = grid_set(g, 2, 3, 1);
+    // Fill from (0,0) with color 2 — should only fill top 8 cells
+    let filled = flood_fill(g, 0, 0, 2);
+    assert_eq(count_color(filled, 2), 8); // top 2 rows
+    assert_eq(count_color(filled, 1), 4); // barrier
+    assert_eq(count_color(filled, 0), 4); // bottom row
+    1
+}
+
+fn test_fill_corner() -> Int {
+    // L-shaped region of color 1
+    // 1 1 0 0
+    // 1 0 0 0
+    // 0 0 0 0
+    // 0 0 0 0
+    let mut g = 0;
+    g = grid_set(g, 0, 0, 1);
+    g = grid_set(g, 0, 1, 1);
+    g = grid_set(g, 1, 0, 1);
+    // Fill from (0,0) with color 2
+    let filled = flood_fill(g, 0, 0, 2);
+    assert_eq(grid_get(filled, 0, 0), 2);
+    assert_eq(grid_get(filled, 0, 1), 2);
+    assert_eq(grid_get(filled, 1, 0), 2);
+    assert_eq(grid_get(filled, 1, 1), 0); // not connected
+    assert_eq(count_color(filled, 2), 3);
+    1
+}
+
+fn test_fill_same_color() -> Int {
+    // Filling with same color should be no-op
+    let g = 0;
+    let filled = flood_fill(g, 0, 0, 0);
+    assert_eq(filled, g);
+    1
+}
+
+fn test_count_color() -> Int {
+    let g = 0;
+    assert_eq(count_color(g, 0), 16);
+    assert_eq(count_color(g, 1), 0);
+    let mut g2 = 0;
+    g2 = grid_set(g2, 0, 0, 1);
+    g2 = grid_set(g2, 1, 1, 1);
+    g2 = grid_set(g2, 2, 2, 1);
+    assert_eq(count_color(g2, 1), 3);
+    assert_eq(count_color(g2, 0), 13);
+    1
+}
+
+fn main() -> Int {
+    test_grid_access();
+    test_fill_single();
+    test_fill_with_barrier();
+    test_fill_corner();
+    test_fill_same_color();
+    test_count_color();
+    print("[OK] 621_flood_fill_aot");
+    0
+}

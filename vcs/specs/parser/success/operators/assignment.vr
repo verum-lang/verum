@@ -1,0 +1,37 @@
+// @test: parse
+// @level: L0
+// @tags: parser, operators, assignment
+// @description: Test assignment operator parsing
+
+fn test_assignment_operators() {
+    let mut x = 0;
+
+    // Simple assignment
+    x = 42;
+
+    // Compound assignment
+    x += 1;
+    x -= 1;
+    x *= 2;
+    x /= 2;
+    x %= 3;
+
+    // Bitwise compound
+    x &= 0xFF;
+    x |= 0x0F;
+    x ^= 0xF0;
+    x <<= 2;
+    x >>= 1;
+
+    // Chained assignment (right-associative)
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    a = b = c = 42;
+
+    // In expressions
+    let result = {
+        x = 10;
+        x + 1
+    };
+}

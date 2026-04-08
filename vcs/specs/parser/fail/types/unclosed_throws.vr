@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, throws, error
+// @description: Test detection of unclosed throws clause
+// @expected-error: E018
+
+// throws clause with unclosed parenthesis
+type Callback is fn() throws(Error;

@@ -1,0 +1,344 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, factory, creation, zeros, ones, full, eye, arange, linspace
+// @timeout: 3000
+// @expect: pass
+// @skip-disabled: Tensor const generic syntax and named arguments now supported by parser
+//
+// Test: Tensor factory functions
+// Verifies all tensor construction methods including zeros, ones, full, eye,
+// arange, linspace, and *_like variants
+
+// =============================================================================
+// zeros
+// =============================================================================
+
+fn test_zeros_1d() {
+    let t = Tensor.zeros([5]);
+
+    assert_eq(t.shape(), [5]);
+    assert_eq(t.numel(), 5);
+    for i in 0..5 {
+        assert_eq(t[i], 0.0);
+    }
+}
+
+fn test_zeros_2d() {
+    let t = Tensor.zeros([3, 4]);
+
+    assert_eq(t.shape(), [3, 4]);
+    assert_eq(t.numel(), 12);
+    for i in 0..3 {
+        for j in 0..4 {
+            assert_eq(t[[i, j]], 0.0);
+        }
+    }
+}
+
+fn test_zeros_3d() {
+    let t = Tensor.zeros([2, 3, 4]);
+
+    assert_eq(t.shape(), [2, 3, 4]);
+    assert_eq(t.numel(), 24);
+}
+
+// =============================================================================
+// ones
+// =============================================================================
+
+fn test_ones_1d() {
+    let t = Tensor.ones([4]);
+
+    assert_eq(t.shape(), [4]);
+    for i in 0..4 {
+        assert_eq(t[i], 1.0);
+    }
+}
+
+fn test_ones_2d() {
+    let t = Tensor.ones([3, 3]);
+
+    assert_eq(t.shape(), [3, 3]);
+    for i in 0..3 {
+        for j in 0..3 {
+            assert_eq(t[[i, j]], 1.0);
+        }
+    }
+}
+
+fn test_ones_3d() {
+    let t = Tensor.ones([2, 4, 3]);
+
+    assert_eq(t.shape(), [2, 4, 3]);
+    assert_eq(t.numel(), 24);
+}
+
+// =============================================================================
+// full
+// =============================================================================
+
+fn test_full_1d() {
+    let t = Tensor.full([5], 3.14);
+
+    assert_eq(t.shape(), [5]);
+    for i in 0..5 {
+        assert(@abs(t[i] - 3.14) < 0.001);
+    }
+}
+
+fn test_full_2d() {
+    let t = Tensor.full([2, 3], 7.0);
+
+    assert_eq(t.shape(), [2, 3]);
+    assert_eq(t[[0, 0]], 7.0);
+    assert_eq(t[[1, 2]], 7.0);
+}
+
+fn test_full_negative() {
+    let t = Tensor.full([3], -2.5);
+
+    assert_eq(t.shape(), [3]);
+    for i in 0..3 {
+        assert(@abs(t[i] - (-2.5)) < 0.001);
+    }
+}
+
+// =============================================================================
+// eye (identity matrix)
+// =============================================================================
+
+fn test_eye_square() {
+    let t = Tensor.eye(3);
+
+    assert_eq(t.shape(), [3, 3]);
+    for i in 0..3 {
+        for j in 0..3 {
+            let expected = if i == j { 1.0 } else { 0.0 };
+            assert_eq(t[[i, j]], expected);
+        }
+    }
+}
+
+fn test_eye_rectangular() {
+    let t = Tensor.eye(3, 4);
+
+    assert_eq(t.shape(), [3, 4]);
+    assert_eq(t[[0, 0]], 1.0);
+    assert_eq(t[[1, 1]], 1.0);
+    assert_eq(t[[2, 2]], 1.0);
+    assert_eq(t[[0, 3]], 0.0);
+    assert_eq(t[[2, 3]], 0.0);
+}
+
+fn test_eye_tall() {
+    let t = Tensor.eye(4, 2);
+
+    assert_eq(t.shape(), [4, 2]);
+    assert_eq(t[[0, 0]], 1.0);
+    assert_eq(t[[1, 1]], 1.0);
+    assert_eq(t[[2, 0]], 0.0);
+    assert_eq(t[[3, 1]], 0.0);
+}
+
+fn test_identity() {
+    let t = Tensor.identity(4);
+
+    assert_eq(t.shape(), [4, 4]);
+    for i in 0..4 {
+        assert_eq(t[[i, i]], 1.0);
+    }
+}
+
+// =============================================================================
+// arange and linspace
+// =============================================================================
+
+fn test_arange_basic() {
+    let t = Tensor.arange(0.0, 5.0, 1.0);
+
+    assert_eq(t.shape(), [5]);
+    assert_eq(t[0], 0.0);
+    assert_eq(t[1], 1.0);
+    assert_eq(t[4], 4.0);
+}
+
+fn test_arange_step() {
+    let t = Tensor.arange(0.0, 10.0, 2.0);
+
+    assert_eq(t.shape(), [5]);
+    assert_eq(t[0], 0.0);
+    assert_eq(t[1], 2.0);
+    assert_eq(t[4], 8.0);
+}
+
+fn test_arange_float_step() {
+    let t = Tensor.arange(0.0, 1.0, 0.25);
+
+    assert_eq(t.shape(), [4]);
+    assert(@abs(t[0] - 0.0) < 0.001);
+    assert(@abs(t[1] - 0.25) < 0.001);
+    assert(@abs(t[3] - 0.75) < 0.001);
+}
+
+fn test_linspace() {
+    let t = Tensor.linspace(0.0, 1.0, 5);
+
+    assert_eq(t.shape(), [5]);
+    assert_eq(t.numel(), 5);
+    assert_eq(t[0], 0.0);
+    assert_eq(t[4], 1.0);
+    assert_eq(t[2], 0.5);
+}
+
+fn test_linspace_single() {
+    let t = Tensor.linspace(0.0, 1.0, 1);
+
+    assert_eq(t.shape(), [1]);
+    assert_eq(t[0], 0.0);
+}
+
+fn test_linspace_negative() {
+    let t = Tensor.linspace(-1.0, 1.0, 5);
+
+    assert_eq(t[0], -1.0);
+    assert_eq(t[2], 0.0);
+    assert_eq(t[4], 1.0);
+}
+
+// =============================================================================
+// *_like factories
+// =============================================================================
+
+fn test_zeros_like() {
+    let a = Tensor.ones([3, 4]);
+    let b = Tensor.zeros_like(a);
+
+    assert_eq(b.shape(), [3, 4]);
+    for i in 0..3 {
+        for j in 0..4 {
+            assert_eq(b[[i, j]], 0.0);
+        }
+    }
+}
+
+fn test_ones_like() {
+    let a = Tensor.zeros([2, 5]);
+    let b = Tensor.ones_like(a);
+
+    assert_eq(b.shape(), [2, 5]);
+    for i in 0..2 {
+        for j in 0..5 {
+            assert_eq(b[[i, j]], 1.0);
+        }
+    }
+}
+
+fn test_full_like() {
+    let a = Tensor.zeros([4, 4]);
+    let b = Tensor.full_like(a, 9.0);
+
+    assert_eq(b.shape(), [4, 4]);
+    assert_eq(b[[0, 0]], 9.0);
+    assert_eq(b[[3, 3]], 9.0);
+}
+
+// =============================================================================
+// Other factories
+// =============================================================================
+
+fn test_empty() {
+    let t = Tensor.empty([2, 3]);
+
+    assert_eq(t.shape(), [2, 3]);
+    assert_eq(t.numel(), 6);
+}
+
+fn test_scalar_tensor() {
+    let t = Tensor.scalar(42.0);
+
+    assert_eq(t.ndim(), 0);
+    assert_eq(t.numel(), 1);
+}
+
+fn test_from_slice() {
+    let data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let t = Tensor.from_slice(&data, [2, 3]);
+
+    assert_eq(t.shape(), [2, 3]);
+    assert_eq(t[[0, 0]], 1.0);
+    assert_eq(t[[1, 2]], 6.0);
+}
+
+fn test_rand_shape() {
+    let t = Tensor.rand([3, 3], uniform: (0.0, 1.0));
+
+    assert_eq(t.shape(), [3, 3]);
+    for i in 0..3 {
+        for j in 0..3 {
+            assert(t[[i, j]] >= 0.0);
+            assert(t[[i, j]] < 1.0);
+        }
+    }
+}
+
+fn test_diag() {
+    let diag_values = Tensor.from([1.0, 2.0, 3.0]);
+    let t = Tensor.diag(diag_values);
+
+    assert_eq(t.shape(), [3, 3]);
+    assert_eq(t[[0, 0]], 1.0);
+    assert_eq(t[[1, 1]], 2.0);
+    assert_eq(t[[2, 2]], 3.0);
+    assert_eq(t[[0, 1]], 0.0);
+    assert_eq(t[[1, 0]], 0.0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // zeros
+    test_zeros_1d();
+    test_zeros_2d();
+    test_zeros_3d();
+
+    // ones
+    test_ones_1d();
+    test_ones_2d();
+    test_ones_3d();
+
+    // full
+    test_full_1d();
+    test_full_2d();
+    test_full_negative();
+
+    // eye / identity
+    test_eye_square();
+    test_eye_rectangular();
+    test_eye_tall();
+    test_identity();
+
+    // arange and linspace
+    test_arange_basic();
+    test_arange_step();
+    test_arange_float_step();
+    test_linspace();
+    test_linspace_single();
+    test_linspace_negative();
+
+    // *_like factories
+    test_zeros_like();
+    test_ones_like();
+    test_full_like();
+
+    // Other factories
+    test_empty();
+    test_scalar_tensor();
+    test_from_slice();
+    test_rand_shape();
+    test_diag();
+
+    print("006_factory: PASSED");
+}

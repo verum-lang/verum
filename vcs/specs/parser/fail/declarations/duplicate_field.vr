@@ -1,0 +1,18 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, record, duplicate, error
+// @description: Test duplicate field name detection
+// @expected-error: E049
+
+type Point is {
+    x: Int,
+    y: Int,
+    x: Float,
+};
+
+type User is {
+    name: Text,
+    age: Int,
+    name: Text,
+    email: Text,
+};

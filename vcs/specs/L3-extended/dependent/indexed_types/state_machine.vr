@@ -1,0 +1,140 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, state-machine, typestate
+
+/// Typed state machines using indexed types
+///
+/// State machines where valid transitions are encoded in the type system.
+
+/// Door state machine
+type DoorState is | Opened | Closed | Locked;
+
+/// Door handle indexed by state
+type Door<S: meta Int> is { handle: Int };
+
+/// State constants
+const OPENED: Int = 0;
+const CLOSED: Int = 1;
+const LOCKED: Int = 2;
+
+/// State transitions
+fn open_door(d: Door<1>) -> Door<0> {
+    Door { handle: d.handle }
+}
+
+fn close_door(d: Door<0>) -> Door<1> {
+    Door { handle: d.handle }
+}
+
+fn lock_door(d: Door<1>) -> Door<2> {
+    Door { handle: d.handle }
+}
+
+fn unlock_door(d: Door<2>) -> Door<1> {
+    Door { handle: d.handle }
+}
+
+/// Connection state types
+type ConnDisconnected is ();
+type ConnConnected is ();
+type ConnAuthenticated is ();
+
+/// Connection with phantom state
+type Conn<S> is {
+    fd: Int,
+    state: S,
+};
+
+fn connect(host: Text, port: Int) -> Conn<ConnConnected> {
+    Conn { fd: 42, state: () }
+}
+
+fn authenticate(c: Conn<ConnConnected>, user: Text, pass: Text) -> Maybe<Conn<ConnAuthenticated>> {
+    if user == "admin" && pass == "secret" {
+        Some(Conn { fd: c.fd, state: () })
+    } else {
+        None
+    }
+}
+
+fn send_data(c: &Conn<ConnAuthenticated>, data: List<Int>) -> Bool {
+    true
+}
+
+fn disconnect<S>(c: Conn<S>) {
+}
+
+/// File state types
+type FOpen is ();
+type FClosed is ();
+
+type FileHandle<S> is {
+    path: Text,
+    state: S,
+};
+
+fn file_open(path: Text) -> Maybe<FileHandle<FOpen>> {
+    Some(FileHandle { path, state: () })
+}
+
+fn file_read(f: &FileHandle<FOpen>) -> List<Int> {
+    []
+}
+
+fn file_write(f: &mut FileHandle<FOpen>, data: List<Int>) -> Bool {
+    true
+}
+
+fn file_close(f: FileHandle<FOpen>) -> FileHandle<FClosed> {
+    FileHandle { path: f.path, state: () }
+}
+
+/// Iterator state types
+type IterActive is { marker: Bool };
+type IterDone is { marker: Bool };
+
+type StatefulIter<T, S> is {
+    data: List<T>,
+    pos: Int,
+    state: S,
+};
+
+fn iter_new<T>(data: List<T>) -> StatefulIter<T, IterActive> {
+    StatefulIter { data, pos: 0, state: IterActive { marker: true } }
+}
+
+fn iter_next<T>(iter: StatefulIter<T, IterActive>) -> (T, StatefulIter<T, IterActive>) {
+    let val = iter.data[iter.pos];
+    (val, StatefulIter { data: iter.data, pos: iter.pos + 1, state: IterActive { marker: true } })
+}
+
+fn main() {
+    // Door state machine
+    let door: Door<1> = Door { handle: 1 };  // Start closed
+    let opened = open_door(door);
+    let closed = close_door(opened);
+    let locked = lock_door(closed);
+    let unlocked = unlock_door(locked);
+
+    // Connection state machine
+    let conn = connect("localhost", 8080);
+    let auth = authenticate(conn, "admin", "secret");
+    match auth {
+        Some(c) => {
+            let _ = send_data(&c, [1, 2, 3]);
+            disconnect(c);
+        }
+        None => {}
+    }
+
+    // File state machine
+    let file = file_open("test.txt");
+    match file {
+        Some(f) => {
+            let data = file_read(&f);
+            let closed = file_close(f);
+        }
+        None => {}
+    }
+}

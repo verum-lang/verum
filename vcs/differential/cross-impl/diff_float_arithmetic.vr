@@ -1,0 +1,65 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, arithmetic, float
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Float arithmetic: add, sub, mul, div, comparison, int-float conversion
+
+fn abs_float(x: Float) -> Float {
+    if x < 0.0 { -x } else { x }
+}
+
+fn main() -> Int {
+    // Basic float ops
+    let a = 3.14;
+    let b = 2.0;
+    let sum = a + b;
+    let diff = a - b;
+    let prod = a * b;
+    let quot = a / b;
+
+    // Print deterministic values (avoid precision-sensitive printing)
+    assert_eq(1.0 + 2.0, 3.0);
+    assert_eq(10.0 - 3.0, 7.0);
+    assert_eq(2.5 * 4.0, 10.0);
+    assert_eq(9.0 / 3.0, 3.0);
+
+    // Negative floats
+    assert_eq(-1.5 + 1.5, 0.0);
+    assert_eq(-2.0 * -3.0, 6.0);
+
+    // Float comparison
+    let eps = 0.0001;
+    let x = 0.1 + 0.2;
+    // 0.1 + 0.2 is not exactly 0.3 in IEEE 754
+    let close = abs_float(x - 0.3) < eps;
+    assert_eq(close, true);
+
+    // Int to float
+    let n = 42;
+    let f = n as Float;
+    assert_eq(f, 42.0);
+
+    // Float to int (truncation)
+    let g = 3.99;
+    let m = g as Int;
+    assert_eq(m, 3);
+
+    let h = -3.99;
+    let k = h as Int;
+    assert_eq(k, -3);
+
+    // Power via multiplication
+    let mut p = 1.0;
+    let mut i = 0;
+    while i < 10 {
+        p = p * 2.0;
+        i = i + 1;
+    }
+    assert_eq(p, 1024.0);
+
+    print("diff_float_arithmetic: ok");
+    0
+}

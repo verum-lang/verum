@@ -1,0 +1,276 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, cellular-automaton
+// @timeout: 50000
+// @expected-exit: 0
+// @description: 1D elementary cellular automaton (Rule 110 and Rule 30) on 16-cell array
+
+// ============================================================================
+// Cells16: Fixed-size array of 16 cells (0 or 1)
+// ============================================================================
+
+type Cells16 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int,
+    c12: Int, c13: Int, c14: Int, c15: Int
+};
+
+fn cells_zero() -> Cells16 {
+    Cells16 {
+        c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0
+    }
+}
+
+fn cells_get(c: Cells16, i: Int) -> Int {
+    if i == 0 { c.c0 } else if i == 1 { c.c1 } else if i == 2 { c.c2 }
+    else if i == 3 { c.c3 } else if i == 4 { c.c4 } else if i == 5 { c.c5 }
+    else if i == 6 { c.c6 } else if i == 7 { c.c7 } else if i == 8 { c.c8 }
+    else if i == 9 { c.c9 } else if i == 10 { c.c10 } else if i == 11 { c.c11 }
+    else if i == 12 { c.c12 } else if i == 13 { c.c13 } else if i == 14 { c.c14 }
+    else { c.c15 }
+}
+
+fn cells_set(c: Cells16, i: Int, val: Int) -> Cells16 {
+    Cells16 {
+        c0: if i == 0 { val } else { c.c0 },
+        c1: if i == 1 { val } else { c.c1 },
+        c2: if i == 2 { val } else { c.c2 },
+        c3: if i == 3 { val } else { c.c3 },
+        c4: if i == 4 { val } else { c.c4 },
+        c5: if i == 5 { val } else { c.c5 },
+        c6: if i == 6 { val } else { c.c6 },
+        c7: if i == 7 { val } else { c.c7 },
+        c8: if i == 8 { val } else { c.c8 },
+        c9: if i == 9 { val } else { c.c9 },
+        c10: if i == 10 { val } else { c.c10 },
+        c11: if i == 11 { val } else { c.c11 },
+        c12: if i == 12 { val } else { c.c12 },
+        c13: if i == 13 { val } else { c.c13 },
+        c14: if i == 14 { val } else { c.c14 },
+        c15: if i == 15 { val } else { c.c15 }
+    }
+}
+
+// ============================================================================
+// Rule application: lookup the 3-bit neighborhood in the rule number
+// neighborhood = left*4 + center*2 + right (0..7)
+// Rule bit at that position determines the new cell value
+// ============================================================================
+
+fn rule_bit(rule: Int, index: Int) -> Int {
+    // Extract bit 'index' from 'rule'
+    // rule / (2^index) mod 2
+    let mut divisor = 1;
+    let mut k = 0;
+    while k < index {
+        divisor = divisor * 2;
+        k = k + 1;
+    }
+    let shifted = rule / divisor;
+    shifted - (shifted / 2) * 2
+}
+
+fn step_automaton(cells: Cells16, rule: Int, size: Int) -> Cells16 {
+    let mut next = cells_zero();
+    let mut i = 0;
+    while i < size {
+        // Boundary: wrap around
+        let left_idx = if i == 0 { size - 1 } else { i - 1 };
+        let right_idx = if i == size - 1 { 0 } else { i + 1 };
+
+        let left_val = cells_get(cells, left_idx);
+        let center_val = cells_get(cells, i);
+        let right_val = cells_get(cells, right_idx);
+
+        let neighborhood = left_val * 4 + center_val * 2 + right_val;
+        let new_val = rule_bit(rule, neighborhood);
+        next = cells_set(next, i, new_val);
+
+        i = i + 1;
+    }
+    next
+}
+
+fn count_ones(cells: Cells16, size: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < size {
+        count = count + cells_get(cells, i);
+        i = i + 1;
+    }
+    count
+}
+
+fn cells_equal(a: Cells16, b: Cells16, size: Int) -> Int {
+    let mut i = 0;
+    let mut eq = 1;
+    while i < size {
+        if cells_get(a, i) != cells_get(b, i) {
+            eq = 0;
+        }
+        i = i + 1;
+    }
+    eq
+}
+
+// ============================================================================
+// Test 1: Rule 110 single seed
+// Initial: ...0001000... (cell 7 is 1 in 16-cell array)
+// Rule 110 = 01101110 in binary
+// ============================================================================
+
+@test
+fn test_rule110_single_seed() {
+    let size = 16;
+    let mut cells = cells_zero();
+    cells = cells_set(cells, 7, 1);  // single 1 in the middle
+
+    // Generation 0: only cell 7 is 1
+    assert_eq(count_ones(cells, size), 1);
+
+    // Step 1 with Rule 110
+    let gen1 = step_automaton(cells, 110, size);
+    // Rule 110: neighborhood 010 (index 2) -> bit 1 of 110
+    // 110 = 0b01101110
+    // bit 0: 0, bit 1: 1, bit 2: 1, bit 3: 1, bit 4: 0, bit 5: 1, bit 6: 1, bit 7: 0
+    // Cell 6: neighborhood (0,0,1) = 1 -> rule_bit(110,1) = 1
+    // Cell 7: neighborhood (0,1,0) = 2 -> rule_bit(110,2) = 1
+    // Cell 8: neighborhood (1,0,0) = 4 -> rule_bit(110,4) = 0
+    // Hmm, but also cell positions further away see (0,0,0)=0 -> rule_bit(110,0)=0
+    assert_eq(cells_get(gen1, 6), 1);
+    assert_eq(cells_get(gen1, 7), 1);
+
+    // More than 1 cell should be active after step
+    let ones = count_ones(gen1, size);
+    assert(ones > 1);
+
+    print("  test_rule110_single_seed: ok");
+}
+
+// ============================================================================
+// Test 2: Rule 110 multi-generation
+// ============================================================================
+
+@test
+fn test_rule110_multi_gen() {
+    let size = 16;
+    let mut cells = cells_zero();
+    cells = cells_set(cells, 7, 1);
+
+    // Run 5 generations
+    let g1 = step_automaton(cells, 110, size);
+    let g2 = step_automaton(g1, 110, size);
+    let g3 = step_automaton(g2, 110, size);
+    let g4 = step_automaton(g3, 110, size);
+    let g5 = step_automaton(g4, 110, size);
+
+    // Rule 110 is known to be Turing complete and produces complex patterns
+    // The population should grow over generations from a single seed
+    let pop0 = count_ones(cells, size);
+    let pop5 = count_ones(g5, size);
+    assert(pop5 > pop0);
+
+    // Verify determinism: running the same steps again should give same result
+    let g1b = step_automaton(cells, 110, size);
+    assert_eq(cells_equal(g1, g1b, size), 1);
+
+    print("  test_rule110_multi_gen: ok");
+}
+
+// ============================================================================
+// Test 3: Rule 30 — known for chaos from a single seed
+// Rule 30 = 0b00011110
+// ============================================================================
+
+@test
+fn test_rule30_basic() {
+    let size = 16;
+    let mut cells = cells_zero();
+    cells = cells_set(cells, 7, 1);
+
+    let gen1 = step_automaton(cells, 30, size);
+    // Rule 30 = 0b00011110
+    // bit 0: 0, bit 1: 1, bit 2: 1, bit 3: 1, bit 4: 1, bit 5: 0, bit 6: 0, bit 7: 0
+    // Cell 6: neighborhood (0,0,1) = 1 -> bit 1 = 1
+    // Cell 7: neighborhood (0,1,0) = 2 -> bit 2 = 1
+    // Cell 8: neighborhood (1,0,0) = 4 -> bit 4 = 1
+    assert_eq(cells_get(gen1, 6), 1);
+    assert_eq(cells_get(gen1, 7), 1);
+    assert_eq(cells_get(gen1, 8), 1);
+
+    // The rest should be 0 (except possibly wrapping effects)
+    // cells 0-5 have neighborhood (0,0,0)=0 -> bit 0 = 0
+    assert_eq(cells_get(gen1, 0), 0);
+    assert_eq(cells_get(gen1, 5), 0);
+
+    print("  test_rule30_basic: ok");
+}
+
+// ============================================================================
+// Test 4: Rule 0 (all dead) and Rule 255 (all alive)
+// ============================================================================
+
+@test
+fn test_trivial_rules() {
+    let size = 16;
+    let mut cells = cells_zero();
+    cells = cells_set(cells, 4, 1);
+    cells = cells_set(cells, 7, 1);
+    cells = cells_set(cells, 10, 1);
+
+    // Rule 0: all neighborhoods map to 0
+    let dead = step_automaton(cells, 0, size);
+    assert_eq(count_ones(dead, size), 0);
+
+    // Rule 255: all neighborhoods map to 1
+    let alive = step_automaton(cells, 255, size);
+    assert_eq(count_ones(alive, size), size);
+
+    print("  test_trivial_rules: ok");
+}
+
+// ============================================================================
+// Test 5: Rule bit extraction
+// ============================================================================
+
+@test
+fn test_rule_bit_extraction() {
+    // Rule 110 = 0b01101110
+    assert_eq(rule_bit(110, 0), 0);
+    assert_eq(rule_bit(110, 1), 1);
+    assert_eq(rule_bit(110, 2), 1);
+    assert_eq(rule_bit(110, 3), 1);
+    assert_eq(rule_bit(110, 4), 0);
+    assert_eq(rule_bit(110, 5), 1);
+    assert_eq(rule_bit(110, 6), 1);
+    assert_eq(rule_bit(110, 7), 0);
+
+    // Rule 30 = 0b00011110
+    assert_eq(rule_bit(30, 0), 0);
+    assert_eq(rule_bit(30, 1), 1);
+    assert_eq(rule_bit(30, 2), 1);
+    assert_eq(rule_bit(30, 3), 1);
+    assert_eq(rule_bit(30, 4), 1);
+    assert_eq(rule_bit(30, 5), 0);
+    assert_eq(rule_bit(30, 6), 0);
+    assert_eq(rule_bit(30, 7), 0);
+
+    print("  test_rule_bit_extraction: ok");
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_rule110_single_seed();
+    test_rule110_multi_gen();
+    test_rule30_basic();
+    test_trivial_rules();
+    test_rule_bit_extraction();
+    print("[OK] 120_cellular_automaton");
+    0
+}

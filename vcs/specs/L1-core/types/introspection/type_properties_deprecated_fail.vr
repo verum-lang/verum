@@ -1,0 +1,32 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, introspection, type-properties, deprecated, negative-test
+// @timeout: 5000
+// @expected-error: E100
+
+/// Type Properties - Deprecated Intrinsics Rejection Test
+///
+/// This test verifies that the deprecated intrinsic functions
+/// size_of<T>(), align_of<T>(), and stride_of<T>() are no longer
+/// accepted by the compiler (they are unrecognized identifiers).
+///
+/// Migration: Use T.size, T.alignment, T.stride instead.
+///
+/// Spec: grammar/verum.ebnf Section 2.17 - Type Properties
+
+// ============================================================================
+// DEPRECATED: These patterns should produce compile errors
+// ============================================================================
+
+fn test_deprecated_intrinsics() {
+    // DEPRECATED: size_of()/align_of()/stride_of() - use T.size/T.alignment/T.stride instead
+    // These functions don't exist in Verum - they should produce E100 (unbound variable)
+    let s = size_of_type(42);  // ERROR: unbound variable
+    let a = align_of_type(42);  // ERROR: unbound variable
+    let t = stride_of_type(42);  // ERROR: unbound variable
+}
+
+fn main() {
+    test_deprecated_intrinsics();  // This should fail to compile
+}

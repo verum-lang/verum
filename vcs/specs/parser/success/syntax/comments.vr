@@ -1,0 +1,29 @@
+// @test: parse-pass
+// @tier: 0
+// @category: syntax
+
+// Single-line comment
+
+/// Doc comment for function
+fn documented() -> Int {
+    42 // inline comment
+}
+
+/* Block comment */
+
+/*
+ * Multi-line
+ * block comment
+ */
+
+/**
+ * Doc block comment
+ */
+type Documented is { value: Int };
+
+/* Nested /* block */ comments */
+
+fn with_inline_blocks() {
+    let x = /* comment in expression */ 42;
+    let y = 1 + /* between operators */ 2;
+}

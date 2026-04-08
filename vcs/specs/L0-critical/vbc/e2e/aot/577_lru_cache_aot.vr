@@ -1,0 +1,209 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, lru-cache, cache, data-structure
+// @timeout: 30000
+
+// LRU (Least Recently Used) cache simulation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn neg_ones() -> Arr8 { Arr8 { v0: 0-1, v1: 0-1, v2: 0-1, v3: 0-1, v4: 0-1, v5: 0-1, v6: 0-1, v7: 0-1 } }
+
+// LRU Cache: keys and values stored in parallel arrays
+// Most recently used at front (index 0), least recently used at back
+// capacity = max items, size = current items
+// keys[i] = -1 means empty
+type LRUCache is { keys: Arr8, vals: Arr8, capacity: Int, size: Int };
+
+fn lru_new(cap: Int) -> LRUCache {
+    LRUCache { keys: neg_ones(), vals: zeros(), capacity: cap, size: 0 }
+}
+
+// Find index of key, or -1
+fn lru_find(cache: LRUCache, key: Int) -> Int {
+    let mut i = 0;
+    while i < cache.size {
+        if get8(cache.keys, i) == key { return i; }
+        i = i + 1;
+    }
+    0 - 1
+}
+
+// Move item at index to front (most recently used)
+fn lru_move_to_front_k(keys: Arr8, idx: Int) -> Arr8 {
+    let save = get8(keys, idx);
+    let mut k = keys;
+    let mut i = idx;
+    while i > 0 {
+        k = set8(k, i, get8(k, i - 1));
+        i = i - 1;
+    }
+    set8(k, 0, save)
+}
+
+fn lru_move_to_front_v(vals: Arr8, idx: Int) -> Arr8 {
+    let save = get8(vals, idx);
+    let mut v = vals;
+    let mut i = idx;
+    while i > 0 {
+        v = set8(v, i, get8(v, i - 1));
+        i = i - 1;
+    }
+    set8(v, 0, save)
+}
+
+// Get value for key, returns -1 if not found
+fn lru_get_val(cache: LRUCache, key: Int) -> Int {
+    let idx = lru_find(cache, key);
+    if idx < 0 { 0 - 1 }
+    else { get8(cache.vals, idx) }
+}
+
+// Get + promote to front (returns new cache and value)
+fn lru_get_keys(cache: LRUCache, key: Int) -> Arr8 {
+    let idx = lru_find(cache, key);
+    if idx < 0 { cache.keys }
+    else { lru_move_to_front_k(cache.keys, idx) }
+}
+
+fn lru_get_vals(cache: LRUCache, key: Int) -> Arr8 {
+    let idx = lru_find(cache, key);
+    if idx < 0 { cache.vals }
+    else { lru_move_to_front_v(cache.vals, idx) }
+}
+
+fn lru_get_size(cache: LRUCache, key: Int) -> Int {
+    cache.size
+}
+
+// Put key-value into cache
+fn lru_put_keys(cache: LRUCache, key: Int, val: Int) -> Arr8 {
+    let idx = lru_find(cache, key);
+    if idx >= 0 {
+        // Update existing: move to front, update value
+        let mut k = lru_move_to_front_k(cache.keys, idx);
+        k
+    } else {
+        // Insert new at front, shift others right
+        let mut k = cache.keys;
+        let limit = if cache.size < cache.capacity { cache.size } else { cache.capacity - 1 };
+        let mut i = limit;
+        while i > 0 {
+            k = set8(k, i, get8(k, i - 1));
+            i = i - 1;
+        }
+        set8(k, 0, key)
+    }
+}
+
+fn lru_put_vals(cache: LRUCache, key: Int, val: Int) -> Arr8 {
+    let idx = lru_find(cache, key);
+    if idx >= 0 {
+        let mut v = lru_move_to_front_v(cache.vals, idx);
+        set8(v, 0, val) // update value
+    } else {
+        let mut v = cache.vals;
+        let limit = if cache.size < cache.capacity { cache.size } else { cache.capacity - 1 };
+        let mut i = limit;
+        while i > 0 {
+            v = set8(v, i, get8(v, i - 1));
+            i = i - 1;
+        }
+        set8(v, 0, val)
+    }
+}
+
+fn lru_put_size(cache: LRUCache, key: Int) -> Int {
+    let idx = lru_find(cache, key);
+    if idx >= 0 { cache.size }
+    else if cache.size < cache.capacity { cache.size + 1 }
+    else { cache.size }
+}
+
+fn test_basic() -> Int {
+    let mut c = lru_new(3);
+    // Put (1, 100)
+    let k1 = lru_put_keys(c, 1, 100);
+    let v1 = lru_put_vals(c, 1, 100);
+    let s1 = lru_put_size(c, 1);
+    c = LRUCache { keys: k1, vals: v1, capacity: 3, size: s1 };
+    assert_eq(c.size, 1);
+    assert_eq(lru_get_val(c, 1), 100);
+
+    // Put (2, 200)
+    let k2 = lru_put_keys(c, 2, 200);
+    let v2 = lru_put_vals(c, 2, 200);
+    let s2 = lru_put_size(c, 2);
+    c = LRUCache { keys: k2, vals: v2, capacity: 3, size: s2 };
+    assert_eq(c.size, 2);
+    assert_eq(lru_get_val(c, 2), 200);
+    assert_eq(lru_get_val(c, 1), 100);
+    1
+}
+
+fn test_eviction() -> Int {
+    let mut c = lru_new(2); // capacity 2
+    // Fill cache
+    let k1 = lru_put_keys(c, 1, 10);
+    let v1 = lru_put_vals(c, 1, 10);
+    c = LRUCache { keys: k1, vals: v1, capacity: 2, size: 1 };
+
+    let k2 = lru_put_keys(c, 2, 20);
+    let v2 = lru_put_vals(c, 2, 20);
+    c = LRUCache { keys: k2, vals: v2, capacity: 2, size: 2 };
+
+    // Add 3rd item → evicts LRU (key 1)
+    let k3 = lru_put_keys(c, 3, 30);
+    let v3 = lru_put_vals(c, 3, 30);
+    c = LRUCache { keys: k3, vals: v3, capacity: 2, size: 2 };
+
+    assert_eq(lru_get_val(c, 3), 30);
+    assert_eq(lru_get_val(c, 2), 20);
+    // Key 1 should be evicted
+    assert_eq(lru_find(c, 1), 0 - 1);
+    1
+}
+
+fn test_update() -> Int {
+    let mut c = lru_new(3);
+    let k1 = lru_put_keys(c, 1, 10);
+    let v1 = lru_put_vals(c, 1, 10);
+    c = LRUCache { keys: k1, vals: v1, capacity: 3, size: 1 };
+
+    // Update value for key 1
+    let k2 = lru_put_keys(c, 1, 99);
+    let v2 = lru_put_vals(c, 1, 99);
+    let s2 = lru_put_size(c, 1);
+    c = LRUCache { keys: k2, vals: v2, capacity: 3, size: s2 };
+    assert_eq(c.size, 1); // no new entry
+    assert_eq(lru_get_val(c, 1), 99); // updated value
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_eviction();
+    test_update();
+    print("[OK] 577_lru_cache_aot");
+    0
+}

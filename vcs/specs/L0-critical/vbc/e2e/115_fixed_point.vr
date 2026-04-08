@@ -1,0 +1,215 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, fixed-point, arithmetic
+// @timeout: 50000
+// @expected-exit: 0
+// @description: FixedPt-point arithmetic using scaled integers (scale factor 1000)
+
+// ============================================================================
+// FixedPt-point representation: value * 1000
+// So 1.5 is represented as 1500, 2.3 as 2300, etc.
+// ============================================================================
+
+type FixedPt is { val: Int };
+
+fn fixed_from_int(n: Int) -> FixedPt {
+    FixedPt { val: n * 1000 }
+}
+
+fn fixed_from_parts(whole: Int, frac: Int) -> FixedPt {
+    // frac is 0-999 representing the decimal part
+    FixedPt { val: whole * 1000 + frac }
+}
+
+fn fixed_to_int(f: FixedPt) -> Int {
+    f.val / 1000
+}
+
+fn fixed_add(a: FixedPt, b: FixedPt) -> FixedPt {
+    FixedPt { val: a.val + b.val }
+}
+
+fn fixed_sub(a: FixedPt, b: FixedPt) -> FixedPt {
+    FixedPt { val: a.val - b.val }
+}
+
+fn fixed_mul(a: FixedPt, b: FixedPt) -> FixedPt {
+    // (a * 1000) * (b * 1000) / 1000 = a * b * 1000
+    FixedPt { val: a.val * b.val / 1000 }
+}
+
+fn fixed_div(a: FixedPt, b: FixedPt) -> FixedPt {
+    // (a * 1000) * 1000 / (b * 1000) = a * 1000 / b
+    FixedPt { val: a.val * 1000 / b.val }
+}
+
+fn fixed_eq(a: FixedPt, b: FixedPt) -> Int {
+    if a.val == b.val { 1 } else { 0 }
+}
+
+fn fixed_negate(a: FixedPt) -> FixedPt {
+    FixedPt { val: 0 - a.val }
+}
+
+fn fixed_abs(a: FixedPt) -> FixedPt {
+    if a.val < 0 { FixedPt { val: 0 - a.val } } else { a }
+}
+
+// ============================================================================
+// Test 1: Addition and subtraction
+// ============================================================================
+
+@test
+fn test_fixed_add_sub() {
+    // 1.5 + 2.3 = 3.8
+    let a = fixed_from_parts(1, 500);   // 1500
+    let b = fixed_from_parts(2, 300);   // 2300
+    let sum = fixed_add(a, b);
+    assert_eq(sum.val, 3800);           // 3.8
+
+    // 5.0 - 2.7 = 2.3
+    let c = fixed_from_int(5);          // 5000
+    let d = fixed_from_parts(2, 700);   // 2700
+    let diff = fixed_sub(c, d);
+    assert_eq(diff.val, 2300);          // 2.3
+
+    // 0.1 + 0.2 = 0.3 (no floating-point weirdness!)
+    let e = fixed_from_parts(0, 100);   // 100
+    let f = fixed_from_parts(0, 200);   // 200
+    let sum2 = fixed_add(e, f);
+    assert_eq(sum2.val, 300);           // 0.3
+
+    print("  test_fixed_add_sub: ok");
+}
+
+// ============================================================================
+// Test 2: Multiplication
+// ============================================================================
+
+@test
+fn test_fixed_mul() {
+    // 2.5 * 3.0 = 7.5
+    let a = fixed_from_parts(2, 500);   // 2500
+    let b = fixed_from_int(3);          // 3000
+    let prod = fixed_mul(a, b);
+    assert_eq(prod.val, 7500);          // 7.5
+
+    // 1.5 * 1.5 = 2.25
+    let c = fixed_from_parts(1, 500);   // 1500
+    let sq = fixed_mul(c, c);
+    assert_eq(sq.val, 2250);            // 2.25
+
+    // 0.5 * 0.5 = 0.25
+    let half = fixed_from_parts(0, 500);  // 500
+    let quarter = fixed_mul(half, half);
+    assert_eq(quarter.val, 250);          // 0.25
+
+    // 10.0 * 0.1 = 1.0
+    let ten = fixed_from_int(10);           // 10000
+    let tenth = fixed_from_parts(0, 100);   // 100
+    let one = fixed_mul(ten, tenth);
+    assert_eq(one.val, 1000);               // 1.0
+
+    print("  test_fixed_mul: ok");
+}
+
+// ============================================================================
+// Test 3: Division
+// ============================================================================
+
+@test
+fn test_fixed_div() {
+    // 7.5 / 2.5 = 3.0
+    let a = fixed_from_parts(7, 500);   // 7500
+    let b = fixed_from_parts(2, 500);   // 2500
+    let quot = fixed_div(a, b);
+    assert_eq(quot.val, 3000);          // 3.0
+
+    // 10.0 / 3.0 = 3.333 (truncated)
+    let c = fixed_from_int(10);         // 10000
+    let d = fixed_from_int(3);          // 3000
+    let r = fixed_div(c, d);
+    assert_eq(r.val, 3333);             // 3.333
+
+    // 1.0 / 4.0 = 0.25
+    let one = fixed_from_int(1);        // 1000
+    let four = fixed_from_int(4);       // 4000
+    let q2 = fixed_div(one, four);
+    assert_eq(q2.val, 250);             // 0.25
+
+    print("  test_fixed_div: ok");
+}
+
+// ============================================================================
+// Test 4: Conversion and identity
+// ============================================================================
+
+@test
+fn test_fixed_convert_identity() {
+    // Convert int to fixed and back
+    let x = fixed_from_int(42);
+    assert_eq(fixed_to_int(x), 42);
+
+    // a + 0 = a
+    let a = fixed_from_parts(3, 141);   // 3.141
+    let zero = fixed_from_int(0);
+    let sum = fixed_add(a, zero);
+    assert_eq(fixed_eq(sum, a), 1);
+
+    // a * 1 = a
+    let one = fixed_from_int(1);
+    let prod = fixed_mul(a, one);
+    assert_eq(fixed_eq(prod, a), 1);
+
+    // a - a = 0
+    let diff = fixed_sub(a, a);
+    assert_eq(diff.val, 0);
+
+    print("  test_fixed_convert_identity: ok");
+}
+
+// ============================================================================
+// Test 5: Negative numbers and absolute value
+// ============================================================================
+
+@test
+fn test_fixed_negative() {
+    let pos = fixed_from_parts(2, 500);    // 2.5 => 2500
+    let neg = fixed_negate(pos);
+    assert_eq(neg.val, -2500);
+
+    // abs of negative = positive
+    let a = fixed_abs(neg);
+    assert_eq(a.val, 2500);
+
+    // abs of positive = positive
+    let b = fixed_abs(pos);
+    assert_eq(b.val, 2500);
+
+    // negative + positive same magnitude = 0
+    let sum = fixed_add(pos, neg);
+    assert_eq(sum.val, 0);
+
+    // -1.5 * -2.0 = 3.0
+    let n1 = fixed_negate(fixed_from_parts(1, 500));  // -1500
+    let n2 = fixed_negate(fixed_from_int(2));          // -2000
+    let prod = fixed_mul(n1, n2);
+    assert_eq(prod.val, 3000);
+
+    print("  test_fixed_negative: ok");
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    test_fixed_add_sub();
+    test_fixed_mul();
+    test_fixed_div();
+    test_fixed_convert_identity();
+    test_fixed_negative();
+    print("[OK] 115_fixed_point");
+    0
+}

@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, error
+// @description: Test missing 'is' keyword in type definition detection
+// @expected-error: E044
+
+type Point { x: Int, y: Int };
+
+type Option<T> Some(T) | None;
+
+type Display protocol { fn show(&self) -> Text; };

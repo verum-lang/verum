@@ -1,0 +1,234 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @level: L0
+// @tags: parser, patterns, type-test, is, runtime-type
+// @description: Comprehensive tests for type test patterns
+
+// ============================================================================
+// Basic Type Test Patterns
+// Grammar: type_test_pattern = identifier , 'is' , type_expr
+// ============================================================================
+
+fn test_basic_type_test() {
+    let value: unknown = get_value();
+
+    match value {
+        x is Int => print(f"Integer: {x}"),
+        x is Text => print(f"Text: {x}"),
+        x is Bool => print(f"Boolean: {x}"),
+        _ => print("Unknown type"),
+    }
+}
+
+fn test_primitive_types() {
+    let data: unknown = read_data();
+
+    match data {
+        n is Int => handle_int(n),
+        f is Float => handle_float(f),
+        s is Text => handle_text(s),
+        b is Bool => handle_bool(b),
+        c is Char => handle_char(c),
+        _ => handle_other(data),
+    }
+}
+
+// ============================================================================
+// Type Test with Generic Types
+// ============================================================================
+
+fn test_generic_type_test() {
+    let value: unknown = parse_json(input);
+
+    match value {
+        list is List<Int> => process_int_list(list),
+        list is List<Text> => process_text_list(list),
+        map is Map<Text, Int> => process_map(map),
+        _ => error("Unexpected type"),
+    }
+}
+
+fn test_nested_generics() {
+    match data {
+        x is Maybe<List<Int>> => handle_maybe_list(x),
+        x is Result<Data, Error> => handle_result(x),
+        x is List<List<Int>> => handle_matrix(x),
+    }
+}
+
+// ============================================================================
+// Type Test with Custom Types
+// ============================================================================
+
+type User is { name: Text, age: Int };
+type Admin is { name: Text, role: Text };
+
+fn test_custom_type_test() {
+    let entity: unknown = get_entity();
+
+    match entity {
+        user is User => {
+            print(f"User: {user.name}, age {user.age}");
+        },
+        admin is Admin => {
+            print(f"Admin: {admin.name}, role {admin.role}");
+        },
+        _ => print("Unknown entity"),
+    }
+}
+
+// ============================================================================
+// Type Test in Conditions
+// ============================================================================
+
+fn test_type_test_in_if() {
+    let value: unknown = input;
+
+    if value is Int {
+        print("It's an integer");
+    }
+
+    if value is Text && (value as Text).len() > 0 {
+        print("It's a non-empty string");
+    }
+}
+
+fn test_combined_conditions() {
+    if data is List<Int> && data.len() > 0 {
+        let first = data[0];
+        process(first);
+    }
+}
+
+// ============================================================================
+// Type Test with Let Binding
+// ============================================================================
+
+fn test_let_with_type_test() {
+    if let x is Int = maybe_int {
+        print(f"Got integer: {x}");
+    }
+
+    if let list is List<Text> = parsed {
+        for item in list {
+            print(item);
+        }
+    }
+}
+
+// ============================================================================
+// Type Test in While Loops
+// ============================================================================
+
+fn test_while_type_test() {
+    while let data is SomeData = iterator.next() {
+        process(data);
+    }
+}
+
+// ============================================================================
+// Negated Type Test (in expressions, not patterns)
+// Note: 'is not' is valid in expressions but not in match patterns
+// ============================================================================
+
+fn test_negated_type_test() {
+    // Use negation in expression context, not pattern context
+    if value is not Int {
+        print("Not an integer");
+    } else {
+        print(f"Integer: {value}");
+    }
+}
+
+fn test_is_not_pattern() {
+    if value is not Error {
+        proceed(value);
+    }
+}
+
+// ============================================================================
+// Type Test with Guards
+// ============================================================================
+
+fn test_type_test_with_guard() {
+    match data {
+        x is Int if x > 0 => print("Positive integer"),
+        x is Int if x < 0 => print("Negative integer"),
+        x is Int => print("Zero"),
+        x is Float if x.is_nan() => print("NaN"),
+        x is Float => print(f"Float: {x}"),
+        _ => print("Other"),
+    }
+}
+
+// ============================================================================
+// Type Test with Or Patterns
+// ============================================================================
+
+fn test_type_test_or() {
+    match value {
+        x is Int | x is Float => {
+            print("Numeric type");
+        },
+        x is Text | x is Char => {
+            print("Character type");
+        },
+        _ => print("Other"),
+    }
+}
+
+// ============================================================================
+// Type Test with Combined Conditions
+// Note: For multiple type constraints, use guards
+// ============================================================================
+
+fn test_type_test_and() {
+    match value {
+        x is Serializable if x is Cloneable => {
+            serialize_and_clone(x);
+        },
+        x is Serializable => {
+            just_serialize(x);
+        },
+        _ => error("Not serializable"),
+    }
+}
+
+// ============================================================================
+// Practical Examples
+// ============================================================================
+
+fn handle_json_value(json: JsonValue) -> Text {
+    match json {
+        v is JsonNull => "null",
+        v is JsonBool => if v { "true" } else { "false" },
+        v is JsonNumber => v.to_text(),
+        v is JsonString => f"\"{v}\"",
+        v is JsonArray => {
+            let items = v.iter().map(handle_json_value).join(", ");
+            f"[{items}]"
+        },
+        v is JsonObject => {
+            let pairs = v.iter().map(|(k, val)| f"\"{k}\": {handle_json_value(val)}").join(", ");
+            f"{{{pairs}}}"
+        },
+    }
+}
+
+fn deserialize<T>(data: unknown) -> Result<T, Error> {
+    match data {
+        value is T => Ok(value),
+        _ => Err(Error.TypeMismatch {
+            expected: T.name,
+            actual: typeof(data).name,
+        }),
+    }
+}
+
+fn safe_cast<T>(value: unknown) -> Maybe<T> {
+    match value {
+        v is T => Some(v),
+        _ => None,
+    }
+}

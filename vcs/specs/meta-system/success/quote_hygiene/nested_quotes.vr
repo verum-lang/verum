@@ -1,0 +1,309 @@
+// @test: meta-pass
+// @level: L2
+// @tier: 0
+// @tags: meta, quote, hygiene, nested, stages
+// @description: Tests nested quotes with proper hygiene at each level
+
+// =============================================================================
+// BASIC NESTED QUOTES
+// =============================================================================
+
+// Two levels of nesting
+meta fn nested_two_levels() -> TokenStream {
+    let outer_var = 10;
+
+    quote {
+        let outer = $outer_var;
+
+        let inner_quote = quote {
+            // This is inside the inner quote
+            // Should not see outer_var directly
+            let inner = 20;
+            inner
+        };
+    }
+}
+
+// Three levels of nesting
+meta fn nested_three_levels() -> TokenStream {
+    let l1 = 1;
+
+    quote {
+        let level1 = $l1;
+
+        let q2 = quote {
+            let level2 = 2;
+
+            let q3 = quote {
+                let level3 = 3;
+                level3
+            };
+
+            level2
+        };
+
+        level1
+    }
+}
+
+// =============================================================================
+// NESTED QUOTE HYGIENE ISOLATION
+// =============================================================================
+
+// Each nesting level has its own hygiene scope
+meta fn nested_hygiene_isolation() -> Bool {
+    let x = "outer";
+
+    let outer_quote = quote {
+        let x = "middle";  // Different binding from outer x
+
+        let inner_quote = quote {
+            let x = "inner";  // Different binding from middle x
+            x
+        };
+
+        x  // Refers to middle x
+    };
+
+    // outer x unchanged
+    x == "outer"
+}
+
+// Variables introduced at each level don't leak
+meta fn nested_no_leak() -> TokenStream {
+    quote {
+        let a = 1;  // Level 1
+
+        let nested = quote {
+            let b = 2;  // Level 2
+            a + b  // 'a' would need to be captured or lifted
+        };
+
+        a  // Only 'a' is visible here, not 'b'
+    }
+}
+
+// =============================================================================
+// NESTED QUOTES WITH SPLICING
+// =============================================================================
+
+// Splice into nested quote
+meta fn nested_splice() -> TokenStream {
+    let value = 42;
+
+    quote {
+        let outer = $value;  // Spliced at level 1
+
+        let inner = quote {
+            // Need lift to access outer level value
+            let copied = lift(outer);
+            copied
+        };
+    }
+}
+
+// Multi-level splicing
+meta fn multi_level_splice() -> TokenStream {
+    let a = 10;
+    let b = 20;
+
+    quote {
+        let sum = ${a + b};  // 30
+
+        let inner = quote {
+            // Reference the computed sum via lift
+            let doubled = lift(sum) * 2;
+            doubled
+        };
+    }
+}
+
+// =============================================================================
+// NESTED QUOTES WITH REPETITION
+// =============================================================================
+
+// Repetition in outer quote
+meta fn nested_repeat_outer() -> TokenStream {
+    let items = [ident("a"), ident("b"), ident("c")];
+
+    quote {
+        $[for item in items {
+            let $item = 0;
+
+            let inner = quote {
+                // Each iteration has its own inner quote
+                process_item()
+            };
+        }]
+    }
+}
+
+// Repetition in inner quote
+meta fn nested_repeat_inner() -> TokenStream {
+    let outer_items = [ident("x"), ident("y")];
+
+    quote {
+        let process = quote {
+            $[for item in outer_items {
+                use_$item();
+            }]
+        };
+    }
+}
+
+// Nested repetition
+meta fn double_nested_repeat() -> TokenStream {
+    let rows = [[1, 2], [3, 4], [5, 6]];
+
+    quote {
+        let matrix = [
+            $[for row in rows {
+                [$[for cell in row { $cell }]]
+            }]
+        ];
+    }
+}
+
+// =============================================================================
+// CROSS-LEVEL GENSYM
+// =============================================================================
+
+// Gensym at outer level, used in inner
+meta fn gensym_cross_level() -> TokenStream {
+    let outer_temp = gensym("outer");
+
+    quote {
+        let $outer_temp = compute();
+
+        let inner = quote {
+            // Inner quote gets its own gensym
+            let inner_temp = gensym("inner");
+            use($inner_temp);
+        };
+
+        $outer_temp
+    }
+}
+
+// Multiple gensyms at different levels
+meta fn gensym_multi_level() -> TokenStream {
+    let l1 = gensym("level1");
+
+    quote {
+        let $l1 = 1;
+
+        let l2 = gensym("level2");
+        let $l2 = 2;
+
+        let inner = quote {
+            let l3 = gensym("level3");
+            let $l3 = 3;
+        };
+
+        $l1 + $l2
+    }
+}
+
+// =============================================================================
+// NESTED QUOTE STAGE INTERACTION
+// =============================================================================
+
+// Outer quote at stage 0, inner at stage 0
+meta fn nested_same_stage() -> TokenStream {
+    quote(0) {
+        let runtime_outer = 1;
+
+        let inner = quote(0) {
+            // Both at runtime
+            let runtime_inner = 2;
+        };
+    }
+}
+
+// Stage 2 generating stage 1 with nested stage 0
+meta(2) fn nested_multi_stage() -> TokenStream {
+    quote(1) {
+        meta fn inner_meta() -> TokenStream {
+            quote(0) {
+                // Runtime code
+                runtime_code()
+            }
+        }
+    }
+}
+
+// =============================================================================
+// PRACTICAL NESTED PATTERNS
+// =============================================================================
+
+// Macro that generates macro-generating code
+meta(2) fn macro_generator() -> TokenStream {
+    let derive_names = [ident("Debug"), ident("Clone")];
+
+    quote(1) {
+        $[for derive_name in derive_names {
+            meta fn ${concat_idents("derive_", derive_name)}(
+                type_name: Ident,
+                fields: List<Ident>
+            ) -> TokenStream {
+                quote(0) {
+                    implement $derive_name for $type_name {
+                        // Generated impl
+                    }
+                }
+            }
+        }]
+    }
+}
+
+// Conditional nested quote
+meta fn conditional_nested() -> TokenStream {
+    let include_inner = true;
+
+    quote {
+        let outer = 1;
+
+        ${if include_inner {
+            quote {
+                let inner = quote {
+                    let deep = 2;
+                };
+            }
+        } else {
+            quote {}
+        }}
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn main() {
+    // Basic nested quotes
+    @const assert(!nested_two_levels().is_empty());
+    @const assert(!nested_three_levels().is_empty());
+
+    // Hygiene isolation
+    @const assert(nested_hygiene_isolation());
+    @const assert(!nested_no_leak().is_empty());
+
+    // Nested splicing
+    @const assert(!nested_splice().is_empty());
+    @const assert(!multi_level_splice().is_empty());
+
+    // Nested repetition
+    @const assert(!nested_repeat_outer().is_empty());
+    @const assert(!nested_repeat_inner().is_empty());
+    @const assert(!double_nested_repeat().is_empty());
+
+    // Cross-level gensym
+    @const assert(!gensym_cross_level().is_empty());
+    @const assert(!gensym_multi_level().is_empty());
+
+    // Stage interaction
+    @const assert(!nested_same_stage().is_empty());
+
+    // Practical patterns
+    @const assert(!conditional_nested().is_empty());
+}

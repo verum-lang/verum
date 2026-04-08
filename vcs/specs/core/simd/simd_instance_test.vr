@@ -1,0 +1,575 @@
+// =============================================================================
+// simd_instance_test.vr - Test instance method calls on type aliases
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: simd, type-alias, method-resolution, instance
+// @description: Tests that instance method calls on type alias values work
+// =============================================================================
+
+module specs.core.simd.simd_instance_test;
+
+mount core.simd.{
+    Vec, Mask,
+    Vec4f, Vec2d, Vec4i, Vec2l,
+    Vec8f, Vec4d, Vec8i,
+    Mask4, Mask8,
+};
+
+// =============================================================================
+// Section 1: Instance Arithmetic Methods
+// =============================================================================
+
+@test
+fn test_instance_add() {
+    let a = Vec4f.splat(1.0);
+    let b = Vec4f.splat(2.0);
+    let c = a.add(b);
+    assert_eq(c.to_array()[0], 3.0);
+    print("Instance add test passed");
+}
+
+@test
+fn test_instance_sub() {
+    let a = Vec4f.splat(10.0);
+    let b = Vec4f.splat(3.0);
+    let c = a.sub(b);
+    assert_eq(c.to_array()[0], 7.0);
+    print("Instance sub test passed");
+}
+
+@test
+fn test_instance_mul() {
+    let a = Vec4f.splat(3.0);
+    let b = Vec4f.splat(4.0);
+    let c = a.mul(b);
+    assert_eq(c.to_array()[0], 12.0);
+    print("Instance mul test passed");
+}
+
+@test
+fn test_instance_div() {
+    let a = Vec4f.splat(20.0);
+    let b = Vec4f.splat(4.0);
+    let c = a.div(b);
+    assert_eq(c.to_array()[0], 5.0);
+    print("Instance div test passed");
+}
+
+// =============================================================================
+// Section 2: Instance Unary Methods
+// =============================================================================
+
+@test
+fn test_instance_abs() {
+    let v = Vec4f.from_array([-1.0, -2.0, -3.0, -4.0]);
+    let result = v.abs();
+    assert_eq(result.to_array()[0], 1.0);
+    assert_eq(result.to_array()[3], 4.0);
+    print("Instance abs test passed");
+}
+
+@test
+fn test_instance_neg() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let result = v.neg();
+    assert_eq(result.to_array()[0], -1.0);
+    assert_eq(result.to_array()[3], -4.0);
+    print("Instance neg test passed");
+}
+
+// =============================================================================
+// Section 3: Instance Reduction Methods
+// =============================================================================
+
+@test
+fn test_instance_reduce_add() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    assert_eq(v.reduce_add(), 10.0);
+    print("Instance reduce_add test passed");
+}
+
+@test
+fn test_instance_reduce_mul() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    assert_eq(v.reduce_mul(), 24.0);
+    print("Instance reduce_mul test passed");
+}
+
+@test
+fn test_instance_reduce_min() {
+    let v = Vec4f.from_array([3.0, 1.0, 4.0, 2.0]);
+    assert_eq(v.reduce_min(), 1.0);
+    print("Instance reduce_min test passed");
+}
+
+@test
+fn test_instance_reduce_max() {
+    let v = Vec4f.from_array([3.0, 1.0, 4.0, 2.0]);
+    assert_eq(v.reduce_max(), 4.0);
+    print("Instance reduce_max test passed");
+}
+
+// =============================================================================
+// Section 4: Instance Comparison Methods
+// =============================================================================
+
+@test
+fn test_instance_cmp_lt() {
+    let a = Vec4i.from_array([1, 5, 3, 7]);
+    let b = Vec4i.from_array([2, 4, 6, 8]);
+    let mask = a.cmp_lt(b);
+    assert_eq(mask.count(), 3);
+    print("Instance cmp_lt test passed");
+}
+
+@test
+fn test_instance_cmp_eq() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.from_array([1, 3, 3, 5]);
+    let mask = a.cmp_eq(b);
+    assert_eq(mask.count(), 2);
+    print("Instance cmp_eq test passed");
+}
+
+// =============================================================================
+// Section 5: Instance Shuffle Methods
+// =============================================================================
+
+@test
+fn test_instance_reverse() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let rev = v.reverse();
+    assert_eq(rev.to_array()[0], 4.0);
+    assert_eq(rev.to_array()[3], 1.0);
+    print("Instance reverse test passed");
+}
+
+@test
+fn test_instance_rotate_left() {
+    let v = Vec4i.from_array([10, 20, 30, 40]);
+    let rot = v.rotate_left<1>();
+    assert_eq(rot.to_array()[0], 20);
+    assert_eq(rot.to_array()[3], 10);
+    print("Instance rotate_left test passed");
+}
+
+// =============================================================================
+// Section 6: Instance Methods on Different Types
+// =============================================================================
+
+@test
+fn test_instance_vec2d_add() {
+    let a = Vec2d.splat(1.5);
+    let b = Vec2d.splat(2.5);
+    let c = a.add(b);
+    assert_eq(c.to_array()[0], 4.0);
+    print("Instance Vec2d add test passed");
+}
+
+@test
+fn test_instance_vec4i_min() {
+    let a = Vec4i.from_array([5, 1, 8, 3]);
+    let b = Vec4i.from_array([2, 7, 4, 6]);
+    let result = a.min(b);
+    assert_eq(result.to_array()[0], 2);
+    assert_eq(result.to_array()[1], 1);
+    print("Instance Vec4i min test passed");
+}
+
+@test
+fn test_instance_vec4i_max() {
+    let a = Vec4i.from_array([5, 1, 8, 3]);
+    let b = Vec4i.from_array([2, 7, 4, 6]);
+    let result = a.max(b);
+    assert_eq(result.to_array()[0], 5);
+    assert_eq(result.to_array()[1], 7);
+    print("Instance Vec4i max test passed");
+}
+
+// =============================================================================
+// Section 7: Instance Method Chaining
+// =============================================================================
+
+@test
+fn test_instance_chained_add_mul() {
+    let a = Vec4f.splat(2.0);
+    let b = Vec4f.splat(3.0);
+    let c = Vec4f.splat(10.0);
+    let result = a.add(b).mul(c);
+    assert_eq(result.to_array()[0], 50.0);  // (2+3)*10
+    print("Instance chained add-mul test passed");
+}
+
+@test
+fn test_instance_chained_sub_abs() {
+    let a = Vec4f.splat(1.0);
+    let b = Vec4f.splat(5.0);
+    let result = a.sub(b).abs();
+    assert_eq(result.to_array()[0], 4.0);  // |1-5| = 4
+    print("Instance chained sub-abs test passed");
+}
+
+@test
+fn test_instance_fma() {
+    let a = Vec4f.splat(2.0);
+    let b = Vec4f.splat(3.0);
+    let c = Vec4f.splat(1.0);
+    let result = a.fma(b, c);
+    assert_eq(result.to_array()[0], 7.0);  // 2*3+1
+    print("Instance fma test passed");
+}
+
+// =============================================================================
+// Section 8: Instance Comparisons Extended
+// =============================================================================
+
+@test
+fn test_instance_cmp_gt() {
+    let a = Vec4f.from_array([5.0, 1.0, 8.0, 3.0]);
+    let b = Vec4f.splat(4.0);
+    let mask = a.cmp_gt(b);
+    assert_eq(mask.count(), 2);  // 5.0 > 4.0 and 8.0 > 4.0
+}
+
+@test
+fn test_instance_cmp_ge() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.from_array([1, 3, 2, 4]);
+    let mask = a.cmp_ge(b);
+    assert_eq(mask.count(), 3);  // 1>=1, 3>=2, 4>=4
+}
+
+@test
+fn test_instance_cmp_le() {
+    let a = Vec4i.from_array([1, 5, 3, 7]);
+    let b = Vec4i.from_array([2, 4, 6, 8]);
+    let mask = a.cmp_le(b);
+    assert_eq(mask.count(), 3);  // 1<=2, 3<=6, 7<=8
+}
+
+@test
+fn test_instance_cmp_ne() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([1.0, 3.0, 3.0, 5.0]);
+    let mask = a.cmp_ne(b);
+    assert_eq(mask.count(), 2);  // index 1 and 3 differ
+}
+
+// =============================================================================
+// Section 9: Instance Min/Max on Vec4f
+// =============================================================================
+
+@test
+fn test_instance_vec4f_min() {
+    let a = Vec4f.from_array([5.0, 1.0, 8.0, 3.0]);
+    let b = Vec4f.from_array([2.0, 7.0, 4.0, 6.0]);
+    let result = a.min(b);
+    assert_eq(result.to_array()[0], 2.0);
+    assert_eq(result.to_array()[1], 1.0);
+    assert_eq(result.to_array()[2], 4.0);
+    assert_eq(result.to_array()[3], 3.0);
+}
+
+@test
+fn test_instance_vec4f_max() {
+    let a = Vec4f.from_array([5.0, 1.0, 8.0, 3.0]);
+    let b = Vec4f.from_array([2.0, 7.0, 4.0, 6.0]);
+    let result = a.max(b);
+    assert_eq(result.to_array()[0], 5.0);
+    assert_eq(result.to_array()[1], 7.0);
+    assert_eq(result.to_array()[2], 8.0);
+    assert_eq(result.to_array()[3], 6.0);
+}
+
+// =============================================================================
+// Section 10: 256-bit Instance Methods
+// =============================================================================
+
+@test
+fn test_instance_vec8f_add() {
+    let a = Vec8f.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let b = Vec8f.splat(10.0);
+    let result = a.add(b);
+    assert_eq(result.to_array()[0], 11.0);
+    assert_eq(result.to_array()[7], 18.0);
+}
+
+@test
+fn test_instance_vec8f_reduce_add() {
+    let v = Vec8f.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    assert_eq(v.reduce_add(), 36.0);
+}
+
+@test
+fn test_instance_vec8i_sub() {
+    let a = Vec8i.from_array([10, 20, 30, 40, 50, 60, 70, 80]);
+    let b = Vec8i.splat(5);
+    let result = a.sub(b);
+    assert_eq(result.to_array()[0], 5);
+    assert_eq(result.to_array()[7], 75);
+}
+
+@test
+fn test_instance_vec8i_reduce_min() {
+    let v = Vec8i.from_array([5, 3, 8, 1, 9, 2, 7, 4]);
+    assert_eq(v.reduce_min(), 1);
+}
+
+@test
+fn test_instance_vec8i_reduce_max() {
+    let v = Vec8i.from_array([5, 3, 8, 1, 9, 2, 7, 4]);
+    assert_eq(v.reduce_max(), 9);
+}
+
+@test
+fn test_instance_vec4d_sub() {
+    let a = Vec4d.from_array([10.0, 20.0, 30.0, 40.0]);
+    let b = Vec4d.splat(5.0);
+    let result = a.sub(b);
+    assert_eq(result.to_array()[0], 5.0);
+    assert_eq(result.to_array()[3], 35.0);
+}
+
+@test
+fn test_instance_vec4d_reduce_add() {
+    let v = Vec4d.from_array([1.0, 2.0, 3.0, 4.0]);
+    assert_eq(v.reduce_add(), 10.0);
+}
+
+// =============================================================================
+// Section 11: Instance FMA Variants
+// =============================================================================
+
+@test
+fn test_instance_fma_zero_addend() {
+    let a = Vec4f.splat(3.0);
+    let b = Vec4f.splat(4.0);
+    let c = Vec4f.splat(0.0);
+    let result = a.fma(b, c);
+    assert_eq(result.to_array()[0], 12.0);  // 3*4+0
+}
+
+@test
+fn test_instance_fma_zero_multiplier() {
+    let a = Vec4f.splat(0.0);
+    let b = Vec4f.splat(100.0);
+    let c = Vec4f.splat(5.0);
+    let result = a.fma(b, c);
+    assert_eq(result.to_array()[0], 5.0);  // 0*100+5
+}
+
+@test
+fn test_instance_fma_identity() {
+    let a = Vec4f.splat(7.0);
+    let b = Vec4f.splat(1.0);
+    let c = Vec4f.splat(0.0);
+    let result = a.fma(b, c);
+    assert_eq(result.to_array()[0], 7.0);  // 7*1+0
+}
+
+// =============================================================================
+// Section 12: Instance Reverse/Rotate Extended
+// =============================================================================
+
+@test
+fn test_instance_reverse_vec4i() {
+    let v = Vec4i.from_array([10, 20, 30, 40]);
+    let rev = v.reverse();
+    assert_eq(rev.to_array()[0], 40);
+    assert_eq(rev.to_array()[3], 10);
+}
+
+@test
+fn test_instance_rotate_left_2() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let rot = v.rotate_left<2>();
+    assert_eq(rot.to_array()[0], 3.0);
+    assert_eq(rot.to_array()[1], 4.0);
+    assert_eq(rot.to_array()[2], 1.0);
+    assert_eq(rot.to_array()[3], 2.0);
+}
+
+@test
+fn test_instance_rotate_left_3() {
+    let v = Vec4i.from_array([10, 20, 30, 40]);
+    let rot = v.rotate_left<3>();
+    assert_eq(rot.to_array()[0], 40);
+    assert_eq(rot.to_array()[1], 10);
+    assert_eq(rot.to_array()[2], 20);
+    assert_eq(rot.to_array()[3], 30);
+}
+
+// =============================================================================
+// Section 13: Instance Method Chaining Extended
+// =============================================================================
+
+@test
+fn test_instance_chain_mul_add() {
+    let a = Vec4f.splat(3.0);
+    let b = Vec4f.splat(4.0);
+    let c = Vec4f.splat(1.0);
+    let result = a.mul(b).add(c);
+    assert_eq(result.to_array()[0], 13.0);  // 3*4+1
+}
+
+@test
+fn test_instance_chain_neg_add() {
+    let a = Vec4f.splat(5.0);
+    let b = Vec4f.splat(3.0);
+    let result = a.neg().add(b);
+    assert_eq(result.to_array()[0], -2.0);  // -5+3 = -2
+}
+
+@test
+fn test_instance_chain_abs_reduce() {
+    let v = Vec4f.from_array([-1.0, -2.0, -3.0, -4.0]);
+    let sum = v.abs().reduce_add();
+    assert_eq(sum, 10.0);  // |1|+|2|+|3|+|4|
+}
+
+@test
+fn test_instance_chain_sub_mul_reduce() {
+    let a = Vec4f.from_array([5.0, 10.0, 15.0, 20.0]);
+    let b = Vec4f.splat(5.0);
+    let c = Vec4f.splat(2.0);
+    let result = a.sub(b).mul(c).reduce_add();
+    assert_eq(result, 60.0);  // (0+5+10+15)*2 = 60
+}
+
+// =============================================================================
+// Section 14: Vec2d Instance Methods
+// =============================================================================
+
+@test
+fn test_instance_vec2d_sub() {
+    let a = Vec2d.from_array([10.0, 20.0]);
+    let b = Vec2d.from_array([3.0, 7.0]);
+    let result = a.sub(b);
+    assert_eq(result.to_array()[0], 7.0);
+    assert_eq(result.to_array()[1], 13.0);
+}
+
+@test
+fn test_instance_vec2d_mul() {
+    let a = Vec2d.from_array([3.0, 4.0]);
+    let b = Vec2d.from_array([5.0, 6.0]);
+    let result = a.mul(b);
+    assert_eq(result.to_array()[0], 15.0);
+    assert_eq(result.to_array()[1], 24.0);
+}
+
+@test
+fn test_instance_vec2d_reduce_add() {
+    let v = Vec2d.from_array([3.5, 6.5]);
+    assert_eq(v.reduce_add(), 10.0);
+}
+
+@test
+fn test_instance_vec2d_min_max() {
+    let a = Vec2d.from_array([5.0, 1.0]);
+    let b = Vec2d.from_array([3.0, 7.0]);
+    let mins = a.min(b);
+    let maxs = a.max(b);
+    assert_eq(mins.to_array()[0], 3.0);
+    assert_eq(mins.to_array()[1], 1.0);
+    assert_eq(maxs.to_array()[0], 5.0);
+    assert_eq(maxs.to_array()[1], 7.0);
+}
+
+// =============================================================================
+// Section 15: Instance Splat Round-Trip
+// =============================================================================
+
+@test
+fn test_instance_splat_roundtrip_float() {
+    let v = Vec4f.splat(7.5);
+    let arr = v.to_array();
+    assert_eq(arr[0], 7.5);
+    assert_eq(arr[1], 7.5);
+    assert_eq(arr[2], 7.5);
+    assert_eq(arr[3], 7.5);
+}
+
+@test
+fn test_instance_splat_roundtrip_int() {
+    let v = Vec4i.splat(42);
+    let arr = v.to_array();
+    assert_eq(arr[0], 42);
+    assert_eq(arr[1], 42);
+    assert_eq(arr[2], 42);
+    assert_eq(arr[3], 42);
+}
+
+@test
+fn test_instance_add_zero_identity() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let zero = Vec4f.splat(0.0);
+    let result = a.add(zero);
+    assert_eq(result.to_array()[0], 1.0);
+    assert_eq(result.to_array()[3], 4.0);
+}
+
+@test
+fn test_instance_mul_one_identity() {
+    let a = Vec4f.from_array([5.0, 10.0, 15.0, 20.0]);
+    let one = Vec4f.splat(1.0);
+    let result = a.mul(one);
+    assert_eq(result.to_array()[0], 5.0);
+    assert_eq(result.to_array()[3], 20.0);
+}
+
+@test
+fn test_instance_sub_self_is_zero() {
+    let a = Vec4f.from_array([3.0, 6.0, 9.0, 12.0]);
+    let result = a.sub(a);
+    assert_eq(result.to_array()[0], 0.0);
+    assert_eq(result.to_array()[1], 0.0);
+    assert_eq(result.to_array()[2], 0.0);
+    assert_eq(result.to_array()[3], 0.0);
+}
+
+@test
+fn test_instance_neg_neg_identity() {
+    let v = Vec4f.from_array([1.0, -2.0, 3.0, -4.0]);
+    let result = v.neg().neg();
+    assert_eq(result.to_array()[0], 1.0);
+    assert_eq(result.to_array()[1], -2.0);
+    assert_eq(result.to_array()[2], 3.0);
+    assert_eq(result.to_array()[3], -4.0);
+}
+
+@test
+fn test_instance_vec8f_reduce_min() {
+    let v = Vec8f.from_array([9.0, 3.0, 7.0, 1.0, 5.0, 8.0, 2.0, 6.0]);
+    assert_eq(v.reduce_min(), 1.0);
+}
+
+@test
+fn test_instance_vec8f_reduce_max() {
+    let v = Vec8f.from_array([9.0, 3.0, 7.0, 1.0, 5.0, 8.0, 2.0, 6.0]);
+    assert_eq(v.reduce_max(), 9.0);
+}
+
+@test
+fn test_instance_vec2l_add() {
+    let a = Vec2l.splat(100);
+    let b = Vec2l.splat(200);
+    let c = a.add(b);
+    assert_eq(c.to_array()[0], 300);
+    assert_eq(c.to_array()[1], 300);
+}
+
+@test
+fn test_instance_vec4d_mul() {
+    let a = Vec4d.from_array([2.0, 3.0, 4.0, 5.0]);
+    let b = Vec4d.from_array([10.0, 10.0, 10.0, 10.0]);
+    let result = a.mul(b);
+    assert_eq(result.to_array()[0], 20.0);
+    assert_eq(result.to_array()[3], 50.0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

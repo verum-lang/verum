@@ -1,0 +1,191 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, topological-sort, graph, dag
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Adjacency matrix for up to 6 nodes (stored in rows of Arr8)
+// adj[i*6+j] = 1 means edge from i to j
+type Graph6 is {
+    r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8, r4: Arr8, r5: Arr8,
+    n: Int
+};
+
+fn get_edge(g: Graph6, from: Int, to: Int) -> Int {
+    if from == 0 { get(g.r0, to) }
+    else if from == 1 { get(g.r1, to) }
+    else if from == 2 { get(g.r2, to) }
+    else if from == 3 { get(g.r3, to) }
+    else if from == 4 { get(g.r4, to) }
+    else { get(g.r5, to) }
+}
+
+// Compute in-degree of each node
+fn compute_in_degrees(g: Graph6) -> Arr8 {
+    let mut deg = zeros();
+    let mut j = 0;
+    while j < g.n {
+        let mut i = 0;
+        let mut total = 0;
+        while i < g.n {
+            total = total + get_edge(g, i, j);
+            i = i + 1;
+        }
+        deg = set(deg, j, total);
+        j = j + 1;
+    }
+    deg
+}
+
+// Kahn's algorithm: topological sort via BFS
+// Returns sorted order in result array, or all -1 if cycle detected
+fn topo_sort(g: Graph6) -> Arr8 {
+    let mut in_deg = compute_in_degrees(g);
+    let mut order = zeros();
+    let mut order_idx = 0;
+
+    // Queue: find nodes with in-degree 0
+    let mut iterations = 0;
+    while iterations < g.n {
+        // Find first node with in_deg 0 that hasn't been placed
+        let mut found = -1;
+        let mut i = 0;
+        while i < g.n {
+            if get(in_deg, i) == 0 {
+                found = i;
+                i = g.n; // break
+            }
+            i = i + 1;
+        }
+        if found == -1 {
+            // Cycle detected — shouldn't happen in our DAGs
+            return zeros();
+        }
+        order = set(order, order_idx, found);
+        order_idx = order_idx + 1;
+        // Mark as processed
+        in_deg = set(in_deg, found, -1);
+        // Decrease in-degree of neighbors
+        let mut j = 0;
+        while j < g.n {
+            if get_edge(g, found, j) == 1 {
+                in_deg = set(in_deg, j, get(in_deg, j) - 1);
+            }
+            j = j + 1;
+        }
+        iterations = iterations + 1;
+    }
+    order
+}
+
+// Check that for every edge (u,v), u appears before v in order
+fn is_valid_topo_order(g: Graph6, order: Arr8) -> Int {
+    // Build position array
+    let mut pos = zeros();
+    let mut i = 0;
+    while i < g.n {
+        pos = set(pos, get(order, i), i);
+        i = i + 1;
+    }
+    // Check all edges
+    let mut u = 0;
+    while u < g.n {
+        let mut v = 0;
+        while v < g.n {
+            if get_edge(g, u, v) == 1 {
+                if get(pos, u) >= get(pos, v) {
+                    return 0;
+                }
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    1
+}
+
+// Count edges in graph
+fn count_edges(g: Graph6) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < g.n {
+        let mut j = 0;
+        while j < g.n {
+            count = count + get_edge(g, i, j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Linear chain: 0 -> 1 -> 2 -> 3
+    let mut r0 = zeros(); r0 = set(r0, 1, 1);
+    let mut r1 = zeros(); r1 = set(r1, 2, 1);
+    let mut r2 = zeros(); r2 = set(r2, 3, 1);
+    let r3 = zeros();
+    let g1 = Graph6 { r0: r0, r1: r1, r2: r2, r3: r3, r4: zeros(), r5: zeros(), n: 4 };
+
+    let order1 = topo_sort(g1);
+    assert_eq(is_valid_topo_order(g1, order1), 1);
+    assert_eq(get(order1, 0), 0);
+    assert_eq(get(order1, 3), 3);
+
+    // Diamond: 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3
+    let mut d0 = zeros(); d0 = set(set(d0, 1, 1), 2, 1);
+    let mut d1 = zeros(); d1 = set(d1, 3, 1);
+    let mut d2 = zeros(); d2 = set(d2, 3, 1);
+    let d3b = zeros();
+    let g2 = Graph6 { r0: d0, r1: d1, r2: d2, r3: d3b, r4: zeros(), r5: zeros(), n: 4 };
+
+    let order2 = topo_sort(g2);
+    assert_eq(is_valid_topo_order(g2, order2), 1);
+    assert_eq(get(order2, 0), 0); // 0 must be first
+    assert_eq(get(order2, 3), 3); // 3 must be last
+    assert_eq(count_edges(g2), 4);
+
+    // In-degree test
+    let deg2 = compute_in_degrees(g2);
+    assert_eq(get(deg2, 0), 0); // no incoming
+    assert_eq(get(deg2, 1), 1); // from 0
+    assert_eq(get(deg2, 2), 1); // from 0
+    assert_eq(get(deg2, 3), 2); // from 1 and 2
+
+    // Single node
+    let g3 = Graph6 { r0: zeros(), r1: zeros(), r2: zeros(), r3: zeros(), r4: zeros(), r5: zeros(), n: 1 };
+    let order3 = topo_sort(g3);
+    assert_eq(get(order3, 0), 0);
+
+    // 5-node DAG: 0->1, 0->2, 1->3, 2->3, 3->4
+    let mut e0 = zeros(); e0 = set(set(e0, 1, 1), 2, 1);
+    let mut e1 = zeros(); e1 = set(e1, 3, 1);
+    let mut e2 = zeros(); e2 = set(e2, 3, 1);
+    let mut e3 = zeros(); e3 = set(e3, 4, 1);
+    let g4 = Graph6 { r0: e0, r1: e1, r2: e2, r3: e3, r4: zeros(), r5: zeros(), n: 5 };
+    let order4 = topo_sort(g4);
+    assert_eq(is_valid_topo_order(g4, order4), 1);
+    assert_eq(count_edges(g4), 5);
+
+    print("DIFF_OK: topological_sort");
+    0
+}

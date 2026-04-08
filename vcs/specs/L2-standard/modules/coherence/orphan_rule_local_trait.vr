@@ -1,0 +1,182 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, coherence, orphan-rule, trait
+
+/// Orphan rule - local trait with external type.
+/// You CAN implement a LOCAL trait for an EXTERNAL type.
+///
+/// This is allowed because:
+/// - The trait is defined in your crate
+/// - You control the trait's semantics
+/// - No other crate can implement your trait for the same type
+/// - Coherence is maintained
+
+// Assume these types come from external crates
+module external_crate {
+    pub type ExtList<T> is {
+        data: Heap<[T]>,
+        len: Int,
+        capacity: Int
+    };
+
+    pub type Map<K, V> is {
+        buckets: Heap<[Bucket<K, V>]>,
+        len: Int
+    };
+
+    type Bucket<K, V> is {
+        key: K,
+        value: V,
+        next: Maybe<Heap<Bucket<K, V>>>
+    };
+
+    pub type String is {
+        data: Bytes
+    };
+
+    pub type Duration is {
+        secs: Int,
+        nanos: Int
+    };
+}
+
+// Our local module - we define traits here
+module local_library {
+    mount external_crate.{ExtList, Map, String, Duration};
+
+    /// Local trait - defined in our crate
+    pub type Summarize is protocol {
+        fn summarize(&self) -> Text;
+        fn summary_length(&self) -> Int {
+            self.summarize().len()
+        }
+    }
+
+    /// Local trait for serialization
+    pub type ToJson is protocol {
+        fn to_json(&self) -> Text;
+    }
+
+    /// Local trait for validation
+    pub type Validate is protocol {
+        fn is_valid(&self) -> Bool;
+        fn validation_errors(&self) -> List<Text>;
+    }
+
+    /// Local trait for pretty printing
+    pub type PrettyPrint is protocol {
+        fn pretty(&self) -> Text;
+        fn pretty_with_indent(&self, indent: Int) -> Text;
+    }
+
+    /// Local trait for size estimation
+    pub type SizeEstimate is protocol {
+        fn estimated_size_bytes(&self) -> Int;
+    }
+
+    // =========================================================================
+    // VALID: Implement LOCAL trait for EXTERNAL type
+    // =========================================================================
+
+    /// Implement Summarize for external ExtList<T>
+    implement<T: Summarize> Summarize for ExtList<T> {
+        fn summarize(&self) -> Text {
+            if self.len == 0 {
+                "Empty list"
+            } else if self.len == 1 {
+                format("List with 1 item: {}", self.data[0].summarize())
+            } else {
+                format("List with {} items", self.len)
+            }
+        }
+    }
+
+    /// Implement ToJson for external Map<K, V>
+    implement<K: ToJson, V: ToJson> ToJson for Map<K, V> {
+        fn to_json(&self) -> Text {
+            let mut parts: List<Text> = List.new();
+            for (k, v) in self.iter() {
+                parts.push(format("{}: {}", k.to_json(), v.to_json()));
+            }
+            format("{{{}}}", parts.join(", "))
+        }
+    }
+
+    /// Implement Validate for external String
+    implement Validate for String {
+        fn is_valid(&self) -> Bool {
+            !self.data.is_empty()
+        }
+
+        fn validation_errors(&self) -> List<Text> {
+            let mut errors = List.new();
+            if self.data.is_empty() {
+                errors.push("String cannot be empty");
+            }
+            errors
+        }
+    }
+
+    /// Implement PrettyPrint for external Duration
+    implement PrettyPrint for Duration {
+        fn pretty(&self) -> Text {
+            self.pretty_with_indent(0)
+        }
+
+        fn pretty_with_indent(&self, indent: Int) -> Text {
+            let spaces = " ".repeat(indent);
+            if self.secs >= 3600 {
+                let hours = self.secs / 3600;
+                let mins = (self.secs % 3600) / 60;
+                format("{}{}h {}m", spaces, hours, mins)
+            } else if self.secs >= 60 {
+                let mins = self.secs / 60;
+                let secs = self.secs % 60;
+                format("{}{}m {}s", spaces, mins, secs)
+            } else {
+                format("{}{}s", spaces, self.secs)
+            }
+        }
+    }
+
+    /// Implement SizeEstimate for multiple external types
+    implement<T> SizeEstimate for ExtList<T> {
+        fn estimated_size_bytes(&self) -> Int {
+            // Header + capacity * T.size
+            24 + self.capacity * T.size
+        }
+    }
+
+    implement<K, V> SizeEstimate for Map<K, V> {
+        fn estimated_size_bytes(&self) -> Int {
+            // Rough estimate based on bucket count
+            32 + self.buckets.len() * (K.size + V.size + 16)
+        }
+    }
+
+    implement SizeEstimate for String {
+        fn estimated_size_bytes(&self) -> Int {
+            24 + self.data.len()
+        }
+    }
+}
+
+fn main() {
+    mount external_crate.{ExtList, Map, String, Duration};
+    mount local_library.{Summarize, ToJson, Validate, PrettyPrint, SizeEstimate};
+
+    // Create external types
+    let list: ExtList<Int> = ExtList {
+        data: Heap.empty(),
+        len: 5,
+        capacity: 8,
+    };
+
+    let duration = Duration { secs: 3725, nanos: 0 };
+
+    // All of these work because:
+    // 1. The traits (Summarize, ToJson, etc.) are defined locally
+    // 2. The types (ExtList, Map, etc.) are external
+    // 3. No coherence violation - we own the trait
+}

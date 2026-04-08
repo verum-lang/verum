@@ -1,0 +1,13 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, division
+// @timeout: 5000
+// @was-skip: FIXED - run-panic now works with interpreter error handling
+// @expected-panic: Division by zero
+
+fn main() {
+    let x: Int = 10;
+    let y: Int = 0;
+    let z = x / y;  // Should panic: division by zero
+}

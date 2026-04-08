@@ -1,0 +1,142 @@
+// =============================================================================
+// data_protocols_test.vr - Tests for DataError Debug/Display implementations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: data, error, display, debug, protocols, core
+// @description: Tests Debug and Display for DataError variants
+// =============================================================================
+
+mount core.base.data.{DataError};
+mount core.base.protocols.{Display, Debug};
+mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// =============================================================================
+// Section 1: DataError Display
+// =============================================================================
+
+@test
+fn test_data_error_type_mismatch_display() {
+    let err = DataError.TypeMismatch { expected: "Int", actual: "Text" };
+    let text = format_display(&err);
+    assert(text.contains("Int") && text.contains("Text"));
+    assert(text.contains("mismatch") || text.contains("expected"));
+}
+
+@test
+fn test_data_error_key_not_found_display() {
+    let err = DataError.KeyNotFound { key: "name" };
+    let text = format_display(&err);
+    assert(text.contains("name"));
+    assert(text.contains("key") || text.contains("not found"));
+}
+
+@test
+fn test_data_error_index_out_of_bounds_display() {
+    let err = DataError.IndexOutOfBounds { index: 5, length: 3 };
+    let text = format_display(&err);
+    assert(text.contains("5") && text.contains("3"));
+}
+
+@test
+fn test_data_error_parse_error_display() {
+    let err = DataError.ParseError { message: "unexpected token at position 42" };
+    let text = format_display(&err);
+    assert(text.contains("unexpected token"));
+}
+
+@test
+fn test_data_error_invalid_cast_display() {
+    let err = DataError.InvalidCast { from: "Bool", to: "Int" };
+    let text = format_display(&err);
+    assert(text.contains("Bool") && text.contains("Int"));
+}
+
+// =============================================================================
+// Section 2: DataError Debug
+// =============================================================================
+
+@test
+fn test_data_error_type_mismatch_debug() {
+    let err = DataError.TypeMismatch { expected: "Int", actual: "Text" };
+    let text = format_debug(&err);
+    assert(text.contains("TypeMismatch"));
+}
+
+@test
+fn test_data_error_key_not_found_debug() {
+    let err = DataError.KeyNotFound { key: "foo" };
+    let text = format_debug(&err);
+    assert(text.contains("KeyNotFound"));
+}
+
+@test
+fn test_data_error_index_out_of_bounds_debug() {
+    let err = DataError.IndexOutOfBounds { index: 10, length: 5 };
+    let text = format_debug(&err);
+    assert(text.contains("IndexOutOfBounds"));
+}
+
+@test
+fn test_data_error_parse_error_debug() {
+    let err = DataError.ParseError { message: "bad json" };
+    let text = format_debug(&err);
+    assert(text.contains("ParseError"));
+}
+
+@test
+fn test_data_error_invalid_cast_debug() {
+    let err = DataError.InvalidCast { from: "A", to: "B" };
+    let text = format_debug(&err);
+    assert(text.contains("InvalidCast"));
+}
+
+// =============================================================================
+// Section 3: Display vs Debug differ
+// =============================================================================
+
+@test
+fn test_data_error_display_vs_debug_differ() {
+    let err = DataError.KeyNotFound { key: "x" };
+    let display_text = format_display(&err);
+    let debug_text = format_debug(&err);
+    assert(display_text != debug_text);
+}
+
+@test
+fn test_data_error_display_actionable() {
+    let err = DataError.TypeMismatch { expected: "Int", actual: "Text" };
+    let msg = format_display(&err);
+    assert(msg.len() > 15);
+}
+
+// =============================================================================
+// Section 4: Function existence proofs
+// =============================================================================
+
+@test
+fn test_data_error_display_fn_exists() {
+    let err = DataError.ParseError { message: "test" };
+    let text = format_display(&err);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_data_error_debug_fn_exists() {
+    let err = DataError.ParseError { message: "test" };
+    let text = format_debug(&err);
+    assert(text.contains("ParseError"));
+}
+
+@test
+fn test_data_error_type_exists() {
+    let err: DataError = DataError.KeyNotFound { key: "test" };
+    assert(err is DataError.KeyNotFound);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,117 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, type-parameters, polymorphism
+// @description: Test generic type parameters in functions and types
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn test_identity() -> Int {
+    let a = identity(42);
+    if a != 42 {
+        print(f"FAIL identity: a={a}, expected 42");
+        return 1;
+    }
+    print("  identity: OK");
+    0
+}
+
+fn max_of<T>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+fn min_of<T>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+fn test_max_min() -> Int {
+    if max_of(3, 7) != 7 {
+        print("FAIL max: 3,7");
+        return 1;
+    }
+    if min_of(3, 7) != 3 {
+        print("FAIL min: 3,7");
+        return 1;
+    }
+    if max_of(-10, -20) != -10 {
+        print("FAIL max: -10,-20");
+        return 1;
+    }
+    print("  max_min: OK");
+    0
+}
+
+fn swap_pair<T>(a: T, b: T) -> List<T> {
+    [b, a]
+}
+
+fn test_swap() -> Int {
+    let result = swap_pair(10, 20);
+    if result[0] != 20 || result[1] != 10 {
+        print(f"FAIL swap: [{result[0]}, {result[1]}]");
+        return 1;
+    }
+    print("  swap: OK");
+    0
+}
+
+fn apply_twice<T>(f: fn(T) -> T, x: T) -> T {
+    f(f(x))
+}
+
+fn test_apply_twice() -> Int {
+    let double = |x: Int| -> Int { x * 2 };
+    let result = apply_twice(double, 3);
+    if result != 12 {
+        print(f"FAIL apply_twice: result={result}, expected 12");
+        return 1;
+    }
+    print("  apply_twice: OK");
+    0
+}
+
+type Wrapper is { value: Int };
+
+implement Wrapper {
+    fn new(v: Int) -> Wrapper {
+        Wrapper { value: v }
+    }
+
+    fn map(&self, f: fn(Int) -> Int) -> Wrapper {
+        Wrapper { value: f(self.value) }
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+fn test_wrapper() -> Int {
+    let w = Wrapper.new(10);
+    let w2 = w.map(|x: Int| -> Int { x * 3 });
+    if w2.get() != 30 {
+        print(f"FAIL wrapper: got={w2.get()}, expected 30");
+        return 1;
+    }
+    print("  wrapper: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Generic Type Tests:");
+    let mut failures = 0;
+    failures = failures + test_identity();
+    failures = failures + test_max_min();
+    failures = failures + test_swap();
+    failures = failures + test_apply_twice();
+    failures = failures + test_wrapper();
+
+    if failures == 0 {
+        print("All generic type tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

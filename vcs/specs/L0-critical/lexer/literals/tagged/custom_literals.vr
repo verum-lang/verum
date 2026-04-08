@@ -1,0 +1,200 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, tagged, custom
+
+// Custom/user-defined tagged literals
+
+fn test_duration_literals() {
+    // Duration literals
+    let one_second = dur#"1s";
+    let five_minutes = dur#"5m";
+    let two_hours = dur#"2h";
+    let one_day = dur#"1d";
+    let complex_duration = dur#"1h30m45s";
+    let milliseconds = dur#"500ms";
+    let microseconds = dur#"100us";
+    let nanoseconds = dur#"50ns";
+}
+
+fn test_byte_size_literals() {
+    // Byte size literals
+    let kilobyte = size#"1KB";
+    let megabyte = size#"1MB";
+    let gigabyte = size#"1GB";
+    let terabyte = size#"1TB";
+    let bytes = size#"512B";
+    let kibibyte = size#"1KiB";
+    let mebibyte = size#"1MiB";
+}
+
+fn test_ip_address_literals() {
+    // IP address literals
+    let ipv4_addr = ip#"192.168.1.1";
+    let ipv4_localhost = ip#"127.0.0.1";
+    let ipv6_addr = ip#"2001:0db8:85a3:0000:0000:8a2e:0370:7334";
+    let ipv6_short = ip#"::1";
+    let ipv6_localhost = ip#"::1";
+}
+
+fn test_cidr_notation() {
+    // CIDR notation
+    let subnet = cidr#"192.168.1.0/24";
+    let ipv6_subnet = cidr#"2001:db8::/32";
+}
+
+fn test_mac_address_literals() {
+    // MAC address literals
+    let mac_addr = mac#"00:1A:2B:3C:4D:5E";
+    let mac_hyphen = mac#"00-1A-2B-3C-4D-5E";
+}
+
+fn test_url_literals() {
+    // URL literals
+    let http_url = url#"https://example.com/path?query=value";
+    let ftp_url = url#"ftp://files.example.com/file.txt";
+    let mailto = url#"mailto:user@example.com";
+    let file_url = url#"file:///home/user/document.pdf";
+}
+
+fn test_path_literals() {
+    // Path literals
+    let unix_path = path#"/home/user/documents";
+    let windows_path = path#"C:\\Users\\Documents";
+    let relative_path = path#"./src/main.vr";
+}
+
+fn test_version_literals() {
+    // Version literals (semver)
+    let version_val = ver#"1.2.3";
+    let version_prerelease = ver#"1.2.3-beta.1";
+    let version_build = ver#"1.2.3+build.456";
+    let version_full = ver#"2.0.0-rc.1+20250115";
+}
+
+fn test_currency_literals() {
+    // Currency literals
+    let usd_val = usd#"100.50";
+    let eur_val = eur#"85.25";
+    let gbp_val = gbp#"75.00";
+    let jpy_val = jpy#"10000";
+    let btc_val = btc#"0.00125";
+}
+
+fn test_geographic_coordinates() {
+    // Geographic coordinates
+    let lat_long = geo#"40.7128,-74.0060";
+    let coord_with_altitude = geo#"40.7128,-74.0060,10m";
+}
+
+fn test_time_zone_literals() {
+    // Time zone literals
+    let utc_tz = tz#"UTC";
+    let eastern = tz#"America/New_York";
+    let tokyo = tz#"Asia/Tokyo";
+}
+
+fn test_mime_type_literals() {
+    // MIME type literals
+    let json_mime = mime#"application/json";
+    let html_mime = mime#"text/html";
+    let png_mime = mime#"image/png";
+    let pdf_mime = mime#"application/pdf";
+}
+
+fn test_base64_encoded_data() {
+    // Base64 encoded data
+    let base64_data = b64#"SGVsbG8gV29ybGQh";
+    let base64_image = b64#"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+}
+
+fn test_hex_encoded_bytes() {
+    // Hex encoded bytes
+    let hex_bytes = hex#"48656c6c6f";
+    let hex_hash = hex#"a1b2c3d4e5f6";
+}
+
+fn test_unit_tagged_numbers() {
+    // Unit-tagged numbers
+    let meters = 100_m;
+    let kilometers = 5_km;
+    let miles = 3_mi;
+    let celsius = 25_C;
+    let fahrenheit = 77_F;
+    let kelvin = 300_K;
+    let kilograms = 70_kg;
+    let pounds = 154_lb;
+}
+
+fn test_custom_domain_literals() {
+    // Custom domain literals
+    let email_addr = email#"user@example.com";
+    let phone_num = phone#"+1-555-123-4567";
+    let isbn_num = isbn#"978-3-16-148410-0";
+    let credit_card = cc#"4111111111111111";
+}
+
+fn test_scientific_units() {
+    // Scientific units
+    let speed = unit#"299792458 m/s";
+    let force = unit#"9.81 N";
+    let energy = unit#"1.602e-19 J";
+}
+
+fn test_percentage() {
+    // Percentage
+    let pct_val = pct#"75.5%";
+    let ratio_val = ratio#"3:4";
+}
+
+fn test_template_literals() {
+    // Template literals
+    let template_val = tmpl#"Hello, {{name}}!";
+}
+
+fn test_yaml_literal() {
+    // YAML literal - using triple-quoted raw multiline
+    let yaml_data = yaml#"""name: John
+age: 30
+languages:
+  - Rust
+  - Python""";
+}
+
+fn test_toml_literal() {
+    // TOML literal - using triple-quoted raw multiline
+    let toml_data = toml#"""[package]
+name = "example"
+version = "1.0.0"
+
+[dependencies]
+library = "1.2.3"""";
+}
+
+fn test_sql_alternative() {
+    // SQL (alternative syntax)
+    let sql_query = query#"SELECT * FROM users WHERE active = true";
+}
+
+fn test_graphql() {
+    // GraphQL - using triple-quoted raw multiline
+    let graphql_query = gql#"""query GetUser($id: ID!) {
+  user(id: $id) {
+    name
+    email
+  }
+}""";
+}
+
+// Custom type with literal
+type CustomLiteral<T> is {
+    value: T,
+    raw: Text,
+};
+
+// Note: Custom literal handlers would be defined using meta/macros in Verum
+// The following demonstrates using custom tagged literals
+fn test_using_custom_literal() {
+    // Using custom literal
+    let payment = money#"USD 99.99";
+}

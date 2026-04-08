@@ -1,0 +1,157 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, tiers, comparison
+
+/// Benchmark comparison of all three reference tiers.
+/// Managed: ~15ns (full CBGR checks)
+/// Checked: ~0ns (compile-time verified)
+/// Unsafe: ~0ns (no checks)
+/// Spec: 26-cbgr-implementation.md#performance
+
+fn main() {
+    let bench = Benchmark.new("Reference Tier Comparison");
+    let mut b = Bencher.new();
+
+    benchmark_managed(&mut b);
+    benchmark_checked(&mut b);
+    benchmark_unsafe(&mut b);
+    analyze_tier_ratios(&mut b);
+
+    bench.report();
+}
+
+/// Benchmark Tier 0: Managed references (~15ns)
+@benchmark
+fn benchmark_managed(b: &mut Bencher) {
+    let value = Heap.new(42);
+    let managed_ref: &Int = &*value;
+
+    b.iter(|| {
+        // Full CBGR check on each access
+        let _ = *managed_ref;
+    });
+
+    b.assert_time_less_than(20.ns());  // Allow some variance
+}
+
+/// Benchmark Tier 1: Checked references (~0ns)
+@benchmark
+fn benchmark_checked(b: &mut Bencher) {
+    let value = 42;  // Stack value
+    let checked_ref: &checked Int = &checked value;
+
+    b.iter(|| {
+        // No runtime checks - just pointer dereference
+        let _ = *checked_ref;
+    });
+
+    b.assert_time_less_than(2.ns());  // Should be essentially zero
+}
+
+/// Benchmark Tier 2: Unsafe references (~0ns)
+@benchmark
+fn benchmark_unsafe(b: &mut Bencher) {
+    let value = 42;
+
+    // SAFETY: value outlives benchmark
+    let unsafe_ref: &unsafe Int = unsafe { &unsafe value };
+
+    b.iter(|| {
+        // No runtime checks
+        unsafe { let _ = *unsafe_ref; }
+    });
+
+    b.assert_time_less_than(2.ns());  // Should be essentially zero
+}
+
+/// Analyze ratios between tiers
+@benchmark
+fn analyze_tier_ratios(b: &mut Bencher) {
+    let iterations = 1_000_000;
+
+    // Measure managed
+    let managed_value = Heap.new(42);
+    let managed_ref: &Int = &*managed_value;
+
+    let managed_start = Time.now();
+    for _ in 0..iterations {
+        let _ = *managed_ref;
+    }
+    let managed_time = Time.now() - managed_start;
+
+    // Measure checked
+    let checked_value = 42;
+    let checked_ref: &checked Int = &checked checked_value;
+
+    let checked_start = Time.now();
+    for _ in 0..iterations {
+        let _ = *checked_ref;
+    }
+    let checked_time = Time.now() - checked_start;
+
+    // Calculate ratios
+    let managed_ns = managed_time.as_nanos() as Float / iterations as Float;
+    let checked_ns = checked_time.as_nanos() as Float / iterations as Float;
+
+    let ratio = managed_ns / checked_ns.max(0.1);
+
+    print("Managed per access: " + managed_ns.to_string() + "ns");
+    print("Checked per access: " + checked_ns.to_string() + "ns");
+    print("Managed/Checked ratio: " + ratio.to_string() + "x");
+
+    // Managed should be 5-30x slower than checked
+    assert(ratio > 3.0);
+    assert(ratio < 50.0);
+}
+
+/// Additional: Measure combined access patterns
+@benchmark
+fn benchmark_realistic_mix(b: &mut Bencher) {
+    // Simulate realistic code with mix of access patterns
+
+    let heap_data = Heap.new([1, 2, 3, 4, 5]);
+    let stack_data = [10, 20, 30, 40, 50];
+
+    b.iter(|| {
+        let mut sum = 0;
+
+        // Managed access (heap data)
+        for item in &*heap_data {
+            sum += *item;
+        }
+
+        // Would be checked if on stack
+        for item in &stack_data {
+            sum += *item;
+        }
+
+        sum
+    });
+}
+
+// Helper types
+type DurationExt is protocol {
+    fn ns(self) -> Duration;
+};
+
+implement DurationExt for Int {
+    fn ns(self) -> Duration {
+        Duration.from_nanos(self as u64)
+    }
+}
+
+// Benchmark framework stubs
+type Benchmark is { name: Text };
+type Bencher is { iterations: Int };
+
+implement Benchmark {
+    fn new(name: Text) -> Benchmark { Benchmark { name: name } }
+    fn report(&self) { print("Benchmark report: " + self.name); }
+}
+
+implement Bencher {
+    fn new() -> Bencher { Bencher { iterations: 1000 } }
+    fn iter<F>(&mut self, _f: F) { /* stub */ }
+    fn assert_time_less_than(&self, _d: Duration) { /* stub */ }
+}

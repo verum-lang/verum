@@ -1,0 +1,156 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, closures, method-chaining, higher-order
+// @description: Generic types with closures and higher-order functions
+
+type Box is { value: Int };
+
+implement Box {
+    fn new(v: Int) -> Box {
+        Box { value: v }
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+
+    fn map_value(&self, f: fn(Int) -> Int) -> Box {
+        Box { value: f(self.value) }
+    }
+}
+
+fn test_basic_generic() -> Int {
+    let b = Box.new(42);
+    if b.get() != 42 {
+        print(f"FAIL basic_generic: expected 42, got {b.get()}");
+        return 1;
+    }
+    print("  basic_generic: OK");
+    0
+}
+
+fn test_map_closure() -> Int {
+    let b = Box.new(10);
+    let doubled = b.map_value(|x: Int| -> Int { x * 2 });
+    if doubled.get() != 20 {
+        print(f"FAIL map_closure: expected 20, got {doubled.get()}");
+        return 1;
+    }
+    print("  map_closure: OK");
+    0
+}
+
+fn test_chained_map() -> Int {
+    let b = Box.new(5);
+    let result = b.map_value(|x: Int| -> Int { x + 1 })
+                  .map_value(|x: Int| -> Int { x * 3 });
+    if result.get() != 18 {
+        print(f"FAIL chained_map: expected 18, got {result.get()}");
+        return 1;
+    }
+    print("  chained_map: OK");
+    0
+}
+
+fn apply_twice(b: Box, f: fn(Int) -> Int) -> Box {
+    b.map_value(f).map_value(f)
+}
+
+fn test_higher_order() -> Int {
+    let b = Box.new(2);
+    let result = apply_twice(b, |x: Int| -> Int { x * x });
+    if result.get() != 16 {
+        print(f"FAIL higher_order: expected 16, got {result.get()}");
+        return 1;
+    }
+    print("  higher_order: OK");
+    0
+}
+
+type Pair is { first: Int, second: Int };
+
+implement Pair {
+    fn new(a: Int, b: Int) -> Pair {
+        Pair { first: a, second: b }
+    }
+
+    fn sum(&self) -> Int {
+        self.first + self.second
+    }
+
+    fn swap(&self) -> Pair {
+        Pair { first: self.second, second: self.first }
+    }
+
+    fn map_both(&self, f: fn(Int) -> Int) -> Pair {
+        Pair { first: f(self.first), second: f(self.second) }
+    }
+}
+
+fn test_pair_closures() -> Int {
+    let p = Pair.new(3, 7);
+    let doubled = p.map_both(|x: Int| -> Int { x * 2 });
+    if doubled.sum() != 20 {
+        print(f"FAIL pair_closures: expected 20, got {doubled.sum()}");
+        return 1;
+    }
+    print("  pair_closures: OK");
+    0
+}
+
+fn test_swap_chain() -> Int {
+    let p = Pair.new(10, 20);
+    let result = p.swap().map_both(|x: Int| -> Int { x + 5 });
+    if result.first != 25 {
+        print(f"FAIL swap_chain first: expected 25, got {result.first}");
+        return 1;
+    }
+    if result.second != 15 {
+        print(f"FAIL swap_chain second: expected 15, got {result.second}");
+        return 1;
+    }
+    print("  swap_chain: OK");
+    0
+}
+
+fn test_list_of_boxes() -> Int {
+    let mut boxes = List.new();
+    boxes.push(Box.new(1));
+    boxes.push(Box.new(2));
+    boxes.push(Box.new(3));
+
+    let mut sum = 0;
+    let mut i = 0;
+    while i < boxes.len() {
+        let b = boxes[i];
+        let mapped = b.map_value(|x: Int| -> Int { x * 10 });
+        sum = sum + mapped.get();
+        i = i + 1;
+    }
+    if sum != 60 {
+        print(f"FAIL list_of_boxes: expected 60, got {sum}");
+        return 1;
+    }
+    print("  list_of_boxes: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Generic Protocol Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_generic();
+    failures = failures + test_map_closure();
+    failures = failures + test_chained_map();
+    failures = failures + test_higher_order();
+    failures = failures + test_pair_closures();
+    failures = failures + test_swap_chain();
+    failures = failures + test_list_of_boxes();
+
+    if failures == 0 {
+        print("All generic protocol tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

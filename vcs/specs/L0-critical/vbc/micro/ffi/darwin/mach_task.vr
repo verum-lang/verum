@@ -1,0 +1,25 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, mach, kernel
+// @description: Test mach_task_self() Mach kernel call
+
+@ffi("libSystem.B.dylib")
+extern {
+    fn mach_task_self() -> u32;
+}
+
+fn main() {
+    // mach_task_self() returns Mach port for current task
+    // It never fails
+    let task = mach_task_self();
+
+    // Task port should be non-zero valid port
+    assert(task > 0);
+
+    // Calling twice should return same value
+    let task2 = mach_task_self();
+    assert(task == task2);
+}

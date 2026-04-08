@@ -1,0 +1,128 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, hash, table, data-structure
+// @expected-exit: 0
+
+// Test: manual hash table implementation
+// Validates array-based open addressing hash map.
+
+// Simple hash function
+fn hash_key(key: Int, capacity: Int) -> Int {
+    let h = ((key * 2654435761) >> 16) & 0x7FFFFFFF;
+    h % capacity
+}
+
+// Linear probing hash table using parallel arrays
+fn ht_insert(keys: List<Int>, vals: List<Int>, used: List<Int>, capacity: Int, key: Int, val: Int) -> Bool {
+    let mut idx = hash_key(key, capacity);
+    let mut probes = 0;
+    while (probes < capacity) {
+        if (used[idx] == 0) {
+            // Empty slot
+            keys[idx] = key;
+            vals[idx] = val;
+            used[idx] = 1;
+            return true;
+        }
+        if (keys[idx] == key) {
+            // Update existing
+            vals[idx] = val;
+            return true;
+        }
+        idx = (idx + 1) % capacity;
+        probes = probes + 1;
+    }
+    false // Table full
+}
+
+fn ht_get(keys: List<Int>, vals: List<Int>, used: List<Int>, capacity: Int, key: Int) -> Int {
+    let mut idx = hash_key(key, capacity);
+    let mut probes = 0;
+    while (probes < capacity) {
+        if (used[idx] == 0) {
+            return -1; // Not found
+        }
+        if (keys[idx] == key) {
+            return vals[idx];
+        }
+        idx = (idx + 1) % capacity;
+        probes = probes + 1;
+    }
+    -1 // Not found
+}
+
+fn ht_contains(keys: List<Int>, used: List<Int>, capacity: Int, key: Int) -> Bool {
+    let mut idx = hash_key(key, capacity);
+    let mut probes = 0;
+    while (probes < capacity) {
+        if (used[idx] == 0) { return false; }
+        if (keys[idx] == key) { return true; }
+        idx = (idx + 1) % capacity;
+        probes = probes + 1;
+    }
+    false
+}
+
+fn main() -> Int {
+    let capacity = 64;
+
+    // Initialize parallel arrays
+    let mut keys: List<Int> = [];
+    let mut vals: List<Int> = [];
+    let mut used: List<Int> = [];
+    let mut i = 0;
+    while (i < capacity) {
+        keys.push(0);
+        vals.push(0);
+        used.push(0);
+        i = i + 1;
+    }
+
+    // Insert key-value pairs
+    assert(ht_insert(keys, vals, used, capacity, 10, 100));
+    assert(ht_insert(keys, vals, used, capacity, 20, 200));
+    assert(ht_insert(keys, vals, used, capacity, 30, 300));
+    assert(ht_insert(keys, vals, used, capacity, 42, 420));
+    assert(ht_insert(keys, vals, used, capacity, 99, 990));
+
+    // Lookup
+    assert_eq(ht_get(keys, vals, used, capacity, 10), 100);
+    assert_eq(ht_get(keys, vals, used, capacity, 20), 200);
+    assert_eq(ht_get(keys, vals, used, capacity, 30), 300);
+    assert_eq(ht_get(keys, vals, used, capacity, 42), 420);
+    assert_eq(ht_get(keys, vals, used, capacity, 99), 990);
+
+    // Not found
+    assert_eq(ht_get(keys, vals, used, capacity, 11), -1);
+    assert_eq(ht_get(keys, vals, used, capacity, 0), -1);
+
+    // Contains
+    assert(ht_contains(keys, used, capacity, 42));
+    assert(!ht_contains(keys, used, capacity, 43));
+
+    // Update existing key
+    assert(ht_insert(keys, vals, used, capacity, 42, 999));
+    assert_eq(ht_get(keys, vals, used, capacity, 42), 999);
+
+    // Stress test: insert 30 elements
+    i = 0;
+    while (i < 30) {
+        assert(ht_insert(keys, vals, used, capacity, 1000 + i, i * i));
+        i = i + 1;
+    }
+
+    // Verify all 30 are retrievable
+    i = 0;
+    let mut all_found = true;
+    while (i < 30) {
+        if (ht_get(keys, vals, used, capacity, 1000 + i) != i * i) {
+            all_found = false;
+        }
+        i = i + 1;
+    }
+    assert(all_found);
+
+    print("hash_table: PASS");
+    0
+}

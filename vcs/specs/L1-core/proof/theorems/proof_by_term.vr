@@ -1,0 +1,23 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, theorem, proof-by-term
+// @timeout: 5000
+
+/// Proof by term — direct expression proof.
+/// Grammar: proof_by_term = '=' expression
+
+// Simple term proof
+theorem id_proof(x: Int) -> Int
+    proof = x;
+
+// Term proof with computation
+theorem double_proof(x: Int) -> Int
+    proof = x + x;
+
+// Term proof with conditional
+theorem max_proof(a: Int, b: Int) -> Int
+    proof = if a > b { a } else { b };
+
+fn main() {
+    print("Proof by term tests parsed");
+}

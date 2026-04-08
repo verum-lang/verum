@@ -1,0 +1,20 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, code_gen, compile_error, halt, error
+// @description: Test that compile_error halts compilation with specified message
+// @expected-error: requires
+
+// =============================================================================
+// COMPILE_ERROR REQUIRES CONTEXT
+// =============================================================================
+
+// Test compile_error requires CompileDiag context
+// This test should fail because we're not providing the context
+meta fn test_compile_error_no_context() -> () {
+    compile_error("Compilation halted by test");  // ERROR: requires CompileDiag
+}
+
+fn main() {
+    @const test_compile_error_no_context();
+}

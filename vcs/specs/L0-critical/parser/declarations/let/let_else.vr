@@ -1,0 +1,105 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, let, binding, else, pattern
+
+// Helper functions for testing
+fn fetch_data() -> Maybe<Int> { Some(42) }
+fn load_config() -> Maybe<Int> { Some(1) }
+fn validate(item: Int) -> Maybe<Int> { Some(item) }
+fn parse_user(json: Text) -> Result<User, ParseError> { Ok(User { id: 1, name: "test" }) }
+fn try_parse() -> Maybe<Int> { Some(1) }
+fn get_counter() -> Maybe<Int> { Some(0) }
+fn log_error(msg: Text) { }
+fn fallback() -> Int { 0 }
+
+type User is { id: Int, name: Text };
+type ParseError is ();
+
+fn test_simple_let_else(maybe: Maybe<Int>) {
+    // Simple let-else with Maybe
+    let Some(x) = maybe else { return; };
+}
+
+fn test_let_else_result(result: Result<Int, Text>, error: Text) -> Result<Int, Text> {
+    // Let-else with Result
+    let Ok(value) = result else { return Err(error); };
+    Ok(value)
+}
+
+fn test_let_else_early_return() -> Maybe<Int> {
+    // Let-else with early return
+    let Some(data) = fetch_data() else {
+        return None;
+    };
+    Some(data)
+}
+
+fn test_let_else_panic() {
+    // Let-else with panic/unreachable
+    let Some(config) = load_config() else {
+        panic("Configuration required");
+    };
+}
+
+fn test_let_else_break() {
+    // Let-else with break in loop context
+    let iter: List<Maybe<Int>> = [Some(1), None, Some(2)];
+    for item in iter {
+        let Some(val) = item else {
+            break;
+        };
+    }
+}
+
+fn test_let_else_continue() {
+    // Let-else with continue in loop context
+    let items: List<Maybe<Int>> = [Some(1), None, Some(2)];
+    for item in items {
+        let Some(valid) = item else {
+            continue;
+        };
+    }
+}
+
+fn test_let_else_complex_pattern(json: Text) -> Result<Int, ParseError> {
+    // Let-else with complex pattern
+    let Ok(user) = parse_user(json) else {
+        return Err(ParseError);
+    };
+    Ok(user.id)
+}
+
+fn test_let_else_tuple_pattern(maybe_a: Maybe<Int>, maybe_b: Maybe<Int>) -> Maybe<Int> {
+    // Let-else with tuple pattern
+    let (Some(a), Some(b)) = (maybe_a, maybe_b) else {
+        return None;
+    };
+    Some(a + b)
+}
+
+fn test_let_else_type_annotation(default_value: Int) -> Int {
+    fn compute() -> Maybe<Int> { Some(42) }
+    // Let-else with type annotation
+    let Some(value): Maybe<Int> = compute() else {
+        return default_value;
+    };
+    value
+}
+
+fn test_let_else_nested_block() -> Int {
+    // Let-else with nested else block
+    let Some(result) = try_parse() else {
+        log_error("Parse failed");
+        return fallback();
+    };
+    result
+}
+
+fn test_let_else_mutable() {
+    // Let-else with mutable binding - bind first then mutate
+    let Some(mut counter) = get_counter() else {
+        return;
+    };
+    counter = counter + 1;
+}

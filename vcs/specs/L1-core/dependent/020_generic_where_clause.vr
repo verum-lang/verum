@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, generic, where-clause
+
+/// Generic where clauses -- constraining type parameters with
+/// protocol bounds using `where type` syntax.
+/// Grammar: generic_where_clause = 'where' 'type' type_constraint_list ;
+
+type Showable is protocol {
+    fn show(&self) -> Text;
+};
+
+type Numeric is protocol {
+    fn zero() -> Self;
+    fn add(&self, other: &Self) -> Self;
+};
+
+type Comparable is protocol {
+    fn compare(&self, other: &Self) -> Int;
+};
+
+// Generic function with where clause
+fn print_all<T>(items: List<T>) where type T: Showable {
+    for item in items {
+        print(item.show());
+    }
+}
+
+// Multiple constraints
+fn sorted_unique<T>(items: List<T>) -> List<T>
+    where type T: Comparable + Eq
+{
+    let sorted = items.sort();
+    let mut result: List<T> = [];
+    for item in sorted {
+        if result.len() == 0 || result[result.len() - 1] != item {
+            result.push(item);
+        }
+    }
+    result
+}
+
+// Where clause on impl block
+implement<T> Showable for List<T> where type T: Showable {
+    fn show(&self) -> Text {
+        let mut parts: List<Text> = [];
+        for item in self {
+            parts.push(item.show());
+        }
+        f"[{parts.join(\", \")}]"
+    }
+}
+
+// Generic type with where clause
+type SortedList<T> where type T: Comparable is {
+    items: List<T>,
+};
+
+// Function combining generic where and refinement
+fn sum<T>(items: List<T>) -> T
+    where type T: Numeric
+{
+    let mut acc = T.zero();
+    for item in items {
+        acc = acc.add(&item);
+    }
+    acc
+}
+
+// Where clause with associated type constraint
+type Container<T> is protocol {
+    type Item;
+    fn items(&self) -> List<Self.Item>;
+};
+
+fn first_item<C>(c: C) -> Maybe<C.Item>
+    where type C: Container
+{
+    let items = c.items();
+    if items.len() > 0 {
+        Some(items[0])
+    } else {
+        None
+    }
+}
+
+fn main() {
+    let nums = [3, 1, 4, 1, 5, 9, 2, 6, 5];
+    let unique = sorted_unique(nums);
+    assert(unique == [1, 2, 3, 4, 5, 6, 9]);
+
+    let sorted = SortedList { items: [1, 2, 3, 4, 5] };
+    assert(sorted.items.len() == 5);
+}

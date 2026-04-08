@@ -1,0 +1,44 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, map, collection
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Map operations: insert, get, contains_key, len
+
+fn main() -> Int {
+    let mut m = Map.new();
+    m.insert("one", 1);
+    m.insert("two", 2);
+    m.insert("three", 3);
+
+    assert_eq(m.len(), 3);
+    assert_eq(m.contains_key("one"), true);
+    assert_eq(m.contains_key("four"), false);
+
+    let v1 = m.get("one");
+    assert_eq(v1, 1);
+    let v2 = m.get("two");
+    assert_eq(v2, 2);
+    let v3 = m.get("three");
+    assert_eq(v3, 3);
+
+    // Overwrite
+    m.insert("one", 100);
+    assert_eq(m.get("one"), 100);
+    assert_eq(m.len(), 3);
+
+    // Integer keys
+    let mut int_map = Map.new();
+    let mut i = 0;
+    while i < 10 {
+        int_map.insert(i, i * i);
+        i = i + 1;
+    }
+    assert_eq(int_map.len(), 10);
+    assert_eq(int_map.get(5), 25);
+    assert_eq(int_map.get(9), 81);
+
+    print("diff_map_operations: ok");
+    0
+}

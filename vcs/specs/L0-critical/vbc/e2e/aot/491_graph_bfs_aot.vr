@@ -1,0 +1,222 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, graph, bfs, shortest-path
+// @timeout: 30000
+
+// BFS shortest paths on bitmask-based adjacency graph
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn neg_ones() -> Arr8 { Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 } }
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn bit(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn has_bit(mask: Int, n: Int) -> Int {
+    (mask / bit(n)) % 2
+}
+
+// BFS from source, returns distance array (-1 = unreachable)
+// adj[i] is bitmask of neighbors of node i
+fn bfs(adj: Arr8, n: Int, src: Int) -> Arr8 {
+    let mut dist = neg_ones();
+    dist = set8(dist, src, 0);
+    // Use a bitmask as queue (set of nodes to visit)
+    let mut queue = bit(src);
+    let mut level = 0;
+    let mut cont = 1;
+    while cont == 1 {
+        if queue == 0 { cont = 0; }
+        else {
+            let mut next_queue = 0;
+            let mut i = 0;
+            while i < n {
+                if has_bit(queue, i) == 1 {
+                    // Visit neighbors
+                    let neighbors = get8(adj, i);
+                    let mut j = 0;
+                    while j < n {
+                        if has_bit(neighbors, j) == 1 {
+                            if get8(dist, j) == -1 {
+                                dist = set8(dist, j, level + 1);
+                                next_queue = next_queue + bit(j);
+                            }
+                        }
+                        j = j + 1;
+                    }
+                }
+                i = i + 1;
+            }
+            queue = next_queue;
+            level = level + 1;
+        }
+    }
+    dist
+}
+
+// Count reachable nodes from source
+fn count_reachable(adj: Arr8, n: Int, src: Int) -> Int {
+    let dist = bfs(adj, n, src);
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(dist, i) != -1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Check if graph is connected (all nodes reachable from 0)
+fn is_connected(adj: Arr8, n: Int) -> Int {
+    if count_reachable(adj, n, 0) == n { 1 } else { 0 }
+}
+
+// Find diameter (longest shortest path)
+fn graph_diameter(adj: Arr8, n: Int) -> Int {
+    let mut max_dist = 0;
+    let mut i = 0;
+    while i < n {
+        let dist = bfs(adj, n, i);
+        let mut j = 0;
+        while j < n {
+            let d = get8(dist, j);
+            if d > max_dist { max_dist = d; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    max_dist
+}
+
+fn test_linear_graph() -> Int {
+    // 0 - 1 - 2 - 3 - 4 (linear chain)
+    let adj = Arr8 {
+        v0: 2,    // 0→1: bit(1)=2
+        v1: 5,    // 1→0,2: bit(0)+bit(2)=1+4=5
+        v2: 10,   // 2→1,3: bit(1)+bit(3)=2+8=10
+        v3: 20,   // 3→2,4: bit(2)+bit(4)=4+16=20
+        v4: 8,    // 4→3: bit(3)=8
+        v5: 0, v6: 0, v7: 0
+    };
+    let dist = bfs(adj, 5, 0);
+    assert_eq(get8(dist, 0), 0);
+    assert_eq(get8(dist, 1), 1);
+    assert_eq(get8(dist, 2), 2);
+    assert_eq(get8(dist, 3), 3);
+    assert_eq(get8(dist, 4), 4);
+    assert_eq(is_connected(adj, 5), 1);
+    assert_eq(graph_diameter(adj, 5), 4);
+    1
+}
+
+fn test_complete_graph() -> Int {
+    // K4: every node connected to every other
+    let adj = Arr8 {
+        v0: 14,   // 0→1,2,3: 2+4+8=14
+        v1: 13,   // 1→0,2,3: 1+4+8=13
+        v2: 11,   // 2→0,1,3: 1+2+8=11
+        v3: 7,    // 3→0,1,2: 1+2+4=7
+        v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    let dist = bfs(adj, 4, 0);
+    assert_eq(get8(dist, 1), 1);
+    assert_eq(get8(dist, 2), 1);
+    assert_eq(get8(dist, 3), 1);
+    assert_eq(graph_diameter(adj, 4), 1);
+    1
+}
+
+fn test_tree_graph() -> Int {
+    //       0
+    //      / \
+    //     1   2
+    //    / \
+    //   3   4
+    let adj = Arr8 {
+        v0: 6,    // 0→1,2: bit(1)+bit(2)=2+4=6
+        v1: 25,   // 1→0,3,4: bit(0)+bit(3)+bit(4)=1+8+16=25
+        v2: 1,    // 2→0: bit(0)=1
+        v3: 2,    // 3→1: bit(1)=2
+        v4: 2,    // 4→1: bit(1)=2
+        v5: 0, v6: 0, v7: 0
+    };
+    let dist = bfs(adj, 5, 0);
+    assert_eq(get8(dist, 1), 1);
+    assert_eq(get8(dist, 2), 1);
+    assert_eq(get8(dist, 3), 2);
+    assert_eq(get8(dist, 4), 2);
+    assert_eq(is_connected(adj, 5), 1);
+    assert_eq(graph_diameter(adj, 5), 3); // 2→0→1→3 or 2→0→1→4
+    1
+}
+
+fn test_disconnected() -> Int {
+    // 0-1, 2-3 (two components)
+    let adj = Arr8 {
+        v0: 2,    // 0→1
+        v1: 1,    // 1→0
+        v2: 8,    // 2→3
+        v3: 4,    // 3→2
+        v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    assert_eq(is_connected(adj, 4), 0);
+    assert_eq(count_reachable(adj, 4, 0), 2);
+    assert_eq(count_reachable(adj, 4, 2), 2);
+    let dist = bfs(adj, 4, 0);
+    assert_eq(get8(dist, 2), -1); // unreachable
+    assert_eq(get8(dist, 3), -1);
+    1
+}
+
+fn test_cycle() -> Int {
+    // 0-1-2-3-4-0 (cycle of 5)
+    let adj = Arr8 {
+        v0: 18,   // 0→1,4: bit(1)+bit(4)=2+16=18
+        v1: 5,    // 1→0,2: 1+4=5
+        v2: 10,   // 2→1,3: 2+8=10
+        v3: 20,   // 3→2,4: 4+16=20
+        v4: 9,    // 4→0,3: 1+8=9
+        v5: 0, v6: 0, v7: 0
+    };
+    let dist = bfs(adj, 5, 0);
+    assert_eq(get8(dist, 1), 1);
+    assert_eq(get8(dist, 2), 2);
+    assert_eq(get8(dist, 3), 2); // via 4
+    assert_eq(get8(dist, 4), 1);
+    assert_eq(graph_diameter(adj, 5), 2);
+    1
+}
+
+fn main() -> Int {
+    test_linear_graph();
+    test_complete_graph();
+    test_tree_graph();
+    test_disconnected();
+    test_cycle();
+    print("[OK] 491_graph_bfs_aot");
+    0
+}

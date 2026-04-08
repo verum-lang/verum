@@ -1,0 +1,356 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, error-handling, errno
+// @timeout: 5000
+
+/// FFI Error Handling - C error conventions in Verum
+///
+/// Demonstrates various C error handling patterns including
+/// errno, return codes, out parameters, and error callbacks.
+
+type c_int is i32;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+
+// ------------------------------------------------------------
+// Errno-based error handling
+// ------------------------------------------------------------
+
+ffi libc {
+    /// Get current errno value
+    @extern("C")
+    fn __errno_location() -> *mut c_int;
+
+    /// File operations that set errno
+    @extern("C")
+    fn open(path: *const c_char, flags: c_int) -> c_int;
+
+    @extern("C")
+    fn read(fd: c_int, buf: *mut c_void, count: size_t) -> isize;
+
+    @extern("C")
+    fn write(fd: c_int, buf: *const c_void, count: size_t) -> isize;
+
+    @extern("C")
+    fn close(fd: c_int) -> c_int;
+
+    @extern("C")
+    fn strerror(errnum: c_int) -> *const c_char;
+}
+
+/// Get errno value
+fn errno() -> c_int {
+    unsafe { *__errno_location() }
+}
+
+/// Set errno value
+fn set_errno(value: c_int) {
+    unsafe { *__errno_location() = value; }
+}
+
+/// Common errno values
+const EPERM: c_int = 1;
+const ENOENT: c_int = 2;
+const ESRCH: c_int = 3;
+const EINTR: c_int = 4;
+const EIO: c_int = 5;
+const ENXIO: c_int = 6;
+const EBADF: c_int = 9;
+const EAGAIN: c_int = 11;
+const ENOMEM: c_int = 12;
+const EACCES: c_int = 13;
+const EEXIST: c_int = 17;
+const ENODEV: c_int = 19;
+const EINVAL: c_int = 22;
+
+/// Convert errno to Verum error type
+type IoError is
+    | PermissionDenied
+    | NotFound
+    | Interrupted
+    | IoFailed
+    | WouldBlock
+    | OutOfMemory
+    | InvalidArgument
+    | AlreadyExists
+    | Unknown { code: c_int, message: Text };
+
+fn errno_to_error(code: c_int) -> IoError {
+    if code == 1 || code == 13 {
+        IoError.PermissionDenied
+    } else if code == 2 {
+        IoError.NotFound
+    } else if code == 4 {
+        IoError.Interrupted
+    } else if code == 5 {
+        IoError.IoFailed
+    } else if code == 11 {
+        IoError.WouldBlock
+    } else if code == 12 {
+        IoError.OutOfMemory
+    } else if code == 22 {
+        IoError.InvalidArgument
+    } else if code == 17 {
+        IoError.AlreadyExists
+    } else {
+        IoError.Unknown { code: code, message: f"errno {code}" }
+    }
+}
+
+/// Safe wrapper for file open
+fn file_open(path: &Text, flags: c_int) -> Result<c_int, IoError> {
+    let c_path = path.to_c_string();
+    set_errno(0);
+
+    let fd = unsafe { open(c_path.as_ptr(), flags) };
+
+    if fd < 0 {
+        Err(errno_to_error(errno()))
+    } else {
+        Ok(fd)
+    }
+}
+
+/// Safe wrapper for read
+fn file_read(fd: c_int, buf: &mut [u8]) -> Result<usize, IoError> {
+    set_errno(0);
+
+    let result = unsafe {
+        read(fd, buf.as_mut_ptr() as *mut c_void, buf.len())
+    };
+
+    if result < 0 {
+        Err(errno_to_error(errno()))
+    } else {
+        Ok(result as usize)
+    }
+}
+
+// ------------------------------------------------------------
+// Return code error handling
+// ------------------------------------------------------------
+
+ffi custom_lib {
+    /// Function returning error code, result via out parameter
+    @extern("C")
+    fn compute_value(
+        input: c_int,
+        result: *mut c_int  // Out parameter
+    ) -> c_int;  // Returns 0 on success, error code otherwise;
+
+    /// Error codes for custom_lib
+    const CUSTOM_OK: c_int = 0;
+    const CUSTOM_INVALID_INPUT: c_int = 1;
+    const CUSTOM_OVERFLOW: c_int = 2;
+    const CUSTOM_INTERNAL: c_int = 3;
+}
+
+type CustomError is
+    | InvalidInput
+    | Overflow
+    | Internal { code: c_int };
+
+fn compute_safe(input: c_int) -> Result<c_int, CustomError> {
+    let mut result: c_int = 0;
+
+    let error_code = unsafe {
+        compute_value(input, &mut result)
+    };
+
+    if error_code == 0 {
+        Ok(result)
+    } else if error_code == 1 {
+        Err(CustomError.InvalidInput)
+    } else if error_code == 2 {
+        Err(CustomError.Overflow)
+    } else {
+        Err(CustomError.Internal { code: error_code })
+    }
+}
+
+// ------------------------------------------------------------
+// Structured error handling with error info
+// ------------------------------------------------------------
+
+@repr(C)
+type ErrorInfo is {
+    code: c_int,
+    message: [c_char; 256],
+    source_file: *const c_char,
+    source_line: c_int,
+};
+
+ffi advanced_lib {
+    /// Function that fills error info on failure
+    @extern("C")
+    fn advanced_operation(
+        input: *const c_void,
+        output: *mut c_void,
+        error: *mut ErrorInfo
+    ) -> c_int;  // Returns 0 on success;
+
+    /// Get last error details
+    @extern("C")
+    fn get_last_error() -> *const ErrorInfo;
+
+    /// Clear error state
+    @extern("C")
+    fn clear_error();
+}
+
+type DetailedError is {
+    code: c_int,
+    message: Text,
+    location: Maybe<(Text, c_int)>,  // file, line
+};
+
+fn advanced_safe<T, U>(input: &T) -> Result<U, DetailedError> {
+    let mut output: U = unsafe { zeroed() };
+    let mut error = ErrorInfo {
+        code: 0,
+        message: [0; 256],
+        source_file: 0 as *const c_char,
+        source_line: 0,
+    };
+
+    let result = unsafe {
+        advanced_operation(
+            input as *const T as *const c_void,
+            &mut output as *mut U as *mut c_void,
+            &mut error
+        )
+    };
+
+    if result == 0 {
+        Ok(output)
+    } else {
+        let message = unsafe {
+            cstr_to_text(error.message.as_ptr())
+        };
+        let location = if error.source_file.is_null() {
+            None
+        } else {
+            let file = unsafe { cstr_to_text(error.source_file) };
+            Some((file, error.source_line))
+        };
+        Err(DetailedError { code: error.code, message, location })
+    }
+}
+
+// ------------------------------------------------------------
+// Error callback pattern
+// ------------------------------------------------------------
+
+type ErrorCallback is fn(*mut c_void, c_int, *const c_char);
+
+ffi stream_lib {
+    /// Set error handler callback
+    @extern("C")
+    fn set_error_handler(callback: ErrorCallback, user_data: *mut c_void);
+
+    /// Process stream (may trigger error callback)
+    @extern("C")
+    fn process_stream(data: *const u8, len: size_t) -> c_int;
+}
+
+type ErrorCollector is {
+    errors: List<(c_int, Text)>,
+};
+
+@extern("C")
+fn error_collector_callback(
+    user_data: *mut c_void,
+    code: c_int,
+    message: *const c_char
+) {
+    unsafe {
+        let collector = &mut *(user_data as *mut ErrorCollector);
+        let msg = cstr_to_text(message);
+        collector.errors.push((code, msg));
+    }
+}
+
+fn process_with_errors(data: &[u8]) -> Result<(), List<(c_int, Text)>> {
+    let mut collector = ErrorCollector { errors: List.new() };
+
+    let result = unsafe {
+        set_error_handler(
+            error_collector_callback,
+            &mut collector as *mut _ as *mut c_void
+        );
+
+        let r = process_stream(data.as_ptr(), data.len());
+
+        // Reset error handler
+        set_error_handler(error_collector_callback, 0 as *mut c_void);
+        r
+    };
+
+    if result == 0 && collector.errors.is_empty() {
+        Ok(())
+    } else {
+        Err(collector.errors)
+    }
+}
+
+// ------------------------------------------------------------
+// Thread-local error handling
+// ------------------------------------------------------------
+
+ffi thread_safe_lib {
+    /// Get thread-local error code
+    @extern("C")
+    fn tls_get_error_code() -> c_int;
+
+    /// Get thread-local error message
+    @extern("C")
+    fn tls_get_error_message() -> *const c_char;
+
+    /// Clear thread-local error
+    @extern("C")
+    fn tls_clear_error();
+
+    /// Operation that uses TLS for errors
+    @extern("C")
+    fn tls_operation(input: c_int) -> c_int;
+}
+
+fn tls_safe_operation(input: c_int) -> Result<c_int, (c_int, Text)> {
+    unsafe { tls_clear_error(); }
+    let result = unsafe { tls_operation(input) };
+    let code = unsafe { tls_get_error_code() };
+
+    if code == 0 {
+        Ok(result)
+    } else {
+        let msg = unsafe { cstr_to_text(tls_get_error_message()) };
+        Err((code, msg))
+    }
+}
+
+/// Convert C string to Text (stub)
+unsafe fn cstr_to_text(ptr: *const c_char) -> Text {
+    Text.from("c_string")
+}
+
+/// Zero-initialize memory
+@extern("C")
+unsafe fn zeroed<T>() -> T;
+
+fn main() {
+    // Errno-based error handling
+    let file_result = file_open("/nonexistent", 0);
+    match file_result {
+        Ok(fd) => print(f"Opened file descriptor: {fd}"),
+        Err(e) => print(f"Error opening file"),
+    };
+
+    // Return code error handling
+    let compute_result = compute_safe(42);
+    match compute_result {
+        Ok(value) => print(f"Computed: {value}"),
+        Err(e) => print(f"Error computing"),
+    };
+}

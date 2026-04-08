@@ -1,0 +1,152 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L0
+// @category: comprehensions
+// @tags: parser, comprehensions, stream, errors
+// @description: Invalid stream comprehension syntax that should fail to parse
+
+// ============================================================================
+// MISSING REQUIRED ELEMENTS
+// ============================================================================
+
+fn test_stream_missing_opening_bracket() {
+    // ERROR: Missing opening bracket after 'stream'
+    let bad = stream x for x in items];
+}
+
+fn test_stream_missing_closing_bracket() {
+    // ERROR: Missing closing bracket
+    let bad = stream[x for x in items;
+}
+
+fn test_stream_missing_for_keyword() {
+    // ERROR: Missing 'for' keyword
+    let bad = stream[x x in items];
+}
+
+fn test_stream_missing_in_keyword() {
+    // ERROR: Missing 'in' keyword
+    let bad = stream[x for x items];
+}
+
+fn test_stream_missing_expression() {
+    // ERROR: Missing element expression
+    let bad = stream[for x in items];
+}
+
+fn test_stream_missing_iterator() {
+    // ERROR: Missing iterator expression
+    let bad = stream[x for x in];
+}
+
+fn test_stream_missing_pattern() {
+    // ERROR: Missing pattern after 'for'
+    let bad = stream[x for in items];
+}
+
+// ============================================================================
+// INVALID CLAUSE SYNTAX
+// ============================================================================
+
+fn test_stream_invalid_if_clause() {
+    // ERROR: 'if' without condition
+    let bad = stream[x for x in items if];
+}
+
+fn test_stream_invalid_let_clause_no_equals() {
+    // ERROR: 'let' without '='
+    let bad = stream[y for x in items let y x * 2];
+}
+
+fn test_stream_invalid_let_clause_no_value() {
+    // ERROR: 'let' without value
+    let bad = stream[y for x in items let y =];
+}
+
+fn test_stream_invalid_let_clause_no_pattern() {
+    // ERROR: 'let' without pattern
+    let bad = stream[y for x in items let = x * 2];
+}
+
+fn test_stream_invalid_nested_for() {
+    // ERROR: Nested 'for' without 'in'
+    let bad = stream[x for x in xs for y ys];
+}
+
+// ============================================================================
+// SYNTAX CONFUSION
+// ============================================================================
+
+fn test_stream_using_where_instead_of_if() {
+    // ERROR: Using 'where' instead of 'if'
+    let bad = stream[x for x in items where x > 0];
+}
+
+fn test_stream_using_colon_like_map() {
+    // ERROR: Using key:value syntax (that's map syntax)
+    let bad = stream[k: v for (k, v) in pairs];
+}
+
+fn test_stream_using_braces() {
+    // ERROR: Using braces instead of brackets
+    let bad = stream{x for x in items};
+}
+
+// ============================================================================
+// STRUCTURAL ERRORS
+// ============================================================================
+
+fn test_stream_extra_closing_bracket() {
+    // ERROR: Extra closing bracket
+    let bad = stream[x for x in items]];
+}
+
+fn test_stream_mismatched_brackets() {
+    // ERROR: Using brace instead of bracket
+    let bad = stream[x for x in items};
+}
+
+fn test_stream_empty_brackets() {
+    // ERROR: Empty stream comprehension
+    let bad = stream[];
+}
+
+fn test_stream_missing_keyword() {
+    // ERROR: Just brackets without 'stream' keyword (this is list comprehension)
+    // Note: This tests that stream requires 'stream' keyword
+    // [x for x in items] is a list, not a stream
+}
+
+// ============================================================================
+// INCORRECT KEYWORD USAGE
+// ============================================================================
+
+fn test_stream_typo_keyword() {
+    // ERROR: Typo in 'stream' keyword
+    let bad = steram[x for x in items];
+}
+
+fn test_stream_uppercase_keyword() {
+    // ERROR: Uppercase 'STREAM' is not the keyword
+    let bad = STREAM[x for x in items];
+}
+
+fn test_stream_iter_keyword() {
+    // ERROR: 'iter' is not the keyword, 'stream' is
+    let bad = iter[x for x in items];
+}
+
+fn test_stream_lazy_keyword() {
+    // ERROR: 'lazy' is not the keyword, 'stream' is
+    let bad = lazy[x for x in items];
+}
+
+// ============================================================================
+// SPACE BETWEEN KEYWORD AND BRACKET
+// ============================================================================
+
+fn test_stream_space_before_bracket() {
+    // Note: This tests whitespace sensitivity
+    // 'stream [' might be parsed differently than 'stream['
+    let bad = stream [x for x in items];  // Space between keyword and bracket
+}

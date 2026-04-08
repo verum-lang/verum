@@ -1,0 +1,203 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, roman-numerals, conversion, encoding
+// @timeout: 30000
+
+// Roman numeral conversions (integer representation)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Encode roman numeral as a sequence of symbol codes:
+// 1=I, 5=V, 10=X, 50=L, 100=C, 500=D, 1000=M
+
+// Convert integer to roman numeral as array of values
+// Returns (arr, length)
+fn to_roman_len(n: Int) -> Int {
+    let mut remaining = n;
+    let mut len = 0;
+    // Count symbols needed
+    while remaining >= 1000 { remaining = remaining - 1000; len = len + 1; }
+    if remaining >= 900 { remaining = remaining - 900; len = len + 2; }
+    if remaining >= 500 { remaining = remaining - 500; len = len + 1; }
+    if remaining >= 400 { remaining = remaining - 400; len = len + 2; }
+    while remaining >= 100 { remaining = remaining - 100; len = len + 1; }
+    if remaining >= 90 { remaining = remaining - 90; len = len + 2; }
+    if remaining >= 50 { remaining = remaining - 50; len = len + 1; }
+    if remaining >= 40 { remaining = remaining - 40; len = len + 2; }
+    while remaining >= 10 { remaining = remaining - 10; len = len + 1; }
+    if remaining >= 9 { remaining = remaining - 9; len = len + 2; }
+    if remaining >= 5 { remaining = remaining - 5; len = len + 1; }
+    if remaining >= 4 { remaining = remaining - 4; len = len + 2; }
+    while remaining >= 1 { remaining = remaining - 1; len = len + 1; }
+    len
+}
+
+// Encode number as sum of roman digit values (for verification)
+// Returns packed checksum: sum of all roman digit values should equal n
+fn roman_checksum(n: Int) -> Int {
+    // The roman representation sums to n (with subtractive pairs)
+    // This is trivially true by construction, so we verify length instead
+    n
+}
+
+// Decode a roman numeral sequence (given as array of values)
+// Values: symbol values in order (e.g., [100, 1000] = CM = 900)
+fn decode_roman(vals: Arr8, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let cur = get8(vals, i);
+        if i + 1 < n {
+            let next = get8(vals, i + 1);
+            if cur < next {
+                // Subtractive: IV=4, IX=9, XL=40, XC=90, CD=400, CM=900
+                total = total + next - cur;
+                i = i + 2;
+            } else {
+                total = total + cur;
+                i = i + 1;
+            }
+        } else {
+            total = total + cur;
+            i = i + 1;
+        }
+    }
+    total
+}
+
+// Check if a number follows roman numeral rules
+// (simplified: just check it's in valid range)
+fn is_valid_roman(n: Int) -> Int {
+    if n >= 1 {
+        if n <= 3999 { return 1; }
+    }
+    0
+}
+
+// Count specific digit type occurrences
+fn count_digit(n: Int, digit: Int) -> Int {
+    let mut remaining = n;
+    let mut count = 0;
+    while remaining >= digit {
+        remaining = remaining - digit;
+        count = count + 1;
+    }
+    count
+}
+
+fn test_decode_simple() -> Int {
+    // III = [1,1,1] → 3
+    let iii = Arr8 { v0: 1, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(iii, 3), 3);
+
+    // VII = [5,1,1] → 7
+    let vii = Arr8 { v0: 5, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(vii, 3), 7);
+
+    // XII = [10,1,1] → 12
+    let xii = Arr8 { v0: 10, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(xii, 3), 12);
+    1
+}
+
+fn test_decode_subtractive() -> Int {
+    // IV = [1,5] → 4
+    let iv = Arr8 { v0: 1, v1: 5, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(iv, 2), 4);
+
+    // IX = [1,10] → 9
+    let ix = Arr8 { v0: 1, v1: 10, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(ix, 2), 9);
+
+    // XL = [10,50] → 40
+    let xl = Arr8 { v0: 10, v1: 50, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(xl, 2), 40);
+
+    // XC = [10,100] → 90
+    let xc = Arr8 { v0: 10, v1: 100, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(xc, 2), 90);
+
+    // CD = [100,500] → 400
+    let cd = Arr8 { v0: 100, v1: 500, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(cd, 2), 400);
+
+    // CM = [100,1000] → 900
+    let cm = Arr8 { v0: 100, v1: 1000, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(cm, 2), 900);
+    1
+}
+
+fn test_decode_complex() -> Int {
+    // MCMXC = [1000,100,1000,10,100] → 1990
+    let mcmxc = Arr8 { v0: 1000, v1: 100, v2: 1000, v3: 10, v4: 100, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(mcmxc, 5), 1990);
+
+    // XLII = [10,50,1,1] → 42
+    let xlii = Arr8 { v0: 10, v1: 50, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(xlii, 4), 42);
+    1
+}
+
+fn test_roman_lengths() -> Int {
+    assert_eq(to_roman_len(1), 1);    // I
+    assert_eq(to_roman_len(4), 2);    // IV
+    assert_eq(to_roman_len(8), 4);    // VIII (V+I+I+I)
+    assert_eq(to_roman_len(9), 2);    // IX
+    assert_eq(to_roman_len(14), 3);   // XIV
+    assert_eq(to_roman_len(3999), 9); // MMMCMXCIX = 9 symbols
+    1
+}
+
+fn test_validity() -> Int {
+    assert_eq(is_valid_roman(1), 1);
+    assert_eq(is_valid_roman(3999), 1);
+    assert_eq(is_valid_roman(0), 0);
+    assert_eq(is_valid_roman(4000), 0);
+    assert_eq(is_valid_roman(-1), 0);
+    1
+}
+
+fn test_roundtrip_property() -> Int {
+    // For any encoded roman numeral, decoding gives the original
+    // LVIII = [50,5,1,1,1] = 58
+    let lviii = Arr8 { v0: 50, v1: 5, v2: 1, v3: 1, v4: 1, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(lviii, 5), 58);
+    assert_eq(to_roman_len(58), 5);
+
+    // DCCC = [500,100,100,100] = 800
+    let dccc = Arr8 { v0: 500, v1: 100, v2: 100, v3: 100, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(decode_roman(dccc, 4), 800);
+    1
+}
+
+fn main() -> Int {
+    test_decode_simple();
+    test_decode_subtractive();
+    test_decode_complex();
+    test_roman_lengths();
+    test_validity();
+    test_roundtrip_property();
+    print("[OK] 518_roman_numerals_aot");
+    0
+}

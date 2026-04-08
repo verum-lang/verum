@@ -1,0 +1,118 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/runtime/sync_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, intrinsics, runtime, sync, futex, spinlock, fence
+// @description: Tests for synchronization intrinsics including futex operations,
+//               spinlock operations, and CPU hints/fences.
+//
+// Coverage:
+// - Function type verification: futex_wait, futex_wake, futex_wake_one, futex_wake_all
+// - Function type verification: spinlock_try_lock, spinlock_lock, spinlock_unlock, spinlock_is_locked
+// - Function type verification: spin_hint, spin_loop_hint, memory_fence, compiler_fence
+//
+// Test Strategy:
+// - Verify function imports resolve
+// - Verify function type signatures via type annotations
+// =============================================================================
+
+module specs.core.intrinsics.runtime.sync_test;
+
+mount core.intrinsics.runtime.sync.{
+    futex_wait,
+    futex_wake,
+    futex_wake_one,
+    futex_wake_all,
+    spinlock_try_lock,
+    spinlock_lock,
+    spinlock_unlock,
+    spinlock_is_locked,
+    spin_hint,
+    spin_loop_hint,
+    memory_fence,
+    compiler_fence,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Futex Function Type Tests
+// =============================================================================
+
+@test
+fn test_futex_wait_exists() {
+    // futex_wait: fn(*const UInt32, UInt32, UInt64) -> Int32
+    let _ = futex_wait;
+}
+
+@test
+fn test_futex_wake_exists() {
+    // futex_wake: fn(*const UInt32, UInt32) -> Int32
+    let _ = futex_wake;
+}
+
+@test
+fn test_futex_wake_one_exists() {
+    let _ = futex_wake_one;
+}
+
+@test
+fn test_futex_wake_all_exists() {
+    let _ = futex_wake_all;
+}
+
+// =============================================================================
+// Spinlock Function Type Tests
+// =============================================================================
+
+@test
+fn test_spinlock_try_lock_exists() {
+    let _ = spinlock_try_lock;
+}
+
+@test
+fn test_spinlock_lock_exists() {
+    let _ = spinlock_lock;
+}
+
+@test
+fn test_spinlock_unlock_exists() {
+    let _ = spinlock_unlock;
+}
+
+@test
+fn test_spinlock_is_locked_exists() {
+    let _ = spinlock_is_locked;
+}
+
+// =============================================================================
+// CPU Hint and Fence Function Tests
+// =============================================================================
+
+@test
+fn test_spin_hint_exists() {
+    let _ = spin_hint;
+}
+
+@test
+fn test_spin_loop_hint_exists() {
+    let _ = spin_loop_hint;
+}
+
+@test
+fn test_memory_fence_exists() {
+    let _ = memory_fence;
+}
+
+@test
+fn test_compiler_fence_exists() {
+    let _ = compiler_fence;
+}

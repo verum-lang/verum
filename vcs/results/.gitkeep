@@ -1,0 +1,7 @@
+# VCS Results Directory
+# This directory stores test results, history, and baselines
+
+# Directory structure:
+# - latest/    : Results from the most recent test run
+# - history/   : Historical test data for trend analysis
+# - baselines/ : Performance and correctness baselines

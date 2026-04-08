@@ -1,0 +1,4 @@
+// @test: typecheck-pass
+// @level: L0
+// @expect: pass
+fn main() { let mut x: Int = 0; if false { x = 1; } assert_eq(x, 0); }

@@ -1,0 +1,190 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, rabin_karp, rolling_hash, pattern_matching, integer_arrays
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Rabin-Karp style rolling hash for pattern matching on integer arrays.
+// Uses polynomial hashing: hash(a[0..m]) = sum(a[i] * BASE^(m-1-i)) mod MOD
+// The rolling hash removes the leftmost element and adds the rightmost.
+//
+// BASE = 31, MOD = 1000000007 (large prime)
+
+fn rk_hash_init(pat: [Int; 16], m: Int, base: Int, modv: Int) -> Int {
+    // Compute hash of pattern pat[0..m-1]
+    let mut h = 0;
+    let mut i = 0;
+    while i < m {
+        h = (h * base + pat[i]) % modv;
+        i = i + 1;
+    }
+    h
+}
+
+fn rk_pow(base: Int, exp: Int, modv: Int) -> Int {
+    // Compute base^exp mod modv (iterative)
+    let mut result = 1;
+    let mut b = base % modv;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b) % modv; }
+        b = (b * b) % modv;
+        e = e / 2;
+    }
+    result
+}
+
+// Find all occurrences of pattern pat[0..m-1] in text txt[0..n-1].
+// Returns count of matches and stores match positions in out_pos[0..].
+fn rk_search(
+    txt:     [Int; 32],
+    n:       Int,
+    pat:     [Int; 16],
+    m:       Int,
+    out_pos: [Int; 32],
+    base:    Int,
+    modv:    Int
+) -> Int {
+    if m > n { return 0; }
+    let high_pow = rk_pow(base, m - 1, modv);
+    let pat_hash = rk_hash_init(pat, m, base, modv);
+
+    // Compute initial window hash: txt[0..m-1]
+    let mut win_hash = 0;
+    let mut i = 0;
+    while i < m {
+        win_hash = (win_hash * base + txt[i]) % modv;
+        i = i + 1;
+    }
+
+    let mut cnt = 0;
+    let mut start = 0;
+    while start <= n - m {
+        // Check hash match then verify character by character
+        if win_hash == pat_hash {
+            let mut match_ok = 1;
+            let mut j = 0;
+            while j < m {
+                if txt[start + j] != pat[j] { match_ok = 0; }
+                j = j + 1;
+            }
+            if match_ok == 1 {
+                out_pos[cnt] = start;
+                cnt = cnt + 1;
+            }
+        }
+        // Roll hash: remove txt[start], add txt[start+m]
+        if start < n - m {
+            win_hash = (win_hash - (txt[start] * high_pow) % modv + modv) % modv;
+            win_hash = (win_hash * base + txt[start + m]) % modv;
+        }
+        start = start + 1;
+    }
+    cnt
+}
+
+fn test_rk_simple() {
+    // txt = [1,2,3,4,5,6,7,8], pat = [3,4,5]
+    // Expected: one match at position 2
+    let txt = [1, 2, 3, 4, 5, 6, 7, 8,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0];
+    let pat = [3, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = rk_search(txt, 8, pat, 3, pos, 31, 1000000007);
+    assert_eq(cnt, 1);
+    assert_eq(pos[0], 2);
+    print("rk_simple: ok");
+}
+
+fn test_rk_multiple_matches() {
+    // txt = [1,2,1,2,1,2,1,2], pat = [1,2]
+    // Matches at positions 0, 2, 4, 6
+    let txt = [1, 2, 1, 2, 1, 2, 1, 2,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0];
+    let pat = [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = rk_search(txt, 8, pat, 2, pos, 31, 1000000007);
+    assert_eq(cnt, 4);
+    assert_eq(pos[0], 0);
+    assert_eq(pos[1], 2);
+    assert_eq(pos[2], 4);
+    assert_eq(pos[3], 6);
+    print("rk_multiple_matches: ok");
+}
+
+fn test_rk_no_match() {
+    // txt = [1,3,5,7,9,11,13,15], pat = [2,4]
+    // No match expected
+    let txt = [1, 3, 5, 7, 9, 11, 13, 15,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0];
+    let pat = [2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = rk_search(txt, 8, pat, 2, pos, 31, 1000000007);
+    assert_eq(cnt, 0);
+    print("rk_no_match: ok");
+}
+
+fn test_rk_single_element_pattern() {
+    // txt = [5,3,7,3,3,9,3,1], pat = [3]
+    // Matches at positions 1, 3, 4, 6
+    let txt = [5, 3, 7, 3, 3, 9, 3, 1,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0];
+    let pat = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = rk_search(txt, 8, pat, 1, pos, 31, 1000000007);
+    assert_eq(cnt, 4);
+    assert_eq(pos[0], 1);
+    assert_eq(pos[1], 3);
+    assert_eq(pos[2], 4);
+    assert_eq(pos[3], 6);
+    print("rk_single_element_pattern: ok");
+}
+
+fn test_rk_full_match() {
+    // Pattern equals text exactly
+    let txt = [10, 20, 30, 40, 50, 60, 70, 80,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0];
+    let pat = [10, 20, 30, 40, 50, 60, 70, 80, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = rk_search(txt, 8, pat, 8, pos, 31, 1000000007);
+    assert_eq(cnt, 1);
+    assert_eq(pos[0], 0);
+
+    // Also verify rk_pow
+    // 31^0 = 1
+    assert_eq(rk_pow(31, 0, 1000000007), 1);
+    // 31^1 = 31
+    assert_eq(rk_pow(31, 1, 1000000007), 31);
+    // 31^2 = 961
+    assert_eq(rk_pow(31, 2, 1000000007), 961);
+    // 2^10 = 1024
+    assert_eq(rk_pow(2, 10, 1000000007), 1024);
+
+    print("rk_full_match: ok");
+}
+
+fn main() -> Int {
+    test_rk_simple();
+    test_rk_multiple_matches();
+    test_rk_no_match();
+    test_rk_single_element_pattern();
+    test_rk_full_match();
+    print("[OK] 482_interp_rabin_karp");
+    0
+}

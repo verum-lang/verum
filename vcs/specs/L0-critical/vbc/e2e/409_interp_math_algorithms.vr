@@ -1,0 +1,157 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, math, algorithms
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests mathematical algorithms: GCD, LCM, modular exponentiation,
+// prime testing, combinatorics.
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    (a / gcd(a, b)) * b
+}
+
+fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % modulus;
+        }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return 0; }
+        i = i + 2;
+    }
+    1
+}
+
+fn test_gcd() {
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(48, 36), 12);
+    assert_eq(gcd(1, 1), 1);
+    assert_eq(gcd(0, 5), 5);
+    print("gcd: ok");
+}
+
+fn test_lcm() {
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(12, 18), 36);
+    assert_eq(lcm(7, 5), 35);
+    assert_eq(lcm(3, 3), 3);
+    print("lcm: ok");
+}
+
+fn test_mod_pow() {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    // 3^7 mod 100 = 2187 mod 100 = 87
+    assert_eq(mod_pow(3, 7, 100), 87);
+    // 5^3 mod 13 = 125 mod 13 = 8
+    assert_eq(mod_pow(5, 3, 13), 8);
+    // Any^0 mod m = 1
+    assert_eq(mod_pow(99, 0, 7), 1);
+    print("mod_pow: ok");
+}
+
+fn test_primes() {
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(5), 1);
+    assert_eq(is_prime(13), 1);
+    assert_eq(is_prime(15), 0);
+    assert_eq(is_prime(97), 1);
+    assert_eq(is_prime(100), 0);
+
+    // Count primes up to 100
+    let mut count = 0;
+    let mut n = 2;
+    while n <= 100 {
+        count = count + is_prime(n);
+        n = n + 1;
+    }
+    // There are 25 primes up to 100
+    assert_eq(count, 25);
+    print("primes: ok");
+}
+
+fn test_sum_of_divisors() {
+    // Sum of divisors of n
+    let n = 28;
+    let mut sum = 0;
+    let mut d = 1;
+    while d <= n {
+        if n % d == 0 {
+            sum = sum + d;
+        }
+        d = d + 1;
+    }
+    // 28 is a perfect number: 1+2+4+7+14+28 = 56 = 2*28
+    assert_eq(sum, 56);
+    print("sum_of_divisors: ok");
+}
+
+fn test_collatz_length() {
+    // Collatz sequence length for starting value n
+    let mut n = 27;
+    let mut steps = 0;
+    while n != 1 {
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    // Collatz(27) takes 111 steps
+    assert_eq(steps, 111);
+    print("collatz_length: ok");
+}
+
+fn test_pascal_triangle() {
+    // Compute C(n, k) using Pascal's triangle (iterative)
+    // C(10, 5) = 252
+    let n = 10;
+    let k = 5;
+    let mut c = 1;
+    let mut i = 0;
+    while i < k {
+        c = c * (n - i);
+        c = c / (i + 1);
+        i = i + 1;
+    }
+    assert_eq(c, 252);
+    print("pascal_triangle: ok");
+}
+
+fn main() -> Int {
+    test_gcd();
+    test_lcm();
+    test_mod_pow();
+    test_primes();
+    test_sum_of_divisors();
+    test_collatz_length();
+    test_pascal_triangle();
+    print("[OK] 409_interp_math_algorithms");
+    0
+}

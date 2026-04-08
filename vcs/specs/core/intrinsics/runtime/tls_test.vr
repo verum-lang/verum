@@ -1,0 +1,128 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/runtime/tls_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, intrinsics, runtime, tls, thread-local, context
+// @description: Tests for thread-local storage intrinsics including TLS base
+//               access, slot operations, context frames, and typed access.
+//
+// Coverage:
+// - TLS base: tls_get_base
+// - Slot operations: tls_slot_get, tls_slot_set, tls_slot_clear, tls_slot_has
+// - Context frames: tls_frame_push, tls_frame_pop
+// - Typed access: tls_read_ptr, tls_write_ptr, tls_read_i32, tls_write_i32,
+//   tls_read_usize, tls_write_usize
+//
+// Test Strategy:
+// - Verify function imports resolve
+// - Verify function type signatures
+// =============================================================================
+
+module specs.core.intrinsics.runtime.tls_test;
+
+mount core.intrinsics.runtime.tls.{
+    tls_get_base,
+    tls_slot_get,
+    tls_slot_set,
+    tls_slot_clear,
+    tls_slot_has,
+    tls_frame_push,
+    tls_frame_pop,
+    tls_read_ptr,
+    tls_write_ptr,
+    tls_read_i32,
+    tls_write_i32,
+    tls_read_usize,
+    tls_write_usize,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// TLS Base Access Tests
+// =============================================================================
+
+@test
+fn test_tls_get_base_exists() {
+    let _ = tls_get_base;
+}
+
+// =============================================================================
+// TLS Slot Operation Tests
+// =============================================================================
+
+@test
+fn test_tls_slot_get_exists() {
+    let _ = tls_slot_get;
+}
+
+@test
+fn test_tls_slot_set_exists() {
+    let _ = tls_slot_set;
+}
+
+@test
+fn test_tls_slot_clear_exists() {
+    let _ = tls_slot_clear;
+}
+
+@test
+fn test_tls_slot_has_exists() {
+    let _ = tls_slot_has;
+}
+
+// =============================================================================
+// TLS Context Frame Tests
+// =============================================================================
+
+@test
+fn test_tls_frame_push_exists() {
+    let _ = tls_frame_push;
+}
+
+@test
+fn test_tls_frame_pop_exists() {
+    let _ = tls_frame_pop;
+}
+
+// =============================================================================
+// Typed TLS Access Tests
+// =============================================================================
+
+@test
+fn test_tls_read_ptr_exists() {
+    let _ = tls_read_ptr;
+}
+
+@test
+fn test_tls_write_ptr_exists() {
+    let _ = tls_write_ptr;
+}
+
+@test
+fn test_tls_read_i32_exists() {
+    let _ = tls_read_i32;
+}
+
+@test
+fn test_tls_write_i32_exists() {
+    let _ = tls_write_i32;
+}
+
+@test
+fn test_tls_read_usize_exists() {
+    let _ = tls_read_usize;
+}
+
+@test
+fn test_tls_write_usize_exists() {
+    let _ = tls_write_usize;
+}

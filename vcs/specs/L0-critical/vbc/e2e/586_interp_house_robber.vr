@@ -1,0 +1,128 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, house_robber, max_sum_non_adjacent, dynamic_programming, dp
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Maximum sum of non-adjacent elements (house robber problem).
+//
+// Given an array of non-negative integers, find the maximum sum
+// of elements such that no two chosen elements are adjacent.
+//
+// DP recurrence:
+//   dp[i] = max(dp[i-1], dp[i-2] + arr[i])
+//   dp[0] = arr[0]
+//   dp[1] = max(arr[0], arr[1])
+//
+// Space-optimized version uses two variables: prev2 and prev1.
+//
+// Verified examples:
+//   [1,2,3,1]       -> 4 (pick 1+3)
+//   [2,7,9,3,1]     -> 12 (pick 2+9+1)
+//   [5,5,10,100,10,5] -> 110 (pick 5+100+5)
+//   [3,10,3,1,2]    -> 12 (pick 10+2)
+//   [1,1,1,1,1]     -> 3 (pick 1+1+1 at positions 0,2,4)
+//   [10]            -> 10
+//   [10,5]          -> 10
+
+// Space-optimized house robber DP.
+fn house_robber(arr: [Int; 16], n: Int) -> Int {
+    if n == 0 { return 0; }
+    if n == 1 { return arr[0]; }
+    let mut prev2 = arr[0];
+    let mut prev1 = if arr[0] > arr[1] { arr[0] } else { arr[1] };
+    let mut i = 2;
+    while i < n {
+        let cand = prev2 + arr[i];
+        let next = if cand > prev1 { cand } else { prev1 };
+        prev2 = prev1;
+        prev1 = next;
+        i = i + 1;
+    }
+    prev1
+}
+
+// Full DP version that also records the dp array for inspection.
+fn house_robber_dp(arr: [Int; 16], n: Int, dp: [Int; 16]) -> Int {
+    if n == 0 { return 0; }
+    dp[0] = arr[0];
+    if n == 1 { return dp[0]; }
+    dp[1] = if arr[0] > arr[1] { arr[0] } else { arr[1] };
+    let mut i = 2;
+    while i < n {
+        let cand = dp[i - 2] + arr[i];
+        dp[i] = if cand > dp[i - 1] { cand } else { dp[i - 1] };
+        i = i + 1;
+    }
+    dp[n - 1]
+}
+
+fn test_basic_cases() {
+    // [1,2,3,1]: dp[0]=1, dp[1]=2, dp[2]=max(2,1+3)=4, dp[3]=max(4,2+1)=4.
+    let mut a1 = [1,2,3,1,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(house_robber(a1, 4), 4);
+    // [2,7,9,3,1]: dp[0]=2,dp[1]=7,dp[2]=max(7,2+9)=11,dp[3]=max(11,7+3)=11,dp[4]=max(11,11+1)=12.
+    let mut a2 = [2,7,9,3,1,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(house_robber(a2, 5), 12);
+    // [10]: single element.
+    let mut a3 = [10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(house_robber(a3, 1), 10);
+    print("basic_cases: ok");
+}
+
+fn test_large_middle() {
+    // [5,5,10,100,10,5]: pick positions 0,3,5: 5+100+5=110.
+    // dp[0]=5, dp[1]=5, dp[2]=max(5,5+10)=15, dp[3]=max(15,5+100)=105,
+    // dp[4]=max(105,15+10)=105, dp[5]=max(105,105+5)=110.
+    let mut a = [5,5,10,100,10,5,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(house_robber(a, 6), 110);
+    print("large_middle: ok");
+}
+
+fn test_dp_array_values() {
+    // [3,10,3,1,2]: dp[0]=3,dp[1]=10,dp[2]=max(10,3+3)=10,dp[3]=max(10,10+1)=11,dp[4]=max(11,10+2)=12.
+    let mut a = [3,10,3,1,2,0,0,0,0,0,0,0,0,0,0,0];
+    let mut dp = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let r = house_robber_dp(a, 5, dp);
+    assert_eq(r, 12);
+    assert_eq(dp[0], 3);
+    assert_eq(dp[1], 10);
+    assert_eq(dp[2], 10);
+    assert_eq(dp[3], 11);
+    assert_eq(dp[4], 12);
+    print("dp_array_values: ok");
+}
+
+fn test_all_equal() {
+    // [1,1,1,1,1]: best = pick every other = 3. dp[0]=1,dp[1]=1,dp[2]=2,dp[3]=2,dp[4]=3.
+    let mut a = [1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0];
+    let mut dp = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let r = house_robber_dp(a, 5, dp);
+    assert_eq(r, 3);
+    assert_eq(dp[2], 2);
+    assert_eq(dp[4], 3);
+    print("all_equal: ok");
+}
+
+fn test_two_elements() {
+    // [10,5]: max=10. [5,10]: max=10.
+    let mut a1 = [10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(house_robber(a1, 2), 10);
+    let mut a2 = [5,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(house_robber(a2, 2), 10);
+    // [6,6]: max=6.
+    let mut a3 = [6,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    assert_eq(house_robber(a3, 2), 6);
+    print("two_elements: ok");
+}
+
+fn main() -> Int {
+    test_basic_cases();
+    test_large_middle();
+    test_dp_array_values();
+    test_all_equal();
+    test_two_elements();
+    print("[OK] 586_interp_house_robber");
+    0
+}

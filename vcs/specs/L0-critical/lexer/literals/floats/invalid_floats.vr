@@ -1,0 +1,158 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, floats, invalid, negative
+
+// Invalid floating-point literals - each line should fail to parse
+
+fn test_missing_digits_after_decimal() {
+    // Missing digits after decimal point
+    let missing_fraction = 1.;
+    let missing_fraction2 = 42.;
+}
+
+fn test_missing_digits_before_decimal() {
+    // Missing digits before decimal point (might be valid as .5 in some langs)
+    let missing_integer = .5;
+    let missing_integer2 = .123;
+}
+
+fn test_double_decimal_points() {
+    // Double decimal points
+    let double_dot = 1.2.3;
+    let triple_dot = 1.2.3.4;
+}
+
+fn test_invalid_exponent_format() {
+    // Invalid exponent format
+    let missing_exp_digits = 1.0e;
+    let missing_exp_digits2 = 1.0E;
+    let missing_exp_digits3 = 1.0e+;
+    let missing_exp_digits4 = 1.0e-;
+}
+
+fn test_invalid_exponent_characters() {
+    // Invalid exponent characters
+    let bad_exp_char = 1.0ea;
+    let bad_exp_char2 = 1.0eX;
+    let bad_exp_char3 = 1.0e1.5;
+}
+
+fn test_multiple_exponents() {
+    // Multiple exponents
+    let double_exp = 1.0e5e3;
+    let double_exp2 = 1e2e3;
+}
+
+fn test_invalid_suffix() {
+    // Invalid suffix
+    let bad_suffix = 1.0_float;
+    let bad_suffix2 = 1.0_double;
+    let bad_suffix3 = 1.0_f;
+    let bad_suffix4 = 1.0_d;
+}
+
+fn test_invalid_underscore_positions() {
+    // Invalid underscore positions
+    let leading_underscore = _1.0;
+    let underscore_after_dot = 1._0;
+    let underscore_before_dot = 1_.0;
+    let underscore_after_e = 1.0e_5;
+    let underscore_before_e = 1.0_e5;
+    let double_underscore = 1.0__f32;
+}
+
+fn test_hexadecimal_float_errors() {
+    // Hexadecimal float syntax errors (if supported)
+    let bad_hex_float = 0x1.Fp;
+    let incomplete_hex = 0x1.F;
+}
+
+fn test_space_in_number() {
+    // Space in number
+    let space_in_float = 1. 0;
+    let space_around_dot = 1 . 0;
+    let space_in_exp = 1.0e 5;
+}
+
+fn test_non_ascii_characters() {
+    // Non-ASCII characters
+    let unicode_dot = 1。0  // fullwidth period;
+    let unicode_digit = 1.０  // fullwidth zero;
+}
+
+fn test_comma_instead_of_dot() {
+    // Comma instead of dot
+    let comma_decimal = 1,5;
+    let european_style = 3,14159;
+}
+
+fn test_multiple_signs() {
+    // Multiple signs
+    let double_sign = --1.0;
+    let double_plus = ++1.0;
+    let mixed_signs = +-1.0;
+}
+
+fn test_sign_wrong_position() {
+    // Sign in wrong position
+    let sign_after_e = 1.0e5-;
+    let sign_in_mantissa = 1.+5e10;
+}
+
+fn test_overflow_underflow() {
+    // Overflow/underflow (too large/small)
+    let overflow = 1.0e309;
+    let underflow = 1.0e-325;
+}
+
+fn test_letters_in_number() {
+    // Letters in number
+    let letter_in_mantissa = 1.2a3;
+    let letter_in_exp = 1.0e1a;
+}
+
+fn test_incomplete_scientific() {
+    // Incomplete scientific notation
+    let just_e = e10;
+    let just_E = E-5;
+}
+
+fn test_dot_suffix() {
+    // Dot at end with suffix
+    let dot_suffix = 1._f32;
+}
+
+fn test_invalid_base_combinations() {
+    // Invalid combination of bases and floats
+    let hex_float_no_exp = 0x1.5;
+    let binary_float = 0b1.01;
+    let octal_float = 0o7.5;
+}
+
+fn test_empty_mantissa() {
+    // Empty before exponent
+    let empty_mantissa_exp = e10;
+    let just_dot_exp = .e5;
+}
+
+fn test_trailing_exponent_sign() {
+    // Trailing exponent sign
+    let trailing_exp_sign = 1.0e+;
+    let trailing_neg_exp = 1.0e-;
+}
+
+fn test_weird_underscore() {
+    // Multiple decimal separators with underscore
+    let weird_underscore = 1_.0_e_5;
+}
+
+fn test_float_with_integer_suffix() {
+    // Float with integer suffix
+    let float_int_suffix = 1.0i32;
+    let float_uint_suffix = 3.14u64;
+}
+
+// Exponent without mantissa decimal
+// (might be valid as 1e5 in some langs, test based on spec)
+// let int_exp = 1e5

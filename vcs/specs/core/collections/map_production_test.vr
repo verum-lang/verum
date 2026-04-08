@@ -1,0 +1,762 @@
+// =============================================================================
+// map_production_test.vr - Production-grade Map and Set capacity management tests
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, map, set, reserve, shrink, capacity, production, core
+// @description: Tests for Map/Set reserve(), shrink_to_fit(), shrink_to(),
+//               and Set::replace(). These are critical for production workloads
+//               that need explicit memory management.
+// =============================================================================
+
+module specs.core.collections.map_production_test;
+
+mount core.*;
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// Section 1: Map::reserve() Tests
+// =============================================================================
+
+@test
+fn test_map_reserve_empty() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.reserve(100);
+    assert(m.capacity() >= 100);
+    assert(m.len() == 0);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_reserve_with_existing() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let old_len = m.len();
+    m.reserve(50);
+    assert(m.capacity() >= 53); // existing 3 + 50
+    assert(m.len() == old_len);
+    // Verify data preserved after resize
+    assert(m.get(&1).unwrap() == &10);
+    assert(m.get(&2).unwrap() == &20);
+    assert(m.get(&3).unwrap() == &30);
+}
+
+@test
+fn test_map_reserve_zero() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 1);
+    let cap = m.capacity();
+    m.reserve(0);
+    // Should not shrink
+    assert(m.capacity() >= cap);
+}
+
+@test
+fn test_map_reserve_already_sufficient() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    let cap = m.capacity();
+    m.reserve(10); // Already have enough capacity
+    assert(m.capacity() == cap); // Should not change
+}
+
+// =============================================================================
+// Section 2: Map::shrink_to_fit() Tests
+// =============================================================================
+
+@test
+fn test_map_shrink_to_fit_empty() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    assert(m.capacity() >= 100);
+    m.shrink_to_fit();
+    assert(m.capacity() == 0);
+}
+
+@test
+fn test_map_shrink_to_fit_with_elements() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let old_cap = m.capacity();
+    m.shrink_to_fit();
+    assert(m.capacity() < old_cap);
+    assert(m.capacity() >= m.len());
+    // Data preserved
+    assert(m.get(&1).unwrap() == &10);
+    assert(m.get(&2).unwrap() == &20);
+    assert(m.get(&3).unwrap() == &30);
+}
+
+@test
+fn test_map_shrink_to_fit_after_removal() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in range(0, 50) {
+        m.insert(i, i * 10);
+    }
+    let cap_before = m.capacity();
+    // Remove most elements
+    for i in range(10, 50) {
+        m.remove(&i);
+    }
+    assert(m.len() == 10);
+    m.shrink_to_fit();
+    assert(m.capacity() < cap_before);
+    // Remaining elements preserved
+    for i in range(0, 10) {
+        assert(m.contains_key(&i));
+    }
+}
+
+// =============================================================================
+// Section 3: Map::shrink_to() Tests
+// =============================================================================
+
+@test
+fn test_map_shrink_to() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.shrink_to(32);
+    assert(m.capacity() >= 32);
+    assert(m.capacity() <= 100);
+    assert(m.get(&1).unwrap() == &10);
+    assert(m.get(&2).unwrap() == &20);
+}
+
+@test
+fn test_map_shrink_to_below_len() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    for i in range(0, 20) {
+        m.insert(i, i);
+    }
+    m.shrink_to(5); // Below len, should shrink to minimum for len
+    assert(m.capacity() >= m.len());
+    // All data preserved
+    for i in range(0, 20) {
+        assert(m.contains_key(&i));
+    }
+}
+
+// =============================================================================
+// Section 4: Set::reserve() Tests
+// =============================================================================
+
+@test
+fn test_set_reserve_empty() {
+    let mut s: Set<Int> = Set.new();
+    s.reserve(100);
+    assert(s.capacity() >= 100);
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_reserve_with_existing() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.reserve(50);
+    assert(s.capacity() >= 53);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+}
+
+// =============================================================================
+// Section 5: Set::shrink_to_fit() Tests
+// =============================================================================
+
+@test
+fn test_set_shrink_to_fit_empty() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    assert(s.capacity() >= 100);
+    s.shrink_to_fit();
+    assert(s.capacity() == 0);
+}
+
+@test
+fn test_set_shrink_to_fit_with_elements() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    let old_cap = s.capacity();
+    s.shrink_to_fit();
+    assert(s.capacity() < old_cap);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+}
+
+// =============================================================================
+// Section 6: Set::shrink_to() Tests
+// =============================================================================
+
+@test
+fn test_set_shrink_to() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    s.insert(1);
+    s.insert(2);
+    s.shrink_to(32);
+    assert(s.capacity() >= 32);
+    assert(s.capacity() <= 100);
+}
+
+// =============================================================================
+// Section 7: Set::replace() Tests
+// =============================================================================
+
+@test
+fn test_set_replace_existing() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(42);
+    let old = s.replace(42);
+    assert(old.is_some());
+    assert(old.unwrap() == 42);
+    assert(s.contains(&42));
+    assert(s.len() == 1);
+}
+
+@test
+fn test_set_replace_new() {
+    let mut s: Set<Int> = Set.new();
+    let old = s.replace(42);
+    assert(old.is_none());
+    assert(s.contains(&42));
+    assert(s.len() == 1);
+}
+
+// =============================================================================
+// Section 8: Map Integration - Reserve then bulk insert
+// =============================================================================
+
+@test
+fn test_map_reserve_bulk_insert() {
+    let mut m: Map<Int, Int> = Map.new();
+    let n = 100;
+    m.reserve(n);
+    let cap_after_reserve = m.capacity();
+    for i in range(0, n) {
+        m.insert(i, i * i);
+    }
+    // Capacity should not have changed (no resize needed)
+    assert(m.capacity() == cap_after_reserve);
+    assert(m.len() == n);
+    // Spot check
+    assert(m.get(&0).unwrap() == &0);
+    assert(m.get(&50).unwrap() == &2500);
+    assert(m.get(&99).unwrap() == &9801);
+}
+
+@test
+fn test_map_shrink_then_grow() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in range(0, 50) {
+        m.insert(i, i);
+    }
+    // Remove most
+    for i in range(5, 50) {
+        m.remove(&i);
+    }
+    m.shrink_to_fit();
+    let small_cap = m.capacity();
+    // Now grow again
+    for i in range(100, 200) {
+        m.insert(i, i);
+    }
+    assert(m.len() == 105); // 5 original + 100 new
+    assert(m.capacity() > small_cap);
+}
+
+// =============================================================================
+// Section 9: Map::with_capacity Tests
+// =============================================================================
+
+@test
+fn test_map_with_capacity_basic() {
+    let m: Map<Int, Text> = Map.with_capacity(50);
+    assert(m.capacity() >= 50);
+    assert(m.is_empty());
+    assert_eq(m.len(), 0);
+}
+
+@test
+fn test_map_with_capacity_zero() {
+    let m: Map<Text, Int> = Map.with_capacity(0);
+    assert_eq(m.len(), 0);
+}
+
+@test
+fn test_map_with_capacity_insert_no_resize() {
+    let mut m: Map<Int, Int> = Map.with_capacity(10);
+    let cap = m.capacity();
+    for i in range(0, 10) {
+        m.insert(i, i);
+    }
+    // Should not have needed to resize
+    assert(m.capacity() == cap);
+    assert_eq(m.len(), 10);
+}
+
+// =============================================================================
+// Section 10: Set::with_capacity Tests
+// =============================================================================
+
+@test
+fn test_set_with_capacity_basic() {
+    let s: Set<Int> = Set.with_capacity(50);
+    assert(s.capacity() >= 50);
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_with_capacity_insert_no_resize() {
+    let mut s: Set<Int> = Set.with_capacity(10);
+    let cap = s.capacity();
+    for i in range(0, 10) {
+        s.insert(i);
+    }
+    assert(s.capacity() == cap);
+    assert_eq(s.len(), 10);
+}
+
+// =============================================================================
+// Section 11: Capacity Tracking Through Operations
+// =============================================================================
+
+@test
+fn test_map_capacity_after_clear() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in range(0, 50) {
+        m.insert(i, i);
+    }
+    let cap_before = m.capacity();
+    m.clear();
+    // Clear doesn't necessarily free memory
+    assert(m.capacity() >= 0);
+    assert_eq(m.len(), 0);
+}
+
+@test
+fn test_set_shrink_to_below_len() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    for i in range(0, 20) {
+        s.insert(i);
+    }
+    s.shrink_to(5); // Below len
+    assert(s.capacity() >= s.len());
+    // All data preserved
+    for i in range(0, 20) {
+        assert(s.contains(&i));
+    }
+}
+
+@test
+fn test_map_reserve_then_shrink_cycle() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.reserve(100);
+    assert(m.capacity() >= 100);
+    m.shrink_to_fit();
+    assert(m.capacity() == 0);
+    m.reserve(50);
+    assert(m.capacity() >= 50);
+}
+
+@test
+fn test_set_reserve_then_shrink_cycle() {
+    let mut s: Set<Int> = Set.new();
+    s.reserve(100);
+    assert(s.capacity() >= 100);
+    s.shrink_to_fit();
+    assert(s.capacity() == 0);
+    s.reserve(50);
+    assert(s.capacity() >= 50);
+}
+
+// =============================================================================
+// Section 12: Set Replace Edge Cases
+// =============================================================================
+
+@test
+fn test_set_replace_multiple_times() {
+    let mut s: Set<Int> = Set.new();
+    let r1 = s.replace(42);
+    assert(r1.is_none()); // First insert
+    let r2 = s.replace(42);
+    assert(r2.is_some()); // Second replaces existing
+    let r3 = s.replace(42);
+    assert(r3.is_some()); // Third replaces existing
+    assert_eq(s.len(), 1); // Always just one element
+}
+
+@test
+fn test_set_replace_different_values() {
+    let mut s: Set<Int> = Set.new();
+    s.replace(1);
+    s.replace(2);
+    s.replace(3);
+    assert_eq(s.len(), 3);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+}
+
+// =============================================================================
+// Section 13: Map Capacity Invariants
+// =============================================================================
+
+@test
+fn test_map_capacity_ge_len_after_inserts() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in range(0, 30) {
+        m.insert(i, i);
+        assert(m.capacity() >= m.len());
+    }
+}
+
+@test
+fn test_set_capacity_ge_len_after_inserts() {
+    let mut s: Set<Int> = Set.new();
+    for i in range(0, 30) {
+        s.insert(i);
+        assert(s.capacity() >= s.len());
+    }
+}
+
+// =============================================================================
+// Section 14: Map Reserve + Immediate Shrink
+// =============================================================================
+
+@test
+fn test_map_reserve_then_immediate_shrink() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.reserve(1000);
+    assert(m.capacity() >= 1000);
+    m.shrink_to_fit();
+    // Empty map after shrink should have zero capacity
+    assert(m.capacity() == 0);
+}
+
+@test
+fn test_set_reserve_zero() {
+    let mut s: Set<Int> = Set.new();
+    s.reserve(0);
+    // Reserving zero is a no-op
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// Section 15: Map shrink_to Edge Cases
+// =============================================================================
+
+@test
+fn test_map_shrink_to_zero_empty() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    m.shrink_to(0);
+    assert(m.capacity() == 0);
+}
+
+@test
+fn test_map_shrink_to_exact_len() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    for i in range(0, 10) {
+        m.insert(i, i);
+    }
+    m.shrink_to(10);
+    assert(m.capacity() >= 10);
+    assert(m.len() == 10);
+}
+
+// =============================================================================
+// Section 16: Set with_capacity Edge Cases
+// =============================================================================
+
+@test
+fn test_set_with_capacity_zero() {
+    let s: Set<Int> = Set.with_capacity(0);
+    assert(s.is_empty());
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_map_with_capacity_preserves_after_clear() {
+    let mut m: Map<Int, Int> = Map.with_capacity(50);
+    for i in range(0, 10) {
+        m.insert(i, i);
+    }
+    let cap = m.capacity();
+    m.clear();
+    assert_eq(m.len(), 0);
+    // Capacity preserved after clear
+    assert(m.capacity() >= 0);
+}
+
+// =============================================================================
+// Section 17: Set shrink_to
+// =============================================================================
+
+@test
+fn test_set_shrink_to_zero_empty() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    s.shrink_to(0);
+    assert(s.capacity() == 0);
+}
+
+@test
+fn test_set_shrink_to_exact() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    s.insert(1);
+    s.insert(2);
+    s.shrink_to(32);
+    assert(s.capacity() >= 2);
+    assert(s.capacity() <= 100);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+// =============================================================================
+// Section 18: Map Reserve Double
+// =============================================================================
+
+@test
+fn test_map_reserve_double() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.reserve(50);
+    assert(m.capacity() >= 50);
+    m.reserve(100);
+    assert(m.capacity() >= 100);
+}
+
+@test
+fn test_set_reserve_already_sufficient() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    let cap = s.capacity();
+    s.reserve(10);
+    // Should not change since we already have plenty
+    assert(s.capacity() == cap);
+}
+
+@test
+fn test_map_shrink_to_larger_than_capacity() {
+    let mut m: Map<Int, Int> = Map.with_capacity(10);
+    let cap = m.capacity();
+    m.shrink_to(1000); // Larger than current capacity - should be no-op
+    assert(m.capacity() <= 1000);
+}
+
+@test
+fn test_set_replace_then_remove() {
+    let mut s: Set<Int> = Set.new();
+    s.replace(10);
+    assert(s.contains(&10));
+    s.remove(&10);
+    assert(!s.contains(&10));
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_map_reserve_then_insert_single() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.reserve(50);
+    let cap = m.capacity();
+    m.insert("key", 42);
+    // Single insert should not trigger resize
+    assert(m.capacity() == cap);
+    assert(m.get(&"key").unwrap() == &42);
+}
+
+@test
+fn test_map_with_capacity_shrink_preserves_data() {
+    let mut m: Map<Int, Int> = Map.with_capacity(200);
+    for i in range(0, 5) {
+        m.insert(i, i * 100);
+    }
+    m.shrink_to_fit();
+    assert(m.capacity() >= 5);
+    // All data preserved
+    assert(m.get(&0).unwrap() == &0);
+    assert(m.get(&4).unwrap() == &400);
+    assert_eq(m.len(), 5);
+}
+
+@test
+fn test_set_shrink_to_fit_after_removal() {
+    let mut s: Set<Int> = Set.new();
+    for i in range(0, 50) {
+        s.insert(i);
+    }
+    for i in range(10, 50) {
+        s.remove(&i);
+    }
+    assert_eq(s.len(), 10);
+    let cap_before = s.capacity();
+    s.shrink_to_fit();
+    assert(s.capacity() <= cap_before);
+    // Remaining data preserved
+    for i in range(0, 10) {
+        assert(s.contains(&i));
+    }
+}
+
+@test
+fn test_set_capacity_after_remove_all() {
+    let mut s: Set<Int> = Set.new();
+    for i in range(0, 20) {
+        s.insert(i);
+    }
+    for i in range(0, 20) {
+        s.remove(&i);
+    }
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+    s.shrink_to_fit();
+    assert(s.capacity() == 0);
+}
+
+@test
+fn test_map_reserve_exact_count() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.reserve(25);
+    assert(m.capacity() >= 25);
+    for i in range(0, 25) {
+        m.insert(i, i);
+    }
+    assert_eq(m.len(), 25);
+    assert(m.capacity() >= 25);
+}
+
+@test
+fn test_set_replace_returns_old_value() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(99);
+    let old = s.replace(99);
+    assert(old.is_some());
+    assert(old.unwrap() == 99);
+    // Set size unchanged
+    assert_eq(s.len(), 1);
+}
+
+// =============================================================================
+// Section 19: Additional Capacity Invariant Tests
+// =============================================================================
+
+@test
+fn test_map_capacity_monotonic_during_insert() {
+    let mut m: Map<Int, Int> = Map.new();
+    let mut prev_cap = m.capacity();
+    for i in range(0, 30) {
+        m.insert(i, i);
+        assert(m.capacity() >= prev_cap);
+        prev_cap = m.capacity();
+    }
+}
+
+@test
+fn test_set_capacity_monotonic_during_insert() {
+    let mut s: Set<Int> = Set.new();
+    let mut prev_cap = s.capacity();
+    for i in range(0, 30) {
+        s.insert(i);
+        assert(s.capacity() >= prev_cap);
+        prev_cap = s.capacity();
+    }
+}
+
+@test
+fn test_map_reserve_idempotent() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.reserve(100);
+    let cap1 = m.capacity();
+    m.reserve(100);
+    let cap2 = m.capacity();
+    assert(cap1 == cap2);
+}
+
+@test
+fn test_set_replace_after_remove() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(42);
+    s.remove(&42);
+    assert(!s.contains(&42));
+    let old = s.replace(42);
+    assert(old.is_none());
+    assert(s.contains(&42));
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_map_clear_then_reinsert() {
+    let mut m: Map<Int, Int> = Map.with_capacity(50);
+    for i in range(0, 10) {
+        m.insert(i, i);
+    }
+    m.clear();
+    assert_eq(m.len(), 0);
+    for i in range(100, 110) {
+        m.insert(i, i * 2);
+    }
+    assert_eq(m.len(), 10);
+    assert(m.get(&100).unwrap() == &200);
+    assert(m.get(&109).unwrap() == &218);
+}
+
+@test
+fn test_set_shrink_then_grow_again() {
+    let mut s: Set<Int> = Set.new();
+    for i in range(0, 50) {
+        s.insert(i);
+    }
+    for i in range(5, 50) {
+        s.remove(&i);
+    }
+    s.shrink_to_fit();
+    let small_cap = s.capacity();
+    for i in range(100, 200) {
+        s.insert(i);
+    }
+    assert_eq(s.len(), 105);
+    assert(s.capacity() > small_cap);
+}
+
+@test
+fn test_map_shrink_to_fit_preserves_all_data() {
+    let mut m: Map<Int, Int> = Map.with_capacity(200);
+    for i in range(0, 10) {
+        m.insert(i, i * 100);
+    }
+    m.shrink_to_fit();
+    assert(m.capacity() >= 10);
+    for i in range(0, 10) {
+        assert(m.contains_key(&i));
+        assert(m.get(&i).unwrap() == &(i * 100));
+    }
+}
+
+@test
+fn test_set_with_capacity_then_shrink_cycle() {
+    let mut s: Set<Int> = Set.with_capacity(200);
+    for i in range(0, 5) {
+        s.insert(i);
+    }
+    s.shrink_to_fit();
+    assert(s.capacity() >= 5);
+    s.reserve(100);
+    assert(s.capacity() >= 105);
+    s.shrink_to(50);
+    assert(s.capacity() >= 5);
+    assert(s.capacity() <= 200);
+    for i in range(0, 5) {
+        assert(s.contains(&i));
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

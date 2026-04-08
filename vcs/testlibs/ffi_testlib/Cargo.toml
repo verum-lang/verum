@@ -1,0 +1,14 @@
+[package]
+name = "ffi_testlib"
+version = "0.1.0"
+edition = "2021"
+description = "Test dynamic library for FFI conformance testing"
+
+# Exclude from parent workspace
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2"

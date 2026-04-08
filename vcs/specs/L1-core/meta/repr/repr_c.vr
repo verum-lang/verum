@@ -1,0 +1,55 @@
+// @test: parse
+// @level: L1
+// @tags: meta, repr, attributes, ffi
+// @timeout: 5000
+
+/// @repr attribute for controlling memory layout.
+/// Grammar: attribute = identifier ['(' attribute_args ')']
+
+// C-compatible layout
+@repr(C)
+type CStruct is {
+    x: Int,
+    y: Int,
+    z: Float,
+};
+
+// Packed layout
+@repr(packed)
+type PackedData is {
+    flag: Bool,
+    value: Int,
+    small: Int,
+};
+
+// Transparent newtype representation
+@repr(transparent)
+type Wrapper is (Int);
+
+// Repr with alignment
+@repr(align(16))
+type AlignedData is {
+    data: List<Float>,
+};
+
+// SIMD repr
+@repr(simd)
+type Vec4f is {
+    x: Float,
+    y: Float,
+    z: Float,
+    w: Float,
+};
+
+// Repr C on sum type (discriminant)
+@repr(C)
+type CEnum is
+    | Variant1
+    | Variant2(Int)
+    | Variant3 { x: Int, y: Int };
+
+fn main() {
+    let s = CStruct { x: 1, y: 2, z: 3.0 };
+    let w = Wrapper(42);
+    print("Repr tests parsed");
+}

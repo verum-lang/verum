@@ -1,0 +1,74 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M102
+// @description: Tests error handling for meta_trace builtin functions
+// @tags: meta-system, builtins, debugging, trace, errors
+
+// Test meta_trace_on with arguments (arity error)
+meta fn test_trace_on_arity() {
+    meta_trace_on(42)  // ERROR: M102 - takes 0 arguments
+}
+
+// Test meta_trace_off with arguments (arity error)
+meta fn test_trace_off_arity() {
+    meta_trace_off(true)  // ERROR: M102 - takes 0 arguments
+}
+
+// Test meta_trace_log with no arguments (arity error)
+meta fn test_trace_log_missing_arg() {
+    meta_trace_log()  // ERROR: M102 - requires 1 argument
+}
+
+// Test meta_trace_log with too many arguments
+meta fn test_trace_log_too_many_args() {
+    meta_trace_log("msg1", "msg2")  // ERROR: M102 - takes 1 argument
+}
+
+// Test meta_trace_dump with arguments (arity error)
+meta fn test_trace_dump_arity() {
+    meta_trace_dump("unused")  // ERROR: M102 - takes 0 arguments
+}
+
+// Test meta_trace_lines with arguments (arity error)
+meta fn test_trace_lines_arity() {
+    meta_trace_lines(1)  // ERROR: M102 - takes 0 arguments
+}
+
+// Test meta_trace_clear with arguments (arity error)
+meta fn test_trace_clear_arity() {
+    meta_trace_clear(true)  // ERROR: M102 - takes 0 arguments
+}
+
+// Test meta_trace_is_enabled with arguments (arity error)
+meta fn test_trace_is_enabled_arity() -> Bool {
+    meta_trace_is_enabled("should not work")  // ERROR: M102 - takes 0 arguments
+}
+
+// Test meta_trace_depth with arguments (arity error)
+meta fn test_trace_depth_arity() -> Int {
+    meta_trace_depth(0)  // ERROR: M102 - takes 0 arguments
+}
+
+// Test meta_trace_enter with no arguments (arity error)
+meta fn test_trace_enter_missing_arg() {
+    meta_trace_enter()  // ERROR: M102 - requires 1 argument
+}
+
+// Test meta_trace_exit with no arguments (arity error)
+meta fn test_trace_exit_missing_arg() {
+    meta_trace_exit()  // ERROR: M102 - requires 1 argument
+}
+
+// Test meta_trace_value with wrong number of args
+meta fn test_trace_value_arity() {
+    meta_trace_value("x")  // ERROR: M102 - requires 2 arguments
+}
+
+// Test meta_trace_assert with wrong number of args
+meta fn test_trace_assert_arity() {
+    meta_trace_assert(true)  // ERROR: M102 - requires 2 arguments
+}
+
+fn main() {
+    @const test_trace_on_arity();
+}

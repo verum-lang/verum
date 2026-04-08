@@ -1,0 +1,245 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, work-distribution, parallel-for, reduce
+// @expected-exit: 0
+
+// Tests parallel work distribution patterns.
+// Verifies map-reduce, parallel-for, and divide-and-conquer.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn min_val(a: Int, b: Int) -> Int {
+    if (a < b) { a } else { b }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if (a > b) { a } else { b }
+}
+
+// Integer square root
+fn isqrt(x: Int) -> Int {
+    if (x <= 0) { return 0; }
+    let mut g = x / 2;
+    if (g == 0) { g = 1; }
+    let mut i = 0;
+    while (i < 30) {
+        g = (g + x / g) / 2;
+        i = i + 1;
+    }
+    if ((g + 1) * (g + 1) - x < x - g * g) { g + 1 } else { g }
+}
+
+fn is_prime(n: Int) -> Int {
+    if (n < 2) { return 0; }
+    let mut i = 2;
+    while (i * i <= n) {
+        if (n % i == 0) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn main() -> Int {
+    // Test 1: Parallel sum reduction (split into 4 chunks)
+    let n = 100;
+    let chunks = 4;
+    let chunk_size = n / chunks;
+    let mut partial = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let mut c = 0;
+    while (c < chunks) {
+        let start = c * chunk_size + 1;
+        let end = (c + 1) * chunk_size;
+        let mut sum = 0;
+        let mut i = start;
+        while (i <= end) {
+            sum = sum + i;
+            i = i + 1;
+        }
+        partial[c] = sum;
+        c = c + 1;
+    }
+
+    let total = partial[0] + partial[1] + partial[2] + partial[3];
+    assert_eq(total, 5050);
+
+    // Test 2: Parallel max reduction
+    let data = [34, 67, 12, 89, 45, 23, 78, 56, 91, 3, 0, 0, 0, 0, 0, 0];
+    // Chunk 1: max(34,67,12,89,45) = 89
+    // Chunk 2: max(23,78,56,91,3) = 91
+    let mut max1 = 0;
+    let mut max2 = 0;
+    let mut i = 0;
+    while (i < 5) {
+        max1 = max_val(max1, data[i]);
+        max2 = max_val(max2, data[i + 5]);
+        i = i + 1;
+    }
+    let global_max = max_val(max1, max2);
+    assert_eq(global_max, 91);
+
+    // Test 3: Parallel dot product
+    let vec_a = [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0];
+    let vec_b = [8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Split into 2 halves
+    let mut dot1 = 0;
+    let mut dot2 = 0;
+    i = 0;
+    while (i < 4) {
+        dot1 = dot1 + vec_a[i] * vec_b[i];
+        dot2 = dot2 + vec_a[i + 4] * vec_b[i + 4];
+        i = i + 1;
+    }
+    let dot = dot1 + dot2;
+    // 8+14+18+20+20+18+14+8 = 120
+    assert_eq(dot, 120);
+
+    // Test 4: Parallel histogram
+    let values = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 0, 0, 0, 0, 0, 0];
+    let mut histogram = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 10) {
+        let bin = values[i];
+        histogram[bin] = histogram[bin] + 1;
+        i = i + 1;
+    }
+    assert_eq(histogram[1], 2);  // Two 1s
+    assert_eq(histogram[3], 2);  // Two 3s
+    assert_eq(histogram[5], 2);  // Two 5s
+    assert_eq(histogram[9], 1);  // One 9
+
+    // Test 5: Parallel prefix sum (scan)
+    let input = [3, 1, 4, 1, 5, 9, 2, 6, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut prefix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    prefix[0] = input[0];
+    i = 1;
+    while (i < 8) {
+        prefix[i] = prefix[i - 1] + input[i];
+        i = i + 1;
+    }
+    assert_eq(prefix[0], 3);
+    assert_eq(prefix[3], 9);   // 3+1+4+1
+    assert_eq(prefix[7], 31);  // 3+1+4+1+5+9+2+6
+
+    // Test 6: Divide-and-conquer merge sort simulation
+    let mut arr = [5, 2, 8, 1, 9, 3, 7, 4, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Simple insertion sort (simulating divide-and-conquer result)
+    let nn = 8;
+    i = 1;
+    while (i < nn) {
+        let key = arr[i];
+        let mut j = i - 1;
+        while (j >= 0 && arr[j] > key) {
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = key;
+        i = i + 1;
+    }
+    assert_eq(arr[0], 1);
+    assert_eq(arr[3], 4);
+    assert_eq(arr[7], 9);
+
+    // Test 7: Parallel prime sieve
+    // Count primes in [2, 50] split into ranges
+    let r1_primes = 0;
+    let r2_primes = 0;
+    let mut count1 = 0;
+    let mut count2 = 0;
+
+    // Range 1: [2, 25]
+    i = 2;
+    while (i <= 25) {
+        count1 = count1 + is_prime(i);
+        i = i + 1;
+    }
+    // Range 2: [26, 50]
+    i = 26;
+    while (i <= 50) {
+        count2 = count2 + is_prime(i);
+        i = i + 1;
+    }
+    let total_primes = count1 + count2;
+    assert_eq(total_primes, 15);  // 15 primes <= 50
+
+    // Test 8: Work distribution with load balancing
+    // Assign tasks by estimated cost
+    let costs = [10, 5, 8, 3, 12, 7, 4, 9, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n_tasks = 8;
+    let n_workers = 2;
+    let mut worker_load = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Greedy: assign each task to least-loaded worker
+    i = 0;
+    while (i < n_tasks) {
+        let assigned = if (worker_load[0] <= worker_load[1]) { 0 } else { 1 };
+        worker_load[assigned] = worker_load[assigned] + costs[i];
+        i = i + 1;
+    }
+    // Total work: 10+5+8+3+12+7+4+9 = 58
+    assert_eq(worker_load[0] + worker_load[1], 58);
+    // Loads should be roughly balanced
+    let imbalance = abs_val(worker_load[0] - worker_load[1]);
+    assert(imbalance <= 10);  // Within reasonable balance
+
+    // Test 9: Parallel matrix-vector multiply (row-partitioned)
+    // 4x4 matrix * 4-vector, split by rows
+    let mat = [1, 2, 3, 4,
+               5, 6, 7, 8,
+               9, 10, 11, 12,
+               13, 14, 15, 16];
+    let vec = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut result = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Worker 1: rows 0-1
+    let mut row = 0;
+    while (row < 2) {
+        let mut sum = 0;
+        let mut col = 0;
+        while (col < 4) {
+            sum = sum + mat[row * 4 + col] * vec[col];
+            col = col + 1;
+        }
+        result[row] = sum;
+        row = row + 1;
+    }
+    // Worker 2: rows 2-3
+    row = 2;
+    while (row < 4) {
+        let mut sum = 0;
+        let mut col = 0;
+        while (col < 4) {
+            sum = sum + mat[row * 4 + col] * vec[col];
+            col = col + 1;
+        }
+        result[row] = sum;
+        row = row + 1;
+    }
+    assert_eq(result[0], 30);   // 1+4+9+16
+    assert_eq(result[1], 70);   // 5+12+21+32
+    assert_eq(result[2], 110);  // 9+20+33+48
+    assert_eq(result[3], 150);  // 13+28+45+64
+
+    // Test 10: Parallel reduction tree
+    // Level 0: 8 values
+    let leaves = [3, 7, 2, 8, 5, 1, 9, 4, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Level 1: 4 sums
+    let mut level1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    level1[0] = leaves[0] + leaves[1];  // 10
+    level1[1] = leaves[2] + leaves[3];  // 10
+    level1[2] = leaves[4] + leaves[5];  // 6
+    level1[3] = leaves[6] + leaves[7];  // 13
+    // Level 2: 2 sums
+    let mut level2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    level2[0] = level1[0] + level1[1];  // 20
+    level2[1] = level1[2] + level1[3];  // 19
+    // Level 3: final sum
+    let root = level2[0] + level2[1];   // 39
+    assert_eq(root, 39);
+
+    print("Async work distribution: PASS");
+    0
+}

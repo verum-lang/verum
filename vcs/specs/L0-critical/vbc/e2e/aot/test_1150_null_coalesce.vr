@@ -1,0 +1,70 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: null-coalesce, optional-chain, maybe
+// @description: Test ?? null coalescing operator
+
+fn maybe_val(n: Int) -> Maybe<Int> {
+    if n > 0 {
+        Some(n)
+    } else {
+        None
+    }
+}
+
+fn test_coalesce_some() -> Int {
+    let val = maybe_val(42) ?? 0;
+    if val != 42 {
+        print(f"FAIL coalesce_some: {val}, expected 42");
+        return 1;
+    }
+    print("  coalesce_some: OK");
+    0
+}
+
+fn test_coalesce_none() -> Int {
+    let val = maybe_val(-1) ?? 99;
+    if val != 99 {
+        print(f"FAIL coalesce_none: {val}, expected 99");
+        return 1;
+    }
+    print("  coalesce_none: OK");
+    0
+}
+
+fn test_coalesce_chain() -> Int {
+    // Chain: first non-None wins
+    let val = maybe_val(-1) ?? maybe_val(-2) ?? maybe_val(7) ?? 0;
+    if val != 7 {
+        print(f"FAIL coalesce_chain: {val}, expected 7");
+        return 1;
+    }
+    print("  coalesce_chain: OK");
+    0
+}
+
+fn test_coalesce_all_none() -> Int {
+    let val = maybe_val(-1) ?? maybe_val(-2) ?? maybe_val(-3) ?? 42;
+    if val != 42 {
+        print(f"FAIL coalesce_all_none: {val}, expected 42");
+        return 1;
+    }
+    print("  coalesce_all_none: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Null Coalesce Tests:");
+    let mut failures = 0;
+    failures = failures + test_coalesce_some();
+    failures = failures + test_coalesce_none();
+    failures = failures + test_coalesce_chain();
+    failures = failures + test_coalesce_all_none();
+
+    if failures == 0 {
+        print("All null coalesce tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

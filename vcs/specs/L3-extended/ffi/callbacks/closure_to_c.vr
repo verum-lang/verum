@@ -1,0 +1,166 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, callbacks, closure, trampoline
+// @timeout: 10000
+// @description: Tests converting Verum closures to C function pointers
+
+/// ============================================================
+/// CLOSURE TO C CALLBACK CONVERSION
+/// ============================================================
+///
+/// C callbacks are plain function pointers with optional user data.
+/// Verum closures capture state. The "trampoline" pattern bridges them.
+
+type c_int is i32;
+type c_void is ();
+type c_size_t is usize;
+
+// ------------------------------------------------------------
+// C Callback Types
+// ------------------------------------------------------------
+
+/// C callback with user data
+type CCallbackWithData is extern "C" fn(*mut c_void, c_int) -> c_int;
+
+/// C callback without user data
+type CCallbackSimple is extern "C" fn(c_int) -> c_int;
+
+// ------------------------------------------------------------
+// FFI Declarations
+// ------------------------------------------------------------
+
+ffi callback_api {
+    @extern("C")
+    fn register_callback_with_data(
+        callback: CCallbackWithData,
+        user_data: *mut c_void
+    ) -> c_int;
+
+    @extern("C")
+    fn call_callback(id: c_int, value: c_int) -> c_int;
+}
+
+// ============================================================
+// MANUAL TRAMPOLINE PATTERN
+// ============================================================
+
+/// The trampoline function has C calling convention
+@extern("C")
+fn multiplier_trampoline(data: *mut c_void, value: c_int) -> c_int {
+    // SAFETY: data is a valid pointer to our multiplier
+    unsafe {
+        let multiplier = *(data as *const c_int);
+        value * multiplier
+    }
+}
+
+/// Use the trampoline with a multiplier
+fn use_multiplier_callback() {
+    let mut multiplier: c_int = 3;
+    let data_ptr = &mut multiplier as *mut c_int as *mut c_void;
+
+    let id = unsafe {
+        callback_api.register_callback_with_data(multiplier_trampoline, data_ptr)
+    };
+}
+
+// ============================================================
+// TYPE-ERASED CALLBACK
+// ============================================================
+
+/// Erased callback stores invoke and cleanup function pointers
+type ErasedCallback is {
+    data: *mut c_void,
+    invoke: fn(*mut c_void, c_int) -> c_int,
+    cleanup: fn(*mut c_void),
+};
+
+implement ErasedCallback {
+    /// Call the callback
+    fn call(&self, value: c_int) -> c_int {
+        (self.invoke)(self.data, value)
+    }
+}
+
+implement Drop for ErasedCallback {
+    fn drop(&mut self) {
+        (self.cleanup)(self.data);
+    }
+}
+
+// ============================================================
+// ONCE CALLBACK (for completion handlers)
+// ============================================================
+
+/// Callback that can be called exactly once
+type OnceCallback is {
+    data: *mut c_void,
+    invoke: fn(*mut c_void, c_int) -> c_int,
+};
+
+implement OnceCallback {
+    /// Call exactly once
+    fn call(self, value: c_int) -> c_int {
+        let result = (self.invoke)(self.data, value);
+        result
+    }
+}
+
+// ============================================================
+// PRACTICAL EXAMPLE: ASYNC COMPLETION
+// ============================================================
+
+/// Completion handler for async operation
+type CompletionHandler is {
+    data: *mut c_void,
+    on_success: fn(*mut c_void, c_int),
+    on_error: fn(*mut c_void, c_int),
+};
+
+ffi async_api {
+    @extern("C")
+    fn start_async_op(
+        on_complete: extern "C" fn(c_int, *mut c_void),
+        on_error: extern "C" fn(c_int, *mut c_void),
+        user_data: *mut c_void
+    ) -> c_int;
+}
+
+/// Async completion trampoline
+@extern("C")
+fn on_complete_trampoline(result: c_int, user_data: *mut c_void) {
+    unsafe {
+        let handler = &*(user_data as *const CompletionHandler);
+        (handler.on_success)(handler.data, result);
+    }
+}
+
+/// Async error trampoline
+@extern("C")
+fn on_error_trampoline(error: c_int, user_data: *mut c_void) {
+    unsafe {
+        let handler = &*(user_data as *const CompletionHandler);
+        (handler.on_error)(handler.data, error);
+    }
+}
+
+// ============================================================
+// CALLBACK BUILDER PATTERN
+// ============================================================
+
+/// Build a callback with state and handler
+type CallbackBuilder<S> is {
+    state: S,
+};
+
+implement<S> CallbackBuilder<S> {
+    fn new(initial: S) -> CallbackBuilder<S> {
+        CallbackBuilder { state: initial }
+    }
+}
+
+fn main() {
+    // Test manual trampoline
+    use_multiplier_callback();
+}

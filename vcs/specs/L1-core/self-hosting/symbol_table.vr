@@ -1,0 +1,319 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: self-hosting, symbol-table, scope, name-resolution
+// @description: Name resolution and scoped symbol table patterns for self-hosting compiler
+
+type SymKind is
+    | Variable(Int)
+    | Function(Int, Int)
+    | TypeName(Int);
+
+fn sym_kind_tag(s: SymKind) -> Int {
+    match s {
+        Variable(_) => 0,
+        Function(_, _) => 1,
+        TypeName(_) => 2,
+    }
+}
+
+type SymEntry is {
+    name: Text,
+    kind: SymKind,
+    scope_depth: Int,
+};
+
+// Scope stack: each scope is a list of symbol entries
+// We simulate scope with a flat list + depth tracking
+
+type SymbolTable is {
+    entries: List<SymEntry>,
+    current_depth: Int,
+};
+
+fn new_table() -> SymbolTable {
+    SymbolTable { entries: List.new(), current_depth: 0 }
+}
+
+fn push_scope(table: &mut SymbolTable) {
+    table.current_depth = table.current_depth + 1;
+}
+
+fn pop_scope(table: &mut SymbolTable) {
+    // Remove all entries at current depth
+    let mut new_entries = List.new();
+    let mut i = 0;
+    while i < table.entries.len() {
+        if table.entries[i].scope_depth < table.current_depth {
+            new_entries.push(table.entries[i]);
+        }
+        i = i + 1;
+    }
+    table.entries = new_entries;
+    table.current_depth = table.current_depth - 1;
+}
+
+fn define(table: &mut SymbolTable, name: Text, kind: SymKind) {
+    table.entries.push(SymEntry {
+        name: name,
+        kind: kind,
+        scope_depth: table.current_depth,
+    });
+}
+
+fn resolve(table: SymbolTable, name: Text) -> Int {
+    // Search from end (most recent/inner scope first)
+    let mut i = table.entries.len() - 1;
+    while i >= 0 {
+        if table.entries[i].name == name {
+            return sym_kind_tag(table.entries[i].kind);
+        }
+        i = i - 1;
+    }
+    -1  // not found
+}
+
+fn resolve_depth(table: SymbolTable, name: Text) -> Int {
+    let mut i = table.entries.len() - 1;
+    while i >= 0 {
+        if table.entries[i].name == name {
+            return table.entries[i].scope_depth;
+        }
+        i = i - 1;
+    }
+    -1
+}
+
+fn count_at_depth(table: SymbolTable, depth: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < table.entries.len() {
+        if table.entries[i].scope_depth == depth {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_basic_define_resolve() -> Int {
+    let mut table = new_table();
+    define(&mut table, "x", SymKind.Variable(1));
+    define(&mut table, "y", SymKind.Variable(2));
+
+    let rx = resolve(table, "x");
+    if rx != 0 {
+        print(f"FAIL basic: x should be Variable(0), got {rx}");
+        return 1;
+    }
+    let ry = resolve(table, "y");
+    if ry != 0 {
+        print(f"FAIL basic: y should be Variable(0), got {ry}");
+        return 1;
+    }
+    let rz = resolve(table, "z");
+    if rz != -1 {
+        print(f"FAIL basic: z should be -1, got {rz}");
+        return 1;
+    }
+    print("  basic_define_resolve: OK");
+    0
+}
+
+fn test_function_symbols() -> Int {
+    let mut table = new_table();
+    define(&mut table, "main", SymKind.Function(0, 1));
+    define(&mut table, "add", SymKind.Function(2, 1));
+    define(&mut table, "Int", SymKind.TypeName(1));
+
+    let r_main = resolve(table, "main");
+    if r_main != 1 {
+        print(f"FAIL func: main should be Function(1), got {r_main}");
+        return 1;
+    }
+    let r_int = resolve(table, "Int");
+    if r_int != 2 {
+        print(f"FAIL func: Int should be TypeName(2), got {r_int}");
+        return 1;
+    }
+    print("  function_symbols: OK");
+    0
+}
+
+fn test_scope_push_pop() -> Int {
+    let mut table = new_table();
+    define(&mut table, "global_x", SymKind.Variable(1));
+
+    push_scope(&mut table);
+    define(&mut table, "local_y", SymKind.Variable(2));
+
+    // Both should be resolvable in inner scope
+    if resolve(table, "global_x") == -1 {
+        print("FAIL scope: global_x should be visible in inner scope");
+        return 1;
+    }
+    if resolve(table, "local_y") == -1 {
+        print("FAIL scope: local_y should be visible in inner scope");
+        return 1;
+    }
+
+    pop_scope(&mut table);
+
+    // global_x still resolvable, local_y gone
+    if resolve(table, "global_x") == -1 {
+        print("FAIL scope: global_x should survive pop");
+        return 1;
+    }
+    if resolve(table, "local_y") != -1 {
+        print("FAIL scope: local_y should be removed after pop");
+        return 1;
+    }
+    print("  scope_push_pop: OK");
+    0
+}
+
+fn test_shadowing() -> Int {
+    let mut table = new_table();
+    define(&mut table, "x", SymKind.Variable(10));
+
+    push_scope(&mut table);
+    define(&mut table, "x", SymKind.Variable(20));
+
+    // Inner x should shadow outer x (resolved by searching from end)
+    let depth = resolve_depth(table, "x");
+    if depth != 1 {
+        print(f"FAIL shadow: x should resolve at depth 1, got {depth}");
+        return 1;
+    }
+
+    pop_scope(&mut table);
+
+    // After pop, should see outer x at depth 0
+    let depth2 = resolve_depth(table, "x");
+    if depth2 != 0 {
+        print(f"FAIL shadow: after pop, x should be at depth 0, got {depth2}");
+        return 1;
+    }
+    print("  shadowing: OK");
+    0
+}
+
+fn test_nested_scopes() -> Int {
+    let mut table = new_table();
+    define(&mut table, "a", SymKind.Variable(1));
+
+    push_scope(&mut table);
+    define(&mut table, "b", SymKind.Variable(2));
+
+    push_scope(&mut table);
+    define(&mut table, "c", SymKind.Variable(3));
+
+    // All visible at depth 2
+    if resolve(table, "a") == -1 || resolve(table, "b") == -1 || resolve(table, "c") == -1 {
+        print("FAIL nested: all vars should be visible at depth 2");
+        return 1;
+    }
+
+    pop_scope(&mut table);
+    // c gone, a and b visible
+    if resolve(table, "c") != -1 {
+        print("FAIL nested: c should be gone after first pop");
+        return 1;
+    }
+    if resolve(table, "a") == -1 || resolve(table, "b") == -1 {
+        print("FAIL nested: a and b should survive first pop");
+        return 1;
+    }
+
+    pop_scope(&mut table);
+    // b gone, a visible
+    if resolve(table, "b") != -1 {
+        print("FAIL nested: b should be gone after second pop");
+        return 1;
+    }
+    if resolve(table, "a") == -1 {
+        print("FAIL nested: a should survive second pop");
+        return 1;
+    }
+    print("  nested_scopes: OK");
+    0
+}
+
+fn test_count_symbols() -> Int {
+    let mut table = new_table();
+    define(&mut table, "g1", SymKind.Variable(1));
+    define(&mut table, "g2", SymKind.Function(0, 0));
+
+    push_scope(&mut table);
+    define(&mut table, "l1", SymKind.Variable(3));
+    define(&mut table, "l2", SymKind.Variable(4));
+    define(&mut table, "l3", SymKind.Variable(5));
+
+    let global_count = count_at_depth(table, 0);
+    let local_count = count_at_depth(table, 1);
+
+    if global_count != 2 {
+        print(f"FAIL count: expected 2 globals, got {global_count}");
+        return 1;
+    }
+    if local_count != 3 {
+        print(f"FAIL count: expected 3 locals, got {local_count}");
+        return 1;
+    }
+    print("  count_symbols: OK");
+    0
+}
+
+fn test_compiler_scenario() -> Int {
+    // Simulate compiling a function with local variables
+    let mut table = new_table();
+
+    // Global scope: types and functions
+    define(&mut table, "Int", SymKind.TypeName(0));
+    define(&mut table, "Bool", SymKind.TypeName(1));
+    define(&mut table, "print", SymKind.Function(1, 0));
+
+    // Enter function scope
+    push_scope(&mut table);
+    define(&mut table, "x", SymKind.Variable(0));
+    define(&mut table, "y", SymKind.Variable(1));
+
+    // Enter if-block scope
+    push_scope(&mut table);
+    define(&mut table, "temp", SymKind.Variable(2));
+
+    // Verify all accessible
+    if resolve(table, "Int") == -1 { print("FAIL scenario: Int not found"); return 1; }
+    if resolve(table, "print") == -1 { print("FAIL scenario: print not found"); return 1; }
+    if resolve(table, "x") == -1 { print("FAIL scenario: x not found"); return 1; }
+    if resolve(table, "temp") == -1 { print("FAIL scenario: temp not found"); return 1; }
+
+    // Leave if-block
+    pop_scope(&mut table);
+    if resolve(table, "temp") != -1 { print("FAIL scenario: temp should be gone"); return 1; }
+    if resolve(table, "x") == -1 { print("FAIL scenario: x should survive"); return 1; }
+
+    // Leave function
+    pop_scope(&mut table);
+    if resolve(table, "x") != -1 { print("FAIL scenario: x should be gone"); return 1; }
+    if resolve(table, "Int") == -1 { print("FAIL scenario: Int should survive"); return 1; }
+
+    print("  compiler_scenario: OK");
+    0
+}
+
+fn main() {
+    let mut failures = 0;
+    failures = failures + test_basic_define_resolve();
+    failures = failures + test_function_symbols();
+    failures = failures + test_scope_push_pop();
+    failures = failures + test_shadowing();
+    failures = failures + test_nested_scopes();
+    failures = failures + test_count_symbols();
+    failures = failures + test_compiler_scenario();
+
+    if failures == 0 {
+        print("All symbol table tests passed");
+    }
+    assert(failures == 0);
+}

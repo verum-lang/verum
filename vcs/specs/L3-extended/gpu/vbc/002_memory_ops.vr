@@ -1,0 +1,81 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, gpu, memory
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU memory operations — simulated alloc, free, memset, memcpy, host-device transfer
+
+type GpuMem is { id: Int, size: Int, value: Int };
+type MemState is { next_id: Int };
+
+fn mem_init() -> MemState { MemState { next_id: 1 } }
+
+fn gpu_alloc(st: MemState, size: Int) -> (GpuMem, MemState) {
+    let mem = GpuMem { id: st.next_id, size: size, value: 0 };
+    let new_st = MemState { next_id: st.next_id + 1 };
+    (mem, new_st)
+}
+
+fn gpu_memset(mem: GpuMem, val: Int, size: Int) -> GpuMem {
+    GpuMem { id: mem.id, size: mem.size, value: val }
+}
+
+fn gpu_memcpy(dst: GpuMem, src: GpuMem, size: Int) -> GpuMem {
+    GpuMem { id: dst.id, size: dst.size, value: src.value }
+}
+
+@test
+fn test_gpu_alloc_free() {
+    let st = mem_init();
+    let (mem, st2) = gpu_alloc(st, 1024);
+    assert(mem.id != 0);
+    // free is a no-op in simulation
+}
+
+@test
+fn test_gpu_alloc_zero_size() {
+    let st = mem_init();
+    let (mem, st2) = gpu_alloc(st, 0);
+    assert(true);
+}
+
+@test
+fn test_gpu_memset() {
+    let st = mem_init();
+    let (mem, st2) = gpu_alloc(st, 256);
+    let mem2 = gpu_memset(mem, 0, 256);
+    assert(mem2.value == 0);
+}
+
+@test
+fn test_gpu_memcpy() {
+    let st = mem_init();
+    let (src, st2) = gpu_alloc(st, 64);
+    let (dst, st3) = gpu_alloc(st2, 64);
+    let src2 = gpu_memset(src, 42, 64);
+    let dst2 = gpu_memcpy(dst, src2, 64);
+    assert(dst2.value == 42);
+}
+
+@test
+fn test_gpu_memcpy_h2d_d2h() {
+    let st = mem_init();
+    let (host, st2) = gpu_alloc(st, 128);
+    let (dev, st3) = gpu_alloc(st2, 128);
+    let host2 = gpu_memset(host, 99, 128);
+    // h2d: host -> device
+    let dev2 = gpu_memcpy(dev, host2, 128);
+    assert(dev2.value == 99);
+    // d2h: device -> host
+    let host3 = gpu_memcpy(host2, dev2, 128);
+    assert(host3.value == 99);
+}
+
+fn main() {
+    test_gpu_alloc_free();
+    test_gpu_alloc_zero_size();
+    test_gpu_memset();
+    test_gpu_memcpy();
+    test_gpu_memcpy_h2d_d2h();
+}

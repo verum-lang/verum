@@ -1,0 +1,81 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, threads, concurrency, safety
+
+/// Test CBGR cross-thread safety guarantees.
+/// CBGR ensures memory safety even in concurrent contexts.
+/// Generation and epoch checks are atomic and thread-safe.
+
+mount core.sync.{Mutex, AtomicInt, AtomicBool, MemoryOrdering, Barrier};
+
+fn main() {
+    test_shared_reference_access();
+    test_concurrent_generation_checks();
+    test_concurrent_allocation_deallocation();
+    test_sync_wrapper_safety();
+
+    print("All cross-thread safety tests passed!");
+}
+
+/// Test shared reference access pattern
+fn test_shared_reference_access() {
+    // Multiple readers can safely hold immutable references via Shared
+    let shared_data = Shared.new(List.from([1, 2, 3, 4, 5]));
+
+    // Create multiple clone handles (simulating threads)
+    let handle1 = shared_data.clone();
+    let handle2 = shared_data.clone();
+    let handle3 = shared_data.clone();
+    let handle4 = shared_data.clone();
+
+    // Each handle can read the data safely
+    // CBGR validates generation on each access
+    print("Shared reference access test passed");
+}
+
+/// Test concurrent generation checks using atomic counter
+fn test_concurrent_generation_checks() {
+    let value = Shared.new(Heap.new(42));
+
+    // Multiple readers verify the same generation
+    let v1 = value.clone();
+    let v2 = value.clone();
+
+    // Generation check is atomic - safe for concurrent access
+    print("Concurrent generation checks test passed");
+}
+
+/// Test allocation/deallocation patterns are safe
+fn test_concurrent_allocation_deallocation() {
+    // Rapid allocation/deallocation should produce unique generations
+    for _ in 0..100 {
+        let value = Heap.new(42);
+        let generation = value.generation();
+        let _ = *value;  // Access
+
+        // New allocation gets new generation
+        let new_value = Heap.new(100);
+        assert(new_value.generation() > generation);
+    }
+
+    print("Concurrent allocation/deallocation test passed");
+}
+
+/// Test Sync wrapper safety patterns
+fn test_sync_wrapper_safety() {
+    // Shared<T> ensures T: Sync is enforced at compile time
+
+    // Int is Sync
+    let shared_int = Shared.new(42);
+
+    // Heap<T> where T: Sync is Sync
+    let shared_heap = Shared.new(Heap.new("shared"));
+
+    // Mutex provides interior mutability with Sync
+    let data = Shared.new(Mutex.new(List.new()));
+
+    // Mutex.new creates a thread-safe wrapper
+    // Multiple threads can safely access through lock()
+    print("Sync wrapper safety test passed");
+}

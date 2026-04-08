@@ -1,0 +1,104 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, linker, linkage, symbols
+// @description: Symbol linkage control tests
+
+/// External linkage (default) - visible to other translation units
+@linkage(external)
+fn public_function() -> Int {
+    42
+}
+
+/// Internal linkage - only visible within this translation unit
+@linkage(internal)
+fn internal_function() -> Int {
+    123
+}
+
+/// Local linkage - not visible even to other modules in same TU
+@linkage(local)
+fn private_helper() -> Int {
+    999
+}
+
+/// Weak linkage - can be overridden by strong symbol
+@linkage(weak)
+fn weak_default_handler() {
+    // Default implementation
+}
+
+/// Using @weak attribute shorthand
+@weak
+fn another_weak_function() -> Int {
+    0
+}
+
+/// Linkonce - only one copy needed
+@linkage(linkonce)
+fn inline_template_instance() -> Int {
+    1
+}
+
+/// Linkonce ODR (One Definition Rule) - for C++ style templates
+@linkage(linkonce_odr)
+fn odr_template<T>(x: T) -> T {
+    x
+}
+
+/// Common linkage - for tentative definitions
+@linkage(common)
+let GLOBAL_BUFFER: [Int; 256] = [0; 256];
+
+/// Available externally - for inlining optimization
+@linkage(available_externally)
+fn inlinable_external() -> Int {
+    // Body available for inlining but not emitted
+    5
+}
+
+/// Combined with visibility
+@linkage(external)
+@visibility(hidden)
+fn hidden_external() -> Int {
+    // Externally linked but not exported
+    10
+}
+
+/// Protected visibility with external linkage
+@linkage(external)
+@visibility(protected)
+fn protected_external() -> Int {
+    11
+}
+
+fn main() {
+    let a = public_function();
+    assert(a == 42);
+
+    let b = internal_function();
+    assert(b == 123);
+
+    let c = private_helper();
+    assert(c == 999);
+
+    weak_default_handler();
+
+    let d = another_weak_function();
+    assert(d == 0);
+
+    let e = inline_template_instance();
+    assert(e == 1);
+
+    let f = odr_template(100);
+    assert(f == 100);
+
+    let g = inlinable_external();
+    assert(g == 5);
+
+    let h = hidden_external();
+    assert(h == 10);
+
+    let i = protected_external();
+    assert(i == 11);
+}

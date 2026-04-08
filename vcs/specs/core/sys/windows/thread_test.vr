@@ -1,0 +1,399 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/windows/thread_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, windows, thread, sync
+// @description: Tests for Windows thread creation and synchronization.
+//
+// Coverage:
+// - Thread, ThreadId, ThreadFunc, ThreadHandle: Thread types
+// - ThreadError: Error types
+// - Mutex, Condvar, SpinLock, RwLock: Synchronization primitives
+// - Semaphore, Once, Barrier: Additional primitives
+// - thread_spawn, thread_join, thread_yield: Thread operations
+// - DEFAULT_THREAD_STACK_SIZE constant
+//
+// Test Strategy:
+// - Test type construction and constants
+// - Test synchronization primitives (single-threaded)
+// - Test Once initialization
+//
+// Platform: Windows x86_64
+// =============================================================================
+
+@cfg(target_os = "windows")
+module test.stdlib.sys.windows.thread_test;
+
+mount core.sys.windows.thread.{
+    ThreadError,
+    Thread, ThreadId, ThreadFunc, ThreadHandle,
+    Mutex, Condvar, SpinLock, RwLock,
+    Semaphore, Once, OnceState, Barrier,
+
+    DEFAULT_THREAD_STACK_SIZE,
+
+    thread_spawn, thread_join, thread_detach,
+    thread_yield, thread_sleep_ms,
+    current_thread_id,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Thread Constants Tests
+// =============================================================================
+
+@test
+fn test_thread_constants() {
+    // Default stack size should be reasonable
+    assert(DEFAULT_THREAD_STACK_SIZE > 0);
+    assert(DEFAULT_THREAD_STACK_SIZE >= 65536);  // At least 64KB
+
+    print("Thread constants tests passed");
+}
+
+// =============================================================================
+// Current Thread ID Tests
+// =============================================================================
+
+@test
+fn test_current_thread_id() {
+    // Get current thread ID
+    let tid = current_thread_id();
+
+    // TID should be positive
+    assert(tid > 0);
+
+    // Multiple calls return same TID
+    let tid2 = current_thread_id();
+    let tid3 = current_thread_id();
+    assert(tid == tid2);
+    assert(tid == tid3);
+
+    print(f"Current TID: {tid}");
+}
+
+// =============================================================================
+// SpinLock Tests
+// =============================================================================
+
+@test
+fn test_spinlock() {
+    // Create spinlock
+    let mut lock = SpinLock.new();
+
+    // Initially unlocked
+    assert(!lock.is_locked());
+
+    // Lock
+    lock.lock();
+    assert(lock.is_locked());
+
+    // Try lock should fail
+    let try_result = lock.try_lock();
+    assert(!try_result);
+
+    // Unlock
+    lock.unlock();
+    assert(!lock.is_locked());
+
+    // Try lock should succeed
+    let try_result2 = lock.try_lock();
+    assert(try_result2);
+
+    lock.unlock();
+
+    // Multiple cycles
+    for _ in 0..10 {
+        lock.lock();
+        assert(lock.is_locked());
+        lock.unlock();
+        assert(!lock.is_locked());
+    }
+
+    print("SpinLock tests passed");
+}
+
+// =============================================================================
+// Mutex Tests
+// =============================================================================
+
+@test
+fn test_mutex() {
+    // Create mutex
+    let mut mutex = Mutex.new();
+
+    // Lock should succeed
+    let lock_result = mutex.lock();
+    assert(lock_result is Ok);
+
+    // Unlock
+    mutex.unlock();
+
+    // Try lock should succeed
+    let try_result = mutex.try_lock();
+    assert(try_result is Ok);
+
+    mutex.unlock();
+
+    // Lock with timeout
+    let timed_result = mutex.lock_timeout(10);  // 10ms
+    assert(timed_result is Ok);
+
+    mutex.unlock();
+
+    print("Mutex tests passed");
+}
+
+// =============================================================================
+// RwLock Tests
+// =============================================================================
+
+@test
+fn test_rwlock() {
+    // Create read-write lock
+    let mut rwlock = RwLock.new();
+
+    // Read lock should succeed
+    rwlock.read_lock();
+    rwlock.read_unlock();
+
+    // Write lock should succeed
+    rwlock.write_lock();
+    rwlock.write_unlock();
+
+    // Try read lock
+    let try_read = rwlock.try_read_lock();
+    assert(try_read);
+    rwlock.read_unlock();
+
+    // Try write lock
+    let try_write = rwlock.try_write_lock();
+    assert(try_write);
+    rwlock.write_unlock();
+
+    // Multiple read locks (should succeed)
+    rwlock.read_lock();
+    // In single-threaded, we can't test concurrent reads
+    rwlock.read_unlock();
+
+    print("RwLock tests passed");
+}
+
+// =============================================================================
+// Condvar Type Tests
+// =============================================================================
+
+@test
+fn test_condvar_type() {
+    // Create condvar
+    let condvar = Condvar.new();
+
+    // Create associated mutex
+    let mut mutex = Mutex.new();
+
+    // Signal with no waiters is safe
+    condvar.signal();
+    condvar.broadcast();
+
+    // Wait with timeout
+    let _ = mutex.lock();
+
+    let wait_result = condvar.wait_timeout(&mut mutex, 1);  // 1ms
+
+    // Should timeout or spurious wakeup
+    match wait_result {
+        Ok(()) => {
+            // Spurious wakeup
+        }
+        Err(e) => {
+            // Expected: timeout
+        }
+    }
+
+    mutex.unlock();
+
+    print("Condvar type tests passed");
+}
+
+// =============================================================================
+// Semaphore Tests
+// =============================================================================
+
+@test
+fn test_semaphore() {
+    // Create semaphore with initial count 2
+    let mut sem = Semaphore.new(2);
+
+    // Wait should succeed (count = 2)
+    let wait1 = sem.wait();
+    assert(wait1 is Ok);
+
+    // Wait should succeed (count = 1)
+    let wait2 = sem.wait();
+    assert(wait2 is Ok);
+
+    // Try wait should fail (count = 0)
+    let try_wait = sem.try_wait();
+    assert(try_wait is Err);
+
+    // Signal to increment count
+    sem.signal();
+
+    // Try wait should succeed now
+    let try_wait2 = sem.try_wait();
+    assert(try_wait2 is Ok);
+
+    // Signal twice to restore
+    sem.signal();
+    sem.signal();
+
+    // Wait with timeout
+    let timed_wait = sem.wait_timeout(10);  // 10ms
+    assert(timed_wait is Ok);
+
+    print("Semaphore tests passed");
+}
+
+// =============================================================================
+// Once Tests
+// =============================================================================
+
+@test
+fn test_once() {
+    // Create Once
+    let mut once = Once.new();
+
+    // Initially not done
+    assert(!once.is_done());
+
+    // Track calls
+    let mut call_count = 0;
+
+    // Call once
+    once.call_once(|| {
+        call_count += 1;
+    });
+
+    assert(once.is_done());
+    assert(call_count == 1);
+
+    // Second call should not execute
+    once.call_once(|| {
+        call_count += 1;
+    });
+
+    assert(call_count == 1);
+
+    // Third call also should not execute
+    once.call_once(|| {
+        call_count += 1;
+    });
+
+    assert(call_count == 1);
+
+    print("Once tests passed");
+}
+
+// =============================================================================
+// ThreadError Type Tests
+// =============================================================================
+
+@test
+fn test_thread_error_types() {
+    // Create variants
+    let create_err = ThreadError.CreateFailed { code: 8 };
+    let join_err = ThreadError.JoinFailed { code: 6 };
+    let detach_err = ThreadError.DetachFailed { code: 5 };
+    let stack_err = ThreadError.StackAllocationFailed { size: 1048576 };
+    let tls_err = ThreadError.TlsSetupFailed { reason: "TlsAlloc failed" };
+    let timeout_err = ThreadError.JoinTimeout { tid: 12345, ms: 5000 };
+
+    // Pattern matching
+    match create_err {
+        ThreadError.CreateFailed { code } => {
+            assert(code == 8);
+        }
+        _ => assert(false),
+    }
+
+    match join_err {
+        ThreadError.JoinFailed { code } => {
+            assert(code == 6);
+        }
+        _ => assert(false),
+    }
+
+    match detach_err {
+        ThreadError.DetachFailed { code } => {
+            assert(code == 5);
+        }
+        _ => assert(false),
+    }
+
+    match stack_err {
+        ThreadError.StackAllocationFailed { size } => {
+            assert(size == 1048576);
+        }
+        _ => assert(false),
+    }
+
+    match tls_err {
+        ThreadError.TlsSetupFailed { reason } => {
+            assert(reason.contains("TlsAlloc"));
+        }
+        _ => assert(false),
+    }
+
+    match timeout_err {
+        ThreadError.JoinTimeout { tid, ms } => {
+            assert(tid == 12345);
+            assert(ms == 5000);
+        }
+        _ => assert(false),
+    }
+
+    print("ThreadError type tests passed");
+}
+
+// =============================================================================
+// Thread Yield Tests
+// =============================================================================
+
+@test
+fn test_thread_yield() {
+    // Yield should not crash
+    thread_yield();
+    thread_yield();
+    thread_yield();
+
+    print("Thread yield tests passed");
+}
+
+// =============================================================================
+// Thread Sleep Tests
+// =============================================================================
+
+@test
+fn test_thread_sleep() {
+    mount core.sys.windows.time.{monotonic_nanos};
+
+    // Sleep for 10ms
+    let before = monotonic_nanos();
+    thread_sleep_ms(10);
+    let after = monotonic_nanos();
+
+    let elapsed = after - before;
+    assert(elapsed >= 9_000_000);     // At least 9ms
+    assert(elapsed < 100_000_000);    // Less than 100ms
+
+    print("Thread sleep tests passed");
+}

@@ -1,0 +1,191 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, bitwise
+
+// Bitwise operators
+
+fn test_bitwise_and() {
+    // Bitwise AND (&)
+    let band1 = 0b1100 & 0b1010;  // 0b1000 = 8
+    let band2 = 0xFF & 0x0F;      // 0x0F = 15
+    let band3 = 255 & 128;        // 128
+    let mask_apply = 0xABCD & 0xFF00;
+}
+
+fn test_bitwise_or() {
+    // Bitwise OR (|)
+    let bor1 = 0b1100 | 0b1010;   // 0b1110 = 14
+    let bor2 = 0xF0 | 0x0F;       // 0xFF = 255
+    let bor3 = 64 | 32;           // 96
+    let flags = 0;
+    let FLAG_READ = 1;
+    let FLAG_WRITE = 2;
+    let flags_set = flags | FLAG_READ | FLAG_WRITE;
+}
+
+fn test_bitwise_xor() {
+    // Bitwise XOR (^)
+    let bxor1 = 0b1100 ^ 0b1010;  // 0b0110 = 6
+    let bxor2 = 0xFF ^ 0xFF;      // 0x00 = 0
+    let bxor3 = 0xFF ^ 0x00;      // 0xFF = 255
+    let value = 0;
+    let TOGGLE_MASK = 0xFF;
+    let toggle = value ^ TOGGLE_MASK;
+}
+
+fn test_bitwise_not() {
+    // Bitwise NOT (~)
+    let bnot1 = ~0b1010;          // ...11110101
+    let bnot2 = ~0xFF;            // ...11111111 11111111 11111111 00000000
+    let bnot3 = ~0;               // All ones
+    let bnot_u8 = ~0u8;          // 255
+}
+
+fn test_shifts() {
+    // Left shift (<<)
+    let lshift1 = 1 << 0;         // 1
+    let lshift2 = 1 << 1;         // 2
+    let lshift3 = 1 << 2;         // 4
+    let lshift4 = 1 << 3;         // 8
+    let lshift5 = 1 << 8;         // 256
+    let lshift_val = 0b0001 << 4; // 0b10000 = 16
+    let x = 4;
+    let double = x << 1;          // Multiply by 2
+
+    // Right shift (>>)
+    let rshift1 = 16 >> 0;        // 16
+    let rshift2 = 16 >> 1;        // 8
+    let rshift3 = 16 >> 2;        // 4
+    let rshift4 = 16 >> 3;        // 2
+    let rshift5 = 16 >> 4;        // 1
+    let rshift_val = 0b10000 >> 4;  // 0b0001 = 1
+    let half = x >> 1;            // Divide by 2 (floor)
+
+    // Arithmetic vs logical right shift
+    let arith_shift = -8i32 >> 1;   // -4 (sign extended)
+    let logic_shift = -8u32 >> 1;   // Large positive number
+}
+
+// Bit manipulation patterns
+
+// Set a bit
+fn set_bit(value: Int, bit: Int) -> Int {
+    value | (1 << bit)
+}
+
+// Clear a bit
+fn clear_bit(value: Int, bit: Int) -> Int {
+    value & ~(1 << bit)
+}
+
+// Toggle a bit
+fn toggle_bit(value: Int, bit: Int) -> Int {
+    value ^ (1 << bit)
+}
+
+// Check if bit is set
+fn is_bit_set(value: Int, bit: Int) -> Bool {
+    (value & (1 << bit)) != 0
+}
+
+// Extract bits
+fn extract_bits(value: Int, start: Int, length: Int) -> Int {
+    (value >> start) & ((1 << length) - 1)
+}
+
+// Flag operations
+const FLAG_READ: Int = 1 << 0;    // 0b0001
+const FLAG_WRITE: Int = 1 << 1;   // 0b0010
+const FLAG_EXEC: Int = 1 << 2;    // 0b0100
+const FLAG_ADMIN: Int = 1 << 3;   // 0b1000
+
+fn test_flags() {
+    let permissions = FLAG_READ | FLAG_WRITE;
+    let has_read = (permissions & FLAG_READ) != 0;
+    let has_exec = (permissions & FLAG_EXEC) != 0;
+    let add_exec = permissions | FLAG_EXEC;
+    let remove_write = permissions & ~FLAG_WRITE;
+}
+
+// Bit counting
+fn count_ones(mut n: Int) -> Int {
+    let mut count = 0;
+    while n != 0 {
+        count = count + (n & 1);
+        n = n >> 1;
+    }
+    count
+}
+
+fn count_zeros(n: Int) -> Int {
+    count_ones(~n)
+}
+
+// Power of two check
+fn is_power_of_two(n: Int) -> Bool {
+    n > 0 && (n & (n - 1)) == 0
+}
+
+// Next power of two
+fn next_power_of_two(mut n: Int) -> Int {
+    n = n - 1;
+    n = n | (n >> 1);
+    n = n | (n >> 2);
+    n = n | (n >> 4);
+    n = n | (n >> 8);
+    n = n | (n >> 16);
+    n + 1
+}
+
+// Swap using XOR
+fn swap_xor(mut a: Int, mut b: Int) -> (Int, Int) {
+    a = a ^ b;
+    b = a ^ b;
+    a = a ^ b;
+    (a, b)
+}
+
+// Rotate bits
+fn rotate_left(value: u32, bits: Int) -> u32 {
+    (value << bits) | (value >> (32 - bits))
+}
+
+fn rotate_right(value: u32, bits: Int) -> u32 {
+    (value >> bits) | (value << (32 - bits))
+}
+
+// Bit reversal
+fn reverse_bits(mut n: u32) -> u32 {
+    let mut result = 0u32;
+    for _ in 0..32 {
+        result = (result << 1) | (n & 1);
+        n = n >> 1;
+    }
+    result
+}
+
+// Sign extension
+fn sign_extend(value: Int, bits: Int) -> Int {
+    let shift = 32 - bits;
+    (value << shift) >> shift
+}
+
+// Bitwise in match (guards)
+fn permission_str(flags: Int) -> Text {
+    match flags {
+        f if (f & FLAG_ADMIN) != 0 => "admin"
+        f if (f & FLAG_WRITE) != 0 => "write"
+        f if (f & FLAG_READ) != 0 => "read"
+        _ => "none"
+    }
+}
+
+fn test_compound_bitwise() {
+    // Compound bitwise assignment (see assignment.vr)
+    let mut flags2 = 0;
+    flags2 = flags2 | FLAG_READ;
+    flags2 = flags2 | FLAG_WRITE;
+    flags2 = flags2 & ~FLAG_READ;
+    flags2 = flags2 ^ FLAG_ADMIN;
+}

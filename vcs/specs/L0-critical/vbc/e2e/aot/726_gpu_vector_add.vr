@@ -1,0 +1,96 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, gpu, vector-add
+// @expected-exit: 0
+
+// Classic GPU vector addition kernel simulation.
+// Each "thread" computes one element: c[gid] = a[gid] + b[gid].
+// Tests list return from functions (requires proper List<Int> return type tracking).
+
+fn vector_add_kernel(a: List<Int>, b: List<Int>, n: Int) -> List<Int> {
+    // Simulate GPU kernel: each "thread" computes c[gid] = a[gid] + b[gid]
+    let mut c = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut gid = 0;
+    while (gid < n) {
+        c[gid] = a[gid] + b[gid];
+        gid = gid + 1;
+    }
+    c
+}
+
+fn vector_scale_kernel(a: List<Int>, scalar: Int, n: Int) -> List<Int> {
+    let mut c = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut gid = 0;
+    while (gid < n) {
+        c[gid] = a[gid] * scalar;
+        gid = gid + 1;
+    }
+    c
+}
+
+fn dot_product(a: List<Int>, b: List<Int>, n: Int) -> Int {
+    // Simulates a GPU dot product with per-thread multiply + reduction
+    let mut partial = 0;
+    let mut gid = 0;
+    while (gid < n) {
+        partial = partial + a[gid] * b[gid];
+        gid = gid + 1;
+    }
+    partial
+}
+
+fn main() -> Int {
+    let n = 8;
+
+    // Test 1: Vector addition via function returning List<Int>
+    let a = [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b = [10, 20, 30, 40, 50, 60, 70, 80, 0, 0, 0, 0, 0, 0, 0, 0];
+    let c = vector_add_kernel(a, b, n);
+    assert_eq(c[0], 11);
+    assert_eq(c[1], 22);
+    assert_eq(c[4], 55);
+    assert_eq(c[7], 88);
+
+    // Test 2: Vector scale via function returning List<Int>
+    let d = vector_scale_kernel(a, 3, n);
+    assert_eq(d[0], 3);
+    assert_eq(d[3], 12);
+    assert_eq(d[7], 24);
+
+    // Test 3: Dot product (returns scalar, depends on list params)
+    let dp = dot_product(a, b, n);
+    // 1*10 + 2*20 + 3*30 + 4*40 + 5*50 + 6*60 + 7*70 + 8*80
+    // = 10 + 40 + 90 + 160 + 250 + 360 + 490 + 640 = 2040
+    assert_eq(dp, 2040);
+
+    // Test 4: Chained operations: add then scale
+    let sum = vector_add_kernel(a, b, n);
+    let scaled = vector_scale_kernel(sum, 2, n);
+    assert_eq(scaled[0], 22);
+    assert_eq(scaled[7], 176);
+
+    // Test 5: Block-based vector add simulation
+    // grid=2, block=4 → 8 threads total
+    let grid = 2;
+    let block = 4;
+    let mut result = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut bid = 0;
+    while (bid < grid) {
+        let mut tid = 0;
+        while (tid < block) {
+            let gid = bid * block + tid;
+            if (gid < n) {
+                result[gid] = a[gid] + b[gid];
+            }
+            tid = tid + 1;
+        }
+        bid = bid + 1;
+    }
+    assert_eq(result[0], 11);
+    assert_eq(result[4], 55);
+    assert_eq(result[7], 88);
+
+    print("GPU vector add: PASS");
+    0
+}

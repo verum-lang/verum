@@ -1,0 +1,93 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, render, layer3
+// @description: Verify core.term.render types parse correctly
+
+
+/// Layer 3: Rendering Engine — Cell, Buffer, diff algorithm, Frame, Terminal.
+
+mount core.term.render.*;
+mount core.term.style.{Style, Color};
+mount core.term.layout.Rect;
+
+fn test_cell() {
+    let cell = Cell.EMPTY;
+    assert_eq(cell.grapheme, " ");
+    assert_eq(cell.skip, false);
+}
+
+fn test_char_display_width() {
+    // ASCII characters
+    assert_eq(char_display_width("a"), 1);
+    assert_eq(char_display_width(" "), 1);
+
+    // Control characters
+    assert_eq(char_display_width(""), 0);
+
+    // Empty string
+    assert_eq(char_display_width(""), 0);
+}
+
+fn test_buffer() {
+    let mut buf = Buffer.new(10, 5);
+    assert_eq(buf.width, 10);
+    assert_eq(buf.height, 5);
+
+    // Set a string
+    let end_x = buf.set_string(0, 0, "Hello", Style.DEFAULT);
+    assert_eq(end_x, 5);
+
+    // Check cell content
+    let cell = buf.get(0, 0);
+    assert_eq(cell.grapheme, "H");
+}
+
+fn test_buffer_set_style() {
+    let mut buf = Buffer.new(10, 5);
+    let style = Style.new().fg(Color.Red);
+    let area = Rect.new(0, 0, 5, 3);
+    buf.set_style(area, style);
+
+    // Cells in area should have the style applied
+    let cell = buf.get(2, 1);
+    assert(cell.style.fg.is_some());
+}
+
+fn test_buffer_merge() {
+    let mut base = Buffer.new(10, 5);
+    let mut overlay = Buffer.new(3, 2);
+    overlay.set_string(0, 0, "Hi!", Style.DEFAULT);
+
+    let area = Rect.new(2, 1, 3, 2);
+    base.merge(&overlay, area);
+
+    // Merged cell should have content
+    let cell = base.get(2, 1);
+    assert_eq(cell.grapheme, "H");
+}
+
+fn test_buffer_reset() {
+    let mut buf = Buffer.new(5, 3);
+    buf.set_string(0, 0, "Test", Style.DEFAULT);
+    buf.reset();
+
+    let cell = buf.get(0, 0);
+    assert_eq(cell.grapheme, " ");
+}
+
+fn test_viewport() {
+    let full = Viewport.Fullscreen;
+    let inline = Viewport.Inline { height: 10 };
+    let fixed = Viewport.Fixed { area: Rect.new(0, 0, 40, 12) };
+}
+
+fn main() {
+    test_cell();
+    test_char_display_width();
+    test_buffer();
+    test_buffer_set_style();
+    test_buffer_merge();
+    test_buffer_reset();
+    test_viewport();
+}

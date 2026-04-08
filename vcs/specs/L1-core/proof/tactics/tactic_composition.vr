@@ -1,0 +1,45 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, tactics, composition
+// @timeout: 5000
+
+/// Tactic composition and sequencing.
+
+// Custom tactic using intro then cases
+tactic intro_and_cases() {
+    intro;
+    cases
+}
+
+// Tactic with named arguments
+tactic rewrite_with(lemma_name: Expr) {
+    rewrite(lemma_name)
+}
+
+// Theorem using parenthesized tactic grouping
+theorem grouped_tactics(a: Int, b: Int)
+    requires a > 0
+    proof by (simp; auto);
+
+// Theorem using apply tactic
+theorem apply_lemma(x: Int)
+    requires x > 0
+    proof by apply(x);
+
+// Theorem using exact
+theorem exact_proof(x: Int) -> Int
+    requires x > 0
+    proof by exact(x);
+
+// Theorem using intro
+theorem intro_test(a: Int, b: Int)
+    proof by intros;
+
+// Theorem using contradiction
+theorem by_contradiction(p: Bool)
+    requires p
+    proof by contradiction;
+
+fn main() {
+    print("Tactic composition tests parsed");
+}

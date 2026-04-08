@@ -1,0 +1,166 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, cbgr, memory, integration, error
+// @timeout: 5000
+// @expected-error: E312
+
+/// Integration test failures: Contracts with CBGR
+/// Demonstrates common errors when combining contracts and memory safety
+
+/// ERROR: Dangling reference in postcondition
+@verify(proof)
+fn return_local_ref<T>(value: T) -> &T {
+    contract#"
+        ensures result.is_valid();  // ERROR: Can't be valid, it's dangling
+    ";
+    let local = value;
+    &local  // Dangling reference - local goes out of scope
+}
+
+/// ERROR: Use after move in contract
+@verify(proof)
+fn move_and_use<T>(value: T) -> (T, T) {
+    contract#"
+        ensures result.0 == value;  // ERROR: value was moved
+        ensures result.1 == value;
+    ";
+    let moved = value;
+    (moved, value)  // ERROR: value already moved
+}
+
+/// ERROR: Exclusive borrow violation
+@verify(proof)
+fn double_mut_borrow<T>(data: &mut T) -> (&mut T, &mut T) {
+    contract#"
+        ensures result.0.is_valid() && result.1.is_valid();
+        // ERROR: Can't have two mutable references to same data
+    ";
+    (data, data)  // Two &mut to same location
+}
+
+/// ERROR: Shared and exclusive borrow conflict
+@verify(proof)
+fn conflicting_borrows<T>(data: &mut T) -> (&T, &mut T) {
+    contract#"
+        ensures result.0.is_valid();
+        ensures result.1.is_valid();
+    ";
+    let shared = &*data;
+    let exclusive = data;  // ERROR: Can't borrow mutably while shared borrow exists
+    (shared, exclusive)
+}
+
+/// ERROR: Generation mismatch
+type Container<T> is {
+    value: T,
+};
+
+@verify(proof)
+fn stale_reference<T>(container: &mut Container<T>, new_value: T) -> &T {
+    contract#"
+        ensures result.is_valid();
+        ensures result.generation() == current_epoch();
+    ";
+    let old_ref = &container.value;
+    container.value = new_value;  // Invalidates old_ref
+    old_ref  // ERROR: Stale reference, generation mismatch
+}
+
+/// ERROR: Lifetime escapes scope
+@verify(proof)
+fn escape_scope<T>(data: &T) -> & T {
+    contract#"
+        ensures result.lifetime().is_static();
+    ";
+    // ERROR: Can't extend lifetime beyond 'a
+    data as & T
+}
+
+/// ERROR: Unsafe block without safety proof
+@verify(proof)
+fn raw_pointer_deref<T>(ptr: *const T) -> &T {
+    contract#"
+        ensures result.is_valid();
+    ";
+    // ERROR: No safety proof for raw pointer dereference
+    unsafe { &*ptr }  // Could be null, dangling, or misaligned
+}
+
+/// ERROR: Interior mutability breaks contract
+type UnsafeCell<T> is {
+    value: T,
+};
+
+@verify(proof)
+fn interior_mutation(cell: &UnsafeCell<Int>) -> Int {
+    contract#"
+        ensures result == cell.value;
+        ensures cell.value == old(cell.value);  // ERROR: Could be mutated
+    ";
+    // Interior mutability means value could change despite shared reference
+    cell.value
+}
+
+/// ERROR: CBGR fat reference bounds violation
+@verify(proof)
+fn slice_oob<T>(slice: &[T], idx: Int) -> &T {
+    contract#"
+        requires idx >= 0;
+        // ERROR: Missing idx < slice.len()
+        ensures result.is_valid();
+    ";
+    &slice[idx]  // Could be out of bounds
+}
+
+/// ERROR: Heap allocation without ownership tracking
+@verify(proof)
+fn leak_memory<T>(value: T) -> & T {
+    contract#"
+        ensures result.is_valid();
+    ";
+    // ERROR: Leaks memory, no cleanup
+    let boxed = Heap(value);
+    let leaked: & T = Heap.leak(boxed);
+    // Heap is leaked but contract doesn't track this
+    leaked
+}
+
+/// ERROR: Split borrow with overlap
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+@verify(proof)
+fn overlapping_split(pair: &mut Pair<Int, Int>) -> (&mut Int, &mut Int) {
+    contract#"
+        ensures result.0.is_disjoint(result.1);  // ERROR: Could point to same
+    ";
+    // If Pair is repr(C) with padding, this might overlap
+    (&mut pair.first, &mut pair.first)  // Same field twice!
+}
+
+/// ERROR: Aliasing through type coercion
+@verify(proof)
+fn alias_through_coercion(x: &mut Int) -> (&Int, &mut Int) {
+    contract#"
+        ensures !result.0.aliases(result.1);  // ERROR: They alias
+    ";
+    let shared: &Int = x;
+    let mutable: &mut Int = x;  // ERROR: Reborrow while shared exists
+    (shared, mutable)
+}
+
+/// ERROR: Reference invalidation across await
+@verify(proof)
+async fn ref_across_await<T>(data: &mut T) -> &T {
+    contract#"
+        ensures result.is_valid();
+    ";
+    let reference = &*data;
+    yield_point().await;  // Reference might be invalidated during await
+    reference  // ERROR: Could be stale after await
+}
+
+async fn yield_point() {}

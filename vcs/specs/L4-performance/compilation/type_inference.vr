@@ -1,0 +1,384 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: compilation, type-inference, performance
+// @description: Type inference speed benchmark (target: < 100ms for 10K LOC)
+
+/// Type Inference Performance Benchmark
+///
+/// Measures the speed of Hindley-Milner type inference with extensions
+/// for refinement types, contexts, and computational properties.
+///
+/// Performance targets:
+/// - Simple programs:     < 50ms / 10K LOC
+/// - Generic code:        < 100ms / 10K LOC
+/// - Refinement types:    < 200ms / 10K LOC
+/// - Complex constraints: < 500ms / 10K LOC
+///
+/// Type inference phases:
+/// 1. Constraint generation
+/// 2. Unification
+/// 3. Refinement solving (SMT)
+/// 4. Property inference
+///
+/// Spec reference: docs/detailed/03-type-system.md
+
+const LOC_TARGET: Int = 10_000;
+const WARMUP_ITERATIONS: Int = 3;
+const BENCHMARK_ITERATIONS: Int = 10;
+
+/// Generate code with simple types (Int, Bool, Text)
+fn generate_simple_typed_code(lines: Int) -> Text {
+    let mut source = Text.with_capacity(lines * 40);
+
+    for i in 0..lines {
+        let line = match i % 4 {
+            0 => format("let x{} = {};", i, i * 7),
+            1 => format("let b{} = {} > {};", i, i, i / 2),
+            2 => format("let s{} = \"string_{}\";", i, i),
+            3 => format("let t{} = (x{}, b{});", i, i - 3, i - 2),
+            _ => "".to_string(),
+        };
+        source.push_str(&line);
+        source.push_str("\n");
+    }
+
+    source
+}
+
+/// Generate code requiring inference across functions
+fn generate_function_inference_code(functions: Int) -> Text {
+    let mut source = Text.with_capacity(functions * 200);
+
+    for i in 0..functions {
+        source.push_str(&format(
+            r#"fn infer_{}(x) {{
+    let y = x + 1;
+    let z = y * 2;
+    z
+}}
+
+fn use_infer_{}() {{
+    let result = infer_{}({});
+    result + 10
+}}
+
+"#,
+            i, i, i, i
+        ));
+    }
+
+    source
+}
+
+/// Generate code with generic types
+fn generate_generic_code(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 300);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"fn generic_{}[T, U](x: T, f: fn(T) -> U) -> U {{
+    f(x)
+}}
+
+fn compose_{}[A, B, C](f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {{
+    |a| g(f(a))
+}}
+
+fn map_pair_{}[T, U](pair: (T, T), f: fn(T) -> U) -> (U, U) {{
+    (f(pair.0), f(pair.1))
+}}
+
+"#,
+            i, i, i
+        ));
+    }
+
+    source
+}
+
+/// Generate code with higher-kinded types
+fn generate_hkt_code(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 400);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"type Functor_{} is protocol {{
+    type F[_];
+
+    fn map[A, B](self: Self.F[A], f: fn(A) -> B) -> Self.F[B];
+}};
+
+type Monad_{} is protocol extends Functor_{} {{
+    fn pure[A](a: A) -> Self.F[A];
+    fn flat_map[A, B](self: Self.F[A], f: fn(A) -> Self.F[B]) -> Self.F[B];
+}};
+
+implement Functor_{} for ListMonad {{
+    type F[T] = List<T>;
+
+    fn map[A, B](self: List<A>, f: fn(A) -> B) -> List<B> {{
+        self.iter().map(f).collect()
+    }}
+}}
+
+"#,
+            i, i, i, i
+        ));
+    }
+
+    source
+}
+
+/// Generate code with refinement types
+fn generate_refinement_code(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 250);
+
+    for i in 0..count {
+        let lower = i * 10;
+        let upper = lower + 100;
+        source.push_str(&format(
+            r#"fn refined_{}(x: Int{{>= {}, <= {}}}) -> Int{{>= 0}} {{
+    if x > {} {{
+        x - {}
+    }} else {{
+        0
+    }}
+}}
+
+fn check_bounds_{}(arr: List<Int>{{len > 0}}, idx: Int{{>= 0}}) -> Maybe<Int> {{
+    if idx < arr.len() {{
+        Some(arr[idx])
+    }} else {{
+        None
+    }}
+}}
+
+"#,
+            i, lower, upper, lower, lower, i
+        ));
+    }
+
+    source
+}
+
+/// Generate code with complex constraint solving
+fn generate_constraint_heavy_code(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 500);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"// Complex constraint solving case {}
+fn constraint_{}[T: Ord + Clone, U: Hash + Eq](
+    items: List<T>,
+    transform: fn(T) -> U,
+    filter: fn(&T) -> Bool,
+) -> Map<U, List<T>> {{
+    let filtered = items.iter().filter(filter).cloned().collect.<List<_>>();
+    let mut result: Map<U, List<T>> = Map.new();
+
+    for item in filtered {{
+        let key = transform(item.clone());
+        result.entry(key).or_default().push(item);
+    }}
+
+    result
+}}
+
+fn use_constraint_{}() {{
+    let data = [(1, "a"), (2, "b"), (3, "c")];
+    let result = constraint_{}(
+        data.to_list(),
+        |(n, _)| n % 2,
+        |(n, _)| *n > 0,
+    );
+    result
+}}
+
+"#,
+            i, i, i, i
+        ));
+    }
+
+    source
+}
+
+/// Generate code with trait resolution
+fn generate_trait_code(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 400);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"type Interface_{} is protocol {{
+    fn operation(&self) -> Int;
+    fn transform<T: Clone>(&self, x: T) -> T;
+}};
+
+type Impl_{} is {{ value: Int }};
+
+implement Interface_{} for Impl_{} {{
+    fn operation(&self) -> Int {{
+        self.value * {}
+    }}
+
+    fn transform<T: Clone>(&self, x: T) -> T {{
+        x.clone()
+    }}
+}}
+
+fn use_trait_{}[T: Interface_{}](obj: T) -> Int {{
+    obj.operation() + {}
+}}
+
+"#,
+            i, i, i, i, i + 1, i, i, i * 10
+        ));
+    }
+
+    source
+}
+
+/// Generate code with mutual recursion
+fn generate_mutually_recursive_code(count: Int) -> Text {
+    let mut source = Text.with_capacity(count * 200);
+
+    for i in 0..count {
+        source.push_str(&format(
+            r#"fn even_{}(n) {{
+    if n == 0 {{ true }}
+    else {{ odd_{}(n - 1) }}
+}}
+
+fn odd_{}(n) {{
+    if n == 0 {{ false }}
+    else {{ even_{}(n - 1) }}
+}}
+
+"#,
+            i, i, i, i
+        ));
+    }
+
+    source
+}
+
+/// Run type inference benchmark
+fn run_inference_benchmark(name: Text, source: Text) -> InferenceBenchmarkResult {
+    let lines = source.lines().count();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let typed_ast = TypeChecker.infer(&source);
+        black_box(typed_ast);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let typed_ast = TypeChecker.infer(&source);
+        black_box(typed_ast);
+    }
+
+    let elapsed = start.elapsed();
+    let avg_ms = elapsed.as_millis() as f64 / BENCHMARK_ITERATIONS as f64;
+    let normalized_ms = avg_ms * (LOC_TARGET as f64 / lines as f64);
+
+    InferenceBenchmarkResult {
+        name,
+        source_lines: lines,
+        avg_time_ms: avg_ms,
+        normalized_ms_per_10k: normalized_ms,
+    }
+}
+
+fn main() {
+    println("=== Type Inference Performance Benchmark ===\n");
+
+    // Generate test cases targeting ~2K lines each (will scale to 10K)
+    let benchmarks = [
+        ("simple_types", generate_simple_typed_code(2000)),
+        ("function_inference", generate_function_inference_code(200)),
+        ("generic_types", generate_generic_code(150)),
+        ("higher_kinded", generate_hkt_code(100)),
+        ("refinement_types", generate_refinement_code(150)),
+        ("constraint_heavy", generate_constraint_heavy_code(80)),
+        ("trait_resolution", generate_trait_code(100)),
+        ("mutual_recursion", generate_mutually_recursive_code(200)),
+    ];
+
+    let mut results: List<InferenceBenchmarkResult> = List.new();
+
+    for (name, source) in benchmarks {
+        results.push(run_inference_benchmark(Text.from(name), source));
+    }
+
+    let targets = [
+        50.0,   // simple_types
+        80.0,   // function_inference
+        100.0,  // generic_types
+        150.0,  // higher_kinded
+        200.0,  // refinement_types
+        500.0,  // constraint_heavy
+        150.0,  // trait_resolution
+        100.0,  // mutual_recursion
+    ];
+
+    println("{:<25} {:>10} {:>15} {:>10} {:>8}",
+            "Benchmark", "Lines", "Norm ms/10K", "Target", "Status");
+    println("{}", "-".repeat(75));
+
+    for (i, result) in results.iter().enumerate() {
+        let target = targets[i];
+        let passed = result.normalized_ms_per_10k <= target;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<25} {:>10} {:>15.2} {:>10.0} {:>8}",
+                result.name,
+                result.source_lines,
+                result.normalized_ms_per_10k,
+                target,
+                status);
+    }
+
+    println("");
+
+    let avg_normalized = results.iter()
+        .map(|r| r.normalized_ms_per_10k)
+        .sum.<f64>() / results.len() as f64;
+
+    println("Average normalized time: {:.2}ms per 10K LOC", avg_normalized);
+    println("Target: < 100ms per 10K LOC (general case)");
+}
+
+type InferenceBenchmarkResult is {
+    name: Text,
+    source_lines: Int,
+    avg_time_ms: f64,
+    normalized_ms_per_10k: f64,
+};
+
+// Mock TypeChecker for benchmark specification
+module TypeChecker {
+    pub fn infer(source: &Text) -> TypedAST {
+        TypedAST { nodes: List.new() }
+    }
+}
+
+type TypedAST is { nodes: List<TypedNode> };
+type TypedNode is { ty: Type };
+type Type is Int | Bool | Text | Generic(Text) | Refined(Heap<Type>, Text);
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn format(fmt: &Text, args: List<Text>) -> Text { Text.new() }

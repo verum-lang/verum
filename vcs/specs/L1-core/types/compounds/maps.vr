@@ -1,0 +1,46 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, compounds, maps
+
+/// Test for Map<K, V> type.
+/// Map is an associative container mapping keys to values (semantic equivalent of HashMap).
+
+fn main() {
+    // Map creation
+    let map: Map<Text, Int> = {};
+
+    // Map with initial values using literal syntax
+    let scores: Map<Text, Int> = {
+        "Alice": 100,
+        "Bob": 85,
+        "Charlie": 92,
+    };
+
+    // Map with capacity hint (use empty map literal)
+    let with_capacity: Map<Int, Text> = {};
+
+    // Mutable operations
+    let mut mutable_map: Map<Text, Int> = {};
+    mutable_map.insert("key1", 10);
+    mutable_map.insert("key2", 20);
+    mutable_map.insert("key1", 15);  // Update existing key
+
+    // Direct access (panics if key not found)
+    let bob_score: Int = scores["Bob"];
+
+    // Map properties
+    let length: Int = 3;  // scores.len() equivalent
+    let is_empty: Bool = true;  // map.is_empty() equivalent
+
+    // Iteration over values
+    for value in scores.values() {
+        let _ = value;
+    }
+
+    // Assertions
+    assert(bob_score == 85);
+    assert(length == 3);
+    assert(is_empty == true);
+}
+

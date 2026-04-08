@@ -1,0 +1,227 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, karatsuba, multiplication, divide-conquer, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Karatsuba-style multiplication (divide-and-conquer integer multiply)
+// We split large integers into upper and lower halves and use the Karatsuba identity:
+//   x * y = z2 * B^2 + z1 * B + z0
+//   where z2 = xH*yH, z0 = xL*yL, z1 = (xH+xL)*(yH+yL) - z2 - z0
+// This reduces 4 multiplications to 3.
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// Simple schoolbook multiply for verification
+fn schoolbook_mul(x: Int, y_val: Int) -> Int {
+    x * y_val
+}
+
+// Split a number into high and low halves given a base B
+fn split_high(x: Int, base: Int) -> Int {
+    x / base
+}
+
+fn split_low(x: Int, base: Int) -> Int {
+    x % base
+}
+
+// Karatsuba multiply using base B
+// x = xH * B + xL
+// y = yH * B + yL
+// x * y = xH*yH * B^2 + ((xH+xL)*(yH+yL) - xH*yH - xL*yL) * B + xL*yL
+fn karatsuba(x: Int, y_val: Int, base: Int) -> Int {
+    // For small numbers, just multiply directly
+    if x < base {
+        if y_val < base {
+            return x * y_val;
+        }
+    }
+
+    let xh = split_high(x, base);
+    let xl = split_low(x, base);
+    let yh = split_high(y_val, base);
+    let yl = split_low(y_val, base);
+
+    let z2 = xh * yh;
+    let z0 = xl * yl;
+    let z1 = (xh + xl) * (yh + yl) - z2 - z0;
+
+    z2 * base * base + z1 * base + z0
+}
+
+// Two-level Karatsuba: split twice for larger numbers
+@allow(unbounded_recursion)
+fn karatsuba2(x: Int, y_val: Int, base: Int) -> Int {
+    if x < base {
+        if y_val < base {
+            return x * y_val;
+        }
+    }
+
+    let xh = split_high(x, base);
+    let xl = split_low(x, base);
+    let yh = split_high(y_val, base);
+    let yl = split_low(y_val, base);
+
+    let z2 = karatsuba2(xh, yh, base);
+    let z0 = karatsuba2(xl, yl, base);
+    let z1 = karatsuba2(xh + xl, yh + yl, base) - z2 - z0;
+
+    z2 * base * base + z1 * base + z0
+}
+
+// Multiply large numbers represented as digit arrays (base 100)
+// Result stored in Arr8 as well
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 }
+}
+
+// Schoolbook multiply of digit arrays in base 100
+// a has na digits, b has nb digits, result has up to na+nb digits
+fn array_mul(a: Arr8, na: Int, b_arr: Arr8, nb: Int) -> Arr8 {
+    let mut result = a8_zero();
+    let mut i = 0;
+    while i < na {
+        let mut carry = 0;
+        let mut j = 0;
+        while j < nb {
+            let pos = i + j;
+            let prod = a8_get(a, i) * a8_get(b_arr, j) + a8_get(result, pos) + carry;
+            result = a8_set(result, pos, prod % 100);
+            carry = prod / 100;
+            j = j + 1;
+        }
+        if carry > 0 {
+            let pos2 = i + nb;
+            result = a8_set(result, pos2, a8_get(result, pos2) + carry);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Convert digit array (base 100, little-endian) to integer
+fn array_to_int(a: Arr8, n: Int) -> Int {
+    let mut result = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < n {
+        result = result + a8_get(a, i) * power;
+        power = power * 100;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_basic_karatsuba() {
+    // Simple cases with base 10
+    assert_eq(karatsuba(12, 34, 10), 408);      // 12*34 = 408
+    assert_eq(karatsuba(56, 78, 10), 4368);      // 56*78 = 4368
+    assert_eq(karatsuba(99, 99, 10), 9801);      // 99*99 = 9801
+    assert_eq(karatsuba(10, 10, 10), 100);       // 10*10 = 100
+    assert_eq(karatsuba(11, 11, 10), 121);       // 11*11 = 121
+}
+
+fn test_karatsuba_base100() {
+    // Base 100 for larger numbers
+    assert_eq(karatsuba(1234, 5678, 100), 7006652);     // 1234*5678
+    assert_eq(karatsuba(9999, 9999, 100), 99980001);    // 9999*9999
+    assert_eq(karatsuba(1000, 1000, 100), 1000000);     // 1000*1000
+    assert_eq(karatsuba(100, 100, 100), 10000);
+}
+
+fn test_karatsuba_identity_cases() {
+    // Multiply by 0
+    assert_eq(karatsuba(0, 12345, 100), 0);
+    assert_eq(karatsuba(12345, 0, 100), 0);
+
+    // Multiply by 1
+    assert_eq(karatsuba(1, 12345, 100), 12345);
+    assert_eq(karatsuba(12345, 1, 100), 12345);
+
+    // Small numbers (below base)
+    assert_eq(karatsuba(7, 8, 10), 56);
+    assert_eq(karatsuba(3, 5, 100), 15);
+}
+
+fn test_karatsuba_commutativity() {
+    // x * y == y * x
+    assert_eq(karatsuba(123, 456, 10), karatsuba(456, 123, 10));
+    assert_eq(karatsuba(1234, 5678, 100), karatsuba(5678, 1234, 100));
+}
+
+fn test_karatsuba_vs_direct() {
+    // Compare with direct multiplication
+    assert_eq(karatsuba(37, 41, 10), 37 * 41);
+    assert_eq(karatsuba(123, 456, 10), 123 * 456);
+    assert_eq(karatsuba(1234, 5678, 100), 1234 * 5678);
+    assert_eq(karatsuba(999, 999, 10), 999 * 999);
+    assert_eq(karatsuba(2048, 4096, 100), 2048 * 4096);
+}
+
+fn test_recursive_karatsuba() {
+    // Two-level recursive Karatsuba
+    assert_eq(karatsuba2(12, 34, 10), 408);
+    assert_eq(karatsuba2(99, 99, 10), 9801);
+    assert_eq(karatsuba2(123, 456, 10), 56088);
+    assert_eq(karatsuba2(1234, 5678, 100), 7006652);
+}
+
+fn test_array_multiply() {
+    // 1234 in base 100: [34, 12]
+    let a = Arr8 { d0: 34, d1: 12, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    // 5678 in base 100: [78, 56]
+    let b = Arr8 { d0: 78, d1: 56, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let result = array_mul(a, 2, b, 2);
+    let val = array_to_int(result, 4);
+    assert_eq(val, 7006652);
+}
+
+fn test_perfect_squares() {
+    // n^2 via Karatsuba
+    assert_eq(karatsuba(25, 25, 10), 625);
+    assert_eq(karatsuba(100, 100, 10), 10000);
+    assert_eq(karatsuba(256, 256, 100), 65536);
+    assert_eq(karatsuba(512, 512, 100), 262144);
+}
+
+fn test_power_of_two_products() {
+    assert_eq(karatsuba(16, 32, 10), 512);
+    assert_eq(karatsuba(64, 128, 10), 8192);
+    assert_eq(karatsuba(256, 512, 100), 131072);
+}
+
+fn main() -> Int {
+    test_basic_karatsuba();
+    test_karatsuba_base100();
+    test_karatsuba_identity_cases();
+    test_karatsuba_commutativity();
+    test_karatsuba_vs_direct();
+    test_recursive_karatsuba();
+    test_array_multiply();
+    test_perfect_squares();
+    test_power_of_two_products();
+    print("[OK] 305_karatsuba_mul_aot");
+    0
+}

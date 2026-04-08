@@ -1,0 +1,59 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arithmetic, invalid, error
+
+// ERROR: Missing operand on right
+let x = 5 +;
+let y = 10 -;
+let z = 20 *;
+
+// ERROR: Missing operand on left
+let a = + 5;  // This might be valid as unary +
+let b = / 5;  // Invalid - no left operand
+let c = % 5;  // Invalid - no left operand
+
+// ERROR: Double operators
+let d = 5 ++ 3;
+let e = 5 -- 3;
+let f = 5 ** ** 3;  // Double exponentiation operators
+
+// ERROR: Mismatched parentheses
+let g = (5 + 3;
+let h = 5 + 3);
+let i = ((5 + 3);
+
+// ERROR: Empty parentheses in expression context
+let j = 5 + () + 3;
+
+// ERROR: Invalid operator combination
+let k = 5 +* 3;
+let l = 5 */ 3;
+let m = 5 -/ 3;
+
+// ERROR: Invalid numeric literal in expression
+let n = 5 + 0xGGG;
+let o = 5 + 0b123;
+let p = 5 + 1.2.3;
+
+// ERROR: Expression ending with operator
+let q = 5 + 3 -;
+let r = a * b /;
+
+// ERROR: Multiple consecutive operators (non-unary)
+let s = 5 * / 3;
+let t = 5 + * 3;
+
+// ERROR: Invalid token in arithmetic expression
+let u = 5 + @ + 3;
+let v = 5 # 3;
+
+// ERROR: Missing expression entirely
+let w = ;
+let x = * ;
+
+// ERROR: Operator as function call
+let y = +(5, 3);  // Unless this is valid infix-to-prefix
+
+// ERROR: Unclosed bracket in indexing
+let z = arr[1 + 2;

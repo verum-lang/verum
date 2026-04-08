@@ -1,0 +1,225 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, sequence, number-theory, math
+// @timeout: 30000
+
+// Famous integer sequences
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// 1. Collatz sequence length (3n+1 problem)
+fn collatz_len(n: Int) -> Int {
+    let mut val = n;
+    let mut steps = 0;
+    while val != 1 {
+        if val % 2 == 0 { val = val / 2; }
+        else { val = 3 * val + 1; }
+        steps = steps + 1;
+    }
+    steps
+}
+
+// 2. Triangular numbers: T(n) = n*(n+1)/2
+fn triangular(n: Int) -> Int { n * (n + 1) / 2 }
+
+// 3. Pentagonal numbers: P(n) = n*(3n-1)/2
+fn pentagonal(n: Int) -> Int { n * (3 * n - 1) / 2 }
+
+// 4. Lucas numbers: L(0)=2, L(1)=1, L(n)=L(n-1)+L(n-2)
+fn lucas(n: Int) -> Int {
+    if n == 0 { return 2; }
+    if n == 1 { return 1; }
+    let mut a = 2;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b
+}
+
+// 5. Bell numbers: B(n) = number of partitions of a set
+fn bell(n: Int) -> Int {
+    // Using Bell triangle with Arr8 for row
+    if n == 0 { return 1; }
+    let mut row = zeros();
+    row = set8(row, 0, 1);
+    let mut i = 1;
+    while i <= n {
+        let mut new_row = zeros();
+        new_row = set8(new_row, 0, get8(row, i - 1));
+        let mut j = 1;
+        while j <= i {
+            new_row = set8(new_row, j, get8(new_row, j - 1) + get8(row, j - 1));
+            j = j + 1;
+        }
+        row = new_row;
+        i = i + 1;
+    }
+    get8(row, 0)
+}
+
+// 6. Look-and-say sequence value properties
+// Compute the length of n-th term (starting from "1")
+// Simplified: just compute number of digits
+fn count_digits(n: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut count = 0;
+    let mut val = n;
+    while val > 0 {
+        count = count + 1;
+        val = val / 10;
+    }
+    count
+}
+
+// 7. Happy numbers: sum of squares of digits repeatedly until 1 or cycle
+fn sum_digit_squares(n: Int) -> Int {
+    let mut sum = 0;
+    let mut val = n;
+    while val > 0 {
+        let d = val % 10;
+        sum = sum + d * d;
+        val = val / 10;
+    }
+    sum
+}
+
+fn is_happy(n: Int) -> Int {
+    let mut slow = n;
+    let mut fast = n;
+    let mut first = 1;
+    while first == 1 {
+        slow = sum_digit_squares(slow);
+        fast = sum_digit_squares(sum_digit_squares(fast));
+        if slow == 1 { return 1; }
+        first = 0;
+    }
+    // Floyd's cycle detection
+    while slow != fast {
+        slow = sum_digit_squares(slow);
+        fast = sum_digit_squares(sum_digit_squares(fast));
+        if slow == 1 { return 1; }
+    }
+    if slow == 1 { 1 } else { 0 }
+}
+
+// 8. Abundant number check: sum of proper divisors > n
+fn sum_proper_divisors(n: Int) -> Int {
+    let mut sum = 1; // 1 is always a divisor
+    let mut i = 2;
+    while i * i <= n {
+        if n % i == 0 {
+            sum = sum + i;
+            if i != n / i { sum = sum + n / i; }
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+fn is_abundant(n: Int) -> Int {
+    if sum_proper_divisors(n) > n { 1 } else { 0 }
+}
+
+fn test_collatz() -> Int {
+    assert_eq(collatz_len(1), 0);
+    assert_eq(collatz_len(2), 1);   // 2→1
+    assert_eq(collatz_len(3), 7);   // 3→10→5→16→8→4→2→1
+    assert_eq(collatz_len(6), 8);   // 6→3→10→5→16→8→4→2→1
+    assert_eq(collatz_len(27), 111);
+    1
+}
+
+fn test_triangular() -> Int {
+    assert_eq(triangular(0), 0);
+    assert_eq(triangular(1), 1);
+    assert_eq(triangular(2), 3);
+    assert_eq(triangular(3), 6);
+    assert_eq(triangular(4), 10);
+    assert_eq(triangular(10), 55);
+    1
+}
+
+fn test_pentagonal() -> Int {
+    assert_eq(pentagonal(1), 1);
+    assert_eq(pentagonal(2), 5);
+    assert_eq(pentagonal(3), 12);
+    assert_eq(pentagonal(4), 22);
+    assert_eq(pentagonal(5), 35);
+    1
+}
+
+fn test_lucas() -> Int {
+    assert_eq(lucas(0), 2);
+    assert_eq(lucas(1), 1);
+    assert_eq(lucas(2), 3);
+    assert_eq(lucas(3), 4);
+    assert_eq(lucas(4), 7);
+    assert_eq(lucas(5), 11);
+    assert_eq(lucas(6), 18);
+    1
+}
+
+fn test_bell() -> Int {
+    assert_eq(bell(0), 1);
+    assert_eq(bell(1), 1);
+    assert_eq(bell(2), 2);
+    assert_eq(bell(3), 5);
+    assert_eq(bell(4), 15);
+    assert_eq(bell(5), 52);
+    1
+}
+
+fn test_happy() -> Int {
+    assert_eq(is_happy(1), 1);
+    assert_eq(is_happy(7), 1);   // 7→49→97→130→10→1
+    assert_eq(is_happy(10), 1);
+    assert_eq(is_happy(2), 0);   // enters cycle
+    assert_eq(is_happy(4), 0);
+    1
+}
+
+fn test_abundant() -> Int {
+    assert_eq(is_abundant(12), 1);  // 1+2+3+4+6=16 > 12
+    assert_eq(is_abundant(18), 1);  // 1+2+3+6+9=21 > 18
+    assert_eq(is_abundant(6), 0);   // 1+2+3=6 (perfect, not abundant)
+    assert_eq(is_abundant(7), 0);   // prime, sum=1
+    1
+}
+
+fn main() -> Int {
+    test_collatz();
+    test_triangular();
+    test_pentagonal();
+    test_lucas();
+    test_bell();
+    test_happy();
+    test_abundant();
+    print("[OK] 559_sequence_aot");
+    0
+}

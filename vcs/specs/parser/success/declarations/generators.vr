@@ -1,0 +1,144 @@
+// @test: parse-pass
+// @tier: 0
+// @category: declarations
+// @level: L0
+// @tags: parser, declarations, generators, iterators
+// @description: Tests for iterator-related function patterns (stream blocks are future extension)
+
+// ============================================================================
+// Iterator-returning Functions
+// Note: The `stream { ... yield ... }` syntax is a future extension
+// These tests use iterator-returning patterns instead
+// ============================================================================
+
+// Function returning an iterator
+fn range_iter(start: Int, end: Int) -> Iterator<Int> {
+    (start..end).iter()
+}
+
+// Function returning a list iterator
+fn list_iter<T>(items: List<T>) -> Iterator<T> {
+    items.iter()
+}
+
+// Generic iterator function
+fn map_iter<T, U>(input: Iterator<T>, f: fn(T) -> U) -> Iterator<U> {
+    input.map(f)
+}
+
+fn filter_iter<T>(input: Iterator<T>, pred: fn(&T) -> Bool) -> Iterator<T> {
+    input.filter(pred)
+}
+
+// ============================================================================
+// Async Iterator Functions
+// ============================================================================
+
+async fn async_range(start: Int, end: Int) -> AsyncIterator<Int> {
+    (start..end).async_iter()
+}
+
+async fn poll_values(source: Source) -> AsyncIterator<Value> using [Network] {
+    source.poll_iter()
+}
+
+// ============================================================================
+// Iterator Functions with Where Clauses
+// ============================================================================
+
+fn sorted_iter<T>(input: Iterator<T>) -> Iterator<T>
+    where type T: Ord
+{
+    input.sorted()
+}
+
+fn unique_iter<T>(input: Iterator<T>) -> Iterator<T>
+    where type T: Hash + Eq
+{
+    input.unique()
+}
+
+// ============================================================================
+// Iterator Functions with Context Requirements
+// ============================================================================
+
+fn log_iter<T>(input: Iterator<T>, prefix: Text) -> Iterator<T> using [Logger] {
+    input.inspect(|item| Logger.info(f"{prefix}: {item}"))
+}
+
+fn db_iter(query: Text) -> Iterator<Row> using [Database] {
+    Database.query(query).rows()
+}
+
+// ============================================================================
+// Iterator Consumption Patterns
+// ============================================================================
+
+fn consume_iter() {
+    // Basic for loop
+    for x in range_iter(0, 10) {
+        print(f"Value: {x}");
+    }
+
+    // Collect into list
+    let list: List<Int> = range_iter(0, 10).collect();
+
+    // Chain operations
+    let result = range_iter(0, 100)
+        |> filter_iter(|x| x % 2 == 0)
+        |> map_iter(|x| x * x)
+        |> take(10)
+        |> collect();
+}
+
+// ============================================================================
+// Iterator Combinators
+// ============================================================================
+
+fn take_iter<T>(input: Iterator<T>, n: Int) -> Iterator<T> {
+    input.take(n)
+}
+
+fn skip_iter<T>(input: Iterator<T>, n: Int) -> Iterator<T> {
+    input.skip(n)
+}
+
+fn zip_iters<A, B>(a: Iterator<A>, b: Iterator<B>) -> Iterator<(A, B)> {
+    a.zip(b)
+}
+
+fn chain_iters<T>(a: Iterator<T>, b: Iterator<T>) -> Iterator<T> {
+    a.chain(b)
+}
+
+// ============================================================================
+// Infinite Iterators
+// ============================================================================
+
+fn repeat_iter<T>(value: T) -> Iterator<T>
+    where type T: Clone
+{
+    Iterator.repeat(value)
+}
+
+fn cycle_iter<T>(items: List<T>) -> Iterator<T>
+    where type T: Clone
+{
+    items.iter().cycle()
+}
+
+fn count_from(start: Int) -> Iterator<Int> {
+    Iterator.count_from(start)
+}
+
+// ============================================================================
+// Visibility
+// ============================================================================
+
+pub fn public_iter() -> Iterator<Int> {
+    (1..10).iter()
+}
+
+pub async fn public_async_iter() -> AsyncIterator<Data> {
+    Data.stream()
+}

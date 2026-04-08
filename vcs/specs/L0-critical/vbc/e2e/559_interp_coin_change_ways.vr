@@ -1,0 +1,159 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, coin_change, dynamic_programming, count_ways, combinations
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Count the number of ways to make change for amount using given coin denominations.
+// Classic unbounded knapsack DP:
+//   ways[0] = 1 (one way to make 0: use no coins)
+//   For each coin c, for each amount a from c to target:
+//     ways[a] += ways[a - c]
+// Returns the number of distinct combinations (order does not matter).
+// DP table stored as [Int; 64]; coins stored as [Int; 16].
+
+// Count number of ways to make 'amount' using coins[0..nc).
+// ways[] must be pre-initialized to 0 (caller provides it).
+fn coin_ways(coins: [Int; 16], nc: Int, amount: Int, ways: [Int; 64]) -> Int {
+    ways[0] = 1;
+    let mut ci = 0;
+    while ci < nc {
+        let c = coins[ci];
+        let mut a = c;
+        while a <= amount {
+            ways[a] = ways[a] + ways[a - c];
+            a = a + 1;
+        }
+        ci = ci + 1;
+    }
+    ways[amount]
+}
+
+// Minimum number of coins to make 'amount' (classic coin change problem variant).
+// Returns -1 if impossible.  Uses [Int; 64] dp table (pre-initialized to INF).
+fn coin_min(coins: [Int; 16], nc: Int, amount: Int, dp: [Int; 64]) -> Int {
+    let inf = 1000000;
+    dp[0] = 0;
+    let mut a = 1;
+    while a <= amount {
+        dp[a] = inf;
+        a = a + 1;
+    }
+    a = 1;
+    while a <= amount {
+        let mut ci = 0;
+        while ci < nc {
+            let c = coins[ci];
+            if c <= a && dp[a - c] < inf {
+                let cand = dp[a - c] + 1;
+                if cand < dp[a] { dp[a] = cand; }
+            }
+            ci = ci + 1;
+        }
+        a = a + 1;
+    }
+    if dp[amount] == inf { -1 } else { dp[amount] }
+}
+
+fn test_classic_coins() {
+    // Coins [1, 2, 3], amount = 4
+    // Ways: 1+1+1+1, 1+1+2, 2+2, 1+3 = 4 ways
+    let mut coins = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ways = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let w = coin_ways(coins, 3, 4, ways);
+    assert_eq(w, 4);
+    print("classic_coins: ok");
+}
+
+fn test_single_coin_divisible() {
+    // Coins [5], amount = 10: only 1 way (two 5s)
+    let mut coins = [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ways = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let w = coin_ways(coins, 1, 10, ways);
+    assert_eq(w, 1);
+
+    // Coins [5], amount = 7: impossible -> 0 ways
+    let mut coins2 = [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ways2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let w2 = coin_ways(coins2, 1, 7, ways2);
+    assert_eq(w2, 0);
+    print("single_coin_divisible: ok");
+}
+
+fn test_amount_zero() {
+    // Always exactly 1 way to make 0 (use no coins).
+    let mut coins = [1, 5, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ways = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let w = coin_ways(coins, 3, 0, ways);
+    assert_eq(w, 1);
+    print("amount_zero: ok");
+}
+
+fn test_min_coins() {
+    // Coins [1, 5, 10, 25], amount = 30: min = 25+5 = 2 coins
+    let mut coins = [1, 5, 10, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let m = coin_min(coins, 4, 30, dp);
+    assert_eq(m, 2);
+
+    // Coins [2], amount = 3: impossible -> -1
+    let mut coins2 = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dp2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let m2 = coin_min(coins2, 1, 3, dp2);
+    assert_eq(m2, -1);
+    print("min_coins: ok");
+}
+
+fn test_us_coins_ways() {
+    // US coins [1, 5, 10, 25], amount = 10
+    // Ways to make 10 cents:
+    //   10 pennies (1+1+1+1+1+1+1+1+1+1)
+    //   5+5 pennies (1+1+1+1+1+5)
+    //   2 nickels (5+5)
+    //   1 dime (10)
+    //   1 nickel + 5 pennies
+    //   Let's count with DP:
+    // After coin=1: ways[k]=1 for all k 0..10
+    // After coin=5: ways[5]+=ways[0]=1 -> 2; ways[6]+=ways[1]=1 -> 2;
+    //               ways[7]+=ways[2]=1 -> 2; ways[8]+=ways[3]=1 -> 2;
+    //               ways[9]+=ways[4]=1 -> 2; ways[10]+=ways[5]=2 -> 3
+    // After coin=10: ways[10]+=ways[0]=1 -> 4
+    // ways[10] = 4
+    let mut coins = [1, 5, 10, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ways = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let w = coin_ways(coins, 4, 10, ways);
+    assert_eq(w, 4);
+    print("us_coins_ways: ok");
+}
+
+fn main() -> Int {
+    test_classic_coins();
+    test_single_coin_divisible();
+    test_amount_zero();
+    test_min_coins();
+    test_us_coins_ways();
+    print("[OK] 559_interp_coin_change_ways");
+    0
+}

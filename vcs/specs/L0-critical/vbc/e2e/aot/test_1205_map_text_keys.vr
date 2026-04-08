@@ -1,0 +1,72 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: map, text, keys, e2e
+// @description: Test Map with Text keys and various value types
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Map<Text, Int>
+    let mut scores = Map.new();
+    scores.insert("Alice", 95);
+    scores.insert("Bob", 87);
+    scores.insert("Charlie", 92);
+
+    if scores.len() != 3 {
+        print(f"FAIL 1: map len = {scores.len()}");
+        f = f + 1;
+    } else {
+        print("  map_text_int: OK");
+    }
+
+    // Test 2: Map.get with text keys
+    let alice_score = scores.get("Alice");
+    if alice_score != 95 {
+        print(f"FAIL 2: Alice score = {alice_score}");
+        f = f + 1;
+    } else {
+        print("  map_get_text: OK");
+    }
+
+    // Test 3: Map.contains_key with text
+    if !scores.contains_key("Bob") {
+        print("FAIL 3: should contain Bob");
+        f = f + 1;
+    } else {
+        print("  map_contains: OK");
+    }
+
+    if scores.contains_key("Dave") {
+        print("FAIL 3b: should not contain Dave");
+        f = f + 1;
+    }
+
+    // Test 4: Map overwrite
+    scores.insert("Alice", 100);
+    let new_score = scores.get("Alice");
+    if new_score != 100 {
+        print(f"FAIL 4: updated Alice = {new_score}");
+        f = f + 1;
+    } else {
+        print("  map_overwrite: OK");
+    }
+
+    // Test 5: Map.remove
+    scores.remove("Bob");
+    if scores.len() != 2 {
+        print(f"FAIL 5: len after remove = {scores.len()}");
+        f = f + 1;
+    }
+    if scores.contains_key("Bob") {
+        print("FAIL 5b: Bob still present");
+        f = f + 1;
+    } else {
+        print("  map_remove: OK");
+    }
+
+    if f == 0 {
+        print("All map text key tests passed");
+    }
+    f
+}

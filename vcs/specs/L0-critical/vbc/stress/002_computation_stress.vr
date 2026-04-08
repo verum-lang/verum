@@ -1,0 +1,369 @@
+// @test: benchmark
+// @tier: 0
+// @level: L0
+// @tags: vbc, stress, computation, arithmetic, performance
+// @timeout: 30000
+// @expect: pass
+//
+// Test: Computational stress testing for VBC interpreter
+// Verifies arithmetic correctness under heavy load, floating point stability
+
+// =============================================================================
+// Integer arithmetic stress
+// =============================================================================
+
+fn test_integer_overflow_boundary() {
+    let max_48: Int = 140737488355327;
+    let min_48: Int = -140737488355328;
+
+    // Many operations near boundary
+    for i in 0..10000 {
+        let near_max = max_48 - i;
+        let near_min = min_48 + i;
+
+        assert(near_max > 0);
+        assert(near_min < 0);
+        assert(near_max + near_min == -1);
+    }
+}
+
+fn test_multiplication_stress() {
+    // Test multiplication accuracy
+    for i in 0..10000 {
+        let a = i * 3;
+        let b = i * 7;
+        let product = a * b;
+        let expected = i * i * 21;
+
+        assert_eq(product, expected);
+    }
+}
+
+fn test_division_stress() {
+    // Test division accuracy
+    for i in 1..10000 {
+        let dividend = i * i * 100;
+        let divisor = i;
+        let quotient = dividend / divisor;
+        let expected = i * 100;
+
+        assert_eq(quotient, expected);
+    }
+}
+
+fn test_modulo_stress() {
+    // Verify modulo correctness
+    for i in 1..10000 {
+        for m in [2, 3, 5, 7, 11, 13, 17, 19, 23] {
+            let remainder = i % m;
+            assert(remainder >= 0);
+            assert(remainder < m);
+            assert_eq((i / m) * m + remainder, i);
+        }
+    }
+}
+
+fn test_bitwise_stress() {
+    for i in 0..10000 {
+        // XOR properties
+        assert_eq(i ^ 0, i);
+        assert_eq(i ^ i, 0);
+        assert_eq((i ^ 0xFFFF) ^ 0xFFFF, i);
+
+        // Shift properties
+        if i < 40 {
+            let shifted = 1 << i;
+            let back = shifted >> i;
+            assert_eq(back, 1);
+        }
+    }
+}
+
+// =============================================================================
+// Floating point stress
+// =============================================================================
+
+fn test_float_accumulation() {
+    // Test for numerical stability in summation
+    let mut sum: Float = 0.0;
+
+    for i in 0..1000000 {
+        sum = sum + 0.000001;
+    }
+
+    // Should be approximately 1.0
+    assert(sum > 0.99 && sum < 1.01);
+}
+
+fn test_float_cancellation() {
+    // Test catastrophic cancellation handling
+    let a: Float = 1.0 + 1e-15;
+    let b: Float = 1.0;
+
+    let diff = a - b;
+
+    // Should preserve small difference
+    assert(diff > 0.0);
+    assert(diff < 1e-14);
+}
+
+fn test_float_multiplication_chain() {
+    let mut value: Float = 1.0;
+
+    // Multiply by 1.0001 many times
+    for _ in 0..10000 {
+        value = value * 1.0001;
+    }
+
+    // Should be approximately e ≈ 2.718
+    assert(value > 2.5 && value < 3.0);
+}
+
+fn test_trig_accuracy() {
+    // Verify trig function accuracy over many values
+    for i in 0..10000 {
+        let x = (i as Float) * 0.001;  // 0 to 10
+
+        // sin²(x) + cos²(x) = 1
+        let s = @sin(x);
+        let c = @cos(x);
+        let identity = s * s + c * c;
+
+        assert(identity > 0.9999 && identity < 1.0001);
+    }
+}
+
+fn test_exp_log_inverse() {
+    for i in 1..10000 {
+        let x = (i as Float) * 0.01;  // 0.01 to 100
+
+        // log(exp(x)) = x for small x
+        if x < 50.0 {
+            let result = @log(@exp(x));
+            assert(@abs(result - x) < 0.0001);
+        }
+
+        // exp(log(x)) = x
+        let result2 = @exp(@log(x));
+        assert(@abs(result2 - x) / x < 0.0001);
+    }
+}
+
+fn test_special_values_stability() {
+    let pos_inf: Float = 1.0 / 0.0;
+    let neg_inf: Float = -1.0 / 0.0;
+    let nan: Float = 0.0 / 0.0;
+
+    // Operations with special values shouldn't crash
+    for _ in 0..10000 {
+        let _ = pos_inf + 1.0;
+        let _ = neg_inf - 1.0;
+        let _ = nan * 2.0;
+        let _ = pos_inf / pos_inf;  // NaN
+    }
+
+    assert(true);
+}
+
+// =============================================================================
+// Mixed operation stress
+// =============================================================================
+
+fn test_polynomial_evaluation() {
+    // Evaluate polynomial many times: P(x) = x³ - 2x² + 3x - 4
+    fn poly(x: Float) -> Float {
+        x * x * x - 2.0 * x * x + 3.0 * x - 4.0
+    }
+
+    for i in 0..100000 {
+        let x = (i as Float) * 0.001 - 50.0;  // -50 to 50
+        let y = poly(x);
+
+        // Verify using Horner's method
+        let y_horner = ((x - 2.0) * x + 3.0) * x - 4.0;
+        assert(@abs(y - y_horner) < 0.0001);
+    }
+}
+
+fn test_matrix_operations() {
+    // Matrix multiplication stress (without tensor ops)
+    type Matrix is { data: [[Float; 10]; 10] };
+
+    fn mat_mul(a: &Matrix, b: &Matrix) -> Matrix {
+        let mut result = Matrix { data: [[0.0; 10]; 10] };
+
+        for i in 0..10 {
+            for j in 0..10 {
+                for k in 0..10 {
+                    result.data[i][j] = result.data[i][j] + a.data[i][k] * b.data[k][j];
+                }
+            }
+        }
+
+        result
+    }
+
+    // Create identity matrix
+    let mut identity = Matrix { data: [[0.0; 10]; 10] };
+    for i in 0..10 {
+        identity.data[i][i] = 1.0;
+    }
+
+    // Create test matrix
+    let mut test = Matrix { data: [[0.0; 10]; 10] };
+    for i in 0..10 {
+        for j in 0..10 {
+            test.data[i][j] = (i * 10 + j) as Float;
+        }
+    }
+
+    // A * I = A
+    let result = mat_mul(&test, &identity);
+    for i in 0..10 {
+        for j in 0..10 {
+            assert_eq(result.data[i][j], test.data[i][j]);
+        }
+    }
+
+    // Multiple multiplications
+    let mut accum = identity;
+    for _ in 0..100 {
+        accum = mat_mul(&accum, &identity);
+    }
+
+    // Should still be identity
+    for i in 0..10 {
+        assert(@abs(accum.data[i][i] - 1.0) < 0.0001);
+    }
+}
+
+fn test_numerical_integration() {
+    // Numerical integration using trapezoidal rule
+    fn integrate(f: fn(Float) -> Float, a: Float, b: Float, n: Int) -> Float {
+        let h = (b - a) / (n as Float);
+        let mut sum = (f(a) + f(b)) / 2.0;
+
+        for i in 1..n {
+            let x = a + (i as Float) * h;
+            sum = sum + f(x);
+        }
+
+        sum * h
+    }
+
+    // Integrate x² from 0 to 1 (should be 1/3)
+    let result = integrate(fn(x: Float) -> Float { x * x }, 0.0, 1.0, 100000);
+    assert(@abs(result - 0.333333) < 0.0001);
+
+    // Integrate sin(x) from 0 to π (should be 2)
+    let result2 = integrate(@sin, 0.0, 3.14159265, 100000);
+    assert(@abs(result2 - 2.0) < 0.001);
+}
+
+fn test_newton_method() {
+    // Newton's method for square root
+    fn sqrt_newton(x: Float, iterations: Int) -> Float {
+        let mut guess = x / 2.0;
+        for _ in 0..iterations {
+            guess = (guess + x / guess) / 2.0;
+        }
+        guess
+    }
+
+    // Test for many values
+    for i in 1..10000 {
+        let x = i as Float;
+        let root = sqrt_newton(x, 20);
+        let squared = root * root;
+
+        assert(@abs(squared - x) / x < 0.0000001);
+    }
+}
+
+fn test_prime_sieve() {
+    // Sieve of Eratosthenes
+    fn sieve(n: Int) -> List<Bool> {
+        let mut is_prime = [true; n + 1];
+        is_prime[0] = false;
+        is_prime[1] = false;
+
+        let mut p = 2;
+        while p * p <= n {
+            if is_prime[p] {
+                let mut multiple = p * p;
+                while multiple <= n {
+                    is_prime[multiple] = false;
+                    multiple = multiple + p;
+                }
+            }
+            p = p + 1;
+        }
+
+        is_prime.to_list()
+    }
+
+    let primes = sieve(100000);
+
+    // Count primes
+    let mut count = 0;
+    for i in 0..100001 {
+        if primes[i] {
+            count = count + 1;
+        }
+    }
+
+    // There are 9592 primes up to 100000
+    assert_eq(count, 9592);
+}
+
+fn test_deterministic_chaos() {
+    // Logistic map: x_{n+1} = r * x_n * (1 - x_n)
+    // Tests floating point determinism
+    fn logistic_map(r: Float, x0: Float, iterations: Int) -> Float {
+        let mut x = x0;
+        for _ in 0..iterations {
+            x = r * x * (1.0 - x);
+        }
+        x
+    }
+
+    // Run same computation multiple times
+    let results: List<Float> = [];
+    for _ in 0..100 {
+        let result = logistic_map(3.9, 0.5, 1000);
+        results.push(result);
+    }
+
+    // All results should be identical (deterministic)
+    let first = results[0];
+    for result in results {
+        assert_eq(result, first);
+    }
+}
+
+fn main() {
+    // Integer stress
+    test_integer_overflow_boundary();
+    test_multiplication_stress();
+    test_division_stress();
+    test_modulo_stress();
+    test_bitwise_stress();
+
+    // Float stress
+    test_float_accumulation();
+    test_float_cancellation();
+    test_float_multiplication_chain();
+    test_trig_accuracy();
+    test_exp_log_inverse();
+    test_special_values_stability();
+
+    // Mixed operations
+    test_polynomial_evaluation();
+    test_matrix_operations();
+    test_numerical_integration();
+    test_newton_method();
+    test_prime_sieve();
+    test_deterministic_chaos();
+
+    print("002_computation_stress: PASSED");
+}

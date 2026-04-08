@@ -1,0 +1,72 @@
+[package]
+name = "vcs-differential-runner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Differential testing runner for VCS"
+keywords = ["testing", "differential", "verum", "compiler"]
+categories = ["development-tools::testing"]
+
+[lib]
+name = "vcs_differential_runner"
+path = "mod.rs"
+
+[[bin]]
+name = "vcs-diff"
+path = "main.rs"
+
+[dependencies]
+# Core utilities
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+# CLI
+clap.workspace = true
+
+# Process management
+wait-timeout.workspace = true
+num_cpus.workspace = true
+
+# Text processing
+regex.workspace = true
+once_cell.workspace = true
+unicode-normalization.workspace = true
+
+# Date/time
+chrono.workspace = true
+
+# Hashing
+md5.workspace = true
+
+# Parallel execution
+rayon.workspace = true
+
+# Directory traversal
+walkdir.workspace = true
+
+# Optional async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"], optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[features]
+default = []
+# Enable async support for parallel testing
+async = ["tokio"]
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,147 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, list, to_upper, to_lower, to_int, index_of, join
+// @expected-exit: 0
+
+// Test: Previously type-checker-blocked methods now wired end-to-end.
+// to_upper/to_lower, to_uppercase/to_lowercase, to_int, index_of, join.
+
+fn main() -> Int {
+    // === Text case conversion ===
+    let s = "Hello World";
+    let upper = s.to_upper();
+    if (upper != "HELLO WORLD") {
+        print(f"FAIL to_upper: '{upper}'");
+        return 1;
+    }
+    let lower = s.to_lower();
+    if (lower != "hello world") {
+        print(f"FAIL to_lower: '{lower}'");
+        return 1;
+    }
+    let up2 = s.to_uppercase();
+    if (up2 != "HELLO WORLD") {
+        print(f"FAIL to_uppercase: '{up2}'");
+        return 1;
+    }
+    let lo2 = s.to_lowercase();
+    if (lo2 != "hello world") {
+        print(f"FAIL to_lowercase: '{lo2}'");
+        return 1;
+    }
+
+    // === Text.to_int — returns Int directly ===
+    let n1 = "42";
+    let v1 = n1.to_int();
+    if (v1 != 42) {
+        print(f"FAIL to_int(42): {v1}");
+        return 1;
+    }
+    let n2 = "-100";
+    let v2 = n2.to_int();
+    if (v2 != -100) {
+        print(f"FAIL to_int(-100): {v2}");
+        return 1;
+    }
+    let n3 = "  999";
+    let v3 = n3.to_int();
+    if (v3 != 999) {
+        print(f"FAIL to_int(ws): {v3}");
+        return 1;
+    }
+
+    // to_int in arithmetic
+    let sum = "10".to_int() + "20".to_int();
+    if (sum != 30) {
+        print(f"FAIL to_int arith: {sum}");
+        return 1;
+    }
+
+    // === CSV parsing with to_int ===
+    let csv = "10,20,30,40,50";
+    let parts = csv.split(",");
+    let mut total = 0;
+    let mut i = 0;
+    while (i < parts.len()) {
+        let p = parts[i];
+        total = total + p.to_int();
+        i = i + 1;
+    }
+    if (total != 150) {
+        print(f"FAIL csv total: {total}");
+        return 1;
+    }
+
+    // === List.index_of ===
+    let mut arr = List.new();
+    arr.push(10);
+    arr.push(20);
+    arr.push(30);
+    let idx = arr.index_of(20);
+    if (idx != 1) {
+        print(f"FAIL index_of(20): {idx}");
+        return 1;
+    }
+    let nf = arr.index_of(99);
+    if (nf != -1) {
+        print(f"FAIL index_of(99): {nf}");
+        return 1;
+    }
+
+    // === List.join ===
+    let words = "hello world foo".split(" ");
+    let joined = words.join("-");
+    if (joined != "hello-world-foo") {
+        print(f"FAIL join: '{joined}'");
+        return 1;
+    }
+
+    // split then join roundtrip
+    let original = "a,b,c,d";
+    let pieces = original.split(",");
+    let rejoined = pieces.join(",");
+    if (rejoined != original) {
+        print(f"FAIL roundtrip: '{rejoined}'");
+        return 1;
+    }
+
+    // join with empty separator
+    let compact = pieces.join("");
+    if (compact != "abcd") {
+        print(f"FAIL compact: '{compact}'");
+        return 1;
+    }
+
+    // === Combo: CSV parse + sort + join ===
+    let data = "5,3,8,1,9,2,7,4,6,0";
+    let nums = data.split(",");
+    let mut sorted = List.new();
+    let mut j = 0;
+    while (j < nums.len()) {
+        let ns = nums[j];
+        sorted.push(ns.to_int());
+        j = j + 1;
+    }
+    sorted.sort();
+    if (sorted[0] != 0) {
+        print(f"FAIL sorted[0]: {sorted[0]}");
+        return 1;
+    }
+    if (sorted[9] != 9) {
+        print(f"FAIL sorted[9]: {sorted[9]}");
+        return 1;
+    }
+
+    // === Case conversion chain ===
+    let mixed = "hElLo WoRlD";
+    let normalized = mixed.to_lower();
+    let shouting = normalized.to_upper();
+    if (shouting != "HELLO WORLD") {
+        print(f"FAIL case chain: '{shouting}'");
+        return 1;
+    }
+
+    print("919_type_checker_gaps: PASS");
+    0
+}

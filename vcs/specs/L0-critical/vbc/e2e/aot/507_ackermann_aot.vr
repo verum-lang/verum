@@ -1,0 +1,220 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, ackermann, recursion, computation
+// @timeout: 30000
+
+// Ackermann function and other recursive computations
+
+// Iterative Ackermann (avoids stack overflow for small inputs)
+// Uses explicit stack simulation
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Ackermann for small values using known formulas
+// A(0, n) = n + 1
+// A(1, n) = n + 2
+// A(2, n) = 2n + 3
+// A(3, n) = 2^(n+3) - 3
+fn ackermann(m: Int, n: Int) -> Int {
+    if m == 0 { return n + 1; }
+    if m == 1 { return n + 2; }
+    if m == 2 { return 2 * n + 3; }
+    if m == 3 {
+        // 2^(n+3) - 3
+        let mut p = 1;
+        let mut i = 0;
+        while i < n + 3 { p = p * 2; i = i + 1; }
+        return p - 3;
+    }
+    // m >= 4: only compute for very small n
+    if n == 0 { return ackermann(m - 1, 1); }
+    // Too large for practical computation
+    -1
+}
+
+// McCarthy 91 function: iterative version
+// f(n) = n-10 if n > 100, else f(f(n+11))
+fn mccarthy91(n: Int) -> Int {
+    let mut x = n;
+    let mut c = 1;
+    while c > 0 {
+        if x > 100 {
+            x = x - 10;
+            c = c - 1;
+        } else {
+            x = x + 11;
+            c = c + 1;
+        }
+    }
+    x
+}
+
+// Collatz sequence length
+fn collatz_len(n: Int) -> Int {
+    let mut x = n;
+    let mut steps = 0;
+    while x != 1 {
+        if x % 2 == 0 { x = x / 2; }
+        else { x = 3 * x + 1; }
+        steps = steps + 1;
+    }
+    steps
+}
+
+// Collatz max value reached
+fn collatz_max(n: Int) -> Int {
+    let mut x = n;
+    let mut max_v = n;
+    while x != 1 {
+        if x % 2 == 0 { x = x / 2; }
+        else { x = 3 * x + 1; }
+        if x > max_v { max_v = x; }
+    }
+    max_v
+}
+
+// Tower of Hanoi: count moves
+fn hanoi_moves(n: Int) -> Int {
+    // 2^n - 1
+    let mut p = 1;
+    let mut i = 0;
+    while i < n { p = p * 2; i = i + 1; }
+    p - 1
+}
+
+// Fibonacci (iterative)
+fn fib(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b
+}
+
+// Lucas numbers: L(0)=2, L(1)=1, L(n) = L(n-1) + L(n-2)
+fn lucas(n: Int) -> Int {
+    if n == 0 { return 2; }
+    if n == 1 { return 1; }
+    let mut a = 2;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    b
+}
+
+fn test_ackermann() -> Int {
+    // A(0, n) = n + 1
+    assert_eq(ackermann(0, 0), 1);
+    assert_eq(ackermann(0, 5), 6);
+
+    // A(1, n) = n + 2
+    assert_eq(ackermann(1, 0), 2);
+    assert_eq(ackermann(1, 5), 7);
+
+    // A(2, n) = 2n + 3
+    assert_eq(ackermann(2, 0), 3);
+    assert_eq(ackermann(2, 1), 5);
+    assert_eq(ackermann(2, 5), 13);
+
+    // A(3, n) = 2^(n+3) - 3
+    assert_eq(ackermann(3, 0), 5);  // 8-3
+    assert_eq(ackermann(3, 1), 13); // 16-3
+    assert_eq(ackermann(3, 2), 29); // 32-3
+    assert_eq(ackermann(3, 3), 61); // 64-3
+    1
+}
+
+fn test_mccarthy91() -> Int {
+    // f(n) = 91 for all n <= 100
+    assert_eq(mccarthy91(99), 91);
+    assert_eq(mccarthy91(100), 91);
+    assert_eq(mccarthy91(91), 91);
+    assert_eq(mccarthy91(50), 91);
+    assert_eq(mccarthy91(1), 91);
+
+    // f(n) = n - 10 for n > 100
+    assert_eq(mccarthy91(101), 91);
+    assert_eq(mccarthy91(111), 101);
+    assert_eq(mccarthy91(200), 190);
+    1
+}
+
+fn test_collatz() -> Int {
+    // Collatz(1) = 0 steps
+    assert_eq(collatz_len(1), 0);
+    // Collatz(2) = 1 step: 2→1
+    assert_eq(collatz_len(2), 1);
+    // Collatz(3) = 7 steps: 3→10→5→16→8→4→2→1
+    assert_eq(collatz_len(3), 7);
+    // Collatz(6) = 8 steps
+    assert_eq(collatz_len(6), 8);
+    // Collatz(27) = 111 steps
+    assert_eq(collatz_len(27), 111);
+
+    // Max value
+    assert_eq(collatz_max(3), 16);
+    1
+}
+
+fn test_hanoi() -> Int {
+    assert_eq(hanoi_moves(1), 1);
+    assert_eq(hanoi_moves(2), 3);
+    assert_eq(hanoi_moves(3), 7);
+    assert_eq(hanoi_moves(4), 15);
+    assert_eq(hanoi_moves(10), 1023);
+    1
+}
+
+fn test_lucas_fib_identity() -> Int {
+    // L(n) = F(n-1) + F(n+1)
+    assert_eq(lucas(5), fib(4) + fib(6)); // 11 = 3 + 8
+    assert_eq(lucas(8), fib(7) + fib(9)); // 47 = 13 + 34
+
+    // F(2n) = F(n) * L(n)
+    // Actually: L(n) * F(n) = F(2n) ... let me verify
+    // F(10) = 55, F(5)=5, L(5)=11, 5*11=55 ✓
+    assert_eq(fib(5) * lucas(5), fib(10));
+    1
+}
+
+fn main() -> Int {
+    test_ackermann();
+    test_mccarthy91();
+    test_collatz();
+    test_hanoi();
+    test_lucas_fib_identity();
+    print("[OK] 507_ackermann_aot");
+    0
+}

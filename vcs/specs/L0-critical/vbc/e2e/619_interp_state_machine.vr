@@ -1,0 +1,224 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, state-machine, finite-automata
+// @timeout: 50000
+// @expected-exit: 0
+
+// =============================================================================
+// Simple traffic light state machine
+// =============================================================================
+
+// States: 0=Red, 1=Green, 2=Yellow
+
+fn next_light(state: Int) -> Int {
+    if state == 0 { 1 }      // Red -> Green
+    else if state == 1 { 2 } // Green -> Yellow
+    else { 0 }               // Yellow -> Red
+}
+
+fn test_traffic_light() {
+    let mut state = 0; // Start at Red
+    assert_eq(state, 0);
+
+    state = next_light(state);
+    assert_eq(state, 1); // Green
+
+    state = next_light(state);
+    assert_eq(state, 2); // Yellow
+
+    state = next_light(state);
+    assert_eq(state, 0); // Red again
+
+    // Full cycle
+    let mut cycles = 0;
+    let mut s = 0;
+    let mut steps = 0;
+    while steps < 12 {
+        s = next_light(s);
+        if s == 0 { cycles = cycles + 1; }
+        steps = steps + 1;
+    }
+    assert_eq(cycles, 4); // 12 steps / 3 per cycle = 4
+    print("  test_traffic_light: ok");
+}
+
+// =============================================================================
+// Door state machine with events
+// =============================================================================
+
+// States: 0=Closed, 1=Opening, 2=Open, 3=Closing
+// Events: 0=ButtonPress, 1=FullyOpen, 2=FullyClosed, 3=Obstruction
+
+fn door_transition(state: Int, event: Int) -> Int {
+    if state == 0 {
+        // Closed
+        if event == 0 { 1 } // ButtonPress -> Opening
+        else { 0 }          // Stay Closed
+    } else if state == 1 {
+        // Opening
+        if event == 1 { 2 }      // FullyOpen -> Open
+        else if event == 0 { 3 } // ButtonPress -> Closing
+        else { 1 }               // Stay Opening
+    } else if state == 2 {
+        // Open
+        if event == 0 { 3 } // ButtonPress -> Closing
+        else { 2 }          // Stay Open
+    } else {
+        // Closing
+        if event == 2 { 0 }      // FullyClosed -> Closed
+        else if event == 3 { 1 } // Obstruction -> Opening
+        else if event == 0 { 1 } // ButtonPress -> Opening
+        else { 3 }               // Stay Closing
+    }
+}
+
+fn test_door_state_machine() {
+    let mut state = 0; // Closed
+
+    state = door_transition(state, 0); // Press button
+    assert_eq(state, 1); // Opening
+
+    state = door_transition(state, 1); // Fully open
+    assert_eq(state, 2); // Open
+
+    state = door_transition(state, 0); // Press button
+    assert_eq(state, 3); // Closing
+
+    state = door_transition(state, 3); // Obstruction!
+    assert_eq(state, 1); // Back to Opening
+
+    state = door_transition(state, 1); // Fully open
+    assert_eq(state, 2); // Open
+
+    state = door_transition(state, 0); // Press button
+    state = door_transition(state, 2); // Fully closed
+    assert_eq(state, 0); // Closed
+    print("  test_door_state_machine: ok");
+}
+
+// =============================================================================
+// Vending machine
+// =============================================================================
+
+// States: 0=Idle, 1=HasQuarter, 2=Dispensing
+// Events: 0=InsertCoin, 1=SelectItem, 2=DispenseComplete, 3=Cancel
+
+type VMState is { state: Int, balance: Int };
+
+implement VMState {
+    fn new() -> VMState {
+        VMState { state: 0, balance: 0 }
+    }
+
+    fn process(self, event: Int) -> VMState {
+        if self.state == 0 {
+            // Idle
+            if event == 0 {
+                VMState { state: 1, balance: self.balance + 25 }
+            } else {
+                self
+            }
+        } else if self.state == 1 {
+            // HasQuarter
+            if event == 0 {
+                VMState { state: 1, balance: self.balance + 25 }
+            } else if event == 1 && self.balance >= 50 {
+                VMState { state: 2, balance: self.balance - 50 }
+            } else if event == 3 {
+                VMState { state: 0, balance: 0 } // Return coins
+            } else {
+                self
+            }
+        } else {
+            // Dispensing
+            if event == 2 {
+                if self.balance > 0 {
+                    VMState { state: 1, balance: self.balance }
+                } else {
+                    VMState { state: 0, balance: 0 }
+                }
+            } else {
+                self
+            }
+        }
+    }
+}
+
+fn test_vending_machine() {
+    let mut vm = VMState.new();
+    assert_eq(vm.state, 0);
+    assert_eq(vm.balance, 0);
+
+    // Insert 2 coins (50 cents)
+    vm = vm.process(0); // InsertCoin
+    assert_eq(vm.balance, 25);
+    vm = vm.process(0); // InsertCoin
+    assert_eq(vm.balance, 50);
+    assert_eq(vm.state, 1);
+
+    // Select item
+    vm = vm.process(1); // SelectItem (costs 50)
+    assert_eq(vm.state, 2); // Dispensing
+    assert_eq(vm.balance, 0);
+
+    // Dispense complete
+    vm = vm.process(2);
+    assert_eq(vm.state, 0); // Back to Idle
+    print("  test_vending_machine: ok");
+}
+
+// =============================================================================
+// Counter with bounds
+// =============================================================================
+
+type BoundedCounter is { value: Int, min_val: Int, max_val: Int };
+
+implement BoundedCounter {
+    fn new(min_val: Int, max_val: Int) -> BoundedCounter {
+        BoundedCounter { value: min_val, min_val: min_val, max_val: max_val }
+    }
+
+    fn increment(self) -> BoundedCounter {
+        let new_val = if self.value + 1 > self.max_val { self.max_val } else { self.value + 1 };
+        BoundedCounter { value: new_val, min_val: self.min_val, max_val: self.max_val }
+    }
+
+    fn decrement(self) -> BoundedCounter {
+        let new_val = if self.value - 1 < self.min_val { self.min_val } else { self.value - 1 };
+        BoundedCounter { value: new_val, min_val: self.min_val, max_val: self.max_val }
+    }
+
+    fn reset(self) -> BoundedCounter {
+        BoundedCounter { value: self.min_val, min_val: self.min_val, max_val: self.max_val }
+    }
+}
+
+fn test_bounded_counter() {
+    let c = BoundedCounter.new(0, 5);
+    assert_eq(c.value, 0);
+
+    let c1 = c.increment().increment().increment();
+    assert_eq(c1.value, 3);
+
+    // Hit upper bound
+    let c2 = c1.increment().increment().increment().increment();
+    assert_eq(c2.value, 5); // capped at max
+
+    // Hit lower bound
+    let c3 = c.decrement();
+    assert_eq(c3.value, 0); // stays at min
+
+    let c4 = c2.reset();
+    assert_eq(c4.value, 0);
+    print("  test_bounded_counter: ok");
+}
+
+fn main() -> Int {
+    test_traffic_light();
+    test_door_state_machine();
+    test_vending_machine();
+    test_bounded_counter();
+    print("[OK] 619_interp_state_machine");
+    0
+}

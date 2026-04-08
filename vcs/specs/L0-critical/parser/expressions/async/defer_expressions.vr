@@ -1,0 +1,185 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, async, defer
+
+// Defer expressions for cleanup actions
+
+// Basic defer
+fn with_resource() {
+    let resource = acquire();
+    defer { resource.release() }
+
+    use_resource(resource)
+}  // resource.release() called here
+
+// Multiple defers (LIFO order)
+fn multi_defer() {
+    let r1 = acquire1();
+    defer { r1.release() }
+
+    let r2 = acquire2();
+    defer { r2.release() }
+
+    let r3 = acquire3();
+    defer { r3.release() }
+
+    use_all(r1, r2, r3)
+}  // r3, r2, r1 released in that order
+
+// Defer with file operations
+fn process_file(path: Text) -> Result<Data, Error> {
+    let file = File.open(path)?;
+    defer { file.close() }
+
+    let data = file.read_all()?;
+    Result.Ok(process(data))
+}
+
+// Defer with locks
+fn synchronized_access() {
+    let guard = mutex.lock();
+    defer { guard.unlock() }
+
+    // Critical section
+    modify_shared_state()
+}
+
+// Defer with database transactions
+fn database_operation() -> Result<(), Error> {
+    let tx = db.begin_transaction()?;
+    defer {
+        if tx.is_active() {
+            tx.rollback()
+        }
+    }
+
+    perform_queries(tx)?;
+    tx.commit()?;
+    Result.Ok(())
+}
+
+// Defer in async function
+async fn async_with_cleanup() {
+    let connection = connect().await;
+    defer { connection.close().await }
+
+    let data = connection.query().await;
+    process(data)
+}
+
+// Defer with early return
+fn early_return_example() -> Result<Int, Error> {
+    let resource = acquire();
+    defer { resource.cleanup() }
+
+    if invalid_state() {
+        return Result.Err(Error.InvalidState)
+    }
+
+    if special_case() {
+        return Result.Ok(42)
+    }
+
+    Result.Ok(process(resource))
+}  // cleanup called in all paths
+
+// Defer with panic
+fn panic_safe() {
+    let resource = acquire();
+    defer { resource.release() }  // Still runs on panic
+
+    potentially_panicking_operation()
+}
+
+// Defer capturing variables
+fn captured_defer() {
+    let name = "resource";
+    let resource = acquire(name);
+    defer {
+        println(f"Releasing {name}");
+        resource.release()
+    }
+
+    use_it(resource)
+}
+
+// Defer with condition
+fn conditional_cleanup() {
+    let mut needs_cleanup = false;
+    let resource = acquire();
+    defer {
+        if needs_cleanup {
+            resource.cleanup()
+        }
+    }
+
+    if operation_succeeded() {
+        needs_cleanup = true;
+    }
+}
+
+// Defer in loop (creates multiple defers)
+fn defer_in_loop() {
+    for i in 0..5 {
+        let r = acquire_numbered(i);
+        defer { r.release() }  // New defer each iteration
+        use_it(r)
+    }  // Each iteration's resource released at iteration end
+}
+
+// Nested defers
+fn nested() {
+    defer { outer_cleanup() }
+
+    {
+        defer { inner_cleanup() }
+        inner_operation()
+    }  // inner_cleanup here
+
+    outer_operation()
+}  // outer_cleanup here
+
+// Defer with error handling
+fn with_error_handling() -> Result<Data, Error> {
+    let connection = connect()?;
+    defer {
+        try {
+            connection.close()
+        } recover |e| {
+            log_error(f"Failed to close: {e}")
+        }
+    }
+
+    connection.query()
+}
+
+// Defer for logging/tracing
+fn traced_function() {
+    let start = now();
+    defer {
+        let duration = now() - start;
+        log(f"Function took {duration}ms")
+    }
+
+    perform_work()
+}
+
+// Defer for state restoration
+fn temporary_state_change() {
+    let old_state = get_state();
+    set_state(new_state);
+    defer { set_state(old_state) }
+
+    work_with_new_state()
+}  // Original state restored
+
+// Async defer
+async fn async_cleanup() {
+    let resource = acquire().await;
+    defer async {
+        resource.async_cleanup().await
+    }
+
+    use_resource(resource).await
+}

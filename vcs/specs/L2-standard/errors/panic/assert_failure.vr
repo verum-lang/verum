@@ -1,0 +1,283 @@
+// @test: run
+// @expected-exit-code: 1
+// @expected-stderr: panic: Assertion failed
+// @tier: 0
+// @level: L2
+// @tags: errors, panic, assert, failure
+// @description: assert! macro failure behavior
+
+/// Assert failure - panic on failed assertions.
+/// Demonstrates assert! macro and related assertion utilities.
+
+/// Basic assert! - panics if condition is false
+fn basic_assert() {
+    let x = 5;
+    assert(x > 0);  // Passes
+
+    let y = -1;
+    assert(y > 0);  // PANICS: "Assertion failed: y > 0"
+}
+
+/// Assert with custom message
+fn assert_with_message() {
+    let user_id = -1;
+
+    assert(
+        user_id >= 0,
+        f"User ID must be non-negative, got: {user_id}"
+    );
+    // PANICS: "Assertion failed: User ID must be non-negative, got: -1"
+}
+
+/// assert_eq! - assert two values are equal
+fn assert_eq_examples() {
+    let expected = 42;
+    let actual = 42;
+
+    assert_eq(expected, actual);  // Passes
+
+    let wrong = 0;
+    assert_eq(expected, wrong);
+    // PANICS: "Assertion failed: `(left == right)`
+    //          left: `42`
+    //         right: `0`"
+}
+
+/// assert_eq! with message
+fn assert_eq_with_message() {
+    let expected = "hello";
+    let actual = "world";
+
+    assert_eq(
+        expected, actual,
+        f"Greeting mismatch: expected {expected}, got {actual}"
+    );
+    // PANICS with custom message
+}
+
+/// assert_ne! - assert two values are not equal
+fn assert_ne_examples() {
+    let a = 5;
+    let b = 10;
+
+    assert_ne(a, b);  // Passes - 5 != 10
+
+    let same = 5;
+    assert_ne(a, same);
+    // PANICS: "Assertion failed: `(left != right)`
+    //          left: `5`
+    //         right: `5`"
+}
+
+/// debug_assert! - only checked in debug builds
+fn debug_assert_examples() {
+    let expensive_check = compute_invariant();
+
+    // Only runs in debug mode
+    debug_assert(expensive_check, "Invariant violated");
+
+    // In release builds, this is completely removed
+    // In debug builds, panics if check fails
+}
+
+fn compute_invariant() -> Bool {
+    // Expensive invariant computation
+    true
+}
+
+/// debug_assert_eq! and debug_assert_ne!
+fn debug_assert_variants() {
+    let x = 42;
+    let y = 42;
+
+    debug_assert_eq(x, y);  // Only in debug
+
+    debug_assert_ne(x, 0);  // Only in debug
+}
+
+/// Asserting on types with Debug trait
+fn assert_with_debug() {
+    type Point is { x: Int, y: Int };
+
+    implement Debug for Point {
+        fn debug(&self) -> Text {
+            f"Point({self.x}, {self.y})"
+        }
+    }
+
+    let p1 = Point { x: 0, y: 0 };
+    let p2 = Point { x: 1, y: 1 };
+
+    assert_eq(p1, p2);
+    // PANICS: "Assertion failed: `(left == right)`
+    //          left: `Point(0, 0)`
+    //         right: `Point(1, 1)`"
+}
+
+/// Asserting on collections
+fn assert_collections() {
+    let expected = [1, 2, 3];
+    let actual = [1, 2, 4];
+
+    assert_eq(expected, actual);
+    // PANICS: "Assertion failed: `(left == right)`
+    //          left: `[1, 2, 3]`
+    //         right: `[1, 2, 4]`"
+}
+
+/// Asserting with custom comparison
+fn assert_approx_eq(a: Float, b: Float, epsilon: Float) {
+    assert(
+        (a - b).abs() < epsilon,
+        f"Values not approximately equal: {a} vs {b} (epsilon: {epsilon})"
+    );
+}
+
+fn test_floats() {
+    assert_approx_eq(0.1 + 0.2, 0.3, 0.0001);  // Passes (handles float imprecision)
+
+    assert_approx_eq(1.0, 2.0, 0.1);
+    // PANICS: "Values not approximately equal: 1.0 vs 2.0 (epsilon: 0.1)"
+}
+
+/// Assertion helpers for common patterns
+fn assert_some<T: Debug>(maybe: Maybe<T>) -> T {
+    match maybe {
+        Some(v) => v,
+        None => panic("Assertion failed: expected Some, got None")
+    }
+}
+
+fn assert_ok<T: Debug, E: Debug>(result: Result<T, E>) -> T {
+    match result {
+        Ok(v) => v,
+        Err(e) => panic(f"Assertion failed: expected Ok, got Err({e})")
+    }
+}
+
+fn assert_err<T: Debug, E: Debug>(result: Result<T, E>) -> E {
+    match result {
+        Err(e) => e,
+        Ok(v) => panic(f"Assertion failed: expected Err, got Ok({v})")
+    }
+}
+
+/// Assertion for bounds checking
+fn assert_bounds(index: Int, min: Int, max: Int) {
+    assert(
+        index >= min && index <= max,
+        f"Index {index} out of bounds [{min}, {max}]"
+    );
+}
+
+fn test_bounds() {
+    let arr = [1, 2, 3, 4, 5];
+    let index = 10;
+
+    assert_bounds(index, 0, (arr.len() - 1) as Int);
+    // PANICS: "Index 10 out of bounds [0, 4]"
+}
+
+/// Assertion for preconditions
+fn require(condition: Bool, message: &Text) {
+    if !condition {
+        panic(f"Precondition failed: {message}");
+    }
+}
+
+fn divide(a: Int, b: Int) -> Int {
+    require(b != 0, "divisor cannot be zero");
+    a / b
+}
+
+/// Assertion for postconditions
+fn ensure(condition: Bool, message: &Text) {
+    if !condition {
+        panic(f"Postcondition failed: {message}");
+    }
+}
+
+fn absolute_value(n: Int) -> Int {
+    let result = if n < 0 { -n } else { n };
+    ensure(result >= 0, "result must be non-negative");
+    result
+}
+
+/// Assertion for invariants
+fn invariant(condition: Bool, message: &Text) {
+    if !condition {
+        panic(f"Invariant violated: {message}");
+    }
+}
+
+type Counter is {
+    value: Int,
+    min: Int,
+    max: Int
+};
+
+implement Counter {
+    fn new(initial: Int, min: Int, max: Int) -> Self {
+        invariant(min <= max, "min must be <= max");
+        invariant(initial >= min && initial <= max, "initial value out of range");
+
+        Counter { value: initial, min, max }
+    }
+
+    fn increment(&mut self) {
+        if self.value < self.max {
+            self.value += 1;
+        }
+        self.check_invariant();
+    }
+
+    fn check_invariant(&self) {
+        invariant(
+            self.value >= self.min && self.value <= self.max,
+            "counter value out of bounds"
+        );
+    }
+}
+
+/// Test assertion (for testing frameworks)
+@test
+fn test_with_assert() {
+    let result = compute_something();
+    assert_eq(result, 42, "compute_something should return 42");
+}
+
+fn compute_something() -> Int {
+    42
+}
+
+/// Assertion in production code patterns
+fn production_assert_pattern() {
+    // In production, you might want different behavior
+    @cfg(debug)
+    {
+        // Full assertions in debug
+        assert(complex_invariant_check());
+    }
+
+    @cfg(not(debug))
+    {
+        // Lighter checks in release
+        if !quick_sanity_check() {
+            log_error("Sanity check failed");
+            // Optionally continue or fail gracefully
+        }
+    }
+}
+
+fn complex_invariant_check() -> Bool { true }
+fn quick_sanity_check() -> Bool { true }
+fn log_error(msg: &str) {}
+
+fn main() {
+    // This demonstrates assertion failure
+    let x = 5;
+    let y = 10;
+
+    assert(x == y, f"Assertion failed: {x} != {y}");
+    // Program exits with panic
+}

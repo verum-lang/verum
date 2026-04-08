@@ -1,0 +1,43 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, redundant-pattern, stream, warning
+// @expected-warning: redundant pattern
+// @description: Redundant stream pattern detection
+
+type Stream<T> is Nil | Cons(T, Heap<Stream<T>>);
+
+// Wildcard makes subsequent patterns redundant
+fn bad_stream_match<T>(s: Stream<T>) -> Int =
+    match s {
+        _ => 0,
+        Nil => 1,        // WARNING: redundant pattern (never reached)
+        Cons(_, _) => 2  // WARNING: redundant pattern (never reached)
+    };
+
+// Cons pattern followed by identical Cons is redundant
+fn redundant_cons<T>(s: Stream<T>) -> Int =
+    match s {
+        Cons(_, _) => 1,
+        Cons(x, _) => 2,  // WARNING: redundant - covered by previous Cons
+        Nil => 0
+    };
+
+// Nil followed by Nil is redundant
+fn redundant_nil<T>(s: Stream<T>) -> Int =
+    match s {
+        Nil => 0,
+        Nil => 1,  // WARNING: redundant - covered by previous Nil
+        _ => 2
+    };
+
+// Stream pattern after wildcard
+fn redundant_stream<T>(s: Stream<T>) -> Int =
+    match s {
+        Cons(_, _) => 1,
+        Nil => 0,
+        Cons(_, _) => 2  // WARNING: redundant - covered by first Cons
+    };
+
+fn main() {
+    // Tests just verify parsing and type checking
+}

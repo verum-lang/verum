@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, narrowing, is-operator
+
+/// Type narrowing through the `is` operator -- pattern testing
+/// narrows the type in the true branch without destructuring.
+
+type Animal is Cat { name: Text } | Dog { name: Text } | Fish;
+
+type Value is IntVal(Int) | FloatVal(Float) | TextVal(Text) | NullVal;
+
+// Is-expression narrows type in conditional branch
+fn greet(a: Animal) -> Text {
+    if a is Cat {
+        f"meow from {a.name}"   // a narrowed to Cat
+    } else if a is Dog {
+        f"woof from {a.name}"   // a narrowed to Dog
+    } else {
+        "blub"
+    }
+}
+
+// Is-expression with binding
+fn extract_int(v: Value) -> Maybe<Int> {
+    if v is IntVal(n) {
+        Some(n)
+    } else {
+        None
+    }
+}
+
+// Narrowing in while-let style
+fn sum_values(vs: List<Value>) -> Int {
+    let mut total = 0;
+    for v in vs {
+        if v is IntVal(n) {
+            total = total + n;
+        }
+    }
+    total
+}
+
+// Narrowing with negation
+fn is_numeric(v: Value) -> Bool {
+    v is IntVal || v is FloatVal
+}
+
+fn describe_non_null(v: Value) -> Text {
+    if !(v is NullVal) {
+        // v narrowed to IntVal | FloatVal | TextVal
+        match v {
+            IntVal(n) => f"int: {n}",
+            FloatVal(f) => f"float: {f}",
+            TextVal(s) => f"text: {s}",
+            NullVal => unreachable(),
+        }
+    } else {
+        "null"
+    }
+}
+
+// Chained narrowing
+fn process(v: Value) -> Text {
+    if v is IntVal(n) && n > 0 {
+        "positive int"
+    } else if v is IntVal(n) && n < 0 {
+        "negative int"
+    } else if v is IntVal {
+        "zero"
+    } else if v is FloatVal {
+        "float"
+    } else {
+        "other"
+    }
+}
+
+fn main() {
+    let cat = Cat { name: "Whiskers" };
+    assert(greet(cat) == "meow from Whiskers");
+
+    let v = IntVal(42);
+    assert(extract_int(v) == Some(42));
+
+    let vals = [IntVal(1), FloatVal(2.0), IntVal(3), NullVal];
+    assert(sum_values(vals) == 4);
+
+    assert(is_numeric(IntVal(1)) == true);
+    assert(is_numeric(NullVal) == false);
+
+    assert(process(IntVal(5)) == "positive int");
+    assert(process(FloatVal(1.0)) == "float");
+}

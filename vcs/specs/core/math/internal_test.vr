@@ -1,0 +1,1250 @@
+// =============================================================================
+// internal_test.vr - Tests for math library internal types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @note: internal.vr fixed — renamed tensor keyword params to t
+// @tags: math, internal, mlir, tape, value, ffi, backend
+// @description: Tests for MLIRType, ElementType, MemRefLayout, TapeOp,
+//               ValueTag, FFIAbi, and BackendCapabilities types.
+// =============================================================================
+
+mount core.math.internal.{
+    MLIRType, ElementType, MemRefLayout,
+    TapeOp, TensorId, ValueTag, FFIAbi,
+    BackendCapabilities, Value, FunctionId,
+    TensorDebugInfo,
+};
+mount core.math.tensor.{DType, Device};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: ElementType Variants
+// =============================================================================
+
+@test
+fn test_element_type_f64() {
+    let e = ElementType.F64;
+    assert(e is ElementType.F64);
+}
+
+@test
+fn test_element_type_f32() {
+    let e = ElementType.F32;
+    assert(e is ElementType.F32);
+}
+
+@test
+fn test_element_type_f16() {
+    let e = ElementType.F16;
+    assert(e is ElementType.F16);
+}
+
+@test
+fn test_element_type_bf16() {
+    let e = ElementType.BF16;
+    assert(e is ElementType.BF16);
+}
+
+@test
+fn test_element_type_i64() {
+    let e = ElementType.I64;
+    assert(e is ElementType.I64);
+}
+
+@test
+fn test_element_type_i32() {
+    let e = ElementType.I32;
+    assert(e is ElementType.I32);
+}
+
+@test
+fn test_element_type_i16() {
+    let e = ElementType.I16;
+    assert(e is ElementType.I16);
+}
+
+@test
+fn test_element_type_i8() {
+    let e = ElementType.I8;
+    assert(e is ElementType.I8);
+}
+
+@test
+fn test_element_type_index() {
+    let e = ElementType.Index;
+    assert(e is ElementType.Index);
+}
+
+@test
+fn test_element_type_bool() {
+    let e = ElementType.Bool;
+    assert(e is ElementType.Bool);
+}
+
+@test
+fn test_element_type_distinctness_float() {
+    assert(!(ElementType.F64 is ElementType.F32));
+    assert(!(ElementType.F32 is ElementType.F16));
+    assert(!(ElementType.F16 is ElementType.BF16));
+}
+
+@test
+fn test_element_type_distinctness_int() {
+    assert(!(ElementType.I64 is ElementType.I32));
+    assert(!(ElementType.I32 is ElementType.I16));
+    assert(!(ElementType.I16 is ElementType.I8));
+}
+
+@test
+fn test_element_type_distinctness_cross() {
+    assert(!(ElementType.F64 is ElementType.I64));
+    assert(!(ElementType.Index is ElementType.Bool));
+    assert(!(ElementType.Bool is ElementType.F32));
+}
+
+@test
+fn test_element_type_match_exhaustive() {
+    let types = [
+        ElementType.F64, ElementType.F32, ElementType.F16, ElementType.BF16,
+        ElementType.I64, ElementType.I32, ElementType.I16, ElementType.I8,
+        ElementType.Index, ElementType.Bool,
+    ];
+    let mut count = 0;
+
+    for t in types {
+        match t {
+            ElementType.F64 => count = count + 1,
+            ElementType.F32 => count = count + 1,
+            ElementType.F16 => count = count + 1,
+            ElementType.BF16 => count = count + 1,
+            ElementType.I64 => count = count + 1,
+            ElementType.I32 => count = count + 1,
+            ElementType.I16 => count = count + 1,
+            ElementType.I8 => count = count + 1,
+            ElementType.Index => count = count + 1,
+            ElementType.Bool => count = count + 1,
+        }
+    }
+    assert_eq(count, 10);
+}
+
+// =============================================================================
+// Section 2: MLIRType Variants
+// =============================================================================
+
+@test
+fn test_mlir_type_tensor() {
+    let t = MLIRType.TensorType {
+        element: ElementType.F32,
+        shape: List.from(&[2 as ISize, 3 as ISize, 4 as ISize]),
+    };
+    assert(t is MLIRType.TensorType);
+}
+
+@test
+fn test_mlir_type_tensor_values() {
+    let t = MLIRType.TensorType {
+        element: ElementType.F64,
+        shape: List.from(&[10 as ISize, 20 as ISize]),
+    };
+    match t {
+        MLIRType.TensorType { element, shape } => {
+            assert(element is ElementType.F64);
+            assert_eq(shape.len(), 2);
+        }
+        _ => panic("expected TensorType"),
+    }
+}
+
+@test
+fn test_mlir_type_memref() {
+    let t = MLIRType.MemRefType {
+        element: ElementType.I32,
+        shape: List.from(&[100 as ISize]),
+        layout: MemRefLayout.Contiguous,
+    };
+    assert(t is MLIRType.MemRefType);
+}
+
+@test
+fn test_mlir_type_memref_strided() {
+    let t = MLIRType.MemRefType {
+        element: ElementType.F16,
+        shape: List.from(&[8 as ISize, 16 as ISize]),
+        layout: MemRefLayout.Strided(List.from(&[16 as ISize, 1 as ISize])),
+    };
+    match t {
+        MLIRType.MemRefType { element, shape, layout } => {
+            assert(element is ElementType.F16);
+            assert(layout is MemRefLayout.Strided);
+        }
+        _ => panic("expected MemRefType"),
+    }
+}
+
+@test
+fn test_mlir_type_scalar() {
+    let t = MLIRType.ScalarType(ElementType.Bool);
+    assert(t is MLIRType.ScalarType);
+}
+
+@test
+fn test_mlir_type_tensor_is_not_scalar() {
+    let t = MLIRType.TensorType {
+        element: ElementType.F32,
+        shape: List.from(&[1 as ISize]),
+    };
+    assert(!(t is MLIRType.ScalarType));
+}
+
+@test
+fn test_mlir_type_memref_is_not_scalar() {
+    let m = MLIRType.MemRefType {
+        element: ElementType.F32,
+        shape: List.from(&[1 as ISize]),
+        layout: MemRefLayout.Contiguous,
+    };
+    assert(!(m is MLIRType.ScalarType));
+}
+
+@test
+fn test_mlir_type_scalar_is_not_tensor() {
+    let s = MLIRType.ScalarType(ElementType.F32);
+    assert(!(s is MLIRType.TensorType));
+    assert(!(s is MLIRType.MemRefType));
+}
+
+// =============================================================================
+// Section 3: MemRefLayout Variants
+// =============================================================================
+
+@test
+fn test_memref_layout_contiguous() {
+    let l = MemRefLayout.Contiguous;
+    assert(l is MemRefLayout.Contiguous);
+}
+
+@test
+fn test_memref_layout_strided() {
+    let l = MemRefLayout.Strided(List.from(&[4 as ISize, 1 as ISize]));
+    assert(l is MemRefLayout.Strided);
+}
+
+@test
+fn test_memref_layout_affine_map() {
+    let l = MemRefLayout.AffineMap("(d0, d1) -> (d0 * 4 + d1)");
+    assert(l is MemRefLayout.AffineMap);
+}
+
+@test
+fn test_memref_layout_distinctness() {
+    assert(!(MemRefLayout.Contiguous is MemRefLayout.Strided));
+    assert(!(MemRefLayout.Contiguous is MemRefLayout.AffineMap));
+    let strided = MemRefLayout.Strided(List.from(&[1 as ISize]));
+    assert(!(strided is MemRefLayout.Contiguous));
+}
+
+// =============================================================================
+// Section 4: TapeOp Variants (Key Operations)
+// =============================================================================
+
+@test
+fn test_tape_op_add() {
+    let op = TapeOp.Add;
+    assert(op is TapeOp.Add);
+}
+
+@test
+fn test_tape_op_sub() {
+    let op = TapeOp.Sub;
+    assert(op is TapeOp.Sub);
+}
+
+@test
+fn test_tape_op_mul() {
+    let op = TapeOp.Mul;
+    assert(op is TapeOp.Mul);
+}
+
+@test
+fn test_tape_op_div() {
+    let op = TapeOp.Div;
+    assert(op is TapeOp.Div);
+}
+
+@test
+fn test_tape_op_matmul() {
+    let op = TapeOp.MatMul;
+    assert(op is TapeOp.MatMul);
+}
+
+@test
+fn test_tape_op_transpose() {
+    let op = TapeOp.Transpose;
+    assert(op is TapeOp.Transpose);
+}
+
+@test
+fn test_tape_op_reshape() {
+    let op = TapeOp.Reshape;
+    assert(op is TapeOp.Reshape);
+}
+
+@test
+fn test_tape_op_relu() {
+    let op = TapeOp.Relu;
+    assert(op is TapeOp.Relu);
+}
+
+@test
+fn test_tape_op_sigmoid() {
+    let op = TapeOp.Sigmoid;
+    assert(op is TapeOp.Sigmoid);
+}
+
+@test
+fn test_tape_op_tanh() {
+    let op = TapeOp.Tanh;
+    assert(op is TapeOp.Tanh);
+}
+
+@test
+fn test_tape_op_exp() {
+    let op = TapeOp.Exp;
+    assert(op is TapeOp.Exp);
+}
+
+@test
+fn test_tape_op_log() {
+    let op = TapeOp.Log;
+    assert(op is TapeOp.Log);
+}
+
+@test
+fn test_tape_op_sqrt() {
+    let op = TapeOp.Sqrt;
+    assert(op is TapeOp.Sqrt);
+}
+
+@test
+fn test_tape_op_sum_with_data() {
+    let op = TapeOp.Sum { axis: Some(-1), keepdim: true };
+    assert(op is TapeOp.Sum);
+}
+
+@test
+fn test_tape_op_mean_with_data() {
+    let op = TapeOp.Mean { axis: None, keepdim: false };
+    assert(op is TapeOp.Mean);
+}
+
+@test
+fn test_tape_op_softmax_with_data() {
+    let op = TapeOp.Softmax { axis: -1 };
+    assert(op is TapeOp.Softmax);
+}
+
+@test
+fn test_tape_op_pow_with_data() {
+    let op = TapeOp.Pow { exponent: 2.0 };
+    assert(op is TapeOp.Pow);
+}
+
+@test
+fn test_tape_op_custom_with_data() {
+    let op = TapeOp.Custom {
+        name: "flash_attention",
+        saved_tensors: List.from(&[1 as TensorId, 2 as TensorId, 3 as TensorId]),
+    };
+    assert(op is TapeOp.Custom);
+}
+
+@test
+fn test_tape_op_distinctness() {
+    assert(!(TapeOp.Add is TapeOp.Sub));
+    assert(!(TapeOp.Mul is TapeOp.Div));
+    assert(!(TapeOp.MatMul is TapeOp.Transpose));
+    assert(!(TapeOp.Relu is TapeOp.Sigmoid));
+    assert(!(TapeOp.Exp is TapeOp.Log));
+}
+
+// =============================================================================
+// Section 5: ValueTag Variants
+// =============================================================================
+
+@test
+fn test_value_tag_float() {
+    let t = ValueTag.TagFloat;
+    assert(t is ValueTag.TagFloat);
+}
+
+@test
+fn test_value_tag_int() {
+    let t = ValueTag.TagInt;
+    assert(t is ValueTag.TagInt);
+}
+
+@test
+fn test_value_tag_bool() {
+    let t = ValueTag.TagBool;
+    assert(t is ValueTag.TagBool);
+}
+
+@test
+fn test_value_tag_null() {
+    let t = ValueTag.TagNull;
+    assert(t is ValueTag.TagNull);
+}
+
+@test
+fn test_value_tag_unit() {
+    let t = ValueTag.TagUnit;
+    assert(t is ValueTag.TagUnit);
+}
+
+@test
+fn test_value_tag_pointer() {
+    let t = ValueTag.TagPointer;
+    assert(t is ValueTag.TagPointer);
+}
+
+@test
+fn test_value_tag_string() {
+    let t = ValueTag.TagString;
+    assert(t is ValueTag.TagString);
+}
+
+@test
+fn test_value_tag_object() {
+    let t = ValueTag.TagObject;
+    assert(t is ValueTag.TagObject);
+}
+
+@test
+fn test_value_tag_distinctness() {
+    assert(!(ValueTag.TagFloat is ValueTag.TagInt));
+    assert(!(ValueTag.TagInt is ValueTag.TagBool));
+    assert(!(ValueTag.TagBool is ValueTag.TagNull));
+    assert(!(ValueTag.TagNull is ValueTag.TagUnit));
+    assert(!(ValueTag.TagUnit is ValueTag.TagPointer));
+    assert(!(ValueTag.TagPointer is ValueTag.TagString));
+    assert(!(ValueTag.TagString is ValueTag.TagObject));
+    assert(!(ValueTag.TagObject is ValueTag.TagFloat));
+}
+
+@test
+fn test_value_tag_match_exhaustive() {
+    let tags = [
+        ValueTag.TagFloat, ValueTag.TagInt, ValueTag.TagBool, ValueTag.TagNull,
+        ValueTag.TagUnit, ValueTag.TagPointer, ValueTag.TagString, ValueTag.TagObject,
+    ];
+    let mut count = 0;
+
+    for tag in tags {
+        match tag {
+            ValueTag.TagFloat => count = count + 1,
+            ValueTag.TagInt => count = count + 1,
+            ValueTag.TagBool => count = count + 1,
+            ValueTag.TagNull => count = count + 1,
+            ValueTag.TagUnit => count = count + 1,
+            ValueTag.TagPointer => count = count + 1,
+            ValueTag.TagString => count = count + 1,
+            ValueTag.TagObject => count = count + 1,
+        }
+    }
+    assert_eq(count, 8);
+}
+
+// =============================================================================
+// Section 6: FFIAbi Variants
+// =============================================================================
+
+@test
+fn test_ffi_abi_c() {
+    let abi = FFIAbi.C;
+    assert(abi is FFIAbi.C);
+}
+
+@test
+fn test_ffi_abi_stdcall() {
+    let abi = FFIAbi.Stdcall;
+    assert(abi is FFIAbi.Stdcall);
+}
+
+@test
+fn test_ffi_abi_fastcall() {
+    let abi = FFIAbi.Fastcall;
+    assert(abi is FFIAbi.Fastcall);
+}
+
+@test
+fn test_ffi_abi_vectorcall() {
+    let abi = FFIAbi.Vectorcall;
+    assert(abi is FFIAbi.Vectorcall);
+}
+
+@test
+fn test_ffi_abi_sysv64() {
+    let abi = FFIAbi.SysV64;
+    assert(abi is FFIAbi.SysV64);
+}
+
+@test
+fn test_ffi_abi_win64() {
+    let abi = FFIAbi.Win64;
+    assert(abi is FFIAbi.Win64);
+}
+
+@test
+fn test_ffi_abi_distinctness() {
+    assert(!(FFIAbi.C is FFIAbi.Stdcall));
+    assert(!(FFIAbi.Stdcall is FFIAbi.Fastcall));
+    assert(!(FFIAbi.Fastcall is FFIAbi.Vectorcall));
+    assert(!(FFIAbi.Vectorcall is FFIAbi.SysV64));
+    assert(!(FFIAbi.SysV64 is FFIAbi.Win64));
+    assert(!(FFIAbi.Win64 is FFIAbi.C));
+}
+
+@test
+fn test_ffi_abi_match_exhaustive() {
+    let abis = [
+        FFIAbi.C, FFIAbi.Stdcall, FFIAbi.Fastcall,
+        FFIAbi.Vectorcall, FFIAbi.SysV64, FFIAbi.Win64,
+    ];
+    let mut count = 0;
+
+    for abi in abis {
+        match abi {
+            FFIAbi.C => count = count + 1,
+            FFIAbi.Stdcall => count = count + 1,
+            FFIAbi.Fastcall => count = count + 1,
+            FFIAbi.Vectorcall => count = count + 1,
+            FFIAbi.SysV64 => count = count + 1,
+            FFIAbi.Win64 => count = count + 1,
+        }
+    }
+    assert_eq(count, 6);
+}
+
+// =============================================================================
+// Section 7: BackendCapabilities Construction
+// =============================================================================
+
+@test
+fn test_backend_capabilities_minimal() {
+    let caps = BackendCapabilities {
+        has_sse42: false,
+        has_avx: false,
+        has_avx2: false,
+        has_fma: false,
+        has_avx512f: false,
+        has_avx512bw: false,
+        has_avx512vl: false,
+        has_neon: false,
+        has_sve: false,
+        has_cuda: false,
+        cuda_compute_capability: None,
+        has_metal: false,
+        metal_gpu_family: None,
+    };
+    assert(!caps.has_sse42);
+    assert(!caps.has_cuda);
+    assert(!caps.has_metal);
+}
+
+@test
+fn test_backend_capabilities_x86_full() {
+    let caps = BackendCapabilities {
+        has_sse42: true,
+        has_avx: true,
+        has_avx2: true,
+        has_fma: true,
+        has_avx512f: true,
+        has_avx512bw: true,
+        has_avx512vl: true,
+        has_neon: false,
+        has_sve: false,
+        has_cuda: true,
+        cuda_compute_capability: Some((9 as USize, 0 as USize)),
+        has_metal: false,
+        metal_gpu_family: None,
+    };
+    assert(caps.has_sse42);
+    assert(caps.has_avx2);
+    assert(caps.has_avx512f);
+    assert(caps.has_cuda);
+}
+
+@test
+fn test_backend_capabilities_arm() {
+    let caps = BackendCapabilities {
+        has_sse42: false,
+        has_avx: false,
+        has_avx2: false,
+        has_fma: false,
+        has_avx512f: false,
+        has_avx512bw: false,
+        has_avx512vl: false,
+        has_neon: true,
+        has_sve: true,
+        has_cuda: false,
+        cuda_compute_capability: None,
+        has_metal: true,
+        metal_gpu_family: Some(7 as USize),
+    };
+    assert(caps.has_neon);
+    assert(caps.has_sve);
+    assert(caps.has_metal);
+    assert(!caps.has_sse42);
+}
+
+// =============================================================================
+// Section 8: TapeOp Missing Variants (Conv2d, MaxPool2d, LayerNorm, BatchNorm)
+// =============================================================================
+
+@test
+fn test_tape_op_conv2d() {
+    let stride = (1 as USize, 1 as USize);
+    let padding = (0 as USize, 0 as USize);
+    let op = TapeOp.Conv2d { stride: stride, padding: padding };
+    assert(op is TapeOp.Conv2d);
+}
+
+@test
+fn test_tape_op_conv2d_with_stride() {
+    let stride = (2 as USize, 2 as USize);
+    let padding = (1 as USize, 1 as USize);
+    let op = TapeOp.Conv2d { stride: stride, padding: padding };
+    assert(op is TapeOp.Conv2d);
+    assert(!(op is TapeOp.MaxPool2d));
+}
+
+@test
+fn test_tape_op_maxpool2d() {
+    let ks = (2 as USize, 2 as USize);
+    let stride = (2 as USize, 2 as USize);
+    let op = TapeOp.MaxPool2d { kernel_size: ks, stride: stride };
+    assert(op is TapeOp.MaxPool2d);
+}
+
+@test
+fn test_tape_op_maxpool2d_asymmetric() {
+    let ks = (3 as USize, 3 as USize);
+    let stride = (1 as USize, 1 as USize);
+    let op = TapeOp.MaxPool2d { kernel_size: ks, stride: stride };
+    assert(op is TapeOp.MaxPool2d);
+    assert(!(op is TapeOp.Conv2d));
+}
+
+@test
+fn test_tape_op_layernorm() {
+    let shape = List.from(&[768 as USize]);
+    let op = TapeOp.LayerNorm { normalized_shape: shape };
+    assert(op is TapeOp.LayerNorm);
+}
+
+@test
+fn test_tape_op_layernorm_2d() {
+    let shape = List.from(&[768 as USize, 512 as USize]);
+    let op = TapeOp.LayerNorm { normalized_shape: shape };
+    assert(op is TapeOp.LayerNorm);
+    assert(!(op is TapeOp.BatchNorm));
+}
+
+@test
+fn test_tape_op_batchnorm() {
+    let mean_id = 10 as TensorId;
+    let var_id = 11 as TensorId;
+    let op = TapeOp.BatchNorm { running_mean: mean_id, running_var: var_id };
+    assert(op is TapeOp.BatchNorm);
+}
+
+@test
+fn test_tape_op_batchnorm_is_not_layernorm() {
+    let mean_id = 5 as TensorId;
+    let var_id = 6 as TensorId;
+    let op = TapeOp.BatchNorm { running_mean: mean_id, running_var: var_id };
+    assert(!(op is TapeOp.LayerNorm));
+    assert(!(op is TapeOp.Add));
+}
+
+// =============================================================================
+// Section 9: TapeOp Match Exhaustive (all 22 variants)
+// =============================================================================
+
+@test
+fn test_tape_op_match_all_variants() {
+    let ops = [
+        TapeOp.Add,
+        TapeOp.Sub,
+        TapeOp.Mul,
+        TapeOp.Div,
+        TapeOp.MatMul,
+        TapeOp.Transpose,
+        TapeOp.Reshape,
+        TapeOp.Sum { axis: None, keepdim: false },
+        TapeOp.Mean { axis: Some(0), keepdim: true },
+        TapeOp.Softmax { axis: -1 },
+        TapeOp.Relu,
+        TapeOp.Sigmoid,
+        TapeOp.Tanh,
+        TapeOp.Exp,
+        TapeOp.Log,
+        TapeOp.Sqrt,
+        TapeOp.Pow { exponent: 2.0 },
+        TapeOp.Conv2d { stride: (1 as USize, 1 as USize), padding: (0 as USize, 0 as USize) },
+        TapeOp.MaxPool2d { kernel_size: (2 as USize, 2 as USize), stride: (2 as USize, 2 as USize) },
+        TapeOp.LayerNorm { normalized_shape: List.from(&[128 as USize]) },
+        TapeOp.BatchNorm { running_mean: 1 as TensorId, running_var: 2 as TensorId },
+        TapeOp.Custom { name: "test", saved_tensors: List.from(&[1 as TensorId]) },
+    ];
+    let mut count = 0;
+    for op in ops {
+        match op {
+            TapeOp.Add => count = count + 1,
+            TapeOp.Sub => count = count + 1,
+            TapeOp.Mul => count = count + 1,
+            TapeOp.Div => count = count + 1,
+            TapeOp.MatMul => count = count + 1,
+            TapeOp.Transpose => count = count + 1,
+            TapeOp.Reshape => count = count + 1,
+            TapeOp.Sum { axis, keepdim } => count = count + 1,
+            TapeOp.Mean { axis, keepdim } => count = count + 1,
+            TapeOp.Softmax { axis } => count = count + 1,
+            TapeOp.Relu => count = count + 1,
+            TapeOp.Sigmoid => count = count + 1,
+            TapeOp.Tanh => count = count + 1,
+            TapeOp.Exp => count = count + 1,
+            TapeOp.Log => count = count + 1,
+            TapeOp.Sqrt => count = count + 1,
+            TapeOp.Pow { exponent } => count = count + 1,
+            TapeOp.Conv2d { stride, padding } => count = count + 1,
+            TapeOp.MaxPool2d { kernel_size, stride } => count = count + 1,
+            TapeOp.LayerNorm { normalized_shape } => count = count + 1,
+            TapeOp.BatchNorm { running_mean, running_var } => count = count + 1,
+            TapeOp.Custom { name, saved_tensors } => count = count + 1,
+        }
+    }
+    assert_eq(count, 22);
+}
+
+// =============================================================================
+// Section 10: TapeOp Field Variations
+// =============================================================================
+
+@test
+fn test_tape_op_sum_none_axis() {
+    let op = TapeOp.Sum { axis: None, keepdim: false };
+    assert(op is TapeOp.Sum);
+}
+
+@test
+fn test_tape_op_sum_positive_axis() {
+    let op = TapeOp.Sum { axis: Some(2), keepdim: true };
+    assert(op is TapeOp.Sum);
+}
+
+@test
+fn test_tape_op_mean_none_axis_keepdim() {
+    let op = TapeOp.Mean { axis: None, keepdim: true };
+    assert(op is TapeOp.Mean);
+}
+
+@test
+fn test_tape_op_mean_with_axis_no_keepdim() {
+    let op = TapeOp.Mean { axis: Some(1), keepdim: false };
+    assert(op is TapeOp.Mean);
+}
+
+@test
+fn test_tape_op_softmax_axis_zero() {
+    let op = TapeOp.Softmax { axis: 0 };
+    assert(op is TapeOp.Softmax);
+}
+
+@test
+fn test_tape_op_pow_fractional() {
+    let op = TapeOp.Pow { exponent: 0.5 };
+    assert(op is TapeOp.Pow);
+}
+
+@test
+fn test_tape_op_pow_negative() {
+    let op = TapeOp.Pow { exponent: 0.0 - 1.0 };
+    assert(op is TapeOp.Pow);
+}
+
+@test
+fn test_tape_op_custom_empty_tensors() {
+    let empty: List<TensorId> = List.new();
+    let op = TapeOp.Custom { name: "identity", saved_tensors: empty };
+    assert(op is TapeOp.Custom);
+}
+
+// =============================================================================
+// Section 11: MemRefLayout Match Exhaustive
+// =============================================================================
+
+@test
+fn test_memref_layout_match_exhaustive() {
+    let layouts = [
+        MemRefLayout.Contiguous,
+        MemRefLayout.Strided(List.from(&[8 as ISize, 1 as ISize])),
+        MemRefLayout.AffineMap("(d0) -> (d0)"),
+    ];
+    let mut count = 0;
+    for l in layouts {
+        match l {
+            MemRefLayout.Contiguous => count = count + 1,
+            MemRefLayout.Strided(s) => count = count + 1,
+            MemRefLayout.AffineMap(m) => count = count + 1,
+        }
+    }
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// Section 12: ElementType in Collections and as Function Parameters
+// =============================================================================
+
+@test
+fn test_element_type_in_list() {
+    let types: List<ElementType> = List.from(&[
+        ElementType.F64,
+        ElementType.F32,
+        ElementType.I32,
+        ElementType.Bool,
+    ]);
+    assert_eq(types.len(), 4);
+}
+
+@test
+fn test_element_type_as_param() {
+    fn accept_element(e: &ElementType) -> Bool { true }
+    let e = ElementType.F64;
+    assert(accept_element(&e));
+}
+
+@test
+fn test_element_type_as_return() {
+    fn get_default_element() -> ElementType { ElementType.F32 }
+    let e = get_default_element();
+    assert(e is ElementType.F32);
+}
+
+// =============================================================================
+// Section 13: MLIRType with Various Shapes
+// =============================================================================
+
+@test
+fn test_mlir_type_tensor_0d_scalar_shape() {
+    let t = MLIRType.TensorType {
+        element: ElementType.F32,
+        shape: List.new(),
+    };
+    assert(t is MLIRType.TensorType);
+}
+
+@test
+fn test_mlir_type_tensor_1d() {
+    let t = MLIRType.TensorType {
+        element: ElementType.F64,
+        shape: List.from(&[1024 as ISize]),
+    };
+    assert(t is MLIRType.TensorType);
+}
+
+@test
+fn test_mlir_type_tensor_3d() {
+    let t = MLIRType.TensorType {
+        element: ElementType.F16,
+        shape: List.from(&[3 as ISize, 224 as ISize, 224 as ISize]),
+    };
+    assert(t is MLIRType.TensorType);
+}
+
+@test
+fn test_mlir_type_tensor_4d_batch() {
+    let t = MLIRType.TensorType {
+        element: ElementType.BF16,
+        shape: List.from(&[32 as ISize, 3 as ISize, 224 as ISize, 224 as ISize]),
+    };
+    match t {
+        MLIRType.TensorType { element, shape } => {
+            assert(element is ElementType.BF16);
+            assert_eq(shape.len(), 4);
+        }
+        _ => panic("expected TensorType"),
+    }
+}
+
+@test
+fn test_mlir_type_memref_with_affine() {
+    let t = MLIRType.MemRefType {
+        element: ElementType.F32,
+        shape: List.from(&[4 as ISize, 8 as ISize]),
+        layout: MemRefLayout.AffineMap("(d0, d1) -> (d1 * 4 + d0)"),
+    };
+    match t {
+        MLIRType.MemRefType { element, shape, layout } => {
+            assert(element is ElementType.F32);
+            assert(layout is MemRefLayout.AffineMap);
+        }
+        _ => panic("expected MemRefType"),
+    }
+}
+
+@test
+fn test_mlir_type_memref_contiguous_1d() {
+    let t = MLIRType.MemRefType {
+        element: ElementType.I64,
+        shape: List.from(&[256 as ISize]),
+        layout: MemRefLayout.Contiguous,
+    };
+    match t {
+        MLIRType.MemRefType { element, shape, layout } => {
+            assert(element is ElementType.I64);
+            assert_eq(shape.len(), 1);
+            assert(layout is MemRefLayout.Contiguous);
+        }
+        _ => panic("expected MemRefType"),
+    }
+}
+
+@test
+fn test_mlir_type_scalar_all_elements() {
+    let scalars = [
+        MLIRType.ScalarType(ElementType.F64),
+        MLIRType.ScalarType(ElementType.F32),
+        MLIRType.ScalarType(ElementType.I32),
+        MLIRType.ScalarType(ElementType.Bool),
+    ];
+    for s in scalars {
+        assert(s is MLIRType.ScalarType);
+    }
+}
+
+@test
+fn test_mlir_type_match_exhaustive() {
+    let types = [
+        MLIRType.TensorType {
+            element: ElementType.F32,
+            shape: List.from(&[2 as ISize]),
+        },
+        MLIRType.MemRefType {
+            element: ElementType.I32,
+            shape: List.from(&[4 as ISize]),
+            layout: MemRefLayout.Contiguous,
+        },
+        MLIRType.ScalarType(ElementType.Bool),
+    ];
+    let mut count = 0;
+    for t in types {
+        match t {
+            MLIRType.TensorType { element, shape } => count = count + 1,
+            MLIRType.MemRefType { element, shape, layout } => count = count + 1,
+            MLIRType.ScalarType(e) => count = count + 1,
+        }
+    }
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// Section 14: Value Type Existence
+// =============================================================================
+
+@test
+fn test_value_type_exists() {
+    fn accept_value(v: Value) -> Bool { true }
+    let _ = accept_value;
+}
+
+@test
+fn test_value_ref_type_exists() {
+    fn accept_value_ref(v: &Value) -> Bool { true }
+    let _ = accept_value_ref;
+}
+
+@test
+fn test_value_from_int_exists() {
+    let _ = Value.from_int;
+}
+
+@test
+fn test_value_from_float_exists() {
+    let _ = Value.from_float;
+}
+
+@test
+fn test_value_from_bool_exists() {
+    let _ = Value.from_bool;
+}
+
+@test
+fn test_value_from_ptr_exists() {
+    let _ = Value.from_ptr;
+}
+
+// =============================================================================
+// Section 15: FunctionId Type Existence
+// =============================================================================
+
+@test
+fn test_function_id_type_exists() {
+    fn accept_function_id(id: FunctionId) -> Bool { true }
+    let _ = accept_function_id;
+}
+
+@test
+fn test_function_id_ref_type_exists() {
+    fn accept_function_id_ref(id: &FunctionId) -> Bool { true }
+    let _ = accept_function_id_ref;
+}
+
+// =============================================================================
+// Section 16: TensorId Type Existence and Usage
+// =============================================================================
+
+@test
+fn test_tensor_id_type_exists() {
+    fn accept_tensor_id(id: TensorId) -> Bool { true }
+    let _ = accept_tensor_id;
+}
+
+@test
+fn test_tensor_id_in_list() {
+    let ids: List<TensorId> = List.from(&[
+        1 as TensorId,
+        2 as TensorId,
+        3 as TensorId,
+    ]);
+    assert_eq(ids.len(), 3);
+}
+
+@test
+fn test_tensor_id_as_field() {
+    let mean_id = 42 as TensorId;
+    let var_id = 43 as TensorId;
+    let op = TapeOp.BatchNorm { running_mean: mean_id, running_var: var_id };
+    assert(op is TapeOp.BatchNorm);
+}
+
+// =============================================================================
+// Section 17: TensorDebugInfo Record
+// =============================================================================
+
+@test
+fn test_tensor_debug_info_type_exists() {
+    fn accept_debug_info(info: &TensorDebugInfo) -> Bool { true }
+    let _ = accept_debug_info;
+}
+
+@test
+fn test_tensor_debug_info_has_id_field() {
+    fn get_id(info: &TensorDebugInfo) -> &U64 { &info.id }
+    let _ = get_id;
+}
+
+@test
+fn test_tensor_debug_info_has_shape_field() {
+    fn get_shape(info: &TensorDebugInfo) -> &List<USize> { &info.shape }
+    let _ = get_shape;
+}
+
+@test
+fn test_tensor_debug_info_has_contiguous_field() {
+    fn get_contiguous(info: &TensorDebugInfo) -> Bool { info.is_contiguous }
+    let _ = get_contiguous;
+}
+
+@test
+fn test_tensor_debug_info_has_generation_field() {
+    fn get_generation(info: &TensorDebugInfo) -> U32 { info.generation }
+    let _ = get_generation;
+}
+
+@test
+fn test_tensor_debug_info_has_ref_count_field() {
+    fn get_ref_count(info: &TensorDebugInfo) -> USize { info.ref_count }
+    let _ = get_ref_count;
+}
+
+// =============================================================================
+// Section 18: BackendCapabilities Additional Configurations
+// =============================================================================
+
+@test
+fn test_backend_capabilities_all_true() {
+    let caps = BackendCapabilities {
+        has_sse42: true,
+        has_avx: true,
+        has_avx2: true,
+        has_fma: true,
+        has_avx512f: true,
+        has_avx512bw: true,
+        has_avx512vl: true,
+        has_neon: true,
+        has_sve: true,
+        has_cuda: true,
+        cuda_compute_capability: Some((9 as USize, 0 as USize)),
+        has_metal: true,
+        metal_gpu_family: Some(9 as USize),
+    };
+    assert(caps.has_sse42);
+    assert(caps.has_avx);
+    assert(caps.has_avx2);
+    assert(caps.has_fma);
+    assert(caps.has_avx512f);
+    assert(caps.has_avx512bw);
+    assert(caps.has_avx512vl);
+    assert(caps.has_neon);
+    assert(caps.has_sve);
+    assert(caps.has_cuda);
+    assert(caps.has_metal);
+}
+
+@test
+fn test_backend_capabilities_cuda_arm_combo() {
+    let caps = BackendCapabilities {
+        has_sse42: false,
+        has_avx: false,
+        has_avx2: false,
+        has_fma: false,
+        has_avx512f: false,
+        has_avx512bw: false,
+        has_avx512vl: false,
+        has_neon: true,
+        has_sve: false,
+        has_cuda: true,
+        cuda_compute_capability: Some((8 as USize, 6 as USize)),
+        has_metal: false,
+        metal_gpu_family: None,
+    };
+    assert(caps.has_neon);
+    assert(caps.has_cuda);
+    assert(!caps.has_sse42);
+    assert(!caps.has_metal);
+}
+
+@test
+fn test_backend_capabilities_x86_no_avx512() {
+    let caps = BackendCapabilities {
+        has_sse42: true,
+        has_avx: true,
+        has_avx2: true,
+        has_fma: true,
+        has_avx512f: false,
+        has_avx512bw: false,
+        has_avx512vl: false,
+        has_neon: false,
+        has_sve: false,
+        has_cuda: false,
+        cuda_compute_capability: None,
+        has_metal: false,
+        metal_gpu_family: None,
+    };
+    assert(caps.has_sse42);
+    assert(caps.has_avx2);
+    assert(caps.has_fma);
+    assert(!caps.has_avx512f);
+    assert(!caps.has_cuda);
+}
+
+@test
+fn test_backend_capabilities_metal_only() {
+    let caps = BackendCapabilities {
+        has_sse42: false,
+        has_avx: false,
+        has_avx2: false,
+        has_fma: false,
+        has_avx512f: false,
+        has_avx512bw: false,
+        has_avx512vl: false,
+        has_neon: true,
+        has_sve: false,
+        has_cuda: false,
+        cuda_compute_capability: None,
+        has_metal: true,
+        metal_gpu_family: Some(8 as USize),
+    };
+    assert(!caps.has_cuda);
+    assert(caps.has_metal);
+    assert(caps.has_neon);
+    assert(!caps.has_avx);
+}
+
+@test
+fn test_backend_capabilities_as_param() {
+    fn accept_caps(c: &BackendCapabilities) -> Bool { true }
+    let caps = BackendCapabilities {
+        has_sse42: false,
+        has_avx: false,
+        has_avx2: false,
+        has_fma: false,
+        has_avx512f: false,
+        has_avx512bw: false,
+        has_avx512vl: false,
+        has_neon: false,
+        has_sve: false,
+        has_cuda: false,
+        cuda_compute_capability: None,
+        has_metal: false,
+        metal_gpu_family: None,
+    };
+    assert(accept_caps(&caps));
+}
+
+// =============================================================================
+// Section 19: Cross-Type Interactions
+// =============================================================================
+
+@test
+fn test_element_type_in_mlir_and_tape() {
+    // ElementType used in MLIRType
+    let mlir = MLIRType.TensorType {
+        element: ElementType.F32,
+        shape: List.from(&[16 as ISize, 32 as ISize]),
+    };
+    assert(mlir is MLIRType.TensorType);
+
+    // Same ElementType concept in TapeOp context (ops on F32 tensors)
+    let op = TapeOp.MatMul;
+    assert(op is TapeOp.MatMul);
+}
+
+@test
+fn test_tensor_id_in_tape_ops() {
+    let id1 = 100 as TensorId;
+    let id2 = 200 as TensorId;
+    let id3 = 300 as TensorId;
+
+    let custom = TapeOp.Custom {
+        name: "fused_attention",
+        saved_tensors: List.from(&[id1, id2, id3]),
+    };
+    assert(custom is TapeOp.Custom);
+
+    let bn = TapeOp.BatchNorm { running_mean: id1, running_var: id2 };
+    assert(bn is TapeOp.BatchNorm);
+}
+
+@test
+fn test_ffi_abi_as_param() {
+    fn accept_abi(a: &FFIAbi) -> Bool { true }
+    let abi = FFIAbi.C;
+    assert(accept_abi(&abi));
+}
+
+@test
+fn test_value_tag_as_param() {
+    fn accept_tag(t: &ValueTag) -> Bool { true }
+    let tag = ValueTag.TagFloat;
+    assert(accept_tag(&tag));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,228 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/windows/ntstatus_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, windows, ntstatus
+// @description: Tests for Windows NT status codes and helpers.
+//
+// Coverage:
+// - NtStatus type
+// - Status constants (STATUS_SUCCESS, STATUS_ACCESS_DENIED, etc.)
+// - Status categorization (success, info, warning, error)
+//
+// Test Strategy:
+// - Verify status code values match Windows NT definitions
+// - Test categorization functions
+//
+// Platform: Windows x86_64
+// =============================================================================
+
+@cfg(target_os = "windows")
+module test.stdlib.sys.windows.ntstatus_test;
+
+mount core.sys.windows.ntstatus.{
+    NtStatus,
+    STATUS_SUCCESS,
+    STATUS_ACCESS_DENIED,
+    STATUS_INVALID_HANDLE,
+    STATUS_NO_MEMORY,
+    STATUS_INVALID_PARAMETER,
+    STATUS_PENDING,
+    STATUS_TIMEOUT,
+    STATUS_CANCELLED,
+    STATUS_NOT_SUPPORTED,
+    STATUS_END_OF_FILE,
+    STATUS_OBJECT_NAME_NOT_FOUND,
+    STATUS_OBJECT_PATH_NOT_FOUND,
+    STATUS_INSUFFICIENT_RESOURCES,
+    STATUS_NOT_IMPLEMENTED,
+    STATUS_BUFFER_OVERFLOW,
+    STATUS_BUFFER_TOO_SMALL,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Status Success Tests
+// =============================================================================
+
+@test
+fn test_status_success() {
+    // STATUS_SUCCESS should be 0
+    assert(STATUS_SUCCESS == 0);
+
+    // Verify it's a success status
+    let status = NtStatus.from_raw(STATUS_SUCCESS);
+    assert(status.is_success());
+    assert(!status.is_error());
+    assert(!status.is_warning());
+    assert(!status.is_info());
+
+    print("Status success tests passed");
+}
+
+// =============================================================================
+// Error Status Tests
+// =============================================================================
+
+@test
+fn test_error_statuses() {
+    // Error statuses should have high bit set (0xC0000000)
+    // ACCESS_DENIED = 0xC0000022
+    assert(STATUS_ACCESS_DENIED == 0xC0000022);
+
+    // INVALID_HANDLE = 0xC0000008
+    assert(STATUS_INVALID_HANDLE == 0xC0000008);
+
+    // NO_MEMORY = 0xC0000017
+    assert(STATUS_NO_MEMORY == 0xC0000017);
+
+    // INVALID_PARAMETER = 0xC000000D
+    assert(STATUS_INVALID_PARAMETER == 0xC000000D);
+
+    // NOT_SUPPORTED = 0xC00000BB
+    assert(STATUS_NOT_SUPPORTED == 0xC00000BB);
+
+    // NOT_IMPLEMENTED = 0xC0000002
+    assert(STATUS_NOT_IMPLEMENTED == 0xC0000002);
+
+    // INSUFFICIENT_RESOURCES = 0xC000009A
+    assert(STATUS_INSUFFICIENT_RESOURCES == 0xC000009A);
+
+    // BUFFER_TOO_SMALL = 0xC0000023
+    assert(STATUS_BUFFER_TOO_SMALL == 0xC0000023);
+
+    // All should be categorized as errors
+    assert(NtStatus.from_raw(STATUS_ACCESS_DENIED).is_error());
+    assert(NtStatus.from_raw(STATUS_INVALID_HANDLE).is_error());
+    assert(NtStatus.from_raw(STATUS_NO_MEMORY).is_error());
+    assert(NtStatus.from_raw(STATUS_INVALID_PARAMETER).is_error());
+
+    print("Error status tests passed");
+}
+
+// =============================================================================
+// Info Status Tests
+// =============================================================================
+
+@test
+fn test_info_statuses() {
+    // PENDING = 0x00000103 (informational)
+    assert(STATUS_PENDING == 0x00000103);
+
+    // END_OF_FILE = 0xC0000011 (error actually)
+    // Note: END_OF_FILE is an error in NT, not info
+
+    // TIMEOUT may be warning or error depending on context
+    // STATUS_TIMEOUT = 0x00000102
+    assert(STATUS_TIMEOUT == 0x00000102);
+
+    // BUFFER_OVERFLOW = 0x80000005 (warning)
+    assert(STATUS_BUFFER_OVERFLOW == 0x80000005);
+
+    // Pending should be informational
+    let pending = NtStatus.from_raw(STATUS_PENDING);
+    assert(!pending.is_error());
+    assert(pending.is_success() || pending.is_info());
+
+    print("Info status tests passed");
+}
+
+// =============================================================================
+// NtStatus Type Tests
+// =============================================================================
+
+@test
+fn test_status_type() {
+    // Create from raw value
+    let status = NtStatus.from_raw(STATUS_SUCCESS);
+    assert(status.raw() == STATUS_SUCCESS);
+
+    // Create from error
+    let error_status = NtStatus.from_raw(STATUS_ACCESS_DENIED);
+    assert(error_status.raw() == STATUS_ACCESS_DENIED);
+
+    // Comparison
+    let status1 = NtStatus.from_raw(0);
+    let status2 = NtStatus.from_raw(0);
+    let status3 = NtStatus.from_raw(1);
+
+    assert(status1 == status2);
+    assert(status1 != status3);
+
+    print("NtStatus type tests passed");
+}
+
+// =============================================================================
+// Status Categorization Tests
+// =============================================================================
+
+@test
+fn test_status_categorization() {
+    // NTSTATUS layout:
+    // Bits 31-30: Severity (00=Success, 01=Info, 10=Warning, 11=Error)
+    // Bit 29: Customer flag
+    // Bit 28: Reserved
+    // Bits 27-16: Facility
+    // Bits 15-0: Code
+
+    // Success (severity 00)
+    let success = NtStatus.from_raw(0x00000000);
+    assert(success.is_success());
+    assert(!success.is_info());
+    assert(!success.is_warning());
+    assert(!success.is_error());
+
+    // Informational (severity 01)
+    let info = NtStatus.from_raw(0x40000000);
+    assert(!info.is_success());
+    assert(info.is_info());
+    assert(!info.is_warning());
+    assert(!info.is_error());
+
+    // Warning (severity 10)
+    let warning = NtStatus.from_raw(0x80000000);
+    assert(!warning.is_success());
+    assert(!warning.is_info());
+    assert(warning.is_warning());
+    assert(!warning.is_error());
+
+    // Error (severity 11)
+    let error = NtStatus.from_raw(0xC0000000);
+    assert(!error.is_success());
+    assert(!error.is_info());
+    assert(!error.is_warning());
+    assert(error.is_error());
+
+    print("Status categorization tests passed");
+}
+
+// =============================================================================
+// Object Status Tests
+// =============================================================================
+
+@test
+fn test_object_statuses() {
+    // Object name not found
+    assert(STATUS_OBJECT_NAME_NOT_FOUND != 0);
+
+    // Object path not found
+    assert(STATUS_OBJECT_PATH_NOT_FOUND != 0);
+
+    // Both should be errors
+    assert(NtStatus.from_raw(STATUS_OBJECT_NAME_NOT_FOUND).is_error());
+    assert(NtStatus.from_raw(STATUS_OBJECT_PATH_NOT_FOUND).is_error());
+
+    // Should be distinct
+    assert(STATUS_OBJECT_NAME_NOT_FOUND != STATUS_OBJECT_PATH_NOT_FOUND);
+
+    print("Object status tests passed");
+}

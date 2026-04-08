@@ -1,0 +1,304 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, lifetimes, borrowing, advanced, comprehensive
+// @description: Advanced lifetime analysis tests demonstrating Verum's reference safety
+
+/// Advanced Lifetime Analysis Test Suite
+///
+/// This test demonstrates Verum's sophisticated lifetime analysis that ensures:
+///
+/// 1. References never outlive their referents
+/// 2. No dangling references across scope boundaries
+/// 3. Safe reference propagation through function calls
+/// 4. Proper handling of references in control flow
+/// 5. Reference validity in nested scopes
+///
+/// Spec: 04-memory-model.md#lifetime-analysis
+
+// ============================================================================
+// TEST 1: Basic Lifetime Constraints
+// ============================================================================
+// References must not outlive the data they point to.
+
+fn test_basic_lifetime() {
+    let value = 42;
+    let reference = &value;
+
+    // Reference is valid as long as value is in scope
+    assert(*reference == 42);
+
+    // Both go out of scope together - safe
+}
+
+fn test_nested_scope_lifetime() {
+    let outer = 100;
+    let outer_ref = &outer;
+
+    {
+        let inner = 200;
+        let inner_ref = &inner;
+
+        // Both references valid here
+        assert(*outer_ref == 100);
+        assert(*inner_ref == 200);
+
+        // inner_ref goes out of scope with inner
+    }
+
+    // outer_ref still valid
+    assert(*outer_ref == 100);
+}
+
+// ============================================================================
+// TEST 2: Function Parameter Lifetimes
+// ============================================================================
+// References passed to functions must remain valid for the call duration.
+
+fn test_function_parameter_lifetime() {
+    let data = [1, 2, 3, 4, 5];
+    let result = sum_array(&data);
+
+    // data is still valid after function returns
+    assert(result == 15);
+    assert(data[0] == 1);
+}
+
+fn sum_array(arr: &[Int; 5]) -> Int {
+    arr[0] + arr[1] + arr[2] + arr[3] + arr[4]
+}
+
+fn test_multiple_reference_parameters() {
+    let a = 10;
+    let b = 20;
+
+    let result = add_refs(&a, &b);
+    assert(result == 30);
+
+    // Both a and b are still valid
+    assert(a == 10);
+    assert(b == 20);
+}
+
+fn add_refs(x: &Int, y: &Int) -> Int {
+    *x + *y
+}
+
+// ============================================================================
+// TEST 3: Reference Return Safety
+// ============================================================================
+// Functions can return references only when lifetime is provable.
+
+fn test_return_parameter_reference() {
+    let values = [10, 20, 30];
+    let first_ref = get_first(&values);
+
+    // first_ref is valid because values outlives the reference
+    assert(*first_ref == 10);
+}
+
+fn get_first(arr: &[Int; 3]) -> &Int {
+    &arr[0]
+}
+
+fn test_return_longer_lived() {
+    let a = 100;
+    let b = 200;
+
+    let max_ref = get_max(&a, &b);
+    assert(*max_ref == 200);
+}
+
+fn get_max(x: &Int, y: &Int) -> &Int {
+    if *x > *y {
+        x
+    } else {
+        y
+    }
+}
+
+// ============================================================================
+// TEST 4: Mutable Reference Lifetime
+// ============================================================================
+// Mutable references have stricter lifetime requirements.
+
+fn test_mutable_reference_lifetime() {
+    let mut value = 42;
+
+    {
+        let mut_ref = &mut value;
+        *mut_ref = 100;
+        // mut_ref goes out of scope
+    }
+
+    // value is now modified
+    assert(value == 100);
+
+    // Can borrow again
+    let new_ref = &value;
+    assert(*new_ref == 100);
+}
+
+fn test_mutable_through_function() {
+    let mut counter = 0;
+
+    increment_by(&mut counter, 5);
+    assert(counter == 5);
+
+    increment_by(&mut counter, 3);
+    assert(counter == 8);
+}
+
+fn increment_by(val: &mut Int, amount: Int) {
+    *val += amount;
+}
+
+// ============================================================================
+// TEST 5: Conditional Lifetime Handling
+// ============================================================================
+// Lifetimes must be valid on all control flow paths.
+
+fn test_conditional_borrow() {
+    let a = 10;
+    let b = 20;
+
+    let chosen: &Int;
+    if a > b {
+        chosen = &a;
+    } else {
+        chosen = &b;
+    }
+
+    // chosen is valid on both paths
+    assert(*chosen == 20);
+}
+
+fn test_loop_borrow() {
+    let data = [1, 2, 3, 4, 5];
+
+    let mut sum = 0;
+    for i in 0..5 {
+        let elem_ref = &data[i];
+        sum += *elem_ref;
+        // elem_ref goes out of scope each iteration
+    }
+
+    assert(sum == 15);
+}
+
+// ============================================================================
+// TEST 6: Struct Field References
+// ============================================================================
+// References to struct fields have the same lifetime as the struct.
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+fn test_struct_field_reference() {
+    let point = Point { x: 10, y: 20 };
+
+    let x_ref = &point.x;
+    let y_ref = &point.y;
+
+    assert(*x_ref == 10);
+    assert(*y_ref == 20);
+
+    // Both references valid as long as point is in scope
+}
+
+fn test_mutable_struct_field() {
+    let mut point = Point { x: 0, y: 0 };
+
+    // Modify fields through references
+    {
+        let x_ref = &mut point.x;
+        *x_ref = 100;
+    }
+
+    {
+        let y_ref = &mut point.y;
+        *y_ref = 200;
+    }
+
+    assert(point.x == 100);
+    assert(point.y == 200);
+}
+
+// ============================================================================
+// TEST 7: Complex Reference Patterns
+// ============================================================================
+// Advanced patterns that combine multiple lifetime concepts.
+
+fn test_reference_chain() {
+    let value = 42;
+    let ref1 = &value;
+    let ref2 = ref1;  // Copy the reference (not reborrow)
+
+    // Both references point to same value
+    assert(*ref1 == 42);
+    assert(*ref2 == 42);
+}
+
+fn test_nested_function_references() {
+    let data = [1, 2, 3];
+
+    // Pass through multiple functions
+    let result = outer_process(&data);
+    assert(result == 2);
+}
+
+fn outer_process(arr: &[Int; 3]) -> Int {
+    inner_process(arr)
+}
+
+fn inner_process(arr: &[Int; 3]) -> Int {
+    arr[1]
+}
+
+fn test_reference_in_tuple() {
+    let a = 10;
+    let b = 20;
+
+    // Tuple of references
+    let refs = (&a, &b);
+
+    assert(*refs.0 == 10);
+    assert(*refs.1 == 20);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Basic lifetime tests
+    test_basic_lifetime();
+    test_nested_scope_lifetime();
+
+    // Function parameter tests
+    test_function_parameter_lifetime();
+    test_multiple_reference_parameters();
+
+    // Return reference tests
+    test_return_parameter_reference();
+    test_return_longer_lived();
+
+    // Mutable reference tests
+    test_mutable_reference_lifetime();
+    test_mutable_through_function();
+
+    // Conditional tests
+    test_conditional_borrow();
+    test_loop_borrow();
+
+    // Struct field tests
+    test_struct_field_reference();
+    test_mutable_struct_field();
+
+    // Complex pattern tests
+    test_reference_chain();
+    test_nested_function_references();
+    test_reference_in_tuple();
+}

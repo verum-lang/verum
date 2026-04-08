@@ -1,0 +1,189 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, encoding, hex
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Hex encoding/decoding — encode bytes to hex digit pairs, decode back, round-trip
+
+// ============================================================================
+// Arr8: Fixed-size array of 8 Ints with length
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn arr_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn arr_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        len: a.len
+    }
+}
+
+fn arr_push(a: Arr8, val: Int) -> Arr8 {
+    let idx = a.len;
+    let updated = arr_set(a, idx, val);
+    Arr8 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        len: idx + 1
+    }
+}
+
+// ============================================================================
+// Hex encoding: each byte (0-255) -> two hex digits (0-15 each)
+// ============================================================================
+
+// Extract high nibble (upper 4 bits)
+fn high_nibble(byte_val: Int) -> Int {
+    byte_val / 16
+}
+
+// Extract low nibble (lower 4 bits)
+fn low_nibble(byte_val: Int) -> Int {
+    byte_val - (byte_val / 16) * 16
+}
+
+// Encode array of bytes to array of hex digit values
+// Input: up to 4 bytes, Output: up to 8 hex digits
+fn hex_encode(input: Arr8) -> Arr8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < input.len {
+        let byte_val = arr_get(input, i);
+        let hi = high_nibble(byte_val);
+        let lo = low_nibble(byte_val);
+        result = arr_push(result, hi);
+        result = arr_push(result, lo);
+        i = i + 1;
+    }
+    result
+}
+
+// Decode array of hex digits back to bytes
+// Input: pairs of hex digits, Output: bytes
+fn hex_decode(encoded: Arr8) -> Arr8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < encoded.len {
+        let hi = arr_get(encoded, i);
+        let lo = arr_get(encoded, i + 1);
+        let byte_val = hi * 16 + lo;
+        result = arr_push(result, byte_val);
+        i = i + 2;
+    }
+    result
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_nibble_extraction() -> Int {
+    // 0xAB = 171: high nibble = 10 (A), low nibble = 11 (B)
+    assert_eq(high_nibble(171), 10);
+    assert_eq(low_nibble(171), 11);
+    // 0xFF = 255: high = 15, low = 15
+    assert_eq(high_nibble(255), 15);
+    assert_eq(low_nibble(255), 15);
+    // 0x00 = 0: high = 0, low = 0
+    assert_eq(high_nibble(0), 0);
+    assert_eq(low_nibble(0), 0);
+    // 0x1F = 31: high = 1, low = 15
+    assert_eq(high_nibble(31), 1);
+    assert_eq(low_nibble(31), 15);
+    0
+}
+
+@test
+fn test_encode_ab_cd() -> Int {
+    // Encode [0xAB, 0xCD] = [171, 205] -> [10, 11, 12, 13]
+    let mut input = arr_new();
+    input = arr_push(input, 171);  // 0xAB
+    input = arr_push(input, 205);  // 0xCD
+    let encoded = hex_encode(input);
+    assert_eq(encoded.len, 4);
+    assert_eq(arr_get(encoded, 0), 10);  // A
+    assert_eq(arr_get(encoded, 1), 11);  // B
+    assert_eq(arr_get(encoded, 2), 12);  // C
+    assert_eq(arr_get(encoded, 3), 13);  // D
+    0
+}
+
+@test
+fn test_encode_zeros() -> Int {
+    // Encode [0, 0] -> [0, 0, 0, 0]
+    let mut input = arr_new();
+    input = arr_push(input, 0);
+    input = arr_push(input, 0);
+    let encoded = hex_encode(input);
+    assert_eq(encoded.len, 4);
+    assert_eq(arr_get(encoded, 0), 0);
+    assert_eq(arr_get(encoded, 1), 0);
+    assert_eq(arr_get(encoded, 2), 0);
+    assert_eq(arr_get(encoded, 3), 0);
+    0
+}
+
+@test
+fn test_decode() -> Int {
+    // Decode [10, 11, 12, 13] -> [171, 205]
+    let mut encoded = arr_new();
+    encoded = arr_push(encoded, 10);
+    encoded = arr_push(encoded, 11);
+    encoded = arr_push(encoded, 12);
+    encoded = arr_push(encoded, 13);
+    let decoded = hex_decode(encoded);
+    assert_eq(decoded.len, 2);
+    assert_eq(arr_get(decoded, 0), 171);  // 0xAB
+    assert_eq(arr_get(decoded, 1), 205);  // 0xCD
+    0
+}
+
+@test
+fn test_round_trip() -> Int {
+    // Encode then decode should give back original
+    let mut input = arr_new();
+    input = arr_push(input, 255);  // 0xFF
+    input = arr_push(input, 128);  // 0x80
+    input = arr_push(input, 42);   // 0x2A
+    let encoded = hex_encode(input);
+    assert_eq(encoded.len, 6);
+    let decoded = hex_decode(encoded);
+    assert_eq(decoded.len, 3);
+    assert_eq(arr_get(decoded, 0), 255);
+    assert_eq(arr_get(decoded, 1), 128);
+    assert_eq(arr_get(decoded, 2), 42);
+    0
+}
+
+fn main() -> Int {
+    test_nibble_extraction();
+    test_encode_ab_cd();
+    test_encode_zeros();
+    test_decode();
+    test_round_trip();
+    print("[OK] 127_encoding");
+    0
+}

@@ -1,0 +1,104 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, lists, dynamic, for-in
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Stack behavior (push/pop from end)
+    let mut stack: List<Int> = [];
+    stack.push(10);
+    stack.push(20);
+    stack.push(30);
+
+    let mut total = 0;
+    while (stack.len() > 0) {
+        let idx = stack.len() - 1;
+        let val = stack[idx];
+        stack.remove(idx);
+        total = total + val;
+    }
+    if (total != 60) {
+        print(f"FAIL stack: total={total}");
+        return 1;
+    }
+
+    // Test 2: Queue behavior (push back, pop front)
+    let mut queue: List<Int> = [];
+    queue.push(1);
+    queue.push(2);
+    queue.push(3);
+
+    let first = queue[0];
+    queue.remove(0);
+    if (first != 1) {
+        print(f"FAIL queue first: {first}");
+        return 1;
+    }
+    if (queue.len() != 2) {
+        print(f"FAIL queue len: {queue.len()}");
+        return 1;
+    }
+    if (queue[0] != 2) {
+        print(f"FAIL queue[0]: {queue[0]}");
+        return 1;
+    }
+
+    // Test 3: Dynamic grow to 100 elements + for-in sum
+    let mut arr: List<Int> = [];
+    let mut i = 0;
+    while (i < 100) {
+        arr.push(i * i);
+        i = i + 1;
+    }
+    if (arr.len() != 100) {
+        print(f"FAIL grow len: {arr.len()}");
+        return 1;
+    }
+    if (arr[99] != 9801) {
+        print(f"FAIL grow[99]: {arr[99]}");
+        return 1;
+    }
+
+    let mut sum2 = 0;
+    for v in arr {
+        sum2 = sum2 + v;
+    }
+    // sum of i^2 for i=0..99 = 99*100*199/6 = 328350
+    if (sum2 != 328350) {
+        print(f"FAIL sum squares: {sum2}");
+        return 1;
+    }
+
+    // Test 4: Break in for-in list
+    let items = [10, 20, 30, 40, 50];
+    let mut found = 0;
+    for item in items {
+        if (item == 30) {
+            found = item;
+            break;
+        }
+    }
+    if (found != 30) {
+        print(f"FAIL break: found={found}");
+        return 1;
+    }
+
+    // Test 5: Continue in for-in list
+    let mut odd_sum = 0;
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    for n in data {
+        if (n % 2 == 0) {
+            continue;
+        }
+        odd_sum = odd_sum + n;
+    }
+    // 1+3+5+7+9 = 25
+    if (odd_sum != 25) {
+        print(f"FAIL continue: odd_sum={odd_sum}");
+        return 1;
+    }
+
+    print("923_dynamic_list_ops: PASS");
+    0
+}

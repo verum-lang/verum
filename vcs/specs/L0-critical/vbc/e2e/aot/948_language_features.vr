@@ -1,0 +1,82 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: comprehensive, variants, protocols, closures, generics, collections
+// Exercises all major Verum language features in AOT
+
+type Vec2 is { x: Int, y: Int };
+type Describable is protocol { fn describe(&self) -> Text; };
+implement Vec2 { fn new(x: Int, y: Int) -> Vec2 { Vec2 { x: x, y: y } } }
+implement Describable for Vec2 { fn describe(&self) -> Text { f"Vec2({self.x}, {self.y})" } }
+
+type Result<T, E> is Ok(T) | Err(E);
+fn div(a: Int, b: Int) -> Result<Int, Text> { if (b == 0) { Err("zero") } else { Ok(a / b) } }
+fn chain_div(a: Int, b: Int, c: Int) -> Result<Int, Text> { let r1 = div(a, b)?; Ok(div(r1, c)?) }
+
+fn map_list(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = [];
+    for item in items { result.push(f(item)); }
+    result
+}
+fn fold_list(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    for item in items { acc = f(acc, item); }
+    acc
+}
+
+type Color is Red | Green | Blue | Rgb(Int, Int, Int);
+type Expr is Num(Int) | Add(Heap<Expr>, Heap<Expr>) | Mul(Heap<Expr>, Heap<Expr>);
+@allow(unbounded_recursion)
+fn eval(e: Expr) -> Int { match e { Num(n) => n, Add(l, r) => eval(*l) + eval(*r), Mul(l, r) => eval(*l) * eval(*r) } }
+fn make_adder(n: Int) -> fn(Int) -> Int { |x| x + n }
+
+fn main() -> Int {
+    // 1. Variants + match
+    let c = Rgb(255, 128, 0);
+    let val = match c { Red => 1, Green => 2, Blue => 3, Rgb(r, g, b) => r + g + b };
+    if (val != 383) { return 1; }
+
+    // 2. Struct + impl + protocol
+    let a = Vec2.new(3, 4);
+    let b = Vec2.new(1, 2);
+    if (a.describe() != "Vec2(3, 4)") { return 1; }
+
+    // 3. Map/Fold with closures
+    let nums = [1, 2, 3, 4, 5];
+    let doubled = map_list(nums, |x: Int| -> Int { x * 2 });
+    let total = fold_list(doubled, 0, |a: Int, b: Int| -> Int { a + b });
+    if (total != 30) { return 1; }
+
+    // 4. Closure factory
+    let add10 = make_adder(10);
+    if (add10(5) != 15) { return 1; }
+
+    // 5. Mutable capture in loop
+    let mut acc = 0;
+    let mut i = 0;
+    while (i < 5) { let f = |x: Int| -> Int { x + i }; acc = acc + f(0); i = i + 1; }
+    if (acc != 10) { return 1; }
+
+    // 6. Recursive expression evaluator
+    let expr = Mul(Heap(Add(Heap(Num(2)), Heap(Num(3)))), Heap(Num(4)));
+    if (eval(expr) != 20) { return 1; }
+
+    // 7. Error handling with ?
+    let ok_result = chain_div(100, 5, 2);
+    match ok_result { Ok(v) => { if (v != 10) { return 1; } } Err(e) => { return 1; } }
+    let err_result = chain_div(100, 0, 2);
+    match err_result { Ok(v) => { return 1; } Err(e) => {} }
+
+    // 8. Collections
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    if (m.len() != 2) { return 1; }
+
+    // 9. String operations
+    let s = "Hello" + ", " + "World!";
+    if (s.len() != 13) { return 1; }
+
+    print("948_language_features: PASS");
+    0
+}

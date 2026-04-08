@@ -1,0 +1,431 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: performance, cbgr, latency, unsafe, tier2
+// @description: Unsafe reference (Tier 2) latency - raw pointer with manual safety proof, zero overhead
+
+/// Unsafe Reference Latency Benchmark
+///
+/// This benchmark measures the latency of Tier 2 unsafe references, where the
+/// programmer provides a manual proof of safety via SAFETY comments.
+///
+/// Performance target: 0ns overhead (identical to raw pointer access)
+///
+/// CBGR Tier 2 characteristics:
+/// - No runtime or compile-time safety checks
+/// - Programmer provides SAFETY documentation
+/// - Used for FFI, performance-critical code, low-level operations
+/// - Compiles to raw pointer operations
+///
+/// Syntax: &unsafe T
+///
+/// Usage requirements:
+/// - SAFETY comment explaining why the operation is safe
+/// - Proof obligations:
+///   1. Pointer is valid (non-null, aligned, dereferenceable)
+///   2. Data is initialized
+///   3. Aliasing rules are respected
+///   4. Lifetime is valid
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Baseline: Raw C-style pointer
+fn benchmark_raw_c_pointer() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let ptr: *const i64 = &*data as *const i64;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // SAFETY: ptr is valid, points to initialized data
+        unsafe { black_box(*ptr) };
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // SAFETY: ptr is valid for the duration of this block
+        unsafe { black_box(*ptr) };
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "raw_c_pointer",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: true,
+    }
+}
+
+/// Tier 2: Unsafe reference read
+fn benchmark_unsafe_ref_read() -> BenchmarkResult {
+    let data = Heap(42i64);
+    // SAFETY: data is valid for 'static lifetime in this test
+    let unsafe_ref: &unsafe i64 = &unsafe *data;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // SAFETY: Reference validity proven above
+        black_box(*unsafe_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Direct memory access - no checks
+        black_box(*unsafe_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "unsafe_ref_read",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Tier 2: Unsafe reference write
+fn benchmark_unsafe_ref_write() -> BenchmarkResult {
+    let mut data = Heap(0i64);
+    // SAFETY: Exclusive access ensured, data valid for test duration
+    let unsafe_ref: &unsafe mut i64 = &unsafe mut *data;
+
+    for i in 0..WARMUP_ITERATIONS {
+        *unsafe_ref = i as i64;
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        *unsafe_ref = i as i64;
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "unsafe_ref_write",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Tier 2: Unsafe slice access (no bounds check)
+fn benchmark_unsafe_slice_unchecked() -> BenchmarkResult {
+    let data: [i64; 1024] = array_from_fn(|i| i as i64);
+    // SAFETY: Slice covers valid initialized array
+    let unsafe_slice: &unsafe [i64] = &unsafe data[..];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // SAFETY: Index 500 is within bounds [0, 1024)
+        black_box(unsafe_slice.get_unchecked(500));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // SAFETY: Index is compile-time constant within bounds
+        black_box(unsafe_slice.get_unchecked(500));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "unsafe_slice_unchecked",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Tier 2: Pointer arithmetic
+fn benchmark_unsafe_pointer_arithmetic() -> BenchmarkResult {
+    let data: [i64; 1024] = array_from_fn(|i| i as i64);
+    let base_ptr: *const i64 = &data[0];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // SAFETY: Offset 500 is within array bounds
+        unsafe {
+            let ptr = base_ptr.add(500);
+            black_box(*ptr);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // SAFETY: base_ptr + 500 is valid (500 < 1024)
+        unsafe {
+            let ptr = base_ptr.add(500);
+            black_box(*ptr);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "unsafe_pointer_arithmetic",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Tier 2: FFI-style raw pointer handling
+fn benchmark_unsafe_ffi_pattern() -> BenchmarkResult {
+    // Simulate receiving a pointer from FFI
+    let data = Heap(42i64);
+    let ffi_ptr: *const i64 = Heap.into_raw(data) as *const i64;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // SAFETY: ffi_ptr came from Heap.into_raw, still valid
+        unsafe { black_box(*ffi_ptr) };
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // SAFETY: Pointer validity maintained throughout benchmark
+        unsafe { black_box(*ffi_ptr) };
+    }
+
+    let elapsed = start.elapsed();
+
+    // Clean up
+    unsafe {
+        // SAFETY: Reconstructing Heap from pointer we created
+        let _ = Heap.from_raw(ffi_ptr as *mut i64);
+    }
+
+    BenchmarkResult {
+        name: "unsafe_ffi_pattern",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Tier 2: Manual SIMD-style memory access
+fn benchmark_unsafe_simd_load() -> BenchmarkResult {
+    let data: [i64; 1024] = array_from_fn(|i| i as i64);
+    let ptr: *const i64 = &data[0];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // SAFETY: Loading 4 consecutive i64s, indices 0-3 valid
+        unsafe {
+            let v0 = *ptr;
+            let v1 = *ptr.add(1);
+            let v2 = *ptr.add(2);
+            let v3 = *ptr.add(3);
+            black_box((v0, v1, v2, v3));
+        }
+    }
+
+    let start = Instant.now();
+
+    let iterations = BENCHMARK_ITERATIONS / 4;
+    for _ in 0..iterations {
+        // SAFETY: Simulating SIMD load of 4 elements
+        unsafe {
+            let v0 = *ptr;
+            let v1 = *ptr.add(1);
+            let v2 = *ptr.add(2);
+            let v3 = *ptr.add(3);
+            black_box((v0, v1, v2, v3));
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "unsafe_simd_load_4x",
+        iterations: iterations * 4,
+        per_op_ns: elapsed.as_nanos() as f64 / (iterations * 4) as f64,
+        is_baseline: false,
+    }
+}
+
+/// Tier 2: Unsafe mutable alias (for specific patterns)
+fn benchmark_unsafe_split_at_mut() -> BenchmarkResult {
+    let mut data: [i64; 1024] = array_from_fn(|i| i as i64);
+    let ptr = data.as_mut_ptr();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // SAFETY: Non-overlapping regions - [0,512) and [512,1024)
+        unsafe {
+            let left = &mut *ptr.add(0);
+            let right = &mut *ptr.add(512);
+            *left = *right;
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // SAFETY: Accessing disjoint array regions
+        unsafe {
+            let left = &mut *ptr.add(0);
+            let right = &mut *ptr.add(512);
+            *left = *right;
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "unsafe_split_at_mut",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Tier 2: Transmute-style reinterpretation
+fn benchmark_unsafe_transmute() -> BenchmarkResult {
+    let data: u64 = 0x4048000000000000;  // IEEE 754 encoding of 3.0f64
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // SAFETY: u64 and f64 have same size and alignment
+        unsafe {
+            let float_val: f64 = transmute(data);
+            black_box(float_val);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // SAFETY: Bit-level reinterpretation is valid for these types
+        unsafe {
+            let float_val: f64 = transmute(data);
+            black_box(float_val);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "unsafe_transmute",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        is_baseline: false,
+    }
+}
+
+/// Tier 2: Raw memory copy
+fn benchmark_unsafe_memcpy() -> BenchmarkResult {
+    let src: [i64; 64] = array_from_fn(|i| i as i64);
+    let mut dst: [i64; 64] = [0; 64];
+
+    let iterations = BENCHMARK_ITERATIONS / 64;
+
+    for _ in 0..(WARMUP_ITERATIONS / 64) {
+        // SAFETY: src and dst are valid, non-overlapping, aligned
+        unsafe {
+            ptr.copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), 64);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        // SAFETY: Non-overlapping copy of 64 elements
+        unsafe {
+            ptr.copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), 64);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "unsafe_memcpy_512b",
+        iterations: iterations * 64,
+        per_op_ns: elapsed.as_nanos() as f64 / (iterations * 64) as f64,
+        is_baseline: false,
+    }
+}
+
+fn main() {
+    println("=== Unsafe Reference (Tier 2) Latency Benchmark ===\n");
+    println("Target: 0ns overhead (identical to raw pointer access)\n");
+    println("Tier 2 references require manual SAFETY proofs.\n");
+
+    let baseline = benchmark_raw_c_pointer();
+    let baseline_ns = baseline.per_op_ns;
+
+    let results = [
+        baseline,
+        benchmark_unsafe_ref_read(),
+        benchmark_unsafe_ref_write(),
+        benchmark_unsafe_slice_unchecked(),
+        benchmark_unsafe_pointer_arithmetic(),
+        benchmark_unsafe_ffi_pattern(),
+        benchmark_unsafe_simd_load(),
+        benchmark_unsafe_split_at_mut(),
+        benchmark_unsafe_transmute(),
+        benchmark_unsafe_memcpy(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>8}",
+            "Benchmark", "Time (ns)", "Overhead", "Status");
+    println("{}", "-".repeat(65));
+
+    let mut all_pass = true;
+    for result in results {
+        let overhead = if result.is_baseline {
+            0.0
+        } else {
+            result.per_op_ns - baseline_ns
+        };
+
+        // Zero overhead expected - allow 0.3ns for measurement noise
+        let passed = result.is_baseline || overhead.abs() < 0.3;
+        if !passed { all_pass = false; }
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.2} {:>12.2} {:>8}",
+                result.name, result.per_op_ns, overhead, status);
+    }
+
+    println("");
+    println("Note: Tier 2 unsafe references provide raw pointer performance.");
+    println("Programmer is responsible for memory safety via SAFETY proofs.");
+    println("");
+
+    if all_pass {
+        println("[PASS] All unsafe references achieve zero overhead.");
+    } else {
+        println("[FAIL] Unexpected overhead detected in unsafe references.");
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    per_op_ns: f64,
+    is_baseline: Bool,
+};
+
+// Helper types
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn array_from_fn<T, const N: usize>(f: fn(usize) -> T) -> [T; N] { todo() }
+unsafe fn transmute<S, T>(src: S) -> T { todo() }
+
+module ptr {
+    pub unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {}
+}

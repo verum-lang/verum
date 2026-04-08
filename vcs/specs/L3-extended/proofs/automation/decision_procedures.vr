@@ -1,0 +1,344 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, automation, decision-procedures
+// @timeout: 25000
+// @description: Tests decision procedures for decidable theories
+
+/// ============================================================
+/// DECISION PROCEDURES
+/// ============================================================
+///
+/// Decision procedures are algorithms that can determine the
+/// truth value of any formula in a specific theory. They are
+/// complete and always terminate.
+
+// ------------------------------------------------------------
+// Propositional Logic (SAT)
+// ------------------------------------------------------------
+
+/// SAT solver for propositional formulas
+theorem decide_prop_simple(p: Bool, q: Bool, r: Bool):
+    ((p || q) && (!p || r) && (!q || r)) implies r
+{
+    proof by decide
+}
+
+/// De Morgan laws are decidable
+theorem decide_demorgan(p: Bool, q: Bool):
+    !(p && q) == (!p || !q)
+{
+    proof by decide
+}
+
+/// Tautology checking
+theorem decide_tautology(p: Bool, q: Bool):
+    (p implies q) implies (!q implies !p)
+{
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Presburger Arithmetic (PA)
+// ------------------------------------------------------------
+
+/// Linear integer arithmetic is decidable
+theorem decide_presburger_1(x: Int, y: Int, z: Int)
+    requires 2*x + 3*y == z
+    requires x >= 0
+    requires y >= 0
+    requires z <= 20
+    ensures x <= 10
+{
+    proof by decide
+}
+
+/// Divisibility in Presburger
+theorem decide_presburger_div(n: Int)
+    requires n % 6 == 0
+    ensures n % 2 == 0 && n % 3 == 0
+{
+    proof by decide
+}
+
+/// Bounded quantifiers in Presburger
+theorem decide_presburger_bounded(n: Nat)
+    requires n >= 10
+    ensures exists m: Nat. m > 5 && m < n
+{
+    proof by decide
+}
+
+/// Chinese Remainder Theorem verification
+theorem decide_crt(x: Int)
+    requires x % 3 == 2
+    requires x % 5 == 3
+    requires 0 <= x && x < 15
+    ensures x == 8
+{
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Linear Real Arithmetic (LRA)
+// ------------------------------------------------------------
+
+/// Real linear arithmetic
+theorem decide_lra_basic(x: Real, y: Real)
+    requires x + y > 0
+    requires x - y > 0
+    ensures x > 0
+{
+    proof by decide
+}
+
+/// Farkas lemma application
+theorem decide_lra_farkas(x: Real, y: Real)
+    requires x + 2*y >= 1
+    requires 2*x + y >= 1
+    ensures x + y >= 2/3
+{
+    proof by decide
+}
+
+/// Strict vs non-strict inequalities
+theorem decide_lra_strict(x: Real, y: Real)
+    requires x > y
+    ensures x >= y
+{
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Bit-Vector Arithmetic (BV)
+// ------------------------------------------------------------
+
+/// Fixed-width integer arithmetic
+theorem decide_bv_arith(x: u32, y: u32)
+    requires x < 1000
+    requires y < 1000
+    ensures x + y < 2000
+{
+    proof by decide
+}
+
+/// Bit manipulation
+theorem decide_bv_bits(x: u32):
+    (x & (x - 1)) == 0 implies (x == 0 || is_power_of_two(x))
+{
+    proof by decide
+}
+
+/// Overflow detection
+theorem decide_bv_overflow(x: u8, y: u8)
+    requires x + y < 256
+    ensures true
+{
+    proof by decide
+}
+
+/// Two's complement
+theorem decide_twos_complement(x: i32):
+    -x == (!x) + 1
+{
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Theory of Arrays
+// ------------------------------------------------------------
+
+/// Read-over-write same index
+theorem decide_array_row<T>(arr: Array<T>, i: Index, v: T):
+    arr.set(i, v).get(i) == v
+{
+    proof by decide
+}
+
+/// Read-over-write different index
+theorem decide_array_rod<T>(arr: Array<T>, i: Index, j: Index, v: T)
+    requires i != j
+    ensures arr.set(i, v).get(j) == arr.get(j)
+{
+    proof by decide
+}
+
+/// Array extensionality
+theorem decide_array_ext<T>(arr1: Array<T>, arr2: Array<T>)
+    requires forall i: Index. arr1.get(i) == arr2.get(i)
+    ensures arr1 == arr2
+{
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Theory of Uninterpreted Functions
+// ------------------------------------------------------------
+
+/// Function congruence
+theorem decide_uf_congr<A, B>(f: fn(A) -> B, x: A, y: A)
+    requires x == y
+    ensures f(x) == f(y)
+{
+    proof by decide
+}
+
+/// Equality chains with functions
+theorem decide_uf_chain<T>(f: fn(T) -> T, a: T, b: T, c: T)
+    requires f(a) == f(b)
+    requires f(b) == f(c)
+    ensures f(a) == f(c)
+{
+    proof by decide
+}
+
+/// Ackermann reduction
+theorem decide_uf_ackermann<T>(f: fn(T) -> T, g: fn(T) -> T, x: T, y: T)
+    requires x == y
+    requires f(x) == g(x)
+    ensures f(y) == g(y)
+{
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Combined Theories
+// ------------------------------------------------------------
+
+/// LIA + Arrays
+theorem decide_combined_lia_arr(arr: Array<Int>, i: Nat, j: Nat)
+    requires i < len(arr)
+    requires j < len(arr)
+    requires i + 1 == j
+    requires arr.get(i) + 1 == arr.get(j)
+    ensures arr.get(j) > arr.get(i)
+{
+    proof by decide
+}
+
+/// BV + UF
+theorem decide_combined_bv_uf(f: fn(u32) -> u32, x: u32)
+    requires f(x) == x << 1
+    ensures f(x) & 1 == 0
+{
+    proof by decide
+}
+
+/// LRA + UF
+theorem decide_combined_lra_uf(f: fn(Real) -> Real, x: Real)
+    requires f(x) > 0
+    requires f(x) < 1
+    ensures 0 < f(x) && f(x) < 1
+{
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Decidability Boundaries
+// ------------------------------------------------------------
+
+/// Single variable polynomial (decidable via CAD)
+theorem decide_poly_single(x: Real)
+    requires x * x - 2 * x + 1 >= 0
+    ensures true
+{
+    proof by decide
+}
+
+/// Two variable system (decidable via CAD)
+theorem decide_poly_two(x: Real, y: Real)
+    requires x * x + y * y <= 1
+    ensures -1 <= x && x <= 1 && -1 <= y && y <= 1
+{
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Decision Procedure Configuration
+// ------------------------------------------------------------
+
+/// Timeout configuration
+theorem decide_with_timeout(complex: Bool)
+    requires complex
+    ensures complex
+{
+    proof by decide
+}
+
+/// Memory limits
+theorem decide_with_memory(x: Int, y: Int)
+    requires x + y > 0
+    ensures x > -y
+{
+    proof by decide
+}
+
+/// Incremental mode
+theorem decide_incremental(a: Int, b: Int, c: Int)
+    requires a < b
+    requires b < c
+    ensures a < c
+{
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Decision Procedure Results
+// ------------------------------------------------------------
+
+/// Model and Proof types for decision results
+type Model is { data: Map<Text, Int> };
+type Proof<P> is { verified: Bool };
+
+/// SAT result type
+type SatResult<P> is
+    | Sat(Model)
+    | Unsat(Proof<P>)
+    | Unknown;
+
+/// External decision function
+fn decide_sat<P: Prop>() -> SatResult<P>;
+
+/// SAT result with model
+fn check_sat_with_model<P: Prop>() -> SatResult<P> {
+    match decide_sat() {
+        Sat(model) => SatResult.Sat(model),
+        Unsat(proof) => SatResult.Unsat(proof),
+        Unknown => SatResult.Unknown,
+    }
+}
+
+// ------------------------------------------------------------
+// Decidability Protocol
+// ------------------------------------------------------------
+
+/// Decidable type class
+type Decidable is protocol {
+    fn decide(self) -> Bool;
+};
+
+/// Use decidability in proofs
+theorem use_decidable<P: Decidable>(p: P): P || !P {
+    proof by decide
+}
+
+// ------------------------------------------------------------
+// Completeness Guarantees
+// ------------------------------------------------------------
+
+/// Decision procedure is complete for its theory
+theorem completeness_guarantee(formula: Bool):
+    decide_bool(formula) == true || decide_bool(formula) == false
+{
+    proof by decide
+}
+
+/// Theory boundary - non-linear arithmetic
+theorem theory_boundary(x: Int, y: Int)
+    requires x * y == 6
+    requires x > 0
+    requires y > 0
+    ensures (x == 1 && y == 6) || (x == 2 && y == 3) || (x == 3 && y == 2) || (x == 6 && y == 1)
+{
+    proof by decide
+}

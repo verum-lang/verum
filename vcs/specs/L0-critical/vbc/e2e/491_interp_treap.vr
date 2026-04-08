@@ -1,0 +1,239 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, treap, bst, heap, randomized_trees
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Treap (tree + heap) property validation using an array-based representation.
+//
+// A treap combines a BST on keys with a min-heap on priorities.
+// Each node i has:
+//   key[i]      = integer BST key
+//   prio[i]     = integer priority (min-heap: parent.prio <= child.prio)
+//   left[i]     = left child index (-1 = NIL)
+//   right[i]    = right child index (-1 = NIL)
+//   parent[i]   = parent index (-1 = root's parent)
+//
+// Properties validated:
+//   1. BST property on keys.
+//   2. Min-heap property on priorities.
+//   3. In-order traversal yields sorted keys.
+//   4. Rotations preserve both invariants.
+
+// --- BST check: all keys in subtree are in (min_key, max_key) ---
+@allow(unbounded_recursion)
+fn treap_bst_ok(
+    key:     [Int; 32],
+    left:    [Int; 32],
+    right:   [Int; 32],
+    i:       Int,
+    min_key: Int,
+    max_key: Int
+) -> Int {
+    if i < 0 { return 1; }
+    if key[i] <= min_key || key[i] >= max_key { return 0; }
+    if treap_bst_ok(key, left, right, left[i],  min_key, key[i])  == 0 { return 0; }
+    if treap_bst_ok(key, left, right, right[i], key[i],  max_key) == 0 { return 0; }
+    1
+}
+
+// --- Min-heap check: parent priority <= children priorities ---
+@allow(unbounded_recursion)
+fn treap_heap_ok(
+    prio:   [Int; 32],
+    left:   [Int; 32],
+    right:  [Int; 32],
+    i:      Int
+) -> Int {
+    if i < 0 { return 1; }
+    if left[i] >= 0 && prio[left[i]]  < prio[i] { return 0; }
+    if right[i] >= 0 && prio[right[i]] < prio[i] { return 0; }
+    if treap_heap_ok(prio, left, right, left[i])  == 0 { return 0; }
+    if treap_heap_ok(prio, left, right, right[i]) == 0 { return 0; }
+    1
+}
+
+// --- In-order traversal into out[], returns count of nodes visited ---
+@allow(unbounded_recursion)
+fn treap_inorder(
+    key:   [Int; 32],
+    left:  [Int; 32],
+    right: [Int; 32],
+    i:     Int,
+    out:   [Int; 32],
+    pos:   [Int; 1]
+) {
+    if i < 0 { return; }
+    treap_inorder(key, left, right, left[i],  out, pos);
+    out[pos[0]] = key[i];
+    pos[0] = pos[0] + 1;
+    treap_inorder(key, left, right, right[i], out, pos);
+}
+
+// --- Count nodes in subtree ---
+@allow(unbounded_recursion)
+fn treap_count(
+    left:  [Int; 32],
+    right: [Int; 32],
+    i:     Int
+) -> Int {
+    if i < 0 { return 0; }
+    1 + treap_count(left, right, left[i]) + treap_count(left, right, right[i])
+}
+
+fn test_treap_valid() {
+    // Build a valid treap (1-indexed, node 0 unused):
+    //   Node 1: key=10, prio=1  (root, min priority)
+    //   Node 2: key=5,  prio=3
+    //   Node 3: key=15, prio=2
+    //   Node 4: key=3,  prio=5
+    //   Node 5: key=7,  prio=4
+    //   Node 6: key=12, prio=6
+    //   Node 7: key=20, prio=7
+    //
+    // Tree structure:
+    //          10(prio=1)
+    //         /          \
+    //      5(prio=3)    15(prio=2)
+    //      /    \       /       \
+    //   3(5)  7(4)  12(6)    20(7)
+    let mut key  = [0, 10,  5, 15,  3,  7, 12, 20,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut prio = [0,  1,  3,  2,  5,  4,  6,  7,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut lft  = [0-1, 2, 4, 6, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+    let mut rgt  = [0-1, 3, 5, 7, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+
+    // BST property
+    assert_eq(treap_bst_ok(key, lft, rgt, 1, 0 - 1000000, 1000000), 1);
+    // Min-heap property
+    assert_eq(treap_heap_ok(prio, lft, rgt, 1), 1);
+    // 7 nodes
+    assert_eq(treap_count(lft, rgt, 1), 7);
+
+    // In-order should give sorted keys: 3,5,7,10,12,15,20
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos = [0];
+    treap_inorder(key, lft, rgt, 1, out, pos);
+    assert_eq(pos[0], 7);
+    assert_eq(out[0], 3);
+    assert_eq(out[1], 5);
+    assert_eq(out[2], 7);
+    assert_eq(out[3], 10);
+    assert_eq(out[4], 12);
+    assert_eq(out[5], 15);
+    assert_eq(out[6], 20);
+
+    print("treap_valid: ok");
+}
+
+fn test_treap_heap_violation() {
+    // Violate heap: set prio of node 3 (key=15, prio=2) to 0 (less than root prio=1)
+    // Actually: root has prio=1, so to violate we give a child lower priority than parent.
+    // Node 3 is right child of node 1. Set prio[3]=0 < prio[1]=1 -> violation.
+    let mut key  = [0, 10,  5, 15,  3,  7, 12, 20,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut prio = [0,  1,  3,  0,  5,  4,  6,  7,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut lft  = [0-1, 2, 4, 6, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+    let mut rgt  = [0-1, 3, 5, 7, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+
+    // Min-heap should be violated: prio[3]=0 < prio[1]=1
+    assert_eq(treap_heap_ok(prio, lft, rgt, 1), 0);
+    // BST property still holds
+    assert_eq(treap_bst_ok(key, lft, rgt, 1, 0 - 1000000, 1000000), 1);
+    print("treap_heap_violation: ok");
+}
+
+fn test_treap_bst_violation() {
+    // Valid treap but then corrupt a key to break BST.
+    // key[5] (node 5, right child of node 2, originally key=7) changed to 100 (> 10).
+    let mut key  = [0, 10,  5, 15,  3, 100, 12, 20,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut prio = [0,  1,  3,  2,  5,   4,  6,  7,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut lft  = [0-1, 2, 4, 6, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+    let mut rgt  = [0-1, 3, 5, 7, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+
+    // BST must fail because key[5]=100 is in right subtree of node 2 (key=5),
+    // but 100 > 10 (root's key), so it exceeds the max_key bound of 10 for that subtree.
+    assert_eq(treap_bst_ok(key, lft, rgt, 1, 0 - 1000000, 1000000), 0);
+    print("treap_bst_violation: ok");
+}
+
+fn test_treap_single_node() {
+    // Single-node treap: always valid.
+    let mut key  = [0, 42,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut prio = [0,  7,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut lft  = [0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+    let mut rgt  = [0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+
+    assert_eq(treap_bst_ok(key, lft, rgt, 1, 0 - 1000000, 1000000), 1);
+    assert_eq(treap_heap_ok(prio, lft, rgt, 1), 1);
+    assert_eq(treap_count(lft, rgt, 1), 1);
+
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos = [0];
+    treap_inorder(key, lft, rgt, 1, out, pos);
+    assert_eq(pos[0], 1);
+    assert_eq(out[0], 42);
+    print("treap_single_node: ok");
+}
+
+fn test_treap_right_spine() {
+    // Right-spine treap: each node has only a right child.
+    // Keys: 1, 2, 3, 4, 5 (sorted -> valid BST)
+    // Priorities: 1, 2, 3, 4, 5 (increasing -> valid min-heap, root is smallest)
+    // Node 1: key=1, prio=1, left=-1, right=2
+    // Node 2: key=2, prio=2, left=-1, right=3
+    // Node 3: key=3, prio=3, left=-1, right=4
+    // Node 4: key=4, prio=4, left=-1, right=5
+    // Node 5: key=5, prio=5, left=-1, right=-1
+    let mut key  = [0,  1,  2,  3,  4,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut prio = [0,  1,  2,  3,  4,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+                    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0];
+    let mut lft  = [0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+    let mut rgt  = [0-1,  2,  3,  4,  5, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1,
+                    0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1, 0-1];
+
+    assert_eq(treap_bst_ok(key, lft, rgt, 1, 0 - 1000000, 1000000), 1);
+    assert_eq(treap_heap_ok(prio, lft, rgt, 1), 1);
+    assert_eq(treap_count(lft, rgt, 1), 5);
+
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos = [0];
+    treap_inorder(key, lft, rgt, 1, out, pos);
+    // In-order of right-spine with sorted keys = sorted keys
+    assert_eq(out[0], 1);
+    assert_eq(out[1], 2);
+    assert_eq(out[2], 3);
+    assert_eq(out[3], 4);
+    assert_eq(out[4], 5);
+    print("treap_right_spine: ok");
+}
+
+fn main() -> Int {
+    test_treap_valid();
+    test_treap_heap_violation();
+    test_treap_bst_violation();
+    test_treap_single_node();
+    test_treap_right_spine();
+    print("[OK] 491_interp_treap");
+    0
+}

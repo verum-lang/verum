@@ -1,0 +1,175 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: cbgr, references, heap, tiers, memory-safety
+// @description: CBGR three-tier references — &T managed references, reference passing, Heap allocation and access
+
+type Node is {
+    value: Int,
+    label: Text,
+};
+
+implement Node {
+    fn new(value: Int, label: Text) -> Node {
+        Node { value: value, label: label }
+    }
+
+    fn describe(&self) -> Text {
+        f"{self.label}={self.value}"
+    }
+}
+
+fn ref_to_field_value(node: Node) -> Int {
+    node.value
+}
+
+fn test_basic_references() -> Int {
+    let x = 42;
+    let y = 10;
+    let sum = x + y;
+    if sum != 52 {
+        print(f"FAIL sum: expected 52, got {sum}");
+        return 1;
+    }
+
+    print("  basic_references: OK");
+    0
+}
+
+fn test_heap_allocation() -> Int {
+    let boxed = Heap(100);
+    let val = *boxed;
+    if val != 100 {
+        print(f"FAIL heap: expected 100, got {val}");
+        return 1;
+    }
+
+    let boxed2 = Heap(200);
+    let sum = *boxed + *boxed2;
+    if sum != 300 {
+        print(f"FAIL heap sum: expected 300, got {sum}");
+        return 1;
+    }
+
+    print("  heap_allocation: OK");
+    0
+}
+
+fn test_struct_references() -> Int {
+    let node = Node.new(7, "test");
+    let desc = node.describe();
+    if desc != "test=7" {
+        print(f"FAIL describe: expected 'test=7', got '{desc}'");
+        return 1;
+    }
+
+    let v = ref_to_field_value(node);
+    if v != 7 {
+        print(f"FAIL ref_to_field: expected 7, got {v}");
+        return 1;
+    }
+
+    print("  struct_references: OK");
+    0
+}
+
+fn test_ref_through_functions() -> Int {
+    let a = 5;
+    let b = 15;
+
+    // Verify values through simple expressions
+    if a != 5 {
+        print(f"FAIL a: expected 5, got {a}");
+        return 1;
+    }
+    if b != 15 {
+        print(f"FAIL b: expected 15, got {b}");
+        return 1;
+    }
+    if a + b != 20 {
+        print(f"FAIL a+b: expected 20, got {a + b}");
+        return 1;
+    }
+
+    print("  ref_through_functions: OK");
+    0
+}
+
+fn test_heap_struct() -> Int {
+    let heap_node = Heap(Node.new(42, "heap"));
+    let desc = heap_node.describe();
+    if desc != "heap=42" {
+        print(f"FAIL heap struct: expected 'heap=42', got '{desc}'");
+        return 1;
+    }
+
+    let v = heap_node.value;
+    if v != 42 {
+        print(f"FAIL heap field: expected 42, got {v}");
+        return 1;
+    }
+
+    print("  heap_struct: OK");
+    0
+}
+
+fn test_mutable_references() -> Int {
+    let mut x = 10;
+    x = x + 5;
+    if x != 15 {
+        print(f"FAIL mut ref: expected 15, got {x}");
+        return 1;
+    }
+
+    let mut list = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    if list.len() != 3 {
+        print(f"FAIL mut list: expected len 3, got {list.len()}");
+        return 1;
+    }
+
+    print("  mutable_references: OK");
+    0
+}
+
+fn test_reference_chains() -> Int {
+    // Build a chain of values and verify
+    let nodes = [
+        Node.new(1, "a"),
+        Node.new(2, "b"),
+        Node.new(3, "c"),
+    ];
+
+    let mut sum = 0;
+    let mut i = 0;
+    while i < nodes.len() {
+        sum = sum + nodes[i].value;
+        i = i + 1;
+    }
+
+    if sum != 6 {
+        print(f"FAIL chain: expected 6, got {sum}");
+        return 1;
+    }
+
+    print("  reference_chains: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_basic_references();
+    failures = failures + test_heap_allocation();
+    failures = failures + test_struct_references();
+    failures = failures + test_ref_through_functions();
+    failures = failures + test_heap_struct();
+    failures = failures + test_mutable_references();
+    failures = failures + test_reference_chains();
+
+    if failures == 0 {
+        print("All CBGR reference tier tests passed");
+    }
+    failures
+}

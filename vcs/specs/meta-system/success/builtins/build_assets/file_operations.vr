@@ -1,0 +1,214 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, build_assets, asset_exists, asset_list_dir, asset_metadata
+// @description: Test build assets file system operation functions
+// @contexts: BuildAssets
+
+// =============================================================================
+// ASSET_EXISTS TESTS
+// =============================================================================
+
+// Test asset_exists basic
+meta fn test_asset_exists(path: Text) -> Bool using [BuildAssets] {
+    asset_exists(path)
+}
+
+// Test asset_exists for conditional loading
+meta fn conditional_asset(path: Text, fallback: Text) -> Text using [BuildAssets] {
+    if asset_exists(path) {
+        path
+    } else {
+        fallback
+    }
+}
+
+// Test asset_exists with multiple paths
+meta fn find_first_existing(paths: [Text]) -> Maybe<Text> using [BuildAssets] {
+    // Simplified: check first path only
+    if list_len(paths) > 0 {
+        let first = maybe_unwrap(list_get(paths, 0));
+        if asset_exists(first) {
+            Some(first)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+// Test asset_exists for feature detection
+meta fn has_optional_config(config_name: Text) -> Bool using [BuildAssets] {
+    let path = text_concat("config/optional/", config_name, ".toml");
+    asset_exists(path)
+}
+
+// Test asset_exists for migration detection
+meta fn has_migration(version: Int) -> Bool using [BuildAssets] {
+    let path = text_concat("migrations/v", stringify(version), ".sql");
+    asset_exists(path)
+}
+
+// =============================================================================
+// ASSET_LIST_DIR TESTS
+// =============================================================================
+
+// Test asset_list_dir basic
+meta fn test_list_dir(path: Text) -> [Text] using [BuildAssets] {
+    asset_list_dir(path)
+}
+
+// Test listing and filtering
+meta fn list_files_with_extension(dir: Text, ext: Text) -> [Text] using [BuildAssets] {
+    let all_files = asset_list_dir(dir);
+    // Filter by extension (simplified - just return all for now)
+    all_files
+}
+
+// Test listing for auto-discovery
+meta fn discover_modules(modules_dir: Text) -> [Text] using [BuildAssets] {
+    asset_list_dir(modules_dir)
+}
+
+// Test listing for plugin discovery (requires dir parameter to avoid auto-execution)
+meta fn discover_plugins(plugins_dir: Text) -> [Text] using [BuildAssets] {
+    asset_list_dir(plugins_dir)
+}
+
+// Test listing templates (requires dir parameter to avoid auto-execution)
+meta fn list_templates(templates_dir: Text) -> [Text] using [BuildAssets] {
+    asset_list_dir(templates_dir)
+}
+
+// Test counting directory entries
+meta fn count_assets(dir: Text) -> Int using [BuildAssets] {
+    let entries = asset_list_dir(dir);
+    list_len(entries)
+}
+
+// =============================================================================
+// ASSET_METADATA TESTS
+// =============================================================================
+
+// Test asset_metadata basic
+// Returns: (size: UInt, modified_ns: UInt, is_directory: Bool, is_file: Bool, is_symlink: Bool)
+meta fn test_asset_metadata(path: Text) -> (UInt, UInt, Bool, Bool, Bool) using [BuildAssets] {
+    asset_metadata(path)
+}
+
+// Test getting file size
+meta fn get_file_size(path: Text) -> UInt using [BuildAssets] {
+    let (size, _modified, _is_dir, _is_file, _is_symlink) = asset_metadata(path);
+    size
+}
+
+// Test checking if path is directory
+meta fn is_directory(path: Text) -> Bool using [BuildAssets] {
+    let (_size, _modified, is_dir, _is_file, _is_symlink) = asset_metadata(path);
+    is_dir
+}
+
+// Test checking if path is regular file
+meta fn is_regular_file(path: Text) -> Bool using [BuildAssets] {
+    let (_size, _modified, _is_dir, is_file, _is_symlink) = asset_metadata(path);
+    is_file
+}
+
+// Test checking modification time
+meta fn get_modified_time(path: Text) -> UInt using [BuildAssets] {
+    let (_size, modified, _is_dir, _is_file, _is_symlink) = asset_metadata(path);
+    modified
+}
+
+// Test checking for symlinks
+meta fn is_symlink(path: Text) -> Bool using [BuildAssets] {
+    let (_size, _modified, _is_dir, _is_file, is_symlink) = asset_metadata(path);
+    is_symlink
+}
+
+// =============================================================================
+// COMBINED OPERATIONS
+// =============================================================================
+
+// Test exists and metadata
+meta fn safe_get_size(path: Text) -> Maybe<UInt> using [BuildAssets] {
+    if asset_exists(path) {
+        let (size, _, _, _, _) = asset_metadata(path);
+        Some(size)
+    } else {
+        None
+    }
+}
+
+// Test list and filter directories
+meta fn list_subdirectories(parent: Text) -> [Text] using [BuildAssets] {
+    let entries = asset_list_dir(parent);
+    // In full implementation, would filter to directories only
+    entries
+}
+
+// Test list and check each
+meta fn list_existing_configs(config_names: [Text]) -> [Text] using [BuildAssets] {
+    // Simplified: return input
+    // Full implementation would filter by asset_exists
+    config_names
+}
+
+// =============================================================================
+// PRACTICAL USE CASES
+// =============================================================================
+
+// Auto-discover test files (requires dir parameter to avoid auto-execution)
+meta fn discover_test_files(tests_dir: Text) -> [Text] using [BuildAssets] {
+    asset_list_dir(tests_dir)
+}
+
+// Check if schema exists before loading
+meta fn load_schema_safe(name: Text) -> Maybe<Text> using [BuildAssets] {
+    let path = text_concat("schemas/", name, ".json");
+    if asset_exists(path) {
+        Some(load_text(path))
+    } else {
+        None
+    }
+}
+
+// Get total size of directory
+meta fn count_directory_files(dir: Text) -> Int using [BuildAssets] {
+    let files = asset_list_dir(dir);
+    list_len(files)
+}
+
+// Check if asset was modified recently (stub - would use actual time comparison)
+meta fn is_recently_modified(path: Text) -> Bool using [BuildAssets] {
+    if asset_exists(path) {
+        let (_, modified, _, _, _) = asset_metadata(path);
+        // Stub: always return true for test
+        true
+    } else {
+        false
+    }
+}
+
+// =============================================================================
+// MAYBE TYPE DEFINITION (for tests)
+// =============================================================================
+
+type Maybe<T> is None | Some(T);
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Test list operations that don't require real files
+    @const assert(list_len([]) == 0);
+    @const assert(list_len(["a", "b", "c"]) == 3);
+
+    // Test text operations
+    @const assert(text_len("test") == 4);
+    @const assert(text_concat("hello", "/", "world") == "hello/world");
+
+    // Meta functions requiring file access are tested at integration level
+}

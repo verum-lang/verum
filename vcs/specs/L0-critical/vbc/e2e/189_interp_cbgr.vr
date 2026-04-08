@@ -1,0 +1,298 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, references, safety
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end CBGR memory model tests through VBC interpreter.
+// Tests the three-tier reference model: Tier 0 (managed, ~15ns),
+// Tier 1 (checked, 0ns), Tier 2 (unsafe, 0ns).
+// Validates reference creation, dereference, epoch management,
+// generation tracking, and use-after-free detection simulation.
+
+// ============================================================================
+// Reference model simulation (Sim-prefixed to avoid stdlib conflicts)
+// ============================================================================
+
+type SimThinRef is {
+    ptr_id: Int,
+    generation: Int,
+    epoch: Int,
+    tier: Int
+};
+
+type SimFatRef is {
+    ptr_id: Int,
+    generation: Int,
+    epoch: Int,
+    tier: Int,
+    len: Int
+};
+
+type SimHeap is {
+    next_ptr: Int,
+    next_gen: Int,
+    current_epoch: Int
+};
+
+fn sim_heap_new() -> SimHeap {
+    SimHeap { next_ptr: 1000, next_gen: 1, current_epoch: 1 }
+}
+
+fn sim_heap_alloc(h: SimHeap) -> SimHeap {
+    SimHeap {
+        next_ptr: h.next_ptr + 1,
+        next_gen: h.next_gen + 1,
+        current_epoch: h.current_epoch
+    }
+}
+
+fn sim_heap_advance_epoch(h: SimHeap) -> SimHeap {
+    SimHeap {
+        next_ptr: h.next_ptr,
+        next_gen: h.next_gen,
+        current_epoch: h.current_epoch + 1
+    }
+}
+
+fn make_thin_ref(h: SimHeap, tier: Int) -> SimThinRef {
+    SimThinRef {
+        ptr_id: h.next_ptr,
+        generation: h.next_gen,
+        epoch: h.current_epoch,
+        tier: tier
+    }
+}
+
+fn make_fat_ref(h: SimHeap, tier: Int, len: Int) -> SimFatRef {
+    SimFatRef {
+        ptr_id: h.next_ptr,
+        generation: h.next_gen,
+        epoch: h.current_epoch,
+        tier: tier,
+        len: len
+    }
+}
+
+// ============================================================================
+// CBGR checks
+// ============================================================================
+
+fn cbgr_check(r: SimThinRef, current_gen: Int, current_epoch: Int) -> Bool {
+    r.generation == current_gen && r.epoch <= current_epoch
+}
+
+fn cbgr_check_fat(r: SimFatRef, current_gen: Int, current_epoch: Int) -> Bool {
+    r.generation == current_gen && r.epoch <= current_epoch
+}
+
+fn cbgr_bounds_check(r: SimFatRef, index: Int) -> Bool {
+    index >= 0 && index < r.len
+}
+
+// ============================================================================
+// Point through reference simulation
+// ============================================================================
+
+type SimPoint is { x: Int, y: Int };
+
+fn point_distance_sq(p: SimPoint) -> Int {
+    p.x * p.x + p.y * p.y
+}
+
+fn deref_point_x(ref_ptr: Int, stored_x: Int) -> Int {
+    stored_x
+}
+
+// ============================================================================
+// Epoch-based memory reclamation simulation
+// ============================================================================
+
+type SimEpochTracker is {
+    epoch1_refs: Int,
+    epoch2_refs: Int,
+    epoch3_refs: Int,
+    current_epoch: Int
+};
+
+fn tracker_new() -> SimEpochTracker {
+    SimEpochTracker {
+        epoch1_refs: 0,
+        epoch2_refs: 0,
+        epoch3_refs: 0,
+        current_epoch: 1
+    }
+}
+
+fn tracker_alloc(t: SimEpochTracker) -> SimEpochTracker {
+    if t.current_epoch == 1 {
+        SimEpochTracker {
+            epoch1_refs: t.epoch1_refs + 1,
+            epoch2_refs: t.epoch2_refs,
+            epoch3_refs: t.epoch3_refs,
+            current_epoch: t.current_epoch
+        }
+    } else if t.current_epoch == 2 {
+        SimEpochTracker {
+            epoch1_refs: t.epoch1_refs,
+            epoch2_refs: t.epoch2_refs + 1,
+            epoch3_refs: t.epoch3_refs,
+            current_epoch: t.current_epoch
+        }
+    } else {
+        SimEpochTracker {
+            epoch1_refs: t.epoch1_refs,
+            epoch2_refs: t.epoch2_refs,
+            epoch3_refs: t.epoch3_refs + 1,
+            current_epoch: t.current_epoch
+        }
+    }
+}
+
+fn tracker_advance(t: SimEpochTracker) -> SimEpochTracker {
+    SimEpochTracker {
+        epoch1_refs: t.epoch1_refs,
+        epoch2_refs: t.epoch2_refs,
+        epoch3_refs: t.epoch3_refs,
+        current_epoch: t.current_epoch + 1
+    }
+}
+
+fn tracker_can_reclaim_epoch(t: SimEpochTracker, epoch: Int) -> Bool {
+    t.current_epoch - epoch >= 2
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn main() -> Int {
+    // ---- Basic SimThinRef creation and validation ----
+    let mut h = sim_heap_new();
+    let r1 = make_thin_ref(h, 0);
+    h = sim_heap_alloc(h);
+    assert_eq(r1.ptr_id, 1000);
+    assert_eq(r1.generation, 1);
+    assert_eq(r1.epoch, 1);
+    assert_eq(r1.tier, 0);
+
+    let r2 = make_thin_ref(h, 0);
+    h = sim_heap_alloc(h);
+    assert_eq(r2.ptr_id, 1001);
+    assert_eq(r2.generation, 2);
+
+    // Different references have different generations
+    assert_eq(r1.generation == r2.generation, false);
+
+    // ---- CBGR check: valid reference ----
+    assert_eq(cbgr_check(r1, 1, 1), true);
+    assert_eq(cbgr_check(r2, 2, 1), true);
+
+    // ---- CBGR check: stale generation (use-after-free simulation) ----
+    assert_eq(cbgr_check(r1, 99, 1), false);
+    assert_eq(cbgr_check(r1, 1, 0), false);
+
+    // ---- SimFatRef with bounds checking ----
+    let fr = make_fat_ref(h, 0, 10);
+    h = sim_heap_alloc(h);
+    assert_eq(fr.len, 10);
+    assert_eq(cbgr_check_fat(fr, fr.generation, h.current_epoch), true);
+
+    assert_eq(cbgr_bounds_check(fr, 0), true);
+    assert_eq(cbgr_bounds_check(fr, 9), true);
+    assert_eq(cbgr_bounds_check(fr, 10), false);
+    assert_eq(cbgr_bounds_check(fr, -1), false);
+
+    // ---- Tier comparison ----
+    let managed_ref = make_thin_ref(h, 0);
+    h = sim_heap_alloc(h);
+    let checked_ref = make_thin_ref(h, 1);
+    h = sim_heap_alloc(h);
+    let unsafe_ref = make_thin_ref(h, 2);
+    h = sim_heap_alloc(h);
+
+    assert_eq(managed_ref.tier, 0);
+    assert_eq(checked_ref.tier, 1);
+    assert_eq(unsafe_ref.tier, 2);
+
+    assert_eq(cbgr_check(managed_ref, managed_ref.generation, h.current_epoch), true);
+    assert_eq(cbgr_check(checked_ref, checked_ref.generation, h.current_epoch), true);
+    assert_eq(cbgr_check(unsafe_ref, unsafe_ref.generation, h.current_epoch), true);
+
+    // ---- Epoch advancement ----
+    h = sim_heap_advance_epoch(h);
+    assert_eq(h.current_epoch, 2);
+
+    assert_eq(cbgr_check(r1, r1.generation, h.current_epoch), true);
+
+    let r_new = make_thin_ref(h, 0);
+    h = sim_heap_alloc(h);
+    assert_eq(r_new.epoch, 2);
+
+    assert_eq(cbgr_check(r_new, r_new.generation, h.current_epoch), true);
+    assert_eq(cbgr_check(r_new, r_new.generation, 1), false);
+
+    // ---- Epoch-based reclamation ----
+    let mut t = tracker_new();
+    t = tracker_alloc(t);
+    t = tracker_alloc(t);
+    assert_eq(t.epoch1_refs, 2);
+    assert_eq(t.current_epoch, 1);
+
+    t = tracker_advance(t);
+    t = tracker_alloc(t);
+    assert_eq(t.epoch2_refs, 1);
+    assert_eq(t.current_epoch, 2);
+
+    assert_eq(tracker_can_reclaim_epoch(t, 1), false);
+
+    t = tracker_advance(t);
+    t = tracker_alloc(t);
+    assert_eq(t.epoch3_refs, 1);
+    assert_eq(t.current_epoch, 3);
+
+    assert_eq(tracker_can_reclaim_epoch(t, 1), true);
+    assert_eq(tracker_can_reclaim_epoch(t, 2), false);
+
+    t = tracker_advance(t);
+    assert_eq(tracker_can_reclaim_epoch(t, 1), true);
+    assert_eq(tracker_can_reclaim_epoch(t, 2), true);
+    assert_eq(tracker_can_reclaim_epoch(t, 3), false);
+
+    // ---- SimPoint through reference simulation ----
+    let p = SimPoint { x: 3, y: 4 };
+    assert_eq(point_distance_sq(p), 25);
+    assert_eq(deref_point_x(1000, p.x), 3);
+
+    // ---- Multiple allocations in same epoch ----
+    let mut h2 = sim_heap_new();
+    let mut i = 0;
+    while i < 10 {
+        h2 = sim_heap_alloc(h2);
+        i = i + 1;
+    }
+    assert_eq(h2.next_gen, 11);
+    assert_eq(h2.next_ptr, 1010);
+    assert_eq(h2.current_epoch, 1);
+
+    // ---- Cross-epoch reference lifecycle ----
+    let mut h3 = sim_heap_new();
+    let ref_e1 = make_thin_ref(h3, 0);
+    h3 = sim_heap_alloc(h3);
+    h3 = sim_heap_advance_epoch(h3);
+    let ref_e2 = make_thin_ref(h3, 0);
+    h3 = sim_heap_alloc(h3);
+    h3 = sim_heap_advance_epoch(h3);
+    let ref_e3 = make_thin_ref(h3, 0);
+    h3 = sim_heap_alloc(h3);
+
+    assert_eq(cbgr_check(ref_e1, ref_e1.generation, h3.current_epoch), true);
+    assert_eq(cbgr_check(ref_e2, ref_e2.generation, h3.current_epoch), true);
+    assert_eq(cbgr_check(ref_e3, ref_e3.generation, h3.current_epoch), true);
+
+    assert_eq(cbgr_check(ref_e3, ref_e3.generation, 1), false);
+
+    print("[OK] 189_interp_cbgr");
+    0
+}

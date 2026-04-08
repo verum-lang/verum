@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: low-level, linker, errors
+// @description: Linker attribute error detection tests - type mismatches in linker-related code
+// @expected-error: E400
+
+/// Error: function return type mismatch in exported function
+@export("C")
+fn wrong_return_type() -> Int {
+    "not an int"
+}
+
+fn main() {}

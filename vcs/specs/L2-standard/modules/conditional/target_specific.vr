@@ -1,0 +1,212 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, conditional, target
+// @description: Target-specific conditional compilation
+
+/// Conditional compilation based on target platform
+
+// Stub types and functions for FFI and platform-specific code
+type File is {};
+type IoError is { message: Text };
+type Matrix<T> is { data: List<T>, rows: Int, cols: Int };
+type TestData is {};
+
+implement TestData {
+    fn mock() -> TestData { TestData {} }
+}
+
+const O_RDONLY: Int = 0;
+const GENERIC_READ: Int = 0x80000000;
+const FILE_SHARE_READ: Int = 1;
+
+fn ffi_open(ptr: *const u8, flags: Int) -> Result<File, IoError> {
+    Ok(File {})
+}
+
+fn ffi_create_file(ptr: *const u8, access: Int, share: Int) -> Result<File, IoError> {
+    Ok(File {})
+}
+
+fn ffi_chmod(ptr: *const u8, mode: Int) -> Result<(), IoError> {
+    Ok(())
+}
+
+fn vDSP_mmul<T>(a: &Matrix<T>, b: &Matrix<T>) -> Matrix<T> {
+    Matrix { data: List.new(), rows: 0, cols: 0 }
+}
+
+implement<T> Matrix<T> {
+    fn multiply(&self, other: &Matrix<T>) -> Matrix<T> {
+        Matrix { data: List.new(), rows: 0, cols: 0 }
+    }
+}
+
+type Invariant is {};
+implement Invariant {
+    fn check(&self) -> Bool { true }
+}
+static GLOBAL_INVARIANT: Invariant = Invariant {};
+
+// OS-specific file operations
+module fs {
+    @cfg(target_os = "linux")
+    public fn open(path: &Text) -> Result<File, IoError> {
+        // Linux-specific implementation using open()
+        ffi_open(path.as_ptr(), O_RDONLY)
+    }
+
+    @cfg(target_os = "macos")
+    public fn open(path: &Text) -> Result<File, IoError> {
+        // macOS-specific implementation
+        ffi_open(path.as_ptr(), O_RDONLY)
+    }
+
+    @cfg(target_os = "windows")
+    public fn open(path: &Text) -> Result<File, IoError> {
+        // Windows-specific implementation using CreateFile
+        ffi_create_file(path.as_ptr(), GENERIC_READ, FILE_SHARE_READ)
+    }
+
+    // Unix-specific functionality
+    @cfg(target_family = "unix")
+    public fn set_permissions(path: &Text, mode: Int) -> Result<(), IoError> {
+        ffi_chmod(path.as_ptr(), mode)
+    }
+
+    @cfg(target_family = "windows")
+    public fn set_permissions(path: &Text, mode: Int) -> Result<(), IoError> {
+        // Windows doesn't have Unix-style permissions
+        // Use ACLs instead
+        Ok(())
+    }
+}
+
+// Architecture-specific SIMD operations
+module simd {
+    @cfg(all(target_arch = "x86_64", target_feature = "avx2"))
+    public fn vector_add(a: &[Float; 8], b: &[Float; 8]) -> [Float; 8] {
+        // AVX2 implementation
+        unsafe {
+            let va = _mm256_loadu_ps(a.as_ptr());
+            let vb = _mm256_loadu_ps(b.as_ptr());
+            let result = _mm256_add_ps(va, vb);
+            let mut out = [0.0; 8];
+            _mm256_storeu_ps(out.as_mut_ptr(), result);
+            out
+        }
+    }
+
+    @cfg(all(target_arch = "aarch64", target_feature = "neon"))
+    public fn vector_add(a: &[Float; 4], b: &[Float; 4]) -> [Float; 4] {
+        // NEON implementation
+        unsafe {
+            let va = vld1q_f32(a.as_ptr());
+            let vb = vld1q_f32(b.as_ptr());
+            let result = vaddq_f32(va, vb);
+            let mut out = [0.0; 4];
+            vst1q_f32(out.as_mut_ptr(), result);
+            out
+        }
+    }
+
+    // Fallback for unsupported architectures
+    @cfg(not(any(
+        all(target_arch = "x86_64", target_feature = "avx2"),
+        all(target_arch = "aarch64", target_feature = "neon")
+    )))
+    public fn vector_add<N: Int>(a: &[Float; N], b: &[Float; N]) -> [Float; N] {
+        let mut result = [0.0; N];
+        for i in 0..N {
+            result[i] = a[i] + b[i];
+        }
+        result
+    }
+}
+
+// Pointer size specific code
+module ptr {
+    @cfg(target_pointer_width = "64")
+    public const MAX_ALIGN: Int = 16;
+
+    @cfg(target_pointer_width = "32")
+    public const MAX_ALIGN: Int = 8;
+
+    @cfg(target_pointer_width = "64")
+    public type Usize is u64;
+
+    @cfg(target_pointer_width = "32")
+    public type Usize is u32;
+}
+
+// Endianness-specific serialization
+module serialize {
+    @cfg(target_endian = "little")
+    public fn write_u32(buffer: &mut [u8], value: u32) {
+        buffer[0] = (value & 0xFF) as u8;
+        buffer[1] = ((value >> 8) & 0xFF) as u8;
+        buffer[2] = ((value >> 16) & 0xFF) as u8;
+        buffer[3] = ((value >> 24) & 0xFF) as u8;
+    }
+
+    @cfg(target_endian = "big")
+    public fn write_u32(buffer: &mut [u8], value: u32) {
+        buffer[0] = ((value >> 24) & 0xFF) as u8;
+        buffer[1] = ((value >> 16) & 0xFF) as u8;
+        buffer[2] = ((value >> 8) & 0xFF) as u8;
+        buffer[3] = (value & 0xFF) as u8;
+    }
+}
+
+// Vendor-specific optimizations
+module vendor {
+    @cfg(target_vendor = "apple")
+    public fn accelerate_matrix_mul(a: &Matrix, b: &Matrix) -> Matrix {
+        // Use Apple Accelerate framework
+        vDSP_mmul(a, b)
+    }
+
+    @cfg(not(target_vendor = "apple"))
+    public fn accelerate_matrix_mul(a: &Matrix, b: &Matrix) -> Matrix {
+        // Generic implementation
+        a.multiply(b)
+    }
+}
+
+// Build environment
+module build {
+    @cfg(debug_assertions)
+    public fn check_invariants() {
+        // Expensive invariant checks in debug mode
+        assert(GLOBAL_INVARIANT.check());
+    }
+
+    @cfg(not(debug_assertions))
+    public fn check_invariants() {
+        // No-op in release mode
+    }
+
+    @cfg(test)
+    public fn mock_data() -> TestData {
+        TestData.mock()
+    }
+}
+
+fn main() {
+    // Platform detection
+    @cfg(target_os = "linux")
+    println("Running on Linux");
+
+    @cfg(target_os = "macos")
+    println("Running on macOS");
+
+    @cfg(target_os = "windows")
+    println("Running on Windows");
+
+    // Architecture detection
+    @cfg(target_arch = "x86_64")
+    println("64-bit x86 architecture");
+
+    @cfg(target_arch = "aarch64")
+    println("64-bit ARM architecture");
+}

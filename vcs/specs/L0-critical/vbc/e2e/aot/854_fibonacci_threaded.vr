@@ -1,0 +1,109 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, threading, fibonacci
+// @expected-exit: 0
+
+// Test: fibonacci computed in separate function calls (simulating threaded work).
+
+fn fib_iterative(n: Int) -> Int {
+    if (n <= 1) { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while (i <= n) {
+        let temp = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+    b
+}
+
+fn fib_pair(n: Int) -> Int {
+    // Returns fib(n) + fib(n+1) to simulate two concurrent fib computations
+    fib_iterative(n) + fib_iterative(n + 1)
+}
+
+fn fib_sum_range(start: Int, end: Int) -> Int {
+    // Sum of fib(start) + fib(start+1) + ... + fib(end-1)
+    let mut acc = 0;
+    let mut i = start;
+    while (i < end) {
+        acc = acc + fib_iterative(i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Basic fibonacci values
+    let f0 = fib_iterative(0);
+    if (f0 != 0) {
+        print(f"FAIL: fib(0)={f0}, expected=0");
+        return 1;
+    }
+
+    let f1 = fib_iterative(1);
+    if (f1 != 1) {
+        print(f"FAIL: fib(1)={f1}, expected=1");
+        return 1;
+    }
+
+    let f10 = fib_iterative(10);
+    if (f10 != 55) {
+        print(f"FAIL: fib(10)={f10}, expected=55");
+        return 1;
+    }
+
+    let f20 = fib_iterative(20);
+    if (f20 != 6765) {
+        print(f"FAIL: fib(20)={f20}, expected=6765");
+        return 1;
+    }
+
+    let f30 = fib_iterative(30);
+    if (f30 != 832040) {
+        print(f"FAIL: fib(30)={f30}, expected=832040");
+        return 1;
+    }
+
+    // Simulate threaded fib pair: fib(19) + fib(20) = 4181 + 6765 = 10946
+    let pair = fib_pair(19);
+    if (pair != 10946) {
+        print(f"FAIL: fib_pair(19)={pair}, expected=10946");
+        return 1;
+    }
+
+    // fib(20) + fib(21) = 6765 + 10946 = 17711
+    let pair2 = fib_pair(20);
+    if (pair2 != 17711) {
+        print(f"FAIL: fib_pair(20)={pair2}, expected=17711");
+        return 1;
+    }
+
+    // Verify fib sum: sum of fib(0..10) = 0+1+1+2+3+5+8+13+21+34 = 88
+    let fsum = fib_sum_range(0, 10);
+    if (fsum != 88) {
+        print(f"FAIL: fib_sum_range(0,10)={fsum}, expected=88");
+        return 1;
+    }
+
+    // Split fib range sum and verify: fib_sum(0..5) + fib_sum(5..10)
+    let fhalf1 = fib_sum_range(0, 5);
+    let fhalf2 = fib_sum_range(5, 10);
+    if (fhalf1 + fhalf2 != 88) {
+        print(f"FAIL: split fib sum={fhalf1 + fhalf2}, expected=88");
+        return 1;
+    }
+
+    // Larger fibonacci
+    let f40 = fib_iterative(40);
+    if (f40 != 102334155) {
+        print(f"FAIL: fib(40)={f40}, expected=102334155");
+        return 1;
+    }
+
+    print("854_fibonacci_threaded: PASS");
+    0
+}

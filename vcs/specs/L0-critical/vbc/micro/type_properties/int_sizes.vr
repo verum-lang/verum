@@ -1,0 +1,31 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test type size properties for integer types
+
+fn main() {
+    // Test Int sizes
+    assert_eq(Int8.size, 1);
+    assert_eq(Int16.size, 2);
+    assert_eq(Int32.size, 4);
+    assert_eq(Int64.size, 8);
+    assert_eq(Int128.size, 16);
+
+    // Test UInt sizes
+    assert_eq(UInt8.size, 1);
+    assert_eq(UInt16.size, 2);
+    assert_eq(UInt32.size, 4);
+    assert_eq(UInt64.size, 8);
+    assert_eq(UInt128.size, 16);
+
+    // Test size types
+    assert_eq(IntSize.size, 8);   // 64-bit platform
+    assert_eq(UIntSize.size, 8);  // 64-bit platform
+
+    // Test compatibility aliases
+    assert_eq(i8.size, 1);
+    assert_eq(u64.size, 8);
+    assert_eq(isize.size, 8);
+    assert_eq(usize.size, 8);
+}

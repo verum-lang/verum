@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, refinement, error
+// @description: Test invalid refinement type syntax detection
+// @expected-error: E053
+
+type Positive is Int { };
+
+type NonEmpty is List<T> { : len > 0 };
+
+type Bounded is Int { value };
+
+type Malformed is Float { x: , y: 1.0 };

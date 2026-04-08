@@ -1,0 +1,218 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, affine, linear, ownership
+
+// Simple affine type
+type affine UniqueHandle is {
+    id: Int,
+    resource: RawPtr,
+};
+
+// Affine type with generic
+type affine OwnedResource<T> is {
+    value: T,
+    handle: SystemHandle,
+};
+
+// Affine type for file handles
+type affine File is {
+    fd: Int,
+    path: Text,
+    mode: FileMode,
+};
+
+// Affine type for memory regions
+type affine MemoryRegion is {
+    ptr: *mut Byte,
+    size: Int,
+    alignment: Int,
+};
+
+// Affine type for locks
+type affine MutexGuard<T> is {
+    mutex: &mut Mutex<T>,
+    value: &mut T,
+};
+
+// Affine type for database connections
+type affine Connection is {
+    handle: DbHandle,
+    pool: &ConnectionPool,
+};
+
+// Affine type for transactions
+type affine Transaction is {
+    connection: Connection,
+    savepoint: Text,
+};
+
+// Affine variant type
+type affine ResourceState is
+    | Acquired(Resource)
+    | Released;
+
+// Affine type with methods
+type affine TempFile is {
+    path: Path,
+};
+
+implement TempFile {
+    fn new() -> TempFile {
+        TempFile { path: create_temp() }
+    }
+
+    // Consuming self - affine semantics
+    fn delete(self) {
+        remove_file(self.path);
+    }
+
+    // Borrow is still allowed
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+// Affine type for socket
+type affine Socket is {
+    fd: Int,
+    local_addr: SocketAddr,
+    remote_addr: Maybe<SocketAddr>,
+};
+
+// Affine type for GPU resources
+type affine GpuBuffer is {
+    id: Int,
+    size: Int,
+    usage: BufferUsage,
+};
+
+// Affine type for async ownership
+type affine AsyncTask<T> is {
+    handle: TaskHandle,
+    result: Maybe<T>,
+};
+
+// Note: Linear types use 'affine' keyword in grammar
+// The difference between affine (at most once) and linear (exactly once)
+// is a semantic distinction, not syntactic
+type affine MustUse<T> is {
+    value: T,
+};
+
+// Affine type for capability tokens
+type affine Capability is {
+    kind: CapabilityKind,
+    scope: Scope,
+};
+
+// Affine type with context
+type affine ContextualResource is {
+    data: Bytes,
+};
+
+implement ContextualResource {
+    fn use(&self) using [Logger] {
+        Logger.info("Using resource");
+    }
+}
+
+// Affine generic container
+type affine Heap<T> is {
+    ptr: *mut T,
+};
+
+implement<T> Heap<T> {
+    fn new(value: T) -> Heap<T> {
+        let ptr = allocate<T>();
+        *ptr = value;
+        Heap { ptr }
+    }
+
+    fn take(self) -> T {
+        let value = *self.ptr;
+        deallocate(self.ptr);
+        value
+    }
+}
+
+// Affine with constraint
+type affine Wrapper<T: Drop> is {
+    inner: T,
+};
+
+// Affine type for iterators that consume
+type affine ConsumingIterator<T> is {
+    items: List<T>,
+    position: Int,
+};
+
+// Affine type for one-shot channels
+type affine OneShotSender<T> is {
+    channel: ChannelHandle,
+};
+
+type affine OneShotReceiver<T> is {
+    channel: ChannelHandle,
+};
+
+// Affine with refinement
+type affine ValidHandle is {
+    id: Int{> 0},
+    valid: Bool{== true},
+};
+
+// Protocol for affine resources
+// Note: The 'affine' constraint on associated types is a semantic feature
+type AffineProtocol is protocol {
+    type Resource;
+
+    fn acquire(&self) -> Self.Resource;
+    fn release(resource: Self.Resource);
+};
+
+// Implementing affine protocol
+implement AffineProtocol for ResourceManager {
+    type Resource = ManagedResource;
+
+    fn acquire(&self) -> ManagedResource {
+        ManagedResource { id: self.next_id() }
+    }
+
+    fn release(resource: ManagedResource) {
+        // Resource is consumed here
+        drop_resource(resource);
+    }
+}
+
+// Note: 'affine' modifier appears on type definitions, not on individual
+// parameter types or return types. The affine-ness is a property of the type itself.
+// Below we reference affine types that were defined earlier.
+fn consume_resource(resource: UniqueHandle) {
+    // Resource must be consumed or explicitly dropped
+    drop(resource);
+}
+
+// Function returning an affine type
+fn create_affine() -> UniqueHandle {
+    UniqueHandle { id: 1, resource: null_ptr() }
+}
+
+// Generic function with constraint (affine would be a protocol/bound if needed)
+fn process_affine<T: Drop>(resource: T) {
+    use_once(resource);
+}
+
+// Nested affine types - the Container is affine, contains normal types
+type affine AffineContainer is {
+    inner: OwnedResource<Int>,
+};
+
+// Affine with visibility - use 'public' not 'pub'
+public type affine PublicResource is {
+    data: Bytes,
+};
+
+internal type affine InternalResource is {
+    secret: Int,
+};

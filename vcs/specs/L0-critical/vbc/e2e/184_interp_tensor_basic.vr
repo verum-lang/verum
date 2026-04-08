@@ -1,0 +1,760 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Comprehensive tensor basics — creation, element-wise ops, reductions, reshape, transpose, scalar access
+
+// ============================================================================
+// FTensor: Fixed-size flat tensor of 16 Floats (stored as scaled Int x10000)
+// Using scaled integers to avoid float comparison issues in the interpreter.
+// Scale factor: 10000 (4 decimal places of precision).
+// ============================================================================
+
+type Tensor16 is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int,
+    d12: Int, d13: Int, d14: Int, d15: Int,
+    len: Int, rows: Int, cols: Int
+};
+
+fn t16_get(t: Tensor16, i: Int) -> Int {
+    if i == 0 { t.d0 } else if i == 1 { t.d1 } else if i == 2 { t.d2 }
+    else if i == 3 { t.d3 } else if i == 4 { t.d4 } else if i == 5 { t.d5 }
+    else if i == 6 { t.d6 } else if i == 7 { t.d7 } else if i == 8 { t.d8 }
+    else if i == 9 { t.d9 } else if i == 10 { t.d10 } else if i == 11 { t.d11 }
+    else if i == 12 { t.d12 } else if i == 13 { t.d13 } else if i == 14 { t.d14 }
+    else { t.d15 }
+}
+
+fn t16_set(t: Tensor16, i: Int, v: Int) -> Tensor16 {
+    Tensor16 {
+        d0: if i == 0 { v } else { t.d0 },
+        d1: if i == 1 { v } else { t.d1 },
+        d2: if i == 2 { v } else { t.d2 },
+        d3: if i == 3 { v } else { t.d3 },
+        d4: if i == 4 { v } else { t.d4 },
+        d5: if i == 5 { v } else { t.d5 },
+        d6: if i == 6 { v } else { t.d6 },
+        d7: if i == 7 { v } else { t.d7 },
+        d8: if i == 8 { v } else { t.d8 },
+        d9: if i == 9 { v } else { t.d9 },
+        d10: if i == 10 { v } else { t.d10 },
+        d11: if i == 11 { v } else { t.d11 },
+        d12: if i == 12 { v } else { t.d12 },
+        d13: if i == 13 { v } else { t.d13 },
+        d14: if i == 14 { v } else { t.d14 },
+        d15: if i == 15 { v } else { t.d15 },
+        len: t.len, rows: t.rows, cols: t.cols
+    }
+}
+
+fn t16_zeros(rows: Int, cols: Int) -> Tensor16 {
+    Tensor16 {
+        d0: 0, d1: 0, d2: 0, d3: 0,
+        d4: 0, d5: 0, d6: 0, d7: 0,
+        d8: 0, d9: 0, d10: 0, d11: 0,
+        d12: 0, d13: 0, d14: 0, d15: 0,
+        len: rows * cols, rows: rows, cols: cols
+    }
+}
+
+fn t16_full(rows: Int, cols: Int, val: Int) -> Tensor16 {
+    Tensor16 {
+        d0: val, d1: val, d2: val, d3: val,
+        d4: val, d5: val, d6: val, d7: val,
+        d8: val, d9: val, d10: val, d11: val,
+        d12: val, d13: val, d14: val, d15: val,
+        len: rows * cols, rows: rows, cols: cols
+    }
+}
+
+fn t16_from8(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Tensor16 {
+    Tensor16 {
+        d0: a, d1: b, d2: c, d3: d,
+        d4: e, d5: f, d6: g, d7: h,
+        d8: 0, d9: 0, d10: 0, d11: 0,
+        d12: 0, d13: 0, d14: 0, d15: 0,
+        len: 8, rows: 1, cols: 8
+    }
+}
+
+// 2D indexing: row-major
+fn t16_get_rc(t: Tensor16, r: Int, c: Int) -> Int {
+    t16_get(t, r * t.cols + c)
+}
+
+// ============================================================================
+// Element-wise binary operations
+// ============================================================================
+
+fn tensor_add(a: Tensor16, b: Tensor16) -> Tensor16 {
+    let mut r = t16_zeros(a.rows, a.cols);
+    let mut i = 0;
+    while i < a.len {
+        r = t16_set(r, i, t16_get(a, i) + t16_get(b, i));
+        i = i + 1;
+    }
+    r
+}
+
+fn tensor_sub(a: Tensor16, b: Tensor16) -> Tensor16 {
+    let mut r = t16_zeros(a.rows, a.cols);
+    let mut i = 0;
+    while i < a.len {
+        r = t16_set(r, i, t16_get(a, i) - t16_get(b, i));
+        i = i + 1;
+    }
+    r
+}
+
+fn tensor_mul(a: Tensor16, b: Tensor16) -> Tensor16 {
+    let mut r = t16_zeros(a.rows, a.cols);
+    let mut i = 0;
+    while i < a.len {
+        r = t16_set(r, i, t16_get(a, i) * t16_get(b, i));
+        i = i + 1;
+    }
+    r
+}
+
+fn tensor_div(a: Tensor16, b: Tensor16) -> Tensor16 {
+    let mut r = t16_zeros(a.rows, a.cols);
+    let mut i = 0;
+    while i < a.len {
+        r = t16_set(r, i, t16_get(a, i) / t16_get(b, i));
+        i = i + 1;
+    }
+    r
+}
+
+fn tensor_scale(t: Tensor16, s: Int) -> Tensor16 {
+    let mut r = t16_zeros(t.rows, t.cols);
+    let mut i = 0;
+    while i < t.len {
+        r = t16_set(r, i, t16_get(t, i) * s);
+        i = i + 1;
+    }
+    r
+}
+
+fn tensor_negate(t: Tensor16) -> Tensor16 {
+    let mut r = t16_zeros(t.rows, t.cols);
+    let mut i = 0;
+    while i < t.len {
+        r = t16_set(r, i, 0 - t16_get(t, i));
+        i = i + 1;
+    }
+    r
+}
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn tensor_abs(t: Tensor16) -> Tensor16 {
+    let mut r = t16_zeros(t.rows, t.cols);
+    let mut i = 0;
+    while i < t.len {
+        r = t16_set(r, i, int_abs(t16_get(t, i)));
+        i = i + 1;
+    }
+    r
+}
+
+// ============================================================================
+// Reduction operations
+// ============================================================================
+
+fn tensor_sum(t: Tensor16) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < t.len {
+        s = s + t16_get(t, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn tensor_max(t: Tensor16) -> Int {
+    let mut m = t16_get(t, 0);
+    let mut i = 1;
+    while i < t.len {
+        let v = t16_get(t, i);
+        if v > m { m = v; }
+        i = i + 1;
+    }
+    m
+}
+
+fn tensor_min(t: Tensor16) -> Int {
+    let mut m = t16_get(t, 0);
+    let mut i = 1;
+    while i < t.len {
+        let v = t16_get(t, i);
+        if v < m { m = v; }
+        i = i + 1;
+    }
+    m
+}
+
+fn tensor_product(t: Tensor16) -> Int {
+    let mut p = 1;
+    let mut i = 0;
+    while i < t.len {
+        p = p * t16_get(t, i);
+        i = i + 1;
+    }
+    p
+}
+
+fn tensor_mean_x1000(t: Tensor16) -> Int {
+    (tensor_sum(t) * 1000) / t.len
+}
+
+fn tensor_argmax(t: Tensor16) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = t16_get(t, 0);
+    let mut i = 1;
+    while i < t.len {
+        let v = t16_get(t, i);
+        if v > best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn tensor_argmin(t: Tensor16) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = t16_get(t, 0);
+    let mut i = 1;
+    while i < t.len {
+        let v = t16_get(t, i);
+        if v < best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+// ============================================================================
+// Shape operations
+// ============================================================================
+
+fn tensor_reshape(t: Tensor16, new_rows: Int, new_cols: Int) -> Tensor16 {
+    Tensor16 {
+        d0: t.d0, d1: t.d1, d2: t.d2, d3: t.d3,
+        d4: t.d4, d5: t.d5, d6: t.d6, d7: t.d7,
+        d8: t.d8, d9: t.d9, d10: t.d10, d11: t.d11,
+        d12: t.d12, d13: t.d13, d14: t.d14, d15: t.d15,
+        len: t.len, rows: new_rows, cols: new_cols
+    }
+}
+
+fn tensor_transpose(t: Tensor16) -> Tensor16 {
+    let mut result = t16_zeros(t.cols, t.rows);
+    let mut r = 0;
+    while r < t.rows {
+        let mut c = 0;
+        while c < t.cols {
+            let src_idx = r * t.cols + c;
+            let dst_idx = c * t.rows + r;
+            result = t16_set(result, dst_idx, t16_get(t, src_idx));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+fn tensor_slice_row(t: Tensor16, row: Int) -> Tensor16 {
+    let start = row * t.cols;
+    let mut result = t16_zeros(1, t.cols);
+    let mut i = 0;
+    while i < t.cols {
+        result = t16_set(result, i, t16_get(t, start + i));
+        i = i + 1;
+    }
+    result
+}
+
+fn tensor_slice_col(t: Tensor16, col: Int) -> Tensor16 {
+    let mut result = t16_zeros(t.rows, 1);
+    let mut r = 0;
+    while r < t.rows {
+        result = t16_set(result, r, t16_get(t, r * t.cols + col));
+        r = r + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Test 1: Tensor creation and shape
+// ============================================================================
+
+@test
+fn test_creation_and_shape() {
+    // Zeros
+    let z = t16_zeros(3, 4);
+    assert_eq(z.rows, 3);
+    assert_eq(z.cols, 4);
+    assert_eq(z.len, 12);
+    assert_eq(t16_get(z, 0), 0);
+    assert_eq(t16_get(z, 11), 0);
+
+    // Full
+    let f = t16_full(2, 3, 42);
+    assert_eq(f.rows, 2);
+    assert_eq(f.cols, 3);
+    assert_eq(f.len, 6);
+    assert_eq(t16_get(f, 0), 42);
+    assert_eq(t16_get(f, 5), 42);
+
+    // From 8 values
+    let v = t16_from8(10, 20, 30, 40, 50, 60, 70, 80);
+    assert_eq(v.len, 8);
+    assert_eq(t16_get(v, 0), 10);
+    assert_eq(t16_get(v, 7), 80);
+    print("  test_creation_and_shape: ok");
+}
+
+// ============================================================================
+// Test 2: Element-wise addition and subtraction
+// ============================================================================
+
+@test
+fn test_add_sub() {
+    let a = t16_from8(1, 2, 3, 4, 5, 6, 7, 8);
+    let b = t16_from8(10, 20, 30, 40, 50, 60, 70, 80);
+
+    let sum = tensor_add(a, b);
+    assert_eq(t16_get(sum, 0), 11);
+    assert_eq(t16_get(sum, 3), 44);
+    assert_eq(t16_get(sum, 7), 88);
+
+    let diff = tensor_sub(b, a);
+    assert_eq(t16_get(diff, 0), 9);
+    assert_eq(t16_get(diff, 3), 36);
+    assert_eq(t16_get(diff, 7), 72);
+
+    // a + b - b = a
+    let roundtrip = tensor_sub(tensor_add(a, b), b);
+    assert_eq(t16_get(roundtrip, 0), 1);
+    assert_eq(t16_get(roundtrip, 4), 5);
+    assert_eq(t16_get(roundtrip, 7), 8);
+
+    // a - a = 0
+    let zero = tensor_sub(a, a);
+    assert_eq(t16_get(zero, 0), 0);
+    assert_eq(t16_get(zero, 7), 0);
+    print("  test_add_sub: ok");
+}
+
+// ============================================================================
+// Test 3: Element-wise multiplication and division
+// ============================================================================
+
+@test
+fn test_mul_div() {
+    let a = t16_from8(2, 3, 4, 5, 6, 7, 8, 9);
+    let b = t16_from8(10, 10, 10, 10, 10, 10, 10, 10);
+
+    let prod = tensor_mul(a, b);
+    assert_eq(t16_get(prod, 0), 20);
+    assert_eq(t16_get(prod, 3), 50);
+    assert_eq(t16_get(prod, 7), 90);
+
+    // div(a*b, b) = a
+    let quot = tensor_div(prod, b);
+    assert_eq(t16_get(quot, 0), 2);
+    assert_eq(t16_get(quot, 4), 6);
+    assert_eq(t16_get(quot, 7), 9);
+
+    // Scale
+    let scaled = tensor_scale(a, 5);
+    assert_eq(t16_get(scaled, 0), 10);
+    assert_eq(t16_get(scaled, 3), 25);
+
+    // Scale by 0
+    let zero_scale = tensor_scale(a, 0);
+    assert_eq(t16_get(zero_scale, 0), 0);
+    assert_eq(t16_get(zero_scale, 7), 0);
+    print("  test_mul_div: ok");
+}
+
+// ============================================================================
+// Test 4: Negate and absolute value
+// ============================================================================
+
+@test
+fn test_negate_abs() {
+    let a = t16_from8(-3, 5, -7, 2, -11, 0, 4, -1);
+
+    // Negate
+    let neg = tensor_negate(a);
+    assert_eq(t16_get(neg, 0), 3);
+    assert_eq(t16_get(neg, 1), -5);
+    assert_eq(t16_get(neg, 5), 0);
+
+    // Double negate = identity
+    let nn = tensor_negate(tensor_negate(a));
+    assert_eq(t16_get(nn, 0), -3);
+    assert_eq(t16_get(nn, 1), 5);
+
+    // Abs
+    let ab = tensor_abs(a);
+    assert_eq(t16_get(ab, 0), 3);
+    assert_eq(t16_get(ab, 1), 5);
+    assert_eq(t16_get(ab, 2), 7);
+    assert_eq(t16_get(ab, 4), 11);
+    assert_eq(t16_get(ab, 5), 0);
+
+    // negate then abs = abs
+    let na = tensor_abs(tensor_negate(a));
+    let ab2 = tensor_abs(a);
+    assert_eq(t16_get(na, 0), t16_get(ab2, 0));
+    assert_eq(t16_get(na, 2), t16_get(ab2, 2));
+    print("  test_negate_abs: ok");
+}
+
+// ============================================================================
+// Test 5: Sum, max, min reductions
+// ============================================================================
+
+@test
+fn test_reductions() {
+    let t = t16_from8(3, 1, 4, 1, 5, 9, 2, 6);
+    assert_eq(tensor_sum(t), 31);
+    assert_eq(tensor_max(t), 9);
+    assert_eq(tensor_min(t), 1);
+    assert_eq(tensor_product(t), 6480);  // 3*1*4*1*5*9*2*6
+
+    // Mean x1000: 31/8 = 3.875, x1000 = 3875
+    assert_eq(tensor_mean_x1000(t), 3875);
+
+    // Argmax / argmin
+    assert_eq(tensor_argmax(t), 5);  // index of 9
+    assert_eq(tensor_argmin(t), 1);  // index of first 1
+
+    // Single element tensor
+    let single = Tensor16 {
+        d0: 42, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0,
+        d8: 0, d9: 0, d10: 0, d11: 0, d12: 0, d13: 0, d14: 0, d15: 0,
+        len: 1, rows: 1, cols: 1
+    };
+    assert_eq(tensor_sum(single), 42);
+    assert_eq(tensor_max(single), 42);
+    assert_eq(tensor_min(single), 42);
+    print("  test_reductions: ok");
+}
+
+// ============================================================================
+// Test 6: Reshape
+// ============================================================================
+
+@test
+fn test_reshape() {
+    // Create 1x12 vector [1..12]
+    let mut t = t16_zeros(1, 12);
+    let mut i = 0;
+    while i < 12 {
+        t = t16_set(t, i, i + 1);
+        i = i + 1;
+    }
+    assert_eq(t.rows, 1);
+    assert_eq(t.cols, 12);
+
+    // Reshape to 3x4
+    let m = tensor_reshape(t, 3, 4);
+    assert_eq(m.rows, 3);
+    assert_eq(m.cols, 4);
+    assert_eq(m.len, 12);
+
+    // Data unchanged: flat indexing same
+    assert_eq(t16_get(m, 0), 1);
+    assert_eq(t16_get(m, 11), 12);
+
+    // 2D access: row 1, col 2 => index 6 => value 7
+    assert_eq(t16_get_rc(m, 1, 2), 7);
+    // row 2, col 0 => index 8 => value 9
+    assert_eq(t16_get_rc(m, 2, 0), 9);
+
+    // Reshape to 4x3
+    let m2 = tensor_reshape(t, 4, 3);
+    // row 1, col 1 => index 4 => value 5
+    assert_eq(t16_get_rc(m2, 1, 1), 5);
+    // row 3, col 2 => index 11 => value 12
+    assert_eq(t16_get_rc(m2, 3, 2), 12);
+
+    // Reshape to 2x6
+    let m3 = tensor_reshape(t, 2, 6);
+    assert_eq(t16_get_rc(m3, 0, 5), 6);
+    assert_eq(t16_get_rc(m3, 1, 0), 7);
+    print("  test_reshape: ok");
+}
+
+// ============================================================================
+// Test 7: Transpose
+// ============================================================================
+
+@test
+fn test_transpose() {
+    // 2x3 matrix:
+    // [1 2 3]
+    // [4 5 6]
+    let mut t = t16_zeros(2, 3);
+    t = t16_set(t, 0, 1);
+    t = t16_set(t, 1, 2);
+    t = t16_set(t, 2, 3);
+    t = t16_set(t, 3, 4);
+    t = t16_set(t, 4, 5);
+    t = t16_set(t, 5, 6);
+
+    let tr = tensor_transpose(t);
+    assert_eq(tr.rows, 3);
+    assert_eq(tr.cols, 2);
+    // Transposed:
+    // [1 4]
+    // [2 5]
+    // [3 6]
+    assert_eq(t16_get_rc(tr, 0, 0), 1);
+    assert_eq(t16_get_rc(tr, 0, 1), 4);
+    assert_eq(t16_get_rc(tr, 1, 0), 2);
+    assert_eq(t16_get_rc(tr, 1, 1), 5);
+    assert_eq(t16_get_rc(tr, 2, 0), 3);
+    assert_eq(t16_get_rc(tr, 2, 1), 6);
+
+    // Transpose of transpose = original
+    let tt = tensor_transpose(tensor_transpose(t));
+    assert_eq(t16_get(tt, 0), 1);
+    assert_eq(t16_get(tt, 5), 6);
+    assert_eq(tt.rows, 2);
+    assert_eq(tt.cols, 3);
+
+    // Symmetric matrix: transpose = self
+    // [1 2]
+    // [2 1]
+    let mut sym = t16_zeros(2, 2);
+    sym = t16_set(sym, 0, 1);
+    sym = t16_set(sym, 1, 2);
+    sym = t16_set(sym, 2, 2);
+    sym = t16_set(sym, 3, 1);
+    let sym_t = tensor_transpose(sym);
+    assert_eq(t16_get(sym_t, 0), 1);
+    assert_eq(t16_get(sym_t, 1), 2);
+    assert_eq(t16_get(sym_t, 2), 2);
+    assert_eq(t16_get(sym_t, 3), 1);
+    print("  test_transpose: ok");
+}
+
+// ============================================================================
+// Test 8: Scalar get/set operations
+// ============================================================================
+
+@test
+fn test_scalar_access() {
+    let mut t = t16_zeros(4, 4);
+
+    // Set diagonal elements
+    t = t16_set(t, 0, 10);    // (0,0)
+    t = t16_set(t, 5, 20);    // (1,1)
+    t = t16_set(t, 10, 30);   // (2,2)
+    t = t16_set(t, 15, 40);   // (3,3)
+
+    assert_eq(t16_get_rc(t, 0, 0), 10);
+    assert_eq(t16_get_rc(t, 1, 1), 20);
+    assert_eq(t16_get_rc(t, 2, 2), 30);
+    assert_eq(t16_get_rc(t, 3, 3), 40);
+
+    // Off-diagonal still zero
+    assert_eq(t16_get_rc(t, 0, 1), 0);
+    assert_eq(t16_get_rc(t, 1, 0), 0);
+    assert_eq(t16_get_rc(t, 2, 3), 0);
+
+    // Overwrite value
+    t = t16_set(t, 5, 999);
+    assert_eq(t16_get_rc(t, 1, 1), 999);
+
+    // Sum of diagonal
+    let diag_sum = t16_get_rc(t, 0, 0) + t16_get_rc(t, 1, 1) + t16_get_rc(t, 2, 2) + t16_get_rc(t, 3, 3);
+    assert_eq(diag_sum, 10 + 999 + 30 + 40);
+    print("  test_scalar_access: ok");
+}
+
+// ============================================================================
+// Test 9: Row and column slicing
+// ============================================================================
+
+@test
+fn test_slicing() {
+    // 3x4 matrix [1..12]
+    let mut t = t16_zeros(3, 4);
+    let mut i = 0;
+    while i < 12 {
+        t = t16_set(t, i, i + 1);
+        i = i + 1;
+    }
+
+    // Slice row 0: [1, 2, 3, 4]
+    let row0 = tensor_slice_row(t, 0);
+    assert_eq(row0.len, 4);
+    assert_eq(t16_get(row0, 0), 1);
+    assert_eq(t16_get(row0, 3), 4);
+
+    // Slice row 2: [9, 10, 11, 12]
+    let row2 = tensor_slice_row(t, 2);
+    assert_eq(t16_get(row2, 0), 9);
+    assert_eq(t16_get(row2, 3), 12);
+
+    // Slice col 0: [1, 5, 9]
+    let col0 = tensor_slice_col(t, 0);
+    assert_eq(col0.len, 3);
+    assert_eq(t16_get(col0, 0), 1);
+    assert_eq(t16_get(col0, 1), 5);
+    assert_eq(t16_get(col0, 2), 9);
+
+    // Slice col 3: [4, 8, 12]
+    let col3 = tensor_slice_col(t, 3);
+    assert_eq(t16_get(col3, 0), 4);
+    assert_eq(t16_get(col3, 1), 8);
+    assert_eq(t16_get(col3, 2), 12);
+    print("  test_slicing: ok");
+}
+
+// ============================================================================
+// Test 10: Combined operations pipeline
+// ============================================================================
+
+@test
+fn test_combined_pipeline() {
+    let a = t16_from8(1, 2, 3, 4, 5, 6, 7, 8);
+    let b = t16_from8(8, 7, 6, 5, 4, 3, 2, 1);
+
+    // (a + b) should be all 9s
+    let sum = tensor_add(a, b);
+    assert_eq(t16_get(sum, 0), 9);
+    assert_eq(t16_get(sum, 4), 9);
+    assert_eq(t16_get(sum, 7), 9);
+    assert_eq(tensor_sum(sum), 72);
+
+    // (a - b) = [-7, -5, -3, -1, 1, 3, 5, 7]
+    let diff = tensor_sub(a, b);
+    assert_eq(t16_get(diff, 0), -7);
+    assert_eq(t16_get(diff, 3), -1);
+    assert_eq(t16_get(diff, 4), 1);
+    assert_eq(t16_get(diff, 7), 7);
+
+    // abs(a - b) = [7, 5, 3, 1, 1, 3, 5, 7]
+    let abs_diff = tensor_abs(diff);
+    assert_eq(t16_get(abs_diff, 0), 7);
+    assert_eq(t16_get(abs_diff, 3), 1);
+    assert_eq(tensor_sum(abs_diff), 32);
+
+    // (a * b) + (b * a) = 2 * (a * b)  (commutativity)
+    let ab = tensor_mul(a, b);
+    let ba = tensor_mul(b, a);
+    assert_eq(tensor_sum(ab), tensor_sum(ba));
+
+    // Verify a*b element values: [8, 14, 18, 20, 20, 18, 14, 8]
+    assert_eq(t16_get(ab, 0), 8);
+    assert_eq(t16_get(ab, 1), 14);
+    assert_eq(t16_get(ab, 3), 20);
+    assert_eq(tensor_sum(ab), 120);
+    print("  test_combined_pipeline: ok");
+}
+
+// ============================================================================
+// Test 11: Reduction on 2D tensor (row-wise and column-wise)
+// ============================================================================
+
+@test
+fn test_2d_reductions() {
+    // 3x4 matrix:
+    // row 0: [1, 2, 3, 4]   sum=10
+    // row 1: [5, 6, 7, 8]   sum=26
+    // row 2: [9, 10, 11, 12] sum=42
+    let mut t = t16_zeros(3, 4);
+    let mut i = 0;
+    while i < 12 {
+        t = t16_set(t, i, i + 1);
+        i = i + 1;
+    }
+
+    // Row-wise sum
+    let row0_sum = tensor_sum(tensor_slice_row(t, 0));
+    assert_eq(row0_sum, 10);
+    let row1_sum = tensor_sum(tensor_slice_row(t, 1));
+    assert_eq(row1_sum, 26);
+    let row2_sum = tensor_sum(tensor_slice_row(t, 2));
+    assert_eq(row2_sum, 42);
+
+    // Column-wise sum
+    let col0_sum = tensor_sum(tensor_slice_col(t, 0));
+    assert_eq(col0_sum, 15);  // 1+5+9
+    let col1_sum = tensor_sum(tensor_slice_col(t, 1));
+    assert_eq(col1_sum, 18);  // 2+6+10
+    let col3_sum = tensor_sum(tensor_slice_col(t, 3));
+    assert_eq(col3_sum, 24);  // 4+8+12
+
+    // Total sum equals sum of all row sums
+    assert_eq(row0_sum + row1_sum + row2_sum, tensor_sum(t));
+    assert_eq(tensor_sum(t), 78);  // 12*13/2
+    print("  test_2d_reductions: ok");
+}
+
+// ============================================================================
+// Test 12: Negative values and mixed operations
+// ============================================================================
+
+@test
+fn test_negative_values() {
+    let t = t16_from8(-50, -30, -10, 0, 10, 30, 50, 70);
+
+    assert_eq(tensor_sum(t), 70);
+    assert_eq(tensor_max(t), 70);
+    assert_eq(tensor_min(t), -50);
+    assert_eq(tensor_argmax(t), 7);
+    assert_eq(tensor_argmin(t), 0);
+
+    // All negative tensor
+    let neg = t16_from8(-8, -6, -4, -2, -1, -3, -5, -7);
+    assert_eq(tensor_sum(neg), -36);
+    assert_eq(tensor_max(neg), -1);
+    assert_eq(tensor_min(neg), -8);
+    assert_eq(tensor_argmax(neg), 4);
+    assert_eq(tensor_argmin(neg), 0);
+
+    // abs of all-negative = all-positive
+    let abs_neg = tensor_abs(neg);
+    assert_eq(tensor_sum(abs_neg), 36);
+    assert_eq(tensor_min(abs_neg), 1);
+    print("  test_negative_values: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_creation_and_shape();
+    test_add_sub();
+    test_mul_div();
+    test_negate_abs();
+    test_reductions();
+    test_reshape();
+    test_transpose();
+    test_scalar_access();
+    test_slicing();
+    test_combined_pipeline();
+    test_2d_reductions();
+    test_negative_values();
+    print("[OK] 184_interp_tensor_basic");
+    0
+}

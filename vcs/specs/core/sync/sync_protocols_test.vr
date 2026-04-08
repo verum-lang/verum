@@ -1,0 +1,209 @@
+// =============================================================================
+// sync_protocols_test.vr - Tests for sync type protocol implementations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: sync, mutex, rwlock, protocols, display, debug, core
+// @description: Tests Display for PoisonError/TryLockError, Debug for RwLock guards
+// =============================================================================
+
+mount core.sync.mutex.{
+    Mutex, MutexGuard,
+    PoisonError, TryLockError,
+    LockResult, TryLockResult,
+};
+mount core.sync.rwlock.{
+    RwLock, RwLockReadGuard, RwLockWriteGuard,
+};
+mount core.base.protocols.{Display, Debug, Eq, Clone};
+mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// =============================================================================
+// Section 1: PoisonError Display
+// =============================================================================
+
+@test
+fn test_poison_error_display() {
+    let err: PoisonError<Int> = PoisonError.new(42);
+    let text = format_display(&err);
+    assert(text.contains("poisoned"));
+    assert(text.contains("lock"));
+}
+
+@test
+fn test_poison_error_debug() {
+    let err: PoisonError<Int> = PoisonError.new(42);
+    let text = format_debug(&err);
+    assert(text.contains("PoisonError"));
+}
+
+@test
+fn test_poison_error_get_ref() {
+    let err: PoisonError<Int> = PoisonError.new(99);
+    let val = err.get_ref();
+    assert_eq(*val, 99);
+}
+
+@test
+fn test_poison_error_into_inner() {
+    let err: PoisonError<Int> = PoisonError.new(77);
+    let val = err.into_inner();
+    assert_eq(val, 77);
+}
+
+@test
+fn test_poison_error_display_consistent() {
+    let err1: PoisonError<Int> = PoisonError.new(1);
+    let err2: PoisonError<Int> = PoisonError.new(2);
+    // Display message is the same regardless of inner value
+    assert_eq(format_display(&err1), format_display(&err2));
+}
+
+// =============================================================================
+// Section 2: TryLockError Display
+// =============================================================================
+
+@test
+fn test_try_lock_error_would_block_display() {
+    let err: TryLockError<Int> = TryLockError.WouldBlock;
+    let text = format_display(&err);
+    assert(text.contains("lock"));
+    assert(text.contains("held"));
+}
+
+@test
+fn test_try_lock_error_poisoned_display() {
+    let poison = PoisonError.new(42);
+    let err: TryLockError<Int> = TryLockError.Poisoned(poison);
+    let text = format_display(&err);
+    assert(text.contains("poisoned"));
+}
+
+@test
+fn test_try_lock_error_would_block_debug() {
+    let err: TryLockError<Int> = TryLockError.WouldBlock;
+    let text = format_debug(&err);
+    assert(text.contains("WouldBlock"));
+}
+
+@test
+fn test_try_lock_error_poisoned_debug() {
+    let poison = PoisonError.new(42);
+    let err: TryLockError<Int> = TryLockError.Poisoned(poison);
+    let text = format_debug(&err);
+    assert(text.contains("Poisoned"));
+}
+
+@test
+fn test_try_lock_error_display_differs_by_variant() {
+    let would_block: TryLockError<Int> = TryLockError.WouldBlock;
+    let poison = PoisonError.new(42);
+    let poisoned: TryLockError<Int> = TryLockError.Poisoned(poison);
+    assert(format_display(&would_block) != format_display(&poisoned));
+}
+
+@test
+fn test_try_lock_error_is_would_block() {
+    let err: TryLockError<Int> = TryLockError.WouldBlock;
+    assert(err is TryLockError.WouldBlock);
+}
+
+@test
+fn test_try_lock_error_is_poisoned() {
+    let poison = PoisonError.new(42);
+    let err: TryLockError<Int> = TryLockError.Poisoned(poison);
+    assert(err is TryLockError.Poisoned);
+}
+
+// =============================================================================
+// Section 3: RwLock Guard Debug
+// =============================================================================
+
+@test
+fn test_rwlock_read_guard_debug_fn_exists() {
+    let rw: RwLock<Int> = RwLock.new(42);
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    assert(result.is_ok());
+}
+
+@test
+fn test_rwlock_write_guard_debug_fn_exists() {
+    let rw: RwLock<Int> = RwLock.new(42);
+    let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Section 4: Mutex Type Tests
+// =============================================================================
+
+@test
+fn test_mutex_type_exists() {
+    let m: Mutex<Int> = Mutex.new(42);
+    assert(!m.is_poisoned());
+}
+
+@test
+fn test_lock_result_type_exists() {
+    let m: Mutex<Int> = Mutex.new(0);
+    let result: LockResult<MutexGuard<Int>> = m.lock();
+    assert(result.is_ok());
+}
+
+@test
+fn test_try_lock_result_type_exists() {
+    let m: Mutex<Int> = Mutex.new(0);
+    let result: TryLockResult<MutexGuard<Int>> = m.try_lock();
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Section 5: RwLock Type Tests
+// =============================================================================
+
+@test
+fn test_rwlock_type_exists() {
+    let rw: RwLock<Int> = RwLock.new(99);
+    assert(!rw.is_poisoned());
+}
+
+@test
+fn test_rwlock_read_guard_type_exists() {
+    let rw: RwLock<Int> = RwLock.new(10);
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    assert(result.is_ok());
+}
+
+@test
+fn test_rwlock_write_guard_type_exists() {
+    let rw: RwLock<Int> = RwLock.new(10);
+    let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Section 6: Error Messages Quality
+// =============================================================================
+
+@test
+fn test_poison_error_message_actionable() {
+    let err: PoisonError<Int> = PoisonError.new(1);
+    let msg = format_display(&err);
+    // Message should explain the problem and cause
+    assert(msg.len() > 20); // Not just a short label
+    assert(msg.contains("task") || msg.contains("thread"));
+}
+
+@test
+fn test_try_lock_error_message_actionable() {
+    let err: TryLockError<Int> = TryLockError.WouldBlock;
+    let msg = format_display(&err);
+    assert(msg.len() > 15);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

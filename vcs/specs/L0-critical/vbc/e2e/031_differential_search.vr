@@ -1,0 +1,240 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, interpreter-vs-aot, search
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Differential search test: verifies interpreter and AOT produce identical results
+// for binary search, linear search, and lower bound on sorted flat arrays.
+
+// Fixed-size array of 8 elements
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+    }
+}
+
+// Linear search: returns index of first occurrence, or -1 if not found
+fn linear_search(a: Arr8, n: Int, target: Int) -> Int {
+    let mut i = 0;
+    let mut found = 0 - 1;
+    while i < n {
+        if arr8_get(a, i) == target && found == 0 - 1 {
+            found = i;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+// Linear search: count occurrences
+fn linear_count(a: Arr8, n: Int, target: Int) -> Int {
+    let mut i = 0;
+    let mut count = 0;
+    while i < n {
+        if arr8_get(a, i) == target {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Binary search on sorted array: returns index of target, or -1 if not found
+fn binary_search(a: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    let mut result = 0 - 1;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let val = arr8_get(a, mid);
+        if val == target {
+            result = mid;
+            lo = hi + 1; // break
+        } else if val < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    result
+}
+
+// Lower bound: returns first index i such that a[i] >= target.
+// If all elements are less, returns n.
+fn lower_bound(a: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if arr8_get(a, mid) < target {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+// Upper bound: returns first index i such that a[i] > target.
+// If all elements are <= target, returns n.
+fn upper_bound(a: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if arr8_get(a, mid) <= target {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+// Find min element in array
+fn find_min(a: Arr8, n: Int) -> Int {
+    let mut m = arr8_get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let v = arr8_get(a, i);
+        if v < m {
+            m = v;
+        }
+        i = i + 1;
+    }
+    m
+}
+
+// Find max element in array
+fn find_max(a: Arr8, n: Int) -> Int {
+    let mut m = arr8_get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let v = arr8_get(a, i);
+        if v > m {
+            m = v;
+        }
+        i = i + 1;
+    }
+    m
+}
+
+fn main() -> Int {
+    // Sorted array for binary search tests
+    let sorted = Arr8 { e0: 2, e1: 5, e2: 8, e3: 12, e4: 16, e5: 23, e6: 38, e7: 56 };
+
+    // --- Binary Search: found ---
+    assert_eq(binary_search(sorted, 8, 2), 0);
+    assert_eq(binary_search(sorted, 8, 5), 1);
+    assert_eq(binary_search(sorted, 8, 8), 2);
+    assert_eq(binary_search(sorted, 8, 12), 3);
+    assert_eq(binary_search(sorted, 8, 16), 4);
+    assert_eq(binary_search(sorted, 8, 23), 5);
+    assert_eq(binary_search(sorted, 8, 38), 6);
+    assert_eq(binary_search(sorted, 8, 56), 7);
+
+    // --- Binary Search: not found ---
+    assert_eq(binary_search(sorted, 8, 1), 0 - 1);
+    assert_eq(binary_search(sorted, 8, 3), 0 - 1);
+    assert_eq(binary_search(sorted, 8, 10), 0 - 1);
+    assert_eq(binary_search(sorted, 8, 100), 0 - 1);
+    assert_eq(binary_search(sorted, 8, 0), 0 - 1);
+
+    // --- Lower Bound ---
+    assert_eq(lower_bound(sorted, 8, 2), 0);   // exact match at 0
+    assert_eq(lower_bound(sorted, 8, 1), 0);   // before first
+    assert_eq(lower_bound(sorted, 8, 3), 1);   // between 2 and 5 -> index 1
+    assert_eq(lower_bound(sorted, 8, 5), 1);   // exact match at 1
+    assert_eq(lower_bound(sorted, 8, 9), 3);   // between 8 and 12 -> index 3
+    assert_eq(lower_bound(sorted, 8, 56), 7);  // exact match at last
+    assert_eq(lower_bound(sorted, 8, 57), 8);  // past end -> n
+    assert_eq(lower_bound(sorted, 8, 100), 8); // way past end -> n
+
+    // --- Upper Bound ---
+    assert_eq(upper_bound(sorted, 8, 2), 1);   // first > 2 is at index 1
+    assert_eq(upper_bound(sorted, 8, 1), 0);   // first > 1 is at index 0
+    assert_eq(upper_bound(sorted, 8, 56), 8);  // nothing > 56 -> n
+    assert_eq(upper_bound(sorted, 8, 12), 4);  // first > 12 is at index 4
+    assert_eq(upper_bound(sorted, 8, 0), 0);   // first > 0 is at index 0
+
+    // --- Lower/Upper bound relation: count of value = upper - lower ---
+    let dups = Arr8 { e0: 1, e1: 3, e2: 3, e3: 3, e4: 5, e5: 7, e6: 7, e7: 9 };
+    assert_eq(lower_bound(dups, 8, 3), 1);
+    assert_eq(upper_bound(dups, 8, 3), 4);
+    assert_eq(upper_bound(dups, 8, 3) - lower_bound(dups, 8, 3), 3); // three 3s
+
+    assert_eq(lower_bound(dups, 8, 7), 5);
+    assert_eq(upper_bound(dups, 8, 7), 7);
+    assert_eq(upper_bound(dups, 8, 7) - lower_bound(dups, 8, 7), 2); // two 7s
+
+    assert_eq(lower_bound(dups, 8, 4), 4);
+    assert_eq(upper_bound(dups, 8, 4), 4);
+    assert_eq(upper_bound(dups, 8, 4) - lower_bound(dups, 8, 4), 0); // no 4s
+
+    // --- Linear Search ---
+    let unsorted = Arr8 { e0: 7, e1: 2, e2: 9, e3: 4, e4: 2, e5: 6, e6: 1, e7: 8 };
+    assert_eq(linear_search(unsorted, 8, 7), 0);
+    assert_eq(linear_search(unsorted, 8, 2), 1);  // first occurrence
+    assert_eq(linear_search(unsorted, 8, 9), 2);
+    assert_eq(linear_search(unsorted, 8, 1), 6);
+    assert_eq(linear_search(unsorted, 8, 8), 7);
+    assert_eq(linear_search(unsorted, 8, 99), 0 - 1); // not found
+
+    // --- Linear Count ---
+    assert_eq(linear_count(unsorted, 8, 2), 2);
+    assert_eq(linear_count(unsorted, 8, 7), 1);
+    assert_eq(linear_count(unsorted, 8, 99), 0);
+
+    let all_same = Arr8 { e0: 4, e1: 4, e2: 4, e3: 4, e4: 4, e5: 4, e6: 4, e7: 4 };
+    assert_eq(linear_count(all_same, 8, 4), 8);
+    assert_eq(linear_search(all_same, 8, 4), 0);
+
+    // --- Find Min/Max ---
+    assert_eq(find_min(unsorted, 8), 1);
+    assert_eq(find_max(unsorted, 8), 9);
+    assert_eq(find_min(sorted, 8), 2);
+    assert_eq(find_max(sorted, 8), 56);
+    assert_eq(find_min(all_same, 8), 4);
+    assert_eq(find_max(all_same, 8), 4);
+
+    // --- Binary search on subarray ---
+    assert_eq(binary_search(sorted, 4, 2), 0);
+    assert_eq(binary_search(sorted, 4, 12), 3);
+    assert_eq(binary_search(sorted, 4, 16), 0 - 1); // outside subarray range
+
+    // --- Edge: single element ---
+    let single = Arr8 { e0: 42, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(binary_search(single, 1, 42), 0);
+    assert_eq(binary_search(single, 1, 0), 0 - 1);
+    assert_eq(lower_bound(single, 1, 42), 0);
+    assert_eq(lower_bound(single, 1, 43), 1);
+    assert_eq(lower_bound(single, 1, 0), 0);
+    assert_eq(linear_search(single, 1, 42), 0);
+    assert_eq(find_min(single, 1), 42);
+    assert_eq(find_max(single, 1), 42);
+
+    print("[OK] 031_differential_search");
+    0
+}

@@ -1,0 +1,304 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, ranges
+// @description: Test range expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// EXCLUSIVE RANGE (Section 2.10 - range_expr, range_op = '..')
+// =============================================================================
+
+fn test_exclusive_range() {
+    let a = 0..10;
+    let b = 1..100;
+    let c = start..end;
+}
+
+fn test_exclusive_range_expressions() {
+    let a = (x + 1)..(y - 1);
+    let b = min..max;
+    let c = compute_start()..compute_end();
+}
+
+fn test_exclusive_range_in_for() {
+    for i in 0..10 {
+        process(i);
+    }
+
+    for i in start..end {
+        use(i);
+    }
+
+    for i in 0..items.len() {
+        process(items[i]);
+    }
+}
+
+// =============================================================================
+// INCLUSIVE RANGE (Section 2.10 - range_op = '..=')
+// =============================================================================
+
+fn test_inclusive_range() {
+    let a = 0..=10;
+    let b = 1..=100;
+    let c = start..=end;
+}
+
+fn test_inclusive_range_expressions() {
+    let a = (x + 1)..=(y - 1);
+    let b = min..=max;
+    let c = compute_start()..=compute_end();
+}
+
+fn test_inclusive_range_in_for() {
+    for i in 0..=10 {
+        process(i);
+    }
+
+    for i in 1..=n {
+        sum += i;
+    }
+}
+
+// =============================================================================
+// RANGE FROM (start..)
+// =============================================================================
+
+fn test_range_from() {
+    let a = 0..;
+    let b = start..;
+    let c = (x + 1)..;
+}
+
+fn test_range_from_usage() {
+    // Open-ended ranges need parentheses in for loops
+    for i in (0..) {
+        if done(i) {
+            break;
+        }
+    }
+
+    let slice = array[start..];
+}
+
+// =============================================================================
+// RANGE TO (..end)
+// =============================================================================
+
+fn test_range_to() {
+    let a = ..10;
+    let b = ..end;
+    let c = ..(x - 1);
+}
+
+fn test_range_to_usage() {
+    let slice = array[..end];
+    let prefix = text[..n];
+}
+
+// =============================================================================
+// RANGE TO INCLUSIVE (..=end)
+// =============================================================================
+
+fn test_range_to_inclusive() {
+    let a = ..=10;
+    let b = ..=end;
+    let c = ..=(x - 1);
+}
+
+fn test_range_to_inclusive_usage() {
+    let slice = array[..=end];
+    let prefix = text[..=n];
+}
+
+// =============================================================================
+// FULL RANGE (..)
+// =============================================================================
+
+fn test_full_range() {
+    let a = ..;
+}
+
+fn test_full_range_usage() {
+    let full_slice = array[..];
+    let copy = text[..];
+}
+
+// =============================================================================
+// RANGES WITH DIFFERENT TYPES
+// =============================================================================
+
+fn test_integer_ranges() {
+    let a = 0i32..100i32;
+    let b = 0u64..=1000u64;
+    let c = -10..10;
+}
+
+fn test_char_ranges() {
+    let lowercase = 'a'..='z';
+    let uppercase = 'A'..='Z';
+    let digits = '0'..='9';
+}
+
+// =============================================================================
+// RANGES IN PATTERNS (Section 2.14 - range_pattern)
+// =============================================================================
+
+fn test_range_in_match() {
+    let category = match n {
+        0..=9 => "single digit",
+        10..=99 => "double digit",
+        100..=999 => "triple digit",
+        _ => "large"
+    };
+}
+
+fn test_char_range_in_match() {
+    let kind = match ch {
+        'a'..='z' => "lowercase",
+        'A'..='Z' => "uppercase",
+        '0'..='9' => "digit",
+        _ => "other"
+    };
+}
+
+fn test_range_pattern_binding() {
+    let result = match value {
+        x @ 0..=10 => small(x),
+        x @ 11..=100 => medium(x),
+        x => large(x)
+    };
+}
+
+// =============================================================================
+// RANGES IN EXPRESSIONS
+// =============================================================================
+
+fn test_range_methods() {
+    let r = 0..10;
+    let contains = r.contains(5);
+    let len = r.len();
+    let start = r.start;
+    let end = r.end;
+}
+
+fn test_range_iteration() {
+    let sum = (1..=100).sum();
+    let product = (1..=10).product();
+    let collected: List<Int> = (0..5).collect();
+}
+
+fn test_range_with_step() {
+    // Using method for step (if available)
+    for i in (0..100).step_by(2) {
+        process_even(i);
+    }
+}
+
+// =============================================================================
+// RANGES IN SLICING
+// =============================================================================
+
+fn test_slice_with_range() {
+    let arr = [1, 2, 3, 4, 5];
+
+    let a = arr[0..3];
+    let b = arr[1..=3];
+    let c = arr[2..];
+    let d = arr[..3];
+    let e = arr[..=3];
+    let f = arr[..];
+}
+
+fn test_string_slice_with_range() {
+    let text = "Hello, World!";
+
+    let hello = text[0..5];
+    let world = text[7..12];
+    let suffix = text[7..];
+    let prefix = text[..5];
+}
+
+fn test_nested_slice_with_range() {
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+
+    let row = matrix[1];
+    let element = matrix[1][0..2];
+}
+
+// =============================================================================
+// RANGE EXPRESSIONS IN COMPLEX CONTEXTS
+// =============================================================================
+
+fn test_range_in_function_call() {
+    process_range(0..10);
+    slice_array(arr, 1..5);
+    iterate_over(start..end);
+}
+
+fn test_range_in_closure() {
+    let in_range = |x| (0..100).contains(x);
+    let first_n = |n| (0..n).collect();
+}
+
+fn test_range_in_conditional() {
+    if (0..10).contains(x) {
+        handle_small();
+    }
+
+    // Use .contains() method for membership checking
+    let result = if (1..=100).contains(n) {
+        "valid"
+    } else {
+        "out of range"
+    };
+}
+
+fn test_range_in_comprehension() {
+    let squares = [x * x for x in 0..10];
+    let evens = [x for x in 0..100 if x % 2 == 0];
+}
+
+// =============================================================================
+// STREAM RANGES (Section 2.11.1 - stream_literal_expr)
+// =============================================================================
+
+fn test_stream_range() {
+    let infinite = stream[0..];
+    let bounded = stream[0..100];
+    let inclusive = stream[0..=100];
+}
+
+fn test_stream_range_usage() {
+    let first_100 = stream[0..].take(100);
+    let lazy_range = stream[0..1000000].filter(|x| is_prime(x));
+}
+
+// =============================================================================
+// EDGE CASES
+// =============================================================================
+
+fn test_range_with_parentheses() {
+    let a = (0)..(10);
+    let b = (start)..(end);
+    let c = (x + y)..(z - w);
+}
+
+fn test_range_precedence() {
+    // Range has lower precedence than most operators
+    let a = 1 + 2..3 + 4;  // (1+2)..(3+4) = 3..7
+    let b = x * 2..y * 3;
+}
+
+fn test_nested_ranges() {
+    // Ranges used as bounds for iteration
+    for i in 0..3 {
+        for j in 0..3 {
+            process(i, j);
+        }
+    }
+}
+
+fn test_range_with_method_calls() {
+    let a = list.len()..other.len();
+    let b = compute_min()..=compute_max();
+}

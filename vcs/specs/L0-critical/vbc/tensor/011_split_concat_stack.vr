@@ -1,0 +1,167 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, split, concat, stack
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Split, Concat, Stack operations
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+type Arr3 is { d0: Float, d1: Float, d2: Float };
+type Arr4 is { d0: Float, d1: Float, d2: Float, d3: Float };
+type Arr6 is { d0: Float, d1: Float, d2: Float, d3: Float, d4: Float, d5: Float };
+
+fn arr3_get(a: Arr3, idx: Int) -> Float {
+    if idx == 0 { a.d0 }
+    else if idx == 1 { a.d1 }
+    else { a.d2 }
+}
+
+fn arr4_get(a: Arr4, idx: Int) -> Float {
+    if idx == 0 { a.d0 }
+    else if idx == 1 { a.d1 }
+    else if idx == 2 { a.d2 }
+    else { a.d3 }
+}
+
+fn arr6_get(a: Arr6, idx: Int) -> Float {
+    if idx == 0 { a.d0 }
+    else if idx == 1 { a.d1 }
+    else if idx == 2 { a.d2 }
+    else if idx == 3 { a.d3 }
+    else if idx == 4 { a.d4 }
+    else { a.d5 }
+}
+
+// concat two Arr3 -> Arr6
+fn concat3_3(a: Arr3, b: Arr3) -> Arr6 {
+    Arr6 { d0: a.d0, d1: a.d1, d2: a.d2, d3: b.d0, d4: b.d1, d5: b.d2 }
+}
+
+// split Arr6 into two Arr3 (equal split) - first half
+fn split6_first(a: Arr6) -> Arr3 {
+    Arr3 { d0: a.d0, d1: a.d1, d2: a.d2 }
+}
+
+// split Arr6 into two Arr3 (equal split) - second half
+fn split6_second(a: Arr6) -> Arr3 {
+    Arr3 { d0: a.d3, d1: a.d4, d2: a.d5 }
+}
+
+// split Arr4 by chunk size 3 -> first chunk is Arr3, remainder is 1 element
+fn split4_chunk0(a: Arr4) -> Arr3 {
+    Arr3 { d0: a.d0, d1: a.d1, d2: a.d2 }
+}
+
+fn split4_remainder(a: Arr4) -> Float {
+    // 4 elements split by 3: chunks of [3, 1]
+    // Remainder: just d3
+    a.d3
+}
+
+// stack (interleave): take element i from a, then element i from b
+// a=[1,2,3], b=[4,5,6] -> [1,4,2,5,3,6]
+fn stack_interleave(a: Arr3, b: Arr3) -> Arr6 {
+    Arr6 { d0: a.d0, d1: b.d0, d2: a.d1, d3: b.d1, d4: a.d2, d5: b.d2 }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_concat_two() {
+    let a = Arr3 { d0: 1.0, d1: 2.0, d2: 3.0 };
+    let b = Arr3 { d0: 4.0, d1: 5.0, d2: 6.0 };
+    let c = concat3_3(a, b);
+
+    assert_eq(c.d0, 1.0);
+    assert_eq(c.d1, 2.0);
+    assert_eq(c.d2, 3.0);
+    assert_eq(c.d3, 4.0);
+    assert_eq(c.d4, 5.0);
+    assert_eq(c.d5, 6.0);
+
+    // Verify round-trip: concat then check each via getter
+    assert_eq(arr6_get(c, 0), 1.0);
+    assert_eq(arr6_get(c, 3), 4.0);
+    assert_eq(arr6_get(c, 5), 6.0);
+    print("  test_concat_two: ok");
+}
+
+@test
+fn test_split_equal() {
+    let data = Arr6 { d0: 10.0, d1: 20.0, d2: 30.0, d3: 40.0, d4: 50.0, d5: 60.0 };
+
+    let first = split6_first(data);
+    let second = split6_second(data);
+
+    // First half: [10, 20, 30]
+    assert_eq(first.d0, 10.0);
+    assert_eq(first.d1, 20.0);
+    assert_eq(first.d2, 30.0);
+
+    // Second half: [40, 50, 60]
+    assert_eq(second.d0, 40.0);
+    assert_eq(second.d1, 50.0);
+    assert_eq(second.d2, 60.0);
+    print("  test_split_equal: ok");
+}
+
+@test
+fn test_split_unequal() {
+    // 4 elements split into chunks of 3: [3, 1]
+    let data = Arr4 { d0: 1.0, d1: 2.0, d2: 3.0, d3: 4.0 };
+
+    let chunk0 = split4_chunk0(data);
+    let remainder = split4_remainder(data);
+
+    // Chunk 0: [1, 2, 3]
+    assert_eq(chunk0.d0, 1.0);
+    assert_eq(chunk0.d1, 2.0);
+    assert_eq(chunk0.d2, 3.0);
+
+    // Remainder: 1 element = 4.0
+    assert_eq(remainder, 4.0);
+
+    // Also verify 6 elements split by 4: first 3 and last 3
+    let data6 = Arr6 { d0: 10.0, d1: 20.0, d2: 30.0, d3: 40.0, d4: 50.0, d5: 60.0 };
+    let first3 = split6_first(data6);
+    let last3 = split6_second(data6);
+    assert_eq(first3.d2, 30.0);
+    assert_eq(last3.d0, 40.0);
+    print("  test_split_unequal: ok");
+}
+
+@test
+fn test_stack_arrays() {
+    // Stack (interleave): a=[1,2,3], b=[4,5,6] -> [1,4,2,5,3,6]
+    let a = Arr3 { d0: 1.0, d1: 2.0, d2: 3.0 };
+    let b = Arr3 { d0: 4.0, d1: 5.0, d2: 6.0 };
+    let stacked = stack_interleave(a, b);
+
+    assert_eq(stacked.d0, 1.0);
+    assert_eq(stacked.d1, 4.0);
+    assert_eq(stacked.d2, 2.0);
+    assert_eq(stacked.d3, 5.0);
+    assert_eq(stacked.d4, 3.0);
+    assert_eq(stacked.d5, 6.0);
+    print("  test_stack_arrays: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_concat_two();
+    test_split_equal();
+    test_split_unequal();
+    test_stack_arrays();
+
+    print("[OK] 011_split_concat_stack");
+    0
+}

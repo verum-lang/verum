@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, unsafe, block, negative-test
+// @description: Verifies that &unsafe references require unsafe block (E320)
+
+/// Test that unsafe references require unsafe block.
+/// Tier 2 references must be explicitly marked unsafe.
+/// Spec: 26-cbgr-implementation.md#unsafe-references
+
+fn main() {
+    let value = 42;
+    let unsafe_ref: &unsafe Int = &unsafe value;  // ERROR: E320 not in unsafe block
+    print(*unsafe_ref);
+}

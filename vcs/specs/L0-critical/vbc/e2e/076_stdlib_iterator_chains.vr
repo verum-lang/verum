@@ -1,0 +1,439 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, iterator
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Iterator chain operations — map/filter/fold/scan/take/skip composition
+
+// ============================================================================
+// 8-element flat array
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// Pair type for enumerate results
+// ============================================================================
+
+type Pair8 is {
+    a0: Int, b0: Int, a1: Int, b1: Int,
+    a2: Int, b2: Int, a3: Int, b3: Int,
+    a4: Int, b4: Int, a5: Int, b5: Int,
+    a6: Int, b6: Int, a7: Int, b7: Int
+};
+
+fn pair8_zeros() -> Pair8 {
+    Pair8 {
+        a0: 0, b0: 0, a1: 0, b1: 0, a2: 0, b2: 0, a3: 0, b3: 0,
+        a4: 0, b4: 0, a5: 0, b5: 0, a6: 0, b6: 0, a7: 0, b7: 0
+    }
+}
+
+fn pair8_get_a(p: Pair8, i: Int) -> Int {
+    if i == 0 { p.a0 } else if i == 1 { p.a1 }
+    else if i == 2 { p.a2 } else if i == 3 { p.a3 }
+    else if i == 4 { p.a4 } else if i == 5 { p.a5 }
+    else if i == 6 { p.a6 } else { p.a7 }
+}
+
+fn pair8_get_b(p: Pair8, i: Int) -> Int {
+    if i == 0 { p.b0 } else if i == 1 { p.b1 }
+    else if i == 2 { p.b2 } else if i == 3 { p.b3 }
+    else if i == 4 { p.b4 } else if i == 5 { p.b5 }
+    else if i == 6 { p.b6 } else { p.b7 }
+}
+
+fn pair8_set(p: Pair8, i: Int, a: Int, b: Int) -> Pair8 {
+    Pair8 {
+        a0: if i == 0 { a } else { p.a0 }, b0: if i == 0 { b } else { p.b0 },
+        a1: if i == 1 { a } else { p.a1 }, b1: if i == 1 { b } else { p.b1 },
+        a2: if i == 2 { a } else { p.a2 }, b2: if i == 2 { b } else { p.b2 },
+        a3: if i == 3 { a } else { p.a3 }, b3: if i == 3 { b } else { p.b3 },
+        a4: if i == 4 { a } else { p.a4 }, b4: if i == 4 { b } else { p.b4 },
+        a5: if i == 5 { a } else { p.a5 }, b5: if i == 5 { b } else { p.b5 },
+        a6: if i == 6 { a } else { p.a6 }, b6: if i == 6 { b } else { p.b6 },
+        a7: if i == 7 { a } else { p.a7 }, b7: if i == 7 { b } else { p.b7 }
+    }
+}
+
+// ============================================================================
+// Filter outcome
+// ============================================================================
+
+type FilterOutcome is { arr: Arr8, count: Int };
+
+// ============================================================================
+// Test 1: map (double), filter (keep even), fold (sum)
+// ============================================================================
+
+@test
+fn test_map_filter_fold() {
+    // Source: [1, 2, 3, 4, 5]
+    let src = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let len = 5;
+
+    // Step 1: map — double each element -> [2, 4, 6, 8, 10]
+    let mut mapped = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        mapped = arr8_set(mapped, i, arr8_get(src, i) * 2);
+        i = i + 1;
+    }
+    assert_eq(arr8_get(mapped, 0), 2);
+    assert_eq(arr8_get(mapped, 1), 4);
+    assert_eq(arr8_get(mapped, 2), 6);
+    assert_eq(arr8_get(mapped, 3), 8);
+    assert_eq(arr8_get(mapped, 4), 10);
+
+    // Step 2: filter — keep even (all are even after doubling) -> [2, 4, 6, 8, 10]
+    let mut filtered = arr8_zeros();
+    let mut fc = 0;
+    let mut j = 0;
+    while j < len {
+        let v = arr8_get(mapped, j);
+        if v % 2 == 0 {
+            filtered = arr8_set(filtered, fc, v);
+            fc = fc + 1;
+        }
+        j = j + 1;
+    }
+    assert_eq(fc, 5);
+
+    // Step 3: fold — sum -> 2+4+6+8+10 = 30
+    let mut total = 0;
+    let mut k = 0;
+    while k < fc {
+        total = total + arr8_get(filtered, k);
+        k = k + 1;
+    }
+    assert_eq(total, 30);
+
+    // Another case: source [1, 3, 5, 7], doubled [2, 6, 10, 14], filter even -> all, sum = 32
+    let src2 = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut mapped2 = arr8_zeros();
+    let mut m = 0;
+    while m < 4 {
+        mapped2 = arr8_set(mapped2, m, arr8_get(src2, m) * 2);
+        m = m + 1;
+    }
+    let mut sum2 = 0;
+    let mut n = 0;
+    while n < 4 {
+        sum2 = sum2 + arr8_get(mapped2, n);
+        n = n + 1;
+    }
+    assert_eq(sum2, 32);
+
+    print("  test_map_filter_fold: ok");
+}
+
+// ============================================================================
+// Test 2: scan — running accumulator with addition
+// ============================================================================
+
+@test
+fn test_scan() {
+    // Source: [1, 2, 3, 4, 5]
+    // Scan sum: [1, 3, 6, 10, 15]
+    let src = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let len = 5;
+
+    let mut scanned = arr8_zeros();
+    let mut acc = 0;
+    let mut i = 0;
+    while i < len {
+        acc = acc + arr8_get(src, i);
+        scanned = arr8_set(scanned, i, acc);
+        i = i + 1;
+    }
+
+    assert_eq(arr8_get(scanned, 0), 1);
+    assert_eq(arr8_get(scanned, 1), 3);
+    assert_eq(arr8_get(scanned, 2), 6);
+    assert_eq(arr8_get(scanned, 3), 10);
+    assert_eq(arr8_get(scanned, 4), 15);
+
+    // Scan product: [1, 2, 6, 24, 120] (factorial-like)
+    let mut scan_prod = arr8_zeros();
+    let mut pacc = 1;
+    let mut j = 0;
+    while j < len {
+        pacc = pacc * arr8_get(src, j);
+        scan_prod = arr8_set(scan_prod, j, pacc);
+        j = j + 1;
+    }
+
+    assert_eq(arr8_get(scan_prod, 0), 1);
+    assert_eq(arr8_get(scan_prod, 1), 2);
+    assert_eq(arr8_get(scan_prod, 2), 6);
+    assert_eq(arr8_get(scan_prod, 3), 24);
+    assert_eq(arr8_get(scan_prod, 4), 120);
+
+    print("  test_scan: ok");
+}
+
+// ============================================================================
+// Test 3: take_while — take elements while condition holds
+// ============================================================================
+
+@test
+fn test_take_while() {
+    // Source: [5, 3, 7, -1, 4, 2]
+    // Take while positive -> [5, 3, 7] (stop at -1)
+    let src = Arr8 { e0: 5, e1: 3, e2: 7, e3: -1, e4: 4, e5: 2, e6: 0, e7: 0 };
+    let len = 6;
+
+    let mut taken = arr8_zeros();
+    let mut tc = 0;
+    let mut i = 0;
+    let mut done = 0;
+    while i < len {
+        if done == 0 {
+            let v = arr8_get(src, i);
+            if v > 0 {
+                taken = arr8_set(taken, tc, v);
+                tc = tc + 1;
+            } else {
+                done = 1;
+            }
+        }
+        i = i + 1;
+    }
+
+    assert_eq(tc, 3);
+    assert_eq(arr8_get(taken, 0), 5);
+    assert_eq(arr8_get(taken, 1), 3);
+    assert_eq(arr8_get(taken, 2), 7);
+
+    // Take while < 10 on [2, 5, 8, 12, 3] -> [2, 5, 8]
+    let src2 = Arr8 { e0: 2, e1: 5, e2: 8, e3: 12, e4: 3, e5: 0, e6: 0, e7: 0 };
+    let mut taken2 = arr8_zeros();
+    let mut tc2 = 0;
+    let mut j = 0;
+    let mut done2 = 0;
+    while j < 5 {
+        if done2 == 0 {
+            let v2 = arr8_get(src2, j);
+            if v2 < 10 {
+                taken2 = arr8_set(taken2, tc2, v2);
+                tc2 = tc2 + 1;
+            } else {
+                done2 = 1;
+            }
+        }
+        j = j + 1;
+    }
+
+    assert_eq(tc2, 3);
+    assert_eq(arr8_get(taken2, 0), 2);
+    assert_eq(arr8_get(taken2, 1), 5);
+    assert_eq(arr8_get(taken2, 2), 8);
+
+    print("  test_take_while: ok");
+}
+
+// ============================================================================
+// Test 4: skip_while — skip elements while condition holds
+// ============================================================================
+
+@test
+fn test_skip_while() {
+    // Source: [1, 2, 3, 10, 11, 12]
+    // Skip while < 5 -> [10, 11, 12]
+    let src = Arr8 { e0: 1, e1: 2, e2: 3, e3: 10, e4: 11, e5: 12, e6: 0, e7: 0 };
+    let len = 6;
+
+    let mut result = arr8_zeros();
+    let mut rc = 0;
+    let mut skipping = 1;
+    let mut i = 0;
+    while i < len {
+        let v = arr8_get(src, i);
+        if skipping == 1 {
+            if v >= 5 {
+                skipping = 0;
+                result = arr8_set(result, rc, v);
+                rc = rc + 1;
+            }
+        } else {
+            result = arr8_set(result, rc, v);
+            rc = rc + 1;
+        }
+        i = i + 1;
+    }
+
+    assert_eq(rc, 3);
+    assert_eq(arr8_get(result, 0), 10);
+    assert_eq(arr8_get(result, 1), 11);
+    assert_eq(arr8_get(result, 2), 12);
+
+    // Skip while even on [2, 4, 6, 3, 8, 1] -> [3, 8, 1]
+    let src2 = Arr8 { e0: 2, e1: 4, e2: 6, e3: 3, e4: 8, e5: 1, e6: 0, e7: 0 };
+    let mut result2 = arr8_zeros();
+    let mut rc2 = 0;
+    let mut skipping2 = 1;
+    let mut j = 0;
+    while j < 6 {
+        let v2 = arr8_get(src2, j);
+        if skipping2 == 1 {
+            if v2 % 2 == 1 {
+                skipping2 = 0;
+                result2 = arr8_set(result2, rc2, v2);
+                rc2 = rc2 + 1;
+            }
+        } else {
+            result2 = arr8_set(result2, rc2, v2);
+            rc2 = rc2 + 1;
+        }
+        j = j + 1;
+    }
+
+    assert_eq(rc2, 3);
+    assert_eq(arr8_get(result2, 0), 3);
+    assert_eq(arr8_get(result2, 1), 8);
+    assert_eq(arr8_get(result2, 2), 1);
+
+    print("  test_skip_while: ok");
+}
+
+// ============================================================================
+// Test 5: enumerate — pair each element with its index
+// ============================================================================
+
+@test
+fn test_enumerate() {
+    // Source: [10, 20, 30, 40]
+    // Enumerate -> [(0,10), (1,20), (2,30), (3,40)]
+    let src = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let len = 4;
+
+    let mut enumerated = pair8_zeros();
+    let mut i = 0;
+    while i < len {
+        enumerated = pair8_set(enumerated, i, i, arr8_get(src, i));
+        i = i + 1;
+    }
+
+    // Verify index part
+    assert_eq(pair8_get_a(enumerated, 0), 0);
+    assert_eq(pair8_get_a(enumerated, 1), 1);
+    assert_eq(pair8_get_a(enumerated, 2), 2);
+    assert_eq(pair8_get_a(enumerated, 3), 3);
+
+    // Verify value part
+    assert_eq(pair8_get_b(enumerated, 0), 10);
+    assert_eq(pair8_get_b(enumerated, 1), 20);
+    assert_eq(pair8_get_b(enumerated, 2), 30);
+    assert_eq(pair8_get_b(enumerated, 3), 40);
+
+    // Verify: sum of indices * values = 0*10 + 1*20 + 2*30 + 3*40 = 0+20+60+120 = 200
+    let mut weighted_sum = 0;
+    let mut j = 0;
+    while j < len {
+        weighted_sum = weighted_sum + pair8_get_a(enumerated, j) * pair8_get_b(enumerated, j);
+        j = j + 1;
+    }
+    assert_eq(weighted_sum, 200);
+
+    print("  test_enumerate: ok");
+}
+
+// ============================================================================
+// Test 6: chain — concatenate two sequences
+// ============================================================================
+
+@test
+fn test_chain() {
+    // Chain [1, 2, 3] with [4, 5, 6] -> [1, 2, 3, 4, 5, 6]
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let a_len = 3;
+    let b = Arr8 { e0: 4, e1: 5, e2: 6, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b_len = 3;
+
+    let mut chained = arr8_zeros();
+    let mut i = 0;
+    while i < a_len {
+        chained = arr8_set(chained, i, arr8_get(a, i));
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < b_len {
+        chained = arr8_set(chained, a_len + j, arr8_get(b, j));
+        j = j + 1;
+    }
+
+    assert_eq(arr8_get(chained, 0), 1);
+    assert_eq(arr8_get(chained, 1), 2);
+    assert_eq(arr8_get(chained, 2), 3);
+    assert_eq(arr8_get(chained, 3), 4);
+    assert_eq(arr8_get(chained, 4), 5);
+    assert_eq(arr8_get(chained, 5), 6);
+
+    // Sum of chained = 1+2+3+4+5+6 = 21
+    let mut total = 0;
+    let mut k = 0;
+    while k < a_len + b_len {
+        total = total + arr8_get(chained, k);
+        k = k + 1;
+    }
+    assert_eq(total, 21);
+
+    // Chain [10, 20] with [30] -> [10, 20, 30]
+    let c = Arr8 { e0: 10, e1: 20, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let d = Arr8 { e0: 30, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut chained2 = arr8_zeros();
+    let mut m = 0;
+    while m < 2 {
+        chained2 = arr8_set(chained2, m, arr8_get(c, m));
+        m = m + 1;
+    }
+    chained2 = arr8_set(chained2, 2, arr8_get(d, 0));
+    assert_eq(arr8_get(chained2, 0), 10);
+    assert_eq(arr8_get(chained2, 1), 20);
+    assert_eq(arr8_get(chained2, 2), 30);
+
+    print("  test_chain: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_map_filter_fold();
+    test_scan();
+    test_take_while();
+    test_skip_while();
+    test_enumerate();
+    test_chain();
+    print("[OK] 076_stdlib_iterator_chains");
+    0
+}

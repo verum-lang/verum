@@ -1,0 +1,173 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, comprehensive
+
+/// Comprehensive test of Verum's reference tier system.
+/// Tier 0: &T (managed) - full CBGR protection with generation + epoch tracking
+/// Tier 1: &checked T - 0ns, compiler-proven safe (tested via tier analysis)
+/// Tier 2: &unsafe T - 0ns, manual safety proof (requires unsafe blocks)
+///
+/// This test exercises Tier 0 managed references through the VBC interpreter.
+/// Spec: 04-memory-model.md#reference-tiers
+/// Spec: 26-cbgr-implementation.md#reference-types
+
+fn main() {
+    test_tier_0_managed_immutable();
+    print("  [OK] test_tier_0_managed_immutable");
+    test_tier_0_managed_mutable();
+    print("  [OK] test_tier_0_managed_mutable");
+    test_tier_0_generation_tracking();
+    print("  [OK] test_tier_0_generation_tracking");
+    test_tier_0_epoch_tracking();
+    print("  [OK] test_tier_0_epoch_tracking");
+    test_tier_0_capabilities();
+    print("  [OK] test_tier_0_capabilities");
+    test_tier_0_multiple_refs();
+    print("  [OK] test_tier_0_multiple_refs");
+    test_tier_0_ref_validity_after_epoch_advance();
+    print("  [OK] test_tier_0_ref_validity_after_epoch_advance");
+
+    print("All reference tier tests passed!");
+}
+
+/// Test Tier 0: Managed immutable references
+fn test_tier_0_managed_immutable() {
+    let heap_val = Heap.new(42);
+
+    // Default references are managed (Tier 0) with CBGR protection
+    let ref_val: &Int = &*heap_val;
+
+    // Has generation for use-after-free detection
+    let generation = ref_val.stored_generation();
+    assert(generation > 0);
+
+    // Has epoch for temporal ordering
+    let epoch = ref_val.epoch();
+    assert(epoch > 0);
+
+    // Can read the referenced value
+    let result = *ref_val;
+    assert(result == 42);
+}
+
+/// Test Tier 0: Managed mutable references
+fn test_tier_0_managed_mutable() {
+    let mut mutable = Heap.new(0);
+    let mut_ref: &mut Int = &mut mutable;
+
+    // Mutable reference can write
+    *mut_ref = 100;
+    assert(*mutable == 100);
+
+    // Mutable reference has write capability
+    assert(mut_ref.capabilities().can_write());
+    assert(mut_ref.capabilities().can_read());
+}
+
+/// Test generation tracking distinguishes allocations
+fn test_tier_0_generation_tracking() {
+    let alloc1 = Heap.new(1);
+    let alloc2 = Heap.new(2);
+
+    let gen1 = alloc1.generation();
+    let gen2 = alloc2.generation();
+
+    // Different allocations have different generations
+    assert(gen1 != gen2);
+    assert(gen1 < gen2);
+
+    // References capture the source generation
+    let ref1: &Int = &*alloc1;
+    let ref2: &Int = &*alloc2;
+    assert(ref1.stored_generation() == gen1);
+    assert(ref2.stored_generation() == gen2);
+}
+
+/// Test epoch tracking for temporal ordering
+fn test_tier_0_epoch_tracking() {
+    let epoch_before = Epoch.current();
+
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Reference captures current epoch
+    let ref_epoch = ref_val.epoch();
+    assert(ref_epoch <= Epoch.current());
+
+    // After advancing epoch, reference is still valid
+    Epoch.advance();
+    assert(ref_val.is_epoch_valid());
+
+    // New references capture the new epoch
+    let new_ref: &Int = &*value;
+    assert(new_ref.epoch() > ref_epoch);
+}
+
+/// Test capability bits distinguish immutable and mutable refs
+fn test_tier_0_capabilities() {
+    let value_immut = Heap.new(100);
+    let mut value_mut = Heap.new(200);
+
+    let immut_ref: &Int = &*value_immut;
+    let mut_ref: &mut Int = &mut value_mut;
+
+    // Immutable: read only
+    let immut_caps = immut_ref.epoch_caps_raw() & 0xFF;
+    assert(immut_caps & 0x01 != 0);  // can_read
+    assert(immut_caps & 0x02 == 0);  // NOT can_write
+
+    // Mutable: read + write
+    let mut_caps = mut_ref.epoch_caps_raw() & 0xFF;
+    assert(mut_caps & 0x01 != 0);  // can_read
+    assert(mut_caps & 0x02 != 0);  // can_write
+}
+
+/// Test multiple references to same allocation
+fn test_tier_0_multiple_refs() {
+    let value = Heap.new(42);
+
+    let ref1: &Int = &*value;
+    let ref2: &Int = &*value;
+    let ref3: &Int = &*value;
+
+    // All references read the same value
+    assert(*ref1 == 42);
+    assert(*ref2 == 42);
+    assert(*ref3 == 42);
+
+    // All share the same generation
+    assert(ref1.stored_generation() == ref2.stored_generation());
+    assert(ref2.stored_generation() == ref3.stored_generation());
+}
+
+/// Test reference remains valid across epoch advances
+fn test_tier_0_ref_validity_after_epoch_advance() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Advance epoch multiple times
+    for _ in 0..50 {
+        Epoch.advance();
+    }
+
+    // Reference should still be valid (within window)
+    assert(ref_val.is_epoch_valid());
+
+    // Value is still accessible
+    assert(*ref_val == 42);
+}
+
+// Supporting types
+
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+
+    fn advance() {
+        Runtime.advance_epoch();
+    }
+}

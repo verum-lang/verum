@@ -1,0 +1,157 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, iterators, generators, patterns
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests various iterator/generator patterns: filtered, mapped, chained,
+// zipped (simulated), and take/skip patterns.
+
+fn* range(start: Int, end_excl: Int) -> Int {
+    let mut i = start;
+    while i < end_excl {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn* powers_of_two(n: Int) -> Int {
+    let mut val = 1;
+    let mut i = 0;
+    while i < n {
+        yield val;
+        val = val * 2;
+        i = i + 1;
+    }
+}
+
+fn* triangular_numbers(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        sum = sum + i;
+        yield sum;
+        i = i + 1;
+    }
+}
+
+fn* repeat_val(val: Int, count: Int) -> Int {
+    let mut i = 0;
+    while i < count {
+        yield val;
+        i = i + 1;
+    }
+}
+
+fn test_filtered_generator() {
+    // Sum only odd numbers from range
+    let mut sum = 0;
+    for i in range(1, 21) {
+        if i % 2 == 1 {
+            sum = sum + i;
+        }
+    }
+    // Odd numbers 1+3+5+...+19 = 100
+    assert_eq(sum, 100);
+    print("filtered_generator: ok");
+}
+
+fn test_mapped_generator() {
+    // Square each value
+    let mut sum_squares = 0;
+    for i in range(1, 6) {
+        sum_squares = sum_squares + i * i;
+    }
+    // 1+4+9+16+25 = 55
+    assert_eq(sum_squares, 55);
+    print("mapped_generator: ok");
+}
+
+fn test_chained_generators() {
+    // Use two generators sequentially
+    let mut count = 0;
+    let mut sum = 0;
+
+    for p in powers_of_two(5) {
+        sum = sum + p;
+        count = count + 1;
+    }
+    // 1+2+4+8+16 = 31
+
+    for t in triangular_numbers(5) {
+        sum = sum + t;
+        count = count + 1;
+    }
+    // 1+3+6+10+15 = 35
+
+    assert_eq(sum, 66); // 31+35
+    assert_eq(count, 10);
+    print("chained_generators: ok");
+}
+
+fn test_take_pattern() {
+    // Take first N items from a generator
+    let mut count = 0;
+    let mut sum = 0;
+    for i in range(1, 1000) {
+        if count >= 5 { break; }
+        sum = sum + i;
+        count = count + 1;
+    }
+    assert_eq(sum, 15); // 1+2+3+4+5
+    assert_eq(count, 5);
+    print("take_pattern: ok");
+}
+
+fn test_skip_pattern() {
+    // Skip first N items then sum rest
+    let mut sum = 0;
+    let mut skipped = 0;
+    for i in range(1, 11) {
+        if skipped < 3 {
+            skipped = skipped + 1;
+        } else {
+            sum = sum + i;
+        }
+    }
+    // Skip 1,2,3 → sum 4+5+6+7+8+9+10 = 49
+    assert_eq(sum, 49);
+    print("skip_pattern: ok");
+}
+
+fn test_zip_simulation() {
+    // Simulate zip by iterating two arrays in parallel
+    let xs = [1, 2, 3, 4, 5];
+    let ys = [10, 20, 30, 40, 50];
+    let mut dot = 0;
+    let mut i = 0;
+    while i < 5 {
+        dot = dot + xs[i] * ys[i];
+        i = i + 1;
+    }
+    // 1*10 + 2*20 + 3*30 + 4*40 + 5*50 = 10+40+90+160+250 = 550
+    assert_eq(dot, 550);
+    print("zip_simulation: ok");
+}
+
+fn test_repeat_generator() {
+    let mut sum = 0;
+    for v in repeat_val(7, 5) {
+        sum = sum + v;
+    }
+    assert_eq(sum, 35);
+    print("repeat_generator: ok");
+}
+
+fn main() -> Int {
+    test_filtered_generator();
+    test_mapped_generator();
+    test_chained_generators();
+    test_take_pattern();
+    test_skip_pattern();
+    test_zip_simulation();
+    test_repeat_generator();
+    print("[OK] 428_interp_iterator_patterns");
+    0
+}

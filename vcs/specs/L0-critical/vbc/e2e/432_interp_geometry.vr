@@ -1,0 +1,133 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, geometry, math
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests computational geometry: points, distances, areas, convex hull check.
+
+type Pt is { x: Int, y: Int };
+
+fn dist_sq(a: Pt, b: Pt) -> Int {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx * dx + dy * dy
+}
+
+fn triangle_area_x2(a: Pt, b: Pt, c: Pt) -> Int {
+    // 2 * area = |x_a(y_b - y_c) + x_b(y_c - y_a) + x_c(y_a - y_b)|
+    let area = a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y);
+    if area < 0 { 0 - area } else { area }
+}
+
+fn cross_sign(o: Pt, a: Pt, b: Pt) -> Int {
+    // Cross product sign: (a-o) × (b-o)
+    let val = (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    if val > 0 { 1 } else if val < 0 { -1 } else { 0 }
+}
+
+fn test_distance() {
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 3, y: 4 };
+    assert_eq(dist_sq(a, b), 25); // 3² + 4² = 25
+
+    let c = Pt { x: 1, y: 1 };
+    let d = Pt { x: 4, y: 5 };
+    assert_eq(dist_sq(c, d), 25); // 3² + 4² = 25
+    print("distance: ok");
+}
+
+fn test_triangle_area() {
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 4, y: 0 };
+    let c = Pt { x: 0, y: 3 };
+    // Area = 4*3/2 = 6, 2*area = 12
+    assert_eq(triangle_area_x2(a, b, c), 12);
+
+    // Degenerate triangle (collinear)
+    let d = Pt { x: 2, y: 0 };
+    assert_eq(triangle_area_x2(a, b, d), 0);
+    print("triangle_area: ok");
+}
+
+fn test_point_in_triangle() {
+    // Check if point P is inside triangle ABC
+    // Method: check if cross products all have same sign
+    let a = Pt { x: 0, y: 0 };
+    let b = Pt { x: 10, y: 0 };
+    let c = Pt { x: 5, y: 10 };
+
+    // Point inside
+    let p_in = Pt { x: 5, y: 3 };
+    let s1 = cross_sign(a, b, p_in);
+    let s2 = cross_sign(b, c, p_in);
+    let s3 = cross_sign(c, a, p_in);
+    let inside = (s1 == s2) && (s2 == s3);
+    assert(inside);
+
+    // Point outside
+    let p_out = Pt { x: 15, y: 5 };
+    let t1 = cross_sign(a, b, p_out);
+    let t2 = cross_sign(b, c, p_out);
+    let t3 = cross_sign(c, a, p_out);
+    let outside = !((t1 == t2) && (t2 == t3));
+    assert(outside);
+    print("point_in_triangle: ok");
+}
+
+fn test_polygon_area() {
+    // Area of rectangle using shoelace formula
+    // Vertices: (0,0), (4,0), (4,3), (0,3)
+    let xs = [0, 4, 4, 0];
+    let ys = [0, 0, 3, 3];
+    let n = 4;
+
+    let mut area_x2 = 0;
+    let mut i = 0;
+    while i < n {
+        let j = (i + 1) % n;
+        area_x2 = area_x2 + xs[i] * ys[j] - xs[j] * ys[i];
+        i = i + 1;
+    }
+    if area_x2 < 0 { area_x2 = 0 - area_x2; }
+    assert_eq(area_x2, 24); // 2 * 12 = 24
+    print("polygon_area: ok");
+}
+
+fn test_closest_pair() {
+    // Find closest pair among 5 points (brute force)
+    let px = [0, 10, 3, 7, 20];
+    let py = [0,  0, 1, 2,  0];
+    let n = 5;
+
+    let mut min_dist = 999999;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            let dx = px[i] - px[j];
+            let dy = py[i] - py[j];
+            let d = dx * dx + dy * dy;
+            if d < min_dist {
+                min_dist = d;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Closest: (3,1) to (7,2) → dist² = 16+1 = 17
+    // Or (0,0) to (3,1) → dist² = 9+1 = 10
+    assert_eq(min_dist, 10);
+    print("closest_pair: ok");
+}
+
+fn main() -> Int {
+    test_distance();
+    test_triangle_area();
+    test_point_in_triangle();
+    test_polygon_area();
+    test_closest_pair();
+    print("[OK] 432_interp_geometry");
+    0
+}

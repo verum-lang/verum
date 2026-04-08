@@ -1,0 +1,637 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: contexts, advanced, conditional, aliased, transformed, negative, pure
+// @description: Tests advanced context patterns from 16-context-system.md Section 2.11 - Advanced Context Patterns
+//
+// This file tests all five advanced context patterns:
+// 1. Conditional Contexts: using [Context if condition]
+// 2. Aliased Contexts: using [Context as alias]
+// 3. Named Contexts: using [name: Context]
+// 4. Transformed Contexts: using [Context.transform()]
+// 5. Negative Contexts: using [!Context]
+//
+// Grammar v2.12: docs/detailed/16-context-system.md Section 2.11
+
+// ============================================================================
+// Compile-time Configuration Stubs
+// ============================================================================
+// These types simulate compiler-provided configuration objects.
+// In production, `cfg` and `platform` are injected by the compiler.
+
+type CfgObject is {
+    analytics_enabled: Bool,
+    debug: Bool,
+    profiling: Bool,
+    metrics_enabled: Bool,
+    analytics: Bool,
+    metrics: Bool,
+    production: Bool,
+    force_analytics: Bool,
+    minimal_mode: Bool,
+};
+
+type PlatformObject is {
+    is_windows: Bool,
+    is_linux: Bool,
+    is_macos: Bool,
+};
+
+// Compile-time configuration (provided by compiler at build time)
+// These would normally be injected by the compiler; here we use test defaults
+static cfg: CfgObject = CfgObject {
+    analytics_enabled: false,
+    debug: false,
+    profiling: false,
+    metrics_enabled: false,
+    analytics: false,
+    metrics: false,
+    production: true,
+    force_analytics: false,
+    minimal_mode: false,
+};
+
+static platform: PlatformObject = PlatformObject {
+    is_windows: false,
+    is_linux: false,
+    is_macos: true,  // Assume macOS for testing
+};
+
+// ============================================================================
+// Context Definitions
+// ============================================================================
+
+context Database {
+    fn query(sql: Text) -> Result<List<Row>, DbError>;
+    fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+context async AsyncDatabase {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+context Logger {
+    fn info(message: Text);
+    fn warn(message: Text);
+    fn error(message: Text);
+    fn debug(message: Text);
+}
+
+context Cache<T> {
+    fn get(key: Text) -> Maybe<T>;
+    fn set(key: Text, value: T);
+    fn delete(key: Text);
+}
+
+context Metrics {
+    fn increment(counter: Text);
+    fn gauge(name: Text, value: Float);
+}
+
+context Analytics {
+    fn track(event: Text, data: Map<Text, Text>);
+}
+
+context Network {
+    fn get(url: Text) -> Result<Response, NetworkError>;
+    fn post(url: Text, body: Text) -> Result<Response, NetworkError>;
+}
+
+context FileSystem {
+    fn read(path: Text) -> Result<Text, IoError>;
+    fn write(path: Text, content: Text) -> Result<(), IoError>;
+}
+
+context Auth {
+    fn current_user() -> User;
+    fn verify_permissions() -> Result<(), AuthError>;
+}
+
+context State<T> {
+    fn get() -> T;
+    fn put(value: T);
+}
+
+context Random {
+    fn next_int() -> Int;
+    fn next_float() -> Float;
+}
+
+context Time {
+    fn now() -> Timestamp;
+}
+
+context IO {
+    fn print(message: Text);
+    fn read_line() -> Text;
+}
+
+// Platform-specific contexts
+context WinEventLog {
+    fn write(source: Text, message: Text);
+}
+
+// Validation context
+context Validator {
+    fn validate<T>(value: T) -> Result<T, ValidationError>;
+}
+
+// Profiling context
+context Profiler {
+    fn start(name: Text);
+    fn stop(name: Text);
+}
+
+// Tracing context
+context Tracing {
+    fn span(name: Text);
+}
+
+// Type definitions
+type Row is Map<Text, Text>;
+type DbError is Failed(Text);
+type NetworkError is Failed(Text);
+type IoError is Failed(Text);
+type AuthError is Failed(Text);
+type ValidationError is Failed(Text);
+type Response is { status: Int, body: Text };
+type User is { id: Int, name: Text };
+type Timestamp is Int;
+
+// Protocol for validatable types
+type Validatable is protocol {
+    fn is_valid(&self) -> Bool;
+};
+
+// ============================================================================
+// Section 1: Conditional Contexts
+// ============================================================================
+
+// 1.1 Configuration-based conditional
+fn with_analytics_if_enabled(event: Text)
+    using [Logger, Analytics if cfg.analytics_enabled]
+{
+    Logger.info(f"Event: {event}");
+
+    if cfg.analytics_enabled {
+        // Use a typed empty map literal
+        let props = Map.new();
+        Analytics.track(event, props);
+    }
+}
+
+// 1.2 Platform-specific conditional
+fn platform_specific_logging()
+    using [Logger, WinEventLog if platform.is_windows]
+{
+    Logger.info("Cross-platform log");
+
+    if platform.is_windows {
+        // WinEventLog only available on Windows
+        // WinEventLog.write("Application", "Log entry");
+    }
+}
+
+// 1.3 Type constraint conditional
+fn serialize_with_validation<T>()
+    using [Validator if T: Validatable]
+{
+    // Validator context only required for validatable types
+}
+
+// 1.4 Boolean combination
+fn debug_with_profiling()
+    using [Logger, Profiler if cfg.debug && cfg.profiling]
+{
+    Logger.info("Operation started");
+
+    if cfg.debug && cfg.profiling {
+        // Profiler.start("operation");
+    }
+}
+
+// 1.5 Negated condition
+fn production_only()
+    using [Analytics if !cfg.debug]
+{
+    // Analytics only in production (not debug)
+}
+
+// ============================================================================
+// Section 2: Aliased Contexts
+// ============================================================================
+
+// 2.1 Basic aliased context
+fn migrate_data()
+    using [Database as source, Database as target, Logger]
+{
+    let data = source.query("SELECT * FROM users");
+    match data {
+        Ok(rows) => {
+            for row in rows {
+                let _ = target.execute(f"INSERT INTO users_new VALUES (...)");
+            }
+        }
+        Err(e) => Logger.error(f"Migration failed: {e}"),
+    }
+}
+
+// 2.2 Aliased with other contexts
+fn replicated_read()
+    using [Database as primary, Database as replica, Logger]
+{
+    Logger.info("Reading from replica");
+    let result = replica.query("SELECT * FROM data");
+
+    match result {
+        Ok(rows) => Logger.info(f"Got {rows.len()} rows"),
+        Err(_) => {
+            Logger.warn("Replica failed, falling back to primary");
+            let _ = primary.query("SELECT * FROM data");
+        }
+    }
+}
+
+// ============================================================================
+// Section 3: Named Contexts (name: Context syntax)
+// ============================================================================
+
+// 3.1 Basic named bindings
+fn handle_request()
+    using [db: Database, log: Logger, auth: Auth]
+{
+    log.info("Handling request");
+    let user = auth.current_user();
+    let _ = db.query(f"SELECT * FROM data WHERE user_id = {user.id}");
+}
+
+// 3.2 Mixed named and unnamed
+fn mixed_context_styles()
+    using [db: Database, Logger, cache: Cache<User>]
+{
+    let _ = db.query("SELECT 1");  // Named
+    Logger.info("Processing");      // Unnamed (original name)
+    let _ = cache.get("user:1");    // Named
+}
+
+// 3.3 Named with generics
+fn generic_cache_operation<T>()
+    using [c: Cache<T>, log: Logger]
+{
+    log.info("Cache operation");
+    let _ = c.get("key");
+}
+
+// ============================================================================
+// Section 4: Context Transformations
+// ============================================================================
+
+// 4.1 Transactional transformation
+fn batch_update()
+    using [Database.transactional()]
+{
+    let _ = Database.execute("UPDATE users SET status = 'active'");
+    let _ = Database.execute("INSERT INTO logs VALUES ('batch_update')");
+    // Auto-commit on success, rollback on error
+}
+
+// 4.2 Traced transformation
+fn traced_query()
+    using [Database.traced("db-query-span")]
+{
+    // All database calls include tracing spans
+    let _ = Database.query("SELECT * FROM users");
+}
+
+// 4.3 Scoped transformation
+fn isolated_cache_operation()
+    using [Cache<Text>.scoped()]
+{
+    // Cache operations isolated from outer scope
+    Cache.set("temp_key", "temp_value");
+    // temp_key not visible outside this scope
+}
+
+// 4.4 Timed transformation
+fn timed_query()
+    using [Database.timed(Duration.seconds(30))]
+{
+    // Query will timeout after 30 seconds
+    let _ = Database.query("SELECT * FROM large_table");
+}
+
+// 4.5 Chained transformations
+fn complex_db_operation()
+    using [Database.transactional().traced("tx-span")]
+{
+    // Database is both transactional and traced
+    let _ = Database.execute("UPDATE ...");
+    let _ = Database.execute("INSERT ...");
+}
+
+// ============================================================================
+// Section 5: Negative Contexts
+// ============================================================================
+
+// 5.1 Single exclusion
+fn pure_calculation(data: List<Int>) -> Int
+    using [!Database]
+{
+    // Compiler verifies no Database calls
+    data.fold(0, |acc, x| acc + x)
+}
+
+// 5.2 Multiple exclusions
+fn truly_pure_function(x: Int, y: Int) -> Int
+    using [!Database, !Network, !FileSystem, !IO]
+{
+    // No I/O operations allowed
+    x + y
+}
+
+// 5.3 Test with exclusions
+@test
+fn test_pure_business_logic()
+    using [!Database, !Network]
+{
+    // Compiler enforces no external dependencies
+    let result = calculate_discount(100, 10);
+    assert_eq(result, 90);
+}
+
+fn calculate_discount(price: Int, percent: Int) -> Int {
+    price - (price * percent / 100)
+}
+
+// 5.4 Positive and negative together
+fn limited_io_function()
+    using [Logger, !Database, !Network]
+{
+    Logger.info("Processing");  // OK: Logger allowed
+    // Database.query(...);     // Error: Database excluded
+    // Network.get(...);        // Error: Network excluded
+}
+
+// 5.5 Library function protection
+public fn parse_config(text: Text) -> Result<Config, ParseError>
+    using [!Database, !Network]
+{
+    // If implementation ever changes to use Database,
+    // compilation will fail - protecting API contract
+    Ok(Config { value: text })
+}
+
+type Config is { value: Text };
+type ParseError is Failed(Text);
+
+// ============================================================================
+// Section 6: Standard Purity Context Groups
+// ============================================================================
+
+// 6.1 Pure using (excludes all side effects)
+using Pure = [!IO, !State<_>, !Random, !Network, !FileSystem, !Database, !Time];
+
+// 6.2 Computationally pure (allows I/O but no state)
+using ComputationallyPure = [!State<_>, !Random];
+
+// 6.3 Deterministic (no non-determinism)
+using Deterministic = [!Random, !Time];
+
+// 6.4 Using Pure context group
+fn mathematical_function(x: Int) -> Int
+    using Pure
+{
+    x * x + 2 * x + 1  // (x + 1)^2
+}
+
+// 6.5 Explicit pure modifier (equivalent to using Pure)
+pure fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+pure fn fibonacci(n: Int) -> Int {
+    if n <= 1 { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+// ============================================================================
+// Section 7: Combined Patterns
+// ============================================================================
+
+// 7.1 Complete migration example
+async fn migrate_users(batch_size: Int)
+    -> Result<MigrationStats, MigrationError>
+    using [
+        source: AsyncDatabase,              // Named binding
+        target: AsyncDatabase.transactional(), // Transformed
+        Logger as log,                      // Aliased
+        Metrics if cfg.metrics_enabled,     // Conditional
+        !Network,                           // Negative (no network)
+    ]
+{
+    log.info("Starting user migration");
+
+    let users = match source.query("SELECT * FROM users").await {
+        Ok(rows) => rows,
+        Err(e) => { return Err(Failed(f"Query failed: {e}")); }
+    };
+
+    for user in users {
+        match target.execute(f"INSERT INTO users VALUES (...)").await {
+            Ok(_) => {}
+            Err(e) => { return Err(Failed(f"Insert failed: {e}")); }
+        }
+    }
+
+    if cfg.metrics_enabled {
+        Metrics.increment("users.migrated");
+    }
+
+    log.info(f"Migrated {users.len()} users");
+
+    Ok(MigrationStats { count: users.len() })
+}
+
+type MigrationStats is { count: Int };
+type MigrationError is Failed(Text);
+
+// 7.2 Layered service with multiple patterns
+fn enterprise_handler(request_id: Text)
+    -> Result<Text, ServiceError>
+    using [
+        db: Database.transactional().traced("db"),
+        cache: Cache<User>.scoped(),
+        log: Logger,
+        Analytics if cfg.analytics,
+        Metrics if cfg.metrics,
+        !Network,  // This service doesn't make external calls
+    ]
+{
+    log.info(f"Handling request {request_id}");
+
+    // Check cache first
+    if let Some(cached) = cache.get(request_id) {
+        log.debug("Cache hit");
+        return Ok(cached.name);
+    }
+
+    // Query database (transactional + traced)
+    let result = match db.query(f"SELECT * FROM data WHERE id = '{request_id}'") {
+        Ok(rows) => rows,
+        Err(e) => { return Err(Failed(f"Query failed: {e}")); }
+    };
+
+    if cfg.analytics {
+        let props = Map.new();
+        Analytics.track("request_handled", props);
+    }
+
+    if cfg.metrics {
+        Metrics.increment("requests.processed");
+    }
+
+    match result.first() {
+        Some(row) => {
+            let name = if row.contains_key("name") {
+                row.get("name").unwrap()
+            } else {
+                "unknown"
+            };
+            Ok(name)
+        }
+        None => Err(Failed("Not found")),
+    }
+}
+
+type ServiceError is Failed(Text);
+
+// ============================================================================
+// Section 8: Provider Binding Examples
+// ============================================================================
+
+fn test_aliased_provider_binding() {
+    // Provide a single database for testing
+    provide Database = MockDatabase.new("source");
+    provide Logger = ConsoleLogger.new();
+
+    // Now migrate_data() can use the database
+    // Note: aliased provide (as source/target) not yet supported
+}
+
+fn test_named_provider_binding() {
+    // Named providers work the same way
+    provide Database = MockDatabase.new("main");
+    provide Logger = ConsoleLogger.new();
+    provide Auth = MockAuth.new();
+
+    handle_request();
+}
+
+type MockDatabase is { name: Text };
+
+implement MockDatabase {
+    fn new(name: Text) -> Self {
+        Self { name }
+    }
+}
+
+implement Database for MockDatabase {
+    fn query(&self, sql: Text) -> Result<List<Row>, DbError> {
+        Ok([])
+    }
+    fn execute(&self, sql: Text) -> Result<Int, DbError> {
+        Ok(1)
+    }
+}
+
+type ConsoleLogger is ();
+
+implement ConsoleLogger {
+    fn new() -> Self {
+        ConsoleLogger
+    }
+}
+
+implement Logger for ConsoleLogger {
+    fn info(&self, message: Text) { print(message); }
+    fn warn(&self, message: Text) { print(f"WARN: {message}"); }
+    fn error(&self, message: Text) { print(f"ERROR: {message}"); }
+    fn debug(&self, message: Text) { print(f"DEBUG: {message}"); }
+}
+
+type MockAuth is ();
+
+implement MockAuth {
+    fn new() -> Self {
+        MockAuth
+    }
+}
+
+implement Auth for MockAuth {
+    fn current_user(&self) -> User {
+        User { id: 1, name: "Test User" }
+    }
+    fn verify_permissions(&self) -> Result<(), AuthError> {
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Section 9: Edge Cases
+// ============================================================================
+
+// 9.1 Empty context list (allowed)
+fn no_contexts_needed() {
+    // Function with no context requirements
+    let x = 1 + 2;
+}
+
+// 9.2 Single context without brackets (backward compatible)
+fn single_context() using Database {
+    let _ = Database.query("SELECT 1");
+}
+
+// 9.3 Deeply nested conditions
+fn complex_conditional()
+    using [
+        Analytics if (cfg.production && cfg.analytics) || cfg.force_analytics,
+        Metrics if cfg.metrics && !cfg.minimal_mode,
+    ]
+{
+    // Complex conditional logic
+}
+
+// 9.4 All pattern types in one signature
+fn kitchen_sink<T: Clone>()
+    using [
+        db: Database.transactional(),           // Named + transformed
+        Cache<T> as c,                          // Generic + aliased
+        Logger,                                 // Simple
+        Metrics if cfg.metrics,                 // Conditional
+        !Network,                               // Negative
+        Validator if T: Validatable,            // Type-conditional
+    ]
+{
+    // All patterns work together
+}
+
+// ============================================================================
+// Test Entry Point
+// ============================================================================
+
+fn main() {
+    // Note: This is primarily a typecheck test
+    // Runtime behavior requires actual context implementations
+
+    // Test pure functions
+    assert_eq(factorial(5), 120);
+    assert_eq(fibonacci(10), 55);
+    assert_eq(mathematical_function(3), 16);  // (3+1)^2 = 16
+    assert_eq(pure_calculation([1, 2, 3, 4, 5]), 15);
+
+    // Test combined patterns
+    test_aliased_provider_binding();
+    test_named_provider_binding();
+
+    print("All advanced context pattern tests passed!");
+}

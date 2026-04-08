@@ -1,0 +1,76 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, comprehensive
+// @expected-exit: 0
+
+fn sum(xs: List<Int>, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while (i < n) {
+        total = total + xs[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn max_val(xs: List<Int>, n: Int) -> Int {
+    let mut mx = xs[0];
+    let mut i = 1;
+    while (i < n) {
+        if (xs[i] > mx) {
+            mx = xs[i];
+        }
+        i = i + 1;
+    }
+    mx
+}
+
+fn reverse_into(src: List<Int>, dst: List<Int>, n: Int) -> Int {
+    let mut i = 0;
+    while (i < n) {
+        dst[i] = src[n - 1 - i];
+        i = i + 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    // Basic list literal and indexing
+    let xs = [5, 3, 8, 1, 9, 2, 7, 4, 6, 0];
+    assert_eq(xs.len(), 10);
+    assert_eq(xs[0], 5);
+    assert_eq(xs[9], 0);
+
+    // Sum via function
+    let total = sum(xs, 10);
+    print(total);
+    assert_eq(total, 45);
+
+    // Max via function
+    let mx = max_val(xs, 10);
+    print(mx);
+    assert_eq(mx, 9);
+
+    // Mutation
+    let mut arr = [10, 20, 30, 40, 50];
+    arr[2] = 99;
+    assert_eq(arr[2], 99);
+    assert_eq(arr[0], 10);
+    assert_eq(arr[4], 50);
+
+    // Reverse in-place using helper
+    let mut rev = [0, 0, 0, 0, 0];
+    reverse_into(arr, rev, 5);
+    assert_eq(rev[0], 50);
+    assert_eq(rev[2], 99);
+    assert_eq(rev[4], 10);
+    print(rev[0]);
+
+    // Empty-ish list with single element
+    let single = [42];
+    assert_eq(single[0], 42);
+    assert_eq(single.len(), 1);
+
+    0
+}

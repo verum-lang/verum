@@ -1,0 +1,329 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, btreemap, btreeset, set, functional, any, all, find
+// @description: Tests functional methods (contains_value, get_or_default, any,
+//               all, find) for BTreeMap, BTreeSet, and Set
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: BTreeMap.contains_value
+// =============================================================================
+
+@test
+fn test_btreemap_contains_value_found() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+    assert(map.contains_value(&"two"));
+}
+
+@test
+fn test_btreemap_contains_value_not_found() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+    assert(!map.contains_value(&"three"));
+}
+
+@test
+fn test_btreemap_contains_value_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(!map.contains_value(&42));
+}
+
+@test
+fn test_btreemap_contains_value_int() {
+    let mut map = BTreeMap.new();
+    map.insert("a", 10);
+    map.insert("b", 20);
+    map.insert("c", 30);
+    assert(map.contains_value(&20));
+    assert(!map.contains_value(&25));
+}
+
+// =============================================================================
+// Section 2: BTreeMap.get_or_default
+// =============================================================================
+
+@test
+fn test_btreemap_get_or_default_found() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 100);
+    map.insert(2, 200);
+    let val = map.get_or_default(&1, 999);
+    assert_eq(val, 100);
+}
+
+@test
+fn test_btreemap_get_or_default_not_found() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 100);
+    let val = map.get_or_default(&99, 999);
+    assert_eq(val, 999);
+}
+
+@test
+fn test_btreemap_get_or_default_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    let val = map.get_or_default(&1, 42);
+    assert_eq(val, 42);
+}
+
+// =============================================================================
+// Section 3: BTreeMap.any / BTreeMap.all / BTreeMap.find
+// =============================================================================
+
+@test
+fn test_btreemap_any_true() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    assert(map.any(|_k, v| *v > 25));
+}
+
+@test
+fn test_btreemap_any_false() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    assert(!map.any(|_k, v| *v > 100));
+}
+
+@test
+fn test_btreemap_any_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(!map.any(|_k, _v| true));
+}
+
+@test
+fn test_btreemap_all_true() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    assert(map.all(|_k, v| *v > 0));
+}
+
+@test
+fn test_btreemap_all_false() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    assert(!map.all(|_k, v| *v > 15));
+}
+
+@test
+fn test_btreemap_all_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    // Vacuously true
+    assert(map.all(|_k, _v| false));
+}
+
+@test
+fn test_btreemap_find_found() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    let result = map.find(|_k, v| *v == 20);
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert_eq(*pair.0, 2);
+    assert_eq(*pair.1, 20);
+}
+
+@test
+fn test_btreemap_find_not_found() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    let result = map.find(|_k, v| *v == 99);
+    assert(result.is_none());
+}
+
+@test
+fn test_btreemap_find_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    let result = map.find(|_k, _v| true);
+    assert(result.is_none());
+}
+
+@test
+fn test_btreemap_find_by_key() {
+    let mut map = BTreeMap.new();
+    map.insert(10, "ten");
+    map.insert(20, "twenty");
+    map.insert(30, "thirty");
+    let result = map.find(|k, _v| *k > 15);
+    assert(result.is_some());
+    // Should find 20 first (sorted order)
+    assert_eq(*result.unwrap().0, 20);
+}
+
+// =============================================================================
+// Section 4: BTreeSet.any / BTreeSet.all / BTreeSet.find
+// =============================================================================
+
+@test
+fn test_btreeset_any_true() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2); set.insert(3); set.insert(4); set.insert(5);
+    assert(set.any(|x| *x > 4));
+}
+
+@test
+fn test_btreeset_any_false() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2); set.insert(3);
+    assert(!set.any(|x| *x > 10));
+}
+
+@test
+fn test_btreeset_any_empty() {
+    let set: BTreeSet<Int> = BTreeSet.new();
+    assert(!set.any(|_x| true));
+}
+
+@test
+fn test_btreeset_all_true() {
+    let mut set = BTreeSet.new();
+    set.insert(2); set.insert(4); set.insert(6);
+    assert(set.all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_btreeset_all_false() {
+    let mut set = BTreeSet.new();
+    set.insert(2); set.insert(3); set.insert(4);
+    assert(!set.all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_btreeset_all_empty() {
+    let set: BTreeSet<Int> = BTreeSet.new();
+    assert(set.all(|_x| false));
+}
+
+@test
+fn test_btreeset_find_found() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2); set.insert(3); set.insert(4); set.insert(5);
+    let result = set.find(|x| *x > 3);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 4);  // First match in sorted order
+}
+
+@test
+fn test_btreeset_find_not_found() {
+    let mut set = BTreeSet.new();
+    set.insert(1); set.insert(2); set.insert(3);
+    let result = set.find(|x| *x > 10);
+    assert(result.is_none());
+}
+
+@test
+fn test_btreeset_find_empty() {
+    let set: BTreeSet<Int> = BTreeSet.new();
+    let result = set.find(|_x| true);
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 5: Set.any / Set.all / Set.find
+// =============================================================================
+
+@test
+fn test_set_any_true() {
+    let mut set = Set.new();
+    set.insert(10); set.insert(20); set.insert(30);
+    assert(set.any(|x| *x >= 30));
+}
+
+@test
+fn test_set_any_false() {
+    let mut set = Set.new();
+    set.insert(1); set.insert(2); set.insert(3);
+    assert(!set.any(|x| *x > 100));
+}
+
+@test
+fn test_set_any_empty() {
+    let set: Set<Int> = Set.new();
+    assert(!set.any(|_x| true));
+}
+
+@test
+fn test_set_all_true() {
+    let mut set = Set.new();
+    set.insert(2); set.insert(4); set.insert(6);
+    assert(set.all(|x| *x > 0));
+}
+
+@test
+fn test_set_all_false() {
+    let mut set = Set.new();
+    set.insert(1); set.insert(2); set.insert(3);
+    assert(!set.all(|x| *x > 2));
+}
+
+@test
+fn test_set_all_empty() {
+    let set: Set<Int> = Set.new();
+    assert(set.all(|_x| false));
+}
+
+@test
+fn test_set_find_found() {
+    let mut set = Set.new();
+    set.insert(5); set.insert(10); set.insert(15);
+    let result = set.find(|x| *x == 10);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 10);
+}
+
+@test
+fn test_set_find_not_found() {
+    let mut set = Set.new();
+    set.insert(1); set.insert(2);
+    let result = set.find(|x| *x == 99);
+    assert(result.is_none());
+}
+
+@test
+fn test_set_find_empty() {
+    let set: Set<Int> = Set.new();
+    let result = set.find(|_x| true);
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 6: Cross-type consistency
+// =============================================================================
+
+@test
+fn test_any_consistency_btreemap_vs_set() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10); map.insert(2, 20); map.insert(3, 30);
+    let mut set = BTreeSet.new();
+    set.insert(10); set.insert(20); set.insert(30);
+    // Both should find element > 25
+    assert(map.any(|_k, v| *v > 25));
+    assert(set.any(|x| *x > 25));
+}
+
+@test
+fn test_all_consistency_btreemap_vs_set() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 10); map.insert(2, 20);
+    let mut set = BTreeSet.new();
+    set.insert(10); set.insert(20);
+    // Both should agree all > 0
+    assert(map.all(|_k, v| *v > 0));
+    assert(set.all(|x| *x > 0));
+}

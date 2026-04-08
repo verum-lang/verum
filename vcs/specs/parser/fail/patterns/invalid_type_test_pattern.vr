@@ -1,0 +1,75 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, type-test, is, error
+// @description: Test invalid type test pattern syntax (binding is Type)
+// @expected-error: E085
+
+fn test_is_without_type() {
+    let value: unknown = 42;
+
+    // Invalid: 'is' without type
+    match value {
+        x is => print("missing type"),
+        _ => print("other"),
+    }
+}
+
+fn test_is_with_expression() {
+    let value: unknown = 42;
+
+    // Invalid: expression instead of type after 'is'
+    match value {
+        x is 42 => print("literal after is"),
+        _ => print("other"),
+    }
+}
+
+fn test_is_without_binding() {
+    let value: unknown = 42;
+
+    // Invalid: 'is' without preceding binding
+    match value {
+        is Int => print("no binding"),
+        _ => print("other"),
+    }
+}
+
+fn test_is_with_pattern() {
+    let value: unknown = 42;
+
+    // Invalid: pattern instead of identifier before 'is'
+    match value {
+        (a, b) is Tuple => print("pattern before is"),
+        _ => print("other"),
+    }
+}
+
+fn test_double_is() {
+    let value: unknown = 42;
+
+    // Invalid: double 'is' keyword
+    match value {
+        x is is Int => print("double is"),
+        _ => print("other"),
+    }
+}
+
+fn test_is_not_wrong_order() {
+    let value: unknown = 42;
+
+    // Invalid: 'not is' instead of 'is not'
+    match value {
+        x not is Int => print("wrong order"),
+        _ => print("other"),
+    }
+}
+
+fn test_is_with_complex_type_error() {
+    let value: unknown = 42;
+
+    // Invalid: malformed type after is
+    match value {
+        x is List< => print("malformed type"),
+        _ => print("other"),
+    }
+}

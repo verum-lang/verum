@@ -1,0 +1,206 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: lexer, edge-cases, tokens
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// Edge Case Tokens - Lexer Edge Case Test Seed
+// Tests unusual but valid token combinations
+// =============================================================================
+
+// Unicode identifiers
+fn unicode_identifiers() {
+    let Alpha = 1;           // Greek
+    let Beta = 2;
+    let kana = 3;    // Japanese
+    let zhong = 4;   // Chinese
+    let emoji_var = 5;       // Near emoji (valid Unicode letter range)
+}
+
+// Identifier edge cases
+fn identifier_edge_cases() {
+    let _ = 0;               // Single underscore
+    let __ = 1;              // Double underscore
+    let ___ = 2;             // Triple underscore
+    let _a = 3;              // Leading underscore
+    let a_ = 4;              // Trailing underscore
+    let _a_ = 5;             // Both
+    let a_b_c = 6;           // Multiple underscores
+    let A123 = 7;            // Digits in identifier
+    let a1b2c3 = 8;          // Mixed
+    let SCREAMING_CASE = 9;  // Constant style
+    let camelCase = 10;      // Camel case
+    let PascalCase = 11;     // Pascal case
+    let snake_case = 12;     // Snake case
+}
+
+// Number edge cases
+fn number_edge_cases() {
+    // Maximum separators
+    let sep1 = 1_2_3_4_5;
+    let sep2 = 0xFF_FF_FF_FF;
+    let sep3 = 0b1_0_1_0_1_0_1_0;
+    let sep4 = 0o7_7_7_7;
+
+    // Leading zeros (in non-decimal)
+    let lead1 = 0x0000FF;
+    let lead2 = 0b00001111;
+    let lead3 = 0o0007;
+
+    // Very small floats
+    let tiny1 = 0.0000001;
+    let tiny2 = 1e-100;
+
+    // Very large floats
+    let huge1 = 9999999999999.9999999;
+    let huge2 = 1e308;
+
+    // Edge exponents
+    let exp1 = 1e0;
+    let exp2 = 1e+0;
+    let exp3 = 1e-0;
+    let exp4 = 1E10;
+    let exp5 = 1E+10;
+    let exp6 = 1E-10;
+}
+
+// String edge cases
+fn string_edge_cases() {
+    // Empty strings
+    let empty1 = "";
+    let empty2 = """""";     // Empty multiline
+    let empty3 = r#""#;      // Empty raw
+
+    // Single character
+    let single1 = "a";
+    let single2 = "\n";
+
+    // Maximum nesting in raw strings
+    let raw_deep = r#####"content"#####;
+
+    // Unicode in strings
+    let unicode1 = "Hello, world!";
+    let unicode2 = "Cafe";
+    let unicode3 = "Emoji: 123";
+
+    // Mixed escapes
+    let mixed = "line1\nline2\ttab\x41unicode\u{1F600}";
+
+    // Quotes in strings
+    let quotes1 = "single'quote";
+    let quotes2 = "double\"quote";
+    let quotes3 = r#"both'and"quotes"#;
+}
+
+// Operator edge cases
+fn operator_edge_cases() {
+    // Consecutive operators
+    let a = 1;
+    let b = --a;             // Double minus (negate negation)
+    let c = !!true;          // Double not
+    let d = &&ptr;           // Address of address (parsed carefully)
+
+    // Operators without spaces
+    let e = 1+2;
+    let f = 3-4;
+    let g = 5*6;
+    let h = 7/8;
+
+    // Chained comparisons parsed
+    let i = a<b;
+    let j = c>d;
+    let k = e<=f;
+    let l = g>=h;
+
+    // Arrow-like sequences
+    let m = a->b;            // Method arrow
+    let n = a=>b;            // Fat arrow
+
+    // Range operators
+    let o = 0..10;
+    let p = 0..=10;
+
+    // Shift vs generics
+    let q = a<<b;            // Shift
+    let r = a>>b;            // Shift
+}
+
+// Comment edge cases
+fn comment_edge_cases() {
+    // Nested block comments (if supported)
+    /* outer /* inner */ outer */
+
+    // Comments with special chars
+    // Special: @#$%^&*()
+
+    /* Multi
+       line
+       comment */
+
+    // Empty comment:
+    //
+
+    /* Empty block: */
+}
+
+// Punctuation edge cases
+fn punctuation_edge_cases() {
+    // Empty structures
+    let empty_tuple = ();
+    let empty_array: [Int; 0] = [];
+    let empty_record = Unit {};
+
+    // Deeply nested
+    let deep = ((((1))));
+    let deep_arr = [[[[1]]]];
+    let deep_gen = List<List<List<Int>>>;
+
+    // Trailing commas
+    let tuple = (1, 2, 3,);
+    let array = [1, 2, 3,];
+    let record = Point { x: 1, y: 2, };
+}
+
+// Token boundary edge cases
+fn token_boundary_tests() {
+    // No space between tokens
+    let ab=1;let cd=2;
+
+    // Identifiers that look like keywords
+    let letx = 1;
+    let fnx = 2;
+    let isx = 3;
+    let typex = 4;
+    let ifx = 5;
+    let elsex = 6;
+
+    // Keywords that are prefixes of identifiers
+    let let_var = 7;
+    let fn_ptr = 8;
+    let is_valid = 9;
+    let type_name = 10;
+    let if_then = 11;
+
+    // Numbers followed by identifiers
+    let num = 123abc;        // Should be error or 123 then abc
+}
+
+// Whitespace edge cases
+fn whitespace_edge_cases() {
+    // Tab indentation
+	let tab_indented = 1;
+
+    // Mixed whitespace
+    	  let mixed_ws = 2;
+
+    // Windows line endings
+    let crlf = 3;
+
+    // Multiple blank lines
+
+
+
+    let after_blanks = 4;
+}

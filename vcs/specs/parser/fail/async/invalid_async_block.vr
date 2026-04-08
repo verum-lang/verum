@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, block, error
+// @description: Test invalid async keyword without block
+// @expected-error: E018
+
+fn test() {
+    let x = async
+}

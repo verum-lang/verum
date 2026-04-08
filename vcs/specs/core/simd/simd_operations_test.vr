@@ -1,0 +1,1420 @@
+// =============================================================================
+// simd_operations_test.vr - Tests for SIMD vector operations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: simd, operations, vectors, arithmetic, core
+// @description: Tests for SIMD vector construction, arithmetic, and reduction operations
+// =============================================================================
+
+module specs.core.simd.simd_operations_test;
+
+mount core.simd.{
+    SimdElement, Vec, Mask,
+    Vec4f, Vec2d, Vec4i, Vec2l, Vec16b, Vec8s,
+    Vec8f, Vec4d, Vec8i, Vec4l,
+    Vec16f, Vec8d, Vec16i, Vec8l,
+    Mask4, Mask8, Mask16,
+};
+
+// =============================================================================
+// Section 1: Vector Construction Tests
+// =============================================================================
+
+@test
+fn test_vec4f_splat() {
+    let v = Vec4f.splat(1.5);
+    // All lanes should have value 1.5
+    let arr = v.to_array();
+    assert_eq(arr[0], 1.5);
+    assert_eq(arr[1], 1.5);
+    assert_eq(arr[2], 1.5);
+    assert_eq(arr[3], 1.5);
+    print("Vec4f.splat() test passed");
+}
+
+@test
+fn test_vec4i_splat() {
+    let v = Vec4i.splat(42);
+    let arr = v.to_array();
+    assert_eq(arr[0], 42);
+    assert_eq(arr[1], 42);
+    assert_eq(arr[2], 42);
+    assert_eq(arr[3], 42);
+    print("Vec4i.splat() test passed");
+}
+
+@test
+fn test_vec2d_splat() {
+    let v = Vec2d.splat(3.14159);
+    let arr = v.to_array();
+    assert_eq(arr[0], 3.14159);
+    assert_eq(arr[1], 3.14159);
+    print("Vec2d.splat() test passed");
+}
+
+@test
+fn test_vec4f_from_array() {
+    let arr: [Float32; 4] = [1.0, 2.0, 3.0, 4.0];
+    let v = Vec4f.from_array(arr);
+    let out = v.to_array();
+    assert_eq(out[0], 1.0);
+    assert_eq(out[1], 2.0);
+    assert_eq(out[2], 3.0);
+    assert_eq(out[3], 4.0);
+    print("Vec4f.from_array() test passed");
+}
+
+@test
+fn test_vec4i_from_array() {
+    let arr: [Int32; 4] = [10, 20, 30, 40];
+    let v = Vec4i.from_array(arr);
+    let out = v.to_array();
+    assert_eq(out[0], 10);
+    assert_eq(out[1], 20);
+    assert_eq(out[2], 30);
+    assert_eq(out[3], 40);
+    print("Vec4i.from_array() test passed");
+}
+
+@test
+fn test_vec8f_from_array() {
+    let arr: [Float32; 8] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let v = Vec8f.from_array(arr);
+    let out = v.to_array();
+    assert_eq(out[0], 1.0);
+    assert_eq(out[7], 8.0);
+    print("Vec8f.from_array() test passed");
+}
+
+@test
+fn test_vec_to_array_roundtrip() {
+    let original: [Float32; 4] = [1.1, 2.2, 3.3, 4.4];
+    let v = Vec4f.from_array(original);
+    let result = v.to_array();
+    // Should be identical
+    assert_eq(result[0], original[0]);
+    assert_eq(result[1], original[1]);
+    assert_eq(result[2], original[2]);
+    assert_eq(result[3], original[3]);
+    print("Vec roundtrip test passed");
+}
+
+// =============================================================================
+// Section 2: Arithmetic Operation Tests
+// =============================================================================
+
+@test
+fn test_vec4f_add() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([5.0, 6.0, 7.0, 8.0]);
+    let c = a.add(b);
+    let result = c.to_array();
+    assert_eq(result[0], 6.0);
+    assert_eq(result[1], 8.0);
+    assert_eq(result[2], 10.0);
+    assert_eq(result[3], 12.0);
+    print("Vec4f.add() test passed");
+}
+
+@test
+fn test_vec4f_sub() {
+    let a = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let b = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let c = a.sub(b);
+    let result = c.to_array();
+    assert_eq(result[0], 9.0);
+    assert_eq(result[1], 18.0);
+    assert_eq(result[2], 27.0);
+    assert_eq(result[3], 36.0);
+    print("Vec4f.sub() test passed");
+}
+
+@test
+fn test_vec4f_mul() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([2.0, 3.0, 4.0, 5.0]);
+    let c = a.mul(b);
+    let result = c.to_array();
+    assert_eq(result[0], 2.0);
+    assert_eq(result[1], 6.0);
+    assert_eq(result[2], 12.0);
+    assert_eq(result[3], 20.0);
+    print("Vec4f.mul() test passed");
+}
+
+@test
+fn test_vec4f_div() {
+    let a = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let b = Vec4f.from_array([2.0, 4.0, 5.0, 8.0]);
+    let c = a.div(b);
+    let result = c.to_array();
+    assert_eq(result[0], 5.0);
+    assert_eq(result[1], 5.0);
+    assert_eq(result[2], 6.0);
+    assert_eq(result[3], 5.0);
+    print("Vec4f.div() test passed");
+}
+
+@test
+fn test_vec4i_add() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.from_array([10, 20, 30, 40]);
+    let c = a.add(b);
+    let result = c.to_array();
+    assert_eq(result[0], 11);
+    assert_eq(result[1], 22);
+    assert_eq(result[2], 33);
+    assert_eq(result[3], 44);
+    print("Vec4i.add() test passed");
+}
+
+@test
+fn test_vec4i_sub() {
+    let a = Vec4i.from_array([100, 200, 300, 400]);
+    let b = Vec4i.from_array([1, 2, 3, 4]);
+    let c = a.sub(b);
+    let result = c.to_array();
+    assert_eq(result[0], 99);
+    assert_eq(result[1], 198);
+    assert_eq(result[2], 297);
+    assert_eq(result[3], 396);
+    print("Vec4i.sub() test passed");
+}
+
+@test
+fn test_vec4i_mul() {
+    let a = Vec4i.from_array([2, 3, 4, 5]);
+    let b = Vec4i.from_array([3, 4, 5, 6]);
+    let c = a.mul(b);
+    let result = c.to_array();
+    assert_eq(result[0], 6);
+    assert_eq(result[1], 12);
+    assert_eq(result[2], 20);
+    assert_eq(result[3], 30);
+    print("Vec4i.mul() test passed");
+}
+
+@test
+fn test_vec2d_add() {
+    let a = Vec2d.from_array([1.5, 2.5]);
+    let b = Vec2d.from_array([3.5, 4.5]);
+    let c = a.add(b);
+    let result = c.to_array();
+    assert_eq(result[0], 5.0);
+    assert_eq(result[1], 7.0);
+    print("Vec2d.add() test passed");
+}
+
+// =============================================================================
+// Section 3: Fused Multiply-Add Tests
+// =============================================================================
+
+@test
+fn test_vec4f_fma() {
+    // fma(a, b, c) = a * b + c
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([2.0, 2.0, 2.0, 2.0]);
+    let c = Vec4f.from_array([10.0, 10.0, 10.0, 10.0]);
+    let result = a.fma(b, c);
+    let arr = result.to_array();
+    // 1*2+10=12, 2*2+10=14, 3*2+10=16, 4*2+10=18
+    assert_eq(arr[0], 12.0);
+    assert_eq(arr[1], 14.0);
+    assert_eq(arr[2], 16.0);
+    assert_eq(arr[3], 18.0);
+    print("Vec4f.fma() test passed");
+}
+
+@test
+fn test_vec2d_fma() {
+    let a = Vec2d.from_array([1.5, 2.5]);
+    let b = Vec2d.from_array([2.0, 2.0]);
+    let c = Vec2d.from_array([1.0, 1.0]);
+    let result = a.fma(b, c);
+    let arr = result.to_array();
+    // 1.5*2+1=4, 2.5*2+1=6
+    assert_eq(arr[0], 4.0);
+    assert_eq(arr[1], 6.0);
+    print("Vec2d.fma() test passed");
+}
+
+// =============================================================================
+// Section 4: Unary Operation Tests
+// =============================================================================
+
+@test
+fn test_vec4f_abs() {
+    let v = Vec4f.from_array([-1.0, 2.0, -3.0, 4.0]);
+    let result = v.abs();
+    let arr = result.to_array();
+    assert_eq(arr[0], 1.0);
+    assert_eq(arr[1], 2.0);
+    assert_eq(arr[2], 3.0);
+    assert_eq(arr[3], 4.0);
+    print("Vec4f.abs() test passed");
+}
+
+@test
+fn test_vec4f_neg() {
+    let v = Vec4f.from_array([1.0, -2.0, 3.0, -4.0]);
+    let result = v.neg();
+    let arr = result.to_array();
+    assert_eq(arr[0], -1.0);
+    assert_eq(arr[1], 2.0);
+    assert_eq(arr[2], -3.0);
+    assert_eq(arr[3], 4.0);
+    print("Vec4f.neg() test passed");
+}
+
+@test
+fn test_vec4i_abs() {
+    let v = Vec4i.from_array([-10, 20, -30, 40]);
+    let result = v.abs();
+    let arr = result.to_array();
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+    assert_eq(arr[3], 40);
+    print("Vec4i.abs() test passed");
+}
+
+// =============================================================================
+// Section 5: Min/Max Operation Tests
+// =============================================================================
+
+@test
+fn test_vec4f_min() {
+    let a = Vec4f.from_array([1.0, 5.0, 3.0, 8.0]);
+    let b = Vec4f.from_array([2.0, 4.0, 6.0, 7.0]);
+    let result = a.min(b);
+    let arr = result.to_array();
+    assert_eq(arr[0], 1.0);  // min(1, 2)
+    assert_eq(arr[1], 4.0);  // min(5, 4)
+    assert_eq(arr[2], 3.0);  // min(3, 6)
+    assert_eq(arr[3], 7.0);  // min(8, 7)
+    print("Vec4f.min() test passed");
+}
+
+@test
+fn test_vec4f_max() {
+    let a = Vec4f.from_array([1.0, 5.0, 3.0, 8.0]);
+    let b = Vec4f.from_array([2.0, 4.0, 6.0, 7.0]);
+    let result = a.max(b);
+    let arr = result.to_array();
+    assert_eq(arr[0], 2.0);  // max(1, 2)
+    assert_eq(arr[1], 5.0);  // max(5, 4)
+    assert_eq(arr[2], 6.0);  // max(3, 6)
+    assert_eq(arr[3], 8.0);  // max(8, 7)
+    print("Vec4f.max() test passed");
+}
+
+@test
+fn test_vec4i_min() {
+    let a = Vec4i.from_array([10, 50, 30, 80]);
+    let b = Vec4i.from_array([20, 40, 60, 70]);
+    let result = a.min(b);
+    let arr = result.to_array();
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 40);
+    assert_eq(arr[2], 30);
+    assert_eq(arr[3], 70);
+    print("Vec4i.min() test passed");
+}
+
+@test
+fn test_vec4i_max() {
+    let a = Vec4i.from_array([10, 50, 30, 80]);
+    let b = Vec4i.from_array([20, 40, 60, 70]);
+    let result = a.max(b);
+    let arr = result.to_array();
+    assert_eq(arr[0], 20);
+    assert_eq(arr[1], 50);
+    assert_eq(arr[2], 60);
+    assert_eq(arr[3], 80);
+    print("Vec4i.max() test passed");
+}
+
+// =============================================================================
+// Section 6: Horizontal Reduction Tests
+// =============================================================================
+
+@test
+fn test_vec4f_reduce_add() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let sum = v.reduce_add();
+    assert_eq(sum, 10.0);  // 1+2+3+4
+    print("Vec4f.reduce_add() test passed");
+}
+
+@test
+fn test_vec4f_reduce_mul() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let product = v.reduce_mul();
+    assert_eq(product, 24.0);  // 1*2*3*4
+    print("Vec4f.reduce_mul() test passed");
+}
+
+@test
+fn test_vec4f_reduce_min() {
+    let v = Vec4f.from_array([3.0, 1.0, 4.0, 2.0]);
+    let min_val = v.reduce_min();
+    assert_eq(min_val, 1.0);
+    print("Vec4f.reduce_min() test passed");
+}
+
+@test
+fn test_vec4f_reduce_max() {
+    let v = Vec4f.from_array([3.0, 1.0, 4.0, 2.0]);
+    let max_val = v.reduce_max();
+    assert_eq(max_val, 4.0);
+    print("Vec4f.reduce_max() test passed");
+}
+
+@test
+fn test_vec4i_reduce_add() {
+    let v = Vec4i.from_array([10, 20, 30, 40]);
+    let sum = v.reduce_add();
+    assert_eq(sum, 100);
+    print("Vec4i.reduce_add() test passed");
+}
+
+@test
+fn test_vec8f_reduce_add() {
+    let v = Vec8f.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let sum = v.reduce_add();
+    assert_eq(sum, 36.0);  // 1+2+3+4+5+6+7+8
+    print("Vec8f.reduce_add() test passed");
+}
+
+@test
+fn test_vec2d_reduce_add() {
+    let v = Vec2d.from_array([1.5, 2.5]);
+    let sum = v.reduce_add();
+    assert_eq(sum, 4.0);
+    print("Vec2d.reduce_add() test passed");
+}
+
+// =============================================================================
+// Section 7: Comparison Operation Tests
+// =============================================================================
+
+@test
+fn test_vec4f_cmp_lt() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([2.0, 2.0, 2.0, 2.0]);
+    let mask = a.cmp_lt(b);
+    // a[0] < b[0]: 1 < 2 = true
+    // a[1] < b[1]: 2 < 2 = false
+    // a[2] < b[2]: 3 < 2 = false
+    // a[3] < b[3]: 4 < 2 = false
+    assert(mask.count() == 1);
+    print("Vec4f.cmp_lt() test passed");
+}
+
+@test
+fn test_vec4f_cmp_le() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([2.0, 2.0, 2.0, 2.0]);
+    let mask = a.cmp_le(b);
+    // a[0] <= b[0]: 1 <= 2 = true
+    // a[1] <= b[1]: 2 <= 2 = true
+    // a[2] <= b[2]: 3 <= 2 = false
+    // a[3] <= b[3]: 4 <= 2 = false
+    assert(mask.count() == 2);
+    print("Vec4f.cmp_le() test passed");
+}
+
+@test
+fn test_vec4f_cmp_gt() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([2.0, 2.0, 2.0, 2.0]);
+    let mask = a.cmp_gt(b);
+    // 1>2=false, 2>2=false, 3>2=true, 4>2=true
+    assert(mask.count() == 2);
+    print("Vec4f.cmp_gt() test passed");
+}
+
+@test
+fn test_vec4f_cmp_ge() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([2.0, 2.0, 2.0, 2.0]);
+    let mask = a.cmp_ge(b);
+    // 1>=2=false, 2>=2=true, 3>=2=true, 4>=2=true
+    assert(mask.count() == 3);
+    print("Vec4f.cmp_ge() test passed");
+}
+
+@test
+fn test_vec4f_cmp_eq() {
+    let a = Vec4f.from_array([1.0, 2.0, 2.0, 4.0]);
+    let b = Vec4f.from_array([1.0, 3.0, 2.0, 5.0]);
+    let mask = a.cmp_eq(b);
+    // 1==1=true, 2==3=false, 2==2=true, 4==5=false
+    assert(mask.count() == 2);
+    print("Vec4f.cmp_eq() test passed");
+}
+
+@test
+fn test_vec4f_cmp_ne() {
+    let a = Vec4f.from_array([1.0, 2.0, 2.0, 4.0]);
+    let b = Vec4f.from_array([1.0, 3.0, 2.0, 5.0]);
+    let mask = a.cmp_ne(b);
+    // 1!=1=false, 2!=3=true, 2!=2=false, 4!=5=true
+    assert(mask.count() == 2);
+    print("Vec4f.cmp_ne() test passed");
+}
+
+@test
+fn test_vec4i_cmp_lt() {
+    let a = Vec4i.from_array([1, 5, 3, 7]);
+    let b = Vec4i.from_array([2, 4, 6, 8]);
+    let mask = a.cmp_lt(b);
+    // 1<2=true, 5<4=false, 3<6=true, 7<8=true
+    assert(mask.count() == 3);
+    print("Vec4i.cmp_lt() test passed");
+}
+
+// =============================================================================
+// Section 8: Conditional Select Tests
+// =============================================================================
+
+@test
+fn test_vec4f_select() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let threshold = Vec4f.splat(2.5);
+    let mask = a.cmp_lt(threshold);  // true, true, false, false
+
+    let result = Vec4f.select(mask, a, b);
+    let arr = result.to_array();
+    // mask[0]=true: select a[0]=1.0
+    // mask[1]=true: select a[1]=2.0
+    // mask[2]=false: select b[2]=30.0
+    // mask[3]=false: select b[3]=40.0
+    assert_eq(arr[0], 1.0);
+    assert_eq(arr[1], 2.0);
+    assert_eq(arr[2], 30.0);
+    assert_eq(arr[3], 40.0);
+    print("Vec4f.select() test passed");
+}
+
+@test
+fn test_vec4i_select() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.from_array([10, 20, 30, 40]);
+    let threshold = Vec4i.splat(3);
+    let mask = a.cmp_le(threshold);  // true, true, true, false
+
+    let result = Vec4i.select(mask, a, b);
+    let arr = result.to_array();
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[3], 40);
+    print("Vec4i.select() test passed");
+}
+
+// =============================================================================
+// Section 9: Shuffle and Permute Tests
+// =============================================================================
+
+@test
+fn test_vec4f_reverse() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let reversed = v.reverse();
+    let arr = reversed.to_array();
+    assert_eq(arr[0], 4.0);
+    assert_eq(arr[1], 3.0);
+    assert_eq(arr[2], 2.0);
+    assert_eq(arr[3], 1.0);
+    print("Vec4f.reverse() test passed");
+}
+
+@test
+fn test_vec4i_reverse() {
+    let v = Vec4i.from_array([10, 20, 30, 40]);
+    let reversed = v.reverse();
+    let arr = reversed.to_array();
+    assert_eq(arr[0], 40);
+    assert_eq(arr[1], 30);
+    assert_eq(arr[2], 20);
+    assert_eq(arr[3], 10);
+    print("Vec4i.reverse() test passed");
+}
+
+@test
+fn test_vec4f_rotate_left_1() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let rotated = v.rotate_left<1>();
+    let arr = rotated.to_array();
+    // Rotate left by 1: [2.0, 3.0, 4.0, 1.0]
+    assert_eq(arr[0], 2.0);
+    assert_eq(arr[1], 3.0);
+    assert_eq(arr[2], 4.0);
+    assert_eq(arr[3], 1.0);
+    print("Vec4f.rotate_left<1>() test passed");
+}
+
+@test
+fn test_vec4f_rotate_left_2() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let rotated = v.rotate_left<2>();
+    let arr = rotated.to_array();
+    // Rotate left by 2: [3.0, 4.0, 1.0, 2.0]
+    assert_eq(arr[0], 3.0);
+    assert_eq(arr[1], 4.0);
+    assert_eq(arr[2], 1.0);
+    assert_eq(arr[3], 2.0);
+    print("Vec4f.rotate_left<2>() test passed");
+}
+
+// =============================================================================
+// Section 10: 256-bit Vector Operation Tests
+// =============================================================================
+
+@test
+fn test_vec8f_add() {
+    let a = Vec8f.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let b = Vec8f.splat(10.0);
+    let c = a.add(b);
+    let result = c.to_array();
+    assert_eq(result[0], 11.0);
+    assert_eq(result[7], 18.0);
+    print("Vec8f.add() test passed");
+}
+
+@test
+fn test_vec4d_add() {
+    let a = Vec4d.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4d.from_array([10.0, 20.0, 30.0, 40.0]);
+    let c = a.add(b);
+    let result = c.to_array();
+    assert_eq(result[0], 11.0);
+    assert_eq(result[1], 22.0);
+    assert_eq(result[2], 33.0);
+    assert_eq(result[3], 44.0);
+    print("Vec4d.add() test passed");
+}
+
+@test
+fn test_vec8i_reduce_add() {
+    let v = Vec8i.from_array([1, 2, 3, 4, 5, 6, 7, 8]);
+    let sum = v.reduce_add();
+    assert_eq(sum, 36);  // 1+2+3+4+5+6+7+8
+    print("Vec8i.reduce_add() test passed");
+}
+
+// =============================================================================
+// Section 11: Edge Cases
+// =============================================================================
+
+@test
+fn test_vec4f_zero() {
+    let v = Vec4f.splat(0.0);
+    let sum = v.reduce_add();
+    assert_eq(sum, 0.0);
+    print("Vec4f zero test passed");
+}
+
+@test
+fn test_vec4f_negative() {
+    let v = Vec4f.from_array([-1.0, -2.0, -3.0, -4.0]);
+    let sum = v.reduce_add();
+    assert_eq(sum, -10.0);
+    print("Vec4f negative test passed");
+}
+
+@test
+fn test_vec4f_mixed_signs() {
+    let v = Vec4f.from_array([-1.0, 2.0, -3.0, 4.0]);
+    let sum = v.reduce_add();
+    assert_eq(sum, 2.0);  // -1+2-3+4
+    print("Vec4f mixed signs test passed");
+}
+
+@test
+fn test_vec4f_self_add() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let doubled = v.add(v);
+    let result = doubled.to_array();
+    assert_eq(result[0], 2.0);
+    assert_eq(result[1], 4.0);
+    assert_eq(result[2], 6.0);
+    assert_eq(result[3], 8.0);
+    print("Vec4f self-add test passed");
+}
+
+@test
+fn test_vec4f_chain_operations() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let two = Vec4f.splat(2.0);
+    let ten = Vec4f.splat(10.0);
+
+    // (v * 2) + 10
+    let result = v.mul(two).add(ten);
+    let arr = result.to_array();
+    assert_eq(arr[0], 12.0);  // 1*2+10
+    assert_eq(arr[1], 14.0);  // 2*2+10
+    assert_eq(arr[2], 16.0);  // 3*2+10
+    assert_eq(arr[3], 18.0);  // 4*2+10
+    print("Vec4f chain operations test passed");
+}
+
+// =============================================================================
+// Section 12: Arithmetic with Zero (Identity Element)
+// =============================================================================
+
+@test
+fn test_vec4f_add_zero_identity() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let zero = Vec4f.splat(0.0);
+    let result = v.add(zero);
+    let arr = result.to_array();
+    assert_eq(arr[0], 1.0);
+    assert_eq(arr[1], 2.0);
+    assert_eq(arr[2], 3.0);
+    assert_eq(arr[3], 4.0);
+    print("Vec4f add zero identity test passed");
+}
+
+@test
+fn test_vec4f_sub_zero_identity() {
+    let v = Vec4f.from_array([5.0, 6.0, 7.0, 8.0]);
+    let zero = Vec4f.splat(0.0);
+    let result = v.sub(zero);
+    let arr = result.to_array();
+    assert_eq(arr[0], 5.0);
+    assert_eq(arr[1], 6.0);
+    assert_eq(arr[2], 7.0);
+    assert_eq(arr[3], 8.0);
+    print("Vec4f sub zero identity test passed");
+}
+
+@test
+fn test_vec4f_mul_one_identity() {
+    let v = Vec4f.from_array([3.0, 6.0, 9.0, 12.0]);
+    let one = Vec4f.splat(1.0);
+    let result = v.mul(one);
+    let arr = result.to_array();
+    assert_eq(arr[0], 3.0);
+    assert_eq(arr[1], 6.0);
+    assert_eq(arr[2], 9.0);
+    assert_eq(arr[3], 12.0);
+    print("Vec4f mul one identity test passed");
+}
+
+@test
+fn test_vec4f_mul_zero_annihilator() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let zero = Vec4f.splat(0.0);
+    let result = v.mul(zero);
+    let arr = result.to_array();
+    assert_eq(arr[0], 0.0);
+    assert_eq(arr[1], 0.0);
+    assert_eq(arr[2], 0.0);
+    assert_eq(arr[3], 0.0);
+    print("Vec4f mul zero annihilator test passed");
+}
+
+@test
+fn test_vec4f_div_by_one() {
+    let v = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let one = Vec4f.splat(1.0);
+    let result = v.div(one);
+    let arr = result.to_array();
+    assert_eq(arr[0], 10.0);
+    assert_eq(arr[1], 20.0);
+    assert_eq(arr[2], 30.0);
+    assert_eq(arr[3], 40.0);
+    print("Vec4f div by one test passed");
+}
+
+@test
+fn test_vec4f_sub_self_is_zero() {
+    let v = Vec4f.from_array([7.0, 14.0, 21.0, 28.0]);
+    let result = v.sub(v);
+    let arr = result.to_array();
+    assert_eq(arr[0], 0.0);
+    assert_eq(arr[1], 0.0);
+    assert_eq(arr[2], 0.0);
+    assert_eq(arr[3], 0.0);
+    print("Vec4f sub self is zero test passed");
+}
+
+@test
+fn test_vec4i_add_zero_identity() {
+    let v = Vec4i.from_array([10, 20, 30, 40]);
+    let zero = Vec4i.splat(0);
+    let result = v.add(zero);
+    let arr = result.to_array();
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+    assert_eq(arr[3], 40);
+    print("Vec4i add zero identity test passed");
+}
+
+@test
+fn test_vec4i_sub_self_is_zero() {
+    let v = Vec4i.from_array([5, 10, 15, 20]);
+    let result = v.sub(v);
+    let arr = result.to_array();
+    assert_eq(arr[0], 0);
+    assert_eq(arr[1], 0);
+    assert_eq(arr[2], 0);
+    assert_eq(arr[3], 0);
+    print("Vec4i sub self is zero test passed");
+}
+
+// =============================================================================
+// Section 13: Arithmetic with Negative Values
+// =============================================================================
+
+@test
+fn test_vec4f_add_negative() {
+    let a = Vec4f.from_array([-1.0, -2.0, -3.0, -4.0]);
+    let b = Vec4f.from_array([-5.0, -6.0, -7.0, -8.0]);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], -6.0);
+    assert_eq(result[1], -8.0);
+    assert_eq(result[2], -10.0);
+    assert_eq(result[3], -12.0);
+    print("Vec4f add negative test passed");
+}
+
+@test
+fn test_vec4f_sub_negative_result() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let result = a.sub(b).to_array();
+    assert_eq(result[0], -9.0);
+    assert_eq(result[1], -18.0);
+    assert_eq(result[2], -27.0);
+    assert_eq(result[3], -36.0);
+    print("Vec4f sub negative result test passed");
+}
+
+@test
+fn test_vec4f_mul_negative() {
+    let a = Vec4f.from_array([-1.0, 2.0, -3.0, 4.0]);
+    let b = Vec4f.from_array([2.0, -3.0, -4.0, 5.0]);
+    let result = a.mul(b).to_array();
+    assert_eq(result[0], -2.0);   // -1 * 2
+    assert_eq(result[1], -6.0);   // 2 * -3
+    assert_eq(result[2], 12.0);   // -3 * -4
+    assert_eq(result[3], 20.0);   // 4 * 5
+    print("Vec4f mul negative test passed");
+}
+
+@test
+fn test_vec4i_mul_negative() {
+    let a = Vec4i.from_array([-2, 3, -4, 5]);
+    let b = Vec4i.from_array([3, -4, -5, 6]);
+    let result = a.mul(b).to_array();
+    assert_eq(result[0], -6);
+    assert_eq(result[1], -12);
+    assert_eq(result[2], 20);
+    assert_eq(result[3], 30);
+    print("Vec4i mul negative test passed");
+}
+
+// =============================================================================
+// Section 14: Abs and Neg Edge Cases
+// =============================================================================
+
+@test
+fn test_vec4f_abs_all_negative() {
+    let v = Vec4f.from_array([-10.0, -20.0, -30.0, -40.0]);
+    let result = v.abs().to_array();
+    assert_eq(result[0], 10.0);
+    assert_eq(result[1], 20.0);
+    assert_eq(result[2], 30.0);
+    assert_eq(result[3], 40.0);
+    print("Vec4f abs all negative test passed");
+}
+
+@test
+fn test_vec4f_abs_already_positive() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let result = v.abs().to_array();
+    assert_eq(result[0], 1.0);
+    assert_eq(result[1], 2.0);
+    assert_eq(result[2], 3.0);
+    assert_eq(result[3], 4.0);
+    print("Vec4f abs already positive test passed");
+}
+
+@test
+fn test_vec4f_abs_zero() {
+    let v = Vec4f.splat(0.0);
+    let result = v.abs().to_array();
+    assert_eq(result[0], 0.0);
+    assert_eq(result[1], 0.0);
+    assert_eq(result[2], 0.0);
+    assert_eq(result[3], 0.0);
+    print("Vec4f abs zero test passed");
+}
+
+@test
+fn test_vec4f_neg_neg_is_identity() {
+    let v = Vec4f.from_array([1.0, -2.0, 3.0, -4.0]);
+    let result = v.neg().neg().to_array();
+    assert_eq(result[0], 1.0);
+    assert_eq(result[1], -2.0);
+    assert_eq(result[2], 3.0);
+    assert_eq(result[3], -4.0);
+    print("Vec4f neg neg is identity test passed");
+}
+
+@test
+fn test_vec4f_neg_zero() {
+    let v = Vec4f.splat(0.0);
+    let result = v.neg().to_array();
+    // Negative zero should equal zero for comparison purposes
+    assert_eq(result[0], 0.0);
+    print("Vec4f neg zero test passed");
+}
+
+@test
+fn test_vec4i_neg() {
+    let v = Vec4i.from_array([1, -2, 3, -4]);
+    let result = v.neg().to_array();
+    assert_eq(result[0], -1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], -3);
+    assert_eq(result[3], 4);
+    print("Vec4i neg test passed");
+}
+
+// =============================================================================
+// Section 15: Min/Max Deeper Tests
+// =============================================================================
+
+@test
+fn test_vec4f_min_equal_vectors() {
+    let v = Vec4f.from_array([3.0, 3.0, 3.0, 3.0]);
+    let result = v.min(v).to_array();
+    assert_eq(result[0], 3.0);
+    assert_eq(result[1], 3.0);
+    assert_eq(result[2], 3.0);
+    assert_eq(result[3], 3.0);
+    print("Vec4f min equal vectors test passed");
+}
+
+@test
+fn test_vec4f_max_equal_vectors() {
+    let v = Vec4f.from_array([7.0, 7.0, 7.0, 7.0]);
+    let result = v.max(v).to_array();
+    assert_eq(result[0], 7.0);
+    assert_eq(result[1], 7.0);
+    assert_eq(result[2], 7.0);
+    assert_eq(result[3], 7.0);
+    print("Vec4f max equal vectors test passed");
+}
+
+@test
+fn test_vec4f_min_with_negative() {
+    let a = Vec4f.from_array([-1.0, -5.0, 3.0, 0.0]);
+    let b = Vec4f.from_array([1.0, -3.0, -2.0, 0.0]);
+    let result = a.min(b).to_array();
+    assert_eq(result[0], -1.0);
+    assert_eq(result[1], -5.0);
+    assert_eq(result[2], -2.0);
+    assert_eq(result[3], 0.0);
+    print("Vec4f min with negative test passed");
+}
+
+@test
+fn test_vec4f_max_with_negative() {
+    let a = Vec4f.from_array([-1.0, -5.0, 3.0, 0.0]);
+    let b = Vec4f.from_array([1.0, -3.0, -2.0, 0.0]);
+    let result = a.max(b).to_array();
+    assert_eq(result[0], 1.0);
+    assert_eq(result[1], -3.0);
+    assert_eq(result[2], 3.0);
+    assert_eq(result[3], 0.0);
+    print("Vec4f max with negative test passed");
+}
+
+// =============================================================================
+// Section 16: Reduction Edge Cases
+// =============================================================================
+
+@test
+fn test_vec4f_reduce_add_zero() {
+    let v = Vec4f.splat(0.0);
+    assert_eq(v.reduce_add(), 0.0);
+    print("Vec4f reduce_add zero test passed");
+}
+
+@test
+fn test_vec4f_reduce_mul_zero() {
+    let v = Vec4f.from_array([1.0, 0.0, 3.0, 4.0]);
+    assert_eq(v.reduce_mul(), 0.0);
+    print("Vec4f reduce_mul zero test passed");
+}
+
+@test
+fn test_vec4f_reduce_mul_ones() {
+    let v = Vec4f.splat(1.0);
+    assert_eq(v.reduce_mul(), 1.0);
+    print("Vec4f reduce_mul ones test passed");
+}
+
+@test
+fn test_vec4i_reduce_min() {
+    let v = Vec4i.from_array([30, 10, 40, 20]);
+    assert_eq(v.reduce_min(), 10);
+    print("Vec4i reduce_min test passed");
+}
+
+@test
+fn test_vec4i_reduce_max() {
+    let v = Vec4i.from_array([30, 10, 40, 20]);
+    assert_eq(v.reduce_max(), 40);
+    print("Vec4i reduce_max test passed");
+}
+
+@test
+fn test_vec4i_reduce_mul() {
+    let v = Vec4i.from_array([1, 2, 3, 4]);
+    assert_eq(v.reduce_mul(), 24);
+    print("Vec4i reduce_mul test passed");
+}
+
+@test
+fn test_vec4f_reduce_min_with_negative() {
+    let v = Vec4f.from_array([-1.0, 2.0, -3.0, 4.0]);
+    assert_eq(v.reduce_min(), -3.0);
+    print("Vec4f reduce_min with negative test passed");
+}
+
+@test
+fn test_vec4f_reduce_max_with_negative() {
+    let v = Vec4f.from_array([-1.0, -2.0, -3.0, -4.0]);
+    assert_eq(v.reduce_max(), -1.0);
+    print("Vec4f reduce_max with negative test passed");
+}
+
+@test
+fn test_vec2d_reduce_mul() {
+    let v = Vec2d.from_array([3.0, 5.0]);
+    assert_eq(v.reduce_mul(), 15.0);
+    print("Vec2d reduce_mul test passed");
+}
+
+@test
+fn test_vec2d_reduce_min() {
+    let v = Vec2d.from_array([7.5, 2.5]);
+    assert_eq(v.reduce_min(), 2.5);
+    print("Vec2d reduce_min test passed");
+}
+
+@test
+fn test_vec2d_reduce_max() {
+    let v = Vec2d.from_array([7.5, 2.5]);
+    assert_eq(v.reduce_max(), 7.5);
+    print("Vec2d reduce_max test passed");
+}
+
+// =============================================================================
+// Section 17: Comparison Deeper Tests
+// =============================================================================
+
+@test
+fn test_vec4f_cmp_eq_all_equal() {
+    let v = Vec4f.splat(5.0);
+    let mask = v.cmp_eq(v);
+    assert_eq(mask.count(), 4);
+    assert(mask.all_active());
+    print("Vec4f cmp_eq all equal test passed");
+}
+
+@test
+fn test_vec4f_cmp_ne_all_equal() {
+    let v = Vec4f.splat(5.0);
+    let mask = v.cmp_ne(v);
+    assert_eq(mask.count(), 0);
+    assert(!mask.any());
+    print("Vec4f cmp_ne all equal test passed");
+}
+
+@test
+fn test_vec4i_cmp_le() {
+    let a = Vec4i.from_array([1, 3, 3, 5]);
+    let b = Vec4i.from_array([2, 3, 4, 4]);
+    let mask = a.cmp_le(b);
+    // 1<=2=true, 3<=3=true, 3<=4=true, 5<=4=false
+    assert_eq(mask.count(), 3);
+    print("Vec4i cmp_le test passed");
+}
+
+@test
+fn test_vec4i_cmp_gt() {
+    let a = Vec4i.from_array([5, 3, 7, 1]);
+    let b = Vec4i.from_array([2, 4, 6, 8]);
+    let mask = a.cmp_gt(b);
+    // 5>2=true, 3>4=false, 7>6=true, 1>8=false
+    assert_eq(mask.count(), 2);
+    print("Vec4i cmp_gt test passed");
+}
+
+@test
+fn test_vec4i_cmp_ge() {
+    let a = Vec4i.from_array([2, 3, 4, 5]);
+    let b = Vec4i.from_array([2, 4, 3, 5]);
+    let mask = a.cmp_ge(b);
+    // 2>=2=true, 3>=4=false, 4>=3=true, 5>=5=true
+    assert_eq(mask.count(), 3);
+    print("Vec4i cmp_ge test passed");
+}
+
+@test
+fn test_vec4i_cmp_eq() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.from_array([1, 3, 3, 5]);
+    let mask = a.cmp_eq(b);
+    // 1==1=true, 2==3=false, 3==3=true, 4==5=false
+    assert_eq(mask.count(), 2);
+    print("Vec4i cmp_eq test passed");
+}
+
+@test
+fn test_vec4i_cmp_ne() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.from_array([1, 3, 3, 5]);
+    let mask = a.cmp_ne(b);
+    // 1!=1=false, 2!=3=true, 3!=3=false, 4!=5=true
+    assert_eq(mask.count(), 2);
+    print("Vec4i cmp_ne test passed");
+}
+
+// =============================================================================
+// Section 18: FMA Edge Cases
+// =============================================================================
+
+@test
+fn test_vec4f_fma_zero_mul() {
+    // fma(a, 0, c) = a * 0 + c = c
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let zero = Vec4f.splat(0.0);
+    let c = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let result = a.fma(zero, c).to_array();
+    assert_eq(result[0], 10.0);
+    assert_eq(result[1], 20.0);
+    assert_eq(result[2], 30.0);
+    assert_eq(result[3], 40.0);
+    print("Vec4f fma zero mul test passed");
+}
+
+@test
+fn test_vec4f_fma_zero_add() {
+    // fma(a, b, 0) = a * b
+    let a = Vec4f.from_array([2.0, 3.0, 4.0, 5.0]);
+    let b = Vec4f.from_array([3.0, 4.0, 5.0, 6.0]);
+    let zero = Vec4f.splat(0.0);
+    let result = a.fma(b, zero).to_array();
+    assert_eq(result[0], 6.0);
+    assert_eq(result[1], 12.0);
+    assert_eq(result[2], 20.0);
+    assert_eq(result[3], 30.0);
+    print("Vec4f fma zero add test passed");
+}
+
+@test
+fn test_vec4f_fma_identity() {
+    // fma(a, 1, 0) = a
+    let a = Vec4f.from_array([7.0, 8.0, 9.0, 10.0]);
+    let one = Vec4f.splat(1.0);
+    let zero = Vec4f.splat(0.0);
+    let result = a.fma(one, zero).to_array();
+    assert_eq(result[0], 7.0);
+    assert_eq(result[1], 8.0);
+    assert_eq(result[2], 9.0);
+    assert_eq(result[3], 10.0);
+    print("Vec4f fma identity test passed");
+}
+
+// =============================================================================
+// Section 19: Select Edge Cases
+// =============================================================================
+
+@test
+fn test_vec4f_select_all_true() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let mask = Mask4.all();
+    let result = Vec4f.select(mask, a, b).to_array();
+    assert_eq(result[0], 1.0);
+    assert_eq(result[1], 2.0);
+    assert_eq(result[2], 3.0);
+    assert_eq(result[3], 4.0);
+    print("Vec4f select all true test passed");
+}
+
+@test
+fn test_vec4f_select_all_false() {
+    let a = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let mask = Mask4.none();
+    let result = Vec4f.select(mask, a, b).to_array();
+    assert_eq(result[0], 10.0);
+    assert_eq(result[1], 20.0);
+    assert_eq(result[2], 30.0);
+    assert_eq(result[3], 40.0);
+    print("Vec4f select all false test passed");
+}
+
+// =============================================================================
+// Section 20: 256-bit and 512-bit Vector Operations
+// =============================================================================
+
+@test
+fn test_vec8f_sub() {
+    let a = Vec8f.from_array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]);
+    let b = Vec8f.splat(5.0);
+    let result = a.sub(b).to_array();
+    assert_eq(result[0], 5.0);
+    assert_eq(result[3], 35.0);
+    assert_eq(result[7], 75.0);
+    print("Vec8f sub test passed");
+}
+
+@test
+fn test_vec8f_mul() {
+    let a = Vec8f.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let b = Vec8f.splat(2.0);
+    let result = a.mul(b).to_array();
+    assert_eq(result[0], 2.0);
+    assert_eq(result[7], 16.0);
+    print("Vec8f mul test passed");
+}
+
+@test
+fn test_vec8i_add() {
+    let a = Vec8i.from_array([1, 2, 3, 4, 5, 6, 7, 8]);
+    let b = Vec8i.splat(100);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], 101);
+    assert_eq(result[7], 108);
+    print("Vec8i add test passed");
+}
+
+@test
+fn test_vec8i_sub() {
+    let a = Vec8i.from_array([10, 20, 30, 40, 50, 60, 70, 80]);
+    let b = Vec8i.from_array([1, 2, 3, 4, 5, 6, 7, 8]);
+    let result = a.sub(b).to_array();
+    assert_eq(result[0], 9);
+    assert_eq(result[7], 72);
+    print("Vec8i sub test passed");
+}
+
+@test
+fn test_vec4d_sub() {
+    let a = Vec4d.from_array([10.0, 20.0, 30.0, 40.0]);
+    let b = Vec4d.from_array([1.0, 2.0, 3.0, 4.0]);
+    let result = a.sub(b).to_array();
+    assert_eq(result[0], 9.0);
+    assert_eq(result[3], 36.0);
+    print("Vec4d sub test passed");
+}
+
+@test
+fn test_vec4d_mul() {
+    let a = Vec4d.from_array([1.5, 2.5, 3.5, 4.5]);
+    let b = Vec4d.from_array([2.0, 2.0, 2.0, 2.0]);
+    let result = a.mul(b).to_array();
+    assert_eq(result[0], 3.0);
+    assert_eq(result[1], 5.0);
+    assert_eq(result[2], 7.0);
+    assert_eq(result[3], 9.0);
+    print("Vec4d mul test passed");
+}
+
+@test
+fn test_vec4d_reduce_add() {
+    let v = Vec4d.from_array([1.0, 2.0, 3.0, 4.0]);
+    assert_eq(v.reduce_add(), 10.0);
+    print("Vec4d reduce_add test passed");
+}
+
+@test
+fn test_vec8f_reduce_min() {
+    let v = Vec8f.from_array([5.0, 3.0, 8.0, 1.0, 7.0, 2.0, 6.0, 4.0]);
+    assert_eq(v.reduce_min(), 1.0);
+    print("Vec8f reduce_min test passed");
+}
+
+@test
+fn test_vec8f_reduce_max() {
+    let v = Vec8f.from_array([5.0, 3.0, 8.0, 1.0, 7.0, 2.0, 6.0, 4.0]);
+    assert_eq(v.reduce_max(), 8.0);
+    print("Vec8f reduce_max test passed");
+}
+
+// =============================================================================
+// Section 21: Shuffle and Rotate Deeper Tests
+// =============================================================================
+
+@test
+fn test_vec4i_reverse() {
+    let v = Vec4i.from_array([100, 200, 300, 400]);
+    let reversed = v.reverse();
+    let arr = reversed.to_array();
+    assert_eq(arr[0], 400);
+    assert_eq(arr[1], 300);
+    assert_eq(arr[2], 200);
+    assert_eq(arr[3], 100);
+    print("Vec4i reverse test passed (dup)");
+}
+
+@test
+fn test_vec4i_rotate_left_1() {
+    let v = Vec4i.from_array([10, 20, 30, 40]);
+    let rotated = v.rotate_left<1>();
+    let arr = rotated.to_array();
+    assert_eq(arr[0], 20);
+    assert_eq(arr[1], 30);
+    assert_eq(arr[2], 40);
+    assert_eq(arr[3], 10);
+    print("Vec4i rotate_left<1> test passed");
+}
+
+@test
+fn test_vec4f_rotate_left_3() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let rotated = v.rotate_left<3>();
+    let arr = rotated.to_array();
+    // Rotate left by 3: [4.0, 1.0, 2.0, 3.0]
+    assert_eq(arr[0], 4.0);
+    assert_eq(arr[1], 1.0);
+    assert_eq(arr[2], 2.0);
+    assert_eq(arr[3], 3.0);
+    print("Vec4f rotate_left<3> test passed");
+}
+
+@test
+fn test_vec2d_reverse() {
+    let v = Vec2d.from_array([1.0, 2.0]);
+    let reversed = v.reverse();
+    let arr = reversed.to_array();
+    assert_eq(arr[0], 2.0);
+    assert_eq(arr[1], 1.0);
+    print("Vec2d reverse test passed");
+}
+
+// =============================================================================
+// Section 22: Chained Operations
+// =============================================================================
+
+@test
+fn test_vec4f_add_sub_chain() {
+    let a = Vec4f.from_array([10.0, 20.0, 30.0, 40.0]);
+    let b = Vec4f.from_array([5.0, 5.0, 5.0, 5.0]);
+    // (a + b) - b should equal a
+    let result = a.add(b).sub(b).to_array();
+    assert_eq(result[0], 10.0);
+    assert_eq(result[1], 20.0);
+    assert_eq(result[2], 30.0);
+    assert_eq(result[3], 40.0);
+    print("Vec4f add-sub chain test passed");
+}
+
+@test
+fn test_vec4i_chain_mul_add() {
+    let v = Vec4i.from_array([1, 2, 3, 4]);
+    let two = Vec4i.splat(2);
+    let ten = Vec4i.splat(10);
+    // (v * 2) + 10
+    let result = v.mul(two).add(ten).to_array();
+    assert_eq(result[0], 12);
+    assert_eq(result[1], 14);
+    assert_eq(result[2], 16);
+    assert_eq(result[3], 18);
+    print("Vec4i chain mul-add test passed");
+}
+
+@test
+fn test_vec4f_abs_after_sub() {
+    let a = Vec4f.from_array([1.0, 5.0, 3.0, 8.0]);
+    let b = Vec4f.from_array([3.0, 2.0, 7.0, 4.0]);
+    let result = a.sub(b).abs().to_array();
+    assert_eq(result[0], 2.0);   // |1-3| = 2
+    assert_eq(result[1], 3.0);   // |5-2| = 3
+    assert_eq(result[2], 4.0);   // |3-7| = 4
+    assert_eq(result[3], 4.0);   // |8-4| = 4
+    print("Vec4f abs after sub test passed");
+}
+
+// =============================================================================
+// Section 23: Construction Patterns
+// =============================================================================
+
+@test
+fn test_vec4f_splat_negative() {
+    let v = Vec4f.splat(-5.0);
+    let arr = v.to_array();
+    assert_eq(arr[0], -5.0);
+    assert_eq(arr[1], -5.0);
+    assert_eq(arr[2], -5.0);
+    assert_eq(arr[3], -5.0);
+    print("Vec4f splat negative test passed");
+}
+
+@test
+fn test_vec4i_splat_negative() {
+    let v = Vec4i.splat(-42);
+    let arr = v.to_array();
+    assert_eq(arr[0], -42);
+    assert_eq(arr[3], -42);
+    print("Vec4i splat negative test passed");
+}
+
+@test
+fn test_vec4f_splat_zero() {
+    let v = Vec4f.splat(0.0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 0.0);
+    assert_eq(arr[3], 0.0);
+    print("Vec4f splat zero test passed");
+}
+
+@test
+fn test_vec4i_from_array_with_negatives() {
+    let v = Vec4i.from_array([-100, 0, 100, -200]);
+    let arr = v.to_array();
+    assert_eq(arr[0], -100);
+    assert_eq(arr[1], 0);
+    assert_eq(arr[2], 100);
+    assert_eq(arr[3], -200);
+    print("Vec4i from_array with negatives test passed");
+}
+
+@test
+fn test_vec2l_splat() {
+    let v = Vec2l.splat(999);
+    let arr = v.to_array();
+    assert_eq(arr[0], 999);
+    assert_eq(arr[1], 999);
+    print("Vec2l splat test passed");
+}
+
+@test
+fn test_vec2l_from_array() {
+    let v = Vec2l.from_array([100, 200]);
+    let arr = v.to_array();
+    assert_eq(arr[0], 100);
+    assert_eq(arr[1], 200);
+    print("Vec2l from_array test passed");
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

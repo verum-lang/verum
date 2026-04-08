@@ -1,0 +1,480 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/common_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, common, os, types, memory
+// @description: Comprehensive tests for common low-level system types that form
+//               the foundation of the V-LLSI bootstrap kernel.
+//
+// Coverage:
+// - OSError: OS error type with code and message
+// - FileDesc: File descriptor newtype wrapper
+// - IOVec: Scatter/gather I/O vector
+// - MemProt: Memory protection flags
+// - MapFlags: Memory mapping flags
+// - MemoryOrdering: Atomic memory ordering
+// - ContextSlots: Thread-local context slots
+// - Page alignment functions
+// - Cross-platform allocation (os_alloc, os_free)
+//
+// Test Strategy:
+// - Type construction and field access
+// - Method correctness
+// - Boundary values and edge cases
+// - Platform-independent behavior
+// =============================================================================
+
+module test.stdlib.sys.common_test;
+
+mount core.sys.common.{
+    OSError, FileDesc, IOVec, MemProt, MapFlags, MemoryOrdering,
+    PAGE_SIZE, page_align_up, page_align_down, is_page_aligned,
+    ContextSlots, MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH,
+    os_alloc, os_free, get_thread_id,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// OSError Tests
+// =============================================================================
+
+@test
+fn test_os_error() {
+    // Create with code and message
+    let err = OSError.new(2, "No such file");
+    assert(err.code == 2);
+    assert(err.message == "No such file");
+
+    // Create from code
+    let err_from_code = OSError.from_code(13);  // EACCES
+    assert(err_from_code.code == 13);
+
+    // is_success
+    let success = OSError.new(0, "Success");
+    assert(success.is_success());
+    assert(!err.is_success());
+
+    // would_block - EAGAIN on Linux (11)
+    let eagain = OSError.new(11, "Resource temporarily unavailable");
+    assert(eagain.would_block());
+
+    // would_block - EWOULDBLOCK on macOS (35)
+    let ewouldblock = OSError.new(35, "Resource temporarily unavailable");
+    assert(ewouldblock.would_block());
+
+    // Not would_block
+    assert(!err.would_block());
+
+    // interrupted - EINTR (4)
+    let eintr = OSError.new(4, "Interrupted system call");
+    assert(eintr.interrupted());
+    assert(!err.interrupted());
+
+    // Equality
+    let err1 = OSError.new(2, "Message 1");
+    let err2 = OSError.new(2, "Message 2");
+    let err3 = OSError.new(3, "Message 1");
+
+    assert(err1 == err2);  // Same code, different message
+    assert(err1 != err3);  // Different code
+
+    print("OSError tests passed");
+}
+
+// =============================================================================
+// FileDesc Tests
+// =============================================================================
+
+@test
+fn test_file_desc() {
+    // Constants
+    assert(FileDesc.INVALID.as_raw() == -1);
+    assert(FileDesc.STDIN.as_raw() == 0);
+    assert(FileDesc.STDOUT.as_raw() == 1);
+    assert(FileDesc.STDERR.as_raw() == 2);
+
+    // Create from raw
+    let fd = FileDesc.from_raw(42);
+    assert(fd.as_raw() == 42);
+
+    // Validity check
+    assert(FileDesc.STDIN.is_valid());
+    assert(FileDesc.STDOUT.is_valid());
+    assert(FileDesc.STDERR.is_valid());
+    assert(fd.is_valid());
+    assert(!FileDesc.INVALID.is_valid());
+
+    // Zero is valid
+    let fd_zero = FileDesc.from_raw(0);
+    assert(fd_zero.is_valid());
+
+    // Negative is invalid
+    let fd_neg = FileDesc.from_raw(-5);
+    assert(!fd_neg.is_valid());
+
+    // Equality
+    let fd1 = FileDesc.from_raw(10);
+    let fd2 = FileDesc.from_raw(10);
+    let fd3 = FileDesc.from_raw(20);
+
+    assert(fd1 == fd2);
+    assert(fd1 != fd3);
+    assert(FileDesc.STDIN == FileDesc.from_raw(0));
+
+    print("FileDesc tests passed");
+}
+
+// =============================================================================
+// IOVec Tests
+// =============================================================================
+
+@test
+fn test_io_vec() {
+    // Create from slice
+    let data: [Byte; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let iov = IOVec.from_slice(&data as &[Byte]);
+
+    assert(iov.len == 10);
+    // Base pointer should point to data
+
+    // Create from raw parts
+    let ptr = &data[0] as *const Byte as &unsafe Byte;
+    let iov_raw = IOVec.from_raw_parts(ptr, 5);
+
+    assert(iov_raw.len == 5);
+
+    // Empty slice
+    let empty: [Byte; 0] = [];
+    let iov_empty = IOVec.from_slice(&empty as &[Byte]);
+    assert(iov_empty.len == 0);
+
+    print("IOVec tests passed");
+}
+
+// =============================================================================
+// MemProt Tests
+// =============================================================================
+
+@test
+fn test_mem_prot() {
+    // Predefined constants
+    let none = MemProt.NONE;
+    assert(!none.read && !none.write && !none.exec);
+
+    let read = MemProt.READ;
+    assert(read.read && !read.write && !read.exec);
+
+    let rw = MemProt.READ_WRITE;
+    assert(rw.read && rw.write && !rw.exec);
+
+    let rx = MemProt.READ_EXEC;
+    assert(rx.read && !rx.write && rx.exec);
+
+    let rwx = MemProt.READ_WRITE_EXEC;
+    assert(rwx.read && rwx.write && rwx.exec);
+
+    // Unix flags conversion
+    assert(none.to_unix_flags() == 0);        // PROT_NONE
+    assert(read.to_unix_flags() == 1);        // PROT_READ
+    assert(rw.to_unix_flags() == 3);          // PROT_READ | PROT_WRITE
+    assert(rx.to_unix_flags() == 5);          // PROT_READ | PROT_EXEC
+    assert(rwx.to_unix_flags() == 7);         // PROT_READ | PROT_WRITE | PROT_EXEC
+
+    // Custom protection
+    let write_only = MemProt { read: false, write: true, exec: false };
+    assert(write_only.to_unix_flags() == 2);  // PROT_WRITE
+
+    print("MemProt tests passed");
+}
+
+// =============================================================================
+// MapFlags Tests
+// =============================================================================
+
+@test
+fn test_map_flags() {
+    // Private anonymous (default for allocations)
+    let priv_anon = MapFlags.PRIVATE_ANON;
+    assert(!priv_anon.shared);
+    assert(priv_anon.is_private);
+    assert(priv_anon.anonymous);
+    assert(!priv_anon.fixed);
+
+    // Shared mapping
+    let shared = MapFlags.SHARED;
+    assert(shared.shared);
+    assert(!shared.is_private);
+    assert(!shared.anonymous);
+    assert(!shared.fixed);
+
+    // Unix flags conversion - values differ by platform
+    // Common: MAP_SHARED=0x01, MAP_PRIVATE=0x02, MAP_FIXED=0x10
+    // Linux: MAP_ANONYMOUS=0x20
+    // macOS: MAP_ANON=0x1000
+    @cfg(target_os = "linux")
+    {
+        assert(priv_anon.to_unix_flags() == 0x22);  // MAP_PRIVATE | MAP_ANONYMOUS
+    }
+    @cfg(target_os = "macos")
+    {
+        assert(priv_anon.to_unix_flags() == 0x1002);  // MAP_PRIVATE | MAP_ANON
+    }
+    assert(shared.to_unix_flags() == 0x01);     // MAP_SHARED
+
+    // Custom flags
+    let fixed_private = MapFlags {
+        shared: false,
+        is_private: true,
+        anonymous: false,
+        fixed: true,
+    };
+    assert(fixed_private.to_unix_flags() == 0x12);  // MAP_PRIVATE | MAP_FIXED
+
+    print("MapFlags tests passed");
+}
+
+// =============================================================================
+// MemoryOrdering Tests
+// =============================================================================
+
+@test
+fn test_memory_ordering() {
+    // Test to_opcode for all orderings
+    assert(MemoryOrdering.Relaxed.to_opcode() == 0);
+    assert(MemoryOrdering.Acquire.to_opcode() == 1);
+    assert(MemoryOrdering.Release.to_opcode() == 2);
+    assert(MemoryOrdering.AcqRel.to_opcode() == 3);
+    assert(MemoryOrdering.SeqCst.to_opcode() == 4);
+
+    // All orderings should have unique opcodes
+    let opcodes = [
+        MemoryOrdering.Relaxed.to_opcode(),
+        MemoryOrdering.Acquire.to_opcode(),
+        MemoryOrdering.Release.to_opcode(),
+        MemoryOrdering.AcqRel.to_opcode(),
+        MemoryOrdering.SeqCst.to_opcode(),
+    ];
+
+    for i in 0..5 {
+        for j in (i + 1)..5 {
+            assert(opcodes[i] != opcodes[j]);
+        }
+    }
+
+    print("MemoryOrdering tests passed");
+}
+
+// =============================================================================
+// Page Alignment Tests
+// =============================================================================
+
+@test
+fn test_page_alignment() {
+    // Verify page size constant
+    assert(PAGE_SIZE == 4096);
+
+    // page_align_up
+    assert(page_align_up(0) == 0);
+    assert(page_align_up(1) == 4096);
+    assert(page_align_up(4095) == 4096);
+    assert(page_align_up(4096) == 4096);
+    assert(page_align_up(4097) == 8192);
+    assert(page_align_up(8192) == 8192);
+    assert(page_align_up(10000) == 12288);  // 3 * 4096
+
+    // page_align_down
+    assert(page_align_down(0) == 0);
+    assert(page_align_down(1) == 0);
+    assert(page_align_down(4095) == 0);
+    assert(page_align_down(4096) == 4096);
+    assert(page_align_down(4097) == 4096);
+    assert(page_align_down(8192) == 8192);
+    assert(page_align_down(10000) == 8192);  // 2 * 4096
+
+    // is_page_aligned
+    assert(is_page_aligned(0));
+    assert(!is_page_aligned(1));
+    assert(!is_page_aligned(4095));
+    assert(is_page_aligned(4096));
+    assert(!is_page_aligned(4097));
+    assert(is_page_aligned(8192));
+    assert(is_page_aligned(1048576));  // 1 MiB
+
+    // Relationship between align_up and align_down
+    for size in [0, 1, 100, 4095, 4096, 4097, 8192, 10000, 65536] {
+        let up = page_align_up(size as USize);
+        let down = page_align_down(size as USize);
+
+        assert(is_page_aligned(up));
+        assert(is_page_aligned(down));
+        assert(up >= (size as USize));
+        assert(down <= (size as USize));
+
+        if is_page_aligned(size as USize) {
+            assert(up == (size as USize));
+            assert(down == (size as USize));
+        } else {
+            assert(up == down + PAGE_SIZE);
+        }
+    }
+
+    print("Page alignment tests passed");
+}
+
+// =============================================================================
+// ContextSlots Tests
+// =============================================================================
+
+@test
+fn test_context_slots() {
+    // Verify constants
+    assert(MAX_CONTEXT_SLOTS == 256);
+    assert(CONTEXT_STACK_DEPTH == 8);
+
+    // Create empty context slots
+    let slots = ContextSlots.new();
+
+    // Initially all slots should be inactive (bitmap is all zeros)
+    for i in 0..4 {
+        assert(slots.active[i] == 0);
+    }
+
+    // Test slot boundary validation (get returns None for invalid slots)
+    let result_neg = slots.get<Int>(-1);
+    assert(result_neg is None);
+
+    let result_high = slots.get<Int>(256);
+    assert(result_high is None);
+
+    let result_valid = slots.get<Int>(0);
+    assert(result_valid is None);  // Valid slot but not set
+
+    let result_mid = slots.get<Int>(128);
+    assert(result_mid is None);  // Valid slot but not set
+
+    print("ContextSlots tests passed");
+}
+
+// =============================================================================
+// OS Allocation Tests
+// =============================================================================
+
+@test
+fn test_os_allocation() {
+    // Test allocation of a single page
+    let result = os_alloc(4096, 4096);
+
+    // Use match to extract value (unwrap has VBC bug with Maybe)
+    let ptr = match result {
+        Some(p) => p,
+        None => panic("os_alloc failed"),
+    };
+
+    // Pointer should be non-null
+    assert(ptr as Int != 0);
+
+    // Write and read to verify memory is usable
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        *int_ptr = 42;
+        assert(*int_ptr == 42);
+    }
+
+    // Free the memory
+    unsafe {
+        os_free(ptr, 4096);
+    }
+
+    // Test larger allocation
+    let large_result = os_alloc(1048576, 4096);  // 1 MiB
+
+    // Use match to extract value
+    let large_ptr = match large_result {
+        Some(p) => p,
+        None => panic("1MB allocation failed"),
+    };
+
+    // Write to beginning and end
+    unsafe {
+        let start_ptr = large_ptr as *mut Int;
+        let end_ptr = (large_ptr as Int + 1048576 - 8) as *mut Int;
+
+        *start_ptr = 100;
+        *end_ptr = 200;
+
+        assert(*start_ptr == 100);
+        assert(*end_ptr == 200);
+
+        os_free(large_ptr, 1048576);
+    }
+
+    // Test zero size (should return None)
+    let zero_result = os_alloc(0, 4096);
+    assert(zero_result is None);
+
+    // Test negative size (should return None)
+    let neg_result = os_alloc(-1, 4096);
+    assert(neg_result is None);
+
+    print("OS allocation tests passed");
+}
+
+// =============================================================================
+// Thread ID Tests
+// =============================================================================
+
+@test
+fn test_thread_id() {
+    // Get thread ID
+    let tid = get_thread_id();
+
+    // TID should be non-zero
+    assert(tid > 0);
+
+    // Multiple calls should return same TID (single-threaded)
+    let tid2 = get_thread_id();
+    let tid3 = get_thread_id();
+
+    assert(tid == tid2);
+    assert(tid == tid3);
+
+    // TID should be reasonable
+    // Note: Linux TIDs are typically < 4 million, but macOS TIDs can be much larger
+    @cfg(target_os = "linux")
+    { assert(tid < 4194304); }
+    @cfg(target_os = "macos")
+    { assert(tid < 1000000000); }  // macOS TIDs can be in hundreds of millions
+
+    print(f"Current thread ID: {tid}");
+}
+
+// =============================================================================
+// Constants Verification
+// =============================================================================
+
+@test
+fn test_constants() {
+    // Verify context constants are reasonable
+    assert(MAX_CONTEXT_SLOTS > 0);
+    assert(MAX_CONTEXT_SLOTS <= 256);  // UInt8 slot index
+
+    assert(CONTEXT_STACK_DEPTH > 0);
+    assert(CONTEXT_STACK_DEPTH <= 256);
+
+    // Page size should be power of 2
+    assert((PAGE_SIZE & (PAGE_SIZE - 1)) == 0);
+
+    // Page size should be at least 4KB
+    assert(PAGE_SIZE >= 4096);
+
+    print("Constants verification passed");
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, attributes, nested, error
+// @description: Test invalid nested attribute syntax
+// @expected-error: E014
+
+@attr(@nested)
+type Foo is { x: Int };

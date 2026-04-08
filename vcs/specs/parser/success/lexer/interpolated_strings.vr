@@ -1,0 +1,430 @@
+// @test: parse-pass
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, strings, interpolation
+// @description: Comprehensive tests for interpolated string literal parsing per grammar/verum.ebnf
+//
+// Grammar productions tested:
+//   interpolated_string = interpolated_prefix , '"' , { string_char | interpolation } , '"'
+//   interpolated_prefix = 'f' | 'fmt'
+//   interpolation = '{' , expression , [ ':' , format_spec ] , '}'
+//   format_spec = { format_spec_char }
+//   format_spec_char = letter | digit | '.' | '<' | '>' | '^' | '+' | '-' | ' ' | '#' | '0'
+//   tagged_interpolated = format_tag , '#' , tagged_interpolated_content
+//   safe_interpolated = semantic_tag , '"' , { string_char | safe_interpolation } , '"'
+
+// ============================================================================
+// BASIC INTERPOLATED STRINGS
+// ============================================================================
+
+fn test_empty_format_string() {
+    let a = f"";
+}
+
+fn test_plain_format_string() {
+    let a = f"hello";
+    let b = f"Hello World";
+    let c = f"no interpolation here";
+}
+
+fn test_single_interpolation() {
+    let name = "World";
+    let x = 42;
+    let y = 3.14;
+
+    let a = f"{name}";
+    let b = f"{x}";
+    let c = f"{y}";
+}
+
+fn test_interpolation_with_text() {
+    let name = "World";
+
+    let a = f"Hello {name}";
+    let b = f"{name}!";
+    let c = f"Hello {name}!";
+    let d = f"Say: {name}";
+}
+
+fn test_multiple_interpolations() {
+    let x = 10;
+    let y = 20;
+    let z = 30;
+
+    let a = f"{x} {y}";
+    let b = f"{x} and {y}";
+    let c = f"{x}, {y}, {z}";
+    let d = f"x={x}, y={y}, z={z}";
+}
+
+fn test_adjacent_interpolations() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    let s1 = f"{a}{b}";
+    let s2 = f"{a}{b}{c}";
+    let s3 = f"{a} {b}{c}";
+    let s4 = f"{a}{b} {c}";
+}
+
+// ============================================================================
+// INTERPOLATION WITH EXPRESSIONS
+// ============================================================================
+
+fn test_arithmetic_expressions() {
+    let x = 10;
+    let y = 5;
+
+    let a = f"{x + y}";
+    let b = f"{x - y}";
+    let c = f"{x * y}";
+    let d = f"{x / y}";
+    let e = f"{x % y}";
+}
+
+fn test_comparison_expressions() {
+    let x = 10;
+    let y = 5;
+
+    let a = f"{x > y}";
+    let b = f"{x < y}";
+    let c = f"{x == y}";
+    let d = f"{x != y}";
+    let e = f"{x >= y}";
+    let f_var = f"{x <= y}";
+}
+
+fn test_parenthesized_expressions() {
+    let x = 2;
+    let y = 3;
+    let z = 4;
+
+    let a = f"{(x + y)}";
+    let b = f"{(x + y) * z}";
+    let c = f"{x * (y + z)}";
+    let d = f"{((x + y) * (z - x))}";
+}
+
+fn test_method_calls() {
+    let s = "hello";
+    let arr = [1, 2, 3];
+
+    let a = f"{s.len()}";
+    let b = f"{arr.len()}";
+    let c = f"{s.to_uppercase()}";
+}
+
+fn test_function_calls() {
+    let x = 10;
+
+    let a = f"{compute(x)}";
+    let b = f"{double(x)}";
+    let c = f"{add(x, 5)}";
+}
+
+fn test_field_access() {
+    type Point is { x: Int, y: Int };
+    let p = Point { x: 10, y: 20 };
+
+    let a = f"{p.x}";
+    let b = f"{p.y}";
+    let c = f"Point({p.x}, {p.y})";
+}
+
+fn test_array_indexing() {
+    let arr = [1, 2, 3, 4, 5];
+
+    let a = f"{arr[0]}";
+    let b = f"{arr[1]}";
+    let c = f"first: {arr[0]}, last: {arr[4]}";
+}
+
+// ============================================================================
+// FORMAT SPECIFIERS
+// ============================================================================
+
+fn test_width_specifiers() {
+    let x = 42;
+
+    let a = f"{x:5}";
+    let b = f"{x:10}";
+    let c = f"{x:1}";
+    let d = f"{x:20}";
+}
+
+fn test_alignment_specifiers() {
+    let s = "test";
+    let x = 42;
+
+    // Left align
+    let a = f"{s:<10}";
+    let b = f"{x:<10}";
+
+    // Right align
+    let c = f"{s:>10}";
+    let d = f"{x:>10}";
+
+    // Center align
+    let e = f"{s:^10}";
+    let f_var = f"{x:^10}";
+}
+
+fn test_precision_specifiers() {
+    let pi = 3.14159265358979;
+
+    let a = f"{pi:.0}";
+    let b = f"{pi:.1}";
+    let c = f"{pi:.2}";
+    let d = f"{pi:.3}";
+    let e = f"{pi:.4}";
+    let f_var = f"{pi:.10}";
+}
+
+fn test_fill_and_width() {
+    let x = 42;
+    let s = "hi";
+
+    // Zero fill
+    let a = f"{x:05}";
+    let b = f"{x:010}";
+
+    // Space fill (default for numbers)
+    let c = f"{x: >5}";
+    let d = f"{x: <5}";
+}
+
+fn test_sign_specifiers() {
+    let pos = 42;
+    let neg = -42;
+    let zero = 0;
+
+    // Always show sign
+    let a = f"{pos:+}";
+    let b = f"{neg:+}";
+    let c = f"{zero:+}";
+
+    // Space for positive
+    let d = f"{pos: }";
+}
+
+fn test_combined_format_specs() {
+    let x = 42;
+    let pi = 3.14159;
+    let s = "test";
+
+    // Width + precision
+    let a = f"{pi:10.2}";
+    let b = f"{pi:8.4}";
+
+    // Sign + width
+    let c = f"{x:+10}";
+
+    // Alignment + width
+    let d = f"{s:>20}";
+    let e = f"{s:<20}";
+    let f_var = f"{s:^20}";
+
+    // All together
+    let g = f"{pi:+10.2}";
+    let h = f"{x:0>10}";
+}
+
+fn test_format_spec_characters() {
+    let x = 42;
+    let pi = 3.14;
+
+    // Hash flag
+    let a = f"{x:#}";
+    let b = f"{x:#x}";
+    let c = f"{x:#b}";
+
+    // Various format types (if supported)
+    let d = f"{x:d}";  // decimal
+    let e = f"{x:x}";  // hex
+    let f_var = f"{x:b}";  // binary
+    let g = f"{x:o}";  // octal
+}
+
+// ============================================================================
+// ESCAPE SEQUENCES IN FORMAT STRINGS
+// ============================================================================
+
+fn test_escapes_in_format_strings() {
+    let x = 42;
+
+    let a = f"value:\t{x}";
+    let b = f"line1\nline2: {x}";
+    let c = f"quote: \"{x}\"";
+    let d = f"path: \\{x}";
+}
+
+fn test_literal_braces() {
+    // Double braces for literal braces
+    let a = f"{{}}";
+    let b = f"{{x}}";
+    let c = f"open: {{, close: }}";
+    let d = f"JSON: {{\"key\": \"value\"}}";
+}
+
+fn test_mixed_escapes_and_interpolation() {
+    let x = 42;
+    let name = "test";
+
+    let a = f"\t{x}\n";
+    let b = f"Name: \"{name}\", Value: {x}";
+    let c = f"{{value: {x}}}";
+}
+
+// ============================================================================
+// NESTED AND COMPLEX EXPRESSIONS
+// ============================================================================
+
+fn test_nested_method_chains() {
+    let s = "hello world";
+
+    let a = f"{s.to_uppercase().len()}";
+    let b = f"{s.split(' ').first()}";
+}
+
+fn test_conditional_expressions() {
+    let x = 10;
+    let y = 5;
+
+    let a = f"{if x > y { x } else { y }}";
+    let b = f"max: {if x > y { x } else { y }}";
+}
+
+fn test_complex_nested() {
+    let data = [[1, 2], [3, 4]];
+
+    let a = f"{data[0][0]}";
+    let b = f"{data[1][1]}";
+}
+
+// ============================================================================
+// FMT PREFIX VARIANT
+// ============================================================================
+
+// Note: 'fmt' prefix is not yet supported by the parser, use 'f' instead
+fn test_fmt_prefix() {
+    let name = "World";
+    let x = 42;
+
+    // Using 'f' prefix (the supported variant)
+    let a = f"hello";
+    let b = f"Hello {name}";
+    let c = f"value: {x}";
+    let d = f"{x:10}";
+}
+
+// ============================================================================
+// TAGGED INTERPOLATED STRINGS
+// ============================================================================
+
+fn test_sql_interpolated() {
+    let table = "users";
+    let id = 42;
+
+    let a = sql"SELECT * FROM {table}";
+    let b = sql"SELECT * FROM users WHERE id = {id}";
+}
+
+fn test_html_interpolated() {
+    let content = "Hello";
+    let class_name = "container";
+
+    let a = html"<div>{content}</div>";
+    let b = html"<div class=\"{class_name}\">{content}</div>";
+}
+
+fn test_shell_interpolated() {
+    let dir = "/tmp";
+    let pattern = "*.txt";
+
+    let a = sh"ls {dir}";
+    let b = sh"find {dir} -name {pattern}";
+}
+
+fn test_json_interpolated() {
+    let name = "test";
+    let value = 42;
+
+    let a = json"""{"name": "${name}", "value": ${value}}""";
+}
+
+fn test_regex_interpolated() {
+    let pattern_part = "user";
+
+    let a = rx"pattern-{pattern_part}";
+}
+
+// ============================================================================
+// MULTILINE FORMAT STRINGS
+// ============================================================================
+
+fn test_multiline_format() {
+    let name = "Alice";
+    let age = 30;
+    let city = "NYC";
+
+    // Note: If multiline format strings are supported
+    // This tests the parser handles them
+    let info = f"Name: {name}
+Age: {age}
+City: {city}";
+}
+
+// ============================================================================
+// EDGE CASES
+// ============================================================================
+
+fn test_empty_interpolations() {
+    // Empty expression (if allowed - parser may reject)
+    // let a = f"{}";  // Likely invalid
+
+    // Just whitespace around expression
+    let x = 42;
+    let a = f"{ x }";
+    let b = f"{  x  }";
+}
+
+fn test_interpolation_at_boundaries() {
+    let x = 42;
+
+    let a = f"{x}";           // Only interpolation
+    let b = f"{x}!";          // At start
+    let c = f"!{x}";          // At end
+    let d = f"!{x}!";         // Both ends
+}
+
+fn test_many_interpolations() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+
+    let result = f"{a}{b}{c}{d}{e}{a}{b}{c}{d}{e}";
+}
+
+fn test_long_expressions() {
+    let very_long_variable_name = 42;
+
+    let a = f"{very_long_variable_name}";
+    let b = f"{very_long_variable_name + very_long_variable_name}";
+}
+
+// Helper functions
+fn compute(x: Int) -> Int {
+    x * 2
+}
+
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}

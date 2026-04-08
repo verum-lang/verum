@@ -1,0 +1,204 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, stable_marriage, gale_shapley, matching, combinatorics
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Gale-Shapley stable marriage algorithm (proposer-optimal).
+// n men and n women, each with a complete preference list.
+// Men propose; women hold/reject.
+// Encoded with flat arrays: pref_m[i*n + j] = j-th preference of man i.
+//                           pref_w[i*n + j] = j-th preference of woman i.
+// Output: match_m[i] = woman matched to man i.
+//         match_w[i] = man matched to woman i.
+// Maximum n = 4 (so tables are 4*4=16 entries).
+
+// rank_w[i*n + j] = rank of man j in woman i's preference list (lower = more preferred).
+fn build_rank_w(pref_w: [Int; 16], rank_w: [Int; 16], n: Int) {
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            let man = pref_w[i * n + j];
+            rank_w[i * n + man] = j;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn gale_shapley(pref_m: [Int; 16], pref_w: [Int; 16], rank_w: [Int; 16],
+                match_m: [Int; 4], match_w: [Int; 4], next_prop: [Int; 4], n: Int) {
+    // Initialize: all unmatched (-1 encoded as n since we use Int).
+    let unmatched = n;
+    let mut i = 0;
+    while i < n {
+        match_m[i] = unmatched;
+        match_w[i] = unmatched;
+        next_prop[i] = 0;
+        i = i + 1;
+    }
+
+    // Count free men.
+    let mut free_count = n;
+    while free_count > 0 {
+        // Find first free man.
+        let mut m = 0;
+        while m < n {
+            if match_m[m] == unmatched { break; }
+            m = m + 1;
+        }
+        if m == n { break; }
+
+        // Man m proposes to his next preference.
+        let w = pref_m[m * n + next_prop[m]];
+        next_prop[m] = next_prop[m] + 1;
+
+        if match_w[w] == unmatched {
+            // Woman w is free: accept proposal.
+            match_m[m] = w;
+            match_w[w] = m;
+            free_count = free_count - 1;
+        } else {
+            let cur_man = match_w[w];
+            // Woman w prefers m over cur_man if rank is lower.
+            if rank_w[w * n + m] < rank_w[w * n + cur_man] {
+                // Woman w upgrades to m.
+                match_m[m] = w;
+                match_w[w] = m;
+                // cur_man is now free again.
+                match_m[cur_man] = unmatched;
+            }
+            // else m stays free (match_m[m] stays unmatched)
+        }
+    }
+}
+
+// Verify stability: no blocking pair (m,w) where both prefer each other over current matches.
+fn is_stable(pref_m: [Int; 16], rank_w: [Int; 16],
+             match_m: [Int; 4], match_w: [Int; 4], n: Int) -> Int {
+    let mut m = 0;
+    while m < n {
+        let w_match = match_m[m];
+        // Check every woman w that m prefers over his current match.
+        let mut w = 0;
+        while w < n {
+            if w == w_match { w = w + 1; } else {
+                // Find rank of w_match and w in m's preference list.
+                let mut rank_current = n;
+                let mut rank_w_cand  = n;
+                let mut j = 0;
+                while j < n {
+                    if pref_m[m * n + j] == w_match  { rank_current = j; }
+                    if pref_m[m * n + j] == w         { rank_w_cand = j; }
+                    j = j + 1;
+                }
+                // m prefers w over w_match: check if w also prefers m.
+                if rank_w_cand < rank_current {
+                    let m_match = match_w[w];
+                    if rank_w[w * n + m] < rank_w[w * n + m_match] {
+                        return 0;  // blocking pair found
+                    }
+                }
+                w = w + 1;
+            }
+        }
+        m = m + 1;
+    }
+    1
+}
+
+fn test_simple_n2() {
+    // n=2: man 0 prefers w0,w1; man 1 prefers w1,w0.
+    //       w0 prefers m0,m1;  w1 prefers m1,m0.
+    // Stable matching: m0-w0, m1-w1.
+    let mut pref_m  = [0,1, 1,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0];
+    let mut pref_w  = [0,1, 1,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0];
+    let mut rank_w  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_rank_w(pref_w, rank_w, 2);
+    let mut match_m   = [0, 0, 0, 0];
+    let mut match_w   = [0, 0, 0, 0];
+    let mut next_prop = [0, 0, 0, 0];
+
+    gale_shapley(pref_m, pref_w, rank_w, match_m, match_w, next_prop, 2);
+    assert_eq(match_m[0], 0);
+    assert_eq(match_m[1], 1);
+    assert_eq(match_w[0], 0);
+    assert_eq(match_w[1], 1);
+    assert_eq(is_stable(pref_m, rank_w, match_m, match_w, 2), 1);
+    print("simple_n2: ok");
+}
+
+fn test_conflict_n2() {
+    // n=2: both men prefer w0 first; women have different preferences.
+    // m0: [w0,w1], m1: [w0,w1]
+    // w0: [m1,m0], w1: [m0,m1]
+    // Expected (man-optimal): m0-w1, m1-w0.
+    let mut pref_m  = [0,1, 0,1, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0];
+    let mut pref_w  = [1,0, 0,1, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0];
+    let mut rank_w  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_rank_w(pref_w, rank_w, 2);
+    let mut match_m   = [0, 0, 0, 0];
+    let mut match_w   = [0, 0, 0, 0];
+    let mut next_prop = [0, 0, 0, 0];
+
+    gale_shapley(pref_m, pref_w, rank_w, match_m, match_w, next_prop, 2);
+    assert_eq(match_m[1], 0);
+    assert_eq(match_m[0], 1);
+    assert_eq(is_stable(pref_m, rank_w, match_m, match_w, 2), 1);
+    print("conflict_n2: ok");
+}
+
+fn test_n3_stability() {
+    // n=3 classic instance.
+    // m0: [w2,w0,w1], m1: [w0,w2,w1], m2: [w0,w1,w2]
+    // w0: [m0,m1,m2], w1: [m0,m1,m2], w2: [m0,m1,m2]
+    let mut pref_m = [2,0,1, 0,2,1, 0,1,2, 0,0,0, 0,0,0,0];
+    let mut pref_w = [0,1,2, 0,1,2, 0,1,2, 0,0,0, 0,0,0,0];
+    let mut rank_w = [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0];
+    build_rank_w(pref_w, rank_w, 3);
+    let mut match_m   = [0, 0, 0, 0];
+    let mut match_w   = [0, 0, 0, 0];
+    let mut next_prop = [0, 0, 0, 0];
+
+    gale_shapley(pref_m, pref_w, rank_w, match_m, match_w, next_prop, 3);
+    // Verify it's a perfect matching and stable.
+    assert(match_m[0] < 3);
+    assert(match_m[1] < 3);
+    assert(match_m[2] < 3);
+    // All matched to different women.
+    assert(match_m[0] != match_m[1]);
+    assert(match_m[1] != match_m[2]);
+    assert(match_m[0] != match_m[2]);
+    assert_eq(is_stable(pref_m, rank_w, match_m, match_w, 3), 1);
+    print("n3_stability: ok");
+}
+
+fn test_all_same_preferences_n2() {
+    // Both men and women have identical preferences; just verify stability.
+    // m0: [w0,w1], m1: [w0,w1]; w0: [m0,m1], w1: [m0,m1]
+    let mut pref_m  = [0,1, 0,1, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0];
+    let mut pref_w  = [0,1, 0,1, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0];
+    let mut rank_w  = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    build_rank_w(pref_w, rank_w, 2);
+    let mut match_m   = [0, 0, 0, 0];
+    let mut match_w   = [0, 0, 0, 0];
+    let mut next_prop = [0, 0, 0, 0];
+
+    gale_shapley(pref_m, pref_w, rank_w, match_m, match_w, next_prop, 2);
+    // Stable: man-optimal means m0 gets w0 (his top choice), m1 gets w1.
+    assert_eq(match_m[0], 0);
+    assert_eq(match_m[1], 1);
+    assert_eq(is_stable(pref_m, rank_w, match_m, match_w, 2), 1);
+    print("all_same_preferences_n2: ok");
+}
+
+fn main() -> Int {
+    test_simple_n2();
+    test_conflict_n2();
+    test_n3_stability();
+    test_all_same_preferences_n2();
+    print("[OK] 546_interp_stable_marriage");
+    0
+}

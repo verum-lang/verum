@@ -1,0 +1,184 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: higher-order, functions, callbacks, closures
+// @description: Test higher-order function patterns
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn increment(x: Int) -> Int {
+    x + 1
+}
+
+fn test_apply() -> Int {
+    let result = apply(double, 5);
+    if result != 10 {
+        print(f"FAIL apply: {result}, expected 10");
+        return 1;
+    }
+    let result2 = apply(increment, 5);
+    if result2 != 6 {
+        print(f"FAIL apply2: {result2}, expected 6");
+        return 1;
+    }
+    print("  apply: OK");
+    0
+}
+
+fn test_apply_twice() -> Int {
+    let result = apply_twice(double, 3);
+    // double(double(3)) = double(6) = 12
+    if result != 12 {
+        print(f"FAIL apply_twice: {result}, expected 12");
+        return 1;
+    }
+    let result2 = apply_twice(increment, 10);
+    // inc(inc(10)) = inc(11) = 12
+    if result2 != 12 {
+        print(f"FAIL apply_twice2: {result2}, expected 12");
+        return 1;
+    }
+    print("  apply_twice: OK");
+    0
+}
+
+fn map_list(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn test_map_list() -> Int {
+    let mut nums = List.new();
+    nums.push(1);
+    nums.push(2);
+    nums.push(3);
+
+    let doubled = map_list(nums, double);
+    if doubled[0] != 2 || doubled[1] != 4 || doubled[2] != 6 {
+        print("FAIL map_list");
+        return 1;
+    }
+    print("  map_list: OK");
+    0
+}
+
+fn filter_list(items: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            result.push(items[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn is_even(x: Int) -> Bool {
+    x % 2 == 0
+}
+
+fn test_filter() -> Int {
+    let mut nums = List.new();
+    nums.push(1);
+    nums.push(2);
+    nums.push(3);
+    nums.push(4);
+    nums.push(5);
+
+    let evens = filter_list(nums, is_even);
+    if evens.len() != 2 {
+        print(f"FAIL filter: len={evens.len()}, expected 2");
+        return 1;
+    }
+    if evens[0] != 2 || evens[1] != 4 {
+        print("FAIL filter: wrong values");
+        return 1;
+    }
+    print("  filter: OK");
+    0
+}
+
+fn reduce(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn mul(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn test_reduce() -> Int {
+    let mut nums = List.new();
+    nums.push(1);
+    nums.push(2);
+    nums.push(3);
+    nums.push(4);
+
+    let sum = reduce(nums, 0, add);
+    if sum != 10 {
+        print(f"FAIL reduce_sum: {sum}, expected 10");
+        return 1;
+    }
+    let product = reduce(nums, 1, mul);
+    if product != 24 {
+        print(f"FAIL reduce_product: {product}, expected 24");
+        return 1;
+    }
+    print("  reduce: OK");
+    0
+}
+
+fn test_closure_capture() -> Int {
+    let factor = 3;
+    let triple = |x: Int| -> Int { x * factor };
+    let result = apply(triple, 7);
+    if result != 21 {
+        print(f"FAIL closure_capture: {result}, expected 21");
+        return 1;
+    }
+    print("  closure_capture: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Higher-Order Function Tests:");
+    let mut failures = 0;
+    failures = failures + test_apply();
+    failures = failures + test_apply_twice();
+    failures = failures + test_map_list();
+    failures = failures + test_filter();
+    failures = failures + test_reduce();
+    failures = failures + test_closure_capture();
+
+    if failures == 0 {
+        print("All higher-order function tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

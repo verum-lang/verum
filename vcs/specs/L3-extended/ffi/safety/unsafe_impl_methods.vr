@@ -1,0 +1,160 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, unsafe, impl-blocks
+// @description: Tests unsafe functions inside implement blocks
+
+/// ============================================================
+/// UNSAFE IMPL METHODS
+/// ============================================================
+///
+/// Unsafe methods in impl blocks allow writing low-level code
+/// that bypasses Verumps safety guarantees within method bodies.
+///
+/// Syntax:
+/// ```
+/// implement Type {
+///     unsafe fn method_name(...) -> ReturnType { ... }
+///     unsafe async fn async_method(...) -> ReturnType { ... }
+/// }
+/// ```
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+
+/// Simple counter for testing unsafe impl methods
+type Counter is {
+    value: i32,
+};
+
+/// Wrapper for FFI handle (simple)
+type Handle is (i32);
+
+// ------------------------------------------------------------
+// Basic Unsafe Methods in Impl Block
+// ------------------------------------------------------------
+
+implement Counter {
+    /// Create a new counter
+    fn new() -> Counter {
+        Counter { value: 0 }
+    }
+
+    /// Safe increment
+    fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+
+    /// Unsafe: Direct value manipulation (bypasses checks)
+    unsafe fn set_raw(&mut self, val: i32) {
+        self.value = val;
+    }
+
+    /// Unsafe: Get value without bounds check
+    unsafe fn get_raw(&self) -> i32 {
+        self.value
+    }
+
+    /// Unsafe async method
+    unsafe async fn load_async(&mut self, val: i32) {
+        self.value = val;
+    }
+}
+
+// ------------------------------------------------------------
+// Implement Block with Multiple Unsafe Methods
+// ------------------------------------------------------------
+
+type Buffer is {
+    size: usize,
+    data: i32,
+};
+
+implement Buffer {
+    fn new(sz: usize) -> Buffer {
+        Buffer { size: sz, data: 0 }
+    }
+
+    /// Regular safe method
+    fn len(&self) -> usize {
+        self.size
+    }
+
+    /// Unsafe: Direct write
+    unsafe fn write(&mut self, val: i32) {
+        self.data = val;
+    }
+
+    /// Unsafe: Direct read
+    unsafe fn read(&self) -> i32 {
+        self.data
+    }
+
+    /// Unsafe async
+    unsafe async fn flush(&mut self) {
+        // Async unsafe operation
+    }
+}
+
+// ------------------------------------------------------------
+// Protocol with Unsafe Methods
+// ------------------------------------------------------------
+
+type UnsafeAccess is protocol {
+    /// Unsafe method in protocol signature
+    unsafe fn get_raw(&self) -> i32;
+    unsafe fn set_raw(&mut self, val: i32);
+};
+
+implement UnsafeAccess for Counter {
+    unsafe fn get_raw(&self) -> i32 {
+        self.value
+    }
+
+    unsafe fn set_raw(&mut self, val: i32) {
+        self.value = val;
+    }
+}
+
+// ------------------------------------------------------------
+// Generic Types with Unsafe Methods
+// ------------------------------------------------------------
+
+type Wrapper<T> is {
+    inner: T,
+};
+
+implement<T> Wrapper<T> {
+    /// Safe constructor
+    fn wrap(value: T) -> Wrapper<T> {
+        Wrapper { inner: value }
+    }
+
+    /// Safe getter
+    fn get(&self) -> &T {
+        &self.inner
+    }
+
+    /// Unsafe: Bypass borrow checker
+    unsafe fn get_unchecked(&self) -> &T {
+        &self.inner
+    }
+
+    /// Unsafe: Mutable access
+    unsafe fn get_mut_unchecked(&mut self) -> &mut T {
+        &mut self.inner
+    }
+}
+
+// ------------------------------------------------------------
+// Main
+// ------------------------------------------------------------
+
+fn main() {
+    let mut counter = Counter.new();
+    counter.increment();
+    print("Unsafe impl methods passed");
+}

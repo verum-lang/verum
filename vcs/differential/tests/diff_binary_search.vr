@@ -1,0 +1,108 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, binary-search, search, bounds
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+// Standard binary search, returns index or -1
+fn bsearch(a: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        let v = get(a, mid);
+        if v == target { return mid; }
+        if v < target { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    -1
+}
+
+// Lower bound: first index where a[i] >= target
+fn lower_bound(a: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if get(a, mid) < target { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+// Upper bound: first index where a[i] > target
+fn upper_bound(a: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if get(a, mid) <= target { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+// Count occurrences of target in sorted array
+fn count_occurrences(a: Arr8, n: Int, target: Int) -> Int {
+    upper_bound(a, n, target) - lower_bound(a, n, target)
+}
+
+// Find peak element (local max): a[i-1] < a[i] > a[i+1]
+fn find_peak(a: Arr8, n: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if get(a, mid) < get(a, mid + 1) { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+fn test_bsearch() -> Int {
+    let a = Arr8 { d0: 1, d1: 3, d2: 5, d3: 7, d4: 9, d5: 0, d6: 0, d7: 0 };
+    assert_eq(bsearch(a, 5, 5), 2);
+    assert_eq(bsearch(a, 5, 1), 0);
+    assert_eq(bsearch(a, 5, 9), 4);
+    assert_eq(bsearch(a, 5, 4), -1);
+    assert_eq(bsearch(a, 5, 0), -1);
+    1
+}
+
+fn test_bounds() -> Int {
+    // Array with duplicates
+    let a = Arr8 { d0: 1, d1: 3, d2: 3, d3: 3, d4: 5, d5: 7, d6: 0, d7: 0 };
+    assert_eq(lower_bound(a, 6, 3), 1);
+    assert_eq(upper_bound(a, 6, 3), 4);
+    assert_eq(count_occurrences(a, 6, 3), 3);
+    assert_eq(count_occurrences(a, 6, 1), 1);
+    assert_eq(count_occurrences(a, 6, 4), 0);
+    1
+}
+
+fn test_peak() -> Int {
+    let a = Arr8 { d0: 1, d1: 3, d2: 7, d3: 5, d4: 2, d5: 0, d6: 0, d7: 0 };
+    assert_eq(find_peak(a, 5), 2);
+    let b = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 0, d6: 0, d7: 0 };
+    assert_eq(find_peak(b, 5), 4);
+    let c = Arr8 { d0: 5, d1: 4, d2: 3, d3: 2, d4: 1, d5: 0, d6: 0, d7: 0 };
+    assert_eq(find_peak(c, 5), 0);
+    1
+}
+
+fn main() -> Int {
+    test_bsearch();
+    test_bounds();
+    test_peak();
+    print("DIFF_OK: binary_search");
+    0
+}

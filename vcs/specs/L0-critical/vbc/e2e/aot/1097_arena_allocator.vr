@@ -1,0 +1,292 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: arena, allocator, generational, memory, cbgr
+// @expect: pass
+// @description: Generational arena allocator — O(1) mass invalidation via shared generation counter
+
+// ============================================================================
+// Self-contained GenerationalArena test
+//
+// Demonstrates the core arena concept: bump-pointer allocation with a shared
+// generation counter that invalidates all references in O(1) on reset.
+// ============================================================================
+
+type ArenaConfig is {
+    initial_capacity: Int,
+    max_capacity: Int,
+    growth_factor: Int,
+};
+
+type GenerationalArena is {
+    buffer: Int,
+    capacity: Int,
+    used: Int,
+    generation: Int,
+    alloc_count: Int,
+    reset_count: Int,
+};
+
+implement GenerationalArena {
+    fn new(capacity: Int) -> GenerationalArena {
+        // Use a List as backing storage — each element is 8 bytes (i64)
+        // We track the raw concept: buffer pointer (simulated), capacity, etc.
+        GenerationalArena {
+            buffer: 1,
+            capacity: capacity,
+            used: 0,
+            generation: 1,
+            alloc_count: 0,
+            reset_count: 0,
+        }
+    }
+
+    fn alloc(&mut self, size: Int) -> Int {
+        // Align to 8 bytes
+        let mask = 7;
+        let aligned = (self.used + mask) & (0 - 8);
+        let end = aligned + size;
+        if end > self.capacity {
+            return 0;
+        }
+        let ptr = self.buffer + aligned;
+        self.used = end;
+        self.alloc_count = self.alloc_count + 1;
+        ptr
+    }
+
+    fn reset(&mut self) {
+        self.generation = self.generation + 1;
+        self.used = 0;
+        self.alloc_count = 0;
+        self.reset_count = self.reset_count + 1;
+    }
+
+    fn generation(&self) -> Int {
+        self.generation
+    }
+
+    fn used(&self) -> Int {
+        self.used
+    }
+
+    fn capacity(&self) -> Int {
+        self.capacity
+    }
+
+    fn alloc_count(&self) -> Int {
+        self.alloc_count
+    }
+
+    fn reset_count(&self) -> Int {
+        self.reset_count
+    }
+
+    fn remaining(&self) -> Int {
+        self.capacity - self.used
+    }
+
+    fn destroy(&mut self) {
+        self.buffer = 0;
+        self.capacity = 0;
+        self.used = 0;
+        self.generation = self.generation + 1;
+        self.alloc_count = 0;
+    }
+
+    fn is_destroyed(&self) -> Bool {
+        self.buffer == 0
+    }
+}
+
+// Simulates a ThinRef that captures the arena generation at creation time.
+// On "dereference", it checks the stored generation against the arena's current
+// generation — if they differ, the ref is stale (use-after-free caught).
+type ArenaRef is {
+    ptr: Int,
+    gen: Int,
+};
+
+fn make_ref(arena: &GenerationalArena, ptr: Int) -> ArenaRef {
+    ArenaRef { ptr: ptr, gen: arena.generation() }
+}
+
+fn is_valid(r: ArenaRef, arena: &GenerationalArena) -> Bool {
+    r.gen == arena.generation()
+}
+
+fn test_basic_allocation() -> Int {
+    let mut arena = GenerationalArena.new(1024);
+
+    // Allocation returns non-zero pointer
+    let p1 = arena.alloc(64);
+    assert(p1 != 0);
+    print(f"alloc(64) -> ptr={p1}");
+
+    let p2 = arena.alloc(128);
+    assert(p2 != 0);
+    assert(p2 != p1);
+    print(f"alloc(128) -> ptr={p2}");
+
+    // Used counter increases
+    assert(arena.used() > 0);
+    print(f"used={arena.used()}");
+    assert_eq(arena.alloc_count(), 2);
+    print("test_basic_allocation: PASS");
+    0
+}
+
+fn test_multiple_allocations() -> Int {
+    let mut arena = GenerationalArena.new(4096);
+
+    let mut i = 0;
+    while i < 10 {
+        let p = arena.alloc(32);
+        assert(p != 0);
+        i = i + 1;
+    }
+    assert_eq(arena.alloc_count(), 10);
+    // 10 allocations of 32 bytes each, 8-byte aligned = 320 bytes
+    assert_eq(arena.used(), 320);
+    print(f"10 allocs: used={arena.used()}, count={arena.alloc_count()}");
+    print("test_multiple_allocations: PASS");
+    0
+}
+
+fn test_reset_invalidates_refs() -> Int {
+    let mut arena = GenerationalArena.new(1024);
+
+    // Allocate and create refs
+    let p1 = arena.alloc(64);
+    let r1 = make_ref(&arena, p1);
+    let p2 = arena.alloc(64);
+    let r2 = make_ref(&arena, p2);
+
+    // Before reset: refs are valid
+    assert(is_valid(r1, &arena));
+    assert(is_valid(r2, &arena));
+    let gen_before = arena.generation();
+    print(f"before reset: gen={gen_before}, used={arena.used()}");
+
+    // Reset: O(1) mass invalidation
+    arena.reset();
+
+    // After reset: generation incremented, used reset to 0
+    let gen_after = arena.generation();
+    assert_eq(gen_after, gen_before + 1);
+    assert_eq(arena.used(), 0);
+    assert_eq(arena.alloc_count(), 0);
+    assert_eq(arena.reset_count(), 1);
+    print(f"after reset: gen={gen_after}, used={arena.used()}");
+
+    // Refs created before reset are now INVALID
+    assert(!is_valid(r1, &arena));
+    assert(!is_valid(r2, &arena));
+    print("stale refs correctly detected as invalid");
+
+    // New allocations after reset get new generation
+    let p3 = arena.alloc(64);
+    let r3 = make_ref(&arena, p3);
+    assert(is_valid(r3, &arena));
+    print("new ref after reset is valid");
+
+    print("test_reset_invalidates_refs: PASS");
+    0
+}
+
+fn test_capacity_exhaustion() -> Int {
+    let mut arena = GenerationalArena.new(64);
+
+    // Fill the arena
+    let p1 = arena.alloc(32);
+    assert(p1 != 0);
+    let p2 = arena.alloc(32);
+    assert(p2 != 0);
+
+    // Arena is full — next alloc should return 0
+    let p3 = arena.alloc(32);
+    assert_eq(p3, 0);
+    print(f"exhaustion: used={arena.used()}, cap={arena.capacity()}");
+
+    // Reset and allocate again — memory reused
+    arena.reset();
+    let p4 = arena.alloc(32);
+    assert(p4 != 0);
+    print("after reset, allocation succeeds again");
+
+    print("test_capacity_exhaustion: PASS");
+    0
+}
+
+fn test_destroy() -> Int {
+    let mut arena = GenerationalArena.new(512);
+    let gen_before = arena.generation();
+
+    let p1 = arena.alloc(64);
+    let r1 = make_ref(&arena, p1);
+
+    arena.destroy();
+
+    assert(arena.is_destroyed());
+    assert_eq(arena.capacity(), 0);
+    assert_eq(arena.used(), 0);
+    // Generation bumped on destroy too
+    assert_eq(arena.generation(), gen_before + 1);
+    // Ref from before destroy is invalid
+    assert(!is_valid(r1, &arena));
+    print("test_destroy: PASS");
+    0
+}
+
+fn test_multiple_resets() -> Int {
+    let mut arena = GenerationalArena.new(256);
+
+    // Simulate 5 frames of a game loop
+    let mut frame = 0;
+    while frame < 5 {
+        // Allocate per-frame data
+        let p = arena.alloc(16);
+        assert(p != 0);
+        let r = make_ref(&arena, p);
+        assert(is_valid(r, &arena));
+
+        // End of frame: reset
+        arena.reset();
+        assert(!is_valid(r, &arena));
+        frame = frame + 1;
+    }
+
+    assert_eq(arena.reset_count(), 5);
+    assert_eq(arena.generation(), 6);
+    print(f"after 5 frames: gen={arena.generation()}, resets={arena.reset_count()}");
+    print("test_multiple_resets: PASS");
+    0
+}
+
+fn test_remaining_space() -> Int {
+    let mut arena = GenerationalArena.new(128);
+    assert_eq(arena.remaining(), 128);
+
+    arena.alloc(48);
+    assert_eq(arena.remaining(), 80);
+
+    arena.alloc(32);
+    assert_eq(arena.remaining(), 48);
+
+    arena.reset();
+    assert_eq(arena.remaining(), 128);
+    print("test_remaining_space: PASS");
+    0
+}
+
+fn main() -> Int {
+    test_basic_allocation();
+    test_multiple_allocations();
+    test_reset_invalidates_refs();
+    test_capacity_exhaustion();
+    test_destroy();
+    test_multiple_resets();
+    test_remaining_space();
+    print("1097_arena_allocator: ALL PASS");
+    0
+}

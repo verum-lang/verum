@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, generics, comma, error
+// @description: Test detection of missing generic argument after comma
+// @expected-error: E018
+
+// Missing type argument after comma
+fn test(x: Map<, Int>) {}

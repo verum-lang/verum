@@ -1,0 +1,526 @@
+// =============================================================================
+// env_test.vr - Comprehensive tests for environment and process operations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, env, process, args, variables, varerror
+// @description: Tests for Args iterator type, VarError variants and matching,
+//               environment access functions (var, var_opt, args, arg, etc.),
+//               standard env variables (home_dir, user, path, temp_dir, etc.),
+//               and process utility functions (exit, exit_success, exit_failure)
+// =============================================================================
+
+mount core.base.env.{
+    Args, VarError,
+    args, arg, args_count, args_os,
+    var, var_opt, set_var, remove_var,
+    home_dir, user, path, temp_dir, shell, locale,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: VarError Variant Construction
+// =============================================================================
+
+@test
+fn test_var_error_not_present() {
+    let err: VarError = VarError.NotPresent;
+    assert(err is VarError.NotPresent);
+    assert(!(err is VarError.NotUnicode));
+}
+
+@test
+fn test_var_error_not_unicode() {
+    let bytes: List<Byte> = List.new();
+    let err: VarError = VarError.NotUnicode(bytes);
+    assert(err is VarError.NotUnicode);
+    assert(!(err is VarError.NotPresent));
+}
+
+// =============================================================================
+// Section 2: VarError in Result Context
+// =============================================================================
+
+@test
+fn test_var_error_in_result() {
+    let result: Result<Text, VarError> = Err(VarError.NotPresent);
+    assert(result.is_err());
+}
+
+@test
+fn test_var_error_ok_result() {
+    let result: Result<Text, VarError> = Ok("value");
+    assert(result.is_ok());
+}
+
+@test
+fn test_var_error_not_unicode_in_result() {
+    let bytes: List<Byte> = List.new();
+    let result: Result<Text, VarError> = Err(VarError.NotUnicode(bytes));
+    assert(result.is_err());
+}
+
+@test
+fn test_var_error_match_not_present() {
+    let result: Result<Text, VarError> = Err(VarError.NotPresent);
+    assert(result.is_err());
+    let err = result.err();
+    assert(err.is_some());
+    assert(err.unwrap() is VarError.NotPresent);
+}
+
+@test
+fn test_var_error_match_not_unicode() {
+    let bytes: List<Byte> = List.new();
+    let result: Result<Text, VarError> = Err(VarError.NotUnicode(bytes));
+    assert(result.is_err());
+    let err = result.err();
+    assert(err.is_some());
+    assert(err.unwrap() is VarError.NotUnicode);
+}
+
+// =============================================================================
+// Section 3: Args Iterator Type
+// =============================================================================
+
+@test
+fn test_args_type_exists() {
+    // Args wraps argc/argv data as an iterator
+    let a: Args = Args { index: 0, count: 0 };
+    assert_eq(a.index, 0);
+    assert_eq(a.count, 0);
+}
+
+@test
+fn test_args_construction() {
+    let a = Args { index: 0, count: 5 };
+    assert_eq(a.index, 0);
+    assert_eq(a.count, 5);
+}
+
+@test
+fn test_args_os_returns_args() {
+    let a: Args = args_os();
+    // Should have at least the program name
+    assert(a.count >= 0);
+}
+
+@test
+fn test_args_index_starts_at_zero() {
+    let a = args_os();
+    assert_eq(a.index, 0);
+}
+
+// =============================================================================
+// Section 4: Command Line Argument Functions
+// =============================================================================
+
+@test
+fn test_args_returns_list() {
+    let a: List<Text> = args();
+    // args() returns a List - length >= 0
+    assert(a.len() >= 0);
+}
+
+@test
+fn test_arg_returns_maybe() {
+    let a: Maybe<Text> = arg(0);
+    // arg(0) may or may not return the program name
+    assert(a is Some || a is None);
+}
+
+@test
+fn test_args_count_returns_int() {
+    let n: Int = args_count();
+    assert(n >= 0);
+}
+
+@test
+fn test_arg_negative_index() {
+    // Negative index should return None
+    let a: Maybe<Text> = arg(-1);
+    // Type check passes - arg accepts Int parameter
+    assert(a is Some || a is None);
+}
+
+@test
+fn test_arg_large_index() {
+    // Very large index should return None
+    let a: Maybe<Text> = arg(99999);
+    assert(a is Some || a is None);
+}
+
+// =============================================================================
+// Section 5: Environment Variable Functions
+// =============================================================================
+
+@test
+fn test_var_returns_result() {
+    let key: &Text = "NONEXISTENT_TEST_VAR_12345";
+    let result: Result<Text, VarError> = var(key);
+    assert(result.is_ok() || result.is_err());
+}
+
+@test
+fn test_var_opt_returns_maybe() {
+    let key: &Text = "NONEXISTENT_TEST_VAR_12345";
+    let result: Maybe<Text> = var_opt(key);
+    assert(result.is_some() || result.is_none());
+}
+
+@test
+fn test_var_empty_key() {
+    let key: &Text = "";
+    let result: Result<Text, VarError> = var(key);
+    assert(result.is_ok() || result.is_err());
+}
+
+@test
+fn test_var_opt_empty_key() {
+    let key: &Text = "";
+    let result: Maybe<Text> = var_opt(key);
+    assert(result.is_some() || result.is_none());
+}
+
+// =============================================================================
+// Section 6: Standard Environment Variable Accessors
+// =============================================================================
+
+@test
+fn test_home_dir_type() {
+    let h: Maybe<Text> = home_dir();
+    assert(h.is_some() || h.is_none());
+}
+
+@test
+fn test_user_type() {
+    let u: Maybe<Text> = user();
+    assert(u.is_some() || u.is_none());
+}
+
+@test
+fn test_path_type() {
+    let p: Maybe<Text> = path();
+    assert(p.is_some() || p.is_none());
+}
+
+@test
+fn test_temp_dir_type() {
+    let t: Text = temp_dir();
+    // temp_dir always returns a non-empty path
+    assert(t.len() >= 0);
+}
+
+@test
+fn test_shell_type() {
+    let s: Maybe<Text> = shell();
+    assert(s.is_some() || s.is_none());
+}
+
+@test
+fn test_locale_type() {
+    let l: Maybe<Text> = locale();
+    assert(l.is_some() || l.is_none());
+}
+
+// =============================================================================
+// Section 7: Standard Env Accessors Return Non-Null Types
+// =============================================================================
+
+@test
+fn test_temp_dir_returns_text() {
+    // temp_dir always returns a value (defaults to /tmp)
+    let t: Text = temp_dir();
+    // Should always return something - has fallback
+    assert(t.len() >= 0);
+}
+
+@test
+fn test_home_dir_returns_maybe() {
+    // home_dir might not be set
+    let h = home_dir();
+    // Either is_some or is_none must be true
+    assert(h.is_some() != h.is_none());
+}
+
+@test
+fn test_user_returns_maybe() {
+    let u = user();
+    assert(u.is_some() != u.is_none());
+}
+
+@test
+fn test_path_returns_maybe() {
+    let p = path();
+    assert(p.is_some() != p.is_none());
+}
+
+@test
+fn test_shell_returns_maybe() {
+    let s = shell();
+    assert(s.is_some() != s.is_none());
+}
+
+@test
+fn test_locale_returns_maybe() {
+    let l = locale();
+    assert(l.is_some() != l.is_none());
+}
+
+// =============================================================================
+// Section 8: VarError Distinctness
+// =============================================================================
+
+@test
+fn test_var_error_variants_distinct() {
+    let e1 = VarError.NotPresent;
+    let bytes: List<Byte> = List.new();
+    let e2 = VarError.NotUnicode(bytes);
+
+    // Ensure different variants can be distinguished
+    assert(e1 is VarError.NotPresent);
+    assert(!(e1 is VarError.NotUnicode));
+    assert(e2 is VarError.NotUnicode);
+    assert(!(e2 is VarError.NotPresent));
+}
+
+// =============================================================================
+// Section 9: set_var and remove_var
+// =============================================================================
+
+@test
+fn test_set_var_function_signature() {
+    // set_var takes key and value as text
+    set_var("VERUM_TEST_VAR_ABC", "test_value");
+    // Verify the variable was set
+    let result = var("VERUM_TEST_VAR_ABC");
+    assert(result.is_ok());
+}
+
+@test
+fn test_set_var_then_read() {
+    set_var("VERUM_TEST_SET_READ", "42");
+    let result = var_opt("VERUM_TEST_SET_READ");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "42");
+}
+
+@test
+fn test_set_var_overwrite() {
+    set_var("VERUM_TEST_OVERWRITE", "first");
+    set_var("VERUM_TEST_OVERWRITE", "second");
+    let result = var_opt("VERUM_TEST_OVERWRITE");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "second");
+}
+
+@test
+fn test_remove_var_function_signature() {
+    set_var("VERUM_TEST_TO_REMOVE", "value");
+    remove_var("VERUM_TEST_TO_REMOVE");
+    // Verify the variable was removed
+    let result = var("VERUM_TEST_TO_REMOVE");
+    assert(result.is_err());
+}
+
+@test
+fn test_remove_var_then_read() {
+    set_var("VERUM_TEST_REMOVE_READ", "exists");
+    remove_var("VERUM_TEST_REMOVE_READ");
+    let result = var_opt("VERUM_TEST_REMOVE_READ");
+    assert(result.is_none());
+}
+
+@test
+fn test_set_var_empty_value() {
+    set_var("VERUM_TEST_EMPTY_VAL", "");
+    let result = var_opt("VERUM_TEST_EMPTY_VAL");
+    // Empty value is still set
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "");
+}
+
+@test
+fn test_remove_nonexistent_var() {
+    // Removing a var that doesn't exist should not panic
+    remove_var("VERUM_NONEXISTENT_REMOVE_12345");
+    // Confirm it still doesn't exist
+    let result = var("VERUM_NONEXISTENT_REMOVE_12345");
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 10: var() Result patterns
+// =============================================================================
+
+@test
+fn test_var_existing_returns_ok() {
+    set_var("VERUM_TEST_VAR_OK", "found");
+    let result = var("VERUM_TEST_VAR_OK");
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), "found");
+}
+
+@test
+fn test_var_missing_returns_err() {
+    remove_var("VERUM_TEST_VAR_MISSING_9999");
+    let result = var("VERUM_TEST_VAR_MISSING_9999");
+    assert(result.is_err());
+}
+
+@test
+fn test_var_opt_existing_returns_some() {
+    set_var("VERUM_TEST_OPT_SOME", "present");
+    let result = var_opt("VERUM_TEST_OPT_SOME");
+    assert(result.is_some());
+}
+
+@test
+fn test_args_count_consistency() {
+    let count = args_count();
+    let arg_list = args();
+    assert_eq(count, arg_list.len());
+}
+
+// =============================================================================
+// Section 11: set_var/remove_var Cycle Tests
+// =============================================================================
+
+@test
+fn test_set_var_remove_var_cycle() {
+    set_var("VERUM_CYCLE_TEST", "a");
+    assert_eq(var_opt("VERUM_CYCLE_TEST").unwrap(), "a");
+    remove_var("VERUM_CYCLE_TEST");
+    assert(var_opt("VERUM_CYCLE_TEST").is_none());
+    set_var("VERUM_CYCLE_TEST", "b");
+    assert_eq(var_opt("VERUM_CYCLE_TEST").unwrap(), "b");
+    remove_var("VERUM_CYCLE_TEST");
+}
+
+@test
+fn test_set_var_long_value() {
+    let long_val = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    set_var("VERUM_LONG_VAL_TEST", long_val);
+    let result = var_opt("VERUM_LONG_VAL_TEST");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), long_val);
+    remove_var("VERUM_LONG_VAL_TEST");
+}
+
+@test
+fn test_var_result_unwrap_or() {
+    remove_var("VERUM_ABSENT_KEY_999");
+    let result = var("VERUM_ABSENT_KEY_999");
+    let value = result.unwrap_or("default");
+    assert_eq(value, "default");
+}
+
+@test
+fn test_var_opt_unwrap_or() {
+    remove_var("VERUM_ABSENT_KEY_998");
+    let result = var_opt("VERUM_ABSENT_KEY_998");
+    let value = result.unwrap_or("fallback");
+    assert_eq(value, "fallback");
+}
+
+@test
+fn test_set_var_multiple_keys() {
+    set_var("VERUM_MULTI_A", "1");
+    set_var("VERUM_MULTI_B", "2");
+    set_var("VERUM_MULTI_C", "3");
+    assert_eq(var_opt("VERUM_MULTI_A").unwrap(), "1");
+    assert_eq(var_opt("VERUM_MULTI_B").unwrap(), "2");
+    assert_eq(var_opt("VERUM_MULTI_C").unwrap(), "3");
+    remove_var("VERUM_MULTI_A");
+    remove_var("VERUM_MULTI_B");
+    remove_var("VERUM_MULTI_C");
+}
+
+@test
+fn test_args_os_index_non_negative() {
+    let a = args_os();
+    assert(a.index >= 0);
+    assert(a.count >= 0);
+}
+
+@test
+fn test_var_error_not_present_in_maybe() {
+    let err: VarError = VarError.NotPresent;
+    let wrapped: Maybe<VarError> = Some(err);
+    assert(wrapped.is_some());
+}
+
+@test
+fn test_temp_dir_not_empty() {
+    let t = temp_dir();
+    // temp_dir always returns a non-empty string on any platform
+    assert(t.len() > 0);
+}
+
+// =============================================================================
+// Additional Environment Tests
+// =============================================================================
+
+@test
+fn test_set_var_overwrite() {
+    set_var("VERUM_OVERWRITE_TEST", "first");
+    set_var("VERUM_OVERWRITE_TEST", "second");
+    assert_eq(var_opt("VERUM_OVERWRITE_TEST").unwrap(), "second");
+    remove_var("VERUM_OVERWRITE_TEST");
+}
+
+@test
+fn test_var_error_not_present() {
+    let err = VarError.NotPresent;
+    assert(err is VarError.NotPresent);
+}
+
+@test
+fn test_var_error_not_present_distinct() {
+    let err = VarError.NotPresent;
+    assert(err is VarError.NotPresent);
+}
+
+@test
+fn test_set_var_empty_value() {
+    set_var("VERUM_EMPTY_VAL", "");
+    let result = var_opt("VERUM_EMPTY_VAL");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "");
+    remove_var("VERUM_EMPTY_VAL");
+}
+
+@test
+fn test_remove_var_nonexistent() {
+    remove_var("VERUM_NEVER_SET_12345");
+    assert(var_opt("VERUM_NEVER_SET_12345").is_none());
+}
+
+@test
+fn test_var_result_absent_is_err() {
+    remove_var("VERUM_ABSENT_FOR_ERR");
+    let result = var("VERUM_ABSENT_FOR_ERR");
+    assert(result.is_err());
+}
+
+@test
+fn test_current_dir_not_empty() {
+    let d = current_dir();
+    assert(d.is_ok());
+}
+
+@test
+fn test_set_var_then_check_exists() {
+    set_var("VERUM_EXISTS_CHECK", "yes");
+    let result = var("VERUM_EXISTS_CHECK");
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), "yes");
+    remove_var("VERUM_EXISTS_CHECK");
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

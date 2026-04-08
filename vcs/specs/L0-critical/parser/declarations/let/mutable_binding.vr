@@ -1,0 +1,60 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, let, binding, mutable
+
+// Helper functions for testing
+fn initial_value() -> Int { 0 }
+fn create_data() -> Int { 42 }
+
+fn test_simple_mutable() {
+    // Simple mutable binding
+    let mut x = 5;
+}
+
+fn test_mutable_with_type() {
+    // Mutable binding with type annotation
+    let mut y: Int = 10;
+}
+
+fn test_mutable_with_expression() {
+    // Mutable binding with complex expression
+    let mut counter = initial_value();
+}
+
+fn test_mutable_collections() {
+    // Mutable binding with collection types
+    let mut list: List<Int> = [];
+    let mut map: Map<Text, Int> = Map.new();
+}
+
+fn test_mutable_with_mutation() {
+    // Mutable binding used in mutation
+    let mut value = 0;
+    value = 1;
+    value += 2;
+}
+
+fn test_mutable_reference() {
+    // Mutable reference binding
+    let mut data = create_data();
+    let ref_to_data = &mut data;
+}
+
+fn test_multiple_mutable() {
+    // Multiple mutable bindings
+    let mut a = 1;
+    let mut b = 2;
+    let mut c = 3;
+}
+
+fn test_mutable_generic() {
+    // Mutable binding with generic type
+    let mut result: Maybe<Int> = None;
+    result = Some(42);
+}
+
+fn test_mutable_tuple() {
+    // Mutable binding with tuple
+    let mut pair: (Int, Int) = (0, 0);
+}

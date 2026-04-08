@@ -1,0 +1,11 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let x = if true { 42 } else { 0 };
+    assert_eq(x, 42);
+
+    let y = if false { 0 } else { 99 };
+    assert_eq(y, 99);
+}

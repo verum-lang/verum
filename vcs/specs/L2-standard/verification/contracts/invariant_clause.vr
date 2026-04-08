@@ -1,0 +1,173 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, invariant
+// @timeout: 5000
+
+/// Tests for invariant clauses in contracts
+/// Loop invariants and type invariants
+
+/// Loop invariant for simple summation
+@verify(proof)
+fn sum_array(arr: &List<Int>) -> Int {
+    contract#"
+        ensures result == arr.iter().sum();
+    ";
+    let mut sum = 0;
+    for i in 0..arr.len() {
+        contract#"invariant 
+            i >= 0 && i <= arr.len();
+            sum == arr[0..i].iter().sum();
+        ";
+        sum += arr[i];
+    }
+    sum
+}
+
+/// Loop invariant for finding maximum
+@verify(proof)
+fn find_max(arr: &List<Int>) -> Int {
+    contract#"
+        requires arr.len() > 0;
+        ensures forall i: Int. 0 <= i < arr.len() implies result >= arr[i];
+        ensures exists i: Int. 0 <= i < arr.len() && result == arr[i];
+    ";
+    let mut max = arr[0];
+    for i in 1..arr.len() {
+        contract#"invariant 
+            i >= 1 && i <= arr.len();
+            forall j: Int. 0 <= j < i implies max >= arr[j];
+            exists j: Int. 0 <= j < i && max == arr[j];
+        ";
+        if arr[i] > max {
+            max = arr[i];
+        }
+    }
+    max
+}
+
+/// Nested loop invariants
+@verify(proof)
+fn matrix_sum(matrix: &List<List<Int>>) -> Int {
+    contract#"
+        ensures result == matrix.iter().map(|row| row.iter().sum()).sum();
+    ";
+    let mut total = 0;
+    for i in 0..matrix.len() {
+        contract#"invariant 
+            i >= 0 && i <= matrix.len();
+            total == matrix[0..i].iter().map(|row| row.iter().sum()).sum();
+        ";
+        for j in 0..matrix[i].len() {
+            contract#"invariant 
+                j >= 0 && j <= matrix[i].len();
+                // Partial sum of current row included
+            ";
+            total += matrix[i][j];
+        }
+    }
+    total
+}
+
+/// While loop invariant
+@verify(proof)
+fn binary_gcd(a: Int{> 0}, b: Int{> 0}) -> Int{> 0} {
+    contract#"
+        ensures result > 0;
+        ensures a % result == 0 && b % result == 0;
+    ";
+    let mut x = a;
+    let mut y = b;
+
+    while y != 0 {
+        contract#"invariant 
+            x > 0 && y >= 0;
+            gcd(x, y) == gcd(a, b);
+        ";
+        let temp = y;
+        y = x % y;
+        x = temp;
+    }
+    x
+}
+
+/// Type invariant for a struct
+type SortedList<T: Ord> is {
+    data: List<T>,
+    // invariant: forall i: Int, j: Int. 0 <= i < j < data.len() implies data[i] <= data[j]
+};
+
+implement<T: Ord> SortedList<T> {
+    @verify(proof)
+    fn insert(&mut self, value: T) {
+        contract#"
+            ensures self.data.len() == old(self.data.len()) + 1;
+            ensures self.data.contains(&value);
+        ";
+        let pos = self.find_insert_position(&value);
+        self.data.insert(pos, value);
+    }
+
+    @verify(proof)
+    fn find_insert_position(&self, value: &T) -> Int {
+        contract#"
+            ensures result >= 0 && result <= self.data.len();
+            ensures forall i: Int. 0 <= i < result implies self.data[i] < *value;
+            ensures forall i: Int. result <= i < self.data.len() implies self.data[i] >= *value;
+        ";
+        let mut pos = 0;
+        while pos < self.data.len() && self.data[pos] < *value {
+            contract#"invariant 
+                pos >= 0 && pos <= self.data.len();
+                forall i: Int. 0 <= i < pos implies self.data[i] < *value;
+            ";
+            pos += 1;
+        }
+        pos
+    }
+}
+
+/// Decreasing variant for termination
+@verify(proof)
+fn factorial(n: Int{>= 0}) -> Int{> 0} {
+    contract#"
+        ensures result > 0;
+        decreases n;
+    ";
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+/// Multiple invariants maintained simultaneously
+@verify(proof)
+fn partition(arr: &mut List<Int>, pivot: Int) -> Int {
+    contract#"
+        ensures forall i: Int. 0 <= i < result implies arr[i] < pivot;
+        ensures forall i: Int. result <= i < arr.len() implies arr[i] >= pivot;
+    ";
+    let mut low = 0;
+    let mut high = arr.len() - 1;
+
+    while low <= high {
+        contract#"invariant 
+            low >= 0 && high < arr.len();
+            forall i: Int. 0 <= i < low implies arr[i] < pivot;
+            forall i: Int. high < i < arr.len() implies arr[i] >= pivot;
+        ";
+        while low <= high && arr[low] < pivot {
+            low += 1;
+        }
+        while low <= high && arr[high] >= pivot {
+            high -= 1;
+        }
+        if low < high {
+            arr.swap(low, high);
+            low += 1;
+            high -= 1;
+        }
+    }
+    low
+}

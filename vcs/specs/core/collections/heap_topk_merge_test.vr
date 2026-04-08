@@ -1,0 +1,345 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, heap, top_k, bottom_k, merge
+// @description: Tests for BinaryHeap.top_k, bottom_k, and merge
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: BinaryHeap.top_k
+// =============================================================================
+
+@test
+fn test_top_k_basic() {
+    let h = BinaryHeap.from_list([3, 1, 4, 1, 5, 9, 2, 6]);
+    let top3 = h.top_k(3);
+    assert_eq(top3.len(), 3);
+    assert_eq(top3[0], 9);
+    assert_eq(top3[1], 6);
+    assert_eq(top3[2], 5);
+}
+
+@test
+fn test_top_k_single() {
+    let h = BinaryHeap.from_list([10, 20, 30, 40, 50]);
+    let top1 = h.top_k(1);
+    assert_eq(top1.len(), 1);
+    assert_eq(top1[0], 50);
+}
+
+@test
+fn test_top_k_all() {
+    let h = BinaryHeap.from_list([3, 1, 2]);
+    let top5 = h.top_k(5); // k > len
+    assert_eq(top5.len(), 3);
+    assert_eq(top5[0], 3);
+    assert_eq(top5[1], 2);
+    assert_eq(top5[2], 1);
+}
+
+@test
+fn test_top_k_zero() {
+    let h = BinaryHeap.from_list([1, 2, 3]);
+    let top0 = h.top_k(0);
+    assert_eq(top0.len(), 0);
+}
+
+@test
+fn test_top_k_empty_heap() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let top3 = h.top_k(3);
+    assert_eq(top3.len(), 0);
+}
+
+@test
+fn test_top_k_equal_to_len() {
+    let h = BinaryHeap.from_list([5, 3, 8, 1]);
+    let top4 = h.top_k(4);
+    assert_eq(top4.len(), 4);
+    assert_eq(top4[0], 8);
+    assert_eq(top4[1], 5);
+    assert_eq(top4[2], 3);
+    assert_eq(top4[3], 1);
+}
+
+@test
+fn test_top_k_duplicates() {
+    let h = BinaryHeap.from_list([5, 5, 5, 3, 3, 1]);
+    let top3 = h.top_k(3);
+    assert_eq(top3.len(), 3);
+    assert_eq(top3[0], 5);
+    assert_eq(top3[1], 5);
+    assert_eq(top3[2], 5);
+}
+
+@test
+fn test_top_k_negative_values() {
+    let h = BinaryHeap.from_list([-10, -5, -1, -20, -3]);
+    let top2 = h.top_k(2);
+    assert_eq(top2.len(), 2);
+    assert_eq(top2[0], -1);
+    assert_eq(top2[1], -3);
+}
+
+@test
+fn test_top_k_preserves_original() {
+    let h = BinaryHeap.from_list([1, 2, 3, 4, 5]);
+    let _ = h.top_k(3);
+    // Original heap unchanged
+    assert_eq(h.len(), 5);
+    assert_eq(*h.peek().unwrap(), 5);
+}
+
+@test
+fn test_top_k_descending_order() {
+    let h = BinaryHeap.from_list([7, 2, 9, 4, 1, 8, 3, 6, 5]);
+    let top5 = h.top_k(5);
+    // Verify descending order
+    let mut i = 0;
+    while i < top5.len() - 1 {
+        assert(top5[i] >= top5[i + 1]);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: BinaryHeap.bottom_k
+// =============================================================================
+
+@test
+fn test_bottom_k_basic() {
+    let h = BinaryHeap.from_list([3, 1, 4, 1, 5, 9, 2, 6]);
+    let bot3 = h.bottom_k(3);
+    assert_eq(bot3.len(), 3);
+    assert_eq(bot3[0], 1);
+    assert_eq(bot3[1], 1);
+    assert_eq(bot3[2], 2);
+}
+
+@test
+fn test_bottom_k_single() {
+    let h = BinaryHeap.from_list([10, 20, 30, 40, 50]);
+    let bot1 = h.bottom_k(1);
+    assert_eq(bot1.len(), 1);
+    assert_eq(bot1[0], 10);
+}
+
+@test
+fn test_bottom_k_all() {
+    let h = BinaryHeap.from_list([3, 1, 2]);
+    let bot5 = h.bottom_k(5); // k > len
+    assert_eq(bot5.len(), 3);
+    assert_eq(bot5[0], 1);
+    assert_eq(bot5[1], 2);
+    assert_eq(bot5[2], 3);
+}
+
+@test
+fn test_bottom_k_zero() {
+    let h = BinaryHeap.from_list([1, 2, 3]);
+    let bot0 = h.bottom_k(0);
+    assert_eq(bot0.len(), 0);
+}
+
+@test
+fn test_bottom_k_empty_heap() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let bot3 = h.bottom_k(3);
+    assert_eq(bot3.len(), 0);
+}
+
+@test
+fn test_bottom_k_duplicates() {
+    let h = BinaryHeap.from_list([1, 1, 1, 5, 5, 9]);
+    let bot3 = h.bottom_k(3);
+    assert_eq(bot3[0], 1);
+    assert_eq(bot3[1], 1);
+    assert_eq(bot3[2], 1);
+}
+
+@test
+fn test_bottom_k_negative() {
+    let h = BinaryHeap.from_list([-10, -5, -1, -20, -3]);
+    let bot2 = h.bottom_k(2);
+    assert_eq(bot2[0], -20);
+    assert_eq(bot2[1], -10);
+}
+
+@test
+fn test_bottom_k_preserves_original() {
+    let h = BinaryHeap.from_list([1, 2, 3, 4, 5]);
+    let _ = h.bottom_k(3);
+    assert_eq(h.len(), 5);
+}
+
+@test
+fn test_bottom_k_ascending_order() {
+    let h = BinaryHeap.from_list([7, 2, 9, 4, 1, 8, 3, 6, 5]);
+    let bot5 = h.bottom_k(5);
+    let mut i = 0;
+    while i < bot5.len() - 1 {
+        assert(bot5[i] <= bot5[i + 1]);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: BinaryHeap.merge
+// =============================================================================
+
+@test
+fn test_merge_basic() {
+    let mut h1 = BinaryHeap.from_list([1, 5, 3]);
+    let mut h2 = BinaryHeap.from_list([8, 2, 6]);
+    h1.merge(&mut h2);
+    assert_eq(h1.len(), 6);
+    assert(h2.is_empty());
+    assert_eq(*h1.peek().unwrap(), 8);
+}
+
+@test
+fn test_merge_into_empty() {
+    let mut h1: BinaryHeap<Int> = BinaryHeap.new();
+    let mut h2 = BinaryHeap.from_list([3, 1, 2]);
+    h1.merge(&mut h2);
+    assert_eq(h1.len(), 3);
+    assert(h2.is_empty());
+    assert_eq(*h1.peek().unwrap(), 3);
+}
+
+@test
+fn test_merge_from_empty() {
+    let mut h1 = BinaryHeap.from_list([3, 1, 2]);
+    let mut h2: BinaryHeap<Int> = BinaryHeap.new();
+    h1.merge(&mut h2);
+    assert_eq(h1.len(), 3);
+    assert_eq(*h1.peek().unwrap(), 3);
+}
+
+@test
+fn test_merge_both_empty() {
+    let mut h1: BinaryHeap<Int> = BinaryHeap.new();
+    let mut h2: BinaryHeap<Int> = BinaryHeap.new();
+    h1.merge(&mut h2);
+    assert(h1.is_empty());
+}
+
+@test
+fn test_merge_preserves_heap_property() {
+    let mut h1 = BinaryHeap.from_list([10, 5, 3, 1]);
+    let mut h2 = BinaryHeap.from_list([8, 6, 4, 2]);
+    h1.merge(&mut h2);
+    // Pop all in order to verify heap property
+    let mut prev = *h1.peek().unwrap();
+    while let Some(val) = h1.pop() {
+        assert(val <= prev);
+        prev = val;
+    }
+}
+
+@test
+fn test_merge_duplicates() {
+    let mut h1 = BinaryHeap.from_list([1, 3, 5]);
+    let mut h2 = BinaryHeap.from_list([1, 3, 5]);
+    h1.merge(&mut h2);
+    assert_eq(h1.len(), 6);
+}
+
+@test
+fn test_merge_disjoint() {
+    let mut h1 = BinaryHeap.from_list([1, 2, 3]);
+    let mut h2 = BinaryHeap.from_list([10, 20, 30]);
+    h1.merge(&mut h2);
+    assert_eq(h1.len(), 6);
+    assert_eq(*h1.peek().unwrap(), 30);
+}
+
+@test
+fn test_merge_large() {
+    let mut list1: List<Int> = [];
+    let mut list2: List<Int> = [];
+    let mut i = 0;
+    while i < 50 {
+        list1.push(i * 2);      // evens 0..98
+        list2.push(i * 2 + 1);  // odds 1..99
+        i = i + 1;
+    }
+    let mut h1 = BinaryHeap.from_list(list1);
+    let mut h2 = BinaryHeap.from_list(list2);
+    h1.merge(&mut h2);
+    assert_eq(h1.len(), 100);
+    assert_eq(*h1.peek().unwrap(), 99);
+    // Verify full sorted drain
+    let mut prev = 100;
+    while let Some(val) = h1.pop() {
+        assert(val < prev);
+        prev = val;
+    }
+}
+
+// =============================================================================
+// Section 4: Integration
+// =============================================================================
+
+@test
+fn test_top_k_bottom_k_consistency() {
+    let h = BinaryHeap.from_list([5, 3, 8, 1, 7, 2, 9, 4, 6]);
+    let top = h.top_k(9);
+    let bot = h.bottom_k(9);
+    // top is descending, bot is ascending — same elements reversed
+    let n = top.len();
+    let mut i = 0;
+    while i < n {
+        assert_eq(top[i], bot[n - 1 - i]);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_merge_then_top_k() {
+    let mut h1 = BinaryHeap.from_list([10, 30, 50]);
+    let mut h2 = BinaryHeap.from_list([20, 40, 60]);
+    h1.merge(&mut h2);
+    let top3 = h1.top_k(3);
+    assert_eq(top3[0], 60);
+    assert_eq(top3[1], 50);
+    assert_eq(top3[2], 40);
+}
+
+@test
+fn test_top_k_after_remove() {
+    let mut h = BinaryHeap.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    h.remove_value(&10);
+    h.remove_value(&5);
+    let top3 = h.top_k(3);
+    assert_eq(top3[0], 9);
+    assert_eq(top3[1], 8);
+    assert_eq(top3[2], 7);
+}
+
+@test
+fn test_bottom_k_after_push() {
+    let mut h = BinaryHeap.from_list([5, 10, 15]);
+    h.push(1);
+    h.push(20);
+    let bot3 = h.bottom_k(3);
+    assert_eq(bot3[0], 1);
+    assert_eq(bot3[1], 5);
+    assert_eq(bot3[2], 10);
+}
+
+@test
+fn test_merge_then_retain() {
+    let mut h1 = BinaryHeap.from_list([1, 2, 3, 4, 5]);
+    let mut h2 = BinaryHeap.from_list([6, 7, 8, 9, 10]);
+    h1.merge(&mut h2);
+    fn is_odd(x: &Int) -> Bool { *x % 2 != 0 }
+    h1.retain(is_odd);
+    assert_eq(h1.len(), 5);
+    // All remaining should be odd
+    for x in h1.iter() {
+        assert(*x % 2 != 0);
+    }
+}

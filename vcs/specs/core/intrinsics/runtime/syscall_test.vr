@@ -1,0 +1,76 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/runtime/syscall_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, intrinsics, runtime, syscall, kernel, system-call
+// @description: Tests for system call intrinsics providing direct kernel access
+//               without libc wrappers.
+//
+// Coverage:
+// - Raw syscalls: syscall0 through syscall6
+//
+// Test Strategy:
+// - Verify function imports resolve
+// - Verify function type signatures (all return Int)
+// =============================================================================
+
+module specs.core.intrinsics.runtime.syscall_test;
+
+mount core.intrinsics.runtime.syscall.{
+    syscall0,
+    syscall1,
+    syscall2,
+    syscall3,
+    syscall4,
+    syscall5,
+    syscall6,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Syscall Function Tests
+// =============================================================================
+
+@test
+fn test_syscall0_exists() {
+    let _ = syscall0;
+}
+
+@test
+fn test_syscall1_exists() {
+    let _ = syscall1;
+}
+
+@test
+fn test_syscall2_exists() {
+    let _ = syscall2;
+}
+
+@test
+fn test_syscall3_exists() {
+    let _ = syscall3;
+}
+
+@test
+fn test_syscall4_exists() {
+    let _ = syscall4;
+}
+
+@test
+fn test_syscall5_exists() {
+    let _ = syscall5;
+}
+
+@test
+fn test_syscall6_exists() {
+    let _ = syscall6;
+}

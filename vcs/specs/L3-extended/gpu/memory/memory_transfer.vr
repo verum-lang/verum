@@ -1,0 +1,174 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, memory, transfer
+
+fn main() {
+    let device = Device.gpu(0);
+
+    // Host to device transfer
+    let host_data: Tensor<f32, [1024]> = Tensor.arange(0.0, 1024.0, 1.0);
+    let device_data = host_data.to(device);
+
+    assert(device_data.device() == device);
+    assert(device_data[0] == 0.0);
+    assert(device_data[1023] == 1023.0);
+
+    // Device to host transfer
+    let back_to_host = device_data.to_host();
+    assert(back_to_host.is_on_host());
+    assert(back_to_host[0] == 0.0);
+    assert(back_to_host[1023] == 1023.0);
+
+    // In-place modification and transfer back
+    let mut device_tensor: Tensor<f32, [100]> = Tensor.zeros().to(device);
+
+    @kernel(block_size = 256)
+    fn fill_kernel(data: &mut Tensor<f32, [N]>) {
+        let idx = global_id().x;
+        if idx < N {
+            data[idx] = idx as f32 * 2.0;
+        }
+    }
+
+// LAUNCH:     fill_kernel<<<auto, 256>>>(&mut device_tensor);
+    device.synchronize();
+
+    let result = device_tensor.to_host();
+    assert(result[0] == 0.0);
+    assert(result[50] == 100.0);
+
+    // Partial transfer (subregion)
+    let large_host: Tensor<f32, [10000]> = Tensor.ones();
+    let partial = large_host[1000..2000].to(device);
+    assert(partial.shape() == [1000]);
+
+    // Strided transfer
+    let strided_host: Tensor<f32, [100, 100]> = Tensor.ones();
+    let column = strided_host.column(50).to(device);  // Non-contiguous
+    assert(column.shape() == [100]);
+
+    // Async transfer with streams
+    let stream = Stream.new(device);
+
+    let async_src: Tensor<f32, [2048]> = Tensor.full(42.0);
+    let async_dst = async_src.to_async(device, stream);
+
+    // Can do other work while transfer is in progress
+    let other_work: Tensor<f32, [100]> = Tensor.zeros();
+
+    stream.synchronize();
+    assert(async_dst[0] == 42.0);
+
+    // Double buffering pattern
+    let stream1 = Stream.new(device);
+    let stream2 = Stream.new(device);
+
+    let buffer1: Tensor<f32, [4096]> = Tensor.zeros();
+    let buffer2: Tensor<f32, [4096]> = Tensor.zeros();
+
+    // Overlap compute and transfer
+    let device_buf1 = buffer1.to_async(device, stream1);
+
+    // While first transfer is in progress, prepare second
+    let device_buf2 = buffer2.to_async(device, stream2);
+
+    Stream.synchronize_all([stream1, stream2]);
+
+    // Device to device transfer (same GPU)
+    let src_device: Tensor<f32, [512]> = Tensor.ones().to(device);
+    let dst_device: Tensor<f32, [512]> = Tensor.zeros().to(device);
+
+    src_device.copy_to(&mut dst_device);
+    assert(dst_device[0] == 1.0);
+
+    // Peer-to-peer transfer (different GPUs)
+    let device0 = Device.gpu(0);
+    let device1 = Device.gpu_if_available(1).unwrap_or(device0);
+
+    if device0 != device1 {
+        // Enable peer access
+        device0.enable_peer_access(device1);
+        device1.enable_peer_access(device0);
+
+        let on_gpu0: Tensor<f32, [1024]> = Tensor.full(1.0).to(device0);
+        let on_gpu1 = on_gpu0.to(device1);  // Direct GPU-to-GPU transfer
+
+        assert(on_gpu1.device() == device1);
+        assert(on_gpu1[0] == 1.0);
+    }
+
+    // Pinned memory for faster transfers
+    let pinned: PinnedTensor<f32, [8192]> = PinnedTensor.new(Tensor.ones());
+
+    let start = Timer.now();
+    let fast_transfer = pinned.to(device);
+    let pinned_time = start.elapsed();
+
+    let regular: Tensor<f32, [8192]> = Tensor.ones();
+
+    let start = Timer.now();
+    let slow_transfer = regular.to(device);
+    let regular_time = start.elapsed();
+
+    // Pinned transfers are typically faster
+    // (May not be measurable for small transfers)
+
+    // Batch transfer optimization
+    let batch: List<Tensor<f32, [256]> > = (0..10)
+        .map(|i| Tensor.full(i as f32))
+        .collect();
+
+    // Transfer all at once (more efficient than individual transfers)
+    let device_batch = batch.to_device_batch(device);
+
+    assert(device_batch.len() == 10);
+    assert(device_batch[0][0] == 0.0);
+    assert(device_batch[9][0] == 9.0);
+
+    // Memory bandwidth measurement
+    let size_mb = 256;  // 256 MB
+    let large_buffer: Tensor<f32, [67108864]> = Tensor.zeros();  // 256 MB
+
+    let stream = Stream.new(device);
+
+    // Warm up
+    let _ = large_buffer.to_async(device, stream);
+    stream.synchronize();
+
+    // Measure
+    let start = Timer.now();
+    let device_large = large_buffer.to_async(device, stream);
+    stream.synchronize();
+    let elapsed = start.elapsed();
+
+    let bandwidth_gbps = (size_mb as f64) / elapsed.as_secs_f64() / 1000.0;
+    // Typical: 10-20 GB/s for PCIe 3.0/4.0
+
+    // Write-combined memory for streaming writes
+    let wc_buffer: WriteCombiendBuffer<f32> = WriteCombinedBuffer.allocate(1024);
+    for i in 0..1024 {
+        wc_buffer[i] = i as f32;  // Efficient sequential writes
+    }
+    let wc_device = wc_buffer.to(device);
+
+    // Async memcpy with callback
+    let callback_src: Tensor<f32, [1024]> = Tensor.ones();
+    callback_src.to_async_with_callback(device, stream, || {
+        // Called when transfer completes
+    });
+
+    // Event-based synchronization
+    let event = Event.new(device);
+
+    let transfer_stream = Stream.new(device);
+    let compute_stream = Stream.new(device);
+
+    let data = host_data.to_async(device, transfer_stream);
+    transfer_stream.record(event);
+
+    // Compute stream waits for transfer
+    compute_stream.wait(event);
+    // Now safe to use 'datap in compute_stream
+}

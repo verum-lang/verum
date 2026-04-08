@@ -1,0 +1,293 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, borrow-checking, nll, liveness, cbgr
+// @description: Liveness-based borrow release enables early reference release based on last use
+
+/// Liveness-based Borrow Release Tests
+///
+/// These tests validate that the CBGR borrow checker implements liveness-based
+/// borrow release as specified in docs/improvements.md Section 1.
+///
+/// Key behavior: Borrows are released at the point of last use, not at
+/// lexical scope end. This allows earlier access to the borrowed place.
+///
+/// Spec: docs/improvements.md Section 1 (Liveness-based Borrow Release)
+/// Impl: crates/verum_cbgr/src/nll_analysis.rs
+
+// ============================================================================
+// TEST 1: Basic liveness-based release
+// ============================================================================
+
+fn read_first(data: &[Int; 3]) -> Int {
+    data[0]
+}
+
+fn modify_data(data: &mut [Int; 3]) {
+    data[0] = 999;
+}
+
+fn test_basic_liveness_release() {
+    let mut data = [1, 2, 3];
+
+    // Immutable borrow created here
+    let first = read_first(&data);
+
+    // Borrow is released at last use (line above)
+    // Even though we're still in the same scope,
+    // the mutable borrow is now allowed
+    modify_data(&mut data);
+
+    assert(first == 1);
+    assert(data[0] == 999);
+}
+
+// ============================================================================
+// TEST 2: Multiple sequential accesses with early release
+// ============================================================================
+
+fn test_sequential_access() {
+    let mut value = 100;
+
+    // First immutable borrow - last use is immediate
+    let v1 = {
+        let r = &value;
+        *r
+    };
+
+    // Second access - mutable
+    {
+        let r = &mut value;
+        *r = 200;
+    }
+
+    // Third access - immutable again
+    let v2 = {
+        let r = &value;
+        *r
+    };
+
+    assert(v1 == 100);
+    assert(v2 == 200);
+}
+
+// ============================================================================
+// TEST 3: Liveness with conditional last use
+// ============================================================================
+
+fn test_conditional_liveness() {
+    let mut data = [10, 20, 30];
+    let cond = true;
+
+    // The borrow's last use depends on the condition
+    let val = if cond {
+        let r = &data;
+        r[0]  // Last use in this branch
+    } else {
+        0
+    };
+
+    // After conditional, borrow is released
+    data[0] = 50;
+
+    assert(val == 10);
+    assert(data[0] == 50);
+}
+
+// ============================================================================
+// TEST 4: Liveness with loop
+// ============================================================================
+
+fn test_loop_liveness() {
+    let mut sum = 0;
+    let data = [1, 2, 3, 4, 5];
+
+    // Each iteration creates and releases borrow
+    for i in 0..5 {
+        // Borrow created and last-used in same statement
+        sum += data[i];
+    }
+
+    // After loop, data is not borrowed
+    let final_sum = sum;
+
+    assert(final_sum == 15);
+}
+
+// ============================================================================
+// TEST 5: Function call with early release
+// ============================================================================
+
+fn compute(x: &Int, y: &Int) -> Int {
+    *x + *y
+}
+
+fn test_function_call_liveness() {
+    let mut a = 10;
+    let mut b = 20;
+
+    // Both borrows are created for the call
+    let result = compute(&a, &b);
+    // Both borrows are released after compute returns
+
+    // Now we can mutate both
+    a = 100;
+    b = 200;
+
+    assert(result == 30);
+    assert(a == 100);
+    assert(b == 200);
+}
+
+// ============================================================================
+// TEST 6: Struct field borrow with liveness
+// ============================================================================
+
+type Container is {
+    values: [Int; 3],
+    count: Int,
+};
+
+fn get_count(c: &Container) -> Int {
+    c.count
+}
+
+fn test_struct_field_liveness() {
+    let mut container = Container {
+        values: [1, 2, 3],
+        count: 3,
+    };
+
+    // Borrow for method call
+    let count = get_count(&container);
+    // Borrow released at last use (above)
+
+    // Now we can mutate
+    container.count = 10;
+
+    assert(count == 3);
+    assert(container.count == 10);
+}
+
+// ============================================================================
+// TEST 7: Temporary borrow in expression
+// ============================================================================
+
+fn test_temporary_borrow() {
+    let mut x = 42;
+
+    // Borrow created and released within expression
+    let doubled = {
+        let r = &x;
+        *r * 2
+    };
+
+    // Immediately available for mutation
+    x = 100;
+
+    assert(doubled == 84);
+    assert(x == 100);
+}
+
+// ============================================================================
+// TEST 8: Chained method calls with early release
+// ============================================================================
+
+type Value is {
+    data: Int,
+};
+
+implement Value {
+    fn get(&self) -> Int {
+        self.data
+    }
+
+    fn set(&mut self, v: Int) {
+        self.data = v;
+    }
+}
+
+fn test_chained_methods() {
+    let mut v = Value { data: 10 };
+
+    // Get creates and releases borrow
+    let current = v.get();
+
+    // Set now works
+    v.set(20);
+
+    let new_val = v.get();
+
+    assert(current == 10);
+    assert(new_val == 20);
+}
+
+// ============================================================================
+// TEST 9: Nested scopes with liveness
+// ============================================================================
+
+fn test_nested_scopes() {
+    let mut data = 100;
+
+    {
+        // Inner scope borrow
+        let inner_val = {
+            let r = &data;
+            *r
+        };
+        // Borrow released after value extraction
+
+        // Can mutate in same inner scope
+        data = 200;
+
+        assert(inner_val == 100);
+    }
+
+    // Outer scope access
+    assert(data == 200);
+}
+
+// ============================================================================
+// TEST 10: Complex pattern with liveness-based release
+// ============================================================================
+
+fn process_array(arr: &[Int; 5]) -> Int {
+    let mut sum = 0;
+    for i in 0..5 {
+        sum += arr[i];
+    }
+    sum
+}
+
+fn test_complex_pattern() {
+    let mut array = [1, 2, 3, 4, 5];
+
+    // Compute sum - borrow for duration of function call only
+    let sum = process_array(&array);
+
+    // Immediately after, we can mutate
+    array[0] = 100;
+
+    // Compute again
+    let new_sum = process_array(&array);
+
+    assert(sum == 15);
+    assert(new_sum == 114);  // 100 + 2 + 3 + 4 + 5
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    test_basic_liveness_release();
+    test_sequential_access();
+    test_conditional_liveness();
+    test_loop_liveness();
+    test_function_call_liveness();
+    test_struct_field_liveness();
+    test_temporary_borrow();
+    test_chained_methods();
+    test_nested_scopes();
+    test_complex_pattern();
+}

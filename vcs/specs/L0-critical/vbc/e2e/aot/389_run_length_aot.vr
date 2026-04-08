@@ -1,0 +1,385 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, run-length-encoding, compression, struct-storage
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for run-length encoding/decoding with struct-based storage.
+// Encodes a sequence into (value, run_length) pairs, decodes back,
+// verifies roundtrip correctness, and tests edge cases.
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+// RLE encoded: pairs stored flat [val0, count0, val1, count1, ...]
+// Up to 8 runs in 16 slots
+type RLEData is { data: Arr16, num_runs: Int };
+
+fn rle_new() -> RLEData {
+    RLEData { data: a16_zero(), num_runs: 0 }
+}
+
+fn rle_val(r: RLEData, idx: Int) -> Int {
+    a16_get(r.data, idx * 2)
+}
+
+fn rle_count(r: RLEData, idx: Int) -> Int {
+    a16_get(r.data, idx * 2 + 1)
+}
+
+fn rle_add_run(r: RLEData, val: Int, count: Int) -> RLEData {
+    let pos = r.num_runs * 2;
+    let d1 = a16_set(r.data, pos, val);
+    let d2 = a16_set(d1, pos + 1, count);
+    RLEData { data: d2, num_runs: r.num_runs + 1 }
+}
+
+// Encode a raw array (up to 16 elements) into RLE
+fn rle_encode(arr: Arr16, n: Int) -> RLEData {
+    if n == 0 { return rle_new(); }
+    let mut result = rle_new();
+    let mut cur_val = a16_get(arr, 0);
+    let mut cur_count = 1;
+    let mut i = 1;
+    while i < n {
+        let v = a16_get(arr, i);
+        if v == cur_val {
+            cur_count = cur_count + 1;
+        } else {
+            result = rle_add_run(result, cur_val, cur_count);
+            cur_val = v;
+            cur_count = 1;
+        }
+        i = i + 1;
+    }
+    result = rle_add_run(result, cur_val, cur_count);
+    result
+}
+
+// Decode RLE back into a flat array, return (array, length)
+type DecodeOut is { data: Arr16, len: Int };
+
+fn rle_decode(r: RLEData) -> DecodeOut {
+    let mut out = a16_zero();
+    let mut pos = 0;
+    let mut i = 0;
+    while i < r.num_runs {
+        let val = rle_val(r, i);
+        let cnt = rle_count(r, i);
+        let mut j = 0;
+        while j < cnt {
+            out = a16_set(out, pos, val);
+            pos = pos + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    DecodeOut { data: out, len: pos }
+}
+
+// Total decoded length from RLE
+fn rle_total_len(r: RLEData) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < r.num_runs {
+        total = total + rle_count(r, i);
+        i = i + 1;
+    }
+    total
+}
+
+// Compare two arrays element-by-element
+fn arrays_equal(a: Arr16, b: Arr16, n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        if a16_get(a, i) != a16_get(b, i) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Helper: append remaining runs of b starting from index start_idx
+fn append_runs(result: RLEData, b: RLEData, start_idx: Int) -> RLEData {
+    let mut r = result;
+    let mut i = start_idx;
+    while i < b.num_runs {
+        r = rle_add_run(r, rle_val(b, i), rle_count(b, i));
+        i = i + 1;
+    }
+    r
+}
+
+// Merge two RLE streams (concatenate), merging adjacent runs if same value
+fn rle_concat(a: RLEData, b: RLEData) -> RLEData {
+    if a.num_runs == 0 { return b; }
+    if b.num_runs == 0 { return a; }
+    // Check if last run of a matches first run of b
+    let last_val = rle_val(a, a.num_runs - 1);
+    let first_val = rle_val(b, 0);
+    if last_val == first_val {
+        // Merge: update last run count, then append remaining of b
+        let merged_count = rle_count(a, a.num_runs - 1) + rle_count(b, 0);
+        let pos = (a.num_runs - 1) * 2 + 1;
+        let new_data = a16_set(a.data, pos, merged_count);
+        let merged = RLEData { data: new_data, num_runs: a.num_runs };
+        append_runs(merged, b, 1)
+    } else {
+        // No merge: just append all of b
+        append_runs(a, b, 0)
+    }
+}
+
+fn test_basic_encode() {
+    // [1, 1, 1, 2, 2, 3] -> (1,3),(2,2),(3,1)
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 1);
+    arr = a16_set(arr, 1, 1);
+    arr = a16_set(arr, 2, 1);
+    arr = a16_set(arr, 3, 2);
+    arr = a16_set(arr, 4, 2);
+    arr = a16_set(arr, 5, 3);
+    let enc = rle_encode(arr, 6);
+    assert_eq(enc.num_runs, 3);
+    assert_eq(rle_val(enc, 0), 1);
+    assert_eq(rle_count(enc, 0), 3);
+    assert_eq(rle_val(enc, 1), 2);
+    assert_eq(rle_count(enc, 1), 2);
+    assert_eq(rle_val(enc, 2), 3);
+    assert_eq(rle_count(enc, 2), 1);
+}
+
+fn test_single_element() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 42);
+    let enc = rle_encode(arr, 1);
+    assert_eq(enc.num_runs, 1);
+    assert_eq(rle_val(enc, 0), 42);
+    assert_eq(rle_count(enc, 0), 1);
+}
+
+fn test_all_same() {
+    let mut arr = a16_zero();
+    let mut i = 0;
+    while i < 10 {
+        arr = a16_set(arr, i, 7);
+        i = i + 1;
+    }
+    let enc = rle_encode(arr, 10);
+    assert_eq(enc.num_runs, 1);
+    assert_eq(rle_val(enc, 0), 7);
+    assert_eq(rle_count(enc, 0), 10);
+}
+
+fn test_all_different() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 1);
+    arr = a16_set(arr, 1, 2);
+    arr = a16_set(arr, 2, 3);
+    arr = a16_set(arr, 3, 4);
+    arr = a16_set(arr, 4, 5);
+    let enc = rle_encode(arr, 5);
+    assert_eq(enc.num_runs, 5);
+    let mut i = 0;
+    while i < 5 {
+        assert_eq(rle_count(enc, i), 1);
+        i = i + 1;
+    }
+}
+
+fn test_empty() {
+    let arr = a16_zero();
+    let enc = rle_encode(arr, 0);
+    assert_eq(enc.num_runs, 0);
+    assert_eq(rle_total_len(enc), 0);
+}
+
+fn test_roundtrip() {
+    // Build [5, 5, 3, 3, 3, 1, 1, 5, 5, 5]
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 5);
+    arr = a16_set(arr, 1, 5);
+    arr = a16_set(arr, 2, 3);
+    arr = a16_set(arr, 3, 3);
+    arr = a16_set(arr, 4, 3);
+    arr = a16_set(arr, 5, 1);
+    arr = a16_set(arr, 6, 1);
+    arr = a16_set(arr, 7, 5);
+    arr = a16_set(arr, 8, 5);
+    arr = a16_set(arr, 9, 5);
+    let enc = rle_encode(arr, 10);
+    let dec = rle_decode(enc);
+    assert_eq(dec.len, 10);
+    assert_eq(arrays_equal(arr, dec.data, 10), 1);
+}
+
+fn test_roundtrip_alternating() {
+    // [1, 2, 1, 2, 1, 2]
+    let mut arr = a16_zero();
+    let mut i = 0;
+    while i < 6 {
+        arr = a16_set(arr, i, 1 + (i % 2));
+        i = i + 1;
+    }
+    let enc = rle_encode(arr, 6);
+    assert_eq(enc.num_runs, 6);
+    let dec = rle_decode(enc);
+    assert_eq(dec.len, 6);
+    assert_eq(arrays_equal(arr, dec.data, 6), 1);
+}
+
+fn test_total_length() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, 1);
+    arr = a16_set(arr, 1, 1);
+    arr = a16_set(arr, 2, 2);
+    arr = a16_set(arr, 3, 2);
+    arr = a16_set(arr, 4, 2);
+    let enc = rle_encode(arr, 5);
+    assert_eq(rle_total_len(enc), 5);
+}
+
+fn test_negative_values() {
+    let mut arr = a16_zero();
+    arr = a16_set(arr, 0, -1);
+    arr = a16_set(arr, 1, -1);
+    arr = a16_set(arr, 2, -1);
+    arr = a16_set(arr, 3, -2);
+    arr = a16_set(arr, 4, -2);
+    let enc = rle_encode(arr, 5);
+    assert_eq(enc.num_runs, 2);
+    assert_eq(rle_val(enc, 0), -1);
+    assert_eq(rle_count(enc, 0), 3);
+    assert_eq(rle_val(enc, 1), -2);
+    assert_eq(rle_count(enc, 1), 2);
+    let dec = rle_decode(enc);
+    assert_eq(arrays_equal(arr, dec.data, 5), 1);
+}
+
+fn test_concat_merge() {
+    // a: (1,3) b: (1,2) -> merged: (1,5)
+    let mut a = rle_new();
+    a = rle_add_run(a, 1, 3);
+    let mut b = rle_new();
+    b = rle_add_run(b, 1, 2);
+    let merged = rle_concat(a, b);
+    assert_eq(merged.num_runs, 1);
+    assert_eq(rle_val(merged, 0), 1);
+    assert_eq(rle_count(merged, 0), 5);
+}
+
+fn test_concat_no_merge() {
+    // a: (1,3) b: (2,2) -> (1,3),(2,2)
+    let mut a = rle_new();
+    a = rle_add_run(a, 1, 3);
+    let mut b = rle_new();
+    b = rle_add_run(b, 2, 2);
+    let merged = rle_concat(a, b);
+    assert_eq(merged.num_runs, 2);
+    assert_eq(rle_val(merged, 0), 1);
+    assert_eq(rle_count(merged, 0), 3);
+    assert_eq(rle_val(merged, 1), 2);
+    assert_eq(rle_count(merged, 1), 2);
+}
+
+fn test_concat_decode() {
+    // Concatenate two encoded sequences and decode
+    let mut a = rle_new();
+    a = rle_add_run(a, 5, 2);
+    a = rle_add_run(a, 3, 1);
+    let mut b = rle_new();
+    b = rle_add_run(b, 3, 2);
+    b = rle_add_run(b, 7, 1);
+    let merged = rle_concat(a, b);
+    // (5,2),(3,1+2),(7,1) = (5,2),(3,3),(7,1)
+    assert_eq(merged.num_runs, 3);
+    assert_eq(rle_count(merged, 1), 3);
+    let dec = rle_decode(merged);
+    assert_eq(dec.len, 6);
+    assert_eq(a16_get(dec.data, 0), 5);
+    assert_eq(a16_get(dec.data, 1), 5);
+    assert_eq(a16_get(dec.data, 2), 3);
+    assert_eq(a16_get(dec.data, 3), 3);
+    assert_eq(a16_get(dec.data, 4), 3);
+    assert_eq(a16_get(dec.data, 5), 7);
+}
+
+fn test_compression_ratio() {
+    // All same: 12 elements -> 1 run (2 slots): good compression
+    let mut arr = a16_zero();
+    let mut i = 0;
+    while i < 12 {
+        arr = a16_set(arr, i, 9);
+        i = i + 1;
+    }
+    let enc = rle_encode(arr, 12);
+    assert_eq(enc.num_runs, 1);
+    assert(enc.num_runs * 2 < 12);
+}
+
+fn test_zeros() {
+    let arr = a16_zero();
+    let enc = rle_encode(arr, 8);
+    assert_eq(enc.num_runs, 1);
+    assert_eq(rle_val(enc, 0), 0);
+    assert_eq(rle_count(enc, 0), 8);
+    let dec = rle_decode(enc);
+    assert_eq(dec.len, 8);
+    assert_eq(arrays_equal(arr, dec.data, 8), 1);
+}
+
+fn main() -> Int {
+    test_basic_encode();
+    test_single_element();
+    test_all_same();
+    test_all_different();
+    test_empty();
+    test_roundtrip();
+    test_roundtrip_alternating();
+    test_total_length();
+    test_negative_values();
+    test_concat_merge();
+    test_concat_no_merge();
+    test_concat_decode();
+    test_compression_ratio();
+    test_zeros();
+    print("[OK] 389_run_length_aot");
+    0
+}

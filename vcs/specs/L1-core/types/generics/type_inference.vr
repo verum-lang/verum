@@ -1,0 +1,199 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, inference
+
+/// Test for type inference with generics.
+/// The type checker should infer generic type parameters from usage.
+
+// Generic function for inference testing
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn make_pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+fn first<A, B>(pair: (A, B)) -> A {
+    pair.0
+}
+
+fn second<A, B>(pair: (A, B)) -> B {
+    pair.1
+}
+
+// Generic container for inference
+type Container<T> is {
+    value: T,
+};
+
+implement<T> Container<T> {
+    fn new(value: T) -> Container<T> {
+        Container { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn map<U>(self, f: fn(T) -> U) -> Container<U> {
+        Container { value: f(self.value) }
+    }
+
+    fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+// Generic function with Ord bound
+fn max_val<T: Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+// Higher-order generic function
+fn apply<A, B>(f: fn(A) -> B, x: A) -> B {
+    f(x)
+}
+
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |x: A| g(f(x))
+}
+
+// Generic swap
+fn swap<A, B>(pair: (A, B)) -> (B, A) {
+    (pair.1, pair.0)
+}
+
+// Generic option helpers
+fn unwrap_or<T>(opt: Maybe<T>, default: T) -> T {
+    match opt {
+        Some(v) => v,
+        None => default,
+    }
+}
+
+// Map over Maybe
+fn map_maybe<A, B>(opt: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match opt {
+        Some(v) => Some(f(v)),
+        None => None,
+    }
+}
+
+// Generic const function
+fn always<A, B>(a: A, _b: B) -> A {
+    a
+}
+
+fn main() {
+    // Basic inference from argument type
+    let x = identity(42);  // T = Int inferred
+    assert(x == 42);
+
+    let y = identity("hello");  // T = Text inferred
+    assert(y == "hello");
+
+    // Inference from return type annotation
+    let z: Float = identity(3.14);  // T = Float confirmed
+    assert(z == 3.14);
+
+    // Inference with multiple type parameters
+    let p = make_pair(1, "two");  // A = Int, B = Text inferred
+    assert(p.0 == 1);
+    assert(p.1 == "two");
+
+    // Inference through first/second
+    let fst = first(make_pair(100, true));  // A = Int, B = Bool inferred
+    assert(fst == 100);
+
+    let snd = second(make_pair(100, true));  // A = Int, B = Bool inferred
+    assert(snd == true);
+
+    // Container inference
+    let c1 = Container { value: 42 };  // T = Int inferred
+    assert(*c1.get() == 42);
+
+    // Inference through map
+    let c2 = Container { value: 10 };
+    let c3 = c2.map(|n: Int| f"{n}");  // T = Int -> U = Text inferred
+    assert(*c3.get() == "10");
+
+    // Chained map inference
+    let c_start = Container { value: 5 };
+    let result = c_start
+        .map(|x: Int| x * 2)
+        .map(|x: Int| f"val:{x}")
+        .into_inner();
+    assert(result == "val:10");
+
+    // Inference with bounds
+    let bigger = max_val(10, 20);  // T: Ord = Int inferred
+    assert(bigger == 20);
+
+    let text_max = max_val("apple", "banana");  // T: Ord = Text inferred
+    assert(text_max == "banana");
+
+    // Inference with apply
+    let squared = apply(|x: Int| x * x, 5);  // A = Int, B = Int inferred
+    assert(squared == 25);
+
+    let converted = apply(|n: Int| f"n{n}", 7);  // A = Int, B = Text inferred
+    assert(converted == "n7");
+
+    // Inference with compose
+    let double_then_str = compose(|x: Int| x * 2, |x: Int| f"{x}");
+    let res = double_then_str(21);
+    assert(res == "42");
+
+    // Swap inference
+    let swapped = swap((42, "hello"));  // A = Int, B = Text inferred
+    assert(swapped.0 == "hello");
+    assert(swapped.1 == 42);
+
+    // Maybe inference
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    // unwrap_or with inference
+    let v1 = unwrap_or(some_val, 0);
+    assert(v1 == 42);
+    let v2 = unwrap_or(none_val, -1);
+    assert(v2 == -1);
+
+    // map_maybe with inference
+    let mapped = map_maybe(Some(10), |x: Int| x * 3);
+    assert(mapped == Some(30));
+
+    let mapped_none: Maybe<Int> = map_maybe(None, |x: Int| x * 3);
+    assert(mapped_none == None);
+
+    // Match arm inference
+    let result2 = match Some(42) {
+        Some(n) => n * 2,  // n: Int inferred
+        None => 0,
+    };
+    assert(result2 == 84);
+
+    // always: A = Int, B = Text inferred
+    let kept = always(99, "ignored");
+    assert(kept == 99);
+
+    // Nested containers
+    let inner_c = Container { value: 42 };
+    let outer = Container { value: inner_c };
+    let inner_ref = outer.get();
+    assert(*inner_ref.get() == 42);
+
+    // Inference in nested make_pair
+    let pair_ab = make_pair(1, 2);
+    let pair_cd = make_pair("a", "b");
+    let nested = make_pair(pair_ab, pair_cd);
+    let n0 = nested.0;
+    let n1 = nested.1;
+    assert(n0.0 == 1);
+    assert(n0.1 == 2);
+    assert(n1.0 == "a");
+
+    print("Generic type inference tests passed!");
+}

@@ -1,0 +1,136 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, declaration, directory-based
+
+/// Directory module declaration - module spread across multiple files in a directory.
+///
+/// Project structure:
+/// ```
+/// src/
+///   main.vr              <- this file
+///   http/                <- directory module
+///     mod.vr             <- module root (re-exports)
+///     client.vr          <- submodule
+///     server.vr          <- submodule
+///     types.vr           <- submodule
+///   crypto/              <- another directory module
+///     mod.vr
+///     hash.vr
+///     encrypt.vr
+/// ```
+
+// Declare directory-based modules
+module http;
+module crypto;
+
+fn main() {
+    // Import from directory module submodules
+    mount http.{Client, Server, Request, Response};
+    mount crypto.{hash_sha256, encrypt_aes};
+
+    // Create HTTP client
+    let client = Client.new();
+
+    // Make a request
+    let request = Request {
+        method: "GET",
+        url: "https://api.example.com/data",
+        headers: Map.new(),
+        body: None
+    };
+
+    let response = client.send(request);
+
+    match response {
+        Ok(resp) => {
+            // Process response
+            let hash = hash_sha256(resp.body);
+            let encrypted = encrypt_aes(resp.body, "secret_key");
+        },
+        Err(e) => {
+            // Handle error
+        }
+    }
+
+    // Create HTTP server
+    let server = Server.bind("0.0.0.0:8080");
+    // server.serve(handler);
+}
+
+// ============================================================================
+// The following would be in http/mod.vr:
+// ============================================================================
+// // Re-export public API from submodules
+// pub mount client.Client;
+// pub mount server.Server;
+// pub mount types.{Request, Response, Headers};
+//
+// // Declare submodules
+// module client;
+// module server;
+// module types;
+// ============================================================================
+
+// ============================================================================
+// The following would be in http/types.vr:
+// ============================================================================
+// pub type Request is {
+//     method: Text,
+//     url: Text,
+//     headers: Map<Text, Text>,
+//     body: Maybe<Bytes>
+// };
+//
+// pub type Response is {
+//     status: Int,
+//     headers: Map<Text, Text>,
+//     body: Bytes
+// };
+//
+// pub type Headers = Map<Text, Text>;
+// ============================================================================
+
+// ============================================================================
+// The following would be in http/client.vr:
+// ============================================================================
+// mount super.types.{Request, Response};
+//
+// pub type Client is {
+//     timeout: Duration,
+//     follow_redirects: Bool
+// };
+//
+// impl Client {
+//     pub fn new() -> Client {
+//         Client { timeout: Duration.seconds(30), follow_redirects: true }
+//     }
+//
+//     pub fn send(&self, request: Request) -> Result<Response, HttpError> {
+//         // Implementation
+//     }
+// }
+// ============================================================================
+
+// ============================================================================
+// The following would be in http/server.vr:
+// ============================================================================
+// mount super.types.{Request, Response};
+//
+// pub type Server is {
+//     addr: Text,
+//     running: Bool
+// };
+//
+// impl Server {
+//     pub fn bind(addr: &Text) -> Server {
+//         Server { addr: addr.clone(), running: false }
+//     }
+//
+//     pub fn serve<F>(&mut self, handler: F)
+//     where F: Fn(Request) -> Response {
+//         self.running = true;
+//         // Accept connections and handle
+//     }
+// }
+// ============================================================================

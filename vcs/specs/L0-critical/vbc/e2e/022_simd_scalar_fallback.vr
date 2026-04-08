@@ -1,0 +1,511 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, simd, scalar, fallback, vector, arithmetic
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: SIMD operations via scalar fallback through VBC interpreter.
+// The interpreter has no actual SIMD hardware instructions, so all vector
+// operations are implemented as scalar loops over flat struct arrays.
+
+// ============================================================================
+// 4-lane integer vector (simulates i32x4 SIMD register)
+// ============================================================================
+
+type SimdI4 is { x: Int, y: Int, z: Int, w: Int };
+
+fn simd4i_splat(v: Int) -> SimdI4 {
+    SimdI4 { x: v, y: v, z: v, w: v }
+}
+
+fn simd4i_new(x: Int, y: Int, z: Int, w: Int) -> SimdI4 {
+    SimdI4 { x: x, y: y, z: z, w: w }
+}
+
+fn simd4i_add(a: SimdI4, b: SimdI4) -> SimdI4 {
+    SimdI4 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z, w: a.w + b.w }
+}
+
+fn simd4i_sub(a: SimdI4, b: SimdI4) -> SimdI4 {
+    SimdI4 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z, w: a.w - b.w }
+}
+
+fn simd4i_mul(a: SimdI4, b: SimdI4) -> SimdI4 {
+    SimdI4 { x: a.x * b.x, y: a.y * b.y, z: a.z * b.z, w: a.w * b.w }
+}
+
+fn simd4i_div(a: SimdI4, b: SimdI4) -> SimdI4 {
+    SimdI4 { x: a.x / b.x, y: a.y / b.y, z: a.z / b.z, w: a.w / b.w }
+}
+
+fn simd4i_neg(a: SimdI4) -> SimdI4 {
+    SimdI4 { x: -a.x, y: -a.y, z: -a.z, w: -a.w }
+}
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn simd4i_abs(a: SimdI4) -> SimdI4 {
+    SimdI4 { x: int_abs(a.x), y: int_abs(a.y), z: int_abs(a.z), w: int_abs(a.w) }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn simd4i_min(a: SimdI4, b: SimdI4) -> SimdI4 {
+    SimdI4 {
+        x: int_min(a.x, b.x),
+        y: int_min(a.y, b.y),
+        z: int_min(a.z, b.z),
+        w: int_min(a.w, b.w)
+    }
+}
+
+fn simd4i_max(a: SimdI4, b: SimdI4) -> SimdI4 {
+    SimdI4 {
+        x: int_max(a.x, b.x),
+        y: int_max(a.y, b.y),
+        z: int_max(a.z, b.z),
+        w: int_max(a.w, b.w)
+    }
+}
+
+// ============================================================================
+// Reduction operations
+// ============================================================================
+
+fn simd4i_reduce_add(a: SimdI4) -> Int {
+    a.x + a.y + a.z + a.w
+}
+
+fn simd4i_reduce_min(a: SimdI4) -> Int {
+    int_min(int_min(a.x, a.y), int_min(a.z, a.w))
+}
+
+fn simd4i_reduce_max(a: SimdI4) -> Int {
+    int_max(int_max(a.x, a.y), int_max(a.z, a.w))
+}
+
+fn simd4i_reduce_mul(a: SimdI4) -> Int {
+    a.x * a.y * a.z * a.w
+}
+
+// ============================================================================
+// Fused multiply-add: a * b + c
+// ============================================================================
+
+fn simd4i_fma(a: SimdI4, b: SimdI4, c: SimdI4) -> SimdI4 {
+    SimdI4 {
+        x: a.x * b.x + c.x,
+        y: a.y * b.y + c.y,
+        z: a.z * b.z + c.z,
+        w: a.w * b.w + c.w
+    }
+}
+
+// ============================================================================
+// Comparison operations (return 1 for true, 0 for false per lane)
+// ============================================================================
+
+fn simd4i_eq(a: SimdI4, b: SimdI4) -> SimdI4 {
+    SimdI4 {
+        x: if a.x == b.x { 1 } else { 0 },
+        y: if a.y == b.y { 1 } else { 0 },
+        z: if a.z == b.z { 1 } else { 0 },
+        w: if a.w == b.w { 1 } else { 0 }
+    }
+}
+
+fn simd4i_lt(a: SimdI4, b: SimdI4) -> SimdI4 {
+    SimdI4 {
+        x: if a.x < b.x { 1 } else { 0 },
+        y: if a.y < b.y { 1 } else { 0 },
+        z: if a.z < b.z { 1 } else { 0 },
+        w: if a.w < b.w { 1 } else { 0 }
+    }
+}
+
+fn simd4i_gt(a: SimdI4, b: SimdI4) -> SimdI4 {
+    SimdI4 {
+        x: if a.x > b.x { 1 } else { 0 },
+        y: if a.y > b.y { 1 } else { 0 },
+        z: if a.z > b.z { 1 } else { 0 },
+        w: if a.w > b.w { 1 } else { 0 }
+    }
+}
+
+// Bitwise-AND-like mask: select lanes where mask is nonzero
+fn simd4i_blend(a: SimdI4, b: SimdI4, mask: SimdI4) -> SimdI4 {
+    SimdI4 {
+        x: if mask.x != 0 { b.x } else { a.x },
+        y: if mask.y != 0 { b.y } else { a.y },
+        z: if mask.z != 0 { b.z } else { a.z },
+        w: if mask.w != 0 { b.w } else { a.w }
+    }
+}
+
+// ============================================================================
+// Dot product (common SIMD pattern)
+// ============================================================================
+
+fn simd4i_dot(a: SimdI4, b: SimdI4) -> Int {
+    simd4i_reduce_add(simd4i_mul(a, b))
+}
+
+// ============================================================================
+// 8-lane vector (simulates i32x8 for wider SIMD)
+// ============================================================================
+
+type SimdI8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn simd8i_splat(v: Int) -> SimdI8 {
+    SimdI8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+
+fn simd8i_add(a: SimdI8, b: SimdI8) -> SimdI8 {
+    SimdI8 {
+        e0: a.e0 + b.e0, e1: a.e1 + b.e1, e2: a.e2 + b.e2, e3: a.e3 + b.e3,
+        e4: a.e4 + b.e4, e5: a.e5 + b.e5, e6: a.e6 + b.e6, e7: a.e7 + b.e7
+    }
+}
+
+fn simd8i_reduce_add(a: SimdI8) -> Int {
+    a.e0 + a.e1 + a.e2 + a.e3 + a.e4 + a.e5 + a.e6 + a.e7
+}
+
+fn simd8i_reduce_min(a: SimdI8) -> Int {
+    let m01 = int_min(a.e0, a.e1);
+    let m23 = int_min(a.e2, a.e3);
+    let m45 = int_min(a.e4, a.e5);
+    let m67 = int_min(a.e6, a.e7);
+    int_min(int_min(m01, m23), int_min(m45, m67))
+}
+
+fn simd8i_reduce_max(a: SimdI8) -> Int {
+    let m01 = int_max(a.e0, a.e1);
+    let m23 = int_max(a.e2, a.e3);
+    let m45 = int_max(a.e4, a.e5);
+    let m67 = int_max(a.e6, a.e7);
+    int_max(int_max(m01, m23), int_max(m45, m67))
+}
+
+// ============================================================================
+// Shift operations (logical left/right)
+// ============================================================================
+
+fn shift_left(x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = result * 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn shift_right(x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = result / 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn simd4i_shl(a: SimdI4, n: Int) -> SimdI4 {
+    SimdI4 {
+        x: shift_left(a.x, n),
+        y: shift_left(a.y, n),
+        z: shift_left(a.z, n),
+        w: shift_left(a.w, n)
+    }
+}
+
+fn simd4i_shr(a: SimdI4, n: Int) -> SimdI4 {
+    SimdI4 {
+        x: shift_right(a.x, n),
+        y: shift_right(a.y, n),
+        z: shift_right(a.z, n),
+        w: shift_right(a.w, n)
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_splat() {
+    let v = simd4i_splat(42);
+    assert_eq(v.x, 42);
+    assert_eq(v.y, 42);
+    assert_eq(v.z, 42);
+    assert_eq(v.w, 42);
+
+    let z = simd4i_splat(0);
+    assert_eq(simd4i_reduce_add(z), 0);
+}
+
+fn test_add() {
+    let a = simd4i_new(1, 2, 3, 4);
+    let b = simd4i_new(10, 20, 30, 40);
+    let c = simd4i_add(a, b);
+    assert_eq(c.x, 11);
+    assert_eq(c.y, 22);
+    assert_eq(c.z, 33);
+    assert_eq(c.w, 44);
+}
+
+fn test_sub() {
+    let a = simd4i_new(10, 20, 30, 40);
+    let b = simd4i_new(1, 5, 10, 15);
+    let c = simd4i_sub(a, b);
+    assert_eq(c.x, 9);
+    assert_eq(c.y, 15);
+    assert_eq(c.z, 20);
+    assert_eq(c.w, 25);
+}
+
+fn test_mul() {
+    let a = simd4i_new(2, 3, 4, 5);
+    let b = simd4i_new(10, 10, 10, 10);
+    let c = simd4i_mul(a, b);
+    assert_eq(c.x, 20);
+    assert_eq(c.y, 30);
+    assert_eq(c.z, 40);
+    assert_eq(c.w, 50);
+}
+
+fn test_div() {
+    let a = simd4i_new(100, 200, 300, 400);
+    let b = simd4i_new(10, 20, 30, 40);
+    let c = simd4i_div(a, b);
+    assert_eq(c.x, 10);
+    assert_eq(c.y, 10);
+    assert_eq(c.z, 10);
+    assert_eq(c.w, 10);
+}
+
+fn test_neg() {
+    let a = simd4i_new(1, -2, 3, -4);
+    let b = simd4i_neg(a);
+    assert_eq(b.x, -1);
+    assert_eq(b.y, 2);
+    assert_eq(b.z, -3);
+    assert_eq(b.w, 4);
+}
+
+fn test_abs() {
+    let a = simd4i_new(-5, 3, -7, 0);
+    let b = simd4i_abs(a);
+    assert_eq(b.x, 5);
+    assert_eq(b.y, 3);
+    assert_eq(b.z, 7);
+    assert_eq(b.w, 0);
+}
+
+fn test_min_max() {
+    let a = simd4i_new(1, 5, 3, 8);
+    let b = simd4i_new(4, 2, 6, 7);
+    let mn = simd4i_min(a, b);
+    let mx = simd4i_max(a, b);
+    assert_eq(mn.x, 1);
+    assert_eq(mn.y, 2);
+    assert_eq(mn.z, 3);
+    assert_eq(mn.w, 7);
+    assert_eq(mx.x, 4);
+    assert_eq(mx.y, 5);
+    assert_eq(mx.z, 6);
+    assert_eq(mx.w, 8);
+}
+
+fn test_reduce_add() {
+    let a = simd4i_new(1, 2, 3, 4);
+    assert_eq(simd4i_reduce_add(a), 10);
+
+    let b = simd4i_new(-1, -2, -3, -4);
+    assert_eq(simd4i_reduce_add(b), -10);
+
+    let c = simd4i_new(100, -50, 25, -75);
+    assert_eq(simd4i_reduce_add(c), 0);
+}
+
+fn test_reduce_min_max() {
+    let a = simd4i_new(5, 1, 8, 3);
+    assert_eq(simd4i_reduce_min(a), 1);
+    assert_eq(simd4i_reduce_max(a), 8);
+
+    let b = simd4i_new(-10, -5, -20, -1);
+    assert_eq(simd4i_reduce_min(b), -20);
+    assert_eq(simd4i_reduce_max(b), -1);
+}
+
+fn test_reduce_mul() {
+    let a = simd4i_new(1, 2, 3, 4);
+    assert_eq(simd4i_reduce_mul(a), 24);
+
+    let b = simd4i_new(2, 2, 2, 2);
+    assert_eq(simd4i_reduce_mul(b), 16);
+}
+
+fn test_fma() {
+    let a = simd4i_new(2, 3, 4, 5);
+    let b = simd4i_new(10, 10, 10, 10);
+    let c = simd4i_new(1, 2, 3, 4);
+    let r = simd4i_fma(a, b, c);
+    // a*b+c = (20+1, 30+2, 40+3, 50+4)
+    assert_eq(r.x, 21);
+    assert_eq(r.y, 32);
+    assert_eq(r.z, 43);
+    assert_eq(r.w, 54);
+}
+
+fn test_comparisons() {
+    let a = simd4i_new(1, 5, 3, 8);
+    let b = simd4i_new(1, 2, 6, 8);
+
+    let eq = simd4i_eq(a, b);
+    assert_eq(eq.x, 1); // 1 == 1
+    assert_eq(eq.y, 0); // 5 != 2
+    assert_eq(eq.z, 0); // 3 != 6
+    assert_eq(eq.w, 1); // 8 == 8
+
+    let lt = simd4i_lt(a, b);
+    assert_eq(lt.x, 0); // 1 < 1 false
+    assert_eq(lt.y, 0); // 5 < 2 false
+    assert_eq(lt.z, 1); // 3 < 6 true
+    assert_eq(lt.w, 0); // 8 < 8 false
+
+    let gt = simd4i_gt(a, b);
+    assert_eq(gt.x, 0); // 1 > 1 false
+    assert_eq(gt.y, 1); // 5 > 2 true
+    assert_eq(gt.z, 0); // 3 > 6 false
+    assert_eq(gt.w, 0); // 8 > 8 false
+}
+
+fn test_blend() {
+    let a = simd4i_new(1, 2, 3, 4);
+    let b = simd4i_new(10, 20, 30, 40);
+    let mask = simd4i_new(0, 1, 0, 1); // select b where mask is nonzero
+
+    let r = simd4i_blend(a, b, mask);
+    assert_eq(r.x, 1);  // mask=0, keep a
+    assert_eq(r.y, 20); // mask=1, take b
+    assert_eq(r.z, 3);  // mask=0, keep a
+    assert_eq(r.w, 40); // mask=1, take b
+}
+
+fn test_dot_product() {
+    let a = simd4i_new(1, 2, 3, 4);
+    let b = simd4i_new(5, 6, 7, 8);
+    // dot = 1*5 + 2*6 + 3*7 + 4*8 = 5 + 12 + 21 + 32 = 70
+    assert_eq(simd4i_dot(a, b), 70);
+
+    // Orthogonal-like: should be small
+    let c = simd4i_new(1, 0, 0, 0);
+    let d = simd4i_new(0, 1, 0, 0);
+    assert_eq(simd4i_dot(c, d), 0);
+}
+
+fn test_shift_operations() {
+    let a = simd4i_new(1, 2, 4, 8);
+
+    let left1 = simd4i_shl(a, 1);
+    assert_eq(left1.x, 2);
+    assert_eq(left1.y, 4);
+    assert_eq(left1.z, 8);
+    assert_eq(left1.w, 16);
+
+    let left3 = simd4i_shl(a, 3);
+    assert_eq(left3.x, 8);
+    assert_eq(left3.y, 16);
+    assert_eq(left3.z, 32);
+    assert_eq(left3.w, 64);
+
+    let b = simd4i_new(16, 32, 64, 128);
+    let right2 = simd4i_shr(b, 2);
+    assert_eq(right2.x, 4);
+    assert_eq(right2.y, 8);
+    assert_eq(right2.z, 16);
+    assert_eq(right2.w, 32);
+}
+
+fn test_vec8_operations() {
+    let a = SimdI8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let b = simd8i_splat(10);
+    let c = simd8i_add(a, b);
+
+    assert_eq(c.e0, 11);
+    assert_eq(c.e4, 15);
+    assert_eq(c.e7, 18);
+
+    assert_eq(simd8i_reduce_add(a), 36); // 1+2+3+4+5+6+7+8
+    assert_eq(simd8i_reduce_min(a), 1);
+    assert_eq(simd8i_reduce_max(a), 8);
+}
+
+fn test_chained_operations() {
+    // Test a common SIMD pattern: normalize (scale to range)
+    let data = simd4i_new(10, 20, 30, 40);
+    let min_val = simd4i_splat(simd4i_reduce_min(data));
+    let shifted = simd4i_sub(data, min_val);
+    // shifted = (0, 10, 20, 30)
+    assert_eq(shifted.x, 0);
+    assert_eq(shifted.y, 10);
+    assert_eq(shifted.z, 20);
+    assert_eq(shifted.w, 30);
+
+    // Scale by 2 using add-self
+    let doubled = simd4i_add(shifted, shifted);
+    assert_eq(doubled.x, 0);
+    assert_eq(doubled.y, 20);
+    assert_eq(doubled.z, 40);
+    assert_eq(doubled.w, 60);
+}
+
+fn test_horizontal_operations() {
+    // Prefix sum simulation (common SIMD pattern)
+    let data = simd4i_new(1, 2, 3, 4);
+    // Manual prefix sum: [1, 1+2, 1+2+3, 1+2+3+4]
+    let ps = simd4i_new(
+        data.x,
+        data.x + data.y,
+        data.x + data.y + data.z,
+        data.x + data.y + data.z + data.w
+    );
+    assert_eq(ps.x, 1);
+    assert_eq(ps.y, 3);
+    assert_eq(ps.z, 6);
+    assert_eq(ps.w, 10);
+}
+
+fn main() -> Int {
+    test_splat();
+    test_add();
+    test_sub();
+    test_mul();
+    test_div();
+    test_neg();
+    test_abs();
+    test_min_max();
+    test_reduce_add();
+    test_reduce_min_max();
+    test_reduce_mul();
+    test_fma();
+    test_comparisons();
+    test_blend();
+    test_dot_product();
+    test_shift_operations();
+    test_vec8_operations();
+    test_chained_operations();
+    test_horizontal_operations();
+    print("[OK] 022_simd_scalar_fallback");
+    0
+}

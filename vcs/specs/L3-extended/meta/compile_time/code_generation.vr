@@ -1,0 +1,196 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, compile-time, code-generation
+
+/// Code generation - генерация кода во время компиляции
+///
+/// Meta функции могут генерировать новый код,
+/// который будет скомпилирован как часть программы.
+/// Тесты используют только базовые возможности языка без stdlib.
+
+// ============================================================
+// БАЗОВЫЕ @derive МАКРОСЫ
+// ============================================================
+
+// Debug derive для простого типа
+@derive(Debug)
+type Point2D is {
+    x: Int,
+    y: Int,
+};
+
+// Clone derive
+@derive(Clone)
+type Vector3D is {
+    x: Float64,
+    y: Float64,
+    z: Float64,
+};
+
+// Eq derive для сравнения
+@derive(Eq)
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+// Комбинированные derives
+@derive(Clone, Eq, Debug)
+type Coordinate is {
+    latitude: Int,
+    longitude: Int,
+};
+
+// ============================================================
+// SUM TYPES С DERIVE
+// ============================================================
+
+@derive(Debug)
+type Shape is
+    | Circle { radius: Int }
+    | Rectangle { width: Int, height: Int }
+    | Triangle { base: Int, height: Int };
+
+@derive(Clone, Eq)
+type Status is
+    | Active
+    | Inactive
+    | Pending { reason_code: Int };
+
+// ============================================================
+// GENERIC TYPES С DERIVE
+// ============================================================
+
+@derive(Clone)
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+@derive(Eq)
+type Triple<T> is {
+    a: T,
+    b: T,
+    c: T,
+};
+
+// ============================================================
+// CONST GENERICS
+// ============================================================
+
+type FixedArray<const N: Int> is {
+    data: [Int; N],
+};
+
+// Создание экземпляров с разными размерами
+const SMALL_ARRAY: FixedArray<4> = FixedArray { data: [1, 2, 3, 4] };
+const LARGE_ARRAY: FixedArray<8> = FixedArray { data: [0, 1, 2, 3, 4, 5, 6, 7] };
+
+// ============================================================
+// COMPILE-TIME ВЫЧИСЛЕНИЯ ДЛЯ ТИПОВ
+// ============================================================
+
+// Размер буфера как константа
+meta fn compute_buffer_size(items: Int, item_size: Int) -> Int {
+    let base = items * item_size;
+    // Выравнивание до степени 2
+    let mut size = base;
+    size = size | (size >> 1);
+    size = size | (size >> 2);
+    size = size | (size >> 4);
+    size = size | (size >> 8);
+    size = size | (size >> 16);
+    size + 1
+}
+
+const BUFFER_ITEMS: Int = 100;
+const ITEM_SIZE: Int = 8;
+const ALIGNED_SIZE: Int = compute_buffer_size(BUFFER_ITEMS, ITEM_SIZE);
+
+type AlignedBuffer is {
+    data: [UInt8; ALIGNED_SIZE],
+};
+
+// ============================================================
+// NEWTYPE PATTERNS
+// ============================================================
+
+// Newtype wrapper
+type UserId is (Int);
+type Email is (Text);
+type Timestamp is (Int64);
+
+// Использование newtypes
+fn process_user(id: UserId, email: Email, ts: Timestamp) -> Bool {
+    true
+}
+
+// ============================================================
+// UNIT TYPE И MARKER TYPES
+// ============================================================
+
+type Marker is { };
+
+type Tagged<T, Tag> is {
+    value: T,
+    _tag: Tag,
+};
+
+// Marker types (empty structs for type-state pattern)
+type Unvalidated is { };
+type Validated is { };
+
+type Input<State> is {
+    data: Text,
+    _state: State,
+};
+
+fn validate(input: Input<Unvalidated>) -> Input<Validated> {
+    // Create Validated marker via empty struct literal
+    Input { data: input.data, _state: Validated { } }
+}
+
+// ============================================================
+// PROTOCOLS (TRAITS)
+// ============================================================
+
+type Printable is protocol {
+    fn to_string(&self) -> Text;
+};
+
+type Numeric is protocol {
+    fn zero() -> Self;
+    fn add(&self, other: &Self) -> Self;
+    fn mul(&self, other: &Self) -> Self;
+};
+
+// Implement для пользовательского типа
+type Counter is { value: Int };
+
+implement Printable for Counter {
+    fn to_string(&self) -> Text {
+        "counter"
+    }
+}
+
+// Пример использования протокола с generic
+fn print_it<T: Printable>(item: &T) -> Text {
+    item.to_string()
+}
+
+// ============================================================
+// COMPILE-TIME ASSERTIONS
+// ============================================================
+
+// Static assertions через const
+const _SIZE_CHECK: () = {
+    // Проверка что Int имеет размер 8 байт
+    @static_assert(@size_of(Int) == 8);
+};
+
+const _ALIGN_CHECK: () = {
+    // Проверка выравнивания
+    @static_assert(@align_of(Int) >= 4);
+};
+

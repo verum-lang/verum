@@ -1,0 +1,108 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L1
+// @tags: modules, context, using, dependency-injection
+
+/// Module-level context requirements (Spec Section 13.3).
+/// Modules can declare context requirements that apply to all functions.
+
+// Define contexts
+context Database {
+    fn query(&self, sql: Text) -> Result<Rows, DbError>;
+    fn execute(&self, sql: Text) -> Result<Int, DbError>;
+}
+
+context Logger {
+    fn info(&self, msg: Text);
+    fn warn(&self, msg: Text);
+    fn error(&self, msg: Text);
+}
+
+context Cache {
+    fn get(&self, key: Text) -> Maybe<Bytes>;
+    fn set(&self, key: Text, value: Bytes);
+    fn invalidate(&self, key: Text);
+}
+
+type DbError is { message: Text };
+type Rows is { data: List<List<Text>> };
+
+// Module with context requirements via attribute
+@using([Database, Logger])
+module user_service {
+    public fn find_user(id: Int) -> Result<User, Error> using [Database, Logger] {
+        log.info(f"Finding user {id}");
+        let rows = db.query(f"SELECT * FROM users WHERE id = {id}")?;
+        // ... parse rows
+        Result.Ok(User { id: id, name: "test" })
+    }
+
+    public fn create_user(name: Text) -> Result<Int, Error> using [Database, Logger] {
+        log.info(f"Creating user {name}");
+        db.execute(f"INSERT INTO users (name) VALUES ('{name}')")
+    }
+
+    public type User is {
+        id: Int,
+        name: Text
+    };
+
+    public type Error is DbError;
+}
+
+// Module with nested context requirements
+@using([Database, Logger, Cache])
+module cached_service {
+    // User type accessible from parent scope
+
+    public fn get_user_cached(id: Int) -> Result<User, Error> using [Database, Logger, Cache] {
+        let cache_key = f"user:{id}";
+
+        // Try cache first
+        if let Some(data) = cache.get(cache_key) {
+            log.info(f"Cache hit for user {id}");
+            // deserialize and return
+            return Result.Ok(User { id: id, name: "cached" });
+        }
+
+        // Cache miss - fetch from DB
+        log.info(f"Cache miss for user {id}");
+        let user = find_user_internal(id)?;
+
+        // Store in cache
+        cache.set(cache_key, serialize(&user));
+
+        Result.Ok(user)
+    }
+
+    fn find_user_internal(id: Int) -> Result<User, Error> {
+        let rows = db.query(f"SELECT * FROM users WHERE id = {id}")?;
+        Result.Ok(User { id: id, name: "internal" })
+    }
+
+    fn serialize(user: &User) -> Bytes {
+        Bytes.from_text(&f"{user.id}:{user.name}")
+    }
+
+    public type Error is DbError;
+}
+
+// Child modules inherit parent's context requirements
+@using([Logger])
+module logging_module {
+    public fn log_message(msg: Text) using [Logger] {
+        log.info(msg);
+    }
+
+    public module child {
+        // Inherits Logger context from parent
+        public fn child_log(msg: Text) using [Logger] {
+            log.info(f"[child] {msg}");
+        }
+    }
+}
+
+fn main() -> Int {
+    // Context usage would be provided at the call site
+    0
+}

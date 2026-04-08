@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @expected-error: E312
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, dangling-reference, cbgr
+// @description: Tests that returning reference to local variable is detected at compile-time via lifetime analysis
+
+fn get_ref() -> &Int {
+    let x = 42;
+    &x  // Reference returned - CBGR tracks generation
+}
+// When function returns, 'x' is deallocated and generation is bumped
+
+fn main() {
+    let r = get_ref();
+    // Dereferencing triggers CBGR generation check
+    print(*r);  // PANIC: generation mismatch (x no longer exists)
+}

@@ -1,0 +1,297 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, system, scheduler, round-robin
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Round-robin process scheduler simulation.
+// Processes have states (ready, running, blocked, terminated).
+// Quantum-based preemption with time tracking and turnaround metrics.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Process states: 0=ready, 1=running, 2=blocked, 3=terminated
+// =============================================================================
+
+// Scheduler with N processes (max 8)
+// burst[i]: total CPU burst time needed
+// remaining[i]: remaining burst time
+// states[i]: process state
+// arrival[i]: arrival time
+// finish_time[i]: when process completed (-1 if not done)
+type Scheduler is {
+    burst: Arr8,
+    remaining: Arr8,
+    states: Arr8,
+    arrival: Arr8,
+    finish_time: Arr8,
+    num_procs: Int,
+    clock: Int,
+    quantum: Int
+};
+
+fn sched_new(quantum: Int) -> Scheduler {
+    Scheduler {
+        burst: a8_zeros(),
+        remaining: a8_zeros(),
+        states: a8_zeros(),
+        arrival: a8_zeros(),
+        finish_time: a8_set(a8_set(a8_set(a8_set(a8_set(a8_set(a8_set(a8_set(
+            a8_zeros(), 0, -1), 1, -1), 2, -1), 3, -1), 4, -1), 5, -1), 6, -1), 7, -1),
+        num_procs: 0,
+        clock: 0,
+        quantum: quantum
+    }
+}
+
+fn sched_add_proc(s: Scheduler, burst_time: Int, arr_time: Int) -> Scheduler {
+    let idx = s.num_procs;
+    Scheduler {
+        burst: a8_set(s.burst, idx, burst_time),
+        remaining: a8_set(s.remaining, idx, burst_time),
+        states: a8_set(s.states, idx, 0),  // ready
+        arrival: a8_set(s.arrival, idx, arr_time),
+        finish_time: s.finish_time,
+        num_procs: s.num_procs + 1,
+        clock: s.clock,
+        quantum: s.quantum
+    }
+}
+
+// Count how many processes are not terminated
+fn sched_active_count(s: Scheduler) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.num_procs {
+        if a8_get(s.states, i) != 3 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Find next ready process starting from given index (round-robin)
+fn sched_find_next(s: Scheduler, start: Int) -> Int {
+    let n = s.num_procs;
+    let mut i = 0;
+    while i < n {
+        let idx = (start + i) % n;
+        if a8_get(s.states, idx) == 0 && a8_get(s.arrival, idx) <= s.clock {
+            return idx;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Run one quantum step from process at idx
+type SchedStep is { sched: Scheduler, ran_proc: Int, time_used: Int };
+
+fn sched_run_quantum(s: Scheduler, idx: Int) -> SchedStep {
+    if idx == -1 {
+        // No ready process, advance clock by 1 (idle)
+        return SchedStep {
+            sched: Scheduler {
+                burst: s.burst, remaining: s.remaining, states: s.states,
+                arrival: s.arrival, finish_time: s.finish_time,
+                num_procs: s.num_procs, clock: s.clock + 1, quantum: s.quantum
+            },
+            ran_proc: -1,
+            time_used: 1
+        };
+    }
+
+    let rem = a8_get(s.remaining, idx);
+    let time_slice = if rem < s.quantum { rem } else { s.quantum };
+    let new_rem = rem - time_slice;
+    let new_clock = s.clock + time_slice;
+
+    let mut new_remaining = a8_set(s.remaining, idx, new_rem);
+    let mut new_states = s.states;
+    let mut new_finish = s.finish_time;
+
+    if new_rem == 0 {
+        new_states = a8_set(new_states, idx, 3);  // terminated
+        new_finish = a8_set(new_finish, idx, new_clock);
+    } else {
+        new_states = a8_set(new_states, idx, 0);  // back to ready
+    }
+
+    SchedStep {
+        sched: Scheduler {
+            burst: s.burst, remaining: new_remaining, states: new_states,
+            arrival: s.arrival, finish_time: new_finish,
+            num_procs: s.num_procs, clock: new_clock, quantum: s.quantum
+        },
+        ran_proc: idx,
+        time_used: time_slice
+    }
+}
+
+// Run full scheduling simulation
+fn sched_run_all(s: Scheduler) -> Scheduler {
+    let mut state = s;
+    let mut next_start = 0;
+    let mut iterations = 0;
+    while sched_active_count(state) > 0 && iterations < 200 {
+        let idx = sched_find_next(state, next_start);
+        let step = sched_run_quantum(state, idx);
+        state = step.sched;
+        if idx != -1 {
+            next_start = (idx + 1) % state.num_procs;
+        }
+        iterations = iterations + 1;
+    }
+    state
+}
+
+// Calculate average turnaround time (finish - arrival) * 100 to avoid floats
+fn sched_avg_turnaround_x100(s: Scheduler) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < s.num_procs {
+        let ft = a8_get(s.finish_time, i);
+        let at = a8_get(s.arrival, i);
+        total = total + (ft - at);
+        i = i + 1;
+    }
+    (total * 100) / s.num_procs
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_single_process() {
+    let mut s = sched_new(2);
+    s = sched_add_proc(s, 5, 0);  // P0: burst=5, arrival=0
+    let done = sched_run_all(s);
+    assert_eq(a8_get(done.states, 0), 3);  // terminated
+    assert_eq(a8_get(done.finish_time, 0), 5);
+    assert_eq(done.clock, 5);
+}
+
+fn test_two_equal_processes() {
+    let mut s = sched_new(2);
+    s = sched_add_proc(s, 4, 0);  // P0: burst=4
+    s = sched_add_proc(s, 4, 0);  // P1: burst=4
+    let done = sched_run_all(s);
+    assert_eq(a8_get(done.states, 0), 3);
+    assert_eq(a8_get(done.states, 1), 3);
+    assert_eq(done.clock, 8);
+}
+
+fn test_different_bursts() {
+    let mut s = sched_new(3);
+    s = sched_add_proc(s, 3, 0);  // P0: burst=3
+    s = sched_add_proc(s, 6, 0);  // P1: burst=6
+    s = sched_add_proc(s, 2, 0);  // P2: burst=2
+    let done = sched_run_all(s);
+
+    assert_eq(a8_get(done.states, 0), 3);
+    assert_eq(a8_get(done.states, 1), 3);
+    assert_eq(a8_get(done.states, 2), 3);
+    // Total time = 3 + 6 + 2 = 11
+    assert_eq(done.clock, 11);
+}
+
+fn test_quantum_1() {
+    let mut s = sched_new(1);
+    s = sched_add_proc(s, 3, 0);
+    s = sched_add_proc(s, 3, 0);
+    let done = sched_run_all(s);
+    assert_eq(done.clock, 6);
+    assert_eq(a8_get(done.states, 0), 3);
+    assert_eq(a8_get(done.states, 1), 3);
+}
+
+fn test_large_quantum() {
+    // Quantum larger than any burst -> behaves like FCFS
+    let mut s = sched_new(100);
+    s = sched_add_proc(s, 5, 0);
+    s = sched_add_proc(s, 3, 0);
+    s = sched_add_proc(s, 7, 0);
+    let done = sched_run_all(s);
+    // P0 finishes at 5, P1 at 8, P2 at 15
+    assert_eq(a8_get(done.finish_time, 0), 5);
+    assert_eq(a8_get(done.finish_time, 1), 8);
+    assert_eq(a8_get(done.finish_time, 2), 15);
+}
+
+fn test_staggered_arrival() {
+    let mut s = sched_new(2);
+    s = sched_add_proc(s, 4, 0);  // P0: arrives at 0
+    s = sched_add_proc(s, 3, 3);  // P1: arrives at 3
+    let done = sched_run_all(s);
+    assert_eq(a8_get(done.states, 0), 3);
+    assert_eq(a8_get(done.states, 1), 3);
+    assert_eq(done.clock, 7);
+}
+
+fn test_turnaround_time() {
+    let mut s = sched_new(2);
+    s = sched_add_proc(s, 4, 0);
+    s = sched_add_proc(s, 4, 0);
+    let done = sched_run_all(s);
+    // P0: finishes at 6 (runs 0-2, waits 2-4, runs 4-6), turnaround=6
+    // P1: finishes at 8 (waits 0-2, runs 2-4, waits 4-6, runs 6-8), turnaround=8
+    // Average = (6+8)/2 = 7
+    let avg = sched_avg_turnaround_x100(done);
+    assert_eq(avg, 700);
+}
+
+fn test_all_same_burst() {
+    let mut s = sched_new(2);
+    s = sched_add_proc(s, 2, 0);
+    s = sched_add_proc(s, 2, 0);
+    s = sched_add_proc(s, 2, 0);
+    let done = sched_run_all(s);
+    assert_eq(done.clock, 6);
+    assert_eq(a8_get(done.states, 0), 3);
+    assert_eq(a8_get(done.states, 1), 3);
+    assert_eq(a8_get(done.states, 2), 3);
+}
+
+fn main() -> Int {
+    test_single_process();
+    test_two_equal_processes();
+    test_different_bursts();
+    test_quantum_1();
+    test_large_quantum();
+    test_staggered_arrival();
+    test_turnaround_time();
+    test_all_same_burst();
+    print("[OK] 313_interp_scheduler_rr");
+    0
+}

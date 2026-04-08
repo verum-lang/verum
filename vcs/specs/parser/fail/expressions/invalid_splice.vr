@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, meta, splice, grammar, error
+// @description: Test detection of invalid splice syntax ($ not followed by identifier or expression)
+// @expected-error: E018
+
+// GRAMMAR: quote_interpolation = '$' , ( identifier | '{' , expression , '}' ) ;
+// After '$', there MUST be either an identifier or '{expr}'.
+
+fn test_invalid_splice() {
+    let quoted = @quote { $ + 1 };  // ERROR: $ not followed by identifier or {
+}

@@ -1,0 +1,167 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, register-machine, vm, simulation
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for simple register machine (4 registers, instruction dispatch)
+
+// 4-register machine
+type Regs is { r0: Int, r1: Int, r2: Int, r3: Int };
+
+fn regs_new() -> Regs { Regs { r0: 0, r1: 0, r2: 0, r3: 0 } }
+
+fn reg_get(r: Regs, i: Int) -> Int {
+    if i == 0 { r.r0 } else if i == 1 { r.r1 }
+    else if i == 2 { r.r2 } else { r.r3 }
+}
+
+fn reg_set(r: Regs, i: Int, v: Int) -> Regs {
+    Regs {
+        r0: if i == 0 { v } else { r.r0 },
+        r1: if i == 1 { v } else { r.r1 },
+        r2: if i == 2 { v } else { r.r2 },
+        r3: if i == 3 { v } else { r.r3 }
+    }
+}
+
+// Instructions: opcode, dest, src1, src2/imm
+// Opcodes: 0=LOAD_IMM, 1=ADD, 2=SUB, 3=MUL, 4=DIV, 5=MOD, 6=AND, 7=OR
+type Inst is { op: Int, dst: Int, src1: Int, src2: Int };
+
+fn execute(regs: Regs, inst: Inst) -> Regs {
+    if inst.op == 0 {
+        // LOAD_IMM: dst = imm (src2)
+        reg_set(regs, inst.dst, inst.src2)
+    } else if inst.op == 1 {
+        // ADD: dst = src1 + src2
+        let v = reg_get(regs, inst.src1) + reg_get(regs, inst.src2);
+        reg_set(regs, inst.dst, v)
+    } else if inst.op == 2 {
+        // SUB: dst = src1 - src2
+        let v = reg_get(regs, inst.src1) - reg_get(regs, inst.src2);
+        reg_set(regs, inst.dst, v)
+    } else if inst.op == 3 {
+        // MUL: dst = src1 * src2
+        let v = reg_get(regs, inst.src1) * reg_get(regs, inst.src2);
+        reg_set(regs, inst.dst, v)
+    } else if inst.op == 4 {
+        // DIV: dst = src1 / src2
+        let divisor = reg_get(regs, inst.src2);
+        if divisor == 0 { regs }
+        else {
+            let v = reg_get(regs, inst.src1) / divisor;
+            reg_set(regs, inst.dst, v)
+        }
+    } else if inst.op == 5 {
+        // MOD: dst = src1 % src2
+        let v = reg_get(regs, inst.src1) % reg_get(regs, inst.src2);
+        reg_set(regs, inst.dst, v)
+    } else if inst.op == 6 {
+        // AND: dst = src1 & src2
+        let v = reg_get(regs, inst.src1) & reg_get(regs, inst.src2);
+        reg_set(regs, inst.dst, v)
+    } else {
+        // OR: dst = src1 | src2
+        let v = reg_get(regs, inst.src1) | reg_get(regs, inst.src2);
+        reg_set(regs, inst.dst, v)
+    }
+}
+
+fn test_load_imm() {
+    let mut r = regs_new();
+    r = execute(r, Inst { op: 0, dst: 0, src1: 0, src2: 42 });
+    assert_eq(reg_get(r, 0), 42);
+    r = execute(r, Inst { op: 0, dst: 1, src1: 0, src2: 100 });
+    assert_eq(reg_get(r, 1), 100);
+    assert_eq(reg_get(r, 0), 42);  // Unchanged
+}
+
+fn test_arithmetic() {
+    let mut r = regs_new();
+    // r0 = 10, r1 = 3
+    r = execute(r, Inst { op: 0, dst: 0, src1: 0, src2: 10 });
+    r = execute(r, Inst { op: 0, dst: 1, src1: 0, src2: 3 });
+
+    // r2 = r0 + r1 = 13
+    r = execute(r, Inst { op: 1, dst: 2, src1: 0, src2: 1 });
+    assert_eq(reg_get(r, 2), 13);
+
+    // r3 = r0 - r1 = 7
+    r = execute(r, Inst { op: 2, dst: 3, src1: 0, src2: 1 });
+    assert_eq(reg_get(r, 3), 7);
+
+    // r2 = r0 * r1 = 30
+    r = execute(r, Inst { op: 3, dst: 2, src1: 0, src2: 1 });
+    assert_eq(reg_get(r, 2), 30);
+
+    // r2 = r0 / r1 = 3
+    r = execute(r, Inst { op: 4, dst: 2, src1: 0, src2: 1 });
+    assert_eq(reg_get(r, 2), 3);
+
+    // r2 = r0 % r1 = 1
+    r = execute(r, Inst { op: 5, dst: 2, src1: 0, src2: 1 });
+    assert_eq(reg_get(r, 2), 1);
+}
+
+fn test_bitwise() {
+    let mut r = regs_new();
+    r = execute(r, Inst { op: 0, dst: 0, src1: 0, src2: 15 });   // 0b1111
+    r = execute(r, Inst { op: 0, dst: 1, src1: 0, src2: 6 });    // 0b0110
+
+    // r2 = r0 & r1 = 6
+    r = execute(r, Inst { op: 6, dst: 2, src1: 0, src2: 1 });
+    assert_eq(reg_get(r, 2), 6);
+
+    // r2 = r0 | r1 = 15
+    r = execute(r, Inst { op: 7, dst: 2, src1: 0, src2: 1 });
+    assert_eq(reg_get(r, 2), 15);
+}
+
+fn test_program() {
+    // Compute: (5 + 3) * 2 - 1 = 15
+    let mut r = regs_new();
+    r = execute(r, Inst { op: 0, dst: 0, src1: 0, src2: 5 });    // r0 = 5
+    r = execute(r, Inst { op: 0, dst: 1, src1: 0, src2: 3 });    // r1 = 3
+    r = execute(r, Inst { op: 1, dst: 2, src1: 0, src2: 1 });    // r2 = r0+r1 = 8
+    r = execute(r, Inst { op: 0, dst: 3, src1: 0, src2: 2 });    // r3 = 2
+    r = execute(r, Inst { op: 3, dst: 2, src1: 2, src2: 3 });    // r2 = r2*r3 = 16
+    r = execute(r, Inst { op: 0, dst: 3, src1: 0, src2: 1 });    // r3 = 1
+    r = execute(r, Inst { op: 2, dst: 0, src1: 2, src2: 3 });    // r0 = r2-r3 = 15
+    assert_eq(reg_get(r, 0), 15);
+}
+
+fn test_factorial_program() {
+    // Compute 5! = 120
+    // r0 = n, r1 = result, r2 = temp
+    let mut r = regs_new();
+    r = execute(r, Inst { op: 0, dst: 0, src1: 0, src2: 5 });    // r0 = 5
+    r = execute(r, Inst { op: 0, dst: 1, src1: 0, src2: 1 });    // r1 = 1
+
+    // Manually unrolled: r1 = r1 * r0, r0 = r0 - 1 (5 times)
+    r = execute(r, Inst { op: 3, dst: 1, src1: 1, src2: 0 });    // r1 = 1*5 = 5
+    r = execute(r, Inst { op: 0, dst: 2, src1: 0, src2: 1 });    // r2 = 1
+    r = execute(r, Inst { op: 2, dst: 0, src1: 0, src2: 2 });    // r0 = 5-1 = 4
+
+    r = execute(r, Inst { op: 3, dst: 1, src1: 1, src2: 0 });    // r1 = 5*4 = 20
+    r = execute(r, Inst { op: 2, dst: 0, src1: 0, src2: 2 });    // r0 = 3
+
+    r = execute(r, Inst { op: 3, dst: 1, src1: 1, src2: 0 });    // r1 = 20*3 = 60
+    r = execute(r, Inst { op: 2, dst: 0, src1: 0, src2: 2 });    // r0 = 2
+
+    r = execute(r, Inst { op: 3, dst: 1, src1: 1, src2: 0 });    // r1 = 60*2 = 120
+    r = execute(r, Inst { op: 2, dst: 0, src1: 0, src2: 2 });    // r0 = 1
+
+    assert_eq(reg_get(r, 1), 120);
+}
+
+fn main() -> Int {
+    test_load_imm();
+    test_arithmetic();
+    test_bitwise();
+    test_program();
+    test_factorial_program();
+    print("[OK] 231_register_machine_aot");
+    0
+}

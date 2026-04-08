@@ -1,0 +1,94 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: recursive, enum, heap, tree, e2e
+// @description: Test recursive enum types with Heap for indirection
+
+type Expr is
+    Lit(Int)
+  | Add(Heap<Expr>, Heap<Expr>)
+  | Mul(Heap<Expr>, Heap<Expr>)
+  | Neg(Heap<Expr>);
+
+@allow(unbounded_recursion)
+fn eval(e: Expr) -> Int {
+    match e {
+        Expr.Lit(n) => n,
+        Expr.Add(l, r) => eval(*l) + eval(*r),
+        Expr.Mul(l, r) => eval(*l) * eval(*r),
+        Expr.Neg(inner) => 0 - eval(*inner),
+    }
+}
+
+@allow(unbounded_recursion)
+fn count_nodes(e: Expr) -> Int {
+    match e {
+        Expr.Lit(_) => 1,
+        Expr.Add(l, r) => 1 + count_nodes(*l) + count_nodes(*r),
+        Expr.Mul(l, r) => 1 + count_nodes(*l) + count_nodes(*r),
+        Expr.Neg(inner) => 1 + count_nodes(*inner),
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Simple literal
+    let e1 = Expr.Lit(42);
+    if eval(e1) != 42 {
+        print("FAIL 1: literal eval");
+        f = f + 1;
+    } else {
+        print("  literal: OK");
+    }
+
+    // Test 2: Addition: 3 + 4 = 7
+    let e2 = Expr.Add(Heap(Expr.Lit(3)), Heap(Expr.Lit(4)));
+    if eval(e2) != 7 {
+        print(f"FAIL 2: add eval = {eval(e2)}");
+        f = f + 1;
+    } else {
+        print("  add: OK");
+    }
+
+    // Test 3: Nested: (2 + 3) * 4 = 20
+    let e3 = Expr.Mul(
+        Heap(Expr.Add(Heap(Expr.Lit(2)), Heap(Expr.Lit(3)))),
+        Heap(Expr.Lit(4))
+    );
+    let r3 = eval(e3);
+    if r3 != 20 {
+        print(f"FAIL 3: nested = {r3}");
+        f = f + 1;
+    } else {
+        print("  nested: OK");
+    }
+
+    // Test 4: Neg: -(5 + 3) = -8
+    let e4 = Expr.Neg(Heap(Expr.Add(Heap(Expr.Lit(5)), Heap(Expr.Lit(3)))));
+    let r4 = eval(e4);
+    if r4 != -8 {
+        print(f"FAIL 4: neg = {r4}");
+        f = f + 1;
+    } else {
+        print("  neg: OK");
+    }
+
+    // Test 5: Count nodes: (2 + 3) * 4 has 5 nodes
+    let e5 = Expr.Mul(
+        Heap(Expr.Add(Heap(Expr.Lit(2)), Heap(Expr.Lit(3)))),
+        Heap(Expr.Lit(4))
+    );
+    let n5 = count_nodes(e5);
+    if n5 != 5 {
+        print(f"FAIL 5: nodes = {n5}");
+        f = f + 1;
+    } else {
+        print("  count_nodes: OK");
+    }
+
+    if f == 0 {
+        print("All recursive enum tests passed");
+    }
+    f
+}

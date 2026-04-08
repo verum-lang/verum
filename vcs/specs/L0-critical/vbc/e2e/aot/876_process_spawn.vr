@@ -1,0 +1,46 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, process, spawn, exec
+// @expected-exit: 0
+
+// Test: process spawning via C runtime bridge.
+// Verifies that Verum can spawn child processes and get exit codes.
+
+// Low-level bridge function — LLVM intercepts this and calls verum_process_exec
+fn __process_exec_raw(program: Text, args: List<Text>) -> Int {
+    -1
+}
+
+fn main() -> Int {
+    // Test 1: Run "true" (exit code 0)
+    let result = __process_exec_raw("/usr/bin/true", []);
+    if (result != 0) {
+        print(f"FAIL test1: /usr/bin/true returned {result}, expected 0");
+        return 1;
+    }
+
+    // Test 2: Run "false" (exit code 1)
+    let result2 = __process_exec_raw("/usr/bin/false", []);
+    if (result2 != 1) {
+        print(f"FAIL test2: /usr/bin/false returned {result2}, expected 1");
+        return 1;
+    }
+
+    // Test 3: Run "echo" with args (exit code 0)
+    let result3 = __process_exec_raw("/bin/echo", ["hello", "world"]);
+    if (result3 != 0) {
+        print(f"FAIL test3: /bin/echo returned {result3}, expected 0");
+        return 1;
+    }
+
+    // Test 4: Run nonexistent program (should return 127 or -1)
+    let result4 = __process_exec_raw("/nonexistent/program", []);
+    if (result4 != 127 && result4 != -1) {
+        print(f"FAIL test4: nonexistent returned {result4}, expected 127 or -1");
+        return 1;
+    }
+
+    print("876_process_spawn: PASS");
+    0
+}

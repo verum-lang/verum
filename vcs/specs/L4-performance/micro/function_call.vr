@@ -1,0 +1,418 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: micro, function, call, overhead, performance
+// @description: Function call overhead (target: < 2ns direct, < 5ns indirect)
+
+/// Function Call Overhead Microbenchmarks
+///
+/// Measures the overhead of different function call patterns.
+/// Understanding call overhead is critical for performance optimization.
+///
+/// Performance targets:
+/// - Direct call:          < 2ns
+/// - Inline call:          < 1ns (should optimize away)
+/// - Indirect call:        < 5ns
+/// - Generic call:         < 3ns (after monomorphization)
+/// - Method call:          < 3ns
+/// - Trait object call:    < 10ns
+///
+/// Spec reference: docs/detailed/05-syntax-grammar.md
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 100_000_000;
+
+/// Direct function call (no inlining)
+@inline(never)
+fn direct_fn(x: Int) -> Int {
+    x + 1
+}
+
+/// Inlined function
+@inline(always)
+fn inline_fn(x: Int) -> Int {
+    x + 1
+}
+
+/// Function with multiple parameters
+@inline(never)
+fn multi_param_fn(a: Int, b: Int, c: Int, d: Int) -> Int {
+    a + b + c + d
+}
+
+/// Function returning tuple
+@inline(never)
+fn tuple_return_fn(x: Int) -> (Int, Int) {
+    (x, x + 1)
+}
+
+/// Recursive function (to measure call stack overhead)
+@inline(never)
+fn recursive_fn(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else { n + recursive_fn(n - 1) }
+}
+
+/// Generic function
+@inline(never)
+fn generic_fn<T: Clone>(x: T) -> T {
+    x.clone()
+}
+
+/// Benchmark: Direct function call
+fn benchmark_direct_call() -> BenchmarkResult {
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(direct_fn(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(direct_fn(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "direct_call",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 2.0,
+    }
+}
+
+/// Benchmark: Inlined function call
+fn benchmark_inline_call() -> BenchmarkResult {
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(inline_fn(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(inline_fn(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "inline_call",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 1.0,
+    }
+}
+
+/// Benchmark: Multi-parameter function call
+fn benchmark_multi_param_call() -> BenchmarkResult {
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(multi_param_fn(i as Int, i as Int, i as Int, i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(multi_param_fn(i as Int, i as Int, i as Int, i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "multi_param_call",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Tuple return
+fn benchmark_tuple_return() -> BenchmarkResult {
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(tuple_return_fn(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(tuple_return_fn(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "tuple_return",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Indirect call via function pointer
+fn benchmark_indirect_call() -> BenchmarkResult {
+    let fn_ptr: fn(Int) -> Int = direct_fn;
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(fn_ptr(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(fn_ptr(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "indirect_call",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,
+    }
+}
+
+/// Benchmark: Generic function call
+fn benchmark_generic_call() -> BenchmarkResult {
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(generic_fn(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(generic_fn(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "generic_call_int",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Method call on struct
+fn benchmark_method_call() -> BenchmarkResult {
+    type Counter is { value: Int };
+
+    implement Counter {
+        @inline(never)
+        fn increment(&self) -> Int {
+            self.value + 1
+        }
+    }
+
+    let counter = Counter { value: 42 };
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(counter.increment());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(counter.increment());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "method_call",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Trait object dynamic dispatch
+fn benchmark_trait_object_call() -> BenchmarkResult {
+    type Incrementable is protocol {
+        fn increment(&self) -> Int;
+    };
+
+    type Counter is { value: Int };
+
+    implement Incrementable for Counter {
+        fn increment(&self) -> Int {
+            self.value + 1
+        }
+    }
+
+    let counter = Counter { value: 42 };
+    let trait_obj: &Incrementable = &counter;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(trait_obj.increment());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 10) {
+        black_box(trait_obj.increment());
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "trait_object_call",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 10) as f64,
+        target_ns: 10.0,
+    }
+}
+
+/// Benchmark: Recursive call overhead
+fn benchmark_recursive_call() -> BenchmarkResult {
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 100) {
+        black_box(recursive_fn(100));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 100) {
+        black_box(recursive_fn(100));
+    }
+
+    let elapsed = start.elapsed();
+    let total_calls = (BENCHMARK_ITERATIONS / 100) * 100;
+
+    BenchmarkResult {
+        name: "recursive_call",
+        per_op_ns: elapsed.as_nanos() as f64 / total_calls as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Closure call (non-capturing)
+fn benchmark_closure_non_capturing() -> BenchmarkResult {
+    let closure = |x: Int| -> Int { x + 1 };
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "closure_non_capturing",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 2.0,
+    }
+}
+
+/// Benchmark: Closure call (capturing)
+fn benchmark_closure_capturing() -> BenchmarkResult {
+    let captured = 42;
+    let closure = |x: Int| -> Int { x + captured };
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "closure_capturing",
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 3.0,
+    }
+}
+
+/// Benchmark: Boxed closure (Fn protocol object)
+fn benchmark_boxed_closure() -> BenchmarkResult {
+    let closure: Heap<Fn(Int) -> Int> = Heap(|x: Int| x + 1);
+
+    // Warmup
+    for i in 0..(WARMUP_ITERATIONS / 10) {
+        black_box(closure(i as Int));
+    }
+
+    let start = Instant.now();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 10) {
+        black_box(closure(i as Int));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "boxed_closure",
+        per_op_ns: elapsed.as_nanos() as f64 / (BENCHMARK_ITERATIONS / 10) as f64,
+        target_ns: 12.0,  // Heap + vtable overhead
+    }
+}
+
+fn main() {
+    println("=== Function Call Overhead Microbenchmarks ===\n");
+
+    let results = [
+        benchmark_direct_call(),
+        benchmark_inline_call(),
+        benchmark_multi_param_call(),
+        benchmark_tuple_return(),
+        benchmark_indirect_call(),
+        benchmark_generic_call(),
+        benchmark_method_call(),
+        benchmark_trait_object_call(),
+        benchmark_recursive_call(),
+        benchmark_closure_non_capturing(),
+        benchmark_closure_capturing(),
+        benchmark_boxed_closure(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>8}",
+            "Benchmark", "Time (ns)", "Target", "Status");
+    println("{}", "-".repeat(65));
+
+    for result in results {
+        let passed = result.per_op_ns <= result.target_ns;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.2} {:>12.0} {:>8}",
+                result.name, result.per_op_ns, result.target_ns, status);
+    }
+
+    println("");
+    println("Function Call Targets:");
+    println("  - Direct call:     < 2ns");
+    println("  - Inline call:     < 1ns");
+    println("  - Indirect call:   < 5ns");
+    println("  - Trait dispatch:  < 10ns");
+}
+
+type BenchmarkResult is {
+    name: Text,
+    per_op_ns: f64,
+    target_ns: f64,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }

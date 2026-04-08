@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, index, unclosed, error
+// @description: Index expression with unclosed bracket
+// @expected-error: E013
+
+fn test() {
+    let x = arr[0;  // Missing closing ]
+}

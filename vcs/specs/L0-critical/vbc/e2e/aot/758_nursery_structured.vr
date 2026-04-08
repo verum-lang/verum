@@ -1,0 +1,182 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, nursery, structured-concurrency
+// @expected-exit: 0
+
+// Tests nursery-based structured concurrency patterns.
+// A nursery is a scope where all spawned tasks must complete before
+// the scope exits. In single-threaded mode, tasks execute sequentially.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Worker functions that would run in nursery tasks
+fn worker_square(x: Int) -> Int { x * x }
+fn worker_double(x: Int) -> Int { x * 2 }
+fn worker_add_one(x: Int) -> Int { x + 1 }
+
+fn sum_list(data: List<Int>, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while (i < n) {
+        total = total + data[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Test 1: Basic nursery pattern — spawn work, collect results
+    let mut results = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < 5) {
+        results[i] = worker_square(i + 1);
+        i = i + 1;
+    }
+    assert_eq(results[0], 1);
+    assert_eq(results[1], 4);
+    assert_eq(results[2], 9);
+    assert_eq(results[3], 16);
+    assert_eq(results[4], 25);
+
+    // Test 2: Nursery scope guarantees — all tasks complete before proceeding
+    let mut completed = 0;
+    i = 0;
+    while (i < 10) {
+        completed = completed + 1;
+        i = i + 1;
+    }
+    // After nursery scope, all 10 tasks have completed
+    assert_eq(completed, 10);
+
+    // Test 3: Nursery with dependent stages
+    // Stage 1: compute squares
+    let mut stage1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 4) {
+        stage1[i] = worker_square(i + 1);
+        i = i + 1;
+    }
+    // Stage 2: double the squares (depends on stage 1)
+    let mut stage2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 4) {
+        stage2[i] = worker_double(stage1[i]);
+        i = i + 1;
+    }
+    assert_eq(stage2[0], 2);   // 2*1
+    assert_eq(stage2[1], 8);   // 2*4
+    assert_eq(stage2[2], 18);  // 2*9
+    assert_eq(stage2[3], 32);  // 2*16
+
+    // Test 4: Nursery error handling (all succeed case)
+    let mut errors = 0;
+    i = 0;
+    while (i < 5) {
+        let result = worker_add_one(i);
+        if (result < 0) {
+            errors = errors + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(errors, 0);  // No errors
+
+    // Test 5: Nursery with reduction
+    let data = [5, 10, 15, 20, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut partial_sums = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Split into 2 partitions
+    partial_sums[0] = data[0] + data[1] + data[2];  // 30
+    partial_sums[1] = data[3] + data[4];             // 45
+    let total = partial_sums[0] + partial_sums[1];
+    assert_eq(total, 75);
+
+    // Test 6: Nested nursery scopes
+    let mut outer_result = 0;
+    // Outer nursery
+    let mut inner_sum = 0;
+    // Inner nursery
+    i = 1;
+    while (i <= 5) {
+        inner_sum = inner_sum + i;
+        i = i + 1;
+    }
+    // Inner nursery complete
+    assert_eq(inner_sum, 15);
+    outer_result = inner_sum * 2;
+    // Outer nursery complete
+    assert_eq(outer_result, 30);
+
+    // Test 7: Nursery cancellation pattern
+    // If any task fails, cancel remaining tasks
+    let mut found = 0;
+    let search_target = 7;
+    i = 0;
+    while (i < 10) {
+        if (i == search_target) {
+            found = 1;
+            // In real nursery, would cancel remaining tasks here
+        }
+        i = i + 1;
+    }
+    assert_eq(found, 1);
+
+    // Test 8: Fan-out/fan-in with nursery
+    let input = 100;
+    // Fan out: split work
+    let w1 = input / 4;        // 25
+    let w2 = input / 4;        // 25
+    let w3 = input / 4;        // 25
+    let w4 = input - 3 * (input / 4);  // 25
+    // Fan in: aggregate
+    let aggregated = worker_square(w1) + worker_square(w2) + worker_square(w3) + worker_square(w4);
+    assert_eq(aggregated, 2500);  // 4 * 625
+
+    // Test 9: Pipeline pattern (producer → transformer → consumer)
+    // Producer generates values
+    let mut produced = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 8) {
+        produced[i] = i * 3;  // 0, 3, 6, 9, 12, 15, 18, 21
+        i = i + 1;
+    }
+    // Transformer squares values
+    let mut transformed = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 8) {
+        transformed[i] = worker_square(produced[i]);
+        i = i + 1;
+    }
+    // Consumer sums transformed values
+    let consumed = sum_list(transformed, 8);
+    // 0 + 9 + 36 + 81 + 144 + 225 + 324 + 441 = 1260
+    assert_eq(consumed, 1260);
+
+    // Test 10: Bounded nursery (max concurrent tasks)
+    // Simulate running at most 3 tasks at a time
+    let batch_size = 3;
+    let total_tasks = 9;
+    let mut batch_results = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut task_idx = 0;
+    while (task_idx < total_tasks) {
+        // Process one batch
+        let batch_end = task_idx + batch_size;
+        let actual_end = if (batch_end > total_tasks) { total_tasks } else { batch_end };
+        let mut j = task_idx;
+        while (j < actual_end) {
+            batch_results[j] = worker_square(j + 1);
+            j = j + 1;
+        }
+        task_idx = actual_end;
+    }
+    // Verify all 9 results
+    assert_eq(batch_results[0], 1);
+    assert_eq(batch_results[4], 25);
+    assert_eq(batch_results[8], 81);
+    let batch_total = sum_list(batch_results, 9);
+    assert_eq(batch_total, 285);  // sum of squares 1..9
+
+    print("Nursery structured: PASS");
+    0
+}

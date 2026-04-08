@@ -1,0 +1,386 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, aliasing, borrowing, safety, advanced
+// @description: Advanced aliasing rules tests demonstrating Verum's reference safety guarantees
+
+/// Advanced Aliasing Rules Test Suite
+///
+/// This test demonstrates Verum's aliasing rules that prevent:
+///
+/// 1. Simultaneous mutable aliasing (data races at the type level)
+/// 2. Iterator invalidation
+/// 3. Reference invalidation through mutation
+/// 4. Unsafe aliasing patterns
+///
+/// These guarantees are enforced at compile time, providing:
+/// - Zero-cost safety (no runtime overhead)
+/// - Prevention of entire classes of bugs
+/// - Foundation for safe concurrency
+///
+/// Spec: 04-memory-model.md#aliasing-rules
+
+// ============================================================================
+// TEST 1: The Fundamental Aliasing Rule
+// ============================================================================
+// Either: one mutable reference, OR any number of immutable references
+// Never both at the same time.
+
+fn test_multiple_immutable_references() {
+    let data = [1, 2, 3, 4, 5];
+
+    // Multiple immutable references are allowed
+    let ref1 = &data;
+    let ref2 = &data;
+    let ref3 = &data;
+
+    // All can be used simultaneously
+    assert(ref1[0] == 1);
+    assert(ref2[1] == 2);
+    assert(ref3[2] == 3);
+}
+
+fn test_exclusive_mutable_reference() {
+    let mut data = 42;
+
+    // Only one mutable reference at a time
+    {
+        let mut_ref = &mut data;
+        *mut_ref = 100;
+        // mut_ref has exclusive access here
+    }
+
+    // After mut_ref goes out of scope, we can borrow again
+    let immut_ref = &data;
+    assert(*immut_ref == 100);
+}
+
+// ============================================================================
+// TEST 2: Preventing Iterator Invalidation
+// ============================================================================
+// Verum's aliasing rules prevent modifying a collection while iterating.
+
+fn test_safe_iteration() {
+    let data = [10, 20, 30, 40, 50];
+
+    let mut sum = 0;
+    for i in 0..5 {
+        // Each element is borrowed immutably during iteration
+        let elem = &data[i];
+        sum += *elem;
+        // Cannot modify data here - immutable borrow active
+    }
+
+    assert(sum == 150);
+}
+
+fn test_collect_then_modify() {
+    let mut data = [1, 2, 3, 4, 5];
+
+    // First, read and accumulate
+    let mut sum = 0;
+    for i in 0..5 {
+        sum += data[i];
+    }
+
+    // Then modify (no active borrows)
+    for i in 0..5 {
+        data[i] = data[i] * 2;
+    }
+
+    // Verify modifications
+    assert(data[0] == 2);
+    assert(data[4] == 10);
+}
+
+// ============================================================================
+// TEST 3: Reference Validity Through Scope
+// ============================================================================
+// References are only valid while the referent is accessible and not mutated.
+
+fn test_scope_based_validity() {
+    let mut container = 42;
+
+    // Block 1: Immutable borrow
+    {
+        let r = &container;
+        assert(*r == 42);
+        // r goes out of scope
+    }
+
+    // Block 2: Mutable borrow (ok, no active immutable borrows)
+    {
+        let r_mut = &mut container;
+        *r_mut = 100;
+        // r_mut goes out of scope
+    }
+
+    // Block 3: New immutable borrow (sees the modified value)
+    {
+        let r2 = &container;
+        assert(*r2 == 100);
+    }
+}
+
+// ============================================================================
+// TEST 4: Field-Level Aliasing
+// ============================================================================
+// Different struct fields can be borrowed independently.
+
+type Record is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+fn test_disjoint_field_borrows() {
+    let mut record = Record { x: 1, y: 2, z: 3 };
+
+    // Borrow different fields mutably - allowed because they're disjoint
+    let x_ref = &mut record.x;
+    let y_ref = &mut record.y;
+
+    // Modify independently
+    *x_ref = 10;
+    *y_ref = 20;
+
+    // z is still accessible
+    assert(record.z == 3);
+}
+
+fn test_field_borrow_with_method() {
+    let mut record = Record { x: 0, y: 0, z: 0 };
+
+    // Borrow x for reading
+    let x_val = record.x;
+
+    // Modify y (different field, no conflict)
+    record.y = x_val + 10;
+
+    // Modify z
+    record.z = record.y + 10;
+
+    assert(record.x == 0);
+    assert(record.y == 10);
+    assert(record.z == 20);
+}
+
+// ============================================================================
+// TEST 5: Index-Based Aliasing
+// ============================================================================
+// Array indices can enable disjoint borrows when statically known.
+
+fn test_disjoint_index_borrows() {
+    let mut arr = [1, 2, 3, 4, 5];
+
+    // Borrow different indices - allowed because they're disjoint
+    let ref0 = &mut arr[0];
+    let ref2 = &mut arr[2];
+    let ref4 = &mut arr[4];
+
+    *ref0 = 10;
+    *ref2 = 30;
+    *ref4 = 50;
+
+    // Other indices unaffected
+    assert(arr[1] == 2);
+    assert(arr[3] == 4);
+}
+
+fn test_swap_elements() {
+    let mut arr = [100, 200];
+
+    // Swap using disjoint borrows
+    let left = &mut arr[0];
+    let right = &mut arr[1];
+
+    let temp = *left;
+    *left = *right;
+    *right = temp;
+
+    assert(arr[0] == 200);
+    assert(arr[1] == 100);
+}
+
+// ============================================================================
+// TEST 6: Function Call Aliasing Safety
+// ============================================================================
+// Function calls respect aliasing rules for their parameters.
+
+fn test_immutable_parameter_aliasing() {
+    let data = 42;
+
+    // Same value can be passed to multiple immutable parameters
+    let result = compare_refs(&data, &data);
+    assert(result == true);
+}
+
+fn compare_refs(a: &Int, b: &Int) -> Bool {
+    *a == *b
+}
+
+fn test_mutable_parameter_exclusivity() {
+    let mut a = 10;
+    let mut b = 20;
+
+    // Different values to mutable parameters - always safe
+    swap_values(&mut a, &mut b);
+
+    assert(a == 20);
+    assert(b == 10);
+}
+
+fn swap_values(x: &mut Int, y: &mut Int) {
+    let temp = *x;
+    *x = *y;
+    *y = temp;
+}
+
+// ============================================================================
+// TEST 7: Nested Reference Patterns
+// ============================================================================
+// Complex reference patterns that maintain aliasing safety.
+
+fn test_reference_to_reference() {
+    let value = 42;
+    let ref1 = &value;
+    let ref2 = &ref1;  // Reference to a reference
+
+    // Dereference twice to get the value
+    assert(**ref2 == 42);
+}
+
+fn test_mutable_reference_chain() {
+    let mut value = 42;
+
+    // Single mutable reference
+    let ref1 = &mut value;
+
+    // Reborrow from ref1
+    {
+        let ref2 = &mut *ref1;
+        *ref2 = 100;
+    }
+
+    // ref1 is usable again after ref2's scope ends
+    assert(*ref1 == 100);
+}
+
+fn test_reference_in_struct() {
+    let value = 42;
+
+    // Struct containing a reference
+    let holder = RefHolder { reference: &value };
+
+    // Access through the struct
+    assert(*holder.reference == 42);
+}
+
+type RefHolder<'a> is {
+    reference: &'a Int,
+};
+
+// ============================================================================
+// TEST 8: Aliasing Safety Patterns
+// ============================================================================
+// Common safe patterns that work within aliasing rules.
+
+fn test_read_modify_write_pattern() {
+    let mut data = [1, 2, 3, 4, 5];
+
+    for i in 0..5 {
+        // Read current value
+        let current = data[i];
+        // Compute new value
+        let new_value = current * 2;
+        // Write new value (read is done, no conflict)
+        data[i] = new_value;
+    }
+
+    assert(data[0] == 2);
+    assert(data[4] == 10);
+}
+
+fn test_accumulator_pattern() {
+    let data = [1, 2, 3, 4, 5];
+    let mut accumulator = 0;
+
+    for i in 0..5 {
+        // Read from data (immutable)
+        let value = data[i];
+        // Modify accumulator (mutable, different variable)
+        accumulator += value;
+    }
+
+    assert(accumulator == 15);
+}
+
+fn test_builder_pattern() {
+    let mut config = Config { value: 0, name: 1, enabled: false };
+
+    // Chain of modifications through mutable reference
+    set_value(&mut config, 42);
+    set_name(&mut config, 99);
+    set_enabled(&mut config, true);
+
+    assert(config.value == 42);
+    assert(config.name == 99);
+    assert(config.enabled == true);
+}
+
+type Config is {
+    value: Int,
+    name: Int,
+    enabled: Bool,
+};
+
+fn set_value(c: &mut Config, v: Int) {
+    c.value = v;
+}
+
+fn set_name(c: &mut Config, n: Int) {
+    c.name = n;
+}
+
+fn set_enabled(c: &mut Config, e: Bool) {
+    c.enabled = e;
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Fundamental aliasing rule tests
+    test_multiple_immutable_references();
+    test_exclusive_mutable_reference();
+
+    // Iterator invalidation prevention
+    test_safe_iteration();
+    test_collect_then_modify();
+
+    // Reference validity
+    test_scope_based_validity();
+
+    // Field-level aliasing
+    test_disjoint_field_borrows();
+    test_field_borrow_with_method();
+
+    // Index-based aliasing
+    test_disjoint_index_borrows();
+    test_swap_elements();
+
+    // Function call aliasing
+    test_immutable_parameter_aliasing();
+    test_mutable_parameter_exclusivity();
+
+    // Nested patterns
+    test_reference_to_reference();
+    test_mutable_reference_chain();
+    test_reference_in_struct();
+
+    // Safe patterns
+    test_read_modify_write_pattern();
+    test_accumulator_pattern();
+    test_builder_pattern();
+}

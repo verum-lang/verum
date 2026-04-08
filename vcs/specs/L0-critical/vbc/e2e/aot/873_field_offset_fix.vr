@@ -1,0 +1,107 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, record, field-offset, correctness
+// @expected-exit: 0
+
+// Test: struct field offsets use type-specific positions.
+// Multiple types share field names — verifies each type uses
+// its own field ordering, not a global interned ID.
+
+type Alpha is {
+    x: Int,
+    y: Int,
+};
+
+type Beta is {
+    name: Int,
+    x: Int,
+};
+
+type Gamma is {
+    a: Int,
+    b: Int,
+    c: Int,
+    x: Int,
+};
+
+type Delta is {
+    x: Int,
+    name: Int,
+    a: Int,
+};
+
+fn make_alpha(x: Int, y: Int) -> Alpha {
+    Alpha { x: x, y: y }
+}
+
+fn make_beta(name: Int, x: Int) -> Beta {
+    Beta { name: name, x: x }
+}
+
+fn make_gamma(a: Int, b: Int, c: Int, x: Int) -> Gamma {
+    Gamma { a: a, b: b, c: c, x: x }
+}
+
+fn make_delta(x: Int, name: Int, a: Int) -> Delta {
+    Delta { x: x, name: name, a: a }
+}
+
+fn get_alpha_x(v: Alpha) -> Int { v.x }
+fn get_alpha_y(v: Alpha) -> Int { v.y }
+fn get_beta_name(v: Beta) -> Int { v.name }
+fn get_beta_x(v: Beta) -> Int { v.x }
+fn get_gamma_a(v: Gamma) -> Int { v.a }
+fn get_gamma_x(v: Gamma) -> Int { v.x }
+fn get_delta_x(v: Delta) -> Int { v.x }
+fn get_delta_name(v: Delta) -> Int { v.name }
+fn get_delta_a(v: Delta) -> Int { v.a }
+
+fn main() -> Int {
+    // Test Alpha: x at position 0, y at position 1
+    let a = make_alpha(10, 20);
+    assert_eq(a.x, 10);
+    assert_eq(a.y, 20);
+    assert_eq(get_alpha_x(a), 10);
+    assert_eq(get_alpha_y(a), 20);
+
+    // Test Beta: name at position 0, x at position 1
+    // "x" is at different positions in Alpha (0) vs Beta (1)
+    let b = make_beta(100, 200);
+    assert_eq(b.name, 100);
+    assert_eq(b.x, 200);
+    assert_eq(get_beta_name(b), 100);
+    assert_eq(get_beta_x(b), 200);
+
+    // Test Gamma: a=0, b=1, c=2, x=3
+    let g = make_gamma(1, 2, 3, 4);
+    assert_eq(g.a, 1);
+    assert_eq(g.b, 2);
+    assert_eq(g.c, 3);
+    assert_eq(g.x, 4);
+    assert_eq(get_gamma_a(g), 1);
+    assert_eq(get_gamma_x(g), 4);
+
+    // Test Delta: x=0, name=1, a=2
+    // Shares fields with multiple types but in different order
+    let d = make_delta(500, 600, 700);
+    assert_eq(d.x, 500);
+    assert_eq(d.name, 600);
+    assert_eq(d.a, 700);
+    assert_eq(get_delta_x(d), 500);
+    assert_eq(get_delta_name(d), 600);
+    assert_eq(get_delta_a(d), 700);
+
+    // Test out-of-order field init
+    let a2 = Alpha { y: 99, x: 42 };
+    assert_eq(a2.x, 42);
+    assert_eq(a2.y, 99);
+
+    // Test field access through function return
+    let a3 = make_alpha(7, 8);
+    let sum = get_alpha_x(a3) + get_alpha_y(a3);
+    assert_eq(sum, 15);
+
+    print("873_field_offset_fix: PASS");
+    0
+}

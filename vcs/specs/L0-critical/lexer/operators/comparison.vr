@@ -1,0 +1,189 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, comparison
+
+// Comparison operators
+
+fn test_equality() {
+    // Equality operator (==)
+    let eq1 = 42 == 42;
+    let eq2 = "hello" == "hello";
+    let eq3 = true == true;
+    let eq4 = 3.14 == 3.14;
+    let eq_false = 1 == 2;
+
+    // Inequality operator (!=)
+    let neq1 = 42 != 0;
+    let neq2 = "hello" != "world";
+    let neq3 = true != false;
+    let neq4 = 3.14 != 2.71;
+    let neq_false = 42 != 42;
+}
+
+fn test_ordering() {
+    // Less than operator (<)
+    let lt1 = 5 < 10;
+    let lt2 = 'a' < 'z';
+    let lt3 = 3.14 < 3.15;
+    let lt_false = 10 < 5;
+    let lt_eq = 5 < 5;
+
+    // Less than or equal operator (<=)
+    let lte1 = 5 <= 10;
+    let lte2 = 5 <= 5;
+    let lte3 = 'a' <= 'a';
+    let lte4 = 3.14 <= 3.14;
+    let lte_false = 10 <= 5;
+
+    // Greater than operator (>)
+    let gt1 = 10 > 5;
+    let gt2 = 'z' > 'a';
+    let gt3 = 3.15 > 3.14;
+    let gt_false = 5 > 10;
+    let gt_eq = 5 > 5;
+
+    // Greater than or equal operator (>=)
+    let gte1 = 10 >= 5;
+    let gte2 = 5 >= 5;
+    let gte3 = 'z' >= 'z';
+    let gte4 = 3.14 >= 3.14;
+    let gte_false = 5 >= 10;
+}
+
+fn test_chained(x: Int) {
+    // Chained comparisons (if supported)
+    let in_range = 0 < x && x < 100;
+    let chained = 0 <= x && x <= 100;
+
+    // Comparison with different types (after coercion)
+    let int_val: Int = 42;
+    let float_val: Float = 42.0;
+    let mixed_eq = (int_val as Float) == float_val;
+}
+
+fn test_conditionals() {
+    // Comparison in conditionals
+    let a = 10;
+    let b = 20;
+
+    if a < b {
+        let result = "a is smaller";
+    }
+
+    if a == b {
+        let result = "equal";
+    } else if a > b {
+        let result = "a is greater";
+    } else {
+        let result = "b is greater";
+    }
+
+    // Comparison in loops
+    let mut i = 0;
+    while i < 10 {
+        i = i + 1;
+    }
+
+    for j in 0..10 {
+        if j >= 5 {
+            break;
+        }
+    }
+}
+
+// Comparison in match guards
+fn classify(n: Int) -> Text {
+    match n {
+        _ if n < 0 => "negative"
+        _ if n == 0 => "zero"
+        _ if n > 0 && n <= 10 => "small positive"
+        _ if n > 10 && n <= 100 => "medium positive"
+        _ => "large positive"
+    }
+}
+
+// Comparison of complex types
+type Point is { x: Int, y: Int };
+
+implement PartialEq for Point {
+    fn eq(&self, other: &Point) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+fn test_complex_comparison() {
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 1, y: 2 };
+    let p3 = Point { x: 3, y: 4 };
+
+    let points_eq = p1 == p2;
+    let points_neq = p1 != p3;
+}
+
+// Ordering comparisons
+implement Ord for Point {
+    fn cmp(&self, other: &Point) -> Ordering {
+        match self.x.cmp(&other.x) {
+            Ordering.Equal => self.y.cmp(&other.y)
+            ord => ord
+        }
+    }
+}
+
+fn test_ordering_comparison() {
+    let p1 = Point { x: 1, y: 2 };
+    let p3 = Point { x: 3, y: 4 };
+    let p_less = p1 < p3;
+    let p_greater = p3 > p1;
+
+    // String comparison (lexicographic)
+    let str_eq = "apple" == "apple";
+    let str_lt = "apple" < "banana";
+    let str_gt = "banana" > "apple";
+    let str_lte = "apple" <= "apple";
+
+    // Array/List comparison (element-wise)
+    let arr1 = [1, 2, 3];
+    let arr2 = [1, 2, 3];
+    let arr3 = [1, 2, 4];
+    let arr_eq = arr1 == arr2;
+    let arr_lt = arr1 < arr3;
+}
+
+// Floating point comparison (with epsilon)
+fn float_eq(a: Float, b: Float, epsilon: Float) -> Bool {
+    (a - b).abs() < epsilon
+}
+
+fn test_float_comparison() {
+    let f1 = 0.1 + 0.2;
+    let f2 = 0.3;
+    let nearly_eq = float_eq(f1, f2, 1e-10);
+
+    // Comparison returning Ordering
+    let ordering = 5.cmp(10);  // Ordering.Less
+    let is_less = ordering == Ordering.Less;
+    let is_equal = ordering == Ordering.Equal;
+    let is_greater = ordering == Ordering.Greater;
+}
+
+// Min/max using comparisons
+fn min(a: Int, b: Int) -> Int {
+    if a <= b { a } else { b }
+}
+
+fn max(a: Int, b: Int) -> Int {
+    if a >= b { a } else { b }
+}
+
+// Clamp using comparisons
+fn clamp(value: Int, min_val: Int, max_val: Int) -> Int {
+    if value < min_val {
+        min_val
+    } else if value > max_val {
+        max_val
+    } else {
+        value
+    }
+}

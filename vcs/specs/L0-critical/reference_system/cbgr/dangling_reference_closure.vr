@@ -1,0 +1,27 @@
+// @test: run-interpreter-panic
+// @expected-panic: CBGR use-after-free detected
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, dangling, closures, runtime, negative-test
+
+/// Test closure capturing reference to dropped value - detected at runtime via CBGR.
+/// The closure captures a reference, but the target is dropped when function returns.
+/// CBGR detects the dangling reference when closure is invoked.
+/// Spec: 26-cbgr-implementation.md#dangling-prevention
+
+fn create_dangling_closure() -> Heap<fn() -> Int> {
+    let local = 42;
+    let local_ref = &local;
+
+    // Closure captures reference - CBGR tracks generation
+    Heap(|| {
+        *local_ref
+    })
+}
+// local is dropped here, generation bumped
+
+fn main() {
+    let closure = create_dangling_closure();
+    // CBGR detects generation mismatch when closure tries to dereference
+    print((*closure)());  // PANIC: generation mismatch (local no longer exists)
+}

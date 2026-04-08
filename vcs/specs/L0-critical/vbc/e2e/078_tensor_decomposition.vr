@@ -1,0 +1,276 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, decomposition
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Tensor decomposition — LU, QR-like, SVD concepts, eigenvalue estimation
+
+// ============================================================================
+// Float helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool {
+    abs_f(a - b) < tol
+}
+
+fn newton_step(g: Float, x: Float) -> Float {
+    (g + x / g) / 2.0
+}
+
+fn approx_sqrt(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let g0 = if x < 2.0 { 1.0 } else { x / 2.0 };
+        let g1 = newton_step(g0, x);
+        let g2 = newton_step(g1, x);
+        let g3 = newton_step(g2, x);
+        newton_step(g3, x)
+    }
+}
+
+// ============================================================================
+// 2x2 float matrix — use getter to avoid multi-field access bug
+// ============================================================================
+
+type Mat2x2 is { a00: Float, a01: Float, a10: Float, a11: Float };
+
+fn mg(m: Mat2x2, r: Int, c: Int) -> Float {
+    if r == 0 {
+        if c == 0 { m.a00 } else { m.a01 }
+    } else {
+        if c == 0 { m.a10 } else { m.a11 }
+    }
+}
+
+fn mat_mul_elem(a: Mat2x2, b: Mat2x2, r: Int, c: Int) -> Float {
+    let ar0 = mg(a, r, 0);
+    let b0c = mg(b, 0, c);
+    let ar1 = mg(a, r, 1);
+    let b1c = mg(b, 1, c);
+    ar0 * b0c + ar1 * b1c
+}
+
+fn mat_mul(a: Mat2x2, b: Mat2x2) -> Mat2x2 {
+    Mat2x2 {
+        a00: mat_mul_elem(a, b, 0, 0),
+        a01: mat_mul_elem(a, b, 0, 1),
+        a10: mat_mul_elem(a, b, 1, 0),
+        a11: mat_mul_elem(a, b, 1, 1)
+    }
+}
+
+fn mat_det(m: Mat2x2) -> Float {
+    let d00 = mg(m, 0, 0);
+    let d11 = mg(m, 1, 1);
+    let d01 = mg(m, 0, 1);
+    let d10 = mg(m, 1, 0);
+    d00 * d11 - d01 * d10
+}
+
+fn mat_inverse(a: Mat2x2) -> Mat2x2 {
+    let inv_det = 1.0 / mat_det(a);
+    let d00 = mg(a, 0, 0);
+    let d01 = mg(a, 0, 1);
+    let d10 = mg(a, 1, 0);
+    let d11 = mg(a, 1, 1);
+    Mat2x2 {
+        a00: d11 * inv_det,
+        a01: (0.0 - d01) * inv_det,
+        a10: (0.0 - d10) * inv_det,
+        a11: d00 * inv_det
+    }
+}
+
+// ============================================================================
+// 2-element float vector — use getter
+// ============================================================================
+
+type Vec2 is { x: Float, y: Float };
+
+fn vg(v: Vec2, i: Int) -> Float {
+    if i == 0 { v.x } else { v.y }
+}
+
+fn vec2_dot(a: Vec2, b: Vec2) -> Float {
+    let ax = vg(a, 0);
+    let ay = vg(a, 1);
+    let bx = vg(b, 0);
+    let b_y = vg(b, 1);
+    ax * bx + ay * b_y
+}
+
+fn vec2_norm(v: Vec2) -> Float {
+    let vx = vg(v, 0);
+    let vy = vg(v, 1);
+    approx_sqrt(vx * vx + vy * vy)
+}
+
+fn vec2_normalize(v: Vec2) -> Vec2 {
+    let n = vec2_norm(v);
+    let vx = vg(v, 0);
+    let vy = vg(v, 1);
+    Vec2 { x: vx / n, y: vy / n }
+}
+
+fn vec2_scale(v: Vec2, s: Float) -> Vec2 {
+    Vec2 { x: vg(v, 0) * s, y: vg(v, 1) * s }
+}
+
+fn vec2_sub(a: Vec2, b: Vec2) -> Vec2 {
+    Vec2 { x: vg(a, 0) - vg(b, 0), y: vg(a, 1) - vg(b, 1) }
+}
+
+fn mat_vec_mul(m: Mat2x2, v: Vec2) -> Vec2 {
+    let vx = vg(v, 0);
+    let vy = vg(v, 1);
+    let rx = mg(m, 0, 0) * vx + mg(m, 0, 1) * vy;
+    let ry = mg(m, 1, 0) * vx + mg(m, 1, 1) * vy;
+    Vec2 { x: rx, y: ry }
+}
+
+// ============================================================================
+// Test 1: LU decomposition 2x2
+// ============================================================================
+
+fn lu_verify(l_mat: Mat2x2, u_mat: Mat2x2) {
+    let prod = mat_mul(l_mat, u_mat);
+    assert(approx_eq(mg(prod, 0, 0), 4.0, 0.001));
+    assert(approx_eq(mg(prod, 0, 1), 3.0, 0.001));
+    assert(approx_eq(mg(prod, 1, 0), 6.0, 0.001));
+    assert(approx_eq(mg(prod, 1, 1), 3.0, 0.001));
+}
+
+fn do_lu_test() {
+    let l10 = 6.0 / 4.0;
+    let u11 = 3.0 - l10 * 3.0;
+    assert(approx_eq(l10, 1.5, 0.001));
+    assert(approx_eq(u11, 0.0 - 1.5, 0.001));
+    let l_mat = Mat2x2 { a00: 1.0, a01: 0.0, a10: l10, a11: 1.0 };
+    let u_mat = Mat2x2 { a00: 4.0, a01: 3.0, a10: 0.0, a11: u11 };
+    lu_verify(l_mat, u_mat);
+    let det_lu = 4.0 * u11;
+    assert(approx_eq(det_lu, 0.0 - 6.0, 0.001));
+    print("  test_lu_decomposition_2x2: ok");
+}
+
+// ============================================================================
+// Test 2: Power iteration
+// ============================================================================
+
+fn power_step(mat: Mat2x2, v: Vec2) -> Vec2 {
+    let w = mat_vec_mul(mat, v);
+    vec2_normalize(w)
+}
+
+fn rayleigh_quotient(mat: Mat2x2, v: Vec2) -> Float {
+    let av = mat_vec_mul(mat, v);
+    vec2_dot(v, av)
+}
+
+fn do_power_iteration_test() {
+    let mat = Mat2x2 { a00: 2.0, a01: 1.0, a10: 1.0, a11: 3.0 };
+    let mut v = Vec2 { x: 1.0, y: 1.0 };
+    let mut iter = 0;
+    while iter < 20 {
+        v = power_step(mat, v);
+        iter = iter + 1;
+    }
+    let eigenvalue = rayleigh_quotient(mat, v);
+    assert(approx_eq(eigenvalue, 3.618, 0.01));
+    let vx_abs = abs_f(vg(v, 0));
+    let vy_abs = abs_f(vg(v, 1));
+    assert(approx_eq(vx_abs, 0.5257, 0.02));
+    assert(approx_eq(vy_abs, 0.8507, 0.02));
+    print("  test_power_iteration: ok");
+}
+
+// ============================================================================
+// Test 3: Gram-Schmidt
+// ============================================================================
+
+fn gs_project_out(v: Vec2, u: Vec2) -> Vec2 {
+    let coeff = vec2_dot(v, u);
+    let proj = vec2_scale(u, coeff);
+    vec2_sub(v, proj)
+}
+
+fn do_gram_schmidt_test() {
+    let v1 = Vec2 { x: 3.0, y: 1.0 };
+    let u1 = vec2_normalize(v1);
+    assert(approx_eq(vg(u1, 0), 0.9487, 0.01));
+    assert(approx_eq(vg(u1, 1), 0.3162, 0.01));
+    let v2 = Vec2 { x: 2.0, y: 2.0 };
+    let ortho = gs_project_out(v2, u1);
+    let u2 = vec2_normalize(ortho);
+    let dot = vec2_dot(u1, u2);
+    assert(approx_eq(dot, 0.0, 0.001));
+    assert(approx_eq(vec2_norm(u1), 1.0, 0.001));
+    assert(approx_eq(vec2_norm(u2), 1.0, 0.001));
+    print("  test_gram_schmidt_2d: ok");
+}
+
+// ============================================================================
+// Test 4: Matrix inverse 2x2
+// ============================================================================
+
+fn do_matrix_inverse_test() {
+    let a = Mat2x2 { a00: 4.0, a01: 7.0, a10: 2.0, a11: 6.0 };
+    assert(approx_eq(mat_det(a), 10.0, 0.001));
+    let inv = mat_inverse(a);
+    assert(approx_eq(mg(inv, 0, 0), 0.6, 0.001));
+    assert(approx_eq(mg(inv, 0, 1), 0.0 - 0.7, 0.001));
+    assert(approx_eq(mg(inv, 1, 0), 0.0 - 0.2, 0.001));
+    assert(approx_eq(mg(inv, 1, 1), 0.4, 0.001));
+    let prod = mat_mul(a, inv);
+    assert(approx_eq(mg(prod, 0, 0), 1.0, 0.001));
+    assert(approx_eq(mg(prod, 0, 1), 0.0, 0.001));
+    assert(approx_eq(mg(prod, 1, 0), 0.0, 0.001));
+    assert(approx_eq(mg(prod, 1, 1), 1.0, 0.001));
+    print("  test_matrix_inverse_2x2: ok");
+}
+
+// ============================================================================
+// Test 5: Condition number
+// ============================================================================
+
+fn compute_eigenvalue(mat: Mat2x2, v0: Vec2) -> Float {
+    let mut v = v0;
+    let mut iter = 0;
+    while iter < 20 {
+        v = power_step(mat, v);
+        iter = iter + 1;
+    }
+    rayleigh_quotient(mat, v)
+}
+
+fn do_condition_number_test() {
+    let mat = Mat2x2 { a00: 2.0, a01: 1.0, a10: 1.0, a11: 3.0 };
+    let lambda_max = compute_eigenvalue(mat, Vec2 { x: 1.0, y: 1.0 });
+    let inv = mat_inverse(mat);
+    let lambda_inv = compute_eigenvalue(inv, Vec2 { x: 1.0, y: 0.0 - 1.0 });
+    let lambda_min = 1.0 / lambda_inv;
+    let cond = lambda_max / lambda_min;
+    assert(approx_eq(lambda_max, 3.618, 0.02));
+    assert(approx_eq(lambda_min, 1.382, 0.02));
+    assert(approx_eq(cond, 2.618, 0.05));
+    print("  test_condition_number: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    do_lu_test();
+    do_power_iteration_test();
+    do_gram_schmidt_test();
+    do_matrix_inverse_test();
+    do_condition_number_test();
+    print("[OK] 078_tensor_decomposition");
+    0
+}

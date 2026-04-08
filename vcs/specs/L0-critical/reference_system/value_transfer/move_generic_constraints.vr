@@ -1,0 +1,204 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine, generics, advanced
+
+/// Test copy and affine semantics with generic type constraints.
+/// Verifies that behavior respects protocol bounds.
+/// Regular types are copied, affine types are moved.
+/// Spec: 04-memory-model.md#generic-constraints
+
+// Affine type
+type affine Resource is {
+    id: Int,
+    name: Text,
+};
+
+fn main() {
+    test_generic_copy_non_affine();
+    test_generic_copy_primitives();
+    test_generic_where_copy();
+    test_generic_conditional();
+    test_nested_generic_copy();
+    test_generic_affine_move();
+}
+
+/// Generic function that accepts any type
+fn consume<T>(value: T) {
+    // value is copied (if Copy) or moved (if affine) into this function
+    let _ = value;
+}
+
+/// Generic function that accepts and returns
+fn identity<T>(value: T) -> T {
+    value  // Value is copied out (if Copy) or moved out (if affine)
+}
+
+/// Test copy types through generics
+fn test_generic_copy_non_affine() {
+    // Text is Copy, so it's copied through generic
+    let s = Text.from("generic copy");
+    consume(s);
+    // s is still valid (Text is Copy)
+    assert(s == "generic copy");
+
+    // List is Copy
+    let list = [1, 2, 3];
+    let list2 = identity(list);
+    // Both valid
+    assert(list.len() == 3);
+    assert(list2.len() == 3);
+
+    // Map is Copy
+    let mut map = Map.new();
+    map.insert("key", 42);
+    let map2 = identity(map);
+    // Both valid
+    assert(map.get("key") == Some(42));
+    assert(map2.get("key") == Some(42));
+}
+
+/// Test primitive Copy types through generics
+fn test_generic_copy_primitives() {
+    // Int is Copy
+    let x: Int = 42;
+    consume(x);
+    // x is still valid
+    assert(x == 42);
+
+    // Bool is Copy
+    let b: Bool = true;
+    let b2 = identity(b);
+    assert(b == true);   // b still valid
+    assert(b2 == true);
+
+    // Float is Copy
+    let f: Float = 3.14;
+    consume(f);
+    assert(f == 3.14);  // f still valid
+}
+
+/// Generic function with Copy bound
+fn copy_and_use<T>(value: T) -> (T, T)
+where type T: Copy
+{
+    // T is Copy, so we can use value multiple times
+    let a = value;
+    let b = value;
+    (a, b)
+}
+
+fn test_generic_where_copy() {
+    // Works with Copy types
+    let (a, b) = copy_and_use(42);
+    assert(a == 42);
+    assert(b == 42);
+
+    // Also works with tuples of Copy types
+    let (p1, p2) = copy_and_use((1, 2));
+    assert(p1.0 == 1);
+    assert(p2.1 == 2);
+}
+
+/// Generic that conditionally returns
+fn conditional_transfer<T>(value: T, condition: Bool) -> Maybe<T> {
+    if condition {
+        Some(value)  // value copied into Some (if Copy)
+    } else {
+        None  // value is dropped here
+    }
+}
+
+fn test_generic_conditional() {
+    // When condition is true, value is copied into result
+    let text = Text.from("hello");
+    let result = conditional_transfer(text, true);
+    assert(result == Some(Text.from("hello")));
+    // text is still valid (Text is Copy)
+    assert(text == "hello");
+
+    // When condition is false, value is dropped
+    let text2 = Text.from("dropped");
+    let result2 = conditional_transfer(text2, false);
+    assert(result2 == None);
+    // text2 is still valid (Text is Copy)
+    assert(text2 == "dropped");
+}
+
+/// Nested generic wrapper
+type Wrapper<T> is {
+    inner: T,
+};
+
+implement<T> Wrapper<T> {
+    fn new(value: T) -> Self {
+        Wrapper { inner: value }  // value copied into field (if Copy)
+    }
+
+    fn into_inner(self) -> T {
+        self.inner  // inner copied out, self dropped
+    }
+}
+
+fn test_nested_generic_copy() {
+    // Create nested wrappers with copy type
+    let inner_text = Text.from("nested");
+    let wrapper1 = Wrapper.new(inner_text);
+    // inner_text is still valid (Text is Copy)
+    assert(inner_text == "nested");
+
+    let wrapper2 = Wrapper.new(wrapper1);
+    // wrapper1 is still valid (Wrapper<Text> is Copy)
+
+    // Unwrap both layers
+    let unwrapped1 = wrapper2.into_inner();
+    let unwrapped2 = unwrapped1.into_inner();
+
+    assert(unwrapped2 == "nested");
+}
+
+/// Test affine types through generics
+fn test_generic_affine_move() {
+    // Resource is affine, so it moves
+    let res = Resource { id: 1, name: Text.from("resource") };
+    consume(res);
+    // res is NO LONGER valid (Resource is affine)
+    // print(res.name);  // Would panic
+
+    // Affine through identity
+    let res2 = Resource { id: 2, name: Text.from("another") };
+    let res3 = identity(res2);
+    // res2 is invalid, res3 is valid
+    assert(res3.id == 2);
+}
+
+/// Test generic with protocol bounds
+type Displayable is protocol {
+    fn display(&self) -> Text;
+};
+
+fn show_and_return<T>(value: T) -> T
+where type T: Displayable
+{
+    let displayed = value.display();
+    print(displayed);
+    value  // Return (copy if Copy, move if affine)
+}
+
+type Message is {
+    content: Text,
+};
+
+implement Displayable for Message {
+    fn display(&self) -> Text {
+        self.content
+    }
+}
+
+fn test_generic_protocol() {
+    let msg = Message { content: Text.from("Hello!") };
+    let msg2 = show_and_return(msg);
+    // Both valid (Message is Copy)
+    assert(msg.content == "Hello!");
+    assert(msg2.content == "Hello!");
+}

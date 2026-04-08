@@ -1,0 +1,24 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M400
+// @tags: meta, quote, hygiene, splice, unbound
+// @description: Tests detection of unbound splice variables
+
+// =============================================================================
+// UNBOUND SPLICE VARIABLE
+// =============================================================================
+
+// M400: Unbound splice - variable not in scope for splicing
+
+meta fn unbound_splice_error() -> TokenStream {
+    // Note: 'undefined_var' is never defined
+    quote {
+        let x = ${undefined_var};  // ERROR: M400 - 'undefined_var' not in scope
+        x
+    }
+}
+
+fn main() {
+    @unbound_splice_error();
+}

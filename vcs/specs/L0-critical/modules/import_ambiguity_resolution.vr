@@ -1,0 +1,53 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: modules, imports, ambiguity, resolution
+
+/// Import ambiguity resolution patterns.
+/// Shows how to properly resolve ambiguous imports.
+
+module module_a {
+    pub type Error is {
+        code: Int,
+        message: Text
+    };
+}
+
+module module_b {
+    pub type Error is {
+        kind: Text,
+        description: Text
+    };
+}
+
+module consumer {
+    // CORRECT: Use explicit renaming to avoid ambiguity
+    mount cog.module_a.Error as ErrorA;
+    mount cog.module_b.Error as ErrorB;
+
+    pub fn use_both_errors() {
+        let a = ErrorA { code: 404, message: "Not found" };
+        let b = ErrorB { kind: "network", description: "Connection failed" };
+    }
+}
+
+module consumer_qualified {
+    // CORRECT: Use qualified paths instead of importing
+    pub fn use_qualified() {
+        let a = cog.module_a.Error { code: 500, message: "Server error" };
+        let b = cog.module_b.Error { kind: "io", description: "Read failed" };
+    }
+}
+
+module consumer_selective {
+    // CORRECT: Only mount what you need from each
+    mount cog.module_a.Error;  // Only one Error imported
+
+    pub fn use_single() {
+        let e = Error { code: 200, message: "OK" };
+    }
+}
+
+fn main() -> Int {
+    0
+}

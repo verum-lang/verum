@@ -1,0 +1,195 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, delimiters, punctuation
+
+// Punctuation tokens: , ; : . -> =>
+
+// Comma (,) - separator in lists, parameters, generics
+fn test_commas() {
+    // Array elements
+    let arr = [1, 2, 3, 4, 5];
+    let arr_trailing = [1, 2, 3,];
+
+    // Tuple elements
+    let tuple = (1, 2, 3);
+    let tuple_trailing = (1, 2, 3,);
+
+    // Function arguments
+    let result = multi_params(1, 2, 3);
+    let result2 = multi_params(1, 2, 3,);
+
+    // Destructuring
+    let (a, b, c) = (1, 2, 3);
+}
+
+// Function parameters
+fn multi_params(a: Int, b: Int, c: Int) -> Int {
+    a + b + c
+}
+
+fn with_trailing(x: Int, y: Int,) -> Int {
+    x + y
+}
+
+// Generic type parameters
+type Multi<A, B, C> is { a: A, b: B, c: C };
+
+// Struct fields
+type Person is {
+    name: Text,
+    age: Int,
+    email: Text,
+};
+
+// Map entries test
+fn test_maps() {
+    let map = { "a": 1, "b": 2, "c": 3 };
+}
+
+// Imports
+// use std.io.{Read, Write, BufRead};
+
+// Semicolon (;) - statement terminator, type separator
+fn test_semicolons() {
+    // Statement termination
+    let x = 42;
+    let y = 3.14;
+    do_something();
+
+    // Multiple statements on one line
+    let a = 1; let b = 2; let c = 3;
+
+    // Expression vs statement
+    let block_expr = { let temp = 5; temp * 2 };  // Returns value
+    let block_stmt = { let temp = 5; temp * 2; };  // Returns ()
+}
+
+// Array type with size
+type FixedArray is [Int; 5];
+type Matrix is [[Int; 3]; 3];
+
+// Colon (:) - type annotations, struct fields, match arms
+fn test_colons() {
+    // Type annotations
+    let x: Int = 42;
+    let y: Float = 3.14;
+    let z: Text = "hello";
+    let arr: List<Int> = [1, 2, 3];
+}
+
+// Function parameter types
+fn typed_params(x: Int, y: Float) -> Text {
+    f"{x}, {y}"
+}
+
+// Function return type
+fn returns_int() -> Int { 42 }
+fn returns_tuple() -> (Int, Text) { (1, "one") }
+
+// Struct field definitions
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// Struct field values and map test
+fn test_struct_and_map() {
+    let point = Point { x: 10, y: 20 };
+    let map = { "key": "value", "count": 42 };
+}
+
+// Generic constraints
+fn bounded<T: Display + Clone>() {}
+type Constrained<T: Ord> is { value: T };
+
+// Labeled loops
+fn test_labeled_loops() {
+    'outer: for i in 0..10 {
+        'inner: for j in 0..10 {
+            if i == j { break 'outer; }
+        }
+    }
+}
+
+// Dot (.) - member access, method calls, float literals
+fn test_dots() {
+    // Struct field access
+    let point = Point { x: 1, y: 2 };
+    let x = point.x;
+
+    // Method calls
+    let text = "hello";
+    let len = text.len();
+    let upper = text.to_upper();
+
+    // Chained method calls
+    let result = text.trim().to_upper().len();
+
+    // Float literals
+    let float = 3.14;
+    let precise = 3.14159265;
+
+    // Range with dots
+    let range = 0..10;
+    let inclusive = 0..=10;
+}
+
+// Arrow (->) - return types, closure types
+fn test_arrows() {
+    // Closure type annotation
+    let closure: fn(Int) -> Int = |x| x * 2;
+    let complex_closure: fn(Int, Int) -> (Int, Int) = |a, b| (b, a);
+}
+
+// Function types
+type Callback is fn(Int) -> Int;
+type Handler is fn(Event) -> Result<Response, Error>;
+
+// Fat arrow (=>) - match arms
+fn describe(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        _ => "many",
+    }
+}
+
+// Match with patterns
+fn test_match_patterns() {
+    let result: Result<Int, Error> = Ok(42);
+    match result {
+        Ok(value) => process(value),
+        Err(error) => handle_error(error),
+    }
+}
+
+// Match with guards
+fn test_match_guards() {
+    let value = 5;
+    let description = match value {
+        n if n < 0 => "negative",
+        n if n > 0 => "positive",
+        _ => "zero",
+    };
+}
+
+// Closure body (single expression)
+fn test_closures() {
+    let double = |x| x * 2;
+    let add = |a, b| a + b;
+}
+
+// Combined punctuation usage
+fn complex_function<T: Display>(items: List<T>, filter: fn(T) -> Bool) -> Result<List<T>, Error> {
+    let filtered: List<T> = items
+        .iter()
+        .filter(filter)
+        .collect();
+
+    match filtered.len() {
+        0 => Err(Error.Empty),
+        _ => Ok(filtered),
+    }
+}

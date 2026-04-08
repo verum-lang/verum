@@ -1,0 +1,58 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, closures, functional
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential test: advanced closure patterns (interpreter vs AOT)
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int { f(g(x)) }
+fn twice(f: fn(Int) -> Int, x: Int) -> Int { f(f(x)) }
+
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let square = |x: Int| -> Int { x * x };
+
+    // Basic apply
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(square, 4), 16);
+
+    // Compose
+    assert_eq(compose(double, inc, 5), 12);  // double(inc(5)) = double(6) = 12
+    assert_eq(compose(inc, double, 5), 11);  // inc(double(5)) = inc(10) = 11
+    assert_eq(compose(square, inc, 3), 16);  // square(inc(3)) = square(4) = 16
+
+    // Twice
+    assert_eq(twice(double, 3), 12);  // double(double(3)) = 12
+    assert_eq(twice(inc, 0), 2);      // inc(inc(0)) = 2
+
+    // Fold
+    let add = |acc: Int, x: Int| -> Int { acc + x };
+    assert_eq(fold_range(1, 6, 0, add), 15);  // 1+2+3+4+5 = 15
+
+    let mul = |acc: Int, x: Int| -> Int { acc * x };
+    assert_eq(fold_range(1, 6, 1, mul), 120);  // 5! = 120
+
+    // Count evens in range
+    let count_even = |acc: Int, x: Int| -> Int {
+        if x % 2 == 0 { acc + 1 } else { acc }
+    };
+    assert_eq(fold_range(1, 11, 0, count_even), 5);  // 2,4,6,8,10
+
+    print("DIFF_OK: closures_advanced");
+    0
+}

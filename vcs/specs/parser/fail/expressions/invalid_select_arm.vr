@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, select, arm, error
+// @description: Select arm missing await on future
+// @expected-error: E018
+
+async fn test() {
+    select {
+        x = future1 => process(x),  // Missing .await
+        y = future2.await => process(y)
+    }
+}

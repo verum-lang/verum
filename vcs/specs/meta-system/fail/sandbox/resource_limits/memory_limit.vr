@@ -1,0 +1,21 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M304
+// @description: Tests iteration limit enforcement in meta evaluation sandbox
+// @tags: meta-system, sandbox, iteration, resource-limits
+
+// Try to execute too many loop iterations during meta evaluation
+meta fn iteration_hog() -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    // Attempt to run more iterations than allowed (limit is 10,000)
+    while i < 100000 {
+        result = result + i;  // ERROR: M304 IterationLimitExceeded
+        i = i + 1;
+    }
+    result
+}
+
+fn main() {
+    @const assert(iteration_hog() > 0);
+}

@@ -1,0 +1,192 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, patterns, view-patterns, pattern-matching
+// @timeout: 10000
+// @expect: pass
+//
+// View Pattern Tests
+//
+// View patterns apply a transformation function to the scrutinee, then match
+// the result against an inner pattern.
+//
+// Grammar (from verum.ebnf):
+//   view_pattern = ( identifier | qualified_path ) , '->' , primary_pattern ;
+//
+// Examples:
+//   parity -> Even(k)       — apply parity(), match against Even(k)
+//   json.parse -> Ok(data)  — apply json.parse(), match against Ok(data)
+//   f -> g -> pat           — nested: apply f, then g, match pat
+
+// =============================================================================
+// Type Definitions for View Patterns
+// =============================================================================
+
+type Parity is Even(Int) | Odd(Int);
+
+type Classification is Small | Medium | Large;
+
+type ParseResult is Ok(Int) | Err(Text);
+
+// =============================================================================
+// View Functions
+// =============================================================================
+
+fn parity(n: Int) -> Parity {
+    if n % 2 == 0 {
+        Even(n / 2)
+    } else {
+        Odd(n)
+    }
+}
+
+fn classify(n: Int) -> Classification {
+    if n < 10 {
+        Small
+    } else if n < 100 {
+        Medium
+    } else {
+        Large
+    }
+}
+
+fn abs_value(n: Int) -> Int {
+    if n < 0 { 0 - n } else { n }
+}
+
+fn parse_int(s: Text) -> ParseResult {
+    Ok(42)
+}
+
+// =============================================================================
+// Basic View Pattern in Match
+// =============================================================================
+
+fn test_basic_view_pattern() {
+    let x = 42;
+    match x {
+        parity -> Even(k) => {
+            assert_eq(k, 21);
+        },
+        parity -> Odd(n) => {
+            panic("should be even");
+        },
+    };
+}
+
+// =============================================================================
+// View Pattern with Classification
+// =============================================================================
+
+fn test_classification_view_pattern() {
+    let n = 50;
+    match n {
+        classify -> Small  => panic("wrong"),
+        classify -> Medium => assert(true),
+        classify -> Large  => panic("wrong"),
+    };
+}
+
+// =============================================================================
+// Qualified Path View Pattern
+// =============================================================================
+
+fn test_qualified_path_view() {
+    let s = "123";
+    match s {
+        parse_int -> Ok(n)  => assert_eq(n, 42),
+        parse_int -> Err(e) => panic("parse failed"),
+    };
+}
+
+// =============================================================================
+// View Pattern with Wildcard
+// =============================================================================
+
+fn test_view_pattern_wildcard() {
+    let x = 7;
+    match x {
+        parity -> _ => assert(true),
+    };
+}
+
+// =============================================================================
+// View Pattern with Guard
+// =============================================================================
+
+fn test_view_pattern_with_guard() {
+    let x = 10;
+    match x {
+        abs_value -> n if n > 5 => assert(true),
+        abs_value -> n           => panic("should be > 5"),
+    };
+}
+
+// =============================================================================
+// View Pattern with Literal
+// =============================================================================
+
+fn test_view_pattern_with_literal() {
+    let x = 0;
+    match x {
+        abs_value -> 0 => assert(true),
+        abs_value -> _ => panic("should be zero"),
+    };
+}
+
+// =============================================================================
+// Nested View Patterns (f -> g -> pat)
+// =============================================================================
+
+fn test_nested_view_pattern() {
+    let x = 50;
+    match x {
+        abs_value -> classify -> Medium => assert(true),
+        _ => panic("should be medium absolute value"),
+    };
+}
+
+// =============================================================================
+// View Pattern in Multiple Arms
+// =============================================================================
+
+fn test_view_pattern_multiple_arms() {
+    let values = [2, 3, 100, 7];
+    for v in values {
+        match v {
+            parity -> Even(k) => {
+                // k is half of v
+                assert_eq(k * 2, v);
+            },
+            parity -> Odd(n) => {
+                assert_eq(n, v);
+            },
+        };
+    }
+}
+
+// =============================================================================
+// View Pattern Mixed with Regular Patterns
+// =============================================================================
+
+fn test_mixed_patterns() {
+    let x = 42;
+    match x {
+        0 => panic("not zero"),
+        1 => panic("not one"),
+        parity -> Even(k) => assert_eq(k, 21),
+        _ => panic("should match even"),
+    };
+}
+
+fn main() {
+    test_basic_view_pattern();
+    test_classification_view_pattern();
+    test_qualified_path_view();
+    test_view_pattern_wildcard();
+    test_view_pattern_with_guard();
+    test_view_pattern_with_literal();
+    test_nested_view_pattern();
+    test_view_pattern_multiple_arms();
+    test_mixed_patterns();
+}

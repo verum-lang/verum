@@ -1,0 +1,276 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, integration
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Comprehensive integration test combining multiple language features
+
+// =============================================================================
+// Types
+// =============================================================================
+
+type Vec3 is { x: Int, y: Int, z: Int };
+
+implement Vec3 {
+    fn new(x: Int, y: Int, z: Int) -> Vec3 { Vec3 { x: x, y: y, z: z } }
+    fn zero() -> Vec3 { Vec3 { x: 0, y: 0, z: 0 } }
+    fn plus(self, other: Vec3) -> Vec3 {
+        Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z }
+    }
+    fn scaled(self, s: Int) -> Vec3 {
+        Vec3 { x: self.x * s, y: self.y * s, z: self.z * s }
+    }
+    fn dot(self, other: Vec3) -> Int {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
+    fn cross_x(self, other: Vec3) -> Int {
+        self.y * other.z - self.z * other.y
+    }
+    fn cross_y(self, other: Vec3) -> Int {
+        self.z * other.x - self.x * other.z
+    }
+    fn cross_z(self, other: Vec3) -> Int {
+        self.x * other.y - self.y * other.x
+    }
+    fn mag_sq(self) -> Int {
+        self.dot(self)
+    }
+    fn vec_str(self) -> Text {
+        f"({self.x}, {self.y}, {self.z})"
+    }
+}
+
+type Particle is { pos_x: Int, pos_y: Int, pos_z: Int, vel_x: Int, vel_y: Int, vel_z: Int, mass: Int };
+
+implement Particle {
+    fn new(px: Int, py: Int, pz: Int, vx: Int, vy: Int, vz: Int, mass: Int) -> Particle {
+        Particle { pos_x: px, pos_y: py, pos_z: pz, vel_x: vx, vel_y: vy, vel_z: vz, mass: mass }
+    }
+    fn step(self, dt: Int) -> Particle {
+        Particle {
+            pos_x: self.pos_x + self.vel_x * dt,
+            pos_y: self.pos_y + self.vel_y * dt,
+            pos_z: self.pos_z + self.vel_z * dt,
+            vel_x: self.vel_x,
+            vel_y: self.vel_y,
+            vel_z: self.vel_z,
+            mass: self.mass,
+        }
+    }
+    fn apply_force(self, fx: Int, fy: Int, fz: Int) -> Particle {
+        // F = ma, a = F/m (integer division)
+        let ax = fx / self.mass;
+        let ay = fy / self.mass;
+        let az = fz / self.mass;
+        Particle {
+            pos_x: self.pos_x,
+            pos_y: self.pos_y,
+            pos_z: self.pos_z,
+            vel_x: self.vel_x + ax,
+            vel_y: self.vel_y + ay,
+            vel_z: self.vel_z + az,
+            mass: self.mass,
+        }
+    }
+    fn kinetic_energy(self) -> Int {
+        let v_sq = self.vel_x * self.vel_x + self.vel_y * self.vel_y + self.vel_z * self.vel_z;
+        self.mass * v_sq / 2
+    }
+}
+
+// =============================================================================
+// Test 1: Vector arithmetic chains
+// =============================================================================
+
+fn test_vector_chains() {
+    let a = Vec3.new(1, 2, 3);
+    let b = Vec3.new(4, 5, 6);
+
+    let c = a.plus(b).scaled(2);
+    assert_eq(c.x, 10);
+    assert_eq(c.y, 14);
+    assert_eq(c.z, 18);
+
+    assert_eq(a.dot(b), 32); // 1*4 + 2*5 + 3*6
+
+    assert_eq(a.cross_x(b), -3);  // 2*6 - 3*5 = -3
+    assert_eq(a.cross_y(b), 6);   // 3*4 - 1*6 = 6
+    assert_eq(a.cross_z(b), -3);  // 1*5 - 2*4 = -3
+
+    let s = a.vec_str();
+    assert_eq(s, "(1, 2, 3)");
+    print("  test_vector_chains: ok");
+}
+
+// =============================================================================
+// Test 2: Particle simulation
+// =============================================================================
+
+fn test_particle_simulation() {
+    let mut p = Particle.new(0, 0, 0, 1, 0, 0, 10);
+
+    // Step 5 times
+    let mut i = 0;
+    while i < 5 {
+        p = p.step(1);
+        i = i + 1;
+    }
+    assert_eq(p.pos_x, 5);
+    assert_eq(p.pos_y, 0);
+    assert_eq(p.pos_z, 0);
+
+    // Apply force (gravity-like in y direction)
+    p = p.apply_force(0, -100, 0); // F=-100, m=10, a=-10
+    assert_eq(p.vel_y, -10);
+
+    // Step more
+    p = p.step(1);
+    assert_eq(p.pos_y, -10);
+
+    assert_eq(p.kinetic_energy() > 0, true);
+    print("  test_particle_simulation: ok");
+}
+
+// =============================================================================
+// Test 3: Higher-order functions with records
+// =============================================================================
+
+fn transform_list(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while i < items.len() {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn sum_list(items: List<Int>) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < items.len() {
+        total = total + items[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn test_higher_order_with_records() {
+    let data: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    let squared = transform_list(data, |x| x * x);
+    let sum_sq = sum_list(squared);
+    assert_eq(sum_sq, 385); // 1+4+9+16+25+36+49+64+81+100
+
+    let cubed = transform_list(data, |x| x * x * x);
+    let sum_cubed = sum_list(cubed);
+    assert_eq(sum_cubed, 3025); // sum of cubes 1..10
+    print("  test_higher_order_with_records: ok");
+}
+
+// =============================================================================
+// Test 4: Variant-based expression evaluator
+// =============================================================================
+
+type Op is OpAdd | OpSub | OpMul | OpDiv;
+
+fn apply_op(op: Op, a: Int, b: Int) -> Int {
+    match op {
+        OpAdd => a + b,
+        OpSub => a - b,
+        OpMul => a * b,
+        OpDiv => if b != 0 { a / b } else { 0 },
+    }
+}
+
+fn test_expression_evaluator() {
+    assert_eq(apply_op(OpAdd, 10, 3), 13);
+    assert_eq(apply_op(OpSub, 10, 3), 7);
+    assert_eq(apply_op(OpMul, 10, 3), 30);
+    assert_eq(apply_op(OpDiv, 10, 3), 3);
+    assert_eq(apply_op(OpDiv, 10, 0), 0);
+
+    // Chain operations
+    let result = apply_op(OpAdd,
+        apply_op(OpMul, 3, 4),
+        apply_op(OpSub, 10, 5));
+    assert_eq(result, 17); // (3*4) + (10-5) = 12+5
+    print("  test_expression_evaluator: ok");
+}
+
+// =============================================================================
+// Test 5: Complex algorithm: matrix power
+// =============================================================================
+
+fn mat2_mul(a: List<Int>, b: List<Int>) -> List<Int> {
+    let mut r: List<Int> = [0, 0, 0, 0];
+    r[0] = a[0] * b[0] + a[1] * b[2];
+    r[1] = a[0] * b[1] + a[1] * b[3];
+    r[2] = a[2] * b[0] + a[3] * b[2];
+    r[3] = a[2] * b[1] + a[3] * b[3];
+    r
+}
+
+@allow(unbounded_recursion)
+fn mat2_pow(m: List<Int>, n: Int) -> List<Int> {
+    if n == 0 {
+        return [1, 0, 0, 1]; // identity
+    }
+    if n == 1 {
+        return m;
+    }
+    if n % 2 == 0 {
+        let half = mat2_pow(m, n / 2);
+        return mat2_mul(half, half);
+    }
+    let sub = mat2_pow(m, n - 1);
+    mat2_mul(m, sub)
+}
+
+fn test_matrix_power() {
+    // Fibonacci via matrix exponentiation
+    // [[1,1],[1,0]]^n gives fib(n+1), fib(n), fib(n), fib(n-1)
+    let fib_mat: List<Int> = [1, 1, 1, 0];
+
+    let m10 = mat2_pow(fib_mat, 10);
+    assert_eq(m10[0], 89);  // fib(11)
+    assert_eq(m10[1], 55);  // fib(10)
+
+    let m20 = mat2_pow(fib_mat, 20);
+    assert_eq(m20[1], 6765); // fib(20)
+    print("  test_matrix_power: ok");
+}
+
+// =============================================================================
+// Test 6: String formatting integration
+// =============================================================================
+
+fn test_format_integration() {
+    let v = Vec3.new(42, -7, 100);
+    let desc = f"Vector: {v.vec_str()}, mag_sq={v.mag_sq()}";
+    assert_eq(desc, "Vector: (42, -7, 100), mag_sq=11813");
+
+    // Build report string
+    let mut report = "Results:\n";
+    let mut i = 1;
+    while i <= 3 {
+        report = report + f"  item {i}: {i * i}\n";
+        i = i + 1;
+    }
+    // Just verify it doesn't crash and produces something
+    assert_eq(report == "", false);
+    print("  test_format_integration: ok");
+}
+
+fn main() -> Int {
+    test_vector_chains();
+    test_particle_simulation();
+    test_higher_order_with_records();
+    test_expression_evaluator();
+    test_matrix_power();
+    test_format_integration();
+    print("[OK] 625_interp_comprehensive");
+    0
+}

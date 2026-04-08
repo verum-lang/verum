@@ -1,0 +1,31 @@
+fn main() -> Int {
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    print(f"len after inserts={s.len()}");
+
+    s.remove(20);
+    print(f"len after remove(20)={s.len()}");
+    if (s.len() != 2) {
+        print(f"FAIL: len={s.len()}, expected 2");
+        return 1;
+    }
+
+    let has20 = s.contains(20);
+    print(f"contains(20) after remove={has20}");
+    if (has20 != false) {
+        print("FAIL: should not contain 20");
+        return 1;
+    }
+
+    let has10 = s.contains(10);
+    print(f"contains(10)={has10}");
+    if (has10 != true) {
+        print("FAIL: should still contain 10");
+        return 1;
+    }
+
+    print("971_set_remove: PASS");
+    0
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, associated, syntax, error
+// @description: Test detection of associated type path without type name
+// @expected-error: E018
+
+// Associated type path must have a type name after the dot
+fn test<T: Iterator>(x: T.Item) where type T.: Display {}

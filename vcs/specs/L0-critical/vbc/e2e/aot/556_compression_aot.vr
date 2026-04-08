@@ -1,0 +1,221 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, compression, rle, encoding
+// @timeout: 30000
+
+// Run-length encoding and basic compression (simplified to avoid nested record returns)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// RLE encode inline: returns count of pairs, stores in provided output via mutation pattern
+// Encode packed as val*100 + run_length
+fn rle_count_runs(input: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let val = get8(input, i);
+        let mut run_len = 1;
+        while i + run_len < n {
+            if get8(input, i + run_len) == val { run_len = run_len + 1; }
+            else { run_len = run_len + n; } // break trick
+        }
+        if run_len > n { run_len = run_len - n; }
+        count = count + 1;
+        i = i + run_len;
+    }
+    count
+}
+
+fn rle_encode(input: Arr8, n: Int) -> Arr8 {
+    let mut output = zeros();
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i < n {
+        let val = get8(input, i);
+        let mut run_len = 1;
+        while i + run_len < n {
+            if get8(input, i + run_len) == val { run_len = run_len + 1; }
+            else { run_len = run_len + n; } // break trick
+        }
+        if run_len > n { run_len = run_len - n; }
+        if out_idx < 8 {
+            output = set8(output, out_idx, val * 100 + run_len);
+            out_idx = out_idx + 1;
+        }
+        i = i + run_len;
+    }
+    output
+}
+
+fn rle_pair_val(packed: Int) -> Int { packed / 100 }
+fn rle_pair_count(packed: Int) -> Int { packed % 100 }
+
+// RLE decode
+fn rle_decode(encoded: Arr8, n_pairs: Int) -> Arr8 {
+    let mut output = zeros();
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i < n_pairs {
+        let pair = get8(encoded, i);
+        let val = rle_pair_val(pair);
+        let cnt = rle_pair_count(pair);
+        let mut j = 0;
+        while j < cnt {
+            if out_idx < 8 {
+                output = set8(output, out_idx, val);
+                out_idx = out_idx + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    output
+}
+
+fn rle_decode_len(encoded: Arr8, n_pairs: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n_pairs {
+        total = total + rle_pair_count(get8(encoded, i));
+        i = i + 1;
+    }
+    total
+}
+
+// Move-to-Front encoding
+fn mtf_encode(input: Arr8, n: Int) -> Arr8 {
+    let mut alphabet = Arr8 { v0: 0, v1: 1, v2: 2, v3: 3, v4: 4, v5: 5, v6: 6, v7: 7 };
+    let mut output = zeros();
+    let mut i = 0;
+    while i < n {
+        let ch = get8(input, i);
+        // Find position of ch
+        let mut pos = 0;
+        while pos < 8 {
+            if get8(alphabet, pos) == ch { pos = pos + 100; } // found: break
+            else { pos = pos + 1; }
+        }
+        if pos >= 100 { pos = pos - 100; } // restore
+        output = set8(output, i, pos);
+        // Move ch to front
+        let mut j = pos;
+        while j > 0 {
+            alphabet = set8(alphabet, j, get8(alphabet, j - 1));
+            j = j - 1;
+        }
+        alphabet = set8(alphabet, 0, ch);
+        i = i + 1;
+    }
+    output
+}
+
+// Unique symbol count
+fn count_unique(data: Arr8, n: Int) -> Int {
+    let mut seen = zeros();
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let v = get8(data, i);
+        if v < 8 {
+            if get8(seen, v) == 0 {
+                seen = set8(seen, v, 1);
+                count = count + 1;
+            }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_rle_basic() -> Int {
+    let input = Arr8 { v0: 1, v1: 1, v2: 1, v3: 2, v4: 2, v5: 3, v6: 0, v7: 0 };
+    let num_runs = rle_count_runs(input, 6);
+    assert_eq(num_runs, 3);
+    let encoded = rle_encode(input, 6);
+    assert_eq(rle_pair_val(get8(encoded, 0)), 1);
+    assert_eq(rle_pair_count(get8(encoded, 0)), 3);
+    assert_eq(rle_pair_val(get8(encoded, 1)), 2);
+    assert_eq(rle_pair_count(get8(encoded, 1)), 2);
+    assert_eq(rle_pair_val(get8(encoded, 2)), 3);
+    assert_eq(rle_pair_count(get8(encoded, 2)), 1);
+    1
+}
+
+fn test_rle_roundtrip() -> Int {
+    let input = Arr8 { v0: 5, v1: 5, v2: 3, v3: 3, v4: 3, v5: 7, v6: 0, v7: 0 };
+    let num_runs = rle_count_runs(input, 6);
+    let encoded = rle_encode(input, 6);
+    let decoded = rle_decode(encoded, num_runs);
+    let dec_len = rle_decode_len(encoded, num_runs);
+    assert_eq(dec_len, 6);
+    assert_eq(get8(decoded, 0), 5);
+    assert_eq(get8(decoded, 1), 5);
+    assert_eq(get8(decoded, 2), 3);
+    assert_eq(get8(decoded, 5), 7);
+    1
+}
+
+fn test_rle_no_runs() -> Int {
+    let input = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(rle_count_runs(input, 4), 4);
+    1
+}
+
+fn test_rle_all_same() -> Int {
+    let input = Arr8 { v0: 7, v1: 7, v2: 7, v3: 7, v4: 7, v5: 7, v6: 0, v7: 0 };
+    assert_eq(rle_count_runs(input, 6), 1);
+    let encoded = rle_encode(input, 6);
+    assert_eq(rle_pair_val(get8(encoded, 0)), 7);
+    assert_eq(rle_pair_count(get8(encoded, 0)), 6);
+    1
+}
+
+fn test_mtf_repeated() -> Int {
+    let input = Arr8 { v0: 3, v1: 3, v2: 3, v3: 3, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let encoded = mtf_encode(input, 4);
+    assert_eq(get8(encoded, 0), 3); // 3 is at position 3 initially
+    assert_eq(get8(encoded, 1), 0); // now 3 is at front
+    assert_eq(get8(encoded, 2), 0);
+    assert_eq(get8(encoded, 3), 0);
+    1
+}
+
+fn test_count_unique() -> Int {
+    let data = Arr8 { v0: 1, v1: 2, v2: 1, v3: 3, v4: 2, v5: 1, v6: 0, v7: 0 };
+    assert_eq(count_unique(data, 6), 3);
+    let all_same = Arr8 { v0: 5, v1: 5, v2: 5, v3: 5, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_unique(all_same, 4), 1);
+    1
+}
+
+fn main() -> Int {
+    test_rle_basic();
+    test_rle_roundtrip();
+    test_rle_no_runs();
+    test_rle_all_same();
+    test_mtf_repeated();
+    test_count_unique();
+    print("[OK] 556_compression_aot");
+    0
+}

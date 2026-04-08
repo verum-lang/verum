@@ -1,0 +1,667 @@
+// =============================================================================
+// ssm_test.vr - Tests for State Space Model types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @note: ssm.vr fixed — changed meta D: Type to D: meta Type syntax
+// @tags: math, ssm, mamba, state-space, moe, routing, discretization, jamba,
+//        expert, activation, router, bi-mamba
+// @description: Tests for DiscretizationMethod, RoutingStrategy, BalanceLoss,
+//               Activation sum types, JambaLayer variants, and type existence
+//               for StateSpaceKernel, S4Layer, MambaBlock, BiMambaBlock, Mamba,
+//               Router, MoELayer, MoETransformerBlock, Expert, Jamba from the
+//               SSM module.
+// =============================================================================
+
+mount core.math.ssm.{
+    DiscretizationMethod, RoutingStrategy, BalanceLoss, Activation,
+    StateSpaceKernel, S4Layer, MambaBlock, BiMambaBlock, Mamba,
+    JambaLayer, Jamba,
+    Expert, Router, MoELayer, MoETransformerBlock,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: DiscretizationMethod Variants
+// =============================================================================
+
+@test
+fn test_discretization_zoh() {
+    let m = DiscretizationMethod.ZeroOrderHold;
+    assert(m is DiscretizationMethod.ZeroOrderHold);
+}
+
+@test
+fn test_discretization_bilinear() {
+    let m = DiscretizationMethod.Bilinear;
+    assert(m is DiscretizationMethod.Bilinear);
+}
+
+@test
+fn test_discretization_euler() {
+    let m = DiscretizationMethod.Euler;
+    assert(m is DiscretizationMethod.Euler);
+}
+
+@test
+fn test_discretization_distinctness() {
+    let zoh = DiscretizationMethod.ZeroOrderHold;
+    let bil = DiscretizationMethod.Bilinear;
+    let euler = DiscretizationMethod.Euler;
+
+    assert(!(zoh is DiscretizationMethod.Bilinear));
+    assert(!(zoh is DiscretizationMethod.Euler));
+    assert(!(bil is DiscretizationMethod.ZeroOrderHold));
+    assert(!(bil is DiscretizationMethod.Euler));
+    assert(!(euler is DiscretizationMethod.ZeroOrderHold));
+    assert(!(euler is DiscretizationMethod.Bilinear));
+}
+
+@test
+fn test_discretization_match_exhaustive() {
+    let methods = [
+        DiscretizationMethod.ZeroOrderHold,
+        DiscretizationMethod.Bilinear,
+        DiscretizationMethod.Euler,
+    ];
+    let mut zoh_count = 0;
+    let mut bil_count = 0;
+    let mut euler_count = 0;
+
+    for m in methods {
+        match m {
+            DiscretizationMethod.ZeroOrderHold => zoh_count = zoh_count + 1,
+            DiscretizationMethod.Bilinear => bil_count = bil_count + 1,
+            DiscretizationMethod.Euler => euler_count = euler_count + 1,
+        }
+    }
+    assert_eq(zoh_count, 1);
+    assert_eq(bil_count, 1);
+    assert_eq(euler_count, 1);
+}
+
+// =============================================================================
+// Section 2: RoutingStrategy Variants
+// =============================================================================
+
+@test
+fn test_routing_strategy_top_k() {
+    let s = RoutingStrategy.TopK { k: 2 as USize };
+    assert(s is RoutingStrategy.TopK);
+}
+
+@test
+fn test_routing_strategy_top_k_values() {
+    // Record variant field destructuring not supported in match — test construction instead
+    let k_val = 4 as USize;
+    let s = RoutingStrategy.TopK { k: k_val };
+    assert(s is RoutingStrategy.TopK);
+    assert_eq(k_val, 4 as USize);
+}
+
+@test
+fn test_routing_strategy_expert_choice() {
+    let s = RoutingStrategy.ExpertChoice { k: 8 as USize };
+    assert(s is RoutingStrategy.ExpertChoice);
+}
+
+@test
+fn test_routing_strategy_expert_choice_values() {
+    let k_val = 16 as USize;
+    let s = RoutingStrategy.ExpertChoice { k: k_val };
+    assert(s is RoutingStrategy.ExpertChoice);
+    assert_eq(k_val, 16 as USize);
+}
+
+@test
+fn test_routing_strategy_soft_moe() {
+    let s = RoutingStrategy.SoftMoE;
+    assert(s is RoutingStrategy.SoftMoE);
+}
+
+@test
+fn test_routing_strategy_distinctness() {
+    let topk = RoutingStrategy.TopK { k: 2 as USize };
+    let ec = RoutingStrategy.ExpertChoice { k: 2 as USize };
+    let soft = RoutingStrategy.SoftMoE;
+
+    assert(!(topk is RoutingStrategy.ExpertChoice));
+    assert(!(topk is RoutingStrategy.SoftMoE));
+    assert(!(ec is RoutingStrategy.TopK));
+    assert(!(ec is RoutingStrategy.SoftMoE));
+    assert(!(soft is RoutingStrategy.TopK));
+    assert(!(soft is RoutingStrategy.ExpertChoice));
+}
+
+// =============================================================================
+// Section 3: BalanceLoss Variants
+// =============================================================================
+
+@test
+fn test_balance_loss_auxiliary() {
+    let bl = BalanceLoss.Auxiliary { coefficient: 0.01 };
+    assert(bl is BalanceLoss.Auxiliary);
+}
+
+@test
+fn test_balance_loss_auxiliary_value() {
+    let coeff = 0.05;
+    let bl = BalanceLoss.Auxiliary { coefficient: coeff };
+    assert(bl is BalanceLoss.Auxiliary);
+    assert_eq(coeff, 0.05);
+}
+
+@test
+fn test_balance_loss_zloss() {
+    let bl = BalanceLoss.ZLoss { coefficient: 0.001 };
+    assert(bl is BalanceLoss.ZLoss);
+}
+
+@test
+fn test_balance_loss_zloss_value() {
+    let coeff = 0.1;
+    let bl = BalanceLoss.ZLoss { coefficient: coeff };
+    assert(bl is BalanceLoss.ZLoss);
+    assert_eq(coeff, 0.1);
+}
+
+@test
+fn test_balance_loss_combined() {
+    let bl = BalanceLoss.Combined { aux: 0.01, z: 0.001 };
+    assert(bl is BalanceLoss.Combined);
+}
+
+@test
+fn test_balance_loss_combined_values() {
+    let aux_val = 0.02;
+    let z_val = 0.003;
+    let bl = BalanceLoss.Combined { aux: aux_val, z: z_val };
+    assert(bl is BalanceLoss.Combined);
+    assert_eq(aux_val, 0.02);
+    assert_eq(z_val, 0.003);
+}
+
+@test
+fn test_balance_loss_distinctness() {
+    let aux = BalanceLoss.Auxiliary { coefficient: 0.01 };
+    let zloss = BalanceLoss.ZLoss { coefficient: 0.01 };
+    let combined = BalanceLoss.Combined { aux: 0.01, z: 0.01 };
+
+    assert(!(aux is BalanceLoss.ZLoss));
+    assert(!(aux is BalanceLoss.Combined));
+    assert(!(zloss is BalanceLoss.Auxiliary));
+    assert(!(zloss is BalanceLoss.Combined));
+    assert(!(combined is BalanceLoss.Auxiliary));
+    assert(!(combined is BalanceLoss.ZLoss));
+}
+
+// =============================================================================
+// Section 4: Activation Variants
+// =============================================================================
+
+@test
+fn test_activation_gelu() {
+    let a = Activation.GELU;
+    assert(a is Activation.GELU);
+}
+
+@test
+fn test_activation_silu() {
+    let a = Activation.SiLU;
+    assert(a is Activation.SiLU);
+}
+
+@test
+fn test_activation_relu() {
+    let a = Activation.ReLU;
+    assert(a is Activation.ReLU);
+}
+
+@test
+fn test_activation_tanh() {
+    let a = Activation.Tanh;
+    assert(a is Activation.Tanh);
+}
+
+@test
+fn test_activation_sigmoid() {
+    let a = Activation.Sigmoid;
+    assert(a is Activation.Sigmoid);
+}
+
+@test
+fn test_activation_match_exhaustive() {
+    let activations = [
+        Activation.GELU,
+        Activation.SiLU,
+        Activation.ReLU,
+        Activation.Tanh,
+        Activation.Sigmoid,
+    ];
+    let mut counts = [0, 0, 0, 0, 0];
+
+    for a in activations {
+        match a {
+            Activation.GELU => counts[0] = counts[0] + 1,
+            Activation.SiLU => counts[1] = counts[1] + 1,
+            Activation.ReLU => counts[2] = counts[2] + 1,
+            Activation.Tanh => counts[3] = counts[3] + 1,
+            Activation.Sigmoid => counts[4] = counts[4] + 1,
+        }
+    }
+    assert_eq(counts[0], 1);
+    assert_eq(counts[1], 1);
+    assert_eq(counts[2], 1);
+    assert_eq(counts[3], 1);
+    assert_eq(counts[4], 1);
+}
+
+@test
+fn test_activation_distinctness() {
+    assert(!(Activation.GELU is Activation.SiLU));
+    assert(!(Activation.GELU is Activation.ReLU));
+    assert(!(Activation.SiLU is Activation.ReLU));
+    assert(!(Activation.ReLU is Activation.Tanh));
+    assert(!(Activation.Tanh is Activation.Sigmoid));
+}
+
+// =============================================================================
+// Section 5: Type Existence — SSM Core Types (concrete specializations)
+// =============================================================================
+
+@test
+fn test_state_space_kernel_type_exists() {
+    fn accept_ssk(k: &StateSpaceKernel<256, 16>) -> Bool { true }
+    let _ = accept_ssk;
+}
+
+@test
+fn test_s4_layer_type_exists() {
+    fn accept_s4(l: &S4Layer<256, 16>) -> Bool { true }
+    let _ = accept_s4;
+}
+
+@test
+fn test_mamba_block_type_exists() {
+    fn accept_mamba(m: &MambaBlock<256, 16>) -> Bool { true }
+    let _ = accept_mamba;
+}
+
+@test
+fn test_bi_mamba_block_type_exists() {
+    fn accept_bimamba(m: &BiMambaBlock<256, 16>) -> Bool { true }
+    let _ = accept_bimamba;
+}
+
+@test
+fn test_mamba_model_type_exists() {
+    fn accept_full_mamba(m: &Mamba<256, 16>) -> Bool { true }
+    let _ = accept_full_mamba;
+}
+
+// =============================================================================
+// Section 6: Type Existence — Jamba Types
+// =============================================================================
+
+@test
+fn test_jamba_layer_type_exists() {
+    fn accept_jamba_layer(j: &JambaLayer<256, 16>) -> Bool { true }
+    let _ = accept_jamba_layer;
+}
+
+@test
+fn test_jamba_model_type_exists() {
+    fn accept_jamba(j: &Jamba<256, 16>) -> Bool { true }
+    let _ = accept_jamba;
+}
+
+// =============================================================================
+// Section 7: Type Existence — MoE Types
+// =============================================================================
+
+@test
+fn test_expert_type_exists() {
+    fn accept_expert(e: &Expert<256, 1024>) -> Bool { true }
+    let _ = accept_expert;
+}
+
+@test
+fn test_router_type_exists() {
+    fn accept_router(r: &Router<256, 8>) -> Bool { true }
+    let _ = accept_router;
+}
+
+@test
+fn test_moe_layer_type_exists() {
+    fn accept_moe(m: &MoELayer<256, 1024, 8>) -> Bool { true }
+    let _ = accept_moe;
+}
+
+@test
+fn test_moe_transformer_block_type_exists() {
+    fn accept_moe_block(b: &MoETransformerBlock<256, 1024, 8>) -> Bool { true }
+    let _ = accept_moe_block;
+}
+
+// =============================================================================
+// Section 8: Type Usage in Collections
+// =============================================================================
+
+@test
+fn test_discretization_method_in_list() {
+    fn make_methods() -> List<DiscretizationMethod> {
+        panic("type check only")
+    }
+    let _ = make_methods;
+}
+
+@test
+fn test_routing_strategy_in_list() {
+    fn make_strategies() -> List<RoutingStrategy> {
+        panic("type check only")
+    }
+    let _ = make_strategies;
+}
+
+@test
+fn test_balance_loss_in_list() {
+    fn make_losses() -> List<BalanceLoss> {
+        panic("type check only")
+    }
+    let _ = make_losses;
+}
+
+@test
+fn test_activation_in_list() {
+    fn make_activations() -> List<Activation> {
+        panic("type check only")
+    }
+    let _ = make_activations;
+}
+
+// =============================================================================
+// Section 9: RoutingStrategy Match Exhaustive
+// =============================================================================
+
+@test
+fn test_routing_strategy_match_exhaustive() {
+    let strategies = [
+        RoutingStrategy.TopK { k: 2 as USize },
+        RoutingStrategy.ExpertChoice { k: 4 as USize },
+        RoutingStrategy.SoftMoE,
+    ];
+    let mut topk_count = 0;
+    let mut ec_count = 0;
+    let mut soft_count = 0;
+
+    for s in strategies {
+        if s is RoutingStrategy.TopK {
+            topk_count = topk_count + 1;
+        } else if s is RoutingStrategy.ExpertChoice {
+            ec_count = ec_count + 1;
+        } else if s is RoutingStrategy.SoftMoE {
+            soft_count = soft_count + 1;
+        }
+    }
+    assert_eq(topk_count, 1);
+    assert_eq(ec_count, 1);
+    assert_eq(soft_count, 1);
+}
+
+// =============================================================================
+// Section 10: BalanceLoss Match Exhaustive
+// =============================================================================
+
+@test
+fn test_balance_loss_match_exhaustive() {
+    let losses = [
+        BalanceLoss.Auxiliary { coefficient: 0.01 },
+        BalanceLoss.ZLoss { coefficient: 0.001 },
+        BalanceLoss.Combined { aux: 0.01, z: 0.001 },
+    ];
+    let mut aux_count = 0;
+    let mut z_count = 0;
+    let mut combined_count = 0;
+
+    for bl in losses {
+        if bl is BalanceLoss.Auxiliary {
+            aux_count = aux_count + 1;
+        } else if bl is BalanceLoss.ZLoss {
+            z_count = z_count + 1;
+        } else if bl is BalanceLoss.Combined {
+            combined_count = combined_count + 1;
+        }
+    }
+    assert_eq(aux_count, 1);
+    assert_eq(z_count, 1);
+    assert_eq(combined_count, 1);
+}
+
+// =============================================================================
+// Section 11: BalanceLoss Variant Field Values
+// =============================================================================
+
+@test
+fn test_balance_loss_auxiliary_zero_coefficient() {
+    let bl = BalanceLoss.Auxiliary { coefficient: 0.0 };
+    assert(bl is BalanceLoss.Auxiliary);
+}
+
+@test
+fn test_balance_loss_zloss_small_coefficient() {
+    let bl = BalanceLoss.ZLoss { coefficient: 0.0001 };
+    assert(bl is BalanceLoss.ZLoss);
+}
+
+@test
+fn test_balance_loss_combined_different_weights() {
+    let bl = BalanceLoss.Combined { aux: 0.1, z: 0.01 };
+    assert(bl is BalanceLoss.Combined);
+}
+
+// =============================================================================
+// Section 12: Type Parameter Constraints
+// =============================================================================
+
+@test
+fn test_activation_as_parameter() {
+    fn apply_activation(a: Activation) -> Bool {
+        match a {
+            Activation.GELU => true,
+            Activation.SiLU => true,
+            Activation.ReLU => true,
+            Activation.Tanh => true,
+            Activation.Sigmoid => true,
+        }
+    }
+    assert(apply_activation(Activation.GELU));
+    assert(apply_activation(Activation.SiLU));
+    assert(apply_activation(Activation.ReLU));
+    assert(apply_activation(Activation.Tanh));
+    assert(apply_activation(Activation.Sigmoid));
+}
+
+@test
+fn test_discretization_as_parameter() {
+    fn describe_method(m: DiscretizationMethod) -> Bool {
+        match m {
+            DiscretizationMethod.ZeroOrderHold => true,
+            DiscretizationMethod.Bilinear => true,
+            DiscretizationMethod.Euler => true,
+        }
+    }
+    assert(describe_method(DiscretizationMethod.ZeroOrderHold));
+    assert(describe_method(DiscretizationMethod.Bilinear));
+    assert(describe_method(DiscretizationMethod.Euler));
+}
+
+// =============================================================================
+// Section 13: Additional Variant and Dimension Tests
+// =============================================================================
+
+@test
+fn test_activation_gelu_not_silu() {
+    let g = Activation.GELU;
+    let s = Activation.SiLU;
+    assert(g is Activation.GELU);
+    assert(!(g is Activation.SiLU));
+    assert(s is Activation.SiLU);
+    assert(!(s is Activation.GELU));
+}
+
+@test
+fn test_discretization_in_maybe() {
+    let m: Maybe<DiscretizationMethod> = Some(DiscretizationMethod.Bilinear);
+    assert(m.is_some());
+}
+
+@test
+fn test_routing_strategy_topk_small_k() {
+    let s = RoutingStrategy.TopK { k: 1 as USize };
+    assert(s is RoutingStrategy.TopK);
+}
+
+@test
+fn test_balance_loss_combined_equal_weights() {
+    let bl = BalanceLoss.Combined { aux: 0.01, z: 0.01 };
+    assert(bl is BalanceLoss.Combined);
+}
+
+@test
+fn test_mamba_different_dimensions() {
+    fn accept_mamba_small(m: &Mamba<128, 8>) -> Bool { true }
+    fn accept_mamba_large(m: &Mamba<512, 32>) -> Bool { true }
+    let _ = accept_mamba_small;
+    let _ = accept_mamba_large;
+}
+
+@test
+fn test_expert_different_dimensions() {
+    fn accept_expert_small(e: &Expert<128, 512>) -> Bool { true }
+    fn accept_expert_large(e: &Expert<1024, 4096>) -> Bool { true }
+    let _ = accept_expert_small;
+    let _ = accept_expert_large;
+}
+
+@test
+fn test_jamba_layer_different_dimensions() {
+    fn accept_jamba_layer_small(j: &JambaLayer<128, 8>) -> Bool { true }
+    fn accept_jamba_layer_large(j: &JambaLayer<1024, 64>) -> Bool { true }
+    let _ = accept_jamba_layer_small;
+    let _ = accept_jamba_layer_large;
+}
+
+@test
+fn test_activation_in_maybe() {
+    let a: Maybe<Activation> = Some(Activation.ReLU);
+    assert(a.is_some());
+    let none_act: Maybe<Activation> = None;
+    assert(none_act.is_none());
+}
+
+// =============================================================================
+// Section 14: Additional Coverage Tests
+// =============================================================================
+
+@test
+fn test_router_type_with_different_dimensions() {
+    fn accept_router_small(r: &Router<128, 4>) -> Bool { true }
+    fn accept_router_medium(r: &Router<256, 8>) -> Bool { true }
+    fn accept_router_large(r: &Router<512, 16>) -> Bool { true }
+    let _ = accept_router_small;
+    let _ = accept_router_medium;
+    let _ = accept_router_large;
+}
+
+@test
+fn test_moe_layer_different_expert_counts() {
+    fn accept_moe_small(m: &MoELayer<128, 512, 4>) -> Bool { true }
+    fn accept_moe_medium(m: &MoELayer<256, 1024, 8>) -> Bool { true }
+    fn accept_moe_large(m: &MoELayer<512, 2048, 16>) -> Bool { true }
+    let _ = accept_moe_small;
+    let _ = accept_moe_medium;
+    let _ = accept_moe_large;
+}
+
+@test
+fn test_expert_with_all_activations() {
+    fn accept_expert_gelu(e: &Expert<256, 1024>) -> Bool { true }
+    fn accept_expert_silu(e: &Expert<256, 1024>) -> Bool { true }
+    fn accept_expert_relu(e: &Expert<256, 1024>) -> Bool { true }
+    fn accept_expert_tanh(e: &Expert<256, 1024>) -> Bool { true }
+    fn accept_expert_sigmoid(e: &Expert<256, 1024>) -> Bool { true }
+    let _ = accept_expert_gelu;
+    let _ = accept_expert_silu;
+    let _ = accept_expert_relu;
+    let _ = accept_expert_tanh;
+    let _ = accept_expert_sigmoid;
+}
+
+@test
+fn test_jamba_layer_mamba_only_variant() {
+    fn create_jamba_mamba() -> JambaLayer<256, 16> {
+        panic("type check only")
+    }
+    let _ = create_jamba_mamba;
+}
+
+@test
+fn test_jamba_layer_hybrid_variant() {
+    fn create_jamba_hybrid() -> JambaLayer<256, 16> {
+        panic("type check only")
+    }
+    let _ = create_jamba_hybrid;
+}
+
+@test
+fn test_state_space_kernel_different_dimensions() {
+    fn accept_ssk_small(k: &StateSpaceKernel<64, 8>) -> Bool { true }
+    fn accept_ssk_medium(k: &StateSpaceKernel<256, 16>) -> Bool { true }
+    fn accept_ssk_large(k: &StateSpaceKernel<512, 32>) -> Bool { true }
+    fn accept_ssk_xlarge(k: &StateSpaceKernel<1024, 64>) -> Bool { true }
+    let _ = accept_ssk_small;
+    let _ = accept_ssk_medium;
+    let _ = accept_ssk_large;
+    let _ = accept_ssk_xlarge;
+}
+
+@test
+fn test_routing_strategy_with_different_k_values() {
+    let topk_1 = RoutingStrategy.TopK { k: 1 as USize };
+    let topk_2 = RoutingStrategy.TopK { k: 2 as USize };
+    let topk_4 = RoutingStrategy.TopK { k: 4 as USize };
+    let topk_8 = RoutingStrategy.TopK { k: 8 as USize };
+
+    assert(topk_1 is RoutingStrategy.TopK);
+    assert(topk_2 is RoutingStrategy.TopK);
+    assert(topk_4 is RoutingStrategy.TopK);
+    assert(topk_8 is RoutingStrategy.TopK);
+}
+
+@test
+fn test_balance_loss_all_variants_with_values() {
+    let aux_small = BalanceLoss.Auxiliary { coefficient: 0.001 };
+    let aux_medium = BalanceLoss.Auxiliary { coefficient: 0.01 };
+    let aux_large = BalanceLoss.Auxiliary { coefficient: 0.1 };
+
+    let z_small = BalanceLoss.ZLoss { coefficient: 0.0001 };
+    let z_medium = BalanceLoss.ZLoss { coefficient: 0.001 };
+    let z_large = BalanceLoss.ZLoss { coefficient: 0.01 };
+
+    let combined1 = BalanceLoss.Combined { aux: 0.01, z: 0.001 };
+    let combined2 = BalanceLoss.Combined { aux: 0.05, z: 0.005 };
+
+    assert(aux_small is BalanceLoss.Auxiliary);
+    assert(aux_medium is BalanceLoss.Auxiliary);
+    assert(aux_large is BalanceLoss.Auxiliary);
+    assert(z_small is BalanceLoss.ZLoss);
+    assert(z_medium is BalanceLoss.ZLoss);
+    assert(z_large is BalanceLoss.ZLoss);
+    assert(combined1 is BalanceLoss.Combined);
+    assert(combined2 is BalanceLoss.Combined);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

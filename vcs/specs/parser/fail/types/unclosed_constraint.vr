@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, constraint, brackets, error
+// @description: Test detection of unclosed constraint generic
+// @expected-error: E041
+
+// Constraint with unclosed generic type argument
+fn test<T: Iterator<Item>(x: T) -> T.Item {}

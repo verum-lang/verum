@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, context, conditional, error
+// @description: Test detection of invalid conditional context (if without condition)
+// @expected-error: E018
+
+// Conditional context requires expression after 'if'
+type Callback is fn() using [Database if];

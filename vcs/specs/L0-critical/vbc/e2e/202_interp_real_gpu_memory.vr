@@ -1,0 +1,48 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, gpu, real-opcode, memory
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL GPU memory management intrinsics through VBC interpreter.
+// Exercises gpu_malloc, gpu_free, gpu_memset, gpu_memcpy.
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Allocate GPU memory (size=1024, memory_space=0)
+    let ptr1 = gpu_malloc(1024, 0);
+    // ptr should be non-zero (valid allocation)
+    if ptr1 == 0 { errors = errors + 1; }
+
+    // Test 2: Allocate another block
+    let ptr2 = gpu_malloc(2048, 0);
+    if ptr2 == 0 { errors = errors + 1; }
+    // Two allocations should be different
+    if ptr1 == ptr2 { errors = errors + 1; }
+
+    // Test 3: Memset (set memory to value)
+    let ms = gpu_memset(ptr1, 0, 1024);
+    if ms != 0 { errors = errors + 1; }
+
+    // Test 4: Memcpy (copy between GPU buffers)
+    let cp = gpu_memcpy(ptr2, ptr1, 1024);
+    if cp != 0 { errors = errors + 1; }
+
+    // Test 5: Free first allocation
+    let f1 = gpu_free(ptr1);
+    if f1 != 0 { errors = errors + 1; }
+
+    // Test 6: Free second allocation
+    let f2 = gpu_free(ptr2);
+    if f2 != 0 { errors = errors + 1; }
+
+    // Test 7: Allocate after free (should work)
+    let ptr3 = gpu_malloc(512, 0);
+    if ptr3 == 0 { errors = errors + 1; }
+    let f3 = gpu_free(ptr3);
+    if f3 != 0 { errors = errors + 1; }
+
+    errors
+}

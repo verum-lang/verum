@@ -1,0 +1,453 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for provide statements (context provision)
+
+// =============================================================================
+// Grammar Reference:
+// provide_stmt = 'provide' , context_path , [ 'as' , identifier ] , '=' , expression ,
+//                ( ';' | 'in' , block_expr ) ;
+// =============================================================================
+
+// =============================================================================
+// BASIC PROVIDE STATEMENTS
+// =============================================================================
+
+fn test_simple_provide() {
+    // Basic provide with semicolon
+    provide Database = PostgresConnection.new();
+}
+
+fn test_provide_with_constructor() {
+    // Provide with constructor call
+    provide Logger = ConsoleLogger.new();
+    provide Cache = RedisCache.new();
+    provide Config = AppConfig.default();
+}
+
+fn test_provide_with_arguments() {
+    // Provide with constructor arguments
+    provide Database = PostgresConnection.new("localhost", 5432, "mydb");
+    provide Logger = FileLogger.new("/var/log/app.log", LogLevel.Info);
+    provide Cache = RedisCache.new("localhost:6379", CacheConfig.default());
+}
+
+fn test_provide_with_builder_pattern() {
+    // Provide with builder pattern
+    provide Config = ConfigBuilder.new()
+        .host("localhost")
+        .port(8080)
+        .timeout(Duration.seconds(30))
+        .build();
+
+    provide Database = DatabaseBuilder.new()
+        .connection_string("postgres://localhost/db")
+        .pool_size(10)
+        .build();
+}
+
+fn test_provide_with_existing_value() {
+    // Provide with existing variable
+    let db = create_database();
+    provide Database = db;
+
+    let logger = create_logger();
+    provide Logger = logger;
+}
+
+// =============================================================================
+// PROVIDE WITH ALIAS
+// =============================================================================
+
+fn test_provide_with_alias() {
+    // Aliased contexts for multiple instances
+    provide Database as primary = PostgresConnection.new("primary.db");
+    provide Database as replica = PostgresConnection.new("replica.db");
+}
+
+fn test_provide_multiple_aliases() {
+    // Multiple aliased contexts
+    provide Logger as file_logger = FileLogger.new("/var/log/app.log");
+    provide Logger as console_logger = ConsoleLogger.new();
+    provide Logger as remote_logger = RemoteLogger.new("log.server.com");
+}
+
+fn test_provide_alias_with_complex_expression() {
+    provide Database as main_db = {
+        let config = load_config();
+        PostgresConnection.new(config.db_host, config.db_port, config.db_name)
+    };
+
+    provide Cache as local_cache = if use_redis {
+        RedisCache.new("localhost")
+    } else {
+        MemoryCache.new()
+    };
+}
+
+// =============================================================================
+// PROVIDE IN BLOCK (SCOPED)
+// =============================================================================
+
+fn test_provide_in_block() {
+    // Scoped provide
+    provide Database = TestDatabase.new() in {
+        run_tests();
+        verify_results();
+    };
+}
+
+fn test_provide_in_block_with_statements() {
+    provide Logger = MockLogger.new() in {
+        let result = perform_operation();
+        assert(result.is_ok());
+        let logs = Logger.get_logs();
+        assert(logs.len() > 0);
+    };
+}
+
+fn test_provide_in_block_with_return() {
+    // Note: provide is a statement, not an expression
+    // Use a block to compute result inside the provide scope
+    let mut result_holder = None;
+    provide Database = TestDatabase.new() in {
+        let data = Database.query("SELECT * FROM users");
+        result_holder = Some(transform(data));
+    };
+}
+
+fn test_provide_alias_in_block() {
+    provide Database as test_db = TestDatabase.new() in {
+        test_db.setup();
+        run_migration();
+        test_db.teardown();
+    };
+}
+
+fn test_nested_provide_in_blocks() {
+    provide Database = OuterDatabase.new() in {
+        provide Logger = OuterLogger.new() in {
+            provide Cache = OuterCache.new() in {
+                run_with_all_contexts();
+            };
+        };
+    };
+}
+
+fn test_provide_in_block_override() {
+    provide Database = ProductionDatabase.new();
+
+    // Override in nested scope
+    provide Database = TestDatabase.new() in {
+        // Uses TestDatabase here
+        test_code();
+    };
+
+    // Back to ProductionDatabase
+    production_code();
+}
+
+// =============================================================================
+// MULTIPLE PROVIDES
+// =============================================================================
+
+fn test_sequential_provides() {
+    // Multiple sequential provides
+    provide Database = PostgresConnection.new();
+    provide Logger = FileLogger.new();
+    provide Cache = RedisCache.new();
+    provide Config = AppConfig.load();
+}
+
+fn test_dependent_provides() {
+    // Provides that depend on each other
+    provide Config = AppConfig.load();
+    provide Database = PostgresConnection.new(Config.db_url);
+    provide Cache = RedisCache.new(Config.cache_url);
+}
+
+fn test_provide_with_using() {
+    // Using context in provide expression
+    provide Config = AppConfig.load();
+
+    provide Database = PostgresConnection.new(Config.db_connection_string);
+
+    // Note: using is for function signatures, not expressions
+    // Context dependencies are inferred from the provided value
+    provide UserService = UserService.new();
+}
+
+// =============================================================================
+// PROVIDE WITH COMPLEX EXPRESSIONS
+// =============================================================================
+
+fn test_provide_with_function_call() {
+    provide Database = create_database_connection();
+    provide Logger = configure_logger(LogLevel.Debug);
+    provide Cache = setup_cache_system();
+}
+
+fn test_provide_with_method_chain() {
+    provide Config = ConfigLoader.new()
+        .load_from_file("config.toml")
+        .merge_with_env()
+        .validate();
+}
+
+fn test_provide_with_conditional() {
+    provide Database = if production {
+        PostgresConnection.new(prod_config)
+    } else {
+        SqliteConnection.new("test.db")
+    };
+}
+
+fn test_provide_with_match() {
+    provide Logger = match env {
+        Env.Production => FileLogger.new("/var/log/app.log"),
+        Env.Staging => RemoteLogger.new("staging.logs.com"),
+        Env.Development => ConsoleLogger.new(),
+        Env.Test => NullLogger.new()
+    };
+}
+
+fn test_provide_with_block() {
+    provide Database = {
+        let config = load_config();
+        let pool_size = if config.is_production { 20 } else { 5 };
+        PostgresPool.new(config.connection_string, pool_size)
+    };
+}
+
+fn test_provide_with_try() {
+    // Provide with error handling
+    provide Database = connect_database()?;
+    provide Cache = setup_cache()?;
+}
+
+async fn test_provide_with_await() {
+    // Async provide
+    provide Database = PostgresConnection.connect_async(config).await;
+    provide Cache = RedisCache.connect_async("localhost:6379").await;
+}
+
+// =============================================================================
+// PROVIDE WITH PATH
+// =============================================================================
+
+fn test_provide_with_qualified_path() {
+    // Qualified context paths
+    provide app.Database = PostgresConnection.new();
+    provide services.Logger = FileLogger.new();
+    provide cache.RedisCache = RedisCache.new();
+}
+
+fn test_provide_with_module_path() {
+    provide myapp.db.Database = create_db();
+    provide myapp.logging.Logger = create_logger();
+}
+
+// =============================================================================
+// PROVIDE IN CONTROL FLOW
+// =============================================================================
+
+fn test_provide_in_if() {
+    if need_database {
+        provide Database = PostgresConnection.new();
+        use_database();
+    }
+}
+
+fn test_provide_in_match() {
+    match mode {
+        Mode.Production => {
+            provide Database = ProductionDatabase.new();
+        },
+        Mode.Test => {
+            provide Database = TestDatabase.new();
+        }
+    };
+}
+
+fn test_provide_in_loop() {
+    for config in configs {
+        provide Database = DatabaseConnection.new(config) in {
+            process_with_database();
+        };
+    }
+}
+
+fn test_provide_with_early_return() {
+    provide Database = get_database();
+
+    if !Database.is_connected() {
+        return;
+    }
+
+    use_database();
+}
+
+// =============================================================================
+// PROVIDE WITH CONTEXT GROUPS
+// =============================================================================
+
+fn test_provide_for_context_group() {
+    // Provide all contexts for a group
+    provide WebContext = WebContextImpl {
+        database: PostgresConnection.new(),
+        logger: ConsoleLogger.new(),
+        cache: RedisCache.new(),
+    };
+}
+
+fn test_provide_individual_in_group() {
+    // Provide individual context from group
+    provide WebContext.Database = PostgresConnection.new();
+    provide WebContext.Logger = FileLogger.new();
+}
+
+// =============================================================================
+// PROVIDE PATTERNS
+// =============================================================================
+
+fn test_provide_setup_pattern() {
+    // Setup function providing contexts
+    fn setup_test_context() {
+        provide Database = TestDatabase.new();
+        provide Logger = TestLogger.new();
+        provide Config = TestConfig.default();
+    }
+}
+
+fn test_provide_teardown_pattern() {
+    // With defer for cleanup
+    provide Database = TestDatabase.new();
+    defer Database.close();
+
+    run_tests();
+}
+
+fn test_provide_factory_pattern() {
+    // Factory function for context
+    fn create_db_context(config: DbConfig) {
+        provide Database = match config.driver {
+            Driver.Postgres => PostgresConnection.new(config),
+            Driver.Sqlite => SqliteConnection.new(config),
+            Driver.Mysql => MysqlConnection.new(config)
+        };
+    }
+}
+
+fn test_provide_override_pattern() {
+    // Base context
+    provide Logger = ProductionLogger.new();
+
+    // Override for specific operation
+    provide Logger = VerboseLogger.new() in {
+        debug_operation();
+    };
+
+    // Back to base
+    normal_operation();
+}
+
+fn test_provide_composition_pattern() {
+    // Compose multiple provides
+    provide Config = AppConfig.load();
+
+    provide Database = PostgresConnection.new(Config.db) in {
+        provide Cache = RedisCache.new(Config.cache) in {
+            provide Logger = FileLogger.new(Config.log_path) in {
+                application_main();
+            };
+        };
+    };
+}
+
+// =============================================================================
+// PROVIDE IN ASYNC CONTEXT
+// =============================================================================
+
+async fn test_async_provide() {
+    provide Database = connect_database().await;
+
+    let query_result = Database.query("SELECT 1").await;
+}
+
+async fn test_async_provide_in_block() {
+    provide Database = connect_database().await in {
+        let users = Database.query("SELECT * FROM users").await;
+        for user in users {
+            process_user(user).await;
+        }
+    };
+}
+
+async fn test_async_provide_multiple() {
+    provide Database = connect_database().await;
+    provide Cache = connect_cache().await;
+    provide Logger = setup_remote_logger().await;
+
+    run_async_app().await;
+}
+
+// =============================================================================
+// PROVIDE WITH GENERIC CONTEXTS
+// =============================================================================
+
+fn test_provide_generic_context() {
+    // Note: Provide uses simple context paths without generics
+    // The context type is determined by the value's type
+    provide UserRepository = UserRepository.new();
+    provide ProductRepository = ProductRepository.new();
+}
+
+fn test_provide_with_aliased_contexts() {
+    // Use aliases for different configurations
+    provide Cache as json_cache = JsonCache.new();
+    provide Store as user_store = UserStore.new();
+}
+
+// =============================================================================
+// REAL-WORLD PROVIDE EXAMPLES
+// =============================================================================
+
+fn test_web_request_handler() {
+    // Typical web request context setup
+    provide Database = get_connection_from_pool();
+    provide Logger = RequestLogger.new(request_id);
+    provide Auth = authenticate(request);
+
+    handle_request(request);
+}
+
+fn test_test_setup() {
+    // Test context setup
+    provide Database = MockDatabase.new() in {
+        provide Logger = TestLogger.new() in {
+            provide Clock = FakeClock.new() in {
+                run_unit_tests();
+            };
+        };
+    };
+}
+
+fn test_microservice_context() {
+    // Microservice initialization
+    provide Config = load_service_config();
+    provide Database = connect_to_database(Config.db);
+    provide MessageQueue = connect_to_mq(Config.mq);
+    provide Metrics = setup_metrics(Config.metrics);
+
+    start_service();
+}
+
+fn test_transaction_context() {
+    provide Database = PostgresConnection.new() in {
+        let tx = Database.begin_transaction();
+        provide Transaction = tx in {
+            perform_operations();
+            Transaction.commit();
+        };
+    };
+}

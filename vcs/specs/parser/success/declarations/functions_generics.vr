@@ -1,0 +1,128 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, functions, generics
+// @description: Test generic function parsing with various type parameter patterns
+
+// Single type parameter
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Multiple type parameters
+fn pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+fn triple<A, B, C>(a: A, b: B, c: C) -> (A, B, C) {
+    (a, b, c)
+}
+
+// Type parameter with single bound
+fn display<T: Display>(x: T) -> Text {
+    x.to_text()
+}
+
+// Type parameter with multiple bounds
+fn cloneable_display<T: Clone + Display>(x: T) -> (T, Text) {
+    (x.clone(), x.to_text())
+}
+
+fn bounded_triple<T: Clone + Debug + Display>(x: T) -> T {
+    x.clone()
+}
+
+// Multiple type parameters with bounds
+fn convert<A: Into<B>, B>(a: A) -> B {
+    a.into()
+}
+
+fn map_pair<A, B, F: Fn(A) -> B>(pair: (A, A), f: F) -> (B, B) {
+    (f(pair.0), f(pair.1))
+}
+
+// Higher-kinded type parameters
+fn functor_map<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    fa.map(f)
+}
+
+fn applicative_pure<F<_>: Applicative, A>(a: A) -> F<A> {
+    F.pure(a)
+}
+
+// Multiple HKT parameters
+fn traverse<F<_>: Applicative, G<_>: Traversable, A, B>(
+    ga: G<A>,
+    f: fn(A) -> F<B>
+) -> F<G<B>> {
+    ga.traverse(f)
+}
+
+// Nested generic types
+fn nested<T, U>(list: List<Maybe<T>>, map: Map<T, List<U>>) -> List<U> {
+    List.new()
+}
+
+// Generic with lifetime-like patterns
+fn slice_first<T>(slice: [T]) -> Maybe<T> {
+    slice.first()
+}
+
+// Generic arrays
+fn array_fill<T: Clone, const N: Int>(value: T) -> [T; N] {
+    [value; N]
+}
+
+// Generic with default type parameter
+fn container<T, C: Collection<T> = List<T>>(items: C) -> Int {
+    items.len()
+}
+
+// Generic with associated type constraints
+fn iter_sum<I: Iterator>(iter: I) -> I.Item
+    where type I.Item: Add + Default
+{
+    iter.fold(I.Item.default(), |acc, x| acc + x)
+}
+
+// Generic function with const generic
+fn matrix_multiply<const M: Int, const N: Int, const P: Int>(
+    a: [[Float; N]; M],
+    b: [[Float; P]; N]
+) -> [[Float; P]; M] {
+    // Implementation
+    [[0.0; P]; M]
+}
+
+// Generic with phantom type
+fn phantom<T, Marker>(value: T) -> Phantom<T, Marker> {
+    Phantom.new(value)
+}
+
+// Recursive generic bound
+fn recursive<T: Comparable<T>>(a: T, b: T) -> Ordering {
+    a.compare(b)
+}
+
+// Self-referential bounds
+fn self_bound<T: PartialEq<T> + Clone>(items: List<T>) -> List<T> {
+    items.unique()
+}
+
+// Complex nested generics
+fn complex_nested<
+    K: Hash + Eq,
+    V: Clone,
+    M: Map<K, List<V>>
+>(map: M) -> List<(K, V)> {
+    map.flat_map(|(k, vs)| vs.map(|v| (k.clone(), v)))
+}
+
+// Generic with negative bound
+fn send_only<T: Send + !Sync>(value: T) {
+    // Can send but not share
+}
+
+// Generic protocol implementation helper
+fn impl_for<T: Protocol, U: Into<T>>(value: U) -> T {
+    value.into()
+}

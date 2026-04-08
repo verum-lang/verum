@@ -1,0 +1,7 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, lemma, error
+// @description: Test invalid lemma declaration without name or body
+// @expected-error: E022
+
+lemma;

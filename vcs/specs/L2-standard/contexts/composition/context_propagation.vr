@@ -1,0 +1,116 @@
+// @test: run
+// @expected-stdout: [main] Starting request processing
+// [handler] Processing request: /api/users
+// [service] Fetching users from database
+// [repo] Executing query: SELECT * FROM users
+// [repo] Found 2 users
+// [service] Transforming 2 users
+// [handler] Sending response with 2 users
+// [main] Request completed
+// @tier: 0
+// @level: L2
+// @tags: contexts, propagation, automatic
+// @description: Tests automatic context propagation through call chains
+//
+// When a function declares `using [Context]`, the context is automatically
+// available to all functions it calls that also declare that context.
+// No explicit passing of context values is needed.
+
+context Logger {
+    fn log(tag: Text, message: Text);
+}
+
+context async Database {
+    async fn query(sql: Text) -> List<Row>;
+}
+
+type Row is Map<Text, Text>;
+
+// Implementations
+type SimpleLogger is {};
+
+implement Logger for SimpleLogger {
+    fn log(tag: Text, message: Text) {
+        println("[" + tag + "] " + message);
+    }
+}
+
+type MockDatabase is {};
+
+implement Database for MockDatabase {
+    async fn query(sql: Text) -> List<Row> {
+        let mut rows = List.new();
+        let mut row1 = Map.new();
+        row1.insert("name", "Alice");
+        rows.push(row1);
+        let mut row2 = Map.new();
+        row2.insert("name", "Bob");
+        rows.push(row2);
+        rows
+    }
+}
+
+// Layer 4: Repository (deepest layer)
+async fn user_repository_find_all() -> List<Row> using [Logger, Database] {
+    Logger.log("repo", "Executing query: SELECT * FROM users");
+    let rows = Database.query("SELECT * FROM users").await;
+    Logger.log("repo", "Found " + rows.len().to_text() + " users");
+    rows
+}
+
+// Layer 3: Service layer
+type User is { name: Text };
+
+async fn user_service_get_all() -> List<User> using [Logger, Database] {
+    Logger.log("service", "Fetching users from database");
+
+    // Contexts are automatically propagated to repository layer
+    let rows = user_repository_find_all().await;
+
+    Logger.log("service", "Transforming " + rows.len().to_text() + " users");
+
+    rows.iter()
+        .map(|row| User { name: row.get("name").unwrap_or("Unknown") })
+        .collect()
+}
+
+// Layer 2: Handler layer
+async fn handle_get_users(path: Text) -> Response using [Logger, Database] {
+    Logger.log("handler", "Processing request: " + path);
+
+    // Contexts automatically propagate through the call chain
+    let users = user_service_get_all().await;
+
+    Logger.log("handler", "Sending response with " + users.len().to_text() + " users");
+
+    Response {
+        status: 200,
+        body: users.to_text(),
+    }
+}
+
+type Response is {
+    status: Int,
+    body: Text,
+};
+
+// Layer 1: Application entry point
+async fn process_request(path: Text) using [Logger, Database] {
+    Logger.log("main", "Starting request processing");
+
+    // All nested function calls automatically receive the contexts
+    // No need to explicitly pass Logger or Database
+    let response = handle_get_users(path).await;
+
+    Logger.log("main", "Request completed");
+}
+
+async fn main() {
+    // Provide contexts at the top level
+    provide Logger = SimpleLogger {};
+    provide Database = MockDatabase {};
+
+    // Process a request - contexts propagate through entire call chain:
+    // main -> process_request -> handle_get_users -> user_service_get_all -> user_repository_find_all
+    process_request("/api/users").await;
+}

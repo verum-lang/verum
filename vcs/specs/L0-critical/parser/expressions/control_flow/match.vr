@@ -1,0 +1,231 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, match, pattern
+
+fn test_simple_match_enum() {
+    // Simple match on enum
+    match value {
+        Maybe.Some(x) => x,
+        Maybe.None => 0,
+    }
+}
+
+fn test_match_integer() {
+    // Match on integer literal
+    match number {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        _ => "many",
+    }
+}
+
+fn test_match_boolean() {
+    // Match on boolean
+    match flag {
+        true => "yes",
+        false => "no",
+    }
+}
+
+fn test_match_string() {
+    // Match on string
+    match command {
+        "start" => start(),
+        "stop" => stop(),
+        "restart" => restart(),
+        _ => handle_unknown(),
+    }
+}
+
+fn test_match_as_expression() {
+    // Match as expression
+    let res = match option {
+        Maybe.Some(x) => x * 2,
+        Maybe.None => default,
+    };
+}
+
+fn test_match_with_binding() {
+    // Match with binding
+    match res {
+        Result.Ok(value) => process(value),
+        Result.Err(error) => handle_error(error),
+    }
+}
+
+fn test_match_tuple_patterns() {
+    // Match with tuple patterns
+    match pair {
+        (0, 0) => "origin",
+        (x, 0) => "x-axis",
+        (0, y) => "y-axis",
+        (x, y) => "somewhere",
+    }
+}
+
+fn test_match_struct_patterns() {
+    // Match with struct patterns
+    match point {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x, y: 0 } => f"on x at {x}",
+        Point { x: 0, y } => f"on y at {y}",
+        Point { x, y } => f"at ({x}, {y})",
+    }
+}
+
+fn test_match_nested_patterns() {
+    // Match with nested patterns
+    match nested {
+        Maybe.Some(Maybe.Some(x)) => x,
+        Maybe.Some(Maybe.None) => default,
+        Maybe.None => default,
+    }
+}
+
+fn test_match_range_patterns() {
+    // Match with range patterns
+    match age {
+        0..=12 => "child",
+        13..=19 => "teenager",
+        20..=64 => "adult",
+        65.. => "senior",
+    }
+}
+
+fn test_match_or_patterns() {
+    // Match with multiple patterns (or-patterns)
+    match char {
+        'a' | 'e' | 'i' | 'o' | 'u' => "vowel",
+        'a'..='z' => "consonant",
+        _ => "other",
+    }
+}
+
+fn test_match_block_arms() {
+    // Match with block arms
+    match action {
+        Action.Complex(data) => {
+            let processed = process(data);
+            validate(processed);
+            save(processed)
+        },
+        Action.Simple => simple_handler(),
+    }
+}
+
+fn test_match_type_annotation() {
+    // Match with type annotation
+    let x: Int = match opt {
+        Maybe.Some(n) => n,
+        Maybe.None => 0,
+    };
+}
+
+fn test_nested_match() {
+    // Nested match
+    match outer {
+        Outer.A(inner) => match inner {
+            Inner.X => "A-X",
+            Inner.Y => "A-Y",
+        },
+        Outer.B => "B",
+    }
+}
+
+fn test_match_trailing_comma() {
+    // Match with trailing comma
+    match value {
+        A => 1,
+        B => 2,
+        C => 3,
+    }
+}
+
+fn test_exhaustive_match() {
+    // Exhaustive match (all cases covered)
+    match bool_val {
+        true => 1,
+        false => 0,
+    }
+}
+
+fn test_match_ref_patterns() {
+    // Match with ref patterns
+    match data {
+        ref x => use(x),
+        ref mut y => modify(y),
+    }
+}
+
+fn test_match_at_binding() {
+    // Match with @ binding
+    match number {
+        n @ 1..=10 => small(n),
+        n @ 11..=100 => medium(n),
+        n => large(n),
+    }
+}
+
+fn test_match_on_reference() {
+    // Match on reference
+    match &option {
+        &Maybe.Some(ref x) => x,
+        &Maybe.None => &default,
+    }
+}
+
+fn test_match_slice_patterns() {
+    // Match with slice patterns
+    match slice {
+        [] => "empty",
+        [x] => "single",
+        [x, y] => "pair",
+        [first, .., last] => "multi",
+    }
+}
+
+fn test_match_heap_patterns() {
+    // Match with heap patterns (Verum uses Heap<T> instead of Rust's Box<T>)
+    match heap_value {
+        Heap(0) => "zero",
+        Heap(n) => f"heap {n}",
+    }
+}
+
+fn get_value(opt: Maybe<Int>) -> Int {
+    // Match expression in return position
+    match opt {
+        Maybe.Some(x) => x,
+        Maybe.None => 0,
+    }
+}
+
+fn test_match_if_let() {
+    // Match with if-let desugaring equivalent
+    match maybe {
+        Maybe.Some(x) if x > 0 => positive(x),
+        Maybe.Some(x) => non_positive(x),
+        Maybe.None => nothing(),
+    }
+}
+
+fn test_match_constant_patterns() {
+    // Match with constant patterns
+    const MAGIC: Int = 42;
+    match number {
+        MAGIC => "magic number!",
+        _ => "normal number",
+    }
+}
+
+fn test_match_array_patterns() {
+    // Match with array patterns
+    match array {
+        [1, 2, 3] => "specific",
+        [1, _, _] => "starts with 1",
+        [_, _, 3] => "ends with 3",
+        _ => "other",
+    }
+}

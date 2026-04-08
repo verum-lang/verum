@@ -1,0 +1,160 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, escapes
+
+// String literals with escape sequences
+
+fn test_common_escapes() {
+    // Common escape sequences
+    let newline = "Hello\nWorld";
+    let carriage_return = "Line1\rLine2";
+    let tab = "Column1\tColumn2";
+    let crlf = "Windows\r\nLine ending";
+}
+
+fn test_quote_escapes() {
+    // Quote escapes
+    let double_quote = "She said \"Hello\"";
+    let single_quote = "It\'s a test";
+    let both_quotes = "\"quoted\" and \'apostrophe\'";
+}
+
+fn test_backslash_escapes() {
+    // Backslash escape
+    let backslash = "Path\\to\\file";
+    let double_backslash = "C:\\\\Network\\\\Share";
+    let mixed = "Tab:\t Backslash:\\";
+}
+
+fn test_special_escapes() {
+    // Null and bell
+    let null_char = "Null:\0End";
+    let bell = "Alert:\a";
+
+    // Form feed and vertical tab
+    let form_feed = "Page1\fPage2";
+    let vertical_tab = "Row1\vRow2";
+
+    // Backspace
+    let backspace = "Back\bspace";
+}
+
+fn test_combined_escapes() {
+    // Combined escape sequences
+    let all_basic = "\n\r\t\\\"\'";
+    let formatted = "Line1\nLine2\nLine3";
+    let table_row = "Col1\tCol2\tCol3";
+}
+
+fn test_path_escapes() {
+    // Escape sequences in paths
+    let windows_path = "C:\\Users\\Documents\\file.txt";
+    let quoted_path = "\"C:\\Program Files\\App\"";
+    let unix_quoted = "\"/home/user/My Documents\"";
+}
+
+fn test_json_escapes() {
+    // JSON-like content
+    let json_string = "{\"name\": \"value\"}";
+    let json_array = "[\"item1\", \"item2\"]";
+    let json_nested = "{\"outer\": {\"inner\": \"value\"}}";
+}
+
+fn test_csv_escapes() {
+    // CSV-like content
+    let csv_line = "\"field1\",\"field2\",\"field3\"";
+    let csv_escaped = "\"He said \"\"Hello\"\"\"";
+}
+
+fn test_html_escapes() {
+    // HTML/XML content
+    let html_attr = "<div class=\"container\">";
+    let xml_content = "<text>Hello\\nWorld</text>";
+}
+
+fn test_consecutive_escapes() {
+    // Multiple escapes in sequence
+    let consecutive = "\n\n\n";
+    let mixed_consecutive = "\t\n\t\n";
+}
+
+fn test_middle_escapes() {
+    // Escapes in the middle
+    let middle_newline = "Start\nEnd";
+    let middle_tab = "Before\tAfter";
+    let middle_quote = "Say \"hi\" now";
+}
+
+fn test_boundary_escapes() {
+    // Escapes at boundaries
+    let start_newline = "\nText";
+    let end_newline = "Text\n";
+    let start_and_end = "\nText\n";
+}
+
+fn test_expression_escapes() {
+    // In expressions
+    let combined = "Line1\n" + "Line2\n" + "Line3";
+    let with_tabs = "\t" + "indented" + "\n";
+}
+
+// In function calls
+fn format_line(content: Text) -> Text {
+    "\t" + content + "\n"
+}
+
+fn test_function_calls() {
+    let formatted_line = format_line("Hello");
+}
+
+fn test_array_escapes() {
+    // In arrays
+    let lines = ["Line1\n", "Line2\n", "Line3\n"];
+    let tabs = ["\t", "\t\t", "\t\t\t"];
+}
+
+// In match
+fn escape_char(c: Char) -> Text {
+    match c {
+        '\n' => "newline"
+        '\t' => "tab"
+        '\r' => "carriage return"
+        '\\' => "backslash"
+        '"' => "double quote"
+        '\'' => "single quote"
+        _ => "other"
+    }
+}
+
+fn test_complex_escapes() {
+    // Complex strings with multiple escape types
+    let multiline_content = "Header\n\tItem 1\n\tItem 2\n\tItem 3";
+    let dialog = "User: \"Hello!\"\nBot: \"Hi there!\"";
+    let log_format = "[INFO]\t2025-01-15\t\"Message\"\n";
+}
+
+fn test_regex_escapes() {
+    // Regex-like patterns (escaped for string)
+    let regex_pattern = "\\d+\\.\\d+";
+    let path_pattern = ".*\\.txt$";
+}
+
+fn test_sql_escapes() {
+    // SQL-like strings
+    let sql_query = "SELECT * FROM \"users\" WHERE name = 'John'";
+    let sql_escaped = "INSERT INTO t VALUES ('O\\'Brien')";
+}
+
+fn test_error_escapes() {
+    // Error messages with escapes
+    let error_msg = "Error: File \"config.json\" not found.\nPlease check the path.";
+    let warning = "Warning:\n\tDeprecated function.\n\tUse newFunction() instead.";
+}
+
+fn test_special_char_escapes() {
+    // Special characters needing escape
+    let percent_escape = "100%% complete";
+    let literal_n = "\\n is a newline";
+    let literal_t = "\\t is a tab";
+}

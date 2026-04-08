@@ -1,0 +1,63 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, sigma-types, refinement, error
+// @expected-error: E400 "Type mismatch"
+
+/// Refinement desugaring - failure cases
+///
+/// These tests verify that refinement type constraints are properly
+/// checked and type mismatches are caught.
+
+/// Non-empty list type
+type NonEmptyList<T> is {
+    data: List<T>,
+    length: Int,
+};
+
+/// Sorted list type
+type SortedList<T> is {
+    data: List<T>,
+};
+
+/// ERROR: Constructing NonEmpty with wrong data type
+fn make_wrong_nonempty() -> NonEmptyList<Int> {
+    NonEmptyList {
+        data: "not a list",  // ERROR: Text != List<Int>
+        length: 3,
+    }
+}
+
+/// ERROR: Constructing Sorted with wrong data type
+fn make_wrong_sorted() -> SortedList<Int> {
+    SortedList {
+        data: 42,  // ERROR: Int != List<Int>
+    }
+}
+
+/// ERROR: Wrong return type for safe head
+fn safe_head_wrong(ne: NonEmptyList<Int>) -> Text {
+    ne.data[0]  // ERROR: Int != Text (data is List<Int>)
+}
+
+/// Bounded value
+type BoundedVal is {
+    value: Int,
+    lo: Int,
+    hi: Int,
+};
+
+/// ERROR: Wrong field type
+fn bounded_wrong() -> BoundedVal {
+    BoundedVal {
+        value: "hello",  // ERROR: Text != Int
+        lo: 0,
+        hi: 100,
+    }
+}
+
+fn main() {
+    let _ = make_wrong_nonempty();
+    let _ = make_wrong_sorted();
+    let _ = bounded_wrong();
+}

@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, impl, error
+// @description: Test missing 'for' keyword in trait impl detection
+// @expected-error: E055
+
+implement Display Int {
+    fn show(&self) -> Text { "hello" }
+}
+
+implement Clone Point {
+    fn clone(&self) -> Self { Point { x: self.x, y: self.y } }
+}

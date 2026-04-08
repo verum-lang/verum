@@ -1,0 +1,24 @@
+// Helper module for test 1052
+
+module module_math_types;
+
+public type Vec2 is {
+    x: Int,
+    y: Int,
+};
+
+public fn vec2_add(a: Vec2, b: Vec2) -> Vec2 {
+    Vec2 { x: a.x + b.x, y: a.y + b.y }
+}
+
+public fn vec2_dot(a: Vec2, b: Vec2) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+public fn vec2_len_sq(v: Vec2) -> Int {
+    v.x * v.x + v.y * v.y
+}
+
+public fn vec2_scale(v: Vec2, s: Int) -> Vec2 {
+    Vec2 { x: v.x * s, y: v.y * s }
+}

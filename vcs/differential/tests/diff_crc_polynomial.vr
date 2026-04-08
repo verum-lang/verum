@@ -1,0 +1,152 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, crc, polynomial, checksum
+// @timeout: 10000
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// Simple additive checksum
+fn checksum_add(data: Int, n: Int) -> Int {
+    // Treat `data` as sequence of n digits (base 10)
+    let mut sum = 0;
+    let mut val = abs_val(data);
+    let mut i = 0;
+    while i < n {
+        sum = sum + val % 10;
+        val = val / 10;
+        i = i + 1;
+    }
+    sum % 256
+}
+
+// Fletcher-16 checksum on a sequence of small values
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn fletcher16(data: Arr8, n: Int) -> Int {
+    let mut sum1 = 0;
+    let mut sum2 = 0;
+    let mut i = 0;
+    while i < n {
+        sum1 = (sum1 + get(data, i)) % 255;
+        sum2 = (sum2 + sum1) % 255;
+        i = i + 1;
+    }
+    sum2 * 256 + sum1
+}
+
+// Adler-32 variant (simplified)
+fn adler32(data: Arr8, n: Int) -> Int {
+    let mut a = 1;
+    let mut b_val = 0;
+    let mut i = 0;
+    while i < n {
+        a = (a + get(data, i)) % 65521;
+        b_val = (b_val + a) % 65521;
+        i = i + 1;
+    }
+    b_val * 65536 + a
+}
+
+// Polynomial hash: h = sum(data[i] * base^i) mod modulus
+fn poly_hash(data: Arr8, n: Int, base: Int, modulus: Int) -> Int {
+    let mut h = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < n {
+        h = (h + get(data, i) * power) % modulus;
+        power = (power * base) % modulus;
+        i = i + 1;
+    }
+    h
+}
+
+// Luhn check digit algorithm (for credit card validation)
+fn luhn_check(data: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut alt = 0;
+    let mut i = n - 1;
+    let mut done = 0;
+    while done == 0 {
+        if i < 0 { done = 1; }
+        else {
+            let mut d = get(data, i);
+            if alt == 1 {
+                d = d * 2;
+                if d > 9 { d = d - 9; }
+            }
+            sum = sum + d;
+            alt = 1 - alt;
+            i = i - 1;
+        }
+    }
+    sum % 10
+}
+
+fn main() -> Int {
+    let data = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 6, d6: 7, d7: 8 };
+
+    // Fletcher-16
+    let f1 = fletcher16(data, 8);
+    assert_eq(f1 > 0, true);
+    // Same data gives same result
+    assert_eq(fletcher16(data, 8), f1);
+    // Empty gives 0
+    assert_eq(fletcher16(data, 0), 0);
+    // Single byte
+    let f_single = fletcher16(data, 1);
+    assert_eq(f_single % 256, 1); // sum1 = 1
+    assert_eq(f_single / 256, 1); // sum2 = 1
+
+    // Adler-32
+    let a1 = adler32(data, 8);
+    assert_eq(a1 > 0, true);
+    assert_eq(adler32(data, 8), a1); // deterministic
+    // Empty: a=1, b=0
+    assert_eq(adler32(data, 0), 1); // 0*65536 + 1
+
+    // Polynomial hash
+    let h1 = poly_hash(data, 8, 31, 1000003);
+    assert_eq(h1 >= 0, true);
+    assert_eq(h1 < 1000003, true);
+    assert_eq(poly_hash(data, 8, 31, 1000003), h1); // deterministic
+
+    // Different bases produce different hashes (usually)
+    let h2 = poly_hash(data, 8, 37, 1000003);
+    // Not guaranteed different but very likely
+    // Instead test property: hash changes when data changes
+    let data2 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 6, d6: 7, d7: 9 }; // last differs
+    let h3 = poly_hash(data2, 8, 31, 1000003);
+    assert_eq(h1 == h3, false); // different data → different hash (very likely)
+
+    // Order matters
+    let data3 = Arr8 { d0: 8, d1: 7, d2: 6, d3: 5, d4: 4, d5: 3, d6: 2, d7: 1 };
+    let h4 = poly_hash(data3, 8, 31, 1000003);
+    assert_eq(h1 == h4, false); // reversed data → different hash
+
+    // Luhn check digit
+    // Valid sequence: [7,9,9,2,7,3,9,8,7,1] → check = 0
+    // We only have 8 slots, test smaller
+    // Sequence [1,2,3,4]: luhn = (4 + 6 + 2 + 2) % 10 = 14%10 = 4
+    // Wait: from right: 4(alt=0), 3*2=6(alt=1), 2(alt=0), 1*2=2(alt=1) → 4+6+2+2=14
+    let luhn1 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(luhn_check(luhn1, 4), 4);
+
+    // All zeros: 0
+    let all_zero = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(luhn_check(all_zero, 4), 0);
+
+    // Additive checksum
+    assert_eq(checksum_add(1234, 4), (1+2+3+4) % 256);
+    assert_eq(checksum_add(9999, 4), (9+9+9+9) % 256);
+
+    print("DIFF_OK: crc_polynomial");
+    0
+}

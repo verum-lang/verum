@@ -1,0 +1,68 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, binding, at, error
+// @description: Test invalid @ binding pattern syntax
+// @expected-error: E070
+
+type Option<T> is None | Some(T);
+type Point is { x: Int, y: Int };
+
+fn test_at_without_identifier() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: @ without preceding identifier
+    match opt {
+        @ Some(x) => print("bound"),
+        None => print("none"),
+    }
+}
+
+fn test_at_with_literal() {
+    let value = 42;
+
+    // Invalid: literal before @ (must be identifier)
+    match value {
+        42 @ x => print("literal at"),
+        _ => print("other"),
+    }
+}
+
+fn test_at_at() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: double @ symbol
+    match opt {
+        val @@ Some(x) => print("double at"),
+        None => print("none"),
+    }
+}
+
+fn test_at_missing_subpattern() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: @ without subpattern
+    match opt {
+        val @ => print("missing subpattern"),
+        None => print("none"),
+    }
+}
+
+fn test_at_in_wrong_position() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: @ in field position
+    match p {
+        Point { @ x } => print("at in field"),
+        _ => print("other"),
+    }
+}
+
+fn test_multiple_at_bindings() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: chained @ bindings
+    match opt {
+        a @ b @ Some(x) => print("chained at"),
+        None => print("none"),
+    }
+}

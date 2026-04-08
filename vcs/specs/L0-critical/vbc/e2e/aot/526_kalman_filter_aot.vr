@@ -1,0 +1,187 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, kalman-filter, estimation, signal-processing
+// @timeout: 30000
+
+// Simplified 1D Kalman filter (integer-scaled)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// 1D Kalman filter state (all values scaled by 100)
+// x = state estimate * 100
+// p = error covariance * 100
+// q = process noise * 100
+// r = measurement noise * 100
+type KF is { x: Int, p: Int, q: Int, r: Int };
+
+fn kf_new(initial_x: Int, initial_p: Int, q: Int, r: Int) -> KF {
+    KF { x: initial_x, p: initial_p, q: q, r: r }
+}
+
+// Predict step: x_pred = x, p_pred = p + q
+fn kf_predict(kf: KF) -> KF {
+    KF { x: kf.x, p: kf.p + kf.q, q: kf.q, r: kf.r }
+}
+
+// Update step with measurement z (scaled by 100)
+// K = p / (p + r)  (Kalman gain, scaled by 100)
+// x = x + K * (z - x) / 100
+// p = (100 - K) * p / 100
+fn kf_update(kf: KF, z: Int) -> KF {
+    let k = kf.p * 100 / (kf.p + kf.r); // Kalman gain * 100
+    let new_x = kf.x + k * (z - kf.x) / 100;
+    let new_p = (100 - k) * kf.p / 100;
+    KF { x: new_x, p: new_p, q: kf.q, r: kf.r }
+}
+
+// Run filter on a sequence of measurements
+fn kf_run(kf: KF, measurements: Arr8, n: Int) -> Arr8 {
+    let mut state = kf;
+    let mut estimates = zeros();
+    let mut i = 0;
+    while i < n {
+        state = kf_predict(state);
+        state = kf_update(state, get8(measurements, i));
+        estimates = set8(estimates, i, state.x);
+        i = i + 1;
+    }
+    estimates
+}
+
+// Exponential moving average (for comparison)
+fn ema(data: Arr8, n: Int, alpha: Int) -> Arr8 {
+    // alpha is scaled by 100 (e.g., 30 = 0.30)
+    let mut result = zeros();
+    result = set8(result, 0, get8(data, 0));
+    let mut i = 1;
+    while i < n {
+        let prev = get8(result, i - 1);
+        let cur = get8(data, i);
+        let val = (alpha * cur + (100 - alpha) * prev) / 100;
+        result = set8(result, i, val);
+        i = i + 1;
+    }
+    result
+}
+
+// Simple moving average
+fn sma(data: Arr8, n: Int, window: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        let mut sum = 0;
+        let mut count = 0;
+        let start = if i >= window - 1 { i - window + 1 } else { 0 };
+        let mut j = start;
+        while j <= i {
+            sum = sum + get8(data, j);
+            count = count + 1;
+            j = j + 1;
+        }
+        result = set8(result, i, sum / count);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_constant_signal() -> Int {
+    // Constant signal at 500 (5.0 scaled), should converge quickly
+    let meas = Arr8 { v0: 500, v1: 500, v2: 500, v3: 500, v4: 500, v5: 0, v6: 0, v7: 0 };
+    let kf = kf_new(0, 10000, 100, 400);
+    let est = kf_run(kf, meas, 5);
+    // After several steps, estimate should be close to 500
+    let final_est = get8(est, 4);
+    assert(abs_val(final_est - 500) < 50);
+    1
+}
+
+fn test_step_signal() -> Int {
+    // Signal jumps from 100 to 500
+    let meas = Arr8 { v0: 100, v1: 100, v2: 500, v3: 500, v4: 500, v5: 500, v6: 0, v7: 0 };
+    let kf = kf_new(100, 100, 100, 200);
+    let est = kf_run(kf, meas, 6);
+    // Should track toward 500 eventually
+    assert(get8(est, 5) > 400);
+    assert(get8(est, 5) <= 500);
+    1
+}
+
+fn test_noisy_signal() -> Int {
+    // True value ~300, measurements have noise
+    let meas = Arr8 { v0: 320, v1: 280, v2: 310, v3: 290, v4: 305, v5: 295, v6: 0, v7: 0 };
+    let kf = kf_new(300, 1000, 50, 500);
+    let est = kf_run(kf, meas, 6);
+    // Filtered estimate should be smoother (closer to 300) than raw
+    let final_est = get8(est, 5);
+    assert(abs_val(final_est - 300) < 20);
+    1
+}
+
+fn test_ema() -> Int {
+    let data = Arr8 { v0: 100, v1: 200, v2: 100, v3: 200, v4: 100, v5: 0, v6: 0, v7: 0 };
+    let result = ema(data, 5, 50); // alpha = 0.5
+    assert_eq(get8(result, 0), 100);
+    assert_eq(get8(result, 1), 150); // (50*200 + 50*100)/100
+    assert_eq(get8(result, 2), 125); // (50*100 + 50*150)/100
+    1
+}
+
+fn test_sma() -> Int {
+    let data = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 0, v6: 0, v7: 0 };
+    let result = sma(data, 5, 3);
+    assert_eq(get8(result, 0), 10);  // only 1 element
+    assert_eq(get8(result, 1), 15);  // avg(10,20)
+    assert_eq(get8(result, 2), 20);  // avg(10,20,30)
+    assert_eq(get8(result, 3), 30);  // avg(20,30,40)
+    assert_eq(get8(result, 4), 40);  // avg(30,40,50)
+    1
+}
+
+fn test_kalman_converges() -> Int {
+    // Kalman filter uncertainty should decrease over time
+    let mut kf = kf_new(0, 10000, 100, 200);
+    let p0 = kf.p;
+    kf = kf_predict(kf);
+    kf = kf_update(kf, 500);
+    let p1 = kf.p;
+    kf = kf_predict(kf);
+    kf = kf_update(kf, 500);
+    let p2 = kf.p;
+    // Uncertainty should decrease: p0 > p1 > p2
+    assert(p0 > p1);
+    assert(p1 > p2);
+    1
+}
+
+fn main() -> Int {
+    test_constant_signal();
+    test_step_signal();
+    test_noisy_signal();
+    test_ema();
+    test_sma();
+    test_kalman_converges();
+    print("[OK] 526_kalman_filter_aot");
+    0
+}

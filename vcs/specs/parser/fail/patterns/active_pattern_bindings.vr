@@ -1,0 +1,97 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, active, bindings, error
+// @description: Test invalid Active Pattern binding syntax
+// @expected-error: E018
+
+// Active pattern definitions for context
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+pattern ParseInt(s: Text) -> Maybe<Int> = Int::parse(s);
+pattern HeadTail(list: List<T>) -> Maybe<(T, List<T>)>;
+
+// =============================================================================
+// Test: Unclosed binding parentheses
+// =============================================================================
+
+fn test_unclosed_binding_parens() {
+    let value = 42;
+
+    // Invalid: unclosed binding parentheses on partial pattern
+    match value {
+        ParseInt()( => print("unclosed"),
+        _ => print("other")
+    }
+}
+
+fn test_unclosed_binding_with_content() {
+    let input = "42";
+
+    // Invalid: unclosed binding parens with content
+    match input {
+        ParseInt()(n => print("unclosed with binding"),
+        _ => print("other")
+    }
+}
+
+fn test_unclosed_parameterized_binding() {
+    let input = "test";
+
+    // Invalid: unclosed binding on parameterized partial pattern
+    match input {
+        RegexMatch("\\d+")([digits => print("unclosed regex binding"),
+        _ => print("other")
+    }
+}
+
+// =============================================================================
+// Test: Missing binding delimiter
+// =============================================================================
+
+fn test_binding_missing_close() {
+    let list = [1, 2, 3];
+
+    // Invalid: missing ) after bindings
+    match list {
+        HeadTail()(h, t => print("missing close"),
+        _ => print("other")
+    }
+}
+
+// =============================================================================
+// Test: Invalid nesting in bindings
+// =============================================================================
+
+fn test_unbalanced_parens_in_binding() {
+    let data = "nested";
+
+    // Invalid: unbalanced parentheses in binding pattern
+    match data {
+        ParsePair()((a, b) => print("unbalanced"),
+        _ => print("other")
+    }
+}
+
+fn test_unbalanced_brackets_in_binding() {
+    let data = "array";
+
+    // Invalid: unbalanced brackets in binding pattern
+    match data {
+        ParseArray()([a, b => print("unbalanced brackets"),
+        _ => print("other")
+    }
+}
+
+// =============================================================================
+// Test: Fat arrow inside bindings (common mistake)
+// =============================================================================
+
+fn test_fat_arrow_in_binding() {
+    let input = "42";
+
+    // Invalid: fat arrow inside binding parens (forgot to close)
+    match input {
+        ParseInt()(n => result => print("arrow inside"),
+        _ => print("other")
+    }
+}

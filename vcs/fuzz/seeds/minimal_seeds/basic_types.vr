@@ -1,0 +1,8 @@
+// Minimal: Basic type declarations
+fn main() {
+    let x: Int = 42;
+    let y: Float = 3.14;
+    let z: Text = "hello";
+    let b: Bool = true;
+    let c: Char = 'a';
+}

@@ -1,0 +1,119 @@
+// @test: typecheck-pass
+// @level: L4
+// @tier: 0
+// @tags: performance, cbgr, overhead, references, latency
+// @timeout: 30000
+// @description: CBGR overhead measurement — value access, struct field, and list indexing costs
+
+/// CBGR Overhead Benchmark
+///
+/// Measures the cost of various access patterns relevant to CBGR.
+/// Target: < 15ns per managed reference operation.
+
+fn bench_direct_value(iters: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        let x = i * 3 + 7;
+        sum = sum + x;
+        i = i + 1;
+    }
+    sum
+}
+
+type Datum is {
+    a: Int,
+    b: Int,
+    c: Int,
+};
+
+fn bench_struct_field(iters: Int) -> Int {
+    let d = Datum { a: 1, b: 2, c: 3 };
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + d.a + d.b + d.c;
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_list_indexed(iters: Int) -> Int {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + data[i % 10];
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_mutable_write(iters: Int) -> Int {
+    let mut val = 0;
+    let mut i = 0;
+    while i < iters {
+        val = val + 1;
+        i = i + 1;
+    }
+    val
+}
+
+fn bench_function_call_overhead(iters: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + add_values(i, 7);
+        i = i + 1;
+    }
+    sum
+}
+
+fn add_values(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn bench_struct_pass(iters: Int) -> Int {
+    let d = Datum { a: 10, b: 20, c: 30 };
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + sum_datum(d);
+        i = i + 1;
+    }
+    sum
+}
+
+fn sum_datum(d: Datum) -> Int {
+    d.a + d.b + d.c
+}
+
+fn main() -> Int {
+    let iters = 1000000;
+    print("=== CBGR Overhead Benchmark ===");
+    print(f"Iterations per test: {iters}");
+
+    let r1 = bench_direct_value(iters);
+    print(f"  direct_value: done (sum={r1})");
+
+    let r2 = bench_struct_field(iters);
+    print(f"  struct_field: done (sum={r2})");
+
+    let r3 = bench_list_indexed(iters);
+    print(f"  list_indexed: done (sum={r3})");
+
+    let r4 = bench_mutable_write(iters);
+    print(f"  mutable_write: done (val={r4})");
+
+    let r5 = bench_function_call_overhead(iters);
+    print(f"  function_call: done (sum={r5})");
+
+    let r6 = bench_struct_pass(iters);
+    print(f"  struct_pass: done (sum={r6})");
+
+    print("");
+    print("Target: < 15ns overhead per managed reference operation");
+    print("Note: actual timing requires external measurement harness");
+    print("All CBGR overhead benchmarks completed");
+    0
+}

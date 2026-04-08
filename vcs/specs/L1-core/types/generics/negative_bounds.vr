@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, bounds, negative
+
+/// Test for negative trait bounds.
+/// Negative bounds exclude types that implement certain traits.
+
+// Negative bound: T must NOT implement Copy
+fn must_move<T: !Copy>(value: T) -> T {
+    // This function takes ownership; value cannot be implicitly copied
+    value
+}
+
+// Negative bound: T must NOT implement Send (not thread-safe)
+fn local_only<T: !Send>(value: T) {
+    // This value cannot be sent to other threads
+    print("Using local-only value");
+}
+
+// Negative bound: T must NOT implement Sync (not shareable)
+fn single_thread<T: !Sync>(value: &T) {
+    // Reference to this value cannot be shared across threads
+    print("Using single-threaded reference");
+}
+
+// Combining positive and negative bounds
+fn owned_non_copyable<T: Clone + !Copy>(value: T) -> (T, T) {
+    // T can be cloned but not copied - must explicitly clone
+    let copy = value.clone();
+    (value, copy)
+}
+
+// Negative bound in struct definition
+type UniqueHandle<T: !Clone> is {
+    inner: T,
+};
+
+implement UniqueHandle<T> {
+    fn new(inner: T) -> UniqueHandle<T> {
+        UniqueHandle { inner }
+    }
+
+    fn into_inner(self) -> T {
+        self.inner
+    }
+
+    // Cannot provide clone because T: !Clone
+}
+
+// Negative bound for unsafe code boundaries
+type SafeWrapper<T: !Unsafe> is {
+    value: T,
+};
+
+// Negative bound to prevent certain generic instantiations
+fn no_pointers<T: !Pointer>(value: T) {
+    // Ensures T is not a raw pointer type
+    print("Safe non-pointer value");
+}
+
+// Complex negative bounds
+fn heap_only<T: !Copy + !Default>(value: T) -> Heap<T> {
+    // T cannot be copied and has no default - must be heap allocated
+    Heap.new(value)
+}
+
+// Negative bounds with where clause
+fn specialized<T>(value: T) -> T
+where
+    T: Debug,
+    T: !Copy,
+{
+    print(f"Moving value: {value:?}");
+    value
+}
+
+// Type that doesn't implement Copy (for testing)
+type NonCopyable is {
+    data: Heap<Int>,
+};
+
+implement NonCopyable {
+    fn new(value: Int) -> NonCopyable {
+        NonCopyable { data: Heap.new(value) }
+    }
+}
+
+// impl Clone for NonCopyable but NOT Copy
+
+fn main() {
+    // Using must_move with non-Copy types
+    let nc = NonCopyable.new(42);
+    let moved = must_move(nc);
+    // nc is no longer valid here
+
+    // Using owned_non_copyable
+    let text: Text = "hello";  // Text is Clone but not Copy
+    let (original, cloned) = owned_non_copyable(text);
+
+    // Using UniqueHandle
+    let handle = UniqueHandle.new(NonCopyable.new(100));
+    let inner = handle.into_inner();
+    // handle is no longer valid
+
+    // Using heap_only
+    let boxed = heap_only(NonCopyable.new(200));
+
+    // Using specialized
+    let list: List<Int> = [1, 2, 3];  // List is !Copy
+    let moved_list = specialized(list);
+
+    // Negative bounds prevent incorrect usage (compile-time checks):
+    // let x: Int = 5;
+    // must_move(x);  // ERROR: Int implements Copy
+
+    // let y: Bool = true;
+    // must_move(y);  // ERROR: Bool implements Copy
+
+    // Assertions
+    assert(*moved.data == 42);
+    assert(original == "hello");
+    assert(cloned == "hello");
+    assert(*inner.data == 100);
+    assert(*boxed == NonCopyable.new(200));
+    assert(moved_list == [1, 2, 3]);
+}

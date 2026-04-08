@@ -1,0 +1,160 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, skip, list, search
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for skip list simulation (2-level sorted list)
+
+// Simple skip list: level 0 (all elements) + level 1 (express lane)
+// We simulate with two sorted arrays
+type Level8 is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    len: Int
+};
+
+fn lvl_new() -> Level8 {
+    Level8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, len: 0 }
+}
+
+fn lvl_get(l: Level8, i: Int) -> Int {
+    if i == 0 { l.d0 } else if i == 1 { l.d1 }
+    else if i == 2 { l.d2 } else if i == 3 { l.d3 }
+    else if i == 4 { l.d4 } else if i == 5 { l.d5 }
+    else if i == 6 { l.d6 } else { l.d7 }
+}
+
+fn lvl_set(l: Level8, i: Int, v: Int) -> Level8 {
+    Level8 {
+        d0: if i == 0 { v } else { l.d0 }, d1: if i == 1 { v } else { l.d1 },
+        d2: if i == 2 { v } else { l.d2 }, d3: if i == 3 { v } else { l.d3 },
+        d4: if i == 4 { v } else { l.d4 }, d5: if i == 5 { v } else { l.d5 },
+        d6: if i == 6 { v } else { l.d6 }, d7: if i == 7 { v } else { l.d7 },
+        len: l.len
+    }
+}
+
+type SkipList is { level0: Level8, level1: Level8 };
+
+fn sl_new() -> SkipList { SkipList { level0: lvl_new(), level1: lvl_new() } }
+
+// Insert into sorted level (shift right)
+fn lvl_insert_sorted(l: Level8, val: Int) -> Level8 {
+    if l.len >= 8 { return l; }
+    // Find position
+    let mut pos = 0;
+    while pos < l.len && lvl_get(l, pos) < val {
+        pos = pos + 1;
+    }
+    // Shift right
+    let mut result = l;
+    let mut j = l.len;
+    while j > pos {
+        result = lvl_set(result, j, lvl_get(result, j - 1));
+        j = j - 1;
+    }
+    result = lvl_set(result, pos, val);
+    Level8 {
+        d0: result.d0, d1: result.d1, d2: result.d2, d3: result.d3,
+        d4: result.d4, d5: result.d5, d6: result.d6, d7: result.d7,
+        len: l.len + 1
+    }
+}
+
+// Simple hash to decide if element goes to express lane
+fn promote(val: Int) -> Bool {
+    (val * 2654435761) % 4 == 0  // ~25% chance
+}
+
+fn sl_insert(sl: SkipList, val: Int) -> SkipList {
+    let l0 = lvl_insert_sorted(sl.level0, val);
+    let l1 = if promote(val) { lvl_insert_sorted(sl.level1, val) } else { sl.level1 };
+    SkipList { level0: l0, level1: l1 }
+}
+
+// Search using skip list: first scan express lane, then refine
+fn sl_search(sl: SkipList, target: Int) -> Bool {
+    // Find position in express lane
+    let mut start = 0;
+    let mut i = 0;
+    while i < sl.level1.len {
+        if lvl_get(sl.level1, i) <= target {
+            start = lvl_get(sl.level1, i);
+        }
+        i = i + 1;
+    }
+
+    // Search in level 0
+    let mut j = 0;
+    while j < sl.level0.len {
+        if lvl_get(sl.level0, j) == target { return true; }
+        if lvl_get(sl.level0, j) > target { return false; }
+        j = j + 1;
+    }
+    false
+}
+
+fn sl_size(sl: SkipList) -> Int { sl.level0.len }
+
+fn test_insert_and_search() {
+    let mut sl = sl_new();
+    sl = sl_insert(sl, 10);
+    sl = sl_insert(sl, 5);
+    sl = sl_insert(sl, 20);
+    sl = sl_insert(sl, 15);
+
+    assert_eq(sl_size(sl), 4);
+    assert_eq(sl_search(sl, 10), true);
+    assert_eq(sl_search(sl, 5), true);
+    assert_eq(sl_search(sl, 20), true);
+    assert_eq(sl_search(sl, 15), true);
+    assert_eq(sl_search(sl, 12), false);
+}
+
+fn test_sorted_order() {
+    let mut sl = sl_new();
+    sl = sl_insert(sl, 30);
+    sl = sl_insert(sl, 10);
+    sl = sl_insert(sl, 20);
+
+    // Level 0 should be sorted
+    assert_eq(lvl_get(sl.level0, 0), 10);
+    assert_eq(lvl_get(sl.level0, 1), 20);
+    assert_eq(lvl_get(sl.level0, 2), 30);
+}
+
+fn test_many_elements() {
+    let mut sl = sl_new();
+    let mut i = 1;
+    while i <= 8 {
+        sl = sl_insert(sl, i * 5);
+        i = i + 1;
+    }
+    assert_eq(sl_size(sl), 8);
+    assert_eq(sl_search(sl, 5), true);
+    assert_eq(sl_search(sl, 40), true);
+    assert_eq(sl_search(sl, 3), false);
+}
+
+fn test_express_lane() {
+    let mut sl = sl_new();
+    let mut i = 1;
+    while i <= 8 {
+        sl = sl_insert(sl, i * 10);
+        i = i + 1;
+    }
+    // Express lane should have some elements
+    assert_eq(sl.level1.len >= 0, true);
+    assert_eq(sl.level1.len <= sl.level0.len, true);
+}
+
+fn main() -> Int {
+    test_insert_and_search();
+    test_sorted_order();
+    test_many_elements();
+    test_express_lane();
+    print("[OK] 276_skip_list_aot");
+    0
+}

@@ -1,0 +1,189 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, protocols, async
+// @description: Async methods in protocols
+
+/// Test for async methods in protocols.
+/// Protocols can define async methods that must be implemented asynchronously.
+
+// ============================================================================
+// Protocol with async methods
+// ============================================================================
+
+type AsyncReader is protocol {
+    type Error;
+
+    async fn read(&mut self, buf: &mut List<Int>) -> Result<Int, Self.Error>;
+    async fn read_to_end(&mut self, buf: &mut List<Int>) -> Result<Int, Self.Error>;
+};
+
+type AsyncWriter is protocol {
+    type Error;
+
+    async fn write(&mut self, buf: &List<Int>) -> Result<Int, Self.Error>;
+    async fn flush(&mut self) -> Result<Int, Self.Error>;
+};
+
+// ============================================================================
+// Protocol with mixed sync and async methods
+// ============================================================================
+
+type Cache is protocol {
+    type Key;
+    type Value;
+    type Error;
+
+    // Sync methods
+    fn capacity(&self) -> Int;
+    fn len(&self) -> Int;
+    fn is_empty(&self) -> Bool;
+
+    // Async methods
+    async fn get(&self, key: &Self.Key) -> Result<Maybe<Self.Value>, Self.Error>;
+    async fn set(&mut self, key: Self.Key, value: Self.Value) -> Result<Int, Self.Error>;
+};
+
+// ============================================================================
+// Protocol with async iterator pattern
+// ============================================================================
+
+type AsyncIterator is protocol {
+    type Item;
+
+    async fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// ============================================================================
+// Protocol with async default implementations
+// ============================================================================
+
+type AsyncService is protocol {
+    type Request;
+    type Response;
+    type Error;
+
+    async fn call(&self, req: Self.Request) -> Result<Self.Response, Self.Error>;
+
+    // Default async implementation
+    async fn call_with_timeout(&self, req: Self.Request, timeout_ms: Int)
+        -> Result<Self.Response, Self.Error>
+    {
+        // Default: just call without timeout
+        self.call(req).await
+    }
+};
+
+// ============================================================================
+// Concrete implementations
+// ============================================================================
+
+type IoError is {
+    message: Text,
+};
+
+type MemoryBuffer is {
+    data: List<Int>,
+    position: Int,
+};
+
+implement AsyncReader for MemoryBuffer {
+    type Error is IoError;
+
+    async fn read(&mut self, buf: &mut List<Int>) -> Result<Int, IoError> {
+        let available = self.data.len() - self.position;
+        let to_read = if available < 1024 { available } else { 1024 };
+
+        let mut i = 0;
+        while i < to_read {
+            buf.push(self.data[self.position + i]);
+            i = i + 1;
+        }
+        self.position = self.position + to_read;
+        Ok(to_read)
+    }
+
+    async fn read_to_end(&mut self, buf: &mut List<Int>) -> Result<Int, IoError> {
+        let remaining = self.data.len() - self.position;
+        let mut i = 0;
+        while i < remaining {
+            buf.push(self.data[self.position + i]);
+            i = i + 1;
+        }
+        self.position = self.data.len();
+        Ok(remaining)
+    }
+}
+
+implement AsyncWriter for MemoryBuffer {
+    type Error is IoError;
+
+    async fn write(&mut self, buf: &List<Int>) -> Result<Int, IoError> {
+        let mut i = 0;
+        while i < buf.len() {
+            self.data.push(buf[i]);
+            i = i + 1;
+        }
+        Ok(buf.len())
+    }
+
+    async fn flush(&mut self) -> Result<Int, IoError> {
+        Ok(0)
+    }
+}
+
+// ============================================================================
+// Async iterator implementation
+// ============================================================================
+
+type AsyncRange is {
+    current: Int,
+    end: Int,
+};
+
+implement AsyncIterator for AsyncRange {
+    type Item is Int;
+
+    async fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end {
+            let value = self.current;
+            self.current = self.current + 1;
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+// ============================================================================
+// Service implementation
+// ============================================================================
+
+type ServiceError is {
+    code: Int,
+    message: Text,
+};
+
+type EchoRequest is {
+    data: Text,
+};
+
+type EchoResponse is {
+    data: Text,
+};
+
+type EchoService is {};
+
+implement AsyncService for EchoService {
+    type Request is EchoRequest;
+    type Response is EchoResponse;
+    type Error is ServiceError;
+
+    async fn call(&self, req: EchoRequest) -> Result<EchoResponse, ServiceError> {
+        Ok(EchoResponse { data: req.data })
+    }
+}
+
+fn main() {
+    // Typecheck-only: verify protocol definitions and implementations compile
+}

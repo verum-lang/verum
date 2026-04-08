@@ -1,0 +1,57 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: text, method, self, debug, e2e
+// @description: Debug test for text field comparison in methods
+
+type Simple is { name: Text };
+
+implement Simple {
+    fn new(name: Text) -> Simple {
+        Simple { name: name }
+    }
+
+    fn get_name(&self) -> Text {
+        self.name
+    }
+}
+
+fn compare_texts(a: Text, b: Text) -> Bool {
+    a == b
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Direct text field access and comparison
+    let s = Simple.new("hello");
+    let n = s.name;
+    if n != "hello" {
+        print(f"FAIL: direct field access, got '{n}'");
+        failures = failures + 1;
+    } else {
+        print("  direct_field: OK");
+    }
+
+    // Test 2: Method that returns text field
+    let n2 = s.get_name();
+    if n2 != "hello" {
+        print(f"FAIL: get_name, got '{n2}'");
+        failures = failures + 1;
+    } else {
+        print("  method_return: OK");
+    }
+
+    // Test 3: Compare method-returned text
+    if !compare_texts(s.get_name(), "hello") {
+        print("FAIL: compare_texts");
+        failures = failures + 1;
+    } else {
+        print("  compare_fn: OK");
+    }
+
+    if failures == 0 {
+        print("All text method debug tests passed");
+    }
+    failures
+}

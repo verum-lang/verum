@@ -1,0 +1,311 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, min-heap, priority-queue, heapify, extract-min
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for min-heap (priority queue):
+// 1. Insert elements maintaining heap property
+// 2. Extract-min (remove and return smallest)
+// 3. Build heap from array (heapify)
+// 4. Heap sort
+// Uses 1-indexed array of max size 8.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn a8_swap(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = a8_get(a, i);
+    let vj = a8_get(a, j);
+    a8_set(a8_set(a, i, vj), j, vi)
+}
+
+// Min-heap using 1-indexed array (index 0 unused, elements at 1..size)
+type Heap is { data: Arr8, size: Int };
+
+fn heap_new() -> Heap {
+    Heap { data: a8_zero(), size: 0 }
+}
+
+// Parent of node i (1-indexed) = i/2
+fn parent(i: Int) -> Int { i / 2 }
+// Left child = 2*i, right child = 2*i+1
+fn left_child(i: Int) -> Int { i * 2 }
+fn right_child(i: Int) -> Int { i * 2 + 1 }
+
+// Sift up: move element at index i upward until heap property restored
+fn sift_up(h: Heap, idx: Int) -> Heap {
+    let mut data = h.data;
+    let mut i = idx;
+    while i > 1 {
+        let p = parent(i);
+        if a8_get(data, i) < a8_get(data, p) {
+            data = a8_swap(data, i, p);
+            i = p;
+        } else {
+            i = 0; // break
+        }
+    }
+    Heap { data: data, size: h.size }
+}
+
+// Sift down: move element at index i downward until heap property restored
+fn sift_down(h: Heap, idx: Int) -> Heap {
+    let mut data = h.data;
+    let n = h.size;
+    let mut i = idx;
+    let mut done = 0;
+    while done == 0 {
+        let l = left_child(i);
+        let r = right_child(i);
+        let mut smallest = i;
+        if l <= n {
+            if a8_get(data, l) < a8_get(data, smallest) {
+                smallest = l;
+            }
+        }
+        if r <= n {
+            if a8_get(data, r) < a8_get(data, smallest) {
+                smallest = r;
+            }
+        }
+        if smallest != i {
+            data = a8_swap(data, i, smallest);
+            i = smallest;
+        } else {
+            done = 1;
+        }
+    }
+    Heap { data: data, size: n }
+}
+
+// Insert value into heap
+fn heap_insert(h: Heap, val: Int) -> Heap {
+    let new_size = h.size + 1;
+    let data = a8_set(h.data, new_size, val);
+    let h2 = Heap { data: data, size: new_size };
+    sift_up(h2, new_size)
+}
+
+// Peek at minimum (root element)
+fn heap_peek(h: Heap) -> Int {
+    a8_get(h.data, 1)
+}
+
+// Extract minimum: remove root, replace with last, sift down
+// Returns the min value
+fn heap_extract_min_val(h: Heap) -> Int {
+    a8_get(h.data, 1)
+}
+
+fn heap_extract_min(h: Heap) -> Heap {
+    let n = h.size;
+    if n <= 1 {
+        return Heap { data: a8_zero(), size: 0 };
+    }
+    // Move last element to root
+    let last = a8_get(h.data, n);
+    let data = a8_set(h.data, 1, last);
+    let h2 = Heap { data: data, size: n - 1 };
+    sift_down(h2, 1)
+}
+
+// Build heap from array (Floyd's algorithm: sift down from n/2 to 1)
+fn build_heap(arr: Arr8, n: Int) -> Heap {
+    // Copy arr into 1-indexed heap (shift by 1)
+    let mut data = a8_zero();
+    let mut i = 0;
+    while i < n {
+        data = a8_set(data, i + 1, a8_get(arr, i));
+        i = i + 1;
+    }
+    let mut h = Heap { data: data, size: n };
+
+    // Sift down from n/2 to 1
+    let mut k = n / 2;
+    while k >= 1 {
+        h = sift_down(h, k);
+        k = k - 1;
+    }
+    h
+}
+
+// Heap sort: repeatedly extract min to produce sorted output
+fn heap_sort(arr: Arr8, n: Int) -> Arr8 {
+    let mut h = build_heap(arr, n);
+    let mut sorted = a8_zero();
+    let mut i = 0;
+    while i < n {
+        let min_val = heap_peek(h);
+        sorted = a8_set(sorted, i, min_val);
+        h = heap_extract_min(h);
+        i = i + 1;
+    }
+    sorted
+}
+
+// Verify heap property: parent <= children
+fn is_valid_heap(h: Heap) -> Int {
+    let n = h.size;
+    let mut i = 1;
+    let mut valid = 1;
+    while i <= n {
+        let l = left_child(i);
+        let r = right_child(i);
+        if l <= n {
+            if a8_get(h.data, l) < a8_get(h.data, i) { valid = 0; }
+        }
+        if r <= n {
+            if a8_get(h.data, r) < a8_get(h.data, i) { valid = 0; }
+        }
+        i = i + 1;
+    }
+    valid
+}
+
+fn test_insert_and_peek() {
+    let mut h = heap_new();
+    h = heap_insert(h, 5);
+    assert_eq(heap_peek(h), 5);
+    h = heap_insert(h, 3);
+    assert_eq(heap_peek(h), 3);
+    h = heap_insert(h, 7);
+    assert_eq(heap_peek(h), 3);
+    h = heap_insert(h, 1);
+    assert_eq(heap_peek(h), 1);
+    assert_eq(h.size, 4);
+    assert_eq(is_valid_heap(h), 1);
+}
+
+fn test_extract_min() {
+    let mut h = heap_new();
+    h = heap_insert(h, 5);
+    h = heap_insert(h, 3);
+    h = heap_insert(h, 7);
+    h = heap_insert(h, 1);
+    h = heap_insert(h, 4);
+
+    assert_eq(heap_peek(h), 1);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek(h), 3);
+    assert_eq(h.size, 4);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek(h), 4);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek(h), 5);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek(h), 7);
+    assert_eq(h.size, 1);
+}
+
+fn test_build_heap() {
+    let arr = Arr8 { a0: 9, a1: 5, a2: 3, a3: 8, a4: 1, a5: 7, a6: 2, a7: 0 };
+    let h = build_heap(arr, 7);
+    assert_eq(is_valid_heap(h), 1);
+    assert_eq(heap_peek(h), 1);
+    assert_eq(h.size, 7);
+}
+
+fn test_heap_sort() {
+    let arr = Arr8 { a0: 9, a1: 5, a2: 3, a3: 8, a4: 1, a5: 7, a6: 2, a7: 0 };
+    let sorted = heap_sort(arr, 7);
+    assert_eq(a8_get(sorted, 0), 1);
+    assert_eq(a8_get(sorted, 1), 2);
+    assert_eq(a8_get(sorted, 2), 3);
+    assert_eq(a8_get(sorted, 3), 5);
+    assert_eq(a8_get(sorted, 4), 7);
+    assert_eq(a8_get(sorted, 5), 8);
+    assert_eq(a8_get(sorted, 6), 9);
+}
+
+fn test_already_sorted() {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 0, a6: 0, a7: 0 };
+    let sorted = heap_sort(arr, 5);
+    assert_eq(a8_get(sorted, 0), 1);
+    assert_eq(a8_get(sorted, 1), 2);
+    assert_eq(a8_get(sorted, 2), 3);
+    assert_eq(a8_get(sorted, 3), 4);
+    assert_eq(a8_get(sorted, 4), 5);
+}
+
+fn test_reverse_sorted() {
+    let arr = Arr8 { a0: 5, a1: 4, a2: 3, a3: 2, a4: 1, a5: 0, a6: 0, a7: 0 };
+    let sorted = heap_sort(arr, 5);
+    assert_eq(a8_get(sorted, 0), 1);
+    assert_eq(a8_get(sorted, 1), 2);
+    assert_eq(a8_get(sorted, 2), 3);
+    assert_eq(a8_get(sorted, 3), 4);
+    assert_eq(a8_get(sorted, 4), 5);
+}
+
+fn test_duplicates() {
+    let arr = Arr8 { a0: 3, a1: 1, a2: 3, a3: 1, a4: 2, a5: 0, a6: 0, a7: 0 };
+    let sorted = heap_sort(arr, 5);
+    assert_eq(a8_get(sorted, 0), 1);
+    assert_eq(a8_get(sorted, 1), 1);
+    assert_eq(a8_get(sorted, 2), 2);
+    assert_eq(a8_get(sorted, 3), 3);
+    assert_eq(a8_get(sorted, 4), 3);
+}
+
+fn test_single_element() {
+    let mut h = heap_new();
+    h = heap_insert(h, 42);
+    assert_eq(heap_peek(h), 42);
+    assert_eq(h.size, 1);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_extract_min(h);
+    assert_eq(h.size, 0);
+}
+
+fn test_heap_property_maintained() {
+    // Insert in random order and verify heap property after each insert
+    let mut h = heap_new();
+    h = heap_insert(h, 10);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_insert(h, 4);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_insert(h, 15);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_insert(h, 2);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_insert(h, 8);
+    assert_eq(is_valid_heap(h), 1);
+    h = heap_insert(h, 1);
+    assert_eq(is_valid_heap(h), 1);
+    assert_eq(heap_peek(h), 1);
+}
+
+fn main() -> Int {
+    test_insert_and_peek();
+    test_extract_min();
+    test_build_heap();
+    test_heap_sort();
+    test_already_sorted();
+    test_reverse_sorted();
+    test_duplicates();
+    test_single_element();
+    test_heap_property_maintained();
+    print("[OK] 343_min_heap_aot");
+    0
+}

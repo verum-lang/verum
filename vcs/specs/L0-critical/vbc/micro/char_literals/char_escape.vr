@@ -1,0 +1,21 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Newline
+    let nl = '\n';
+    assert_eq(nl as Int, 10);
+
+    // Tab
+    let tab = '\t';
+    assert_eq(tab as Int, 9);
+
+    // Carriage return
+    let cr = '\r';
+    assert_eq(cr as Int, 13);
+
+    // Null
+    let nul = '\0';
+    assert_eq(nul as Int, 0);
+}

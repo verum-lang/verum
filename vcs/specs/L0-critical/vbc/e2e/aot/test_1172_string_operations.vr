@@ -1,0 +1,72 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: string, text, operations, e2e
+// @description: Test string/text operations - contains, length, comparison, f-strings
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: String comparison
+    let a = "hello";
+    let b = "hello";
+    let c = "world";
+    if a != b {
+        print("FAIL: string equality");
+        failures = failures + 1;
+    }
+    if a == c {
+        print("FAIL: string inequality");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  string_cmp: OK");
+    }
+
+    // Test 2: f-string interpolation
+    let name = "Verum";
+    let version = 1;
+    let msg = f"Language: {name} v{version}";
+    if msg != "Language: Verum v1" {
+        print(f"FAIL: f-string got '{msg}'");
+        failures = failures + 1;
+    } else {
+        print("  f_string: OK");
+    }
+
+    // Test 3: String concatenation via f-string
+    let part1 = "foo";
+    let part2 = "bar";
+    let combined = f"{part1}{part2}";
+    if combined != "foobar" {
+        print(f"FAIL: concat got '{combined}'");
+        failures = failures + 1;
+    } else {
+        print("  concat: OK");
+    }
+
+    // Test 4: Nested f-string expressions
+    let x = 10;
+    let y = 20;
+    let result = f"{x} + {y} = {x + y}";
+    if result != "10 + 20 = 30" {
+        print(f"FAIL: nested f-string got '{result}'");
+        failures = failures + 1;
+    } else {
+        print("  nested_fstring: OK");
+    }
+
+    // Test 5: String in conditionals
+    let status = if x > 5 { "large" } else { "small" };
+    if status != "large" {
+        print("FAIL: string conditional");
+        failures = failures + 1;
+    } else {
+        print("  string_cond: OK");
+    }
+
+    if failures == 0 {
+        print("All string operation tests passed");
+    }
+    failures
+}

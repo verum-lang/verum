@@ -1,0 +1,79 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, newton, sqrt, approximation
+// @timeout: 10000
+
+// Integer square root using Newton's method
+fn isqrt(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+// Check: isqrt(n)^2 <= n < (isqrt(n)+1)^2
+fn verify_isqrt(n: Int) -> Int {
+    let s = isqrt(n);
+    if s * s > n { return 0; }
+    if (s + 1) * (s + 1) <= n { return 0; }
+    1
+}
+
+// Integer cube root
+fn icbrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut x = n;
+    let mut y = (2 * x + n / (x * x)) / 3;
+    while y < x {
+        x = y;
+        y = (2 * x + n / (x * x)) / 3;
+    }
+    x
+}
+
+fn main() -> Int {
+    // Perfect squares
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(25), 5);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(144), 12);
+    assert_eq(isqrt(10000), 100);
+
+    // Non-perfect squares (floor)
+    assert_eq(isqrt(2), 1);
+    assert_eq(isqrt(3), 1);
+    assert_eq(isqrt(5), 2);
+    assert_eq(isqrt(8), 2);
+    assert_eq(isqrt(10), 3);
+    assert_eq(isqrt(99), 9);
+    assert_eq(isqrt(101), 10);
+
+    // Verify property for 1..50
+    let mut i = 1;
+    while i <= 50 {
+        assert_eq(verify_isqrt(i), 1);
+        i = i + 1;
+    }
+
+    // Cube roots
+    assert_eq(icbrt(0), 0);
+    assert_eq(icbrt(1), 1);
+    assert_eq(icbrt(8), 2);
+    assert_eq(icbrt(27), 3);
+    assert_eq(icbrt(64), 4);
+    assert_eq(icbrt(125), 5);
+    assert_eq(icbrt(1000), 10);
+
+    print("DIFF_OK: newton_sqrt");
+    0
+}

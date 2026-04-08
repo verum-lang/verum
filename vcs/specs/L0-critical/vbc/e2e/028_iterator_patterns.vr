@@ -1,0 +1,796 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, iterator, map, filter, reduce, zip, chain, functional
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: iterator-like patterns through function composition
+// using VBC interpreter. Simulates map/filter/reduce/zip/enumerate
+// and other iterator combinators on flat struct arrays.
+
+// ============================================================================
+// 8-element flat array with length (single flat struct, no nesting)
+// ============================================================================
+
+type SArr is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn sarr_empty() -> SArr {
+    SArr { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn sarr_get(a: SArr, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn sarr_set(a: SArr, i: Int, val: Int) -> SArr {
+    SArr {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        len: a.len
+    }
+}
+
+fn sarr_push(a: SArr, val: Int) -> SArr {
+    let updated = sarr_set(a, a.len, val);
+    SArr {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        len: a.len + 1
+    }
+}
+
+fn sarr_with_len(a: SArr, new_len: Int) -> SArr {
+    SArr {
+        e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3,
+        e4: a.e4, e5: a.e5, e6: a.e6, e7: a.e7,
+        len: new_len
+    }
+}
+
+// ============================================================================
+// Map: apply function to each element
+// ============================================================================
+
+fn sarr_map(a: SArr, f: fn(Int) -> Int) -> SArr {
+    let mut result = sarr_empty();
+    let mut i = 0;
+    while i < a.len {
+        result = sarr_push(result, f(sarr_get(a, i)));
+        i = i + 1;
+    }
+    result
+}
+
+fn double_val(x: Int) -> Int { x * 2 }
+fn square_val(x: Int) -> Int { x * x }
+fn negate_val(x: Int) -> Int { -x }
+fn add_ten(x: Int) -> Int { x + 10 }
+
+fn test_map() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+    a = sarr_push(a, 4);
+    a = sarr_push(a, 5);
+
+    let doubled = sarr_map(a, double_val);
+    assert_eq(doubled.len, 5);
+    assert_eq(sarr_get(doubled, 0), 2);
+    assert_eq(sarr_get(doubled, 1), 4);
+    assert_eq(sarr_get(doubled, 2), 6);
+    assert_eq(sarr_get(doubled, 3), 8);
+    assert_eq(sarr_get(doubled, 4), 10);
+
+    let squared = sarr_map(a, square_val);
+    assert_eq(sarr_get(squared, 0), 1);
+    assert_eq(sarr_get(squared, 1), 4);
+    assert_eq(sarr_get(squared, 2), 9);
+    assert_eq(sarr_get(squared, 3), 16);
+    assert_eq(sarr_get(squared, 4), 25);
+
+    // Map on empty
+    let empty = sarr_map(sarr_empty(), double_val);
+    assert_eq(empty.len, 0);
+}
+
+// ============================================================================
+// Filter: keep elements matching predicate
+// ============================================================================
+
+fn sarr_filter(a: SArr, pred: fn(Int) -> Bool) -> SArr {
+    let mut result = sarr_empty();
+    let mut i = 0;
+    while i < a.len {
+        let val = sarr_get(a, i);
+        if pred(val) {
+            result = sarr_push(result, val);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn is_even(x: Int) -> Bool { x % 2 == 0 }
+fn is_positive(x: Int) -> Bool { x > 0 }
+fn is_greater_than_3(x: Int) -> Bool { x > 3 }
+
+fn test_filter() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+    a = sarr_push(a, 4);
+    a = sarr_push(a, 5);
+    a = sarr_push(a, 6);
+
+    let evens = sarr_filter(a, is_even);
+    assert_eq(evens.len, 3);
+    assert_eq(sarr_get(evens, 0), 2);
+    assert_eq(sarr_get(evens, 1), 4);
+    assert_eq(sarr_get(evens, 2), 6);
+
+    let big = sarr_filter(a, is_greater_than_3);
+    assert_eq(big.len, 3);
+    assert_eq(sarr_get(big, 0), 4);
+    assert_eq(sarr_get(big, 1), 5);
+    assert_eq(sarr_get(big, 2), 6);
+
+    // Filter everything out
+    let mut b = sarr_empty();
+    b = sarr_push(b, -1);
+    b = sarr_push(b, -2);
+    let pos = sarr_filter(b, is_positive);
+    assert_eq(pos.len, 0);
+}
+
+// ============================================================================
+// Reduce (fold left)
+// ============================================================================
+
+fn sarr_reduce(a: SArr, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < a.len {
+        acc = f(acc, sarr_get(a, i));
+        i = i + 1;
+    }
+    acc
+}
+
+fn add_ints(a: Int, b: Int) -> Int { a + b }
+fn mul_ints(a: Int, b: Int) -> Int { a * b }
+fn max_ints(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_ints(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+fn test_reduce() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+    a = sarr_push(a, 4);
+    a = sarr_push(a, 5);
+
+    assert_eq(sarr_reduce(a, 0, add_ints), 15);       // sum
+    assert_eq(sarr_reduce(a, 1, mul_ints), 120);       // product
+    assert_eq(sarr_reduce(a, 0, max_ints), 5);         // max
+    assert_eq(sarr_reduce(a, 999, min_ints), 1);       // min
+
+    // Reduce on single element
+    let mut single = sarr_empty();
+    single = sarr_push(single, 42);
+    assert_eq(sarr_reduce(single, 0, add_ints), 42);
+
+    // Reduce on empty
+    assert_eq(sarr_reduce(sarr_empty(), 0, add_ints), 0);
+}
+
+// ============================================================================
+// Map + Filter + Reduce (chaining)
+// ============================================================================
+
+fn test_map_filter_reduce() {
+    // Start: [1, 2, 3, 4, 5, 6, 7, 8]
+    let mut a = sarr_empty();
+    let mut i = 1;
+    while i <= 8 {
+        a = sarr_push(a, i);
+        i = i + 1;
+    }
+
+    // Filter evens -> [2, 4, 6, 8], then square -> [4, 16, 36, 64], then sum = 120
+    let evens = sarr_filter(a, is_even);
+    let squared = sarr_map(evens, square_val);
+    let total = sarr_reduce(squared, 0, add_ints);
+    assert_eq(total, 120);  // 4 + 16 + 36 + 64
+
+    // Map double -> [2,4,6,8,10,12,14,16], filter > 3 -> [4,6,8,10,12,14,16], reduce sum = 70
+    let doubled = sarr_map(a, double_val);
+    let big_doubled = sarr_filter(doubled, is_greater_than_3);
+    let total2 = sarr_reduce(big_doubled, 0, add_ints);
+    assert_eq(total2, 70);  // 4+6+8+10+12+14+16
+}
+
+// ============================================================================
+// Zip: combine two arrays element-wise
+// ============================================================================
+
+// Zip stores pairs as (a0, b0, a1, b1, ...) in a flat array
+type PairArr is {
+    p0: Int, p1: Int, p2: Int, p3: Int,
+    p4: Int, p5: Int, p6: Int, p7: Int,
+    p8: Int, p9: Int, p10: Int, p11: Int,
+    p12: Int, p13: Int, p14: Int, p15: Int,
+    pair_count: Int
+};
+
+fn pair_arr_empty() -> PairArr {
+    PairArr {
+        p0: 0, p1: 0, p2: 0, p3: 0,
+        p4: 0, p5: 0, p6: 0, p7: 0,
+        p8: 0, p9: 0, p10: 0, p11: 0,
+        p12: 0, p13: 0, p14: 0, p15: 0,
+        pair_count: 0
+    }
+}
+
+fn pair_arr_get(pa: PairArr, i: Int) -> Int {
+    if i == 0 { pa.p0 } else if i == 1 { pa.p1 }
+    else if i == 2 { pa.p2 } else if i == 3 { pa.p3 }
+    else if i == 4 { pa.p4 } else if i == 5 { pa.p5 }
+    else if i == 6 { pa.p6 } else if i == 7 { pa.p7 }
+    else if i == 8 { pa.p8 } else if i == 9 { pa.p9 }
+    else if i == 10 { pa.p10 } else if i == 11 { pa.p11 }
+    else if i == 12 { pa.p12 } else if i == 13 { pa.p13 }
+    else if i == 14 { pa.p14 } else { pa.p15 }
+}
+
+fn pair_arr_set(pa: PairArr, i: Int, val: Int) -> PairArr {
+    PairArr {
+        p0: if i == 0 { val } else { pa.p0 },
+        p1: if i == 1 { val } else { pa.p1 },
+        p2: if i == 2 { val } else { pa.p2 },
+        p3: if i == 3 { val } else { pa.p3 },
+        p4: if i == 4 { val } else { pa.p4 },
+        p5: if i == 5 { val } else { pa.p5 },
+        p6: if i == 6 { val } else { pa.p6 },
+        p7: if i == 7 { val } else { pa.p7 },
+        p8: if i == 8 { val } else { pa.p8 },
+        p9: if i == 9 { val } else { pa.p9 },
+        p10: if i == 10 { val } else { pa.p10 },
+        p11: if i == 11 { val } else { pa.p11 },
+        p12: if i == 12 { val } else { pa.p12 },
+        p13: if i == 13 { val } else { pa.p13 },
+        p14: if i == 14 { val } else { pa.p14 },
+        p15: if i == 15 { val } else { pa.p15 },
+        pair_count: pa.pair_count
+    }
+}
+
+fn pair_arr_with_count(pa: PairArr, count: Int) -> PairArr {
+    PairArr {
+        p0: pa.p0, p1: pa.p1, p2: pa.p2, p3: pa.p3,
+        p4: pa.p4, p5: pa.p5, p6: pa.p6, p7: pa.p7,
+        p8: pa.p8, p9: pa.p9, p10: pa.p10, p11: pa.p11,
+        p12: pa.p12, p13: pa.p13, p14: pa.p14, p15: pa.p15,
+        pair_count: count
+    }
+}
+
+fn sarr_zip(a: SArr, b: SArr) -> PairArr {
+    let min_len = if a.len < b.len { a.len } else { b.len };
+    let mut result = pair_arr_empty();
+    let mut i = 0;
+    while i < min_len {
+        let pos = i * 2;
+        result = pair_arr_set(result, pos, sarr_get(a, i));
+        result = pair_arr_set(result, pos + 1, sarr_get(b, i));
+        i = i + 1;
+    }
+    pair_arr_with_count(result, min_len)
+}
+
+fn test_zip() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+
+    let mut b = sarr_empty();
+    b = sarr_push(b, 10);
+    b = sarr_push(b, 20);
+    b = sarr_push(b, 30);
+
+    let zipped = sarr_zip(a, b);
+    assert_eq(zipped.pair_count, 3);
+    // Pair 0: (1, 10)
+    assert_eq(pair_arr_get(zipped, 0), 1);
+    assert_eq(pair_arr_get(zipped, 1), 10);
+    // Pair 1: (2, 20)
+    assert_eq(pair_arr_get(zipped, 2), 2);
+    assert_eq(pair_arr_get(zipped, 3), 20);
+    // Pair 2: (3, 30)
+    assert_eq(pair_arr_get(zipped, 4), 3);
+    assert_eq(pair_arr_get(zipped, 5), 30);
+}
+
+fn test_zip_different_lengths() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+    a = sarr_push(a, 4);
+    a = sarr_push(a, 5);
+
+    let mut b = sarr_empty();
+    b = sarr_push(b, 10);
+    b = sarr_push(b, 20);
+
+    let zipped = sarr_zip(a, b);
+    assert_eq(zipped.pair_count, 2);  // min of 5 and 2
+    assert_eq(pair_arr_get(zipped, 0), 1);
+    assert_eq(pair_arr_get(zipped, 1), 10);
+    assert_eq(pair_arr_get(zipped, 2), 2);
+    assert_eq(pair_arr_get(zipped, 3), 20);
+}
+
+// ============================================================================
+// Dot product
+// ============================================================================
+
+fn dot_product(a: SArr, b: SArr) -> Int {
+    let min_len = if a.len < b.len { a.len } else { b.len };
+    let mut sum = 0;
+    let mut i = 0;
+    while i < min_len {
+        sum = sum + sarr_get(a, i) * sarr_get(b, i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_dot_product() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+
+    let mut b = sarr_empty();
+    b = sarr_push(b, 4);
+    b = sarr_push(b, 5);
+    b = sarr_push(b, 6);
+
+    assert_eq(dot_product(a, b), 32);  // 1*4 + 2*5 + 3*6 = 4+10+18
+}
+
+// ============================================================================
+// Enumerate: produce (index, value) pairs
+// ============================================================================
+
+fn sarr_enumerate(a: SArr) -> PairArr {
+    let mut result = pair_arr_empty();
+    let mut i = 0;
+    while i < a.len {
+        let pos = i * 2;
+        result = pair_arr_set(result, pos, i);
+        result = pair_arr_set(result, pos + 1, sarr_get(a, i));
+        i = i + 1;
+    }
+    pair_arr_with_count(result, a.len)
+}
+
+fn test_enumerate() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 10);
+    a = sarr_push(a, 20);
+    a = sarr_push(a, 30);
+
+    let enumerated = sarr_enumerate(a);
+    assert_eq(enumerated.pair_count, 3);
+    // (0, 10)
+    assert_eq(pair_arr_get(enumerated, 0), 0);
+    assert_eq(pair_arr_get(enumerated, 1), 10);
+    // (1, 20)
+    assert_eq(pair_arr_get(enumerated, 2), 1);
+    assert_eq(pair_arr_get(enumerated, 3), 20);
+    // (2, 30)
+    assert_eq(pair_arr_get(enumerated, 4), 2);
+    assert_eq(pair_arr_get(enumerated, 5), 30);
+}
+
+// ============================================================================
+// Take and Skip
+// ============================================================================
+
+fn sarr_take(a: SArr, n: Int) -> SArr {
+    let take_count = if n < a.len { n } else { a.len };
+    let mut result = sarr_empty();
+    let mut i = 0;
+    while i < take_count {
+        result = sarr_push(result, sarr_get(a, i));
+        i = i + 1;
+    }
+    result
+}
+
+fn sarr_skip(a: SArr, n: Int) -> SArr {
+    let mut result = sarr_empty();
+    let mut i = n;
+    while i < a.len {
+        result = sarr_push(result, sarr_get(a, i));
+        i = i + 1;
+    }
+    result
+}
+
+fn test_take() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 10);
+    a = sarr_push(a, 20);
+    a = sarr_push(a, 30);
+    a = sarr_push(a, 40);
+    a = sarr_push(a, 50);
+
+    let t = sarr_take(a, 3);
+    assert_eq(t.len, 3);
+    assert_eq(sarr_get(t, 0), 10);
+    assert_eq(sarr_get(t, 1), 20);
+    assert_eq(sarr_get(t, 2), 30);
+
+    // Take more than length
+    let t2 = sarr_take(a, 100);
+    assert_eq(t2.len, 5);
+
+    // Take 0
+    let t3 = sarr_take(a, 0);
+    assert_eq(t3.len, 0);
+}
+
+fn test_skip() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 10);
+    a = sarr_push(a, 20);
+    a = sarr_push(a, 30);
+    a = sarr_push(a, 40);
+    a = sarr_push(a, 50);
+
+    let s = sarr_skip(a, 2);
+    assert_eq(s.len, 3);
+    assert_eq(sarr_get(s, 0), 30);
+    assert_eq(sarr_get(s, 1), 40);
+    assert_eq(sarr_get(s, 2), 50);
+
+    // Skip all
+    let s2 = sarr_skip(a, 5);
+    assert_eq(s2.len, 0);
+
+    // Skip 0
+    let s3 = sarr_skip(a, 0);
+    assert_eq(s3.len, 5);
+    assert_eq(sarr_get(s3, 0), 10);
+}
+
+// ============================================================================
+// Sliding window (sum of window)
+// ============================================================================
+
+fn sarr_window_sums(a: SArr, window_size: Int) -> SArr {
+    let mut result = sarr_empty();
+    if window_size <= a.len {
+        let num_windows = a.len - window_size + 1;
+        let mut i = 0;
+        while i < num_windows {
+            let mut sum = 0;
+            let mut j = 0;
+            while j < window_size {
+                sum = sum + sarr_get(a, i + j);
+                j = j + 1;
+            }
+            result = sarr_push(result, sum);
+            i = i + 1;
+        }
+    }
+    result
+}
+
+fn test_window_sums() {
+    // [1, 2, 3, 4, 5] with window size 3
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+    a = sarr_push(a, 4);
+    a = sarr_push(a, 5);
+
+    let ws = sarr_window_sums(a, 3);
+    assert_eq(ws.len, 3);              // 5 - 3 + 1 = 3 windows
+    assert_eq(sarr_get(ws, 0), 6);    // 1+2+3
+    assert_eq(sarr_get(ws, 1), 9);    // 2+3+4
+    assert_eq(sarr_get(ws, 2), 12);   // 3+4+5
+
+    // Window size 1 = identity
+    let ws1 = sarr_window_sums(a, 1);
+    assert_eq(ws1.len, 5);
+    assert_eq(sarr_get(ws1, 0), 1);
+    assert_eq(sarr_get(ws1, 4), 5);
+
+    // Window size = array length = total sum
+    let ws_full = sarr_window_sums(a, 5);
+    assert_eq(ws_full.len, 1);
+    assert_eq(sarr_get(ws_full, 0), 15);
+}
+
+// ============================================================================
+// Chain: concatenate two arrays
+// ============================================================================
+
+fn sarr_chain(a: SArr, b: SArr) -> SArr {
+    let mut result = sarr_empty();
+    let mut i = 0;
+    while i < a.len {
+        result = sarr_push(result, sarr_get(a, i));
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < b.len {
+        result = sarr_push(result, sarr_get(b, j));
+        j = j + 1;
+    }
+    result
+}
+
+fn test_chain() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+
+    let mut b = sarr_empty();
+    b = sarr_push(b, 4);
+    b = sarr_push(b, 5);
+
+    let chained = sarr_chain(a, b);
+    assert_eq(chained.len, 5);
+    assert_eq(sarr_get(chained, 0), 1);
+    assert_eq(sarr_get(chained, 1), 2);
+    assert_eq(sarr_get(chained, 2), 3);
+    assert_eq(sarr_get(chained, 3), 4);
+    assert_eq(sarr_get(chained, 4), 5);
+
+    // Chain with empty
+    let c1 = sarr_chain(a, sarr_empty());
+    assert_eq(c1.len, 3);
+    let c2 = sarr_chain(sarr_empty(), b);
+    assert_eq(c2.len, 2);
+}
+
+// ============================================================================
+// All / Any predicate checking
+// ============================================================================
+
+fn sarr_all(a: SArr, pred: fn(Int) -> Bool) -> Bool {
+    let mut result = true;
+    let mut i = 0;
+    while i < a.len {
+        if !pred(sarr_get(a, i)) {
+            result = false;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn sarr_any(a: SArr, pred: fn(Int) -> Bool) -> Bool {
+    let mut result = false;
+    let mut i = 0;
+    while i < a.len {
+        if pred(sarr_get(a, i)) {
+            result = true;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_all_any() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 4);
+    a = sarr_push(a, 6);
+    a = sarr_push(a, 8);
+
+    assert(sarr_all(a, is_even));
+    assert(sarr_any(a, is_even));
+    // 4, 6, 8 are > 3, but 2 is not
+    assert(sarr_any(a, is_greater_than_3));
+    assert(!sarr_all(a, is_greater_than_3));  // 2 is not > 3
+
+    // All positive
+    assert(sarr_all(a, is_positive));
+
+    // Mixed with negatives
+    let mut b = sarr_empty();
+    b = sarr_push(b, -1);
+    b = sarr_push(b, 2);
+    b = sarr_push(b, -3);
+    assert(!sarr_all(b, is_positive));
+    assert(sarr_any(b, is_positive));
+
+    // Empty array
+    assert(sarr_all(sarr_empty(), is_even));    // vacuously true
+    assert(!sarr_any(sarr_empty(), is_even));   // no elements match
+}
+
+// ============================================================================
+// Find: return first element matching predicate (or -1)
+// ============================================================================
+
+fn sarr_find(a: SArr, pred: fn(Int) -> Bool) -> Int {
+    let mut result = -1;
+    let mut i = 0;
+    let mut found = false;
+    while i < a.len && !found {
+        if pred(sarr_get(a, i)) {
+            result = sarr_get(a, i);
+            found = true;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn sarr_find_index(a: SArr, pred: fn(Int) -> Bool) -> Int {
+    let mut result = -1;
+    let mut i = 0;
+    let mut found = false;
+    while i < a.len && !found {
+        if pred(sarr_get(a, i)) {
+            result = i;
+            found = true;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_find() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 3);
+    a = sarr_push(a, 5);
+    a = sarr_push(a, 4);
+    a = sarr_push(a, 7);
+
+    assert_eq(sarr_find(a, is_even), 4);        // first even
+    assert_eq(sarr_find_index(a, is_even), 3);   // index of first even
+
+    assert_eq(sarr_find(a, is_positive), 1);     // first positive (all are)
+    assert_eq(sarr_find_index(a, is_positive), 0);
+
+    // Not found
+    let mut b = sarr_empty();
+    b = sarr_push(b, 1);
+    b = sarr_push(b, 3);
+    b = sarr_push(b, 5);
+    assert_eq(sarr_find(b, is_even), -1);
+    assert_eq(sarr_find_index(b, is_even), -1);
+}
+
+// ============================================================================
+// Scan (prefix reduce): produce running accumulator values
+// ============================================================================
+
+fn sarr_scan(a: SArr, init: Int, f: fn(Int, Int) -> Int) -> SArr {
+    let mut result = sarr_empty();
+    let mut acc = init;
+    let mut i = 0;
+    while i < a.len {
+        acc = f(acc, sarr_get(a, i));
+        result = sarr_push(result, acc);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_scan() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+    a = sarr_push(a, 4);
+    a = sarr_push(a, 5);
+
+    // Running sum: [1, 3, 6, 10, 15]
+    let prefix_sums = sarr_scan(a, 0, add_ints);
+    assert_eq(prefix_sums.len, 5);
+    assert_eq(sarr_get(prefix_sums, 0), 1);
+    assert_eq(sarr_get(prefix_sums, 1), 3);
+    assert_eq(sarr_get(prefix_sums, 2), 6);
+    assert_eq(sarr_get(prefix_sums, 3), 10);
+    assert_eq(sarr_get(prefix_sums, 4), 15);
+
+    // Running product: [1, 2, 6, 24, 120]
+    let prefix_products = sarr_scan(a, 1, mul_ints);
+    assert_eq(sarr_get(prefix_products, 0), 1);
+    assert_eq(sarr_get(prefix_products, 1), 2);
+    assert_eq(sarr_get(prefix_products, 2), 6);
+    assert_eq(sarr_get(prefix_products, 3), 24);
+    assert_eq(sarr_get(prefix_products, 4), 120);
+
+    // Running max: [1, 2, 3, 4, 5]
+    let prefix_max = sarr_scan(a, 0, max_ints);
+    assert_eq(sarr_get(prefix_max, 0), 1);
+    assert_eq(sarr_get(prefix_max, 4), 5);
+}
+
+// ============================================================================
+// Reverse
+// ============================================================================
+
+fn sarr_reverse(a: SArr) -> SArr {
+    let mut result = sarr_empty();
+    let mut i = a.len;
+    while i > 0 {
+        i = i - 1;
+        result = sarr_push(result, sarr_get(a, i));
+    }
+    result
+}
+
+fn test_reverse() {
+    let mut a = sarr_empty();
+    a = sarr_push(a, 1);
+    a = sarr_push(a, 2);
+    a = sarr_push(a, 3);
+    a = sarr_push(a, 4);
+
+    let rev = sarr_reverse(a);
+    assert_eq(rev.len, 4);
+    assert_eq(sarr_get(rev, 0), 4);
+    assert_eq(sarr_get(rev, 1), 3);
+    assert_eq(sarr_get(rev, 2), 2);
+    assert_eq(sarr_get(rev, 3), 1);
+
+    // Double reverse = identity
+    let mut i = 0;
+    let double_rev = sarr_reverse(sarr_reverse(a));
+    while i < a.len {
+        assert_eq(sarr_get(a, i), sarr_get(double_rev, i));
+        i = i + 1;
+    }
+}
+
+fn main() -> Int {
+    test_map();
+    test_filter();
+    test_reduce();
+    test_map_filter_reduce();
+    test_zip();
+    test_zip_different_lengths();
+    test_dot_product();
+    test_enumerate();
+    test_take();
+    test_skip();
+    test_window_sums();
+    test_chain();
+    test_all_any();
+    test_find();
+    test_scan();
+    test_reverse();
+    print("[OK] 028_iterator_patterns");
+    0
+}

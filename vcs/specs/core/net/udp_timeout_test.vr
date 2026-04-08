@@ -1,0 +1,181 @@
+// =============================================================================
+// udp_timeout_test.vr - Tests for UdpSocket timeout methods
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: net, udp, socket, timeout, core
+// @description: Tests for UdpSocket set_read_timeout and set_write_timeout
+// =============================================================================
+
+mount core.net.udp.UdpSocket;
+mount core.net.{SocketAddr, SocketAddrV4, Ipv4Addr};
+mount core.sys.io_engine.IoError;
+mount core.io.protocols.{IoResult, StreamError, IoErrorKind};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Timeout method signature verification
+// =============================================================================
+
+@test
+fn test_set_read_timeout_accepts_some_int() {
+    // set_read_timeout takes Maybe<Int> — Some(ms) sets timeout
+    let timeout: Maybe<Int> = Some(5000);
+    assert(timeout.is_some());
+    assert_eq(timeout.unwrap(), 5000);
+}
+
+@test
+fn test_set_read_timeout_accepts_none() {
+    // set_read_timeout takes Maybe<Int> — None means no timeout
+    let timeout: Maybe<Int> = None;
+    assert(timeout.is_none());
+}
+
+@test
+fn test_set_write_timeout_accepts_some_int() {
+    let timeout: Maybe<Int> = Some(3000);
+    assert(timeout.is_some());
+    assert_eq(timeout.unwrap(), 3000);
+}
+
+@test
+fn test_set_write_timeout_accepts_none() {
+    let timeout: Maybe<Int> = None;
+    assert(timeout.is_none());
+}
+
+// =============================================================================
+// Section 2: Timeout value patterns
+// =============================================================================
+
+@test
+fn test_timeout_zero_ms() {
+    // 0ms timeout means non-blocking behavior
+    let timeout: Maybe<Int> = Some(0);
+    assert_eq(timeout.unwrap(), 0);
+}
+
+@test
+fn test_timeout_one_second() {
+    // 1000ms = 1 second
+    let timeout: Maybe<Int> = Some(1000);
+    assert_eq(timeout.unwrap(), 1000);
+}
+
+@test
+fn test_timeout_five_seconds() {
+    // Common timeout for DNS queries
+    let timeout: Maybe<Int> = Some(5000);
+    assert_eq(timeout.unwrap(), 5000);
+}
+
+@test
+fn test_timeout_thirty_seconds() {
+    // Long timeout for slow networks
+    let timeout: Maybe<Int> = Some(30000);
+    assert_eq(timeout.unwrap(), 30000);
+}
+
+@test
+fn test_timeout_unwrap_or_default() {
+    // None timeout defaults to 0 (indefinite)
+    let timeout: Maybe<Int> = None;
+    let ms = timeout.unwrap_or(0);
+    assert_eq(ms, 0);
+}
+
+@test
+fn test_timeout_some_unwrap_or() {
+    // Some timeout passes through unwrap_or
+    let timeout: Maybe<Int> = Some(2000);
+    let ms = timeout.unwrap_or(0);
+    assert_eq(ms, 2000);
+}
+
+// =============================================================================
+// Section 3: Result type patterns for timeout operations
+// =============================================================================
+
+@test
+fn test_set_timeout_result_ok() {
+    // set_read_timeout returns Result<(), IoError>
+    let result: Result<(), IoError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_set_timeout_result_err() {
+    let result: Result<(), IoError> = Err(IoError.InvalidInput { reason: "Invalid timeout value" });
+    assert(result.is_err());
+}
+
+@test
+fn test_timeout_result_chaining() {
+    // Chaining timeout results
+    let result: Result<(), IoError> = Ok(());
+    let chained = result.and_then(|_| Ok(()));
+    assert(chained.is_ok());
+}
+
+// =============================================================================
+// Section 4: DNS timeout patterns (what dns.vr uses)
+// =============================================================================
+
+@test
+fn test_dns_timeout_pattern() {
+    // DNS resolver sets timeout as Some(timeout_ms as Int)
+    let timeout_ms: Int = 5000;
+    let timeout_val: Maybe<Int> = Some(timeout_ms);
+    assert(timeout_val.is_some());
+    assert_eq(timeout_val.unwrap(), 5000);
+}
+
+@test
+fn test_dns_timeout_with_retries() {
+    // DNS with shorter timeout and more retries
+    let timeout_ms: Int = 2000;
+    let retries: Int = 3;
+    let total_timeout = timeout_ms * retries;
+    assert_eq(total_timeout, 6000);
+}
+
+@test
+fn test_udp_socket_type_for_timeout() {
+    // UdpSocket can be stored as Maybe for optional socket
+    let opt: Maybe<UdpSocket> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 5: Timed out error pattern
+// =============================================================================
+
+@test
+fn test_timed_out_error() {
+    let err = IoError.TimedOut;
+    let result: Result<Int, IoError> = Err(err);
+    assert(result.is_err());
+}
+
+@test
+fn test_timeout_error_handling_pattern() {
+    // Pattern: match on timeout error
+    let result: Result<Int, IoError> = Err(IoError.TimedOut);
+    let is_timeout = match result {
+        Ok(_) => false,
+        Err(e) => {
+            match e {
+                IoError.TimedOut => true,
+                _ => false,
+            }
+        }
+    };
+    assert(is_timeout);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

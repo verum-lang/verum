@@ -1,0 +1,125 @@
+// @test: run
+// Text processing — building, comparing, length, concatenation
+
+fn count_char(s: Text, target: Int) -> Int {
+    // Count occurrences by comparing char codes
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len() {
+        // Use byte comparison (simplified)
+        i = i + 1;
+    }
+    count
+}
+
+fn repeat_text(s: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < n {
+        result = result + s;
+        i = i + 1;
+    }
+    result
+}
+
+fn starts_with_char(s: Text, prefix: Text) -> Bool {
+    if (prefix.len() > s.len()) { return false; }
+    // Use slice comparison
+    let front = s.slice(0, prefix.len());
+    front == prefix
+}
+
+fn main() -> Int {
+    // Test 1: String concatenation
+    let a = "hello";
+    let b = " world";
+    let c = a + b;
+    if (c != "hello world") {
+        print(f"FAIL test1: got '{c}'");
+        return 1;
+    }
+    if (c.len() != 11) {
+        print(f"FAIL test1: len={c.len()}");
+        return 1;
+    }
+    print("test1 concat: OK");
+
+    // Test 2: F-string interpolation
+    let name = "Verum";
+    let version = 1;
+    let greeting = f"Hello, {name} v{version}!";
+    print(f"test2: '{greeting}'");
+    // "Hello, Verum v1!" = 16 chars
+    if (greeting.len() != 16) {
+        print(f"FAIL test2: len={greeting.len()}");
+        return 1;
+    }
+    print("test2 f-string: OK");
+
+    // Test 3: Repeat
+    let stars = repeat_text("*", 5);
+    if (stars != "*****") {
+        print(f"FAIL test3: repeat='{stars}'");
+        return 1;
+    }
+    if (stars.len() != 5) {
+        print(f"FAIL test3: len={stars.len()}");
+        return 1;
+    }
+    print("test3 repeat: OK");
+
+    // Test 4: starts_with via slice
+    if (!starts_with_char("hello world", "hello")) {
+        print("FAIL test4a");
+        return 1;
+    }
+    if (starts_with_char("hello", "hello world")) {
+        print("FAIL test4b");
+        return 1;
+    }
+    print("test4 starts_with: OK");
+
+    // Test 5: Building text in a loop
+    let mut csv = "";
+    let mut i = 1;
+    while i <= 5 {
+        if (i > 1) { csv = csv + ","; }
+        csv = csv + f"{i}";
+        i = i + 1;
+    }
+    if (csv != "1,2,3,4,5") {
+        print(f"FAIL test5: csv='{csv}'");
+        return 1;
+    }
+    print("test5 csv: OK");
+
+    // Test 6: Empty string handling
+    let empty = "";
+    if (empty.len() != 0) {
+        print(f"FAIL test6: empty len={empty.len()}");
+        return 1;
+    }
+    let non_empty = empty + "x";
+    if (non_empty != "x") {
+        print("FAIL test6: append to empty");
+        return 1;
+    }
+    print("test6 empty: OK");
+
+    // Test 7: String equality
+    let s1 = "abc";
+    let s2 = "abc";
+    let s3 = "xyz";
+    if (s1 != s2) {
+        print("FAIL test7: equal strings");
+        return 1;
+    }
+    if (s1 == s3) {
+        print("FAIL test7: different strings");
+        return 1;
+    }
+    print("test7 equality: OK");
+
+    print("1024_text_processing: PASS");
+    0
+}

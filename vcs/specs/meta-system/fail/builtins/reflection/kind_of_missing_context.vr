@@ -1,0 +1,36 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, reflection, context, error
+// @description: Test that kind_of requires MetaTypes context
+// @expected-error: E101
+
+// =============================================================================
+// KIND_OF MISSING CONTEXT TESTS
+// =============================================================================
+
+// kind_of requires MetaTypes context
+meta fn test_kind_of_no_context() -> TypeKind {
+    kind_of(Int)  // ERROR: requires MetaTypes context
+}
+
+// is_struct requires MetaTypes context
+meta fn test_is_struct_no_context() -> Bool {
+    type Point is { x: Int, y: Int };
+    is_struct(Point)  // ERROR: requires MetaTypes context
+}
+
+// is_enum requires MetaTypes context
+meta fn test_is_enum_no_context() -> Bool {
+    type Color is Red | Green | Blue;
+    is_enum(Color)  // ERROR: requires MetaTypes context
+}
+
+// is_tuple requires MetaTypes context
+meta fn test_is_tuple_no_context() -> Bool {
+    is_tuple((Int, Bool))  // ERROR: requires MetaTypes context
+}
+
+fn main() {
+    @const assert(test_is_struct_no_context());
+}

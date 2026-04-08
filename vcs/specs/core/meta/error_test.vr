@@ -1,0 +1,176 @@
+// =============================================================================
+// error_test.vr - Tests for meta programming error types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, error, meta-error, meta-result
+// @description: Tests for MetaError variants and MetaResult type
+// =============================================================================
+
+mount core.meta.{MetaError, MetaResult};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: MetaError Variants
+// =============================================================================
+
+@test
+fn test_meta_error_asset_not_found() {
+    let err = MetaError.AssetNotFound { path: "missing.json" };
+    match err {
+        MetaError.AssetNotFound { path } => assert_eq(path, "missing.json"),
+        _ => panic("expected AssetNotFound"),
+    }
+}
+
+@test
+fn test_meta_error_asset_read_error() {
+    let err = MetaError.AssetReadError {
+        path: "data.json",
+        reason: "permission denied",
+    };
+    match err {
+        MetaError.AssetReadError { path, reason } => {
+            assert_eq(path, "data.json");
+            assert_eq(reason, "permission denied");
+        },
+        _ => panic("expected AssetReadError"),
+    }
+}
+
+@test
+fn test_meta_error_type_error() {
+    let err = MetaError.TypeError {
+        expected: "Int",
+        found: "Text",
+    };
+    match err {
+        MetaError.TypeError { expected, found } => {
+            assert_eq(expected, "Int");
+            assert_eq(found, "Text");
+        },
+        _ => panic("expected TypeError"),
+    }
+}
+
+@test
+fn test_meta_error_recursion_limit() {
+    let err = MetaError.RecursionLimit {
+        depth: 300,
+        limit: 256,
+    };
+    match err {
+        MetaError.RecursionLimit { depth, limit } => {
+            assert_eq(depth, 300);
+            assert_eq(limit, 256);
+        },
+        _ => panic("expected RecursionLimit"),
+    }
+}
+
+@test
+fn test_meta_error_iteration_limit() {
+    let err = MetaError.IterationLimit {
+        count: 2000000,
+        limit: 1000000,
+    };
+    match err {
+        MetaError.IterationLimit { count, limit } => {
+            assert_eq(count, 2000000);
+            assert_eq(limit, 1000000);
+        },
+        _ => panic("expected IterationLimit"),
+    }
+}
+
+@test
+fn test_meta_error_memory_limit() {
+    let err = MetaError.MemoryLimit {
+        used: 128000000,
+        limit: 67108864,
+    };
+    match err {
+        MetaError.MemoryLimit { used, limit } => {
+            assert_eq(used, 128000000);
+            assert_eq(limit, 67108864);
+        },
+        _ => panic("expected MemoryLimit"),
+    }
+}
+
+@test
+fn test_meta_error_timeout() {
+    let err = MetaError.Timeout {
+        elapsed_ms: 35000,
+        limit_ms: 30000,
+    };
+    match err {
+        MetaError.Timeout { elapsed_ms, limit_ms } => {
+            assert_eq(elapsed_ms, 35000);
+            assert_eq(limit_ms, 30000);
+        },
+        _ => panic("expected Timeout"),
+    }
+}
+
+@test
+fn test_meta_error_invalid_operation() {
+    let err = MetaError.InvalidOperation {
+        operation: "emit",
+        reason: "outside meta context",
+    };
+    match err {
+        MetaError.InvalidOperation { operation, reason } => {
+            assert_eq(operation, "emit");
+        },
+        _ => panic("expected InvalidOperation"),
+    }
+}
+
+@test
+fn test_meta_error_method_not_found() {
+    let err = MetaError.MethodNotFound {
+        type_name: "Foo",
+        method_name: "bar",
+    };
+    match err {
+        MetaError.MethodNotFound { type_name, method_name } => {
+            assert_eq(type_name, "Foo");
+            assert_eq(method_name, "bar");
+        },
+        _ => panic("expected MethodNotFound"),
+    }
+}
+
+@test
+fn test_meta_error_other() {
+    let err = MetaError.Other { message: "custom error" };
+    match err {
+        MetaError.Other { message } => assert_eq(message, "custom error"),
+        _ => panic("expected Other"),
+    }
+}
+
+// =============================================================================
+// Section 2: MetaResult Type
+// =============================================================================
+
+@test
+fn test_meta_result_ok() {
+    let result: MetaResult<Int> = Ok(42);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_meta_result_err() {
+    let result: MetaResult<Int> = Err(MetaError.Other { message: "fail" });
+    assert(result.is_err());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,74 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, characters, invalid
+
+// Invalid character literals - these should all fail to parse
+
+fn test_invalid_characters() {
+    // Empty character literal
+    let empty = '';
+
+    // Multiple characters in single quotes
+    let multi = 'ab';
+    let word = 'hello';
+
+    // Unterminated character literal
+    let unterm = 'a;
+
+    // Missing closing quote
+    let missing = 'x;
+
+    // Invalid escape sequences
+    let bad_escape = '\q';
+    let bad_escape2 = '\m';
+    let bad_escape3 = '\y';
+
+    // Incomplete hex escape
+    let bad_hex = '\x';
+    let bad_hex2 = '\x1';
+    let bad_hex3 = '\xGG';
+
+    // Incomplete unicode escape
+    let bad_unicode = '\u';
+    let bad_unicode2 = '\u{}';
+    let bad_unicode3 = '\u{GGGG}';
+    let bad_unicode4 = '\u{123';
+    let bad_unicode5 = '\u123}';
+
+    // Invalid unicode codepoint (too large)
+    let too_large = '\u{FFFFFF}';
+    let too_large2 = '\u{110000}';
+
+    // Surrogate pair (invalid in literals)
+    let surrogate = '\u{D800}';
+    let surrogate2 = '\u{DFFF}';
+
+    // Raw newline in character literal
+    let raw_newline = ';
+'
+
+    // Raw tab might be ambiguous
+    let raw_carriage = ';
+'
+
+    // Null byte without escape
+    // (This is platform-dependent but typically invalid)
+
+    // Mixed quote types
+    let mixed = 'a";
+    let mixed2 = "a';
+
+    // Only backslash
+    let only_escape = '\';
+
+    // Unclosed escape
+    let unclosed = '\;
+
+    // Double escape issue
+    let double = '\\\';
+
+    // Character literal with leading/trailing whitespace issues
+    let space_issue = ' a';
+    let space_issue2 = 'a ';
+}

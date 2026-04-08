@@ -1,0 +1,144 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, conversion
+// @description: Basic tier conversion tests using to_managed(), to_checked(), to_unsafe() methods
+
+/// Basic Tier Conversion Test Suite
+///
+/// Tests the fundamental tier conversion methods between the three reference tiers:
+/// - Tier 0: &T (managed) - runtime CBGR checks
+/// - Tier 1: &checked T - compile-time verified, zero-cost
+/// - Tier 2: &unsafe T - manual safety proof required
+///
+/// Spec: 26-cbgr-implementation.md#tier-conversion
+
+// ============================================================================
+// TEST 1: Basic to_checked() conversion
+// ============================================================================
+
+fn test_managed_to_checked() {
+    let value = 42;
+    let managed_ref: &Int = &value;
+
+    // Convert Tier 0 -> Tier 1
+    // Note: to_checked() returns &checked Int from &Int
+    let checked_ref = managed_ref.to_checked();
+
+    // The type of checked_ref is &checked Int
+    // Verify dereferencing works
+    assert(*checked_ref == 42);
+}
+
+// ============================================================================
+// TEST 2: Basic to_managed() conversion
+// ============================================================================
+
+fn test_checked_to_managed() {
+    let value = 100;
+
+    // Start with managed reference and convert to checked
+    let managed_ref: &Int = &value;
+    let checked_ref = managed_ref.to_checked();
+
+    // Convert Tier 1 -> Tier 0
+    let back_to_managed = checked_ref.to_managed();
+
+    // Verify value is preserved
+    assert(*back_to_managed == 100);
+}
+
+// ============================================================================
+// TEST 3: Basic to_unsafe() conversion from managed
+// ============================================================================
+
+fn test_managed_to_unsafe() {
+    let value = 200;
+    let managed_ref: &Int = &value;
+
+    // Convert Tier 0 -> Tier 2
+    let unsafe_ref = managed_ref.to_unsafe();
+
+    // Verify dereferencing works
+    assert(*unsafe_ref == 200);
+}
+
+// ============================================================================
+// TEST 4: Basic to_unsafe() conversion from checked
+// ============================================================================
+
+fn test_checked_to_unsafe() {
+    let value = 300;
+    let managed_ref: &Int = &value;
+    let checked_ref = managed_ref.to_checked();
+
+    // Convert Tier 1 -> Tier 2
+    let unsafe_ref = checked_ref.to_unsafe();
+
+    // Verify value is preserved
+    assert(*unsafe_ref == 300);
+}
+
+// ============================================================================
+// TEST 5: Chained conversions
+// ============================================================================
+
+fn test_chained_conversion() {
+    let value = 400;
+    let managed: &Int = &value;
+
+    // Chain: Tier 0 -> Tier 1 -> Tier 0
+    let checked_ref = managed.to_checked();
+    let back = checked_ref.to_managed();
+
+    assert(*back == 400);
+}
+
+fn test_full_chain() {
+    let value = 500;
+    let managed: &Int = &value;
+
+    // Chain: Tier 0 -> Tier 1 -> Tier 2
+    let checked_ref = managed.to_checked();
+    let unsafe_ref = checked_ref.to_unsafe();
+
+    assert(*unsafe_ref == 500);
+}
+
+// ============================================================================
+// TEST 6: Conversion with expressions
+// ============================================================================
+
+fn test_conversion_in_expression() {
+    let a = 10;
+    let b = 20;
+
+    let ref_a: &Int = &a;
+    let ref_b: &Int = &b;
+
+    // Use converted references in expressions
+    let checked_a = ref_a.to_checked();
+    let checked_b = ref_b.to_checked();
+
+    let sum = *checked_a + *checked_b;
+    assert(sum == 30);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Basic conversions
+    test_managed_to_checked();
+    test_checked_to_managed();
+    test_managed_to_unsafe();
+    test_checked_to_unsafe();
+
+    // Chained conversions
+    test_chained_conversion();
+    test_full_chain();
+
+    // Expression usage
+    test_conversion_in_expression();
+}

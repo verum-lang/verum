@@ -1,0 +1,414 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/darwin/io_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, darwin, io, kqueue
+// @description: Tests for macOS kqueue I/O subsystem.
+//
+// Coverage:
+// - KqueueDriver: Main kqueue driver type
+// - IoDriverError, IoOpKind, IoToken, IoOp, IoCqe: I/O types
+// - create_io_driver: Driver creation
+// - is_kqueue_available: Feature detection
+// - kqueue filter constants (EVFILT_*)
+// - kqueue flag constants (EV_*)
+// - kqueue fflags constants (NOTE_*)
+//
+// Test Strategy:
+// - Test type construction and field access
+// - Verify constants match BSD/Darwin definitions
+// - Test driver creation
+//
+// Platform: macOS (kqueue-based I/O)
+// =============================================================================
+
+@cfg(target_os = "macos")
+module test.stdlib.sys.darwin.io_test;
+
+mount core.sys.darwin.io.{
+    IoDriverError, IoOpKind, IoToken, IoOp, IoCqe,
+    KqueueDriver, KqueueEventIter,
+    IoDriver,
+    create_io_driver, is_kqueue_available,
+    MAX_EVENTS, DEFAULT_TIMEOUT_NS,
+};
+
+mount core.sys.darwin.libsystem.{
+    KEvent, KEvent64,
+    EVFILT_READ, EVFILT_WRITE, EVFILT_AIO, EVFILT_VNODE, EVFILT_PROC,
+    EVFILT_SIGNAL, EVFILT_TIMER, EVFILT_MACHPORT, EVFILT_USER,
+    EV_ADD, EV_DELETE, EV_ENABLE, EV_DISABLE, EV_ONESHOT, EV_CLEAR,
+    EV_RECEIPT, EV_DISPATCH, EV_EOF, EV_ERROR,
+    NOTE_DELETE, NOTE_WRITE, NOTE_EXTEND, NOTE_ATTRIB, NOTE_LINK,
+    NOTE_RENAME, NOTE_REVOKE, NOTE_TRIGGER,
+    NOTE_SECONDS, NOTE_USECONDS, NOTE_NSECONDS, NOTE_ABSOLUTE,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Filter Constants Tests
+// =============================================================================
+
+@test
+fn test_filter_constants() {
+    // kqueue filter constants (negative values on BSD)
+    assert(EVFILT_READ == -1);
+    assert(EVFILT_WRITE == -2);
+    assert(EVFILT_AIO == -3);
+    assert(EVFILT_VNODE == -4);
+    assert(EVFILT_PROC == -5);
+    assert(EVFILT_SIGNAL == -6);
+    assert(EVFILT_TIMER == -7);
+    assert(EVFILT_MACHPORT == -8);
+    assert(EVFILT_USER == -10);
+
+    // All filters should be distinct
+    let filters = [
+        EVFILT_READ, EVFILT_WRITE, EVFILT_AIO, EVFILT_VNODE,
+        EVFILT_PROC, EVFILT_SIGNAL, EVFILT_TIMER, EVFILT_MACHPORT,
+        EVFILT_USER,
+    ];
+
+    // Use while loops instead of for-range (9 filters)
+    let mut i = 0;
+    while i < 9 {
+        let mut j = i + 1;
+        while j < 9 {
+            assert(filters[i] != filters[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    print("Filter constants tests passed");
+}
+
+// =============================================================================
+// Flag Constants Tests
+// =============================================================================
+
+@test
+fn test_flag_constants() {
+    // Event action flags
+    assert(EV_ADD == 0x0001);
+    assert(EV_DELETE == 0x0002);
+    assert(EV_ENABLE == 0x0004);
+    assert(EV_DISABLE == 0x0008);
+
+    // Event behavior flags
+    assert(EV_ONESHOT == 0x0010);
+    assert(EV_CLEAR == 0x0020);
+    assert(EV_RECEIPT == 0x0040);
+    assert(EV_DISPATCH == 0x0080);
+
+    // Status flags
+    assert(EV_EOF == 0x8000);
+    assert(EV_ERROR == 0x4000);
+
+    // Flags are combinable
+    let add_oneshot = EV_ADD | EV_ONESHOT;
+    assert((add_oneshot & EV_ADD) != 0);
+    assert((add_oneshot & EV_ONESHOT) != 0);
+
+    let add_clear = EV_ADD | EV_CLEAR;
+    assert((add_clear & EV_ADD) != 0);
+    assert((add_clear & EV_CLEAR) != 0);
+
+    print("Flag constants tests passed");
+}
+
+// =============================================================================
+// FFlags Constants Tests
+// =============================================================================
+
+@test
+fn test_fflags_constants() {
+    // Vnode fflags
+    assert(NOTE_DELETE == 0x0001);
+    assert(NOTE_WRITE == 0x0002);
+    assert(NOTE_EXTEND == 0x0004);
+    assert(NOTE_ATTRIB == 0x0008);
+    assert(NOTE_LINK == 0x0010);
+    assert(NOTE_RENAME == 0x0020);
+    assert(NOTE_REVOKE == 0x0040);
+
+    // User fflags
+    assert(NOTE_TRIGGER == 0x01000000);
+
+    // Fflags are combinable
+    let write_extend = NOTE_WRITE | NOTE_EXTEND;
+    assert((write_extend & NOTE_WRITE) != 0);
+    assert((write_extend & NOTE_EXTEND) != 0);
+
+    print("FFlags constants tests passed");
+}
+
+// =============================================================================
+// Timer Constants Tests
+// =============================================================================
+
+@test
+fn test_timer_constants() {
+    // Timer units
+    assert(NOTE_SECONDS == 0x00000001);
+    assert(NOTE_USECONDS == 0x00000002);
+    assert(NOTE_NSECONDS == 0x00000004);
+    assert(NOTE_ABSOLUTE == 0x00000008);
+
+    // Timer units are distinct
+    assert(NOTE_SECONDS != NOTE_USECONDS);
+    assert(NOTE_USECONDS != NOTE_NSECONDS);
+    assert(NOTE_NSECONDS != NOTE_ABSOLUTE);
+
+    print("Timer constants tests passed");
+}
+
+// =============================================================================
+// Kqueue Availability Tests
+// =============================================================================
+
+@test
+fn test_kqueue_availability() {
+    // kqueue should always be available on macOS
+    let available = is_kqueue_available();
+    assert(available);
+
+    // Multiple calls should return same result
+    let available2 = is_kqueue_available();
+    assert(available == available2);
+
+    print("Kqueue availability tests passed");
+}
+
+// =============================================================================
+// KEvent Type Tests
+// =============================================================================
+
+@test
+fn test_kevent_type() {
+    // Create KEvent
+    let event = KEvent {
+        ident: 42,
+        filter: EVFILT_READ,
+        flags: EV_ADD | EV_ENABLE,
+        fflags: 0,
+        data: 0,
+        udata: 100 as &unsafe Byte,
+    };
+
+    assert(event.ident == 42);
+    assert(event.filter == EVFILT_READ);
+    assert((event.flags & EV_ADD) != 0);
+    assert((event.flags & EV_ENABLE) != 0);
+
+    // Create write event
+    let write_event = KEvent {
+        ident: 1,
+        filter: EVFILT_WRITE,
+        flags: EV_ADD | EV_ONESHOT,
+        fflags: 0,
+        data: 0,
+        udata: 0 as &unsafe Byte,
+    };
+
+    assert(write_event.filter == EVFILT_WRITE);
+    assert((write_event.flags & EV_ONESHOT) != 0);
+
+    // Create timer event
+    let timer_event = KEvent {
+        ident: 1,
+        filter: EVFILT_TIMER,
+        flags: EV_ADD,
+        fflags: NOTE_NSECONDS,
+        data: 1_000_000,  // 1ms in nanoseconds
+        udata: 0 as &unsafe Byte,
+    };
+
+    assert(timer_event.filter == EVFILT_TIMER);
+    assert((timer_event.fflags & NOTE_NSECONDS) != 0);
+    assert(timer_event.data == 1_000_000);
+
+    // KEvent64 (extended version)
+    let event64 = KEvent64 {
+        ident: 42,
+        filter: EVFILT_READ,
+        flags: EV_ADD,
+        fflags: 0,
+        data: 0,
+        udata: 100,
+        ext: [0, 0],
+    };
+
+    assert(event64.ident == 42);
+    assert(event64.udata == 100);
+
+    print("KEvent type tests passed");
+}
+
+// =============================================================================
+// I/O Driver Creation Tests
+// =============================================================================
+
+@test
+fn test_io_driver_creation() {
+    // Create I/O driver
+    let driver_result = create_io_driver();
+
+    match driver_result {
+        Ok(driver) => {
+            // Driver created successfully
+            print("I/O driver created successfully");
+        }
+        Err(e) => {
+            // Should not fail on macOS
+            print(f"Failed to create I/O driver: {e.message()}");
+            assert(false);
+        }
+    }
+}
+
+// =============================================================================
+// IoDriverError Type Tests
+// =============================================================================
+
+@test
+fn test_io_error_types() {
+    // Test the actual IoDriverError variants from sys.darwin.io
+    let would_block = IoDriverError.WouldBlock;
+    let interrupted = IoDriverError.Interrupted;
+    let not_found = IoDriverError.NotFound { path: "/test/path" };
+    let already_exists = IoDriverError.AlreadyExists;
+    let invalid = IoDriverError.InvalidInput { reason: "test reason" };
+    let permission = IoDriverError.PermissionDenied;
+    let refused = IoDriverError.ConnectionRefused;
+    let reset = IoDriverError.ConnectionReset;
+    let broken = IoDriverError.BrokenPipe;
+    let timeout = IoDriverError.TimedOut;
+    let queue_full = IoDriverError.QueueFull;
+    let closed = IoDriverError.Closed;
+    let other = IoDriverError.Other { code: 99, message: "test error" };
+
+    // Pattern matching
+    match would_block {
+        WouldBlock => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match not_found {
+        NotFound { path } => {
+            assert(path == "/test/path");
+        }
+        _ => assert(false),
+    }
+
+    match invalid {
+        InvalidInput { reason } => {
+            assert(reason.contains("test"));
+        }
+        _ => assert(false),
+    }
+
+    match other {
+        Other { code, message } => {
+            assert(code == 99);
+            assert(message.contains("test"));
+        }
+        _ => assert(false),
+    }
+
+    // Test error messages
+    assert(would_block.message() == "Resource temporarily unavailable");
+    assert(would_block.is_retryable());
+    assert(interrupted.is_retryable());
+    assert(!permission.is_retryable());
+
+    // Test from_errno
+    let eagain_err = IoDriverError.from_errno(35);  // EAGAIN on Darwin
+    match eagain_err {
+        WouldBlock => { /* ok */ }
+        _ => assert(false),
+    }
+
+    print("IoDriverError type tests passed");
+}
+
+// =============================================================================
+// I/O Constants Tests
+// =============================================================================
+
+@test
+fn test_io_constants() {
+    // Max events should be reasonable
+    assert(MAX_EVENTS > 0);
+    assert(MAX_EVENTS <= 1024);
+
+    // Default timeout should be non-zero
+    assert(DEFAULT_TIMEOUT_NS > 0);
+
+    print("I/O constants tests passed");
+}
+
+// =============================================================================
+// IoOpKind Tests
+// =============================================================================
+
+@test
+fn test_io_op_kind() {
+    // Create I/O operation kinds
+    let read_op = IoOpKind.Read;
+    let write_op = IoOpKind.Write;
+    let accept_op = IoOpKind.Accept;
+    let connect_op = IoOpKind.Connect;
+    let timer_op = IoOpKind.Timer;
+    let signal_op = IoOpKind.Signal;
+    let user_op = IoOpKind.User;
+    let send_op = IoOpKind.Send;
+    let recv_op = IoOpKind.Recv;
+
+    // Pattern matching
+    match read_op {
+        Read => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match write_op {
+        Write => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match accept_op {
+        Accept => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match connect_op {
+        Connect => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match timer_op {
+        Timer => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match signal_op {
+        Signal => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match user_op {
+        User => { /* ok */ }
+        _ => assert(false),
+    }
+
+    print("IoOpKind tests passed");
+}

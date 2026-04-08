@@ -1,0 +1,247 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, type_test, discriminant
+// @description: Test type-related pattern matching in meta functions
+
+// =============================================================================
+// DISCRIMINANT-BASED MATCHING (simulating type tests)
+// =============================================================================
+
+// Use tags to simulate type discrimination
+// Tag 0 = Int, Tag 1 = Text, Tag 2 = Bool
+
+meta fn test_discriminant_int() -> Bool {
+    let x = (0, 42);  // Type tag 0 = Int
+    match x {
+        (0, _) => true,   // Is Int
+        (1, _) => false,  // Is Text
+        (2, _) => false,  // Is Bool
+        _ => false,
+    }
+}
+
+meta fn test_discriminant_text() -> Bool {
+    let x = (1, "hello");  // Type tag 1 = Text
+    match x {
+        (0, _) => false,
+        (1, _) => true,
+        (2, _) => false,
+        _ => false,
+    }
+}
+
+meta fn test_discriminant_bool() -> Bool {
+    let x = (2, true);  // Type tag 2 = Bool
+    match x {
+        (0, _) => false,
+        (1, _) => false,
+        (2, _) => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// VALUE EXTRACTION WITH DISCRIMINANT
+// =============================================================================
+
+meta fn extract_int_value(x: (Int, Int)) -> Int {
+    match x {
+        (0, n) => n,
+        _ => 0,
+    }
+}
+
+meta fn extract_with_guard(x: (Int, Int)) -> Text {
+    match x {
+        (0, n) if n > 0 => "positive int",
+        (0, n) if n < 0 => "negative int",
+        (0, 0) => "zero",
+        _ => "not an int",
+    }
+}
+
+// =============================================================================
+// TAGGED MAYBE-LIKE PATTERNS
+// =============================================================================
+
+meta fn test_tagged_some_check() -> Bool {
+    let m = (1, 42);  // Some(42)
+    match m {
+        (1, _) => true,
+        (0, _) => false,
+        _ => false,
+    }
+}
+
+meta fn test_tagged_none_check() -> Bool {
+    let m = (0, 0);  // None
+    match m {
+        (1, _) => false,
+        (0, _) => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// TAGGED RESULT-LIKE PATTERNS
+// =============================================================================
+
+meta fn test_tagged_ok_check() -> Bool {
+    let r = (0, 42);  // Ok(42)
+    match r {
+        (0, _) => true,
+        (1, _) => false,
+        _ => false,
+    }
+}
+
+meta fn test_tagged_err_check() -> Bool {
+    let r = (1, "error");  // Err("error")
+    match r {
+        (0, _) => false,
+        (1, _) => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// CLASSIFICATION WITH GUARDS
+// =============================================================================
+
+meta fn classify_tagged(m: (Int, Int)) -> Text {
+    match m {
+        (1, n) if n > 0 => "positive some",
+        (1, n) if n < 0 => "negative some",
+        (1, 0) => "zero some",
+        (0, _) => "none",
+        _ => "unknown",
+    }
+}
+
+meta fn classify_result_tagged(r: (Int, Int)) -> Text {
+    match r {
+        (0, n) if n >= 0 => "success with non-negative",
+        (0, _) => "success with negative",
+        (1, _) => "error",
+        _ => "unknown",
+    }
+}
+
+// =============================================================================
+// TUPLE TYPE PATTERNS
+// =============================================================================
+
+meta fn test_tuple_types() -> Text {
+    let pair = (42, "hello");
+    match pair {
+        (n, s) if n > 0 => "positive number with text",
+        (0, _) => "zero with something",
+        _ => "other",
+    }
+}
+
+meta fn test_triple_sum() -> Int {
+    let triple = (1, 2, 3);
+    match triple {
+        (a, b, c) => a + b + c,
+    }
+}
+
+// =============================================================================
+// ARRAY TYPE PATTERNS
+// =============================================================================
+
+meta fn test_array_sum() -> Int {
+    let arr = [1, 2, 3];
+    match arr {
+        [a, b, c] => a + b + c,
+    }
+}
+
+meta fn test_array_all_true() -> Bool {
+    let arr = [true, true, true];
+    match arr {
+        [a, b, c] => a && b && c,
+    }
+}
+
+// =============================================================================
+// NESTED TYPE PATTERNS
+// =============================================================================
+
+meta fn test_nested_tagged() -> Int {
+    let nested = (1, (1, 42));  // Some(Some(42))
+    match nested {
+        (1, (1, n)) => n,
+        (1, (0, _)) => -1,
+        (0, _) => -2,
+        _ => -3,
+    }
+}
+
+meta fn test_tagged_tuple() -> Int {
+    let m = (1, (10, 20));  // Some((10, 20))
+    match m {
+        (1, (a, b)) => a + b,
+        (0, _) => 0,
+        _ => -1,
+    }
+}
+
+meta fn test_result_maybe_tagged() -> Int {
+    let r = (0, (1, 100));  // Ok(Some(100))
+    match r {
+        (0, (1, n)) => n,
+        (0, (0, _)) => -1,
+        (1, _) => -2,
+        _ => -3,
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Discriminant tests
+    @const assert(test_discriminant_int());
+    @const assert(test_discriminant_text());
+    @const assert(test_discriminant_bool());
+
+    // Value extraction
+    @const assert_eq(extract_int_value((0, 42)), 42);
+    @const assert_eq(extract_with_guard((0, 10)), "positive int");
+    @const assert_eq(extract_with_guard((0, -5)), "negative int");
+
+    // Tagged maybe tests
+    @const assert(test_tagged_some_check());
+    @const assert(test_tagged_none_check());
+
+    // Tagged result tests
+    @const assert(test_tagged_ok_check());
+    @const assert(test_tagged_err_check());
+
+    // Classification tests
+    @const assert_eq(classify_tagged((1, 42)), "positive some");
+    @const assert_eq(classify_tagged((1, -5)), "negative some");
+    @const assert_eq(classify_tagged((1, 0)), "zero some");
+    @const assert_eq(classify_tagged((0, 0)), "none");
+
+    @const assert_eq(classify_result_tagged((0, 10)), "success with non-negative");
+    @const assert_eq(classify_result_tagged((0, -5)), "success with negative");
+    @const assert_eq(classify_result_tagged((1, 0)), "error");
+
+    // Tuple type tests
+    @const assert_eq(test_tuple_types(), "positive number with text");
+    @const assert_eq(test_triple_sum(), 6);
+
+    // Array type tests
+    @const assert_eq(test_array_sum(), 6);
+    @const assert(test_array_all_true());
+
+    // Nested type tests
+    @const assert_eq(test_nested_tagged(), 42);
+    @const assert_eq(test_tagged_tuple(), 30);
+    @const assert_eq(test_result_maybe_tagged(), 100);
+}

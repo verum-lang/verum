@@ -1,0 +1,199 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, timeout
+// @timeout: 100
+// @expected-error: verification-timeout
+
+/// Proof timeout test: verification should fail due to time limit.
+/// Tests that the verifier respects timeout constraints.
+
+// ============================================================================
+// Computationally expensive proof (should timeout)
+// ============================================================================
+
+/// This function requires proving a complex arithmetic property
+/// that cannot be decided within the 100ms timeout.
+@verify(proof)
+fn expensive_proof(n: Int{> 0}) -> Int{> 0} {
+    // Computing Ackermann-like values requires exponential reasoning
+    let mut result = 1;
+    let mut i = 0;
+
+    while i < n {
+        invariant result > 0;
+        invariant i >= 0 && i <= n;
+
+        // Nested loop creates exponential proof complexity
+        let mut j = 0;
+        while j < result {
+            invariant j >= 0;
+            j += 1;
+        }
+
+        result = result * 2 + 1;
+        i += 1;
+    }
+
+    result
+}
+
+// ============================================================================
+// Deeply nested quantifiers (expensive to verify)
+// ============================================================================
+
+/// Multiple nested quantifiers create exponential search space
+@verify(proof)
+fn nested_quantifier_proof(arr: List<List<List<Int>>>) -> Bool
+    requires forall a in arr =>
+                forall b in a =>
+                    forall c in b =>
+                        forall d in 0..c =>
+                            d >= 0
+    ensures result == true
+{
+    // Z3 must enumerate all nested combinations
+    true
+}
+
+// ============================================================================
+// Non-linear arithmetic (undecidable in general)
+// ============================================================================
+
+/// Polynomial root finding can be very expensive
+@verify(proof)
+fn polynomial_roots(a: Int, b: Int, c: Int, d: Int, e: Int) -> Bool
+    requires a * a + b * b + c * c + d * d + e * e > 0
+{
+    // Proving properties about 5th degree polynomials is expensive
+    let p = a * a * a * a * a +
+            b * b * b * b +
+            c * c * c +
+            d * d +
+            e;
+    p != 0 || (a == 0 && b == 0 && c == 0 && d == 0 && e == 0)
+}
+
+// ============================================================================
+// Large constraint system
+// ============================================================================
+
+/// Many constraints create large SMT formulas
+@verify(proof)
+fn large_constraints(
+    a: Int{> 0 && < 1000},
+    b: Int{> 0 && < 1000},
+    c: Int{> 0 && < 1000},
+    d: Int{> 0 && < 1000},
+    e: Int{> 0 && < 1000},
+    f: Int{> 0 && < 1000},
+    g: Int{> 0 && < 1000},
+    h: Int{> 0 && < 1000}
+) -> Int{>= 0}
+    requires a + b + c + d + e + f + g + h < 5000
+    requires a * b > c * d
+    requires e + f != g + h
+    ensures result < 10000
+{
+    a + b + c + d + e + f + g + h
+}
+
+// ============================================================================
+// Recursive definition unrolling
+// ============================================================================
+
+/// Deep recursion requires many unrolling steps
+fn fibonacci(n: Int{>= 0}) -> Int{>= 0} {
+    if n <= 1 { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+@verify(proof)
+fn fib_property(n: Int{>= 0 && <= 40}) -> Bool
+    ensures result == true
+{
+    // Proving fib(40) > fib(39) requires deep unrolling
+    fibonacci(n + 1) >= fibonacci(n)
+}
+
+// ============================================================================
+// Combinatorial explosion
+// ============================================================================
+
+/// Permutation checking has factorial complexity
+@verify(proof)
+fn is_permutation(a: List<Int>, b: List<Int>) -> Bool
+    requires len(a) == len(b)
+    requires len(a) <= 10
+    ensures result == (forall x in a => exists y in b => x == y) &&
+                     (forall y in b => exists x in a => y == x)
+{
+    // Checking all n! permutations
+    true  // Placeholder
+}
+
+// ============================================================================
+// Integer factorization (computationally hard)
+// ============================================================================
+
+@verify(proof)
+fn has_factor(n: Int{> 1}, f: Int{> 1}) -> Bool
+    requires f < n
+    ensures result == (n % f == 0)
+{
+    n % f == 0
+}
+
+@verify(proof)
+fn is_prime(n: Int{> 1}) -> Bool
+    ensures result == (forall f: Int{> 1 && < n} => n % f != 0)
+{
+    // Proving primality requires checking all potential factors
+    let mut i = 2;
+    while i * i <= n {
+        if n % i == 0 {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+// ============================================================================
+// Text constraint solving (expensive theory)
+// ============================================================================
+
+@verify(proof)
+fn string_contains_pattern(s: Text, pattern: Text) -> Bool
+    requires len(s) >= len(pattern)
+    ensures result == exists i: Int{>= 0 && <= len(s) - len(pattern)} =>
+                        s[i..i + len(pattern)] == pattern
+{
+    // Text theory with quantifiers is expensive
+    for i in 0..=(len(s) - len(pattern)) {
+        if s[i..i + len(pattern)] == pattern {
+            return true;
+        }
+    }
+    false
+}
+
+// ============================================================================
+// Floating point verification (complex theory)
+// ============================================================================
+
+@verify(proof)
+fn float_associativity_fails(a: Float, b: Float, c: Float) -> Bool {
+    // Floating point is not associative, verification is complex
+    let left = (a + b) + c;
+    let right = a + (b + c);
+    // This might not be provable due to floating point semantics
+    (left - right).abs() < 1e-10
+}
+
+fn main() {
+    // These tests are designed to timeout
+    // The test harness should verify that verification fails with timeout error
+
+    // Note: In actual execution, these would cause the verifier to timeout
+    // and report a verification failure due to time limit exceeded
+}

@@ -1,0 +1,106 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, closures, capture, higher-order
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT closure capture, multi-capture, and closure-returning-closure patterns
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x| x * n
+}
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+// Multi-capture: closure captures multiple values
+fn make_linear(a: Int, b: Int) -> fn(Int) -> Int {
+    |x| a * x + b
+}
+
+fn make_clamp(lo: Int, hi: Int) -> fn(Int) -> Int {
+    |x| {
+        if x < lo {
+            lo
+        } else if x > hi {
+            hi
+        } else {
+            x
+        }
+    }
+}
+
+// Higher-order: fold over a range
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Basic capture
+    let add5 = make_adder(5);
+    let mul3 = make_multiplier(3);
+    assert_eq(add5(10), 15);
+    assert_eq(mul3(10), 30);
+
+    // Apply and apply_twice
+    assert_eq(apply(add5, 7), 12);
+    assert_eq(apply_twice(add5, 0), 10);  // 0+5+5
+    assert_eq(apply_twice(mul3, 2), 18);  // 2*3*3
+
+    // Composition
+    let add5_then_mul3 = compose(mul3, add5);
+    assert_eq(add5_then_mul3(2), 21);  // (2+5)*3 = 21
+
+    let mul3_then_add5 = compose(add5, mul3);
+    assert_eq(mul3_then_add5(2), 11);  // 2*3+5 = 11
+
+    // Multi-capture
+    let f_2x_plus_3 = make_linear(2, 3);
+    assert_eq(f_2x_plus_3(0), 3);
+    assert_eq(f_2x_plus_3(5), 13);
+    assert_eq(f_2x_plus_3(10), 23);
+
+    // Clamp
+    let clamp_0_10 = make_clamp(0, 10);
+    assert_eq(clamp_0_10(-5), 0);
+    assert_eq(clamp_0_10(5), 5);
+    assert_eq(clamp_0_10(15), 10);
+
+    // Fold
+    let sum = fold_range(1, 11, 0, |acc, x| acc + x);
+    assert_eq(sum, 55);
+
+    let product = fold_range(1, 6, 1, |acc, x| acc * x);
+    assert_eq(product, 120);  // 5!
+
+    // Closure as argument inline
+    let count = fold_range(0, 100, 0, |acc, x| {
+        if x - (x / 2) * 2 == 0 {
+            acc + 1
+        } else {
+            acc
+        }
+    });
+    assert_eq(count, 50);  // 50 even numbers in 0..100
+
+    0
+}

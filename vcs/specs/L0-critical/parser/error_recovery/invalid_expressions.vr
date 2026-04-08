@@ -1,0 +1,95 @@
+// @test: parse-recover
+// @tier: 0
+// @level: L0
+// @tags: parser, error-recovery, expressions, invalid-syntax
+// @description: Tests parser recovery from invalid expression syntax.
+//              Parser should flag errors but continue parsing subsequent valid code.
+
+// Test 1: Binary operator with missing right operand
+fn test_missing_rhs() {
+    let x = 5 +;
+    let y = 10;
+    y
+}
+
+// Test 2: Unary operator on nothing
+fn test_dangling_unary() {
+    let x = -;
+    let y = 42;
+    y
+}
+
+// Test 3: Consecutive binary operators
+fn test_double_operator() {
+    let x = 5 + * 3;
+    let y = 10;
+    y
+}
+
+// Test 4: Assignment to literal
+fn test_literal_assign() {
+    42 = 5;
+    let valid = 10;
+    valid
+}
+
+// Test 5: Empty parenthesized expression used as value
+fn test_empty_parens_value() {
+    let x = ();
+    let y = (1 + 2);
+    y
+}
+
+// Test 6: Trailing comma in expression context (not tuple)
+fn test_trailing_comma_expr() {
+    let x = 5,;
+    let y = 10;
+    y
+}
+
+// Test 7: Incomplete if expression
+fn test_incomplete_if() {
+    let x = if;
+    let y = 20;
+    y
+}
+
+// Test 8: Match with no arms
+fn test_empty_match() {
+    let x = 5;
+    match x {
+    }
+    let y = 10;
+    y
+}
+
+// Test 9: Incomplete function call
+fn test_incomplete_call() {
+    let x = print(;
+    let y = 10;
+    y
+}
+
+// Test 10: Invalid field access
+fn test_invalid_field() {
+    let x = 5.;
+    let y = 10;
+    y
+}
+
+// Test 11: Chained invalid access
+fn test_chained_invalid() {
+    let x = foo..bar;
+    let y = 10;
+    y
+}
+
+// Test 12: Multiple errors with valid code between
+fn test_interleaved_errors() {
+    let a = 1;
+    let b = 2 +;
+    let c = 3;
+    let d = * 4;
+    let e = 5;
+    a + c + e
+}

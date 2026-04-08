@@ -1,0 +1,35 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, heavy, stress
+// @expected-exit: 0
+
+fn make_msg(n: Int) -> Text {
+    f"item_{n}"
+}
+
+fn main() -> Int {
+    // Heavy string allocation: 200 format strings in a loop
+    let mut i = 0;
+    let mut count = 0;
+    while (i < 200) {
+        let msg = make_msg(i);
+        count = count + 1;
+        i = i + 1;
+    }
+    assert_eq(count, 200);
+
+    // 50 different string variables
+    let a0 = "a0"; let a1 = "a1"; let a2 = "a2"; let a3 = "a3"; let a4 = "a4";
+    let a5 = "a5"; let a6 = "a6"; let a7 = "a7"; let a8 = "a8"; let a9 = "a9";
+    let b0 = "b0"; let b1 = "b1"; let b2 = "b2"; let b3 = "b3"; let b4 = "b4";
+    let b5 = "b5"; let b6 = "b6"; let b7 = "b7"; let b8 = "b8"; let b9 = "b9";
+
+    // Verify first and last
+    print(a0);
+    print(b9);
+
+    print(count);
+
+    0
+}

@@ -1,0 +1,125 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, records, nested, deep-access
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT nested records: records containing records, deep field access
+
+type Point is { x: Int, y: Int };
+
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+}
+
+type Rect is { origin: Point, width: Int, height: Int };
+
+implement Rect {
+    fn new(x: Int, y: Int, w: Int, h: Int) -> Rect {
+        Rect { origin: Point.new(x, y), width: w, height: h }
+    }
+
+    fn area(self) -> Int {
+        self.width * self.height
+    }
+
+    fn right(self) -> Int {
+        self.origin.x + self.width
+    }
+
+    fn bottom(self) -> Int {
+        self.origin.y + self.height
+    }
+
+    fn translate(self, dx: Int, dy: Int) -> Rect {
+        Rect {
+            origin: Point.new(self.origin.x + dx, self.origin.y + dy),
+            width: self.width,
+            height: self.height,
+        }
+    }
+}
+
+type Pair is { first: Int, second: Int };
+
+implement Pair {
+    fn new(a: Int, b: Int) -> Pair {
+        Pair { first: a, second: b }
+    }
+
+    fn swap(self) -> Pair {
+        Pair { first: self.second, second: self.first }
+    }
+
+    fn sum(self) -> Int {
+        self.first + self.second
+    }
+}
+
+// Function that returns a record built from another record
+fn mirror_point(p: Point) -> Point {
+    Point.new(0 - p.x, 0 - p.y)
+}
+
+fn double_rect(r: Rect) -> Rect {
+    Rect {
+        origin: r.origin,
+        width: r.width * 2,
+        height: r.height * 2,
+    }
+}
+
+fn main() -> Int {
+    // Basic nested record
+    let r = Rect.new(10, 20, 30, 40);
+    assert_eq(r.origin.x, 10);
+    assert_eq(r.origin.y, 20);
+    assert_eq(r.width, 30);
+    assert_eq(r.height, 40);
+    assert_eq(r.area(), 1200);
+    assert_eq(r.right(), 40);
+    assert_eq(r.bottom(), 60);
+
+    // Translate
+    let r2 = r.translate(5, -5);
+    assert_eq(r2.origin.x, 15);
+    assert_eq(r2.origin.y, 15);
+    assert_eq(r2.width, 30);
+    assert_eq(r2.area(), 1200);  // Same area after translate
+
+    // Double
+    let r3 = double_rect(r);
+    assert_eq(r3.width, 60);
+    assert_eq(r3.height, 80);
+    assert_eq(r3.area(), 4800);
+    assert_eq(r3.origin.x, 10);  // Origin unchanged
+
+    // Mirror
+    let p = Point.new(3, 4);
+    let mp = mirror_point(p);
+    assert_eq(mp.x, -3);
+    assert_eq(mp.y, -4);
+
+    // Pair operations
+    let pair = Pair.new(10, 20);
+    assert_eq(pair.sum(), 30);
+    let swapped = pair.swap();
+    assert_eq(swapped.first, 20);
+    assert_eq(swapped.second, 10);
+    assert_eq(swapped.sum(), 30);  // Sum unchanged after swap
+
+    // Build multiple records in a loop
+    let mut total = 0;
+    let mut i = 0;
+    while i < 10 {
+        let p = Pair.new(i, i * i);
+        total = total + p.sum();
+        i = i + 1;
+    }
+    // sum of (i + i^2) for i=0..9 = sum(i) + sum(i^2) = 45 + 285 = 330
+    assert_eq(total, 330);
+
+    0
+}

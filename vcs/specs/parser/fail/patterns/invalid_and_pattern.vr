@@ -1,0 +1,69 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, and, combination, error
+// @description: Test invalid and-pattern (pattern combination) syntax
+// @expected-error: E084
+
+// Active patterns for testing
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+pattern Positive(n: Int) -> Bool = n > 0;
+
+fn test_trailing_ampersand() {
+    let value = 42;
+
+    // Invalid: trailing & with no following pattern
+    match value {
+        Even() & => print("trailing and"),
+        _ => print("other"),
+    }
+}
+
+fn test_leading_ampersand() {
+    let value = 42;
+
+    // Invalid: leading & with no preceding pattern
+    match value {
+        & Positive() => print("leading and"),
+        _ => print("other"),
+    }
+}
+
+fn test_double_ampersand() {
+    let value = 42;
+
+    // Invalid: double && instead of single &
+    match value {
+        Even() && Positive() => print("double and"),
+        _ => print("other"),
+    }
+}
+
+fn test_empty_and_pattern() {
+    let value = 42;
+
+    // Invalid: empty between & symbols
+    match value {
+        Even() & & Positive() => print("empty between"),
+        _ => print("other"),
+    }
+}
+
+fn test_and_with_guard_confusion() {
+    let value = 42;
+
+    // Invalid: & confused with guard
+    match value {
+        x & x > 0 => print("confused"),
+        _ => print("other"),
+    }
+}
+
+fn test_triple_and() {
+    let value = 42;
+
+    // Invalid: triple &&& pattern
+    match value {
+        Even() &&& Positive() => print("triple"),
+        _ => print("other"),
+    }
+}

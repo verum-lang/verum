@@ -1,0 +1,221 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, trivial, automation
+// @timeout: 5000
+
+/// Trivial Tactic
+///
+/// The `trivial` tactic solves goals that are trivially true,
+/// including reflexivity, assumptions, and simple propositions.
+
+// ------------------------------------------------------------
+// Basic Trivial Goals
+// ------------------------------------------------------------
+
+/// Reflexivity is trivial
+theorem refl_trivial(x: Int): x == x {
+    proof by trivial
+}
+
+/// True is trivial
+theorem true_trivial: True {
+    proof by trivial
+}
+
+/// Identity is trivial
+theorem id_trivial<P: Prop>(p: P): P {
+    proof {
+        assume h: P;
+        trivial  // h is in context
+    }
+}
+
+/// And introduction with same prop
+theorem and_same<P: Prop>(p: P): P && P {
+    proof {
+        assume h: P;
+        split;
+        trivial;
+        trivial
+    }
+}
+
+// ------------------------------------------------------------
+// Trivial with Simple Arithmetic
+// ------------------------------------------------------------
+
+/// Zero plus zero
+theorem zero_plus_zero: 0 + 0 == 0 {
+    proof by trivial
+}
+
+/// One times one
+theorem one_times_one: 1 * 1 == 1 {
+    proof by trivial
+}
+
+/// Simple comparison
+theorem zero_lt_one: 0 < 1 {
+    proof by trivial
+}
+
+/// Negation of false
+theorem not_false: !False {
+    proof by trivial
+}
+
+// ------------------------------------------------------------
+// Trivial with Definitions
+// ------------------------------------------------------------
+
+fn is_zero(n: Int) -> Bool {
+    n == 0
+}
+
+theorem is_zero_zero: is_zero(0) == true {
+    proof by trivial  // unfolds definition
+}
+
+fn always_true<T>(_x: T) -> Bool {
+    true
+}
+
+theorem always_true_is_true: always_true(42) == true {
+    proof by trivial
+}
+
+// ------------------------------------------------------------
+// Trivial in Context
+// ------------------------------------------------------------
+
+/// Assumption is in context
+theorem from_assumption(p: Bool): p == true -> p == true {
+    proof {
+        assume h: p == true;
+        trivial  // h solves the goal
+    }
+}
+
+/// Nested trivial
+theorem nested_impl<P: Prop, Q: Prop>: P -> (Q -> P) {
+    proof {
+        assume hp: P;
+        assume _hq: Q;
+        trivial  // hp is P
+    }
+}
+
+/// Disjunction with trivial
+theorem or_trivial_left<P: Prop>(p: P): P || False {
+    proof {
+        assume hp: P;
+        left;
+        trivial
+    }
+}
+
+theorem or_trivial_right<P: Prop>(p: P): False || P {
+    proof {
+        assume hp: P;
+        right;
+        trivial
+    }
+}
+
+// ------------------------------------------------------------
+// Trivial Limitations
+// ------------------------------------------------------------
+
+/// Requires small simplification (not pure trivial)
+theorem add_comm_trivial: 1 + 2 == 2 + 1 {
+    proof {
+        // Just trivial might not work here
+        // Need simp or compute
+        simp
+    }
+}
+
+/// Trivial after unfolding
+theorem unfold_then_trivial(xs: List<Int>): xs.len() >= 0 {
+    proof {
+        unfold List.len;
+        trivial  // lengths are non-negative
+    }
+}
+
+// ------------------------------------------------------------
+// Combined with Other Tactics
+// ------------------------------------------------------------
+
+/// Trivial finishes simple cases
+theorem cases_with_trivial(b: Bool): b || !b {
+    proof {
+        cases b {
+            true => {
+                left;
+                trivial
+            }
+            false => {
+                right;
+                trivial
+            }
+        }
+    }
+}
+
+/// Trivial after destruct
+theorem pair_trivial(p: (Int, Int)): p.0 + p.1 == p.1 + p.0 {
+    proof {
+        let (a, b) = p;
+        // Now goal is a + b == b + a
+        ring  // or could use add_comm
+    }
+}
+
+/// Induction with trivial base
+theorem list_len_append<T>(xs: List<T>, ys: List<T>):
+    (xs ++ ys).len() == xs.len() + ys.len()
+{
+    proof by induction on xs {
+        case Nil => {
+            // ([] ++ ys).len() == [].len() + ys.len()
+            // ys.len() == 0 + ys.len()
+            trivial  // by definition
+        }
+        case Cons(h, t) => {
+            simp;
+            rewrite IH;
+            ring
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Trivial Failure Cases (for documentation)
+// ------------------------------------------------------------
+
+// These would NOT be solvable by trivial alone:
+
+// theorem needs_induction(n: Nat): n + 0 == n {
+//     proof by trivial  // FAILS - needs induction
+// }
+
+// theorem needs_ring(a: Int, b: Int): (a + b)^2 == a^2 + 2*a*b + b^2 {
+//     proof by trivial  // FAILS - needs ring
+// }
+
+// theorem needs_cases(b: Bool): if b { 1 } else { 1 } == 1 {
+//     proof by trivial  // FAILS - needs case analysis
+// }
+
+fn main() {
+    // Trivial proofs verify at compile time
+    // Runtime just confirms the theorems hold
+
+    assert(0 == 0);
+    assert(true);
+    assert(0 + 0 == 0);
+    assert(1 * 1 == 1);
+    assert(0 < 1);
+}

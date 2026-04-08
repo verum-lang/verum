@@ -1,0 +1,119 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: tuple, multi-return, destructure, e2e
+// @description: Test multiple return values via tuples and struct destructuring
+
+type Pair is { first: Int, second: Int };
+
+fn divmod(a: Int, b: Int) -> Pair {
+    Pair { first: a / b, second: a % b }
+}
+
+fn min_max(items: List<Int>) -> Pair {
+    let mut lo = items[0];
+    let mut hi = items[0];
+    let mut i = 1;
+    while i < items.len() {
+        if items[i] < lo {
+            lo = items[i];
+        }
+        if items[i] > hi {
+            hi = items[i];
+        }
+        i = i + 1;
+    }
+    Pair { first: lo, second: hi }
+}
+
+type Stats is { sum: Int, count: Int, min: Int, max: Int };
+
+fn compute_stats(items: List<Int>) -> Stats {
+    let mut sum = 0;
+    let mut lo = items[0];
+    let mut hi = items[0];
+    let mut i = 0;
+    while i < items.len() {
+        sum = sum + items[i];
+        if items[i] < lo { lo = items[i]; }
+        if items[i] > hi { hi = items[i]; }
+        i = i + 1;
+    }
+    Stats { sum: sum, count: items.len(), min: lo, max: hi }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: divmod
+    let dm = divmod(17, 5);
+    if dm.first != 3 {
+        print(f"FAIL 1: quotient = {dm.first}");
+        f = f + 1;
+    } else if dm.second != 2 {
+        print(f"FAIL 1: remainder = {dm.second}");
+        f = f + 1;
+    } else {
+        print("  divmod: OK");
+    }
+
+    // Test 2: min_max
+    let nums = List.new();
+    nums.push(5);
+    nums.push(3);
+    nums.push(9);
+    nums.push(1);
+    nums.push(7);
+    let mm = min_max(nums);
+    if mm.first != 1 {
+        print(f"FAIL 2: min = {mm.first}");
+        f = f + 1;
+    } else if mm.second != 9 {
+        print(f"FAIL 2: max = {mm.second}");
+        f = f + 1;
+    } else {
+        print("  min_max: OK");
+    }
+
+    // Test 3: stats
+    let data = List.new();
+    data.push(10);
+    data.push(20);
+    data.push(30);
+    data.push(40);
+    data.push(50);
+    let st = compute_stats(data);
+    if st.sum != 150 {
+        print(f"FAIL 3: sum = {st.sum}");
+        f = f + 1;
+    } else if st.count != 5 {
+        print(f"FAIL 3: count = {st.count}");
+        f = f + 1;
+    } else if st.min != 10 {
+        print(f"FAIL 3: min = {st.min}");
+        f = f + 1;
+    } else if st.max != 50 {
+        print(f"FAIL 3: max = {st.max}");
+        f = f + 1;
+    } else {
+        print("  stats: OK");
+    }
+
+    // Test 4: Chaining struct returns
+    let dm2 = divmod(dm.first * 100 + dm.second, 7);
+    // 3*100 + 2 = 302, 302/7 = 43, 302%7 = 1
+    if dm2.first != 43 {
+        print(f"FAIL 4: chained quotient = {dm2.first}");
+        f = f + 1;
+    } else if dm2.second != 1 {
+        print(f"FAIL 4: chained remainder = {dm2.second}");
+        f = f + 1;
+    } else {
+        print("  chained_return: OK");
+    }
+
+    if f == 0 {
+        print("All multi-return tests passed");
+    }
+    f
+}

@@ -1,0 +1,120 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, interval, arithmetic, records
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests interval arithmetic using record types.
+
+type Interval is { lo: Int, hi: Int };
+
+fn interval_add(a: Interval, b: Interval) -> Interval {
+    Interval { lo: a.lo + b.lo, hi: a.hi + b.hi }
+}
+
+fn interval_mul(a: Interval, b: Interval) -> Interval {
+    let p1 = a.lo * b.lo;
+    let p2 = a.lo * b.hi;
+    let p3 = a.hi * b.lo;
+    let p4 = a.hi * b.hi;
+
+    let mut mn = p1;
+    if p2 < mn { mn = p2; }
+    if p3 < mn { mn = p3; }
+    if p4 < mn { mn = p4; }
+
+    let mut mx = p1;
+    if p2 > mx { mx = p2; }
+    if p3 > mx { mx = p3; }
+    if p4 > mx { mx = p4; }
+
+    Interval { lo: mn, hi: mx }
+}
+
+fn interval_width(i: Interval) -> Int {
+    i.hi - i.lo
+}
+
+fn interval_contains(i: Interval, x: Int) -> Int {
+    if x >= i.lo && x <= i.hi { 1 } else { 0 }
+}
+
+fn interval_overlaps(a: Interval, b: Interval) -> Int {
+    if a.lo <= b.hi && b.lo <= a.hi { 1 } else { 0 }
+}
+
+fn test_interval_basics() {
+    let a = Interval { lo: 1, hi: 5 };
+    let b = Interval { lo: 3, hi: 7 };
+
+    assert_eq(interval_width(a), 4);
+    assert_eq(interval_width(b), 4);
+    assert_eq(interval_contains(a, 3), 1);
+    assert_eq(interval_contains(a, 6), 0);
+    assert_eq(interval_overlaps(a, b), 1);
+    print("interval_basics: ok");
+}
+
+fn test_interval_add() {
+    let a = Interval { lo: 2, hi: 4 };
+    let b = Interval { lo: 1, hi: 3 };
+    let sum = interval_add(a, b);
+    // [2,4] + [1,3] = [3,7]
+    assert_eq(sum.lo, 3);
+    assert_eq(sum.hi, 7);
+    print("interval_add: ok");
+}
+
+fn test_interval_mul() {
+    let a = Interval { lo: 2, hi: 3 };
+    let b = Interval { lo: 4, hi: 5 };
+    let prod = interval_mul(a, b);
+    // [2,3] * [4,5] = [8,15]
+    assert_eq(prod.lo, 8);
+    assert_eq(prod.hi, 15);
+
+    // Interval with negatives
+    let c = Interval { lo: -2, hi: 3 };
+    let d = Interval { lo: 1, hi: 4 };
+    let prod2 = interval_mul(c, d);
+    // min(-2*1, -2*4, 3*1, 3*4) = -8
+    // max(-2*1, -2*4, 3*1, 3*4) = 12
+    assert_eq(prod2.lo, -8);
+    assert_eq(prod2.hi, 12);
+    print("interval_mul: ok");
+}
+
+fn test_interval_chain() {
+    // [1,2] + [3,4] = [4,6]
+    // [4,6] * [1,2] = [4,12]
+    let a = Interval { lo: 1, hi: 2 };
+    let b = Interval { lo: 3, hi: 4 };
+    let c = Interval { lo: 1, hi: 2 };
+
+    let sum = interval_add(a, b);
+    let result = interval_mul(sum, c);
+    assert_eq(result.lo, 4);
+    assert_eq(result.hi, 12);
+    print("interval_chain: ok");
+}
+
+fn test_interval_no_overlap() {
+    let a = Interval { lo: 1, hi: 5 };
+    let b = Interval { lo: 6, hi: 10 };
+    assert_eq(interval_overlaps(a, b), 0);
+
+    let c = Interval { lo: 1, hi: 6 };
+    assert_eq(interval_overlaps(c, b), 1); // Touch at 6
+    print("interval_no_overlap: ok");
+}
+
+fn main() -> Int {
+    test_interval_basics();
+    test_interval_add();
+    test_interval_mul();
+    test_interval_chain();
+    test_interval_no_overlap();
+    print("[OK] 426_interp_interval_arithmetic");
+    0
+}

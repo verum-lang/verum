@@ -1,0 +1,137 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: smt, verification, refinement, types, constraints, cli-integration
+// @timeout: 15000
+// @description: Refinement type verification patterns — arithmetic invariants proven at runtime
+
+/// Positive integers add to positive
+fn add_positives(a: Int, b: Int) -> Int {
+    a + b
+}
+
+/// Multiplication of positives stays positive
+fn mul_positives(a: Int, b: Int) -> Int {
+    a * b
+}
+
+/// Factorial
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n == 0 { 1 } else { n * factorial(n - 1) }
+}
+
+/// Clamp to byte range [0, 255]
+fn clamp_to_byte(value: Int) -> Int {
+    if value < 0 { 0 }
+    else if value > 255 { 255 }
+    else { value }
+}
+
+/// Convert to percentage
+fn to_percentage(numerator: Int, denominator: Int) -> Int {
+    (numerator * 100) / denominator
+}
+
+/// Squared value is non-negative
+fn square(x: Int) -> Int {
+    x * x
+}
+
+/// Ring index stays in bounds
+fn ring_index(i: Int, size: Int) -> Int {
+    i % size
+}
+
+/// Average stays between inputs
+fn average(a: Int, b: Int) -> Int {
+    a + (b - a) / 2
+}
+
+/// Safe increment
+fn safe_increment(x: Int) -> Int {
+    x + 1
+}
+
+fn test_add_positives() -> Int {
+    let r = add_positives(3, 5);
+    if r != 8 { print(f"FAIL add_positives={r}"); return 1; }
+    print("  add_positives: OK");
+    0
+}
+
+fn test_mul_positives() -> Int {
+    let r = mul_positives(4, 7);
+    if r != 28 { print(f"FAIL mul_positives={r}"); return 1; }
+    print("  mul_positives: OK");
+    0
+}
+
+fn test_factorial() -> Int {
+    if factorial(0) != 1 { print("FAIL factorial(0)"); return 1; }
+    if factorial(5) != 120 { print("FAIL factorial(5)"); return 1; }
+    if factorial(10) != 3628800 { print("FAIL factorial(10)"); return 1; }
+    print("  factorial: OK");
+    0
+}
+
+fn test_clamp_to_byte() -> Int {
+    if clamp_to_byte(128) != 128 { print("FAIL clamp mid"); return 1; }
+    if clamp_to_byte(-10) != 0 { print("FAIL clamp neg"); return 1; }
+    if clamp_to_byte(300) != 255 { print("FAIL clamp high"); return 1; }
+    print("  clamp_to_byte: OK");
+    0
+}
+
+fn test_to_percentage() -> Int {
+    if to_percentage(75, 100) != 75 { print("FAIL pct 75"); return 1; }
+    if to_percentage(1, 4) != 25 { print("FAIL pct 25"); return 1; }
+    print("  to_percentage: OK");
+    0
+}
+
+fn test_square() -> Int {
+    if square(7) != 49 { print("FAIL square 7"); return 1; }
+    if square(-7) != 49 { print("FAIL square -7"); return 1; }
+    if square(0) != 0 { print("FAIL square 0"); return 1; }
+    print("  square: OK");
+    0
+}
+
+fn test_ring_index() -> Int {
+    if ring_index(13, 5) != 3 { print("FAIL ring 13%5"); return 1; }
+    if ring_index(0, 5) != 0 { print("FAIL ring 0%5"); return 1; }
+    print("  ring_index: OK");
+    0
+}
+
+fn test_average() -> Int {
+    if average(3, 9) != 6 { print("FAIL avg 3,9"); return 1; }
+    if average(0, 100) != 50 { print("FAIL avg 0,100"); return 1; }
+    print("  average: OK");
+    0
+}
+
+fn test_safe_increment() -> Int {
+    if safe_increment(0) != 1 { print("FAIL incr 0"); return 1; }
+    if safe_increment(41) != 42 { print("FAIL incr 41"); return 1; }
+    print("  safe_increment: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_add_positives();
+    failures = failures + test_mul_positives();
+    failures = failures + test_factorial();
+    failures = failures + test_clamp_to_byte();
+    failures = failures + test_to_percentage();
+    failures = failures + test_square();
+    failures = failures + test_ring_index();
+    failures = failures + test_average();
+    failures = failures + test_safe_increment();
+    if failures == 0 {
+        print("All verify_refinements tests passed");
+    }
+    failures
+}

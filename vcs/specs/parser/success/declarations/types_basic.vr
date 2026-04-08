@@ -1,0 +1,64 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, types
+// @description: Test basic type definition parsing
+
+// Unit type
+type Unit is ();
+
+// Newtype
+type UserId is (Int);
+
+// Tuple type
+type Pair is (Int, Int);
+
+type Triple is (Int, Text, Bool);
+
+// Record type (struct-like)
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    email: Text
+};
+
+// With visibility
+type PublicRecord is {
+    pub id: Int,
+    internal data: Text,
+    protected secret: Int
+};
+
+// With default values
+type Config is {
+    host: Text = "localhost",
+    port: Int = 8080,
+    debug: Bool = false
+};
+
+// Variant type (enum-like)
+type Option<T> is None | Some(T);
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Color is Red | Green | Blue;
+
+type Message is
+    | Text(Text)
+    | Number(Int)
+    | Quit;
+
+// Variant with record data
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { a: Float, b: Float, c: Float };
+
+// Tree structure
+type Tree<T> is
+    | Leaf(T)
+    | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };

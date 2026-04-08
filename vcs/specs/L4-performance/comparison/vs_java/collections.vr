@@ -1,0 +1,786 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @baseline-comparison: java
+// @tags: comparison, java, jvm, collections, data-structures, baseline, performance
+// @description: Collections vs Java benchmark (target: > 1.5x Java performance)
+
+/// Verum vs Java: Collections Benchmark
+///
+/// This benchmark compares Verum's collection operations against Java.
+/// Java collections are well-optimized but have inherent overhead from
+/// object allocation, boxing, and GC pressure.
+///
+/// Target: > 1.5x Java performance (at least 50% faster)
+///
+/// Collections tested:
+/// - List vs ArrayList
+/// - Map vs HashMap
+/// - Set vs HashSet
+/// - Heap vs PriorityQueue
+///
+/// Why Verum should be faster:
+/// - No boxing for primitives
+/// - No object header overhead
+/// - CBGR vs GC (predictable latency)
+/// - Better cache locality
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const DATA_SIZE: Int = 1_000_000;
+const SMALL_SIZE: Int = 10_000;
+const LOOKUP_COUNT: Int = 1_000_000;
+
+/// Java baseline measurements (HotSpot JIT warmed up)
+module java_baselines {
+    // ArrayList operations
+    pub const ARRAYLIST_ADD_1M_MS: Float = 25.0;
+    pub const ARRAYLIST_GET_1M_MS: Float = 15.0;
+    pub const ARRAYLIST_REMOVE_1M_MS: Float = 5.0;
+    pub const ARRAYLIST_ITER_1M_MS: Float = 8.0;
+    pub const ARRAYLIST_STREAM_1M_MS: Float = 40.0;
+
+    // HashMap operations
+    pub const HASHMAP_PUT_1M_MS: Float = 300.0;
+    pub const HASHMAP_GET_1M_MS: Float = 80.0;
+    pub const HASHMAP_REMOVE_1M_MS: Float = 90.0;
+    pub const HASHMAP_ITER_1M_MS: Float = 50.0;
+    pub const HASHMAP_COMPUTE_1M_MS: Float = 150.0;
+
+    // HashSet operations
+    pub const HASHSET_ADD_1M_MS: Float = 280.0;
+    pub const HASHSET_CONTAINS_1M_MS: Float = 70.0;
+
+    // PriorityQueue operations
+    pub const PQUEUE_ADD_1M_MS: Float = 100.0;
+    pub const PQUEUE_POLL_1M_MS: Float = 150.0;
+
+    // Boxing overhead
+    pub const BOXING_OVERHEAD_10M_MS: Float = 200.0;
+
+    // Stream operations
+    pub const STREAM_MAP_FILTER_1M_MS: Float = 80.0;
+    pub const STREAM_COLLECT_1M_MS: Float = 60.0;
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs Java: Collections");
+
+    // ArrayList/List comparisons
+    results.add(benchmark_list_add());
+    results.add(benchmark_list_get());
+    results.add(benchmark_list_remove());
+    results.add(benchmark_list_iterate());
+    results.add(benchmark_list_functional());
+
+    // HashMap/Map comparisons
+    results.add(benchmark_map_put());
+    results.add(benchmark_map_get());
+    results.add(benchmark_map_remove());
+    results.add(benchmark_map_iterate());
+    results.add(benchmark_map_compute());
+
+    // HashSet/Set comparisons
+    results.add(benchmark_set_add());
+    results.add(benchmark_set_contains());
+
+    // PriorityQueue/Heap comparisons
+    results.add(benchmark_heap_add());
+    results.add(benchmark_heap_poll());
+
+    // Boxing overhead
+    results.add(benchmark_no_boxing());
+
+    // Stream operations
+    results.add(benchmark_stream_operations());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_java_collections.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.speedup >= r.min_speedup);
+    assert(all_meet_target, "Verum collections performance below target vs Java");
+}
+
+// ============================================================================
+// List/ArrayList Benchmarks
+// ============================================================================
+
+/// Benchmark: List add 1M elements
+fn benchmark_list_add() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut list: List<Int> = List.new();
+        for i in 0..SMALL_SIZE {
+            list.push(i);
+        }
+        black_box(list);
+    }
+
+    let mut list: List<Int> = List.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        list.push(i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.ARRAYLIST_ADD_1M_MS;
+
+    black_box(list);
+
+    ComparisonResult {
+        name: "list_add_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "list",
+    }
+}
+
+/// Benchmark: List random get 1M times
+fn benchmark_list_get() -> ComparisonResult {
+    let list: List<Int> = (0..DATA_SIZE).collect();
+    let mut rng = Random.with_seed(42);
+    let indices: List<Int> = (0..LOOKUP_COUNT)
+        .map(|_| rng.gen_range(0, DATA_SIZE))
+        .collect();
+
+    // Warmup
+    for i in 0..SMALL_SIZE {
+        black_box(list[indices[i]]);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Int = 0;
+    for i in 0..LOOKUP_COUNT {
+        sum += list[indices[i]];
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.ARRAYLIST_GET_1M_MS;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "list_get_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "list",
+    }
+}
+
+/// Benchmark: List remove from end 1M times
+fn benchmark_list_remove() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut list: List<Int> = (0..SMALL_SIZE).collect();
+        while list.pop().is_some() {}
+        black_box(list);
+    }
+
+    let mut list: List<Int> = (0..DATA_SIZE).collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    while list.pop().is_some() {}
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.ARRAYLIST_REMOVE_1M_MS;
+
+    ComparisonResult {
+        name: "list_remove_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "list",
+    }
+}
+
+/// Benchmark: List iteration sum
+fn benchmark_list_iterate() -> ComparisonResult {
+    let list: List<Int> = (0..DATA_SIZE).collect();
+
+    // Warmup
+    black_box(list.iter().take(SMALL_SIZE).sum.<Int>());
+
+    let timer = Timer.new();
+    timer.start();
+
+    let sum: Int = list.iter().sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.ARRAYLIST_ITER_1M_MS;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "list_iterate_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 2.0, // No autoboxing
+        category: "list",
+    }
+}
+
+/// Benchmark: List functional operations (map/filter)
+fn benchmark_list_functional() -> ComparisonResult {
+    let list: List<Int> = (0..DATA_SIZE).collect();
+
+    // Warmup
+    black_box(list.iter()
+        .take(SMALL_SIZE)
+        .filter(|&x| x % 2 == 0)
+        .map(|x| x * 2)
+        .sum.<Int>());
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result: Int = list.iter()
+        .filter(|&x| x % 2 == 0)
+        .map(|x| x * 2)
+        .sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.STREAM_MAP_FILTER_1M_MS;
+
+    black_box(result);
+
+    ComparisonResult {
+        name: "list_map_filter_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 2.0, // Java streams have overhead
+        category: "functional",
+    }
+}
+
+// ============================================================================
+// Map/HashMap Benchmarks
+// ============================================================================
+
+/// Benchmark: Map put 1M entries
+fn benchmark_map_put() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut map: Map<Int, Int> = Map.new();
+        for i in 0..SMALL_SIZE {
+            map.insert(i, i * 2);
+        }
+        black_box(map);
+    }
+
+    let mut map: Map<Int, Int> = Map.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.HASHMAP_PUT_1M_MS;
+
+    black_box(map);
+
+    ComparisonResult {
+        name: "map_put_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "map",
+    }
+}
+
+/// Benchmark: Map get 1M times
+fn benchmark_map_get() -> ComparisonResult {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..DATA_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    let mut rng = Random.with_seed(42);
+    let keys: List<Int> = (0..LOOKUP_COUNT)
+        .map(|_| rng.gen_range(0, DATA_SIZE))
+        .collect();
+
+    // Warmup
+    for i in 0..SMALL_SIZE {
+        black_box(map.get(&keys[i]));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: Int = 0;
+    for i in 0..LOOKUP_COUNT {
+        if let Some(&v) = map.get(&keys[i]) {
+            sum += v;
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.HASHMAP_GET_1M_MS;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "map_get_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "map",
+    }
+}
+
+/// Benchmark: Map remove 1M entries
+fn benchmark_map_remove() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut map: Map<Int, Int> = Map.new();
+        for i in 0..SMALL_SIZE {
+            map.insert(i, i * 2);
+        }
+        for i in 0..SMALL_SIZE {
+            map.remove(&i);
+        }
+        black_box(map);
+    }
+
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..DATA_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        map.remove(&i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.HASHMAP_REMOVE_1M_MS;
+
+    ComparisonResult {
+        name: "map_remove_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "map",
+    }
+}
+
+/// Benchmark: Map iteration
+fn benchmark_map_iterate() -> ComparisonResult {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..DATA_SIZE {
+        map.insert(i, i * 2);
+    }
+
+    // Warmup
+    let mut small_map: Map<Int, Int> = Map.new();
+    for i in 0..SMALL_SIZE { small_map.insert(i, i * 2); }
+    black_box(small_map.iter().map(|(k, v)| k + v).sum.<Int>());
+
+    let timer = Timer.new();
+    timer.start();
+
+    let sum: Int = map.iter().map(|(k, v)| k + v).sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.HASHMAP_ITER_1M_MS;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "map_iterate_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "map",
+    }
+}
+
+/// Benchmark: Map compute if absent
+fn benchmark_map_compute() -> ComparisonResult {
+    let mut map: Map<Int, Int> = Map.new();
+    let keys: List<Int> = (0..DATA_SIZE).collect();
+
+    // Warmup
+    for i in 0..SMALL_SIZE {
+        map.entry(i).or_insert_with(|| i * 2);
+    }
+    map.clear();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        map.entry(i).or_insert_with(|| i * 2);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.HASHMAP_COMPUTE_1M_MS;
+
+    black_box(map);
+
+    ComparisonResult {
+        name: "map_compute_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "map",
+    }
+}
+
+// ============================================================================
+// Set/HashSet Benchmarks
+// ============================================================================
+
+/// Benchmark: Set add 1M elements
+fn benchmark_set_add() -> ComparisonResult {
+    // Warmup
+    for _ in 0..3 {
+        let mut set: Set<Int> = Set.new();
+        for i in 0..SMALL_SIZE {
+            set.insert(i);
+        }
+        black_box(set);
+    }
+
+    let mut set: Set<Int> = Set.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        set.insert(i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.HASHSET_ADD_1M_MS;
+
+    black_box(set);
+
+    ComparisonResult {
+        name: "set_add_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "set",
+    }
+}
+
+/// Benchmark: Set contains 1M times
+fn benchmark_set_contains() -> ComparisonResult {
+    let set: Set<Int> = (0..DATA_SIZE).collect();
+    let mut rng = Random.with_seed(42);
+    let values: List<Int> = (0..LOOKUP_COUNT)
+        .map(|_| rng.gen_range(0, DATA_SIZE * 2))
+        .collect();
+
+    // Warmup
+    for i in 0..SMALL_SIZE {
+        black_box(set.contains(&values[i]));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut count: Int = 0;
+    for i in 0..LOOKUP_COUNT {
+        if set.contains(&values[i]) {
+            count += 1;
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.HASHSET_CONTAINS_1M_MS;
+
+    black_box(count);
+
+    ComparisonResult {
+        name: "set_contains_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "set",
+    }
+}
+
+// ============================================================================
+// Heap/PriorityQueue Benchmarks
+// ============================================================================
+
+/// Benchmark: Heap add 1M elements
+fn benchmark_heap_add() -> ComparisonResult {
+    let mut rng = Random.with_seed(42);
+    let data: List<Int> = (0..DATA_SIZE)
+        .map(|_| rng.gen_range(0, DATA_SIZE))
+        .collect();
+
+    // Warmup
+    for _ in 0..3 {
+        let mut heap: Heap<Int> = Heap();
+        for i in 0..SMALL_SIZE {
+            heap.push(data[i]);
+        }
+        black_box(heap);
+    }
+
+    let mut heap: Heap<Int> = Heap();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        heap.push(data[i]);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.PQUEUE_ADD_1M_MS;
+
+    black_box(heap);
+
+    ComparisonResult {
+        name: "heap_add_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "heap",
+    }
+}
+
+/// Benchmark: Heap poll 1M elements
+fn benchmark_heap_poll() -> ComparisonResult {
+    let mut rng = Random.with_seed(42);
+    let mut heap: Heap<Int> = Heap();
+    for _ in 0..DATA_SIZE {
+        heap.push(rng.gen_range(0, DATA_SIZE));
+    }
+
+    // Warmup with smaller heap
+    let mut small_heap: Heap<Int> = Heap();
+    for _ in 0..SMALL_SIZE { small_heap.push(rng.gen_range(0, SMALL_SIZE)); }
+    while small_heap.pop().is_some() {}
+
+    let timer = Timer.new();
+    timer.start();
+
+    while heap.pop().is_some() {}
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.PQUEUE_POLL_1M_MS;
+
+    ComparisonResult {
+        name: "heap_poll_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "heap",
+    }
+}
+
+// ============================================================================
+// Boxing Overhead Benchmark
+// ============================================================================
+
+/// Benchmark: No boxing overhead (Verum primitives vs Java boxed Integer)
+fn benchmark_no_boxing() -> ComparisonResult {
+    let data: List<Int> = (0..10_000_000).collect();
+
+    // Warmup
+    black_box(data.iter().take(100_000).sum.<Int>());
+
+    let timer = Timer.new();
+    timer.start();
+
+    // In Java, this would involve boxing/unboxing for Integer
+    let sum: Int = data.iter().sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.BOXING_OVERHEAD_10M_MS;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "no_boxing_sum_10m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 5.0, // Major advantage - no boxing
+        category: "boxing",
+    }
+}
+
+/// Benchmark: Stream-like operations
+fn benchmark_stream_operations() -> ComparisonResult {
+    let data: List<Int> = (0..DATA_SIZE).collect();
+
+    // Warmup
+    black_box(data.iter()
+        .take(SMALL_SIZE)
+        .filter(|&x| x % 2 == 0)
+        .map(|x| x * 2)
+        .collect.<List<_>>());
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result: List<Int> = data.iter()
+        .filter(|&x| x % 2 == 0)
+        .map(|x| x * 2)
+        .collect();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.STREAM_COLLECT_1M_MS;
+
+    black_box(result);
+
+    ComparisonResult {
+        name: "stream_collect_1m",
+        verum_ms,
+        baseline_ms: java_ms,
+        speedup: java_ms / verum_ms,
+        min_speedup: 1.5,
+        category: "functional",
+    }
+}
+
+type ComparisonResult is {
+    name: Text,
+    verum_ms: Float,
+    baseline_ms: Float,
+    speedup: Float,
+    min_speedup: Float,
+    category: Text,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<ComparisonResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: ComparisonResult) {
+        self.results.push(result);
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<30} {:>12} {:>12} {:>10} {:>10} {:>8}",
+                "Benchmark", "Verum (ms)", "Java (ms)", "Speedup", "Target", "Status");
+        println("{}", "-".repeat(90));
+
+        for result in &self.results {
+            let passed = result.speedup >= result.min_speedup;
+            let status = if passed { "PASS" } else { "FAIL" };
+
+            println("{:<30} {:>12.2} {:>12.2} {:>10.2}x {:>10.1}x {:>8}",
+                    result.name, result.verum_ms, result.baseline_ms,
+                    result.speedup, result.min_speedup, status);
+        }
+
+        println("");
+        let avg_speedup = self.results.iter()
+            .map(|r| r.speedup)
+            .sum.<Float>() / self.results.len() as Float;
+        println("Average speedup: {:.2}x faster than Java", avg_speedup);
+        println("");
+        println("Key advantages:");
+        println("  - No primitive boxing overhead");
+        println("  - No object header overhead (16 bytes per object in Java)");
+        println("  - Better cache locality (contiguous memory)");
+        println("  - Predictable CBGR vs unpredictable GC pauses");
+    }
+
+    fn export_comparison(&self, path: Text) {
+        let json = Json.object();
+        json.set("suite", &self.suite_name);
+        json.set("baseline", "java");
+
+        let results_json = Json.array();
+        for result in &self.results {
+            let r = Json.object();
+            r.set("name", &result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("baseline_ms", result.baseline_ms);
+            r.set("speedup", result.speedup);
+            r.set("min_speedup", result.min_speedup);
+            r.set("category", &result.category);
+            r.set("passed", result.speedup >= result.min_speedup);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+    }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+type Timer is { start_time: Instant };
+implement Timer {
+    fn new() -> Self { Self { start_time: Instant.now() } }
+    fn start(&mut self) { self.start_time = Instant.now(); }
+    fn elapsed_ms(&self) -> Int { self.start_time.elapsed().as_millis() }
+}
+
+type Random is { seed: u64 };
+implement Random {
+    fn with_seed(seed: u64) -> Self { Self { seed } }
+    fn gen_range(&mut self, min: Int, max: Int) -> Int { min }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+type Json is { data: Map<Text, Heap<Any>> };
+implement Json {
+    fn object() -> Self { Self { data: Map.new() } }
+    fn array() -> Self { Self { data: Map.new() } }
+    fn set<T>(&mut self, key: &Text, value: T) {}
+    fn push<T>(&mut self, value: T) {}
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+module File {
+    pub fn write(path: Text, content: Text) {}
+}

@@ -1,0 +1,206 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, record, struct, fields
+// @description: Test record (struct) pattern matching in meta functions
+
+// =============================================================================
+// TYPE DEFINITIONS
+// =============================================================================
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Point3D is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+type Rectangle is {
+    origin: Point,
+    width: Int,
+    height: Int,
+};
+
+// =============================================================================
+// BASIC RECORD PATTERNS
+// =============================================================================
+
+meta fn test_record_destructure() -> Int {
+    let p = Point { x: 10, y: 20 };
+    match p {
+        Point { x, y } => x + y,
+    }
+}
+
+meta fn test_record_three_fields() -> Int {
+    let p = Point3D { x: 1, y: 2, z: 3 };
+    match p {
+        Point3D { x, y, z } => x + y + z,
+    }
+}
+
+meta fn test_record_with_text() -> Text {
+    let person = Person { name: "Alice", age: 30 };
+    match person {
+        Person { name, age: _ } => name,
+    }
+}
+
+// =============================================================================
+// RECORD PATTERNS WITH FIELD RENAMING
+// =============================================================================
+
+meta fn test_record_rename_field() -> Int {
+    let p = Point { x: 100, y: 200 };
+    match p {
+        Point { x: a, y: b } => a * b,
+    }
+}
+
+meta fn test_record_partial_rename() -> Int {
+    let p = Point3D { x: 5, y: 10, z: 15 };
+    match p {
+        Point3D { x, y: second, z: third } => x + second + third,
+    }
+}
+
+// =============================================================================
+// RECORD PATTERNS WITH WILDCARDS
+// =============================================================================
+
+meta fn test_record_ignore_field() -> Int {
+    let p = Point { x: 42, y: 99 };
+    match p {
+        Point { x, y: _ } => x,
+    }
+}
+
+meta fn test_record_rest() -> Int {
+    let p = Point3D { x: 1, y: 2, z: 3 };
+    match p {
+        Point3D { x, .. } => x,
+    }
+}
+
+meta fn test_record_partial_with_rest() -> Int {
+    let p = Point3D { x: 10, y: 20, z: 30 };
+    match p {
+        Point3D { z, .. } => z,
+    }
+}
+
+// =============================================================================
+// NESTED RECORD PATTERNS
+// =============================================================================
+
+meta fn test_nested_record() -> Int {
+    let rect = Rectangle {
+        origin: Point { x: 5, y: 10 },
+        width: 100,
+        height: 50,
+    };
+    match rect {
+        Rectangle { origin: Point { x, y }, width, height } => x + y + width + height,
+    }
+}
+
+meta fn test_deeply_nested() -> Int {
+    let rect = Rectangle {
+        origin: Point { x: 1, y: 2 },
+        width: 3,
+        height: 4,
+    };
+    match rect {
+        Rectangle { origin: Point { x, .. }, width, .. } => x + width,
+    }
+}
+
+// =============================================================================
+// RECORD PATTERNS WITH LITERALS
+// =============================================================================
+
+meta fn test_record_with_literal_match() -> Bool {
+    let p = Point { x: 0, y: 0 };
+    match p {
+        Point { x: 0, y: 0 } => true,
+        _ => false,
+    }
+}
+
+meta fn test_record_partial_literal() -> Text {
+    let p = Point { x: 0, y: 10 };
+    match p {
+        Point { x: 0, y } if y > 0 => "on positive y-axis",
+        Point { x: 0, y } if y < 0 => "on negative y-axis",
+        Point { x: 0, y: 0 } => "origin",
+        _ => "elsewhere",
+    }
+}
+
+// =============================================================================
+// RECORD PATTERNS IN VARIANTS
+// =============================================================================
+
+type Shape is
+    | Circle { center: Point, radius: Int }
+    | Rect { origin: Point, size: Point };
+
+meta fn test_variant_with_record() -> Int {
+    let shape = Circle { center: Point { x: 10, y: 20 }, radius: 5 };
+    match shape {
+        Circle { center: Point { x, y }, radius } => x + y + radius,
+        Rect { origin: _, size: _ } => 0,
+    }
+}
+
+meta fn test_variant_rect() -> Int {
+    let shape = Rect {
+        origin: Point { x: 0, y: 0 },
+        size: Point { x: 100, y: 50 },
+    };
+    match shape {
+        Circle { .. } => 0,
+        Rect { size: Point { x: w, y: h }, .. } => w * h,
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Basic record patterns
+    @const assert_eq(test_record_destructure(), 30);
+    @const assert_eq(test_record_three_fields(), 6);
+    @const assert_eq(test_record_with_text(), "Alice");
+
+    // Field renaming
+    @const assert_eq(test_record_rename_field(), 20000);
+    @const assert_eq(test_record_partial_rename(), 30);
+
+    // Wildcards and rest
+    @const assert_eq(test_record_ignore_field(), 42);
+    @const assert_eq(test_record_rest(), 1);
+    @const assert_eq(test_record_partial_with_rest(), 30);
+
+    // Nested records
+    @const assert_eq(test_nested_record(), 165);
+    @const assert_eq(test_deeply_nested(), 4);
+
+    // Literals in records
+    @const assert(test_record_with_literal_match());
+    @const assert_eq(test_record_partial_literal(), "on positive y-axis");
+
+    // Variants with records
+    @const assert_eq(test_variant_with_record(), 35);
+    @const assert_eq(test_variant_rect(), 5000);
+}

@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, numbers, float, error
+// @description: Test invalid float literal detection
+// @expected-error: E003
+
+fn test_invalid_float() {
+    let a = 1.;
+    let b = .5;
+    let c = 1e;
+    let d = 1.2e;
+}

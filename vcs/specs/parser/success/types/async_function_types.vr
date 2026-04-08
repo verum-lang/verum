@@ -1,0 +1,293 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @level: L0
+// @tags: parser, types, async, function, comprehensive
+// @description: Comprehensive parser tests for async function type expressions
+
+// =============================================================================
+// Section 1: Basic Async Function Types
+// Grammar: function_type = [ 'async' ] , 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ]
+// =============================================================================
+
+fn test_basic_async_function_types() {
+    // Async function with no parameters, no explicit return
+    let f1: async fn() = get_async_unit();
+
+    // Async function with unit return
+    let f2: async fn() -> () = get_async_unit_explicit();
+
+    // Async function with simple return type
+    let f3: async fn() -> Int = get_async_int();
+    let f4: async fn() -> Text = get_async_text();
+    let f5: async fn() -> Bool = get_async_bool();
+    let f6: async fn() -> Float = get_async_float();
+}
+
+fn get_async_unit() -> async fn() { async || {} }
+fn get_async_unit_explicit() -> async fn() -> () { async || () }
+fn get_async_int() -> async fn() -> Int { async || 42 }
+fn get_async_text() -> async fn() -> Text { async || "hello" }
+fn get_async_bool() -> async fn() -> Bool { async || true }
+fn get_async_float() -> async fn() -> Float { async || 3.14 }
+
+// =============================================================================
+// Section 2: Async Function Types with Parameters
+// =============================================================================
+
+fn test_async_function_types_with_params() {
+    // Single parameter
+    let f1: async fn(Int) -> Int = async_identity();
+    let f2: async fn(Text) -> Int = async_text_len();
+
+    // Multiple parameters
+    let f3: async fn(Int, Int) -> Int = async_add();
+    let f4: async fn(Text, Int) -> Text = async_repeat();
+
+    // Many parameters
+    let f5: async fn(Int, Text, Bool, Float) -> Text = async_format();
+}
+
+fn async_identity() -> async fn(Int) -> Int { async |x| x }
+fn async_text_len() -> async fn(Text) -> Int { async |s| s.len() }
+fn async_add() -> async fn(Int, Int) -> Int { async |a, b| a + b }
+fn async_repeat() -> async fn(Text, Int) -> Text { async |s, n| s }
+fn async_format() -> async fn(Int, Text, Bool, Float) -> Text { async |i, s, b, f| s }
+
+// =============================================================================
+// Section 3: Async Function Types with Context Clauses
+// =============================================================================
+
+context Database {
+    fn query(&self, sql: Text) -> Result<Data, Error>;
+}
+
+context Logger {
+    fn log(&self, message: Text);
+}
+
+context Cache {
+    fn get(&self, key: Text) -> Maybe<Text>;
+    fn set(&self, key: Text, value: Text);
+}
+
+type Data is { rows: List<Text> };
+type Error is { message: Text };
+
+fn test_async_with_contexts() {
+    // Single context
+    let f1: async fn() -> Int using [Database] = async_db_fn();
+
+    // Multiple contexts
+    let f2: async fn() -> Text using [Database, Logger] = async_db_log_fn();
+    let f3: async fn(Text) -> Int using [Database, Cache, Logger] = async_multi_ctx();
+
+    // Context with complex return type
+    let f4: async fn(Text) -> Result<Int, Error> using [Database] = async_db_result();
+}
+
+fn async_db_fn() -> async fn() -> Int using [Database] { async || 0 }
+fn async_db_log_fn() -> async fn() -> Text using [Database, Logger] { async || "" }
+fn async_multi_ctx() -> async fn(Text) -> Int using [Database, Cache, Logger] { async |s| 0 }
+fn async_db_result() -> async fn(Text) -> Result<Int, Error> using [Database] { async |s| Ok(0) }
+
+// =============================================================================
+// Section 4: Async Function Types with Complex Parameters
+// =============================================================================
+
+fn test_async_complex_params() {
+    // Tuple parameters
+    let f1: async fn((Int, Text)) -> Int = async_tuple_fn();
+
+    // Array parameters
+    let f2: async fn([Int; 3]) -> Int = async_array_fn();
+
+    // Slice parameters
+    let f3: async fn(&[Int]) -> Int = async_slice_fn();
+
+    // Generic parameters
+    let f4: async fn(List<Int>) -> Int = async_list_fn();
+    let f5: async fn(Map<Text, Int>) -> Int = async_map_fn();
+
+    // Reference parameters
+    let f6: async fn(&Int) -> Int = async_ref_fn();
+    let f7: async fn(&mut Int) = async_mut_fn();
+}
+
+fn async_tuple_fn() -> async fn((Int, Text)) -> Int { async |t| t.0 }
+fn async_array_fn() -> async fn([Int; 3]) -> Int { async |arr| arr[0] }
+fn async_slice_fn() -> async fn(&[Int]) -> Int { async |s| s.len() }
+fn async_list_fn() -> async fn(List<Int>) -> Int { async |l| l.len() }
+fn async_map_fn() -> async fn(Map<Text, Int>) -> Int { async |m| m.len() }
+fn async_ref_fn() -> async fn(&Int) -> Int { async |r| *r }
+fn async_mut_fn() -> async fn(&mut Int) { async |r| *r = 0 }
+
+// =============================================================================
+// Section 5: Async Function Types with Complex Returns
+// =============================================================================
+
+fn test_async_complex_returns() {
+    // Tuple return
+    let f1: async fn(Int) -> (Int, Int) = async_split();
+
+    // Array return
+    let f2: async fn(Int) -> [Int; 3] = async_triple();
+
+    // Option/Result returns
+    let f3: async fn(Int) -> Maybe<Int> = async_maybe();
+    let f4: async fn(Int) -> Result<Int, Error> = async_result();
+
+    // Generic returns
+    let f5: async fn() -> List<Int> = async_list_return();
+    let f6: async fn() -> Map<Text, Int> = async_map_return();
+
+    // Nested Future (async returning Future explicitly)
+    let f7: async fn() -> Future<Int> = async_nested_future();
+}
+
+fn async_split() -> async fn(Int) -> (Int, Int) { async |n| (n, n) }
+fn async_triple() -> async fn(Int) -> [Int; 3] { async |n| [n, n, n] }
+fn async_maybe() -> async fn(Int) -> Maybe<Int> { async |n| Some(n) }
+fn async_result() -> async fn(Int) -> Result<Int, Error> { async |n| Ok(n) }
+fn async_list_return() -> async fn() -> List<Int> { async || List.new() }
+fn async_map_return() -> async fn() -> Map<Text, Int> { async || Map.new() }
+fn async_nested_future() -> async fn() -> Future<Int> { async || Future.ready(42) }
+
+// =============================================================================
+// Section 6: Higher-Order Async Function Types
+// =============================================================================
+
+fn test_higher_order_async() {
+    // Async function taking sync function
+    let f1: async fn(fn(Int) -> Int) -> Int = async_apply();
+
+    // Async function returning sync function
+    let f2: async fn() -> fn(Int) -> Int = async_make_fn();
+
+    // Async function taking async function
+    let f3: async fn(async fn() -> Int) -> Int = async_take_async();
+
+    // Async function returning async function
+    let f4: async fn() -> async fn() -> Int = async_make_async();
+
+    // Async higher-order with context
+    let f5: async fn(async fn() -> Int using [Database]) -> Int using [Logger] = async_ho_ctx();
+}
+
+fn async_apply() -> async fn(fn(Int) -> Int) -> Int { async |f| f(42) }
+fn async_make_fn() -> async fn() -> fn(Int) -> Int { async || |x| x }
+fn async_take_async() -> async fn(async fn() -> Int) -> Int { async |f| f().await }
+fn async_make_async() -> async fn() -> async fn() -> Int { async || async || 42 }
+fn async_ho_ctx() -> async fn(async fn() -> Int using [Database]) -> Int using [Logger] {
+    async |f| 0
+}
+
+// =============================================================================
+// Section 7: Async Function Types in Type Definitions
+// =============================================================================
+
+// Type aliases for async functions
+type AsyncCallback is async fn() -> Int;
+type AsyncHandler is async fn(Text) -> Result<Int, Error>;
+type AsyncProcessor<T> is async fn(T) -> T;
+type AsyncContextFn is async fn() using [Database, Logger];
+
+// Record with async function fields
+type AsyncHandlers is {
+    on_connect: async fn() -> Bool,
+    on_data: async fn(Data) -> Result<(), Error>,
+    on_disconnect: async fn(),
+};
+
+// Generic async function type
+type AsyncMapper<A, B> is async fn(A) -> B;
+type AsyncBiMapper<A, B, C> is async fn(A, B) -> C;
+type AsyncFold<A, B> is async fn(B, A) -> B;
+
+fn test_async_type_aliases() {
+    let callback: AsyncCallback = async || 42;
+    let handler: AsyncHandler = async |s| Ok(0);
+    let processor: AsyncProcessor<Int> = async |x| x;
+}
+
+// =============================================================================
+// Section 8: Async Function Types in Generic Contexts
+// =============================================================================
+
+fn test_async_in_generics() {
+    // List of async functions
+    let fns: List<async fn() -> Int> = List.of(
+        async || 1,
+        async || 2,
+        async || 3
+    );
+
+    // Maybe containing async function
+    let maybe_fn: Maybe<async fn() -> Int> = Some(async || 42);
+
+    // Result containing async function
+    let result_fn: Result<async fn() -> Int, Error> = Ok(async || 42);
+}
+
+// Generic function with async function parameter
+async fn map_async<A, B>(items: List<A>, f: async fn(A) -> B) -> List<B> {
+    let mut result = List.new();
+    for item in items {
+        result.push(f(item).await);
+    }
+    result
+}
+
+async fn filter_async<T>(items: List<T>, pred: async fn(T) -> Bool) -> List<T> {
+    let mut result = List.new();
+    for item in items {
+        if pred(item).await {
+            result.push(item);
+        }
+    }
+    result
+}
+
+// =============================================================================
+// Section 9: Async Function Types in Protocols
+// =============================================================================
+
+type AsyncIterator is protocol {
+    type Item;
+    async fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type AsyncFunctor<F<_>> is protocol {
+    async fn map<A, B>(self: F<A>, f: async fn(A) -> B) -> F<B>;
+};
+
+type AsyncHandler is protocol {
+    type Input;
+    type Output;
+    type Error;
+
+    async fn handle(&self, input: Self.Input) -> Result<Self.Output, Self.Error>;
+};
+
+// =============================================================================
+// Section 10: Edge Cases and Complex Combinations
+// =============================================================================
+
+fn test_async_edge_cases() {
+    // Async function returning never
+    let diverge: async fn() -> ! = async || panic("never");
+
+    // Deeply nested async
+    let deep: async fn(async fn(async fn() -> Int) -> Int) -> Int =
+        async |f| f(async || 42).await;
+
+    // Async with all modifiers
+    let full: async fn(Int, Text) -> Result<Int, Error> using [Database, Logger] =
+        async |n, s| Ok(n);
+
+    // Async in tuple type
+    let pair: (async fn() -> Int, async fn() -> Text) = (async || 42, async || "hi");
+
+    // Async returning itself
+    let self_ref: async fn() -> async fn() -> Int = async || async || 42;
+}

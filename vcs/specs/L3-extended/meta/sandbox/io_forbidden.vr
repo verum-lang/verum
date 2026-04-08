@@ -1,0 +1,139 @@
+// @test: typecheck-fail
+// @expected-error: IO operations are not allowed in meta context
+// @tier: 3
+// @level: L3
+// @tags: meta, sandbox, io, forbidden
+
+/// IO операции запрещены в meta функциях
+///
+/// Meta функции должны быть чистыми и детерминированными,
+/// поэтому любые IO операции запрещены.
+
+// ============================================================
+// ЗАПРЕЩЁННЫЕ ОПЕРАЦИИ - IO
+// ============================================================
+
+// ERROR: File IO запрещено
+meta fn read_config() -> Text {
+    // ERROR: Cannot perform file IO in meta context
+    std.fs.read_to_string("/etc/config.toml")
+        .expect("Failed to read config")
+}
+
+// ERROR: Network IO запрещено
+meta fn fetch_data() -> Json {
+    // ERROR: Cannot perform network IO in meta context
+    http.get("https://api.example.com/data")
+        .expect("Failed to fetch")
+        .json()
+}
+
+// ERROR: Console IO запрещено
+meta fn print_debug(msg: &str) {
+    // ERROR: Cannot perform console IO in meta context
+    println(msg);
+}
+
+meta fn read_input() -> Text {
+    // ERROR: Cannot read from stdin in meta context
+    std.io.stdin().read_line()
+        .expect("Failed to read")
+}
+
+// ERROR: Environment variables запрещены (могут меняться)
+meta fn get_env() -> Text {
+    // ERROR: Cannot access environment in meta context
+    std.env.var("HOME").unwrap_or_default()
+}
+
+// ERROR: Current time запрещено (недетерминировано)
+meta fn current_time() -> u64 {
+    // ERROR: Cannot access system time in meta context
+    std.time.now().timestamp()
+}
+
+// ERROR: Random запрещено (недетерминировано)
+meta fn random_number() -> u64 {
+    // ERROR: Cannot use random in meta context
+    rand.random<u64>()
+}
+
+// ERROR: Process execution запрещено
+meta fn run_command() -> Text {
+    // ERROR: Cannot execute processes in meta context
+    std.process.Command.new("ls")
+        .output()
+        .expect("Failed")
+        .stdout
+}
+
+// ERROR: Database access запрещено
+meta fn query_db() -> List<User> {
+    // ERROR: Cannot access database in meta context
+    db.query("SELECT * FROM users")
+        .expect("Query failed")
+}
+
+// ERROR: Socket operations запрещены
+meta fn connect_socket() -> Socket {
+    // ERROR: Cannot create sockets in meta context
+    Socket.connect("localhost:8080")
+        .expect("Connection failed")
+}
+
+// ERROR: FFI вызовы запрещены
+meta fn call_c_function() -> i32 {
+    // ERROR: Cannot call FFI in meta context
+    unsafe { libc.getpid() }
+}
+
+// ERROR: Thread spawning запрещено
+meta fn spawn_thread() {
+    // ERROR: Cannot spawn threads in meta context
+    std.thread.spawn(|| {
+        println("In thread");
+    });
+}
+
+// ERROR: Async IO запрещено
+meta async fn async_fetch() -> Text {
+    // ERROR: Async operations not allowed in meta context
+    let response = http.get("https://example.com").await?;
+    response.text().await
+}
+
+// ERROR: File system operations запрещены
+meta fn create_file() {
+    // ERROR: Cannot create files in meta context
+    std.fs.write("/tmp/test.txt", "content")
+        .expect("Write failed");
+}
+
+meta fn list_directory() -> List<Text> {
+    // ERROR: Cannot list directories in meta context
+    std.fs.read_dir("/home")
+        .expect("Read dir failed")
+        .map(|e| e.path().to_string())
+        .collect()
+}
+
+// ERROR: Mutex/sync primitives запрещены
+meta fn use_mutex() {
+    // ERROR: Cannot use synchronization primitives in meta context
+    let mutex = Mutex.new(0);
+    let guard = mutex.lock();
+    *guard += 1;
+}
+
+// Попытка скрыть IO в generic функции
+meta fn sneaky_io<F: Fn() -> T, T>(f: F) -> T {
+    // ERROR: Cannot execute arbitrary closures that may perform IO
+    f()
+}
+
+fn main() {
+    // Эти вызовы вызовут ошибки компиляции
+    const CONFIG: Text = read_config();  // ERROR
+    const NOW: u64 = current_time();     // ERROR
+    const RAND: u64 = random_number();   // ERROR
+}

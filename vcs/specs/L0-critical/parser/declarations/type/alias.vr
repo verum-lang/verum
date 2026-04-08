@@ -1,0 +1,110 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, alias
+
+// Simple type alias
+type UserId is Int;
+
+// Type alias with different primitives
+type Age is Int;
+type Score is Float;
+type Name is Text;
+type Active is Bool;
+
+// Type alias for generic type
+type IntList is List<Int>;
+type StringMap is Map<Text, Text>;
+type OptionalInt is Maybe<Int>;
+
+// Type alias for tuple
+type Point2D is (Float, Float);
+type Point3D is (Float, Float, Float);
+type Pair<A, B> is (A, B);
+
+// Type alias for function type
+type Predicate<T> is fn(T) -> Bool;
+type Transform<A, B> is fn(A) -> B;
+type Consumer<T> is fn(T) -> ();
+type Supplier<T> is fn() -> T;
+
+// Type alias for nested generics
+type NestedOption is Maybe<Maybe<Int>>;
+type ListOfMaybes is List<Maybe<Int>>;
+type MapOfLists is Map<Text, List<Int>>;
+
+// Generic type alias
+type Container<T> is List<T>;
+type Dict<K, V> is Map<K, V>;
+type Wrapper<T> is { value: T };
+
+// Type alias with multiple type parameters
+type Either<L, R> is Result<R, L>;
+type BiFunction<A, B, C> is fn(A, B) -> C;
+
+// Type alias for reference types
+type IntRef is &Int;
+type MutIntRef is &mut Int;
+type CheckedRef<T> is &checked T;
+
+// Type alias chain (alias of alias)
+type Id is Int;
+type UserId2 is Id;
+type AdminId is UserId2;
+
+// Type alias for complex function type
+// Note: context clauses (using) in type aliases are not supported at top-level
+// Use function signatures within protocols or implementations instead
+type Handler is fn(Request) -> Response;
+
+// Type alias for async function types
+// Note: async fn type syntax is not directly supported in type aliases
+// Use regular function types or protocols with async methods instead
+type AsyncHandler is fn(Request) -> Response;
+type AsyncCallback<T> is fn(T) -> Result<(), Error>;
+
+// Type alias with constraint
+type Bounded<T: Ord> is List<T>;
+
+// Type alias for union types (variant-style) - inline variant list syntax
+// Note: Per grammar, variant_list requires variant names, not just types
+// So type unions like `Text | Int` are not valid top-level type definitions
+// Use variant syntax instead:
+type StringOrNumber is
+    | TextValue(Text)
+    | IntValue(Int);
+
+type JsonValue is
+    | Null
+    | BoolValue(Bool)
+    | IntValue(Int)
+    | FloatValue(Float)
+    | TextValue(Text)
+    | ArrayValue(List<JsonValue>)
+    | ObjectValue(Map<Text, JsonValue>);
+
+// Note: Intersection types are not directly supported in the grammar
+// Use protocols instead:
+type ReadWrite is protocol extends Read + Write { };
+
+// Type alias for never type (bottom type)
+// Note: The `!` never type syntax may be implementation-specific
+type Never is protocol { };
+
+// Protocol for Self reference (builders)
+type Builder is protocol {
+    fn build(self) -> Self;
+};
+
+// Type alias with visibility
+public type PublicId is Int;
+internal type CrateId is Int;
+
+// Type alias chain with generics
+type MyList<T> is List<T>;
+type MyMaybe<T> is Maybe<T>;
+type MyResult<T> is Result<T, AppError>;
+
+// Complex function type alias
+type Middleware is fn(Request, fn(Request) -> Response) -> Response;
+type ErrorHandler<E> is fn(E) -> Result<Recovery, FatalError>;

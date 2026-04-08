@@ -1,0 +1,292 @@
+// @test: meta-pass
+// @level: L2
+// @tier: 0
+// @tags: meta, termination, measure, well-founded, recursion
+// @description: Test measure functions for termination proofs in meta-system
+
+// =============================================================================
+// BASIC MEASURE FUNCTIONS
+// =============================================================================
+
+// Factorial with natural measure (n decreases)
+@measure(n)
+meta fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+// Fibonacci with natural measure
+@measure(n)
+meta fn fib(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fib(n - 1) + fib(n - 2) }
+}
+
+// GCD with well-founded measure (b decreases, or (a, b) lexicographically)
+@measure(b)
+meta fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a }
+    else { gcd(b, a % b) }
+}
+
+// =============================================================================
+// LEXICOGRAPHIC MEASURES
+// =============================================================================
+
+// Ackermann function with lexicographic measure
+@measure(m, n)
+meta fn ackermann(m: Int, n: Int) -> Int {
+    if m == 0 { n + 1 }
+    else if n == 0 { ackermann(m - 1, 1) }
+    else { ackermann(m - 1, ackermann(m, n - 1)) }
+}
+
+// McCarthy's 91 function with measure (100 - n when n <= 100, 0 otherwise)
+@measure(if n > 100 { 0 } else { 101 - n })
+meta fn mccarthy91(n: Int) -> Int {
+    if n > 100 { n - 10 }
+    else { mccarthy91(mccarthy91(n + 11)) }
+}
+
+// =============================================================================
+// STRUCTURAL MEASURES
+// =============================================================================
+
+type Tree<T> is
+    | Leaf(T)
+    | Node(Heap<Tree<T>>, Heap<Tree<T>>);
+
+// Measure: depth of tree
+@measure(tree_depth(t))
+meta fn tree_sum(t: Tree<Int>) -> Int {
+    match t {
+        Leaf(n) => n,
+        Node(left, right) => tree_sum(*left) + tree_sum(*right),
+    }
+}
+
+meta fn tree_depth<T>(t: &Tree<T>) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node(left, right) => {
+            let l = tree_depth(left);
+            let r = tree_depth(right);
+            1 + if l > r { l } else { r }
+        },
+    }
+}
+
+// Measure: number of nodes
+@measure(node_count(t))
+meta fn tree_flatten<T>(t: Tree<T>) -> List<T> {
+    match t {
+        Leaf(v) => List.from([v]),
+        Node(left, right) => {
+            let mut result = tree_flatten(*left);
+            result.extend(tree_flatten(*right));
+            result
+        },
+    }
+}
+
+meta fn node_count<T>(t: &Tree<T>) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node(left, right) => 1 + node_count(left) + node_count(right),
+    }
+}
+
+// =============================================================================
+// LIST MEASURES
+// =============================================================================
+
+// Measure: length of list
+@measure(len(lst))
+meta fn sum_list(lst: List<Int>) -> Int {
+    if lst.is_empty() { 0 }
+    else {
+        let head = lst[0];
+        let tail = lst[1..].to_list();
+        head + sum_list(tail)
+    }
+}
+
+// Measure: sum of lengths of both lists
+@measure(len(a) + len(b))
+meta fn merge(a: List<Int>, b: List<Int>) -> List<Int> {
+    if a.is_empty() { return b; }
+    if b.is_empty() { return a; }
+
+    if a[0] <= b[0] {
+        let mut result = List.from([a[0]]);
+        result.extend(merge(a[1..].to_list(), b));
+        result
+    } else {
+        let mut result = List.from([b[0]]);
+        result.extend(merge(a, b[1..].to_list()));
+        result
+    }
+}
+
+// Merge sort with length measure
+@measure(len(lst))
+meta fn merge_sort(lst: List<Int>) -> List<Int> {
+    let n = len(lst);
+    if n <= 1 { return lst; }
+
+    let mid = n / 2;
+    let left = lst[..mid].to_list();
+    let right = lst[mid..].to_list();
+
+    merge(merge_sort(left), merge_sort(right))
+}
+
+// =============================================================================
+// MUTUAL RECURSION WITH MEASURES
+// =============================================================================
+
+// Even-odd with measure n
+@measure(n)
+meta fn is_even(n: Int) -> Bool {
+    if n == 0 { true }
+    else { is_odd(n - 1) }
+}
+
+@measure(n)
+meta fn is_odd(n: Int) -> Bool {
+    if n == 0 { false }
+    else { is_even(n - 1) }
+}
+
+// Collatz sequence with well-founded measure
+// Note: Collatz conjecture unproven, so we add fuel
+@measure(fuel)
+meta fn collatz_steps(n: Int, fuel: Int) -> Int {
+    if fuel == 0 { -1 }  // Out of fuel
+    else if n == 1 { 0 }
+    else if n % 2 == 0 { 1 + collatz_steps(n / 2, fuel - 1) }
+    else { 1 + collatz_steps(3 * n + 1, fuel - 1) }
+}
+
+// =============================================================================
+// CUSTOM MEASURE FUNCTIONS
+// =============================================================================
+
+// Custom measure: number of 1-bits in binary representation
+meta fn popcount(n: Int) -> Int {
+    if n == 0 { 0 }
+    else { (n & 1) + popcount(n >> 1) }
+}
+
+// Measure: popcount * 2 + (n & 1)
+@measure(popcount(n) * 2 + (n & 1))
+meta fn binary_gcd(a: Int, b: Int) -> Int {
+    if a == b { return a; }
+    if a == 0 { return b; }
+    if b == 0 { return a; }
+
+    // Both even
+    if (a & 1) == 0 && (b & 1) == 0 {
+        return 2 * binary_gcd(a >> 1, b >> 1);
+    }
+    // a even, b odd
+    if (a & 1) == 0 {
+        return binary_gcd(a >> 1, b);
+    }
+    // a odd, b even
+    if (b & 1) == 0 {
+        return binary_gcd(a, b >> 1);
+    }
+    // Both odd
+    if a > b {
+        binary_gcd((a - b) >> 1, b)
+    } else {
+        binary_gcd(a, (b - a) >> 1)
+    }
+}
+
+// =============================================================================
+// TERMINATION VERIFICATION ATTRIBUTES
+// =============================================================================
+
+// Explicit termination proof annotation
+@termination_proof("structural recursion on first argument")
+meta fn length<T>(lst: List<T>) -> Int {
+    if lst.is_empty() { 0 }
+    else { 1 + length(lst[1..].to_list()) }
+}
+
+// Assert decreasing variant
+@decreases(n - acc)
+meta fn factorial_acc(n: Int, acc: Int) -> Int {
+    if n <= 1 { acc }
+    else { factorial_acc(n - 1, n * acc) }
+}
+
+// Well-founded recursion marker
+@well_founded
+meta fn div(a: Int, b: Int) -> Int {
+    if a < b { 0 }
+    else { 1 + div(a - b, b) }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Basic measures
+    @const assert_eq(factorial(5), 120);
+    @const assert_eq(factorial(10), 3628800);
+    @const assert_eq(fib(10), 55);
+    @const assert_eq(fib(15), 610);
+    @const assert_eq(gcd(48, 18), 6);
+    @const assert_eq(gcd(100, 35), 5);
+
+    // Lexicographic measures
+    @const assert_eq(ackermann(0, 5), 6);
+    @const assert_eq(ackermann(1, 3), 5);
+    @const assert_eq(ackermann(2, 2), 7);
+    @const assert_eq(ackermann(3, 2), 29);
+    @const assert_eq(mccarthy91(99), 91);
+    @const assert_eq(mccarthy91(100), 91);
+    @const assert_eq(mccarthy91(101), 91);
+
+    // Structural measures
+    let tree = Node(
+        Heap.new(Node(
+            Heap.new(Leaf(1)),
+            Heap.new(Leaf(2))
+        )),
+        Heap.new(Leaf(3))
+    );
+    @const assert_eq(tree_sum(tree), 6);
+
+    let flat = tree_flatten(tree);
+    @const assert_eq(len(flat), 3);
+
+    // List measures
+    @const assert_eq(sum_list(List.from([1, 2, 3, 4, 5])), 15);
+
+    let sorted = merge_sort(List.from([5, 2, 8, 1, 9, 3]));
+    @const assert_eq(sorted, List.from([1, 2, 3, 5, 8, 9]));
+
+    // Mutual recursion
+    @const assert(is_even(10));
+    @const assert(!is_even(7));
+    @const assert(is_odd(7));
+    @const assert(!is_odd(10));
+
+    // Collatz
+    @const assert_eq(collatz_steps(6, 100), 8);
+    @const assert_eq(collatz_steps(27, 200), 111);
+
+    // Custom measures
+    @const assert_eq(binary_gcd(48, 18), 6);
+    @const assert_eq(binary_gcd(100, 35), 5);
+
+    // Explicit termination proofs
+    @const assert_eq(length(List.from([1, 2, 3, 4, 5])), 5);
+    @const assert_eq(factorial_acc(5, 1), 120);
+    @const assert_eq(div(17, 5), 3);
+}

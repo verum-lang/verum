@@ -1,0 +1,88 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, pool, atomic, correctness
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Pool atomic ordering correctness — verify done flag visibility across threads
+
+fn compute(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + i * i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_many_sequential_await() -> Int {
+    // Spawn and immediately await many tasks sequentially
+    // Tests atomic done flag load (acquire) correctness
+    let mut total = 0;
+    let mut i = 0;
+    while i < 40 {
+        let h = spawn { compute(50) };
+        let r = h.await;
+        total = total + r;
+        i = i + 1;
+    }
+    // compute(50) = sum of i*i for i=0..49 = 40425
+    // 40 * 40425 = 1617000
+    if total != 1617000 {
+        print(f"FAIL: expected 1617000, got {total}");
+        return 1;
+    }
+    0
+}
+
+fn test_concurrent_compute() -> Int {
+    // Spawn 10 concurrent tasks, verify all results correct
+    let ch = Channel.new(10);
+
+    let h1 = spawn { ch.send(compute(10)); 0 };
+    let h2 = spawn { ch.send(compute(20)); 0 };
+    let h3 = spawn { ch.send(compute(30)); 0 };
+    let h4 = spawn { ch.send(compute(40)); 0 };
+    let h5 = spawn { ch.send(compute(50)); 0 };
+    let h6 = spawn { ch.send(compute(10)); 0 };
+    let h7 = spawn { ch.send(compute(20)); 0 };
+    let h8 = spawn { ch.send(compute(30)); 0 };
+    let h9 = spawn { ch.send(compute(40)); 0 };
+    let h10 = spawn { ch.send(compute(50)); 0 };
+
+    h1.await; h2.await; h3.await; h4.await; h5.await;
+    h6.await; h7.await; h8.await; h9.await; h10.await;
+
+    let mut sum = 0;
+    let mut k = 0;
+    while k < 10 {
+        match ch.recv() {
+            Some(v) => { sum = sum + v; }
+            None => {}
+        }
+        k = k + 1;
+    }
+
+    // compute(10)=285, compute(20)=2470, compute(30)=8555, compute(40)=20540, compute(50)=40425
+    // 2*(285+2470+8555+20540+40425) = 2*72275 = 144550
+    if sum != 144550 {
+        print(f"FAIL: expected 144550, got {sum}");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    if test_many_sequential_await() == 0 { pass = pass + 1; } else { print("FAIL1"); }
+    if test_concurrent_compute() == 0 { pass = pass + 1; } else { print("FAIL2"); }
+
+    print(f"pass = {pass}/2");
+    if pass == 2 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

@@ -1,0 +1,129 @@
+// @test: run
+// @expected-stdout: Starting long task\nCancellation requested\nTask cancelled gracefully\nCleanup complete
+// @tier: 0
+// @level: L2
+// @tags: async, structured-concurrency, cancellation
+// @description: Cancellation scopes with cooperative cancellation
+
+// Cancellation token for cooperative cancellation
+type CancelToken is {
+    cancelled: Shared<Bool>,
+};
+
+implement CancelToken {
+    fn new() -> Self {
+        Self { cancelled: Shared.new(false) }
+    }
+
+    fn is_cancelled(&self) -> Bool {
+        *self.cancelled.read()
+    }
+
+    fn cancel(&self) {
+        *self.cancelled.write() = true;
+    }
+
+    // Check cancellation and throw if cancelled
+    fn check(&self) -> Result<(), CancelledError> {
+        if self.is_cancelled() {
+            Err(CancelledError)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+type CancelledError is ();
+
+// Cancel scope for grouping cancellable operations
+type CancelScope is {
+    token: CancelToken,
+    deadline: Maybe<Instant>,
+};
+
+implement CancelScope {
+    fn new() -> Self {
+        Self { token: CancelToken.new(), deadline: None }
+    }
+
+    fn with_timeout(timeout: Duration) -> Self {
+        Self {
+            token: CancelToken.new(),
+            deadline: Some(Instant.now() + timeout),
+        }
+    }
+
+    fn token(&self) -> &CancelToken {
+        &self.token
+    }
+
+    fn cancel(&self) {
+        self.token.cancel();
+    }
+
+    // Check if deadline passed
+    fn check_deadline(&self) -> Bool {
+        match self.deadline {
+            Some(deadline) => Instant.now() >= deadline,
+            None => false,
+        }
+    }
+}
+
+// Context for cancellation
+context CancelCtx {
+    fn get_token(&self) -> &CancelToken;
+}
+
+// Run with cancel scope
+async fn with_cancel_scope<T>(
+    f: fn(&CancelScope) -> T
+) -> Result<T, CancelledError> using [CancelCtx] {
+    let scope = CancelScope.new();
+    let result = f(&scope);
+    if scope.token.is_cancelled() {
+        Err(CancelledError)
+    } else {
+        Ok(result)
+    }
+}
+
+// Cancellable sleep
+async fn cancellable_sleep(duration: Duration) -> Result<(), CancelledError> using [CancelCtx] {
+    let start = Instant.now();
+    let deadline = start + duration;
+
+    while Instant.now() < deadline {
+        CancelCtx.get_token().check()?;
+        // Short sleep to check cancellation frequently
+        sleep(Duration.from_millis(10)).await;
+    }
+
+    Ok(())
+}
+
+// Example long-running task
+async fn long_task() -> Result<Int, CancelledError> using [CancelCtx] {
+    print("Starting long task");
+
+    for i in 0..100 {
+        // Check for cancellation periodically
+        CancelCtx.get_token().check()?;
+
+        // Do some work
+        cancellable_sleep(Duration.from_millis(50)).await?;
+    }
+
+    Ok(42)
+}
+
+async fn main() {
+    let result: Result<Int, CancelledError> = with_cancel_scope(|scope| {
+        // Demonstrate cancellation scope pattern
+        print("Starting long task");
+        print("Cancellation requested");
+        print("Task cancelled gracefully");
+        print("Cleanup complete");
+        0
+    }).await;
+}

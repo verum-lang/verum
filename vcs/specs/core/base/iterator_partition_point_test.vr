@@ -1,0 +1,152 @@
+// =============================================================================
+// iterator_partition_point_test.vr - Tests for partition_point method
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, iterator, partition_point
+// @description: Tests for Iterator.partition_point() method which finds
+//               the index of the first element where the predicate returns false
+// =============================================================================
+
+mount core.base.iterator.{Iterator, Range, range};
+
+// =============================================================================
+// Section 1: Basic partition_point
+// =============================================================================
+
+@test
+fn test_partition_point_basic() {
+    // [1, 2, 3, 4, 5] partitioned by < 4 gives [1, 2, 3] then [4, 5]
+    let result = [1, 2, 3, 4, 5].into_iter().partition_point(|x| *x < 4);
+    assert_eq(result, 3);
+}
+
+@test
+fn test_partition_point_all_true() {
+    let result = [1, 2, 3].into_iter().partition_point(|x| *x < 10);
+    assert_eq(result, 3);
+}
+
+@test
+fn test_partition_point_all_false() {
+    let result = [5, 6, 7].into_iter().partition_point(|x| *x < 3);
+    assert_eq(result, 0);
+}
+
+@test
+fn test_partition_point_empty() {
+    let items: List<Int> = [];
+    let result = items.into_iter().partition_point(|x| *x < 5);
+    assert_eq(result, 0);
+}
+
+@test
+fn test_partition_point_single_true() {
+    let result = [1].into_iter().partition_point(|x| *x < 5);
+    assert_eq(result, 1);
+}
+
+@test
+fn test_partition_point_single_false() {
+    let result = [10].into_iter().partition_point(|x| *x < 5);
+    assert_eq(result, 0);
+}
+
+// =============================================================================
+// Section 2: With ranges
+// =============================================================================
+
+@test
+fn test_partition_point_range() {
+    // Range 0..10, partitioned by < 5 gives 5 elements (0,1,2,3,4)
+    let result = range(0, 10).partition_point(|x| *x < 5);
+    assert_eq(result, 5);
+}
+
+@test
+fn test_partition_point_range_all_true() {
+    let result = range(0, 5).partition_point(|x| *x < 100);
+    assert_eq(result, 5);
+}
+
+@test
+fn test_partition_point_range_all_false() {
+    let result = range(10, 20).partition_point(|x| *x < 5);
+    assert_eq(result, 0);
+}
+
+// =============================================================================
+// Section 3: Even/odd partition
+// =============================================================================
+
+@test
+fn test_partition_point_even_first() {
+    // If sorted so even comes first: [2, 4, 6, 1, 3, 5]
+    let result = [2, 4, 6, 1, 3, 5].into_iter().partition_point(|x| *x % 2 == 0);
+    assert_eq(result, 3);
+}
+
+@test
+fn test_partition_point_negative_first() {
+    let result = [-3, -2, -1, 0, 1, 2].into_iter().partition_point(|x| *x < 0);
+    assert_eq(result, 3);
+}
+
+// =============================================================================
+// Section 4: Boundary at start and end
+// =============================================================================
+
+@test
+fn test_partition_point_boundary_at_start() {
+    // First element already false
+    let result = [10, 20, 30].into_iter().partition_point(|x| *x < 5);
+    assert_eq(result, 0);
+}
+
+@test
+fn test_partition_point_boundary_at_end() {
+    // All true
+    let result = [1, 2, 3].into_iter().partition_point(|x| *x < 100);
+    assert_eq(result, 3);
+}
+
+@test
+fn test_partition_point_boundary_at_one() {
+    // Only first element is true
+    let result = [1, 10, 20].into_iter().partition_point(|x| *x < 5);
+    assert_eq(result, 1);
+}
+
+// =============================================================================
+// Section 5: Larger sequences
+// =============================================================================
+
+@test
+fn test_partition_point_ten_elements() {
+    let result = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].into_iter()
+        .partition_point(|x| *x <= 7);
+    assert_eq(result, 7);
+}
+
+@test
+fn test_partition_point_two_elements_first_true() {
+    let result = [1, 10].into_iter().partition_point(|x| *x < 5);
+    assert_eq(result, 1);
+}
+
+@test
+fn test_partition_point_two_elements_both_true() {
+    let result = [1, 2].into_iter().partition_point(|x| *x < 5);
+    assert_eq(result, 2);
+}
+
+@test
+fn test_partition_point_two_elements_both_false() {
+    let result = [10, 20].into_iter().partition_point(|x| *x < 5);
+    assert_eq(result, 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

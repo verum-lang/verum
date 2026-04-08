@@ -1,0 +1,295 @@
+// @test: parse-pass
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, integers
+// @description: Comprehensive tests for integer literal parsing per grammar/verum.ebnf
+//
+// Grammar productions tested:
+//   integer_lit = ( decimal_lit | hexadecimal_lit | octal_lit | binary_lit ) , [ int_suffix ]
+//   decimal_lit = dec_digit , { dec_digit | '_' }
+//   hexadecimal_lit = '0x' , hex_digit , { hex_digit | '_' }
+//   octal_lit = '0o' , oct_digit , { oct_digit | '_' }
+//   binary_lit = '0b' , bin_digit , { bin_digit | '_' }
+//   int_suffix = 'i8' | 'i16' | 'i32' | 'i64' | 'i128' | 'isize'
+//              | 'u8' | 'u16' | 'u32' | 'u64' | 'u128' | 'usize'
+
+fn test_decimal_integers() {
+    // Basic decimal integers
+    let a = 0;
+    let b = 1;
+    let c = 9;
+    let d = 10;
+    let e = 42;
+    let f = 123;
+    let g = 1234567890;
+
+    // Large numbers
+    let h = 999999999999;
+    let i = 18446744073709551615;
+
+    // With underscores (visual separators)
+    let j = 1_000;
+    let k = 1_000_000;
+    let l = 1_000_000_000;
+    let m = 1_2_3_4_5;
+    let n = 100__;  // trailing underscores
+    let o = 1__000; // multiple underscores
+}
+
+fn test_decimal_with_signed_suffixes() {
+    // i8 suffix (-128 to 127)
+    let a = 0i8;
+    let b = 1i8;
+    let c = 127i8;
+
+    // i16 suffix (-32768 to 32767)
+    let d = 0i16;
+    let e = 32767i16;
+    let f = 1_000i16;
+
+    // i32 suffix (-2147483648 to 2147483647)
+    let g = 0i32;
+    let h = 2147483647i32;
+    let i = 1_000_000i32;
+
+    // i64 suffix
+    let j = 0i64;
+    let k = 9223372036854775807i64;
+    let l = 1_000_000_000_000i64;
+
+    // i128 suffix
+    let m = 0i128;
+    let n = 170141183460469231731687303715884105727i128;
+    let o = 1_000_000_000_000_000_000i128;
+
+    // isize suffix (platform dependent)
+    let p = 0isize;
+    let q = 1_000_000isize;
+    let r = 9999999isize;
+}
+
+fn test_decimal_with_unsigned_suffixes() {
+    // u8 suffix (0 to 255)
+    let a = 0u8;
+    let b = 255u8;
+    let c = 128u8;
+
+    // u16 suffix (0 to 65535)
+    let d = 0u16;
+    let e = 65535u16;
+    let f = 1_000u16;
+
+    // u32 suffix (0 to 4294967295)
+    let g = 0u32;
+    let h = 4294967295u32;
+    let i = 1_000_000u32;
+
+    // u64 suffix (0 to 18446744073709551615)
+    let j = 0u64;
+    let k = 18446744073709551615u64;
+    let l = 1_000_000_000_000u64;
+
+    // u128 suffix
+    let m = 0u128;
+    let n = 340282366920938463463374607431768211455u128;
+    let o = 1_000_000_000_000_000_000u128;
+
+    // usize suffix (platform dependent)
+    let p = 0usize;
+    let q = 1_000_000usize;
+    let r = 9999999usize;
+}
+
+fn test_hexadecimal_integers() {
+    // Basic hexadecimal (0x prefix)
+    let a = 0x0;
+    let b = 0x1;
+    let c = 0x9;
+    let d = 0xa;
+    let e = 0xA;
+    let f = 0xf;
+    let g = 0xF;
+    let h = 0x10;
+    let i = 0xFF;
+    let j = 0xff;
+    let k = 0xABCDEF;
+    let l = 0xabcdef;
+    let m = 0xDeAdBeEf;
+
+    // Large hex values
+    let n = 0xFFFFFFFF;
+    let o = 0xFFFFFFFFFFFFFFFF;
+
+    // With underscores
+    let p = 0x1234_5678;
+    let q = 0xFF_FF;
+    let r = 0xAB_CD_EF;
+    let s = 0x1_2_3_4;
+}
+
+fn test_hexadecimal_with_suffixes() {
+    // Unsigned suffixes (hex requires _ before suffix to avoid ambiguity)
+    let a = 0xFF_u8;
+    let b = 0xFFFF_u16;
+    let c = 0xFFFFFFFF_u32;
+    let d = 0xFFFFFFFFFFFFFFFF_u64;
+    let e = 0x1_u128;
+    let f = 0xAB_usize;
+
+    // Signed suffixes
+    let g = 0x7F_i8;
+    let h = 0x7FFF_i16;
+    let i = 0x7FFFFFFF_i32;
+    let j = 0x7FFFFFFFFFFFFFFF_i64;
+    let k = 0x1_i128;
+    let l = 0xAB_isize;
+
+    // With underscores and suffixes
+    let m = 0xFF_FF_u16;
+    let n = 0xAB_CD_EF_12_u32;
+    let o = 0x1234_5678_9ABC_DEF0_u64;
+}
+
+fn test_octal_integers() {
+    // Basic octal (0o prefix)
+    let a = 0o0;
+    let b = 0o1;
+    let c = 0o7;
+    let d = 0o10;
+    let e = 0o77;
+    let f = 0o100;
+    let g = 0o755;
+    let h = 0o644;
+    let i = 0o777;
+
+    // Large octal values
+    let j = 0o7777777777;
+    let k = 0o1777777777777777777777;
+
+    // With underscores
+    let l = 0o1_2_3;
+    let m = 0o777_777;
+    let n = 0o12_34_56;
+}
+
+fn test_octal_with_suffixes() {
+    // Unsigned suffixes
+    let a = 0o77u8;
+    let b = 0o177777u16;
+    let c = 0o37777777777u32;
+    let d = 0o1u64;
+    let e = 0o1u128;
+    let f = 0o77usize;
+
+    // Signed suffixes
+    let g = 0o177i8;
+    let h = 0o77777i16;
+    let i = 0o17777777777i32;
+    let j = 0o1i64;
+    let k = 0o1i128;
+    let l = 0o77isize;
+
+    // With underscores and suffixes
+    let m = 0o7_7_7u16;
+    let n = 0o755_755u32;
+}
+
+fn test_binary_integers() {
+    // Basic binary (0b prefix)
+    let a = 0b0;
+    let b = 0b1;
+    let c = 0b10;
+    let d = 0b11;
+    let e = 0b100;
+    let f = 0b1010;
+    let g = 0b1111;
+    let h = 0b10101010;
+    let i = 0b11111111;
+    let j = 0b11110000;
+
+    // Large binary values
+    let k = 0b11111111111111111111111111111111;
+    let l = 0b1111111111111111111111111111111111111111111111111111111111111111;
+
+    // With underscores (byte grouping)
+    let m = 0b1111_0000;
+    let n = 0b1010_1010;
+    let o = 0b1111_1111_0000_0000;
+    let p = 0b1_0_1_0_1_0_1_0;
+    let q = 0b1111_0000_1111_0000;
+}
+
+fn test_binary_with_suffixes() {
+    // Unsigned suffixes
+    let a = 0b11111111u8;
+    let b = 0b1111111111111111u16;
+    let c = 0b1u32;
+    let d = 0b1u64;
+    let e = 0b1u128;
+    let f = 0b1010usize;
+
+    // Signed suffixes
+    let g = 0b1111111i8;
+    let h = 0b111111111111111i16;
+    let i = 0b1i32;
+    let j = 0b1i64;
+    let k = 0b1i128;
+    let l = 0b1010isize;
+
+    // With underscores and suffixes
+    let m = 0b1111_0000u8;
+    let n = 0b1010_1010_1010_1010u16;
+    let o = 0b1111_0000_1111_0000_1111_0000_1111_0000u32;
+}
+
+fn test_edge_cases() {
+    // Minimum values
+    let a = 0i8;
+    let b = 0i16;
+    let c = 0i32;
+    let d = 0i64;
+    let e = 0i128;
+    let f = 0u8;
+    let g = 0u16;
+    let h = 0u32;
+    let i = 0u64;
+    let j = 0u128;
+
+    // Single digits with all suffixes
+    let k = 1i8;
+    let l = 1i16;
+    let m = 1i32;
+    let n = 1i64;
+    let o = 1i128;
+    let p = 1isize;
+    let q = 1u8;
+    let r = 1u16;
+    let s = 1u32;
+    let t = 1u64;
+    let u = 1u128;
+    let v = 1usize;
+
+    // All bases with 0
+    let w = 0;
+    let x = 0x0;
+    let y = 0o0;
+    let z = 0b0;
+}
+
+fn test_mixed_usage() {
+    // Integers in expressions
+    let sum = 10 + 20;
+    let diff = 100 - 50;
+    let prod = 0xFF * 0x10;
+    let quot = 0o777 / 0o7;
+    let rem = 0b1111 % 0b10;
+
+    // Integers in array initialization
+    let arr = [1, 2, 3, 4, 5];
+    let hex_arr = [0x10, 0x20, 0x30];
+
+    // Integers as type parameters
+    let fixed_size = [0; 10];
+    let another = [0u8; 256];
+}

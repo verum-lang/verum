@@ -1,0 +1,214 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, polynomial, arithmetic
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Polynomial operations — evaluate (Horner), add, multiply using fixed-size coefficient arrays
+
+// ============================================================================
+// Arr8: Fixed-size array of 8 Ints (index = degree of coefficient)
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn arr_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn arr_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        len: a.len
+    }
+}
+
+fn arr_with_len(a: Arr8, new_len: Int) -> Arr8 {
+    Arr8 {
+        e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3,
+        e4: a.e4, e5: a.e5, e6: a.e6, e7: a.e7,
+        len: new_len
+    }
+}
+
+// ============================================================================
+// Polynomial: coefficients in Arr8, index = degree
+// poly [1, 2, 1] represents 1 + 2x + x^2
+// ============================================================================
+
+fn poly_new(c0: Int, c1: Int, c2: Int, deg: Int) -> Arr8 {
+    let mut p = arr_new();
+    p = arr_set(p, 0, c0);
+    p = arr_set(p, 1, c1);
+    p = arr_set(p, 2, c2);
+    arr_with_len(p, deg + 1)
+}
+
+// Evaluate polynomial at x using Horner's method
+fn poly_eval(p: Arr8, x: Int) -> Int {
+    // Start from highest degree and work down
+    let mut result = 0;
+    let mut i = p.len - 1;
+    while i >= 0 {
+        result = result * x + arr_get(p, i);
+        i = i - 1;
+    }
+    result
+}
+
+// Add two polynomials
+fn poly_add(a: Arr8, b: Arr8) -> Arr8 {
+    let max_len = if a.len > b.len { a.len } else { b.len };
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < max_len {
+        let av = if i < a.len { arr_get(a, i) } else { 0 };
+        let bv = if i < b.len { arr_get(b, i) } else { 0 };
+        result = arr_set(result, i, av + bv);
+        i = i + 1;
+    }
+    arr_with_len(result, max_len)
+}
+
+// Multiply two polynomials (result degree = deg_a + deg_b)
+fn poly_mul(a: Arr8, b: Arr8) -> Arr8 {
+    let result_len = a.len + b.len - 1;
+    let mut result = arr_new();
+    result = arr_with_len(result, result_len);
+    let mut i = 0;
+    while i < a.len {
+        let mut j = 0;
+        while j < b.len {
+            let idx = i + j;
+            let cur = arr_get(result, idx);
+            let prod = arr_get(a, i) * arr_get(b, j);
+            result = arr_set(result, idx, cur + prod);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_eval_horner() -> Int {
+    // p(x) = 1 + 2x + x^2 = (x+1)^2
+    // p(3) = 1 + 6 + 9 = 16
+    let p = poly_new(1, 2, 1, 2);
+    assert_eq(poly_eval(p, 3), 16);
+    // p(0) = 1
+    assert_eq(poly_eval(p, 0), 1);
+    // p(1) = 1 + 2 + 1 = 4
+    assert_eq(poly_eval(p, 1), 4);
+    // p(-1) = 1 - 2 + 1 = 0
+    assert_eq(poly_eval(p, -1), 0);
+    0
+}
+
+@test
+fn test_add_polynomials() -> Int {
+    // (x + 1) + (x^2 + 1) = x^2 + x + 2
+    // a = [1, 1, 0] len=2, b = [1, 0, 1] len=3
+    let mut a = arr_new();
+    a = arr_set(a, 0, 1);
+    a = arr_set(a, 1, 1);
+    a = arr_with_len(a, 2);
+
+    let mut b = arr_new();
+    b = arr_set(b, 0, 1);
+    b = arr_set(b, 2, 1);
+    b = arr_with_len(b, 3);
+
+    let result = poly_add(a, b);
+    // x^2 + x + 2 -> [2, 1, 1]
+    assert_eq(arr_get(result, 0), 2);
+    assert_eq(arr_get(result, 1), 1);
+    assert_eq(arr_get(result, 2), 1);
+    assert_eq(result.len, 3);
+    0
+}
+
+@test
+fn test_multiply_polynomials() -> Int {
+    // (x + 1) * (x + 1) = x^2 + 2x + 1
+    // a = [1, 1] len=2
+    let mut a = arr_new();
+    a = arr_set(a, 0, 1);
+    a = arr_set(a, 1, 1);
+    a = arr_with_len(a, 2);
+
+    let result = poly_mul(a, a);
+    // [1, 2, 1] len=3
+    assert_eq(arr_get(result, 0), 1);
+    assert_eq(arr_get(result, 1), 2);
+    assert_eq(arr_get(result, 2), 1);
+    assert_eq(result.len, 3);
+    0
+}
+
+@test
+fn test_mul_linear_polynomials() -> Int {
+    // (x + 2) * (x + 3) = x^2 + 5x + 6
+    let mut a = arr_new();
+    a = arr_set(a, 0, 2);
+    a = arr_set(a, 1, 1);
+    a = arr_with_len(a, 2);
+
+    let mut b = arr_new();
+    b = arr_set(b, 0, 3);
+    b = arr_set(b, 1, 1);
+    b = arr_with_len(b, 2);
+
+    let result = poly_mul(a, b);
+    assert_eq(arr_get(result, 0), 6);
+    assert_eq(arr_get(result, 1), 5);
+    assert_eq(arr_get(result, 2), 1);
+    // Evaluate at x=1: 1+5+6 = 12 = (1+2)*(1+3) = 3*4 = 12
+    assert_eq(poly_eval(result, 1), 12);
+    0
+}
+
+@test
+fn test_eval_cubic() -> Int {
+    // p(x) = x^3 + 0*x^2 + 0*x + (-8) = x^3 - 8
+    // p(2) = 8 - 8 = 0
+    let mut p = arr_new();
+    p = arr_set(p, 0, -8);
+    p = arr_set(p, 3, 1);
+    p = arr_with_len(p, 4);
+    assert_eq(poly_eval(p, 2), 0);
+    // p(3) = 27 - 8 = 19
+    assert_eq(poly_eval(p, 3), 19);
+    0
+}
+
+fn main() -> Int {
+    test_eval_horner();
+    test_add_polynomials();
+    test_multiply_polynomials();
+    test_mul_linear_polynomials();
+    test_eval_cubic();
+    print("[OK] 123_polynomial");
+    0
+}

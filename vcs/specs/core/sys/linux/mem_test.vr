@@ -1,0 +1,439 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/linux/mem_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, linux, memory, mmap, mprotect
+// @description: Tests for Linux memory management operations.
+//
+// Coverage:
+// - mmap, munmap: Memory mapping operations
+// - mprotect: Memory protection changes
+// - madvise: Memory advice operations
+// - mremap: Memory remapping
+// - Convenience functions (make_readonly, make_readwrite, etc.)
+// - Page utilities (PAGE_SIZE, alignment functions)
+// - Protection constants (PROT_NONE, PROT_READ, etc.)
+// - Map constants (MAP_PRIVATE, MAP_ANONYMOUS, etc.)
+//
+// Test Strategy:
+// - Test allocation and deallocation
+// - Test protection changes with verification
+// - Test madvise hints (non-destructive)
+// - Test page alignment utilities
+//
+// Platform: Linux x86_64
+// =============================================================================
+
+@cfg(target_os = "linux")
+module test.stdlib.sys.linux.mem_test;
+
+mount core.sys.linux.mem.{
+    mmap, munmap, mprotect, madvise, mremap,
+    make_readonly, make_readwrite, make_executable, make_guard,
+    prefetch, release, free_pages,
+    enable_huge_pages, grow_mapping, shrink_mapping,
+
+    PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC,
+    MAP_SHARED, MAP_PRIVATE, MAP_ANONYMOUS, MAP_ANON,
+    MAP_FIXED, MAP_HUGETLB, MAP_STACK,
+    MADV_NORMAL, MADV_RANDOM, MADV_SEQUENTIAL,
+    MADV_WILLNEED, MADV_DONTNEED, MADV_FREE,
+    MREMAP_MAYMOVE,
+
+    PAGE_SIZE, HUGE_PAGE_SIZE,
+    page_align_up, page_align_down, is_page_aligned,
+    pages_for,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Protection Constants Tests
+// =============================================================================
+
+@test
+fn test_protection_constants() {
+    // PROT_NONE should be 0
+    assert(PROT_NONE == 0);
+
+    // Individual protection bits
+    assert(PROT_READ == 0x1);
+    assert(PROT_WRITE == 0x2);
+    assert(PROT_EXEC == 0x4);
+
+    // Common combinations
+    assert((PROT_READ | PROT_WRITE) == 0x3);
+    assert((PROT_READ | PROT_EXEC) == 0x5);
+    assert((PROT_READ | PROT_WRITE | PROT_EXEC) == 0x7);
+
+    // Bits are distinct
+    assert((PROT_READ & PROT_WRITE) == 0);
+    assert((PROT_READ & PROT_EXEC) == 0);
+    assert((PROT_WRITE & PROT_EXEC) == 0);
+
+    print("Protection constants tests passed");
+}
+
+// =============================================================================
+// Map Constants Tests
+// =============================================================================
+
+@test
+fn test_map_constants() {
+    // MAP_SHARED and MAP_PRIVATE are mutually exclusive
+    assert(MAP_SHARED == 0x01);
+    assert(MAP_PRIVATE == 0x02);
+    assert((MAP_SHARED & MAP_PRIVATE) == 0);
+
+    // MAP_ANONYMOUS for non-file-backed mappings
+    assert(MAP_ANONYMOUS == 0x20);
+    assert(MAP_ANON == MAP_ANONYMOUS);
+
+    // MAP_FIXED for address placement
+    assert(MAP_FIXED == 0x10);
+
+    // Common combinations
+    let private_anon = MAP_PRIVATE | MAP_ANONYMOUS;
+    assert(private_anon == 0x22);
+
+    print("Map constants tests passed");
+}
+
+// =============================================================================
+// Page Utility Tests
+// =============================================================================
+
+@test
+fn test_page_utilities() {
+    // Verify page size constant
+    assert(PAGE_SIZE == 4096);
+
+    // Verify huge page size (2MB on x86_64)
+    assert(HUGE_PAGE_SIZE == 2097152);
+
+    // page_align_up tests
+    assert(page_align_up(0) == 0);
+    assert(page_align_up(1) == 4096);
+    assert(page_align_up(4095) == 4096);
+    assert(page_align_up(4096) == 4096);
+    assert(page_align_up(4097) == 8192);
+    assert(page_align_up(10000) == 12288);
+
+    // page_align_down tests
+    assert(page_align_down(0) == 0);
+    assert(page_align_down(1) == 0);
+    assert(page_align_down(4095) == 0);
+    assert(page_align_down(4096) == 4096);
+    assert(page_align_down(4097) == 4096);
+    assert(page_align_down(10000) == 8192);
+
+    // is_page_aligned tests
+    assert(is_page_aligned(0));
+    assert(!is_page_aligned(1));
+    assert(!is_page_aligned(4095));
+    assert(is_page_aligned(4096));
+    assert(!is_page_aligned(4097));
+    assert(is_page_aligned(8192));
+    assert(is_page_aligned(1048576));  // 1 MiB
+
+    // pages_for tests
+    assert(pages_for(0) == 0);
+    assert(pages_for(1) == 1);
+    assert(pages_for(4096) == 1);
+    assert(pages_for(4097) == 2);
+    assert(pages_for(8192) == 2);
+    assert(pages_for(10000) == 3);
+    assert(pages_for(65536) == 16);
+
+    // Relationship between functions
+    for size in [0, 1, 100, 4095, 4096, 4097, 8192, 10000] {
+        let up = page_align_up(size);
+        let down = page_align_down(size);
+
+        assert(is_page_aligned(up));
+        assert(is_page_aligned(down));
+        assert(up >= size);
+        assert(down <= size);
+
+        if size > 0 {
+            assert(pages_for(size) == up / PAGE_SIZE);
+        }
+    }
+
+    print("Page utility tests passed");
+}
+
+// =============================================================================
+// Basic mmap Tests
+// =============================================================================
+
+@test
+fn test_basic_mmap() {
+    // Map a single page
+    let result = mmap(
+        0 as &unsafe Byte,
+        PAGE_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS,
+        -1,
+        0
+    );
+
+    assert(result is Ok);
+    let ptr = result.unwrap();
+
+    // Verify alignment
+    let addr = ptr as Int;
+    assert(addr != 0);
+    assert(is_page_aligned(addr));
+
+    // Write and read
+    unsafe {
+        let byte_ptr = ptr as *mut Byte;
+        *byte_ptr = 0xAB;
+        assert(*byte_ptr == 0xAB);
+
+        // Write at end of page
+        let end_ptr = (ptr as Int + PAGE_SIZE - 1) as *mut Byte;
+        *end_ptr = 0xCD;
+        assert(*end_ptr == 0xCD);
+    }
+
+    // Unmap
+    let unmap_result = munmap(ptr, PAGE_SIZE);
+    assert(unmap_result is Ok);
+
+    // Map multiple pages
+    let multi_size = PAGE_SIZE * 8;
+    let multi_result = mmap(
+        0 as &unsafe Byte,
+        multi_size,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS,
+        -1,
+        0
+    );
+
+    assert(multi_result is Ok);
+    let multi_ptr = multi_result.unwrap();
+
+    // Write to all pages
+    unsafe {
+        for i in 0..8 {
+            let page_ptr = (multi_ptr as Int + i * PAGE_SIZE) as *mut Int;
+            *page_ptr = i as Int;
+        }
+
+        // Verify writes
+        for i in 0..8 {
+            let page_ptr = (multi_ptr as Int + i * PAGE_SIZE) as *mut Int;
+            assert(*page_ptr == i as Int);
+        }
+    }
+
+    let _ = munmap(multi_ptr, multi_size);
+
+    print("Basic mmap tests passed");
+}
+
+// =============================================================================
+// mprotect Tests
+// =============================================================================
+
+@test
+fn test_mprotect() {
+    // Map writable memory
+    let result = mmap(
+        0 as &unsafe Byte,
+        PAGE_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS,
+        -1,
+        0
+    );
+
+    assert(result is Ok);
+    let ptr = result.unwrap();
+
+    // Write initial value
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        *int_ptr = 12345;
+    }
+
+    // Make read-only
+    let prot_result = mprotect(ptr, PAGE_SIZE, PROT_READ);
+    assert(prot_result is Ok);
+
+    // Read should still work
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        assert(*int_ptr == 12345);
+    }
+
+    // Make writable again
+    let prot_result2 = mprotect(ptr, PAGE_SIZE, PROT_READ | PROT_WRITE);
+    assert(prot_result2 is Ok);
+
+    // Write should work now
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        *int_ptr = 54321;
+        assert(*int_ptr == 54321);
+    }
+
+    // Make no access
+    let prot_result3 = mprotect(ptr, PAGE_SIZE, PROT_NONE);
+    assert(prot_result3 is Ok);
+
+    // Restore access before unmapping
+    let _ = mprotect(ptr, PAGE_SIZE, PROT_READ | PROT_WRITE);
+    let _ = munmap(ptr, PAGE_SIZE);
+
+    print("mprotect tests passed");
+}
+
+// =============================================================================
+// madvise Tests
+// =============================================================================
+
+@test
+fn test_madvise() {
+    // Map memory for testing
+    let size = PAGE_SIZE * 4;
+    let result = mmap(
+        0 as &unsafe Byte,
+        size,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS,
+        -1,
+        0
+    );
+
+    assert(result is Ok);
+    let ptr = result.unwrap();
+
+    // Write some data
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        *int_ptr = 42;
+    }
+
+    // Test various madvise hints (all should succeed)
+    let normal_result = madvise(ptr, size, MADV_NORMAL);
+    assert(normal_result is Ok);
+
+    let random_result = madvise(ptr, size, MADV_RANDOM);
+    assert(random_result is Ok);
+
+    let sequential_result = madvise(ptr, size, MADV_SEQUENTIAL);
+    assert(sequential_result is Ok);
+
+    let willneed_result = madvise(ptr, size, MADV_WILLNEED);
+    assert(willneed_result is Ok);
+
+    // MADV_DONTNEED may clear the data, so we verify after
+    // Write data first
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        *int_ptr = 100;
+    }
+
+    let dontneed_result = madvise(ptr, size, MADV_DONTNEED);
+    assert(dontneed_result is Ok);
+
+    // After DONTNEED, reading may return zeros (but mapping still valid)
+    // The exact behavior depends on kernel version
+
+    let _ = munmap(ptr, size);
+
+    print("madvise tests passed");
+}
+
+// =============================================================================
+// Convenience Function Tests
+// =============================================================================
+
+@test
+fn test_convenience_functions() {
+    // Map memory
+    let size = PAGE_SIZE * 2;
+    let result = mmap(
+        0 as &unsafe Byte,
+        size,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS,
+        -1,
+        0
+    );
+
+    assert(result is Ok);
+    let ptr = result.unwrap();
+
+    // Write test data
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        *int_ptr = 999;
+    }
+
+    // Test make_readonly
+    let ro_result = make_readonly(ptr, size);
+    assert(ro_result is Ok);
+
+    // Read should work
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        assert(*int_ptr == 999);
+    }
+
+    // Test make_readwrite
+    let rw_result = make_readwrite(ptr, size);
+    assert(rw_result is Ok);
+
+    // Write should work
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        *int_ptr = 888;
+        assert(*int_ptr == 888);
+    }
+
+    // Test prefetch (should succeed, even if no visible effect)
+    let prefetch_result = prefetch(ptr, size);
+    assert(prefetch_result is Ok);
+
+    // Test release (DONTNEED)
+    let release_result = release(ptr, size);
+    assert(release_result is Ok);
+
+    let _ = munmap(ptr, size);
+
+    print("Convenience function tests passed");
+}
+
+// =============================================================================
+// Memory Constants Tests
+// =============================================================================
+
+@test
+fn test_madvise_constants() {
+    // Verify madvise constants
+    assert(MADV_NORMAL == 0);
+    assert(MADV_RANDOM == 1);
+    assert(MADV_SEQUENTIAL == 2);
+    assert(MADV_WILLNEED == 3);
+    assert(MADV_DONTNEED == 4);
+
+    // MADV_FREE may not be available on older kernels
+    // but constant should be defined
+    assert(MADV_FREE >= 0);
+
+    print("madvise constants tests passed");
+}

@@ -1,0 +1,1026 @@
+// =============================================================================
+// vcs/specs/core/math/special_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, math, special, gamma, erf, bessel
+// @description: Comprehensive tests for special mathematical functions including
+//               gamma functions, error functions, and Bessel functions.
+//
+// Coverage:
+// - Gamma functions: gamma, lgamma, digamma, trigamma, beta, lbeta
+// - Error functions: erf, erfc, erfinv, erfcinv
+// - Bessel functions: j0, j1, y0, y1, jn
+// - Incomplete gamma: gammainc_lower, gammainc_upper, gammainc_p, gammainc_q
+//
+// Test Strategy:
+// - Known values: test against tabulated values
+// - Identities: test mathematical relationships
+// - Edge cases: test behavior at boundaries and special points
+// - Symmetry: test odd/even function properties
+// =============================================================================
+
+module specs.core.math.special_test;
+
+mount core.math.special.{
+    gamma, gamma_positive, lgamma, digamma, trigamma, beta, lbeta,
+    erf, erfc, erfinv, erfcinv,
+    j0, j1, y0, y1, jn,
+    gammainc_lower, gammainc_upper, gammainc_p, gammainc_q,
+};
+mount core.math.constants.{PI, E, INFINITY, NEG_INFINITY, NAN};
+mount core.math.elementary.{abs, sqrt, exp, log, sin, cos, pow};
+mount core.math.{is_nan};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool {
+    if is_nan(a) && is_nan(b) { return true; }
+    if is_nan(a) || is_nan(b) { return false; }
+    abs(a - b) < tol
+}
+
+fn approx_eq_rel(a: Float, b: Float, rel_tol: Float) -> Bool {
+    if is_nan(a) && is_nan(b) { return true; }
+    if is_nan(a) || is_nan(b) { return false; }
+    let scale = if abs(b) > 1.0 { abs(b) } else { 1.0 };
+    abs(a - b) < rel_tol * scale
+}
+
+// =============================================================================
+// Gamma Function Tests
+// =============================================================================
+
+@test
+fn test_gamma_positive_integers() {
+    // Γ(n) = (n-1)! for positive integers
+    // Γ(1) = 0! = 1
+    assert(approx_eq(gamma(1.0), 1.0, 1e-10));
+
+    // Γ(2) = 1! = 1
+    assert(approx_eq(gamma(2.0), 1.0, 1e-10));
+
+    // Γ(3) = 2! = 2
+    assert(approx_eq(gamma(3.0), 2.0, 1e-10));
+
+    // Γ(4) = 3! = 6
+    assert(approx_eq(gamma(4.0), 6.0, 1e-10));
+
+    // Γ(5) = 4! = 24
+    assert(approx_eq(gamma(5.0), 24.0, 1e-10));
+
+    // Γ(6) = 5! = 120
+    assert(approx_eq(gamma(6.0), 120.0, 1e-10));
+
+    // Γ(7) = 6! = 720
+    assert(approx_eq(gamma(7.0), 720.0, 1e-9));
+
+    print("Gamma positive integer tests passed");
+}
+
+@test
+fn test_gamma_half_integers() {
+    // Γ(1/2) = √π
+    let sqrt_pi = sqrt(PI);
+    assert(approx_eq_rel(gamma(0.5), sqrt_pi, 1e-10));
+
+    // Γ(3/2) = (1/2)√π
+    assert(approx_eq_rel(gamma(1.5), 0.5 * sqrt_pi, 1e-10));
+
+    // Γ(5/2) = (3/4)√π
+    assert(approx_eq_rel(gamma(2.5), 0.75 * sqrt_pi, 1e-10));
+
+    // Γ(7/2) = (15/8)√π
+    assert(approx_eq_rel(gamma(3.5), 1.875 * sqrt_pi, 1e-10));
+
+    print("Gamma half-integer tests passed");
+}
+
+@test
+fn test_gamma_special_values() {
+    // Γ(x) has poles at non-positive integers
+    // The implementation returns INFINITY at these points
+    assert(gamma(0.0) == INFINITY);
+    assert(gamma(-1.0) == INFINITY);
+    assert(gamma(-2.0) == INFINITY);
+
+    // NaN input returns NaN
+    assert(is_nan(gamma(NAN)));
+
+    // Recurrence relation: Γ(x+1) = x·Γ(x)
+    let x = 2.7;
+    assert(approx_eq_rel(gamma(x + 1.0), x * gamma(x), 1e-10));
+
+    // Check a negative non-integer value using reflection formula
+    // Γ(-0.5) = -2√π
+    assert(approx_eq_rel(gamma(-0.5), -2.0 * sqrt(PI), 1e-10));
+
+    print("Gamma special values tests passed");
+}
+
+@test
+fn test_lgamma_basic() {
+    // ln(Γ(1)) = ln(1) = 0
+    assert(approx_eq(lgamma(1.0), 0.0, 1e-10));
+
+    // ln(Γ(2)) = ln(1) = 0
+    assert(approx_eq(lgamma(2.0), 0.0, 1e-10));
+
+    // ln(Γ(3)) = ln(2)
+    assert(approx_eq_rel(lgamma(3.0), log(2.0), 1e-10));
+
+    // ln(Γ(5)) = ln(24)
+    assert(approx_eq_rel(lgamma(5.0), log(24.0), 1e-10));
+
+    // For positive x, lgamma(x) = ln(|gamma(x)|)
+    let x = 3.7;
+    assert(approx_eq_rel(lgamma(x), log(gamma(x)), 1e-10));
+
+    print("lgamma basic tests passed");
+}
+
+@test
+fn test_lgamma_large_values() {
+    // For large x, Stirling approximation should work well
+    // lgamma(100) ≈ 359.134... (from tables)
+    let lg100 = lgamma(100.0);
+    assert(approx_eq_rel(lg100, 359.1342053695754, 1e-8));
+
+    // lgamma(1000) - using Stirling approximation
+    let lg1000 = lgamma(1000.0);
+    // Known value approximately 5905.22...
+    assert(lg1000 > 5900.0 && lg1000 < 5910.0);
+
+    print("lgamma large value tests passed");
+}
+
+@test
+fn test_digamma_basic() {
+    // ψ(1) = -γ where γ is Euler-Mascheroni constant ≈ 0.5772...
+    let euler_gamma = 0.5772156649015329;
+    assert(approx_eq_rel(digamma(1.0), -euler_gamma, 1e-8));
+
+    // ψ(2) = 1 - γ
+    assert(approx_eq_rel(digamma(2.0), 1.0 - euler_gamma, 1e-8));
+
+    // Recurrence: ψ(x+1) = ψ(x) + 1/x
+    let x = 3.5;
+    assert(approx_eq_rel(digamma(x + 1.0), digamma(x) + 1.0 / x, 1e-10));
+
+    // ψ(1/2) = -γ - 2*ln(2)
+    let expected = -euler_gamma - 2.0 * log(2.0);
+    assert(approx_eq_rel(digamma(0.5), expected, 1e-8));
+
+    // NaN and pole handling
+    assert(is_nan(digamma(NAN)));
+    assert(is_nan(digamma(0.0)));
+    assert(is_nan(digamma(-1.0)));
+
+    print("digamma basic tests passed");
+}
+
+@test
+fn test_trigamma_basic() {
+    // ψ₁(1) = π²/6
+    assert(approx_eq_rel(trigamma(1.0), PI * PI / 6.0, 1e-8));
+
+    // ψ₁(2) = π²/6 - 1
+    assert(approx_eq_rel(trigamma(2.0), PI * PI / 6.0 - 1.0, 1e-8));
+
+    // Recurrence: ψ₁(x+1) = ψ₁(x) - 1/x²
+    let x = 3.5;
+    assert(approx_eq_rel(trigamma(x + 1.0), trigamma(x) - 1.0 / (x * x), 1e-10));
+
+    // NaN handling
+    assert(is_nan(trigamma(NAN)));
+    assert(is_nan(trigamma(0.0)));
+
+    print("trigamma basic tests passed");
+}
+
+@test
+fn test_beta_function() {
+    // B(a, b) = Γ(a)Γ(b)/Γ(a+b)
+    // B(1, 1) = 1
+    assert(approx_eq(beta(1.0, 1.0), 1.0, 1e-10));
+
+    // B(1, 2) = Γ(1)Γ(2)/Γ(3) = 1·1/2 = 0.5
+    assert(approx_eq(beta(1.0, 2.0), 0.5, 1e-10));
+
+    // B(2, 2) = Γ(2)Γ(2)/Γ(4) = 1·1/6 = 1/6
+    assert(approx_eq(beta(2.0, 2.0), 1.0 / 6.0, 1e-10));
+
+    // Symmetry: B(a, b) = B(b, a)
+    assert(approx_eq(beta(3.0, 5.0), beta(5.0, 3.0), 1e-10));
+
+    // B(1/2, 1/2) = π
+    assert(approx_eq_rel(beta(0.5, 0.5), PI, 1e-10));
+
+    print("beta function tests passed");
+}
+
+@test
+fn test_lbeta_function() {
+    // ln(B(a, b)) = lgamma(a) + lgamma(b) - lgamma(a+b)
+    let a = 3.0;
+    let b = 5.0;
+    let expected = lgamma(a) + lgamma(b) - lgamma(a + b);
+    assert(approx_eq(lbeta(a, b), expected, 1e-12));
+
+    // For large values, lbeta is more stable
+    let lbeta_large = lbeta(100.0, 100.0);
+    // Should be finite and negative
+    assert(lbeta_large < 0.0);
+    assert(lbeta_large > -1000.0);
+
+    print("lbeta function tests passed");
+}
+
+// =============================================================================
+// Error Function Tests
+// =============================================================================
+
+@test
+fn test_erf_basic() {
+    // erf(0) = 0
+    assert(approx_eq(erf(0.0), 0.0, 1e-15));
+
+    // erf(∞) = 1
+    assert(erf(INFINITY) == 1.0);
+
+    // erf(-∞) = -1
+    assert(erf(NEG_INFINITY) == -1.0);
+
+    // NaN handling
+    assert(is_nan(erf(NAN)));
+
+    // Known values (from tables)
+    // erf(0.5) ≈ 0.5204998778
+    assert(approx_eq_rel(erf(0.5), 0.5204998778130465, 1e-6));
+
+    // erf(1.0) ≈ 0.8427007929
+    assert(approx_eq_rel(erf(1.0), 0.8427007929497149, 1e-6));
+
+    // erf(2.0) ≈ 0.9953222650
+    assert(approx_eq_rel(erf(2.0), 0.9953222650189527, 1e-5));
+
+    print("erf basic tests passed");
+}
+
+@test
+fn test_erf_symmetry() {
+    // erf(-x) = -erf(x) (odd function)
+    let test_values = [0.5, 1.0, 1.5, 2.0, 2.5];
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        let erf_pos: Float = erf(x);  // Cast to plain Float before negation
+        let erf_neg: Float = erf(-x);
+        assert(approx_eq(erf_neg, -erf_pos, 1e-12));
+    }
+
+    print("erf symmetry tests passed");
+}
+
+@test
+fn test_erf_bounds() {
+    // erf(x) ∈ (-1, 1) for all finite x
+    let test_values = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0];
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        let y = erf(x);
+        assert(y >= -1.0 && y <= 1.0);
+        let y_neg = erf(-x);
+        assert(y_neg >= -1.0 && y_neg <= 1.0);
+    }
+
+    print("erf bounds tests passed");
+}
+
+@test
+fn test_erfc_basic() {
+    // erfc(0) = 1
+    assert(approx_eq(erfc(0.0), 1.0, 1e-15));
+
+    // erfc(∞) = 0
+    assert(erfc(INFINITY) == 0.0);
+
+    // erfc(-∞) = 2
+    assert(erfc(NEG_INFINITY) == 2.0);
+
+    // NaN handling
+    assert(is_nan(erfc(NAN)));
+
+    // Known values
+    // erfc(1.0) ≈ 0.1572992070
+    assert(approx_eq_rel(erfc(1.0), 0.15729920705028513, 1e-6));
+
+    print("erfc basic tests passed");
+}
+
+@test
+fn test_erfc_complement() {
+    // erfc(x) = 1 - erf(x)
+    let test_values = [0.0, 0.5, 1.0, 2.0, 3.0];
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        assert(approx_eq(erfc(x), 1.0 - erf(x), 1e-10));
+    }
+
+    print("erfc complement tests passed");
+}
+
+@test
+fn test_erfinv_basic() {
+    // erfinv(0) = 0
+    assert(approx_eq(erfinv(0.0), 0.0, 1e-12));
+
+    // erfinv(1) = ∞
+    assert(erfinv(1.0) == INFINITY);
+
+    // erfinv(-1) = -∞
+    assert(erfinv(-1.0) == NEG_INFINITY);
+
+    // Symmetry: erfinv(-x) = -erfinv(x)
+    let test_values = [0.1, 0.3, 0.5, 0.7, 0.9];
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        let inv_pos: Float = erfinv(x);  // Cast to plain Float before negation
+        let inv_neg: Float = erfinv(-x);
+        assert(approx_eq(inv_neg, -inv_pos, 1e-10));
+    }
+
+    print("erfinv basic tests passed");
+}
+
+@test
+fn test_erfinv_roundtrip() {
+    // erf(erfinv(x)) = x for x ∈ (-1, 1)
+    let test_values = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, -0.5];
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        let roundtrip = erf(erfinv(x));
+        assert(approx_eq(roundtrip, x, 1e-6));
+    }
+
+    // erfinv(erf(x)) = x for moderate x
+    let test_xs = [0.0, 0.5, 1.0, -0.5, -1.0];
+    for i in 0..test_xs.len() {
+        let x = test_xs[i];
+        let roundtrip = erfinv(erf(x));
+        assert(approx_eq(roundtrip, x, 1e-5));
+    }
+
+    print("erfinv roundtrip tests passed");
+}
+
+// =============================================================================
+// Bessel Function Tests
+// =============================================================================
+
+@test
+fn test_j0_basic() {
+    // J₀(0) = 1
+    assert(approx_eq(j0(0.0), 1.0, 1e-12));
+
+    // Known values (from tables)
+    // J₀(1) ≈ 0.7651976866
+    assert(approx_eq_rel(j0(1.0), 0.7651976865579666, 1e-6));
+
+    // J₀(2) ≈ 0.2238907791
+    assert(approx_eq_rel(j0(2.0), 0.22389077914123567, 1e-6));
+
+    // J₀(5) ≈ -0.1775967713
+    assert(approx_eq_rel(j0(5.0), -0.17759677131433826, 1e-6));
+
+    // First zero of J₀ is at approximately 2.4048
+    let j0_zero1 = j0(2.4048255576957728);
+    assert(abs(j0_zero1) < 1e-6);
+
+    print("J0 basic tests passed");
+}
+
+@test
+fn test_j1_basic() {
+    // J₁(0) = 0
+    assert(approx_eq(j1(0.0), 0.0, 1e-12));
+
+    // Known values
+    // J₁(1) ≈ 0.4400505857
+    assert(approx_eq_rel(j1(1.0), 0.44005058574493355, 1e-6));
+
+    // J₁(2) ≈ 0.5767248078
+    assert(approx_eq_rel(j1(2.0), 0.5767248077568736, 1e-6));
+
+    // J₁(5) ≈ -0.3275791376
+    assert(approx_eq_rel(j1(5.0), -0.32757913759146523, 1e-6));
+
+    print("J1 basic tests passed");
+}
+
+@test
+fn test_bessel_symmetry() {
+    // J₀(x) is even: J₀(-x) = J₀(x)
+    let test_values = [0.5, 1.0, 2.0, 5.0];
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        assert(approx_eq(j0(-x), j0(x), 1e-12));
+    }
+
+    // J₁(x) is odd: J₁(-x) = -J₁(x)
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        assert(approx_eq(j1(-x), -j1(x), 1e-12));
+    }
+
+    print("Bessel symmetry tests passed");
+}
+
+@test
+fn test_y0_basic() {
+    // Y₀(x) is only defined for x > 0
+    // Y₀(1) ≈ 0.0882569642
+    assert(approx_eq_rel(y0(1.0), 0.08825696421567696, 1e-5));
+
+    // Y₀(2) ≈ 0.5103756726
+    assert(approx_eq_rel(y0(2.0), 0.5103756726497451, 1e-5));
+
+    // Y₀(5) ≈ -0.3085176252
+    assert(approx_eq_rel(y0(5.0), -0.30851762524903357, 1e-5));
+
+    print("Y0 basic tests passed");
+}
+
+@test
+fn test_y1_basic() {
+    // Y₁(x) is only defined for x > 0
+    // Y₁(1) ≈ -0.7812128213
+    assert(approx_eq_rel(y1(1.0), -0.7812128213002887, 1e-5));
+
+    // Y₁(2) ≈ -0.1070324315
+    assert(approx_eq_rel(y1(2.0), -0.10703243154093755, 1e-5));
+
+    print("Y1 basic tests passed");
+}
+
+@test
+fn test_jn_basic() {
+    // J₀ and J₁ should match j0 and j1
+    assert(approx_eq(jn(0, 2.0), j0(2.0), 1e-10));
+    assert(approx_eq(jn(1, 2.0), j1(2.0), 1e-10));
+
+    // J₂(1) ≈ 0.1149034849
+    assert(approx_eq_rel(jn(2, 1.0), 0.11490348493190048, 1e-5));
+
+    // J₃(2) ≈ 0.1289432494
+    assert(approx_eq_rel(jn(3, 2.0), 0.12894324947440203, 1e-5));
+
+    // Negative order: J_{-n}(x) = (-1)^n * J_n(x)
+    assert(approx_eq(jn(-2, 1.0), jn(2, 1.0), 1e-10));     // even n
+    assert(approx_eq(jn(-3, 2.0), -jn(3, 2.0), 1e-10));    // odd n
+
+    print("Jn basic tests passed");
+}
+
+// =============================================================================
+// Incomplete Gamma Tests
+// =============================================================================
+
+@test
+fn test_gammainc_bounds() {
+    // γ(a, 0) = 0
+    assert(approx_eq(gammainc_lower(2.0, 0.0), 0.0, 1e-12));
+
+    // Γ(a, 0) = Γ(a)
+    assert(approx_eq(gammainc_upper(2.0, 0.0), gamma(2.0), 1e-10));
+
+    // γ(a, ∞) = Γ(a)
+    assert(approx_eq(gammainc_lower(2.0, INFINITY), gamma(2.0), 1e-10));
+
+    // Γ(a, ∞) = 0
+    assert(approx_eq(gammainc_upper(2.0, INFINITY), 0.0, 1e-12));
+
+    print("Incomplete gamma bounds tests passed");
+}
+
+@test
+fn test_gammainc_complement() {
+    // γ(a, x) + Γ(a, x) = Γ(a)
+    let test_params = [
+        (1.0, 0.5),
+        (2.0, 1.0),
+        (3.0, 2.0),
+        (0.5, 1.0),
+    ];
+
+    for i in 0..test_params.len() {
+        let (a, x) = test_params[i];
+        let lower = gammainc_lower(a, x);
+        let upper = gammainc_upper(a, x);
+        let total = gamma(a);
+        assert(approx_eq_rel(lower + upper, total, 1e-8));
+    }
+
+    print("Incomplete gamma complement tests passed");
+}
+
+@test
+fn test_gammainc_regularized() {
+    // P(a, x) + Q(a, x) = 1
+    let test_params = [
+        (1.0, 0.5),
+        (2.0, 1.0),
+        (3.0, 2.0),
+        (0.5, 1.0),
+    ];
+
+    for i in 0..test_params.len() {
+        let (a, x) = test_params[i];
+        let p = gammainc_p(a, x);
+        let q = gammainc_q(a, x);
+        assert(approx_eq(p + q, 1.0, 1e-10));
+    }
+
+    // P(a, x) = γ(a, x) / Γ(a)
+    let a = 2.0;
+    let x = 1.5;
+    let p = gammainc_p(a, x);
+    let expected = gammainc_lower(a, x) / gamma(a);
+    assert(approx_eq(p, expected, 1e-12));
+
+    // P(1, x) = 1 - e^(-x) (exponential distribution CDF)
+    let x2 = 2.0;
+    let p1 = gammainc_p(1.0, x2);
+    let expected2 = 1.0 - exp(-x2);
+    assert(approx_eq(p1, expected2, 1e-10));
+
+    print("Incomplete gamma regularized tests passed");
+}
+
+// =============================================================================
+// Gamma Positive (Refinement Type) Tests
+// =============================================================================
+
+@test
+fn test_gamma_positive_fn() {
+    let _ = gamma_positive;
+}
+
+@test
+fn test_gamma_positive_integers() {
+    // gamma_positive takes Float{> 0.0} and returns Float{> 0.0}
+    let g1 = gamma_positive(1.0);
+    assert(approx_eq(g1, 1.0, 1e-10));
+
+    let g4 = gamma_positive(4.0);
+    assert(approx_eq(g4, 6.0, 1e-10));
+}
+
+@test
+fn test_gamma_positive_half() {
+    let sqrt_pi = sqrt(PI);
+    let g = gamma_positive(0.5);
+    assert(approx_eq_rel(g, sqrt_pi, 1e-10));
+}
+
+// =============================================================================
+// erfcinv Tests
+// =============================================================================
+
+@test
+fn test_erfcinv_basic() {
+    // erfcinv(1) = erfinv(0) = 0
+    assert(approx_eq(erfcinv(1.0), 0.0, 1e-12));
+
+    // erfcinv(0) = erfinv(1) = ∞
+    assert(erfcinv(0.0) == INFINITY);
+
+    // erfcinv(2) = erfinv(-1) = -∞
+    assert(erfcinv(2.0) == NEG_INFINITY);
+}
+
+@test
+fn test_erfcinv_roundtrip() {
+    // erfc(erfcinv(x)) = x for x ∈ (0, 2)
+    let test_values = [0.1, 0.5, 1.0, 1.5, 1.9];
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        let roundtrip = erfc(erfcinv(x));
+        assert(approx_eq(roundtrip, x, 1e-5));
+    }
+}
+
+// =============================================================================
+// Additional Gamma Tests
+// =============================================================================
+
+@test
+fn test_gamma_recurrence() {
+    // Γ(x+1) = x·Γ(x) for several values
+    let test_values = [1.5, 2.3, 3.7, 4.1, 0.8];
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        assert(approx_eq_rel(gamma(x + 1.0), x * gamma(x), 1e-10));
+    }
+}
+
+@test
+fn test_gamma_reflection() {
+    // Γ(x)·Γ(1-x) = π/sin(πx) for non-integer x
+    let test_values = [0.3, 0.7, 0.25, 0.9];
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        let product = gamma(x) * gamma(1.0 - x);
+        let expected = PI / sin(PI * x);
+        assert(approx_eq_rel(product, expected, 1e-8));
+    }
+}
+
+@test
+fn test_gamma_duplication() {
+    // Legendre duplication formula: Γ(z)·Γ(z+1/2) = √π·Γ(2z) / 2^(2z-1)
+    // Test with z = 2.0
+    let z = 2.0;
+    let lhs = gamma(z) * gamma(z + 0.5);
+    let sqrt_pi: Float = sqrt(PI);
+    let gamma_2z: Float = gamma(2.0 * z);
+    let numerator: Float = sqrt_pi * gamma_2z;
+    let pow_denom: Float = pow(2.0, 2.0 * z - 1.0);
+    let rhs: Float = numerator / pow_denom;
+    assert(approx_eq_rel(lhs, rhs, 1e-8));
+}
+
+@test
+fn test_lgamma_special_values() {
+    // lgamma(1/2) = ln(√π) = 0.5*ln(π)
+    assert(approx_eq_rel(lgamma(0.5), 0.5 * log(PI), 1e-10));
+
+    // lgamma(n) = ln((n-1)!)
+    // lgamma(6) = ln(120) ≈ 4.787
+    assert(approx_eq_rel(lgamma(6.0), log(120.0), 1e-10));
+
+    // lgamma for negative non-integer
+    let lg_neg = lgamma(-0.5);
+    // lgamma(-0.5) = ln(|Γ(-0.5)|) = ln(2√π)
+    assert(approx_eq_rel(lg_neg, log(2.0 * sqrt(PI)), 1e-10));
+}
+
+@test
+fn test_lgamma_nan() {
+    assert(is_nan(lgamma(NAN)));
+}
+
+// =============================================================================
+// Additional Digamma/Trigamma Tests
+// =============================================================================
+
+@test
+fn test_digamma_positive_integers() {
+    // ψ(n) = -γ + Σ(1/k, k=1..n-1) for positive integers
+    let euler_gamma = 0.5772156649015329;
+    // ψ(3) = -γ + 1 + 1/2 = -γ + 1.5
+    assert(approx_eq_rel(digamma(3.0), -euler_gamma + 1.5, 1e-8));
+    // ψ(4) = -γ + 1 + 1/2 + 1/3
+    assert(approx_eq_rel(digamma(4.0), -euler_gamma + 1.0 + 0.5 + 1.0 / 3.0, 1e-8));
+}
+
+@test
+fn test_trigamma_positive_integers() {
+    // ψ₁(n) = π²/6 - Σ(1/k², k=1..n-1)
+    // ψ₁(3) = π²/6 - 1 - 1/4 = π²/6 - 1.25
+    let pi2_6 = PI * PI / 6.0;
+    assert(approx_eq_rel(trigamma(3.0), pi2_6 - 1.0 - 0.25, 1e-8));
+}
+
+@test
+fn test_digamma_large() {
+    // For large x: ψ(x) ≈ ln(x) - 1/(2x)
+    let x = 100.0;
+    let approx_val = log(x) - 0.5 / x;
+    assert(approx_eq_rel(digamma(x), approx_val, 1e-4));
+}
+
+// =============================================================================
+// Additional Beta Tests
+// =============================================================================
+
+@test
+fn test_beta_known_values() {
+    // B(n, 1) = 1/n for positive integer n
+    assert(approx_eq(beta(1.0, 1.0), 1.0, 1e-10));
+    assert(approx_eq(beta(2.0, 1.0), 0.5, 1e-10));
+    assert(approx_eq(beta(3.0, 1.0), 1.0 / 3.0, 1e-10));
+    assert(approx_eq(beta(4.0, 1.0), 0.25, 1e-10));
+}
+
+@test
+fn test_beta_relation_to_gamma() {
+    // B(a, b) = Γ(a)Γ(b)/Γ(a+b) for various values
+    let test_cases = [(2.5, 3.5), (1.5, 2.0), (0.5, 0.5)];
+    for i in 0..test_cases.len() {
+        let (a, b) = test_cases[i];
+        let beta_val = beta(a, b);
+        let gamma_val = gamma(a) * gamma(b) / gamma(a + b);
+        assert(approx_eq_rel(beta_val, gamma_val, 1e-10));
+    }
+}
+
+// =============================================================================
+// Additional Error Function Tests
+// =============================================================================
+
+@test
+fn test_erf_increasing() {
+    // erf(x) is monotonically increasing
+    let prev = erf(0.0);
+    let test_values = [0.5, 1.0, 1.5, 2.0, 3.0];
+    let mut prev_val: Float = prev;
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        let curr: Float = erf(x);
+        assert(curr > prev_val);
+        prev_val = curr;
+    }
+}
+
+@test
+fn test_erfc_decreasing() {
+    // erfc(x) is monotonically decreasing for x > 0
+    let test_values = [0.0, 0.5, 1.0, 2.0, 3.0];
+    let mut prev_val = erfc(test_values[0]);
+    for i in 1..test_values.len() {
+        let curr = erfc(test_values[i]);
+        assert(curr < prev_val);
+        prev_val = curr;
+    }
+}
+
+@test
+fn test_erf_normal_cdf_relation() {
+    // Normal CDF Φ(x) = 0.5 * (1 + erf(x / √2))
+    // Φ(0) = 0.5
+    let cdf_0: Float = 0.5 * (1.0 + erf(0.0));
+    assert(approx_eq(cdf_0, 0.5, 1e-12));
+
+    // Φ(∞) = 1
+    let cdf_inf: Float = 0.5 * (1.0 + erf(INFINITY));
+    assert(approx_eq(cdf_inf, 1.0, 1e-12));
+}
+
+// =============================================================================
+// Additional Bessel Tests
+// =============================================================================
+
+@test
+fn test_j0_large_argument() {
+    // For large x, J₀(x) ≈ √(2/(πx)) * cos(x - π/4)
+    // Just verify it returns a reasonable value
+    let val = j0(20.0);
+    assert(val > -1.0 && val < 1.0);
+}
+
+@test
+fn test_j1_large_argument() {
+    let val = j1(20.0);
+    assert(val > -1.0 && val < 1.0);
+}
+
+@test
+fn test_jn_higher_orders() {
+    // J₄(2) ≈ 0.0340
+    let j4 = jn(4, 2.0);
+    assert(approx_eq_rel(j4, 0.033995719807568434, 1e-4));
+
+    // J₅(5) ≈ 0.2611
+    let j5 = jn(5, 5.0);
+    assert(approx_eq_rel(j5, 0.26114054612017014, 1e-4));
+}
+
+@test
+fn test_jn_at_zero() {
+    // J_n(0) = 0 for n >= 1
+    assert(approx_eq(jn(2, 0.0), 0.0, 1e-12));
+    assert(approx_eq(jn(3, 0.0), 0.0, 1e-12));
+    assert(approx_eq(jn(10, 0.0), 0.0, 1e-12));
+}
+
+@test
+fn test_bessel_recurrence() {
+    // J_{n-1}(x) + J_{n+1}(x) = (2n/x) * J_n(x) for x != 0
+    let x = 3.0;
+    let n = 2;
+    let lhs = jn(n - 1, x) + jn(n + 1, x);
+    let rhs = 2.0 * (n as Float) / x * jn(n, x);
+    assert(approx_eq(lhs, rhs, 1e-8));
+}
+
+@test
+fn test_y0_large_argument() {
+    let val = y0(20.0);
+    assert(val > -1.0 && val < 1.0);
+}
+
+@test
+fn test_y1_large_argument() {
+    let val = y1(20.0);
+    assert(val > -1.0 && val < 1.0);
+}
+
+// =============================================================================
+// Additional Incomplete Gamma Tests
+// =============================================================================
+
+@test
+fn test_gammainc_p_limits() {
+    // P(a, 0) = 0
+    assert(approx_eq(gammainc_p(2.0, 0.0), 0.0, 1e-12));
+
+    // P(a, ∞) = 1
+    assert(approx_eq(gammainc_p(2.0, INFINITY), 1.0, 1e-12));
+}
+
+@test
+fn test_gammainc_q_limits() {
+    // Q(a, 0) = 1
+    assert(approx_eq(gammainc_q(2.0, 0.0), 1.0, 1e-12));
+
+    // Q(a, ∞) = 0
+    assert(approx_eq(gammainc_q(2.0, INFINITY), 0.0, 1e-12));
+}
+
+@test
+fn test_gammainc_chi_squared_relation() {
+    // Chi-squared CDF: P(k/2, x/2)
+    // For k=2, x=1: CDF = P(1, 0.5) = 1 - e^(-0.5)
+    let cdf = gammainc_p(1.0, 0.5);
+    let expected = 1.0 - exp(-0.5);
+    assert(approx_eq(cdf, expected, 1e-10));
+}
+
+@test
+fn test_gammainc_monotonic() {
+    // P(a, x) is monotonically increasing in x for fixed a
+    let a = 2.0;
+    let mut prev = gammainc_p(a, 0.1);
+    let test_xs = [0.5, 1.0, 2.0, 5.0];
+    for i in 0..test_xs.len() {
+        let curr = gammainc_p(a, test_xs[i]);
+        assert(curr > prev);
+        prev = curr;
+    }
+}
+
+// =============================================================================
+// Additional Coverage Tests
+// =============================================================================
+
+@test
+fn test_beta_symmetry_multiple() {
+    // B(a, b) = B(b, a) for various combinations
+    let test_pairs = [
+        (1.5, 2.5),
+        (0.5, 3.0),
+        (4.0, 6.0),
+        (0.25, 0.75),
+    ];
+
+    for i in 0..test_pairs.len() {
+        let (a, b) = test_pairs[i];
+        let beta_ab = beta(a, b);
+        let beta_ba = beta(b, a);
+        assert(approx_eq_rel(beta_ab, beta_ba, 1e-10));
+    }
+
+    print("Beta symmetry multiple tests passed");
+}
+
+@test
+fn test_erf_derivative_property() {
+    // d/dx erf(x) = (2/√π) * e^(-x²)
+    // Numerical derivative check at several points
+    let test_values = [0.5, 1.0, 2.0];
+    let h = 1e-6;
+    let sqrt_pi: Float = sqrt(PI);
+
+    for i in 0..test_values.len() {
+        let x = test_values[i];
+        let erf_val: Float = erf(x);
+        let erf_plus_h: Float = erf(x + h);
+        let numerical_deriv: Float = (erf_plus_h - erf_val) / h;
+        let expected_deriv: Float = 2.0 / sqrt_pi * exp(0.0 - (x * x));
+        assert(approx_eq_rel(numerical_deriv, expected_deriv, 1e-4));
+    }
+
+    print("erf derivative property tests passed");
+}
+
+@test
+fn test_gamma_stirling_approximation() {
+    // Stirling's approximation: Γ(n) ≈ √(2πn) * (n/e)^n for large n
+    // Test that the ratio approaches 1 as n increases
+    let n = 10.0;
+    let gamma_n = gamma(n);
+    let sqrt_2pi_n: Float = sqrt(2.0 * PI * n);
+    let n_over_e: Float = n / E;
+    let stirling_approx: Float = sqrt_2pi_n * pow(n_over_e, n);
+
+    // For n=10, the ratio should be very close to 1
+    let ratio: Float = gamma_n / stirling_approx;
+    assert(ratio > 0.99 && ratio < 1.01);
+
+    print("Gamma Stirling approximation tests passed");
+}
+
+@test
+fn test_bessel_wronskian() {
+    // Wronskian identity: J₀(x)*Y₁(x) - J₁(x)*Y₀(x) = 2/(πx)
+    let x = 3.0;
+    let j0_val: Float = j0(x);
+    let j1_val: Float = j1(x);
+    let y0_val: Float = y0(x);
+    let y1_val: Float = y1(x);
+
+    let wronskian: Float = j0_val * y1_val - j1_val * y0_val;
+    let expected: Float = 2.0 / (PI * x);
+
+    assert(approx_eq_rel(wronskian, expected, 1e-5));
+
+    print("Bessel Wronskian tests passed");
+}
+
+@test
+fn test_erfc_large_x_behavior() {
+    // For large x, erfc(x) ≈ e^(-x²) / (x√π)
+    // Test asymptotic behavior
+    let x = 5.0;
+    let erfc_val = erfc(x);
+    let sqrt_pi: Float = sqrt(PI);
+    let exp_neg_x2: Float = exp(0.0 - (x * x));
+    let asymptotic: Float = exp_neg_x2 / (x * sqrt_pi);
+
+    // The ratio should be reasonably close for x=5
+    let ratio: Float = erfc_val / asymptotic;
+    assert(ratio > 0.5 && ratio < 2.0);
+
+    print("erfc large x behavior tests passed");
+}
+
+@test
+fn test_gammainc_relation_to_exponential() {
+    // P(1, x) = 1 - e^(-x) (exponential CDF)
+    let test_xs = [0.5, 1.0, 2.0, 3.0];
+
+    for i in 0..test_xs.len() {
+        let x = test_xs[i];
+        let p_val = gammainc_p(1.0, x);
+        let exp_cdf: Float = 1.0 - exp(0.0 - x);
+        assert(approx_eq(p_val, exp_cdf, 1e-10));
+    }
+
+    print("Incomplete gamma exponential relation tests passed");
+}
+
+@test
+fn test_digamma_harmonic_relation() {
+    // For positive integers: ψ(n) = H_{n-1} - γ
+    // where H_n is the nth harmonic number
+    let euler_gamma = 0.5772156649015329;
+
+    // ψ(5) = H_4 - γ = (1 + 1/2 + 1/3 + 1/4) - γ
+    let h4: Float = 1.0 + 0.5 + 1.0/3.0 + 0.25;
+    let expected: Float = h4 - euler_gamma;
+    let psi5: Float = digamma(5.0);
+    assert(approx_eq_rel(psi5, expected, 1e-8));
+
+    // ψ(6) = H_5 - γ
+    let h5: Float = h4 + 0.2;
+    let expected6: Float = h5 - euler_gamma;
+    let psi6: Float = digamma(6.0);
+    assert(approx_eq_rel(psi6, expected6, 1e-8));
+
+    print("Digamma harmonic relation tests passed");
+}
+
+@test
+fn test_jn_small_order_consistency() {
+    // Verify that jn matches j0 and j1 for various x values
+    let test_xs = [0.5, 1.5, 3.0, 5.0, 7.0];
+
+    for i in 0..test_xs.len() {
+        let x = test_xs[i];
+        assert(approx_eq(jn(0, x), j0(x), 1e-12));
+        assert(approx_eq(jn(1, x), j1(x), 1e-12));
+    }
+
+    print("Bessel jn small order consistency tests passed");
+}

@@ -1,0 +1,52 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, list, collection
+// @timeout: 10000
+// @expected-exit: 0
+// @description: List operations: push, len, indexing, iteration
+
+fn sum_list(items: List<Int>) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < items.len() {
+        total = total + items[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Create and push
+    let mut nums = List.new();
+    nums.push(10);
+    nums.push(20);
+    nums.push(30);
+    assert_eq(nums.len(), 3);
+
+    // Indexing
+    assert_eq(nums[0], 10);
+    assert_eq(nums[1], 20);
+    assert_eq(nums[2], 30);
+
+    // Sum
+    assert_eq(sum_list(nums), 60);
+
+    // Build list in loop
+    let mut squares = List.new();
+    let mut i = 0;
+    while i < 10 {
+        squares.push(i * i);
+        i = i + 1;
+    }
+    assert_eq(squares.len(), 10);
+    assert_eq(squares[0], 0);
+    assert_eq(squares[4], 16);
+    assert_eq(squares[9], 81);
+
+    // Sum of squares 0..9 = 285
+    assert_eq(sum_list(squares), 285);
+
+    print("diff_list_operations: ok");
+    0
+}

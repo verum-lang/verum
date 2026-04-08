@@ -1,0 +1,33 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, libsystem
+// @description: Test getpid() FFI call to libSystem
+
+// Declare FFI binding directly
+@ffi("libSystem.B.dylib")
+extern {
+    fn getpid() -> Int;
+}
+
+fn main() {
+    // getpid() always succeeds and returns current process ID
+    // Process ID is always > 0
+    let pid = getpid();
+    print("pid type check:\n");
+    let zero: Int = 0;
+    print("zero=");
+    print(zero);
+    print("\n");
+    print("pid=");
+    print(pid);
+    print("\n");
+    // Try arithmetic to see what type it is
+    let sum = pid + 1;
+    print("pid+1=");
+    print(sum);
+    print("\n");
+    assert(pid > 0);
+}

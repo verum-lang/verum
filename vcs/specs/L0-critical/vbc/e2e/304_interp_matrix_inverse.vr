@@ -1,0 +1,246 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, matrix, inverse
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: 2x2 matrix inverse using integer-scaled arithmetic.
+// Scale factor 1000. Tests determinant, adjugate, and inverse with
+// verification via multiplication identity A * A^{-1} = I.
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn assert_near(actual: Int, expected: Int, tolerance: Int) {
+    let diff = abs_val(actual - expected);
+    assert(diff <= tolerance);
+}
+
+// =============================================================================
+// 2x2 Matrix: [a, b; c, d] with entries scaled by 1000
+// =============================================================================
+
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+
+fn mat2_det(m: Mat2) -> Int {
+    (m.a * m.d - m.b * m.c) / 1000
+}
+
+fn mat2_inv(m: Mat2) -> Mat2 {
+    let det = (m.a * m.d - m.b * m.c) / 1000;
+    if det == 0 {
+        return Mat2 { a: 0, b: 0, c: 0, d: 0 };
+    }
+    Mat2 {
+        a: (m.d * 1000) / det,
+        b: ((-m.b) * 1000) / det,
+        c: ((-m.c) * 1000) / det,
+        d: (m.a * 1000) / det
+    }
+}
+
+fn mat2_mul(p: Mat2, q: Mat2) -> Mat2 {
+    Mat2 {
+        a: (p.a * q.a + p.b * q.c) / 1000,
+        b: (p.a * q.b + p.b * q.d) / 1000,
+        c: (p.c * q.a + p.d * q.c) / 1000,
+        d: (p.c * q.b + p.d * q.d) / 1000
+    }
+}
+
+fn test_mat2_determinant() {
+    // Identity: det = 1
+    let id = Mat2 { a: 1000, b: 0, c: 0, d: 1000 };
+    assert_eq(mat2_det(id), 1000);
+
+    // [2, 3; 1, 4] => det = 8-3 = 5
+    let m1 = Mat2 { a: 2000, b: 3000, c: 1000, d: 4000 };
+    assert_eq(mat2_det(m1), 5000);
+
+    // [1, 2; 3, 4] => det = 4-6 = -2
+    let m2 = Mat2 { a: 1000, b: 2000, c: 3000, d: 4000 };
+    assert_eq(mat2_det(m2), -2000);
+
+    // Singular: [2, 4; 1, 2] => det = 0
+    let m3 = Mat2 { a: 2000, b: 4000, c: 1000, d: 2000 };
+    assert_eq(mat2_det(m3), 0);
+}
+
+fn test_mat2_inverse_identity() {
+    let id = Mat2 { a: 1000, b: 0, c: 0, d: 1000 };
+    let inv = mat2_inv(id);
+    assert_near(inv.a, 1000, 5);
+    assert_near(inv.b, 0, 5);
+    assert_near(inv.c, 0, 5);
+    assert_near(inv.d, 1000, 5);
+}
+
+fn test_mat2_inverse_simple() {
+    // M = [2, 1; 0, 1], det = 2
+    // M^{-1} = [0.5, -0.5; 0, 1]
+    let m = Mat2 { a: 2000, b: 1000, c: 0, d: 1000 };
+    let inv = mat2_inv(m);
+    assert_near(inv.a, 500, 5);
+    assert_near(inv.b, -500, 5);
+    assert_near(inv.c, 0, 5);
+    assert_near(inv.d, 1000, 5);
+
+    // Verify M * M^{-1} = I
+    let prod = mat2_mul(m, inv);
+    assert_near(prod.a, 1000, 10);
+    assert_near(prod.b, 0, 10);
+    assert_near(prod.c, 0, 10);
+    assert_near(prod.d, 1000, 10);
+}
+
+fn test_mat2_inverse_general() {
+    // M = [4, 7; 2, 6], det = 24-14 = 10
+    // M^{-1} = [0.6, -0.7; -0.2, 0.4]
+    let m = Mat2 { a: 4000, b: 7000, c: 2000, d: 6000 };
+    let inv = mat2_inv(m);
+    assert_near(inv.a, 600, 5);
+    assert_near(inv.b, -700, 5);
+    assert_near(inv.c, -200, 5);
+    assert_near(inv.d, 400, 5);
+
+    // Verify M * M^{-1} = I
+    let prod = mat2_mul(m, inv);
+    assert_near(prod.a, 1000, 15);
+    assert_near(prod.b, 0, 15);
+    assert_near(prod.c, 0, 15);
+    assert_near(prod.d, 1000, 15);
+}
+
+fn test_mat2_inverse_diagonal() {
+    // Diagonal [3, 0; 0, 5], inverse = [1/3, 0; 0, 1/5]
+    let m = Mat2 { a: 3000, b: 0, c: 0, d: 5000 };
+    let inv = mat2_inv(m);
+    assert_near(inv.a, 333, 5);  // 1/3 * 1000 ~ 333
+    assert_near(inv.b, 0, 5);
+    assert_near(inv.c, 0, 5);
+    assert_near(inv.d, 200, 5);  // 1/5 * 1000 = 200
+
+    let prod = mat2_mul(m, inv);
+    assert_near(prod.a, 1000, 15);
+    assert_near(prod.d, 1000, 15);
+}
+
+fn test_mat2_inverse_negative() {
+    // M = [1, -1; -1, 2], det = 2 - 1 = 1
+    // M^{-1} = [2, 1; 1, 1]
+    let m = Mat2 { a: 1000, b: -1000, c: -1000, d: 2000 };
+    let inv = mat2_inv(m);
+    assert_near(inv.a, 2000, 5);
+    assert_near(inv.b, 1000, 5);
+    assert_near(inv.c, 1000, 5);
+    assert_near(inv.d, 1000, 5);
+
+    let prod = mat2_mul(m, inv);
+    assert_near(prod.a, 1000, 10);
+    assert_near(prod.b, 0, 10);
+    assert_near(prod.c, 0, 10);
+    assert_near(prod.d, 1000, 10);
+}
+
+fn test_mat2_properties() {
+    // (A*B)^{-1} = B^{-1} * A^{-1}
+    let a_mat = Mat2 { a: 2000, b: 1000, c: 0, d: 3000 };
+    let b_mat = Mat2 { a: 1000, b: 0, c: 1000, d: 2000 };
+
+    let ab = mat2_mul(a_mat, b_mat);
+    let ab_inv = mat2_inv(ab);
+    let a_inv = mat2_inv(a_mat);
+    let b_inv = mat2_inv(b_mat);
+    let ba_inv = mat2_mul(b_inv, a_inv);
+
+    assert_near(ab_inv.a, ba_inv.a, 20);
+    assert_near(ab_inv.b, ba_inv.b, 20);
+    assert_near(ab_inv.c, ba_inv.c, 20);
+    assert_near(ab_inv.d, ba_inv.d, 20);
+
+    // det(A^{-1}) * det(A) / 1000 = 1000
+    let det_a = mat2_det(a_mat);
+    let det_a_inv = mat2_det(a_inv);
+    let prod_det = (det_a * det_a_inv) / 1000;
+    assert_near(prod_det, 1000, 20);
+}
+
+fn test_mat2_double_inverse() {
+    // (A^{-1})^{-1} = A
+    let m = Mat2 { a: 3000, b: 1000, c: 2000, d: 4000 };
+    let inv = mat2_inv(m);
+    let inv_inv = mat2_inv(inv);
+    assert_near(inv_inv.a, m.a, 20);
+    assert_near(inv_inv.b, m.b, 20);
+    assert_near(inv_inv.c, m.c, 20);
+    assert_near(inv_inv.d, m.d, 20);
+}
+
+fn test_mat2_singular() {
+    // Singular matrix: [2, 4; 1, 2], det = 0
+    let m = Mat2 { a: 2000, b: 4000, c: 1000, d: 2000 };
+    let inv = mat2_inv(m);
+    // Should return zero matrix
+    assert_eq(inv.a, 0);
+    assert_eq(inv.b, 0);
+    assert_eq(inv.c, 0);
+    assert_eq(inv.d, 0);
+}
+
+// =============================================================================
+// 3x3 determinant only (avoid full inverse for speed)
+// Direct formula using 6 fields: row-major flattened
+// =============================================================================
+
+fn det3x3(a00: Int, a01: Int, a02: Int,
+           a10: Int, a11: Int, a12: Int,
+           a20: Int, a21: Int, a22: Int) -> Int {
+    // Returns det * 1000 (inputs are *1000)
+    let c0 = (a11 * a22 - a12 * a21) / 1000;
+    let c1 = (a10 * a22 - a12 * a20) / 1000;
+    let c2 = (a10 * a21 - a11 * a20) / 1000;
+    (a00 * c0 - a01 * c1 + a02 * c2) / 1000
+}
+
+fn test_3x3_determinant() {
+    // Identity: det = 1
+    let d1 = det3x3(1000, 0, 0, 0, 1000, 0, 0, 0, 1000);
+    assert_eq(d1, 1000);
+
+    // Diagonal [2,3,4]: det = 24
+    let d2 = det3x3(2000, 0, 0, 0, 3000, 0, 0, 0, 4000);
+    assert_eq(d2, 24000);
+
+    // [1,2,3; 0,1,4; 5,6,0]: det = 1*(0-24) - 2*(0-20) + 3*(0-5) = -24+40-15 = 1
+    let d3 = det3x3(1000, 2000, 3000, 0, 1000, 4000, 5000, 6000, 0);
+    assert_eq(d3, 1000);
+
+    // Singular: rows dependent
+    let d4 = det3x3(1000, 2000, 3000, 2000, 4000, 6000, 1000, 1000, 1000);
+    assert_eq(d4, 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_mat2_determinant();
+    test_mat2_inverse_identity();
+    test_mat2_inverse_simple();
+    test_mat2_inverse_general();
+    test_mat2_inverse_diagonal();
+    test_mat2_inverse_negative();
+    test_mat2_properties();
+    test_mat2_double_inverse();
+    test_mat2_singular();
+    test_3x3_determinant();
+    print("[OK] 304_interp_matrix_inverse");
+    0
+}

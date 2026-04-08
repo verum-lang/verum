@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, cast, as, error
+// @description: Cast expression missing target type
+// @expected-error: E018
+
+fn test() {
+    let x = value as;  // Missing type after as
+}

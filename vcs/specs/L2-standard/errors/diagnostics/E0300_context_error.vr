@@ -1,0 +1,129 @@
+// @test: typecheck-fail
+// @expected-error: E0300
+// @tier: 0
+// @level: L2
+// @tags: errors, diagnostics, context
+// @description: Context system error E0300
+
+/// Error E0300: Context not provided
+/// Occurs when a required context is not available.
+
+context Database {
+    fn query(&self, sql: Text) -> Result<Rows, DbError>;
+}
+
+context Logger {
+    fn log(&self, level: LogLevel, message: Text);
+}
+
+context Cache {
+    fn get(&self, key: Text) -> Maybe<Text>;
+}
+
+/// Function requiring context
+fn query_users() using [Database] {
+    Database.query("SELECT * FROM users");
+}
+
+fn log_message() using [Logger] {
+    Logger.log(LogLevel.Info, "Hello");
+}
+
+fn cached_query() using [Database, Cache] {
+    match Cache.get("users") {
+        Some(cached) => cached,
+        None => Database.query("SELECT * FROM users"),
+    }
+}
+
+fn main() {
+    // E0300: Context `Database` is not provided
+    query_users();  // Error: missing Database context
+
+    // E0300: Context `Logger` is not provided
+    log_message();  // Error: missing Logger context
+
+    // E0300: Multiple contexts not provided
+    cached_query();  // Error: missing Database, Cache contexts
+}
+
+fn partial_context_example() {
+    type PostgresDb is {};
+    let db = PostgresDb {};
+
+    provide Database = db {
+        // Database is provided here
+
+        // E0300: Logger still not provided in this scope
+        fn inner() using [Database, Logger] {
+            Database.query("SELECT 1");
+            Logger.log(LogLevel.Info, "queried");  // Error
+        }
+
+        inner();
+    }
+}
+
+fn nested_scope_error() {
+    type PostgresDb is {};
+    type ConsoleLogger is {};
+
+    let db = PostgresDb {};
+    let logger = ConsoleLogger {};
+
+    provide Database = db {
+        // Only Database available
+
+        query_users();  // OK
+
+        {
+            // New scope, still only Database
+
+            // E0300: Logger not in scope
+            log_message();  // Error
+        }
+    }
+}
+
+fn context_in_async_error() {
+    type PostgresDb is {};
+    let db = PostgresDb {};
+
+    provide Database = db {
+        // E0300: Context may not be available after await
+        spawn {
+            // Database context doesn't automatically propagate to spawned tasks
+            query_users();  // Error: Database not provided in spawned task
+        };
+    }
+}
+
+// Expected error message format:
+// error[E0300]: required context `Database` is not provided
+//   --> context_error.vr:42:5
+//    |
+// 40 | fn main() {
+//    |    ---- context scope begins here
+// 41 |     // E0300: Context `Database` is not provided
+// 42 |     query_users();
+//    |     ^^^^^^^^^^^^^ `Database` context required here
+//    |
+// note: function `query_users` requires these contexts:
+//   --> context_error.vr:20:26
+//    |
+// 20 | fn query_users() using [Database] {
+//    |                        ^^^^^^^^^^
+//    |
+//    = help: wrap the call in a `provide` block:
+//            provide Database = your_db {
+//                query_users();
+//            }
+
+type Rows is {};
+type DbError is {};
+type LogLevel is Info, Warn, Error;
+
+fn main() {
+    // This file should not compile due to missing contexts
+    query_users();
+}

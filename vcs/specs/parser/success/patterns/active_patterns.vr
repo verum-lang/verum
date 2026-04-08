@@ -1,0 +1,294 @@
+// @test: parse
+// @level: L0
+// @tags: parser, patterns, active, extraction, bindings
+// @description: Test Active Pattern parsing with extraction bindings (F#-style)
+
+// =============================================================================
+// Section 1: Active Pattern Definitions
+// =============================================================================
+
+// Total patterns return Bool - match without extraction
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+pattern Odd(n: Int) -> Bool = n % 2 == 1;
+pattern Positive(n: Int) -> Bool = n > 0;
+pattern Negative(n: Int) -> Bool = n < 0;
+pattern Zero(n: Int) -> Bool = n == 0;
+
+// Parameterized total patterns
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+pattern Divisible(by: Int)(n: Int) -> Bool = n % by == 0;
+pattern HasLength(len: Int)(s: Text) -> Bool = s.len() == len;
+
+// Partial patterns return Maybe<T> - extract on match
+pattern ParseInt(s: Text) -> Maybe<Int> = Int::parse(s);
+pattern ParseFloat(s: Text) -> Maybe<Float> = Float::parse(s);
+pattern HeadTail(list: List<T>) -> Maybe<(T, List<T>)> =
+    if list.is_empty() { None } else { Some((list.head(), list.tail())) };
+
+// Parameterized partial patterns
+pattern RegexMatch(re: Text)(s: Text) -> Maybe<List<Text>> = Regex::new(re).find(s);
+pattern SplitAt(idx: Int)(list: List<T>) -> Maybe<(List<T>, List<T>)> = list.split_at(idx);
+
+// =============================================================================
+// Section 2: Total Pattern Usage - No Extraction
+// =============================================================================
+
+fn test_simple_total_patterns() {
+    let value = 42;
+
+    // Basic total patterns with empty parens
+    match value {
+        Even() => print("even"),
+        Odd() => print("odd")
+    }
+
+    // Multiple total patterns
+    match value {
+        Positive() => print("positive"),
+        Negative() => print("negative"),
+        Zero() => print("zero")
+    }
+}
+
+fn test_parameterized_total_patterns() {
+    let value = 50;
+
+    // Parameterized total patterns: params in first (), empty second ()
+    match value {
+        InRange(0, 100)() => print("in range"),
+        InRange(100, 1000)() => print("larger"),
+        _ => print("out of range")
+    }
+
+    // Multiple parameters
+    match value {
+        Divisible(10)() => print("divisible by 10"),
+        Divisible(5)() => print("divisible by 5"),
+        Divisible(2)() => print("even"),
+        _ => print("odd")
+    }
+}
+
+// =============================================================================
+// Section 3: Partial Pattern Usage - With Extraction Bindings
+// =============================================================================
+
+fn test_simple_partial_patterns() {
+    let input = "42";
+
+    // Partial pattern with single binding: ParseInt()(n)
+    match input {
+        ParseInt()(n) => print(f"Parsed: {n}"),
+        _ => print("Not a number")
+    }
+
+    // Partial pattern with tuple binding: HeadTail()(head, tail)
+    let list = [1, 2, 3, 4, 5];
+    match list {
+        HeadTail()(h, t) => print(f"Head: {h}, Tail: {t}"),
+        _ => print("Empty list")
+    }
+}
+
+fn test_nested_extraction_bindings() {
+    let input = "123";
+
+    // Nested pattern in bindings
+    match input {
+        ParseInt()((n, _)) => print(f"Got pair with {n}"),
+        ParseInt()(value) => print(f"Got value: {value}"),
+        _ => print("Parse failed")
+    }
+
+    // Destructuring in bindings
+    let data = "1,2,3";
+    match data {
+        Split(",")()([first, second, third]) => print(f"Three values: {first}, {second}, {third}"),
+        Split(",")()([first, ..rest]) => print(f"First: {first}, rest: {rest}"),
+        _ => print("Split failed")
+    }
+}
+
+fn test_parameterized_partial_patterns() {
+    let input = "abc123def";
+
+    // Parameterized partial pattern: params in first (), bindings in second ()
+    match input {
+        RegexMatch("\\d+")()([digits]) => print(f"Found digits: {digits}"),
+        RegexMatch("[a-z]+")()([letters]) => print(f"Found letters: {letters}"),
+        _ => print("No match")
+    }
+
+    // Parameterized with tuple bindings
+    let list = [1, 2, 3, 4, 5];
+    match list {
+        SplitAt(2)()((left, right)) => print(f"Left: {left}, Right: {right}"),
+        _ => print("Split failed")
+    }
+}
+
+fn test_multiple_bindings() {
+    let data = some_complex_data();
+
+    // Multiple bindings in extraction
+    match data {
+        DecomposePair()(first, second) => print(f"Pair: {first}, {second}"),
+        DecomposeTriple()(a, b, c) => print(f"Triple: {a}, {b}, {c}"),
+        _ => print("Unknown structure")
+    }
+}
+
+fn test_wildcard_in_bindings() {
+    let input = "42";
+
+    // Wildcard binding - extract but ignore value
+    match input {
+        ParseInt()(_) => print("Is a number (ignored value)"),
+        _ => print("Not a number")
+    }
+
+    // Partial wildcard
+    let pair = "(1, 2)";
+    match pair {
+        ParsePair()(_, second) => print(f"Second element: {second}"),
+        ParsePair()(first, _) => print(f"First element: {first}"),
+        _ => print("Not a pair")
+    }
+}
+
+// =============================================================================
+// Section 4: Combined Patterns (And, Or, Guards)
+// =============================================================================
+
+fn test_and_patterns_with_active() {
+    let value = 42;
+
+    // And pattern combines multiple active patterns
+    match value {
+        Even() & Positive() => print("positive even"),
+        Even() & Negative() => print("negative even"),
+        Odd() & Positive() => print("positive odd"),
+        Odd() & Negative() => print("negative odd"),
+        _ => print("zero")
+    }
+
+    // Parameterized and patterns
+    match value {
+        InRange(0, 100)() & Divisible(10)() => print("0-100 and divisible by 10"),
+        InRange(0, 100)() => print("0-100"),
+        _ => print("other")
+    }
+}
+
+fn test_or_patterns_with_active() {
+    let value = 42;
+
+    // Or patterns with active patterns
+    match value {
+        Even() | Zero() => print("even or zero"),
+        _ => print("odd and non-zero")
+    }
+}
+
+fn test_guards_with_active_patterns() {
+    let input = "42";
+
+    // Guards on partial patterns
+    match input {
+        ParseInt()(n) if n > 100 => print(f"Large number: {n}"),
+        ParseInt()(n) if n > 0 => print(f"Positive number: {n}"),
+        ParseInt()(n) => print(f"Non-positive: {n}"),
+        _ => print("Not a number")
+    }
+
+    // Where guards
+    match input {
+        ParseInt()(n) where n.is_prime() => print(f"Prime: {n}"),
+        ParseInt()(n) => print(f"Non-prime: {n}"),
+        _ => print("Not a number")
+    }
+}
+
+fn test_binding_at_with_active() {
+    let input = "42";
+
+    // @ binding with active pattern extraction
+    match input {
+        original @ ParseInt()(n) => print(f"Parsed {original} as {n}"),
+        s => print(f"Could not parse: {s}")
+    }
+}
+
+// =============================================================================
+// Section 5: Active Patterns in Let Bindings
+// =============================================================================
+
+fn test_let_with_active_patterns() {
+    let input = "42";
+
+    // Let binding with partial pattern
+    let ParseInt()(n) = input;
+    print(f"Parsed: {n}");
+
+    // Let-else with partial pattern
+    let ParseInt()(value) = input else {
+        return print("Parse failed");
+    };
+    print(f"Got value: {value}");
+}
+
+fn test_for_with_active_patterns() {
+    let strings = ["1", "2", "three", "4", "five"];
+
+    // Filter-map with active pattern in for loop
+    for ParseInt()(n) in strings {
+        print(f"Number: {n}");
+    }
+}
+
+// =============================================================================
+// Section 6: Redundant/Edge Case Syntax
+// =============================================================================
+
+fn test_redundant_empty_bindings() {
+    let value = 42;
+
+    // Redundant empty bindings: Even()() is same as Even()
+    match value {
+        Even()() => print("even with redundant parens"),
+        _ => print("other")
+    }
+
+    // Parameterized with redundant empty: InRange(0,100)()() would be invalid
+    // (only one trailing parens group is allowed)
+}
+
+fn test_complex_expressions_in_params() {
+    let value = 50;
+
+    // Complex expressions as parameters
+    let lo = 0;
+    let hi = 100;
+    match value {
+        InRange(lo, hi)() => print("in range"),
+        InRange(lo * 2, hi * 2)() => print("in doubled range"),
+        InRange(compute_low(), compute_high())() => print("in computed range"),
+        _ => print("out of range")
+    }
+}
+
+fn test_type_qualified_active_patterns() {
+    let value = 42;
+
+    // Namespace-qualified active pattern
+    match value {
+        numbers.Even() => print("even"),
+        numbers.Odd() => print("odd")
+    }
+
+    // Module-qualified with params
+    match value {
+        validation.InRange(0, 100)() => print("valid"),
+        _ => print("invalid")
+    }
+}

@@ -1,0 +1,496 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @description: Comprehensive parser tests for function type productions
+// Grammar: function_type = [ 'async' ] , 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
+//          rank2_function_type = [ 'async' ] , 'fn' , generics , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
+
+// =============================================================================
+// Section 1: Basic Function Types - No Parameters
+// =============================================================================
+
+fn test_no_param_function_types() {
+    // Function with no parameters, no return
+    let f1: fn() = get_void_fn();
+
+    // Function with no parameters, returns unit explicitly
+    let f2: fn() -> () = get_unit_fn();
+
+    // Function with no parameters, returns value
+    let f3: fn() -> Int = get_int_fn();
+    let f4: fn() -> Text = get_text_fn();
+    let f5: fn() -> Bool = get_bool_fn();
+}
+
+fn get_void_fn() -> fn() { (|| {}) }
+fn get_unit_fn() -> fn() -> () { (|| ()) }
+fn get_int_fn() -> fn() -> Int { (|| 42) }
+fn get_text_fn() -> fn() -> Text { (|| "hello") }
+fn get_bool_fn() -> fn() -> Bool { (|| true) }
+
+// =============================================================================
+// Section 2: Basic Function Types - Single Parameter
+// =============================================================================
+
+fn test_single_param_function_types() {
+    // Single parameter, no return
+    let f1: fn(Int) = take_int_fn();
+
+    // Single parameter with return
+    let f2: fn(Int) -> Int = identity_fn();
+    let f3: fn(Text) -> Text = text_identity_fn();
+    let f4: fn(Bool) -> Int = bool_to_int_fn();
+
+    // Complex single parameter
+    let f5: fn(List<Int>) -> Int = list_sum_fn();
+    let f6: fn(Map<Text, Int>) -> Int = map_size_fn();
+}
+
+fn take_int_fn() -> fn(Int) { |x| {} }
+fn identity_fn() -> fn(Int) -> Int { |x| x }
+fn text_identity_fn() -> fn(Text) -> Text { |s| s }
+fn bool_to_int_fn() -> fn(Bool) -> Int { |b| if b { 1 } else { 0 } }
+fn list_sum_fn() -> fn(List<Int>) -> Int { |list| list.sum() }
+fn map_size_fn() -> fn(Map<Text, Int>) -> Int { |map| map.len() }
+
+// =============================================================================
+// Section 3: Basic Function Types - Multiple Parameters
+// =============================================================================
+
+fn test_multi_param_function_types() {
+    // Two parameters
+    let f1: fn(Int, Int) -> Int = add_fn();
+    let f2: fn(Text, Text) -> Text = concat_fn();
+    let f3: fn(Int, Text) -> Text = format_fn();
+
+    // Three parameters
+    let f4: fn(Int, Int, Int) -> Int = sum3_fn();
+
+    // Many parameters
+    let f5: fn(Int, Int, Int, Int, Int) -> Int = sum5_fn();
+
+    // Mixed types
+    let f6: fn(Int, Text, Bool, Float) -> Text = mixed_fn();
+}
+
+fn add_fn() -> fn(Int, Int) -> Int { |a, b| a + b }
+fn concat_fn() -> fn(Text, Text) -> Text { |a, b| f"{a}{b}" }
+fn format_fn() -> fn(Int, Text) -> Text { |n, s| f"{s}: {n}" }
+fn sum3_fn() -> fn(Int, Int, Int) -> Int { |a, b, c| a + b + c }
+fn sum5_fn() -> fn(Int, Int, Int, Int, Int) -> Int { |a, b, c, d, e| a + b + c + d + e }
+fn mixed_fn() -> fn(Int, Text, Bool, Float) -> Text { |i, s, b, f| s }
+
+// =============================================================================
+// Section 4: Async Function Types
+// =============================================================================
+
+// Note: `async fn()` as a type annotation uses function types returning Future
+fn test_async_function_types() {
+    // Async functions return Future types
+    let f1: fn() -> Future<()> = get_async_void();
+
+    // Async with return
+    let f2: fn() -> Future<Int> = get_async_int();
+
+    // Async with params
+    let f3: fn(Int) -> Future<Int> = get_async_identity();
+    let f4: fn(Text, Int) -> Future<Text> = get_async_format();
+
+    // Async returning Future explicitly
+    let f5: fn() -> Future<Int> = get_async_future();
+}
+
+fn get_async_void() -> fn() -> Future<()> { (|| Future.ready(())) }
+fn get_async_int() -> fn() -> Future<Int> { (|| Future.ready(42)) }
+fn get_async_identity() -> fn(Int) -> Future<Int> { |x| Future.ready(x) }
+fn get_async_format() -> fn(Text, Int) -> Future<Text> { |s, n| Future.ready(f"{s}: {n}") }
+fn get_async_future() -> fn() -> Future<Int> { (|| Future.ready(42)) }
+
+// =============================================================================
+// Section 5: Function Types with Context Clause
+// =============================================================================
+
+// Grammar: context_clause = 'using' , context_spec ;
+
+fn test_function_types_with_contexts() {
+    // Single context
+    let f1: fn() using [Database] = db_fn();
+    let f2: fn(Int) -> Text using [Logger] = logging_fn();
+
+    // Multiple contexts
+    let f3: fn() using [Database, Logger] = db_logging_fn();
+    let f4: fn(Text) -> Int using [Database, Cache, Logger] = multi_ctx_fn();
+
+    // Function types with context returning futures
+    let f5: fn() -> Future<Int> using [Database] = async_db_fn();
+    let f6: fn(Text) -> Future<Result<Int, Error>> using [Database, Logger] = async_multi_fn();
+}
+
+context Database {
+    fn query(&self, sql: Text) -> Result<Data, Error>;
+}
+
+context Logger {
+    fn log(&self, message: Text);
+}
+
+context Cache {
+    fn get(&self, key: Text) -> Maybe<Text>;
+    fn set(&self, key: Text, value: Text);
+}
+
+type Data is { rows: List<Row> };
+type Row is { values: Map<Text, Text> };
+type Error is { message: Text };
+
+fn db_fn() -> fn() using [Database] { (|| {}) }
+fn logging_fn() -> fn(Int) -> Text using [Logger] { |n| f"{n}" }
+fn db_logging_fn() -> fn() using [Database, Logger] { (|| {}) }
+fn multi_ctx_fn() -> fn(Text) -> Int using [Database, Cache, Logger] { |s| 0 }
+fn async_db_fn() -> async fn() -> Int using [Database] { (async || 42) }
+fn async_multi_fn() -> async fn(Text) -> Result<Int, Error> using [Database, Logger] {
+    async |s| Ok(42)
+}
+
+// =============================================================================
+// Section 6: Higher-Order Function Types
+// =============================================================================
+
+fn test_higher_order_function_types() {
+    // Function that takes a function
+    let f1: fn(fn(Int) -> Int) -> Int = apply_to_42();
+
+    // Function that returns a function
+    let f2: fn(Int) -> fn(Int) -> Int = make_adder();
+
+    // Function that takes and returns functions
+    let f3: fn(fn(Int) -> Int) -> fn(Int) -> Int = compose_self();
+
+    // Nested higher-order
+    let f4: fn(fn(fn(Int) -> Int) -> Int) -> Int = meta_apply();
+
+    // Curried function type
+    let f5: fn(Int) -> fn(Int) -> fn(Int) -> Int = curried_sum();
+}
+
+fn apply_to_42() -> fn(fn(Int) -> Int) -> Int { |f| f(42) }
+fn make_adder() -> fn(Int) -> fn(Int) -> Int { |n| |m| n + m }
+fn compose_self() -> fn(fn(Int) -> Int) -> fn(Int) -> Int { |f| |x| f(f(x)) }
+fn meta_apply() -> fn(fn(fn(Int) -> Int) -> Int) -> Int { |f| f(|g| g(42)) }
+fn curried_sum() -> fn(Int) -> fn(Int) -> fn(Int) -> Int { |a| |b| |c| a + b + c }
+
+// =============================================================================
+// Section 7: Rank-2 Polymorphic Function Types
+// =============================================================================
+
+// Grammar: rank2_function_type = [ 'async' ] , 'fn' , generics , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
+
+fn test_rank2_function_types() {
+    // Basic rank-2: function works for all R
+    let f1: fn<R>(R) -> R = get_polymorphic_identity();
+
+    // Rank-2 with constraint
+    let f2: fn<T: Clone>(T) -> (T, T) = get_duplicator();
+
+    // Transducer pattern (classic rank-2 use case)
+    let f3: fn<R>(Reducer<Int, R>) -> Reducer<Text, R> = get_transducer();
+
+    // Multiple quantified parameters
+    let f4: fn<A, B>(A, B) -> (B, A) = get_polymorphic_swap();
+
+    // Rank-2 with bounds
+    let f5: fn<T: Display + Clone>(T) -> Text = get_show_clone();
+}
+
+type Reducer<A, R> is fn(R, A) -> R;
+
+type Display is protocol {
+    fn fmt(&self) -> Text;
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+fn get_polymorphic_identity() -> fn<R>(R) -> R { |x| x }
+fn get_duplicator() -> fn<T: Clone>(T) -> (T, T) { |x| (x.clone(), x) }
+fn get_transducer() -> fn<R>(Reducer<Int, R>) -> Reducer<Text, R> {
+    |reducer| |r, s| reducer(r, s.len())
+}
+fn get_polymorphic_swap() -> fn<A, B>(A, B) -> (B, A) { |a, b| (b, a) }
+fn get_show_clone() -> fn<T: Display + Clone>(T) -> Text { |x| x.fmt() }
+
+// =============================================================================
+// Section 8: Complex Rank-2 Types (Transducers)
+// =============================================================================
+
+// Full transducer type definition
+type Transducer<A, B> is {
+    transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>
+};
+
+// Stateful transducer
+type StatefulTransducer<A, B, S> is {
+    initial_state: S,
+    transform: fn<R>(Reducer<B, R>, &mut S) -> Reducer<A, R>
+};
+
+fn test_transducer_types() {
+    // Map transducer
+    let map_t: Transducer<Int, Text> = make_map_transducer();
+
+    // Filter transducer
+    let filter_t: Transducer<Int, Int> = make_filter_transducer();
+
+    // Stateful transducer
+    let take_t: StatefulTransducer<Int, Int, Int> = make_take_transducer();
+
+    // Composed transducer
+    let composed: Transducer<Int, Bool> = compose_transducers();
+}
+
+fn make_map_transducer() -> Transducer<Int, Text> {
+    Transducer { transform: |reducer| |r, n| reducer(r, f"{n}") }
+}
+
+fn make_filter_transducer() -> Transducer<Int, Int> {
+    Transducer { transform: |reducer| |r, n| if n > 0 { reducer(r, n) } else { r } }
+}
+
+fn make_take_transducer() -> StatefulTransducer<Int, Int, Int> {
+    StatefulTransducer {
+        initial_state: 0,
+        transform: |reducer, count| |r, n| {
+            if *count < 5 {
+                *count = *count + 1;
+                reducer(r, n)
+            } else {
+                r
+            }
+        }
+    }
+}
+
+fn compose_transducers() -> Transducer<Int, Bool> {
+    Transducer { transform: |reducer| |r, n| reducer(r, n > 0) }
+}
+
+// =============================================================================
+// Section 9: Function Types with Complex Parameters
+// =============================================================================
+
+fn test_complex_param_function_types() {
+    // Function taking tuple
+    let f1: fn((Int, Text)) -> Int = tuple_fn();
+
+    // Function taking array
+    let f2: fn([Int; 5]) -> Int = array_fn();
+
+    // Function taking slice
+    let f3: fn(&[Int]) -> Int = slice_fn();
+
+    // Function taking reference
+    let f4: fn(&Int) -> Int = ref_fn();
+    let f5: fn(&mut Int) = mut_ref_fn();
+
+    // Function taking generic
+    let f6: fn(List<Int>) -> Int = list_fn();
+    let f7: fn(Map<Text, Int>) -> Int = map_fn();
+
+    // Mixed complex params
+    let f8: fn(&List<(Int, Text)>, [Int; 3]) -> Map<Text, Int> = complex_fn();
+}
+
+fn tuple_fn() -> fn((Int, Text)) -> Int { |t| t.0 }
+fn array_fn() -> fn([Int; 5]) -> Int { |arr| arr[0] }
+fn slice_fn() -> fn(&[Int]) -> Int { |s| s.len() }
+fn ref_fn() -> fn(&Int) -> Int { |r| *r }
+fn mut_ref_fn() -> fn(&mut Int) { |r| *r = *r + 1 }
+fn list_fn() -> fn(List<Int>) -> Int { |list| list.len() }
+fn map_fn() -> fn(Map<Text, Int>) -> Int { |map| map.len() }
+fn complex_fn() -> fn(&List<(Int, Text)>, [Int; 3]) -> Map<Text, Int> {
+    |list, arr| Map.new()
+}
+
+// =============================================================================
+// Section 10: Function Types with Complex Returns
+// =============================================================================
+
+fn test_complex_return_function_types() {
+    // Function returning tuple
+    let f1: fn(Int) -> (Int, Int) = split_fn();
+
+    // Function returning array
+    let f2: fn(Int) -> [Int; 3] = triple_fn();
+
+    // Function returning generic
+    let f3: fn(Int) -> Maybe<Int> = maybe_fn();
+    let f4: fn(Int) -> Result<Int, Error> = result_fn();
+
+    // Function returning reference
+    let f5: fn(&[Int]) -> &Int = first_ref_fn();
+
+    // Function returning function
+    let f6: fn() -> fn(Int) -> Int = fn_factory();
+}
+
+fn split_fn() -> fn(Int) -> (Int, Int) { |n| (n, n) }
+fn triple_fn() -> fn(Int) -> [Int; 3] { |n| [n, n, n] }
+fn maybe_fn() -> fn(Int) -> Maybe<Int> { |n| if n > 0 { Some(n) } else { None } }
+fn result_fn() -> fn(Int) -> Result<Int, Error> { |n| Ok(n) }
+fn first_ref_fn() -> fn(&[Int]) -> &Int { |s| &s[0] }
+fn fn_factory() -> fn() -> fn(Int) -> Int { (|| |x| x) }
+
+// =============================================================================
+// Section 11: Function Types in Type Definitions
+// =============================================================================
+
+// Type alias for function types
+type IntTransform is fn(Int) -> Int;
+type BinaryOp is fn(Int, Int) -> Int;
+type Predicate<T> is fn(T) -> Bool;
+type Consumer<T> is fn(T);
+type Producer<T> is fn() -> T;
+type Callback is fn() using [Logger];
+
+// Record with function type fields
+type Handler is {
+    on_start: fn(),
+    on_data: fn(Int) -> Bool,
+    on_error: fn(Error),
+    on_complete: fn() -> Int
+};
+
+// Generic function type aliases
+type Mapper<A, B> is fn(A) -> B;
+type BiMapper<A, B, C> is fn(A, B) -> C;
+type FoldFn<A, B> is fn(B, A) -> B;
+
+fn test_type_alias_function_types() {
+    let transform: IntTransform = |x| x * 2;
+    let add: BinaryOp = |a, b| a + b;
+    let is_positive: Predicate<Int> = |n| n > 0;
+    let printer: Consumer<Text> = |s| print(s);
+    let producer: Producer<Int> = || 42;
+}
+
+// =============================================================================
+// Section 12: Function Types in Generic Contexts
+// =============================================================================
+
+fn test_function_types_as_generics() {
+    // List of functions
+    let fns: List<fn(Int) -> Int> = List.of(|x| x, |x| x * 2, |x| x + 1);
+
+    // Map with function values
+    let ops: Map<Text, fn(Int, Int) -> Int> = Map.of(
+        ("add", |a, b| a + b),
+        ("sub", |a, b| a - b),
+        ("mul", |a, b| a * b)
+    );
+
+    // Maybe containing function
+    let maybe_fn: Maybe<fn() -> Int> = Some(|| 42);
+
+    // Result containing function
+    let result_fn: Result<fn(Int) -> Int, Error> = Ok(|x| x);
+}
+
+// Generic function taking function type parameter
+fn map_list<A, B>(list: List<A>, f: fn(A) -> B) -> List<B> {
+    list.map(f)
+}
+
+fn filter_list<T>(list: List<T>, pred: fn(T) -> Bool) -> List<T> {
+    list.filter(pred)
+}
+
+fn fold_list<A, B>(list: List<A>, init: B, f: fn(B, A) -> B) -> B {
+    list.fold(init, f)
+}
+
+// =============================================================================
+// Section 13: Function Types in Protocol Definitions
+// =============================================================================
+
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+type Monad<M<_>> is protocol extends Functor<M<_>> {
+    fn pure<A>(a: A) -> M<A>;
+    fn flat_map<A, B>(self: M<A>, f: fn(A) -> M<B>) -> M<B>;
+};
+
+type Foldable<F<_>> is protocol {
+    fn fold<A, B>(self: F<A>, init: B, f: fn(B, A) -> B) -> B;
+};
+
+// Protocol with function type in associated type position
+type Handler is protocol {
+    type Event;
+    type Result;
+    fn handle(&self) -> fn(Self.Event) -> Self.Result;
+};
+
+// =============================================================================
+// Section 14: Closure Types (Implicit Function Types)
+// =============================================================================
+
+fn test_closure_types() {
+    // Closures with explicit type annotation
+    let add: fn(Int, Int) -> Int = |a, b| a + b;
+
+    // Closure with capture (still has function type)
+    let x = 10;
+    let add_x: fn(Int) -> Int = |n| n + x;
+
+    // Async closure
+    let async_add: async fn(Int, Int) -> Int = async |a, b| a + b;
+
+    // Closure with context
+    let ctx_fn: fn(Int) -> Int using [Logger] = |n| {
+        Logger.log(f"Processing {n}");
+        n * 2
+    };
+}
+
+// =============================================================================
+// Section 15: Edge Cases and Complex Combinations
+// =============================================================================
+
+fn test_edge_cases() {
+    // Function returning never
+    let diverge: fn() -> ! = || panic("never returns");
+
+    // Function taking and returning unknown
+    let any_fn: fn(unknown) -> unknown = |x| x;
+
+    // Deeply nested function types
+    let deep: fn(fn(fn(Int) -> Int) -> fn(Int) -> Int) -> Int = |f| f(|g| g)(42);
+
+    // Function with all modifiers
+    let full: async fn(Int, Text) -> Result<Int, Error> using [Database, Logger] =
+        async |n, s| Ok(n);
+
+    // Empty parameter list with complex return
+    let complex_return: fn() -> Result<List<Map<Text, Int>>, Error> = || Ok(List.new());
+
+    // Function taking function that takes function
+    let meta: fn(fn(fn() -> Int) -> Int) -> Int = |f| f(|| 42);
+}
+
+// =============================================================================
+// Section 16: Function Types with Throws Clause
+// =============================================================================
+
+// Note: throws is part of function_def, not function_type in grammar
+// But we can model it in type aliases
+
+type FallibleFn<T, E> is fn(T) -> Result<T, E>;
+type ThrowingFn is fn() -> Result<Int, Error>;
+
+fn test_fallible_function_types() {
+    let parse: FallibleFn<Text, Error> = |s| Ok(s);
+    let may_fail: ThrowingFn = || Ok(42);
+}

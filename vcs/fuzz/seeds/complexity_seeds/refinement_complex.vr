@@ -1,0 +1,49 @@
+// Complexity: Complex refinement types
+type Positive is (Int) where value it > 0;
+type NonNegative is (Int) where value it >= 0;
+type Percentage is (Int) where value it >= 0 && it <= 100;
+type NonEmpty<T> is (List<T>) where value len(it) > 0;
+
+fn safe_divide(a: Int, b: Int{!= 0}) -> Int {
+    a / b
+}
+
+fn sqrt(x: NonNegative) -> Float {
+    // Simplified
+    0.0
+}
+
+fn percentage_to_fraction(p: Percentage) -> Float {
+    p as Float / 100.0
+}
+
+fn head<T>(list: NonEmpty<T>) -> T {
+    list[0]
+}
+
+fn binary_search(
+    arr: &List<Int>,
+    target: Int,
+    low: Int{>= 0},
+    high: Int{>= low}
+) -> Maybe<Int> {
+    if low > high {
+        None
+    } else {
+        let mid = low + (high - low) / 2;
+        let val = arr[mid];
+        if val == target {
+            Some(mid)
+        } else if val < target {
+            binary_search(arr, target, mid + 1, high)
+        } else {
+            binary_search(arr, target, low, mid - 1)
+        }
+    }
+}
+
+fn main() {
+    let p: Percentage = 50;
+    let result = safe_divide(100, 2);
+    let frac = percentage_to_fraction(p);
+}

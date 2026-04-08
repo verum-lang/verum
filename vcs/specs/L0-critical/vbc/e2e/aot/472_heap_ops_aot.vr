@@ -1,0 +1,224 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, heap, priority-queue, data-structure
+// @timeout: 30000
+
+// Min-heap operations on a fixed-size array
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Heap is stored as (arr, size) packed: arr is the data, size tracked separately
+// Parent of i: (i-1)/2, left child: 2i+1, right child: 2i+2
+
+fn swap8(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = get8(a, i);
+    let vj = get8(a, j);
+    let tmp = set8(a, i, vj);
+    set8(tmp, j, vi)
+}
+
+// Sift up: restore heap property after inserting at index i
+fn sift_up(arr: Arr8, i: Int) -> Arr8 {
+    let mut a = arr;
+    let mut idx = i;
+    while idx > 0 {
+        let parent = (idx - 1) / 2;
+        if get8(a, idx) < get8(a, parent) {
+            a = swap8(a, idx, parent);
+            idx = parent;
+        } else {
+            idx = 0; // break
+        }
+    }
+    a
+}
+
+// Sift down: restore heap property from index i with heap of given size
+fn sift_down(arr: Arr8, i: Int, size: Int) -> Arr8 {
+    let mut a = arr;
+    let mut idx = i;
+    let mut cont = 1;
+    while cont == 1 {
+        let left = 2 * idx + 1;
+        let right = 2 * idx + 2;
+        let mut smallest = idx;
+        if left < size {
+            if get8(a, left) < get8(a, smallest) {
+                smallest = left;
+            }
+        }
+        if right < size {
+            if get8(a, right) < get8(a, smallest) {
+                smallest = right;
+            }
+        }
+        if smallest != idx {
+            a = swap8(a, idx, smallest);
+            idx = smallest;
+        } else {
+            cont = 0;
+        }
+    }
+    a
+}
+
+// Insert value into heap, return new array (size managed externally)
+fn heap_insert(arr: Arr8, size: Int, val: Int) -> Arr8 {
+    let a = set8(arr, size, val);
+    sift_up(a, size)
+}
+
+// Extract min: swap root with last, sift down
+// Returns min value packed with new array via separate functions
+fn heap_peek(arr: Arr8) -> Int {
+    get8(arr, 0)
+}
+
+fn heap_extract_arr(arr: Arr8, size: Int) -> Arr8 {
+    let a = set8(arr, 0, get8(arr, size - 1));
+    sift_down(a, 0, size - 1)
+}
+
+// Verify min-heap property
+fn is_min_heap(arr: Arr8, size: Int) -> Int {
+    let mut i = 0;
+    while i < size {
+        let left = 2 * i + 1;
+        let right = 2 * i + 2;
+        if left < size {
+            if get8(arr, left) < get8(arr, i) { return 0; }
+        }
+        if right < size {
+            if get8(arr, right) < get8(arr, i) { return 0; }
+        }
+        i = i + 1;
+    }
+    1
+}
+
+// Heapify: build heap from arbitrary array
+fn heapify(arr: Arr8, size: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = size / 2 - 1;
+    while i >= 0 {
+        a = sift_down(a, i, size);
+        i = i - 1;
+    }
+    a
+}
+
+// Heap sort: build min-heap then extract all
+fn heap_sort(arr: Arr8, size: Int) -> Arr8 {
+    let mut a = heapify(arr, size);
+    let mut result = zeros();
+    let mut s = size;
+    let mut ri = 0;
+    while s > 0 {
+        result = set8(result, ri, get8(a, 0));
+        a = heap_extract_arr(a, s);
+        s = s - 1;
+        ri = ri + 1;
+    }
+    result
+}
+
+fn test_insert_extract() -> Int {
+    let mut h = zeros();
+    h = heap_insert(h, 0, 5);
+    h = heap_insert(h, 1, 3);
+    h = heap_insert(h, 2, 7);
+    h = heap_insert(h, 3, 1);
+    assert_eq(is_min_heap(h, 4), 1);
+    assert_eq(heap_peek(h), 1);
+
+    // Extract min (1)
+    let min1 = heap_peek(h);
+    h = heap_extract_arr(h, 4);
+    assert_eq(min1, 1);
+    assert_eq(is_min_heap(h, 3), 1);
+    assert_eq(heap_peek(h), 3);
+
+    // Extract min (3)
+    let min2 = heap_peek(h);
+    h = heap_extract_arr(h, 3);
+    assert_eq(min2, 3);
+    assert_eq(heap_peek(h), 5);
+    1
+}
+
+fn test_heapify() -> Int {
+    // Build heap from unsorted array
+    let arr = Arr8 { v0: 9, v1: 4, v2: 7, v3: 1, v4: 3, v5: 6, v6: 2, v7: 8 };
+    let h = heapify(arr, 8);
+    assert_eq(is_min_heap(h, 8), 1);
+    assert_eq(heap_peek(h), 1);
+    1
+}
+
+fn test_heap_sort() -> Int {
+    let arr = Arr8 { v0: 5, v1: 2, v2: 8, v3: 1, v4: 9, v5: 3, v6: 7, v7: 4 };
+    let sorted = heap_sort(arr, 8);
+    assert_eq(get8(sorted, 0), 1);
+    assert_eq(get8(sorted, 1), 2);
+    assert_eq(get8(sorted, 2), 3);
+    assert_eq(get8(sorted, 3), 4);
+    assert_eq(get8(sorted, 4), 5);
+    assert_eq(get8(sorted, 5), 7);
+    assert_eq(get8(sorted, 6), 8);
+    assert_eq(get8(sorted, 7), 9);
+    1
+}
+
+fn test_already_heap() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    assert_eq(is_min_heap(arr, 8), 1);
+    let h = heapify(arr, 8);
+    assert_eq(heap_peek(h), 1);
+    1
+}
+
+fn test_duplicates() -> Int {
+    let mut h = zeros();
+    h = heap_insert(h, 0, 3);
+    h = heap_insert(h, 1, 3);
+    h = heap_insert(h, 2, 1);
+    h = heap_insert(h, 3, 1);
+    assert_eq(is_min_heap(h, 4), 1);
+    assert_eq(heap_peek(h), 1);
+    h = heap_extract_arr(h, 4);
+    assert_eq(heap_peek(h), 1);
+    h = heap_extract_arr(h, 3);
+    assert_eq(heap_peek(h), 3);
+    1
+}
+
+fn main() -> Int {
+    test_insert_extract();
+    test_heapify();
+    test_heap_sort();
+    test_already_heap();
+    test_duplicates();
+    print("[OK] 472_heap_ops_aot");
+    0
+}

@@ -1,0 +1,228 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, tagged, color, hex
+
+// Hex color literal syntax
+
+fn test_6_digit_rgb_colors() {
+    // 6-digit RGB colors (full format)
+    let red = #FF0000;
+    let green = #00FF00;
+    let blue = #0000FF;
+    let white = #FFFFFF;
+    let black = #000000;
+}
+
+fn test_common_web_colors() {
+    // Common web colors
+    let orange = #FFA500;
+    let yellow = #FFFF00;
+    let purple = #800080;
+    let pink = #FFC0CB;
+    let cyan = #00FFFF;
+    let magenta = #FF00FF;
+}
+
+fn test_expanded_shorthand_rgb() {
+    // Expanded from 3-digit shorthand RGB (e.g. #F00 -> #FF0000)
+    let red_expanded = #FF0000;
+    let green_expanded = #00FF00;
+    let blue_expanded = #0000FF;
+    let white_expanded = #FFFFFF;
+    let black_expanded = #000000;
+}
+
+fn test_8_digit_rgba_colors() {
+    // 8-digit RGBA colors (with alpha)
+    let red_alpha = #FF0000FF;      // Fully opaque red
+    let semi_transparent = #FF000080;  // 50% transparent red
+    let transparent_white = #FFFFFF00;  // Fully transparent white
+    let semi_blue = #0000FF7F;      // ~50% transparent blue
+}
+
+fn test_expanded_shorthand_rgba() {
+    // Expanded from 4-digit shorthand RGBA (e.g. #F00F -> #FF0000FF)
+    let red_alpha_expanded = #FF0000FF;
+    let transparent_expanded = #FFFFFF00;
+}
+
+fn test_lowercase_variant() {
+    // Lowercase variant
+    let lowercase_red = #ff0000;
+    let lowercase_green = #00ff00;
+    let lowercase_blue = #0000ff;
+}
+
+fn test_mixed_case() {
+    // Mixed case
+    let mixed_case = #FfAa00;
+}
+
+fn test_gray_scale() {
+    // Gray scale
+    let gray_light = #CCCCCC;
+    let gray_medium = #888888;
+    let gray_dark = #444444;
+    let gray_25 = #404040;
+    let gray_50 = #808080;
+    let gray_75 = #C0C0C0;
+}
+
+fn test_material_design_colors() {
+    // Material design colors
+    let md_red_500 = #F44336;
+    let md_pink_500 = #E91E63;
+    let md_purple_500 = #9C27B0;
+    let md_indigo_500 = #3F51B5;
+    let md_blue_500 = #2196F3;
+    let md_teal_500 = #009688;
+    let md_green_500 = #4CAF50;
+    let md_amber_500 = #FFC107;
+}
+
+fn test_pastel_colors() {
+    // Pastel colors
+    let pastel_pink = #FFD1DC;
+    let pastel_blue = #AEC6CF;
+    let pastel_green = #77DD77;
+    let pastel_yellow = #FDFD96;
+    let pastel_purple = #B19CD9;
+}
+
+fn test_brand_colors() {
+    // Brand colors (examples)
+    let brand_facebook = #1877F2;
+    let brand_twitter = #1DA1F2;
+    let brand_github = #333333;
+    let brand_spotify = #1DB954;
+}
+
+fn test_color_in_expressions() {
+    // Color in expressions
+    let primary = #3498DB;
+    let secondary = #2ECC71;
+    let is_same = primary == secondary;
+}
+
+fn test_color_arithmetic() {
+    // Color arithmetic (if supported)
+    let darkened = #FF0000.darken(0.2);
+    let lightened = #FF0000.lighten(0.2);
+    let mixed = #FF0000.mix(#0000FF, 0.5);
+}
+
+// Color in function parameters
+fn set_background(color: Color) {
+    element.style.background_color = color
+}
+
+fn test_function_call() {
+    set_background(#F5F5F5);
+}
+
+// Color in structs
+type Theme is {
+    primary: Color,
+    secondary: Color,
+    background: Color,
+    text_color: Color,
+};
+
+fn test_color_in_structs() {
+    let dark_theme = Theme {
+        primary: #BB86FC,
+        secondary: #03DAC6,
+        background: #121212,
+        text_color: #FFFFFF,
+    };
+
+    let light_theme = Theme {
+        primary: #6200EE,
+        secondary: #03DAC6,
+        background: #FFFFFF,
+        text_color: #000000,
+    };
+}
+
+fn test_color_in_arrays() {
+    // Color in arrays
+    let palette = [#FF0000, #FF7F00, #FFFF00, #00FF00, #0000FF, #4B0082, #9400D3];
+    let gradient = [#000000, #333333, #666666, #999999, #CCCCCC, #FFFFFF];
+}
+
+fn test_color_in_maps() {
+    // Color in maps
+    let color_names: Map<Text, Color> = {
+        "red": #FF0000,
+        "green": #00FF00,
+        "blue": #0000FF,
+    };
+}
+
+fn test_color_conversion() {
+    // Color conversion
+    let rgb = #FF5733;
+    let hsl = rgb.to_hsl();
+    let hsv = rgb.to_hsv();
+    let cmyk = rgb.to_cmyk();
+}
+
+fn test_color_components() {
+    // Color components
+    let color = #FF8800;
+    let r = color.red();
+    let g = color.green();
+    let b = color.blue();
+    let a = color.alpha();
+}
+
+fn test_color_from_components() {
+    // Color from components
+    let from_rgb = Color.rgb(255, 136, 0);
+    let from_rgba = Color.rgba(255, 136, 0, 128);
+    let from_hsl = Color.hsl(32, 100, 50);
+}
+
+// Color comparison
+fn color_category(c: Color) -> Text {
+    // Using if-else for color comparison since hex literals in patterns
+    // may not be supported in all contexts
+    if c == #FF0000 {
+        "pure red"
+    } else if c == #00FF00 {
+        "pure green"
+    } else if c == #0000FF {
+        "pure blue"
+    } else if c.red() > 200 {
+        "reddish"
+    } else if c.green() > 200 {
+        "greenish"
+    } else if c.blue() > 200 {
+        "bluish"
+    } else {
+        "mixed"
+    }
+}
+
+fn test_color_interpolation() {
+    // Color interpolation
+    let start_color = #FF0000;
+    let end_color = #0000FF;
+    let midpoint = start_color.lerp(end_color, 0.5);
+}
+
+fn test_contrast_calculation() {
+    // Contrast calculation
+    let bg = #FFFFFF;
+    let fg = #000000;
+    let contrast_ratio = bg.contrast_ratio(fg);
+    let is_accessible = contrast_ratio >= 4.5;
+}
+
+fn test_color_with_alpha_operations() {
+    // Color with alpha operations
+    let base = #FF0000;
+    let with_alpha = base.with_alpha(0.5);
+    let opaque = with_alpha.opaque();
+}

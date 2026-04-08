@@ -1,0 +1,15 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, panic, loop
+// @timeout: 5000
+// @expected-panic: Assertion failed
+
+fn main() {
+    let mut sum = 0;
+    for i in 0..10 {
+        sum = sum + i;
+        assert(sum < 20);
+    }
+    print(f"sum={sum}");
+}

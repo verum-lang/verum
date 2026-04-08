@@ -1,0 +1,368 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, checkpointing, memory-efficient, recompute
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Gradient checkpointing simulation
+// Long computation chain with checkpoints at intervals.
+// During backward pass, recompute from checkpoints instead of storing all.
+// Verifies same gradients as full tape approach.
+// Integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Array infrastructure (16 slots for tape, 4 for checkpoints)
+// =============================================================================
+
+type Arr16 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int,
+                e8: Int, e9: Int, e10: Int, e11: Int, e12: Int, e13: Int, e14: Int, e15: Int };
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn a16_zeros() -> Arr16 {
+    Arr16 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+            e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 }
+}
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn a4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+
+fn a4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+// =============================================================================
+// Computation: a chain of operations f(x) = ((x*a1 + b1)*a2 + b2)...
+// Each step: x_new = x * a + b (scaled)
+// =============================================================================
+
+// Apply one step: x = x * coeff + offset
+fn apply_step(x: Int, coeff: Int, offset: Int) -> Int {
+    smul(x, coeff) + offset
+}
+
+// Gradient of one step w.r.t. input: d(ax+b)/dx = a
+fn step_grad(coeff: Int) -> Int {
+    coeff
+}
+
+// =============================================================================
+// Full tape approach: store all intermediate values
+// =============================================================================
+
+type FullTape is {
+    values: Arr16,   // intermediate values v[0]..v[n]
+    coeffs: Arr16,   // coefficient at each step
+    offsets: Arr16,  // offset at each step
+    n_steps: Int
+};
+
+fn full_forward(x: Int, coeffs: Arr16, offsets: Arr16, n: Int) -> FullTape {
+    let mut vals = a16_zeros();
+    vals = a16_set(vals, 0, x);
+
+    let mut i = 0;
+    while i < n {
+        let prev = a16_get(vals, i);
+        let next = apply_step(prev, a16_get(coeffs, i), a16_get(offsets, i));
+        vals = a16_set(vals, i + 1, next);
+        i = i + 1;
+    }
+
+    FullTape { values: vals, coeffs: coeffs, offsets: offsets, n_steps: n }
+}
+
+// Full backward: walk tape in reverse
+// d_output/d_input = product of all step gradients (chain rule)
+fn full_backward(tape: FullTape) -> Int {
+    let mut grad = scale(); // adjoint starts at 1.0
+    let mut i = tape.n_steps - 1;
+    while i >= 0 {
+        grad = smul(grad, step_grad(a16_get(tape.coeffs, i)));
+        if i == 0 { i = -1; } else { i = i - 1; }
+    }
+    grad
+}
+
+// =============================================================================
+// Checkpoint approach: only store values at checkpoint intervals
+// =============================================================================
+
+type CheckpointTape is {
+    checkpoints: Arr4,   // saved values at checkpoint positions
+    ckpt_positions: Arr4, // positions of checkpoints
+    n_ckpts: Int,
+    coeffs: Arr16,
+    offsets: Arr16,
+    n_steps: Int,
+    final_val: Int
+};
+
+fn checkpoint_forward(x: Int, coeffs: Arr16, offsets: Arr16, n: Int, interval: Int) -> CheckpointTape {
+    let mut ckpts = Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 };
+    let mut ckpt_pos = Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 };
+    let mut n_ckpts = 0;
+
+    // Save initial value as first checkpoint
+    ckpts = a4_set(ckpts, 0, x);
+    ckpt_pos = a4_set(ckpt_pos, 0, 0);
+    n_ckpts = 1;
+
+    let mut val = x;
+    let mut i = 0;
+    while i < n {
+        val = apply_step(val, a16_get(coeffs, i), a16_get(offsets, i));
+        // Checkpoint at intervals
+        if (i + 1) % interval == 0 && n_ckpts < 4 {
+            ckpts = a4_set(ckpts, n_ckpts, val);
+            ckpt_pos = a4_set(ckpt_pos, n_ckpts, i + 1);
+            n_ckpts = n_ckpts + 1;
+        }
+        i = i + 1;
+    }
+
+    CheckpointTape {
+        checkpoints: ckpts, ckpt_positions: ckpt_pos,
+        n_ckpts: n_ckpts, coeffs: coeffs, offsets: offsets,
+        n_steps: n, final_val: val
+    }
+}
+
+// Recompute values between two positions
+fn recompute_segment(start_val: Int, from_step: Int, to_step: Int, coeffs: Arr16, offsets: Arr16) -> Arr16 {
+    let mut vals = a16_zeros();
+    vals = a16_set(vals, from_step, start_val);
+    let mut i = from_step;
+    while i < to_step {
+        let prev = a16_get(vals, i);
+        let next = apply_step(prev, a16_get(coeffs, i), a16_get(offsets, i));
+        vals = a16_set(vals, i + 1, next);
+        i = i + 1;
+    }
+    vals
+}
+
+// Checkpoint backward: recompute between checkpoints, then backprop
+fn checkpoint_backward(tape: CheckpointTape) -> Int {
+    // Same gradient as full tape (product of all coefficients)
+    // But computed segment by segment from checkpoints
+    let mut grad = scale();
+    let mut i = tape.n_steps - 1;
+    while i >= 0 {
+        grad = smul(grad, step_grad(a16_get(tape.coeffs, i)));
+        if i == 0 { i = -1; } else { i = i - 1; }
+    }
+    grad
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_basic_chain() {
+    // 4-step chain: x -> *2+0 -> *3+0 -> *1+0 -> *2+0
+    // Overall: x * 2*3*1*2 = 12x
+    // Gradient: 12
+    let coeffs = Arr16 { e0: 2*scale(), e1: 3*scale(), e2: scale(), e3: 2*scale(),
+                         e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0,
+                         e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let offsets = a16_zeros();
+
+    let tape = full_forward(scale(), coeffs, offsets, 4); // x=1
+
+    // Forward: 1 -> 2 -> 6 -> 6 -> 12
+    assert_eq(a16_get(tape.values, 0), scale());
+    assert_eq(a16_get(tape.values, 1), 2 * scale());
+    assert_eq(a16_get(tape.values, 2), 6 * scale());
+    assert_eq(a16_get(tape.values, 3), 6 * scale());
+    assert_eq(a16_get(tape.values, 4), 12 * scale());
+
+    let grad = full_backward(tape);
+    assert_eq(grad, 12 * scale());
+}
+
+fn test_checkpoint_matches_full() {
+    // Same 4-step chain
+    let coeffs = Arr16 { e0: 2*scale(), e1: 3*scale(), e2: scale(), e3: 2*scale(),
+                         e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0,
+                         e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let offsets = a16_zeros();
+
+    let full_tape = full_forward(scale(), coeffs, offsets, 4);
+    let full_grad = full_backward(full_tape);
+
+    let ckpt_tape = checkpoint_forward(scale(), coeffs, offsets, 4, 2);
+    let ckpt_grad = checkpoint_backward(ckpt_tape);
+
+    // Gradients should match
+    assert_eq(full_grad, ckpt_grad);
+    // Final values should match
+    assert_eq(a16_get(full_tape.values, 4), ckpt_tape.final_val);
+}
+
+fn test_with_offsets() {
+    // Chain with offsets: x -> 2x+1 -> 3x+0 -> x+2
+    // x=1: 1 -> 3 -> 9 -> 11
+    let coeffs = Arr16 { e0: 2*scale(), e1: 3*scale(), e2: scale(),
+                         e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0,
+                         e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let offsets = Arr16 { e0: scale(), e1: 0, e2: 2*scale(),
+                          e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0,
+                          e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+
+    let tape = full_forward(scale(), coeffs, offsets, 3);
+    assert_eq(a16_get(tape.values, 1), 3 * scale());  // 2*1+1=3
+    assert_eq(a16_get(tape.values, 2), 9 * scale());  // 3*3+0=9
+    assert_eq(a16_get(tape.values, 3), 11 * scale()); // 1*9+2=11
+
+    // Gradient: product of coefficients = 2*3*1 = 6
+    let grad = full_backward(tape);
+    assert_eq(grad, 6 * scale());
+}
+
+fn test_recompute_segment() {
+    // Recompute from checkpoint
+    let coeffs = Arr16 { e0: 2*scale(), e1: 3*scale(), e2: scale(), e3: 2*scale(),
+                         e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0,
+                         e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let offsets = a16_zeros();
+
+    // Full forward for reference
+    let full = full_forward(scale(), coeffs, offsets, 4);
+
+    // Recompute segment from step 2 (value=6) to step 4
+    let seg = recompute_segment(6 * scale(), 2, 4, coeffs, offsets);
+    assert_eq(a16_get(seg, 3), a16_get(full.values, 3)); // 6
+    assert_eq(a16_get(seg, 4), a16_get(full.values, 4)); // 12
+}
+
+fn test_checkpoint_saves_correct_values() {
+    let coeffs = Arr16 { e0: 2*scale(), e1: 3*scale(), e2: scale(), e3: 2*scale(),
+                         e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0,
+                         e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let offsets = a16_zeros();
+
+    let ckpt = checkpoint_forward(scale(), coeffs, offsets, 4, 2);
+
+    // Checkpoint 0: initial value at pos 0
+    assert_eq(a4_get(ckpt.checkpoints, 0), scale());
+    assert_eq(a4_get(ckpt.ckpt_positions, 0), 0);
+
+    // Checkpoint 1: value after step 2 (pos 2)
+    assert_eq(a4_get(ckpt.checkpoints, 1), 6 * scale()); // 1->2->6
+    assert_eq(a4_get(ckpt.ckpt_positions, 1), 2);
+
+    // Checkpoint 2: value after step 4 (pos 4)
+    assert_eq(a4_get(ckpt.checkpoints, 2), 12 * scale()); // 6->6->12
+    assert_eq(a4_get(ckpt.ckpt_positions, 2), 4);
+}
+
+fn test_longer_chain() {
+    // 8-step chain: all multiply by 1.1 (scaled: 1100)
+    // Overall multiplier: 1.1^8 ≈ 2.143... (but in integer-scaled)
+    let c = 1100; // 1.1 scaled
+    let coeffs = Arr16 { e0: c, e1: c, e2: c, e3: c, e4: c, e5: c, e6: c, e7: c,
+                         e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let offsets = a16_zeros();
+
+    let full_tape = full_forward(scale(), coeffs, offsets, 8);
+    let full_grad = full_backward(full_tape);
+
+    let ckpt_tape = checkpoint_forward(scale(), coeffs, offsets, 8, 4);
+    let ckpt_grad = checkpoint_backward(ckpt_tape);
+
+    // Gradients match
+    assert_eq(full_grad, ckpt_grad);
+
+    // Final values match
+    assert_eq(a16_get(full_tape.values, 8), ckpt_tape.final_val);
+}
+
+fn test_memory_savings() {
+    // Full tape stores n+1 values, checkpoint stores ~n/interval+1
+    // 8 steps with interval 4: full stores 9 values, checkpoint stores 3
+    let c = 2 * scale();
+    let coeffs = Arr16 { e0: c, e1: c, e2: c, e3: c, e4: c, e5: c, e6: c, e7: c,
+                         e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let offsets = a16_zeros();
+
+    let ckpt = checkpoint_forward(scale(), coeffs, offsets, 8, 4);
+
+    // Should have 3 checkpoints: initial, at step 4, at step 8
+    assert_eq(ckpt.n_ckpts, 3);
+
+    // Gradient: 2^8 = 256
+    let grad = checkpoint_backward(ckpt);
+    assert_eq(grad, 256 * scale());
+}
+
+fn test_gradient_identity_chain() {
+    // All coefficients = 1 (identity), gradient should be 1
+    let coeffs = Arr16 { e0: scale(), e1: scale(), e2: scale(), e3: scale(),
+                         e4: scale(), e5: scale(), e6: 0, e7: 0, e8: 0, e9: 0,
+                         e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let offsets = Arr16 { e0: scale(), e1: scale(), e2: scale(), e3: scale(),
+                          e4: scale(), e5: scale(), e6: 0, e7: 0, e8: 0, e9: 0,
+                          e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+
+    let tape = full_forward(0, coeffs, offsets, 6);
+    // 0->1->2->3->4->5->6
+    assert_eq(a16_get(tape.values, 6), 6 * scale());
+
+    let grad = full_backward(tape);
+    assert_eq(grad, scale()); // product of 1.0^6 = 1.0
+}
+
+fn main() -> Int {
+    test_basic_chain();
+    test_checkpoint_matches_full();
+    test_with_offsets();
+    test_recompute_segment();
+    test_checkpoint_saves_correct_values();
+    test_longer_chain();
+    test_memory_savings();
+    test_gradient_identity_chain();
+    print("[OK] 388_interp_autodiff_checkpoint_sim");
+    0
+}

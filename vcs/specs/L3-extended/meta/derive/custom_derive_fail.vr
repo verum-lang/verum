@@ -1,0 +1,207 @@
+// @test: typecheck-fail
+// @expected-error: Derive macro error
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, custom, error
+
+/// Custom derive failure cases
+///
+/// These tests verify that custom derive macros produce proper
+/// error messages when used incorrectly.
+
+// ============================================================
+// INVALID DERIVE MACRO DEFINITIONS
+// ============================================================
+
+// ERROR: Derive macro must return TokenStream
+@derive_macro
+meta fn BadReturn(ty: TypeInfo) -> Int {
+    // ERROR: Derive macro must return TokenStream, not Int
+    42
+}
+
+// ERROR: Derive macro must accept TypeInfo
+@derive_macro
+meta fn BadParams(name: Text) -> TokenStream {
+    // ERROR: First parameter must be TypeInfo
+    @quote {}
+}
+
+// ERROR: Derive macro cannot have side effects
+@derive_macro
+meta fn SideEffectDerive(ty: TypeInfo) -> TokenStream {
+    // ERROR: Cannot perform IO in derive macro
+    println("Deriving for {ty.name}");
+    @quote {}
+}
+
+// ============================================================
+// INVALID DERIVE USAGE
+// ============================================================
+
+// ERROR: Using undefined derive
+@derive(NonExistent)
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// ERROR: Derive on incompatible type
+@derive(Copy)
+type LargeBuffer is {
+    data: [u8; 1_000_000],  // Too large for Copy on stack
+};
+
+// ERROR: Derive with circular dependency
+@derive(Clone)
+type SelfRef is {
+    data: Int,
+    self_ptr: &SelfRef,  // Cannot clone self-referential type
+};
+
+// ERROR: Derive requires trait not in scope
+@derive(serde.Serialize)  // serde not imported
+type Data is {
+    value: Int,
+};
+
+// ============================================================
+// CONSTRAINT VIOLATIONS
+// ============================================================
+
+// ERROR: Field doesn't implement required trait
+@derive(Clone)
+type Wrapper is {
+    inner: NonCloneable,  // NonCloneable doesn't implement Clone
+};
+
+type NonCloneable is {
+    handle: FileHandle,  // File handles cannot be cloned
+};
+
+// ERROR: Generic bounds not satisfied
+@derive(Eq)
+type FloatWrapper is {
+    value: Float,  // Float is PartialEq but not Eq (NaN != NaN)
+};
+
+// ERROR: Recursive type without Box
+@derive(Clone)
+type InfiniteTree is
+    | Leaf(Int)
+    | Node(InfiniteTree, InfiniteTree);  // Infinite size without Box
+
+// ============================================================
+// QUOTE ERRORS IN DERIVE
+// ============================================================
+
+@derive_macro
+meta fn BadQuote(ty: TypeInfo) -> TokenStream {
+    // ERROR: Invalid quote syntax - unbalanced braces
+    @quote {
+        implement #(ty.name) {
+            fn bad() {
+    }
+}
+
+@derive_macro
+meta fn BadInterpolation(ty: TypeInfo) -> TokenStream {
+    // ERROR: Cannot interpolate non-existent variable
+    @quote {
+        implement #(ty.name) {
+            fn get(&self) -> #(undefined_var) {
+                &self.data
+            }
+        }
+    }
+}
+
+@derive_macro
+meta fn TypeMismatch(ty: TypeInfo) -> TokenStream {
+    let count: Int = 42;
+    // ERROR: Cannot interpolate Int where Ident expected
+    @quote {
+        fn #(count)() {}  // count is Int, not identifier
+    }
+}
+
+// ============================================================
+// RUNTIME ERRORS IN DERIVE EXPANSION
+// ============================================================
+
+@derive_macro
+meta fn PanicDerive(ty: TypeInfo) -> TokenStream {
+    if ty.fields().is_empty() {
+        // ERROR: Derive macro panicked
+        panic("Cannot derive for empty struct")
+    }
+    @quote {}
+}
+
+@derive(PanicDerive)
+type Empty is {};  // ERROR: PanicDerive panicked
+
+@derive_macro
+meta fn DivByZero(ty: TypeInfo) -> TokenStream {
+    let count = ty.fields().len();
+    let ratio = 100 / count;  // ERROR: Division by zero for empty struct
+    @quote {}
+}
+
+@derive(DivByZero)
+type AlsoEmpty is {};
+
+// ============================================================
+// ATTRIBUTE ERRORS
+// ============================================================
+
+// ERROR: Invalid derive attribute syntax
+@derive(Debug, )  // Trailing comma not allowed here
+type BadSyntax1 is { x: Int };
+
+@derive(Debug Clone)  // Missing comma
+type BadSyntax2 is { x: Int };
+
+@derive()  // Empty derive list
+type BadSyntax3 is { x: Int };
+
+// ERROR: Conflicting derives
+@derive(Copy, Drop)  // Copy and custom Drop are incompatible
+type Conflict is {
+    value: Int,
+};
+
+implement Drop for Conflict {
+    fn drop(&mut self) {
+        println("Dropping");
+    }
+}
+
+// ERROR: Derive with invalid options
+@derive(Builder { unknown_option: true })
+type BadOptions is {
+    name: Text,
+};
+
+// ============================================================
+// FIELD ATTRIBUTE ERRORS
+// ============================================================
+
+@derive(Serialize)
+type BadFieldAttrs is {
+    @serialize(invalid_option = true)  // Unknown serialization option
+    data: Int,
+
+    unused: Int,
+};
+
+// ERROR: Skip on all fields makes serialization impossible
+@derive(Serialize)
+type AllSkipped is {
+    a: Int,
+    b: Int,
+};
+
+fn main() {
+    // These will all fail during derive expansion
+}

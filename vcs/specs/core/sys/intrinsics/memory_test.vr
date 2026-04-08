@@ -1,0 +1,433 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/memory_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, memory, memcpy, memmove, memset, memcmp
+// @description: Comprehensive tests for memory intrinsics that form the
+//               foundation of all data manipulation in Verum.
+//
+// Coverage:
+// - memcpy: Non-overlapping memory copy
+// - memmove: Overlapping memory copy
+// - memset: Memory fill with byte value
+// - memcmp: Memory comparison
+//
+// Test Strategy:
+// - Zero-length operations
+// - Small copies (1-16 bytes)
+// - Medium copies (17-256 bytes)
+// - Large copies (256+ bytes)
+// - Alignment variations (aligned and unaligned)
+// - Boundary conditions
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.memory_test;
+
+mount core.intrinsics.{memcpy, memmove, memset, memcmp};
+mount core.memory.{Heap};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// memset Tests
+// =============================================================================
+
+@test
+fn test_memset() {
+    print("test_memset starting...");
+
+    // Zero fill
+    let buf: [Byte; 16] = uninit();
+    unsafe {
+        memset(&mut buf[0] as *mut Byte, 0, 16);
+    }
+    let mut i = 0;
+    while i < 16 {
+        assert(buf[i] == 0);
+        i = i + 1;
+    }
+
+    // Fill with specific value
+    unsafe {
+        memset(&mut buf[0] as *mut Byte, 0xAB, 16);
+    }
+    i = 0;
+    while i < 16 {
+        assert(buf[i] == 0xAB);
+        i = i + 1;
+    }
+
+    // Partial fill
+    let buf2: [Byte; 32] = [0; 32];
+    unsafe {
+        memset(&mut buf2[8] as *mut Byte, 0xFF, 8);
+    }
+    // First 8 bytes unchanged
+    i = 0;
+    while i < 8 {
+        assert(buf2[i] == 0);
+        i = i + 1;
+    }
+    // Middle 8 bytes filled
+    i = 8;
+    while i < 16 {
+        assert(buf2[i] == 0xFF);
+        i = i + 1;
+    }
+    // Last 16 bytes unchanged
+    i = 16;
+    while i < 32 {
+        assert(buf2[i] == 0);
+        i = i + 1;
+    }
+
+    // Zero-length memset (should be no-op)
+    let value: Byte = 42;
+    let buf3: [Byte; 4] = [value; 4];
+    unsafe {
+        memset(&mut buf3[0] as *mut Byte, 0, 0);
+    }
+    i = 0;
+    while i < 4 {
+        assert(buf3[i] == value);
+        i = i + 1;
+    }
+
+    // Single byte memset (using single-element array for addressable memory)
+    let mut single: [Byte; 1] = [0];
+    unsafe {
+        memset(&mut single[0] as *mut Byte, 99, 1);
+    }
+    assert(single[0] == 99);
+    print("test_memset passed!");
+}
+
+// =============================================================================
+// memcpy Tests
+// =============================================================================
+
+@test
+fn test_memcpy() {
+    print("test_memcpy starting...");
+
+    // Basic copy
+    let src: [Byte; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    let dst: [Byte; 8] = [0; 8];
+
+    unsafe {
+        memcpy(&mut dst[0] as *mut Byte, &src[0] as *const Byte, 8);
+    }
+
+    let mut i = 0;
+    while i < 8 {
+        assert(dst[i] == src[i]);
+        i = i + 1;
+    }
+
+    // Partial copy
+    let src2: [Byte; 16] = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160];
+    let dst2: [Byte; 16] = [0; 16];
+
+    unsafe {
+        memcpy(&mut dst2[4] as *mut Byte, &src2[0] as *const Byte, 8);
+    }
+
+    // First 4 bytes unchanged
+    i = 0;
+    while i < 4 {
+        assert(dst2[i] == 0);
+        i = i + 1;
+    }
+    // Middle 8 bytes copied
+    i = 0;
+    while i < 8 {
+        assert(dst2[i + 4] == src2[i]);
+        i = i + 1;
+    }
+    // Last 4 bytes unchanged
+    i = 12;
+    while i < 16 {
+        assert(dst2[i] == 0);
+        i = i + 1;
+    }
+
+    // Zero-length copy (should be no-op)
+    let src3: [Byte; 4] = [1, 2, 3, 4];
+    let dst3: [Byte; 4] = [5, 6, 7, 8];
+    unsafe {
+        memcpy(&mut dst3[0] as *mut Byte, &src3[0] as *const Byte, 0);
+    }
+    i = 0;
+    while i < 4 {
+        assert(dst3[i] == (i + 5) as Byte);
+        i = i + 1;
+    }
+
+    // Large copy
+    let large_src: [Byte; 1024] = uninit();
+    let large_dst: [Byte; 1024] = uninit();
+
+    unsafe {
+        // Initialize source
+        i = 0;
+        while i < 1024 {
+            *(&mut large_src[i] as *mut Byte) = (i % 256) as Byte;
+            i = i + 1;
+        }
+
+        memcpy(&mut large_dst[0] as *mut Byte, &large_src[0] as *const Byte, 1024);
+    }
+
+    i = 0;
+    while i < 1024 {
+        assert(large_dst[i] == (i % 256) as Byte);
+        i = i + 1;
+    }
+    print("test_memcpy passed!");
+}
+
+// =============================================================================
+// memmove Tests
+// =============================================================================
+
+@test
+fn test_memmove() {
+    print("test_memmove starting...");
+
+    // Non-overlapping (same as memcpy)
+    let src: [Byte; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    let dst: [Byte; 8] = [0; 8];
+
+    unsafe {
+        memmove(&mut dst[0] as *mut Byte, &src[0] as *const Byte, 8);
+    }
+
+    let mut i = 0;
+    while i < 8 {
+        assert(dst[i] == src[i]);
+        i = i + 1;
+    }
+
+    // Overlapping: move forward (dst > src)
+    let buf1: [Byte; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0];
+    unsafe {
+        // Move bytes 0-7 to positions 4-11
+        memmove(&mut buf1[4] as *mut Byte, &buf1[0] as *const Byte, 8);
+    }
+    // Expected: [1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]
+    assert(buf1[0] == 1);
+    assert(buf1[1] == 2);
+    assert(buf1[2] == 3);
+    assert(buf1[3] == 4);
+    assert(buf1[4] == 1);
+    assert(buf1[5] == 2);
+    assert(buf1[6] == 3);
+    assert(buf1[7] == 4);
+    assert(buf1[8] == 5);
+    assert(buf1[9] == 6);
+    assert(buf1[10] == 7);
+    assert(buf1[11] == 8);
+
+    // Overlapping: move backward (dst < src)
+    let buf2: [Byte; 16] = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0];
+    unsafe {
+        // Move bytes 4-11 to positions 0-7
+        memmove(&mut buf2[0] as *mut Byte, &buf2[4] as *const Byte, 8);
+    }
+    // Expected: [1, 2, 3, 4, 5, 6, 7, 8, 5, 6, 7, 8, 0, 0, 0, 0]
+    assert(buf2[0] == 1);
+    assert(buf2[1] == 2);
+    assert(buf2[2] == 3);
+    assert(buf2[3] == 4);
+    assert(buf2[4] == 5);
+    assert(buf2[5] == 6);
+    assert(buf2[6] == 7);
+    assert(buf2[7] == 8);
+
+    // Zero-length memmove
+    let buf3: [Byte; 4] = [1, 2, 3, 4];
+    unsafe {
+        memmove(&mut buf3[0] as *mut Byte, &buf3[2] as *const Byte, 0);
+    }
+    i = 0;
+    while i < 4 {
+        assert(buf3[i] == (i + 1) as Byte);
+        i = i + 1;
+    }
+    print("test_memmove passed!");
+}
+
+// =============================================================================
+// memcmp Tests
+// =============================================================================
+
+@test
+fn test_memcmp() {
+    // Equal buffers
+    let a: [Byte; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    let b: [Byte; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    let result = unsafe {
+        memcmp(&a[0] as *const Byte, &b[0] as *const Byte, 8)
+    };
+    assert(result == 0);
+
+    // First buffer less than second
+    let c: [Byte; 8] = [1, 2, 3, 4, 5, 6, 7, 7];  // Last byte differs
+    let result = unsafe {
+        memcmp(&c[0] as *const Byte, &a[0] as *const Byte, 8)
+    };
+    assert(result < 0);
+
+    // First buffer greater than second
+    let d: [Byte; 8] = [1, 2, 3, 4, 5, 6, 7, 9];
+    let result = unsafe {
+        memcmp(&d[0] as *const Byte, &a[0] as *const Byte, 8)
+    };
+    assert(result > 0);
+
+    // Difference at first byte
+    let e: [Byte; 8] = [0, 2, 3, 4, 5, 6, 7, 8];
+    let result = unsafe {
+        memcmp(&e[0] as *const Byte, &a[0] as *const Byte, 8)
+    };
+    assert(result < 0);
+
+    // Zero-length comparison (always equal)
+    let result = unsafe {
+        memcmp(&a[0] as *const Byte, &d[0] as *const Byte, 0)
+    };
+    assert(result == 0);
+
+    // Partial comparison
+    let f: [Byte; 8] = [1, 2, 3, 4, 99, 99, 99, 99];
+    let result = unsafe {
+        memcmp(&a[0] as *const Byte, &f[0] as *const Byte, 4)
+    };
+    assert(result == 0);  // First 4 bytes are equal
+
+    let result = unsafe {
+        memcmp(&a[0] as *const Byte, &f[0] as *const Byte, 5)
+    };
+    assert(result != 0);  // 5th byte differs
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_memory_edge_cases() {
+    print("test_memory_edge_cases starting...");
+
+    // Single byte operations (using single-element arrays for addressable memory)
+    let single_src: [Byte; 1] = [42];
+    let single_dst: [Byte; 1] = [0];
+
+    unsafe {
+        memcpy(&mut single_dst[0] as *mut Byte, &single_src[0] as *const Byte, 1);
+    }
+    assert(single_dst[0] == 42);
+
+    unsafe {
+        memset(&mut single_dst[0] as *mut Byte, 99, 1);
+    }
+    assert(single_dst[0] == 99);
+
+    let cmp_result = unsafe {
+        memcmp(&single_src[0] as *const Byte, &single_dst[0] as *const Byte, 1)
+    };
+    assert(cmp_result != 0);
+
+    // All zeros comparison
+    let zeros1: [Byte; 16] = [0; 16];
+    let zeros2: [Byte; 16] = [0; 16];
+    let result = unsafe {
+        memcmp(&zeros1[0] as *const Byte, &zeros2[0] as *const Byte, 16)
+    };
+    assert(result == 0);
+
+    // All 0xFF comparison
+    let ones1: [Byte; 16] = [0xFF; 16];
+    let ones2: [Byte; 16] = [0xFF; 16];
+    let result = unsafe {
+        memcmp(&ones1[0] as *const Byte, &ones2[0] as *const Byte, 16)
+    };
+    assert(result == 0);
+
+    // Pattern test
+    let pattern: [Byte; 8] = [0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55];
+    let copy: [Byte; 8] = [0; 8];
+    unsafe {
+        memcpy(&mut copy[0] as *mut Byte, &pattern[0] as *const Byte, 8);
+    }
+    let mut i = 0;
+    while i < 8 {
+        if i % 2 == 0 {
+            assert(copy[i] == 0xAA);
+        } else {
+            assert(copy[i] == 0x55);
+        }
+        i = i + 1;
+    }
+    print("test_memory_edge_cases passed!");
+}
+
+// =============================================================================
+// Alignment Tests
+// =============================================================================
+
+@test
+fn test_memory_alignment() {
+    print("test_memory_alignment starting...");
+
+    // Aligned access (8-byte aligned)
+    let aligned: [UInt64; 4] = [0x0102030405060708, 0x090A0B0C0D0E0F10,
+                                 0x1112131415161718, 0x191A1B1C1D1E1F20];
+    let aligned_dst: [UInt64; 4] = [0; 4];
+
+    unsafe {
+        memcpy(
+            &mut aligned_dst[0] as *mut UInt64 as *mut Byte,
+            &aligned[0] as *const UInt64 as *const Byte,
+            32  // 4 * 8 bytes
+        );
+    }
+
+    let mut i = 0;
+    while i < 4 {
+        assert(aligned_dst[i] == aligned[i]);
+        i = i + 1;
+    }
+
+    // Unaligned access (copy starting from odd offset)
+    let src_buf: [Byte; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let dst_buf: [Byte; 16] = [0; 16];
+
+    // Copy from offset 1 to offset 3 (both unaligned)
+    unsafe {
+        memcpy(&mut dst_buf[3] as *mut Byte, &src_buf[1] as *const Byte, 7);
+    }
+
+    // Check the result
+    assert(dst_buf[0] == 0);
+    assert(dst_buf[1] == 0);
+    assert(dst_buf[2] == 0);
+    assert(dst_buf[3] == 2);  // src_buf[1]
+    assert(dst_buf[4] == 3);  // src_buf[2]
+    assert(dst_buf[5] == 4);
+    assert(dst_buf[6] == 5);
+    assert(dst_buf[7] == 6);
+    assert(dst_buf[8] == 7);
+    assert(dst_buf[9] == 8);  // src_buf[7]
+    assert(dst_buf[10] == 0);
+    print("test_memory_alignment passed!");
+}

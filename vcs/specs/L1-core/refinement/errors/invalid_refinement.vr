@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @expected-error: E400
+// @tier: 0
+// @level: L1
+// @tags: refinement, errors, type-mismatch
+// @description: Refinement predicates applied to wrong base types
+
+/// Error: Refinement types must match their base types.
+/// Assigning a value of the wrong type to a refined type variable is an error.
+
+type PositiveInt is Int{> 0};
+
+fn takes_positive(x: PositiveInt) -> Int { x }
+
+fn main() {
+    // ERROR E400: Text is not Int (the base of PositiveInt)
+    let result = takes_positive("hello");
+}

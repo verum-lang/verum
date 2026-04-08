@@ -1,0 +1,295 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 5us per simple expression
+// @tags: codegen, llvm, inkwell, performance
+
+/// Benchmark for expression code generation (LLVM IR via Inkwell)
+///
+/// Tests code generation for various expression types:
+/// - Arithmetic operations
+/// - Control flow
+/// - Function calls
+/// - Memory operations
+
+module benchmarks.micro.codegen_expression
+
+using [Benchmark, Codegen]
+
+/// Simple integer arithmetic
+fn benchmark_codegen_int_arithmetic() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("1 + 2 * 3");
+        // Should generate: add i64 1, (mul i64 2, 3)
+    }
+}
+
+/// Floating point arithmetic
+fn benchmark_codegen_float_arithmetic() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("1.0 + 2.0 * 3.0");
+    }
+}
+
+/// Boolean operations
+fn benchmark_codegen_boolean() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("a && b || !c");
+    }
+}
+
+/// Comparison operations
+fn benchmark_codegen_comparison() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("x > 0 && x < 100");
+    }
+}
+
+/// Variable load
+fn benchmark_codegen_var_load() {
+    let codegen = Codegen.new();
+
+    for _ in 0..100_000 {
+        let ir = codegen.compile_expr("x");
+    }
+}
+
+/// Variable store
+fn benchmark_codegen_var_store() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_stmt("x = 42");
+    }
+}
+
+/// If expression
+fn benchmark_codegen_if_expr() {
+    let codegen = Codegen.new();
+
+    for _ in 0..30_000 {
+        let ir = codegen.compile_expr("if cond { a } else { b }");
+    }
+}
+
+/// Nested if expression
+fn benchmark_codegen_nested_if() {
+    let codegen = Codegen.new();
+
+    for _ in 0..20_000 {
+        let ir = codegen.compile_expr("if a { 1 } else if b { 2 } else { 3 }");
+    }
+}
+
+/// Match expression
+fn benchmark_codegen_match() {
+    let codegen = Codegen.new();
+
+    for _ in 0..20_000 {
+        let ir = codegen.compile_expr("match x { 0 => \"zero\", 1 => \"one\", _ => \"other\" }");
+    }
+}
+
+/// Function call (direct)
+fn benchmark_codegen_call_direct() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("foo(a, b, c)");
+    }
+}
+
+/// Method call (indirect via vtable)
+fn benchmark_codegen_call_virtual() {
+    let codegen = Codegen.new();
+
+    for _ in 0..30_000 {
+        let ir = codegen.compile_expr("obj.method(arg)");
+    }
+}
+
+/// Closure creation
+fn benchmark_codegen_closure_create() {
+    let codegen = Codegen.new();
+
+    for _ in 0..20_000 {
+        let ir = codegen.compile_expr("|x| x + captured");
+    }
+}
+
+/// Closure call
+fn benchmark_codegen_closure_call() {
+    let codegen = Codegen.new();
+
+    for _ in 0..30_000 {
+        let ir = codegen.compile_expr("closure(arg)");
+    }
+}
+
+/// Array/list index
+fn benchmark_codegen_index() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("arr[i]");
+    }
+}
+
+/// Array index with bounds check
+fn benchmark_codegen_index_checked() {
+    let codegen = Codegen.new();
+
+    for _ in 0..30_000 {
+        let ir = codegen.compile_expr("arr.get(i)");  // Returns Maybe<T>
+    }
+}
+
+/// Field access
+fn benchmark_codegen_field_access() {
+    let codegen = Codegen.new();
+
+    for _ in 0..100_000 {
+        let ir = codegen.compile_expr("point.x");
+    }
+}
+
+/// Struct literal
+fn benchmark_codegen_struct_literal() {
+    let codegen = Codegen.new();
+
+    for _ in 0..20_000 {
+        let ir = codegen.compile_expr("Point { x: 10, y: 20 }");
+    }
+}
+
+/// Tuple creation
+fn benchmark_codegen_tuple() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("(a, b, c)");
+    }
+}
+
+/// Tuple destructuring
+fn benchmark_codegen_tuple_destruct() {
+    let codegen = Codegen.new();
+
+    for _ in 0..30_000 {
+        let ir = codegen.compile_stmt("let (x, y) = tuple");
+    }
+}
+
+/// Reference creation (CBGR)
+fn benchmark_codegen_ref_create() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("&value");
+        // Should generate ThinRef with generation + epoch
+    }
+}
+
+/// Reference dereference (CBGR check)
+fn benchmark_codegen_ref_deref() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("*ref_value");
+        // Should include generation check
+    }
+}
+
+/// Heap allocation
+fn benchmark_codegen_heap_alloc() {
+    let codegen = Codegen.new();
+
+    for _ in 0..30_000 {
+        let ir = codegen.compile_expr("Heap.alloc(value)");
+    }
+}
+
+/// List literal
+fn benchmark_codegen_list_literal() {
+    let codegen = Codegen.new();
+
+    for _ in 0..20_000 {
+        let ir = codegen.compile_expr("list![1, 2, 3, 4, 5]");
+    }
+}
+
+/// Map literal
+fn benchmark_codegen_map_literal() {
+    let codegen = Codegen.new();
+
+    for _ in 0..15_000 {
+        let ir = codegen.compile_expr("map!{\"a\" => 1, \"b\" => 2}");
+    }
+}
+
+/// String interpolation
+fn benchmark_codegen_string_interp() {
+    let codegen = Codegen.new();
+
+    for _ in 0..20_000 {
+        let ir = codegen.compile_expr("text(\"Hello, {}!\", name)");
+    }
+}
+
+/// Range expression
+fn benchmark_codegen_range() {
+    let codegen = Codegen.new();
+
+    for _ in 0..50_000 {
+        let ir = codegen.compile_expr("0..100");
+    }
+}
+
+/// Binary operators with overflow check
+fn benchmark_codegen_checked_ops() {
+    let codegen = Codegen.new();
+
+    for _ in 0..30_000 {
+        let ir = codegen.compile_expr("a.checked_add(b)");
+    }
+}
+
+/// SIMD operations
+fn benchmark_codegen_simd() {
+    let codegen = Codegen.new();
+
+    for _ in 0..20_000 {
+        let ir = codegen.compile_expr("simd4_add(a, b)");
+    }
+}
+
+/// Async await
+fn benchmark_codegen_async_await() {
+    let codegen = Codegen.new();
+
+    for _ in 0..15_000 {
+        let ir = codegen.compile_expr("future.await");
+    }
+}
+
+/// Complex expression
+fn benchmark_codegen_complex() {
+    let codegen = Codegen.new();
+
+    for _ in 0..5_000 {
+        let ir = codegen.compile_expr("
+            list.iter()
+                .filter(|x| x > 0)
+                .map(|x| x * 2)
+                .sum()
+        ");
+    }
+}

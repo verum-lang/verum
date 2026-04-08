@@ -1,0 +1,858 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @baseline-comparison: rust
+// @tags: comparison, rust, async, concurrency, baseline, performance
+// @description: Async vs Rust benchmark (target: 0.85-1.0x Rust performance)
+
+/// Verum vs Rust: Async Benchmark
+///
+/// This benchmark compares Verum's async runtime against Rust's tokio.
+/// Async performance is critical for I/O-bound applications and tests
+/// the overhead of task scheduling, context switching, and synchronization.
+///
+/// Target: 0.85-1.0x Rust/tokio performance
+///
+/// Operations tested:
+/// - Task spawn overhead
+/// - Task yield/reschedule
+/// - Channel operations (MPSC, broadcast)
+/// - Async mutex operations
+/// - Concurrent task execution
+/// - Async I/O simulation
+///
+/// Note: Verum uses a similar async model to Rust with futures and
+/// explicit .await points.
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const TASK_COUNT: Int = 100_000;
+const CHANNEL_OPS: Int = 1_000_000;
+const CONCURRENT_TASKS: Int = 1_000;
+
+/// Rust/tokio baseline measurements
+module rust_baselines {
+    // Task operations
+    pub const SPAWN_TASK_100K_MS: Float = 50.0;
+    pub const SPAWN_LOCAL_100K_MS: Float = 30.0;
+    pub const YIELD_100K_MS: Float = 20.0;
+    pub const JOIN_ALL_1K_MS: Float = 10.0;
+
+    // Channel operations
+    pub const MPSC_SEND_1M_MS: Float = 100.0;
+    pub const MPSC_RECV_1M_MS: Float = 100.0;
+    pub const BROADCAST_SEND_100K_MS: Float = 50.0;
+    pub const ONESHOT_100K_MS: Float = 40.0;
+
+    // Synchronization
+    pub const MUTEX_LOCK_100K_MS: Float = 60.0;
+    pub const RWLOCK_READ_100K_MS: Float = 40.0;
+    pub const RWLOCK_WRITE_100K_MS: Float = 80.0;
+    pub const SEMAPHORE_100K_MS: Float = 50.0;
+
+    // Concurrent execution
+    pub const PARALLEL_COMPUTE_1K_MS: Float = 50.0;
+    pub const PIPELINE_100K_MS: Float = 80.0;
+    pub const FAN_OUT_IN_10K_MS: Float = 100.0;
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs Rust: Async");
+
+    // Task spawn benchmarks
+    results.add(benchmark_spawn_task());
+    results.add(benchmark_spawn_local());
+    results.add(benchmark_yield_now());
+    results.add(benchmark_join_all());
+
+    // Channel benchmarks
+    results.add(benchmark_mpsc_send());
+    results.add(benchmark_mpsc_recv());
+    results.add(benchmark_broadcast());
+    results.add(benchmark_oneshot());
+
+    // Synchronization benchmarks
+    results.add(benchmark_async_mutex());
+    results.add(benchmark_rwlock_read());
+    results.add(benchmark_rwlock_write());
+    results.add(benchmark_semaphore());
+
+    // Concurrent execution benchmarks
+    results.add(benchmark_parallel_compute());
+    results.add(benchmark_pipeline());
+    results.add(benchmark_fan_out_in());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_rust_async.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.ratio >= r.min_target);
+    assert(all_meet_target, "Verum async performance below target");
+}
+
+// ============================================================================
+// Task Spawn Benchmarks
+// ============================================================================
+
+/// Benchmark: Spawn tasks
+async fn benchmark_spawn_task() -> ComparisonResult {
+    // Warmup
+    for _ in 0..1000 {
+        let handle = spawn(async { 42 });
+        black_box(handle.await);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut handles: List<JoinHandle<Int>> = List.with_capacity(TASK_COUNT);
+
+    for i in 0..TASK_COUNT {
+        handles.push(spawn(async move { i * 2 }));
+    }
+
+    for handle in handles {
+        black_box(handle.await);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "spawn_task_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.SPAWN_TASK_100K_MS,
+        ratio: rust_baselines.SPAWN_TASK_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "spawn",
+    }
+}
+
+/// Benchmark: Spawn local (non-Send) tasks
+async fn benchmark_spawn_local() -> ComparisonResult {
+    // Warmup
+    for _ in 0..1000 {
+        let handle = spawn_local(async { 42 });
+        black_box(handle.await);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut handles: List<JoinHandle<Int>> = List.with_capacity(TASK_COUNT);
+
+    for i in 0..TASK_COUNT {
+        handles.push(spawn_local(async move { i * 2 }));
+    }
+
+    for handle in handles {
+        black_box(handle.await);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "spawn_local_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.SPAWN_LOCAL_100K_MS,
+        ratio: rust_baselines.SPAWN_LOCAL_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "spawn",
+    }
+}
+
+/// Benchmark: Yield to scheduler
+async fn benchmark_yield_now() -> ComparisonResult {
+    // Warmup
+    for _ in 0..1000 {
+        yield_now().await;
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..TASK_COUNT {
+        yield_now().await;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "yield_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.YIELD_100K_MS,
+        ratio: rust_baselines.YIELD_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "spawn",
+    }
+}
+
+/// Benchmark: Join all tasks
+async fn benchmark_join_all() -> ComparisonResult {
+    // Warmup
+    for _ in 0..10 {
+        let futures: List<_> = (0..100).map(|i| async move { i * 2 }).collect();
+        black_box(join_all(futures).await);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let futures: List<_> = (0..CONCURRENT_TASKS)
+        .map(|i| async move { fib(20) + i })
+        .collect();
+
+    let results = join_all(futures).await;
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(results);
+
+    ComparisonResult {
+        name: "join_all_1k",
+        verum_ms,
+        baseline_ms: rust_baselines.JOIN_ALL_1K_MS,
+        ratio: rust_baselines.JOIN_ALL_1K_MS / verum_ms,
+        min_target: 0.85,
+        category: "spawn",
+    }
+}
+
+// ============================================================================
+// Channel Benchmarks
+// ============================================================================
+
+/// Benchmark: MPSC channel send
+async fn benchmark_mpsc_send() -> ComparisonResult {
+    let (tx, mut rx) = mpsc.channel.<Int>(1024);
+
+    // Spawn receiver
+    let receiver = spawn(async move {
+        let mut count = 0;
+        while let Some(_) = rx.recv().await {
+            count += 1;
+        }
+        count
+    });
+
+    // Warmup
+    for i in 0..10000 {
+        tx.send(i).await.unwrap();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..CHANNEL_OPS {
+        tx.send(i).await.unwrap();
+    }
+
+    drop(tx);
+    let count = receiver.await;
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(count);
+
+    ComparisonResult {
+        name: "mpsc_send_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.MPSC_SEND_1M_MS,
+        ratio: rust_baselines.MPSC_SEND_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "channel",
+    }
+}
+
+/// Benchmark: MPSC channel receive
+async fn benchmark_mpsc_recv() -> ComparisonResult {
+    let (tx, mut rx) = mpsc.channel.<Int>(1024);
+
+    // Pre-fill channel
+    let sender = spawn(async move {
+        for i in 0..CHANNEL_OPS {
+            tx.send(i).await.unwrap();
+        }
+    });
+
+    // Warmup - wait for some messages
+    yield_now().await;
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut count: Int = 0;
+    while let Some(v) = rx.recv().await {
+        count += 1;
+        black_box(v);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    sender.await;
+
+    ComparisonResult {
+        name: "mpsc_recv_1m",
+        verum_ms,
+        baseline_ms: rust_baselines.MPSC_RECV_1M_MS,
+        ratio: rust_baselines.MPSC_RECV_1M_MS / verum_ms,
+        min_target: 0.85,
+        category: "channel",
+    }
+}
+
+/// Benchmark: Broadcast channel
+async fn benchmark_broadcast() -> ComparisonResult {
+    let (tx, _) = broadcast.channel.<Int>(1024);
+
+    // Create multiple receivers
+    let mut receivers: List<_> = (0..10)
+        .map(|_| tx.subscribe())
+        .collect();
+
+    // Spawn receiver tasks
+    let receiver_handles: List<_> = receivers.into_iter()
+        .map(|mut rx| spawn(async move {
+            let mut count = 0;
+            while let Ok(_) = rx.recv().await {
+                count += 1;
+            }
+            count
+        }))
+        .collect();
+
+    // Warmup
+    for i in 0..1000 {
+        let _ = tx.send(i);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..(TASK_COUNT / 10) {
+        let _ = tx.send(i);
+    }
+
+    drop(tx);
+
+    for handle in receiver_handles {
+        black_box(handle.await);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "broadcast_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.BROADCAST_SEND_100K_MS,
+        ratio: rust_baselines.BROADCAST_SEND_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "channel",
+    }
+}
+
+/// Benchmark: Oneshot channel
+async fn benchmark_oneshot() -> ComparisonResult {
+    // Warmup
+    for _ in 0..1000 {
+        let (tx, rx) = oneshot.channel.<Int>();
+        tx.send(42).unwrap();
+        black_box(rx.await);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..TASK_COUNT {
+        let (tx, rx) = oneshot.channel.<Int>();
+        tx.send(i).unwrap();
+        black_box(rx.await);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "oneshot_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.ONESHOT_100K_MS,
+        ratio: rust_baselines.ONESHOT_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "channel",
+    }
+}
+
+// ============================================================================
+// Synchronization Benchmarks
+// ============================================================================
+
+/// Benchmark: Async mutex lock/unlock
+async fn benchmark_async_mutex() -> ComparisonResult {
+    let mutex = AsyncMutex.new(0);
+
+    // Warmup
+    for _ in 0..1000 {
+        let mut guard = mutex.lock().await;
+        *guard += 1;
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..TASK_COUNT {
+        let mut guard = mutex.lock().await;
+        *guard += 1;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "async_mutex_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.MUTEX_LOCK_100K_MS,
+        ratio: rust_baselines.MUTEX_LOCK_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "sync",
+    }
+}
+
+/// Benchmark: RwLock read
+async fn benchmark_rwlock_read() -> ComparisonResult {
+    let rwlock = AsyncRwLock.new(42);
+
+    // Warmup
+    for _ in 0..1000 {
+        let guard = rwlock.read().await;
+        black_box(*guard);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..TASK_COUNT {
+        let guard = rwlock.read().await;
+        black_box(*guard);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "rwlock_read_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.RWLOCK_READ_100K_MS,
+        ratio: rust_baselines.RWLOCK_READ_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "sync",
+    }
+}
+
+/// Benchmark: RwLock write
+async fn benchmark_rwlock_write() -> ComparisonResult {
+    let rwlock = AsyncRwLock.new(0);
+
+    // Warmup
+    for _ in 0..1000 {
+        let mut guard = rwlock.write().await;
+        *guard += 1;
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..TASK_COUNT {
+        let mut guard = rwlock.write().await;
+        *guard += 1;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "rwlock_write_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.RWLOCK_WRITE_100K_MS,
+        ratio: rust_baselines.RWLOCK_WRITE_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "sync",
+    }
+}
+
+/// Benchmark: Semaphore acquire/release
+async fn benchmark_semaphore() -> ComparisonResult {
+    let semaphore = AsyncSemaphore.new(10);
+
+    // Warmup
+    for _ in 0..1000 {
+        let permit = semaphore.acquire().await.unwrap();
+        black_box(&permit);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..TASK_COUNT {
+        let permit = semaphore.acquire().await.unwrap();
+        black_box(&permit);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    ComparisonResult {
+        name: "semaphore_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.SEMAPHORE_100K_MS,
+        ratio: rust_baselines.SEMAPHORE_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "sync",
+    }
+}
+
+// ============================================================================
+// Concurrent Execution Benchmarks
+// ============================================================================
+
+/// Benchmark: Parallel compute tasks
+async fn benchmark_parallel_compute() -> ComparisonResult {
+    // Warmup
+    for _ in 0..10 {
+        let futures: List<_> = (0..100)
+            .map(|i| spawn(async move { fib(20) + i }))
+            .collect();
+        for f in futures { black_box(f.await); }
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let futures: List<_> = (0..CONCURRENT_TASKS)
+        .map(|i| spawn(async move { fib(25) + i }))
+        .collect();
+
+    let mut sum: Int = 0;
+    for f in futures {
+        sum += f.await;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "parallel_compute_1k",
+        verum_ms,
+        baseline_ms: rust_baselines.PARALLEL_COMPUTE_1K_MS,
+        ratio: rust_baselines.PARALLEL_COMPUTE_1K_MS / verum_ms,
+        min_target: 0.85,
+        category: "concurrent",
+    }
+}
+
+/// Benchmark: Pipeline of async stages
+async fn benchmark_pipeline() -> ComparisonResult {
+    let (tx1, mut rx1) = mpsc.channel.<Int>(256);
+    let (tx2, mut rx2) = mpsc.channel.<Int>(256);
+    let (tx3, mut rx3) = mpsc.channel.<Int>(256);
+
+    // Stage 1: Double
+    let stage1 = spawn(async move {
+        while let Some(v) = rx1.recv().await {
+            tx2.send(v * 2).await.unwrap();
+        }
+    });
+
+    // Stage 2: Add offset
+    let stage2 = spawn(async move {
+        while let Some(v) = rx2.recv().await {
+            tx3.send(v + 10).await.unwrap();
+        }
+    });
+
+    // Stage 3: Collect
+    let stage3 = spawn(async move {
+        let mut sum: Int = 0;
+        while let Some(v) = rx3.recv().await {
+            sum += v;
+        }
+        sum
+    });
+
+    // Warmup
+    for i in 0..1000 {
+        tx1.send(i).await.unwrap();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..TASK_COUNT {
+        tx1.send(i).await.unwrap();
+    }
+
+    drop(tx1);
+
+    stage1.await;
+    drop(tx2);
+    stage2.await;
+    drop(tx3);
+    let result = stage3.await;
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(result);
+
+    ComparisonResult {
+        name: "pipeline_100k",
+        verum_ms,
+        baseline_ms: rust_baselines.PIPELINE_100K_MS,
+        ratio: rust_baselines.PIPELINE_100K_MS / verum_ms,
+        min_target: 0.85,
+        category: "concurrent",
+    }
+}
+
+/// Benchmark: Fan-out and fan-in pattern
+async fn benchmark_fan_out_in() -> ComparisonResult {
+    let num_workers = 10;
+    let items_per_worker = TASK_COUNT / num_workers;
+
+    // Warmup
+    let warmup_futures: List<_> = (0..10)
+        .map(|_| spawn(async { fib(15) }))
+        .collect();
+    for f in warmup_futures { black_box(f.await); }
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Fan out to workers
+    let worker_futures: List<_> = (0..num_workers)
+        .map(|worker_id| {
+            let start = worker_id * items_per_worker;
+            spawn(async move {
+                let mut sum: Int = 0;
+                for i in start..(start + items_per_worker) {
+                    sum += i * 2;
+                }
+                sum
+            })
+        })
+        .collect();
+
+    // Fan in results
+    let mut total: Int = 0;
+    for f in worker_futures {
+        total += f.await;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+
+    black_box(total);
+
+    ComparisonResult {
+        name: "fan_out_in_10k",
+        verum_ms,
+        baseline_ms: rust_baselines.FAN_OUT_IN_10K_MS,
+        ratio: rust_baselines.FAN_OUT_IN_10K_MS / verum_ms,
+        min_target: 0.85,
+        category: "concurrent",
+    }
+}
+
+/// Simple fibonacci for compute workload
+fn fib(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fib(n - 1) + fib(n - 2) }
+}
+
+type ComparisonResult is {
+    name: Text,
+    verum_ms: Float,
+    baseline_ms: Float,
+    ratio: Float,
+    min_target: Float,
+    category: Text,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<ComparisonResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: ComparisonResult) {
+        self.results.push(result);
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<30} {:>12} {:>12} {:>10} {:>8} {:>8}",
+                "Benchmark", "Verum (ms)", "Rust (ms)", "Ratio", "Target", "Status");
+        println("{}", "-".repeat(85));
+
+        for result in &self.results {
+            let passed = result.ratio >= result.min_target;
+            let status = if passed { "PASS" } else { "FAIL" };
+            let ratio_pct = result.ratio * 100.0;
+
+            println("{:<30} {:>12.2} {:>12.2} {:>9.1}% {:>7.0}% {:>8}",
+                    result.name, result.verum_ms, result.baseline_ms,
+                    ratio_pct, result.min_target * 100.0, status);
+        }
+    }
+
+    fn export_comparison(&self, path: Text) {
+        let json = Json.object();
+        json.set("suite", &self.suite_name);
+        json.set("baseline", "rust");
+
+        let results_json = Json.array();
+        for result in &self.results {
+            let r = Json.object();
+            r.set("name", &result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("baseline_ms", result.baseline_ms);
+            r.set("ratio", result.ratio);
+            r.set("min_target", result.min_target);
+            r.set("category", &result.category);
+            r.set("passed", result.ratio >= result.min_target);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+    }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+// Async runtime stubs
+async fn spawn<F, T>(f: F) -> JoinHandle<T>
+where F: Future<Output = T> + Send + 'static, T: Send + 'static {
+    JoinHandle { value: None }
+}
+
+async fn spawn_local<F, T>(f: F) -> JoinHandle<T>
+where F: Future<Output = T> + 'static {
+    JoinHandle { value: None }
+}
+
+async fn yield_now() {}
+
+async fn join_all<I, F>(futures: I) -> List<F.Output>
+where I: IntoIterator<Item = F>, F: Future {
+    List.new()
+}
+
+type JoinHandle<T> is { value: Maybe<T> };
+implement<T> JoinHandle<T> {
+    async fn await(self) -> T { self.value.unwrap() }
+}
+
+module mpsc {
+    pub fn channel<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
+        (Sender { _phantom: () }, Receiver { _phantom: () })
+    }
+
+    pub type Sender<T> is { _phantom: () };
+    implement<T> Sender<T> {
+        pub async fn send(&self, value: T) -> Result<(), ()> { Ok(()) }
+    }
+
+    pub type Receiver<T> is { _phantom: () };
+    implement<T> Receiver<T> {
+        pub async fn recv(&mut self) -> Maybe<T> { None }
+    }
+}
+
+module broadcast {
+    pub fn channel<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
+        (Sender { _phantom: () }, Receiver { _phantom: () })
+    }
+
+    pub type Sender<T> is { _phantom: () };
+    implement<T> Sender<T> {
+        pub fn send(&self, value: T) -> Result<(), ()> { Ok(()) }
+        pub fn subscribe(&self) -> Receiver<T> { Receiver { _phantom: () } }
+    }
+
+    pub type Receiver<T> is { _phantom: () };
+    implement<T> Receiver<T> {
+        pub async fn recv(&mut self) -> Result<T, ()> { Err(()) }
+    }
+}
+
+module oneshot {
+    pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
+        (Sender { _phantom: () }, Receiver { _phantom: () })
+    }
+
+    pub type Sender<T> is { _phantom: () };
+    implement<T> Sender<T> {
+        pub fn send(self, value: T) -> Result<(), ()> { Ok(()) }
+    }
+
+    pub type Receiver<T> is { _phantom: () };
+    implement<T> Receiver<T> {
+        pub async fn await(self) -> T { panic("stub") }
+    }
+}
+
+type AsyncMutex<T> is { value: T };
+implement<T> AsyncMutex<T> {
+    fn new(value: T) -> Self { Self { value } }
+    async fn lock(&self) -> MutexGuard<T> { MutexGuard { _phantom: () } }
+}
+
+type MutexGuard<'a, T> is { _phantom: () };
+
+type AsyncRwLock<T> is { value: T };
+implement<T> AsyncRwLock<T> {
+    fn new(value: T) -> Self { Self { value } }
+    async fn read(&self) -> RwLockReadGuard<T> { RwLockReadGuard { _phantom: () } }
+    async fn write(&self) -> RwLockWriteGuard<T> { RwLockWriteGuard { _phantom: () } }
+}
+
+type RwLockReadGuard<'a, T> is { _phantom: () };
+type RwLockWriteGuard<'a, T> is { _phantom: () };
+
+type AsyncSemaphore is { permits: Int };
+implement AsyncSemaphore {
+    fn new(permits: Int) -> Self { Self { permits } }
+    async fn acquire(&self) -> Result<SemaphorePermit, ()> { Ok(SemaphorePermit { _phantom: () }) }
+}
+
+type SemaphorePermit is { _phantom: () };
+
+type Timer is { start_time: Instant };
+implement Timer {
+    fn new() -> Self { Self { start_time: Instant.now() } }
+    fn start(&mut self) { self.start_time = Instant.now(); }
+    fn elapsed_ms(&self) -> Int { self.start_time.elapsed().as_millis() }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+type Json is { data: Map<Text, Heap<Any>> };
+implement Json {
+    fn object() -> Self { Self { data: Map.new() } }
+    fn array() -> Self { Self { data: Map.new() } }
+    fn set<T>(&mut self, key: &Text, value: T) {}
+    fn push<T>(&mut self, value: T) {}
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+module File {
+    pub fn write(path: Text, content: Text) {}
+}

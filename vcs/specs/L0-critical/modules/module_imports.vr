@@ -1,0 +1,98 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: modules, imports, basic
+
+/// Module mount tests.
+/// Verifies various mount statement forms are parsed correctly.
+
+// Define modules to mount from
+module library {
+    pub module core {
+        pub type Error is
+            | NotFound
+            | Invalid
+            | Timeout;
+
+        pub fn create_error() -> Error {
+            Error.NotFound
+        }
+    }
+
+    pub module utils {
+        pub fn format(s: Text) -> Text {
+            f"[{s}]"
+        }
+
+        pub fn uppercase(s: Text) -> Text {
+            s.to_uppercase()
+        }
+
+        pub const VERSION: Text = "1.0";
+    }
+}
+
+// Simple mount
+module consumer1 {
+    mount library.core.Error;
+
+    pub fn handle_error() -> Error {
+        Error.NotFound
+    }
+}
+
+// Import with alias
+module consumer2 {
+    mount library.core.Error as Err;
+    mount library.utils.format as fmt;
+
+    pub fn process() -> Text {
+        fmt("processing")
+    }
+}
+
+// Nested mount (multiple items)
+module consumer3 {
+    mount library.core.{Error, create_error};
+    mount library.utils.{format, uppercase, VERSION};
+
+    pub fn demo() -> Text {
+        let err = create_error();
+        let msg = format(VERSION);
+        uppercase(msg)
+    }
+}
+
+// Glob mount
+module consumer4 {
+    mount library.utils.*;
+
+    pub fn use_all() -> Text {
+        let v = VERSION;
+        let f = format("test");
+        uppercase(f)
+    }
+}
+
+// Re-export
+module reexporter {
+    pub mount library.core.Error;
+    pub mount library.utils.{format, VERSION};
+}
+
+// Consume re-exports
+module consumer5 {
+    mount reexporter.Error;
+    mount reexporter.format;
+    mount reexporter.VERSION;
+
+    pub fn use_reexports() -> Text {
+        format(VERSION)
+    }
+}
+
+fn main() -> Int {
+    // Note: Module resolution from main requires integration that is pending.
+    // This test verifies mount statement parsing only.
+    0
+}

@@ -1,0 +1,262 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, dependent, sigma, refinement, self-hosting-critical
+// @expect: pass
+// Test: Dependent types and sigma types for self-hosting verification
+
+// =============================================================================
+// BASIC DEPENDENT PAIRS
+// =============================================================================
+
+// Dependent pair using sigma type syntax
+type SizedArray<T, const N: Int> is
+    len: Int where len == N,
+    data: [T; N];
+
+// Function returning dependent pair
+fn make_sized_array<T, const N: Int>(items: [T; N]) -> SizedArray<T, N> {
+    SizedArray { len: N, data: items }
+}
+
+// =============================================================================
+// REFINEMENT TYPES
+// =============================================================================
+
+// Basic refinement
+type PositiveInt is Int where self > 0;
+
+// Multiple predicates (use comma for conjunction in where clause)
+type BoundedInt is Int where self >= 0, self <= 100;
+
+// Refinement with multiple predicates
+type EvenPositive is Int where self > 0, self % 2 == 0;
+
+// Refinement on generic type (length > 0 expressed as refinement)
+type NonEmptyList<T> is List<T> where len(self) > 0;
+
+// =============================================================================
+// DEPENDENT FUNCTION TYPES
+// =============================================================================
+
+// Function with dependent return type (const generic)
+fn replicate<T, const N: Int>(value: T) -> [T; N] {
+    [value; N]
+}
+
+// Dependent parameter with conjunction (use requires clause)
+fn index<T, const N: Int>(arr: [T; N], i: Int) -> T
+    requires i >= 0 && i < N
+{
+    arr[i]
+}
+
+// =============================================================================
+// DEPENDENT RECORD TYPES
+// =============================================================================
+
+// Matrix with const generics for dimensions
+type Matrix<T, const R: Int, const C: Int> is
+    rows: Int where rows == R,
+    cols: Int where cols == C,
+    data: [[T; C]; R];
+
+// Tree with depth parameter
+type Tree<T, const D: Int> is
+    depth: Int where depth == D,
+    root: TreeNode<T, D>;
+
+// GADT-style tree node
+type TreeNode<T, const D: Int> is
+    | Leaf(T)
+    | Branch(TreeNode<T, D>, TreeNode<T, D>);
+
+// =============================================================================
+// TYPE-LEVEL ARITHMETIC
+// =============================================================================
+
+// Array with computed size
+fn concat_arrays<T, const N: Int, const M: Int>(
+    a: [T; N],
+    b: [T; M]
+) -> [T; N + M] {
+    // Implementation
+}
+
+// Complex type-level expression
+fn flatten<T, const N: Int, const M: Int>(
+    arr: [[T; M]; N]
+) -> [T; N * M] {
+    // Implementation
+}
+
+// =============================================================================
+// DEPENDENT PATTERNS
+// =============================================================================
+
+// Pattern matching on dependent struct
+fn process_sized<const N: Int>(arr: SizedArray<Int, N>) -> Int {
+    // Access sigma type fields directly
+    let n = arr.len;
+    let d = arr.data;
+    if n > 0 {
+        d[0]
+    } else {
+        0
+    }
+}
+
+// Destructuring in function params (using struct pattern)
+fn first_element<const N: Int>(arr: SizedArray<Int, N>) -> Int
+    requires N > 0
+{
+    arr.data[0]
+}
+
+// =============================================================================
+// EXISTENTIAL TYPES
+// =============================================================================
+
+// Existential with constraint using struct wrapper
+type SomeArray<T> is {
+    data: List<T>,  // Runtime-sized, length unknown at compile time
+};
+
+// Bounded array with constraint on the size parameter
+type SomeBoundedArray<T, const N: Int> is [T; N] where N > 0, N <= 100;
+
+// =============================================================================
+// REFINEMENT IN FUNCTION SIGNATURES
+// =============================================================================
+
+// Refined parameters (use requires clause)
+fn divide(a: Int, b: Int) -> Int
+    requires b != 0
+{
+    a / b
+}
+
+// Refined return type (use ensures clause)
+fn abs(n: Int) -> Int
+    ensures self >= 0
+{
+    if n >= 0 { n } else { -n }
+}
+
+// Both refined (use requires and ensures)
+fn safe_sqrt(n: Float) -> Float
+    requires n >= 0.0
+    ensures self >= 0.0
+{
+    sqrt(n)
+}
+
+// =============================================================================
+// DEPENDENT RECORDS
+// =============================================================================
+
+// Record with dependent fields (using sigma type syntax)
+type DynArray<T, const C: Int> is
+    capacity: Int where capacity == C,
+    length: Int where length <= C,
+    data: [T; C];
+
+// Nested dependent record (const generics encode constraints)
+type SparseTensor<T, const D: Int, const NZ: Int, const TOTAL: Int> is
+    dim_count: Int where dim_count == D,
+    dims: [Int; D],
+    total_elements: Int where total_elements == TOTAL,
+    non_zero_count: Int where non_zero_count == NZ,
+    values: [T; NZ];
+
+// =============================================================================
+// PROOF-CARRYING CODE
+// =============================================================================
+
+// Function with proof obligation (refinement on return)
+fn binary_search<T: Ord, const N: Int>(arr: [T; N], target: T) -> Maybe<Int>
+    requires N > 0
+{
+    // Implementation with proof that returned index is in bounds
+}
+
+// Sorted list type with invariant
+type SortedList<T: Ord> is {
+    items: List<T>,
+    // Invariant: items are sorted (verified at construction)
+};
+
+// =============================================================================
+// DEPENDENT PATTERN MATCHING
+// =============================================================================
+
+// GADTs-like pattern (length-indexed list)
+type Vec<T, const N: Int> is
+    | Nil
+    | Cons(T, Heap<Vec<T, N>>);
+
+// Head with requires clause on function
+fn head<T, const N: Int>(v: Vec<T, N>) -> T
+    requires N > 0
+{
+    match v {
+        Cons(x, _) => x,
+        _ => unreachable(),
+    }
+}
+
+// Tail function
+fn tail<T, const N: Int>(v: Vec<T, N>) -> Vec<T, N>
+    requires N > 0
+{
+    match v {
+        Cons(_, rest) => *rest,
+        _ => unreachable(),
+    }
+}
+
+// =============================================================================
+// INDEXED FAMILIES
+// =============================================================================
+
+// Type indexed by natural number (use comma for multiple predicates in where)
+type Fin<const N: Int> is Int where self >= 0, self < N;
+
+fn fin_to_int<const N: Int>(f: Fin<N>) -> Int {
+    f
+}
+
+// Safe vector indexing
+fn at<T, const N: Int>(v: Vec<T, N>, i: Fin<N>) -> T {
+    // Index is guaranteed to be in bounds by type
+    v.get_unchecked(i)
+}
+
+// =============================================================================
+// EQUALITY PROOFS
+// =============================================================================
+
+// Type-level equality witness (uses unit type as proof)
+type Equal<A, B> is ();
+
+// Type equality protocol (phantom type marker)
+type TypeEq<A, B> is protocol { };
+
+// Use equality proof - function identity
+fn id<T>(x: T) -> T {
+    x
+}
+
+// =============================================================================
+// DEPENDENT TYPE SYNONYMS
+// =============================================================================
+
+// Dependent type alias
+type Square<const N: Int> is [[Float; N]; N];
+
+// Parameterized refinement (use comma for multiple predicates in where)
+type Range<const MIN: Int, const MAX: Int> is Int where self >= MIN, self <= MAX;
+
+// Common ranges
+type Byte is Range<0, 255>;
+type Percent is Range<0, 100>;

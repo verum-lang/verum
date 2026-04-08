@@ -1,0 +1,133 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, convolution, polynomial_multiplication, integer_sequences
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Convolution of integer sequences (polynomial multiplication).
+//
+// Given two sequences A[0..m-1] and B[0..n-1], their convolution C is:
+//   C[k] = sum_{i+j=k} A[i] * B[j]  for k = 0..m+n-2.
+//
+// This is equivalent to multiplying polynomials:
+//   P_A(x) = A[0] + A[1]*x + ... + A[m-1]*x^(m-1)
+//   P_B(x) = B[0] + B[1]*x + ... + B[n-1]*x^(n-1)
+//   P_C(x) = P_A(x) * P_B(x)
+//
+// Verified examples:
+//   A=[1,2], B=[3,4]: C=[3,10,8].  (1+2x)*(3+4x) = 3+10x+8x^2
+//   A=[1,1,1], B=[1,1,1]: C=[1,2,3,2,1].
+//   A=[2,3,4], B=[1,0,1]: C=[2,3,6,3,4].
+//   A=[1], B=[5,6,7]: C=[5,6,7].
+
+// Convolve a[0..m-1] with b[0..n-1] into c[0..m+n-2].
+// Max m+n-1 <= 16 (both arrays capped at [Int;8] inputs, result [Int;16]).
+fn convolve(a: [Int; 8], m: Int, b: [Int; 8], n: Int, c: [Int; 16]) {
+    let len = m + n - 1;
+    let mut k = 0;
+    while k < len { c[k] = 0; k = k + 1; }
+    let mut i = 0;
+    while i < m {
+        let mut j = 0;
+        while j < n {
+            c[i + j] = c[i + j] + a[i] * b[j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// Compute the sum of elements of c[0..len-1].
+fn conv_sum(c: [Int; 16], len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len { s = s + c[i]; i = i + 1; }
+    s
+}
+
+fn test_degree_one_times_degree_one() {
+    // A=[1,2], B=[3,4]: (1+2x)*(3+4x)=3+10x+8x^2. C=[3,10,8].
+    let mut a = [1,2,0,0,0,0,0,0];
+    let mut b = [3,4,0,0,0,0,0,0];
+    let mut c = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    convolve(a, 2, b, 2, c);
+    assert_eq(c[0], 3);
+    assert_eq(c[1], 10);
+    assert_eq(c[2], 8);
+    // Sum = 21 = (1+2)*(3+4) = 3*7 = 21.
+    assert_eq(conv_sum(c, 3), 21);
+    print("degree1_times_degree1: ok");
+}
+
+fn test_ones_convolution() {
+    // A=[1,1,1], B=[1,1,1]: C=[1,2,3,2,1].
+    // C[k] = number of ways i+j=k with 0<=i<3, 0<=j<3.
+    let mut a = [1,1,1,0,0,0,0,0];
+    let mut b = [1,1,1,0,0,0,0,0];
+    let mut c = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    convolve(a, 3, b, 3, c);
+    assert_eq(c[0], 1);
+    assert_eq(c[1], 2);
+    assert_eq(c[2], 3);
+    assert_eq(c[3], 2);
+    assert_eq(c[4], 1);
+    // Sum = 9 = 3*3.
+    assert_eq(conv_sum(c, 5), 9);
+    print("ones_convolution: ok");
+}
+
+fn test_sparse_b() {
+    // A=[2,3,4], B=[1,0,1]: C=[2,3,6,3,4].
+    // C[0]=2*1=2, C[1]=3*1=3, C[2]=4*1+2*1=6, C[3]=3*1=3, C[4]=4*1=4.
+    let mut a = [2,3,4,0,0,0,0,0];
+    let mut b = [1,0,1,0,0,0,0,0];
+    let mut c = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    convolve(a, 3, b, 3, c);
+    assert_eq(c[0], 2);
+    assert_eq(c[1], 3);
+    assert_eq(c[2], 6);
+    assert_eq(c[3], 3);
+    assert_eq(c[4], 4);
+    print("sparse_b: ok");
+}
+
+fn test_single_element() {
+    // A=[1], B=[5,6,7]: C=[5,6,7] (scalar multiplication).
+    let mut a = [1,0,0,0,0,0,0,0];
+    let mut b = [5,6,7,0,0,0,0,0];
+    let mut c = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    convolve(a, 1, b, 3, c);
+    assert_eq(c[0], 5);
+    assert_eq(c[1], 6);
+    assert_eq(c[2], 7);
+    assert_eq(conv_sum(c, 3), 18);
+    print("single_element: ok");
+}
+
+fn test_polynomial_multiply() {
+    // A=[1,2,1], B=[1,2,1]: (1+2x+x^2)^2 = (1+x)^2*(1+x)^2 = (1+x)^4.
+    // (1+x)^4 = 1+4x+6x^2+4x^3+x^4. C=[1,4,6,4,1].
+    let mut a = [1,2,1,0,0,0,0,0];
+    let mut b = [1,2,1,0,0,0,0,0];
+    let mut c = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    convolve(a, 3, b, 3, c);
+    assert_eq(c[0], 1);
+    assert_eq(c[1], 4);
+    assert_eq(c[2], 6);
+    assert_eq(c[3], 4);
+    assert_eq(c[4], 1);
+    // Sum = 16 = (1+2+1)*(1+2+1) = 4*4.
+    assert_eq(conv_sum(c, 5), 16);
+    print("polynomial_multiply: ok");
+}
+
+fn main() -> Int {
+    test_degree_one_times_degree_one();
+    test_ones_convolution();
+    test_sparse_b();
+    test_single_element();
+    test_polynomial_multiply();
+    print("[OK] 587_interp_convolution");
+    0
+}

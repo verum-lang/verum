@@ -1,0 +1,22 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, math, linalg, vector, direct
+// @description: Test Vector imported directly from linalg
+
+module specs.core.math.vector_direct_test;
+
+// Import directly from linalg, not through core.math
+mount core.math.linalg.{Vector};
+
+fn main() {
+    print("Creating Vector.zeros(3) (direct import)...");
+    let v0: Vector<Float> = Vector.zeros(3);
+    print("Vector created!");
+
+    print("Getting length...");
+    let len = v0.len();
+    print(f"Length = {len}");
+
+    print("Test done!");
+}

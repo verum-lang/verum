@@ -1,0 +1,148 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, 430
+// @timeout: 30000
+
+// Milestone 430: comprehensive array and algorithm tests
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Insertion sort
+fn insertion_sort(arr: Arr8, n: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = 1;
+    while i < n {
+        let key = get8(a, i);
+        let mut j = i - 1;
+        let mut insert_pos = 0;
+        let mut found = 0;
+        while j >= 0 {
+            if found == 0 {
+                if get8(a, j) > key {
+                    a = set8(a, j + 1, get8(a, j));
+                    j = j - 1;
+                } else {
+                    insert_pos = j + 1;
+                    found = 1;
+                    j = -1;
+                }
+            } else {
+                j = -1;
+            }
+        }
+        if found == 0 { insert_pos = 0; }
+        a = set8(a, insert_pos, key);
+        i = i + 1;
+    }
+    a
+}
+
+// Check sorted
+fn is_sorted(arr: Arr8, n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if get8(arr, i) < get8(arr, i - 1) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Find median of sorted array
+fn median(arr: Arr8, n: Int) -> Int {
+    if n % 2 == 1 {
+        get8(arr, n / 2)
+    } else {
+        (get8(arr, n / 2 - 1) + get8(arr, n / 2)) / 2
+    }
+}
+
+// Rotate array left by k positions
+fn rotate_left(arr: Arr8, n: Int, k: Int) -> Arr8 {
+    let mut result = new_arr8();
+    let mut i = 0;
+    while i < n {
+        result = set8(result, i, get8(arr, (i + k) % n));
+        i = i + 1;
+    }
+    result
+}
+
+fn test_sort() -> Int {
+    let arr = Arr8 { v0: 5, v1: 3, v2: 8, v3: 1, v4: 9, v5: 2, v6: 7, v7: 4 };
+    let sorted = insertion_sort(arr, 8);
+    assert_eq(is_sorted(sorted, 8), 1);
+    assert_eq(get8(sorted, 0), 1);
+    assert_eq(get8(sorted, 7), 9);
+    1
+}
+
+fn test_median() -> Int {
+    let arr = Arr8 { v0: 1, v1: 3, v2: 5, v3: 7, v4: 9, v5: 0, v6: 0, v7: 0 };
+    assert_eq(median(arr, 5), 5);  // odd: middle element
+    let arr2 = Arr8 { v0: 1, v1: 3, v2: 5, v3: 7, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(median(arr2, 4), 4);  // even: (3+5)/2 = 4
+    1
+}
+
+fn test_rotate() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let r = rotate_left(arr, 5, 2);
+    assert_eq(get8(r, 0), 3);
+    assert_eq(get8(r, 1), 4);
+    assert_eq(get8(r, 2), 5);
+    assert_eq(get8(r, 3), 1);
+    assert_eq(get8(r, 4), 2);
+    1
+}
+
+fn test_sum_prod() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let mut sum_val = 0;
+    let mut prod_val = 1;
+    let mut i = 0;
+    while i < 5 {
+        sum_val = sum_val + get8(arr, i);
+        prod_val = prod_val * get8(arr, i);
+        i = i + 1;
+    }
+    assert_eq(sum_val, 15);
+    assert_eq(prod_val, 120);
+    1
+}
+
+fn main() -> Int {
+    test_sort();
+    test_median();
+    test_rotate();
+    test_sum_prod();
+    print("[OK] 430_milestone_aot");
+    0
+}

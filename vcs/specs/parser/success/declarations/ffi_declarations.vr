@@ -1,0 +1,248 @@
+// @test: parse-pass
+// @tier: 0
+// @category: declarations
+// @level: L0
+// @tags: parser, declarations, ffi, extern, foreign-function
+// @description: Comprehensive tests for FFI and extern declarations
+
+// ============================================================================
+// Extern Blocks
+// Grammar: extern_block = 'extern' , [ string_lit ] , '{' , { extern_fn_decl } , '}'
+// ============================================================================
+
+// Default C ABI
+extern {
+    fn malloc(size: Int) -> &unsafe Byte;
+    fn free(ptr: &unsafe Byte);
+    fn memcpy(dest: &unsafe Byte, src: &unsafe Byte, n: Int) -> &unsafe Byte;
+}
+
+// Explicit C ABI
+extern "C" {
+    fn printf(format: &Byte, ...) -> Int;
+    fn strlen(s: &Byte) -> Int;
+    fn strcmp(s1: &Byte, s2: &Byte) -> Int;
+}
+
+// System ABI
+extern "system" {
+    fn GetLastError() -> u32;
+    fn SetLastError(code: u32);
+}
+
+// ============================================================================
+// Extern Functions with Generics
+// ============================================================================
+
+extern "C" {
+    fn qsort<T>(base: &unsafe T, nmemb: Int, size: Int, compar: fn(&T, &T) -> Int);
+}
+
+// ============================================================================
+// Extern Functions with Visibility
+// ============================================================================
+
+extern "C" {
+    pub fn public_extern() -> Int;
+    fn private_extern() -> Int;
+}
+
+// ============================================================================
+// FFI Boundary Declarations
+// Grammar: ffi_declaration = 'ffi' , identifier , [ 'extends' , identifier ] , '{' , ffi_items , '}'
+// ============================================================================
+
+ffi LibC {
+    @extern("libc.so", calling_convention = "cdecl")
+    fn malloc(size: Int) -> &unsafe Byte;
+
+    @extern("libc.so")
+    fn free(ptr: &unsafe Byte);
+
+    @extern("libc.so")
+    fn realloc(ptr: &unsafe Byte, size: Int) -> &unsafe Byte;
+
+    memory_effects = Allocates + Deallocates(ptr);
+    thread_safe = true;
+    errors_via = Errno;
+}
+
+ffi OpenSSL extends LibC {
+    @extern("libssl.so")
+    fn SSL_new(ctx: &unsafe SSLContext) -> &unsafe SSL;
+
+    @extern("libssl.so")
+    fn SSL_free(ssl: &unsafe SSL);
+
+    @extern("libssl.so")
+    fn SSL_read(ssl: &unsafe SSL, buf: &unsafe Byte, num: Int) -> Int;
+
+    @extern("libssl.so")
+    fn SSL_write(ssl: &unsafe SSL, buf: &unsafe Byte, num: Int) -> Int;
+
+    requires ctx != null;
+    ensures result != null || get_error() != 0;
+    memory_effects = Reads(ssl) + Writes(buf);
+    thread_safe = false;
+}
+
+// ============================================================================
+// FFI Memory Effects
+// Grammar: ffi_memory_effects = 'memory_effects' , '=' , memory_effect_spec
+// ============================================================================
+
+ffi PureFFI {
+    @extern("libpure.so")
+    fn compute(x: Int) -> Int;
+
+    memory_effects = Pure;
+}
+
+ffi ReaderFFI {
+    @extern("libreader.so")
+    fn read_value(ptr: &unsafe Data) -> Int;
+
+    memory_effects = Reads(ptr);
+}
+
+ffi WriterFFI {
+    @extern("libwriter.so")
+    fn write_value(ptr: &unsafe Data, value: Int);
+
+    memory_effects = Writes(ptr);
+}
+
+ffi AllocatorFFI {
+    @extern("liballoc.so")
+    fn create() -> &unsafe Resource;
+
+    @extern("liballoc.so")
+    fn destroy(ptr: &unsafe Resource);
+
+    memory_effects = Allocates;
+    memory_effects = Deallocates(ptr);
+}
+
+ffi ComplexMemory {
+    @extern("libcomplex.so")
+    fn process(input: &unsafe Data, output: &unsafe Data) -> Int;
+
+    memory_effects = Reads(input) + Writes(output) + Allocates;
+}
+
+// ============================================================================
+// FFI Error Protocols
+// Grammar: ffi_error_protocol = 'errors_via' , '=' , error_mechanism
+// ============================================================================
+
+ffi ErrnoStyle {
+    @extern("liberrno.so")
+    fn operation() -> Int;
+
+    errors_via = Errno;
+}
+
+ffi ReturnCodeStyle {
+    @extern("librc.so")
+    fn operation() -> Int;
+
+    errors_via = ReturnCode(-1);
+}
+
+ffi ReturnValueStyle {
+    @extern("librv.so")
+    fn operation() -> &unsafe Data;
+
+    errors_via = ReturnValue(null) with Errno;
+}
+
+ffi NoErrorStyle {
+    @extern("libne.so")
+    fn infallible() -> Int;
+
+    errors_via = None;
+}
+
+// ============================================================================
+// FFI Ownership Specification
+// Grammar: ffi_ownership_spec = '@ownership' , '(' , ownership_mode , ')'
+// ============================================================================
+
+ffi OwnershipExamples {
+    @extern("lib.so")
+    @ownership(transfer_to = "callee")
+    fn take_ownership(ptr: &unsafe Data);
+
+    @extern("lib.so")
+    @ownership(transfer_from = "callee")
+    fn receive_ownership() -> &unsafe Data;
+
+    @extern("lib.so")
+    @ownership(borrow)
+    fn borrow_ref(ptr: &unsafe Data) -> Int;
+
+    @extern("lib.so")
+    @ownership(shared)
+    fn shared_access(ptr: &unsafe Data) -> Int;
+}
+
+// ============================================================================
+// FFI Requires/Ensures Clauses
+// ============================================================================
+
+ffi SafeFFI {
+    @extern("libsafe.so")
+    fn safe_divide(a: Int, b: Int) -> Int;
+
+    requires b != 0;
+    ensures result * b <= a && result * b > a - b;
+}
+
+ffi BoundsChecked {
+    @extern("libbounds.so")
+    fn array_get(arr: &unsafe [Int], idx: Int, len: Int) -> Int;
+
+    requires idx >= 0 && idx < len;
+    ensures true;
+}
+
+// ============================================================================
+// FFI Thread Safety
+// ============================================================================
+
+ffi ThreadSafeFFI {
+    @extern("libts.so")
+    fn thread_safe_op() -> Int;
+
+    thread_safe = true;
+}
+
+ffi ThreadUnsafeFFI {
+    @extern("libtu.so")
+    fn thread_unsafe_op() -> Int;
+
+    thread_safe = false;
+}
+
+// ============================================================================
+// Complex FFI Declaration
+// ============================================================================
+
+ffi Database extends Connection {
+    @extern("libdb.so", calling_convention = "cdecl")
+    fn db_connect(host: &Byte, port: Int) -> &unsafe DbHandle;
+
+    @extern("libdb.so")
+    fn db_query(handle: &unsafe DbHandle, query: &Byte) -> &unsafe ResultSet;
+
+    @extern("libdb.so")
+    fn db_close(handle: &unsafe DbHandle);
+
+    requires host != null;
+    requires port > 0 && port < 65536;
+    ensures result != null || db_get_error() != 0;
+
+    memory_effects = Allocates + Reads(host);
+    thread_safe = false;
+    errors_via = ReturnValue(null) with Errno;
+}

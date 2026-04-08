@@ -1,0 +1,132 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: text, string, methods, split, contains
+// @description: Test string/text method operations
+
+fn test_contains() -> Int {
+    let s = "hello world";
+    if !s.contains("world") {
+        print("FAIL contains: should contain 'world'");
+        return 1;
+    }
+    if s.contains("xyz") {
+        print("FAIL contains: should not contain 'xyz'");
+        return 1;
+    }
+    print("  contains: OK");
+    0
+}
+
+fn test_starts_ends() -> Int {
+    let s = "hello world";
+    if !s.starts_with("hello") {
+        print("FAIL starts_with");
+        return 1;
+    }
+    if !s.ends_with("world") {
+        print("FAIL ends_with");
+        return 1;
+    }
+    if s.starts_with("world") {
+        print("FAIL starts_with: false positive");
+        return 1;
+    }
+    print("  starts_ends: OK");
+    0
+}
+
+fn test_to_uppercase() -> Int {
+    let s = "hello";
+    let upper = s.to_uppercase();
+    if upper != "HELLO" {
+        print(f"FAIL uppercase: got '{upper}'");
+        return 1;
+    }
+    print("  to_uppercase: OK");
+    0
+}
+
+fn test_to_lowercase() -> Int {
+    let s = "HELLO";
+    let lower = s.to_lowercase();
+    if lower != "hello" {
+        print(f"FAIL lowercase: got '{lower}'");
+        return 1;
+    }
+    print("  to_lowercase: OK");
+    0
+}
+
+fn test_trim() -> Int {
+    let s = "  hello  ";
+    let trimmed = s.trim();
+    if trimmed != "hello" {
+        print(f"FAIL trim: got '{trimmed}'");
+        return 1;
+    }
+    print("  trim: OK");
+    0
+}
+
+fn test_substring() -> Int {
+    let s = "hello world";
+    let sub = s.substring(0, 5);
+    if sub != "hello" {
+        print(f"FAIL substring: got '{sub}'");
+        return 1;
+    }
+    let sub2 = s.substring(6, 11);
+    if sub2 != "world" {
+        print(f"FAIL substring2: got '{sub2}'");
+        return 1;
+    }
+    print("  substring: OK");
+    0
+}
+
+fn test_replace() -> Int {
+    let s = "hello world";
+    let r = s.replace("world", "verum");
+    if r != "hello verum" {
+        print(f"FAIL replace: got '{r}'");
+        return 1;
+    }
+    print("  replace: OK");
+    0
+}
+
+fn test_split() -> Int {
+    let s = "a,b,c,d";
+    let parts = s.split(",");
+    if parts.len() != 4 {
+        print(f"FAIL split: len={parts.len()}, expected 4");
+        return 1;
+    }
+    if parts[0] != "a" || parts[3] != "d" {
+        print(f"FAIL split: [{parts[0]}..{parts[3]}]");
+        return 1;
+    }
+    print("  split: OK");
+    0
+}
+
+fn main() -> Int {
+    print("String Methods Tests:");
+    let mut failures = 0;
+    failures = failures + test_contains();
+    failures = failures + test_starts_ends();
+    failures = failures + test_to_uppercase();
+    failures = failures + test_to_lowercase();
+    failures = failures + test_trim();
+    failures = failures + test_substring();
+    failures = failures + test_replace();
+    failures = failures + test_split();
+
+    if failures == 0 {
+        print("All string methods tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

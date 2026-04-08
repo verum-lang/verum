@@ -1,0 +1,173 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, safety-guarantees, lifetime-safety, critical
+// @description: Core safety guarantee - references cannot outlive their referents
+
+/// SAFETY GUARANTEE: Lifetime Safety
+///
+/// Verum ensures references never outlive the values they point to through:
+/// 1. Compile-time lifetime analysis (borrow checker)
+/// 2. Scope-based lifetime inference
+/// 3. CBGR runtime backup for edge cases
+/// 4. Explicit lifetime annotations when needed
+/// 5. Closure capture rules
+///
+/// This prevents:
+/// - Dangling pointer dereferences
+/// - Use-after-free vulnerabilities
+/// - Iterator invalidation bugs
+/// - Return of stack-local references
+
+// Note: This test file is currently skipped because explicit lifetime annotations
+// (like Rust's <'a>) are not yet implemented in the Verum parser. The tests below
+// demonstrate the intended semantics using simplified patterns that don't require
+// explicit lifetime parameters.
+
+fn main() {
+    test_basic_lifetime();
+    test_borrowed_from_scope();
+    test_closure_capture_lifetime();
+    test_iterator_lifetime();
+    print("All lifetime safety tests passed!");
+}
+
+/// Basic lifetime: references live within their scope
+fn test_basic_lifetime() {
+    let value = 42;
+
+    // Reference is valid within this scope
+    {
+        let ref_val: &Int = &value;
+        assert(*ref_val == 42);
+        // ref_val valid here
+    }
+    // ref_val out of scope, but value still exists
+
+    // Value outlives any reference taken to it
+    let another_ref = &value;
+    assert(*another_ref == 42);
+}
+
+/// References cannot escape their referent's scope
+fn test_borrowed_from_scope() {
+    // Reference returned from borrow of long-lived value
+    // Note: In full Verum, this would use lifetime annotations
+    fn get_ref(value: &Int) -> &Int {
+        value  // OK: input lifetime equals output lifetime
+    }
+
+    let num = 100;
+    let ref_num = get_ref(&num);
+    assert(*ref_num == 100);
+
+    // Multiple references with same lifetime
+    fn longest(a: &Text, b: &Text) -> &Text {
+        if a.len() > b.len() { a } else { b }
+    }
+
+    let s1 = Text.from("short");
+    let s2 = Text.from("longer string");
+    let result = longest(&s1, &s2);
+    assert(result.len() == 13);
+
+    // Reference into collection owned by caller
+    fn first_element(list: &List<Int>) -> Maybe<&Int> {
+        list.first()
+    }
+
+    let items = [1, 2, 3];
+    match first_element(&items) {
+        Some(first) => assert(*first == 1),
+        None => panic("unexpected"),
+    }
+
+    // INVALID patterns caught at compile time:
+    // fn bad() -> &Int {
+    //     let local = 42;
+    //     &local  // ERROR: returns reference to local
+    // }
+}
+
+/// Closure capture respects lifetimes
+fn test_closure_capture_lifetime() {
+    // Immutable capture by reference
+    let value = 42;
+    let get_value = || {
+        value  // Captures by reference
+    };
+    assert(get_value() == 42);
+
+    // Mutable capture
+    let mut counter = 0;
+    let mut increment = || {
+        counter += 1;
+    };
+    increment();
+    increment();
+    assert(counter == 2);
+
+    // Move capture for owned values
+    let owned = Text.from("captured");
+    let get_owned = move || {
+        owned.clone()  // Value moved into closure
+    };
+    // owned is no longer accessible here
+    let copy = get_owned();
+    assert(copy == "captured");
+}
+
+/// Iterator lifetime safety
+fn test_iterator_lifetime() {
+    let items = [1, 2, 3, 4, 5];
+
+    // Iterator borrows collection
+    let iter = items.iter();  // Borrows items
+
+    // Collection cannot be modified while iterator exists
+    // items.push(6);  // ERROR: cannot mutate while borrowed
+
+    // Iterator references are valid within iteration
+    for item in iter {
+        assert(*item > 0);
+    }
+
+    // After iterator consumed, collection is free
+    // items.push(6);  // Would be OK here
+
+    // Collecting preserves lifetime correctly
+    let refs: List<&Int> = items.iter().collect();
+    // refs borrows items - items must outlive refs
+
+    for r in &refs {
+        assert(**r > 0);
+    }
+
+    // INVALID: Storing references that outlive collection
+    // let escaped_refs: List<&Int>;
+    // {
+    //     let temp = [1, 2, 3];
+    //     escaped_refs = temp.iter().collect();  // ERROR
+    // }  // temp dropped
+    // use escaped_refs  // Would be dangling
+}
+
+// The following features require explicit lifetime annotations which are
+// not yet implemented in the parser:
+//
+// 1. Struct lifetime annotations:
+//    type Wrapper<'a> is { value: &'a Int };
+//
+// 2. Lifetime bounds on generics:
+//    fn process<'a, T: 'a>(value: &'a T) -> &'a T
+//
+// 3. Static lifetime:
+//    static GLOBAL: Int = 100;
+//    fn get_static() -> &'static Int
+//
+// 4. Higher-ranked trait bounds:
+//    F: for<'a> Fn(&'a Int) -> Int
+//
+// 5. Lifetime elision rules (automatic inference)
+//
+// These will be implemented as part of the full borrow checker.

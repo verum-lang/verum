@@ -1,0 +1,561 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, nn, neural-network
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT tensor neural network operations — conv, pool, batch_norm, leaky_relu, argmax, topk, cumsum
+
+// ============================================================================
+// Utility helpers
+// ============================================================================
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// ============================================================================
+// Arr8: 8-element integer array via record type
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// 1D Convolution (sliding dot product with kernel of size 3)
+// ============================================================================
+
+type Kernel3 is { k0: Int, k1: Int, k2: Int };
+
+fn conv1d_k3(input: Arr8, input_len: Int, kernel: Kernel3) -> Arr8 {
+    let out_len = input_len - 2;
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < out_len {
+        let sum = arr8_get(input, i) * kernel.k0
+                + arr8_get(input, i + 1) * kernel.k1
+                + arr8_get(input, i + 2) * kernel.k2;
+        out = arr8_set(out, i, sum);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Pooling operations (window=2, stride=2)
+// ============================================================================
+
+fn max_pool_1d(input: Arr8, input_len: Int) -> Arr8 {
+    let out_len = input_len / 2;
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < out_len {
+        let a = arr8_get(input, i * 2);
+        let b = arr8_get(input, i * 2 + 1);
+        out = arr8_set(out, i, int_max(a, b));
+        i = i + 1;
+    }
+    out
+}
+
+fn avg_pool_1d(input: Arr8, input_len: Int) -> Arr8 {
+    let out_len = input_len / 2;
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < out_len {
+        let a = arr8_get(input, i * 2);
+        let b = arr8_get(input, i * 2 + 1);
+        out = arr8_set(out, i, (a + b) / 2);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// LeakyReLU: x if x >= 0, x/10 otherwise (integer approximation)
+// ============================================================================
+
+fn leaky_relu(x: Int) -> Int {
+    if x >= 0 { x } else { x / 10 }
+}
+
+fn arr8_leaky_relu(a: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, leaky_relu(arr8_get(a, i)));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Argmax / Argmin: find index of maximum / minimum element
+// ============================================================================
+
+fn arr8_argmax(a: Arr8, len: Int) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        let v = arr8_get(a, i);
+        if v > best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn arr8_argmin(a: Arr8, len: Int) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        let v = arr8_get(a, i);
+        if v < best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+// ============================================================================
+// TopK: find the k largest elements (simple selection, returns sorted desc)
+// ============================================================================
+
+fn arr8_max_val(a: Arr8, len: Int) -> Int {
+    let mut mx = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        mx = int_max(mx, arr8_get(a, i));
+        i = i + 1;
+    }
+    mx
+}
+
+// TopK via repeated selection: find max, mask it out, repeat k times.
+// Uses a very small sentinel value to mask out selected elements.
+fn topk(a: Arr8, len: Int, k: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut working = a;
+    let mut j = 0;
+    while j < k {
+        let idx = arr8_argmax(working, len);
+        let val = arr8_get(working, idx);
+        result = arr8_set(result, j, val);
+        // Mask out the selected element with a very negative value
+        working = arr8_set(working, idx, -999999);
+        j = j + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Cumulative sum and cumulative product
+// ============================================================================
+
+fn arr8_cumsum(a: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut running = 0;
+    let mut i = 0;
+    while i < len {
+        running = running + arr8_get(a, i);
+        out = arr8_set(out, i, running);
+        i = i + 1;
+    }
+    out
+}
+
+fn arr8_cumprod(a: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut running = 1;
+    let mut i = 0;
+    while i < len {
+        running = running * arr8_get(a, i);
+        out = arr8_set(out, i, running);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Batch normalization (integer approximation)
+// (x - mean) * scale / divisor
+// We compute mean = sum(x) / len, then normalize each element.
+// scale=100 to keep precision in integer math.
+// ============================================================================
+
+fn arr8_sum(a: Arr8, len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len {
+        s = s + arr8_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn arr8_batch_norm(a: Arr8, len: Int, scale: Int) -> Arr8 {
+    let mean = arr8_sum(a, len) / len;
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        let centered = arr8_get(a, i) - mean;
+        out = arr8_set(out, i, centered * scale);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Clamp: restrict values to [lo, hi]
+// ============================================================================
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo { lo } else if x > hi { hi } else { x }
+}
+
+fn arr8_clamp(a: Arr8, len: Int, lo: Int, hi: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, clamp(arr8_get(a, i), lo, hi));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_conv1d_edge_detect() {
+    // Edge detection kernel [-1, 2, -1] on a ramp signal
+    let input = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 0, e7: 0 };
+    let kernel = Kernel3 { k0: -1, k1: 2, k2: -1 };
+    let out = conv1d_k3(input, 6, kernel);
+    // Ramp is linear: second difference is 0
+    // out[0] = -10 + 40 - 30 = 0
+    // out[1] = -20 + 60 - 40 = 0
+    // out[2] = -30 + 80 - 50 = 0
+    // out[3] = -40 + 100 - 60 = 0
+    assert_eq(arr8_get(out, 0), 0);
+    assert_eq(arr8_get(out, 1), 0);
+    assert_eq(arr8_get(out, 2), 0);
+    assert_eq(arr8_get(out, 3), 0);
+    print("  conv1d_edge_detect ok");
+}
+
+fn test_conv1d_sum_kernel() {
+    // Averaging kernel [1, 1, 1] on [2, 4, 6, 8, 10, 12]
+    let input = Arr8 { e0: 2, e1: 4, e2: 6, e3: 8, e4: 10, e5: 12, e6: 0, e7: 0 };
+    let kernel = Kernel3 { k0: 1, k1: 1, k2: 1 };
+    let out = conv1d_k3(input, 6, kernel);
+    // out[0] = 2+4+6 = 12
+    // out[1] = 4+6+8 = 18
+    // out[2] = 6+8+10 = 24
+    // out[3] = 8+10+12 = 30
+    assert_eq(arr8_get(out, 0), 12);
+    assert_eq(arr8_get(out, 1), 18);
+    assert_eq(arr8_get(out, 2), 24);
+    assert_eq(arr8_get(out, 3), 30);
+    print("  conv1d_sum_kernel ok");
+}
+
+fn test_max_pool() {
+    let input = Arr8 { e0: 3, e1: 7, e2: 1, e3: 9, e4: 5, e5: 2, e6: 8, e7: 4 };
+    let out = max_pool_1d(input, 8);
+    // Pairs: (3,7)->7, (1,9)->9, (5,2)->5, (8,4)->8
+    assert_eq(arr8_get(out, 0), 7);
+    assert_eq(arr8_get(out, 1), 9);
+    assert_eq(arr8_get(out, 2), 5);
+    assert_eq(arr8_get(out, 3), 8);
+    print("  max_pool ok");
+}
+
+fn test_avg_pool() {
+    let input = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+    let out = avg_pool_1d(input, 8);
+    // Pairs: (10+20)/2=15, (30+40)/2=35, (50+60)/2=55, (70+80)/2=75
+    assert_eq(arr8_get(out, 0), 15);
+    assert_eq(arr8_get(out, 1), 35);
+    assert_eq(arr8_get(out, 2), 55);
+    assert_eq(arr8_get(out, 3), 75);
+    print("  avg_pool ok");
+}
+
+fn test_leaky_relu() {
+    let input = Arr8 { e0: -100, e1: 50, e2: -30, e3: 0, e4: 200, e5: -70, e6: 10, e7: -1 };
+    let out = arr8_leaky_relu(input, 8);
+    // Positive values pass through, negative values divide by 10
+    assert_eq(arr8_get(out, 0), -10);  // -100 / 10
+    assert_eq(arr8_get(out, 1), 50);   // positive
+    assert_eq(arr8_get(out, 2), -3);   // -30 / 10
+    assert_eq(arr8_get(out, 3), 0);    // zero passes through
+    assert_eq(arr8_get(out, 4), 200);  // positive
+    assert_eq(arr8_get(out, 5), -7);   // -70 / 10
+    assert_eq(arr8_get(out, 6), 10);   // positive
+    assert_eq(arr8_get(out, 7), 0);    // -1 / 10 = 0 (integer truncation)
+    print("  leaky_relu ok");
+}
+
+fn test_argmax() {
+    let a = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    assert_eq(arr8_argmax(a, 8), 5);  // 9 is at index 5
+
+    // Argmax of first 4 elements: max is 4 at index 2
+    assert_eq(arr8_argmax(a, 4), 2);
+
+    // All equal: should return first occurrence (index 0)
+    let b = Arr8 { e0: 7, e1: 7, e2: 7, e3: 7, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr8_argmax(b, 4), 0);
+    print("  argmax ok");
+}
+
+fn test_argmin() {
+    let a = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    assert_eq(arr8_argmin(a, 8), 1);  // 1 is at index 1 (first occurrence)
+
+    // With negatives
+    let b = Arr8 { e0: 10, e1: -5, e2: 3, e3: -20, e4: 7, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr8_argmin(b, 5), 3);  // -20 is at index 3
+    print("  argmin ok");
+}
+
+fn test_topk() {
+    let a = Arr8 { e0: 3, e1: 1, e2: 9, e3: 4, e4: 7, e5: 2, e6: 8, e7: 5 };
+    let top3 = topk(a, 8, 3);
+    // Top 3: 9, 8, 7
+    assert_eq(arr8_get(top3, 0), 9);
+    assert_eq(arr8_get(top3, 1), 8);
+    assert_eq(arr8_get(top3, 2), 7);
+
+    // Top 1 is just the max
+    let top1 = topk(a, 8, 1);
+    assert_eq(arr8_get(top1, 0), 9);
+
+    // Top 5
+    let top5 = topk(a, 8, 5);
+    assert_eq(arr8_get(top5, 0), 9);
+    assert_eq(arr8_get(top5, 1), 8);
+    assert_eq(arr8_get(top5, 2), 7);
+    assert_eq(arr8_get(top5, 3), 5);
+    assert_eq(arr8_get(top5, 4), 4);
+    print("  topk ok");
+}
+
+fn test_cumsum() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let cs = arr8_cumsum(a, 5);
+    assert_eq(arr8_get(cs, 0), 1);   // 1
+    assert_eq(arr8_get(cs, 1), 3);   // 1+2
+    assert_eq(arr8_get(cs, 2), 6);   // 1+2+3
+    assert_eq(arr8_get(cs, 3), 10);  // 1+2+3+4
+    assert_eq(arr8_get(cs, 4), 15);  // 1+2+3+4+5
+
+    // Cumsum with negatives
+    let b = Arr8 { e0: 10, e1: -3, e2: 5, e3: -7, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let cs2 = arr8_cumsum(b, 4);
+    assert_eq(arr8_get(cs2, 0), 10);  // 10
+    assert_eq(arr8_get(cs2, 1), 7);   // 10-3
+    assert_eq(arr8_get(cs2, 2), 12);  // 10-3+5
+    assert_eq(arr8_get(cs2, 3), 5);   // 10-3+5-7
+    print("  cumsum ok");
+}
+
+fn test_cumprod() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let cp = arr8_cumprod(a, 5);
+    assert_eq(arr8_get(cp, 0), 1);    // 1
+    assert_eq(arr8_get(cp, 1), 2);    // 1*2
+    assert_eq(arr8_get(cp, 2), 6);    // 1*2*3
+    assert_eq(arr8_get(cp, 3), 24);   // 1*2*3*4
+    assert_eq(arr8_get(cp, 4), 120);  // 1*2*3*4*5 = 5!
+
+    // Cumprod with negative
+    let b = Arr8 { e0: 2, e1: -3, e2: 4, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let cp2 = arr8_cumprod(b, 3);
+    assert_eq(arr8_get(cp2, 0), 2);    // 2
+    assert_eq(arr8_get(cp2, 1), -6);   // 2 * -3
+    assert_eq(arr8_get(cp2, 2), -24);  // 2 * -3 * 4
+    print("  cumprod ok");
+}
+
+fn test_batch_norm() {
+    // Input: [10, 20, 30, 40], mean = 25, scale = 10
+    // Centered: [-15, -5, 5, 15]
+    // Scaled: [-150, -50, 50, 150]
+    let input = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = arr8_batch_norm(input, 4, 10);
+    assert_eq(arr8_get(out, 0), -150);
+    assert_eq(arr8_get(out, 1), -50);
+    assert_eq(arr8_get(out, 2), 50);
+    assert_eq(arr8_get(out, 3), 150);
+
+    // Symmetric input around 0: [−20, −10, 10, 20], mean = 0
+    // Centered: [-20, -10, 10, 20], scaled by 5: [-100, -50, 50, 100]
+    let sym = Arr8 { e0: -20, e1: -10, e2: 10, e3: 20, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out2 = arr8_batch_norm(sym, 4, 5);
+    assert_eq(arr8_get(out2, 0), -100);
+    assert_eq(arr8_get(out2, 1), -50);
+    assert_eq(arr8_get(out2, 2), 50);
+    assert_eq(arr8_get(out2, 3), 100);
+    print("  batch_norm ok");
+}
+
+fn test_clamp() {
+    let input = Arr8 { e0: -50, e1: 0, e2: 25, e3: 100, e4: 255, e5: -1, e6: 128, e7: 300 };
+    let out = arr8_clamp(input, 8, 0, 255);
+    assert_eq(arr8_get(out, 0), 0);    // -50 clamped to 0
+    assert_eq(arr8_get(out, 1), 0);    // 0 stays
+    assert_eq(arr8_get(out, 2), 25);   // in range
+    assert_eq(arr8_get(out, 3), 100);  // in range
+    assert_eq(arr8_get(out, 4), 255);  // at upper bound
+    assert_eq(arr8_get(out, 5), 0);    // -1 clamped to 0
+    assert_eq(arr8_get(out, 6), 128);  // in range
+    assert_eq(arr8_get(out, 7), 255);  // 300 clamped to 255
+
+    // Tight clamp [10, 20]
+    let out2 = arr8_clamp(input, 8, 10, 20);
+    assert_eq(arr8_get(out2, 0), 10);  // -50 -> 10
+    assert_eq(arr8_get(out2, 1), 10);  // 0 -> 10
+    assert_eq(arr8_get(out2, 2), 20);  // 25 -> 20
+    assert_eq(arr8_get(out2, 3), 20);  // 100 -> 20
+    print("  clamp ok");
+}
+
+fn test_conv_leaky_relu_pool_pipeline() {
+    // Mini neural network layer pipeline: Conv1D -> LeakyReLU -> MaxPool
+    let input = Arr8 { e0: 5, e1: -10, e2: 15, e3: -20, e4: 25, e5: -30, e6: 0, e7: 0 };
+
+    // Weighted sum kernel [1, -1, 1]
+    let kernel = Kernel3 { k0: 1, k1: -1, k2: 1 };
+
+    // Step 1: Conv1D (input_len=6, output_len=4)
+    let conv_out = conv1d_k3(input, 6, kernel);
+    // out[0] = 5 - (-10) + 15 = 30
+    // out[1] = -10 - 15 + (-20) = -45
+    // out[2] = 15 - (-20) + 25 = 60
+    // out[3] = -20 - 25 + (-30) = -75
+    assert_eq(arr8_get(conv_out, 0), 30);
+    assert_eq(arr8_get(conv_out, 1), -45);
+    assert_eq(arr8_get(conv_out, 2), 60);
+    assert_eq(arr8_get(conv_out, 3), -75);
+
+    // Step 2: LeakyReLU
+    let act_out = arr8_leaky_relu(conv_out, 4);
+    assert_eq(arr8_get(act_out, 0), 30);   // positive passes through
+    assert_eq(arr8_get(act_out, 1), -4);   // -45 / 10 = -4 (integer truncation)
+    assert_eq(arr8_get(act_out, 2), 60);   // positive passes through
+    assert_eq(arr8_get(act_out, 3), -7);   // -75 / 10 = -7 (integer truncation)
+
+    // Step 3: MaxPool (window=2, stride=2)
+    let pool_out = max_pool_1d(act_out, 4);
+    // Pairs: (30, -4)->30, (60, -7)->60
+    assert_eq(arr8_get(pool_out, 0), 30);
+    assert_eq(arr8_get(pool_out, 1), 60);
+    print("  conv_leaky_relu_pool_pipeline ok");
+}
+
+fn test_batch_norm_clamp_pipeline() {
+    // Pipeline: BatchNorm -> Clamp (simulate quantization-aware inference)
+    let input = Arr8 { e0: 100, e1: 200, e2: 300, e3: 400, e4: 0, e5: 0, e6: 0, e7: 0 };
+
+    // BatchNorm with scale=1: mean=250, centered=[-150, -50, 50, 150]
+    let normed = arr8_batch_norm(input, 4, 1);
+    assert_eq(arr8_get(normed, 0), -150);
+    assert_eq(arr8_get(normed, 1), -50);
+    assert_eq(arr8_get(normed, 2), 50);
+    assert_eq(arr8_get(normed, 3), 150);
+
+    // Clamp to [-128, 127] (simulated int8 quantization)
+    let quantized = arr8_clamp(normed, 4, -128, 127);
+    assert_eq(arr8_get(quantized, 0), -128);  // -150 clamped
+    assert_eq(arr8_get(quantized, 1), -50);   // in range
+    assert_eq(arr8_get(quantized, 2), 50);    // in range
+    assert_eq(arr8_get(quantized, 3), 127);   // 150 clamped
+    print("  batch_norm_clamp_pipeline ok");
+}
+
+fn test_cumsum_argmax_combined() {
+    // Use cumulative sum then find where the running total first exceeds a threshold
+    let weights = Arr8 { e0: 5, e1: 10, e2: 20, e3: 15, e4: 30, e5: 10, e6: 5, e7: 5 };
+    let cs = arr8_cumsum(weights, 8);
+    // Cumsum: [5, 15, 35, 50, 80, 90, 95, 100]
+    assert_eq(arr8_get(cs, 0), 5);
+    assert_eq(arr8_get(cs, 1), 15);
+    assert_eq(arr8_get(cs, 2), 35);
+    assert_eq(arr8_get(cs, 3), 50);
+    assert_eq(arr8_get(cs, 4), 80);
+    assert_eq(arr8_get(cs, 5), 90);
+    assert_eq(arr8_get(cs, 6), 95);
+    assert_eq(arr8_get(cs, 7), 100);
+
+    // Argmax of cumsum is always last element (monotonically increasing for positive inputs)
+    assert_eq(arr8_argmax(cs, 8), 7);
+
+    // Argmax of original weights: 30 is at index 4
+    assert_eq(arr8_argmax(weights, 8), 4);
+    print("  cumsum_argmax_combined ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_conv1d_edge_detect();
+    test_conv1d_sum_kernel();
+    test_max_pool();
+    test_avg_pool();
+    test_leaky_relu();
+    test_argmax();
+    test_argmin();
+    test_topk();
+    test_cumsum();
+    test_cumprod();
+    test_batch_norm();
+    test_clamp();
+    test_conv_leaky_relu_pool_pipeline();
+    test_batch_norm_clamp_pipeline();
+    test_cumsum_argmax_combined();
+    print("[OK] 144_tensor_nn_aot");
+    0
+}

@@ -1,0 +1,112 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: throw, try, recover, exception-handling
+// @description: Exception throwing and recovery with try/recover blocks
+
+fn divide(a: Int, b: Int) -> Int {
+    if b == 0 {
+        throw "division by zero";
+    }
+    a / b
+}
+
+fn test_basic_throw() -> Int {
+    let result = try {
+        divide(10, 0)
+    } recover {
+        _ => -999
+    };
+    if result != -999 {
+        print(f"FAIL basic_throw: expected -999, got {result}");
+        return 1;
+    }
+    print("  basic_throw: OK");
+    0
+}
+
+fn test_no_throw() -> Int {
+    let result = try {
+        divide(100, 5)
+    } recover {
+        _ => -999
+    };
+    if result != 20 {
+        print(f"FAIL no_throw: expected 20, got {result}");
+        return 1;
+    }
+    print("  no_throw: OK");
+    0
+}
+
+fn risky_chain(x: Int) -> Int {
+    let a = divide(x, 2);
+    let b = divide(a, 3);
+    a + b
+}
+
+fn test_chain_throw() -> Int {
+    let result = try {
+        risky_chain(60)
+    } recover {
+        _ => -1
+    };
+    // 60/2=30, 30/3=10, 30+10=40
+    if result != 40 {
+        print(f"FAIL chain_throw: expected 40, got {result}");
+        return 1;
+    }
+    print("  chain_throw: OK");
+    0
+}
+
+fn test_nested_try() -> Int {
+    let outer = try {
+        let inner = try {
+            divide(10, 0)
+        } recover {
+            _ => 42
+        };
+        inner + 8
+    } recover {
+        _ => -1
+    };
+    if outer != 50 {
+        print(f"FAIL nested_try: expected 50, got {outer}");
+        return 1;
+    }
+    print("  nested_try: OK");
+    0
+}
+
+fn test_recover_value() -> Int {
+    let result = try {
+        throw "custom error";
+        0
+    } recover {
+        _ => 777
+    };
+    if result != 777 {
+        print(f"FAIL recover_value: expected 777, got {result}");
+        return 1;
+    }
+    print("  recover_value: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Throw/Recover Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_throw();
+    failures = failures + test_no_throw();
+    failures = failures + test_chain_throw();
+    failures = failures + test_nested_try();
+    failures = failures + test_recover_value();
+
+    if failures == 0 {
+        print("All throw/recover tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

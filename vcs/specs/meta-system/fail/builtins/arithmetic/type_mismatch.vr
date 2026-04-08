@@ -1,0 +1,25 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, type, error
+// @description: Test that arithmetic builtins fail with wrong argument types
+// @expected-error: type
+
+// =============================================================================
+// TYPE MISMATCH TESTS
+// =============================================================================
+
+// Test abs with text instead of number
+meta fn test_abs_text() -> Int {
+    abs("hello")  // ERROR: abs expects numeric type, got Text
+}
+
+// Test min with mismatched types
+meta fn test_min_type_mismatch() -> Int {
+    min(1, "two")  // ERROR: min expects matching types
+}
+
+// Test max with boolean instead of number
+meta fn test_max_bool() -> Int {
+    max(true, false)  // ERROR: max expects numeric type
+}

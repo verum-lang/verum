@@ -1,0 +1,129 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, channel, send, recv, async
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Test Channel operations: send, recv, close, is_closed, len,
+// capacity, is_empty, is_full.
+// Uses Channel.new(cap) opcode for channel creation.
+
+fn test_channel_basic() {
+    let mut ch = Channel.new(4);
+
+    // Send values
+    let s1 = ch.send(10);
+    let s2 = ch.send(20);
+    let s3 = ch.send(30);
+
+    assert_eq(s1, true);
+    assert_eq(s2, true);
+    assert_eq(s3, true);
+
+    // Check length
+    let n = ch.len();
+    assert_eq(n, 3);
+
+    // Receive values (FIFO order)
+    let v1 = ch.recv();
+    let v2 = ch.recv();
+    let v3 = ch.recv();
+
+    // After receiving, channel should be empty
+    let empty = ch.is_empty();
+    assert_eq(empty, true);
+
+    print("channel_basic: ok");
+}
+
+fn test_channel_full() {
+    let mut ch = Channel.new(2);
+
+    // Fill the channel
+    ch.send(1);
+    ch.send(2);
+
+    // Channel is full — send should return false
+    let full = ch.is_full();
+    assert_eq(full, true);
+
+    let s3 = ch.send(3);
+    assert_eq(s3, false);
+
+    // Receive one to make space
+    ch.recv();
+
+    let full2 = ch.is_full();
+    assert_eq(full2, false);
+
+    // Now send should work
+    let s4 = ch.send(4);
+    assert_eq(s4, true);
+
+    print("channel_full: ok");
+}
+
+fn test_channel_close() {
+    let mut ch = Channel.new(4);
+    ch.send(42);
+
+    // Close the channel
+    ch.close();
+
+    let closed = ch.is_closed();
+    assert_eq(closed, true);
+
+    // Send on closed channel returns false
+    let s = ch.send(99);
+    assert_eq(s, false);
+
+    print("channel_close: ok");
+}
+
+fn test_channel_capacity() {
+    let ch = Channel.new(16);
+    let cap = ch.capacity();
+    assert_eq(cap, 16);
+
+    let ch2 = Channel.new(1);
+    let cap2 = ch2.capacity();
+    assert_eq(cap2, 1);
+
+    print("channel_capacity: ok");
+}
+
+fn test_channel_wrap_around() {
+    // Test circular buffer behavior
+    let mut ch = Channel.new(4);
+
+    // Fill and drain twice to test head/tail wrap-around
+    let mut round = 0;
+    while round < 2 {
+        ch.send(round * 10 + 1);
+        ch.send(round * 10 + 2);
+        ch.send(round * 10 + 3);
+        ch.recv();
+        ch.recv();
+        ch.recv();
+        round = round + 1;
+    }
+
+    // Should still work after wrap-around
+    let s = ch.send(99);
+    assert_eq(s, true);
+    let n = ch.len();
+    assert_eq(n, 1);
+
+    print("channel_wrap_around: ok");
+}
+
+fn main() -> Int {
+    test_channel_basic();
+    test_channel_full();
+    test_channel_close();
+    test_channel_capacity();
+    test_channel_wrap_around();
+    print("[OK] 606_interp_channel_ops");
+    0
+}

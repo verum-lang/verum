@@ -1,0 +1,209 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, closures, higher-order, functions
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Interpreter e2e test: closures, higher-order functions, function composition
+
+// =============================================================================
+// Functions as values
+// =============================================================================
+
+fn double(x: Int) -> Int { x * 2 }
+fn square(x: Int) -> Int { x * x }
+fn negate(x: Int) -> Int { 0 - x }
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn test_functions_as_values() {
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(square, 5), 25);
+    assert_eq(apply(negate, 5), -5);
+    print("  test_functions_as_values: ok");
+}
+
+// =============================================================================
+// Apply function to list
+// =============================================================================
+
+fn map_list(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while i < items.len() {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn test_map_list() {
+    let nums: List<Int> = [1, 2, 3, 4, 5];
+    let doubled = map_list(nums, double);
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[4], 10);
+
+    let squared = map_list(nums, square);
+    assert_eq(squared[0], 1);
+    assert_eq(squared[2], 9);
+    assert_eq(squared[4], 25);
+    print("  test_map_list: ok");
+}
+
+// =============================================================================
+// Filter function
+// =============================================================================
+
+fn is_even(x: Int) -> Bool { x % 2 == 0 }
+fn is_positive(x: Int) -> Bool { x > 0 }
+
+fn filter_list(items: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            result.push(items[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_filter_list() {
+    let nums: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8];
+    let evens = filter_list(nums, is_even);
+    assert_eq(evens.len(), 4);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[3], 8);
+
+    let mixed: List<Int> = [-3, -1, 0, 2, 5];
+    let positives = filter_list(mixed, is_positive);
+    assert_eq(positives.len(), 2);
+    assert_eq(positives[0], 2);
+    assert_eq(positives[1], 5);
+    print("  test_filter_list: ok");
+}
+
+// =============================================================================
+// Reduce/Fold
+// =============================================================================
+
+fn add(a: Int, b: Int) -> Int { a + b }
+fn mul(a: Int, b: Int) -> Int { a * b }
+fn max_fn(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+fn fold_list(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_fold_list() {
+    let nums: List<Int> = [1, 2, 3, 4, 5];
+
+    let sum = fold_list(nums, 0, add);
+    assert_eq(sum, 15);
+
+    let product = fold_list(nums, 1, mul);
+    assert_eq(product, 120);
+
+    let maximum = fold_list(nums, 0, max_fn);
+    assert_eq(maximum, 5);
+    print("  test_fold_list: ok");
+}
+
+// =============================================================================
+// Function returning function
+// =============================================================================
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x| x * n
+}
+
+fn test_function_factories() {
+    let add5 = make_adder(5);
+    assert_eq(add5(10), 15);
+    assert_eq(add5(0), 5);
+
+    let triple = make_multiplier(3);
+    assert_eq(triple(4), 12);
+    assert_eq(triple(7), 21);
+    print("  test_function_factories: ok");
+}
+
+// =============================================================================
+// Closures capturing variables
+// =============================================================================
+
+fn test_closure_capture() {
+    let base = 100;
+    let offset = 50;
+
+    let compute = |x: Int| -> Int { x + base + offset };
+    assert_eq(compute(1), 151);
+    assert_eq(compute(10), 160);
+    print("  test_closure_capture: ok");
+}
+
+// =============================================================================
+// Composition
+// =============================================================================
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn test_composition() {
+    let double_then_square = compose(square, double);
+    // square(double(3)) = square(6) = 36
+    assert_eq(double_then_square(3), 36);
+
+    let square_then_double = compose(double, square);
+    // double(square(3)) = double(9) = 18
+    assert_eq(square_then_double(3), 18);
+    print("  test_composition: ok");
+}
+
+// =============================================================================
+// Pipeline pattern
+// =============================================================================
+
+fn test_pipeline() {
+    let nums: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Filter evens, then double, then sum
+    let evens = filter_list(nums, is_even);
+    let doubled = map_list(evens, double);
+    let total = fold_list(doubled, 0, add);
+    // evens: 2,4,6,8,10 -> doubled: 4,8,12,16,20 -> sum: 60
+    assert_eq(total, 60);
+    print("  test_pipeline: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_functions_as_values();
+    test_map_list();
+    test_filter_list();
+    test_fold_list();
+    test_function_factories();
+    test_closure_capture();
+    test_composition();
+    test_pipeline();
+    print("[OK] 612_interp_closures_hof");
+    0
+}

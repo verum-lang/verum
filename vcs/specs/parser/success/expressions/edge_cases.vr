@@ -1,0 +1,439 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, edge-cases, grammar-coverage
+// @description: Comprehensive edge case tests for parser grammar coverage
+//               Critical for self-hosting verification
+
+// ============================================================================
+// EMPTY DELIMITERS - Grammar consistency tests
+// ============================================================================
+
+fn test_empty_delimiters() {
+    // Empty array literal - valid per grammar
+    let empty_arr = [];
+
+    // Unit expression - single value of unit type
+    let unit_val = ();
+
+    // Empty block in block
+    let block_result = { {} };
+
+    // Return unit explicitly
+    return ();
+}
+
+fn test_empty_function_body() {
+    // Empty function body is valid
+}
+
+fn empty_with_return_type() -> () {
+    // Explicit unit return type with empty body
+}
+
+// ============================================================================
+// GENERIC CLOSING AMBIGUITY - >> vs > >
+// ============================================================================
+
+fn test_generic_double_close() {
+    // Two levels of generics ending with >>
+    let nested: List<Maybe<Int>> = List.new();
+
+    // Method call with generic type arguments (NOT turbofish - Verum uses method<T>() style)
+    let result = processor.convert<List<Maybe<Int>>>();
+}
+
+fn test_generic_triple_close() {
+    // Three levels of generics ending with >>>
+    let deep: List<List<Maybe<Int>>> = List.new();
+
+    // Generic type in expression
+    let typed: List<List<List<Int>>> = List.new();
+}
+
+fn test_generic_in_comparison() {
+    // Generic followed by comparison - must not confuse > with closing
+    // Note: Verum uses type annotations, not turbofish
+    let x: Maybe<Int> = get_value();
+    let cmp = x.unwrap() > 0;
+    let y: List<Int> = get_list();
+    let len_check = y.len() >= 5;
+}
+
+// ============================================================================
+// OPERATOR PRECEDENCE AND ASSOCIATIVITY
+// ============================================================================
+
+fn test_power_operator_right_associativity() {
+    // ** is right-associative: 2 ** 3 ** 2 = 2 ** (3 ** 2) = 2 ** 9 = 512
+    let result = 2 ** 3 ** 2;
+
+    // Mixed with unary minus
+    let negative = -2 ** 2;  // -(2 ** 2) = -4
+}
+
+fn test_null_coalesce_precedence() {
+    // ?? has lower precedence than most operators
+    let val = a + b ?? c;  // (a + b) ?? c
+
+    // Chained coalesce is left-associative
+    let chain = x ?? y ?? z;  // (x ?? y) ?? z
+}
+
+fn test_operator_chains() {
+    // Complex operator chains
+    let complex = a + b * c - d / e % f;
+
+    // Comparison chains
+    let compare = x < y <= z;
+
+    // Logical chains
+    let logical = a && b || c && d;
+}
+
+fn test_unary_minus_with_power() {
+    // Unary minus binds tighter than power
+    let x = -2 ** 2;    // -(2 ** 2) = -4
+    let y = (-2) ** 2;  // 4
+}
+
+// ============================================================================
+// REFERENCE TYPE COMBINATIONS
+// ============================================================================
+
+fn test_reference_types(
+    basic_ref: &Int,
+    mutable_ref: &mut Int,
+    checked_ref: &checked Int,
+    checked_mut_ref: &checked mut Int,
+    unsafe_ref: &unsafe Int,
+    unsafe_mut_ref: &unsafe mut Int
+) {
+    // All reference type variants should parse
+}
+
+// ============================================================================
+// TRAILING COMMA HANDLING
+// ============================================================================
+
+fn test_trailing_comma_tuple() {
+    let single = (42,);      // Single-element tuple needs trailing comma
+    let multi = (1, 2, 3,);  // Optional trailing comma
+}
+
+fn test_trailing_comma_params(a: Int, b: Int,) -> Int {
+    a + b
+}
+
+fn test_trailing_comma_record() {
+    type Point is {
+        x: Float,
+        y: Float,  // Trailing comma in record fields
+    };
+}
+
+fn test_trailing_comma_array() {
+    let arr = [1, 2, 3,];  // Trailing comma in array
+}
+
+// ============================================================================
+// OPTIONAL CHAINING AND NULL COALESCE
+// ============================================================================
+
+fn test_optional_chain() {
+    let val = obj?.field?.nested;
+
+    // Combined with null coalesce
+    let safe = obj?.field ?? default;
+
+    // Method call with optional chain
+    let result = container?.get(key)?.process();
+}
+
+fn test_optional_method_call() {
+    // Optional method with arguments
+    let val = obj?.method(arg1, arg2);
+
+    // Chained optional methods
+    let chain = a?.foo()?.bar()?.baz();
+}
+
+// ============================================================================
+// FORMAT STRING EDGE CASES
+// ============================================================================
+
+fn test_format_strings() {
+    let name = "world";
+    let age = 42;
+
+    // Basic interpolation
+    let basic = f"Hello, {name}!";
+
+    // Expression in interpolation
+    let expr = f"Result: {1 + 2 * 3}";
+
+    // Nested braces (escaped)
+    let escaped = f"Braces: {{literal}}";
+
+    // Multiple interpolations
+    let multi = f"{name} is {age} years old";
+}
+
+// ============================================================================
+// PATTERN EDGE CASES
+// ============================================================================
+
+fn test_pattern_alternation() {
+    match value {
+        1 | 2 | 3 => "small",
+        10 | 20 | 30 => "medium",
+        _ => "other"
+    };
+}
+
+fn test_pattern_with_and() {
+    match num {
+        x @ 1..10 => f"single digit: {x}",
+        _ => "other"
+    };
+}
+
+fn test_record_pattern_with_rest() {
+    match point {
+        Point { x, .. } => x,
+        _ => 0.0
+    };
+}
+
+fn test_slice_pattern() {
+    // Slice patterns use '..' for rest (not '...')
+    // stream patterns use '...' (e.g., stream[a, ...rest])
+    match arr {
+        [first, second, ..rest] => (first, second, rest),
+        [single] => (single, 0, []),
+        [] => (0, 0, [])
+    };
+}
+
+// ============================================================================
+// ASYNC/AWAIT EDGE CASES
+// ============================================================================
+
+async fn test_await_in_complex_expr() {
+    // Await with method chain
+    let result = fetch().await.process().await;
+
+    // Await with optional chain
+    let safe = maybe_async()?.await;
+
+    // Await with error propagation
+    let handled = risky().await?;
+}
+
+fn test_async_closure() {
+    let closure = async |x| x.fetch().await;
+}
+
+fn test_async_block() {
+    let future = async {
+        let data = fetch().await;
+        process(data)
+    };
+}
+
+// ============================================================================
+// DEEPLY NESTED STRUCTURES
+// ============================================================================
+
+fn test_deeply_nested_delimiters() {
+    // 5 levels of nesting
+    let deep = [[[[[ 42 ]]]]];
+
+    // Mixed delimiters
+    let mixed = { [( { [ 1 ] } )] };
+}
+
+fn test_many_function_parameters(
+    a: Int, b: Int, c: Int, d: Int, e: Int,
+    f: Int, g: Int, h: Int, i: Int, j: Int
+) -> Int {
+    a + b + c + d + e + f + g + h + i + j
+}
+
+// ============================================================================
+// SINGLE CHARACTER IDENTIFIERS
+// ============================================================================
+
+fn test_single_char_idents() {
+    let a = 1;
+    let b = 2;
+    let c = a + b;
+
+    // Single char function parameter
+    fn f(x: Int) -> Int { x }
+
+    // Single char generic
+    fn g<T>(val: T) -> T { val }
+}
+
+// ============================================================================
+// RANGE OPERATORS
+// ============================================================================
+
+fn test_range_operators() {
+    // Exclusive range
+    let exclusive = 0..10;
+
+    // Inclusive range
+    let inclusive = 0..=10;
+
+    // Open-ended ranges
+    let from = 5..;
+    let to = ..10;
+    let to_inclusive = ..=10;
+
+    // Full range
+    let full = ..;
+}
+
+// ============================================================================
+// COMPLEX TYPE EXPRESSIONS
+// ============================================================================
+
+type HigherOrder is fn(fn(Int) -> Int) -> fn(Int) -> Int;
+
+type RecursiveTree is {
+    value: Int,
+    left: Maybe<Heap<RecursiveTree>>,
+    right: Maybe<Heap<RecursiveTree>>
+};
+
+type FunctionWithContext is fn(Int) -> Int using [Logger, Database];
+
+// Optional return type (explicit ())
+fn explicit_unit() -> () {
+}
+
+// ============================================================================
+// MOUNT STATEMENT VARIANTS
+// ============================================================================
+
+mount core.collections;
+mount core.collections as sc;
+mount core.collections.{List, Map, Set};
+mount super.utils;
+mount cog.internal;
+
+// ============================================================================
+// ATTRIBUTE EDGE CASES
+// ============================================================================
+
+@derive(Clone, Debug)
+@repr(C)
+type AttributedStruct is {
+    @serialize(rename = "id")
+    user_id: Int,
+
+    @validate(min = 0, max = 100)
+    percentage: Float,
+};
+
+@inline(always)
+fn inlined_function() -> Int { 42 }
+
+@cfg(target = "linux")
+fn platform_specific() {
+    // Linux-only code
+}
+
+// ============================================================================
+// LET-ELSE PATTERN
+// ============================================================================
+
+fn test_let_else() {
+    let Some(value) = maybe_value else {
+        return;
+    };
+
+    // With complex pattern
+    let Point { x, y } = get_point() else {
+        panic("No point");
+    };
+}
+
+// ============================================================================
+// BLOCK EXPRESSIONS AS VALUES
+// ============================================================================
+
+fn test_block_as_value() {
+    // Block with final expression (no semicolon)
+    let result = {
+        let temp = compute();
+        temp * 2
+    };
+
+    // Nested blocks as values
+    let nested = {
+        let inner = {
+            42
+        };
+        inner + 1
+    };
+}
+
+// ============================================================================
+// IF-LET CHAINS
+// ============================================================================
+
+fn test_if_let_chain() {
+    // If-let with condition
+    if let Some(x) = opt && x > 0 {
+        process(x);
+    }
+
+    // Chained if-else-if-let
+    if let Some(a) = opt1 {
+        use_a(a);
+    } else if let Some(b) = opt2 {
+        use_b(b);
+    } else {
+        use_default();
+    }
+}
+
+// ============================================================================
+// MATCH EXPRESSION EDGE CASES
+// ============================================================================
+
+fn test_match_with_guards() {
+    match value {
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        _ => "zero"
+    };
+}
+
+fn test_match_method_syntax() {
+    // Postfix match
+    value.match {
+        Some(x) => x,
+        None => default()
+    };
+}
+
+// ============================================================================
+// COMPLEX CLOSURE SYNTAX
+// ============================================================================
+
+fn test_closures() {
+    // With type annotations
+    let typed = |x: Int, y: Int| -> Int { x + y };
+
+    // With move
+    let moved = move |x| captured + x;
+
+    // Multi-line closure
+    let multi = |x| {
+        let temp = x * 2;
+        temp + 1
+    };
+}

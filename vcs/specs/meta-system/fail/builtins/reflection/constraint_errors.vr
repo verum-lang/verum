@@ -1,0 +1,19 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: requires
+// @description: Tests that bounds_of requires MetaTypes context
+// @tags: meta-system, builtins, reflection, constraints, errors
+
+type Bounded<T: Copy> is {
+    value: T,
+};
+
+// Test bounds_of without MetaTypes context
+// This should fail because bounds_of requires MetaTypes
+meta fn test_bounds_without_context() -> List<Bound> {
+    bounds_of<Bounded<Int>>()  // ERROR: requires MetaTypes context
+}
+
+fn main() {
+    @const test_bounds_without_context();
+}

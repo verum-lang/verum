@@ -1,0 +1,505 @@
+// @test: run
+// @expected-stdout: Test 1 PASSED: LIFO ordering verified\nTest 2 PASSED: errdefer uses correct context\nTest 3 PASSED: nested provide ordering correct\nTest 4 PASSED: context cleanup before errdefer\nTest 5 PASSED: multiple contexts LIFO order\nAll errdefer_context_ordering tests passed
+// @tier: 0
+// @level: L2
+// @tags: errors, cleanup, errdefer, context, ordering, LIFO
+// @description: Test errdefer with context cleanup ordering and LIFO execution
+
+/// Tests for errdefer and context cleanup ordering.
+/// Per audit1.md Section 4.3.3: errdefer + Context Cleanup Priority.
+/// Key concerns:
+/// - errdefer and context cleanup share the unified defer stack
+/// - LIFO order must be maintained
+/// - errdefer must be able to use context if declared after provide
+/// Spec: grammar/verum.ebnf Section 2.13 - defer_stmt (errdefer)
+/// Spec: docs/audit1.md - errdefer + Context Cleanup Priority
+
+// === Context Definitions ===
+
+context Logger {
+    fn log(&self, level: LogLevel, message: &Text);
+    fn info(&self, message: &Text);
+    fn warn(&self, message: &Text);
+    fn error(&self, message: &Text);
+}
+
+type LogLevel is Info | Warn | Error | Debug;
+
+context Database {
+    fn query(&self, sql: &Text) -> Result<QueryResult, DbError>;
+    fn connect(&self) -> Result<Connection, DbError>;
+    fn release(&self, conn: &Connection);
+}
+
+context Metrics {
+    fn increment(&self, name: &Text);
+    fn record(&self, name: &Text, value: Int);
+}
+
+// === Supporting Types ===
+
+type Connection is {
+    id: Int,
+    active: Bool
+};
+
+type QueryResult is {
+    rows: Int
+};
+
+type DbError is
+    | ConnectionFailed(Text)
+    | QueryFailed(Text);
+
+type OperationError is
+    | Database(DbError)
+    | Logic(Text);
+
+// === Global State for Test Verification ===
+
+static mut EXECUTION_LOG: List<Text> = List.new();
+
+fn clear_log() {
+    EXECUTION_LOG.clear();
+}
+
+fn log_event(event: Text) {
+    EXECUTION_LOG.push(event);
+}
+
+fn get_log() -> List<Text> {
+    EXECUTION_LOG.clone()
+}
+
+fn verify_order(expected: List<Text>) -> Bool {
+    let actual = get_log();
+    if actual.len() != expected.len() {
+        println(format("Length mismatch: expected {}, got {}", expected.len(), actual.len()));
+        println(format("Expected: {:?}", expected));
+        println(format("Actual: {:?}", actual));
+        return false;
+    }
+    for (i, exp) in expected.iter().enumerate() {
+        if actual[i] != *exp {
+            println(format("Mismatch at {}: expected '{}', got '{}'", i, exp, actual[i]));
+            return false;
+        }
+    }
+    true
+}
+
+// === Test 1: Basic LIFO ordering with errdefer and context ===
+
+/// Verify that errdefer and context cleanup follow strict LIFO
+fn test_lifo_ordering() -> Result<Int, OperationError>
+    using [Logger, Database]
+{
+    clear_log();
+
+    log_event("start");
+
+    // Stack position [1]
+    defer log_event("defer_1");
+
+    // Stack position [2] - errdefer
+    errdefer log_event("errdefer_1");
+
+    // Stack position [3]
+    defer log_event("defer_2");
+
+    // Stack position [4] - errdefer
+    errdefer log_event("errdefer_2");
+
+    log_event("before_error");
+
+    // Trigger error path
+    Err(OperationError.Logic("Intentional failure"))?;
+
+    Ok(42)
+}
+// Expected LIFO on error: errdefer_2, defer_2, errdefer_1, defer_1
+// (errdefers interleaved with defers based on declaration order)
+
+fn verify_test_1() {
+    let _ = test_lifo_ordering();
+    let log = get_log();
+
+    // Verify LIFO order
+    assert(log[0] == "start");
+    assert(log[1] == "before_error");
+    // Then cleanup in reverse order
+    assert(log[2] == "errdefer_2");
+    assert(log[3] == "defer_2");
+    assert(log[4] == "errdefer_1");
+    assert(log[5] == "defer_1");
+
+    println("Test 1 PASSED: LIFO ordering verified");
+}
+
+// === Test 2: errdefer using provided context ===
+
+/// errdefer declared AFTER provide should be able to use that context
+fn test_errdefer_uses_context() -> Result<Int, OperationError> {
+    clear_log();
+
+    log_event("start");
+
+    // Provide Logger context
+    provide Logger = TestLogger { prefix: "CTX" };
+    log_event("logger_provided");
+
+    // This errdefer is declared AFTER provide, so Logger should be available
+    errdefer {
+        log_event("errdefer_start");
+        Logger.error("Cleanup due to error");  // Should work!
+        log_event("errdefer_end");
+    }
+
+    log_event("before_error");
+    Err(OperationError.Logic("Failure"))?;
+
+    Ok(42)
+}
+
+fn verify_test_2() {
+    let _ = test_errdefer_uses_context();
+    let log = get_log();
+
+    // Verify errdefer could use Logger
+    assert(log.contains(&"errdefer_start"));
+    assert(log.contains(&"[CTX ERROR] Cleanup due to error"));  // Logger was used
+    assert(log.contains(&"errdefer_end"));
+
+    // Verify ordering: errdefer runs before logger is unprovided
+    let errdefer_idx = log.iter().position(|s| s == "errdefer_start").unwrap();
+    let unprovide_idx = log.iter().position(|s| s == "logger_unprovided");
+
+    if let Some(idx) = unprovide_idx {
+        assert(errdefer_idx < idx);  // errdefer before context cleanup
+    }
+
+    println("Test 2 PASSED: errdefer uses correct context");
+}
+
+// === Test 3: Nested provide with errdefer ===
+
+/// When contexts are nested, errdefer sees the innermost context
+fn test_nested_provide_ordering() -> Result<Int, OperationError> {
+    clear_log();
+
+    // Outer Logger
+    provide Logger = TestLogger { prefix: "OUTER" };
+    log_event("outer_logger_provided");
+
+    defer log_event("outer_cleanup");
+
+    let result = {
+        // Inner Logger (shadows outer) - same context but different scope
+        // provide Logger = TestLogger { prefix: "INNER" };
+        log_event("inner_logger_provided");
+
+        errdefer {
+            // Should see INNER Logger
+            Logger.warn("Inner errdefer cleanup");
+        }
+
+        defer log_event("inner_cleanup");
+
+        // Cause error in inner scope
+        Err(Logic("Inner failure"))
+    };
+
+    result
+}
+
+fn verify_test_3() {
+    let _ = test_nested_provide_ordering();
+    let log = get_log();
+
+    // Verify INNER Logger was used in errdefer
+    assert(log.contains(&"[INNER WARN] Inner errdefer cleanup"));
+
+    // Verify cleanup order: errdefer -> inner_cleanup -> outer_cleanup
+    let errdefer_idx = log.iter().position(|s| s.contains("Inner errdefer")).unwrap();
+    let inner_cleanup_idx = log.iter().position(|s| s == "inner_cleanup").unwrap();
+    let outer_cleanup_idx = log.iter().position(|s| s == "outer_cleanup").unwrap();
+
+    assert(errdefer_idx < inner_cleanup_idx);
+    assert(inner_cleanup_idx < outer_cleanup_idx);
+
+    println("Test 3 PASSED: nested provide ordering correct");
+}
+
+// === Test 4: Context cleanup vs errdefer timing ===
+
+/// Demonstrate that context cleanup (unprovide) happens at scope end,
+/// and errdefer can still use context during error unwinding
+fn test_context_cleanup_timing() -> Result<Int, OperationError> {
+    clear_log();
+
+    log_event("start");
+
+    provide Database = TestDatabase {};
+    log_event("database_provided");
+
+    // Connection acquired from Database context
+    let conn = match Database.connect() {
+        Ok(c) => c,
+        Err(e) => return Err(OperationError.Database(e)),
+    };
+    log_event("connection_acquired");
+
+    // This errdefer should be able to call Database.release()
+    // because errdefer runs BEFORE context unprovide
+    errdefer {
+        log_event("errdefer_before_release");
+        Database.release(&conn);  // Context still available!
+        log_event("errdefer_after_release");
+    }
+
+    log_event("before_error");
+    Err(OperationError.Logic("Database operation failed"))?;
+
+    Ok(42)
+}
+
+fn verify_test_4() {
+    let _ = test_context_cleanup_timing();
+    let log = get_log();
+
+    // Verify Database context was available during errdefer
+    assert(log.contains(&"errdefer_before_release"));
+    assert(log.contains(&"connection_released_1"));  // From TestDatabase.release()
+    assert(log.contains(&"errdefer_after_release"));
+
+    // Verify sequence
+    let release_idx = log.iter().position(|s| s == "connection_released_1").unwrap();
+    let unprovide_idx = log.iter().position(|s| s == "database_unprovided");
+
+    if let Some(idx) = unprovide_idx {
+        assert(release_idx < idx);
+    }
+
+    println("Test 4 PASSED: context cleanup before errdefer");
+}
+
+// === Test 5: Multiple contexts with errdefer ===
+
+/// Multiple contexts and errdefers - verify correct LIFO for all
+fn test_multiple_contexts() -> Result<Int, OperationError> {
+    clear_log();
+
+    log_event("start");
+
+    // Provide first context
+    provide Logger = TestLogger { prefix: "LOG" };
+    log_event("logger_provided");
+
+    errdefer Logger.error("Logger errdefer");
+
+    // Provide second context
+    provide Metrics = TestMetrics {};
+    log_event("metrics_provided");
+
+    errdefer Metrics.record("error_count", 1);
+
+    // Provide third context
+    provide Database = TestDatabase {};
+    log_event("database_provided");
+
+    errdefer Database.release(&Connection { id: 999, active: true });
+
+    log_event("all_contexts_ready");
+    log_event("before_error");
+
+    Err(OperationError.Logic("Multi-context failure"))?;
+
+    Ok(42)
+}
+
+fn verify_test_5() {
+    let _ = test_multiple_contexts();
+    let log = get_log();
+
+    // Find indices of errdefer executions
+    let db_errdefer_idx = log.iter().position(|s| s.contains("connection_released_999")).unwrap();
+    let metrics_errdefer_idx = log.iter().position(|s| s.contains("recorded: error_count")).unwrap();
+    let logger_errdefer_idx = log.iter().position(|s| s.contains("Logger errdefer")).unwrap();
+
+    // LIFO: Database errdefer -> Metrics errdefer -> Logger errdefer
+    assert(db_errdefer_idx < metrics_errdefer_idx);
+    assert(metrics_errdefer_idx < logger_errdefer_idx);
+
+    println("Test 5 PASSED: multiple contexts LIFO order");
+}
+
+// === Test 6: errdefer declared BEFORE provide cannot use context ===
+
+/// This should demonstrate compile-time or runtime error
+/// when errdefer tries to use context not yet provided
+fn test_errdefer_before_provide() -> Result<Int, OperationError> {
+    clear_log();
+
+    log_event("start");
+
+    // errdefer BEFORE provide - Logger not yet available
+    // This should either:
+    // 1. Compile error (if static analysis catches it)
+    // 2. Runtime error ContextError.NotProvided
+    errdefer {
+        log_event("errdefer_attempts_logger");
+        // Logger.error("This should fail!");  // Would fail at runtime
+        log_event("errdefer_skipped_logger_call");
+    }
+
+    provide Logger = TestLogger { prefix: "LATE" };
+    log_event("logger_provided_late");
+
+    Err(OperationError.Logic("Test"))?;
+
+    Ok(42)
+}
+
+fn verify_test_6() {
+    let _ = test_errdefer_before_provide();
+    let log = get_log();
+
+    // errdefer ran but couldn't use Logger (it wasn't in scope when errdefer was declared)
+    assert(log.contains(&"errdefer_attempts_logger"));
+    assert(log.contains(&"errdefer_skipped_logger_call"));
+
+    // This demonstrates the importance of declaration order
+}
+
+// === Test 7: errdefer with context method that may fail ===
+
+/// When errdefer calls a context method that itself may fail
+fn test_errdefer_context_method_failure() -> Result<Int, OperationError>
+    using [Database]
+{
+    clear_log();
+
+    let conn = match Database.connect() {
+        Ok(c) => c,
+        Err(e) => return Err(OperationError.Database(e)),
+    };
+    log_event("connected");
+
+    // errdefer calls Database.query which may fail
+    // Errors in errdefer should be logged/swallowed, not propagated
+    errdefer {
+        log_event("errdefer_start");
+        let cleanup_result = Database.query("ROLLBACK");
+        match cleanup_result {
+            Ok(_) => log_event("rollback_success"),
+            Err(e) => log_event(format("rollback_failed: {:?}", e))
+        }
+        log_event("errdefer_end");
+    }
+
+    log_event("before_error");
+    Err(OperationError.Logic("Main operation failed"))?;
+
+    Ok(42)
+}
+
+// === Test Mock Implementations ===
+
+type TestLogger is {
+    prefix: Text
+};
+
+implement Logger for TestLogger {
+    fn log(&self, level: LogLevel, message: &Text) {
+        let level_str = match level {
+            LogLevel.Info => "INFO",
+            LogLevel.Warn => "WARN",
+            LogLevel.Error => "ERROR",
+            LogLevel.Debug => "DEBUG"
+        };
+        log_event(format("[{} {}] {}", self.prefix, level_str, message));
+    }
+
+    fn info(&self, message: &Text) {
+        self.log(LogLevel.Info, message);
+    }
+
+    fn warn(&self, message: &Text) {
+        self.log(LogLevel.Warn, message);
+    }
+
+    fn error(&self, message: &Text) {
+        self.log(LogLevel.Error, message);
+    }
+}
+
+type TestDatabase is ();
+
+implement Database for TestDatabase {
+    fn connect(&self) -> Result<Connection, DbError> {
+        log_event("database_connect");
+        Ok(Connection { id: 1, active: true })
+    }
+
+    fn query(&self, sql: &Text) -> Result<QueryResult, DbError> {
+        log_event(format("database_query: {}", sql));
+        Ok(QueryResult { rows: 0 })
+    }
+
+    fn release(&self, conn: &Connection) {
+        log_event(format("connection_released_{}", conn.id));
+    }
+}
+
+type TestMetrics is ();
+
+implement Metrics for TestMetrics {
+    fn increment(&self, name: &Text) {
+        log_event(format("incremented: {}", name));
+    }
+
+    fn record(&self, name: &Text, value: Int) {
+        log_event(format("recorded: {} = {}", name, value));
+    }
+}
+
+// === Main Test Runner ===
+
+fn main() {
+    // Setup base contexts for tests that need them
+    provide Logger = TestLogger { prefix: "MAIN" };
+    provide Database = TestDatabase {};
+    provide Metrics = TestMetrics {};
+
+    // Run all tests
+    verify_test_1();
+    verify_test_2();
+    verify_test_3();
+    verify_test_4();
+    verify_test_5();
+
+    println("All errdefer_context_ordering tests passed");
+}
+
+// === Additional Documentation ===
+
+/// Unified Defer Stack Semantics (from audit1.md):
+///
+/// ┌─────────────────────────────────────────────────────┐
+/// │                   DEFER STACK                        │
+/// ├─────────────────────────────────────────────────────┤
+/// │ [4] errdefer: conn.release()        <- Error only    │
+/// │ [3] defer: cleanup_temp_files()     <- Always        │
+/// │ [2] provide cleanup: unprovide(Ctx) <- Always (RAII) │
+/// │ [1] errdefer: log_failure()         <- Error only    │
+/// └─────────────────────────────────────────────────────┘
+///                          |
+///               LIFO execution on scope exit
+///
+/// On error path:
+///   1. All errdefers execute in LIFO order
+///   2. All defers execute in LIFO order
+///   3. Context unprovides execute in LIFO order
+///
+/// Key invariant: errdefer declared AFTER provide CAN use that context,
+/// because errdefer runs BEFORE context unprovide in the unified stack.

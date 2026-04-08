@@ -1,0 +1,344 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, union-find, disjoint-set
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Union-Find (Disjoint Set) data structure with path
+// compression. Test: union, find, connected components counting, cycle detection.
+
+// =============================================================================
+// Union-Find with up to 8 elements
+// parent[i] = parent of i (self means root)
+// rank[i] = rank for union by rank
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+type UnionFind is { parent: Arr8, rnk: Arr8, size: Int };
+
+fn uf_new(n: Int) -> UnionFind {
+    // Each element is its own parent, rank 0
+    let mut parent = arr8_new();
+    let mut i = 0;
+    while i < n {
+        parent = arr8_set(parent, i, i);
+        i = i + 1;
+    }
+    UnionFind { parent: parent, rnk: arr8_new(), size: n }
+}
+
+fn arr8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Find with path compression (iterative)
+// =============================================================================
+
+type FindResult is { root: Int, parent: Arr8 };
+
+fn uf_find(parent: Arr8, x: Int) -> FindResult {
+    // First pass: find root
+    let mut r = x;
+    while arr8_get(parent, r) != r {
+        r = arr8_get(parent, r);
+    }
+    // Second pass: path compression
+    let mut cur = x;
+    let mut p = parent;
+    while cur != r {
+        let next = arr8_get(p, cur);
+        p = arr8_set(p, cur, r);
+        cur = next;
+    }
+    FindResult { root: r, parent: p }
+}
+
+// =============================================================================
+// Union by rank
+// =============================================================================
+
+fn uf_union(uf: UnionFind, x: Int, y: Int) -> UnionFind {
+    let fx = uf_find(uf.parent, x);
+    let fy = uf_find(fx.parent, y);
+    let rx = fx.root;
+    let ry = fy.root;
+    let p = fy.parent;
+
+    if rx == ry {
+        // Already in same set
+        return UnionFind { parent: p, rnk: uf.rnk, size: uf.size };
+    }
+
+    let rank_x = arr8_get(uf.rnk, rx);
+    let rank_y = arr8_get(uf.rnk, ry);
+
+    if rank_x < rank_y {
+        // Attach rx under ry
+        let new_p = arr8_set(p, rx, ry);
+        UnionFind { parent: new_p, rnk: uf.rnk, size: uf.size }
+    } else if rank_x > rank_y {
+        // Attach ry under rx
+        let new_p = arr8_set(p, ry, rx);
+        UnionFind { parent: new_p, rnk: uf.rnk, size: uf.size }
+    } else {
+        // Same rank: attach ry under rx, increment rank of rx
+        let new_p = arr8_set(p, ry, rx);
+        let new_r = arr8_set(uf.rnk, rx, rank_x + 1);
+        UnionFind { parent: new_p, rnk: new_r, size: uf.size }
+    }
+}
+
+// =============================================================================
+// Check if two elements are connected
+// =============================================================================
+
+fn uf_connected(uf: UnionFind, x: Int, y: Int) -> Int {
+    let fx = uf_find(uf.parent, x);
+    let fy = uf_find(fx.parent, y);
+    if fx.root == fy.root { 1 } else { 0 }
+}
+
+// =============================================================================
+// Count connected components
+// =============================================================================
+
+fn uf_count_components(uf: UnionFind) -> Int {
+    let mut count = 0;
+    let mut p = uf.parent;
+    let mut i = 0;
+    while i < uf.size {
+        let fr = uf_find(p, i);
+        p = fr.parent;
+        if fr.root == i {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// =============================================================================
+// Test: basic union and find
+// =============================================================================
+
+fn test_basic_union_find() {
+    let mut uf = uf_new(5);
+
+    // Initially all separate
+    assert_eq(uf_connected(uf, 0, 1), 0);
+    assert_eq(uf_connected(uf, 1, 2), 0);
+
+    // Union 0 and 1
+    uf = uf_union(uf, 0, 1);
+    assert_eq(uf_connected(uf, 0, 1), 1);
+    assert_eq(uf_connected(uf, 0, 2), 0);
+
+    // Union 2 and 3
+    uf = uf_union(uf, 2, 3);
+    assert_eq(uf_connected(uf, 2, 3), 1);
+    assert_eq(uf_connected(uf, 0, 2), 0);
+
+    // Union the two groups via 1 and 3
+    uf = uf_union(uf, 1, 3);
+    assert_eq(uf_connected(uf, 0, 2), 1);
+    assert_eq(uf_connected(uf, 0, 3), 1);
+    assert_eq(uf_connected(uf, 1, 2), 1);
+
+    // 4 is still separate
+    assert_eq(uf_connected(uf, 0, 4), 0);
+}
+
+// =============================================================================
+// Test: count connected components
+// =============================================================================
+
+fn test_count_components() {
+    let mut uf = uf_new(6);
+    assert_eq(uf_count_components(uf), 6);
+
+    uf = uf_union(uf, 0, 1);
+    assert_eq(uf_count_components(uf), 5);
+
+    uf = uf_union(uf, 2, 3);
+    assert_eq(uf_count_components(uf), 4);
+
+    uf = uf_union(uf, 4, 5);
+    assert_eq(uf_count_components(uf), 3);
+
+    uf = uf_union(uf, 0, 2);
+    assert_eq(uf_count_components(uf), 2);
+
+    uf = uf_union(uf, 0, 4);
+    assert_eq(uf_count_components(uf), 1);
+}
+
+// =============================================================================
+// Test: redundant unions (union same set)
+// =============================================================================
+
+fn test_redundant_unions() {
+    let mut uf = uf_new(4);
+    uf = uf_union(uf, 0, 1);
+    uf = uf_union(uf, 0, 1);  // redundant
+    uf = uf_union(uf, 1, 0);  // redundant
+    assert_eq(uf_count_components(uf), 3);  // still 3: {0,1}, {2}, {3}
+}
+
+// =============================================================================
+// Test: self-find
+// =============================================================================
+
+fn test_self_find() {
+    let uf = uf_new(4);
+    let mut i = 0;
+    while i < 4 {
+        let fr = uf_find(uf.parent, i);
+        assert_eq(fr.root, i);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Test: path compression
+// Chain: 0 -> 1 -> 2 -> 3 (parent chain)
+// After find(0), all should point directly to 3
+// =============================================================================
+
+fn test_path_compression() {
+    let mut parent = arr8_new();
+    parent = arr8_set(parent, 0, 1);
+    parent = arr8_set(parent, 1, 2);
+    parent = arr8_set(parent, 2, 3);
+    parent = arr8_set(parent, 3, 3);
+
+    let fr = uf_find(parent, 0);
+    assert_eq(fr.root, 3);
+    // After compression, 0 should point directly to 3
+    assert_eq(arr8_get(fr.parent, 0), 3);
+    // 1 should also point to 3
+    assert_eq(arr8_get(fr.parent, 1), 3);
+    // 2 should point to 3
+    assert_eq(arr8_get(fr.parent, 2), 3);
+}
+
+// =============================================================================
+// Cycle detection in undirected graph using Union-Find
+// If we try to union two nodes that are already connected, there's a cycle.
+// =============================================================================
+
+// Edge represented as two node indices
+type Edge is { u: Int, v: Int };
+
+fn has_cycle(edges: Arr8, edge_count: Int, node_count: Int) -> Int {
+    // edges are stored as pairs: edges[2*i]=u, edges[2*i+1]=v
+    let mut uf = uf_new(node_count);
+    let mut i = 0;
+    let mut found_cycle = 0;
+    while i < edge_count {
+        let u = arr8_get(edges, i * 2);
+        let v = arr8_get(edges, i * 2 + 1);
+        if uf_connected(uf, u, v) == 1 {
+            found_cycle = 1;
+        }
+        uf = uf_union(uf, u, v);
+        i = i + 1;
+    }
+    found_cycle
+}
+
+// =============================================================================
+// Test: cycle detection — tree (no cycle)
+// Edges: 0-1, 1-2, 1-3
+// =============================================================================
+
+fn test_no_cycle() {
+    let mut edges = arr8_new();
+    edges = arr8_set(edges, 0, 0);  // edge 0: u=0
+    edges = arr8_set(edges, 1, 1);  // edge 0: v=1
+    edges = arr8_set(edges, 2, 1);  // edge 1: u=1
+    edges = arr8_set(edges, 3, 2);  // edge 1: v=2
+    edges = arr8_set(edges, 4, 1);  // edge 2: u=1
+    edges = arr8_set(edges, 5, 3);  // edge 2: v=3
+    assert_eq(has_cycle(edges, 3, 4), 0);
+}
+
+// =============================================================================
+// Test: cycle detection — triangle (has cycle)
+// Edges: 0-1, 1-2, 2-0
+// =============================================================================
+
+fn test_has_cycle() {
+    let mut edges = arr8_new();
+    edges = arr8_set(edges, 0, 0);  // edge 0: u=0
+    edges = arr8_set(edges, 1, 1);  // edge 0: v=1
+    edges = arr8_set(edges, 2, 1);  // edge 1: u=1
+    edges = arr8_set(edges, 3, 2);  // edge 1: v=2
+    edges = arr8_set(edges, 4, 2);  // edge 2: u=2
+    edges = arr8_set(edges, 5, 0);  // edge 2: v=0
+    assert_eq(has_cycle(edges, 3, 3), 1);
+}
+
+// =============================================================================
+// Test: chain union — all connected at end
+// =============================================================================
+
+fn test_chain_union() {
+    let mut uf = uf_new(8);
+    // Connect in chain: 0-1, 1-2, 2-3, 3-4, 4-5, 5-6, 6-7
+    let mut i = 0;
+    while i < 7 {
+        uf = uf_union(uf, i, i + 1);
+        i = i + 1;
+    }
+    // All should be connected
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(uf_connected(uf, 0, j), 1);
+        j = j + 1;
+    }
+    assert_eq(uf_count_components(uf), 1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_basic_union_find();
+    test_count_components();
+    test_redundant_unions();
+    test_self_find();
+    test_path_compression();
+    test_no_cycle();
+    test_has_cycle();
+    test_chain_union();
+    print("[OK] 276_interp_union_find");
+    0
+}

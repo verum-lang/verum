@@ -1,0 +1,126 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, binary, operations
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests binary/bit-level operations and algorithms.
+
+fn popcount(n: Int) -> Int {
+    let mut count = 0;
+    let mut val = n;
+    while val > 0 {
+        count = count + (val & 1);
+        val = val >> 1;
+    }
+    count
+}
+
+fn reverse_bits_8(n: Int) -> Int {
+    let mut result = 0;
+    let mut val = n & 0xFF;
+    let mut i = 0;
+    while i < 8 {
+        result = (result << 1) | (val & 1);
+        val = val >> 1;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_popcount() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);   // 0b111
+    assert_eq(popcount(255), 8); // 0b11111111
+    assert_eq(popcount(256), 1); // 0b100000000
+    assert_eq(popcount(0xAAAA), 8); // alternating 1010...
+    print("popcount: ok");
+}
+
+fn test_reverse_bits() {
+    assert_eq(reverse_bits_8(0b10000000), 0b00000001);
+    assert_eq(reverse_bits_8(0b11001010), 0b01010011);
+    assert_eq(reverse_bits_8(0xFF), 0xFF);
+    assert_eq(reverse_bits_8(0), 0);
+    assert_eq(reverse_bits_8(1), 128);
+    print("reverse_bits: ok");
+}
+
+fn test_next_power_of_two() {
+    // Find smallest power of 2 >= n
+    let test_vals = [1, 3, 5, 7, 9, 15, 16, 17, 100];
+    let expected  = [1, 4, 8, 8, 16, 16, 16, 32, 128];
+    let n = 9;
+
+    let mut i = 0;
+    while i < n {
+        let val = test_vals[i];
+        let mut p = 1;
+        while p < val {
+            p = p << 1;
+        }
+        assert_eq(p, expected[i]);
+        i = i + 1;
+    }
+    print("next_power_of_two: ok");
+}
+
+fn test_power_of_two_bits() {
+    // Each power of 2 has exactly 1 bit set
+    let mut n = 1;
+    let mut i = 0;
+    while i < 16 {
+        assert_eq(popcount(n), 1);
+        n = n << 1;
+        i = i + 1;
+    }
+    assert_eq(n, 65536); // 2^16
+    // Verify: 2^k - 1 has k bits set
+    assert_eq(popcount(15), 4);   // 2^4 - 1
+    assert_eq(popcount(31), 5);   // 2^5 - 1
+    assert_eq(popcount(63), 6);   // 2^6 - 1
+    assert_eq(popcount(127), 7);  // 2^7 - 1
+    print("power_of_two_bits: ok");
+}
+
+fn test_bit_extract_insert() {
+    // Extract bits [7:4] from a value
+    let value = 0xABCD;
+    let extracted = (value >> 4) & 0xF;
+    assert_eq(extracted, 0xC);
+
+    // Insert 0x5 into bits [7:4]
+    let mask = 0xF << 4; // 0xF0
+    let cleared = value & (0xFFFF ^ mask);
+    let inserted = cleared | (0x5 << 4);
+    assert_eq(inserted, 0xAB5D);
+    print("bit_extract_insert: ok");
+}
+
+fn test_parity() {
+    // Even parity: count of set bits is even → 0, odd → 1
+    let mut i = 0;
+    let mut even_count = 0;
+    while i < 16 {
+        if popcount(i) % 2 == 0 {
+            even_count = even_count + 1;
+        }
+        i = i + 1;
+    }
+    // Half of 0..15 have even parity
+    assert_eq(even_count, 8);
+    print("parity: ok");
+}
+
+fn main() -> Int {
+    test_popcount();
+    test_reverse_bits();
+    test_next_power_of_two();
+    test_power_of_two_bits();
+    test_bit_extract_insert();
+    test_parity();
+    print("[OK] 433_interp_binary_operations");
+    0
+}

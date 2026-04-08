@@ -1,0 +1,197 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, smt, bitvector
+// @description: SMT bitvector theory for fixed-width integer verification
+
+/// Bitvector verification uses SMT solver's bitvector theory
+/// for precise modeling of fixed-width integer operations.
+
+@verify(proof)
+fn wrapping_add_u8(a: UInt8, b: UInt8) -> UInt8 {
+    contract#"
+        ensures result == bvadd(a, b);  // Modular arithmetic
+    ";
+    a.wrapping_add(b)
+}
+
+@verify(proof)
+fn saturating_add_u8(a: UInt8, b: UInt8) -> UInt8 {
+    contract#"
+        ensures a + b <= 255 implies result == a + b;
+        ensures a + b > 255 implies result == 255;
+    ";
+    a.saturating_add(b)
+}
+
+@verify(proof)
+fn checked_add_u8(a: UInt8, b: UInt8) -> Maybe<UInt8> {
+    contract#"
+        ensures a + b <= 255 implies result == Some(a + b);
+        ensures a + b > 255 implies result == None;
+    ";
+    a.checked_add(b)
+}
+
+/// Bitwise operations
+@verify(proof)
+fn set_bit(value: UInt32, bit: Int{>= 0, < 32}) -> UInt32 {
+    contract#"
+        requires bit >= 0 && bit < 32;
+        ensures (result >> bit) & 1 == 1;
+        ensures forall i in 0..32 => i != bit implies
+            ((result >> i) & 1) == ((value >> i) & 1);
+    ";
+    value | (1 << bit)
+}
+
+@verify(proof)
+fn clear_bit(value: UInt32, bit: Int{>= 0, < 32}) -> UInt32 {
+    contract#"
+        requires bit >= 0 && bit < 32;
+        ensures (result >> bit) & 1 == 0;
+        ensures forall i in 0..32 => i != bit implies
+            ((result >> i) & 1) == ((value >> i) & 1);
+    ";
+    value & !(1 << bit)
+}
+
+@verify(proof)
+fn toggle_bit(value: UInt32, bit: Int{>= 0, < 32}) -> UInt32 {
+    contract#"
+        requires bit >= 0 && bit < 32;
+        ensures ((result >> bit) & 1) == 1 - ((value >> bit) & 1);
+    ";
+    value ^ (1 << bit)
+}
+
+/// Population count (number of set bits)
+@verify(proof)
+fn popcount(mut x: UInt32) -> Int{>= 0, <= 32} {
+    contract#"
+        ensures result == count_ones(old(x));
+    ";
+    let mut count = 0;
+    while x != 0 {
+        count += (x & 1) as Int;
+        x >>= 1;
+    }
+    count
+}
+
+/// Leading zeros
+@verify(proof)
+fn leading_zeros(x: UInt32) -> Int{>= 0, <= 32} {
+    contract#"
+        ensures x == 0 implies result == 32;
+        ensures x != 0 implies (x >> (32 - result)) != 0;
+        ensures x != 0 implies (x >> (32 - result + 1)) == 0;
+    ";
+    if x == 0 { return 32; }
+
+    let mut n = 0;
+    let mut mask: UInt32 = 0x80000000;
+    while (x & mask) == 0 {
+        n += 1;
+        mask >>= 1;
+    }
+    n
+}
+
+/// Byte swapping
+@verify(proof)
+fn swap_bytes_u32(x: UInt32) -> UInt32 {
+    contract#"
+        ensures swap_bytes_u32(result) == x;  // Self-inverse
+    ";
+    ((x >> 24) & 0xFF) |
+    ((x >> 8) & 0xFF00) |
+    ((x << 8) & 0xFF0000) |
+    ((x << 24) & 0xFF000000)
+}
+
+/// Rotation
+@verify(proof)
+fn rotate_left_u32(x: UInt32, n: Int{>= 0, < 32}) -> UInt32 {
+    contract#"
+        requires n >= 0 && n < 32;
+        ensures result == (x << n) | (x >> (32 - n));
+    ";
+    (x << n) | (x >> (32 - n))
+}
+
+@verify(proof)
+fn rotate_right_u32(x: UInt32, n: Int{>= 0, < 32}) -> UInt32 {
+    contract#"
+        requires n >= 0 && n < 32;
+        ensures result == (x >> n) | (x << (32 - n));
+    ";
+    (x >> n) | (x << (32 - n))
+}
+
+/// Sign extension
+@verify(proof)
+fn sign_extend_8_to_32(x: Int8) -> Int32 {
+    contract#"
+        ensures result as Int8 == x;  // Low bits preserved
+        ensures x >= 0 implies result >= 0;
+        ensures x < 0 implies result < 0;
+    ";
+    x as Int32
+}
+
+/// Zero extension
+@verify(proof)
+fn zero_extend_8_to_32(x: UInt8) -> UInt32 {
+    contract#"
+        ensures result & 0xFF == x as UInt32;
+        ensures result >> 8 == 0;
+    ";
+    x as UInt32
+}
+
+/// Power of two check
+@verify(proof)
+fn is_power_of_two(x: UInt32) -> Bool {
+    contract#"
+        ensures result == (x != 0 && (x & (x - 1)) == 0);
+    ";
+    x != 0 && (x & (x - 1)) == 0
+}
+
+/// Next power of two
+@verify(proof)
+fn next_power_of_two(x: UInt32{> 0, <= 0x80000000}) -> UInt32 {
+    contract#"
+        requires x > 0;
+        requires x <= 0x80000000;
+        ensures is_power_of_two(result);
+        ensures result >= x;
+        ensures forall p: UInt32 => is_power_of_two(p) && p >= x implies result <= p;
+    ";
+    let mut v = x - 1;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v + 1
+}
+
+ghost fn count_ones(x: UInt32) -> Int {
+    // Ghost function for specification
+    let mut count = 0;
+    let mut val = x;
+    while val != 0 {
+        count += (val & 1) as Int;
+        val >>= 1;
+    }
+    count
+}
+
+fn main() {
+    assert(wrapping_add_u8(200, 100) == 44);  // 300 mod 256
+    assert(saturating_add_u8(200, 100) == 255);
+    assert(is_power_of_two(16));
+    assert(!is_power_of_two(15));
+}

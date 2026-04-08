@@ -1,0 +1,128 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, scope, lifetime, tracking
+
+/// Test CBGR scope-based lifetime tracking.
+/// CBGR integrates with lexical scopes for safety.
+/// Spec: 26-cbgr-implementation.md#scope-integration
+
+fn main() {
+    test_scope_drops();
+    test_nested_scope_tracking();
+    test_conditional_scope();
+    test_loop_scope();
+    test_scope_early_exit();
+}
+
+/// Test that scope exit triggers generation invalidation
+fn test_scope_drops() {
+    let outer_gen: Int;
+    let outer_valid: Bool;
+
+    {
+        let inner = Heap.new(42);
+        outer_gen = inner.generation();
+
+        // Inside scope, reference is valid
+        let ref_val = &*inner;
+        assert(*ref_val == 42);
+
+        outer_valid = true;
+    }
+    // inner is dropped, generation invalidated
+
+    // New allocation should have different generation
+    let new_alloc = Heap.new(100);
+    assert(new_alloc.generation() != outer_gen);
+}
+
+/// Test nested scope tracking
+fn test_nested_scope_tracking() {
+    let level1 = Heap.new(1);
+    let gen1 = level1.generation();
+
+    {
+        let level2 = Heap.new(2);
+        let gen2 = level2.generation();
+
+        assert(gen2 > gen1);
+
+        {
+            let level3 = Heap.new(3);
+            let gen3 = level3.generation();
+
+            assert(gen3 > gen2);
+
+            // All three are valid here
+            assert(*level1 == 1);
+            assert(*level2 == 2);
+            assert(*level3 == 3);
+        }
+        // level3 dropped
+
+        // level1 and level2 still valid
+        assert(*level1 == 1);
+        assert(*level2 == 2);
+    }
+    // level2 dropped
+
+    // Only level1 still valid
+    assert(*level1 == 1);
+}
+
+/// Test conditional scope behavior
+fn test_conditional_scope() {
+    let condition = true;
+    let mut observed_gen: Int = 0;
+
+    if condition {
+        let temp = Heap.new(42);
+        observed_gen = temp.generation();
+
+        let ref_temp = &*temp;
+        assert(*ref_temp == 42);
+    }
+    // temp dropped if condition was true
+
+    // New allocation after conditional
+    let after = Heap.new(100);
+    assert(after.generation() > observed_gen);
+}
+
+/// Test loop scope behavior
+fn test_loop_scope() {
+    let mut prev_gen: Int = 0;
+
+    for i in 0..5 {
+        let loop_var = Heap.new(i);
+        let generation = loop_var.generation();
+
+        // Each iteration gets new generation
+        assert(generation > prev_gen);
+        prev_gen = generation;
+
+        // Valid within iteration
+        assert(*loop_var == i);
+    }
+    // All loop_var instances dropped
+}
+
+/// Test scope with early exit
+fn test_scope_early_exit() {
+    let result = find_positive(&[-1, -2, 3, -4]);
+
+    match result {
+        Some(val) => assert(val == 3),
+        None => panic("Should find positive"),
+    }
+}
+
+fn find_positive(items: &List<Int>) -> Maybe<Int> {
+    for item in items {
+        if *item > 0 {
+            return Some(*item);  // Early return, scope cleanup happens
+        }
+    }
+    None
+}

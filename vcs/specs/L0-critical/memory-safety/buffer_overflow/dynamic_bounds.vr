@@ -1,0 +1,18 @@
+// @test: run-interpreter-panic
+// @expected-panic: Index out of bounds: index 15 for list of length 3
+// @requires: bounds-checking
+// @tier: 0
+// @level: L0
+// @was-skip: FIXED - run-interpreter-panic now works with interpreter error handling
+// @tags: memory-safety, bounds-check, dynamic
+// @description: Tests that dynamically computed index beyond bounds causes a panic
+
+fn compute_index(base: Int, offset: Int) -> Int {
+    base + offset
+}
+
+fn main() {
+    let arr = [10, 20, 30];
+    let idx = compute_index(5, 10);  // idx = 15
+    let _ = arr[idx];  // Panic: Index out of bounds (15 >= 3)
+}

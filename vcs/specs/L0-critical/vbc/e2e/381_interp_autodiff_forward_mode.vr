@@ -1,0 +1,248 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, forward-mode, dual-numbers
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Forward-mode AD via dual numbers
+// Dual number: (val, deriv) where arithmetic propagates derivatives.
+// d(a+b) = (a.val+b.val, a.deriv+b.deriv)
+// d(a*b) = (a.val*b.val, a.deriv*b.val + a.val*b.deriv)
+// Uses integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Dual number type
+// =============================================================================
+
+type Dual is { val: Int, deriv: Int };
+
+// Create a dual number for an input variable (deriv=1)
+fn dual_var(x: Int) -> Dual {
+    Dual { val: x, deriv: scale() }
+}
+
+// Create a dual number for a constant (deriv=0)
+fn dual_const(c: Int) -> Dual {
+    Dual { val: c, deriv: 0 }
+}
+
+// Dual addition: (a+b, a'+b')
+fn dual_add(a: Dual, b: Dual) -> Dual {
+    Dual { val: a.val + b.val, deriv: a.deriv + b.deriv }
+}
+
+// Dual subtraction: (a-b, a'-b')
+fn dual_sub(a: Dual, b: Dual) -> Dual {
+    Dual { val: a.val - b.val, deriv: a.deriv - b.deriv }
+}
+
+// Dual multiplication: (a*b, a'*b + a*b')
+fn dual_mul(a: Dual, b: Dual) -> Dual {
+    Dual {
+        val: smul(a.val, b.val),
+        deriv: smul(a.deriv, b.val) + smul(a.val, b.deriv)
+    }
+}
+
+// Dual scalar multiplication: c*x where c is Int
+fn dual_scale(c: Int, a: Dual) -> Dual {
+    Dual { val: smul(c, a.val), deriv: smul(c, a.deriv) }
+}
+
+// Dual squaring: x^2 (optimized: val=x^2, deriv=2*x*x')
+fn dual_sq(a: Dual) -> Dual {
+    dual_mul(a, a)
+}
+
+// Dual cube: x^3
+fn dual_cube(a: Dual) -> Dual {
+    dual_mul(dual_mul(a, a), a)
+}
+
+// Dual negate
+fn dual_neg(a: Dual) -> Dual {
+    Dual { val: 0 - a.val, deriv: 0 - a.deriv }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_constant() {
+    // f(x) = 5, f'(x) = 0
+    let c = dual_const(5 * scale());
+    assert_eq(c.val, 5 * scale());
+    assert_eq(c.deriv, 0);
+}
+
+fn test_identity() {
+    // f(x) = x, f'(x) = 1
+    let x = dual_var(3 * scale());
+    assert_eq(x.val, 3 * scale());
+    assert_eq(x.deriv, scale()); // 1.0
+}
+
+fn test_linear() {
+    // f(x) = 2x + 3, f'(x) = 2
+    let x = dual_var(4 * scale()); // x=4
+    let two = dual_const(2 * scale());
+    let three = dual_const(3 * scale());
+    let result = dual_add(dual_mul(two, x), three);
+    assert_eq(result.val, 11 * scale());  // 2*4+3 = 11
+    assert_eq(result.deriv, 2 * scale()); // f'=2
+}
+
+fn test_square() {
+    // f(x) = x^2, f'(x) = 2x
+    // At x=3: f(3)=9, f'(3)=6
+    let x = dual_var(3 * scale());
+    let result = dual_sq(x);
+    assert_eq(result.val, 9 * scale());
+    assert_eq(result.deriv, 6 * scale());
+}
+
+fn test_cube() {
+    // f(x) = x^3, f'(x) = 3x^2
+    // At x=2: f(2)=8, f'(2)=12
+    let x = dual_var(2 * scale());
+    let result = dual_cube(x);
+    assert_eq(result.val, 8 * scale());
+    assert_eq(result.deriv, 12 * scale());
+}
+
+fn test_polynomial() {
+    // f(x) = x^2 + 2x + 1 = (x+1)^2
+    // f'(x) = 2x + 2
+    // At x=3: f(3)=16, f'(3)=8
+    let x = dual_var(3 * scale());
+    let one = dual_const(scale());
+    let two = dual_const(2 * scale());
+
+    let x_sq = dual_sq(x);
+    let two_x = dual_mul(two, x);
+    let result = dual_add(dual_add(x_sq, two_x), one);
+
+    assert_eq(result.val, 16 * scale());
+    assert_eq(result.deriv, 8 * scale());
+}
+
+fn test_product() {
+    // f(x) = (x+1)*(x+2), f'(x) = 2x+3
+    // At x=2: f(2)=3*4=12, f'(2)=7
+    let x = dual_var(2 * scale());
+    let one = dual_const(scale());
+    let two = dual_const(2 * scale());
+
+    let a = dual_add(x, one);  // x+1
+    let b = dual_add(x, two);  // x+2
+    let result = dual_mul(a, b);
+
+    assert_eq(result.val, 12 * scale());
+    assert_eq(result.deriv, 7 * scale());
+}
+
+fn test_difference() {
+    // f(x) = x^2 - x, f'(x) = 2x - 1
+    // At x=5: f(5)=20, f'(5)=9
+    let x = dual_var(5 * scale());
+    let result = dual_sub(dual_sq(x), x);
+    assert_eq(result.val, 20 * scale());
+    assert_eq(result.deriv, 9 * scale());
+}
+
+fn test_composition() {
+    // f(x) = (x^2)^2 = x^4, f'(x) = 4x^3
+    // At x=2: f(2)=16, f'(2)=32
+    let x = dual_var(2 * scale());
+    let x_sq = dual_sq(x);
+    let result = dual_sq(x_sq);
+    assert_eq(result.val, 16 * scale());
+    assert_eq(result.deriv, 32 * scale());
+}
+
+fn test_multiple_points() {
+    // f(x) = x^2 + 1, f'(x) = 2x
+    // Test at x = 0, 1, 2, 3, 4
+    let one = dual_const(scale());
+
+    let r0 = dual_add(dual_sq(dual_var(0)), one);
+    assert_eq(r0.val, scale());
+    assert_eq(r0.deriv, 0);
+
+    let r1 = dual_add(dual_sq(dual_var(scale())), one);
+    assert_eq(r1.val, 2 * scale());
+    assert_eq(r1.deriv, 2 * scale());
+
+    let r2 = dual_add(dual_sq(dual_var(2 * scale())), one);
+    assert_eq(r2.val, 5 * scale());
+    assert_eq(r2.deriv, 4 * scale());
+
+    let r3 = dual_add(dual_sq(dual_var(3 * scale())), one);
+    assert_eq(r3.val, 10 * scale());
+    assert_eq(r3.deriv, 6 * scale());
+
+    let r4 = dual_add(dual_sq(dual_var(4 * scale())), one);
+    assert_eq(r4.val, 17 * scale());
+    assert_eq(r4.deriv, 8 * scale());
+}
+
+fn test_negative_input() {
+    // f(x) = x^2, f'(x) = 2x
+    // At x=-3: f(-3)=9, f'(-3)=-6
+    let x = dual_var(-3 * scale());
+    let result = dual_sq(x);
+    assert_eq(result.val, 9 * scale());
+    assert_eq(result.deriv, -6 * scale());
+}
+
+fn test_horner_form() {
+    // f(x) = x^3 + 2x^2 + 3x + 4 using Horner: ((x+2)*x+3)*x+4
+    // f'(x) = 3x^2 + 4x + 3
+    // At x=1: f(1)=10, f'(1)=10
+    let x = dual_var(scale());
+    let two = dual_const(2 * scale());
+    let three = dual_const(3 * scale());
+    let four = dual_const(4 * scale());
+
+    // Horner: ((x+2)*x+3)*x+4
+    let step1 = dual_add(x, two);       // x+2
+    let step2 = dual_mul(step1, x);     // (x+2)*x
+    let step3 = dual_add(step2, three); // (x+2)*x+3
+    let step4 = dual_mul(step3, x);     // ((x+2)*x+3)*x
+    let result = dual_add(step4, four); // ((x+2)*x+3)*x+4
+
+    assert_eq(result.val, 10 * scale());
+    assert_eq(result.deriv, 10 * scale());
+}
+
+fn main() -> Int {
+    test_constant();
+    test_identity();
+    test_linear();
+    test_square();
+    test_cube();
+    test_polynomial();
+    test_product();
+    test_difference();
+    test_composition();
+    test_multiple_points();
+    test_negative_input();
+    test_horner_form();
+    print("[OK] 381_interp_autodiff_forward_mode");
+    0
+}

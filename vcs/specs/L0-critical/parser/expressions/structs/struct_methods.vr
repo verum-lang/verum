@@ -1,0 +1,177 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, structs, methods
+
+// Struct methods and implementations
+
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+// Implement methods for struct
+implement Point {
+    // Constructor
+    fn new(x: Float, y: Float) -> Point {
+        Point { x, y }
+    }
+
+    // Static method (associated function)
+    fn origin() -> Point {
+        Point { x: 0.0, y: 0.0 }
+    }
+
+    // Instance method (takes self)
+    fn distance_from_origin(self) -> Float {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+
+    // Method with reference to self
+    fn distance_to(&self, other: &Point) -> Float {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    // Mutable method
+    fn translate(&mut self, dx: Float, dy: Float) {
+        self.x += dx;
+        self.y += dy;
+    }
+
+    // Method returning Self
+    fn add(self, other: Point) -> Point {
+        Point {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+
+    // Getter methods
+    fn x(&self) -> Float { self.x }
+    fn y(&self) -> Float { self.y }
+
+    // Method for scaling
+    fn scale(self, factor: Float) -> Point {
+        Point {
+            x: self.x * factor,
+            y: self.y * factor,
+        }
+    }
+}
+
+// Test using struct methods
+fn test_using_struct_methods() {
+    let p1 = Point.new(3.0, 4.0);
+    let origin = Point.origin();
+    let dist = p1.distance_from_origin();
+    let dist_to = p1.distance_to(&origin);
+
+    let mut p2 = Point.new(0.0, 0.0);
+    p2.translate(5.0, 5.0);
+
+    let sum = p1.add(p2);
+    let scaled = p1.scale(2.0);
+}
+
+// Generic struct with methods
+type Container<T> is {
+    items: List<T>,
+};
+
+implement<T> Container<T> {
+    fn new() -> Container<T> {
+        Container { items: [] }
+    }
+
+    fn push(&mut self, item: T) {
+        self.items.push(item)
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        self.items.pop()
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.items.is_empty()
+    }
+}
+
+// Constrained generic methods
+implement<T: Display> Container<T> {
+    fn display_all(&self) {
+        for item in &self.items {
+            print(item.to_string())
+        }
+    }
+}
+
+// Protocol definition
+type Displayable is protocol {
+    fn display(&self) -> Text;
+};
+
+// Implementing protocols for struct
+implement Displayable for Point {
+    fn display(&self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+// Test chained method calls
+fn test_chained_method_calls() {
+    let result = Point.new(0.0, 0.0)
+        .add(Point.new(3.0, 0.0))
+        .add(Point.new(0.0, 4.0))
+        .distance_from_origin();
+}
+
+// Method with closure parameter
+implement<T> Container<T> {
+    fn find(&self, predicate: fn(&T) -> Bool) -> Maybe<&T> {
+        for item in &self.items {
+            if predicate(item) {
+                return Some(item)
+            }
+        }
+        None
+    }
+
+    fn map<U>(&self, f: fn(&T) -> U) -> Container<U> {
+        Container {
+            items: self.items.iter().map(f).collect()
+        }
+    }
+}
+
+// Type for async methods test
+type Data is {
+    id: Int,
+};
+
+type Response is {
+    status: Int,
+};
+
+implement Data {
+    async fn fetch(&self) -> Result<Response> {
+        Ok(Response { status: 200 })
+    }
+}
+
+// Async methods
+implement Container<Data> {
+    async fn fetch_all(&self) -> Result<List<Response>> {
+        let mut results = [];
+        for item in &self.items {
+            let response = item.fetch().await?;
+            results.push(response)
+        }
+        Ok(results)
+    }
+}

@@ -1,0 +1,254 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, gpu, graph, capture, launch
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU graph API — create, capture, launch, replay lifecycle simulation
+
+// ============================================================================
+// Graph node types
+// ============================================================================
+
+type GraphNode is {
+    node_id: Int,
+    node_kind: Int,    // 0=kernel, 1=memcpy, 2=memset, 3=barrier
+    dep_count: Int,
+    is_executed: Int
+};
+
+// ============================================================================
+// 8-node graph
+// ============================================================================
+
+type NodeArr8 is {
+    n0: GraphNode, n1: GraphNode, n2: GraphNode, n3: GraphNode,
+    n4: GraphNode, n5: GraphNode, n6: GraphNode, n7: GraphNode
+};
+
+fn nodearr_get(a: NodeArr8, i: Int) -> GraphNode {
+    if i == 0 { a.n0 } else if i == 1 { a.n1 }
+    else if i == 2 { a.n2 } else if i == 3 { a.n3 }
+    else if i == 4 { a.n4 } else if i == 5 { a.n5 }
+    else if i == 6 { a.n6 } else { a.n7 }
+}
+
+fn nodearr_set(a: NodeArr8, i: Int, node: GraphNode) -> NodeArr8 {
+    NodeArr8 {
+        n0: if i == 0 { node } else { a.n0 },
+        n1: if i == 1 { node } else { a.n1 },
+        n2: if i == 2 { node } else { a.n2 },
+        n3: if i == 3 { node } else { a.n3 },
+        n4: if i == 4 { node } else { a.n4 },
+        n5: if i == 5 { node } else { a.n5 },
+        n6: if i == 6 { node } else { a.n6 },
+        n7: if i == 7 { node } else { a.n7 }
+    }
+}
+
+fn empty_node() -> GraphNode {
+    GraphNode { node_id: 0, node_kind: 0, dep_count: 0, is_executed: 0 }
+}
+
+fn nodearr_empty() -> NodeArr8 {
+    let e = empty_node();
+    NodeArr8 { n0: e, n1: e, n2: e, n3: e, n4: e, n5: e, n6: e, n7: e }
+}
+
+// ============================================================================
+// GPU Graph
+// ============================================================================
+
+type GpuGraph is {
+    nodes: NodeArr8,
+    node_count: Int,
+    is_captured: Int,
+    launch_count: Int
+};
+
+fn graph_new() -> GpuGraph {
+    GpuGraph { nodes: nodearr_empty(), node_count: 0, is_captured: 0, launch_count: 0 }
+}
+
+fn graph_add_node(g: GpuGraph, kind: Int, deps: Int) -> GpuGraph {
+    let node = GraphNode { node_id: g.node_count, node_kind: kind, dep_count: deps, is_executed: 0 };
+    let new_nodes = nodearr_set(g.nodes, g.node_count, node);
+    GpuGraph { nodes: new_nodes, node_count: g.node_count + 1, is_captured: g.is_captured, launch_count: g.launch_count }
+}
+
+fn graph_capture(g: GpuGraph) -> GpuGraph {
+    GpuGraph { nodes: g.nodes, node_count: g.node_count, is_captured: 1, launch_count: g.launch_count }
+}
+
+fn graph_launch(g: GpuGraph) -> GpuGraph {
+    if g.is_captured == 0 { g }
+    else {
+        // Mark all nodes as executed
+        let mut nodes = g.nodes;
+        let mut i = 0;
+        while i < g.node_count {
+            let n = nodearr_get(nodes, i);
+            let executed = GraphNode { node_id: n.node_id, node_kind: n.node_kind, dep_count: n.dep_count, is_executed: 1 };
+            nodes = nodearr_set(nodes, i, executed);
+            i = i + 1;
+        }
+        GpuGraph { nodes: nodes, node_count: g.node_count, is_captured: 1, launch_count: g.launch_count + 1 }
+    }
+}
+
+fn graph_count_executed(g: GpuGraph) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < g.node_count {
+        let n = nodearr_get(g.nodes, i);
+        if n.is_executed == 1 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// ============================================================================
+// Test 1: Graph creation and node addition
+// ============================================================================
+
+@test
+fn test_graph_creation() {
+    let mut g = graph_new();
+    assert_eq(g.node_count, 0);
+    assert_eq(g.is_captured, 0);
+
+    // Add kernel node
+    g = graph_add_node(g, 0, 0);
+    assert_eq(g.node_count, 1);
+    let n0 = nodearr_get(g.nodes, 0);
+    assert_eq(n0.node_kind, 0);
+    assert_eq(n0.dep_count, 0);
+
+    // Add memcpy node depending on kernel
+    g = graph_add_node(g, 1, 1);
+    assert_eq(g.node_count, 2);
+    let n1 = nodearr_get(g.nodes, 1);
+    assert_eq(n1.node_kind, 1);
+    assert_eq(n1.dep_count, 1);
+
+    // Add barrier
+    g = graph_add_node(g, 3, 2);
+    assert_eq(g.node_count, 3);
+
+    print("  test_graph_creation: ok");
+}
+
+// ============================================================================
+// Test 2: Capture and launch
+// ============================================================================
+
+@test
+fn test_capture_launch() {
+    let mut g = graph_new();
+    g = graph_add_node(g, 0, 0);   // kernel
+    g = graph_add_node(g, 1, 1);   // memcpy
+    g = graph_add_node(g, 0, 1);   // kernel
+    g = graph_add_node(g, 2, 0);   // memset
+
+    // Cannot execute before capture
+    assert_eq(g.is_captured, 0);
+    let g_no_capture = graph_launch(g);
+    assert_eq(g_no_capture.launch_count, 0);
+
+    // Capture and launch
+    g = graph_capture(g);
+    assert_eq(g.is_captured, 1);
+
+    g = graph_launch(g);
+    assert_eq(g.launch_count, 1);
+    assert_eq(graph_count_executed(g), 4);
+
+    print("  test_capture_launch: ok");
+}
+
+// ============================================================================
+// Test 3: Graph replay — launch multiple times
+// ============================================================================
+
+@test
+fn test_graph_replay() {
+    let mut g = graph_new();
+    g = graph_add_node(g, 0, 0);
+    g = graph_add_node(g, 0, 1);
+    g = graph_capture(g);
+
+    // Launch 5 times
+    let mut i = 0;
+    while i < 5 {
+        g = graph_launch(g);
+        i = i + 1;
+    }
+    assert_eq(g.launch_count, 5);
+
+    // All nodes still marked executed
+    assert_eq(graph_count_executed(g), 2);
+
+    print("  test_graph_replay: ok");
+}
+
+// ============================================================================
+// Test 4: Complex graph — diamond dependency pattern
+// ============================================================================
+
+@test
+fn test_diamond_graph() {
+    let mut g = graph_new();
+
+    // Diamond: A -> B, A -> C, B -> D, C -> D
+    g = graph_add_node(g, 0, 0);   // A: kernel, no deps
+    g = graph_add_node(g, 0, 1);   // B: kernel, depends on A
+    g = graph_add_node(g, 1, 1);   // C: memcpy, depends on A
+    g = graph_add_node(g, 0, 2);   // D: kernel, depends on B and C
+
+    assert_eq(g.node_count, 4);
+
+    // Verify dep counts
+    let a = nodearr_get(g.nodes, 0);
+    let b = nodearr_get(g.nodes, 1);
+    let c = nodearr_get(g.nodes, 2);
+    let d = nodearr_get(g.nodes, 3);
+    assert_eq(a.dep_count, 0);
+    assert_eq(b.dep_count, 1);
+    assert_eq(c.dep_count, 1);
+    assert_eq(d.dep_count, 2);
+
+    // Count node types
+    let mut kernel_count = 0;
+    let mut memcpy_count = 0;
+    let mut idx = 0;
+    while idx < 4 {
+        let n = nodearr_get(g.nodes, idx);
+        if n.node_kind == 0 { kernel_count = kernel_count + 1; }
+        if n.node_kind == 1 { memcpy_count = memcpy_count + 1; }
+        idx = idx + 1;
+    }
+    assert_eq(kernel_count, 3);
+    assert_eq(memcpy_count, 1);
+
+    // Capture and launch
+    g = graph_capture(g);
+    g = graph_launch(g);
+    assert_eq(graph_count_executed(g), 4);
+
+    print("  test_diamond_graph: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_graph_creation();
+    test_capture_launch();
+    test_graph_replay();
+    test_diamond_graph();
+    print("[OK] 083_gpu_graph_api");
+    0
+}

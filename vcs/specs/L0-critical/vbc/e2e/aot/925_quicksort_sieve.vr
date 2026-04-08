@@ -1,0 +1,123 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, recursion, lists, for-in, algorithms
+// @expected-exit: 0
+
+@allow(unbounded_recursion)
+fn quicksort(arr: List<Int>) -> List<Int> {
+    if (arr.len() <= 1) {
+        return arr;
+    }
+    let pivot = arr[0];
+    let mut less: List<Int> = [];
+    let mut equal: List<Int> = [];
+    let mut greater: List<Int> = [];
+    for x in arr {
+        if (x < pivot) {
+            less.push(x);
+        } else if (x == pivot) {
+            equal.push(x);
+        } else {
+            greater.push(x);
+        }
+    }
+    let sorted_less = quicksort(less);
+    let sorted_greater = quicksort(greater);
+    let mut result: List<Int> = [];
+    for x in sorted_less {
+        result.push(x);
+    }
+    for x in equal {
+        result.push(x);
+    }
+    for x in sorted_greater {
+        result.push(x);
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: Quicksort
+    let unsorted = [5, 3, 8, 1, 9, 2, 7, 4, 6, 0];
+    let sorted = quicksort(unsorted);
+    if (sorted.len() != 10) {
+        print(f"FAIL sort len: {sorted.len()}");
+        return 1;
+    }
+    let mut i = 0;
+    while (i < 10) {
+        if (sorted[i] != i) {
+            print(f"FAIL sort[{i}]: {sorted[i]}");
+            return 1;
+        }
+        i = i + 1;
+    }
+
+    // Test 2: Fibonacci sequence
+    let mut fibs: List<Int> = [];
+    fibs.push(0);
+    fibs.push(1);
+    let mut j = 2;
+    while (j < 20) {
+        let next = fibs[j - 1] + fibs[j - 2];
+        fibs.push(next);
+        j = j + 1;
+    }
+    if (fibs[10] != 55) {
+        print(f"FAIL fib[10]: {fibs[10]}");
+        return 1;
+    }
+    if (fibs[19] != 4181) {
+        print(f"FAIL fib[19]: {fibs[19]}");
+        return 1;
+    }
+
+    // Test 3: Sieve of Eratosthenes
+    let limit = 50;
+    let mut is_prime: List<Int> = [];
+    let mut k = 0;
+    while (k <= limit) {
+        is_prime.push(1);
+        k = k + 1;
+    }
+    is_prime[0] = 0;
+    is_prime[1] = 0;
+    let mut p = 2;
+    while (p * p <= limit) {
+        if (is_prime[p] != 0) {
+            let mut m = p * p;
+            while (m <= limit) {
+                is_prime[m] = 0;
+                m = m + p;
+            }
+        }
+        p = p + 1;
+    }
+    let mut prime_count = 0;
+    let mut n = 0;
+    while (n <= limit) {
+        if (is_prime[n] != 0) {
+            prime_count = prime_count + 1;
+        }
+        n = n + 1;
+    }
+    if (prime_count != 15) {
+        print(f"FAIL primes: {prime_count}");
+        return 1;
+    }
+
+    // Test 4: for-in on empty list (regression test)
+    let empty: List<Int> = [];
+    let mut empty_sum = 0;
+    for x in empty {
+        empty_sum = empty_sum + x;
+    }
+    if (empty_sum != 0) {
+        print(f"FAIL empty: {empty_sum}");
+        return 1;
+    }
+
+    print("925_quicksort_sieve: PASS");
+    0
+}

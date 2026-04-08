@@ -1,0 +1,130 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: spawn, parallel, workers, fan-out
+// @description: Test multiple concurrent workers with channels
+
+fn test_fan_out() -> Int {
+    let result_ch = Channel.new(10);
+
+    // Spawn 4 workers computing partial sums
+    let t1 = spawn {
+        let mut s = 0;
+        let mut i = 0;
+        while i < 25 { s = s + i; i = i + 1; }
+        result_ch.send(s);
+        0
+    };
+    let t2 = spawn {
+        let mut s = 0;
+        let mut i = 25;
+        while i < 50 { s = s + i; i = i + 1; }
+        result_ch.send(s);
+        0
+    };
+    let t3 = spawn {
+        let mut s = 0;
+        let mut i = 50;
+        while i < 75 { s = s + i; i = i + 1; }
+        result_ch.send(s);
+        0
+    };
+    let t4 = spawn {
+        let mut s = 0;
+        let mut i = 75;
+        while i < 100 { s = s + i; i = i + 1; }
+        result_ch.send(s);
+        0
+    };
+
+    t1.await;
+    t2.await;
+    t3.await;
+    t4.await;
+
+    // Collect results
+    let mut total = 0;
+    let mut count = 0;
+    while count < 4 {
+        let v = match result_ch.recv() { Some(v) => v, None => 0 };
+        total = total + v;
+        count = count + 1;
+    }
+
+    // Sum 0..100 = 4950
+    if total != 4950 {
+        print(f"FAIL fan_out: total={total}, expected 4950");
+        return 1;
+    }
+    print("  fan_out: OK");
+    0
+}
+
+fn test_pipeline_stages() -> Int {
+    let stage1 = Channel.new(10);
+    let stage2 = Channel.new(10);
+    let stage3 = Channel.new(10);
+
+    // Stage 1: multiply by 2
+    let s1 = spawn {
+        let mut i = 0;
+        while i < 5 {
+            let v = match stage1.recv() { Some(v) => v, None => 0 };
+            stage2.send(v * 2);
+            i = i + 1;
+        }
+        0
+    };
+
+    // Stage 2: add 10
+    let s2 = spawn {
+        let mut i = 0;
+        while i < 5 {
+            let v = match stage2.recv() { Some(v) => v, None => 0 };
+            stage3.send(v + 10);
+            i = i + 1;
+        }
+        0
+    };
+
+    // Feed input: 1,2,3,4,5
+    let mut i = 0;
+    while i < 5 {
+        stage1.send(i + 1);
+        i = i + 1;
+    }
+
+    // Collect: (1*2+10)=12, (2*2+10)=14, (3*2+10)=16, (4*2+10)=18, (5*2+10)=20
+    let mut sum = 0;
+    i = 0;
+    while i < 5 {
+        let v = match stage3.recv() { Some(v) => v, None => 0 };
+        sum = sum + v;
+        i = i + 1;
+    }
+
+    s1.await;
+    s2.await;
+
+    // 12+14+16+18+20 = 80
+    if sum != 80 {
+        print(f"FAIL pipeline: sum={sum}, expected 80");
+        return 1;
+    }
+    print("  pipeline_stages: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Multi-Spawn Tests:");
+    let mut failures = 0;
+    failures = failures + test_fan_out();
+    failures = failures + test_pipeline_stages();
+
+    if failures == 0 {
+        print("All multi-spawn tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

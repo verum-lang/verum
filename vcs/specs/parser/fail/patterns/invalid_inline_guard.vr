@@ -1,0 +1,109 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, guard, inline, error
+// @description: Test invalid inline/nested guard patterns (RFC 3637)
+// @expected-error: E085
+
+// ============================================================================
+// Invalid inline guard patterns
+// ============================================================================
+
+fn test_inline_guard_missing_expr() {
+    let value = 42;
+
+    // Invalid: 'if' in parenthesized pattern without expression
+    match value {
+        (x if) => print("missing guard expr"),
+        _ => print("other"),
+    }
+}
+
+fn test_inline_guard_followed_by_paren() {
+    let value = 42;
+
+    // Invalid: 'if' followed immediately by closing paren
+    match value {
+        (x if ) => print("empty guard"),
+        _ => print("other"),
+    }
+}
+
+fn test_inline_guard_missing_expr_in_tuple() {
+    let pair = (1, 2);
+
+    // Invalid: guard in tuple without expression
+    match pair {
+        ((a if), b) => print("missing guard"),
+        _ => print("other"),
+    }
+}
+
+fn test_inline_guard_followed_by_comma() {
+    let pair = (1, 2);
+
+    // Invalid: guard followed by comma instead of expression
+    match pair {
+        ((a if , b)) => print("comma after if"),
+        _ => print("other"),
+    }
+}
+
+fn test_inline_guard_followed_by_pipe() {
+    let value = 42;
+
+    // Invalid: guard followed by pipe without expression
+    match value {
+        (x if |) => print("pipe after if"),
+        _ => print("other"),
+    }
+}
+
+fn test_inline_guard_empty_or_alternative() {
+    let value = 42;
+
+    // Invalid: or-pattern with empty guarded alternative
+    match value {
+        (x if true) | (y if) => print("empty guard in or"),
+        _ => print("other"),
+    }
+}
+
+fn test_inline_guard_in_array_missing_expr() {
+    let arr = [1, 2, 3];
+
+    // Invalid: guard in array without expression
+    match arr {
+        [(x if), ..] => print("array guard missing"),
+        _ => print("other"),
+    }
+}
+
+fn test_inline_guard_followed_by_bracket() {
+    let arr = [1, 2, 3];
+
+    // Invalid: guard followed by closing bracket
+    match arr {
+        [(x if )] => print("bracket after if"),
+        _ => print("other"),
+    }
+}
+
+fn test_inline_guard_double_if() {
+    let value = 42;
+
+    // Invalid: double if in parenthesized pattern
+    match value {
+        (x if if true) => print("double if"),
+        _ => print("other"),
+    }
+}
+
+fn test_nested_guard_missing_inner_expr() {
+    let data = Some(42);
+
+    // Invalid: nested pattern with missing guard expression
+    match data {
+        Some((x if )) => print("nested missing"),
+        None => print("none"),
+    }
+}

@@ -1,0 +1,359 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, sum-types, variants
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: sum type creation, is checks, match expressions,
+// multiple variants, payload extraction via match
+
+// =============================================================================
+// Sum type definitions
+// =============================================================================
+
+type Direction is North | South | East | West;
+type MaybeInt is Nothing | Just(Int);
+type Shape is Circle(Int) | Rectangle { w: Int, h: Int } | Dot;
+type Comparison is Less | Equal | Greater;
+type Payload is Empty | Single(Int) | Pair { fst: Int, snd: Int } | Triple { a: Int, b: Int, c: Int };
+
+// =============================================================================
+// Unit variant creation and is checks
+// =============================================================================
+
+fn test_direction_creation() {
+    let n: Direction = North;
+    let s: Direction = South;
+    let e: Direction = East;
+    let w: Direction = West;
+
+    assert(n is North);
+    assert(s is South);
+    assert(e is East);
+    assert(w is West);
+}
+
+fn test_direction_negative_is() {
+    let n: Direction = North;
+    assert_eq(n is South, false);
+    assert_eq(n is East, false);
+    assert_eq(n is West, false);
+}
+
+// =============================================================================
+// Match on unit variants
+// =============================================================================
+
+fn direction_to_num(d: Direction) -> Int {
+    match d {
+        North => 0,
+        South => 1,
+        East => 2,
+        West => 3
+    }
+}
+
+fn test_direction_match() {
+    assert_eq(direction_to_num(North), 0);
+    assert_eq(direction_to_num(South), 1);
+    assert_eq(direction_to_num(East), 2);
+    assert_eq(direction_to_num(West), 3);
+}
+
+fn opposite_dir(d: Direction) -> Direction {
+    match d {
+        North => South,
+        South => North,
+        East => West,
+        West => East
+    }
+}
+
+fn test_opposite_direction() {
+    assert(opposite_dir(North) is South);
+    assert(opposite_dir(South) is North);
+    assert(opposite_dir(East) is West);
+    assert(opposite_dir(West) is East);
+}
+
+// =============================================================================
+// Tuple variants with payload
+// =============================================================================
+
+fn test_maybe_creation() {
+    let some: MaybeInt = Just(42);
+    let none: MaybeInt = Nothing;
+
+    assert(some is Just(_));
+    assert(none is Nothing);
+    assert_eq(some is Nothing, false);
+    assert_eq(none is Just(_), false);
+}
+
+fn unwrap_or(m: MaybeInt, default: Int) -> Int {
+    match m {
+        Nothing => default,
+        Just(v) => v
+    }
+}
+
+fn test_maybe_unwrap() {
+    assert_eq(unwrap_or(Just(42), 0), 42);
+    assert_eq(unwrap_or(Just(-5), 99), -5);
+    assert_eq(unwrap_or(Nothing, 99), 99);
+    assert_eq(unwrap_or(Nothing, 0), 0);
+}
+
+fn maybe_map(m: MaybeInt, f: fn(Int) -> Int) -> MaybeInt {
+    match m {
+        Nothing => Nothing,
+        Just(v) => Just(f(v))
+    }
+}
+
+fn test_maybe_map() {
+    let some = Just(10);
+    let doubled = maybe_map(some, |x: Int| -> Int { x * 2 });
+    assert_eq(unwrap_or(doubled, 0), 20);
+
+    let none: MaybeInt = Nothing;
+    let result = maybe_map(none, |x: Int| -> Int { x * 2 });
+    assert(result is Nothing);
+}
+
+// =============================================================================
+// Record variants
+// =============================================================================
+
+fn test_shape_creation() {
+    let c = Circle(5);
+    let r = Rectangle { w: 10, h: 20 };
+    let d: Shape = Dot;
+
+    assert(c is Circle(_));
+    assert(r is Rectangle { w: _, h: _ });
+    assert(d is Dot);
+}
+
+fn shape_area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Rectangle { w, h } => w * h,
+        Dot => 0
+    }
+}
+
+fn test_shape_area() {
+    assert_eq(shape_area(Circle(5)), 75);
+    assert_eq(shape_area(Circle(0)), 0);
+    assert_eq(shape_area(Rectangle { w: 3, h: 4 }), 12);
+    assert_eq(shape_area(Rectangle { w: 10, h: 10 }), 100);
+    assert_eq(shape_area(Dot), 0);
+}
+
+fn shape_perimeter(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * 6,
+        Rectangle { w, h } => 2 * (w + h),
+        Dot => 0
+    }
+}
+
+fn test_shape_perimeter() {
+    assert_eq(shape_perimeter(Circle(5)), 30);
+    assert_eq(shape_perimeter(Rectangle { w: 3, h: 4 }), 14);
+    assert_eq(shape_perimeter(Dot), 0);
+}
+
+// =============================================================================
+// Comparison type
+// =============================================================================
+
+fn compare_ints(a: Int, b: Int) -> Comparison {
+    if a < b {
+        Less
+    } else if a == b {
+        Equal
+    } else {
+        Greater
+    }
+}
+
+fn comparison_to_int(c: Comparison) -> Int {
+    match c {
+        Less => -1,
+        Equal => 0,
+        Greater => 1
+    }
+}
+
+fn test_comparison() {
+    assert_eq(comparison_to_int(compare_ints(1, 2)), -1);
+    assert_eq(comparison_to_int(compare_ints(5, 5)), 0);
+    assert_eq(comparison_to_int(compare_ints(10, 3)), 1);
+}
+
+fn test_comparison_is_checks() {
+    let r = compare_ints(1, 2);
+    assert(r is Less);
+    assert_eq(r is Equal, false);
+    assert_eq(r is Greater, false);
+}
+
+// =============================================================================
+// Multi-payload variants
+// =============================================================================
+
+fn payload_sum(p: Payload) -> Int {
+    match p {
+        Empty => 0,
+        Single(x) => x,
+        Pair { fst, snd } => fst + snd,
+        Triple { a, b, c } => a + b + c
+    }
+}
+
+fn test_payload_variants() {
+    assert_eq(payload_sum(Empty), 0);
+    assert_eq(payload_sum(Single(42)), 42);
+    assert_eq(payload_sum(Pair { fst: 10, snd: 20 }), 30);
+    assert_eq(payload_sum(Triple { a: 1, b: 2, c: 3 }), 6);
+}
+
+fn test_payload_is_checks() {
+    let e: Payload = Empty;
+    let s = Single(5);
+    let p = Pair { fst: 1, snd: 2 };
+    let t = Triple { a: 1, b: 2, c: 3 };
+
+    assert(e is Empty);
+    assert_eq(e is Single(_), false);
+    assert(s is Single(_));
+    assert_eq(s is Empty, false);
+    assert(p is Pair { fst: _, snd: _ });
+    assert(t is Triple { a: _, b: _, c: _ });
+}
+
+// =============================================================================
+// Variants in conditionals
+// =============================================================================
+
+fn test_variant_in_conditional() {
+    let x = 10;
+    let m = if x > 5 {
+        Just(x)
+    } else {
+        Nothing
+    };
+    assert(m is Just(_));
+    assert_eq(unwrap_or(m, 0), 10);
+
+    let y = 3;
+    let n = if y > 5 {
+        Just(y)
+    } else {
+        Nothing
+    };
+    assert(n is Nothing);
+    assert_eq(unwrap_or(n, -1), -1);
+}
+
+// =============================================================================
+// Variants in loops
+// =============================================================================
+
+fn test_variant_in_loop() {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 10 {
+        let m = if i % 2 == 0 { Just(i) } else { Nothing };
+        sum = sum + unwrap_or(m, 0);
+        i = i + 1;
+    }
+    // Even numbers 0+2+4+6+8 = 20
+    assert_eq(sum, 20);
+}
+
+// =============================================================================
+// Nested match usage
+// =============================================================================
+
+fn classify_maybe(m: MaybeInt) -> Int {
+    match m {
+        Nothing => 0,
+        Just(v) => if v > 0 { 1 } else if v == 0 { 0 } else { -1 }
+    }
+}
+
+fn test_nested_match() {
+    assert_eq(classify_maybe(Just(5)), 1);
+    assert_eq(classify_maybe(Just(0)), 0);
+    assert_eq(classify_maybe(Just(-3)), -1);
+    assert_eq(classify_maybe(Nothing), 0);
+}
+
+// =============================================================================
+// Variant functions returning variants
+// =============================================================================
+
+fn safe_div(a: Int, b: Int) -> MaybeInt {
+    if b == 0 {
+        Nothing
+    } else {
+        Just(a / b)
+    }
+}
+
+fn test_safe_div() {
+    assert_eq(unwrap_or(safe_div(10, 2), -1), 5);
+    assert_eq(unwrap_or(safe_div(10, 3), -1), 3);
+    assert_eq(unwrap_or(safe_div(10, 0), -1), -1);
+    assert_eq(unwrap_or(safe_div(0, 5), -1), 0);
+}
+
+// =============================================================================
+// Chain of variant operations
+// =============================================================================
+
+fn test_chain_operations() {
+    let a = safe_div(100, 5);
+    // a = Just(20)
+    let b = maybe_map(a, |x: Int| -> Int { x + 10 });
+    // b = Just(30)
+    assert_eq(unwrap_or(b, 0), 30);
+
+    let c = safe_div(100, 0);
+    // c = Nothing
+    let d = maybe_map(c, |x: Int| -> Int { x + 10 });
+    // d = Nothing
+    assert_eq(unwrap_or(d, -1), -1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_direction_creation();
+    test_direction_negative_is();
+    test_direction_match();
+    test_opposite_direction();
+    test_maybe_creation();
+    test_maybe_unwrap();
+    test_maybe_map();
+    test_shape_creation();
+    test_shape_area();
+    test_shape_perimeter();
+    test_comparison();
+    test_comparison_is_checks();
+    test_payload_variants();
+    test_payload_is_checks();
+    test_variant_in_conditional();
+    test_variant_in_loop();
+    test_nested_match();
+    test_safe_div();
+    test_chain_operations();
+    print("[OK] 265_interp_sum_types");
+    0
+}

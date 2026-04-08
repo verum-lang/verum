@@ -1,0 +1,49 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, time, duration, sleep
+// @expected-exit: 0
+
+fn __time_monotonic_nanos_raw() -> Int {
+    0
+}
+
+fn __time_sleep_nanos_raw(nanos: Int) -> Int {
+    0
+}
+
+fn main() -> Int {
+    // Test 1: monotonic clock returns non-zero nanoseconds
+    let t1 = __time_monotonic_nanos_raw();
+    if (t1 <= 0) {
+        print(f"FAIL test1: monotonic_nanos={t1}");
+        return 1;
+    }
+
+    // Test 2: sleep for ~10ms, verify elapsed time
+    let before = __time_monotonic_nanos_raw();
+    __time_sleep_nanos_raw(10000000);
+    let after = __time_monotonic_nanos_raw();
+    let elapsed_ns = after - before;
+    // Should be at least 5ms (accounting for timer imprecision)
+    if (elapsed_ns < 5000000) {
+        print(f"FAIL test2: elapsed_ns={elapsed_ns} (expected >= 5ms)");
+        return 1;
+    }
+    // Should be less than 500ms (generous upper bound)
+    if (elapsed_ns > 500000000) {
+        print(f"FAIL test2b: elapsed_ns={elapsed_ns} (too slow)");
+        return 1;
+    }
+
+    // Test 3: two monotonic reads are monotonically increasing
+    let t2 = __time_monotonic_nanos_raw();
+    let t3 = __time_monotonic_nanos_raw();
+    if (t3 < t2) {
+        print(f"FAIL test3: not monotonic t2={t2} t3={t3}");
+        return 1;
+    }
+
+    print("926_time_api: PASS");
+    0
+}

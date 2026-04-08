@@ -1,0 +1,326 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: simd, intrinsics, platform
+
+// Feature detection and platform-specific intrinsics
+fn main() {
+    // Runtime feature detection
+    if cpu_has_feature(CpuFeature.AVX2) {
+        avx2_optimized_path();
+    } else if cpu_has_feature(CpuFeature.SSE4_1) {
+        sse4_optimized_path();
+    } else {
+        fallback_path();
+    }
+}
+
+// SSE/SSE2 intrinsics (baseline x86-64)
+@target_feature(enable = "sse2")
+fn sse2_operations() {
+    let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let b: f32x4 = f32x4(5.0, 6.0, 7.0, 8.0);
+
+    // SSE shuffle with immediate
+    let shuffled = a.shuffle_ps.<0b11_10_01_00>(b);
+    // Result: [a[0], a[1], b[2], b[3]]
+
+    // SSE unpack operations
+    let low = a.unpack_lo(b);   // [a0, b0, a1, b1]
+    let high = a.unpack_hi(b);  // [a2, b2, a3, b3]
+
+    // SSE move operations
+    let moved = a.move_ss(b);   // [b0, a1, a2, a3]
+    let move_hl = a.move_hl(b); // [b2, b3, a2, a3]
+    let move_lh = a.move_lh(b); // [a0, a1, b0, b1]
+
+    // Double precision
+    let da: f64x2 = f64x2(1.0, 2.0);
+    let db: f64x2 = f64x2(3.0, 4.0);
+
+    let shuffled_d = da.shuffle_pd.<0b01>(db);  // [da[1], db[0]]
+
+    // Integer SSE2
+    let ia: i32x4 = i32x4(1, 2, 3, 4);
+    let ib: i32x4 = i32x4(5, 6, 7, 8);
+
+    let packed = ia.packs_epi32(ib);  // Pack to i16 with saturation
+}
+
+// SSE3 intrinsics
+@target_feature(enable = "sse3")
+fn sse3_operations() {
+    let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let b: f32x4 = f32x4(5.0, 6.0, 7.0, 8.0);
+
+    // Horizontal add/sub
+    let hadd = a.hadd_ps(b);     // [a0+a1, a2+a3, b0+b1, b2+b3]
+    let hsub = a.hsub_ps(b);     // [a0-a1, a2-a3, b0-b1, b2-b3]
+
+    // Add/sub interleaved
+    let addsub = a.addsub_ps(b); // [a0-b0, a1+b1, a2-b2, a3+b3]
+
+    // Move duplicates
+    let moveldup = a.moveldup_ps(); // [a0, a0, a2, a2]
+    let movehdup = a.movehdup_ps(); // [a1, a1, a3, a3]
+
+    // Double precision
+    let da: f64x2 = f64x2(1.0, 2.0);
+    let movedup_d = da.movedup_pd(); // [da0, da0]
+}
+
+// SSSE3 intrinsics
+@target_feature(enable = "ssse3")
+fn ssse3_operations() {
+    let a: i8x16 = i8x16.from_array([1, -2, 3, -4, 5, -6, 7, -8, 9, -10, 11, -12, 13, -14, 15, -16]);
+    let b: i8x16 = i8x16.from_array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0]);
+
+    // Absolute value
+    let abs_val = a.pabs_b();
+
+    // Shuffle bytes (arbitrary byte permutation)
+    let shuffled = a.pshufb(b);  // Uses b as shuffle control
+
+    // Multiply and add adjacent (i16)
+    let i16_a: i16x8 = i16x8(1, 2, 3, 4, 5, 6, 7, 8);
+    let i16_b: i16x8 = i16x8(1, 1, 1, 1, 1, 1, 1, 1);
+    let maddubs = i16_a.pmaddubsw(i16_b);
+
+    // Horizontal add/sub for packed integers
+    let i16_hadd = i16_a.phaddsw(i16_b);
+
+    // Sign manipulation
+    let sign_result = a.psign_b(b);  // Negate, zero, or keep based on sign of b
+}
+
+// SSE4.1 intrinsics
+@target_feature(enable = "sse4.1")
+fn sse41_operations() {
+    let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let b: f32x4 = f32x4(5.0, 6.0, 7.0, 8.0);
+
+    // Dot product with mask
+    let dp = a.dp_ps.<0xFF>(b);  // Full dot product in all lanes
+
+    // Blend with immediate mask
+    let blended = a.blend_ps.<0b1010>(b);  // [a0, b1, a2, b3]
+
+    // Blend with variable mask
+    let mask: f32x4 = f32x4(-1.0, 0.0, -1.0, 0.0);  // Sign bit = mask
+    let blendv = a.blendv_ps(b, mask);
+
+    // Round operations
+    let rounded = a.round_ps.<0b00>();  // Round to nearest
+    let floored = a.round_ps.<0b01>();  // Floor
+    let ceiled = a.round_ps.<0b10>();   // Ceil
+    let truncated = a.round_ps.<0b11>(); // Truncate
+
+    // Insert/extract
+    let inserted = a.insert_ps.<0b00110000>(b);
+    let extracted: f32 = a.extract_ps.<2>();
+
+    // Integer operations
+    let ia: i32x4 = i32x4(1, 2, 3, 4);
+    let ib: i32x4 = i32x4(2, 2, 2, 2);
+
+    let min_val = ia.pmin_sd(ib);  // Signed min
+    let max_val = ia.pmax_sd(ib);  // Signed max
+
+    // Test operations
+    let all_zero = ia.ptestz(ib);  // Test if (a & b) == 0
+    let all_ones = ia.ptestc(ib);  // Test if (~a & b) == 0
+}
+
+// SSE4.2 intrinsics
+@target_feature(enable = "sse4.2")
+fn sse42_operations() {
+    // Text comparison (pcmpestri, pcmpistrm, etc.)
+    let str_a: i8x16 = i8x16.from_str("Hello World!");
+    let str_b: i8x16 = i8x16.from_str("World");
+
+    // Find substring
+    let idx = str_a.pcmpistri.<0b00001100>(str_b);
+
+    // CRC32 instruction
+    let crc: u32 = 0;
+    let data: u64 = 0x1234567890ABCDEF;
+    let new_crc = crc.crc32u64(data);
+
+    // Population count (via popcnt, often grouped with SSE4.2)
+    let pop = (data as i64).popcnt();
+}
+
+// AVX intrinsics
+@target_feature(enable = "avx")
+fn avx_operations() {
+    let a: f32x8 = f32x8(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
+    let b: f32x8 = f32x8(8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0);
+
+    // 256-bit operations
+    let sum = a + b;
+    let prod = a * b;
+
+    // Permute within 128-bit lanes
+    let perm = a.permute_ps.<0b11_10_01_00>();
+
+    // Permute across 128-bit lanes
+    let perm2f128 = a.permute2f128.<0b0001>(b);
+
+    // Broadcast
+    let broadcast = f32x8.broadcast_ss(&1.0);
+
+    // Insert/extract 128-bit lanes
+    let low_lane: f32x4 = a.extract_f128.<0>();
+    let high_lane: f32x4 = a.extract_f128.<1>();
+
+    let new_vec = a.insert_f128.<1>(f32x4.splat(42.0));
+
+    // Masked load/store
+    let mask: i32x8 = i32x8(-1, 0, -1, 0, -1, 0, -1, 0);
+    let arr: [f32; 8] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let masked = f32x8.maskload(&arr[0], mask);
+
+    // Double precision 256-bit
+    let da: f64x4 = f64x4(1.0, 2.0, 3.0, 4.0);
+    let db: f64x4 = f64x4(5.0, 6.0, 7.0, 8.0);
+    let dsum = da + db;
+}
+
+// AVX2 intrinsics
+@target_feature(enable = "avx2")
+fn avx2_operations() {
+    // Integer 256-bit operations
+    let ia: i32x8 = i32x8(1, 2, 3, 4, 5, 6, 7, 8);
+    let ib: i32x8 = i32x8(8, 7, 6, 5, 4, 3, 2, 1);
+
+    let isum = ia + ib;
+    let iprod = ia * ib;
+
+    // Gather
+    let base: [f32; 16] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0,
+                           8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0];
+    let indices: i32x8 = i32x8(0, 2, 4, 6, 8, 10, 12, 14);
+
+    let gathered: f32x8 = f32x8.gather(&base[0], indices, 4);
+
+    // Permute across lanes
+    let permd = ia.permutevar8x32(ib);
+
+    // Broadcast from memory
+    let broadcast32 = i32x8.broadcast_d(&42);
+    let broadcast64 = i64x4.broadcast_q(&42i64);
+
+    // Byte shuffle across full 256 bits
+    let shuffle_ctrl: i8x32 = i8x32.from_array([
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
+    ]);
+
+    // Shift by variable amount
+    let shift_amounts: i32x8 = i32x8(1, 2, 3, 4, 5, 6, 7, 8);
+    let shifted = ia.sllv_epi32(shift_amounts);
+}
+
+// FMA (Fused Multiply-Add) intrinsics
+@target_feature(enable = "fma")
+fn fma_operations() {
+    let a: f32x8 = f32x8(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
+    let b: f32x8 = f32x8(2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0);
+    let c: f32x8 = f32x8(10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0);
+
+    // a * b + c
+    let fmadd = a.fmadd_ps(b, c);
+
+    // a * b - c
+    let fmsub = a.fmsub_ps(b, c);
+
+    // -(a * b) + c
+    let fnmadd = a.fnmadd_ps(b, c);
+
+    // -(a * b) - c
+    let fnmsub = a.fnmsub_ps(b, c);
+
+    // Alternating add/sub for complex math
+    let fmaddsub = a.fmaddsub_ps(b, c);  // [a0*b0-c0, a1*b1+c1, ...]
+    let fmsubadd = a.fmsubadd_ps(b, c);  // [a0*b0+c0, a1*b1-c1, ...]
+}
+
+// AVX-512 intrinsics (when available)
+@target_feature(enable = "avx512f")
+fn avx512_operations() {
+    let a: f32x16 = f32x16.splat(1.0);
+    let b: f32x16 = f32x16.splat(2.0);
+
+    // 512-bit operations
+    let sum = a + b;
+    let prod = a * b;
+
+    // Mask register operations (native k registers)
+    let mask: mask16 = mask16.from_u16(0xFF00);
+    let blended = mask.blend_ps(a, b);
+
+    // Masked operations that don't write to masked lanes
+    let mut c: f32x16 = f32x16.splat(0.0);
+    c = a.add_ps_mask(b, mask, c);  // Only writes where mask is true
+
+    // Compress/expand with AVX-512
+    let compressed = a.compress_ps(mask);
+    let expanded = b.expand_ps(mask);
+
+    // Ternary logic (arbitrary 3-input boolean function)
+    let ia: i32x16 = i32x16.splat(0xFF00FF00_u32 as i32);
+    let ib: i32x16 = i32x16.splat(0xF0F0F0F0_u32 as i32);
+    let ic: i32x16 = i32x16.splat(0xCCCCCCCC_u32 as i32);
+    let ternary = ia.ternarylogic.<0xCA>(ib, ic);  // (a & b) | (~a & c)
+
+    // Conflict detection
+    let indices: i32x16 = i32x16.from_array([0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7]);
+    let conflicts = indices.conflict_epi32();
+}
+
+// ARM NEON intrinsics
+@target_feature(enable = "neon")
+fn neon_operations() {
+    let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let b: f32x4 = f32x4(5.0, 6.0, 7.0, 8.0);
+
+    // NEON specific operations
+    let sum = a.vaddq_f32(b);
+    let prod = a.vmulq_f32(b);
+
+    // Multiply-accumulate
+    let c: f32x4 = f32x4(10.0, 10.0, 10.0, 10.0);
+    let mla = a.vmlaq_f32(b, c);  // a + b * c
+
+    // Reciprocal estimate and Newton-Raphson step
+    let recip_est = a.vrecpeq_f32();
+    let recip_step = recip_est.vrecpsq_f32(a);
+
+    // Table lookup
+    let table: u8x16 = u8x16.from_array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    let indices: u8x8 = u8x8.from_array([3, 1, 4, 1, 5, 9, 2, 6]);
+    let looked_up = table.vtbl1u8(indices);
+
+    // Pairwise operations
+    let pairwise_add = a.vpaddq_f32(b);  // [a0+a1, a2+a3, b0+b1, b2+b3]
+
+    // Zip (interleave)
+    let (zipped_low, zipped_high) = a.vzipq_f32(b);
+    // zipped_low = [a0, b0, a1, b1], zipped_high = [a2, b2, a3, b3]
+
+    // Unzip (deinterleave)
+    let (unzipped_even, unzipped_odd) = a.vuzpq_f32(b);
+}
+
+fn avx2_optimized_path() {
+    // High-performance path using AVX2
+}
+
+fn sse4_optimized_path() {
+    // Medium-performance path using SSE4
+}
+
+fn fallback_path() {
+    // Portable fallback
+}

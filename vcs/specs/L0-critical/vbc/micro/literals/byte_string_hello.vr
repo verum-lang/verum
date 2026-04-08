@@ -1,0 +1,13 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Verify byte string literal contains correct ASCII bytes
+fn main() {
+    let bs = b"hello";
+    assert_eq(bs[0], 104);  // h
+    assert_eq(bs[1], 101);  // e
+    assert_eq(bs[2], 108);  // l
+    assert_eq(bs[3], 108);  // l
+    assert_eq(bs[4], 111);  // o
+}

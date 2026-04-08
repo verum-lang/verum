@@ -1,0 +1,454 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, refinements, refinement_types, predicates
+// @description: Comprehensive test for refinement type and predicate parsing
+
+// ============================================================================
+// Basic Inline Refinements (inline_refinement)
+// Grammar: '{' refinement_predicates '}'
+// ============================================================================
+
+// Simple comparison refinement
+type Positive is Int{> 0};
+
+type NonNegative is Int{>= 0};
+
+type Negative is Int{< 0};
+
+type NonPositive is Int{<= 0};
+
+type NonZero is Int{!= 0};
+
+// ============================================================================
+// Multiple Predicates (refinement_predicates)
+// Grammar: refinement_predicate { ',' refinement_predicate }
+// ============================================================================
+
+// Multiple comparison predicates
+type Bounded is Int{>= 0, <= 100};
+
+type InRange is Int{> 10, < 20};
+
+type ValidPercent is Float{>= 0.0, <= 100.0};
+
+// Three predicates
+type TightBound is Int{>= 1, <= 10, != 5};
+
+// Four predicates
+type VeryConstrained is Int{> 0, < 100, != 50, != 25};
+
+// ============================================================================
+// Refinement with 'it' Keyword
+// ============================================================================
+
+// Using 'it' to refer to the value
+type NonEmptyText is Text{it.len() > 0};
+
+type ShortText is Text{it.len() <= 100};
+
+type NonEmptyList<T> is List<T>{it.len() > 0};
+
+type SmallList<T> is List<T>{it.len() <= 10};
+
+// Complex 'it' expressions
+type ValidEmail is Text{it.len() > 0, it.contains("@")};
+
+type AlphaText is Text{it.all(|c| c.is_alphabetic())};
+
+type SortedList<T: Ord> is List<T>{is_sorted(it)};
+
+// ============================================================================
+// Named Refinement Predicates
+// Grammar: identifier ':' expression
+// ============================================================================
+
+// Named predicate in refinement
+type NamedPositive is Int{n: n > 0};
+
+type NamedBounded is Int{x: x >= 0 && x <= 100};
+
+type NamedValid is Text{s: s.len() > 0 && s.len() < 256};
+
+// Multiple named predicates
+type MultiNamed is Int{a: a > 0, b: a < 100};
+
+// Named with complex expression
+type ComplexNamed is Int{val: val > 0 && val % 2 == 0};
+
+// ============================================================================
+// Refinement with Where Clause (value_where_clause)
+// Grammar: 'where' [ 'value' ] refinement_expr
+// ============================================================================
+
+// Where clause refinement
+type PositiveWhere is Int where > 0;
+
+type BoundedWhere is Int where >= 0 && <= 100;
+
+// Where with value keyword
+type ValidValue is Int where value > 0;
+
+type BoundedValue is Float where value >= -1.0 && value <= 1.0;
+
+// Where with identifier
+type EmailWhere is Text where is_valid_email;
+
+type PhoneWhere is Text where is_valid_phone;
+
+// ============================================================================
+// Lambda Refinements
+// Grammar: '|' param_list_lambda '|' expression
+// ============================================================================
+
+// Lambda refinement
+type EvenLambda is Int where |n| n % 2 == 0;
+
+type OddLambda is Int where |n| n % 2 == 1;
+
+type PrimeLambda is Int where |n| is_prime(n);
+
+// Lambda with tuple (access elements by index)
+type SortedPair is (Int, Int) where |p| p.0 <= p.1;
+
+// Complex lambda with tuple
+type ValidRange is (Int, Int) where |p| p.0 <= p.1 && p.1 - p.0 <= 100;
+
+// ============================================================================
+// Sigma Types (Dependent Pairs)
+// Grammar: identifier ':' type_expr [ 'where' expression ]
+// ============================================================================
+
+// Basic sigma type
+type SizedArray is (n: Int where n > 0, arr: List<Int> where arr.len() == n);
+
+// Sigma with constraint
+type IndexedElement<T> is (list: List<T>, idx: Int where idx >= 0 && idx < list.len());
+
+// Nested sigma
+type Matrix is (rows: Int where rows > 0, cols: Int where cols > 0, data: List<List<Float>>);
+
+// ============================================================================
+// Refinement on Generic Types
+// ============================================================================
+
+// Simple generic refinement
+type NonEmptyVec<T> is List<T>{it.len() > 0};
+
+type SingletonList<T> is List<T>{it.len() == 1};
+
+// Bounded generic refinement
+type SortedVec<T: Ord> is List<T>{is_sorted(it)};
+
+type UniqueVec<T: Eq> is List<T>{has_no_duplicates(it)};
+
+// Multiple type parameters
+type NonEmptyMap<K, V> is Map<K, V>{it.len() > 0};
+
+type BoundedMap<K, V> is Map<K, V>{it.len() <= 1000};
+
+// ============================================================================
+// Refinement on Record Types
+// ============================================================================
+
+// Refined record fields
+type ValidUser is {
+    id: Int{> 0},
+    name: Text{it.len() >= 1, it.len() <= 100},
+    age: Int{>= 0, <= 150},
+    email: Text{is_valid_email(it)}
+};
+
+// Partially refined record
+type PartialValid is {
+    x: Int{>= 0},
+    y: Int,  // Not refined
+    z: Float{>= 0.0}
+};
+
+// Record with dependent refinement
+type ValidRectangle is {
+    width: Int{> 0},
+    height: Int{> 0},
+    area: Int{it == width * height}
+};
+
+// Nested refined records
+type ValidAccount is {
+    user: ValidUser,
+    balance: Float{>= 0.0},
+    transactions: List<Transaction>{it.len() <= 10000}
+};
+
+// ============================================================================
+// Refinement on Function Parameters
+// ============================================================================
+
+// Function with refined parameter
+fn positive_only(x: Int{x > 0}) -> Int {
+    x * 2
+}
+
+// Multiple refined parameters
+fn bounded_add(a: Int{a >= 0, a <= 100}, b: Int{b >= 0, b <= 100}) -> Int {
+    a + b
+}
+
+// Refined and unrefined mix
+fn mixed_params(x: Int{x > 0}, y: Int, z: Int{z < 100}) -> Int {
+    x + y + z
+}
+
+// Refined generic parameter
+fn process_nonempty<T>(list: List<T>{it.len() > 0}) -> T {
+    list[0]
+}
+
+// ============================================================================
+// Refinement on Return Types
+// ============================================================================
+
+// Refined return type
+fn always_positive(x: Int) -> Int{result > 0} {
+    abs(x) + 1
+}
+
+// Complex refined return
+fn clamp(x: Int, lo: Int, hi: Int) -> Int{result >= lo, result <= hi}
+    requires lo <= hi
+{
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+// Generic refined return
+fn head<T>(list: List<T>) -> Maybe<T>{result is Some => list.len() > 0}
+    requires list.len() > 0
+{
+    Some(list[0])
+}
+
+// ============================================================================
+// Refinement Expressions
+// ============================================================================
+
+fn test_refinement_expressions() {
+    // Refined let binding
+    let x: Int{x > 0} = 42;
+
+    // Refined local type
+    type LocalPositive is Int{> 0};
+    let y: LocalPositive = 10;
+
+    // Cast with refinement
+    let z = x as Int{> 0, < 100};
+
+    // Refined array element type
+    let arr: List<Int{>= 0}> = [1, 2, 3];
+
+    // Refined optional
+    let maybe: Maybe<Int{> 0}> = Some(5);
+}
+
+// ============================================================================
+// Refinement in Pattern Matching
+// ============================================================================
+
+fn test_refinement_patterns() {
+    let x = 42;
+
+    // Pattern with refinement guard
+    match x {
+        n if n > 0 => print("positive"),
+        n if n < 0 => print("negative"),
+        _ => print("zero"),
+    }
+
+    // Refined variant data
+    type MaybePositive is None | Some(Int{> 0});
+    let m: MaybePositive = Some(5);
+
+    match m {
+        None => print("none"),
+        Some(n) => print(f"positive: {n}"),
+    }
+}
+
+// ============================================================================
+// Refinement in Protocols
+// ============================================================================
+
+type BoundedContainer<T> is protocol {
+    const MAX_SIZE: Int;
+
+    fn len(&self) -> Int{result >= 0, result <= Self.MAX_SIZE};
+
+    fn push(&mut self, elem: T)
+        requires self.len() < Self.MAX_SIZE;
+
+    fn is_full(&self) -> Bool{result == (self.len() == Self.MAX_SIZE)};
+};
+
+type Validator<T> is protocol {
+    fn validate(&self, value: T) -> Bool;
+
+    fn validated(&self, value: T) -> Maybe<T{self.validate(it)}>;
+};
+
+// ============================================================================
+// Complex Refinement Types
+// ============================================================================
+
+// Refinement with logical operators
+type ValidScore is Int{>= 0 && <= 100};
+
+type InBounds is Int{> 0 || it == 0};
+
+type NotForbidden is Int{!(it == 13 || it == 666)};
+
+// Refinement with arithmetic
+type PowerOfTwo is Int{it > 0 && (it & (it - 1)) == 0};
+
+type DivisibleByThree is Int{it % 3 == 0};
+
+type Perfect is Int{it > 0 && sum_of_divisors(it) == it};
+
+// Refinement with function calls
+type Ascii is Text{it.all(|c| c.is_ascii())};
+
+type Lowercase is Text{it == it.to_lowercase()};
+
+type Trimmed is Text{it == it.trim()};
+
+// ============================================================================
+// Refinement in Verification
+// ============================================================================
+
+// Theorem about refined types
+theorem positive_sum(a: Int{a > 0}, b: Int{b > 0}): a + b > 0 {
+    proof by omega
+}
+
+// Lemma with refined parameters
+lemma refined_param_lemma(x: Int{x >= 0}): x * x >= 0 {
+    proof by omega
+}
+
+// Refinement in contract
+fn verified_div(a: Int, b: Int{b != 0}) -> Int
+    where ensures a == result * b + a % b
+{
+    a / b
+}
+
+// ============================================================================
+// Dependent Refinement Types
+// ============================================================================
+
+// Array with length refinement
+type Array<T, const N: Int{N > 0}> is {
+    data: List<T>{it.len() == N}
+};
+
+// Sized string
+type FixedString<const N: Int{N >= 0}> is Text{it.len() <= N};
+
+// Matrix with dimensions
+type Matrix<T, const R: Int{R > 0}, const C: Int{C > 0}> is {
+    data: List<List<T>>{it.len() == R && forall row: List<T> . it.contains(row) => row.len() == C}
+};
+
+// ============================================================================
+// Refinement Type Aliases
+// ============================================================================
+
+// Semantic refinement aliases
+type Natural is Int{>= 0};
+type PositiveInt is Int{> 0};
+type Percentage is Float{>= 0.0, <= 100.0};
+type UnitInterval is Float{>= 0.0, <= 1.0};
+type Probability is Float{>= 0.0, <= 1.0};
+
+// Domain-specific aliases
+type Age is Int{>= 0, <= 150};
+type Year is Int{>= 1900, <= 2100};
+type Month is Int{>= 1, <= 12};
+type Day is Int{>= 1, <= 31};
+
+type Latitude is Float{>= -90.0, <= 90.0};
+type Longitude is Float{>= -180.0, <= 180.0};
+
+type PortNumber is Int{>= 0, <= 65535};
+type HttpStatusCode is Int{>= 100, < 600};
+
+// ============================================================================
+// Refinement Subtyping
+// ============================================================================
+
+// Subtype relationship through refinement
+type Natural is Int{>= 0};
+type Positive is Int{> 0};  // Positive <: Natural (logically)
+
+fn accepts_natural(n: Natural) -> Natural {
+    n + 1
+}
+
+fn test_subtyping() {
+    let p: Positive = 5;
+    // Positive should be usable where Natural is expected
+    let result = accepts_natural(p);
+}
+
+// ============================================================================
+// Refinement with Existential Quantifiers
+// ============================================================================
+
+// Type with existentially quantified refinement
+type HasFactor is Int{exists k: Int . k > 1 && k < it && it % k == 0};
+
+type HasWitness<P> is Int{exists w: P . witness_for(it, w)};
+
+// ============================================================================
+// Refinement in Error Handling
+// ============================================================================
+
+// Result with refined Ok type
+type ValidatedResult<T, E> is Result<T{is_valid(it)}, E>;
+
+// Error with refinement
+fn parse_positive(s: Text) -> Result<Int{result > 0}, ParseError> {
+    let n = s.parse<Int>()?;
+    if n > 0 {
+        Ok(n)
+    } else {
+        Err(ParseError.new("Expected positive"))
+    }
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Trivially true refinement
+type TrivialTrue is Int{true};
+
+// Refinement with self-reference
+type SelfRef is Int{it == it};
+
+// Empty predicate (defaults to true)
+type NoConstraint is Int;
+
+// Nested refinement access
+type NestedAccess is {
+    inner: {
+        value: Int{> 0};
+    }
+};
+
+// Refinement on optional content
+type MaybePositive is Maybe<Int{> 0}>;
+
+// Refinement on result content
+type OkPositive is Result<Int{> 0}, Error>;

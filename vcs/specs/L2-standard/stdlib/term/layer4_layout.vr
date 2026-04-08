@@ -1,0 +1,137 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, layout, layer4
+// @description: Verify core.term.layout types — Rect, Constraint, Layout, Flex, Grid
+
+/// Layer 4: Layout Engine — Rect, Margin, Constraint, Layout solver,
+/// FlexLayout, GridLayout, responsive breakpoints, shortcuts.
+
+mount core.term.layout.*;
+
+fn test_rect_basic() {
+    let r = Rect.new(5, 10, 80, 24);
+    assert_eq(r.area(), 1920);
+    assert_eq(r.left(), 5);
+    assert_eq(r.right(), 85);
+    assert_eq(r.top(), 10);
+    assert_eq(r.bottom(), 34);
+}
+
+fn test_rect_inner() {
+    let r = Rect.new(0, 0, 80, 24);
+    let m = Margin.uniform(2);
+    let inner = r.inner(m);
+    assert_eq(inner.x, 2);
+    assert_eq(inner.y, 2);
+    assert_eq(inner.width, 76);
+    assert_eq(inner.height, 20);
+}
+
+fn test_rect_intersection() {
+    let a = Rect.new(0, 0, 10, 10);
+    let b = Rect.new(5, 5, 10, 10);
+    let inter = a.intersection(&b);
+    assert_eq(inter.x, 5);
+    assert_eq(inter.y, 5);
+    assert_eq(inter.width, 5);
+    assert_eq(inter.height, 5);
+}
+
+fn test_rect_contains() {
+    let r = Rect.new(10, 20, 30, 40);
+    assert(r.contains(15, 25));
+    assert(!r.contains(5, 25));
+    assert(!r.contains(15, 65));
+}
+
+fn test_margin() {
+    let m = Margin.uniform(3);
+    assert_eq(m.top, 3);
+    assert_eq(m.right, 3);
+    assert_eq(m.bottom, 3);
+    assert_eq(m.left, 3);
+
+    let h = Margin.horizontal(5);
+    assert_eq(h.left, 5);
+    assert_eq(h.right, 5);
+    assert_eq(h.top, 0);
+}
+
+fn test_constraint_types() {
+    let constraints = [
+        Constraint.Length(10),
+        Constraint.Min(5),
+        Constraint.Max(20),
+        Constraint.Percentage(50),
+        Constraint.Ratio(1, 3),
+        Constraint.Fill(1),
+    ];
+    assert_eq(constraints.len(), 6);
+}
+
+fn test_layout_builder() {
+    let layout = Layout.vertical()
+        .margin(Margin.uniform(1))
+        .spacing(1)
+        .flex(Flex.Start);
+
+    // Layout split should produce rects
+    let area = Rect.new(0, 0, 80, 24);
+    let mut constraints = List.new();
+    constraints.push(Constraint.Length(3));
+    constraints.push(Constraint.Fill(1));
+    constraints.push(Constraint.Length(1));
+    let areas = layout.constraints(constraints).split(area);
+    assert_eq(areas.len(), 3);
+}
+
+fn test_direction() {
+    let h = Direction.Horizontal;
+    let v = Direction.Vertical;
+}
+
+fn test_flex_types() {
+    let flex_types = [
+        Flex.Start,
+        Flex.Center,
+        Flex.End,
+        Flex.SpaceBetween,
+        Flex.SpaceAround,
+    ];
+    assert_eq(flex_types.len(), 5);
+}
+
+fn test_flex_layout() {
+    // NOTE: FlexItem struct literal uses None which resolves to Command.None
+    // instead of Maybe.None (cross-module variant resolution limitation).
+    // Testing FlexLayout.row() constructor only.
+    let flex = FlexLayout.row();
+    let container = Rect.new(0, 0, 100, 10);
+}
+
+fn test_grid_layout() {
+    let mut cols = List.new();
+    cols.push(GridTrack.Fr(1.0));
+    cols.push(GridTrack.Fr(2.0));
+    let mut rows = List.new();
+    rows.push(GridTrack.Fixed(3));
+    rows.push(GridTrack.Fr(1.0));
+    let grid = GridLayout.new(cols, rows).gap(1);
+    let cells = grid.compute(Rect.new(0, 0, 80, 24));
+    assert_eq(cells.len(), 2); // 2 rows
+}
+
+fn main() {
+    test_rect_basic();
+    test_rect_inner();
+    test_rect_intersection();
+    test_rect_contains();
+    test_margin();
+    test_constraint_types();
+    test_layout_builder();
+    test_direction();
+    test_flex_types();
+    test_flex_layout();
+    test_grid_layout();
+}

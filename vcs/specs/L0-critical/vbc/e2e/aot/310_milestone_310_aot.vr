@@ -1,0 +1,322 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, comprehensive, closures, math, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+//
+// MILESTONE 310: Comprehensive integration test covering closures, math,
+// data structures, and algorithms
+
+// === Utility functions ===
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn min2(a: Int, b_val: Int) -> Int { if a < b_val { a } else { b_val } }
+fn max2(a: Int, b_val: Int) -> Int { if a > b_val { a } else { b_val } }
+
+// === Array type ===
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+// === Higher-order functions ===
+fn arr8_map(a: Arr8, f: fn(Int) -> Int) -> Arr8 {
+    let mut result = a;
+    let mut i = 0;
+    while i < a.len {
+        result = arr8_set(result, i, f(arr8_get(a, i)));
+        i = i + 1;
+    }
+    result
+}
+
+fn arr8_fold(a: Arr8, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < a.len {
+        acc = f(acc, arr8_get(a, i));
+        i = i + 1;
+    }
+    acc
+}
+
+fn arr8_filter_count(a: Arr8, pred: fn(Int) -> Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < a.len {
+        if pred(arr8_get(a, i)) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn apply_n(x: Int, n: Int, f: fn(Int) -> Int) -> Int {
+    let mut val = x;
+    let mut i = 0;
+    while i < n {
+        val = f(val);
+        i = i + 1;
+    }
+    val
+}
+
+fn compose(x: Int, f: fn(Int) -> Int, g: fn(Int) -> Int) -> Int {
+    f(g(x))
+}
+
+// Named function helpers for higher-order use
+fn triple(x: Int) -> Int { x * 3 }
+fn inc(x: Int) -> Int { x + 1 }
+fn square(x: Int) -> Int { x * x }
+fn negate(x: Int) -> Int { -x }
+fn add_fn(acc: Int, x: Int) -> Int { acc + x }
+fn mul_fn(acc: Int, x: Int) -> Int { acc * x }
+fn is_even(x: Int) -> Int { if x % 2 == 0 { 1 } else { 0 } }
+fn is_positive(x: Int) -> Int { if x > 0 { 1 } else { 0 } }
+
+// === Math: Collatz sequence ===
+fn collatz_steps(n: Int) -> Int {
+    let mut x = n;
+    let mut steps = 0;
+    while x != 1 {
+        if x % 2 == 0 { x = x / 2; } else { x = 3 * x + 1; }
+        steps = steps + 1;
+    }
+    steps
+}
+
+// === Math: digit sum ===
+fn digit_sum(n: Int) -> Int {
+    let mut x = abs_val(n);
+    let mut sum = 0;
+    while x > 0 {
+        sum = sum + x % 10;
+        x = x / 10;
+    }
+    sum
+}
+
+// === Math: Fibonacci ===
+fn fib(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n { let c = a + b; a = b; b = c; i = i + 1; }
+    b
+}
+
+// === Math: binomial coefficient ===
+fn binom(n: Int, k: Int) -> Int {
+    if k > n { return 0; }
+    let mut kk = k;
+    if kk > n - kk { kk = n - kk; }
+    let mut result = 1;
+    let mut i = 0;
+    while i < kk {
+        result = result * (n - i) / (i + 1);
+        i = i + 1;
+    }
+    result
+}
+
+// === Data structure: stack using array ===
+type Stack8 is { data: Arr8, top: Int };
+
+fn stack_new() -> Stack8 {
+    Stack8 { data: arr8_new(0), top: 0 }
+}
+
+fn stack_push_val(s: Stack8, val: Int) -> Stack8 {
+    let new_data = arr8_set(s.data, s.top, val);
+    Stack8 { data: Arr8 { a0: new_data.a0, a1: new_data.a1, a2: new_data.a2, a3: new_data.a3, a4: new_data.a4, a5: new_data.a5, a6: new_data.a6, a7: new_data.a7, len: s.top + 1 }, top: s.top + 1 }
+}
+
+fn stack_peek(s: Stack8) -> Int {
+    arr8_get(s.data, s.top - 1)
+}
+
+fn stack_pop_top(s: Stack8) -> Stack8 {
+    Stack8 { data: s.data, top: s.top - 1 }
+}
+
+// === Algorithm: bubble sort ===
+fn bubble_sort(a: Arr8) -> Arr8 {
+    let mut result = a;
+    let mut i = 0;
+    while i < result.len - 1 {
+        let mut j = 0;
+        while j < result.len - 1 - i {
+            if arr8_get(result, j) > arr8_get(result, j + 1) {
+                let tmp = arr8_get(result, j);
+                result = arr8_set(result, j, arr8_get(result, j + 1));
+                result = arr8_set(result, j + 1, tmp);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// === Algorithm: check if palindrome (digits) ===
+fn is_palindrome(n: Int) -> Int {
+    let mut x = abs_val(n);
+    let mut rev = 0;
+    let mut orig = x;
+    while x > 0 {
+        rev = rev * 10 + x % 10;
+        x = x / 10;
+    }
+    if rev == orig { 1 } else { 0 }
+}
+
+fn test_closures_and_higher_order() {
+    let a = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 0, a6: 0, a7: 0, len: 5 };
+
+    // Map
+    let tripled = arr8_map(a, triple);
+    assert_eq(arr8_get(tripled, 0), 3);
+    assert_eq(arr8_get(tripled, 4), 15);
+
+    let squared = arr8_map(a, square);
+    assert_eq(arr8_get(squared, 0), 1);
+    assert_eq(arr8_get(squared, 2), 9);
+    assert_eq(arr8_get(squared, 4), 25);
+
+    // Fold
+    let sum = arr8_fold(a, 0, add_fn);
+    assert_eq(sum, 15);  // 1+2+3+4+5
+
+    let product = arr8_fold(a, 1, mul_fn);
+    assert_eq(product, 120);  // 5!
+
+    // Filter count
+    let even_count = arr8_filter_count(a, is_even);
+    assert_eq(even_count, 2);  // 2 and 4
+
+    // apply_n: triple applied 3 times to 1 = 27
+    assert_eq(apply_n(1, 3, triple), 27);
+    assert_eq(apply_n(0, 5, inc), 5);
+
+    // compose: square(inc(3)) = square(4) = 16
+    assert_eq(compose(3, square, inc), 16);
+    // compose: inc(square(3)) = inc(9) = 10
+    assert_eq(compose(3, inc, square), 10);
+}
+
+fn test_math_suite() {
+    // Collatz
+    assert_eq(collatz_steps(1), 0);
+    assert_eq(collatz_steps(2), 1);    // 2 -> 1
+    assert_eq(collatz_steps(3), 7);    // 3->10->5->16->8->4->2->1
+    assert_eq(collatz_steps(6), 8);
+    assert_eq(collatz_steps(27), 111);
+
+    // Digit sum
+    assert_eq(digit_sum(0), 0);
+    assert_eq(digit_sum(123), 6);
+    assert_eq(digit_sum(9999), 36);
+
+    // Fibonacci
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(15), 610);
+
+    // Binomial coefficients (Pascal's triangle)
+    assert_eq(binom(5, 0), 1);
+    assert_eq(binom(5, 1), 5);
+    assert_eq(binom(5, 2), 10);
+    assert_eq(binom(5, 3), 10);
+    assert_eq(binom(10, 5), 252);
+    // Pascal identity: C(n,k) = C(n-1,k-1) + C(n-1,k)
+    assert_eq(binom(8, 3), binom(7, 2) + binom(7, 3));
+
+    // Palindrome
+    assert_eq(is_palindrome(121), 1);
+    assert_eq(is_palindrome(12321), 1);
+    assert_eq(is_palindrome(123), 0);
+    assert_eq(is_palindrome(1), 1);
+}
+
+fn test_data_structures() {
+    // Stack operations
+    let mut s = stack_new();
+    s = stack_push_val(s, 10);
+    s = stack_push_val(s, 20);
+    s = stack_push_val(s, 30);
+    assert_eq(s.top, 3);
+    assert_eq(stack_peek(s), 30);
+    s = stack_pop_top(s);
+    assert_eq(stack_peek(s), 20);
+    assert_eq(s.top, 2);
+
+    // Sorting
+    let unsorted = Arr8 { a0: 64, a1: 25, a2: 12, a3: 22, a4: 11, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sorted = bubble_sort(unsorted);
+    assert_eq(arr8_get(sorted, 0), 11);
+    assert_eq(arr8_get(sorted, 1), 12);
+    assert_eq(arr8_get(sorted, 2), 22);
+    assert_eq(arr8_get(sorted, 3), 25);
+    assert_eq(arr8_get(sorted, 4), 64);
+}
+
+fn test_integration() {
+    // Map squares, then fold sum: sum of squares 1..5 = 55
+    let a = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sq = arr8_map(a, square);
+    let sum_sq = arr8_fold(sq, 0, add_fn);
+    assert_eq(sum_sq, 55);  // 1+4+9+16+25
+
+    // Fibonacci digits: fib(20) = 6765, digit_sum = 6+7+6+5 = 24
+    assert_eq(digit_sum(fib(20)), 24);
+
+    // Collatz from Fibonacci: collatz_steps(fib(7)) = collatz_steps(13) = 9
+    assert_eq(collatz_steps(fib(7)), 9);
+
+    // Count palindromic numbers in array
+    let nums = Arr8 { a0: 121, a1: 456, a2: 333, a3: 12321, a4: 100, a5: 0, a6: 0, a7: 0, len: 5 };
+    let pal_count = arr8_filter_count(nums, is_palindrome);
+    assert_eq(pal_count, 3);  // 121, 333, 12321
+
+    // Sort then verify
+    let b = Arr8 { a0: 50, a1: 30, a2: 10, a3: 40, a4: 20, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sb = bubble_sort(b);
+    assert_eq(arr8_get(sb, 0), 10);
+    assert_eq(arr8_get(sb, 4), 50);
+
+    // Negate then map back
+    let negated = arr8_map(a, negate);
+    assert_eq(arr8_get(negated, 0), -1);
+    assert_eq(arr8_get(negated, 4), -5);
+    let pos_count = arr8_filter_count(negated, is_positive);
+    assert_eq(pos_count, 0);
+}
+
+fn main() -> Int {
+    test_closures_and_higher_order();
+    test_math_suite();
+    test_data_structures();
+    test_integration();
+    print("[OK] 310_milestone_310_aot");
+    0
+}

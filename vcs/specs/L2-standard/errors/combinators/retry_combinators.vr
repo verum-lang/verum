@@ -1,0 +1,407 @@
+// =============================================================================
+// retry_combinators.vr - Tests for retry and backoff combinators
+// =============================================================================
+// @test: unit
+// @tier: 2
+// @level: L2
+// @tags: errors, combinators, retry, backoff
+// @spec: docs/improvements.md Section 16 - Error Handling Evolution
+// =============================================================================
+//
+// Tests for retry infrastructure:
+// - BackoffStrategy variants (None, Linear, Exponential, ExponentialJitter)
+// - RetryConfig builder
+// - Result.retry() and variants
+// - Should_retry predicate filtering
+//
+// =============================================================================
+
+module tests.errors.combinators.retry;
+
+mount core.*;
+
+// =============================================================================
+// Local BackoffStrategy / RetryConfig (not yet in stdlib)
+// =============================================================================
+
+type BackoffStrategy is
+    | None
+    | Linear { delay_ms: Int }
+    | Exponential { initial_ms: Int, max_ms: Int, multiplier: Float }
+    | ExponentialJitter { initial_ms: Int, max_ms: Int, multiplier: Float, jitter_factor: Float };
+
+implement BackoffStrategy {
+    fn delay_for_attempt(&self, attempt: Int) -> Int {
+        match self {
+            BackoffStrategy.None => 0,
+            BackoffStrategy.Linear { delay_ms } => delay_ms,
+            BackoffStrategy.Exponential { initial_ms, max_ms, multiplier } => {
+                let delay = (initial_ms as Float) * multiplier.powi(attempt);
+                let d = delay as Int;
+                if d > max_ms { max_ms } else { d }
+            }
+            BackoffStrategy.ExponentialJitter { initial_ms, max_ms, multiplier, jitter_factor } => {
+                let base = (initial_ms as Float) * multiplier.powi(attempt);
+                let jitter = base * jitter_factor;
+                let d = (base + jitter) as Int;
+                if d > max_ms { max_ms } else { d }
+            }
+        }
+    }
+}
+
+type RetryConfig<E> is {
+    max_attempts: Int,
+    strategy: BackoffStrategy,
+    should_retry: fn(&E) -> Bool,
+};
+
+implement<E> RetryConfig<E> {
+    fn simple(max: Int) -> RetryConfig<E> {
+        RetryConfig {
+            max_attempts: max,
+            strategy: BackoffStrategy.None,
+            should_retry: |_| true,
+        }
+    }
+
+    fn exponential(max: Int, initial: Int, max_ms: Int) -> RetryConfig<E> {
+        RetryConfig {
+            max_attempts: max,
+            strategy: BackoffStrategy.Exponential {
+                initial_ms: initial,
+                max_ms: max_ms,
+                multiplier: 2.0,
+            },
+            should_retry: |_| true,
+        }
+    }
+
+    fn with_filter(self, f: fn(&E) -> Bool) -> RetryConfig<E> {
+        RetryConfig {
+            max_attempts: self.max_attempts,
+            strategy: self.strategy,
+            should_retry: f,
+        }
+    }
+}
+
+// Helper: retry with no delay
+fn retry_immediate<T, E>(max_attempts: Int, operation: fn() -> Result<T, E>) -> Result<T, E> {
+    let mut last_err: Maybe<E> = None;
+    for _ in 0..max_attempts {
+        match operation() {
+            Ok(v) => return Ok(v),
+            Err(e) => { last_err = Some(e); }
+        }
+    }
+    match last_err {
+        Some(e) => Err(e),
+        None => panic("retry_immediate: no attempts made"),
+    }
+}
+
+// =============================================================================
+// Test Error Type
+// =============================================================================
+
+type TestError is
+    | Transient(Text)
+    | Permanent(Text);
+
+implement TestError {
+    fn is_retryable(&self) -> Bool {
+        match self {
+            Transient(_) => true,
+            Permanent(_) => false,
+        }
+    }
+}
+
+implement Clone for TestError {
+    fn clone(&self) -> TestError {
+        match self {
+            Transient(msg) => Transient(msg.clone()),
+            Permanent(msg) => Permanent(msg.clone()),
+        }
+    }
+}
+
+// =============================================================================
+// Test 1: BackoffStrategy.None
+// =============================================================================
+
+fn test_backoff_none() {
+    let strategy = BackoffStrategy.None;
+
+    assert_eq(strategy.delay_for_attempt(0), 0);
+    assert_eq(strategy.delay_for_attempt(1), 0);
+    assert_eq(strategy.delay_for_attempt(10), 0);
+    assert_eq(strategy.delay_for_attempt(100), 0);
+}
+
+// =============================================================================
+// Test 2: BackoffStrategy.Linear
+// =============================================================================
+
+fn test_backoff_linear() {
+    let strategy = BackoffStrategy.Linear { delay_ms: 500 };
+
+    // Constant delay regardless of attempt
+    assert_eq(strategy.delay_for_attempt(0), 500);
+    assert_eq(strategy.delay_for_attempt(1), 500);
+    assert_eq(strategy.delay_for_attempt(5), 500);
+    assert_eq(strategy.delay_for_attempt(100), 500);
+}
+
+// =============================================================================
+// Test 3: BackoffStrategy.Exponential
+// =============================================================================
+
+fn test_backoff_exponential() {
+    let strategy = BackoffStrategy.Exponential {
+        initial_ms: 100,
+        max_ms: 5000,
+        multiplier: 2.0,
+    };
+
+    // 100 * 2^0 = 100
+    assert_eq(strategy.delay_for_attempt(0), 100);
+    // 100 * 2^1 = 200
+    assert_eq(strategy.delay_for_attempt(1), 200);
+    // 100 * 2^2 = 400
+    assert_eq(strategy.delay_for_attempt(2), 400);
+    // 100 * 2^3 = 800
+    assert_eq(strategy.delay_for_attempt(3), 800);
+    // 100 * 2^4 = 1600
+    assert_eq(strategy.delay_for_attempt(4), 1600);
+    // 100 * 2^5 = 3200
+    assert_eq(strategy.delay_for_attempt(5), 3200);
+    // 100 * 2^6 = 6400, capped at 5000
+    assert_eq(strategy.delay_for_attempt(6), 5000);
+    // Still capped
+    assert_eq(strategy.delay_for_attempt(10), 5000);
+}
+
+fn test_backoff_exponential_custom_multiplier() {
+    let strategy = BackoffStrategy.Exponential {
+        initial_ms: 100,
+        max_ms: 10000,
+        multiplier: 3.0,
+    };
+
+    // 100 * 3^0 = 100
+    assert_eq(strategy.delay_for_attempt(0), 100);
+    // 100 * 3^1 = 300
+    assert_eq(strategy.delay_for_attempt(1), 300);
+    // 100 * 3^2 = 900
+    assert_eq(strategy.delay_for_attempt(2), 900);
+    // 100 * 3^3 = 2700
+    assert_eq(strategy.delay_for_attempt(3), 2700);
+}
+
+// =============================================================================
+// Test 4: BackoffStrategy.ExponentialJitter
+// =============================================================================
+
+fn test_backoff_exponential_jitter() {
+    let strategy = BackoffStrategy.ExponentialJitter {
+        initial_ms: 100,
+        max_ms: 5000,
+        multiplier: 2.0,
+        jitter_factor: 0.1,
+    };
+
+    // With jitter, values should be in range [base, base * 1.1]
+    // Just verify it's in reasonable range
+    let delay0 = strategy.delay_for_attempt(0);
+    assert(delay0 >= 100 && delay0 <= 110);
+
+    let delay1 = strategy.delay_for_attempt(1);
+    assert(delay1 >= 200 && delay1 <= 220);
+
+    // High attempts should be capped
+    let delay_high = strategy.delay_for_attempt(10);
+    assert(delay_high >= 5000 && delay_high <= 5500);
+}
+
+// =============================================================================
+// Test 5: RetryConfig construction
+// =============================================================================
+
+fn test_retry_config_simple() {
+    let config = RetryConfig.simple<TestError>(3);
+
+    assert_eq(config.max_attempts, 3);
+    match config.strategy {
+        BackoffStrategy.None => assert(true),
+        _ => assert(false),
+    }
+}
+
+fn test_retry_config_exponential() {
+    let config = RetryConfig.exponential<TestError>(5, 100, 5000);
+
+    assert_eq(config.max_attempts, 5);
+    match config.strategy {
+        BackoffStrategy.Exponential { initial_ms, max_ms, .. } => {
+            assert_eq(initial_ms, 100);
+            assert_eq(max_ms, 5000);
+        }
+        _ => assert(false),
+    }
+}
+
+fn test_retry_config_with_filter() {
+    let config = RetryConfig.simple<TestError>(3)
+        .with_filter(|e| e.is_retryable());
+
+    assert_eq(config.max_attempts, 3);
+
+    // Test the filter
+    assert((config.should_retry)(&Transient("test")));
+    assert(!(config.should_retry)(&Permanent("test")));
+}
+
+// =============================================================================
+// Test 6: Result.retry_immediate (no delay)
+// =============================================================================
+
+fn test_retry_immediate_success_first_try() {
+    let mut attempts = 0;
+
+    let result: Result<Int, TestError> = retry_immediate(3, || {
+        attempts = attempts + 1;
+        Ok(42)
+    });
+
+    assert_eq(result, Ok(42));
+    assert_eq(attempts, 1);
+}
+
+fn test_retry_immediate_success_after_failures() {
+    let mut attempts = 0;
+
+    let result: Result<Int, TestError> = retry_immediate(5, || {
+        attempts = attempts + 1;
+        if attempts < 3 {
+            Err(TestError.Transient(f"attempt {attempts}"))
+        } else {
+            Ok(42)
+        }
+    });
+
+    assert_eq(result, Ok(42));
+    assert_eq(attempts, 3);
+}
+
+fn test_retry_immediate_exhausted() {
+    let mut attempts = 0;
+
+    let result: Result<Int, TestError> = retry_immediate(3, || {
+        attempts = attempts + 1;
+        Err(TestError.Transient(f"attempt {attempts}"))
+    });
+
+    assert(result.is_err());
+    assert_eq(attempts, 3);
+}
+
+// =============================================================================
+// Test 7: Retry with should_retry filter
+// =============================================================================
+
+fn test_retry_with_filter_stops_on_permanent() {
+    let mut attempts = 0;
+
+    // Simulate retry with filter: stop on permanent error
+    let mut result: Result<Int, TestError> = Err(TestError.Transient("initial"));
+
+    while attempts < 5 {
+        attempts = attempts + 1;
+        if attempts == 1 {
+            result = Err(TestError.Transient("retry me"));
+        } else {
+            result = Err(TestError.Permanent("don't retry"));
+            break;  // Permanent error stops retry
+        }
+    }
+
+    assert(result.is_err());
+    assert_eq(attempts, 2);  // Stopped after permanent error
+}
+
+fn test_retry_with_filter_continues_on_transient() {
+    let mut attempts = 0;
+
+    // Simulate retry with filter: continue on transient
+    let mut result: Result<Int, TestError> = Err(TestError.Transient("initial"));
+
+    while attempts < 5 {
+        attempts = attempts + 1;
+        if attempts < 4 {
+            result = Err(TestError.Transient(f"transient {attempts}"));
+        } else {
+            let ok_result: Result<Int, TestError> = Ok(100);
+            result = ok_result;
+            break;
+        }
+    }
+
+    assert_eq(result, Ok(100));
+    assert_eq(attempts, 4);
+}
+
+// =============================================================================
+// Test 8: Edge cases
+// =============================================================================
+
+fn test_retry_single_attempt() {
+    let mut attempts = 0;
+
+    let result: Result<Int, TestError> = retry_immediate(1, || {
+        attempts = attempts + 1;
+        Err(TestError.Transient("fail"))
+    });
+
+    assert(result.is_err());
+    assert_eq(attempts, 1);
+}
+
+fn test_retry_zero_attempts_panics() {
+    // This should panic - can't have 0 attempts
+    // We'll just verify the function exists for now
+    // In production code, this would be validated
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    // BackoffStrategy tests
+    test_backoff_none();
+    test_backoff_linear();
+    test_backoff_exponential();
+    test_backoff_exponential_custom_multiplier();
+    test_backoff_exponential_jitter();
+
+    // RetryConfig tests
+    test_retry_config_simple();
+    test_retry_config_exponential();
+    test_retry_config_with_filter();
+
+    // Retry execution tests
+    test_retry_immediate_success_first_try();
+    test_retry_immediate_success_after_failures();
+    test_retry_immediate_exhausted();
+
+    // Filter tests
+    test_retry_with_filter_stops_on_permanent();
+    test_retry_with_filter_continues_on_transient();
+
+    // Edge cases
+    test_retry_single_attempt();
+
+    print("All retry combinator tests passed!");
+}

@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: exhaustiveness, active-pattern, variant-returning, error
+// @description: Non-exhaustive variant-returning pattern match should fail
+// @expected-error: E0601
+// @expected-error-message: non-exhaustive patterns
+
+// ============================================================
+// NON-EXHAUSTIVE VARIANT PATTERN DETECTION
+// ============================================================
+// Variant-returning patterns must cover all possible variants.
+// Missing a variant produces exhaustiveness error E410.
+
+type Parity is Even | Odd;
+
+pattern Parity(n: Int) -> Parity =
+    if n % 2 == 0 { Even } else { Odd };
+
+// ERROR: Missing 'Odd' case
+fn incomplete_parity(x: Int) -> Text =
+    match Parity(x) {
+        Even => "even"
+        // Missing: Odd => ...
+    };
+
+fn main() {
+    let _ = incomplete_parity(5);
+}

@@ -1,0 +1,297 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 10us per function
+// @tags: parser, performance
+
+/// Benchmark for function parsing performance
+///
+/// Tests parsing of:
+/// - Simple functions
+/// - Generic functions
+/// - Functions with various parameter patterns
+/// - Async functions
+/// - Functions with context requirements
+
+module benchmarks.micro.parse_function
+
+using [Benchmark, Parser]
+
+/// Simple function with no parameters
+fn benchmark_parse_fn_empty() {
+    let parser = Parser.new();
+
+    for _ in 0..50_000 {
+        let _ = parser.parse_item("fn foo() { }");
+    }
+}
+
+/// Function with return type
+fn benchmark_parse_fn_with_return() {
+    let parser = Parser.new();
+
+    for _ in 0..50_000 {
+        let _ = parser.parse_item("fn foo() -> Int { 42 }");
+    }
+}
+
+/// Function with single parameter
+fn benchmark_parse_fn_single_param() {
+    let parser = Parser.new();
+
+    for _ in 0..40_000 {
+        let _ = parser.parse_item("fn foo(x: Int) -> Int { x }");
+    }
+}
+
+/// Function with multiple parameters
+fn benchmark_parse_fn_multi_param() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("fn foo(a: Int, b: Int, c: Int) -> Int { a + b + c }");
+    }
+}
+
+/// Generic function
+fn benchmark_parse_fn_generic() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("fn identity<T>(x: T) -> T { x }");
+    }
+}
+
+/// Generic function with multiple type parameters
+fn benchmark_parse_fn_multi_generic() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_item("fn pair<A, B>(a: A, b: B) -> (A, B) { (a, b) }");
+    }
+}
+
+/// Generic function with trait bounds
+fn benchmark_parse_fn_bounded_generic() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_item("fn sum<T: Add + Default>(items: List<T>) -> T { items.fold(T.default(), |a, b| a + b) }");
+    }
+}
+
+/// Generic function with where clause
+fn benchmark_parse_fn_where_clause() {
+    let parser = Parser.new();
+
+    for _ in 0..15_000 {
+        let _ = parser.parse_item("
+            fn complex<T, U>(a: T, b: U) -> T
+            where
+                T: Clone + Debug,
+                U: Into<T>
+            {
+                a.clone()
+            }
+        ");
+    }
+}
+
+/// Async function
+fn benchmark_parse_fn_async() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("async fn fetch(url: Text) -> Result<Text, Error> { http.get(url).await }");
+    }
+}
+
+/// Function with context requirements
+fn benchmark_parse_fn_with_context() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("fn query(sql: Text) using [Database, Logger] -> List<Row> { Database.query(sql) }");
+    }
+}
+
+/// Function with refinement types
+fn benchmark_parse_fn_refinement() {
+    let parser = Parser.new();
+
+    for _ in 0..15_000 {
+        let _ = parser.parse_item("
+            fn safe_divide(a: Int, b: Int where b != 0) -> Int {
+                a / b
+            }
+        ");
+    }
+}
+
+/// Function with default parameters
+fn benchmark_parse_fn_default_params() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_item("fn greet(name: Text, greeting: Text = \"Hello\") -> Text { text(\"{} {}\", greeting, name) }");
+    }
+}
+
+/// Function with named parameters
+fn benchmark_parse_fn_named_params() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_item("fn create_user(name: Text, age: Int, email: Text) -> User { User { name, age, email } }");
+    }
+}
+
+/// Function with variadic parameters
+fn benchmark_parse_fn_variadic() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_item("fn printf(format: Text, args: ...Any) { }");
+    }
+}
+
+/// Function with pattern matching parameters
+fn benchmark_parse_fn_pattern_param() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_item("fn get_x((x, _): (Int, Int)) -> Int { x }");
+    }
+}
+
+/// Function with complex body
+fn benchmark_parse_fn_complex_body() {
+    let parser = Parser.new();
+
+    for _ in 0..10_000 {
+        let _ = parser.parse_item("
+            fn process(items: List<Int>) -> Int {
+                let filtered = items.iter().filter(|x| x > 0);
+                let mapped = filtered.map(|x| x * 2);
+                let result = mapped.fold(0, |acc, x| acc + x);
+
+                if result > 100 {
+                    result / 2
+                } else {
+                    result
+                }
+            }
+        ");
+    }
+}
+
+/// Method function (impl block)
+fn benchmark_parse_fn_method() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("fn len(&self) -> Int { self.data.len() }");
+    }
+}
+
+/// Mutable method
+fn benchmark_parse_fn_mut_method() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("fn push(&mut self, item: T) { self.data.push(item) }");
+    }
+}
+
+/// Static method
+fn benchmark_parse_fn_static_method() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("fn new() -> Self { Self { data: list![] } }");
+    }
+}
+
+/// Visibility modifiers
+fn benchmark_parse_fn_visibility() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_item("pub fn public_fn() { }");
+        let _ = parser.parse_item("pub(crate) fn crate_fn() { }");
+        let _ = parser.parse_item("pub(super) fn super_fn() { }");
+    }
+}
+
+/// Const function
+fn benchmark_parse_fn_const() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("const fn factorial(n: Int) -> Int { if n <= 1 { 1 } else { n * factorial(n - 1) } }");
+    }
+}
+
+/// Inline function
+fn benchmark_parse_fn_inline() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("#[inline] fn fast_add(a: Int, b: Int) -> Int { a + b }");
+    }
+}
+
+/// Function with many attributes
+fn benchmark_parse_fn_attributes() {
+    let parser = Parser.new();
+
+    for _ in 0..15_000 {
+        let _ = parser.parse_item("
+            @test
+            @ignore
+            @timeout(5000)
+            fn slow_test() {
+                // ...
+            }
+        ");
+    }
+}
+
+/// Function with documentation
+fn benchmark_parse_fn_doc() {
+    let parser = Parser.new();
+
+    for _ in 0..15_000 {
+        let _ = parser.parse_item("
+            /// Calculates the factorial of n.
+            ///
+            /// # Arguments
+            /// * `n` - A non-negative integer
+            ///
+            /// # Returns
+            /// The factorial of n
+            fn factorial(n: Int) -> Int {
+                if n <= 1 { 1 } else { n * factorial(n - 1) }
+            }
+        ");
+    }
+}
+
+/// Extern function
+fn benchmark_parse_fn_extern() {
+    let parser = Parser.new();
+
+    for _ in 0..30_000 {
+        let _ = parser.parse_item("extern \"C\" fn c_function(ptr: *const u8, len: usize) -> i32;");
+    }
+}
+
+/// Function with CBGR annotations
+fn benchmark_parse_fn_cbgr() {
+    let parser = Parser.new();
+
+    for _ in 0..20_000 {
+        let _ = parser.parse_item("fn borrow(data: &List<Int>) -> &Int { &data[0] }");
+        let _ = parser.parse_item("fn borrow_checked(data: &checked List<Int>) -> &checked Int { &checked data[0] }");
+    }
+}

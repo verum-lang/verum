@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, attributes, requires, verification, error
+// @description: Test invalid empty requires clause
+// @expected-error: E016
+
+@requires()
+fn test(x: Int) -> Int {
+    x + 1
+}

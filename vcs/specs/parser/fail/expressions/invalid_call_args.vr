@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, call, args, error
+// @description: Function call with invalid argument syntax
+// @expected-error: E018
+
+fn test() {
+    foo(,);  // Empty argument with comma
+}

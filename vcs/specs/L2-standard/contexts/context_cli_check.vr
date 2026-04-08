@@ -1,0 +1,134 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: context, cli, analysis, using, provide, dependency-injection
+// @description: Context system for CLI analysis testing — context declarations, provide/using syntax, context groups
+
+// ============================================================================
+// Context declarations for CLI tooling
+// ============================================================================
+
+context Terminal {
+    fn write(text: Text);
+    fn write_line(text: Text);
+    fn read_line() -> Text;
+    fn set_color(color: Text);
+    fn reset_color();
+}
+
+context FileSystem {
+    fn read_file(path: Text) -> Text;
+    fn write_file(path: Text, content: Text) -> Bool;
+    fn file_exists(path: Text) -> Bool;
+}
+
+context Environment {
+    fn get_var(name: Text) -> Text;
+    fn current_dir() -> Text;
+    fn home_dir() -> Text;
+}
+
+context Clock {
+    fn now_millis() -> Int;
+}
+
+// ============================================================================
+// Supporting types
+// ============================================================================
+
+type Command is
+    | CmdBuild(Text)
+    | CmdRun(Text)
+    | CmdTest(Text)
+    | CmdHelp;
+
+type CliResult is {
+    exit_code: Int,
+    message: Text,
+};
+
+// ============================================================================
+// Context groups for CLI commands
+// ============================================================================
+
+using CliBase = [Terminal, Environment];
+using CliIo = [Terminal, FileSystem, Environment];
+using CliFull = [Terminal, FileSystem, Environment, Clock];
+
+// ============================================================================
+// Functions using contexts
+// ============================================================================
+
+fn print_help() using CliBase {
+    Terminal.write_line("Usage: verum <command> [options]");
+    Terminal.write_line("");
+    Terminal.write_line("Commands:");
+    Terminal.write_line("  build <file>   Compile a Verum source file");
+    Terminal.write_line("  run <file>     Compile and run");
+    Terminal.write_line("  test <dir>     Run tests");
+    Terminal.write_line("  help           Show this message");
+}
+
+fn execute_build(path: Text) -> CliResult using CliIo {
+    Terminal.write_line(f"Building {path}...");
+
+    if !FileSystem.file_exists(path) {
+        Terminal.set_color("red");
+        Terminal.write_line(f"Error: file not found: {path}");
+        Terminal.reset_color();
+        return CliResult { exit_code: 1, message: "file not found" };
+    }
+
+    let source = FileSystem.read_file(path);
+    Terminal.set_color("green");
+    Terminal.write_line(f"Successfully compiled {path}");
+    Terminal.reset_color();
+
+    CliResult { exit_code: 0, message: "success" }
+}
+
+fn execute_test(dir: Text) -> CliResult using CliFull {
+    let start = Clock.now_millis();
+    Terminal.write_line(f"Running tests in {dir}...");
+
+    let elapsed = Clock.now_millis() - start;
+    Terminal.write_line(f"Completed in {elapsed}ms");
+
+    CliResult { exit_code: 0, message: "found test files" }
+}
+
+// ============================================================================
+// Nested context usage
+// ============================================================================
+
+fn log_with_timestamp(msg: Text) using [Terminal, Clock] {
+    let ts = Clock.now_millis();
+    Terminal.write_line(f"[{ts}] {msg}");
+}
+
+fn resolve_path(path: Text) -> Text using [Environment] {
+    if path == "~" {
+        Environment.home_dir()
+    } else {
+        let cwd = Environment.current_dir();
+        f"{cwd}/{path}"
+    }
+}
+
+fn verbose_build(path: Text) using CliFull {
+    let resolved = resolve_path(path);
+    log_with_timestamp(f"Starting build: {resolved}");
+    let result = execute_build(resolved);
+    log_with_timestamp(f"Build finished: exit_code={result.exit_code}");
+}
+
+// ============================================================================
+// Entry point — type-checks context system correctly
+// ============================================================================
+
+fn main() -> Int {
+    // This test verifies context system syntax type-checks correctly.
+    // Runtime would require actual context provider implementations.
+    print("Context system type-check: OK");
+    0
+}

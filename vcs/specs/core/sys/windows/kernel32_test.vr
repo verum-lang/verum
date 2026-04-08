@@ -1,0 +1,319 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/windows/kernel32_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, windows, kernel32, ffi
+// @description: Tests for Windows kernel32.dll FFI functions.
+//
+// Coverage:
+// - Error handling: GetLastError, SetLastError
+// - Console I/O: GetStdHandle
+// - Memory: VirtualAlloc, VirtualFree, VirtualProtect
+// - Thread: GetCurrentThread, GetCurrentThreadId, Sleep
+// - TLS: TlsAlloc, TlsFree, TlsGetValue, TlsSetValue
+// - Process: GetCurrentProcess, GetCurrentProcessId
+// - Synchronization: Wait constants
+// - Standard handles and file constants
+//
+// Test Strategy:
+// - Test type construction and constants
+// - Test read-only system queries
+// - Test memory operations with cleanup
+//
+// Platform: Windows x86_64
+// =============================================================================
+
+@cfg(target_os = "windows")
+module test.stdlib.sys.windows.kernel32_test;
+
+mount core.sys.windows.kernel32.{
+    GetLastError, SetLastError,
+    GetStdHandle,
+    VirtualAlloc, VirtualFree, VirtualProtect,
+    GetCurrentThread, GetCurrentThreadId,
+    GetCurrentProcess, GetCurrentProcessId,
+    Sleep,
+    TlsAlloc, TlsFree, TlsGetValue, TlsSetValue,
+    TLS_OUT_OF_INDEXES,
+
+    WAIT_OBJECT_0, WAIT_ABANDONED, WAIT_TIMEOUT, WAIT_FAILED, INFINITE,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
+
+    MEM_COMMIT, MEM_RESERVE, MEM_DECOMMIT, MEM_RELEASE,
+    PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE,
+    PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
+
+    GENERIC_READ, GENERIC_WRITE, GENERIC_EXECUTE, GENERIC_ALL,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_SHARE_DELETE,
+    CREATE_NEW, CREATE_ALWAYS, OPEN_EXISTING, OPEN_ALWAYS, TRUNCATE_EXISTING,
+    FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OVERLAPPED,
+    INVALID_HANDLE_VALUE,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Wait Constants Tests
+// =============================================================================
+
+@test
+fn test_wait_constants() {
+    // Wait return values
+    assert(WAIT_OBJECT_0 == 0);
+    assert(WAIT_ABANDONED == 0x80);
+    assert(WAIT_TIMEOUT == 0x102);
+    assert(WAIT_FAILED == 0xFFFFFFFF);
+    assert(INFINITE == 0xFFFFFFFF);
+
+    print("Wait constants tests passed");
+}
+
+// =============================================================================
+// Standard Handle Constants Tests
+// =============================================================================
+
+@test
+fn test_std_handle_constants() {
+    // Standard handle values (negative values)
+    assert(STD_INPUT_HANDLE == -10);
+    assert(STD_OUTPUT_HANDLE == -11);
+    assert(STD_ERROR_HANDLE == -12);
+
+    // Invalid handle
+    assert(INVALID_HANDLE_VALUE == -1);
+
+    print("Standard handle constants tests passed");
+}
+
+// =============================================================================
+// Memory Constants Tests
+// =============================================================================
+
+@test
+fn test_memory_constants() {
+    // Allocation type
+    assert(MEM_COMMIT == 0x1000);
+    assert(MEM_RESERVE == 0x2000);
+    assert(MEM_DECOMMIT == 0x4000);
+    assert(MEM_RELEASE == 0x8000);
+
+    // Page protection
+    assert(PAGE_NOACCESS == 0x01);
+    assert(PAGE_READONLY == 0x02);
+    assert(PAGE_READWRITE == 0x04);
+    assert(PAGE_EXECUTE == 0x10);
+    assert(PAGE_EXECUTE_READ == 0x20);
+    assert(PAGE_EXECUTE_READWRITE == 0x40);
+
+    // Combined flags
+    let commit_reserve = MEM_COMMIT | MEM_RESERVE;
+    assert((commit_reserve & MEM_COMMIT) != 0);
+    assert((commit_reserve & MEM_RESERVE) != 0);
+
+    print("Memory constants tests passed");
+}
+
+// =============================================================================
+// File Constants Tests
+// =============================================================================
+
+@test
+fn test_file_constants() {
+    // Generic access
+    assert(GENERIC_READ == 0x80000000);
+    assert(GENERIC_WRITE == 0x40000000);
+    assert(GENERIC_EXECUTE == 0x20000000);
+    assert(GENERIC_ALL == 0x10000000);
+
+    // Share modes
+    assert(FILE_SHARE_READ == 0x01);
+    assert(FILE_SHARE_WRITE == 0x02);
+    assert(FILE_SHARE_DELETE == 0x04);
+
+    // Creation disposition
+    assert(CREATE_NEW == 1);
+    assert(CREATE_ALWAYS == 2);
+    assert(OPEN_EXISTING == 3);
+    assert(OPEN_ALWAYS == 4);
+    assert(TRUNCATE_EXISTING == 5);
+
+    // File attributes
+    assert(FILE_ATTRIBUTE_NORMAL == 0x80);
+    assert(FILE_FLAG_OVERLAPPED == 0x40000000);
+
+    print("File constants tests passed");
+}
+
+// =============================================================================
+// GetLastError Tests
+// =============================================================================
+
+@test
+fn test_get_last_error() {
+    // Set and get last error
+    SetLastError(0);
+    let err0 = GetLastError();
+    assert(err0 == 0);
+
+    SetLastError(5);  // ERROR_ACCESS_DENIED
+    let err5 = GetLastError();
+    assert(err5 == 5);
+
+    SetLastError(2);  // ERROR_FILE_NOT_FOUND
+    let err2 = GetLastError();
+    assert(err2 == 2);
+
+    // Clear error
+    SetLastError(0);
+
+    print("GetLastError tests passed");
+}
+
+// =============================================================================
+// Process/Thread ID Tests
+// =============================================================================
+
+@test
+fn test_process_thread_ids() {
+    // Get current process ID
+    let pid = GetCurrentProcessId();
+    assert(pid > 0);
+
+    // Multiple calls return same PID
+    let pid2 = GetCurrentProcessId();
+    assert(pid == pid2);
+
+    // Get current thread ID
+    let tid = GetCurrentThreadId();
+    assert(tid > 0);
+
+    // Multiple calls return same TID
+    let tid2 = GetCurrentThreadId();
+    assert(tid == tid2);
+
+    // Get handles (pseudo-handles)
+    let process = GetCurrentProcess();
+    assert(process != 0);
+
+    let thread = GetCurrentThread();
+    assert(thread != 0);
+
+    print(f"PID: {pid}, TID: {tid}");
+}
+
+// =============================================================================
+// Virtual Memory Tests
+// =============================================================================
+
+@test
+fn test_virtual_memory() {
+    // Allocate memory
+    let ptr = VirtualAlloc(
+        0 as &unsafe Byte,
+        4096,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_READWRITE
+    );
+
+    assert(ptr != 0 as &unsafe Byte);
+
+    // Write and read
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        *int_ptr = 0xDEADBEEF;
+        assert(*int_ptr == 0xDEADBEEF);
+    }
+
+    // Change protection to read-only
+    let mut old_protect: UInt32 = 0;
+    let protect_result = VirtualProtect(ptr, 4096, PAGE_READONLY, &mut old_protect);
+    assert(protect_result != 0);
+    assert(old_protect == PAGE_READWRITE);
+
+    // Read should still work
+    unsafe {
+        let int_ptr = ptr as *mut Int;
+        assert(*int_ptr == 0xDEADBEEF);
+    }
+
+    // Restore read-write
+    let _ = VirtualProtect(ptr, 4096, PAGE_READWRITE, &mut old_protect);
+
+    // Free memory
+    let free_result = VirtualFree(ptr, 0, MEM_RELEASE);
+    assert(free_result != 0);
+
+    print("Virtual memory tests passed");
+}
+
+// =============================================================================
+// TLS Operations Tests
+// =============================================================================
+
+@test
+fn test_tls_operations() {
+    // Allocate TLS slot
+    let slot = TlsAlloc();
+    assert(slot != TLS_OUT_OF_INDEXES);
+
+    // Set value
+    let set_result = TlsSetValue(slot, 42 as &unsafe Byte);
+    assert(set_result != 0);
+
+    // Get value
+    let value = TlsGetValue(slot);
+    assert(value == 42 as &unsafe Byte);
+
+    // Update value
+    let _ = TlsSetValue(slot, 100 as &unsafe Byte);
+    let value2 = TlsGetValue(slot);
+    assert(value2 == 100 as &unsafe Byte);
+
+    // Free slot
+    let free_result = TlsFree(slot);
+    assert(free_result != 0);
+
+    // Allocate multiple slots
+    let mut slots: [UInt32; 10] = [0; 10];
+    for i in 0..10 {
+        slots[i] = TlsAlloc();
+        assert(slots[i] != TLS_OUT_OF_INDEXES);
+    }
+
+    // Free all slots
+    for i in 0..10 {
+        let _ = TlsFree(slots[i]);
+    }
+
+    print("TLS operations tests passed");
+}
+
+// =============================================================================
+// Sleep Tests
+// =============================================================================
+
+@test
+fn test_sleep() {
+    mount core.sys.windows.time.{monotonic_nanos};
+
+    // Sleep for 10ms
+    let before = monotonic_nanos();
+    Sleep(10);
+    let after = monotonic_nanos();
+
+    let elapsed = after - before;
+    // Should have slept at least 9ms
+    assert(elapsed >= 9_000_000);
+    // Should not have slept more than 100ms
+    assert(elapsed < 100_000_000);
+
+    print("Sleep tests passed");
+}

@@ -1,0 +1,56 @@
+// @test: run
+// @expected-stdout: Outer config: production\nInner config: staging\nBack to outer: production
+// @tier: 0
+// @level: L2
+// @tags: contexts, provide, shadowing, vbc, runtime
+// @description: Tests context shadowing - inner provide overrides outer context temporarily
+
+// Configuration context
+context Config {
+    fn get_env(&self) -> Text;
+}
+
+// Concrete config implementations
+type EnvConfig is {
+    environment: Text,
+};
+
+implement Config for EnvConfig {
+    fn get_env(&self) -> Text {
+        self.environment.clone()
+    }
+}
+
+// Function that reads current config
+fn print_config(label: Text) using [Config] {
+    let env = Config.get_env();
+    println(f"{label}: {env}");
+}
+
+// Function that demonstrates shadowing by providing a new config in inner scope
+fn demonstrate_shadowing() using [Config] {
+    // Print outer config
+    print_config("Outer config");
+
+    // Shadow with inner config
+    {
+        let inner_config = EnvConfig { environment: "staging" };
+        provide Config = inner_config;
+
+        // This should see the inner (shadowed) config
+        print_config("Inner config");
+
+        // Inner scope ends here, inner context is cleaned up
+    }
+
+    // Back to outer config
+    print_config("Back to outer");
+}
+
+fn main() {
+    // Provide outer config
+    let outer_config = EnvConfig { environment: "production" };
+    provide Config = outer_config;
+
+    demonstrate_shadowing();
+}

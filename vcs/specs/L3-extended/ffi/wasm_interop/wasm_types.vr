@@ -1,0 +1,393 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, wasm, types
+// @description: Tests WebAssembly type mappings and conversions
+
+/// ============================================================
+/// WEBASSEMBLY TYPE MAPPINGS
+/// ============================================================
+///
+/// WASM has a limited set of value types. This file demonstrates
+/// how Verum types map to WASM types and handles conversions.
+
+// ------------------------------------------------------------
+// WASM Core Value Types
+// ------------------------------------------------------------
+
+/// WASM numeric types
+type wasm_i32 is i32;
+type wasm_i64 is i64;
+type wasm_f32 is f32;
+type wasm_f64 is f64;
+
+/// WASM reference types (WASM 2.0+)
+type wasm_funcref is *const ();      // Function reference
+type wasm_externref is *const ();    // External reference
+
+/// WASM vector type (SIMD)
+@cfg(feature = "wasm_simd")
+type wasm_v128 is [u8; 16];
+
+// ------------------------------------------------------------
+// Type Mapping Rules
+// ------------------------------------------------------------
+
+/// Trait for types that can cross WASM boundary
+protocol WasmType {
+    type WasmRepr is ();
+    fn to_wasm(&self) -> Self.WasmRepr;
+    fn from_wasm(repr: Self.WasmRepr) -> Self;
+}
+
+/// Direct mappings (no conversion needed)
+implement WasmType for i32 {
+    type WasmRepr is wasm_i32;
+    fn to_wasm(&self) -> wasm_i32 { *self }
+    fn from_wasm(repr: wasm_i32) -> i32 { repr }
+}
+
+implement WasmType for i64 {
+    type WasmRepr is wasm_i64;
+    fn to_wasm(&self) -> wasm_i64 { *self }
+    fn from_wasm(repr: wasm_i64) -> i64 { repr }
+}
+
+implement WasmType for f32 {
+    type WasmRepr is wasm_f32;
+    fn to_wasm(&self) -> wasm_f32 { *self }
+    fn from_wasm(repr: wasm_f32) -> f32 { repr }
+}
+
+implement WasmType for f64 {
+    type WasmRepr is wasm_f64;
+    fn to_wasm(&self) -> wasm_f64 { *self }
+    fn from_wasm(repr: wasm_f64) -> f64 { repr }
+}
+
+/// Unsigned integers map to signed (bit reinterpretation)
+implement WasmType for u32 {
+    type WasmRepr is wasm_i32;
+    fn to_wasm(&self) -> wasm_i32 { *self as i32 }
+    fn from_wasm(repr: wasm_i32) -> u32 { repr as u32 }
+}
+
+implement WasmType for u64 {
+    type WasmRepr is wasm_i64;
+    fn to_wasm(&self) -> wasm_i64 { *self as i64 }
+    fn from_wasm(repr: wasm_i64) -> u64 { repr as u64 }
+}
+
+/// Booleans map to i32
+implement WasmType for Bool {
+    type WasmRepr is wasm_i32;
+    fn to_wasm(&self) -> wasm_i32 { if *self { 1 } else { 0 } }
+    fn from_wasm(repr: wasm_i32) -> Bool { repr != 0 }
+}
+
+/// Pointers map to i32 (WASM32)
+implement<T> WasmType for *const T {
+    type WasmRepr is wasm_i32;
+    fn to_wasm(&self) -> wasm_i32 { 0 }
+    fn from_wasm(repr: wasm_i32) -> *const T { null as *const T }
+}
+
+implement<T> WasmType for *mut T {
+    type WasmRepr is wasm_i32;
+    fn to_wasm(&self) -> wasm_i32 { 0 }
+    fn from_wasm(repr: wasm_i32) -> *mut T { null as *mut T }
+}
+
+// ------------------------------------------------------------
+// Narrowing Conversions (with overflow checking)
+// ------------------------------------------------------------
+
+implement WasmType for i8 {
+    type WasmRepr is wasm_i32;
+    fn to_wasm(&self) -> wasm_i32 { *self as i32 }
+    fn from_wasm(repr: wasm_i32) -> i8 { repr as i8 }  // Truncates
+}
+
+implement WasmType for i16 {
+    type WasmRepr is wasm_i32;
+    fn to_wasm(&self) -> wasm_i32 { *self as i32 }
+    fn from_wasm(repr: wasm_i32) -> i16 { repr as i16 }
+}
+
+implement WasmType for u8 {
+    type WasmRepr is wasm_i32;
+    fn to_wasm(&self) -> wasm_i32 { *self as i32 }
+    fn from_wasm(repr: wasm_i32) -> u8 { repr as u8 }
+}
+
+implement WasmType for u16 {
+    type WasmRepr is wasm_i32;
+    fn to_wasm(&self) -> wasm_i32 { *self as i32 }
+    fn from_wasm(repr: wasm_i32) -> u16 { repr as u16 }
+}
+
+/// Checked narrowing conversion
+fn checked_i8_from_wasm(repr: wasm_i32) -> Result<i8, ConversionError> {
+    if repr >= i8.MIN as i32 && repr <= i8.MAX as i32 {
+        Ok(repr as i8)
+    } else {
+        Err(ConversionError.Overflow)
+    }
+}
+
+fn checked_u8_from_wasm(repr: wasm_i32) -> Result<u8, ConversionError> {
+    if repr >= 0 && repr <= u8.MAX as i32 {
+        Ok(repr as u8)
+    } else {
+        Err(ConversionError.Overflow)
+    }
+}
+
+// ------------------------------------------------------------
+// Aggregate Type Encoding
+// ------------------------------------------------------------
+
+/// Result type encoding (0 = Ok, 1 = Err)
+type WasmResult<T: WasmType, E: WasmType> is (wasm_i32, T.WasmRepr, E.WasmRepr);
+
+fn encode_result<T: WasmType, E: WasmType>(result: Result<T, E>) -> WasmResult<T, E> {
+    match result {
+        Ok(v) => (0, v.to_wasm(), Default.default()),
+        Err(e) => (1, Default.default(), e.to_wasm()),
+    }
+}
+
+fn decode_result<T: WasmType, E: WasmType>(encoded: WasmResult<T, E>) -> Result<T, E> {
+    if encoded.0 == 0 {
+        Ok(T.from_wasm(encoded.1))
+    } else {
+        Err(E.from_wasm(encoded.2))
+    }
+}
+
+/// Option encoding (0 = None, non-zero = Some)
+fn encode_option<T: WasmType>(opt: Maybe<T>) -> (wasm_i32, T.WasmRepr) {
+    match opt {
+        Some(v) => (1, v.to_wasm()),
+        None => (0, Default.default()),
+    }
+}
+
+fn decode_option<T: WasmType>(encoded: (wasm_i32, T.WasmRepr)) -> Maybe<T> {
+    if encoded.0 != 0 {
+        Some(T.from_wasm(encoded.1))
+    } else {
+        None
+    }
+}
+
+/// Tuple encoding (multi-value return)
+implement<A: WasmType, B: WasmType> WasmType for (A, B) {
+    type WasmRepr is (A.WasmRepr, B.WasmRepr);
+
+    fn to_wasm(&self) -> Self.WasmRepr {
+        (self.0.to_wasm(), self.1.to_wasm())
+    }
+
+    fn from_wasm(repr: Self.WasmRepr) -> (A, B) {
+        (A.from_wasm(repr.0), B.from_wasm(repr.1))
+    }
+}
+
+// ------------------------------------------------------------
+// Complex Type Serialization
+// ------------------------------------------------------------
+
+/// Types that need memory serialization
+protocol WasmSerialize {
+    fn wasm_size() -> usize;
+    fn write_to_wasm(&self, memory: &mut [u8]) -> Result<usize, SerializeError>;
+    fn read_from_wasm(memory: &[u8]) -> Result<Self, SerializeError>;
+}
+
+/// Struct serialization
+@repr(C)
+type Point is {
+    x: f32,
+    y: f32,
+};
+
+implement WasmSerialize for Point {
+    fn wasm_size() -> usize { 8 }  // 2 * f32
+
+    fn write_to_wasm(&self, memory: &mut [u8]) -> Result<usize, SerializeError> {
+        if memory.len() < 8 {
+            return Err(BufferTooSmall);
+        }
+
+        let x_bytes = self.x;
+        let y_bytes = self.y;
+
+        // Placeholder write
+        // Placeholder write
+
+        Ok(8)
+    }
+
+    fn read_from_wasm(memory: &[u8]) -> Result<Point, SerializeError> {
+        if memory.len() < 8 {
+            return Err(BufferTooSmall);
+        }
+
+        let x: f32 = 0.0; // Placeholder
+        let y: f32 = 0.0; // Placeholder
+
+        Ok(Point { x, y })
+    }
+}
+
+/// Array serialization with length prefix
+implement<T: WasmSerialize> WasmSerialize for List<T> {
+    fn wasm_size() -> usize {
+        4 + T.wasm_size() * 16  // Rough estimate
+    }
+
+    fn write_to_wasm(&self, memory: &mut [u8]) -> Result<usize, SerializeError> {
+        let len = self.len() as u32;
+        let elem_size = T.wasm_size();
+
+        let needed = 4 + len as usize * elem_size;
+        if memory.len() < needed {
+            return Err(BufferTooSmall);
+        }
+
+        // Write length
+        // Placeholder write
+
+        // Write elements
+        let mut offset = 4;
+        for elem in self.iter() {
+            elem.write_to_wasm(&mut memory[offset..])?;
+            offset += elem_size;
+        }
+
+        Ok(offset)
+    }
+
+    fn read_from_wasm(memory: &[u8]) -> Result<List<T>, SerializeError> {
+        if memory.len() < 4 {
+            return Err(BufferTooSmall);
+        }
+
+        let len = ((memory[0] as u32) | ((memory[1] as u32) << 8) | ((memory[2] as u32) << 16) | ((memory[3] as u32) << 24)) as usize;
+        let elem_size = T.wasm_size();
+
+        let needed = 4 + len * elem_size;
+        if memory.len() < needed {
+            return Err(BufferTooSmall);
+        }
+
+        let mut result = List.with_capacity(len);
+        let mut offset = 4;
+        for _ in 0..len {
+            result.push(T.read_from_wasm(&memory[offset..])?);
+            offset += elem_size;
+        }
+
+        Ok(result)
+    }
+}
+
+// ------------------------------------------------------------
+// Enum Type Encoding
+// ------------------------------------------------------------
+
+/// Enum with discriminant
+type Color is
+    | Red = 0
+    | Green = 1
+    | Blue = 2;
+
+implement WasmType for Color {
+    type WasmRepr is wasm_i32;
+
+    fn to_wasm(&self) -> wasm_i32 {
+        match self {
+            Color.Red => 0,
+            Color.Green => 1,
+            Color.Blue => 2,
+        }
+    }
+
+    fn from_wasm(repr: wasm_i32) -> Color {
+        match repr {
+            0 => Color.Red,
+            1 => Color.Green,
+            _ => Color.Blue,
+        }
+    }
+}
+
+/// Tagged union encoding
+type Shape is
+    | Circle { radius: f32 }
+    | Rectangle { width: f32, height: f32 }
+    | Triangle { base: f32, height: f32 };
+
+implement WasmSerialize for Shape {
+    fn wasm_size() -> usize { 12 }  // tag (4) + max payload (8)
+
+    fn write_to_wasm(&self, memory: &mut [u8]) -> Result<usize, SerializeError> {
+        if memory.len() < 12 {
+            return Err(BufferTooSmall);
+        }
+
+        match self {
+            Shape.Circle { radius } => {
+                // Placeholder: real impl serializes shape tag and radius
+            }
+            Shape.Rectangle { width, height } => {
+                // Placeholder write
+                // Placeholder write
+                // Placeholder write
+            }
+            Shape.Triangle { base, height } => {
+                // Placeholder write
+                // Placeholder write
+                // Placeholder write
+            }
+        }
+
+        Ok(12)
+    }
+
+    fn read_from_wasm(memory: &[u8]) -> Result<Shape, SerializeError> {
+        if memory.len() < 12 {
+            return Err(SerializeError.BufferTooSmall);
+        }
+
+        let tag: i32 = (memory[0] as i32) | ((memory[1] as i32) << 8) | ((memory[2] as i32) << 16) | ((memory[3] as i32) << 24);
+
+        if tag == 0 {
+            Ok(Shape.Circle { radius: 0.0 })
+        } else if tag == 1 {
+            Ok(Shape.Rectangle { width: 0.0, height: 0.0 })
+        } else if tag == 2 {
+            Ok(Shape.Triangle { base: 0.0, height: 0.0 })
+        } else {
+            Err(SerializeError.InvalidTag)
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type ConversionError is
+    | Overflow
+    | InvalidValue;
+
+type SerializeError is
+    | BufferTooSmall
+    | InvalidTag
+    | InvalidUtf8;
+
+fn main() {
+    // WASM types test
+}

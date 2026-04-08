@@ -1,0 +1,64 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: impl, list, methods
+// @expect: pass
+
+// Stack pattern with proper Maybe<Int> handling for pop().
+
+type MyStack is {
+    data: List<Int>,
+};
+
+fn mystack_new() -> MyStack {
+    MyStack { data: List.new() }
+}
+
+implement MyStack {
+    fn push(&mut self, val: Int) {
+        self.data.push(val);
+    }
+
+    fn pop(&mut self) -> Int {
+        // List.pop() returns Maybe<Int>, unwrap it
+        match self.data.pop() {
+            Some(v) => v,
+            None => -1,
+        }
+    }
+
+    fn len(&self) -> Int {
+        self.data.len()
+    }
+}
+
+fn main() -> Int {
+    let mut s = mystack_new();
+    s.push(10);
+    s.push(20);
+
+    let sz = s.len();
+    print(f"len = {sz}");
+
+    let top = s.pop();
+    print(f"pop = {top}");
+
+    if top != 20 {
+        print(f"FAIL: pop = {top}, expected 20");
+        return 1;
+    }
+
+    let next = s.pop();
+    if next != 10 {
+        print(f"FAIL: next pop = {next}, expected 10");
+        return 1;
+    }
+
+    if s.len() != 0 {
+        print(f"FAIL: final len = {s.len()}, expected 0");
+        return 1;
+    }
+
+    print("PASS: inline stack works");
+    0
+}

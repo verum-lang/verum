@@ -1,0 +1,397 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, exhaustiveness, enum
+//
+// Tests exhaustiveness checking for enum (variant) types.
+// Enums with finite variants must have all variants covered.
+
+//------------------------------------------------------------------------------
+// Enum Type Definitions
+//------------------------------------------------------------------------------
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+type Direction is
+    | North
+    | South
+    | East
+    | West;
+
+type Weekday is
+    | Monday
+    | Tuesday
+    | Wednesday
+    | Thursday
+    | Friday
+    | Saturday
+    | Sunday;
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Either<A, B> is
+    | Left(A)
+    | Right(B);
+
+type Ordering is
+    | Less
+    | Equal
+    | Greater;
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+type Tree<T> is
+    | Leaf(T)
+    | Branch(Tree<T>, Tree<T>);
+
+//------------------------------------------------------------------------------
+// Basic Enum Exhaustiveness
+//------------------------------------------------------------------------------
+
+/// All Color variants explicitly.
+fn color_all(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+    }
+}
+
+/// All Direction variants.
+fn direction_all(d: Direction) -> Int {
+    match d {
+        North => 0,
+        East => 90,
+        South => 180,
+        West => 270,
+    }
+}
+
+/// All Weekday variants.
+fn weekday_all(day: Weekday) -> Bool {
+    match day {
+        Monday => true,
+        Tuesday => true,
+        Wednesday => true,
+        Thursday => true,
+        Friday => true,
+        Saturday => false,
+        Sunday => false,
+    }
+}
+
+/// All Ordering variants.
+fn ordering_all(ord: Ordering) -> Int {
+    match ord {
+        Less => -1,
+        Equal => 0,
+        Greater => 1,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Enum with Or-Patterns
+//------------------------------------------------------------------------------
+
+/// Using or-patterns to group variants.
+fn color_grouped(c: Color) -> Text {
+    match c {
+        Red | Blue => "primary",
+        Green => "secondary",
+    }
+}
+
+/// Weekday grouped by category.
+fn weekday_grouped(day: Weekday) -> Text {
+    match day {
+        Monday | Tuesday | Wednesday | Thursday | Friday => "weekday",
+        Saturday | Sunday => "weekend",
+    }
+}
+
+/// Direction grouped by axis.
+fn direction_grouped(d: Direction) -> Text {
+    match d {
+        North | South => "vertical",
+        East | West => "horizontal",
+    }
+}
+
+/// Ordering grouped.
+fn ordering_grouped(ord: Ordering) -> Text {
+    match ord {
+        Less | Greater => "not equal",
+        Equal => "equal",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Enum with Wildcards
+//------------------------------------------------------------------------------
+
+/// Wildcard catches remaining.
+fn color_partial(c: Color) -> Text {
+    match c {
+        Red => "red",
+        _ => "not red",
+    }
+}
+
+/// Several explicit, wildcard for rest.
+fn weekday_partial(day: Weekday) -> Text {
+    match day {
+        Monday => "start of week",
+        Friday => "almost weekend",
+        Saturday | Sunday => "weekend",
+        _ => "middle of week",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Generic Enum Exhaustiveness
+//------------------------------------------------------------------------------
+
+/// Maybe with both variants.
+fn maybe_all<T>(m: Maybe<T>) -> Bool {
+    match m {
+        Some(_) => true,
+        None => false,
+    }
+}
+
+/// Result with both variants.
+fn result_all<T, E>(r: Result<T, E>) -> Bool {
+    match r {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+/// Either with both variants.
+fn either_all<A, B>(e: Either<A, B>) -> Text {
+    match e {
+        Left(_) => "left",
+        Right(_) => "right",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Enum Exhaustiveness
+//------------------------------------------------------------------------------
+
+/// Maybe<Maybe<T>> - 3 distinct cases.
+fn nested_maybe<T>(mm: Maybe<Maybe<T>>) -> Int {
+    match mm {
+        Some(Some(_)) => 2,
+        Some(None) => 1,
+        None => 0,
+    }
+}
+
+/// Result<Maybe<T>, E> - 3 distinct cases.
+fn result_maybe<T, E>(r: Result<Maybe<T>, E>) -> Int {
+    match r {
+        Ok(Some(_)) => 2,
+        Ok(None) => 1,
+        Err(_) => 0,
+    }
+}
+
+/// Maybe<Result<T, E>> - 3 distinct cases.
+fn maybe_result<T, E>(m: Maybe<Result<T, E>>) -> Int {
+    match m {
+        Some(Ok(_)) => 2,
+        Some(Err(_)) => 1,
+        None => 0,
+    }
+}
+
+/// Triple nesting.
+fn triple_nested<T>(mmm: Maybe<Maybe<Maybe<T>>>) -> Int {
+    match mmm {
+        Some(Some(Some(_))) => 3,
+        Some(Some(None)) => 2,
+        Some(None) => 1,
+        None => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Enum Tuple Combinations
+//------------------------------------------------------------------------------
+
+/// (Color, Color) - 9 combinations.
+fn color_pair(pair: (Color, Color)) -> Bool {
+    match pair {
+        (Red, Red) | (Green, Green) | (Blue, Blue) => true,  // Same
+        _ => false,  // Different
+    }
+}
+
+/// (Maybe<T>, Maybe<U>) - 4 combinations.
+fn maybe_pair<T, U>(pair: (Maybe<T>, Maybe<U>)) -> Int {
+    match pair {
+        (Some(_), Some(_)) => 3,
+        (Some(_), None) => 2,
+        (None, Some(_)) => 1,
+        (None, None) => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Recursive Enum Exhaustiveness
+//------------------------------------------------------------------------------
+
+/// ConsList with both variants.
+fn list_variants<T>(list: ConsList<T>) -> Bool {
+    match list {
+        Cons(_, _) => true,
+        Nil => false,
+    }
+}
+
+/// Tree with both variants.
+fn tree_variants<T>(tree: Tree<T>) -> Bool {
+    match tree {
+        Leaf(_) => true,
+        Branch(_, _) => false,
+    }
+}
+
+/// More specific list patterns.
+fn list_specific<T>(list: ConsList<T>) -> Text {
+    match list {
+        Nil => "empty",
+        Cons(_, Nil) => "single",
+        Cons(_, Cons(_, _)) => "multiple",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Enum with Payload Exhaustiveness
+//------------------------------------------------------------------------------
+
+type Message is
+    | Txt(Text)
+    | Number(Int)
+    | Pair(Int, Int);
+
+/// Message with all variants and payloads.
+fn message_all(m: Message) -> Text {
+    match m {
+        Txt(s) => s,
+        Number(n) => f"{n}",
+        Pair(a, b) => f"({a}, {b})",
+    }
+}
+
+/// Message with partial payload matching.
+fn message_partial(m: Message) -> Int {
+    match m {
+        Txt(_) => 0,
+        Number(n) => n,
+        Pair(a, _) => a,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Enum with Struct-like Variants
+//------------------------------------------------------------------------------
+
+type Shape is
+    | Circle { radius: Int }
+    | Rectangle { width: Int, height: Int }
+    | Triangle { base: Int, height: Int };
+
+/// Shape with all variants.
+fn shape_all(s: Shape) -> Int {
+    match s {
+        Circle { radius } => radius * radius * 3,
+        Rectangle { width, height } => width * height,
+        Triangle { base, height } => base * height / 2,
+    }
+}
+
+/// Shape with rest patterns.
+fn shape_rest(s: Shape) -> Text {
+    match s {
+        Circle { .. } => "circle",
+        Rectangle { .. } => "rectangle",
+        Triangle { .. } => "triangle",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+@test
+fn main() {
+    // Color
+    assert(color_all(Red) == "red");
+    assert(color_all(Green) == "green");
+    assert(color_all(Blue) == "blue");
+
+    // Direction
+    assert(direction_all(North) == 0);
+    assert(direction_all(East) == 90);
+
+    // Weekday
+    assert(weekday_all(Monday) == true);
+    assert(weekday_all(Saturday) == false);
+
+    // Ordering
+    assert(ordering_all(Less) == -1);
+    assert(ordering_all(Equal) == 0);
+    assert(ordering_all(Greater) == 1);
+
+    // Grouped
+    assert(color_grouped(Red) == "primary");
+    assert(color_grouped(Green) == "secondary");
+    assert(weekday_grouped(Monday) == "weekday");
+    assert(weekday_grouped(Sunday) == "weekend");
+
+    // Maybe
+    assert(maybe_all(Some(42)) == true);
+    assert(maybe_all(None) == false);
+
+    // Result
+    assert(result_all(Ok(42)) == true);
+    assert(result_all(Err("error")) == false);
+
+    // Nested
+    assert(nested_maybe(Some(Some(42))) == 2);
+    assert(nested_maybe(Some(None)) == 1);
+    assert(nested_maybe(None) == 0);
+
+    // Color pair
+    assert(color_pair((Red, Red)) == true);
+    assert(color_pair((Red, Blue)) == false);
+
+    // Maybe pair
+    assert(maybe_pair((Some(1), Some(2))) == 3);
+    assert(maybe_pair((None, None)) == 0);
+
+    // ConsList
+    assert(list_variants(Cons(1, Nil)) == true);
+    assert(list_variants(Nil) == false);
+    assert(list_specific(Nil) == "empty");
+    assert(list_specific(Cons(1, Nil)) == "single");
+    assert(list_specific(Cons(1, Cons(2, Nil))) == "multiple");
+
+    // Shape
+    assert(shape_all(Circle { radius: 5 }) == 75);
+    assert(shape_all(Rectangle { width: 4, height: 5 }) == 20);
+    assert(shape_rest(Circle { radius: 5 }) == "circle");
+}

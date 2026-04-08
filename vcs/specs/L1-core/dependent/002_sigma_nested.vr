@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, sigma-types, nested
+
+/// Nested sigma types -- sigma bindings that reference each other
+/// and compose dependent constraints across multiple fields.
+
+// Inner type depends on outer
+type BoundedPair is lo: Int, hi: Int where hi > lo,
+    mid: Int where mid >= lo && mid <= hi;
+
+// List whose length matches a declared size
+type SizedList<T> is n: Int where n >= 0, items: List<T>;
+
+// Matrix dimensions with data constraint
+type DenseMatrix is rows: Int where rows > 0,
+    cols: Int where cols > 0,
+    data: List<Float>;
+
+// Pair where second is strictly greater
+type StrictlyOrdered is first: Int, second: Int where second > first;
+
+// Nested: a list of intervals where each is valid
+type IntervalList is intervals: List<(Int, Int)>;
+
+// Sigma type with three dependent fields
+type Slice is start: Int where start >= 0,
+    length: Int where length >= 0,
+    data: List<Int>;
+
+fn make_bounded(lo: Int, hi: Int, mid: Int) -> Maybe<BoundedPair> {
+    if hi > lo && mid >= lo && mid <= hi {
+        Some(BoundedPair { lo, hi, mid })
+    } else {
+        None
+    }
+}
+
+fn matrix_element_count(m: DenseMatrix) -> Int {
+    m.rows * m.cols
+}
+
+fn main() {
+    let bp = BoundedPair { lo: 0, hi: 10, mid: 5 };
+    assert(bp.mid >= bp.lo);
+    assert(bp.mid <= bp.hi);
+
+    let m = DenseMatrix { rows: 2, cols: 3, data: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] };
+    assert(matrix_element_count(m) == 6);
+
+    let ord = StrictlyOrdered { first: 1, second: 5 };
+    assert(ord.second > ord.first);
+}

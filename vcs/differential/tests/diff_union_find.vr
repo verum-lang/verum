@@ -1,0 +1,127 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, union-find, disjoint-set
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+// Union-Find with parent array (no path compression to keep it simple)
+type UF is { parent: Arr8, rank: Arr8, n: Int };
+
+fn uf_new(n: Int) -> UF {
+    // Each element is its own parent
+    let p = Arr8 { d0: 0, d1: 1, d2: 2, d3: 3, d4: 4, d5: 5, d6: 6, d7: 7 };
+    let r = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    UF { parent: p, rank: r, n: n }
+}
+
+fn find(uf: UF, x: Int) -> Int {
+    let mut cur = x;
+    while get(uf.parent, cur) != cur {
+        cur = get(uf.parent, cur);
+    }
+    cur
+}
+
+fn union(uf: UF, x: Int, y: Int) -> UF {
+    let rx = find(uf, x);
+    let ry = find(uf, y);
+    if rx == ry { return uf; }
+    let rank_x = get(uf.rank, rx);
+    let rank_y = get(uf.rank, ry);
+    if rank_x < rank_y {
+        UF { parent: set(uf.parent, rx, ry), rank: uf.rank, n: uf.n }
+    } else if rank_x > rank_y {
+        UF { parent: set(uf.parent, ry, rx), rank: uf.rank, n: uf.n }
+    } else {
+        let p2 = set(uf.parent, ry, rx);
+        let r2 = set(uf.rank, rx, rank_x + 1);
+        UF { parent: p2, rank: r2, n: uf.n }
+    }
+}
+
+fn connected(uf: UF, x: Int, y: Int) -> Int {
+    if find(uf, x) == find(uf, y) { 1 } else { 0 }
+}
+
+fn count_components(uf: UF) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < uf.n {
+        if find(uf, i) == i { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_basic() -> Int {
+    let mut uf = uf_new(6);
+    assert_eq(count_components(uf), 6);
+    assert_eq(connected(uf, 0, 1), 0);
+    uf = union(uf, 0, 1);
+    assert_eq(connected(uf, 0, 1), 1);
+    assert_eq(count_components(uf), 5);
+    1
+}
+
+fn test_chain() -> Int {
+    let mut uf = uf_new(5);
+    uf = union(uf, 0, 1);
+    uf = union(uf, 1, 2);
+    uf = union(uf, 2, 3);
+    assert_eq(connected(uf, 0, 3), 1);
+    assert_eq(connected(uf, 0, 4), 0);
+    assert_eq(count_components(uf), 2);
+    1
+}
+
+fn test_merge_groups() -> Int {
+    let mut uf = uf_new(6);
+    // Group A: {0, 1, 2}
+    uf = union(uf, 0, 1);
+    uf = union(uf, 1, 2);
+    // Group B: {3, 4}
+    uf = union(uf, 3, 4);
+    assert_eq(count_components(uf), 3);
+    // Merge A and B
+    uf = union(uf, 2, 3);
+    assert_eq(connected(uf, 0, 4), 1);
+    assert_eq(count_components(uf), 2);
+    1
+}
+
+fn test_idempotent() -> Int {
+    let mut uf = uf_new(4);
+    uf = union(uf, 0, 1);
+    let c1 = count_components(uf);
+    uf = union(uf, 0, 1);
+    let c2 = count_components(uf);
+    assert_eq(c1, c2);
+    assert_eq(c1, 3);
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_chain();
+    test_merge_groups();
+    test_idempotent();
+    print("DIFF_OK: union_find");
+    0
+}

@@ -1,0 +1,78 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, loops, ranges, iteration, for-in
+// @expected-exit: 0
+
+// Test: for-in loop patterns with ranges and nested loops.
+
+fn sum_range(start: Int, stop: Int) -> Int {
+    let mut acc = 0;
+    for i in start..stop {
+        acc = acc + i;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: basic range iteration
+    let r1 = sum_range(0, 10);
+    if (r1 != 45) {
+        print(f"FAIL test1: sum(0..10)={r1}");
+        return 1;
+    }
+
+    // Test 2: nested for-in loops
+    let mut total = 0;
+    for i in 0..5 {
+        for j in 0..5 {
+            total = total + 1;
+        }
+    }
+    if (total != 25) {
+        print(f"FAIL test2: total={total}");
+        return 1;
+    }
+
+    // Test 3: sum of squares with for-in
+    let mut sum_sq = 0;
+    for k in 1..11 {
+        sum_sq = sum_sq + k * k;
+    }
+    if (sum_sq != 385) {
+        print(f"FAIL test3: sum_sq={sum_sq}");
+        return 1;
+    }
+
+    // Test 4: large iteration
+    let r4 = sum_range(0, 10000);
+    // 0+1+...+9999 = 49995000
+    if (r4 != 49995000) {
+        print(f"FAIL test4: large sum={r4}");
+        return 1;
+    }
+
+    // Test 5: for-in with accumulation pattern
+    let mut product = 1;
+    for n in 1..8 {
+        product = product * n;
+    }
+    // 7! = 5040
+    if (product != 5040) {
+        print(f"FAIL test5: factorial={product}");
+        return 1;
+    }
+
+    // Test 6: countdown via for-in
+    let mut count = 0;
+    for c in 0..100 {
+        count = count + 1;
+    }
+    if (count != 100) {
+        print(f"FAIL test6: count={count}");
+        return 1;
+    }
+
+    print("888_for_in_loops: PASS");
+    0
+}

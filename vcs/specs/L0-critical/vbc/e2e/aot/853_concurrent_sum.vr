@@ -1,0 +1,90 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, threading, concurrent, sum
+// @expected-exit: 0
+
+// Test: concurrent computation pattern — partial sums over ranges.
+
+fn partial_sum(start: Int, count: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < start + count) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn weighted_sum(start: Int, count: Int, weight: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < start + count) {
+        acc = acc + i * weight;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Basic partial_sum: sum 0..99 = 99*100/2 = 4950
+    let r1 = partial_sum(0, 100);
+    if (r1 != 4950) {
+        print(f"FAIL: partial_sum(0,100)={r1}, expected=4950");
+        return 1;
+    }
+
+    // partial_sum(100, 100) = sum 100..199 = 100*100 + 99*100/2 = 10000+4950 = 14950
+    let r2 = partial_sum(100, 100);
+    if (r2 != 14950) {
+        print(f"FAIL: partial_sum(100,100)={r2}, expected=14950");
+        return 1;
+    }
+
+    // Combine 10 chunks of 100 to get sum 0..999
+    let mut combined = 0;
+    let mut chunk_idx = 0;
+    while (chunk_idx < 10) {
+        combined = combined + partial_sum(chunk_idx * 100, 100);
+        chunk_idx = chunk_idx + 1;
+    }
+    // sum 0..999 = 999*1000/2 = 499500
+    if (combined != 499500) {
+        print(f"FAIL: combined 10x100={combined}, expected=499500");
+        return 1;
+    }
+
+    // Weighted sum: weight=2, sum 0..49 = 2*(49*50/2) = 2*1225 = 2450
+    let w1 = weighted_sum(0, 50, 2);
+    if (w1 != 2450) {
+        print(f"FAIL: weighted_sum(0,50,2)={w1}, expected=2450");
+        return 1;
+    }
+
+    // Combine weighted sums: 5 chunks of 200, weight=1 => sum 0..999 = 499500
+    let mut w_combined = 0;
+    let mut wi = 0;
+    while (wi < 5) {
+        w_combined = w_combined + weighted_sum(wi * 200, 200, 1);
+        wi = wi + 1;
+    }
+    if (w_combined != 499500) {
+        print(f"FAIL: weighted combined={w_combined}, expected=499500");
+        return 1;
+    }
+
+    // Verify commutativity: different chunk sizes give same result
+    let c2 = partial_sum(0, 500) + partial_sum(500, 500);
+    let c4 = partial_sum(0, 250) + partial_sum(250, 250) + partial_sum(500, 250) + partial_sum(750, 250);
+    if (c2 != c4) {
+        print(f"FAIL: c2={c2} != c4={c4}");
+        return 1;
+    }
+    if (c2 != 499500) {
+        print(f"FAIL: c2={c2}, expected=499500");
+        return 1;
+    }
+
+    print("853_concurrent_sum: PASS");
+    0
+}

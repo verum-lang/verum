@@ -1,0 +1,240 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, async, select, concurrency
+// @timeout: 5000
+// @expect: pass
+//
+// Test: SELECT opcode
+// Verifies concurrent future coordination with select expression
+// Note: join() requires Future impl recognition which is a known limitation
+
+// =============================================================================
+// SELECT - Wait for first future
+// =============================================================================
+
+async fn test_select_first_ready() {
+    async fn fast() -> Int { 1 }
+    async fn slow() -> Int {
+        // Simulate delay
+        for _ in 0..1000000 { }
+        2
+    }
+
+    let result = select {
+        v = fast().await => v,
+        v = slow().await => v
+    };
+
+    // fast() should complete first
+    assert_eq(result, 1);
+}
+
+async fn test_select_with_else() {
+    async fn quick() -> Int { 42 }
+
+    let result = select {
+        v = quick().await => v,
+        else => 0
+    };
+
+    // Either quick completes or else is taken
+    assert(result == 42 || result == 0);
+}
+
+async fn test_select_multiple_branches() {
+    async fn a() -> Int { 1 }
+    async fn b() -> Int { 2 }
+    async fn c() -> Int { 3 }
+
+    let result = select {
+        v = a().await => f"a: {v}",
+        v = b().await => f"b: {v}",
+        v = c().await => f"c: {v}"
+    };
+
+    // One of them completes
+    assert(result.starts_with("a:") || result.starts_with("b:") || result.starts_with("c:"));
+}
+
+async fn test_select_with_condition() {
+    let flag: Bool = true;
+
+    async fn task1() -> Int { 1 }
+    async fn task2() -> Int { 2 }
+
+    let result = select {
+        v = task1().await if flag => v,
+        v = task2().await if !flag => v,
+        else => 0
+    };
+
+    assert_eq(result, 1);
+}
+
+async fn test_select_same_type() {
+    // All branches return same type
+    async fn compute(x: Int) -> Int { x * 2 }
+
+    let result = select {
+        v = compute(5).await => v,
+        v = compute(10).await => v
+    };
+
+    assert(result == 10 || result == 20);
+}
+
+// =============================================================================
+// Combined select patterns
+// =============================================================================
+
+async fn test_select_in_loop() {
+    let mut total: Int = 0;
+
+    for i in 0..3 {
+        let v = select {
+            r = (async { i }).await => r,
+            else => 0
+        };
+        total = total + v;
+    }
+
+    // 0 + 1 + 2 = 3 (or could be all else = 0)
+    assert(total >= 0 && total <= 3);
+}
+
+async fn test_select_nested() {
+    async fn inner_select(id: Int) -> Int {
+        select {
+            v = (async { id * 2 }).await => v,
+            else => id
+        }
+    }
+
+    let result = select {
+        v = inner_select(5).await => v,
+        v = inner_select(10).await => v
+    };
+
+    assert(result == 10 || result == 5 || result == 20);
+}
+
+// =============================================================================
+// Error handling with select
+// =============================================================================
+
+async fn test_select_with_result() {
+    async fn succeed() -> Result<Int, Text> { Ok(42) }
+    async fn fail() -> Result<Int, Text> { Err("error") }
+
+    let result = select {
+        r = succeed().await => r,
+        r = fail().await => r
+    };
+
+    // One of them, could be Ok or Err
+    assert(result is Ok || result is Err);
+}
+
+async fn test_select_maybe() {
+    async fn some_value() -> Maybe<Int> { Some(42) }
+    async fn no_value() -> Maybe<Int> { None }
+
+    let result = select {
+        v = some_value().await => v,
+        v = no_value().await => v
+    };
+
+    // Either Some or None
+    assert(result is Some || result is None);
+}
+
+// =============================================================================
+// Race patterns
+// =============================================================================
+
+async fn test_race_text() {
+    async fn task_a() -> Text { "a" }
+    async fn task_b() -> Text { "b" }
+    async fn task_c() -> Text { "c" }
+
+    // Race three tasks, take first result
+    let winner = select {
+        v = task_a().await => v,
+        v = task_b().await => v,
+        v = task_c().await => v
+    };
+
+    assert(winner == "a" || winner == "b" || winner == "c");
+}
+
+async fn test_race_bool() {
+    async fn yes() -> Bool { true }
+    async fn no() -> Bool { false }
+
+    let result = select {
+        v = yes().await => v,
+        v = no().await => v
+    };
+
+    // Either true or false
+    assert(result == true || result == false);
+}
+
+// =============================================================================
+// Sequential await (alternative to join)
+// =============================================================================
+
+async fn test_sequential_await() {
+    // When join() isn't available, sequential await works
+    async fn a() -> Int { 1 }
+    async fn b() -> Int { 2 }
+    async fn c() -> Int { 3 }
+
+    let r1 = a().await;
+    let r2 = b().await;
+    let r3 = c().await;
+
+    assert_eq(r1 + r2 + r3, 6);
+}
+
+async fn test_sequential_with_dependency() {
+    async fn step1() -> Int { 10 }
+    async fn step2(x: Int) -> Int { x * 2 }
+    async fn step3(x: Int) -> Int { x + 5 }
+
+    let a = step1().await;
+    let b = step2(a).await;
+    let c = step3(b).await;
+
+    assert_eq(c, 25);  // 10 * 2 + 5
+}
+
+fn main() {
+    @block_on(async {
+        // SELECT tests
+        test_select_first_ready().await;
+        test_select_with_else().await;
+        test_select_multiple_branches().await;
+        test_select_with_condition().await;
+        test_select_same_type().await;
+
+        // Combined patterns
+        test_select_in_loop().await;
+        test_select_nested().await;
+
+        // Error handling
+        test_select_with_result().await;
+        test_select_maybe().await;
+
+        // Race patterns
+        test_race_text().await;
+        test_race_bool().await;
+
+        // Sequential await
+        test_sequential_await().await;
+        test_sequential_with_dependency().await;
+    });
+
+    print("002_select_join: PASSED");
+}

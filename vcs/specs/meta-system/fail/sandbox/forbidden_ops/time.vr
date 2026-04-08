@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, sandbox, forbidden, time, nondeterministic
+// @description: Test that non-deterministic time operations are forbidden
+// @expected-error: M301
+
+// Getting current time breaks reproducibility (non-deterministic)
+meta fn test_current_time() -> Int {
+    // Attempting to get current time should fail with M301 ForbiddenOperation
+    current_time_millis()
+}
+
+fn main() {
+    // Call meta function at compile time
+    @const assert(test_current_time() > 0);
+}

@@ -1,0 +1,130 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, complex, arithmetic
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Complex number arithmetic using scaled integers (x1000) — add, sub, multiply, magnitude
+
+// ============================================================================
+// Complex type: re and im are scaled by 1000 (1.0 = 1000, 2.5 = 2500)
+// ============================================================================
+
+type Complex is { re: Int, im: Int };
+
+fn cx_new(r: Int, i: Int) -> Complex {
+    Complex { re: r, im: i }
+}
+
+// ============================================================================
+// Arithmetic (scaled integer math)
+// ============================================================================
+
+fn cx_add(a: Complex, b: Complex) -> Complex {
+    Complex { re: a.re + b.re, im: a.im + b.im }
+}
+
+fn cx_sub(a: Complex, b: Complex) -> Complex {
+    Complex { re: a.re - b.re, im: a.im - b.im }
+}
+
+fn cx_mul(a: Complex, b: Complex) -> Complex {
+    // (a+bi)(c+di) = (ac-bd) + (ad+bc)i
+    // With scale 1000: re = (a*c - b*d) / 1000, im = (a*d + b*c) / 1000
+    let re = (a.re * b.re - a.im * b.im) / 1000;
+    let im = (a.re * b.im + a.im * b.re) / 1000;
+    Complex { re: re, im: im }
+}
+
+fn cx_mag_sq(a: Complex) -> Int {
+    // |a|^2 = re^2 + im^2 (both in scaled units, result is scaled^2 / 1000)
+    // Return in units of 1000 for consistency
+    (a.re * a.re + a.im * a.im) / 1000
+}
+
+fn cx_conjugate(a: Complex) -> Complex {
+    Complex { re: a.re, im: 0 - a.im }
+}
+
+fn cx_eq(a: Complex, b: Complex) -> Int {
+    if a.re == b.re {
+        if a.im == b.im { 1 } else { 0 }
+    } else { 0 }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_add_sub() -> Int {
+    // (1+2i) + (3+4i) = (4+6i)
+    let a = cx_new(1000, 2000);
+    let b = cx_new(3000, 4000);
+    let sum = cx_add(a, b);
+    assert_eq(sum.re, 4000);
+    assert_eq(sum.im, 6000);
+    // (4+6i) - (3+4i) = (1+2i)
+    let diff = cx_sub(sum, b);
+    assert_eq(diff.re, 1000);
+    assert_eq(diff.im, 2000);
+    0
+}
+
+@test
+fn test_multiply() -> Int {
+    // (1+2i) * (3+4i) = (3+4i+6i+8i^2) = (3-8) + (4+6)i = -5+10i
+    let a = cx_new(1000, 2000);
+    let b = cx_new(3000, 4000);
+    let prod = cx_mul(a, b);
+    assert_eq(prod.re, -5000);
+    assert_eq(prod.im, 10000);
+    0
+}
+
+@test
+fn test_multiply_pure_imaginary() -> Int {
+    // (0+1i) * (0+1i) = (0-1) + (0+0)i = -1+0i
+    let i_unit = cx_new(0, 1000);
+    let result = cx_mul(i_unit, i_unit);
+    assert_eq(result.re, -1000);
+    assert_eq(result.im, 0);
+    0
+}
+
+@test
+fn test_magnitude_squared() -> Int {
+    // |3+4i|^2 = 9+16 = 25 (in scaled: 25000)
+    let a = cx_new(3000, 4000);
+    let msq = cx_mag_sq(a);
+    assert_eq(msq, 25000);
+    // |1+0i|^2 = 1 (in scaled: 1000)
+    let b = cx_new(1000, 0);
+    assert_eq(cx_mag_sq(b), 1000);
+    0
+}
+
+@test
+fn test_conjugate() -> Int {
+    // conj(3+4i) = 3-4i
+    let a = cx_new(3000, 4000);
+    let c = cx_conjugate(a);
+    assert_eq(c.re, 3000);
+    assert_eq(c.im, -4000);
+    // a * conj(a) should be real (im = 0), value = |a|^2
+    let prod = cx_mul(a, c);
+    assert_eq(prod.im, 0);
+    // (3+4i)(3-4i) = 9+16 = 25 (scaled: 25000)
+    assert_eq(prod.re, 25000);
+    0
+}
+
+fn main() -> Int {
+    test_add_sub();
+    test_multiply();
+    test_multiply_pure_imaginary();
+    test_magnitude_squared();
+    test_conjugate();
+    print("[OK] 122_complex_arith");
+    0
+}

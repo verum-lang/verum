@@ -1,0 +1,247 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: closure, capture, mutable, higher-order, return-value, advanced
+// @description: Advanced closure patterns — mutable captures, closures as return values, higher-order functions, generic closures
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x| x * n
+}
+
+fn fold(list: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < list.len() {
+        acc = f(acc, list[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn map_list(list: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < list.len() {
+        result.push(f(list[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(list: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < list.len() {
+        if pred(list[i]) {
+            result.push(list[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_basic_closures() -> Int {
+    let add5 = make_adder(5);
+    let mul3 = make_multiplier(3);
+
+    if add5(10) != 15 {
+        print(f"FAIL add5(10): expected 15, got {add5(10)}");
+        return 1;
+    }
+
+    if mul3(7) != 21 {
+        print(f"FAIL mul3(7): expected 21, got {mul3(7)}");
+        return 1;
+    }
+
+    print("  basic_closures: OK");
+    0
+}
+
+fn test_closure_composition() -> Int {
+    let add1 = make_adder(1);
+    let mul2 = make_multiplier(2);
+
+    // compose(add1, mul2)(5) = add1(mul2(5)) = add1(10) = 11
+    let composed = compose(add1, mul2);
+    let result = composed(5);
+    if result != 11 {
+        print(f"FAIL compose: expected 11, got {result}");
+        return 1;
+    }
+
+    // Reverse: compose(mul2, add1)(5) = mul2(add1(5)) = mul2(6) = 12
+    let composed2 = compose(mul2, add1);
+    let result2 = composed2(5);
+    if result2 != 12 {
+        print(f"FAIL compose2: expected 12, got {result2}");
+        return 1;
+    }
+
+    print("  closure_composition: OK");
+    0
+}
+
+fn test_mutable_captures() -> Int {
+    let mut count = 0;
+    let counter = || {
+        count = count + 1;
+        count
+    };
+
+    let v1 = counter();
+    let v2 = counter();
+    let v3 = counter();
+
+    if v3 != 3 {
+        print(f"FAIL mut capture: expected 3, got {v3}");
+        return 1;
+    }
+
+    print("  mutable_captures: OK");
+    0
+}
+
+fn test_higher_order_functions() -> Int {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Sum using fold
+    let sum = fold(data, 0, |acc, x| acc + x);
+    if sum != 55 {
+        print(f"FAIL fold sum: expected 55, got {sum}");
+        return 1;
+    }
+
+    // Product using fold
+    let product = fold([1, 2, 3, 4, 5], 1, |acc, x| acc * x);
+    if product != 120 {
+        print(f"FAIL fold product: expected 120, got {product}");
+        return 1;
+    }
+
+    // Map: double each
+    let doubled = map_list(data, |x| x * 2);
+    if doubled[0] != 2 || doubled[9] != 20 {
+        print(f"FAIL map: expected [2,...,20]");
+        return 1;
+    }
+
+    // Filter: evens only
+    let evens = filter_list(data, |x| x % 2 == 0);
+    if evens.len() != 5 {
+        print(f"FAIL filter: expected 5 evens, got {evens.len()}");
+        return 1;
+    }
+
+    print("  higher_order_functions: OK");
+    0
+}
+
+fn test_closure_as_return() -> Int {
+    // Chain of adders
+    let add10 = make_adder(10);
+    let add20 = make_adder(20);
+
+    let pipeline = compose(add20, add10);
+    let result = pipeline(5);
+    // add20(add10(5)) = add20(15) = 35
+    if result != 35 {
+        print(f"FAIL return closure: expected 35, got {result}");
+        return 1;
+    }
+
+    print("  closure_as_return: OK");
+    0
+}
+
+fn test_closure_in_data_structure() -> Int {
+    // List of operations
+    let ops = [
+        make_adder(1),
+        make_multiplier(2),
+        make_adder(3),
+    ];
+
+    // Apply all operations in sequence
+    let mut value = 5;
+    let mut i = 0;
+    while i < ops.len() {
+        value = ops[i](value);
+        i = i + 1;
+    }
+    // (5 + 1) * 2 + 3 = 15
+    if value != 15 {
+        print(f"FAIL closure list: expected 15, got {value}");
+        return 1;
+    }
+
+    print("  closure_in_data_structure: OK");
+    0
+}
+
+fn test_apply_function() -> Int {
+    let result1 = apply(|x| x * x, 5);
+    if result1 != 25 {
+        print(f"FAIL apply square: expected 25, got {result1}");
+        return 1;
+    }
+
+    let result2 = apply(|x| x + 100, 42);
+    if result2 != 142 {
+        print(f"FAIL apply add100: expected 142, got {result2}");
+        return 1;
+    }
+
+    print("  apply_function: OK");
+    0
+}
+
+fn test_closure_captures_multiple() -> Int {
+    let base = 10;
+    let factor = 3;
+    let offset = 5;
+
+    let transform = |x| x * factor + offset + base;
+
+    if transform(2) != 21 {
+        print(f"FAIL multi capture: expected 21, got {transform(2)}");
+        return 1;
+    }
+    // 2 * 3 + 5 + 10 = 21
+    if transform(0) != 15 {
+        print(f"FAIL multi capture 0: expected 15, got {transform(0)}");
+        return 1;
+    }
+
+    print("  closure_captures_multiple: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_basic_closures();
+    failures = failures + test_closure_composition();
+    failures = failures + test_mutable_captures();
+    failures = failures + test_higher_order_functions();
+    failures = failures + test_closure_as_return();
+    failures = failures + test_closure_in_data_structure();
+    failures = failures + test_apply_function();
+    failures = failures + test_closure_captures_multiple();
+
+    if failures == 0 {
+        print("All advanced closure tests passed");
+    }
+    failures
+}

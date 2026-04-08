@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, gat, constraints
+
+/// Test for Generic Associated Types (GATs) with constraints.
+/// GATs allow associated types to have their own type parameters.
+
+// Protocol with a basic GAT
+type Container is protocol {
+    type Item<T>;
+
+    fn wrap<T>(value: T) -> Self.Item<T>;
+    fn unwrap<T>(item: Self.Item<T>) -> T;
+};
+
+// Protocol with GAT that has bounds
+type BoundedContainer is protocol {
+    type Item<T: Clone>;
+
+    fn wrap<T: Clone>(value: T) -> Self.Item<T>;
+    fn clone_item<T: Clone>(item: &Self.Item<T>) -> Self.Item<T>;
+};
+
+// Protocol with multiple GATs
+type Transformer is protocol {
+    type Input<A>;
+    type Output<B>;
+
+    fn transform<A, B>(input: Self.Input<A>, f: fn(A) -> B) -> Self.Output<B>;
+};
+
+// Implementation of Container
+type BoxWrapper is ();
+
+implement Container for BoxWrapper {
+    type Item<T> = Heap<T>;
+
+    fn wrap<T>(value: T) -> Heap<T> {
+        Heap.new(value)
+    }
+
+    fn unwrap<T>(item: Heap<T>) -> T {
+        *item
+    }
+}
+
+// Implementation of BoundedContainer
+type CloneableWrapper is ();
+
+implement BoundedContainer for CloneableWrapper {
+    type Item<T: Clone> = List<T>;
+
+    fn wrap<T: Clone>(value: T) -> List<T> {
+        [value]
+    }
+
+    fn clone_item<T: Clone>(item: &List<T>) -> List<T> {
+        item.clone()
+    }
+}
+
+// Function using GAT constraints
+fn use_container<C: Container>(value: Int) -> Int {
+    let wrapped: C.Item<Int> = C.wrap(value);
+    C.unwrap(wrapped)
+}
+
+// Function using bounded GAT
+fn clone_twice<C: BoundedContainer, T: Clone>(value: T) -> (C.Item<T>, C.Item<T>) {
+    let item1 = C.wrap(value.clone());
+    let item2 = C.clone_item(&item1);
+    (item1, item2)
+}
+
+fn main() {
+    // Using BoxWrapper as Container
+    let wrapped: Heap<Int> = BoxWrapper.wrap(42);
+    let unwrapped: Int = BoxWrapper.unwrap(wrapped);
+    assert(unwrapped == 42);
+
+    // Using CloneableWrapper as BoundedContainer
+    let list: List<Text> = CloneableWrapper.wrap("hello");
+    let cloned: List<Text> = CloneableWrapper.clone_item(&list);
+    assert(list == cloned);
+
+    // Using generic function with Container
+    let result: Int = use_container<BoxWrapper>(100);
+    assert(result == 100);
+
+    // Using generic function with BoundedContainer
+    let (a, b) = clone_twice<CloneableWrapper, Int>(50);
+    assert(a == [50]);
+    assert(b == [50]);
+}

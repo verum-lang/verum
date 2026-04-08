@@ -1,0 +1,395 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, protocols, extends, inheritance
+// @description: Protocol inheritance using extends keyword
+
+/// Test for protocol inheritance using extends.
+/// Protocols can extend other protocols, requiring all parent methods.
+
+// ============================================================================
+// Base protocols
+// ============================================================================
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+type Hash is protocol {
+    fn hash(&self) -> Int;
+};
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type Debug is protocol {
+    fn debug(&self) -> Text;
+};
+
+// ============================================================================
+// Single protocol inheritance
+// ============================================================================
+
+// Local Ordering type to avoid collision with stdlib AtomicOrdering
+type CmpOrdering is Less | Equal | Greater;
+
+type PartialOrd is protocol extends Eq {
+    fn partial_cmp(&self, other: &Self) -> Maybe<CmpOrdering>;
+
+    fn lt(&self, other: &Self) -> Bool {
+        self.partial_cmp(other) is Some(CmpOrdering.Less)
+    }
+};
+
+type Ord is protocol extends PartialOrd {
+    fn cmp(&self, other: &Self) -> CmpOrdering;
+};
+
+// ============================================================================
+// Multiple protocol inheritance
+// ============================================================================
+
+type Hashable is protocol extends Eq + Hash {
+    // Combines Eq and Hash - can be used as map key
+};
+
+type Comparable is protocol extends Eq + Ord {
+    // Combines Eq and Ord for full comparison support
+};
+
+type Printable is protocol extends Display + Debug {
+    // Can be displayed and debugged
+    fn pretty_print(&self) {
+        print(f"Display: {self.display()}");
+        print(f"Debug: {self.debug()}");
+    }
+};
+
+// ============================================================================
+// Deep inheritance chain
+// ============================================================================
+
+type Copyable is protocol extends Clone {
+    // Marker that clone is cheap (like Copy in Rust)
+};
+
+type NumericBase is protocol extends Clone + Eq {
+    fn zero() -> Self;
+    fn one() -> Self;
+};
+
+type Additive is protocol extends NumericBase {
+    fn add(&self, other: &Self) -> Self;
+    fn neg(&self) -> Self;
+
+    fn sub(&self, other: &Self) -> Self {
+        self.add(&other.neg())
+    }
+};
+
+type Multiplicative is protocol extends NumericBase {
+    fn mul(&self, other: &Self) -> Self;
+    fn inv(&self) -> Maybe<Self>;
+};
+
+type Ring is protocol extends Additive + Multiplicative {
+    // Ring: additive group + multiplicative monoid
+};
+
+type Field is protocol extends Ring {
+    // Field: ring where every non-zero element has multiplicative inverse
+    fn is_zero(&self) -> Bool {
+        self.eq(&Self.zero())
+    }
+};
+
+// ============================================================================
+// Protocol inheritance with associated types
+// ============================================================================
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type DoubleEndedIterator is protocol extends Iterator {
+    fn next_back(&mut self) -> Maybe<Self.Item>;
+};
+
+type ExactSizeIterator is protocol extends Iterator {
+    fn len(&self) -> Int;
+
+    fn is_empty(&self) -> Bool {
+        self.len() == 0
+    }
+};
+
+type FusedIterator is protocol extends Iterator {
+    // After returning None, always returns None
+};
+
+type RandomAccessIterator is protocol extends ExactSizeIterator + DoubleEndedIterator {
+    fn get(&self, index: Int) -> Maybe<&Self.Item>;
+};
+
+// ============================================================================
+// Implementations of extended protocols
+// ============================================================================
+
+type Number is {
+    value: Int,
+};
+
+// Must implement all parent protocols
+implement Clone for Number {
+    fn clone(&self) -> Number {
+        Number { value: self.value }
+    }
+}
+
+implement Eq for Number {
+    fn eq(&self, other: &Number) -> Bool {
+        self.value == other.value
+    }
+}
+
+implement Hash for Number {
+    fn hash(&self) -> Int {
+        self.value.hash()
+    }
+}
+
+implement Display for Number {
+    fn display(&self) -> Text {
+        f"{self.value}"
+    }
+}
+
+implement Debug for Number {
+    fn debug(&self) -> Text {
+        f"Number({self.value})"
+    }
+}
+
+// Implement PartialOrd (requires Eq)
+implement PartialOrd for Number {
+    fn partial_cmp(&self, other: &Number) -> Maybe<CmpOrdering> {
+        Some(self.cmp(other))
+    }
+}
+
+// Implement Ord (requires PartialOrd which requires Eq)
+implement Ord for Number {
+    fn cmp(&self, other: &Number) -> CmpOrdering {
+        if self.value < other.value {
+            CmpOrdering.Less
+        } else if self.value > other.value {
+            CmpOrdering.Greater
+        } else {
+            CmpOrdering.Equal
+        }
+    }
+}
+
+// Implement combined protocols
+implement Hashable for Number {}  // Already has Eq + Hash
+implement Comparable for Number {}  // Already has Eq + Ord
+implement Printable for Number {}  // Already has Display + Debug
+
+// ============================================================================
+// Full numeric implementation
+// ============================================================================
+
+type Real is {
+    value: Float,
+};
+
+implement Clone for Real {
+    fn clone(&self) -> Real {
+        Real { value: self.value }
+    }
+}
+
+implement Eq for Real {
+    fn eq(&self, other: &Real) -> Bool {
+        self.value == other.value
+    }
+}
+
+implement NumericBase for Real {
+    fn zero() -> Real {
+        Real { value: 0.0 }
+    }
+
+    fn one() -> Real {
+        Real { value: 1.0 }
+    }
+}
+
+implement Additive for Real {
+    fn add(&self, other: &Real) -> Real {
+        Real { value: self.value + other.value }
+    }
+
+    fn neg(&self) -> Real {
+        Real { value: -self.value }
+    }
+}
+
+implement Multiplicative for Real {
+    fn mul(&self, other: &Real) -> Real {
+        Real { value: self.value * other.value }
+    }
+
+    fn inv(&self) -> Maybe<Real> {
+        if self.value == 0.0 {
+            None
+        } else {
+            Some(Real { value: 1.0 / self.value })
+        }
+    }
+}
+
+implement Ring for Real {}
+implement Field for Real {}
+
+// ============================================================================
+// Iterator inheritance implementation
+// ============================================================================
+
+type VecIterator<T> is {
+    items: List<T>,
+    front: Int,
+    back: Int,
+};
+
+implement<T> Iterator for VecIterator<T> {
+    type Item is T;
+
+    fn next(&mut self) -> Maybe<T> {
+        if self.front < self.back {
+            let item = self.items[self.front];
+            self.front += 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
+implement<T> DoubleEndedIterator for VecIterator<T> {
+    fn next_back(&mut self) -> Maybe<T> {
+        if self.front < self.back {
+            self.back -= 1;
+            let item = self.items[self.back];
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
+implement<T> ExactSizeIterator for VecIterator<T> {
+    fn len(&self) -> Int {
+        self.back - self.front
+    }
+}
+
+implement<T> RandomAccessIterator for VecIterator<T> {
+    fn get(&self, index: Int) -> Maybe<&T> {
+        let actual = self.front + index;
+        if actual < self.back {
+            self.items.get(actual)
+        } else {
+            None
+        }
+    }
+}
+
+// ============================================================================
+// Functions using extended protocols
+// ============================================================================
+
+fn use_hashable<T: Hashable>(item: T) -> Int {
+    // Can use both eq and hash
+    item.hash()
+}
+
+// NOTE: use_comparable needs max() which requires Ord.max default method
+// fn use_comparable<T: Comparable>(a: T, b: T) -> T { a.max(b) }
+
+fn use_printable<T: Printable>(item: &T) {
+    // Can use display, debug, and pretty_print
+    item.pretty_print();
+}
+
+fn use_field<T: Field>(a: T, b: T) -> T {
+    // Has all numeric operations
+    let sum = a.add(&b);
+    let product = a.mul(&b);
+    sum
+}
+
+// NOTE: Functions using I.Item associated type projections not yet supported
+// fn iterate_both_ways<I: DoubleEndedIterator>(mut iter: I) -> (Maybe<I.Item>, Maybe<I.Item>) { ... }
+// fn random_access<I: RandomAccessIterator>(iter: &I, index: Int) -> Maybe<&I.Item> { ... }
+
+fn main() {
+    // Test Number with inheritance chain
+    let n1 = Number { value: 10 };
+    let n2 = Number { value: 20 };
+    let n3 = Number { value: 10 };
+
+    // From Eq (via PartialOrd via Ord)
+    assert(n1.eq(&n3));
+    assert(!n1.eq(&n2));
+
+    // From PartialOrd
+    assert(n1.lt(&n2));
+
+    // From Ord
+    assert(n1.cmp(&n2) is CmpOrdering.Less);
+
+    // From Hash
+    assert(n1.hash() == n3.hash());
+
+    // From Display + Debug
+    assert(n1.display() == "10");
+    assert(n1.debug() == "Number(10)");
+
+    // Test Real with Field protocol
+    let r1 = Real { value: 2.0 };
+    let r2 = Real { value: 3.0 };
+
+    // Additive
+    let sum = r1.add(&r2);
+    assert(sum.value == 5.0);
+
+    let diff = r1.sub(&r2);
+    assert(diff.value == -1.0);
+
+    // Multiplicative
+    let prod = r1.mul(&r2);
+    assert(prod.value == 6.0);
+
+    // Field
+    assert(!r1.is_zero());
+    assert(Real.zero().is_zero());
+
+    // Test iterator inheritance
+    let items: List<Int> = [1, 2, 3, 4, 5];
+    let iter = VecIterator {
+        items: items,
+        front: 0,
+        back: 5,
+    };
+
+    // ExactSizeIterator
+    assert(iter.len() == 5);
+    assert(!iter.is_empty());
+}

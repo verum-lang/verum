@@ -1,0 +1,332 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, integration, bounds-elimination, escape-analysis, cbgr, mir
+// @timeout: 10000
+// @description: Integration test for verification phase - combines bounds elimination and escape analysis
+
+/// Verification Phase Integration Test
+///
+/// This test exercises the full verification phase pipeline:
+/// 1. MIR lowering from AST
+/// 2. Control flow graph construction
+/// 3. Dominator tree analysis
+/// 4. Loop detection and analysis
+/// 5. Bounds check elimination (constant, induction, hoisting)
+/// 6. CBGR escape analysis
+/// 7. Tier transition recommendations
+///
+/// The verification phase operates on MIR and produces optimization hints
+/// that the codegen phase uses to eliminate runtime checks.
+
+// =============================================================================
+// Combined patterns: Bounds + Escape Analysis
+// =============================================================================
+
+type Vector3 is { data: [Float; 3] };
+
+/// Function with multiple optimization opportunities:
+/// - Constant index access
+/// - Loop-invariant references
+/// - Non-escaping references (Tier 1 candidates)
+fn compute_vector_length(v: Vector3) -> Float {
+    // 1. Reference to struct is function-local (Tier 1 candidate)
+    let vref: &Vector3 = &v;
+
+    // 2. All indices are constants (bounds eliminated)
+    let x = vref.data[0];
+    let y = vref.data[1];
+    let z = vref.data[2];
+
+    // 3. Local computation, no escape
+    x * x + y * y + z * z
+}
+
+/// Multiple array traversal with loop hoisting and tier analysis
+fn dot_product_vectors(a: Vector3, b: Vector3) -> Float {
+    // References don't escape - Tier 1 candidates
+    let ra: &Vector3 = &a;
+    let rb: &Vector3 = &b;
+
+    let mut sum: Float = 0.0;
+    let mut i: Int = 0;
+
+    // Loop with:
+    // - Induction variable i bounded by 3
+    // - ra and rb are loop-invariant
+    // - Bounds checks hoistable
+    while i < 3 {
+        sum = sum + ra.data[i] * rb.data[i];
+        i = i + 1;
+    }
+
+    sum
+}
+
+// =============================================================================
+// Complex control flow with bounds and escape
+// =============================================================================
+
+fn process_matrix_diagonal(m: [[Int; 4]; 4]) -> Int {
+    // Matrix reference doesn't escape
+    let mref: &[[Int; 4]; 4] = &m;
+
+    let mut trace: Int = 0;
+    let mut i: Int = 0;
+
+    // Loop with diagonal access pattern
+    // Both indices are same induction variable
+    while i < 4 {
+        // m[i][i] - both bounds checks can be eliminated
+        trace = trace + mref[i][i];
+        i = i + 1;
+    }
+
+    trace
+}
+
+type MaybeInt is None | Some { val: Int };
+
+fn find_and_process(arr: [Int; 10], target: Int) -> MaybeInt {
+    // Reference is function-local until conditional return
+    let aref: &[Int; 10] = &arr;
+    let mut i: Int = 0;
+
+    while i < 10 {
+        // Bounds check eliminated via induction
+        if aref[i] == target {
+            // Value copied, reference doesn't escape
+            return MaybeInt.Some { val: aref[i] * 2 };
+        }
+        i = i + 1;
+    }
+
+    MaybeInt.None
+}
+
+// =============================================================================
+// Nested structures with escape tracking
+// =============================================================================
+
+type Point is { x: Float, y: Float };
+type Triangle is { vertices: [Point; 3] };
+
+fn triangle_perimeter(t: Triangle) -> Float {
+    // Reference to triangle - analyze escape path
+    let tref: &Triangle = &t;
+
+    // All constant indices into fixed-size arrays
+    let p0 = tref.vertices[0];
+    let p1 = tref.vertices[1];
+    let p2 = tref.vertices[2];
+
+    // Helper function for distance
+    fn distance_squared(a: Point, b: Point) -> Float {
+        let dx = a.x - b.x;
+        let dy = a.y - b.y;
+        dx * dx + dy * dy
+    }
+
+    distance_squared(p0, p1) + distance_squared(p1, p2) + distance_squared(p2, p0)
+}
+
+// =============================================================================
+// Mixed escape patterns in single function
+// =============================================================================
+
+type RefContainer is { inner: &Int };
+
+fn mixed_escape_analysis(x: Int, y: &Int) -> (Int, RefContainer) {
+    // r1: local use only - Tier 1 candidate
+    let r1: &Int = &x;
+    let local_result = *r1 * 2;
+
+    // y: escapes via return - must be Tier 0
+    let escaped = RefContainer { inner: y };
+
+    (local_result, escaped)
+}
+
+fn conditional_tier_requirements(flag: Bool, a: Int, b: Int) -> Int {
+    let ra: &Int = &a;
+    let rb: &Int = &b;
+
+    // Both references used locally, neither escapes
+    // Even though selection is conditional, both can be Tier 1
+    if flag {
+        *ra * 2
+    } else {
+        *rb * 3
+    }
+}
+
+// =============================================================================
+// Loop with multiple optimization patterns
+// =============================================================================
+
+fn image_filter(pixels: [[Int; 8]; 8]) -> [[Int; 8]; 8] {
+    let mut result: [[Int; 8]; 8] = [[0; 8]; 8];
+    let mut y: Int = 1;
+
+    // Outer loop - row iteration
+    while y < 7 {
+        let mut x: Int = 1;
+        // Inner loop - column iteration
+        while x < 7 {
+            // 3x3 kernel access
+            // All bounds checks can be eliminated because:
+            // - y ranges 1..7, so y-1, y, y+1 are in 0..8
+            // - x ranges 1..7, so x-1, x, x+1 are in 0..8
+
+            let sum =
+                pixels[y-1][x-1] + pixels[y-1][x] + pixels[y-1][x+1] +
+                pixels[y][x-1]   + pixels[y][x]   + pixels[y][x+1] +
+                pixels[y+1][x-1] + pixels[y+1][x] + pixels[y+1][x+1];
+
+            result[y][x] = sum / 9;
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+
+    result
+}
+
+// =============================================================================
+// Closure with captured references
+// =============================================================================
+
+fn map_array(arr: [Int; 5], f: fn(Int) -> Int) -> [Int; 5] {
+    let mut result: [Int; 5] = [0; 5];
+    let mut i: Int = 0;
+
+    // arr is loop-invariant, bounds hoistable
+    while i < 5 {
+        result[i] = f(arr[i]);
+        i = i + 1;
+    }
+
+    result
+}
+
+fn test_closure_capture() -> Int {
+    let multiplier: Int = 3;
+    let arr = [1, 2, 3, 4, 5];
+
+    // Closure captures multiplier by value
+    // Reference to multiplier doesn't escape
+    let tripled = map_array(arr, |x| x * multiplier);
+
+    tripled[0] + tripled[4]  // 3 + 15 = 18
+}
+
+// =============================================================================
+// CBGR tier validation points
+// =============================================================================
+
+fn demonstrate_tier0_validation(x: Int) -> Int {
+    let r: &Int = &x;
+
+    // Multiple dereferences - each is a validation point in Tier 0
+    // Optimizer may batch or eliminate redundant validations
+    let a = *r;
+    let b = *r;
+    let c = *r;
+
+    a + b + c
+}
+
+fn demonstrate_tier1_candidate() -> Int {
+    let x: Int = 42;
+    let r: &Int = &x;
+
+    // Local reference, doesn't escape
+    // Compiler should be able to promote to Tier 1
+    *r * 2
+}
+
+// =============================================================================
+// Recursive patterns
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn sum_recursive(arr: &[Int; 10], idx: Int) -> Int {
+    if idx >= 10 {
+        0
+    } else {
+        arr[idx] + sum_recursive(arr, idx + 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+// =============================================================================
+// Main - comprehensive validation
+// =============================================================================
+
+fn main() {
+    // Vector operations
+    let v = Vector3 { data: [3.0, 4.0, 0.0] };
+    let len_sq = compute_vector_length(v);
+    assert(len_sq == 25.0);
+
+    let v1 = Vector3 { data: [1.0, 0.0, 0.0] };
+    let v2 = Vector3 { data: [1.0, 0.0, 0.0] };
+    assert(dot_product_vectors(v1, v2) == 1.0);
+
+    // Matrix diagonal
+    let m = [
+        [1, 0, 0, 0],
+        [0, 2, 0, 0],
+        [0, 0, 3, 0],
+        [0, 0, 0, 4]
+    ];
+    assert(process_matrix_diagonal(m) == 10);
+
+    // Find operation
+    let arr = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+    let found = find_and_process(arr, 20);
+    match found {
+        MaybeInt.Some { val } => assert(val == 40),
+        MaybeInt.None => assert(false),
+    }
+
+    // Triangle
+    let t = Triangle {
+        vertices: [
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 1.0, y: 0.0 },
+            Point { x: 0.0, y: 1.0 }
+        ]
+    };
+    let _ = triangle_perimeter(t);
+
+    // Mixed escape
+    let y = 20;
+    let (local, container) = mixed_escape_analysis(10, &y);
+    assert(local == 20);
+    assert(*container.inner == 20);
+
+    // Conditional
+    assert(conditional_tier_requirements(true, 10, 20) == 20);
+    assert(conditional_tier_requirements(false, 10, 20) == 60);
+
+    // Closure capture
+    assert(test_closure_capture() == 18);
+
+    // Tier demonstrations
+    assert(demonstrate_tier0_validation(10) == 30);
+    assert(demonstrate_tier1_candidate() == 84);
+
+    // Recursive
+    let arr10 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    assert(sum_recursive(&arr10, 0) == 55);
+    assert(factorial(5) == 120);
+}

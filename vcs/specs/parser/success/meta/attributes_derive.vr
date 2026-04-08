@@ -1,0 +1,276 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, attributes, derive
+// @description: Test @derive attribute parsing - grammar production: derive_attribute
+
+// ============================================================================
+// DERIVE ATTRIBUTE
+// Grammar: derive_attribute = 'derive' '(' identifier { ',' identifier } ')'
+// ============================================================================
+
+// Single derive
+@derive(Clone)
+type Point is { x: Int, y: Int };
+
+@derive(Debug)
+type DebugOnly is { value: Text };
+
+@derive(Eq)
+type EqOnly is { id: Int };
+
+@derive(Hash)
+type HashOnly is { key: Text };
+
+@derive(Default)
+type DefaultOnly is { count: Int };
+
+@derive(Copy)
+type CopyOnly is { byte: Byte };
+
+@derive(Send)
+type SendOnly is { data: Int };
+
+@derive(Sync)
+type SyncOnly is { shared: Int };
+
+// ============================================================================
+// MULTIPLE DERIVES IN SINGLE ATTRIBUTE
+// ============================================================================
+
+@derive(Clone, Debug)
+type TwoDerive is { a: Int, b: Int };
+
+@derive(Clone, Debug, Eq)
+type ThreeDerive is { x: Int };
+
+@derive(Clone, Debug, Eq, Hash)
+type FourDerive is { key: Text, value: Int };
+
+@derive(Clone, Debug, Eq, Hash, Default)
+type FiveDerive is { name: Text };
+
+@derive(Clone, Copy, Debug, Eq, Hash, Ord, Default)
+type ManyDerive is { small: i8 };
+
+// ============================================================================
+// DERIVE WITH OTHER ATTRIBUTES
+// ============================================================================
+
+@derive(Clone, Debug)
+@repr(C)
+type DeriveWithRepr is { a: i32, b: i32 };
+
+@inline
+@derive(Clone)
+type DeriveWithInline is { value: Int };
+
+@deprecated("Use NewType")
+@derive(Clone, Debug)
+type DeriveWithDeprecated is { old: Text };
+
+@cfg(feature = "serde")
+@derive(Clone, Debug, Serialize, Deserialize)
+type DeriveWithCfg is { data: Text };
+
+@doc("A documented type with derives")
+@derive(Clone, Debug, Eq, Hash)
+type DocumentedDerive is { id: Int };
+
+// ============================================================================
+// DERIVE ON SUM TYPES (VARIANTS)
+// ============================================================================
+
+@derive(Clone, Debug)
+type Option<T> is None | Some(T);
+
+@derive(Clone, Debug, Eq)
+type Result<T, E> is Ok(T) | Err(E);
+
+@derive(Clone, Debug)
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb { r: u8, g: u8, b: u8 };
+
+@derive(Clone, Debug, Eq, Hash)
+type Tree<T> is
+    | Leaf(T)
+    | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+// ============================================================================
+// DERIVE ON TUPLE TYPES
+// ============================================================================
+
+@derive(Clone, Debug)
+type Pair<A, B> is (A, B);
+
+@derive(Clone, Debug, Eq)
+type Triple<A, B, C> is (A, B, C);
+
+@derive(Clone, Copy)
+type IntPair is (Int, Int);
+
+// ============================================================================
+// DERIVE ON NEWTYPE
+// ============================================================================
+
+@derive(Clone, Debug, Eq, Hash)
+type UserId is (Int);
+
+@derive(Clone, Debug, Eq, Ord)
+type Username is (Text);
+
+@derive(Clone, Copy, Debug, Eq, Hash, Ord)
+type Timestamp is (i64);
+
+// ============================================================================
+// DERIVE ON UNIT TYPE
+// ============================================================================
+
+@derive(Clone, Copy, Debug, Eq, Hash, Default)
+type Marker is ();
+
+@derive(Clone, Debug)
+type Signal is ();
+
+// ============================================================================
+// DERIVE ON GENERIC TYPES
+// ============================================================================
+
+@derive(Clone, Debug)
+type Container<T> is { item: T };
+
+@derive(Clone, Debug, Eq)
+type Wrapper<T: Eq> is { inner: T };
+
+@derive(Clone, Debug)
+type KeyValue<K, V> is { key: K, value: V };
+
+@derive(Clone, Debug)
+type MultiGeneric<A, B, C> is { a: A, b: B, c: C };
+
+@derive(Clone)
+type BoundedContainer<T: Clone + Debug> is { data: T };
+
+// ============================================================================
+// DERIVE WITH WHERE CLAUSES
+// ============================================================================
+
+@derive(Clone, Debug)
+type ConstrainedBox<T> is { value: T };
+where type T: Clone + Debug;
+
+@derive(Clone, Eq)
+type EqBox<T> is { value: T };
+where type T: Clone + Eq;
+
+// ============================================================================
+// DERIVE ON RECURSIVE TYPES
+// ============================================================================
+
+@derive(Clone, Debug)
+type LinkedList<T> is
+    | Nil
+    | Cons { head: T, tail: Heap<LinkedList<T>> };
+
+@derive(Clone, Debug)
+type BinaryTree<T> is
+    | Empty
+    | Branch {
+        value: T,
+        left: Heap<BinaryTree<T>>,
+        right: Heap<BinaryTree<T>>
+    };
+
+// ============================================================================
+// DERIVE ON COMPLEX FIELD TYPES
+// ============================================================================
+
+@derive(Clone, Debug)
+type ComplexFields is {
+    list: List<Int>,
+    map: Map<Text, Int>,
+    set: Set<Text>,
+    optional: Maybe<Int>,
+    nested: List<Map<Text, Set<Int>>>
+};
+
+@derive(Clone, Debug, Eq)
+type ReferenceFields is {
+    borrowed: &Int,
+    mutable: &mut Text
+};
+
+// ============================================================================
+// DERIVE WITH FIELD ATTRIBUTES
+// ============================================================================
+
+@derive(Clone, Debug, Serialize)
+type SerializableType is {
+    @serialize(rename = "identifier")
+    id: Int,
+
+    @serialize(skip)
+    @derive(Debug)
+    internal_cache: Map<Text, Int>,
+
+    @serialize(flatten)
+    metadata: Metadata
+};
+
+// ============================================================================
+// PLATFORM-SPECIFIC DERIVES
+// ============================================================================
+
+@derive(Clone, Debug)
+@cfg(target_os = "linux")
+type LinuxSpecific is { fd: i32 };
+
+@derive(Clone, Debug)
+@cfg(target_os = "windows")
+type WindowsSpecific is { handle: usize };
+
+// ============================================================================
+// DERIVE CUSTOM TRAITS
+// ============================================================================
+
+@derive(Clone, Debug, MyCustomTrait)
+type CustomDerived is { value: Int };
+
+@derive(Clone, Debug, Serialize, Deserialize, Validate)
+type FullyDerived is {
+    @validate(min = 1)
+    id: Int,
+    @validate(pattern = """^[a-z]+$""")
+    name: Text
+};
+
+// ============================================================================
+// DERIVE ON ASSOCIATED TYPES IN PROTOCOLS
+// ============================================================================
+
+type Container is protocol {
+    @derive(Clone)
+    type Item;
+
+    fn get(&self) -> Self.Item;
+};
+
+// ============================================================================
+// DERIVE ORDER VARIATIONS (all should parse)
+// ============================================================================
+
+@derive(Debug, Clone)
+type OrderA is { x: Int };
+
+@derive(Eq, Debug, Clone)
+type OrderB is { x: Int };
+
+@derive(Hash, Eq, Debug, Clone)
+type OrderC is { x: Int };
+
+@derive(Default, Hash, Eq, Debug, Clone)
+type OrderD is { x: Int };

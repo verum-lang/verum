@@ -1,0 +1,156 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, records, variants, data-structures
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests record types, nested records, variant types used as data structures,
+// and algorithms operating on structured data.
+
+type Pair is { first: Int, second: Int };
+type Triple is { a: Int, b: Int, c: Int };
+
+// Linked list as variant type
+type IntList is IntListEmpty | IntListCons { head: Int, len: Int };
+
+fn make_pair(a: Int, b: Int) -> Pair {
+    Pair { first: a, second: b }
+}
+
+fn swap_pair(p: Pair) -> Pair {
+    Pair { first: p.second, second: p.first }
+}
+
+fn sum_triple(t: Triple) -> Int {
+    t.a + t.b + t.c
+}
+
+fn test_pairs() {
+    let p = make_pair(10, 20);
+    assert_eq(p.first, 10);
+    assert_eq(p.second, 20);
+
+    let swapped = swap_pair(p);
+    assert_eq(swapped.first, 20);
+    assert_eq(swapped.second, 10);
+
+    // Nested operations
+    let p2 = make_pair(p.first + p.second, p.first * p.second);
+    assert_eq(p2.first, 30);
+    assert_eq(p2.second, 200);
+
+    print("pairs: ok");
+}
+
+fn test_triples() {
+    let t = Triple { a: 3, b: 4, c: 5 };
+    assert_eq(sum_triple(t), 12);
+
+    // Pythagorean check: a² + b² = c²
+    let pyth = t.a * t.a + t.b * t.b == t.c * t.c;
+    assert(pyth);
+
+    let t2 = Triple { a: 5, b: 12, c: 13 };
+    assert_eq(sum_triple(t2), 30);
+    assert(t2.a * t2.a + t2.b * t2.b == t2.c * t2.c);
+
+    print("triples: ok");
+}
+
+fn test_record_mutation() {
+    let mut p = Pair { first: 1, second: 2 };
+    assert_eq(p.first, 1);
+
+    p = Pair { first: p.first + 10, second: p.second + 20 };
+    assert_eq(p.first, 11);
+    assert_eq(p.second, 22);
+
+    // Accumulate
+    let mut i = 0;
+    while i < 5 {
+        p = Pair { first: p.first + 1, second: p.second + 2 };
+        i = i + 1;
+    }
+    assert_eq(p.first, 16);
+    assert_eq(p.second, 32);
+    print("record_mutation: ok");
+}
+
+fn test_variant_list() {
+    // Build a "list" tracking length via IntListCons variant
+    let l0 = IntListEmpty;
+    let l1 = IntListCons { head: 10, len: 1 };
+    let l2 = IntListCons { head: 20, len: 2 };
+    let l3 = IntListCons { head: 30, len: 3 };
+
+    // Check variant matching
+    match l0 {
+        IntListEmpty => {},
+        IntListCons { head: h, len: n } => panic("expected IntListEmpty"),
+    }
+
+    match l3 {
+        IntListEmpty => panic("expected IntListCons"),
+        IntListCons { head: h, len: n } => {
+            assert_eq(h, 30);
+            assert_eq(n, 3);
+        },
+    }
+
+    print("variant_list: ok");
+}
+
+type Matrix2 is { m00: Int, m01: Int, m10: Int, m11: Int };
+
+fn mat_mul(a: Matrix2, b: Matrix2) -> Matrix2 {
+    Matrix2 {
+        m00: a.m00 * b.m00 + a.m01 * b.m10,
+        m01: a.m00 * b.m01 + a.m01 * b.m11,
+        m10: a.m10 * b.m00 + a.m11 * b.m10,
+        m11: a.m10 * b.m01 + a.m11 * b.m11,
+    }
+}
+
+fn mat_det(m: Matrix2) -> Int {
+    m.m00 * m.m11 - m.m01 * m.m10
+}
+
+fn test_matrix_ops() {
+    let identity = Matrix2 { m00: 1, m01: 0, m10: 0, m11: 1 };
+    let a = Matrix2 { m00: 2, m01: 3, m10: 1, m11: 4 };
+
+    // A * I = A
+    let result = mat_mul(a, identity);
+    assert_eq(result.m00, 2);
+    assert_eq(result.m01, 3);
+    assert_eq(result.m10, 1);
+    assert_eq(result.m11, 4);
+
+    // det(A) = 2*4 - 3*1 = 5
+    assert_eq(mat_det(a), 5);
+
+    // A * A
+    let a2 = mat_mul(a, a);
+    // [2 3] * [2 3] = [7  18]
+    // [1 4]   [1 4]   [6  19]
+    assert_eq(a2.m00, 7);
+    assert_eq(a2.m01, 18);
+    assert_eq(a2.m10, 6);
+    assert_eq(a2.m11, 19);
+
+    // det(A²) = det(A)² = 25
+    assert_eq(mat_det(a2), 25);
+
+    print("matrix_ops: ok");
+}
+
+fn main() -> Int {
+    test_pairs();
+    test_triples();
+    test_record_mutation();
+    test_variant_list();
+    test_matrix_ops();
+    print("[OK] 399_interp_data_structures");
+    0
+}

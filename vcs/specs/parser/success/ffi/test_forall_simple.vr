@@ -1,0 +1,13 @@
+// @test: parse-pass
+// @tier: 0
+// @category: ffi
+// @level: L0
+
+type c_int is i32;
+
+ffi Test {
+    @extern("C")
+    fn test(x: c_int) -> bool;
+
+    requires forall i: c_int . true;
+}

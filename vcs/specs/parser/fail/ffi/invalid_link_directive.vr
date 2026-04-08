@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, ffi, link, error
+// @description: Test invalid @link attribute syntax
+// @expected-error: E018
+
+// @link requires library name
+@link(=)
+extern "C" {
+    fn ext_func();
+}

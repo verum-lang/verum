@@ -1,0 +1,283 @@
+// @test: compile-only
+// @tier: 0
+// @level: L2
+// @tags: errors, panic, unrecoverable, abort
+
+/// Unrecoverable errors - situations where recovery is impossible.
+/// Demonstrates when panic is not catchable and program must terminate.
+
+/// Abort vs Panic
+/// - Panic: Unwinds stack, runs destructors, can be caught
+/// - Abort: Immediate termination, no unwinding, cannot be caught
+
+/// Explicit abort - immediate program termination
+fn critical_failure() {
+    // Abort is used when:
+    // 1. Memory corruption detected
+    // 2. Security violation
+    // 3. Double panic
+    // 4. Unrecoverable resource exhaustion
+
+    panic("Critical system failure - cannot continue");
+}
+
+/// Memory corruption detected
+fn check_memory_integrity(ptr: *const u8, expected_magic: u64) {
+    let magic = unsafe { *(ptr as *const u64) };
+    if magic != expected_magic {
+        // Memory corruption - unsafe to unwind
+        panic(f"Memory corruption detected: expected {expected_magic}, got {magic}");
+    }
+}
+
+/// Security boundary violation
+fn security_check(user: &User, resource: &Resource) {
+    if !user.has_permission(resource) {
+        // Log security violation
+        log_security_event(SecurityEvent.UnauthorizedAccess {
+            user_id: user.id,
+            resource_id: resource.id
+        });
+
+        // Abort - don't allow any further code execution
+        panic("Security violation: unauthorized access attempt");
+    }
+}
+
+type User is { id: Int };
+type Resource is { id: Int };
+
+implement User {
+    fn has_permission(&self, resource: &Resource) -> Bool {
+        true // Simplified
+    }
+}
+
+type SecurityEvent is
+    | UnauthorizedAccess { user_id: Int, resource_id: Int };
+
+fn log_security_event(event: SecurityEvent) {
+    // Log to secure audit log
+}
+
+/// Double panic - panic during panic handling
+fn demonstrate_double_panic() {
+    // First panic
+    let _guard = PanicGuard.new();
+
+    // If this panics while PanicGuard is dropping (during unwind),
+    // it becomes a double panic
+    panic("First panic");
+}
+
+type PanicGuard is {};
+
+implement Drop for PanicGuard {
+    fn drop(&mut self) {
+        // If this panics, we have a double panic -> abort
+        if currently_unwinding() {
+            // Don't panic during unwind
+            return;
+        }
+        // Safe to do cleanup
+    }
+}
+
+fn currently_unwinding() -> Bool {
+    // Check if we're currently unwinding due to panic
+    false
+}
+
+/// Stack overflow - cannot be caught
+@allow(unbounded_recursion)
+fn cause_stack_overflow() -> ! {
+    // Infinite recursion leads to stack overflow
+    // This cannot be caught - immediate abort
+    cause_stack_overflow()
+}
+
+/// Out of memory - often unrecoverable
+fn handle_oom() {
+    // Global OOM handler
+    set_oom_handler(|layout| {
+        // Options:
+        // 1. Abort (safest)
+        // 2. Try to free memory and retry
+        // 3. Return null (C-style, unsafe)
+
+        eprint(f"Out of memory: requested {layout.size} bytes");
+        panic("Cannot recover from OOM");
+    });
+}
+
+type Layout is { size: usize };
+
+fn set_oom_handler(handler: fn(Layout)) {
+    // Set global OOM handler
+}
+
+/// Hardware exceptions - signal handlers
+fn setup_signal_handlers() {
+    // SIGSEGV - Segmentation fault
+    signal(SIGSEGV, |_| {
+        // Cannot safely recover from segfault
+        panic("Segmentation fault - memory access violation");
+    });
+
+    // SIGBUS - Bus error
+    signal(SIGBUS, |_| {
+        panic("Bus error - invalid memory access");
+    });
+
+    // SIGFPE - Floating point exception
+    signal(SIGFPE, |_| {
+        panic("Floating point exception");
+    });
+
+    // SIGILL - Illegal instruction
+    signal(SIGILL, |_| {
+        panic("Illegal instruction - possible code corruption");
+    });
+}
+
+const SIGSEGV: i32 = 11;
+const SIGBUS: i32 = 7;
+const SIGFPE: i32 = 8;
+const SIGILL: i32 = 4;
+
+fn signal(sig: i32, handler: fn(i32)) {
+    // Platform signal setup
+}
+
+/// Assertion in release mode (abort instead of panic)
+fn release_assert(condition: Bool, message: &Text) {
+    if !condition {
+        // In release mode, use abort for assertions
+        // This prevents catch_unwind from hiding bugs
+        panic(f"Release assertion failed: {message}");
+    }
+}
+
+/// Unreachable code marker
+fn process_value(v: Value) -> Int {
+    match v {
+        Value.Int(i) => i,
+        Value.Float(f) => f as Int,
+        Value.Bool(b) => if b { 1 } else { 0 },
+        // If this is truly unreachable, use abort
+        _ => unreachable("Invalid value variant")
+    }
+}
+
+type Value is
+    | Int(Int)
+    | Float(Float)
+    | Bool(Bool);
+
+// The unreachable() built-in - abort on impossible code paths
+// unreachable() is a built-in function in Verum (no ! syntax)
+
+/// Compile-time unreachable vs runtime unreachable
+fn compile_time_unreachable(n: Int) -> Int {
+    if n >= 0 {
+        return n;
+    }
+    if n < 0 {
+        return -n;
+    }
+    // Compiler knows this is unreachable
+    // But we add it for safety
+    unreachable("Neither n >= 0 nor n < 0")
+}
+
+/// Invariant violation in unsafe code
+unsafe fn unsafe_operation(ptr: *mut Data) {
+    if ptr.is_null() {
+        // Null pointer in unsafe context - abort
+        panic("Null pointer passed to unsafe_operation");
+    }
+
+    // Check alignment (simplified - cast to Int)
+    if (ptr as Int) % 8 != 0 {
+        panic("Misaligned pointer in unsafe_operation");
+    }
+
+    // Proceed with operation
+    (*ptr).process();
+}
+
+type Data is {};
+implement Data {
+    fn process(&mut self) {}
+}
+
+// Type properties: use T.alignment instead of deprecated align_of<T>()
+
+/// Panic in no_std environment (no unwinding available)
+@cfg(not(feature = "std"))
+fn no_std_panic(msg: &Text) {
+    // In no_std, there's no unwinding infrastructure
+    // All panics become aborts
+    panic(f"{msg}");
+}
+
+/// Custom abort handler
+fn set_abort_handler(handler: fn() -> !) {
+    // Platform-specific abort handler registration
+    // This runs just before process termination
+}
+
+/// Example abort handler that writes crash dump
+fn crash_dump_handler() -> ! {
+    // Write diagnostic information
+    write_crash_dump();
+
+    // Flush logs
+    flush_all_logs();
+
+    // Call original abort
+    core_abort()
+}
+
+fn write_crash_dump() {
+    // Write memory state, stack traces, etc.
+}
+
+fn flush_all_logs() {
+    // Ensure all log buffers are flushed
+}
+
+fn core_abort() -> ! {
+    // Platform abort
+    loop {}
+}
+
+/// Difference between abort behaviors
+fn abort_behaviors() {
+    // std.process.abort() - Immediate termination
+    // - No destructors run
+    // - No catch_unwind
+    // - Core dump may be generated
+
+    // panic() with panic=abort - Configurable via Cargo.toml
+    // - Panic behavior becomes abort
+    // - Still logs panic message
+    // - Runs panic hook
+
+    // unreachable_unchecked() - UB if reached
+    // - No runtime check
+    // - Used for optimization
+    // - ONLY use when compiler can't prove unreachability
+
+    // intrinsics.abort() - Low-level immediate abort
+    // - No cleanup whatsoever
+    // - Used by other abort mechanisms
+}
+
+fn main() {
+    // This file demonstrates unrecoverable scenarios
+    // Running it would terminate the program
+
+    println("Unrecoverable error types demonstrated");
+    println("These scenarios cannot use normal error handling");
+}

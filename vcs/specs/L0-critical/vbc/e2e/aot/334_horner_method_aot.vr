@@ -1,0 +1,279 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, horner, polynomial, evaluation, differentiation
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Horner's method: polynomial evaluation, composition, and differentiation.
+// Polynomials represented as coefficient arrays: p[i] = coefficient of x^i.
+// p(x) = p[0] + p[1]*x + p[2]*x^2 + ... + p[n-1]*x^(n-1)
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn a8_zero(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+// Evaluate polynomial p at x using Horner's method
+// p(x) = p[n-1]*x^(n-1) + ... + p[1]*x + p[0]
+// Horner: ((p[n-1]*x + p[n-2])*x + ...) * x + p[0]
+fn poly_eval(p: Arr8, x: Int) -> Int {
+    let n = p.len;
+    if n == 0 { return 0; }
+    let mut result = a8_get(p, n - 1);
+    let mut i = n - 2;
+    while i >= 0 {
+        result = result * x + a8_get(p, i);
+        i = i - 1;
+    }
+    result
+}
+
+// Naive evaluation for comparison (powers method)
+fn poly_eval_naive(p: Arr8, x: Int) -> Int {
+    let n = p.len;
+    let mut result = 0;
+    let mut power = 1;
+    let mut i = 0;
+    while i < n {
+        result = result + a8_get(p, i) * power;
+        power = power * x;
+        i = i + 1;
+    }
+    result
+}
+
+// Formal derivative: p'(x) where p'[i] = (i+1) * p[i+1]
+fn poly_deriv(p: Arr8) -> Arr8 {
+    let n = p.len;
+    if n <= 1 { return a8_zero(0); }
+    let mut result = a8_zero(n - 1);
+    let mut i = 0;
+    while i < n - 1 {
+        result = a8_set(result, i, (i + 1) * a8_get(p, i + 1));
+        i = i + 1;
+    }
+    result
+}
+
+// Second derivative
+fn poly_deriv2(p: Arr8) -> Arr8 {
+    poly_deriv(poly_deriv(p))
+}
+
+// Polynomial addition: r = p + q
+fn poly_add(p: Arr8, q: Arr8) -> Arr8 {
+    let n = if p.len > q.len { p.len } else { q.len };
+    let mut result = a8_zero(n);
+    let mut i = 0;
+    while i < n {
+        let pv = if i < p.len { a8_get(p, i) } else { 0 };
+        let qv = if i < q.len { a8_get(q, i) } else { 0 };
+        result = a8_set(result, i, pv + qv);
+        i = i + 1;
+    }
+    result
+}
+
+// Polynomial scalar multiply
+fn poly_scale(p: Arr8, c: Int) -> Arr8 {
+    let mut result = a8_zero(p.len);
+    let mut i = 0;
+    while i < p.len {
+        result = a8_set(result, i, a8_get(p, i) * c);
+        i = i + 1;
+    }
+    result
+}
+
+// Polynomial multiplication (convolution), result degree = p.len + q.len - 2
+fn poly_mul(p: Arr8, q: Arr8) -> Arr8 {
+    let rlen = p.len + q.len - 1;
+    let capped = if rlen > 8 { 8 } else { rlen };
+    let mut result = a8_zero(capped);
+    let mut i = 0;
+    while i < p.len {
+        let mut j = 0;
+        while j < q.len {
+            if i + j < capped {
+                let cur = a8_get(result, i + j);
+                result = a8_set(result, i + j, cur + a8_get(p, i) * a8_get(q, j));
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Evaluate derivative at x using Horner's method on derived coefficients
+fn poly_eval_deriv(p: Arr8, x: Int) -> Int {
+    let dp = poly_deriv(p);
+    poly_eval(dp, x)
+}
+
+fn test_basic_eval() {
+    // p(x) = 3 + 2x + 5x^2 (coeffs: [3, 2, 5])
+    let p = Arr8 { a0: 3, a1: 2, a2: 5, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    // p(0) = 3
+    assert_eq(poly_eval(p, 0), 3);
+    // p(1) = 3 + 2 + 5 = 10
+    assert_eq(poly_eval(p, 1), 10);
+    // p(2) = 3 + 4 + 20 = 27
+    assert_eq(poly_eval(p, 2), 27);
+    // p(-1) = 3 - 2 + 5 = 6
+    assert_eq(poly_eval(p, -1), 6);
+    // p(3) = 3 + 6 + 45 = 54
+    assert_eq(poly_eval(p, 3), 54);
+}
+
+fn test_horner_matches_naive() {
+    // p(x) = 1 - 3x + 2x^2 + x^3
+    let p = Arr8 { a0: 1, a1: -3, a2: 2, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let mut x = -3;
+    while x <= 5 {
+        assert_eq(poly_eval(p, x), poly_eval_naive(p, x));
+        x = x + 1;
+    }
+}
+
+fn test_derivative() {
+    // p(x) = 3 + 2x + 5x^2 + x^3
+    // p'(x) = 2 + 10x + 3x^2
+    let p = Arr8 { a0: 3, a1: 2, a2: 5, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let dp = poly_deriv(p);
+    assert_eq(dp.len, 3);
+    assert_eq(a8_get(dp, 0), 2);
+    assert_eq(a8_get(dp, 1), 10);
+    assert_eq(a8_get(dp, 2), 3);
+    // p'(0) = 2
+    assert_eq(poly_eval(dp, 0), 2);
+    // p'(1) = 2 + 10 + 3 = 15
+    assert_eq(poly_eval(dp, 1), 15);
+    // p'(2) = 2 + 20 + 12 = 34
+    assert_eq(poly_eval(dp, 2), 34);
+}
+
+fn test_second_derivative() {
+    // p(x) = 3 + 2x + 5x^2 + x^3
+    // p'(x) = 2 + 10x + 3x^2
+    // p''(x) = 10 + 6x -> coeffs [10, 6], len=2
+    let p = Arr8 { a0: 3, a1: 2, a2: 5, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let d2p = poly_deriv2(p);
+    assert_eq(d2p.len, 2);
+    assert_eq(a8_get(d2p, 0), 10);
+    assert_eq(a8_get(d2p, 1), 6);
+    // p''(0) = 10
+    assert_eq(poly_eval(d2p, 0), 10);
+    // p''(1) = 16
+    assert_eq(poly_eval(d2p, 1), 16);
+}
+
+fn test_polynomial_addition() {
+    // p(x) = 1 + 2x + 3x^2, q(x) = 4 + 5x
+    let p = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let q = Arr8 { a0: 4, a1: 5, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let r = poly_add(p, q);
+    // r(x) = 5 + 7x + 3x^2
+    assert_eq(a8_get(r, 0), 5);
+    assert_eq(a8_get(r, 1), 7);
+    assert_eq(a8_get(r, 2), 3);
+    assert_eq(r.len, 3);
+}
+
+fn test_polynomial_multiply() {
+    // p(x) = 1 + x, q(x) = 1 - x
+    // p*q = 1 - x^2 -> [1, 0, -1]
+    let p = Arr8 { a0: 1, a1: 1, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let q = Arr8 { a0: 1, a1: -1, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let r = poly_mul(p, q);
+    assert_eq(r.len, 3);
+    assert_eq(a8_get(r, 0), 1);
+    assert_eq(a8_get(r, 1), 0);
+    assert_eq(a8_get(r, 2), -1);
+    // Verify: r(3) = 1 - 9 = -8
+    assert_eq(poly_eval(r, 3), -8);
+    // Also verify p(3)*q(3) = 4 * (-2) = -8
+    assert_eq(poly_eval(p, 3) * poly_eval(q, 3), -8);
+}
+
+fn test_product_rule() {
+    // Product rule: (p*q)' = p'*q + p*q'
+    // p(x) = 2 + 3x, q(x) = 1 + x + x^2
+    let p = Arr8 { a0: 2, a1: 3, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let q = Arr8 { a0: 1, a1: 1, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let pq = poly_mul(p, q);
+    let dpq = poly_deriv(pq);
+    let dp = poly_deriv(p);
+    let dq = poly_deriv(q);
+    // p'*q + p*q'
+    let lhs = poly_add(poly_mul(dp, q), poly_mul(p, dq));
+    // Verify at multiple points
+    let mut x = -2;
+    while x <= 4 {
+        assert_eq(poly_eval(dpq, x), poly_eval(lhs, x));
+        x = x + 1;
+    }
+}
+
+fn test_constant_polynomial() {
+    // p(x) = 7 (constant)
+    let p = Arr8 { a0: 7, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 1 };
+    assert_eq(poly_eval(p, 0), 7);
+    assert_eq(poly_eval(p, 100), 7);
+    // Derivative of constant is zero polynomial
+    let dp = poly_deriv(p);
+    assert_eq(dp.len, 0);
+}
+
+fn test_power_polynomial() {
+    // p(x) = x^4 = [0, 0, 0, 0, 1]
+    let p = Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 1, a5: 0, a6: 0, a7: 0, len: 5 };
+    assert_eq(poly_eval(p, 2), 16);
+    assert_eq(poly_eval(p, 3), 81);
+    // p'(x) = 4x^3
+    let dp = poly_deriv(p);
+    assert_eq(poly_eval(dp, 2), 32); // 4*8
+    assert_eq(poly_eval(dp, 3), 108); // 4*27
+}
+
+fn test_scale() {
+    // p(x) = 1 + x + x^2, 3*p(x) = 3 + 3x + 3x^2
+    let p = Arr8 { a0: 1, a1: 1, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let sp = poly_scale(p, 3);
+    assert_eq(poly_eval(sp, 2), 3 * poly_eval(p, 2));
+    assert_eq(poly_eval(sp, 5), 3 * poly_eval(p, 5));
+}
+
+fn main() -> Int {
+    test_basic_eval();
+    test_horner_matches_naive();
+    test_derivative();
+    test_second_derivative();
+    test_polynomial_addition();
+    test_polynomial_multiply();
+    test_product_rule();
+    test_constant_polynomial();
+    test_power_polynomial();
+    test_scale();
+    print("[OK] 334_horner_method_aot");
+    0
+}

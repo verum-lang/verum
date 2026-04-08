@@ -1,0 +1,31 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, aliasing, functions, negative-test
+
+/// Test aliasing violation through function calls.
+/// Passing mutable reference while immutable reference exists causes compile-time error.
+/// Verum detects this at COMPILE-TIME via borrow checking.
+/// Spec: 04-memory-model.md#aliasing-rules
+
+fn read_data(data: &List<Int>) -> Int {
+    let mut total = 0;
+    for item in data {
+        total = total + item;
+    }
+    total
+}
+
+fn modify_data(data: &mut List<Int>) {
+    data.push(100);
+}
+
+fn main() {
+    let mut numbers = [1, 2, 3, 4, 5];
+
+    let sum_ref = &numbers;              // Immutable reference - read epoch capability
+    modify_data(&mut numbers);           // Mutable reference attempt - requires exclusive write
+    // PANIC: epoch violation (sum_ref holds read capability)
+    print(read_data(sum_ref));
+}

@@ -1,0 +1,137 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: implement, multiple-types, methods
+// @description: Test multiple implement blocks for different types
+
+type Vec2D is { x: Int, y: Int };
+type Vec3D is { x: Int, y: Int, z: Int };
+type Circle2 is { cx: Int, cy: Int, radius: Int };
+
+implement Vec2D {
+    fn create(x: Int, y: Int) -> Vec2D {
+        Vec2D { x: x, y: y }
+    }
+
+    fn mag_sq(&self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+
+    fn add_vec(&self, other: Vec2D) -> Vec2D {
+        Vec2D { x: self.x + other.x, y: self.y + other.y }
+    }
+}
+
+implement Vec3D {
+    fn create(x: Int, y: Int, z: Int) -> Vec3D {
+        Vec3D { x: x, y: y, z: z }
+    }
+
+    fn mag_sq(&self) -> Int {
+        self.x * self.x + self.y * self.y + self.z * self.z
+    }
+
+    fn cross(&self, other: Vec3D) -> Vec3D {
+        Vec3D {
+            x: self.y * other.z - self.z * other.y,
+            y: self.z * other.x - self.x * other.z,
+            z: self.x * other.y - self.y * other.x,
+        }
+    }
+}
+
+implement Circle2 {
+    fn create(cx: Int, cy: Int, r: Int) -> Circle2 {
+        Circle2 { cx: cx, cy: cy, radius: r }
+    }
+
+    fn area_approx(&self) -> Int {
+        // pi ≈ 314/100, area = pi * r^2
+        314 * self.radius * self.radius / 100
+    }
+
+    fn circ_approx(&self) -> Int {
+        // circumference ≈ 2 * pi * r ≈ 628 * r / 100
+        628 * self.radius / 100
+    }
+
+    fn contains_point(&self, px: Int, py: Int) -> Bool {
+        let dx = px - self.cx;
+        let dy = py - self.cy;
+        dx * dx + dy * dy <= self.radius * self.radius
+    }
+}
+
+fn test_vec2d() -> Int {
+    let v1 = Vec2D.create(3, 4);
+    let v2 = Vec2D.create(1, 2);
+    let v3 = v1.add_vec(v2);
+
+    if v3.x != 4 || v3.y != 6 {
+        print(f"FAIL vec2d add: ({v3.x}, {v3.y})");
+        return 1;
+    }
+    if v1.mag_sq() != 25 {
+        print(f"FAIL vec2d mag_sq: {v1.mag_sq()}");
+        return 1;
+    }
+    print("  vec2d: OK");
+    0
+}
+
+fn test_vec3d() -> Int {
+    let v1 = Vec3D.create(1, 0, 0);
+    let v2 = Vec3D.create(0, 1, 0);
+    let cross = v1.cross(v2);
+
+    // (1,0,0) × (0,1,0) = (0,0,1)
+    if cross.x != 0 || cross.y != 0 || cross.z != 1 {
+        print(f"FAIL cross: ({cross.x}, {cross.y}, {cross.z})");
+        return 1;
+    }
+
+    let v3 = Vec3D.create(2, 3, 4);
+    if v3.mag_sq() != 29 {
+        print(f"FAIL vec3d mag_sq: {v3.mag_sq()}");
+        return 1;
+    }
+    print("  vec3d: OK");
+    0
+}
+
+fn test_circle() -> Int {
+    let c = Circle2.create(0, 0, 10);
+
+    let area = c.area_approx();
+    // Expected: 314 * 100 / 100 = 314
+    if area != 314 {
+        print(f"FAIL circle area: {area}, expected 314");
+        return 1;
+    }
+
+    if !c.contains_point(3, 4) {
+        print("FAIL: (3,4) should be inside circle r=10");
+        return 1;
+    }
+    if c.contains_point(8, 8) {
+        print("FAIL: (8,8) should be outside circle r=10");
+        return 1;
+    }
+    print("  circle: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Multi-Implement Tests:");
+    let mut failures = 0;
+    failures = failures + test_vec2d();
+    failures = failures + test_vec3d();
+    failures = failures + test_circle();
+
+    if failures == 0 {
+        print("All multi-implement tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

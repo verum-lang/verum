@@ -1,0 +1,194 @@
+// =============================================================================
+// list_select_test.vr - Tests for List select_nth_unstable() method
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, list, selection, partial-sort
+// @description: Tests for List selection algorithm (quickselect)
+// =============================================================================
+
+mount core.collections.list.List;
+mount core.base.ordering.Ordering;
+
+// =============================================================================
+// Section 1: select_nth_unstable basic tests
+// =============================================================================
+
+@test
+fn test_select_nth_median() {
+    let mut list = List.from([3, 1, 4, 1, 5, 9, 2, 6, 5]);
+    let median = list.select_nth_unstable(4);
+    assert_eq(*median, 4); // Sorted: [1, 1, 2, 3, 4, 5, 5, 6, 9]
+}
+
+@test
+fn test_select_nth_minimum() {
+    let mut list = List.from([5, 3, 1, 4, 2]);
+    let min_val = list.select_nth_unstable(0);
+    assert_eq(*min_val, 1);
+}
+
+@test
+fn test_select_nth_maximum() {
+    let mut list = List.from([5, 3, 1, 4, 2]);
+    let max_val = list.select_nth_unstable(4);
+    assert_eq(*max_val, 5);
+}
+
+@test
+fn test_select_nth_single_element() {
+    let mut list = List.from([42]);
+    let val = list.select_nth_unstable(0);
+    assert_eq(*val, 42);
+}
+
+@test
+fn test_select_nth_two_elements() {
+    let mut list = List.from([5, 3]);
+    let first = list.select_nth_unstable(0);
+    assert_eq(*first, 3);
+}
+
+@test
+fn test_select_nth_two_elements_max() {
+    let mut list = List.from([5, 3]);
+    let second = list.select_nth_unstable(1);
+    assert_eq(*second, 5);
+}
+
+@test
+fn test_select_nth_already_sorted() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    let mid = list.select_nth_unstable(2);
+    assert_eq(*mid, 3);
+}
+
+@test
+fn test_select_nth_reverse_sorted() {
+    let mut list = List.from([5, 4, 3, 2, 1]);
+    let mid = list.select_nth_unstable(2);
+    assert_eq(*mid, 3);
+}
+
+@test
+fn test_select_nth_duplicates() {
+    let mut list = List.from([3, 3, 3, 3, 3]);
+    let mid = list.select_nth_unstable(2);
+    assert_eq(*mid, 3);
+}
+
+@test
+fn test_select_nth_with_negatives() {
+    let mut list = List.from([3, -1, 4, -5, 0, 2]);
+    // Sorted: [-5, -1, 0, 2, 3, 4]
+    let val = list.select_nth_unstable(0);
+    assert_eq(*val, -5);
+}
+
+@test
+fn test_select_nth_partitions_correctly() {
+    let mut list = List.from([7, 2, 9, 4, 1, 8, 3, 6, 5]);
+    let pivot = list.select_nth_unstable(4);
+    let pivot_val = *pivot;
+    // Sorted: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert_eq(pivot_val, 5);
+
+    // All elements before index 4 should be <= pivot
+    for i in 0..4 {
+        assert(list[i] <= pivot_val);
+    }
+    // All elements after index 4 should be >= pivot
+    for i in 5..9 {
+        assert(list[i] >= pivot_val);
+    }
+}
+
+// =============================================================================
+// Section 2: select_nth_unstable_by tests
+// =============================================================================
+
+@test
+fn test_select_nth_by_reverse() {
+    let mut list = List.from([1, 2, 3, 4, 5]);
+    // Select nth with reverse comparator — largest first
+    let val = list.select_nth_unstable_by(0, |a, b| b.cmp(a));
+    assert_eq(*val, 5);
+}
+
+@test
+fn test_select_nth_by_custom() {
+    let mut list = List.from([10, 20, 30, 40, 50]);
+    // Select 2nd smallest
+    let val = list.select_nth_unstable_by(1, |a, b| a.cmp(b));
+    assert_eq(*val, 20);
+}
+
+@test
+fn test_select_nth_by_partitions() {
+    let mut list = List.from([9, 1, 8, 2, 7, 3, 6, 4, 5]);
+    let pivot = list.select_nth_unstable_by(3, |a, b| a.cmp(b));
+    let pivot_val = *pivot;
+    // Sorted: [1, 2, 3, 4, 5, 6, 7, 8, 9], index 3 = 4
+    assert_eq(pivot_val, 4);
+}
+
+// =============================================================================
+// Section 3: Practical use cases
+// =============================================================================
+
+@test
+fn test_select_nth_find_kth_smallest() {
+    let mut data = List.from([100, 45, 78, 23, 91, 56, 12, 67, 34, 89]);
+    // Find 3rd smallest (index 2)
+    let third = data.select_nth_unstable(2);
+    // Sorted: [12, 23, 34, 45, 56, 67, 78, 89, 91, 100]
+    assert_eq(*third, 34);
+}
+
+@test
+fn test_select_nth_larger_dataset() {
+    let mut list: List<Int> = List.new();
+    // Build a list of 0..20 in scrambled order
+    let mut i = 0;
+    while i < 20 {
+        list.push((i * 7 + 3) % 20);
+        i = i + 1;
+    }
+
+    // Select the median
+    let mid = list.select_nth_unstable(10);
+    assert_eq(*mid, 10);
+}
+
+@test
+fn test_select_nth_preserves_length() {
+    let mut list = List.from([5, 3, 1, 4, 2]);
+    let _val = list.select_nth_unstable(2);
+    assert_eq(list.len(), 5);
+}
+
+@test
+fn test_select_nth_all_same() {
+    let mut list = List.from([7, 7, 7, 7, 7, 7, 7]);
+    let val = list.select_nth_unstable(3);
+    assert_eq(*val, 7);
+}
+
+@test
+fn test_select_nth_first_index() {
+    let mut list = List.from([10, 20, 30, 40, 50]);
+    let val = list.select_nth_unstable(0);
+    assert_eq(*val, 10);
+}
+
+@test
+fn test_select_nth_last_index() {
+    let mut list = List.from([10, 20, 30, 40, 50]);
+    let val = list.select_nth_unstable(4);
+    assert_eq(*val, 50);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

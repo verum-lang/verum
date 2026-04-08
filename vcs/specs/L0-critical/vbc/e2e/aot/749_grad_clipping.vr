@@ -1,0 +1,160 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, autodiff, grad-clipping, normalization
+// @expected-exit: 0
+
+// Tests gradient clipping and normalization strategies.
+// Verifies L2 norm clipping, value clipping, and gradient scaling.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if (a > b) { a } else { b }
+}
+
+fn min_val(a: Int, b: Int) -> Int {
+    if (a < b) { a } else { b }
+}
+
+// Integer square root (Newton's method)
+fn isqrt(x: Int) -> Int {
+    if (x <= 0) { return 0; }
+    let mut g = x / 2;
+    if (g == 0) { g = 1; }
+    let mut i = 0;
+    while (i < 30) {
+        g = (g + x / g) / 2;
+        i = i + 1;
+    }
+    if ((g + 1) * (g + 1) - x < x - g * g) { g + 1 } else { g }
+}
+
+// Clip value to range [lo, hi]
+fn clip_val(x: Int, lo: Int, hi: Int) -> Int {
+    if (x < lo) { lo } else if (x > hi) { hi } else { x }
+}
+
+// Compute L2 norm squared of a gradient vector
+fn l2_norm_sq(grads: List<Int>, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < n) {
+        sum = sum + grads[i] * grads[i];
+        i = i + 1;
+    }
+    sum
+}
+
+// Scale gradients: grad * scale_num / scale_den
+fn scale_grads(grads: List<Int>, n: Int, scale_num: Int, scale_den: Int) -> List<Int> {
+    let mut result = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        result[i] = grads[i] * scale_num / scale_den;
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: L2 norm computation
+    let grads = [3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let norm_sq = l2_norm_sq(grads, 2);
+    assert_eq(norm_sq, 25);  // 9 + 16 = 25
+    assert_eq(isqrt(norm_sq), 5);
+
+    // Test 2: Gradient clipping by value
+    // Clip each gradient independently to [-2, 2]
+    let big_grads = [10, -15, 1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut clipped = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < 4) {
+        clipped[i] = clip_val(big_grads[i], -2, 2);
+        i = i + 1;
+    }
+    assert_eq(clipped[0], 2);    // 10 → 2
+    assert_eq(clipped[1], -2);   // -15 → -2
+    assert_eq(clipped[2], 1);    // 1 → 1 (no change)
+    assert_eq(clipped[3], -1);   // -1 → -1 (no change)
+
+    // Test 3: Gradient clipping by L2 norm
+    // If ||grad|| > max_norm, scale grad by max_norm / ||grad||
+    let grads3 = [30, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let norm3_sq = l2_norm_sq(grads3, 2);
+    assert_eq(norm3_sq, 2500);  // 900 + 1600
+    let norm3 = isqrt(norm3_sq);
+    assert_eq(norm3, 50);
+
+    let max_norm = 10;
+    // Scale: 10/50 = 1/5
+    let scaled = scale_grads(grads3, 2, max_norm, norm3);
+    assert_eq(scaled[0], 6);   // 30 * 10 / 50 = 6
+    assert_eq(scaled[1], 8);   // 40 * 10 / 50 = 8
+    // New norm: sqrt(36 + 64) = sqrt(100) = 10 ✓
+    let new_norm_sq = l2_norm_sq(scaled, 2);
+    assert_eq(new_norm_sq, 100);
+    assert_eq(isqrt(new_norm_sq), max_norm);
+
+    // Test 4: No clipping needed when norm < max_norm
+    let small_grads = [3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let small_norm = isqrt(l2_norm_sq(small_grads, 2));
+    assert_eq(small_norm, 5);
+    // max_norm = 10, no clipping needed
+    assert(small_norm <= max_norm);
+
+    // Test 5: Gradient scaling preserves direction
+    // After clipping, grad/||grad|| should be same direction
+    // Original direction: (30, 40) → (3, 4) normalized
+    // Clipped: (6, 8) → (3, 4) normalized ✓
+    // Verify: 30 * 8 == 40 * 6 (cross product = 0 means parallel)
+    assert_eq(30 * 8, 40 * 6);  // 240 == 240
+    assert_eq(scaled[0] * 40, scaled[1] * 30);  // 6*40 = 8*30 = 240
+
+    // Test 6: 4D gradient clipping
+    let grads4d = [6, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let norm4d = isqrt(l2_norm_sq(grads4d, 2));
+    assert_eq(norm4d, 10);
+    let max_norm4 = 5;
+    let scaled4d = scale_grads(grads4d, 2, max_norm4, norm4d);
+    assert_eq(scaled4d[0], 3);  // 6 * 5/10 = 3
+    assert_eq(scaled4d[1], 4);  // 8 * 5/10 = 4
+    assert_eq(isqrt(l2_norm_sq(scaled4d, 2)), max_norm4);
+
+    // Test 7: Gradient normalization (scale to unit norm)
+    let unit = scale_grads(grads4d, 2, 1000, norm4d);  // Scaled by 1000
+    // (600, 800) → norm = 1000
+    assert_eq(unit[0], 600);
+    assert_eq(unit[1], 800);
+    assert_eq(isqrt(l2_norm_sq(unit, 2)), 1000);
+
+    // Test 8: Zero gradient edge case
+    let zero_grads = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let zero_norm = isqrt(l2_norm_sq(zero_grads, 2));
+    assert_eq(zero_norm, 0);
+    // Clipping zero gradients should remain zero (no division by zero)
+
+    // Test 9: Gradient explosion detection
+    // If gradient norm exceeds a threshold, it indicates exploding gradients
+    let exploding = [1000, 2000, 3000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let explode_norm_sq = l2_norm_sq(exploding, 3);
+    assert_eq(explode_norm_sq, 14000000);  // 1M + 4M + 9M
+    let threshold_sq = 100 * 100;  // threshold = 100
+    assert(explode_norm_sq > threshold_sq);
+
+    // Test 10: Global gradient norm (aggregate over multiple parameter groups)
+    let param1_grads = [3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let param2_grads = [5, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Global norm = sqrt(sum of all squared gradients)
+    let global_norm_sq = l2_norm_sq(param1_grads, 2) + l2_norm_sq(param2_grads, 2);
+    // = 25 + 169 = 194
+    assert_eq(global_norm_sq, 194);
+    let global_norm = isqrt(global_norm_sq);
+    // sqrt(194) ≈ 13.93, isqrt gives 14
+    assert_eq(global_norm, 14);
+
+    print("Grad clipping: PASS");
+    0
+}

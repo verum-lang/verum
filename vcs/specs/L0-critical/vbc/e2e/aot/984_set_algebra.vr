@@ -1,0 +1,43 @@
+fn main() -> Int {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+
+    // Intersection: {2, 3}
+    let inter = a.intersection(b);
+    print(f"inter.len={inter.len()}");
+    if inter.len() != 2 { return 1; }
+    if !inter.contains(2) { return 1; }
+    if !inter.contains(3) { return 1; }
+
+    // Difference a - b: {1}
+    let diff_ab = a.difference(b);
+    print(f"diff(a-b).len={diff_ab.len()}");
+    if diff_ab.len() != 1 { return 1; }
+    if !diff_ab.contains(1) { return 1; }
+
+    // Difference b - a: {4}
+    let diff_ba = b.difference(a);
+    print(f"diff(b-a).len={diff_ba.len()}");
+    if diff_ba.len() != 1 { return 1; }
+    if !diff_ba.contains(4) { return 1; }
+
+    // Disjoint intersection: empty
+    let mut c = Set.new();
+    c.insert(99);
+    let empty_inter = a.intersection(c);
+    if empty_inter.len() != 0 { return 1; }
+
+    // Self intersection: same size
+    let self_inter = a.intersection(a);
+    if self_inter.len() != 3 { return 1; }
+
+    print("all set algebra tests passed");
+    0
+}

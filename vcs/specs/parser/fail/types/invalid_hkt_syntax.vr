@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, hkt, syntax, error
+// @description: Test detection of malformed higher-kinded type syntax
+// @expected-error: E018
+
+// HKT placeholder must be underscore, not identifier
+fn transform<F<T>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    fa
+}

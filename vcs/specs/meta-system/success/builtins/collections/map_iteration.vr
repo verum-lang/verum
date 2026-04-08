@@ -1,0 +1,121 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, map, iteration
+// @description: Test map iteration operations (map_keys, map_values, map_entries)
+
+// =============================================================================
+// MAP_KEYS TESTS
+// =============================================================================
+
+// Test map_keys on empty map
+meta fn test_map_keys_empty() -> Int {
+    let m = map_new();
+    let keys = map_keys(m);
+    list_len(keys)  // Should be 0
+}
+
+// Test map_keys on map with entries
+meta fn test_map_keys_with_entries() -> Int {
+    let m = map_new();
+    let m = map_insert(m, "a", 1);
+    let m = map_insert(m, "b", 2);
+    let m = map_insert(m, "c", 3);
+    let keys = map_keys(m);
+    list_len(keys)  // Should be 3
+}
+
+// Test map_keys returns keys in sorted order (BTreeMap)
+meta fn test_map_keys_order() -> Maybe<Text> {
+    let m = map_new();
+    let m = map_insert(m, "z", 1);
+    let m = map_insert(m, "a", 2);
+    let m = map_insert(m, "m", 3);
+    let keys = map_keys(m);
+    list_get(keys, 0)  // Should be Some("a") (sorted)
+}
+
+// =============================================================================
+// MAP_VALUES TESTS
+// =============================================================================
+
+// Test map_values on empty map
+meta fn test_map_values_empty() -> Int {
+    let m = map_new();
+    let values = map_values(m);
+    list_len(values)  // Should be 0
+}
+
+// Test map_values on map with entries
+meta fn test_map_values_with_entries() -> Int {
+    let m = map_new();
+    let m = map_insert(m, "x", 10);
+    let m = map_insert(m, "y", 20);
+    let values = map_values(m);
+    list_len(values)  // Should be 2
+}
+
+// =============================================================================
+// MAP_ENTRIES TESTS
+// =============================================================================
+
+// Test map_entries on empty map
+meta fn test_map_entries_empty() -> Int {
+    let m = map_new();
+    let entries = map_entries(m);
+    list_len(entries)  // Should be 0
+}
+
+// Test map_entries on map with entries
+meta fn test_map_entries_with_entries() -> Int {
+    let m = map_new();
+    let m = map_insert(m, "a", 1);
+    let m = map_insert(m, "b", 2);
+    let entries = map_entries(m);
+    list_len(entries)  // Should be 2
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test keys and values count match
+meta fn test_keys_values_count_match() -> Bool {
+    let m = map_new();
+    let m = map_insert(m, "a", 1);
+    let m = map_insert(m, "b", 2);
+    let m = map_insert(m, "c", 3);
+    let keys = map_keys(m);
+    let values = map_values(m);
+    list_len(keys) == list_len(values)  // Should be true
+}
+
+// Test entries count matches keys count
+meta fn test_entries_count_match() -> Bool {
+    let m = map_new();
+    let m = map_insert(m, "x", 10);
+    let m = map_insert(m, "y", 20);
+    let keys = map_keys(m);
+    let entries = map_entries(m);
+    list_len(keys) == list_len(entries)  // Should be true
+}
+
+// Main test function
+fn main() {
+    // keys tests
+    assert_eq(@const(test_map_keys_empty()), 0);
+    assert_eq(@const(test_map_keys_with_entries()), 3);
+    assert_eq(@const(test_map_keys_order()), Some("a"));
+
+    // values tests
+    assert_eq(@const(test_map_values_empty()), 0);
+    assert_eq(@const(test_map_values_with_entries()), 2);
+
+    // entries tests
+    assert_eq(@const(test_map_entries_empty()), 0);
+    assert_eq(@const(test_map_entries_with_entries()), 2);
+
+    // combined tests
+    assert(@const(test_keys_values_count_match()));
+    assert(@const(test_entries_count_match()));
+}

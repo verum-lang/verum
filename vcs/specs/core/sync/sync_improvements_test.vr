@@ -1,0 +1,269 @@
+// =============================================================================
+// sync_improvements_test.vr - Tests for sync module improvements
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: sync, mutex, atomic, core
+// @description: Tests for Mutex.is_locked, AtomicInt fetch_and/or/max/min
+// =============================================================================
+
+mount core.sync.mutex.{Mutex, MutexGuard, LockResult};
+mount core.sync.rwlock.{RwLock, RwLockReadGuard, RwLockWriteGuard};
+mount core.sync.atomic.{AtomicInt, AtomicBool, Ordering};
+mount core.sync.once.{Once, OnceLock};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Mutex.is_locked
+// =============================================================================
+
+@test
+fn test_mutex_is_locked_initially_false() {
+    let m: Mutex<Int> = Mutex.new(42);
+    assert(!m.is_locked());
+}
+
+@test
+fn test_mutex_is_locked_after_lock() {
+    let m: Mutex<Int> = Mutex.new(42);
+    let guard = m.lock().unwrap();
+    assert(m.is_locked());
+}
+
+@test
+fn test_mutex_is_locked_type() {
+    let m: Mutex<Text> = Mutex.new("hello");
+    let result: Bool = m.is_locked();
+    assert(!result);
+}
+
+// =============================================================================
+// Section 3: AtomicInt fetch_and / fetch_or
+// =============================================================================
+
+@test
+fn test_atomic_int_fetch_and() {
+    let a = AtomicInt.new(0b1111);
+    let old = a.fetch_and(0b1010, Ordering.SeqCst);
+    assert_eq(old, 0b1111);
+    assert_eq(a.load(Ordering.SeqCst), 0b1010);
+}
+
+@test
+fn test_atomic_int_fetch_and_zero() {
+    let a = AtomicInt.new(0xFF);
+    let old = a.fetch_and(0, Ordering.SeqCst);
+    assert_eq(old, 0xFF);
+    assert_eq(a.load(Ordering.SeqCst), 0);
+}
+
+@test
+fn test_atomic_int_fetch_or() {
+    let a = AtomicInt.new(0b1010);
+    let old = a.fetch_or(0b0101, Ordering.SeqCst);
+    assert_eq(old, 0b1010);
+    assert_eq(a.load(Ordering.SeqCst), 0b1111);
+}
+
+@test
+fn test_atomic_int_fetch_or_zero() {
+    let a = AtomicInt.new(0);
+    let old = a.fetch_or(42, Ordering.SeqCst);
+    assert_eq(old, 0);
+    assert_eq(a.load(Ordering.SeqCst), 42);
+}
+
+@test
+fn test_atomic_int_fetch_and_or_combined() {
+    let a = AtomicInt.new(0b11001100);
+    a.fetch_and(0b11110000, Ordering.SeqCst);
+    assert_eq(a.load(Ordering.SeqCst), 0b11000000);
+    a.fetch_or(0b00001010, Ordering.SeqCst);
+    assert_eq(a.load(Ordering.SeqCst), 0b11001010);
+}
+
+// =============================================================================
+// Section 4: AtomicInt fetch_max / fetch_min
+// =============================================================================
+
+@test
+fn test_atomic_int_fetch_max_larger() {
+    let a = AtomicInt.new(5);
+    let old = a.fetch_max(10, Ordering.SeqCst);
+    assert_eq(old, 5);
+    assert_eq(a.load(Ordering.SeqCst), 10);
+}
+
+@test
+fn test_atomic_int_fetch_max_smaller() {
+    let a = AtomicInt.new(10);
+    let old = a.fetch_max(5, Ordering.SeqCst);
+    assert_eq(old, 10);
+    assert_eq(a.load(Ordering.SeqCst), 10);
+}
+
+@test
+fn test_atomic_int_fetch_max_equal() {
+    let a = AtomicInt.new(7);
+    let old = a.fetch_max(7, Ordering.SeqCst);
+    assert_eq(old, 7);
+    assert_eq(a.load(Ordering.SeqCst), 7);
+}
+
+@test
+fn test_atomic_int_fetch_min_smaller() {
+    let a = AtomicInt.new(10);
+    let old = a.fetch_min(5, Ordering.SeqCst);
+    assert_eq(old, 10);
+    assert_eq(a.load(Ordering.SeqCst), 5);
+}
+
+@test
+fn test_atomic_int_fetch_min_larger() {
+    let a = AtomicInt.new(5);
+    let old = a.fetch_min(10, Ordering.SeqCst);
+    assert_eq(old, 5);
+    assert_eq(a.load(Ordering.SeqCst), 5);
+}
+
+@test
+fn test_atomic_int_fetch_min_equal() {
+    let a = AtomicInt.new(7);
+    let old = a.fetch_min(7, Ordering.SeqCst);
+    assert_eq(old, 7);
+    assert_eq(a.load(Ordering.SeqCst), 7);
+}
+
+@test
+fn test_atomic_int_fetch_max_negative() {
+    let a = AtomicInt.new(-5);
+    let old = a.fetch_max(3, Ordering.SeqCst);
+    assert_eq(old, -5);
+    assert_eq(a.load(Ordering.SeqCst), 3);
+}
+
+@test
+fn test_atomic_int_fetch_min_negative() {
+    let a = AtomicInt.new(3);
+    let old = a.fetch_min(-5, Ordering.SeqCst);
+    assert_eq(old, 3);
+    assert_eq(a.load(Ordering.SeqCst), -5);
+}
+
+// =============================================================================
+// Section 2: RwLock
+// =============================================================================
+
+@test
+fn test_rwlock_has_debug() {
+    let rw: RwLock<Int> = RwLock.new(42);
+    let guard = rw.try_read();
+    assert(guard.is_ok());
+}
+
+@test
+fn test_rwlock_default_creates() {
+    let rw: RwLock<Int> = RwLock.default();
+    assert(!rw.is_poisoned());
+}
+
+@test
+fn test_rwlock_default_read() {
+    let rw: RwLock<Int> = RwLock.default();
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 0);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 5: OnceLock.get_or_try_init
+// =============================================================================
+
+@test
+fn test_oncelock_get_or_try_init_success() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let result = lock.get_or_try_init(|| Ok(42) as Result<Int, Text>);
+    assert(result.is_ok());
+}
+
+@test
+fn test_oncelock_get_or_try_init_failure() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let result = lock.get_or_try_init(|| Err("init failed") as Result<Int, Text>);
+    assert(result.is_err());
+    assert(!lock.is_initialized());
+}
+
+@test
+fn test_oncelock_get_or_try_init_already_initialized() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    lock.get_or_init(|| 100);
+    let result = lock.get_or_try_init(|| Ok(200) as Result<Int, Text>);
+    assert(result.is_ok());
+}
+
+@test
+fn test_oncelock_get_or_try_init_retry_after_failure() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    let r1 = lock.get_or_try_init(|| Err("fail") as Result<Int, Text>);
+    assert(r1.is_err());
+    let r2 = lock.get_or_try_init(|| Ok(42) as Result<Int, Text>);
+    assert(r2.is_ok());
+}
+
+// =============================================================================
+// Section 6: Existing functionality verification
+// =============================================================================
+
+@test
+fn test_mutex_try_lock_type() {
+    let m: Mutex<Int> = Mutex.new(0);
+    let result = m.try_lock();
+    assert(result.is_ok());
+}
+
+@test
+fn test_rwlock_try_read_type() {
+    let rw: RwLock<Int> = RwLock.new(0);
+    let result = rw.try_read();
+    assert(result.is_ok());
+}
+
+@test
+fn test_rwlock_try_write_type() {
+    let rw: RwLock<Int> = RwLock.new(0);
+    let result = rw.try_write();
+    assert(result.is_ok());
+}
+
+@test
+fn test_atomic_int_basic_ops() {
+    let a = AtomicInt.new(0);
+    a.store(10, Ordering.SeqCst);
+    assert_eq(a.load(Ordering.SeqCst), 10);
+    let old = a.fetch_add(5, Ordering.SeqCst);
+    assert_eq(old, 10);
+    assert_eq(a.load(Ordering.SeqCst), 15);
+}
+
+@test
+fn test_oncelock_basic() {
+    let lock: OnceLock<Int> = OnceLock.new();
+    assert(!lock.is_initialized());
+    lock.get_or_init(|| 42);
+    assert(lock.is_initialized());
+    assert(lock.get().is_some());
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,193 @@
+// @test: run
+// @expected-stdout: Worker started\nWorker done\nResult: 42\nMultiple: [10, 20, 30]\nNamed task completed\nLocal task done\nDetached started
+// @tier: 0
+// @level: L2
+// @tags: async, spawn, task
+// @description: Comprehensive basic task spawning patterns
+
+// Basic async function to spawn
+async fn worker() -> Int {
+    println("Worker started");
+    println("Worker done");
+    42
+}
+
+// Worker with parameter
+async fn compute(x: Int) -> Int {
+    x * 10
+}
+
+// Basic spawn with await
+async fn test_basic_spawn() -> Int {
+    let handle = spawn worker();
+    handle.await
+}
+
+// Spawn multiple tasks
+async fn test_multiple_spawn() -> List<Int> {
+    let h1 = spawn compute(1);
+    let h2 = spawn compute(2);
+    let h3 = spawn compute(3);
+
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+    [r1, r2, r3]
+}
+
+// Spawn with capture
+async fn test_spawn_capture() -> Int {
+    let data = 100;
+
+    let handle = spawn {
+        // Captures 'data' by move (default for spawn)
+        data * 2
+    };
+
+    handle.await
+}
+
+// Spawn with explicit move - move is default for spawn
+async fn test_spawn_move() -> Text {
+    let owned = Text.from("hello");
+
+    let handle = spawn {
+        // Takes ownership of 'owned'
+        f"{owned} world"
+    };
+
+    handle.await
+}
+
+// Named spawn for debugging
+async fn test_named_spawn() {
+    let handle = spawn {
+        println("Named task completed");
+        42
+    };
+
+    handle.await;
+}
+
+// Spawn local (for non-Send futures)
+async fn test_spawn_local() {
+    let handle = spawn {
+        println("Local task done");
+        42
+    };
+
+    handle.await;
+}
+
+// Spawn detached (fire and forget)
+async fn test_spawn_detached() {
+    spawn {
+        println("Detached started");
+    };
+
+    // Give it time to print
+    sleep(Duration.from_millis(10)).await;
+}
+
+// Spawn returning Result
+async fn test_spawn_result() -> Result<Int, Error> {
+    let handle = spawn {
+        let value = risky_operation().await;
+        Ok(value * 2)
+    };
+
+    match handle.await {
+        Ok(result) => result,
+        Err(_) => Err(Error.new("spawn overflow")),
+    }
+}
+
+async fn risky_operation() -> Result<Int, Error> {
+    Ok(21)
+}
+
+// Spawn in a loop
+async fn test_spawn_loop() -> Int {
+    let mut handles = [];
+
+    for i in 1..=5 {
+        let h = spawn compute(i);
+        handles.push(h);
+    }
+
+    let mut sum = 0;
+    for handle in handles {
+        sum += handle.await;
+    }
+
+    sum
+}
+
+// Spawn with async block
+async fn test_spawn_async_block() -> Int {
+    let handle = spawn {
+        let a = compute(1).await;
+        let b = compute(2).await;
+        a + b
+    };
+
+    handle.await
+}
+
+// Spawn blocking (for CPU-bound work)
+async fn test_spawn_blocking() -> Int {
+    let handle = spawn {
+        heavy_computation()
+    };
+
+    handle.await
+}
+
+fn heavy_computation() -> Int {
+    let mut sum = 0;
+    for i in 0..1000 {
+        sum += i;
+    }
+    sum
+}
+
+// Structured concurrency with scope
+async fn test_spawn_scope() -> List<Int> {
+    let h1 = spawn compute(1);
+    let h2 = spawn compute(2);
+    let h3 = spawn compute(3);
+
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+
+    [r1, r2, r3]
+}
+
+// JoinHandle methods
+async fn test_join_handle_methods() {
+    let handle = spawn compute(5);
+
+    // Await result
+    let result = handle.await;
+    println(f"Result: {result}");
+}
+
+async fn main() {
+    // Basic spawn
+    let result = test_basic_spawn().await;
+    println(f"Result: {result}");
+
+    // Multiple spawn
+    let results = test_multiple_spawn().await;
+    println(f"Multiple: {results}");
+
+    // Named spawn
+    test_named_spawn().await;
+
+    // Spawn local
+    test_spawn_local().await;
+
+    // Spawn detached
+    test_spawn_detached().await;
+}

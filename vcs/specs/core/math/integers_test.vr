@@ -1,0 +1,888 @@
+// =============================================================================
+// integers_test.vr - Tests for integer operations and number theory
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, integers, gcd, lcm, factorial, division, core
+// @description: Tests for integer division modes, GCD, LCM, factorial, binomial, primality
+// =============================================================================
+
+mount core.math.integers.{
+    DivMode,
+    div_floor, div_ceiling, div_euclidean,
+    mod_euclidean, mod_floor, div, divmod,
+    gcd, gcd_binary, lcm, gcd_extended,
+    mod_inverse, pow_mod,
+    is_prime, is_prime_miller_rabin, next_prime,
+    isqrt, icbrt,
+    factorial, binomial, falling_factorial, rising_factorial,
+};
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: DivMode Variants
+// =============================================================================
+
+@test
+fn test_div_mode_truncate() {
+    let mode: DivMode = DivMode.Truncate;
+    assert(mode is DivMode.Truncate);
+}
+
+@test
+fn test_div_mode_floor() {
+    let mode: DivMode = DivMode.Floor;
+    assert(mode is DivMode.Floor);
+}
+
+@test
+fn test_div_mode_ceiling() {
+    let mode: DivMode = DivMode.Ceiling;
+    assert(mode is DivMode.Ceiling);
+}
+
+@test
+fn test_div_mode_euclidean() {
+    let mode: DivMode = DivMode.Euclidean;
+    assert(mode is DivMode.Euclidean);
+}
+
+// =============================================================================
+// Section 2: Division Operations - Positive Numbers
+// =============================================================================
+
+@test
+fn test_div_floor_positive() {
+    // 7 / 3 = 2.33... → floor = 2
+    assert_eq(div_floor(7, 3), 2);
+    assert_eq(div_floor(9, 3), 3);
+    assert_eq(div_floor(10, 3), 3);
+}
+
+@test
+fn test_div_ceiling_positive() {
+    // 7 / 3 = 2.33... → ceiling = 3
+    assert_eq(div_ceiling(7, 3), 3);
+    assert_eq(div_ceiling(9, 3), 3);
+    assert_eq(div_ceiling(10, 3), 4);
+}
+
+@test
+fn test_div_euclidean_positive() {
+    assert_eq(div_euclidean(7, 3), 2);
+    assert_eq(div_euclidean(9, 3), 3);
+    assert_eq(div_euclidean(10, 3), 3);
+}
+
+// =============================================================================
+// Section 3: Division Operations - Negative Numbers
+// =============================================================================
+
+@test
+fn test_div_floor_negative() {
+    // -7 / 3 = -2.33... → floor = -3
+    assert_eq(div_floor(-7, 3), -3);
+    // 7 / -3 = -2.33... → floor = -3
+    assert_eq(div_floor(7, -3), -3);
+    // -7 / -3 = 2.33... → floor = 2
+    assert_eq(div_floor(-7, -3), 2);
+}
+
+@test
+fn test_div_ceiling_negative() {
+    // -7 / 3 = -2.33... → ceiling = -2
+    assert_eq(div_ceiling(-7, 3), -2);
+    // 7 / -3 = -2.33... → ceiling = -2
+    assert_eq(div_ceiling(7, -3), -2);
+    // -7 / -3 = 2.33... → ceiling = 3
+    assert_eq(div_ceiling(-7, -3), 3);
+}
+
+@test
+fn test_div_euclidean_negative() {
+    // Euclidean: remainder is always non-negative
+    assert_eq(div_euclidean(-7, 3), -3);
+    assert_eq(div_euclidean(7, -3), -2);
+    assert_eq(div_euclidean(-7, -3), 3);
+}
+
+// =============================================================================
+// Section 4: Modulo Operations
+// =============================================================================
+
+@test
+fn test_mod_euclidean_positive() {
+    assert_eq(mod_euclidean(7, 3), 1);
+    assert_eq(mod_euclidean(9, 3), 0);
+    assert_eq(mod_euclidean(10, 3), 1);
+}
+
+@test
+fn test_mod_euclidean_negative() {
+    // Euclidean mod always returns non-negative
+    assert_eq(mod_euclidean(-7, 3), 2);
+    assert_eq(mod_euclidean(7, -3), 1);
+    assert_eq(mod_euclidean(-7, -3), 2);
+}
+
+@test
+fn test_mod_floor_positive() {
+    assert_eq(mod_floor(7, 3), 1);
+    assert_eq(mod_floor(9, 3), 0);
+}
+
+@test
+fn test_mod_floor_negative() {
+    // Floor mod has same sign as divisor
+    assert_eq(mod_floor(-7, 3), 2);
+    assert_eq(mod_floor(7, -3), -2);
+}
+
+// =============================================================================
+// Section 5: Generic Division with Mode
+// =============================================================================
+
+@test
+fn test_div_with_mode() {
+    assert_eq(div(7, 3, DivMode.Truncate), 2);
+    assert_eq(div(7, 3, DivMode.Floor), 2);
+    assert_eq(div(7, 3, DivMode.Ceiling), 3);
+    assert_eq(div(7, 3, DivMode.Euclidean), 2);
+
+    assert_eq(div(-7, 3, DivMode.Truncate), -2);
+    assert_eq(div(-7, 3, DivMode.Floor), -3);
+    assert_eq(div(-7, 3, DivMode.Ceiling), -2);
+    assert_eq(div(-7, 3, DivMode.Euclidean), -3);
+}
+
+@test
+fn test_divmod() {
+    let (q, r) = divmod(7, 3);
+    assert_eq(q, 2);
+    assert_eq(r, 1);
+
+    let (q2, r2) = divmod(-7, 3);
+    assert_eq(q2, -3);
+    assert_eq(r2, 2);  // Euclidean: non-negative remainder
+}
+
+// =============================================================================
+// Section 6: GCD (Greatest Common Divisor)
+// =============================================================================
+
+@test
+fn test_gcd_positive() {
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(48, 18), 6);
+    assert_eq(gcd(17, 13), 1);  // Coprime
+    assert_eq(gcd(100, 25), 25);
+}
+
+@test
+fn test_gcd_with_zero() {
+    assert_eq(gcd(5, 0), 5);
+    assert_eq(gcd(0, 5), 5);
+    assert_eq(gcd(0, 0), 0);
+}
+
+@test
+fn test_gcd_negative() {
+    // GCD is always non-negative
+    assert_eq(gcd(-12, 8), 4);
+    assert_eq(gcd(12, -8), 4);
+    assert_eq(gcd(-12, -8), 4);
+}
+
+@test
+fn test_gcd_same_number() {
+    assert_eq(gcd(7, 7), 7);
+    assert_eq(gcd(1, 1), 1);
+}
+
+// =============================================================================
+// Section 7: LCM (Least Common Multiple)
+// =============================================================================
+
+@test
+fn test_lcm_positive() {
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(3, 5), 15);
+    assert_eq(lcm(12, 18), 36);
+}
+
+@test
+fn test_lcm_with_zero() {
+    assert_eq(lcm(0, 5), 0);
+    assert_eq(lcm(5, 0), 0);
+    assert_eq(lcm(0, 0), 0);
+}
+
+@test
+fn test_lcm_negative() {
+    // LCM is always non-negative
+    assert_eq(lcm(-4, 6), 12);
+    assert_eq(lcm(4, -6), 12);
+}
+
+@test
+fn test_lcm_coprime() {
+    // LCM of coprime numbers is their product
+    assert_eq(lcm(7, 11), 77);
+}
+
+// =============================================================================
+// Section 8: Extended GCD
+// =============================================================================
+
+@test
+fn test_gcd_extended_basic() {
+    let (g, x, y) = gcd_extended(12, 8);
+    assert_eq(g, 4);
+    // Verify: 12*x + 8*y = 4
+    assert_eq(12 * x + 8 * y, 4);
+}
+
+@test
+fn test_gcd_extended_coprime() {
+    let (g, x, y) = gcd_extended(17, 13);
+    assert_eq(g, 1);
+    assert_eq(17 * x + 13 * y, 1);
+}
+
+// =============================================================================
+// Section 9: Modular Exponentiation
+// =============================================================================
+
+@test
+fn test_pow_mod_basic() {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    assert_eq(pow_mod(2, 10, 1000), 24);
+    // 3^4 mod 5 = 81 mod 5 = 1
+    assert_eq(pow_mod(3, 4, 5), 1);
+}
+
+@test
+fn test_pow_mod_zero_exp() {
+    // x^0 mod m = 1 (for m > 1)
+    assert_eq(pow_mod(5, 0, 7), 1);
+}
+
+@test
+fn test_pow_mod_one() {
+    // x mod 1 = 0
+    assert_eq(pow_mod(5, 3, 1), 0);
+}
+
+@test
+fn test_pow_mod_large() {
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p) for prime p
+    assert_eq(pow_mod(2, 6, 7), 1);  // 2^6 mod 7 = 64 mod 7 = 1
+}
+
+// =============================================================================
+// Section 10: Primality Testing
+// =============================================================================
+
+@test
+fn test_is_prime_small() {
+    assert(!is_prime(0));
+    assert(!is_prime(1));
+    assert(is_prime(2));
+    assert(is_prime(3));
+    assert(!is_prime(4));
+    assert(is_prime(5));
+    assert(!is_prime(6));
+    assert(is_prime(7));
+}
+
+@test
+fn test_is_prime_medium() {
+    assert(is_prime(11));
+    assert(is_prime(13));
+    assert(is_prime(17));
+    assert(is_prime(19));
+    assert(is_prime(23));
+    assert(!is_prime(15));
+    assert(!is_prime(21));
+    assert(!is_prime(25));
+}
+
+@test
+fn test_is_prime_larger() {
+    assert(is_prime(97));
+    assert(is_prime(101));
+    assert(!is_prime(100));
+    assert(!is_prime(99));
+}
+
+@test
+fn test_next_prime() {
+    assert_eq(next_prime(1), 2);
+    assert_eq(next_prime(2), 2);
+    assert_eq(next_prime(3), 3);
+    assert_eq(next_prime(4), 5);
+    assert_eq(next_prime(10), 11);
+    assert_eq(next_prime(14), 17);
+}
+
+// =============================================================================
+// Section 11: Integer Square Root
+// =============================================================================
+
+@test
+fn test_isqrt_perfect_squares() {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(25), 5);
+    assert_eq(isqrt(100), 10);
+}
+
+@test
+fn test_isqrt_non_perfect() {
+    // Returns floor of sqrt
+    assert_eq(isqrt(2), 1);
+    assert_eq(isqrt(3), 1);
+    assert_eq(isqrt(5), 2);
+    assert_eq(isqrt(8), 2);
+    assert_eq(isqrt(10), 3);
+    assert_eq(isqrt(15), 3);
+    assert_eq(isqrt(99), 9);
+}
+
+// =============================================================================
+// Section 12: Integer Cube Root
+// =============================================================================
+
+@test
+fn test_icbrt_perfect_cubes() {
+    assert_eq(icbrt(0), 0);
+    assert_eq(icbrt(1), 1);
+    assert_eq(icbrt(8), 2);
+    assert_eq(icbrt(27), 3);
+    assert_eq(icbrt(64), 4);
+    assert_eq(icbrt(125), 5);
+}
+
+@test
+fn test_icbrt_negative() {
+    assert_eq(icbrt(-1), -1);
+    assert_eq(icbrt(-8), -2);
+    assert_eq(icbrt(-27), -3);
+}
+
+@test
+fn test_icbrt_non_perfect() {
+    assert_eq(icbrt(2), 1);
+    assert_eq(icbrt(7), 1);
+    assert_eq(icbrt(9), 2);
+    assert_eq(icbrt(26), 2);
+}
+
+// =============================================================================
+// Section 13: Factorial
+// =============================================================================
+
+@test
+fn test_factorial_small() {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(2), 2);
+    assert_eq(factorial(3), 6);
+    assert_eq(factorial(4), 24);
+    assert_eq(factorial(5), 120);
+}
+
+@test
+fn test_factorial_larger() {
+    assert_eq(factorial(10), 3628800);
+    assert_eq(factorial(12), 479001600);
+}
+
+// =============================================================================
+// Section 14: Binomial Coefficients
+// =============================================================================
+
+@test
+fn test_binomial_basic() {
+    // C(n, 0) = 1
+    assert_eq(binomial(5, 0), 1);
+    // C(n, n) = 1
+    assert_eq(binomial(5, 5), 1);
+    // C(n, 1) = n
+    assert_eq(binomial(5, 1), 5);
+}
+
+@test
+fn test_binomial_pascal() {
+    // Pascal's triangle
+    assert_eq(binomial(4, 2), 6);
+    assert_eq(binomial(5, 2), 10);
+    assert_eq(binomial(6, 3), 20);
+    assert_eq(binomial(10, 5), 252);
+}
+
+@test
+fn test_binomial_symmetry() {
+    // C(n, k) = C(n, n-k)
+    assert_eq(binomial(7, 2), binomial(7, 5));
+    assert_eq(binomial(10, 3), binomial(10, 7));
+}
+
+@test
+fn test_binomial_out_of_range() {
+    assert_eq(binomial(5, -1), 0);
+    assert_eq(binomial(5, 6), 0);
+}
+
+// =============================================================================
+// Section 15: Falling/Rising Factorial
+// =============================================================================
+
+@test
+fn test_falling_factorial() {
+    // (5)_3 = 5 * 4 * 3 = 60
+    assert_eq(falling_factorial(5, 3), 60);
+    // (n)_0 = 1
+    assert_eq(falling_factorial(5, 0), 1);
+    // (n)_1 = n
+    assert_eq(falling_factorial(5, 1), 5);
+}
+
+@test
+fn test_rising_factorial() {
+    // 5^(3) = 5 * 6 * 7 = 210
+    assert_eq(rising_factorial(5, 3), 210);
+    // n^(0) = 1
+    assert_eq(rising_factorial(5, 0), 1);
+    // n^(1) = n
+    assert_eq(rising_factorial(5, 1), 5);
+}
+
+// =============================================================================
+// Section 16: Binary GCD (Stein's Algorithm)
+// =============================================================================
+
+@test
+fn test_gcd_binary_basic() {
+    assert_eq(gcd_binary(12, 8), 4);
+    assert_eq(gcd_binary(48, 18), 6);
+    assert_eq(gcd_binary(17, 13), 1);
+    assert_eq(gcd_binary(100, 25), 25);
+}
+
+@test
+fn test_gcd_binary_with_zero() {
+    assert_eq(gcd_binary(5, 0), 5);
+    assert_eq(gcd_binary(0, 5), 5);
+    assert_eq(gcd_binary(0, 0), 0);
+}
+
+@test
+fn test_gcd_binary_negative() {
+    assert_eq(gcd_binary(-12, 8), 4);
+    assert_eq(gcd_binary(12, -8), 4);
+    assert_eq(gcd_binary(-12, -8), 4);
+}
+
+@test
+fn test_gcd_binary_matches_gcd() {
+    // Binary GCD must produce the same result as Euclidean GCD
+    assert_eq(gcd_binary(12, 8), gcd(12, 8));
+    assert_eq(gcd_binary(48, 18), gcd(48, 18));
+    assert_eq(gcd_binary(17, 13), gcd(17, 13));
+    assert_eq(gcd_binary(100, 25), gcd(100, 25));
+    assert_eq(gcd_binary(7, 7), gcd(7, 7));
+    assert_eq(gcd_binary(1, 1), gcd(1, 1));
+}
+
+// =============================================================================
+// Section 17: Modular Inverse
+// =============================================================================
+
+@test
+fn test_mod_inverse_exists() {
+    // 3 * 5 = 15 = 1 mod 7
+    let inv = mod_inverse(3, 7);
+    assert(inv is Some);
+}
+
+@test
+fn test_mod_inverse_value() {
+    // mod_inverse(3, 7) should be Some(5) since 3*5 = 15 ≡ 1 (mod 7)
+    let inv = mod_inverse(3, 7);
+    assert_eq(inv, Some(5));
+}
+
+@test
+fn test_mod_inverse_not_coprime() {
+    // gcd(2, 6) = 2 ≠ 1, so no inverse
+    let inv = mod_inverse(2, 6);
+    assert(inv is None);
+}
+
+@test
+fn test_mod_inverse_one() {
+    // 1 is always its own inverse: 1*1 ≡ 1 (mod n)
+    assert_eq(mod_inverse(1, 5), Some(1));
+    assert_eq(mod_inverse(1, 13), Some(1));
+}
+
+@test
+fn test_mod_inverse_larger() {
+    // 7 * 8 = 56 ≡ 1 (mod 11) since 56 = 5*11 + 1
+    let inv = mod_inverse(7, 11);
+    assert_eq(inv, Some(8));
+}
+
+// =============================================================================
+// Section 18: Miller-Rabin Primality Test
+// =============================================================================
+
+@test
+fn test_is_prime_miller_rabin_small_primes() {
+    assert(is_prime_miller_rabin(2));
+    assert(is_prime_miller_rabin(3));
+    assert(is_prime_miller_rabin(5));
+    assert(is_prime_miller_rabin(7));
+    assert(is_prime_miller_rabin(11));
+    assert(is_prime_miller_rabin(13));
+}
+
+@test
+fn test_is_prime_miller_rabin_composites() {
+    assert(!is_prime_miller_rabin(4));
+    assert(!is_prime_miller_rabin(9));
+    assert(!is_prime_miller_rabin(15));
+    assert(!is_prime_miller_rabin(21));
+    assert(!is_prime_miller_rabin(25));
+}
+
+@test
+fn test_is_prime_miller_rabin_matches_trial_division() {
+    // Miller-Rabin should agree with trial division for small values
+    assert_eq(is_prime_miller_rabin(97), is_prime(97));
+    assert_eq(is_prime_miller_rabin(101), is_prime(101));
+    assert_eq(is_prime_miller_rabin(100), is_prime(100));
+    assert_eq(is_prime_miller_rabin(99), is_prime(99));
+}
+
+// =============================================================================
+// Section 19: DivMode Exhaustive / Distinctness
+// =============================================================================
+
+@test
+fn test_div_mode_distinctness() {
+    let t = DivMode.Truncate;
+    let f = DivMode.Floor;
+    let c = DivMode.Ceiling;
+    let e = DivMode.Euclidean;
+
+    // Each variant is only its own kind
+    assert(t is DivMode.Truncate);
+    assert(!(t is DivMode.Floor));
+    assert(!(t is DivMode.Ceiling));
+    assert(!(t is DivMode.Euclidean));
+
+    assert(f is DivMode.Floor);
+    assert(!(f is DivMode.Truncate));
+
+    assert(c is DivMode.Ceiling);
+    assert(!(c is DivMode.Truncate));
+
+    assert(e is DivMode.Euclidean);
+    assert(!(e is DivMode.Truncate));
+}
+
+@test
+fn test_div_all_modes_differ_for_negative() {
+    // For -7 / 3, the four modes give different results:
+    // Truncate = -2, Floor = -3, Ceiling = -2, Euclidean = -3
+    // (Truncate and Ceiling agree here, Floor and Euclidean agree)
+    let t = div(-7, 3, DivMode.Truncate);
+    let f = div(-7, 3, DivMode.Floor);
+    let c = div(-7, 3, DivMode.Ceiling);
+    let e = div(-7, 3, DivMode.Euclidean);
+
+    assert_eq(t, -2);
+    assert_eq(f, -3);
+    assert_eq(c, -2);
+    assert_eq(e, -3);
+}
+
+// =============================================================================
+// Section 20: Division Edge Cases
+// =============================================================================
+
+@test
+fn test_div_by_one() {
+    // Dividing by 1 returns the dividend in all modes
+    assert_eq(div_floor(42, 1), 42);
+    assert_eq(div_ceiling(42, 1), 42);
+    assert_eq(div_euclidean(42, 1), 42);
+    assert_eq(div_floor(-42, 1), -42);
+    assert_eq(div_ceiling(-42, 1), -42);
+    assert_eq(div_euclidean(-42, 1), -42);
+}
+
+@test
+fn test_div_exact() {
+    // When division is exact, all modes agree
+    assert_eq(div_floor(12, 4), 3);
+    assert_eq(div_ceiling(12, 4), 3);
+    assert_eq(div_euclidean(12, 4), 3);
+}
+
+@test
+fn test_divmod_exact() {
+    // When division is exact, remainder is 0
+    let (q, r) = divmod(12, 4);
+    assert_eq(q, 3);
+    assert_eq(r, 0);
+}
+
+@test
+fn test_mod_euclidean_by_one() {
+    // Any number mod 1 = 0
+    assert_eq(mod_euclidean(42, 1), 0);
+    assert_eq(mod_euclidean(-42, 1), 0);
+    assert_eq(mod_euclidean(0, 1), 0);
+}
+
+// =============================================================================
+// Section 21: GCD/LCM Relationship
+// =============================================================================
+
+@test
+fn test_gcd_lcm_relationship() {
+    // gcd(a,b) * lcm(a,b) = |a * b| for non-zero a, b
+    let a = 12;
+    let b = 8;
+    assert_eq(gcd(a, b) * lcm(a, b), a * b);
+
+    let c = 15;
+    let d = 20;
+    assert_eq(gcd(c, d) * lcm(c, d), c * d);
+
+    let e = 7;
+    let f = 11;
+    assert_eq(gcd(e, f) * lcm(e, f), e * f);
+}
+
+@test
+fn test_gcd_commutative() {
+    assert_eq(gcd(12, 8), gcd(8, 12));
+    assert_eq(gcd(48, 18), gcd(18, 48));
+    assert_eq(gcd(7, 11), gcd(11, 7));
+}
+
+@test
+fn test_lcm_commutative() {
+    assert_eq(lcm(4, 6), lcm(6, 4));
+    assert_eq(lcm(12, 18), lcm(18, 12));
+    assert_eq(lcm(7, 11), lcm(11, 7));
+}
+
+// =============================================================================
+// Section 22: Extended GCD Additional Cases
+// =============================================================================
+
+@test
+fn test_gcd_extended_35_15() {
+    let (g, x, y) = gcd_extended(35, 15);
+    assert_eq(g, 5);
+    assert_eq(35 * x + 15 * y, 5);
+}
+
+@test
+fn test_gcd_extended_with_zero() {
+    let (g, x, y) = gcd_extended(7, 0);
+    assert_eq(g, 7);
+    assert_eq(7 * x + 0 * y, 7);
+}
+
+@test
+fn test_gcd_extended_negative() {
+    let (g, x, y) = gcd_extended(-12, 8);
+    assert_eq(g, 4);
+    assert_eq(-12 * x + 8 * y, 4);
+}
+
+// =============================================================================
+// Section 23: More pow_mod and Fermat's Little Theorem
+// =============================================================================
+
+@test
+fn test_pow_mod_more() {
+    // 7^2 mod 11 = 49 mod 11 = 5
+    assert_eq(pow_mod(7, 2, 11), 5);
+    // 5^3 mod 13 = 125 mod 13 = 8
+    assert_eq(pow_mod(5, 3, 13), 8);
+}
+
+@test
+fn test_pow_mod_fermat_little() {
+    // Fermat's little: a^(p-1) ≡ 1 (mod p) for prime p, gcd(a,p)=1
+    assert_eq(pow_mod(3, 10, 11), 1);  // 3^10 mod 11
+    assert_eq(pow_mod(5, 12, 13), 1);  // 5^12 mod 13
+    assert_eq(pow_mod(7, 16, 17), 1);  // 7^16 mod 17
+}
+
+@test
+fn test_pow_mod_base_one() {
+    // 1^n mod m = 1 (for m > 1)
+    assert_eq(pow_mod(1, 100, 7), 1);
+    assert_eq(pow_mod(1, 0, 7), 1);
+}
+
+// =============================================================================
+// Section 24: Primality Edge Cases
+// =============================================================================
+
+@test
+fn test_is_prime_negative() {
+    assert(!is_prime(-1));
+    assert(!is_prime(-7));
+    assert(!is_prime(-13));
+}
+
+@test
+fn test_is_prime_two_is_smallest() {
+    // 2 is the smallest and only even prime
+    assert(is_prime(2));
+    assert(!is_prime(4));
+    assert(!is_prime(6));
+    assert(!is_prime(8));
+}
+
+// =============================================================================
+// Section 25: next_prime Edge Cases
+// =============================================================================
+
+@test
+fn test_next_prime_already_prime() {
+    // When n is already prime, next_prime returns n
+    assert_eq(next_prime(97), 97);
+    assert_eq(next_prime(101), 101);
+    assert_eq(next_prime(7), 7);
+}
+
+@test
+fn test_next_prime_zero_and_one() {
+    assert_eq(next_prime(0), 2);
+    assert_eq(next_prime(1), 2);
+}
+
+@test
+fn test_next_prime_after_gap() {
+    // After 113 the next prime is 127 (gap of 14)
+    assert_eq(next_prime(114), 127);
+}
+
+// =============================================================================
+// Section 26: Factorial Additional Cases
+// =============================================================================
+
+@test
+fn test_factorial_six_seven() {
+    assert_eq(factorial(6), 720);
+    assert_eq(factorial(7), 5040);
+    assert_eq(factorial(8), 40320);
+}
+
+// =============================================================================
+// Section 27: Binomial Additional Cases
+// =============================================================================
+
+@test
+fn test_binomial_pascal_rule() {
+    // Pascal's rule: C(n, k) = C(n-1, k-1) + C(n-1, k)
+    assert_eq(binomial(6, 2), binomial(5, 1) + binomial(5, 2));
+    assert_eq(binomial(8, 3), binomial(7, 2) + binomial(7, 3));
+    assert_eq(binomial(10, 4), binomial(9, 3) + binomial(9, 4));
+}
+
+@test
+fn test_binomial_zero_zero() {
+    assert_eq(binomial(0, 0), 1);
+}
+
+@test
+fn test_binomial_row_sum() {
+    // Sum of C(n, k) for k = 0..n equals 2^n
+    // C(4,0) + C(4,1) + C(4,2) + C(4,3) + C(4,4) = 1 + 4 + 6 + 4 + 1 = 16 = 2^4
+    let sum = binomial(4, 0) + binomial(4, 1) + binomial(4, 2) + binomial(4, 3) + binomial(4, 4);
+    assert_eq(sum, 16);
+}
+
+// =============================================================================
+// Section 28: Falling/Rising Factorial Extended
+// =============================================================================
+
+@test
+fn test_falling_factorial_larger() {
+    // (10)_3 = 10 * 9 * 8 = 720
+    assert_eq(falling_factorial(10, 3), 720);
+    // (7)_4 = 7 * 6 * 5 * 4 = 840
+    assert_eq(falling_factorial(7, 4), 840);
+}
+
+@test
+fn test_rising_factorial_larger() {
+    // 1^(5) = 1 * 2 * 3 * 4 * 5 = 120 = 5!
+    assert_eq(rising_factorial(1, 5), 120);
+    // 3^(4) = 3 * 4 * 5 * 6 = 360
+    assert_eq(rising_factorial(3, 4), 360);
+}
+
+@test
+fn test_falling_factorial_equals_factorial() {
+    // (n)_n = n!
+    assert_eq(falling_factorial(5, 5), factorial(5));
+    assert_eq(falling_factorial(6, 6), factorial(6));
+}
+
+@test
+fn test_rising_factorial_from_one_equals_factorial() {
+    // 1^(n) = n!
+    assert_eq(rising_factorial(1, 5), factorial(5));
+    assert_eq(rising_factorial(1, 7), factorial(7));
+}
+
+// =============================================================================
+// Section 29: Integer Roots Extended
+// =============================================================================
+
+@test
+fn test_isqrt_large_perfect_square() {
+    assert_eq(isqrt(10000), 100);
+    assert_eq(isqrt(2500), 50);
+    assert_eq(isqrt(144), 12);
+}
+
+@test
+fn test_icbrt_large_perfect_cube() {
+    assert_eq(icbrt(1000), 10);
+    assert_eq(icbrt(216), 6);
+    assert_eq(icbrt(343), 7);
+}
+
+@test
+fn test_isqrt_property() {
+    // For any n, isqrt(n)^2 <= n < (isqrt(n)+1)^2
+    let n = 50;
+    let s = isqrt(n);
+    assert(s * s <= n);
+    assert((s + 1) * (s + 1) > n);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

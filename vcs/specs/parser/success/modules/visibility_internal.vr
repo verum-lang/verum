@@ -1,0 +1,98 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Internal function
+internal fn internal_function() -> Int {
+    42
+}
+
+// Internal type definitions
+internal type InternalRecord is { secret: Int };
+internal type InternalEnum is A | B | C;
+
+// Internal protocol
+internal type InternalProtocol is protocol {
+    fn internal_method(&self);
+};
+
+// Internal constants
+internal const INTERNAL_CONST: Int = 100;
+
+// Internal statics
+internal static INTERNAL_STATIC: Int = 200;
+internal static mut INTERNAL_MUT_STATIC: Int = 300;
+
+// Internal module
+internal module internal_module {
+    fn helper() -> Int { 1 }
+
+    internal fn also_internal() -> Int { 2 }
+}
+
+// Internal in public module
+pub module public_api {
+    pub fn exposed() -> Int { internal_impl() }
+
+    internal fn internal_impl() -> Int { 42 }
+}
+
+// Internal implementation methods
+internal type InternalType is { data: Text };
+
+implement InternalType {
+    internal fn new(s: Text) -> Self {
+        InternalType { data: s }
+    }
+
+    internal fn get_data(&self) -> Text {
+        self.data.clone()
+    }
+}
+
+// Internal generic types
+internal type InternalContainer<T> is { value: T };
+
+// Internal generic functions
+internal fn internal_identity<T>(x: T) -> T { x }
+
+// Internal async functions
+internal async fn internal_async() -> Int {
+    fetch_data().await
+}
+
+// Internal context functions
+internal fn internal_contextual() using [Cache] {
+    Cache.get("key")
+}
+
+// Internal mount
+internal mount core.internal_utils;
+
+// Module with internal visibility for implementation details
+pub module library {
+    pub type PublicApi is { id: Int };
+
+    // Internal implementation types
+    internal type InternalState is { cache: Map<Text, Int> };
+    internal type InternalConfig is { timeout: Int };
+
+    pub fn create() -> PublicApi {
+        PublicApi { id: make_id() }
+    }
+
+    internal fn make_id() -> Int {
+        42
+    }
+
+    internal fn validate(api: &PublicApi) -> Bool {
+        api.id > 0
+    }
+}
+
+// Nested internal visibility
+internal module outer_internal {
+    internal module inner_internal {
+        internal fn deeply_internal() -> Int { 0 }
+    }
+}

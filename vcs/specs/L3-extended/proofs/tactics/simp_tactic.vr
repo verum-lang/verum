@@ -1,0 +1,63 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, simplification
+// @timeout: 15000
+
+/// Extended simplification tactic tests
+
+/// Arithmetic simplification
+theorem simp_arith_1(x: Int): x + 0 == x { proof by simp }
+theorem simp_arith_2(x: Int): 0 + x == x { proof by simp }
+theorem simp_arith_3(x: Int): x * 1 == x { proof by simp }
+theorem simp_arith_4(x: Int): 1 * x == x { proof by simp }
+theorem simp_arith_5(x: Int): x * 0 == 0 { proof by simp }
+
+/// Nested simplification
+theorem simp_nested(x: Int): (x + 0) * 1 == x { proof by simp }
+
+/// Simplification with preconditions
+theorem simp_with_pre(x: Int, y: Int)
+    requires x == y
+    ensures x + 0 == y
+{
+    proof by simp
+}
+
+/// Simp lemma registration
+@simp lemma append_nil<T>(xs: List<T>): xs ++ [] == xs { proof by induction on xs }
+
+theorem use_simp_lemma<T>(xs: List<T>): xs ++ [] == xs {
+    proof by simp
+}
+
+/// Boolean simplification
+theorem simp_bool_1(p: Bool): p && true == p { proof by simp }
+theorem simp_bool_2(p: Bool): p || false == p { proof by simp }
+theorem simp_bool_3(p: Bool): p && false == false { proof by simp }
+theorem simp_bool_4(p: Bool): p || true == true { proof by simp }
+
+/// Conditional simplification
+theorem simp_if_true<T>(a: T, b: T): (if true { a } else { b }) == a { proof by simp }
+theorem simp_if_false<T>(a: T, b: T): (if false { a } else { b }) == b { proof by simp }
+
+/// Quantifier simplification
+theorem simp_forall(): (forall x: Int. true) == true { proof by simp }
+
+/// Natural number simplification
+theorem simp_nat_succ(n: Nat): succ(n) != 0 { proof by simp }
+
+/// Simp with multiple databases
+theorem simp_multi(n: Nat): n + 0 + 0 * n == n {
+    proof by simp
+}
+
+/// Simp that makes progress
+theorem simp_progress(a: Int, b: Int)
+    requires a > b
+    ensures a >= b
+{
+    proof { simp; omega }
+}
+
+fn main() {}

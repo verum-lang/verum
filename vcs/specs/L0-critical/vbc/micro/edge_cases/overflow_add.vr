@@ -1,0 +1,25 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, overflow, addition
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Test integer addition overflow behavior (wrapping semantics)
+
+fn main() {
+    // Test large positive numbers
+    let large: Int = 9223372036854775807;  // i64 max
+    let one: Int = 1;
+
+    // In Verum, integer overflow wraps around (like Rust's release mode)
+    // Adding 1 to max should wrap to min
+    let wrapped = large + one;
+    assert(wrapped < 0);  // Should be negative after wrap
+    assert_eq(wrapped, -9223372036854775808);  // i64 min
+
+    // Test overflow with smaller values
+    let a: Int = 4611686018427387904;  // 2^62
+    let b: Int = 4611686018427387904;  // 2^62
+    let c = a + b;  // 2^63 = -2^63 after wrap (i64 min)
+    assert(c < 0);
+}

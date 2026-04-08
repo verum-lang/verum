@@ -1,0 +1,170 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, set
+// @description: Test basic set operations (set_new, set_len, set_insert, set_remove, set_contains)
+
+// =============================================================================
+// SET_NEW TESTS
+// =============================================================================
+
+// Test set_new creates empty set
+meta fn test_set_new_empty() -> Int {
+    let s = set_new();
+    set_len(s)  // Should be 0
+}
+
+// =============================================================================
+// SET_INSERT TESTS
+// =============================================================================
+
+// Test set_insert on empty set
+meta fn test_set_insert_empty() -> Int {
+    let s = set_new();
+    let s = set_insert(s, "element");
+    set_len(s)  // Should be 1
+}
+
+// Test set_insert multiple elements
+meta fn test_set_insert_multiple() -> Int {
+    let s = set_new();
+    let s = set_insert(s, "a");
+    let s = set_insert(s, "b");
+    let s = set_insert(s, "c");
+    set_len(s)  // Should be 3
+}
+
+// Test set_insert duplicate (no-op)
+meta fn test_set_insert_duplicate() -> Int {
+    let s = set_new();
+    let s = set_insert(s, "element");
+    let s = set_insert(s, "element");  // Duplicate
+    set_len(s)  // Should be 1 (no duplicates)
+}
+
+// =============================================================================
+// SET_CONTAINS TESTS
+// =============================================================================
+
+// Test set_contains for existing element
+meta fn test_set_contains_existing() -> Bool {
+    let s = set_new();
+    let s = set_insert(s, "element");
+    set_contains(s, "element")  // Should be true
+}
+
+// Test set_contains for missing element
+meta fn test_set_contains_missing() -> Bool {
+    let s = set_new();
+    !set_contains(s, "missing")  // Should be true
+}
+
+// =============================================================================
+// SET_REMOVE TESTS
+// =============================================================================
+
+// Test set_remove existing element
+meta fn test_set_remove_existing() -> Int {
+    let s = set_new();
+    let s = set_insert(s, "a");
+    let s = set_insert(s, "b");
+    let s = set_remove(s, "a");
+    set_len(s)  // Should be 1
+}
+
+// Test set_remove non-existing element (no-op)
+meta fn test_set_remove_missing() -> Int {
+    let s = set_new();
+    let s = set_insert(s, "a");
+    let s = set_remove(s, "missing");
+    set_len(s)  // Should be 1
+}
+
+// Test set_remove then contains
+meta fn test_set_remove_then_contains() -> Bool {
+    let s = set_new();
+    let s = set_insert(s, "element");
+    let s = set_remove(s, "element");
+    !set_contains(s, "element")  // Should be true
+}
+
+// =============================================================================
+// SET_TO_LIST TESTS
+// =============================================================================
+
+// Test set_to_list empty set
+meta fn test_set_to_list_empty() -> Int {
+    let s = set_new();
+    let lst = set_to_list(s);
+    list_len(lst)  // Should be 0
+}
+
+// Test set_to_list with elements
+meta fn test_set_to_list_with_elements() -> Int {
+    let s = set_new();
+    let s = set_insert(s, "a");
+    let s = set_insert(s, "b");
+    let s = set_insert(s, "c");
+    let lst = set_to_list(s);
+    list_len(lst)  // Should be 3
+}
+
+// Test set_to_list returns sorted order
+meta fn test_set_to_list_sorted() -> Maybe<Text> {
+    let s = set_new();
+    let s = set_insert(s, "z");
+    let s = set_insert(s, "a");
+    let s = set_insert(s, "m");
+    let lst = set_to_list(s);
+    list_get(lst, 0)  // Should be Some("a") (sorted)
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test insert then contains
+meta fn test_insert_then_contains() -> Bool {
+    let s = set_new();
+    let s = set_insert(s, "x");
+    set_contains(s, "x")  // Should be true
+}
+
+// Test multiple inserts then len
+meta fn test_multiple_inserts_len() -> Int {
+    let s = set_new();
+    let s = set_insert(s, "a");
+    let s = set_insert(s, "b");
+    let s = set_insert(s, "a");  // duplicate
+    let s = set_insert(s, "c");
+    set_len(s)  // Should be 3
+}
+
+// Main test function
+fn main() {
+    // new tests
+    assert_eq(@const(test_set_new_empty()), 0);
+
+    // insert tests
+    assert_eq(@const(test_set_insert_empty()), 1);
+    assert_eq(@const(test_set_insert_multiple()), 3);
+    assert_eq(@const(test_set_insert_duplicate()), 1);
+
+    // contains tests
+    assert(@const(test_set_contains_existing()));
+    assert(@const(test_set_contains_missing()));
+
+    // remove tests
+    assert_eq(@const(test_set_remove_existing()), 1);
+    assert_eq(@const(test_set_remove_missing()), 1);
+    assert(@const(test_set_remove_then_contains()));
+
+    // to_list tests
+    assert_eq(@const(test_set_to_list_empty()), 0);
+    assert_eq(@const(test_set_to_list_with_elements()), 3);
+    assert_eq(@const(test_set_to_list_sorted()), Some("a"));
+
+    // combined tests
+    assert(@const(test_insert_then_contains()));
+    assert_eq(@const(test_multiple_inserts_len()), 3);
+}

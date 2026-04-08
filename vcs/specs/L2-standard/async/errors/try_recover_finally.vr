@@ -1,0 +1,255 @@
+// @test: run
+// @expected-stdout: Acquiring resource\nPerforming operation\nOperation succeeded\nReleasing resource\nResult: 42\nAcquiring resource\nPerforming risky operation\nRecovered from error: operation failed\nReleasing resource\nRecovered value: -1\nStarting complex operation\nStep 1 complete\nStep 2 failed, recovering\nRecovered at step 2\nCleanup complete\nComplex result: partial
+// @tier: 0
+// @level: L2
+// @tags: async, errors, try, recover, finally
+// @description: Async try/recover/finally blocks for structured error handling
+
+// Resource that needs cleanup
+type Resource is {
+    id: Int,
+};
+
+fn acquire_resource() -> Resource {
+    println("Acquiring resource");
+    Resource { id: 1 }
+}
+
+fn release_resource(r: &Resource) {
+    println("Releasing resource");
+}
+
+async fn risky_operation(should_fail: Bool) -> Result<Int, Error> {
+    if should_fail {
+        println("Performing risky operation");
+        Err(Error.new("operation failed"))
+    } else {
+        println("Performing operation");
+        println("Operation succeeded");
+        Ok(42)
+    }
+}
+
+// Basic try/recover/finally pattern
+async fn basic_try_recover_finally(should_fail: Bool) -> Int {
+    let resource = acquire_resource();
+
+    let result = try {
+        risky_operation(should_fail).await?
+    } recover error {
+        println(f"Recovered from error: {error}");
+        -1 // Recovery value
+    } finally {
+        release_resource(&resource);
+    };
+
+    result
+}
+
+// Nested try blocks
+async fn nested_try_blocks() -> Text {
+    println("Starting complex operation");
+
+    try {
+        // Outer try
+        let step1 = try {
+            println("Step 1 complete");
+            Ok(1)
+        } recover _ {
+            println("Recovered at step 1");
+            -1
+        };
+
+        let step2 = try {
+            // This will fail
+            Err(Error.new("step 2 error"))?;
+            println("Step 2 complete");
+            Ok(2)
+        } recover error {
+            println("Step 2 failed, recovering");
+            println("Recovered at step 2");
+            -2
+        } finally {
+            println("Cleanup complete");
+        };
+
+        if step2 < 0 {
+            "partial"
+        } else {
+            "complete"
+        }
+    } recover _ {
+        "failed"
+    }
+}
+
+// Try with async operations in finally
+async fn async_finally() -> Result<Int, Error> {
+    let started_at = Instant.now();
+
+    try {
+        let data = fetch_data().await?;
+        process(data).await
+    } recover error {
+        log_error(&error).await;
+        Err(error)
+    } finally {
+        // Async cleanup
+        record_timing(started_at).await;
+    }
+}
+
+async fn fetch_data() -> Result<Int, Error> {
+    Ok(100)
+}
+
+async fn process(data: Int) -> Result<Int, Error> {
+    Ok(data * 2)
+}
+
+async fn log_error(_error: &Error) {
+    // Log the error asynchronously
+}
+
+async fn record_timing(_started: Instant) {
+    // Record timing metrics
+}
+
+// Multiple recover clauses for different error types
+async fn typed_recovery() -> Int {
+    try {
+        network_operation().await?
+    } recover NetworkError.Timeout => {
+        println("Network timeout, using cached value");
+        get_cached_value()
+    } recover NetworkError.ConnectionRefused => {
+        println("Connection refused, using fallback");
+        get_fallback_value()
+    } recover error {
+        println(f"Unknown error: {error}");
+        0
+    }
+}
+
+type NetworkError is
+    | Timeout
+    | ConnectionRefused
+    | Other(Text);
+
+async fn network_operation() -> Result<Int, NetworkError> {
+    Err(NetworkError.Timeout)
+}
+
+fn get_cached_value() -> Int { 42 }
+fn get_fallback_value() -> Int { 0 }
+
+// Try with explicit type annotation
+async fn typed_try() -> Result<Int, Error> {
+    let value: Result<Int, Error> = try {
+        let x = compute().await?;
+        let y = validate(x).await?;
+        x + y
+    };
+
+    value
+}
+
+async fn compute() -> Result<Int, Error> { Ok(10) }
+async fn validate(x: Int) -> Result<Int, Error> { Ok(x) }
+
+// Finally for resource cleanup
+async fn file_processing() -> Result<Text, Error> {
+    let file = File.open("data.txt").await?;
+
+    try {
+        let contents = file.read_all().await?;
+        let processed = transform(contents).await?;
+        processed
+    } finally {
+        // Always close the file
+        file.close().await;
+    }
+}
+
+type File is { path: Text };
+
+implement File {
+    async fn open(path: Text) -> Result<File, Error> {
+        Ok(File { path })
+    }
+
+    async fn read_all(self) -> Result<Text, Error> {
+        Ok("file contents")
+    }
+
+    async fn close(self) {
+        // Close file handle
+    }
+}
+
+async fn transform(s: Text) -> Result<Text, Error> {
+    Ok(s.to_uppercase())
+}
+
+// Combining defer and try/finally
+async fn combined_cleanup() -> Result<Int, Error> {
+    let conn = open_connection().await?;
+
+    // defer always runs, even if we return early
+    defer {
+        conn.close();
+    }
+
+    // try/finally for scoped cleanup
+    let result = try {
+        let tx = conn.begin_transaction().await?;
+
+        try {
+            execute_queries(&tx).await?;
+            tx.commit().await?;
+            42
+        } recover error {
+            tx.rollback().await;
+            Err(error)
+        }
+    };
+
+    result
+}
+
+type Connection is {};
+type Transaction is {};
+
+async fn open_connection() -> Result<Connection, Error> {
+    Ok(Connection {})
+}
+
+implement Connection {
+    fn close(self) {}
+    async fn begin_transaction(self) -> Result<Transaction, Error> {
+        Ok(Transaction {})
+    }
+}
+
+implement Transaction {
+    async fn commit(self) -> Result<(), Error> { Ok(()) }
+    async fn rollback(self) {}
+}
+
+async fn execute_queries(_tx: &Transaction) -> Result<(), Error> {
+    Ok(())
+}
+
+async fn main() {
+    // Test basic try/recover/finally - success case
+    let result1 = basic_try_recover_finally(false).await;
+    println(f"Result: {result1}");
+
+    // Test basic try/recover/finally - failure case
+    let result2 = basic_try_recover_finally(true).await;
+    println(f"Recovered value: {result2}");
+
+    // Test nested try blocks
+    let result3 = nested_try_blocks().await;
+    println(f"Complex result: {result3}");
+}

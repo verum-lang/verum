@@ -1,0 +1,41 @@
+// @test: parse-pass
+// @tier: 0
+// @category: syntax
+
+fn test_blocks() {
+    // Block expression
+    let result = {
+        let x = 1;
+        let y = 2;
+        x + y
+    };
+
+    // Nested blocks
+    let nested = {
+        let outer = 1;
+        {
+            let inner = 2;
+            outer + inner
+        }
+    };
+
+    // Block in expressions
+    let conditional = if true {
+        {
+            let temp = compute();
+            temp * 2
+        }
+    } else {
+        0
+    };
+
+    // Empty block
+    let unit = {};
+
+    // Block with statements and expression
+    let mixed = {
+        do_something();
+        do_more();
+        final_value()
+    };
+}

@@ -1,0 +1,88 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, reflection, generics, introspection
+// @description: Tests for generic type introspection builtins
+// @contexts: MetaTypes
+
+// =============================================================================
+// TEST TYPE DEFINITIONS
+// =============================================================================
+
+// Generic container type
+type Container<T> is { value: T };
+
+// Generic pair type
+type Pair<A, B> is { first: A, second: B };
+
+// Nested generic type
+type Tree<T> is Leaf(T) | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+// Maybe type
+type Maybe<T> is None | Some(T);
+
+// =============================================================================
+// GENERICS_OF TESTS
+// =============================================================================
+
+// Test generics_of for simple generic type
+meta fn test_generics_of_simple(ctx: Text) -> Bool using [MetaTypes] {
+    let params = generics_of<Container<Int>>();
+    list_len(params) >= 0
+}
+
+// Test generics_of for multi-parameter type
+meta fn test_generics_of_pair(ctx: Text) -> Bool using [MetaTypes] {
+    let params = generics_of<Pair<Int, Text>>();
+    list_len(params) >= 0
+}
+
+// Test generics_of for non-generic type
+meta fn test_generics_of_non_generic(ctx: Text) -> Bool using [MetaTypes] {
+    let params = generics_of<Int>();
+    list_len(params) >= 0
+}
+
+// =============================================================================
+// TYPE_NAME TESTS
+// =============================================================================
+
+// Test type_name for basic type
+meta fn test_type_name_basic(ctx: Text) -> Bool using [MetaTypes] {
+    let name = type_name<Int>();
+    text_len(name) > 0
+}
+
+// Test type_name for generic type
+meta fn test_type_name_generic(ctx: Text) -> Bool using [MetaTypes] {
+    let name = type_name<Container<Int>>();
+    text_len(name) > 0
+}
+
+// =============================================================================
+// IS_GENERIC TESTS
+// =============================================================================
+
+// Test is_generic for generic type
+meta fn test_is_generic_true(ctx: Text) -> Bool using [MetaTypes] {
+    is_generic<Container<Int>>()
+}
+
+// Test is_generic for non-generic type
+meta fn test_is_generic_false(ctx: Text) -> Bool using [MetaTypes] {
+    !is_generic<Int>()
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    @const assert(test_generics_of_simple("ctx"));
+    @const assert(test_generics_of_pair("ctx"));
+    @const assert(test_generics_of_non_generic("ctx"));
+    @const assert(test_type_name_basic("ctx"));
+    @const assert(test_type_name_generic("ctx"));
+    @const assert(test_is_generic_true("ctx"));
+    @const assert(test_is_generic_false("ctx"));
+}

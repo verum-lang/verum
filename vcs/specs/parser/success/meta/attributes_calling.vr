@@ -1,0 +1,353 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, attributes, ffi, calling-convention
+// @description: Test calling convention and FFI attributes - grammar: calling_convention_attr, ffi_function_decl
+
+// ============================================================================
+// CALLING CONVENTION ATTRIBUTE
+// Grammar: calling_convention_attr = 'calling_convention' '=' string_lit
+// ============================================================================
+
+// @extern with explicit calling convention
+@extern("C", calling_convention = "cdecl")
+fn c_function(x: i32) -> i32;
+
+@extern("C", calling_convention = "stdcall")
+fn stdcall_function(x: i32, y: i32) -> i32;
+
+@extern("C", calling_convention = "fastcall")
+fn fastcall_function(x: i32) -> i32;
+
+@extern("C", calling_convention = "thiscall")
+fn thiscall_method(this: *mut u8, x: i32) -> i32;
+
+@extern("C", calling_convention = "vectorcall")
+fn vectorcall_function(x: f32, y: f32, z: f32, w: f32) -> f32;
+
+@extern("C", calling_convention = "aapcs")
+fn arm_function(x: i32) -> i32;
+
+@extern("C", calling_convention = "win64")
+fn windows_x64_function(x: i64) -> i64;
+
+@extern("C", calling_convention = "sysv64")
+fn linux_x64_function(x: i64) -> i64;
+
+// ============================================================================
+// @extern BASIC FORMS
+// Grammar: ffi_function_decl = '@extern' '(' string_lit [ ',' calling_convention_attr ] ')' 'fn' ...
+// ============================================================================
+
+// Basic C extern
+@extern("C")
+fn basic_c_extern(x: i32) -> i32;
+
+// With no return type
+@extern("C")
+fn void_return(x: i32);
+
+// Multiple parameters
+@extern("C")
+fn multi_param(a: i32, b: i32, c: i32, d: i32) -> i32;
+
+// No parameters
+@extern("C")
+fn no_params() -> i32;
+
+// Pointer parameters
+@extern("C")
+fn with_pointers(ptr: *const u8, len: usize) -> i32;
+
+@extern("C")
+fn mut_pointer(ptr: *mut u8, len: usize);
+
+// ============================================================================
+// @extern WITH DIFFERENT ABIs
+// ============================================================================
+
+@extern("Rust")
+fn rust_extern(x: Int) -> Int;
+
+@extern("system")
+fn system_default(x: i32) -> i32;
+
+@extern("C-unwind")
+fn c_unwind_capable(x: i32) -> i32;
+
+@extern("Rust-intrinsic")
+fn rust_intrinsic() -> i32;
+
+// ============================================================================
+// FFI WITH GENERIC PARAMETERS
+// ============================================================================
+
+@extern("C")
+fn generic_ptr_extern<T>(ptr: *const T) -> *const T;
+
+@extern("C")
+fn generic_callback<T>(callback: fn(*const T) -> i32, data: *const T) -> i32;
+
+// ============================================================================
+// FFI FUNCTION DECLARATIONS WITH CONTRACTS
+// Grammar: ffi_requires_clause, ffi_ensures_clause
+// ============================================================================
+
+@extern("C")
+@requires(ptr != null)
+@ensures(result >= 0)
+fn checked_strlen(ptr: *const u8) -> usize;
+
+@extern("C")
+@requires(dest != null && src != null)
+@requires(n > 0)
+@ensures(result == dest)
+fn checked_memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8;
+
+// ============================================================================
+// FFI WITH MEMORY EFFECTS
+// Grammar: ffi_memory_effects
+// ============================================================================
+
+@extern("C")
+@memory_effects(Pure)
+fn pure_extern(x: i32) -> i32;
+
+@extern("C")
+@memory_effects(Reads(ptr))
+fn reads_extern(ptr: *const u8) -> i32;
+
+@extern("C")
+@memory_effects(Writes(ptr))
+fn writes_extern(ptr: *mut u8, value: i32);
+
+@extern("C")
+@memory_effects(Allocates)
+fn allocating_extern(size: usize) -> *mut u8;
+
+@extern("C")
+@memory_effects(Deallocates(ptr))
+fn deallocating_extern(ptr: *mut u8);
+
+@extern("C")
+@memory_effects(Reads(src) + Writes(dest))
+fn copy_extern(dest: *mut u8, src: *const u8, len: usize);
+
+// ============================================================================
+// FFI WITH THREAD SAFETY
+// Grammar: ffi_thread_safety
+// ============================================================================
+
+@extern("C")
+@thread_safe(true)
+fn thread_safe_extern(x: i32) -> i32;
+
+@extern("C")
+@thread_safe(false)
+fn not_thread_safe_extern(x: i32) -> i32;
+
+// ============================================================================
+// FFI WITH ERROR PROTOCOL
+// Grammar: ffi_error_protocol, error_mechanism
+// ============================================================================
+
+@extern("C")
+@errors_via(Errno)
+fn errno_extern(fd: i32) -> i32;
+
+@extern("C")
+@errors_via(ReturnCode(-1))
+fn return_code_extern(x: i32) -> i32;
+
+// Note: "ReturnValue(x) with Errno" syntax is only valid inside ffi {} blocks
+// Using @errors_via attribute with simpler error mechanism for standalone functions
+@extern("C")
+@errors_via(ReturnValue(null))
+fn null_with_errno(size: usize) -> *mut u8;
+
+@extern("C")
+@errors_via(None)
+fn no_error_extern(x: i32) -> i32;
+
+// ============================================================================
+// FFI WITH OWNERSHIP SPECIFICATION
+// Grammar: ffi_ownership_spec, ownership_mode
+// ============================================================================
+
+@extern("C")
+@ownership(transfer_to = "callee")
+fn transfers_ownership(ptr: *mut u8);
+
+@extern("C")
+@ownership(transfer_from = "callee")
+fn receives_ownership(size: usize) -> *mut u8;
+
+@extern("C")
+@ownership(borrow)
+fn borrows_data(ptr: *const u8) -> i32;
+
+@extern("C")
+@ownership(shared)
+fn shared_access(ptr: *const u8) -> i32;
+
+// ============================================================================
+// EXTERN BLOCKS
+// Grammar: extern_block
+// ============================================================================
+
+extern "C" {
+    fn block_func1(x: i32) -> i32;
+    fn block_func2(ptr: *mut u8);
+    fn block_func3() -> *const u8;
+}
+
+extern {
+    fn default_abi_func(x: i32) -> i32;
+}
+
+extern "stdcall" {
+    fn win32_func1(handle: usize) -> i32;
+    fn win32_func2(handle: usize, flags: u32) -> i32;
+}
+
+extern "C" {
+    pub fn public_extern_in_block(x: i32) -> i32;
+    internal fn internal_extern_in_block(x: i32) -> i32;
+}
+
+// ============================================================================
+// COMPLETE FFI SPECIFICATION EXAMPLE
+// ============================================================================
+
+@extern("C", calling_convention = "cdecl")
+@requires(ptr != null && len > 0)
+@ensures(result >= 0 || result == -1)
+@memory_effects(Reads(ptr))
+@thread_safe(true)
+@errors_via(Errno)
+@ownership(borrow)
+fn full_spec_extern(ptr: *const u8, len: usize) -> i32;
+
+// ============================================================================
+// @repr ATTRIBUTE FOR LAYOUT CONTROL
+// ============================================================================
+
+@repr(C)
+type CStruct is { a: i32, b: i32 };
+
+@repr(C, packed)
+type PackedStruct is { a: u8, b: i64, c: u8 };
+
+@repr(C, align(16))
+type AlignedCStruct is { data: [u8; 64] };
+
+@repr(transparent)
+type TransparentWrapper is (i32);
+
+@repr(u8)
+type SmallEnum is A | B | C;
+
+// Note: Verum variant discriminants work differently - using repr for layout
+@repr(i32)
+type SignedEnum is Negative | Zero | Positive;
+
+@repr(C)
+type CUnion is A(i32) | B(f32);
+
+// ============================================================================
+// @link_name AND @link_section ATTRIBUTES
+// ============================================================================
+
+@extern("C")
+@link_name("actual_c_name")
+fn verum_name(x: i32) -> i32;
+
+@extern("C")
+@link_section(".custom_section")
+fn in_custom_section() -> i32;
+
+// Note: extern statics need to be declared differently
+// This shows an extern static declaration with link name
+@link_name("global_var")
+static EXTERN_GLOBAL: i32 = 0;
+
+// ============================================================================
+// @no_mangle ATTRIBUTE
+// ============================================================================
+
+@no_mangle
+fn exported_with_exact_name(x: Int) -> Int {
+    x * 2
+}
+
+@no_mangle
+@extern("C")
+fn c_callable_from_verum(x: i32) -> i32;
+
+// ============================================================================
+// CALLBACK AND FUNCTION POINTER TYPES IN FFI
+// Note: Function pointer types with calling conventions are defined
+// using @repr attribute on the type, or by using a typedef
+// ============================================================================
+
+// Callback function types are plain function types (abi is determined at call site)
+@extern("C")
+fn with_callback(
+    callback: fn(i32) -> i32,
+    data: i32
+) -> i32;
+
+@extern("C")
+fn register_handler(
+    handler: fn(*const u8, usize) -> i32
+);
+
+// Function pointer type aliases
+type CCallback is fn(i32, i32) -> i32;
+type WindowProc is fn(usize, u32, usize, isize) -> isize;
+
+// ============================================================================
+// VARIADIC FFI FUNCTIONS
+// ============================================================================
+
+@extern("C")
+fn printf(format: *const u8, ...) -> i32;
+
+@extern("C")
+fn sprintf(buf: *mut u8, format: *const u8, ...) -> i32;
+
+// ============================================================================
+// FFI WITH COMPLEX TYPE MAPPINGS
+// ============================================================================
+
+@repr(C)
+type CPoint is { x: f64, y: f64 };
+
+@repr(C)
+type CArray is { data: [i32; 10], len: usize };
+
+@repr(C)
+type CString is { ptr: *const u8, len: usize, cap: usize };
+
+@extern("C")
+fn process_point(point: *const CPoint) -> f64;
+
+@extern("C")
+fn process_array(arr: *mut CArray) -> i32;
+
+// ============================================================================
+// INTRINSIC ATTRIBUTES
+// ============================================================================
+
+@intrinsic("llvm.sqrt.f64")
+fn sqrt_intrinsic(x: f64) -> f64;
+
+@intrinsic("llvm.fabs.f64")
+fn fabs_intrinsic(x: f64) -> f64;
+
+@intrinsic("llvm.memcpy.p0.p0.i64")
+fn memcpy_intrinsic(dest: *mut u8, src: *const u8, len: i64, volatile: bool);
+
+@intrinsic("cpu_arch_specific")
+fn arch_specific() -> i32;

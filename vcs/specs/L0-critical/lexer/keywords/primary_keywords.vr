@@ -1,0 +1,95 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, primary
+
+// Primary keywords for type definitions and constraints
+
+// Type definitions
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+type Color is Red | Green | Blue | Rgb(Int, Int, Int);
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Maybe<T> is Some(T) | None;
+
+// Type aliases
+type UserId is Int;
+type Email is Text;
+type Coordinates is (Float, Float);
+
+// Generic type with constraints
+type Container<T> is {
+    value: T,
+    label: Text,
+};
+
+// Where clauses for type constraints
+fn print_all<T>(items: List<T>) where T: Display {
+    for item in items {
+        print(item.display())
+    }
+}
+
+// Multiple where constraints
+fn compare_and_show<T, U>(a: T, b: U) -> Text
+where
+    T: Ord + Display,
+    U: Ord + Display
+{
+    if a < b {
+        f"{a} < {b}"
+    } else {
+        f"{a} >= {b}"
+    }
+}
+
+// Using for context dependencies
+fn fetch_user(id: UserId) -> User using [Database] {
+    Database.query(f"SELECT * FROM users WHERE id = {id}")
+}
+
+fn log_action(msg: Text) using [Logger] {
+    Logger.info(msg)
+}
+
+// Multiple context dependencies
+fn process_order(order: Order) -> Result<Receipt, Error>
+using [Database, Logger, PaymentGateway]
+{
+    Logger.info(f"Processing order {order.id}");
+    let user = Database.get_user(order.user_id);
+    PaymentGateway.charge(user, order.total)
+}
+
+// Nested type definitions
+type Tree<T> is Leaf(T) | Branch(Tree<T>, Tree<T>);
+
+type BinaryTree<K, V> is {
+    key: K,
+    value: V,
+    left: Maybe<BinaryTree<K, V>>,
+    right: Maybe<BinaryTree<K, V>>,
+};
+
+// Record type
+type ValidatedEmail is {
+    raw: Text,
+    domain: Text,
+    local_part: Text,
+};
+
+// Using with multiple contexts inline
+fn complex_operation() using [Db, Cache, Logger, Metrics] {
+    let cached = Cache.get("key");
+    if let None = cached {
+        let data = Db.fetch("key");
+        Cache.set("key", data);
+        Metrics.increment("cache_miss");
+    }
+    Logger.debug("Operation complete");
+}

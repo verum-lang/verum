@@ -1,0 +1,147 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, hanoi, puzzle
+// @timeout: 10000
+
+// Tower of Hanoi - iterative solution
+// Pegs represented as stacks (using flat arrays)
+type Pegs is {
+    a0: Int, a1: Int, a2: Int, a3: Int,   // peg A
+    b0: Int, b1: Int, b2: Int, b3: Int,   // peg B
+    c0: Int, c1: Int, c2: Int, c3: Int,   // peg C
+    atop: Int, btop: Int, ctop: Int
+};
+
+fn pegs_new() -> Pegs {
+    Pegs {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        b0: 0, b1: 0, b2: 0, b3: 0,
+        c0: 0, c1: 0, c2: 0, c3: 0,
+        atop: 0, btop: 0, ctop: 0
+    }
+}
+
+fn peg_get(p: Pegs, peg: Int, i: Int) -> Int {
+    if peg == 0 {
+        if i == 0 { p.a0 } else if i == 1 { p.a1 } else if i == 2 { p.a2 } else { p.a3 }
+    } else if peg == 1 {
+        if i == 0 { p.b0 } else if i == 1 { p.b1 } else if i == 2 { p.b2 } else { p.b3 }
+    } else {
+        if i == 0 { p.c0 } else if i == 1 { p.c1 } else if i == 2 { p.c2 } else { p.c3 }
+    }
+}
+
+fn peg_top(p: Pegs, peg: Int) -> Int {
+    if peg == 0 { p.atop } else if peg == 1 { p.btop } else { p.ctop }
+}
+
+fn peg_push(p: Pegs, peg: Int, val: Int) -> Pegs {
+    let top = peg_top(p, peg);
+    if peg == 0 {
+        let mut r = Pegs {
+            a0: if top == 0 { val } else { p.a0 },
+            a1: if top == 1 { val } else { p.a1 },
+            a2: if top == 2 { val } else { p.a2 },
+            a3: if top == 3 { val } else { p.a3 },
+            b0: p.b0, b1: p.b1, b2: p.b2, b3: p.b3,
+            c0: p.c0, c1: p.c1, c2: p.c2, c3: p.c3,
+            atop: top + 1, btop: p.btop, ctop: p.ctop
+        };
+        r
+    } else if peg == 1 {
+        Pegs {
+            a0: p.a0, a1: p.a1, a2: p.a2, a3: p.a3,
+            b0: if top == 0 { val } else { p.b0 },
+            b1: if top == 1 { val } else { p.b1 },
+            b2: if top == 2 { val } else { p.b2 },
+            b3: if top == 3 { val } else { p.b3 },
+            c0: p.c0, c1: p.c1, c2: p.c2, c3: p.c3,
+            atop: p.atop, btop: top + 1, ctop: p.ctop
+        }
+    } else {
+        Pegs {
+            a0: p.a0, a1: p.a1, a2: p.a2, a3: p.a3,
+            b0: p.b0, b1: p.b1, b2: p.b2, b3: p.b3,
+            c0: if top == 0 { val } else { p.c0 },
+            c1: if top == 1 { val } else { p.c1 },
+            c2: if top == 2 { val } else { p.c2 },
+            c3: if top == 3 { val } else { p.c3 },
+            atop: p.atop, btop: p.btop, ctop: top + 1
+        }
+    }
+}
+
+fn peg_peek(p: Pegs, peg: Int) -> Int {
+    let top = peg_top(p, peg);
+    if top == 0 { 999 }  // empty
+    else { peg_get(p, peg, top - 1) }
+}
+
+fn peg_pop(p: Pegs, peg: Int) -> Pegs {
+    let top = peg_top(p, peg);
+    if peg == 0 {
+        Pegs { a0: p.a0, a1: p.a1, a2: p.a2, a3: p.a3, b0: p.b0, b1: p.b1, b2: p.b2, b3: p.b3,
+               c0: p.c0, c1: p.c1, c2: p.c2, c3: p.c3, atop: top - 1, btop: p.btop, ctop: p.ctop }
+    } else if peg == 1 {
+        Pegs { a0: p.a0, a1: p.a1, a2: p.a2, a3: p.a3, b0: p.b0, b1: p.b1, b2: p.b2, b3: p.b3,
+               c0: p.c0, c1: p.c1, c2: p.c2, c3: p.c3, atop: p.atop, btop: top - 1, ctop: p.ctop }
+    } else {
+        Pegs { a0: p.a0, a1: p.a1, a2: p.a2, a3: p.a3, b0: p.b0, b1: p.b1, b2: p.b2, b3: p.b3,
+               c0: p.c0, c1: p.c1, c2: p.c2, c3: p.c3, atop: p.atop, btop: p.btop, ctop: top - 1 }
+    }
+}
+
+fn make_legal_move(p: Pegs, from_peg: Int, to_peg: Int) -> Pegs {
+    let from_top = peg_peek(p, from_peg);
+    let to_top = peg_peek(p, to_peg);
+    if from_top < to_top {
+        let p2 = peg_pop(p, from_peg);
+        peg_push(p2, to_peg, from_top)
+    } else {
+        let p2 = peg_pop(p, to_peg);
+        peg_push(p2, from_peg, to_top)
+    }
+}
+
+fn main() -> Int {
+    // 3 disks: 1 (small), 2 (medium), 3 (large)
+    let mut p = pegs_new();
+    p = peg_push(p, 0, 3);
+    p = peg_push(p, 0, 2);
+    p = peg_push(p, 0, 1);
+
+    assert_eq(peg_top(p, 0), 3);  // 3 disks on A
+    assert_eq(peg_top(p, 1), 0);
+    assert_eq(peg_top(p, 2), 0);
+
+    // Iterative Hanoi for 3 disks: 2^3-1 = 7 moves
+    // For odd n, cycle is A->C->B->A (for peg 0,1,2)
+    let total_moves = 7;
+    let mut moves = 0;
+    while moves < total_moves {
+        let step = moves % 3;
+        if step == 0 {
+            p = make_legal_move(p, 0, 2);  // A <-> C
+        } else if step == 1 {
+            p = make_legal_move(p, 0, 1);  // A <-> B
+        } else {
+            p = make_legal_move(p, 1, 2);  // B <-> C
+        }
+        moves = moves + 1;
+    }
+
+    // After 7 moves, all disks should be on peg C
+    assert_eq(peg_top(p, 0), 0);
+    assert_eq(peg_top(p, 1), 0);
+    assert_eq(peg_top(p, 2), 3);
+
+    // Verify disks are in correct order on C
+    assert_eq(peg_get(p, 2, 0), 3);  // bottom: large
+    assert_eq(peg_get(p, 2, 1), 2);  // middle: medium
+    assert_eq(peg_get(p, 2, 2), 1);  // top: small
+
+    print("DIFF_OK: tower_of_hanoi");
+    0
+}

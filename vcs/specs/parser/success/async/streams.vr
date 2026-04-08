@@ -1,0 +1,367 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for stream expressions and comprehensions
+
+// ============================================================================
+// Stream Comprehension Expressions
+// ============================================================================
+
+fn test_basic_stream_comprehensions() {
+    // Simple stream comprehension
+    let a = stream[x * 2 for x in source];
+
+    // Stream with filter
+    let b = stream[x for x in source if x > 0];
+
+    // Stream with transformation and filter
+    let c = stream[transform(x) for x in items if is_valid(x)];
+
+    // Stream with complex expression
+    let d = stream[x * x + 1 for x in numbers];
+
+    // Stream with method call transformation
+    let e = stream[item.process() for item in collection];
+}
+
+// ============================================================================
+// Stream Comprehensions with Multiple Generators
+// ============================================================================
+
+fn test_multi_generator_streams() {
+    // Cartesian product
+    let product = stream[(x, y) for x in xs for y in ys];
+
+    // Triple generator
+    let triple = stream[(x, y, z) for x in xs for y in ys for z in zs];
+
+    // Filtered multi-generator
+    let filtered = stream[(x, y) for x in xs for y in ys if x != y];
+
+    // Dependent generators
+    let dependent = stream[(i, j) for i in 0..n for j in 0..i];
+
+    // Complex multi-generator
+    let complex = stream[
+        compute(x, y, z)
+        for x in data_x
+        for y in data_y if depends_on(x, y)
+        for z in data_z if valid(x, y, z)
+    ];
+}
+
+// ============================================================================
+// Stream Comprehensions with Let Clauses
+// ============================================================================
+
+fn test_stream_let_clauses() {
+    // Simple let clause
+    let a = stream[y for x in items let y = transform(x)];
+
+    // Multiple let clauses
+    let b = stream[z for x in items let y = step1(x) let z = step2(y)];
+
+    // Let with filter
+    let c = stream[processed for item in source
+                   let processed = process(item)
+                   if is_valid(processed)];
+
+    // Let in multi-generator
+    let d = stream[result for x in xs
+                   let x_val = compute_x(x)
+                   for y in ys
+                   let y_val = compute_y(y)
+                   let result = combine(x_val, y_val)];
+
+    // Complex let chain
+    let e = stream[final_value
+                   for raw in inputs
+                   let validated = validate(raw)
+                   if validated.is_ok()
+                   let processed = validated.unwrap()
+                   let transformed = transform(processed)
+                   let final_value = finalize(transformed)];
+}
+
+// ============================================================================
+// Stream Literal Expressions - Element Based
+// ============================================================================
+
+fn test_stream_element_literals() {
+    // Simple element stream
+    let a = stream[1, 2, 3];
+
+    // Single element stream
+    let b = stream[42];
+
+    // Stream with expressions
+    let c = stream[a + b, c * d, e - f];
+
+    // Stream with function calls
+    let d = stream[compute_a(), compute_b(), compute_c()];
+
+    // Mixed literals and expressions
+    let e = stream[1, x, 3, y * 2];
+}
+
+// ============================================================================
+// Stream Literal Expressions - Infinite/Cyclic
+// ============================================================================
+
+fn test_stream_infinite_literals() {
+    // Infinite cycle with ellipsis
+    let cycle = stream[1, 2, 3, ...];
+
+    // Two element cycle
+    let binary = stream[0, 1, ...];
+
+    // Single element infinite
+    let constant = stream[42, ...];
+
+    // Pattern-detected sequence
+    let sequence = stream[0, 1, 2, ...];
+
+    // Arithmetic sequence
+    let arithmetic = stream[0, 2, 4, ...];
+}
+
+// ============================================================================
+// Stream Literal Expressions - Range Based
+// ============================================================================
+
+fn test_stream_range_literals() {
+    // Exclusive range stream
+    let a = stream[0..100];
+
+    // Inclusive range stream
+    let b = stream[0..=100];
+
+    // Open-ended range (infinite)
+    let c = stream[0..];
+
+    // From expression range
+    let d = stream[start..end];
+
+    // Complex range expression
+    let e = stream[0..(n * 2)];
+
+    // Range with method call bounds
+    let f = stream[config.min()..config.max()];
+
+    // Inclusive with expression
+    let g = stream[lower..=upper];
+
+    // Starting from non-zero
+    let h = stream[100..];
+
+    // Negative range
+    let i = stream[-10..10];
+}
+
+// ============================================================================
+// Stream Patterns in Match
+// ============================================================================
+
+fn test_stream_patterns() {
+    // Match head and tail
+    match data_stream {
+        stream[first, second, ...rest] => process_pair(first, second, rest),
+        stream[only, ...rest] => process_single(only, rest),
+        stream[] => empty_handler()
+    }
+
+    // Match specific count
+    match input {
+        stream[a, b, c, ...rest] => handle_three(a, b, c, rest),
+        stream[a, b, ...rest] => handle_two(a, b, rest),
+        stream[a, ...rest] => handle_one(a, rest),
+        stream[] => handle_empty()
+    }
+
+    // Bind entire stream
+    match source {
+        stream[...all] => process_all(all)
+    }
+
+    // With guard
+    match numbers {
+        stream[first, ...rest] if first > 0 => positive_start(first, rest),
+        stream[first, ...rest] => negative_start(first, rest),
+        stream[] => no_numbers()
+    }
+}
+
+// ============================================================================
+// Stream Pattern in Let Bindings
+// ============================================================================
+
+fn test_stream_let_patterns() {
+    // Destructure head and tail
+    let stream[head, ...tail] = input_stream;
+
+    // Multiple heads
+    let stream[first, second, ...rest] = data;
+
+    // Bind all
+    let stream[...everything] = source;
+
+    // With type annotation
+    let stream[h, ...t]: Stream<Int> = numbers;
+}
+
+// ============================================================================
+// Nested Stream Expressions
+// ============================================================================
+
+fn test_nested_streams() {
+    // Stream of streams
+    let nested = stream[stream[y for y in row] for row in matrix];
+
+    // Flatten pattern
+    let flat = stream[x for row in matrix for x in row];
+
+    // Stream in stream literal
+    let combined = stream[
+        stream[0..10],
+        stream[10..20],
+        stream[20..30]
+    ];
+
+    // Nested comprehensions
+    let deep = stream[
+        stream[x + y for y in 0..width]
+        for x in 0..height
+    ];
+}
+
+// ============================================================================
+// Stream Operations (Method Calls)
+// ============================================================================
+
+fn test_stream_operations() {
+    // Stream methods
+    let mapped = source.map(|x| x * 2);
+    let filtered = source.filter(|x| x > 0);
+    let taken = source.take(10);
+    let skipped = source.skip(5);
+
+    // Chained operations
+    let processed = input_stream
+        .filter(|x| x > 0)
+        .map(|x| x * 2)
+        .take(100);
+
+    // Collect to list
+    let list = stream[0..100].collect();
+
+    // Reduce/fold
+    let sum = numbers.fold(0, |acc, x| acc + x);
+
+    // Zip streams
+    let zipped = stream_a.zip(stream_b);
+
+    // Chain streams
+    let chained = stream_a.chain(stream_b);
+}
+
+// ============================================================================
+// Async Streams
+// ============================================================================
+
+async fn test_async_streams() {
+    // For await over stream
+    for await item in async_stream {
+        process(item);
+    }
+
+    // Stream comprehension with async processing in body
+    let async_mapped = stream[process(x) for x in source];
+
+    // Collect async stream
+    let results: List<Data> = async_stream.collect().await;
+
+    // Async stream operations
+    let processed = async_input
+        .map(async |x| transform(x).await)
+        .buffer(10);
+}
+
+// ============================================================================
+// Stream in Expressions
+// ============================================================================
+
+fn test_stream_in_expressions() {
+    // Stream as function argument
+    process_stream(stream[1, 2, 3]);
+
+    // Stream in let with complex expression
+    let result = stream[0..100]
+        .filter(|x| x % 2 == 0)
+        .map(|x| x * x)
+        .take(10)
+        .sum();
+
+    // Stream in conditional
+    let source = if use_range {
+        stream[0..1000]
+    } else {
+        stream[1, 2, 3, ...]
+    };
+
+    // Stream in struct
+    let container = StreamContainer {
+        data: stream[0..100],
+        infinite: stream[1, ...]
+    };
+
+    // Stream in tuple
+    let pair = (stream[0..10], stream[10..20]);
+}
+
+// ============================================================================
+// Complex Stream Patterns
+// ============================================================================
+
+fn test_complex_stream_patterns() {
+    // Fibonacci-like pattern (conceptual)
+    let fib_like = stream[0, 1, ...];  // Pattern detection
+
+    // Geometric sequence
+    let powers = stream[1, 2, 4, ...];
+
+    // Stream from iterator transformation
+    let transformed = items.iter()
+        .filter(|x| predicate(x))
+        .map(|x| transform(x))
+        .into_stream();
+
+    // Interleave streams
+    let interleaved = stream_a.interleave(stream_b);
+
+    // Batch processing
+    let batched = large_stream.chunks(100);
+
+    // Window over stream
+    let windowed = data_stream.windows(3);
+}
+
+// ============================================================================
+// Stream Type Annotations
+// ============================================================================
+
+fn test_stream_types() {
+    // Explicit type
+    let typed: Stream<Int> = stream[1, 2, 3];
+
+    // Generic stream
+    let generic: Stream<T> = stream[a, b, c];
+
+    // Stream of tuples
+    let pairs: Stream<(Int, Text)> = stream[(1, "a"), (2, "b")];
+
+    // Nested stream type
+    let nested: Stream<Stream<Int>> = stream[stream[0..10], stream[10..20]];
+
+    // Result stream
+    let results: Stream<Result<Data, Error>> = try_stream();
+}

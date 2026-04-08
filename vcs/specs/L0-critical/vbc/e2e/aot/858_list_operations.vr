@@ -1,0 +1,94 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, array, push, pop, indexing
+// @expected-exit: 0
+
+// Test: comprehensive list operations in AOT
+// Validates list creation, push, pop, indexing, length.
+
+fn sum_list(arr: List<Int>, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while (i < n) {
+        total = total + arr[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Basic list creation and access
+    let mut arr = [10, 20, 30, 40, 50];
+    if (arr[0] != 10) {
+        print(f"FAIL: arr[0]={arr[0]}, expected=10");
+        return 1;
+    }
+    if (arr[4] != 50) {
+        print(f"FAIL: arr[4]={arr[4]}, expected=50");
+        return 1;
+    }
+
+    // Sum the list
+    let s = sum_list(arr, 5);
+    // 10+20+30+40+50 = 150
+    if (s != 150) {
+        print(f"FAIL: sum={s}, expected=150");
+        return 1;
+    }
+
+    // Mutation
+    arr[2] = 99;
+    if (arr[2] != 99) {
+        print(f"FAIL: arr[2]={arr[2]}, expected=99 after mutation");
+        return 1;
+    }
+
+    // Build list with push
+    let mut dynamic: List<Int> = [];
+    dynamic.push(1);
+    dynamic.push(2);
+    dynamic.push(3);
+    dynamic.push(4);
+    dynamic.push(5);
+
+    if (dynamic.len() != 5) {
+        print(f"FAIL: dynamic.len()={dynamic.len()}, expected=5");
+        return 1;
+    }
+
+    let dsum = sum_list(dynamic, 5);
+    // 1+2+3+4+5 = 15
+    if (dsum != 15) {
+        print(f"FAIL: dynamic sum={dsum}, expected=15");
+        return 1;
+    }
+
+    // Pop
+    let popped = dynamic.pop();
+    if (dynamic.len() != 4) {
+        print(f"FAIL: after pop len={dynamic.len()}, expected=4");
+        return 1;
+    }
+
+    // Build larger list
+    let mut big: List<Int> = [];
+    let mut i = 0;
+    while (i < 100) {
+        big.push(i);
+        i = i + 1;
+    }
+    if (big.len() != 100) {
+        print(f"FAIL: big.len()={big.len()}, expected=100");
+        return 1;
+    }
+    // Sum 0..99 = 4950
+    let big_sum = sum_list(big, 100);
+    if (big_sum != 4950) {
+        print(f"FAIL: big_sum={big_sum}, expected=4950");
+        return 1;
+    }
+
+    print("858_list_operations: PASS");
+    0
+}

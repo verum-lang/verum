@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, references, checked, error
+// @description: Test detection of double checked in reference type
+// @expected-error: E088
+
+// Double checked is not valid
+fn test(x: &checked checked T) {}

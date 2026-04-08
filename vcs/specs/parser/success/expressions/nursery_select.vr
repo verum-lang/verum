@@ -1,0 +1,221 @@
+// @test: parse-pass
+// @tier: 0
+// @category: expressions
+// @level: L0
+// @tags: parser, expressions, nursery, select, async, structured-concurrency
+// @description: Comprehensive tests for nursery and select expressions
+
+// ============================================================================
+// Basic Nursery Expressions
+// Grammar: 'nursery' , [ nursery_options ] , block_expr , [ nursery_handlers ]
+// ============================================================================
+
+fn test_basic_nursery() {
+    nursery {
+        let a = spawn fetch_a();
+        let b = spawn fetch_b();
+    }
+}
+
+fn test_nursery_with_timeout() {
+    nursery(timeout: 5.seconds) {
+        let result = spawn fetch_data();
+    }
+}
+
+fn test_nursery_with_options() {
+    nursery(timeout: 10.seconds, on_error: cancel_all) {
+        spawn task_a();
+        spawn task_b();
+    }
+}
+
+fn test_nursery_with_max_tasks() {
+    nursery(max_tasks: 4) {
+        for i in 0..10 {
+            spawn process(i);
+        }
+    }
+}
+
+fn test_nursery_on_error_modes() {
+    nursery(on_error: cancel_all) {
+        spawn risky_task();
+    }
+
+    nursery(on_error: wait_all) {
+        spawn another_task();
+    }
+
+    nursery(on_error: fail_fast) {
+        spawn fast_fail_task();
+    }
+}
+
+// ============================================================================
+// Nursery Handlers
+// Grammar: nursery_handlers = nursery_cancel , [ nursery_recover ] | nursery_recover
+// ============================================================================
+
+fn test_nursery_on_cancel() {
+    nursery(timeout: 1.seconds) {
+        spawn long_task();
+    } on_cancel {
+        cleanup();
+    }
+}
+
+fn test_nursery_recover_match() {
+    nursery {
+        spawn fetch_data();
+    } recover {
+        TimeoutError => default_value,
+        NetworkError(e) => fallback(e),
+    }
+}
+
+fn test_nursery_recover_closure() {
+    nursery {
+        spawn task();
+    } recover |e| {
+        log_error(e);
+        default_result
+    }
+}
+
+fn test_nursery_both_handlers() {
+    nursery(timeout: 5.seconds) {
+        spawn critical_task();
+    } on_cancel {
+        abort_gracefully();
+    } recover {
+        Timeout => cached_result,
+        _ => panic("Unhandled error"),
+    }
+}
+
+// ============================================================================
+// Select Expressions
+// Grammar: 'select' , [ 'biased' ] , '{' , select_arms , '}'
+// ============================================================================
+
+fn test_basic_select() {
+    select {
+        msg = rx.recv().await => handle(msg),
+        result = task.await => process(result),
+    }
+}
+
+fn test_select_biased() {
+    select biased {
+        priority = priority_channel.recv().await => handle_priority(priority),
+        normal = normal_channel.recv().await => handle_normal(normal),
+    }
+}
+
+fn test_select_with_guards() {
+    select {
+        msg = channel.recv().await if !closed => process(msg),
+        _ = timeout.await if timeout_enabled => handle_timeout(),
+    }
+}
+
+fn test_select_with_else() {
+    select {
+        data = rx.recv().await => handle(data),
+        else => default_action(),
+    }
+}
+
+fn test_select_complex() {
+    select biased {
+        cmd = command_rx.recv().await if running => {
+            match cmd {
+                Command.Stop => break,
+                Command.Pause => pause(),
+                Command.Resume => resume(),
+            }
+        },
+        data = data_rx.recv().await => {
+            buffer.push(data);
+        },
+        _ = flush_interval.tick().await if !buffer.is_empty() => {
+            flush_buffer(&mut buffer);
+        },
+        else => {
+            idle_count += 1;
+        },
+    }
+}
+
+fn test_select_patterns() {
+    select {
+        Some(val) = maybe_channel.recv().await => use_val(val),
+        Ok(result) = fallible_task.await => success(result),
+        Err(e) = another_task.await => handle_error(e),
+    }
+}
+
+// ============================================================================
+// Spawn Expressions
+// Grammar: 'spawn' , [ 'using' , '[' , identifier_list , ']' ] , expression
+// ============================================================================
+
+fn test_basic_spawn() {
+    spawn async { work() }
+}
+
+fn test_spawn_with_contexts() {
+    spawn using [Database, Logger] async {
+        db_query();
+        log_action();
+    }
+}
+
+fn test_spawn_expression() {
+    let handle = spawn compute_value();
+}
+
+// ============================================================================
+// Yield Expressions
+// Grammar: 'yield' , expression
+// ============================================================================
+
+fn* range_generator(n: Int) -> Int {
+    for i in 0..n {
+        yield i;
+    }
+}
+
+async fn* async_generator() -> Data using [Http] {
+    while let Some(page) = next_page().await {
+        yield page;
+    }
+}
+
+// ============================================================================
+// Complex Async Patterns
+// ============================================================================
+
+fn test_nested_nursery() {
+    nursery {
+        spawn nursery {
+            spawn inner_task_a();
+            spawn inner_task_b();
+        };
+        spawn outer_task();
+    }
+}
+
+fn test_select_in_nursery() {
+    nursery(timeout: 30.seconds) {
+        spawn async {
+            loop {
+                select {
+                    msg = rx.recv().await => process(msg),
+                    _ = shutdown.recv().await => break,
+                }
+            }
+        };
+    }
+}

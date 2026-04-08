@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, let, equals, error
+// @description: Test missing equals sign in let statement with initializer
+// @expected-error: E042
+
+fn test() {
+    let x 5;
+}

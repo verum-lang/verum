@@ -1,0 +1,25 @@
+// @test: meta-fail
+// @level: L2
+// @tier: 0
+// @expected-error: M405
+// @tags: meta, quote, hygiene, stage, mismatch
+// @description: Tests detection of stage mismatches in quotes
+
+// =============================================================================
+// STAGE MISMATCH - REFERENCE ACROSS STAGES WITHOUT LIFT
+// =============================================================================
+
+// Stage 1 meta function trying to reference stage 1 binding in stage 0 code
+meta fn stage_mismatch() -> TokenStream {
+    let x = 42;  // Stage 1 binding
+
+    quote {
+        // This 'x' is at stage 0, but we're trying to reference stage 1 'x'
+        // without using lift() - this is a stage mismatch
+        let y = x;  // ERROR: M405 - Stage mismatch: 'x' is stage 1, context is stage 0
+    }
+}
+
+fn main() {
+    let result = @stage_mismatch();
+}

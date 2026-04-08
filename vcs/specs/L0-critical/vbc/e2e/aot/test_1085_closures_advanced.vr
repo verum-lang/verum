@@ -1,0 +1,117 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: closures, higher-order, capture, mutation
+// @description: Test advanced closure patterns - captures, mutation, higher-order
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn test_closure_capture() -> Int {
+    let offset = 100;
+    let add_offset = |x: Int| -> Int { x + offset };
+    let result = apply(add_offset, 42);
+    if result != 142 {
+        print(f"FAIL capture: result={result}, expected 142");
+        return 1;
+    }
+    print("  closure_capture: OK");
+    0
+}
+
+fn test_closure_factory() -> Int {
+    let make_adder = |n: Int| -> fn(Int) -> Int {
+        |x: Int| -> Int { x + n }
+    };
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    if add5(3) != 8 {
+        print(f"FAIL factory: add5(3)={add5(3)}, expected 8");
+        return 1;
+    }
+    if add10(3) != 13 {
+        print(f"FAIL factory: add10(3)={add10(3)}, expected 13");
+        return 1;
+    }
+    print("  closure_factory: OK");
+    0
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn test_compose() -> Int {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let double_then_inc = compose(inc, double);
+    let result = double_then_inc(5);
+    if result != 11 {
+        print(f"FAIL compose: result={result}, expected 11");
+        return 1;
+    }
+    print("  compose: OK");
+    0
+}
+
+fn fold(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_fold() -> Int {
+    let nums = [1, 2, 3, 4, 5];
+    let sum = fold(nums, 0, |a: Int, b: Int| -> Int { a + b });
+    if sum != 15 {
+        print(f"FAIL fold: sum={sum}, expected 15");
+        return 1;
+    }
+    let product = fold(nums, 1, |a: Int, b: Int| -> Int { a * b });
+    if product != 120 {
+        print(f"FAIL fold: product={product}, expected 120");
+        return 1;
+    }
+    print("  fold: OK");
+    0
+}
+
+fn test_mutable_capture() -> Int {
+    let mut count = 0;
+    let increment = || -> Int {
+        count = count + 1;
+        count
+    };
+    increment();
+    increment();
+    increment();
+    let final_val = increment();
+    if final_val != 4 {
+        print(f"FAIL mut_capture: final={final_val}, expected 4");
+        return 1;
+    }
+    print("  mutable_capture: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Advanced Closure Tests:");
+    let mut failures = 0;
+    failures = failures + test_closure_capture();
+    failures = failures + test_closure_factory();
+    failures = failures + test_compose();
+    failures = failures + test_fold();
+    failures = failures + test_mutable_capture();
+
+    if failures == 0 {
+        print("All advanced closure tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

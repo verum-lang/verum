@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, typetest, runtime-types
+// @description: TypeTest pattern exhaustiveness edge cases
+
+type Maybe<T> is None | Some(T);
+
+// Base protocol for runtime type tests
+type Showable is protocol {
+    fn show(&self) -> Text;
+};
+
+// Variant types for testing
+type Animal is Dog | Cat | Bird;
+
+implement Showable for Animal {
+    fn show(&self) -> Text =
+        match self {
+            Dog => "dog",
+            Cat => "cat",
+            Bird => "bird"
+        };
+}
+
+// TypeTest with union type
+fn identify_animal(a: Animal) -> Text =
+    match a {
+        x is Dog => "is a dog",
+        x is Cat => "is a cat",
+        x is Bird => "is a bird"
+    };
+
+// TypeTest combined with guards
+fn animal_with_condition(a: Animal, friendly: Bool) -> Text =
+    match a {
+        x is Dog if friendly => "friendly dog",
+        x is Dog => "unfriendly dog",
+        x is Cat => "cat (independent)",
+        _ => "other animal"
+    };
+
+// TypeTest on protocol implementors
+fn show_if_showable<T>(value: T) -> Maybe<Text> =
+    match value {
+        x is Showable => Some(x.show()),
+        _ => None
+    };
+
+// Nested TypeTest patterns
+type Container is Box { value: Animal } | Empty;
+
+fn describe_container(c: Container) -> Text =
+    match c {
+        Box { value } if value is Dog => "box with dog",
+        Box { value } if value is Cat => "box with cat",
+        Box { .. } => "box with something",
+        Empty => "empty"
+    };
+
+// TypeTest with binding
+fn extract_if_dog(a: Animal) -> Maybe<Animal> =
+    match a {
+        dog is Dog => Some(dog),
+        _ => None
+    };
+
+// Multiple TypeTest alternatives
+fn categorize_animal(a: Animal) -> Text =
+    match a {
+        x is Dog | x is Cat => "mammal",
+        x is Bird => "bird"
+    };
+
+// TypeTest with record pattern
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { base: Float, height: Float };
+
+fn area(s: Shape) -> Float =
+    match s {
+        c is Circle => 3.14159 * c.radius * c.radius,
+        r is Rectangle => r.width * r.height,
+        t is Triangle => 0.5 * t.base * t.height
+    };
+
+// TypeTest preserving type information
+fn double_if_circle(s: Shape) -> Shape =
+    match s {
+        c is Circle => Circle { radius: c.radius * 2.0 },
+        other => other
+    };
+
+// Exhaustive TypeTest on closed union (use local Outcome to avoid stdlib clash)
+type Outcome<T, E> is OkVal(T) | ErrVal(E);
+
+fn handle_outcome<T, E>(r: Outcome<T, E>) -> Text =
+    match r {
+        OkVal(_) => "success",
+        ErrVal(_) => "failure"
+    };
+
+fn main() {
+    assert(identify_animal(Dog) == "is a dog");
+    assert(identify_animal(Cat) == "is a cat");
+    assert(identify_animal(Bird) == "is a bird");
+
+    assert(animal_with_condition(Dog, true) == "friendly dog");
+    assert(animal_with_condition(Dog, false) == "unfriendly dog");
+
+    let boxed = Box { value: Dog };
+    assert(describe_container(boxed) == "box with dog");
+    assert(describe_container(Empty) == "empty");
+
+    let circle = Circle { radius: 2.0 };
+    let rect = Rectangle { width: 3.0, height: 4.0 };
+    assert(area(circle) > 12.0);
+    assert(area(rect) == 12.0);
+
+    assert(categorize_animal(Dog) == "mammal");
+    assert(categorize_animal(Bird) == "bird");
+}

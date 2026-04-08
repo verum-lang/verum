@@ -309,9 +309,14 @@ impl std::fmt::Display for ErrorMatchResult {
 /// Configuration for the test executor.
 #[derive(Debug, Clone)]
 pub struct ExecutorConfig {
-    /// Path to the single `verum` CLI binary.
-    /// All tiers are dispatched through `verum run --tier <T> <file>`.
-    pub verum_bin: PathBuf,
+    /// Path to the verum interpreter
+    pub interpreter_path: PathBuf,
+    /// Path to the verum JIT compiler (baseline)
+    pub jit_base_path: PathBuf,
+    /// Path to the verum JIT compiler (optimized)
+    pub jit_opt_path: PathBuf,
+    /// Path to the verum AOT compiler
+    pub aot_path: PathBuf,
     /// Working directory for test execution
     pub work_dir: PathBuf,
     /// Default timeout in milliseconds
@@ -322,7 +327,6 @@ pub struct ExecutorConfig {
     /// This is faster for parse/typecheck tests but requires verum_compiler
     pub use_direct_integration: bool,
     /// Path to the main verum CLI binary (for process-based execution)
-    /// (Legacy alias — prefer `verum_bin` directly)
     pub verum_cli_path: Option<PathBuf>,
     /// Available features for @requires directive
     pub available_features: Set<Text>,
@@ -337,11 +341,11 @@ pub struct ExecutorConfig {
 
 impl Default for ExecutorConfig {
     fn default() -> Self {
-        // Locate the single `verum` binary
+        // Try to find the verum CLI in common locations
         let verum_cli_path = Self::find_verum_cli();
-        let verum_bin = verum_cli_path
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "verum.exe" } else { "verum" }));
+
+        // Find the vcs/bin directory with wrapper scripts
+        let bin_dir = Self::find_bin_dir();
 
         // Default available features
         let mut available_features = Set::new();
@@ -356,14 +360,20 @@ impl Default for ExecutorConfig {
         }
 
         Self {
-            verum_bin,
+            interpreter_path: bin_dir.join("verum-interpreter"),
+            jit_base_path: bin_dir.join("verum-jit"),
+            jit_opt_path: bin_dir.join("verum-jit"),
+            aot_path: bin_dir.join("verum-aot"),
             work_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             default_timeout_ms: 30_000,
             env: Map::new(),
+            // Default to direct integration (faster and no external dependencies)
             use_direct_integration: true,
             verum_cli_path,
             available_features,
+            // Default to running full tests (including runtime)
             compile_time_only: false,
+            // VBC output disabled by default
             vbc_output_dir: None,
             vbc_preserve_paths: false,
         }
@@ -390,6 +400,56 @@ pub struct ExecutorConfigBuilder {
 }
 
 impl ExecutorConfig {
+    /// Find the vcs/bin directory with wrapper scripts
+    fn find_bin_dir() -> PathBuf {
+        // Check VCS_BIN environment variable first
+        if let Ok(path) = std::env::var("VCS_BIN") {
+            let path = PathBuf::from(path);
+            if path.exists() {
+                // Canonicalize to absolute path for Command::new()
+                if let Ok(abs_path) = path.canonicalize() {
+                    return abs_path;
+                }
+                return path;
+            }
+        }
+
+        // Try relative to current directory
+        let cwd_bin = PathBuf::from("vcs/bin");
+        if cwd_bin.exists() {
+            // Canonicalize to absolute path for Command::new()
+            if let Ok(abs_path) = cwd_bin.canonicalize() {
+                return abs_path;
+            }
+            return cwd_bin;
+        }
+
+        // Also check "bin" directly (when running from vcs directory)
+        let bin_direct = PathBuf::from("bin");
+        if bin_direct.exists() && bin_direct.join("verum-interpreter").exists() {
+            // Canonicalize to absolute path for Command::new()
+            if let Ok(abs_path) = bin_direct.canonicalize() {
+                return abs_path;
+            }
+            return bin_direct;
+        }
+
+        // Try to find by searching up the directory tree
+        if let Ok(cwd) = std::env::current_dir() {
+            for ancestor in cwd.ancestors() {
+                let bin_dir = ancestor.join("vcs").join("bin");
+                if bin_dir.exists() {
+                    return bin_dir;
+                }
+            }
+        }
+
+        // Fall back to system PATH lookup (empty path)
+        PathBuf::new()
+    }
+}
+
+impl ExecutorConfig {
     /// Find the verum CLI binary in common locations
     pub fn find_verum_cli() -> Option<PathBuf> {
         // Check VERUM_CLI environment variable first
@@ -402,35 +462,28 @@ impl ExecutorConfig {
 
         // Check for cargo build output in workspace root
         // The vtest runner is in vcs/runner/vtest, so workspace root is ../../..
-        let exe = if cfg!(windows) { "verum.exe" } else { "verum" };
         let workspace_paths = [
-            format!("../../../target/release/{exe}"),
-            format!("../../../target/debug/{exe}"),
-            exe.to_string(),
+            // Relative from vcs/runner/vtest
+            "../../../target/release/verum",
+            "../../../target/debug/verum",
+            // Standard PATH locations
+            "verum",
         ];
 
-        for path_str in &workspace_paths {
+        for path_str in workspace_paths {
             let path = PathBuf::from(path_str);
             if path.exists() {
                 return Some(path);
             }
         }
 
-        // Check if 'verum' is in PATH using platform-appropriate command
-        let (lookup_cmd, lookup_arg) = if cfg!(windows) {
-            ("where.exe", "verum")
-        } else {
-            ("which", "verum")
-        };
-        if let Ok(output) = std::process::Command::new(lookup_cmd).arg(lookup_arg).output() {
+        // Check if 'verum' is in PATH
+        if let Ok(output) = std::process::Command::new("which").arg("verum").output() {
             if output.status.success() {
-                // `where` on Windows may return multiple lines; take the first
                 let path_str = String::from_utf8_lossy(&output.stdout);
-                if let Some(first_line) = path_str.lines().next() {
-                    let path = PathBuf::from(first_line.trim());
-                    if path.exists() {
-                        return Some(path);
-                    }
+                let path = PathBuf::from(path_str.trim());
+                if path.exists() {
+                    return Some(path);
                 }
             }
         }
@@ -458,26 +511,22 @@ impl ExecutorConfig {
 }
 
 impl ExecutorConfig {
-    /// Build the command line for a given execution tier.
+    /// Get the command for a specific tier.
     ///
-    /// All tiers are dispatched through the single `verum` binary:
-    ///   Tier 0 — `verum run --interp <file>`  (VBC interpreter)
-    ///   Tier 1 — `verum run --aot   <file>`   (LLVM AOT)
-    ///
-    /// The caller appends the source file path after the returned args.
+    /// Note: The wrapper scripts (verum-interpreter, verum-jit, verum-aot) already
+    /// include the `run` subcommand internally, so we only need to pass tier-specific
+    /// flags here. The file path is appended by the caller.
     pub fn command_for_tier(&self, tier: Tier) -> (PathBuf, List<Text>) {
-        let bin = self.verum_bin.clone();
-        let args: List<Text> = match tier {
-            Tier::Tier0 => vec![
-                "run".to_string().into(),
-                "--interp".to_string().into(),
-            ].into(),
-            Tier::Tier1 | Tier::Tier2 | Tier::Tier3 => vec![
-                "run".to_string().into(),
-                "--aot".to_string().into(),
-            ].into(),
-        };
-        (bin, args)
+        match tier {
+            // verum-interpreter already calls: verum run --interp "$@"
+            Tier::Tier0 => (self.interpreter_path.clone(), vec![].into()),
+            // verum-jit parses --baseline and calls: verum run --jit "$@"
+            Tier::Tier1 => (self.jit_base_path.clone(), vec!["--baseline".to_string().into()].into()),
+            // verum-jit parses --optimize and calls: verum run --aot "$@"
+            Tier::Tier2 => (self.jit_opt_path.clone(), vec!["--optimize".to_string().into()].into()),
+            // verum-aot already calls: verum run --optimized "$@"
+            Tier::Tier3 => (self.aot_path.clone(), vec![].into()),
+        }
     }
 }
 
@@ -2422,9 +2471,21 @@ impl Executor {
         _tier: Tier,
         phase: &str,
     ) -> Result<ProcessOutput, ExecutorError> {
-        // For compile-time phases (verify, check, build, parse), use verum CLI directly.
-        // These phases don't depend on tier (interpreter vs AOT).
-        let cmd_path = self.config.verum_bin.clone();
+        // For compile-time phases (verify, check, build, parse), use verum CLI directly
+        // These phases don't depend on tier (interpreter vs JIT vs AOT)
+        let cmd_path = match &self.config.verum_cli_path {
+            Some(path) => path.clone(),
+            None => {
+                // Try to find verum CLI
+                if let Some(found) = ExecutorConfig::find_verum_cli() {
+                    found
+                } else {
+                    return Err(ExecutorError::CommandNotFound(
+                        "verum CLI not found. Run 'cargo build --release -p verum_cli'".to_string().into(),
+                    ));
+                }
+            }
+        };
 
         // Build args: verum <phase> <file>
         let args = vec![phase.to_string().into(), directives.source_path.to_string().into()];
@@ -2466,14 +2527,11 @@ impl Executor {
             cmd.env(key.as_str(), value.as_str());
         }
 
+        // Enforce per-process memory limit (2GB) to prevent OOM
         // Enforce per-process memory limit (2GB) to prevent OOM.
-        //
-        // Platform strategy:
-        //   Linux  — RLIMIT_AS (virtual address space, hard limit)
-        //   macOS  — RLIMIT_RSS (advisory, kernel uses it for OOM decisions)
-        //   Windows — Job Object with JOB_OBJECT_LIMIT_PROCESS_MEMORY
-        const MEMORY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
-
+        // On Linux, RLIMIT_AS limits virtual address space.
+        // On macOS, RLIMIT_AS is ignored; use RLIMIT_RSS instead (advisory but
+        // respected by the kernel for RSS-based OOM decisions).
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -2481,8 +2539,8 @@ impl Executor {
             unsafe {
                 cmd.pre_exec(|| {
                     let limit = libc::rlimit {
-                        rlim_cur: MEMORY_LIMIT_BYTES as _,
-                        rlim_max: MEMORY_LIMIT_BYTES as _,
+                        rlim_cur: 2 * 512 * 1024 * 1024, // 2GB soft limit
+                        rlim_max: 2 * 512 * 1024 * 1024, // 2GB hard limit
                     };
                     #[cfg(target_os = "linux")]
                     {
@@ -2504,14 +2562,6 @@ impl Executor {
                 ExecutorError::IoError(e)
             }
         })?;
-
-        // On Windows, assign the child to a Job Object with a memory limit.
-        // The Job Object is dropped (and closed) when this scope exits, but the
-        // limit is enforced by the kernel for the child's lifetime.
-        #[cfg(windows)]
-        let _job_guard = child.id().and_then(|pid| {
-            assign_job_memory_limit(pid, MEMORY_LIMIT_BYTES)
-        });
 
         // Wait with timeout, killing the process if it exceeds the limit
         let timeout_duration = Duration::from_millis(timeout_ms);
@@ -3760,72 +3810,5 @@ pub mod verify {
                 phase: "compile".to_string(),
             },
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Platform: Windows Job Object memory limiter
-// ---------------------------------------------------------------------------
-
-/// RAII guard for a Windows Job Object handle.
-#[cfg(windows)]
-struct JobGuard(*mut std::ffi::c_void); // HANDLE = *mut c_void
-
-#[cfg(windows)]
-impl Drop for JobGuard {
-    fn drop(&mut self) {
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
-    }
-}
-
-/// Assign `pid` to a new Job Object that enforces `limit_bytes` of committed
-/// memory.  Returns the guard whose drop closes the job handle.
-///
-/// If any Win32 call fails we silently return `None` — running without a
-/// memory cap is preferable to aborting the test.
-#[cfg(windows)]
-fn assign_job_memory_limit(pid: u32, limit_bytes: u64) -> Option<JobGuard> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::JobObjects::*;
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
-
-    unsafe {
-        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-        if job.is_null() {
-            return None;
-        }
-
-        // Configure memory limit
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY;
-        info.ProcessMemoryLimit = limit_bytes as usize;
-
-        let ok = SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            &info as *const _ as *const _,
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        );
-        if ok == 0 {
-            CloseHandle(job);
-            return None;
-        }
-
-        // Open the child process handle with enough rights to assign it
-        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-        if process.is_null() {
-            CloseHandle(job);
-            return None;
-        }
-
-        let assigned = AssignProcessToJobObject(job, process);
-        CloseHandle(process);
-
-        if assigned == 0 {
-            CloseHandle(job);
-            return None;
-        }
-
-        Some(JobGuard(job))
     }
 }

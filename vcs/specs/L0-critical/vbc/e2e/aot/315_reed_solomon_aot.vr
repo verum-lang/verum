@@ -1,0 +1,322 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, reed-solomon, error-correction, polynomial, galois-field
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Reed-Solomon-like error correction using polynomial evaluation over GF(p)
+// Uses prime p=97 for all arithmetic
+
+fn field_prime() -> Int { 97 }
+
+fn gf_norm(a: Int) -> Int {
+    let p = field_prime();
+    let r = a % p;
+    if r < 0 { r + p } else { r }
+}
+
+fn gf_add(a: Int, b_val: Int) -> Int { gf_norm(a + b_val) }
+fn gf_sub(a: Int, b_val: Int) -> Int { gf_norm(a - b_val) }
+fn gf_mul(a: Int, b_val: Int) -> Int { gf_norm(a * b_val) }
+fn gf_neg(a: Int) -> Int { gf_norm(-a) }
+
+fn gf_exp(base: Int, exp: Int) -> Int {
+    let p = field_prime();
+    let mut result = 1;
+    let mut b_val = gf_norm(base);
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b_val) % p; }
+        b_val = (b_val * b_val) % p;
+        e = e / 2;
+    }
+    result
+}
+
+fn gf_inv(a: Int) -> Int {
+    gf_exp(a, field_prime() - 2)
+}
+
+fn gf_div(a: Int, b_val: Int) -> Int {
+    gf_mul(a, gf_inv(b_val))
+}
+
+// Polynomial with up to 8 coefficients (degree <= 7)
+type Poly8 is { c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int, c6: Int, c7: Int, deg: Int };
+
+fn poly_new() -> Poly8 {
+    Poly8 { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, deg: 0 }
+}
+
+fn poly_get(p: Poly8, i: Int) -> Int {
+    if i == 0 { p.c0 } else if i == 1 { p.c1 } else if i == 2 { p.c2 }
+    else if i == 3 { p.c3 } else if i == 4 { p.c4 } else if i == 5 { p.c5 }
+    else if i == 6 { p.c6 } else { p.c7 }
+}
+
+fn poly_set(p: Poly8, i: Int, v: Int) -> Poly8 {
+    Poly8 {
+        c0: if i == 0 { v } else { p.c0 }, c1: if i == 1 { v } else { p.c1 },
+        c2: if i == 2 { v } else { p.c2 }, c3: if i == 3 { v } else { p.c3 },
+        c4: if i == 4 { v } else { p.c4 }, c5: if i == 5 { v } else { p.c5 },
+        c6: if i == 6 { v } else { p.c6 }, c7: if i == 7 { v } else { p.c7 },
+        deg: p.deg
+    }
+}
+
+fn poly_set_deg(p: Poly8, d: Int) -> Poly8 {
+    Poly8 { c0: p.c0, c1: p.c1, c2: p.c2, c3: p.c3, c4: p.c4, c5: p.c5, c6: p.c6, c7: p.c7, deg: d }
+}
+
+// Evaluate polynomial using Horner's method over GF(p)
+fn poly_eval(p: Poly8, x: Int) -> Int {
+    let mut result = 0;
+    let mut i = p.deg;
+    while i >= 0 {
+        result = gf_add(gf_mul(result, x), poly_get(p, i));
+        i = i - 1;
+    }
+    result
+}
+
+// === Reed-Solomon encoding ===
+// Message: k symbols (coefficients of a degree k-1 polynomial)
+// Codeword: n symbols (polynomial evaluated at n distinct points)
+// We use evaluation points 1, 2, ..., n
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+// Encode message (k symbols) into codeword (n symbols)
+// msg: coefficients of message polynomial (degree k-1)
+// n: codeword length (n > k gives n-k redundancy symbols)
+fn rs_encode(msg: Arr8, n: Int) -> Arr8 {
+    let k = msg.len;
+    // Build message polynomial
+    let mut mp = poly_new();
+    let mut i = 0;
+    while i < k {
+        mp = poly_set(mp, i, gf_norm(arr8_get(msg, i)));
+        i = i + 1;
+    }
+    mp = poly_set_deg(mp, k - 1);
+
+    // Evaluate at points 1, 2, ..., n
+    let mut codeword = arr8_new(n);
+    let mut j = 0;
+    while j < n {
+        let eval_point = j + 1;  // Points 1, 2, ..., n
+        codeword = arr8_set(codeword, j, poly_eval(mp, eval_point));
+        j = j + 1;
+    }
+    codeword
+}
+
+// === Lagrange interpolation over GF(p) ===
+// Given k points (x_i, y_i), recover the unique degree-(k-1) polynomial
+// Returns the polynomial coefficient at position `coeff_idx`
+// Actually, we just need to evaluate the interpolation polynomial at a point.
+fn lagrange_eval(xs: Arr8, ys: Arr8, k: Int, eval_x: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < k {
+        let mut num = arr8_get(ys, i);
+        let mut j = 0;
+        while j < k {
+            if j != i {
+                num = gf_mul(num, gf_sub(eval_x, arr8_get(xs, j)));
+                num = gf_mul(num, gf_inv(gf_sub(arr8_get(xs, i), arr8_get(xs, j))));
+            }
+            j = j + 1;
+        }
+        result = gf_add(result, num);
+        i = i + 1;
+    }
+    result
+}
+
+// RS decode: given n codeword symbols (some may be corrupted),
+// pick any k correct symbols and use Lagrange interpolation.
+// For simplicity, we use the first k symbols (assuming they're correct).
+fn rs_decode_simple(codeword: Arr8, k: Int) -> Arr8 {
+    // Use first k evaluation points (1, 2, ..., k)
+    let mut xs = arr8_new(k);
+    let mut ys = arr8_new(k);
+    let mut i = 0;
+    while i < k {
+        xs = arr8_set(xs, i, i + 1);
+        ys = arr8_set(ys, i, arr8_get(codeword, i));
+        i = i + 1;
+    }
+
+    // Recover message polynomial coefficients by evaluating at 0
+    // Actually, we recover by evaluating at the encoding points
+    // To get coefficients, use Lagrange to evaluate at 1, 2, ..., k
+    // But the message IS the coefficients, so we need a different approach.
+    // Instead, recover by evaluating the interpolated poly at specific points.
+    // Since encoding evaluated at 1..n, decoding should recover the original polynomial
+    // and then extract coefficients. For this test, we verify by re-encoding.
+
+    // For verification: evaluate the recovered polynomial at all n encoding points
+    let mut recovered = arr8_new(k);
+    let mut j = 0;
+    while j < k {
+        // We need to recover coefficient j of the polynomial
+        // Instead, we verify that interpolation reproduces all codeword values
+        recovered = arr8_set(recovered, j, lagrange_eval(xs, ys, k, j + 1));
+        j = j + 1;
+    }
+    recovered
+}
+
+fn test_gf_arithmetic() {
+    assert_eq(gf_add(50, 50), 3);     // 100 % 97
+    assert_eq(gf_sub(5, 10), 92);     // -5 % 97 = 92
+    assert_eq(gf_mul(10, 10), 3);     // 100 % 97
+    assert_eq(gf_mul(gf_inv(7), 7), 1);
+    assert_eq(gf_exp(2, 96), 1);      // Fermat's little theorem
+}
+
+fn test_encode_decode() {
+    // Message: [5, 10, 15] (3 symbols, degree-2 polynomial)
+    let msg = Arr8 { a0: 5, a1: 10, a2: 15, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+
+    // Encode into 6 symbols (3 data + 3 redundancy)
+    let codeword = rs_encode(msg, 6);
+
+    // Verify: polynomial is p(x) = 5 + 10x + 15x^2
+    // p(1) = 5 + 10 + 15 = 30
+    assert_eq(arr8_get(codeword, 0), 30);
+    // p(2) = 5 + 20 + 60 = 85
+    assert_eq(arr8_get(codeword, 1), 85);
+    // p(3) = 5 + 30 + 135 = 170 mod 97 = 73
+    assert_eq(arr8_get(codeword, 2), 73);
+    // p(4) = 5 + 40 + 240 = 285 mod 97 = 285 - 2*97 = 91
+    assert_eq(arr8_get(codeword, 3), 91);
+    // p(5) = 5 + 50 + 375 = 430 mod 97 = 430 - 4*97 = 42
+    assert_eq(arr8_get(codeword, 4), 42);
+    // p(6) = 5 + 60 + 540 = 605 mod 97 = 605 - 6*97 = 23
+    assert_eq(arr8_get(codeword, 5), 23);
+}
+
+fn test_lagrange_interpolation() {
+    // Known polynomial p(x) = 5 + 10x + 15x^2 over GF(97)
+    // Evaluate at points 1,2,3 to get y values
+    let xs = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let ys = Arr8 { a0: 30, a1: 85, a2: 73, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+
+    // Lagrange should reproduce polynomial at other points
+    // p(4) = 91
+    assert_eq(lagrange_eval(xs, ys, 3, 4), 91);
+    // p(5) = 42
+    assert_eq(lagrange_eval(xs, ys, 3, 5), 42);
+    // p(6) = 23
+    assert_eq(lagrange_eval(xs, ys, 3, 6), 23);
+
+    // Also verify at given points
+    assert_eq(lagrange_eval(xs, ys, 3, 1), 30);
+    assert_eq(lagrange_eval(xs, ys, 3, 2), 85);
+    assert_eq(lagrange_eval(xs, ys, 3, 3), 73);
+}
+
+fn test_error_detection() {
+    // Encode message, corrupt one symbol, detect error
+    let msg = Arr8 { a0: 7, a1: 13, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    // p(x) = 7 + 13x
+    let codeword = rs_encode(msg, 4);
+
+    // p(1) = 20, p(2) = 33, p(3) = 46, p(4) = 59
+    assert_eq(arr8_get(codeword, 0), 20);
+    assert_eq(arr8_get(codeword, 1), 33);
+    assert_eq(arr8_get(codeword, 2), 46);
+    assert_eq(arr8_get(codeword, 3), 59);
+
+    // Corrupt codeword[1] (change 33 to 50)
+    let corrupted = arr8_set(codeword, 1, 50);
+
+    // Use non-corrupted symbols (0, 2) for recovery via Lagrange
+    let xs = Arr8 { a0: 1, a1: 3, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let ys = Arr8 { a0: arr8_get(corrupted, 0), a1: arr8_get(corrupted, 2), a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+
+    // Recover: evaluate at point 2 (should give 33, not 50)
+    let recovered = lagrange_eval(xs, ys, 2, 2);
+    assert_eq(recovered, 33);  // Correctly recovered!
+    // The corrupted value was 50, so we detected the error
+    assert_eq(arr8_get(corrupted, 1) != recovered, true);
+}
+
+fn test_erasure_correction() {
+    // Message: [3, 7, 11] (k=3)
+    let msg = Arr8 { a0: 3, a1: 7, a2: 11, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let codeword = rs_encode(msg, 6);
+
+    // "Erase" (lose) symbols 0 and 3 -- we know which are lost
+    // Use remaining symbols 1, 2, 4 (at points 2, 3, 5)
+    let xs = Arr8 { a0: 2, a1: 3, a2: 5, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let ys = Arr8 { a0: arr8_get(codeword, 1), a1: arr8_get(codeword, 2), a2: arr8_get(codeword, 4), a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+
+    // Recover the erased symbols
+    // Symbol 0 was at point 1: p(1)
+    let rec0 = lagrange_eval(xs, ys, 3, 1);
+    assert_eq(rec0, arr8_get(codeword, 0));
+
+    // Symbol 3 was at point 4: p(4)
+    let rec3 = lagrange_eval(xs, ys, 3, 4);
+    assert_eq(rec3, arr8_get(codeword, 3));
+
+    // Also verify all other points match
+    let rec1 = lagrange_eval(xs, ys, 3, 2);
+    assert_eq(rec1, arr8_get(codeword, 1));
+
+    let rec5 = lagrange_eval(xs, ys, 3, 6);
+    assert_eq(rec5, arr8_get(codeword, 5));
+}
+
+fn test_different_messages() {
+    // Verify encoding is unique per message
+    let msg1 = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let msg2 = Arr8 { a0: 1, a1: 2, a2: 4, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 3 };
+    let cw1 = rs_encode(msg1, 5);
+    let cw2 = rs_encode(msg2, 5);
+
+    // At least one codeword symbol must differ
+    let mut differ = 0;
+    let mut i = 0;
+    while i < 5 {
+        if arr8_get(cw1, i) != arr8_get(cw2, i) { differ = 1; }
+        i = i + 1;
+    }
+    assert_eq(differ, 1);
+}
+
+fn main() -> Int {
+    test_gf_arithmetic();
+    test_encode_decode();
+    test_lagrange_interpolation();
+    test_error_detection();
+    test_erasure_correction();
+    test_different_messages();
+    print("[OK] 315_reed_solomon_aot");
+    0
+}

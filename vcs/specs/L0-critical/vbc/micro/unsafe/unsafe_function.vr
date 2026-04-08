@@ -1,0 +1,12 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, function, declaration
+// @description: Unsafe function declaration and call
+unsafe fn dangerous_operation(x: Int) -> Int {
+    x * 2
+}
+
+fn main() {
+    let result: Int = unsafe { dangerous_operation(21) };
+    assert_eq(result, 42);
+}

@@ -1,0 +1,19 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, redundant-pattern, warning
+// @description: Redundant pattern detection (should compile with warning)
+// @expected-warning: W0602
+
+type Color is Red | Green | Blue;
+
+// Redundant: Red case after wildcard
+fn with_redundant(c: Color) -> Text =
+    match c {
+        Red => "red",
+        _ => "other",
+        Green => "green"  // W0602: unreachable pattern
+    };
+
+fn main() {
+    let _ = with_redundant(Red);
+}

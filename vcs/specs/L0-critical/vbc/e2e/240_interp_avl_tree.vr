@@ -1,0 +1,417 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, avl-tree, balanced-tree, data-structure
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: AVL tree using array-based storage.
+// Tracks heights and balance factors. Tests insert with rotations.
+// Uses parallel arrays for: values, left child, right child, heights.
+// -1 = null/empty node. Recursive insert returns new subtree root index.
+
+// =============================================================================
+// Array storage (16 slots)
+// =============================================================================
+
+type Arr16 is { v0: Int, v1: Int, v2: Int, v3: Int,
+                v4: Int, v5: Int, v6: Int, v7: Int,
+                v8: Int, v9: Int, v10: Int, v11: Int,
+                v12: Int, v13: Int, v14: Int, v15: Int };
+
+fn ag(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 } else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else if i == 7 { a.v7 }
+    else if i == 8 { a.v8 } else if i == 9 { a.v9 }
+    else if i == 10 { a.v10 } else if i == 11 { a.v11 }
+    else if i == 12 { a.v12 } else if i == 13 { a.v13 }
+    else if i == 14 { a.v14 } else { a.v15 }
+}
+
+fn aset(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        v0: if i == 0 { val } else { a.v0 },
+        v1: if i == 1 { val } else { a.v1 },
+        v2: if i == 2 { val } else { a.v2 },
+        v3: if i == 3 { val } else { a.v3 },
+        v4: if i == 4 { val } else { a.v4 },
+        v5: if i == 5 { val } else { a.v5 },
+        v6: if i == 6 { val } else { a.v6 },
+        v7: if i == 7 { val } else { a.v7 },
+        v8: if i == 8 { val } else { a.v8 },
+        v9: if i == 9 { val } else { a.v9 },
+        v10: if i == 10 { val } else { a.v10 },
+        v11: if i == 11 { val } else { a.v11 },
+        v12: if i == 12 { val } else { a.v12 },
+        v13: if i == 13 { val } else { a.v13 },
+        v14: if i == 14 { val } else { a.v14 },
+        v15: if i == 15 { val } else { a.v15 }
+    }
+}
+
+fn neg_ones() -> Arr16 {
+    Arr16 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1,
+            v8: -1, v9: -1, v10: -1, v11: -1, v12: -1, v13: -1, v14: -1, v15: -1 }
+}
+
+fn zeros16() -> Arr16 {
+    Arr16 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+            v8: 0, v9: 0, v10: 0, v11: 0, v12: 0, v13: 0, v14: 0, v15: 0 }
+}
+
+// =============================================================================
+// Global AVL tree state using mutable arrays
+// Stored as globals in the functions via a State record
+// vals[i], lefts[i], rights[i], heights[i] describe node i
+// =============================================================================
+
+type AVLState is {
+    vals: Arr16,
+    lefts: Arr16,
+    rights: Arr16,
+    heights: Arr16,
+    next_free: Int
+};
+
+fn avl_init() -> AVLState {
+    AVLState { vals: zeros16(), lefts: neg_ones(), rights: neg_ones(),
+               heights: zeros16(), next_free: 0 }
+}
+
+fn max_int(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn get_height(s: AVLState, idx: Int) -> Int {
+    if idx == -1 { -1 } else { ag(s.heights, idx) }
+}
+
+fn calc_balance(s: AVLState, idx: Int) -> Int {
+    if idx == -1 { 0 }
+    else { get_height(s, ag(s.lefts, idx)) - get_height(s, ag(s.rights, idx)) }
+}
+
+fn fix_height(s: AVLState, idx: Int) -> AVLState {
+    let lh = get_height(s, ag(s.lefts, idx));
+    let rh = get_height(s, ag(s.rights, idx));
+    let h = max_int(lh, rh) + 1;
+    AVLState { vals: s.vals, lefts: s.lefts, rights: s.rights,
+               heights: aset(s.heights, idx, h), next_free: s.next_free }
+}
+
+// =============================================================================
+// Rotations — modify the state and return (new_state, new_subroot)
+// Encoded as: return value is the new subroot, state modified via wrapper
+// =============================================================================
+
+type RotResult is { st: AVLState, root: Int };
+
+// Right rotation: y is the node, x = y.left becomes new root
+fn rotate_right(s: AVLState, y: Int) -> RotResult {
+    let x = ag(s.lefts, y);
+    let b = ag(s.rights, x);
+    // x.right = y, y.left = b
+    let s2 = AVLState { vals: s.vals, lefts: aset(s.lefts, y, b),
+                         rights: aset(s.rights, x, y),
+                         heights: s.heights, next_free: s.next_free };
+    let s3 = fix_height(s2, y);
+    let s4 = fix_height(s3, x);
+    RotResult { st: s4, root: x }
+}
+
+// Left rotation: x is the node, y = x.right becomes new root
+fn rotate_left(s: AVLState, x: Int) -> RotResult {
+    let y = ag(s.rights, x);
+    let b = ag(s.lefts, y);
+    // y.left = x, x.right = b
+    let s2 = AVLState { vals: s.vals, lefts: aset(s.lefts, y, x),
+                         rights: aset(s.rights, x, b),
+                         heights: s.heights, next_free: s.next_free };
+    let s3 = fix_height(s2, x);
+    let s4 = fix_height(s3, y);
+    RotResult { st: s4, root: y }
+}
+
+// =============================================================================
+// AVL insert (recursive), returns (new_state, new_subroot)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn avl_insert_rec(s: AVLState, node: Int, val: Int) -> RotResult {
+    if node == -1 {
+        // Allocate new node
+        let idx = s.next_free;
+        let s2 = AVLState {
+            vals: aset(s.vals, idx, val),
+            lefts: s.lefts,
+            rights: s.rights,
+            heights: aset(s.heights, idx, 0),
+            next_free: idx + 1
+        };
+        return RotResult { st: s2, root: idx };
+    }
+
+    let cur = ag(s.vals, node);
+    if val == cur {
+        return RotResult { st: s, root: node };
+    }
+
+    let mut s2 = s;
+    if val < cur {
+        let sub = avl_insert_rec(s, ag(s.lefts, node), val);
+        s2 = AVLState { vals: sub.st.vals,
+                         lefts: aset(sub.st.lefts, node, sub.root),
+                         rights: sub.st.rights,
+                         heights: sub.st.heights,
+                         next_free: sub.st.next_free };
+    } else {
+        let sub = avl_insert_rec(s, ag(s.rights, node), val);
+        s2 = AVLState { vals: sub.st.vals,
+                         lefts: sub.st.lefts,
+                         rights: aset(sub.st.rights, node, sub.root),
+                         heights: sub.st.heights,
+                         next_free: sub.st.next_free };
+    }
+
+    // Update height
+    let s3 = fix_height(s2, node);
+    let bf = calc_balance(s3, node);
+
+    // Left-Left
+    if bf > 1 {
+        let lc = ag(s3.lefts, node);
+        if val < ag(s3.vals, lc) {
+            return rotate_right(s3, node);
+        }
+    }
+
+    // Right-Right
+    if bf < -1 {
+        let rc = ag(s3.rights, node);
+        if val > ag(s3.vals, rc) {
+            return rotate_left(s3, node);
+        }
+    }
+
+    // Left-Right
+    if bf > 1 {
+        let lc = ag(s3.lefts, node);
+        if val > ag(s3.vals, lc) {
+            let lr = rotate_left(s3, lc);
+            let s4 = AVLState { vals: lr.st.vals,
+                                 lefts: aset(lr.st.lefts, node, lr.root),
+                                 rights: lr.st.rights,
+                                 heights: lr.st.heights,
+                                 next_free: lr.st.next_free };
+            return rotate_right(s4, node);
+        }
+    }
+
+    // Right-Left
+    if bf < -1 {
+        let rc = ag(s3.rights, node);
+        if val < ag(s3.vals, rc) {
+            let rl = rotate_right(s3, rc);
+            let s4 = AVLState { vals: rl.st.vals,
+                                 lefts: rl.st.lefts,
+                                 rights: aset(rl.st.rights, node, rl.root),
+                                 heights: rl.st.heights,
+                                 next_free: rl.st.next_free };
+            return rotate_left(s4, node);
+        }
+    }
+
+    RotResult { st: s3, root: node }
+}
+
+// Wrapper: insert value, update root
+type AVLTree is { state: AVLState, root: Int };
+
+fn avl_new() -> AVLTree {
+    AVLTree { state: avl_init(), root: -1 }
+}
+
+fn avl_insert(t: AVLTree, val: Int) -> AVLTree {
+    let r = avl_insert_rec(t.state, t.root, val);
+    AVLTree { state: r.st, root: r.root }
+}
+
+// =============================================================================
+// Query functions
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn avl_search(s: AVLState, node: Int, val: Int) -> Bool {
+    if node == -1 { return false; }
+    let cur = ag(s.vals, node);
+    if val == cur { true }
+    else if val < cur { avl_search(s, ag(s.lefts, node), val) }
+    else { avl_search(s, ag(s.rights, node), val) }
+}
+
+fn avl_contains(t: AVLTree, val: Int) -> Bool {
+    avl_search(t.state, t.root, val)
+}
+
+@allow(unbounded_recursion)
+fn count_nodes(s: AVLState, node: Int) -> Int {
+    if node == -1 { 0 }
+    else { 1 + count_nodes(s, ag(s.lefts, node)) + count_nodes(s, ag(s.rights, node)) }
+}
+
+fn avl_count(t: AVLTree) -> Int {
+    count_nodes(t.state, t.root)
+}
+
+@allow(unbounded_recursion)
+fn is_balanced_at(s: AVLState, node: Int) -> Bool {
+    if node == -1 { return true; }
+    let bf = calc_balance(s, node);
+    if bf > 1 { return false; }
+    if bf < -1 { return false; }
+    if !is_balanced_at(s, ag(s.lefts, node)) { return false; }
+    is_balanced_at(s, ag(s.rights, node))
+}
+
+fn avl_balanced(t: AVLTree) -> Bool {
+    is_balanced_at(t.state, t.root)
+}
+
+@allow(unbounded_recursion)
+fn is_bst_at(s: AVLState, node: Int, lo: Int, hi: Int) -> Bool {
+    if node == -1 { return true; }
+    let v = ag(s.vals, node);
+    if v <= lo { return false; }
+    if v >= hi { return false; }
+    if !is_bst_at(s, ag(s.lefts, node), lo, v) { return false; }
+    is_bst_at(s, ag(s.rights, node), v, hi)
+}
+
+fn avl_is_bst(t: AVLTree) -> Bool {
+    is_bst_at(t.state, t.root, -999999, 999999)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_empty() {
+    let t = avl_new();
+    assert_eq(avl_count(t), 0);
+    assert_eq(avl_balanced(t), true);
+    assert_eq(avl_contains(t, 5), false);
+}
+
+fn test_single() {
+    let t = avl_insert(avl_new(), 10);
+    assert_eq(avl_count(t), 1);
+    assert_eq(avl_contains(t, 10), true);
+    assert_eq(avl_contains(t, 5), false);
+    assert_eq(avl_balanced(t), true);
+    assert_eq(avl_is_bst(t), true);
+}
+
+fn test_ascending_triggers_rotation() {
+    // 1, 2, 3 in order: without rotation would be a chain
+    let mut t = avl_new();
+    t = avl_insert(t, 1);
+    t = avl_insert(t, 2);
+    t = avl_insert(t, 3);
+    assert_eq(avl_count(t), 3);
+    assert_eq(avl_balanced(t), true);
+    assert_eq(avl_is_bst(t), true);
+    assert_eq(avl_contains(t, 1), true);
+    assert_eq(avl_contains(t, 2), true);
+    assert_eq(avl_contains(t, 3), true);
+}
+
+fn test_descending_triggers_rotation() {
+    let mut t = avl_new();
+    t = avl_insert(t, 3);
+    t = avl_insert(t, 2);
+    t = avl_insert(t, 1);
+    assert_eq(avl_count(t), 3);
+    assert_eq(avl_balanced(t), true);
+    assert_eq(avl_is_bst(t), true);
+}
+
+fn test_left_right_rotation() {
+    // Insert 3, 1, 2 — triggers left-right
+    let mut t = avl_new();
+    t = avl_insert(t, 3);
+    t = avl_insert(t, 1);
+    t = avl_insert(t, 2);
+    assert_eq(avl_count(t), 3);
+    assert_eq(avl_balanced(t), true);
+    assert_eq(avl_is_bst(t), true);
+}
+
+fn test_right_left_rotation() {
+    // Insert 1, 3, 2 — triggers right-left
+    let mut t = avl_new();
+    t = avl_insert(t, 1);
+    t = avl_insert(t, 3);
+    t = avl_insert(t, 2);
+    assert_eq(avl_count(t), 3);
+    assert_eq(avl_balanced(t), true);
+    assert_eq(avl_is_bst(t), true);
+}
+
+fn test_balanced_insert() {
+    let mut t = avl_new();
+    t = avl_insert(t, 5);
+    t = avl_insert(t, 3);
+    t = avl_insert(t, 7);
+    t = avl_insert(t, 1);
+    t = avl_insert(t, 4);
+    t = avl_insert(t, 6);
+    t = avl_insert(t, 8);
+    assert_eq(avl_count(t), 7);
+    assert_eq(avl_balanced(t), true);
+    assert_eq(avl_is_bst(t), true);
+    assert_eq(avl_contains(t, 1), true);
+    assert_eq(avl_contains(t, 4), true);
+    assert_eq(avl_contains(t, 8), true);
+    assert_eq(avl_contains(t, 2), false);
+}
+
+fn test_sequential_stress() {
+    // Insert 1 through 7 sequentially — worst case for BST
+    let mut t = avl_new();
+    let mut i = 1;
+    while i <= 7 {
+        t = avl_insert(t, i);
+        assert_eq(avl_balanced(t), true);
+        i = i + 1;
+    }
+    assert_eq(avl_count(t), 7);
+    assert_eq(avl_is_bst(t), true);
+    // Height should be at most 3 for 7 nodes
+    let root_h = get_height(t.state, t.root);
+    assert(root_h <= 3);
+}
+
+fn test_duplicate_insert() {
+    let mut t = avl_new();
+    t = avl_insert(t, 5);
+    t = avl_insert(t, 5);
+    t = avl_insert(t, 5);
+    assert_eq(avl_count(t), 1);
+    assert_eq(avl_balanced(t), true);
+}
+
+fn main() -> Int {
+    test_empty();
+    test_single();
+    test_ascending_triggers_rotation();
+    test_descending_triggers_rotation();
+    test_left_right_rotation();
+    test_right_left_rotation();
+    test_balanced_insert();
+    test_sequential_stress();
+    test_duplicate_insert();
+    print("[OK] 240_interp_avl_tree");
+    0
+}

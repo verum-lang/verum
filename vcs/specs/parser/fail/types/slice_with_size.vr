@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, slice, size, error
+// @description: Test detection of confusion between slice and array syntax
+// @expected-error: E070
+
+// Slice type [T] does not have size - use [T; N] for array
+// This tests using comma instead of semicolon
+fn test(x: [Int, 10]) {}

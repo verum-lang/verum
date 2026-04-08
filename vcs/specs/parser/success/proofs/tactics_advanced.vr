@@ -1,0 +1,229 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, tactics, proof-strategies
+// @description: Comprehensive tests for advanced tactic expressions in proofs
+
+// ============================================================================
+// Built-in Tactic Expressions
+// Grammar: tactic_name = 'auto' | 'simp' | 'ring' | 'field' | 'omega' | ...
+// ============================================================================
+
+theorem test_auto(x: Int): x == x {
+    proof by auto
+}
+
+theorem test_simp(x: Int): x + 0 == x {
+    proof by simp
+}
+
+theorem test_ring(a: Int, b: Int): (a + b) * (a - b) == a * a - b * b {
+    proof by ring
+}
+
+theorem test_field(a: Float, b: Float)
+    requires b != 0
+    ensures a / b * b == a
+{
+    proof by field
+}
+
+theorem test_omega(x: Int)
+    requires x > 0
+    ensures x >= 1
+{
+    proof by omega
+}
+
+theorem test_blast(x: Bool, y: Bool): x && y => y && x {
+    proof by blast
+}
+
+theorem test_smt(x: Int, y: Int)
+    requires x > 0 && y > 0
+    ensures x + y > 0
+{
+    proof by smt
+}
+
+// ============================================================================
+// Tactic Sequences
+// Grammar: tactic_expr = tactic_expr , ';' , tactic_expr
+// ============================================================================
+
+theorem test_tactic_sequence(a: Int, b: Int): a + b == b + a {
+    proof by simp; ring; auto
+}
+
+theorem test_long_sequence(x: Int): x * 1 + 0 == x {
+    proof by simp; ring; simp; auto
+}
+
+// ============================================================================
+// Tactics with Arguments
+// ============================================================================
+
+theorem test_induction(n: Int)
+    requires n >= 0
+    ensures sum(0..n) * 2 == n * (n + 1)
+{
+    proof by induction(n)
+}
+
+theorem test_cases(x: Int): x >= 0 || x < 0 {
+    proof by omega
+}
+
+theorem test_rewrite(a: Int, b: Int): a + b - b == a {
+    proof by rewrite(add_sub_cancel); simp
+}
+
+theorem test_unfold(n: Int)
+    requires n >= 0
+    ensures factorial(n) >= 1
+{
+    proof by unfold factorial; induction(n); omega
+}
+
+theorem test_apply(x: Int)
+    requires x > 0
+    ensures x >= 0
+{
+    proof by apply(positive_implies_nonneg)
+}
+
+theorem test_exact(x: Int): x + 0 == x {
+    proof by exact(add_zero_right)
+}
+
+// ============================================================================
+// Intro Tactics
+// ============================================================================
+
+theorem test_intro(x: Int): forall y: Int . x + y == y + x {
+    proof {
+        intro(y);
+        show x + y == y + x by ring;
+    }
+}
+
+theorem test_intros(): forall a: Int . forall b: Int . a + b == b + a {
+    proof {
+        intros(a);
+        intros(b);
+        show a + b == b + a by ring;
+    }
+}
+
+// ============================================================================
+// Contradiction and Assumption
+// ============================================================================
+
+theorem test_contradiction(x: Int)
+    requires x > 0 && x < 0
+    ensures false
+{
+    proof by contradiction
+}
+
+theorem test_assumption(x: Int)
+    requires x == 42
+    ensures x == 42
+{
+    proof by assumption
+}
+
+theorem test_trivial(): true {
+    proof by trivial
+}
+
+// ============================================================================
+// Complex Tactic Compositions
+// ============================================================================
+
+theorem polynomial_proof(x: Int, y: Int): (x + y)^2 == x^2 + 2*x*y + y^2 {
+    proof by ring; simp; auto
+}
+
+theorem arithmetic_proof(x: Int)
+    requires x >= 0
+    ensures x + 1 > 0
+{
+    proof by omega; auto
+}
+
+theorem default_proof(x: Int): x * 1 == x {
+    proof by simp; ring; auto
+}
+
+// ============================================================================
+// Tactics in Structured Proofs
+// ============================================================================
+
+theorem structured_with_tactics(a: Int, b: Int, c: Int)
+: (a + b) + c == a + (b + c) {
+    proof {
+        have step1: a + b == b + a by ring;
+        have step2: b + c == c + b by ring;
+        show (a + b) + c == a + (b + c) by ring;
+    }
+}
+
+theorem calc_with_tactics(x: Int): x * 2 == x + x {
+    proof {
+        calc {
+            x * 2
+            == { by ring } 2 * x
+            == { by ring } x + x
+        }
+    }
+}
+
+// ============================================================================
+// Nested Tactic Expressions
+// ============================================================================
+
+theorem nested_tactics(a: Int, b: Int)
+    requires a > 0 && b > 0
+    ensures a * b > 0
+{
+    proof {
+        have pos_a: a > 0 by assumption;
+        have pos_b: b > 0 by assumption;
+        show a * b > 0 by (apply(mul_pos); assumption; assumption);
+    }
+}
+
+// ============================================================================
+// Grouped Tactics
+// ============================================================================
+
+theorem grouped_tactics(x: Int, y: Int): (x + y) * (x + y) == x^2 + 2*x*y + y^2 {
+    proof by (simp; ring)
+}
+
+theorem alternative_grouped(a: Int): a + a == 2 * a {
+    proof by (ring; auto)
+}
+
+// ============================================================================
+// More Complex Proof Structures
+// ============================================================================
+
+theorem complex_proof(n: Int)
+    requires n >= 0
+    ensures n * (n + 1) % 2 == 0
+{
+    proof {
+        // Product of consecutive integers is always even
+        show n * (n + 1) % 2 == 0 by omega;
+    }
+}
+
+theorem induction_proof(n: Int)
+    requires n >= 0
+    ensures sum_sq(n) == n * (n + 1) * (2*n + 1) / 6
+{
+    proof by induction(n); ring; auto
+}

@@ -1,0 +1,122 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, data-movement, load, immediate
+// @timeout: 5000
+// @expect: pass
+//
+// Test: LOAD_I, LOAD_F, LOAD_TRUE, LOAD_FALSE, LOAD_UNIT, LOAD_SMALL_I, LOAD_NIL
+// Verifies correct NaN-boxing encoding for all immediate value types
+
+fn test_load_integer() {
+    // Basic integer loading
+    let a: Int = 0;
+    let b: Int = 1;
+    let c: Int = -1;
+    let d: Int = 42;
+    let e: Int = -42;
+
+    assert_eq(a, 0);
+    assert_eq(b, 1);
+    assert_eq(c, -1);
+    assert_eq(d, 42);
+    assert_eq(e, -42);
+}
+
+fn test_load_large_integers() {
+    // Test 48-bit integer range (NaN-boxing limit)
+    let max_positive: Int = 140737488355327;   // 2^47 - 1
+    let min_negative: Int = -140737488355328;  // -2^47
+
+    assert_eq(max_positive, 140737488355327);
+    assert_eq(min_negative, -140737488355328);
+
+    // Powers of 2
+    let pow16: Int = 65536;
+    let pow32: Int = 4294967296;
+    let pow40: Int = 1099511627776;
+
+    assert_eq(pow16, 65536);
+    assert_eq(pow32, 4294967296);
+    assert_eq(pow40, 1099511627776);
+}
+
+fn test_load_small_immediate() {
+    // LOAD_SMALL_I optimization: -64 to 63 range
+    let small_neg: Int = -64;
+    let small_pos: Int = 63;
+    let zero: Int = 0;
+
+    assert_eq(small_neg, -64);
+    assert_eq(small_pos, 63);
+    assert_eq(zero, 0);
+}
+
+fn test_load_float() {
+    // Basic float loading
+    let a: Float = 0.0;
+    let b: Float = 1.0;
+    let c: Float = -1.0;
+    let d: Float = 3.14159265358979;
+    let e: Float = 2.718281828459045;
+
+    assert_eq(a, 0.0);
+    assert_eq(b, 1.0);
+    assert_eq(c, -1.0);
+    assert(d > 3.14159 && d < 3.14160);
+    assert(e > 2.71828 && e < 2.71829);
+}
+
+fn test_load_float_special() {
+    // Special float values
+    let pos_inf: Float = 1.0 / 0.0;
+    let neg_inf: Float = -1.0 / 0.0;
+    let neg_zero: Float = -0.0;
+
+    assert(pos_inf > 1e308);
+    assert(neg_inf < -1e308);
+    assert_eq(neg_zero, 0.0);  // -0.0 == 0.0
+}
+
+fn test_load_float_subnormal() {
+    // Subnormal/denormalized floats
+    let tiny: Float = 5e-324;  // Smallest positive subnormal
+    let small: Float = 2.2250738585072014e-308;  // Smallest normal
+
+    assert(tiny > 0.0);
+    assert(small > tiny);
+}
+
+fn test_load_boolean() {
+    let t: Bool = true;
+    let f: Bool = false;
+
+    assert(t);
+    assert(!f);
+    assert_eq(t, true);
+    assert_eq(f, false);
+}
+
+fn test_load_unit() {
+    let u: () = ();
+    assert_eq(u, ());
+}
+
+fn test_load_nil() {
+    // NIL represents null/nothing
+    let n: Maybe<Int> = None;
+    assert(n is None);
+}
+
+fn main() {
+    test_load_integer();
+    test_load_large_integers();
+    test_load_small_immediate();
+    test_load_float();
+    test_load_float_special();
+    test_load_float_subnormal();
+    test_load_boolean();
+    test_load_unit();
+    test_load_nil();
+    print("001_load_immediate: PASSED");
+}

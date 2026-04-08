@@ -1,0 +1,328 @@
+// @test: parse-pass
+// @tier: 0
+// @category: syntax
+// @level: L0
+// @tags: parser, syntax, edge-cases, disambiguation, corner-cases
+// @description: Comprehensive tests for parser edge cases and disambiguation
+
+// ============================================================================
+// Operator Precedence Edge Cases
+// ============================================================================
+
+fn test_precedence_edges() {
+    // Multiplication vs power
+    let a = 2 * 3 ** 4;      // 2 * (3 ** 4) = 2 * 81 = 162
+    let b = 2 ** 3 * 4;      // (2 ** 3) * 4 = 8 * 4 = 32
+
+    // Comparison chains (NOT associative in Verum)
+    let c = 1 < 2 && 2 < 3;  // Must use && explicitly
+
+    // Bitwise vs logical
+    let d = true && false || true;  // (true && false) || true
+    let e = 1 & 2 | 3;              // (1 & 2) | 3
+
+    // Pipeline vs comparison
+    let f = x |> f > 0;      // (x |> f) > 0
+
+    // Null coalesce vs range
+    let g = a ?? b..c;       // (a ?? b)..c
+}
+
+// ============================================================================
+// Generic Angle Bracket Disambiguation
+// ============================================================================
+
+fn test_angle_brackets() {
+    // Less-than vs generic
+    let a = x < y;           // Comparison
+    let b: List<Int> = [];   // Generic type annotation
+
+    // Nested generics
+    let c: List<List<Int>> = [];
+
+    // Right shift vs nested generic close
+    let d: Map<Text, List<Int>> = Map.new();
+
+    // Generic call with type annotation
+    let e: Int = parse(s);
+    let f = x < y && y > 0;  // Comparisons
+
+    // Method generic call with type annotation
+    let g: &Int = list.get(0);
+}
+
+// ============================================================================
+// Block vs Record Disambiguation
+// ============================================================================
+
+fn test_block_vs_record() {
+    // Record expression
+    let point = Point { x: 1, y: 2 };
+
+    // Block expression
+    let result = { let x = 1; x + 1 };
+
+    // Empty record vs empty block
+    let empty_record: {} = {};
+    let empty_block = {};  // This is a block returning ()
+
+    // Map literal vs block
+    let map = map!{ "key": "value" };  // Map literal (uses map! macro)
+    let block = { do_something(); expr };  // Block
+}
+
+// ============================================================================
+// Closure vs Bitwise Or Disambiguation
+// ============================================================================
+
+fn test_closure_or() {
+    // Closure
+    let f = |x| x + 1;
+    let g = |x, y| x + y;
+    let h = || 42;
+
+    // Bitwise or
+    let a = x | y;
+    let b = x | y | z;
+
+    // Closure with or pattern
+    let i = |x| match x { A | B => 1, _ => 0 };
+}
+
+// ============================================================================
+// Range vs Method Call Disambiguation
+// ============================================================================
+
+fn test_range_method() {
+    // Range
+    let r1 = 0..10;
+    let r2 = 0..=10;
+    let r3 = ..10;
+    let r4 = 0..;
+
+    // Method call on range result
+    let m = (0..10).collect();
+
+    // Range on method results
+    let n = a.start()..a.end();
+}
+
+// ============================================================================
+// Type vs Expression Context
+// ============================================================================
+
+fn test_type_expr_context() {
+    // Type annotation
+    let x: Int = 42;
+    let y: List<Int> = [];
+
+    // Expression with type
+    let z = value as Int;
+    let w = value as List<Int>;
+
+    // Type in function return position
+    fn returns() -> Int { 42 }
+    fn returns_generic<T>() -> List<T> { [] }
+}
+
+// ============================================================================
+// Pattern vs Expression Disambiguation
+// ============================================================================
+
+fn test_pattern_expr() {
+    // In let binding (pattern context)
+    let (a, b) = tuple;
+    let [x, y, z] = array;
+    let Point { x, y } = point;
+
+    // In expression context
+    let tuple = (a, b);
+    let array = [x, y, z];
+    let point = Point { x, y };
+
+    // Match patterns vs expressions
+    match value {
+        1 | 2 | 3 => "small",     // Or pattern
+        x if x > 10 => "large",   // Guard expression
+        _ => "other",
+    }
+}
+
+// ============================================================================
+// Keyword as Identifier Edge Cases
+// ============================================================================
+
+fn test_keyword_contexts() {
+    // 'type' in different contexts
+    let type_alias = MyType;  // 'type' as start of identifier
+    type MyType is Int;       // 'type' as keyword
+
+    // 'fn' contexts
+    let fn_ptr: fn(Int) -> Int = add_one;
+    fn add_one(x: Int) -> Int { x + 1 }
+
+    // 'is' contexts
+    type Wrapper is Int;      // 'is' in type definition
+    let check = value is Int; // 'is' as operator
+}
+
+// ============================================================================
+// Semicolon Sensitivity
+// ============================================================================
+
+fn test_semicolons() {
+    // Statement with semicolon
+    let x = 1;
+    let y = 2;
+
+    // Expression without semicolon (return value)
+    x + y
+}
+
+fn test_block_return() {
+    let result = {
+        let a = 1;
+        let b = 2;
+        a + b  // No semicolon - this is the return value
+    };
+}
+
+fn test_if_expression() {
+    // If as expression (no semicolons needed)
+    let x = if condition { 1 } else { 2 };
+
+    // If as statement
+    if condition {
+        do_something();
+    }
+}
+
+// ============================================================================
+// Attribute Placement
+// ============================================================================
+
+@derive(Debug)
+type Point is { x: Float, y: Float };
+
+fn test_attribute_contexts() {
+    // Attribute on item
+    @inline
+    fn helper() { }
+
+    // Attribute on field
+    type Config is {
+        @serialize(rename = "serverHost")
+        host: Text,
+    };
+
+    // Attribute on match arm
+    match result {
+        @cold Err(e) => handle_error(e),
+        @hot Ok(v) => process(v),
+    }
+}
+
+// ============================================================================
+// Unicode and Special Characters
+// ============================================================================
+
+fn test_unicode() {
+    // Unicode identifiers
+    let café = "coffee";
+    let 日本語 = "Japanese";
+    let αβγ = 123;
+
+    // Unicode in strings
+    let emoji = "Hello 👋 World 🌍";
+    let escaped = "\u{1F600}";
+}
+
+// ============================================================================
+// Trailing Commas
+// ============================================================================
+
+fn test_trailing_commas() {
+    // Allowed in tuples
+    let t = (1, 2, 3,);
+
+    // Allowed in arrays
+    let a = [1, 2, 3,];
+
+    // Allowed in function calls
+    let r = func(a, b, c,);
+
+    // Allowed in records
+    let p = Point {
+        x: 1.0,
+        y: 2.0,
+    };
+
+    // Allowed in generics
+    type MyMap<K, V,> is Map<K, V>;
+}
+
+// ============================================================================
+// Empty Constructs
+// ============================================================================
+
+fn test_empty_constructs() {
+    // Empty tuple (unit)
+    let unit = ();
+
+    // Empty array
+    let empty_arr: [Int; 0] = [];
+
+    // Empty record (unit type)
+    type Empty is ();
+
+    // Empty block
+    let empty_block = {};
+
+    // Empty function
+    fn empty_fn() { }
+
+    // Empty match (not allowed, but testing parser)
+    // match x { }  // This should fail
+}
+
+// ============================================================================
+// Deeply Nested Expressions
+// ============================================================================
+
+fn test_deep_nesting() {
+    let deep = ((((((((((1))))))))));
+
+    let nested_call = f(g(h(i(j(k(l(m(n(o(p(x)))))))))));
+
+    let nested_access = a.b.c.d.e.f.g.h.i.j;
+
+    let nested_index = arr[0][1][2][3][4];
+
+    let nested_generics: List<List<List<List<Int>>>> = [];
+}
+
+// ============================================================================
+// Long Chains
+// ============================================================================
+
+fn test_long_chains() {
+    let piped = data
+        |> filter(pred1)
+        |> map(transform1)
+        |> filter(pred2)
+        |> map(transform2)
+        |> collect();
+
+    let chained = obj
+        .method1()
+        .method2()
+        .method3()
+        .method4()
+        .method5();
+
+    let ternary_chain = if a { 1 }
+        else if b { 2 }
+        else if c { 3 }
+        else if d { 4 }
+        else { 5 };
+}

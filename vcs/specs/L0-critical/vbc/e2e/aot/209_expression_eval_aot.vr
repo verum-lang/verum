@@ -1,0 +1,180 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, expression, evaluator, stack-machine
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for stack-based expression evaluator
+
+// Instruction encoding: positive = push literal, negative = operation
+// -1 = add, -2 = sub, -3 = mul, -4 = div, -5 = dup, -6 = swap
+
+type Stack16 is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    s8: Int, s9: Int, s10: Int, s11: Int,
+    s12: Int, s13: Int, s14: Int, s15: Int,
+    top: Int
+};
+
+fn st_new() -> Stack16 {
+    Stack16 {
+        s0: 0, s1: 0, s2: 0, s3: 0,
+        s4: 0, s5: 0, s6: 0, s7: 0,
+        s8: 0, s9: 0, s10: 0, s11: 0,
+        s12: 0, s13: 0, s14: 0, s15: 0,
+        top: 0
+    }
+}
+
+fn st_get(s: Stack16, i: Int) -> Int {
+    if i == 0 { s.s0 } else if i == 1 { s.s1 }
+    else if i == 2 { s.s2 } else if i == 3 { s.s3 }
+    else if i == 4 { s.s4 } else if i == 5 { s.s5 }
+    else if i == 6 { s.s6 } else if i == 7 { s.s7 }
+    else if i == 8 { s.s8 } else if i == 9 { s.s9 }
+    else if i == 10 { s.s10 } else if i == 11 { s.s11 }
+    else if i == 12 { s.s12 } else if i == 13 { s.s13 }
+    else if i == 14 { s.s14 } else { s.s15 }
+}
+
+fn st_set(s: Stack16, i: Int, val: Int) -> Stack16 {
+    Stack16 {
+        s0: if i == 0 { val } else { s.s0 },
+        s1: if i == 1 { val } else { s.s1 },
+        s2: if i == 2 { val } else { s.s2 },
+        s3: if i == 3 { val } else { s.s3 },
+        s4: if i == 4 { val } else { s.s4 },
+        s5: if i == 5 { val } else { s.s5 },
+        s6: if i == 6 { val } else { s.s6 },
+        s7: if i == 7 { val } else { s.s7 },
+        s8: if i == 8 { val } else { s.s8 },
+        s9: if i == 9 { val } else { s.s9 },
+        s10: if i == 10 { val } else { s.s10 },
+        s11: if i == 11 { val } else { s.s11 },
+        s12: if i == 12 { val } else { s.s12 },
+        s13: if i == 13 { val } else { s.s13 },
+        s14: if i == 14 { val } else { s.s14 },
+        s15: if i == 15 { val } else { s.s15 },
+        top: s.top
+    }
+}
+
+fn push(s: Stack16, val: Int) -> Stack16 {
+    let ns = st_set(s, s.top, val);
+    Stack16 {
+        s0: ns.s0, s1: ns.s1, s2: ns.s2, s3: ns.s3,
+        s4: ns.s4, s5: ns.s5, s6: ns.s6, s7: ns.s7,
+        s8: ns.s8, s9: ns.s9, s10: ns.s10, s11: ns.s11,
+        s12: ns.s12, s13: ns.s13, s14: ns.s14, s15: ns.s15,
+        top: s.top + 1
+    }
+}
+
+fn pop_val(s: Stack16) -> Int { st_get(s, s.top - 1) }
+
+fn pop(s: Stack16) -> Stack16 {
+    Stack16 {
+        s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3,
+        s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7,
+        s8: s.s8, s9: s.s9, s10: s.s10, s11: s.s11,
+        s12: s.s12, s13: s.s13, s14: s.s14, s15: s.s15,
+        top: s.top - 1
+    }
+}
+
+fn exec_op(s: Stack16, op: Int) -> Stack16 {
+    if op == -1 {
+        // Add
+        let b = pop_val(s); let s1 = pop(s);
+        let a = pop_val(s1); let s2 = pop(s1);
+        push(s2, a + b)
+    } else if op == -2 {
+        // Sub
+        let b = pop_val(s); let s1 = pop(s);
+        let a = pop_val(s1); let s2 = pop(s1);
+        push(s2, a - b)
+    } else if op == -3 {
+        // Mul
+        let b = pop_val(s); let s1 = pop(s);
+        let a = pop_val(s1); let s2 = pop(s1);
+        push(s2, a * b)
+    } else if op == -4 {
+        // Div
+        let b = pop_val(s); let s1 = pop(s);
+        let a = pop_val(s1); let s2 = pop(s1);
+        push(s2, a / b)
+    } else if op == -5 {
+        // Dup
+        let a = pop_val(s);
+        push(s, a)
+    } else {
+        // Swap
+        let b = pop_val(s); let s1 = pop(s);
+        let a = pop_val(s1); let s2 = pop(s1);
+        let s3 = push(s2, b);
+        push(s3, a)
+    }
+}
+
+fn test_basic_eval() {
+    // Evaluate: 3 + 4
+    // Instructions: push 3, push 4, add
+    let mut s = st_new();
+    s = push(s, 3);
+    s = push(s, 4);
+    s = exec_op(s, -1);  // add
+    assert_eq(pop_val(s), 7);
+}
+
+fn test_complex_eval() {
+    // Evaluate: (5 + 3) * 2
+    // Instructions: push 5, push 3, add, push 2, mul
+    let mut s = st_new();
+    s = push(s, 5);
+    s = push(s, 3);
+    s = exec_op(s, -1);  // add -> 8
+    s = push(s, 2);
+    s = exec_op(s, -3);  // mul -> 16
+    assert_eq(pop_val(s), 16);
+}
+
+fn test_rpn() {
+    // Evaluate: (10 - 3) * (4 + 2) = 7 * 6 = 42
+    let mut s = st_new();
+    s = push(s, 10);
+    s = push(s, 3);
+    s = exec_op(s, -2);  // sub -> 7
+    s = push(s, 4);
+    s = push(s, 2);
+    s = exec_op(s, -1);  // add -> 6
+    s = exec_op(s, -3);  // mul -> 42
+    assert_eq(pop_val(s), 42);
+}
+
+fn test_dup_swap() {
+    // Push 5, dup, mul = 5*5 = 25
+    let mut s = st_new();
+    s = push(s, 5);
+    s = exec_op(s, -5);  // dup
+    s = exec_op(s, -3);  // mul
+    assert_eq(pop_val(s), 25);
+
+    // Push 3, push 7, swap, sub = 7-3 = 4
+    let mut s2 = st_new();
+    s2 = push(s2, 3);
+    s2 = push(s2, 7);
+    s2 = exec_op(s2, -6);  // swap -> stack: [7, 3]
+    s2 = exec_op(s2, -2);  // sub -> 7 - 3 = 4
+    assert_eq(pop_val(s2), 4);
+}
+
+fn main() -> Int {
+    test_basic_eval();
+    test_complex_eval();
+    test_rpn();
+    test_dup_swap();
+    print("[OK] 209_expression_eval_aot");
+    0
+}

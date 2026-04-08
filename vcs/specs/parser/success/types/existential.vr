@@ -1,0 +1,354 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @level: L0
+// @tags: parser, types, existential, some, opaque
+// @description: Comprehensive parser tests for existential type productions
+
+// =============================================================================
+// Grammar Reference:
+// existential_type = 'some' , identifier , ':' , existential_bounds ;
+// existential_bounds = existential_bound , { '+' , existential_bound } ;
+// existential_bound = protocol_path , [ associated_type_bindings ] ;
+// existential_def = 'type' , identifier , 'is' , existential_type , ';' ;
+// =============================================================================
+
+// =============================================================================
+// Section 1: Basic Existential Types
+// =============================================================================
+
+// Existential type with single bound
+fn returns_iterator() -> some I: Iterator<Item = Int> {
+    [1, 2, 3].iter()
+}
+
+// Existential type in variable declaration
+fn test_basic_existential() {
+    let iter: some I: Iterator<Item = Int> = [1, 2, 3].iter();
+}
+
+// Existential with different identifiers
+fn test_identifier_variations() {
+    let a: some T: Clone = get_cloneable();
+    let b: some X: Debug = get_debuggable();
+    let c: some Item: Display = get_displayable();
+    let d: some Impl: Serialize = get_serializable();
+}
+
+fn get_cloneable() -> some T: Clone { 42 }
+fn get_debuggable() -> some X: Debug { "test" }
+fn get_displayable() -> some Item: Display { 3.14 }
+fn get_serializable() -> some Impl: Serialize { true }
+
+// =============================================================================
+// Section 2: Existential Types with Multiple Bounds
+// =============================================================================
+
+// Two bounds
+fn two_bounds() -> some T: Clone + Debug {
+    "hello"
+}
+
+// Three bounds
+fn three_bounds() -> some T: Clone + Debug + Display {
+    42
+}
+
+// Four bounds
+fn four_bounds() -> some T: Clone + Debug + Display + Eq {
+    true
+}
+
+// Many bounds
+fn many_bounds() -> some T: Clone + Debug + Display + Eq + Hash + Ord + Send + Sync {
+    "comprehensive"
+}
+
+fn test_multiple_bounds_usage() {
+    let clonable_debug: some T: Clone + Debug = two_bounds();
+    let full: some T: Clone + Debug + Display + Eq + Hash + Ord + Send + Sync = many_bounds();
+}
+
+// =============================================================================
+// Section 3: Existential Types with Associated Type Bindings
+// =============================================================================
+
+// Single associated type binding
+fn returns_iter_with_item() -> some I: Iterator<Item = Int> {
+    (0..10).iter()
+}
+
+// Multiple associated type bindings
+fn returns_map_iter() -> some I: Iterator<Item = (Key, Value)> {
+    Map.new().iter()
+}
+
+// Associated type with complex type
+fn returns_nested_iter() -> some I: Iterator<Item = List<Int>> {
+    [[1, 2], [3, 4], [5, 6]].iter()
+}
+
+// Multiple bounds with associated types
+fn returns_into_iter() -> some I: Iterator<Item = Int> + Clone {
+    [1, 2, 3].into_iter()
+}
+
+// Complex associated type bindings
+fn returns_double_iter() -> some I: DoubleEndedIterator<Item = Int> {
+    [1, 2, 3].iter()
+}
+
+type DoubleEndedIterator is protocol extends Iterator {
+    fn next_back(&mut self) -> Maybe<Self.Item>;
+};
+
+// =============================================================================
+// Section 4: Existential Type Definitions (type alias form)
+// =============================================================================
+
+// Grammar: existential_def = 'type' , identifier , 'is' , existential_type , ';' ;
+
+// Basic existential type definition
+type OpaqueIterator is some I: Iterator<Item = Int>;
+
+// Existential with multiple bounds
+type CloneableDisplay is some T: Clone + Display;
+
+// Existential with associated type binding
+type StringIterator is some I: Iterator<Item = Text>;
+
+// Existential for plugin system
+type Plugin is some P: PluginInterface;
+
+// Existential for storage abstraction
+type Storage is some S: StorageBackend + Send + Sync;
+
+// Existential for stream processing
+type DataStream is some S: Stream<Item = Byte>;
+
+// Existential for callback
+type Callback is some F: Fn(Int) -> Bool;
+
+// Existential for async operations
+type AsyncTask is some T: Future<Output = Result<Int, Error>>;
+
+// Protocol definitions for above existential types
+type PluginInterface is protocol {
+    fn name(&self) -> Text;
+    fn execute(&self);
+};
+
+type StorageBackend is protocol {
+    fn get(&self, key: Text) -> Maybe<Byte>;
+    fn set(&mut self, key: Text, value: Byte);
+};
+
+type Stream is protocol {
+    type Item;
+    fn poll_next(&mut self) -> Poll<Maybe<Self.Item>>;
+};
+
+type Fn<Args, Ret> is protocol {
+    fn call(&self, args: Args) -> Ret;
+};
+
+type Future is protocol {
+    type Output;
+    fn poll(&mut self) -> Poll<Self.Output>;
+};
+
+type Poll<T> is Ready(T) | Pending;
+
+type Error is { message: Text };
+
+// =============================================================================
+// Section 5: Existential Types in Function Parameters
+// =============================================================================
+
+// Existential as parameter
+fn accept_iterator(iter: some I: Iterator<Item = Int>) {
+    for item in iter {
+        process(item);
+    }
+}
+
+// Multiple existential parameters
+fn accept_two_existentials(
+    iter: some I: Iterator<Item = Int>,
+    display: some D: Display
+) {
+    // Both types are opaque
+}
+
+// Mixed regular and existential parameters
+fn mixed_params(
+    count: Int,
+    iter: some I: Iterator<Item = Text>,
+    flag: Bool
+) {
+    // Regular and existential mixed
+}
+
+fn process(x: Int) {}
+
+// =============================================================================
+// Section 6: Existential Types in Struct Fields
+// =============================================================================
+
+// Record with existential field
+type IteratorHolder is {
+    iter: some I: Iterator<Item = Int>,
+    count: Int
+};
+
+// Multiple existential fields
+type DoubleHolder is {
+    first: some A: Clone,
+    second: some B: Debug
+};
+
+// Existential in generic struct
+type Container<T> is {
+    data: T,
+    transform: some F: Fn(T) -> T
+};
+
+// =============================================================================
+// Section 7: Existential Types with Visibility
+// =============================================================================
+
+// Public existential type definition
+pub type PublicPlugin is some P: PluginInterface;
+
+// Internal existential
+internal type InternalStorage is some S: StorageBackend;
+
+// =============================================================================
+// Section 8: Existential Types with Generic Parameters
+// =============================================================================
+
+// Existential referencing generic parameter
+fn generic_existential<T>() -> some I: Iterator<Item = T> {
+    List.new().iter()
+}
+
+// Existential with bounded generic
+fn bounded_generic<T: Clone>() -> some I: Iterator<Item = T> + Clone {
+    List.new().iter()
+}
+
+// Multiple generic parameters
+fn multi_generic<K, V>() -> some I: Iterator<Item = (K, V)> {
+    Map.new().iter()
+}
+
+// =============================================================================
+// Section 9: Existential Types in Type Aliases
+// =============================================================================
+
+// Type alias using existential
+type BoxedIterator<T> is Heap<some I: Iterator<Item = T>>;
+
+// Result with existential error
+type SafeResult<T> is Result<T, some E: Error>;
+
+// =============================================================================
+// Section 10: Existential Types in Return Position
+// =============================================================================
+
+// Basic return position
+fn make_iterator() -> some I: Iterator<Item = Int> {
+    [1, 2, 3].iter()
+}
+
+// Async function with existential return
+async fn async_stream() -> some S: Stream<Item = Byte> {
+    ByteStream.new()
+}
+
+// Method returning existential
+implement Container<Int> {
+    fn transform_iter(&self) -> some I: Iterator<Item = Int> {
+        self.data.iter()
+    }
+}
+
+type ByteStream is ();
+
+// =============================================================================
+// Section 11: Existential Types in Complex Expressions
+// =============================================================================
+
+fn test_existential_in_expressions() {
+    // Existential in closure return
+    let make_iter = || -> some I: Iterator<Item = Int> {
+        [1, 2, 3].iter()
+    };
+
+    // Existential in conditional
+    let iter: some I: Iterator<Item = Int> = if condition {
+        [1, 2, 3].iter()
+    } else {
+        [4, 5, 6].iter()
+    };
+
+    // Existential in match arm
+    let result: some D: Display = match value {
+        0 => "zero",
+        n => n.to_string()
+    };
+}
+
+const condition: Bool = true;
+const value: Int = 42;
+
+// =============================================================================
+// Section 12: Existential Types with Lifetimes (if supported)
+// =============================================================================
+
+// Existential with reference in associated type
+fn returns_ref_iter(data: &List<Int>) -> some I: Iterator<Item = &Int> {
+    data.iter()
+}
+
+// =============================================================================
+// Section 13: Protocol Definitions for Completeness
+// =============================================================================
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Debug is protocol {
+    fn debug(&self) -> Text;
+};
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+type Hash is protocol {
+    fn hash(&self) -> u64;
+};
+
+type Ord is protocol extends Eq {
+    fn cmp(&self, other: &Self) -> Ordering;
+};
+
+type Send is protocol {};
+type Sync is protocol {};
+type Serialize is protocol {};
+
+type Ordering is Less | Equal | Greater;
+
+type Key is Int;
+type Value is Text;

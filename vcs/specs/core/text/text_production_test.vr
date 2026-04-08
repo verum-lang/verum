@@ -1,0 +1,907 @@
+// =============================================================================
+// text_production_test.vr - Production-grade Text method tests
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, production, strip, split_once, reverse, center, core
+// @description: Tests for production-grade Text methods: strip_prefix,
+//               strip_suffix, remove_prefix, remove_suffix, split_once,
+//               rsplit_once, eq_ignore_case, count_matches, is_ascii,
+//               reverse, center, contains_any, index_of_any, is_char_boundary.
+// =============================================================================
+
+module specs.core.text.text_production_test;
+
+mount core.text.{Text, ParseError};
+mount core.collections.List;
+mount core.base.maybe.{Maybe};
+mount core.base.result.{Result};
+
+// =============================================================================
+// strip_prefix / strip_suffix
+// =============================================================================
+
+@test
+fn test_strip_prefix_found() {
+    let s = "Hello, World!";
+    let result = s.strip_prefix("Hello, ");
+    assert(result.is_some());
+    assert(result.unwrap() == "World!");
+}
+
+@test
+fn test_strip_prefix_not_found() {
+    let s = "Hello, World!";
+    let result = s.strip_prefix("Goodbye");
+    assert(result.is_none());
+}
+
+@test
+fn test_strip_prefix_empty_prefix() {
+    let s = "Hello";
+    let result = s.strip_prefix("");
+    assert(result.is_some());
+    assert(result.unwrap() == "Hello");
+}
+
+@test
+fn test_strip_prefix_full_match() {
+    let s = "Hello";
+    let result = s.strip_prefix("Hello");
+    assert(result.is_some());
+    assert(result.unwrap() == "");
+}
+
+@test
+fn test_strip_suffix_found() {
+    let s = "Hello, World!";
+    let result = s.strip_suffix(", World!");
+    assert(result.is_some());
+    assert(result.unwrap() == "Hello");
+}
+
+@test
+fn test_strip_suffix_not_found() {
+    let s = "Hello, World!";
+    let result = s.strip_suffix("Universe");
+    assert(result.is_none());
+}
+
+@test
+fn test_strip_suffix_empty_suffix() {
+    let s = "Hello";
+    let result = s.strip_suffix("");
+    assert(result.is_some());
+    assert(result.unwrap() == "Hello");
+}
+
+// =============================================================================
+// remove_prefix / remove_suffix
+// =============================================================================
+
+@test
+fn test_remove_prefix_present() {
+    let s = "Hello, World!";
+    assert(s.remove_prefix("Hello, ") == "World!");
+}
+
+@test
+fn test_remove_prefix_absent() {
+    let s = "Hello, World!";
+    assert(s.remove_prefix("Goodbye") == "Hello, World!");
+}
+
+@test
+fn test_remove_suffix_present() {
+    let s = "file.txt";
+    assert(s.remove_suffix(".txt") == "file");
+}
+
+@test
+fn test_remove_suffix_absent() {
+    let s = "file.txt";
+    assert(s.remove_suffix(".rs") == "file.txt");
+}
+
+// =============================================================================
+// split_once / rsplit_once
+// =============================================================================
+
+@test
+fn test_split_once_found() {
+    let s = "key=value=extra";
+    let result = s.split_once("=");
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert(pair.0 == "key");
+    assert(pair.1 == "value=extra");
+}
+
+@test
+fn test_split_once_not_found() {
+    let s = "no separator here";
+    let result = s.split_once("=");
+    assert(result.is_none());
+}
+
+@test
+fn test_split_once_at_start() {
+    let s = "=value";
+    let result = s.split_once("=");
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert(pair.0 == "");
+    assert(pair.1 == "value");
+}
+
+@test
+fn test_split_once_at_end() {
+    let s = "key=";
+    let result = s.split_once("=");
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert(pair.0 == "key");
+    assert(pair.1 == "");
+}
+
+@test
+fn test_rsplit_once_found() {
+    let s = "a.b.c.d";
+    let result = s.rsplit_once(".");
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert(pair.0 == "a.b.c");
+    assert(pair.1 == "d");
+}
+
+@test
+fn test_rsplit_once_not_found() {
+    let s = "no dots here";
+    let result = s.rsplit_once(".");
+    assert(result.is_none());
+}
+
+@test
+fn test_rsplit_once_single_sep() {
+    let s = "left.right";
+    let result = s.rsplit_once(".");
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert(pair.0 == "left");
+    assert(pair.1 == "right");
+}
+
+// =============================================================================
+// eq_ignore_case
+// =============================================================================
+
+@test
+fn test_eq_ignore_case_equal() {
+    assert("Hello".eq_ignore_case("hello"));
+    assert("WORLD".eq_ignore_case("world"));
+    assert("FooBar".eq_ignore_case("foobar"));
+}
+
+@test
+fn test_eq_ignore_case_not_equal() {
+    assert(!"Hello".eq_ignore_case("World"));
+    assert(!"abc".eq_ignore_case("abcd"));
+}
+
+@test
+fn test_eq_ignore_case_empty() {
+    assert("".eq_ignore_case(""));
+    assert(!"".eq_ignore_case("a"));
+}
+
+@test
+fn test_eq_ignore_case_numbers() {
+    assert("abc123".eq_ignore_case("ABC123"));
+}
+
+// =============================================================================
+// count_matches
+// =============================================================================
+
+@test
+fn test_count_matches_basic() {
+    assert("abcabcabc".count_matches("abc") == 3);
+}
+
+@test
+fn test_count_matches_no_match() {
+    assert("hello".count_matches("xyz") == 0);
+}
+
+@test
+fn test_count_matches_single_char() {
+    assert("aabaa".count_matches("a") == 4);
+}
+
+@test
+fn test_count_matches_overlapping_not_counted() {
+    // Non-overlapping: "aaa" with pattern "aa" -> only 1 match
+    assert("aaa".count_matches("aa") == 1);
+}
+
+@test
+fn test_count_matches_empty_pattern() {
+    // Empty pattern matches at every position + 1
+    assert("abc".count_matches("") == 4);
+}
+
+@test
+fn test_count_matches_empty_text() {
+    assert("".count_matches("abc") == 0);
+}
+
+// =============================================================================
+// is_ascii
+// =============================================================================
+
+@test
+fn test_is_ascii_true() {
+    assert("Hello, World!".is_ascii());
+    assert("0123456789".is_ascii());
+    assert("".is_ascii());
+}
+
+@test
+fn test_is_ascii_false() {
+    assert(!"Héllo".is_ascii());
+}
+
+@test
+fn test_is_ascii_all_ascii_range() {
+    assert(" ~".is_ascii()); // space and tilde are ASCII
+}
+
+// =============================================================================
+// reverse
+// =============================================================================
+
+@test
+fn test_reverse_basic() {
+    assert("hello".reverse() == "olleh");
+}
+
+@test
+fn test_reverse_empty() {
+    assert("".reverse() == "");
+}
+
+@test
+fn test_reverse_single_char() {
+    assert("x".reverse() == "x");
+}
+
+@test
+fn test_reverse_palindrome() {
+    assert("racecar".reverse() == "racecar");
+}
+
+// =============================================================================
+// center
+// =============================================================================
+
+@test
+fn test_center_basic() {
+    let result = "hi".center(6, ' ');
+    assert(result == "  hi  ");
+}
+
+@test
+fn test_center_odd_padding() {
+    // "hi" is 2 chars, width 7 means 5 padding, left gets 2, right gets 3
+    let result = "hi".center(7, '-');
+    assert(result.len() == 7);
+    assert(result.starts_with("--"));
+    assert(result.ends_with("---"));
+}
+
+@test
+fn test_center_already_wide_enough() {
+    let result = "hello".center(3, ' ');
+    assert(result == "hello");
+}
+
+@test
+fn test_center_exact_width() {
+    let result = "ab".center(2, ' ');
+    assert(result == "ab");
+}
+
+// =============================================================================
+// contains_any / index_of_any
+// =============================================================================
+
+@test
+fn test_contains_any_found() {
+    let vowels: List<Char> = ['a', 'e', 'i', 'o', 'u'];
+    assert("hello".contains_any(&vowels));
+}
+
+@test
+fn test_contains_any_not_found() {
+    let vowels: List<Char> = ['a', 'e', 'i', 'o', 'u'];
+    assert(!"dry".contains_any(&vowels));
+}
+
+@test
+fn test_contains_any_empty_chars() {
+    let empty: List<Char> = [];
+    assert(!"hello".contains_any(&empty));
+}
+
+@test
+fn test_index_of_any_found() {
+    let targets: List<Char> = ['x', 'y', 'z'];
+    let result = "abcxyz".index_of_any(&targets);
+    assert(result.is_some());
+    assert(result.unwrap() == 3); // byte index of 'x'
+}
+
+@test
+fn test_index_of_any_not_found() {
+    let targets: List<Char> = ['x', 'y', 'z'];
+    let result = "abc".index_of_any(&targets);
+    assert(result.is_none());
+}
+
+// =============================================================================
+// is_char_boundary
+// =============================================================================
+
+@test
+fn test_is_char_boundary_ascii() {
+    let s = "hello";
+    assert(s.is_char_boundary(0));
+    assert(s.is_char_boundary(1));
+    assert(s.is_char_boundary(5)); // past end is boundary
+}
+
+@test
+fn test_is_char_boundary_out_of_range() {
+    let s = "hello";
+    assert(!s.is_char_boundary(6));
+    assert(!s.is_char_boundary(-1));
+}
+
+// =============================================================================
+// Edge Case Tests
+// =============================================================================
+
+@test
+fn test_strip_prefix_repeated() {
+    // strip_prefix only removes first occurrence
+    let s = "aaabbb";
+    let result = s.strip_prefix("a");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "aabbb");
+}
+
+@test
+fn test_strip_suffix_repeated() {
+    let s = "aaabbb";
+    let result = s.strip_suffix("b");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "aaabb");
+}
+
+@test
+fn test_remove_prefix_idempotent() {
+    let s = "hello world";
+    let r1 = s.remove_prefix("hello ");
+    assert_eq(r1, "world");
+    // Removing again when prefix not present returns unchanged
+    let r2 = r1.remove_prefix("hello ");
+    assert_eq(r2, "world");
+}
+
+@test
+fn test_split_once_multiple_separators() {
+    // split_once only splits at FIRST separator
+    let s = "a:b:c:d";
+    let result = s.split_once(":");
+    assert(result.is_some());
+    let (before, after) = result.unwrap();
+    assert_eq(before, "a");
+    assert_eq(after, "b:c:d");
+}
+
+@test
+fn test_rsplit_once_multiple_separators() {
+    // rsplit_once splits at LAST separator
+    let s = "a:b:c:d";
+    let result = s.rsplit_once(":");
+    assert(result.is_some());
+    let (before, after) = result.unwrap();
+    assert_eq(before, "a:b:c");
+    assert_eq(after, "d");
+}
+
+@test
+fn test_eq_ignore_case_mixed() {
+    assert("Hello World".eq_ignore_case("hello world"));
+    assert("HELLO".eq_ignore_case("hello"));
+    assert("hello".eq_ignore_case("HELLO"));
+    assert(!"hello".eq_ignore_case("world"));
+}
+
+@test
+fn test_count_matches_multiple() {
+    assert_eq("abababab".count_matches("ab"), 4);
+    assert_eq("aaa".count_matches("a"), 3);
+    assert_eq("hello".count_matches("l"), 2);
+}
+
+@test
+fn test_reverse_multichar() {
+    assert_eq("abc".reverse(), "cba");
+    assert_eq("12345".reverse(), "54321");
+    assert_eq("a".reverse(), "a");
+}
+
+@test
+fn test_center_with_fill() {
+    // center with custom fill character
+    let s = "hi";
+    let centered = s.center(6, ' ');
+    assert_eq(centered.len(), 6);
+    // "hi" is 2 chars, 6-2=4 padding, 2 left + 2 right
+    assert(centered.contains("hi"));
+}
+
+@test
+fn test_contains_any_single_char() {
+    let h_chars: List<Char> = ['h'];
+    let o_chars: List<Char> = ['o'];
+    let x_chars: List<Char> = ['x'];
+    assert("hello".contains_any(&h_chars));
+    assert("hello".contains_any(&o_chars));
+    assert(!"hello".contains_any(&x_chars));
+}
+
+@test
+fn test_index_of_any_multiple_matches() {
+    // Should return index of FIRST match
+    let targets: List<Char> = ['o', 'w'];
+    let result = "hello world".index_of_any(&targets);
+    assert(result.is_some());
+    // 'o' appears at index 4, 'w' at index 6 — 'o' comes first
+    assert_eq(result.unwrap(), 4);
+}
+
+@test
+fn test_is_char_boundary_basic() {
+    let s = "hello";
+    assert(s.is_char_boundary(0));  // Start
+    assert(s.is_char_boundary(5));  // End
+    assert(s.is_char_boundary(3));  // Middle
+}
+
+@test
+fn test_strip_prefix_empty_string() {
+    let s = "";
+    assert(s.strip_prefix("anything").is_none());
+}
+
+@test
+fn test_split_once_empty_separator() {
+    // Empty separator — implementation-defined behavior
+    let s = "hello";
+    let result = s.split_once("");
+    // Whether this returns Some or None depends on implementation
+    // Just verify it doesn't crash
+    let _ = result;
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+// =============================================================================
+// Section: Text Conversion Functions
+// =============================================================================
+
+@test
+fn test_text_from_int_positive() {
+    let t = Text.from_int(42);
+    assert_eq(t, "42");
+}
+
+@test
+fn test_text_from_int_negative() {
+    let t = Text.from_int(-123);
+    assert_eq(t, "-123");
+}
+
+@test
+fn test_text_from_int_zero() {
+    let t = Text.from_int(0);
+    assert_eq(t, "0");
+}
+
+@test
+fn test_text_from_int_large() {
+    let t = Text.from_int(1000000);
+    assert_eq(t, "1000000");
+}
+
+@test
+fn test_text_from_float_basic() {
+    let t = Text.from_float(3.14);
+    // Float formatting may vary, just verify it contains expected digits
+    assert(t.contains("3"));
+    assert(t.contains("14"));
+}
+
+@test
+fn test_text_from_float_zero() {
+    let t = Text.from_float(0.0);
+    assert(t.contains("0"));
+}
+
+@test
+fn test_text_from_float_negative() {
+    let t = Text.from_float(-2.5);
+    assert(t.starts_with("-"));
+    assert(t.contains("2"));
+}
+
+@test
+fn test_text_from_float_integer() {
+    let t = Text.from_float(100.0);
+    assert(t.contains("100"));
+}
+
+@test
+fn test_text_from_bool_true() {
+    let t = Text.from_bool(true);
+    assert_eq(t, "true");
+}
+
+@test
+fn test_text_from_bool_false() {
+    let t = Text.from_bool(false);
+    assert_eq(t, "false");
+}
+
+// =============================================================================
+// Section: Unicode Multi-byte Tests
+// =============================================================================
+
+@test
+fn test_text_unicode_2byte_len() {
+    // é is 2 bytes in UTF-8
+    let t = "café";
+    assert(t.len() >= 4); // At least 4 bytes (c=1, a=1, f=1, é=2 = 5)
+}
+
+@test
+fn test_text_unicode_contains() {
+    let t = "hello wörld";
+    assert(t.contains("wörld"));
+    assert(t.contains("hello"));
+    assert(!t.contains("world")); // ASCII 'o' != 'ö'
+}
+
+@test
+fn test_text_unicode_starts_ends_with() {
+    let t = "über cool";
+    assert(t.starts_with("über"));
+    assert(t.ends_with("cool"));
+}
+
+@test
+fn test_text_unicode_split() {
+    let t = "a,ö,ü";
+    let parts = t.split(",");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "ö");
+    assert_eq(parts[2], "ü");
+}
+
+@test
+fn test_text_unicode_eq() {
+    let a = "naïve";
+    let b = "naïve";
+    assert_eq(a, b);
+}
+
+@test
+fn test_text_unicode_trim() {
+    let t = "  héllo  ";
+    let trimmed = t.trim();
+    assert_eq(trimmed, "héllo");
+}
+
+@test
+fn test_text_unicode_replace() {
+    let t = "café latte";
+    let replaced = t.replace("café", "espresso");
+    assert_eq(replaced, "espresso latte");
+}
+
+@test
+fn test_text_unicode_to_uppercase() {
+    let t = "hello";
+    assert_eq(t.to_uppercase(), "HELLO");
+}
+
+@test
+fn test_text_unicode_to_lowercase() {
+    let t = "HELLO";
+    assert_eq(t.to_lowercase(), "hello");
+}
+
+// =============================================================================
+// Section: SSO Boundary Edge Cases
+// =============================================================================
+
+@test
+fn test_text_sso_boundary_22() {
+    // 22 bytes = within SSO inline storage
+    let t = "1234567890123456789012"; // 22 chars
+    assert_eq(t.len(), 22);
+    assert(!t.is_empty());
+}
+
+@test
+fn test_text_sso_boundary_23() {
+    // 23 bytes = SSO maximum capacity
+    let t = "12345678901234567890123"; // 23 chars
+    assert_eq(t.len(), 23);
+}
+
+@test
+fn test_text_sso_boundary_24() {
+    // 24 bytes = exceeds SSO, moves to heap
+    let t = "123456789012345678901234"; // 24 chars
+    assert_eq(t.len(), 24);
+    assert(t.starts_with("1234"));
+    assert(t.ends_with("1234"));
+}
+
+@test
+fn test_text_sso_push_transition() {
+    // Build up a string that crosses the SSO boundary
+    let mut t = "";
+    let mut i = 0;
+    while i < 30 {
+        t = t + "a";
+        i = i + 1;
+    }
+    assert_eq(t.len(), 30);
+    // Verify content is correct after SSO-to-heap transition
+    assert(t.starts_with("aaa"));
+    assert(t.ends_with("aaa"));
+}
+
+// =============================================================================
+// Section: trim_start_matches / trim_end_matches
+// =============================================================================
+
+@test
+fn test_trim_start_matches_basic() {
+    let s = "---hello";
+    assert_eq(s.trim_start_matches("-"), "hello");
+}
+
+@test
+fn test_trim_start_matches_repeated() {
+    let s = "aaabbb";
+    assert_eq(s.trim_start_matches("a"), "bbb");
+}
+
+@test
+fn test_trim_start_matches_not_found() {
+    let s = "hello";
+    assert_eq(s.trim_start_matches("x"), "hello");
+}
+
+@test
+fn test_trim_start_matches_empty_pattern() {
+    let s = "hello";
+    assert_eq(s.trim_start_matches(""), "hello");
+}
+
+@test
+fn test_trim_start_matches_multi_char() {
+    let s = "abcabcdef";
+    assert_eq(s.trim_start_matches("abc"), "def");
+}
+
+@test
+fn test_trim_end_matches_basic() {
+    let s = "hello---";
+    assert_eq(s.trim_end_matches("-"), "hello");
+}
+
+@test
+fn test_trim_end_matches_repeated() {
+    let s = "bbbccc";
+    assert_eq(s.trim_end_matches("c"), "bbb");
+}
+
+@test
+fn test_trim_end_matches_not_found() {
+    let s = "hello";
+    assert_eq(s.trim_end_matches("x"), "hello");
+}
+
+@test
+fn test_trim_end_matches_empty_pattern() {
+    let s = "hello";
+    assert_eq(s.trim_end_matches(""), "hello");
+}
+
+@test
+fn test_trim_end_matches_multi_char() {
+    let s = "defabcabc";
+    assert_eq(s.trim_end_matches("abc"), "def");
+}
+
+// =============================================================================
+// Section: pad_left / pad_right
+// =============================================================================
+
+@test
+fn test_pad_left_basic() {
+    let s = "42";
+    assert_eq(s.pad_left(5, '0'), "00042");
+}
+
+@test
+fn test_pad_left_no_padding_needed() {
+    let s = "hello";
+    assert_eq(s.pad_left(3, ' '), "hello");
+}
+
+@test
+fn test_pad_left_exact_width() {
+    let s = "abc";
+    assert_eq(s.pad_left(3, ' '), "abc");
+}
+
+@test
+fn test_pad_left_single_char() {
+    let s = "x";
+    assert_eq(s.pad_left(4, '.'), "...x");
+}
+
+@test
+fn test_pad_left_empty_string() {
+    let s = "";
+    assert_eq(s.pad_left(3, '*'), "***");
+}
+
+@test
+fn test_pad_right_basic() {
+    let s = "hi";
+    assert_eq(s.pad_right(5, '-'), "hi---");
+}
+
+@test
+fn test_pad_right_no_padding_needed() {
+    let s = "hello";
+    assert_eq(s.pad_right(3, ' '), "hello");
+}
+
+@test
+fn test_pad_right_exact_width() {
+    let s = "abc";
+    assert_eq(s.pad_right(3, ' '), "abc");
+}
+
+@test
+fn test_pad_right_single_char() {
+    let s = "x";
+    assert_eq(s.pad_right(4, '.'), "x...");
+}
+
+@test
+fn test_pad_right_empty_string() {
+    let s = "";
+    assert_eq(s.pad_right(3, '#'), "###");
+}
+
+// =============================================================================
+// Section: splitn / rsplitn
+// =============================================================================
+
+@test
+fn test_splitn_basic() {
+    let s = "a:b:c:d";
+    let parts = s.splitn(3, ":");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "c:d"); // Remainder
+}
+
+@test
+fn test_splitn_no_separator() {
+    let s = "hello world";
+    let parts = s.splitn(3, ":");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "hello world");
+}
+
+@test
+fn test_splitn_one() {
+    let s = "a:b:c";
+    let parts = s.splitn(1, ":");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "a:b:c");
+}
+
+@test
+fn test_splitn_exact() {
+    let s = "a:b:c";
+    let parts = s.splitn(3, ":");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "c");
+}
+
+@test
+fn test_splitn_more_than_parts() {
+    let s = "a:b";
+    let parts = s.splitn(5, ":");
+    assert_eq(parts.len(), 2);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+}
+
+@test
+fn test_rsplitn_basic() {
+    let s = "a:b:c:d";
+    let parts = s.rsplitn(3, ":");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a:b");   // Remainder (from left)
+    assert_eq(parts[1], "c");
+    assert_eq(parts[2], "d");
+}
+
+@test
+fn test_rsplitn_no_separator() {
+    let s = "hello world";
+    let parts = s.rsplitn(3, ":");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "hello world");
+}
+
+@test
+fn test_rsplitn_one() {
+    let s = "a:b:c";
+    let parts = s.rsplitn(1, ":");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "a:b:c");
+}
+
+@test
+fn test_rsplitn_exact() {
+    let s = "a:b:c";
+    let parts = s.rsplitn(3, ":");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "c");
+}
+
+@test
+fn test_rsplitn_more_than_parts() {
+    let s = "a:b";
+    let parts = s.rsplitn(5, ":");
+    assert_eq(parts.len(), 2);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

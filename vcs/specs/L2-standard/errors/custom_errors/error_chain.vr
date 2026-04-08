@@ -1,0 +1,350 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, custom, chain, cause
+// @description: Error chaining - tracking error causation
+
+/// Error chaining - preserving error causation history.
+/// Demonstrates patterns for tracking root causes and error chains.
+
+/// Base Error protocol with source support
+type Error is protocol extends Display + Debug {
+    fn description(&self) -> Text;
+
+    /// Returns the underlying cause of this error, if any
+    fn source(&self) -> Maybe<&Error> {
+        None
+    }
+
+    /// Returns the root cause by following the chain
+    fn root_cause(&self) -> &Error {
+        let mut current: &Error = self;
+        while let Some(source) = current.source() {
+            current = source;
+        }
+        current
+    }
+
+    /// Returns the full error chain as a list
+    fn chain(&self) -> List<&Error> {
+        let mut chain: List<&Error> = List.new();
+        let mut current: Maybe<&Error> = Some(self);
+        while let Some(err) = current {
+            chain.push(err);
+            current = err.source();
+        }
+        chain
+    }
+};
+
+/// Simple chained error wrapper
+type ChainedError<E> is {
+    current: E,
+    source: Maybe<Heap<Error>>
+};
+
+implement<E: Error> ChainedError<E> {
+    fn new(error: E) -> Self {
+        ChainedError {
+            current: error,
+            source: None
+        }
+    }
+
+    fn with_source(mut self, source: impl Error) -> Self {
+        self.source = Some(Heap(source));
+        self
+    }
+}
+
+// NOTE: Display/fmt pattern not yet supported by compiler
+// Display impls would use write(f, ...) pattern
+
+implement<E: Error> Error for ChainedError<E> {
+    fn description(&self) -> Text {
+        self.current.description()
+    }
+
+    fn source(&self) -> Maybe<&Error> {
+        self.source.as_ref().map(|b| b.as_ref())
+    }
+}
+
+/// Concrete error types for demonstration
+type IoError is
+    | NotFound(Text)
+    | PermissionDenied(Text)
+    | Timeout;
+
+// Display for IoError - commented out (write/Formatter not supported)
+
+
+implement Error for IoError {
+    fn description(&self) -> Text {
+        match self {
+            IoError.NotFound(_) => "file not found",
+            IoError.PermissionDenied(_) => "permission denied",
+            IoError.Timeout => "timeout"
+        }
+    }
+}
+
+type ConfigError is
+    | FileError(IoError)
+    | ParseError { line: Int, message: Text }
+    | MissingKey(Text)
+;
+
+// Display for ConfigError - commented out (write/Formatter not supported)
+
+
+implement Error for ConfigError {
+    fn description(&self) -> Text {
+        match self {
+            ConfigError.FileError(_) => "file error",
+            ConfigError.ParseError { .. } => "parse error",
+            ConfigError.MissingKey(_) => "missing key"
+        }
+    }
+
+    fn source(&self) -> Maybe<&Error> {
+        match self {
+            ConfigError.FileError(e) => Some(e),
+            _ => None
+        }
+    }
+}
+
+type DatabaseError is { message: Text };
+type NetworkError is { message: Text };
+
+type AppError is
+    | Config(ConfigError)
+    | Database(DatabaseError)
+    | Network(NetworkError);
+
+// Display for DatabaseError - commented out (write/Formatter not supported)
+
+
+implement Error for DatabaseError {
+    fn description(&self) -> Text { "database error" }
+}
+
+// Display for NetworkError - commented out (write/Formatter not supported)
+
+
+implement Error for NetworkError {
+    fn description(&self) -> Text { "network error" }
+}
+
+// Display for AppError - commented out (write/Formatter not supported)
+implement AppError {
+}
+
+implement Error for AppError {
+    fn description(&self) -> Text {
+        match self {
+            AppError.Config(_) => "config error",
+            AppError.Database(_) => "database error",
+            AppError.Network(_) => "network error"
+        }
+    }
+
+    fn source(&self) -> Maybe<&Error> {
+        match self {
+            AppError.Config(e) => Some(e),
+            AppError.Database(e) => Some(e),
+            AppError.Network(e) => Some(e)
+        }
+    }
+}
+
+/// Error chain formatting utilities
+fn format_error_chain(error: &Error) -> Text {
+    let mut output = f"Error: {error}";
+    let mut current = error.source();
+    let mut depth = 0;
+
+    while let Some(cause) = current {
+        depth += 1;
+        let line = f"\n{depth}. caused by: {cause}";
+        output = output + &line;
+        current = cause.source();
+    }
+
+    output
+}
+
+fn format_chain_json(error: &Error) -> Text {
+    let chain: List<Text> = error.chain()
+        .iter()
+        .map(|e| {
+            let desc = e.description();
+            f"{{\"message\": \"{e}\", \"description\": \"{desc}\"}}"
+        })
+        .collect();
+
+    let joined = chain.join(", ");
+    f"[{joined}]"
+}
+
+/// Context-adding chain builder
+type ErrorContext<E> is {
+    inner: E,
+    context: Text,
+    source: Maybe<Heap<Error>>
+};
+
+implement<E: Error> ErrorContext<E> {
+    fn new(error: E, context: impl Into<Text>) -> Self {
+        let source: Maybe<Heap<Error>> = None;
+
+        ErrorContext {
+            inner: error,
+            context: context.into(),
+            source
+        }
+    }
+
+    fn chain(error: E, context: impl Into<Text>, cause: impl Error) -> Self {
+        ErrorContext {
+            inner: error,
+            context: context.into(),
+            source: Some(Heap(cause))
+        }
+    }
+}
+
+// Display for ErrorContext - commented out (write/Formatter not supported)
+
+
+implement<E: Error> Error for ErrorContext<E> {
+    fn description(&self) -> Text {
+        self.context.clone()
+    }
+
+    fn source(&self) -> Maybe<&Error> {
+        self.source.as_ref().map(|b| b.as_ref())
+            .or_else(|| self.inner.source())
+    }
+}
+
+/// Result extension for adding context
+type ResultChainExt<T, E> is protocol {
+    fn chain_err<F: Fn() -> C, C: Error>(self, f: F) -> Result<T, ErrorContext<C>>;
+    fn with_chain<C: Error>(self, context: C) -> Result<T, ErrorContext<C>>;
+};
+implement<T, E: Error> ResultChainExt<T, E> for Result<T, E> {
+    fn chain_err<F: Fn() -> C, C: Error>(self, f: F) -> Result<T, ErrorContext<C>>
+    {
+        self.map_err(|e| ErrorContext.chain(f(), "operation failed", e))
+    }
+
+    fn with_chain<C>(self, context: C) -> Result<T, ErrorContext<C>>
+    where type C: Error
+    {
+        self.map_err(|e| ErrorContext.chain(context, "operation failed", e))
+    }
+}
+
+/// Practical example: Multi-layer error chain
+fn load_application() -> Result<Application, AppError> {
+    let config = load_config()
+        .map_err(|e| AppError.Config(e))?;
+
+    let db = connect_database(&config)
+        .map_err(|e| AppError.Database(e))?;
+
+    Ok(Application { config, db })
+}
+
+type Application is { config: Config, db: Connection };
+type Config is { db_url: Text };
+type Connection is {};
+
+fn load_config() -> Result<Config, ConfigError> {
+    let content = read_config_file()
+        .map_err(|e| ConfigError.FileError(e))?;
+
+    parse_config(&content)
+}
+
+fn read_config_file() -> Result<Text, IoError> {
+    // Simulated file read
+    Err(IoError.NotFound("/etc/app/config.toml"))
+}
+
+fn parse_config(content: &Text) -> Result<Config, ConfigError> {
+    Ok(Config { db_url: "postgres://localhost/db" })
+}
+
+fn connect_database(config: &Config) -> Result<Connection, DatabaseError> {
+    Ok(Connection {})
+}
+
+/// Traversing error chains
+fn analyze_error(error: &Error) {
+    print("=== Error Analysis ===");
+    print(f"Top-level: {error}");
+    print(f"Description: {error.description()}");
+
+    let chain = error.chain();
+    print(f"Chain depth: {chain.len()}");
+
+    for (i, err) in chain.iter().enumerate() {
+        let desc = err.description();
+        print(f"  Level {i}: {err} ({desc})");
+    }
+
+    print(f"Root cause: {error.root_cause()}");
+}
+
+/// Matching on error chain
+fn handle_error(error: &AppError) -> Text {
+    // Check immediate error
+    match error {
+        AppError.Config(ConfigError.FileError(IoError.NotFound(path))) => {
+            f"Config file missing: {path}. Please create it."
+        },
+        AppError.Config(ConfigError.FileError(IoError.PermissionDenied(path))) => {
+            f"Cannot read config: {path}. Check permissions."
+        },
+        AppError.Config(ConfigError.ParseError { line, message }) => {
+            f"Config syntax error at line {line}: {message}"
+        },
+        _ => {
+            // Fall back to generic handling with chain info
+            let chain_info = format_error_chain(error);
+            f"Error: {chain_info}"
+        }
+    }
+}
+
+/// Retrying based on root cause
+fn should_retry(error: &Error) -> Bool {
+    // Check if root cause description suggests a retriable error
+    let root = error.root_cause();
+    let desc = root.description();
+    desc.contains("timeout") || desc.contains("temporary")
+}
+
+fn main() {
+    // Create an error chain
+    let io_error = IoError.NotFound("/etc/app/config.toml");
+    let config_error = ConfigError.FileError(io_error);
+    let app_error = AppError.Config(config_error);
+
+    // Display the chain
+    println("=== Error Chain ===");
+    println(format_error_chain(&app_error));
+
+    println("\n=== Chain Analysis ===");
+    analyze_error(&app_error);
+
+    println("\n=== User-Friendly Message ===");
+    println(handle_error(&app_error));
+
+    // JSON format for logging
+    println("\n=== JSON Format ===");
+    println(format_chain_json(&app_error));
+}

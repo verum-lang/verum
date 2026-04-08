@@ -1,0 +1,720 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, async, for-await, loops, expressions
+// @timeout: 10000
+//
+// Parser tests for 'for await' loop syntax
+// Verifies correct parsing of async iterator consumption per grammar/verum.ebnf v2.10
+// Spec: docs/detailed/10-concurrency-model.md Section 12.2 - for await Loop
+//
+// Grammar Reference:
+// for_await_loop = 'for' , 'await' , pattern , 'in' , expression
+//                , { loop_annotation } , block_expr ;
+
+// =============================================================================
+// Section 1: Basic for await Loops
+// =============================================================================
+
+// Simplest for await loop
+async fn basic_for_await() {
+    for await item in async_iterator() {
+        process(item);
+    }
+}
+
+// for await with explicit type annotation in the body
+async fn typed_for_await() {
+    for await item in number_stream() {
+        let typed_item: Int = item;
+        print(typed_item);
+    }
+}
+
+// for await with binding
+async fn binding_for_await() {
+    for await x in range_async(0, 10) {
+        let doubled = x * 2;
+        print(doubled);
+    }
+}
+
+// for await with multiple statements in body
+async fn multi_statement_body() {
+    for await item in stream() {
+        let processed = process(item);
+        validate(processed);
+        save(processed);
+    }
+}
+
+// for await with single expression body
+async fn expr_body() {
+    for await item in stream() {
+        item.process()
+    }
+}
+
+// =============================================================================
+// Section 2: Pattern Matching in for await
+// =============================================================================
+
+// for await with tuple pattern
+async fn tuple_pattern() {
+    for await (key, value) in stream_pairs() {
+        print(f"{key}: {value}");
+    }
+}
+
+// for await with triple tuple pattern
+async fn triple_tuple_pattern() {
+    for await (a, b, c) in stream_triples() {
+        print(f"{a} + {b} + {c}");
+    }
+}
+
+// for await with struct pattern
+async fn struct_pattern() {
+    for await Point { x, y } in point_stream() {
+        print(f"({x}, {y})");
+    }
+}
+
+// for await with nested struct pattern
+async fn nested_struct_pattern() {
+    for await Rect { origin: Point { x, y }, size: Size { w, h } } in rect_stream() {
+        print(f"Rect at ({x},{y}) with size {w}x{h}");
+    }
+}
+
+// for await with variant pattern
+async fn variant_pattern() {
+    for await Result.Ok(value) in results_stream() {
+        process(value);
+    }
+}
+
+// for await with Maybe pattern
+async fn maybe_pattern() {
+    for await Maybe.Some(item) in maybe_stream() {
+        handle(item);
+    }
+}
+
+// for await with reference pattern
+async fn ref_pattern() {
+    for await &item in ref_stream() {
+        print(item);
+    }
+}
+
+// for await with mutable reference pattern
+async fn mut_ref_pattern() {
+    for await &mut item in mut_stream() {
+        item.modify();
+    }
+}
+
+// for await with binding pattern
+async fn bind_pattern() {
+    for await item @ Point { x, y } in point_stream() {
+        print(f"Full: {item}, coords: ({x}, {y})");
+    }
+}
+
+// for await with rest pattern
+async fn rest_pattern() {
+    for await (first, .., last) in tuple_stream() {
+        print(f"First: {first}, Last: {last}");
+    }
+}
+
+// for await with array pattern
+async fn array_pattern() {
+    for await [a, b, c] in array_stream() {
+        print(a + b + c);
+    }
+}
+
+// for await with or pattern
+async fn or_pattern() {
+    for await Result.Ok(v) | Result.Err(v) in result_stream() {
+        print(v);
+    }
+}
+
+// for await with wildcard
+async fn wildcard_pattern() {
+    for await (key, _) in pair_stream() {
+        // Only use key, ignore value
+        process_key(key);
+    }
+}
+
+// =============================================================================
+// Section 3: for await with Different Iterator Sources
+// =============================================================================
+
+// for await on function call
+async fn from_function_call() {
+    for await item in fetch_items() {
+        process(item);
+    }
+}
+
+// for await on method call
+async fn from_method_call() {
+    let source = DataSource.new();
+    for await item in source.stream() {
+        process(item);
+    }
+}
+
+// for await on chained method call
+async fn from_chained_call() {
+    for await item in source.filter(predicate).take(10) {
+        process(item);
+    }
+}
+
+// for await on async generator call with arguments
+async fn from_gen_with_args() {
+    let batch_size = 100;
+    for await page in paginate(url, batch_size) {
+        process_page(page);
+    }
+}
+
+// for await on variable
+async fn from_variable() {
+    let iter = create_async_iterator();
+    for await item in iter {
+        process(item);
+    }
+}
+
+// for await on field access
+async fn from_field_access() {
+    for await item in self.iterator {
+        process(item);
+    }
+}
+
+// for await on index access
+async fn from_index_access() {
+    for await item in iterators[0] {
+        process(item);
+    }
+}
+
+// for await on nested field access
+async fn from_nested_field() {
+    for await item in self.config.source.iterator {
+        process(item);
+    }
+}
+
+// for await on pipeline expression
+async fn from_pipeline() {
+    for await item in source |> filter(predicate) |> map(transform) {
+        process(item);
+    }
+}
+
+// for await on async block
+async fn from_async_block() {
+    for await item in async { create_iterator().await } {
+        process(item);
+    }
+}
+
+// =============================================================================
+// Section 4: for await with Control Flow
+// =============================================================================
+
+// for await with break
+async fn with_break() {
+    for await item in stream() {
+        if item.is_terminal() {
+            break;
+        }
+        process(item);
+    }
+}
+
+// for await with continue
+async fn with_continue() {
+    for await item in stream() {
+        if item.should_skip() {
+            continue;
+        }
+        process(item);
+    }
+}
+
+// for await with labeled break
+async fn with_labeled_break() {
+    'outer: for await item in outer_stream() {
+        for await inner in inner_stream() {
+            if inner.done() {
+                break 'outer;
+            }
+            process(inner);
+        }
+    }
+}
+
+// for await with labeled continue
+async fn with_labeled_continue() {
+    'outer: for await item in outer_stream() {
+        for await inner in inner_stream() {
+            if inner.skip() {
+                continue 'outer;
+            }
+            process(inner);
+        }
+    }
+}
+
+// for await with early return
+async fn with_early_return() -> Maybe<Item> {
+    for await item in stream() {
+        if item.is_target() {
+            return Maybe.Some(item);
+        }
+    }
+    Maybe.None
+}
+
+// for await with question mark operator
+async fn with_question_mark() -> Result<(), Error> {
+    for await item in fallible_stream() {
+        let processed = process(item)?;
+        save(processed)?;
+    }
+    Result.Ok(())
+}
+
+// =============================================================================
+// Section 5: Nested for await Loops
+// =============================================================================
+
+// Nested for await loops
+async fn nested_for_await() {
+    for await outer in outer_stream() {
+        for await inner in inner_stream(outer) {
+            process(outer, inner);
+        }
+    }
+}
+
+// for await inside regular for loop
+async fn for_await_in_for() {
+    for i in 0..10 {
+        for await item in stream_at(i) {
+            process(i, item);
+        }
+    }
+}
+
+// Regular for inside for await
+async fn for_in_for_await() {
+    for await batch in batched_stream() {
+        for item in batch {
+            process(item);
+        }
+    }
+}
+
+// for await inside while loop
+async fn for_await_in_while() {
+    while condition() {
+        for await item in stream() {
+            process(item);
+        }
+    }
+}
+
+// for await inside loop
+async fn for_await_in_loop() {
+    loop {
+        for await item in stream() {
+            if item.is_last() {
+                break;
+            }
+            process(item);
+        }
+        if done() {
+            break;
+        }
+    }
+}
+
+// Triple nested for await
+async fn triple_nested() {
+    for await level1 in stream1() {
+        for await level2 in stream2(level1) {
+            for await level3 in stream3(level2) {
+                process(level1, level2, level3);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 6: for await with Conditionals
+// =============================================================================
+
+// for await inside if block
+async fn for_await_in_if() {
+    if should_stream {
+        for await item in stream() {
+            process(item);
+        }
+    }
+}
+
+// for await inside if-else
+async fn for_await_in_if_else() {
+    if use_fast_path {
+        for await item in fast_stream() {
+            process_fast(item);
+        }
+    } else {
+        for await item in slow_stream() {
+            process_slow(item);
+        }
+    }
+}
+
+// Conditional inside for await
+async fn conditional_in_for_await() {
+    for await item in stream() {
+        if item.is_valid() {
+            process(item);
+        } else {
+            log_invalid(item);
+        }
+    }
+}
+
+// for await inside match arm
+async fn for_await_in_match() {
+    match source {
+        Source.Network => {
+            for await item in network_stream() {
+                process(item);
+            }
+        }
+        Source.File => {
+            for await item in file_stream() {
+                process(item);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 7: for await with Error Handling
+// =============================================================================
+
+// for await in try block
+async fn for_await_in_try() {
+    try {
+        for await item in fallible_stream() {
+            process(item)?;
+        }
+    } recover {
+        e => handle_error(e)
+    }
+}
+
+// for await with recover
+async fn for_await_with_recover() {
+    for await item in stream() {
+        try {
+            process(item)?;
+        } recover {
+            e => {
+                log_error(e);
+                continue;
+            }
+        }
+    }
+}
+
+// for await in try with finally
+async fn for_await_try_finally() {
+    try {
+        for await item in stream() {
+            process(item)?;
+        }
+    } finally {
+        cleanup().await;
+    }
+}
+
+// for await with defer
+async fn for_await_with_defer() {
+    let conn = connect().await;
+    defer conn.close().await;
+
+    for await item in conn.stream() {
+        process(item);
+    }
+}
+
+// for await with errdefer
+async fn for_await_with_errdefer() -> Result<(), Error> {
+    let resource = acquire().await?;
+    errdefer resource.rollback().await;
+
+    for await item in resource.stream() {
+        process(item)?;
+    }
+
+    resource.commit().await?;
+    Result.Ok(())
+}
+
+// =============================================================================
+// Section 8: for await with Contexts
+// =============================================================================
+
+// for await in async function with context
+async fn with_context() using Http {
+    for await page in Http.stream_pages("/api/data") {
+        process(page);
+    }
+}
+
+// for await in function with multiple contexts
+async fn multi_context() using [Http, Logger, Metrics] {
+    Logger.info("Starting stream processing");
+    Metrics.start_timer("stream_processing");
+
+    for await item in Http.stream_items() {
+        Logger.debug(f"Processing item: {item.id}");
+        process(item);
+        Metrics.increment("items_processed");
+    }
+
+    Logger.info("Stream processing complete");
+    Metrics.stop_timer("stream_processing");
+}
+
+// for await consuming generator with context
+async fn consume_gen_with_context() using [Database, Cache] {
+    for await record in paginate_records() {
+        Cache.store(record.id, record).await;
+    }
+}
+
+// =============================================================================
+// Section 9: for await Loop Annotations
+// =============================================================================
+
+// for await with invariant annotation
+async fn with_invariant() {
+    let mut count = 0;
+    for await item in stream()
+        invariant count >= 0
+    {
+        count += 1;
+        process(item);
+    }
+}
+
+// for await with decreases annotation
+async fn with_decreases() {
+    let mut remaining = 100;
+    for await item in bounded_stream()
+        decreases remaining
+    {
+        remaining -= 1;
+        process(item);
+    }
+}
+
+// for await with multiple annotations
+async fn with_multi_annotations() {
+    let mut processed = 0;
+    let mut remaining = total;
+    for await item in stream()
+        invariant processed + remaining == total
+        decreases remaining
+    {
+        process(item);
+        processed += 1;
+        remaining -= 1;
+    }
+}
+
+// =============================================================================
+// Section 10: for await with Complex Expressions
+// =============================================================================
+
+// for await with await in body
+async fn await_in_body() {
+    for await item in stream() {
+        let extra_data = fetch_extra(item.id).await;
+        process(item, extra_data);
+    }
+}
+
+// for await with spawn in body
+async fn spawn_in_body() {
+    for await item in stream() {
+        spawn process_async(item);
+    }
+}
+
+// for await with async block in body
+async fn async_block_in_body() {
+    for await item in stream() {
+        let result = async {
+            let step1 = process_step1(item).await;
+            let step2 = process_step2(step1).await;
+            step2
+        }.await;
+        save(result);
+    }
+}
+
+// for await with join
+async fn with_join() {
+    for await item in stream() {
+        let (a, b) = join(
+            process_a(item),
+            process_b(item),
+        ).await;
+        combine(a, b);
+    }
+}
+
+// for await with select in body
+async fn with_select_in_body() {
+    for await item in main_stream() {
+        select {
+            processed = process(item).await => save(processed),
+            _ = timeout(Duration.from_secs(5)).await => {
+                log_timeout(item);
+                continue;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 11: for await with Collection Operations
+// =============================================================================
+
+// for await collecting to list
+async fn collect_to_list() -> List<Item> {
+    let mut items: List<Item> = List.new();
+    for await item in stream() {
+        items.push(item);
+    }
+    items
+}
+
+// for await with filter
+async fn filter_stream() {
+    for await item in stream() {
+        if predicate(item) {
+            yield item;
+        }
+    }
+}
+
+// for await with map
+async fn map_stream() {
+    for await item in stream() {
+        let mapped = transform(item);
+        yield mapped;
+    }
+}
+
+// for await with enumerate
+async fn enumerate_stream() {
+    let mut index = 0;
+    for await item in stream() {
+        print(f"{index}: {item}");
+        index += 1;
+    }
+}
+
+// for await with fold/reduce
+async fn reduce_stream() -> Int {
+    let mut sum = 0;
+    for await item in int_stream() {
+        sum += item;
+    }
+    sum
+}
+
+// =============================================================================
+// Section 12: for await Edge Cases
+// =============================================================================
+
+// Empty for await body
+async fn empty_body() {
+    for await _ in stream() {
+    }
+}
+
+// for await with unit yield
+async fn unit_yield() {
+    for await _ in unit_stream() {
+        yield ();
+    }
+}
+
+// for await with complex iterator expression
+async fn complex_iterator_expr() {
+    for await item in if condition { stream_a() } else { stream_b() } {
+        process(item);
+    }
+}
+
+// for await with match expression as iterator
+async fn match_as_iterator() {
+    for await item in match source {
+        Source.A => stream_a(),
+        Source.B => stream_b(),
+    } {
+        process(item);
+    }
+}
+
+// for await immediately followed by another for await
+async fn sequential_for_await() {
+    for await item1 in stream1() {
+        process1(item1);
+    }
+    for await item2 in stream2() {
+        process2(item2);
+    }
+}
+
+// for await with deeply nested pattern
+async fn deep_pattern() {
+    for await Data {
+        inner: Inner {
+            values: [first, second, ..],
+            metadata: Metadata { id, .. }
+        }
+    } in data_stream() {
+        print(f"id={id}, first={first}, second={second}");
+    }
+}
+
+// =============================================================================
+// Main function (entry point for parse test)
+// =============================================================================
+
+fn main() {
+    // This file tests parser acceptance of for await syntax
+    // No runtime execution needed for parse-pass test
+    let _ = 0;
+}

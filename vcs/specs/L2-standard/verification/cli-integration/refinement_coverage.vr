@@ -1,0 +1,218 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: self-hosting, refinement, types, contracts, bounds
+// @description: Refinement type annotations and bounded value patterns
+
+// NonNeg: value always >= 0
+fn make_non_neg(x: Int) -> Int {
+    if x < 0 { 0 } else { x }
+}
+
+// Bounded: value always in [lo, hi]
+fn make_bounded(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+// NonEmpty list operations — precondition: list must have elements
+fn safe_first(items: List<Int>) -> Int {
+    if items.len() == 0 { return -1; }
+    items[0]
+}
+
+fn safe_last(items: List<Int>) -> Int {
+    if items.len() == 0 { return -1; }
+    items[items.len() - 1]
+}
+
+// Percentage: always 0..100
+fn to_percentage(num: Int, denom: Int) -> Int {
+    if denom == 0 { return 0; }
+    let raw = num * 100 / denom;
+    make_bounded(raw, 0, 100)
+}
+
+// Index refinement: always valid for given list
+fn safe_index(items: List<Int>, i: Int) -> Int {
+    let idx = make_bounded(i, 0, items.len() - 1);
+    if items.len() == 0 { return -1; }
+    items[idx]
+}
+
+// Monotonic counter: can only increase
+type Counter is { value: Int };
+
+implement Counter {
+    fn new() -> Counter {
+        Counter { value: 0 }
+    }
+
+    fn increment(&mut self, amount: Int) {
+        // Refinement: amount must be positive, counter never decreases
+        let delta = make_non_neg(amount);
+        self.value = self.value + delta;
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+// Sorted list invariant
+fn is_sorted(items: List<Int>) -> Bool {
+    if items.len() <= 1 { return true; }
+    let mut i = 1;
+    while i < items.len() {
+        if items[i] < items[i - 1] {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn insert_sorted(items: &mut List<Int>, val: Int) {
+    // Maintain sorted invariant after insertion
+    items.push(val);
+    // Bubble the new element into position
+    let mut i = items.len() - 1;
+    while i > 0 {
+        if items[i] < items[i - 1] {
+            // swap
+            let tmp = items[i];
+            items[i] = items[i - 1];
+            items[i - 1] = tmp;
+            i = i - 1;
+        } else {
+            return;
+        }
+    }
+}
+
+fn test_non_neg() -> Int {
+    let cases = [-10, -1, 0, 1, 10];
+    let mut i = 0;
+    while i < cases.len() {
+        let result = make_non_neg(cases[i]);
+        if result < 0 {
+            print(f"FAIL non_neg: make_non_neg({cases[i]}) = {result} < 0");
+            return 1;
+        }
+        i = i + 1;
+    }
+    if make_non_neg(-5) != 0 { print("FAIL: non_neg(-5) != 0"); return 1; }
+    if make_non_neg(5) != 5 { print("FAIL: non_neg(5) != 5"); return 1; }
+    print("  non_neg: OK");
+    0
+}
+
+fn test_bounded() -> Int {
+    let cases = [-5, 0, 5, 10, 15];
+    let mut i = 0;
+    while i < cases.len() {
+        let result = make_bounded(cases[i], 0, 10);
+        if result < 0 || result > 10 {
+            print(f"FAIL bounded: make_bounded({cases[i]}, 0, 10) = {result}");
+            return 1;
+        }
+        i = i + 1;
+    }
+    print("  bounded: OK");
+    0
+}
+
+fn test_percentage() -> Int {
+    if to_percentage(1, 2) != 50 { print("FAIL: 1/2 != 50%"); return 1; }
+    if to_percentage(3, 4) != 75 { print("FAIL: 3/4 != 75%"); return 1; }
+    if to_percentage(0, 100) != 0 { print("FAIL: 0/100 != 0%"); return 1; }
+    if to_percentage(100, 100) != 100 { print("FAIL: 100/100 != 100%"); return 1; }
+    if to_percentage(10, 0) != 0 { print("FAIL: 10/0 != 0%"); return 1; }
+
+    // Over 100% should clamp
+    let over = to_percentage(200, 100);
+    if over > 100 {
+        print(f"FAIL: 200/100 should clamp to 100, got {over}");
+        return 1;
+    }
+    print("  percentage: OK");
+    0
+}
+
+fn test_safe_list_ops() -> Int {
+    let items = [10, 20, 30];
+    if safe_first(items) != 10 { print("FAIL: first != 10"); return 1; }
+    if safe_last(items) != 30 { print("FAIL: last != 30"); return 1; }
+
+    let empty = List.new();
+    if safe_first(empty) != -1 { print("FAIL: first of empty != -1"); return 1; }
+    if safe_last(empty) != -1 { print("FAIL: last of empty != -1"); return 1; }
+
+    let data = [100, 200, 300, 400, 500];
+    if safe_index(data, 0) != 100 { print("FAIL: safe_index 0"); return 1; }
+    if safe_index(data, 4) != 500 { print("FAIL: safe_index 4"); return 1; }
+    // Out of bounds should clamp to valid range
+    if safe_index(data, -5) != 100 { print("FAIL: safe_index -5 should clamp to 0"); return 1; }
+    if safe_index(data, 99) != 500 { print("FAIL: safe_index 99 should clamp to last"); return 1; }
+    print("  safe_list_ops: OK");
+    0
+}
+
+fn test_monotonic_counter() -> Int {
+    let mut c = Counter.new();
+    if c.get() != 0 { print("FAIL: counter initial != 0"); return 1; }
+
+    c.increment(5);
+    if c.get() != 5 { print(f"FAIL: counter after +5 = {c.get()}"); return 1; }
+
+    c.increment(3);
+    if c.get() != 8 { print(f"FAIL: counter after +3 = {c.get()}"); return 1; }
+
+    // Negative increment should be treated as 0 (non-negative refinement)
+    c.increment(-10);
+    if c.get() != 8 {
+        print(f"FAIL: counter after -10 should stay 8, got {c.get()}");
+        return 1;
+    }
+    print("  monotonic_counter: OK");
+    0
+}
+
+fn test_sorted_invariant() -> Int {
+    let mut sorted = List.new();
+    insert_sorted(&mut sorted, 5);
+    insert_sorted(&mut sorted, 2);
+    insert_sorted(&mut sorted, 8);
+    insert_sorted(&mut sorted, 1);
+    insert_sorted(&mut sorted, 6);
+
+    if !is_sorted(sorted) {
+        print("FAIL: list should be sorted after insert_sorted");
+        return 1;
+    }
+    if sorted.len() != 5 {
+        print(f"FAIL: expected 5 elements, got {sorted.len()}");
+        return 1;
+    }
+    // Should be [1, 2, 5, 6, 8]
+    if sorted[0] != 1 { print(f"FAIL: sorted[0] = {sorted[0]}"); return 1; }
+    if sorted[4] != 8 { print(f"FAIL: sorted[4] = {sorted[4]}"); return 1; }
+    print("  sorted_invariant: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_non_neg();
+    failures = failures + test_bounded();
+    failures = failures + test_percentage();
+    failures = failures + test_safe_list_ops();
+    failures = failures + test_monotonic_counter();
+    failures = failures + test_sorted_invariant();
+
+    if failures == 0 {
+        print("All refinement coverage tests passed");
+    }
+    failures
+}

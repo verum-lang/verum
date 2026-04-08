@@ -1,0 +1,25 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, negative-test
+// @expect: error(MovedValueUsed)
+
+/// Test that detects use after move for AFFINE types at compile time.
+/// This is critical for memory safety - the type checker catches
+/// use of moved affine values and reports "type not found: varname".
+/// NOTE: Regular types (Text, Int, List, etc.) use COPY semantics in Verum.
+/// Only types declared with `type affine` have move semantics.
+/// Spec: 04-memory-model.md#affine-types
+
+// Affine type - has move semantics (cannot be used after move)
+type affine Handle is {
+    id: Int,
+    name: Text,
+};
+
+fn main() {
+    // Basic use after move with affine type
+    let h1 = Handle { id: 1, name: Text.from("resource") };
+    let h2 = h1;           // h1 moved to h2 (Handle is affine)
+    print(h1.name);        // COMPILE ERROR: type not found: h1
+}

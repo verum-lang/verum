@@ -1,0 +1,330 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, shell_sort, activity_selection, integer_factorization, bit_tricks, coin_change
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #18: combines algorithms from tests 551-559 in a pipeline.
+// Pipeline:
+//   1. Shell sort (551)           - sort a raw array of activity durations
+//   2. Activity selection (552)   - build and solve an interval scheduling problem
+//   3. Integer factorization (553)- factorize selected-activity counts
+//   4. Bit tricks (556)           - compute popcount/parity of factorization result
+//   5. Coin change (559)          - count ways to represent popcount as coin sum
+
+// ============================================================
+// Shell sort (from 551) — Knuth gap sequence
+// ============================================================
+
+fn shell_sort_knuth(a: [Int; 16], n: Int) {
+    let mut gi = 0;
+    while gi < 3 {
+        let gap = if gi == 0 { 13 } else { if gi == 1 { 4 } else { 1 } };
+        if gap < n {
+            let mut i = gap;
+            while i < n {
+                let tmp = a[i];
+                let mut j = i;
+                while j >= gap && a[j - gap] > tmp {
+                    a[j] = a[j - gap];
+                    j = j - gap;
+                }
+                a[j] = tmp;
+                i = i + 1;
+            }
+        }
+        gi = gi + 1;
+    }
+}
+
+fn is_sorted_16(a: [Int; 16], n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if a[i] < a[i - 1] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_shell_pipeline() {
+    // Raw durations of 8 activities (to be sorted before scheduling)
+    let mut dur = [7, 2, 9, 4, 11, 3, 6, 8, 0, 0, 0, 0, 0, 0, 0, 0];
+    shell_sort_knuth(dur, 8);
+    // After sort: [2,3,4,6,7,8,9,11]
+    assert_eq(is_sorted_16(dur, 8), 1);
+    assert_eq(dur[0], 2);
+    assert_eq(dur[7], 11);
+    print("shell_pipeline: ok");
+}
+
+// ============================================================
+// Activity selection (from 552)
+// ============================================================
+
+fn activity_select_pipeline(start: [Int; 16], finish: [Int; 16],
+                             selected: [Int; 16], n: Int) -> Int {
+    let mut count = 0;
+    let mut last_f = -1;
+    let mut i = 0;
+    while i < n { selected[i] = 0; i = i + 1; }
+    i = 0;
+    while i < n {
+        if start[i] >= last_f {
+            selected[i] = 1;
+            last_f = finish[i];
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn no_overlap_check(start: [Int; 16], finish: [Int; 16],
+                    selected: [Int; 16], n: Int) -> Int {
+    let mut prev_f = -1;
+    let mut i = 0;
+    while i < n {
+        if selected[i] == 1 {
+            if start[i] < prev_f { return 0; }
+            prev_f = finish[i];
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_activity_pipeline() {
+    // 8 activities sorted by finish (matching the sorted durations):
+    // Use sorted durations as finish times; start = finish - duration_proportion
+    // Activities (start, finish) already sorted by finish:
+    // (0,2),(1,4),(3,6),(4,8),(5,11),(7,13),(9,16),(10,20)
+    // Greedy: pick (0,2), last=2; (1,4) start 1<2 skip; (3,6) start 3>=2 pick, last=6;
+    //         (4,8) start 4<6 skip; (5,11) start 5<6 skip; (7,13) start 7>=6 pick, last=13;
+    //         (9,16) start 9<13 skip; (10,20) start 10<13 skip.
+    // Count = 3
+    let mut s = [0, 1, 3, 4, 5, 7, 9, 10, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut f = [2, 4, 6, 8,11,13,16, 20, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sel = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = activity_select_pipeline(s, f, sel, 8);
+    assert_eq(cnt, 3);
+    assert_eq(no_overlap_check(s, f, sel, 8), 1);
+    assert_eq(sel[0], 1);   // (0,2) selected
+    assert_eq(sel[2], 1);   // (3,6) selected
+    assert_eq(sel[5], 1);   // (7,13) selected
+    print("activity_pipeline: ok");
+}
+
+// ============================================================
+// Integer factorization (from 553)
+// ============================================================
+
+fn count_divisors_pipeline(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut count = 0;
+    let mut i = 1;
+    while i * i <= n {
+        if n % i == 0 {
+            count = count + 1;
+            if i != n / i { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn prime_factors_pipeline(n: Int, factors: [Int; 16]) -> Int {
+    let mut remaining = n;
+    let mut count = 0;
+    let mut d = 2;
+    while d * d <= remaining {
+        while remaining % d == 0 {
+            factors[count] = d;
+            count = count + 1;
+            remaining = remaining / d;
+        }
+        d = d + 1;
+    }
+    if remaining > 1 {
+        factors[count] = remaining;
+        count = count + 1;
+    }
+    count
+}
+
+fn test_factorization_pipeline() {
+    // activity count = 3 (from above): count_divisors(3) = 2 (1,3)
+    assert_eq(count_divisors_pipeline(3), 2);
+
+    // Factorize 12 (= 2^2 * 3): 3 prime factors with multiplicity
+    let mut f = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = prime_factors_pipeline(12, f);
+    assert_eq(cnt, 3);
+    assert_eq(f[0], 2);
+    assert_eq(f[1], 2);
+    assert_eq(f[2], 3);
+
+    // Sum of prime factors of 12 = 2+2+3 = 7
+    let mut s = 0;
+    let mut i = 0;
+    while i < cnt { s = s + f[i]; i = i + 1; }
+    assert_eq(s, 7);
+    print("factorization_pipeline: ok");
+}
+
+// ============================================================
+// Bit tricks (from 556)
+// ============================================================
+
+fn popcount_pipeline(n: Int) -> Int {
+    let mut x = n;
+    let mut c = 0;
+    while x > 0 { x = x & (x - 1); c = c + 1; }
+    c
+}
+
+fn parity_pipeline(n: Int) -> Int {
+    let mut x = n;
+    let mut p = 0;
+    while x > 0 { p = p + 1; x = x & (x - 1); }
+    p % 2
+}
+
+fn next_pow2_pipeline(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut p = 1;
+    while p < n { p = p * 2; }
+    p
+}
+
+fn test_bit_pipeline() {
+    // popcount(12) = 2  (binary 1100: two bits set)
+    assert_eq(popcount_pipeline(12), 2);
+    // parity(12) = 0  (even number of bits)
+    assert_eq(parity_pipeline(12), 0);
+
+    // next_pow2(count_divisors(12)) = next_pow2(6) = 8
+    let nd = count_divisors_pipeline(12);
+    assert_eq(nd, 6);
+    assert_eq(next_pow2_pipeline(nd), 8);
+
+    // popcount(7) = 3  (binary 111)
+    assert_eq(popcount_pipeline(7), 3);
+    // parity(7) = 1
+    assert_eq(parity_pipeline(7), 1);
+    print("bit_pipeline: ok");
+}
+
+// ============================================================
+// Coin change ways (from 559)
+// ============================================================
+
+fn coin_ways_pipeline(coins: [Int; 16], nc: Int, amount: Int, ways: [Int; 64]) -> Int {
+    ways[0] = 1;
+    let mut ci = 0;
+    while ci < nc {
+        let c = coins[ci];
+        let mut a = c;
+        while a <= amount {
+            ways[a] = ways[a] + ways[a - c];
+            a = a + 1;
+        }
+        ci = ci + 1;
+    }
+    ways[amount]
+}
+
+fn test_coin_pipeline() {
+    // Represent popcount(12)=2 as coin sum using coins [1,2]:
+    // Ways to make 2 with [1,2]: (1+1) and (2) = 2 ways
+    let mut coins = [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ways = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let w = coin_ways_pipeline(coins, 2, 2, ways);
+    assert_eq(w, 2);
+
+    // Represent popcount(255)=8 using coins [1,2,5]:
+    // Ways to make 8 with [1,2,5]:
+    // We know this is > 0 (plenty of ways). Exact: 15.
+    // Verify by DP: ways[8] after coins [1,2,5].
+    // After coin=1: ways[k]=1 for k=0..8
+    // After coin=2: ways[2]+=ways[0]=1->2; ways[3]+=ways[1]=1->2;
+    //               ways[4]+=ways[2]=2->3; ways[5]+=ways[3]=2->3;
+    //               ways[6]+=ways[4]=3->4; ways[7]+=ways[5]=3->4;
+    //               ways[8]+=ways[6]=4->5
+    // After coin=5: ways[5]+=ways[0]=1->4; ways[6]+=ways[1]=1->5;
+    //               ways[7]+=ways[2]=2->6; ways[8]+=ways[3]=2->7
+    // ways[8] = 7
+    let mut coins2 = [1, 2, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ways2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let w2 = coin_ways_pipeline(coins2, 3, 8, ways2);
+    assert_eq(w2, 7);
+    print("coin_pipeline: ok");
+}
+
+// ============================================================
+// Combined cross-algorithm pipeline
+// ============================================================
+
+fn test_combined_pipeline() {
+    // Step 1: Sort an array of numbers using shell sort.
+    let mut arr = [15, 3, 9, 1, 7, 12, 5, 11, 0, 0, 0, 0, 0, 0, 0, 0];
+    shell_sort_knuth(arr, 8);
+    assert_eq(is_sorted_16(arr, 8), 1);
+    // Sorted: [1, 3, 5, 7, 9, 11, 12, 15]
+    assert_eq(arr[0], 1);
+    assert_eq(arr[7], 15);
+
+    // Step 2: Use sorted values as finish times with start = finish/2.
+    // Activities: (0,1),(1,3),(2,5),(3,7),(4,9),(5,11),(6,12),(7,15)
+    let mut s2 = [0, 1, 2, 3, 4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut f2 = [1, 3, 5, 7, 9,11,12,15, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sel = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Greedy: (0,1) pick; (1,3) start 1>=1 pick; (2,5) start 2<3 skip;
+    //         (3,7) start 3>=3 pick; (4,9) start 4<7 skip; (5,11) start 5<7 skip;
+    //         (6,12) start 6<7 skip; (7,15) start 7>=7 pick. count=4.
+    let cnt = activity_select_pipeline(s2, f2, sel, 8);
+    assert_eq(cnt, 4);
+    assert_eq(no_overlap_check(s2, f2, sel, 8), 1);
+
+    // Step 3: Factorize count (4 = 2^2): 2 prime factors with multiplicity.
+    let mut factors = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nf = prime_factors_pipeline(cnt, factors);
+    assert_eq(nf, 2);
+    assert_eq(factors[0], 2);
+    assert_eq(factors[1], 2);
+
+    // Step 4: popcount(count) = popcount(4) = 1 (binary 100)
+    let pc = popcount_pipeline(cnt);
+    assert_eq(pc, 1);
+    assert_eq(parity_pipeline(cnt), 1);
+
+    // Step 5: coin_ways for amount=pc=1 with coins [1]: only 1 way.
+    let mut coins = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ways = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cw = coin_ways_pipeline(coins, 1, pc, ways);
+    assert_eq(cw, 1);
+
+    let msg = f"combined: cnt={cnt} nf={nf} pc={pc} cw={cw}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_shell_pipeline();
+    test_activity_pipeline();
+    test_factorization_pipeline();
+    test_bit_pipeline();
+    test_coin_pipeline();
+    test_combined_pipeline();
+    print("[OK] 560_interp_comprehensive18");
+    0
+}

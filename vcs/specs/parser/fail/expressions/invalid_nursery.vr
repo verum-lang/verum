@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, async, nursery, grammar, error
+// @description: Test detection of nursery without block expression
+// @expected-error: E0D4
+
+// GRAMMAR: nursery_expr = 'nursery' , [ nursery_options ] , block_expr , [ nursery_handlers ] ;
+// Block expression is REQUIRED after nursery keyword (and optional options).
+
+async fn test_invalid_nursery() {
+    nursery;  // ERROR: missing block after nursery
+}

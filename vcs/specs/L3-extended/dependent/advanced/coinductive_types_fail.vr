@@ -1,0 +1,42 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, coinductive, streams, advanced, error
+// @expected-error: E400 "Type mismatch"
+
+/// Coinductive types - failure cases
+
+/// Stream type
+type Stream<T> is {
+    head: T,
+    tail: fn() -> Stream<T>,
+};
+
+/// ERROR: Wrong head type
+fn wrong_stream() -> Stream<Int> {
+    Stream {
+        head: "not an int",  // ERROR: Text != Int
+        tail: || wrong_stream(),
+    }
+}
+
+/// ERROR: Wrong tail return type
+fn wrong_tail() -> Stream<Int> {
+    Stream {
+        head: 42,
+        tail: || "not a stream",  // ERROR: Text != Stream<Int>
+    }
+}
+
+/// ERROR: Stream element type mismatch in map
+fn map_wrong(s: Stream<Int>) -> Stream<Text> {
+    Stream {
+        head: s.head,  // ERROR: Int != Text
+        tail: || map_wrong((s.tail)()),
+    }
+}
+
+fn main() {
+    let _ = wrong_stream();
+    let _ = map_wrong(Stream { head: 1, tail: || Stream { head: 2, tail: || wrong_stream() } });
+}

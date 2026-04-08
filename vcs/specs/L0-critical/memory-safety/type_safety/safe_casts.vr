@@ -1,0 +1,178 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, type-safety, casts, conversions
+// @description: Tests safe type conversion patterns
+
+/// Verum provides safe type conversions that:
+/// - Are explicit (no implicit coercions)
+/// - Are checked when possible
+/// - Return Result/Maybe for fallible conversions
+/// - Preserve type safety guarantees
+
+fn main() {
+    test_numeric_widening();
+    test_numeric_narrowing();
+    test_checked_casts();
+    test_string_conversions();
+    test_protocol_conversions();
+    test_variant_casts();
+
+    print("All safe cast tests passed!");
+}
+
+fn test_numeric_widening() {
+    // Widening conversions are always safe
+    let i8_val: i8 = 100;
+    let i16_val: i16 = i8_val.into();  // Safe: i8 -> i16
+    let i32_val: i32 = i16_val.into(); // Safe: i16 -> i32
+    let i64_val: i64 = i32_val.into(); // Safe: i32 -> i64
+
+    assert(i64_val == 100);
+
+    // Unsigned widening
+    let u8_val: u8 = 200;
+    let u16_val: u16 = u8_val.into();
+    let u32_val: u32 = u16_val.into();
+
+    assert(u32_val == 200);
+
+    // Float widening
+    let f32_val: f32 = 3.14;
+    let f64_val: f64 = f32_val.into();
+
+    assert(f64_val > 3.13 && f64_val < 3.15);
+}
+
+fn test_numeric_narrowing() {
+    // Narrowing uses 'as' - may truncate
+    let big: i64 = 1000;
+    let small: i8 = big as i8;  // Truncates to fit
+
+    // Value wraps: 1000 % 256 = 232, as signed = -24
+    assert(small == -24);
+
+    // Float to int truncates toward zero
+    let f: Float = 3.7;
+    let i: Int = f as Int;
+    assert(i == 3);
+
+    let neg_f: Float = -3.7;
+    let neg_i: Int = neg_f as Int;
+    assert(neg_i == -3);
+}
+
+fn test_checked_casts() {
+    // try_into for checked conversions
+    let big: i64 = 1000;
+
+    let result: Result<i8, TryFromIntError> = big.try_into();
+    match result {
+        Ok(_) => panic("Should have failed"),
+        Err(e) => print("Expected error: value out of range"),
+    }
+
+    // Successful checked conversion
+    let small: i64 = 50;
+    let result2: Result<i8, TryFromIntError> = small.try_into();
+    assert(result2 == Ok(50i8));
+
+    // Checked from unsigned to signed
+    let u_val: u64 = 200;
+    let result3: Result<i8, TryFromIntError> = u_val.try_into();
+    assert(result3.is_err());  // 200 > i8.MAX
+
+    // Use unwrap_or for default on failure
+    let safe_val = big.try_into().unwrap_or(i8.MAX);
+    assert(safe_val == i8.MAX);
+}
+
+fn test_string_conversions() {
+    // Int to Text
+    let n: Int = 42;
+    let s: Text = n.to_string();
+    assert(s == "42");
+
+    // Text to Int (fallible)
+    let valid: Result<Int, ParseError> = "123".parse();
+    assert(valid == Ok(123));
+
+    let invalid: Result<Int, ParseError> = "abc".parse();
+    assert(invalid.is_err());
+
+    // With radix
+    let hex: Result<Int, ParseError> = Int.from_str_radix("FF", 16);
+    assert(hex == Ok(255));
+
+    // Float to Text with formatting
+    let f: Float = 3.14159;
+    let formatted = format("{:.2}", f);
+    assert(formatted == "3.14");
+}
+
+fn test_protocol_conversions() {
+    // From/Into protocols for custom types
+    type Celsius is (Float);
+    type Fahrenheit is (Float);
+
+    implement From<Celsius> for Fahrenheit {
+        fn from(c: Celsius) -> Fahrenheit {
+            Fahrenheit(c.0 * 9.0 / 5.0 + 32.0)
+        }
+    }
+
+    implement From<Fahrenheit> for Celsius {
+        fn from(f: Fahrenheit) -> Celsius {
+            Celsius((f.0 - 32.0) * 5.0 / 9.0)
+        }
+    }
+
+    let boiling_c = Celsius(100.0);
+    let boiling_f: Fahrenheit = boiling_c.into();
+    assert((boiling_f.0 - 212.0).abs() < 0.001);
+
+    let freezing_f = Fahrenheit(32.0);
+    let freezing_c: Celsius = freezing_f.into();
+    assert((freezing_c.0 - 0.0).abs() < 0.001);
+}
+
+fn test_variant_casts() {
+    // Downcast for variants using pattern matching
+    type Animal is
+        Dog { name: Text, breed: Text }
+        | Cat { name: Text, indoor: Bool }
+        | Bird { name: Text, can_fly: Bool };
+
+    let pet = Animal.Dog {
+        name: Text.from("Buddy"),
+        breed: Text.from("Labrador"),
+    };
+
+    // Safe variant inspection
+    let is_dog = (pet) is (Animal.Dog { .. });
+    assert(is_dog);
+
+    // Extract with if let
+    if let Animal.Dog { name, breed } = pet {
+        assert(name == "Buddy");
+        assert(breed == "Labrador");
+    }
+
+    // Using match for exhaustive handling
+    let sound = match pet {
+        Animal.Dog { .. } => "Woof!",
+        Animal.Cat { .. } => "Meow!",
+        Animal.Bird { .. } => "Tweet!",
+    };
+    assert(sound == "Woof!");
+}
+
+// Demonstrate that unsafe casts don't exist in safe Verum
+// fn no_unsafe_casts() {
+//     // These do NOT exist in safe Verum:
+//     // - reinterpret_cast<T>(value)
+//     // - transmute<A, B>(value)
+//     // - *(T*)&value (pointer cast)
+//     //
+//     // Memory reinterpretation requires unsafe block and FFI
+// }

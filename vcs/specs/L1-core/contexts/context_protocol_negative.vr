@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: context, protocol, negative, using, exclusion
+// @description: Negative context constraints (`!Protocol`) in `using` clauses
+//   exclude a context from the function's scope. The compiler verifies the
+//   function body does NOT use the excluded context, either directly or
+//   transitively via callees.
+//   Grammar: negative_context = '!' , context_path ;
+
+context Database {
+    fn query(sql: Text) -> List<Text>;
+    fn execute(sql: Text) -> Int;
+}
+
+context Logger {
+    fn info(msg: Text);
+    fn warn(msg: Text);
+}
+
+context Network {
+    fn fetch(url: Text) -> Text;
+}
+
+// Pure computation: explicitly excludes Database and Network
+fn compute_total(values: List<Int>) -> Int
+    using [!Database, !Network]
+{
+    let mut sum = 0;
+    for v in values {
+        sum = sum + v;
+    }
+    sum
+}
+
+// Logger-only: excludes Database
+fn log_message(msg: Text)
+    using [Logger, !Database]
+{
+    Logger.info(msg);
+}
+
+// Context group with negative members
+using Pure = [!Database, !Network, !Logger];
+
+fn pure_add(a: Int, b: Int) -> Int
+    using Pure
+{
+    a + b
+}
+
+fn main() -> Int {
+    0
+}

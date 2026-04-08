@@ -1,0 +1,697 @@
+// =============================================================================
+// text_test.vr - Comprehensive tests for Text type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, string, utf8, core
+// @description: Comprehensive tests for Text type and methods
+// =============================================================================
+
+mount core.collections.List;
+mount core.base.maybe.{Maybe};
+mount core.base.result.{Result};
+
+// =============================================================================
+// Section 1: Construction Tests
+// =============================================================================
+
+@test
+fn test_text_literal() {
+    let s: Text = "hello";
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_text_empty() {
+    let empty: Text = "";
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+}
+
+// =============================================================================
+// Section 2: Length Tests
+// =============================================================================
+
+@test
+fn test_text_len() {
+    let s: Text = "hello";
+    assert_eq(s.len(), 5);
+}
+
+@test
+fn test_text_is_empty() {
+    let empty: Text = "";
+    let non_empty: Text = "x";
+
+    assert(empty.is_empty());
+    assert(!non_empty.is_empty());
+}
+
+// =============================================================================
+// Section 3: Comparison Tests
+// =============================================================================
+
+@test
+fn test_text_equality() {
+    let a: Text = "hello";
+    let b: Text = "hello";
+    let c: Text = "world";
+
+    assert_eq(a, b);
+    assert(a != c);
+}
+
+@test
+fn test_text_comparison() {
+    let a: Text = "apple";
+    let b: Text = "banana";
+    let c: Text = "apple";
+
+    assert(a < b);
+    assert(b > a);
+    assert(a <= c);
+    assert(a >= c);
+}
+
+// =============================================================================
+// Section 4: Concatenation Tests
+// =============================================================================
+
+@test
+fn test_text_concat() {
+    let a: Text = "hello";
+    let b: Text = " world";
+    let c: Text = a + b;
+
+    assert_eq(c, "hello world");
+}
+
+@test
+fn test_text_append() {
+    let mut s: Text = "hello";
+    s = s + " world";
+
+    assert_eq(s, "hello world");
+}
+
+// =============================================================================
+// Section 5: Substring and Slicing Tests
+// =============================================================================
+
+@test
+fn test_text_substring() {
+    let s: Text = "hello world";
+
+    let sub = s.substring(0, 5);
+    assert_eq(sub, "hello");
+
+    let sub2 = s.substring(6, 11);
+    assert_eq(sub2, "world");
+}
+
+@test
+fn test_text_slice() {
+    let s: Text = "hello world";
+
+    let slice = s.slice(0, 5);
+    assert_eq(slice, "hello");
+}
+
+// =============================================================================
+// Section 6: Search Tests
+// =============================================================================
+
+@test
+fn test_text_contains() {
+    let s: Text = "hello world";
+
+    assert(s.contains(&"hello"));
+    assert(s.contains(&"world"));
+    assert(s.contains(&" "));
+    assert(!s.contains(&"xyz"));
+}
+
+@test
+fn test_text_starts_with() {
+    let s: Text = "hello world";
+
+    assert(s.starts_with(&"hello"));
+    assert(s.starts_with(&"h"));
+    assert(!s.starts_with(&"world"));
+}
+
+@test
+fn test_text_ends_with() {
+    let s: Text = "hello world";
+
+    assert(s.ends_with(&"world"));
+    assert(s.ends_with(&"d"));
+    assert(!s.ends_with(&"hello"));
+}
+
+@test
+fn test_text_find() {
+    let s: Text = "hello world";
+
+    match s.find(&"world") {
+        Maybe.Some(idx) => assert_eq(idx, 6),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match s.find(&"xyz") {
+        Maybe.None => {} // Expected
+        Maybe.Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_text_rfind() {
+    let s: Text = "hello hello";
+
+    match s.rfind(&"hello") {
+        Maybe.Some(idx) => assert_eq(idx, 6),  // Second occurrence
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 7: Case Conversion Tests
+// =============================================================================
+
+@test
+fn test_text_to_uppercase() {
+    let s: Text = "hello";
+    assert_eq(s.to_uppercase(), "HELLO");
+}
+
+@test
+fn test_text_to_lowercase() {
+    let s: Text = "HELLO";
+    assert_eq(s.to_lowercase(), "hello");
+}
+
+// =============================================================================
+// Section 8: Trim Tests
+// =============================================================================
+
+@test
+fn test_text_trim() {
+    let s: Text = "  hello world  ";
+    assert_eq(s.trim(), "hello world");
+}
+
+@test
+fn test_text_trim_start() {
+    let s: Text = "  hello";
+    assert_eq(s.trim_start(), "hello");
+}
+
+@test
+fn test_text_trim_end() {
+    let s: Text = "hello  ";
+    assert_eq(s.trim_end(), "hello");
+}
+
+// =============================================================================
+// Section 9: Split Tests
+// =============================================================================
+
+@test
+fn test_text_split() {
+    let s: Text = "a,b,c,d";
+    let parts: List<Text> = s.split(&",");
+
+    assert_eq(parts.len(), 4);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "c");
+    assert_eq(parts[3], "d");
+}
+
+@test
+fn test_text_split_whitespace() {
+    let s: Text = "hello world  test";
+    let words: List<Text> = s.split_whitespace();
+
+    assert_eq(words.len(), 3);
+    assert_eq(words[0], "hello");
+    assert_eq(words[1], "world");
+    assert_eq(words[2], "test");
+}
+
+// =============================================================================
+// Section 10: Replace Tests
+// =============================================================================
+
+@test
+fn test_text_replace() {
+    let s: Text = "hello world";
+    let result = s.replace(&"world", &"verum");
+
+    assert_eq(result, "hello verum");
+}
+
+// =============================================================================
+// Section 11: Character Access Tests
+// =============================================================================
+
+@test
+fn test_text_char_at() {
+    let s: Text = "hello";
+
+    match s.char_at(0) {
+        Maybe.Some(c) => assert_eq(c, 'h'),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match s.char_at(4) {
+        Maybe.Some(c) => assert_eq(c, 'o'),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    match s.char_at(10) {
+        Maybe.None => {} // Expected - out of bounds
+        Maybe.Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_text_chars() {
+    let s: Text = "abc";
+    let mut chars: List<Char> = List.new();
+
+    for c in s.chars() {
+        chars.push(c);
+    }
+
+    assert_eq(chars.len(), 3);
+    assert_eq(chars[0], 'a');
+    assert_eq(chars[1], 'b');
+    assert_eq(chars[2], 'c');
+}
+
+// =============================================================================
+// Section 12: Parsing Tests
+// =============================================================================
+
+@test
+fn test_text_parse_int() {
+    let s: Text = "42";
+    match s.parse_int() {
+        Result.Ok(n) => assert_eq(n, 42),
+        Result.Err(_) => panic("Expected Ok"),
+    }
+
+    let negative: Text = "-123";
+    match negative.parse_int() {
+        Result.Ok(n) => assert_eq(n, -123),
+        Result.Err(_) => panic("Expected Ok"),
+    }
+
+    let invalid: Text = "abc";
+    match invalid.parse_int() {
+        Result.Err(_) => {} // Expected
+        Result.Ok(_) => panic("Expected Err"),
+    }
+}
+
+@test
+fn test_text_parse_float() {
+    let s: Text = "3.14";
+    match s.parse_float() {
+        Result.Ok(f) => assert(f > 3.13 && f < 3.15),
+        Result.Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 13: Format String Tests
+// =============================================================================
+
+@test
+fn test_text_format() {
+    let x = 42;
+    let name = "world";
+    let result = f"Hello {name}, number is {x}";
+
+    assert(result.contains(&"Hello"));
+    assert(result.contains(&"world"));
+    assert(result.contains(&"42"));
+}
+
+// =============================================================================
+// Section 13b: Additional Parse Tests
+// =============================================================================
+
+@test
+fn test_text_parse_bool() {
+    match "true".parse_bool() {
+        Result.Ok(b) => assert_eq(b, true),
+        Result.Err(_) => panic("Expected Ok"),
+    }
+
+    match "false".parse_bool() {
+        Result.Ok(b) => assert_eq(b, false),
+        Result.Err(_) => panic("Expected Ok"),
+    }
+
+    match "invalid".parse_bool() {
+        Result.Err(_) => {} // Expected
+        Result.Ok(_) => panic("Expected Err"),
+    }
+}
+
+// =============================================================================
+// Section 13c: Conversion From Primitives Tests
+// =============================================================================
+
+@test
+fn test_text_from_int() {
+    assert_eq(Text.from_int(42), "42");
+    assert_eq(Text.from_int(0), "0");
+    assert_eq(Text.from_int(-123), "-123");
+}
+
+@test
+fn test_text_from_float() {
+    let s = Text.from_float(3.14);
+    assert(s.contains(&"3.14"));
+}
+
+@test
+fn test_text_from_bool() {
+    assert_eq(Text.from_bool(true), "true");
+    assert_eq(Text.from_bool(false), "false");
+}
+
+// =============================================================================
+// Section 14: Repeat Tests
+// =============================================================================
+
+@test
+fn test_text_repeat() {
+    let s: Text = "ab";
+    let repeated = s.repeat(3);
+
+    assert_eq(repeated, "ababab");
+}
+
+// =============================================================================
+// Section 15: Edge Cases
+// =============================================================================
+
+@test
+fn test_text_empty_operations() {
+    let empty: Text = "";
+
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+    assert_eq(empty.trim(), "");
+    assert_eq(empty.to_uppercase(), "");
+    assert(!empty.contains(&"x"));
+}
+
+@test
+fn test_text_single_char() {
+    let s: Text = "x";
+
+    assert_eq(s.len(), 1);
+    assert(!s.is_empty());
+    assert_eq(s.to_uppercase(), "X");
+}
+
+// =============================================================================
+// Section 16: Trim Matches
+// =============================================================================
+
+@test
+fn test_text_trim_start_matches() {
+    assert_eq("###hello".trim_start_matches("#"), "hello");
+    assert_eq("hello".trim_start_matches("#"), "hello");
+    assert_eq("###".trim_start_matches("#"), "");
+}
+
+@test
+fn test_text_trim_end_matches() {
+    assert_eq("hello###".trim_end_matches("#"), "hello");
+    assert_eq("hello".trim_end_matches("#"), "hello");
+    assert_eq("###".trim_end_matches("#"), "");
+}
+
+// =============================================================================
+// Section 17: Padding
+// =============================================================================
+
+@test
+fn test_text_pad_left() {
+    assert_eq("42".pad_left(5, '0'), "00042");
+    assert_eq("hello".pad_left(3, ' '), "hello");
+    assert_eq("x".pad_left(4, '-'), "---x");
+}
+
+@test
+fn test_text_pad_right() {
+    assert_eq("42".pad_right(5, ' '), "42   ");
+    assert_eq("hello".pad_right(3, ' '), "hello");
+    assert_eq("x".pad_right(4, '-'), "x---");
+}
+
+// =============================================================================
+// Section 18: SplitN
+// =============================================================================
+
+@test
+fn test_text_splitn() {
+    let parts = "a.b.c.d".splitn(3, ".");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "c.d");
+}
+
+@test
+fn test_text_splitn_no_match() {
+    let parts = "hello".splitn(3, ".");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "hello");
+}
+
+@test
+fn test_text_rsplitn() {
+    let parts = "a.b.c.d".rsplitn(3, ".");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a.b");
+    assert_eq(parts[1], "c");
+    assert_eq(parts[2], "d");
+}
+
+// =============================================================================
+// Section 19: Strip Prefix / Suffix
+// =============================================================================
+
+@test
+fn test_text_strip_prefix_found() {
+    let result = "hello world".strip_prefix(&"hello ");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "world");
+}
+
+@test
+fn test_text_strip_prefix_not_found() {
+    let result = "hello world".strip_prefix(&"xyz");
+    assert(result.is_none());
+}
+
+@test
+fn test_text_strip_prefix_empty() {
+    let result = "hello".strip_prefix(&"");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "hello");
+}
+
+@test
+fn test_text_strip_prefix_full() {
+    let result = "hello".strip_prefix(&"hello");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "");
+}
+
+@test
+fn test_text_strip_suffix_found() {
+    let result = "hello world".strip_suffix(&" world");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "hello");
+}
+
+@test
+fn test_text_strip_suffix_not_found() {
+    let result = "hello world".strip_suffix(&"xyz");
+    assert(result.is_none());
+}
+
+@test
+fn test_text_strip_suffix_empty() {
+    let result = "hello".strip_suffix(&"");
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "hello");
+}
+
+// =============================================================================
+// Section 20: Split Once
+// =============================================================================
+
+@test
+fn test_text_split_once_found() {
+    let result = "key=value".split_once(&"=");
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert_eq(pair.0, "key");
+    assert_eq(pair.1, "value");
+}
+
+@test
+fn test_text_split_once_not_found() {
+    let result = "hello world".split_once(&"=");
+    assert(result.is_none());
+}
+
+@test
+fn test_text_split_once_multiple_delimiters() {
+    // Should split at FIRST occurrence
+    let result = "a=b=c".split_once(&"=");
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert_eq(pair.0, "a");
+    assert_eq(pair.1, "b=c");
+}
+
+@test
+fn test_text_rsplit_once_found() {
+    let result = "a.b.c".rsplit_once(&".");
+    assert(result.is_some());
+    let pair = result.unwrap();
+    assert_eq(pair.0, "a.b");
+    assert_eq(pair.1, "c");
+}
+
+@test
+fn test_text_rsplit_once_not_found() {
+    let result = "hello".rsplit_once(&".");
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 21: Case-Insensitive Comparison
+// =============================================================================
+
+@test
+fn test_text_eq_ignore_case_equal() {
+    assert("hello".eq_ignore_case(&"HELLO"));
+    assert("Hello".eq_ignore_case(&"hELLO"));
+}
+
+@test
+fn test_text_eq_ignore_case_not_equal() {
+    assert(!"hello".eq_ignore_case(&"world"));
+}
+
+@test
+fn test_text_eq_ignore_case_empty() {
+    assert("".eq_ignore_case(&""));
+}
+
+// =============================================================================
+// Section 22: Count Matches
+// =============================================================================
+
+@test
+fn test_text_count_matches() {
+    assert_eq("abcabcabc".count_matches(&"abc"), 3);
+    assert_eq("aaa".count_matches(&"a"), 3);
+    assert_eq("hello".count_matches(&"xyz"), 0);
+}
+
+@test
+fn test_text_count_matches_empty_pattern() {
+    // Empty pattern behavior - 0 matches expected
+    assert_eq("hello".count_matches(&""), 0);
+}
+
+// =============================================================================
+// Section 23: ASCII and Classification
+// =============================================================================
+
+@test
+fn test_text_is_ascii() {
+    assert("hello world 123".is_ascii());
+    assert("".is_ascii());
+    assert("!@#$%".is_ascii());
+}
+
+@test
+fn test_text_is_numeric() {
+    assert("12345".is_numeric());
+    assert("0".is_numeric());
+    assert(!"hello".is_numeric());
+    assert(!"12a34".is_numeric());
+    assert(!"".is_numeric());
+}
+
+@test
+fn test_text_is_alphabetic() {
+    assert("hello".is_alphabetic());
+    assert("ABC".is_alphabetic());
+    assert(!"123".is_alphabetic());
+    assert(!"hello123".is_alphabetic());
+    assert(!"".is_alphabetic());
+}
+
+@test
+fn test_text_is_alphanumeric() {
+    assert("hello123".is_alphanumeric());
+    assert("abc".is_alphanumeric());
+    assert("123".is_alphanumeric());
+    assert(!"hello world".is_alphanumeric());
+    assert(!"".is_alphanumeric());
+}
+
+// =============================================================================
+// Section 24: Reverse
+// =============================================================================
+
+@test
+fn test_text_reverse() {
+    assert_eq("hello".reverse(), "olleh");
+    assert_eq("".reverse(), "");
+    assert_eq("a".reverse(), "a");
+    assert_eq("ab".reverse(), "ba");
+}
+
+// =============================================================================
+// Section 25: Center
+// =============================================================================
+
+@test
+fn test_text_center() {
+    let centered = "hi".center(6, '-');
+    assert_eq(centered, "--hi--");
+}
+
+@test
+fn test_text_center_already_wide() {
+    let centered = "hello".center(3, '-');
+    assert_eq(centered, "hello");
+}
+
+@test
+fn test_text_center_odd_padding() {
+    // "hi" (2) centered in width 7 => 2 left pad, 3 right pad (or similar)
+    let centered = "hi".center(7, '*');
+    assert_eq(centered.len(), 7);
+    assert(centered.contains(&"hi"));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

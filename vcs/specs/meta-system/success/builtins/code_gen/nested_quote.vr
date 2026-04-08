@@ -1,0 +1,47 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, code_gen, quote
+// @description: Tests for nested quote functionality
+
+// Test concat_idents for identifier generation
+meta fn test_concat_idents_for_codegen() -> Bool {
+    let prefix = "get";
+    let suffix = "Value";
+    let ident = concat_idents(prefix, suffix);
+    ident == "getValue"
+}
+
+// Test format_ident for structured code generation
+meta fn test_format_ident_codegen() -> Bool {
+    let type_name = "User";
+
+    let impl_name = format_ident("{}_impl", type_name);
+    let test_name = format_ident("test_{}", type_name);
+
+    impl_name == "User_impl" && test_name == "test_User"
+}
+
+// Test recursive identifier building
+meta fn build_nested_name(depth: Int, base: Text) -> Text {
+    if depth <= 0 {
+        base
+    } else {
+        let inner = build_nested_name(depth - 1, base);
+        text_concat("wrap_", inner)
+    }
+}
+
+meta fn test_recursive_name_building() -> Bool {
+    let name0 = build_nested_name(0, "core");
+    let name1 = build_nested_name(1, "core");
+    let name2 = build_nested_name(2, "core");
+
+    name0 == "core" && name1 == "wrap_core" && name2 == "wrap_wrap_core"
+}
+
+fn main() {
+    @const assert(test_concat_idents_for_codegen());
+    @const assert(test_format_ident_codegen());
+    @const assert(test_recursive_name_building());
+}

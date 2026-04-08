@@ -1,0 +1,70 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: nested, text, method, e2e
+// @description: Debug nested struct text comparison in methods
+
+type Inner is { label: Text };
+type Outer is { inner: Inner, name: Text };
+
+implement Outer {
+    fn new(name: Text, label: Text) -> Outer {
+        Outer { inner: Inner { label: label }, name: name }
+    }
+
+    fn check_name(&self, expected: Text) -> Bool {
+        self.name == expected
+    }
+
+    fn get_label(&self) -> Text {
+        self.inner.label
+    }
+
+    fn check_label(&self, expected: Text) -> Bool {
+        self.inner.label == expected
+    }
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    let o = Outer.new("myobj", "mylbl");
+
+    // Test 1: Direct nested field access (no method)
+    if o.inner.label != "mylbl" {
+        print(f"FAIL: direct nested, got '{o.inner.label}'");
+        failures = failures + 1;
+    } else {
+        print("  direct_nested: OK");
+    }
+
+    // Test 2: Name check via method
+    if !o.check_name("myobj") {
+        print("FAIL: check_name");
+        failures = failures + 1;
+    } else {
+        print("  check_name: OK");
+    }
+
+    // Test 3: Get label via method
+    let lbl = o.get_label();
+    if lbl != "mylbl" {
+        print(f"FAIL: get_label, got '{lbl}'");
+        failures = failures + 1;
+    } else {
+        print("  get_label: OK");
+    }
+
+    // Test 4: Check label via method
+    if !o.check_label("mylbl") {
+        print("FAIL: check_label");
+        failures = failures + 1;
+    } else {
+        print("  check_label: OK");
+    }
+
+    if failures == 0 {
+        print("All nested text method tests passed");
+    }
+    failures
+}

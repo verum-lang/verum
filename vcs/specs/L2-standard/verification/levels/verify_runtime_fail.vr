@@ -1,0 +1,24 @@
+// @test: run-panic
+// @expected-panic: Contract violation: requires y != 0.0
+// @tier: 0
+// @level: L2
+// @tags: verification, runtime, error
+// @expected-error: E601 "Precondition violated"
+
+/// Runtime verification failure tests
+/// Demonstrates runtime contract violation behavior
+
+@verify(runtime)
+fn divide_by_zero_attempt(x: Float, y: Float) -> Float {
+    contract#"
+        requires y != 0.0;
+        ensures result == x / y;
+    ";
+    x / y
+}
+
+fn main() {
+    // This should panic at runtime with contract violation
+    let result = divide_by_zero_attempt(10.0, 0.0);
+    println(f"This should not print: {result}");
+}

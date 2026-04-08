@@ -1,0 +1,191 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, stress, comprehensive
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Milestone test #260: stress test with many function calls and data flow
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn clamp(x: Int, lo: Int, hi: Int) -> Int { max2(lo, min2(x, hi)) }
+
+// === Collatz sequence ===
+fn collatz_step(n: Int) -> Int {
+    if n % 2 == 0 { n / 2 } else { 3 * n + 1 }
+}
+
+fn collatz_length(n: Int) -> Int {
+    let mut x = n;
+    let mut steps = 0;
+    while x != 1 {
+        x = collatz_step(x);
+        steps = steps + 1;
+    }
+    steps
+}
+
+// === Digit operations ===
+fn digit_sum(n: Int) -> Int {
+    let mut x = abs_val(n);
+    let mut sum = 0;
+    while x > 0 {
+        sum = sum + x % 10;
+        x = x / 10;
+    }
+    sum
+}
+
+fn digit_count(n: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut x = abs_val(n);
+    let mut count = 0;
+    while x > 0 {
+        count = count + 1;
+        x = x / 10;
+    }
+    count
+}
+
+fn reverse_digits(n: Int) -> Int {
+    let mut x = abs_val(n);
+    let mut rev = 0;
+    while x > 0 {
+        rev = rev * 10 + x % 10;
+        x = x / 10;
+    }
+    rev
+}
+
+fn is_palindrome(n: Int) -> Bool {
+    n >= 0 && n == reverse_digits(n)
+}
+
+// === Accumulator pattern ===
+fn sum_range(a: Int, b: Int) -> Int {
+    let mut sum = 0;
+    let mut i = a;
+    while i <= b {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn prod_range(a: Int, b: Int) -> Int {
+    let mut prod = 1;
+    let mut i = a;
+    while i <= b {
+        prod = prod * i;
+        i = i + 1;
+    }
+    prod
+}
+
+// === Higher-order ===
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_collatz() {
+    assert_eq(collatz_length(1), 0);
+    assert_eq(collatz_length(2), 1);
+    assert_eq(collatz_length(3), 7);
+    assert_eq(collatz_length(27), 111);
+
+    // All starting values 1-20 eventually reach 1
+    let mut i = 1;
+    let mut total_steps = 0;
+    while i <= 20 {
+        let steps = collatz_length(i);
+        assert_eq(steps >= 0, true);
+        total_steps = total_steps + steps;
+        i = i + 1;
+    }
+    assert_eq(total_steps > 0, true);
+}
+
+fn test_digits() {
+    assert_eq(digit_sum(123), 6);
+    assert_eq(digit_sum(9999), 36);
+    assert_eq(digit_count(123), 3);
+    assert_eq(digit_count(0), 1);
+    assert_eq(digit_count(10000), 5);
+
+    assert_eq(reverse_digits(123), 321);
+    assert_eq(reverse_digits(100), 1);
+    assert_eq(reverse_digits(12321), 12321);
+
+    assert_eq(is_palindrome(121), true);
+    assert_eq(is_palindrome(123), false);
+    assert_eq(is_palindrome(0), true);
+    assert_eq(is_palindrome(1001), true);
+}
+
+fn test_ranges() {
+    assert_eq(sum_range(1, 100), 5050);
+    assert_eq(sum_range(1, 10), 55);
+    assert_eq(prod_range(1, 5), 120);  // 5!
+    assert_eq(prod_range(1, 8), 40320); // 8!
+}
+
+fn test_clamp() {
+    assert_eq(clamp(5, 0, 10), 5);
+    assert_eq(clamp(-5, 0, 10), 0);
+    assert_eq(clamp(15, 0, 10), 10);
+    assert_eq(clamp(0, 0, 10), 0);
+    assert_eq(clamp(10, 0, 10), 10);
+}
+
+fn test_fold() {
+    let add = |a: Int, b: Int| -> Int { a + b };
+    assert_eq(fold_range(1, 11, 0, add), 55);
+
+    let mul = |a: Int, b: Int| -> Int { a * b };
+    assert_eq(fold_range(1, 7, 1, mul), 720);
+
+    // Count even numbers in [0, 20)
+    let count_even = |acc: Int, x: Int| -> Int { if x % 2 == 0 { acc + 1 } else { acc } };
+    assert_eq(fold_range(0, 20, 0, count_even), 10);
+}
+
+fn test_stress() {
+    // Compute sum of digit sums for 1..100
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 100 {
+        total = total + digit_sum(i);
+        i = i + 1;
+    }
+    // digit_sum(1)+...+digit_sum(100) = 901
+    assert_eq(total, 901);
+
+    // Count palindromes in 1..200
+    let mut palindromes = 0;
+    let mut j = 1;
+    while j <= 200 {
+        if is_palindrome(j) { palindromes = palindromes + 1; }
+        j = j + 1;
+    }
+    // 1-9 (9) + 11,22,...,99 (9) + 101,111,121,131,141,151,161,171,181,191 (10) = 28
+    assert_eq(palindromes, 28);
+}
+
+fn main() -> Int {
+    test_collatz();
+    test_digits();
+    test_ranges();
+    test_clamp();
+    test_fold();
+    test_stress();
+    print("[OK] 260_milestone_260_aot");
+    0
+}

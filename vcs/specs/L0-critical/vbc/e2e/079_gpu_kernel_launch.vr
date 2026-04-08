@@ -1,0 +1,409 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, gpu, kernel
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU kernel launch simulation — thread blocks, shared memory, synchronization
+
+// ============================================================================
+// Array helpers (16-element for GPU simulation)
+// ============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 } else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 } else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        e8: if i == 8 { val } else { a.e8 },
+        e9: if i == 9 { val } else { a.e9 },
+        e10: if i == 10 { val } else { a.e10 },
+        e11: if i == 11 { val } else { a.e11 },
+        e12: if i == 12 { val } else { a.e12 },
+        e13: if i == 13 { val } else { a.e13 },
+        e14: if i == 14 { val } else { a.e14 },
+        e15: if i == 15 { val } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// ============================================================================
+// Grid/block coordinate type
+// ============================================================================
+
+type GridCoord is { block_x: Int, block_y: Int, thread_x: Int, thread_y: Int };
+
+// ============================================================================
+// Test 1: Thread block mapping — map 1D thread index to 2D grid coordinates
+// Given grid_dim = (2, 2), block_dim = (4, 1):
+//   global_id = block_id * block_dim + thread_id
+//   block_x = (global_id / block_dim_x) % grid_dim_x
+//   Actually: simpler — blockIdx.x * blockDim.x + threadIdx.x
+// ============================================================================
+
+fn map_1d_to_2d(global_id: Int, width: Int) -> GridCoord {
+    let row = global_id / width;
+    let col = global_id % width;
+    GridCoord { block_x: col / 4, block_y: row, thread_x: col % 4, thread_y: 0 }
+}
+
+@test
+fn test_thread_block_mapping() {
+    // 4x4 grid, block size 4x1, so 1 block per row, 4 blocks total
+    // Thread 0: row=0, col=0 -> block(0,0), thread(0,0)
+    // Thread 1: row=0, col=1 -> block(0,0), thread(1,0)
+    // Thread 4: row=1, col=0 -> block(0,1), thread(0,0)
+    // Thread 7: row=1, col=3 -> block(0,1), thread(3,0)
+
+    let width = 4;
+
+    // Thread ID 0
+    let c0 = map_1d_to_2d(0, width);
+    assert_eq(c0.block_x, 0);
+    assert_eq(c0.block_y, 0);
+    assert_eq(c0.thread_x, 0);
+
+    // Thread ID 3
+    let c3 = map_1d_to_2d(3, width);
+    assert_eq(c3.block_x, 0);
+    assert_eq(c3.block_y, 0);
+    assert_eq(c3.thread_x, 3);
+
+    // Thread ID 4 (next row)
+    let c4 = map_1d_to_2d(4, width);
+    assert_eq(c4.block_x, 0);
+    assert_eq(c4.block_y, 1);
+    assert_eq(c4.thread_x, 0);
+
+    // Thread ID 7
+    let c7 = map_1d_to_2d(7, width);
+    assert_eq(c7.block_x, 0);
+    assert_eq(c7.block_y, 1);
+    assert_eq(c7.thread_x, 3);
+
+    // Thread ID 15 (last thread in a 4x4 grid)
+    let c15 = map_1d_to_2d(15, width);
+    assert_eq(c15.block_x, 0);
+    assert_eq(c15.block_y, 3);
+    assert_eq(c15.thread_x, 3);
+
+    // Width 8: thread 9 -> row=1, col=1 -> block(0,1), thread(1,0)
+    let c9 = map_1d_to_2d(9, 8);
+    assert_eq(c9.block_x, 0);
+    assert_eq(c9.block_y, 1);
+    assert_eq(c9.thread_x, 1);
+
+    print("  test_thread_block_mapping: ok");
+}
+
+// ============================================================================
+// Test 2: Parallel tree reduction
+// Simulate reducing 8 elements by halving at each step
+// Step 0: [1,2,3,4,5,6,7,8] -> sum pairs
+// Step 1: [3, 7, 11, 15]
+// Step 2: [10, 26]
+// Step 3: [36]
+// ============================================================================
+
+@test
+fn test_reduction_parallel() {
+    // Initial data
+    let mut data = arr16_zeros();
+    data = arr16_set(data, 0, 1);
+    data = arr16_set(data, 1, 2);
+    data = arr16_set(data, 2, 3);
+    data = arr16_set(data, 3, 4);
+    data = arr16_set(data, 4, 5);
+    data = arr16_set(data, 5, 6);
+    data = arr16_set(data, 6, 7);
+    data = arr16_set(data, 7, 8);
+
+    let mut n = 8;
+
+    // Step 1: stride = 1, pairs (0,1), (2,3), (4,5), (6,7)
+    let mut stride = 1;
+    while stride < n {
+        let mut i = 0;
+        while i < n {
+            if i % (stride * 2) == 0 {
+                let left = arr16_get(data, i);
+                let right = arr16_get(data, i + stride);
+                data = arr16_set(data, i, left + right);
+            }
+            i = i + 1;
+        }
+        stride = stride * 2;
+    }
+
+    // After reduction, data[0] should be sum 1..8 = 36
+    assert_eq(arr16_get(data, 0), 36);
+
+    // Verify intermediate values are correct
+    // After step 1 (stride=1): [3, _, 7, _, 11, _, 15, _]
+    // After step 2 (stride=2): [10, _, _, _, 26, _, _, _]
+    // After step 3 (stride=4): [36, _, _, _, _, _, _, _]
+
+    // Test with different data: [10, 20, 30, 40]
+    let mut data2 = arr16_zeros();
+    data2 = arr16_set(data2, 0, 10);
+    data2 = arr16_set(data2, 1, 20);
+    data2 = arr16_set(data2, 2, 30);
+    data2 = arr16_set(data2, 3, 40);
+
+    let mut stride2 = 1;
+    while stride2 < 4 {
+        let mut j = 0;
+        while j < 4 {
+            if j % (stride2 * 2) == 0 {
+                let l2 = arr16_get(data2, j);
+                let r2 = arr16_get(data2, j + stride2);
+                data2 = arr16_set(data2, j, l2 + r2);
+            }
+            j = j + 1;
+        }
+        stride2 = stride2 * 2;
+    }
+    assert_eq(arr16_get(data2, 0), 100);
+
+    print("  test_reduction_parallel: ok");
+}
+
+// ============================================================================
+// Test 3: Shared memory bank — detect bank conflicts
+// Bank index = (address / 4) % num_banks
+// Conflict when two threads access different addresses in same bank
+// ============================================================================
+
+fn compute_bank(addr: Int, num_banks: Int) -> Int {
+    (addr / 4) % num_banks
+}
+
+@test
+fn test_shared_memory_bank() {
+    let num_banks = 8;
+
+    // Sequential access: threads 0-7 access addresses 0, 4, 8, ..., 28
+    // Banks: 0, 1, 2, 3, 4, 5, 6, 7 — no conflicts
+    let mut banks = arr16_zeros();
+    let mut conflicts = 0;
+    let mut i = 0;
+    while i < 8 {
+        let addr = i * 4;
+        let bank = compute_bank(addr, num_banks);
+        // Check if this bank was already used
+        if arr16_get(banks, bank) == 1 {
+            conflicts = conflicts + 1;
+        }
+        banks = arr16_set(banks, bank, 1);
+        i = i + 1;
+    }
+    assert_eq(conflicts, 0);
+
+    // Strided access with stride 8 (32 bytes): all threads hit bank 0 — all conflict
+    // Addresses: 0, 32, 64, 96, ... -> banks: 0, 0, 0, 0, ...
+    let mut banks2 = arr16_zeros();
+    let mut conflicts2 = 0;
+    let mut j = 0;
+    while j < 8 {
+        let addr2 = j * 32;
+        let bank2 = compute_bank(addr2, num_banks);
+        if arr16_get(banks2, bank2) == 1 {
+            conflicts2 = conflicts2 + 1;
+        }
+        banks2 = arr16_set(banks2, bank2, 1);
+        j = j + 1;
+    }
+    // First access is free, remaining 7 conflict
+    assert_eq(conflicts2, 7);
+
+    print("  test_shared_memory_bank: ok");
+}
+
+// ============================================================================
+// Test 4: Warp divergence — count threads taking different branches
+// In a warp of 8 threads, if some take branch A and others take B, that's divergence
+// ============================================================================
+
+@test
+fn test_warp_divergence() {
+    let warp_size = 8;
+
+    // Condition: thread_id < 4 -> branch A; else -> branch B
+    // 4 threads in A, 4 in B -> divergent
+    let mut branch_a_count = 0;
+    let mut branch_b_count = 0;
+    let mut i = 0;
+    while i < warp_size {
+        if i < 4 {
+            branch_a_count = branch_a_count + 1;
+        } else {
+            branch_b_count = branch_b_count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(branch_a_count, 4);
+    assert_eq(branch_b_count, 4);
+    // Divergent if both branches are taken
+    let is_divergent = if branch_a_count > 0 { if branch_b_count > 0 { 1 } else { 0 } } else { 0 };
+    assert_eq(is_divergent, 1);
+
+    // All threads take same branch: no divergence
+    let mut all_a = 0;
+    let mut all_b = 0;
+    let mut j = 0;
+    while j < warp_size {
+        // Condition always true
+        if j >= 0 {
+            all_a = all_a + 1;
+        } else {
+            all_b = all_b + 1;
+        }
+        j = j + 1;
+    }
+    assert_eq(all_a, 8);
+    assert_eq(all_b, 0);
+    let no_div = if all_a > 0 { if all_b > 0 { 1 } else { 0 } } else { 0 };
+    assert_eq(no_div, 0);
+
+    // Odd/even divergence: 4 odd, 4 even
+    let mut odd_count = 0;
+    let mut even_count = 0;
+    let mut k = 0;
+    while k < warp_size {
+        if k % 2 == 0 {
+            even_count = even_count + 1;
+        } else {
+            odd_count = odd_count + 1;
+        }
+        k = k + 1;
+    }
+    assert_eq(odd_count, 4);
+    assert_eq(even_count, 4);
+
+    print("  test_warp_divergence: ok");
+}
+
+// ============================================================================
+// Test 5: Coalesced access — check if memory accesses are consecutive
+// Coalesced: thread i accesses address base + i * element_size
+// Non-coalesced: random or strided access pattern
+// ============================================================================
+
+@test
+fn test_coalesced_access() {
+    let num_threads = 8;
+    let elem_size = 4;
+
+    // Pattern 1: Coalesced — addresses 0, 4, 8, 12, 16, 20, 24, 28
+    let mut addrs = arr16_zeros();
+    let mut i = 0;
+    while i < num_threads {
+        addrs = arr16_set(addrs, i, i * elem_size);
+        i = i + 1;
+    }
+
+    // Check coalescing: consecutive addresses differ by elem_size
+    let mut is_coalesced = 1;
+    let mut j = 1;
+    while j < num_threads {
+        let diff = arr16_get(addrs, j) - arr16_get(addrs, j - 1);
+        if diff == elem_size {
+            // ok
+            j = j;
+        } else {
+            is_coalesced = 0;
+        }
+        j = j + 1;
+    }
+    assert_eq(is_coalesced, 1);
+
+    // Pattern 2: Non-coalesced — addresses 0, 32, 4, 36, 8, 40, 12, 44
+    let mut addrs2 = arr16_zeros();
+    addrs2 = arr16_set(addrs2, 0, 0);
+    addrs2 = arr16_set(addrs2, 1, 32);
+    addrs2 = arr16_set(addrs2, 2, 4);
+    addrs2 = arr16_set(addrs2, 3, 36);
+    addrs2 = arr16_set(addrs2, 4, 8);
+    addrs2 = arr16_set(addrs2, 5, 40);
+    addrs2 = arr16_set(addrs2, 6, 12);
+    addrs2 = arr16_set(addrs2, 7, 44);
+
+    let mut is_coalesced2 = 1;
+    let mut k = 1;
+    while k < num_threads {
+        let diff2 = arr16_get(addrs2, k) - arr16_get(addrs2, k - 1);
+        if diff2 == elem_size {
+            k = k;
+        } else {
+            is_coalesced2 = 0;
+        }
+        k = k + 1;
+    }
+    assert_eq(is_coalesced2, 0);
+
+    // Count cache lines accessed (assuming 32-byte cache lines)
+    // Coalesced: addresses 0-28 -> 1 cache line (0-31)
+    // Non-coalesced: addresses 0,4,8,12 in line 0; 32,36,40,44 in line 1 -> 2 lines
+    let cache_line_size = 32;
+    let mut lines_used = arr16_zeros();
+    let mut line_count = 0;
+    let mut m = 0;
+    while m < num_threads {
+        let line = arr16_get(addrs2, m) / cache_line_size;
+        if line < 16 {
+            if arr16_get(lines_used, line) == 0 {
+                lines_used = arr16_set(lines_used, line, 1);
+                line_count = line_count + 1;
+            }
+        }
+        m = m + 1;
+    }
+    assert_eq(line_count, 2);
+
+    print("  test_coalesced_access: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_thread_block_mapping();
+    test_reduction_parallel();
+    test_shared_memory_bank();
+    test_warp_divergence();
+    test_coalesced_access();
+    print("[OK] 079_gpu_kernel_launch");
+    0
+}

@@ -1,0 +1,15 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, double-free, cbgr
+// @description: Tests that CBGR detects simple double-free attempts
+
+fn main() {
+    let data = Heap.new(42);
+
+    // First free - valid
+    drop(data);
+
+    // Second free - double free detected
+    drop(data);  // CBGR detects double free via generation mismatch
+}

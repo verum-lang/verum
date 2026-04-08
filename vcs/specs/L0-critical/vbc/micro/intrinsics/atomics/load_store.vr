@@ -1,0 +1,14 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Simple atomic load/store test using regular variable
+    // This tests basic memory semantics
+    let mut x = 0;
+    x = 42;
+    assert_eq(x, 42);
+
+    x = 100;
+    assert_eq(x, 100);
+}

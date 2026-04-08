@@ -1,0 +1,173 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, string, matching, pattern, kmp
+// @timeout: 10000
+
+// String matching algorithms using integer arrays
+// Characters represented as ASCII values in Arr8
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Brute force string match: find first occurrence of pattern in text
+// Returns index or -1 if not found
+fn brute_match(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let mut i = 0;
+    while i <= tlen - plen {
+        let mut j = 0;
+        let mut matched = 1;
+        while j < plen {
+            if get8(text, i + j) != get8(pat, j) {
+                matched = 0;
+                j = plen; // break
+            }
+            j = j + 1;
+        }
+        if matched == 1 {
+            return i;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Count all occurrences of pattern in text
+fn count_matches(text: Arr8, tlen: Int, pat: Arr8, plen: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i <= tlen - plen {
+        let mut j = 0;
+        let mut matched = 1;
+        while j < plen {
+            if get8(text, i + j) != get8(pat, j) {
+                matched = 0;
+                j = plen; // break
+            }
+            j = j + 1;
+        }
+        if matched == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Check if text is a rotation of pattern (both same length)
+fn is_rotation(a: Arr8, b: Arr8, n: Int) -> Int {
+    // Check each rotation offset
+    let mut rot = 0;
+    while rot < n {
+        let mut ok = 1;
+        let mut i = 0;
+        while i < n {
+            let idx = (i + rot) % n;
+            if get8(a, idx) != get8(b, i) {
+                ok = 0;
+                i = n; // break
+            }
+            i = i + 1;
+        }
+        if ok == 1 { return 1; }
+        rot = rot + 1;
+    }
+    0
+}
+
+// Longest common prefix of two arrays
+fn lcp_length(a: Arr8, alen: Int, b: Arr8, blen: Int) -> Int {
+    let lim = if alen < blen { alen } else { blen };
+    let mut i = 0;
+    while i < lim {
+        if get8(a, i) != get8(b, i) { return i; }
+        i = i + 1;
+    }
+    lim
+}
+
+// Hamming distance (positions where arrays differ)
+fn hamming_dist(a: Arr8, b: Arr8, n: Int) -> Int {
+    let mut diff = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(a, i) != get8(b, i) { diff = diff + 1; }
+        i = i + 1;
+    }
+    diff
+}
+
+fn test_brute_match() -> Int {
+    // text = [1,2,3,4,5,6,7,8], pattern = [3,4,5]
+    let text = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let pat = Arr8 { v0: 3, v1: 4, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(brute_match(text, 8, pat, 3), 2);
+
+    // Not found
+    let pat2 = Arr8 { v0: 9, v1: 9, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(brute_match(text, 8, pat2, 2), -1);
+    1
+}
+
+fn test_count() -> Int {
+    // text = [1,2,1,2,1,2,1,2], pattern = [1,2]
+    let text = Arr8 { v0: 1, v1: 2, v2: 1, v3: 2, v4: 1, v5: 2, v6: 1, v7: 2 };
+    let pat = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_matches(text, 8, pat, 2), 4);
+    1
+}
+
+fn test_rotation() -> Int {
+    // [1,2,3,4] rotated by 2 = [3,4,1,2]
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 3, v1: 4, v2: 1, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_rotation(a, b, 4), 1);
+
+    // Not a rotation
+    let c = Arr8 { v0: 2, v1: 3, v2: 4, v3: 5, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_rotation(a, c, 4), 0);
+    1
+}
+
+fn test_lcp_hamming() -> Int {
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 1, v1: 2, v2: 3, v3: 7, v4: 8, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcp_length(a, 5, b, 5), 3);
+    assert_eq(hamming_dist(a, b, 5), 2);
+    1
+}
+
+fn main() -> Int {
+    test_brute_match();
+    test_count();
+    test_rotation();
+    test_lcp_hamming();
+    print("DIFF_OK: string_matching");
+    0
+}

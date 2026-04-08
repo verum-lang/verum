@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, references, modifiers, order, error
+// @description: Test detection of wrong modifier order (mut before checked)
+// @expected-error: E018
+
+// Correct order is: &checked mut T, not &mut checked T
+fn test(x: &mut checked T) {}

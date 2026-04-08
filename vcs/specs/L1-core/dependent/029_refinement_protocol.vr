@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, protocol
+
+/// Refinement types in protocol definitions -- protocol methods
+/// with refined parameters and return types.
+
+type Positive is Int{> 0};
+type Natural is Int{>= 0};
+
+// Protocol with refined return type
+type Collection is protocol {
+    type Item;
+    fn len(&self) -> Natural;
+    fn is_empty(&self) -> Bool;
+};
+
+// Protocol with refined parameters
+type SafeIndex is protocol {
+    type Item;
+    fn get(&self, idx: Natural) -> Maybe<Self.Item>;
+    fn get_unchecked(&self, idx: Int{>= 0}) -> Self.Item;
+};
+
+// Protocol with ensures on methods
+type Stack is protocol {
+    type Item;
+    fn push(&mut self, item: Self.Item)
+        where ensures self.len() == old(self.len()) + 1;
+    fn pop(&mut self) -> Maybe<Self.Item>;
+    fn len(&self) -> Natural;
+    fn is_empty(&self) -> Bool;
+};
+
+// Protocol method with refined parameter
+type Splittable is protocol {
+    fn split_at(&self, idx: Natural) -> (Self, Self);
+};
+
+// Implementation with refined types
+type IntStack is {
+    data: List<Int>,
+};
+
+implement Stack for IntStack {
+    type Item = Int;
+
+    fn push(&mut self, item: Int) {
+        self.data.push(item);
+    }
+
+    fn pop(&mut self) -> Maybe<Int> {
+        if self.data.len() > 0 {
+            Some(self.data.pop())
+        } else {
+            None
+        }
+    }
+
+    fn len(&self) -> Natural {
+        self.data.len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.data.len() == 0
+    }
+}
+
+// Generic function using protocol with refinements
+fn push_n<S: Stack>(stack: &mut S, item: S.Item, n: Positive) {
+    let mut i = 0;
+    while i < n {
+        stack.push(item);
+        i = i + 1;
+    }
+}
+
+fn pop_safe<S: Stack>(stack: &mut S) -> S.Item {
+    match stack.pop() {
+        Some(item) => item,
+        None => panic("pop from empty stack"),
+    }
+}
+
+fn main() {
+    let mut stack = IntStack { data: [] };
+    assert(stack.is_empty());
+
+    push_n(&mut stack, 42, 3);
+    assert(stack.len() == 3);
+
+    let top = pop_safe(&mut stack);
+    assert(top == 42);
+    assert(stack.len() == 2);
+}

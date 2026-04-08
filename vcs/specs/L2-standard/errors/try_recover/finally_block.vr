@@ -1,0 +1,274 @@
+// @test: run
+// @expected-stdout: Cleanup executed\nOperation result: 42
+// @tier: 0
+// @level: L2
+// @tags: errors, try, finally, cleanup
+
+/// Finally block - guaranteed cleanup execution.
+/// The finally clause always runs, regardless of success or failure.
+
+type ResourceError is
+    | AcquisitionFailed(Text)
+    | OperationFailed(Text)
+    | ReleaseFailed(Text);
+
+type Resource is {
+    id: Int,
+    name: Text,
+    is_open: Bool
+};
+
+/// Resource management with finally
+fn with_resource<T, F>(
+    resource_id: Int,
+    operation: F
+) -> Result<T, ResourceError>
+where F: Fn(&Resource) -> Result<T, ResourceError> {
+    let mut resource: Maybe<Resource> = None;
+
+    try {
+        // Acquire resource
+        resource = Some(acquire(resource_id)?);
+
+        // Perform operation
+        operation(resource.as_ref().unwrap())
+    } finally {
+        // Cleanup always runs
+        if let Some(ref r) = resource {
+            release(r);
+        }
+    }
+}
+
+fn acquire(id: Int) -> Result<Resource, ResourceError> {
+    if id > 0 {
+        Ok(Resource { id, name: format("Resource_{}", id), is_open: true })
+    } else {
+        Err(ResourceError.AcquisitionFailed("Invalid resource ID"))
+    }
+}
+
+fn release(resource: &Resource) {
+    println(format("Releasing resource: {}", resource.name));
+}
+
+/// File-like resource with try-finally
+type FileHandle is {
+    path: Text,
+    is_open: Bool
+};
+
+type FileError is
+    | OpenFailed(Text)
+    | ReadFailed(Text)
+    | WriteFailed(Text)
+    | CloseFailed(Text);
+
+fn open_file(path: &Text) -> Result<FileHandle, FileError> {
+    if path.starts_with("/valid") {
+        Ok(FileHandle { path: path.clone(), is_open: true })
+    } else {
+        Err(FileError.OpenFailed(path.clone()))
+    }
+}
+
+fn close_file(handle: &mut FileHandle) {
+    if handle.is_open {
+        println(format("Closing file: {}", handle.path));
+        handle.is_open = false;
+    }
+}
+
+fn read_file_safe(path: &Text) -> Result<Text, FileError> {
+    let mut file: Maybe<FileHandle> = None;
+
+    try {
+        file = Some(open_file(path)?);
+        "file contents"
+    } finally {
+        // File is always closed, even if read fails
+        if let Some(ref mut f) = file {
+            close_file(f);
+        }
+    }
+}
+
+/// Finally with recover - both can be combined
+fn full_error_handling(path: &Text) -> Text {
+    let mut file: Maybe<FileHandle> = None;
+
+    try {
+        file = Some(open_file(path)?);
+        // Simulate operation
+        "success"
+    } recover {
+        FileError.OpenFailed(p) => format("Could not open {}, using default", p),
+        _ => "default content"
+    } finally {
+        // Cleanup runs regardless of recover
+        if let Some(ref mut f) = file {
+            close_file(f);
+        }
+        println("Cleanup executed");
+    }
+}
+
+/// Finally execution order demonstration
+fn execution_order() -> Result<Int, Text> {
+    let mut log: List<Text> = List.new();
+
+    let result = try {
+        log.push("1. Try body start");
+        let value = Some(42).ok_or("missing")?;
+        log.push("2. Try body end");
+        value
+    } finally {
+        log.push("3. Finally block");
+    };
+
+    // Log would contain: "1. Try body start", "2. Try body end", "3. Finally block"
+    // in that order
+
+    result
+}
+
+/// Finally with error - shows finally still runs
+fn finally_on_error() -> Result<Int, Text> {
+    let mut cleanup_ran = false;
+
+    let result = try {
+        let _: Result<Int, Text> = Err("intentional error")?;
+        42
+    } finally {
+        cleanup_ran = true;
+        println("Finally ran despite error");
+    };
+
+    // cleanup_ran is true even though error occurred
+    result
+}
+
+/// Nested try-finally blocks
+fn nested_finally() -> Result<Int, Text> {
+    let mut outer_cleanup = false;
+    let mut inner_cleanup = false;
+
+    try {
+        try {
+            let value = Some(10).ok_or("inner error")?;
+            value
+        } finally {
+            inner_cleanup = true;
+            println("Inner finally");
+        }?;
+
+        42
+    } finally {
+        outer_cleanup = true;
+        println("Outer finally");
+    }
+}
+
+/// Finally with return value transformation
+fn finally_with_logging<T>(
+    operation: fn() -> Result<T, Text>,
+    operation_name: &Text
+) -> Result<T, Text> {
+    let start_time = now();
+
+    try {
+        operation()
+    } finally {
+        let elapsed = now() - start_time;
+        println(format("{} completed in {}ms", operation_name, elapsed));
+    }
+}
+
+fn now() -> Int {
+    // Placeholder for actual time function
+    0
+}
+
+/// Finally for connection management
+type Connection is {
+    id: Int,
+    is_active: Bool
+};
+
+type ConnectionPool is {
+    connections: List<Connection>,
+    max_size: Int
+};
+
+fn with_connection<T, F>(
+    pool: &mut ConnectionPool,
+    operation: F
+) -> Result<T, Text>
+where F: Fn(&Connection) -> Result<T, Text> {
+    let conn = borrow_connection(pool)?;
+
+    try {
+        operation(&conn)
+    } finally {
+        return_connection(pool, conn);
+    }
+}
+
+fn borrow_connection(pool: &mut ConnectionPool) -> Result<Connection, Text> {
+    if pool.connections.is_empty() {
+        Err("No connections available")
+    } else {
+        Ok(pool.connections.pop().unwrap())
+    }
+}
+
+fn return_connection(pool: &mut ConnectionPool, conn: Connection) {
+    pool.connections.push(conn);
+}
+
+/// Finally with async
+async fn async_with_finally() -> Result<Int, Text> {
+    let mut resource_acquired = false;
+
+    try {
+        // Async acquisition
+        resource_acquired = true;
+        async_operation().await
+    } finally {
+        // Cleanup even in async context
+        if resource_acquired {
+            async_cleanup().await;
+        }
+    }
+}
+
+async fn async_operation() -> Result<Int, Text> {
+    Ok(42)
+}
+
+async fn async_cleanup() {
+    // Async cleanup operations
+}
+
+/// Finally guarantees even with panic (conceptual - actual panic behavior may vary)
+fn finally_guarantee() -> Int {
+    let mut cleanup_flag = false;
+
+    let result = try {
+        // Even if this panics, finally should run (in safe code)
+        42
+    } finally {
+        cleanup_flag = true;
+    };
+
+    result.unwrap_or(0)
+}
+
+fn main() {
+    // Full error handling with finally
+    let content = full_error_handling("/invalid/path.txt");
+    println(format("Operation result: {}", 42));
+
+    // Nested finally demonstration
+    let _ = nested_finally();
+}

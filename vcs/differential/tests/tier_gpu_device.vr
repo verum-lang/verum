@@ -1,0 +1,278 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, gpu, device
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for GPU device concepts.
+/// Tests device ID allocation, stream management, event timing, and occupancy modeling
+/// using pure Verum arithmetic (no actual GPU required).
+
+fn main() {
+    test_device_id_allocation();
+    test_stream_scheduling();
+    test_event_timing();
+    test_occupancy_calculation();
+    test_multi_device_routing();
+}
+
+/// Simulated device ID allocation and property queries
+fn test_device_id_allocation() {
+    println("=== Device ID Allocation ===");
+
+    // Simulate allocating device IDs in a round-robin fashion
+    let num_devices = 4;
+    let num_tasks = 12;
+
+    let mut task = 0;
+    while task < num_tasks {
+        let device_id = task % num_devices;
+        println(f"task {task} -> device {device_id}");
+        task = task + 1;
+    }
+
+    // Simulate device properties: compute capability (major.minor as integer encoding)
+    // Device 0: CC 8.6 (86), Device 1: CC 8.9 (89), Device 2: CC 9.0 (90), Device 3: CC 7.5 (75)
+    let cc_values = [86, 89, 90, 75];
+
+    let mut i = 0;
+    while i < 4 {
+        let major = cc_values[i] / 10;
+        let minor = cc_values[i] % 10;
+        println(f"device {i}: compute capability {major}.{minor}");
+        i = i + 1;
+    }
+
+    // Find the device with highest compute capability
+    let mut best_device = 0;
+    let mut best_cc = cc_values[0];
+    let mut j = 1;
+    while j < 4 {
+        if cc_values[j] > best_cc {
+            best_cc = cc_values[j];
+            best_device = j;
+        }
+        j = j + 1;
+    }
+    println(f"best device: {best_device} with CC {best_cc / 10}.{best_cc % 10}");
+}
+
+/// Simulated stream scheduling with priority queues
+fn test_stream_scheduling() {
+    println("\n=== Stream Scheduling ===");
+
+    // Model stream priorities: 0 = high, 1 = normal, 2 = low
+    // Kernels are scheduled in priority order within each stream
+    let stream_priorities = [1, 0, 2, 1, 0];
+    let kernel_durations = [100, 50, 200, 75, 30];
+
+    // Sort by priority (simple selection sort simulation)
+    let mut order = [0, 1, 2, 3, 4];
+    let mut a = 0;
+    while a < 5 {
+        let mut min_idx = a;
+        let mut b = a + 1;
+        while b < 5 {
+            if stream_priorities[order[b]] < stream_priorities[order[min_idx]] {
+                min_idx = b;
+            }
+            b = b + 1;
+        }
+        // Swap
+        let tmp = order[a];
+        order[a] = order[min_idx];
+        order[min_idx] = tmp;
+        a = a + 1;
+    }
+
+    println("execution order by priority:");
+    let mut cumulative_time = 0;
+    let mut k = 0;
+    while k < 5 {
+        let idx = order[k];
+        cumulative_time = cumulative_time + kernel_durations[idx];
+        println(f"  stream {idx} (priority {stream_priorities[idx]}): duration={kernel_durations[idx]}, cumulative={cumulative_time}");
+        k = k + 1;
+    }
+    println(f"total execution time: {cumulative_time}");
+
+    // Concurrent stream overlap: two streams executing in parallel
+    // Stream A: kernels of 100, 200, 150
+    // Stream B: kernels of 120, 180
+    let stream_a = [100, 200, 150];
+    let stream_b = [120, 180];
+
+    let mut time_a = 0;
+    let mut ia = 0;
+    while ia < 3 {
+        time_a = time_a + stream_a[ia];
+        ia = ia + 1;
+    }
+
+    let mut time_b = 0;
+    let mut ib = 0;
+    while ib < 2 {
+        time_b = time_b + stream_b[ib];
+        ib = ib + 1;
+    }
+
+    let parallel_time = if time_a > time_b { time_a } else { time_b };
+    println(f"stream A total: {time_a}");
+    println(f"stream B total: {time_b}");
+    println(f"parallel execution time: {parallel_time}");
+}
+
+/// Simulated event timing and synchronization
+fn test_event_timing() {
+    println("\n=== Event Timing ===");
+
+    // Model kernel launch timestamps and durations
+    let launch_times = [0, 100, 250, 400, 550];
+    let durations = [80, 120, 100, 130, 90];
+
+    let mut i = 0;
+    while i < 5 {
+        let start = launch_times[i];
+        let end = start + durations[i];
+        println(f"kernel {i}: start={start}us, end={end}us, duration={durations[i]}us");
+        i = i + 1;
+    }
+
+    // Compute total wall time
+    let first_start = launch_times[0];
+    let last_end = launch_times[4] + durations[4];
+    println(f"total wall time: {last_end - first_start}us");
+
+    // Compute utilization: sum of durations / wall time
+    let mut total_busy = 0;
+    let mut j = 0;
+    while j < 5 {
+        total_busy = total_busy + durations[j];
+        j = j + 1;
+    }
+    let wall_time = last_end - first_start;
+    // Integer percentage
+    let utilization = total_busy * 100 / wall_time;
+    println(f"total busy time: {total_busy}us");
+    println(f"utilization: {utilization}%");
+
+    // Detect overlap: check if any kernel start < previous kernel end
+    let mut overlaps = 0;
+    let mut k = 1;
+    while k < 5 {
+        let prev_end = launch_times[k - 1] + durations[k - 1];
+        if launch_times[k] < prev_end {
+            println(f"overlap detected: kernel {k} starts at {launch_times[k]} before kernel {k - 1} ends at {prev_end}");
+            overlaps = overlaps + 1;
+        }
+        k = k + 1;
+    }
+    println(f"total overlaps: {overlaps}");
+}
+
+/// Simulated GPU occupancy calculation
+fn test_occupancy_calculation() {
+    println("\n=== Occupancy Calculation ===");
+
+    // SM (Streaming Multiprocessor) resource model
+    let max_threads_per_sm = 2048;
+    let max_blocks_per_sm = 32;
+    let max_shared_mem_per_sm = 49152;  // bytes
+
+    // Kernel configurations to test
+    let block_sizes = [64, 128, 256, 512, 1024];
+    let shared_mem_per_block = [1024, 2048, 4096, 8192, 16384];
+
+    let mut i = 0;
+    while i < 5 {
+        let block_size = block_sizes[i];
+        let shared_mem = shared_mem_per_block[i];
+
+        // Thread-limited blocks
+        let thread_limited = max_threads_per_sm / block_size;
+
+        // Shared memory-limited blocks
+        let mem_limited = if shared_mem > 0 {
+            max_shared_mem_per_sm / shared_mem
+        } else {
+            max_blocks_per_sm
+        };
+
+        // Actual blocks (minimum of all limits)
+        let mut actual_blocks = thread_limited;
+        if mem_limited < actual_blocks {
+            actual_blocks = mem_limited;
+        }
+        if max_blocks_per_sm < actual_blocks {
+            actual_blocks = max_blocks_per_sm;
+        }
+
+        let active_threads = actual_blocks * block_size;
+        let occupancy = active_threads * 100 / max_threads_per_sm;
+
+        println(f"block_size={block_size}, shared_mem={shared_mem}: blocks={actual_blocks}, threads={active_threads}, occupancy={occupancy}%");
+        i = i + 1;
+    }
+}
+
+/// Simulated multi-device task routing with load balancing
+fn test_multi_device_routing() {
+    println("\n=== Multi-Device Routing ===");
+
+    // 3 devices with different capacities (FLOPS in arbitrary units)
+    let device_capacities = [1000, 1500, 800];
+    let num_devices = 3;
+
+    // Task workloads to distribute
+    let task_workloads = [200, 300, 150, 400, 250, 100, 350, 180];
+    let num_tasks = 8;
+
+    // Greedy load-balancing: assign each task to the least loaded device
+    let mut device_loads = [0, 0, 0];
+
+    let mut t = 0;
+    while t < num_tasks {
+        // Find device with minimum current load
+        let mut min_device = 0;
+        let mut min_load = device_loads[0];
+        let mut d = 1;
+        while d < num_devices {
+            if device_loads[d] < min_load {
+                min_load = device_loads[d];
+                min_device = d;
+            }
+            d = d + 1;
+        }
+
+        device_loads[min_device] = device_loads[min_device] + task_workloads[t];
+        println(f"task {t} (workload={task_workloads[t]}) -> device {min_device} (load now: {device_loads[min_device]})");
+        t = t + 1;
+    }
+
+    println("final device loads:");
+    let mut d = 0;
+    while d < num_devices {
+        let utilization = device_loads[d] * 100 / device_capacities[d];
+        println(f"  device {d}: load={device_loads[d]}, capacity={device_capacities[d]}, utilization={utilization}%");
+        d = d + 1;
+    }
+
+    // Compute load imbalance
+    let mut max_load = device_loads[0];
+    let mut min_load_val = device_loads[0];
+    let mut total_load = device_loads[0];
+    let mut e = 1;
+    while e < num_devices {
+        if device_loads[e] > max_load {
+            max_load = device_loads[e];
+        }
+        if device_loads[e] < min_load_val {
+            min_load_val = device_loads[e];
+        }
+        total_load = total_load + device_loads[e];
+        e = e + 1;
+    }
+    let avg_load = total_load / num_devices;
+    let imbalance = max_load - min_load_val;
+    println(f"load imbalance: {imbalance} (max={max_load}, min={min_load_val}, avg={avg_load})");
+}

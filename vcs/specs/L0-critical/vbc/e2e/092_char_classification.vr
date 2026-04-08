@@ -1,0 +1,334 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, unicode, char, classification
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Unicode character classification — alphabetic, numeric, whitespace, case, control
+
+// ============================================================================
+// Character classification using codepoint ranges
+// We work with Int codepoints since Verum chars map to Unicode
+// ============================================================================
+
+fn is_ascii_digit(cp: Int) -> Int {
+    // '0' = 48, '9' = 57
+    if cp >= 48 {
+        if cp <= 57 { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn is_ascii_upper(cp: Int) -> Int {
+    // 'A' = 65, 'Z' = 90
+    if cp >= 65 {
+        if cp <= 90 { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn is_ascii_lower(cp: Int) -> Int {
+    // 'a' = 97, 'z' = 122
+    if cp >= 97 {
+        if cp <= 122 { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn is_ascii_alpha(cp: Int) -> Int {
+    if is_ascii_upper(cp) == 1 { 1 }
+    else if is_ascii_lower(cp) == 1 { 1 }
+    else { 0 }
+}
+
+fn is_ascii_alphanumeric(cp: Int) -> Int {
+    if is_ascii_alpha(cp) == 1 { 1 }
+    else if is_ascii_digit(cp) == 1 { 1 }
+    else { 0 }
+}
+
+fn is_ascii_whitespace(cp: Int) -> Int {
+    // space=32, tab=9, newline=10, carriage_return=13, form_feed=12, vertical_tab=11
+    if cp == 32 { 1 }
+    else if cp == 9 { 1 }
+    else if cp == 10 { 1 }
+    else if cp == 13 { 1 }
+    else if cp == 12 { 1 }
+    else if cp == 11 { 1 }
+    else { 0 }
+}
+
+fn is_ascii_control(cp: Int) -> Int {
+    // 0-31 and 127 (DEL)
+    if cp >= 0 {
+        if cp <= 31 { 1 }
+        else if cp == 127 { 1 }
+        else { 0 }
+    } else { 0 }
+}
+
+fn is_ascii_punctuation(cp: Int) -> Int {
+    // 33-47, 58-64, 91-96, 123-126
+    if cp >= 33 {
+        if cp <= 47 { 1 }
+        else if cp >= 58 {
+            if cp <= 64 { 1 }
+            else if cp >= 91 {
+                if cp <= 96 { 1 }
+                else if cp >= 123 {
+                    if cp <= 126 { 1 }
+                    else { 0 }
+                } else { 0 }
+            } else { 0 }
+        } else { 0 }
+    } else { 0 }
+}
+
+fn to_upper(cp: Int) -> Int {
+    if is_ascii_lower(cp) == 1 { cp - 32 } else { cp }
+}
+
+fn to_lower(cp: Int) -> Int {
+    if is_ascii_upper(cp) == 1 { cp + 32 } else { cp }
+}
+
+// ============================================================================
+// Extended Unicode ranges (Latin Extended, Greek, Cyrillic basics)
+// ============================================================================
+
+fn is_latin_extended(cp: Int) -> Int {
+    // Latin Extended-A: U+0100-U+017F, Latin Extended-B: U+0180-U+024F
+    if cp >= 256 {
+        if cp <= 591 { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn is_greek(cp: Int) -> Int {
+    // Greek and Coptic: U+0370-U+03FF
+    if cp >= 880 {
+        if cp <= 1023 { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn is_cyrillic(cp: Int) -> Int {
+    // Cyrillic: U+0400-U+04FF
+    if cp >= 1024 {
+        if cp <= 1279 { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn is_alphabetic_extended(cp: Int) -> Int {
+    if is_ascii_alpha(cp) == 1 { 1 }
+    else if is_latin_extended(cp) == 1 { 1 }
+    else if is_greek(cp) == 1 { 1 }
+    else if is_cyrillic(cp) == 1 { 1 }
+    else { 0 }
+}
+
+// ============================================================================
+// Test 1: ASCII digits
+// ============================================================================
+
+@test
+fn test_ascii_digits() {
+    // '0' through '9'
+    let mut i = 48;
+    let mut count = 0;
+    while i <= 57 {
+        assert_eq(is_ascii_digit(i), 1);
+        count = count + 1;
+        i = i + 1;
+    }
+    assert_eq(count, 10);
+
+    // Non-digits
+    assert_eq(is_ascii_digit(47), 0);   // '/'
+    assert_eq(is_ascii_digit(58), 0);   // ':'
+    assert_eq(is_ascii_digit(65), 0);   // 'A'
+    assert_eq(is_ascii_digit(32), 0);   // space
+    assert_eq(is_ascii_digit(0), 0);    // null
+
+    print("  test_ascii_digits: ok");
+}
+
+// ============================================================================
+// Test 2: ASCII letters and case
+// ============================================================================
+
+@test
+fn test_ascii_letters() {
+    // Count uppercase letters
+    let mut upper_count = 0;
+    let mut cp = 0;
+    while cp < 128 {
+        if is_ascii_upper(cp) == 1 {
+            upper_count = upper_count + 1;
+        }
+        cp = cp + 1;
+    }
+    assert_eq(upper_count, 26);
+
+    // Count lowercase letters
+    let mut lower_count = 0;
+    let mut cp2 = 0;
+    while cp2 < 128 {
+        if is_ascii_lower(cp2) == 1 {
+            lower_count = lower_count + 1;
+        }
+        cp2 = cp2 + 1;
+    }
+    assert_eq(lower_count, 26);
+
+    // Total alpha
+    let mut alpha_count = 0;
+    let mut cp3 = 0;
+    while cp3 < 128 {
+        if is_ascii_alpha(cp3) == 1 {
+            alpha_count = alpha_count + 1;
+        }
+        cp3 = cp3 + 1;
+    }
+    assert_eq(alpha_count, 52);
+
+    // Case conversion
+    assert_eq(to_upper(97), 65);    // 'a' -> 'A'
+    assert_eq(to_upper(122), 90);   // 'z' -> 'Z'
+    assert_eq(to_upper(65), 65);    // 'A' -> 'A' (unchanged)
+    assert_eq(to_lower(65), 97);    // 'A' -> 'a'
+    assert_eq(to_lower(90), 122);   // 'Z' -> 'z'
+    assert_eq(to_lower(97), 97);    // 'a' -> 'a' (unchanged)
+
+    print("  test_ascii_letters: ok");
+}
+
+// ============================================================================
+// Test 3: Whitespace and control characters
+// ============================================================================
+
+@test
+fn test_whitespace_control() {
+    // Whitespace characters
+    assert_eq(is_ascii_whitespace(32), 1);   // space
+    assert_eq(is_ascii_whitespace(9), 1);    // tab
+    assert_eq(is_ascii_whitespace(10), 1);   // newline
+    assert_eq(is_ascii_whitespace(13), 1);   // carriage return
+    assert_eq(is_ascii_whitespace(12), 1);   // form feed
+    assert_eq(is_ascii_whitespace(11), 1);   // vertical tab
+
+    // Non-whitespace
+    assert_eq(is_ascii_whitespace(65), 0);
+    assert_eq(is_ascii_whitespace(48), 0);
+    assert_eq(is_ascii_whitespace(0), 0);
+
+    // Count control characters (0-31 + 127)
+    let mut ctrl_count = 0;
+    let mut i = 0;
+    while i < 128 {
+        if is_ascii_control(i) == 1 {
+            ctrl_count = ctrl_count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(ctrl_count, 33);  // 0-31 (32) + DEL (1) = 33
+
+    // DEL is control but not whitespace
+    assert_eq(is_ascii_control(127), 1);
+    assert_eq(is_ascii_whitespace(127), 0);
+
+    print("  test_whitespace_control: ok");
+}
+
+// ============================================================================
+// Test 4: Punctuation and categories exhaustive check
+// ============================================================================
+
+@test
+fn test_punctuation_categories() {
+    // Every ASCII char should be exactly one of: control, whitespace (subset of control range + space),
+    // digit, upper, lower, or punctuation
+    // Actually: control chars are 0-31 + 127, space (32) is whitespace,
+    // then printable: 33-126 split into digits, letters, punctuation
+
+    // Count punctuation
+    let mut punct_count = 0;
+    let mut i = 0;
+    while i < 128 {
+        if is_ascii_punctuation(i) == 1 {
+            punct_count = punct_count + 1;
+        }
+        i = i + 1;
+    }
+    // 33-47 (15), 58-64 (7), 91-96 (6), 123-126 (4) = 32
+    assert_eq(punct_count, 32);
+
+    // Verify no overlap between categories for printable range (32-126)
+    let mut j = 32;
+    let mut overlap = 0;
+    while j <= 126 {
+        let mut cats = 0;
+        if is_ascii_digit(j) == 1 { cats = cats + 1; }
+        if is_ascii_alpha(j) == 1 { cats = cats + 1; }
+        if is_ascii_punctuation(j) == 1 { cats = cats + 1; }
+        if j == 32 { cats = cats + 1; }  // space
+        if cats > 1 { overlap = overlap + 1; }
+        j = j + 1;
+    }
+    assert_eq(overlap, 0);
+
+    // Verify complete coverage: space(1) + digits(10) + upper(26) + lower(26) + punct(32) = 95
+    // Printable range is 32-126 = 95 characters
+    assert_eq(1 + 10 + 26 + 26 + 32, 95);
+
+    print("  test_punctuation_categories: ok");
+}
+
+// ============================================================================
+// Test 5: Extended Unicode ranges
+// ============================================================================
+
+@test
+fn test_unicode_extended() {
+    // Latin Extended-A: U+0100 = 256
+    assert_eq(is_latin_extended(256), 1);
+    assert_eq(is_latin_extended(400), 1);
+    assert_eq(is_latin_extended(591), 1);
+    assert_eq(is_latin_extended(255), 0);
+    assert_eq(is_latin_extended(592), 0);
+
+    // Greek: U+0370 = 880
+    assert_eq(is_greek(880), 1);
+    assert_eq(is_greek(945), 1);   // alpha
+    assert_eq(is_greek(969), 1);   // omega
+    assert_eq(is_greek(1023), 1);
+    assert_eq(is_greek(879), 0);
+    assert_eq(is_greek(1024), 0);
+
+    // Cyrillic: U+0400 = 1024
+    assert_eq(is_cyrillic(1024), 1);
+    assert_eq(is_cyrillic(1040), 1);  // A
+    assert_eq(is_cyrillic(1103), 1);  // ya
+    assert_eq(is_cyrillic(1279), 1);
+    assert_eq(is_cyrillic(1023), 0);
+    assert_eq(is_cyrillic(1280), 0);
+
+    // Extended alphabetic combines all
+    assert_eq(is_alphabetic_extended(65), 1);    // ASCII 'A'
+    assert_eq(is_alphabetic_extended(256), 1);   // Latin Extended
+    assert_eq(is_alphabetic_extended(945), 1);   // Greek alpha
+    assert_eq(is_alphabetic_extended(1040), 1);  // Cyrillic A
+    assert_eq(is_alphabetic_extended(48), 0);    // digit '0'
+    assert_eq(is_alphabetic_extended(32), 0);    // space
+
+    print("  test_unicode_extended: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_ascii_digits();
+    test_ascii_letters();
+    test_whitespace_control();
+    test_punctuation_categories();
+    test_unicode_extended();
+    print("[OK] 092_char_classification");
+    0
+}

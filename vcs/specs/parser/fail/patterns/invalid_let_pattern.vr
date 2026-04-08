@@ -1,0 +1,74 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, let, error
+// @description: Test invalid patterns in let statements
+// @expected-error: E088
+
+type Option<T> is None | Some(T);
+type Point is { x: Int, y: Int };
+
+fn test_let_with_guard() {
+    let value = 42;
+
+    // Invalid: guard in let pattern (guards only in match)
+    let x if x > 0 = value;
+}
+
+fn test_let_with_or_pattern() {
+    let value = 1;
+
+    // Invalid: or-pattern in let (only one binding allowed)
+    let 1 | 2 | 3 = value;
+}
+
+fn test_let_expression_pattern() {
+    let value = 42;
+
+    // Invalid: expression instead of pattern
+    let 1 + 2 = value;
+}
+
+fn test_let_missing_equals() {
+    let value = 42;
+
+    // Invalid: missing = in let
+    let x value;
+}
+
+fn test_let_double_equals() {
+    let value = 42;
+
+    // Invalid: == instead of =
+    let x == value;
+}
+
+fn test_let_arrow_equals() {
+    let value = 42;
+
+    // Invalid: => instead of =
+    let x => value;
+}
+
+fn test_let_active_pattern() {
+    let value = 42;
+
+    // Invalid: active pattern in let (makes no sense)
+    let Even() = value;
+}
+
+// Active pattern for test
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+
+fn test_let_else_missing_else_block() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: let else without block
+    let Some(x) = opt else;
+}
+
+fn test_let_else_missing_pattern() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: missing pattern before else
+    let = opt else { panic("none"); };
+}

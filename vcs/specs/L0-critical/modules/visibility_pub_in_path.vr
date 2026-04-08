@@ -1,0 +1,79 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: modules, visibility, pub_in_path
+
+/// Path-restricted visibility using pub(in path) syntax.
+/// Items are visible only within the specified module subtree.
+
+module api {
+    pub module v1 {
+        // Only visible within cog.api module tree
+        pub(in cog.api) type LegacyRequest is {
+            method: Text,
+            path: Text,
+            body: Maybe<Text>
+        };
+
+        pub(in cog.api) fn handle_legacy(req: LegacyRequest) -> Text {
+            "legacy response"
+        }
+    }
+
+    pub module v2 {
+        // Can access v1's pub(in cog.api) items because we're in api
+        mount super.v1.LegacyRequest;
+
+        pub type ModernRequest is {
+            method: Text,
+            path: Text,
+            headers: Map<Text, Text>,
+            body: Maybe<Bytes>
+        };
+
+        pub(in cog.api) fn migrate(req: LegacyRequest) -> ModernRequest {
+            ModernRequest {
+                method: req.method,
+                path: req.path,
+                headers: Map.new(),
+                body: Maybe.None
+            }
+        }
+
+        pub fn handle_modern(req: ModernRequest) -> Text {
+            "modern response"
+        }
+    }
+
+    // Internal coordinator can access both
+    pub module internal {
+        mount super.v1.{LegacyRequest, handle_legacy};
+        mount super.v2.{ModernRequest, migrate, handle_modern};
+
+        pub(in cog.api) fn route_request(is_legacy: Bool) -> Text {
+            if is_legacy {
+                let req = LegacyRequest { method: "GET", path: "/", body: Maybe.None };
+                handle_legacy(req)
+            } else {
+                let req = ModernRequest {
+                    method: "GET",
+                    path: "/",
+                    headers: Map.new(),
+                    body: Maybe.None
+                };
+                handle_modern(req)
+            }
+        }
+    }
+}
+
+fn main() -> Int {
+    // From outside api module, we can only access public items
+    let response = api.v2.handle_modern(api.v2.ModernRequest {
+        method: "POST",
+        path: "/data",
+        headers: Map.new(),
+        body: Maybe.None
+    });
+    0
+}

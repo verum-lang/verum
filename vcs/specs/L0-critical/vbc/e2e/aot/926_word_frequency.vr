@@ -1,0 +1,57 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let text = "the cat sat on the mat the cat";
+    let words = text.split(" ");
+
+    let mut freq = Map.new();
+
+    // First pass: initialize all words to 0
+    let mut i = 0;
+    while (i < words.len()) {
+        if (freq.contains_key(words[i]) != true) {
+            freq.insert(words[i], 0);
+        }
+        i = i + 1;
+    }
+
+    // Second pass: increment counts
+    i = 0;
+    while (i < words.len()) {
+        let old = freq.get(words[i]);
+        freq.remove(words[i]);
+        freq.insert(words[i], old + 1);
+        i = i + 1;
+    }
+
+    let the_count = freq.get("the");
+    if (the_count != 3) {
+        print(f"FAIL the: {the_count}");
+        return 1;
+    }
+
+    let cat_count = freq.get("cat");
+    if (cat_count != 2) {
+        print(f"FAIL cat: {cat_count}");
+        return 1;
+    }
+
+    let sat_count = freq.get("sat");
+    if (sat_count != 1) {
+        print(f"FAIL sat: {sat_count}");
+        return 1;
+    }
+
+    // Test Map.get result in arithmetic
+    let total = freq.get("the") + freq.get("cat") + freq.get("sat");
+    if (total != 6) {
+        print(f"FAIL total: {total}");
+        return 1;
+    }
+
+    print("926_word_frequency: PASS");
+    0
+}

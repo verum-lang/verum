@@ -1,0 +1,62 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, memory, allocation
+// @description: Test FFI memory allocation operations
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_alloc(size: Int) -> &mut Int;
+    fn ffi_alloc_aligned(size: Int, align: Int) -> &mut Int;
+    fn ffi_free(ptr: &mut Int, size: Int);
+    fn ffi_fill_array_i32(arr: &mut Int, len: Int, value: Int);
+    fn ffi_sum_array_i32(arr: &Int, len: Int) -> Int;
+}
+
+fn main() {
+    // Test basic allocation
+    let size = 32;
+    let ptr = ffi_alloc(size);
+
+    // Write to allocated memory (treat as i32 array = 8 elements)
+    ffi_fill_array_i32(ptr, 8, 42);
+
+    // Read back (cast mutable ref to immutable)
+    let sum = ffi_sum_array_i32(ptr as &Int, 8);
+    assert_eq(sum, 336);  // 8 elements * 42 = 336
+
+    // Free memory
+    ffi_free(ptr, size);
+
+    // Test aligned allocation (align to 16 bytes)
+    let aligned_ptr = ffi_alloc_aligned(64, 16);
+
+    // The pointer should be 16-byte aligned
+    // We can't easily check alignment in Verum, but we can use the memory
+    ffi_fill_array_i32(aligned_ptr, 16, 7);  // 64 bytes = 16 i32s
+
+    let aligned_sum = ffi_sum_array_i32(aligned_ptr as &Int, 16);
+    assert_eq(aligned_sum, 112);  // 7 * 16 = 112
+
+    ffi_free(aligned_ptr, 64);
+
+    // Test small allocation
+    let small_ptr = ffi_alloc(4);  // Just 4 bytes
+    ffi_fill_array_i32(small_ptr, 1, 12345);
+    let small_sum = ffi_sum_array_i32(small_ptr as &Int, 1);
+    assert_eq(small_sum, 12345);
+    ffi_free(small_ptr, 4);
+
+    // Test larger allocation
+    let large_size = 1024;
+    let large_ptr = ffi_alloc(large_size);
+    let elem_count = 256;  // 1024 bytes / 4 = 256 i32s
+    ffi_fill_array_i32(large_ptr, elem_count, 1);
+    let large_sum = ffi_sum_array_i32(large_ptr as &Int, elem_count);
+    assert_eq(large_sum, 256);
+    ffi_free(large_ptr, large_size);
+
+    print("Memory allocation tests passed!\n");
+}

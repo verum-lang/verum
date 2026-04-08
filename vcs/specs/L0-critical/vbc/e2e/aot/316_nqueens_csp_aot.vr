@@ -1,0 +1,286 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, nqueens, constraint-satisfaction, backtracking
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for N-Queens constraint satisfaction via backtracking (N=4,5,6)
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+// Check if placing a queen at (row, col) is safe
+// board[i] = column where queen in row i is placed (for rows 0..row-1)
+fn is_safe(board: Arr8, row: Int, col: Int) -> Int {
+    let mut i = 0;
+    while i < row {
+        let placed_col = arr8_get(board, i);
+        // Same column
+        if placed_col == col { return 0; }
+        // Same diagonal
+        if abs_val(placed_col - col) == abs_val(i - row) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Count all solutions for N-Queens using iterative backtracking
+// board[row] = column of queen in that row, -1 means unplaced
+fn count_solutions(n: Int) -> Int {
+    let mut board = arr8_new(n);
+    let mut count = 0;
+    let mut row = 0;
+    // Initialize all to -1
+    let mut init_i = 0;
+    while init_i < n {
+        board = arr8_set(board, init_i, -1);
+        init_i = init_i + 1;
+    }
+
+    // Start placing from row 0, column 0
+    let mut col = 0;
+    let mut done = 0;
+
+    while done == 0 {
+        if row == n {
+            // All queens placed - found a solution
+            count = count + 1;
+            // Backtrack
+            row = row - 1;
+            if row < 0 {
+                done = 1;
+            } else {
+                col = arr8_get(board, row) + 1;
+            }
+        } else {
+            // Try to place queen in current row
+            let mut placed = 0;
+            while col < n {
+                if placed == 0 {
+                    if is_safe(board, row, col) == 1 {
+                        board = arr8_set(board, row, col);
+                        placed = 1;
+                    } else {
+                        col = col + 1;
+                    }
+                }
+                if placed == 1 {
+                    col = n; // break
+                }
+            }
+
+            if placed == 1 {
+                // Move to next row
+                row = row + 1;
+                col = 0;
+            } else {
+                // No valid column found, backtrack
+                board = arr8_set(board, row, -1);
+                row = row - 1;
+                if row < 0 {
+                    done = 1;
+                } else {
+                    col = arr8_get(board, row) + 1;
+                    board = arr8_set(board, row, -1);
+                }
+            }
+        }
+    }
+    count
+}
+
+// Find one solution (returns the board, or all -1 if none)
+fn find_one_solution(n: Int) -> Arr8 {
+    let mut board = arr8_new(n);
+    let mut init_i = 0;
+    while init_i < n {
+        board = arr8_set(board, init_i, -1);
+        init_i = init_i + 1;
+    }
+
+    let mut row = 0;
+    let mut col = 0;
+    let mut found = 0;
+    let mut done = 0;
+
+    while done == 0 {
+        if found == 1 { done = 1; }
+        else if row == n {
+            found = 1;
+        } else {
+            let mut placed = 0;
+            while col < n {
+                if placed == 0 {
+                    if is_safe(board, row, col) == 1 {
+                        board = arr8_set(board, row, col);
+                        placed = 1;
+                    } else {
+                        col = col + 1;
+                    }
+                }
+                if placed == 1 { col = n; }
+            }
+
+            if placed == 1 {
+                row = row + 1;
+                col = 0;
+            } else {
+                board = arr8_set(board, row, -1);
+                row = row - 1;
+                if row < 0 { done = 1; }
+                else {
+                    col = arr8_get(board, row) + 1;
+                    board = arr8_set(board, row, -1);
+                }
+            }
+        }
+    }
+    board
+}
+
+// Validate a solution: all queens safe from each other
+fn validate_solution(board: Arr8, n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        let ci = arr8_get(board, i);
+        if ci < 0 { return 0; }  // Unplaced queen
+        if ci >= n { return 0; }  // Out of bounds
+        let mut j = i + 1;
+        while j < n {
+            let cj = arr8_get(board, j);
+            // Same column
+            if ci == cj { return 0; }
+            // Same diagonal
+            if abs_val(ci - cj) == abs_val(i - j) { return 0; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_is_safe() {
+    let board = arr8_new(4);
+    // Empty board: placing at (0, 0) is safe
+    assert_eq(is_safe(board, 0, 0), 1);
+
+    // Place queen at (0, 0)
+    let b1 = arr8_set(board, 0, 0);
+    // (1, 0) not safe: same column
+    assert_eq(is_safe(b1, 1, 0), 0);
+    // (1, 1) not safe: diagonal
+    assert_eq(is_safe(b1, 1, 1), 0);
+    // (1, 2) safe
+    assert_eq(is_safe(b1, 1, 2), 1);
+    // (1, 3) safe
+    assert_eq(is_safe(b1, 1, 3), 1);
+}
+
+fn test_4queens_count() {
+    // 4-Queens has exactly 2 solutions
+    let count = count_solutions(4);
+    assert_eq(count, 2);
+}
+
+fn test_5queens_count() {
+    // 5-Queens has exactly 10 solutions
+    let count = count_solutions(5);
+    assert_eq(count, 10);
+}
+
+fn test_6queens_count() {
+    // 6-Queens has exactly 4 solutions
+    let count = count_solutions(6);
+    assert_eq(count, 4);
+}
+
+fn test_1queen() {
+    // 1-Queen: trivially 1 solution
+    let count = count_solutions(1);
+    assert_eq(count, 1);
+}
+
+fn test_2queens_impossible() {
+    // 2-Queens and 3-Queens have no solutions
+    assert_eq(count_solutions(2), 0);
+    assert_eq(count_solutions(3), 0);
+}
+
+fn test_find_and_validate_4() {
+    let sol = find_one_solution(4);
+    assert_eq(validate_solution(sol, 4), 1);
+    // All queens should be placed (no -1)
+    let mut all_placed = 1;
+    let mut i = 0;
+    while i < 4 {
+        if arr8_get(sol, i) < 0 { all_placed = 0; }
+        i = i + 1;
+    }
+    assert_eq(all_placed, 1);
+}
+
+fn test_find_and_validate_5() {
+    let sol = find_one_solution(5);
+    assert_eq(validate_solution(sol, 5), 1);
+}
+
+fn test_find_and_validate_6() {
+    let sol = find_one_solution(6);
+    assert_eq(validate_solution(sol, 6), 1);
+}
+
+fn test_validate_invalid() {
+    // Two queens in same column: invalid
+    let mut bad = arr8_new(4);
+    bad = arr8_set(bad, 0, 0);
+    bad = arr8_set(bad, 1, 0);
+    bad = arr8_set(bad, 2, 2);
+    bad = arr8_set(bad, 3, 3);
+    assert_eq(validate_solution(bad, 4), 0);
+
+    // Two queens on diagonal: invalid
+    let mut bad2 = arr8_new(4);
+    bad2 = arr8_set(bad2, 0, 0);
+    bad2 = arr8_set(bad2, 1, 1);  // diagonal from (0,0)
+    bad2 = arr8_set(bad2, 2, 3);
+    bad2 = arr8_set(bad2, 3, 2);
+    assert_eq(validate_solution(bad2, 4), 0);
+}
+
+fn main() -> Int {
+    test_is_safe();
+    test_4queens_count();
+    test_5queens_count();
+    test_6queens_count();
+    test_1queen();
+    test_2queens_impossible();
+    test_find_and_validate_4();
+    test_find_and_validate_5();
+    test_find_and_validate_6();
+    test_validate_invalid();
+    print("[OK] 316_nqueens_csp_aot");
+    0
+}

@@ -1,0 +1,266 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, graph, bfs, traversal
+// @timeout: 30000
+
+// Graph BFS traversal on a small adjacency-matrix graph (6 nodes)
+// Adjacency matrix rows stored in Arr8s. BFS queue in Arr8.
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn neg_ones() -> Arr8 { Arr8 { v0: 0-1, v1: 0-1, v2: 0-1, v3: 0-1, v4: 0-1, v5: 0-1, v6: 0-1, v7: 0-1 } }
+
+// 6-node graph adjacency matrix. Each row is an Arr8 (first 6 entries used).
+// adj_row(node) returns 1 at position j if edge from node to j exists.
+// Graph:
+//   0 -- 1 -- 2
+//   |         |
+//   3 -- 4 -- 5
+// Adjacency (undirected):
+//   0: {1,3}  1: {0,2}  2: {1,5}  3: {0,4}  4: {3,5}  5: {2,4}
+
+fn adj_row0() -> Arr8 { Arr8 { v0: 0, v1: 1, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn adj_row1() -> Arr8 { Arr8 { v0: 1, v1: 0, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn adj_row2() -> Arr8 { Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 1, v6: 0, v7: 0 } }
+fn adj_row3() -> Arr8 { Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 1, v5: 0, v6: 0, v7: 0 } }
+fn adj_row4() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 1, v4: 0, v5: 1, v6: 0, v7: 0 } }
+fn adj_row5() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 1, v3: 0, v4: 1, v5: 0, v6: 0, v7: 0 } }
+
+fn adj_row(node: Int) -> Arr8 {
+    if node == 0 { adj_row0() }
+    else if node == 1 { adj_row1() }
+    else if node == 2 { adj_row2() }
+    else if node == 3 { adj_row3() }
+    else if node == 4 { adj_row4() }
+    else { adj_row5() }
+}
+
+// Check if edge exists between u and v
+fn has_edge(u: Int, v: Int) -> Int {
+    get8(adj_row(u), v)
+}
+
+// BFS from source node. Returns dist array (distance from source, -1 if unreachable).
+// Uses Arr8 as queue (circular, up to 8 slots) and Arr8 for distances.
+// n = number of nodes (max 6 here).
+fn bfs_dist(src: Int, n: Int) -> Arr8 {
+    let mut dist = neg_ones();
+    dist = set8(dist, src, 0);
+    let mut queue = zeros();
+    queue = set8(queue, 0, src);
+    let mut front = 0;
+    let mut back = 1;
+    let mut iters = 0;
+    while front < back {
+        let u = get8(queue, front % 8);
+        front = front + 1;
+        let d = get8(dist, u);
+        let row = adj_row(u);
+        let mut v = 0;
+        while v < n {
+            if get8(row, v) == 1 {
+                if get8(dist, v) < 0 {
+                    dist = set8(dist, v, d + 1);
+                    if back - front < 8 {
+                        queue = set8(queue, back % 8, v);
+                        back = back + 1;
+                    }
+                }
+            }
+            v = v + 1;
+        }
+        iters = iters + 1;
+        if iters > 30 { front = back; }
+    }
+    dist
+}
+
+// BFS visit order from source. Returns Arr8 of visit-order node IDs.
+fn bfs_order(src: Int, n: Int) -> Arr8 {
+    let mut visited = zeros(); // 0 = not visited, 1 = visited
+    let mut order = zeros();
+    let mut ord_idx = 0;
+    let mut queue = zeros();
+    queue = set8(queue, 0, src);
+    let mut front = 0;
+    let mut back = 1;
+    visited = set8(visited, src, 1);
+    order = set8(order, 0, src);
+    ord_idx = 1;
+    let mut iters = 0;
+    while front < back {
+        let u = get8(queue, front % 8);
+        front = front + 1;
+        let row = adj_row(u);
+        let mut v = 0;
+        while v < n {
+            if get8(row, v) == 1 {
+                if get8(visited, v) == 0 {
+                    visited = set8(visited, v, 1);
+                    if ord_idx < 8 {
+                        order = set8(order, ord_idx, v);
+                        ord_idx = ord_idx + 1;
+                    }
+                    if back - front < 8 {
+                        queue = set8(queue, back % 8, v);
+                        back = back + 1;
+                    }
+                }
+            }
+            v = v + 1;
+        }
+        iters = iters + 1;
+        if iters > 30 { front = back; }
+    }
+    order
+}
+
+// Count how many nodes are reachable from src (including src itself)
+fn reachable_count(src: Int, n: Int) -> Int {
+    let dist = bfs_dist(src, n);
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(dist, i) >= 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_distances_from_0() -> Int {
+    // Graph:  0--1--2
+    //         |     |
+    //         3--4--5
+    // BFS from 0:
+    // dist[0]=0, dist[1]=1, dist[3]=1, dist[2]=2, dist[4]=2, dist[5]=3
+    let dist = bfs_dist(0, 6);
+    assert_eq(get8(dist, 0), 0);
+    assert_eq(get8(dist, 1), 1);
+    assert_eq(get8(dist, 3), 1);
+    assert_eq(get8(dist, 2), 2);
+    assert_eq(get8(dist, 4), 2);
+    assert_eq(get8(dist, 5), 3);
+    1
+}
+
+fn test_distances_from_5() -> Int {
+    // BFS from 5:
+    // dist[5]=0, neighbors of 5: {2,4}
+    // dist[2]=1, dist[4]=1
+    // neighbors of 2: {1} -> dist[1]=2; neighbors of 4: {3} -> dist[3]=2
+    // neighbors of 1: {0} -> dist[0]=3
+    let dist = bfs_dist(5, 6);
+    assert_eq(get8(dist, 5), 0);
+    assert_eq(get8(dist, 2), 1);
+    assert_eq(get8(dist, 4), 1);
+    assert_eq(get8(dist, 1), 2);
+    assert_eq(get8(dist, 3), 2);
+    assert_eq(get8(dist, 0), 3);
+    1
+}
+
+fn test_distances_from_2() -> Int {
+    // BFS from 2:
+    // dist[2]=0, neighbors: {1,5}
+    // dist[1]=1, dist[5]=1
+    // neighbors of 1: {0} -> dist[0]=2; neighbors of 5: {4} -> dist[4]=2
+    // neighbors of 0: {3} -> dist[3]=3
+    let dist = bfs_dist(2, 6);
+    assert_eq(get8(dist, 2), 0);
+    assert_eq(get8(dist, 1), 1);
+    assert_eq(get8(dist, 5), 1);
+    assert_eq(get8(dist, 0), 2);
+    assert_eq(get8(dist, 4), 2);
+    assert_eq(get8(dist, 3), 3);
+    1
+}
+
+fn test_visit_order() -> Int {
+    // BFS from 0 visits: 0, then neighbors in order: 1, 3
+    // then neighbors of 1: 2; neighbors of 3: 4
+    // then neighbors of 2: 5
+    let order = bfs_order(0, 6);
+    assert_eq(get8(order, 0), 0);
+    assert_eq(get8(order, 1), 1);
+    assert_eq(get8(order, 2), 3);
+    assert_eq(get8(order, 3), 2);
+    assert_eq(get8(order, 4), 4);
+    assert_eq(get8(order, 5), 5);
+    1
+}
+
+fn test_connected_component() -> Int {
+    // All 6 nodes are connected
+    assert_eq(reachable_count(0, 6), 6);
+    assert_eq(reachable_count(3, 6), 6);
+    assert_eq(reachable_count(5, 6), 6);
+    1
+}
+
+fn test_self_distance() -> Int {
+    let mut i = 0;
+    while i < 6 {
+        let dist = bfs_dist(i, 6);
+        assert_eq(get8(dist, i), 0);
+        i = i + 1;
+    }
+    1
+}
+
+fn test_symmetry() -> Int {
+    // For undirected graph: dist(u,v) == dist(v,u)
+    let d0 = bfs_dist(0, 6);
+    let d5 = bfs_dist(5, 6);
+    // dist(0,5) should equal dist(5,0)
+    assert_eq(get8(d0, 5), get8(d5, 0));
+    let d1 = bfs_dist(1, 6);
+    let d4 = bfs_dist(4, 6);
+    assert_eq(get8(d1, 4), get8(d4, 1));
+    1
+}
+
+fn test_edge_check() -> Int {
+    // Verify adjacency
+    assert_eq(has_edge(0, 1), 1);
+    assert_eq(has_edge(0, 3), 1);
+    assert_eq(has_edge(0, 2), 0);
+    assert_eq(has_edge(0, 4), 0);
+    assert_eq(has_edge(0, 5), 0);
+    assert_eq(has_edge(2, 5), 1);
+    assert_eq(has_edge(4, 5), 1);
+    assert_eq(has_edge(1, 4), 0);
+    1
+}
+
+fn main() -> Int {
+    test_distances_from_0();
+    test_distances_from_5();
+    test_distances_from_2();
+    test_visit_order();
+    test_connected_component();
+    test_self_distance();
+    test_symmetry();
+    test_edge_check();
+    print("[OK] 613_graph_bfs_aot");
+    0
+}

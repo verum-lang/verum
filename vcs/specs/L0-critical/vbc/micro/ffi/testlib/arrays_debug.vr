@@ -1,0 +1,36 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, arrays, debug
+// @description: Debug test for FFI array operations
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_sum_array_i32(arr: &Int, len: Int) -> Int;
+}
+
+fn main() {
+    // Create simple array
+    let arr1 = [1, 2, 3, 4, 5];
+
+    // Print before FFI call
+    print("Calling ffi_sum_array_i32...\n");
+
+    // Call FFI function
+    let sum = ffi_sum_array_i32(&arr1[0], 5);
+
+    // Print result
+    print("sum = ");
+    print(sum);
+    print("\n");
+
+    // Check the result
+    if sum == 15 {
+        print("SUCCESS: sum is correct!\n");
+    } else {
+        print("FAILURE: expected 15, got ");
+        print(sum);
+        print("\n");
+    }
+}

@@ -1,0 +1,137 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, bit-manipulation, bitwise, xor, popcount
+// @expected-exit: 0
+
+// Tests bit counting, power-of-2 checks, bit reversal, and XOR properties.
+
+fn popcount(n: Int) -> Int {
+    let mut count = 0;
+    let mut val = n;
+    while (val > 0) {
+        count = count + (val % 2);
+        val = val / 2;
+    }
+    count
+}
+
+fn is_power_of_two(n: Int) -> Int {
+    // n > 0 and n has exactly one bit set
+    if (n <= 0) { 0 }
+    else {
+        if (popcount(n) == 1) { 1 } else { 0 }
+    }
+}
+
+fn reverse_bits_8(n: Int) -> Int {
+    // Reverse lowest 8 bits of n
+    let mut result = 0;
+    let mut val = n % 256;
+    let mut i = 0;
+    while (i < 8) {
+        result = result * 2 + (val % 2);
+        val = val / 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn highest_bit_pos(n: Int) -> Int {
+    // Position of highest set bit (0-indexed), -1 if n==0
+    if (n <= 0) { -1 }
+    else {
+        let mut pos = 0;
+        let mut val = n;
+        while (val > 1) {
+            val = val / 2;
+            pos = pos + 1;
+        }
+        pos
+    }
+}
+
+fn lowest_bit_pos(n: Int) -> Int {
+    // Position of lowest set bit (0-indexed), -1 if n==0
+    if (n <= 0) { -1 }
+    else {
+        let mut pos = 0;
+        let mut val = n;
+        while (val % 2 == 0) {
+            val = val / 2;
+            pos = pos + 1;
+        }
+        pos
+    }
+}
+
+fn main() -> Int {
+    // Test 1: popcount
+    // 0 = 0b0 -> 0 bits
+    // 7 = 0b111 -> 3 bits
+    // 255 = 0b11111111 -> 8 bits
+    // 1024 = 0b10000000000 -> 1 bit
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(1024), 1);
+
+    // Test 2: Power of 2 check
+    // 1=2^0, 2=2^1, 4=2^2, 8=2^3, 16=2^4, 64=2^6
+    assert_eq(is_power_of_two(1), 1);
+    assert_eq(is_power_of_two(64), 1);
+    assert_eq(is_power_of_two(6), 0);   // 6 = 0b110, popcount=2
+    assert_eq(is_power_of_two(0), 0);
+
+    // Test 3: Bit reversal (8-bit)
+    // 1 = 0b00000001 -> reversed = 0b10000000 = 128
+    // 170 = 0b10101010 -> reversed = 0b01010101 = 85
+    // 255 = 0b11111111 -> reversed = 0b11111111 = 255
+    assert_eq(reverse_bits_8(1), 128);
+    assert_eq(reverse_bits_8(170), 85);
+    assert_eq(reverse_bits_8(255), 255);
+
+    // Test 4: XOR self-inverse property: a ^ a = 0
+    let a = 12345;
+    assert_eq(a ^ a, 0);
+
+    // Test 5: XOR identity: a ^ 0 = a
+    assert_eq(a ^ 0, a);
+
+    // Test 6: XOR commutativity and associativity
+    let bv = 6789;
+    assert_eq(a ^ bv, bv ^ a);
+
+    // Test 7: XOR swap
+    // Simulate XOR swap of two values
+    let mut x = 42;
+    let mut y = 99;
+    x = x ^ y;    // x = 42 ^ 99
+    y = x ^ y;    // y = (42 ^ 99) ^ 99 = 42
+    x = x ^ y;    // x = (42 ^ 99) ^ 42 = 99
+    assert_eq(x, 99);
+    assert_eq(y, 42);
+
+    // Test 8: Highest bit position
+    // 1 -> bit 0, 8 -> bit 3, 255 -> bit 7, 1024 -> bit 10
+    assert_eq(highest_bit_pos(1), 0);
+    assert_eq(highest_bit_pos(8), 3);
+    assert_eq(highest_bit_pos(255), 7);
+    assert_eq(highest_bit_pos(1024), 10);
+
+    // Test 9: Lowest bit position
+    // 1 -> bit 0, 8 -> bit 3, 12 = 0b1100 -> bit 2, 80 = 0b1010000 -> bit 4
+    assert_eq(lowest_bit_pos(1), 0);
+    assert_eq(lowest_bit_pos(8), 3);
+    assert_eq(lowest_bit_pos(12), 2);
+    assert_eq(lowest_bit_pos(80), 4);
+
+    // Test 10: Bit manipulation identity: popcount(a ^ b) gives Hamming distance
+    // a = 0b1010 = 10, b = 0b1100 = 12
+    // a ^ b = 0b0110 = 6, popcount(6) = 2 (bits differ at positions 1 and 2)
+    let hamming = popcount(10 ^ 12);
+    assert_eq(hamming, 2);
+
+    print("Bit manipulation: PASS");
+    0
+}

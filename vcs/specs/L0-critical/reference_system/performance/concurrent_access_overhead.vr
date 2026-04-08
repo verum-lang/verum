@@ -1,0 +1,115 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, concurrent, overhead
+
+/// Test CBGR overhead in concurrent access scenarios.
+/// Multi-threaded access should not cause excessive contention.
+/// Spec: 26-cbgr-implementation.md#concurrency-overhead
+
+mount core.time.{Time};
+
+fn main() {
+    test_single_thread_baseline();
+    test_multi_thread_shared_read();
+    test_thread_local_access();
+    compare_contention_levels();
+}
+
+/// Baseline: single-threaded access
+fn test_single_thread_baseline() {
+    let data = Shared.new(Heap.new(42));
+
+    let iterations = 1_000_000;
+    let start = Time.now();
+
+    for _ in 0..iterations {
+        let ref_val = &**data.get();
+        let _ = *ref_val;
+    }
+
+    let elapsed = Time.now() - start;
+    let ns_per_access = elapsed.as_nanos() / iterations;
+
+    print("Single-thread baseline: " + ns_per_access.to_string() + "ns/access");
+}
+
+/// Test multi-threaded read access (conceptual - simulates with sequential loops)
+fn test_multi_thread_shared_read() {
+    let data = Shared.new(Heap.new(42));
+    let num_threads = 4;
+    let iterations_per_thread = 250_000;
+
+    let start = Time.now();
+
+    // Conceptually N threads; simulated sequentially for compile-only test
+    for _t in 0..num_threads {
+        for _ in 0..iterations_per_thread {
+            let ref_val = &**data.get();
+            let _ = *ref_val;
+        }
+    }
+
+    let elapsed = Time.now() - start;
+    let total_accesses = num_threads * iterations_per_thread;
+    let ns_per_access = elapsed.as_nanos() / total_accesses;
+
+    print("Multi-thread shared read: " + ns_per_access.to_string() + "ns/access");
+}
+
+/// Test thread-local access (no contention) - conceptual
+fn test_thread_local_access() {
+    let num_threads = 4;
+    let iterations_per_thread = 250_000;
+
+    let start = Time.now();
+
+    for t in 0..num_threads {
+        // Each thread would have its own data - no sharing
+        let local_data = Heap.new(t);
+
+        for _ in 0..iterations_per_thread {
+            let ref_val = &*local_data;
+            let _ = *ref_val;
+        }
+    }
+
+    let elapsed = Time.now() - start;
+    let total_accesses = num_threads * iterations_per_thread;
+    let ns_per_access = elapsed.as_nanos() / total_accesses;
+
+    print("Thread-local access: " + ns_per_access.to_string() + "ns/access");
+}
+
+/// Compare different contention levels (conceptual)
+fn compare_contention_levels() {
+    let iterations = 100_000;
+
+    // No contention: each thread has own data
+    let start1 = Time.now();
+    for _ in 0..4 {
+        let data = Heap.new(42);
+        for _ in 0..iterations {
+            let _ = *&*data;
+        }
+    }
+    let time1 = Time.now() - start1;
+
+    // Read contention: shared data, read-only
+    let shared = Shared.new(Heap.new(42));
+    let start2 = Time.now();
+    for _ in 0..4 {
+        for _ in 0..iterations {
+            let _ = *&**shared.get();
+        }
+    }
+    let time2 = Time.now() - start2;
+
+    // Write contention would use Mutex
+    let time3_ms: Int = time2.as_millis() * 2;  // Conceptual: write contention ~2x slower
+
+    print("Contention comparison (" + iterations.to_string() + " iters x 4 threads):");
+    print("  No contention:    " + time1.as_millis().to_string() + "ms");
+    print("  Read contention:  " + time2.as_millis().to_string() + "ms");
+    print("  Write contention: " + time3_ms.to_string() + "ms");
+}

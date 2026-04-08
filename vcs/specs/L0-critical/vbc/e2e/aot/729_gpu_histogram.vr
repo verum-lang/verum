@@ -1,0 +1,95 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, gpu, histogram, atomics
+// @expected-exit: 0
+
+// GPU histogram computation with atomic simulation.
+// Tests functions returning List<Int> and blocked computation patterns.
+
+fn histogram(data: List<Int>, n: Int, num_bins: Int) -> List<Int> {
+    let mut bins = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        let val = data[i];
+        if (val >= 0) {
+            if (val < num_bins) {
+                bins[val] = bins[val] + 1;
+            }
+        }
+        i = i + 1;
+    }
+    bins
+}
+
+fn blocked_histogram(data: List<Int>, n: Int, num_bins: Int, block_size: Int) -> List<Int> {
+    // Simulate per-block histogram with shared memory, then merge
+    let num_blocks = (n + block_size - 1) / block_size;
+    let mut global_bins = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let mut bid = 0;
+    while (bid < num_blocks) {
+        let mut local_bins = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let start = bid * block_size;
+        let mut tid = 0;
+        while (tid < block_size) {
+            let idx = start + tid;
+            if (idx < n) {
+                let val = data[idx];
+                if (val >= 0) {
+                    if (val < num_bins) {
+                        local_bins[val] = local_bins[val] + 1;
+                    }
+                }
+            }
+            tid = tid + 1;
+        }
+        // Merge local → global (simulated atomic add)
+        let mut b = 0;
+        while (b < num_bins) {
+            global_bins[b] = global_bins[b] + local_bins[b];
+            b = b + 1;
+        }
+        bid = bid + 1;
+    }
+    global_bins
+}
+
+fn main() -> Int {
+    // Test 1: Simple histogram via function
+    let data = [0, 1, 2, 3, 0, 1, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+    let bins = histogram(data, 10, 4);
+    assert_eq(bins[0], 4);
+    assert_eq(bins[1], 3);
+    assert_eq(bins[2], 2);
+    assert_eq(bins[3], 1);
+
+    // Test 2: All same value
+    let data2 = [2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bins2 = histogram(data2, 8, 4);
+    assert_eq(bins2[0], 0);
+    assert_eq(bins2[1], 0);
+    assert_eq(bins2[2], 8);
+    assert_eq(bins2[3], 0);
+
+    // Test 3: Blocked histogram gives same results as simple
+    let bins3 = blocked_histogram(data, 10, 4, 4);
+    assert_eq(bins3[0], 4);
+    assert_eq(bins3[1], 3);
+    assert_eq(bins3[2], 2);
+    assert_eq(bins3[3], 1);
+
+    // Test 4: Different block sizes should give same result
+    let bins4 = blocked_histogram(data, 10, 4, 2);
+    assert_eq(bins4[0], 4);
+    assert_eq(bins4[1], 3);
+    assert_eq(bins4[2], 2);
+    assert_eq(bins4[3], 1);
+
+    // Test 5: Verify histogram sums to n
+    let total = bins[0] + bins[1] + bins[2] + bins[3];
+    assert_eq(total, 10);
+
+    print("GPU histogram: PASS");
+    0
+}

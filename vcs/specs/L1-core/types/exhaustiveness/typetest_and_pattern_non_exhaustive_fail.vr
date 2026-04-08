@@ -1,0 +1,19 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: exhaustiveness, pattern, error
+// @expected-error: E0601
+
+// Non-exhaustive match should produce E0601 error
+
+type Color is Red | Green | Blue;
+
+fn classify(c: Color) -> Text =
+    match c {
+        Red => "red",
+        Green => "green"
+        // Missing Blue case! Non-exhaustive.
+    };
+
+fn main() {
+    let _ = classify(Blue);
+}

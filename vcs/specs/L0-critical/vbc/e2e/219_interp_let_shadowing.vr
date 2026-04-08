@@ -1,0 +1,174 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, let, shadowing, bindings
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: let bindings, let mut, variable shadowing in nested scopes
+
+// =============================================================================
+// Basic let bindings
+// =============================================================================
+
+fn test_let_immutable() {
+    let x = 42;
+    assert_eq(x, 42);
+    let y = x + 8;
+    assert_eq(y, 50);
+    let z = x * y;
+    assert_eq(z, 2100);
+}
+
+fn test_let_mut() {
+    let mut x = 0;
+    assert_eq(x, 0);
+    x = 10;
+    assert_eq(x, 10);
+    x = x + 5;
+    assert_eq(x, 15);
+    x = x * 2;
+    assert_eq(x, 30);
+}
+
+fn test_multiple_bindings() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    assert_eq(a + b + c + d + e, 15);
+}
+
+// =============================================================================
+// Variable shadowing
+// =============================================================================
+
+fn test_basic_shadowing() {
+    let x = 10;
+    assert_eq(x, 10);
+    let x = 20;
+    assert_eq(x, 20);
+    let x = x + 5;
+    assert_eq(x, 25);
+}
+
+fn test_shadow_with_different_expression() {
+    let x = 5;
+    let x = x * x;
+    assert_eq(x, 25);
+    let x = x + 1;
+    assert_eq(x, 26);
+}
+
+fn test_shadow_mut_to_immutable() {
+    let mut x = 10;
+    x = 20;
+    let x = x + 5;
+    // x is now immutable with value 25
+    assert_eq(x, 25);
+}
+
+// =============================================================================
+// Scoped shadowing
+// =============================================================================
+
+fn test_block_scope_shadowing() {
+    let x = 10;
+    let result = {
+        let x = 20;
+        x + 5
+    };
+    // x in outer scope unchanged
+    assert_eq(x, 10);
+    assert_eq(result, 25);
+}
+
+fn test_nested_scope_shadowing() {
+    let x = 1;
+    let r1 = {
+        let x = 2;
+        let r2 = {
+            let x = 3;
+            x
+        };
+        assert_eq(r2, 3);
+        x
+    };
+    assert_eq(r1, 2);
+    assert_eq(x, 1);
+}
+
+fn test_if_scope_shadowing() {
+    let x = 100;
+    let result = if true {
+        let x = 200;
+        x
+    } else {
+        let x = 300;
+        x
+    };
+    assert_eq(result, 200);
+    assert_eq(x, 100);
+}
+
+// =============================================================================
+// Mutation in scopes
+// =============================================================================
+
+fn test_mut_in_loop() {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let increment = i * 2;
+        total = total + increment;
+        i = i + 1;
+    }
+    // 0+2+4+6+8 = 20
+    assert_eq(total, 20);
+}
+
+fn test_shadow_accumulate() {
+    let x = 1;
+    let x = x + 1;
+    let x = x + 1;
+    let x = x + 1;
+    let x = x + 1;
+    assert_eq(x, 5);
+}
+
+// =============================================================================
+// Let with expressions
+// =============================================================================
+
+fn test_let_with_if_expr() {
+    let x = 10;
+    let y = if x > 5 { x * 2 } else { x };
+    assert_eq(y, 20);
+}
+
+fn test_let_with_function_call() {
+    fn double(n: Int) -> Int { n * 2 }
+    let x = double(21);
+    assert_eq(x, 42);
+    let y = double(double(5));
+    assert_eq(y, 20);
+}
+
+fn main() -> Int {
+    test_let_immutable();
+    test_let_mut();
+    test_multiple_bindings();
+    test_basic_shadowing();
+    test_shadow_with_different_expression();
+    test_shadow_mut_to_immutable();
+    test_block_scope_shadowing();
+    test_nested_scope_shadowing();
+    test_if_scope_shadowing();
+    test_mut_in_loop();
+    test_shadow_accumulate();
+    test_let_with_if_expr();
+    test_let_with_function_call();
+    print("[OK] 219_interp_let_shadowing");
+    0
+}

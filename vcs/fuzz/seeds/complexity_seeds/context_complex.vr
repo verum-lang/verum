@@ -1,0 +1,60 @@
+// Complexity: Complex context system usage
+context Logger {
+    fn log(&self, msg: Text);
+    fn error(&self, msg: Text);
+}
+
+context Database {
+    fn query(&self, sql: Text) -> List<Map<Text, Text>>;
+    fn execute(&self, sql: Text) -> Int;
+}
+
+context Config {
+    fn get(&self, key: Text) -> Maybe<Text>;
+}
+
+type ConsoleLogger is {};
+type FileLogger is { path: Text };
+
+implement Logger for ConsoleLogger {
+    fn log(&self, msg: Text) {}
+    fn error(&self, msg: Text) {}
+}
+
+implement Logger for FileLogger {
+    fn log(&self, msg: Text) {}
+    fn error(&self, msg: Text) {}
+}
+
+fn do_work() using [Logger, Database] {
+    Logger.log("Starting work");
+    let results = Database.query("SELECT * FROM users");
+    Logger.log("Work complete");
+}
+
+fn with_config() using [Logger, Config] {
+    match Config.get("debug") {
+        Some(val) => Logger.log(val),
+        None => Logger.error("No config"),
+    }
+}
+
+fn nested_contexts() using [Logger] {
+    Logger.log("Outer scope");
+
+    {
+        // Inner scope can shadow
+        provide Logger = FileLogger { path: "inner.log" };
+        Logger.log("Inner scope");
+    }
+
+    Logger.log("Back to outer");
+}
+
+fn main() {
+    provide Logger = ConsoleLogger {};
+
+    Logger.log("Starting application");
+
+    nested_contexts();
+}

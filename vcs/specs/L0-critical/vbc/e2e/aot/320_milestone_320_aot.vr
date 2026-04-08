@@ -1,0 +1,359 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, comprehensive, math, data-structures
+// @timeout: 50000
+// @expected-exit: 0
+//
+// MILESTONE 320: Comprehensive integration test combining math,
+// bit manipulation, hash functions, and data structure operations
+
+// === Utility ===
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn min2(a: Int, bv: Int) -> Int { if a < bv { a } else { bv } }
+fn max2(a: Int, bv: Int) -> Int { if a > bv { a } else { bv } }
+
+// === Array type ===
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+// === Math: modular arithmetic ===
+fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b) % modulus; }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+fn gcd(a: Int, bv: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(bv);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut d = 3;
+    while d * d <= n { if n % d == 0 { return 0; } d = d + 2; }
+    1
+}
+
+// === Bit manipulation ===
+fn count_bits(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 {
+        count = count + (x % 2);
+        x = x / 2;
+    }
+    count
+}
+
+fn reverse_bits_8(n: Int) -> Int {
+    let mut result = 0;
+    let mut x = n;
+    let mut i = 0;
+    while i < 8 {
+        result = result * 2 + (x % 2);
+        x = x / 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn is_power_of_two(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    // n & (n-1) == 0 means power of two
+    // Simulate: count_bits should be 1
+    if count_bits(n) == 1 { 1 } else { 0 }
+}
+
+// === Simple hash functions ===
+fn hash_djb2(val: Int) -> Int {
+    // Hash an integer using djb2-style algorithm
+    let mut hash = 5381;
+    let mut x = abs_val(val);
+    let mut i = 0;
+    while i < 8 {
+        let digit = x % 10;
+        hash = ((hash * 33) + digit) % 1000000007;
+        x = x / 10;
+        i = i + 1;
+    }
+    hash
+}
+
+fn hash_fnv(val: Int) -> Int {
+    // FNV-1a style hash
+    let mut hash = 2166136261;
+    let mut x = abs_val(val);
+    let mut i = 0;
+    while i < 8 {
+        let octet = x % 256;
+        // XOR-fold: hash = hash ^ octet
+        // Simulate XOR with mod arithmetic
+        hash = ((hash + octet) * 16777619) % 1000000007;
+        x = x / 256;
+        i = i + 1;
+    }
+    hash
+}
+
+// === Euler's totient function ===
+fn euler_totient(n: Int) -> Int {
+    let mut result = 0;
+    let mut i = 1;
+    while i <= n {
+        if gcd(i, n) == 1 { result = result + 1; }
+        i = i + 1;
+    }
+    result
+}
+
+// === Catalan number (nth) ===
+fn catalan(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut dp = arr8_new(8);
+    dp = arr8_set(dp, 0, 1);
+    dp = arr8_set(dp, 1, 1);
+    let mut i = 2;
+    while i <= n {
+        let mut sum = 0;
+        let mut j = 0;
+        while j < i {
+            sum = sum + arr8_get(dp, j) * arr8_get(dp, i - 1 - j);
+            j = j + 1;
+        }
+        dp = arr8_set(dp, i, sum);
+        i = i + 1;
+    }
+    arr8_get(dp, n)
+}
+
+// === Higher-order functions ===
+fn arr8_map(a: Arr8, f: fn(Int) -> Int) -> Arr8 {
+    let mut result = a;
+    let mut i = 0;
+    while i < a.len {
+        result = arr8_set(result, i, f(arr8_get(a, i)));
+        i = i + 1;
+    }
+    result
+}
+
+fn arr8_fold(a: Arr8, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < a.len { acc = f(acc, arr8_get(a, i)); i = i + 1; }
+    acc
+}
+
+fn add_fn(acc: Int, x: Int) -> Int { acc + x }
+fn max_fn(acc: Int, x: Int) -> Int { max2(acc, x) }
+
+// === Selection sort ===
+fn selection_sort(a: Arr8) -> Arr8 {
+    let mut result = a;
+    let mut i = 0;
+    while i < result.len - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < result.len {
+            if arr8_get(result, j) < arr8_get(result, min_idx) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            let tmp = arr8_get(result, i);
+            result = arr8_set(result, i, arr8_get(result, min_idx));
+            result = arr8_set(result, min_idx, tmp);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn is_sorted(a: Arr8) -> Int {
+    let mut i = 1;
+    while i < a.len {
+        if arr8_get(a, i) < arr8_get(a, i - 1) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_math_section() {
+    // Modular exponentiation
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    assert_eq(mod_pow(3, 13, 1000000007), 1594323);
+    // Fermat's little theorem: a^(p-1) = 1 mod p for prime p
+    assert_eq(mod_pow(2, 6, 7), 1);
+    assert_eq(mod_pow(5, 12, 13), 1);
+
+    // GCD
+    assert_eq(gcd(48, 18), 6);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(17, 31), 1);
+
+    // Primes
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(97), 1);
+    assert_eq(is_prime(91), 0); // 91 = 7 * 13
+    assert_eq(is_prime(1), 0);
+}
+
+fn test_bit_manipulation() {
+    assert_eq(count_bits(0), 0);
+    assert_eq(count_bits(1), 1);
+    assert_eq(count_bits(7), 3);
+    assert_eq(count_bits(255), 8);
+    assert_eq(count_bits(128), 1);
+
+    assert_eq(reverse_bits_8(1), 128);   // 00000001 -> 10000000
+    assert_eq(reverse_bits_8(128), 1);   // 10000000 -> 00000001
+    assert_eq(reverse_bits_8(255), 255); // 11111111 -> 11111111
+    assert_eq(reverse_bits_8(170), 85);  // 10101010 -> 01010101
+
+    assert_eq(is_power_of_two(1), 1);
+    assert_eq(is_power_of_two(2), 1);
+    assert_eq(is_power_of_two(64), 1);
+    assert_eq(is_power_of_two(3), 0);
+    assert_eq(is_power_of_two(0), 0);
+}
+
+fn test_hash_properties() {
+    // Different inputs should (usually) give different hashes
+    let h1 = hash_djb2(12345);
+    let h2 = hash_djb2(12346);
+    let h3 = hash_djb2(0);
+    assert_eq(h1 != h2, true);
+    assert_eq(h1 != h3, true);
+
+    // Same input should give same hash (determinism)
+    assert_eq(hash_djb2(999), hash_djb2(999));
+    assert_eq(hash_fnv(42), hash_fnv(42));
+
+    // FNV hashes
+    let f1 = hash_fnv(100);
+    let f2 = hash_fnv(200);
+    assert_eq(f1 != f2, true);
+    assert_eq(f1 > 0, true);
+    assert_eq(f2 > 0, true);
+}
+
+fn test_euler_totient() {
+    assert_eq(euler_totient(1), 1);
+    assert_eq(euler_totient(2), 1);
+    assert_eq(euler_totient(6), 2);  // 1, 5
+    assert_eq(euler_totient(12), 4); // 1, 5, 7, 11
+    // For prime p: totient(p) = p - 1
+    assert_eq(euler_totient(7), 6);
+    assert_eq(euler_totient(13), 12);
+    // For prime power: totient(p^k) = p^k - p^(k-1)
+    assert_eq(euler_totient(8), 4); // 2^3 - 2^2 = 4
+    assert_eq(euler_totient(9), 6); // 3^2 - 3^1 = 6
+}
+
+fn test_catalan_numbers() {
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+    assert_eq(catalan(6), 132);
+    assert_eq(catalan(7), 429);
+}
+
+fn test_sorting_and_higher_order() {
+    let a = Arr8 { a0: 38, a1: 27, a2: 43, a3: 3, a4: 9, a5: 82, a6: 10, a7: 0, len: 7 };
+    let sorted = selection_sort(a);
+    assert_eq(is_sorted(sorted), 1);
+    assert_eq(arr8_get(sorted, 0), 3);
+    assert_eq(arr8_get(sorted, 6), 82);
+
+    // Map + fold: sum of squares
+    let b = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sq = arr8_map(b, count_bits);
+    // count_bits: 1->1, 2->1, 3->2, 4->1, 5->2
+    assert_eq(arr8_get(sq, 0), 1);
+    assert_eq(arr8_get(sq, 2), 2);
+    assert_eq(arr8_get(sq, 4), 2);
+    let bit_sum = arr8_fold(sq, 0, add_fn);
+    assert_eq(bit_sum, 7);
+}
+
+fn test_integration() {
+    // Count primes up to 30
+    let mut prime_count = 0;
+    let mut i = 2;
+    while i <= 30 {
+        prime_count = prime_count + is_prime(i);
+        i = i + 1;
+    }
+    assert_eq(prime_count, 10); // 2,3,5,7,11,13,17,19,23,29
+
+    // Sum of totients 1..10 should equal 10*11/2 = 55 (actually no, that's wrong)
+    // Actually sum of totients 1..n relates to number of fractions
+    // totient(1)+totient(2)+...+totient(10) = 1+1+2+2+4+2+6+4+6+4 = 32
+    let mut tot_sum = 0;
+    let mut j = 1;
+    while j <= 10 {
+        tot_sum = tot_sum + euler_totient(j);
+        j = j + 1;
+    }
+    assert_eq(tot_sum, 32);
+
+    // Catalan(5) = 42, is_prime(42) = 0
+    assert_eq(is_prime(catalan(5)), 0);
+    // Catalan(3) = 5, is_prime(5) = 1
+    assert_eq(is_prime(catalan(3)), 1);
+
+    // reverse_bits_8 is its own inverse
+    let mut k = 0;
+    while k < 256 {
+        assert_eq(reverse_bits_8(reverse_bits_8(k)), k);
+        k = k + 32; // check every 32nd
+    }
+}
+
+fn main() -> Int {
+    test_math_section();
+    test_bit_manipulation();
+    test_hash_properties();
+    test_euler_totient();
+    test_catalan_numbers();
+    test_sorting_and_higher_order();
+    test_integration();
+    print("[OK] 320_milestone_320_aot");
+    0
+}

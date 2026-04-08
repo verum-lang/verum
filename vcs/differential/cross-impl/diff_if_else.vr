@@ -1,0 +1,69 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, control-flow, if-else
+// @timeout: 10000
+// @expected-exit: 0
+// @description: If/else control flow: basic, nested, chained, expression form
+
+fn classify(n: Int) -> Text {
+    if n < 0 {
+        "negative"
+    } else if n == 0 {
+        "zero"
+    } else if n < 10 {
+        "small"
+    } else if n < 100 {
+        "medium"
+    } else {
+        "large"
+    }
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo { lo } else if x > hi { hi } else { x }
+}
+
+fn main() -> Int {
+    assert_eq(classify(-5), "negative");
+    assert_eq(classify(0), "zero");
+    assert_eq(classify(7), "small");
+    assert_eq(classify(42), "medium");
+    assert_eq(classify(999), "large");
+
+    assert_eq(abs_val(-42), 42);
+    assert_eq(abs_val(42), 42);
+    assert_eq(abs_val(0), 0);
+
+    assert_eq(max(3, 7), 7);
+    assert_eq(max(10, 2), 10);
+    assert_eq(min(3, 7), 3);
+
+    assert_eq(clamp(5, 0, 10), 5);
+    assert_eq(clamp(-5, 0, 10), 0);
+    assert_eq(clamp(15, 0, 10), 10);
+
+    // Boolean logic
+    assert_eq(true && true, true);
+    assert_eq(true && false, false);
+    assert_eq(false || true, true);
+    assert_eq(false || false, false);
+    assert_eq(!true, false);
+    assert_eq(!false, true);
+
+    print("diff_if_else: ok");
+    0
+}

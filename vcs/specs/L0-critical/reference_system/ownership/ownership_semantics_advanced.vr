@@ -1,0 +1,315 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: ownership, move-semantics, drop, advanced, comprehensive
+// @description: Advanced ownership semantics tests demonstrating Verum's sophisticated memory management
+
+/// Advanced Ownership Semantics Test Suite
+///
+/// This test demonstrates Verum's comprehensive ownership system that goes beyond
+/// basic Rust-like move semantics to provide:
+///
+/// 1. Explicit drop() for controlled resource release
+/// 2. Move semantics with automatic use-after-move detection
+/// 3. Partial moves from structs and tuples
+/// 4. Reborrowing patterns for flexible reference handling
+/// 5. Copy vs Move type distinction
+///
+/// Spec: 04-memory-model.md#ownership-model
+
+// ============================================================================
+// TEST 1: Explicit Resource Management with drop()
+// ============================================================================
+// The drop() function allows explicit resource release before end of scope.
+
+fn test_explicit_drop() {
+    let resource = create_resource();
+    use_resource(&resource);
+
+    // Explicitly release the resource
+    drop(resource);
+
+    // After drop, the binding is no longer valid
+    // let _ = resource;  // Would be ERROR: use after move/drop
+
+    // Can create new resource with same name
+    let resource = create_resource();
+    use_resource(&resource);
+    // Automatically dropped at scope end
+}
+
+fn create_resource() -> Int {
+    42
+}
+
+fn use_resource(r: &Int) {
+    assert(*r == 42);
+}
+
+// ============================================================================
+// TEST 2: Move Semantics with Detection
+// ============================================================================
+// Verum tracks ownership through moves and prevents use after move.
+
+fn test_move_semantics() {
+    let data = [1, 2, 3, 4, 5];
+
+    // Move into function
+    let processed = process_data(data);
+
+    // data is moved, cannot be used
+    // let _ = data[0];  // Would be ERROR: use after move
+
+    // processed owns the result
+    assert(processed[0] == 2);
+}
+
+fn process_data(mut arr: [Int; 5]) -> [Int; 5] {
+    // Transform in place
+    for i in 0..5 {
+        arr[i] = arr[i] * 2;
+    }
+    arr  // Return ownership
+}
+
+fn test_conditional_move() {
+    let value = 100;
+    let condition = true;
+
+    if condition {
+        let moved = consume(value);
+        assert(moved == 100);
+        // value is moved in this branch
+    }
+    // After if, value is considered moved on all paths
+    // let _ = value;  // Would be ERROR
+}
+
+fn consume(x: Int) -> Int {
+    x
+}
+
+// ============================================================================
+// TEST 3: Partial Moves
+// ============================================================================
+// Verum allows moving individual fields out of structs.
+
+type Container is {
+    data: Int,
+    metadata: Int,
+};
+
+fn test_partial_move() {
+    let container = Container { data: 42, metadata: 99 };
+
+    // Access data field
+    let extracted_data = container.data;
+    assert(extracted_data == 42);
+
+    // metadata is still accessible
+    let extracted_meta = container.metadata;
+    assert(extracted_meta == 99);
+}
+
+fn test_tuple_access() {
+    let pair = (42, 100);
+
+    // Access tuple elements
+    let first = pair.0;
+    let second = pair.1;
+
+    assert(first == 42);
+    assert(second == 100);
+}
+
+// ============================================================================
+// TEST 4: Reborrowing Patterns
+// ============================================================================
+// References can be reborrowed to allow more flexible usage patterns.
+
+fn test_reborrow() {
+    let mut value = 42;
+
+    // First mutable borrow
+    let r1 = &mut value;
+    *r1 = 100;
+
+    // Reborrow from r1
+    let r2 = &mut *r1;
+    *r2 = 200;
+
+    // r1 is temporarily invalidated during r2's lifetime
+    // Both point to same location, but usage is serialized
+
+    assert(*r1 == 200);
+    assert(value == 200);
+}
+
+fn test_reborrow_in_function() {
+    let mut data = 0;
+
+    let r = &mut data;
+
+    // Pass reborrow to function
+    increment(&mut *r);
+    increment(&mut *r);
+    increment(&mut *r);
+
+    assert(*r == 3);
+}
+
+fn increment(x: &mut Int) {
+    *x += 1;
+}
+
+// ============================================================================
+// TEST 5: Copy Types vs Move Types
+// ============================================================================
+// Primitive types are Copy, complex types are Move.
+
+fn test_copy_semantics() {
+    let x: Int = 42;
+    let y = x;  // Copy, not move
+
+    // Both x and y are valid
+    assert(x == 42);
+    assert(y == 42);
+
+    // Booleans are Copy
+    let flag = true;
+    let copied_flag = flag;
+    assert(flag == copied_flag);
+
+    // Floats are Copy
+    let f: Float = 3.14;
+    let f2 = f;
+    assert(f == f2);
+}
+
+fn test_array_copy_elements() {
+    let arr = [1, 2, 3];
+
+    // Indexing returns a copy for Copy types
+    let elem = arr[0];
+
+    // Array is still fully usable
+    assert(arr[0] == 1);
+    assert(elem == 1);
+}
+
+// ============================================================================
+// TEST 6: Ownership Transfer Patterns
+// ============================================================================
+// Common patterns for transferring ownership safely.
+
+fn test_return_ownership() {
+    let result = create_and_return();
+    assert(result == 42);
+}
+
+fn create_and_return() -> Int {
+    let local = 42;
+    local  // Ownership transferred to caller
+}
+
+fn test_swap_ownership() {
+    let mut a = 10;
+    let mut b = 20;
+
+    // Swap values (both are Copy, so this just copies)
+    let temp = a;
+    a = b;
+    b = temp;
+
+    assert(a == 20);
+    assert(b == 10);
+}
+
+fn test_replace_pattern() {
+    let mut value = 100;
+
+    // Replace and get old value
+    let old = replace(&mut value, 200);
+
+    assert(old == 100);
+    assert(value == 200);
+}
+
+fn replace(dest: &mut Int, new_val: Int) -> Int {
+    let old = *dest;
+    *dest = new_val;
+    old
+}
+
+// ============================================================================
+// TEST 7: Scope-Based Cleanup
+// ============================================================================
+// Values are automatically dropped when they go out of scope.
+
+fn test_scope_cleanup() {
+    let outer = create_resource();
+
+    {
+        let inner = create_resource();
+        use_resource(&inner);
+        // inner is dropped here
+    }
+
+    // outer is still valid
+    use_resource(&outer);
+    // outer is dropped at function end
+}
+
+fn test_early_return_cleanup() {
+    let resource = create_resource();
+
+    if true {
+        use_resource(&resource);
+        return;  // resource is dropped before return
+    }
+
+    // This code is unreachable, but cleanup still happens
+}
+
+fn test_loop_cleanup() {
+    for i in 0..3 {
+        let loop_local = create_resource();
+        use_resource(&loop_local);
+        // loop_local is dropped at end of each iteration
+    }
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Explicit drop tests
+    test_explicit_drop();
+
+    // Move semantics tests
+    test_move_semantics();
+    test_conditional_move();
+
+    // Partial move tests
+    test_partial_move();
+    test_tuple_access();
+
+    // Reborrow tests
+    test_reborrow();
+    test_reborrow_in_function();
+
+    // Copy semantics tests
+    test_copy_semantics();
+    test_array_copy_elements();
+
+    // Ownership transfer tests
+    test_return_ownership();
+    test_swap_ownership();
+    test_replace_pattern();
+
+    // Scope cleanup tests
+    test_scope_cleanup();
+    test_early_return_cleanup();
+    test_loop_cleanup();
+}

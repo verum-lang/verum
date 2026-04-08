@@ -1,0 +1,142 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @category: comprehensions
+// @tags: parser, comprehensions, set
+// @description: Set comprehension syntax: set{expr for pattern in iter clause*}
+
+// ============================================================================
+// BASIC SET COMPREHENSION SYNTAX
+// Grammar: set_comprehension = 'set' , '{' , expression , 'for' , pattern ,
+//          'in' , expression , { comprehension_clause } , '}' ;
+// ============================================================================
+
+fn test_basic_set_comprehension() {
+    // Simple set from list
+    let unique = set{x for x in items};
+
+    // With transformation
+    let doubled = set{x * 2 for x in numbers};
+
+    // With method call
+    let lowercased = set{s.to_lower() for s in strings};
+
+    // With function call
+    let processed = set{normalize(x) for x in raw_data};
+
+    // From range
+    let range_set = set{i for i in 0..10};
+
+    // From inclusive range
+    let inclusive_set = set{i for i in 1..=5};
+
+    // Field extraction
+    let ids = set{item.id for item in items};
+
+    // Index access
+    let firsts = set{arr[0] for arr in arrays};
+}
+
+fn test_set_comprehension_with_filter() {
+    // Basic filter
+    let positives = set{x for x in numbers if x > 0};
+
+    // Filter with method
+    let evens = set{x for x in numbers if x.is_even()};
+
+    // Compound filter
+    let in_range = set{x for x in values if x >= min && x <= max};
+
+    // Filter with negation
+    let non_empty = set{s for s in strings if !s.is_empty()};
+
+    // Multiple if clauses
+    let multi_filter = set{x for x in items if x > 0 if x < 100};
+}
+
+fn test_set_comprehension_with_let() {
+    // Let binding for computed value
+    let with_computed = set{result for x in items let result = expensive(x)};
+
+    // Let binding with type annotation
+    let typed_let = set{computed for x in items let computed: Int = x * 2};
+
+    // Multiple let bindings
+    let multi_let = set{final for x in source
+                               let intermediate = process(x)
+                               let final = finalize(intermediate)};
+}
+
+fn test_set_comprehension_nested_for() {
+    // Cartesian product (unique pairs)
+    let pairs = set{(x, y) for x in xs for y in ys};
+
+    // Dependent generators
+    let triangular = set{(i, j) for i in 0..n for j in 0..i};
+
+    // Nested with filter
+    let filtered_pairs = set{(x, y) for x in xs if x > 0 for y in ys if y > x};
+
+    // Flatten and dedupe
+    let flattened = set{item for group in groups for item in group.items};
+
+    // Three-way nesting
+    let triples = set{(x, y, z) for x in xs for y in ys for z in zs};
+}
+
+fn test_set_comprehension_complex_expressions() {
+    // Conditional
+    let clamped = set{if x > max { max } else { x } for x in values};
+
+    // Match expression
+    let unwrapped = set{match opt { Some(v) => v, None => 0 } for opt in options};
+
+    // Tuple construction
+    let tuples = set{(i, i * 2) for i in 0..10};
+
+    // Record construction
+    let points = set{Point { x: i, y: i } for i in 0..5};
+
+    // Pipeline
+    let piped = set{x |> f |> g for x in source};
+
+    // String interpolation
+    let labeled = set{f"item_{x}" for x in items};
+}
+
+fn test_set_comprehension_practical() {
+    // Unique categories
+    let categories = set{item.category for item in all_items};
+
+    // Unique words from text
+    let vocabulary = set{word.to_lower() for line in text for word in line.split(" ")};
+
+    // Unique unordered pairs
+    let unordered_pairs = set{(min(a, b), max(a, b)) for a in items for b in items if a != b};
+
+    // Unique lengths
+    let lengths = set{s.len() for s in strings};
+
+    // Unique prefixes
+    let prefixes = set{s[0..3] for s in strings if s.len() >= 3};
+}
+
+fn test_set_keyword_as_identifier() {
+    // 'set' can be used as identifier when not followed by '{'
+    let set = SomeModule.set;
+    let result = set.new();
+    let value = set.contains(x);
+}
+
+// ============================================================================
+// ALTERNATIVE: Set.from() for list comprehension results
+// (Still supported for compatibility with existing code patterns)
+// ============================================================================
+
+fn test_set_from_list_comprehension() {
+    // Using Set.from with list comprehension
+    let from_list = Set.from([x for x in items]);
+
+    // This is equivalent to native syntax but more verbose
+    let from_range = Set.from([i * i for i in 1..10]);
+}

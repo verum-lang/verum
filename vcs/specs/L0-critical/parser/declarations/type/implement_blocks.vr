@@ -1,0 +1,255 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, implement, impl
+
+// Simple implement block for a type
+type Point is { x: Float, y: Float };
+
+implement Point {
+    fn new(x: Float, y: Float) -> Point {
+        Point { x, y }
+    }
+
+    fn origin() -> Point {
+        Point { x: 0.0, y: 0.0 }
+    }
+}
+
+// Implement block with self methods
+implement Point {
+    fn distance_from_origin(&self) -> Float {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+
+    fn translate(&mut self, dx: Float, dy: Float) {
+        self.x += dx;
+        self.y += dy;
+    }
+}
+
+// Implement protocol for type
+type Circle is { center: Point, radius: Float };
+
+implement Display for Circle {
+    fn display(&self) -> Text {
+        format("Circle at ({}, {}) with radius {}",
+               self.center.x, self.center.y, self.radius)
+    }
+}
+
+// Implement multiple protocols
+implement Debug for Circle {
+    fn debug(&self) -> Text {
+        format("Circle {{ center: {:?}, radius: {} }}",
+               self.center, self.radius)
+    }
+}
+
+implement Clone for Circle {
+    fn clone(&self) -> Circle {
+        Circle { center: self.center.clone(), radius: self.radius }
+    }
+}
+
+// Generic implement block
+type Container<T> is { value: T };
+
+implement<T> Container<T> {
+    fn new(value: T) -> Container<T> {
+        Container { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn set(&mut self, value: T) {
+        self.value = value;
+    }
+}
+
+// Implement with constraints
+implement<T: Clone> Container<T> {
+    fn duplicate(&self) -> Container<T> {
+        Container { value: self.value.clone() }
+    }
+}
+
+implement<T: Debug + Display> Container<T> {
+    fn inspect(&self) -> Text {
+        format("Container holding: {}", self.value.display())
+    }
+}
+
+// Implement protocol for generic type
+implement<T: Display> Display for Container<T> {
+    fn display(&self) -> Text {
+        format("Container({})", self.value.display())
+    }
+}
+
+// Implement with constraints
+implement<T: Clone, U: Clone> Pair<T, U> {
+    fn clone_pair(&self) -> Pair<T, U> {
+        Pair { first: self.first.clone(), second: self.second.clone() }
+    }
+}
+
+// Implement for variant types
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+implement<T> Maybe<T> {
+    fn is_some(&self) -> Bool {
+        match self {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    fn is_none(&self) -> Bool {
+        !self.is_some()
+    }
+
+    fn unwrap(self) -> T {
+        match self {
+            Some(value) => value,
+            None => panic("Called unwrap on None"),
+        }
+    }
+
+    fn unwrap_or(self, default: T) -> T {
+        match self {
+            Some(value) => value,
+            None => default,
+        }
+    }
+}
+
+implement<T: Clone> Maybe<T> {
+    fn cloned(&self) -> Maybe<T> {
+        match self {
+            Some(value) => Some(value.clone()),
+            None => None,
+        }
+    }
+}
+
+// Implement with associated types
+implement<T> Iterator for Container<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<Self.Item> {
+        // Implementation
+        None
+    }
+}
+
+// Implement with async methods
+implement Container<AsyncData> {
+    async fn fetch(&self) -> Result<Data, Error> {
+        self.value.load().await
+    }
+}
+
+// Implement with context requirements
+implement Service {
+    fn process(&self) using [Database, Logger] {
+        Logger.info("Processing service");
+        Database.execute("UPDATE status SET active = true");
+    }
+}
+
+// Implement with visibility modifiers
+implement PrivateType {
+    public fn public_method(&self) { }
+
+    fn private_method(&self) { }
+}
+
+// Nested implement blocks (for different aspects)
+type ComplexType is { data: List<Int> };
+
+implement ComplexType {
+    // Core methods
+    fn new() -> ComplexType {
+        ComplexType { data: [] }
+    }
+}
+
+implement ComplexType {
+    // Additional methods
+    fn len(&self) -> Int {
+        self.data.len()
+    }
+}
+
+// Implement with default methods
+implement DefaultProtocol for MyType {
+    // Override specific methods
+    fn required_method(&self) -> Int {
+        42
+    }
+
+    // Use default for others
+}
+
+// Implement for tuple structs / newtypes
+type UserId is (Int);
+
+implement UserId {
+    fn new(id: Int) -> UserId {
+        UserId(id)
+    }
+
+    fn value(&self) -> Int {
+        match self {
+            UserId(id) => id,
+        }
+    }
+}
+
+// Implement with multiple type parameters
+type Map<K, V> is { entries: List<(K, V)> };
+
+implement<K: Eq + Hash, V> Map<K, V> {
+    fn new() -> Map<K, V> {
+        Map { entries: [] }
+    }
+
+    fn get(&self, key: &K) -> Maybe<&V> {
+        for (k, v) in &self.entries {
+            if k == key {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        self.entries.push((key, value));
+    }
+}
+
+// Specialization (if supported)
+@specialize
+implement<T: Copy> Clone for Container<T> {
+    fn clone(&self) -> Container<T> {
+        Container { value: self.value }
+    }
+}
+
+// Implement with const generics
+implement<T, const N: Int> FixedArray<T, N> {
+    fn len(&self) -> Int { N }
+
+    fn get(&self, index: Int) -> Maybe<&T> {
+        if index >= 0 && index < N {
+            Some(&self.data[index])
+        } else {
+            None
+        }
+    }
+}

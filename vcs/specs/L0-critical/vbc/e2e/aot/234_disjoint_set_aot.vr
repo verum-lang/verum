@@ -1,0 +1,158 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, disjoint-set, union-find
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for disjoint set (union-find) data structure
+
+// 8-element disjoint set: parent array and rank array
+type DSU is {
+    p0: Int, p1: Int, p2: Int, p3: Int, p4: Int, p5: Int, p6: Int, p7: Int,
+    r0: Int, r1: Int, r2: Int, r3: Int, r4: Int, r5: Int, r6: Int, r7: Int
+};
+
+fn dsu_new() -> DSU {
+    // Each element is its own parent, rank 0
+    DSU {
+        p0: 0, p1: 1, p2: 2, p3: 3, p4: 4, p5: 5, p6: 6, p7: 7,
+        r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0
+    }
+}
+
+fn dsu_parent(d: DSU, i: Int) -> Int {
+    if i == 0 { d.p0 } else if i == 1 { d.p1 }
+    else if i == 2 { d.p2 } else if i == 3 { d.p3 }
+    else if i == 4 { d.p4 } else if i == 5 { d.p5 }
+    else if i == 6 { d.p6 } else { d.p7 }
+}
+
+fn dsu_rank(d: DSU, i: Int) -> Int {
+    if i == 0 { d.r0 } else if i == 1 { d.r1 }
+    else if i == 2 { d.r2 } else if i == 3 { d.r3 }
+    else if i == 4 { d.r4 } else if i == 5 { d.r5 }
+    else if i == 6 { d.r6 } else { d.r7 }
+}
+
+fn dsu_set_parent(d: DSU, i: Int, p: Int) -> DSU {
+    DSU {
+        p0: if i == 0 { p } else { d.p0 }, p1: if i == 1 { p } else { d.p1 },
+        p2: if i == 2 { p } else { d.p2 }, p3: if i == 3 { p } else { d.p3 },
+        p4: if i == 4 { p } else { d.p4 }, p5: if i == 5 { p } else { d.p5 },
+        p6: if i == 6 { p } else { d.p6 }, p7: if i == 7 { p } else { d.p7 },
+        r0: d.r0, r1: d.r1, r2: d.r2, r3: d.r3,
+        r4: d.r4, r5: d.r5, r6: d.r6, r7: d.r7
+    }
+}
+
+fn dsu_set_rank(d: DSU, i: Int, r: Int) -> DSU {
+    DSU {
+        p0: d.p0, p1: d.p1, p2: d.p2, p3: d.p3,
+        p4: d.p4, p5: d.p5, p6: d.p6, p7: d.p7,
+        r0: if i == 0 { r } else { d.r0 }, r1: if i == 1 { r } else { d.r1 },
+        r2: if i == 2 { r } else { d.r2 }, r3: if i == 3 { r } else { d.r3 },
+        r4: if i == 4 { r } else { d.r4 }, r5: if i == 5 { r } else { d.r5 },
+        r6: if i == 6 { r } else { d.r6 }, r7: if i == 7 { r } else { d.r7 }
+    }
+}
+
+// Find root (with path compression limited to 3 levels)
+fn dsu_find(d: DSU, x: Int) -> Int {
+    let mut cur = x;
+    // Follow parent chain (max 3 hops for 8 elements)
+    let p1 = dsu_parent(d, cur);
+    if p1 == cur { return cur; }
+    let p2 = dsu_parent(d, p1);
+    if p2 == p1 { return p1; }
+    let p3 = dsu_parent(d, p2);
+    if p3 == p2 { return p2; }
+    p3
+}
+
+// Union by rank
+fn dsu_union(d: DSU, x: Int, y: Int) -> DSU {
+    let rx = dsu_find(d, x);
+    let ry = dsu_find(d, y);
+    if rx == ry { return d; }
+
+    let rank_x = dsu_rank(d, rx);
+    let rank_y = dsu_rank(d, ry);
+
+    if rank_x < rank_y {
+        dsu_set_parent(d, rx, ry)
+    } else if rank_x > rank_y {
+        dsu_set_parent(d, ry, rx)
+    } else {
+        let d2 = dsu_set_parent(d, ry, rx);
+        dsu_set_rank(d2, rx, rank_x + 1)
+    }
+}
+
+fn dsu_connected(d: DSU, x: Int, y: Int) -> Bool {
+    dsu_find(d, x) == dsu_find(d, y)
+}
+
+fn dsu_count_sets(d: DSU) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        if dsu_find(d, i) == i { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_initial() {
+    let d = dsu_new();
+    assert_eq(dsu_count_sets(d), 8);
+    assert_eq(dsu_connected(d, 0, 1), false);
+    assert_eq(dsu_connected(d, 0, 0), true);
+}
+
+fn test_union() {
+    let mut d = dsu_new();
+    d = dsu_union(d, 0, 1);
+    assert_eq(dsu_connected(d, 0, 1), true);
+    assert_eq(dsu_connected(d, 0, 2), false);
+    assert_eq(dsu_count_sets(d), 7);
+
+    d = dsu_union(d, 2, 3);
+    assert_eq(dsu_connected(d, 2, 3), true);
+    assert_eq(dsu_count_sets(d), 6);
+
+    // Union the two groups
+    d = dsu_union(d, 1, 2);
+    assert_eq(dsu_connected(d, 0, 3), true);
+    assert_eq(dsu_count_sets(d), 5);
+}
+
+fn test_chain_union() {
+    let mut d = dsu_new();
+    // Union 0-1, 1-2, 2-3, ... chain
+    d = dsu_union(d, 0, 1);
+    d = dsu_union(d, 1, 2);
+    d = dsu_union(d, 2, 3);
+    d = dsu_union(d, 3, 4);
+
+    assert_eq(dsu_connected(d, 0, 4), true);
+    assert_eq(dsu_connected(d, 0, 5), false);
+    assert_eq(dsu_count_sets(d), 4);  // {0,1,2,3,4}, {5}, {6}, {7}
+}
+
+fn test_idempotent() {
+    let mut d = dsu_new();
+    d = dsu_union(d, 3, 5);
+    let sets_before = dsu_count_sets(d);
+    d = dsu_union(d, 3, 5);  // Already connected
+    assert_eq(dsu_count_sets(d), sets_before);
+}
+
+fn main() -> Int {
+    test_initial();
+    test_union();
+    test_chain_union();
+    test_idempotent();
+    print("[OK] 234_disjoint_set_aot");
+    0
+}

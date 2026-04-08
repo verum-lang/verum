@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-check, multi-dimensional
+// @description: Tests bounds checking on multi-dimensional arrays
+
+fn main() {
+    // 3x3 matrix
+    let matrix = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+    ];
+
+    // Valid access
+    let _ = matrix[2][2];  // 9 - OK
+
+    // Invalid access - second dimension out of bounds
+    let _ = matrix[1][5];  // Panic: Index out of bounds
+}

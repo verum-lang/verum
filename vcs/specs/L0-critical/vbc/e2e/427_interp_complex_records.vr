@@ -1,0 +1,113 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, records, complex
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests complex record usage: nested records, record arrays, records in variants.
+
+type Vec2 is { x: Int, y: Int };
+type Line is { start_pt: Vec2, end_pt: Vec2 };
+type AABB is { min_pt: Vec2, max_pt: Vec2 };
+
+fn vec2_add(a: Vec2, b: Vec2) -> Vec2 {
+    Vec2 { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn vec2_sub(a: Vec2, b: Vec2) -> Vec2 {
+    Vec2 { x: a.x - b.x, y: a.y - b.y }
+}
+
+fn vec2_dot(a: Vec2, b: Vec2) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+fn vec2_length_sq(v: Vec2) -> Int {
+    v.x * v.x + v.y * v.y
+}
+
+fn test_vec2_operations() {
+    let a = Vec2 { x: 3, y: 4 };
+    let b = Vec2 { x: 1, y: 2 };
+
+    let sum = vec2_add(a, b);
+    assert_eq(sum.x, 4);
+    assert_eq(sum.y, 6);
+
+    let diff = vec2_sub(a, b);
+    assert_eq(diff.x, 2);
+    assert_eq(diff.y, 2);
+
+    let dot = vec2_dot(a, b);
+    assert_eq(dot, 11); // 3*1 + 4*2
+
+    let len_sq = vec2_length_sq(a);
+    assert_eq(len_sq, 25); // 3^2 + 4^2
+    print("vec2_operations: ok");
+}
+
+fn test_line_midpoint() {
+    let line = Line {
+        start_pt: Vec2 { x: 0, y: 0 },
+        end_pt: Vec2 { x: 10, y: 20 },
+    };
+
+    let mid_x = (line.start_pt.x + line.end_pt.x) / 2;
+    let mid_y = (line.start_pt.y + line.end_pt.y) / 2;
+    assert_eq(mid_x, 5);
+    assert_eq(mid_y, 10);
+    print("line_midpoint: ok");
+}
+
+fn test_aabb_contains() {
+    let bbox = AABB {
+        min_pt: Vec2 { x: 0, y: 0 },
+        max_pt: Vec2 { x: 100, y: 100 },
+    };
+
+    let inside = Vec2 { x: 50, y: 50 };
+    let outside = Vec2 { x: 150, y: 50 };
+
+    let in_box = inside.x >= bbox.min_pt.x && inside.x <= bbox.max_pt.x
+              && inside.y >= bbox.min_pt.y && inside.y <= bbox.max_pt.y;
+    assert(in_box);
+
+    let out_box = outside.x >= bbox.min_pt.x && outside.x <= bbox.max_pt.x
+               && outside.y >= bbox.min_pt.y && outside.y <= bbox.max_pt.y;
+    assert(!out_box);
+    print("aabb_contains: ok");
+}
+
+fn test_record_mutation_chain() {
+    let mut p = Vec2 { x: 0, y: 0 };
+    let mut i = 0;
+    while i < 10 {
+        p = vec2_add(p, Vec2 { x: i, y: i * 2 });
+        i = i + 1;
+    }
+    // x: 0+1+2+...+9 = 45
+    // y: 0+2+4+...+18 = 90
+    assert_eq(p.x, 45);
+    assert_eq(p.y, 90);
+    print("record_mutation_chain: ok");
+}
+
+fn test_record_as_return() {
+    let p1 = Vec2 { x: 10, y: 20 };
+    let p2 = Vec2 { x: 30, y: 40 };
+    let result = vec2_add(vec2_add(p1, p2), Vec2 { x: 5, y: 5 });
+    assert_eq(result.x, 45);
+    assert_eq(result.y, 65);
+    print("record_as_return: ok");
+}
+
+fn main() -> Int {
+    test_vec2_operations();
+    test_line_midpoint();
+    test_aabb_contains();
+    test_record_mutation_chain();
+    test_record_as_return();
+    print("[OK] 427_interp_complex_records");
+    0
+}

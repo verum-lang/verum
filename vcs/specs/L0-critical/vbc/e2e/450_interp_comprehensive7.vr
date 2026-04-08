@@ -1,0 +1,383 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #7: exercises records, closures, generators,
+// spawn/await, lists, format strings.
+// Milestone: ~277 interpreter tests.
+
+// -- Record types --
+
+type Interval is { lo: Int, hi: Int };
+type RunStats is { count: Int, sum: Int, min_val: Int, max_val: Int };
+
+fn interval_new(lo: Int, hi: Int) -> Interval {
+    Interval { lo: lo, hi: hi }
+}
+
+fn interval_len(iv: Interval) -> Int {
+    iv.hi - iv.lo
+}
+
+fn interval_contains(iv: Interval, x: Int) -> Int {
+    if x >= iv.lo && x <= iv.hi { 1 } else { 0 }
+}
+
+fn interval_overlap(a: Interval, b: Interval) -> Int {
+    // 1 if overlapping
+    if a.lo > b.hi || b.lo > a.hi { 0 } else { 1 }
+}
+
+fn test_interval_records() {
+    let a = interval_new(2, 8);
+    let b = interval_new(5, 12);
+    let c = interval_new(10, 20);
+
+    assert_eq(interval_len(a), 6);
+    assert_eq(interval_len(b), 7);
+    assert_eq(interval_contains(a, 5), 1);
+    assert_eq(interval_contains(a, 9), 0);
+    assert_eq(interval_overlap(a, b), 1); // [2,8] and [5,12] overlap at [5,8]
+    assert_eq(interval_overlap(a, c), 0); // [2,8] and [10,20] don't overlap
+    assert_eq(interval_overlap(b, c), 1); // [5,12] and [10,20] overlap at [10,12]
+
+    print("interval_records: ok");
+}
+
+// -- RunStats accumulation --
+
+fn stats_new() -> RunStats {
+    RunStats { count: 0, sum: 0, min_val: 999999, max_val: -999999 }
+}
+
+fn stats_add(s: RunStats, val: Int) -> RunStats {
+    let new_min = if val < s.min_val { val } else { s.min_val };
+    let new_max = if val > s.max_val { val } else { s.max_val };
+    RunStats {
+        count: s.count + 1,
+        sum: s.sum + val,
+        min_val: new_min,
+        max_val: new_max
+    }
+}
+
+fn stats_mean_x10(s: RunStats) -> Int {
+    // Returns mean * 10 (fixed-point) to avoid float
+    if s.count == 0 { 0 } else { (s.sum * 10) / s.count }
+}
+
+fn test_run_stats() {
+    let mut st = stats_new();
+    let data = [15, 3, 42, 7, 28, 11, 36, 19];
+    let n = 8;
+
+    let mut i = 0;
+    while i < n {
+        st = stats_add(st, data[i]);
+        i = i + 1;
+    }
+
+    // Sum = 15+3+42+7+28+11+36+19 = 161
+    assert_eq(st.count, 8);
+    assert_eq(st.sum, 161);
+    assert_eq(st.min_val, 3);
+    assert_eq(st.max_val, 42);
+
+    // Mean = 161/8 = 20.125 -> *10 = 201
+    assert_eq(stats_mean_x10(st), 201);
+
+    print("run_stats: ok");
+}
+
+// -- Closures --
+
+fn apply_n_times(val: Int, n: Int, f: fn(Int) -> Int) -> Int {
+    let mut result = val;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_closures() {
+    // Double 4 times: 1 -> 2 -> 4 -> 8 -> 16
+    let double = |x: Int| -> Int { x * 2 };
+    let r1 = apply_n_times(1, 4, double);
+    assert_eq(r1, 16);
+
+    // Add 3 five times: 0 -> 3 -> 6 -> 9 -> 12 -> 15
+    let add3 = |x: Int| -> Int { x + 3 };
+    let r2 = apply_n_times(0, 5, add3);
+    assert_eq(r2, 15);
+
+    // Square twice: 2 -> 4 -> 16
+    let sq = |x: Int| -> Int { x * x };
+    let r3 = apply_n_times(2, 2, sq);
+    assert_eq(r3, 16);
+
+    // Closure capturing a constant
+    let offset = 100;
+    let shift = |x: Int| -> Int { x + offset };
+    let r4 = apply_n_times(0, 3, shift);
+    assert_eq(r4, 300);
+
+    print("closures: ok");
+}
+
+// -- Generators --
+
+fn* triangular(n: Int) -> Int {
+    // Yields triangular numbers: 1, 3, 6, 10, ...
+    let mut acc = 0;
+    let mut k = 1;
+    while k <= n {
+        acc = acc + k;
+        yield acc;
+        k = k + 1;
+    }
+}
+
+fn* fibonacci_gen(count: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < count {
+        yield a;
+        let next = a + b;
+        a = b;
+        b = next;
+        i = i + 1;
+    }
+}
+
+fn test_generators() {
+    // Triangular numbers: T(1)=1, T(2)=3, T(3)=6, T(4)=10, T(5)=15
+    let mut tri_vals = [0, 0, 0, 0, 0];
+    let mut idx = 0;
+    for t in triangular(5) {
+        tri_vals[idx] = t;
+        idx = idx + 1;
+    }
+    assert_eq(tri_vals[0], 1);
+    assert_eq(tri_vals[1], 3);
+    assert_eq(tri_vals[2], 6);
+    assert_eq(tri_vals[3], 10);
+    assert_eq(tri_vals[4], 15);
+
+    // Fibonacci: 0, 1, 1, 2, 3, 5, 8, 13
+    let mut fib_vals = [0, 0, 0, 0, 0, 0, 0, 0];
+    idx = 0;
+    for f in fibonacci_gen(8) {
+        fib_vals[idx] = f;
+        idx = idx + 1;
+    }
+    assert_eq(fib_vals[0], 0);
+    assert_eq(fib_vals[1], 1);
+    assert_eq(fib_vals[2], 1);
+    assert_eq(fib_vals[3], 2);
+    assert_eq(fib_vals[4], 3);
+    assert_eq(fib_vals[5], 5);
+    assert_eq(fib_vals[6], 8);
+    assert_eq(fib_vals[7], 13);
+
+    // Sum of first 5 triangular numbers = 1+3+6+10+15 = 35
+    let mut tri_sum = 0;
+    let mut k = 0;
+    while k < 5 { tri_sum = tri_sum + tri_vals[k]; k = k + 1; }
+    assert_eq(tri_sum, 35);
+
+    print("generators: ok");
+}
+
+// -- Spawn/Await --
+
+fn dot_product(a0: Int, a1: Int, a2: Int, b0: Int, b1: Int, b2: Int) -> Int {
+    a0 * b0 + a1 * b1 + a2 * b2
+}
+
+fn gcd_compute(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+fn count_primes_up_to(limit: Int) -> Int {
+    let mut count = 0;
+    let mut n = 2;
+    while n <= limit {
+        let mut is_prime = 1;
+        let mut d = 2;
+        while d * d <= n {
+            if n % d == 0 { is_prime = 0; d = n; }
+            d = d + 1;
+        }
+        if is_prime == 1 { count = count + 1; }
+        n = n + 1;
+    }
+    count
+}
+
+fn test_spawn_await() {
+    // Parallel computation of dot products
+    let t1 = spawn dot_product(1, 2, 3, 4, 5, 6);
+    let t2 = spawn dot_product(7, 8, 9, 1, 2, 3);
+    let t3 = spawn gcd_compute(252, 180);
+
+    let r1 = t1.await; // 1*4 + 2*5 + 3*6 = 4+10+18 = 32
+    let r2 = t2.await; // 7*1 + 8*2 + 9*3 = 7+16+27 = 50
+    let r3 = t3.await; // gcd(252, 180) = 36
+
+    assert_eq(r1, 32);
+    assert_eq(r2, 50);
+    assert_eq(r3, 36);
+
+    // Count primes up to 30 in parallel with another computation
+    let t4 = spawn count_primes_up_to(30);
+    let t5 = spawn dot_product(10, 20, 30, 1, 1, 1);
+    let r4 = t4.await; // primes up to 30: 2,3,5,7,11,13,17,19,23,29 = 10
+    let r5 = t5.await; // 10+20+30 = 60
+    assert_eq(r4, 10);
+    assert_eq(r5, 60);
+
+    print("spawn_await: ok");
+}
+
+// -- List operations --
+
+fn test_list_operations() {
+    // Sort a small list using insertion sort
+    let mut arr = [64, 25, 12, 22, 11];
+    let n = 5;
+
+    // Insertion sort
+    let mut i = 1;
+    while i < n {
+        let key = arr[i];
+        let mut j = i - 1;
+        while j >= 0 && arr[j] > key {
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = key;
+        i = i + 1;
+    }
+
+    assert_eq(arr[0], 11);
+    assert_eq(arr[1], 12);
+    assert_eq(arr[2], 22);
+    assert_eq(arr[3], 25);
+    assert_eq(arr[4], 64);
+
+    // Running sum with prefix array
+    let mut prefix = [0, 0, 0, 0, 0];
+    prefix[0] = arr[0];
+    i = 1;
+    while i < n {
+        prefix[i] = prefix[i - 1] + arr[i];
+        i = i + 1;
+    }
+    // prefix = [11, 23, 45, 70, 134]
+    assert_eq(prefix[4], 134); // total sum
+
+    // Binary search in sorted array for value 22
+    let mut lo = 0;
+    let mut hi = n - 1;
+    let target = 22;
+    let mut found_idx = -1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if arr[mid] == target {
+            found_idx = mid;
+            lo = hi + 1; // break
+        } else if arr[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    assert_eq(found_idx, 2); // 22 is at index 2 in sorted array
+
+    print("list_operations: ok");
+}
+
+// -- Format strings --
+
+fn test_format_strings() {
+    let iv = interval_new(5, 15);
+    let len = interval_len(iv);
+    let msg1 = f"interval [{iv.lo}, {iv.hi}] length={len}";
+    print(msg1);
+
+    // Format numbers in a loop
+    let mut acc = 0;
+    let mut i = 1;
+    while i <= 5 {
+        acc = acc + i * i;
+        let sq = i * i;
+        print(f"  i={i} sq={sq} acc={acc}");
+        i = i + 1;
+    }
+    // 1+4+9+16+25 = 55
+    assert_eq(acc, 55);
+
+    // Format with record fields
+    let st = RunStats { count: 3, sum: 90, min_val: 20, max_val: 40 };
+    let mean = st.sum / st.count;
+    let summary = f"stats: n={st.count} sum={st.sum} mean={mean}";
+    print(summary);
+    assert_eq(mean, 30);
+
+    print("format_strings: ok");
+}
+
+fn test_combined_pipeline() {
+    // Combine multiple features: generate, filter via closure, accumulate stats
+    let is_odd = |x: Int| -> Int { x % 2 };
+
+    // Generate first 10 triangular numbers and compute stats on odd ones
+    let mut odd_count = 0;
+    let mut odd_sum = 0;
+    for t in triangular(10) {
+        if is_odd(t) == 1 {
+            odd_count = odd_count + 1;
+            odd_sum = odd_sum + t;
+        }
+    }
+    // Triangular numbers: 1,3,6,10,15,21,28,36,45,55
+    // Odd ones: 1,3,15,21,45,55 = 6 values, sum = 1+3+15+21+45+55 = 140
+    assert_eq(odd_count, 6);
+    assert_eq(odd_sum, 140);
+
+    // Spawn fibonacci computation alongside
+    let t_fib = spawn count_primes_up_to(50);
+    let prime_count_50 = t_fib.await;
+    // Primes up to 50: 2,3,5,7,11,13,17,19,23,29,31,37,41,43,47 = 15
+    assert_eq(prime_count_50, 15);
+
+    let msg = f"pipeline: odd_triangular={odd_count} sum={odd_sum} primes_50={prime_count_50}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_interval_records();
+    test_run_stats();
+    test_closures();
+    test_generators();
+    test_spawn_await();
+    test_list_operations();
+    test_format_strings();
+    test_combined_pipeline();
+    print("[OK] 450_interp_comprehensive7 — MILESTONE: ~277 interpreter tests");
+    0
+}

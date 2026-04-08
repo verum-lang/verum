@@ -1,0 +1,137 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, identifiers, basic
+
+// Basic identifier lexing
+
+fn test_basic_identifiers() {
+    // Simple identifiers
+    let x = 1;
+    let y = 2;
+    let name = "value";
+    let value = 42;
+
+    // Single character
+    let a = 1;
+    let b = 2;
+    let z = 26;
+
+    // Uppercase single
+    let A = 1;
+    let B = 2;
+    let Z = 26;
+
+    // With digits
+    let x1 = 1;
+    let x2 = 2;
+    let value42 = 42;
+    let item123 = 123;
+
+    // With underscores
+    let my_variable = 1;
+    let another_one = 2;
+    let multi_word_name = 3;
+
+    // Leading underscore
+    let _unused = 1;
+    let _private = 2;
+    let __double = 3;
+
+    // Multiple underscores
+    let a__b = 1;
+    let x___y = 2;
+    let _a_b_c_ = 3;
+
+    // Trailing underscore
+    let variable_ = 1;
+    let name_ = 2;
+
+    // Snake case
+    let snake_case_variable = 1;
+    let another_snake_case = 2;
+    let very_long_snake_case_name = 3;
+
+    // Camel case
+    let camelCase = 1;
+    let anotherCamelCase = 2;
+    let XMLParser = 3;
+
+    // Pascal case
+    let PascalCase = 1;
+    let AnotherPascalCase = 2;
+    let MyStruct = 3;
+
+    // All caps (constants style)
+    let MAX_VALUE = 100;
+    let MIN_VALUE = 0;
+    let DEFAULT_SIZE = 64;
+
+    // Mixed case
+    let mixedCase_with_underscore = 1;
+    let PascalCase_mixed = 2;
+
+    // Keywords as identifiers (contextual)
+    // These are NOT keywords but look similar
+    let match_result = 1;
+    let if_condition = 2;
+    let for_loop = 3;
+
+    // Long identifiers
+    let this_is_a_very_long_identifier_name_that_might_be_at_the_limit = 1;
+    let anotherLongIdentifierWithManyWordsInCamelCase = 2;
+
+    // Numbers in middle
+    let value2process = 1;
+    let data4life = 2;
+    let version3beta = 3;
+
+    // Identifiers starting with type-like prefixes
+    let integer_count = 1;
+    let float_precision = 2;
+    let string_length = 3;
+    let boolean_flag = 4;
+
+    // Near-keywords
+    let letx = 1;
+    let fnx = 2;
+    let ifx = 3;
+    let forx = 4;
+    let matchx = 5;
+
+    // Reserved-looking but valid
+    let _type = 1;
+    let _fn = 2;
+    let _let = 3;
+}
+
+// Type names
+type MyType is Int;
+type AnotherType is Text;
+type HttpResponse is { status: Int };
+
+// Function names
+fn my_function() {}
+fn anotherFunction() {}
+fn process_data() {}
+
+// Method names
+type MyData is {
+    value: Int,
+};
+
+implement MyData {
+    fn getValue(&self) -> Int { self.value }
+    fn set_value(&mut self, v: Int) { self.value = v; }
+}
+
+// Generic parameters
+fn generic<T>(x: T) -> T { x }
+fn multi_generic<T, U>(a: T, b: U) -> T { a }
+
+// Lifetime parameters (if applicable)
+fn with_lifetime<'a>(x: &'a Text) -> &'a Text { x }
+
+// Module names
+module my_module {}
+module another_module {}

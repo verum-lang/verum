@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Int16 type constants (MIN, MAX, BITS)
+
+fn main() {
+    // Test Int16.MIN (-2^15)
+    assert_eq(Int16.MIN(), -32768);
+
+    // Test Int16.MAX (2^15 - 1)
+    assert_eq(Int16.MAX(), 32767);
+
+    // Test Int16.BITS
+    assert_eq(Int16.BITS(), 16);
+
+    // Test i16 alias (FFI compatibility)
+    assert_eq(i16.MIN(), -32768);
+    assert_eq(i16.MAX(), 32767);
+    assert_eq(i16.BITS(), 16);
+}

@@ -1,0 +1,106 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: builder, pattern, method-chain, e2e
+// @description: Test builder pattern with method chaining and mutable self
+
+type Config is {
+    host: Text,
+    port: Int,
+    max_connections: Int,
+    timeout: Int,
+    debug: Bool,
+};
+
+implement Config {
+    fn new() -> Config {
+        Config {
+            host: "localhost",
+            port: 8080,
+            max_connections: 100,
+            timeout: 30,
+            debug: false,
+        }
+    }
+
+    fn with_port(&mut self, port: Int) {
+        self.port = port;
+    }
+
+    fn with_timeout(&mut self, timeout: Int) {
+        self.timeout = timeout;
+    }
+
+    fn with_debug(&mut self, debug: Bool) {
+        self.debug = debug;
+    }
+
+    fn with_max_conn(&mut self, n: Int) {
+        self.max_connections = n;
+    }
+
+    fn is_debug(&self) -> Bool {
+        self.debug
+    }
+
+    fn get_port(&self) -> Int {
+        self.port
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    let mut cfg = Config.new();
+
+    // Test 1: Default values
+    if cfg.port != 8080 {
+        print(f"FAIL 1: default port = {cfg.port}");
+        f = f + 1;
+    } else {
+        print("  default_port: OK");
+    }
+
+    // Test 2: Mutate via method
+    cfg.with_port(3000);
+    if cfg.get_port() != 3000 {
+        print(f"FAIL 2: port after set = {cfg.get_port()}");
+        f = f + 1;
+    } else {
+        print("  set_port: OK");
+    }
+
+    // Test 3: Multiple mutations
+    cfg.with_timeout(60);
+    cfg.with_debug(true);
+    cfg.with_max_conn(500);
+
+    if cfg.timeout != 60 {
+        print(f"FAIL 3a: timeout = {cfg.timeout}");
+        f = f + 1;
+    }
+    if !cfg.is_debug() {
+        print("FAIL 3b: debug not set");
+        f = f + 1;
+    }
+    if cfg.max_connections != 500 {
+        print(f"FAIL 3c: max_conn = {cfg.max_connections}");
+        f = f + 1;
+    }
+    if f == 0 {
+        print("  builder_chain: OK");
+    }
+
+    // Test 4: Host text field
+    if cfg.host != "localhost" {
+        print(f"FAIL 4: host = '{cfg.host}'");
+        f = f + 1;
+    } else {
+        print("  host_text: OK");
+    }
+
+    if f == 0 {
+        print("All builder pattern tests passed");
+    }
+    f
+}

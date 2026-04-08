@@ -1,0 +1,146 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, at, binding, subpattern
+// @description: Test @ binding patterns (capture while matching) in meta functions
+
+// =============================================================================
+// BASIC @ BINDING
+// =============================================================================
+
+meta fn test_at_basic() -> Int {
+    match 42 {
+        x @ _ => x,
+    }
+}
+
+meta fn test_at_with_literal() -> Int {
+    match 100 {
+        n @ 100 => n * 2,
+        _ => 0,
+    }
+}
+
+// =============================================================================
+// @ BINDING WITH TUPLE
+// =============================================================================
+
+meta fn test_at_tuple_whole() -> Int {
+    match (10, 20) {
+        pair @ (a, b) => a + b,
+    }
+}
+
+meta fn test_at_nested_tuple() -> Int {
+    match ((1, 2), 3) {
+        (inner @ (a, b), outer) => a + b + outer,
+    }
+}
+
+// =============================================================================
+// @ BINDING WITH VARIANT
+// =============================================================================
+
+meta fn test_at_maybe_some() -> Int {
+    match Some(42) {
+        opt @ Some(x) => x,
+        None => 0,
+    }
+}
+
+meta fn test_at_maybe_value() -> Int {
+    match Some(100) {
+        Some(n @ 100) => n,
+        Some(_) => 0,
+        None => -1,
+    }
+}
+
+// =============================================================================
+// @ BINDING WITH ARRAY
+// =============================================================================
+
+meta fn test_at_array() -> Int {
+    match [1, 2, 3] {
+        arr @ [a, b, c] => a + b + c,
+    }
+}
+
+meta fn test_at_array_element() -> Int {
+    match [10, 20, 30] {
+        [first @ _, second @ _, third @ _] => first + second + third,
+    }
+}
+
+// =============================================================================
+// @ BINDING WITH GUARD
+// =============================================================================
+
+meta fn test_at_with_guard() -> Int {
+    match 50 {
+        n @ _ if n > 25 => n,
+        _ => 0,
+    }
+}
+
+meta fn test_at_guard_tuple() -> Text {
+    match (10, 20) {
+        pair @ (a, b) if a + b > 20 => "large sum",
+        pair @ (a, b) if a == b => "equal",
+        _ => "other",
+    }
+}
+
+// =============================================================================
+// NESTED @ BINDINGS
+// =============================================================================
+
+meta fn test_nested_at() -> Int {
+    match Some((1, 2)) {
+        opt @ Some(inner @ (a, b)) => a + b,
+        None => 0,
+    }
+}
+
+// =============================================================================
+// @ BINDING WITH OR PATTERNS
+// =============================================================================
+
+meta fn test_at_or_pattern() -> Int {
+    match 3 {
+        n @ (1 | 2 | 3 | 4 | 5) => n * 10,
+        _ => 0,
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Basic @ binding
+    @const assert_eq(test_at_basic(), 42);
+    @const assert_eq(test_at_with_literal(), 200);
+
+    // @ binding with tuple
+    @const assert_eq(test_at_tuple_whole(), 30);
+    @const assert_eq(test_at_nested_tuple(), 6);
+
+    // @ binding with variant
+    @const assert_eq(test_at_maybe_some(), 42);
+    @const assert_eq(test_at_maybe_value(), 100);
+
+    // @ binding with array
+    @const assert_eq(test_at_array(), 6);
+    @const assert_eq(test_at_array_element(), 60);
+
+    // @ binding with guard
+    @const assert_eq(test_at_with_guard(), 50);
+    @const assert_eq(test_at_guard_tuple(), "large sum");
+
+    // Nested @ bindings
+    @const assert_eq(test_nested_at(), 3);
+
+    // @ binding with or patterns
+    @const assert_eq(test_at_or_pattern(), 30);
+}

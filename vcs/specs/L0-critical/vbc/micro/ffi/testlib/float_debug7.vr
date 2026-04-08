@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, debug
+// @description: Debug integer function calls
+
+fn add_int(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn main() {
+    print(1); print("\n");
+
+    let sum = add_int(10, 20);
+    print(2); print("\n");
+    print(sum); print("\n");
+
+    print(3); print("\n");
+}

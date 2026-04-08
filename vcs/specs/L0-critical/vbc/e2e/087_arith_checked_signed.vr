@@ -1,0 +1,263 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, arithmetic, checked, overflow, signed
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Checked signed arithmetic — overflow detection for add, sub, mul using manual bounds
+
+// ============================================================================
+// Checked arithmetic result
+// ============================================================================
+
+type CheckedInt is { value: Int, overflowed: Int };
+
+fn checked_ok(val: Int) -> CheckedInt {
+    CheckedInt { value: val, overflowed: 0 }
+}
+
+fn checked_overflow() -> CheckedInt {
+    CheckedInt { value: 0, overflowed: 1 }
+}
+
+// ============================================================================
+// 32-bit signed range constants (simulated)
+// ============================================================================
+
+fn i32_max() -> Int { 2147483647 }
+fn i32_min() -> Int { 0 - 2147483648 }
+
+// ============================================================================
+// Checked add: detect overflow for 32-bit signed range
+// ============================================================================
+
+fn checked_add_i32(a: Int, b: Int) -> CheckedInt {
+    let result = a + b;
+    // Overflow if both positive and result negative, or both negative and result positive
+    if a > 0 {
+        if b > 0 {
+            if result < 0 { checked_overflow() }
+            else if result > i32_max() { checked_overflow() }
+            else { checked_ok(result) }
+        } else {
+            // a > 0, b <= 0: cannot overflow (result is between a+min and a)
+            checked_ok(result)
+        }
+    } else {
+        if b < 0 {
+            if result > 0 { checked_overflow() }
+            else if result < i32_min() { checked_overflow() }
+            else { checked_ok(result) }
+        } else {
+            // a <= 0, b >= 0: cannot overflow
+            checked_ok(result)
+        }
+    }
+}
+
+// ============================================================================
+// Checked sub
+// ============================================================================
+
+fn checked_sub_i32(a: Int, b: Int) -> CheckedInt {
+    // a - b = a + (-b), but negating b can overflow if b = i32_min
+    if b == i32_min() {
+        if a < 0 { checked_overflow() }
+        else { checked_ok(a - b) }
+    } else {
+        checked_add_i32(a, 0 - b)
+    }
+}
+
+// ============================================================================
+// Checked mul — detect via division check
+// ============================================================================
+
+fn checked_mul_i32(a: Int, b: Int) -> CheckedInt {
+    if a == 0 { checked_ok(0) }
+    else if b == 0 { checked_ok(0) }
+    else {
+        let result = a * b;
+        // Check: result / a should equal b
+        if result / a == b {
+            if result > i32_max() { checked_overflow() }
+            else if result < i32_min() { checked_overflow() }
+            else { checked_ok(result) }
+        } else {
+            checked_overflow()
+        }
+    }
+}
+
+// ============================================================================
+// Test 1: Checked add — normal cases
+// ============================================================================
+
+@test
+fn test_checked_add_normal() {
+    let r1 = checked_add_i32(10, 20);
+    assert_eq(r1.value, 30);
+    assert_eq(r1.overflowed, 0);
+
+    let r2 = checked_add_i32(0 - 10, 0 - 20);
+    assert_eq(r2.value, 0 - 30);
+    assert_eq(r2.overflowed, 0);
+
+    let r3 = checked_add_i32(100, 0 - 50);
+    assert_eq(r3.value, 50);
+    assert_eq(r3.overflowed, 0);
+
+    let r4 = checked_add_i32(0, 0);
+    assert_eq(r4.value, 0);
+    assert_eq(r4.overflowed, 0);
+
+    let r5 = checked_add_i32(0 - 100, 100);
+    assert_eq(r5.value, 0);
+    assert_eq(r5.overflowed, 0);
+
+    print("  test_checked_add_normal: ok");
+}
+
+// ============================================================================
+// Test 2: Checked add — overflow cases
+// ============================================================================
+
+@test
+fn test_checked_add_overflow() {
+    // MAX + 1 overflows
+    let r1 = checked_add_i32(i32_max(), 1);
+    assert_eq(r1.overflowed, 1);
+
+    // MAX + MAX overflows
+    let r2 = checked_add_i32(i32_max(), i32_max());
+    assert_eq(r2.overflowed, 1);
+
+    // MIN + (-1) overflows
+    let r3 = checked_add_i32(i32_min(), 0 - 1);
+    assert_eq(r3.overflowed, 1);
+
+    // Boundary: MAX + 0 does not overflow
+    let r4 = checked_add_i32(i32_max(), 0);
+    assert_eq(r4.value, i32_max());
+    assert_eq(r4.overflowed, 0);
+
+    // Boundary: MIN + 0 does not overflow
+    let r5 = checked_add_i32(i32_min(), 0);
+    assert_eq(r5.value, i32_min());
+    assert_eq(r5.overflowed, 0);
+
+    print("  test_checked_add_overflow: ok");
+}
+
+// ============================================================================
+// Test 3: Checked sub
+// ============================================================================
+
+@test
+fn test_checked_sub() {
+    // Normal cases
+    let r1 = checked_sub_i32(30, 10);
+    assert_eq(r1.value, 20);
+    assert_eq(r1.overflowed, 0);
+
+    let r2 = checked_sub_i32(10, 30);
+    assert_eq(r2.value, 0 - 20);
+    assert_eq(r2.overflowed, 0);
+
+    // MIN - 1 overflows
+    let r3 = checked_sub_i32(i32_min(), 1);
+    assert_eq(r3.overflowed, 1);
+
+    // MAX - (-1) = MAX + 1, overflows
+    let r4 = checked_sub_i32(i32_max(), 0 - 1);
+    assert_eq(r4.overflowed, 1);
+
+    // 0 - 0 = 0
+    let r5 = checked_sub_i32(0, 0);
+    assert_eq(r5.value, 0);
+    assert_eq(r5.overflowed, 0);
+
+    print("  test_checked_sub: ok");
+}
+
+// ============================================================================
+// Test 4: Checked mul
+// ============================================================================
+
+@test
+fn test_checked_mul() {
+    // Normal cases
+    let r1 = checked_mul_i32(7, 6);
+    assert_eq(r1.value, 42);
+    assert_eq(r1.overflowed, 0);
+
+    let r2 = checked_mul_i32(0 - 7, 6);
+    assert_eq(r2.value, 0 - 42);
+    assert_eq(r2.overflowed, 0);
+
+    let r3 = checked_mul_i32(0 - 7, 0 - 6);
+    assert_eq(r3.value, 42);
+    assert_eq(r3.overflowed, 0);
+
+    // Multiply by zero
+    let r4 = checked_mul_i32(i32_max(), 0);
+    assert_eq(r4.value, 0);
+    assert_eq(r4.overflowed, 0);
+
+    // Overflow: MAX * 2
+    let r5 = checked_mul_i32(i32_max(), 2);
+    assert_eq(r5.overflowed, 1);
+
+    // Overflow: large * large
+    let r6 = checked_mul_i32(100000, 100000);
+    // 10^10 > 2^31, overflow
+    assert_eq(r6.overflowed, 1);
+
+    print("  test_checked_mul: ok");
+}
+
+// ============================================================================
+// Test 5: Chained checked operations
+// ============================================================================
+
+@test
+fn test_chained_checked() {
+    // (100 + 200) * 3 - 50 = 850, all within range
+    let step1 = checked_add_i32(100, 200);
+    assert_eq(step1.overflowed, 0);
+
+    let step2 = checked_mul_i32(step1.value, 3);
+    assert_eq(step2.overflowed, 0);
+
+    let step3 = checked_sub_i32(step2.value, 50);
+    assert_eq(step3.overflowed, 0);
+    assert_eq(step3.value, 850);
+
+    // Chain that overflows at step 2: (MAX - 1 + 2) should overflow at add
+    let s1 = checked_add_i32(i32_max() - 1, 2);
+    assert_eq(s1.overflowed, 1);
+
+    // If we detect overflow early, don't continue
+    let final_overflowed = if s1.overflowed == 1 { 1 }
+        else {
+            let s2 = checked_mul_i32(s1.value, 2);
+            s2.overflowed
+        };
+    assert_eq(final_overflowed, 1);
+
+    print("  test_chained_checked: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_checked_add_normal();
+    test_checked_add_overflow();
+    test_checked_sub();
+    test_checked_mul();
+    test_chained_checked();
+    print("[OK] 087_arith_checked_signed");
+    0
+}

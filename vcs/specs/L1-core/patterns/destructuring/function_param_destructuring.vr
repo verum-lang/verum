@@ -1,0 +1,268 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, destructuring, function, parameters
+//
+// Tests destructuring patterns in function parameters.
+// Function parameter destructuring allows direct extraction of compound values.
+
+//------------------------------------------------------------------------------
+// Tuple Parameter Destructuring
+//------------------------------------------------------------------------------
+
+/// Simple pair parameter.
+fn add_pair((a, b): (Int, Int)) -> Int {
+    a + b
+}
+
+/// Triple parameter.
+fn sum_triple((x, y, z): (Int, Int, Int)) -> Int {
+    x + y + z
+}
+
+/// Nested tuple parameter.
+fn process_nested(((a, b), (c, d)): ((Int, Int), (Int, Int))) -> Int {
+    a + b + c + d
+}
+
+/// Tuple with wildcards.
+fn extract_second((_, second, _): (Int, Int, Int)) -> Int {
+    second
+}
+
+//------------------------------------------------------------------------------
+// Struct Parameter Destructuring
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Point3D is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+/// Simple struct parameter.
+fn point_sum(Point { x, y }: Point) -> Int {
+    x + y
+}
+
+/// Struct with field rename.
+fn point_product(Point { x: px, y: py }: Point) -> Int {
+    px * py
+}
+
+/// Struct with rest pattern.
+fn get_age(Person { age, .. }: Person) -> Int {
+    age
+}
+
+/// 3D point distance squared.
+fn distance_squared(Point3D { x, y, z }: Point3D) -> Int {
+    x * x + y * y + z * z
+}
+
+/// Nested struct parameter.
+type Line is {
+    start: Point,
+    end: Point,
+};
+
+fn line_length_squared(Line { start: Point { x: x1, y: y1 }, end: Point { x: x2, y: y2 } }: Line) -> Int {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    dx * dx + dy * dy
+}
+
+//------------------------------------------------------------------------------
+// Mixed Parameter Types
+//------------------------------------------------------------------------------
+
+/// Tuple and struct mixed.
+fn mixed_params(point: Point, (a, b): (Int, Int)) -> Int {
+    point.x + point.y + a + b
+}
+
+/// Destructured and regular params.
+fn partial_destruct(n: Int, (x, y): (Int, Int)) -> Int {
+    n + x + y
+}
+
+/// Multiple destructured params.
+fn multi_destruct((a, b): (Int, Int), Point { x, y }: Point) -> Int {
+    a + b + x + y
+}
+
+//------------------------------------------------------------------------------
+// Generic Parameter Destructuring
+//------------------------------------------------------------------------------
+
+/// Generic tuple swap.
+fn swap<T, U>((a, b): (T, U)) -> (U, T) {
+    (b, a)
+}
+
+/// Generic first element.
+fn fst<T, U>((first, _): (T, U)) -> T {
+    first
+}
+
+/// Generic second element.
+fn snd<T, U>((_, second): (T, U)) -> U {
+    second
+}
+
+//------------------------------------------------------------------------------
+// Closure Parameter Destructuring
+//------------------------------------------------------------------------------
+
+/// Closure with tuple param.
+fn with_tuple_closure() -> Int {
+    let add = |pair: (Int, Int)| pair.0 + pair.1;
+    add((3, 4))
+}
+
+/// Higher-order with destructure.
+fn map_pairs(pairs: List<(Int, Int)>, f: fn((Int, Int)) -> Int) -> List<Int> {
+    pairs.map(f)
+}
+
+//------------------------------------------------------------------------------
+// Method Parameter Destructuring
+//------------------------------------------------------------------------------
+
+type Calculator is {
+    base: Int,
+};
+
+implement Calculator {
+    /// Method with tuple param.
+    fn add_tuple(self, (a, b): (Int, Int)) -> Int {
+        self.base + a + b
+    }
+
+    /// Method with struct param.
+    fn add_point(self, Point { x, y }: Point) -> Int {
+        self.base + x + y
+    }
+
+    /// Method with multiple destructured params.
+    fn combine(self, (a, b): (Int, Int), Point { x, y }: Point) -> Int {
+        self.base + a + b + x + y
+    }
+}
+
+//------------------------------------------------------------------------------
+// Recursive Function with Destructuring
+//------------------------------------------------------------------------------
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+/// Recursive with tuple destructure.
+@allow(unbounded_recursion)
+fn list_sum(list: ConsList<(Int, Int)>) -> Int {
+    match list {
+        Nil => 0,
+        Cons((a, b), rest) => a + b + list_sum(rest),
+    }
+}
+
+/// Recursive with struct destructure in match.
+@allow(unbounded_recursion)
+fn point_list_sum(list: ConsList<Point>) -> Int {
+    match list {
+        Nil => 0,
+        Cons(Point { x, y }, rest) => x + y + point_list_sum(rest),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Complex Examples
+//------------------------------------------------------------------------------
+
+/// Config processing.
+type Config is {
+    host: Text,
+    port: Int,
+    timeout: Int,
+};
+
+fn format_config(Config { host, port, .. }: Config) -> Text {
+    f"{host}:{port}"
+}
+
+/// RGB color.
+type RGB is {
+    r: Int,
+    g: Int,
+    b: Int,
+};
+
+fn rgb_to_gray(RGB { r, g, b }: RGB) -> Int {
+    (r * 299 + g * 587 + b * 114) / 1000
+}
+
+/// Vector operations.
+fn dot_product(Point { x: x1, y: y1 }: Point, Point { x: x2, y: y2 }: Point) -> Int {
+    x1 * x2 + y1 * y2
+}
+
+fn cross_product_z(Point { x: x1, y: y1 }: Point, Point { x: x2, y: y2 }: Point) -> Int {
+    x1 * y2 - y1 * x2
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+@test
+fn main() {
+    // Tuple params
+    assert(add_pair((3, 4)) == 7);
+    assert(sum_triple((1, 2, 3)) == 6);
+    assert(process_nested(((1, 2), (3, 4))) == 10);
+    assert(extract_second((1, 42, 3)) == 42);
+
+    // Struct params
+    assert(point_sum(Point { x: 3, y: 4 }) == 7);
+    assert(point_product(Point { x: 3, y: 4 }) == 12);
+    assert(get_age(Person { name: "Alice", age: 30 }) == 30);
+    assert(distance_squared(Point3D { x: 1, y: 2, z: 2 }) == 9);
+
+    // Line length
+    let line = Line {
+        start: Point { x: 0, y: 0 },
+        end: Point { x: 3, y: 4 }
+    };
+    assert(line_length_squared(line) == 25);
+
+    // Generic
+    assert(swap((1, "hello")) == ("hello", 1));
+    assert(fst((1, 2)) == 1);
+    assert(snd((1, 2)) == 2);
+
+    // Closures
+    assert(with_tuple_closure() == 7);
+
+    // Complex
+    let config = Config { host: "localhost", port: 8080, timeout: 30 };
+    assert(format_config(config) == "localhost:8080");
+
+    let color = RGB { r: 128, g: 128, b: 128 };
+    assert(rgb_to_gray(color) == 128);
+
+    let p1 = Point { x: 1, y: 0 };
+    let p2 = Point { x: 0, y: 1 };
+    assert(dot_product(p1, p2) == 0);
+    assert(cross_product_z(p1, p2) == 1);
+}

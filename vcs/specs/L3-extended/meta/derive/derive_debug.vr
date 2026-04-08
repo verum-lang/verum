@@ -1,0 +1,140 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, debug
+
+/// Автоматическое derive для Debug trait
+///
+/// `@derive(Debug)` генерирует реализацию Debug trait,
+/// которая выводит структуру в читаемом формате.
+/// Тест использует только базовые возможности языка без stdlib.
+
+// ============================================================
+// ПРОСТЫЕ STRUCT TYPES С DEBUG
+// ============================================================
+
+@derive(Debug)
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+@derive(Debug)
+type Address is {
+    street: Text,
+    city: Text,
+    zip: Int,
+};
+
+@derive(Debug)
+type Employee is {
+    person: Person,
+    address: Address,
+    department: Text,
+};
+
+// ============================================================
+// SUM TYPES С DEBUG
+// ============================================================
+
+@derive(Debug)
+type Status is
+    | Active
+    | Inactive { reason: Text }
+    | Pending { code: Int };
+
+@derive(Debug)
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Custom { r: Int, g: Int, b: Int };
+
+// ============================================================
+// GENERIC TYPES С DEBUG
+// ============================================================
+
+@derive(Debug)
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+@derive(Debug)
+type Triple<T> is {
+    a: T,
+    b: T,
+    c: T,
+};
+
+@derive(Debug)
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+// ============================================================
+// NEWTYPE С DEBUG
+// ============================================================
+
+@derive(Debug)
+type UserId is (Int);
+
+@derive(Debug)
+type Point is (Int, Int, Int);
+
+// ============================================================
+// ВЛОЖЕННЫЕ СТРУКТУРЫ С DEBUG
+// ============================================================
+
+@derive(Debug)
+type Config is {
+    name: Text,
+    value: Int,
+    enabled: Bool,
+};
+
+@derive(Debug)
+type AppConfig is {
+    main: Config,
+    backup: Config,
+    priority: Int,
+};
+
+// ============================================================
+// ИСПОЛЬЗОВАНИЕ DEBUG
+// ============================================================
+
+fn test_debug() {
+    let p = Person { name: "Alice", age: 30 };
+    // Person { name: "Alice", age: 30 }
+
+    let addr = Address {
+        street: "123 Main St",
+        city: "Boston",
+        zip: 2101,
+    };
+    // Address { street: "123 Main St", city: "Boston", zip: 2101 }
+
+    let emp = Employee {
+        person: p,
+        address: addr,
+        department: "Engineering",
+    };
+    // Employee { person: Person { ... }, address: Address { ... }, department: "Engineering" }
+
+    let status = Status.Inactive { reason: "On leave" };
+    // Status.Inactive { reason: "On leave" }
+
+    let pair = Pair { first: 42, second: "hello" };
+    // Pair { first: 42, second: "hello" }
+
+    let point = Point(1, 2, 3);
+    // Point(1, 2, 3)
+
+    let maybe: Maybe<Int> = Maybe.Some(100);
+    // Maybe.Some(100)
+}
+
+fn main() {
+    test_debug();
+}

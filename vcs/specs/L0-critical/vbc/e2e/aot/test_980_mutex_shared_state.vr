@@ -1,0 +1,82 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: mutex, concurrency, shared-state, runtime
+// @description: Test mutex protecting shared state across threads
+
+fn __mutex_new_raw() -> Int { 0 }
+fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
+fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Basic mutex lock/unlock
+    let m = __mutex_new_raw();
+    __mutex_lock_raw(m);
+    __mutex_unlock_raw(m);
+    print("  basic_lock_unlock: OK");
+
+    // Test 2: Multiple threads with mutex, results via channel
+    let mtx = __mutex_new_raw();
+    let ch = Channel.new(10);
+    let iters = 500;
+
+    let h1 = spawn {
+        let mut local = 0;
+        let mut i = 0;
+        while i < iters {
+            __mutex_lock_raw(mtx);
+            local = local + 1;
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        ch.send(local);
+        0
+    };
+    let h2 = spawn {
+        let mut local = 0;
+        let mut i = 0;
+        while i < iters {
+            __mutex_lock_raw(mtx);
+            local = local + 1;
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        ch.send(local);
+        0
+    };
+    let h3 = spawn {
+        let mut local = 0;
+        let mut i = 0;
+        while i < iters {
+            __mutex_lock_raw(mtx);
+            local = local + 1;
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        ch.send(local);
+        0
+    };
+
+    h1.await;
+    h2.await;
+    h3.await;
+
+    let mut total = 0;
+    let mut i = 0;
+    while i < 3 {
+        total = total + match ch.recv() { Some(v) => v, None => 0 };
+        i = i + 1;
+    }
+
+    if total != 1500 {
+        print(f"FAIL: expected 1500, got {total}");
+        failures = failures + 1;
+    }
+
+    if failures == 0 {
+        print("All mutex tests passed");
+    }
+    failures
+}

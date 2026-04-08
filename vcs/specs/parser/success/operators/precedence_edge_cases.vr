@@ -1,0 +1,185 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: operators, precedence, associativity, self-hosting-critical
+// @expect: pass
+// Test: Operator precedence and associativity edge cases for self-hosting verification
+
+// =============================================================================
+// EXPONENTIATION ASSOCIATIVITY
+// =============================================================================
+
+// Exponentiation is right-associative: 2**3**2 = 2**(3**2) = 2**9 = 512
+fn test_power_right_assoc() -> Int {
+    let a = 2 ** 3 ** 2;  // Should be 2 ** (3 ** 2) = 2 ** 9 = 512
+    let b = (2 ** 3) ** 2;  // Explicit: 8 ** 2 = 64
+    let c = 2 ** (3 ** 2);  // Explicit: 2 ** 9 = 512
+    a
+}
+
+// =============================================================================
+// ARITHMETIC PRECEDENCE
+// =============================================================================
+
+// Multiplication/division before addition/subtraction
+fn test_arith_precedence() -> Int {
+    let a = 1 + 2 * 3;       // 1 + (2 * 3) = 7
+    let b = 1 - 2 / 2;       // 1 - (2 / 2) = 0
+    let c = 1 + 2 * 3 - 4;   // (1 + (2 * 3)) - 4 = 3
+    let d = 1 * 2 + 3 * 4;   // (1 * 2) + (3 * 4) = 14
+    a
+}
+
+// Exponentiation before multiplication
+fn test_exp_over_mult() -> Int {
+    let a = 2 * 3 ** 2;      // 2 * (3 ** 2) = 18
+    let b = 2 ** 3 * 4;      // (2 ** 3) * 4 = 32
+    a
+}
+
+// Unary minus and exponentiation
+fn test_unary_exp_interaction() -> Int {
+    let a = -2 ** 2;         // -(2 ** 2) = -4 (unary lower than exp)
+    let b = (-2) ** 2;       // 4
+    a
+}
+
+// =============================================================================
+// BITWISE OPERATOR PRECEDENCE
+// =============================================================================
+
+// Bitwise AND before OR before XOR
+fn test_bitwise_precedence() -> Int {
+    let a = 1 | 2 & 3;       // 1 | (2 & 3) = 1 | 2 = 3
+    let b = 1 ^ 2 | 3;       // (1 ^ 2) | 3 = 3 | 3 = 3
+    let c = 1 & 2 ^ 3 | 4;   // ((1 & 2) ^ 3) | 4
+    a
+}
+
+// Shift operators precedence
+fn test_shift_precedence() -> Int {
+    let a = 1 << 2 + 3;      // 1 << (2 + 3) = 32 (shift lower than add)
+    let b = 1 + 2 << 3;      // (1 + 2) << 3 = 24
+    let c = 1 << 2 | 3;      // (1 << 2) | 3 = 7
+    a
+}
+
+// =============================================================================
+// COMPARISON OPERATORS
+// =============================================================================
+
+// Comparison lower than arithmetic
+fn test_comparison_precedence() -> Bool {
+    let a = 1 + 2 < 3 + 4;   // (1 + 2) < (3 + 4)
+    let b = 1 << 2 > 3;      // (1 << 2) > 3
+    a
+}
+
+// Chained comparisons (if supported)
+fn test_chained_comparisons() -> Bool {
+    let x = 5;
+    // This tests whether chained comparisons are parsed correctly
+    let result = 1 < x && x < 10;
+    result
+}
+
+// =============================================================================
+// LOGICAL OPERATOR PRECEDENCE
+// =============================================================================
+
+// AND before OR
+fn test_logical_precedence() -> Bool {
+    let a = true || false && false;  // true || (false && false) = true
+    let b = false && true || true;   // (false && true) || true = true
+    a
+}
+
+// NOT before AND/OR
+fn test_logical_not_precedence() -> Bool {
+    let a = !true && false;    // (!true) && false = false
+    let b = !false || true;    // (!false) || true = true
+    let c = !(true && false);  // !(true && false) = true
+    a
+}
+
+// =============================================================================
+// MIXED PRECEDENCE
+// =============================================================================
+
+// Arithmetic, comparison, and logical
+fn test_mixed_precedence() -> Bool {
+    let a = 1 + 2 > 2 && 3 * 4 < 20;  // ((1 + 2) > 2) && ((3 * 4) < 20)
+    a
+}
+
+// Complex nested expression
+fn test_complex_nested() -> Int {
+    let a = 1 + 2 * 3 ** 4 - 5 / 2;  // 1 + (2 * (3 ** 4)) - (5 / 2)
+    a
+}
+
+// =============================================================================
+// ASSOCIATIVITY TESTS
+// =============================================================================
+
+// Left-associative arithmetic
+fn test_left_assoc_arith() -> Int {
+    let a = 10 - 5 - 2;      // (10 - 5) - 2 = 3
+    let b = 20 / 4 / 2;      // (20 / 4) / 2 = 2
+    let c = 10 % 6 % 2;      // (10 % 6) % 2 = 0
+    a
+}
+
+// Left-associative bitwise
+fn test_left_assoc_bitwise() -> Int {
+    let a = 16 >> 2 >> 1;    // (16 >> 2) >> 1 = 2
+    let b = 1 << 2 << 1;     // (1 << 2) << 1 = 8
+    a
+}
+
+// =============================================================================
+// RANGE OPERATOR PRECEDENCE
+// =============================================================================
+
+// Range operators
+fn test_range_precedence() {
+    let a = 0..10;           // Range literal
+    let b = 1 + 2..3 + 4;    // (1 + 2)..(3 + 4) = 3..7
+    let c = 0..=10;          // Inclusive range
+}
+
+// =============================================================================
+// PIPE OPERATOR PRECEDENCE
+// =============================================================================
+
+// Pipe operator (if supported)
+fn test_pipe_precedence() -> Int {
+    let x = 5;
+    let result = x |> add_one |> double;
+    result
+}
+
+fn add_one(n: Int) -> Int { n + 1 }
+fn double(n: Int) -> Int { n * 2 }
+
+// =============================================================================
+// TERNARY-LIKE EXPRESSIONS
+// =============================================================================
+
+// If-else as expression
+fn test_if_else_precedence() -> Int {
+    let a = if true { 1 } else { 2 } + 3;  // Should this be (if...) + 3?
+    let b = 1 + if true { 2 } else { 3 };  // 1 + (if...)
+    a
+}
+
+// =============================================================================
+// TYPE CAST PRECEDENCE
+// =============================================================================
+
+// as operator precedence
+fn test_as_precedence() -> Int {
+    let a = 1 + 2 as Float as Int;  // ((1 + 2) as Float) as Int
+    let b = 1 as Float + 2.0;       // (1 as Float) + 2.0
+    a
+}

@@ -1,0 +1,362 @@
+// =============================================================================
+// list_utils_test.vr - Tests for List utility functions
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, list, utilities, core
+// @description: Tests for flatten_list, unzip_list, group_by, interleave_lists
+// =============================================================================
+
+mount core.collections.list.{List, flatten_list, unzip_list, group_by, interleave_lists};
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: flatten_list Tests
+// =============================================================================
+
+@test
+fn test_flatten_list_basic() {
+    let nested: List<List<Int>> = [[1, 2], [3, 4], [5]];
+    let flat = flatten_list(&nested);
+    assert_eq(flat.len(), 5);
+    assert_eq(flat[0], 1);
+    assert_eq(flat[1], 2);
+    assert_eq(flat[2], 3);
+    assert_eq(flat[3], 4);
+    assert_eq(flat[4], 5);
+}
+
+@test
+fn test_flatten_list_empty_outer() {
+    let nested: List<List<Int>> = [];
+    let flat = flatten_list(&nested);
+    assert(flat.is_empty());
+    assert_eq(flat.len(), 0);
+}
+
+@test
+fn test_flatten_list_empty_inner() {
+    let empty1: List<Int> = [];
+    let empty2: List<Int> = [];
+    let nested: List<List<Int>> = [empty1, empty2];
+    let flat = flatten_list(&nested);
+    assert(flat.is_empty());
+}
+
+@test
+fn test_flatten_list_mixed_empty_and_non_empty() {
+    let e1: List<Int> = [];
+    let e2: List<Int> = [];
+    let e3: List<Int> = [];
+    let nested: List<List<Int>> = [e1, [1, 2], e2, [3], e3];
+    let flat = flatten_list(&nested);
+    assert_eq(flat.len(), 3);
+    assert_eq(flat[0], 1);
+    assert_eq(flat[1], 2);
+    assert_eq(flat[2], 3);
+}
+
+@test
+fn test_flatten_list_single_inner() {
+    let nested: List<List<Int>> = [[42]];
+    let flat = flatten_list(&nested);
+    assert_eq(flat.len(), 1);
+    assert_eq(flat[0], 42);
+}
+
+@test
+fn test_flatten_list_preserves_order() {
+    let nested: List<List<Int>> = [[10, 20], [30, 40], [50, 60]];
+    let flat = flatten_list(&nested);
+    for i in range(0, 6) {
+        assert_eq(flat[i], (i + 1) * 10);
+    }
+}
+
+@test
+fn test_flatten_list_large() {
+    let mut nested: List<List<Int>> = [];
+    for i in range(0, 100) {
+        nested.push([i * 2, i * 2 + 1]);
+    }
+    let flat = flatten_list(&nested);
+    assert_eq(flat.len(), 200);
+    for i in range(0, 200) {
+        assert_eq(flat[i], i);
+    }
+}
+
+// =============================================================================
+// Section 2: unzip_list Tests
+// =============================================================================
+
+@test
+fn test_unzip_list_basic() {
+    let pairs: List<(Int, Int)> = [(1, 10), (2, 20), (3, 30)];
+    let (left, right) = unzip_list(&pairs);
+    assert_eq(left.len(), 3);
+    assert_eq(right.len(), 3);
+    assert_eq(left[0], 1);
+    assert_eq(left[1], 2);
+    assert_eq(left[2], 3);
+    assert_eq(right[0], 10);
+    assert_eq(right[1], 20);
+    assert_eq(right[2], 30);
+}
+
+@test
+fn test_unzip_list_empty() {
+    let pairs: List<(Int, Int)> = [];
+    let (left, right) = unzip_list(&pairs);
+    assert(left.is_empty());
+    assert(right.is_empty());
+}
+
+@test
+fn test_unzip_list_single() {
+    let pairs: List<(Int, Bool)> = [(42, true)];
+    let (nums, bools) = unzip_list(&pairs);
+    assert_eq(nums.len(), 1);
+    assert_eq(nums[0], 42);
+    assert_eq(bools.len(), 1);
+    assert_eq(bools[0], true);
+}
+
+@test
+fn test_unzip_list_preserves_order() {
+    let mut pairs: List<(Int, Int)> = [];
+    for i in range(0, 50) {
+        pairs.push((i, i * i));
+    }
+    let (keys, vals) = unzip_list(&pairs);
+    for i in range(0, 50) {
+        assert_eq(keys[i], i);
+        assert_eq(vals[i], i * i);
+    }
+}
+
+// =============================================================================
+// Section 3: group_by Tests
+// =============================================================================
+
+@test
+fn test_group_by_basic() {
+    let items: List<Int> = [1, 1, 2, 2, 2, 3];
+    let groups = group_by(&items, |x| *x);
+    assert_eq(groups.len(), 3);
+
+    // Group 1: key=1, elements=[1, 1]
+    assert_eq(groups[0].0, 1);
+    assert_eq(groups[0].1.len(), 2);
+
+    // Group 2: key=2, elements=[2, 2, 2]
+    assert_eq(groups[1].0, 2);
+    assert_eq(groups[1].1.len(), 3);
+
+    // Group 3: key=3, elements=[3]
+    assert_eq(groups[2].0, 3);
+    assert_eq(groups[2].1.len(), 1);
+}
+
+@test
+fn test_group_by_empty() {
+    let items: List<Int> = [];
+    let groups = group_by(&items, |x| *x);
+    assert(groups.is_empty());
+}
+
+@test
+fn test_group_by_single() {
+    let items: List<Int> = [42];
+    let groups = group_by(&items, |x| *x);
+    assert_eq(groups.len(), 1);
+    assert_eq(groups[0].0, 42);
+    assert_eq(groups[0].1.len(), 1);
+    assert_eq(groups[0].1[0], 42);
+}
+
+@test
+fn test_group_by_all_same() {
+    let items: List<Int> = [5, 5, 5, 5, 5];
+    let groups = group_by(&items, |x| *x);
+    assert_eq(groups.len(), 1);
+    assert_eq(groups[0].0, 5);
+    assert_eq(groups[0].1.len(), 5);
+}
+
+@test
+fn test_group_by_all_different() {
+    let items: List<Int> = [1, 2, 3, 4, 5];
+    let groups = group_by(&items, |x| *x);
+    assert_eq(groups.len(), 5);
+    for i in range(0, 5) {
+        assert_eq(groups[i].0, i + 1);
+        assert_eq(groups[i].1.len(), 1);
+    }
+}
+
+@test
+fn test_group_by_non_consecutive_same_key() {
+    // group_by groups CONSECUTIVE elements, so same key separated by different key
+    // creates separate groups
+    let items: List<Int> = [1, 2, 1];
+    let groups = group_by(&items, |x| *x);
+    assert_eq(groups.len(), 3);
+    assert_eq(groups[0].0, 1);
+    assert_eq(groups[1].0, 2);
+    assert_eq(groups[2].0, 1);
+}
+
+@test
+fn test_group_by_with_key_function() {
+    // Group by even/odd
+    let items: List<Int> = [2, 4, 6, 1, 3, 8, 10];
+    let groups = group_by(&items, |x| *x % 2);
+    assert_eq(groups.len(), 3);
+
+    // First group: even (2, 4, 6)
+    assert_eq(groups[0].0, 0);
+    assert_eq(groups[0].1.len(), 3);
+
+    // Second group: odd (1, 3)
+    assert_eq(groups[1].0, 1);
+    assert_eq(groups[1].1.len(), 2);
+
+    // Third group: even (8, 10)
+    assert_eq(groups[2].0, 0);
+    assert_eq(groups[2].1.len(), 2);
+}
+
+// =============================================================================
+// Section 4: interleave_lists Tests
+// =============================================================================
+
+@test
+fn test_interleave_lists_equal_length() {
+    let a: List<Int> = [1, 3, 5];
+    let b: List<Int> = [2, 4, 6];
+    let result = interleave_lists(&a, &b);
+    assert_eq(result.len(), 6);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 3);
+    assert_eq(result[3], 4);
+    assert_eq(result[4], 5);
+    assert_eq(result[5], 6);
+}
+
+@test
+fn test_interleave_lists_first_longer() {
+    let a: List<Int> = [1, 3, 5, 7];
+    let b: List<Int> = [2, 4];
+    let result = interleave_lists(&a, &b);
+    assert_eq(result.len(), 6);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 3);
+    assert_eq(result[3], 4);
+    assert_eq(result[4], 5);
+    assert_eq(result[5], 7);
+}
+
+@test
+fn test_interleave_lists_second_longer() {
+    let a: List<Int> = [1];
+    let b: List<Int> = [2, 4, 6];
+    let result = interleave_lists(&a, &b);
+    assert_eq(result.len(), 4);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 4);
+    assert_eq(result[3], 6);
+}
+
+@test
+fn test_interleave_lists_both_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+    let result = interleave_lists(&a, &b);
+    assert(result.is_empty());
+}
+
+@test
+fn test_interleave_lists_first_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [1, 2, 3];
+    let result = interleave_lists(&a, &b);
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 3);
+}
+
+@test
+fn test_interleave_lists_second_empty() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [];
+    let result = interleave_lists(&a, &b);
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 3);
+}
+
+@test
+fn test_interleave_lists_single_elements() {
+    let a: List<Int> = [1];
+    let b: List<Int> = [2];
+    let result = interleave_lists(&a, &b);
+    assert_eq(result.len(), 2);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+}
+
+// =============================================================================
+// Section 5: Edge Cases and Integration
+// =============================================================================
+
+@test
+fn test_flatten_single_large_inner() {
+    let mut inner: List<Int> = [];
+    for i in range(0, 1000) {
+        inner.push(i);
+    }
+    let nested: List<List<Int>> = [inner];
+    let flat = flatten_list(&nested);
+    assert_eq(flat.len(), 1000);
+    assert_eq(flat[0], 0);
+    assert_eq(flat[999], 999);
+}
+
+@test
+fn test_unzip_rezip_roundtrip() {
+    // Unzip and manually re-zip should give same data
+    let original: List<(Int, Int)> = [(10, 100), (20, 200), (30, 300)];
+    let (left, right) = unzip_list(&original);
+    for i in range(0, original.len()) {
+        assert_eq(left[i], original[i].0);
+        assert_eq(right[i], original[i].1);
+    }
+}
+
+@test
+fn test_group_by_preserves_elements() {
+    let items: List<Int> = [3, 3, 1, 1, 1, 2, 2];
+    let groups = group_by(&items, |x| *x);
+
+    // Count total elements across all groups
+    let mut total = 0;
+    for i in range(0, groups.len()) {
+        total = total + groups[i].1.len();
+    }
+    assert_eq(total, items.len());
+}
+
+@test
+fn test_interleave_preserves_total_length() {
+    let a: List<Int> = [1, 2, 3, 4, 5];
+    let b: List<Int> = [10, 20, 30];
+    let result = interleave_lists(&a, &b);
+    assert_eq(result.len(), a.len() + b.len());
+}

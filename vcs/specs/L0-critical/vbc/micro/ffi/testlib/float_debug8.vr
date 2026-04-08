@@ -1,0 +1,26 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED
+// @tier: 0
+// @expected-exit: 0
+// @tags: debug
+// @description: Debug approx_eq function without FFI
+
+fn approx_eq(a: Float, b: Float, epsilon: Float) -> Bool {
+    let diff = a - b;
+    if diff < 0.0 {
+        -diff < epsilon
+    } else {
+        diff < epsilon
+    }
+}
+
+fn main() {
+    print(1); print("\n");
+
+    let eq1 = approx_eq(2.0, 2.0, 0.001);
+    print(2); print("\n");
+    print(eq1); print("\n");
+
+    print(3); print("\n");
+}

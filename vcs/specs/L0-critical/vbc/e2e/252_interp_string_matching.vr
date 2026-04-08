@@ -1,0 +1,396 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, string-matching, search
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: string matching using integer arrays (each int = a character)
+
+// =============================================================================
+// Arr16 — text/pattern storage (up to 16 "characters" as ints)
+// =============================================================================
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr16_new() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else if i == 15 { a.a15 }
+    else { 0 }
+}
+
+fn arr16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { val } else { a.a0 },
+        a1: if i == 1 { val } else { a.a1 },
+        a2: if i == 2 { val } else { a.a2 },
+        a3: if i == 3 { val } else { a.a3 },
+        a4: if i == 4 { val } else { a.a4 },
+        a5: if i == 5 { val } else { a.a5 },
+        a6: if i == 6 { val } else { a.a6 },
+        a7: if i == 7 { val } else { a.a7 },
+        a8: if i == 8 { val } else { a.a8 },
+        a9: if i == 9 { val } else { a.a9 },
+        a10: if i == 10 { val } else { a.a10 },
+        a11: if i == 11 { val } else { a.a11 },
+        a12: if i == 12 { val } else { a.a12 },
+        a13: if i == 13 { val } else { a.a13 },
+        a14: if i == 14 { val } else { a.a14 },
+        a15: if i == 15 { val } else { a.a15 }
+    }
+}
+
+// =============================================================================
+// Brute-force substring search
+// Returns index of first occurrence, or -1 if not found
+// text_len: length of text, pat_len: length of pattern
+// =============================================================================
+
+fn find_first(text: Arr16, text_len: Int, pat: Arr16, pat_len: Int) -> Int {
+    if pat_len == 0 {
+        return 0;
+    }
+    if pat_len > text_len {
+        return -1;
+    }
+    let mut i = 0;
+    while i <= text_len - pat_len {
+        let mut j = 0;
+        let mut matched = 1;
+        while j < pat_len {
+            if arr16_get(text, i + j) != arr16_get(pat, j) {
+                matched = 0;
+                j = pat_len; // break
+            } else {
+                j = j + 1;
+            }
+        }
+        if matched == 1 {
+            return i;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// =============================================================================
+// Find last occurrence
+// =============================================================================
+
+fn find_last(text: Arr16, text_len: Int, pat: Arr16, pat_len: Int) -> Int {
+    if pat_len == 0 {
+        return text_len;
+    }
+    if pat_len > text_len {
+        return -1;
+    }
+    let mut result = -1;
+    let mut i = 0;
+    while i <= text_len - pat_len {
+        let mut j = 0;
+        let mut matched = 1;
+        while j < pat_len {
+            if arr16_get(text, i + j) != arr16_get(pat, j) {
+                matched = 0;
+                j = pat_len; // break
+            } else {
+                j = j + 1;
+            }
+        }
+        if matched == 1 {
+            result = i;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Count occurrences (non-overlapping)
+// =============================================================================
+
+fn count_occurrences(text: Arr16, text_len: Int, pat: Arr16, pat_len: Int) -> Int {
+    if pat_len == 0 {
+        return text_len + 1;
+    }
+    if pat_len > text_len {
+        return 0;
+    }
+    let mut count = 0;
+    let mut i = 0;
+    while i <= text_len - pat_len {
+        let mut j = 0;
+        let mut matched = 1;
+        while j < pat_len {
+            if arr16_get(text, i + j) != arr16_get(pat, j) {
+                matched = 0;
+                j = pat_len;
+            } else {
+                j = j + 1;
+            }
+        }
+        if matched == 1 {
+            count = count + 1;
+            i = i + pat_len; // skip past match (non-overlapping)
+        } else {
+            i = i + 1;
+        }
+    }
+    count
+}
+
+// =============================================================================
+// Check if text starts with pattern
+// =============================================================================
+
+fn starts_with(text: Arr16, text_len: Int, pat: Arr16, pat_len: Int) -> Bool {
+    if pat_len > text_len {
+        return false;
+    }
+    let mut i = 0;
+    while i < pat_len {
+        if arr16_get(text, i) != arr16_get(pat, i) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Check if text ends with pattern
+// =============================================================================
+
+fn ends_with(text: Arr16, text_len: Int, pat: Arr16, pat_len: Int) -> Bool {
+    if pat_len > text_len {
+        return false;
+    }
+    let offset = text_len - pat_len;
+    let mut i = 0;
+    while i < pat_len {
+        if arr16_get(text, offset + i) != arr16_get(pat, i) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Check if two arrays are equal over a given length
+// =============================================================================
+
+fn arrays_equal(a: Arr16, b: Arr16, length: Int) -> Bool {
+    let mut i = 0;
+    while i < length {
+        if arr16_get(a, i) != arr16_get(b, i) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Helper: build array from up to 10 values
+// =============================================================================
+
+fn make_arr(v0: Int, v1: Int, v2: Int, v3: Int, v4: Int,
+            v5: Int, v6: Int, v7: Int, v8: Int, v9: Int) -> Arr16 {
+    let mut a = arr16_new();
+    a = arr16_set(a, 0, v0);
+    a = arr16_set(a, 1, v1);
+    a = arr16_set(a, 2, v2);
+    a = arr16_set(a, 3, v3);
+    a = arr16_set(a, 4, v4);
+    a = arr16_set(a, 5, v5);
+    a = arr16_set(a, 6, v6);
+    a = arr16_set(a, 7, v7);
+    a = arr16_set(a, 8, v8);
+    a = arr16_set(a, 9, v9);
+    a
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_find_basic() {
+    // text = [1,2,3,4,5,6,7,8], pattern = [3,4,5]
+    let text = make_arr(1, 2, 3, 4, 5, 6, 7, 8, 0, 0);
+    let pat = make_arr(3, 4, 5, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(find_first(text, 8, pat, 3), 2);
+}
+
+fn test_find_at_start() {
+    // text = [1,2,3,4], pattern = [1,2]
+    let text = make_arr(1, 2, 3, 4, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(1, 2, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(find_first(text, 4, pat, 2), 0);
+}
+
+fn test_find_at_end() {
+    // text = [1,2,3,4], pattern = [3,4]
+    let text = make_arr(1, 2, 3, 4, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(3, 4, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(find_first(text, 4, pat, 2), 2);
+}
+
+fn test_find_no_match() {
+    // text = [1,2,3,4], pattern = [5,6]
+    let text = make_arr(1, 2, 3, 4, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(5, 6, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(find_first(text, 4, pat, 2), -1);
+}
+
+fn test_find_exact_match() {
+    // text = [5,6,7], pattern = [5,6,7]
+    let text = make_arr(5, 6, 7, 0, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(5, 6, 7, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(find_first(text, 3, pat, 3), 0);
+}
+
+fn test_find_single_char() {
+    let text = make_arr(1, 2, 3, 2, 5, 0, 0, 0, 0, 0);
+    let pat = make_arr(2, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    // first occurrence of 2 is at index 1
+    assert_eq(find_first(text, 5, pat, 1), 1);
+}
+
+fn test_find_empty_pattern() {
+    let text = make_arr(1, 2, 3, 0, 0, 0, 0, 0, 0, 0);
+    let pat = arr16_new();
+    assert_eq(find_first(text, 3, pat, 0), 0);
+}
+
+fn test_find_pattern_too_long() {
+    let text = make_arr(1, 2, 0, 0, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(1, 2, 3, 4, 5, 0, 0, 0, 0, 0);
+    assert_eq(find_first(text, 2, pat, 5), -1);
+}
+
+fn test_find_last() {
+    // text = [1,2,1,2,1,2], find last [1,2]
+    let text = make_arr(1, 2, 1, 2, 1, 2, 0, 0, 0, 0);
+    let pat = make_arr(1, 2, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(find_last(text, 6, pat, 2), 4);
+}
+
+fn test_find_last_single() {
+    // Only one occurrence
+    let text = make_arr(1, 2, 3, 4, 5, 0, 0, 0, 0, 0);
+    let pat = make_arr(3, 4, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(find_last(text, 5, pat, 2), 2);
+}
+
+fn test_count_none() {
+    let text = make_arr(1, 2, 3, 4, 5, 0, 0, 0, 0, 0);
+    let pat = make_arr(9, 9, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(count_occurrences(text, 5, pat, 2), 0);
+}
+
+fn test_count_one() {
+    let text = make_arr(1, 2, 3, 4, 5, 0, 0, 0, 0, 0);
+    let pat = make_arr(2, 3, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(count_occurrences(text, 5, pat, 2), 1);
+}
+
+fn test_count_multiple() {
+    // text = [1,2,1,2,1,2], non-overlapping [1,2] => 3
+    let text = make_arr(1, 2, 1, 2, 1, 2, 0, 0, 0, 0);
+    let pat = make_arr(1, 2, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(count_occurrences(text, 6, pat, 2), 3);
+}
+
+fn test_count_repeated_char() {
+    // text = [5,5,5,5,5,5], non-overlapping [5,5] => 3
+    let text = make_arr(5, 5, 5, 5, 5, 5, 0, 0, 0, 0);
+    let pat = make_arr(5, 5, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(count_occurrences(text, 6, pat, 2), 3);
+}
+
+fn test_starts_with_true() {
+    let text = make_arr(1, 2, 3, 4, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(1, 2, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert(starts_with(text, 4, pat, 2));
+}
+
+fn test_starts_with_false() {
+    let text = make_arr(1, 2, 3, 4, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(2, 3, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert(!starts_with(text, 4, pat, 2));
+}
+
+fn test_ends_with_true() {
+    let text = make_arr(1, 2, 3, 4, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(3, 4, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert(ends_with(text, 4, pat, 2));
+}
+
+fn test_ends_with_false() {
+    let text = make_arr(1, 2, 3, 4, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(2, 3, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert(!ends_with(text, 4, pat, 2));
+}
+
+fn test_partial_match_not_found() {
+    // text = [1,2,3,5], pattern = [2,3,4] — partial match but not full
+    let text = make_arr(1, 2, 3, 5, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(2, 3, 4, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(find_first(text, 4, pat, 3), -1);
+}
+
+fn test_find_last_no_match() {
+    let text = make_arr(1, 2, 3, 0, 0, 0, 0, 0, 0, 0);
+    let pat = make_arr(7, 8, 0, 0, 0, 0, 0, 0, 0, 0);
+    assert_eq(find_last(text, 3, pat, 2), -1);
+}
+
+fn main() -> Int {
+    test_find_basic();
+    test_find_at_start();
+    test_find_at_end();
+    test_find_no_match();
+    test_find_exact_match();
+    test_find_single_char();
+    test_find_empty_pattern();
+    test_find_pattern_too_long();
+    test_find_last();
+    test_find_last_single();
+    test_count_none();
+    test_count_one();
+    test_count_multiple();
+    test_count_repeated_char();
+    test_starts_with_true();
+    test_starts_with_false();
+    test_ends_with_true();
+    test_ends_with_false();
+    test_partial_match_not_found();
+    test_find_last_no_match();
+    print("[OK] 252_interp_string_matching");
+    0
+}

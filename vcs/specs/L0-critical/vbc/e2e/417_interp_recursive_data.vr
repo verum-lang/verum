@@ -1,0 +1,170 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, recursion, data-structures
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests recursive algorithms operating on structured data.
+
+type Tree is Leaf(Int) | Branch(Int, Int, Int);
+// Branch(value, left_idx, right_idx) — indices into an array-based tree
+
+fn tree_value(t: Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Branch(v, l, r) => v,
+    }
+}
+
+fn test_tree_sum() {
+    // Array-based binary tree:
+    //       10
+    //      /  \
+    //     5    15
+    //    / \   / \
+    //   3   7 12  20
+    let values = [10, 5, 15, 3, 7, 12, 20];
+    let n = 7;
+
+    // Sum all values (BFS order, already in array)
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + values[i];
+        i = i + 1;
+    }
+    assert_eq(sum, 72); // 10+5+15+3+7+12+20
+    print("tree_sum: ok");
+}
+
+fn test_tree_depth_search() {
+    // Binary search tree check (array-based, 1-indexed)
+    // Parent at i, left child at 2*i, right child at 2*i+1
+    let bst = [0, 10, 5, 15, 3, 7, 12, 20]; // index 0 unused
+    let n = 8;
+
+    // Search for value 12
+    let mut idx = 1;
+    let target = 12;
+    let mut found = 0;
+    while idx < n {
+        if bst[idx] == target {
+            found = 1;
+            idx = n; // break
+        } else if target < bst[idx] {
+            idx = idx * 2; // go left
+        } else {
+            idx = idx * 2 + 1; // go right
+        }
+    }
+    assert_eq(found, 1);
+
+    // Search for value 8 (not in tree)
+    idx = 1;
+    let target2 = 8;
+    found = 0;
+    while idx < n {
+        if bst[idx] == target2 {
+            found = 1;
+            idx = n;
+        } else if target2 < bst[idx] {
+            idx = idx * 2;
+        } else {
+            idx = idx * 2 + 1;
+        }
+    }
+    assert_eq(found, 0);
+    print("tree_depth_search: ok");
+}
+
+fn test_inorder_traversal() {
+    // Simulate inorder traversal using stack (array-based)
+    // BST: [_, 10, 5, 15, 3, 7, 12, 20] (1-indexed)
+    let bst = [0, 10, 5, 15, 3, 7, 12, 20];
+    let n = 8;
+
+    // Iterative inorder: left, root, right
+    // For a BST, inorder gives sorted order: 3, 5, 7, 10, 12, 15, 20
+    let mut result = [0, 0, 0, 0, 0, 0, 0];
+    let mut result_idx = 0;
+
+    let mut stack_arr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sp = 0;
+    let mut current = 1;
+
+    while sp > 0 || current < n {
+        // Go as far left as possible
+        while current < n {
+            stack_arr[sp] = current;
+            sp = sp + 1;
+            current = current * 2; // left child
+        }
+        // Pop and visit
+        if sp > 0 {
+            sp = sp - 1;
+            current = stack_arr[sp];
+            result[result_idx] = bst[current];
+            result_idx = result_idx + 1;
+            current = current * 2 + 1; // right child
+        }
+    }
+
+    assert_eq(result_idx, 7);
+    assert_eq(result[0], 3);
+    assert_eq(result[1], 5);
+    assert_eq(result[2], 7);
+    assert_eq(result[3], 10);
+    assert_eq(result[4], 12);
+    assert_eq(result[5], 15);
+    assert_eq(result[6], 20);
+    print("inorder_traversal: ok");
+}
+
+fn test_heap_property() {
+    // Check if array satisfies max-heap property
+    // Max heap: parent >= children
+    let heap = [100, 90, 80, 70, 60, 50, 40];
+    let n = 7;
+    let mut is_heap = 1;
+    let mut i = 0;
+    while i < n {
+        let left = 2 * i + 1;
+        let right = 2 * i + 2;
+        if left < n {
+            if heap[i] < heap[left] { is_heap = 0; }
+        }
+        if right < n {
+            if heap[i] < heap[right] { is_heap = 0; }
+        }
+        i = i + 1;
+    }
+    assert_eq(is_heap, 1);
+
+    // This is NOT a valid max heap
+    let not_heap = [50, 90, 80, 70, 60, 100, 40];
+    is_heap = 1;
+    i = 0;
+    while i < n {
+        let left = 2 * i + 1;
+        let right = 2 * i + 2;
+        if left < n {
+            if not_heap[i] < not_heap[left] { is_heap = 0; }
+        }
+        if right < n {
+            if not_heap[i] < not_heap[right] { is_heap = 0; }
+        }
+        i = i + 1;
+    }
+    assert_eq(is_heap, 0);
+    print("heap_property: ok");
+}
+
+fn main() -> Int {
+    test_tree_sum();
+    test_tree_depth_search();
+    test_inorder_traversal();
+    test_heap_property();
+    print("[OK] 417_interp_recursive_data");
+    0
+}

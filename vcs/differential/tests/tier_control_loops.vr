@@ -1,0 +1,483 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, control-flow, loops
+// @timeout: 20000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for loop control flow.
+/// Tests for, while, loop constructs with break, continue, and nested patterns.
+
+fn main() {
+    test_for_range();
+    test_for_collection();
+    test_while_basic();
+    test_while_complex();
+    test_loop_infinite();
+    test_break_continue();
+    test_labeled_loops();
+    test_nested_loops();
+    test_loop_accumulation();
+    test_early_termination();
+}
+
+/// For loop with ranges
+fn test_for_range() {
+    println("=== For Range ===");
+
+    // Exclusive range
+    println("0..5:");
+    for i in 0..5 {
+        println(f"  {i}");
+    }
+
+    // Inclusive range
+    println("0..=5:");
+    for i in 0..=5 {
+        println(f"  {i}");
+    }
+
+    // Negative range
+    println("-3..3:");
+    for i in -3..3 {
+        println(f"  {i}");
+    }
+
+    // Step (using filter or custom iterator)
+    println("0..10 step 2:");
+    for i in (0..10).step_by(2) {
+        println(f"  {i}");
+    }
+
+    // Reverse range
+    println("5..0 reverse:");
+    for i in (0..5).rev() {
+        println(f"  {i}");
+    }
+
+    // Empty range
+    println("5..5 (empty):");
+    for i in 5..5 {
+        println(f"  {i}");
+    }
+    println("  (no output)");
+}
+
+/// For loop with collections
+fn test_for_collection() {
+    println("\n=== For Collection ===");
+
+    // List
+    let numbers = [10, 20, 30, 40, 50];
+    println("list iteration:");
+    for n in numbers {
+        println(f"  {n}");
+    }
+
+    // With index
+    println("enumerated:");
+    for (i, n) in numbers.enumerate() {
+        println(f"  [{i}]: {n}");
+    }
+
+    // Text characters
+    println("text chars:");
+    for c in "hello".chars() {
+        println(f"  '{c}'");
+    }
+
+    // Map entries (sorted for determinism)
+    let map = {"a": 1, "b": 2, "c": 3};
+    println("map entries:");
+    for (k, v) in map.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Nested lists
+    let matrix = [[1, 2], [3, 4], [5, 6]];
+    println("nested:");
+    for row in matrix {
+        for item in row {
+            println(f"  {item}");
+        }
+    }
+}
+
+/// Basic while loops
+fn test_while_basic() {
+    println("\n=== While Basic ===");
+
+    // Simple countdown
+    let mut n = 5;
+    println("countdown:");
+    while n > 0 {
+        println(f"  {n}");
+        n = n - 1;
+    }
+
+    // Count up
+    let mut i = 0;
+    println("count up:");
+    while i < 5 {
+        println(f"  {i}");
+        i = i + 1;
+    }
+
+    // Zero iterations
+    let mut x = 10;
+    println("zero iterations (x > 100):");
+    while x > 100 {
+        println(f"  {x}");
+        x = x - 1;
+    }
+    println("  (no output)");
+
+    // Single iteration
+    let mut once = true;
+    println("single iteration:");
+    while once {
+        println("  executed once");
+        once = false;
+    }
+}
+
+/// Complex while conditions
+fn test_while_complex() {
+    println("\n=== While Complex ===");
+
+    // Multiple conditions
+    let mut a = 0;
+    let mut b = 10;
+    println("dual variable:");
+    while a < 5 && b > 5 {
+        println(f"  a={a}, b={b}");
+        a = a + 1;
+        b = b - 1;
+    }
+
+    // Condition with function call
+    fn should_continue(n: Int) -> Bool {
+        n < 5
+    }
+
+    let mut m = 0;
+    println("function condition:");
+    while should_continue(m) {
+        println(f"  m={m}");
+        m = m + 1;
+    }
+
+    // State machine
+    let mut state = "start";
+    let mut steps = 0;
+    println("state machine:");
+    while state != "done" {
+        println(f"  state: {state}");
+        state = match state {
+            "start" => "middle",
+            "middle" => "end",
+            "end" => "done",
+            _ => "done",
+        };
+        steps = steps + 1;
+        if steps > 10 { break; }  // Safety limit
+    }
+}
+
+/// Infinite loop with break
+fn test_loop_infinite() {
+    println("\n=== Loop Infinite ===");
+
+    // Basic loop with break
+    let mut count = 0;
+    println("basic loop:");
+    loop {
+        println(f"  count: {count}");
+        count = count + 1;
+        if count >= 5 {
+            break;
+        }
+    }
+
+    // Loop as expression
+    let mut n = 0;
+    let result = loop {
+        n = n + 1;
+        if n * n > 50 {
+            break n;
+        }
+    };
+    println(f"loop result (n where n*n > 50): {result}");
+
+    // Loop with complex break value
+    let mut items = [10, 20, 30, 40, 50];
+    let mut idx = 0;
+    let found = loop {
+        if idx >= items.len() {
+            break None;
+        }
+        if items[idx] > 25 {
+            break Some(items[idx]);
+        }
+        idx = idx + 1;
+    };
+    println(f"first > 25: {found}");
+}
+
+/// Break and continue
+fn test_break_continue() {
+    println("\n=== Break Continue ===");
+
+    // Continue to skip
+    println("skip evens:");
+    for i in 0..10 {
+        if i % 2 == 0 {
+            continue;
+        }
+        println(f"  {i}");
+    }
+
+    // Break early
+    println("break at 5:");
+    for i in 0..10 {
+        if i == 5 {
+            break;
+        }
+        println(f"  {i}");
+    }
+
+    // Combined
+    println("skip multiples of 3, break at 10:");
+    for i in 0..20 {
+        if i % 3 == 0 {
+            continue;
+        }
+        if i >= 10 {
+            break;
+        }
+        println(f"  {i}");
+    }
+
+    // Continue in while
+    let mut x = 0;
+    println("while with continue:");
+    while x < 10 {
+        x = x + 1;
+        if x % 2 == 0 {
+            continue;
+        }
+        println(f"  {x}");
+    }
+}
+
+/// Labeled loops for nested control
+fn test_labeled_loops() {
+    println("\n=== Labeled Loops ===");
+
+    // Break outer loop
+    println("break outer:");
+    'outer: for i in 0..3 {
+        for j in 0..3 {
+            println(f"  ({i}, {j})");
+            if i == 1 && j == 1 {
+                break 'outer;
+            }
+        }
+    }
+
+    // Continue outer loop
+    println("continue outer:");
+    'outer: for i in 0..3 {
+        for j in 0..3 {
+            if j == 1 {
+                continue 'outer;
+            }
+            println(f"  ({i}, {j})");
+        }
+    }
+
+    // Break specific level
+    println("triple nested, break middle:");
+    'outer: for i in 0..2 {
+        'middle: for j in 0..2 {
+            for k in 0..2 {
+                println(f"  ({i}, {j}, {k})");
+                if k == 1 {
+                    break 'middle;
+                }
+            }
+        }
+    }
+
+    // Loop expression with label
+    let result = 'search: loop {
+        for i in 0..10 {
+            if i * i > 50 {
+                break 'search i;
+            }
+        }
+        break 'search -1;
+    };
+    println(f"labeled loop result: {result}");
+}
+
+/// Nested loop patterns
+fn test_nested_loops() {
+    println("\n=== Nested Loops ===");
+
+    // Simple 2D iteration
+    println("2D grid:");
+    for i in 0..3 {
+        for j in 0..3 {
+            println(f"  ({i}, {j})");
+        }
+    }
+
+    // Triangle pattern
+    println("triangle:");
+    for i in 0..5 {
+        for j in 0..=i {
+            println(f"  ({i}, {j})");
+        }
+    }
+
+    // While in for
+    println("while in for:");
+    for i in 0..3 {
+        let mut j = 0;
+        while j < i + 1 {
+            println(f"  ({i}, {j})");
+            j = j + 1;
+        }
+    }
+
+    // Loop in for
+    println("loop in for:");
+    for i in 0..3 {
+        let mut count = 0;
+        loop {
+            if count >= i + 1 {
+                break;
+            }
+            println(f"  ({i}, {count})");
+            count = count + 1;
+        }
+    }
+}
+
+/// Accumulation patterns in loops
+fn test_loop_accumulation() {
+    println("\n=== Loop Accumulation ===");
+
+    // Sum
+    let mut sum = 0;
+    for i in 1..=10 {
+        sum = sum + i;
+    }
+    println(f"sum 1-10: {sum}");
+
+    // Product
+    let mut product = 1;
+    for i in 1..=5 {
+        product = product * i;
+    }
+    println(f"factorial 5: {product}");
+
+    // Find max
+    let numbers = [3, 1, 4, 1, 5, 9, 2, 6, 5];
+    let mut max = numbers[0];
+    for n in numbers {
+        if n > max {
+            max = n;
+        }
+    }
+    println(f"max: {max}");
+
+    // Build list
+    let mut squares: List<Int> = [];
+    for i in 1..=5 {
+        squares.push(i * i);
+    }
+    println(f"squares: {squares}");
+
+    // Conditional accumulation
+    let mut even_sum = 0;
+    for i in 1..=10 {
+        if i % 2 == 0 {
+            even_sum = even_sum + i;
+        }
+    }
+    println(f"sum of evens 1-10: {even_sum}");
+
+    // Accumulator with while
+    let mut n = 100;
+    let mut steps = 0;
+    while n > 1 {
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    println(f"Collatz steps for 100: {steps}");
+}
+
+/// Early termination patterns
+fn test_early_termination() {
+    println("\n=== Early Termination ===");
+
+    // Find first
+    let items = [2, 4, 6, 7, 8, 10];
+    let mut first_odd: Maybe<Int> = None;
+    for item in items {
+        if item % 2 != 0 {
+            first_odd = Some(item);
+            break;
+        }
+    }
+    println(f"first odd: {first_odd}");
+
+    // Find index
+    let target = 8;
+    let mut found_idx: Maybe<Int> = None;
+    for (i, item) in items.enumerate() {
+        if item == target {
+            found_idx = Some(i);
+            break;
+        }
+    }
+    println(f"index of {target}: {found_idx}");
+
+    // Any match
+    let mut has_large = false;
+    for item in items {
+        if item > 5 {
+            has_large = true;
+            break;
+        }
+    }
+    println(f"has value > 5: {has_large}");
+
+    // All match (with early termination on failure)
+    let mut all_positive = true;
+    for item in items {
+        if item <= 0 {
+            all_positive = false;
+            break;
+        }
+    }
+    println(f"all positive: {all_positive}");
+
+    // Nested early termination
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    let mut found_pos: Maybe<(Int, Int)> = None;
+    'outer: for (i, row) in matrix.enumerate() {
+        for (j, val) in row.enumerate() {
+            if val == 5 {
+                found_pos = Some((i, j));
+                break 'outer;
+            }
+        }
+    }
+    println(f"position of 5: {found_pos}");
+}

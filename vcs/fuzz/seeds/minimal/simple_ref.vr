@@ -1,0 +1,9 @@
+// Minimal: Simple reference (CBGR Tier 0)
+fn process(data: &Int) -> Int {
+    *data + 1
+}
+
+fn main() {
+    let x = 42;
+    let y = process(&x);
+}

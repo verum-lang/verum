@@ -1,0 +1,255 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, tensor-ext-fft
+// @timeout: 10000
+
+/// Tests DFT (Discrete Fourier Transform) magnitude computation, scatter/gather
+/// index patterns, and frequency bin analysis for cross-tier consistency.
+/// Uses manual sine/cosine approximations (no transcendental intrinsics).
+
+fn main() {
+    test_dft_magnitudes();
+    test_scatter_indices();
+    test_frequency_bins();
+    test_inverse_dft_roundtrip();
+}
+
+/// Taylor series sine: sin(x) = x - x^3/3! + x^5/5! - ... (12 terms)
+fn taylor_sin(x: Float) -> Float {
+    // Reduce x to [-pi, pi] range
+    let pi = 3.141592653589793;
+    let two_pi = 2.0 * pi;
+    let mut r = x;
+    while r > pi {
+        r = r - two_pi;
+    }
+    while r < -pi {
+        r = r + two_pi;
+    }
+    let mut sum = 0.0;
+    let mut term = r;
+    let mut n = 1;
+    while n <= 12 {
+        sum = sum + term;
+        term = -term * r * r / ((2 * n) as Float * (2 * n + 1) as Float);
+        n = n + 1;
+    }
+    sum
+}
+
+/// Taylor series cosine: cos(x) = 1 - x^2/2! + x^4/4! - ... (12 terms)
+fn taylor_cos(x: Float) -> Float {
+    let pi = 3.141592653589793;
+    let two_pi = 2.0 * pi;
+    let mut r = x;
+    while r > pi {
+        r = r - two_pi;
+    }
+    while r < -pi {
+        r = r + two_pi;
+    }
+    let mut sum = 0.0;
+    let mut term = 1.0;
+    let mut n = 0;
+    while n <= 12 {
+        sum = sum + term;
+        term = -term * r * r / ((2 * n + 1) as Float * (2 * n + 2) as Float);
+        n = n + 1;
+    }
+    sum
+}
+
+/// Newton's sqrt
+fn newton_sqrt(x: Float) -> Float {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    let mut guess = if x > 1.0 { x / 2.0 } else { 1.0 };
+    let mut i = 0;
+    while i < 12 {
+        guess = (guess + x / guess) / 2.0;
+        i = i + 1;
+    }
+    guess
+}
+
+/// Compute DFT of a small signal and output magnitudes.
+/// DFT: X[k] = sum_{n=0}^{N-1} x[n] * exp(-2*pi*i*k*n/N)
+///   Re(X[k]) = sum x[n] * cos(2*pi*k*n/N)
+///   Im(X[k]) = -sum x[n] * sin(2*pi*k*n/N)
+fn test_dft_magnitudes() {
+    println("=== DFT Magnitudes ===");
+
+    let signal = [1.0, 0.0, -1.0, 0.0];
+    let n = 4;
+    let pi = 3.141592653589793;
+
+    let mut k = 0;
+    while k < n {
+        let mut re = 0.0;
+        let mut im = 0.0;
+        let mut j = 0;
+        while j < n {
+            let angle = 2.0 * pi * (k as Float) * (j as Float) / (n as Float);
+            re = re + signal[j] * taylor_cos(angle);
+            im = im - signal[j] * taylor_sin(angle);
+            j = j + 1;
+        }
+        let mag = newton_sqrt(re * re + im * im);
+        println(f"X[{k}]: re={re}, im={im}, mag={mag}");
+        k = k + 1;
+    }
+
+    // DC component (k=0) should be sum of signal
+    let dc = signal[0] + signal[1] + signal[2] + signal[3];
+    println(f"dc_component: {dc}");
+}
+
+/// Scatter/gather index computation patterns used in FFT butterfly operations.
+/// Tests bit-reversal permutation and stride patterns.
+fn test_scatter_indices() {
+    println("\n=== Scatter Indices ===");
+
+    // Bit-reversal permutation for N=8
+    // For FFT of length 8, the bit-reversal of index i (3 bits) gives the
+    // destination index
+    let n = 8;
+    let bits = 3; // log2(8)
+
+    let mut i = 0;
+    while i < n {
+        // Manual bit reversal for 3 bits
+        let b0 = i & 1;
+        let b1 = (i / 2) & 1;
+        let b2 = (i / 4) & 1;
+        let reversed = b0 * 4 + b1 * 2 + b2;
+        println(f"bit_rev[{i}] = {reversed}");
+        i = i + 1;
+    }
+
+    // Butterfly stride pattern for radix-2 FFT
+    // Stage s has stride 2^s
+    println("butterfly strides:");
+    let mut stage = 0;
+    while stage < bits {
+        let stride = 1;
+        let mut s = 0;
+        let mut st = 1;
+        while s < stage {
+            st = st * 2;
+            s = s + 1;
+        }
+        println(f"  stage {stage}: stride={st}, groups={n / (st * 2)}");
+        stage = stage + 1;
+    }
+
+    // Twiddle factor indices: at stage s, butterfly at position j
+    // uses twiddle factor W_N^(j * N / (2^(s+1)))
+    println("twiddle indices (N=8):");
+    let mut s = 0;
+    while s < bits {
+        let mut step = 1;
+        let mut si = 0;
+        while si < s + 1 {
+            step = step * 2;
+            si = si + 1;
+        }
+        let mut j = 0;
+        while j < step / 2 {
+            let twiddle_idx = j * n / step;
+            println(f"  stage {s}, pos {j}: twiddle W_{n}^{twiddle_idx}");
+            j = j + 1;
+        }
+        s = s + 1;
+    }
+}
+
+/// Frequency bin analysis: compute which frequencies are present
+/// in a composed signal using DFT magnitudes.
+fn test_frequency_bins() {
+    println("\n=== Frequency Bins ===");
+
+    // Compose signal: x[n] = cos(2*pi*1*n/8) + 0.5*cos(2*pi*3*n/8)
+    // This should show peaks at bins 1 and 3 (and mirrors at 5 and 7)
+    let n = 8;
+    let pi = 3.141592653589793;
+
+    let mut signal = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut i = 0;
+    while i < n {
+        let t = i as Float;
+        signal[i] = taylor_cos(2.0 * pi * 1.0 * t / 8.0)
+                   + 0.5 * taylor_cos(2.0 * pi * 3.0 * t / 8.0);
+        println(f"signal[{i}]: {signal[i]}");
+        i = i + 1;
+    }
+
+    // Compute DFT magnitudes
+    let mut k = 0;
+    while k < n {
+        let mut re = 0.0;
+        let mut im = 0.0;
+        let mut j = 0;
+        while j < n {
+            let angle = 2.0 * pi * (k as Float) * (j as Float) / (n as Float);
+            re = re + signal[j] * taylor_cos(angle);
+            im = im - signal[j] * taylor_sin(angle);
+            j = j + 1;
+        }
+        let mag = newton_sqrt(re * re + im * im);
+        // Classify: strong (>3), medium (>1), weak
+        let label = if mag > 3.0 {
+            "STRONG"
+        } else if mag > 1.0 {
+            "medium"
+        } else {
+            "weak"
+        };
+        println(f"bin[{k}]: mag={mag} ({label})");
+        k = k + 1;
+    }
+}
+
+/// Inverse DFT roundtrip: DFT then IDFT should recover original signal.
+/// Tests with a simple 4-element signal.
+fn test_inverse_dft_roundtrip() {
+    println("\n=== Inverse DFT Roundtrip ===");
+
+    let original = [3.0, -1.0, 2.0, -2.0];
+    let n = 4;
+    let pi = 3.141592653589793;
+
+    // Forward DFT
+    let mut re_spec = [0.0, 0.0, 0.0, 0.0];
+    let mut im_spec = [0.0, 0.0, 0.0, 0.0];
+
+    let mut k = 0;
+    while k < n {
+        let mut j = 0;
+        while j < n {
+            let angle = 2.0 * pi * (k as Float) * (j as Float) / (n as Float);
+            re_spec[k] = re_spec[k] + original[j] * taylor_cos(angle);
+            im_spec[k] = im_spec[k] - original[j] * taylor_sin(angle);
+            j = j + 1;
+        }
+        println(f"DFT[{k}]: re={re_spec[k]}, im={im_spec[k]}");
+        k = k + 1;
+    }
+
+    // Inverse DFT: x[n] = (1/N) * sum X[k] * exp(+2*pi*i*k*n/N)
+    let mut m = 0;
+    while m < n {
+        let mut recovered = 0.0;
+        let mut k2 = 0;
+        while k2 < n {
+            let angle = 2.0 * pi * (k2 as Float) * (m as Float) / (n as Float);
+            // Re(X[k] * exp(+i*angle)) = Re(X)*cos - Im(X)*sin   (note: +i, so sin sign flips)
+            recovered = recovered + re_spec[k2] * taylor_cos(angle) - im_spec[k2] * taylor_sin(angle);
+            k2 = k2 + 1;
+        }
+        recovered = recovered / n as Float;
+        println(f"recovered[{m}]: {recovered}");
+        m = m + 1;
+    }
+}

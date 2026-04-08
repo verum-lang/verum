@@ -1,0 +1,69 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, try, error-handling
+// @description: Test try/recover/finally expression parsing
+
+fn test_try_expressions() {
+    // Basic try
+    try {
+        risky_operation();
+    }
+
+    // Try with recover (match arms)
+    try {
+        risky_operation();
+    } recover {
+        IoError(e) => handle_io(e),
+        ParseError(e) => handle_parse(e),
+        _ => handle_unknown()
+    }
+
+    // Try with recover (closure)
+    try {
+        risky_operation();
+    } recover |e| {
+        log_error(e);
+        default_value()
+    }
+
+    // Try with finally
+    try {
+        acquire_resource();
+        use_resource();
+    } finally {
+        release_resource();
+    }
+
+    // Try with recover and finally
+    try {
+        risky_operation();
+    } recover |e| {
+        handle_error(e)
+    } finally {
+        cleanup();
+    }
+
+    // Nested try
+    try {
+        try {
+            inner_risky();
+        } recover |e| {
+            handle_inner(e)
+        }
+    } recover |e| {
+        handle_outer(e)
+    }
+}
+
+fn test_throw_expression() {
+    // Basic throw
+    throw Error.new("message");
+
+    // Conditional throw
+    if invalid {
+        throw ValidationError.InvalidInput;
+    }
+
+    // Throw in expression context
+    let result = if valid { value } else { throw Error.Invalid };
+}

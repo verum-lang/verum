@@ -1,0 +1,754 @@
+// =============================================================================
+// vcs/specs/core/math/nn_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, math, nn, neural-network, layer, optimizer, transformer
+// @description: Tests for the neural networks module including layer types,
+//               activation functions, parameter management, optimizers,
+//               learning rate schedulers, and transformer components.
+//
+// Coverage:
+// - Parameter: construction, grad tracking, zero_grad
+// - Activation variants: ReLU, GELU, SiLU, Tanh, Sigmoid, Softmax
+// - Layer types: Linear, Embedding, Conv2d, LayerNorm, RMSNorm, BatchNorm
+// - Dropout: construction, probability validation
+// - Optimizers: SGD, AdamW construction and configuration
+// - Schedulers: CosineScheduler, LinearWarmup
+// - Transformer: MultiHeadAttention, FeedForward, TransformerBlock
+//
+// Test Strategy:
+// - Constructor-based type creation (avoids direct record construction issues)
+// - Builder pattern verification (with_* methods)
+// - Optimizer hyperparameter defaults
+// - Scheduler warmup and decay logic
+// =============================================================================
+
+module specs.core.math.nn_test;
+
+mount core.math.nn.{
+    Parameter,
+    Activation,
+    Linear, Embedding, Conv2d,
+    LayerNorm, RMSNorm, BatchNorm,
+    Dropout,
+    SGD, AdamW,
+    Optimizer, LRScheduler,
+    CosineScheduler, LinearWarmup,
+    MultiHeadAttention, FeedForward, TransformerBlock,
+    AttentionInput,
+    RoPE,
+    Module, Serializable,
+    relu, gelu, silu, sigmoid, softmax_axis, log_softmax, softplus,
+    cross_entropy_loss, mse_loss, smooth_l1_loss,
+    binary_cross_entropy, binary_cross_entropy_with_logits,
+    clip_grad_norm, clip_grad_value,
+    sinusoidal_encoding,
+};
+mount core.math.tensor.{DynTensor, zeros, ones};
+mount core.math.elementary.{abs, cos};
+mount core.math.constants.{PI};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Activation Tests
+// =============================================================================
+
+@test
+fn test_activation_relu_variant() {
+    let act = Activation.ReLU;
+    match act {
+        Activation.ReLU => { /* expected */ }
+        _ => assert(false, "Should be ReLU"),
+    }
+}
+
+@test
+fn test_activation_gelu_variant() {
+    let act = Activation.GELU;
+    match act {
+        Activation.GELU => { /* expected */ }
+        _ => assert(false, "Should be GELU"),
+    }
+}
+
+@test
+fn test_activation_silu_variant() {
+    let act = Activation.SiLU;
+    match act {
+        Activation.SiLU => { /* expected */ }
+        _ => assert(false, "Should be SiLU"),
+    }
+}
+
+@test
+fn test_activation_tanh_variant() {
+    let act = Activation.Tanh;
+    match act {
+        Activation.Tanh => { /* expected */ }
+        _ => assert(false, "Should be Tanh"),
+    }
+}
+
+@test
+fn test_activation_sigmoid_variant() {
+    let act = Activation.Sigmoid;
+    match act {
+        Activation.Sigmoid => { /* expected */ }
+        _ => assert(false, "Should be Sigmoid"),
+    }
+}
+
+@test
+fn test_activation_softmax_variant() {
+    let act = Activation.Softmax(-1);
+    match act {
+        Activation.Softmax(axis) => assert_eq(axis, -1),
+        _ => assert(false, "Should be Softmax"),
+    }
+}
+
+@test
+fn test_activation_softmax_axis_0() {
+    let act = Activation.Softmax(0);
+    match act {
+        Activation.Softmax(axis) => assert_eq(axis, 0),
+        _ => assert(false, "Should be Softmax(0)"),
+    }
+}
+
+// =============================================================================
+// Parameter Tests
+// =============================================================================
+
+@test
+fn test_parameter_new() {
+    let p = Parameter.new(&[3 as USize, 4 as USize]);
+    assert(p.requires_grad, "Default parameter should require grad");
+}
+
+@test
+fn test_parameter_from_tensor() {
+    let p = Parameter.from_tensor(zeros(&[5 as USize]));
+    assert(p.requires_grad, "from_tensor parameter should require grad");
+    match p.grad {
+        Maybe.None => { /* expected */ }
+        Maybe.Some(_) => assert(false, "Initial grad should be None"),
+    }
+}
+
+@test
+fn test_parameter_zero_grad() {
+    let mut p = Parameter.from_tensor(zeros(&[3 as USize]));
+    p.accumulate_grad(&ones(&[3 as USize]));
+    match p.grad {
+        Maybe.Some(_) => { /* has grad */ }
+        Maybe.None => assert(false, "Should have grad after accumulate"),
+    }
+    p.zero_grad();
+    match p.grad {
+        Maybe.None => { /* expected after zero_grad */ }
+        Maybe.Some(_) => assert(false, "After zero_grad, grad should be None"),
+    }
+}
+
+// =============================================================================
+// Linear Layer Tests
+// =============================================================================
+
+@test
+fn test_linear_type_exists() {
+    // Verify Linear type and constructor exist
+    let _ = Linear.new;
+}
+
+@test
+fn test_linear_fields_type() {
+    // Verify Linear has the expected field types via type annotations
+    let _: fn(&Linear) -> USize = |l| l.in_features;
+    let _: fn(&Linear) -> USize = |l| l.out_features;
+}
+
+// =============================================================================
+// Embedding Layer Tests
+// =============================================================================
+
+@test
+fn test_embedding_type_exists() {
+    let _ = Embedding.new;
+}
+
+@test
+fn test_embedding_fields_type() {
+    let _: fn(&Embedding) -> USize = |e| e.num_embeddings;
+    let _: fn(&Embedding) -> USize = |e| e.embedding_dim;
+}
+
+// =============================================================================
+// Conv2d Layer Tests
+// =============================================================================
+
+@test
+fn test_conv2d_type_exists() {
+    let _ = Conv2d.new;
+}
+
+@test
+fn test_conv2d_fields_type() {
+    let _: fn(&Conv2d) -> USize = |c| c.in_channels;
+    let _: fn(&Conv2d) -> USize = |c| c.out_channels;
+}
+
+
+// =============================================================================
+// Normalization Layer Tests
+// =============================================================================
+
+@test
+fn test_layer_norm_construction() {
+    let ln = LayerNorm.new(&[512 as USize]);
+    assert_eq(ln.normalized_shape.len(), 1);
+    assert_eq(ln.normalized_shape[0], 512 as USize);
+    assert(ln.eps > 0.0, "eps should be positive");
+}
+
+@test
+fn test_layer_norm_with_eps() {
+    let ln = LayerNorm.new(&[256 as USize]).with_eps(1e-6);
+    assert(ln.eps == 1e-6, "custom eps");
+}
+
+@test
+fn test_rms_norm_construction() {
+    let rn = RMSNorm.new(768 as USize);
+    assert(rn.eps == 1e-5, "default eps should be 1e-5");
+}
+
+@test
+fn test_batch_norm_construction() {
+    let bn = BatchNorm.new(64 as USize);
+    assert_eq(bn.num_features, 64 as USize);
+    assert(bn.training, "Should start in training mode");
+    assert(bn.momentum == 0.1, "Default momentum");
+    assert(bn.eps == 1e-5, "Default eps");
+}
+
+@test
+fn test_batch_norm_eval_mode() {
+    let mut bn = BatchNorm.new(32 as USize);
+    bn.eval();
+    assert(!bn.training, "Should be in eval mode");
+    bn.train();
+    assert(bn.training, "Should be back in training mode");
+}
+
+// =============================================================================
+// Dropout Tests
+// =============================================================================
+
+@test
+fn test_dropout_construction() {
+    let d = Dropout.new(0.1);
+    assert(d.p == 0.1, "probability should be 0.1");
+    assert(d.training, "should be in training mode");
+}
+
+@test
+fn test_dropout_eval() {
+    let mut d = Dropout.new(0.5);
+    d.eval();
+    assert(!d.training, "eval should set training=false");
+}
+
+@test
+fn test_dropout_zero_prob() {
+    let d = Dropout.new(0.0);
+    assert(d.p == 0.0, "zero dropout probability");
+}
+
+// =============================================================================
+// SGD Optimizer Tests
+// =============================================================================
+
+@test
+fn test_sgd_simple() {
+    let opt = SGD.simple(0.01);
+    assert(opt.lr == 0.01, "lr should be 0.01");
+    assert(opt.momentum == 0.0, "simple SGD has no momentum");
+    assert(opt.weight_decay == 0.0, "simple SGD has no weight decay");
+}
+
+@test
+fn test_sgd_with_momentum() {
+    let opt = SGD.new(0.01, 0.9, 0.0);
+    assert(opt.lr == 0.01, "lr");
+    assert(opt.momentum == 0.9, "momentum");
+    assert(opt.weight_decay == 0.0, "no weight decay");
+}
+
+@test
+fn test_sgd_full() {
+    let opt = SGD.new(0.001, 0.9, 1e-4);
+    assert(opt.lr == 0.001, "lr");
+    assert(opt.momentum == 0.9, "momentum");
+    assert(opt.weight_decay == 1e-4, "weight decay");
+}
+
+@test
+fn test_sgd_lr_accessor() {
+    let opt = SGD.simple(0.05);
+    assert_eq(opt.lr(), 0.05);
+}
+
+@test
+fn test_sgd_set_lr() {
+    let mut opt = SGD.simple(0.01);
+    opt.set_lr(0.001);
+    assert_eq(opt.lr(), 0.001);
+}
+
+// =============================================================================
+// AdamW Optimizer Tests
+// =============================================================================
+
+@test
+fn test_adamw_defaults() {
+    let opt = AdamW.new(0.001, 0.01);
+    assert(opt.lr == 0.001, "lr");
+    assert(opt.beta1 == 0.9, "default beta1");
+    assert(opt.beta2 == 0.999, "default beta2");
+    assert(opt.eps == 1e-8, "default eps");
+    assert(opt.weight_decay == 0.01, "weight_decay");
+    assert_eq(opt.step_count, 0 as USize);
+}
+
+@test
+fn test_adamw_with_betas() {
+    let opt = AdamW.new(0.001, 0.01).with_betas(0.95, 0.98);
+    assert(opt.beta1 == 0.95, "custom beta1");
+    assert(opt.beta2 == 0.98, "custom beta2");
+}
+
+@test
+fn test_adamw_with_eps() {
+    let opt = AdamW.new(0.001, 0.01).with_eps(1e-6);
+    assert(opt.eps == 1e-6, "custom eps");
+}
+
+@test
+fn test_adamw_builder_chain() {
+    let opt = AdamW.new(3e-4, 0.1)
+        .with_betas(0.9, 0.95)
+        .with_eps(1e-5);
+    assert(opt.lr == 3e-4, "lr");
+    assert(opt.beta1 == 0.9, "beta1");
+    assert(opt.beta2 == 0.95, "beta2");
+    assert(opt.eps == 1e-5, "eps");
+    assert(opt.weight_decay == 0.1, "weight_decay");
+}
+
+@test
+fn test_adamw_lr_accessor() {
+    let opt = AdamW.new(1e-3, 0.01);
+    assert_eq(opt.lr(), 1e-3);
+}
+
+@test
+fn test_adamw_set_lr() {
+    let mut opt = AdamW.new(1e-3, 0.01);
+    opt.set_lr(5e-4);
+    assert_eq(opt.lr(), 5e-4);
+}
+
+// =============================================================================
+// Learning Rate Scheduler Tests
+// =============================================================================
+
+@test
+fn test_cosine_scheduler_warmup() {
+    let sched = CosineScheduler.new(1e-3, 1e-5, 1000 as USize, 10000 as USize);
+    // During warmup, lr should increase linearly
+    let lr_0 = sched.get_lr(0 as USize);
+    let lr_500 = sched.get_lr(500 as USize);
+    let lr_1000 = sched.get_lr(999 as USize);
+    assert(lr_0 < lr_500, "lr should increase during warmup");
+    assert(lr_500 < lr_1000, "lr should keep increasing during warmup");
+}
+
+@test
+fn test_cosine_scheduler_at_warmup_end() {
+    let sched = CosineScheduler.new(1e-3, 1e-5, 1000 as USize, 10000 as USize);
+    // Right at warmup end, lr should be close to initial_lr
+    let lr = sched.get_lr(1000 as USize);
+    // At step 1000, progress = 0, cos(0) = 1
+    // lr = min_lr + 0.5 * (initial_lr - min_lr) * (1 + 1) = initial_lr
+    assert(abs(lr - 1e-3) < 1e-6, "lr at warmup end should be initial_lr");
+}
+
+@test
+fn test_cosine_scheduler_decay() {
+    let sched = CosineScheduler.new(1e-3, 0.0, 0 as USize, 1000 as USize);
+    // After warmup (0 steps), should decay
+    let lr_start = sched.get_lr(0 as USize);
+    let lr_mid = sched.get_lr(500 as USize);
+    let lr_end = sched.get_lr(999 as USize);
+    assert(lr_start > lr_mid, "lr should decrease");
+    assert(lr_mid > lr_end, "lr should continue decreasing");
+}
+
+@test
+fn test_cosine_scheduler_minimum() {
+    let sched = CosineScheduler.new(1e-3, 1e-5, 0 as USize, 1000 as USize);
+    // At the very end, lr should be close to min_lr
+    let lr = sched.get_lr(1000 as USize);
+    assert(lr >= 1e-5, "lr should not go below min_lr");
+    assert(lr < 1e-3, "lr at end should be less than initial");
+}
+
+@test
+fn test_linear_warmup_during_warmup() {
+    let sched = LinearWarmup { target_lr: 1e-3, warmup_steps: 100 as USize };
+    // During warmup, lr scales linearly
+    let lr_0 = sched.get_lr(0 as USize);
+    let lr_50 = sched.get_lr(50 as USize);
+    let lr_100 = sched.get_lr(100 as USize);
+    assert(lr_0 < lr_50, "lr should increase");
+    assert(lr_50 < lr_100 || abs(lr_50 - lr_100) < 1e-10, "lr should keep increasing");
+}
+
+@test
+fn test_linear_warmup_at_target() {
+    let sched = LinearWarmup { target_lr: 1e-3, warmup_steps: 100 as USize };
+    let lr = sched.get_lr(100 as USize);
+    assert_eq(lr, 1e-3);
+}
+
+@test
+fn test_linear_warmup_after_warmup() {
+    let sched = LinearWarmup { target_lr: 1e-3, warmup_steps: 100 as USize };
+    // After warmup, lr stays at target
+    let lr = sched.get_lr(500 as USize);
+    assert_eq(lr, 1e-3);
+}
+
+// =============================================================================
+// Transformer Component Tests
+// =============================================================================
+
+@test
+fn test_multi_head_attention_type_exists() {
+    // Verify MultiHeadAttention type and its constructor exist
+    let _ = MultiHeadAttention.new;
+}
+
+@test
+fn test_feed_forward_type_exists() {
+    // Verify FeedForward type and its constructor exist
+    let _ = FeedForward.new;
+}
+
+@test
+fn test_rope_construction() {
+    let rope = RoPE.new(64 as USize, 10000.0);
+    assert_eq(rope.dim, 64 as USize);
+    assert(rope.base == 10000.0, "RoPE base frequency");
+}
+
+// =============================================================================
+// Type Relationship Tests
+// =============================================================================
+
+@test
+fn test_attention_input_type() {
+    // AttentionInput is (DynTensor<Float>, Maybe<DynTensor<Float>>)
+    let x = zeros(&[1 as USize, 10 as USize, 512 as USize]);
+    let mask: Maybe<DynTensor<Float>> = Maybe.None;
+    let input = (x, mask);
+    let (_, m) = input;
+    match m {
+        Maybe.None => { /* no mask */ }
+        Maybe.Some(_) => assert(false, "Should be None"),
+    }
+}
+
+@test
+fn test_attention_input_with_mask() {
+    let x = zeros(&[1 as USize, 10 as USize, 512 as USize]);
+    let mask = Maybe.Some(zeros(&[1 as USize, 1 as USize, 10 as USize, 10 as USize]));
+    let input = (x, mask);
+    let (_, m) = input;
+    match m {
+        Maybe.Some(_) => { /* has mask */ }
+        Maybe.None => assert(false, "Should have mask"),
+    }
+}
+
+// =============================================================================
+// Standalone Activation Function Import Tests
+// =============================================================================
+
+@test
+fn test_relu_function_exists() {
+    let _ = relu;
+}
+
+@test
+fn test_gelu_function_exists() {
+    let _ = gelu;
+}
+
+@test
+fn test_silu_function_exists() {
+    let _ = silu;
+}
+
+@test
+fn test_sigmoid_function_exists() {
+    let _ = sigmoid;
+}
+
+@test
+fn test_softmax_axis_function_exists() {
+    let _ = softmax_axis;
+}
+
+@test
+fn test_log_softmax_function_exists() {
+    let _ = log_softmax;
+}
+
+@test
+fn test_softplus_function_exists() {
+    let _ = softplus;
+}
+
+// =============================================================================
+// Loss Function Import Tests
+// =============================================================================
+
+@test
+fn test_cross_entropy_loss_function_exists() {
+    let _ = cross_entropy_loss;
+}
+
+@test
+fn test_mse_loss_function_exists() {
+    let _ = mse_loss;
+}
+
+@test
+fn test_smooth_l1_loss_function_exists() {
+    let _ = smooth_l1_loss;
+}
+
+@test
+fn test_binary_cross_entropy_function_exists() {
+    let _ = binary_cross_entropy;
+}
+
+@test
+fn test_binary_cross_entropy_with_logits_function_exists() {
+    let _ = binary_cross_entropy_with_logits;
+}
+
+// =============================================================================
+// Gradient Clipping Import Tests
+// =============================================================================
+
+@test
+fn test_clip_grad_norm_function_exists() {
+    let _ = clip_grad_norm;
+}
+
+@test
+fn test_clip_grad_value_function_exists() {
+    let _ = clip_grad_value;
+}
+
+// =============================================================================
+// Encoding Function Import Tests
+// =============================================================================
+
+@test
+fn test_sinusoidal_encoding_function_exists() {
+    let _ = sinusoidal_encoding;
+}
+
+// =============================================================================
+// Conv2d Builder Method Tests
+// =============================================================================
+
+@test
+fn test_conv2d_kernel_size_field() {
+    let _: fn(&Conv2d) -> USize = |c| c.kernel_size.0;
+    let _: fn(&Conv2d) -> USize = |c| c.kernel_size.1;
+}
+
+@test
+fn test_conv2d_stride_field() {
+    let _: fn(&Conv2d) -> USize = |c| c.stride.0;
+    let _: fn(&Conv2d) -> USize = |c| c.stride.1;
+}
+
+@test
+fn test_conv2d_padding_field() {
+    let _: fn(&Conv2d) -> USize = |c| c.padding.0;
+    let _: fn(&Conv2d) -> USize = |c| c.padding.1;
+}
+
+@test
+fn test_conv2d_field_types() {
+    let _: fn(&Conv2d) -> (USize, USize) = |c| c.kernel_size;
+    let _: fn(&Conv2d) -> (USize, USize) = |c| c.stride;
+    let _: fn(&Conv2d) -> (USize, USize) = |c| c.padding;
+    let _: fn(&Conv2d) -> (USize, USize) = |c| c.dilation;
+}
+
+// =============================================================================
+// MultiHeadAttention Extended Tests
+// =============================================================================
+
+@test
+fn test_multi_head_attention_field_types() {
+    let _: fn(&MultiHeadAttention) -> USize = |m| m.num_heads;
+    let _: fn(&MultiHeadAttention) -> USize = |m| m.head_dim;
+}
+
+@test
+fn test_multi_head_attention_dropout_field() {
+    let _: fn(&MultiHeadAttention) -> &Dropout = |m| &m.dropout;
+}
+
+// =============================================================================
+// FeedForward Extended Tests
+// =============================================================================
+
+@test
+fn test_feed_forward_field_types() {
+    let _: fn(&FeedForward) -> &Activation = |f| &f.activation;
+}
+
+@test
+fn test_feed_forward_dropout_field() {
+    let _: fn(&FeedForward) -> &Dropout = |f| &f.dropout;
+}
+
+// =============================================================================
+// TransformerBlock Tests
+// =============================================================================
+
+@test
+fn test_transformer_block_type_exists() {
+    let _ = TransformerBlock.new;
+}
+
+@test
+fn test_transformer_block_field_types() {
+    let _: fn(&TransformerBlock) -> &LayerNorm = |t| &t.ln1;
+    let _: fn(&TransformerBlock) -> &LayerNorm = |t| &t.ln2;
+    let _: fn(&TransformerBlock) -> &MultiHeadAttention = |t| &t.attn;
+    let _: fn(&TransformerBlock) -> &FeedForward = |t| &t.ffn;
+}
+
+// =============================================================================
+// Activation Distinctness Tests
+// =============================================================================
+
+@test
+fn test_activation_relu_is_not_gelu() {
+    let a = Activation.ReLU;
+    assert(!(a is Activation.GELU), "ReLU should not be GELU");
+    assert(!(a is Activation.SiLU), "ReLU should not be SiLU");
+    assert(!(a is Activation.Tanh), "ReLU should not be Tanh");
+    assert(!(a is Activation.Sigmoid), "ReLU should not be Sigmoid");
+}
+
+@test
+fn test_activation_gelu_is_not_others() {
+    let a = Activation.GELU;
+    assert(!(a is Activation.ReLU), "GELU should not be ReLU");
+    assert(!(a is Activation.SiLU), "GELU should not be SiLU");
+    assert(!(a is Activation.Tanh), "GELU should not be Tanh");
+    assert(!(a is Activation.Sigmoid), "GELU should not be Sigmoid");
+}
+
+@test
+fn test_activation_softmax_different_axes() {
+    let a1 = Activation.Softmax(0);
+    let a2 = Activation.Softmax(-1);
+    let a3 = Activation.Softmax(1);
+    match a1 {
+        Activation.Softmax(axis) => assert_eq(axis, 0),
+        _ => assert(false, "Should be Softmax"),
+    }
+    match a2 {
+        Activation.Softmax(axis) => assert_eq(axis, -1),
+        _ => assert(false, "Should be Softmax"),
+    }
+    match a3 {
+        Activation.Softmax(axis) => assert_eq(axis, 1),
+        _ => assert(false, "Should be Softmax"),
+    }
+}
+
+// =============================================================================
+// RoPE Extended Tests
+// =============================================================================
+
+@test
+fn test_rope_different_base() {
+    let rope = RoPE.new(128 as USize, 500000.0);
+    assert_eq(rope.dim, 128 as USize);
+    assert(rope.base == 500000.0, "Custom base frequency for long context");
+}
+
+@test
+fn test_rope_different_dims() {
+    let rope32 = RoPE.new(32 as USize, 10000.0);
+    let rope64 = RoPE.new(64 as USize, 10000.0);
+    let rope128 = RoPE.new(128 as USize, 10000.0);
+    assert_eq(rope32.dim, 32 as USize);
+    assert_eq(rope64.dim, 64 as USize);
+    assert_eq(rope128.dim, 128 as USize);
+}
+
+// =============================================================================
+// Protocol Existence Tests
+// =============================================================================
+
+@test
+fn test_module_protocol_exists() {
+    // Module<In, Out> is a protocol with forward, parameters, parameters_mut
+    let _: fn(&Linear, DynTensor<Float>) -> DynTensor<Float> = |l, x| l.forward(x);
+}
+
+@test
+fn test_serializable_protocol_exists() {
+    let _ = Serializable;
+}
+
+// =============================================================================
+// Dropout Extended Tests
+// =============================================================================
+
+@test
+fn test_dropout_train_eval_roundtrip() {
+    let mut d = Dropout.new(0.3);
+    assert(d.training, "starts in training mode");
+    d.eval();
+    assert(!d.training, "eval sets training=false");
+    d.train();
+    assert(d.training, "train sets training=true");
+    d.eval();
+    assert(!d.training, "second eval also works");
+    d.train();
+    assert(d.training, "second train also works");
+}

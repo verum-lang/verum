@@ -1,0 +1,205 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, lru-cache, data-structure
+// @timeout: 30000
+
+// LRU Cache simulation using arrays
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// LRU Cache: keys array, values array, timestamps array, size, capacity
+// Key=-1 means empty slot. Timestamp increases on each access.
+type LRU is { keys: Arr8, vals: Arr8, times: Arr8, size: Int, cap: Int, clock: Int };
+
+fn lru_new(capacity: Int) -> LRU {
+    let empty = Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    LRU { keys: empty, vals: zeros(), times: zeros(), size: 0, cap: capacity, clock: 0 }
+}
+
+// Find index of key, or -1 if not found
+fn lru_find(cache: LRU, key: Int) -> Int {
+    let mut i = 0;
+    while i < cache.size {
+        if get8(cache.keys, i) == key { return i; }
+        i = i + 1;
+    }
+    -1
+}
+
+// Find index of LRU entry (minimum timestamp)
+fn lru_find_min(cache: LRU) -> Int {
+    let mut min_idx = 0;
+    let mut min_time = get8(cache.times, 0);
+    let mut i = 1;
+    while i < cache.size {
+        let t = get8(cache.times, i);
+        if t < min_time {
+            min_time = t;
+            min_idx = i;
+        }
+        i = i + 1;
+    }
+    min_idx
+}
+
+// Get value for key, returns -1 if not found. Updates timestamp.
+fn lru_get(cache: LRU, key: Int) -> Int {
+    let idx = lru_find(cache, key);
+    if idx == -1 { return -1; }
+    get8(cache.vals, idx)
+}
+
+// Get updated cache after a get operation (updates timestamp)
+fn lru_after_get(cache: LRU, key: Int) -> LRU {
+    let idx = lru_find(cache, key);
+    if idx == -1 { return cache; }
+    let new_clock = cache.clock + 1;
+    LRU {
+        keys: cache.keys,
+        vals: cache.vals,
+        times: set8(cache.times, idx, new_clock),
+        size: cache.size,
+        cap: cache.cap,
+        clock: new_clock
+    }
+}
+
+// Put key-value pair. Evicts LRU if full.
+fn lru_put(cache: LRU, key: Int, val: Int) -> LRU {
+    let new_clock = cache.clock + 1;
+    // Check if key already exists
+    let idx = lru_find(cache, key);
+    if idx >= 0 {
+        // Update existing
+        return LRU {
+            keys: cache.keys,
+            vals: set8(cache.vals, idx, val),
+            times: set8(cache.times, idx, new_clock),
+            size: cache.size,
+            cap: cache.cap,
+            clock: new_clock
+        };
+    }
+    // Not found — insert
+    if cache.size < cache.cap {
+        // Room available
+        return LRU {
+            keys: set8(cache.keys, cache.size, key),
+            vals: set8(cache.vals, cache.size, val),
+            times: set8(cache.times, cache.size, new_clock),
+            size: cache.size + 1,
+            cap: cache.cap,
+            clock: new_clock
+        };
+    }
+    // Full — evict LRU
+    let evict = lru_find_min(cache);
+    LRU {
+        keys: set8(cache.keys, evict, key),
+        vals: set8(cache.vals, evict, val),
+        times: set8(cache.times, evict, new_clock),
+        size: cache.size,
+        cap: cache.cap,
+        clock: new_clock
+    }
+}
+
+fn test_basic_ops() -> Int {
+    let mut c = lru_new(3);
+    c = lru_put(c, 1, 10);
+    c = lru_put(c, 2, 20);
+    c = lru_put(c, 3, 30);
+
+    assert_eq(lru_get(c, 1), 10);
+    assert_eq(lru_get(c, 2), 20);
+    assert_eq(lru_get(c, 3), 30);
+    assert_eq(lru_get(c, 4), -1); // not found
+    assert_eq(c.size, 3);
+    1
+}
+
+fn test_eviction() -> Int {
+    let mut c = lru_new(2);
+    c = lru_put(c, 1, 10); // clock=1
+    c = lru_put(c, 2, 20); // clock=2
+    // Cache full: [1→10 (t=1), 2→20 (t=2)]
+
+    // Put 3 — evicts key 1 (oldest)
+    c = lru_put(c, 3, 30); // clock=3
+    assert_eq(lru_get(c, 1), -1); // evicted
+    assert_eq(lru_get(c, 2), 20);
+    assert_eq(lru_get(c, 3), 30);
+    1
+}
+
+fn test_access_updates_time() -> Int {
+    let mut c = lru_new(2);
+    c = lru_put(c, 1, 10); // clock=1
+    c = lru_put(c, 2, 20); // clock=2
+
+    // Access key 1 to make it recently used
+    c = lru_after_get(c, 1); // clock=3, key 1 time=3
+
+    // Now evict — key 2 (t=2) is older than key 1 (t=3)
+    c = lru_put(c, 3, 30); // clock=4, evicts key 2
+    assert_eq(lru_get(c, 1), 10); // still present
+    assert_eq(lru_get(c, 2), -1); // evicted
+    assert_eq(lru_get(c, 3), 30);
+    1
+}
+
+fn test_update_value() -> Int {
+    let mut c = lru_new(3);
+    c = lru_put(c, 1, 10);
+    c = lru_put(c, 1, 99); // update value
+    assert_eq(lru_get(c, 1), 99);
+    assert_eq(c.size, 1); // no duplicate
+    1
+}
+
+fn test_sequential_evictions() -> Int {
+    let mut c = lru_new(3);
+    c = lru_put(c, 1, 10);
+    c = lru_put(c, 2, 20);
+    c = lru_put(c, 3, 30);
+    c = lru_put(c, 4, 40); // evicts 1
+    c = lru_put(c, 5, 50); // evicts 2
+
+    assert_eq(lru_get(c, 1), -1);
+    assert_eq(lru_get(c, 2), -1);
+    assert_eq(lru_get(c, 3), 30);
+    assert_eq(lru_get(c, 4), 40);
+    assert_eq(lru_get(c, 5), 50);
+    1
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_eviction();
+    test_access_updates_time();
+    test_update_value();
+    test_sequential_evictions();
+    print("[OK] 511_lru_cache_aot");
+    0
+}

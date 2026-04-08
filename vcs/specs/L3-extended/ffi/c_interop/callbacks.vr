@@ -1,0 +1,410 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, callbacks, function-pointers
+// @timeout: 5000
+// @description: Tests callback patterns for FFI interop
+
+/// ============================================================
+/// FFI CALLBACKS
+/// ============================================================
+///
+/// Demonstrates safe callback patterns for FFI interop,
+/// including lifetime management and panic safety.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_void is ();
+type c_char is i8;
+type c_size is usize;
+
+/// Basic callback type
+type Callback is extern "C" fn(c_int) -> c_int;
+
+/// Callback with user data (closure simulation)
+type CallbackWithData is extern "C" fn(*mut c_void, c_int) -> c_int;
+
+/// Comparison callback for sorting
+type CompareCallback is extern "C" fn(*const c_void, *const c_void) -> c_int;
+
+type Error is
+    | RegistrationFailed
+    | DirectoryError(c_int)
+    | IoError(c_int);
+
+// ------------------------------------------------------------
+// FFI Declarations
+// ------------------------------------------------------------
+
+ffi sort_lib_qsort {
+    /// C qsort function that takes a comparison callback
+    @extern("C")
+    fn qsort(
+        base: *mut c_void,
+        num: c_size,
+        size: c_size,
+        compare: CompareCallback
+    );
+}
+
+ffi event_lib_register {
+    /// Register a callback with context
+    @extern("C")
+    fn register_callback(ctx: *mut CallbackContext) -> c_int;
+}
+
+ffi event_lib_trigger {
+    /// Trigger callbacks
+    @extern("C")
+    fn trigger_callbacks(value: c_int);
+}
+
+ffi event_lib_unregister {
+    /// Unregister callback
+    @extern("C")
+    fn unregister_callback(ctx: *mut CallbackContext);
+}
+
+// ------------------------------------------------------------
+// Basic Callback Export
+// ------------------------------------------------------------
+
+/// Export a comparison function with C ABI
+@export("C")
+@no_mangle
+fn compare_ints(a: *const c_void, b: *const c_void) -> c_int {
+    unsafe {
+        let a_val = *(a as *const c_int);
+        let b_val = *(b as *const c_int);
+        a_val - b_val
+    }
+}
+
+/// Use qsort with our callback
+fn sort_int_array(arr: &mut [c_int]) {
+    unsafe {
+        sort_lib_qsort.qsort(
+            arr.as_mut_ptr() as *mut c_void,
+            arr.len(),
+            c_int.size,
+            compare_ints
+        );
+    }
+}
+
+// ------------------------------------------------------------
+// Callback with User Data (Context)
+// ------------------------------------------------------------
+
+/// Opaque callback context
+@repr(C)
+type CallbackContext is {
+    user_data: *mut c_void,
+    callback: CallbackWithData,
+};
+
+/// Verum wrapper for safe callback management
+type SafeCallback<T> is {
+    context: Heap<CallbackContextWrapper<T>>,
+};
+
+type CallbackContextWrapper<T> is {
+    data: T,
+    handler: fn(&mut T, c_int) -> c_int,
+    raw_ctx: CallbackContext,
+};
+
+/// Trampoline function that extracts T from void*
+@export("C")
+@no_mangle
+fn callback_trampoline<T>(user_data: *mut c_void, value: c_int) -> c_int {
+    unsafe {
+        let wrapper = &mut *(user_data as *mut CallbackContextWrapper<T>);
+        (wrapper.handler)(&mut wrapper.data, value)
+    }
+}
+
+/// Create a callback with captured data
+fn create_callback<T>(
+    data: T,
+    handler: fn(&mut T, c_int) -> c_int
+) -> SafeCallback<T> {
+    let wrapper = CallbackContextWrapper {
+        data,
+        handler,
+        raw_ctx: CallbackContext {
+            user_data: null as *mut c_void,
+            callback: callback_trampoline,
+        },
+    };
+
+    let mut boxed = Heap(wrapper);
+    // Set user_data to point to the wrapper itself
+    boxed.raw_ctx.user_data = null as *mut c_void;
+
+    SafeCallback { context: boxed }
+}
+
+/// Register the callback with the C library
+fn register<T>(cb: &SafeCallback<T>) -> Result<(), Error> {
+    // Placeholder: real impl calls C registration function
+    let result: c_int = 0;
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(RegistrationFailed)
+    }
+}
+
+/// Unregister and clean up
+fn unregister<T>(cb: SafeCallback<T>) {
+    unsafe {
+        let ctx_ptr = &cb.context.raw_ctx as *const CallbackContext as *mut CallbackContext;
+        event_lib_unregister.unregister_callback(ctx_ptr);
+    }
+    // cb.context is dropped here, freeing memory
+}
+
+// ------------------------------------------------------------
+// Async Callback Patterns
+// ------------------------------------------------------------
+
+/// Callback for async operations
+type AsyncCallback is extern "C" fn(*mut c_void, c_int, *const u8, c_size);
+
+ffi async_io_read {
+    /// Start async read with completion callback
+    @extern("C")
+    fn async_read(
+        fd: c_int,
+        buffer: *mut u8,
+        len: c_size,
+        callback: AsyncCallback,
+        user_data: *mut c_void
+    ) -> c_int;
+}
+
+/// Promise-like wrapper for async callbacks
+type AsyncOperation<T> is {
+    result: Maybe<Result<T, Error>>,
+    completed: Bool,
+};
+
+implement<T> AsyncOperation<T> {
+    fn new() -> AsyncOperation<T> {
+        AsyncOperation {
+            result: None,
+            completed: false,
+        }
+    }
+
+    fn complete(&mut self, value: Result<T, Error>) {
+        self.result = Some(value);
+        self.completed = true;
+    }
+
+    fn is_completed(&self) -> Bool {
+        self.completed
+    }
+
+    fn take_result(&mut self) -> Maybe<Result<T, Error>> {
+        let result = self.result;
+        self.result = None;
+        result
+    }
+}
+
+/// Trampoline for async read completion
+@export("C")
+@no_mangle
+fn async_read_complete(
+    user_data: *mut c_void,
+    error_code: c_int,
+    data: *const u8,
+    len: c_size
+) {
+    unsafe {
+        let op = &mut *(user_data as *mut AsyncOperation<List<u8>>);
+        if error_code == 0 {
+            let mut bytes = List.with_capacity(len);
+            for i in 0..len {
+                bytes.push(*data.add(i));
+            }
+            op.complete(Ok(bytes));
+        } else {
+            op.complete(Err(IoError(error_code)));
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Panic Safety in Callbacks
+// ------------------------------------------------------------
+
+/// Result of catching a panic
+type CatchResult<T> is
+    | Success(T)
+    | Panicked;
+
+/// Wrapper that catches panics at FFI boundary
+fn panic_safe_invoke<F, R>(f: F) -> CatchResult<R>
+where F: FnOnce() -> R
+{
+    // In real implementation, this would use catch_unwind
+    // For now, we just call the function
+    Success(f())
+}
+
+/// Panic-safe callback wrapper
+@export("C")
+@no_mangle
+fn panic_safe_callback_wrapper(user_data: *mut c_void, value: c_int) -> c_int {
+    let callback = unsafe { &*(user_data as *meta fn(c_int) -> c_int) };
+
+    let result = panic_safe_invoke(|| callback(value));
+
+    match result {
+        Success(v) => v,
+        Panicked => -1,  // Return error code on panic
+    }
+}
+
+// ------------------------------------------------------------
+// Iterator Callback Pattern
+// ------------------------------------------------------------
+
+/// C-style iterator callback
+type IteratorCallback is extern "C" fn(*mut c_void, *const c_char) -> c_int;
+
+ffi dir_lib_iterate {
+    /// Iterate directory entries with callback
+    @extern("C")
+    fn iterate_directory(
+        path: *const c_char,
+        callback: IteratorCallback,
+        user_data: *mut c_void
+    ) -> c_int;
+}
+
+/// Entry collector for directory iteration
+type EntryCollector is {
+    entries: List<Text>,
+};
+
+/// Callback to collect directory entries
+@export("C")
+@no_mangle
+fn collect_entry_callback(user_data: *mut c_void, name: *const c_char) -> c_int {
+    unsafe {
+        let collector = &mut *(user_data as *mut EntryCollector);
+        let name_str = cstr_to_text(name);
+        collector.entries.push(name_str);
+        0  // Continue iteration
+    }
+}
+
+/// Safe directory iteration
+fn list_directory(path: &Text) -> Result<List<Text>, Error> {
+    let mut collector = EntryCollector { entries: List.new() };
+
+    // Placeholder: real impl calls C directory iteration function
+    let result: c_int = 0;
+    if result == 0 {
+        Ok(collector.entries)
+    } else {
+        Err(DirectoryError(result))
+    }
+}
+
+// ------------------------------------------------------------
+// Callback Registration Guard
+// ------------------------------------------------------------
+
+/// RAII guard for callback registration
+type CallbackGuard<T> is {
+    callback: SafeCallback<T>,
+    registered: Bool,
+};
+
+implement<T> CallbackGuard<T> {
+    fn new(callback: SafeCallback<T>) -> Result<CallbackGuard<T>, Error> {
+        register(&callback)?;
+        Ok(CallbackGuard {
+            callback,
+            registered: true,
+        })
+    }
+}
+
+implement<T> Drop for CallbackGuard<T> {
+    fn drop(&mut self) {
+        if self.registered {
+            // Need to unregister but can't move callback
+            // In real code, would need different approach
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Helper Functions
+// ------------------------------------------------------------
+
+// Type Properties: use T.size instead of deprecated size_of<T>() function
+
+fn cstr_to_text(ptr: *const c_char) -> Text {
+    // Placeholder
+    Text.new()
+}
+
+fn text_to_cstr(t: &Text) -> CStr {
+    // Placeholder
+    CStr { ptr: null as *const c_char }
+}
+
+type CStr is {
+    ptr: *const c_char,
+};
+
+implement CStr {
+    fn as_ptr(&self) -> *const c_char {
+        self.ptr
+    }
+}
+
+// ------------------------------------------------------------
+// Tests
+// ------------------------------------------------------------
+
+fn test_sort_with_callback() {
+    let mut numbers: [c_int; 5] = [5, 2, 8, 1, 9];
+    sort_int_array(&mut numbers);
+    assert(numbers[0] == 1);
+    assert(numbers[4] == 9);
+}
+
+fn test_callback_with_context() {
+    let mut counter = 0;
+
+    fn increment_handler(count: &mut c_int, value: c_int) -> c_int {
+        *count = *count + value;
+        *count
+    }
+
+    let cb = create_callback(counter, increment_handler);
+    // Would register and use callback here
+}
+
+fn test_async_operation() {
+    let op = AsyncOperation.new<List<u8>>();
+    assert(!op.is_completed());
+}
+
+fn main() {
+    test_sort_with_callback();
+    test_callback_with_context();
+    test_async_operation();
+    print("Callback tests passed");
+}

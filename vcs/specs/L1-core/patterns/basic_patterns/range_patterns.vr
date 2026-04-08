@@ -1,0 +1,309 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, range, basic
+//
+// Tests range patterns for matching contiguous values in pattern matching.
+// Supports inclusive ranges (1..=10), exclusive ranges (1..10), and
+// half-open ranges (1.., ..10).
+
+//------------------------------------------------------------------------------
+// Inclusive Range Patterns (..=)
+//------------------------------------------------------------------------------
+
+/// Inclusive range for integers.
+fn range_inclusive_int(n: Int) -> Text {
+    match n {
+        0..=9 => "single digit",
+        10..=99 => "two digits",
+        100..=999 => "three digits",
+        _ => "other",
+    }
+}
+
+/// Inclusive range for characters.
+fn range_inclusive_char(c: Char) -> Text {
+    match c {
+        'a'..='z' => "lowercase letter",
+        'A'..='Z' => "uppercase letter",
+        '0'..='9' => "digit",
+        _ => "other",
+    }
+}
+
+/// Inclusive range with single value (edge case).
+fn range_single_value(n: Int) -> Text {
+    match n {
+        0..=0 => "zero only",
+        1..=1 => "one only",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Exclusive Range Patterns (..)
+//------------------------------------------------------------------------------
+
+/// Exclusive range for integers.
+fn range_exclusive_int(n: Int) -> Text {
+    match n {
+        0..10 => "zero to nine",
+        10..100 => "ten to ninety-nine",
+        100..1000 => "hundred to nine ninety-nine",
+        _ => "other",
+    }
+}
+
+/// Range for characters (using inclusive ranges).
+fn range_exclusive_char(c: Char) -> Text {
+    match c {
+        'a'..='m' => "first half lowercase",
+        'n'..='z' => "second half lowercase",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Half-Open Range Patterns
+//------------------------------------------------------------------------------
+
+/// Open end range (start..).
+fn range_open_end(n: Int) -> Text {
+    match n {
+        ..0 => "negative",
+        0 => "zero",
+        1.. => "positive",
+    }
+}
+
+/// Open start range (..end).
+fn range_open_start(n: Int) -> Text {
+    match n {
+        ..=-1 => "negative",
+        0 => "zero",
+        1..=100 => "small positive",
+        101.. => "large positive",
+    }
+}
+
+/// Negative range.
+fn range_negative(n: Int) -> Text {
+    match n {
+        ..-100 => "very negative",
+        -100..=-1 => "moderately negative",
+        0 => "zero",
+        1..=100 => "moderately positive",
+        101.. => "very positive",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Character Ranges
+//------------------------------------------------------------------------------
+
+/// ASCII letter classification.
+fn classify_letter(c: Char) -> Text {
+    match c {
+        'a'..='f' | 'A'..='F' => "hex letter",
+        'g'..='z' | 'G'..='Z' => "non-hex letter",
+        _ => "not a letter",
+    }
+}
+
+/// Digit ranges.
+fn classify_digit(c: Char) -> Text {
+    match c {
+        '0'..='1' => "binary digit",
+        '2'..='7' => "octal-only digit",
+        '8'..='9' => "decimal-only digit",
+        _ => "not a digit",
+    }
+}
+
+/// Unicode ranges.
+fn classify_unicode(c: Char) -> Text {
+    match c {
+        '\u{0000}'..='\u{007F}' => "ASCII",
+        '\u{0080}'..='\u{00FF}' => "Latin-1 Supplement",
+        '\u{0100}'..='\u{017F}' => "Latin Extended-A",
+        '\u{0370}'..='\u{03FF}' => "Greek and Coptic",
+        '\u{0400}'..='\u{04FF}' => "Cyrillic",
+        '\u{4E00}'..='\u{9FFF}' => "CJK Unified Ideographs",
+        _ => "Other Unicode",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Range Patterns with Guards
+//------------------------------------------------------------------------------
+
+/// Range with additional guard condition.
+fn range_with_guard(n: Int) -> Text {
+    match n {
+        x @ 0..=100 if x % 2 == 0 => "small even",
+        x @ 0..=100 if x % 2 != 0 => "small odd",
+        x @ 101.. if x % 2 == 0 => "large even",
+        x @ 101.. => "large odd",
+        _ => "negative",
+    }
+}
+
+/// Range combined with binding.
+fn range_bound(n: Int) -> (Text, Int) {
+    match n {
+        x @ 1..=10 => ("single digit positive", x),
+        x @ 11..=100 => ("two digit", x),
+        x @ _ => ("other", x),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Overlapping and Adjacent Ranges
+//------------------------------------------------------------------------------
+
+/// Adjacent ranges (no gaps).
+fn adjacent_ranges(n: Int) -> Text {
+    match n {
+        ..0 => "negative",
+        0..=9 => "single digit",
+        10..=99 => "two digits",
+        100..=999 => "three digits",
+        1000.. => "four or more digits",
+    }
+}
+
+/// Ranges with specific literals.
+fn range_with_literals(n: Int) -> Text {
+    match n {
+        0 => "exactly zero",
+        1..=9 => "small positive",
+        10 => "exactly ten",
+        11..=99 => "rest of two digit",
+        100 => "exactly hundred",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Range Patterns in Tuples
+//------------------------------------------------------------------------------
+
+/// Range patterns in tuple elements.
+fn range_in_tuple(point: (Int, Int)) -> Text {
+    match point {
+        (0..=10, 0..=10) => "first quadrant, near origin",
+        (-10..=0, 0..=10) => "second quadrant, near origin",
+        (-10..=0, -10..=0) => "third quadrant, near origin",
+        (0..=10, -10..=0) => "fourth quadrant, near origin",
+        _ => "far from origin",
+    }
+}
+
+/// Mixed range and literal in tuple.
+fn range_mixed_tuple(data: (Char, Int)) -> Text {
+    match data {
+        ('a'..='z', 0..=100) => "lowercase with small number",
+        ('A'..='Z', 0..=100) => "uppercase with small number",
+        (_, 0..=100) => "other char with small number",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Range Patterns with Enums
+//------------------------------------------------------------------------------
+
+type Status is
+    | Code(Int)
+    | Named(Text);
+
+/// Range inside enum variant.
+fn range_in_enum(s: Status) -> Text {
+    match s {
+        Code(200..=299) => "success",
+        Code(300..=399) => "redirect",
+        Code(400..=499) => "client error",
+        Code(500..=599) => "server error",
+        Code(_) => "unknown code",
+        Named(_) => "named status",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Edge Cases
+//------------------------------------------------------------------------------
+
+/// Empty-looking range (start == end for exclusive).
+fn range_empty_exclusive(n: Int) -> Text {
+    match n {
+        5..5 => "impossible",  // This range is empty
+        5 => "five",
+        _ => "other",
+    }
+}
+
+/// Byte range (using Int to match literal range patterns).
+fn range_byte(b: Int) -> Text {
+    match b {
+        0x00..=0x1F => "control character",
+        0x20..=0x7E => "printable ASCII",
+        0x7F => "DEL",
+        0x80..=0xFF => "extended ASCII",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Inclusive ranges
+    assert(range_inclusive_int(5) == "single digit");
+    assert(range_inclusive_int(50) == "two digits");
+    assert(range_inclusive_int(500) == "three digits");
+
+    // Character ranges
+    assert(range_inclusive_char('m') == "lowercase letter");
+    assert(range_inclusive_char('M') == "uppercase letter");
+    assert(range_inclusive_char('5') == "digit");
+    assert(range_inclusive_char('!') == "other");
+
+    // Exclusive ranges
+    assert(range_exclusive_int(5) == "zero to nine");
+    assert(range_exclusive_int(50) == "ten to ninety-nine");
+
+    // Half-open ranges
+    assert(range_open_end(-5) == "negative");
+    assert(range_open_end(0) == "zero");
+    assert(range_open_end(5) == "positive");
+
+    // Letter classification
+    assert(classify_letter('a') == "hex letter");
+    assert(classify_letter('F') == "hex letter");
+    assert(classify_letter('g') == "non-hex letter");
+    assert(classify_letter('5') == "not a letter");
+
+    // Range with guard
+    assert(range_with_guard(50) == "small even");
+    assert(range_with_guard(51) == "small odd");
+    assert(range_with_guard(200) == "large even");
+
+    // Adjacent ranges
+    assert(adjacent_ranges(-5) == "negative");
+    assert(adjacent_ranges(5) == "single digit");
+    assert(adjacent_ranges(50) == "two digits");
+    assert(adjacent_ranges(500) == "three digits");
+    assert(adjacent_ranges(5000) == "four or more digits");
+
+    // Range in tuple
+    assert(range_in_tuple((5, 5)) == "first quadrant, near origin");
+    assert(range_in_tuple((-5, 5)) == "second quadrant, near origin");
+    assert(range_in_tuple((100, 100)) == "far from origin");
+
+    // Range in enum
+    assert(range_in_enum(Code(200)) == "success");
+    assert(range_in_enum(Code(404)) == "client error");
+    assert(range_in_enum(Code(500)) == "server error");
+    assert(range_in_enum(Named("OK")) == "named status");
+}

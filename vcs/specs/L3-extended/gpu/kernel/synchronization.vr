@@ -1,0 +1,278 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, kernel, synchronization
+
+// Basic barrier synchronization
+@kernel(block_size = 256)
+fn barrier_example(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [N]>
+) {
+    @shared let sdata: [f32; 256];
+
+    let tid = local_id().x;
+    let idx = global_id().x;
+
+    // Phase 1: Load data
+    sdata[tid] = if idx < N { input[idx] } else { 0.0 };
+
+    // Wait for all threads to complete loading
+    barrier();
+
+    // Phase 2: Process data (each thread reads neighborps data)
+    let neighbor_idx = (tid + 1) % 256;
+    let result = sdata[tid] + sdata[neighbor_idx];
+
+    // Wait before writing to shared memory again
+    barrier();
+
+    sdata[tid] = result;
+
+    barrier();
+
+    // Phase 3: Write output
+    if idx < N {
+        output[idx] = sdata[tid];
+    }
+}
+
+// Warp-level synchronization (no explicit barrier needed within warp)
+@kernel(block_size = 256)
+fn warp_reduce(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [NUM_BLOCKS]>
+) {
+    @shared let sdata: [f32; 256];
+
+    let tid = local_id().x;
+    let idx = global_id().x;
+    let warp_id = tid / 32;
+    let lane_id = tid % 32;
+
+    sdata[tid] = if idx < N { input[idx] } else { 0.0 };
+    barrier();
+
+    // Reduction using warp shuffles (no barrier needed)
+    let mut val = sdata[tid];
+
+    // Warp-level reduction using shuffle
+    val += warp_shuffle_down(val, 16);
+    val += warp_shuffle_down(val, 8);
+    val += warp_shuffle_down(val, 4);
+    val += warp_shuffle_down(val, 2);
+    val += warp_shuffle_down(val, 1);
+
+    // First thread of each warp writes to shared memory
+    if lane_id == 0 {
+        sdata[warp_id] = val;
+    }
+
+    barrier();
+
+    // Final reduction by first warp
+    if warp_id == 0 {
+        val = if tid < 8 { sdata[tid] } else { 0.0 };
+
+        val += warp_shuffle_down(val, 4);
+        val += warp_shuffle_down(val, 2);
+        val += warp_shuffle_down(val, 1);
+
+        if tid == 0 {
+            output[group_id().x] = val;
+        }
+    }
+}
+
+// Memory fence for global memory visibility
+@kernel(block_size = 256)
+fn memory_fence_example(
+    data: &mut Tensor<f32, [N]>,
+    flags: &mut Tensor<u32, [N]>
+) {
+    let idx = global_id().x;
+
+    if idx < N {
+        // Write data
+        data[idx] = idx as f32;
+
+        // Ensure data write is visible before flag
+        thread_fence();  // All memory operations before are visible
+
+        // Set flag to indicate data is ready
+        atomic_store(&mut flags[idx], 1);
+    }
+}
+
+// Device-wide synchronization using cooperative groups
+@kernel(block_size = 256, cooperative = true)
+fn device_barrier_example(
+    phase1_output: &mut Tensor<f32, [N]>,
+    phase2_output: &mut Tensor<f32, [N]>
+) {
+    let idx = global_id().x;
+
+    // Phase 1: All blocks do initial work
+    if idx < N {
+        phase1_output[idx] = idx as f32;
+    }
+
+    // Wait for ALL blocks to complete phase 1
+    grid_barrier();
+
+    // Phase 2: All blocks can read phase 1 output
+    if idx < N {
+        // Read from any location safely
+        let read_idx = (N - 1 - idx);
+        phase2_output[idx] = phase1_output[read_idx];
+    }
+}
+
+// Conditional barrier (barrier with predicate)
+@kernel(block_size = 256)
+fn conditional_barrier_example(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [N]>,
+    threshold: f32
+) {
+    @shared let count: u32 = 0;
+    @shared let sdata: [f32; 256];
+
+    let tid = local_id().x;
+    let idx = global_id().x;
+
+    let val = if idx < N { input[idx] } else { 0.0 };
+
+    // Count how many values exceed threshold
+    if val > threshold {
+        atomic_add(&mut count, 1);
+    }
+
+    barrier();
+
+    // All threads see the final count
+    let block_count = count;
+
+    sdata[tid] = val;
+
+    barrier();
+
+    // Only process if enough values exceed threshold
+    if block_count > 128 {
+        // Do heavy computation
+        if idx < N {
+            output[idx] = sdata[tid].sqrt();
+        }
+    } else {
+        // Skip computation
+        if idx < N {
+            output[idx] = sdata[tid];
+        }
+    }
+}
+
+// Barrier with acquire/release semantics
+@kernel(block_size = 256)
+fn acquire_release_barrier(
+    buffer: &mut Tensor<f32, [N]>,
+    locks: &mut Tensor<u32, [NUM_BLOCKS]>
+) {
+    let idx = global_id().x;
+    let block = group_id().x;
+
+    if idx < N {
+        buffer[idx] *= 2.0;
+    }
+
+    barrier();
+
+    // Only first thread of block acquires lock and signals completion
+    if local_id().x == 0 {
+        // Release semantics: all previous writes are visible
+        atomic_store_release(&mut locks[block], 1);
+
+        // Wait for previous block to complete (if not first block)
+        if block > 0 {
+            // Acquire semantics: see all previous blockps writes
+            while atomic_load_acquire(&locks[block - 1]) == 0 {
+                // Spin wait
+            }
+        }
+    }
+
+    barrier();
+}
+
+// Named barriers (advanced)
+@kernel(block_size = 256)
+fn named_barriers(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [N]>
+) {
+    @shared let buffer1: [f32; 128];
+    @shared let buffer2: [f32; 128];
+
+    let tid = local_id().x;
+    let idx = global_id().x;
+
+    // Split threads into two groups
+    let group = tid / 128;
+    let local_tid = tid % 128;
+
+    if group == 0 {
+        // Group 0 works on buffer1
+        buffer1[local_tid] = if idx < N { input[idx] } else { 0.0 };
+        barrier_named(0);  // Only threads in this group wait
+        buffer1[local_tid] *= 2.0;
+    } else {
+        // Group 1 works on buffer2
+        buffer2[local_tid] = if idx < N { input[idx] } else { 0.0 };
+        barrier_named(1);  // Only threads in this group wait
+        buffer2[local_tid] += 1.0;
+    }
+
+    // Full block barrier before combining results
+    barrier();
+
+    // Combine results
+    if group == 0 && idx < N {
+        output[idx] = buffer1[local_tid] + buffer2[local_tid];
+    }
+}
+
+// Synchronization with divergent control flow
+@kernel(block_size = 256)
+fn divergent_sync(
+    input: &Tensor<f32, [N]>,
+    output: &mut Tensor<f32, [N]>,
+    mask: &Tensor<bool, [N]>
+) {
+    @shared let sdata: [f32; 256];
+
+    let tid = local_id().x;
+    let idx = global_id().x;
+
+    let val = if idx < N { input[idx] } else { 0.0 };
+    let should_process = idx < N && mask[idx];
+
+    // All threads participate in barrier, regardless of divergence
+    sdata[tid] = val;
+    barrier();  // Must be reached by ALL threads
+
+    // Divergent computation
+    let result = if should_process {
+        // Complex computation path
+        sdata[tid].sqrt() * 2.0
+    } else {
+        // Simple path
+        sdata[tid]
+    };
+
+    // Another barrier - all threads must reach this
+    barrier();
+
+    if idx < N {
+        output[idx] = result;
+    }
+}

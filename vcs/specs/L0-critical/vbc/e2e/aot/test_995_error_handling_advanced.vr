@@ -1,0 +1,252 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: error, result, try, recover, advanced, chaining
+// @description: Advanced error patterns — try/recover with multiple error types, error context chaining, custom error types with methods
+
+type IoError is
+    | FileNotFound(Text)
+    | PermissionDenied(Text)
+    | Timeout;
+
+type ParseError is
+    | BadFormat(Text)
+    | EmptyInput;
+
+type AppError is
+    | Io(Text)
+    | Parse(Text)
+    | Logic(Text);
+
+fn io_error_message(e: IoError) -> Text {
+    match e {
+        FileNotFound(path) => f"file not found: {path}",
+        PermissionDenied(path) => f"permission denied: {path}",
+        Timeout => "operation timed out",
+    }
+}
+
+fn parse_error_message(e: ParseError) -> Text {
+    match e {
+        BadFormat(detail) => f"bad format: {detail}",
+        EmptyInput => "empty input",
+    }
+}
+
+fn read_config(path: Text) -> Result<Text, IoError> {
+    if path == "/missing" {
+        Err(IoError.FileNotFound(path))
+    } else if path == "/secret" {
+        Err(IoError.PermissionDenied(path))
+    } else {
+        Ok("key=value")
+    }
+}
+
+fn parse_config(text: Text) -> Result<Int, ParseError> {
+    if text == "" {
+        Err(ParseError.EmptyInput)
+    } else if text == "bad" {
+        Err(ParseError.BadFormat("invalid syntax"))
+    } else {
+        // Extract numeric value after '='
+        Ok(42)
+    }
+}
+
+fn load_config(path: Text) -> Result<Int, AppError> {
+    let content = match read_config(path) {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = io_error_message(e);
+            return Err(AppError.Io(msg));
+        }
+    };
+
+    let value = match parse_config(content) {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = parse_error_message(e);
+            return Err(AppError.Parse(msg));
+        }
+    };
+
+    if value < 0 {
+        return Err(AppError.Logic("negative config value"));
+    }
+    Ok(value)
+}
+
+fn test_try_recover_multiple() -> Int {
+    // Success path
+    let result = try {
+        let v = load_config("/etc/config")?;
+        v
+    } recover |err| {
+        -1
+    };
+
+    if result != 42 {
+        print(f"FAIL success: expected 42, got {result}");
+        return 1;
+    }
+
+    // IO error path
+    let result2 = try {
+        let v = load_config("/missing")?;
+        v
+    } recover |err| {
+        -1
+    };
+
+    if result2 != -1 {
+        print(f"FAIL io error: expected -1, got {result2}");
+        return 1;
+    }
+
+    print("  try_recover_multiple: OK");
+    0
+}
+
+fn test_error_chain() -> Int {
+    // Chain multiple fallible operations
+    match load_config("/missing") {
+        Ok(_) => {
+            print("FAIL: expected error for /missing");
+            return 1;
+        }
+        Err(e) => {
+            match e {
+                Io(msg) => {
+                    if msg != "file not found: /missing" {
+                        print(f"FAIL: wrong IO error: {msg}");
+                        return 1;
+                    }
+                }
+                _ => {
+                    print("FAIL: expected Io error variant");
+                    return 1;
+                }
+            }
+        }
+    }
+
+    match load_config("/secret") {
+        Ok(_) => {
+            print("FAIL: expected error for /secret");
+            return 1;
+        }
+        Err(e) => {
+            match e {
+                Io(msg) => {
+                    if msg != "permission denied: /secret" {
+                        print(f"FAIL: wrong perm error: {msg}");
+                        return 1;
+                    }
+                }
+                _ => {
+                    print("FAIL: expected Io error for /secret");
+                    return 1;
+                }
+            }
+        }
+    }
+
+    print("  error_chain: OK");
+    0
+}
+
+fn test_nested_try_recover() -> Int {
+    let outer = try {
+        let inner = try {
+            let v = load_config("/missing")?;
+            v
+        } recover |err| {
+            // Recover from inner error, try fallback
+            let fallback = try {
+                let v = load_config("/etc/config")?;
+                v
+            } recover |err2| {
+                -99
+            };
+            fallback
+        };
+        inner
+    } recover |err| {
+        -999
+    };
+
+    if outer != 42 {
+        print(f"FAIL nested: expected 42, got {outer}");
+        return 1;
+    }
+
+    print("  nested_try_recover: OK");
+    0
+}
+
+fn test_error_with_context() -> Int {
+    // Wrap errors with additional context
+    let mut errors = List.new();
+
+    let paths = ["/etc/config", "/missing", "/secret"];
+    let mut i = 0;
+    while i < paths.len() {
+        match load_config(paths[i]) {
+            Ok(v) => {}
+            Err(e) => {
+                match e {
+                    Io(msg) => errors.push(f"IO: {msg}"),
+                    Parse(msg) => errors.push(f"Parse: {msg}"),
+                    Logic(msg) => errors.push(f"Logic: {msg}"),
+                }
+            }
+        }
+        i = i + 1;
+    }
+
+    if errors.len() != 2 {
+        print(f"FAIL context: expected 2 errors, got {errors.len()}");
+        return 1;
+    }
+
+    print("  error_with_context: OK");
+    0
+}
+
+fn test_result_combinators() -> Int {
+    // Manual map/and_then patterns
+    let r1 = load_config("/etc/config");
+    let mut doubled_val = 0;
+    let mut had_error = false;
+    match r1 {
+        Ok(v) => doubled_val = v * 2,
+        Err(_) => had_error = true,
+    };
+
+    if had_error {
+        print("FAIL combinator: unexpected error");
+        return 1;
+    }
+    if doubled_val != 84 {
+        print(f"FAIL combinator: expected 84, got {doubled_val}");
+        return 1;
+    }
+
+    print("  result_combinators: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_try_recover_multiple();
+    failures = failures + test_error_chain();
+    failures = failures + test_nested_try_recover();
+    failures = failures + test_error_with_context();
+    failures = failures + test_result_combinators();
+
+    if failures == 0 {
+        print("All advanced error handling tests passed");
+    }
+    failures
+}

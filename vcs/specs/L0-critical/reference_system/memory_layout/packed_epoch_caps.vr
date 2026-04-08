@@ -1,0 +1,141 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, epoch, capabilities
+
+/// Test the packed epoch+capabilities field layout.
+/// This 4-byte field stores epoch timestamp and access capabilities.
+/// Encoding: ((epoch & 0x00FF_FFFF) << 8) | capability_bits
+/// Spec: 26-cbgr-implementation.md#epoch-caps-encoding
+
+fn main() {
+    test_epoch_caps_encoding();
+    print("  [OK] test_epoch_caps_encoding");
+    test_capability_flags();
+    print("  [OK] test_capability_flags");
+    test_epoch_extraction();
+    print("  [OK] test_epoch_extraction");
+    test_combined_operations();
+    print("  [OK] test_combined_operations");
+    test_pack_unpack();
+    print("  [OK] test_pack_unpack");
+
+    print("All packed epoch+caps tests passed!");
+}
+
+/// Test the basic epoch_caps encoding
+fn test_epoch_caps_encoding() {
+    // epoch_caps packs epoch and capabilities into a single integer:
+    // - Lower 8 bits: capability flags
+    // - Upper 24 bits: epoch value
+
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    let epoch_caps = ref_val.epoch_caps_raw();
+
+    // Should be non-zero (has both epoch and at least read capability)
+    assert(epoch_caps != 0);
+
+    // Extract components
+    let caps_bits = epoch_caps & 0xFF;
+    let epoch_bits = (epoch_caps >> 8) & 0x00FFFFFF;
+
+    // Capabilities should include at least read (bit 0)
+    assert(caps_bits & 0x01 != 0);
+
+    // Epoch should be positive
+    assert(epoch_bits > 0);
+}
+
+/// Test capability flag extraction via built-in methods
+fn test_capability_flags() {
+    // Capability flags (lower 8 bits of packed epoch_caps):
+    // bit 0: can_read
+    // bit 1: can_write
+
+    // Immutable reference to heap-allocated value
+    let value = Heap.new(100);
+    let immut_ref: &Int = &*value;
+
+    // Mutable reference to separate heap-allocated value
+    let mut value2 = Heap.new(200);
+    let mut_ref: &mut Int = &mut value2;
+
+    // Immutable should have read but not write
+    assert(immut_ref.capabilities().can_read());
+    assert(!immut_ref.capabilities().can_write());
+
+    // Mutable should have both read and write
+    assert(mut_ref.capabilities().can_read());
+    assert(mut_ref.capabilities().can_write());
+}
+
+/// Test epoch value extraction from references
+fn test_epoch_extraction() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    let epoch = ref_val.epoch();
+    let current = Epoch.current();
+
+    // Reference epoch should be <= current
+    assert(epoch <= current);
+
+    // And relatively recent (within validity window)
+    assert(current - epoch < 1_000_000);
+}
+
+/// Test combined epoch and capability operations on different ref types
+fn test_combined_operations() {
+    // Use separate allocations to avoid borrow checker aliasing
+    let data1 = Heap.new(42);
+    let mut data2 = Heap.new(42);
+
+    // Create immutable and mutable references
+    let ref1: &Int = &*data1;
+    let ref2: &mut Int = &mut data2;
+
+    // Extract capabilities via packed epoch_caps
+    let caps1 = ref1.epoch_caps_raw() & 0xFF;
+    let caps2 = ref2.epoch_caps_raw() & 0xFF;
+
+    // Immutable ref: read-only (0x01)
+    assert(caps1 == 1);
+
+    // Mutable ref: read+write (0x03)
+    assert(caps2 == 3);
+
+    // Capabilities differ between immutable and mutable
+    assert(caps1 != caps2);
+}
+
+/// Demonstrate packing and unpacking of epoch+caps values
+fn test_pack_unpack() {
+    let epoch = 12345;
+    let caps = 3;  // read + write
+
+    // Pack into single value (same encoding as CBGR uses)
+    let packed = ((epoch & 0x00FFFFFF) << 8) | (caps & 0xFF);
+
+    // Unpack
+    let unpacked_epoch = (packed >> 8) & 0x00FFFFFF;
+    let unpacked_caps = packed & 0xFF;
+
+    assert(unpacked_epoch == epoch);
+    assert(unpacked_caps == caps);
+
+    // Verify specific capability bits
+    assert(unpacked_caps & 0x01 != 0);  // can_read
+    assert(unpacked_caps & 0x02 != 0);  // can_write
+}
+
+// Supporting types
+
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+}

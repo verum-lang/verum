@@ -1,0 +1,91 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, closures, capture, higher-order
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests closure variable capture, closure factories, and closures as
+// function arguments/return values.
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x| x * n
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn test_closure_capture() {
+    let add5 = make_adder(5);
+    assert_eq(add5(10), 15);
+    assert_eq(add5(0), 5);
+    assert_eq(add5(-3), 2);
+
+    let add10 = make_adder(10);
+    assert_eq(add10(5), 15);
+    assert_eq(add10(add5(3)), 18);
+    print("closure_capture: ok");
+}
+
+fn test_multiplier() {
+    let times3 = make_multiplier(3);
+    assert_eq(times3(7), 21);
+    assert_eq(times3(0), 0);
+    assert_eq(times3(-2), -6);
+
+    let times10 = make_multiplier(10);
+    assert_eq(times10(42), 420);
+    print("multiplier: ok");
+}
+
+fn test_apply_twice() {
+    let add3 = make_adder(3);
+    assert_eq(apply_twice(add3, 10), 16);  // (10+3)+3 = 16
+
+    let double = make_multiplier(2);
+    assert_eq(apply_twice(double, 5), 20);  // (5*2)*2 = 20
+
+    print("apply_twice: ok");
+}
+
+fn test_closure_in_loop() {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 5 {
+        let adder = make_adder(i);
+        total = total + adder(100);
+        i = i + 1;
+    }
+    // 101 + 102 + 103 + 104 + 105 = 515
+    assert_eq(total, 515);
+    print("closure_in_loop: ok");
+}
+
+fn test_closure_composition() {
+    let add1 = make_adder(1);
+    let mul2 = make_multiplier(2);
+
+    // Manual composition via closure
+    let result1 = mul2(add1(5));   // (5+1)*2 = 12
+    assert_eq(result1, 12);
+
+    let result2 = add1(mul2(5));   // (5*2)+1 = 11
+    assert_eq(result2, 11);
+
+    print("closure_composition: ok");
+}
+
+fn main() -> Int {
+    test_closure_capture();
+    test_multiplier();
+    test_apply_twice();
+    test_closure_in_loop();
+    test_closure_composition();
+    print("[OK] 395_interp_closures_capture");
+    0
+}

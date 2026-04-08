@@ -1,0 +1,137 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: tensor, arithmetic
+
+fn main() {
+    // Vector arithmetic
+    let a: Tensor<f32, [4]> = tensor<4>f32{1.0, 2.0, 3.0, 4.0};
+    let b: Tensor<f32, [4]> = tensor<4>f32{2.0, 3.0, 4.0, 5.0};
+
+    // Element-wise addition
+    let sum = a + b;
+    assert(sum[0] == 3.0);
+    assert(sum[1] == 5.0);
+    assert(sum[2] == 7.0);
+    assert(sum[3] == 9.0);
+
+    // Element-wise subtraction
+    let diff = b - a;
+    assert(diff[0] == 1.0);
+    assert(diff[1] == 1.0);
+    assert(diff[2] == 1.0);
+    assert(diff[3] == 1.0);
+
+    // Element-wise multiplication (Hadamard product)
+    let prod = a * b;
+    assert(prod[0] == 2.0);
+    assert(prod[1] == 6.0);
+    assert(prod[2] == 12.0);
+    assert(prod[3] == 20.0);
+
+    // Element-wise division
+    let quot = b / a;
+    assert(quot[0] == 2.0);
+    assert(quot[1] == 1.5);
+    assert(quot[2] == 4.0 / 3.0);
+    assert(quot[3] == 1.25);
+
+    // Scalar operations
+    let scaled = a * 2.0;
+    assert(scaled[0] == 2.0);
+    assert(scaled[3] == 8.0);
+
+    let shifted = a + 10.0;
+    assert(shifted[0] == 11.0);
+    assert(shifted[3] == 14.0);
+
+    // Matrix arithmetic
+    let m1: Tensor<f32, [2, 3]> = tensor<2, 3>f32{
+        {1.0, 2.0, 3.0},
+        {4.0, 5.0, 6.0}
+    };
+    let m2: Tensor<f32, [2, 3]> = tensor<2, 3>f32{
+        {2.0, 4.0, 6.0},
+        {8.0, 10.0, 12.0}
+    };
+
+    let m_sum = m1 + m2;
+    assert(m_sum[0, 0] == 3.0);
+    assert(m_sum[1, 2] == 18.0);
+
+    let m_prod = m1 * m2;
+    assert(m_prod[0, 0] == 2.0);
+    assert(m_prod[1, 1] == 50.0);
+
+    // Unary operations
+    let neg = -a;
+    assert(neg[0] == -1.0);
+    assert(neg[3] == -4.0);
+
+    // Power operations
+    let squared = a.pow(2);
+    assert(squared[0] == 1.0);
+    assert(squared[1] == 4.0);
+    assert(squared[2] == 9.0);
+    assert(squared[3] == 16.0);
+
+    let sqrt_vals = squared.sqrt();
+    assert(sqrt_vals[0] == 1.0);
+    assert(sqrt_vals[1] == 2.0);
+
+    // Exponential and logarithm
+    let exp_vals = a.exp();
+    assert((exp_vals[0] - 2.718281828).abs() < 1e-5);
+
+    let log_vals = a.log();
+    assert(log_vals[0] == 0.0);
+    assert((log_vals[1] - 0.693147).abs() < 1e-5);
+
+    // Trigonometric operations
+    let angles: Tensor<f32, [4]> = tensor<4>f32{0.0, 3.14159/2.0, 3.14159, 3.14159*3.0/2.0};
+
+    let sin_vals = angles.sin();
+    assert(sin_vals[0].abs() < 1e-5);  // sin(0) = 0
+    assert((sin_vals[1] - 1.0).abs() < 1e-5);  // sin(pi/2) = 1
+
+    let cos_vals = angles.cos();
+    assert((cos_vals[0] - 1.0).abs() < 1e-5);  // cos(0) = 1
+    assert(cos_vals[1].abs() < 1e-5);  // cos(pi/2) = 0
+
+    // Compound expressions
+    let result = (a * 2.0 + b).pow(2) / 4.0;
+    assert(result.shape() == [4]);
+
+    // In-place operations
+    let mut c: Tensor<f32, [3]> = tensor<3>f32{1.0, 2.0, 3.0};
+    c += tensor<3>f32{1.0, 1.0, 1.0};
+    assert(c[0] == 2.0);
+    assert(c[2] == 4.0);
+
+    c *= 2.0;
+    assert(c[0] == 4.0);
+    assert(c[2] == 8.0);
+
+    // Absolute value
+    let mixed: Tensor<f32, [4]> = tensor<4>f32{-1.0, 2.0, -3.0, 4.0};
+    let abs_vals = mixed.abs();
+    assert(abs_vals[0] == 1.0);
+    assert(abs_vals[2] == 3.0);
+
+    // Min/max element-wise
+    let min_vals = a.min(b);
+    assert(min_vals[0] == 1.0);
+    assert(min_vals[3] == 4.0);
+
+    let max_vals = a.max(b);
+    assert(max_vals[0] == 2.0);
+    assert(max_vals[3] == 5.0);
+
+    // Clamp
+    let clamped = a.clamp(1.5, 3.5);
+    assert(clamped[0] == 1.5);  // Clamped to min
+    assert(clamped[1] == 2.0);  // Unchanged
+    assert(clamped[2] == 3.0);  // Unchanged
+    assert(clamped[3] == 3.5);  // Clamped to max
+}

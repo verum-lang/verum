@@ -1,0 +1,365 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, custom, context, enrichment
+
+/// Error context - enriching errors with additional information.
+/// Patterns for adding context, locations, and debugging information.
+
+/// Basic context wrapper
+type WithContext<E> is {
+    error: E,
+    context: Text
+};
+
+implement<E> WithContext<E> {
+    fn new(error: E, context: Text) -> Self {
+        WithContext { error, context }
+    }
+}
+
+implement<E: Display> Display for WithContext<E> {
+    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
+        formatter.write_str(f"{self.context}: {self.error}")
+    }
+}
+
+/// Extension protocol for adding context to Results
+type ResultExt<T, E> is protocol {
+    /// Add context to an error
+    fn context(self, ctx: Text) -> Result<T, WithContext<E>>;
+
+    /// Add context lazily (only computed on error)
+    fn with_context<F>(self, f: F) -> Result<T, WithContext<E>>
+    where F: Fn() -> Text;
+};
+
+implement<T, E> ResultExt<T, E> for Result<T, E> {
+    fn context(self, ctx: Text) -> Result<T, WithContext<E>> {
+        self.map_err(|e| WithContext.new(e, ctx))
+    }
+
+    fn with_context<F>(self, f: F) -> Result<T, WithContext<E>>
+    where F: Fn() -> Text {
+        self.map_err(|e| WithContext.new(e, f()))
+    }
+}
+
+/// Rich context with multiple layers
+type ContextStack is {
+    messages: List<Text>,
+    locations: List<SourceLocation>
+};
+
+type SourceLocation is {
+    file: Text,
+    line: Int,
+    column: Int,
+    function: Maybe<Text>
+};
+
+implement ContextStack {
+    fn new() -> Self {
+        ContextStack {
+            messages: List.new(),
+            locations: List.new()
+        }
+    }
+
+    fn push(&mut self, message: Text) {
+        self.messages.push(message);
+    }
+
+    fn push_location(&mut self, location: SourceLocation) {
+        self.locations.push(location);
+    }
+
+    fn format_chain(&self) -> Text {
+        let mut result = Text.new();
+        for (i, msg) in self.messages.iter().enumerate() {
+            if i > 0 {
+                result.push_str("\n  caused by: ");
+            }
+            result.push_str(msg);
+        }
+        result
+    }
+}
+
+/// Error with full context
+type ContextualError<E> is {
+    inner: E,
+    context: ContextStack,
+    timestamp: Timestamp,
+    request_id: Maybe<RequestId>
+};
+
+type Timestamp is Int;
+type RequestId is Text;
+
+implement<E: Error> ContextualError<E> {
+    fn new(error: E) -> Self {
+        ContextualError {
+            inner: error,
+            context: ContextStack.new(),
+            timestamp: now(),
+            request_id: current_request_id()
+        }
+    }
+
+    fn with_message(mut self, message: Text) -> Self {
+        self.context.push(message);
+        self
+    }
+
+    fn at_location(mut self, file: Text, line: Int, column: Int) -> Self {
+        self.context.push_location(SourceLocation {
+            file,
+            line,
+            column,
+            function: None
+        });
+        self
+    }
+
+    fn in_function(mut self, function: Text) -> Self {
+        if let Some(loc) = self.context.locations.last_mut() {
+            loc.function = Some(function);
+        }
+        self
+    }
+}
+
+fn now() -> Timestamp {
+    0 // Placeholder
+}
+
+fn current_request_id() -> Maybe<RequestId> {
+    None // Would get from context
+}
+
+/// Span-based context (for tracing integration)
+type SpannedError<E> is {
+    error: E,
+    span_id: SpanId,
+    trace_id: TraceId,
+    parent_span: Maybe<SpanId>
+};
+
+type SpanId is u64;
+type TraceId is u128;
+
+implement<E> SpannedError<E> {
+    fn from_current_span(error: E) -> Self {
+        SpannedError {
+            error,
+            span_id: current_span_id(),
+            trace_id: current_trace_id(),
+            parent_span: parent_span_id()
+        }
+    }
+}
+
+fn current_span_id() -> SpanId { 0 }
+fn current_trace_id() -> TraceId { 0 }
+fn parent_span_id() -> Maybe<SpanId> { None }
+
+/// Operation context - what was being attempted
+type OperationError<E> is {
+    error: E,
+    operation: Operation,
+    arguments: Map<Text, Text>
+};
+
+type Operation is {
+    name: Text,
+    category: Text,
+    started_at: Timestamp
+};
+
+implement<E> OperationError<E> {
+    fn during(error: E, operation_name: Text) -> Self {
+        OperationError {
+            error,
+            operation: Operation {
+                name: operation_name,
+                category: "unknown",
+                started_at: now()
+            },
+            arguments: Map.new()
+        }
+    }
+
+    fn in_category(mut self, category: Text) -> Self {
+        self.operation.category = category;
+        self
+    }
+
+    fn with_arg(mut self, key: Text, value: impl Display) -> Self {
+        self.arguments.insert(key, value.to_text());
+        self
+    }
+}
+
+implement<E: Display> Display for OperationError<E> {
+    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
+        formatter.write_str(f"Operation '{self.operation.name}' failed: {self.error}");
+        if !self.arguments.is_empty() {
+            formatter.write_str("\n  Arguments:");
+            for (k, v) in &self.arguments {
+                formatter.write_str(f"\n    {k}: {v}");
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Resource context - what resource was involved
+type ResourceError<E> is {
+    error: E,
+    resource: ResourceInfo
+};
+
+type ResourceInfo is {
+    kind: Text,
+    id: Maybe<Text>,
+    path: Maybe<Text>,
+    owner: Maybe<Text>
+};
+
+implement<E> ResourceError<E> {
+    fn on_resource(error: E, kind: Text) -> Self {
+        ResourceError {
+            error,
+            resource: ResourceInfo {
+                kind,
+                id: None,
+                path: None,
+                owner: None
+            }
+        }
+    }
+
+    fn with_id(mut self, id: Text) -> Self {
+        self.resource.id = Some(id);
+        self
+    }
+
+    fn at_path(mut self, path: Text) -> Self {
+        self.resource.path = Some(path);
+        self
+    }
+
+    fn owned_by(mut self, owner: Text) -> Self {
+        self.resource.owner = Some(owner);
+        self
+    }
+}
+
+/// Debug context - development-time information
+type DebugError<E> is {
+    error: E,
+    debug_info: DebugInfo
+};
+
+type DebugInfo is {
+    backtrace: Maybe<Backtrace>,
+    environment: Map<Text, Text>,
+    memory_usage: Maybe<MemoryStats>,
+    thread_info: Maybe<ThreadInfo>
+};
+
+type Backtrace is { frames: List<Frame> };
+type Frame is { function: Text, file: Text, line: Int };
+type MemoryStats is { allocated: usize, freed: usize };
+type ThreadInfo is { id: u64, name: Text };
+
+implement<E> DebugError<E> {
+    fn capture(error: E) -> Self {
+        DebugError {
+            error,
+            debug_info: DebugInfo {
+                backtrace: capture_backtrace(),
+                environment: capture_relevant_env(),
+                memory_usage: capture_memory_stats(),
+                thread_info: capture_thread_info()
+            }
+        }
+    }
+}
+
+fn capture_backtrace() -> Maybe<Backtrace> { None }
+fn capture_relevant_env() -> Map<Text, Text> { Map.new() }
+fn capture_memory_stats() -> Maybe<MemoryStats> { None }
+fn capture_thread_info() -> Maybe<ThreadInfo> { None }
+
+/// Helper for automatic location context
+fn add_context<E>(result: Result<E, E>, msg: Text) -> Result<E, E> {
+    result
+}
+
+/// Example usage: Database operation with full context
+fn fetch_user_with_context(user_id: Int) -> Result<User, ContextualError<DatabaseError>> {
+    let connection = get_connection()
+        .map_err(|e| ContextualError.new(e)
+            .with_message("Failed to get database connection")
+            .with_message(f"While fetching user {user_id}"))?;
+
+    let query_result = execute_query(&connection, "SELECT * FROM users WHERE id = ?", &[user_id])
+        .map_err(|e| ContextualError.new(e)
+            .with_message("Query execution failed")
+            .with_message(f"User ID: {user_id}"))?;
+
+    parse_user_row(&query_result)
+        .map_err(|e| ContextualError.new(e)
+            .with_message("Failed to parse user data"))
+}
+
+type User is { id: Int, name: Text };
+type Connection is {};
+type QueryResult is {};
+type DatabaseError is ConnectionFailed, QueryFailed, ParseFailed;
+
+fn get_connection() -> Result<Connection, DatabaseError> {
+    Ok(Connection {})
+}
+
+fn execute_query(conn: &Connection, query: &Text, params: &[Int]) -> Result<QueryResult, DatabaseError> {
+    Ok(QueryResult {})
+}
+
+fn parse_user_row(result: &QueryResult) -> Result<User, DatabaseError> {
+    Ok(User { id: 1, name: "Test" })
+}
+
+/// Fluent API for context building
+type ErrorContextBuilder is protocol extends Sized {
+    fn context(self, msg: impl Into<Text>) -> Self;
+    fn operation(self, name: impl Into<Text>) -> Self;
+    fn resource(self, kind: impl Into<Text>, id: impl Into<Text>) -> Self;
+};
+
+fn main() {
+    // Example: Adding context to errors
+    let result: Result<Int, Text> = Err("base error");
+
+    let contextualized = result
+        .context("Failed to process request")
+        .map_err(|e| f"{e}");
+
+    match contextualized {
+        Ok(v) => print(f"Success: {v}"),
+        Err(e) => print(f"Error with context: {e}")
+    }
+
+    // Example: Operation context
+    let op_error = OperationError.during(
+        "Connection refused",
+        "fetch_user"
+    )
+    .in_category("database")
+    .with_arg("user_id", 12345)
+    .with_arg("timeout_ms", 5000);
+
+    print(f"{op_error}");
+}

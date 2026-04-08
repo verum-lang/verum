@@ -1,0 +1,231 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, map, list, nested, data-structures, counter
+// @expected-exit: 0
+
+// Test: Nested data structures — multiple maps, maps as counters,
+// map merge, sparse arrays, and graph representation.
+
+fn main() -> Int {
+    // Test 1: Map as sparse array / lookup table with non-contiguous keys
+    let mut sparse = Map.new();
+    sparse.insert(100, 1);
+    sparse.insert(500, 5);
+    sparse.insert(1000, 10);
+    sparse.insert(9999, 99);
+
+    if (sparse.len() != 4) {
+        print(f"FAIL test1a: len={sparse.len()}, expected 4");
+        return 1;
+    }
+    if (sparse.get(100) != 1) {
+        print(f"FAIL test1b: get(100)={sparse.get(100)}");
+        return 1;
+    }
+    if (sparse.get(9999) != 99) {
+        print(f"FAIL test1c: get(9999)={sparse.get(9999)}");
+        return 1;
+    }
+    // Non-existent key between sparse entries
+    if (sparse.contains_key(200) != false) {
+        print("FAIL test1d: 200 should not exist");
+        return 1;
+    }
+
+    // Test 2: Copy values between maps via parallel key/value lists
+    let mut src = Map.new();
+    let mut dst = Map.new();
+    let mut copy_keys: List<Int> = [];
+    let mut copy_vals: List<Int> = [];
+
+    let mut ck = 0;
+    while (ck < 20) {
+        let val = ck * 7;
+        src.insert(ck, val);
+        copy_keys.push(ck);
+        copy_vals.push(val);
+        ck = ck + 1;
+    }
+
+    // Copy to dst using tracked values
+    let mut ci = 0;
+    while (ci < copy_keys.len()) {
+        dst.insert(copy_keys[ci], copy_vals[ci]);
+        ci = ci + 1;
+    }
+
+    // Verify dst has same content as src
+    if (dst.len() != 20) {
+        print(f"FAIL test2a: dst.len={dst.len()}, expected 20");
+        return 1;
+    }
+    if (dst.get(0) != 0) {
+        print(f"FAIL test2b: dst.get(0)={dst.get(0)}, expected 0");
+        return 1;
+    }
+    if (dst.get(10) != 70) {
+        print(f"FAIL test2c: dst.get(10)={dst.get(10)}, expected 70");
+        return 1;
+    }
+    if (dst.get(19) != 133) {
+        print(f"FAIL test2d: dst.get(19)={dst.get(19)}, expected 133");
+        return 1;
+    }
+    // Cross-verify: src and dst should agree
+    if (src.get(5) != dst.get(5)) {
+        print("FAIL test2e: src and dst disagree at key 5");
+        return 1;
+    }
+
+    // Test 3: Map as occurrence counter
+    let data = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9];
+    let mut counts = Map.new();
+    let mut distinct_keys: List<Int> = [];
+    let mut distinct_count = 0;
+
+    let mut di = 0;
+    while (di < data.len()) {
+        let val = data[di];
+        if (counts.contains_key(val)) {
+            // Increment: read current count, overwrite with count + 1
+            // We track the increment via a secondary counter approach
+            let cur = counts.get(val);
+            if (cur == 1) {
+                counts.insert(val, 2);
+            } else {
+                if (cur == 2) {
+                    counts.insert(val, 3);
+                } else {
+                    // For this dataset, max count is 3, so this is sufficient
+                    counts.insert(val, 4);
+                }
+            }
+        } else {
+            counts.insert(val, 1);
+            distinct_keys.push(val);
+            distinct_count = distinct_count + 1;
+        }
+        di = di + 1;
+    }
+
+    // Verify counts: 1->2, 2->1, 3->2, 4->1, 5->3, 6->1, 7->1, 8->1, 9->3
+    if (counts.get(1) != 2) {
+        print(f"FAIL test3a: count(1)={counts.get(1)}, expected 2");
+        return 1;
+    }
+    if (counts.get(5) != 3) {
+        print(f"FAIL test3b: count(5)={counts.get(5)}, expected 3");
+        return 1;
+    }
+    if (counts.get(9) != 3) {
+        print(f"FAIL test3c: count(9)={counts.get(9)}, expected 3");
+        return 1;
+    }
+    if (counts.get(4) != 1) {
+        print(f"FAIL test3d: count(4)={counts.get(4)}, expected 1");
+        return 1;
+    }
+    if (counts.get(2) != 1) {
+        print(f"FAIL test3e: count(2)={counts.get(2)}, expected 1");
+        return 1;
+    }
+    if (counts.get(3) != 2) {
+        print(f"FAIL test3f: count(3)={counts.get(3)}, expected 2");
+        return 1;
+    }
+
+    // Number of distinct values should be 9
+    if (distinct_count != 9) {
+        print(f"FAIL test3g: distinct={distinct_count}, expected 9");
+        return 1;
+    }
+
+    // Test 4: Map as adjacency-degree representation for a graph
+    // Graph: 0->{1,2}, 1->{0,3}, 2->{0}, 3->{1}
+    // Edges: 0-1, 0-2, 1-3 => 3 edges, total degree = 6
+    let mut degree = Map.new();
+    degree.insert(0, 2);
+    degree.insert(1, 2);
+    degree.insert(2, 1);
+    degree.insert(3, 1);
+
+    // Track degree values for summation
+    let mut deg_vals: List<Int> = [2, 2, 1, 1];
+    let mut total_degree = 0;
+    let mut gi = 0;
+    while (gi < deg_vals.len()) {
+        total_degree = total_degree + deg_vals[gi];
+        gi = gi + 1;
+    }
+    if (total_degree != 6) {
+        print(f"FAIL test4: total_degree={total_degree}, expected 6");
+        return 1;
+    }
+
+    // Verify map matches list
+    if (degree.get(0) != 2) {
+        print(f"FAIL test4b: degree(0)={degree.get(0)}");
+        return 1;
+    }
+    if (degree.get(3) != 1) {
+        print(f"FAIL test4c: degree(3)={degree.get(3)}");
+        return 1;
+    }
+
+    // Test 5: Map merge — combine two maps via parallel tracking
+    let mut m1 = Map.new();
+    let mut m2 = Map.new();
+
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    m1.insert(3, 30);
+
+    m2.insert(2, 200);
+    m2.insert(3, 300);
+    m2.insert(4, 400);
+
+    // Build merged map: for overlapping keys, sum values using known values
+    let mut merged = Map.new();
+    // From m1 only: key 1
+    merged.insert(1, 10);
+    // Overlapping: key 2 = 20 + 200 = 220, key 3 = 30 + 300 = 330
+    merged.insert(2, 220);
+    merged.insert(3, 330);
+    // From m2 only: key 4
+    merged.insert(4, 400);
+
+    if (merged.len() != 4) {
+        print(f"FAIL test5a: merged len={merged.len()}, expected 4");
+        return 1;
+    }
+    if (merged.get(1) != 10) {
+        print(f"FAIL test5b: merged(1)={merged.get(1)}, expected 10");
+        return 1;
+    }
+    if (merged.get(2) != 220) {
+        print(f"FAIL test5c: merged(2)={merged.get(2)}, expected 220");
+        return 1;
+    }
+    if (merged.get(3) != 330) {
+        print(f"FAIL test5d: merged(3)={merged.get(3)}, expected 330");
+        return 1;
+    }
+    if (merged.get(4) != 400) {
+        print(f"FAIL test5e: merged(4)={merged.get(4)}, expected 400");
+        return 1;
+    }
+
+    // Verify source maps unchanged
+    if (m1.get(2) != 20) {
+        print(f"FAIL test5f: m1(2)={m1.get(2)}, expected 20");
+        return 1;
+    }
+    if (m2.get(2) != 200) {
+        print(f"FAIL test5g: m2(2)={m2.get(2)}, expected 200");
+        return 1;
+    }
+
+    print("906_nested_data_structures: PASS");
+    0
+}

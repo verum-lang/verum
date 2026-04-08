@@ -1,0 +1,14 @@
+// Crash seed: Edge cases with generics
+type Empty<T> is ();
+
+type Wrapper<T> is { value: T };
+
+type Nested<A, B, C> is {
+    first: A,
+    second: B,
+    third: C,
+};
+
+fn main() {
+    let w: Wrapper<Int> = Wrapper { value: 42 };
+}

@@ -1,0 +1,63 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, scope, shadowing
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT variable scoping, shadowing, and block expressions
+
+fn outer_scope() -> Int {
+    let x = 10;
+    let y = 20;
+    let z = {
+        let x = 100;  // shadows outer x
+        x + y         // 100 + 20 = 120
+    };
+    // x is still 10 here
+    x + z  // 10 + 120 = 130
+}
+
+fn nested_if_scope() -> Int {
+    let x = 1;
+    let result = if x == 1 {
+        let x = 100;
+        x * 2  // 200
+    } else {
+        let x = 50;
+        x * 3  // 150
+    };
+    result + x  // 200 + 1 = 201
+}
+
+fn chain_shadow() -> Int {
+    let x = 1;
+    let x = x + 1;   // 2
+    let x = x * 3;   // 6
+    let x = x - 1;   // 5
+    let x = x * x;   // 25
+    x
+}
+
+fn accumulate(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        let contribution = i * i;
+        sum = sum + contribution;
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    assert_eq(outer_scope(), 130);
+    assert_eq(nested_if_scope(), 201);
+    assert_eq(chain_shadow(), 25);
+
+    // sum of squares: 0 + 1 + 4 + 9 + 16 = 30
+    assert_eq(accumulate(5), 30);
+    // sum of squares 0..10: 0+1+4+9+16+25+36+49+64+81 = 285
+    assert_eq(accumulate(10), 285);
+
+    0
+}

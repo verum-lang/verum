@@ -1,0 +1,597 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, list
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Extended List stdlib operations — filter, map, fold, partition
+
+// ============================================================================
+// Flat struct array (8 elements + length)
+// ============================================================================
+
+type IntList is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+type Pair is { first: Int, second: Int };
+
+// Pair array (up to 8 pairs, using flat layout)
+type PairArr is {
+    a0: Int, b0: Int, a1: Int, b1: Int,
+    a2: Int, b2: Int, a3: Int, b3: Int,
+    a4: Int, b4: Int, a5: Int, b5: Int,
+    a6: Int, b6: Int, a7: Int, b7: Int,
+    len: Int
+};
+
+// ============================================================================
+// IntList helpers
+// ============================================================================
+
+fn list_new() -> IntList {
+    IntList { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn list_get(l: IntList, i: Int) -> Int {
+    if i == 0 { l.e0 } else if i == 1 { l.e1 }
+    else if i == 2 { l.e2 } else if i == 3 { l.e3 }
+    else if i == 4 { l.e4 } else if i == 5 { l.e5 }
+    else if i == 6 { l.e6 } else { l.e7 }
+}
+
+fn list_set(l: IntList, i: Int, val: Int) -> IntList {
+    IntList {
+        e0: if i == 0 { val } else { l.e0 },
+        e1: if i == 1 { val } else { l.e1 },
+        e2: if i == 2 { val } else { l.e2 },
+        e3: if i == 3 { val } else { l.e3 },
+        e4: if i == 4 { val } else { l.e4 },
+        e5: if i == 5 { val } else { l.e5 },
+        e6: if i == 6 { val } else { l.e6 },
+        e7: if i == 7 { val } else { l.e7 },
+        len: l.len
+    }
+}
+
+fn list_push(l: IntList, val: Int) -> IntList {
+    let updated = list_set(l, l.len, val);
+    IntList {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        len: l.len + 1
+    }
+}
+
+fn list_from8(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, n: Int) -> IntList {
+    IntList { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: g, e7: h, len: n }
+}
+
+// ============================================================================
+// PairArr helpers
+// ============================================================================
+
+fn pair_arr_new() -> PairArr {
+    PairArr {
+        a0: 0, b0: 0, a1: 0, b1: 0, a2: 0, b2: 0, a3: 0, b3: 0,
+        a4: 0, b4: 0, a5: 0, b5: 0, a6: 0, b6: 0, a7: 0, b7: 0,
+        len: 0
+    }
+}
+
+fn pair_arr_get_first(p: PairArr, i: Int) -> Int {
+    if i == 0 { p.a0 } else if i == 1 { p.a1 }
+    else if i == 2 { p.a2 } else if i == 3 { p.a3 }
+    else if i == 4 { p.a4 } else if i == 5 { p.a5 }
+    else if i == 6 { p.a6 } else { p.a7 }
+}
+
+fn pair_arr_get_second(p: PairArr, i: Int) -> Int {
+    if i == 0 { p.b0 } else if i == 1 { p.b1 }
+    else if i == 2 { p.b2 } else if i == 3 { p.b3 }
+    else if i == 4 { p.b4 } else if i == 5 { p.b5 }
+    else if i == 6 { p.b6 } else { p.b7 }
+}
+
+fn pair_arr_set(p: PairArr, i: Int, a: Int, b: Int) -> PairArr {
+    PairArr {
+        a0: if i == 0 { a } else { p.a0 }, b0: if i == 0 { b } else { p.b0 },
+        a1: if i == 1 { a } else { p.a1 }, b1: if i == 1 { b } else { p.b1 },
+        a2: if i == 2 { a } else { p.a2 }, b2: if i == 2 { b } else { p.b2 },
+        a3: if i == 3 { a } else { p.a3 }, b3: if i == 3 { b } else { p.b3 },
+        a4: if i == 4 { a } else { p.a4 }, b4: if i == 4 { b } else { p.b4 },
+        a5: if i == 5 { a } else { p.a5 }, b5: if i == 5 { b } else { p.b5 },
+        a6: if i == 6 { a } else { p.a6 }, b6: if i == 6 { b } else { p.b6 },
+        a7: if i == 7 { a } else { p.a7 }, b7: if i == 7 { b } else { p.b7 },
+        len: p.len
+    }
+}
+
+fn pair_arr_with_len(p: PairArr, n: Int) -> PairArr {
+    PairArr {
+        a0: p.a0, b0: p.b0, a1: p.a1, b1: p.b1,
+        a2: p.a2, b2: p.b2, a3: p.a3, b3: p.b3,
+        a4: p.a4, b4: p.b4, a5: p.a5, b5: p.b5,
+        a6: p.a6, b6: p.b6, a7: p.a7, b7: p.b7,
+        len: n
+    }
+}
+
+// ============================================================================
+// Extended list operations
+// ============================================================================
+
+// Filter: keep elements greater than threshold
+fn list_filter_gt(l: IntList, threshold: Int) -> IntList {
+    let mut result = list_new();
+    let mut j = 0;
+    let mut i = 0;
+    while i < l.len {
+        let v = list_get(l, i);
+        if v > threshold {
+            result = list_set(result, j, v);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    IntList {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: j
+    }
+}
+
+// Map: square each element
+fn list_map_square(l: IntList) -> IntList {
+    let mut result = list_new();
+    let mut i = 0;
+    while i < l.len {
+        let v = list_get(l, i);
+        result = list_set(result, i, v * v);
+        i = i + 1;
+    }
+    IntList {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: l.len
+    }
+}
+
+// Map: double each element
+fn list_map_double(l: IntList) -> IntList {
+    let mut result = list_new();
+    let mut i = 0;
+    while i < l.len {
+        let v = list_get(l, i);
+        result = list_set(result, i, v * 2);
+        i = i + 1;
+    }
+    IntList {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: l.len
+    }
+}
+
+// Fold: sum all elements
+fn list_fold_sum(l: IntList) -> Int {
+    let mut acc = 0;
+    let mut i = 0;
+    while i < l.len {
+        acc = acc + list_get(l, i);
+        i = i + 1;
+    }
+    acc
+}
+
+// Fold: product of all elements
+fn list_fold_product(l: IntList) -> Int {
+    let mut acc = 1;
+    let mut i = 0;
+    while i < l.len {
+        acc = acc * list_get(l, i);
+        i = i + 1;
+    }
+    acc
+}
+
+// Partition: split into two lists (even / odd)
+// Returns (evens, odds) packed into a PairArr where first=even_list, second=odd_list
+// For simplicity, return two IntLists via a wrapper
+type TwoLists is { evens: IntList, odds: IntList };
+
+fn list_partition_even_odd(l: IntList) -> TwoLists {
+    let mut evens = list_new();
+    let mut odds = list_new();
+    let mut ei = 0;
+    let mut oi = 0;
+    let mut i = 0;
+    while i < l.len {
+        let v = list_get(l, i);
+        if v % 2 == 0 {
+            evens = list_set(evens, ei, v);
+            ei = ei + 1;
+        } else {
+            odds = list_set(odds, oi, v);
+            oi = oi + 1;
+        }
+        i = i + 1;
+    }
+    let evens_final = IntList {
+        e0: evens.e0, e1: evens.e1, e2: evens.e2, e3: evens.e3,
+        e4: evens.e4, e5: evens.e5, e6: evens.e6, e7: evens.e7,
+        len: ei
+    };
+    let odds_final = IntList {
+        e0: odds.e0, e1: odds.e1, e2: odds.e2, e3: odds.e3,
+        e4: odds.e4, e5: odds.e5, e6: odds.e6, e7: odds.e7,
+        len: oi
+    };
+    TwoLists { evens: evens_final, odds: odds_final }
+}
+
+// Zip: combine two lists into pairs
+fn list_zip(a: IntList, b: IntList) -> PairArr {
+    let min_len = if a.len < b.len { a.len } else { b.len };
+    let mut result = pair_arr_new();
+    let mut i = 0;
+    while i < min_len {
+        result = pair_arr_set(result, i, list_get(a, i), list_get(b, i));
+        i = i + 1;
+    }
+    pair_arr_with_len(result, min_len)
+}
+
+// Flat map: each element produces two results (element, element * 10)
+fn list_flat_map_expand(l: IntList) -> IntList {
+    let mut result = list_new();
+    let mut j = 0;
+    let mut i = 0;
+    while i < l.len {
+        let v = list_get(l, i);
+        result = list_set(result, j, v);
+        j = j + 1;
+        result = list_set(result, j, v * 10);
+        j = j + 1;
+        i = i + 1;
+    }
+    IntList {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: j
+    }
+}
+
+// Take first N elements
+fn list_take(l: IntList, n: Int) -> IntList {
+    let count = if n < l.len { n } else { l.len };
+    let mut result = list_new();
+    let mut i = 0;
+    while i < count {
+        result = list_set(result, i, list_get(l, i));
+        i = i + 1;
+    }
+    IntList {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: count
+    }
+}
+
+// Drop first N elements
+fn list_drop(l: IntList, n: Int) -> IntList {
+    let start = if n < l.len { n } else { l.len };
+    let new_len = l.len - start;
+    let mut result = list_new();
+    let mut i = 0;
+    while i < new_len {
+        result = list_set(result, i, list_get(l, start + i));
+        i = i + 1;
+    }
+    IntList {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: new_len
+    }
+}
+
+// Reverse a list
+fn list_reverse(l: IntList) -> IntList {
+    let mut result = list_new();
+    let mut i = 0;
+    while i < l.len {
+        result = list_set(result, i, list_get(l, l.len - 1 - i));
+        i = i + 1;
+    }
+    IntList {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: l.len
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_list_filter() {
+    // [3, 7, 1, 9, 2, 5, 8, 4] — filter > 4 => [7, 9, 5, 8]
+    let l = list_from8(3, 7, 1, 9, 2, 5, 8, 4, 8);
+    let filtered = list_filter_gt(l, 4);
+    assert_eq(filtered.len, 4);
+    assert_eq(list_get(filtered, 0), 7);
+    assert_eq(list_get(filtered, 1), 9);
+    assert_eq(list_get(filtered, 2), 5);
+    assert_eq(list_get(filtered, 3), 8);
+
+    // Filter with threshold 10 => empty
+    let none = list_filter_gt(l, 10);
+    assert_eq(none.len, 0);
+
+    // Filter with threshold 0 => all elements
+    let all = list_filter_gt(l, 0);
+    assert_eq(all.len, 8);
+
+    print("  test_list_filter: ok");
+}
+
+@test
+fn test_list_map() {
+    // [1, 2, 3, 4, 5] — square => [1, 4, 9, 16, 25]
+    let l = list_from8(1, 2, 3, 4, 5, 0, 0, 0, 5);
+    let squared = list_map_square(l);
+    assert_eq(squared.len, 5);
+    assert_eq(list_get(squared, 0), 1);
+    assert_eq(list_get(squared, 1), 4);
+    assert_eq(list_get(squared, 2), 9);
+    assert_eq(list_get(squared, 3), 16);
+    assert_eq(list_get(squared, 4), 25);
+
+    // [3, 7, 2] — double => [6, 14, 4]
+    let l2 = list_from8(3, 7, 2, 0, 0, 0, 0, 0, 3);
+    let doubled = list_map_double(l2);
+    assert_eq(doubled.len, 3);
+    assert_eq(list_get(doubled, 0), 6);
+    assert_eq(list_get(doubled, 1), 14);
+    assert_eq(list_get(doubled, 2), 4);
+
+    // Map on empty list
+    let empty = list_new();
+    let mapped_empty = list_map_square(empty);
+    assert_eq(mapped_empty.len, 0);
+
+    print("  test_list_map: ok");
+}
+
+@test
+fn test_list_fold_sum() {
+    // [1, 2, 3, 4, 5] — sum => 15
+    let l = list_from8(1, 2, 3, 4, 5, 0, 0, 0, 5);
+    assert_eq(list_fold_sum(l), 15);
+
+    // [10, 20, 30] — sum => 60
+    let l2 = list_from8(10, 20, 30, 0, 0, 0, 0, 0, 3);
+    assert_eq(list_fold_sum(l2), 60);
+
+    // Product [1, 2, 3, 4, 5] => 120
+    assert_eq(list_fold_product(l), 120);
+
+    // Product [2, 3, 7] => 42
+    let l3 = list_from8(2, 3, 7, 0, 0, 0, 0, 0, 3);
+    assert_eq(list_fold_product(l3), 42);
+
+    // Sum of empty list => 0
+    let empty = list_new();
+    assert_eq(list_fold_sum(empty), 0);
+
+    // Product of single element => element itself
+    let single = list_from8(99, 0, 0, 0, 0, 0, 0, 0, 1);
+    assert_eq(list_fold_product(single), 99);
+
+    print("  test_list_fold_sum: ok");
+}
+
+@test
+fn test_list_partition() {
+    // [1, 2, 3, 4, 5, 6, 7, 8] — partition even/odd
+    let l = list_from8(1, 2, 3, 4, 5, 6, 7, 8, 8);
+    let parts = list_partition_even_odd(l);
+
+    // Evens: [2, 4, 6, 8]
+    assert_eq(parts.evens.len, 4);
+    assert_eq(list_get(parts.evens, 0), 2);
+    assert_eq(list_get(parts.evens, 1), 4);
+    assert_eq(list_get(parts.evens, 2), 6);
+    assert_eq(list_get(parts.evens, 3), 8);
+
+    // Odds: [1, 3, 5, 7]
+    assert_eq(parts.odds.len, 4);
+    assert_eq(list_get(parts.odds, 0), 1);
+    assert_eq(list_get(parts.odds, 1), 3);
+    assert_eq(list_get(parts.odds, 2), 5);
+    assert_eq(list_get(parts.odds, 3), 7);
+
+    // All even: [2, 4, 6]
+    let all_even = list_from8(2, 4, 6, 0, 0, 0, 0, 0, 3);
+    let parts2 = list_partition_even_odd(all_even);
+    assert_eq(parts2.evens.len, 3);
+    assert_eq(parts2.odds.len, 0);
+
+    // All odd: [1, 3, 5]
+    let all_odd = list_from8(1, 3, 5, 0, 0, 0, 0, 0, 3);
+    let parts3 = list_partition_even_odd(all_odd);
+    assert_eq(parts3.evens.len, 0);
+    assert_eq(parts3.odds.len, 3);
+
+    print("  test_list_partition: ok");
+}
+
+@test
+fn test_list_zip() {
+    // Zip [1, 2, 3] with [10, 20, 30] => [(1,10), (2,20), (3,30)]
+    let a = list_from8(1, 2, 3, 0, 0, 0, 0, 0, 3);
+    let b = list_from8(10, 20, 30, 0, 0, 0, 0, 0, 3);
+    let zipped = list_zip(a, b);
+
+    assert_eq(zipped.len, 3);
+    assert_eq(pair_arr_get_first(zipped, 0), 1);
+    assert_eq(pair_arr_get_second(zipped, 0), 10);
+    assert_eq(pair_arr_get_first(zipped, 1), 2);
+    assert_eq(pair_arr_get_second(zipped, 1), 20);
+    assert_eq(pair_arr_get_first(zipped, 2), 3);
+    assert_eq(pair_arr_get_second(zipped, 2), 30);
+
+    // Zip different lengths: [1, 2, 3, 4] with [10, 20] => [(1,10), (2,20)]
+    let c = list_from8(1, 2, 3, 4, 0, 0, 0, 0, 4);
+    let d = list_from8(10, 20, 0, 0, 0, 0, 0, 0, 2);
+    let zipped2 = list_zip(c, d);
+    assert_eq(zipped2.len, 2);
+    assert_eq(pair_arr_get_first(zipped2, 0), 1);
+    assert_eq(pair_arr_get_second(zipped2, 0), 10);
+    assert_eq(pair_arr_get_first(zipped2, 1), 2);
+    assert_eq(pair_arr_get_second(zipped2, 1), 20);
+
+    // Dot product via zip: 1*10 + 2*20 + 3*30 = 10+40+90 = 140
+    let mut dot = 0;
+    let mut i = 0;
+    while i < zipped.len {
+        dot = dot + pair_arr_get_first(zipped, i) * pair_arr_get_second(zipped, i);
+        i = i + 1;
+    }
+    assert_eq(dot, 140);
+
+    print("  test_list_zip: ok");
+}
+
+@test
+fn test_list_flat_map() {
+    // [1, 2, 3] flat_map => [1, 10, 2, 20, 3, 30]
+    let l = list_from8(1, 2, 3, 0, 0, 0, 0, 0, 3);
+    let expanded = list_flat_map_expand(l);
+
+    assert_eq(expanded.len, 6);
+    assert_eq(list_get(expanded, 0), 1);
+    assert_eq(list_get(expanded, 1), 10);
+    assert_eq(list_get(expanded, 2), 2);
+    assert_eq(list_get(expanded, 3), 20);
+    assert_eq(list_get(expanded, 4), 3);
+    assert_eq(list_get(expanded, 5), 30);
+
+    // Sum of flat_map result: 1+10+2+20+3+30 = 66
+    assert_eq(list_fold_sum(expanded), 66);
+
+    // Single element: [5] => [5, 50]
+    let single = list_from8(5, 0, 0, 0, 0, 0, 0, 0, 1);
+    let exp2 = list_flat_map_expand(single);
+    assert_eq(exp2.len, 2);
+    assert_eq(list_get(exp2, 0), 5);
+    assert_eq(list_get(exp2, 1), 50);
+
+    print("  test_list_flat_map: ok");
+}
+
+@test
+fn test_list_take_drop() {
+    // [10, 20, 30, 40, 50]
+    let l = list_from8(10, 20, 30, 40, 50, 0, 0, 0, 5);
+
+    // Take 3 => [10, 20, 30]
+    let taken = list_take(l, 3);
+    assert_eq(taken.len, 3);
+    assert_eq(list_get(taken, 0), 10);
+    assert_eq(list_get(taken, 1), 20);
+    assert_eq(list_get(taken, 2), 30);
+
+    // Take 0 => []
+    let taken0 = list_take(l, 0);
+    assert_eq(taken0.len, 0);
+
+    // Take more than length => full list
+    let taken_all = list_take(l, 10);
+    assert_eq(taken_all.len, 5);
+    assert_eq(list_get(taken_all, 4), 50);
+
+    // Drop 2 => [30, 40, 50]
+    let dropped = list_drop(l, 2);
+    assert_eq(dropped.len, 3);
+    assert_eq(list_get(dropped, 0), 30);
+    assert_eq(list_get(dropped, 1), 40);
+    assert_eq(list_get(dropped, 2), 50);
+
+    // Drop 0 => full list
+    let dropped0 = list_drop(l, 0);
+    assert_eq(dropped0.len, 5);
+    assert_eq(list_get(dropped0, 0), 10);
+
+    // Drop all => []
+    let dropped_all = list_drop(l, 5);
+    assert_eq(dropped_all.len, 0);
+
+    // Take N + Drop N covers all elements
+    // Sum(take 3) + Sum(drop 3) = Sum(all)
+    let take3 = list_take(l, 3);
+    let drop3 = list_drop(l, 3);
+    let sum_all = list_fold_sum(l);
+    let sum_parts = list_fold_sum(take3) + list_fold_sum(drop3);
+    assert_eq(sum_all, sum_parts);
+
+    print("  test_list_take_drop: ok");
+}
+
+@test
+fn test_list_reverse() {
+    // [1, 2, 3, 4, 5] => [5, 4, 3, 2, 1]
+    let l = list_from8(1, 2, 3, 4, 5, 0, 0, 0, 5);
+    let rev = list_reverse(l);
+
+    assert_eq(rev.len, 5);
+    assert_eq(list_get(rev, 0), 5);
+    assert_eq(list_get(rev, 1), 4);
+    assert_eq(list_get(rev, 2), 3);
+    assert_eq(list_get(rev, 3), 2);
+    assert_eq(list_get(rev, 4), 1);
+
+    // Double reverse = original
+    let rev2 = list_reverse(rev);
+    let mut i = 0;
+    while i < l.len {
+        assert_eq(list_get(rev2, i), list_get(l, i));
+        i = i + 1;
+    }
+
+    // Reverse single element
+    let single = list_from8(42, 0, 0, 0, 0, 0, 0, 0, 1);
+    let rev_single = list_reverse(single);
+    assert_eq(rev_single.len, 1);
+    assert_eq(list_get(rev_single, 0), 42);
+
+    // Reverse empty
+    let empty = list_new();
+    let rev_empty = list_reverse(empty);
+    assert_eq(rev_empty.len, 0);
+
+    // Reverse preserves sum
+    assert_eq(list_fold_sum(l), list_fold_sum(rev));
+
+    print("  test_list_reverse: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_list_filter();
+    test_list_map();
+    test_list_fold_sum();
+    test_list_partition();
+    test_list_zip();
+    test_list_flat_map();
+    test_list_take_drop();
+    test_list_reverse();
+    print("[OK] 072_stdlib_list_extended");
+    0
+}

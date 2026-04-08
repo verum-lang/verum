@@ -1,0 +1,117 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: modules, refinement, types, cross-module
+
+/// Refined types across module boundaries (Spec Section 14).
+/// Refinements are preserved when types cross module boundaries.
+
+module math {
+    // Style 1: Inline refinement
+    pub type Positive is Int{> 0};
+    pub type NonZeroFloat is Float{it != 0.0};
+
+    // Style 2: Declarative refinement with predicate
+    pub type NonEmpty<T> is List<T> where is_non_empty;
+
+    pub predicate is_non_empty<T>(arr: List<T>) -> Bool {
+        arr.len() > 0
+    }
+
+    // Style 3: Sigma-type refinement
+    pub type BoundedInt is x: Int where x >= 0 && x <= 100;
+    pub type ValidPort is port: Int where port > 0 && port <= 65535;
+
+    // Function with refined return type
+    pub fn abs(x: Int) -> Int{>= 0} {
+        if x < 0 { -x } else { x }
+    }
+
+    // Function accepting refined type
+    pub fn sqrt(x: Float{>= 0.0}) -> Float{>= 0.0} {
+        // Implementation would go here
+        x.sqrt()
+    }
+
+    pub fn divide(numerator: Float, denominator: Float{!= 0.0}) -> Float {
+        numerator / denominator
+    }
+}
+
+module validation {
+    link crate.math.{Positive, NonZeroFloat, BoundedInt, abs, sqrt, divide};
+
+    // Use refined types from another module
+    pub fn process_positive(p: Positive) -> Positive {
+        // Refinement is preserved
+        let doubled = p * 2;
+        // Must return Positive
+        doubled
+    }
+
+    pub fn compute() -> Result<Float, Error> {
+        // Create values matching refinements
+        let pos: Positive = 42;  // OK: 42 > 0
+
+        // Refinement validated at construction
+        let bounded: BoundedInt = 50;  // OK: 0 <= 50 <= 100
+
+        // Function return preserves refinement
+        let absolute = abs(-10);  // absolute: Int{>= 0}
+
+        // Refinement checked at function boundaries
+        let root = sqrt(16.0)?;  // OK: 16.0 >= 0
+
+        // Division requires non-zero denominator
+        let result = divide(10.0, 2.0);  // OK: 2.0 != 0.0
+
+        Result.Ok(result)
+    }
+}
+
+module predicates {
+    // Public refined type with public predicate
+    pub type SafeHtml is Text where is_safe_html;
+
+    pub predicate is_safe_html(html: Text) -> Bool {
+        !html.contains("<script>") && !html.contains("javascript:")
+    }
+
+    // Public type with internal predicate
+    pub type SessionToken is Text where is_valid_token;
+
+    // Internal validation logic - not exposed
+    predicate is_valid_token(token: Text) -> Bool {
+        token.len() == 64
+    }
+
+    // Public type with inline complex predicate
+    pub type Password is pass: Text where {
+        pass.len() >= 8 &&
+        has_uppercase(pass) &&
+        has_lowercase(pass) &&
+        has_digit(pass)
+    };
+
+    fn has_uppercase(s: Text) -> Bool { true }  // Simplified
+    fn has_lowercase(s: Text) -> Bool { true }  // Simplified
+    fn has_digit(s: Text) -> Bool { true }  // Simplified
+}
+
+module consumer {
+    link crate.predicates.{SafeHtml, Password};
+
+    pub fn render_content(html: SafeHtml) {
+        // SafeHtml is guaranteed to be safe
+        print(html);
+    }
+
+    pub fn authenticate(password: Password) -> Bool {
+        // Password is guaranteed to meet complexity requirements
+        true
+    }
+}
+
+fn main() -> Int {
+    0
+}

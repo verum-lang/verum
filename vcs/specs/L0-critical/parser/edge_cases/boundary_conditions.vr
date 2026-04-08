@@ -1,0 +1,194 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, boundary, limits
+
+// Helper types
+type LargeStruct is {
+    field1: Int, field2: Int, field3: Int, field4: Int, field5: Int,
+    field6: Int, field7: Int, field8: Int, field9: Int, field10: Int,
+    field11: Int, field12: Int, field13: Int, field14: Int, field15: Int,
+    field16: Int, field17: Int, field18: Int, field19: Int, field20: Int,
+};
+
+type LargeEnum is
+    V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 |
+    V11 | V12 | V13 | V14 | V15 | V16 | V17 | V18 | V19 | V20 |
+    V21 | V22 | V23 | V24 | V25 | V26 | V27 | V28 | V29 | V30;
+
+type ManyGenerics<A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P> is (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
+
+type T is Int;
+type E is Int;
+type F is Int;
+type H is Int;
+type EmptyRecord is { };
+type Clone is protocol { };
+type Debug is protocol { };
+type Default is protocol { };
+type Display is protocol { };
+type Eq is protocol { };
+type Hash is protocol { };
+type Ord is protocol { };
+type Send is protocol { };
+type Sync is protocol { };
+type Sized is protocol { };
+
+// Helper functions
+fn a() -> Int { 0 }
+fn b() -> Int { 0 }
+fn c_fn() -> Int { 0 }
+fn d_fn() -> Int { 0 }
+fn e_fn() -> Int { 0 }
+fn f_fn() -> Int { 0 }
+fn g_fn() -> Int { 0 }
+fn h_fn() -> Int { 0 }
+fn i_fn() -> Int { 0 }
+fn j_fn() -> Int { 0 }
+fn k_fn() -> Int { 0 }
+fn l_fn() -> Int { 0 }
+fn m_fn() -> Int { 0 }
+fn n_fn() -> Int { 0 }
+fn o_fn() -> Int { 0 }
+fn p_fn() -> Int { 0 }
+fn q_fn() -> Int { 0 }
+fn r_fn() -> Int { 0 }
+fn s_fn() -> Int { 0 }
+fn t_fn() -> Int { 0 }
+fn u_fn() -> Int { 0 }
+fn v_fn() -> Int { 0 }
+fn w_fn() -> Int { 0 }
+fn x_fn() -> Int { 0 }
+fn y_fn() -> Int { 0 }
+fn z_fn() -> Int { 0 }
+
+fn test_very_long_identifier() {
+    // Very long identifier
+    let abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_very_long_identifier_name = 1;
+}
+
+fn test_very_long_string_literal() {
+    // Very long string literal
+    let long_string = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+}
+
+// Many parameters
+fn many_params(
+    a: Int, b: Int, c: Int, d: Int, e: Int,
+    f: Int, g: Int, h: Int, i: Int, j: Int,
+    k: Int, l: Int, m: Int, n: Int, o: Int,
+    p: Int, q: Int, r: Int, s: Int, t: Int
+) -> Int {
+    a + b + c + d + e + f + g + h + i + j + k + l + m + n + o + p + q + r + s + t
+}
+
+fn test_many_match_arms() {
+    let value = 5;
+
+    // Many match arms
+    match value {
+        0 => 0, 1 => 1, 2 => 2, 3 => 3, 4 => 4,
+        5 => 5, 6 => 6, 7 => 7, 8 => 8, 9 => 9,
+        10 => 10, 11 => 11, 12 => 12, 13 => 13, 14 => 14,
+        15 => 15, 16 => 16, 17 => 17, 18 => 18, 19 => 19,
+        _ => -1,
+    };
+}
+
+// Many where clauses
+fn many_bounds<T>()
+where type T: Clone + Debug + Default + Display + Eq + Hash + Ord + Send + Sync + Sized
+{
+    // body
+}
+
+fn test_very_large_array_literal() {
+    // Very large array literal
+    let large_array = [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+        11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+        31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+        41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+    ];
+}
+
+fn test_very_long_expression() {
+    let a_val = 1; let b_val = 2; let c_val = 3; let d_val = 4; let e_val = 5;
+    let f_val = 6; let g_val = 7; let h_val = 8; let i_val = 9; let j_val = 10;
+    let k_val = 11; let l_val = 12; let m_val = 13; let n_val = 14; let o_val = 15;
+    let p_val = 16; let q_val = 17; let r_val = 18; let s_val = 19; let t_val = 20;
+    let u_val = 21; let v_val = 22; let w_val = 23; let x_val = 24; let y_val = 25;
+    let z_val = 26;
+
+    // Very long expression
+    let long_expr = a_val + b_val + c_val + d_val + e_val + f_val + g_val + h_val + i_val + j_val + k_val + l_val + m_val + n_val + o_val + p_val + q_val + r_val + s_val + t_val + u_val + v_val + w_val + x_val + y_val + z_val;
+}
+
+fn test_many_nested_calls() {
+    fn p_inner<T>(x: T) -> T { x }
+    fn q_inner<T>(x: T) -> T { x }
+    fn r_inner<T>(x: T) -> T { x }
+    fn s_inner<T>(x: T) -> T { x }
+    fn t_inner<T>(x: T) -> T { x }
+    fn u_inner<T>(x: T) -> T { x }
+    fn v_inner<T>(x: T) -> T { x }
+    fn w_inner<T>(x: T) -> T { x }
+    fn x_inner<T>(x: T) -> T { x }
+    fn y_inner<T>(x: T) -> T { x }
+    fn z_inner<T>(x: T) -> T { x }
+
+    // Many nested calls
+    let result = z_inner(y_inner(x_inner(w_inner(v_inner(u_inner(t_inner(s_inner(r_inner(q_inner(p_inner(0)))))))))));
+}
+
+fn test_long_method_chain() {
+    type Obj is { val: Int };
+    fn a_method(o: Obj) -> Obj { o }
+    fn b_method(o: Obj) -> Obj { o }
+    fn c_method(o: Obj) -> Obj { o }
+    fn d_method(o: Obj) -> Obj { o }
+    fn e_method(o: Obj) -> Obj { o }
+    fn f_method(o: Obj) -> Obj { o }
+    fn g_method(o: Obj) -> Obj { o }
+    fn h_method(o: Obj) -> Obj { o }
+    fn i_method(o: Obj) -> Obj { o }
+    fn j_method(o: Obj) -> Obj { o }
+
+    let obj = Obj { val: 0 };
+
+    // Long method chain
+    let chained = j_method(i_method(h_method(g_method(f_method(e_method(d_method(c_method(b_method(a_method(obj)))))))))).val;
+}
+
+// Minimum valid constructs
+fn f_min() {}  // Minimal function
+type T_min is Int;  // Minimal type
+
+fn test_minimal_let() {
+    let x = 1;  // Minimal let (no spaces)
+}
+
+fn test_single_character_everything() {
+    // Single character everything
+    let a = 5;
+    let g: Int = 10;
+}
+
+fn c_single() {
+    let d = 42;
+}
+
+// Empty constructs
+fn empty() {}
+
+fn test_single_item_collections() {
+    // Single item collections
+    let single_array = [1];
+    let single_tuple = (1,);
+}
+
+fn test_maximum_nesting_depth() {
+    // Maximum nesting depth test (stress test)
+    let max_depth = ((((((((((((((((((((((((((((((42))))))))))))))))))))))))))))));
+}

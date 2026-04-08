@@ -1,0 +1,9 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, block, basic
+// @description: Basic unsafe block as statement
+fn main() {
+    unsafe {
+        let x: Int = 42;
+    };
+}

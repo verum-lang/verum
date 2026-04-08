@@ -1,0 +1,147 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: method, dispatch, builder, chain, e2e
+// @description: Test method chaining, builder pattern, and multi-implement blocks
+
+type Config is {
+    width: Int,
+    height: Int,
+    title: Text,
+    fullscreen: Bool,
+};
+
+implement Config {
+    fn new() -> Config {
+        Config { width: 800, height: 600, title: "default", fullscreen: false }
+    }
+
+    fn with_size(w: Int, h: Int) -> Config {
+        Config { width: w, height: h, title: "default", fullscreen: false }
+    }
+
+    fn area(&self) -> Int {
+        self.width * self.height
+    }
+
+    fn is_landscape(&self) -> Bool {
+        self.width > self.height
+    }
+}
+
+type Vec2 is { x: Int, y: Int };
+
+implement Vec2 {
+    fn new(x: Int, y: Int) -> Vec2 {
+        Vec2 { x: x, y: y }
+    }
+
+    fn add(&self, other: &Vec2) -> Vec2 {
+        Vec2 { x: self.x + other.x, y: self.y + other.y }
+    }
+
+    fn scale(&self, factor: Int) -> Vec2 {
+        Vec2 { x: self.x * factor, y: self.y * factor }
+    }
+
+    fn dot(&self, other: &Vec2) -> Int {
+        self.x * other.x + self.y * other.y
+    }
+
+    fn length_sq(&self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+}
+
+type LinkedNode is {
+    value: Int,
+    next_val: Int,
+    has_next: Bool,
+};
+
+implement LinkedNode {
+    fn leaf(v: Int) -> LinkedNode {
+        LinkedNode { value: v, next_val: 0, has_next: false }
+    }
+
+    fn chain(v: Int, next: Int) -> LinkedNode {
+        LinkedNode { value: v, next_val: next, has_next: true }
+    }
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Config with different constructors
+    let cfg = Config.new();
+    if cfg.area() != 480000 {
+        print(f"FAIL: default area expected 480000, got {cfg.area()}");
+        failures = failures + 1;
+    }
+    let cfg2 = Config.with_size(1920, 1080);
+    if cfg2.area() != 2073600 {
+        print(f"FAIL: hd area expected 2073600, got {cfg2.area()}");
+        failures = failures + 1;
+    }
+    if !cfg2.is_landscape() {
+        print("FAIL: expected landscape");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  config: OK");
+    }
+
+    // Test 2: Vec2 operations
+    let v1 = Vec2.new(3, 4);
+    let v2 = Vec2.new(1, 2);
+    let v3 = v1.add(&v2);
+    if v3.x != 4 {
+        print(f"FAIL: add x expected 4, got {v3.x}");
+        failures = failures + 1;
+    }
+    if v3.y != 6 {
+        print(f"FAIL: add y expected 6, got {v3.y}");
+        failures = failures + 1;
+    }
+    let scaled = v1.scale(3);
+    if scaled.x != 9 {
+        print(f"FAIL: scale x expected 9, got {scaled.x}");
+        failures = failures + 1;
+    }
+    let d = v1.dot(&v2);
+    if d != 11 {
+        print(f"FAIL: dot expected 11, got {d}");
+        failures = failures + 1;
+    }
+    if v1.length_sq() != 25 {
+        print(f"FAIL: length_sq expected 25, got {v1.length_sq()}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  vec2: OK");
+    }
+
+    // Test 3: Node chain
+    let n1 = LinkedNode.chain(10, 20);
+    let n2 = LinkedNode.leaf(30);
+    if !n1.has_next {
+        print("FAIL: n1 should have next");
+        failures = failures + 1;
+    }
+    if n2.has_next {
+        print("FAIL: n2 should not have next");
+        failures = failures + 1;
+    }
+    if n1.value + n1.next_val + n2.value != 60 {
+        print("FAIL: chain sum");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  linked: OK");
+    }
+
+    if failures == 0 {
+        print("All multimethod dispatch tests passed");
+    }
+    failures
+}

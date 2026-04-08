@@ -1,0 +1,383 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, combinatorics, factorial
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: combinatorics (factorial, binomial, permutations, Catalan)
+
+// =============================================================================
+// Factorial (iterative)
+// =============================================================================
+
+fn factorial(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 2;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Factorial (recursive)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn factorial_rec(n: Int) -> Int {
+    if n <= 1 { 1 }
+    else { n * factorial_rec(n - 1) }
+}
+
+// =============================================================================
+// Binomial coefficient C(n, k) — iterative, avoids overflow
+// C(n, k) = n! / (k! * (n-k)!)
+// =============================================================================
+
+fn binomial(n: Int, k: Int) -> Int {
+    if k < 0 || k > n {
+        return 0;
+    }
+    // Use symmetry: C(n,k) = C(n, n-k)
+    let mut kk = k;
+    if kk > n - kk {
+        kk = n - kk;
+    }
+    let mut result = 1;
+    let mut i = 0;
+    while i < kk {
+        result = result * (n - i);
+        result = result / (i + 1);
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Binomial using Pascal's triangle (recursive)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn binomial_pascal(n: Int, k: Int) -> Int {
+    if k == 0 || k == n {
+        1
+    } else {
+        binomial_pascal(n - 1, k - 1) + binomial_pascal(n - 1, k)
+    }
+}
+
+// =============================================================================
+// Permutations P(n, k) = n! / (n-k)!
+// =============================================================================
+
+fn permutations(n: Int, k: Int) -> Int {
+    if k < 0 || k > n {
+        return 0;
+    }
+    let mut result = 1;
+    let mut i = 0;
+    while i < k {
+        result = result * (n - i);
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Catalan number C_n = C(2n, n) / (n+1)
+// Also: C_n = sum(C_i * C_{n-1-i}) for i=0..n-1
+// =============================================================================
+
+fn catalan(n: Int) -> Int {
+    binomial(2 * n, n) / (n + 1)
+}
+
+// Recursive Catalan (using the sum formula)
+@allow(unbounded_recursion)
+fn catalan_rec(n: Int) -> Int {
+    if n <= 1 {
+        return 1;
+    }
+    let mut s = 0;
+    let mut i = 0;
+    while i < n {
+        s = s + catalan_rec(i) * catalan_rec(n - 1 - i);
+        i = i + 1;
+    }
+    s
+}
+
+// =============================================================================
+// Derangements D(n) — permutations with no fixed points
+// D(n) = (n-1) * (D(n-1) + D(n-2))
+// D(0) = 1, D(1) = 0
+// =============================================================================
+
+fn derangement(n: Int) -> Int {
+    if n == 0 {
+        return 1;
+    }
+    if n == 1 {
+        return 0;
+    }
+    let mut prev2 = 1; // D(0)
+    let mut prev1 = 0; // D(1)
+    let mut i = 2;
+    while i <= n {
+        let curr = (i - 1) * (prev1 + prev2);
+        prev2 = prev1;
+        prev1 = curr;
+        i = i + 1;
+    }
+    prev1
+}
+
+// =============================================================================
+// Stirling numbers of the second kind S(n, k)
+// Number of ways to partition n elements into k non-empty subsets
+// S(n,k) = k*S(n-1,k) + S(n-1,k-1), S(n,0)=0 for n>0, S(0,0)=1
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn stirling2(n: Int, k: Int) -> Int {
+    if n == 0 && k == 0 {
+        return 1;
+    }
+    if n == 0 || k == 0 {
+        return 0;
+    }
+    if k > n {
+        return 0;
+    }
+    k * stirling2(n - 1, k) + stirling2(n - 1, k - 1)
+}
+
+// =============================================================================
+// Tests — Factorial
+// =============================================================================
+
+fn test_factorial() {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(2), 2);
+    assert_eq(factorial(3), 6);
+    assert_eq(factorial(4), 24);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(6), 720);
+    assert_eq(factorial(7), 5040);
+    assert_eq(factorial(8), 40320);
+    assert_eq(factorial(9), 362880);
+    assert_eq(factorial(10), 3628800);
+    // Recursive matches iterative
+    let mut i = 0;
+    while i <= 10 {
+        assert_eq(factorial(i), factorial_rec(i));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Tests — Binomial
+// =============================================================================
+
+fn test_binomial_basic() {
+    // C(n, 0) = 1 for all n
+    assert_eq(binomial(0, 0), 1);
+    assert_eq(binomial(5, 0), 1);
+    assert_eq(binomial(10, 0), 1);
+    // C(n, n) = 1 for all n
+    assert_eq(binomial(5, 5), 1);
+    assert_eq(binomial(10, 10), 1);
+    // C(n, 1) = n
+    assert_eq(binomial(5, 1), 5);
+    assert_eq(binomial(10, 1), 10);
+}
+
+fn test_binomial_known() {
+    assert_eq(binomial(4, 2), 6);
+    assert_eq(binomial(5, 2), 10);
+    assert_eq(binomial(5, 3), 10);
+    assert_eq(binomial(6, 3), 20);
+    assert_eq(binomial(7, 3), 35);
+    assert_eq(binomial(8, 4), 70);
+    assert_eq(binomial(10, 5), 252);
+}
+
+fn test_binomial_symmetry() {
+    // C(n, k) = C(n, n-k)
+    assert_eq(binomial(7, 2), binomial(7, 5));
+    assert_eq(binomial(8, 3), binomial(8, 5));
+    assert_eq(binomial(10, 4), binomial(10, 6));
+}
+
+fn test_binomial_pascal_row() {
+    // Row 5 of Pascal's triangle: 1, 5, 10, 10, 5, 1
+    assert_eq(binomial(5, 0), 1);
+    assert_eq(binomial(5, 1), 5);
+    assert_eq(binomial(5, 2), 10);
+    assert_eq(binomial(5, 3), 10);
+    assert_eq(binomial(5, 4), 5);
+    assert_eq(binomial(5, 5), 1);
+}
+
+fn test_binomial_sum() {
+    // Sum of row n = 2^n
+    let mut s = 0;
+    let mut k = 0;
+    while k <= 7 {
+        s = s + binomial(7, k);
+        k = k + 1;
+    }
+    assert_eq(s, 128); // 2^7
+}
+
+fn test_binomial_pascal_agrees() {
+    // Recursive Pascal should agree with iterative
+    let mut n = 0;
+    while n <= 8 {
+        let mut k = 0;
+        while k <= n {
+            assert_eq(binomial(n, k), binomial_pascal(n, k));
+            k = k + 1;
+        }
+        n = n + 1;
+    }
+}
+
+fn test_binomial_invalid() {
+    assert_eq(binomial(5, -1), 0);
+    assert_eq(binomial(5, 6), 0);
+}
+
+// =============================================================================
+// Tests — Permutations
+// =============================================================================
+
+fn test_permutations() {
+    // P(n, 0) = 1
+    assert_eq(permutations(5, 0), 1);
+    // P(n, 1) = n
+    assert_eq(permutations(5, 1), 5);
+    // P(n, n) = n!
+    assert_eq(permutations(5, 5), 120);
+    // P(5, 2) = 5*4 = 20
+    assert_eq(permutations(5, 2), 20);
+    // P(5, 3) = 5*4*3 = 60
+    assert_eq(permutations(5, 3), 60);
+    // P(10, 3) = 10*9*8 = 720
+    assert_eq(permutations(10, 3), 720);
+}
+
+fn test_permutations_relation() {
+    // P(n, k) = C(n, k) * k!
+    assert_eq(permutations(7, 3), binomial(7, 3) * factorial(3));
+    assert_eq(permutations(8, 4), binomial(8, 4) * factorial(4));
+}
+
+// =============================================================================
+// Tests — Catalan numbers
+// =============================================================================
+
+fn test_catalan() {
+    // C_0=1, C_1=1, C_2=2, C_3=5, C_4=14, C_5=42, C_6=132, C_7=429
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+    assert_eq(catalan(6), 132);
+    assert_eq(catalan(7), 429);
+}
+
+fn test_catalan_recursive_agrees() {
+    let mut i = 0;
+    while i <= 7 {
+        assert_eq(catalan(i), catalan_rec(i));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Tests — Derangements
+// =============================================================================
+
+fn test_derangements() {
+    // D(0)=1, D(1)=0, D(2)=1, D(3)=2, D(4)=9, D(5)=44, D(6)=265
+    assert_eq(derangement(0), 1);
+    assert_eq(derangement(1), 0);
+    assert_eq(derangement(2), 1);
+    assert_eq(derangement(3), 2);
+    assert_eq(derangement(4), 9);
+    assert_eq(derangement(5), 44);
+    assert_eq(derangement(6), 265);
+}
+
+fn test_derangements_relation() {
+    // D(n) = n! - sum(C(n,k)*D(n-k)) for k=1..n
+    // Equivalently: n! = sum(C(n,k)*D(k)) for k=0..n
+    // Check: sum(C(5,k)*D(k)) for k=0..5 = 5! = 120
+    let s = binomial(5, 0) * derangement(0)
+          + binomial(5, 1) * derangement(1)
+          + binomial(5, 2) * derangement(2)
+          + binomial(5, 3) * derangement(3)
+          + binomial(5, 4) * derangement(4)
+          + binomial(5, 5) * derangement(5);
+    assert_eq(s, 120);
+}
+
+// =============================================================================
+// Tests — Stirling numbers
+// =============================================================================
+
+fn test_stirling() {
+    // S(n, 1) = 1 for all n >= 1
+    assert_eq(stirling2(1, 1), 1);
+    assert_eq(stirling2(3, 1), 1);
+    assert_eq(stirling2(5, 1), 1);
+    // S(n, n) = 1 for all n
+    assert_eq(stirling2(3, 3), 1);
+    assert_eq(stirling2(5, 5), 1);
+    // S(n, 2) = 2^(n-1) - 1
+    assert_eq(stirling2(2, 2), 1);
+    assert_eq(stirling2(3, 2), 3);
+    assert_eq(stirling2(4, 2), 7);
+    assert_eq(stirling2(5, 2), 15);
+    // Known values
+    assert_eq(stirling2(4, 3), 6);
+    assert_eq(stirling2(5, 3), 25);
+    assert_eq(stirling2(5, 4), 10);
+}
+
+fn test_stirling_bell() {
+    // Bell number B(n) = sum(S(n,k)) for k=0..n
+    // B(0)=1, B(1)=1, B(2)=2, B(3)=5, B(4)=15, B(5)=52
+    let b3 = stirling2(3, 0) + stirling2(3, 1) + stirling2(3, 2) + stirling2(3, 3);
+    assert_eq(b3, 5);
+    let b4 = stirling2(4, 0) + stirling2(4, 1) + stirling2(4, 2)
+           + stirling2(4, 3) + stirling2(4, 4);
+    assert_eq(b4, 15);
+}
+
+fn main() -> Int {
+    test_factorial();
+    test_binomial_basic();
+    test_binomial_known();
+    test_binomial_symmetry();
+    test_binomial_pascal_row();
+    test_binomial_sum();
+    test_binomial_pascal_agrees();
+    test_binomial_invalid();
+    test_permutations();
+    test_permutations_relation();
+    test_catalan();
+    test_catalan_recursive_agrees();
+    test_derangements();
+    test_derangements_relation();
+    test_stirling();
+    test_stirling_bell();
+    print("[OK] 257_interp_combinatorics");
+    0
+}

@@ -1,0 +1,53 @@
+// @test: parse
+// @level: L1
+// @tags: meta, inline, attributes, optimization
+// @timeout: 5000
+
+/// @inline and optimization hint attributes.
+/// Grammar: attribute = identifier ['(' attribute_args ')']
+
+// Basic inline hint
+@inline
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Always inline
+@inline(always)
+fn fast_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+// Never inline
+@inline(never)
+fn complex_calculation(x: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < x {
+        result = result + i * i;
+        i = i + 1;
+    }
+    result
+}
+
+// Cold function (unlikely to be called)
+@cold
+fn handle_error(code: Int) -> Text {
+    f"Error code: {code}"
+}
+
+// Hot function (frequently called)
+@hot
+fn process_item(item: Int) -> Int {
+    item * 2 + 1
+}
+
+fn main() {
+    let sum = add(3, 4);
+    assert_eq(sum, 7);
+
+    let min = fast_min(10, 5);
+    assert_eq(min, 5);
+
+    print("Inline attribute tests parsed");
+}

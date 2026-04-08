@@ -1,0 +1,46 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: theorem, verification, formal
+// @expect: pass
+
+// Test theorem declarations (verified by compiler, not executed).
+
+// Theorem: addition is commutative
+theorem add_comm(a: Int, b: Int)
+    ensures a + b == b + a;
+
+// Theorem: multiplication distributes over addition
+theorem distributive(a: Int, b: Int, c: Int)
+    ensures a * (b + c) == a * b + a * c;
+
+// Factorial function
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+fn main() -> Int {
+    // Runtime checks match theorem properties
+    let a = 3;
+    let b = 5;
+    let c = 7;
+
+    if a + b != b + a {
+        print("FAIL: add_comm");
+        return 1;
+    }
+
+    if a * (b + c) != a * b + a * c {
+        print("FAIL: distributive");
+        return 1;
+    }
+
+    if factorial(5) != 120 {
+        print(f"FAIL: factorial(5) = {factorial(5)}");
+        return 1;
+    }
+
+    print("PASS: theorem properties hold");
+    0
+}

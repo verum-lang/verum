@@ -1,0 +1,26 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Float32 type constants (MIN, MAX, BITS, EPSILON)
+
+fn main() {
+    // Test Float32.BITS
+    assert_eq(Float32.BITS(), 32);
+
+    // Test f32 alias (FFI compatibility)
+    assert_eq(f32.BITS(), 32);
+
+    // Test MAX/MIN approximations
+    assert(Float32.MAX() > 1.0e+37);
+    assert(Float32.EPSILON() < 1.0e-6);
+
+    // Test special values
+    assert(Float32.infinity().is_infinite());
+    assert(Float32.neg_infinity().is_infinite());
+    assert(Float32.nan().is_nan());
+
+    // Test f32 special values
+    assert(f32.infinity().is_infinite());
+    assert(f32.nan().is_nan());
+}

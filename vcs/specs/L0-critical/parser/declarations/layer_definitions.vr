@@ -1,0 +1,147 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, declarations, layers, context-system
+// @timeout: 10000
+// @expect: pass
+//
+// Layer Definition Tests
+//
+// Layers are compile-time constructs for composing context providers.
+// The compiler resolves dependencies between layers, verifies all
+// requires are satisfied, and generates optimal initialization order.
+//
+// Grammar (from verum.ebnf):
+//   layer_def  = visibility , 'layer' , identifier , layer_body ;
+//   layer_body = '{' , { layer_item } , '}' | '=' , layer_expr , ';' ;
+//   layer_item = provide_stmt ;
+//   layer_expr = identifier , { '+' , identifier } ;
+
+// =============================================================================
+// Basic Layer Definition (Block Form)
+// =============================================================================
+
+type Database is {
+    url: Text,
+};
+
+type Logger is {
+    level: Int,
+};
+
+type Cache is {
+    capacity: Int,
+};
+
+type Config is {
+    debug: Bool,
+};
+
+type Auth is {
+    secret: Text,
+};
+
+layer DatabaseLayer {
+    provide Database = Database { url: "postgres://localhost/app" };
+}
+
+layer LoggingLayer {
+    provide Logger = Logger { level: 3 };
+}
+
+layer CacheLayer {
+    provide Cache = Cache { capacity: 1000 };
+}
+
+// =============================================================================
+// Layer Composition (Expression Form)
+// =============================================================================
+
+layer AppLayer = DatabaseLayer + LoggingLayer + CacheLayer;
+
+layer WebLayer = AppLayer + AuthLayer;
+
+layer TestLayer = MockDatabaseLayer + LoggingLayer;
+
+// =============================================================================
+// Layer with Multiple Provides
+// =============================================================================
+
+layer FullStackLayer {
+    provide Database = Database { url: "postgres://localhost/app" };
+    provide Logger = Logger { level: 2 };
+    provide Cache = Cache { capacity: 5000 };
+    provide Config = Config { debug: false };
+}
+
+// =============================================================================
+// Visibility Modifiers
+// =============================================================================
+
+pub layer PublicLayer {
+    provide Config = Config { debug: true };
+}
+
+layer InternalLayer {
+    provide Logger = Logger { level: 0 };
+}
+
+// =============================================================================
+// Complex Provide Expressions in Layers
+// =============================================================================
+
+layer ProductionLayer {
+    provide Database = {
+        let url = "postgres://prod-server/app";
+        Database { url: url }
+    };
+    provide Logger = Logger { level: 1 };
+}
+
+// =============================================================================
+// Multi-level Layer Composition
+// =============================================================================
+
+layer InfraLayer = DatabaseLayer + CacheLayer;
+layer ServiceLayer = InfraLayer + LoggingLayer;
+layer FullLayer = ServiceLayer + AuthLayer;
+
+// =============================================================================
+// Layer Usage
+// =============================================================================
+
+layer AuthLayer {
+    provide Auth = Auth { secret: "test-secret" };
+}
+
+layer MockDatabaseLayer {
+    provide Database = Database { url: "sqlite://:memory:" };
+}
+
+fn start_app() {
+    // Layers provide their contexts via their block definitions.
+    // To use a layer's contexts, provide each individually or
+    // use the layer composition at the declaration level.
+    provide Database = Database { url: "postgres://localhost/app" };
+    provide Logger = Logger { level: 3 };
+    provide Cache = Cache { capacity: 1000 };
+    run_server();
+}
+
+fn run_server() using [Database, Logger, Cache] {
+    Logger.info("Server started");
+}
+
+fn run_tests() {
+    provide Database = Database { url: "sqlite://:memory:" };
+    provide Logger = Logger { level: 0 };
+    execute_test_suite();
+}
+
+fn execute_test_suite() using [Database, Logger] {
+    Logger.info("Running tests");
+}
+
+fn main() {
+    start_app();
+}

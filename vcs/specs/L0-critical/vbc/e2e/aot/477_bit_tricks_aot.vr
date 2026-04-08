@@ -1,0 +1,297 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, bit-manipulation, tricks
+// @timeout: 30000
+
+// Bit manipulation tricks and operations
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Count leading zeros (for positive integers, assuming 32-bit)
+fn clz32(n: Int) -> Int {
+    if n == 0 { return 32; }
+    let mut count = 0;
+    let mut val = n;
+    // Binary search for highest bit
+    let mut bit = 16;
+    while bit >= 1 {
+        let mut threshold = 1;
+        let mut k = 0;
+        while k < bit { threshold = threshold * 2; k = k + 1; }
+        // threshold = 2^bit
+        let upper_threshold = threshold * threshold; // 2^(2*bit)... no that's wrong
+        // We need: if val < 2^(32-count) and val >= 2^(32-count-1)
+        // Simpler: just divide
+        bit = bit / 2;
+    }
+    // Simple approach: count by dividing
+    count = 0;
+    val = n;
+    let mut p = 1;
+    let mut i = 0;
+    while i < 31 { p = p * 2; i = i + 1; } // p = 2^31
+    while p > 0 {
+        if val >= p { return count; }
+        count = count + 1;
+        p = p / 2;
+    }
+    32
+}
+
+// Count trailing zeros
+fn ctz(n: Int) -> Int {
+    if n == 0 { return 32; }
+    let mut count = 0;
+    let mut val = n;
+    while val % 2 == 0 {
+        count = count + 1;
+        val = val / 2;
+    }
+    count
+}
+
+// Population count (number of 1 bits)
+fn popcount(n: Int) -> Int {
+    let mut count = 0;
+    let mut val = n;
+    while val > 0 {
+        count = count + val % 2;
+        val = val / 2;
+    }
+    count
+}
+
+// Check if power of 2
+fn is_power_of_2(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if popcount(n) == 1 { 1 } else { 0 }
+}
+
+// Next power of 2 >= n
+fn next_pow2(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut p = 1;
+    while p < n { p = p * 2; }
+    p
+}
+
+// Highest set bit position (0-indexed, -1 if n=0)
+fn highest_bit(n: Int) -> Int {
+    if n == 0 { return -1; }
+    let mut pos = 0;
+    let mut val = n;
+    while val > 1 {
+        val = val / 2;
+        pos = pos + 1;
+    }
+    pos
+}
+
+// Lowest set bit position (0-indexed, -1 if n=0)
+fn lowest_bit(n: Int) -> Int {
+    if n == 0 { return -1; }
+    ctz(n)
+}
+
+// Reverse bits of an 8-bit number
+fn reverse_bits8(n: Int) -> Int {
+    let mut result = 0;
+    let mut val = n;
+    let mut i = 0;
+    while i < 8 {
+        result = result * 2 + val % 2;
+        val = val / 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Parity: 1 if odd number of 1-bits, 0 if even
+fn parity(n: Int) -> Int {
+    popcount(n) % 2
+}
+
+// Swap bits at positions i and j in value n
+fn swap_bits(n: Int, i: Int, j: Int) -> Int {
+    // Extract bits at positions i and j
+    let mut pi = 1;
+    let mut k = 0;
+    while k < i { pi = pi * 2; k = k + 1; }
+    let mut pj = 1;
+    k = 0;
+    while k < j { pj = pj * 2; k = k + 1; }
+
+    let bi = (n / pi) % 2;
+    let bj = (n / pj) % 2;
+
+    if bi == bj { return n; }
+
+    // XOR both positions
+    let mut result = n;
+    if bi == 1 { result = result - pi; } else { result = result + pi; }
+    if bj == 1 { result = result - pj; } else { result = result + pj; }
+    result
+}
+
+// Gray code encode
+fn gray_encode(n: Int) -> Int {
+    // n XOR (n >> 1), implemented with integer ops
+    let half = n / 2;
+    // XOR = a + b - 2*(a AND b)
+    // For XOR without bitwise: use the fact that for bits
+    let mut result = 0;
+    let mut a = n;
+    let mut b = half;
+    let mut bit = 1;
+    while a > 0 {
+        let ba = a % 2;
+        let bb = b % 2;
+        if ba != bb { result = result + bit; }
+        a = a / 2;
+        b = b / 2;
+        bit = bit * 2;
+    }
+    // Handle remaining bits of b (shouldn't happen since b = n/2 < n)
+    result
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);    // 111
+    assert_eq(popcount(255), 8);  // 11111111
+    assert_eq(popcount(256), 1);  // 100000000
+    assert_eq(popcount(170), 4);  // 10101010
+    1
+}
+
+fn test_power_of_2() -> Int {
+    assert_eq(is_power_of_2(1), 1);
+    assert_eq(is_power_of_2(2), 1);
+    assert_eq(is_power_of_2(4), 1);
+    assert_eq(is_power_of_2(8), 1);
+    assert_eq(is_power_of_2(16), 1);
+    assert_eq(is_power_of_2(3), 0);
+    assert_eq(is_power_of_2(6), 0);
+    assert_eq(is_power_of_2(0), 0);
+
+    assert_eq(next_pow2(1), 1);
+    assert_eq(next_pow2(3), 4);
+    assert_eq(next_pow2(5), 8);
+    assert_eq(next_pow2(8), 8);
+    assert_eq(next_pow2(9), 16);
+    1
+}
+
+fn test_trailing_zeros() -> Int {
+    assert_eq(ctz(1), 0);
+    assert_eq(ctz(2), 1);
+    assert_eq(ctz(4), 2);
+    assert_eq(ctz(8), 3);
+    assert_eq(ctz(12), 2);  // 1100
+    assert_eq(ctz(16), 4);
+    assert_eq(ctz(0), 32);
+    1
+}
+
+fn test_highest_lowest_bit() -> Int {
+    assert_eq(highest_bit(1), 0);
+    assert_eq(highest_bit(2), 1);
+    assert_eq(highest_bit(3), 1);
+    assert_eq(highest_bit(8), 3);
+    assert_eq(highest_bit(255), 7);
+    assert_eq(highest_bit(0), -1);
+
+    assert_eq(lowest_bit(1), 0);
+    assert_eq(lowest_bit(2), 1);
+    assert_eq(lowest_bit(12), 2);
+    assert_eq(lowest_bit(0), -1);
+    1
+}
+
+fn test_reverse_bits() -> Int {
+    assert_eq(reverse_bits8(0), 0);
+    assert_eq(reverse_bits8(255), 255); // all 1s stays all 1s
+    assert_eq(reverse_bits8(1), 128);   // 00000001 -> 10000000
+    assert_eq(reverse_bits8(128), 1);   // 10000000 -> 00000001
+    assert_eq(reverse_bits8(170), 85);  // 10101010 -> 01010101
+    assert_eq(reverse_bits8(85), 170);  // 01010101 -> 10101010
+    1
+}
+
+fn test_parity() -> Int {
+    assert_eq(parity(0), 0);    // 0 ones = even
+    assert_eq(parity(1), 1);    // 1 one = odd
+    assert_eq(parity(3), 0);    // 2 ones = even
+    assert_eq(parity(7), 1);    // 3 ones = odd
+    assert_eq(parity(15), 0);   // 4 ones = even
+    assert_eq(parity(255), 0);  // 8 ones = even
+    1
+}
+
+fn test_swap_bits() -> Int {
+    // swap bits 0 and 1 of 5 (101): bit0=1, bit1=0 -> swap -> 110 = 6
+    assert_eq(swap_bits(5, 0, 1), 6);
+    // swap bits 0 and 2 of 5 (101): same bits -> no change
+    assert_eq(swap_bits(5, 0, 2), 5);
+    // swap bits 1 and 2 of 6 (110): bit1=1, bit2=1 -> same, no change
+    assert_eq(swap_bits(6, 1, 2), 6);
+    1
+}
+
+fn test_gray_code() -> Int {
+    // Gray code: 0→0, 1→1, 2→3, 3→2, 4→6, 5→7, 6→5, 7→4
+    assert_eq(gray_encode(0), 0);
+    assert_eq(gray_encode(1), 1);
+    assert_eq(gray_encode(2), 3);
+    assert_eq(gray_encode(3), 2);
+    assert_eq(gray_encode(4), 6);
+    assert_eq(gray_encode(5), 7);
+    assert_eq(gray_encode(6), 5);
+    assert_eq(gray_encode(7), 4);
+
+    // Gray code property: consecutive values differ by exactly 1 bit
+    let mut i = 0;
+    while i < 7 {
+        let diff = popcount(abs_val(gray_encode(i + 1) - gray_encode(i)));
+        // Actually XOR-diff is what we want, but we can check popcount of XOR
+        // Using our XOR trick:
+        let g1 = gray_encode(i);
+        let g2 = gray_encode(i + 1);
+        // XOR via bit-by-bit
+        let mut xor_val = 0;
+        let mut a = g1;
+        let mut bb = g2;
+        let mut bit = 1;
+        while a > 0 {
+            let ba = a % 2;
+            let bbb = bb % 2;
+            if ba != bbb { xor_val = xor_val + bit; }
+            a = a / 2;
+            bb = bb / 2;
+            bit = bit * 2;
+        }
+        while bb > 0 {
+            let bbb = bb % 2;
+            if bbb != 0 { xor_val = xor_val + bit; }
+            bb = bb / 2;
+            bit = bit * 2;
+        }
+        assert_eq(popcount(xor_val), 1);
+        i = i + 1;
+    }
+    1
+}
+
+fn main() -> Int {
+    test_popcount();
+    test_power_of_2();
+    test_trailing_zeros();
+    test_highest_lowest_bit();
+    test_reverse_bits();
+    test_parity();
+    test_swap_bits();
+    test_gray_code();
+    print("[OK] 477_bit_tricks_aot");
+    0
+}

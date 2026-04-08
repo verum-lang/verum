@@ -1,0 +1,276 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @category: float
+// @description: Floating-point precision and IEEE 754 compliance tests
+// @tags: float, precision, ieee754, nan, infinity, denormal
+
+/// Floating-point precision must be consistent across execution tiers.
+/// Tests IEEE 754 special values, rounding, and edge cases.
+
+module FloatingPointPrecision;
+
+/// Test NaN propagation
+/// NaN must propagate through arithmetic operations
+fn test_nan_propagation() {
+    let nan = 0.0 / 0.0;
+
+    // NaN + anything = NaN
+    // @expect-output: NaN
+    print(nan + 1.0);
+
+    // NaN * anything = NaN
+    // @expect-output: NaN
+    print(nan * 0.0);
+
+    // NaN comparison (always false)
+    // @expect-output: false
+    print(nan == nan);
+
+    // @expect-output: false
+    print(nan < 1.0);
+
+    // @expect-output: false
+    print(nan > -1.0);
+}
+
+/// Test infinity arithmetic
+fn test_infinity_arithmetic() {
+    let pos_inf = 1.0 / 0.0;
+    let neg_inf = -1.0 / 0.0;
+
+    // Infinity + finite = infinity
+    // @expect-output: inf
+    print(pos_inf + 1000000.0);
+
+    // -Infinity + finite = -infinity
+    // @expect-output: -inf
+    print(neg_inf + 1000000.0);
+
+    // Infinity - Infinity = NaN
+    // @expect-output: NaN
+    print(pos_inf - pos_inf);
+
+    // Infinity * 0 = NaN
+    // @expect-output: NaN
+    print(pos_inf * 0.0);
+
+    // 1 / Infinity = 0
+    // @expect-output: 0.0
+    print(1.0 / pos_inf);
+
+    // Infinity / Infinity = NaN
+    // @expect-output: NaN
+    print(pos_inf / pos_inf);
+}
+
+/// Test denormalized (subnormal) numbers
+fn test_denormalized_numbers() {
+    let min_positive = 2.2250738585072014e-308;  // MIN_POSITIVE
+    let denormal = 5e-324;  // Smallest denormal
+
+    // Denormal arithmetic
+    // @expect-output: true
+    print(denormal > 0.0);
+
+    // Denormal * 2 may still be denormal
+    let double_denormal = denormal * 2.0;
+    // @expect-output: true
+    print(double_denormal > denormal);
+
+    // Denormal underflow
+    let underflow = denormal / 2.0;
+    // @expect-output: 0.0
+    print(underflow);  // Underflows to zero
+
+    // Denormal + normal
+    let sum = min_positive + denormal;
+    // @expect-output: true
+    print(sum > min_positive);
+}
+
+/// Test floating-point rounding
+fn test_rounding() {
+    // Machine epsilon test
+    let epsilon = 2.220446049250313e-16;
+
+    // 1 + epsilon > 1
+    // @expect-output: true
+    print(1.0 + epsilon > 1.0);
+
+    // 1 + epsilon/2 == 1 (rounds to 1)
+    // @expect-output: true
+    print(1.0 + epsilon / 2.0 == 1.0);
+
+    // Test round-to-nearest-even (banker's rounding)
+    // 0.5 rounds to 0, 1.5 rounds to 2, 2.5 rounds to 2
+    // @expect-output: 0
+    print(round(0.5));
+
+    // @expect-output: 2
+    print(round(1.5));
+
+    // @expect-output: 2
+    print(round(2.5));
+}
+
+/// Test precision loss in arithmetic
+fn test_precision_loss() {
+    let large = 1e16;
+    let small = 1.0;
+
+    // Large + small - large should be small, but may lose precision
+    let result = (large + small) - large;
+    // @expect-output-approx: 1.0 epsilon=0.1
+    print(result);
+
+    // Catastrophic cancellation
+    let a = 1.0000000000001;
+    let b = 1.0;
+    let diff = a - b;
+    // @expect-output-approx: 1e-13 epsilon=1e-15
+    print(diff);
+}
+
+/// Test special value comparisons
+fn test_special_comparisons() {
+    let pos_inf = 1.0 / 0.0;
+    let neg_inf = -1.0 / 0.0;
+    let nan = 0.0 / 0.0;
+
+    // Infinity comparisons
+    // @expect-output: true
+    print(pos_inf > 1e308);
+
+    // @expect-output: true
+    print(neg_inf < -1e308);
+
+    // @expect-output: true
+    print(pos_inf == pos_inf);
+
+    // @expect-output: false
+    print(pos_inf == neg_inf);
+
+    // Signed zero
+    let pos_zero = 0.0;
+    let neg_zero = -0.0;
+
+    // +0 == -0 (IEEE 754)
+    // @expect-output: true
+    print(pos_zero == neg_zero);
+
+    // But 1/+0 != 1/-0
+    // @expect-output: false
+    print((1.0 / pos_zero) == (1.0 / neg_zero));
+}
+
+/// Test floating-point to integer conversion
+fn test_float_to_int() {
+    // Normal conversion
+    // @expect-output: 42
+    print(42.7 as Int);
+
+    // Truncation toward zero
+    // @expect-output: -42
+    print(-42.7 as Int);
+
+    // Infinity to Int (undefined behavior in some implementations)
+    let inf = 1.0 / 0.0;
+    // @expect-error: Conversion error
+    // print(inf as Int);
+
+    // NaN to Int (undefined behavior)
+    let nan = 0.0 / 0.0;
+    // @expect-error: Conversion error
+    // print(nan as Int);
+}
+
+/// Test floating-point literal precision
+fn test_literal_precision() {
+    // 17 significant digits should round-trip
+    let precise = 1.2345678901234567;
+    // @expect-output: 1.2345678901234567
+    print(precise);
+
+    // Scientific notation
+    let sci = 1.23e-100;
+    // @expect-output: 1.23e-100
+    print(sci);
+
+    // Maximum representable
+    let max = 1.7976931348623157e308;
+    // @expect-output: 1.7976931348623157e308
+    print(max);
+}
+
+/// Test fused multiply-add (FMA)
+fn test_fma() {
+    let a = 1e15;
+    let b = 1e15;
+    let c = -1e30 + 1.0;
+
+    // FMA should give more accurate result than separate multiply and add
+    let fma_result = fma(a, b, c);
+    let separate = a * b + c;
+
+    // FMA result should be closer to 1.0
+    // @expect-output-approx: 1.0 epsilon=1.0
+    print(fma_result);
+}
+
+/// Test floating-point classification
+fn test_classification() {
+    let normal = 1.5;
+    let subnormal = 5e-324;
+    let inf = 1.0 / 0.0;
+    let nan = 0.0 / 0.0;
+    let zero = 0.0;
+
+    // @expect-output: true
+    print(is_normal(normal));
+
+    // @expect-output: true
+    print(is_subnormal(subnormal));
+
+    // @expect-output: true
+    print(is_infinite(inf));
+
+    // @expect-output: true
+    print(is_nan(nan));
+
+    // @expect-output: true
+    print(is_zero(zero));
+}
+
+/// Test ULP (Units in Last Place) differences
+fn test_ulp() {
+    let a = 1.0;
+    let next = next_after(a, 2.0);
+
+    // next_after should give the next representable float
+    // @expect-output: true
+    print(next > a);
+
+    // Difference should be exactly 1 ULP
+    let ulp_diff = next - a;
+    // @expect-output: 2.220446049250313e-16
+    print(ulp_diff);
+}
+
+fn main() {
+    print("Testing floating-point precision and IEEE 754 compliance...");
+
+    test_nan_propagation();
+    test_infinity_arithmetic();
+    test_denormalized_numbers();
+    test_rounding();
+    test_precision_loss();
+    test_special_comparisons();
+    test_float_to_int();
+    test_literal_precision();
+    test_fma();
+    test_classification();
+    test_ulp();
+
+    print("Floating-point precision tests complete.");
+}

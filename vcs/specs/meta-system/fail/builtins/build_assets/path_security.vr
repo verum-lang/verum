@@ -1,0 +1,125 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, build_assets, security, path_traversal, error
+// @description: Test that build assets blocks path traversal and absolute paths
+// @expected-error: M308
+
+// =============================================================================
+// PATH TRAVERSAL ATTACKS
+// =============================================================================
+
+// ERROR: Basic path traversal with ..
+meta fn test_path_traversal_basic() -> Text using [BuildAssets] {
+    load_text("../etc/passwd")  // ERROR: Path traversal blocked
+}
+
+// ERROR: Path traversal with multiple ..
+meta fn test_path_traversal_multiple() -> Text using [BuildAssets] {
+    load_text("../../etc/passwd")  // ERROR: Path traversal blocked
+}
+
+// ERROR: Path traversal embedded in path
+meta fn test_path_traversal_embedded() -> Text using [BuildAssets] {
+    load_text("config/../../../etc/passwd")  // ERROR: Path traversal blocked
+}
+
+// ERROR: Path traversal at end
+meta fn test_path_traversal_end() -> Text using [BuildAssets] {
+    load_text("valid/path/..")  // ERROR: Path traversal blocked
+}
+
+// ERROR: Path traversal with ./ prefix
+meta fn test_path_traversal_dot_prefix() -> Text using [BuildAssets] {
+    load_text("./../sensitive")  // ERROR: Path traversal blocked
+}
+
+// =============================================================================
+// ABSOLUTE PATHS
+// =============================================================================
+
+// ERROR: Unix absolute path
+meta fn test_absolute_unix() -> Text using [BuildAssets] {
+    load_text("/etc/passwd")  // ERROR: Absolute paths not allowed
+}
+
+// ERROR: Windows absolute path with drive letter
+meta fn test_absolute_windows() -> Text using [BuildAssets] {
+    load_text("C:\\Windows\\System32\\config")  // ERROR: Absolute paths not allowed
+}
+
+// ERROR: Root path
+meta fn test_absolute_root() -> Text using [BuildAssets] {
+    load_text("/")  // ERROR: Absolute paths not allowed
+}
+
+// ERROR: Home directory expansion attempt
+meta fn test_home_expansion() -> Text using [BuildAssets] {
+    load_text("~/sensitive_data")  // ERROR: Home expansion not allowed
+}
+
+// =============================================================================
+// SECURITY ATTACKS ON OTHER FUNCTIONS
+// =============================================================================
+
+// ERROR: Path traversal in include_str
+meta fn test_include_str_traversal() -> Text using [BuildAssets] {
+    include_str("../../../etc/shadow")  // ERROR: Path traversal blocked
+}
+
+// ERROR: Path traversal in include_bytes
+meta fn test_include_bytes_traversal() -> Bytes using [BuildAssets] {
+    include_bytes("../../../etc/passwd")  // ERROR: Path traversal blocked
+}
+
+// ERROR: Absolute path in asset_exists
+meta fn test_exists_absolute() -> Bool using [BuildAssets] {
+    asset_exists("/etc/passwd")  // ERROR: Absolute paths not allowed
+}
+
+// ERROR: Path traversal in asset_list_dir
+meta fn test_list_dir_traversal() -> [Text] using [BuildAssets] {
+    asset_list_dir("../")  // ERROR: Path traversal blocked
+}
+
+// ERROR: Absolute path in asset_metadata
+meta fn test_metadata_absolute() -> (UInt, UInt, Bool, Bool, Bool) using [BuildAssets] {
+    asset_metadata("/etc/passwd")  // ERROR: Absolute paths not allowed
+}
+
+// =============================================================================
+// URL-ENCODED ATTACKS
+// =============================================================================
+
+// ERROR: URL-encoded path traversal
+meta fn test_url_encoded_traversal() -> Text using [BuildAssets] {
+    load_text("%2e%2e%2fetc%2fpasswd")  // ERROR: Encoded path traversal blocked
+}
+
+// ERROR: Double-encoded path traversal
+meta fn test_double_encoded_traversal() -> Text using [BuildAssets] {
+    load_text("%252e%252e%252fetc")  // ERROR: Double-encoded blocked
+}
+
+// =============================================================================
+// NULL BYTE INJECTION
+// =============================================================================
+
+// ERROR: Null byte injection attempt
+meta fn test_null_byte_injection() -> Text using [BuildAssets] {
+    load_text("valid.txt\x00.jpg")  // ERROR: Null bytes not allowed
+}
+
+// =============================================================================
+// SYMLINK FOLLOWING ATTACKS
+// =============================================================================
+
+// ERROR: Symlink to sensitive file (if path resolves outside project)
+meta fn test_symlink_escape() -> Text using [BuildAssets] {
+    // Note: This would fail if symlink points outside project root
+    load_text("malicious_symlink")  // Blocked if resolves outside
+}
+
+fn main() {
+    @const test_path_traversal_basic();
+}

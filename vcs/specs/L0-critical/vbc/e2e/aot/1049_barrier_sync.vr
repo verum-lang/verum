@@ -1,0 +1,74 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: barrier, sync, concurrency
+// @expect: pass
+
+// Barrier-like synchronization: threads coordinate via channels + mutex.
+
+fn __mutex_new_raw() -> Int { 0 }
+fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
+fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
+
+fn main() -> Int {
+    let mtx = __mutex_new_raw();
+    // Use channel as shared counter cell
+    let counter_ch = Channel.new(1);
+    counter_ch.send(0);
+
+    // 3 threads each increment the shared counter
+    let t1 = spawn {
+        __mutex_lock_raw(mtx);
+        match counter_ch.recv() {
+            Some(v) => { counter_ch.send(v + 10); },
+            None => {}
+        }
+        __mutex_unlock_raw(mtx);
+        1
+    };
+
+    let t2 = spawn {
+        __mutex_lock_raw(mtx);
+        match counter_ch.recv() {
+            Some(v) => { counter_ch.send(v + 20); },
+            None => {}
+        }
+        __mutex_unlock_raw(mtx);
+        2
+    };
+
+    let t3 = spawn {
+        __mutex_lock_raw(mtx);
+        match counter_ch.recv() {
+            Some(v) => { counter_ch.send(v + 30); },
+            None => {}
+        }
+        __mutex_unlock_raw(mtx);
+        3
+    };
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+
+    // All threads should have completed
+    if r1 + r2 + r3 != 6 {
+        print(f"FAIL: thread returns sum = {r1 + r2 + r3}");
+        return 1;
+    }
+
+    // Read final counter value
+    let final_val = match counter_ch.recv() {
+        Some(v) => v,
+        None => -1,
+    };
+
+    // 10 + 20 + 30 = 60
+    if final_val != 60 {
+        print(f"FAIL: final counter = {final_val}, expected 60");
+        return 1;
+    }
+
+    print(f"PASS: barrier-like sync, counter = {final_val}");
+    0
+}

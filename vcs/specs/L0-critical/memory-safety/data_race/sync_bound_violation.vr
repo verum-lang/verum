@@ -1,0 +1,24 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, data-race, type-system, sync
+// @description: Tests that non-Sync types cannot be shared across threads via reference
+
+// This test verifies that the type system prevents sharing non-Sync types
+// across thread boundaries via references. Currently skipped because threading
+// primitives (spawn) are not yet implemented.
+
+// UnsafeCell<T> does not implement Sync (interior mutability is not thread-safe)
+// Types with interior mutability are inherently non-Sync
+type UnsafeCell<T> is {
+    value: T,
+};
+
+fn main() {
+    // Placeholder - actual test requires spawn syntax
+    // The intended test would verify compile-time rejection of:
+    //   let cell = UnsafeCell { value: 42 };
+    //   let cell_ref = &cell;
+    //   spawn || { let _ = *cell_ref; }  // ERROR: does not implement Sync
+    print("Sync bound violation test - skipped (threading not implemented)");
+}

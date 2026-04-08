@@ -1,0 +1,350 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, auto
+// @timeout: 15000
+// @description: Tests the auto tactic for automated proof search
+
+/// ============================================================
+/// AUTO TACTIC
+/// ============================================================
+///
+/// The auto tactic performs automated proof search using
+/// a database of lemmas, introduction rules, and elimination rules.
+/// It is more powerful than simp but may be slower.
+
+// ------------------------------------------------------------
+// Basic Auto Proofs
+// ------------------------------------------------------------
+
+/// Trivial goals
+theorem auto_trivial_1(): true {
+    proof by auto
+}
+
+theorem auto_trivial_2(p: Bool)
+    requires p
+    ensures p
+{
+    proof by auto
+}
+
+/// Simple implications
+theorem auto_implication(p: Bool, q: Bool)
+    requires p
+    requires p implies q
+    ensures q
+{
+    proof by auto
+}
+
+/// Chain of implications
+theorem auto_chain(a: Bool, b: Bool, c: Bool, d: Bool)
+    requires a
+    requires a implies b
+    requires b implies c
+    requires c implies d
+    ensures d
+{
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Auto with Introduction Rules
+// ------------------------------------------------------------
+
+/// Conjunction introduction
+theorem auto_and_intro(p: Bool, q: Bool)
+    requires p
+    requires q
+    ensures p && q
+{
+    proof by auto
+}
+
+/// Existential introduction
+theorem auto_exists_intro(): exists x: Nat. x > 0 {
+    proof by auto  // Finds witness 1
+}
+
+/// Multiple conjuncts
+theorem auto_multi_and(a: Bool, b: Bool, c: Bool)
+    requires a
+    requires b
+    requires c
+    ensures a && b && c
+{
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Auto with Elimination Rules
+// ------------------------------------------------------------
+
+/// Conjunction elimination
+theorem auto_and_elim(p: Bool, q: Bool)
+    requires p && q
+    ensures p
+{
+    proof by auto
+}
+
+/// Disjunction elimination
+theorem auto_or_elim(p: Bool, q: Bool, r: Bool)
+    requires p || q
+    requires p implies r
+    requires q implies r
+    ensures r
+{
+    proof by auto
+}
+
+/// Existential elimination
+theorem auto_exists_elim<T>(xs: List<T>)
+    requires len(xs) > 0
+    ensures exists x: T. x in xs
+{
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Auto with Lemma Database
+// ------------------------------------------------------------
+
+/// Register lemmas for auto
+@auto
+lemma nat_pos_succ(n: Nat): succ(n) > 0 {
+    proof by arithmetic
+}
+
+@auto
+lemma list_nonempty_cons<T>(x: T, xs: List<T>): len(x . xs) > 0 {
+    proof by definition, arithmetic
+}
+
+/// Using registered lemmas
+theorem use_auto_lemmas(n: Nat): succ(succ(n)) > 0 {
+    proof by auto  // Uses nat_pos_succ
+}
+
+// ------------------------------------------------------------
+// Auto with Safe Rules
+// ------------------------------------------------------------
+
+/// Safe rules that don't branch
+theorem auto_safe(x: Int, y: Int)
+    requires x > 0
+    requires y > 0
+    ensures x + y > 0
+{
+    proof by auto using safe_rules
+}
+
+/// Mixing safe and unsafe rules
+theorem auto_mixed(p: Bool, q: Bool)
+    requires p || q
+    ensures q || p
+{
+    proof by auto using [safe_rules, or_comm]
+}
+
+// ------------------------------------------------------------
+// Auto with Depth Limit
+// ------------------------------------------------------------
+
+/// Limit search depth
+theorem auto_shallow(a: Bool, b: Bool, c: Bool)
+    requires a implies b
+    requires b implies c
+    requires a
+    ensures c
+{
+    proof by auto { depth: 3 }
+}
+
+/// Deep proof requires higher depth
+theorem auto_deep(p: Bool)
+    requires p implies p implies p implies p implies p
+    requires p
+    ensures p
+{
+    proof by auto { depth: 10 }
+}
+
+// ------------------------------------------------------------
+// Auto with Backtracking
+// ------------------------------------------------------------
+
+/// Auto backtracks when needed
+theorem auto_backtrack(p: Bool, q: Bool, r: Bool)
+    requires (p && q) || (p && r)
+    requires q implies r
+    ensures p && r
+{
+    proof by auto  // May try wrong branch first, then backtrack
+}
+
+/// Multiple valid paths
+theorem auto_multiple_paths(a: Bool, b: Bool)
+    requires a
+    requires b
+    requires a implies b
+    ensures b
+{
+    proof by auto  // Can use direct hypothesis or implication
+}
+
+// ------------------------------------------------------------
+// Auto with Arithmetic
+// ------------------------------------------------------------
+
+/// Linear arithmetic
+theorem auto_arith_1(x: Int, y: Int)
+    requires x > y
+    requires y > 0
+    ensures x > 0
+{
+    proof by auto
+}
+
+/// Bounds propagation
+theorem auto_arith_2(a: Int, b: Int, c: Int)
+    requires a <= b
+    requires b <= c
+    ensures a <= c
+{
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Auto with Equality
+// ------------------------------------------------------------
+
+/// Equality reasoning
+theorem auto_eq(x: Int, y: Int, z: Int)
+    requires x == y
+    requires y == z
+    ensures x == z
+{
+    proof by auto
+}
+
+/// Substitution
+theorem auto_subst(x: Int, y: Int, f: fn(Int) -> Int)
+    requires x == y
+    ensures f(x) == f(y)
+{
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Auto with Type Classes
+// ------------------------------------------------------------
+
+/// Using type class instances
+theorem auto_typeclass<T: Eq>(x: T, y: T, z: T)
+    requires x == y
+    requires y == z
+    ensures x == z
+{
+    proof by auto  // Uses Eq transitivity
+}
+
+/// Ord reasoning
+theorem auto_ord<T: Ord>(x: T, y: T, z: T)
+    requires x < y
+    requires y < z
+    ensures x < z
+{
+    proof by auto
+}
+
+// ------------------------------------------------------------
+// Auto with Quantifiers
+// ------------------------------------------------------------
+
+/// Universal instantiation
+theorem auto_forall_inst(n: Nat)
+    requires forall m: Nat. m + 0 == m
+    ensures n + 0 == n
+{
+    proof by auto
+}
+
+/// Finding witnesses
+theorem auto_witness(): exists x: Nat. x * x == 4 {
+    proof by auto { witnesses: [0, 1, 2, 3, 4] }
+}
+
+// ------------------------------------------------------------
+// Auto Tactics Combination
+// ------------------------------------------------------------
+
+/// Auto then simp
+theorem auto_simp(x: Int)
+    requires x + 0 > 0
+    ensures x > 0
+{
+    proof by auto; simp
+}
+
+/// Auto with specific tactics
+theorem auto_with_tactics(xs: List<Int>)
+    requires len(xs) > 0
+    ensures exists h: Int, t: List<Int>. xs == h . t
+{
+    proof by auto using [list_cases, intro_rules]
+}
+
+// ------------------------------------------------------------
+// Auto Configuration
+// ------------------------------------------------------------
+
+/// Verbose auto for debugging
+theorem auto_verbose(p: Bool, q: Bool)
+    requires p && q
+    ensures q && p
+{
+    proof by auto { verbose: true }
+}
+
+/// Auto with timeout
+theorem auto_timeout(complex: Bool)
+    requires complex
+    ensures complex
+{
+    proof by auto { timeout: 5000 }
+}
+
+/// Auto with custom hint database
+theorem auto_custom_hints(x: Int)
+    requires x > 0
+    ensures x >= 0
+{
+    proof by auto using hints [arithmetic_hints, ordering_hints]
+}
+
+// ------------------------------------------------------------
+// Auto Failures and Fallbacks
+// ------------------------------------------------------------
+
+/// Auto with fallback
+theorem auto_fallback(n: Nat): n + 0 == n {
+    proof {
+        try { auto }
+        catch { simp }
+    }
+}
+
+/// Partial auto progress
+theorem auto_partial(a: Int, b: Int, c: Int)
+    requires a > b
+    requires b > c
+    ensures a > c
+{
+    proof {
+        auto;  // Makes progress but may not finish
+        // remaining goal solved by:
+        by transitivity
+    }
+}

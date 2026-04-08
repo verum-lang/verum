@@ -1,0 +1,173 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: structs, nested, methods, complex-data
+// @description: Test complex struct patterns with nested data
+
+type Point3D is { x: Int, y: Int, z: Int };
+
+implement Point3D {
+    fn new(x: Int, y: Int, z: Int) -> Point3D {
+        Point3D { x: x, y: y, z: z }
+    }
+
+    fn manhattan_dist(&self, other: Point3D) -> Int {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        let dz = self.z - other.z;
+        let abs_dx = if dx < 0 { 0 - dx } else { dx };
+        let abs_dy = if dy < 0 { 0 - dy } else { dy };
+        let abs_dz = if dz < 0 { 0 - dz } else { dz };
+        abs_dx + abs_dy + abs_dz
+    }
+
+    fn dot(&self, other: Point3D) -> Int {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
+
+    fn scale(&self, factor: Int) -> Point3D {
+        Point3D { x: self.x * factor, y: self.y * factor, z: self.z * factor }
+    }
+}
+
+fn test_point3d() -> Int {
+    let a = Point3D.new(1, 2, 3);
+    let b = Point3D.new(4, 6, 8);
+    let dist = a.manhattan_dist(b);
+    // |1-4| + |2-6| + |3-8| = 3 + 4 + 5 = 12
+    if dist != 12 {
+        print(f"FAIL point3d: dist={dist}, expected 12");
+        return 1;
+    }
+    let d = a.dot(b);
+    // 1*4 + 2*6 + 3*8 = 4 + 12 + 24 = 40
+    if d != 40 {
+        print(f"FAIL point3d: dot={d}, expected 40");
+        return 1;
+    }
+    let s = a.scale(3);
+    if s.x != 3 || s.y != 6 || s.z != 9 {
+        print(f"FAIL scale: ({s.x}, {s.y}, {s.z})");
+        return 1;
+    }
+    print("  point3d: OK");
+    0
+}
+
+type Matrix is { rows: Int, cols: Int, data: List<Int> };
+
+implement Matrix {
+    fn new(rows: Int, cols: Int) -> Matrix {
+        let mut data = List.new();
+        let mut i = 0;
+        while i < rows * cols {
+            data.push(0);
+            i = i + 1;
+        }
+        Matrix { rows: rows, cols: cols, data: data }
+    }
+
+    fn get(&self, r: Int, c: Int) -> Int {
+        self.data[r * self.cols + c]
+    }
+
+    fn set(&mut self, r: Int, c: Int, val: Int) {
+        self.data[r * self.cols + c] = val;
+    }
+
+    fn trace(&self) -> Int {
+        let mut sum = 0;
+        let mut i = 0;
+        let min_dim = if self.rows < self.cols { self.rows } else { self.cols };
+        while i < min_dim {
+            sum = sum + self.get(i, i);
+            i = i + 1;
+        }
+        sum
+    }
+}
+
+fn test_matrix() -> Int {
+    let mut m = Matrix.new(3, 3);
+    // Set identity-like matrix
+    m.set(0, 0, 1);
+    m.set(1, 1, 2);
+    m.set(2, 2, 3);
+    m.set(0, 1, 4);
+
+    if m.get(0, 0) != 1 {
+        print(f"FAIL matrix[0,0]={m.get(0, 0)}");
+        return 1;
+    }
+    if m.get(0, 1) != 4 {
+        print(f"FAIL matrix[0,1]={m.get(0, 1)}");
+        return 1;
+    }
+
+    let t = m.trace();
+    if t != 6 {
+        print(f"FAIL trace={t}, expected 6");
+        return 1;
+    }
+    print("  matrix: OK");
+    0
+}
+
+type Employee is { name: Text, age: Int, salary: Int };
+
+fn test_employee_list() -> Int {
+    let mut employees = List.new();
+    employees.push(Employee { name: "Alice", age: 30, salary: 50000 });
+    employees.push(Employee { name: "Bob", age: 25, salary: 45000 });
+    employees.push(Employee { name: "Carol", age: 35, salary: 60000 });
+
+    // Find highest salary
+    let mut max_salary = 0;
+    let mut max_name = "";
+    let mut i = 0;
+    while i < employees.len() {
+        let emp = employees[i];
+        if emp.salary > max_salary {
+            max_salary = emp.salary;
+            max_name = emp.name;
+        }
+        i = i + 1;
+    }
+    if max_salary != 60000 {
+        print(f"FAIL employee: max_salary={max_salary}");
+        return 1;
+    }
+    if max_name != "Carol" {
+        print(f"FAIL employee: name={max_name}");
+        return 1;
+    }
+
+    // Total salary
+    let mut total = 0;
+    i = 0;
+    while i < employees.len() {
+        total = total + employees[i].salary;
+        i = i + 1;
+    }
+    if total != 155000 {
+        print(f"FAIL total_salary: {total}");
+        return 1;
+    }
+    print("  employee_list: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Complex Struct Tests:");
+    let mut failures = 0;
+    failures = failures + test_point3d();
+    failures = failures + test_matrix();
+    failures = failures + test_employee_list();
+
+    if failures == 0 {
+        print("All complex struct tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

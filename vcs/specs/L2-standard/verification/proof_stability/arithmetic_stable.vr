@@ -1,0 +1,82 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: proof-stability, arithmetic, stable
+// @timeout: 30000
+
+/// Arithmetic proofs - typically very stable with deterministic SMT solving.
+/// These tests verify basic arithmetic properties that should always succeed.
+
+/// Test: Addition is commutative
+fn test_add_commutative(x: Int, y: Int) -> Bool
+    ensures result == (x + y == y + x)
+{
+    x + y == y + x
+}
+
+/// Test: Addition is associative
+fn test_add_associative(x: Int, y: Int, z: Int) -> Bool
+    ensures result == ((x + y) + z == x + (y + z))
+{
+    (x + y) + z == x + (y + z)
+}
+
+/// Test: Multiplication distributes over addition
+fn test_distributive(x: Int, y: Int, z: Int) -> Bool
+    ensures result == (x * (y + z) == x * y + x * z)
+{
+    x * (y + z) == x * y + x * z
+}
+
+/// Test: Positive sum of positives
+fn test_positive_sum(x: Int{> 0}, y: Int{> 0}) -> Int
+    ensures result > 0
+    ensures result == x + y
+{
+    x + y
+}
+
+/// Test: Absolute value properties
+fn test_abs_positive(x: Int) -> Int
+    ensures result >= 0
+    ensures result == x || result == -x
+{
+    if x >= 0 { x } else { -x }
+}
+
+/// Test: Integer division bounds
+fn test_division_bounds(x: Int{>= 0}, y: Int{> 0}) -> Int
+    ensures result >= 0
+    ensures result <= x
+{
+    x / y
+}
+
+/// Test: Modulo bounds
+fn test_modulo_bounds(x: Int{>= 0}, y: Int{> 0}) -> Int
+    ensures result >= 0
+    ensures result < y
+{
+    x % y
+}
+
+/// Test: Linear arithmetic transitivity
+fn test_transitivity(x: Int, y: Int, z: Int) -> Bool
+    requires x < y
+    requires y < z
+    ensures result == (x < z)
+{
+    x < z
+}
+
+fn main() {
+    // Simple verification entry point
+    assert(test_add_commutative(3, 5));
+    assert(test_add_associative(1, 2, 3));
+    assert(test_distributive(2, 3, 4));
+    assert(test_positive_sum(5, 7) == 12);
+    assert(test_abs_positive(-5) == 5);
+    assert(test_division_bounds(10, 3) == 3);
+    assert(test_modulo_bounds(10, 3) == 1);
+    assert(test_transitivity(1, 2, 3));
+}

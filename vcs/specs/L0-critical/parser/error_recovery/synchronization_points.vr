@@ -1,0 +1,101 @@
+// @test: parse-recover
+// @tier: 0
+// @level: L0
+// @tags: parser, error-recovery, synchronization, item-boundary
+// @expect: errors
+// @description: Tests parser synchronization at item boundaries (fn, type, impl, etc.).
+//              Parser should skip invalid tokens until reaching a valid sync point.
+
+// Test 1: Invalid syntax before function
+// Parser should skip garbage and find 'fn'
+invalid garbage here that makes no sense
+
+fn valid_function_after_garbage() -> Int {
+    42
+}
+
+// Test 2: Invalid syntax between functions
+fn first_function() -> Int {
+    1
+}
+
+more invalid syntax between functions
+
+fn second_function() -> Int {
+    2
+}
+
+// Test 3: Sync at type definition
+random tokens that aren't valid
+
+type ValidType is {
+    field: Int,
+};
+
+// Test 4: Sync at implement block
+junk before implement block
+
+implement ValidType {
+    fn method(self) -> Int {
+        self.field
+    }
+}
+
+// Test 5: Sync at statement boundary within function
+fn function_with_internal_errors() {
+    let valid1 = 1;
+    completely invalid statement syntax here
+    let valid2 = 2;
+    garbage between statements
+    let valid3 = 3;
+    valid1 + valid2 + valid3
+}
+
+// Test 6: Sync after incomplete item
+fn incomplete_fn(
+// Parser should recover at next item
+
+fn complete_fn() -> Int {
+    100
+}
+
+// Test 7: Sync at semicolon
+fn sync_at_semicolons() {
+    let x = @#$%^&;
+    let y = 10;
+    let z = !!!;
+    let w = 20;
+    y + w
+}
+
+// Test 8: Sync at closing brace
+fn sync_at_braces() {
+    if true {
+        invalid syntax inside if
+    }
+    let after_if = 42;
+    after_if
+}
+
+// Test 9: Multiple sync points in sequence
+fn multiple_syncs() {
+    @@@;
+    let a = 1;
+    $$$;
+    let b = 2;
+    ###;
+    let c = 3;
+    a + b + c
+}
+
+// Test 10: Recovery preserves subsequent valid items
+type TypeAfterErrors is {
+    x: Int,
+    y: Int,
+};
+
+implement TypeAfterErrors {
+    fn sum(self) -> Int {
+        self.x + self.y
+    }
+}

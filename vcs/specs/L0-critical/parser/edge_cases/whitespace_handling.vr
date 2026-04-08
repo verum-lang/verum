@@ -1,0 +1,282 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, whitespace, formatting
+
+// Helper types
+type T is { a: Int };
+type Point is { x: Int, y: Int };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+type Map<K, V> is { entries: List<(K, V)> };
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Error is { message: Text };
+type Container<T> is { data: T };
+type MyType<T> is { value: T };
+type Clone is protocol { };
+type Debug is protocol { };
+
+// Helper functions
+fn f() -> Int { 42 }
+fn compute() -> Int { 42 }
+fn fallible() -> Result<Int, Error> { Ok(42) }
+fn transform(x: Int) -> Int { x }
+fn finalize(x: Int) -> Int { x }
+fn very_long_function_name_here(a: Int, b: Int, c: Int, d: Int) -> Int { a + b + c + d }
+
+fn test_minimal_whitespace() {
+    // Minimal whitespace
+    let x = 1;
+}
+
+fn test_maximum_whitespace() {
+    // Maximum whitespace
+    let     x     =     1     ;
+}
+
+fn     spaced_fn     (     )     ->     Int     {     42     }
+
+fn test_newlines_in_various_positions() {
+    // Newlines in various positions
+    let x =
+        compute();
+}
+
+fn multiline_fn(
+    a: Int,
+    b: Int,
+)
+->
+Int
+{
+    a
+    +
+    b
+}
+
+fn test_newlines_between_tokens() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+
+    // Newlines between tokens in expressions
+    let result = a
+        + b
+        * c
+        - d
+        / e;
+}
+
+fn test_whitespace_in_type_annotations() {
+    // Whitespace in type annotations
+    let x :    Int    = 1;
+    let y: Int = 2;
+}
+
+fn test_whitespace_in_generics() {
+    // Whitespace in generics
+    let list : List < Int > = Nil;
+    let map: Map<Text, Int> = Map { entries: Nil };
+}
+
+fn test_whitespace_in_function_calls() {
+    fn f3(a: Int, b: Int, c: Int) -> Int { a + b + c }
+
+    // Whitespace in function calls
+    let result = f3 ( 1 , 2 , 3 );
+    let compact = f3(1, 2, 3);
+}
+
+fn test_whitespace_in_array_literals() {
+    // Whitespace in array literals
+    let arr = [ 1 , 2 , 3 ];
+    let compact_arr = [1, 2, 3];
+}
+
+fn test_whitespace_in_struct_literals() {
+    // Whitespace in struct literals
+    let point = Point { x : 1 , y : 2 };
+    let compact_point = Point { x: 1, y: 2 };
+}
+
+fn test_whitespace_around_operators() {
+    let a = 5;
+    let b = 10;
+
+    // Whitespace around operators
+    let sum = a + b;
+    let spaced_sum = a + b;
+    let extra_spaced = a  +  b;
+}
+
+fn test_whitespace_in_match() {
+    let value: Maybe<Int> = Some(42);
+
+    // Whitespace in match expressions
+    match value {
+        Some ( x ) => x ,
+        None => 0 ,
+    };
+
+    match value { Some(x) => x, None => 0, };
+}
+
+fn test_whitespace_in_closure() {
+    // Whitespace in closure
+    let f_closure = | x | x * 2;
+    let g_closure = |x| x * 2;
+    let h_closure = |  x  ,  y  |  x  +  y;
+}
+
+fn test_whitespace_in_pipeline() {
+    let data = 42;
+
+    // Whitespace in pipeline
+    let result = data |> transform |> finalize;
+    let compact = data |> transform |> finalize;
+}
+
+// Whitespace in where clauses
+fn f_with_where < T > ( x : T ) -> T
+where
+    T : Clone + Debug
+{
+    x
+}
+
+fn g_with_where<T>(x: T) -> T where T: Clone { x }
+
+// Whitespace in context clause
+fn h_with_context ( ) using [ Database , Logger ] { }
+fn i_with_context() using[Database, Logger] { }
+
+fn test_multiple_blank_lines() {
+    let before_blanks = 1;
+
+
+
+    let after_blanks = 2;
+}
+
+fn test_whitespace_inside_strings() {
+    // Whitespace inside strings (preserved)
+    let text = "  spaces  inside  ";
+    let tabs = "	tabs	inside	";
+    let newlines = "line1
+line2
+line3";
+}
+
+fn test_whitespace_in_raw_strings() {
+    // Whitespace in raw strings
+    let raw = """  raw whitespace  """;
+}
+
+fn test_whitespace_around_assignment() {
+    // Whitespace around = in assignments
+    let x = 1;
+    let y = 1;
+    let z = 1;
+    let w  =  1;
+}
+
+fn test_whitespace_in_range() {
+    let start = 0;
+    let end = 10;
+
+    // Whitespace in range expressions
+    let range = 0 .. 10;
+    let inclusive = 0 ..= 10;
+    let compact_range = 0..10;
+}
+
+fn test_whitespace_in_method_chains() {
+    let obj = Point { x: 1, y: 2 };
+
+    // Whitespace in method chains
+    let result = obj.x + obj.y;
+    let compact = obj.x + obj.y;
+}
+
+fn test_whitespace_in_optional_chaining() {
+    let value: Maybe<Point> = Some(Point { x: 10, y: 20 });
+
+    // Whitespace in optional chaining
+    let maybe = match value { Some(p) => Some(p.x), None => None };
+}
+
+fn test_whitespace_in_try() {
+    fn risky() -> Result<Int, Error> { Ok(42) }
+    fn handle(e: Error) -> Int { 0 }
+
+    // Whitespace in try expressions
+    try {
+        risky ( ) ?
+    } recover {
+        e => handle ( e )
+    };
+
+    try { risky()? } recover { e => handle(e) };
+}
+
+// Whitespace in attribute
+@ repr ( C )
+type AttrT is { };
+
+@repr(C)
+type AttrU is { };
+
+// Whitespace in implement block
+implement    Container < T >    for    MyType < T >    {
+    fn    method    (    &    self    )    {    }
+}
+
+implement Container<T> for MyType<T> { fn method(&self) { } }
+
+fn test_long_lines_vs_broken_lines() {
+    let argument_one = 1;
+    let argument_two = 2;
+    let argument_three = 3;
+    let argument_four = 4;
+
+    // Long lines vs broken lines
+    let long_line = very_long_function_name_here(argument_one, argument_two, argument_three, argument_four);
+
+    let broken = very_long_function_name_here(
+        argument_one,
+        argument_two,
+        argument_three,
+        argument_four
+    );
+}
+
+fn test_alignment_patterns() {
+    // Alignment patterns
+    let short    = 1;
+    let medium   = 2;
+    let long_var = 3;
+}
+
+fn test_no_space_before_semicolon() {
+    // No space before semicolon patterns
+    let x = 1; let y = 2; let z = 3;
+}
+
+fn test_expression_continuation() {
+    let first_term = 1;
+    let second_term = 2;
+    let third_term = 3;
+    let fourth_term = 4;
+
+    // Expression continuation
+    let complex = first_term
+                + second_term
+                - third_term
+                * fourth_term;
+}
+
+// Context types
+type Database is { connection: Text };
+type Logger is { level: Int };

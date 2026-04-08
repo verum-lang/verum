@@ -1,0 +1,97 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: channel, fan-in, pipeline, runtime
+// @description: Test fan-in and pipeline patterns with channels
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Fan-in - multiple producers, single consumer channel
+    let result_ch = Channel.new(10);
+
+    let s1 = spawn {
+        sleep_ms(10);
+        result_ch.send(100);
+        0
+    };
+    let s2 = spawn {
+        sleep_ms(20);
+        result_ch.send(200);
+        0
+    };
+    let s3 = spawn {
+        sleep_ms(30);
+        result_ch.send(300);
+        0
+    };
+
+    let mut sum = 0;
+    let mut count = 0;
+    while count < 3 {
+        let val = match result_ch.recv() { Some(v) => v, None => 0 };
+        sum = sum + val;
+        count = count + 1;
+    }
+
+    s1.await;
+    s2.await;
+    s3.await;
+
+    if sum != 600 {
+        print(f"FAIL fan_in: expected 600, got {sum}");
+        failures = failures + 1;
+    } else {
+        print("  fan_in: OK");
+    }
+
+    // Test 2: Pipeline - ch1 -> transformer -> ch2
+    let stage1 = Channel.new(10);
+    let stage2 = Channel.new(10);
+
+    let p = spawn {
+        let mut i = 0;
+        while i < 5 {
+            stage1.send(i);
+            i = i + 1;
+        }
+        stage1.send(-1);
+        0
+    };
+
+    let t = spawn {
+        loop {
+            let val = match stage1.recv() { Some(v) => v, None => -1 };
+            if val == -1 {
+                stage2.send(-1);
+                break;
+            }
+            stage2.send(val * 10);
+        }
+        0
+    };
+
+    let mut pipeline_sum = 0;
+    loop {
+        let val = match stage2.recv() { Some(v) => v, None => -1 };
+        if val == -1 {
+            break;
+        }
+        pipeline_sum = pipeline_sum + val;
+    }
+
+    p.await;
+    t.await;
+
+    if pipeline_sum != 100 {
+        print(f"FAIL pipeline: expected 100, got {pipeline_sum}");
+        failures = failures + 1;
+    } else {
+        print("  pipeline: OK");
+    }
+
+    if failures == 0 {
+        print("All channel pattern tests passed");
+    }
+    failures
+}

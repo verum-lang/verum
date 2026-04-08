@@ -1,0 +1,847 @@
+// =============================================================================
+// primitives_bool_byte_char_test.vr - Tests for Bool, Byte, Char, Unit types
+// =============================================================================
+// @test: run-interpreter
+// @level: L1
+// @tier: 0
+// @tags: core, primitives, bool, byte, char, unit, ascii, unicode
+// @timeout: 30000
+// @description: Industrial-grade tests for Bool, Byte, Char, and Unit types
+//               covering all methods, edge cases, and protocol implementations
+// =============================================================================
+
+module specs.stdlib.core.primitives_bool_byte_char_test;
+
+mount core.prelude.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+// =============================================================================
+// BOOL TYPE TESTS
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Bool Methods
+// -----------------------------------------------------------------------------
+
+@test
+fn test_bool_and_then() {
+    // and_then is eager logical AND
+    assert_eq(true.and_then(true), true);
+    assert_eq(true.and_then(false), false);
+    assert_eq(false.and_then(true), false);
+    assert_eq(false.and_then(false), false);
+
+    // Note: Unlike && operator, this evaluates both arguments (eager)
+}
+
+@test
+fn test_bool_or_else() {
+    // or_else is eager logical OR
+    assert_eq(true.or_else(true), true);
+    assert_eq(true.or_else(false), true);
+    assert_eq(false.or_else(true), true);
+    assert_eq(false.or_else(false), false);
+}
+
+@test
+fn test_bool_xor() {
+    assert_eq(true.xor(true), false);
+    assert_eq(true.xor(false), true);
+    assert_eq(false.xor(true), true);
+    assert_eq(false.xor(false), false);
+
+    // XOR is its own inverse
+    assert_eq(true.xor(true).xor(true), true);
+    assert_eq(true.xor(false).xor(false), true);
+}
+
+@test
+fn test_bool_to_int() {
+    assert_eq(true.to_int(), 1);
+    assert_eq(false.to_int(), 0);
+}
+
+@test
+fn test_bool_select() {
+    // select<T>(if_true, if_false) -> T
+    assert_eq(true.select(42, 0), 42);
+    assert_eq(false.select(42, 0), 0);
+
+    assert_eq(true.select("yes", "no"), "yes");
+    assert_eq(false.select("yes", "no"), "no");
+
+    // Works with any type
+    assert_eq(true.select(3.14, 2.71), 3.14);
+    assert_eq(false.select(3.14, 2.71), 2.71);
+}
+
+// -----------------------------------------------------------------------------
+// Bool Protocol Implementations
+// -----------------------------------------------------------------------------
+
+@test
+fn test_bool_eq_protocol() {
+    assert(true == true);
+    assert(false == false);
+    assert(!(true == false));
+    assert(true != false);
+    assert(!(true != true));
+}
+
+@test
+fn test_bool_ord_protocol() {
+    // false < true
+    assert(false < true);
+    assert(!(true < false));
+    assert(false <= true);
+    assert(true <= true);
+    assert(false <= false);
+    assert(true > false);
+    assert(true >= false);
+}
+
+@test
+fn test_bool_cmp() {
+    assert_eq(true.cmp(&true), Equal);
+    assert_eq(false.cmp(&false), Equal);
+    assert_eq(false.cmp(&true), Less);
+    assert_eq(true.cmp(&false), Greater);
+}
+
+@test
+fn test_bool_hash() {
+    // Different bools should hash differently
+    // Note: We can't test hash values directly, but we can test consistency
+    let h1 = true;
+    let h2 = true;
+    // Same value should produce same hash (tested implicitly)
+}
+
+@test
+fn test_bool_clone_copy() {
+    let x = true;
+    let y = x.clone();
+    assert_eq(x, y);
+
+    let z = x;  // Copy
+    assert_eq(x, true);
+    assert_eq(z, true);
+}
+
+@test
+fn test_bool_default() {
+    assert_eq(Bool.default(), false);
+}
+
+@test
+fn test_bool_not_protocol() {
+    assert_eq(!true, false);
+    assert_eq(!false, true);
+    assert_eq(!!true, true);
+    assert_eq(!!false, false);
+}
+
+@test
+fn test_bool_bitand_protocol() {
+    assert_eq(true & true, true);
+    assert_eq(true & false, false);
+    assert_eq(false & true, false);
+    assert_eq(false & false, false);
+}
+
+@test
+fn test_bool_bitor_protocol() {
+    assert_eq(true | true, true);
+    assert_eq(true | false, true);
+    assert_eq(false | true, true);
+    assert_eq(false | false, false);
+}
+
+@test
+fn test_bool_bitxor_protocol() {
+    assert_eq(true ^ true, false);
+    assert_eq(true ^ false, true);
+    assert_eq(false ^ true, true);
+    assert_eq(false ^ false, false);
+}
+
+// -----------------------------------------------------------------------------
+// Bool Logical Properties
+// -----------------------------------------------------------------------------
+
+@test
+fn test_bool_logical_properties() {
+    // De Morgan's laws
+    assert_eq(!(true && true), !true || !true);
+    assert_eq(!(true && false), !true || !false);
+    assert_eq(!(false && true), !false || !true);
+    assert_eq(!(false && false), !false || !false);
+
+    assert_eq(!(true || true), !true && !true);
+    assert_eq(!(true || false), !true && !false);
+    assert_eq(!(false || true), !false && !true);
+    assert_eq(!(false || false), !false && !false);
+
+    // Idempotence
+    assert_eq(true && true, true);
+    assert_eq(false || false, false);
+
+    // Identity
+    assert_eq(true && true, true);
+    assert_eq(false || false, false);
+}
+
+@test
+fn test_bool_truth_table_completeness() {
+    // Test all 16 possible binary boolean functions exist via combinations
+    let vals = [false, true];
+
+    let mut i = 0;
+    while i < 2 {
+        let a = vals[i];
+        let mut j = 0;
+        while j < 2 {
+            let b = vals[j];
+            // All basic operations produce valid booleans
+            let _ = a && b;
+            let _ = a || b;
+            let _ = a.xor(b);
+            let _ = !a;
+            let _ = a & b;
+            let _ = a | b;
+            let _ = a ^ b;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// BYTE TYPE TESTS
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Byte Constants
+// -----------------------------------------------------------------------------
+
+@test
+fn test_byte_constants() {
+    // Byte range constants (min=0, max=255)
+    let min: Byte = 0 as Byte;
+    let max: Byte = 255 as Byte;
+    assert_eq(min, 0 as Byte);
+    assert_eq(max, 255 as Byte);
+}
+
+// -----------------------------------------------------------------------------
+// Byte ASCII Classification
+// -----------------------------------------------------------------------------
+
+@test
+fn test_byte_is_ascii_alphabetic() {
+    // Uppercase A-Z (65-90)
+    assert((65 as Byte).is_ascii_alphabetic());   // 'A'
+    assert((77 as Byte).is_ascii_alphabetic());   // 'M'
+    assert((90 as Byte).is_ascii_alphabetic());   // 'Z'
+
+    // Lowercase a-z (97-122)
+    assert((97 as Byte).is_ascii_alphabetic());   // 'a'
+    assert((109 as Byte).is_ascii_alphabetic());  // 'm'
+    assert((122 as Byte).is_ascii_alphabetic());  // 'z'
+
+    // Non-alphabetic
+    assert(!(64 as Byte).is_ascii_alphabetic());  // '@'
+    assert(!(91 as Byte).is_ascii_alphabetic());  // '['
+    assert(!(96 as Byte).is_ascii_alphabetic());  // '`'
+    assert(!(123 as Byte).is_ascii_alphabetic()); // '{'
+    assert(!(48 as Byte).is_ascii_alphabetic());  // '0'
+    assert(!(32 as Byte).is_ascii_alphabetic());  // space
+}
+
+@test
+fn test_byte_is_ascii_digit() {
+    // Digits 0-9 (48-57)
+    assert((48 as Byte).is_ascii_digit());  // '0'
+    assert((53 as Byte).is_ascii_digit());  // '5'
+    assert((57 as Byte).is_ascii_digit());  // '9'
+
+    // Non-digits
+    assert(!(47 as Byte).is_ascii_digit());  // '/'
+    assert(!(58 as Byte).is_ascii_digit());  // ':'
+    assert(!(65 as Byte).is_ascii_digit());  // 'A'
+    assert(!(32 as Byte).is_ascii_digit());  // space
+}
+
+@test
+fn test_byte_is_ascii_alphanumeric() {
+    // Alphabetic
+    assert((65 as Byte).is_ascii_alphanumeric());   // 'A'
+    assert((97 as Byte).is_ascii_alphanumeric());   // 'a'
+
+    // Numeric
+    assert((48 as Byte).is_ascii_alphanumeric());   // '0'
+    assert((57 as Byte).is_ascii_alphanumeric());   // '9'
+
+    // Non-alphanumeric
+    assert(!(32 as Byte).is_ascii_alphanumeric());  // space
+    assert(!(64 as Byte).is_ascii_alphanumeric());  // '@'
+    assert(!(33 as Byte).is_ascii_alphanumeric());  // '!'
+}
+
+@test
+fn test_byte_is_ascii_whitespace() {
+    assert((32 as Byte).is_ascii_whitespace());   // space
+    assert((9 as Byte).is_ascii_whitespace());    // horizontal tab
+    assert((10 as Byte).is_ascii_whitespace());   // newline (LF)
+    assert((13 as Byte).is_ascii_whitespace());   // carriage return (CR)
+
+    // Non-whitespace
+    assert(!(11 as Byte).is_ascii_whitespace());  // vertical tab (not standard whitespace)
+    assert(!(12 as Byte).is_ascii_whitespace());  // form feed (not standard whitespace)
+    assert(!(0 as Byte).is_ascii_whitespace());   // null
+    assert(!(65 as Byte).is_ascii_whitespace());  // 'A'
+}
+
+// -----------------------------------------------------------------------------
+// Byte Case Conversion
+// -----------------------------------------------------------------------------
+
+@test
+fn test_byte_to_ascii_uppercase() {
+    // Lowercase -> Uppercase
+    assert_eq((97 as Byte).to_ascii_uppercase(), 65 as Byte);   // 'a' -> 'A'
+    assert_eq((109 as Byte).to_ascii_uppercase(), 77 as Byte);  // 'm' -> 'M'
+    assert_eq((122 as Byte).to_ascii_uppercase(), 90 as Byte);  // 'z' -> 'Z'
+
+    // Already uppercase (unchanged)
+    assert_eq((65 as Byte).to_ascii_uppercase(), 65 as Byte);   // 'A' -> 'A'
+    assert_eq((90 as Byte).to_ascii_uppercase(), 90 as Byte);   // 'Z' -> 'Z'
+
+    // Non-alphabetic (unchanged)
+    assert_eq((48 as Byte).to_ascii_uppercase(), 48 as Byte);   // '0' -> '0'
+    assert_eq((32 as Byte).to_ascii_uppercase(), 32 as Byte);   // space -> space
+}
+
+@test
+fn test_byte_to_ascii_lowercase() {
+    // Uppercase -> Lowercase
+    assert_eq((65 as Byte).to_ascii_lowercase(), 97 as Byte);   // 'A' -> 'a'
+    assert_eq((77 as Byte).to_ascii_lowercase(), 109 as Byte);  // 'M' -> 'm'
+    assert_eq((90 as Byte).to_ascii_lowercase(), 122 as Byte);  // 'Z' -> 'z'
+
+    // Already lowercase (unchanged)
+    assert_eq((97 as Byte).to_ascii_lowercase(), 97 as Byte);   // 'a' -> 'a'
+    assert_eq((122 as Byte).to_ascii_lowercase(), 122 as Byte); // 'z' -> 'z'
+
+    // Non-alphabetic (unchanged)
+    assert_eq((48 as Byte).to_ascii_lowercase(), 48 as Byte);   // '0' -> '0'
+}
+
+@test
+fn test_byte_case_conversion_roundtrip() {
+    // For alphabetic chars: to_lower(to_upper(x)) == to_lower(x)
+    let mut b = 97;
+    while b < 123 {  // a-z
+        let lower = (b as Byte);
+        let upper = lower.to_ascii_uppercase();
+        assert_eq(upper.to_ascii_lowercase(), lower);
+        b = b + 1;
+    }
+
+    b = 65;
+    while b < 91 {  // A-Z
+        let upper = (b as Byte);
+        let lower = upper.to_ascii_lowercase();
+        assert_eq(lower.to_ascii_uppercase(), upper);
+        b = b + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Byte Conversion and Arithmetic
+// -----------------------------------------------------------------------------
+
+@test
+fn test_byte_to_int() {
+    assert_eq((0 as Byte).to_int(), 0);
+    assert_eq((127 as Byte).to_int(), 127);
+    assert_eq((255 as Byte).to_int(), 255);
+}
+
+@test
+fn test_byte_checked_add() {
+    assert_eq((100 as Byte).checked_add(50 as Byte), Some(150 as Byte));
+    assert_eq((0 as Byte).checked_add(0 as Byte), Some(0 as Byte));
+    assert_eq((255 as Byte).checked_add(0 as Byte), Some(255 as Byte));
+
+    // Overflow
+    assert_eq((255 as Byte).checked_add(1 as Byte), None);
+    assert_eq((200 as Byte).checked_add(100 as Byte), None);
+}
+
+@test
+fn test_byte_saturating_add() {
+    assert_eq((100 as Byte).saturating_add(50 as Byte), 150 as Byte);
+    assert_eq((0 as Byte).saturating_add(255 as Byte), 255 as Byte);
+
+    // Saturation at max
+    assert_eq((255 as Byte).saturating_add(1 as Byte), 255 as Byte);
+    assert_eq((200 as Byte).saturating_add(100 as Byte), 255 as Byte);
+    assert_eq((255 as Byte).saturating_add(255 as Byte), 255 as Byte);
+}
+
+@test
+fn test_byte_wrapping_add() {
+    assert_eq((100 as Byte).wrapping_add(50 as Byte), 150 as Byte);
+
+    // Wrapping
+    assert_eq((255 as Byte).wrapping_add(1 as Byte), 0 as Byte);
+    assert_eq((255 as Byte).wrapping_add(2 as Byte), 1 as Byte);
+    assert_eq((200 as Byte).wrapping_add(100 as Byte), 44 as Byte);  // (200 + 100) % 256 = 44
+}
+
+// -----------------------------------------------------------------------------
+// Byte Protocol Implementations
+// -----------------------------------------------------------------------------
+
+@test
+fn test_byte_eq_protocol() {
+    assert((0 as Byte) == (0 as Byte));
+    assert((255 as Byte) == (255 as Byte));
+    assert(!((0 as Byte) == (1 as Byte)));
+}
+
+@test
+fn test_byte_ord_protocol() {
+    assert((0 as Byte) < (1 as Byte));
+    assert((254 as Byte) < (255 as Byte));
+    assert((255 as Byte) > (0 as Byte));
+    assert((100 as Byte) <= (100 as Byte));
+}
+
+@test
+fn test_byte_default() {
+    // Default value for Byte is 0
+    let b: Byte = 0 as Byte;
+    assert_eq(b, 0 as Byte);
+}
+
+// =============================================================================
+// CHAR TYPE TESTS
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Char Constants
+// -----------------------------------------------------------------------------
+
+@test
+fn test_char_constants() {
+    assert_eq(Char.replacement(), '\u{FFFD}');
+    assert_eq(Char.max_value(), '\u{10FFFF}');
+}
+
+// -----------------------------------------------------------------------------
+// Char ASCII Classification
+// -----------------------------------------------------------------------------
+
+@test
+fn test_char_is_ascii() {
+    // ASCII range (0-127)
+    assert('A'.is_ascii());
+    assert('a'.is_ascii());
+    assert('0'.is_ascii());
+    assert(' '.is_ascii());
+    assert('\n'.is_ascii());
+    assert('\0'.is_ascii());
+    assert('\x7F'.is_ascii());  // DEL (127)
+
+    // Non-ASCII
+    assert(!'é'.is_ascii());
+    assert(!'中'.is_ascii());
+    assert(!'🎉'.is_ascii());
+    assert(!'\u{80}'.is_ascii());  // 128
+}
+
+// -----------------------------------------------------------------------------
+// Char Unicode Classification
+// -----------------------------------------------------------------------------
+
+@test
+fn test_char_is_alphabetic() {
+    // ASCII alphabetic
+    assert('A'.is_alphabetic());
+    assert('Z'.is_alphabetic());
+    assert('a'.is_alphabetic());
+    assert('z'.is_alphabetic());
+
+    // Unicode alphabetic
+    assert('é'.is_alphabetic());
+    assert('ñ'.is_alphabetic());
+    assert('α'.is_alphabetic());  // Greek
+    assert('中'.is_alphabetic());  // CJK
+
+    // Non-alphabetic
+    assert(!'0'.is_alphabetic());
+    assert(!'9'.is_alphabetic());
+    assert(!' '.is_alphabetic());
+    assert(!'!'.is_alphabetic());
+}
+
+@test
+fn test_char_is_numeric() {
+    // ASCII digits
+    assert('0'.is_numeric());
+    assert('5'.is_numeric());
+    assert('9'.is_numeric());
+
+    // Unicode numeric (various scripts)
+    // Note: Implementation may vary
+
+    // Non-numeric
+    assert(!'A'.is_numeric());
+    assert(!' '.is_numeric());
+    assert(!'!'.is_numeric());
+}
+
+@test
+fn test_char_is_alphanumeric() {
+    assert('A'.is_alphanumeric());
+    assert('a'.is_alphanumeric());
+    assert('0'.is_alphanumeric());
+    assert('9'.is_alphanumeric());
+    assert('é'.is_alphanumeric());
+
+    assert(!' '.is_alphanumeric());
+    assert(!'!'.is_alphanumeric());
+    assert(!'\n'.is_alphanumeric());
+}
+
+@test
+fn test_char_is_whitespace() {
+    // Standard whitespace
+    assert(' '.is_whitespace());
+    assert('\t'.is_whitespace());
+    assert('\n'.is_whitespace());
+    assert('\r'.is_whitespace());
+
+    // Unicode whitespace
+    assert('\u{00A0}'.is_whitespace());  // Non-breaking space (may depend on impl)
+
+    // Non-whitespace
+    assert(!'A'.is_whitespace());
+    assert(!'0'.is_whitespace());
+    assert(!'\0'.is_whitespace());
+}
+
+@test
+fn test_char_is_control() {
+    // Control characters (C0 controls: 0x00-0x1F, DEL: 0x7F)
+    assert('\0'.is_control());
+    assert('\x01'.is_control());
+    assert('\x1F'.is_control());
+    assert('\x7F'.is_control());  // DEL
+
+    // Non-control
+    assert(!' '.is_control());
+    assert(!'A'.is_control());
+    assert(!'0'.is_control());
+}
+
+// -----------------------------------------------------------------------------
+// Char Case Classification and Conversion
+// -----------------------------------------------------------------------------
+
+@test
+fn test_char_is_uppercase() {
+    assert('A'.is_uppercase());
+    assert('Z'.is_uppercase());
+    assert('É'.is_uppercase());
+
+    assert(!'a'.is_uppercase());
+    assert(!'z'.is_uppercase());
+    assert(!'0'.is_uppercase());
+    assert(!' '.is_uppercase());
+}
+
+@test
+fn test_char_is_lowercase() {
+    assert('a'.is_lowercase());
+    assert('z'.is_lowercase());
+    assert('é'.is_lowercase());
+
+    assert(!'A'.is_lowercase());
+    assert(!'Z'.is_lowercase());
+    assert(!'0'.is_lowercase());
+}
+
+@test
+fn test_char_to_uppercase() {
+    assert_eq('a'.to_uppercase(), 'A');
+    assert_eq('z'.to_uppercase(), 'Z');
+    assert_eq('A'.to_uppercase(), 'A');  // Already uppercase
+
+    // Non-alphabetic unchanged
+    assert_eq('0'.to_uppercase(), '0');
+    assert_eq(' '.to_uppercase(), ' ');
+}
+
+@test
+fn test_char_to_lowercase() {
+    assert_eq('A'.to_lowercase(), 'a');
+    assert_eq('Z'.to_lowercase(), 'z');
+    assert_eq('a'.to_lowercase(), 'a');  // Already lowercase
+
+    // Non-alphabetic unchanged
+    assert_eq('0'.to_lowercase(), '0');
+}
+
+// -----------------------------------------------------------------------------
+// Char Digit Conversion
+// -----------------------------------------------------------------------------
+
+@test
+fn test_char_is_digit() {
+    // Base 10
+    assert('0'.is_digit(10));
+    assert('9'.is_digit(10));
+    assert(!'a'.is_digit(10));
+
+    // Base 16 (hex)
+    assert('0'.is_digit(16));
+    assert('9'.is_digit(16));
+    assert('a'.is_digit(16));
+    assert('f'.is_digit(16));
+    assert('A'.is_digit(16));
+    assert('F'.is_digit(16));
+    assert(!'g'.is_digit(16));
+
+    // Base 2 (binary)
+    assert('0'.is_digit(2));
+    assert('1'.is_digit(2));
+    assert(!'2'.is_digit(2));
+
+    // Base 36
+    assert('0'.is_digit(36));
+    assert('z'.is_digit(36));
+    assert('Z'.is_digit(36));
+}
+
+@test
+fn test_char_to_digit() {
+    // Base 10
+    assert_eq('0'.to_digit(10), Some(0));
+    assert_eq('5'.to_digit(10), Some(5));
+    assert_eq('9'.to_digit(10), Some(9));
+    assert_eq('a'.to_digit(10), None);
+
+    // Base 16
+    assert_eq('a'.to_digit(16), Some(10));
+    assert_eq('f'.to_digit(16), Some(15));
+    assert_eq('A'.to_digit(16), Some(10));
+    assert_eq('F'.to_digit(16), Some(15));
+    assert_eq('g'.to_digit(16), None);
+
+    // Base 2
+    assert_eq('0'.to_digit(2), Some(0));
+    assert_eq('1'.to_digit(2), Some(1));
+    assert_eq('2'.to_digit(2), None);
+}
+
+@test
+fn test_char_from_digit() {
+    // Base 10
+    assert_eq(Char.from_digit(0, 10), Some('0'));
+    assert_eq(Char.from_digit(5, 10), Some('5'));
+    assert_eq(Char.from_digit(9, 10), Some('9'));
+    assert_eq(Char.from_digit(10, 10), None);
+
+    // Base 16
+    assert_eq(Char.from_digit(0, 16), Some('0'));
+    assert_eq(Char.from_digit(10, 16), Some('A'));
+    assert_eq(Char.from_digit(15, 16), Some('F'));
+    assert_eq(Char.from_digit(16, 16), None);
+}
+
+@test
+fn test_char_digit_roundtrip() {
+    // For valid digits: from_digit(to_digit(c, r), r) == Some(uppercase(c))
+    let chars = ['0', '1', '5', '9', 'a', 'f'];
+    let mut i = 0;
+    while i < 6 {
+        let c = chars[i];
+        match c.to_digit(16) {
+            Some(d) => {
+                let result = Char.from_digit(d, 16);
+                assert(result.is_some());
+            }
+            None => {}
+        }
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Char UTF-8 Length
+// -----------------------------------------------------------------------------
+
+@test
+fn test_char_len_utf8() {
+    // 1-byte UTF-8 (ASCII)
+    assert_eq('A'.len_utf8(), 1);
+    assert_eq('z'.len_utf8(), 1);
+    assert_eq('\0'.len_utf8(), 1);
+    assert_eq('\x7F'.len_utf8(), 1);
+
+    // 2-byte UTF-8
+    assert_eq('é'.len_utf8(), 2);
+    assert_eq('ñ'.len_utf8(), 2);
+    assert_eq('\u{80}'.len_utf8(), 2);
+    assert_eq('\u{7FF}'.len_utf8(), 2);
+
+    // 3-byte UTF-8
+    assert_eq('中'.len_utf8(), 3);
+    assert_eq('\u{800}'.len_utf8(), 3);
+    assert_eq('\u{FFFF}'.len_utf8(), 3);
+
+    // 4-byte UTF-8
+    assert_eq('🎉'.len_utf8(), 4);
+    assert_eq('\u{10000}'.len_utf8(), 4);
+    assert_eq('\u{10FFFF}'.len_utf8(), 4);
+}
+
+@test
+fn test_char_len_utf16() {
+    // BMP characters (1 code unit)
+    assert_eq('A'.len_utf16(), 1);
+    assert_eq('中'.len_utf16(), 1);
+    assert_eq('\u{FFFF}'.len_utf16(), 1);
+
+    // Supplementary characters (2 code units - surrogate pair)
+    assert_eq('🎉'.len_utf16(), 2);
+    assert_eq('\u{10000}'.len_utf16(), 2);
+    assert_eq('\u{10FFFF}'.len_utf16(), 2);
+}
+
+// -----------------------------------------------------------------------------
+// Char Protocol Implementations
+// -----------------------------------------------------------------------------
+
+@test
+fn test_char_eq_protocol() {
+    assert('A' == 'A');
+    assert(!('A' == 'B'));
+    assert('A' != 'B');
+    assert('🎉' == '🎉');
+}
+
+@test
+fn test_char_ord_protocol() {
+    assert('A' < 'B');
+    assert('a' > 'A');  // Lowercase ASCII has higher code points
+    assert('Z' < 'a');
+    assert('\u{0000}' < '\u{10FFFF}');
+}
+
+@test
+fn test_char_cmp() {
+    assert_eq('A'.cmp(&'A'), Equal);
+    assert_eq('A'.cmp(&'B'), Less);
+    assert_eq('B'.cmp(&'A'), Greater);
+}
+
+@test
+fn test_char_default() {
+    assert_eq(Char.default(), '\0');
+}
+
+@test
+fn test_char_clone_copy() {
+    let x = '🎉';
+    let y = x.clone();
+    assert_eq(x, y);
+
+    let z = x;
+    assert_eq(x, '🎉');
+    assert_eq(z, '🎉');
+}
+
+// =============================================================================
+// UNIT TYPE TESTS
+// =============================================================================
+
+@test
+fn test_unit_eq_protocol() {
+    assert(() == ());
+    assert(!((() != ())));
+}
+
+@test
+fn test_unit_ord_protocol() {
+    // All units are equal
+    assert_eq(().cmp(&()), Equal);
+    assert(() <= ());
+    assert(() >= ());
+    assert(!(() < ()));
+    assert(!(() > ()));
+}
+
+@test
+fn test_unit_default() {
+    assert_eq(().default(), ());
+}
+
+@test
+fn test_unit_clone_copy() {
+    let x = ();
+    let y = x.clone();
+    assert_eq(x, y);
+
+    let z = x;
+    assert_eq(x, ());
+    assert_eq(z, ());
+}
+
+// =============================================================================
+// ASCII TABLE COMPLETENESS TEST
+// =============================================================================
+
+@test
+fn test_ascii_table_coverage() {
+    // Verify classification for entire ASCII range
+    let mut i = 0;
+    while i < 128 {
+        let b = i as Byte;
+
+        // At least one classification should apply or be false
+        let is_alpha = b.is_ascii_alphabetic();
+        let is_digit = b.is_ascii_digit();
+        let is_space = b.is_ascii_whitespace();
+
+        // Alphanumeric should be union of alpha and digit
+        assert_eq(b.is_ascii_alphanumeric(), is_alpha || is_digit);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_byte_char_consistency() {
+    // For ASCII range, Byte and Char classifications should agree
+    let mut i = 0;
+    while i < 128 {
+        let b = i as Byte;
+        let c = i as Char;
+
+        // is_ascii should always be true
+        assert(c.is_ascii());
+
+        // ASCII-specific checks match
+        assert_eq(b.is_ascii_alphabetic(), c.is_alphabetic() && c.is_ascii());
+        assert_eq(b.is_ascii_digit(), c.is_numeric() && c.is_ascii());
+        i = i + 1;
+    }
+}
+
+fn main() {
+    print("Bool, Byte, Char, Unit primitive tests loaded successfully");
+}

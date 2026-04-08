@@ -1,0 +1,117 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, list
+// @description: Test basic list operations (list_len, list_push, list_get)
+
+// =============================================================================
+// LIST_LEN TESTS
+// =============================================================================
+
+// Test list_len with empty list
+meta fn test_list_len_empty() -> Int {
+    list_len([])  // Should be 0
+}
+
+// Test list_len with single element
+meta fn test_list_len_single() -> Int {
+    list_len([42])  // Should be 1
+}
+
+// Test list_len with multiple elements
+meta fn test_list_len_multiple() -> Int {
+    list_len([1, 2, 3, 4, 5])  // Should be 5
+}
+
+// Test list_len with computed list
+meta fn test_list_len_computed() -> Int {
+    let xs = [1, 2, 3];
+    list_len(xs)  // Should be 3
+}
+
+// =============================================================================
+// LIST_PUSH TESTS
+// =============================================================================
+
+// Test list_push on empty list
+meta fn test_list_push_empty() -> List<Int> {
+    list_push([], 42)  // Should be [42]
+}
+
+// Test list_push on non-empty list
+meta fn test_list_push_nonempty() -> List<Int> {
+    list_push([1, 2], 3)  // Should be [1, 2, 3]
+}
+
+// Test multiple pushes
+meta fn test_list_push_multiple() -> Int {
+    let xs = [];
+    let xs = list_push(xs, 1);
+    let xs = list_push(xs, 2);
+    let xs = list_push(xs, 3);
+    list_len(xs)  // Should be 3
+}
+
+// =============================================================================
+// LIST_GET TESTS
+// =============================================================================
+
+// Test list_get first element
+meta fn test_list_get_first() -> Maybe<Int> {
+    list_get([10, 20, 30], 0)  // Should be Some(10)
+}
+
+// Test list_get middle element
+meta fn test_list_get_middle() -> Maybe<Int> {
+    list_get([10, 20, 30], 1)  // Should be Some(20)
+}
+
+// Test list_get last element
+meta fn test_list_get_last() -> Maybe<Int> {
+    list_get([10, 20, 30], 2)  // Should be Some(30)
+}
+
+// Test list_get with single element list
+meta fn test_list_get_single() -> Maybe<Int> {
+    list_get([42], 0)  // Should be Some(42)
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test push then get
+meta fn test_push_then_get() -> Maybe<Int> {
+    let xs = list_push([1, 2], 3);
+    list_get(xs, 2)  // Should be Some(3)
+}
+
+// Test len after push
+meta fn test_len_after_push() -> Int {
+    let xs = list_push([1, 2, 3], 4);
+    list_len(xs)  // Should be 4
+}
+
+// Main test function
+fn main() {
+    // len tests
+    assert_eq(@const(test_list_len_empty()), 0);
+    assert_eq(@const(test_list_len_single()), 1);
+    assert_eq(@const(test_list_len_multiple()), 5);
+    assert_eq(@const(test_list_len_computed()), 3);
+
+    // push tests
+    assert_eq(@const(test_list_push_empty()), [42]);
+    assert_eq(@const(test_list_push_nonempty()), [1, 2, 3]);
+    assert_eq(@const(test_list_push_multiple()), 3);
+
+    // get tests (now return Maybe<Int>)
+    assert_eq(@const(test_list_get_first()), Some(10));
+    assert_eq(@const(test_list_get_middle()), Some(20));
+    assert_eq(@const(test_list_get_last()), Some(30));
+    assert_eq(@const(test_list_get_single()), Some(42));
+
+    // combined tests (now return Maybe<Int>)
+    assert_eq(@const(test_push_then_get()), Some(3));
+    assert_eq(@const(test_len_after_push()), 4);
+}

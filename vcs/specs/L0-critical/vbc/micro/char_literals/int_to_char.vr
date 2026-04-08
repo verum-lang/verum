@@ -1,0 +1,13 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let i = 65;
+    let c = i as Char;
+    assert_eq(c, 'A');
+
+    let i2 = 97;
+    let c2 = i2 as Char;
+    assert_eq(c2, 'a');
+}

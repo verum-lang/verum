@@ -1,0 +1,183 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, implement, invalid, error
+
+// ERROR: Missing type name
+implement {
+    fn method() { }
+}
+
+// ERROR: Missing for keyword in protocol implementation
+implement Display MyType {
+    fn display(&self) -> Text { "hello" }
+}
+
+// ERROR: Missing braces
+implement MyType
+    fn method() { }
+
+// ERROR: Unclosed implement block
+implement MyType {
+    fn method() { }
+
+// ERROR: Invalid self parameter
+implement MyType {
+    fn method(self self) { }
+}
+
+// ERROR: self outside implement
+fn orphan_self(self) { }
+
+// ERROR: Invalid generic syntax
+implement<> MyType { }
+implement<T,> MyType { }
+implement<T U> MyType { }
+
+// ERROR: Missing closing angle bracket
+implement<T MyType { }
+
+// ERROR: Invalid where clause
+implement<T> MyType where { }
+implement<T> MyType where T: { }
+
+// ERROR: Duplicate implement (same type same protocol)
+// Note: This may be a semantic error, not parse error
+implement Display for MyType { }
+implement Display for MyType { }
+
+// Note: The following ARE valid Verum syntax (removed as they're not errors)
+// `implement` is the correct Verum keyword (not Rust's `impl`)
+// `implement Trait for Type` is correct Verum syntax
+
+// ERROR: Missing method body
+implement MyType {
+    fn method();
+}
+
+// ERROR: Invalid visibility in impl item
+implement MyType {
+    private fn method() { }
+}
+
+// ERROR: Associated type without value
+implement Iterator for MyType {
+    type Item;
+}
+
+// ERROR: Invalid associated type syntax
+implement Iterator for MyType {
+    type Item = ;
+}
+
+// ERROR: const without value
+implement MyType {
+    const VALUE: Int;
+}
+
+// ERROR: const without type
+implement MyType {
+    const VALUE = 42;
+}
+
+// ERROR: Invalid method signature
+implement MyType {
+    fn () { }
+    fn 123method() { }
+}
+
+// ERROR: Missing self in method
+implement MyType {
+    fn instance_method(x: Int) { }  // No self for instance method
+}
+
+// ERROR: Invalid default keyword usage
+implement MyType {
+    default default fn method() { }
+}
+
+// ERROR: Expression in implement block
+implement MyType {
+    let x = 1;
+    42 + 1;
+}
+
+// ERROR: Statement in implement block
+implement MyType {
+    for i in 0..10 { }
+}
+
+// ERROR: Nested implement block
+implement MyType {
+    implement Inner { }
+}
+
+// ERROR: Multiple for clauses
+implement Display for for MyType { }
+
+// ERROR: Invalid type expression
+implement Display for 123 { }
+implement Display for "text" { }
+
+// ERROR: Missing type after for
+implement Display for { }
+
+// ERROR: Semicolon instead of block
+implement MyType;
+
+// ERROR: Arrow in implement
+implement MyType -> OtherType { }
+
+// ERROR: Invalid generic bounds in implement
+implement<T:> MyType { }
+implement<T: +> MyType { }
+implement<T: Clone +> MyType { }
+
+// ERROR: Invalid specialization
+implement MyType {
+    @specialize @specialize
+    fn method() { }
+}
+
+// ERROR: Specialize without implement
+@specialize
+type NotImplement is { };
+
+// ERROR: Empty angle brackets in type
+implement<> Container<> { }
+
+// ERROR: Invalid associated type definition
+implement Container for MyType {
+    type Item<> = Int;
+}
+
+// ERROR: Async on associated const
+implement MyType {
+    async const VALUE: Int = 42;
+}
+
+// ERROR: Invalid receiver types
+implement MyType {
+    fn method(&& self) { }
+    fn method2(*** self) { }
+    fn method3(&mut mut self) { }
+}
+
+// ERROR: Type annotation on self
+implement MyType {
+    fn method(self: Int) { }
+}
+
+// ERROR: Multiple where clauses
+implement<T> MyType
+where T: Clone
+where T: Debug
+{ }
+
+// ERROR: Invalid negative bound syntax
+implement<T: !!Clone> MyType { }
+implement<T: Clone + !!Debug> MyType { }
+
+// ERROR: Implement with module path errors
+implement super.super.Type { }
+implement .InvalidPath { }

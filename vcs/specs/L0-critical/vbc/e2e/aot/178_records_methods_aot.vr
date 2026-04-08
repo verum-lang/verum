@@ -1,0 +1,116 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, records, methods, nested
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for records: nested records, methods on records, field access
+
+type Vec2 is { x: Int, y: Int };
+type Rect is { origin: Vec2, size: Vec2 };
+type RGB is { r: Int, g: Int, b: Int };
+
+fn vec2_add(a: Vec2, b: Vec2) -> Vec2 {
+    Vec2 { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn vec2_scale(v: Vec2, s: Int) -> Vec2 {
+    Vec2 { x: v.x * s, y: v.y * s }
+}
+
+fn vec2_dot(a: Vec2, b: Vec2) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+fn vec2_length_sq(v: Vec2) -> Int {
+    v.x * v.x + v.y * v.y
+}
+
+fn rect_area(r: Rect) -> Int {
+    r.size.x * r.size.y
+}
+
+fn rect_contains(r: Rect, p: Vec2) -> Bool {
+    p.x >= r.origin.x && p.x < r.origin.x + r.size.x &&
+    p.y >= r.origin.y && p.y < r.origin.y + r.size.y
+}
+
+fn rect_translate(r: Rect, offset: Vec2) -> Rect {
+    Rect {
+        origin: vec2_add(r.origin, offset),
+        size: r.size
+    }
+}
+
+fn rgb_to_gray(c: RGB) -> Int {
+    (c.r * 30 + c.g * 59 + c.b * 11) / 100
+}
+
+fn rgb_blend(a: RGB, b: RGB) -> RGB {
+    RGB {
+        r: (a.r + b.r) / 2,
+        g: (a.g + b.g) / 2,
+        b: (a.b + b.b) / 2
+    }
+}
+
+fn main() -> Int {
+    // Vec2 basic operations
+    let v1 = Vec2 { x: 3, y: 4 };
+    let v2 = Vec2 { x: 1, y: 2 };
+    assert_eq(v1.x, 3);
+    assert_eq(v1.y, 4);
+
+    let v3 = vec2_add(v1, v2);
+    assert_eq(v3.x, 4);
+    assert_eq(v3.y, 6);
+
+    let v4 = vec2_scale(v1, 3);
+    assert_eq(v4.x, 9);
+    assert_eq(v4.y, 12);
+
+    assert_eq(vec2_dot(v1, v2), 11);  // 3*1 + 4*2
+    assert_eq(vec2_length_sq(v1), 25);  // 9 + 16
+
+    // Nested records
+    let r1 = Rect {
+        origin: Vec2 { x: 10, y: 20 },
+        size: Vec2 { x: 100, y: 50 }
+    };
+    assert_eq(rect_area(r1), 5000);
+    assert_eq(rect_contains(r1, Vec2 { x: 50, y: 30 }), true);
+    assert_eq(rect_contains(r1, Vec2 { x: 5, y: 30 }), false);
+    assert_eq(rect_contains(r1, Vec2 { x: 110, y: 70 }), false);
+
+    let r2 = rect_translate(r1, Vec2 { x: 5, y: -10 });
+    assert_eq(r2.origin.x, 15);
+    assert_eq(r2.origin.y, 10);
+    assert_eq(r2.size.x, 100);
+
+    // RGB operations
+    let red = RGB { r: 255, g: 0, b: 0 };
+    let blue = RGB { r: 0, g: 0, b: 255 };
+    let white = RGB { r: 255, g: 255, b: 255 };
+
+    assert_eq(rgb_to_gray(white), 255);
+    assert_eq(rgb_to_gray(red), 76);  // 255*30/100
+
+    let purple = rgb_blend(red, blue);
+    assert_eq(purple.r, 127);
+    assert_eq(purple.g, 0);
+    assert_eq(purple.b, 127);
+
+    // Record chain
+    let mut pos = Vec2 { x: 0, y: 0 };
+    let mut i = 0;
+    while i < 10 {
+        pos = vec2_add(pos, Vec2 { x: i, y: i * 2 });
+        i = i + 1;
+    }
+    assert_eq(pos.x, 45);   // 0+1+2+...+9
+    assert_eq(pos.y, 90);   // 2*(0+1+2+...+9)
+
+    print("[OK] 178_records_methods_aot");
+    0
+}

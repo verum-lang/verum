@@ -1,0 +1,9 @@
+// Minimal: Simple struct
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+}

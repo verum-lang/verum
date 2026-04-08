@@ -1,0 +1,317 @@
+// @test: run
+// @expected-stdout: All advanced Result combinators tests passed!
+// @tier: 0
+// @level: L2
+// @tags: errors, combinators, retry, fold, tap, timeout, advanced
+// @description: Tests for rich error combinators
+//
+// Spec: docs/detailed/20-error-handling.md Section 2.5.7 - Rich Error Combinators
+// These combinators provide declarative error handling patterns.
+
+// ============================================================================
+// Types for testing
+// ============================================================================
+
+type TestError is
+    | Retriable(Text)
+    | NonRetriable(Text)
+    | Timeout;
+
+implement TestError {
+    fn is_retriable(&self) -> Bool {
+        match self {
+            TestError.Retriable(_) => true,
+            _ => false,
+        }
+    }
+}
+
+// ============================================================================
+// Test helpers
+// ============================================================================
+
+static mut CALL_COUNT: Int = 0;
+
+fn reset_call_count() {
+    CALL_COUNT = 0;
+}
+
+fn get_call_count() -> Int {
+    CALL_COUNT
+}
+
+fn increment_call_count() {
+    CALL_COUNT += 1;
+}
+
+// ============================================================================
+// Test: fold combinator
+// ============================================================================
+
+fn test_fold() {
+    // fold handles both success and error paths
+    let ok_result: Result<Int, Text> = Ok(42);
+    let err_result: Result<Int, Text> = Err("error");
+
+    let ok_folded = ok_result.fold(
+        |v| f"success: {v}",
+        |e| f"failed: {e}"
+    );
+    assert_eq(ok_folded, "success: 42");
+
+    let err_folded = err_result.fold(
+        |v| f"success: {v}",
+        |e| f"failed: {e}"
+    );
+    assert_eq(err_folded, "failed: error");
+}
+
+// ============================================================================
+// Test: tap and tap_error (inspect patterns)
+// ============================================================================
+
+fn test_tap_and_tap_error() {
+    // tap executes side effect on success
+    let mut logged_value: Maybe<Int> = None;
+    let result: Result<Int, Text> = Ok(42);
+
+    let same = result
+        .tap(|v| { logged_value = Some(*v); });
+
+    assert(same.is_ok());
+    assert_eq(logged_value, Some(42));
+
+    // tap_error executes side effect on error
+    let mut logged_error: Maybe<Text> = None;
+    let err_result: Result<Int, Text> = Err("oops");
+
+    let same_err = err_result
+        .tap_error(|e| { logged_error = Some(e.clone()); });
+
+    assert(same_err.is_err());
+    assert_eq(logged_error, Some("oops"));
+
+    // tap doesn't run on error
+    let mut tap_called = false;
+    let _ = Err("error").tap(|_: &Int| { tap_called = true; });
+    assert(!tap_called);
+
+    // tap_error doesn't run on success
+    let mut tap_error_called = false;
+    let _: Result<Int, Text> = Ok(1).tap_error(|_| { tap_error_called = true; });
+    assert(!tap_error_called);
+}
+
+// ============================================================================
+// Test: retry with basic backoff
+// ============================================================================
+
+fn test_retry_basic() {
+    reset_call_count();
+
+    // Create a function that fails twice then succeeds
+    fn flaky_operation() -> Result<Int, TestError> {
+        increment_call_count();
+        if get_call_count() < 3 {
+            Err(TestError.Retriable("temporary failure"))
+        } else {
+            Ok(42)
+        }
+    }
+
+    // Use a simple retry loop (actual retry combinator would be more elegant)
+    let mut result: Result<Int, TestError> = Err(TestError.Retriable("init"));
+    let max_attempts = 5;
+
+    for attempt in 0..max_attempts {
+        result = flaky_operation();
+        if result.is_ok() {
+            break;
+        }
+    }
+
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+    assert_eq(get_call_count(), 3);  // Should succeed on third attempt
+}
+
+// ============================================================================
+// Test: retry with should_retry predicate
+// ============================================================================
+
+fn test_retry_with_predicate() {
+    reset_call_count();
+
+    // Create a function that returns non-retriable error
+    fn non_retriable_operation() -> Result<Int, TestError> {
+        increment_call_count();
+        Err(TestError.NonRetriable("fatal error"))
+    }
+
+    // Retry loop with predicate
+    let mut result = non_retriable_operation();
+    let max_attempts = 5;
+    let mut attempts = 1;
+
+    while result.is_err() && attempts < max_attempts {
+        if let Err(ref e) = result {
+            if !e.is_retriable() {
+                break;  // Don't retry non-retriable errors
+            }
+        }
+        result = non_retriable_operation();
+        attempts += 1;
+    }
+
+    assert(result.is_err());
+    assert_eq(get_call_count(), 1);  // Should only try once (non-retriable)
+}
+
+// ============================================================================
+// Test: or_else_chain fallback pattern
+// ============================================================================
+
+fn test_or_else_chain() {
+    fn primary() -> Result<Int, Text> {
+        Err("primary failed")
+    }
+
+    fn fallback1() -> Result<Int, Text> {
+        Err("fallback1 failed")
+    }
+
+    fn fallback2() -> Result<Int, Text> {
+        Ok(42)
+    }
+
+    fn fallback3() -> Result<Int, Text> {
+        Ok(999)  // Should not be called
+    }
+
+    // Chain of fallbacks
+    let result = primary()
+        .or_else(|_| fallback1())
+        .or_else(|_| fallback2())
+        .or_else(|_| fallback3());  // Won't be reached
+
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+// ============================================================================
+// Test: combining multiple combinators
+// ============================================================================
+
+fn test_combinator_chain() {
+    fn fetch_data(id: Int) -> Result<Int, TestError> {
+        if id > 0 {
+            Ok(id * 10)
+        } else {
+            Err(TestError.NonRetriable("invalid id"))
+        }
+    }
+
+    fn transform(value: Int) -> Result<Int, TestError> {
+        if value > 50 {
+            Ok(value + 1)
+        } else {
+            Err(TestError.Retriable("value too low"))
+        }
+    }
+
+    // Chain of operations
+    let fetched = fetch_data(10);
+    let transformed = fetched.and_then(transform);
+    let result = transformed.map(|v| v * 2);
+
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 202);  // (10 * 10 + 1) * 2
+}
+
+// ============================================================================
+// Test: map_or and map_or_else
+// ============================================================================
+
+fn test_map_or_patterns() {
+    let ok_result: Result<Int, Text> = Ok(42);
+    let err_result: Result<Int, Text> = Err("error");
+
+    // map_or provides default for error case
+    let value1 = ok_result.map_or(0, |v| v * 2);
+    assert_eq(value1, 84);
+
+    let value2 = err_result.map_or(0, |v| v * 2);
+    assert_eq(value2, 0);
+
+    // map_or_else computes default lazily
+    let value3 = ok_result.map_or_else(
+        |_e| -1,
+        |v| v * 2
+    );
+    assert_eq(value3, 84);
+
+    let value4 = err_result.map_or_else(
+        |e| -(e.len() as Int),
+        |v| v * 2
+    );
+    assert_eq(value4, -5);  // "error".len() = 5
+}
+
+// ============================================================================
+// Test: Result conversion and interop
+// ============================================================================
+
+fn test_result_conversion() {
+    // Convert to Maybe
+    let ok_result: Result<Int, Text> = Ok(42);
+    let err_result: Result<Int, Text> = Err("error");
+
+    let ok_value = ok_result.ok();
+    assert_eq(ok_value, Some(42));
+
+    let err_value = err_result.ok();
+    assert_eq(err_value, None);
+
+    // Convert error to Maybe
+    let ok_err = Ok(42).err();
+    assert_eq(ok_err, None);
+
+    let err_err: Maybe<Text> = Err("oops").err();
+    assert_eq(err_err, Some("oops"));
+}
+
+// ============================================================================
+// Test: Result flattening
+// ============================================================================
+
+fn test_flatten() {
+    let nested_ok: Result<Result<Int, Text>, Text> = Ok(Ok(42));
+    let flattened = nested_ok.flatten();
+    assert_eq(flattened, Ok(42));
+
+    let nested_inner_err: Result<Result<Int, Text>, Text> = Ok(Err("inner"));
+    let flattened2 = nested_inner_err.flatten();
+    assert_eq(flattened2, Err("inner"));
+
+    let nested_outer_err: Result<Result<Int, Text>, Text> = Err("outer");
+    let flattened3 = nested_outer_err.flatten();
+    assert_eq(flattened3, Err("outer"));
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    test_fold();
+    test_tap_and_tap_error();
+    test_retry_basic();
+    test_retry_with_predicate();
+    test_or_else_chain();
+    test_combinator_chain();
+    test_map_or_patterns();
+    test_result_conversion();
+    test_flatten();
+
+    print("All advanced Result combinators tests passed!");
+}

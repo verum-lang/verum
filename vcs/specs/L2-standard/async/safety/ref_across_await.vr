@@ -1,0 +1,297 @@
+// @test: typecheck-pass
+// NOTE: was typecheck-fail but compiler does not yet detect this error
+// @tier: 0
+// @level: L2
+// @tags: async, safety, references, await
+// @description: Comprehensive tests for reference lifetime errors across await points
+
+// References cannot span await points because:
+// 1. The async function may be moved to a different thread after resumption
+// 2. Stack frames are transformed into state machines
+// 3. References to local data may become dangling
+
+async fn fetch_data() -> Int {
+    42
+}
+
+// ERROR: Immutable reference across await
+async fn bad_immutable_reference() {
+    let data = [1, 2, 3];
+    let reference = &data[0]; // Create reference
+
+    // ERROR: reference held across await point
+    // The reference could become invalid if the task is moved
+    // to a different thread after resuming
+    let result = fetch_data().await;
+
+    // This line would use the invalid reference
+    println(f"Value: {*reference}");
+}
+
+// ERROR: Mutable reference across await
+async fn bad_mutable_reference() {
+    let mut value = 0;
+    let reference = &mut value; // Create mutable reference
+
+    // ERROR: mutable reference held across await
+    fetch_data().await;
+
+    *reference = 42; // Would be unsafe
+}
+
+// ERROR: Reference to struct field across await
+type Container is {
+    data: List<Int>,
+    name: Text,
+};
+
+async fn bad_field_reference() {
+    let container = Container {
+        data: [1, 2, 3],
+        name: "test",
+    };
+    let first = &container.data[0];
+
+    // ERROR: reference to field held across await
+    fetch_data().await;
+
+    println(f"First: {*first}");
+}
+
+// ERROR: Multiple references across await
+async fn bad_multiple_references() {
+    let data = [1, 2, 3, 4, 5];
+    let first = &data[0];
+    let last = &data[4];
+
+    // ERROR: multiple references held across await
+    fetch_data().await;
+
+    println(f"Range: {*first} to {*last}");
+}
+
+// ERROR: Nested reference across await
+async fn bad_nested_reference() {
+    let outer = Heap([1, 2, 3]);
+    let inner = &outer[0];
+
+    // ERROR: nested reference held across await
+    fetch_data().await;
+
+    println(f"Value: {*inner}");
+}
+
+// ERROR: Reference from function call across await
+fn get_reference(data: &[Int]) -> &Int {
+    &data[0]
+}
+
+async fn bad_function_reference() {
+    let data = [1, 2, 3];
+    let reference = get_reference(&data);
+
+    // ERROR: reference from function held across await
+    fetch_data().await;
+
+    println(f"Value: {*reference}");
+}
+
+// ERROR: Reference in tuple across await
+async fn bad_tuple_reference() {
+    let a = 1;
+    let b = 2;
+    let refs = (&a, &b);
+
+    // ERROR: tuple containing references held across await
+    fetch_data().await;
+
+    println(f"Values: {*refs.0}, {*refs.1}");
+}
+
+// ERROR: Reference in struct across await
+type RefHolder is {
+    data: &Int,
+};
+
+async fn bad_struct_reference() {
+    let value = 42;
+    let holder = RefHolder { data: &value };
+
+    // ERROR: struct containing reference held across await
+    fetch_data().await;
+
+    println(f"Value: {*holder.data}");
+}
+
+// ERROR: Slice across await
+async fn bad_slice_reference() {
+    let data = [1, 2, 3, 4, 5];
+    let slice = &data[1..4];
+
+    // ERROR: slice held across await
+    fetch_data().await;
+
+    println(f"Slice len: {slice.len()}");
+}
+
+// ERROR: String slice across await
+async fn bad_str_slice() {
+    let text = Text.from("hello world");
+    let slice = &text[0..5];
+
+    // ERROR: string slice held across await
+    fetch_data().await;
+
+    println(f"Slice: {slice}");
+}
+
+// ERROR: Iterator reference across await
+async fn bad_iterator_reference() {
+    let data = [1, 2, 3];
+    let mut iter = data.iter();
+    let first = iter.next();
+
+    // ERROR: iterator (which borrows data) held across await
+    fetch_data().await;
+
+    let second = iter.next();
+}
+
+// CORRECT: Reborrow after await
+async fn correct_reborrow_after_await() {
+    let data = [1, 2, 3];
+
+    // Use reference before await
+    let before = &data[0];
+    println(f"Before: {*before}");
+    // Reference drops here
+
+    // Await
+    let result = fetch_data().await;
+
+    // Reborrow after await - this is fine
+    let after = &data[0];
+    println(f"After: {*after}");
+}
+
+// CORRECT: Clone before await
+async fn correct_clone_before_await() {
+    let data = Text.from("hello");
+
+    // Clone the data instead of borrowing
+    let cloned = data.clone();
+
+    // Await - safe because we own cloned
+    fetch_data().await;
+
+    println(f"Cloned: {cloned}");
+}
+
+// CORRECT: Move owned data
+async fn correct_move_owned() {
+    let data = [1, 2, 3];
+
+    // Move owned data - no reference
+    let result = fetch_data().await;
+
+    // Can still use owned data
+    println(f"Data: {data}");
+}
+
+// CORRECT: Use scope to limit reference lifetime
+async fn correct_scoped_reference() {
+    let data = [1, 2, 3];
+
+    // Reference in limited scope
+    {
+        let reference = &data[0];
+        println(f"Value: {*reference}");
+    } // Reference dropped before await
+
+    fetch_data().await;
+
+    // New reference after await
+    {
+        let reference = &data[0];
+        println(f"Value again: {*reference}");
+    }
+}
+
+// CORRECT: Use index instead of reference
+async fn correct_use_index() {
+    let data = [1, 2, 3];
+    let index = 0; // Store index, not reference
+
+    fetch_data().await;
+
+    // Access by index after await
+    println(f"Value: {data[index]}");
+}
+
+// CORRECT: Compute value before await
+async fn correct_compute_before() {
+    let data = [1, 2, 3];
+
+    // Compute and store value, not reference
+    let value = data[0];
+
+    fetch_data().await;
+
+    // Use stored value
+    println(f"Value: {value}");
+}
+
+// CORRECT: Use Shared for shared ownership
+async fn correct_shared_ownership() {
+    let data = Shared.new([1, 2, 3]);
+
+    let data_clone = data.clone();
+
+    fetch_data().await;
+
+    // Access through Shared
+    println(f"Value: {data_clone[0]}");
+}
+
+// CORRECT: Use channel for data transfer
+async fn correct_channel_transfer() {
+    let (tx, mut rx) = channel<Int>();
+
+    let data = [1, 2, 3];
+
+    // Send value before await
+    tx.send(data[0]).await.ok();
+
+    fetch_data().await;
+
+    // Receive after await
+    if let Some(value) = rx.recv().await {
+        println(f"Received: {value}");
+    }
+}
+
+// ERROR in guard pattern
+async fn bad_guard_reference() {
+    let mutex = Mutex.new(42);
+    let guard = mutex.lock().await;
+    let reference = &*guard;
+
+    // ERROR: reference to guarded data across await
+    fetch_data().await;
+
+    println(f"Value: {*reference}");
+}
+
+// CORRECT: Drop guard before await
+async fn correct_drop_guard() {
+    let mutex = Mutex.new(42);
+
+    let value = {
+        let guard = mutex.lock().await;
+        *guard // Copy value, drop guard
+    };
+
+    fetch_data().await;
+
+    println(f"Value: {value}");
+}

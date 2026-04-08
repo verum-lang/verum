@@ -1,0 +1,394 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, comprehensive, lexer, parser, typechecker, codegen
+// @description: Comprehensive test combining ALL compiler-critical patterns
+
+// === LEXER PATTERN: Token scanning ===
+
+type Token is
+    | TkIdent(Text)
+    | TkInt(Int)
+    | TkPlus
+    | TkMinus
+    | TkStar
+    | TkSlash
+    | TkLParen
+    | TkRParen
+    | TkSemi
+    | TkEof;
+
+fn token_tag(t: Token) -> Int {
+    match t {
+        TkIdent(_) => 0,
+        TkInt(_) => 1,
+        TkPlus => 2,
+        TkMinus => 3,
+        TkStar => 4,
+        TkSlash => 5,
+        TkLParen => 6,
+        TkRParen => 7,
+        TkSemi => 8,
+        TkEof => 9,
+    }
+}
+
+fn lex_single(c: Int) -> Token {
+    if c == 43 { return Token.TkPlus; }
+    if c == 45 { return Token.TkMinus; }
+    if c == 42 { return Token.TkStar; }
+    if c == 47 { return Token.TkSlash; }
+    if c == 40 { return Token.TkLParen; }
+    if c == 41 { return Token.TkRParen; }
+    if c == 59 { return Token.TkSemi; }
+    Token.TkEof
+}
+
+fn lex_number(input: Text, start: Int) -> Int {
+    // Returns (value << 16) | end_pos packed
+    let mut val = 0;
+    let mut pos = start;
+    while pos < input.len() {
+        let b = match input.byte_at(pos) { Some(v) => v, None => -1, };
+        if b >= 48 && b <= 57 {
+            val = val * 10 + (b - 48);
+            pos = pos + 1;
+        } else {
+            return val * 65536 + pos;
+        }
+    }
+    val * 65536 + pos
+}
+
+fn tokenize(input: Text) -> List<Token> {
+    let mut tokens = List.new();
+    let mut i = 0;
+
+    while i < input.len() {
+        let b = match input.byte_at(i) { Some(v) => v, None => -1, };
+        if b == 32 || b == 10 || b == 9 {
+            // Skip whitespace
+            i = i + 1;
+        } else if b >= 48 && b <= 57 {
+            let packed = lex_number(input, i);
+            let val = packed / 65536;
+            let end = packed % 65536;
+            tokens.push(Token.TkInt(val));
+            i = end;
+        } else {
+            let tok = lex_single(b);
+            tokens.push(tok);
+            i = i + 1;
+        }
+    }
+    tokens.push(Token.TkEof);
+    tokens
+}
+
+// === PARSER PATTERN: Recursive descent ===
+
+type AstNode is
+    | NumNode(Int)
+    | BinOp(Int, Heap<AstNode>, Heap<AstNode>)
+    | UnaryMinus(Heap<AstNode>);
+
+// Parser state: (tokens, position)
+// Returns (node, new_position) packed as AstNode and Int
+
+fn parser_peek_tag(tokens: List<Token>, pos: Int) -> Int {
+    if pos >= tokens.len() { return 9; }
+    token_tag(tokens[pos])
+}
+
+fn parser_peek_int(tokens: List<Token>, pos: Int) -> Int {
+    match tokens[pos] {
+        TkInt(n) => n,
+        _ => 0,
+    }
+}
+
+// Simple expression parser: handles + and * with correct precedence
+// expr = term (('+' | '-') term)*
+// term = factor (('*' | '/') factor)*
+// factor = INT | '(' expr ')' | '-' factor
+
+type ParseResult is {
+    node: AstNode,
+    pos: Int,
+};
+
+@allow(unbounded_recursion)
+fn parse_factor(tokens: List<Token>, pos: Int) -> ParseResult {
+    let tag = parser_peek_tag(tokens, pos);
+
+    if tag == 1 {
+        // TkInt
+        let val = parser_peek_int(tokens, pos);
+        return ParseResult { node: AstNode.NumNode(val), pos: pos + 1 };
+    }
+
+    if tag == 3 {
+        // TkMinus (unary)
+        let inner = parse_factor(tokens, pos + 1);
+        return ParseResult {
+            node: AstNode.UnaryMinus(Heap(inner.node)),
+            pos: inner.pos,
+        };
+    }
+
+    if tag == 6 {
+        // TkLParen
+        let inner = parse_expr(tokens, pos + 1);
+        // Skip TkRParen
+        return ParseResult { node: inner.node, pos: inner.pos + 1 };
+    }
+
+    // Fallback
+    ParseResult { node: AstNode.NumNode(0), pos: pos + 1 }
+}
+
+@allow(unbounded_recursion)
+fn parse_term(tokens: List<Token>, pos: Int) -> ParseResult {
+    let mut left = parse_factor(tokens, pos);
+    let mut cur_pos = left.pos;
+    let mut node = left.node;
+
+    while parser_peek_tag(tokens, cur_pos) == 4 || parser_peek_tag(tokens, cur_pos) == 5 {
+        let op_tag = parser_peek_tag(tokens, cur_pos);
+        let right = parse_factor(tokens, cur_pos + 1);
+        node = AstNode.BinOp(op_tag, Heap(node), Heap(right.node));
+        cur_pos = right.pos;
+    }
+
+    ParseResult { node: node, pos: cur_pos }
+}
+
+@allow(unbounded_recursion)
+fn parse_expr(tokens: List<Token>, pos: Int) -> ParseResult {
+    let mut left = parse_term(tokens, pos);
+    let mut cur_pos = left.pos;
+    let mut node = left.node;
+
+    while parser_peek_tag(tokens, cur_pos) == 2 || parser_peek_tag(tokens, cur_pos) == 3 {
+        let op_tag = parser_peek_tag(tokens, cur_pos);
+        let right = parse_term(tokens, cur_pos + 1);
+        node = AstNode.BinOp(op_tag, Heap(node), Heap(right.node));
+        cur_pos = right.pos;
+    }
+
+    ParseResult { node: node, pos: cur_pos }
+}
+
+// === TYPE CHECKER PATTERN: Symbol table + type mapping ===
+
+fn build_type_env() -> Map<Int, Int> {
+    // type_id -> type_tag (int keys for Map tracking compatibility)
+    let mut env = Map.new();
+    env.insert(1, 1);  // Int -> 1
+    env.insert(2, 2);  // Bool -> 2
+    env.insert(3, 3);  // Text -> 3
+    env.insert(4, 4);  // Float -> 4
+    env
+}
+
+fn check_type(env: Map<Int, Int>, type_id: Int) -> Int {
+    if env.contains_key(type_id) {
+        env.get(type_id)
+    } else {
+        -1  // Unknown type
+    }
+}
+
+// === CODEGEN PATTERN: Text builder + indentation ===
+
+@allow(unbounded_recursion)
+fn emit_code(node: AstNode) -> Text {
+    match node {
+        NumNode(n) => f"PUSH {n}",
+        BinOp(op, left, right) => {
+            let l = emit_code(*left);
+            let r = emit_code(*right);
+            let op_name = if op == 2 { "ADD" }
+                         else if op == 3 { "SUB" }
+                         else if op == 4 { "MUL" }
+                         else { "DIV" };
+            f"{l}\n{r}\n{op_name}"
+        }
+        UnaryMinus(inner) => {
+            let i = emit_code(*inner);
+            f"{i}\nNEG"
+        }
+    }
+}
+
+@allow(unbounded_recursion)
+fn eval_ast(node: AstNode) -> Int {
+    match node {
+        NumNode(n) => n,
+        BinOp(op, left, right) => {
+            let l = eval_ast(*left);
+            let r = eval_ast(*right);
+            if op == 2 { l + r }
+            else if op == 3 { l - r }
+            else if op == 4 { l * r }
+            else if op == 5 {
+                if r == 0 { 0 } else { l / r }
+            }
+            else { 0 }
+        }
+        UnaryMinus(inner) => -eval_ast(*inner),
+    }
+}
+
+// === TESTS ===
+
+fn test_lexer() -> Int {
+    let tokens = tokenize("3 + 4 * 2");
+    // Expect: TkInt(3), TkPlus, TkInt(4), TkStar, TkInt(2), TkEof
+    if tokens.len() != 6 {
+        print(f"FAIL lexer: expected 6 tokens, got {tokens.len()}");
+        return 1;
+    }
+    if token_tag(tokens[0]) != 1 {
+        print("FAIL lexer: token 0 should be TkInt");
+        return 1;
+    }
+    if token_tag(tokens[1]) != 2 {
+        print("FAIL lexer: token 1 should be TkPlus");
+        return 1;
+    }
+    if token_tag(tokens[3]) != 4 {
+        print("FAIL lexer: token 3 should be TkStar");
+        return 1;
+    }
+    print("  lexer: OK");
+    0
+}
+
+fn test_parser() -> Int {
+    let tokens = tokenize("3 + 4 * 2");
+    let result = parse_expr(tokens, 0);
+
+    // Evaluate: 3 + (4 * 2) = 3 + 8 = 11
+    let val = eval_ast(result.node);
+    if val != 11 {
+        print(f"FAIL parser: 3+4*2 expected 11, got {val}");
+        return 1;
+    }
+    print("  parser: OK");
+    0
+}
+
+fn test_parser_parens() -> Int {
+    let tokens = tokenize("(3 + 4) * 2");
+    let result = parse_expr(tokens, 0);
+
+    let val = eval_ast(result.node);
+    if val != 14 {
+        print(f"FAIL parens: (3+4)*2 expected 14, got {val}");
+        return 1;
+    }
+    print("  parser_parens: OK");
+    0
+}
+
+fn test_type_checker() -> Int {
+    let env = build_type_env();
+
+    let int_type = check_type(env, 1);  // Check type_id 1 (Int)
+    if int_type != 1 {
+        print(f"FAIL type_checker: Int expected 1, got {int_type}");
+        return 1;
+    }
+
+    let unk = check_type(env, 99);  // Check unknown type_id
+    if unk != -1 {
+        print(f"FAIL type_checker: unknown expected -1, got {unk}");
+        return 1;
+    }
+    print("  type_checker: OK");
+    0
+}
+
+fn test_codegen() -> Int {
+    let tokens = tokenize("3 + 4");
+    let result = parse_expr(tokens, 0);
+    let code = emit_code(result.node);
+
+    if !code.contains("PUSH 3") {
+        print(f"FAIL codegen: missing PUSH 3 in '{code}'");
+        return 1;
+    }
+    if !code.contains("PUSH 4") {
+        print(f"FAIL codegen: missing PUSH 4 in '{code}'");
+        return 1;
+    }
+    if !code.contains("ADD") {
+        print(f"FAIL codegen: missing ADD in '{code}'");
+        return 1;
+    }
+    print("  codegen: OK");
+    0
+}
+
+fn test_unary_minus() -> Int {
+    let tokens = tokenize("-5");
+    let result = parse_expr(tokens, 0);
+    let val = eval_ast(result.node);
+    if val != -5 {
+        print(f"FAIL unary: -5 expected -5, got {val}");
+        return 1;
+    }
+    print("  unary_minus: OK");
+    0
+}
+
+fn test_complex_expression() -> Int {
+    // 10 - 3 * 2 + 1 = 10 - 6 + 1 = 5
+    let tokens = tokenize("10 - 3 * 2 + 1");
+    let result = parse_expr(tokens, 0);
+    let val = eval_ast(result.node);
+    if val != 5 {
+        print(f"FAIL complex: 10-3*2+1 expected 5, got {val}");
+        return 1;
+    }
+    print("  complex_expression: OK");
+    0
+}
+
+fn test_end_to_end() -> Int {
+    // Full pipeline: source -> tokens -> AST -> evaluate + generate code
+    let source = "2 * (3 + 4)";
+    let tokens = tokenize(source);
+    let ast = parse_expr(tokens, 0);
+    let value = eval_ast(ast.node);
+    let code = emit_code(ast.node);
+
+    if value != 14 {
+        print(f"FAIL e2e: 2*(3+4) expected 14, got {value}");
+        return 1;
+    }
+    if !code.contains("MUL") {
+        print("FAIL e2e: missing MUL instruction");
+        return 1;
+    }
+    print("  end_to_end: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_lexer();
+    failures = failures + test_parser();
+    failures = failures + test_parser_parens();
+    failures = failures + test_type_checker();
+    failures = failures + test_codegen();
+    failures = failures + test_unary_minus();
+    failures = failures + test_complex_expression();
+    failures = failures + test_end_to_end();
+
+    if failures == 0 {
+        print("All comprehensive compiler pattern tests passed");
+    }
+    failures
+}

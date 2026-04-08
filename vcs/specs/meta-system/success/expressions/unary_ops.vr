@@ -1,0 +1,71 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, expressions, unary, operators
+// @description: Test unary operator expression evaluation in meta functions
+
+// =============================================================================
+// NEGATION OPERATORS
+// =============================================================================
+
+meta fn test_negative() -> Int {
+    -42
+}
+
+meta fn test_double_negative() -> Int {
+    --42
+}
+
+meta fn test_negative_expr() -> Int {
+    -(10 + 5)
+}
+
+// =============================================================================
+// LOGICAL NOT
+// =============================================================================
+
+meta fn test_not_true() -> Bool {
+    !true
+}
+
+meta fn test_not_false() -> Bool {
+    !false
+}
+
+meta fn test_double_not() -> Bool {
+    !!true
+}
+
+meta fn test_not_expr() -> Bool {
+    !(5 > 10)
+}
+
+// =============================================================================
+// COMBINED WITH BINARY
+// =============================================================================
+
+meta fn test_neg_in_binary() -> Int {
+    -5 + 10
+}
+
+meta fn test_not_in_and() -> Bool {
+    !false && true
+}
+
+// Main test function
+fn main() {
+    // Negation tests
+    @const assert_eq(test_negative(), -42);
+    @const assert_eq(test_double_negative(), 42);
+    @const assert_eq(test_negative_expr(), -15);
+
+    // Logical not tests
+    @const assert(!test_not_true());
+    @const assert(test_not_false());
+    @const assert(test_double_not());
+    @const assert(test_not_expr());
+
+    // Combined tests
+    @const assert_eq(test_neg_in_binary(), 5);
+    @const assert(test_not_in_and());
+}

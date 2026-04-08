@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, await, chain, error
+// @description: Test malformed await chain expression
+// @expected-error: E018
+
+async fn test() {
+    // Double await is semantically weird but may parse
+    // Missing expression after first await
+    let x = await await;
+}

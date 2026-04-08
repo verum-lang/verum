@@ -1,0 +1,556 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, calc_chain, calc_step, calc_relation
+// @description: Comprehensive test for calculational proof chain parsing
+
+// ============================================================================
+// Basic Calc Chains (calc_chain = 'calc' '{' calc_step { calc_step } '}')
+// ============================================================================
+
+// Simple equality chain
+theorem calc_simple_eq(x: Int): x + 0 == x {
+    proof {
+        calc {
+            x + 0
+            == { by simp } x
+        }
+    }
+}
+
+// Two-step equality chain
+theorem calc_two_step(a: Int, b: Int): a + b == b + a {
+    proof {
+        calc {
+            a + b
+            == { by ring } b + a
+        }
+    }
+}
+
+// Multi-step equality chain
+theorem calc_multi_step(x: Int, y: Int, z: Int): x + (y + z) == (x + y) + z {
+    proof {
+        calc {
+            x + (y + z)
+            == { by ring } (x + y) + z
+        }
+    }
+}
+
+// ============================================================================
+// Calc Relations (calc_relation = '==' | '<' | '<=' | '>' | '>=' | '!=')
+// ============================================================================
+
+// Equality relation (==)
+theorem calc_rel_eq(a: Int): a * 1 == a {
+    proof {
+        calc {
+            a * 1
+            == { by ring } a
+        }
+    }
+}
+
+// Less than relation (<)
+theorem calc_rel_lt(x: Int)
+    requires x > 0
+: 0 < x + 1 {
+    proof {
+        calc {
+            0
+            < { by omega } x
+            < { by omega } x + 1
+        }
+    }
+}
+
+// Less than or equal relation (<=)
+theorem calc_rel_le(a: Int, b: Int)
+    requires a <= b
+: a <= b + 1 {
+    proof {
+        calc {
+            a
+            <= { by assumption } b
+            <= { by omega } b + 1
+        }
+    }
+}
+
+// Greater than relation (>)
+theorem calc_rel_gt(n: Int)
+    requires n >= 0
+: n + 2 > n {
+    proof {
+        calc {
+            n + 2
+            > { by omega } n + 1
+            > { by omega } n
+        }
+    }
+}
+
+// Greater than or equal relation (>=)
+theorem calc_rel_ge(x: Int, y: Int)
+    requires x >= y
+: x + 1 >= y {
+    proof {
+        calc {
+            x + 1
+            >= { by omega } x
+            >= { by assumption } y
+        }
+    }
+}
+
+// Not equal relation (!=)
+theorem calc_rel_ne(a: Int): a + 1 != a {
+    proof {
+        calc {
+            a + 1
+            != { by omega } a
+        }
+    }
+}
+
+// ============================================================================
+// Calc Steps (calc_step = expression calc_relation '{' proof_justification '}' expression)
+// ============================================================================
+
+// Step with tactic justification
+theorem calc_step_tactic(a: Int, b: Int): (a + b) * 2 == a * 2 + b * 2 {
+    proof {
+        calc {
+            (a + b) * 2
+            == { by ring } a * 2 + b * 2
+        }
+    }
+}
+
+// Step with identifier justification
+theorem calc_step_ident(x: Int): x + 0 == x {
+    proof {
+        calc {
+            x + 0
+            == { by add_zero } x
+        }
+    }
+}
+
+// Step with chained tactic justification
+theorem calc_step_chained(a: Int): a * 1 + 0 == a {
+    proof {
+        calc {
+            a * 1 + 0
+            == { by simp; ring } a
+        }
+    }
+}
+
+// Step with grouped tactic justification
+theorem calc_step_grouped(x: Int): (x + 1) - 1 == x {
+    proof {
+        calc {
+            (x + 1) - 1
+            == { by (simp; ring) } x
+        }
+    }
+}
+
+// ============================================================================
+// Long Calc Chains
+// ============================================================================
+
+// Four-step chain
+theorem calc_four_steps(a: Int, b: Int, c: Int, d: Int): a + b + c + d == d + c + b + a {
+    proof {
+        calc {
+            a + b + c + d
+            == { by ring } (a + b) + (c + d)
+            == { by ring } (c + d) + (a + b)
+            == { by ring } (d + c) + (b + a)
+            == { by ring } d + c + b + a
+        }
+    }
+}
+
+// Five-step chain with different justifications
+theorem calc_five_steps(x: Int): x * 5 == x + x + x + x + x {
+    proof {
+        calc {
+            x * 5
+            == { by ring } x * (1 + 4)
+            == { by ring } x * 1 + x * 4
+            == { by ring } x + x * 4
+            == { by ring } x + x + x * 3
+            == { by ring } x + x + x + x + x
+        }
+    }
+}
+
+// Chain building up a sum
+theorem calc_sum_buildup(n: Int)
+    requires n >= 0
+: 1 + 2 + 3 == 6 {
+    proof {
+        calc {
+            1 + 2 + 3
+            == { by simp } 3 + 3
+            == { by simp } 6
+        }
+    }
+}
+
+// ============================================================================
+// Mixed Relation Chains
+// ============================================================================
+
+// Transitivity chain with inequalities
+theorem calc_trans_ineq(a: Int, b: Int, c: Int)
+    requires a < b, b < c
+: a < c {
+    proof {
+        calc {
+            a
+            < { by assumption } b
+            < { by assumption } c
+        }
+    }
+}
+
+// Chain with <= and <
+theorem calc_mixed_le_lt(x: Int, y: Int, z: Int)
+    requires x <= y, y < z
+: x < z {
+    proof {
+        calc {
+            x
+            <= { by assumption } y
+            < { by assumption } z
+        }
+    }
+}
+
+// Chain with >= and >
+theorem calc_mixed_ge_gt(a: Int, b: Int, c: Int)
+    requires a >= b, b > c
+: a > c {
+    proof {
+        calc {
+            a
+            >= { by assumption } b
+            > { by assumption } c
+        }
+    }
+}
+
+// Chain starting with equality, then inequality
+theorem calc_eq_then_lt(x: Int, y: Int)
+    requires x == y - 1
+: x < y {
+    proof {
+        calc {
+            x
+            == { by assumption } y - 1
+            < { by omega } y
+        }
+    }
+}
+
+// ============================================================================
+// Calc Chains with Complex Expressions
+// ============================================================================
+
+// Chain with function calls
+theorem calc_with_functions(list: List<Int>)
+    requires list.len() > 0
+: list.len() >= 1 {
+    proof {
+        calc {
+            list.len()
+            > { by assumption } 0
+            >= { by omega } 1
+        }
+    }
+}
+
+// Chain with nested expressions
+theorem calc_nested_exprs(a: Int, b: Int): (a + b) * (a - b) == a * a - b * b {
+    proof {
+        calc {
+            (a + b) * (a - b)
+            == { by ring } a * a - a * b + b * a - b * b
+            == { by ring } a * a - b * b
+        }
+    }
+}
+
+// Chain with conditional expressions
+theorem calc_with_conditional(x: Int, y: Int)
+    requires x >= 0, y >= 0
+: max(x, y) >= x {
+    proof {
+        calc {
+            max(x, y)
+            >= { by simp } x
+        }
+    }
+}
+
+// Chain with tuple access
+theorem calc_tuple(p: (Int, Int))
+    requires p.0 <= p.1
+: p.0 <= p.1 + 1 {
+    proof {
+        calc {
+            p.0
+            <= { by assumption } p.1
+            <= { by omega } p.1 + 1
+        }
+    }
+}
+
+// ============================================================================
+// Calc Chains in Different Proof Contexts
+// ============================================================================
+
+// Calc in theorem proof body
+theorem calc_in_theorem(x: Int, y: Int): x * y + y * x == 2 * x * y {
+    proof {
+        calc {
+            x * y + y * x
+            == { by ring } x * y + x * y
+            == { by ring } 2 * x * y
+        }
+    }
+}
+
+// Calc in lemma proof body
+lemma calc_in_lemma(a: Int): a * 2 == a + a {
+    proof {
+        calc {
+            a * 2
+            == { by ring } a + a
+        }
+    }
+}
+
+// Calc with have steps before
+theorem calc_with_have(a: Int, b: Int)
+    requires a > 0, b > 0
+: a + b > 0 {
+    proof {
+        have h1: a > 0 by assumption;
+        have h2: b > 0 by assumption;
+        calc {
+            a + b
+            > { by omega } a
+            > { by omega } 0
+        }
+    }
+}
+
+// Calc followed by show
+theorem calc_then_show(x: Int): x * 2 == x + x {
+    proof {
+        calc {
+            x * 2
+            == { by ring } x + x
+        }
+        show x * 2 == x + x by ring;
+    }
+}
+
+// Multiple calc chains in one proof
+theorem multi_calc(a: Int, b: Int, c: Int)
+    requires a < b, b < c
+: a < c && a + 1 <= c {
+    proof {
+        calc {
+            a
+            < { by assumption } b
+            < { by assumption } c
+        }
+        calc {
+            a + 1
+            <= { by omega } b
+            <= { by omega } c
+        }
+        show a < c && a + 1 <= c by auto;
+    }
+}
+
+// ============================================================================
+// Calc Chains for Algebraic Properties
+// ============================================================================
+
+// Associativity proof
+theorem calc_assoc(a: Int, b: Int, c: Int): (a + b) + c == a + (b + c) {
+    proof {
+        calc {
+            (a + b) + c
+            == { by ring } a + b + c
+            == { by ring } a + (b + c)
+        }
+    }
+}
+
+// Commutativity proof
+theorem calc_comm(x: Int, y: Int): x * y == y * x {
+    proof {
+        calc {
+            x * y
+            == { by ring } y * x
+        }
+    }
+}
+
+// Distributivity proof
+theorem calc_distrib(a: Int, b: Int, c: Int): a * (b + c) == a * b + a * c {
+    proof {
+        calc {
+            a * (b + c)
+            == { by ring } a * b + a * c
+        }
+    }
+}
+
+// Identity proof
+theorem calc_identity(x: Int): x * 1 + 0 == x {
+    proof {
+        calc {
+            x * 1 + 0
+            == { by ring } x * 1
+            == { by ring } x
+        }
+    }
+}
+
+// Inverse proof
+theorem calc_inverse(x: Int): x + (-x) == 0 {
+    proof {
+        calc {
+            x + (-x)
+            == { by ring } 0
+        }
+    }
+}
+
+// ============================================================================
+// Calc Chains with Generics
+// ============================================================================
+
+// Generic equality chain
+theorem calc_generic<T: Add + Eq>(a: T, b: T, zero: T)
+    requires a + zero == a, b + zero == b
+: (a + zero) + (b + zero) == a + b {
+    proof {
+        calc {
+            (a + zero) + (b + zero)
+            == { by simp } a + (b + zero)
+            == { by simp } a + b
+        }
+    }
+}
+
+// Generic ordering chain
+theorem calc_generic_ord<T: Ord>(x: T, y: T, z: T)
+    requires x <= y, y <= z
+: x <= z {
+    proof {
+        calc {
+            x
+            <= { by assumption } y
+            <= { by assumption } z
+        }
+    }
+}
+
+// ============================================================================
+// Calc Chains with Custom Justifications
+// ============================================================================
+
+// Using custom lemma as justification
+theorem calc_custom_justif(a: Int, b: Int): a + b == b + a {
+    proof {
+        calc {
+            a + b
+            == { by add_comm_lemma } b + a
+        }
+    }
+}
+
+// Using theorem as justification
+theorem calc_theorem_justif(x: Int): x * (x + 1) - x == x * x {
+    proof {
+        calc {
+            x * (x + 1) - x
+            == { by ring } x * x + x - x
+            == { by ring } x * x
+        }
+    }
+}
+
+// Using apply tactic as justification
+theorem calc_apply_justif<T: Eq>(a: T, b: T)
+    requires a == b
+: b == a {
+    proof {
+        calc {
+            b
+            == { by apply(eq_sym) } a
+        }
+    }
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Single step calc (minimal)
+theorem calc_single_step(x: Int): x == x {
+    proof {
+        calc {
+            x
+            == { by trivial } x
+        }
+    }
+}
+
+// Calc with deeply nested expression
+theorem calc_deep_nesting(a: Int, b: Int, c: Int, d: Int):
+    ((a + b) * (c + d)) == a*c + a*d + b*c + b*d
+{
+    proof {
+        calc {
+            ((a + b) * (c + d))
+            == { by ring } (a + b) * c + (a + b) * d
+            == { by ring } a*c + b*c + a*d + b*d
+            == { by ring } a*c + a*d + b*c + b*d
+        }
+    }
+}
+
+// Calc with boolean expressions
+theorem calc_boolean(p: Bool, q: Bool): (p && q) == (q && p) {
+    proof {
+        calc {
+            (p && q)
+            == { by simp } (q && p)
+        }
+    }
+}
+
+// Calc proving bound
+theorem calc_bound(n: Int)
+    requires n >= 0
+: n * n >= 0 {
+    proof {
+        calc {
+            n * n
+            >= { by omega } 0
+        }
+    }
+}

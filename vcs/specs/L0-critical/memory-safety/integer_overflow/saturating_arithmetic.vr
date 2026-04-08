@@ -1,0 +1,37 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, integer-overflow, saturating
+// @description: Tests saturating arithmetic that clamps instead of panicking
+
+fn main() {
+    let max_int = 9223372036854775807;  // Int.MAX
+    let min_int = -9223372036854775807 - 1;  // Int.MIN
+
+    // Saturating addition - clamps at MAX
+    let sat_add = max_int.saturating_add(1);
+    assert(sat_add == max_int);
+
+    let sat_add2 = max_int.saturating_add(1000);
+    assert(sat_add2 == max_int);
+
+    // Saturating subtraction - clamps at MIN
+    let sat_sub = min_int.saturating_sub(1);
+    assert(sat_sub == min_int);
+
+    // Saturating multiplication
+    let sat_mul = max_int.saturating_mul(2);
+    assert(sat_mul == max_int);
+
+    let sat_mul2 = min_int.saturating_mul(2);
+    assert(sat_mul2 == min_int);
+
+    // Safe operations
+    let safe_add = 100.saturating_add(50);
+    assert(safe_add == 150);
+
+    let safe_sub = 100.saturating_sub(150);
+    assert(safe_sub == -50);
+
+    println("Saturating arithmetic test passed");
+}

@@ -1,0 +1,55 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, functions, modifiers
+// @description: Test function modifier parsing
+
+// Pure function
+pure fn pure_add(x: Int, y: Int) -> Int {
+    x + y
+}
+
+// Async function
+async fn async_fetch(url: Text) -> Response {
+    http_get(url).await
+}
+
+// Unsafe function
+unsafe fn raw_pointer_deref(ptr: *const Int) -> Int {
+    *ptr
+}
+
+// Combined modifiers
+pure async fn pure_async_compute() -> Int {
+    42
+}
+
+async unsafe fn async_unsafe_op() {}
+
+pure unsafe fn pure_unsafe_math(x: Int) -> Int {
+    x
+}
+
+// Meta functions
+meta fn compile_time() -> Int {
+    2 + 2
+}
+
+meta(1) fn stage_one() {}
+
+meta(2) fn stage_two_generates_meta() {}
+
+// All modifiers
+pure meta async unsafe fn all_modifiers() {}
+
+// Generator functions
+fn* sync_generator() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+async fn* async_generator() -> Page {
+    while let Some(page) = next_page().await {
+        yield page;
+    }
+}

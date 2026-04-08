@@ -1,0 +1,239 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, binary-gcd, stein, number-theory
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for binary GCD (Stein's algorithm).
+// Computes GCD using only subtraction and bit shifts (division by 2).
+// Also tests: extended GCD, LCM, coprimality, and GCD properties.
+
+// Count trailing zeros (number of times n is divisible by 2)
+fn ctz(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut count = 0;
+    let mut val = n;
+    while val % 2 == 0 {
+        count = count + 1;
+        val = val / 2;
+    }
+    count
+}
+
+// Binary GCD (Stein's algorithm)
+// Uses only subtraction and division by 2
+@allow(unbounded_recursion)
+fn binary_gcd(a: Int, b: Int) -> Int {
+    if a == 0 { return b; }
+    if b == 0 { return a; }
+
+    // Make both positive
+    let mut u = a;
+    let mut v = b;
+    if u < 0 { u = 0 - u; }
+    if v < 0 { v = 0 - v; }
+
+    // Factor out common powers of 2
+    let shift_u = ctz(u);
+    let shift_v = ctz(v);
+    let common_shift = if shift_u < shift_v { shift_u } else { shift_v };
+
+    // Remove all factors of 2 from u
+    let mut i = 0;
+    while i < shift_u {
+        u = u / 2;
+        i = i + 1;
+    }
+
+    // Main loop
+    while v != 0 {
+        // Remove factors of 2 from v
+        while v % 2 == 0 {
+            v = v / 2;
+        }
+
+        // Ensure u <= v, then subtract
+        if u > v {
+            let tmp = u;
+            u = v;
+            v = tmp;
+        }
+        v = v - u;
+    }
+
+    // Restore common factors of 2
+    let mut result = u;
+    i = 0;
+    while i < common_shift {
+        result = result * 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Standard Euclidean GCD for comparison
+@allow(unbounded_recursion)
+fn euclidean_gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    if x < 0 { x = 0 - x; }
+    if y < 0 { y = 0 - y; }
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// LCM via GCD
+fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 { return 0; }
+    if b == 0 { return 0; }
+    let g = binary_gcd(a, b);
+    (a / g) * b
+}
+
+// Check if two numbers are coprime
+fn is_coprime(a: Int, b: Int) -> Int {
+    if binary_gcd(a, b) == 1 { 1 } else { 0 }
+}
+
+fn test_basic_gcd() {
+    assert_eq(binary_gcd(12, 8), 4);
+    assert_eq(binary_gcd(48, 18), 6);
+    assert_eq(binary_gcd(100, 75), 25);
+    assert_eq(binary_gcd(17, 13), 1);
+    assert_eq(binary_gcd(36, 24), 12);
+}
+
+fn test_zero_cases() {
+    assert_eq(binary_gcd(0, 5), 5);
+    assert_eq(binary_gcd(7, 0), 7);
+    assert_eq(binary_gcd(0, 0), 0);
+}
+
+fn test_equal_numbers() {
+    assert_eq(binary_gcd(7, 7), 7);
+    assert_eq(binary_gcd(100, 100), 100);
+    assert_eq(binary_gcd(1, 1), 1);
+}
+
+fn test_one_cases() {
+    assert_eq(binary_gcd(1, 100), 1);
+    assert_eq(binary_gcd(100, 1), 1);
+    assert_eq(binary_gcd(1, 0), 1);
+}
+
+fn test_powers_of_2() {
+    assert_eq(binary_gcd(8, 4), 4);
+    assert_eq(binary_gcd(16, 8), 8);
+    assert_eq(binary_gcd(32, 16), 16);
+    assert_eq(binary_gcd(64, 48), 16);
+    assert_eq(binary_gcd(128, 96), 32);
+}
+
+fn test_matches_euclidean() {
+    // Verify binary GCD matches Euclidean GCD
+    assert_eq(binary_gcd(252, 105), euclidean_gcd(252, 105));
+    assert_eq(binary_gcd(1071, 462), euclidean_gcd(1071, 462));
+    assert_eq(binary_gcd(270, 192), euclidean_gcd(270, 192));
+    assert_eq(binary_gcd(1000, 625), euclidean_gcd(1000, 625));
+    assert_eq(binary_gcd(144, 89), euclidean_gcd(144, 89));
+}
+
+fn test_commutative() {
+    assert_eq(binary_gcd(48, 18), binary_gcd(18, 48));
+    assert_eq(binary_gcd(100, 35), binary_gcd(35, 100));
+    assert_eq(binary_gcd(7, 13), binary_gcd(13, 7));
+}
+
+fn test_lcm_basic() {
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(12, 8), 24);
+    assert_eq(lcm(3, 7), 21);
+    assert_eq(lcm(6, 6), 6);
+    assert_eq(lcm(1, 10), 10);
+}
+
+fn test_lcm_zero() {
+    assert_eq(lcm(0, 5), 0);
+    assert_eq(lcm(5, 0), 0);
+}
+
+fn test_coprime() {
+    assert_eq(is_coprime(3, 7), 1);
+    assert_eq(is_coprime(8, 15), 1);
+    assert_eq(is_coprime(13, 17), 1);
+    assert_eq(is_coprime(4, 6), 0);
+    assert_eq(is_coprime(12, 8), 0);
+}
+
+fn test_gcd_lcm_identity() {
+    // gcd(a,b) * lcm(a,b) == a * b
+    let a = 12;
+    let b = 18;
+    assert_eq(binary_gcd(a, b) * lcm(a, b), a * b);
+
+    let c = 35;
+    let d = 15;
+    assert_eq(binary_gcd(c, d) * lcm(c, d), c * d);
+}
+
+fn test_ctz() {
+    assert_eq(ctz(1), 0);
+    assert_eq(ctz(2), 1);
+    assert_eq(ctz(4), 2);
+    assert_eq(ctz(8), 3);
+    assert_eq(ctz(12), 2);
+    assert_eq(ctz(6), 1);
+    assert_eq(ctz(0), 0);
+}
+
+fn test_large_values() {
+    assert_eq(binary_gcd(10000, 7500), 2500);
+    assert_eq(binary_gcd(9999, 3333), 3333);
+    assert_eq(binary_gcd(65536, 49152), 16384);
+}
+
+fn test_prime_gcd() {
+    // GCD of two distinct primes is 1
+    assert_eq(binary_gcd(7, 11), 1);
+    assert_eq(binary_gcd(13, 23), 1);
+    assert_eq(binary_gcd(29, 37), 1);
+    assert_eq(binary_gcd(41, 43), 1);
+}
+
+fn test_consecutive_fibonacci() {
+    // Consecutive Fibonacci numbers are coprime
+    // F(n) and F(n+1) always have GCD = 1
+    assert_eq(binary_gcd(1, 1), 1);
+    assert_eq(binary_gcd(1, 2), 1);
+    assert_eq(binary_gcd(2, 3), 1);
+    assert_eq(binary_gcd(3, 5), 1);
+    assert_eq(binary_gcd(5, 8), 1);
+    assert_eq(binary_gcd(8, 13), 1);
+    assert_eq(binary_gcd(13, 21), 1);
+    assert_eq(binary_gcd(21, 34), 1);
+}
+
+fn main() -> Int {
+    test_basic_gcd();
+    test_zero_cases();
+    test_equal_numbers();
+    test_one_cases();
+    test_powers_of_2();
+    test_matches_euclidean();
+    test_commutative();
+    test_lcm_basic();
+    test_lcm_zero();
+    test_coprime();
+    test_gcd_lcm_identity();
+    test_ctz();
+    test_large_values();
+    test_prime_gcd();
+    test_consecutive_fibonacci();
+    print("[OK] 359_binary_gcd_aot");
+    0
+}

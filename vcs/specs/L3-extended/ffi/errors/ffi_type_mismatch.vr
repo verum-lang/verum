@@ -1,0 +1,268 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: ffi, errors, type-mismatch, unsafe
+// @expected-error: E400
+// @description: Tests FFI type mismatch error detection
+
+/// ============================================================
+/// FFI TYPE MISMATCH ERRORS
+/// ============================================================
+///
+/// Error code E7XX series for FFI-related errors:
+/// - E701: FFI type mismatch
+/// - E702: Invalid FFI type
+/// - E703: Unsupported FFI type
+/// - E704: ABI mismatch
+/// - E705: Missing FFI annotation
+/// - E706: Invalid calling convention
+/// - E707: Unsafe operation outside unsafe block
+
+// ============================================================
+// E701: FFI TYPE MISMATCH
+// ============================================================
+
+// ------------------------------------------------------------
+// Incompatible Primitive Types
+// ------------------------------------------------------------
+
+ffi libc {
+    @extern("C")
+    fn strlen(s: *const c_char) -> c_size;
+}
+
+/// ERROR: Passing Verum Text where C pointer expected
+fn type_mismatch_text() {
+    let s = "hello";
+    // @expected-error: E701 "FFI type mismatch: expected '*const c_charp, found 'Textp"
+    let len = unsafe { libc.strlen(s) };  // ERROR: Text != *const c_char
+}
+
+/// ERROR: Passing Int where pointer expected
+fn type_mismatch_int_for_pointer() {
+    let x: Int = 42;
+    // @expected-error: E701 "FFI type mismatch: expected '*const c_charp, found 'Intp"
+    let len = unsafe { libc.strlen(x) };  // ERROR: Int != *const c_char
+}
+
+// ------------------------------------------------------------
+// Wrong Pointer Types
+// ------------------------------------------------------------
+
+ffi example {
+    @extern("C")
+    fn process_ints(data: *const c_int, len: c_size) -> c_int;
+
+    @extern("C")
+    fn process_floats(data: *const c_float, len: c_size) -> c_float;
+}
+
+/// ERROR: Passing float pointer where int pointer expected
+fn wrong_pointer_element_type() {
+    let floats: [c_float; 4] = [1.0, 2.0, 3.0, 4.0];
+    // @expected-error: E701 "FFI type mismatch: expected '*const c_intp, found '*const c_floatp"
+    let result = unsafe { example.process_ints(floats.as_ptr(), 4) };
+}
+
+/// ERROR: Wrong mutability
+fn wrong_pointer_mutability() {
+    let mut ints: [c_int; 4] = [1, 2, 3, 4];
+    let ptr: *const c_int = ints.as_ptr();
+    // Expected mutable, got immutable
+    // (This may or may not be an error depending on language rules)
+}
+
+// ------------------------------------------------------------
+// Struct Layout Mismatch
+// ------------------------------------------------------------
+
+@repr(C)
+type CPoint is {
+    x: c_int,
+    y: c_int,
+};
+
+/// Non-C-repr struct
+type VerumPoint is {  // Missing @repr(C)!
+    x: Int,
+    y: Int,
+};
+
+ffi geometry {
+    @extern("C")
+    fn point_distance(a: *const CPoint, b: *const CPoint) -> c_double;
+}
+
+/// ERROR: Passing non-repr(C) struct to FFI
+fn struct_repr_mismatch() {
+    let p1 = VerumPoint { x: 0, y: 0 };
+    let p2 = VerumPoint { x: 3, y: 4 };
+
+    // @expected-error: E701 "FFI type mismatch: 'VerumPointp is not repr(C)"
+    let dist = unsafe {
+        geometry.point_distance(&p1 as *const _, &p2 as *const _)
+    };
+}
+
+// ------------------------------------------------------------
+// Function Pointer Type Mismatch
+// ------------------------------------------------------------
+
+type CCallback is extern "C" fn(c_int) -> c_int;
+type WrongCallback is fn(c_int) -> c_int;  // Not extern "C"!
+
+ffi callbacks {
+    @extern("C")
+    fn register_callback(cb: CCallback);
+}
+
+/// Verum function (not extern "C")
+fn verum_callback(x: c_int) -> c_int {
+    x * 2
+}
+
+/// ERROR: Passing non-extern callback
+fn callback_convention_mismatch() {
+    // @expected-error: E701 "FFI type mismatch: expected 'extern \"C\" fnp, found 'fnp"
+    unsafe { callbacks.register_callback(verum_callback) };
+}
+
+// ------------------------------------------------------------
+// Generic Types in FFI
+// ------------------------------------------------------------
+
+ffi generic_error {
+    // @expected-error: E703 "Unsupported FFI type: generic type 'Tp"
+    @extern("C")
+    fn generic_function(value: c_int) -> c_int;  // Generics not allowed in FFI
+}
+
+/// ERROR: List is not FFI-safe
+fn list_in_ffi() {
+    let items: List<c_int> = List.from([1, 2, 3]);
+    // @expected-error: E702 "Invalid FFI type: 'List<c_int>' is not FFI-safe"
+    // List<T> is a Verum type, not a C type
+}
+
+// ------------------------------------------------------------
+// Maybe/Result in FFI
+// ------------------------------------------------------------
+
+ffi option_error {
+    // @expected-error: E702 "Invalid FFI type: 'Maybe<c_int>'"
+    @extern("C")
+    fn returns_maybe(x: c_int) -> Maybe<c_int>;  // ERROR: Maybe not FFI-safe;
+}
+
+/// ERROR: Passing Verum Maybe to C
+fn maybe_in_ffi() {
+    let opt: Maybe<c_int> = Some(42);
+    // Cannot pass Maybe directly to C
+}
+
+// ============================================================
+// E702: INVALID FFI TYPE
+// ============================================================
+
+// Closure types are not FFI-safe
+ffi closure_error {
+    // @expected-error: E702 "Invalid FFI type: closure type"
+    @extern("C")
+    fn with_closure(f: fn(c_int) -> c_int) -> c_int;  // Closure not FFI-safe
+}
+
+// Protocol objects are not FFI-safe
+ffi trait_error {
+    // @expected-error: E702 "Invalid FFI type: protocol object 'Displayp"
+    @extern("C")
+    fn with_trait_object(obj: &Display) -> c_int;  // ERROR;
+}
+
+// Zero-sized types
+ffi zst_error {
+    // @expected-error: E702 "Invalid FFI type: zero-sized type"
+    @extern("C")
+    fn with_unit(u: ()) -> c_int;  // Technically () is c_void but...;
+}
+
+// ============================================================
+// E703: UNSUPPORTED FFI TYPE
+// ============================================================
+
+// 128-bit integers on some platforms
+@cfg(not(target_arch = "x86_64"))
+ffi i128_error {
+    // @expected-error: E703 "Unsupported FFI type: 'i128p not supported on this platform"
+    @extern("C")
+    fn with_i128(x: i128) -> i128;  // ERROR on some platforms;
+}
+
+// Long double varies by platform
+ffi long_double_error {
+    // May be unsupported depending on platform
+    @extern("C")
+    fn with_long_double(x: c_longdouble) -> c_longdouble;
+}
+
+// ============================================================
+// E704: ABI MISMATCH
+// ============================================================
+
+/// Calling convention mismatch
+@extern("C")
+fn c_function(x: c_int) -> c_int { x }
+
+@extern("stdcall")
+fn stdcall_function(x: c_int) -> c_int { x }
+
+fn abi_mismatch() {
+    let c_fn: extern "C" fn(c_int) -> c_int = c_function;
+
+    // @expected-error: E704 "ABI mismatch: expected 'extern \"C\"', found 'extern \"stdcall\"'"
+    let wrong: extern "C" fn(c_int) -> c_int = stdcall_function;  // ERROR
+}
+
+// ============================================================
+// E705: MISSING FFI ANNOTATION
+// ============================================================
+
+/// Function without proper FFI block
+fn missing_ffi_block() {
+    // @expected-error: E705 "Missing FFI annotation: 'strlenp must be declared in 'ffip block"
+    @extern("C")
+    fn strlen(s: *const c_char) -> c_size;  // ERROR: Must be in ffi block;
+}
+
+// ============================================================
+// E706: INVALID CALLING CONVENTION
+// ============================================================
+
+ffi invalid_convention {
+    // @expected-error: E706 "Invalid calling convention: 'pascalp"
+    @extern("pascal")  // ERROR: pascal not supported
+    fn pascal_function(x: c_int) -> c_int;
+
+    // @expected-error: E706 "Invalid calling convention: 'thiscallp without class context"
+    @extern("thiscall")  // ERROR: thiscall needs this pointer
+    fn thiscall_without_this(x: c_int) -> c_int;
+}
+
+// ============================================================
+// TYPE DEFINITIONS
+// ============================================================
+
+type c_char is i8;
+type c_int is i32;
+type c_float is f32;
+type c_double is f64;
+type c_size is usize;
+type c_longdouble is f64;  // Simplified
+type c_void is ();
+
+type Display is protocol {
+    fn display(&self) -> Text;
+}
+
+fn main() {
+    // FFI type mismatch error tests
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, capability, comma, error
+// @description: Test detection of double comma in capability list
+// @expected-error: E083
+
+// Double comma is not allowed in capability list
+fn test(db: Database with [Read,, Write]) {}

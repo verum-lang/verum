@@ -1,0 +1,322 @@
+// @test: run
+// @expected-stdout: Caught panic: test panic\nRecovered value: 0\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, panic, catch_unwind, recovery
+// @description: catch_unwind for catching panics at boundaries
+
+/// Catch unwind - controlled panic recovery.
+/// Allows catching panics at thread/task/FFI boundaries.
+
+type PanicPayload is Heap<Any>;
+
+type PanicInfo is {
+    message: Text,
+    location: Maybe<SourceLocation>
+};
+
+type SourceLocation is {
+    file: Text,
+    line: Int,
+    column: Int
+};
+
+/// Basic catch_unwind usage
+fn basic_catch() -> Result<Int, PanicPayload> {
+    catch_unwind(|| {
+        // Code that might panic
+        risky_computation()
+    })
+}
+
+fn risky_computation() -> Int {
+    // Might panic under some conditions
+    42
+}
+
+/// Catch and convert to Result
+fn panic_to_result<T>(operation: fn() -> T) -> Result<T, Text> {
+    match catch_unwind(operation) {
+        Ok(value) => Ok(value),
+        Err(payload) => {
+            Err("Unknown panic")
+        }
+    }
+}
+
+/// Catch with recovery value
+fn catch_with_default<T: Default>(
+    operation: fn() -> T
+) -> T {
+    catch_unwind(operation).unwrap_or_default()
+}
+
+/// Thread boundary protection
+fn protected_thread() {
+    let handle = spawn(|| {
+        // Wrap thread work in catch_unwind
+        catch_unwind(|| {
+            thread_work()
+        })
+    });
+
+    match handle.join() {
+        Ok(inner) => {
+            match inner {
+                Ok(result) => println(f"Thread succeeded: {result}"),
+                Err(_) => println("Thread panicked but was caught"),
+            }
+        },
+        Err(join_error) => {
+            println(f"Thread join failed: {join_error}");
+        }
+    }
+}
+
+fn thread_work() -> Int {
+    // Thread work that might panic
+    42
+}
+
+/// FFI boundary protection
+extern "C" fn safe_ffi_callback(data: *const u8, len: usize) -> i32 {
+    // CRITICAL: Panics must not cross FFI boundary (undefined behavior)
+    let result = catch_unwind(|| {
+        // Convert raw data to safe type
+        let slice = unsafe {
+            std.slice.from_raw_parts(data, len)
+        };
+
+        process_ffi_data(slice)
+    });
+
+    match result {
+        Ok(Ok(value)) => value,
+        Ok(Err(_)) => -1,    // Application error
+        Err(_) => -2          // Panic error
+    }
+}
+
+fn process_ffi_data(data: &[u8]) -> Result<i32, Text> {
+    Ok(data.len() as i32)
+}
+
+/// UnwindSafe trait - ensuring safe recovery
+fn demonstrate_unwind_safety() {
+    // Types that are UnwindSafe can be safely used across catch_unwind
+    let safe_value: Int = 42;
+
+    let result = catch_unwind(|| {
+        // Can safely reference safe_value
+        safe_value * 2
+    });
+
+    // RefCell is NOT UnwindSafe by default
+    // Because panic might leave it in inconsistent state
+    let cell = RefCell.new(42);
+
+    // Use catch_unwind directly (AssertUnwindSafe is implicit)
+    let result = catch_unwind(|| {
+        cell
+    });
+}
+
+/// AssertUnwindSafe wrapper
+fn with_assert_unwind_safe() {
+    let mut state = ComplexState.new();
+
+    // Use catch_unwind directly
+    let result = catch_unwind(|| {
+        state.modify();
+        state.get_value()
+    });
+
+    // WARNING: state might be in inconsistent state after panic!
+    // Only use AssertUnwindSafe when you can handle this
+}
+
+type ComplexState is { value: Int };
+
+implement ComplexState {
+    fn new() -> Self { ComplexState { value: 0 } }
+    fn modify(&mut self) { self.value += 1; }
+    fn get_value(&self) -> Int { self.value }
+}
+
+/// Resumable panic handling pattern
+fn resumable<T, F, R>(operation: F, recovery: R) -> T
+where type F: Fn, type R: Fn
+{
+    match catch_unwind(operation) {
+        Ok(value) => value,
+        Err(_) => recovery()
+    }
+}
+
+fn demonstrate_resumable() {
+    let result = resumable(
+        || {
+            // Might panic
+            risky_computation()
+        },
+        || {
+            // Recovery path
+            0
+        }
+    );
+}
+
+/// Retry on panic
+fn retry_on_panic<T, F>(
+    mut attempts: Int,
+    operation: F
+) -> Result<T, Text>
+where type F: Fn() -> T + UnwindSafe + Clone
+{
+    while attempts > 0 {
+        match catch_unwind(operation.clone()) {
+            Ok(value) => return Ok(value),
+            Err(_) => {
+                attempts -= 1;
+                if attempts > 0 {
+                    println("Panic caught, retrying...");
+                }
+            }
+        }
+    }
+    Err("All retry attempts failed".to_text())
+}
+
+/// Panic barrier for subsystem isolation
+type PanicBarrier<T> is {
+    inner: Result<T, Text>
+};
+
+implement<T> PanicBarrier<T> {
+    fn run<F>(f: F) -> Self
+    where F: Fn() -> T + UnwindSafe {
+        let inner = panic_to_result(f);
+        PanicBarrier { inner }
+    }
+
+    fn is_ok(&self) -> Bool {
+        self.inner.is_ok()
+    }
+
+    fn into_result(self) -> Result<T, Text> {
+        self.inner
+    }
+
+    fn unwrap_or(self, default: T) -> T {
+        self.inner.unwrap_or(default)
+    }
+
+    fn unwrap_or_else<F>(self, f: F) -> T
+    where F: Fn(Text) -> T {
+        match self.inner {
+            Ok(v) => v,
+            Err(e) => f(e)
+        }
+    }
+}
+
+/// Practical example: Plugin system
+type Plugin is protocol {
+    fn name(&self) -> Text;
+    fn execute(&self) -> Result<(), Text>;
+};
+
+fn run_plugin_safely(plugin: &dyn Plugin) -> Result<(), Text> {
+    let name = plugin.name();
+    println(f"Running plugin: {name}");
+
+    // Catch panics from plugin code
+    let result = catch_unwind(|| {
+        plugin.execute()
+    });
+
+    match result {
+        Ok(inner) => {
+            match inner {
+                Ok(()) => {
+                    println(f"Plugin {name} completed successfully");
+                    Ok(())
+                },
+                Err(e) => {
+                    println(f"Plugin {name} returned error: {e}");
+                    Err(e)
+                },
+            }
+        },
+        Err(_) => {
+            let msg = f"Plugin {name} panicked!";
+            println(msg);
+            Err(msg)
+        }
+    }
+}
+
+/// Testing helper: assert_panics
+fn assert_panics<F>(f: F) -> Text
+where F: Fn() + UnwindSafe {
+    match catch_unwind(f) {
+        Ok(_) => panic("Expected panic but function completed normally"),
+        Err(_) => "panic caught".to_text(),
+    }
+}
+
+@test
+fn test_panics() {
+    let message = assert_panics(|| {
+        panic("expected panic message");
+    });
+
+    assert(message.contains("expected panic"));
+}
+
+fn main() {
+    // Demonstrate catch_unwind
+    let result = panic_to_result(|| {
+        panic("test panic");
+    });
+
+    match result {
+        Ok(v) => println(format("Got: {:?}", v)),
+        Err(msg) => println(format("Caught panic: {}", msg))
+    }
+
+    // Demonstrate recovery
+    let recovered = resumable(
+        || panic("recoverable panic"),
+        || 0
+    );
+    println(format("Recovered value: {}", recovered));
+
+    println("Operation completed");
+}
+
+// Placeholder implementations
+type RefCell<T> is { value: T };
+type AssertUnwindSafe<T> is { inner: T };
+
+fn catch_unwind<T>(f: fn() -> T) -> Result<T, PanicPayload> {
+    // Platform implementation
+    Ok(f())
+}
+
+fn spawn<T>(f: fn() -> T) -> JoinHandle<T> {
+    // Platform implementation
+    JoinHandle { phantom: PhantomData }
+}
+
+type JoinHandle<T> is { phantom: PhantomData<T> };
+type PhantomData<T> is {};
+
+implement<T> JoinHandle<T> {
+    fn join(self) -> Result<T, Text> {
+        Err("not implemented".to_text())
+    }
+}
+
+type UnwindSafe is protocol {};
+implement<T> UnwindSafe for T {}

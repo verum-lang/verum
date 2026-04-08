@@ -1,0 +1,6 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// LOAD_SMALL_I max value (63)
+fn main() { assert_eq(63, 63); }

@@ -1,0 +1,80 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: ffi, repr_c, type-safety, validation
+// @description: @repr(C) struct types pass FFI validation; non-repr types in extern still work
+// @expected-exit: 0
+
+// @repr(C) struct — C-compatible layout, FFI-safe
+@repr(C)
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// @repr(C) struct with more fields
+@repr(C)
+type Rect is {
+    left: Int,
+    top: Int,
+    right: Int,
+    bottom: Int,
+};
+
+// Regular type (NOT @repr(C)) — only valid in extern {}, not in ffi {}
+type Color is {
+    r: Int,
+    g: Int,
+    b: Int,
+};
+
+// Extern block — permissive validation
+@ffi("libSystem.B.dylib")
+extern {
+    fn getpid() -> Int;
+    fn malloc(size: Int) -> &unsafe Byte;
+    fn free(ptr: &unsafe Byte) -> ();
+}
+
+fn compute_area(r: Rect) -> Int {
+    let width = r.right - r.left;
+    let height = r.bottom - r.top;
+    width * height
+}
+
+fn distance_squared(p1: Point, p2: Point) -> Int {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    dx * dx + dy * dy
+}
+
+fn main() {
+    // Test 1: @repr(C) struct construction and field access
+    let p1 = Point { x: 3, y: 4 };
+    let p2 = Point { x: 6, y: 8 };
+    let d2 = distance_squared(p1, p2);
+    assert(d2 == 25); // (6-3)^2 + (8-4)^2 = 9 + 16 = 25
+    print(f"Test 1 PASS: distance_squared = {d2}");
+
+    // Test 2: @repr(C) struct with 4 fields
+    let r = Rect { left: 0, top: 0, right: 10, bottom: 5 };
+    let area = compute_area(r);
+    assert(area == 50);
+    print(f"Test 2 PASS: area = {area}");
+
+    // Test 3: FFI + @repr(C) combined (malloc for struct-sized buffer)
+    let pid = getpid();
+    assert(pid > 0);
+    let buf = malloc(16); // sizeof(Point) = 2 * 8 = 16
+    free(buf);
+    print(f"Test 3 PASS: pid={pid}, malloc+free OK");
+
+    // Test 4: Regular type (no @repr(C)) works in user code
+    let c = Color { r: 255, g: 128, b: 0 };
+    assert(c.r == 255);
+    assert(c.g == 128);
+    assert(c.b == 0);
+    print("Test 4 PASS: non-repr type in user code");
+
+    print("All @repr(C) validation tests passed");
+}

@@ -1,0 +1,82 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: let-else, early-return, maybe
+// @description: Test let-else for early return on None
+
+fn lookup(key: Int) -> Maybe<Int> {
+    if key == 1 {
+        Some(100)
+    } else if key == 2 {
+        Some(200)
+    } else {
+        None
+    }
+}
+
+fn process_key(key: Int) -> Int {
+    let Some(val) = lookup(key) else {
+        return -1;
+    };
+    val * 2
+}
+
+fn test_let_else_some() -> Int {
+    let result = process_key(1);
+    if result != 200 {
+        print(f"FAIL let_else_some: {result}, expected 200");
+        return 1;
+    }
+    let result2 = process_key(2);
+    if result2 != 400 {
+        print(f"FAIL let_else_some2: {result2}, expected 400");
+        return 1;
+    }
+    print("  let_else_some: OK");
+    0
+}
+
+fn test_let_else_none() -> Int {
+    let result = process_key(99);
+    if result != -1 {
+        print(f"FAIL let_else_none: {result}, expected -1");
+        return 1;
+    }
+    print("  let_else_none: OK");
+    0
+}
+
+fn test_let_else_in_loop() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        let Some(val) = lookup(i) else {
+            i = i + 1;
+            continue;
+        };
+        sum = sum + val;
+        i = i + 1;
+    }
+    // key=1 -> 100, key=2 -> 200, others -> skip
+    if sum != 300 {
+        print(f"FAIL let_else_loop: sum={sum}, expected 300");
+        return 1;
+    }
+    print("  let_else_in_loop: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Let-Else Tests:");
+    let mut failures = 0;
+    failures = failures + test_let_else_some();
+    failures = failures + test_let_else_none();
+    failures = failures + test_let_else_in_loop();
+
+    if failures == 0 {
+        print("All let-else tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

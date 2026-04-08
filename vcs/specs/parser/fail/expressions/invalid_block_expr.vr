@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, block, error
+// @description: Block expression with unclosed brace
+// @expected-error: E011
+
+fn test() {
+    let x = {
+        let a = 1;
+        a + 1
+    // Missing closing brace
+}

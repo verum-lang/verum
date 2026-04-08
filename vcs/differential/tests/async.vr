@@ -1,0 +1,242 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-oracle, async
+// @timeout: 30000
+
+/// Async behavior for differential testing.
+/// Tests async/await, spawn, and ordering semantics.
+
+fn main() {
+    test_basic_async();
+    test_await_sequence();
+    test_async_expressions();
+    test_concurrent_spawn();
+    test_async_error_handling();
+}
+
+/// Basic async function
+fn test_basic_async() {
+    println("=== Basic Async ===");
+
+    async fn simple_async() -> Int {
+        42
+    }
+
+    async fn async_add(a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    // Await simple async
+    let result = simple_async().await;
+    println(f"simple_async: {result}");
+
+    // Await with parameters
+    let sum = async_add(10, 20).await;
+    println(f"async_add: {sum}");
+
+    // Async block
+    let block_result = async {
+        let x = 10;
+        let y = 20;
+        x + y
+    }.await;
+    println(f"async block: {block_result}");
+}
+
+/// Await sequencing
+fn test_await_sequence() {
+    println("\n=== Await Sequence ===");
+
+    async fn step(n: Int) -> Int {
+        println(f"step {n} starting");
+        let result = n * 2;
+        println(f"step {n} complete: {result}");
+        result
+    }
+
+    // Sequential awaits
+    println("Sequential:");
+    let a = step(1).await;
+    let b = step(2).await;
+    let c = step(3).await;
+    println(f"results: {a}, {b}, {c}");
+    println(f"sum: {a + b + c}");
+
+    // Chained awaits
+    async fn chain(n: Int) -> Int {
+        if n <= 1 {
+            n
+        } else {
+            let prev = chain(n - 1).await;
+            prev + n
+        }
+    }
+
+    println("\nChained:");
+    let chain_result = chain(5).await;
+    println(f"chain(5): {chain_result}");
+
+    // Pipeline of async operations
+    async fn double_async(n: Int) -> Int { n * 2 }
+    async fn increment_async(n: Int) -> Int { n + 1 }
+
+    println("\nPipeline:");
+    let start = 5;
+    let step1 = double_async(start).await;
+    let step2 = increment_async(step1).await;
+    let step3 = double_async(step2).await;
+    println(f"{start} -> {step1} -> {step2} -> {step3}");
+}
+
+/// Async expressions
+fn test_async_expressions() {
+    println("\n=== Async Expressions ===");
+
+    async fn compute(n: Int) -> Int {
+        n * n
+    }
+
+    // Async in conditional
+    let condition = true;
+    let result = if condition {
+        compute(5).await
+    } else {
+        compute(10).await
+    };
+    println(f"conditional async: {result}");
+
+    // Async in match
+    let choice = 2;
+    let matched = match choice {
+        1 => compute(10).await,
+        2 => compute(20).await,
+        _ => compute(0).await,
+    };
+    println(f"match async: {matched}");
+
+    // Async in loop
+    let mut total = 0;
+    for i in 1..=5 {
+        let value = compute(i).await;
+        total = total + value;
+    }
+    println(f"loop async sum: {total}");
+
+    // Async with closures
+    let async_closure = async |x| x * 2;
+    let closure_result = async_closure(21).await;
+    println(f"async closure: {closure_result}");
+}
+
+/// Concurrent spawning
+fn test_concurrent_spawn() {
+    println("\n=== Concurrent Spawn ===");
+
+    async fn task(id: Int, duration: Int) -> Int {
+        println(f"task {id} started");
+        // Simulate some work
+        let result = id * 100 + duration;
+        println(f"task {id} completed with {result}");
+        result
+    }
+
+    // Spawn multiple tasks
+    println("Spawning tasks:");
+    let handle1 = spawn task(1, 10);
+    let handle2 = spawn task(2, 20);
+    let handle3 = spawn task(3, 30);
+
+    // Await all
+    let r1 = handle1.await;
+    let r2 = handle2.await;
+    let r3 = handle3.await;
+
+    println(f"results: {r1}, {r2}, {r3}");
+
+    // Join syntax
+    println("\nUsing join:");
+    let (a, b, c) = join(
+        task(10, 1),
+        task(20, 2),
+        task(30, 3)
+    ).await;
+    println(f"joined: {a}, {b}, {c}");
+
+    // Race/select
+    println("\nUsing select:");
+    async fn fast() -> Text { "fast" }
+    async fn slow() -> Text {
+        // Simulated delay
+        "slow"
+    }
+
+    let winner = select {
+        result = fast() => f"fast won: {result}",
+        result = slow() => f"slow won: {result}",
+    }.await;
+    println(f"select result: {winner}");
+}
+
+/// Async error handling
+fn test_async_error_handling() {
+    println("\n=== Async Error Handling ===");
+
+    type AsyncError is NetworkError | TimeoutError | ValidationError;
+
+    async fn might_fail(should_fail: Bool) -> Result<Int, AsyncError> {
+        if should_fail {
+            Err(ValidationError)
+        } else {
+            Ok(42)
+        }
+    }
+
+    // Handle async result
+    match might_fail(false).await {
+        Ok(value) => println(f"success: {value}"),
+        Err(e) => println(f"error: {e}"),
+    }
+
+    match might_fail(true).await {
+        Ok(value) => println(f"success: {value}"),
+        Err(e) => println(f"error: {e}"),
+    }
+
+    // Try with async
+    async fn async_operation() -> Result<Int, AsyncError> {
+        let step1 = might_fail(false).await?;
+        let step2 = might_fail(false).await?;
+        Ok(step1 + step2)
+    }
+
+    match async_operation().await {
+        Ok(value) => println(f"operation success: {value}"),
+        Err(e) => println(f"operation error: {e}"),
+    }
+
+    // Recover from async error
+    let recovered = try {
+        might_fail(true).await?;
+        100
+    } recover {
+        ValidationError => {
+            println("recovered from validation error");
+            0
+        },
+        _ => -1,
+    };
+    println(f"recovered value: {recovered}");
+
+    // Timeout handling
+    async fn long_running() -> Int {
+        // Simulated long operation
+        42
+    }
+
+    let timed = timeout(1000, long_running()).await;
+    match timed {
+        Ok(value) => println(f"completed in time: {value}"),
+        Err(TimeoutError) => println("operation timed out"),
+    }
+}

@@ -1,0 +1,153 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: match, patterns, nested, guards
+// @description: Complex pattern matching with nested patterns and various forms
+
+type Expr is
+    Num(Int)
+    | Add { left: Heap<Expr>, right: Heap<Expr> }
+    | Mul { left: Heap<Expr>, right: Heap<Expr> }
+    | Neg(Heap<Expr>);
+
+@allow(unbounded_recursion)
+fn eval(e: &Expr) -> Int {
+    match e {
+        Num(n) => n,
+        Add { left, right } => eval(left) + eval(right),
+        Mul { left, right } => eval(left) * eval(right),
+        Neg(inner) => 0 - eval(inner),
+    }
+}
+
+fn test_expr_eval() -> Int {
+    // (3 + 4) * 2 = 14
+    let expr = Mul {
+        left: Heap(Add {
+            left: Heap(Num(3)),
+            right: Heap(Num(4)),
+        }),
+        right: Heap(Num(2)),
+    };
+    let result = eval(&expr);
+    if result != 14 {
+        print(f"FAIL expr_eval: expected 14, got {result}");
+        return 1;
+    }
+    print("  expr_eval: OK");
+    0
+}
+
+fn test_neg_expr() -> Int {
+    // -(5 + 3) = -8
+    let expr = Neg(Heap(Add {
+        left: Heap(Num(5)),
+        right: Heap(Num(3)),
+    }));
+    let result = eval(&expr);
+    if result != -8 {
+        print(f"FAIL neg_expr: expected -8, got {result}");
+        return 1;
+    }
+    print("  neg_expr: OK");
+    0
+}
+
+type Command is
+    Quit
+    | Move { dx: Int, dy: Int }
+    | Write(Text)
+    | Color { r: Int, g: Int, b: Int };
+
+fn describe(cmd: &Command) -> Text {
+    match cmd {
+        Quit => "quit",
+        Move { dx, dy } => f"move({dx},{dy})",
+        Write(msg) => f"write({msg})",
+        Color { r, g, b } => f"color({r},{g},{b})",
+    }
+}
+
+fn test_command_patterns() -> Int {
+    let c1 = Quit;
+    if describe(&c1) != "quit" {
+        print(f"FAIL quit: got {describe(&c1)}");
+        return 1;
+    }
+    let c2 = Move { dx: 5, dy: -3 };
+    if describe(&c2) != "move(5,-3)" {
+        print(f"FAIL move: got {describe(&c2)}");
+        return 1;
+    }
+    let c3 = Write("hello");
+    if describe(&c3) != "write(hello)" {
+        print(f"FAIL write: got {describe(&c3)}");
+        return 1;
+    }
+    let c4 = Color { r: 255, g: 128, b: 0 };
+    if describe(&c4) != "color(255,128,0)" {
+        print(f"FAIL color: got {describe(&c4)}");
+        return 1;
+    }
+    print("  command_patterns: OK");
+    0
+}
+
+fn test_match_wildcard() -> Int {
+    let values = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    let mut i = 0;
+    while i < values.len() {
+        let v = values[i];
+        let contribution = match v {
+            1 => 100,
+            2 => 200,
+            _ => v,
+        };
+        sum = sum + contribution;
+        i = i + 1;
+    }
+    // 100 + 200 + 3 + 4 + 5 = 312
+    if sum != 312 {
+        print(f"FAIL wildcard: expected 312, got {sum}");
+        return 1;
+    }
+    print("  match_wildcard: OK");
+    0
+}
+
+fn test_maybe_chain() -> Int {
+    let a = Some(10);
+    let b = None;
+
+    let va = match a { Some(x) => x * 2, None => 0 };
+    let vb = match b { Some(x) => x * 2, None => 0 };
+
+    if va != 20 {
+        print(f"FAIL maybe_chain a: expected 20, got {va}");
+        return 1;
+    }
+    if vb != 0 {
+        print(f"FAIL maybe_chain b: expected 0, got {vb}");
+        return 1;
+    }
+    print("  maybe_chain: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Complex Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_expr_eval();
+    failures = failures + test_neg_expr();
+    failures = failures + test_command_patterns();
+    failures = failures + test_match_wildcard();
+    failures = failures + test_maybe_chain();
+
+    if failures == 0 {
+        print("All complex pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

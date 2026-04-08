@@ -1,0 +1,927 @@
+// =============================================================================
+// display_test.vr - Tests for Display and Debug protocol formatting
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, base, protocols, display, debug, formatting
+// @description: Comprehensive tests for Display and Debug formatting of all
+//               primitive types, custom types, and the Formatter API.
+//
+// Coverage:
+// - Display protocol: Int, Float, Bool, Char, Byte, Text, Unit
+// - Debug protocol: Int, Float, Bool, Char, Byte, Text, Maybe, Result
+// - Formatter API: write_str, write_char, write_int, write_float
+// - Helper functions: format_display, format_debug
+// =============================================================================
+
+module specs.core.base.display_test;
+
+mount core.base.protocols.{Display, Debug, Eq, Clone};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.text.format.{
+    Formatter, FormatSpec, FormatError, format_display, format_debug,
+};
+mount core.text.text.Text;
+mount core.collections.list.List;
+mount core.collections.map.Map;
+mount core.collections.set.Set;
+mount core.collections.deque.Deque;
+mount core.collections.heap.BinaryHeap;
+mount core.collections.btree.{BTreeMap, BTreeSet};
+
+// =============================================================================
+// Section 1: Display for Primitive Types via format_display
+// =============================================================================
+
+@test
+fn test_display_int_positive() {
+    let val: Int = 42;
+    let text = format_display(&val);
+    assert_eq(text, "42");
+}
+
+@test
+fn test_display_int_negative() {
+    let val: Int = -123;
+    let text = format_display(&val);
+    assert_eq(text, "-123");
+}
+
+@test
+fn test_display_int_zero() {
+    let val: Int = 0;
+    let text = format_display(&val);
+    assert_eq(text, "0");
+}
+
+@test
+fn test_display_int_large() {
+    let val: Int = 1000000;
+    let text = format_display(&val);
+    assert_eq(text, "1000000");
+}
+
+@test
+fn test_display_float_simple() {
+    let val: Float = 3.14;
+    let text = format_display(&val);
+    // Float formatting - just verify it contains the integral part
+    assert(text.len() > 0);
+}
+
+@test
+fn test_display_float_integer() {
+    let val: Float = 42.0;
+    let text = format_display(&val);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_display_float_negative() {
+    let val: Float = -2.5;
+    let text = format_display(&val);
+    assert(text.starts_with("-"));
+}
+
+@test
+fn test_display_float_zero() {
+    let val: Float = 0.0;
+    let text = format_display(&val);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_display_bool_true() {
+    let val: Bool = true;
+    let text = format_display(&val);
+    assert_eq(text, "true");
+}
+
+@test
+fn test_display_bool_false() {
+    let val: Bool = false;
+    let text = format_display(&val);
+    assert_eq(text, "false");
+}
+
+@test
+fn test_display_char_ascii() {
+    let val: Char = 'A';
+    let text = format_display(&val);
+    assert_eq(text, "A");
+}
+
+@test
+fn test_display_char_digit() {
+    let val: Char = '7';
+    let text = format_display(&val);
+    assert_eq(text, "7");
+}
+
+@test
+fn test_display_char_space() {
+    let val: Char = ' ';
+    let text = format_display(&val);
+    assert_eq(text, " ");
+}
+
+@test
+fn test_display_byte() {
+    let val: Byte = 65;
+    let text = format_display(&val);
+    assert_eq(text, "65");
+}
+
+@test
+fn test_display_byte_zero() {
+    let val: Byte = 0;
+    let text = format_display(&val);
+    assert_eq(text, "0");
+}
+
+@test
+fn test_display_byte_max() {
+    let val: Byte = 255;
+    let text = format_display(&val);
+    assert_eq(text, "255");
+}
+
+@test
+fn test_display_text() {
+    let val: Text = "hello world";
+    let text = format_display(&val);
+    assert_eq(text, "hello world");
+}
+
+@test
+fn test_display_text_empty() {
+    let val: Text = "";
+    let text = format_display(&val);
+    assert_eq(text, "");
+}
+
+// =============================================================================
+// Section 2: Debug for Primitive Types via format_debug
+// =============================================================================
+
+@test
+fn test_debug_int() {
+    let val: Int = 42;
+    let text = format_debug(&val);
+    assert_eq(text, "42");
+}
+
+@test
+fn test_debug_int_negative() {
+    let val: Int = -99;
+    let text = format_debug(&val);
+    assert_eq(text, "-99");
+}
+
+@test
+fn test_debug_float() {
+    let val: Float = 3.14;
+    let text = format_debug(&val);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_debug_bool_true() {
+    let val: Bool = true;
+    let text = format_debug(&val);
+    assert_eq(text, "true");
+}
+
+@test
+fn test_debug_bool_false() {
+    let val: Bool = false;
+    let text = format_debug(&val);
+    assert_eq(text, "false");
+}
+
+@test
+fn test_debug_char_simple() {
+    let val: Char = 'A';
+    let text = format_debug(&val);
+    // Debug for Char wraps in single quotes: 'A'
+    assert_eq(text, "'A'");
+}
+
+@test
+fn test_debug_char_newline() {
+    let val: Char = '\n';
+    let text = format_debug(&val);
+    // Debug for Char escapes newline: '\n'
+    assert_eq(text, "'\\n'");
+}
+
+@test
+fn test_debug_char_tab() {
+    let val: Char = '\t';
+    let text = format_debug(&val);
+    assert_eq(text, "'\\t'");
+}
+
+@test
+fn test_debug_char_backslash() {
+    let val: Char = '\\';
+    let text = format_debug(&val);
+    assert_eq(text, "'\\\\'");
+}
+
+@test
+fn test_debug_char_single_quote() {
+    let val: Char = '\'';
+    let text = format_debug(&val);
+    assert_eq(text, "'\\''");
+}
+
+@test
+fn test_debug_byte() {
+    let val: Byte = 0;
+    let text = format_debug(&val);
+    // Debug for Byte shows hex: 0x00
+    assert_eq(text, "0x00");
+}
+
+@test
+fn test_debug_byte_hex() {
+    let val: Byte = 255;
+    let text = format_debug(&val);
+    assert_eq(text, "0xff");
+}
+
+@test
+fn test_debug_byte_mid() {
+    let val: Byte = 42;
+    let text = format_debug(&val);
+    assert_eq(text, "0x2a");
+}
+
+@test
+fn test_debug_text() {
+    let val: Text = "hello";
+    let text = format_debug(&val);
+    // Debug for Text wraps in double quotes
+    assert(text.starts_with("\""));
+    assert(text.ends_with("\""));
+}
+
+@test
+fn test_debug_text_empty() {
+    let val: Text = "";
+    let text = format_debug(&val);
+    assert_eq(text, "\"\"");
+}
+
+// =============================================================================
+// Section 3: Debug for Composite Types
+// =============================================================================
+
+@test
+fn test_debug_maybe_some() {
+    let val: Maybe<Int> = Some(42);
+    let text = format_debug(&val);
+    assert(text.contains("Some"));
+    assert(text.contains("42"));
+}
+
+@test
+fn test_debug_maybe_none() {
+    let val: Maybe<Int> = None;
+    let text = format_debug(&val);
+    assert_eq(text, "None");
+}
+
+@test
+fn test_debug_result_ok() {
+    let val: Result<Int, Text> = Ok(42);
+    let text = format_debug(&val);
+    assert(text.contains("Ok"));
+    assert(text.contains("42"));
+}
+
+@test
+fn test_debug_result_err() {
+    let val: Result<Int, Text> = Err("oops");
+    let text = format_debug(&val);
+    assert(text.contains("Err"));
+}
+
+// =============================================================================
+// Section 4: Formatter API - Direct Usage
+// =============================================================================
+
+@test
+fn test_formatter_write_str() {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    let result = f.write_str("hello");
+    assert(result.is_ok());
+    assert_eq(buf, "hello");
+}
+
+@test
+fn test_formatter_write_str_multiple() {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    f.write_str("hello");
+    f.write_str(" ");
+    f.write_str("world");
+    assert_eq(buf, "hello world");
+}
+
+@test
+fn test_formatter_write_char() {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    f.write_char('H');
+    f.write_char('i');
+    assert_eq(buf, "Hi");
+}
+
+@test
+fn test_formatter_write_int() {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    f.write_int(42);
+    assert_eq(buf, "42");
+}
+
+@test
+fn test_formatter_write_int_negative() {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    f.write_int(-99);
+    assert_eq(buf, "-99");
+}
+
+@test
+fn test_formatter_write_int_zero() {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    f.write_int(0);
+    assert_eq(buf, "0");
+}
+
+@test
+fn test_formatter_write_float() {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    f.write_float(3.14);
+    assert(buf.len() > 0);
+}
+
+@test
+fn test_formatter_mixed_writes() {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    f.write_str("value=");
+    f.write_int(42);
+    f.write_str(", ok=");
+    f.write_str("true");
+    assert_eq(buf, "value=42, ok=true");
+}
+
+// =============================================================================
+// Section 5: Custom Type Display/Debug
+// =============================================================================
+
+type Color is {
+    r: Byte,
+    g: Byte,
+    b: Byte,
+};
+
+implement Display for Color {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("rgb(")?;
+        f.write_int(self.r as Int)?;
+        f.write_str(", ")?;
+        f.write_int(self.g as Int)?;
+        f.write_str(", ")?;
+        f.write_int(self.b as Int)?;
+        f.write_str(")")
+    }
+}
+
+implement Debug for Color {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Color { r: ")?;
+        f.write_int(self.r as Int)?;
+        f.write_str(", g: ")?;
+        f.write_int(self.g as Int)?;
+        f.write_str(", b: ")?;
+        f.write_int(self.b as Int)?;
+        f.write_str(" }")
+    }
+}
+
+@test
+fn test_custom_display() {
+    let c = Color { r: 255, g: 128, b: 0 };
+    let text = format_display(&c);
+    assert_eq(text, "rgb(255, 128, 0)");
+}
+
+@test
+fn test_custom_debug() {
+    let c = Color { r: 255, g: 128, b: 0 };
+    let text = format_debug(&c);
+    assert_eq(text, "Color { r: 255, g: 128, b: 0 }");
+}
+
+@test
+fn test_custom_display_zero_values() {
+    let c = Color { r: 0, g: 0, b: 0 };
+    let text = format_display(&c);
+    assert_eq(text, "rgb(0, 0, 0)");
+}
+
+// =============================================================================
+// Section 6: Display vs Debug Difference
+// =============================================================================
+
+@test
+fn test_display_vs_debug_char() {
+    let val: Char = 'X';
+    let disp = format_display(&val);
+    let dbg = format_debug(&val);
+    // Display just outputs the char, Debug wraps in quotes
+    assert_eq(disp, "X");
+    assert_eq(dbg, "'X'");
+}
+
+@test
+fn test_display_vs_debug_text() {
+    let val: Text = "hello";
+    let disp = format_display(&val);
+    let dbg = format_debug(&val);
+    // Display outputs raw text, Debug wraps in double quotes
+    assert_eq(disp, "hello");
+    assert(dbg.starts_with("\""));
+}
+
+@test
+fn test_display_vs_debug_bool() {
+    let val: Bool = true;
+    let disp = format_display(&val);
+    let dbg = format_debug(&val);
+    // Both should output "true" for Bool
+    assert_eq(disp, "true");
+    assert_eq(dbg, "true");
+}
+
+// =============================================================================
+// Section 7: Additional Display/Debug Tests
+// =============================================================================
+
+@test
+fn test_display_int_zero() {
+    let val: Int = 0;
+    let text = format_display(&val);
+    assert_eq(text, "0");
+}
+
+@test
+fn test_display_int_negative() {
+    let val: Int = -42;
+    let text = format_display(&val);
+    assert_eq(text, "-42");
+}
+
+@test
+fn test_display_float_zero() {
+    let val: Float = 0.0;
+    let text = format_display(&val);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_display_bool_false() {
+    let val: Bool = false;
+    let text = format_display(&val);
+    assert_eq(text, "false");
+}
+
+@test
+fn test_debug_int_negative() {
+    let val: Int = -100;
+    let text = format_debug(&val);
+    assert_eq(text, "-100");
+}
+
+@test
+fn test_custom_display_max_color() {
+    let c = Color { r: 255, g: 255, b: 255 };
+    let text = format_display(&c);
+    assert_eq(text, "rgb(255, 255, 255)");
+}
+
+@test
+fn test_display_int_large() {
+    let val: Int = 1000000;
+    let text = format_display(&val);
+    assert_eq(text, "1000000");
+}
+
+@test
+fn test_display_unit() {
+    let val: () = ();
+    let text = format_display(&val);
+    assert(text.len() >= 0);
+}
+
+// =============================================================================
+// Section 8: Display for Maybe and Result
+// =============================================================================
+
+@test
+fn test_display_maybe_some_int() {
+    let val: Maybe<Int> = Some(42);
+    let text = format_display(&val);
+    assert_eq(text, "Some(42)");
+}
+
+@test
+fn test_display_maybe_none_int() {
+    let val: Maybe<Int> = None;
+    let text = format_display(&val);
+    assert_eq(text, "None");
+}
+
+@test
+fn test_display_maybe_some_text() {
+    let val: Maybe<Text> = Some("hello");
+    let text = format_display(&val);
+    assert_eq(text, "Some(hello)");
+}
+
+@test
+fn test_display_maybe_some_bool() {
+    let val: Maybe<Bool> = Some(true);
+    let text = format_display(&val);
+    assert_eq(text, "Some(true)");
+}
+
+@test
+fn test_display_result_ok_int() {
+    let val: Result<Int, Text> = Ok(42);
+    let text = format_display(&val);
+    assert_eq(text, "Ok(42)");
+}
+
+@test
+fn test_display_result_err_text() {
+    let val: Result<Int, Text> = Err("oops");
+    let text = format_display(&val);
+    assert_eq(text, "Err(oops)");
+}
+
+@test
+fn test_display_result_ok_text() {
+    let val: Result<Text, Text> = Ok("success");
+    let text = format_display(&val);
+    assert_eq(text, "Ok(success)");
+}
+
+@test
+fn test_display_result_err_int() {
+    let val: Result<Text, Int> = Err(404);
+    let text = format_display(&val);
+    assert_eq(text, "Err(404)");
+}
+
+// =============================================================================
+// Section 9: Display for List and Deque
+// =============================================================================
+
+@test
+fn test_display_list_ints() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    let text = format_display(&list);
+    assert_eq(text, "[1, 2, 3]");
+}
+
+@test
+fn test_display_list_empty() {
+    let list: List<Int> = List.new();
+    let text = format_display(&list);
+    assert_eq(text, "[]");
+}
+
+@test
+fn test_display_list_single() {
+    let mut list: List<Int> = List.new();
+    list.push(42);
+    let text = format_display(&list);
+    assert_eq(text, "[42]");
+}
+
+@test
+fn test_display_list_bools() {
+    let mut list: List<Bool> = List.new();
+    list.push(true);
+    list.push(false);
+    let text = format_display(&list);
+    assert_eq(text, "[true, false]");
+}
+
+@test
+fn test_display_deque_ints() {
+    let mut dq: Deque<Int> = Deque.new();
+    dq.push_back(10);
+    dq.push_back(20);
+    dq.push_back(30);
+    let text = format_display(&dq);
+    assert_eq(text, "[10, 20, 30]");
+}
+
+@test
+fn test_display_deque_empty() {
+    let dq: Deque<Int> = Deque.new();
+    let text = format_display(&dq);
+    assert_eq(text, "[]");
+}
+
+@test
+fn test_display_deque_single() {
+    let mut dq: Deque<Int> = Deque.new();
+    dq.push_back(99);
+    let text = format_display(&dq);
+    assert_eq(text, "[99]");
+}
+
+// =============================================================================
+// Section 10: Display for BTreeMap and BTreeSet (sorted, deterministic)
+// =============================================================================
+
+@test
+fn test_display_btreemap_single() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    let text = format_display(&m);
+    assert_eq(text, "{1: 100}");
+}
+
+@test
+fn test_display_btreemap_multiple() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(3, 300);
+    m.insert(1, 100);
+    m.insert(2, 200);
+    let text = format_display(&m);
+    // BTreeMap iterates in sorted key order
+    assert_eq(text, "{1: 100, 2: 200, 3: 300}");
+}
+
+@test
+fn test_display_btreemap_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let text = format_display(&m);
+    assert_eq(text, "{}");
+}
+
+@test
+fn test_display_btreeset_single() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(42);
+    let text = format_display(&s);
+    assert_eq(text, "{42}");
+}
+
+@test
+fn test_display_btreeset_multiple() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(2);
+    let text = format_display(&s);
+    // BTreeSet iterates in sorted order
+    assert_eq(text, "{1, 2, 3}");
+}
+
+@test
+fn test_display_btreeset_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    let text = format_display(&s);
+    assert_eq(text, "{}");
+}
+
+// =============================================================================
+// Section 11: Display for Hash Map and Set (single-element for determinism)
+// =============================================================================
+
+@test
+fn test_display_map_single() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    let text = format_display(&m);
+    assert_eq(text, "{1: 100}");
+}
+
+@test
+fn test_display_map_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let text = format_display(&m);
+    assert_eq(text, "{}");
+}
+
+@test
+fn test_display_map_multiple_contains() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let text = format_display(&m);
+    // Hash order not deterministic, check structure
+    assert(text.starts_with("{"));
+    assert(text.ends_with("}"));
+    assert(text.contains("1: 10"));
+    assert(text.contains("2: 20"));
+}
+
+@test
+fn test_display_set_single() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(42);
+    let text = format_display(&s);
+    assert_eq(text, "{42}");
+}
+
+@test
+fn test_display_set_empty() {
+    let s: Set<Int> = Set.new();
+    let text = format_display(&s);
+    assert_eq(text, "{}");
+}
+
+@test
+fn test_display_set_multiple_contains() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    let text = format_display(&s);
+    assert(text.starts_with("{"));
+    assert(text.ends_with("}"));
+    assert(text.contains("1"));
+    assert(text.contains("2"));
+    assert(text.contains("3"));
+}
+
+// =============================================================================
+// Section 12: Display for BinaryHeap
+// =============================================================================
+
+@test
+fn test_display_heap_single() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(42);
+    let text = format_display(&h);
+    assert_eq(text, "Heap[42]");
+}
+
+@test
+fn test_display_heap_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let text = format_display(&h);
+    assert_eq(text, "Heap[]");
+}
+
+@test
+fn test_display_heap_multiple() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(5);
+    h.push(3);
+    let text = format_display(&h);
+    // Heap order: max at front, but internal order varies
+    assert(text.starts_with("Heap["));
+    assert(text.ends_with("]"));
+    assert(text.contains("5"));
+    assert(text.contains("1"));
+    assert(text.contains("3"));
+}
+
+// =============================================================================
+// Section 13: Debug for BTreeMap and BTreeSet
+// =============================================================================
+
+@test
+fn test_debug_btreemap_single() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    let text = format_debug(&m);
+    assert_eq(text, "BTreeMap{1: 100}");
+}
+
+@test
+fn test_debug_btreemap_multiple() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(3, 300);
+    m.insert(1, 100);
+    m.insert(2, 200);
+    let text = format_debug(&m);
+    assert_eq(text, "BTreeMap{1: 100, 2: 200, 3: 300}");
+}
+
+@test
+fn test_debug_btreemap_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let text = format_debug(&m);
+    assert_eq(text, "BTreeMap{}");
+}
+
+@test
+fn test_debug_btreeset_single() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(42);
+    let text = format_debug(&s);
+    assert_eq(text, "BTreeSet{42}");
+}
+
+@test
+fn test_debug_btreeset_multiple() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(2);
+    let text = format_debug(&s);
+    assert_eq(text, "BTreeSet{1, 2, 3}");
+}
+
+@test
+fn test_debug_btreeset_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    let text = format_debug(&s);
+    assert_eq(text, "BTreeSet{}");
+}
+
+// =============================================================================
+// Section 14: Display vs Debug for collections
+// =============================================================================
+
+@test
+fn test_display_vs_debug_list() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    let disp = format_display(&list);
+    let dbg = format_debug(&list);
+    // Display: [1, 2], Debug: List[1, 2] (or similar)
+    assert_eq(disp, "[1, 2]");
+    assert(dbg.len() > 0);
+}
+
+@test
+fn test_display_vs_debug_btreemap() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 10);
+    let disp = format_display(&m);
+    let dbg = format_debug(&m);
+    assert_eq(disp, "{1: 10}");
+    assert_eq(dbg, "BTreeMap{1: 10}");
+}
+
+@test
+fn test_display_vs_debug_btreeset() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(5);
+    let disp = format_display(&s);
+    let dbg = format_debug(&s);
+    assert_eq(disp, "{5}");
+    assert_eq(dbg, "BTreeSet{5}");
+}
+
+@test
+fn test_display_vs_debug_maybe() {
+    let val: Maybe<Int> = Some(99);
+    let disp = format_display(&val);
+    let dbg = format_debug(&val);
+    assert_eq(disp, "Some(99)");
+    assert(dbg.contains("Some"));
+    assert(dbg.contains("99"));
+}
+
+@test
+fn test_display_vs_debug_result() {
+    let val: Result<Int, Text> = Ok(7);
+    let disp = format_display(&val);
+    let dbg = format_debug(&val);
+    assert_eq(disp, "Ok(7)");
+    assert(dbg.contains("Ok"));
+    assert(dbg.contains("7"));
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

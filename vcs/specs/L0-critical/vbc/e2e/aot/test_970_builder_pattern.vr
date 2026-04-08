@@ -1,0 +1,222 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: builder, method-chaining, struct, pattern
+// @description: Builder pattern with method chaining
+
+type Config is {
+    host: Text,
+    port: Int,
+    max_connections: Int,
+    timeout_ms: Int,
+    debug: Bool,
+};
+
+type ConfigBuilder is {
+    host: Text,
+    port: Int,
+    max_connections: Int,
+    timeout_ms: Int,
+    debug: Bool,
+};
+
+implement ConfigBuilder {
+    fn new() -> ConfigBuilder {
+        ConfigBuilder {
+            host: "localhost",
+            port: 8080,
+            max_connections: 100,
+            timeout_ms: 5000,
+            debug: false,
+        }
+    }
+
+    fn with_host(&self, h: Text) -> ConfigBuilder {
+        ConfigBuilder { host: h, port: self.port, max_connections: self.max_connections, timeout_ms: self.timeout_ms, debug: self.debug }
+    }
+
+    fn with_port(&self, p: Int) -> ConfigBuilder {
+        ConfigBuilder { host: self.host, port: p, max_connections: self.max_connections, timeout_ms: self.timeout_ms, debug: self.debug }
+    }
+
+    fn with_max_connections(&self, mc: Int) -> ConfigBuilder {
+        ConfigBuilder { host: self.host, port: self.port, max_connections: mc, timeout_ms: self.timeout_ms, debug: self.debug }
+    }
+
+    fn with_timeout(&self, t: Int) -> ConfigBuilder {
+        ConfigBuilder { host: self.host, port: self.port, max_connections: self.max_connections, timeout_ms: t, debug: self.debug }
+    }
+
+    fn with_debug(&self, d: Bool) -> ConfigBuilder {
+        ConfigBuilder { host: self.host, port: self.port, max_connections: self.max_connections, timeout_ms: self.timeout_ms, debug: d }
+    }
+
+    fn build(&self) -> Config {
+        Config { host: self.host, port: self.port, max_connections: self.max_connections, timeout_ms: self.timeout_ms, debug: self.debug }
+    }
+}
+
+fn test_default() -> Int {
+    let config = ConfigBuilder.new().build();
+    if config.port != 8080 {
+        print(f"FAIL default port: expected 8080, got {config.port}");
+        return 1;
+    }
+    if config.max_connections != 100 {
+        print(f"FAIL default max_conn: expected 100, got {config.max_connections}");
+        return 1;
+    }
+    print("  default: OK");
+    0
+}
+
+fn test_single_override() -> Int {
+    let config = ConfigBuilder.new().with_port(9090).build();
+    if config.port != 9090 {
+        print(f"FAIL single_override: expected 9090, got {config.port}");
+        return 1;
+    }
+    print("  single_override: OK");
+    0
+}
+
+fn test_chained() -> Int {
+    let config = ConfigBuilder.new()
+        .with_port(3000)
+        .with_max_connections(50)
+        .with_timeout(10000)
+        .with_debug(true)
+        .build();
+
+    if config.port != 3000 {
+        print(f"FAIL chained port: expected 3000, got {config.port}");
+        return 1;
+    }
+    if config.max_connections != 50 {
+        print(f"FAIL chained max_conn: expected 50, got {config.max_connections}");
+        return 1;
+    }
+    if config.timeout_ms != 10000 {
+        print(f"FAIL chained timeout: expected 10000, got {config.timeout_ms}");
+        return 1;
+    }
+    print("  chained: OK");
+    0
+}
+
+// Stack without pop (uses index-based access to avoid Maybe)
+type Stack is { data: List<Int>, size: Int };
+
+implement Stack {
+    fn new() -> Stack {
+        Stack { data: List.new(), size: 0 }
+    }
+
+    fn push(&mut self, val: Int) {
+        self.data.push(val);
+        self.size = self.size + 1;
+    }
+
+    fn peek(&self) -> Int {
+        if self.size == 0 { return -1; }
+        self.data[self.size - 1]
+    }
+
+    fn pop_val(&mut self) -> Int {
+        if self.size == 0 { return -1; }
+        self.size = self.size - 1;
+        self.data[self.size]
+    }
+
+    fn len(&self) -> Int {
+        self.size
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.size == 0
+    }
+}
+
+fn test_stack() -> Int {
+    let mut s = Stack.new();
+    s.push(10);
+    s.push(20);
+    s.push(30);
+
+    if s.len() != 3 {
+        print(f"FAIL stack len: expected 3, got {s.len()}");
+        return 1;
+    }
+    if s.peek() != 30 {
+        print(f"FAIL stack peek: expected 30, got {s.peek()}");
+        return 1;
+    }
+
+    let v = s.pop_val();
+    if v != 30 {
+        print(f"FAIL stack pop: expected 30, got {v}");
+        return 1;
+    }
+    if s.len() != 2 {
+        print(f"FAIL stack len after pop: expected 2, got {s.len()}");
+        return 1;
+    }
+    print("  stack: OK");
+    0
+}
+
+fn test_stack_accumulate() -> Int {
+    let mut s = Stack.new();
+    let mut i = 1;
+    while i <= 10 {
+        s.push(i);
+        i = i + 1;
+    }
+
+    let mut sum = 0;
+    while !s.is_empty() {
+        sum = sum + s.pop_val();
+    }
+    if sum != 55 {
+        print(f"FAIL stack_accumulate: expected 55, got {sum}");
+        return 1;
+    }
+    print("  stack_accumulate: OK");
+    0
+}
+
+fn test_host_override() -> Int {
+    let config = ConfigBuilder.new()
+        .with_host("example.com")
+        .with_port(443)
+        .build();
+
+    if config.host != "example.com" {
+        print(f"FAIL host: expected example.com, got {config.host}");
+        return 1;
+    }
+    if config.port != 443 {
+        print(f"FAIL port: expected 443, got {config.port}");
+        return 1;
+    }
+    print("  host_override: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Builder Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_default();
+    failures = failures + test_single_override();
+    failures = failures + test_chained();
+    failures = failures + test_stack();
+    failures = failures + test_stack_accumulate();
+    failures = failures + test_host_override();
+
+    if failures == 0 {
+        print("All builder pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

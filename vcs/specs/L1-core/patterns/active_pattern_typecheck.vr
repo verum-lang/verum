@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, active, extraction, typecheck
+// @description: Type checking tests for Active Pattern declarations and matching
+
+// Note: Partial pattern extraction (ParseInt()(n) where n is used as Int) is not yet
+// fully resolved by the type checker — the binding receives the full Maybe<T> type
+// rather than the extracted T. Tests here cover what is implemented.
+
+// =============================================================================
+// Active Pattern Definitions
+// =============================================================================
+
+// Total patterns (return Bool)
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+pattern Positive(n: Int) -> Bool = n > 0;
+pattern Negative(n: Int) -> Bool = n < 0;
+
+// Parameterized total patterns
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+pattern Divisible(divisor: Int)(n: Int) -> Bool = n % divisor == 0;
+
+// Partial patterns (return Maybe<T>)
+// Note: extraction binding type is not yet unwrapped by type checker
+pattern ParseInt(s: Text) -> Maybe<Int> = Int.parse(s);
+pattern ParseFloat(s: Text) -> Maybe<Float> = Float.parse(s);
+
+// =============================================================================
+// Type Checking Tests
+// =============================================================================
+
+fn test_total_pattern_types() {
+    let x: Int = 42;
+
+    // Total patterns don't bind variables — just check matching compiles
+    match x {
+        Even() => {},
+        _ => {}
+    }
+
+    // Negative pattern
+    match x {
+        Negative() => {},
+        Positive() => {},
+        _ => {}
+    }
+}
+
+fn test_and_patterns() {
+    let x: Int = 42;
+
+    // And-pattern with total patterns
+    match x {
+        Even() & Positive() => {},
+        _ => {}
+    }
+}
+
+fn test_parameterized_pattern_types() {
+    let x: Int = 50;
+
+    // Parameterized total pattern - params are expressions
+    match x {
+        InRange(0, 100)() => {},
+        InRange(100, 200)() => {},
+        _ => {}
+    }
+
+    // Params can be variables of correct type
+    let lo: Int = 0;
+    let hi: Int = 100;
+    match x {
+        InRange(lo, hi)() => {},
+        _ => {}
+    }
+
+    // Multiple parameterized patterns
+    match x {
+        Divisible(2)() => {},
+        _ => {}
+    }
+
+    // Combination
+    match x {
+        InRange(0, 100)() & Divisible(2)() => {},
+        _ => {}
+    }
+}
+
+fn test_partial_pattern_wildcard() {
+    let s: Text = "42";
+
+    // Partial pattern with wildcard binding compiles without type error
+    match s {
+        ParseInt()(_) => {}
+        _ => {}
+    }
+
+    match s {
+        ParseFloat()(_) => {}
+        _ => {}
+    }
+}
+
+fn test_total_pattern_or() {
+    let x: Int = 5;
+
+    // Or-pattern of value literals
+    match x {
+        1 | 2 | 3 => {},
+        _ => {}
+    }
+}

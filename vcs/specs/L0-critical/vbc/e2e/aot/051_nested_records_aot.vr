@@ -1,0 +1,129 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, records, nested, deep-access
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT nested records with deep field access
+
+type Vec2 is { x: Int, y: Int };
+type Rect2 is { origin: Vec2, size: Vec2 };
+type Color is { r: Int, g: Int, b: Int };
+type ColorRect is { rect: Rect2, color: Color };
+
+fn vec2_add(a: Vec2, b: Vec2) -> Vec2 {
+    Vec2 { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn vec2_scale(v: Vec2, s: Int) -> Vec2 {
+    Vec2 { x: v.x * s, y: v.y * s }
+}
+
+fn vec2_dot(a: Vec2, b: Vec2) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+fn vec2_len_sq(v: Vec2) -> Int {
+    v.x * v.x + v.y * v.y
+}
+
+fn rect_area(r: Rect2) -> Int {
+    r.size.x * r.size.y
+}
+
+fn rect_perimeter(r: Rect2) -> Int {
+    2 * (r.size.x + r.size.y)
+}
+
+fn rect_contains(r: Rect2, p: Vec2) -> Bool {
+    p.x >= r.origin.x && p.x < r.origin.x + r.size.x &&
+    p.y >= r.origin.y && p.y < r.origin.y + r.size.y
+}
+
+fn rect_translate(r: Rect2, offset: Vec2) -> Rect2 {
+    Rect2 { origin: vec2_add(r.origin, offset), size: r.size }
+}
+
+fn color_brightness(c: Color) -> Int {
+    (c.r + c.g + c.b) / 3
+}
+
+fn color_mix(a: Color, b: Color) -> Color {
+    Color { r: (a.r + b.r) / 2, g: (a.g + b.g) / 2, b: (a.b + b.b) / 2 }
+}
+
+fn main() -> Int {
+    // Vec2 operations
+    let v1 = Vec2 { x: 3, y: 4 };
+    let v2 = Vec2 { x: 1, y: 2 };
+    assert_eq(v1.x, 3);
+    assert_eq(v1.y, 4);
+
+    let sum = vec2_add(v1, v2);
+    assert_eq(sum.x, 4);
+    assert_eq(sum.y, 6);
+
+    let scaled = vec2_scale(v1, 3);
+    assert_eq(scaled.x, 9);
+    assert_eq(scaled.y, 12);
+
+    assert_eq(vec2_dot(v1, v2), 11);  // 3*1 + 4*2
+    assert_eq(vec2_len_sq(v1), 25);   // 9 + 16
+
+    // Rect operations
+    let r = Rect2 {
+        origin: Vec2 { x: 10, y: 20 },
+        size: Vec2 { x: 30, y: 40 },
+    };
+    assert_eq(rect_area(r), 1200);      // 30*40
+    assert_eq(rect_perimeter(r), 140);   // 2*(30+40)
+    assert_eq(r.origin.x, 10);
+    assert_eq(r.size.y, 40);
+
+    // Contains
+    assert(rect_contains(r, Vec2 { x: 15, y: 25 }));
+    assert(rect_contains(r, Vec2 { x: 10, y: 20 }));  // inclusive origin
+    assert(!rect_contains(r, Vec2 { x: 40, y: 60 }));  // 40 >= 10+30
+    assert(!rect_contains(r, Vec2 { x: 5, y: 25 }));
+
+    // Translate
+    let moved = rect_translate(r, Vec2 { x: 5, y: -10 });
+    assert_eq(moved.origin.x, 15);
+    assert_eq(moved.origin.y, 10);
+    assert_eq(moved.size.x, 30);  // size unchanged
+
+    // Color operations
+    let red = Color { r: 255, g: 0, b: 0 };
+    let blue = Color { r: 0, g: 0, b: 255 };
+    let white = Color { r: 255, g: 255, b: 255 };
+
+    assert_eq(color_brightness(red), 85);     // 255/3
+    assert_eq(color_brightness(white), 255);
+
+    let purple = color_mix(red, blue);
+    assert_eq(purple.r, 127);  // (255+0)/2
+    assert_eq(purple.g, 0);
+    assert_eq(purple.b, 127);
+
+    // ColorRect: nested 3 levels deep
+    let cr = ColorRect {
+        rect: Rect2 {
+            origin: Vec2 { x: 0, y: 0 },
+            size: Vec2 { x: 100, y: 50 },
+        },
+        color: Color { r: 200, g: 100, b: 50 },
+    };
+    assert_eq(rect_area(cr.rect), 5000);
+    assert_eq(cr.color.r, 200);
+    assert_eq(cr.rect.origin.x, 0);
+    assert_eq(cr.rect.size.x, 100);
+
+    // Build array of rects as sequential test
+    let r1 = Rect2 { origin: Vec2 { x: 0, y: 0 }, size: Vec2 { x: 10, y: 10 } };
+    let r2 = Rect2 { origin: Vec2 { x: 10, y: 0 }, size: Vec2 { x: 20, y: 10 } };
+    let r3 = Rect2 { origin: Vec2 { x: 30, y: 0 }, size: Vec2 { x: 5, y: 5 } };
+    let total_area = rect_area(r1) + rect_area(r2) + rect_area(r3);
+    assert_eq(total_area, 325);  // 100 + 200 + 25
+
+    0
+}

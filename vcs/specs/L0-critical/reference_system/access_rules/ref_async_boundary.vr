@@ -1,0 +1,191 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, async, lifetime
+
+/// Test borrowing across async boundaries.
+/// References must remain valid across await points.
+/// CBGR tracks generation across async suspension.
+/// Spec: 04-memory-model.md#aliasing-rules
+/// Spec: 16-context-system.md#async-borrowing
+
+async fn main() {
+    test_borrow_across_await().await;
+    test_shared_borrow_in_async().await;
+    test_mutable_borrow_async().await;
+    test_nested_async_borrow().await;
+    test_borrow_multiple_awaits().await;
+    test_async_lifetime_extension().await;
+    test_async_function_borrow().await;
+}
+
+/// Test that borrows remain valid across await points
+async fn test_borrow_across_await() {
+    let data = [1, 2, 3, 4, 5];
+
+    // Borrow data
+    let data_ref = &data;
+
+    // Use before await
+    let len_before = data_ref.len();
+
+    // Yield control (await point)
+    yield_now().await;
+
+    // Borrow still valid after await
+    let len_after = data_ref.len();
+
+    assert(len_before == len_after);
+    assert(len_after == 5);
+
+    // Original data still valid after borrow ends
+    assert(data.len() == 5);
+}
+
+/// Test multiple shared borrows in async context
+async fn test_shared_borrow_in_async() {
+    let shared_data = Text.from("shared across tasks");
+
+    // Multiple shared borrows
+    let ref1 = &shared_data;
+    let ref2 = &shared_data;
+
+    // Pass borrows to async functions (sequential for simplicity)
+    let result1 = read_text(ref1).await;
+    let result2 = read_text(ref2).await;
+
+    assert(result1 == result2);
+    assert(result1 == 20);
+}
+
+async fn read_text(text: &Text) -> Int {
+    yield_now().await;
+    text.len()
+}
+
+/// Test mutable reference in async - exclusive access
+async fn test_mutable_borrow_async() {
+    let mut data = [1, 2, 3];
+
+    // Mutable borrow
+    let data_mut = &mut data;
+
+    // Modify through borrow
+    data_mut.push(4);
+
+    // Await with mutable reference held
+    yield_now().await;
+
+    // Still have exclusive access
+    data_mut.push(5);
+
+    // Let the mutable reference end naturally by not using data_mut anymore
+
+    // Verify modifications
+    assert(data.len() == 5);
+    assert(data[3] == 4);
+    assert(data[4] == 5);
+}
+
+/// Helper async function for nested borrow test
+async fn inner_process(data: &Text) -> Int {
+    // Borrow valid in nested async
+    yield_now().await;
+    data.len()
+}
+
+/// Helper async function for nested borrow test
+async fn middle_process(data: &Text) -> Int {
+    // Pass borrow to nested async
+    inner_process(data).await
+}
+
+/// Test nested async functions with borrowed data
+async fn test_nested_async_borrow() {
+    let outer_data = Text.from("outer");
+
+    // Call nested async chain
+    let result = middle_process(&outer_data).await;
+    assert(result == 5);
+
+    // outer_data still valid
+    assert(outer_data == "outer");
+}
+
+/// Test borrow validity across multiple awaits
+async fn test_borrow_multiple_awaits() {
+    let data = Text.from("racing data");
+    let data_ref = &data;
+
+    // Multiple awaits with borrowed data
+    yield_now().await;
+    let len1 = data_ref.len();
+
+    yield_now().await;
+    let len2 = data_ref.len();
+
+    // Borrow was valid across all awaits
+    assert(len1 == len2);
+    assert(len1 == data.len());
+}
+
+/// Test borrow lifetime extension in async
+async fn test_async_lifetime_extension() {
+    // Data created in scope
+    let text = Text.from("extended lifetime");
+
+    // Borrow the text
+    let text_ref = &text;
+
+    // Await with borrow
+    yield_now().await;
+
+    // text must live long enough for this - use length check instead
+    let len = text_ref.len();
+
+    assert(len == 17);
+}
+
+/// Helper: yield control back to async runtime
+async fn yield_now() {
+    // Implementation yields to executor
+}
+
+/// Helper: join two futures (simplified for test)
+/// Note: Full generic version would use: async fn join<A, B>(a: Future<A>, b: Future<B>) -> (A, B)
+async fn join_int_futures(a: Int, b: Int) -> (Int, Int) {
+    (a, b)
+}
+
+/// Test borrowing in async functions with passed references
+async fn test_async_function_borrow() {
+    let items = [1, 2, 3, 4, 5];
+
+    // Pass borrow to async function
+    let result = sum_items(&items).await;
+    assert(result == 15);
+
+    // items still available
+    assert(items.len() == 5);
+}
+
+/// Helper async function that takes a borrowed list
+async fn sum_items(data: &List<Int>) -> Int {
+    yield_now().await;
+    let mut sum = 0;
+    let mut i = 0;
+    while i < data.len() {
+        sum = sum + data[i];
+        i = i + 1;
+    }
+    sum
+}
+
+/// Test that invalid borrows are caught
+// Note: This would be a separate typecheck-fail test
+// fn invalid_async_borrow() {
+//     async fn escaping_borrow() -> &Text {
+//         let local = Text.from("local");
+//         &local  // ERROR: cannot return reference to local
+//     }
+// }

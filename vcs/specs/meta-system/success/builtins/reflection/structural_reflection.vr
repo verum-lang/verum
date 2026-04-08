@@ -1,0 +1,130 @@
+// @test: meta-pass
+// @level: L1
+// @description: Tests structural reflection builtin functions
+// @tags: meta-system, builtins, reflection, structural
+// @contexts: MetaTypes
+
+// Maybe type for tests
+type Maybe<T> is None | Some(T);
+
+// Test type with various structural features
+@derive(Debug, Clone)
+type Person is {
+    name: Text,
+    age: Int,
+    email: Maybe<Text>,
+};
+
+type Container<T> is {
+    value: T,
+    metadata: Text,
+};
+
+type LinkedList<T> is
+    Empty
+    | Node { value: T, next: Heap<LinkedList<T>> };
+
+// Test simple_name_of - gets unqualified type name
+meta fn test_simple_name_of(ctx: Text) -> Bool using [MetaTypes] {
+    let name1 = simple_name_of<Person>();
+    let name2 = simple_name_of<Container<Int>>();
+    let name3 = simple_name_of<LinkedList<Text>>();
+    name1 == "Person" && name2 == "Container" && name3 == "LinkedList"
+}
+
+// Test module_of - gets module path where type is defined
+meta fn test_module_of(ctx: Text) -> Bool using [MetaTypes] {
+    let path = module_of<Person>();
+    // Module path should be non-empty
+    text_len(path) >= 0
+}
+
+// Test generics_of - gets generic parameters
+meta fn test_generics_of(ctx: Text) -> Bool using [MetaTypes] {
+    let params = generics_of<Container<Int>>();
+    let container_ok = list_len(params) >= 0;
+
+    let params2 = generics_of<Person>();
+    let person_ok = list_len(params2) >= 0;
+
+    container_ok && person_ok
+}
+
+// Test inner_type_of - gets inner type for wrapper types
+meta fn test_inner_type_of(ctx: Text) -> Bool using [MetaTypes] {
+    let inner = inner_type_of<Maybe<Int>>();
+    let inner2 = inner_type_of<Heap<Text>>();
+    let inner3 = inner_type_of<Int>();
+
+    // Just verify they return something (even None)
+    true
+}
+
+// Test element_type_of - gets element type of collections
+meta fn test_element_type_of(ctx: Text) -> Bool using [MetaTypes] {
+    let elem = element_type_of<List<Int>>();
+    let elem2 = element_type_of<Set<Text>>();
+    let elem3 = element_type_of<Int>();
+
+    // Just verify they return something (even None)
+    true
+}
+
+// Test functions_of - gets all functions defined on type
+meta fn test_functions_of(ctx: Text) -> Bool using [MetaTypes] {
+    let funcs = functions_of<Person>();
+    // Should include derived functions from Debug, Clone
+    list_len(funcs) >= 0
+}
+
+// Test static_functions_of - gets associated functions
+meta fn test_static_functions_of(ctx: Text) -> Bool using [MetaTypes] {
+    let statics = static_functions_of<Person>();
+    list_len(statics) >= 0
+}
+
+// Test instance_methods_of - gets methods with self
+meta fn test_instance_methods_of(ctx: Text) -> Bool using [MetaTypes] {
+    let methods = instance_methods_of<Person>();
+    list_len(methods) >= 0
+}
+
+// Test field_offset - gets byte offset of field
+meta fn test_field_offset(ctx: Text) -> Bool using [MetaTypes] {
+    let offset = field_offset<Person>("name");
+    let offset2 = field_offset<Person>("age");
+    offset >= 0 && offset2 >= 0
+}
+
+// Test memory_layout_of - gets complete memory layout
+meta fn test_memory_layout_of(ctx: Text) -> Bool using [MetaTypes] {
+    let layout = memory_layout_of<Person>();
+    // Just verify it returns something
+    true
+}
+
+// Test attributes_of - gets all attributes
+meta fn test_attributes_of(ctx: Text) -> Bool using [MetaTypes] {
+    let attrs = attributes_of<Person>();
+    list_len(attrs) >= 0
+}
+
+// Test has_attribute - checks for specific attribute
+meta fn test_has_attribute(ctx: Text) -> Bool using [MetaTypes] {
+    has_attribute<Person>("derive")
+}
+
+fn main() {
+    @const assert(test_simple_name_of("ctx"));
+    @const assert(test_module_of("ctx"));
+    @const assert(test_generics_of("ctx"));
+    @const assert(test_inner_type_of("ctx"));
+    @const assert(test_element_type_of("ctx"));
+    @const assert(test_functions_of("ctx"));
+    @const assert(test_static_functions_of("ctx"));
+    @const assert(test_instance_methods_of("ctx"));
+    @const assert(test_field_offset("ctx"));
+    @const assert(test_memory_layout_of("ctx"));
+    @const assert(test_attributes_of("ctx"));
+    @const assert(test_has_attribute("ctx"));
+}

@@ -1,0 +1,264 @@
+// =============================================================================
+// maybe_additional_test.vr - Tests for zip_with, take_if, get_or_insert_default
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: maybe, zip_with, take_if, get_or_insert_default
+// @description: Tests for Maybe methods that don't have dedicated test coverage:
+//               zip_with (combining function zip), take_if (conditional extraction),
+//               and get_or_insert_default (default insertion).
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: zip_with
+// =============================================================================
+
+@test
+fn test_zip_with_both_some() {
+    let a: Maybe<Int> = Some(3);
+    let b: Maybe<Int> = Some(4);
+    let result = a.zip_with(b, |x, y| x * y);
+    match result {
+        Some(val) => assert_eq(val, 12),
+        None => panic("both Some should produce Some"),
+    }
+}
+
+@test
+fn test_zip_with_left_none() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = Some(4);
+    let result = a.zip_with(b, |x, y| x + y);
+    assert(result is None);
+}
+
+@test
+fn test_zip_with_right_none() {
+    let a: Maybe<Int> = Some(3);
+    let b: Maybe<Int> = None;
+    let result = a.zip_with(b, |x, y| x + y);
+    assert(result is None);
+}
+
+@test
+fn test_zip_with_both_none() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = None;
+    let result = a.zip_with(b, |x, y| x + y);
+    assert(result is None);
+}
+
+@test
+fn test_zip_with_different_types() {
+    let a: Maybe<Int> = Some(5);
+    let b: Maybe<Text> = Some("hello");
+    let result = a.zip_with(b, |n, _t| n > 0);
+    match result {
+        Some(val) => assert(val),
+        None => panic("should produce Some"),
+    }
+}
+
+@test
+fn test_zip_with_addition() {
+    let a: Maybe<Int> = Some(10);
+    let b: Maybe<Int> = Some(20);
+    let result = a.zip_with(b, |x, y| x + y);
+    match result {
+        Some(val) => assert_eq(val, 30),
+        None => panic("should produce Some"),
+    }
+}
+
+@test
+fn test_zip_with_string_concat() {
+    let a: Maybe<Text> = Some("hello");
+    let b: Maybe<Text> = Some(" world");
+    let result = a.zip_with(b, |x, y| x + &y);
+    match result {
+        Some(val) => assert_eq(val, "hello world"),
+        None => panic("should produce Some"),
+    }
+}
+
+@test
+fn test_zip_with_produces_tuple() {
+    let a: Maybe<Int> = Some(1);
+    let b: Maybe<Bool> = Some(true);
+    let result = a.zip_with(b, |x, y| (x, y));
+    assert(result is Some);
+}
+
+@test
+fn test_zip_with_vs_zip() {
+    // zip_with(f) is equivalent to zip().map(f)
+    let a1: Maybe<Int> = Some(3);
+    let b1: Maybe<Int> = Some(4);
+    let zw = a1.zip_with(b1, |x, y| x + y);
+
+    match zw {
+        Some(val) => assert_eq(val, 7),
+        None => panic("should produce Some"),
+    }
+}
+
+// =============================================================================
+// Section 2: take_if
+// =============================================================================
+
+@test
+fn test_take_if_some_predicate_true() {
+    let mut m: Maybe<Int> = Some(42);
+    let taken = m.take_if(|v| *v > 10);
+    match taken {
+        Some(val) => assert_eq(val, 42),
+        None => panic("predicate true should take"),
+    }
+    // Original should now be None
+    assert(m is None);
+}
+
+@test
+fn test_take_if_some_predicate_false() {
+    let mut m: Maybe<Int> = Some(5);
+    let taken = m.take_if(|v| *v > 10);
+    assert(taken is None);
+    // Original should be unchanged
+    assert(m is Some);
+}
+
+@test
+fn test_take_if_none() {
+    let mut m: Maybe<Int> = None;
+    let taken = m.take_if(|v| *v > 10);
+    assert(taken is None);
+    assert(m is None);
+}
+
+@test
+fn test_take_if_always_true() {
+    let mut m: Maybe<Int> = Some(99);
+    let taken = m.take_if(|_| true);
+    match taken {
+        Some(val) => assert_eq(val, 99),
+        None => panic("always true should take"),
+    }
+    assert(m is None);
+}
+
+@test
+fn test_take_if_always_false() {
+    let mut m: Maybe<Int> = Some(99);
+    let taken = m.take_if(|_| false);
+    assert(taken is None);
+    assert(m is Some);
+}
+
+@test
+fn test_take_if_even() {
+    let mut m1: Maybe<Int> = Some(4);
+    let mut m2: Maybe<Int> = Some(7);
+
+    let t1 = m1.take_if(|v| *v % 2 == 0);
+    let t2 = m2.take_if(|v| *v % 2 == 0);
+
+    assert(t1 is Some);  // 4 is even
+    assert(t2 is None);  // 7 is odd
+}
+
+@test
+fn test_take_if_repeated_calls() {
+    let mut m: Maybe<Int> = Some(42);
+
+    // First take succeeds
+    let taken1 = m.take_if(|v| *v > 10);
+    assert(taken1 is Some);
+    assert(m is None);
+
+    // Second take on None returns None
+    let taken2 = m.take_if(|v| *v > 10);
+    assert(taken2 is None);
+}
+
+@test
+fn test_take_if_text() {
+    let mut m: Maybe<Text> = Some("hello");
+    let taken = m.take_if(|v| v.len() > 3);
+    assert(taken is Some);
+    assert(m is None);
+}
+
+@test
+fn test_take_if_text_too_short() {
+    let mut m: Maybe<Text> = Some("hi");
+    let taken = m.take_if(|v| v.len() > 3);
+    assert(taken is None);
+    assert(m is Some);
+}
+
+// =============================================================================
+// Section 3: get_or_insert_default
+// =============================================================================
+
+@test
+fn test_get_or_insert_default_none() {
+    let mut m: Maybe<Int> = None;
+    let val = m.get_or_insert_default();
+    assert_eq(*val, 0);  // Int default is 0
+    assert(m is Some);
+}
+
+@test
+fn test_get_or_insert_default_some() {
+    let mut m: Maybe<Int> = Some(42);
+    let val = m.get_or_insert_default();
+    assert_eq(*val, 42);  // Existing value preserved
+}
+
+@test
+fn test_get_or_insert_default_bool() {
+    let mut m: Maybe<Bool> = None;
+    let val = m.get_or_insert_default();
+    assert_eq(*val, false);  // Bool default is false
+}
+
+@test
+fn test_get_or_insert_default_float() {
+    let mut m: Maybe<Float> = None;
+    let val = m.get_or_insert_default();
+    assert_eq(*val, 0.0);  // Float default is 0.0
+}
+
+@test
+fn test_get_or_insert_default_text() {
+    let mut m: Maybe<Text> = None;
+    let val = m.get_or_insert_default();
+    assert_eq(*val, "");  // Text default is ""
+}
+
+@test
+fn test_get_or_insert_default_preserves_value() {
+    let mut m: Maybe<Int> = Some(100);
+    let _ = m.get_or_insert_default();
+    match m {
+        Some(v) => assert_eq(v, 100),
+        None => panic("should still be Some"),
+    }
+}
+
+@test
+fn test_get_or_insert_default_repeated() {
+    let mut m: Maybe<Int> = None;
+    let val1 = m.get_or_insert_default();
+    assert_eq(*val1, 0);
+    // Now it's Some(0), calling again should return same
+    let val2 = m.get_or_insert_default();
+    assert_eq(*val2, 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

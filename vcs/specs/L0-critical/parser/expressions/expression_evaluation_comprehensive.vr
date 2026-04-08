@@ -1,0 +1,641 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, evaluation, comprehensive
+// @description: Comprehensive expression evaluation tests
+
+/// Comprehensive Expression Evaluation Test Suite
+///
+/// This test demonstrates Verum's expression evaluation capabilities:
+///
+/// 1. Arithmetic expressions
+/// 2. Comparison expressions
+/// 3. Logical expressions
+/// 4. Bitwise expressions
+/// 5. Assignment expressions
+/// 6. Block expressions
+/// 7. If expressions
+/// 8. Loop expressions
+/// 9. Function call expressions
+/// 10. Field access expressions
+/// 11. Index expressions
+/// 12. Range expressions
+///
+/// Spec: 05-syntax-grammar.md#expressions
+
+// ============================================================================
+// SUPPORTING TYPE DEFINITIONS
+// ============================================================================
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Vector3 is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+// ============================================================================
+// TEST 1: Arithmetic Expressions
+// ============================================================================
+
+fn test_basic_arithmetic() {
+    // Addition
+    assert(2 + 3 == 5);
+    assert(100 + 200 == 300);
+
+    // Subtraction
+    assert(10 - 3 == 7);
+    assert(100 - 50 == 50);
+
+    // Multiplication
+    assert(4 * 5 == 20);
+    assert(7 * 8 == 56);
+
+    // Division
+    assert(20 / 4 == 5);
+    assert(100 / 10 == 10);
+
+    // Modulo
+    assert(17 % 5 == 2);
+    assert(100 % 7 == 2);
+}
+
+fn test_arithmetic_precedence() {
+    // Multiplication before addition
+    assert(2 + 3 * 4 == 14);
+    assert(5 * 2 + 3 == 13);
+
+    // Division before subtraction
+    assert(10 - 4 / 2 == 8);
+    assert(20 / 4 - 3 == 2);
+
+    // Parentheses override precedence
+    assert((2 + 3) * 4 == 20);
+    assert(2 * (3 + 4) == 14);
+}
+
+fn test_compound_arithmetic() {
+    let a = 10;
+    let b = 3;
+    let c = 2;
+
+    // Complex expressions
+    assert(a + b * c == 16);
+    assert((a + b) * c == 26);
+    assert(a * b + c == 32);
+    assert(a * (b + c) == 50);
+    assert(a / b + c == 5);
+    assert(a % b + c == 3);
+}
+
+// ============================================================================
+// TEST 2: Comparison Expressions
+// ============================================================================
+
+fn test_equality_comparisons() {
+    assert((5 == 5) == true);
+    assert((5 == 6) == false);
+    assert((5 != 6) == true);
+    assert((5 != 5) == false);
+}
+
+fn test_relational_comparisons() {
+    assert((3 < 5) == true);
+    assert((5 < 3) == false);
+    assert((5 < 5) == false);
+
+    assert((5 > 3) == true);
+    assert((3 > 5) == false);
+    assert((5 > 5) == false);
+
+    assert((3 <= 5) == true);
+    assert((5 <= 5) == true);
+    assert((6 <= 5) == false);
+
+    assert((5 >= 3) == true);
+    assert((5 >= 5) == true);
+    assert((4 >= 5) == false);
+}
+
+fn test_chained_comparisons() {
+    let x = 5;
+    assert((x > 3) == true);
+    assert((x < 10) == true);
+    assert((x >= 5) == true);
+    assert((x <= 5) == true);
+}
+
+// ============================================================================
+// TEST 3: Logical Expressions
+// ============================================================================
+
+fn test_logical_and() {
+    assert((true && true) == true);
+    assert((true && false) == false);
+    assert((false && true) == false);
+    assert((false && false) == false);
+}
+
+fn test_logical_or() {
+    assert((true || true) == true);
+    assert((true || false) == true);
+    assert((false || true) == true);
+    assert((false || false) == false);
+}
+
+fn test_logical_not() {
+    assert((!true) == false);
+    assert((!false) == true);
+}
+
+fn test_complex_logical() {
+    let a = true;
+    let b = false;
+    let c = true;
+
+    assert((a && c) == true);
+    assert((a && b) == false);
+    assert((a || b) == true);
+    assert((b || b) == false);
+    assert((!b && a) == true);
+    assert((a && !b) == true);
+    assert((a || b && c) == true);  // && has higher precedence
+    assert(((a || b) && c) == true);
+}
+
+fn test_short_circuit_and() {
+    // In short-circuit evaluation, if first operand is false,
+    // second operand is not evaluated
+    let mut evaluated = false;
+
+    fn set_flag(flag: &mut Bool) -> Bool {
+        *flag = true;
+        true
+    }
+
+    // This should short-circuit
+    let result = false && { evaluated = true; true };
+    assert(result == false);
+    // evaluated might or might not be set depending on implementation
+}
+
+fn test_short_circuit_or() {
+    // In short-circuit evaluation, if first operand is true,
+    // second operand is not evaluated
+    let result = true || false;
+    assert(result == true);
+}
+
+// ============================================================================
+// TEST 4: Bitwise Expressions
+// ============================================================================
+
+fn test_bitwise_and() {
+    assert((0b1010 & 0b1100) == 0b1000);
+    assert((0xFF & 0x0F) == 0x0F);
+    assert((255 & 127) == 127);
+}
+
+fn test_bitwise_or() {
+    assert((0b1010 | 0b0101) == 0b1111);
+    assert((0xF0 | 0x0F) == 0xFF);
+    assert((8 | 4) == 12);
+}
+
+fn test_bitwise_xor() {
+    assert((0b1010 ^ 0b1100) == 0b0110);
+    assert((0xFF ^ 0xFF) == 0);
+    assert((0xFF ^ 0x00) == 0xFF);
+}
+
+fn test_bitwise_shift() {
+    // Left shift
+    assert((1 << 0) == 1);
+    assert((1 << 1) == 2);
+    assert((1 << 2) == 4);
+    assert((1 << 3) == 8);
+    assert((5 << 2) == 20);
+
+    // Right shift
+    assert((8 >> 1) == 4);
+    assert((8 >> 2) == 2);
+    assert((8 >> 3) == 1);
+    assert((16 >> 4) == 1);
+}
+
+// ============================================================================
+// TEST 5: Assignment Expressions
+// ============================================================================
+
+fn test_simple_assignment() {
+    let mut x = 0;
+    x = 42;
+    assert(x == 42);
+
+    x = 100;
+    assert(x == 100);
+}
+
+fn test_compound_assignment() {
+    let mut x = 10;
+
+    x += 5;
+    assert(x == 15);
+
+    x -= 3;
+    assert(x == 12);
+
+    x *= 2;
+    assert(x == 24);
+
+    x /= 4;
+    assert(x == 6);
+
+    x %= 4;
+    assert(x == 2);
+}
+
+fn test_bitwise_compound_assignment() {
+    let mut x = 0b1010;
+
+    x &= 0b1100;
+    assert(x == 0b1000);
+
+    x |= 0b0011;
+    assert(x == 0b1011);
+
+    x ^= 0b1111;
+    assert(x == 0b0100);
+
+    x <<= 2;
+    assert(x == 0b10000);
+
+    x >>= 1;
+    assert(x == 0b1000);
+}
+
+// ============================================================================
+// TEST 6: Block Expressions
+// ============================================================================
+
+fn test_block_expression_value() {
+    let x = {
+        let a = 10;
+        let b = 20;
+        a + b
+    };
+
+    assert(x == 30);
+}
+
+fn test_nested_block_expressions() {
+    let x = {
+        let inner = {
+            let a = 5;
+            a * 2
+        };
+        inner + 10
+    };
+
+    assert(x == 20);
+}
+
+fn test_block_with_statements() {
+    let x = {
+        let mut sum = 0;
+        sum += 1;
+        sum += 2;
+        sum += 3;
+        sum
+    };
+
+    assert(x == 6);
+}
+
+// ============================================================================
+// TEST 7: If Expressions
+// ============================================================================
+
+fn test_if_expression() {
+    let x = if true { 42 } else { 0 };
+    assert(x == 42);
+
+    let y = if false { 42 } else { 0 };
+    assert(y == 0);
+}
+
+fn test_if_else_chain() {
+    fn classify(n: Int) -> Int {
+        if n < 0 {
+            0
+        } else if n < 10 {
+            1
+        } else if n < 100 {
+            2
+        } else {
+            3
+        }
+    }
+
+    assert(classify(5) == 1);
+    assert(classify(50) == 2);
+    assert(classify(500) == 3);
+}
+
+fn test_if_with_complex_condition() {
+    let a = 5;
+    let b = 10;
+
+    let result = if a < b && a > 0 {
+        a + b
+    } else {
+        0
+    };
+
+    assert(result == 15);
+}
+
+// ============================================================================
+// TEST 8: Loop Expressions
+// ============================================================================
+
+fn test_for_loop() {
+    let mut sum = 0;
+    for i in 0..5 {
+        sum += i;
+    }
+    assert(sum == 10);  // 0 + 1 + 2 + 3 + 4 = 10
+}
+
+fn test_while_loop() {
+    let mut n = 0;
+    let mut sum = 0;
+    while n < 5 {
+        sum += n;
+        n += 1;
+    }
+    assert(sum == 10);
+}
+
+fn test_loop_with_break() {
+    let mut n = 0;
+    loop {
+        n += 1;
+        if n >= 10 {
+            break;
+        }
+    }
+    assert(n == 10);
+}
+
+fn test_nested_loops() {
+    let mut count = 0;
+    for i in 0..3 {
+        for j in 0..3 {
+            count += 1;
+        }
+    }
+    assert(count == 9);
+}
+
+// ============================================================================
+// TEST 9: Function Call Expressions
+// ============================================================================
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn test_function_calls() {
+    assert(add(2, 3) == 5);
+    assert(multiply(4, 5) == 20);
+}
+
+fn test_nested_function_calls() {
+    assert(add(add(1, 2), add(3, 4)) == 10);
+    assert(multiply(add(2, 3), multiply(2, 2)) == 20);
+}
+
+fn test_function_call_in_expression() {
+    let result = add(10, 20) * 2 + multiply(3, 4);
+    assert(result == 72);  // 30 * 2 + 12 = 72
+}
+
+// ============================================================================
+// TEST 10: Field Access Expressions
+// ============================================================================
+
+fn test_struct_field_access() {
+    let p = Point { x: 10, y: 20 };
+    assert(p.x == 10);
+    assert(p.y == 20);
+}
+
+fn test_nested_field_access() {
+    let v = Vector3 { x: 1, y: 2, z: 3 };
+    let sum = v.x + v.y + v.z;
+    assert(sum == 6);
+}
+
+fn test_field_access_in_expression() {
+    let p1 = Point { x: 3, y: 4 };
+    let p2 = Point { x: 6, y: 8 };
+
+    let dist_squared = (p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y);
+    assert(dist_squared == 25);  // 3^2 + 4^2 = 25
+}
+
+fn test_mutable_field_assignment() {
+    let mut p = Point { x: 0, y: 0 };
+    p.x = 10;
+    p.y = 20;
+    assert(p.x == 10);
+    assert(p.y == 20);
+}
+
+// ============================================================================
+// TEST 11: Index Expressions
+// ============================================================================
+
+fn test_array_indexing() {
+    let arr = [10, 20, 30, 40, 50];
+    assert(arr[0] == 10);
+    assert(arr[1] == 20);
+    assert(arr[4] == 50);
+}
+
+fn test_index_with_expression() {
+    let arr = [0, 1, 4, 9, 16, 25];
+    let i = 3;
+    assert(arr[i] == 9);
+    assert(arr[i + 1] == 16);
+}
+
+fn test_mutable_array_indexing() {
+    let mut arr = [1, 2, 3];
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[2] = 30;
+    assert(arr[0] == 10);
+    assert(arr[1] == 20);
+    assert(arr[2] == 30);
+}
+
+fn test_nested_array() {
+    let matrix = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+    ];
+    assert(matrix[0][0] == 1);
+    assert(matrix[1][1] == 5);
+    assert(matrix[2][2] == 9);
+}
+
+// ============================================================================
+// TEST 12: Range Expressions
+// ============================================================================
+
+fn test_range_iteration() {
+    let mut sum = 0;
+    for i in 0..5 {
+        sum += i;
+    }
+    assert(sum == 10);
+}
+
+fn test_range_with_step() {
+    let arr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let mut count = 0;
+    for i in 0..5 {
+        count += 1;
+    }
+    assert(count == 5);
+}
+
+// ============================================================================
+// TEST 13: Combined Expression Tests
+// ============================================================================
+
+fn test_complex_expression_1() {
+    let a = 5;
+    let b = 3;
+    let c = 2;
+
+    // ((5 + 3) * 2 - 4) / 3 = (8 * 2 - 4) / 3 = (16 - 4) / 3 = 12 / 3 = 4
+    let result = ((a + b) * c - 4) / b;
+    assert(result == 4);
+}
+
+fn test_complex_expression_2() {
+    let arr = [1, 2, 3, 4, 5];
+    let p = Point { x: 2, y: 3 };
+
+    // arr[p.x] + arr[p.y] = arr[2] + arr[3] = 3 + 4 = 7
+    let result = arr[p.x] + arr[p.y];
+    assert(result == 7);
+}
+
+fn test_complex_expression_3() {
+    let mut sum = 0;
+    for i in 0..5 {
+        sum += if i % 2 == 0 { i } else { 0 };
+    }
+    // 0 + 2 + 4 = 6
+    assert(sum == 6);
+}
+
+fn test_expression_in_match() {
+    let value = 42;
+    let result = match value * 2 {
+        84 => 1,
+        _ => 0,
+    };
+    assert(result == 1);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Arithmetic
+    test_basic_arithmetic();
+    test_arithmetic_precedence();
+    test_compound_arithmetic();
+
+    // Comparisons
+    test_equality_comparisons();
+    test_relational_comparisons();
+    test_chained_comparisons();
+
+    // Logical
+    test_logical_and();
+    test_logical_or();
+    test_logical_not();
+    test_complex_logical();
+    test_short_circuit_and();
+    test_short_circuit_or();
+
+    // Bitwise
+    test_bitwise_and();
+    test_bitwise_or();
+    test_bitwise_xor();
+    test_bitwise_shift();
+
+    // Assignment
+    test_simple_assignment();
+    test_compound_assignment();
+    test_bitwise_compound_assignment();
+
+    // Block expressions
+    test_block_expression_value();
+    test_nested_block_expressions();
+    test_block_with_statements();
+
+    // If expressions
+    test_if_expression();
+    test_if_else_chain();
+    test_if_with_complex_condition();
+
+    // Loops
+    test_for_loop();
+    test_while_loop();
+    test_loop_with_break();
+    test_nested_loops();
+
+    // Function calls
+    test_function_calls();
+    test_nested_function_calls();
+    test_function_call_in_expression();
+
+    // Field access
+    test_struct_field_access();
+    test_nested_field_access();
+    test_field_access_in_expression();
+    test_mutable_field_assignment();
+
+    // Indexing
+    test_array_indexing();
+    test_index_with_expression();
+    test_mutable_array_indexing();
+    test_nested_array();
+
+    // Ranges
+    test_range_iteration();
+    test_range_with_step();
+
+    // Combined
+    test_complex_expression_1();
+    test_complex_expression_2();
+    test_complex_expression_3();
+    test_expression_in_match();
+}

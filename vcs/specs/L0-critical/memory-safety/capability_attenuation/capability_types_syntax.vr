@@ -1,0 +1,132 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: capability, types, syntax, parser
+// @timeout: 5000
+// @expect: pass
+//
+// Capability Type Syntax Tests
+// =============================
+// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+//
+// Tests parsing of capability-restricted type syntax: Type with [Caps]
+
+// ============================================================================
+// BASIC CAPABILITY TYPE SYNTAX
+// ============================================================================
+
+// Test 1: Single capability
+fn test_single_capability(db: Database with [Read]) -> () {
+    // db can only call Read methods
+}
+
+// Test 2: Multiple capabilities
+fn test_multiple_capabilities(db: Database with [Read, Write]) -> () {
+    // db can call both Read and Write methods
+}
+
+// Test 3: Standard capability names
+fn test_standard_capabilities(ctx: AppContext with [Read, Write, Execute, Admin]) -> () {
+    // All standard capabilities
+}
+
+// Test 4: Transactional capabilities
+fn test_transaction_capabilities(db: Database with [Read, Write, Transaction]) -> () {
+    // Transactional database access
+}
+
+// Test 5: Network and FileSystem capabilities
+fn test_io_capabilities(io: IOContext with [Network, FileSystem]) -> () {
+    // I/O capabilities
+}
+
+// Test 6: Auth and Config capabilities
+fn test_security_capabilities(ctx: SecurityContext with [Auth, Config]) -> () {
+    // Security-related capabilities
+}
+
+// Test 7: Logging and Metrics capabilities
+fn test_observability_capabilities(ctx: ObservabilityContext with [Logging, Metrics]) -> () {
+    // Observability capabilities
+}
+
+// Test 8: Cache capability
+fn test_cache_capability(ctx: CacheContext with [Read, Cache]) -> () {
+    // Cache capability
+}
+
+// Test 9: Query capability (SQL-specific)
+fn test_query_capability(db: Database with [Query]) -> () {
+    // Query-only database access
+}
+
+// Test 10: Custom capability names
+fn test_custom_capabilities(db: Database with [CustomCap1, CustomCap2]) -> () {
+    // User-defined capabilities
+}
+
+// ============================================================================
+// CAPABILITY TYPE IN RETURN POSITIONS
+// ============================================================================
+
+// Test 11: Return capability-restricted type
+fn get_readonly_db() -> Database with [Read] {
+    // Returns a read-only view of database
+    database()
+}
+
+// Test 12: Return with multiple capabilities
+fn get_readwrite_db() -> Database with [Read, Write] {
+    database()
+}
+
+// ============================================================================
+// CAPABILITY TYPE IN GENERIC CONTEXTS
+// ============================================================================
+
+// Test 13: Generic with capability type
+fn process_db<T>(db: T with [Read]) -> () {
+    // Generic type with capability restriction
+}
+
+// Test 14: Container of capability-restricted types
+fn get_db_list() -> List<Database with [Read]> {
+    // List of read-only databases
+    List.new()
+}
+
+// ============================================================================
+// CAPABILITY TYPE IN STRUCT FIELDS
+// ============================================================================
+
+// Test 15: Type with capability in record field
+type AppState is {
+    db: Database with [Read],
+    config: Config with [Read],
+};
+
+// Test 16: Multiple capability-restricted fields
+type FullState is {
+    readonly_db: Database with [Read],
+    writable_db: Database with [Read, Write],
+    admin_db: Database with [Admin],
+};
+
+// ============================================================================
+// HELPER TYPES (MOCK)
+// ============================================================================
+
+type Database is { _marker: Int };
+type AppContext is { _marker: Int };
+type IOContext is { _marker: Int };
+type SecurityContext is { _marker: Int };
+type ObservabilityContext is { _marker: Int };
+type CacheContext is { _marker: Int };
+type Config is { _marker: Int };
+
+fn database() -> Database with [Read, Write] { Database { _marker: 0 } }
+
+fn main() {
+    // Run all syntax tests by type checking this file
+    print("Capability type syntax tests passed");
+}

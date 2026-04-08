@@ -1,0 +1,228 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, clamp, pow
+// @description: Comprehensive tests for clamp and pow builtins
+
+// =============================================================================
+// CLAMP FUNCTION
+// =============================================================================
+
+meta fn test_clamp_in_range() -> Bool {
+    // Value within range returns unchanged
+    let result = clamp(5, 0, 10);
+    result == 5
+}
+
+meta fn test_clamp_below_min() -> Bool {
+    // Value below min returns min
+    let result = clamp(-5, 0, 10);
+    result == 0
+}
+
+meta fn test_clamp_above_max() -> Bool {
+    // Value above max returns max
+    let result = clamp(15, 0, 10);
+    result == 10
+}
+
+meta fn test_clamp_at_min() -> Bool {
+    // Value at min boundary
+    let result = clamp(0, 0, 10);
+    result == 0
+}
+
+meta fn test_clamp_at_max() -> Bool {
+    // Value at max boundary
+    let result = clamp(10, 0, 10);
+    result == 10
+}
+
+meta fn test_clamp_negative_range() -> Bool {
+    // Clamp with negative range
+    let result = clamp(-50, -100, -10);
+    result == -50
+}
+
+meta fn test_clamp_single_value_range() -> Bool {
+    // When min == max, always returns that value
+    let result = clamp(100, 5, 5);
+    result == 5
+}
+
+meta fn test_clamp_float() -> Bool {
+    // Clamp works with floats
+    let result = clamp(3.14, 0.0, 2.0);
+    result == 2.0
+}
+
+meta fn test_clamp_float_in_range() -> Bool {
+    let result = clamp(1.5, 0.0, 3.0);
+    result == 1.5
+}
+
+meta fn test_clamp_float_precision() -> Bool {
+    // Test with precise float values
+    let result = clamp(0.123456, 0.1, 0.2);
+    result == 0.123456
+}
+
+// =============================================================================
+// POW FUNCTION
+// =============================================================================
+
+meta fn test_pow_basic() -> Bool {
+    let result = pow(2, 10);
+    result == 1024
+}
+
+meta fn test_pow_zero_exponent() -> Bool {
+    // Any number to power of 0 is 1
+    let result = pow(12345, 0);
+    result == 1
+}
+
+meta fn test_pow_one_exponent() -> Bool {
+    // Any number to power of 1 is itself
+    let result = pow(42, 1);
+    result == 42
+}
+
+meta fn test_pow_zero_base() -> Bool {
+    // 0 to any positive power is 0
+    let result = pow(0, 5);
+    result == 0
+}
+
+meta fn test_pow_one_base() -> Bool {
+    // 1 to any power is 1
+    let result = pow(1, 100);
+    result == 1
+}
+
+meta fn test_pow_negative_base_even() -> Bool {
+    // Negative base with even exponent is positive
+    let result = pow(-2, 4);
+    result == 16
+}
+
+meta fn test_pow_negative_base_odd() -> Bool {
+    // Negative base with odd exponent is negative
+    let result = pow(-2, 3);
+    result == -8
+}
+
+meta fn test_pow_large_result() -> Bool {
+    // Test with larger result
+    let result = pow(3, 20);
+    result == 3486784401
+}
+
+meta fn test_pow_squares() -> Bool {
+    // Perfect squares
+    pow(2, 2) == 4 && pow(3, 2) == 9 && pow(10, 2) == 100
+}
+
+meta fn test_pow_cubes() -> Bool {
+    // Perfect cubes
+    pow(2, 3) == 8 && pow(3, 3) == 27 && pow(4, 3) == 64
+}
+
+meta fn test_pow_identity() -> Bool {
+    // Power identity: a^1 = a for all a
+    let a = 7;
+    pow(a, 1) == a
+}
+
+meta fn test_pow_multiplication_rule() -> Bool {
+    // a^m * a^n = a^(m+n)
+    let a = 2;
+    let m = 3;
+    let n = 4;
+    pow(a, m) * pow(a, n) == pow(a, m + n)
+}
+
+meta fn test_pow_nested_rule() -> Bool {
+    // (a^m)^n = a^(m*n)
+    let a = 2;
+    let m = 2;
+    let n = 3;
+    pow(pow(a, m), n) == pow(a, m * n)
+}
+
+meta fn test_pow_float_base() -> Bool {
+    // Float base with float exponent
+    let result = pow(2.0, 3.0);
+    result == 8.0
+}
+
+meta fn test_pow_float_precision() -> Bool {
+    // Test float precision with small base
+    let result = pow(1.5, 2.0);
+    result == 2.25
+}
+
+// =============================================================================
+// COMBINED CLAMP AND POW
+// =============================================================================
+
+meta fn test_clamp_pow_result() -> Bool {
+    // Clamp the result of a power operation
+    let power_result = pow(2, 20);  // 1048576
+    let clamped = clamp(power_result, 0, 1000000);
+    clamped == 1000000
+}
+
+meta fn test_pow_clamped_exponent() -> Bool {
+    // Use clamped value as exponent
+    let exp = clamp(100, 0, 5);
+    let result = pow(2, exp);
+    result == 32  // 2^5
+}
+
+meta fn test_pow_clamped_base() -> Bool {
+    // Use clamped value as base
+    let base = clamp(100, 2, 10);
+    let result = pow(base, 3);
+    result == 1000  // 10^3
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Clamp tests
+    @const assert(test_clamp_in_range());
+    @const assert(test_clamp_below_min());
+    @const assert(test_clamp_above_max());
+    @const assert(test_clamp_at_min());
+    @const assert(test_clamp_at_max());
+    @const assert(test_clamp_negative_range());
+    @const assert(test_clamp_single_value_range());
+    @const assert(test_clamp_float());
+    @const assert(test_clamp_float_in_range());
+    @const assert(test_clamp_float_precision());
+
+    // Pow tests
+    @const assert(test_pow_basic());
+    @const assert(test_pow_zero_exponent());
+    @const assert(test_pow_one_exponent());
+    @const assert(test_pow_zero_base());
+    @const assert(test_pow_one_base());
+    @const assert(test_pow_negative_base_even());
+    @const assert(test_pow_negative_base_odd());
+    @const assert(test_pow_large_result());
+    @const assert(test_pow_squares());
+    @const assert(test_pow_cubes());
+    @const assert(test_pow_identity());
+    @const assert(test_pow_multiplication_rule());
+    @const assert(test_pow_nested_rule());
+    @const assert(test_pow_float_base());
+    @const assert(test_pow_float_precision());
+
+    // Combined tests
+    @const assert(test_clamp_pow_result());
+    @const assert(test_pow_clamped_exponent());
+    @const assert(test_pow_clamped_base());
+}

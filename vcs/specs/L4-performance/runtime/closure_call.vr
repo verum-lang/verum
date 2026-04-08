@@ -1,0 +1,505 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: runtime, closure, call, overhead, capture
+// @description: Closure invocation benchmark (target: < 10ns per invocation)
+
+/// Closure Invocation Benchmark
+///
+/// Measures the overhead of closure calls in Verum.
+/// Closures can capture variables by reference or by value (move).
+///
+/// Targets:
+/// - No capture: < 5ns (same as function pointer)
+/// - Reference capture: < 8ns
+/// - Move capture: < 10ns
+/// - Boxed closure (dyn): < 15ns
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+module vcs.specs.l4.runtime.closure_call;
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Closure Invocation Overhead");
+
+    // Basic closure benchmarks
+    results.add(benchmark_closure_no_capture());
+    results.add(benchmark_closure_single_capture());
+    results.add(benchmark_closure_multi_capture());
+    results.add(benchmark_closure_move_capture());
+
+    // Complex capture patterns
+    results.add(benchmark_closure_large_capture());
+    results.add(benchmark_closure_nested_capture());
+    results.add(benchmark_closure_mutable_capture());
+
+    // Boxed/dynamic closures
+    results.add(benchmark_closure_boxed());
+    results.add(benchmark_closure_dyn_dispatch());
+
+    // Closure patterns
+    results.add(benchmark_closure_as_callback());
+    results.add(benchmark_closure_chain());
+    results.add(benchmark_closure_recursive());
+
+    results.report();
+    assert(results.all_pass(), "Closure invocation overhead exceeds targets");
+}
+
+/// Closure without any captures
+fn benchmark_closure_no_capture() -> BenchmarkResult {
+    let closure = || 42;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_no_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 5.0,
+        passed: per_call_ns < 5.0,
+    }
+}
+
+/// Closure with single variable capture
+fn benchmark_closure_single_capture() -> BenchmarkResult {
+    let captured = 42;
+    let closure = || captured;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_single_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 6.0,
+        passed: per_call_ns < 6.0,
+    }
+}
+
+/// Closure with multiple variable captures
+fn benchmark_closure_multi_capture() -> BenchmarkResult {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+
+    let closure = || a + b + c + d + e;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_multi_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 8.0,
+        passed: per_call_ns < 8.0,
+    }
+}
+
+/// Closure with move capture
+fn benchmark_closure_move_capture() -> BenchmarkResult {
+    let data = [1, 2, 3, 4, 5];
+    let closure = move || data.len();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_move_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 10.0,
+        passed: per_call_ns < 10.0,
+    }
+}
+
+/// Closure capturing large data structure
+fn benchmark_closure_large_capture() -> BenchmarkResult {
+    let large_data: List<Int> = List.with_capacity(1000);
+    for i in 0..1000 {
+        large_data.push(i);
+    }
+
+    let closure = || large_data[500];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_large_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 12.0,
+        passed: per_call_ns < 12.0,
+    }
+}
+
+/// Nested closure captures
+fn benchmark_closure_nested_capture() -> BenchmarkResult {
+    let outer_val = 10;
+
+    let outer_closure = || {
+        let inner_val = 20;
+        let inner_closure = || outer_val + inner_val;
+        inner_closure()
+    };
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(outer_closure());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(outer_closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_nested_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 15.0,
+        passed: per_call_ns < 15.0,
+    }
+}
+
+/// Closure with mutable capture
+fn benchmark_closure_mutable_capture() -> BenchmarkResult {
+    let mut counter = 0;
+    let mut closure = || {
+        counter += 1;
+        counter
+    };
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    counter = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_mutable_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 8.0,
+        passed: per_call_ns < 8.0,
+    }
+}
+
+/// Boxed closure (heap allocated)
+fn benchmark_closure_boxed() -> BenchmarkResult {
+    let captured = 42;
+    let closure: Heap<fn() -> Int> = Heap(|| captured);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(closure());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(closure());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_boxed",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 12.0,
+        passed: per_call_ns < 12.0,
+    }
+}
+
+/// Dynamic dispatch closure
+fn benchmark_closure_dyn_dispatch() -> BenchmarkResult {
+    let closures: List<Heap<Fn() -> Int>> = [
+        Heap(|| 1),
+        Heap(|| 2),
+        Heap(|| 3),
+    ];
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 3) {
+        for c in closures.iter() {
+            black_box(c());
+        }
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 3) {
+        for c in closures.iter() {
+            black_box(c());
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_dyn_dispatch",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 15.0,
+        passed: per_call_ns < 15.0,
+    }
+}
+
+/// Closure as callback pattern
+fn benchmark_closure_as_callback() -> BenchmarkResult {
+    fn apply_callback<F: Fn(Int) -> Int>(f: F, x: Int) -> Int {
+        f(x)
+    }
+
+    let callback = |x: Int| x * 2;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(apply_callback(callback, 21));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(apply_callback(callback, 21));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_as_callback",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 10.0,
+        passed: per_call_ns < 10.0,
+    }
+}
+
+/// Chained closure calls
+fn benchmark_closure_chain() -> BenchmarkResult {
+    let add_one = |x: Int| x + 1;
+    let double = |x: Int| x * 2;
+    let subtract_three = |x: Int| x - 3;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let result = subtract_three(double(add_one(10)));
+        black_box(result);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let result = subtract_three(double(add_one(10)));
+        black_box(result);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_chain_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // 3 closure calls per chain
+    let per_call_ns = per_chain_ns / 3.0;
+
+    BenchmarkResult {
+        name: "closure_chain",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 6.0,
+        passed: per_call_ns < 6.0,
+    }
+}
+
+/// Recursive closure (via Y combinator pattern)
+fn benchmark_closure_recursive() -> BenchmarkResult {
+    // Factorial using closure
+    fn factorial(n: Int) -> Int {
+        let fact_impl = |f: &Fn(&Fn(&Fn(Int) -> Int, Int) -> Int, Int) -> Int, n: Int| -> Int {
+            if n <= 1 { 1 } else { n * f(f, n - 1) }
+        };
+        fact_impl(&fact_impl, n)
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(factorial(10));
+    }
+
+    let iterations = BENCHMARK_ITERATIONS / 10;  // factorial(10) has 10 recursive calls
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(factorial(10));
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / (iterations * 10) as Float;
+
+    BenchmarkResult {
+        name: "closure_recursive",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 20.0,  // Higher due to recursive overhead
+        passed: per_call_ns < 20.0,
+    }
+}
+
+// Benchmark infrastructure types
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

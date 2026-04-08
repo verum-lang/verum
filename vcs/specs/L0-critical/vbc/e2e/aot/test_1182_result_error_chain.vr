@@ -1,0 +1,138 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: result, error, chain, propagation, e2e
+// @description: Test Result type chaining, error propagation, and recovery patterns
+
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn safe_sqrt(n: Int) -> Result<Int, Text> {
+    if n < 0 {
+        Err("negative input")
+    } else {
+        // Integer square root approximation
+        let mut guess = n / 2;
+        if guess == 0 { guess = 1; }
+        let mut i = 0;
+        while i < 20 {
+            guess = (guess + n / guess) / 2;
+            i = i + 1;
+        }
+        Ok(guess)
+    }
+}
+
+fn compute(a: Int, b: Int) -> Result<Int, Text> {
+    let q = match divide(a, b) {
+        Ok(v) => v,
+        Err(e) => { return Err(e); }
+    };
+    let r = match safe_sqrt(q) {
+        Ok(v) => v,
+        Err(e) => { return Err(e); }
+    };
+    Ok(r)
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Successful computation
+    let r1 = compute(100, 1);
+    match r1 {
+        Ok(v) => {
+            if v != 10 {
+                print(f"FAIL: compute(100,1) expected 10, got {v}");
+                failures = failures + 1;
+            }
+        },
+        Err(e) => {
+            print(f"FAIL: compute(100,1) errored: {e}");
+            failures = failures + 1;
+        }
+    }
+    if failures == 0 {
+        print("  success_chain: OK");
+    }
+
+    // Test 2: Division error
+    let r2 = compute(100, 0);
+    match r2 {
+        Ok(v) => {
+            print(f"FAIL: compute(100,0) should error, got {v}");
+            failures = failures + 1;
+        },
+        Err(e) => {
+            if e != "division by zero" {
+                print(f"FAIL: wrong error: {e}");
+                failures = failures + 1;
+            }
+        }
+    }
+    if failures == 0 {
+        print("  div_error: OK");
+    }
+
+    // Test 3: Negative sqrt error
+    let r3 = divide(-100, 1);
+    match r3 {
+        Ok(v) => {
+            let r3b = safe_sqrt(v);
+            match r3b {
+                Ok(_) => {
+                    print("FAIL: sqrt(-100) should error");
+                    failures = failures + 1;
+                },
+                Err(e) => {
+                    if e != "negative input" {
+                        print(f"FAIL: wrong error: {e}");
+                        failures = failures + 1;
+                    }
+                }
+            }
+        },
+        Err(e) => {
+            print(f"FAIL: divide(-100,1) should not error: {e}");
+            failures = failures + 1;
+        }
+    }
+    if failures == 0 {
+        print("  sqrt_error: OK");
+    }
+
+    // Test 4: Multiple results
+    let mut ok_count = 0;
+    let mut err_count = 0;
+    let inputs = [10, 0, 25, 0, 100];
+    let mut idx = 0;
+    while idx < inputs.len() {
+        let r = divide(100, inputs[idx]);
+        match r {
+            Ok(_) => { ok_count = ok_count + 1; },
+            Err(_) => { err_count = err_count + 1; },
+        }
+        idx = idx + 1;
+    }
+    if ok_count != 3 {
+        print(f"FAIL: ok_count expected 3, got {ok_count}");
+        failures = failures + 1;
+    }
+    if err_count != 2 {
+        print(f"FAIL: err_count expected 2, got {err_count}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  batch_results: OK");
+    }
+
+    if failures == 0 {
+        print("All result/error chain tests passed");
+    }
+    failures
+}

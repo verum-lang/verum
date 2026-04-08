@@ -1,0 +1,68 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, rest, position, error
+// @description: Test rest pattern in invalid positions
+// @expected-error: E078
+
+type Point is { x: Int, y: Int };
+type Option<T> is None | Some(T);
+
+fn test_rest_as_variant_arg() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: rest pattern as variant argument
+    match opt {
+        Some(..) => print("rest in variant"),
+        None => print("none"),
+    }
+}
+
+fn test_rest_in_record_wrong_syntax() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: rest pattern syntax error in record (should be .. not ...)
+    match p {
+        Point { x, ... } => print("wrong rest syntax"),
+        _ => print("other"),
+    }
+}
+
+fn test_rest_at_start_and_end() {
+    let arr = [1, 2, 3];
+
+    // Invalid: rest at both start and end
+    match arr {
+        [.., ..]  => print("both ends"),
+        _ => print("other"),
+    }
+}
+
+fn test_rest_with_invalid_binding() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Invalid: rest with invalid binding syntax
+    match arr {
+        [first, ..= rest, last] => print("invalid rest binding"),
+        _ => print("other"),
+    }
+}
+
+fn test_named_rest_wrong_syntax() {
+    let arr = [1, 2, 3];
+
+    // Invalid: named rest with wrong syntax (should be ..rest not .. rest)
+    match arr {
+        [first, .. rest] => print("wrong named rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_rest_outside_collection() {
+    let value = 42;
+
+    // Invalid: rest pattern outside of collection context
+    match value {
+        .. => print("bare rest"),
+        _ => print("other"),
+    }
+}

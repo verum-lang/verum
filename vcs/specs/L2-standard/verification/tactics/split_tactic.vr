@@ -1,0 +1,125 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, tactics, split
+// @timeout: 10000
+// @description: Split tactic for case-based proofs
+
+/// Split tactic breaks goal into cases for separate proofs
+
+// Case split on boolean
+@verify(proof)
+fn bool_to_int(b: Bool) -> Int {
+    contract#"
+        ensures b implies result == 1;
+        ensures !b implies result == 0;
+        ensures result == 0 || result == 1;
+    ";
+    // Proof: split on b
+    if b { 1 } else { 0 }
+}
+
+// Case split on enum
+type Color is Red | Green | Blue;
+
+@verify(proof)
+fn color_value(c: Color) -> Int {
+    contract#"
+        ensures result >= 0 && result <= 2;
+    ";
+    // Proof: split on c
+    match c {
+        Color.Red => 0,
+        Color.Green => 1,
+        Color.Blue => 2,
+    }
+}
+
+// Case split on comparison
+@verify(proof)
+fn sign(x: Int) -> Int {
+    contract#"
+        ensures x > 0 implies result == 1;
+        ensures x < 0 implies result == -1;
+        ensures x == 0 implies result == 0;
+        ensures result == -1 || result == 0 || result == 1;
+    ";
+    // Proof: split on x < 0, x == 0, x > 0
+    if x < 0 { -1 }
+    else if x > 0 { 1 }
+    else { 0 }
+}
+
+// Case split on option
+@verify(proof)
+fn unwrap_or<T: Clone>(opt: Maybe<T>, default: T) -> T {
+    contract#"
+        ensures opt.is_some() implies result == opt.unwrap();
+        ensures opt.is_none() implies result == default;
+    ";
+    // Proof: split on opt
+    match opt {
+        Some(v) => v,
+        None => default,
+    }
+}
+
+// Multiple case splits
+@verify(proof)
+fn quadrant(x: Int, y: Int) -> Int {
+    contract#"
+        ensures result >= 0 && result <= 4;
+        ensures x > 0 && y > 0 implies result == 1;
+        ensures x < 0 && y > 0 implies result == 2;
+        ensures x < 0 && y < 0 implies result == 3;
+        ensures x > 0 && y < 0 implies result == 4;
+        ensures (x == 0 || y == 0) implies result == 0;
+    ";
+    // Proof: split on x and y signs
+    if x == 0 || y == 0 { 0 }
+    else if x > 0 && y > 0 { 1 }
+    else if x < 0 && y > 0 { 2 }
+    else if x < 0 && y < 0 { 3 }
+    else { 4 }
+}
+
+// Case split with complex conditions
+@verify(proof)
+fn classify_number(n: Int) -> Text
+    ensures n < 0 implies result == "negative"
+    ensures n == 0 implies result == "zero"
+    ensures n > 0 && n % 2 == 0 implies result == "positive even"
+    ensures n > 0 && n % 2 != 0 implies result == "positive odd"
+{
+    // Proof: split on n < 0, n == 0, n > 0
+    // For n > 0: split on n % 2
+    if n < 0 { "negative" }
+    else if n == 0 { "zero" }
+    else if n % 2 == 0 { "positive even" }
+    else { "positive odd" }
+}
+
+// Case split on result type
+type Result<T, E> is Ok(T) | Err(E);
+
+@verify(proof)
+fn is_ok<T, E>(result: &Result<T, E>) -> Bool {
+    contract#"
+        ensures match result {
+            Result.Ok(_) => result == true,
+            Result.Err(_) => result == false,
+        };
+    ";
+    match result {
+        Result.Ok(_) => true,
+        Result.Err(_) => false,
+    }
+}
+
+fn main() {
+    assert(sign(-5) == -1);
+    assert(sign(0) == 0);
+    assert(sign(5) == 1);
+    assert(quadrant(1, 1) == 1);
+    assert(quadrant(-1, 1) == 2);
+}

@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, brackets, error
+// @description: Test unmatched bracket detection
+// @expected-error: E013
+
+fn test_unmatched() {
+    let arr = [1, 2, 3;
+    let idx = arr[0;
+}

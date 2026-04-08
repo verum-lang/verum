@@ -1,0 +1,475 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for assignment statements
+
+// =============================================================================
+// Grammar Reference:
+// assignment_expr = null_coalesce_expr , [ assign_op , assignment_expr ] ;
+// assign_op = '=' | '+=' | '-=' | '*=' | '/=' | '%='
+//           | '&=' | '|=' | '^=' | '<<=' | '>>=' ;
+// =============================================================================
+
+fn test_simple_assignment() {
+    let mut x = 0;
+    let mut y = 0;
+    let mut z = 0;
+
+    // Basic assignment
+    x = 1;
+    y = 2;
+    z = 3;
+
+    // Assignment from variable
+    x = y;
+    y = z;
+    z = x;
+
+    // Assignment from expression
+    x = 1 + 2;
+    y = x * 3;
+    z = compute_value();
+
+    // Chained assignment (right-associative)
+    x = y = z = 0;
+    x = y = compute();
+}
+
+fn test_arithmetic_compound_assignment() {
+    let mut n = 100;
+
+    // Addition assignment
+    n += 10;
+    n += x;
+    n += compute();
+    n += 1 + 2;
+
+    // Subtraction assignment
+    n -= 5;
+    n -= y;
+    n -= get_delta();
+    n -= 3 - 1;
+
+    // Multiplication assignment
+    n *= 2;
+    n *= factor;
+    n *= get_multiplier();
+    n *= 2 + 1;
+
+    // Division assignment
+    n /= 4;
+    n /= divisor;
+    n /= compute_divisor();
+    n /= 2 * 2;
+
+    // Modulo assignment
+    n %= 7;
+    n %= modulus;
+    n %= get_mod();
+    n %= 3 + 2;
+}
+
+fn test_bitwise_compound_assignment() {
+    let mut bits = 0xFF;
+
+    // Bitwise AND assignment
+    bits &= 0x0F;
+    bits &= mask;
+    bits &= get_mask();
+    bits &= 0xFF & 0x0F;
+
+    // Bitwise OR assignment
+    bits |= 0xF0;
+    bits |= flags;
+    bits |= get_flags();
+    bits |= 0x01 | 0x02;
+
+    // Bitwise XOR assignment
+    bits ^= 0xAA;
+    bits ^= toggle_bits;
+    bits ^= compute_xor();
+    bits ^= 0xFF ^ 0x0F;
+
+    // Left shift assignment
+    bits <<= 2;
+    bits <<= shift_amount;
+    bits <<= get_shift();
+    bits <<= 1 + 1;
+
+    // Right shift assignment
+    bits >>= 3;
+    bits >>= shift_amount;
+    bits >>= get_shift();
+    bits >>= 2 - 1;
+}
+
+fn test_assignment_to_places() {
+    let mut point = Point { x: 0, y: 0 };
+    let mut array = [0, 0, 0];
+    let mut tuple = (0, 0);
+
+    // Field assignment
+    point.x = 10;
+    point.y = 20;
+
+    // Nested field assignment
+    entity.position.x = 100;
+    entity.position.y = 200;
+    entity.config.settings.value = 42;
+
+    // Array index assignment
+    array[0] = 1;
+    array[1] = 2;
+    array[i] = value;
+    array[compute_index()] = compute_value();
+
+    // Nested array assignment
+    matrix[i][j] = value;
+    cube[x][y][z] = data;
+
+    // Tuple field assignment (via index)
+    tuple.0 = 10;
+    tuple.1 = 20;
+
+    // Dereferenced assignment
+    *ptr = value;
+    *get_mut_ref() = new_value;
+
+    // Compound on fields
+    point.x += 5;
+    point.y -= 3;
+
+    // Compound on array elements
+    array[0] += 1;
+    array[i] *= 2;
+
+    // Compound on dereferenced
+    *counter += 1;
+    *accumulator *= factor;
+}
+
+fn test_assignment_with_complex_lhs() {
+    let mut data: Map<Text, Int> = Map.new();
+    let mut nested: List<Point> = List.new();
+
+    // Method result assignment (get_mut returns &mut)
+    *data.get_mut("key") = 42;
+
+    // Index with complex expression
+    let idx = if cond { 0 } else { 1 };
+    array[idx] = value;
+    array[compute(a, b, c)] = result;
+
+    // Chained method with field
+    entity.get_component<Transform>().position.x = 10;
+
+    // Optional chaining would need different handling
+    // obj?.field = value; // might not be valid for assignment
+}
+
+fn test_assignment_with_complex_rhs() {
+    let mut x = 0;
+    let mut result = 0;
+
+    // Arithmetic expression
+    x = a + b * c - d / e;
+    x = (a + b) * (c - d);
+    x = 2 ** 10;
+
+    // Logical expression
+    x = if a && b { 1 } else { 0 };
+
+    // Comparison (bool result)
+    let mut flag = false;
+    flag = x > y;
+    flag = a == b && c != d;
+
+    // Function call
+    result = compute(a, b);
+    result = obj.method();
+    result = chain().of().calls();
+
+    // Block expression
+    result = {
+        let temp = preprocess();
+        transform(temp)
+    };
+
+    // If expression
+    result = if condition { value_a } else { value_b };
+
+    // Match expression
+    result = match opt {
+        Some(v) => v,
+        None => default()
+    };
+
+    // Pipeline
+    result = data |> transform |> finalize;
+
+    // Closure call
+    result = closure(arg);
+    result = (|x| x * 2)(value);
+
+    // Constructor
+    let mut point = Point { x: 0, y: 0 };
+    point = Point { x: 10, y: 20 };
+
+    // Array literal
+    let mut arr = [0; 5];
+    arr = [1, 2, 3, 4, 5];
+}
+
+fn test_compound_assignment_with_complex_expressions() {
+    let mut sum = 0;
+    let mut product = 1;
+
+    // Compound with function call
+    sum += compute_delta();
+    product *= get_factor();
+
+    // Compound with method chain
+    sum += obj.get_value().as_int();
+
+    // Compound with conditional
+    sum += if condition { 10 } else { 0 };
+
+    // Compound with match
+    product *= match mode {
+        Fast => 2,
+        Normal => 1,
+        Slow => 0
+    };
+
+    // Compound with block
+    sum += {
+        let a = get_a();
+        let b = get_b();
+        a + b
+    };
+}
+
+fn test_multiple_assignments() {
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+
+    // Sequential assignments
+    a = 1;
+    b = 2;
+    c = 3;
+
+    // Using previous values
+    a = b + c;
+    b = a + c;
+    c = a + b;
+
+    // Swap pattern (with temp)
+    let temp = a;
+    a = b;
+    b = temp;
+
+    // Multiple compound assignments
+    a += 1;
+    b -= 2;
+    c *= 3;
+}
+
+fn test_assignment_in_expressions() {
+    let mut x = 0;
+
+    // Assignment in block (value is ())
+    let result = {
+        x = 10;
+        x
+    };
+
+    // Assignment followed by expression
+    let value = {
+        x = compute();
+        x + 1
+    };
+
+    // Multiple assignments in block
+    let final_value = {
+        x = 1;
+        x += 2;
+        x *= 3;
+        x
+    };
+}
+
+fn test_assignment_with_references() {
+    let mut value = 42;
+    let mut ref_val = &mut value;
+
+    // Assign to dereferenced
+    *ref_val = 100;
+
+    // Compound on dereferenced
+    *ref_val += 10;
+    *ref_val -= 5;
+    *ref_val *= 2;
+
+    // Through multiple dereferences
+    let mut double_ref = &mut ref_val;
+    **double_ref = 50;
+}
+
+fn test_assignment_with_smart_pointers() {
+    let mut boxed = Heap(0);
+    let mut shared = Shared(0);
+
+    // Assign to boxed value (if mutable access allowed)
+    *boxed = 42;
+    *boxed += 10;
+
+    // With methods
+    boxed.set(100);
+    boxed.modify(|x| x + 1);
+}
+
+fn test_assignment_operators_all() {
+    let mut n = 0;
+    let mut bits = 0;
+
+    // All arithmetic compound operators
+    n += 1;   // addition
+    n -= 1;   // subtraction
+    n *= 2;   // multiplication
+    n /= 2;   // division
+    n %= 3;   // modulo
+
+    // All bitwise compound operators
+    bits &= 0xFF;   // AND
+    bits |= 0x0F;   // OR
+    bits ^= 0xAA;   // XOR
+    bits <<= 2;     // left shift
+    bits >>= 1;     // right shift
+}
+
+fn test_assignment_associativity() {
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+
+    // Right-to-left associativity
+    a = b = c = 10;  // c = 10, then b = c, then a = b
+
+    // With expressions
+    a = b = c = compute();
+
+    // Mixed (still right-to-left)
+    a = b = 5;
+    a = 1 + (b = 2);  // b = 2, then a = 1 + b
+}
+
+fn test_assignment_to_mutable_parameters() {
+    fn mutate(mut x: Int, mut y: Int) {
+        // Assign to mutable parameters
+        x = 10;
+        y = 20;
+
+        // Compound on parameters
+        x += 5;
+        y *= 2;
+    }
+
+    fn mutate_ref(x: &mut Int, y: &mut Int) {
+        // Assign through references
+        *x = 10;
+        *y = 20;
+
+        // Compound through references
+        *x += 5;
+        *y *= 2;
+    }
+}
+
+fn test_assignment_in_control_flow() {
+    let mut counter = 0;
+
+    // In if block
+    if condition {
+        counter = 10;
+        counter += 5;
+    }
+
+    // In else block
+    if other {
+        counter = 0;
+    } else {
+        counter = 100;
+    }
+
+    // In loop
+    loop {
+        counter += 1;
+        if counter > 10 {
+            break;
+        }
+    }
+
+    // In while
+    while counter < 100 {
+        counter *= 2;
+    }
+
+    // In for
+    for i in 0..10 {
+        counter += i;
+    }
+
+    // In match arm
+    match value {
+        0 => { counter = 0; },
+        1 => { counter += 1; },
+        _ => { counter *= 2; }
+    }
+}
+
+fn test_field_compound_assignment() {
+    let mut config = Config {
+        count: 0,
+        scale: 1.0,
+        flags: 0,
+    };
+
+    // Arithmetic on fields
+    config.count += 1;
+    config.count -= 1;
+    config.scale *= 2.0;
+    config.scale /= 4.0;
+
+    // Bitwise on fields
+    config.flags |= FLAG_A;
+    config.flags &= ~FLAG_B;
+    config.flags ^= FLAG_C;
+
+    // Nested field compound
+    entity.stats.health += 10;
+    entity.stats.damage *= 1.5;
+}
+
+fn test_index_compound_assignment() {
+    let mut array = [0, 0, 0, 0, 0];
+    let mut map: Map<Text, Int> = Map.new();
+
+    // Array index compound
+    array[0] += 1;
+    array[1] -= 2;
+    array[2] *= 3;
+    array[i] /= divisor;
+    array[compute_index()] %= modulus;
+
+    // Bitwise on array
+    array[0] &= mask;
+    array[1] |= flags;
+    array[2] ^= toggle;
+    array[3] <<= shift;
+    array[4] >>= shift;
+
+    // Map value compound
+    *map.get_mut("key") += 1;
+    map["count"] += 1;  // if index syntax supported for maps
+}

@@ -1,0 +1,91 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, generator, yield, coroutine
+// @expected-exit: 0
+
+// Test: generator yield/next pattern
+// Validates that generators can yield values and be iterated.
+
+@allow(unbounded_recursion)
+fn range_sum(n: Int) -> Int {
+    // Sum 1..n using accumulator (simulates generator consumption)
+    let mut total = 0;
+    let mut i = 1;
+    while (i <= n) {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn fibonacci_seq(n: Int) -> Int {
+    // Compute nth fibonacci iteratively
+    if (n <= 0) { return 0; }
+    if (n == 1) { return 1; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while (i <= n) {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    b
+}
+
+fn collatz_steps(start: Int) -> Int {
+    // Count steps to reach 1 in Collatz sequence
+    let mut n = start;
+    let mut steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn main() -> Int {
+    // Test range sum: 1+2+3+...+100 = 5050
+    let s = range_sum(100);
+    if (s != 5050) {
+        print(f"FAIL: range_sum(100)={s}, expected=5050");
+        return 1;
+    }
+
+    // Test fibonacci: fib(10) = 55
+    let f = fibonacci_seq(10);
+    if (f != 55) {
+        print(f"FAIL: fibonacci_seq(10)={f}, expected=55");
+        return 1;
+    }
+
+    // Test fibonacci: fib(20) = 6765
+    let f2 = fibonacci_seq(20);
+    if (f2 != 6765) {
+        print(f"FAIL: fibonacci_seq(20)={f2}, expected=6765");
+        return 1;
+    }
+
+    // Test Collatz: collatz(27) = 111 steps
+    let c = collatz_steps(27);
+    if (c != 111) {
+        print(f"FAIL: collatz_steps(27)={c}, expected=111");
+        return 1;
+    }
+
+    // Test Collatz: collatz(1) = 0 steps
+    let c2 = collatz_steps(1);
+    if (c2 != 0) {
+        print(f"FAIL: collatz_steps(1)={c2}, expected=0");
+        return 1;
+    }
+
+    print("856_generator_yield: PASS");
+    0
+}

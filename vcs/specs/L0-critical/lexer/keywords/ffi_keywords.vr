@@ -1,0 +1,147 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, ffi, extern
+
+// FFI (Foreign Function Interface) keywords: ffi, extern
+
+// Basic FFI block declaration
+ffi CLibrary {
+    @extern("C")
+    fn printf(format: *const c_char) -> c_int;
+
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+
+    @extern("C")
+    fn free(ptr: *mut c_void);
+}
+
+// FFI with math library functions
+ffi MathLib {
+    @extern("C")
+    fn sin(x: c_double) -> c_double;
+
+    @extern("C")
+    fn cos(x: c_double) -> c_double;
+
+    @extern("C")
+    fn sqrt(x: c_double) -> c_double;
+}
+
+// FFI type definitions in module
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+type c_char is i8;
+type c_void is ();
+type c_double is f64;
+type size_t is u64;
+type ssize_t is i64;
+
+// FFI with structs
+type timespec is {
+    tv_sec: time_t,
+    tv_nsec: c_long,
+};
+
+// Repr attributes for C compatibility
+@repr(C)
+type CCompatibleStruct is {
+    x: c_int,
+    y: c_int,
+    z: c_double,
+};
+
+@repr(C, packed)
+type PackedStruct is {
+    a: c_char,
+    b: c_int,
+};
+
+@repr(C, align(16))
+type AlignedStruct is {
+    data: [c_char; 16],
+};
+
+// FFI for system calls
+ffi SystemCalls {
+    @extern("C")
+    fn open(path: *const c_char, flags: c_int) -> c_int;
+
+    @extern("C")
+    fn close(fd: c_int) -> c_int;
+
+    @extern("C")
+    fn read(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t;
+
+    @extern("C")
+    fn write(fd: c_int, buf: *const c_void, count: size_t) -> ssize_t;
+}
+
+// FFI with opaque types
+ffi SSLLibrary {
+    @extern("C")
+    fn SSL_CTX_new(method: *const SSL_METHOD) -> *mut SSL_CTX;
+
+    @extern("C")
+    fn SSL_CTX_free(ctx: *mut SSL_CTX);
+
+    @extern("C")
+    fn SSL_new(ctx: *mut SSL_CTX) -> *mut SSL;
+
+    @extern("C")
+    fn SSL_free(ssl: *mut SSL);
+}
+
+// FFI safe wrappers
+fn safe_malloc(size: Int) -> Result<*mut c_void, Error> {
+    unsafe {
+        let ptr = malloc(size as size_t);
+        if ptr.is_null() {
+            Err(Error.allocation_failed())
+        } else {
+            Ok(ptr)
+        }
+    }
+}
+
+fn safe_free(ptr: *mut c_void) {
+    if !ptr.is_null() {
+        unsafe { free(ptr); }
+    }
+}
+
+// FFI with unsafe blocks
+fn use_c_library() {
+    unsafe {
+        let ptr = malloc(1024);
+        if !ptr.is_null() {
+            // Use the allocated memory
+            free(ptr);
+        }
+    }
+}
+
+// Platform-specific FFI
+@cfg(target_os = "linux")
+ffi LinuxSpecific {
+    @extern("C")
+    fn epoll_create(size: c_int) -> c_int;
+
+    @extern("C")
+    fn epoll_ctl(epfd: c_int, op: c_int, fd: c_int, event: *mut epoll_event) -> c_int;
+}
+
+@cfg(target_os = "macos")
+ffi MacOSSpecific {
+    @extern("C")
+    fn kqueue() -> c_int;
+}
+
+// Exported function with C calling convention
+@no_mangle
+fn exported_function(x: c_int) -> c_int {
+    x + 1
+}

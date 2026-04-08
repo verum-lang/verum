@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, sandbox, forbidden, process
+// @description: Test that process operations are forbidden in meta functions
+// @expected-error: M301
+
+// Process spawning should be blocked in meta context
+meta fn test_process_spawn() -> Int {
+    // Attempting to spawn a process should fail with M301 ForbiddenOperation
+    // The `exec` function is in the process_functions allowlist
+    exec("ls", ["-la"])
+}
+
+fn main() {
+    // Call meta function at compile time
+    @const assert(test_process_spawn() >= 0);
+}

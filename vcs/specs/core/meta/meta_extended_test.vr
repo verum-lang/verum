@@ -1,0 +1,670 @@
+// =============================================================================
+// meta_extended_test.vr - Extended tests for meta types and reflection APIs
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: meta, reflection, token, span, attribute, function-info, protocol-info,
+//        ownership, field-offset, method-resolution, trait-bound, lifetime
+// @description: Extended tests for reflection type methods (FieldInfo attributes,
+//               VariantInfo patterns, GenericParam constraints, ProtocolInfo,
+//               FunctionInfo signatures), TokenStream, Span, Attribute types,
+//               OwnershipInfo, FieldOffset, MethodResolution, PrimitiveType, Visibility.
+// =============================================================================
+
+module specs.core.meta.meta_extended_test;
+
+mount core.meta.reflection.{
+    TypeKind, MethodSource, FieldInfo, VariantInfo, VariantKind,
+    GenericParam, GenericParamKind, Visibility, PrimitiveType,
+    TraitBound, LifetimeParam, OwnershipInfo, FieldOffset,
+    MethodResolution, FunctionInfo, ParamInfo, SelfKind,
+    ProtocolInfo, AssociatedTypeInfo,
+};
+mount core.meta.span.{Span, SpanFlags};
+mount core.meta.token.{TokenStream, TokenTree, TokenKind, Delimiter};
+mount core.meta.attribute.{Attribute, AttributeStyle, AttributeArg, AttributeValue};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: TypeKind extended
+// =============================================================================
+
+@test
+fn test_type_kind_function() {
+    let k = TypeKind.Function;
+    assert(!k.is_compound());
+    assert(!k.is_reference());
+    assert(!k.is_primitive());
+}
+
+@test
+fn test_type_kind_type_param() {
+    let k = TypeKind.TypeParam;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_associated() {
+    let k = TypeKind.Associated;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_never() {
+    let k = TypeKind.Never;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_infer() {
+    let k = TypeKind.Infer;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_unknown() {
+    let k = TypeKind.Unknown;
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_reference() {
+    let k = TypeKind.Reference;
+    assert(k.is_reference());
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_pointer() {
+    let k = TypeKind.Pointer;
+    assert(k.is_reference());
+}
+
+@test
+fn test_type_kind_primitive() {
+    let k = TypeKind.Primitive;
+    assert(k.is_primitive());
+    assert(!k.is_compound());
+}
+
+@test
+fn test_type_kind_name_struct() {
+    let k = TypeKind.Struct;
+    assert_eq(k.name(), "struct");
+}
+
+@test
+fn test_type_kind_name_enum() {
+    let k = TypeKind.Enum;
+    assert_eq(k.name(), "enum");
+}
+
+@test
+fn test_type_kind_name_protocol() {
+    let k = TypeKind.Protocol;
+    assert_eq(k.name(), "protocol");
+}
+
+@test
+fn test_type_kind_name_function() {
+    let k = TypeKind.Function;
+    assert_eq(k.name(), "function");
+}
+
+@test
+fn test_type_kind_name_never() {
+    let k = TypeKind.Never;
+    assert_eq(k.name(), "never");
+}
+
+// =============================================================================
+// Section 2: FieldInfo (avoiding 'field' keyword as variable name)
+// =============================================================================
+
+@test
+fn test_field_info_is_public() {
+    // FieldInfo has: name, index, type_name, type_kind, visibility, is_mutable, attributes, doc, span
+    let fi: Maybe<FieldInfo> = None;
+    assert(fi.is_none());
+}
+
+@test
+fn test_field_info_type_exists() {
+    let opt: Maybe<FieldInfo> = None;
+    assert(opt.is_none());
+    // FieldInfo has: has_attribute(), is_public(), is_private(), is_tuple_field(), accessor()
+}
+
+// =============================================================================
+// Section 3: VariantInfo
+// =============================================================================
+
+@test
+fn test_variant_kind_unit() {
+    let k = VariantKind.Unit;
+    assert(k is VariantKind.Unit);
+}
+
+@test
+fn test_variant_kind_tuple() {
+    let k = VariantKind.Tuple;
+    assert(k is VariantKind.Tuple);
+}
+
+@test
+fn test_variant_kind_struct() {
+    let k = VariantKind.Struct;
+    assert(k is VariantKind.Struct);
+}
+
+@test
+fn test_variant_info_type() {
+    let opt: Maybe<VariantInfo> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_variant_info_type_exists() {
+    let opt: Maybe<VariantInfo> = None;
+    assert(opt.is_none());
+    // VariantInfo has: has_attribute(), is_unit(), is_tuple(), is_struct(), pattern(), wildcard_pattern()
+}
+
+// =============================================================================
+// Section 4: GenericParam
+// =============================================================================
+
+@test
+fn test_generic_param_kind_type() {
+    let k = GenericParamKind.Type;
+    assert(k is GenericParamKind.Type);
+}
+
+@test
+fn test_generic_param_kind_lifetime() {
+    let k = GenericParamKind.Lifetime;
+    assert(k is GenericParamKind.Lifetime);
+}
+
+@test
+fn test_generic_param_kind_const() {
+    let k = GenericParamKind.Const;
+    assert(k is GenericParamKind.Const);
+}
+
+@test
+fn test_generic_param_type() {
+    let opt: Maybe<GenericParam> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_generic_param_type_exists() {
+    let opt: Maybe<GenericParam> = None;
+    assert(opt.is_none());
+    // GenericParam has: has_bound(), is_constrained(), has_default(), declaration()
+}
+
+// =============================================================================
+// Section 5: PrimitiveType classification
+// =============================================================================
+
+@test
+fn test_primitive_int() {
+    let p = PrimitiveType.Int;
+    assert(p.is_numeric());
+    assert(p.is_signed());
+    assert(!p.is_unsigned());
+    assert(!p.is_float());
+}
+
+@test
+fn test_primitive_float64() {
+    let p = PrimitiveType.Float64;
+    assert(p.is_numeric());
+    assert(p.is_float());
+}
+
+@test
+fn test_primitive_bool() {
+    let p = PrimitiveType.Bool;
+    assert(!p.is_numeric());
+}
+
+@test
+fn test_primitive_char() {
+    let p = PrimitiveType.Char;
+    assert(!p.is_numeric());
+}
+
+@test
+fn test_primitive_int8() {
+    let p = PrimitiveType.Int8;
+    assert(p.is_numeric());
+    assert(p.is_signed());
+}
+
+@test
+fn test_primitive_uint8() {
+    let p = PrimitiveType.UInt8;
+    assert(p.is_numeric());
+    assert(p.is_unsigned());
+}
+
+@test
+fn test_primitive_int16() {
+    let p = PrimitiveType.Int16;
+    assert(p.is_signed());
+}
+
+@test
+fn test_primitive_uint16() {
+    let p = PrimitiveType.UInt16;
+    assert(p.is_unsigned());
+}
+
+@test
+fn test_primitive_int32() {
+    let p = PrimitiveType.Int32;
+    assert(p.is_signed());
+}
+
+@test
+fn test_primitive_uint32() {
+    let p = PrimitiveType.UInt32;
+    assert(p.is_unsigned());
+}
+
+@test
+fn test_primitive_int64() {
+    let p = PrimitiveType.Int64;
+    assert(p.is_signed());
+}
+
+@test
+fn test_primitive_uint64() {
+    let p = PrimitiveType.UInt64;
+    assert(p.is_unsigned());
+}
+
+@test
+fn test_primitive_float32() {
+    let p = PrimitiveType.Float32;
+    assert(p.is_float());
+}
+
+@test
+fn test_primitive_name() {
+    let p = PrimitiveType.Int;
+    let n = p.name();
+    assert(n.len() > 0);
+}
+
+@test
+fn test_primitive_size() {
+    let p = PrimitiveType.Int;
+    let s = p.size();
+    assert(s > 0);
+}
+
+// =============================================================================
+// Section 6: FunctionInfo
+// =============================================================================
+
+@test
+fn test_function_info_type() {
+    let opt: Maybe<FunctionInfo> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_function_info_type_exists() {
+    let opt: Maybe<FunctionInfo> = None;
+    assert(opt.is_none());
+    // FunctionInfo has: self_param(), is_method(), is_static(), non_self_params(), signature()
+}
+
+// =============================================================================
+// Section 7: Visibility
+// =============================================================================
+
+@test
+fn test_visibility_public() {
+    let v = Visibility.Public;
+    assert(v.is_public());
+}
+
+@test
+fn test_visibility_private() {
+    let v = Visibility.Private;
+    assert(!v.is_public());
+}
+
+@test
+fn test_visibility_crate() {
+    let v = Visibility.Crate;
+    assert(!v.is_public());
+}
+
+@test
+fn test_visibility_keyword_public() {
+    let v = Visibility.Public;
+    let kw = v.keyword();
+    assert(kw.is_some());
+}
+
+@test
+fn test_visibility_keyword_private() {
+    let v = Visibility.Private;
+    let kw = v.keyword();
+    let _: Maybe<Text> = kw;
+}
+
+// =============================================================================
+// Section 8: OwnershipInfo
+// =============================================================================
+
+@test
+fn test_ownership_info_type() {
+    let opt: Maybe<OwnershipInfo> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_ownership_info_type_exists() {
+    let opt: Maybe<OwnershipInfo> = None;
+    assert(opt.is_none());
+    // OwnershipInfo has: is_trivially_copyable(), is_thread_safe(), requires_cleanup(), non_copy_reason()
+}
+
+// =============================================================================
+// Section 9: FieldOffset
+// =============================================================================
+
+@test
+fn test_field_offset_type() {
+    let opt: Maybe<FieldOffset> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_field_offset_type_exists() {
+    let opt: Maybe<FieldOffset> = None;
+    assert(opt.is_none());
+    // FieldOffset has: end(), has_padding()
+}
+
+// =============================================================================
+// Section 10: MethodSource
+// =============================================================================
+
+@test
+fn test_method_source_inherent() {
+    let s = MethodSource.Inherent;
+    assert(s is MethodSource.Inherent);
+}
+
+@test
+fn test_method_source_protocol() {
+    let s = MethodSource.Protocol;
+    assert(s is MethodSource.Protocol);
+}
+
+@test
+fn test_method_source_derived() {
+    let s = MethodSource.Derived;
+    assert(s is MethodSource.Derived);
+}
+
+@test
+fn test_method_source_generated() {
+    let s = MethodSource.Generated;
+    assert(s is MethodSource.Generated);
+}
+
+// =============================================================================
+// Section 11: SelfKind
+// =============================================================================
+
+@test
+fn test_self_kind_value() {
+    let k = SelfKind.Value;
+    assert(k is SelfKind.Value);
+}
+
+@test
+fn test_self_kind_ref() {
+    let k = SelfKind.Ref;
+    assert(k is SelfKind.Ref);
+}
+
+@test
+fn test_self_kind_ref_mut() {
+    let k = SelfKind.RefMut;
+    assert(k is SelfKind.RefMut);
+}
+
+// =============================================================================
+// Section 12: Span
+// =============================================================================
+
+@test
+fn test_span_type() {
+    let opt: Maybe<Span> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_span_flags_type() {
+    let opt: Maybe<SpanFlags> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 13: TokenStream and TokenKind
+// =============================================================================
+
+@test
+fn test_token_stream_new() {
+    let ts = TokenStream.new();
+    let _: TokenStream = ts;
+}
+
+@test
+fn test_token_kind_ident() {
+    let k = TokenKind.Ident("foo");
+    assert(k is TokenKind.Ident);
+}
+
+@test
+fn test_token_kind_doc_comment() {
+    let k = TokenKind.DocComment("a doc comment");
+    assert(k is TokenKind.DocComment);
+}
+
+@test
+fn test_token_kind_eof() {
+    let k = TokenKind.Eof;
+    assert(k is TokenKind.Eof);
+}
+
+@test
+fn test_delimiter_parenthesis() {
+    let d = Delimiter.Parenthesis;
+    assert(d is Delimiter.Parenthesis);
+}
+
+@test
+fn test_delimiter_brace() {
+    let d = Delimiter.Brace;
+    assert(d is Delimiter.Brace);
+}
+
+@test
+fn test_delimiter_bracket() {
+    let d = Delimiter.Bracket;
+    assert(d is Delimiter.Bracket);
+}
+
+@test
+fn test_delimiter_none() {
+    let d = Delimiter.None;
+    assert(d is Delimiter.None);
+}
+
+// =============================================================================
+// Section 14: Attribute types
+// =============================================================================
+
+@test
+fn test_attribute_style_word() {
+    let s = AttributeStyle.Word;
+    assert(s is AttributeStyle.Word);
+}
+
+@test
+fn test_attribute_style_value() {
+    let s = AttributeStyle.Value;
+    assert(s is AttributeStyle.Value);
+}
+
+@test
+fn test_attribute_style_call() {
+    let s = AttributeStyle.Call;
+    assert(s is AttributeStyle.Call);
+}
+
+@test
+fn test_attribute_type() {
+    let opt: Maybe<Attribute> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_attribute_arg_type_exists() {
+    let opt: Maybe<AttributeArg> = None;
+    assert(opt.is_none());
+    // AttributeArg has: positional(AttributeValue), named(Text, AttributeValue)
+}
+
+@test
+fn test_attribute_value_ident() {
+    let val = AttributeValue.Ident("debug");
+    assert(val is AttributeValue.Ident);
+}
+
+@test
+fn test_attribute_value_string() {
+    let val = AttributeValue.String("hello");
+    assert(val is AttributeValue.String);
+}
+
+@test
+fn test_attribute_value_int() {
+    let val = AttributeValue.Int(42);
+    assert(val is AttributeValue.Int);
+}
+
+@test
+fn test_attribute_value_bool() {
+    let val = AttributeValue.Bool(true);
+    assert(val is AttributeValue.Bool);
+}
+
+// =============================================================================
+// Section 15: TraitBound
+// =============================================================================
+
+@test
+fn test_trait_bound_type() {
+    let opt: Maybe<TraitBound> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_trait_bound_type_exists() {
+    let opt: Maybe<TraitBound> = None;
+    assert(opt.is_none());
+    // TraitBound has methods: syntax(), is_marker(), implies_copy()
+}
+
+// =============================================================================
+// Section 16: LifetimeParam
+// =============================================================================
+
+@test
+fn test_lifetime_param_type() {
+    let opt: Maybe<LifetimeParam> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_lifetime_param_type_exists() {
+    let opt: Maybe<LifetimeParam> = None;
+    assert(opt.is_none());
+    // LifetimeParam has methods: syntax(), declaration(), has_bounds()
+}
+
+// =============================================================================
+// Section 17: ProtocolInfo
+// =============================================================================
+
+@test
+fn test_protocol_info_type() {
+    let opt: Maybe<ProtocolInfo> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_protocol_info_type_exists() {
+    let opt: Maybe<ProtocolInfo> = None;
+    assert(opt.is_none());
+    // ProtocolInfo has methods: is_marker(), all_methods(), has_associated_type()
+}
+
+// =============================================================================
+// Section 18: ParamInfo
+// =============================================================================
+
+@test
+fn test_param_info_type() {
+    let opt: Maybe<ParamInfo> = None;
+    assert(opt.is_none());
+}
+
+@test
+fn test_param_info_type_exists() {
+    let opt: Maybe<ParamInfo> = None;
+    assert(opt.is_none());
+    // ParamInfo has methods: is_self(), declaration()
+}
+
+// =============================================================================
+// Section 19: AssociatedTypeInfo
+// =============================================================================
+
+@test
+fn test_associated_type_info() {
+    let opt: Maybe<AssociatedTypeInfo> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 20: MethodResolution
+// =============================================================================
+
+@test
+fn test_method_resolution_type() {
+    let opt: Maybe<MethodResolution> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

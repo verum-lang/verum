@@ -1,0 +1,159 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: channel, spawn, pipeline, producer-consumer
+// @description: Channel-based pipeline with multiple stages and proper Maybe unwrapping
+
+fn recv_val(ch: &Channel<Int>) -> Int {
+    match ch.recv() { Some(x) => x, None => 0 }
+}
+
+fn test_simple_pipeline() -> Int {
+    let ch = Channel.new(8);
+    ch.send(10);
+    ch.send(20);
+    ch.send(30);
+    let a = recv_val(&ch);
+    let b = recv_val(&ch);
+    let c = recv_val(&ch);
+    let sum = a + b + c;
+    if sum != 60 {
+        print(f"FAIL simple_pipeline: expected 60, got {sum}");
+        return 1;
+    }
+    print("  simple_pipeline: OK");
+    0
+}
+
+fn test_spawn_producer() -> Int {
+    let ch = Channel.new(16);
+    let h = spawn {
+        ch.send(100);
+        ch.send(200);
+        ch.send(300);
+        3
+    };
+    let count = h.await;
+    let v1 = recv_val(&ch);
+    let v2 = recv_val(&ch);
+    let v3 = recv_val(&ch);
+    let sum = v1 + v2 + v3;
+    if sum != 600 {
+        print(f"FAIL spawn_producer: expected 600, got {sum}");
+        return 1;
+    }
+    print("  spawn_producer: OK");
+    0
+}
+
+fn test_bidirectional() -> Int {
+    let request_ch = Channel.new(4);
+    let response_ch = Channel.new(4);
+
+    request_ch.send(42);
+
+    let worker = spawn {
+        let req = match request_ch.recv() { Some(x) => x, None => 0 };
+        response_ch.send(req * 3);
+        1
+    };
+
+    let result = match response_ch.recv() { Some(x) => x, None => 0 };
+    worker.await;
+
+    if result != 126 {
+        print(f"FAIL bidirectional: expected 126, got {result}");
+        return 1;
+    }
+    print("  bidirectional: OK");
+    0
+}
+
+fn test_multi_worker() -> Int {
+    let ch = Channel.new(16);
+
+    let w1 = spawn {
+        ch.send(10);
+        ch.send(20);
+        2
+    };
+    let w2 = spawn {
+        ch.send(30);
+        ch.send(40);
+        2
+    };
+
+    w1.await;
+    w2.await;
+
+    let v1 = recv_val(&ch);
+    let v2 = recv_val(&ch);
+    let v3 = recv_val(&ch);
+    let v4 = recv_val(&ch);
+    let sum = v1 + v2 + v3 + v4;
+    if sum != 100 {
+        print(f"FAIL multi_worker: expected 100, got {sum}");
+        return 1;
+    }
+    print("  multi_worker: OK");
+    0
+}
+
+fn test_channel_capacity() -> Int {
+    let ch = Channel.new(2);
+    ch.send(1);
+    ch.send(2);
+    let v1 = recv_val(&ch);
+    let v2 = recv_val(&ch);
+    if v1 != 1 {
+        print(f"FAIL capacity v1: expected 1, got {v1}");
+        return 1;
+    }
+    if v2 != 2 {
+        print(f"FAIL capacity v2: expected 2, got {v2}");
+        return 1;
+    }
+    print("  channel_capacity: OK");
+    0
+}
+
+fn test_fan_out() -> Int {
+    let ch = Channel.new(8);
+
+    let w1 = spawn { ch.send(20); 0 };
+    let w2 = spawn { ch.send(40); 0 };
+    let w3 = spawn { ch.send(60); 0 };
+
+    w1.await;
+    w2.await;
+    w3.await;
+
+    let r1 = recv_val(&ch);
+    let r2 = recv_val(&ch);
+    let r3 = recv_val(&ch);
+    let sum = r1 + r2 + r3;
+    if sum != 120 {
+        print(f"FAIL fan_out: expected 120, got {sum}");
+        return 1;
+    }
+    print("  fan_out: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Channel Pipeline Tests:");
+    let mut failures = 0;
+    failures = failures + test_simple_pipeline();
+    failures = failures + test_spawn_producer();
+    failures = failures + test_bidirectional();
+    failures = failures + test_multi_worker();
+    failures = failures + test_channel_capacity();
+    failures = failures + test_fan_out();
+
+    if failures == 0 {
+        print("All channel pipeline tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

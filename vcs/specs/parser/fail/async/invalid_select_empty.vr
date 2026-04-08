@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, select, empty, error
+// @description: Test select with no arms
+// @expected-error: E0A8
+
+async fn test() {
+    // select requires at least one arm
+    select {
+    }
+}

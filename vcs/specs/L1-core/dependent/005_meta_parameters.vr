@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, meta-parameters, compile-time
+// @tags-extra: const-generic
+
+/// Meta parameters -- compile-time type-level values.
+/// Grammar: meta_param = identifier ':' 'meta' type_expr [ refinement ] ;
+/// Grammar: meta_where_clause = 'where' 'meta' meta_constraint_list ;
+
+// Type with meta parameter (compile-time known size)
+type FixedArray<T, N: meta Int> is {
+    data: [T; N],
+};
+
+// Meta parameter with refinement
+type BoundedArray<T, N: meta Int{> 0}> is {
+    data: [T; N],
+};
+
+// Meta where clause on type definition
+type Matrix<T, R: meta Int, C: meta Int>
+    where meta R > 0, C > 0
+is {
+    data: [T; R * C],
+};
+
+// Type alias using meta arithmetic
+type SquareMatrix<T, N: meta Int> is Matrix<T, N, N>;
+
+// Meta parameter constraining another meta parameter
+type SubMatrix<T, R: meta Int, C: meta Int, R2: meta Int{<= R}, C2: meta Int{<= C}> is {
+    data: [T; R2 * C2],
+};
+
+// Function with meta parameters
+fn zeros<N: meta Int{> 0}>() -> FixedArray<Int, N> {
+    FixedArray { data: [0; N] }
+}
+
+fn identity<N: meta Int{> 0}>() -> Matrix<Float, N, N> {
+    Matrix {
+        data: [0.0; N * N],
+    }
+}
+
+// Meta parameter in return type
+fn replicate<T, N: meta Int>(value: T) -> FixedArray<T, N> {
+    FixedArray { data: [value; N] }
+}
+
+fn main() {
+    let arr: FixedArray<Int, 5> = zeros();
+    assert(arr.data.len() == 5);
+
+    let mat: Matrix<Float, 3, 3> = identity();
+    assert(mat.data.len() == 9);
+
+    let rep: FixedArray<Bool, 4> = replicate(true);
+    assert(rep.data.len() == 4);
+}

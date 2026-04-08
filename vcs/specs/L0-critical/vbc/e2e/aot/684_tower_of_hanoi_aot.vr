@@ -1,0 +1,168 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, hanoi, recursion, puzzle
+// @timeout: 30000
+
+// Tower of Hanoi: count moves and verify solution properties
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+// Minimum moves for n disks = 2^n - 1
+fn hanoi_moves(n: Int) -> Int { pow2(n) - 1 }
+
+// Iterative Tower of Hanoi simulation
+// Pegs represented as stacks: each peg uses 2 positions in Arr8
+// peg[0]: positions 0,1 (top at 0); peg[1]: positions 2,3; peg[2]: positions 4,5
+// Stack sizes stored in positions 6 (peg0 count), 7 (peg1 count)
+// Actually, let's simplify: track where each disk is
+// disk_pos[i] = which peg disk i is on (0, 1, or 2)
+// For n<=4 disks
+
+// Count moves iteratively using the formula
+// For each move i (1-based): disk to move = position of least significant set bit of i
+// Direction depends on parity
+
+// Simulate: track positions of disks after all moves
+fn simulate_hanoi(n: Int) -> Int {
+    // disk_pos: disk i starts on peg 0
+    let mut disk_pos = zeros();
+    // Total moves
+    let total = hanoi_moves(n);
+    let mut move_num = 1;
+    while move_num <= total {
+        // Find which disk to move: disk = bit position of lowest set bit of move_num
+        let mut disk = 0;
+        let mut m = move_num;
+        while m % 2 == 0 { disk = disk + 1; m = m / 2; }
+        // Move disk: cycle pegs
+        // For odd-sized puzzles: smallest disk cycles 0->2->1->0
+        // For even-sized puzzles: smallest disk cycles 0->1->2->0
+        let cur_peg = get8(disk_pos, disk);
+        let new_peg = if disk == 0 {
+            // Smallest disk: depends on n parity
+            if n % 2 == 1 {
+                (cur_peg + 2) % 3 // 0->2->1->0
+            } else {
+                (cur_peg + 1) % 3 // 0->1->2->0
+            }
+        } else {
+            // Other disk: move to the legal peg (the one without a smaller disk on top)
+            // Since we follow the pattern, the other non-current peg that's valid
+            // For 2 disks, this always works out
+            let peg_a = (cur_peg + 1) % 3;
+            let peg_b = (cur_peg + 2) % 3;
+            // Pick the valid one (no smaller disk on it)
+            // Check if peg_a has a smaller disk
+            let mut a_has_smaller = 0;
+            let mut b_has_smaller = 0;
+            let mut d = 0;
+            while d < disk {
+                if get8(disk_pos, d) == peg_a { a_has_smaller = 1; }
+                if get8(disk_pos, d) == peg_b { b_has_smaller = 1; }
+                d = d + 1;
+            }
+            if a_has_smaller == 0 { peg_a }
+            else { peg_b }
+        };
+        disk_pos = set8(disk_pos, disk, new_peg);
+        move_num = move_num + 1;
+    }
+    // Verify all disks are on peg 2 (destination)
+    let mut all_on_dest = 1;
+    let mut i = 0;
+    while i < n {
+        if get8(disk_pos, i) != 2 { all_on_dest = 0; }
+        i = i + 1;
+    }
+    all_on_dest
+}
+
+fn test_move_count() -> Int {
+    assert_eq(hanoi_moves(1), 1);
+    assert_eq(hanoi_moves(2), 3);
+    assert_eq(hanoi_moves(3), 7);
+    assert_eq(hanoi_moves(4), 15);
+    assert_eq(hanoi_moves(5), 31);
+    // 2^n - 1 is always odd for n >= 1
+    assert_eq(hanoi_moves(3) % 2, 1);
+    assert_eq(hanoi_moves(4) % 2, 1);
+    1
+}
+
+fn test_simulation_1() -> Int {
+    assert_eq(simulate_hanoi(1), 1); // 1 disk: move to peg 2
+    1
+}
+
+fn test_simulation_2() -> Int {
+    assert_eq(simulate_hanoi(2), 1); // 2 disks: all on peg 2
+    1
+}
+
+fn test_simulation_3() -> Int {
+    assert_eq(simulate_hanoi(3), 1); // 3 disks: all on peg 2
+    1
+}
+
+fn test_recurrence() -> Int {
+    // T(n) = 2*T(n-1) + 1
+    assert_eq(hanoi_moves(3), 2 * hanoi_moves(2) + 1);
+    assert_eq(hanoi_moves(4), 2 * hanoi_moves(3) + 1);
+    assert_eq(hanoi_moves(5), 2 * hanoi_moves(4) + 1);
+    1
+}
+
+fn test_frame_stewart() -> Int {
+    // Frame-Stewart conjecture for 4-peg Hanoi
+    // Not testing 4 pegs, but verify the 3-peg formula properties
+    // Sum of first n odd numbers = n^2 (unrelated but fun)
+    // hanoi_moves(n) = 2^n - 1 < n! for n >= 3
+    assert_eq(hanoi_moves(3) > 6, 1); // 7 > 6: true
+    // Actually 2^n-1 > n! only for small n. For n=3: 7>6, n=4: 15<24
+    assert_eq(hanoi_moves(3), 7);
+    assert_eq(hanoi_moves(4), 15);
+    // Verify: powers of 2
+    assert_eq(hanoi_moves(1) + 1, 2);
+    assert_eq(hanoi_moves(2) + 1, 4);
+    assert_eq(hanoi_moves(3) + 1, 8);
+    1
+}
+
+fn main() -> Int {
+    test_move_count();
+    test_simulation_1();
+    test_simulation_2();
+    test_simulation_3();
+    test_recurrence();
+    test_frame_stewart();
+    print("[OK] 684_tower_of_hanoi_aot");
+    0
+}

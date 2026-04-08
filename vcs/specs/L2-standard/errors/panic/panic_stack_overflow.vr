@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @level: L2
+// @tier: 0
+// @tags: errors, panic, recursion, stack-overflow
+// @expected-error: E321
+
+fn infinite_recursion(n: Int) -> Int {
+    infinite_recursion(n + 1)
+}
+
+fn main() {
+    let result = infinite_recursion(0);
+    print(f"{result}");
+}

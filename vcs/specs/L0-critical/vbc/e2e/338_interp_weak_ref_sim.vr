@@ -1,0 +1,402 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, memory, weak-ref, strong-weak, cbgr
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Weak reference simulation.
+// Strong/weak reference counting with upgrade (weak->strong) and
+// downgrade (strong->weak) operations. Object is freed when strong count
+// reaches 0. Weak refs can attempt upgrade but may fail if object is freed.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// Weak reference system
+// 8 objects max
+// strong[i]: strong reference count for object i
+// weak[i]: weak reference count for object i
+// alive[i]: 1 if object data is live (freed when strong hits 0)
+// control_alive[i]: 1 if control block exists (freed when both strong+weak hit 0)
+// values[i]: simulated data
+// =============================================================================
+
+type WeakRefSys is {
+    strong: Arr8,
+    weak: Arr8,
+    alive: Arr8,
+    ctrl_alive: Arr8,
+    values: Arr8,
+    num_objects: Int
+};
+
+fn wr_new() -> WeakRefSys {
+    WeakRefSys {
+        strong: a8_new(),
+        weak: a8_new(),
+        alive: a8_new(),
+        ctrl_alive: a8_new(),
+        values: a8_new(),
+        num_objects: 0
+    }
+}
+
+// Create a new object with initial strong count = 1
+type WrAllocPair is { sys: WeakRefSys, obj_id: Int };
+
+fn wr_create(sys: WeakRefSys, val: Int) -> WrAllocPair {
+    let id = sys.num_objects;
+    WrAllocPair {
+        sys: WeakRefSys {
+            strong: a8_set(sys.strong, id, 1),
+            weak: sys.weak,
+            alive: a8_set(sys.alive, id, 1),
+            ctrl_alive: a8_set(sys.ctrl_alive, id, 1),
+            values: a8_set(sys.values, id, val),
+            num_objects: id + 1
+        },
+        obj_id: id
+    }
+}
+
+// Clone strong reference (increment strong count)
+fn wr_clone_strong(sys: WeakRefSys, id: Int) -> WeakRefSys {
+    if a8_get(sys.alive, id) == 0 {
+        return sys;  // Can't clone dead object
+    }
+    let cur = a8_get(sys.strong, id);
+    WeakRefSys {
+        strong: a8_set(sys.strong, id, cur + 1),
+        weak: sys.weak,
+        alive: sys.alive,
+        ctrl_alive: sys.ctrl_alive,
+        values: sys.values,
+        num_objects: sys.num_objects
+    }
+}
+
+// Drop strong reference
+fn wr_drop_strong(sys: WeakRefSys, id: Int) -> WeakRefSys {
+    let cur = a8_get(sys.strong, id);
+    if cur <= 0 {
+        return sys;
+    }
+    let new_strong = cur - 1;
+    let mut new_alive = sys.alive;
+    let mut new_ctrl = sys.ctrl_alive;
+
+    if new_strong == 0 {
+        // Object data is freed
+        new_alive = a8_set(new_alive, id, 0);
+        // Control block freed only if weak count is also 0
+        if a8_get(sys.weak, id) == 0 {
+            new_ctrl = a8_set(new_ctrl, id, 0);
+        }
+    }
+
+    WeakRefSys {
+        strong: a8_set(sys.strong, id, new_strong),
+        weak: sys.weak,
+        alive: new_alive,
+        ctrl_alive: new_ctrl,
+        values: sys.values,
+        num_objects: sys.num_objects
+    }
+}
+
+// Downgrade: create a weak reference from a strong one
+fn wr_downgrade(sys: WeakRefSys, id: Int) -> WeakRefSys {
+    // Only valid if control block exists
+    if a8_get(sys.ctrl_alive, id) == 0 {
+        return sys;
+    }
+    let cur = a8_get(sys.weak, id);
+    WeakRefSys {
+        strong: sys.strong,
+        weak: a8_set(sys.weak, id, cur + 1),
+        alive: sys.alive,
+        ctrl_alive: sys.ctrl_alive,
+        values: sys.values,
+        num_objects: sys.num_objects
+    }
+}
+
+// Drop weak reference
+fn wr_drop_weak(sys: WeakRefSys, id: Int) -> WeakRefSys {
+    let cur = a8_get(sys.weak, id);
+    if cur <= 0 {
+        return sys;
+    }
+    let new_weak = cur - 1;
+    let mut new_ctrl = sys.ctrl_alive;
+
+    // If strong is also 0 and weak reaches 0, free control block
+    if a8_get(sys.strong, id) == 0 && new_weak == 0 {
+        new_ctrl = a8_set(new_ctrl, id, 0);
+    }
+
+    WeakRefSys {
+        strong: sys.strong,
+        weak: a8_set(sys.weak, id, new_weak),
+        alive: sys.alive,
+        ctrl_alive: new_ctrl,
+        values: sys.values,
+        num_objects: sys.num_objects
+    }
+}
+
+// Upgrade: try to promote weak ref to strong ref
+// Returns 1 if upgrade succeeded, 0 if object is dead
+type UpgradePair is { sys: WeakRefSys, success: Int };
+
+fn wr_upgrade(sys: WeakRefSys, id: Int) -> UpgradePair {
+    if a8_get(sys.alive, id) == 0 {
+        // Object is dead, upgrade fails
+        return UpgradePair { sys: sys, success: 0 };
+    }
+    // Increment strong count
+    let cur = a8_get(sys.strong, id);
+    UpgradePair {
+        sys: WeakRefSys {
+            strong: a8_set(sys.strong, id, cur + 1),
+            weak: sys.weak,
+            alive: sys.alive,
+            ctrl_alive: sys.ctrl_alive,
+            values: sys.values,
+            num_objects: sys.num_objects
+        },
+        success: 1
+    }
+}
+
+// Read value (returns -1 if dead)
+fn wr_read(sys: WeakRefSys, id: Int) -> Int {
+    if a8_get(sys.alive, id) == 1 {
+        a8_get(sys.values, id)
+    } else {
+        -1
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_basic_strong() {
+    let s0 = wr_new();
+    let p = wr_create(s0, 42);
+    assert_eq(wr_read(p.sys, p.obj_id), 42);
+    assert_eq(a8_get(p.sys.strong, p.obj_id), 1);
+    assert_eq(a8_get(p.sys.weak, p.obj_id), 0);
+    assert_eq(a8_get(p.sys.alive, p.obj_id), 1);
+
+    let s1 = wr_drop_strong(p.sys, p.obj_id);
+    assert_eq(a8_get(s1.alive, p.obj_id), 0);
+    assert_eq(a8_get(s1.ctrl_alive, p.obj_id), 0);
+}
+
+fn test_clone_strong() {
+    let s0 = wr_new();
+    let p = wr_create(s0, 10);
+    let s1 = wr_clone_strong(p.sys, p.obj_id);
+    let s2 = wr_clone_strong(s1, p.obj_id);
+    assert_eq(a8_get(s2.strong, p.obj_id), 3);
+
+    // Drop two -> still alive with count 1
+    let s3 = wr_drop_strong(wr_drop_strong(s2, p.obj_id), p.obj_id);
+    assert_eq(a8_get(s3.strong, p.obj_id), 1);
+    assert_eq(a8_get(s3.alive, p.obj_id), 1);
+
+    // Drop last -> dead
+    let s4 = wr_drop_strong(s3, p.obj_id);
+    assert_eq(a8_get(s4.alive, p.obj_id), 0);
+}
+
+fn test_downgrade_upgrade() {
+    let s0 = wr_new();
+    let p = wr_create(s0, 77);
+
+    // Downgrade (create weak from strong)
+    let s1 = wr_downgrade(p.sys, p.obj_id);
+    assert_eq(a8_get(s1.strong, p.obj_id), 1);
+    assert_eq(a8_get(s1.weak, p.obj_id), 1);
+
+    // Upgrade (promote weak to strong)
+    let u = wr_upgrade(s1, p.obj_id);
+    assert_eq(u.success, 1);
+    assert_eq(a8_get(u.sys.strong, p.obj_id), 2);
+    assert_eq(a8_get(u.sys.weak, p.obj_id), 1);
+}
+
+fn test_upgrade_after_death() {
+    let s0 = wr_new();
+    let p = wr_create(s0, 99);
+
+    // Create weak ref
+    let s1 = wr_downgrade(p.sys, p.obj_id);
+
+    // Drop all strong refs -> object dies
+    let s2 = wr_drop_strong(s1, p.obj_id);
+    assert_eq(a8_get(s2.alive, p.obj_id), 0);
+    assert_eq(a8_get(s2.strong, p.obj_id), 0);
+    assert_eq(a8_get(s2.weak, p.obj_id), 1);
+
+    // Control block still alive (weak ref exists)
+    assert_eq(a8_get(s2.ctrl_alive, p.obj_id), 1);
+
+    // Upgrade attempt fails
+    let u = wr_upgrade(s2, p.obj_id);
+    assert_eq(u.success, 0);
+
+    // Drop weak ref -> control block freed
+    let s3 = wr_drop_weak(u.sys, p.obj_id);
+    assert_eq(a8_get(s3.weak, p.obj_id), 0);
+    assert_eq(a8_get(s3.ctrl_alive, p.obj_id), 0);
+}
+
+fn test_multiple_weak_refs() {
+    let s0 = wr_new();
+    let p = wr_create(s0, 55);
+
+    // Create 3 weak refs
+    let s1 = wr_downgrade(wr_downgrade(wr_downgrade(p.sys, p.obj_id), p.obj_id), p.obj_id);
+    assert_eq(a8_get(s1.weak, p.obj_id), 3);
+
+    // Drop strong -> object dies but control block alive
+    let s2 = wr_drop_strong(s1, p.obj_id);
+    assert_eq(a8_get(s2.alive, p.obj_id), 0);
+    assert_eq(a8_get(s2.ctrl_alive, p.obj_id), 1);
+
+    // Drop 2 weak refs -> control still alive
+    let s3 = wr_drop_weak(wr_drop_weak(s2, p.obj_id), p.obj_id);
+    assert_eq(a8_get(s3.weak, p.obj_id), 1);
+    assert_eq(a8_get(s3.ctrl_alive, p.obj_id), 1);
+
+    // Drop last weak -> control block freed
+    let s4 = wr_drop_weak(s3, p.obj_id);
+    assert_eq(a8_get(s4.weak, p.obj_id), 0);
+    assert_eq(a8_get(s4.ctrl_alive, p.obj_id), 0);
+}
+
+fn test_strong_keeps_alive() {
+    let s0 = wr_new();
+    let p = wr_create(s0, 33);
+
+    // Downgrade, then upgrade
+    let s1 = wr_downgrade(p.sys, p.obj_id);
+    let u = wr_upgrade(s1, p.obj_id);
+    assert_eq(u.success, 1);
+
+    // Drop original strong ref
+    let s2 = wr_drop_strong(u.sys, p.obj_id);
+    // Still alive because upgrade added a strong ref
+    assert_eq(a8_get(s2.alive, p.obj_id), 1);
+    assert_eq(a8_get(s2.strong, p.obj_id), 1);
+
+    // Read still works
+    assert_eq(wr_read(s2, p.obj_id), 33);
+}
+
+fn test_multiple_objects_independent() {
+    let s0 = wr_new();
+    let p1 = wr_create(s0, 10);
+    let p2 = wr_create(p1.sys, 20);
+
+    let s1 = wr_downgrade(p2.sys, p1.obj_id);
+    let s2 = wr_downgrade(s1, p2.obj_id);
+
+    // Kill obj 1 -> obj 2 unaffected
+    let s3 = wr_drop_strong(s2, p1.obj_id);
+    assert_eq(a8_get(s3.alive, p1.obj_id), 0);
+    assert_eq(a8_get(s3.alive, p2.obj_id), 1);
+    assert_eq(wr_read(s3, p2.obj_id), 20);
+
+    // Upgrade weak to obj 1 fails
+    let u1 = wr_upgrade(s3, p1.obj_id);
+    assert_eq(u1.success, 0);
+
+    // Upgrade weak to obj 2 succeeds
+    let u2 = wr_upgrade(u1.sys, p2.obj_id);
+    assert_eq(u2.success, 1);
+}
+
+fn test_cycle_breaking_with_weak() {
+    // Simulate: A strongly refs B, B weakly refs A
+    // When A's strong count drops, A dies, B's weak ref to A becomes invalid
+    let s0 = wr_new();
+    let pa = wr_create(s0, 100);    // A: strong=1
+    let pb = wr_create(pa.sys, 200); // B: strong=1
+
+    // A strongly references B (clone B's strong)
+    let s1 = wr_clone_strong(pb.sys, pb.obj_id);
+    // B weakly references A (downgrade A)
+    let s2 = wr_downgrade(s1, pa.obj_id);
+
+    // B has strong=2 (original + A's ref), A has strong=1, weak=1
+    assert_eq(a8_get(s2.strong, pa.obj_id), 1);
+    assert_eq(a8_get(s2.weak, pa.obj_id), 1);
+    assert_eq(a8_get(s2.strong, pb.obj_id), 2);
+
+    // Drop A's external strong ref -> A dies
+    let s3 = wr_drop_strong(s2, pa.obj_id);
+    assert_eq(a8_get(s3.alive, pa.obj_id), 0);
+
+    // B tries to upgrade weak ref to A -> fails
+    let u = wr_upgrade(s3, pa.obj_id);
+    assert_eq(u.success, 0);
+
+    // B still alive
+    assert_eq(a8_get(u.sys.alive, pb.obj_id), 1);
+
+    // Drop A's strong ref to B
+    let s4 = wr_drop_strong(u.sys, pb.obj_id);
+    // B still alive (has original strong=1)
+    assert_eq(a8_get(s4.alive, pb.obj_id), 1);
+    assert_eq(a8_get(s4.strong, pb.obj_id), 1);
+}
+
+fn main() -> Int {
+    test_basic_strong();
+    test_clone_strong();
+    test_downgrade_upgrade();
+    test_upgrade_after_death();
+    test_multiple_weak_refs();
+    test_strong_keeps_alive();
+    test_multiple_objects_independent();
+    test_cycle_breaking_with_weak();
+    print("[OK] 338_interp_weak_ref_sim");
+    0
+}

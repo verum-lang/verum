@@ -1,0 +1,83 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: context, using, provide, runtime
+// @description: Test context system (dependency injection)
+
+context Logger {
+    fn log(&self, msg: Text) -> Text;
+}
+
+type PrefixLogger is {
+    prefix: Text,
+};
+
+implement Logger for PrefixLogger {
+    fn log(&self, msg: Text) -> Text {
+        f"[{self.prefix}] {msg}"
+    }
+}
+
+context Config {
+    fn max_retries(&self) -> Int;
+}
+
+type AppConfig is {
+    retries: Int,
+};
+
+implement Config for AppConfig {
+    fn max_retries(&self) -> Int {
+        self.retries
+    }
+}
+
+fn format_message(msg: Text) -> Text using [Logger] {
+    Logger.log(msg)
+}
+
+fn get_retries() -> Int using [Config] {
+    Config.max_retries()
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Basic context provide and usage
+    let logger = PrefixLogger { prefix: "TEST" };
+    provide Logger = logger;
+
+    let result = format_message("hello");
+    if result != "[TEST] hello" {
+        print(f"FAIL basic: expected '[TEST] hello', got '{result}'");
+        failures = failures + 1;
+    } else {
+        print("  basic_context: OK");
+    }
+
+    // Test 2: Multiple contexts
+    let config = AppConfig { retries: 3 };
+    provide Config = config;
+
+    let retries = get_retries();
+    if retries != 3 {
+        print(f"FAIL multiple: expected 3 retries, got {retries}");
+        failures = failures + 1;
+    } else {
+        print("  multiple_contexts: OK");
+    }
+
+    // Test 3: Context used in function call chain
+    let result2 = format_message("world");
+    if result2 != "[TEST] world" {
+        print(f"FAIL chain: expected '[TEST] world', got '{result2}'");
+        failures = failures + 1;
+    } else {
+        print("  context_chain: OK");
+    }
+
+    if failures == 0 {
+        print("All context system tests passed");
+    }
+    failures
+}

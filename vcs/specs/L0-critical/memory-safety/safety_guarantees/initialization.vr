@@ -1,0 +1,352 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, safety-guarantees, initialization, critical
+// @description: Core safety guarantee - all variables must be initialized before use
+
+/// SAFETY GUARANTEE: Initialization Before Use
+///
+/// Verum ensures all variables are initialized before use through:
+/// 1. Definite assignment analysis at compile time
+/// 2. Constructor requirements for structs
+/// 3. No uninitialized memory in safe code
+/// 4. Partial initialization tracking for structs
+/// 5. Array/collection initialization requirements
+///
+/// This prevents:
+/// - Reading garbage memory values
+/// - Undefined behavior from uninitialized reads
+/// - Information disclosure from uncleared memory
+/// - Security vulnerabilities from predictable uninitialized values
+
+fn main() {
+    test_basic_initialization();
+    test_conditional_initialization();
+    test_struct_initialization();
+    test_array_initialization();
+    test_collection_initialization();
+    test_delayed_initialization();
+
+    print("All initialization tests passed!");
+}
+
+/// All variables must be initialized before use
+fn test_basic_initialization() {
+    // Initialize at declaration
+    let x: Int = 42;
+    assert(x == 42);
+
+    // Type inference from initializer
+    let y = 100;  // Inferred as Int
+    assert(y == 100);
+
+    // Multiple bindings
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    assert(a + b + c == 6);
+
+    // Shadowing with new initialization
+    let value = 10;
+    let value = value * 2;  // New binding with computed value
+    assert(value == 20);
+
+    // Mutable initialization
+    let mut counter = 0;
+    counter += 1;
+    assert(counter == 1);
+}
+
+/// Conditional initialization must cover all paths
+fn test_conditional_initialization() {
+    // Valid: all paths initialize
+    let x: Int;
+    if true {
+        x = 1;
+    } else {
+        x = 2;
+    }
+    assert(x == 1);  // OK: x is definitely initialized
+
+    // Valid: match covers all cases
+    let y: Int;
+    match get_variant() {
+        Variant.A => y = 10,
+        Variant.B => y = 20,
+        Variant.C => y = 30,
+    }
+    // y is definitely initialized - match is exhaustive
+    assert(y >= 10);
+
+    // Valid: early return means variable not used
+    fn with_early_return(condition: Bool) -> Int {
+        let result: Int;
+        if condition {
+            return 42;  // Early return - result not needed
+        }
+        result = 100;
+        result  // Only reached when result is initialized
+    }
+
+    assert(with_early_return(true) == 42);
+    assert(with_early_return(false) == 100);
+
+    // Invalid patterns caught at compile time:
+    // let z: Int;
+    // if some_condition() {
+    //     z = 1;
+    // }
+    // println(z);  // ERROR: z may not be initialized
+}
+
+/// Structs must have all fields initialized
+fn test_struct_initialization() {
+    // Complete struct initialization
+    let point = Point { x: 10, y: 20 };
+    assert(point.x == 10);
+    assert(point.y == 20);
+
+    // Cannot create partial struct:
+    // let bad = Point { x: 10 };  // ERROR: missing field 'y'
+
+    // Struct with defaults still requires complete initialization
+    let config = Config {
+        name: Text.from("app"),
+        version: 1,
+        debug: false,
+    };
+    assert(config.name == "app");
+
+    // Functional update syntax - base must be initialized
+    let point2 = Point { x: 30, ..point };
+    assert(point2.x == 30);
+    assert(point2.y == 20);  // From point
+
+    // Nested struct initialization
+    let container = Container {
+        header: Header { id: 1, name: Text.from("test") },
+        data: [1, 2, 3],
+    };
+    assert(container.header.id == 1);
+}
+
+/// Arrays must be fully initialized
+fn test_array_initialization() {
+    // Array literal - all elements specified
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+    assert(arr.len() == 5);
+
+    // Repeat initialization
+    let zeros: [Int; 10] = [0; 10];
+    for z in &zeros {
+        assert(*z == 0);
+    }
+
+    // Cannot create partially initialized array:
+    // let bad: [Int; 5] = [1, 2, 3];  // ERROR: expected 5 elements
+
+    // Array from iterator - must provide all elements
+    let computed: [Int; 5] = (0..5).collect_array();
+    for i in 0..5 {
+        assert(computed[i] == i);
+    }
+
+    // Mutable array - initialized first
+    let mut arr2: [Int; 3] = [0, 0, 0];
+    arr2[0] = 10;
+    arr2[1] = 20;
+    arr2[2] = 30;
+    assert(arr2[0] == 10);
+}
+
+/// Collections start empty but are always valid
+fn test_collection_initialization() {
+    // Empty collection is valid state
+    let empty_list: List<Int> = List.new();
+    assert(empty_list.len() == 0);
+    assert(empty_list.is_empty());
+
+    // Initialize with elements
+    let list = [1, 2, 3];
+    assert(list.len() == 3);
+
+    // Map starts empty
+    let mut map: Map<Text, Int> = Map.new();
+    assert(map.is_empty());
+
+    map.insert(Text.from("key"), 42);
+    assert(map.len() == 1);
+
+    // Set starts empty
+    let mut set: Set<Int> = Set.new();
+    set.insert(1);
+    set.insert(2);
+    assert(set.len() == 2);
+
+    // Builder pattern ensures complete initialization
+    let config = ConfigBuilder.new()
+        .name(Text.from("app"))
+        .version(2)
+        .debug(true)
+        .build();  // build() requires all fields set
+
+    assert(config.name == "app");
+    assert(config.version == 2);
+}
+
+/// Delayed initialization with definite assignment
+fn test_delayed_initialization() {
+    let result: Int;
+
+    // Complex initialization logic
+    let input = get_input();
+    if input > 100 {
+        result = process_large(input);
+    } else if input > 0 {
+        result = process_small(input);
+    } else {
+        result = 0;  // Default for non-positive
+    }
+
+    // Compiler verifies all paths initialize result
+    assert(result >= 0);
+
+    // Loop initialization
+    let first_positive: Int;
+    let values = [-1, -2, 3, 4, 5];
+
+    for v in &values {
+        if *v > 0 {
+            first_positive = *v;
+            break;  // Must break after initializing
+        }
+    }
+    // NOTE: In real code, would need to handle case where no positive found
+    // Compiler tracks that loop may not initialize if no break
+
+    // Safe pattern with Maybe
+    let maybe_first: Maybe<Int> = values.iter()
+        .find(|v| **v > 0)
+        .copied();
+
+    match maybe_first {
+        Some(v) => assert(v == 3),
+        None => panic("no positive found"),
+    }
+}
+
+/// MaybeUninit for advanced cases (requires unsafe for extraction)
+fn demonstrate_maybe_uninit() {
+    // For performance-critical code, use MaybeUninit
+    // This is similar to Rust's MaybeUninit<T>
+
+    // Safe wrapper around potentially uninitialized memory
+    type MaybeUninit<T> is {
+        // Internal representation
+    };
+
+    implement MaybeUninit<T> {
+        // Create uninitialized
+        fn uninit() -> MaybeUninit<T> {
+            // ...
+        }
+
+        // Write value
+        fn write(&mut self, value: T) {
+            // ...
+        }
+
+        // Extract requires unsafe - caller guarantees initialization
+        unsafe fn assume_init(self) -> T {
+            // ...
+        }
+    }
+
+    // Usage in safe code still requires proving initialization
+    let mut slot: MaybeUninit<Int> = MaybeUninit.uninit();
+    slot.write(42);
+
+    // Only after write can we extract
+    let value = unsafe { slot.assume_init() };
+    assert(value == 42);
+}
+
+// Supporting types
+
+type Variant is A | B | C;
+
+fn get_variant() -> Variant {
+    Variant.A
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Config is {
+    name: Text,
+    version: Int,
+    debug: Bool,
+};
+
+type ConfigBuilder is {
+    name: Maybe<Text>,
+    version: Maybe<Int>,
+    debug: Maybe<Bool>,
+};
+
+implement ConfigBuilder {
+    fn new() -> ConfigBuilder {
+        ConfigBuilder {
+            name: Maybe.None,
+            version: Maybe.None,
+            debug: Maybe.None,
+        }
+    }
+
+    fn name(mut self, n: Text) -> ConfigBuilder {
+        self.name = Maybe.Some(n);
+        self
+    }
+
+    fn version(mut self, v: Int) -> ConfigBuilder {
+        self.version = Maybe.Some(v);
+        self
+    }
+
+    fn debug(mut self, d: Bool) -> ConfigBuilder {
+        self.debug = Maybe.Some(d);
+        self
+    }
+
+    fn build(self) -> Config {
+        Config {
+            name: self.name.expect("name required"),
+            version: self.version.expect("version required"),
+            debug: self.debug.expect("debug required"),
+        }
+    }
+}
+
+type Header is {
+    id: Int,
+    name: Text,
+};
+
+type Container is {
+    header: Header,
+    data: List<Int>,
+};
+
+fn get_input() -> Int {
+    50
+}
+
+fn process_large(n: Int) -> Int {
+    n * 2
+}
+
+fn process_small(n: Int) -> Int {
+    n + 10
+}

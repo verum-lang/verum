@@ -1,0 +1,127 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, recursion, advanced
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests advanced recursion patterns: accumulator recursion, CPS-style,
+// divide and conquer, memoized recursion via arrays.
+
+@allow(unbounded_recursion)
+fn sum_acc(n: Int, acc: Int) -> Int {
+    if n <= 0 { acc } else { sum_acc(n - 1, acc + n) }
+}
+
+@allow(unbounded_recursion)
+fn reverse_digits(n: Int, acc: Int) -> Int {
+    if n == 0 { acc }
+    else { reverse_digits(n / 10, acc * 10 + n % 10) }
+}
+
+@allow(unbounded_recursion)
+fn count_digits(n: Int) -> Int {
+    if n < 10 { 1 } else { 1 + count_digits(n / 10) }
+}
+
+@allow(unbounded_recursion)
+fn digital_root(n: Int) -> Int {
+    if n < 10 { n }
+    else {
+        let mut sum = 0;
+        let mut val = n;
+        while val > 0 {
+            sum = sum + val % 10;
+            val = val / 10;
+        }
+        digital_root(sum)
+    }
+}
+
+@allow(unbounded_recursion)
+fn binary_gcd(a: Int, b: Int) -> Int {
+    if a == b { a }
+    else if a == 0 { b }
+    else if b == 0 { a }
+    else if a % 2 == 0 {
+        if b % 2 == 0 { 2 * binary_gcd(a / 2, b / 2) }
+        else { binary_gcd(a / 2, b) }
+    } else if b % 2 == 0 {
+        binary_gcd(a, b / 2)
+    } else if a > b {
+        binary_gcd((a - b) / 2, b)
+    } else {
+        binary_gcd((b - a) / 2, a)
+    }
+}
+
+fn test_accumulator_recursion() {
+    assert_eq(sum_acc(100, 0), 5050);
+    assert_eq(sum_acc(10, 0), 55);
+    assert_eq(sum_acc(0, 42), 42);
+    print("accumulator_recursion: ok");
+}
+
+fn test_reverse_digits() {
+    assert_eq(reverse_digits(12345, 0), 54321);
+    assert_eq(reverse_digits(1000, 0), 1); // Leading zeros dropped
+    assert_eq(reverse_digits(7, 0), 7);
+    print("reverse_digits: ok");
+}
+
+fn test_count_digits() {
+    assert_eq(count_digits(0), 1);
+    assert_eq(count_digits(9), 1);
+    assert_eq(count_digits(10), 2);
+    assert_eq(count_digits(999), 3);
+    assert_eq(count_digits(12345), 5);
+    assert_eq(count_digits(1000000), 7);
+    print("count_digits: ok");
+}
+
+fn test_digital_root() {
+    // Digital root: keep summing digits until single digit
+    assert_eq(digital_root(0), 0);
+    assert_eq(digital_root(5), 5);
+    assert_eq(digital_root(39), 3); // 3+9=12, 1+2=3
+    assert_eq(digital_root(493), 7); // 4+9+3=16, 1+6=7
+    assert_eq(digital_root(9999), 9); // 36→9
+    print("digital_root: ok");
+}
+
+fn test_binary_gcd() {
+    assert_eq(binary_gcd(12, 8), 4);
+    assert_eq(binary_gcd(48, 36), 12);
+    assert_eq(binary_gcd(17, 13), 1);
+    assert_eq(binary_gcd(100, 75), 25);
+    assert_eq(binary_gcd(0, 7), 7);
+    assert_eq(binary_gcd(7, 0), 7);
+    print("binary_gcd: ok");
+}
+
+fn test_tower_of_hanoi_count() {
+    // Count moves for n disks (2^n - 1)
+    let mut moves = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    moves[0] = 0;
+    let mut i = 1;
+    while i <= 10 {
+        moves[i] = 2 * moves[i - 1] + 1;
+        i = i + 1;
+    }
+    assert_eq(moves[1], 1);
+    assert_eq(moves[3], 7);
+    assert_eq(moves[5], 31);
+    assert_eq(moves[10], 1023);
+    print("tower_of_hanoi_count: ok");
+}
+
+fn main() -> Int {
+    test_accumulator_recursion();
+    test_reverse_digits();
+    test_count_digits();
+    test_digital_root();
+    test_binary_gcd();
+    test_tower_of_hanoi_count();
+    print("[OK] 425_interp_advanced_recursion");
+    0
+}

@@ -1,0 +1,360 @@
+// =============================================================================
+// cow_test.vr - Tests for Cow<T> (Clone-on-Write) type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, memory, cow, clone-on-write
+// @description: Tests for Cow<T> construction, predicates, conversion,
+//               mutation, and protocol implementations
+// =============================================================================
+
+mount core.base.memory.{Cow, Heap, Shared};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// Section 1: Construction
+// =============================================================================
+
+@test
+fn test_cow_borrowed() {
+    let value = 42;
+    let cow: Cow<Int> = Cow.Borrowed(&value);
+    assert(cow.is_borrowed());
+    assert(!cow.is_owned());
+}
+
+@test
+fn test_cow_owned() {
+    let cow: Cow<Int> = Cow.Owned(42);
+    assert(cow.is_owned());
+    assert(!cow.is_borrowed());
+}
+
+@test
+fn test_cow_borrowed_text() {
+    let text = "hello world";
+    let cow: Cow<Text> = Cow.Borrowed(&text);
+    assert(cow.is_borrowed());
+}
+
+@test
+fn test_cow_owned_text() {
+    let cow: Cow<Text> = Cow.Owned("hello world");
+    assert(cow.is_owned());
+}
+
+// =============================================================================
+// Section 2: as_ref
+// =============================================================================
+
+@test
+fn test_cow_as_ref_borrowed() {
+    let value = 42;
+    let cow: Cow<Int> = Cow.Borrowed(&value);
+    let r: &Int = cow.as_ref();
+    assert_eq(*r, 42);
+}
+
+@test
+fn test_cow_as_ref_owned() {
+    let cow: Cow<Int> = Cow.Owned(99);
+    let r: &Int = cow.as_ref();
+    assert_eq(*r, 99);
+}
+
+@test
+fn test_cow_as_ref_text_borrowed() {
+    let text = "test";
+    let cow: Cow<Text> = Cow.Borrowed(&text);
+    assert_eq(*cow.as_ref(), "test");
+}
+
+@test
+fn test_cow_as_ref_text_owned() {
+    let cow: Cow<Text> = Cow.Owned("owned text");
+    assert_eq(*cow.as_ref(), "owned text");
+}
+
+// =============================================================================
+// Section 3: into_owned
+// =============================================================================
+
+@test
+fn test_cow_into_owned_from_borrowed() {
+    let value = 42;
+    let cow: Cow<Int> = Cow.Borrowed(&value);
+    let owned: Int = cow.into_owned();
+    assert_eq(owned, 42);
+}
+
+@test
+fn test_cow_into_owned_from_owned() {
+    let cow: Cow<Int> = Cow.Owned(99);
+    let owned: Int = cow.into_owned();
+    assert_eq(owned, 99);
+}
+
+@test
+fn test_cow_into_owned_text() {
+    let text = "hello";
+    let cow: Cow<Text> = Cow.Borrowed(&text);
+    let owned: Text = cow.into_owned();
+    assert_eq(owned, "hello");
+}
+
+// =============================================================================
+// Section 4: to_mut (Clone-on-Write behavior)
+// =============================================================================
+
+@test
+fn test_cow_to_mut_owned() {
+    let mut cow: Cow<Int> = Cow.Owned(10);
+    let r: &mut Int = cow.to_mut();
+    *r = 20;
+    assert_eq(*cow.as_ref(), 20);
+    assert(cow.is_owned());
+}
+
+@test
+fn test_cow_to_mut_borrowed_triggers_clone() {
+    let value = 42;
+    let mut cow: Cow<Int> = Cow.Borrowed(&value);
+    assert(cow.is_borrowed());
+    let r: &mut Int = cow.to_mut();
+    // After to_mut, should now be owned
+    assert(cow.is_owned());
+    *r = 100;
+    assert_eq(*cow.as_ref(), 100);
+    // Original value unchanged
+    assert_eq(value, 42);
+}
+
+@test
+fn test_cow_to_mut_text() {
+    let text = "hello";
+    let mut cow: Cow<Text> = Cow.Borrowed(&text);
+    let r = cow.to_mut();
+    assert(cow.is_owned());
+}
+
+// =============================================================================
+// Section 5: Eq protocol
+// =============================================================================
+
+@test
+fn test_cow_eq_both_borrowed() {
+    let a = 42;
+    let b = 42;
+    let cow_a: Cow<Int> = Cow.Borrowed(&a);
+    let cow_b: Cow<Int> = Cow.Borrowed(&b);
+    assert(cow_a == cow_b);
+}
+
+@test
+fn test_cow_eq_both_owned() {
+    let cow_a: Cow<Int> = Cow.Owned(42);
+    let cow_b: Cow<Int> = Cow.Owned(42);
+    assert(cow_a == cow_b);
+}
+
+@test
+fn test_cow_eq_mixed() {
+    let value = 42;
+    let cow_borrowed: Cow<Int> = Cow.Borrowed(&value);
+    let cow_owned: Cow<Int> = Cow.Owned(42);
+    assert(cow_borrowed == cow_owned);
+}
+
+@test
+fn test_cow_ne() {
+    let cow_a: Cow<Int> = Cow.Owned(42);
+    let cow_b: Cow<Int> = Cow.Owned(99);
+    assert(cow_a != cow_b);
+}
+
+@test
+fn test_cow_eq_text() {
+    let text = "same";
+    let cow_a: Cow<Text> = Cow.Borrowed(&text);
+    let cow_b: Cow<Text> = Cow.Owned("same");
+    assert(cow_a == cow_b);
+}
+
+// =============================================================================
+// Section 6: Ord protocol
+// =============================================================================
+
+@test
+fn test_cow_ord_less() {
+    let cow_a: Cow<Int> = Cow.Owned(10);
+    let cow_b: Cow<Int> = Cow.Owned(20);
+    assert_eq(cow_a.cmp(&cow_b), Less);
+}
+
+@test
+fn test_cow_ord_greater() {
+    let cow_a: Cow<Int> = Cow.Owned(20);
+    let cow_b: Cow<Int> = Cow.Owned(10);
+    assert_eq(cow_a.cmp(&cow_b), Greater);
+}
+
+@test
+fn test_cow_ord_equal() {
+    let cow_a: Cow<Int> = Cow.Owned(42);
+    let cow_b: Cow<Int> = Cow.Owned(42);
+    assert_eq(cow_a.cmp(&cow_b), Equal);
+}
+
+@test
+fn test_cow_ord_mixed() {
+    let value = 5;
+    let cow_a: Cow<Int> = Cow.Borrowed(&value);
+    let cow_b: Cow<Int> = Cow.Owned(10);
+    assert_eq(cow_a.cmp(&cow_b), Less);
+}
+
+// =============================================================================
+// Section 7: Clone protocol
+// =============================================================================
+
+@test
+fn test_cow_clone_borrowed() {
+    let value = 42;
+    let cow: Cow<Int> = Cow.Borrowed(&value);
+    let cloned = cow.clone();
+    assert(cloned.is_borrowed());
+    assert_eq(*cloned.as_ref(), 42);
+}
+
+@test
+fn test_cow_clone_owned() {
+    let cow: Cow<Int> = Cow.Owned(42);
+    let cloned = cow.clone();
+    assert(cloned.is_owned());
+    assert_eq(*cloned.as_ref(), 42);
+}
+
+@test
+fn test_cow_clone_independence() {
+    let mut cow: Cow<Int> = Cow.Owned(42);
+    let cloned = cow.clone();
+    *cow.to_mut() = 100;
+    assert_eq(*cow.as_ref(), 100);
+    assert_eq(*cloned.as_ref(), 42);
+}
+
+// =============================================================================
+// Section 8: Default protocol
+// =============================================================================
+
+@test
+fn test_cow_default_int() {
+    let cow: Cow<Int> = Cow.default();
+    assert(cow.is_owned());
+    assert_eq(*cow.as_ref(), 0);
+}
+
+@test
+fn test_cow_default_bool() {
+    let cow: Cow<Bool> = Cow.default();
+    assert(cow.is_owned());
+    assert_eq(*cow.as_ref(), false);
+}
+
+// =============================================================================
+// Section 9: Predicates in various states
+// =============================================================================
+
+@test
+fn test_cow_is_borrowed_false_for_owned() {
+    let cow: Cow<Int> = Cow.Owned(42);
+    assert(!cow.is_borrowed());
+}
+
+@test
+fn test_cow_is_owned_false_for_borrowed() {
+    let value = 42;
+    let cow: Cow<Int> = Cow.Borrowed(&value);
+    assert(!cow.is_owned());
+}
+
+@test
+fn test_cow_transitions_to_owned() {
+    let value = 42;
+    let mut cow: Cow<Int> = Cow.Borrowed(&value);
+    assert(cow.is_borrowed());
+    cow.to_mut();
+    assert(cow.is_owned());
+    // Once owned, stays owned
+    cow.to_mut();
+    assert(cow.is_owned());
+}
+
+// =============================================================================
+// Section 10: Multiple mutations
+// =============================================================================
+
+@test
+fn test_cow_multiple_to_mut() {
+    let mut cow: Cow<Int> = Cow.Owned(0);
+    *cow.to_mut() = 1;
+    *cow.to_mut() = 2;
+    *cow.to_mut() = 3;
+    assert_eq(*cow.as_ref(), 3);
+}
+
+@test
+fn test_cow_borrow_then_mutate_then_read() {
+    let original = 100;
+    let mut cow: Cow<Int> = Cow.Borrowed(&original);
+    // Read borrowed
+    assert_eq(*cow.as_ref(), 100);
+    // Clone-on-write
+    *cow.to_mut() = 200;
+    // Read owned
+    assert_eq(*cow.as_ref(), 200);
+    // Original unchanged
+    assert_eq(original, 100);
+}
+
+// =============================================================================
+// Section 11: Edge cases
+// =============================================================================
+
+@test
+fn test_cow_owned_zero() {
+    let cow: Cow<Int> = Cow.Owned(0);
+    assert_eq(*cow.as_ref(), 0);
+    assert_eq(cow.into_owned(), 0);
+}
+
+@test
+fn test_cow_owned_negative() {
+    let cow: Cow<Int> = Cow.Owned(-42);
+    assert_eq(*cow.as_ref(), -42);
+}
+
+@test
+fn test_cow_borrowed_empty_text() {
+    let text = "";
+    let cow: Cow<Text> = Cow.Borrowed(&text);
+    assert_eq(*cow.as_ref(), "");
+}
+
+@test
+fn test_cow_owned_bool_true() {
+    let cow: Cow<Bool> = Cow.Owned(true);
+    assert(*cow.as_ref());
+}
+
+@test
+fn test_cow_owned_bool_false() {
+    let cow: Cow<Bool> = Cow.Owned(false);
+    assert(!*cow.as_ref());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

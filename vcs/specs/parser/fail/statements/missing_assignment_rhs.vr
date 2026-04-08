@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, assignment, rhs, error
+// @description: Test assignment with missing right-hand side
+// @expected-error: E041
+
+fn test() {
+    let x = 0;
+    x =;
+}

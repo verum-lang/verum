@@ -1,0 +1,33 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, theorem
+// @timeout: 5000
+
+/// Basic theorem declarations.
+/// Grammar: theorem_decl = 'theorem' identifier [generic_params] '(' [param_list] ')'
+///          ['->' type_expr] [requires_clause] [ensures_clause] proof_body
+
+// Simple theorem with proof by tactic
+theorem addition_commutative(a: Int, b: Int)
+    requires a >= 0, b >= 0
+    proof by auto;
+
+// Theorem with ensures clause
+// ensures_clause = 'where' ensures_item { ',' ensures_item }
+// ensures_item = 'ensures' expression
+fn abs(x: Int) -> Int where ensures result >= 0 {
+    if x < 0 { -x } else { x }
+}
+
+// Theorem with no parameters
+theorem zero_is_identity()
+    proof by trivial;
+
+// Theorem with return type
+theorem double_positive(n: Int) -> Bool
+    requires n > 0
+    proof by auto;
+
+fn main() {
+    print("Basic theorem tests parsed");
+}

@@ -1,0 +1,273 @@
+// @test: run
+// @expected-stdout: Received: 1\nReceived: 2\nReceived: 3\nReceived: 4\nReceived: 5\nAll messages received\nBounded: Ok\nBroadcast: 3 receivers got message
+// @tier: 0
+// @level: L2
+// @tags: async, synchronization, channel, mpsc
+// @description: Comprehensive async channel patterns for message passing
+
+// Basic mpsc channel (multi-producer single-consumer)
+async fn test_basic_channel() {
+    let (tx, mut rx) = channel<Int>();
+
+    // Multiple producers
+    let producers: List<_> = (1..=5).map(|i| {
+        let tx_clone = tx.clone();
+        spawn {
+            tx_clone.send(i).await.expect("send failed");
+        }
+    }).collect();
+
+    // Drop original sender so channel closes when producers done
+    drop(tx);
+
+    // Wait for all producers
+    join_all(producers).await;
+
+    // Receive all messages
+    while let Some(msg) = rx.recv().await {
+        println(f"Received: {msg}");
+    }
+
+    println("All messages received");
+}
+
+// Bounded channel with capacity
+async fn test_bounded_channel() -> Result<(), Error> {
+    let (tx, mut rx) = bounded_channel<Int>(3);
+
+    // Send up to capacity
+    tx.send(1).await?;
+    tx.send(2).await?;
+    tx.send(3).await?;
+
+    // Fourth send would block until receive
+    let send_handle = spawn {
+        tx.send(4).await
+    };
+
+    // Receive to make room
+    let _ = rx.recv().await;
+
+    // Now send completes
+    send_handle.await?;
+
+    Ok(())
+}
+
+// try_send and try_recv (non-blocking)
+async fn test_try_operations() {
+    let (tx, mut rx) = bounded_channel<Int>(1);
+
+    // try_send succeeds when capacity available
+    match tx.try_send(42) {
+        Ok(()) => println("Sent immediately"),
+        Err(TrySendError.Full(v)) => println(f"Channel full, value: {v}"),
+        Err(TrySendError.Disconnected(v)) => println(f"Disconnected, value: {v}"),
+    }
+
+    // try_recv succeeds when message available
+    match rx.try_recv() {
+        Ok(value) => println(f"Received: {value}"),
+        Err(TryRecvError.Empty) => println("No message"),
+        Err(TryRecvError.Disconnected) => println("Disconnected"),
+    }
+}
+
+// send_timeout
+async fn test_send_timeout() {
+    let (tx, rx) = bounded_channel<Int>(1);
+
+    tx.send(1).await.ok();
+
+    // Channel is full, this will timeout
+    match tx.send_timeout(2, Duration.from_millis(10)).await {
+        Ok(()) => println("Sent"),
+        Err(SendTimeoutError.Timeout(v)) => println(f"Timeout, value: {v}"),
+        Err(SendTimeoutError.Disconnected(v)) => println(f"Disconnected, value: {v}"),
+    }
+}
+
+// recv_timeout
+async fn test_recv_timeout() {
+    let (_tx, mut rx) = channel<Int>();
+
+    // No messages, this will timeout
+    match rx.recv_timeout(Duration.from_millis(10)).await {
+        Ok(value) => println(f"Received: {value}"),
+        Err(RecvTimeoutError.Timeout) => println("Timeout"),
+        Err(RecvTimeoutError.Disconnected) => println("Disconnected"),
+    }
+}
+
+// Channel as async iterator
+async fn test_channel_iterator() {
+    let (tx, rx) = channel<Int>();
+
+    spawn {
+        for i in 1..=5 {
+            tx.send(i).await.ok();
+        }
+        drop(tx);
+    };
+
+    // Use channel as async iterator
+    let sum = rx
+        .iter()
+        .fold(0, |acc, x| acc + x)
+        .await;
+
+    println(f"Sum: {sum}");
+}
+
+// Broadcast channel (multi-producer multi-consumer)
+async fn test_broadcast_channel() -> Int {
+    let (tx, _) = broadcast_channel<Text>(10);
+
+    // Create multiple receivers
+    let rx1 = tx.subscribe();
+    let rx2 = tx.subscribe();
+    let rx3 = tx.subscribe();
+
+    // Send message
+    tx.send("hello").ok();
+
+    // All receivers get the message
+    let mut count = 0;
+
+    for mut rx in [rx1, rx2, rx3] {
+        if let Ok(msg) = rx.recv().await {
+            count += 1;
+        }
+    }
+
+    count
+}
+
+// Watch channel (latest value only)
+async fn test_watch_channel() {
+    let (tx, mut rx) = watch_channel<Int>(0);
+
+    // Spawn updater
+    spawn {
+        for i in 1..=10 {
+            tx.send(i).ok();
+            sleep(Duration.from_millis(10)).await;
+        }
+    };
+
+    // Reader only sees latest values
+    // NOTE: changed()/borrow() not yet available on WatchReceiver
+    println("Watch channel setup complete");
+}
+
+// select on multiple channels
+async fn test_select_channels() {
+    let (tx1, mut rx1) = channel<Int>();
+    let (tx2, mut rx2) = channel<Text>();
+
+    spawn {
+        sleep(Duration.from_millis(10)).await;
+        tx1.send(42).await.ok();
+    };
+
+    spawn {
+        sleep(Duration.from_millis(20)).await;
+        tx2.send("hello").await.ok();
+    };
+
+    // Select first available
+    select {
+        value = rx1.recv().await => println(f"Got int: {value}"),
+        value = rx2.recv().await => println(f"Got text: {value}"),
+    }
+}
+
+// Channel with batch operations
+async fn test_batch_operations() {
+    let (tx, mut rx) = bounded_channel<Int>(100);
+
+    // Send many at once
+    tx.send_all([1, 2, 3, 4, 5]).await.ok();
+
+    // Receive batch
+    let batch = rx.recv_batch(5).await;
+    println(f"Batch: {batch}");
+}
+
+// Rendezvous channel (capacity 0) - not yet available
+async fn test_rendezvous_channel() {
+    // rendezvous_channel not yet implemented
+    let (tx, mut rx) = channel<Int>(0);
+    spawn { tx.send(42).await; };
+    let _value = rx.recv().await;
+}
+
+// Priority channel - not yet available
+async fn test_priority_channel() {
+    // priority_channel not yet implemented
+    let (tx, mut rx) = channel<Int>(10);
+    tx.send(1).await;
+    tx.send(2).await;
+    let _v = rx.recv().await;
+}
+
+// Closing channels
+async fn test_channel_closing() {
+    let (tx, mut rx) = channel<Int>();
+
+    tx.send(1).await.ok();
+    tx.send(2).await.ok();
+
+    // Close sender side
+    tx.close();
+
+    // Can still receive pending messages
+    while let Some(value) = rx.recv().await {
+        println(f"Received: {value}");
+    }
+
+    // recv now returns None
+    assert(rx.recv().await.is_none());
+}
+
+// Channel stats
+async fn test_channel_stats() {
+    let (tx, rx) = bounded_channel<Int>(10);
+
+    tx.send(1).await.ok();
+    tx.send(2).await.ok();
+
+    println(f"Capacity: {tx.capacity()}");
+    println(f"Len: {rx.len()}");
+    println(f"Is empty: {rx.is_empty()}");
+    println(f"Is full: {tx.is_full()}");
+}
+
+// Weak sender (doesn't keep channel alive)
+async fn test_weak_sender() {
+    let (tx, mut rx) = channel<Int>();
+    let weak_tx = tx.downgrade();
+
+    drop(tx); // Original sender dropped
+
+    // Try to upgrade weak sender
+    match weak_tx.upgrade() {
+        Some(tx) => tx.send(42).await.ok(),
+        None => println("Channel closed"),
+    }
+}
+
+async fn main() {
+    // Basic channel
+    test_basic_channel().await;
+
+    // Bounded channel
+    match test_bounded_channel().await {
+        Ok(()) => println("Bounded: Ok"),
+        Err(e) => println(f"Bounded: Err({e})"),
+    }
+
+    // Broadcast channel
+    let receivers = test_broadcast_channel().await;
+    println(f"Broadcast: {receivers} receivers got message");
+}

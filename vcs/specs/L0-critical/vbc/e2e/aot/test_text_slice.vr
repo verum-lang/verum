@@ -1,0 +1,20 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "Hello, World!";
+
+    // Test slice
+    let sub = s.slice(0, 5);
+    print(f"slice(0,5) = {sub}");
+
+    let sub2 = s.slice(7, 12);
+    print(f"slice(7,12) = {sub2}");
+
+    // Test that slice returns a new Text
+    print(f"sub len = {sub.len()}");
+    print(f"sub2 len = {sub2.len()}");
+
+    0
+}

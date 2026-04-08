@@ -1,0 +1,317 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, contracts, requires, ensures
+// @description: Test for requires/ensures clause parsing
+//
+// Note: This tests the SUPPORTED syntax:
+// - Functions: requires/ensures clauses directly (multiple keywords ok)
+// - Theorems: requires/ensures with comma-separated expressions (ONE keyword each)
+// - Protocols: only where ensures (not bare requires)
+// - Impl methods: NO requires/ensures clauses
+
+// ============================================================================
+// Basic Requires Clauses (functions)
+// Note: Functions support multiple requires keywords
+// ============================================================================
+
+fn single_requires(x: Int) -> Int
+    requires x > 0
+{
+    x * 2
+}
+
+fn multi_requires_separate(x: Int, y: Int) -> Int
+    requires x > 0
+    requires y > 0
+{
+    x + y
+}
+
+fn multi_requires_clauses(a: Int, b: Int, c: Int) -> Int
+    requires a > 0
+    requires b > 0
+    requires c > 0
+{
+    a + b + c
+}
+
+fn complex_requires(list: List<Int>, i: Int) -> Int
+    requires list.len() > 0
+    requires 0 <= i && i < list.len()
+{
+    list[i]
+}
+
+// ============================================================================
+// Basic Ensures Clauses (functions)
+// ============================================================================
+
+fn single_ensures(x: Int) -> Int
+    ensures result >= 0
+{
+    x * x
+}
+
+fn multi_ensures(x: Int) -> Int
+    ensures result >= 0
+    ensures result <= x * x
+{
+    x * x
+}
+
+fn ensures_with_result(a: Int, b: Int) -> Int
+    ensures result == a + b
+{
+    a + b
+}
+
+// ============================================================================
+// Combined Requires and Ensures
+// ============================================================================
+
+fn requires_and_ensures(x: Int) -> Int
+    requires x > 0
+    ensures result > 0
+{
+    x * 2
+}
+
+fn complex_contract(list: List<Int>, i: Int) -> Int
+    requires list.len() > 0
+    requires 0 <= i && i < list.len()
+    ensures result == list[i]
+{
+    list[i]
+}
+
+fn full_contract(a: Int, b: Int) -> Int
+    requires a >= 0
+    requires b >= 0
+    ensures result >= a
+    ensures result >= b
+{
+    a + b
+}
+
+// ============================================================================
+// Requires in Theorem Declarations (Contract-based syntax)
+// Note: Theorems support ONE requires keyword with comma-separated expressions
+// ============================================================================
+
+theorem theorem_single_requires(x: Int)
+    requires x > 0
+    ensures x >= 1
+{
+    proof by omega
+}
+
+theorem theorem_multi_requires(a: Int, b: Int)
+    requires a > 0, b > 0
+    ensures a + b > 0
+{
+    proof by omega
+}
+
+theorem theorem_combined_requires(x: Int, y: Int, z: Int)
+    requires x >= 0, y >= 0, z >= 0
+    ensures x + y + z >= 0
+{
+    proof by omega
+}
+
+// ============================================================================
+// Ensures in Theorem Declarations
+// ============================================================================
+
+theorem theorem_with_ensures(x: Int)
+    ensures x >= 0
+{
+    proof by omega
+}
+
+theorem theorem_full_contract(a: Int, b: Int)
+    requires a >= 0, b >= 0
+    ensures a + b >= 0
+{
+    proof by omega
+}
+
+// ============================================================================
+// Proposition-based Theorem Declarations (using : syntax)
+// These use `: proposition` instead of requires/ensures
+// ============================================================================
+
+theorem positive_square(x: Int): x * x >= 0 {
+    proof by omega
+}
+
+// ============================================================================
+// Requires in Lemma Declarations (Contract-based syntax)
+// ============================================================================
+
+lemma lemma_with_requires(n: Int)
+    requires n >= 0
+    ensures n * n >= 0
+{
+    proof by omega
+}
+
+lemma lemma_multi_requires(a: Int, b: Int, c: Int)
+    requires a <= b, b <= c
+    ensures a <= c
+{
+    proof by omega
+}
+
+// ============================================================================
+// Contract Expressions Types
+// ============================================================================
+
+fn arith_requires(a: Int, b: Int) -> Int
+    requires a + b > 0
+{
+    a + b
+}
+
+fn comparison_requires(a: Int, b: Int, c: Int) -> Int
+    requires a <= b
+    requires b <= c
+{
+    b
+}
+
+fn bool_requires(flag: Bool, x: Int) -> Int
+    requires flag || x > 0
+{
+    x
+}
+
+fn negation_requires(x: Int) -> Int
+    requires !(x < 0)
+{
+    x
+}
+
+fn trivial_requires(x: Int) -> Int
+    requires true
+{
+    x
+}
+
+fn literal_requires(x: Int) -> Int
+    requires 1 > 0
+{
+    x
+}
+
+// ============================================================================
+// Contracts in Protocol Methods (using where ensures only)
+// Note: protocols don't support bare 'requires' clauses
+// ============================================================================
+
+type Comparable is protocol {
+    fn compare(&self, other: &Self) -> Int;
+
+    fn less_than(&self, other: &Self) -> Bool;
+};
+
+type Container<T> is protocol {
+    fn get(&self, index: Int) -> Maybe<T>;
+
+    fn push(&mut self, elem: T);
+
+    fn len(&self) -> Int where result >= 0;
+};
+
+// ============================================================================
+// Contracts in Implementations
+// Note: impl methods do NOT support requires/ensures clauses
+// ============================================================================
+
+type Stack<T> is {
+    elements: List<T>,
+};
+
+implement Stack<T> {
+    fn push(&mut self, elem: T) {
+        self.elements.push(elem);
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        self.elements.pop()
+    }
+
+    fn peek(&self) -> Maybe<&T> {
+        self.elements.last()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.elements.len() == 0
+    }
+}
+
+// ============================================================================
+// Contracts in Async Functions
+// ============================================================================
+
+async fn async_requires(url: Text) -> Response
+    requires url.len() > 0
+{
+    fetch(url).await
+}
+
+async fn async_ensures(data: List<Int>) -> List<Int>
+    ensures result.len() <= data.len()
+{
+    process_async(data).await
+}
+
+// ============================================================================
+// Contracts with Context Requirements
+// Note: using clause comes BEFORE requires/ensures
+// ============================================================================
+
+fn db_contract(id: Int) -> Maybe<User>
+    using [Database]
+    requires id > 0
+{
+    Database.find_user(id)
+}
+
+fn logged_contract(action: Text)
+    using [Logger]
+    requires action.len() > 0
+{
+    Logger.log(action);
+}
+
+// ============================================================================
+// Contracts with Generic Types
+// ============================================================================
+
+fn generic_requires<T: Ord>(a: T, b: T) -> T
+    requires a <= b
+{
+    b
+}
+
+fn bounded_generic<T: Num>(x: T, y: T) -> T
+    requires x >= T.zero()
+    requires y >= T.zero()
+    ensures result >= T.zero()
+{
+    x + y
+}
+
+// ============================================================================
+// Contracts for Verification
+// ============================================================================
+
+fn factorial(n: Int) -> Int
+    requires n >= 0
+    ensures result >= 1
+{
+    if n == 0 { 1 } else { n * factorial(n - 1) }
+}

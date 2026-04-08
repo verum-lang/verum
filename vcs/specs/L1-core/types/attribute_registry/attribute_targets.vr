@@ -1,0 +1,374 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, attributes, targets, grammar-v2.7
+// @expect: pass
+// @description: AttributeTarget bitflags validation tests
+// @spec: docs/detailed/31-attribute-registry.md Section 3
+
+// =============================================================================
+// Test Suite: Extended Attribute Positions (Grammar v2.7)
+// Validates all attribute target positions defined in the grammar
+// =============================================================================
+
+// =============================================================================
+// Target: Function (0x0001)
+// Attributes valid on function definitions
+// =============================================================================
+
+@inline
+fn target_function_inline() {}
+
+@cold
+fn target_function_cold() {}
+
+@hot
+fn target_function_hot() {}
+
+@inline(always)
+fn target_function_inline_always() {}
+
+@inline(never)
+fn target_function_inline_never() {}
+
+@must_use
+fn target_function_must_use() -> Int { 42 }
+
+@verify(static)
+fn target_function_verify() {}
+
+@deprecated(since = "2.0")
+fn target_function_deprecated() {}
+
+@doc("Documentation for function")
+fn target_function_doc() {}
+
+// =============================================================================
+// Target: Type (0x0002)
+// Attributes valid on type definitions
+// =============================================================================
+
+@derive(Clone, Debug)
+type TargetTypeDeriveClone is { value: Int };
+
+@serialize
+type TargetTypeSerialize is { data: Text };
+
+@repr(C)
+type TargetTypeReprC is { x: i32, y: i32 };
+
+@align(16)
+type TargetTypeAlign16 is { data: [u8; 16] };
+
+@packed
+type TargetTypePacked is { a: u8, b: u32 };
+
+@verify(static)
+type TargetTypeVerify is Int{> 0};
+
+@deprecated(since = "3.0", reason = "Use NewType instead")
+type TargetTypeDeprecated is { old: Int };
+
+// =============================================================================
+// Target: Field (0x0004)
+// Attributes valid on record fields
+// =============================================================================
+
+type FieldAttributeTests is {
+    @serialize(rename = "field_id")
+    id: Int,
+
+    @validate(min_length = 1)
+    name: Text,
+
+    @deprecated(since = "2.0")
+    old_field: Maybe<Int>,
+
+    @skip_serialize
+    internal_only: Int,
+
+    @range(min = 0, max = 100)
+    percentage: Int,
+
+    @pattern("^[a-z]+$")
+    code: Text,
+
+    @doc("Field documentation")
+    documented: Int,
+
+    @align(8)
+    aligned_field: Int,
+};
+
+// =============================================================================
+// Target: Variant (0x0008)
+// Attributes valid on sum type variants
+// =============================================================================
+
+type VariantAttributeTests is
+    @default
+    DefaultVariant
+    | @serialize(value = 1)
+      NumericVariant
+    | @deprecated(since = "2.0")
+      OldVariant
+    | @doc("Documented variant")
+      DocVariant(Int)
+    | @serialize(rename = "custom_name")
+      RenamedVariant;
+
+// Multiple attributes on variants
+type MultiAttrVariants is
+    @default
+    @serialize(value = 0)
+    @doc("The default none value")
+    None
+    | @serialize(value = 1)
+      @doc("Contains a value")
+      Some(Int);
+
+// =============================================================================
+// Target: Param (0x0010)
+// Attributes valid on function parameters
+// =============================================================================
+
+fn param_attribute_tests(
+    @unused _ignored: Int,
+    @must_use result: &mut Int,
+    @doc("The input value") input: Int,
+    @deprecated(since = "2.0") old_param: Maybe<Text>,
+) {}
+
+// Self parameter with attributes
+type SelfParamTest is { value: Int };
+
+implement SelfParamTest {
+    fn method_with_self_attr(
+        @inline
+        &self,
+        @unused _ctx: Int,
+    ) -> Int {
+        self.value
+    }
+
+    fn mutable_self_attr(
+        &mut self,
+        @must_use new_value: Int,
+    ) {
+        self.value = new_value;
+    }
+}
+
+// =============================================================================
+// Target: MatchArm (0x0020)
+// Attributes valid on match arms
+// =============================================================================
+
+fn match_arm_attribute_tests(x: Int) -> Int {
+    match x {
+        @hot
+        n if n > 1000 => n * 2,
+
+        @cold
+        n if n < 0 => 0,
+
+        @likely
+        n if n > 0 => n,
+
+        @unlikely
+        0 => -1,
+
+        @unreachable
+        n if n < -1000 => panic("Unexpected"),
+
+        @default
+        _ => x,
+    }
+}
+
+// Multiple attributes on match arms
+fn multi_attr_match_arms(x: Int) -> Int {
+    match x {
+        @hot
+        @likely
+        @doc("Hot path for positive values")
+        n if n > 0 => n,
+
+        @cold
+        @unlikely
+        @doc("Cold path for negative values")
+        n if n < 0 => -n,
+
+        _ => 0,
+    }
+}
+
+// =============================================================================
+// Target: Module (0x0040)
+// Attributes valid on module definitions
+// =============================================================================
+
+@profile(application)
+module target_module_profile {}
+
+@deprecated(since = "2.0")
+module target_module_deprecated {}
+
+@doc("Module documentation")
+module target_module_doc {}
+
+// =============================================================================
+// Target: Impl (0x0080)
+// Attributes valid on implementation blocks
+// =============================================================================
+
+type ImplTargetTest is { value: Int };
+
+@specialize
+implement ImplTargetTest {}
+
+@doc("Implementation documentation")
+implement ImplTargetTest {}
+
+// =============================================================================
+// Target: Const (0x0100)
+// Attributes valid on constants
+// =============================================================================
+
+@deprecated(since = "2.0")
+const DEPRECATED_CONST: Int = 42;
+
+@doc("A documented constant")
+const DOCUMENTED_CONST: Int = 100;
+
+@used
+const USED_CONST: Int = 1;
+
+// =============================================================================
+// Target: Static (0x0200)
+// Attributes valid on static variables
+// =============================================================================
+
+@thread_local
+static THREAD_LOCAL_VAR: Int = 0;
+
+@deprecated(since = "2.0")
+static DEPRECATED_STATIC: Int = 0;
+
+// =============================================================================
+// Target: Loop (0x0400)
+// Attributes valid on loop expressions
+// =============================================================================
+
+fn loop_attribute_tests() {
+    @unroll(4)
+    for i in 0..100 {
+        // unrolled loop
+    }
+
+    let items = [1, 2, 3, 4, 5];
+    @parallel
+    for item in items {
+        // parallel loop
+    }
+
+    let vec = [1, 2, 3, 4, 5];
+    @vectorize
+    for i in 0..vec.len() {
+        // vectorized loop
+    }
+}
+
+// =============================================================================
+// Target: Expr (0x0800)
+// Attributes valid on expressions
+// =============================================================================
+
+fn expr_attribute_tests(condition: Bool) -> Int {
+    @likely
+    if condition {
+        return 42;
+    }
+
+    @unlikely
+    if !condition {
+        return 0;
+    }
+
+    @prefetch
+    let data = 100;
+
+    42
+}
+
+// =============================================================================
+// Target: Protocol (0x2000)
+// Attributes valid on protocol definitions
+// =============================================================================
+
+@marker
+type MarkerProtocol is protocol {};
+
+@object_safe
+type ObjectSafeProtocol is protocol {
+    fn method(&self) -> Int;
+};
+
+@deprecated(since = "2.0")
+type DeprecatedProtocol is protocol {};
+
+// =============================================================================
+// Combined: All (0xFFFF)
+// Attributes that can be applied anywhere
+// =============================================================================
+
+// @doc is valid on ALL targets
+@doc("Documented module")
+module doc_everywhere {}
+
+@doc("Documented type")
+type DocType is {
+    @doc("Documented field")
+    value: Int,
+};
+
+@doc("Documented variant type")
+type DocVariantType is
+    @doc("Documented variant")
+    A
+    | B;
+
+@doc("Documented function")
+fn doc_function(@doc("Documented param") x: Int) {
+    match x {
+        @doc("Documented arm")
+        n => n,
+    }
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Verify basic functionality
+    let t = TargetTypeDeriveClone { value: 42 };
+    assert(t.value == 42);
+
+    let f = FieldAttributeTests {
+        id: 1,
+        name: "test",
+        old_field: None,
+        internal_only: 100,
+        percentage: 50,
+        code: "abc",
+        documented: 42,
+        aligned_field: 8,
+    };
+    assert(f.id == 1);
+
+    let result = match_arm_attribute_tests(500);
+    assert(result == 500);
+
+    print("All attribute target tests passed!");
+}

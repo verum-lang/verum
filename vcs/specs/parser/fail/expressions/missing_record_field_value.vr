@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, record, field, error
+// @description: Record literal with missing field value after colon
+// @expected-error: E018
+
+type Point is { x: Int, y: Int };
+
+fn test() {
+    let p = Point { x: , y: 2 };  // Missing value for x
+}

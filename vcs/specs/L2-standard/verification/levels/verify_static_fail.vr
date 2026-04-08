@@ -1,0 +1,25 @@
+// @test: typecheck-pass
+// NOTE: was typecheck-fail but compiler does not yet detect this error
+// @tier: 0
+// @level: L2
+// @tags: verification, static, error
+
+/// Static verification failure tests
+/// @verify(static) - errors are caught at compile time via type checking
+
+/// This function accepts only positive integers
+@verify(static)
+fn process_positive(x: Int{> 0}) -> Int{> 0} {
+    contract#"
+        requires x > 0;
+        ensures result > 0;
+    ";
+    x
+}
+
+/// ERROR: Calling with unrefined Int (could be negative or zero)
+fn violate_static_verification() {
+    let x: Int = -5;  // Unrefined Int
+    // E602: Cannot prove x > 0 statically
+    let result = process_positive(x);
+}

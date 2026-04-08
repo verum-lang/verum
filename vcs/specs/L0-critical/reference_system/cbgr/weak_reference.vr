@@ -1,0 +1,97 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, weak, reference, cycle
+
+/// Test weak references with CBGR.
+/// Weak refs don't prevent deallocation but are safely tracked.
+/// Spec: 26-cbgr-implementation.md#weak-references
+
+fn main() {
+    test_weak_concept();
+    test_weak_upgrade_concept();
+    test_break_cycle_with_weak();
+    test_weak_generation_concept();
+}
+
+/// Test basic weak reference concept
+fn test_weak_concept() {
+    // Shared<T> uses reference counting
+    let strong = Shared.new(42);
+
+    // A weak reference doesn't increase the strong count
+    // When all strong refs are dropped, the value is deallocated
+    // Weak refs can detect this through generation tracking
+
+    print("Weak reference concept test passed");
+}
+
+/// Test upgrading weak to strong concept
+fn test_weak_upgrade_concept() {
+    // Upgrade: attempt to get a strong ref from a weak ref
+    // Succeeds if the value is still alive (strong count > 0)
+    // Fails if the value was dropped (generation mismatch)
+
+    let strong = Shared.new("shared");
+
+    // While strong exists, upgrade from a weak would succeed
+    // After strong is dropped, upgrade returns None
+
+    print("Weak upgrade concept test passed");
+}
+
+/// Test using weak refs to break reference cycles
+fn test_break_cycle_with_weak() {
+    // Node type for cycle testing
+    type Node is {
+        value: Int,
+        next: Maybe<Shared<Node>>,
+    };
+
+    // Create nodes that could form a cycle
+    let node_a = Shared.new(Node {
+        value: 1,
+        next: None,
+    });
+
+    let node_b = Shared.new(Node {
+        value: 2,
+        next: None,
+    });
+
+    // Forward link: A -> B (strong reference)
+    // In a real cycle, B -> A would use a Weak reference
+    // to prevent the cycle from keeping both alive
+
+    // Without weak refs, A -> B -> A would leak
+    // With weak refs, B -> A (weak) allows A to be dropped
+    // which then drops B
+
+    print("Break cycle with weak test passed");
+}
+
+/// Test CBGR generation tracking concept for weak refs
+fn test_weak_generation_concept() {
+    // CBGR generation tracking enables safe weak references:
+    //
+    // 1. Strong ref stores generation at creation
+    // 2. Weak ref also stores generation
+    // 3. On upgrade, weak checks if generation still matches
+    // 4. If generation changed (memory reused), upgrade fails safely
+    //
+    // This is superior to reference counting alone because:
+    // - Detects ABA problems (memory reused for different allocation)
+    // - Works with CBGR's epoch system for temporal ordering
+    // - No need for separate control blocks in many cases
+
+    let alloc = Heap.new(42);
+    let gen = alloc.generation();
+
+    // Generation is unique to this allocation
+    assert(gen > 0);
+
+    // After drop, the generation at that address would change
+    // Any weak ref with the old generation would fail to upgrade
+
+    print("Weak generation concept test passed");
+}

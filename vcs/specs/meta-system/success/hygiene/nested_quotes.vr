@@ -1,0 +1,176 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, nested, quotes, marks
+// @description: Test hygiene in deeply nested quote expressions
+
+// =============================================================================
+// BASIC NESTED QUOTES
+// =============================================================================
+
+meta fn outer_quote() -> TokenStream {
+    let outer_val = 100;
+
+    quote {
+        let a = ${outer_val};
+
+        // Inner quote is a separate scope
+        let inner_ts = quote {
+            let b = 200;
+            b
+        };
+
+        a
+    }
+}
+
+// =============================================================================
+// NESTED QUOTE WITH MARK FLIPPING
+// =============================================================================
+// Marks flip (toggle) when crossing quote boundaries
+
+meta fn mark_flip_demo() -> TokenStream {
+    quote {
+        // Outer quote: Mark M1 applies
+        let x = 1;  // Has mark M1
+
+        // Inner quote: M1 flips out, M2 applies
+        let nested = quote {
+            let y = 2;  // Has mark M2 only
+
+            // x is accessible because when we exit the inner quote,
+            // M1 flips back
+            x + y
+        };
+    }
+}
+
+// =============================================================================
+// THREE-LEVEL NESTING
+// =============================================================================
+
+meta(2) fn three_level_nesting() -> TokenStream {
+    let stage2_val = 1000;
+
+    quote(1) {
+        // Stage 1 meta code
+        meta fn generated_meta() -> TokenStream {
+            let stage1_val = 100;
+
+            quote(0) {
+                // Stage 0 runtime code
+                let stage0_val = 10;
+
+                // All values accessible through proper splicing
+                let total = ${stage2_val} + ${stage1_val} + stage0_val;
+                // total = 1000 + 100 + 10 = 1110
+            }
+        }
+    }
+}
+
+// =============================================================================
+// QUOTE RETURNING QUOTE
+// =============================================================================
+
+meta fn quote_factory(prefix: Text) -> TokenStream {
+    quote {
+        meta fn ${ident(prefix)}_generator() -> TokenStream {
+            quote {
+                fn ${ident(prefix)}_function() -> Int {
+                    42
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// NESTED SPLICES
+// =============================================================================
+
+meta fn nested_splices() -> TokenStream {
+    let outer = 10;
+    let items = [1, 2, 3];
+
+    quote {
+        let base = ${outer};
+
+        // Splice inside repetition
+        let results = [
+            $[for item in items {
+                ${outer * item}
+            }]
+        ];  // [10, 20, 30]
+    }
+}
+
+// =============================================================================
+// QUOTE WITH CLOSURE
+// =============================================================================
+
+meta fn quote_with_closure() -> TokenStream {
+    let captured = 50;
+
+    quote {
+        let local = 5;
+
+        let closure = |x: Int| -> Int {
+            // Closure captures local from quote scope
+            // And accesses spliced captured value
+            local + x + ${captured}
+        };
+
+        closure(10)  // 5 + 10 + 50 = 65
+    }
+}
+
+// =============================================================================
+// NESTED QUOTE WITH GENSYM
+// =============================================================================
+
+meta fn nested_gensym() -> TokenStream {
+    let outer_temp = gensym("temp");
+
+    quote {
+        let $outer_temp = 100;
+
+        let inner = {
+            // Inner block has its own gensym'd variable
+            let inner_helper = gensym("helper");
+
+            quote {
+                let $inner_helper = 200;
+                $inner_helper
+            }
+        };
+
+        $outer_temp
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_outer_quote() {
+    let result = @outer_quote();
+    assert(result == 100);
+}
+
+fn test_nested_splices() {
+    @nested_splices();
+    assert(base == 10);
+    assert(results == [10, 20, 30]);
+}
+
+fn test_quote_with_closure() {
+    let result = @quote_with_closure();
+    assert(result == 65);
+}
+
+fn main() {
+    test_outer_quote();
+    test_nested_splices();
+    test_quote_with_closure();
+}

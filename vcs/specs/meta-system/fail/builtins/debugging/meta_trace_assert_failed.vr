@@ -1,0 +1,16 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: Assertion failed
+// @description: Tests meta_trace_assert with failing condition
+// @tags: meta-system, builtins, debugging, trace, assertion
+
+// Test meta_trace_assert with false condition
+meta fn test_trace_assert_fail() -> () {
+    meta_trace_on();
+    meta_trace_assert(false, "expected value to be positive");  // ERROR: Assertion failed
+}
+
+fn main() {
+    @const test_trace_assert_fail();
+}

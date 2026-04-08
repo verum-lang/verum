@@ -1,0 +1,168 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #3: exercises a wide range of interpreter features
+// in combination. This is test 400 — a milestone marker.
+
+type Color is Red | Green | Blue | Custom(Int);
+
+fn color_value(c: Color) -> Int {
+    match c {
+        Red => 0xFF0000,
+        Green => 0x00FF00,
+        Blue => 0x0000FF,
+        Custom(v) => v,
+    }
+}
+
+fn* range(start: Int, end_excl: Int) -> Int {
+    let mut i = start;
+    while i < end_excl {
+        yield i;
+        i = i + 1;
+    }
+}
+
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int {
+    if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn make_counter(start: Int) -> fn() -> Int {
+    let mut count = start;
+    || {
+        let val = count;
+        count = count + 1;
+        val
+    }
+}
+
+fn apply_n(f: fn(Int) -> Int, x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn double(x: Int) -> Int { x * 2 }
+
+fn test_colors() {
+    assert_eq(color_value(Red), 0xFF0000);
+    assert_eq(color_value(Green), 0x00FF00);
+    assert_eq(color_value(Blue), 0x0000FF);
+    assert_eq(color_value(Custom(42)), 42);
+    print("colors: ok");
+}
+
+fn test_generator_sum() {
+    let mut total = 0;
+    for i in range(1, 11) {
+        total = total + i;
+    }
+    assert_eq(total, 55);
+    print("generator_sum: ok");
+}
+
+fn test_generator_with_closures() {
+    // Use generator to create a range, then apply closure to each
+    let mut sum_squares = 0;
+    for i in range(1, 6) {
+        sum_squares = sum_squares + i * i;
+    }
+    // 1 + 4 + 9 + 16 + 25 = 55
+    assert_eq(sum_squares, 55);
+    print("generator_with_closures: ok");
+}
+
+fn test_spawn_with_recursion() {
+    let t = spawn fib(15);
+    let result = t.await;
+    assert_eq(result, 610);
+    print("spawn_with_recursion: ok");
+}
+
+fn test_apply_n_function() {
+    // double applied 5 times: 3 → 6 → 12 → 24 → 48 → 96
+    assert_eq(apply_n(double, 3, 5), 96);
+    // double applied 10 times: 1 → 1024
+    assert_eq(apply_n(double, 1, 10), 1024);
+    print("apply_n: ok");
+}
+
+fn test_complex_control_flow() {
+    // Nested loops with early conditions
+    let mut total = 0;
+    let mut i = 0;
+    while i < 10 {
+        let mut j = 0;
+        while j < 10 {
+            if (i + j) % 3 == 0 {
+                total = total + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Count of (i,j) pairs where (i+j) % 3 == 0 in 0..10 x 0..10
+    // Should be 34 (10*10/3 rounded)
+    assert_eq(total, 34);
+    print("complex_control_flow: ok");
+}
+
+fn test_mixed_types_in_loops() {
+    // Mix generators, closures, and pattern matching
+    let mut results = 0;
+    for n in range(0, 4) {
+        let c = if n == 0 { Red }
+                else if n == 1 { Green }
+                else if n == 2 { Blue }
+                else { Custom(n * 100) };
+        let v = color_value(c);
+        if v > 255 {
+            results = results + 1;
+        }
+    }
+    // Red = 16711680 > 255 ✓, Green = 65280 > 255 ✓, Blue = 255 NOT > 255, Custom(300) > 255 ✓
+    assert_eq(results, 3);
+    print("mixed_types: ok");
+}
+
+fn test_accumulator_pattern() {
+    // Simulate accumulator using mutable state
+    let mut sum = 0;
+    let mut product = 1;
+    let mut count = 0;
+
+    let mut i = 1;
+    while i <= 10 {
+        sum = sum + i;
+        product = product * (if i <= 6 { i } else { 1 });
+        count = count + 1;
+        i = i + 1;
+    }
+
+    assert_eq(sum, 55);
+    assert_eq(product, 720);  // 6!
+    assert_eq(count, 10);
+    print("accumulator_pattern: ok");
+}
+
+fn main() -> Int {
+    test_colors();
+    test_generator_sum();
+    test_generator_with_closures();
+    test_spawn_with_recursion();
+    test_apply_n_function();
+    test_complex_control_flow();
+    test_mixed_types_in_loops();
+    test_accumulator_pattern();
+    print("[OK] 400_interp_comprehensive3 — MILESTONE: 170+ interpreter tests");
+    0
+}

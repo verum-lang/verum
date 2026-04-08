@@ -1,0 +1,34 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, partial-move, nested, negative-test
+
+/// Test partial move detection in nested structs with affine types at compile time.
+/// Moving a nested affine field partially moves the parent struct.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-partial-move
+
+// Affine inner type
+type affine Inner is {
+    value: Int,
+};
+
+// Outer struct containing affine field
+type Outer is {
+    inner: Inner,
+    count: Int,
+};
+
+fn main() {
+    let outer = Outer {
+        inner: Inner { value: 42 },
+        count: 100,
+    };
+
+    // Move out the nested affine struct - marks outer as partially moved
+    let inner = outer.inner;
+
+    // Cannot use outer as a whole
+    let copy = outer;  // COMPILE ERROR: type not found: outer (partially moved)
+}

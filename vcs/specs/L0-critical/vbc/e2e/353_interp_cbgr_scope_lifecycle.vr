@@ -1,0 +1,363 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, scope, lifecycle
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: CBGR reference lifecycle within scopes.
+// Tests reference validity across scope levels, passing references
+// to functions, returning values from functions, and nested scope
+// reference tracking with generation counters.
+
+// =============================================================================
+// Functions that take and return values via references
+// =============================================================================
+
+fn read_ref(r: &Int) -> Int {
+    *r
+}
+
+fn compute_via_ref(r: &Int) -> Int {
+    *r * *r + *r
+}
+
+fn add_refs(a: &Int, b: &Int) -> Int {
+    *a + *b
+}
+
+fn max_ref(a: &Int, b: &Int) -> Int {
+    if *a > *b { *a } else { *b }
+}
+
+fn min_ref(a: &Int, b: &Int) -> Int {
+    if *a < *b { *a } else { *b }
+}
+
+fn clamp_ref(val: &Int, lo: &Int, hi: &Int) -> Int {
+    if *val < *lo { *lo }
+    else if *val > *hi { *hi }
+    else { *val }
+}
+
+// =============================================================================
+// Functions that mutate through references
+// =============================================================================
+
+fn double_in_place(r: &mut Int) {
+    *r = *r * 2;
+}
+
+fn accumulate(dst: &mut Int, src: &Int) {
+    *dst = *dst + *src;
+}
+
+fn apply_n_times_increment(r: &mut Int, n: Int) {
+    let mut i = 0;
+    while i < n {
+        *r = *r + 1;
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Test: References created inside blocks
+// =============================================================================
+
+fn test_ref_in_block() {
+    let x = 42;
+    let val = {
+        let r = &x;
+        *r
+    };
+    assert_eq(val, 42);
+}
+
+fn test_ref_in_nested_blocks() {
+    let x = 10;
+    let val = {
+        let r1 = &x;
+        let inner = {
+            let r2 = &x;
+            *r2 + *r1
+        };
+        inner
+    };
+    assert_eq(val, 20);
+}
+
+fn test_mut_ref_in_block() {
+    let mut x = 0;
+    {
+        let r = &mut x;
+        *r = 100;
+    }
+    assert_eq(x, 100);
+}
+
+fn test_mut_ref_sequential_blocks() {
+    let mut x = 0;
+    {
+        let r = &mut x;
+        *r = 10;
+    }
+    assert_eq(x, 10);
+    {
+        let r = &mut x;
+        *r = 20;
+    }
+    assert_eq(x, 20);
+    {
+        let r = &mut x;
+        *r = 30;
+    }
+    assert_eq(x, 30);
+}
+
+// =============================================================================
+// Test: Reference validity at different scope levels
+// =============================================================================
+
+fn test_outer_ref_valid_in_inner() {
+    let x = 77;
+    let r = &x;
+    let result = {
+        // r still valid since x is in outer scope
+        *r + 23
+    };
+    assert_eq(result, 100);
+}
+
+fn test_multiple_scope_levels() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let ra = &a;
+    let result = {
+        let rb = &b;
+        let inner = {
+            let rc = &c;
+            *ra + *rb + *rc
+        };
+        inner
+    };
+    assert_eq(result, 6);
+}
+
+// =============================================================================
+// Test: Passing references to functions
+// =============================================================================
+
+fn test_pass_ref_to_function() {
+    let x = 42;
+    let result = read_ref(&x);
+    assert_eq(result, 42);
+}
+
+fn test_pass_ref_compute() {
+    let x = 5;
+    // x^2 + x = 25 + 5 = 30
+    assert_eq(compute_via_ref(&x), 30);
+}
+
+fn test_pass_two_refs() {
+    let a = 15;
+    let b = 27;
+    assert_eq(add_refs(&a, &b), 42);
+}
+
+fn test_pass_refs_max_min() {
+    let a = 30;
+    let b = 50;
+    assert_eq(max_ref(&a, &b), 50);
+    assert_eq(min_ref(&a, &b), 30);
+}
+
+fn test_pass_three_refs_clamp() {
+    let val = 75;
+    let lo = 10;
+    let hi = 50;
+    assert_eq(clamp_ref(&val, &lo, &hi), 50);
+
+    let val2 = 5;
+    assert_eq(clamp_ref(&val2, &lo, &hi), 10);
+
+    let val3 = 30;
+    assert_eq(clamp_ref(&val3, &lo, &hi), 30);
+}
+
+// =============================================================================
+// Test: Returning values (not references) from functions
+// =============================================================================
+
+fn make_value() -> Int {
+    42
+}
+
+fn make_sum(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn compute_with_local_refs(a: Int, b: Int) -> Int {
+    let ra = &a;
+    let rb = &b;
+    *ra * *rb
+}
+
+fn test_return_value() {
+    let x = make_value();
+    let r = &x;
+    assert_eq(*r, 42);
+}
+
+fn test_return_computed_value() {
+    let x = make_sum(15, 27);
+    let r = &x;
+    assert_eq(*r, 42);
+}
+
+fn test_function_internal_refs() {
+    let result = compute_with_local_refs(6, 7);
+    assert_eq(result, 42);
+}
+
+// =============================================================================
+// Test: Nested scope reference tracking
+// =============================================================================
+
+fn test_scope_chain() {
+    let mut total = 0;
+    let x = 10;
+    {
+        let y = 20;
+        {
+            let z = 30;
+            let rx = &x;
+            let ry = &y;
+            let rz = &z;
+            total = *rx + *ry + *rz;
+        }
+    }
+    assert_eq(total, 60);
+}
+
+fn test_loop_scope_refs() {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        // Each iteration creates a new scope for inner_val
+        let inner_val = i * 10;
+        let r = &inner_val;
+        sum = sum + *r;
+        i = i + 1;
+    }
+    // 0 + 10 + 20 + 30 + 40 = 100
+    assert_eq(sum, 100);
+}
+
+fn test_function_chain_with_refs() {
+    let a = 3;
+    let b = 4;
+    let c = 5;
+    let ab = add_refs(&a, &b);
+    let rab = &ab;
+    let result = add_refs(rab, &c);
+    assert_eq(result, 12);
+}
+
+// =============================================================================
+// Test: Mutation through references across function calls
+// =============================================================================
+
+fn test_mut_ref_across_function() {
+    let mut x = 5;
+    double_in_place(&mut x);
+    assert_eq(x, 10);
+    double_in_place(&mut x);
+    assert_eq(x, 20);
+}
+
+fn test_accumulate_via_ref() {
+    let mut total = 0;
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    accumulate(&mut total, &a);
+    assert_eq(total, 10);
+    accumulate(&mut total, &b);
+    assert_eq(total, 30);
+    accumulate(&mut total, &c);
+    assert_eq(total, 60);
+}
+
+fn test_apply_n_times() {
+    let mut x = 0;
+    apply_n_times_increment(&mut x, 7);
+    assert_eq(x, 7);
+    apply_n_times_increment(&mut x, 3);
+    assert_eq(x, 10);
+}
+
+// =============================================================================
+// Test: Complex lifecycle patterns
+// =============================================================================
+
+fn test_lifecycle_create_use_release() {
+    let mut results = 0;
+    let mut i = 0;
+    while i < 3 {
+        // Create a value, reference it, use it, let reference go out of scope
+        let val = (i + 1) * 100;
+        let r = &val;
+        results = results + *r;
+        i = i + 1;
+    }
+    // 100 + 200 + 300 = 600
+    assert_eq(results, 600);
+}
+
+fn test_interleaved_ref_mut() {
+    let mut x = 0;
+    // Read phase
+    let r = &x;
+    let snapshot1 = *r;
+    assert_eq(snapshot1, 0);
+    // Write phase
+    let rm = &mut x;
+    *rm = 50;
+    // Read phase again
+    let r2 = &x;
+    let snapshot2 = *r2;
+    assert_eq(snapshot2, 50);
+    // Write phase again
+    let rm2 = &mut x;
+    *rm2 = 100;
+    assert_eq(x, 100);
+}
+
+fn main() -> Int {
+    test_ref_in_block();
+    test_ref_in_nested_blocks();
+    test_mut_ref_in_block();
+    test_mut_ref_sequential_blocks();
+    test_outer_ref_valid_in_inner();
+    test_multiple_scope_levels();
+    test_pass_ref_to_function();
+    test_pass_ref_compute();
+    test_pass_two_refs();
+    test_pass_refs_max_min();
+    test_pass_three_refs_clamp();
+    test_return_value();
+    test_return_computed_value();
+    test_function_internal_refs();
+    test_scope_chain();
+    test_loop_scope_refs();
+    test_function_chain_with_refs();
+    test_mut_ref_across_function();
+    test_accumulate_via_ref();
+    test_apply_n_times();
+    test_lifecycle_create_use_release();
+    test_interleaved_ref_mut();
+    print("[OK] 353_interp_cbgr_scope_lifecycle");
+    0
+}

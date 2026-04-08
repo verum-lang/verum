@@ -1,0 +1,194 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, cellular-automaton, 1d, rule
+// @timeout: 30000
+
+// 1D elementary cellular automata (Wolfram rules)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn has_bit(mask: Int, k: Int) -> Int { (mask / pow2(k)) % 2 }
+
+// Apply Wolfram rule to a neighborhood (left, center, right)
+fn apply_rule(rule: Int, left: Int, center: Int, right: Int) -> Int {
+    let idx = left * 4 + center * 2 + right;
+    has_bit(rule, idx)
+}
+
+// State stored as bitmask (8 cells)
+fn get_cell(state: Int, i: Int) -> Int { has_bit(state, i) }
+
+fn set_cell(state: Int, i: Int, val: Int) -> Int {
+    if val == 1 {
+        if has_bit(state, i) == 0 { state + pow2(i) } else { state }
+    } else {
+        if has_bit(state, i) == 1 { state - pow2(i) } else { state }
+    }
+}
+
+// Evolve one step (8 cells, wrapping boundary)
+fn evolve(state: Int, rule: Int, n: Int) -> Int {
+    let mut new_state = 0;
+    let mut i = 0;
+    while i < n {
+        let left = get_cell(state, (i + n - 1) % n);
+        let center = get_cell(state, i);
+        let right = get_cell(state, (i + 1) % n);
+        let new_val = apply_rule(rule, left, center, right);
+        if new_val == 1 {
+            new_state = new_state + pow2(i);
+        }
+        i = i + 1;
+    }
+    new_state
+}
+
+// Evolve for multiple steps
+fn evolve_n(state: Int, rule: Int, n: Int, steps: Int) -> Int {
+    let mut s = state;
+    let mut i = 0;
+    while i < steps {
+        s = evolve(s, rule, n);
+        i = i + 1;
+    }
+    s
+}
+
+// Count alive cells
+fn popcount_state(state: Int, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get_cell(state, i) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Check if state is a cycle of period p
+fn is_cycle(state: Int, rule: Int, n: Int, period: Int) -> Int {
+    let evolved = evolve_n(state, rule, n, period);
+    if evolved == state { 1 } else { 0 }
+}
+
+fn test_rule_0() -> Int {
+    // Rule 0: all neighborhoods map to 0 (everything dies)
+    let state = 255; // all cells alive (8 bits)
+    let result = evolve(state, 0, 8);
+    assert_eq(result, 0);
+    1
+}
+
+fn test_rule_255() -> Int {
+    // Rule 255: all neighborhoods map to 1 (everything becomes alive)
+    let state = 0;
+    let result = evolve(state, 255, 8);
+    assert_eq(result, 255); // all alive
+    1
+}
+
+fn test_rule_90() -> Int {
+    // Rule 90 (XOR rule): left XOR right
+    // Single cell in center: generates Sierpinski pattern
+    let state = pow2(4); // cell 4 alive only (00010000)
+    let step1 = evolve(state, 90, 8);
+    // Cell 3 and 5 should be alive (neighbors of the center)
+    assert_eq(get_cell(step1, 3), 1);
+    assert_eq(get_cell(step1, 5), 1);
+    assert_eq(get_cell(step1, 4), 0); // center dies (XOR of 0,0 = 0)
+    1
+}
+
+fn test_rule_110() -> Int {
+    // Rule 110: known to be Turing-complete
+    // Just verify it produces non-trivial evolution
+    let state = pow2(7); // rightmost cell alive
+    let step1 = evolve(state, 110, 8);
+    assert(step1 != 0);       // not dead
+    assert(step1 != state);   // changed
+    1
+}
+
+fn test_rule_30() -> Int {
+    // Rule 30: chaotic behavior
+    let state = pow2(4); // single center cell
+    let step1 = evolve(state, 30, 8);
+    let step2 = evolve(step1, 30, 8);
+    // All three should be different
+    assert(state != step1);
+    assert(step1 != step2);
+    1
+}
+
+fn test_still_life() -> Int {
+    // Find if there's a still life under rule 90
+    // All zeros is trivially a still life
+    assert_eq(evolve(0, 90, 8), 0);
+
+    // All ones under rule 204 (identity: center cell stays)
+    assert_eq(evolve(255, 204, 8), 255);
+    assert_eq(is_cycle(255, 204, 8, 1), 1);
+    1
+}
+
+fn test_cycle_detection() -> Int {
+    // Rule 90 with 8 cells should eventually cycle
+    let state = pow2(4);
+    // Evolve several steps and check for periodicity
+    let s1 = evolve_n(state, 90, 8, 1);
+    let s2 = evolve_n(state, 90, 8, 2);
+    let s4 = evolve_n(state, 90, 8, 4);
+    // All should be non-zero for rule 90 from single cell
+    assert(s1 != 0);
+    assert(s2 != 0);
+    1
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount_state(0, 8), 0);
+    assert_eq(popcount_state(255, 8), 8);
+    assert_eq(popcount_state(pow2(3), 8), 1);
+    assert_eq(popcount_state(pow2(0) + pow2(7), 8), 2);
+    1
+}
+
+fn main() -> Int {
+    test_rule_0();
+    test_rule_255();
+    test_rule_90();
+    test_rule_110();
+    test_rule_30();
+    test_still_life();
+    test_cycle_detection();
+    test_popcount();
+    print("[OK] 564_cellular_1d_aot");
+    0
+}

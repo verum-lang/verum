@@ -1,0 +1,58 @@
+// @test: run
+// @expected-stdout: Permanent task started\nTransient task started\nTemporary task started\nPermanent restarted after failure\nTest completed
+// @tier: 0
+// @level: L2
+// @tags: async, spawn, restart, strategies
+// @description: Different restart policies for spawned tasks
+
+// Permanent - always restart
+async fn permanent_task(fail_once: &Shared<Bool>) {
+    println("Permanent task started");
+    let should_fail = fail_once.load();
+    if should_fail {
+        fail_once.store(false);
+        panic("Simulated failure");
+    }
+}
+
+// Transient - restart only on abnormal termination
+async fn transient_task() {
+    println("Transient task started");
+    // Normal completion - won't restart
+}
+
+// Temporary - never restart
+async fn temporary_task() {
+    println("Temporary task started");
+}
+
+async fn main() {
+    let fail_flag = Shared.new(true);
+
+    // Permanent: always restarted
+    let permanent = spawn_with_config(
+        SpawnConfig.new(),
+        permanent_task(&fail_flag),
+    );
+
+    // Transient: restart only on error
+    let transient = spawn_with_config(
+        SpawnConfig.new(),
+        transient_task(),
+    );
+
+    // Temporary: never restart
+    let temporary = spawn_with_config(
+        SpawnConfig.new(),
+        temporary_task(),
+    );
+
+    // Wait for restart to happen
+    sleep(Duration.from_millis(200)).await;
+
+    if !fail_flag.load() {
+        println("Permanent restarted after failure");
+    }
+
+    println("Test completed");
+}

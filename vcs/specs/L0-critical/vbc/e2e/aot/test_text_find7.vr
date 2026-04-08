@@ -1,0 +1,42 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "hello world";
+    let n = "world";
+
+    let self_bytes = s.as_bytes();
+    let needle_bytes = n.as_bytes();
+
+    // Inline comparison at position 6
+    let mut match_count = 0;
+    let nlen = needle_bytes.len();
+    for j in range(0, nlen) {
+        let a = self_bytes[6 + j];
+        let b = needle_bytes[j];
+        if a == b {
+            match_count = match_count + 1;
+        }
+    }
+    print(f"match_count={match_count}");
+
+    // Now nested: check each position
+    let slen = self_bytes.len();
+    let end = slen - nlen + 1;
+    for i in range(0, end) {
+        let mut mc = 0;
+        for j in range(0, nlen) {
+            let a = self_bytes[i + j];
+            let b = needle_bytes[j];
+            if a == b {
+                mc = mc + 1;
+            }
+        }
+        if mc == nlen {
+            print(f"full_match_at={i}");
+        }
+    }
+
+    0
+}

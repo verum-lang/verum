@@ -1,0 +1,375 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, binding, ref, mut, at
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int };
+type Event is Click { x: Int, y: Int } | Other;
+type Container is { field1: Int, field2: Int, field3: Nested };
+type Nested is { inner: Int };
+type Inner is { value: Int };
+type Data is { id: Int, value: Int };
+type Outer is { level1: Level1 };
+type Level1 is { level2: Level2 };
+type Level2 is { level3: Level3 };
+type Level3 is { value: Int };
+type Tree is Node(Heap<Tree>, Heap<Tree>, Int) | Leaf(Int);
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+
+// Helper functions
+fn use<T>(x: T) { }
+fn log<T>(x: T) { }
+fn save<T>(x: T) { }
+fn greet(name: Text, age: Int) { }
+fn log_event<T>(e: T) { }
+fn handle_click(x: Int, y: Int) { }
+fn log_unhandled<T>(e: T) { }
+fn store<T>(x: T) { }
+fn process<T>(x: T, y: T) { }
+fn handle_small<T>(x: T) { }
+fn handle_medium<T>(x: T) { }
+fn handle_large<T>(x: T) { }
+fn log_outer<T>(x: T) { }
+fn log_inner<T>(x: T) { }
+fn read<T>(x: T) { }
+fn compute(x: Int, y: Int) -> Int { x + y }
+fn create_point() -> Point { Point { x: 0, y: 0 } }
+fn compute_pair() -> (Int, Int) { (0, 0) }
+fn log_array<T>(x: T) { }
+fn process_first<T>(x: T) { }
+fn process_second<T>(x: T) { }
+fn process_rest<T>(x: T) { }
+fn handle<T>(x: T) { }
+fn log_item<T>(x: T) { }
+fn draw(x: Int, y: Int) { }
+fn log_all<T>(a: T, b: T, c: T, d: T, e: Int) { }
+fn even(n: Int) { }
+fn odd(n: Int) { }
+fn other(n: Int) { }
+fn positive<T>(x: T) { }
+fn negative<T>(x: T) { }
+fn zero<T>(x: T) { }
+fn process_tree<T>(root: T, left: T, right: T) { }
+fn compare(a: Int, b: Int, c: Int) { }
+fn process_leaf<T>(leaf: T, value: Int) { }
+
+fn test_simple_identifier_binding() {
+    let value = 42;
+
+    // Simple identifier binding
+    let x = value;
+    match value {
+        val => use(val),
+    };
+}
+
+fn test_mutable_binding_pattern() {
+    let result = 0;
+
+    // Mutable binding pattern
+    let mut counter = 0;
+    match result {
+        mut value => {
+            value += 1;
+            value
+        },
+    };
+}
+
+fn test_reference_binding_pattern() {
+    let stored = 42;
+
+    // Reference binding pattern
+    match stored {
+        ref value => read(value),
+    };
+}
+
+fn test_mutable_reference_binding_pattern() {
+    let mut container = Point { x: 10, y: 20 };
+
+    // Mutable reference binding pattern
+    match container {
+        ref mut value => {
+            value.x += 1;
+        },
+    };
+}
+
+fn test_at_pattern_binding() {
+    let maybe: Maybe<Int> = Maybe.Some(42);
+
+    // At-pattern binding (bind whole while destructuring)
+    match maybe {
+        whole @ Maybe.Some(inner) => {
+            log(whole);
+            use(inner);
+        },
+        Maybe.None => {},
+    };
+}
+
+fn test_at_pattern_with_struct() {
+    let person = Person { name: "Alice", age: 30 };
+
+    // At-pattern with struct
+    match person {
+        all @ Person { name, age } => {
+            save(all);
+            greet(name, age);
+        },
+    };
+}
+
+fn test_at_pattern_with_variant() {
+    let event = Event.Click { x: 10, y: 20 };
+
+    // At-pattern with variant
+    match event {
+        e @ Event.Click { x, y } => {
+            log_event(e);
+            handle_click(x, y);
+        },
+        other @ _ => log_unhandled(other),
+    };
+}
+
+fn test_at_pattern_with_tuple() {
+    let pair = (1, 2);
+
+    // At-pattern with tuple
+    match pair {
+        both @ (first, second) => {
+            store(both);
+            process(first, second);
+        },
+    };
+}
+
+fn test_at_pattern_with_range() {
+    let number = 5;
+
+    // At-pattern with range
+    match number {
+        small @ 1..=10 => handle_small(small),
+        medium @ 11..=100 => handle_medium(medium),
+        large @ _ => handle_large(large),
+    };
+}
+
+fn test_at_pattern_with_nested_destructuring() {
+    let nested = Container { field1: 1, field2: 2, field3: Nested { inner: 42 } };
+
+    // At-pattern with nested destructuring
+    match nested {
+        outer @ Container { field3: inner @ Nested { inner: value }, .. } => {
+            log_outer(outer);
+            log_inner(inner);
+            use(value);
+        },
+    };
+}
+
+fn test_ref_binding_in_let() {
+    let owned_value = 42;
+    let mut mutable_value = 10;
+
+    // Ref binding in let
+    let ref borrowed = owned_value;
+    let ref mut mutable_borrow = mutable_value;
+}
+
+fn test_combined_modifiers() {
+    let mut data = Container { field1: 1, field2: 2, field3: Nested { inner: 42 } };
+
+    // Combined modifiers
+    match data {
+        ref mut all @ Container { field1: ref value, .. } => {
+            read(value);
+        },
+    };
+}
+
+fn test_at_pattern_in_let_destructuring() {
+    // At-pattern in let destructuring
+    let whole @ Point { x, y } = create_point();
+    let both @ (a, b) = compute_pair();
+}
+
+fn test_binding_with_underscore_suffix() {
+    let result: Result<Int, Text> = Result.Ok(42);
+
+    // Binding with underscore suffix for unused
+    match result {
+        Result.Ok(value_) => {},
+        Result.Err(_error) => {},
+    };
+}
+
+fn test_multiple_bindings_in_same_pattern() {
+    let complex = Container { field1: 1, field2: 2, field3: Nested { inner: 42 } };
+
+    // Multiple bindings in same pattern
+    match complex {
+        Container {
+            field1: ref a,
+            field2: ref mut b,
+            field3: c @ Nested { inner },
+        } => {
+            read(a);
+            log(c);
+            use(inner);
+        },
+    };
+}
+
+fn test_at_pattern_in_array() {
+    let array = [1, 2, 3, 4, 5];
+
+    // At-pattern in array
+    match array {
+        all @ [first, second, rest @ ..] => {
+            log_array(all);
+            process_first(first);
+            process_second(second);
+            process_rest(rest);
+        },
+    };
+}
+
+fn test_at_pattern_in_or_pattern() {
+    let result: Result<Int, Int> = Result.Ok(42);
+
+    // At-pattern in or-pattern - using parentheses to group the or-pattern
+    match result {
+        success @ (Result.Ok(value) | Result.Err(value)) => {
+            log(success);
+            handle(value);
+        },
+    };
+}
+
+// Binding in function parameters
+fn process_point(whole @ Point { x, y }: Point) {
+    log(whole);
+    compute(x, y);
+}
+
+fn with_ref(ref value: Int) {
+    read(value);
+}
+
+fn with_mut(mut value: Int) {
+    value += 1;
+}
+
+fn test_binding_in_closure_parameters() {
+    // Binding in closure parameters
+    let f = |whole @ (a, b)| {
+        log(whole);
+        a + b
+    };
+}
+
+fn test_binding_in_for_loop() {
+    let entries: List<(Int, Int)> = Nil;
+
+    // Binding in for loop
+    for whole @ (key, value) in entries {
+        log(whole);
+        process(key, value);
+    }
+}
+
+fn test_binding_in_while_let() {
+    let iter: Maybe<Data> = Maybe.Some(Data { id: 1, value: 42 });
+
+    // Binding in while-let
+    while let Maybe.Some(item @ Data { id, value }) = iter {
+        log_item(item);
+        process(id, value);
+    }
+}
+
+fn test_binding_in_if_let() {
+    let maybe_point: Maybe<Point> = Maybe.Some(Point { x: 10, y: 20 });
+
+    // Binding in if-let
+    // NOTE: Double @ binding (whole @ inner @ Point) is not supported per grammar.
+    // Grammar only allows: identifier_pattern = [ 'ref' ] , [ 'mut' ] , identifier , [ '@' , pattern ]
+    // Using single @ binding instead:
+    if let Maybe.Some(whole @ Point { x, y }) = maybe_point {
+        log(whole);
+        draw(x, y);
+    }
+}
+
+fn test_binding_in_let_else() {
+    let maybe: Maybe<Int> = Maybe.Some(42);
+
+    // Binding in let-else
+    let whole @ Maybe.Some(value) = maybe else {
+        return;
+    };
+}
+
+fn test_complex_nested_binding() {
+    let deep = Outer { level1: Level1 { level2: Level2 { level3: Level3 { value: 42 } } } };
+
+    // Complex nested binding
+    match deep {
+        outer @ Outer {
+            level1: l1 @ Level1 {
+                level2: l2 @ Level2 {
+                    level3: l3 @ Level3 { value }
+                }
+            }
+        } => {
+            log_all(outer, l1, l2, l3, value);
+        },
+    };
+}
+
+fn test_binding_with_guards() {
+    let number = 5;
+
+    // Binding with guards
+    match number {
+        n @ 1..=100 if n % 2 == 0 => even(n),
+        n @ 1..=100 if n % 2 == 1 => odd(n),
+        n => other(n),
+    };
+}
+
+fn test_binding_with_where_clause() {
+    let value = 5;
+
+    // Binding with where clause
+    match value {
+        x if x > 0 => positive(x),
+        x if x < 0 => negative(x),
+        x => zero(x),
+    };
+}
+
+fn test_multiple_at_patterns_in_nested_structure() {
+    let tree = Tree.Node(
+        Heap(Tree.Leaf(1)),
+        Heap(Tree.Leaf(2)),
+        10
+    );
+
+    // Multiple at-patterns in nested structure
+    match tree {
+        root @ Tree.Node(left_tree, right_tree, root_val) => {
+            process_tree(root, left_tree, right_tree);
+        },
+        leaf @ Tree.Leaf(value) => {
+            process_leaf(leaf, value);
+        },
+    };
+}

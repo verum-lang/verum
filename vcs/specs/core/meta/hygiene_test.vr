@@ -1,0 +1,180 @@
+// =============================================================================
+// vcs/specs/stdlib/meta/hygiene_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L3
+// @tags: stdlib, meta, hygiene, context, macros, staged
+// @note: Hygiene — types resolve for typecheck
+// @description: Comprehensive tests for the Hygiene context facade which provides
+//               unified hygiene-related capabilities for macro identifier management.
+//
+// Coverage:
+// - Hygiene.gensym(): Generate unique identifiers
+// - Hygiene.call_site(): Get span at macro call site
+// - Hygiene.def_site(): Get span at macro definition site
+// - Hygiene.mixed_site(): Get mixed span
+// - Hygiene.invocation_id(): Get unique invocation identifier
+// - Hygiene.stage_unique_ident(): Generate stage-aware unique identifier
+//
+// Test Strategy:
+// - Method existence and return types
+// - Uniqueness guarantees for generated identifiers
+// - Span properties and file information
+// - Multi-stage identifier generation
+// =============================================================================
+
+module test.stdlib.meta.hygiene_test;
+
+mount core.meta.contexts.{Hygiene, InvocationId};
+mount core.meta.types.{Ident, Span};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// gensym Tests
+// =============================================================================
+
+@test
+fn test_gensym_basic() using [Hygiene] {
+    // Basic gensym should return an identifier
+    let id = Hygiene.gensym("temp");
+    assert(id.to_text().len() > 0);
+    assert(id.to_text().contains("temp"));
+
+    print("gensym basic test passed");
+}
+
+@test
+fn test_gensym_uniqueness() using [Hygiene] {
+    // Multiple gensyms with same base should produce unique identifiers
+    let id1 = Hygiene.gensym("var");
+    let id2 = Hygiene.gensym("var");
+    let id3 = Hygiene.gensym("var");
+
+    assert(id1 != id2);
+    assert(id2 != id3);
+    assert(id1 != id3);
+
+    // Different bases should also produce different identifiers
+    let id_a = Hygiene.gensym("alpha");
+    let id_b = Hygiene.gensym("beta");
+
+    assert(id_a != id_b);
+
+    print("gensym uniqueness test passed");
+}
+
+// =============================================================================
+// Span Site Tests
+// =============================================================================
+
+@test
+fn test_call_site() using [Hygiene] {
+    // call_site() returns the span at the macro call site
+    let span = Hygiene.call_site();
+
+    // Span should have valid file information
+    assert(span.file().len() > 0);
+
+    // Span should have valid line/column (positive values)
+    assert(span.start_line() > 0);
+    assert(span.start_column() >= 0);
+
+    print("call_site test passed");
+}
+
+@test
+fn test_def_site() using [Hygiene] {
+    // def_site() returns the span at the macro definition site
+    let span = Hygiene.def_site();
+
+    // Span should have valid file information
+    assert(span.file().len() > 0);
+
+    // Span should have valid line/column
+    assert(span.start_line() > 0);
+
+    print("def_site test passed");
+}
+
+@test
+fn test_mixed_site() using [Hygiene] {
+    // mixed_site() returns a span with:
+    // - visibility from call_site
+    // - resolution from def_site
+    let span = Hygiene.mixed_site();
+
+    // Span should have valid file information
+    assert(span.file().len() > 0);
+
+    // Span should have valid line/column
+    assert(span.start_line() > 0);
+
+    print("mixed_site test passed");
+}
+
+// =============================================================================
+// Invocation ID Tests
+// =============================================================================
+
+@test
+fn test_invocation_id() using [Hygiene] {
+    // invocation_id() returns a unique identifier for the current macro invocation
+    let id = Hygiene.invocation_id();
+
+    // ID should convert to non-empty text
+    assert(id.to_text().len() > 0);
+
+    print("invocation_id test passed");
+}
+
+// =============================================================================
+// Stage Unique Ident Tests
+// =============================================================================
+
+@test
+fn test_stage_unique_ident() using [Hygiene] {
+    // stage_unique_ident() generates identifiers that are unique across stages
+    let id1 = Hygiene.stage_unique_ident("staged_var");
+    let id2 = Hygiene.stage_unique_ident("staged_var");
+
+    // Even with same base, should be unique
+    assert(id1 != id2);
+
+    // Should contain the base string
+    assert(id1.to_text().contains("staged_var"));
+    assert(id2.to_text().contains("staged_var"));
+
+    print("stage_unique_ident test passed");
+}
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+
+// Test hygiene context usage in a meta function
+meta fn create_unique_binding(base: Text) -> Ast using [Hygiene] {
+    let unique_name = Hygiene.gensym(base);
+    let invoc = Hygiene.invocation_id();
+
+    quote {
+        let lift(unique_name) = 42;
+    }
+}
+
+@test
+fn test_hygiene_in_meta_function() {
+    // The meta function should generate unique bindings
+    @create_unique_binding("x");
+    @create_unique_binding("x");
+    // Both should compile without name collision
+
+    print("hygiene in meta function test passed");
+}

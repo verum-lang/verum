@@ -1,0 +1,133 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, graph, adjacency, traversal
+// @timeout: 10000
+
+// Graph as adjacency matrix (8x8 max, stored in 8 Arr8s flattened to one struct)
+// For simplicity, store edges as flat list: edges[k] = (u*8 + v)
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Edge list: edges_from[k] = source, edges_to[k] = dest
+// Compute degree of vertex v
+fn degree(edges_from: Arr8, edges_to: Arr8, n_edges: Int, v: Int) -> Int {
+    let mut d = 0;
+    let mut i = 0;
+    while i < n_edges {
+        if get(edges_from, i) == v { d = d + 1; }
+        if get(edges_to, i) == v { d = d + 1; }
+        i = i + 1;
+    }
+    d
+}
+
+// Check if edge exists
+fn has_edge(edges_from: Arr8, edges_to: Arr8, n_edges: Int, u: Int, v: Int) -> Int {
+    let mut i = 0;
+    while i < n_edges {
+        if get(edges_from, i) == u {
+            if get(edges_to, i) == v { return 1; }
+        }
+        if get(edges_from, i) == v {
+            if get(edges_to, i) == u { return 1; }
+        }
+        i = i + 1;
+    }
+    0
+}
+
+// Count vertices with degree > 0
+fn count_vertices(edges_from: Arr8, edges_to: Arr8, n_edges: Int, n: Int) -> Int {
+    let mut count = 0;
+    let mut v = 0;
+    while v < n {
+        if degree(edges_from, edges_to, n_edges, v) > 0 { count = count + 1; }
+        v = v + 1;
+    }
+    count
+}
+
+// Count triangles (undirected): for each triple (i,j,k), check if all 3 edges exist
+fn count_triangles(ef: Arr8, et: Arr8, ne: Int, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if has_edge(ef, et, ne, i, j) == 1 {
+                let mut k = j + 1;
+                while k < n {
+                    if has_edge(ef, et, ne, j, k) == 1 {
+                        if has_edge(ef, et, ne, i, k) == 1 {
+                            count = count + 1;
+                        }
+                    }
+                    k = k + 1;
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_degree() -> Int {
+    // Triangle: 0-1, 1-2, 0-2
+    let ef = Arr8 { d0: 0, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let et = Arr8 { d0: 1, d1: 2, d2: 2, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(degree(ef, et, 3, 0), 2);
+    assert_eq(degree(ef, et, 3, 1), 2);
+    assert_eq(degree(ef, et, 3, 2), 2);
+    assert_eq(degree(ef, et, 3, 3), 0);
+    1
+}
+
+fn test_edges() -> Int {
+    let ef = Arr8 { d0: 0, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let et = Arr8 { d0: 1, d1: 2, d2: 2, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(has_edge(ef, et, 3, 0, 1), 1);
+    assert_eq(has_edge(ef, et, 3, 1, 0), 1);
+    assert_eq(has_edge(ef, et, 3, 0, 3), 0);
+    assert_eq(count_vertices(ef, et, 3, 4), 3);
+    1
+}
+
+fn test_triangles() -> Int {
+    // K4 complete graph: 0-1, 0-2, 0-3, 1-2, 1-3, 2-3
+    let ef = Arr8 { d0: 0, d1: 0, d2: 0, d3: 1, d4: 1, d5: 2, d6: 0, d7: 0 };
+    let et = Arr8 { d0: 1, d1: 2, d2: 3, d3: 2, d4: 3, d5: 3, d6: 0, d7: 0 };
+    // K4 has C(4,3) = 4 triangles
+    assert_eq(count_triangles(ef, et, 6, 4), 4);
+    // Single triangle
+    let ef2 = Arr8 { d0: 0, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let et2 = Arr8 { d0: 1, d1: 2, d2: 2, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(count_triangles(ef2, et2, 3, 3), 1);
+    1
+}
+
+fn main() -> Int {
+    test_degree();
+    test_edges();
+    test_triangles();
+    print("DIFF_OK: graph_basic");
+    0
+}

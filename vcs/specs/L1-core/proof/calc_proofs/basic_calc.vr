@@ -1,0 +1,45 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, calc, calculational
+// @timeout: 5000
+
+/// Calculational proof chains.
+/// Grammar: calc_chain = 'calc' '{' calc_step { calc_step } '}'
+///          calc_step = expression calc_relation '{' proof_justification '}' expression
+///          calc_relation = '==' | '<' | '<=' | '>' | '>=' | '!='
+
+// Theorem with calc chain proof
+theorem calc_example(x: Int, y: Int)
+    requires x > 0, y > 0
+    proof {
+        calc {
+            x + y
+            > { by assumption } x
+            > { by assumption } 0
+        }
+    };
+
+// Equality chain
+theorem equality_chain(a: Int)
+    proof {
+        calc {
+            a + 0
+            == { by simp } a
+            == { by auto } a * 1
+        }
+    };
+
+// Inequality chain with mixed relations
+theorem inequality_chain(x: Int)
+    requires x > 5
+    proof {
+        calc {
+            x
+            > { by assumption } 5
+            >= { by omega } 5
+        }
+    };
+
+fn main() {
+    print("Calculational proof tests parsed");
+}

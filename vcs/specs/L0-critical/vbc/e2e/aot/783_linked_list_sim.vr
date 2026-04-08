@@ -1,0 +1,255 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, linked_list
+// @expected-exit: 0
+
+// Linked list simulation using arrays
+// value[i] = value of node i
+// nxt[i] = index of next node, -1 = null
+// head = index of head node
+
+// --- Insert at head ---
+// Returns new head index
+fn insert_head(values: List<Int>, nxt: List<Int>, head_idx: Int,
+               new_node: Int, new_val: Int) -> Int {
+    let mut v = values;
+    let mut n = nxt;
+    v[new_node] = new_val;
+    n[new_node] = head_idx;
+    new_node
+}
+
+// --- Insert at tail ---
+fn insert_tail(values: List<Int>, nxt: List<Int>, head_idx: Int,
+               new_node: Int, new_val: Int) -> Int {
+    let mut v = values;
+    let mut n = nxt;
+    v[new_node] = new_val;
+    n[new_node] = -1;
+
+    if head_idx == -1 {
+        new_node
+    } else {
+        // Traverse to tail
+        let mut cur = head_idx;
+        let mut done = 0;
+        while done == 0 {
+            if n[cur] == -1 {
+                n[cur] = new_node;
+                done = 1;
+            } else {
+                cur = n[cur];
+            }
+        }
+        head_idx
+    }
+}
+
+// --- List length ---
+fn list_length(nxt: List<Int>, head_idx: Int) -> Int {
+    let mut count = 0;
+    let mut cur = head_idx;
+    while cur != -1 {
+        count = count + 1;
+        cur = nxt[cur];
+    }
+    count
+}
+
+// --- Get value at position ---
+fn get_at(values: List<Int>, nxt: List<Int>, head_idx: Int, pos: Int) -> Int {
+    let mut cur = head_idx;
+    let mut i = 0;
+    while i < pos {
+        cur = nxt[cur];
+        i = i + 1;
+    }
+    values[cur]
+}
+
+// --- Reverse list ---
+// Returns new head index
+fn reverse_list(nxt: List<Int>, head_idx: Int) -> Int {
+    let mut n = nxt;
+    let mut prev = -1;
+    let mut cur = head_idx;
+    while cur != -1 {
+        let next_node = n[cur];
+        n[cur] = prev;
+        prev = cur;
+        cur = next_node;
+    }
+    prev
+}
+
+// --- Delete node at position ---
+// Returns new head index
+fn delete_at(nxt: List<Int>, head_idx: Int, pos: Int) -> Int {
+    let mut n = nxt;
+    if pos == 0 {
+        n[head_idx]
+    } else {
+        let mut cur = head_idx;
+        let mut i = 0;
+        while i < pos - 1 {
+            cur = n[cur];
+            i = i + 1;
+        }
+        let to_delete = n[cur];
+        n[cur] = n[to_delete];
+        head_idx
+    }
+}
+
+// --- Floyd's cycle detection ---
+// Returns 1 if cycle found, 0 otherwise
+fn has_cycle(nxt: List<Int>, head_idx: Int) -> Int {
+    if head_idx == -1 {
+        0
+    } else {
+        let mut slow = head_idx;
+        let mut fast = head_idx;
+        let mut found = 0;
+        let mut steps = 0;
+        let max_steps = 16;
+        while steps < max_steps {
+            // Move slow by 1
+            slow = nxt[slow];
+
+            // Move fast by 2
+            if nxt[fast] == -1 {
+                steps = max_steps; // break, no cycle
+            } else {
+                fast = nxt[nxt[fast]];
+                if fast == -1 {
+                    steps = max_steps; // break, no cycle
+                } else if slow == fast {
+                    found = 1;
+                    steps = max_steps; // break, cycle found
+                }
+            }
+            steps = steps + 1;
+        }
+        found
+    }
+}
+
+// --- Merge two sorted lists ---
+// Returns head index of merged list
+// Uses nodes from pool starting at merge_start for new allocation
+fn merge_sorted(val1: List<Int>, nxt1: List<Int>, h1: Int,
+                val2: List<Int>, nxt2: List<Int>, h2: Int,
+                out_vals: List<Int>, out_nxt: List<Int>) -> Int {
+    let mut ov = out_vals;
+    let mut on = out_nxt;
+    let mut c1 = h1;
+    let mut c2 = h2;
+    let mut out_idx = 0;
+    let mut head_out = 0;
+    let mut prev_out = -1;
+
+    while c1 != -1 {
+        if c2 != -1 {
+            if val1[c1] <= val2[c2] {
+                ov[out_idx] = val1[c1];
+                c1 = nxt1[c1];
+            } else {
+                ov[out_idx] = val2[c2];
+                c2 = nxt2[c2];
+            }
+        } else {
+            ov[out_idx] = val1[c1];
+            c1 = nxt1[c1];
+        }
+        on[out_idx] = -1;
+        if prev_out >= 0 {
+            on[prev_out] = out_idx;
+        }
+        prev_out = out_idx;
+        out_idx = out_idx + 1;
+    }
+    while c2 != -1 {
+        ov[out_idx] = val2[c2];
+        on[out_idx] = -1;
+        if prev_out >= 0 {
+            on[prev_out] = out_idx;
+        }
+        prev_out = out_idx;
+        c2 = nxt2[c2];
+        out_idx = out_idx + 1;
+    }
+
+    0
+}
+
+fn main() -> Int {
+    // Build a linked list: 10 -> 20 -> 30 -> 40
+    // Node 0: val=10, next=1
+    // Node 1: val=20, next=2
+    // Node 2: val=30, next=3
+    // Node 3: val=40, next=-1
+    let mut vals = [10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nxt =  [1,  2,  3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    let head = 0;
+
+    // Test 1: List length
+    let len = list_length(nxt, head);
+    assert_eq(len, 4);
+
+    // Test 2: Get value at position 0
+    let v0 = get_at(vals, nxt, head, 0);
+    assert_eq(v0, 10);
+
+    // Test 3: Get value at position 2
+    let v2 = get_at(vals, nxt, head, 2);
+    assert_eq(v2, 30);
+
+    // Test 4: Insert 5 at head -> 5, 10, 20, 30, 40
+    // Use node 4 for the new element
+    vals[4] = 5;
+    nxt[4] = 0;
+    let new_head = 4;
+    let new_len = list_length(nxt, new_head);
+    assert_eq(new_len, 5);
+
+    // Test 5: First element after insert at head
+    let v_head = get_at(vals, nxt, new_head, 0);
+    assert_eq(v_head, 5);
+
+    // Test 6: Reverse the original 4-node list: 10->20->30->40 becomes 40->30->20->10
+    let mut rev_nxt = [1, 2, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    let rev_head = reverse_list(rev_nxt, 0);
+    // After reverse: nxt = [_, _, _, _] with 3->2->1->0
+    // rev_head = 3
+    assert_eq(rev_head, 3);
+
+    // Test 7: No cycle in normal list
+    let mut no_cyc_nxt = [1, 2, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    let cyc = has_cycle(no_cyc_nxt, 0);
+    assert_eq(cyc, 0);
+
+    // Test 8: Cycle detection with cycle: 0->1->2->3->1
+    let mut cyc_nxt = [1, 2, 3, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    let cyc2 = has_cycle(cyc_nxt, 0);
+    assert_eq(cyc2, 1);
+
+    // Test 9: Merge two sorted lists
+    // List1: 1->3->5 (nodes 0,1,2)
+    // List2: 2->4->6 (nodes 0,1,2)
+    let mval1 = [1, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mnxt1 = [1, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    let mval2 = [2, 4, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mnxt2 = [1, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    let mut out_v = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out_n = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    let mhead = merge_sorted(mval1, mnxt1, 0, mval2, mnxt2, 0, out_v, out_n);
+    // Merged: 1,2,3,4,5,6 at indices 0,1,2,3,4,5
+    assert_eq(out_v[0], 1);
+
+    // Test 10: Merged list second element
+    assert_eq(out_v[1], 2);
+
+    print("783_linked_list_sim: PASS");
+    0
+}

@@ -1,0 +1,181 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: integration, comprehensive, multi-feature
+// @description: Integration test combining multiple language features
+
+type Player is { name: Text, score: Int, level: Int };
+
+implement Player {
+    fn new(name: Text) -> Player {
+        Player { name: name, score: 0, level: 1 }
+    }
+
+    fn add_score(&self, points: Int) -> Player {
+        let new_score = self.score + points;
+        let new_level = new_score / 100 + 1;
+        Player { name: self.name, score: new_score, level: new_level }
+    }
+
+    fn info(&self) -> Text {
+        f"{self.name}: score={self.score}, level={self.level}"
+    }
+}
+
+fn test_player_progression() -> Int {
+    let mut p = Player.new("Alice");
+    p = p.add_score(50);
+    p = p.add_score(75);
+    p = p.add_score(30);
+
+    if p.score != 155 {
+        print(f"FAIL player: score={p.score}");
+        return 1;
+    }
+    if p.level != 2 {
+        print(f"FAIL player: level={p.level}");
+        return 1;
+    }
+    print("  player_progression: OK");
+    0
+}
+
+type Action is Attack(Int) | Heal(Int) | Defend;
+
+fn apply_action(hp: Int, action: Action) -> Int {
+    match action {
+        Attack(dmg) => {
+            let result = hp - dmg;
+            if result < 0 { 0 } else { result }
+        }
+        Heal(amount) => {
+            let result = hp + amount;
+            if result > 100 { 100 } else { result }
+        }
+        Defend => hp,
+    }
+}
+
+fn test_combat() -> Int {
+    let mut hp = 100;
+    let actions = [Attack(30), Heal(10), Attack(50), Defend, Heal(20)];
+
+    let mut i = 0;
+    while i < actions.len() {
+        hp = apply_action(hp, actions[i]);
+        i = i + 1;
+    }
+
+    // 100 - 30 + 10 - 50 + 0 + 20 = 50
+    if hp != 50 {
+        print(f"FAIL combat: hp={hp}, expected 50");
+        return 1;
+    }
+    print("  combat: OK");
+    0
+}
+
+fn* prime_gen(limit: Int) -> Int {
+    let mut n = 2;
+    while n < limit {
+        let mut is_prime = true;
+        let mut d = 2;
+        while d * d <= n {
+            if n % d == 0 {
+                is_prime = false;
+                break;
+            }
+            d = d + 1;
+        }
+        if is_prime {
+            yield n;
+        }
+        n = n + 1;
+    }
+}
+
+fn test_prime_generator() -> Int {
+    let mut primes = List.new();
+    for p in prime_gen(30) {
+        primes.push(p);
+    }
+    // Primes < 30: 2,3,5,7,11,13,17,19,23,29 = 10
+    if primes.len() != 10 {
+        print(f"FAIL primes: count={primes.len()}, expected 10");
+        return 1;
+    }
+    if primes[0] != 2 || primes[9] != 29 {
+        print("FAIL primes: wrong values");
+        return 1;
+    }
+    print("  prime_generator: OK");
+    0
+}
+
+fn test_string_processing() -> Int {
+    let words = "the quick brown fox jumps over the lazy dog";
+    let parts = words.split(" ");
+    if parts.len() != 9 {
+        print(f"FAIL string: word count={parts.len()}, expected 9");
+        return 1;
+    }
+
+    // Count words > 3 chars
+    let mut long_words = 0;
+    let mut i = 0;
+    while i < parts.len() {
+        if parts[i].len() > 3 {
+            long_words = long_words + 1;
+        }
+        i = i + 1;
+    }
+    // quick(5) brown(5) jumps(5) over(4) lazy(4) = 5
+    if long_words != 5 {
+        print(f"FAIL string: long_words={long_words}, expected 5");
+        return 1;
+    }
+    print("  string_processing: OK");
+    0
+}
+
+fn test_concurrent_accumulate() -> Int {
+    let ch = Channel.new(10);
+
+    let t1 = spawn {
+        let mut s = 0;
+        let mut i = 1;
+        while i <= 10 {
+            s = s + i * i;
+            i = i + 1;
+        }
+        ch.send(s);
+        0
+    };
+
+    t1.await;
+    let sum_sq = match ch.recv() { Some(v) => v, None => -1 };
+    // 1+4+9+16+25+36+49+64+81+100 = 385
+    if sum_sq != 385 {
+        print(f"FAIL concurrent: sum_sq={sum_sq}, expected 385");
+        return 1;
+    }
+    print("  concurrent_accumulate: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Comprehensive Integration Tests:");
+    let mut failures = 0;
+    failures = failures + test_player_progression();
+    failures = failures + test_combat();
+    failures = failures + test_prime_generator();
+    failures = failures + test_string_processing();
+    failures = failures + test_concurrent_accumulate();
+
+    if failures == 0 {
+        print("All integration tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

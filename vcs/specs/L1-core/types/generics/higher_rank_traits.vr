@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, higher-rank
+
+/// Test for higher-rank types in Verum.
+/// Verum supports rank-2 polymorphic function types where quantified type
+/// parameters scope only within the function type: fn<R>(...) -> ...
+
+// Basic rank-2 function type: the function must work for ALL R
+type Transducer<A, B> is {
+    transform: fn<R>(fn(R, B) -> R) -> fn(R, A) -> R,
+};
+
+// Protocol with higher-rank method
+type Visitor is protocol {
+    fn visit<T>(&self, value: &T) -> &T;
+};
+
+// Protocol requiring generic callback
+type ForEach<T> is protocol {
+    fn for_each(&self, f: fn(&T));
+};
+
+// Implementation of ForEach for List
+implement<T> ForEach<T> for List<T> {
+    fn for_each(&self, f: fn(&T)) {
+        for item in self {
+            f(item);
+        }
+    }
+}
+
+// Function accepting a generic function argument
+fn apply_to_both<T, F: Fn(&T) -> &T>(a: &T, b: &T, f: F) -> (&T, &T) {
+    (f(a), f(b))
+}
+
+// Generic map over references
+fn map_refs<A, B, F: Fn(&A) -> B>(items: &List<A>, f: F) -> List<B> {
+    items.iter().map(|item| f(item)).collect()
+}
+
+// Rank-2 type: function that works with any reducer
+fn mapping_transducer<A, B>(f: fn(A) -> B) -> Transducer<A, B> {
+    Transducer {
+        transform: |step| |acc, a| step(acc, f(a)),
+    }
+}
+
+// Function demonstrating generic identity
+fn with_identity<T: Clone>(value: &T) -> T {
+    value.clone()
+}
+
+fn main() {
+    // Using ForEach
+    let items: List<Int> = [1, 2, 3, 4, 5];
+    items.for_each(|x| {
+        print(f"Value: {x}");
+    });
+
+    // Using apply_to_both with generic function
+    let a: Int = 10;
+    let b: Int = 20;
+    let (ref_a, ref_b) = apply_to_both(&a, &b, |x| x);
+    assert(*ref_a == 10);
+    assert(*ref_b == 20);
+
+    // Using map_refs with generic function
+    let numbers: List<Int> = [1, 2, 3];
+    let doubled: List<Int> = map_refs(&numbers, |x| *x * 2);
+    assert(doubled == [2, 4, 6]);
+
+    // Using with_identity
+    let value: Int = 42;
+    let result = with_identity(&value);
+    assert(result == 42);
+}

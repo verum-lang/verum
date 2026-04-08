@@ -1,0 +1,131 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, fallback
+
+/// Test tier fallback behavior: when higher-tier refs can't be proven safe,
+/// the system falls back to Tier 0 managed references with full CBGR protection.
+/// This ensures memory safety at the cost of runtime overhead (~15ns/access).
+///
+/// In the interpreter (Tier 0 execution), ALL references use managed tier.
+/// This test verifies that managed references provide correct safety guarantees.
+
+fn main() {
+    test_managed_fallback_safety();
+    print("  [OK] test_managed_fallback_safety");
+    test_managed_after_mutation();
+    print("  [OK] test_managed_after_mutation");
+    test_managed_after_drop();
+    print("  [OK] test_managed_after_drop");
+    test_managed_epoch_ordering();
+    print("  [OK] test_managed_epoch_ordering");
+    test_managed_transparent_usage();
+    print("  [OK] test_managed_transparent_usage");
+
+    print("All tier fallback tests passed!");
+}
+
+/// Test that managed references provide safety guarantees
+fn test_managed_fallback_safety() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Managed reference has all CBGR metadata
+    assert(ref_val.stored_generation() > 0);
+    assert(ref_val.epoch() > 0);
+    assert(ref_val.is_epoch_valid());
+
+    // Can safely dereference
+    assert(*ref_val == 42);
+}
+
+/// Test managed references detect mutations through epoch tracking
+fn test_managed_after_mutation() {
+    let mut value = Heap.new(10);
+
+    let epoch_before = Epoch.current();
+    *value = 20;
+    let epoch_after = Epoch.current();
+
+    // Mutation advances the epoch
+    assert(epoch_after > epoch_before);
+
+    // Value is correctly updated
+    assert(*value == 20);
+}
+
+/// Test managed reference behavior after explicit drop
+fn test_managed_after_drop() {
+    let epoch_before = Epoch.current();
+
+    let value = Heap.new(42);
+    let gen = value.generation();
+    assert(gen > 0);
+
+    // After drop, epoch advances
+    drop(value);
+    let epoch_after = Epoch.current();
+    assert(epoch_after > epoch_before);
+}
+
+/// Test epoch ordering with managed references
+fn test_managed_epoch_ordering() {
+    let value = Heap.new(42);
+
+    // Create reference at current epoch
+    let ref1: &Int = &*value;
+    let epoch1 = ref1.epoch();
+
+    // Advance epoch
+    Epoch.advance();
+
+    // Create new reference at new epoch
+    let ref2: &Int = &*value;
+    let epoch2 = ref2.epoch();
+
+    // Second reference has later epoch
+    assert(epoch2 > epoch1);
+
+    // Both references read the same value
+    assert(*ref1 == 42);
+    assert(*ref2 == 42);
+
+    // Both references are still valid
+    assert(ref1.is_epoch_valid());
+    assert(ref2.is_epoch_valid());
+}
+
+/// Test that managed tier usage is transparent to the programmer
+fn test_managed_transparent_usage() {
+    // Regular code doesn't need to know about tiers
+    let a = Heap.new(10);
+    let b = Heap.new(20);
+    let c = Heap.new(30);
+
+    let ra: &Int = &*a;
+    let rb: &Int = &*b;
+    let rc: &Int = &*c;
+
+    // Normal value operations work transparently
+    let sum = *ra + *rb + *rc;
+    assert(sum == 60);
+
+    // CBGR protection is automatic
+    assert(ra.is_epoch_valid());
+    assert(rb.is_epoch_valid());
+    assert(rc.is_epoch_valid());
+}
+
+// Supporting types
+
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+
+    fn advance() {
+        Runtime.advance_epoch();
+    }
+}

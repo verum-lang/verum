@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, sandbox, forbidden, random, nondeterministic
+// @description: Test that non-deterministic random operations are forbidden
+// @expected-error: E103
+
+// Random without seed is non-deterministic
+meta fn test_random() -> Int {
+    // Attempting to generate random number should fail with M301 ForbiddenOperation
+    // The `std.random.gen` function is in the random_functions allowlist
+    std.random.gen()
+}
+
+fn main() {
+    // Call meta function at compile time
+    @const assert(test_random() >= 0);
+}

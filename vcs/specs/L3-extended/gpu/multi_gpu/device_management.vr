@@ -1,0 +1,189 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, multi_gpu, device
+
+fn main() {
+    // Query available devices
+    let device_count = Device.gpu_count();
+    assert(device_count >= 1);
+
+    // Get device by index
+    let device0 = Device.gpu(0);
+
+    // Get all devices
+    let all_devices: List<Device> = Device.all_gpus();
+    assert(all_devices.len() == device_count);
+
+    // Device properties
+    let props = device0.properties();
+
+    let name = props.name;
+    let compute_capability = props.compute_capability;  // e.g., (8, 0) for SM 8.0
+    let total_memory = props.total_memory;
+    let multiprocessor_count = props.multiprocessor_count;
+    let max_threads_per_block = props.max_threads_per_block;
+    let max_block_dims = props.max_block_dims;  // (x, y, z)
+    let max_grid_dims = props.max_grid_dims;    // (x, y, z)
+    let warp_size = props.warp_size;
+    let clock_rate = props.clock_rate;
+    let memory_clock_rate = props.memory_clock_rate;
+    let memory_bus_width = props.memory_bus_width;
+    let l2_cache_size = props.l2_cache_size;
+
+    assert(max_threads_per_block >= 256);
+    assert(warp_size == 32);
+
+    // Device capabilities
+    assert(device0.supports_unified_memory());
+    assert(device0.supports_async_compute());
+
+    let has_tensor_cores = device0.supports_tensor_cores();
+    let has_ray_tracing = device0.supports_ray_tracing();
+
+    // Current device context
+    let current = Device.current();
+
+    // Set current device
+    Device.set_current(device0);
+    assert(Device.current() == device0);
+
+    // Scoped device selection
+    with_device(device0, || {
+        // All GPU operations in this block use device0
+        let t: Tensor<f32, [100]> = Tensor.zeros().to_current_device();
+        assert(t.device() == device0);
+    });
+
+    // Multi-device operations
+    if device_count >= 2 {
+        let device1 = Device.gpu(1);
+
+        // Check peer access capability
+        let can_access_0_from_1 = device0.can_access_peer(device1);
+        let can_access_1_from_0 = device1.can_access_peer(device0);
+
+        // Enable peer access (for direct GPU-to-GPU transfers)
+        if can_access_0_from_1 {
+            device0.enable_peer_access(device1);
+        }
+        if can_access_1_from_0 {
+            device1.enable_peer_access(device0);
+        }
+
+        // Query peer access link type
+        let link = device0.peer_link_type(device1);
+        match link {
+            PeerLinkType.NVLink => {},
+            PeerLinkType.PCIe => {},
+            PeerLinkType.None => {},
+        }
+
+        // Peer access bandwidth (approximate)
+        let bandwidth = device0.peer_bandwidth(device1);  // GB/s
+
+        // Allocate on specific device
+        let on_dev0: Tensor<f32, [1000]> = Tensor.zeros().to(device0);
+        let on_dev1: Tensor<f32, [1000]> = Tensor.zeros().to(device1);
+
+        assert(on_dev0.device() == device0);
+        assert(on_dev1.device() == device1);
+
+        // Transfer between devices
+        let transferred = on_dev0.to(device1);
+        assert(transferred.device() == device1);
+    }
+
+    // Device synchronization
+    device0.synchronize();  // Wait for all operations on device0
+
+    // Multi-device synchronization
+    Device.synchronize_all();  // Wait for all devices
+
+    // Streams per device
+    let stream0 = Stream.new(device0);
+
+    if device_count >= 2 {
+        let device1 = Device.gpu(1);
+        let stream1 = Stream.new(device1);
+
+        // Streams are device-specific
+        assert(stream0.device() == device0);
+        assert(stream1.device() == device1);
+    }
+
+    // Device memory info
+    let mem_info = device0.memory_info();
+    let total = mem_info.total;
+    let free = mem_info.free;
+    let used = mem_info.used;
+
+    assert(used + free <= total);
+
+    // Reset device (clear all allocations, reset state)
+    // WARNING: Destroys all context state
+    // device0.reset();
+
+    // Device selection by criteria
+    let best_device = Device.select_by(|props| {
+        // Prefer device with most memory
+        props.total_memory
+    });
+
+    let fastest = Device.select_by(|props| {
+        // Prefer device with highest compute capability
+        props.compute_capability.0 * 10 + props.compute_capability.1
+    });
+
+    // Device groups for multi-GPU algorithms
+    let gpu_group = DeviceGroup.new(all_devices);
+
+    // Check if all devices in group can peer access
+    if gpu_group.all_peers_accessible() {
+        gpu_group.enable_all_peer_access();
+    }
+
+    // Device affinity (for NUMA awareness)
+    let cpu_affinity = device0.cpu_affinity();  // NUMA nodes
+
+    // Power and thermal state
+    let power_state = device0.power_state();
+    let temperature = device0.temperature();
+    let power_usage = device0.power_usage();
+    let power_limit = device0.power_limit();
+
+    // Performance state (P-state)
+    let perf_state = device0.performance_state();
+
+    // Set power mode
+    // device0.set_power_mode(PowerMode.MaxPerformance);
+    // device0.set_power_mode(PowerMode.Balanced);
+    // device0.set_power_mode(PowerMode.PowerSaver);
+
+    // Device events for timing
+    let start = Event.new(device0);
+    let end = Event.new(device0);
+
+    let stream = Stream.new(device0);
+    stream.record(start);
+
+    // ... do work ...
+
+    stream.record(end);
+    stream.synchronize();
+
+    let elapsed_ms = Event.elapsed_time(start, end);
+
+    // ECC status
+    if device0.supports_ecc() {
+        let ecc_enabled = device0.ecc_enabled();
+        let ecc_errors = device0.ecc_error_counts();
+    }
+
+    // MIG (Multi-Instance GPU) support
+    if device0.supports_mig() {
+        let mig_devices = device0.mig_instances();
+        // Each MIG instance appears as separate device
+    }
+}

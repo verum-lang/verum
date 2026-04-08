@@ -1,0 +1,109 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, math, newton, float
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Newton's method sqrt approximation, verify convergence
+
+fn main() -> Int {
+    test_newton_sqrt_integers();
+    test_newton_sqrt_fractions();
+    test_newton_cbrt();
+    0
+}
+
+/// Newton's method for sqrt: x_{n+1} = (x_n + S/x_n) / 2
+fn newton_sqrt_val(s: Float) -> Float {
+    if s <= 0.0 {
+        0.0
+    } else {
+        let mut guess = if s > 1.0 { s / 2.0 } else { 1.0 };
+        let mut i = 0;
+        while i < 20 {
+            guess = (guess + s / guess) / 2.0;
+            i = i + 1;
+        }
+        guess
+    }
+}
+
+/// Check if float is close enough (within epsilon)
+fn approx_eq(a: Float, b: Float, eps: Float) -> Bool {
+    let diff = a - b;
+    let ad = if diff < 0.0 { -diff } else { diff };
+    ad < eps
+}
+
+/// Perfect squares: sqrt should converge to exact integer
+fn test_newton_sqrt_integers() {
+    let s4 = newton_sqrt_val(4.0);
+    let s9 = newton_sqrt_val(9.0);
+    let s16 = newton_sqrt_val(16.0);
+    let s25 = newton_sqrt_val(25.0);
+    let s100 = newton_sqrt_val(100.0);
+
+    assert_eq(approx_eq(s4 * s4, 4.0, 0.0001), true);
+    assert_eq(approx_eq(s9 * s9, 9.0, 0.0001), true);
+    assert_eq(approx_eq(s16 * s16, 16.0, 0.0001), true);
+    assert_eq(approx_eq(s25 * s25, 25.0, 0.0001), true);
+    assert_eq(approx_eq(s100 * s100, 100.0, 0.001), true);
+
+    assert_eq(approx_eq(s4, 2.0, 0.0001), true);
+    assert_eq(approx_eq(s9, 3.0, 0.0001), true);
+    assert_eq(approx_eq(s16, 4.0, 0.0001), true);
+    print("newton_sqrt_integers: pass\n");
+}
+
+/// Non-perfect squares
+fn test_newton_sqrt_fractions() {
+    let s2 = newton_sqrt_val(2.0);
+    let s3 = newton_sqrt_val(3.0);
+    let s05 = newton_sqrt_val(0.5);
+    let s001 = newton_sqrt_val(0.01);
+
+    assert_eq(approx_eq(s2, 1.41421356, 0.0001), true);
+    assert_eq(approx_eq(s3, 1.73205080, 0.0001), true);
+    assert_eq(approx_eq(s05, 0.70710678, 0.0001), true);
+    assert_eq(approx_eq(s001, 0.1, 0.0001), true);
+
+    assert_eq(approx_eq(s2 * s2, 2.0, 0.0001), true);
+    assert_eq(approx_eq(s3 * s3, 3.0, 0.0001), true);
+    print("newton_sqrt_fractions: pass\n");
+}
+
+/// Newton's method for cube root: x_{n+1} = (2*x_n + S/x_n^2) / 3
+fn newton_cbrt_val(s: Float) -> Float {
+    if s == 0.0 {
+        0.0
+    } else {
+        let neg = s < 0.0;
+        let sv = if neg { -s } else { s };
+        let mut guess = sv / 3.0;
+        if guess < 1.0 {
+            guess = 1.0;
+        }
+        let mut i = 0;
+        while i < 25 {
+            guess = (2.0 * guess + sv / (guess * guess)) / 3.0;
+            i = i + 1;
+        }
+        if neg { -guess } else { guess }
+    }
+}
+
+/// Verify cube roots
+fn test_newton_cbrt() {
+    let c8 = newton_cbrt_val(8.0);
+    let c27 = newton_cbrt_val(27.0);
+    let c125 = newton_cbrt_val(125.0);
+
+    assert_eq(approx_eq(c8, 2.0, 0.0001), true);
+    assert_eq(approx_eq(c27, 3.0, 0.0001), true);
+    assert_eq(approx_eq(c125, 5.0, 0.0001), true);
+
+    assert_eq(approx_eq(c8 * c8 * c8, 8.0, 0.001), true);
+    assert_eq(approx_eq(c27 * c27 * c27, 27.0, 0.001), true);
+    print("newton_cbrt: pass\n");
+}

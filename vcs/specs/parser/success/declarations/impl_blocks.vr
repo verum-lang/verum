@@ -1,0 +1,88 @@
+// @test: parse-pass
+// @level: L0
+// @tags: parser, declarations, impl, implement
+// @description: Test implementation block parsing
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+// Basic impl block
+implement Point {
+    fn new(x: Float, y: Float) -> Point {
+        Point { x, y }
+    }
+
+    fn origin() -> Point {
+        Point { x: 0.0, y: 0.0 }
+    }
+
+    fn distance(&self) -> Float {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+}
+
+// Protocol implementation
+type Show is protocol {
+    fn show(&self) -> Text;
+};
+
+implement Show for Point {
+    fn show(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+type Container<T> is {
+    value: T
+};
+
+// Generic impl
+implement<T> Container<T> {
+    fn new(value: T) -> Container<T> {
+        Container { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+}
+
+// Impl with bounds
+implement<T: Clone> Clone for Container<T> {
+    fn clone(&self) -> Container<T> {
+        Container { value: self.value.clone() }
+    }
+}
+
+// Impl with where clause
+implement<T> Debug for Container<T>
+    where type T: Debug
+{
+    fn debug(&self) -> Text {
+        f"Container({self.value.debug()})"
+    }
+}
+
+// Specialization
+@specialize
+implement Show for List<Text> {
+    fn show(&self) -> Text {
+        self.join(", ")
+    }
+}
+
+// Associated type in impl
+type Counter is {
+    count: Int
+};
+
+implement Iterator for Counter {
+    type Item is Int;
+
+    fn next(&mut self) -> Maybe<Int> {
+        self.count += 1;
+        Some(self.count)
+    }
+}

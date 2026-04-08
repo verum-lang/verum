@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, comprehension, error
+// @description: Comprehension with malformed for clause
+// @expected-error: E018
+
+fn test() {
+    let x = [x * 2 for in items];  // Missing pattern in for clause
+}

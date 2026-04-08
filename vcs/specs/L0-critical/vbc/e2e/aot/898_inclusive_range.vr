@@ -1,0 +1,42 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, ranges, inclusive, for-in
+// @expected-exit: 0
+
+// Test: inclusive range iteration (..=) and range methods.
+
+fn main() -> Int {
+    // Test 1: inclusive range sum 1..=10 = 55
+    let mut sum = 0;
+    for i in 1..=10 {
+        sum = sum + i;
+    }
+    if (sum != 55) {
+        print(f"FAIL test1: sum(1..=10)={sum}");
+        return 1;
+    }
+
+    // Test 2: single-element inclusive range
+    let mut count = 0;
+    for i in 5..=5 {
+        count = count + 1;
+    }
+    if (count != 1) {
+        print(f"FAIL test2: count(5..=5)={count}");
+        return 1;
+    }
+
+    // Test 3: empty exclusive range (5..5 = empty)
+    let mut empty_count = 0;
+    for i in 5..5 {
+        empty_count = empty_count + 1;
+    }
+    if (empty_count != 0) {
+        print(f"FAIL test3: count(5..5)={empty_count}");
+        return 1;
+    }
+
+    print("898_inclusive_range: PASS");
+    0
+}

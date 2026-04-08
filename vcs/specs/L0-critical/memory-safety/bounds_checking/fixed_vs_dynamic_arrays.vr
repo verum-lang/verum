@@ -1,0 +1,79 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, bounds-checking, type-inference, semantics
+// @description: Tests distinction between fixed-size and dynamic arrays
+
+/// Verum distinguishes between:
+/// 1. Fixed-size arrays [T; N] - size known at compile time, static bounds checking
+/// 2. Dynamic arrays [T] or List<T> - can grow/shrink, runtime bounds checking only
+
+fn main() {
+    test_fixed_array_valid();
+    test_dynamic_array_valid();
+    test_explicit_vs_inferred();
+}
+
+/// Test valid accesses on fixed-size arrays
+fn test_fixed_array_valid() {
+    // Explicit size annotation
+    let fixed: [Int; 5] = [1, 2, 3, 4, 5];
+
+    // All valid indices
+    let a = fixed[0];
+    let b = fixed[1];
+    let c = fixed[2];
+    let d = fixed[3];
+    let e = fixed[4];
+
+    assert(a + b + c + d + e == 15);
+}
+
+/// Test dynamic arrays without size constraints
+fn test_dynamic_array_valid() {
+    // No size annotation = dynamic
+    let dynamic = [1, 2, 3];
+
+    // Mutable dynamic can grow
+    let mut growing = [10, 20];
+    growing.push(30);
+    growing.push(40);
+
+    let sum = growing[0] + growing[1] + growing[2] + growing[3];
+    assert(sum == 100);
+}
+
+/// Test explicit type annotation vs inference
+fn test_explicit_vs_inferred() {
+    // Explicitly typed as fixed
+    let explicit_fixed: [Int; 3] = [1, 2, 3];
+
+    // Inferred as dynamic (no annotation)
+    let inferred_dynamic = [1, 2, 3];
+
+    // Both work for valid indices
+    assert(explicit_fixed[0] == inferred_dynamic[0]);
+    assert(explicit_fixed[1] == inferred_dynamic[1]);
+    assert(explicit_fixed[2] == inferred_dynamic[2]);
+
+    // Only dynamic can grow
+    let mut mutable_dynamic = inferred_dynamic;
+    mutable_dynamic.push(4);
+    assert(mutable_dynamic.len() == 4);
+}
+
+/// Function taking fixed-size array - bounds checked
+fn sum_fixed(arr: [Int; 3]) -> Int {
+    arr[0] + arr[1] + arr[2]
+}
+
+/// Function taking dynamic array - no static bounds check
+fn sum_dynamic(arr: [Int]) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < arr.len() {
+        total = total + arr[i];
+        i = i + 1;
+    }
+    total
+}

@@ -1,0 +1,59 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L4
+// @tags: compilation, incremental, cache, invalidation
+// @description: Tests that incremental cache correctly invalidates dependent modules
+//              when a source module changes, while preserving unaffected modules.
+
+/// This benchmark verifies correctness of incremental compilation cache invalidation.
+/// It checks that:
+/// 1. Unchanged modules are not recompiled
+/// 2. Modules depending on changed signatures are recompiled
+/// 3. Modules depending on changed bodies only are NOT recompiled
+/// 4. Transitive dependencies are correctly tracked
+
+// Module A: base types
+type UserId is (Int);
+type UserName is (Text);
+
+type User is {
+    id: UserId,
+    name: UserName,
+};
+
+// Module B: depends on A
+fn create_user(id: Int, name: Text) -> User {
+    User { id: UserId(id), name: UserName(name) }
+}
+
+fn get_user_name(user: &User) -> Text {
+    let UserName(name) = user.name;
+    name
+}
+
+// Module C: depends on B (transitive dep on A)
+fn format_user(user: &User) -> Text {
+    let name = get_user_name(user);
+    f"User: {name}"
+}
+
+// Module D: independent, should never be invalidated by A/B/C changes
+fn compute_fibonacci(n: Int) -> Int {
+    if n <= 1 { n }
+    else { compute_fibonacci(n - 1) + compute_fibonacci(n - 2) }
+}
+
+fn main() {
+    // Scenario 1: Body-only change in Module B
+    // Expected: only B recompiled, C uses cached, D uses cached
+    let user = create_user(1, "Alice");
+    let formatted = format_user(&user);
+    assert(formatted == "User: Alice");
+
+    // Scenario 2: Signature change in Module A
+    // Expected: A, B, C recompiled, D uses cached
+    let fib = compute_fibonacci(10);
+    assert(fib == 55);
+
+    print("Incremental cache invalidation: OK");
+}

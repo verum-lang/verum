@@ -1,0 +1,68 @@
+// @test: parse
+// @level: L0
+// @tags: parser, statements, provide, defer
+// @description: Test provide and defer statement parsing
+
+fn test_provide_statements() {
+    // Basic provide
+    provide Database = PostgresDatabase.new();
+
+    // Provide with alias
+    provide Database as primary = MainDatabase.new();
+
+    // Provide in block
+    provide Logger = ConsoleLogger.new() in {
+        Logger.info("In scoped block");
+    };
+
+    // Multiple provides
+    provide Database = PostgresDatabase.new();
+    provide Logger = FileLogger.new("/var/log/app.log");
+    provide Cache = RedisCache.new("localhost:6379");
+
+    // Nested provides
+    provide Database = TestDatabase.new() in {
+        provide Logger = TestLogger.new() in {
+            run_tests();
+        }
+    };
+}
+
+fn test_defer_statements() {
+    // Basic defer
+    defer cleanup();
+
+    // Defer with block
+    defer {
+        close_file();
+        release_lock();
+    };
+
+    // Defer with expression
+    defer file.close();
+
+    // Multiple defers (LIFO order)
+    defer step_3();
+    defer step_2();
+    defer step_1();
+
+    // Errdefer (error path only)
+    errdefer rollback();
+
+    // Errdefer with block
+    errdefer {
+        log_error();
+        cleanup_partial();
+    };
+
+    // Combined usage pattern
+    let file = open_file()?;
+    defer file.close();
+    errdefer file.delete();
+
+    let lock = acquire_lock();
+    defer lock.release();
+
+    // Process file
+    process(file)?;
+}

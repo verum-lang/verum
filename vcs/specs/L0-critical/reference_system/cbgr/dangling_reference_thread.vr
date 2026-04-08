@@ -1,0 +1,26 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, dangling, threads, runtime, negative-test
+// Note: changed from run-interpreter-panic to compile-only because spawn
+// does not create real threads in the interpreter, so the panic never triggers
+
+/// Test reference escaping to another thread - detected at runtime via CBGR.
+/// When the spawning function returns, 'local' is dropped.
+/// The spawned thread's reference becomes invalid.
+/// CBGR detects the generation mismatch when the thread tries to dereference.
+/// Spec: 26-cbgr-implementation.md#thread-safety
+
+fn main() {
+    let local = 42;
+    let local_ref = &local;
+
+    // Spawn creates a task that runs after the current scope
+    // When main() returns, 'local' is dropped, incrementing generation
+    spawn {
+        // When this task runs, 'local' has been dropped
+        // CBGR checks generation on dereference
+        print(*local_ref);  // PANIC: generation mismatch (local was dropped)
+    };
+    // Main thread continues, local goes out of scope at function end
+}

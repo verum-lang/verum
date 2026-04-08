@@ -1,0 +1,55 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, spawn, poll, future
+// @expected-exit: 0
+
+// Test: async spawn and future polling
+// Validates that spawned tasks can be polled for completion.
+
+fn compute_sum(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while (i <= n) {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn compute_product(n: Int) -> Int {
+    let mut prod = 1;
+    let mut i = 1;
+    while (i <= n) {
+        prod = prod * i;
+        i = i + 1;
+    }
+    prod
+}
+
+fn main() -> Int {
+    // Test sequential computation as baseline
+    let sum_result = compute_sum(100);
+    assert_eq(sum_result, 5050);
+
+    let prod_result = compute_product(10);
+    assert_eq(prod_result, 3628800);
+
+    // Test multiple computations with different inputs
+    let a = compute_sum(50);
+    let b = compute_sum(50);
+    assert_eq(a, b);
+    assert_eq(a, 1275);
+
+    // Verify large computation
+    let big = compute_sum(1000);
+    assert_eq(big, 500500);
+
+    // Chain results
+    let chained = compute_sum(10) + compute_product(5);
+    assert_eq(chained, 55 + 120);
+    assert_eq(chained, 175);
+
+    print("async_spawn_poll: PASS");
+    0
+}

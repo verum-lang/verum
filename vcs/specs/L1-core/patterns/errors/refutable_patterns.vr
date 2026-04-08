@@ -1,0 +1,108 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: patterns, errors, refutable
+// @expected-error: E088
+
+/// Test for refutable pattern errors.
+/// Refutable patterns can fail to match and must be used in appropriate contexts.
+
+fn main() {
+    // ========================================================================
+    // Refutable patterns in let bindings (ERROR)
+    // ========================================================================
+
+    type Maybe<T> is
+        | Some(T)
+        | None;
+
+    // E501: Refutable pattern in let binding
+    let Some(x) = get_maybe_value();  // ERROR: pattern may not match
+
+    // E501: Literal pattern in let
+    let 42 = some_int();  // ERROR: may not be 42
+
+    // E501: Specific variant in let
+    type Result<T, E> is
+        | Ok(T)
+        | Err(E);
+
+    let Ok(value) = get_result();  // ERROR: might be Err
+
+    // ========================================================================
+    // Refutable patterns in function parameters (ERROR)
+    // ========================================================================
+
+    // E501: Refutable pattern as function parameter
+    fn takes_some(Some(x): Maybe<Int>) -> Int {  // ERROR
+        x
+    }
+
+    // E501: Specific tuple in function parameter
+    fn takes_pair((1, 2): (Int, Int)) -> () {  // ERROR
+        ()
+    }
+
+    // ========================================================================
+    // Refutable patterns in for loops (ERROR)
+    // ========================================================================
+
+    // E501: Refutable pattern in for loop
+    let items: List<Maybe<Int>> = [];
+    for Some(x) in items {  // ERROR: items might contain None
+        print(f"{x}");
+    }
+
+    // E501: Specific variant in for
+    let results: List<Result<Int, Text>> = [];
+    for Ok(value) in results {  // ERROR: might be Err
+        print(f"{value}");
+    }
+
+    // ========================================================================
+    // Refutable patterns in closure parameters (ERROR)
+    // ========================================================================
+
+    // E501: Refutable pattern in closure
+    let extract = |Some(x): Maybe<Int>| x;  // ERROR
+
+    // ========================================================================
+    // Nested refutable patterns (ERROR)
+    // ========================================================================
+
+    // E501: Nested refutable pattern
+    let (Some(a), Some(b)) = get_pair();  // ERROR: either might be None
+
+    // E501: Refutable inside irrefutable
+    type Container is { value: Maybe<Int> };
+    let Container { value: Some(x) } = get_container();  // ERROR
+
+    // ========================================================================
+    // Or patterns with refutable alternatives (ERROR)
+    // ========================================================================
+
+    // E501: Partial or pattern
+    type Triple is
+        | A
+        | B
+        | C;
+
+    let Triple.A | Triple.B = get_triple();  // ERROR: doesn't cover C
+
+    // ========================================================================
+    // Guard patterns making irrefutable pattern refutable (ERROR)
+    // ========================================================================
+
+    // E501: Guard on otherwise irrefutable pattern in let
+    let x @ _ if x > 0 = some_int();  // ERROR: guard can fail
+}
+
+// Helper function declarations
+fn get_maybe_value() -> Maybe<Int> { None }
+fn some_int() -> Int { 42 }
+fn get_result() -> Result<Int, Text> { Err("error") }
+fn get_pair() -> (Maybe<Int>, Maybe<Int>) { (None, None) }
+fn get_container() -> Container { Container { value: None } }
+fn get_triple() -> Triple { Triple.C }
+
+// All examples above should produce E501 "Refutable pattern in irrefutable context" error

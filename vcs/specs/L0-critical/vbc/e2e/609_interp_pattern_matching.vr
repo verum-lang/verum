@@ -1,0 +1,276 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, pattern-matching, match, variants
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Interpreter e2e test: advanced pattern matching, variants, match expressions
+
+// =============================================================================
+// Sum types (variants) with match
+// =============================================================================
+
+type Shape is Circle(Int) | Square(Int) | Triangle { base: Int, height: Int };
+
+fn shape_area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Square(side) => side * side,
+        Triangle { base: b, height: h } => b * h / 2,
+    }
+}
+
+fn test_basic_match() {
+    assert_eq(shape_area(Circle(5)), 75);
+    assert_eq(shape_area(Square(4)), 16);
+    assert_eq(shape_area(Triangle { base: 6, height: 4 }), 12);
+    print("  test_basic_match: ok");
+}
+
+// =============================================================================
+// Option-like pattern (Maybe)
+// =============================================================================
+
+type Opt is ONone | OSome(Int);
+
+fn opt_unwrap_or(o: Opt, default_val: Int) -> Int {
+    match o {
+        ONone => default_val,
+        OSome(v) => v,
+    }
+}
+
+fn opt_map_double(o: Opt) -> Opt {
+    match o {
+        ONone => ONone,
+        OSome(v) => OSome(v * 2),
+    }
+}
+
+fn test_option_pattern() {
+    assert_eq(opt_unwrap_or(OSome(42), 0), 42);
+    assert_eq(opt_unwrap_or(ONone, -1), -1);
+
+    let doubled = opt_map_double(OSome(5));
+    assert_eq(opt_unwrap_or(doubled, 0), 10);
+
+    let none_doubled = opt_map_double(ONone);
+    assert_eq(opt_unwrap_or(none_doubled, -1), -1);
+    print("  test_option_pattern: ok");
+}
+
+// =============================================================================
+// Result-like pattern
+// =============================================================================
+
+type Outcome is Success(Int) | Failure(Int);
+
+fn safe_divide(a: Int, b: Int) -> Outcome {
+    if b == 0 {
+        Failure(-1)
+    } else {
+        Success(a / b)
+    }
+}
+
+fn outcome_is_success(o: Outcome) -> Bool {
+    match o {
+        Success(_) => true,
+        Failure(_) => false,
+    }
+}
+
+fn outcome_value(o: Outcome) -> Int {
+    match o {
+        Success(v) => v,
+        Failure(e) => e,
+    }
+}
+
+fn test_result_pattern() {
+    let r1 = safe_divide(10, 3);
+    assert_eq(outcome_is_success(r1), true);
+    assert_eq(outcome_value(r1), 3);
+
+    let r2 = safe_divide(10, 0);
+    assert_eq(outcome_is_success(r2), false);
+    assert_eq(outcome_value(r2), -1);
+    print("  test_result_pattern: ok");
+}
+
+// =============================================================================
+// Nested variant matching
+// =============================================================================
+
+type Tree is Leaf(Int) | Branch { left: Int, right: Int };
+
+fn tree_sum(t: Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Branch { left: l, right: r } => l + r,
+    }
+}
+
+fn test_tree_matching() {
+    assert_eq(tree_sum(Leaf(42)), 42);
+    assert_eq(tree_sum(Branch { left: 10, right: 20 }), 30);
+    print("  test_tree_matching: ok");
+}
+
+// =============================================================================
+// Match with literal patterns
+// =============================================================================
+
+fn classify_number(n: Int) -> Int {
+    if n < 0 {
+        -1
+    } else if n == 0 {
+        0
+    } else {
+        1
+    }
+}
+
+fn test_literal_patterns() {
+    assert_eq(classify_number(-5), -1);
+    assert_eq(classify_number(0), 0);
+    assert_eq(classify_number(10), 1);
+    print("  test_literal_patterns: ok");
+}
+
+// =============================================================================
+// Match returning variants
+// =============================================================================
+
+type Color is Red | Green | Blue | Custom(Int);
+
+fn next_color(c: Color) -> Color {
+    match c {
+        Red => Green,
+        Green => Blue,
+        Blue => Red,
+        Custom(v) => Custom(v + 1),
+    }
+}
+
+fn color_value(c: Color) -> Int {
+    match c {
+        Red => 0,
+        Green => 1,
+        Blue => 2,
+        Custom(v) => v,
+    }
+}
+
+fn test_variant_cycle() {
+    let c1 = Red;
+    let c2 = next_color(c1);
+    let c3 = next_color(c2);
+    let c4 = next_color(c3);
+    assert_eq(color_value(c1), 0);
+    assert_eq(color_value(c2), 1);
+    assert_eq(color_value(c3), 2);
+    assert_eq(color_value(c4), 0); // cycles back
+
+    let custom = Custom(100);
+    let custom2 = next_color(custom);
+    assert_eq(color_value(custom2), 101);
+    print("  test_variant_cycle: ok");
+}
+
+// =============================================================================
+// Pattern matching in loops
+// =============================================================================
+
+fn test_matching_in_loop() {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 10 {
+        let shape = if i % 3 == 0 {
+            Circle(i)
+        } else if i % 3 == 1 {
+            Square(i)
+        } else {
+            Triangle { base: i, height: i }
+        };
+        sum = sum + shape_area(shape);
+        i = i + 1;
+    }
+    // i=0: Circle(0) = 0
+    // i=1: Square(1) = 1
+    // i=2: Tri(2,2) = 2
+    // i=3: Circle(3) = 27
+    // i=4: Square(4) = 16
+    // i=5: Tri(5,5) = 12
+    // i=6: Circle(6) = 108
+    // i=7: Square(7) = 49
+    // i=8: Tri(8,8) = 32
+    // i=9: Circle(9) = 243
+    assert_eq(sum, 490);
+    print("  test_matching_in_loop: ok");
+}
+
+// =============================================================================
+// Using `is` keyword for type testing
+// =============================================================================
+
+fn test_is_pattern() {
+    let s1: Shape = Circle(5);
+    let s2: Shape = Square(3);
+
+    // Use match to test variant
+    let is_circle = match s1 {
+        Circle(_) => true,
+        _ => false,
+    };
+    assert_eq(is_circle, true);
+
+    let is_square = match s2 {
+        Square(_) => true,
+        _ => false,
+    };
+    assert_eq(is_square, true);
+    print("  test_is_pattern: ok");
+}
+
+// =============================================================================
+// Match with wildcard
+// =============================================================================
+
+fn count_circles(shapes: List<Int>) -> Int {
+    // Simulating shape types with ints: 0=circle, 1=square, 2=triangle
+    let mut count = 0;
+    let mut i = 0;
+    while i < shapes.len() {
+        if shapes[i] == 0 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_wildcard_patterns() {
+    let shapes: List<Int> = [0, 1, 0, 2, 0, 1, 0];
+    assert_eq(count_circles(shapes), 4);
+    print("  test_wildcard_patterns: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_basic_match();
+    test_option_pattern();
+    test_result_pattern();
+    test_tree_matching();
+    test_literal_patterns();
+    test_variant_cycle();
+    test_matching_in_loop();
+    test_is_pattern();
+    test_wildcard_patterns();
+    print("[OK] 609_interp_pattern_matching");
+    0
+}

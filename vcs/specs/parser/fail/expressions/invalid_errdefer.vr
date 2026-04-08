@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, errdefer, error
+// @description: errdefer statement without body
+// @expected-error: E045
+
+fn test() {
+    errdefer;  // errdefer requires expression or block
+}

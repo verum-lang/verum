@@ -1,0 +1,152 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stdlib, math
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT: Math functions via integer arithmetic.
+// Tests abs, gcd, lcm, factorial, fibonacci, combinations, ipow, mod_pow.
+
+fn int_abs(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn int_min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn int_max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn int_clamp(val: Int, lo: Int, hi: Int) -> Int { if val < lo { lo } else if val > hi { hi } else { val } }
+fn int_sign(x: Int) -> Int { if x > 0 { 1 } else if x < 0 { -1 } else { 0 } }
+
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { 0 } else if n == 1 { 1 }
+    else {
+        let mut x = n / 2;
+        let mut done = false;
+        let mut iters = 0;
+        while !done && iters < 100 {
+            let next = (x + n / x) / 2;
+            if next >= x { done = true; }
+            else { x = next; }
+            iters = iters + 1;
+        }
+        x
+    }
+}
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int { if b == 0 { a } else { gcd(b, a % b) } }
+fn lcm(a: Int, b: Int) -> Int { if a == 0 || b == 0 { 0 } else { (a / gcd(a, b)) * b } }
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { false } else if n < 4 { true } else if n % 2 == 0 { false }
+    else {
+        let mut i = 3;
+        let limit = isqrt(n);
+        let mut prime = true;
+        while i <= limit { if n % i == 0 { prime = false; } i = i + 2; }
+        prime
+    }
+}
+
+fn factorial(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 2;
+    while i <= n { result = result * i; i = i + 1; }
+    result
+}
+
+fn fibonacci(n: Int) -> Int {
+    if n <= 0 { 0 } else if n == 1 { 1 }
+    else {
+        let mut a = 0;
+        let mut b = 1;
+        let mut i = 2;
+        while i <= n { let next = a + b; a = b; b = next; i = i + 1; }
+        b
+    }
+}
+
+fn combinations(n: Int, k: Int) -> Int {
+    if k > n { 0 } else if k == 0 || k == n { 1 }
+    else {
+        let kk = if k > n - k { n - k } else { k };
+        let mut result = 1;
+        let mut i = 0;
+        while i < kk { result = result * (n - i); result = result / (i + 1); i = i + 1; }
+        result
+    }
+}
+
+fn ipow_fast(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut b = base;
+    let mut e = exp;
+    while e > 0 { if e % 2 == 1 { result = result * b; } b = b * b; e = e / 2; }
+    result
+}
+
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 { if e % 2 == 1 { result = (result * b) % m; } b = (b * b) % m; e = e / 2; }
+    result
+}
+
+// Tests
+
+fn test_basics() {
+    assert_eq(int_abs(5), 5);
+    assert_eq(int_abs(-5), 5);
+    assert_eq(int_min(3, 7), 3);
+    assert_eq(int_max(3, 7), 7);
+    assert_eq(int_clamp(5, 0, 10), 5);
+    assert_eq(int_clamp(-3, 0, 10), 0);
+    assert_eq(int_sign(42), 1);
+    assert_eq(int_sign(-7), -1);
+    assert_eq(int_sign(0), 0);
+}
+
+fn test_sqrt_gcd() {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(100), 10);
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(gcd(12, 8) * lcm(12, 8), 12 * 8);
+}
+
+fn test_primality() {
+    assert(is_prime(2));
+    assert(is_prime(3));
+    assert(!is_prime(4));
+    assert(is_prime(97));
+    assert(!is_prime(100));
+}
+
+fn test_factorial_fib() {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(10), 55);
+    assert_eq(fibonacci(20), 6765);
+}
+
+fn test_combinations_pow() {
+    assert_eq(combinations(5, 2), 10);
+    assert_eq(combinations(10, 5), 252);
+    assert_eq(ipow_fast(2, 10), 1024);
+    assert_eq(ipow_fast(3, 5), 243);
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    assert_eq(mod_pow(2, 12, 13), 1);
+}
+
+fn main() -> Int {
+    test_basics();
+    test_sqrt_gcd();
+    test_primality();
+    test_factorial_fib();
+    test_combinations_pow();
+    print("[OK] 138_stdlib_math_aot");
+    0
+}

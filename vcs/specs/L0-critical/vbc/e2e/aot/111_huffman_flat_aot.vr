@@ -1,0 +1,652 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, huffman, frequency, flat-array, compression
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT Huffman coding with frequency counting and tree building using flat arrays
+
+// Flat array of 16 integers with length tracking
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int,
+    len: Int
+};
+
+fn arr_new() -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0,
+        len: 0
+    }
+}
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn arr_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 },
+        len: a.len
+    }
+}
+
+// Count frequency of each symbol (0..max_sym) in the message array
+// Returns frequency array where freq[symbol] = count
+fn count_frequencies(msg: Arr16, freq: Arr16) -> Arr16 {
+    let mut f = freq;
+    let mut i = 0;
+    while i < msg.len {
+        let sym = arr_get(msg, i);
+        let old = arr_get(f, sym);
+        f = arr_set(f, sym, old + 1);
+        i = i + 1;
+    }
+    f
+}
+
+// Huffman tree stored as flat arrays:
+// - freq_arr: frequency of each node
+// - left_arr: left child index (-1 if leaf)
+// - right_arr: right child index (-1 if leaf)
+// - sym_arr: symbol for leaf nodes (-1 if internal)
+// - node_count: total nodes allocated
+type HuffTree is {
+    freq0: Int, freq1: Int, freq2: Int, freq3: Int,
+    freq4: Int, freq5: Int, freq6: Int, freq7: Int,
+    freq8: Int, freq9: Int, freq10: Int, freq11: Int,
+    freq12: Int, freq13: Int, freq14: Int, freq15: Int,
+    left0: Int, left1: Int, left2: Int, left3: Int,
+    left4: Int, left5: Int, left6: Int, left7: Int,
+    left8: Int, left9: Int, left10: Int, left11: Int,
+    left12: Int, left13: Int, left14: Int, left15: Int,
+    right0: Int, right1: Int, right2: Int, right3: Int,
+    right4: Int, right5: Int, right6: Int, right7: Int,
+    right8: Int, right9: Int, right10: Int, right11: Int,
+    right12: Int, right13: Int, right14: Int, right15: Int,
+    sym0: Int, sym1: Int, sym2: Int, sym3: Int,
+    sym4: Int, sym5: Int, sym6: Int, sym7: Int,
+    sym8: Int, sym9: Int, sym10: Int, sym11: Int,
+    sym12: Int, sym13: Int, sym14: Int, sym15: Int,
+    node_count: Int
+};
+
+fn ht_new() -> HuffTree {
+    HuffTree {
+        freq0: 0, freq1: 0, freq2: 0, freq3: 0,
+        freq4: 0, freq5: 0, freq6: 0, freq7: 0,
+        freq8: 0, freq9: 0, freq10: 0, freq11: 0,
+        freq12: 0, freq13: 0, freq14: 0, freq15: 0,
+        left0: -1, left1: -1, left2: -1, left3: -1,
+        left4: -1, left5: -1, left6: -1, left7: -1,
+        left8: -1, left9: -1, left10: -1, left11: -1,
+        left12: -1, left13: -1, left14: -1, left15: -1,
+        right0: -1, right1: -1, right2: -1, right3: -1,
+        right4: -1, right5: -1, right6: -1, right7: -1,
+        right8: -1, right9: -1, right10: -1, right11: -1,
+        right12: -1, right13: -1, right14: -1, right15: -1,
+        sym0: -1, sym1: -1, sym2: -1, sym3: -1,
+        sym4: -1, sym5: -1, sym6: -1, sym7: -1,
+        sym8: -1, sym9: -1, sym10: -1, sym11: -1,
+        sym12: -1, sym13: -1, sym14: -1, sym15: -1,
+        node_count: 0
+    }
+}
+
+fn ht_get_freq(t: HuffTree, i: Int) -> Int {
+    if i == 0 { t.freq0 } else if i == 1 { t.freq1 }
+    else if i == 2 { t.freq2 } else if i == 3 { t.freq3 }
+    else if i == 4 { t.freq4 } else if i == 5 { t.freq5 }
+    else if i == 6 { t.freq6 } else if i == 7 { t.freq7 }
+    else if i == 8 { t.freq8 } else if i == 9 { t.freq9 }
+    else if i == 10 { t.freq10 } else if i == 11 { t.freq11 }
+    else if i == 12 { t.freq12 } else if i == 13 { t.freq13 }
+    else if i == 14 { t.freq14 } else { t.freq15 }
+}
+
+fn ht_get_left(t: HuffTree, i: Int) -> Int {
+    if i == 0 { t.left0 } else if i == 1 { t.left1 }
+    else if i == 2 { t.left2 } else if i == 3 { t.left3 }
+    else if i == 4 { t.left4 } else if i == 5 { t.left5 }
+    else if i == 6 { t.left6 } else if i == 7 { t.left7 }
+    else if i == 8 { t.left8 } else if i == 9 { t.left9 }
+    else if i == 10 { t.left10 } else if i == 11 { t.left11 }
+    else if i == 12 { t.left12 } else if i == 13 { t.left13 }
+    else if i == 14 { t.left14 } else { t.left15 }
+}
+
+fn ht_get_right(t: HuffTree, i: Int) -> Int {
+    if i == 0 { t.right0 } else if i == 1 { t.right1 }
+    else if i == 2 { t.right2 } else if i == 3 { t.right3 }
+    else if i == 4 { t.right4 } else if i == 5 { t.right5 }
+    else if i == 6 { t.right6 } else if i == 7 { t.right7 }
+    else if i == 8 { t.right8 } else if i == 9 { t.right9 }
+    else if i == 10 { t.right10 } else if i == 11 { t.right11 }
+    else if i == 12 { t.right12 } else if i == 13 { t.right13 }
+    else if i == 14 { t.right14 } else { t.right15 }
+}
+
+fn ht_get_sym(t: HuffTree, i: Int) -> Int {
+    if i == 0 { t.sym0 } else if i == 1 { t.sym1 }
+    else if i == 2 { t.sym2 } else if i == 3 { t.sym3 }
+    else if i == 4 { t.sym4 } else if i == 5 { t.sym5 }
+    else if i == 6 { t.sym6 } else if i == 7 { t.sym7 }
+    else if i == 8 { t.sym8 } else if i == 9 { t.sym9 }
+    else if i == 10 { t.sym10 } else if i == 11 { t.sym11 }
+    else if i == 12 { t.sym12 } else if i == 13 { t.sym13 }
+    else if i == 14 { t.sym14 } else { t.sym15 }
+}
+
+fn ht_set_freq(t: HuffTree, i: Int, v: Int) -> HuffTree {
+    HuffTree {
+        freq0: if i == 0 { v } else { t.freq0 },
+        freq1: if i == 1 { v } else { t.freq1 },
+        freq2: if i == 2 { v } else { t.freq2 },
+        freq3: if i == 3 { v } else { t.freq3 },
+        freq4: if i == 4 { v } else { t.freq4 },
+        freq5: if i == 5 { v } else { t.freq5 },
+        freq6: if i == 6 { v } else { t.freq6 },
+        freq7: if i == 7 { v } else { t.freq7 },
+        freq8: if i == 8 { v } else { t.freq8 },
+        freq9: if i == 9 { v } else { t.freq9 },
+        freq10: if i == 10 { v } else { t.freq10 },
+        freq11: if i == 11 { v } else { t.freq11 },
+        freq12: if i == 12 { v } else { t.freq12 },
+        freq13: if i == 13 { v } else { t.freq13 },
+        freq14: if i == 14 { v } else { t.freq14 },
+        freq15: if i == 15 { v } else { t.freq15 },
+        left0: t.left0, left1: t.left1, left2: t.left2, left3: t.left3,
+        left4: t.left4, left5: t.left5, left6: t.left6, left7: t.left7,
+        left8: t.left8, left9: t.left9, left10: t.left10, left11: t.left11,
+        left12: t.left12, left13: t.left13, left14: t.left14, left15: t.left15,
+        right0: t.right0, right1: t.right1, right2: t.right2, right3: t.right3,
+        right4: t.right4, right5: t.right5, right6: t.right6, right7: t.right7,
+        right8: t.right8, right9: t.right9, right10: t.right10, right11: t.right11,
+        right12: t.right12, right13: t.right13, right14: t.right14, right15: t.right15,
+        sym0: t.sym0, sym1: t.sym1, sym2: t.sym2, sym3: t.sym3,
+        sym4: t.sym4, sym5: t.sym5, sym6: t.sym6, sym7: t.sym7,
+        sym8: t.sym8, sym9: t.sym9, sym10: t.sym10, sym11: t.sym11,
+        sym12: t.sym12, sym13: t.sym13, sym14: t.sym14, sym15: t.sym15,
+        node_count: t.node_count
+    }
+}
+
+fn ht_set_left(t: HuffTree, i: Int, v: Int) -> HuffTree {
+    HuffTree {
+        freq0: t.freq0, freq1: t.freq1, freq2: t.freq2, freq3: t.freq3,
+        freq4: t.freq4, freq5: t.freq5, freq6: t.freq6, freq7: t.freq7,
+        freq8: t.freq8, freq9: t.freq9, freq10: t.freq10, freq11: t.freq11,
+        freq12: t.freq12, freq13: t.freq13, freq14: t.freq14, freq15: t.freq15,
+        left0: if i == 0 { v } else { t.left0 },
+        left1: if i == 1 { v } else { t.left1 },
+        left2: if i == 2 { v } else { t.left2 },
+        left3: if i == 3 { v } else { t.left3 },
+        left4: if i == 4 { v } else { t.left4 },
+        left5: if i == 5 { v } else { t.left5 },
+        left6: if i == 6 { v } else { t.left6 },
+        left7: if i == 7 { v } else { t.left7 },
+        left8: if i == 8 { v } else { t.left8 },
+        left9: if i == 9 { v } else { t.left9 },
+        left10: if i == 10 { v } else { t.left10 },
+        left11: if i == 11 { v } else { t.left11 },
+        left12: if i == 12 { v } else { t.left12 },
+        left13: if i == 13 { v } else { t.left13 },
+        left14: if i == 14 { v } else { t.left14 },
+        left15: if i == 15 { v } else { t.left15 },
+        right0: t.right0, right1: t.right1, right2: t.right2, right3: t.right3,
+        right4: t.right4, right5: t.right5, right6: t.right6, right7: t.right7,
+        right8: t.right8, right9: t.right9, right10: t.right10, right11: t.right11,
+        right12: t.right12, right13: t.right13, right14: t.right14, right15: t.right15,
+        sym0: t.sym0, sym1: t.sym1, sym2: t.sym2, sym3: t.sym3,
+        sym4: t.sym4, sym5: t.sym5, sym6: t.sym6, sym7: t.sym7,
+        sym8: t.sym8, sym9: t.sym9, sym10: t.sym10, sym11: t.sym11,
+        sym12: t.sym12, sym13: t.sym13, sym14: t.sym14, sym15: t.sym15,
+        node_count: t.node_count
+    }
+}
+
+fn ht_set_right(t: HuffTree, i: Int, v: Int) -> HuffTree {
+    HuffTree {
+        freq0: t.freq0, freq1: t.freq1, freq2: t.freq2, freq3: t.freq3,
+        freq4: t.freq4, freq5: t.freq5, freq6: t.freq6, freq7: t.freq7,
+        freq8: t.freq8, freq9: t.freq9, freq10: t.freq10, freq11: t.freq11,
+        freq12: t.freq12, freq13: t.freq13, freq14: t.freq14, freq15: t.freq15,
+        left0: t.left0, left1: t.left1, left2: t.left2, left3: t.left3,
+        left4: t.left4, left5: t.left5, left6: t.left6, left7: t.left7,
+        left8: t.left8, left9: t.left9, left10: t.left10, left11: t.left11,
+        left12: t.left12, left13: t.left13, left14: t.left14, left15: t.left15,
+        right0: if i == 0 { v } else { t.right0 },
+        right1: if i == 1 { v } else { t.right1 },
+        right2: if i == 2 { v } else { t.right2 },
+        right3: if i == 3 { v } else { t.right3 },
+        right4: if i == 4 { v } else { t.right4 },
+        right5: if i == 5 { v } else { t.right5 },
+        right6: if i == 6 { v } else { t.right6 },
+        right7: if i == 7 { v } else { t.right7 },
+        right8: if i == 8 { v } else { t.right8 },
+        right9: if i == 9 { v } else { t.right9 },
+        right10: if i == 10 { v } else { t.right10 },
+        right11: if i == 11 { v } else { t.right11 },
+        right12: if i == 12 { v } else { t.right12 },
+        right13: if i == 13 { v } else { t.right13 },
+        right14: if i == 14 { v } else { t.right14 },
+        right15: if i == 15 { v } else { t.right15 },
+        sym0: t.sym0, sym1: t.sym1, sym2: t.sym2, sym3: t.sym3,
+        sym4: t.sym4, sym5: t.sym5, sym6: t.sym6, sym7: t.sym7,
+        sym8: t.sym8, sym9: t.sym9, sym10: t.sym10, sym11: t.sym11,
+        sym12: t.sym12, sym13: t.sym13, sym14: t.sym14, sym15: t.sym15,
+        node_count: t.node_count
+    }
+}
+
+fn ht_set_sym(t: HuffTree, i: Int, v: Int) -> HuffTree {
+    HuffTree {
+        freq0: t.freq0, freq1: t.freq1, freq2: t.freq2, freq3: t.freq3,
+        freq4: t.freq4, freq5: t.freq5, freq6: t.freq6, freq7: t.freq7,
+        freq8: t.freq8, freq9: t.freq9, freq10: t.freq10, freq11: t.freq11,
+        freq12: t.freq12, freq13: t.freq13, freq14: t.freq14, freq15: t.freq15,
+        left0: t.left0, left1: t.left1, left2: t.left2, left3: t.left3,
+        left4: t.left4, left5: t.left5, left6: t.left6, left7: t.left7,
+        left8: t.left8, left9: t.left9, left10: t.left10, left11: t.left11,
+        left12: t.left12, left13: t.left13, left14: t.left14, left15: t.left15,
+        right0: t.right0, right1: t.right1, right2: t.right2, right3: t.right3,
+        right4: t.right4, right5: t.right5, right6: t.right6, right7: t.right7,
+        right8: t.right8, right9: t.right9, right10: t.right10, right11: t.right11,
+        right12: t.right12, right13: t.right13, right14: t.right14, right15: t.right15,
+        sym0: if i == 0 { v } else { t.sym0 },
+        sym1: if i == 1 { v } else { t.sym1 },
+        sym2: if i == 2 { v } else { t.sym2 },
+        sym3: if i == 3 { v } else { t.sym3 },
+        sym4: if i == 4 { v } else { t.sym4 },
+        sym5: if i == 5 { v } else { t.sym5 },
+        sym6: if i == 6 { v } else { t.sym6 },
+        sym7: if i == 7 { v } else { t.sym7 },
+        sym8: if i == 8 { v } else { t.sym8 },
+        sym9: if i == 9 { v } else { t.sym9 },
+        sym10: if i == 10 { v } else { t.sym10 },
+        sym11: if i == 11 { v } else { t.sym11 },
+        sym12: if i == 12 { v } else { t.sym12 },
+        sym13: if i == 13 { v } else { t.sym13 },
+        sym14: if i == 14 { v } else { t.sym14 },
+        sym15: if i == 15 { v } else { t.sym15 },
+        node_count: t.node_count
+    }
+}
+
+// Add a leaf node, returns updated tree
+fn ht_add_leaf(t: HuffTree, sym: Int, freq: Int) -> HuffTree {
+    let idx = t.node_count;
+    let mut t2 = ht_set_freq(t, idx, freq);
+    t2 = ht_set_sym(t2, idx, sym);
+    // left and right already -1 from init
+    HuffTree {
+        freq0: t2.freq0, freq1: t2.freq1, freq2: t2.freq2, freq3: t2.freq3,
+        freq4: t2.freq4, freq5: t2.freq5, freq6: t2.freq6, freq7: t2.freq7,
+        freq8: t2.freq8, freq9: t2.freq9, freq10: t2.freq10, freq11: t2.freq11,
+        freq12: t2.freq12, freq13: t2.freq13, freq14: t2.freq14, freq15: t2.freq15,
+        left0: t2.left0, left1: t2.left1, left2: t2.left2, left3: t2.left3,
+        left4: t2.left4, left5: t2.left5, left6: t2.left6, left7: t2.left7,
+        left8: t2.left8, left9: t2.left9, left10: t2.left10, left11: t2.left11,
+        left12: t2.left12, left13: t2.left13, left14: t2.left14, left15: t2.left15,
+        right0: t2.right0, right1: t2.right1, right2: t2.right2, right3: t2.right3,
+        right4: t2.right4, right5: t2.right5, right6: t2.right6, right7: t2.right7,
+        right8: t2.right8, right9: t2.right9, right10: t2.right10, right11: t2.right11,
+        right12: t2.right12, right13: t2.right13, right14: t2.right14, right15: t2.right15,
+        sym0: t2.sym0, sym1: t2.sym1, sym2: t2.sym2, sym3: t2.sym3,
+        sym4: t2.sym4, sym5: t2.sym5, sym6: t2.sym6, sym7: t2.sym7,
+        sym8: t2.sym8, sym9: t2.sym9, sym10: t2.sym10, sym11: t2.sym11,
+        sym12: t2.sym12, sym13: t2.sym13, sym14: t2.sym14, sym15: t2.sym15,
+        node_count: idx + 1
+    }
+}
+
+// Add an internal node with left/right children, returns updated tree
+fn ht_add_internal(t: HuffTree, left_idx: Int, right_idx: Int) -> HuffTree {
+    let idx = t.node_count;
+    let f = ht_get_freq(t, left_idx) + ht_get_freq(t, right_idx);
+    let mut t2 = ht_set_freq(t, idx, f);
+    t2 = ht_set_left(t2, idx, left_idx);
+    t2 = ht_set_right(t2, idx, right_idx);
+    // sym stays -1 (internal)
+    HuffTree {
+        freq0: t2.freq0, freq1: t2.freq1, freq2: t2.freq2, freq3: t2.freq3,
+        freq4: t2.freq4, freq5: t2.freq5, freq6: t2.freq6, freq7: t2.freq7,
+        freq8: t2.freq8, freq9: t2.freq9, freq10: t2.freq10, freq11: t2.freq11,
+        freq12: t2.freq12, freq13: t2.freq13, freq14: t2.freq14, freq15: t2.freq15,
+        left0: t2.left0, left1: t2.left1, left2: t2.left2, left3: t2.left3,
+        left4: t2.left4, left5: t2.left5, left6: t2.left6, left7: t2.left7,
+        left8: t2.left8, left9: t2.left9, left10: t2.left10, left11: t2.left11,
+        left12: t2.left12, left13: t2.left13, left14: t2.left14, left15: t2.left15,
+        right0: t2.right0, right1: t2.right1, right2: t2.right2, right3: t2.right3,
+        right4: t2.right4, right5: t2.right5, right6: t2.right6, right7: t2.right7,
+        right8: t2.right8, right9: t2.right9, right10: t2.right10, right11: t2.right11,
+        right12: t2.right12, right13: t2.right13, right14: t2.right14, right15: t2.right15,
+        sym0: t2.sym0, sym1: t2.sym1, sym2: t2.sym2, sym3: t2.sym3,
+        sym4: t2.sym4, sym5: t2.sym5, sym6: t2.sym6, sym7: t2.sym7,
+        sym8: t2.sym8, sym9: t2.sym9, sym10: t2.sym10, sym11: t2.sym11,
+        sym12: t2.sym12, sym13: t2.sym13, sym14: t2.sym14, sym15: t2.sym15,
+        node_count: idx + 1
+    }
+}
+
+fn ht_is_leaf(t: HuffTree, i: Int) -> Bool {
+    ht_get_left(t, i) == -1 && ht_get_right(t, i) == -1
+}
+
+// Find code length for a symbol by traversing from root
+// Returns the depth of the leaf with given symbol, searching from node_idx
+@allow(unbounded_recursion)
+fn find_depth(t: HuffTree, node_idx: Int, sym: Int, depth: Int) -> Int {
+    if node_idx < 0 { -1 }
+    else if ht_is_leaf(t, node_idx) {
+        if ht_get_sym(t, node_idx) == sym { depth } else { -1 }
+    } else {
+        let ld = find_depth(t, ht_get_left(t, node_idx), sym, depth + 1);
+        if ld >= 0 { ld }
+        else { find_depth(t, ht_get_right(t, node_idx), sym, depth + 1) }
+    }
+}
+
+// Total weighted path length from a root node
+@allow(unbounded_recursion)
+fn weighted_path(t: HuffTree, node_idx: Int, depth: Int) -> Int {
+    if node_idx < 0 { 0 }
+    else if ht_is_leaf(t, node_idx) { ht_get_freq(t, node_idx) * depth }
+    else {
+        weighted_path(t, ht_get_left(t, node_idx), depth + 1)
+        + weighted_path(t, ht_get_right(t, node_idx), depth + 1)
+    }
+}
+
+// Count leaves under a node
+@allow(unbounded_recursion)
+fn count_leaves(t: HuffTree, node_idx: Int) -> Int {
+    if node_idx < 0 { 0 }
+    else if ht_is_leaf(t, node_idx) { 1 }
+    else {
+        count_leaves(t, ht_get_left(t, node_idx))
+        + count_leaves(t, ht_get_right(t, node_idx))
+    }
+}
+
+// Build Huffman tree for 4 symbols with known frequencies
+// Uses a simple priority queue: active_arr holds node indices, active_freq holds their freqs
+// We merge the two smallest repeatedly
+fn build_huffman_4(s0f: Int, s1f: Int, s2f: Int, s3f: Int) -> HuffTree {
+    // Create 4 leaf nodes
+    let mut t = ht_new();
+    t = ht_add_leaf(t, 0, s0f);  // node 0
+    t = ht_add_leaf(t, 1, s1f);  // node 1
+    t = ht_add_leaf(t, 2, s2f);  // node 2
+    t = ht_add_leaf(t, 3, s3f);  // node 3
+
+    // Priority queue: 4 entries initially
+    let mut pq = arr_new();
+    pq = Arr16 { a0: 0, a1: 1, a2: 2, a3: 3,
+                  a4: 0, a5: 0, a6: 0, a7: 0,
+                  a8: 0, a9: 0, a10: 0, a11: 0,
+                  a12: 0, a13: 0, a14: 0, a15: 0, len: 4 };
+
+    // Repeat 3 times: find 2 smallest, merge
+    let mut iter = 0;
+    while iter < 3 {
+        // Find index of minimum freq in pq
+        let mut min_i = 0;
+        let mut min_f = ht_get_freq(t, arr_get(pq, 0));
+        let mut j = 1;
+        while j < pq.len {
+            let fj = ht_get_freq(t, arr_get(pq, j));
+            if fj < min_f {
+                min_f = fj;
+                min_i = j;
+            }
+            j = j + 1;
+        }
+        let n1 = arr_get(pq, min_i);
+        // Remove min_i: swap with last
+        let last_idx = pq.len - 1;
+        pq = arr_set(pq, min_i, arr_get(pq, last_idx));
+        pq = Arr16 {
+            a0: pq.a0, a1: pq.a1, a2: pq.a2, a3: pq.a3,
+            a4: pq.a4, a5: pq.a5, a6: pq.a6, a7: pq.a7,
+            a8: pq.a8, a9: pq.a9, a10: pq.a10, a11: pq.a11,
+            a12: pq.a12, a13: pq.a13, a14: pq.a14, a15: pq.a15,
+            len: last_idx
+        };
+
+        // Find second minimum
+        let mut min2_i = 0;
+        let mut min2_f = ht_get_freq(t, arr_get(pq, 0));
+        let mut k = 1;
+        while k < pq.len {
+            let fk = ht_get_freq(t, arr_get(pq, k));
+            if fk < min2_f {
+                min2_f = fk;
+                min2_i = k;
+            }
+            k = k + 1;
+        }
+        let n2 = arr_get(pq, min2_i);
+        // Remove min2_i
+        let last_idx2 = pq.len - 1;
+        pq = arr_set(pq, min2_i, arr_get(pq, last_idx2));
+        pq = Arr16 {
+            a0: pq.a0, a1: pq.a1, a2: pq.a2, a3: pq.a3,
+            a4: pq.a4, a5: pq.a5, a6: pq.a6, a7: pq.a7,
+            a8: pq.a8, a9: pq.a9, a10: pq.a10, a11: pq.a11,
+            a12: pq.a12, a13: pq.a13, a14: pq.a14, a15: pq.a15,
+            len: last_idx2
+        };
+
+        // Merge n1, n2 into new internal node
+        t = ht_add_internal(t, n1, n2);
+        let new_idx = t.node_count - 1;
+
+        // Add new node to pq
+        pq = arr_set(pq, pq.len, new_idx);
+        pq = Arr16 {
+            a0: pq.a0, a1: pq.a1, a2: pq.a2, a3: pq.a3,
+            a4: pq.a4, a5: pq.a5, a6: pq.a6, a7: pq.a7,
+            a8: pq.a8, a9: pq.a9, a10: pq.a10, a11: pq.a11,
+            a12: pq.a12, a13: pq.a13, a14: pq.a14, a15: pq.a15,
+            len: pq.len + 1
+        };
+
+        iter = iter + 1;
+    }
+
+    t
+}
+
+fn main() -> Int {
+    // === Test 1: Frequency counting ===
+    // Message: [0, 1, 0, 2, 0, 1, 0, 3, 0, 1]
+    let mut msg = arr_new();
+    msg = arr_set(msg, 0, 0); msg = arr_set(msg, 1, 1);
+    msg = arr_set(msg, 2, 0); msg = arr_set(msg, 3, 2);
+    msg = arr_set(msg, 4, 0); msg = arr_set(msg, 5, 1);
+    msg = arr_set(msg, 6, 0); msg = arr_set(msg, 7, 3);
+    msg = arr_set(msg, 8, 0); msg = arr_set(msg, 9, 1);
+    msg = Arr16 { a0: msg.a0, a1: msg.a1, a2: msg.a2, a3: msg.a3,
+                   a4: msg.a4, a5: msg.a5, a6: msg.a6, a7: msg.a7,
+                   a8: msg.a8, a9: msg.a9, a10: msg.a10, a11: msg.a11,
+                   a12: msg.a12, a13: msg.a13, a14: msg.a14, a15: msg.a15,
+                   len: 10 };
+
+    let mut freq = arr_new();
+    freq = count_frequencies(msg, freq);
+    assert_eq(arr_get(freq, 0), 5);  // symbol 0 appears 5 times
+    assert_eq(arr_get(freq, 1), 3);  // symbol 1 appears 3 times
+    assert_eq(arr_get(freq, 2), 1);  // symbol 2 appears 1 time
+    assert_eq(arr_get(freq, 3), 1);  // symbol 3 appears 1 time
+
+    // === Test 2: Build Huffman tree for these frequencies ===
+    let tree = build_huffman_4(5, 3, 1, 1);
+    let root = tree.node_count - 1;
+
+    // Root frequency = total = 10
+    assert_eq(ht_get_freq(tree, root), 10);
+    // Root is internal
+    assert(!ht_is_leaf(tree, root));
+    // 4 leaves
+    assert_eq(count_leaves(tree, root), 4);
+    // 7 total nodes (4 leaves + 3 internal)
+    assert_eq(tree.node_count, 7);
+
+    // === Test 3: Code lengths ===
+    let cl0 = find_depth(tree, root, 0, 0);
+    let cl1 = find_depth(tree, root, 1, 0);
+    let cl2 = find_depth(tree, root, 2, 0);
+    let cl3 = find_depth(tree, root, 3, 0);
+
+    // All valid code lengths
+    assert(cl0 > 0);
+    assert(cl1 > 0);
+    assert(cl2 > 0);
+    assert(cl3 > 0);
+
+    // Most frequent symbol (0, freq=5) should have shortest or equal code
+    assert(cl0 <= cl2);
+    assert(cl0 <= cl3);
+
+    // Least frequent symbols (2,3 freq=1) should have longest or equal codes
+    assert(cl2 >= cl1);
+    assert(cl3 >= cl1);
+
+    // === Test 4: Weighted path length ===
+    let wpl = weighted_path(tree, root, 0);
+    assert_eq(wpl, 5 * cl0 + 3 * cl1 + 1 * cl2 + 1 * cl3);
+
+    // === Test 5: Huffman is at least as good as fixed-length ===
+    // Fixed 2-bit codes for 4 symbols: 10 * 2 = 20 bits
+    assert(wpl <= 20);
+
+    // === Test 6: Balanced case (equal frequencies) ===
+    let eq_tree = build_huffman_4(4, 4, 4, 4);
+    let eq_root = eq_tree.node_count - 1;
+    assert_eq(ht_get_freq(eq_tree, eq_root), 16);
+    assert_eq(count_leaves(eq_tree, eq_root), 4);
+
+    let eq_cl0 = find_depth(eq_tree, eq_root, 0, 0);
+    let eq_cl1 = find_depth(eq_tree, eq_root, 1, 0);
+    let eq_cl2 = find_depth(eq_tree, eq_root, 2, 0);
+    let eq_cl3 = find_depth(eq_tree, eq_root, 3, 0);
+    // All depths should be 2 for balanced 4-symbol tree
+    assert_eq(eq_cl0, 2);
+    assert_eq(eq_cl1, 2);
+    assert_eq(eq_cl2, 2);
+    assert_eq(eq_cl3, 2);
+
+    let eq_wpl = weighted_path(eq_tree, eq_root, 0);
+    assert_eq(eq_wpl, 32);  // 16 * 2
+
+    // === Test 7: Highly skewed case ===
+    let sk_tree = build_huffman_4(100, 1, 1, 1);
+    let sk_root = sk_tree.node_count - 1;
+    assert_eq(ht_get_freq(sk_tree, sk_root), 103);
+
+    let sk_cl0 = find_depth(sk_tree, sk_root, 0, 0);
+    // Most frequent should get shortest code
+    assert_eq(sk_cl0, 1);
+
+    let sk_wpl = weighted_path(sk_tree, sk_root, 0);
+    // With fixed 2-bit: 103 * 2 = 206. Huffman should be much better
+    assert(sk_wpl < 206);
+
+    // === Test 8: Single dominant symbol ===
+    let dom_tree = build_huffman_4(50, 2, 1, 1);
+    let dom_root = dom_tree.node_count - 1;
+    assert_eq(ht_get_freq(dom_tree, dom_root), 54);
+    let dom_cl0 = find_depth(dom_tree, dom_root, 0, 0);
+    assert_eq(dom_cl0, 1);  // Most frequent gets depth 1
+
+    // === Test 9: Two dominant, two rare ===
+    let td_tree = build_huffman_4(10, 10, 1, 1);
+    let td_root = td_tree.node_count - 1;
+    assert_eq(ht_get_freq(td_tree, td_root), 22);
+    let td_cl0 = find_depth(td_tree, td_root, 0, 0);
+    let td_cl1 = find_depth(td_tree, td_root, 1, 0);
+    let td_cl2 = find_depth(td_tree, td_root, 2, 0);
+    let td_cl3 = find_depth(td_tree, td_root, 3, 0);
+    // Rare symbols should have longer codes
+    assert(td_cl2 >= td_cl0);
+    assert(td_cl3 >= td_cl1);
+
+    // === Test 10: Frequency counting edge cases ===
+    // Empty message
+    let empty_msg = arr_new();
+    let empty_freq = count_frequencies(empty_msg, arr_new());
+    assert_eq(arr_get(empty_freq, 0), 0);
+    assert_eq(arr_get(empty_freq, 1), 0);
+
+    // Single symbol message
+    let mut single = arr_new();
+    single = arr_set(single, 0, 5);
+    single = Arr16 { a0: single.a0, a1: single.a1, a2: single.a2, a3: single.a3,
+                      a4: single.a4, a5: single.a5, a6: single.a6, a7: single.a7,
+                      a8: single.a8, a9: single.a9, a10: single.a10, a11: single.a11,
+                      a12: single.a12, a13: single.a13, a14: single.a14, a15: single.a15,
+                      len: 1 };
+    let single_freq = count_frequencies(single, arr_new());
+    assert_eq(arr_get(single_freq, 5), 1);
+    assert_eq(arr_get(single_freq, 0), 0);
+
+    // === Test 11: Verify total frequency preservation ===
+    let mut total = 0;
+    let mut i = 0;
+    while i < 8 {
+        total = total + arr_get(freq, i);
+        i = i + 1;
+    }
+    assert_eq(total, 10);  // matches msg.len
+
+    // === Test 12: Leaf node properties ===
+    // First 4 nodes should be leaves
+    assert(ht_is_leaf(tree, 0));
+    assert(ht_is_leaf(tree, 1));
+    assert(ht_is_leaf(tree, 2));
+    assert(ht_is_leaf(tree, 3));
+    // Internal nodes
+    assert(!ht_is_leaf(tree, 4));
+    assert(!ht_is_leaf(tree, 5));
+    assert(!ht_is_leaf(tree, 6));
+
+    // === Test 13: Symbol lookup on leaf ===
+    assert_eq(ht_get_sym(tree, 0), 0);
+    assert_eq(ht_get_sym(tree, 1), 1);
+    assert_eq(ht_get_sym(tree, 2), 2);
+    assert_eq(ht_get_sym(tree, 3), 3);
+
+    // === Test 14: Nonexistent symbol ===
+    let missing = find_depth(tree, root, 99, 0);
+    assert_eq(missing, -1);
+
+    0
+}

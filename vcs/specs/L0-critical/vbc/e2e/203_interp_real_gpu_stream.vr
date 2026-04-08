@@ -1,0 +1,45 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, gpu, real-opcode, stream
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL GPU stream management intrinsics through VBC interpreter.
+// Exercises gpu_stream_create, gpu_stream_destroy, gpu_sync.
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Create a stream
+    let s1 = gpu_stream_create();
+    // Stream handle should be non-negative
+    if s1 < 0 { errors = errors + 1; }
+
+    // Test 2: Create another stream (different handle)
+    let s2 = gpu_stream_create();
+    if s2 < 0 { errors = errors + 1; }
+    if s1 == s2 { errors = errors + 1; }
+
+    // Test 3: Sync stream (no-op on CPU, should succeed)
+    let sync1 = gpu_sync(s1);
+    if sync1 != 0 { errors = errors + 1; }
+
+    // Test 4: Sync second stream
+    let sync2 = gpu_sync(s2);
+    if sync2 != 0 { errors = errors + 1; }
+
+    // Test 5: Destroy streams
+    let d1 = gpu_stream_destroy(s1);
+    if d1 != 0 { errors = errors + 1; }
+    let d2 = gpu_stream_destroy(s2);
+    if d2 != 0 { errors = errors + 1; }
+
+    // Test 6: Create stream after destroy
+    let s3 = gpu_stream_create();
+    if s3 < 0 { errors = errors + 1; }
+    let d3 = gpu_stream_destroy(s3);
+    if d3 != 0 { errors = errors + 1; }
+
+    errors
+}

@@ -1,0 +1,215 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, stack, queue, data-structures
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for stack and queue using record-based arrays
+
+// Stack with 8 capacity
+type Stack8 is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    top: Int  // index of next free slot (also = size)
+};
+
+fn stack_new() -> Stack8 {
+    Stack8 { s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0, s7: 0, top: 0 }
+}
+
+fn stack_get(s: Stack8, i: Int) -> Int {
+    if i == 0 { s.s0 } else if i == 1 { s.s1 }
+    else if i == 2 { s.s2 } else if i == 3 { s.s3 }
+    else if i == 4 { s.s4 } else if i == 5 { s.s5 }
+    else if i == 6 { s.s6 } else { s.s7 }
+}
+
+fn stack_set(s: Stack8, i: Int, val: Int) -> Stack8 {
+    Stack8 {
+        s0: if i == 0 { val } else { s.s0 },
+        s1: if i == 1 { val } else { s.s1 },
+        s2: if i == 2 { val } else { s.s2 },
+        s3: if i == 3 { val } else { s.s3 },
+        s4: if i == 4 { val } else { s.s4 },
+        s5: if i == 5 { val } else { s.s5 },
+        s6: if i == 6 { val } else { s.s6 },
+        s7: if i == 7 { val } else { s.s7 },
+        top: s.top
+    }
+}
+
+fn stack_push(s: Stack8, val: Int) -> Stack8 {
+    let mut ns = stack_set(s, s.top, val);
+    Stack8 {
+        s0: ns.s0, s1: ns.s1, s2: ns.s2, s3: ns.s3,
+        s4: ns.s4, s5: ns.s5, s6: ns.s6, s7: ns.s7,
+        top: s.top + 1
+    }
+}
+
+fn stack_pop_val(s: Stack8) -> Int {
+    stack_get(s, s.top - 1)
+}
+
+fn stack_pop(s: Stack8) -> Stack8 {
+    Stack8 {
+        s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3,
+        s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7,
+        top: s.top - 1
+    }
+}
+
+fn stack_size(s: Stack8) -> Int {
+    s.top
+}
+
+fn stack_is_empty(s: Stack8) -> Bool {
+    s.top == 0
+}
+
+// Queue with 8 capacity (circular buffer)
+type Queue8 is {
+    q0: Int, q1: Int, q2: Int, q3: Int,
+    q4: Int, q5: Int, q6: Int, q7: Int,
+    head: Int,
+    tail: Int,
+    count: Int
+};
+
+fn queue_new() -> Queue8 {
+    Queue8 { q0: 0, q1: 0, q2: 0, q3: 0, q4: 0, q5: 0, q6: 0, q7: 0,
+             head: 0, tail: 0, count: 0 }
+}
+
+fn queue_get(q: Queue8, i: Int) -> Int {
+    if i == 0 { q.q0 } else if i == 1 { q.q1 }
+    else if i == 2 { q.q2 } else if i == 3 { q.q3 }
+    else if i == 4 { q.q4 } else if i == 5 { q.q5 }
+    else if i == 6 { q.q6 } else { q.q7 }
+}
+
+fn queue_set(q: Queue8, i: Int, val: Int) -> Queue8 {
+    Queue8 {
+        q0: if i == 0 { val } else { q.q0 },
+        q1: if i == 1 { val } else { q.q1 },
+        q2: if i == 2 { val } else { q.q2 },
+        q3: if i == 3 { val } else { q.q3 },
+        q4: if i == 4 { val } else { q.q4 },
+        q5: if i == 5 { val } else { q.q5 },
+        q6: if i == 6 { val } else { q.q6 },
+        q7: if i == 7 { val } else { q.q7 },
+        head: q.head, tail: q.tail, count: q.count
+    }
+}
+
+fn queue_enqueue(q: Queue8, val: Int) -> Queue8 {
+    let nq = queue_set(q, q.tail, val);
+    Queue8 {
+        q0: nq.q0, q1: nq.q1, q2: nq.q2, q3: nq.q3,
+        q4: nq.q4, q5: nq.q5, q6: nq.q6, q7: nq.q7,
+        head: q.head, tail: (q.tail + 1) % 8, count: q.count + 1
+    }
+}
+
+fn queue_front(q: Queue8) -> Int {
+    queue_get(q, q.head)
+}
+
+fn queue_dequeue(q: Queue8) -> Queue8 {
+    Queue8 {
+        q0: q.q0, q1: q.q1, q2: q.q2, q3: q.q3,
+        q4: q.q4, q5: q.q5, q6: q.q6, q7: q.q7,
+        head: (q.head + 1) % 8, tail: q.tail, count: q.count - 1
+    }
+}
+
+fn test_stack() {
+    let s0 = stack_new();
+    assert_eq(stack_is_empty(s0), true);
+    assert_eq(stack_size(s0), 0);
+
+    let s1 = stack_push(s0, 10);
+    let s2 = stack_push(s1, 20);
+    let s3 = stack_push(s2, 30);
+
+    assert_eq(stack_size(s3), 3);
+    assert_eq(stack_is_empty(s3), false);
+    assert_eq(stack_pop_val(s3), 30);
+
+    let s4 = stack_pop(s3);
+    assert_eq(stack_pop_val(s4), 20);
+    assert_eq(stack_size(s4), 2);
+
+    let s5 = stack_pop(s4);
+    assert_eq(stack_pop_val(s5), 10);
+
+    let s6 = stack_pop(s5);
+    assert_eq(stack_is_empty(s6), true);
+}
+
+fn test_queue() {
+    let q0 = queue_new();
+    assert_eq(q0.count, 0);
+
+    let q1 = queue_enqueue(q0, 10);
+    let q2 = queue_enqueue(q1, 20);
+    let q3 = queue_enqueue(q2, 30);
+
+    assert_eq(q3.count, 3);
+    assert_eq(queue_front(q3), 10);
+
+    let q4 = queue_dequeue(q3);
+    assert_eq(queue_front(q4), 20);
+    assert_eq(q4.count, 2);
+
+    let q5 = queue_dequeue(q4);
+    assert_eq(queue_front(q5), 30);
+    assert_eq(q5.count, 1);
+
+    let q6 = queue_dequeue(q5);
+    assert_eq(q6.count, 0);
+}
+
+fn test_stack_lifo() {
+    // Push 1..5, pop should return 5..1
+    let mut s = stack_new();
+    s = stack_push(s, 1);
+    s = stack_push(s, 2);
+    s = stack_push(s, 3);
+    s = stack_push(s, 4);
+    s = stack_push(s, 5);
+
+    assert_eq(stack_pop_val(s), 5); s = stack_pop(s);
+    assert_eq(stack_pop_val(s), 4); s = stack_pop(s);
+    assert_eq(stack_pop_val(s), 3); s = stack_pop(s);
+    assert_eq(stack_pop_val(s), 2); s = stack_pop(s);
+    assert_eq(stack_pop_val(s), 1); s = stack_pop(s);
+    assert_eq(stack_is_empty(s), true);
+}
+
+fn test_queue_fifo() {
+    // Enqueue 1..5, dequeue should return 1..5
+    let mut q = queue_new();
+    q = queue_enqueue(q, 1);
+    q = queue_enqueue(q, 2);
+    q = queue_enqueue(q, 3);
+    q = queue_enqueue(q, 4);
+    q = queue_enqueue(q, 5);
+
+    assert_eq(queue_front(q), 1); q = queue_dequeue(q);
+    assert_eq(queue_front(q), 2); q = queue_dequeue(q);
+    assert_eq(queue_front(q), 3); q = queue_dequeue(q);
+    assert_eq(queue_front(q), 4); q = queue_dequeue(q);
+    assert_eq(queue_front(q), 5); q = queue_dequeue(q);
+    assert_eq(q.count, 0);
+}
+
+fn main() -> Int {
+    test_stack();
+    test_queue();
+    test_stack_lifo();
+    test_queue_fifo();
+    print("[OK] 196_stack_queue_aot");
+    0
+}

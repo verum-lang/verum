@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: exhaustiveness, pattern-matching, bool
+// @expected-error: E0601
+// @description: Bool match missing false case
+
+fn check_bool(b: Bool) -> Int =
+    match b {
+        true => 1
+        // E0601: non-exhaustive patterns: `false` not covered
+    };
+
+fn main() {
+    let _ = check_bool(true);
+}

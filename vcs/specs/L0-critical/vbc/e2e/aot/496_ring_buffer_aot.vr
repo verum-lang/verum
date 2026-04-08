@@ -1,0 +1,220 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, ring-buffer, circular-queue, data-structure
+// @timeout: 30000
+
+// Ring buffer (circular queue) implementation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Ring buffer with capacity 8
+type RingBuf is { data: Arr8, head: Int, tail: Int, size: Int };
+
+fn rb_new() -> RingBuf {
+    RingBuf { data: zeros(), head: 0, tail: 0, size: 0 }
+}
+
+fn rb_is_empty(rb: RingBuf) -> Int {
+    if rb.size == 0 { 1 } else { 0 }
+}
+
+fn rb_is_full(rb: RingBuf) -> Int {
+    if rb.size == 8 { 1 } else { 0 }
+}
+
+fn rb_push(rb: RingBuf, val: Int) -> RingBuf {
+    if rb.size == 8 { return rb; } // full, ignore
+    RingBuf {
+        data: set8(rb.data, rb.tail, val),
+        head: rb.head,
+        tail: (rb.tail + 1) % 8,
+        size: rb.size + 1
+    }
+}
+
+fn rb_front(rb: RingBuf) -> Int {
+    get8(rb.data, rb.head)
+}
+
+fn rb_pop(rb: RingBuf) -> RingBuf {
+    if rb.size == 0 { return rb; }
+    RingBuf {
+        data: rb.data,
+        head: (rb.head + 1) % 8,
+        tail: rb.tail,
+        size: rb.size - 1
+    }
+}
+
+// Sliding window max using ring buffer as deque index storage
+// Returns max of last 'window' elements added
+fn sliding_max(data: Arr8, n: Int, window: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        // Find max in window [max(0, i-window+1), i]
+        let start = if i - window + 1 > 0 { i - window + 1 } else { 0 };
+        let mut max_v = get8(data, start);
+        let mut j = start + 1;
+        while j <= i {
+            let v = get8(data, j);
+            if v > max_v { max_v = v; }
+            j = j + 1;
+        }
+        result = set8(result, i, max_v);
+        i = i + 1;
+    }
+    result
+}
+
+// Sliding window sum
+fn sliding_sum(data: Arr8, n: Int, window: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        let start = if i - window + 1 > 0 { i - window + 1 } else { 0 };
+        let mut sum = 0;
+        let mut j = start;
+        while j <= i {
+            sum = sum + get8(data, j);
+            j = j + 1;
+        }
+        result = set8(result, i, sum);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_basic_ops() -> Int {
+    let mut rb = rb_new();
+    assert_eq(rb_is_empty(rb), 1);
+    assert_eq(rb.size, 0);
+
+    rb = rb_push(rb, 10);
+    assert_eq(rb_is_empty(rb), 0);
+    assert_eq(rb.size, 1);
+    assert_eq(rb_front(rb), 10);
+
+    rb = rb_push(rb, 20);
+    rb = rb_push(rb, 30);
+    assert_eq(rb.size, 3);
+    assert_eq(rb_front(rb), 10);
+
+    rb = rb_pop(rb);
+    assert_eq(rb.size, 2);
+    assert_eq(rb_front(rb), 20);
+
+    rb = rb_pop(rb);
+    assert_eq(rb_front(rb), 30);
+    assert_eq(rb.size, 1);
+    1
+}
+
+fn test_wraparound() -> Int {
+    let mut rb = rb_new();
+    // Fill to 5
+    let mut i = 0;
+    while i < 5 {
+        rb = rb_push(rb, i * 10);
+        i = i + 1;
+    }
+    assert_eq(rb.size, 5);
+
+    // Pop 3
+    rb = rb_pop(rb);
+    rb = rb_pop(rb);
+    rb = rb_pop(rb);
+    assert_eq(rb.size, 2);
+    assert_eq(rb_front(rb), 30);
+
+    // Push 5 more (wraps around)
+    rb = rb_push(rb, 50);
+    rb = rb_push(rb, 60);
+    rb = rb_push(rb, 70);
+    rb = rb_push(rb, 80);
+    rb = rb_push(rb, 90);
+    assert_eq(rb.size, 7);
+    assert_eq(rb_front(rb), 30); // oldest element
+    1
+}
+
+fn test_full_buffer() -> Int {
+    let mut rb = rb_new();
+    let mut i = 0;
+    while i < 8 {
+        rb = rb_push(rb, i + 1);
+        i = i + 1;
+    }
+    assert_eq(rb_is_full(rb), 1);
+    assert_eq(rb.size, 8);
+
+    // Push when full should be ignored
+    let rb2 = rb_push(rb, 99);
+    assert_eq(rb2.size, 8);
+    assert_eq(rb_front(rb2), 1); // still the same
+
+    // Pop and push
+    rb = rb_pop(rb);
+    rb = rb_push(rb, 9);
+    assert_eq(rb.size, 8);
+    assert_eq(rb_front(rb), 2);
+    1
+}
+
+fn test_sliding_max() -> Int {
+    let data = Arr8 { v0: 1, v1: 3, v2: 2, v3: 5, v4: 4, v5: 1, v6: 6, v7: 2 };
+    let m = sliding_max(data, 8, 3);
+    // window=3: max of [0..0]=1, [0..1]=3, [0..2]=3, [1..3]=5, [2..4]=5, [3..5]=5, [4..6]=6, [5..7]=6
+    assert_eq(get8(m, 0), 1);
+    assert_eq(get8(m, 1), 3);
+    assert_eq(get8(m, 2), 3);
+    assert_eq(get8(m, 3), 5);
+    assert_eq(get8(m, 4), 5);
+    assert_eq(get8(m, 5), 5);
+    assert_eq(get8(m, 6), 6);
+    assert_eq(get8(m, 7), 6);
+    1
+}
+
+fn test_sliding_sum() -> Int {
+    let data = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let s = sliding_sum(data, 5, 3);
+    // window=3: sum[0..0]=1, sum[0..1]=3, sum[0..2]=6, sum[1..3]=9, sum[2..4]=12
+    assert_eq(get8(s, 0), 1);
+    assert_eq(get8(s, 1), 3);
+    assert_eq(get8(s, 2), 6);
+    assert_eq(get8(s, 3), 9);
+    assert_eq(get8(s, 4), 12);
+    1
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_wraparound();
+    test_full_buffer();
+    test_sliding_max();
+    test_sliding_sum();
+    print("[OK] 496_ring_buffer_aot");
+    0
+}

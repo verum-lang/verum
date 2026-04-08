@@ -1,0 +1,340 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/windows/io_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, windows, io, iocp
+// @description: Tests for Windows IOCP (I/O Completion Ports) subsystem.
+//
+// Coverage:
+// - IocpDriver: Main IOCP driver type
+// - IoError, IoOperation: I/O types
+// - OverlappedEntry: Completion entry type
+// - Operation types: FileReadOp, FileWriteOp, Socket*Op
+// - MAX_IOCP_ENTRIES constant
+//
+// Test Strategy:
+// - Test type construction and field access
+// - Verify constants
+// - Test driver creation
+//
+// Platform: Windows x86_64
+// =============================================================================
+
+@cfg(target_os = "windows")
+module test.stdlib.sys.windows.io_test;
+
+mount core.sys.windows.io.{
+    IoError,
+    IocpDriver,
+    OverlappedEntry,
+    IoOperation,
+    IoCompletionCallback,
+    FileReadOp,
+    FileWriteOp,
+    SocketAcceptOp,
+    SocketConnectOp,
+    SocketRecvOp,
+    SocketSendOp,
+    MAX_IOCP_ENTRIES,
+};
+
+mount core.sys.windows.kernel32.{
+    CreateIoCompletionPort,
+    GetQueuedCompletionStatus,
+    PostQueuedCompletionStatus,
+    INVALID_HANDLE_VALUE,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// I/O Constants Tests
+// =============================================================================
+
+@test
+fn test_io_constants() {
+    // Max IOCP entries should be reasonable
+    assert(MAX_IOCP_ENTRIES > 0);
+    assert(MAX_IOCP_ENTRIES <= 1024);
+
+    print("I/O constants tests passed");
+}
+
+// =============================================================================
+// Overlapped Entry Tests
+// =============================================================================
+
+@test
+fn test_overlapped_entry() {
+    // Create overlapped entry
+    let entry = OverlappedEntry {
+        lpCompletionKey: 42,
+        lpOverlapped: 0 as &unsafe Byte,
+        Internal: 0,
+        InternalHigh: 0,
+        dwNumberOfBytesTransferred: 1024,
+    };
+
+    assert(entry.lpCompletionKey == 42);
+    assert(entry.dwNumberOfBytesTransferred == 1024);
+
+    // Zero-initialized entry
+    let zero_entry = OverlappedEntry {
+        lpCompletionKey: 0,
+        lpOverlapped: 0 as &unsafe Byte,
+        Internal: 0,
+        InternalHigh: 0,
+        dwNumberOfBytesTransferred: 0,
+    };
+
+    assert(zero_entry.lpCompletionKey == 0);
+    assert(zero_entry.dwNumberOfBytesTransferred == 0);
+
+    print("Overlapped entry tests passed");
+}
+
+// =============================================================================
+// I/O Operation Types Tests
+// =============================================================================
+
+@test
+fn test_io_operation_types() {
+    // FileReadOp
+    let read_op = FileReadOp {
+        handle: 0,
+        buffer: 0 as &mut [Byte],
+        offset: 100,
+        bytes_requested: 4096,
+    };
+
+    assert(read_op.offset == 100);
+    assert(read_op.bytes_requested == 4096);
+
+    // FileWriteOp
+    let write_op = FileWriteOp {
+        handle: 0,
+        buffer: 0 as &[Byte],
+        offset: 200,
+        bytes_to_write: 2048,
+    };
+
+    assert(write_op.offset == 200);
+    assert(write_op.bytes_to_write == 2048);
+
+    // SocketAcceptOp
+    let accept_op = SocketAcceptOp {
+        listen_socket: 100,
+        accept_socket: 0,
+        buffer: 0 as &mut [Byte],
+    };
+
+    assert(accept_op.listen_socket == 100);
+
+    // SocketConnectOp
+    let connect_op = SocketConnectOp {
+        socket: 200,
+        address: 0 as &unsafe Byte,
+        address_len: 16,
+    };
+
+    assert(connect_op.socket == 200);
+    assert(connect_op.address_len == 16);
+
+    // SocketRecvOp
+    let recv_op = SocketRecvOp {
+        socket: 300,
+        buffer: 0 as &mut [Byte],
+        flags: 0,
+    };
+
+    assert(recv_op.socket == 300);
+
+    // SocketSendOp
+    let send_op = SocketSendOp {
+        socket: 400,
+        buffer: 0 as &[Byte],
+        flags: 0,
+    };
+
+    assert(send_op.socket == 400);
+
+    print("I/O operation types tests passed");
+}
+
+// =============================================================================
+// IoError Type Tests
+// =============================================================================
+
+@test
+fn test_io_error_types() {
+    // Create various IoError variants
+    let sys_err = IoError.SystemError { code: 5, message: "Access denied" };
+    let iocp_err = IoError.IocpCreateFailed { code: 8 };
+    let assoc_err = IoError.AssociateFailed { code: 6 };
+    let timeout = IoError.Timeout { ms: 1000 };
+    let closed = IoError.PortClosed;
+    let pending = IoError.OperationPending;
+
+    // Pattern matching
+    match sys_err {
+        IoError.SystemError { code, message } => {
+            assert(code == 5);
+            assert(message.contains("Access"));
+        }
+        _ => assert(false),
+    }
+
+    match iocp_err {
+        IoError.IocpCreateFailed { code } => {
+            assert(code == 8);
+        }
+        _ => assert(false),
+    }
+
+    match assoc_err {
+        IoError.AssociateFailed { code } => {
+            assert(code == 6);
+        }
+        _ => assert(false),
+    }
+
+    match timeout {
+        IoError.Timeout { ms } => {
+            assert(ms == 1000);
+        }
+        _ => assert(false),
+    }
+
+    match closed {
+        IoError.PortClosed => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match pending {
+        IoError.OperationPending => { /* ok */ }
+        _ => assert(false),
+    }
+
+    print("IoError type tests passed");
+}
+
+// =============================================================================
+// IOCP Creation Tests
+// =============================================================================
+
+@test
+fn test_iocp_creation() {
+    // Create IOCP
+    let iocp = CreateIoCompletionPort(
+        INVALID_HANDLE_VALUE as Int,
+        0,
+        0,
+        0  // Use default number of concurrent threads
+    );
+
+    if iocp != 0 {
+        print("IOCP created successfully");
+
+        // Post a completion status
+        let post_result = PostQueuedCompletionStatus(
+            iocp,
+            100,     // Bytes transferred
+            42,      // Completion key
+            0 as &unsafe Byte  // Overlapped (NULL)
+        );
+
+        assert(post_result != 0);
+
+        // Get the completion status
+        let mut bytes: UInt32 = 0;
+        let mut key: Int = 0;
+        let mut overlapped: &unsafe Byte = 0 as &unsafe Byte;
+
+        let get_result = GetQueuedCompletionStatus(
+            iocp,
+            &mut bytes,
+            &mut key,
+            &mut overlapped,
+            0  // Don't wait
+        );
+
+        // Should succeed
+        assert(get_result != 0);
+        assert(bytes == 100);
+        assert(key == 42);
+
+        // Close IOCP handle
+        mount core.sys.windows.kernel32.{CloseHandle};
+        let _ = CloseHandle(iocp);
+    } else {
+        print("IOCP creation failed (may need admin rights)");
+    }
+}
+
+// =============================================================================
+// IoOperation Enum Tests
+// =============================================================================
+
+@test
+fn test_io_operation_enum() {
+    // Create operation variants
+    let read = IoOperation.Read { buffer: 0 as &mut [Byte], offset: 0 };
+    let write = IoOperation.Write { buffer: 0 as &[Byte], offset: 0 };
+    let accept = IoOperation.Accept { listen_socket: 0 };
+    let connect = IoOperation.Connect { address: 0 as &unsafe Byte };
+    let recv = IoOperation.Recv { buffer: 0 as &mut [Byte] };
+    let send = IoOperation.Send { buffer: 0 as &[Byte] };
+    let close = IoOperation.Close;
+
+    // Pattern matching
+    match read {
+        IoOperation.Read { buffer, offset } => {
+            assert(offset == 0);
+        }
+        _ => assert(false),
+    }
+
+    match write {
+        IoOperation.Write { buffer, offset } => {
+            assert(offset == 0);
+        }
+        _ => assert(false),
+    }
+
+    match accept {
+        IoOperation.Accept { listen_socket } => {
+            assert(listen_socket == 0);
+        }
+        _ => assert(false),
+    }
+
+    match connect {
+        IoOperation.Connect { address } => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match recv {
+        IoOperation.Recv { buffer } => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match send {
+        IoOperation.Send { buffer } => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match close {
+        IoOperation.Close => { /* ok */ }
+        _ => assert(false),
+    }
+
+    print("IoOperation enum tests passed");
+}

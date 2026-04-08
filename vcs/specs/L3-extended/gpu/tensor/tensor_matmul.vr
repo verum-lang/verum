@@ -1,0 +1,277 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, tensor, matmul, linalg
+
+/// Tensor matrix multiplication operations including batched matmul,
+/// transposed operations, and specialized GEMM variants.
+
+fn main() {
+    let device = Device.gpu(0);
+
+    // Basic matrix multiplication
+    test_basic_matmul(device);
+
+    // Batched matrix multiplication
+    test_batched_matmul(device);
+
+    // Transposed matmul variants
+    test_transposed_matmul(device);
+
+    // GEMM operations
+    test_gemm(device);
+
+    // Vector-matrix products
+    test_vector_matrix(device);
+
+    // Matrix chain optimization
+    test_matrix_chain(device);
+}
+
+fn test_basic_matmul(device: Device) {
+    // (M, K) matmul (K, N) -> (M, N)
+    let a: Tensor<f32, [4, 3]> = tensor<4, 3>f32{
+        {1.0, 2.0, 3.0},
+        {4.0, 5.0, 6.0},
+        {7.0, 8.0, 9.0},
+        {10.0, 11.0, 12.0}
+    }.to(device);
+
+    let b: Tensor<f32, [3, 2]> = tensor<3, 2>f32{
+        {1.0, 2.0},
+        {3.0, 4.0},
+        {5.0, 6.0}
+    }.to(device);
+
+    let c = matmul(a, b);
+    assert(c.shape() == [4, 2]);
+
+    let c_host = c.to_host();
+    // First row: 1*1 + 2*3 + 3*5 = 22, 1*2 + 2*4 + 3*6 = 28
+    assert((c_host[0, 0] - 22.0).abs() < 1e-5);
+    assert((c_host[0, 1] - 28.0).abs() < 1e-5);
+
+    // Last row: 10*1 + 11*3 + 12*5 = 103, 10*2 + 11*4 + 12*6 = 136
+    assert((c_host[3, 0] - 103.0).abs() < 1e-5);
+    assert((c_host[3, 1] - 136.0).abs() < 1e-5);
+
+    // Square matrix multiplication
+    let sq_a: Tensor<f32, [3, 3]> = Tensor.eye().to(device);
+    let sq_b: Tensor<f32, [3, 3]> = Tensor.full(2.0).to(device);
+
+    let sq_c = matmul(sq_a, sq_b);
+    assert(sq_c[0, 0] == 2.0);  // Identity preserves values
+
+    // Self multiplication
+    let m: Tensor<f32, [2, 2]> = tensor<2, 2>f32{
+        {1.0, 2.0},
+        {3.0, 4.0}
+    }.to(device);
+
+    let m_sq = matmul(m, m);
+    let m_sq_host = m_sq.to_host();
+    // [[1*1+2*3, 1*2+2*4], [3*1+4*3, 3*2+4*4]] = [[7, 10], [15, 22]]
+    assert((m_sq_host[0, 0] - 7.0).abs() < 1e-5);
+    assert((m_sq_host[1, 1] - 22.0).abs() < 1e-5);
+}
+
+fn test_batched_matmul(device: Device) {
+    // Batched matmul: (B, M, K) bmm (B, K, N) -> (B, M, N)
+    let batch_size = 4;
+
+    let a: Tensor<f32, [4, 2, 3]> = Tensor.randn().to(device);
+    let b: Tensor<f32, [4, 3, 2]> = Tensor.randn().to(device);
+
+    let c = a.bmm(b);
+    assert(c.shape() == [4, 2, 2]);
+
+    // Verify each batch independently
+    for batch in 0..4 {
+        let a_slice = a.batch_slice(batch);
+        let b_slice = b.batch_slice(batch);
+        let c_slice = c.batch_slice(batch);
+
+        let expected = matmul(a_slice, b_slice);
+        assert((c_slice - expected).abs().max() < 1e-4);
+    }
+
+    // Broadcast batch dimension: (B, M, K) @ (K, N) -> (B, M, N)
+    let a_batch: Tensor<f32, [8, 4, 3]> = Tensor.randn().to(device);
+    let b_single: Tensor<f32, [3, 5]> = Tensor.randn().to(device);
+
+    let c_broadcast = a_batch.bmm_broadcast(b_single);
+    assert(c_broadcast.shape() == [8, 4, 5]);
+
+    // Broadcast both: (1, M, K) @ (B, K, N) -> (B, M, N)
+    let a_single: Tensor<f32, [1, 3, 4]> = Tensor.randn().to(device);
+    let b_batch: Tensor<f32, [8, 4, 2]> = Tensor.randn().to(device);
+
+    let c_both = a_single.bmm(b_batch);
+    assert(c_both.shape() == [8, 3, 2]);
+
+    // 4D batched matmul: (B1, B2, M, K) @ (B1, B2, K, N) -> (B1, B2, M, N)
+    let a_4d: Tensor<f32, [2, 3, 4, 5]> = Tensor.randn().to(device);
+    let b_4d: Tensor<f32, [2, 3, 5, 6]> = Tensor.randn().to(device);
+
+    let c_4d = matmul(a_4d, b_4d);
+    assert(c_4d.shape() == [2, 3, 4, 6]);
+}
+
+fn test_transposed_matmul(device: Device) {
+    let a: Tensor<f32, [3, 4]> = Tensor.randn().to(device);
+    let b: Tensor<f32, [5, 4]> = Tensor.randn().to(device);
+
+    // A @ B^T: (M, K) @ (N, K)^T = (M, K) @ (K, N) -> (M, N)
+    let c_bt = a.mm_transposed_b(b);  // or matmul(a, b.T)
+    assert(c_bt.shape() == [3, 5]);
+
+    // A^T @ B: (K, M)^T @ (K, N) = (M, K) @ (K, N) -> (M, N)
+    let a2: Tensor<f32, [4, 3]> = Tensor.randn().to(device);
+    let b2: Tensor<f32, [4, 5]> = Tensor.randn().to(device);
+
+    let c_at = a2.mm_transposed_a(b2);  // or matmul(a2.T, b2)
+    assert(c_at.shape() == [3, 5]);
+
+    // A^T @ B^T: (K, M)^T @ (N, K)^T -> (M, N)
+    let a3: Tensor<f32, [4, 3]> = Tensor.randn().to(device);
+    let b3: Tensor<f32, [5, 4]> = Tensor.randn().to(device);
+
+    let c_both = matmul(a3.T, b3.T);
+    assert(c_both.shape() == [3, 5]);
+
+    // Verify transposed results
+    let c_explicit = matmul(a3.T.contiguous(), b3.T.contiguous());
+    assert((c_both - c_explicit).abs().max() < 1e-4);
+}
+
+fn test_gemm(device: Device) {
+    // General matrix multiply: C = alpha * A @ B + beta * C
+
+    let m = 64;
+    let n = 32;
+    let k = 48;
+
+    let a: Tensor<f32, [64, 48]> = Tensor.randn().to(device);
+    let b: Tensor<f32, [48, 32]> = Tensor.randn().to(device);
+    let mut c: Tensor<f32, [64, 32]> = Tensor.randn().to(device);
+
+    let alpha = 2.0;
+    let beta = 0.5;
+
+    let c_original = c.clone();
+
+    // GEMM: C = alpha * A @ B + beta * C
+    gemm(&mut c, a, b, alpha, beta);
+
+    // Verify
+    let expected = alpha * matmul(a, b) + beta * c_original;
+    assert((c - expected).abs().max() < 1e-3);
+
+    // GEMM with transposes: C = alpha * A^T @ B + beta * C
+    let a_t: Tensor<f32, [48, 64]> = Tensor.randn().to(device);
+    let mut c2: Tensor<f32, [64, 32]> = Tensor.randn().to(device);
+
+    gemm_transposed(
+        &mut c2, a_t, b,
+        alpha, beta,
+        trans_a: true, trans_b: false
+    );
+
+    // GEMM with strided inputs
+    let large_a: Tensor<f32, [128, 96]> = Tensor.randn().to(device);
+    let large_b: Tensor<f32, [96, 64]> = Tensor.randn().to(device);
+
+    // Use strided view (every other element)
+    let a_strided = large_a.stride_view(2, 2);
+    let b_strided = large_b.stride_view(2, 2);
+
+    let c_strided = matmul(a_strided, b_strided);
+
+    // GEMM with different data types
+    let a_f16: Tensor<f16, [32, 16]> = Tensor.randn().to(device);
+    let b_f16: Tensor<f16, [16, 24]> = Tensor.randn().to(device);
+
+    // Mixed precision: compute in f32, store in f16
+    let c_mixed = a_f16.gemm_mixed(b_f16);
+    assert(c_mixed.dtype() == dtype.f16);
+}
+
+fn test_vector_matrix(device: Device) {
+    // Vector-matrix: (K,) @ (K, N) -> (N,)
+    let v: Tensor<f32, [4]> = tensor<4>f32{1.0, 2.0, 3.0, 4.0}.to(device);
+    let m: Tensor<f32, [4, 3]> = Tensor.ones().to(device);
+
+    let result = matmul(v, m);
+    assert(result.shape() == [3]);
+    assert((result[0] - 10.0).abs() < 1e-5);  // 1+2+3+4
+
+    // Matrix-vector: (M, K) @ (K,) -> (M,)
+    let m2: Tensor<f32, [3, 4]> = Tensor.ones().to(device);
+    let v2: Tensor<f32, [4]> = tensor<4>f32{1.0, 2.0, 3.0, 4.0}.to(device);
+
+    let result2 = matmul(m2, v2);
+    assert(result2.shape() == [3]);
+    assert((result2[0] - 10.0).abs() < 1e-5);
+
+    // Dot product: (N,) dot (N,) -> scalar
+    let a: Tensor<f32, [5]> = tensor<5>f32{1.0, 2.0, 3.0, 4.0, 5.0}.to(device);
+    let b: Tensor<f32, [5]> = tensor<5>f32{5.0, 4.0, 3.0, 2.0, 1.0}.to(device);
+
+    let dot = a.dot(b);
+    // 1*5 + 2*4 + 3*3 + 4*2 + 5*1 = 5 + 8 + 9 + 8 + 5 = 35
+    assert((dot - 35.0).abs() < 1e-5);
+
+    // Outer product: (M,) outer (N,) -> (M, N)
+    let u: Tensor<f32, [3]> = tensor<3>f32{1.0, 2.0, 3.0}.to(device);
+    let w: Tensor<f32, [2]> = tensor<2>f32{4.0, 5.0}.to(device);
+
+    let outer = u.outer(w);
+    assert(outer.shape() == [3, 2]);
+    assert((outer[0, 0] - 4.0).abs() < 1e-5);   // 1*4
+    assert((outer[2, 1] - 15.0).abs() < 1e-5);  // 3*5
+}
+
+fn test_matrix_chain(device: Device) {
+    // Optimal matrix chain multiplication order
+    let a: Tensor<f32, [10, 30]> = Tensor.randn().to(device);
+    let b: Tensor<f32, [30, 5]> = Tensor.randn().to(device);
+    let c: Tensor<f32, [5, 60]> = Tensor.randn().to(device);
+
+    // Naive: (A @ B) @ C or A @ (B @ C)
+    // Optimal ordering minimizes operations
+    let result_naive = matmul(matmul(a, b), c);
+    let result_chain = a.chain_matmul([b, c]);
+
+    // Results should be equivalent
+    assert((result_naive - result_chain).abs().max() < 1e-3);
+
+    // Multi-matrix chain
+    let d: Tensor<f32, [60, 2]> = Tensor.randn().to(device);
+    let multi = a.chain_matmul([b, c, d]);
+    assert(multi.shape() == [10, 2]);
+}
+
+fn gemm(
+    c: &mut Tensor<f32, [M, N]>,
+    a: &Tensor<f32, [M, K]>,
+    b: &Tensor<f32, [K, N]>,
+    alpha: f32,
+    beta: f32
+) {
+    *c = alpha * matmul(*a, *b) + beta * *c;
+}
+
+fn gemm_transposed(
+    c: &mut Tensor<f32, [M, N]>,
+    a: &Tensor<f32, [K, M]>,
+    b: &Tensor<f32, [K, N]>,
+    alpha: f32,
+    beta: f32,
+    trans_a: bool,
+    trans_b: bool
+) {
+    let a_op = if trans_a { a.T } else { *a };
+    let b_op = if trans_b { b.T } else { *b };
+    *c = alpha * matmul(a_op, b_op) + beta * *c;
+}

@@ -1,0 +1,168 @@
+// Type system stress test
+// Tests complex type constructs and inference
+
+use verum_core.base.{List, Text, Map, Maybe, Set}
+
+// Generic types with multiple parameters
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+type Triple<A, B, C> is {
+    a: A,
+    b: B,
+    c: C,
+};
+
+// Nested generics
+type NestedList<T> is List<List<T>>;
+type MapOfLists<K, V> is Map<K, List<V>>;
+type ListOfMaps<K, V> is List<Map<K, V>>;
+
+// Higher-kinded types (if supported)
+type Container<F, T> is F<T>;
+
+// Recursive types
+type LinkedList<T> is
+    Nil |
+    Cons(T, Heap<LinkedList<T>>);
+
+type BinaryTree<T> is
+    Empty |
+    Node(Heap<BinaryTree<T>>, T, Heap<BinaryTree<T>>);
+
+// Mutually recursive types
+type Expr is
+    Num(Int) |
+    Add(Heap<Expr>, Heap<Expr>) |
+    Let(Text, Heap<Expr>, Heap<Expr>) |
+    Var(Text) |
+    Lambda(Text, Heap<Expr>) |
+    App(Heap<Expr>, Heap<Expr>);
+
+type Type is
+    TInt |
+    TBool |
+    TFun(Heap<Type>, Heap<Type>) |
+    TVar(Text);
+
+// Type aliases
+type IntList is List<Int>;
+type StringMap is Map<Text, Text>;
+type MaybeInt is Maybe<Int>;
+
+// Complex function types
+type Predicate<T> is function(T) -> Bool;
+type Transform<A, B> is function(A) -> B;
+type Reducer<T, Acc> is function(Acc, T) -> Acc;
+type Comparator<T> is function(T, T) -> Int;
+
+// Functions with generic constraints
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: pair.second, second: pair.first }
+}
+
+fn map_option<A, B>(opt: Maybe<A>, f: function(A) -> B) -> Maybe<B> {
+    match opt {
+        Some(x) => Some(f(x)),
+        None => None,
+    }
+}
+
+fn fold<T, Acc>(list: List<T>, init: Acc, f: function(Acc, T) -> Acc) -> Acc {
+    let mut acc = init;
+    for item in list {
+        acc = f(acc, item);
+    }
+    acc
+}
+
+// Type inference challenges
+fn infer_test() {
+    // Infer list element type
+    let list = [1, 2, 3];
+
+    // Infer map types
+    let map = { "a": 1, "b": 2 };
+
+    // Infer closure types
+    let add = |x, y| x + y;
+    let double = |x| x * 2;
+
+    // Infer through function calls
+    let result = identity(42);
+
+    // Infer through chains
+    let chained = [1, 2, 3]
+        .map(|x| x * 2)
+        .filter(|x| x > 2)
+        .fold(0, |a, b| a + b);
+
+    // Infer from context
+    let opt: Maybe<Int> = Some(42);
+    let extracted = match opt {
+        Some(x) => x,
+        None => 0,
+    };
+}
+
+// Refinement types
+type PositiveInt is { n: Int | n > 0 };
+type NonEmpty<T> is { list: List<T> | len(list) > 0 };
+type BoundedInt is { n: Int | n >= 0 && n <= 100 };
+
+fn positive_only(n: PositiveInt) -> Int {
+    n
+}
+
+fn non_empty_head<T>(list: NonEmpty<T>) -> T {
+    list[0]
+}
+
+// Associated types (if supported)
+protocol Iterator {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+}
+
+// Generic protocols
+protocol Functor<F> {
+    fn map<A, B>(self: F<A>, f: function(A) -> B) -> F<B>;
+}
+
+protocol Monad<M>: Functor<M> {
+    fn pure<A>(value: A) -> M<A>;
+    fn flat_map<A, B>(self: M<A>, f: function(A) -> M<B>) -> M<B>;
+}
+
+fn main() {
+    // Create complex nested types
+    let nested: List<List<Int>> = [[1, 2], [3, 4]];
+    let map_of_lists: Map<Text, List<Int>> = { "a": [1, 2], "b": [3, 4] };
+
+    // Use generic functions
+    let id_result = identity(42);
+    let pair = Pair { first: 1, second: "hello" };
+    let swapped = swap(pair);
+
+    // Create recursive types
+    let list: LinkedList<Int> = LinkedList.Cons(1,
+        Heap(LinkedList.Cons(2,
+            Heap(LinkedList.Nil))));
+
+    let tree: BinaryTree<Int> = BinaryTree.Node(
+        Heap(BinaryTree.Empty),
+        5,
+        Heap(BinaryTree.Empty));
+
+    // Type inference tests
+    infer_test();
+
+    // Verify types
+    assert id_result == 42;
+}

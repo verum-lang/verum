@@ -1,0 +1,57 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED
+// @tier: 0
+// @expected-exit: 0
+// @description: Test to_le_bytes and from_le_bytes methods for numeric types
+
+fn main() {
+    // Test Int (i64) byte conversion
+    let n: Int = 0x0102030405060708;
+    let bytes = n.to_le_bytes();
+    assert_eq(bytes[0], 0x08);
+    assert_eq(bytes[7], 0x01);
+
+    let restored = Int.from_le_bytes(bytes);
+    assert_eq(restored, n);
+
+    // Test big-endian
+    let be_bytes = n.to_be_bytes();
+    assert_eq(be_bytes[0], 0x01);
+    assert_eq(be_bytes[7], 0x08);
+
+    let restored_be = Int.from_be_bytes(be_bytes);
+    assert_eq(restored_be, n);
+
+    // Test u64 byte conversion
+    let u: u64 = 0x0102030405060708;
+    let u_bytes = u.to_le_bytes();
+    assert_eq(u_bytes[0], 0x08);
+
+    let u_restored = u64.from_le_bytes(u_bytes);
+    assert_eq(u_restored, u);
+
+    // Test i32 byte conversion
+    let i32_val: i32 = 0x01020304;
+    let i32_bytes = i32_val.to_le_bytes();
+    assert_eq(i32_bytes[0], 0x04);
+    assert_eq(i32_bytes[3], 0x01);
+
+    let i32_restored = i32.from_le_bytes(i32_bytes);
+    assert_eq(i32_restored, i32_val);
+
+    // Test u32 byte conversion
+    let u32_val: u32 = 0x01020304;
+    let u32_bytes = u32_val.to_le_bytes();
+    let u32_restored = u32.from_le_bytes(u32_bytes);
+    assert_eq(u32_restored, u32_val);
+
+    // Test u16 byte conversion
+    let u16_val: u16 = 0x0102;
+    let u16_bytes = u16_val.to_le_bytes();
+    assert_eq(u16_bytes[0], 0x02);
+    assert_eq(u16_bytes[1], 0x01);
+
+    let u16_restored = u16.from_le_bytes(u16_bytes);
+    assert_eq(u16_restored, u16_val);
+}

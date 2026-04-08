@@ -1,0 +1,254 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, interval_tree, merge_intervals, scheduling, point_query
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interval operations: merging overlapping intervals, point-in-interval queries,
+// interval scheduling (maximum non-overlapping set), and interval coverage.
+// Intervals stored as flat arrays: ivals[i*2] = start, ivals[i*2+1] = end.
+
+// Sort intervals by start time using insertion sort.
+// n = number of intervals; ivals has capacity for 32 intervals (64 ints).
+fn sort_intervals(ivals: [Int; 64], n: Int) {
+    let mut i = 1;
+    while i < n {
+        let ks = ivals[i * 2];
+        let ke = ivals[i * 2 + 1];
+        let mut j = i - 1;
+        while j >= 0 && ivals[j * 2] > ks {
+            ivals[(j + 1) * 2]     = ivals[j * 2];
+            ivals[(j + 1) * 2 + 1] = ivals[j * 2 + 1];
+            j = j - 1;
+        }
+        ivals[(j + 1) * 2]     = ks;
+        ivals[(j + 1) * 2 + 1] = ke;
+        i = i + 1;
+    }
+}
+
+// Merge overlapping intervals (sorted by start).
+// Writes merged intervals into out[]; returns count of merged intervals.
+fn merge_intervals(ivals: [Int; 64], n: Int, out: [Int; 64]) -> Int {
+    if n == 0 { 0 } else {
+        let mut oi = 0;
+        out[0] = ivals[0];
+        out[1] = ivals[1];
+        oi = 1;
+        let mut i = 1;
+        while i < n {
+            let cs = ivals[i * 2];
+            let ce = ivals[i * 2 + 1];
+            let last_e = out[(oi - 1) * 2 + 1];
+            if cs <= last_e {
+                // Overlapping: extend end if needed
+                if ce > last_e {
+                    out[(oi - 1) * 2 + 1] = ce;
+                }
+            } else {
+                // No overlap: add new interval
+                out[oi * 2]     = cs;
+                out[oi * 2 + 1] = ce;
+                oi = oi + 1;
+            }
+            i = i + 1;
+        }
+        oi
+    }
+}
+
+// Count how many intervals contain point p.
+fn count_containing(ivals: [Int; 64], n: Int, p: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n {
+        if ivals[i * 2] <= p && p <= ivals[i * 2 + 1] {
+            cnt = cnt + 1;
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+// Interval scheduling: find maximum set of non-overlapping intervals.
+// Uses greedy algorithm: sort by end time, pick earliest-ending compatible interval.
+// Returns count of selected intervals; selected[] stores their original indices.
+fn schedule_intervals(ivals: [Int; 64], n: Int, selected: [Int; 32]) -> Int {
+    // Sort a copy by end time (bubble sort for simplicity)
+    let mut order = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0];
+    let mut i = 0;
+    while i < n { order[i] = i; i = i + 1; }
+
+    // Bubble sort order[] by ivals[order[j]*2+1] (end time)
+    i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n - 1 - i {
+            let ea = ivals[order[j] * 2 + 1];
+            let eb = ivals[order[j + 1] * 2 + 1];
+            if ea > eb {
+                let tmp = order[j];
+                order[j] = order[j + 1];
+                order[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    // Greedy selection
+    let mut cnt = 0;
+    let mut last_end = -1;
+    i = 0;
+    while i < n {
+        let idx = order[i];
+        let s = ivals[idx * 2];
+        let e = ivals[idx * 2 + 1];
+        if s > last_end {
+            selected[cnt] = idx;
+            cnt = cnt + 1;
+            last_end = e;
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+fn test_merge_no_overlap() {
+    // [1,2], [4,5], [7,9] -> no overlap -> 3 intervals after merge
+    let mut ivals = [1, 2, 4, 5, 7, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    sort_intervals(ivals, 3);
+    let mc = merge_intervals(ivals, 3, out);
+    assert_eq(mc, 3);
+    assert_eq(out[0], 1); assert_eq(out[1], 2);
+    assert_eq(out[2], 4); assert_eq(out[3], 5);
+    assert_eq(out[4], 7); assert_eq(out[5], 9);
+
+    print("merge_no_overlap: ok");
+}
+
+fn test_merge_all_overlap() {
+    // [1,10], [2,6], [8,15] -> sorted: [1,10],[2,6],[8,15]
+    // [1,10] and [2,6] overlap -> [1,10]
+    // [1,10] and [8,15] overlap -> [1,15]
+    // Result: 1 interval [1,15]
+    let mut ivals = [1, 10, 2, 6, 8, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    sort_intervals(ivals, 3);
+    let mc = merge_intervals(ivals, 3, out);
+    assert_eq(mc, 1);
+    assert_eq(out[0], 1);
+    assert_eq(out[1], 15);
+
+    print("merge_all_overlap: ok");
+}
+
+fn test_merge_partial_overlap() {
+    // [1,3],[2,4],[6,8],[7,10],[12,14]
+    // Sorted: [1,3],[2,4],[6,8],[7,10],[12,14]
+    // Merge: [1,3]+[2,4]=[1,4]; [6,8]+[7,10]=[6,10]; [12,14] separate
+    // Result: [1,4], [6,10], [12,14] -> 3 intervals
+    let mut ivals = [1, 3, 2, 4, 6, 8, 7, 10, 12, 14, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    sort_intervals(ivals, 5);
+    let mc = merge_intervals(ivals, 5, out);
+    assert_eq(mc, 3);
+    assert_eq(out[0], 1);  assert_eq(out[1], 4);
+    assert_eq(out[2], 6);  assert_eq(out[3], 10);
+    assert_eq(out[4], 12); assert_eq(out[5], 14);
+
+    print("merge_partial_overlap: ok");
+}
+
+fn test_point_queries() {
+    // Intervals: [1,5],[3,7],[10,15],[12,20]
+    let ivals = [1, 5, 3, 7, 10, 15, 12, 20, 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Point 0: not in any interval -> 0
+    assert_eq(count_containing(ivals, 4, 0), 0);
+    // Point 4: in [1,5] and [3,7] -> 2
+    assert_eq(count_containing(ivals, 4, 4), 2);
+    // Point 6: in [3,7] only -> 1
+    assert_eq(count_containing(ivals, 4, 6), 1);
+    // Point 13: in [10,15] and [12,20] -> 2
+    assert_eq(count_containing(ivals, 4, 13), 2);
+    // Point 18: in [12,20] only -> 1
+    assert_eq(count_containing(ivals, 4, 18), 1);
+    // Point 21: not in any -> 0
+    assert_eq(count_containing(ivals, 4, 21), 0);
+
+    print("point_queries: ok");
+}
+
+fn test_interval_scheduling() {
+    // Classic scheduling: find max non-overlapping intervals.
+    // Intervals: [1,4],[3,5],[0,6],[5,7],[3,9],[5,10],[8,11],[8,12],[2,14],[12,16]
+    // Sorted by end: [1,4],[3,5],[0,6],[5,7],[3,9],[5,10],[8,11],[8,12],[2,14],[12,16]
+    // Greedy: pick [1,4], skip [3,5](overlaps 4), skip [0,6](overlaps 4),
+    //         pick [5,7], skip [3,9](overlaps 7), skip [5,10](overlaps 7),
+    //         pick [8,11], skip [8,12](overlaps 11), skip [2,14](overlaps 11),
+    //         pick [12,16]
+    // -> 4 selected
+    let mut ivals = [1, 4, 3, 5, 0, 6, 5, 7, 3, 9, 5, 10, 8, 11, 8, 12,
+                     2, 14, 12, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sel = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let sc = schedule_intervals(ivals, 10, sel);
+    assert_eq(sc, 4);
+
+    // Verify the selected intervals are non-overlapping
+    let mut prev_end = -1;
+    let mut valid = 1;
+    let mut i = 0;
+    while i < sc {
+        let idx = sel[i];
+        let s = ivals[idx * 2];
+        let e = ivals[idx * 2 + 1];
+        if s <= prev_end { valid = 0; }
+        prev_end = e;
+        i = i + 1;
+    }
+    assert_eq(valid, 1);
+
+    print("interval_scheduling: ok");
+}
+
+fn main() -> Int {
+    test_merge_no_overlap();
+    test_merge_all_overlap();
+    test_merge_partial_overlap();
+    test_point_queries();
+    test_interval_scheduling();
+    print("[OK] 465_interp_interval_tree");
+    0
+}

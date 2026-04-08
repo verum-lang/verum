@@ -1,0 +1,135 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, expressions, block
+// @description: Test block expression evaluation in meta functions
+
+// =============================================================================
+// BASIC BLOCKS
+// =============================================================================
+
+meta fn test_simple_block() -> Int {
+    {
+        42
+    }
+}
+
+meta fn test_block_with_let() -> Int {
+    {
+        let x = 10;
+        x
+    }
+}
+
+meta fn test_block_with_multiple_stmts() -> Int {
+    {
+        let x = 10;
+        let y = 20;
+        x + y
+    }
+}
+
+// =============================================================================
+// NESTED BLOCKS
+// =============================================================================
+
+meta fn test_nested_blocks() -> Int {
+    {
+        let outer = 100;
+        {
+            let inner = 50;
+            outer + inner
+        }
+    }
+}
+
+meta fn test_deeply_nested() -> Int {
+    {
+        let a = 1;
+        {
+            let b = 2;
+            {
+                let c = 3;
+                a + b + c
+            }
+        }
+    }
+}
+
+// =============================================================================
+// BLOCK SCOPING
+// =============================================================================
+
+meta fn test_scope_shadowing() -> Int {
+    let x = 10;
+    let result = {
+        let x = 20;
+        x
+    };
+    result + x
+}
+
+meta fn test_scope_independence() -> Int {
+    let a = {
+        let temp = 5;
+        temp * 2
+    };
+    let b = {
+        let temp = 10;
+        temp * 2
+    };
+    a + b
+}
+
+// =============================================================================
+// BLOCKS IN EXPRESSIONS
+// =============================================================================
+
+meta fn test_block_in_binary() -> Int {
+    { 10 } + { 20 }
+}
+
+meta fn test_block_in_if() -> Int {
+    if { true } {
+        { 100 }
+    } else {
+        { 0 }
+    }
+}
+
+// =============================================================================
+// COMPLEX BLOCK PATTERNS
+// =============================================================================
+
+meta fn test_compute_in_block() -> Int {
+    let result = {
+        let base = 100;
+        let multiplier = 5;
+        let bonus = 10;
+        base * multiplier + bonus
+    };
+    result
+}
+
+// Main test function
+fn main() {
+    // Basic block tests
+    @const assert_eq(test_simple_block(), 42);
+    @const assert_eq(test_block_with_let(), 10);
+    @const assert_eq(test_block_with_multiple_stmts(), 30);
+
+    // Nested block tests
+    @const assert_eq(test_nested_blocks(), 150);
+    @const assert_eq(test_deeply_nested(), 6);
+
+    // Scope tests
+    @const assert_eq(test_scope_shadowing(), 30);
+    @const assert_eq(test_scope_independence(), 30);
+
+    // Block in expression tests
+    @const assert_eq(test_block_in_binary(), 30);
+    @const assert_eq(test_block_in_if(), 100);
+
+    // Complex pattern tests
+    @const assert_eq(test_compute_in_block(), 510);
+}

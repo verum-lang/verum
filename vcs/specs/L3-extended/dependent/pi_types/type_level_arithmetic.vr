@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, pi-types, type-level-arithmetic
+
+/// Type-level arithmetic using meta Int
+///
+/// Demonstrates compile-time computation over integers,
+/// enabling precise size tracking and static verification.
+
+/// Matrix with statically known dimensions
+type Matrix<T, Rows: meta Int, Cols: meta Int> is {
+    data: [T; Rows * Cols],
+};
+
+/// Fixed-size array
+type FixedArray<T, N: meta Int> is {
+    data: [T; N],
+};
+
+/// Create a zero matrix
+fn zero_matrix<T, R: meta Int, C: meta Int>() -> Matrix<T, R, C> {
+    Matrix { data: [T.default(); R * C] }
+}
+
+/// Create an identity-sized matrix
+fn identity_matrix<N: meta Int{> 0}>() -> Matrix<Float, N, N> {
+    Matrix { data: [0.0; N * N] }
+}
+
+/// Matrix multiplication with dimension checking
+fn matmul<T, M: meta Int, N: meta Int, K: meta Int>(
+    a: Matrix<T, M, N>,
+    b: Matrix<T, N, K>
+) -> Matrix<T, M, K> {
+    // Inner dimensions must match (both N)
+    // Result is M x K
+    Matrix { data: [T.default(); M * K] }
+}
+
+/// Vector dot product (same dimensions required)
+fn dot<T, N: meta Int>(
+    xs: FixedArray<T, N>,
+    ys: FixedArray<T, N>
+) -> T {
+    xs.data[0]  // Simplified
+}
+
+/// Create zeros array
+fn zeros<N: meta Int>() -> FixedArray<Float, N> {
+    FixedArray { data: [0.0; N] }
+}
+
+/// Create ones array
+fn ones<N: meta Int>() -> FixedArray<Float, N> {
+    FixedArray { data: [1.0; N] }
+}
+
+/// Replicate value
+fn replicate<T, N: meta Int>(value: T) -> FixedArray<T, N> {
+    FixedArray { data: [value; N] }
+}
+
+/// Type-level arithmetic in constraints
+fn bounded_access<T, N: meta Int{> 0}>(arr: FixedArray<T, N>, idx: Int) -> T
+where idx >= 0, idx < N {
+    arr.data[idx]
+}
+
+/// Compute size from dimensions
+fn flat_size<R: meta Int, C: meta Int>() -> Int {
+    R * C
+}
+
+/// Nested array with computed size (flattened)
+type FlatMatrix<T, N: meta Int> is {
+    data: [T; N],
+};
+
+/// Create a flat matrix of given total size
+fn flat_zeros<T, N: meta Int>() -> FlatMatrix<T, N> {
+    FlatMatrix { data: [T.default(); N] }
+}
+
+/// Square matrix type alias
+type SquareMatrix<T, N: meta Int> is Matrix<T, N, N>;
+
+/// Diagonal matrix creation
+fn diagonal<N: meta Int{> 0}>(values: FixedArray<Float, N>) -> SquareMatrix<Float, N> {
+    SquareMatrix { data: [0.0; N * N] }
+}
+
+/// Type-level bounds checking with meta where
+fn safe_slice<T, N: meta Int, Start: meta Int, Len: meta Int>(
+    arr: FixedArray<T, N>
+) -> FixedArray<T, Len>
+where meta Start >= 0, Len >= 0, Start + Len <= N {
+    FixedArray { data: [T.default(); Len] }
+}
+
+fn main() {
+    // Basic meta arithmetic
+    let size = flat_size.<3, 4>();
+    assert(size == 12);
+
+    // Matrix dimensions
+    let a: Matrix<Float, 2, 3> = zero_matrix();
+    let b: Matrix<Float, 3, 4> = zero_matrix();
+    let c: Matrix<Float, 2, 4> = matmul(a, b);
+
+    // Vector operations
+    let v1: FixedArray<Float, 5> = zeros();
+    let v2: FixedArray<Float, 5> = ones();
+    let d = dot(v1, v2);
+
+    // Flat matrix with computed size
+    let flat: FlatMatrix<Float, 24> = flat_zeros();
+    assert(flat.data.len() == 24);
+
+    // Square matrix
+    let sq: SquareMatrix<Float, 3> = diagonal(FixedArray { data: [1.0, 2.0, 3.0] });
+    assert(sq.data.len() == 9);
+
+    // Identity matrix
+    let id: Matrix<Float, 4, 4> = identity_matrix();
+    assert(id.data.len() == 16);
+}

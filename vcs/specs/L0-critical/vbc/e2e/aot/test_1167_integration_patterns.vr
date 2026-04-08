@@ -1,0 +1,183 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: integration, comprehensive, multi-feature
+// @description: Integration test combining generics, closures, collections, match, and control flow
+
+type Priority is Low | Medium | High;
+
+type Task3 is { name: Text, priority: Priority, done: Bool };
+
+implement Task3 {
+    fn create(name: Text, pri: Priority) -> Task3 {
+        Task3 { name: name, priority: pri, done: false }
+    }
+
+    fn priority_value(&self) -> Int {
+        match self.priority {
+            Low => 1,
+            Medium => 2,
+            High => 3,
+        }
+    }
+
+    fn mark_done(&self) -> Task3 {
+        Task3 { name: self.name, priority: self.priority, done: true }
+    }
+}
+
+fn test_task_system() -> Int {
+    let mut tasks = List.new();
+    tasks.push(Task3.create("email", Low));
+    tasks.push(Task3.create("deploy", High));
+    tasks.push(Task3.create("review", Medium));
+    tasks.push(Task3.create("hotfix", High));
+    tasks.push(Task3.create("docs", Low));
+
+    // Count high priority
+    let mut high_count = 0;
+    let mut i = 0;
+    while i < tasks.len() {
+        if tasks[i].priority_value() == 3 {
+            high_count = high_count + 1;
+        }
+        i = i + 1;
+    }
+    if high_count != 2 {
+        print(f"FAIL high_count: {high_count}");
+        return 1;
+    }
+
+    // Sum all priorities
+    let mut total = 0;
+    i = 0;
+    while i < tasks.len() {
+        total = total + tasks[i].priority_value();
+        i = i + 1;
+    }
+    // 1 + 3 + 2 + 3 + 1 = 10
+    if total != 10 {
+        print(f"FAIL total_priority: {total}");
+        return 1;
+    }
+    print("  task_system: OK");
+    0
+}
+
+fn test_map_word_count() -> Int {
+    let mut words = List.new();
+    words.push("the");
+    words.push("cat");
+    words.push("sat");
+    words.push("on");
+    words.push("the");
+    words.push("mat");
+    words.push("the");
+
+    let mut counts = Map.new();
+    let mut i = 0;
+    while i < words.len() {
+        let word = words[i];
+        if counts.contains_key(word) {
+            let old = counts.get(word);
+            counts.insert(word, old + 1);
+        } else {
+            counts.insert(word, 1);
+        }
+        i = i + 1;
+    }
+
+    if counts.get("the") != 3 {
+        print(f"FAIL word_count_the: {counts.get(\"the\")}");
+        return 1;
+    }
+    if counts.get("cat") != 1 {
+        print(f"FAIL word_count_cat: {counts.get(\"cat\")}");
+        return 1;
+    }
+    if counts.len() != 5 {
+        print(f"FAIL word_count_len: {counts.len()}");
+        return 1;
+    }
+    print("  word_count: OK");
+    0
+}
+
+fn test_builder_pattern() -> Int {
+    type Config2 is { width: Int, height: Int, title: Text };
+
+    let cfg = Config2 { width: 800, height: 600, title: "App" };
+
+    // Functional update — create new with changed field
+    let resized = Config2 { width: 1024, height: 768, title: cfg.title };
+
+    if resized.width != 1024 || resized.height != 768 {
+        print(f"FAIL builder: {resized.width}x{resized.height}");
+        return 1;
+    }
+    if resized.title != "App" {
+        print(f"FAIL builder_title: {resized.title}");
+        return 1;
+    }
+    print("  builder_pattern: OK");
+    0
+}
+
+fn test_pipeline_transforms() -> Int {
+    // Build a pipeline: filter evens, square them, sum
+    let mut nums = List.new();
+    let mut i = 1;
+    while i <= 10 {
+        nums.push(i);
+        i = i + 1;
+    }
+
+    // Filter evens
+    let mut evens = List.new();
+    i = 0;
+    while i < nums.len() {
+        if nums[i] % 2 == 0 {
+            evens.push(nums[i]);
+        }
+        i = i + 1;
+    }
+
+    // Square them
+    let mut squares = List.new();
+    i = 0;
+    while i < evens.len() {
+        squares.push(evens[i] * evens[i]);
+        i = i + 1;
+    }
+
+    // Sum
+    let mut total = 0;
+    i = 0;
+    while i < squares.len() {
+        total = total + squares[i];
+        i = i + 1;
+    }
+    // Evens: 2,4,6,8,10 -> Squares: 4,16,36,64,100 -> Sum: 220
+    if total != 220 {
+        print(f"FAIL pipeline: {total}, expected 220");
+        return 1;
+    }
+    print("  pipeline_transforms: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Integration Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_task_system();
+    failures = failures + test_map_word_count();
+    failures = failures + test_builder_pattern();
+    failures = failures + test_pipeline_transforms();
+
+    if failures == 0 {
+        print("All integration tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

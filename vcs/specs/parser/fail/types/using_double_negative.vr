@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, using, context, negative, error
+// @description: Test detection of invalid double negative context syntax
+// @expected-error: E018
+
+// Double negative is not allowed
+type Callback is fn() using [!!Database];

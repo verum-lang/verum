@@ -1,0 +1,103 @@
+// @test: run
+// Iterator patterns — for-in, range, nested loops, collect
+
+fn fibonacci(n: Int) -> List<Int> {
+    let result = List.new();
+    if (n <= 0) { return result; }
+    result.push(0);
+    if (n == 1) { return result; }
+    result.push(1);
+    let mut i = 2;
+    while i < n {
+        let prev2 = result[i - 2];
+        let prev1 = result[i - 1];
+        result.push(prev1 + prev2);
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: For-in over range
+    let mut sum = 0;
+    for i in 1..=10 {
+        sum = sum + i;
+    }
+    if (sum != 55) {
+        print(f"FAIL test1: sum 1..=10 = {sum}");
+        return 1;
+    }
+    print("test1 range sum: OK");
+
+    // Test 2: For-in over list
+    let items = [10, 20, 30, 40, 50];
+    let mut total = 0;
+    for x in items {
+        total = total + x;
+    }
+    if (total != 150) {
+        print(f"FAIL test2: list sum = {total}");
+        return 1;
+    }
+    print("test2 list for-in: OK");
+
+    // Test 3: Fibonacci
+    let fib = fibonacci(10);
+    if (fib.len() != 10) {
+        print(f"FAIL test3: fib.len() = {fib.len()}");
+        return 1;
+    }
+    if (fib[0] != 0 || fib[1] != 1 || fib[9] != 34) {
+        print("FAIL test3: fib values wrong");
+        return 1;
+    }
+    print("test3 fibonacci: OK");
+
+    // Test 4: Nested range loops
+    let mut pairs = 0;
+    for i in 0..5 {
+        for j in 0..5 {
+            if (i < j) {
+                pairs = pairs + 1;
+            }
+        }
+    }
+    if (pairs != 10) {
+        print(f"FAIL test4: pairs = {pairs}");
+        return 1;
+    }
+    print("test4 nested loops: OK");
+
+    // Test 5: Build list with while loop
+    let built = List.new();
+    let mut bi = 0;
+    while bi < 10 {
+        built.push(bi * bi);
+        bi = bi + 1;
+    }
+    if (built.len() != 10) {
+        print(f"FAIL test5: built.len() = {built.len()}");
+        return 1;
+    }
+    // 0,1,4,9,16,25,36,49,64,81
+    if (built[0] != 0 || built[3] != 9 || built[9] != 81) {
+        print(f"FAIL test5: built[0]={built[0]}, built[9]={built[9]}");
+        return 1;
+    }
+    print("test5 list build: OK");
+
+    // Test 6: Accumulate from range
+    let mut product = 1;
+    for i in 1..=5 {
+        product = product * i;
+    }
+    // 5! = 120
+    if (product != 120) {
+        print(f"FAIL test6: 5! = {product}");
+        return 1;
+    }
+    print("test6 factorial: OK");
+
+    print("1025_iterator_patterns: PASS");
+    0
+}

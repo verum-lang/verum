@@ -1,0 +1,240 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, compose, functional
+
+// Function composition operators (>> and <<)
+
+// Forward composition (>>)
+// f >> g means "first f, then g" i.e., g(f(x))
+fn double(x: Int) -> Int { x * 2 }
+fn add_one(x: Int) -> Int { x + 1 }
+fn square(x: Int) -> Int { x * x }
+
+fn test_forward_composition() {
+    let double_then_add = double >> add_one;
+    let result1 = double_then_add(5);  // double(5) = 10, add_one(10) = 11
+
+    // Chained forward composition
+    let transform = double >> add_one >> square;
+    let result2 = transform(3);  // double(3)=6, add_one(6)=7, square(7)=49
+}
+
+fn test_backward_composition() {
+    // Backward composition (<<)
+    // f << g means "first g, then f" i.e., f(g(x))
+    let add_then_double = double << add_one;
+    let result3 = add_then_double(5);  // add_one(5)=6, double(6)=12
+
+    // Chained backward composition
+    let reverse_transform = square << add_one << double;
+    let result4 = reverse_transform(3);  // double(3)=6, add_one(6)=7, square(7)=49
+}
+
+// Composition with type-changing functions
+fn parse_int(s: Text) -> Maybe<Int> { Int.parse(s) }
+fn validate_positive(n: Int) -> Maybe<Int> {
+    if n > 0 { Some(n) } else { None }
+}
+
+fn test_kleisli_composition() {
+    // Kleisli composition for Maybe - using explicit bind
+    // The >=> operator is not currently supported
+    let parse_and_validate = |s| parse_int(s).and_then(validate_positive);
+}
+
+fn test_closure_composition() {
+    // Composition with closures
+    let composed_closure = (|x| x + 1) >> (|x| x * 2);
+    let closure_result = composed_closure(5);  // 12
+}
+
+fn test_variable_composition() {
+    // Composition in variable assignment
+    let f: fn(Int) -> Int = double;
+    let g: fn(Int) -> Int = square;
+    let h = f >> g;
+}
+
+// Composition with generic functions
+fn identity<T>(x: T) -> T { x }
+
+fn map_option<A, B>(f: fn(A) -> B) -> fn(Maybe<A>) -> Maybe<B> {
+    |opt| opt.map(f)
+}
+
+fn read_input() -> Text { "" }
+fn parse_data(t: Text) -> Text { t }
+fn validate(t: Text) -> Text { t }
+fn transform(t: Text) -> Text { t }
+fn format_output(t: Text) -> Text { t }
+
+fn test_point_free() {
+    // Point-free style using composition
+    let process =
+        read_input
+        >> parse_data
+        >> validate
+        >> transform
+        >> format_output;
+}
+
+fn test_composition_expressions() {
+    let f = double;
+    let g = add_one;
+    let h = square;
+    let i = add_one;
+
+    // Composition in expressions
+    let complex = (f >> g) >> (h >> i);
+    let nested = f >> (g >> h);
+}
+
+// Composition with method-like functions
+fn trim_string(s: Text) -> Text { s.trim() }
+fn to_upper(s: Text) -> Text { s.to_upper() }
+fn reverse_text(s: Text) -> Text { s.reverse() }
+
+fn test_text_composition() {
+    let text_transform = trim_string >> to_upper >> reverse_text;
+    let transformed_text = text_transform("  hello world  ");
+}
+
+fn test_array_composition() {
+    // Composition operators in arrays
+    let transformers = [
+        double >> add_one,
+        square >> double,
+        add_one >> square,
+    ];
+}
+
+fn fast_parse(t: Text) -> Text { t }
+fn fast_validate(t: Text) -> Text { t }
+fn slow_parse(t: Text) -> Text { t }
+fn slow_validate(t: Text) -> Text { t }
+fn finalize(t: Text) -> Text { t }
+
+fn test_conditional_composition() {
+    let use_fast_path = true;
+
+    // Composition with conditional logic
+    let conditional_compose = if use_fast_path {
+        fast_parse >> fast_validate
+    } else {
+        slow_parse >> slow_validate
+    };
+
+    // Mixing composition and pipeline
+    let initial_value = "";
+    let result = initial_value
+        |> (parse_data >> validate >> transform)
+        |> finalize;
+}
+
+// Composition preserves types
+fn str_len(s: Text) -> Int { s.len() }
+fn is_even(n: Int) -> Bool { n % 2 == 0 }
+
+fn test_type_preservation() {
+    let length_is_even: fn(Text) -> Bool = str_len >> is_even;
+}
+
+fn test_equivalence() {
+    let a = double;
+    let b = add_one;
+    let c = square;
+
+    // Backward composition equivalence
+    // f << g << h is equivalent to h >> g >> f
+    let forward = a >> b >> c;
+    let backward = c << b << a;  // Same function
+}
+
+// Composition with partial application
+fn add(a: Int, b: Int) -> Int { a + b }
+
+fn test_partial_application() {
+    let add_five = add(5, _);
+    let double_then_add_five = double >> add_five;
+}
+
+fn test_identity_composition() {
+    let f = double;
+
+    // Identity composition
+    let with_identity = f >> identity;  // Same as f
+    let identity_with = identity >> f;  // Same as f
+}
+
+fn test_associativity() {
+    let f = double;
+    let g = add_one;
+    let h = square;
+
+    // Associativity of composition
+    // (f >> g) >> h == f >> (g >> h)
+    let left_assoc = (f >> g) >> h;
+    let right_assoc = f >> (g >> h);
+}
+
+// Composition in function parameters
+fn apply_transform<T>(
+    data: List<T>,
+    transform: fn(T) -> T
+) -> List<T> {
+    data.map(transform)
+}
+
+fn test_parameter_composition() {
+    let doubled_and_incremented = apply_transform(
+        [1, 2, 3, 4, 5],
+        double >> add_one
+    );
+}
+
+type Error is { message: Text };
+
+implement Error {
+    fn new(msg: Text) -> Error {
+        Error { message: msg }
+    }
+}
+
+// Composition with error-handling functions
+fn try_parse(s: Text) -> Result<Int, Error> { Int.try_parse(s) }
+fn try_validate(n: Int) -> Result<Int, Error> {
+    if n > 0 { Ok(n) } else { Err(Error.new("Invalid")) }
+}
+
+// Composition returning composed function
+fn compose<A, B, C>(
+    f: fn(A) -> B,
+    g: fn(B) -> C
+) -> fn(A) -> C {
+    f >> g
+}
+
+fn test_compose_function() {
+    let composed = compose(double, square);
+}
+
+fn test_precedence_composition() {
+    let f = double;
+    let g = add_one;
+    let h = square;
+
+    // Composition operator precedence
+    let prec1 = f >> g >> h;  // Should be (f >> g) >> h
+    let prec2 = f << g << h;  // Should be f << (g << h)
+}
+
+type Data is ();
+
+// Async function composition (if supported)
+async fn fetch_data(url: Text) -> Data { () }
+async fn process_data(data: Data) -> Result<Data, Error> { Ok(()) }
+
+fn test_async_composition() {
+    let async_pipeline = fetch_data >> process_data;
+}

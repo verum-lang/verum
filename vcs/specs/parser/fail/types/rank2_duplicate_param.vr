@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, rank2, params, error
+// @description: Test detection of duplicate type parameter in rank-2 function type
+// @expected-error: E069
+
+// Type parameters must be unique
+type Transform is fn<R, R>(R) -> R;

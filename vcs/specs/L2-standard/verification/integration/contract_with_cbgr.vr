@@ -1,0 +1,212 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, cbgr, memory, integration
+// @timeout: 5000
+
+/// Integration tests: Contracts with CBGR (Capability-Based Generational References)
+/// Demonstrates memory safety verification with contracts
+
+/// Tier 0: Managed references with full CBGR protection (~15ns overhead)
+@verify(proof)
+fn safe_dereference<T>(ptr: &T) -> &T {
+    contract#"
+        requires ptr.is_valid();
+        ensures result.is_valid();
+        ensures *result == *ptr;
+    ";
+    ptr
+}
+
+/// Tier 1: Checked references with compile-time escape analysis (0ns overhead)
+@verify(proof)
+fn checked_local_ref<T>(value: T) -> T {
+    contract#"
+        ensures result == value;
+    ";
+    // &checked reference is proven safe by escape analysis
+    let local: &checked T = &value;
+    *local
+}
+
+/// Tier 2: Unsafe references requiring manual safety proof
+@verify(proof)
+fn unsafe_pointer_arithmetic<T>(
+    base: &unsafe T,
+    offset: Int
+) -> &unsafe T {
+    contract#"
+        requires base.is_valid();
+        requires offset >= 0;
+        requires base.bounds_check(offset);
+        ensures result.is_valid();
+        // SAFETY: Caller guarantees offset is within allocated bounds
+    ";
+    // SAFETY: Manual proof required - offset verified by contract
+    base.offset(offset)
+}
+
+/// CBGR generation checking in contracts
+type Node<T> is {
+    value: T,
+    next: Maybe<&Node<T>>,
+};
+
+@verify(proof)
+fn traverse_list<T>(head: &Node<T>) -> List<&T> {
+    contract#"
+        requires head.is_valid();
+        ensures forall i: Int. 0 <= i < result.len() implies result[i].is_valid();
+        ensures forall i: Int. 0 <= i < result.len() implies result[i].generation() <= head.generation();
+    ";
+    let mut result = List.new();
+    let mut current = Some(head);
+
+    while let Some(node) = current {
+        contract#"invariant 
+            node.is_valid();
+            forall i: Int. 0 <= i < result.len() implies result[i].is_valid();
+        ";
+        result.push(&node.value);
+        current = node.next;
+    }
+
+    result
+}
+
+/// Epoch capabilities and borrow tracking
+@verify(proof)
+fn exclusive_borrow<T>(data: &mut T) -> &mut T {
+    contract#"
+        requires data.is_valid();
+        requires data.is_exclusively_borrowed();
+        ensures result.is_valid();
+        ensures result.is_exclusively_borrowed();
+        // No other references to data exist
+    ";
+    data
+}
+
+/// Split borrows with CBGR
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+@verify(proof)
+fn split_borrow<A, B>(pair: &mut Pair<A, B>) -> (&mut A, &mut B) {
+    contract#"
+        requires pair.is_valid();
+        ensures result.0.is_valid();
+        ensures result.1.is_valid();
+        ensures result.0.is_disjoint(result.1);
+        // The two references don't overlap
+    ";
+    (&mut pair.first, &mut pair.second)
+}
+
+/// Memory allocation with CBGR
+@verify(proof)
+fn allocate_array<T: Default>(size: Int{> 0}) -> Heap<List<T>> {
+    contract#"
+        requires size > 0;
+        ensures result.is_valid();
+        ensures result.len() == size;
+        ensures result.generation() == current_epoch();
+    ";
+    let mut arr = Heap.new(List.with_capacity(size));
+    for _ in 0..size {
+        arr.push(T.default());
+    }
+    arr
+}
+
+/// Deallocation safety
+@verify(proof)
+fn safe_deallocate<T>(ptr: Heap<T>) {
+    contract#"
+        requires ptr.is_valid();
+        requires ptr.is_exclusively_owned();
+        ensures ptr.is_invalidated();
+        // All references to ptr are now invalid
+    ";
+    drop(ptr)
+}
+
+/// Reference lifetime contracts
+@verify(proof)
+fn borrow_for_scope<T>(data: &T, scope: Scope) -> &T {
+    contract#"
+        requires data.is_valid();
+        requires data.lifetime().contains(scope);
+        ensures result.is_valid();
+        ensures result.lifetime() == data.lifetime();
+    ";
+    data
+}
+
+/// CBGR with interior mutability
+type Cell<T> is {
+    value: T,
+    borrow_state: BorrowState,
+};
+
+@verify(proof)
+fn cell_borrow<T>(cell: &Cell<T>) -> Result<&T, BorrowError> {
+    contract#"
+        requires cell.is_valid();
+        ensures match result {
+            Ok(ref_) => ref_.is_valid() && cell.borrow_state.has_shared_borrow(),
+            Err(_) => cell.borrow_state.has_exclusive_borrow()
+        };
+    ";
+    if cell.borrow_state.has_exclusive_borrow() {
+        Err(BorrowError.AlreadyMutablyBorrowed)
+    } else {
+        cell.borrow_state.add_shared_borrow();
+        Ok(&cell.value)
+    }
+}
+
+/// Stack-based CBGR verification
+@verify(proof)
+fn stack_local_reference<T: Copy>(value: T) -> T {
+    contract#"
+        ensures result == value;
+        // Stack allocation is always valid within its scope
+    ";
+    let stack_ref: &checked T = &value;
+    // &checked guarantees no escaping
+    *stack_ref
+}
+
+/// CBGR with slices
+@verify(proof)
+fn slice_safety<T>(arr: &List<T>, start: Int, len: Int) -> &[T] {
+    contract#"
+        requires arr.is_valid();
+        requires start >= 0;
+        requires len >= 0;
+        requires start + len <= arr.len();
+        ensures result.is_valid();
+        ensures result.len() == len;
+        ensures result.base_ptr() == arr.as_ptr().offset(start);
+    ";
+    &arr[start..start + len]
+}
+
+/// Fat reference verification (ptr + len + generation)
+@verify(proof)
+fn fat_ref_invariants<T>(slice: &[T]) -> Bool {
+    contract#"
+        requires slice.is_valid();
+        ensures result == (
+            slice.ptr().is_valid() &&
+            slice.len() >= 0 &&
+            slice.generation().is_current_or_ancestor()
+        );
+    ";
+    slice.ptr().is_valid() &&
+    slice.len() >= 0 &&
+    slice.generation().is_current_or_ancestor()
+}

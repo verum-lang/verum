@@ -1,0 +1,40 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Bool methods
+
+fn main() {
+    let t = true;
+    let f = false;
+
+    // Test and_then (eager AND)
+    assert(t.and_then(t));
+    assert(!t.and_then(f));
+    assert(!f.and_then(t));
+    assert(!f.and_then(f));
+
+    // Test or_else (eager OR)
+    assert(t.or_else(t));
+    assert(t.or_else(f));
+    assert(f.or_else(t));
+    assert(!f.or_else(f));
+
+    // Test xor
+    assert(!t.xor(t));
+    assert(t.xor(f));
+    assert(f.xor(t));
+    assert(!f.xor(f));
+
+    // Test to_int
+    assert_eq(t.to_int(), 1);
+    assert_eq(f.to_int(), 0);
+
+    // Test select
+    assert_eq(t.select(10, 20), 10);
+    assert_eq(f.select(10, 20), 20);
+
+    // Test with strings
+    assert_eq(t.select("yes", "no"), "yes");
+    assert_eq(f.select("yes", "no"), "no");
+}

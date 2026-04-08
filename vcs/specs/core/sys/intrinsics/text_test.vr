@@ -1,0 +1,301 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/text_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, text, utf8, parsing
+// @description: Tests for text and UTF-8 intrinsics including character
+//               classification, UTF-8 decoding, and text parsing.
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.text_test;
+
+mount core.maybe.{Maybe, Some, None};
+mount core.intrinsics.{
+    utf8_decode_char, utf8_decode_char_len,
+    char_is_alphabetic, char_is_numeric, char_is_alphanumeric,
+    char_is_whitespace, char_is_control, char_is_uppercase, char_is_lowercase,
+    char_to_uppercase, char_to_lowercase,
+    text_parse_int, text_parse_float,
+    int_to_text, float_to_text,
+    text_from_static,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// UTF-8 Decoding Tests
+// =============================================================================
+
+@test
+fn test_utf8_decode_ascii() {
+    // Test single ASCII characters
+    let data_a: [Byte; 1] = [0x41]; // 'A'
+    let (ch_a, len_a) = utf8_decode_char_len(&data_a as &[Byte], 0);
+    assert(ch_a == 'A');
+    assert(len_a == 1);
+
+    let data_z: [Byte; 1] = [0x7A]; // 'z'
+    let (ch_z, len_z) = utf8_decode_char_len(&data_z as &[Byte], 0);
+    assert(ch_z == 'z');
+    assert(len_z == 1);
+
+    let data_0: [Byte; 1] = [0x30]; // '0'
+    let (ch_0, len_0) = utf8_decode_char_len(&data_0 as &[Byte], 0);
+    assert(ch_0 == '0');
+    assert(len_0 == 1);
+
+    // Test space and special chars
+    let data_space: [Byte; 1] = [0x20]; // ' '
+    let (ch_sp, len_sp) = utf8_decode_char_len(&data_space as &[Byte], 0);
+    assert(ch_sp == ' ');
+    assert(len_sp == 1);
+
+    print("UTF-8 ASCII decoding tests passed");
+}
+
+@test
+fn test_utf8_decode_multibyte() {
+    // 2-byte UTF-8: Latin Extended (e-acute = U+00E9 = 0xC3 0xA9)
+    let latin: [Byte; 2] = [0xC3, 0xA9];
+    let (ch_lat, len_lat) = utf8_decode_char_len(&latin as &[Byte], 0);
+    assert(ch_lat == '\u{00E9}');
+    assert(len_lat == 2);
+
+    // 2-byte UTF-8: Greek (pi = U+03C0 = 0xCF 0x80)
+    let greek: [Byte; 2] = [0xCF, 0x80];
+    let (ch_gr, len_gr) = utf8_decode_char_len(&greek as &[Byte], 0);
+    assert(ch_gr == '\u{03C0}');
+    assert(len_gr == 2);
+
+    // 3-byte UTF-8: CJK (zhong = U+4E2D = 0xE4 0xB8 0xAD)
+    let cjk: [Byte; 3] = [0xE4, 0xB8, 0xAD];
+    let (ch_cjk, len_cjk) = utf8_decode_char_len(&cjk as &[Byte], 0);
+    assert(ch_cjk == '\u{4E2D}');
+    assert(len_cjk == 3);
+
+    // 3-byte UTF-8: Euro sign (U+20AC = 0xE2 0x82 0xAC)
+    let euro: [Byte; 3] = [0xE2, 0x82, 0xAC];
+    let (ch_eur, len_eur) = utf8_decode_char_len(&euro as &[Byte], 0);
+    assert(ch_eur == '\u{20AC}');
+    assert(len_eur == 3);
+
+    // 4-byte UTF-8: Emoji (U+1F600 = 0xF0 0x9F 0x98 0x80)
+    let emoji: [Byte; 4] = [0xF0, 0x9F, 0x98, 0x80];
+    let (ch_em, len_em) = utf8_decode_char_len(&emoji as &[Byte], 0);
+    assert(ch_em == '\u{1F600}');
+    assert(len_em == 4);
+
+    print("UTF-8 multi-byte decoding tests passed");
+}
+
+// =============================================================================
+// Character Classification Tests
+// =============================================================================
+
+@test
+fn test_char_is_alphabetic() {
+    // Uppercase ASCII
+    assert(char_is_alphabetic('A'));
+    assert(char_is_alphabetic('Z'));
+    assert(char_is_alphabetic('M'));
+
+    // Lowercase ASCII
+    assert(char_is_alphabetic('a'));
+    assert(char_is_alphabetic('z'));
+    assert(char_is_alphabetic('m'));
+
+    // Non-alphabetic
+    assert(!char_is_alphabetic('0'));
+    assert(!char_is_alphabetic('9'));
+    assert(!char_is_alphabetic(' '));
+    assert(!char_is_alphabetic('@'));
+    assert(!char_is_alphabetic('-'));
+
+    print("char_is_alphabetic tests passed");
+}
+
+@test
+fn test_char_is_numeric() {
+    // Digits 0-9
+    assert(char_is_numeric('0'));
+    assert(char_is_numeric('1'));
+    assert(char_is_numeric('5'));
+    assert(char_is_numeric('9'));
+
+    // Non-numeric
+    assert(!char_is_numeric('a'));
+    assert(!char_is_numeric('Z'));
+    assert(!char_is_numeric(' '));
+    assert(!char_is_numeric('-'));
+    assert(!char_is_numeric('.'));
+
+    print("char_is_numeric tests passed");
+}
+
+@test
+fn test_char_is_alphanumeric() {
+    // Alphabetic
+    assert(char_is_alphanumeric('A'));
+    assert(char_is_alphanumeric('z'));
+
+    // Numeric
+    assert(char_is_alphanumeric('0'));
+    assert(char_is_alphanumeric('9'));
+
+    // Neither
+    assert(!char_is_alphanumeric(' '));
+    assert(!char_is_alphanumeric('-'));
+    assert(!char_is_alphanumeric('@'));
+
+    print("char_is_alphanumeric tests passed");
+}
+
+@test
+fn test_char_is_whitespace() {
+    // Whitespace characters
+    assert(char_is_whitespace(' '));
+    assert(char_is_whitespace('\t'));
+    assert(char_is_whitespace('\n'));
+    assert(char_is_whitespace('\r'));
+
+    // Non-whitespace
+    assert(!char_is_whitespace('a'));
+    assert(!char_is_whitespace('0'));
+    assert(!char_is_whitespace('-'));
+
+    print("char_is_whitespace tests passed");
+}
+
+@test
+fn test_char_is_control() {
+    // Control characters (0x00-0x1F)
+    assert(char_is_control('\0'));  // NUL
+    assert(char_is_control('\t'));  // TAB (also whitespace)
+    assert(char_is_control('\n'));  // LF (also whitespace)
+    assert(char_is_control('\r'));  // CR (also whitespace)
+
+    // Non-control
+    assert(!char_is_control(' '));  // Space is not control
+    assert(!char_is_control('A'));
+    assert(!char_is_control('0'));
+
+    print("char_is_control tests passed");
+}
+
+@test
+fn test_char_case() {
+    // Test uppercase detection
+    assert(char_is_uppercase('A'));
+    assert(char_is_uppercase('Z'));
+    assert(!char_is_uppercase('a'));
+    assert(!char_is_uppercase('0'));
+
+    // Test lowercase detection
+    assert(char_is_lowercase('a'));
+    assert(char_is_lowercase('z'));
+    assert(!char_is_lowercase('A'));
+    assert(!char_is_lowercase('0'));
+
+    // Test case conversion
+    assert(char_to_uppercase('a') == 'A');
+    assert(char_to_uppercase('z') == 'Z');
+    assert(char_to_uppercase('A') == 'A'); // Already uppercase
+    assert(char_to_uppercase('0') == '0'); // Non-letter unchanged
+
+    assert(char_to_lowercase('A') == 'a');
+    assert(char_to_lowercase('Z') == 'z');
+    assert(char_to_lowercase('a') == 'a'); // Already lowercase
+    assert(char_to_lowercase('0') == '0'); // Non-letter unchanged
+
+    print("char_case tests passed");
+}
+
+// =============================================================================
+// Text Parsing Tests
+// =============================================================================
+
+@test
+fn test_text_parse_int() {
+    // Positive integers
+    let text1 = text_from_static("42");
+    let result1 = text_parse_int(&text1);
+    assert(result1 is Some(_));
+
+    let text2 = text_from_static("0");
+    let result2 = text_parse_int(&text2);
+    assert(result2 is Some(_));
+
+    let text3 = text_from_static("123456789");
+    let result3 = text_parse_int(&text3);
+    assert(result3 is Some(_));
+
+    // Negative integers
+    let text4 = text_from_static("-42");
+    let result4 = text_parse_int(&text4);
+    assert(result4 is Some(_));
+
+    // Invalid
+    let text5 = text_from_static("abc");
+    let result5 = text_parse_int(&text5);
+    assert(result5 is None);
+
+    let text6 = text_from_static("");
+    let result6 = text_parse_int(&text6);
+    assert(result6 is None);
+
+    let text7 = text_from_static("12.34");
+    let result7 = text_parse_int(&text7);
+    assert(result7 is None);
+
+    print("text_parse_int tests passed");
+}
+
+@test
+fn test_text_parse_float() {
+    // Simple floats
+    let text1 = text_from_static("3.14");
+    let result1 = text_parse_float(&text1);
+    assert(result1 is Some(_));
+
+    let text2 = text_from_static("0.0");
+    let result2 = text_parse_float(&text2);
+    assert(result2 is Some(_));
+
+    // Scientific notation
+    let text3 = text_from_static("1.5e10");
+    let result3 = text_parse_float(&text3);
+    assert(result3 is Some(_));
+
+    // Negative
+    let text4 = text_from_static("-2.5");
+    let result4 = text_parse_float(&text4);
+    assert(result4 is Some(_));
+
+    // Invalid
+    let text5 = text_from_static("abc");
+    let result5 = text_parse_float(&text5);
+    assert(result5 is None);
+
+    print("text_parse_float tests passed");
+}
+
+@test
+fn test_int_to_text() {
+    // Positive numbers
+    let t1 = int_to_text(42);
+    // Just verify conversion doesn't crash; actual value check needs runtime
+
+    let t2 = int_to_text(0);
+
+    let t3 = int_to_text(-100);
+
+    print("int_to_text tests passed");
+}

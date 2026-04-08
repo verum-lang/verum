@@ -1,0 +1,182 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, reference, matching
+//
+// Tests pattern matching involving types with reference parameters.
+// Tests basic interaction between references and pattern matching constructs.
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+// Functions taking references and matching on borrowed values
+fn classify_int(x: Int) -> Text {
+    match x {
+        0 => "zero",
+        n if n < 0 => "negative",
+        _ => "positive",
+    }
+}
+
+// Pattern matching results stored in references via let
+fn point_classify(p: Point) -> Text {
+    let Point { x, y } = p;
+    match (x, y) {
+        (0, 0) => "origin",
+        (0, _) => "y-axis",
+        (_, 0) => "x-axis",
+        _ => "other",
+    }
+}
+
+// Passing reference to function and matching result
+fn doubled_if_positive(n: Int) -> Maybe<Int> {
+    match n {
+        x if x > 0 => Some(x * 2),
+        _ => None,
+    }
+}
+
+fn apply_to_ref(n: &Int) -> Int {
+    // Auto-deref: use n in context that expects Int
+    classify_int(*n).len()
+}
+
+fn sum_points(a: &Point, b: &Point) -> Point {
+    Point { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn color_value(c: &Color) -> Int {
+    match c {
+        Red => 1,
+        Green => 2,
+        Blue => 3,
+    }
+}
+
+fn map_maybe_ref<T: Clone, U>(m: &Maybe<T>, f: fn(T) -> U) -> Maybe<U> {
+    match m {
+        Some(x) => Some(f(x.clone())),
+        None => None,
+    }
+}
+
+// Pattern matching with borrowed fields
+fn max_coord(p: &Point) -> Int {
+    if p.x > p.y { p.x } else { p.y }
+}
+
+fn is_origin(p: &Point) -> Bool {
+    p.x == 0 && p.y == 0
+}
+
+fn color_is_primary(c: &Color) -> Bool {
+    match c {
+        Red | Blue => true,
+        Green => false,
+    }
+}
+
+// Function taking mutable reference
+fn double_x(p: &mut Point) {
+    p.x = p.x * 2;
+}
+
+fn increment_if_positive(n: &mut Int) {
+    if *n > 0 {
+        *n = *n + 1;
+    }
+}
+
+fn set_to_max(a: &mut Int, b: Int) {
+    if b > *a {
+        *a = b;
+    }
+}
+
+// Pattern match on list via reference
+fn first_positive(list: &List<Int>) -> Maybe<Int> {
+    for x in list {
+        if x > 0 {
+            return Some(x);
+        }
+    }
+    None
+}
+
+fn main() {
+    // Basic classification
+    assert(classify_int(5) == "positive");
+    assert(classify_int(0) == "zero");
+    assert(classify_int(-3) == "negative");
+
+    // Point classify
+    assert(point_classify(Point { x: 0, y: 0 }) == "origin");
+    assert(point_classify(Point { x: 0, y: 5 }) == "y-axis");
+    assert(point_classify(Point { x: 5, y: 0 }) == "x-axis");
+    assert(point_classify(Point { x: 1, y: 2 }) == "other");
+
+    // Doubled if positive
+    assert(doubled_if_positive(3) == Some(6));
+    assert(doubled_if_positive(-1) == None);
+    assert(doubled_if_positive(0) == None);
+
+    // Sum points via references
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 3, y: 4 };
+    let sum = sum_points(&p1, &p2);
+    assert(sum.x == 4 && sum.y == 6);
+
+    // Color value via reference
+    let c = Red;
+    assert(color_value(&c) == 1);
+    let c2 = Blue;
+    assert(color_value(&c2) == 3);
+
+    // Max coord via reference
+    let p3 = Point { x: 5, y: 3 };
+    assert(max_coord(&p3) == 5);
+    assert(is_origin(&Point { x: 0, y: 0 }) == true);
+    assert(is_origin(&p1) == false);
+
+    // Color primary via reference
+    assert(color_is_primary(&Red) == true);
+    assert(color_is_primary(&Green) == false);
+    assert(color_is_primary(&Blue) == true);
+
+    // Mutable reference operations
+    let mut p4 = Point { x: 3, y: 7 };
+    double_x(&mut p4);
+    assert(p4.x == 6);
+
+    let mut n = 5;
+    increment_if_positive(&mut n);
+    assert(n == 6);
+
+    let mut neg = -5;
+    increment_if_positive(&mut neg);
+    assert(neg == -5);  // Unchanged
+
+    let mut m = 3;
+    set_to_max(&mut m, 10);
+    assert(m == 10);
+    set_to_max(&mut m, 5);
+    assert(m == 10);  // Unchanged
+
+    // List via reference
+    let list = [1, -2, 3, -4, 5];
+    assert(first_positive(&list) == Some(1));
+    let all_neg = [-1, -2, -3];
+    assert(first_positive(&all_neg) == None);
+}

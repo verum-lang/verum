@@ -1,0 +1,147 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, matrix, determinant, linear-algebra
+// @timeout: 30000
+
+// Matrix determinant and operations for small matrices
+
+// 2x2 matrix stored as 4 values: [a, b, c, d] = | a b |
+//                                                  | c d |
+fn det2(a: Int, b: Int, c: Int, d: Int) -> Int {
+    a * d - b * c
+}
+
+// 3x3 matrix stored as 9 values in row-major order
+// Using Arr8 to hold up to 8 values (we use indices 0-8 but only have 8 slots)
+// Instead, pass individual values or use packed representation
+
+// 3x3 determinant by cofactor expansion along first row
+fn det3(a00: Int, a01: Int, a02: Int,
+        a10: Int, a11: Int, a12: Int,
+        a20: Int, a21: Int, a22: Int) -> Int {
+    a00 * det2(a11, a12, a21, a22)
+    - a01 * det2(a10, a12, a20, a22)
+    + a02 * det2(a10, a11, a20, a21)
+}
+
+// 2x2 matrix trace
+fn trace2(a: Int, d: Int) -> Int { a + d }
+
+// 2x2 matrix multiply: C = A * B
+// A = [a,b,c,d], B = [e,f,g,h]
+// Returns [ae+bg, af+bh, ce+dg, cf+dh]
+fn mat2_mul_00(a: Int, b: Int, e: Int, g: Int) -> Int { a * e + b * g }
+fn mat2_mul_01(a: Int, b: Int, f: Int, h: Int) -> Int { a * f + b * h }
+fn mat2_mul_10(c: Int, d: Int, e: Int, g: Int) -> Int { c * e + d * g }
+fn mat2_mul_11(c: Int, d: Int, f: Int, h: Int) -> Int { c * f + d * h }
+
+// Transpose 2x2: [a,b,c,d] -> [a,c,b,d]
+// Just swap b and c
+
+// Check if 2x2 matrix is identity
+fn is_identity2(a: Int, b: Int, c: Int, d: Int) -> Int {
+    if a == 1 {
+        if b == 0 {
+            if c == 0 {
+                if d == 1 { 1 } else { 0 }
+            } else { 0 }
+        } else { 0 }
+    } else { 0 }
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+fn test_det2() -> Int {
+    // det([1,0,0,1]) = 1 (identity)
+    assert_eq(det2(1, 0, 0, 1), 1);
+    // det([2,3,1,4]) = 8-3 = 5
+    assert_eq(det2(2, 3, 1, 4), 5);
+    // det([1,2,3,6]) = 6-6 = 0 (singular)
+    assert_eq(det2(1, 2, 3, 6), 0);
+    // det([3,7,1,4]) = 12-7 = 5
+    assert_eq(det2(3, 7, 1, 4), 5);
+    // Negative determinant
+    assert_eq(det2(1, 3, 2, 4), 4 - 6); // -2
+    1
+}
+
+fn test_det3() -> Int {
+    // Identity matrix: det = 1
+    assert_eq(det3(1,0,0, 0,1,0, 0,0,1), 1);
+    // det([1,2,3, 4,5,6, 7,8,9]) = 0 (singular)
+    assert_eq(det3(1,2,3, 4,5,6, 7,8,9), 0);
+    // det([2,0,0, 0,3,0, 0,0,4]) = 24 (diagonal)
+    assert_eq(det3(2,0,0, 0,3,0, 0,0,4), 24);
+    // det([1,2,0, 3,1,0, 0,0,5]) = 5*(1-6) = -25
+    assert_eq(det3(1,2,0, 3,1,0, 0,0,5), 0 - 25);
+    1
+}
+
+fn test_det_properties() -> Int {
+    // det(A*B) = det(A)*det(B) for 2x2
+    let det_a = det2(2, 1, 3, 4); // 8-3 = 5
+    let det_b = det2(1, 2, 0, 3); // 3
+    // A*B:
+    let c00 = mat2_mul_00(2, 1, 1, 0); // 2*1+1*0 = 2
+    let c01 = mat2_mul_01(2, 1, 2, 3); // 2*2+1*3 = 7
+    let c10 = mat2_mul_10(3, 4, 1, 0); // 3*1+4*0 = 3
+    let c11 = mat2_mul_11(3, 4, 2, 3); // 3*2+4*3 = 18
+    let det_ab = det2(c00, c01, c10, c11);
+    assert_eq(det_ab, det_a * det_b); // 15
+    1
+}
+
+fn test_trace() -> Int {
+    assert_eq(trace2(1, 1), 2); // identity
+    assert_eq(trace2(3, 5), 8);
+    assert_eq(trace2(0, 0), 0);
+    1
+}
+
+fn test_identity_mul() -> Int {
+    // I * A = A
+    let a = 3;
+    let b = 7;
+    let c = 2;
+    let d = 5;
+    // I = [1,0,0,1]
+    let r00 = mat2_mul_00(1, 0, a, c);
+    let r01 = mat2_mul_01(1, 0, b, d);
+    let r10 = mat2_mul_10(0, 1, a, c);
+    let r11 = mat2_mul_11(0, 1, b, d);
+    assert_eq(r00, a);
+    assert_eq(r01, b);
+    assert_eq(r10, c);
+    assert_eq(r11, d);
+    1
+}
+
+fn test_transpose_det() -> Int {
+    // det(A) = det(A^T)
+    let a = 2;
+    let b = 3;
+    let c = 5;
+    let d = 7;
+    assert_eq(det2(a, b, c, d), det2(a, c, b, d));
+    1
+}
+
+fn test_singular() -> Int {
+    // Row multiple: det = 0
+    assert_eq(det2(2, 4, 3, 6), 0);
+    // det3 with linearly dependent rows
+    assert_eq(det3(1,2,3, 2,4,6, 7,8,9), 0);
+    1
+}
+
+fn main() -> Int {
+    test_det2();
+    test_det3();
+    test_det_properties();
+    test_trace();
+    test_identity_mul();
+    test_transpose_det();
+    test_singular();
+    print("[OK] 651_matrix_det_aot");
+    0
+}

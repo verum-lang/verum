@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, error
+// @description: Test missing type name detection
+// @expected-error: E043
+
+type is { x: Int, y: Int };
+
+type is Point | Line;
+
+type is protocol { fn foo(&self); };

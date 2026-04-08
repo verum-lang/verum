@@ -1,0 +1,209 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, polynomial, horner, arithmetic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Polynomial operations: evaluation via Horner's method, addition,
+// multiplication of polynomials represented as coefficient arrays.
+// Coefficients are stored in ascending degree order: coeffs[i] = coeff of x^i.
+
+// Evaluate polynomial at x using Horner's method.
+// coeffs[0..n-1], degree = n-1.
+fn poly_eval(c0: Int, c1: Int, c2: Int, c3: Int, n: Int, x: Int) -> Int {
+    // Generic Horner for up to degree 3: result = c0 + c1*x + c2*x^2 + c3*x^3
+    // Horner: (((c3)*x + c2)*x + c1)*x + c0
+    if n == 1 {
+        c0
+    } else if n == 2 {
+        // c0 + c1*x
+        c1 * x + c0
+    } else if n == 3 {
+        // c0 + c1*x + c2*x^2
+        (c2 * x + c1) * x + c0
+    } else {
+        // c0 + c1*x + c2*x^2 + c3*x^3
+        ((c3 * x + c2) * x + c1) * x + c0
+    }
+}
+
+fn test_poly_eval_horner() {
+    // p(x) = 2 + 3x + x^2  (coeffs [2, 3, 1])
+    // p(0) = 2
+    // p(1) = 2 + 3 + 1 = 6
+    // p(2) = 2 + 6 + 4 = 12
+    // p(-1) = 2 - 3 + 1 = 0
+    assert_eq(poly_eval(2, 3, 1, 0, 3, 0), 2);
+    assert_eq(poly_eval(2, 3, 1, 0, 3, 1), 6);
+    assert_eq(poly_eval(2, 3, 1, 0, 3, 2), 12);
+    assert_eq(poly_eval(2, 3, 1, 0, 3, -1), 0);
+
+    // p(x) = 1 + 0x + 0x^2 + x^3  (coeffs [1, 0, 0, 1])
+    // p(2) = 1 + 8 = 9
+    // p(3) = 1 + 27 = 28
+    // p(-2) = 1 + (-8) = -7
+    assert_eq(poly_eval(1, 0, 0, 1, 4, 2), 9);
+    assert_eq(poly_eval(1, 0, 0, 1, 4, 3), 28);
+    assert_eq(poly_eval(1, 0, 0, 1, 4, -2), -7);
+
+    // p(x) = 5 - 2x  (coeffs [5, -2])
+    // p(0) = 5, p(1) = 3, p(3) = -1
+    assert_eq(poly_eval(5, -2, 0, 0, 2, 0), 5);
+    assert_eq(poly_eval(5, -2, 0, 0, 2, 1), 3);
+    assert_eq(poly_eval(5, -2, 0, 0, 2, 3), -1);
+
+    print("poly_eval_horner: ok");
+}
+
+fn test_poly_addition() {
+    // Add polynomials by adding coefficients elementwise.
+    // p(x) = 1 + 2x + 3x^2  and  q(x) = 4 + 0x + 2x^2
+    // sum = 5 + 2x + 5x^2
+    let p = [1, 2, 3];
+    let q = [4, 0, 2];
+    let mut s = [0, 0, 0];
+    s[0] = p[0] + q[0]; // 5
+    s[1] = p[1] + q[1]; // 2
+    s[2] = p[2] + q[2]; // 5
+    assert_eq(s[0], 5);
+    assert_eq(s[1], 2);
+    assert_eq(s[2], 5);
+
+    // Evaluate sum at x=1: 5+2+5 = 12
+    let val = poly_eval(s[0], s[1], s[2], 0, 3, 1);
+    assert_eq(val, 12);
+    // Evaluate sum at x=2: 5 + 4 + 20 = 29
+    let val2 = poly_eval(s[0], s[1], s[2], 0, 3, 2);
+    assert_eq(val2, 29);
+
+    // p(x) = 3 + 0x - 1x^2 + 2x^3  and  q(x) = -3 + 1x + 1x^2 + 0x^3
+    // sum = 0 + 1x + 0x^2 + 2x^3
+    let p2 = [3, 0, -1, 2];
+    let q2 = [-3, 1, 1, 0];
+    let mut s2 = [0, 0, 0, 0];
+    s2[0] = p2[0] + q2[0]; // 0
+    s2[1] = p2[1] + q2[1]; // 1
+    s2[2] = p2[2] + q2[2]; // 0
+    s2[3] = p2[3] + q2[3]; // 2
+    assert_eq(s2[0], 0);
+    assert_eq(s2[1], 1);
+    assert_eq(s2[2], 0);
+    assert_eq(s2[3], 2);
+
+    // Evaluate at x=2: 0 + 2 + 0 + 16 = 18
+    let val3 = poly_eval(s2[0], s2[1], s2[2], s2[3], 4, 2);
+    assert_eq(val3, 18);
+
+    print("poly_addition: ok");
+}
+
+fn test_poly_multiplication() {
+    // Multiply two degree-1 polynomials:
+    // p(x) = 2 + 3x  (coeffs [2, 3])
+    // q(x) = 1 + 2x  (coeffs [1, 2])
+    // product = 2*1 + (2*2 + 3*1)x + 3*2*x^2
+    //         = 2 + 7x + 6x^2
+    let pa0 = 2; let pa1 = 3;
+    let pb0 = 1; let pb1 = 2;
+    let prod0 = pa0 * pb0;           // 2
+    let prod1 = pa0 * pb1 + pa1 * pb0; // 4 + 3 = 7
+    let prod2 = pa1 * pb1;           // 6
+    assert_eq(prod0, 2);
+    assert_eq(prod1, 7);
+    assert_eq(prod2, 6);
+
+    // Verify: product at x=1 = 2 + 7 + 6 = 15
+    // Also: p(1)*q(1) = (2+3)*(1+2) = 5*3 = 15
+    let check = poly_eval(prod0, prod1, prod2, 0, 3, 1);
+    assert_eq(check, 15);
+
+    // Multiply (x - 1)(x + 2) = x^2 + x - 2
+    // p(x) = -1 + x  (coeffs [-1, 1])
+    // q(x) = 2 + x   (coeffs [2, 1])
+    let p0 = -1; let p1 = 1;
+    let q0 = 2;  let q1 = 1;
+    let r0 = p0 * q0;           // -2
+    let r1 = p0 * q1 + p1 * q0; // -1 + 2 = 1
+    let r2 = p1 * q1;           // 1
+    assert_eq(r0, -2);
+    assert_eq(r1, 1);
+    assert_eq(r2, 1);
+    // r(x) = x^2 + x - 2, roots at x=1 and x=-2
+    // r(1) = 1 + 1 - 2 = 0
+    assert_eq(poly_eval(r0, r1, r2, 0, 3, 1), 0);
+    // r(-2) = 4 - 2 - 2 = 0
+    assert_eq(poly_eval(r0, r1, r2, 0, 3, -2), 0);
+    // r(0) = -2
+    assert_eq(poly_eval(r0, r1, r2, 0, 3, 0), -2);
+    // r(3) = 9 + 3 - 2 = 10
+    assert_eq(poly_eval(r0, r1, r2, 0, 3, 3), 10);
+
+    print("poly_multiplication: ok");
+}
+
+fn test_poly_derivative() {
+    // Derivative of p(x) = a0 + a1*x + a2*x^2 + a3*x^3
+    // p'(x) = a1 + 2*a2*x + 3*a3*x^2
+    //
+    // p(x) = 1 + 4x + 6x^2 + 4x^3
+    // p'(x) = 4 + 12x + 12x^2
+    let a1 = 4; let a2 = 6; let a3 = 4;
+    let d0 = a1;      // 4
+    let d1 = 2 * a2;  // 12
+    let d2 = 3 * a3;  // 12
+    assert_eq(d0, 4);
+    assert_eq(d1, 12);
+    assert_eq(d2, 12);
+    // p'(1) = 4 + 12 + 12 = 28
+    assert_eq(poly_eval(d0, d1, d2, 0, 3, 1), 28);
+    // p'(0) = 4
+    assert_eq(poly_eval(d0, d1, d2, 0, 3, 0), 4);
+    // p'(2) = 4 + 24 + 48 = 76
+    assert_eq(poly_eval(d0, d1, d2, 0, 3, 2), 76);
+
+    // p(x) = 3 - 2x + x^2  =>  p'(x) = -2 + 2x
+    let b1 = -2; let b2 = 1;
+    let e0 = b1;     // -2
+    let e1 = 2 * b2; // 2
+    assert_eq(e0, -2);
+    assert_eq(e1, 2);
+    // p'(0) = -2, p'(1) = 0, p'(3) = 4
+    assert_eq(poly_eval(e0, e1, 0, 0, 2, 0), -2);
+    assert_eq(poly_eval(e0, e1, 0, 0, 2, 1), 0);
+    assert_eq(poly_eval(e0, e1, 0, 0, 2, 3), 4);
+
+    print("poly_derivative: ok");
+}
+
+fn test_poly_composition() {
+    // Compute p(q(x)) where p(t) = t^2 + 1 and q(x) = x + 2
+    // p(q(x)) = (x+2)^2 + 1 = x^2 + 4x + 4 + 1 = x^2 + 4x + 5
+    // Evaluate at x=0: 5, x=1: 10, x=-1: 2, x=3: 9+12+5=26
+    //
+    // Using poly_eval for p(t) at t=q(x):
+    // p(x) = 1 + 0*t + 1*t^2  =>  p(t) = poly_eval(1, 0, 1, 0, 3, t)
+    // q(x) = 2 + x
+    let mut i = 0;
+    let xs = [0, 1, -1, 3];
+    let expected = [5, 10, 2, 26];
+    while i < 4 {
+        let x = xs[i];
+        let t = x + 2;             // q(x)
+        let val = poly_eval(1, 0, 1, 0, 3, t); // p(t) = t^2 + 1
+        assert_eq(val, expected[i]);
+        i = i + 1;
+    }
+
+    print("poly_composition: ok");
+}
+
+fn main() -> Int {
+    test_poly_eval_horner();
+    test_poly_addition();
+    test_poly_multiplication();
+    test_poly_derivative();
+    test_poly_composition();
+    print("[OK] 451_interp_polynomial");
+    0
+}

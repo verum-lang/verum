@@ -1,0 +1,211 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-proofs, lemma
+// @timeout: 20000
+// @description: Tests lemma declaration, usage, and composition
+
+/// ============================================================
+/// LEMMA USAGE
+/// ============================================================
+
+// ============================================================
+// BASIC LEMMAS
+// ============================================================
+
+/// Basic arithmetic lemma
+lemma add_succ(n: Nat, m: Nat): n + succ(m) == succ(n + m) {
+    proof by definition
+}
+
+/// Another arithmetic lemma
+lemma succ_add(n: Nat, m: Nat): succ(n) + m == succ(n + m) {
+    proof by auto
+}
+
+/// Multiplication lemma
+lemma mult_zero_right(n: Nat): n * 0 == 0 {
+    proof by definition
+}
+
+lemma mult_succ_right(n: Nat, m: Nat): n * succ(m) == n * m + n {
+    proof by definition
+}
+
+// ============================================================
+// USING LEMMAS IN PROOFS
+// ============================================================
+
+/// Use lemma directly
+theorem add_comm_proof(a: Nat, b: Nat): a + b == b + a {
+    proof by induction on a {
+        case 0 => {
+            trivial
+        }
+        case succ(k) => {
+            have ih: k + b == b + k;
+            conclude by auto
+        }
+    }
+}
+
+lemma add_zero_right(n: Nat): n + 0 == n {
+    proof by definition
+}
+
+/// Chain multiple lemmas
+lemma mult_comm(a: Nat, b: Nat): a * b == b * a {
+    proof by induction on a {
+        case 0 => {
+            have: 0 * b == 0 by definition;
+            have: b * 0 == 0 by mult_zero_right;
+            conclude by transitivity
+        }
+        case succ(k) => {
+            have ih: k * b == b * k;
+            conclude by auto
+        }
+    }
+}
+
+/// General list length append lemma
+lemma list_length_append<T>(xs: List<T>, ys: List<T>):
+    len(xs ++ ys) == len(xs) + len(ys)
+{
+    proof by induction on xs
+}
+
+/// Use specialized instance
+theorem triple_append_length<T>(xs: List<T>, ys: List<T>, zs: List<T>):
+    len(xs ++ ys ++ zs) == len(xs) + len(ys) + len(zs)
+{
+    proof {
+        calc {
+            len(xs ++ ys ++ zs)
+            == { by list_length_append } len(xs ++ ys) + len(zs)
+            == { by list_length_append } len(xs) + len(ys) + len(zs)
+        }
+    }
+}
+
+// ============================================================
+// SIMP LEMMAS
+// ============================================================
+
+/// Mark as simp lemma for automatic use
+@simp
+lemma add_zero_simp(n: Nat): n + 0 == n {
+    proof by definition
+}
+
+@simp
+lemma mul_one(n: Nat): n * 1 == n {
+    proof by auto
+}
+
+@simp
+lemma mul_zero(n: Nat): n * 0 == 0 {
+    proof by definition
+}
+
+/// Use simp lemmas automatically
+theorem simplify_expression(n: Nat): n + 0 + 0 * n == n {
+    proof by simp
+}
+
+// ============================================================
+// CONDITIONAL LEMMAS
+// ============================================================
+
+/// Conditional lemma
+lemma div_mul_cancel(n: Int, d: Int)
+    requires d != 0
+    ensures (n / d) * d <= n
+{
+    proof by euclidean_division
+}
+
+/// Use conditional lemma
+theorem division_bound(a: Int, b: Int)
+    requires b > 0
+    ensures (a / b) * b <= a
+{
+    proof {
+        have: b != 0 by arithmetic;
+        conclude by div_mul_cancel
+    }
+}
+
+/// Sqrt multiplication lemma
+lemma sqrt_mult(a: Float, b: Float)
+    requires a >= 0
+    requires b >= 0
+    ensures sqrt(a * b) == sqrt(a) * sqrt(b)
+{
+    proof by real_analysis
+}
+
+theorem sqrt_square_root(x: Float)
+    requires x >= 0
+    ensures sqrt(x * x) == x
+{
+    proof {
+        have: x * x >= 0 by auto;
+        calc {
+            sqrt(x * x)
+            == { by sqrt_mult } sqrt(x) * sqrt(x)
+            == { by sqrt_def } x
+        }
+    }
+}
+
+fn sqrt(x: Float) -> Float;
+
+// ============================================================
+// LOCAL LEMMAS
+// ============================================================
+
+theorem main_theorem(n: Nat)
+    ensures n * (n + 1) % 2 == 0
+{
+    proof by auto
+}
+
+// ============================================================
+// LEMMA LIBRARIES
+// ============================================================
+
+/// Organize related lemmas in modules
+module nat_lemmas {
+    pub lemma succ_ne_zero(n: Nat): succ(n) != 0 {
+        proof by definition
+    }
+
+    pub lemma add_right_cancel(a: Nat, b: Nat, c: Nat)
+        requires a + c == b + c
+        ensures a == b
+    {
+        proof by induction on c {
+            case 0 => simp
+            case succ(k) => {
+                conclude by auto
+            }
+        }
+    }
+}
+
+module list_lemmas {
+    pub lemma reverse_reverse<T>(xs: List<T>): reverse(reverse(xs)) == xs {
+        proof by induction on xs
+    }
+
+    pub lemma map_id<T>(xs: List<T>): xs.map(|x| x) == xs {
+        proof by induction on xs
+    }
+}
+
+fn reverse<T>(xs: List<T>) -> List<T>;
+
+fn main() {
+    // Lemma verification tests
+}

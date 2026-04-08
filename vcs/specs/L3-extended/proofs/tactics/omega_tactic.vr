@@ -1,0 +1,346 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, omega, linear-arithmetic
+// @timeout: 20000
+// @description: Tests the omega tactic for linear arithmetic decision (extended)
+
+/// ============================================================
+/// OMEGA TACTIC (EXTENDED)
+/// ============================================================
+///
+/// Extended omega tactic tests for Presburger arithmetic
+/// decision procedure with advanced features.
+
+// ------------------------------------------------------------
+// Omega with Complex Constraints
+// ------------------------------------------------------------
+
+/// System of linear equations
+theorem omega_system(x: Int, y: Int, z: Int)
+    requires x + y + z == 10
+    requires x - y == 2
+    requires y - z == 1
+    ensures x == 4 && y == 2 && z == 4
+{
+    proof by omega
+}
+
+/// Parametric constraints
+theorem omega_parametric(a: Int, b: Int, n: Int)
+    requires n > 0
+    requires a <= n
+    requires b <= n
+    requires a + b > n
+    ensures a > 0 || b > 0
+{
+    proof by omega
+}
+
+/// Cascading inequalities
+theorem omega_cascade(v1: Int, v2: Int, v3: Int, v4: Int, v5: Int)
+    requires v1 < v2
+    requires v2 < v3
+    requires v3 < v4
+    requires v4 < v5
+    requires v5 - v1 < 10
+    ensures v3 - v1 < 6
+{
+    proof by omega
+}
+
+// ------------------------------------------------------------
+// Omega with Modular Arithmetic
+// ------------------------------------------------------------
+
+/// Modular equivalence
+theorem omega_mod_equiv(a: Int, b: Int, m: Int)
+    requires m > 0
+    requires a % m == b % m
+    requires 0 <= a && a < m
+    requires 0 <= b && b < m
+    ensures a == b
+{
+    proof by omega { theory: divmod }
+}
+
+/// Euclidean division properties
+theorem omega_euclidean(n: Int, d: Int)
+    requires d > 0
+    ensures n == d * (n / d) + (n % d)
+{
+    proof by omega { theory: divmod }
+}
+
+/// GCD constraints
+theorem omega_gcd_bounds(a: Int, b: Int, g: Int)
+    requires g == gcd(a, b)
+    requires a > 0
+    requires b > 0
+    ensures g <= a && g <= b
+{
+    proof by omega { theory: divmod, gcd: true }
+}
+
+// ------------------------------------------------------------
+// Omega with Absolute Values
+// ------------------------------------------------------------
+
+/// Absolute value bounds
+theorem omega_abs_bounds(x: Int, bound: Int)
+    requires bound >= 0
+    requires abs(x) <= bound
+    ensures -bound <= x && x <= bound
+{
+    proof by omega { abs: true }
+}
+
+/// Triangle inequality
+theorem omega_triangle(a: Int, b: Int):
+    abs(a + b) <= abs(a) + abs(b)
+{
+    proof by omega { abs: true }
+}
+
+/// Reverse triangle inequality
+theorem omega_reverse_triangle(a: Int, b: Int):
+    abs(abs(a) - abs(b)) <= abs(a - b)
+{
+    proof by omega { abs: true }
+}
+
+// ------------------------------------------------------------
+// Omega for Array Indexing
+// ------------------------------------------------------------
+
+/// Index in bounds after increment
+theorem omega_index_incr(i: Nat, n: Nat)
+    requires i < n
+    requires n > 1
+    ensures i + 1 <= n
+{
+    proof by omega
+}
+
+/// Loop index invariant
+theorem omega_loop_index(i: Nat, start: Nat, end: Nat, step: Nat)
+    requires step > 0
+    requires start <= i
+    requires i < end
+    ensures i + step <= end || i + step > end
+{
+    proof by omega  // Tautology for case split
+}
+
+/// Matrix indexing
+theorem omega_matrix_index(i: Nat, j: Nat, rows: Nat, cols: Nat)
+    requires i < rows
+    requires j < cols
+    requires rows > 0
+    requires cols > 0
+    ensures i * cols + j < rows * cols
+{
+    proof by omega
+}
+
+// ------------------------------------------------------------
+// Omega for Loop Termination
+// ------------------------------------------------------------
+
+/// Decreasing variant
+theorem omega_variant_decreases(n: Int, i: Int)
+    requires i >= 0
+    requires i < n
+    ensures n - i > 0 && n - (i + 1) < n - i
+{
+    proof by omega
+}
+
+/// Bounded iteration count
+theorem omega_iter_bound(start: Nat, end: Nat, i: Nat)
+    requires start <= i
+    requires i <= end
+    ensures i - start <= end - start
+{
+    proof by omega
+}
+
+/// Step function termination
+theorem omega_step_terminates(x: Int, bound: Int)
+    requires x > 0
+    requires bound > 0
+    requires x <= bound
+    ensures exists steps: Nat. steps <= bound && (x - steps <= 0)
+{
+    proof by omega
+}
+
+// ------------------------------------------------------------
+// Omega with Quantifiers
+// ------------------------------------------------------------
+
+/// Bounded universal
+theorem omega_bounded_forall(n: Nat, arr: Array<Int>)
+    requires n == len(arr)
+    requires forall i: Nat. i < n implies arr.get(i) >= 0
+    requires n > 0
+    ensures arr.get(0) >= 0
+{
+    proof by omega
+}
+
+/// Bounded existential witness
+theorem omega_bounded_exists(n: Nat)
+    requires n >= 5
+    ensures exists i: Nat. i > 2 && i < n
+{
+    proof by omega  // Witness: 3
+}
+
+/// Quantifier elimination
+theorem omega_qe(a: Int, b: Int)
+    requires a > 0
+    ensures exists x: Int. a * x > b
+{
+    proof by omega { quantifier_elimination: true }
+}
+
+// ------------------------------------------------------------
+// Omega Edge Cases
+// ------------------------------------------------------------
+
+/// Large coefficients
+theorem omega_large_coeff(x: Int)
+    requires 1000000 * x + 999999 > 0
+    requires x >= 0
+    ensures x >= 0  // Trivial but tests large coefficients
+{
+    proof by omega
+}
+
+/// Many variables
+theorem omega_many_vars(
+    a: Int, b: Int, c: Int, d: Int, e: Int,
+    f: Int, g: Int, h: Int, i: Int, j: Int
+)
+    requires a + b + c + d + e + f + g + h + i + j == 100
+    requires a >= 0 && b >= 0 && c >= 0 && d >= 0 && e >= 0
+    requires f >= 0 && g >= 0 && h >= 0 && i >= 0 && j >= 0
+    ensures a <= 100
+{
+    proof by omega
+}
+
+/// Tight bounds
+theorem omega_tight(x: Int)
+    requires x >= 5
+    requires x <= 5
+    ensures x == 5
+{
+    proof by omega
+}
+
+/// Empty solution space detection
+theorem omega_empty_solution(x: Int)
+    requires x > 5
+    requires x < 5
+    ensures false
+{
+    proof by omega  // Contradiction in preconditions
+}
+
+// ------------------------------------------------------------
+// Omega with Nat Constraints
+// ------------------------------------------------------------
+
+/// Natural number non-negativity
+theorem omega_nat_nonneg(n: Nat, m: Nat)
+    ensures n + m >= n
+{
+    proof by omega
+}
+
+/// Nat subtraction (saturating)
+theorem omega_nat_sub(a: Nat, b: Nat)
+    requires a >= b
+    ensures a - b + b == a
+{
+    proof by omega
+}
+
+/// Nat multiplication bounds
+theorem omega_nat_mul_bounds(a: Nat, b: Nat, limit: Nat)
+    requires a <= 10
+    requires b <= 10
+    ensures a + b <= 20
+{
+    proof by omega
+}
+
+// ------------------------------------------------------------
+// Omega Performance
+// ------------------------------------------------------------
+
+/// Omega with preprocessing
+theorem omega_preprocess(a: Int, b: Int, c: Int)
+    requires 2*a + 4*b + 6*c == 24
+    requires a >= 0 && b >= 0 && c >= 0
+    ensures a + 2*b + 3*c == 12
+{
+    proof by omega { preprocess: true }
+}
+
+/// Omega with caching
+theorem omega_cached(x: Int, y: Int)
+    requires x + y == 10
+    requires x >= 0
+    requires y >= 0
+    ensures x <= 10 && y <= 10
+{
+    proof by omega { cache: true }
+}
+
+// ------------------------------------------------------------
+// Omega Extensions
+// ------------------------------------------------------------
+
+/// Omega with min/max
+theorem omega_minmax(a: Int, b: Int, c: Int)
+    requires c == max(a, b)
+    requires a <= 10
+    requires b <= 10
+    ensures c <= 10
+{
+    proof by omega { extensions: [min, max] }
+}
+
+/// Omega with floor/ceiling
+theorem omega_floor_ceil(x: Rational)
+    requires x >= 0
+    ensures floor(x) <= x && x < floor(x) + 1
+{
+    proof by omega { extensions: [floor, ceil] }
+}
+
+// ------------------------------------------------------------
+// Omega Debugging
+// ------------------------------------------------------------
+
+/// Show omega steps
+theorem omega_trace(x: Int, y: Int)
+    requires x + y > 0
+    requires x <= 0
+    ensures y > 0
+{
+    proof by omega { trace: true }
+    // Would show variable elimination steps
+}
+
+/// Show Fourier-Motzkin steps
+theorem omega_fm_trace(a: Int, b: Int, c: Int)
+    requires a + b <= c
+    requires b + c <= a + 10
+    ensures c - a <= 5
+{
+    proof by omega { show_elimination: true }
+}

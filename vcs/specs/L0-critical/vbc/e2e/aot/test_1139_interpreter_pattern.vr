@@ -1,0 +1,155 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: interpreter, pattern, eval, calculator
+// @description: Test interpreter/evaluator patterns using sum types
+
+type Expr2 is
+    Lit(Int)
+  | BinAdd(Heap<Expr2>, Heap<Expr2>)
+  | BinSub(Heap<Expr2>, Heap<Expr2>)
+  | BinMul(Heap<Expr2>, Heap<Expr2>)
+  | BinDiv(Heap<Expr2>, Heap<Expr2>)
+  | Neg(Heap<Expr2>);
+
+@allow(unbounded_recursion)
+fn eval(e: Expr2) -> Int {
+    match e {
+        Lit(n) => n,
+        BinAdd(a, b) => eval(*a) + eval(*b),
+        BinSub(a, b) => eval(*a) - eval(*b),
+        BinMul(a, b) => eval(*a) * eval(*b),
+        BinDiv(a, b) => {
+            let divisor = eval(*b);
+            if divisor == 0 { 0 } else { eval(*a) / divisor }
+        },
+        Neg(x) => 0 - eval(*x),
+    }
+}
+
+fn test_lit() -> Int {
+    let e = Lit(42);
+    let r = eval(e);
+    if r != 42 {
+        print(f"FAIL lit: {r}");
+        return 1;
+    }
+    print("  lit: OK");
+    0
+}
+
+fn test_add_sub() -> Int {
+    // 10 + 20 = 30
+    let e1 = BinAdd(Heap(Lit(10)), Heap(Lit(20)));
+    if eval(e1) != 30 {
+        print("FAIL add");
+        return 1;
+    }
+    // 30 - 12 = 18
+    let e2 = BinSub(Heap(Lit(30)), Heap(Lit(12)));
+    if eval(e2) != 18 {
+        print("FAIL sub");
+        return 1;
+    }
+    print("  add_sub: OK");
+    0
+}
+
+fn test_complex_expr() -> Int {
+    // (3 + 4) * (10 - 5) = 7 * 5 = 35
+    let three_plus_four = BinAdd(Heap(Lit(3)), Heap(Lit(4)));
+    let ten_minus_five = BinSub(Heap(Lit(10)), Heap(Lit(5)));
+    let expr = BinMul(Heap(three_plus_four), Heap(ten_minus_five));
+    let r = eval(expr);
+    if r != 35 {
+        print(f"FAIL complex: {r}, expected 35");
+        return 1;
+    }
+    print("  complex_expr: OK");
+    0
+}
+
+fn test_nested() -> Int {
+    // -(3 + 4) = -7
+    let sum_expr = BinAdd(Heap(Lit(3)), Heap(Lit(4)));
+    let neg_expr = Neg(Heap(sum_expr));
+    let r = eval(neg_expr);
+    if r != -7 {
+        print(f"FAIL neg: {r}");
+        return 1;
+    }
+    print("  nested: OK");
+    0
+}
+
+fn test_div_zero() -> Int {
+    let e = BinDiv(Heap(Lit(10)), Heap(Lit(0)));
+    let r = eval(e);
+    if r != 0 {
+        print(f"FAIL div_zero: {r}");
+        return 1;
+    }
+    print("  div_zero: OK");
+    0
+}
+
+@allow(unbounded_recursion)
+fn expr_depth(e: Expr2) -> Int {
+    match e {
+        Lit(_) => 1,
+        BinAdd(a, b) => {
+            let da = expr_depth(*a);
+            let db = expr_depth(*b);
+            1 + if da > db { da } else { db }
+        },
+        BinSub(a, b) => {
+            let da = expr_depth(*a);
+            let db = expr_depth(*b);
+            1 + if da > db { da } else { db }
+        },
+        BinMul(a, b) => {
+            let da = expr_depth(*a);
+            let db = expr_depth(*b);
+            1 + if da > db { da } else { db }
+        },
+        BinDiv(a, b) => {
+            let da = expr_depth(*a);
+            let db = expr_depth(*b);
+            1 + if da > db { da } else { db }
+        },
+        Neg(x) => 1 + expr_depth(*x),
+    }
+}
+
+fn test_depth() -> Int {
+    // depth of ((1 + 2) * 3) = 3
+    let expr = BinMul(
+        Heap(BinAdd(Heap(Lit(1)), Heap(Lit(2)))),
+        Heap(Lit(3))
+    );
+    let d = expr_depth(expr);
+    if d != 3 {
+        print(f"FAIL depth: {d}, expected 3");
+        return 1;
+    }
+    print("  depth: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Interpreter Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_lit();
+    failures = failures + test_add_sub();
+    failures = failures + test_complex_expr();
+    failures = failures + test_nested();
+    failures = failures + test_div_zero();
+    failures = failures + test_depth();
+
+    if failures == 0 {
+        print("All interpreter pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

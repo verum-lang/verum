@@ -1,0 +1,207 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, null_coalesce, optional
+
+// Null coalescing operator (??) tests
+
+fn test_basic_null_coalesce() {
+    // Basic null coalescing
+    let maybe_value: Maybe<Int> = None;
+    let default_value = maybe_value ?? 42;
+
+    let some_value: Maybe<Int> = Some(100);
+    let extracted = some_value ?? 0;  // Should be 100
+}
+
+fn test_chained_null_coalesce() {
+    // Chained null coalescing
+    let first: Maybe<Int> = None;
+    let second: Maybe<Int> = None;
+    let third: Maybe<Int> = Some(3);
+    let result = first ?? second ?? third ?? 0;
+
+    // Multiple levels
+    let a: Maybe<Maybe<Int>> = Some(Some(42));
+    let unwrapped = a ?? Some(0) ?? 0;
+}
+
+// With function calls
+fn get_user_age(id: Int) -> Maybe<Int> {
+    if id > 0 { Some(25) } else { None }
+}
+
+fn test_function_null_coalesce() {
+    let age = get_user_age(-1) ?? 18;  // Default age
+}
+
+// With method chains
+type User is {
+    name: Maybe<Text>,
+    email: Maybe<Text>,
+};
+
+fn test_method_null_coalesce() {
+    let user = User { name: None, email: Some("test@example.com") };
+    let display_name = user.name ?? "Anonymous";
+    let contact = user.email ?? "no-email";
+}
+
+fn test_expression_null_coalesce() {
+    // Null coalesce with expressions
+    let x: Maybe<Int> = None;
+    let computed = x ?? (10 + 20);  // 30
+    let complex = x ?? (if true { 1 } else { 2 });
+}
+
+// With struct field access
+type Config is {
+    timeout: Maybe<Int>,
+    retries: Maybe<Int>,
+};
+
+fn test_struct_field_null_coalesce() {
+    let config = Config { timeout: None, retries: Some(3) };
+    let actual_timeout = config.timeout ?? 30;
+    let actual_retries = config.retries ?? 1;
+}
+
+fn test_assignment_null_coalesce() {
+    // Null coalesce in assignments
+    let mut value: Maybe<Int> = None;
+    value = value ?? Some(42);
+}
+
+fn test_result_null_coalesce() {
+    // With different types (Result)
+    let result_val: Result<Int, Text> = Err("not found");
+    let ok_or_default = result_val.ok() ?? 0;
+}
+
+fn test_array_null_coalesce() {
+    // Null coalesce with array access
+    let arr: List<Maybe<Int>> = [Some(1), None, Some(3)];
+    let second_elem = arr[1] ?? 0;  // Assuming arr[1] returns Maybe
+}
+
+// With optional chaining combined
+type Person is {
+    address: Maybe<Address>,
+};
+
+type Address is {
+    city: Maybe<Text>,
+};
+
+fn test_optional_chain_null_coalesce() {
+    let person: Maybe<Person> = Some(Person { address: None });
+    let city = person?.address?.city ?? "Unknown";
+}
+
+fn test_precedence_null_coalesce() {
+    // Precedence tests
+    let low = 1;
+    let high = 10;
+    let maybe_mid: Maybe<Int> = None;
+    let bounded = maybe_mid ?? low + high;  // Precedence: (??) vs (+)
+}
+
+// In function parameters
+fn greet(name: Maybe<Text>) -> Text {
+    let display_name = name ?? "Guest";
+    f"Hello, {display_name}!"
+}
+
+fn test_function_param_null_coalesce() {
+    let greeting = greet(None);
+}
+
+fn test_closure_null_coalesce() {
+    // With closures
+    let get_default = || 42;
+    let maybe_num: Maybe<Int> = None;
+    let num = maybe_num ?? get_default();
+}
+
+// In match expressions
+fn process(val: Maybe<Int>) -> Text {
+    match val ?? 0 {
+        0 => "zero or none"
+        n if n > 0 => "positive"
+        _ => "negative"
+    }
+}
+
+fn test_array_literal_null_coalesce() {
+    // Null coalesce in arrays
+    let defaults = [
+        None ?? 1,
+        Some(2) ?? 0,
+        None ?? 3,
+    ];
+}
+
+fn test_string_null_coalesce() {
+    // With string literals
+    let maybe_name: Maybe<Text> = None;
+    let name = maybe_name ?? "default";
+}
+
+fn test_complex_expression_null_coalesce() {
+    // With more complex expressions
+    let maybe_x: Maybe<Int> = None;
+    let maybe_y: Maybe<Int> = Some(5);
+    let sum = (maybe_x ?? 0) + (maybe_y ?? 0);
+}
+
+// Short-circuit evaluation
+fn expensive_default() -> Int {
+    // This should not be called if left side is Some
+    1000
+}
+
+fn test_short_circuit_null_coalesce() {
+    let cached: Maybe<Int> = Some(42);
+    let value_cached = cached ?? expensive_default();  // Should be 42, not 1000
+}
+
+fn test_conditional_null_coalesce() {
+    // In conditional expressions
+    let threshold: Maybe<Int> = None;
+    if (threshold ?? 100) > 50 {
+        // do something
+    }
+}
+
+fn test_type_inference_null_coalesce() {
+    // With type inference
+    let inferred = None ?? "hello";  // Type should be Text
+    let inferred_int = None ?? 42;   // Type should be Int
+}
+
+fn test_tuple_null_coalesce() {
+    // Null coalesce with tuples
+    let maybe_pair: Maybe<(Int, Int)> = None;
+    let pair = maybe_pair ?? (0, 0);
+}
+
+// With enum variants
+type Status is Pending | Active | Done;
+
+fn test_enum_null_coalesce() {
+    let maybe_status: Maybe<Status> = None;
+    let status = maybe_status ?? Status.Pending;
+}
+
+// Constants with null coalesce
+const DEFAULT_TIMEOUT: Int = 30;
+
+fn test_constant_null_coalesce() {
+    let configured_timeout: Maybe<Int> = None;
+    let timeout = configured_timeout ?? DEFAULT_TIMEOUT;
+}
+
+fn test_parenthesized_null_coalesce() {
+    // Edge case: parenthesized
+    let paren_coalesce = (((None)) ?? ((42)));
+}

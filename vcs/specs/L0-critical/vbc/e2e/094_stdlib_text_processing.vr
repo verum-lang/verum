@@ -1,0 +1,460 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, text
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Stdlib text processing — char-by-char string operations, search, case, encoding
+
+// ============================================================================
+// Str16: Fixed-size string buffer (16 char codes + length)
+// ============================================================================
+
+type Str16 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int,
+    c12: Int, c13: Int, c14: Int, c15: Int,
+    len: Int
+};
+
+fn str_empty() -> Str16 {
+    Str16 {
+        c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 0
+    }
+}
+
+fn str_get(s: Str16, i: Int) -> Int {
+    if i == 0 { s.c0 } else if i == 1 { s.c1 } else if i == 2 { s.c2 }
+    else if i == 3 { s.c3 } else if i == 4 { s.c4 } else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 } else if i == 7 { s.c7 } else if i == 8 { s.c8 }
+    else if i == 9 { s.c9 } else if i == 10 { s.c10 } else if i == 11 { s.c11 }
+    else if i == 12 { s.c12 } else if i == 13 { s.c13 } else if i == 14 { s.c14 }
+    else { s.c15 }
+}
+
+fn str_set(s: Str16, i: Int, val: Int) -> Str16 {
+    Str16 {
+        c0: if i == 0 { val } else { s.c0 },
+        c1: if i == 1 { val } else { s.c1 },
+        c2: if i == 2 { val } else { s.c2 },
+        c3: if i == 3 { val } else { s.c3 },
+        c4: if i == 4 { val } else { s.c4 },
+        c5: if i == 5 { val } else { s.c5 },
+        c6: if i == 6 { val } else { s.c6 },
+        c7: if i == 7 { val } else { s.c7 },
+        c8: if i == 8 { val } else { s.c8 },
+        c9: if i == 9 { val } else { s.c9 },
+        c10: if i == 10 { val } else { s.c10 },
+        c11: if i == 11 { val } else { s.c11 },
+        c12: if i == 12 { val } else { s.c12 },
+        c13: if i == 13 { val } else { s.c13 },
+        c14: if i == 14 { val } else { s.c14 },
+        c15: if i == 15 { val } else { s.c15 },
+        len: s.len
+    }
+}
+
+fn str_push(s: Str16, ch: Int) -> Str16 {
+    let idx = s.len;
+    let updated = str_set(s, idx, ch);
+    Str16 {
+        c0: updated.c0, c1: updated.c1, c2: updated.c2, c3: updated.c3,
+        c4: updated.c4, c5: updated.c5, c6: updated.c6, c7: updated.c7,
+        c8: updated.c8, c9: updated.c9, c10: updated.c10, c11: updated.c11,
+        c12: updated.c12, c13: updated.c13, c14: updated.c14, c15: updated.c15,
+        len: idx + 1
+    }
+}
+
+// ============================================================================
+// Character classification helpers
+// ============================================================================
+
+fn is_upper(c: Int) -> Int {
+    if c >= 65 { if c <= 90 { 1 } else { 0 } } else { 0 }
+}
+
+fn is_lower(c: Int) -> Int {
+    if c >= 97 { if c <= 122 { 1 } else { 0 } } else { 0 }
+}
+
+fn is_alpha(c: Int) -> Int {
+    if is_upper(c) == 1 { 1 } else if is_lower(c) == 1 { 1 } else { 0 }
+}
+
+fn is_digit_char(c: Int) -> Int {
+    if c >= 48 { if c <= 57 { 1 } else { 0 } } else { 0 }
+}
+
+fn to_upper(c: Int) -> Int {
+    if is_lower(c) == 1 { c - 32 } else { c }
+}
+
+fn to_lower(c: Int) -> Int {
+    if is_upper(c) == 1 { c + 32 } else { c }
+}
+
+// ============================================================================
+// String operations
+// ============================================================================
+
+fn str_equal(a: Str16, b: Str16) -> Int {
+    if a.len == b.len {
+        let mut i = 0;
+        let mut eq = 1;
+        while i < a.len {
+            if str_get(a, i) == str_get(b, i) {
+                i = i + 1;
+            } else {
+                eq = 0;
+                i = a.len;  // break
+            }
+        }
+        eq
+    } else { 0 }
+}
+
+fn str_find(haystack: Str16, needle: Str16) -> Int {
+    // Returns index of first occurrence of needle in haystack, or -1
+    if needle.len == 0 { return 0; }
+    if needle.len > haystack.len { return -1; }
+    let limit = haystack.len - needle.len;
+    let mut i = 0;
+    while i <= limit {
+        let mut j = 0;
+        let mut matched = 1;
+        while j < needle.len {
+            if str_get(haystack, i + j) == str_get(needle, j) {
+                j = j + 1;
+            } else {
+                matched = 0;
+                j = needle.len;  // break
+            }
+        }
+        if matched == 1 { return i; }
+        i = i + 1;
+    }
+    -1
+}
+
+fn str_count_char(s: Str16, ch: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len {
+        if str_get(s, i) == ch { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn str_to_upper(s: Str16) -> Str16 {
+    let mut result = s;
+    let mut i = 0;
+    while i < s.len {
+        result = str_set(result, i, to_upper(str_get(result, i)));
+        i = i + 1;
+    }
+    result
+}
+
+fn str_to_lower(s: Str16) -> Str16 {
+    let mut result = s;
+    let mut i = 0;
+    while i < s.len {
+        result = str_set(result, i, to_lower(str_get(result, i)));
+        i = i + 1;
+    }
+    result
+}
+
+fn str_reverse(s: Str16) -> Str16 {
+    let mut result = str_empty();
+    let mut i = 0;
+    while i < s.len {
+        result = str_set(result, i, str_get(s, s.len - 1 - i));
+        i = i + 1;
+    }
+    Str16 {
+        c0: result.c0, c1: result.c1, c2: result.c2, c3: result.c3,
+        c4: result.c4, c5: result.c5, c6: result.c6, c7: result.c7,
+        c8: result.c8, c9: result.c9, c10: result.c10, c11: result.c11,
+        c12: result.c12, c13: result.c13, c14: result.c14, c15: result.c15,
+        len: s.len
+    }
+}
+
+// ============================================================================
+// Test 1: String construction and basic access
+// ============================================================================
+
+@test
+fn test_string_basics() {
+    // Build "Hello" char by char: H=72, e=101, l=108, l=108, o=111
+    let mut s = str_empty();
+    assert_eq(s.len, 0);
+
+    s = str_push(s, 72);   // H
+    s = str_push(s, 101);  // e
+    s = str_push(s, 108);  // l
+    s = str_push(s, 108);  // l
+    s = str_push(s, 111);  // o
+    assert_eq(s.len, 5);
+
+    assert_eq(str_get(s, 0), 72);
+    assert_eq(str_get(s, 1), 101);
+    assert_eq(str_get(s, 4), 111);
+
+    // Count specific chars
+    assert_eq(str_count_char(s, 108), 2);  // two 'l's
+    assert_eq(str_count_char(s, 72), 1);   // one 'H'
+    assert_eq(str_count_char(s, 65), 0);   // no 'A'
+
+    // Empty string
+    let empty = str_empty();
+    assert_eq(str_count_char(empty, 0), 0);
+
+    print("  test_string_basics: ok");
+}
+
+// ============================================================================
+// Test 2: String search and find
+// ============================================================================
+
+@test
+fn test_string_search() {
+    // haystack: "abcdefgh" = [97,98,99,100,101,102,103,104]
+    let hay = Str16 {
+        c0: 97, c1: 98, c2: 99, c3: 100, c4: 101, c5: 102, c6: 103, c7: 104,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 8
+    };
+
+    // needle: "cde" = [99,100,101]
+    let mut needle = str_empty();
+    needle = str_push(needle, 99);
+    needle = str_push(needle, 100);
+    needle = str_push(needle, 101);
+
+    assert_eq(str_find(hay, needle), 2);
+
+    // Find at start: "abc"
+    let mut start_needle = str_empty();
+    start_needle = str_push(start_needle, 97);
+    start_needle = str_push(start_needle, 98);
+    start_needle = str_push(start_needle, 99);
+    assert_eq(str_find(hay, start_needle), 0);
+
+    // Find at end: "gh"
+    let mut end_needle = str_empty();
+    end_needle = str_push(end_needle, 103);
+    end_needle = str_push(end_needle, 104);
+    assert_eq(str_find(hay, end_needle), 6);
+
+    // Not found: "xyz"
+    let mut missing = str_empty();
+    missing = str_push(missing, 120);
+    missing = str_push(missing, 121);
+    missing = str_push(missing, 122);
+    assert_eq(str_find(hay, missing), -1);
+
+    // Empty needle always found at 0
+    let empty = str_empty();
+    assert_eq(str_find(hay, empty), 0);
+
+    // Needle longer than haystack
+    let short = Str16 {
+        c0: 97, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 1
+    };
+    assert_eq(str_find(short, hay), -1);
+
+    print("  test_string_search: ok");
+}
+
+// ============================================================================
+// Test 3: Case conversion on full strings
+// ============================================================================
+
+@test
+fn test_case_conversion() {
+    // "Hello" = [72, 101, 108, 108, 111]
+    let hello = Str16 {
+        c0: 72, c1: 101, c2: 108, c3: 108, c4: 111,
+        c5: 0, c6: 0, c7: 0, c8: 0, c9: 0,
+        c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 5
+    };
+
+    // To upper: "HELLO" = [72, 69, 76, 76, 79]
+    let upper = str_to_upper(hello);
+    assert_eq(str_get(upper, 0), 72);   // H
+    assert_eq(str_get(upper, 1), 69);   // E
+    assert_eq(str_get(upper, 2), 76);   // L
+    assert_eq(str_get(upper, 3), 76);   // L
+    assert_eq(str_get(upper, 4), 79);   // O
+
+    // To lower: "hello" = [104, 101, 108, 108, 111]
+    let lower = str_to_lower(hello);
+    assert_eq(str_get(lower, 0), 104);  // h
+    assert_eq(str_get(lower, 1), 101);  // e
+    assert_eq(str_get(lower, 2), 108);  // l
+    assert_eq(str_get(lower, 3), 108);  // l
+    assert_eq(str_get(lower, 4), 111);  // o
+
+    // Round trip: to_lower(to_upper(x)) == to_lower(x)
+    let round = str_to_lower(str_to_upper(hello));
+    assert_eq(str_equal(round, lower), 1);
+
+    // Non-alpha chars unchanged: "A1B" = [65, 49, 66]
+    let mixed = Str16 {
+        c0: 65, c1: 49, c2: 66, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 3
+    };
+    let mixed_lower = str_to_lower(mixed);
+    assert_eq(str_get(mixed_lower, 0), 97);   // a
+    assert_eq(str_get(mixed_lower, 1), 49);   // 1 (unchanged)
+    assert_eq(str_get(mixed_lower, 2), 98);   // b
+
+    print("  test_case_conversion: ok");
+}
+
+// ============================================================================
+// Test 4: String reverse and equality
+// ============================================================================
+
+@test
+fn test_reverse_equality() {
+    // "abcde" = [97,98,99,100,101]
+    let fwd = Str16 {
+        c0: 97, c1: 98, c2: 99, c3: 100, c4: 101,
+        c5: 0, c6: 0, c7: 0, c8: 0, c9: 0,
+        c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 5
+    };
+    let rev = str_reverse(fwd);
+    // "edcba" = [101,100,99,98,97]
+    assert_eq(str_get(rev, 0), 101);
+    assert_eq(str_get(rev, 1), 100);
+    assert_eq(str_get(rev, 2), 99);
+    assert_eq(str_get(rev, 3), 98);
+    assert_eq(str_get(rev, 4), 97);
+    assert_eq(rev.len, 5);
+
+    // Double reverse restores original
+    let rev2 = str_reverse(rev);
+    assert_eq(str_equal(rev2, fwd), 1);
+
+    // Palindrome: "abcba" reversed equals itself
+    let pal = Str16 {
+        c0: 97, c1: 98, c2: 99, c3: 98, c4: 97,
+        c5: 0, c6: 0, c7: 0, c8: 0, c9: 0,
+        c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 5
+    };
+    let pal_rev = str_reverse(pal);
+    assert_eq(str_equal(pal, pal_rev), 1);
+
+    // Non-palindrome
+    assert_eq(str_equal(fwd, rev), 0);
+
+    // Equality: same content
+    let copy = Str16 {
+        c0: 97, c1: 98, c2: 99, c3: 100, c4: 101,
+        c5: 0, c6: 0, c7: 0, c8: 0, c9: 0,
+        c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 5
+    };
+    assert_eq(str_equal(fwd, copy), 1);
+
+    // Different length -> not equal
+    let shorter = Str16 {
+        c0: 97, c1: 98, c2: 99, c3: 0, c4: 0,
+        c5: 0, c6: 0, c7: 0, c8: 0, c9: 0,
+        c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 3
+    };
+    assert_eq(str_equal(fwd, shorter), 0);
+
+    print("  test_reverse_equality: ok");
+}
+
+// ============================================================================
+// Test 5: Word counting and digit extraction
+// ============================================================================
+
+@test
+fn test_word_count_digits() {
+    // "Hi 42 Go" = [72,105,32,52,50,32,71,111]
+    let text = Str16 {
+        c0: 72, c1: 105, c2: 32, c3: 52, c4: 50, c5: 32, c6: 71, c7: 111,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 8
+    };
+
+    // Count words (space-separated)
+    let mut words = 0;
+    let mut in_word = 0;
+    let mut i = 0;
+    while i < text.len {
+        let c = str_get(text, i);
+        if c == 32 {
+            in_word = 0;
+        } else {
+            if in_word == 0 {
+                words = words + 1;
+                in_word = 1;
+            }
+        }
+        i = i + 1;
+    }
+    assert_eq(words, 3);
+
+    // Count alpha chars
+    let mut alpha_count = 0;
+    i = 0;
+    while i < text.len {
+        if is_alpha(str_get(text, i)) == 1 { alpha_count = alpha_count + 1; }
+        i = i + 1;
+    }
+    assert_eq(alpha_count, 4);  // H, i, G, o
+
+    // Count digit chars
+    let mut digit_count = 0;
+    i = 0;
+    while i < text.len {
+        if is_digit_char(str_get(text, i)) == 1 { digit_count = digit_count + 1; }
+        i = i + 1;
+    }
+    assert_eq(digit_count, 2);  // 4, 2
+
+    // Extract number from digits: "42"
+    // Digits are at positions 3 ('4'=52) and 4 ('2'=50)
+    let d0 = str_get(text, 3) - 48;  // 4
+    let d1 = str_get(text, 4) - 48;  // 2
+    let number = d0 * 10 + d1;
+    assert_eq(number, 42);
+
+    // Count spaces
+    assert_eq(str_count_char(text, 32), 2);
+
+    print("  test_word_count_digits: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_string_basics();
+    test_string_search();
+    test_case_conversion();
+    test_reverse_equality();
+    test_word_count_digits();
+    print("[OK] 094_stdlib_text_processing");
+    0
+}

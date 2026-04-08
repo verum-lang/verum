@@ -1,0 +1,134 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, multiple-parameters
+
+
+/// Test for generic functions and types with multiple type parameters.
+/// Multiple parameters enable more complex polymorphic relationships.
+
+// Function with two type parameters
+fn swap<A, B>(pair: (A, B)) -> (B, A) {
+    let (a, b) = pair;
+    (b, a)
+}
+
+// Function with three type parameters
+fn apply<A, B, C>(f: fn(A, B) -> C, a: A, b: B) -> C {
+    f(a, b)
+}
+
+// Generic struct with multiple parameters
+type Either<L, R> is {
+    left: Maybe<L>,
+    right: Maybe<R>,
+};
+
+// Generic tuple struct
+type Triple<A, B, C> is {
+    first: A,
+    second: B,
+    third: C,
+};
+
+// Implementation with multiple type parameters
+implement<L, R> Either<L, R> {
+    fn left(value: L) -> Either<L, R> {
+        Either { left: Some(value), right: None }
+    }
+
+    fn right(value: R) -> Either<L, R> {
+        Either { left: None, right: Some(value) }
+    }
+
+    fn is_left(&self) -> Bool {
+        self.left.is_some()
+    }
+
+    fn is_right(&self) -> Bool {
+        self.right.is_some()
+    }
+}
+
+// Function composing multiple generic types
+fn zip<A, B>(list_a: List<A>, list_b: List<B>) -> List<(A, B)> {
+    let mut result: List<(A, B)> = [];
+    let len = if list_a.len() < list_b.len() { list_a.len() } else { list_b.len() };
+    let mut i = 0;
+    while i < len {
+        result.push((list_a[i], list_b[i]));
+        i = i + 1;
+    }
+    result
+}
+
+// Nested generic function
+fn map_pair<A, B, C, D>(
+    pair: (A, B),
+    f: fn(A) -> C,
+    g: fn(B) -> D,
+) -> (C, D) {
+    let (a, b) = pair;
+    (f(a), g(b))
+}
+
+fn main() {
+    // Swap with different type combinations
+    let swapped_int_text: (Text, Int) = swap((42, "hello"));
+    let swapped_bool_float: (Float, Bool) = swap((true, 3.14));
+
+    // Apply with various functions
+    let sum: Int = apply(|a, b| a + b, 10, 20);
+    let concat: Text = apply(|a, b| a + b, "Hello, ", "World!");
+
+    // Either type
+    let left_value: Either<Int, Text> = Either.left(42);
+    let right_value: Either<Int, Text> = Either.right("error");
+
+    // Triple type
+    let triple: Triple<Int, Text, Bool> = Triple {
+        first: 1,
+        second: "two",
+        third: true,
+    };
+
+    // Result type
+    let success: Result<Int, Text> = Ok(100);
+    let failure: Result<Int, Text> = Err("Something went wrong");
+
+    // Pattern matching on Result
+    let value = match success {
+        Ok(n) => n,
+        Err(_) => 0,
+    };
+
+    // Zip lists
+    let list_a: List<Int> = [1, 2, 3];
+    let list_b: List<Text> = ["a", "b", "c"];
+    let zipped: List<(Int, Text)> = zip(list_a, list_b);
+
+    // Map pair
+    let original: (Int, Text) = (42, "hello");
+    let transformed: (Text, Int) = map_pair(
+        original,
+        |n| f"number: {n}",
+        |s| s.len(),
+    );
+
+    // Nested generics
+    let nested: Result<Either<Int, Text>, Bool> = Ok(Either.left(42));
+
+    // Assertions
+    assert(swapped_int_text == ("hello", 42));
+    assert(swapped_bool_float == (3.14, true));
+    assert(sum == 30);
+    assert(concat == "Hello, World!");
+    assert(left_value.is_left());
+    assert(right_value.is_right());
+    assert(triple.first == 1);
+    assert(triple.second == "two");
+    assert(value == 100);
+    assert(zipped.len() == 3);
+    assert(zipped[0] == (1, "a"));
+    assert(transformed == ("number: 42", 5));
+}

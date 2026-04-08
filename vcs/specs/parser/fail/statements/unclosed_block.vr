@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, block, unclosed, error
+// @description: Test unclosed block statement
+// @expected-error: E011
+
+fn test() {
+    {
+        let x = 5;
+}

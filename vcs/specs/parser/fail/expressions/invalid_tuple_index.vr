@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, tuple, index, error
+// @description: Tuple index with invalid literal
+// @expected-error: E018
+
+fn test() {
+    let t = (1, 2, 3);
+    let x = t.-1;  // Negative tuple index
+}

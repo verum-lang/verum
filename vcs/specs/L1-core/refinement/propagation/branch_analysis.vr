@@ -1,0 +1,331 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, propagation, branch
+
+/// Test for branch analysis in refinement type checking.
+/// Verifies that refinements are correctly tracked across branches.
+
+// ============================================================================
+// Branch join analysis
+// ============================================================================
+
+type NonNegative is Int{>= 0};
+type Positive is Int{> 0};
+
+/// Both branches return NonNegative, so result is NonNegative
+fn join_refinements(x: Int, choose_first: Bool) -> NonNegative {
+    if choose_first {
+        if x >= 0 { x } else { 0 }
+    } else {
+        if x >= 0 { x } else { -x }
+    }
+}
+
+/// Branches have different but compatible refinements
+fn join_compatible(x: Int) -> NonNegative {
+    if x > 0 {
+        x  // Positive, which is subtype of NonNegative
+    } else if x < 0 {
+        -x  // Also Positive
+    } else {
+        0  // Zero, which is NonNegative
+    }
+}
+
+// ============================================================================
+// Unreachable branch elimination
+// ============================================================================
+
+fn unreachable_else(x: Positive) -> Positive {
+    if x > 0 {
+        x
+    } else {
+        // This branch is unreachable: x > 0 is always true for Positive
+        unreachable()
+    }
+}
+
+fn unreachable_match(x: NonNegative) -> NonNegative {
+    match x {
+        n if n >= 0 => n,
+        // No need for other cases - NonNegative is always >= 0
+    }
+}
+
+// ============================================================================
+// Branch-specific narrowing
+// ============================================================================
+
+type Maybe<T> is Some(T) | None;
+
+fn branch_narrowing<T>(opt: Maybe<T>) -> Bool {
+    match opt {
+        Option.Some(_) => true,   // opt is known to be Some here
+        Option.None => false,     // opt is known to be None here
+    }
+}
+
+fn nested_branch_narrowing(x: Int) -> Text {
+    if x >= 0 {
+        // x: Int{>= 0}
+        if x == 0 {
+            // x: Int{== 0}
+            "zero"
+        } else {
+            // x: Int{> 0} (>= 0 and != 0)
+            "positive"
+        }
+    } else {
+        // x: Int{< 0}
+        "negative"
+    }
+}
+
+// ============================================================================
+// Early return branch analysis
+// ============================================================================
+
+fn early_return_refines(x: Int) -> Positive {
+    if x <= 0 {
+        return 1;  // Early return with positive value
+    }
+    // After early return: x > 0
+    x
+}
+
+fn multiple_early_returns(x: Int, y: Int) -> (Positive, Positive) {
+    if x <= 0 {
+        return (1, 1);
+    }
+    // x > 0
+    if y <= 0 {
+        return (x, 1);
+    }
+    // x > 0 && y > 0
+    (x, y)
+}
+
+fn guard_clause_pattern(x: Maybe<Int>) -> Positive {
+    let value = match x {
+        Some(v) => v,
+        None => return 1,
+    };
+    // value is now Int (unwrapped from Some)
+
+    if value <= 0 {
+        return 1;
+    }
+    // value > 0
+    value
+}
+
+// ============================================================================
+// Loop branch analysis
+// ============================================================================
+
+fn loop_invariant_refinement(items: List<Int>) -> List<Positive> {
+    let mut result: List<Positive> = [];
+
+    for item in items {
+        // item is Int here
+        if item > 0 {
+            // item is refined to Positive
+            result.push(item);
+        }
+        // After if: item is back to Int (no refinement persists)
+    }
+
+    result
+}
+
+fn while_loop_branch(mut x: Int) -> NonNegative {
+    while x < 0 {
+        // In loop: x < 0
+        x += 1;
+    }
+    // After loop: x >= 0 (condition became false)
+    x
+}
+
+fn loop_break_refinement() -> Positive {
+    let mut x = 0;
+    loop {
+        x += 1;
+        if x > 10 {
+            break;  // x > 10 at break point
+        }
+    }
+    // x > 10 implies x > 0
+    x
+}
+
+// ============================================================================
+// Conditional expression branch analysis
+// ============================================================================
+
+fn ternary_refinement(x: Int) -> NonNegative {
+    if x >= 0 { x } else { -x }
+}
+
+fn nested_ternary(x: Int, y: Int) -> NonNegative {
+    if x >= 0 {
+        if y >= x { y } else { x }
+    } else {
+        if y >= -x { y } else { -x }
+    }
+}
+
+// ============================================================================
+// Short-circuit evaluation branch analysis
+// ============================================================================
+
+fn short_circuit_and(x: Int) -> Maybe<Positive> {
+    // If x <= 0, second condition is not evaluated
+    if x > 0 && x < 100 {
+        Some(x)  // x is known to be > 0 here
+    } else {
+        None
+    }
+}
+
+fn short_circuit_or(x: Int) -> NonNegative {
+    // If x >= 0, second condition is not evaluated
+    if x < 0 || x >= 0 {
+        // Always true, but refinement still works
+        if x >= 0 { x } else { -x }
+    } else {
+        unreachable()
+    }
+}
+
+// ============================================================================
+// Exception/Error branch analysis
+// ============================================================================
+
+type Result<T, E> is Ok(T) | Err(E);
+
+fn result_branch_analysis(r: Result<Int, Text>) -> Int {
+    match r {
+        Result.Ok(value) => {
+            // value is Int here
+            value
+        }
+        Result.Err(msg) => {
+            // msg is Text here
+            print("Error: ", msg);
+            -1
+        }
+    }
+}
+
+fn try_branch_analysis(x: Int) -> Result<Int, Text> {
+    if x <= 0 {
+        return Result.Err("must be positive");
+    }
+    // x > 0 (flow-sensitive refinement would narrow to Positive)
+    Result.Ok(x)
+}
+
+// ============================================================================
+// Complex branch merging
+// ============================================================================
+
+type Clamped is Int{>= -100 && <= 100};
+
+fn complex_clamp(x: Int) -> Clamped {
+    if x < -100 {
+        -100
+    } else if x > 100 {
+        100
+    } else {
+        // x >= -100 && x <= 100
+        x
+    }
+}
+
+fn multi_variable_branching(x: Int, y: Int) -> (NonNegative, NonNegative) {
+    let a: NonNegative;
+    let b: NonNegative;
+
+    if x >= 0 {
+        a = x;
+    } else {
+        a = -x;
+    }
+
+    if y >= 0 {
+        b = y;
+    } else {
+        b = -y;
+    }
+
+    (a, b)
+}
+
+// ============================================================================
+// Definite assignment analysis with branches
+// ============================================================================
+
+fn definite_assignment_branches(condition: Bool) -> Int {
+    let result: Int;
+
+    if condition {
+        result = 1;
+    } else {
+        result = 2;
+    }
+
+    // result is definitely assigned regardless of branch
+    result
+}
+
+fn complex_definite_assignment(x: Int) -> Positive {
+    let result: Positive;
+
+    if x > 100 {
+        result = x;
+    } else if x > 0 {
+        result = x;
+    } else if x == 0 {
+        result = 1;
+    } else {
+        result = -x;
+    }
+
+    result  // Definitely assigned in all branches
+}
+
+// ============================================================================
+// Main demonstration
+// ============================================================================
+
+fn main() {
+    // Join refinements
+    assert(join_refinements(5, true) >= 0);
+    assert(join_refinements(-5, false) >= 0);
+
+    // Branch narrowing
+    assert(nested_branch_narrowing(0) == "zero");
+    assert(nested_branch_narrowing(5) == "positive");
+    assert(nested_branch_narrowing(-3) == "negative");
+
+    // Early return
+    assert(early_return_refines(-5) == 1);
+    assert(early_return_refines(10) == 10);
+
+    // Loop branches
+    let positives = loop_invariant_refinement([-1, 2, -3, 4]);
+    assert(positives == [2, 4]);
+
+    // Complex clamp
+    assert(complex_clamp(-200) == -100);
+    assert(complex_clamp(200) == 100);
+    assert(complex_clamp(50) == 50);
+
+    // Definite assignment
+    assert(definite_assignment_branches(true) == 1);
+    assert(definite_assignment_branches(false) == 2);
+
+    print("All branch analysis tests passed!");
+}

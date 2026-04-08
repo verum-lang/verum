@@ -1,0 +1,197 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, distributed
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT distributed collective operation simulation — allreduce, broadcast, scatter/gather
+
+// ============================================================================
+// Simulated distributed environment with 4 workers
+// Each worker holds a single integer value
+// ============================================================================
+
+type Workers4 is { w0: Int, w1: Int, w2: Int, w3: Int };
+
+fn workers_new(a: Int, b: Int, c: Int, d: Int) -> Workers4 {
+    Workers4 { w0: a, w1: b, w2: c, w3: d }
+}
+
+fn workers_get(w: Workers4, i: Int) -> Int {
+    if i == 0 { w.w0 } else if i == 1 { w.w1 }
+    else if i == 2 { w.w2 } else { w.w3 }
+}
+
+// ============================================================================
+// Test 1: AllReduce SUM — each worker gets the sum of all values
+// ============================================================================
+
+fn allreduce_sum(w: Workers4) -> Workers4 {
+    let total = w.w0 + w.w1 + w.w2 + w.w3;
+    Workers4 { w0: total, w1: total, w2: total, w3: total }
+}
+
+fn test_allreduce_sum() {
+    let w = workers_new(10, 20, 30, 40);
+    let result = allreduce_sum(w);
+    assert_eq(workers_get(result, 0), 100);
+    assert_eq(workers_get(result, 1), 100);
+    assert_eq(workers_get(result, 2), 100);
+    assert_eq(workers_get(result, 3), 100);
+
+    // With zeros
+    let w2 = workers_new(0, 0, 0, 0);
+    let r2 = allreduce_sum(w2);
+    assert_eq(workers_get(r2, 0), 0);
+
+    // With negative values
+    let w3 = workers_new(-5, 10, -15, 10);
+    let r3 = allreduce_sum(w3);
+    assert_eq(workers_get(r3, 0), 0);
+
+    print("test_allreduce_sum passed");
+}
+
+// ============================================================================
+// Test 2: AllReduce MAX — each worker gets the max of all values
+// ============================================================================
+
+fn allreduce_max(w: Workers4) -> Workers4 {
+    let mut best = w.w0;
+    if w.w1 > best { best = w.w1; }
+    if w.w2 > best { best = w.w2; }
+    if w.w3 > best { best = w.w3; }
+    Workers4 { w0: best, w1: best, w2: best, w3: best }
+}
+
+fn test_allreduce_max() {
+    let w = workers_new(10, 50, 30, 20);
+    let result = allreduce_max(w);
+    assert_eq(workers_get(result, 0), 50);
+    assert_eq(workers_get(result, 1), 50);
+    assert_eq(workers_get(result, 2), 50);
+    assert_eq(workers_get(result, 3), 50);
+
+    // All same
+    let w2 = workers_new(7, 7, 7, 7);
+    let r2 = allreduce_max(w2);
+    assert_eq(workers_get(r2, 0), 7);
+
+    // Negative
+    let w3 = workers_new(-100, -50, -200, -1);
+    let r3 = allreduce_max(w3);
+    assert_eq(workers_get(r3, 0), -1);
+
+    print("test_allreduce_max passed");
+}
+
+// ============================================================================
+// Test 3: Broadcast — one root worker sends its value to all others
+// ============================================================================
+
+fn broadcast(w: Workers4, root: Int) -> Workers4 {
+    let val = workers_get(w, root);
+    Workers4 { w0: val, w1: val, w2: val, w3: val }
+}
+
+fn test_broadcast() {
+    let w = workers_new(100, 200, 300, 400);
+
+    // Broadcast from root 0
+    let r0 = broadcast(w, 0);
+    assert_eq(workers_get(r0, 0), 100);
+    assert_eq(workers_get(r0, 1), 100);
+    assert_eq(workers_get(r0, 2), 100);
+    assert_eq(workers_get(r0, 3), 100);
+
+    // Broadcast from root 2
+    let r2 = broadcast(w, 2);
+    assert_eq(workers_get(r2, 0), 300);
+    assert_eq(workers_get(r2, 3), 300);
+
+    // Broadcast from root 3
+    let r3 = broadcast(w, 3);
+    assert_eq(workers_get(r3, 1), 400);
+
+    print("test_broadcast passed");
+}
+
+// ============================================================================
+// Test 4: Gather — collect all values to root, others get 0
+// ============================================================================
+
+type GatherResult is { g0: Int, g1: Int, g2: Int, g3: Int, root: Int };
+
+fn gather(w: Workers4, root: Int) -> GatherResult {
+    // Root gets all values in order; others get zero
+    GatherResult { g0: w.w0, g1: w.w1, g2: w.w2, g3: w.w3, root: root }
+}
+
+fn test_gather() {
+    let w = workers_new(10, 20, 30, 40);
+    let g = gather(w, 0);
+    assert_eq(g.g0, 10);
+    assert_eq(g.g1, 20);
+    assert_eq(g.g2, 30);
+    assert_eq(g.g3, 40);
+    assert_eq(g.root, 0);
+
+    // Verify total is preserved
+    let total = g.g0 + g.g1 + g.g2 + g.g3;
+    assert_eq(total, 100);
+
+    print("test_gather passed");
+}
+
+// ============================================================================
+// Test 5: Ring AllReduce simulation (pairwise exchange)
+// ============================================================================
+
+fn test_ring_allreduce() {
+    // Simulate a correct ring allreduce with 4 workers using scatter-reduce + allgather.
+    // Phase 1 (scatter-reduce): 3 rounds, each worker accumulates partial sums
+    // Phase 2 (allgather): 3 rounds, share completed segments
+    // For simplicity, we use a direct sum approach equivalent to allreduce.
+    let v0 = 10;
+    let v1 = 20;
+    let v2 = 30;
+    let v3 = 40;
+
+    // Direct allreduce: each worker computes the total
+    let total = v0 + v1 + v2 + v3;
+    assert_eq(total, 100);
+
+    // Verify commutativity and associativity
+    let total2 = v3 + v2 + v1 + v0;
+    assert_eq(total2, 100);
+
+    // Simulate pairwise exchange (butterfly pattern): 2 rounds
+    // Round 1: pairs (0,1) and (2,3) exchange
+    let p0 = v0 + v1;  // 30
+    let p1 = v0 + v1;  // 30
+    let p2 = v2 + v3;  // 70
+    let p3 = v2 + v3;  // 70
+
+    // Round 2: pairs (0,2) and (1,3) exchange
+    let r0 = p0 + p2;  // 100
+    let r1 = p1 + p3;  // 100
+    let r2 = p2 + p0;  // 100
+    let r3 = p3 + p1;  // 100
+
+    assert_eq(r0, 100);
+    assert_eq(r1, 100);
+    assert_eq(r2, 100);
+    assert_eq(r3, 100);
+
+    print("test_ring_allreduce passed");
+}
+
+fn main() -> Int {
+    test_allreduce_sum();
+    test_allreduce_max();
+    test_broadcast();
+    test_gather();
+    test_ring_allreduce();
+    print("ALL PASSED");
+    0
+}

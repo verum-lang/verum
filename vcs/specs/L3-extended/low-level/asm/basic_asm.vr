@@ -1,0 +1,64 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, inline-assembly, asm
+// @description: Basic inline assembly syntax tests
+
+/// Basic inline assembly with no operands
+fn test_nop() {
+    @asm("nop", options(volatile));
+}
+
+/// Inline assembly with input operand
+fn test_input(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(volatile));
+    res
+}
+
+/// Inline assembly with multiple inputs
+fn test_add(a: Int, b: Int) -> Int {
+    let res: Int = 0;
+    @asm("add {res}, {a}, {b}", options(nomem));
+    res
+}
+
+/// Inline assembly with inout operand
+fn test_increment(x: &mut Int) {
+    @asm("add {x}, {x}, #1", options(volatile));
+}
+
+/// Inline assembly with clobbers
+fn test_with_clobbers(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(volatile));
+    res
+}
+
+/// Intel syntax assembly
+fn test_intel_syntax(a: Int, b: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {a}", options(intel));
+    res
+}
+
+/// AT&T syntax assembly (default)
+fn test_att_syntax(a: Int) -> Int {
+    let res: Int = 0;
+    @asm("movq {a}, {res}", options(att));
+    res
+}
+
+fn main() {
+    test_nop();
+
+    let x = test_input(42);
+    assert(x == 42);
+
+    let sum = test_add(10, 20);
+    assert(sum == 30);
+
+    let mut val = 5;
+    test_increment(&mut val);
+    assert(val == 6);
+}

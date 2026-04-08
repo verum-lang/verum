@@ -1,0 +1,20 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "ABCDE";
+    let n = s.len();
+    print(f"text_len={n}");
+
+    // Test bytes
+    let bytes = s.as_bytes();
+    let blen = bytes.len();
+    print(f"bytes_len={blen}");
+
+    // Test byte access
+    let b0 = bytes[0];
+    print(f"byte0={b0}");
+
+    0
+}

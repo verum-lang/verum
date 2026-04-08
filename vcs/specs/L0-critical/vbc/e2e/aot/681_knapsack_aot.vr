@@ -1,0 +1,199 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, knapsack, dynamic-programming, optimization
+// @timeout: 30000
+
+// 0/1 Knapsack problem with DP (small instances)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+// 0/1 Knapsack DP for small capacity (<=7)
+// items: n items with weights[] and values[]
+// capacity: max weight
+// dp[w] = max value achievable with weight limit w
+fn knapsack(weights: Arr8, values: Arr8, n: Int, capacity: Int) -> Int {
+    let mut dp = zeros();
+    let mut i = 0;
+    while i < n {
+        let w = get8(weights, i);
+        let v = get8(values, i);
+        // Process from high to low capacity to avoid using item twice
+        let mut c = capacity;
+        while c >= w {
+            let new_val = get8(dp, c - w) + v;
+            if new_val > get8(dp, c) {
+                dp = set8(dp, c, new_val);
+            }
+            c = c - 1;
+        }
+        i = i + 1;
+    }
+    get8(dp, capacity)
+}
+
+// Fractional knapsack (greedy): take items by value/weight ratio
+// Not exact with integers, but we can approximate
+// Returns: max value * 10 (scaled)
+fn fractional_knapsack(weights: Arr8, values: Arr8, n: Int, capacity: Int) -> Int {
+    // Sort by value-density (value*100/weight descending)
+    // For simplicity, use selection-based greedy
+    let mut taken = 0; // bitset of taken items
+    let mut total_value = 0;
+    let mut remaining = capacity;
+    let mut iter = 0;
+    while iter < n {
+        // Find best untaken item
+        let mut best_idx = 0 - 1;
+        let mut best_ratio = 0 - 1;
+        let mut j = 0;
+        while j < n {
+            if (taken / pow2_small(j)) % 2 == 0 { // not taken
+                let ratio = get8(values, j) * 100 / get8(weights, j);
+                if ratio > best_ratio {
+                    best_ratio = ratio;
+                    best_idx = j;
+                }
+            }
+            j = j + 1;
+        }
+        if best_idx >= 0 {
+            let w = get8(weights, best_idx);
+            let v = get8(values, best_idx);
+            if w <= remaining {
+                total_value = total_value + v;
+                remaining = remaining - w;
+                taken = taken + pow2_small(best_idx);
+            } else {
+                // Take fraction: remaining/w of the item
+                total_value = total_value + v * remaining / w;
+                remaining = 0;
+            }
+        }
+        iter = iter + 1;
+    }
+    total_value
+}
+
+fn pow2_small(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+// Unbounded knapsack (can take items multiple times)
+fn unbounded_knapsack(weights: Arr8, values: Arr8, n: Int, capacity: Int) -> Int {
+    let mut dp = zeros();
+    let mut c = 1;
+    while c <= capacity {
+        let mut best = get8(dp, c);
+        let mut i = 0;
+        while i < n {
+            let w = get8(weights, i);
+            if w <= c {
+                let val = get8(dp, c - w) + get8(values, i);
+                if val > best { best = val; }
+            }
+            i = i + 1;
+        }
+        dp = set8(dp, c, best);
+        c = c + 1;
+    }
+    get8(dp, capacity)
+}
+
+fn test_basic_knapsack() -> Int {
+    // Items: (weight, value) = (1,1), (3,4), (4,5), (5,7)
+    let weights = Arr8 { v0: 1, v1: 3, v2: 4, v3: 5, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let values = Arr8 { v0: 1, v1: 4, v2: 5, v3: 7, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Capacity 7: best is items 1+3 (weight=3+4=7, value=4+5=9) or items 0+3 (1+5=6, 1+7=8)
+    // Actually items 1+2: w=3+4=7, v=4+5=9
+    let result = knapsack(weights, values, 4, 7);
+    assert_eq(result, 9);
+    1
+}
+
+fn test_single_item() -> Int {
+    let weights = Arr8 { v0: 5, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let values = Arr8 { v0: 10, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Capacity 5: can take it
+    assert_eq(knapsack(weights, values, 1, 5), 10);
+    // Capacity 4: can't take it
+    assert_eq(knapsack(weights, values, 1, 4), 0);
+    1
+}
+
+fn test_all_fit() -> Int {
+    // All items fit: (1,3), (1,4), (1,5)
+    let weights = Arr8 { v0: 1, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let values = Arr8 { v0: 3, v1: 4, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(knapsack(weights, values, 3, 7), 12); // take all
+    assert_eq(knapsack(weights, values, 3, 3), 12); // still all fit
+    assert_eq(knapsack(weights, values, 3, 2), 9);  // best 2: 4+5
+    1
+}
+
+fn test_unbounded() -> Int {
+    // Unbounded: items (2,3), (3,5)
+    let weights = Arr8 { v0: 2, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let values = Arr8 { v0: 3, v1: 5, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // Capacity 6: 3x item0 = 9, or 2x item1 = 10, or item0+item1 = 8
+    assert_eq(unbounded_knapsack(weights, values, 2, 6), 10);
+    // Capacity 7: item1+item1 = 10 (w=6) + item0 (w=2, won't fit w=1 left) = 10
+    // Actually: 2x item0 + 1x item1 = 6+5 = 11, w=4+3=7 ✓
+    assert_eq(unbounded_knapsack(weights, values, 2, 7), 11);
+    1
+}
+
+fn test_zero_capacity() -> Int {
+    let weights = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let values = Arr8 { v0: 10, v1: 20, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(knapsack(weights, values, 2, 0), 0);
+    1
+}
+
+fn test_fractional() -> Int {
+    // Fractional knapsack: items (2,10), (3,15), (5,20)
+    // Ratios: 5, 5, 4. Greedy picks item0 (w=2,v=10), item1 (w=3,v=15), then 2/5 of item2 (v=8)
+    // Capacity 7: 10+15 = 25 full items, then 2 remaining, 2/5 of 20 = 8, total = 33
+    let weights = Arr8 { v0: 2, v1: 3, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let values = Arr8 { v0: 10, v1: 15, v2: 20, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let result = fractional_knapsack(weights, values, 3, 7);
+    // 10 + 15 + 20*2/5 = 25 + 8 = 33
+    assert_eq(result, 33);
+    1
+}
+
+fn main() -> Int {
+    test_basic_knapsack();
+    test_single_item();
+    test_all_fit();
+    test_unbounded();
+    test_zero_capacity();
+    test_fractional();
+    print("[OK] 681_knapsack_aot");
+    0
+}

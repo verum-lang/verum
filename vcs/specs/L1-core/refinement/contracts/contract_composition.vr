@@ -1,0 +1,162 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: contracts, composition
+// @timeout: 5000
+
+/// Contract composition: combining and composing function contracts.
+/// Demonstrates how contracts propagate through function calls and data flow.
+
+// ============================================================================
+// Sequential composition (contract chaining)
+// ============================================================================
+
+@verify(proof)
+fn add_one(x: Int) -> Int
+    ensures result == x + 1
+{
+    x + 1
+}
+
+@verify(proof)
+fn double(x: Int) -> Int
+    ensures result == x * 2
+{
+    x * 2
+}
+
+@verify(proof)
+fn add_one_then_double(x: Int) -> Int
+    ensures result == (x + 1) * 2
+{
+    let y = add_one(x);   // y == x + 1 (from add_one's ensures)
+    double(y)              // result == y * 2 == (x + 1) * 2
+}
+
+// ============================================================================
+// Parallel composition (independent contracts)
+// ============================================================================
+
+@verify(proof)
+fn min(a: Int, b: Int) -> Int
+    ensures result <= a
+    ensures result <= b
+    ensures result == a || result == b
+{
+    if a <= b { a } else { b }
+}
+
+@verify(proof)
+fn max(a: Int, b: Int) -> Int
+    ensures result >= a
+    ensures result >= b
+    ensures result == a || result == b
+{
+    if a >= b { a } else { b }
+}
+
+@verify(proof)
+fn minmax(a: Int, b: Int) -> (Int, Int)
+    ensures result.0 <= result.1
+    ensures result.0 <= a && result.0 <= b
+    ensures result.1 >= a && result.1 >= b
+{
+    (min(a, b), max(a, b))  // Contracts compose in parallel
+}
+
+// ============================================================================
+// Contract strengthening (subtype refinement)
+// ============================================================================
+
+@verify(proof)
+fn positive_add(x: Int{> 0}, y: Int{> 0}) -> Int{> 0}
+    ensures result > x
+    ensures result > y
+{
+    x + y  // Stronger postcondition: result is positive AND greater than both inputs
+}
+
+@verify(proof)
+fn bounded_increment(x: Int{>= 0 && < 100}) -> Int{> 0 && <= 100}
+    ensures result == x + 1
+{
+    x + 1  // Strengthened: 0 <= x < 100 implies 1 <= x+1 <= 100
+}
+
+// ============================================================================
+// Conditional contract composition
+// ============================================================================
+
+@verify(proof)
+fn safe_divide(x: Int, y: Int) -> Maybe<Int>
+    ensures y == 0 => result == None
+    ensures y != 0 => result == Some(x / y)
+{
+    if y == 0 { None } else { Some(x / y) }
+}
+
+// ============================================================================
+// Recursive contract composition
+// ============================================================================
+
+@verify(proof)
+fn factorial(n: Int{>= 0}) -> Int{> 0}
+    ensures n == 0 => result == 1
+{
+    if n == 0 {
+        1
+    } else {
+        n * factorial(n - 1)  // Recursive contract application
+    }
+}
+
+@verify(proof)
+fn power(base: Int, exp: Int{>= 0}) -> Int
+    ensures exp == 0 => result == 1
+{
+    if exp == 0 {
+        1
+    } else {
+        base * power(base, exp - 1)
+    }
+}
+
+// ============================================================================
+// Contract algebra (combining ensures clauses)
+// ============================================================================
+
+@verify(proof)
+fn clamp(x: Int, lo: Int, hi: Int) -> Int
+    requires lo <= hi
+    ensures result >= lo                          // Lower bound
+    ensures result <= hi                          // Upper bound
+    ensures x < lo => result == lo               // Clamped low
+    ensures x > hi => result == hi               // Clamped high
+    ensures x >= lo && x <= hi => result == x   // In range
+{
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+fn main() {
+    // Sequential composition
+    let result = add_one_then_double(5);
+    assert(result == 12);
+
+    // Parallel composition
+    let (lo, hi) = minmax(7, 3);
+    assert(lo == 3 && hi == 7);
+
+    // Contract strengthening
+    let pos = positive_add(3, 5);
+    assert(pos == 8);
+
+    // Conditional composition
+    let div = safe_divide(10, 2);
+    assert(div == Some(5));
+
+    // Recursive composition
+    let fact = factorial(5);
+    assert(fact == 120);
+}

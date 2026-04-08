@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, nursery, parameter, error
+// @description: Test nursery with invalid parameter syntax
+// @expected-error: E0D4
+
+async fn test() {
+    // nursery parameter must be |identifier|
+    nursery 123 {
+        // invalid
+    }
+}

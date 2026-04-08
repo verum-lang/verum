@@ -1,0 +1,243 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, access, field
+
+// Field access expressions
+
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int, address: Address };
+type Address is { street: Text, city: Text, zip: Text };
+
+// Status type for match example
+type Status is
+    | Active
+    | Inactive
+    | Other;
+
+// Config type for examples
+type Config is { enabled: Bool, debug: Bool, settings: Maybe<Settings> };
+type Settings is { value: Int };
+
+// Data types for examples
+type Data is { section: Section, status: Status, items: List<Int> };
+type Section is { subsection: Subsection };
+type Subsection is { field: Int };
+
+// Protocol for generic example
+type HasX is protocol {
+    fn get_x(&self) -> Int;
+};
+
+// Helper function declarations
+fn get_point() -> Point {
+    Point { x: 0, y: 0 }
+}
+
+fn allow_access() { }
+
+fn enable_debug_mode() { }
+
+fn handle_active() { }
+
+fn handle_inactive() { }
+
+fn handle_other() { }
+
+// Simple field access
+fn test_simple_field_access() {
+    let p = Point { x: 10, y: 20 };
+    let x_val = p.x;
+    let y_val = p.y;
+}
+
+// Nested field access
+fn test_nested_field_access() {
+    let person = Person {
+        name: "Alice",
+        age: 30,
+        address: Address {
+            street: "123 Main St",
+            city: "Boston",
+            zip: "02101",
+        },
+    };
+
+    let city = person.address.city;
+    let zip = person.address.zip;
+}
+
+// Field access on expression
+fn test_field_access_on_expression() {
+    let computed = (Point { x: 5, y: 10 }).x;
+    let from_call = get_point().x;
+    let points: List<Point> = [];
+    let from_array = points[0].y;
+}
+
+// Chained field access
+fn test_chained_field_access() {
+    let data = Data {
+        section: Section {
+            subsection: Subsection { field: 42 },
+        },
+        status: Status.Active,
+        items: [],
+    };
+    let deep = data.section.subsection.field;
+}
+
+// Field access with method call
+fn test_field_access_with_method() {
+    let text = "hello";
+    let len = text.len();
+    let upper = text.to_uppercase();
+}
+
+// Mixed access (fields and methods)
+fn test_mixed_access() {
+    let data = Data {
+        section: Section {
+            subsection: Subsection { field: 42 },
+        },
+        status: Status.Active,
+        items: [1, 2, 3],
+    };
+    let result = data.items.len();
+}
+
+// Optional field access
+fn test_optional_field_access() {
+    let person: Maybe<Person> = None;
+    let maybe_city = person?.address?.city;
+    let config: Maybe<Config> = None;
+    let safe_value = config?.settings?.value;
+}
+
+// Field access in expressions
+fn test_field_access_in_expressions() {
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 4, y: 6 };
+    let sum = p1.x + p2.x;
+    let distance = (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y);
+}
+
+// Field access as condition
+fn test_field_access_as_condition() {
+    let person = Person {
+        name: "Bob",
+        age: 25,
+        address: Address {
+            street: "456 Oak Ave",
+            city: "NYC",
+            zip: "10001",
+        },
+    };
+
+    if person.age >= 18 {
+        allow_access();
+    }
+
+    let config = Config { enabled: true, debug: true, settings: None };
+    if config.enabled && config.debug {
+        enable_debug_mode();
+    }
+}
+
+// Field access in match
+fn test_field_access_in_match() {
+    let data = Data {
+        section: Section {
+            subsection: Subsection { field: 42 },
+        },
+        status: Status.Active,
+        items: [],
+    };
+
+    match data.status {
+        Status.Active => handle_active(),
+        Status.Inactive => handle_inactive(),
+        _ => handle_other(),
+    }
+}
+
+// Mutable field access
+fn test_mutable_field_access() {
+    let mut point = Point { x: 0, y: 0 };
+    point.x = 10;
+    point.y = 20;
+    point.x += 5;
+}
+
+// Field access on reference
+fn update_point(p: &mut Point) {
+    p.x = 100;
+    p.y = 200;
+}
+
+// Field access with deref
+fn test_field_access_with_deref() {
+    let boxed = Heap(Point { x: 1, y: 2 });
+    let x = boxed.x;
+    let y = (*boxed).y;
+}
+
+// Tuple field access (positional)
+fn test_tuple_field_access() {
+    let tuple = (10, 20, 30);
+    let first = tuple.0;
+    let second = tuple.1;
+    let third = tuple.2;
+}
+
+// Nested tuple access (parentheses required to avoid .0.0 being parsed as float)
+fn test_nested_tuple_access() {
+    let nested_tuple = ((1, 2), (3, 4));
+    let inner_first = (nested_tuple.0).0;
+    let inner_second = (nested_tuple.0).1;
+}
+
+// Field access in closures
+fn test_field_access_in_closures() {
+    let get_x = |p: Point| p.x;
+    let points: List<Point> = [];
+    let points_x = points.map(|p| p.x);
+}
+
+// Field access in comprehension
+fn test_field_access_in_comprehension() {
+    let people: List<Person> = [];
+    let all_cities = [person.address.city for person in people];
+    let ages = [p.age for p in people if p.age > 18];
+}
+
+// Static field access
+fn test_static_field_access() {
+    let constant = Point.ORIGIN;
+    let max = Int.MAX;
+    let min = Int.MIN;
+}
+
+// Associated constant access
+fn test_associated_constant_access() {
+    let pi = Math.PI;
+    let e = Math.E;
+}
+
+// Generic field access
+fn get_x<T: HasX>(obj: T) -> Int {
+    obj.get_x()
+}
+
+// Field access on self
+implement Point {
+    fn sum_components(&self) -> Int {
+        self.x + self.y
+    }
+
+    fn swap(&mut self) {
+        let temp = self.x;
+        self.x = self.y;
+        self.y = temp;
+    }
+}

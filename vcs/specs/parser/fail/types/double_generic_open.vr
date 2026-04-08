@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, generics, syntax, error
+// @description: Test detection of double opening angle bracket in generic
+// @expected-error: E085
+
+// Double opening angle bracket is invalid
+fn test(x: List<<Int>) {}

@@ -1,0 +1,225 @@
+// =============================================================================
+// iterator_laws_test.vr - Iterator algebraic law tests
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, iterator, laws, composition, algebraic
+// @description: Tests iterator algebraic properties: composition, identity,
+//               consistency between equivalent expressions
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: map composition law — map(f).map(g) == map(g(f(x)))
+// =============================================================================
+
+fn double(x: &Int) -> Int { *x * 2 }
+fn add_one(x: &Int) -> Int { *x + 1 }
+fn double_val(x: Int) -> Int { x * 2 }
+fn add_one_val(x: Int) -> Int { x + 1 }
+fn composed(x: &Int) -> Int { (*x * 2) + 1 }
+
+@test
+fn test_map_composition_equivalence() {
+    let data = [1, 2, 3, 4, 5];
+    let chained: List<Int> = data.iter().map(double).map(add_one_val).collect();
+    let composed_result: List<Int> = data.iter().map(composed).collect();
+    assert_eq(chained.len(), composed_result.len());
+    let mut i = 0;
+    while i < chained.len() {
+        assert_eq(chained[i], composed_result[i]);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: filter + count consistency
+// =============================================================================
+
+fn is_even(x: &Int) -> Bool { *x % 2 == 0 }
+fn is_positive(x: &Int) -> Bool { *x > 0 }
+
+@test
+fn test_filter_count_equals_count_matching() {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let filter_count = data.iter().filter(is_even).count();
+    assert_eq(filter_count, 5);
+}
+
+@test
+fn test_filter_count_empty_result() {
+    let data = [1, 3, 5, 7, 9];
+    let count = data.iter().filter(is_even).count();
+    assert_eq(count, 0);
+}
+
+@test
+fn test_filter_count_all_match() {
+    let data = [2, 4, 6, 8];
+    let count = data.iter().filter(is_even).count();
+    assert_eq(count, 4);
+}
+
+// =============================================================================
+// Section 3: map preserves length
+// =============================================================================
+
+@test
+fn test_map_preserves_length() {
+    let data = [10, 20, 30, 40, 50];
+    let mapped: List<Int> = data.iter().map(double).collect();
+    assert_eq(data.len(), mapped.len());
+}
+
+@test
+fn test_map_preserves_length_empty() {
+    let data: [Int; 0] = [];
+    let mapped: List<Int> = data.iter().map(double).collect();
+    assert_eq(mapped.len(), 0);
+}
+
+// =============================================================================
+// Section 4: take + skip = original length
+// =============================================================================
+
+@test
+fn test_take_skip_cover_all() {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let n = 4;
+    let taken: List<Int> = data.iter().map(|x| *x).take(n).collect();
+    let skipped: List<Int> = data.iter().map(|x| *x).skip(n).collect();
+    assert_eq(taken.len() + skipped.len(), data.len());
+}
+
+@test
+fn test_take_zero_gives_empty() {
+    let data = [1, 2, 3];
+    let taken: List<Int> = data.iter().map(|x| *x).take(0).collect();
+    assert_eq(taken.len(), 0);
+}
+
+@test
+fn test_skip_beyond_gives_empty() {
+    let data = [1, 2, 3];
+    let skipped: List<Int> = data.iter().map(|x| *x).skip(100).collect();
+    assert_eq(skipped.len(), 0);
+}
+
+// =============================================================================
+// Section 5: fold identity — fold with identity function
+// =============================================================================
+
+@test
+fn test_fold_sum_matches_sum() {
+    let data = [1, 2, 3, 4, 5];
+    let folded = data.iter().fold(0, |acc, x| acc + *x);
+    let summed: Int = data.iter().map(|x| *x).sum();
+    assert_eq(folded, summed);
+}
+
+@test
+fn test_fold_empty() {
+    let data: [Int; 0] = [];
+    let folded = data.iter().fold(0, |acc, x| acc + *x);
+    assert_eq(folded, 0);
+}
+
+// =============================================================================
+// Section 6: chain length = sum of lengths
+// =============================================================================
+
+@test
+fn test_chain_length_additive() {
+    let a = [1, 2, 3];
+    let b = [4, 5];
+    let chained: List<Int> = a.iter().map(|x| *x).chain(b.iter().map(|x| *x)).collect();
+    assert_eq(chained.len(), a.len() + b.len());
+}
+
+@test
+fn test_chain_empty_left() {
+    let a: [Int; 0] = [];
+    let b = [1, 2, 3];
+    let chained: List<Int> = a.iter().map(|x| *x).chain(b.iter().map(|x| *x)).collect();
+    assert_eq(chained.len(), b.len());
+}
+
+@test
+fn test_chain_empty_right() {
+    let a = [1, 2, 3];
+    let b: [Int; 0] = [];
+    let chained: List<Int> = a.iter().map(|x| *x).chain(b.iter().map(|x| *x)).collect();
+    assert_eq(chained.len(), a.len());
+}
+
+// =============================================================================
+// Section 7: enumerate produces correct indices
+// =============================================================================
+
+@test
+fn test_enumerate_indices_sequential() {
+    let data = [10, 20, 30];
+    let mut expected_idx = 0;
+    for pair in data.iter().enumerate() {
+        assert_eq(pair.0, expected_idx);
+        expected_idx = expected_idx + 1;
+    }
+    assert_eq(expected_idx, 3);
+}
+
+// =============================================================================
+// Section 8: any/all duality — !any(p) == all(!p) for finite iterators
+// =============================================================================
+
+@test
+fn test_any_all_duality_none_match() {
+    let data = [1, 3, 5, 7, 9];
+    let any_even = data.iter().any(is_even);
+    let all_odd = data.iter().all(|x| *x % 2 != 0);
+    assert(!any_even);
+    assert(all_odd);
+}
+
+@test
+fn test_any_all_duality_all_match() {
+    let data = [2, 4, 6, 8];
+    let any_even = data.iter().any(is_even);
+    let all_even = data.iter().all(is_even);
+    assert(any_even);
+    assert(all_even);
+}
+
+@test
+fn test_any_all_empty() {
+    let data: [Int; 0] = [];
+    let any_result = data.iter().any(is_even);
+    let all_result = data.iter().all(is_even);
+    assert(!any_result);
+    assert(all_result);  // vacuously true
+}
+
+// =============================================================================
+// Section 9: zip produces min-length pairs
+// =============================================================================
+
+@test
+fn test_zip_length_is_min() {
+    let a = [1, 2, 3, 4, 5];
+    let b = [10, 20, 30];
+    let zipped: List<(Int, Int)> = a.iter().map(|x| *x).zip(b.iter().map(|x| *x)).collect();
+    assert_eq(zipped.len(), 3);  // min(5, 3)
+}
+
+@test
+fn test_zip_equal_lengths() {
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let zipped: List<(Int, Int)> = a.iter().map(|x| *x).zip(b.iter().map(|x| *x)).collect();
+    assert_eq(zipped.len(), 3);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

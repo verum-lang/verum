@@ -1,0 +1,20 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, context, propagation, error
+// @description: Test context propagation errors - calling context-requiring function without context
+// @expected-error: requires
+
+// =============================================================================
+// CONTEXT NOT DECLARED
+// =============================================================================
+
+// This function requires MetaTypes context but doesn't declare it
+meta fn needs_metatypes_no_decl() -> Int {
+    size_of(Int)  // ERROR: requires MetaTypes
+}
+
+fn main() {
+    // This should fail because needs_metatypes_no_decl lacks MetaTypes context
+    @const assert(needs_metatypes_no_decl() > 0);
+}

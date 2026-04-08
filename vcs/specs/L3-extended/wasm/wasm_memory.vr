@@ -1,0 +1,97 @@
+// @test: run
+// @level: L3
+
+// @tier: 2
+// @tags: wasm, memory, heap, cross-compilation
+// @expected-exit: 0
+// @description: Heap allocation, List, and basic memory operations under WASM
+
+type TreeNode is {
+    value: Int,
+    left: Maybe<Heap<TreeNode>>,
+    right: Maybe<Heap<TreeNode>>,
+};
+
+fn leaf(v: Int) -> Heap<TreeNode> {
+    Heap(TreeNode {
+        value: v,
+        left: None,
+        right: None,
+    })
+}
+
+fn node(v: Int, l: Heap<TreeNode>, r: Heap<TreeNode>) -> Heap<TreeNode> {
+    Heap(TreeNode {
+        value: v,
+        left: Some(l),
+        right: Some(r),
+    })
+}
+
+@allow(unbounded_recursion)
+fn tree_sum(t: &TreeNode) -> Int {
+    let left_sum = match &t.left {
+        Some(l) => tree_sum(&*l),
+        None => 0,
+    };
+    let right_sum = match &t.right {
+        Some(r) => tree_sum(&*r),
+        None => 0,
+    };
+    t.value + left_sum + right_sum
+}
+
+@allow(unbounded_recursion)
+fn tree_depth(t: &TreeNode) -> Int {
+    let ld = match &t.left {
+        Some(l) => tree_depth(&*l),
+        None => 0,
+    };
+    let rd = match &t.right {
+        Some(r) => tree_depth(&*r),
+        None => 0,
+    };
+    1 + if ld > rd { ld } else { rd }
+}
+
+fn main() -> Int {
+    // List operations
+    let mut numbers = List.new();
+    let mut i = 0;
+    while i < 10 {
+        numbers.push(i * i);
+        i = i + 1;
+    }
+    assert_eq(numbers.len(), 10);
+    assert_eq(numbers[0], 0);
+    assert_eq(numbers[3], 9);
+    assert_eq(numbers[9], 81);
+
+    // Sum via loop
+    let mut total = 0;
+    let mut j = 0;
+    while j < numbers.len() {
+        total = total + numbers[j];
+        j = j + 1;
+    }
+    assert_eq(total, 285);
+
+    // Heap allocation — binary tree
+    //       10
+    //      /  \
+    //     5    15
+    //    / \   / \
+    //   2   7 12  20
+    let tree = node(10,
+        node(5, leaf(2), leaf(7)),
+        node(15, leaf(12), leaf(20)),
+    );
+    assert_eq(tree_sum(&tree), 71);
+    assert_eq(tree_depth(&tree), 3);
+
+    // Heap — simple box
+    let boxed = Heap(42);
+    assert_eq(*boxed, 42);
+
+    0
+}

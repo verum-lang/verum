@@ -1,0 +1,120 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, float, math, arithmetic, format
+// @expected-exit: 0
+
+// Test: floating-point math operations and formatting
+// Validates float arithmetic, comparison, and f-string interpolation.
+
+fn abs_f(x: Float) -> Float {
+    if (x < 0.0) { 0.0 - x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, eps: Float) -> Bool {
+    abs_f(a - b) < eps
+}
+
+fn taylor_sin_approx(x: Float) -> Float {
+    // Taylor series: sin(x) ≈ x - x^3/6 + x^5/120
+    let x2 = x * x;
+    let x3 = x2 * x;
+    let x5 = x3 * x2;
+    x - x3 / 6.0 + x5 / 120.0
+}
+
+fn newton_sqrt(n: Float) -> Float {
+    // Newton's method for square root
+    if (n <= 0.0) { return 0.0; }
+    let mut guess = n / 2.0;
+    let mut i = 0;
+    while (i < 20) {
+        guess = (guess + n / guess) / 2.0;
+        i = i + 1;
+    }
+    guess
+}
+
+fn main() -> Int {
+    // Basic float arithmetic
+    let a = 3.14;
+    let b = 2.72;
+    let sum = a + b;
+    if (!approx_eq(sum, 5.86, 0.001)) {
+        print(f"FAIL: 3.14 + 2.72 = {sum}, expected ~5.86");
+        return 1;
+    }
+
+    let diff = a - b;
+    if (!approx_eq(diff, 0.42, 0.001)) {
+        print(f"FAIL: 3.14 - 2.72 = {diff}, expected ~0.42");
+        return 1;
+    }
+
+    let prod = 2.5 * 4.0;
+    if (!approx_eq(prod, 10.0, 0.001)) {
+        print(f"FAIL: 2.5 * 4.0 = {prod}, expected 10.0");
+        return 1;
+    }
+
+    let quot = 10.0 / 3.0;
+    if (!approx_eq(quot, 3.333, 0.01)) {
+        print(f"FAIL: 10.0 / 3.0 = {quot}, expected ~3.333");
+        return 1;
+    }
+
+    // Float comparison
+    if (3.14 > 4.0) {
+        print("FAIL: 3.14 > 4.0 should be false");
+        return 1;
+    }
+    if (4.0 < 3.14) {
+        print("FAIL: 4.0 < 3.14 should be false");
+        return 1;
+    }
+
+    // Newton's sqrt
+    let sq = newton_sqrt(25.0);
+    if (!approx_eq(sq, 5.0, 0.0001)) {
+        print(f"FAIL: sqrt(25)={sq}, expected ~5.0");
+        return 1;
+    }
+
+    let sq2 = newton_sqrt(2.0);
+    if (!approx_eq(sq2, 1.4142, 0.001)) {
+        print(f"FAIL: sqrt(2)={sq2}, expected ~1.4142");
+        return 1;
+    }
+
+    // Taylor sin approximation (for small x)
+    // sin(0.5) ≈ 0.4794
+    let s = taylor_sin_approx(0.5);
+    if (!approx_eq(s, 0.4794, 0.001)) {
+        print(f"FAIL: sin(0.5)={s}, expected ~0.4794");
+        return 1;
+    }
+
+    // Float in format strings
+    let pi = 3.14159;
+    let formatted = f"pi={pi}";
+    if (formatted == "") {
+        print("FAIL: float f-string is empty");
+        return 1;
+    }
+
+    // Accumulation test
+    let mut acc = 0.0;
+    let mut i = 0;
+    while (i < 1000) {
+        acc = acc + 0.001;
+        i = i + 1;
+    }
+    // Should be approximately 1.0 (with floating point error)
+    if (!approx_eq(acc, 1.0, 0.01)) {
+        print(f"FAIL: 1000 * 0.001 = {acc}, expected ~1.0");
+        return 1;
+    }
+
+    print("860_float_math: PASS");
+    0
+}

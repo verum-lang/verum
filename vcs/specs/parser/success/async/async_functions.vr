@@ -1,0 +1,244 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for async function declarations
+
+// ============================================================================
+// Basic Async Functions
+// ============================================================================
+
+// Simple async function with no parameters
+async fn simple_async() {
+    do_work().await;
+}
+
+// Async function with return type
+async fn fetch_data() -> Text {
+    "data"
+}
+
+// Async function with parameters
+async fn fetch_with_params(url: Text, timeout: Int) -> Maybe<Text> {
+    Some("result")
+}
+
+// Async function returning unit
+async fn notify() -> () {
+    send_notification().await;
+}
+
+// ============================================================================
+// Generic Async Functions
+// ============================================================================
+
+// Async function with type parameter
+async fn fetch_generic<T>(source: T) -> T {
+    source
+}
+
+// Async function with multiple type parameters
+async fn transform_async<A, B>(input: A, mapper: fn(A) -> B) -> B {
+    mapper(input)
+}
+
+// Async function with bounded generics
+async fn fetch_bounded<T: Serialize>(value: T) -> Bytes {
+    serialize(value)
+}
+
+// Async function with where clause
+async fn complex_async<T, U>(a: T, b: U) -> T
+    where T: Clone + Send, U: Into<T>
+{
+    a.clone()
+}
+
+// ============================================================================
+// Async Functions with Context Clauses
+// ============================================================================
+
+// Single context
+async fn fetch_with_context() -> Text using [Network] {
+    "fetched"
+}
+
+// Multiple contexts
+async fn database_op() -> Int using [Database, Logger] {
+    42
+}
+
+// Context with generics
+async fn generic_with_context<T: Send>(value: T) -> T using [Runtime] {
+    value
+}
+
+// Complex context specification
+async fn complex_contexts() -> Result<Data, Error> using [Database, Network, Logger, Cache] {
+    fetch_and_cache().await
+}
+
+// Context alias
+async fn aliased_context() -> Int using [Database as PrimaryDb] {
+    query().await
+}
+
+// Negative context (proves no usage)
+async fn no_network() -> Int using [!Network] {
+    local_compute()
+}
+
+// ============================================================================
+// Async Functions with Throws Clause
+// ============================================================================
+
+// Async function with typed throws
+async fn parse_async(input: Text) throws(ParseError) -> AST {
+    parse(input)
+}
+
+// Async with multiple error types
+async fn process_data(data: Data) throws(ParseError | ValidationError) -> Result {
+    validate_and_process(data).await
+}
+
+// Async with throws and context
+async fn fetch_and_parse(url: Text) throws(NetworkError | ParseError) -> Document using [Network] {
+    let response = fetch(url).await;
+    parse(response)
+}
+
+// ============================================================================
+// Async Generator Functions (async fn*)
+// ============================================================================
+
+// Basic async generator
+async fn* page_fetcher() -> Page {
+    while let Some(page) = next_page().await {
+        yield page;
+    }
+}
+
+// Async generator with parameters
+async fn* stream_items<T>(source: AsyncStream<T>) -> T {
+    for await item in source {
+        yield item;
+    }
+}
+
+// Async generator with context
+async fn* fetch_pages(urls: List<Text>) -> Page using [Network, Logger] {
+    for url in urls {
+        let page = fetch(url).await;
+        log(f"Fetched: {url}");
+        yield page;
+    }
+}
+
+// Async generator with throws
+async fn* risky_generator(source: Source) throws(IOError) -> Data {
+    while let Some(data) = source.read().await {
+        yield data;
+    }
+}
+
+// ============================================================================
+// Combined Modifiers with Async
+// ============================================================================
+
+// Pure async function
+pure async fn pure_async_compute() -> Int {
+    42
+}
+
+// Async unsafe function
+async unsafe fn async_unsafe_op(ptr: *const Data) -> Data {
+    (*ptr).clone()
+}
+
+// Pure async unsafe
+pure async unsafe fn pure_async_unsafe() -> Int {
+    0
+}
+
+// ============================================================================
+// Visibility Modifiers
+// ============================================================================
+
+// Public async function
+public async fn public_fetch() -> Data {
+    fetch_data().await
+}
+
+// Internal async function
+internal async fn internal_helper() -> Int {
+    compute_internal()
+}
+
+// Protected async function
+protected async fn protected_process() -> Result {
+    process().await
+}
+
+// ============================================================================
+// Async Functions with Ensures Clause
+// ============================================================================
+
+// Async with postcondition
+async fn fetch_positive() -> Int ensures result > 0 {
+    let value = fetch_value().await;
+    if value <= 0 { 1 } else { value }
+}
+
+// Async with complex ensures
+async fn bounded_fetch(min: Int, max: Int) -> Int
+    ensures result >= min && result <= max
+{
+    let value = fetch_in_range(min, max).await;
+    value.clamp(min, max)
+}
+
+// ============================================================================
+// Async Functions in Type Context
+// ============================================================================
+
+type AsyncProcessor is protocol {
+    // Method-style async function in type
+    async fn process(&self, input: Data) -> Result;
+
+    // Async function with mut self
+    async fn update(&mut self, data: Data);
+
+    // Static async function
+    async fn create() -> Self;
+};
+
+// ============================================================================
+// Async Functions with Default Parameters
+// ============================================================================
+
+async fn fetch_with_defaults(
+    url: Text,
+    timeout: Int = 5000,
+    retries: Int = 3
+) -> Response {
+    fetch_with_retry(url, timeout, retries).await
+}
+
+// ============================================================================
+// Async Functions with Complex Return Types
+// ============================================================================
+
+// Returning a tuple
+async fn fetch_pair() -> (Text, Int) {
+    ("data", 42)
+}
+
+// Returning a function type
+async fn get_handler() -> fn(Request) -> Response {
+    |req| process(req)
+}
+
+// Returning Future type (async functions return futures)
+async fn get_async_future() -> Future<Response> {
+    fetch().await
+}

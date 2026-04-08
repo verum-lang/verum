@@ -1,0 +1,160 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, egg_drop, dynamic_programming, combinatorics, puzzle
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Egg drop problem: given e eggs and f floors, find the minimum number of
+// trials needed in the worst case to determine the critical floor.
+//
+// DP formulation (standard):
+//   dp[i][j] = min trials with i eggs and j floors.
+//   dp[1][j] = j  (only 1 egg: must try each floor linearly)
+//   dp[i][0] = 0  (0 floors: no trials needed)
+//   dp[i][1] = 1  (1 floor: one trial)
+//   dp[i][j] = 1 + min over x in 1..=j { max(dp[i-1][x-1], dp[i][j-x]) }
+//
+// DP stored in flat [Int; 256]: index = e*16+f (e up to 8, f up to 15).
+
+// Compute dp table for egg_drop. Max 8 eggs (rows 0..8), 15 floors (cols 0..15).
+// dp layout: dp[e*16+f]. Returns dp[eggs*16+floors].
+fn egg_drop_dp(eggs: Int, floors: Int, dp: [Int; 256]) -> Int {
+    // Base cases
+    let mut e = 0;
+    while e <= eggs {
+        dp[e * 16 + 0] = 0;  // 0 floors
+        dp[e * 16 + 1] = 1;  // 1 floor (even for e=0; harmless)
+        e = e + 1;
+    }
+    let mut f = 0;
+    while f <= floors {
+        dp[1 * 16 + f] = f;  // 1 egg: linear search
+        f = f + 1;
+    }
+    dp[0 * 16 + 0] = 0;
+    // Fill table
+    e = 2;
+    while e <= eggs {
+        f = 2;
+        while f <= floors {
+            dp[e * 16 + f] = f;  // worst case upper bound
+            let mut x = 1;
+            while x <= f {
+                let break_val   = dp[(e - 1) * 16 + (x - 1)];
+                let nobreak_val = dp[e * 16 + (f - x)];
+                let worst = if break_val > nobreak_val { break_val } else { nobreak_val };
+                let cand = 1 + worst;
+                if cand < dp[e * 16 + f] { dp[e * 16 + f] = cand; }
+                x = x + 1;
+            }
+            f = f + 1;
+        }
+        e = e + 1;
+    }
+    dp[eggs * 16 + floors]
+}
+
+fn make_dp256() -> [Int; 256] {
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+}
+
+fn test_one_egg() {
+    // 1 egg, n floors: always n trials (must try each floor from bottom).
+    let mut dp = make_dp256();
+    let r1 = egg_drop_dp(1, 5, dp);
+    assert_eq(r1, 5);
+    let mut dp2 = make_dp256();
+    let r2 = egg_drop_dp(1, 10, dp2);
+    assert_eq(r2, 10);
+    let mut dp3 = make_dp256();
+    let r3 = egg_drop_dp(1, 1, dp3);
+    assert_eq(r3, 1);
+    print("one_egg: ok");
+}
+
+fn test_two_eggs_classic() {
+    // 2 eggs, 10 floors: optimal = 4 trials.
+    // With t trials and 2 eggs: max floors = t*(t+1)/2. t=4: 10. Exactly 10.
+    let mut dp = make_dp256();
+    let r = egg_drop_dp(2, 10, dp);
+    assert_eq(r, 4);
+    // 2 eggs, 1 floor: 1 trial.
+    let r2 = dp[2 * 16 + 1];
+    assert_eq(r2, 1);
+    // 2 eggs, 4 floors: t*(t+1)/2>=4 -> t=3 (3>=3, since 2*3/2=3<4, 3*4/2=6>=4). So 3 trials.
+    let mut dp3 = make_dp256();
+    let r3 = egg_drop_dp(2, 4, dp3);
+    assert_eq(r3, 3);
+    print("two_eggs_classic: ok");
+}
+
+fn test_many_eggs() {
+    // 5 eggs, 7 floors: with 3 trials, 2^3-1=7 floors can be covered. egg_drop(5,7)=3.
+    let mut dp = make_dp256();
+    let r = egg_drop_dp(5, 7, dp);
+    assert_eq(r, 3);
+    // 4 eggs, 6 floors: egg_drop(4,6)=3 (verified by DP).
+    let mut dp2 = make_dp256();
+    let r2 = egg_drop_dp(4, 6, dp2);
+    assert_eq(r2, 3);
+    // 3 eggs, 14 floors: should be 4 (verified by DP).
+    // With 3 eggs 4 trials: max floors = C(4,1)+C(4,2)+C(4,3)=4+6+4=14. Exactly 14.
+    let mut dp3 = make_dp256();
+    let r3 = egg_drop_dp(3, 14, dp3);
+    assert_eq(r3, 4);
+    print("many_eggs: ok");
+}
+
+fn test_zero_and_one_floor() {
+    // 0 floors: 0 trials regardless of eggs.
+    let mut dp = make_dp256();
+    let r = egg_drop_dp(3, 0, dp);
+    assert_eq(r, 0);
+    // 1 floor: 1 trial.
+    let mut dp2 = make_dp256();
+    let r2 = egg_drop_dp(3, 1, dp2);
+    assert_eq(r2, 1);
+    print("zero_one_floor: ok");
+}
+
+fn test_two_eggs_various() {
+    // 2 eggs, 2 floors: t*(t+1)/2>=2 -> t=2 (1*2/2=1<2, 2*3/2=3>=2). So 2 trials.
+    let mut dp = make_dp256();
+    let r = egg_drop_dp(2, 2, dp);
+    assert_eq(r, 2);
+    // 2 eggs, 3 floors: t*(t+1)/2>=3 -> t=2 (2*3/2=3>=3). So 2 trials.
+    let mut dp2 = make_dp256();
+    let r2 = egg_drop_dp(2, 3, dp2);
+    assert_eq(r2, 2);
+    // 2 eggs, 6 floors: t*(t+1)/2>=6 -> t=3 (2*3/2=3<6, 3*4/2=6>=6). So 3 trials.
+    let mut dp3 = make_dp256();
+    let r3 = egg_drop_dp(2, 6, dp3);
+    assert_eq(r3, 3);
+    print("two_eggs_various: ok");
+}
+
+fn main() -> Int {
+    test_one_egg();
+    test_two_eggs_classic();
+    test_many_eggs();
+    test_zero_and_one_floor();
+    test_two_eggs_various();
+    print("[OK] 568_interp_egg_drop");
+    0
+}

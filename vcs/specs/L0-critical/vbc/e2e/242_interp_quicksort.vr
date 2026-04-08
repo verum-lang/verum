@@ -1,0 +1,264 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, quicksort, sorting
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: quicksort with Lomuto partition on fixed-size record arrays
+
+// =============================================================================
+// Array type and accessors (8 elements)
+// =============================================================================
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn arr_new() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn arr_get(arr: Arr8, idx: Int) -> Int {
+    if idx == 0 { arr.a0 }
+    else if idx == 1 { arr.a1 }
+    else if idx == 2 { arr.a2 }
+    else if idx == 3 { arr.a3 }
+    else if idx == 4 { arr.a4 }
+    else if idx == 5 { arr.a5 }
+    else if idx == 6 { arr.a6 }
+    else if idx == 7 { arr.a7 }
+    else { -1 }
+}
+
+fn arr_set(arr: Arr8, idx: Int, val: Int) -> Arr8 {
+    Arr8 {
+        a0: if idx == 0 { val } else { arr.a0 },
+        a1: if idx == 1 { val } else { arr.a1 },
+        a2: if idx == 2 { val } else { arr.a2 },
+        a3: if idx == 3 { val } else { arr.a3 },
+        a4: if idx == 4 { val } else { arr.a4 },
+        a5: if idx == 5 { val } else { arr.a5 },
+        a6: if idx == 6 { val } else { arr.a6 },
+        a7: if idx == 7 { val } else { arr.a7 },
+    }
+}
+
+fn arr_swap(arr: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = arr_get(arr, i);
+    let vj = arr_get(arr, j);
+    let tmp = arr_set(arr, i, vj);
+    arr_set(tmp, j, vi)
+}
+
+fn is_sorted(arr: Arr8, lo: Int, hi: Int) -> Bool {
+    let mut i = lo;
+    while i < hi - 1 {
+        if arr_get(arr, i) > arr_get(arr, i + 1) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Lomuto partition: pivot is arr[hi-1], returns (partitioned_arr, pivot_index)
+// We return a record to return two values
+// =============================================================================
+
+type PartResult is { arr: Arr8, pivot_idx: Int };
+
+fn lomuto_partition(arr: Arr8, lo: Int, hi: Int) -> PartResult {
+    let pivot = arr_get(arr, hi - 1);
+    let mut a = arr;
+    let mut i = lo;
+    let mut j = lo;
+    while j < hi - 1 {
+        if arr_get(a, j) <= pivot {
+            a = arr_swap(a, i, j);
+            i = i + 1;
+        }
+        j = j + 1;
+    }
+    // Place pivot in its final position
+    a = arr_swap(a, i, hi - 1);
+    PartResult { arr: a, pivot_idx: i }
+}
+
+// =============================================================================
+// Quicksort (recursive)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn quicksort(arr: Arr8, lo: Int, hi: Int) -> Arr8 {
+    if hi - lo <= 1 {
+        arr
+    } else {
+        let pr = lomuto_partition(arr, lo, hi);
+        let left_sorted = quicksort(pr.arr, lo, pr.pivot_idx);
+        quicksort(left_sorted, pr.pivot_idx + 1, hi)
+    }
+}
+
+fn sort8(arr: Arr8) -> Arr8 {
+    quicksort(arr, 0, 8)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_reverse_order() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 8);
+    a = arr_set(a, 1, 7);
+    a = arr_set(a, 2, 6);
+    a = arr_set(a, 3, 5);
+    a = arr_set(a, 4, 4);
+    a = arr_set(a, 5, 3);
+    a = arr_set(a, 6, 2);
+    a = arr_set(a, 7, 1);
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 7), 8);
+}
+
+fn test_already_sorted() {
+    let mut a = arr_new();
+    let mut i = 0;
+    while i < 8 {
+        a = arr_set(a, i, i + 1);
+        i = i + 1;
+    }
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 7), 8);
+}
+
+fn test_random_permutation() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 5);
+    a = arr_set(a, 1, 2);
+    a = arr_set(a, 2, 8);
+    a = arr_set(a, 3, 1);
+    a = arr_set(a, 4, 9);
+    a = arr_set(a, 5, 3);
+    a = arr_set(a, 6, 7);
+    a = arr_set(a, 7, 4);
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 1), 2);
+    assert_eq(arr_get(s, 2), 3);
+    assert_eq(arr_get(s, 3), 4);
+    assert_eq(arr_get(s, 4), 5);
+    assert_eq(arr_get(s, 5), 7);
+    assert_eq(arr_get(s, 6), 8);
+    assert_eq(arr_get(s, 7), 9);
+}
+
+fn test_duplicates() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 3);
+    a = arr_set(a, 1, 1);
+    a = arr_set(a, 2, 4);
+    a = arr_set(a, 3, 1);
+    a = arr_set(a, 4, 5);
+    a = arr_set(a, 5, 9);
+    a = arr_set(a, 6, 2);
+    a = arr_set(a, 7, 6);
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), 1);
+    assert_eq(arr_get(s, 1), 1);
+}
+
+fn test_all_same() {
+    let mut a = arr_new();
+    let mut i = 0;
+    while i < 8 {
+        a = arr_set(a, i, 7);
+        i = i + 1;
+    }
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(arr_get(s, j), 7);
+        j = j + 1;
+    }
+}
+
+fn test_negatives() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, -10);
+    a = arr_set(a, 1, 5);
+    a = arr_set(a, 2, -3);
+    a = arr_set(a, 3, 0);
+    a = arr_set(a, 4, 7);
+    a = arr_set(a, 5, -1);
+    a = arr_set(a, 6, 4);
+    a = arr_set(a, 7, -6);
+    let s = sort8(a);
+    assert(is_sorted(s, 0, 8));
+    assert_eq(arr_get(s, 0), -10);
+    assert_eq(arr_get(s, 1), -6);
+    assert_eq(arr_get(s, 2), -3);
+    assert_eq(arr_get(s, 3), -1);
+    assert_eq(arr_get(s, 4), 0);
+    assert_eq(arr_get(s, 5), 4);
+    assert_eq(arr_get(s, 6), 5);
+    assert_eq(arr_get(s, 7), 7);
+}
+
+fn test_two_elements() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 5);
+    a = arr_set(a, 1, 2);
+    // Sort only first 2 elements
+    let s = quicksort(a, 0, 2);
+    assert_eq(arr_get(s, 0), 2);
+    assert_eq(arr_get(s, 1), 5);
+}
+
+fn test_partition_correctness() {
+    let mut a = arr_new();
+    a = arr_set(a, 0, 5);
+    a = arr_set(a, 1, 2);
+    a = arr_set(a, 2, 8);
+    a = arr_set(a, 3, 1);
+    a = arr_set(a, 4, 9);
+    a = arr_set(a, 5, 3);
+    a = arr_set(a, 6, 7);
+    a = arr_set(a, 7, 4);
+    // Pivot is arr[7]=4
+    let pr = lomuto_partition(a, 0, 8);
+    let pivot = arr_get(pr.arr, pr.pivot_idx);
+    assert_eq(pivot, 4);
+    // Everything left of pivot_idx should be <= 4
+    let mut i = 0;
+    while i < pr.pivot_idx {
+        assert(arr_get(pr.arr, i) <= 4);
+        i = i + 1;
+    }
+    // Everything right of pivot_idx should be > 4
+    let mut j = pr.pivot_idx + 1;
+    while j < 8 {
+        assert(arr_get(pr.arr, j) > 4);
+        j = j + 1;
+    }
+}
+
+fn main() -> Int {
+    test_reverse_order();
+    test_already_sorted();
+    test_random_permutation();
+    test_duplicates();
+    test_all_same();
+    test_negatives();
+    test_two_elements();
+    test_partition_correctness();
+    print("[OK] 242_interp_quicksort");
+    0
+}

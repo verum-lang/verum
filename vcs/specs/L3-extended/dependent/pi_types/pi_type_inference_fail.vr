@@ -1,0 +1,48 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, pi-types, type-inference, error
+// @expected-error: E400 "Type mismatch"
+
+/// Pi type inference failures
+///
+/// These tests verify that type inference correctly identifies
+/// type mismatches even when types are inferred.
+
+/// Sized array type
+type SizedArray<T, N: meta Int> is {
+    data: [T; N],
+};
+
+/// ERROR: Inferred return type conflicts with explicit annotation
+fn inference_conflict<T>(x: T) -> SizedArray<T, 10> {
+    // Constructing a 3-element array but claiming 10
+    SizedArray { data: [x, x, x] }  // ERROR: [T; 3] != [T; 10]
+}
+
+/// ERROR: Pattern matching with inconsistent types
+fn match_wrong(opt: Maybe<Int>) -> Text {
+    match opt {
+        Some(x) => x,      // ERROR: Int != Text
+        None => "nothing",
+    }
+}
+
+/// ERROR: Closure inference with wrong return type
+fn closure_wrong() -> fn(Int) -> Text {
+    |x: Int| x * 2  // ERROR: Int != Text
+}
+
+/// ERROR: Higher-order inference propagation failure
+fn map_wrong<T, U>(xs: List<T>, f: fn(T) -> U) -> List<Int> {
+    // Map returns List<U>, not List<Int> when U != Int
+    xs.map(f)  // ERROR when U != Int
+}
+
+fn main() {
+    // These should fail type checking
+    let _ = inference_conflict(0);
+    let _ = match_wrong(Some(42));
+    let _: Text = closure_wrong()(5);  // Int != Text
+    let _: List<Int> = map_wrong([1, 2, 3], |x| f"value: {x}");
+}

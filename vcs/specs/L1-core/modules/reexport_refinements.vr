@@ -1,0 +1,76 @@
+// @test: parse-pass
+// @tier: all
+// @level: L1
+// @tags: modules, re-exports, refinement, types
+
+/// Re-exported types preserve their refinements (Spec Section 14.5).
+/// When refined types are re-exported, all refinement predicates are preserved.
+
+module core {
+    pub module internal {
+        pub module validation {
+            // Refined type with predicate
+            pub type PositiveInt is Int;
+
+            pub type BoundedString is Text;
+
+            pub type ValidPort is Int;
+
+            // Predicate for reuse
+            pub fn is_positive(n: Int) -> Bool {
+                n > 0
+            }
+
+            pub fn is_valid_port(port: Int) -> Bool {
+                port > 0 && port <= 65535
+            }
+        }
+    }
+}
+
+module core_exports {
+    // Re-export with refinements preserved
+    pub mount core.internal.validation.PositiveInt;
+    pub mount core.internal.validation.BoundedString;
+    pub mount core.internal.validation.ValidPort;
+    pub mount core.internal.validation.is_positive;
+    pub mount core.internal.validation.is_valid_port;
+
+    // Create type alias
+    pub type Port is ValidPort;
+}
+
+// Library root level re-exports
+pub mount core_exports.{Port, PositiveInt, BoundedString};
+pub mount core_exports.is_positive;
+
+module consumer {
+    mount cog.{Port, PositiveInt};
+    mount cog.is_positive;
+
+    pub fn connect(port: Port) {
+        print(f"Connecting to port: {port}");
+    }
+
+    pub fn create_items(count: PositiveInt) {
+        for i in 0..count {
+            print(f"Creating item {i}");
+        }
+    }
+
+    pub fn validate_and_process(n: Int) -> Result<(), Error> {
+        if is_positive(n) {
+            let validated: PositiveInt = n;
+            create_items(validated);
+            Result.Ok(())
+        } else {
+            Result.Err(Error.Invalid)
+        }
+    }
+
+    pub type Error is Invalid;
+}
+
+fn main() -> Int {
+    0
+}

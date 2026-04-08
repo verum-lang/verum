@@ -1,0 +1,156 @@
+// =============================================================================
+// result_default_test.vr - Tests for Result.unwrap_or_default
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, base, result, default
+// @description: Tests for Result.unwrap_or_default() with various types.
+// =============================================================================
+
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// SECTION 1: unwrap_or_default - Int
+// =============================================================================
+
+@test
+fn test_unwrap_or_default_ok_int() {
+    let r: Result<Int, Text> = Ok(42);
+    assert_eq(r.unwrap_or_default(), 42);
+}
+
+@test
+fn test_unwrap_or_default_err_int() {
+    let r: Result<Int, Text> = Err("error");
+    assert_eq(r.unwrap_or_default(), 0);  // Int default is 0
+}
+
+// =============================================================================
+// SECTION 2: unwrap_or_default - Bool
+// =============================================================================
+
+@test
+fn test_unwrap_or_default_ok_bool() {
+    let r: Result<Bool, Text> = Ok(true);
+    assert_eq(r.unwrap_or_default(), true);
+}
+
+@test
+fn test_unwrap_or_default_err_bool() {
+    let r: Result<Bool, Text> = Err("error");
+    assert_eq(r.unwrap_or_default(), false);
+}
+
+// =============================================================================
+// SECTION 3: unwrap_or_default - Float
+// =============================================================================
+
+@test
+fn test_unwrap_or_default_ok_float() {
+    let r: Result<Float, Text> = Ok(3.14);
+    let val: Float = r.unwrap_or_default();
+    assert(val > 3.0);
+}
+
+@test
+fn test_unwrap_or_default_err_float() {
+    let r: Result<Float, Text> = Err("error");
+    let val: Float = r.unwrap_or_default();
+    assert_eq(val, 0.0);
+}
+
+// =============================================================================
+// SECTION 4: unwrap_or_default - Text
+// =============================================================================
+
+@test
+fn test_unwrap_or_default_ok_text() {
+    let r: Result<Text, Int> = Ok("hello");
+    assert_eq(r.unwrap_or_default(), "hello");
+}
+
+@test
+fn test_unwrap_or_default_err_text() {
+    let r: Result<Text, Int> = Err(404);
+    assert_eq(r.unwrap_or_default(), "");
+}
+
+// =============================================================================
+// SECTION 5: unwrap_or_default after transformations
+// =============================================================================
+
+@test
+fn test_unwrap_or_default_after_map() {
+    let r: Result<Int, Text> = Ok(5);
+    let mapped: Result<Int, Text> = r.map(|x| x * 2);
+    assert_eq(mapped.unwrap_or_default(), 10);
+}
+
+@test
+fn test_unwrap_or_default_after_map_err() {
+    let r: Result<Int, Text> = Err("error");
+    let mapped: Result<Int, Text> = r.map(|x| x * 2);
+    assert_eq(mapped.unwrap_or_default(), 0);
+}
+
+@test
+fn test_unwrap_or_default_after_and_then_ok() {
+    let r: Result<Int, Text> = Ok(10);
+    let chained: Result<Int, Text> = r.and_then(|x| Ok(x + 5));
+    assert_eq(chained.unwrap_or_default(), 15);
+}
+
+@test
+fn test_unwrap_or_default_after_and_then_err() {
+    let r: Result<Int, Text> = Ok(10);
+    let chained: Result<Int, Text> = r.and_then(|_x| Err("failed"));
+    assert_eq(chained.unwrap_or_default(), 0);
+}
+
+@test
+fn test_unwrap_or_default_after_or_else() {
+    let r: Result<Int, Text> = Err("error");
+    let recovered: Result<Int, Text> = r.or_else(|_e| Ok(99));
+    assert_eq(recovered.unwrap_or_default(), 99);
+}
+
+// =============================================================================
+// SECTION 7: Default for Result<T, E>
+// =============================================================================
+
+@test
+fn test_result_default_int() {
+    let r: Result<Int, Text> = Result.default();
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 0);
+}
+
+@test
+fn test_result_default_bool() {
+    let r: Result<Bool, Text> = Result.default();
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), false);
+}
+
+@test
+fn test_result_default_float() {
+    let r: Result<Float, Text> = Result.default();
+    assert(r.is_ok());
+    let val: Float = r.unwrap();
+    assert_eq(val, 0.0);
+}
+
+@test
+fn test_result_default_is_ok() {
+    let r: Result<Int, Int> = Result.default();
+    assert(r.is_ok());
+    assert(!r.is_err());
+}
+
+@test
+fn test_result_default_unwrap_or() {
+    let r: Result<Int, Text> = Result.default();
+    // Since default is Ok(0), unwrap_or should return 0 not the fallback
+    assert_eq(r.unwrap_or(42), 0);
+}

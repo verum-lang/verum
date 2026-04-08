@@ -1,0 +1,123 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, spawn, await, futures
+// @expected-exit: 0
+
+// Test: async spawn/await patterns, future composition.
+
+fn fib(n: Int) -> Int {
+    if (n <= 1) { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while (i <= n) {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    b
+}
+
+fn matrix_trace(size: Int) -> Int {
+    // Compute trace of size x size identity matrix (= size)
+    let mut trace = 0;
+    let mut i = 0;
+    while (i < size) {
+        trace = trace + 1;
+        i = i + 1;
+    }
+    trace
+}
+
+fn collatz_steps(mut n: Int) -> Int {
+    let mut steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    steps
+}
+
+fn main() -> Int {
+    // Test 1: spawn compute-heavy tasks
+    let t1 = spawn fib(30);
+    let t2 = spawn fib(35);
+    let t3 = spawn fib(25);
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+
+    if (r1 != 832040) {
+        print(f"FAIL test1: fib(30)={r1}");
+        return 1;
+    }
+    if (r2 != 9227465) {
+        print(f"FAIL test1: fib(35)={r2}");
+        return 1;
+    }
+    if (r3 != 75025) {
+        print(f"FAIL test1: fib(25)={r3}");
+        return 1;
+    }
+
+    // Test 2: spawn + collect pattern (map-reduce)
+    let w1 = spawn collatz_steps(27);
+    let w2 = spawn collatz_steps(871);
+    let w3 = spawn collatz_steps(6171);
+    let w4 = spawn collatz_steps(77031);
+
+    let s1 = w1.await;
+    let s2 = w2.await;
+    let s3 = w3.await;
+    let s4 = w4.await;
+
+    let total_steps = s1 + s2 + s3 + s4;
+    // Collatz(27)=111, Collatz(871)=178, Collatz(6171)=261, Collatz(77031)=350
+    if (s1 != 111) {
+        print(f"FAIL test2: collatz(27)={s1}");
+        return 1;
+    }
+    if (s2 != 178) {
+        print(f"FAIL test2: collatz(871)={s2}");
+        return 1;
+    }
+
+    // Test 3: chain spawns (sequential async)
+    let a = spawn matrix_trace(100);
+    let ra = a.await;
+    let b = spawn matrix_trace(ra + 50);
+    let rb = b.await;
+    // trace(100)=100, trace(150)=150
+    if (rb != 150) {
+        print(f"FAIL test3: chained result={rb}");
+        return 1;
+    }
+
+    // Test 4: many concurrent tasks
+    let mut handles = [0, 0, 0, 0, 0, 0, 0, 0];
+    let f1 = spawn fib(10);
+    let f2 = spawn fib(11);
+    let f3 = spawn fib(12);
+    let f4 = spawn fib(13);
+    let f5 = spawn fib(14);
+    let f6 = spawn fib(15);
+    let f7 = spawn fib(16);
+    let f8 = spawn fib(17);
+
+    let sum_fibs = f1.await + f2.await + f3.await + f4.await + f5.await + f6.await + f7.await + f8.await;
+    // fib(10..17) = 55+89+144+233+377+610+987+1597 = 4092
+    if (sum_fibs != 4092) {
+        print(f"FAIL test4: sum_fibs={sum_fibs}");
+        return 1;
+    }
+
+    print("893_async_spawn_await: PASS");
+    0
+}

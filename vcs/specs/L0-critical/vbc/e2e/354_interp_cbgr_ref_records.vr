@@ -1,0 +1,328 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, records, references
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: CBGR references to record types.
+// Tests taking references to records, dereferencing and accessing fields,
+// mutable record references, and modifying record fields through refs.
+
+// =============================================================================
+// Type definitions
+// =============================================================================
+
+type Point2D is { x: Int, y: Int };
+type Point3D is { x: Int, y: Int, z: Int };
+type Rect is { origin: Point2D, width: Int, height: Int };
+type Color is { r: Int, g: Int, b: Int };
+type ColoredPoint is { pos: Point2D, col: Color };
+
+// =============================================================================
+// Functions taking record references
+// =============================================================================
+
+fn point2d_sum(p: &Point2D) -> Int {
+    (*p).x + (*p).y
+}
+
+fn point2d_product(p: &Point2D) -> Int {
+    (*p).x * (*p).y
+}
+
+fn point3d_magnitude_sq(p: &Point3D) -> Int {
+    (*p).x * (*p).x + (*p).y * (*p).y + (*p).z * (*p).z
+}
+
+fn rect_area(r: &Rect) -> Int {
+    (*r).width * (*r).height
+}
+
+fn rect_perimeter(r: &Rect) -> Int {
+    2 * ((*r).width + (*r).height)
+}
+
+fn color_brightness(c: &Color) -> Int {
+    (*c).r + (*c).g + (*c).b
+}
+
+fn points_distance_sq(a: &Point2D, b: &Point2D) -> Int {
+    let dx = (*a).x - (*b).x;
+    let dy = (*a).y - (*b).y;
+    dx * dx + dy * dy
+}
+
+// =============================================================================
+// Test: Basic record reference and dereference
+// =============================================================================
+
+fn test_ref_point2d() {
+    let p = Point2D { x: 3, y: 4 };
+    let r = &p;
+    assert_eq((*r).x, 3);
+    assert_eq((*r).y, 4);
+}
+
+fn test_ref_point3d() {
+    let p = Point3D { x: 1, y: 2, z: 3 };
+    let r = &p;
+    assert_eq((*r).x, 1);
+    assert_eq((*r).y, 2);
+    assert_eq((*r).z, 3);
+}
+
+fn test_ref_color() {
+    let c = Color { r: 255, g: 128, b: 0 };
+    let rc = &c;
+    assert_eq((*rc).r, 255);
+    assert_eq((*rc).g, 128);
+    assert_eq((*rc).b, 0);
+}
+
+// =============================================================================
+// Test: Pass record reference to function
+// =============================================================================
+
+fn test_point2d_sum_via_ref() {
+    let p = Point2D { x: 10, y: 20 };
+    assert_eq(point2d_sum(&p), 30);
+}
+
+fn test_point2d_product_via_ref() {
+    let p = Point2D { x: 6, y: 7 };
+    assert_eq(point2d_product(&p), 42);
+}
+
+fn test_point3d_magnitude() {
+    let p = Point3D { x: 1, y: 2, z: 2 };
+    // 1 + 4 + 4 = 9
+    assert_eq(point3d_magnitude_sq(&p), 9);
+}
+
+fn test_rect_area_via_ref() {
+    let r = Rect { origin: Point2D { x: 0, y: 0 }, width: 5, height: 8 };
+    assert_eq(rect_area(&r), 40);
+}
+
+fn test_rect_perimeter_via_ref() {
+    let r = Rect { origin: Point2D { x: 0, y: 0 }, width: 5, height: 8 };
+    assert_eq(rect_perimeter(&r), 26);
+}
+
+fn test_color_brightness_via_ref() {
+    let c = Color { r: 100, g: 150, b: 200 };
+    assert_eq(color_brightness(&c), 450);
+}
+
+// =============================================================================
+// Test: Two record references to function
+// =============================================================================
+
+fn test_distance_between_points() {
+    let p1 = Point2D { x: 0, y: 0 };
+    let p2 = Point2D { x: 3, y: 4 };
+    // (3-0)^2 + (4-0)^2 = 9 + 16 = 25
+    assert_eq(points_distance_sq(&p1, &p2), 25);
+}
+
+fn test_distance_same_point() {
+    let p = Point2D { x: 5, y: 5 };
+    assert_eq(points_distance_sq(&p, &p), 0);
+}
+
+fn test_distance_negative_coords() {
+    let p1 = Point2D { x: -1, y: -1 };
+    let p2 = Point2D { x: 2, y: 3 };
+    // (2-(-1))^2 + (3-(-1))^2 = 9 + 16 = 25
+    assert_eq(points_distance_sq(&p1, &p2), 25);
+}
+
+// =============================================================================
+// Test: Multiple references to same record
+// =============================================================================
+
+fn test_multiple_refs_same_record() {
+    let p = Point2D { x: 7, y: 11 };
+    let r1 = &p;
+    let r2 = &p;
+    let r3 = &p;
+    assert_eq((*r1).x, 7);
+    assert_eq((*r2).x, 7);
+    assert_eq((*r3).y, 11);
+    assert_eq((*r1).x + (*r2).y, 18);
+}
+
+// =============================================================================
+// Test: Mutable references to records
+// =============================================================================
+
+fn test_mut_ref_record() {
+    let mut p = Point2D { x: 0, y: 0 };
+    let r = &mut p;
+    *r = Point2D { x: 10, y: 20 };
+    assert_eq(p.x, 10);
+    assert_eq(p.y, 20);
+}
+
+fn test_mut_ref_record_replace() {
+    let mut p = Point2D { x: 1, y: 2 };
+    let r = &mut p;
+    *r = Point2D { x: 100, y: 200 };
+    assert_eq(p.x, 100);
+    assert_eq(p.y, 200);
+}
+
+fn test_mut_ref_color_replace() {
+    let mut c = Color { r: 0, g: 0, b: 0 };
+    let rc = &mut c;
+    *rc = Color { r: 255, g: 255, b: 255 };
+    assert_eq(c.r, 255);
+    assert_eq(c.g, 255);
+    assert_eq(c.b, 255);
+}
+
+// =============================================================================
+// Test: Sequential record mutations
+// =============================================================================
+
+fn set_point(p: &mut Point2D, nx: Int, ny: Int) {
+    *p = Point2D { x: nx, y: ny };
+}
+
+fn test_sequential_point_mutations() {
+    let mut p = Point2D { x: 0, y: 0 };
+    set_point(&mut p, 1, 1);
+    assert_eq(p.x, 1);
+    assert_eq(p.y, 1);
+    set_point(&mut p, 5, 10);
+    assert_eq(p.x, 5);
+    assert_eq(p.y, 10);
+    set_point(&mut p, -3, -7);
+    assert_eq(p.x, -3);
+    assert_eq(p.y, -7);
+}
+
+// =============================================================================
+// Test: Record references in loops
+// =============================================================================
+
+fn test_record_ref_in_loop() {
+    let mut sum_x = 0;
+    let mut sum_y = 0;
+    let mut i = 0;
+    while i < 5 {
+        let p = Point2D { x: i, y: i * 2 };
+        let r = &p;
+        sum_x = sum_x + (*r).x;
+        sum_y = sum_y + (*r).y;
+        i = i + 1;
+    }
+    // sum_x = 0+1+2+3+4 = 10
+    // sum_y = 0+2+4+6+8 = 20
+    assert_eq(sum_x, 10);
+    assert_eq(sum_y, 20);
+}
+
+// =============================================================================
+// Test: Nested record references
+// =============================================================================
+
+fn test_nested_record_ref() {
+    let r = Rect {
+        origin: Point2D { x: 5, y: 10 },
+        width: 20,
+        height: 30
+    };
+    let rr = &r;
+    assert_eq((*rr).width, 20);
+    assert_eq((*rr).height, 30);
+    assert_eq((*rr).origin.x, 5);
+    assert_eq((*rr).origin.y, 10);
+}
+
+fn test_colored_point_ref() {
+    let cp = ColoredPoint {
+        pos: Point2D { x: 3, y: 4 },
+        col: Color { r: 255, g: 0, b: 128 }
+    };
+    let r = &cp;
+    assert_eq((*r).pos.x, 3);
+    assert_eq((*r).pos.y, 4);
+    assert_eq((*r).col.r, 255);
+    assert_eq((*r).col.g, 0);
+    assert_eq((*r).col.b, 128);
+}
+
+// =============================================================================
+// Test: Record reference field extraction
+// =============================================================================
+
+fn extract_x(p: &Point2D) -> Int {
+    (*p).x
+}
+
+fn extract_y(p: &Point2D) -> Int {
+    (*p).y
+}
+
+fn test_field_extraction_functions() {
+    let p = Point2D { x: 42, y: 99 };
+    assert_eq(extract_x(&p), 42);
+    assert_eq(extract_y(&p), 99);
+}
+
+// =============================================================================
+// Test: Record creation from ref data
+// =============================================================================
+
+fn make_point_from_refs(rx: &Int, ry: &Int) -> Point2D {
+    Point2D { x: *rx, y: *ry }
+}
+
+fn test_create_record_from_refs() {
+    let x = 7;
+    let y = 11;
+    let p = make_point_from_refs(&x, &y);
+    assert_eq(p.x, 7);
+    assert_eq(p.y, 11);
+}
+
+fn test_create_record_chain() {
+    let a = 1;
+    let b = 2;
+    let p1 = make_point_from_refs(&a, &b);
+    let c = p1.x + p1.y;
+    let d = p1.x * p1.y;
+    let p2 = make_point_from_refs(&c, &d);
+    assert_eq(p2.x, 3);
+    assert_eq(p2.y, 2);
+}
+
+fn main() -> Int {
+    test_ref_point2d();
+    test_ref_point3d();
+    test_ref_color();
+    test_point2d_sum_via_ref();
+    test_point2d_product_via_ref();
+    test_point3d_magnitude();
+    test_rect_area_via_ref();
+    test_rect_perimeter_via_ref();
+    test_color_brightness_via_ref();
+    test_distance_between_points();
+    test_distance_same_point();
+    test_distance_negative_coords();
+    test_multiple_refs_same_record();
+    test_mut_ref_record();
+    test_mut_ref_record_replace();
+    test_mut_ref_color_replace();
+    test_sequential_point_mutations();
+    test_record_ref_in_loop();
+    test_nested_record_ref();
+    test_colored_point_ref();
+    test_field_extraction_functions();
+    test_create_record_from_refs();
+    test_create_record_chain();
+    print("[OK] 354_interp_cbgr_ref_records");
+    0
+}

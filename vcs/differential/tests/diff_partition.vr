@@ -1,0 +1,148 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, partition, number, theory
+// @timeout: 10000
+
+// Integer partition counting
+
+// Count number of partitions of n into parts <= max_part
+// Using iterative DP with Arr8 (max n = 7)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Count partitions of n (unrestricted)
+// dp[j] = number of ways to partition j
+fn partition_count(n: Int) -> Int {
+    let mut dp = set8(new_arr8(), 0, 1); // dp[0] = 1
+    let mut part = 1;
+    while part <= n {
+        let mut j = part;
+        while j <= n {
+            dp = set8(dp, j, get8(dp, j) + get8(dp, j - part));
+            j = j + 1;
+        }
+        part = part + 1;
+    }
+    get8(dp, n)
+}
+
+// Count partitions into distinct parts
+fn partition_distinct(n: Int) -> Int {
+    let mut dp = set8(new_arr8(), 0, 1);
+    let mut part = 1;
+    while part <= n {
+        // Process from high to low (like 0/1 knapsack)
+        let mut j = n;
+        while j >= part {
+            dp = set8(dp, j, get8(dp, j) + get8(dp, j - part));
+            j = j - 1;
+        }
+        part = part + 1;
+    }
+    get8(dp, n)
+}
+
+// Count partitions into at most k parts
+// This equals partitions of n with largest part <= k
+fn partition_bounded(n: Int, k: Int) -> Int {
+    let mut dp = set8(new_arr8(), 0, 1);
+    let mut part = 1;
+    while part <= k {
+        let mut j = part;
+        while j <= n {
+            dp = set8(dp, j, get8(dp, j) + get8(dp, j - part));
+            j = j + 1;
+        }
+        part = part + 1;
+    }
+    get8(dp, n)
+}
+
+// Count compositions (ordered partitions) of n
+fn composition_count(n: Int) -> Int {
+    // 2^(n-1) for n >= 1
+    if n == 0 { return 1; }
+    let mut r = 1;
+    let mut i = 0;
+    while i < n - 1 {
+        r = r * 2;
+        i = i + 1;
+    }
+    r
+}
+
+fn test_partitions() -> Int {
+    // p(0)=1, p(1)=1, p(2)=2, p(3)=3, p(4)=5, p(5)=7, p(6)=11, p(7)=15
+    assert_eq(partition_count(0), 1);
+    assert_eq(partition_count(1), 1);
+    assert_eq(partition_count(2), 2);
+    assert_eq(partition_count(3), 3);
+    assert_eq(partition_count(4), 5);
+    assert_eq(partition_count(5), 7);
+    1
+}
+
+fn test_distinct() -> Int {
+    // q(0)=1, q(1)=1, q(2)=1, q(3)=2, q(4)=2, q(5)=3, q(6)=4, q(7)=5
+    assert_eq(partition_distinct(0), 1);
+    assert_eq(partition_distinct(1), 1);
+    assert_eq(partition_distinct(2), 1);
+    assert_eq(partition_distinct(3), 2); // {3}, {2+1}
+    assert_eq(partition_distinct(5), 3); // {5}, {4+1}, {3+2}
+    1
+}
+
+fn test_bounded() -> Int {
+    // Partitions of 5 with parts <= 2: {2+2+1, 2+1+1+1, 1+1+1+1+1} = 3
+    assert_eq(partition_bounded(5, 2), 3);
+    // Partitions of 5 with parts <= 3: {3+2, 3+1+1, 2+2+1, 2+1+1+1, 1+1+1+1+1} = 5
+    assert_eq(partition_bounded(5, 3), 5);
+    1
+}
+
+fn test_compositions() -> Int {
+    assert_eq(composition_count(1), 1);
+    assert_eq(composition_count(2), 2);
+    assert_eq(composition_count(3), 4);
+    assert_eq(composition_count(4), 8);
+    1
+}
+
+fn main() -> Int {
+    test_partitions();
+    test_distinct();
+    test_bounded();
+    test_compositions();
+    print("DIFF_OK: partition");
+    0
+}

@@ -1,0 +1,433 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, loops, for, while
+// @description: Test loop expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// INFINITE LOOP (Section 2.12 - infinite_loop)
+// =============================================================================
+
+fn test_infinite_loop() {
+    loop {
+        do_work();
+    }
+
+    loop {
+        if done {
+            break;
+        }
+        continue_work();
+    }
+}
+
+fn test_loop_with_break_value() {
+    let result = loop {
+        let value = compute();
+        if value > threshold {
+            break value;
+        }
+    };
+
+    let found = loop {
+        if let Some(item) = search() {
+            break item;
+        }
+    };
+}
+
+fn test_nested_loops() {
+    loop {
+        loop {
+            if inner_done {
+                break;
+            }
+        }
+        if outer_done {
+            break;
+        }
+    };
+}
+
+// =============================================================================
+// WHILE LOOP (Section 2.12 - while_loop)
+// =============================================================================
+
+fn test_basic_while() {
+    while condition {
+        do_work();
+    }
+
+    while x > 0 {
+        x -= 1;
+    }
+
+    while items.has_next() {
+        process(items.next());
+    }
+}
+
+fn test_while_with_complex_condition() {
+    while a > 0 && b < 100 {
+        process();
+    }
+
+    while is_valid(state) || has_fallback {
+        iterate();
+    }
+
+    while !done && attempts < max_attempts {
+        try_again();
+    }
+}
+
+fn test_while_with_method_calls() {
+    while iterator.has_next() {
+        let item = iterator.next();
+        process(item);
+    }
+
+    while queue.is_not_empty() {
+        let task = queue.dequeue();
+        execute(task);
+    }
+}
+
+// =============================================================================
+// WHILE LOOP WITH ANNOTATIONS (Section 2.12 - loop_annotation)
+// =============================================================================
+
+fn test_while_with_invariant() {
+    while x > 0
+        invariant x >= 0
+    {
+        x -= 1;
+    }
+
+    while i < n
+        invariant 0 <= i && i <= n
+    {
+        process(arr[i]);
+        i += 1;
+    }
+}
+
+fn test_while_with_decreases() {
+    while x > 0
+        decreases x
+    {
+        x -= 1;
+    }
+
+    while fuel > 0
+        decreases fuel
+    {
+        do_step();
+        fuel -= 1;
+    }
+}
+
+fn test_while_with_both_annotations() {
+    while i < n
+        invariant 0 <= i && i <= n
+        decreases n - i
+    {
+        process(i);
+        i += 1;
+    }
+
+    while x > 0 && y > 0
+        invariant x >= 0 && y >= 0
+        decreases x + y
+    {
+        if x > y {
+            x -= 1;
+        } else {
+            y -= 1;
+        }
+    }
+}
+
+// =============================================================================
+// FOR LOOP (Section 2.12 - for_loop)
+// =============================================================================
+
+fn test_basic_for() {
+    for item in items {
+        process(item);
+    }
+
+    for x in collection {
+        transform(x);
+    }
+
+    for element in array {
+        consume(element);
+    }
+}
+
+fn test_for_with_ranges() {
+    for i in 0..10 {
+        print(i);
+    }
+
+    for i in 0..=10 {
+        print(i);
+    }
+
+    for i in start..end {
+        process(i);
+    }
+}
+
+fn test_for_with_pattern() {
+    for (key, value) in map {
+        store(key, value);
+    }
+
+    for (index, item) in items.enumerate() {
+        print(f"{index}: {item}");
+    }
+
+    for Point { x, y } in points {
+        draw(x, y);
+    }
+
+    for Some(value) in maybe_values {
+        process(value);
+    }
+}
+
+fn test_for_with_reference_pattern() {
+    for &item in &items {
+        read(item);
+    }
+
+    for &mut item in &mut items {
+        modify(item);
+    }
+}
+
+fn test_for_with_method_chains() {
+    for item in items.iter() {
+        process(item);
+    }
+
+    for item in items.iter().filter(|x| x > 0) {
+        positive(item);
+    }
+
+    for item in items.iter().map(|x| x * 2).take(10) {
+        process(item);
+    }
+}
+
+// =============================================================================
+// FOR LOOP WITH ANNOTATIONS
+// =============================================================================
+
+fn test_for_with_invariant() {
+    for i in 0..n
+        invariant sum == i * (i - 1) / 2
+    {
+        sum += i;
+    }
+}
+
+fn test_for_with_decreases() {
+    for item in items
+        decreases items.len() - i
+    {
+        process(item);
+    }
+}
+
+fn test_for_with_both_annotations() {
+    for i in 0..n
+        invariant 0 <= i && i <= n
+        decreases n - i
+    {
+        process(arr[i]);
+    }
+}
+
+// =============================================================================
+// FOR AWAIT LOOP (Section 2.12 - for_await_loop)
+// =============================================================================
+
+fn test_for_await() {
+    for await item in async_stream {
+        handle(item);
+    }
+
+    for await response in fetch_all() {
+        process(response);
+    }
+
+    for await message in channel.receive_all() {
+        handle_message(message);
+    }
+}
+
+fn test_for_await_with_pattern() {
+    for await (id, data) in async_pairs {
+        store(id, data);
+    }
+
+    for await Ok(result) in stream_results {
+        use_result(result);
+    }
+}
+
+fn test_for_await_with_annotations() {
+    for await item in stream
+        invariant processed < limit
+    {
+        process(item);
+        processed += 1;
+    }
+}
+
+// =============================================================================
+// NESTED LOOPS
+// =============================================================================
+
+fn test_nested_for_loops() {
+    for i in 0..rows {
+        for j in 0..cols {
+            matrix[i][j] = compute(i, j);
+        }
+    }
+}
+
+fn test_nested_while_for() {
+    while has_batch {
+        for item in current_batch {
+            process(item);
+        }
+        load_next_batch();
+    }
+}
+
+fn test_nested_for_while() {
+    for config in configs {
+        while !config.done {
+            config.step();
+        }
+    }
+}
+
+fn test_deeply_nested() {
+    for x in xs {
+        for y in ys {
+            while condition {
+                loop {
+                    if done {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// LOOPS WITH CONTROL FLOW
+// =============================================================================
+
+fn test_loop_break() {
+    for item in items {
+        if should_stop(item) {
+            break;
+        }
+        process(item);
+    }
+}
+
+fn test_loop_continue() {
+    for item in items {
+        if should_skip(item) {
+            continue;
+        }
+        process(item);
+    }
+}
+
+fn test_loop_break_with_value() {
+    let found = loop {
+        let candidate = next_candidate();
+        if matches(candidate) {
+            break candidate;
+        }
+    };
+
+    let result = loop {
+        match try_operation() {
+            Ok(v) => break v,
+            Err(_) => continue
+        }
+    };
+}
+
+// =============================================================================
+// LOOPS AS EXPRESSIONS
+// =============================================================================
+
+fn test_loop_as_expression() {
+    let result = loop {
+        if condition {
+            break value;
+        }
+    };
+
+    // For loops don't return values directly (unit type)
+    let _: () = for item in items {
+        process(item);
+    };
+}
+
+fn test_loop_in_larger_expression() {
+    let doubled = loop {
+        let v = compute();
+        if v > 0 {
+            break v * 2;
+        }
+    };
+
+    let processed = {
+        for item in prep {
+            setup(item);
+        }
+        finalize()
+    };
+}
+
+// =============================================================================
+// COMPLEX LOOP PATTERNS
+// =============================================================================
+
+fn test_complex_for_pattern() {
+    for (i, (key, value)) in map.entries().enumerate() {
+        print(f"{i}: {key} = {value}");
+    }
+
+    for Result { data: Some(inner), .. } in results {
+        process(inner);
+    }
+}
+
+fn test_loop_with_defer() {
+    for item in items {
+        defer cleanup(item);
+        process(item);
+    }
+}
+
+fn test_loop_with_conditional() {
+    for item in items {
+        if let Some(value) = item.get_value() {
+            if value > threshold {
+                process(value);
+            }
+        }
+    }
+}

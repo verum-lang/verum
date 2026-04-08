@@ -1,0 +1,282 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, arithmetic, checked-signed
+// @timeout: 10000
+
+/// Tests checked add/sub/mul overflow detection with signed integers.
+/// Verifies that overflow flags and wrapped results are identical across tiers.
+
+fn main() {
+    test_checked_add_boundaries();
+    test_checked_sub_boundaries();
+    test_checked_mul_boundaries();
+    test_overflow_chain();
+    test_manual_overflow_detect();
+}
+
+/// Checked addition near boundaries and with various sign combinations
+fn test_checked_add_boundaries() {
+    println("=== Checked Add Boundaries ===");
+
+    // Small safe additions
+    let pairs = [
+        (0, 0), (1, 1), (-1, 1), (100, 200),
+        (-100, -200), (50, -50), (-50, 50),
+        (1000000, 2000000), (-1000000, -2000000)
+    ];
+
+    let mut i = 0;
+    while i < 9 {
+        let (a, b) = pairs[i];
+        match a.checked_add(b) {
+            Some(result) => println(f"checked_add({a}, {b}) = Some({result})"),
+            None => println(f"checked_add({a}, {b}) = None"),
+        }
+        i = i + 1;
+    }
+
+    // Verify commutativity: a + b == b + a
+    println("commutativity check:");
+    let mut j = 0;
+    while j < 5 {
+        let (a, b) = pairs[j];
+        let ab = a.checked_add(b);
+        let ba = b.checked_add(a);
+        let same = match (ab, ba) {
+            (Some(x), Some(y)) => x == y,
+            (None, None) => true,
+            _ => false,
+        };
+        println(f"  {a} + {b} commutative: {same}");
+        j = j + 1;
+    }
+
+    // Identity: a + 0 == a
+    println("identity check:");
+    let test_vals = [0, 1, -1, 42, -42, 999999];
+    let mut k = 0;
+    while k < 6 {
+        let v = test_vals[k];
+        match v.checked_add(0) {
+            Some(result) => println(f"  {v} + 0 = {result}"),
+            None => println(f"  {v} + 0 = overflow"),
+        }
+        k = k + 1;
+    }
+}
+
+/// Checked subtraction with boundary analysis
+fn test_checked_sub_boundaries() {
+    println("\n=== Checked Sub Boundaries ===");
+
+    let pairs = [
+        (100, 50), (50, 100), (0, 0), (0, 1), (1, 0),
+        (-100, 50), (100, -50), (-100, -50),
+        (1000000, 999999)
+    ];
+
+    let mut i = 0;
+    while i < 9 {
+        let (a, b) = pairs[i];
+        match a.checked_sub(b) {
+            Some(result) => println(f"checked_sub({a}, {b}) = Some({result})"),
+            None => println(f"checked_sub({a}, {b}) = None"),
+        }
+        i = i + 1;
+    }
+
+    // Self-subtraction: a - a == 0
+    println("self-subtraction:");
+    let vals = [0, 1, -1, 42, -1000, 999999];
+    let mut j = 0;
+    while j < 6 {
+        let v = vals[j];
+        match v.checked_sub(v) {
+            Some(result) => println(f"  {v} - {v} = {result}"),
+            None => println(f"  {v} - {v} = overflow"),
+        }
+        j = j + 1;
+    }
+
+    // Subtraction is addition of negation
+    println("sub vs add-neg:");
+    let mut k = 0;
+    while k < 5 {
+        let (a, b) = pairs[k];
+        let sub_result = a.checked_sub(b);
+        let add_neg = a.checked_add(-b);
+        let same = match (sub_result, add_neg) {
+            (Some(x), Some(y)) => x == y,
+            (None, None) => true,
+            _ => false,
+        };
+        println(f"  {a} - {b} == {a} + ({-b}): {same}");
+        k = k + 1;
+    }
+}
+
+/// Checked multiplication with overflow detection
+fn test_checked_mul_boundaries() {
+    println("\n=== Checked Mul Boundaries ===");
+
+    let pairs = [
+        (0, 100), (1, 100), (-1, 100), (100, 100),
+        (10, -10), (-10, -10), (1000, 1000),
+        (100000, 100000), (2, 500000000)
+    ];
+
+    let mut i = 0;
+    while i < 9 {
+        let (a, b) = pairs[i];
+        match a.checked_mul(b) {
+            Some(result) => println(f"checked_mul({a}, {b}) = Some({result})"),
+            None => println(f"checked_mul({a}, {b}) = None"),
+        }
+        i = i + 1;
+    }
+
+    // Multiplication by zero
+    println("zero multiplication:");
+    let vals = [0, 1, -1, 999, -999];
+    let mut j = 0;
+    while j < 5 {
+        let v = vals[j];
+        match v.checked_mul(0) {
+            Some(result) => println(f"  {v} * 0 = {result}"),
+            None => println(f"  {v} * 0 = overflow"),
+        }
+        j = j + 1;
+    }
+
+    // Multiplication by one (identity)
+    println("one multiplication:");
+    let mut k = 0;
+    while k < 5 {
+        let v = vals[k];
+        match v.checked_mul(1) {
+            Some(result) => println(f"  {v} * 1 = {result}"),
+            None => println(f"  {v} * 1 = overflow"),
+        }
+        k = k + 1;
+    }
+
+    // Sign rules: positive*positive, positive*negative, etc.
+    println("sign rules:");
+    println(f"  (+)*(+): {3.checked_mul(4)}");
+    println(f"  (+)*(-): {3.checked_mul(-4)}");
+    println(f"  (-)*(+): {(-3).checked_mul(4)}");
+    println(f"  (-)*(-): {(-3).checked_mul(-4)}");
+}
+
+/// Chain of checked operations: stop on first overflow
+fn test_overflow_chain() {
+    println("\n=== Overflow Chain ===");
+
+    // Accumulate: start with 1, repeatedly multiply by factor
+    fn checked_pow_chain(base: Int, exp: Int) -> Maybe<Int> {
+        let mut result = 1;
+        let mut i = 0;
+        while i < exp {
+            match result.checked_mul(base) {
+                Some(r) => result = r,
+                None => return None,
+            }
+            i = i + 1;
+        }
+        Some(result)
+    }
+
+    // Powers of 2
+    let mut e = 0;
+    while e <= 30 {
+        match checked_pow_chain(2, e) {
+            Some(val) => println(f"2^{e} = {val}"),
+            None => println(f"2^{e} = overflow"),
+        }
+        e = e + 5;
+    }
+
+    // Powers of 10
+    let mut e2 = 0;
+    while e2 <= 18 {
+        match checked_pow_chain(10, e2) {
+            Some(val) => println(f"10^{e2} = {val}"),
+            None => println(f"10^{e2} = overflow"),
+        }
+        e2 = e2 + 3;
+    }
+
+    // Factorial chain
+    fn checked_factorial(n: Int) -> Maybe<Int> {
+        let mut result = 1;
+        let mut i = 2;
+        while i <= n {
+            match result.checked_mul(i) {
+                Some(r) => result = r,
+                None => return None,
+            }
+            i = i + 1;
+        }
+        Some(result)
+    }
+
+    let mut f = 1;
+    while f <= 20 {
+        match checked_factorial(f) {
+            Some(val) => println(f"{f}! = {val}"),
+            None => println(f"{f}! = overflow"),
+        }
+        f = f + 1;
+    }
+}
+
+/// Manual overflow detection using saturating and overflowing ops
+fn test_manual_overflow_detect() {
+    println("\n=== Manual Overflow Detection ===");
+
+    // Compare checked vs saturating vs wrapping for the same operations
+    let pairs = [(100, 50), (-100, -200), (1000000, 1000000), (0, 0)];
+
+    let mut i = 0;
+    while i < 4 {
+        let (a, b) = pairs[i];
+
+        let checked = a.checked_add(b);
+        let saturated = a.saturating_add(b);
+        let (wrapped, overflow) = a.overflowing_add(b);
+
+        let checked_str = match checked {
+            Some(v) => f"Some({v})",
+            None => f"None",
+        };
+
+        println(f"add({a}, {b}): checked={checked_str}, saturated={saturated}, wrapped={wrapped}, overflow={overflow}");
+        i = i + 1;
+    }
+
+    // Division by zero detection
+    println("division by zero:");
+    let dividends = [0, 1, -1, 100, -100];
+    let mut j = 0;
+    while j < 5 {
+        let v = dividends[j];
+        match v.checked_div(0) {
+            Some(result) => println(f"  {v} / 0 = Some({result})"),
+            None => println(f"  {v} / 0 = None"),
+        }
+        j = j + 1;
+    }
+
+    // Remainder by zero
+    println("remainder by zero:");
+    let mut k = 0;
+    while k < 5 {
+        let v = dividends[k];
+        match v.checked_rem(0) {
+            Some(result) => println(f"  {v} % 0 = Some({result})"),
+            None => println(f"  {v} % 0 = None"),
+        }
+        k = k + 1;
+    }
+}

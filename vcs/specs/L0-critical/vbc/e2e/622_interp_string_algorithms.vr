@@ -1,0 +1,149 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, string, algorithms, text
+// @timeout: 50000
+// @expected-exit: 0
+
+// =============================================================================
+// String representation via int array (simulated char codes)
+// =============================================================================
+
+fn test_text_equality() {
+    let a = "hello";
+    let b = "hello";
+    let c = "world";
+    assert_eq(a == b, true);
+    assert_eq(a == c, false);
+    assert_eq(a != c, true);
+    print("  test_text_equality: ok");
+}
+
+fn test_fstring_complex() {
+    let name = "Alice";
+    let age = 30;
+    let msg = f"Name: {name}, Age: {age}";
+    assert_eq(msg, "Name: Alice, Age: 30");
+
+    let x = 100;
+    let y = 200;
+    let coord = f"({x}, {y})";
+    assert_eq(coord, "(100, 200)");
+    print("  test_fstring_complex: ok");
+}
+
+fn test_string_concat_chain() {
+    let parts = "a" + "b" + "c" + "d" + "e";
+    assert_eq(parts, "abcde");
+
+    let hello = "Hello" + ", " + "World" + "!";
+    assert_eq(hello, "Hello, World!");
+    print("  test_string_concat_chain: ok");
+}
+
+// =============================================================================
+// Number to string patterns
+// =============================================================================
+
+fn int_to_str(n: Int) -> Text {
+    f"{n}"
+}
+
+fn test_int_to_string() {
+    assert_eq(int_to_str(0), "0");
+    assert_eq(int_to_str(42), "42");
+    assert_eq(int_to_str(-1), "-1");
+    assert_eq(int_to_str(1000000), "1000000");
+    print("  test_int_to_string: ok");
+}
+
+// =============================================================================
+// String building in loops
+// =============================================================================
+
+fn test_string_accumulation() {
+    let mut result = "";
+    let mut i = 0;
+    while i < 5 {
+        result = result + f"{i}";
+        i = i + 1;
+    }
+    assert_eq(result, "01234");
+    print("  test_string_accumulation: ok");
+}
+
+// =============================================================================
+// Digit counting using integer operations
+// =============================================================================
+
+fn count_digits(n: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut val = if n < 0 { 0 - n } else { n };
+    let mut count = 0;
+    while val > 0 {
+        count = count + 1;
+        val = val / 10;
+    }
+    count
+}
+
+fn test_digit_counting() {
+    assert_eq(count_digits(0), 1);
+    assert_eq(count_digits(5), 1);
+    assert_eq(count_digits(42), 2);
+    assert_eq(count_digits(999), 3);
+    assert_eq(count_digits(10000), 5);
+    assert_eq(count_digits(-42), 2);
+    print("  test_digit_counting: ok");
+}
+
+// =============================================================================
+// Palindrome number check
+// =============================================================================
+
+fn is_palindrome_num(n: Int) -> Bool {
+    if n < 0 { return false; }
+    let mut digits: List<Int> = [];
+    let mut val = n;
+    if val == 0 {
+        digits.push(0);
+    } else {
+        while val > 0 {
+            digits.push(val % 10);
+            val = val / 10;
+        }
+    }
+
+    let mut left = 0;
+    let mut right = digits.len() - 1;
+    while left < right {
+        if digits[left] != digits[right] {
+            return false;
+        }
+        left = left + 1;
+        right = right - 1;
+    }
+    true
+}
+
+fn test_palindrome_number() {
+    assert_eq(is_palindrome_num(121), true);
+    assert_eq(is_palindrome_num(12321), true);
+    assert_eq(is_palindrome_num(123), false);
+    assert_eq(is_palindrome_num(0), true);
+    assert_eq(is_palindrome_num(11), true);
+    assert_eq(is_palindrome_num(-121), false);
+    print("  test_palindrome_number: ok");
+}
+
+fn main() -> Int {
+    test_text_equality();
+    test_fstring_complex();
+    test_string_concat_chain();
+    test_int_to_string();
+    test_string_accumulation();
+    test_digit_counting();
+    test_palindrome_number();
+    print("[OK] 622_interp_string_algorithms");
+    0
+}

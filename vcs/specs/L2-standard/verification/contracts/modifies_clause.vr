@@ -1,0 +1,155 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, contracts, modifies, framing
+// @description: Modifies clause for framing conditions
+
+/// The `modifies` clause specifies which memory locations a function may change.
+/// This enables modular verification by proving frame conditions.
+
+@verify(static)
+fn increment(x: &mut Int) {
+    contract#"
+        modifies x;
+        ensures *x == old(*x) + 1;
+    ";
+    *x += 1;
+}
+
+@verify(static)
+fn swap<T>(a: &mut T, b: &mut T) {
+    contract#"
+        modifies a, b;
+        ensures *a == old(*b);
+        ensures *b == old(*a);
+    ";
+    let tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+/// Modifies on struct fields
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+@verify(static)
+fn translate_x(p: &mut Point, dx: Int) {
+    contract#"
+        modifies p.x;  // Only x field is modified
+        ensures p.x == old(p.x) + dx;
+        ensures p.y == old(p.y);  // Frame condition: y unchanged
+    ";
+    p.x += dx;
+}
+
+@verify(static)
+fn translate(p: &mut Point, dx: Int, dy: Int) {
+    contract#"
+        modifies p.x, p.y;
+        ensures p.x == old(p.x) + dx;
+        ensures p.y == old(p.y) + dy;
+    ";
+    p.x += dx;
+    p.y += dy;
+}
+
+/// Modifies on array elements
+@verify(static)
+fn set_element<T>(arr: &mut List<T>, idx: Int{>= 0}, value: T) {
+    contract#"
+        requires idx < arr.len();
+        modifies arr[idx];
+        ensures arr[idx] == value;
+        ensures forall i: Int => i != idx implies arr[i] == old(arr[i]);
+    ";
+    arr[idx] = value;
+}
+
+@verify(static)
+fn fill<T: Clone>(arr: &mut List<T>, value: T) {
+    contract#"
+        modifies arr[..];  // All elements
+        ensures forall i in 0..arr.len() => arr[i] == value;
+    ";
+    for i in 0..arr.len() {
+        arr[i] = value.clone();
+    }
+}
+
+/// Modifies with slice
+@verify(static)
+fn zero_range(arr: &mut List<Int>, start: Int{>= 0}, end: Int) {
+    contract#"
+        requires start <= end;
+        requires end <= arr.len();
+        modifies arr[start..end];
+        ensures forall i in start..end => arr[i] == 0;
+        ensures forall i in 0..start => arr[i] == old(arr[i]);
+        ensures forall i in end..arr.len() => arr[i] == old(arr[i]);
+    ";
+    for i in start..end {
+        arr[i] = 0;
+    }
+}
+
+/// Nested struct modifications
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+@verify(static)
+fn move_rectangle(r: &mut Rectangle, dx: Int, dy: Int) {
+    contract#"
+        modifies r.top_left, r.bottom_right;
+        ensures r.top_left.x == old(r.top_left.x) + dx;
+        ensures r.top_left.y == old(r.top_left.y) + dy;
+        ensures r.bottom_right.x == old(r.bottom_right.x) + dx;
+        ensures r.bottom_right.y == old(r.bottom_right.y) + dy;
+    ";
+    r.top_left.x += dx;
+    r.top_left.y += dy;
+    r.bottom_right.x += dx;
+    r.bottom_right.y += dy;
+}
+
+/// Conditional modifies
+@verify(static)
+fn maybe_increment(x: &mut Int, should_increment: Bool) {
+    contract#"
+        modifies x if should_increment;
+        ensures should_increment implies *x == old(*x) + 1;
+        ensures !should_increment implies *x == old(*x);
+    ";
+    if should_increment {
+        *x += 1;
+    }
+}
+
+/// Modifies with heap allocation
+@verify(runtime)
+fn resize_list<T: Default>(list: &mut List<T>, new_len: Int{>= 0}) {
+    contract#"
+        modifies list;
+        ensures list.len() == new_len;
+    ";
+    while list.len() < new_len {
+        list.push(T.default());
+    }
+    while list.len() > new_len {
+        list.pop();
+    }
+}
+
+fn main() {
+    let mut x = 5;
+    increment(&mut x);
+    assert(x == 6);
+
+    let mut p = Point { x: 0, y: 0 };
+    translate_x(&mut p, 10);
+    assert(p.x == 10);
+    assert(p.y == 0);  // Frame condition holds
+}

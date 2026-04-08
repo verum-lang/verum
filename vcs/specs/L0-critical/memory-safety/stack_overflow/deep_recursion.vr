@@ -1,0 +1,43 @@
+// @test: run-interpreter
+// @expected-output: "55"
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, stack-overflow, recursion, safe
+// @description: Tests that deep but finite recursion works correctly
+
+// Tail-recursive fibonacci with accumulator
+fn fib_tail(n: Int, a: Int, b: Int) -> Int {
+    if n == 0 {
+        a
+    } else if n == 1 {
+        b
+    } else {
+        fib_tail(n - 1, b, a + b)  // Tail call optimized
+    }
+}
+
+fn fib(n: Int) -> Int {
+    fib_tail(n, 0, 1)
+}
+
+// Deep but bounded recursion
+fn sum_to(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else {
+        n + sum_to(n - 1)
+    }
+}
+
+fn main() {
+    // Test fibonacci
+    assert(fib(10) == 55);
+    print(fib(10));
+
+    // Test moderately deep recursion (sum 1 to 100)
+    assert(sum_to(100) == 5050);
+
+    // Test fibonacci up to the point where Int doesn't overflow
+    // fib(92) is the largest fibonacci that fits in signed 64-bit
+    assert(fib(50) > 0);
+}

@@ -1,0 +1,347 @@
+// =============================================================================
+// list_capacity_test.vr - Tests for List shrink_to and partition_point
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, collections, list, shrink_to, partition_point
+// @description: Tests for List.shrink_to and List.partition_point methods.
+//
+// Coverage:
+// - shrink_to: basic, below length, zero, exact, noop, larger than cap
+// - partition_point: sorted ints, all true, all false, empty, single, boundary
+// =============================================================================
+
+module specs.core.collections.list_capacity_test;
+
+mount core.base.protocols.{Eq, Clone, Ord};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: shrink_to
+// =============================================================================
+
+@test
+fn test_shrink_to_basic() {
+    let mut list: List<Int> = List.with_capacity(100);
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    assert_eq(list.capacity(), 100);
+    list.shrink_to(10);
+    assert(list.capacity() <= 10);
+    assert(list.capacity() >= 3);
+    assert_eq(list.len(), 3);
+    assert_eq(*list.get(0).unwrap(), 1);
+    assert_eq(*list.get(1).unwrap(), 2);
+    assert_eq(*list.get(2).unwrap(), 3);
+}
+
+@test
+fn test_shrink_to_below_length() {
+    let mut list: List<Int> = List.with_capacity(100);
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    // shrink_to with min_capacity < len should shrink to len
+    list.shrink_to(1);
+    assert(list.capacity() >= 3);
+    assert_eq(list.len(), 3);
+}
+
+@test
+fn test_shrink_to_zero_empty() {
+    let mut list: List<Int> = List.with_capacity(50);
+    list.shrink_to(0);
+    assert_eq(list.capacity(), 0);
+    assert_eq(list.len(), 0);
+}
+
+@test
+fn test_shrink_to_exact() {
+    let mut list: List<Int> = List.with_capacity(100);
+    list.push(10);
+    list.push(20);
+    list.push(30);
+    list.push(40);
+    list.push(50);
+    list.shrink_to(5);
+    assert(list.capacity() >= 5);
+    assert_eq(list.len(), 5);
+}
+
+@test
+fn test_shrink_to_noop_when_smaller() {
+    let mut list: List<Int> = List.with_capacity(5);
+    list.push(1);
+    list.push(2);
+    let cap_before = list.capacity();
+    list.shrink_to(100);
+    // Should not grow — noop when target > current capacity
+    assert_eq(list.capacity(), cap_before);
+}
+
+@test
+fn test_shrink_to_preserves_data() {
+    let mut list: List<Int> = List.with_capacity(200);
+    for i in range(0, 10) {
+        list.push(i * 10);
+    }
+    list.shrink_to(15);
+    assert_eq(list.len(), 10);
+    for i in range(0, 10) {
+        assert_eq(*list.get(i).unwrap(), i * 10);
+    }
+}
+
+@test
+fn test_shrink_to_then_push() {
+    let mut list: List<Int> = List.with_capacity(100);
+    list.push(1);
+    list.push(2);
+    list.shrink_to(3);
+    // Can still push after shrink
+    list.push(3);
+    list.push(4);
+    assert_eq(list.len(), 4);
+    assert_eq(*list.get(3).unwrap(), 4);
+}
+
+@test
+fn test_shrink_to_vs_shrink_to_fit() {
+    let mut list1: List<Int> = List.with_capacity(100);
+    let mut list2: List<Int> = List.with_capacity(100);
+    list1.push(1);
+    list1.push(2);
+    list2.push(1);
+    list2.push(2);
+
+    list1.shrink_to_fit();
+    list2.shrink_to(2);
+
+    // Both should have capacity >= 2
+    assert(list1.capacity() >= 2);
+    assert(list2.capacity() >= 2);
+    assert_eq(list1.len(), 2);
+    assert_eq(list2.len(), 2);
+}
+
+// =============================================================================
+// Section 2: partition_point
+// =============================================================================
+
+fn ge_5(x: &Int) -> Bool {
+    *x >= 5
+}
+
+fn ge_0(x: &Int) -> Bool {
+    *x >= 0
+}
+
+fn ge_100(x: &Int) -> Bool {
+    *x >= 100
+}
+
+fn ge_3(x: &Int) -> Bool {
+    *x >= 3
+}
+
+fn ge_1(x: &Int) -> Bool {
+    *x >= 1
+}
+
+fn gt_10(x: &Int) -> Bool {
+    *x > 10
+}
+
+fn is_positive(x: &Int) -> Bool {
+    *x > 0
+}
+
+@test
+fn test_partition_point_basic() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    list.push(5);
+    list.push(7);
+    list.push(9);
+    // Partition point: first element >= 5
+    let idx = list.partition_point(ge_5);
+    assert_eq(idx, 3);
+}
+
+@test
+fn test_partition_point_all_true() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    // All >= 0
+    let idx = list.partition_point(ge_0);
+    assert_eq(idx, 0);
+}
+
+@test
+fn test_partition_point_all_false() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    // None >= 100
+    let idx = list.partition_point(ge_100);
+    assert_eq(idx, 3);
+}
+
+@test
+fn test_partition_point_empty() {
+    let list: List<Int> = List.new();
+    let idx = list.partition_point(ge_5);
+    assert_eq(idx, 0);
+}
+
+@test
+fn test_partition_point_single_true() {
+    let mut list: List<Int> = List.new();
+    list.push(10);
+    let idx = list.partition_point(ge_5);
+    assert_eq(idx, 0);
+}
+
+@test
+fn test_partition_point_single_false() {
+    let mut list: List<Int> = List.new();
+    list.push(2);
+    let idx = list.partition_point(ge_5);
+    assert_eq(idx, 1);
+}
+
+@test
+fn test_partition_point_boundary() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    list.push(4);
+    list.push(5);
+    // First element >= 3
+    let idx = list.partition_point(ge_3);
+    assert_eq(idx, 2);
+}
+
+@test
+fn test_partition_point_first_element() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    // First >= 1
+    let idx = list.partition_point(ge_1);
+    assert_eq(idx, 0);
+}
+
+@test
+fn test_partition_point_last_element() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(5);
+    list.push(10);
+    // First > 10 → none
+    let idx = list.partition_point(gt_10);
+    assert_eq(idx, 3);
+}
+
+@test
+fn test_partition_point_with_negatives() {
+    let mut list: List<Int> = List.new();
+    list.push(-5);
+    list.push(-2);
+    list.push(0);
+    list.push(3);
+    list.push(7);
+    // First > 0
+    let idx = list.partition_point(is_positive);
+    assert_eq(idx, 3);
+}
+
+@test
+fn test_partition_point_two_elements() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(10);
+    let idx = list.partition_point(ge_5);
+    assert_eq(idx, 1);
+}
+
+@test
+fn test_partition_point_consecutive() {
+    let mut list: List<Int> = List.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    list.push(4);
+    list.push(5);
+    list.push(6);
+    list.push(7);
+    list.push(8);
+    list.push(9);
+    list.push(10);
+    let idx = list.partition_point(ge_5);
+    assert_eq(idx, 4);
+}
+
+// =============================================================================
+// Section 3: Integration tests
+// =============================================================================
+
+@test
+fn test_shrink_to_after_many_pops() {
+    let mut list: List<Int> = List.new();
+    for i in range(0, 100) {
+        list.push(i);
+    }
+    // Pop most elements
+    for i in range(0, 95) {
+        list.pop();
+    }
+    assert_eq(list.len(), 5);
+    let cap_before = list.capacity();
+    assert(cap_before > 5);
+    list.shrink_to(10);
+    assert(list.capacity() <= 10);
+    assert_eq(list.len(), 5);
+    assert_eq(*list.get(0).unwrap(), 0);
+    assert_eq(*list.get(4).unwrap(), 4);
+}
+
+fn ge_50(x: &Int) -> Bool {
+    *x >= 50
+}
+
+@test
+fn test_partition_point_for_insertion() {
+    // Use partition_point to find insertion index in sorted list
+    let mut list: List<Int> = List.new();
+    list.push(10);
+    list.push(20);
+    list.push(30);
+    list.push(40);
+    list.push(50);
+    let idx = list.partition_point(ge_50);
+    assert_eq(idx, 4);
+    list.insert(idx, 45);
+    assert_eq(list.len(), 6);
+    assert_eq(*list.get(4).unwrap(), 45);
+    assert_eq(*list.get(5).unwrap(), 50);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

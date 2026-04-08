@@ -1,0 +1,238 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, catalan, combinatorics, ballot-problem
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Catalan numbers:
+// 1. Iterative computation via the recurrence C(n) = sum(C(i)*C(n-1-i))
+// 2. Direct formula C(n) = C(2n,n)/(n+1)
+// 3. Ballot problem: number of valid parenthesizations
+// 4. Monotone lattice paths
+// 5. Triangulation of polygon
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+// Binomial coefficient C(n, k) via multiplicative formula
+fn binom(n: Int, k: Int) -> Int {
+    if k > n { return 0; }
+    let mut kk = k;
+    if kk > n - kk { kk = n - kk; }
+    let mut result = 1;
+    let mut i = 0;
+    while i < kk {
+        result = result * (n - i) / (i + 1);
+        i = i + 1;
+    }
+    result
+}
+
+// Catalan via formula: C(n) = C(2n, n) / (n+1)
+fn catalan_formula(n: Int) -> Int {
+    binom(2 * n, n) / (n + 1)
+}
+
+// Catalan via recurrence: C(0)=1, C(n) = sum_{i=0}^{n-1} C(i)*C(n-1-i)
+// Uses DP table stored in Arr8 (supports n up to 7)
+fn catalan_recurrence(n: Int) -> Int {
+    let mut dp = Arr8 { a0: 1, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let mut k = 1;
+    while k <= n {
+        let mut sum = 0;
+        let mut i = 0;
+        while i < k {
+            sum = sum + a8_get(dp, i) * a8_get(dp, k - 1 - i);
+            i = i + 1;
+        }
+        dp = a8_set(dp, k, sum);
+        k = k + 1;
+    }
+    a8_get(dp, n)
+}
+
+// Catalan via the ratio: C(n) = C(n-1) * 2*(2n-1) / (n+1)
+fn catalan_ratio(n: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut c = 1;
+    let mut k = 1;
+    while k <= n {
+        c = c * 2 * (2 * k - 1) / (k + 1);
+        k = k + 1;
+    }
+    c
+}
+
+// Count valid parenthesizations of n pairs using ballot-style DP
+// dp[open][close] = number of ways, but we use a simpler approach:
+// Count monotone paths from (0,0) to (n,n) staying below diagonal
+// Equivalent: sequences of n opens and n closes where prefix opens >= prefix closes
+fn count_valid_parens(n: Int) -> Int {
+    // Use the reflection principle: C(2n, n) - C(2n, n+1) = Catalan(n)
+    binom(2 * n, n) - binom(2 * n, n + 1)
+}
+
+// Number of ways to triangulate a convex polygon with (n+2) sides = C(n)
+fn triangulations(sides: Int) -> Int {
+    // polygon with s sides has C(s-2) triangulations
+    catalan_formula(sides - 2)
+}
+
+// Number of full binary trees with n+1 leaves = C(n)
+fn full_binary_trees(leaves: Int) -> Int {
+    catalan_formula(leaves - 1)
+}
+
+// Ballot problem: candidate A gets a votes, B gets b votes (a > b).
+// Probability that A is strictly ahead throughout = (a - b) / (a + b).
+// Number of favorable sequences = (a - b) * C(a+b, a) / (a + b)
+// When a = n+1, b = n: favorable = 1 * C(2n+1, n+1) / (2n+1) = C(n)
+fn ballot_sequences(n: Int) -> Int {
+    // A gets n+1 votes, B gets n votes
+    // Number of valid orderings where A always leads
+    binom(2 * n + 1, n + 1) / (2 * n + 1)
+}
+
+fn test_catalan_values() {
+    // Known Catalan numbers: 1, 1, 2, 5, 14, 42, 132, 429
+    assert_eq(catalan_formula(0), 1);
+    assert_eq(catalan_formula(1), 1);
+    assert_eq(catalan_formula(2), 2);
+    assert_eq(catalan_formula(3), 5);
+    assert_eq(catalan_formula(4), 14);
+    assert_eq(catalan_formula(5), 42);
+    assert_eq(catalan_formula(6), 132);
+    assert_eq(catalan_formula(7), 429);
+}
+
+fn test_formula_matches_recurrence() {
+    let mut n = 0;
+    while n <= 7 {
+        assert_eq(catalan_formula(n), catalan_recurrence(n));
+        n = n + 1;
+    }
+}
+
+fn test_formula_matches_ratio() {
+    let mut n = 0;
+    while n <= 7 {
+        assert_eq(catalan_formula(n), catalan_ratio(n));
+        n = n + 1;
+    }
+}
+
+fn test_reflection_principle() {
+    // count_valid_parens uses reflection: C(2n,n) - C(2n,n+1) = Catalan(n)
+    let mut n = 0;
+    while n <= 7 {
+        assert_eq(count_valid_parens(n), catalan_formula(n));
+        n = n + 1;
+    }
+}
+
+fn test_convex_recurrence() {
+    // Catalan recurrence: C(n) = sum C(i)*C(n-1-i)
+    // Verify for C(5) = 42
+    let c0 = catalan_formula(0);
+    let c1 = catalan_formula(1);
+    let c2 = catalan_formula(2);
+    let c3 = catalan_formula(3);
+    let c4 = catalan_formula(4);
+    // C(5) = C(0)*C(4) + C(1)*C(3) + C(2)*C(2) + C(3)*C(1) + C(4)*C(0)
+    //       = 1*14 + 1*5 + 2*2 + 5*1 + 14*1 = 14+5+4+5+14 = 42
+    let sum5 = c0*c4 + c1*c3 + c2*c2 + c3*c1 + c4*c0;
+    assert_eq(sum5, 42);
+}
+
+fn test_triangulations() {
+    // Triangle (3 sides): 1 triangulation = C(1) = 1
+    assert_eq(triangulations(3), 1);
+    // Quadrilateral (4 sides): 2 triangulations = C(2) = 2
+    assert_eq(triangulations(4), 2);
+    // Pentagon (5 sides): 5 triangulations = C(3) = 5
+    assert_eq(triangulations(5), 5);
+    // Hexagon (6 sides): 14 = C(4)
+    assert_eq(triangulations(6), 14);
+    // Heptagon (7 sides): 42 = C(5)
+    assert_eq(triangulations(7), 42);
+}
+
+fn test_full_binary_trees() {
+    // 1 leaf: 1 tree (just the leaf) = C(0) = 1
+    assert_eq(full_binary_trees(1), 1);
+    // 2 leaves: 1 tree = C(1) = 1
+    assert_eq(full_binary_trees(2), 1);
+    // 3 leaves: 2 trees = C(2) = 2
+    assert_eq(full_binary_trees(3), 2);
+    // 4 leaves: 5 trees = C(3) = 5
+    assert_eq(full_binary_trees(4), 5);
+    // 5 leaves: 14 trees = C(4) = 14
+    assert_eq(full_binary_trees(5), 14);
+}
+
+fn test_ballot_problem() {
+    // A gets n+1, B gets n votes. Favorable sequences = C(n).
+    assert_eq(ballot_sequences(0), 1);
+    assert_eq(ballot_sequences(1), 1);
+    assert_eq(ballot_sequences(2), 2);
+    assert_eq(ballot_sequences(3), 5);
+    assert_eq(ballot_sequences(4), 14);
+    assert_eq(ballot_sequences(5), 42);
+}
+
+fn test_catalan_identity_sum() {
+    // Sum identity: C(0) + C(1) + ... + C(n) < C(n+1) for n >= 2
+    // Sum C(0..4) = 1+1+2+5+14 = 23 < C(5) = 42
+    let sum4 = 1 + 1 + 2 + 5 + 14;
+    assert_eq(sum4, 23);
+    assert_eq(catalan_formula(5), 42);
+    assert_eq(sum4 < catalan_formula(5), true);
+}
+
+fn test_hankel_matrix() {
+    // Hankel matrix determinant property:
+    // det([[C(0),C(1)],[C(1),C(2)]]) = C(0)*C(2) - C(1)*C(1) = 1*2 - 1*1 = 1
+    let det2 = catalan_formula(0) * catalan_formula(2) - catalan_formula(1) * catalan_formula(1);
+    assert_eq(det2, 1);
+    // For all n, det of Hankel matrix of Catalan numbers = 1
+    // 3x3: det([[C0,C1,C2],[C1,C2,C3],[C2,C3,C4]])
+    let c0 = 1;
+    let c1_val = 1;
+    let c2_val = 2;
+    let c3_val = 5;
+    let c4_val = 14;
+    // det = c0*(c2*c4 - c3*c3) - c1*(c1*c4 - c3*c2) + c2*(c1*c3 - c2*c2)
+    let det3 = c0*(c2_val*c4_val - c3_val*c3_val) - c1_val*(c1_val*c4_val - c3_val*c2_val) + c2_val*(c1_val*c3_val - c2_val*c2_val);
+    assert_eq(det3, 1);
+}
+
+fn main() -> Int {
+    test_catalan_values();
+    test_formula_matches_recurrence();
+    test_formula_matches_ratio();
+    test_reflection_principle();
+    test_convex_recurrence();
+    test_triangulations();
+    test_full_binary_trees();
+    test_ballot_problem();
+    test_catalan_identity_sum();
+    test_hankel_matrix();
+    print("[OK] 337_catalan_numbers_aot");
+    0
+}

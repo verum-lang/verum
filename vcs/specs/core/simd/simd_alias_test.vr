@@ -1,0 +1,546 @@
+// =============================================================================
+// simd_alias_test.vr - Tests for type alias method resolution
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: simd, type-alias, method-resolution
+// @description: Tests that type alias method resolution works (Task #21)
+// =============================================================================
+
+module specs.core.simd.simd_alias_test;
+
+mount core.simd.{
+    Vec, Mask,
+    Vec4f, Vec2d, Vec4i, Vec2l,
+    Vec8f, Vec4d, Vec8i,
+    Mask4, Mask8, Mask16,
+};
+
+// Define custom type aliases for testing
+type MyVec4 = Vec<Float32, 4>;
+type MyVec2D = Vec<Float64, 2>;
+type MyVec4Int = Vec<Int32, 4>;
+
+@test
+fn test_direct_vec_splat() {
+    let v: Vec<Float32, 4> = Vec.splat(1.0 as Float32);
+    let arr = v.to_array();
+    assert_eq(arr[0], 1.0);
+    print("Direct Vec.splat() test passed");
+}
+
+@test
+fn test_vec4f_alias_splat() {
+    let v = Vec4f.splat(2.0 as Float32);
+    let arr = v.to_array();
+    assert_eq(arr[0], 2.0);
+    print("Vec4f alias splat test passed");
+}
+
+@test
+fn test_custom_alias_splat() {
+    let v = MyVec4.splat(3.0 as Float32);
+    let arr = v.to_array();
+    assert_eq(arr[0], 3.0);
+    print("Custom alias splat test passed");
+}
+
+@test
+fn test_custom_alias_from_array() {
+    let v = MyVec4.from_array([1.0, 2.0, 3.0, 4.0]);
+    let arr = v.to_array();
+    assert_eq(arr[2], 3.0);
+    print("Custom alias from_array test passed");
+}
+
+@test
+fn test_custom_alias_arithmetic() {
+    let a = MyVec4.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = MyVec4.splat(10.0);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], 11.0);
+    assert_eq(result[3], 14.0);
+    print("Custom alias arithmetic test passed");
+}
+
+@test
+fn test_custom_alias_double_from_array() {
+    let v = MyVec2D.from_array([1.5, 2.5]);
+    let arr = v.to_array();
+    assert_eq(arr[0], 1.5);
+    assert_eq(arr[1], 2.5);
+    print("Custom alias double from_array test passed");
+}
+
+@test
+fn test_custom_alias_int_splat() {
+    let v = MyVec4Int.splat(42);
+    let arr = v.to_array();
+    assert_eq(arr[0], 42);
+    assert_eq(arr[3], 42);
+    print("Custom alias int splat test passed");
+}
+
+@test
+fn test_alias_vec4f_reduce() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    assert_eq(v.reduce_add(), 10.0);
+    print("Alias Vec4f reduce test passed");
+}
+
+@test
+fn test_alias_vec4i_reduce() {
+    let v = Vec4i.from_array([10, 20, 30, 40]);
+    assert_eq(v.reduce_add(), 100);
+    print("Alias Vec4i reduce test passed");
+}
+
+@test
+fn test_alias_vec2d_arithmetic() {
+    let a = Vec2d.from_array([1.0, 2.0]);
+    let b = Vec2d.from_array([3.0, 4.0]);
+    let result = a.mul(b).to_array();
+    assert_eq(result[0], 3.0);
+    assert_eq(result[1], 8.0);
+    print("Alias Vec2d arithmetic test passed");
+}
+
+@test
+fn test_alias_vec8f_splat() {
+    let v = Vec8f.splat(5.0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 5.0);
+    assert_eq(arr[7], 5.0);
+    print("Alias Vec8f splat test passed");
+}
+
+@test
+fn test_alias_vec8i_from_array() {
+    let v = Vec8i.from_array([1, 2, 3, 4, 5, 6, 7, 8]);
+    let arr = v.to_array();
+    assert_eq(arr[0], 1);
+    assert_eq(arr[7], 8);
+    print("Alias Vec8i from_array test passed");
+}
+
+@test
+fn test_alias_interop_vec4f_myv4() {
+    // Vec4f and MyVec4 should be interchangeable (both are Vec<Float32, 4>)
+    let a = Vec4f.splat(1.0);
+    let b = MyVec4.splat(2.0);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], 3.0);
+    print("Alias interop Vec4f/MyVec4 test passed");
+}
+
+@test
+fn test_alias_mask4_operations() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    let mask: Mask4 = v.cmp_gt(Vec4f.splat(2.0));
+    assert_eq(mask.count(), 2);
+    print("Alias Mask4 operations test passed");
+}
+
+@test
+fn test_alias_vec4d_splat() {
+    let v = Vec4d.splat(3.14);
+    let arr = v.to_array();
+    assert_eq(arr[0], 3.14);
+    assert_eq(arr[3], 3.14);
+    print("Alias Vec4d splat test passed");
+}
+
+// =============================================================================
+// Section: Custom Alias Sub/Mul/Div
+// =============================================================================
+
+@test
+fn test_custom_alias_sub() {
+    let a = MyVec4.from_array([10.0, 20.0, 30.0, 40.0]);
+    let b = MyVec4.splat(5.0);
+    let result = a.sub(b).to_array();
+    assert_eq(result[0], 5.0);
+    assert_eq(result[3], 35.0);
+}
+
+@test
+fn test_custom_alias_mul() {
+    let a = MyVec4.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = MyVec4.splat(3.0);
+    let result = a.mul(b).to_array();
+    assert_eq(result[0], 3.0);
+    assert_eq(result[3], 12.0);
+}
+
+@test
+fn test_custom_alias_div() {
+    let a = MyVec4.from_array([10.0, 20.0, 30.0, 40.0]);
+    let b = MyVec4.splat(10.0);
+    let result = a.div(b).to_array();
+    assert_eq(result[0], 1.0);
+    assert_eq(result[3], 4.0);
+}
+
+// =============================================================================
+// Section: Custom Alias Reductions
+// =============================================================================
+
+@test
+fn test_custom_alias_reduce_add() {
+    let v = MyVec4.from_array([1.0, 2.0, 3.0, 4.0]);
+    assert_eq(v.reduce_add(), 10.0);
+}
+
+@test
+fn test_custom_alias_reduce_min() {
+    let v = MyVec4.from_array([3.0, 1.0, 4.0, 2.0]);
+    assert_eq(v.reduce_min(), 1.0);
+}
+
+@test
+fn test_custom_alias_reduce_max() {
+    let v = MyVec4.from_array([3.0, 1.0, 4.0, 2.0]);
+    assert_eq(v.reduce_max(), 4.0);
+}
+
+@test
+fn test_custom_alias_int_reduce_add() {
+    let v = MyVec4Int.from_array([10, 20, 30, 40]);
+    assert_eq(v.reduce_add(), 100);
+}
+
+// =============================================================================
+// Section: Custom Alias Unary Operations
+// =============================================================================
+
+@test
+fn test_custom_alias_abs() {
+    let v = MyVec4.from_array([-1.0, -2.0, -3.0, -4.0]);
+    let result = v.abs().to_array();
+    assert_eq(result[0], 1.0);
+    assert_eq(result[3], 4.0);
+}
+
+@test
+fn test_custom_alias_neg() {
+    let v = MyVec4.from_array([1.0, 2.0, 3.0, 4.0]);
+    let result = v.neg().to_array();
+    assert_eq(result[0], -1.0);
+    assert_eq(result[3], -4.0);
+}
+
+// =============================================================================
+// Section: Vec2l Alias Tests
+// =============================================================================
+
+@test
+fn test_alias_vec2l_splat() {
+    let v = Vec2l.splat(123);
+    let arr = v.to_array();
+    assert_eq(arr[0], 123);
+    assert_eq(arr[1], 123);
+}
+
+@test
+fn test_alias_vec2l_from_array() {
+    let v = Vec2l.from_array([100, 200]);
+    let arr = v.to_array();
+    assert_eq(arr[0], 100);
+    assert_eq(arr[1], 200);
+}
+
+@test
+fn test_alias_vec2l_add() {
+    let a = Vec2l.from_array([10, 20]);
+    let b = Vec2l.from_array([30, 40]);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], 40);
+    assert_eq(result[1], 60);
+}
+
+@test
+fn test_alias_vec2l_reduce_add() {
+    let v = Vec2l.from_array([50, 75]);
+    assert_eq(v.reduce_add(), 125);
+}
+
+// =============================================================================
+// Section: 256-bit Alias Operations
+// =============================================================================
+
+@test
+fn test_alias_vec8f_arithmetic() {
+    let a = Vec8f.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let b = Vec8f.splat(10.0);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], 11.0);
+    assert_eq(result[7], 18.0);
+}
+
+@test
+fn test_alias_vec8f_reduce_add() {
+    let v = Vec8f.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    assert_eq(v.reduce_add(), 36.0);
+}
+
+@test
+fn test_alias_vec8i_arithmetic() {
+    let a = Vec8i.from_array([1, 2, 3, 4, 5, 6, 7, 8]);
+    let b = Vec8i.splat(100);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], 101);
+    assert_eq(result[7], 108);
+}
+
+@test
+fn test_alias_vec8i_reduce_add() {
+    let v = Vec8i.from_array([1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq(v.reduce_add(), 36);
+}
+
+@test
+fn test_alias_vec4d_from_array() {
+    let v = Vec4d.from_array([1.0, 2.0, 3.0, 4.0]);
+    let arr = v.to_array();
+    assert_eq(arr[0], 1.0);
+    assert_eq(arr[3], 4.0);
+}
+
+@test
+fn test_alias_vec4d_arithmetic() {
+    let a = Vec4d.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = Vec4d.splat(0.5);
+    let result = a.mul(b).to_array();
+    assert_eq(result[0], 0.5);
+    assert_eq(result[3], 2.0);
+}
+
+// =============================================================================
+// Section: Custom Alias Comparison
+// =============================================================================
+
+@test
+fn test_custom_alias_cmp_gt() {
+    let v = MyVec4.from_array([1.0, 5.0, 3.0, 7.0]);
+    let threshold = MyVec4.splat(4.0);
+    let mask = v.cmp_gt(threshold);
+    assert_eq(mask.count(), 2);  // 5.0 > 4.0 and 7.0 > 4.0
+}
+
+@test
+fn test_custom_alias_cmp_eq() {
+    let a = MyVec4Int.from_array([1, 2, 3, 4]);
+    let b = MyVec4Int.from_array([1, 3, 3, 5]);
+    let mask = a.cmp_eq(b);
+    assert_eq(mask.count(), 2);  // index 0 and 2
+}
+
+// =============================================================================
+// Section: Custom Alias Method Chaining
+// =============================================================================
+
+@test
+fn test_custom_alias_chain_add_mul() {
+    let a = MyVec4.splat(2.0);
+    let b = MyVec4.splat(3.0);
+    let c = MyVec4.splat(10.0);
+    let result = a.add(b).mul(c);
+    assert_eq(result.to_array()[0], 50.0);  // (2+3)*10
+}
+
+@test
+fn test_custom_alias_chain_sub_abs() {
+    let a = MyVec4.splat(1.0);
+    let b = MyVec4.splat(5.0);
+    let result = a.sub(b).abs();
+    assert_eq(result.to_array()[0], 4.0);  // |1-5| = 4
+}
+
+// =============================================================================
+// Section: Custom Alias Min/Max
+// =============================================================================
+
+@test
+fn test_custom_alias_min() {
+    let a = MyVec4.from_array([5.0, 1.0, 8.0, 3.0]);
+    let b = MyVec4.from_array([2.0, 7.0, 4.0, 6.0]);
+    let result = a.min(b).to_array();
+    assert_eq(result[0], 2.0);
+    assert_eq(result[1], 1.0);
+    assert_eq(result[2], 4.0);
+    assert_eq(result[3], 3.0);
+}
+
+@test
+fn test_custom_alias_max() {
+    let a = MyVec4.from_array([5.0, 1.0, 8.0, 3.0]);
+    let b = MyVec4.from_array([2.0, 7.0, 4.0, 6.0]);
+    let result = a.max(b).to_array();
+    assert_eq(result[0], 5.0);
+    assert_eq(result[1], 7.0);
+    assert_eq(result[2], 8.0);
+    assert_eq(result[3], 6.0);
+}
+
+// =============================================================================
+// Section: Additional Alias Tests
+// =============================================================================
+
+@test
+fn test_custom_alias_double_sub() {
+    let a = MyVec2D.from_array([10.0, 20.0]);
+    let b = MyVec2D.from_array([3.0, 7.0]);
+    let result = a.sub(b).to_array();
+    assert_eq(result[0], 7.0);
+    assert_eq(result[1], 13.0);
+}
+
+@test
+fn test_custom_alias_splat_zero() {
+    let v = MyVec4.splat(0.0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 0.0);
+    assert_eq(arr[1], 0.0);
+    assert_eq(arr[2], 0.0);
+    assert_eq(arr[3], 0.0);
+}
+
+@test
+fn test_alias_vec2l_sub() {
+    let a = Vec2l.from_array([100, 200]);
+    let b = Vec2l.from_array([30, 50]);
+    let result = a.sub(b).to_array();
+    assert_eq(result[0], 70);
+    assert_eq(result[1], 150);
+}
+
+@test
+fn test_alias_vec4d_reduce_add() {
+    let v = Vec4d.from_array([1.0, 2.0, 3.0, 4.0]);
+    assert_eq(v.reduce_add(), 10.0);
+}
+
+@test
+fn test_alias_vec8i_reduce_min() {
+    let v = Vec8i.from_array([5, 3, 8, 1, 9, 2, 7, 4]);
+    assert_eq(v.reduce_min(), 1);
+}
+
+@test
+fn test_alias_vec8i_reduce_max() {
+    let v = Vec8i.from_array([5, 3, 8, 1, 9, 2, 7, 4]);
+    assert_eq(v.reduce_max(), 9);
+}
+
+@test
+fn test_alias_vec8f_reduce_min() {
+    let v = Vec8f.from_array([5.0, 3.0, 8.0, 1.0, 9.0, 2.0, 7.0, 4.0]);
+    assert_eq(v.reduce_min(), 1.0);
+}
+
+@test
+fn test_alias_vec8f_reduce_max() {
+    let v = Vec8f.from_array([5.0, 3.0, 8.0, 1.0, 9.0, 2.0, 7.0, 4.0]);
+    assert_eq(v.reduce_max(), 9.0);
+}
+
+@test
+fn test_custom_alias_from_array_round_trip() {
+    let arr = [1.5, 2.5, 3.5, 4.5];
+    let v = MyVec4.from_array(arr);
+    let result = v.to_array();
+    assert_eq(result[0], 1.5);
+    assert_eq(result[1], 2.5);
+    assert_eq(result[2], 3.5);
+    assert_eq(result[3], 4.5);
+}
+
+@test
+fn test_custom_alias_int_from_array_round_trip() {
+    let arr = [10, 20, 30, 40];
+    let v = MyVec4Int.from_array(arr);
+    let result = v.to_array();
+    assert_eq(result[0], 10);
+    assert_eq(result[1], 20);
+    assert_eq(result[2], 30);
+    assert_eq(result[3], 40);
+}
+
+// =============================================================================
+// Additional Alias Tests
+// =============================================================================
+
+@test
+fn test_alias_vec4f_mul() {
+    let a = Vec4f.from_array([2.0, 3.0, 4.0, 5.0]);
+    let b = Vec4f.from_array([10.0, 10.0, 10.0, 10.0]);
+    let result = a.mul(b).to_array();
+    assert_eq(result[0], 20.0);
+    assert_eq(result[1], 30.0);
+    assert_eq(result[2], 40.0);
+    assert_eq(result[3], 50.0);
+}
+
+@test
+fn test_alias_vec4i_add() {
+    let a = Vec4i.from_array([1, 2, 3, 4]);
+    let b = Vec4i.from_array([10, 20, 30, 40]);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], 11);
+    assert_eq(result[1], 22);
+    assert_eq(result[2], 33);
+    assert_eq(result[3], 44);
+}
+
+@test
+fn test_alias_vec2d_add() {
+    let a = Vec2d.from_array([1.5, 2.5]);
+    let b = Vec2d.from_array([3.5, 4.5]);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], 5.0);
+    assert_eq(result[1], 7.0);
+}
+
+@test
+fn test_alias_vec4f_reduce_add() {
+    let v = Vec4f.from_array([1.0, 2.0, 3.0, 4.0]);
+    assert_eq(v.reduce_add(), 10.0);
+}
+
+@test
+fn test_alias_vec4i_reduce_add() {
+    let v = Vec4i.from_array([10, 20, 30, 40]);
+    assert_eq(v.reduce_add(), 100);
+}
+
+@test
+fn test_alias_vec8f_splat() {
+    let v = Vec8f.splat(5.0);
+    let arr = v.to_array();
+    assert_eq(arr[0], 5.0);
+    assert_eq(arr[7], 5.0);
+}
+
+@test
+fn test_alias_vec2l_add() {
+    let a = Vec2l.from_array([1000, 2000]);
+    let b = Vec2l.from_array([500, 500]);
+    let result = a.add(b).to_array();
+    assert_eq(result[0], 1500);
+    assert_eq(result[1], 2500);
+}
+
+@test
+fn test_custom_alias_neg() {
+    let v = MyVec4.from_array([1.0, -2.0, 3.0, -4.0]);
+    let neg = v.neg().to_array();
+    assert_eq(neg[0], -1.0);
+    assert_eq(neg[1], 2.0);
+    assert_eq(neg[2], -3.0);
+    assert_eq(neg[3], 4.0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

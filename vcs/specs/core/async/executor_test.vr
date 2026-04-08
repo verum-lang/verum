@@ -1,0 +1,836 @@
+// =============================================================================
+// executor_test.vr - Comprehensive tests for async executor types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, executor, runtime, config, sleep, timeout, builder
+// @description: Tests for RuntimeConfig, Runtime, RuntimeBuilder,
+//               Sleep, TimeoutError, Timeout, ExecutionEnv types,
+//               builder patterns, and configuration presets
+// =============================================================================
+
+mount core.async.executor.{
+    RuntimeConfig, Runtime, RuntimeBuilder,
+    Sleep, TimeoutError, Timeout,
+    ExecutionEnv,
+    sleep_ms, sleep_secs,
+    block_on,
+    timeout,
+};
+mount core.async.future.Future;
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.async.select.{ReadyFuture, ready};
+mount core.async.waker.{Waker, Context, noop_waker};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: RuntimeConfig Default Preset
+// =============================================================================
+
+@test
+fn test_runtime_config_default() {
+    let config: RuntimeConfig = RuntimeConfig.default();
+    assert_eq(config.max_tasks, 10000);
+    assert(config.enable_work_stealing);
+    assert(config.enable_io);
+    assert(config.enable_time);
+}
+
+@test
+fn test_runtime_config_default_stack_size() {
+    let config = RuntimeConfig.default();
+    assert_eq(config.task_stack_size, 1024 * 1024);
+}
+
+// =============================================================================
+// Section 2: RuntimeConfig CPU-Bound Preset
+// =============================================================================
+
+@test
+fn test_runtime_config_cpu_bound() {
+    let config: RuntimeConfig = RuntimeConfig.cpu_bound();
+    assert_eq(config.max_tasks, 1000);
+    assert(config.enable_work_stealing);
+    assert(!config.enable_io);
+    assert(!config.enable_time);
+}
+
+@test
+fn test_runtime_config_cpu_bound_stack_size() {
+    let config = RuntimeConfig.cpu_bound();
+    assert_eq(config.task_stack_size, 512 * 1024);
+}
+
+// =============================================================================
+// Section 3: RuntimeConfig IO-Bound Preset
+// =============================================================================
+
+@test
+fn test_runtime_config_io_bound() {
+    let config: RuntimeConfig = RuntimeConfig.io_bound();
+    assert_eq(config.max_tasks, 100000);
+    assert(config.enable_work_stealing);
+    assert(config.enable_io);
+    assert(config.enable_time);
+}
+
+@test
+fn test_runtime_config_io_bound_stack_size() {
+    let config = RuntimeConfig.io_bound();
+    assert_eq(config.task_stack_size, 256 * 1024);
+}
+
+// =============================================================================
+// Section 4: RuntimeConfig Builder Methods
+// =============================================================================
+
+@test
+fn test_runtime_config_max_tasks_builder() {
+    let config = RuntimeConfig.default()
+        .max_tasks(500);
+    assert_eq(config.max_tasks, 500);
+}
+
+@test
+fn test_runtime_config_task_stack_size_builder() {
+    let config = RuntimeConfig.default()
+        .task_stack_size(8192);
+    assert_eq(config.task_stack_size, 8192);
+}
+
+@test
+fn test_runtime_config_work_stealing_builder() {
+    let config = RuntimeConfig.default()
+        .work_stealing(false);
+    assert(!config.enable_work_stealing);
+}
+
+@test
+fn test_runtime_config_chained_builder() {
+    let config = RuntimeConfig.default()
+        .max_tasks(1000)
+        .task_stack_size(8192)
+        .work_stealing(true);
+    assert_eq(config.max_tasks, 1000);
+    assert_eq(config.task_stack_size, 8192);
+    assert(config.enable_work_stealing);
+}
+
+// =============================================================================
+// Section 5: RuntimeBuilder
+// =============================================================================
+
+@test
+fn test_runtime_builder_new() {
+    let builder: RuntimeBuilder = RuntimeBuilder.new();
+    // Builder starts with default config
+    assert_eq(builder.config.max_tasks, 10000);
+    assert(builder.config.enable_work_stealing);
+}
+
+@test
+fn test_runtime_builder_max_tasks() {
+    let builder = RuntimeBuilder.new()
+        .max_tasks(500);
+    assert_eq(builder.config.max_tasks, 500);
+}
+
+@test
+fn test_runtime_builder_stack_size() {
+    let builder = RuntimeBuilder.new()
+        .stack_size(4096);
+    assert_eq(builder.config.task_stack_size, 4096);
+}
+
+@test
+fn test_runtime_builder_chain() {
+    let builder = RuntimeBuilder.new()
+        .max_tasks(500)
+        .stack_size(4096)
+        .enable_work_stealing()
+        .enable_io()
+        .enable_time();
+    assert_eq(builder.config.max_tasks, 500);
+    assert_eq(builder.config.task_stack_size, 4096);
+    assert(builder.config.enable_work_stealing);
+    assert(builder.config.enable_io);
+    assert(builder.config.enable_time);
+}
+
+@test
+fn test_runtime_builder_build() {
+    let runtime: Runtime = RuntimeBuilder.new()
+        .max_tasks(100)
+        .build();
+    assert_eq(runtime.task_count(), 0);
+    assert(!runtime.is_running());
+}
+
+// =============================================================================
+// Section 6: TimeoutError
+// =============================================================================
+
+@test
+fn test_timeout_error_type() {
+    let _err: TimeoutError = TimeoutError;
+    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    assert(result.is_err());
+}
+
+@test
+fn test_timeout_error_in_err_result() {
+    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    assert(result.is_err());
+}
+
+@test
+fn test_timeout_error_in_ok_result() {
+    let result: Result<Int, TimeoutError> = Ok(42);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_timeout_error_match() {
+    let result: Result<Text, TimeoutError> = Err(TimeoutError);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 7: Sleep Type
+// =============================================================================
+
+@test
+fn test_sleep_ms_type() {
+    let s: Sleep = sleep_ms(100);
+    assert_eq(s.deadline_ns, 100 * 1_000_000);
+    assert(!s.completed);
+}
+
+@test
+fn test_sleep_secs_type() {
+    let s: Sleep = sleep_secs(1);
+    assert_eq(s.deadline_ns, 1_000_000_000);
+    assert(!s.completed);
+}
+
+@test
+fn test_sleep_new() {
+    let s: Sleep = Sleep.new(1000000);
+    assert_eq(s.deadline_ns, 1000000);
+    assert(!s.completed);
+    assert_eq(s.registration_id, 0);
+}
+
+@test
+fn test_sleep_zero_duration() {
+    let s: Sleep = sleep_ms(0);
+    assert_eq(s.deadline_ns, 0);
+    assert(!s.completed);
+}
+
+@test
+fn test_sleep_large_duration() {
+    let s: Sleep = sleep_secs(3600);
+    assert_eq(s.deadline_ns, 3600 * 1_000_000_000);
+    assert(!s.completed);
+}
+
+// =============================================================================
+// Section 8: Ready Future with Executor
+// =============================================================================
+
+@test
+fn test_ready_future_int() {
+    let mut fut: ReadyFuture<Int> = ready(42);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let poll = fut.poll(&mut cx);
+    assert(poll.is_ready());
+}
+
+@test
+fn test_ready_future_text() {
+    let mut fut: ReadyFuture<Text> = ready("hello");
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let poll = fut.poll(&mut cx);
+    assert(poll.is_ready());
+}
+
+@test
+fn test_ready_future_bool() {
+    let mut fut: ReadyFuture<Bool> = ready(true);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let poll = fut.poll(&mut cx);
+    assert(poll.is_ready());
+}
+
+// =============================================================================
+// Section 9: Runtime Type
+// =============================================================================
+
+@test
+fn test_runtime_new() {
+    let rt: Runtime = Runtime.new();
+    assert_eq(rt.task_count(), 0);
+    assert(!rt.is_running());
+}
+
+@test
+fn test_runtime_with_config() {
+    let config = RuntimeConfig.cpu_bound();
+    let rt: Runtime = Runtime.with_config(config);
+    assert_eq(rt.task_count(), 0);
+    assert(!rt.is_running());
+    assert_eq(rt.config.max_tasks, 1000);
+}
+
+// =============================================================================
+// Section 10: ExecutionEnv
+// =============================================================================
+
+@test
+fn test_execution_env_construction() {
+    let env = ExecutionEnv { id: 1, parent_id: None };
+    assert_eq(env.id, 1);
+    assert(env.parent_id is None);
+}
+
+@test
+fn test_execution_env_with_parent() {
+    let env = ExecutionEnv { id: 2, parent_id: Some(1) };
+    assert_eq(env.id, 2);
+    match env.parent_id {
+        Some(pid) => assert_eq(pid, 1),
+        None => panic("expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 11: RuntimeConfig IO SQ Entries
+// =============================================================================
+
+@test
+fn test_runtime_config_default_io_sq_entries() {
+    let config = RuntimeConfig.default();
+    assert(config.io_sq_entries > 0);
+}
+
+@test
+fn test_runtime_config_cpu_bound_minimal_io() {
+    let config = RuntimeConfig.cpu_bound();
+    assert_eq(config.io_sq_entries, 64);
+}
+
+@test
+fn test_runtime_config_io_bound_large_sq() {
+    let config = RuntimeConfig.io_bound();
+    assert_eq(config.io_sq_entries, 1024);
+}
+
+// =============================================================================
+// Section 12: RuntimeBuilder Disable Defaults
+// =============================================================================
+
+@test
+fn test_runtime_builder_default_has_io() {
+    let builder = RuntimeBuilder.new();
+    assert(builder.config.enable_io);
+    assert(builder.config.enable_time);
+}
+
+@test
+fn test_runtime_builder_build_preserves_config() {
+    let rt = RuntimeBuilder.new()
+        .max_tasks(250)
+        .stack_size(2048)
+        .build();
+    assert_eq(rt.config.max_tasks, 250);
+    assert_eq(rt.config.task_stack_size, 2048);
+}
+
+// =============================================================================
+// Section 13: Sleep Duration Calculations
+// =============================================================================
+
+@test
+fn test_sleep_ms_calculation() {
+    // 500ms = 500_000_000 ns
+    let s = sleep_ms(500);
+    assert_eq(s.deadline_ns, 500_000_000);
+}
+
+@test
+fn test_sleep_secs_calculation() {
+    // 10s = 10_000_000_000 ns
+    let s = sleep_secs(10);
+    assert_eq(s.deadline_ns, 10_000_000_000);
+}
+
+@test
+fn test_sleep_new_is_not_completed() {
+    let s = Sleep.new(999);
+    assert(!s.completed);
+    assert_eq(s.registration_id, 0);
+    assert_eq(s.deadline_ns, 999);
+}
+
+// =============================================================================
+// Section 14: Timeout Type Construction
+// =============================================================================
+
+@test
+fn test_timeout_error_in_result_match() {
+    let result: Result<Text, TimeoutError> = Err(TimeoutError);
+    let msg = match result {
+        Ok(v) => v,
+        Err(_) => "timed out",
+    };
+    assert_eq(msg, "timed out");
+}
+
+@test
+fn test_timeout_ok_result() {
+    let result: Result<Int, TimeoutError> = Ok(100);
+    match result {
+        Ok(v) => assert_eq(v, 100),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 15: Runtime State After Construction
+// =============================================================================
+
+@test
+fn test_runtime_initial_not_running() {
+    let rt = Runtime.new();
+    assert(!rt.is_running());
+}
+
+@test
+fn test_runtime_initial_zero_tasks() {
+    let rt = Runtime.new();
+    assert_eq(rt.task_count(), 0);
+}
+
+@test
+fn test_runtime_config_accessible() {
+    let rt = Runtime.new();
+    assert_eq(rt.config.max_tasks, 10000);
+    assert(rt.config.enable_work_stealing);
+    assert(rt.config.enable_io);
+    assert(rt.config.enable_time);
+}
+
+@test
+fn test_runtime_cpu_bound_config() {
+    let rt = Runtime.with_config(RuntimeConfig.cpu_bound());
+    assert_eq(rt.config.max_tasks, 1000);
+    assert(!rt.config.enable_io);
+    assert(!rt.config.enable_time);
+}
+
+// =============================================================================
+// Section 16: RuntimeConfig Presets Comparison
+// =============================================================================
+
+@test
+fn test_config_presets_differ() {
+    let def = RuntimeConfig.default();
+    let cpu = RuntimeConfig.cpu_bound();
+    let io = RuntimeConfig.io_bound();
+
+    // Different max_tasks
+    assert(def.max_tasks != cpu.max_tasks);
+    assert(def.max_tasks != io.max_tasks);
+    assert(cpu.max_tasks != io.max_tasks);
+
+    // IO-bound has most tasks
+    assert(io.max_tasks > def.max_tasks);
+    assert(def.max_tasks > cpu.max_tasks);
+}
+
+@test
+fn test_config_presets_stack_sizes() {
+    let def = RuntimeConfig.default();
+    let cpu = RuntimeConfig.cpu_bound();
+    let io = RuntimeConfig.io_bound();
+
+    // Default has largest stack
+    assert(def.task_stack_size > cpu.task_stack_size);
+    assert(cpu.task_stack_size > io.task_stack_size);
+}
+
+// =============================================================================
+// Section 17: RuntimeConfig Custom Construction
+// =============================================================================
+
+@test
+fn test_runtime_config_custom_all_fields() {
+    let config = RuntimeConfig {
+        max_tasks: 5000,
+        enable_work_stealing: false,
+        task_stack_size: 2048,
+        enable_io: false,
+        enable_time: true,
+        io_sq_entries: 128,
+    };
+    assert_eq(config.max_tasks, 5000);
+    assert(!config.enable_work_stealing);
+    assert_eq(config.task_stack_size, 2048);
+    assert(!config.enable_io);
+    assert(config.enable_time);
+    assert_eq(config.io_sq_entries, 128);
+}
+
+@test
+fn test_runtime_config_minimal_custom() {
+    let config = RuntimeConfig {
+        max_tasks: 1,
+        enable_work_stealing: false,
+        task_stack_size: 4096,
+        enable_io: false,
+        enable_time: false,
+        io_sq_entries: 0,
+    };
+    assert_eq(config.max_tasks, 1);
+    assert_eq(config.task_stack_size, 4096);
+    assert(!config.enable_work_stealing);
+    assert(!config.enable_io);
+    assert(!config.enable_time);
+}
+
+@test
+fn test_runtime_config_large_max_tasks() {
+    let config = RuntimeConfig.default()
+        .max_tasks(1_000_000);
+    assert_eq(config.max_tasks, 1_000_000);
+}
+
+// =============================================================================
+// Section 18: RuntimeBuilder Advanced Patterns
+// =============================================================================
+
+@test
+fn test_runtime_builder_io_only() {
+    let builder = RuntimeBuilder.new()
+        .enable_io();
+    assert(builder.config.enable_io);
+}
+
+@test
+fn test_runtime_builder_time_only() {
+    let builder = RuntimeBuilder.new()
+        .enable_time();
+    assert(builder.config.enable_time);
+}
+
+@test
+fn test_runtime_builder_small_stack() {
+    let rt = RuntimeBuilder.new()
+        .stack_size(1024)
+        .build();
+    assert_eq(rt.config.task_stack_size, 1024);
+    assert_eq(rt.task_count(), 0);
+}
+
+@test
+fn test_runtime_builder_large_tasks() {
+    let rt = RuntimeBuilder.new()
+        .max_tasks(500000)
+        .build();
+    assert_eq(rt.config.max_tasks, 500000);
+    assert(!rt.is_running());
+}
+
+@test
+fn test_runtime_builder_all_options() {
+    let rt = RuntimeBuilder.new()
+        .max_tasks(200)
+        .stack_size(16384)
+        .enable_work_stealing()
+        .enable_io()
+        .enable_time()
+        .build();
+    assert_eq(rt.config.max_tasks, 200);
+    assert_eq(rt.config.task_stack_size, 16384);
+    assert(rt.config.enable_work_stealing);
+    assert(rt.config.enable_io);
+    assert(rt.config.enable_time);
+    assert_eq(rt.task_count(), 0);
+    assert(!rt.is_running());
+}
+
+// =============================================================================
+// Section 19: Runtime with Various Configs
+// =============================================================================
+
+@test
+fn test_runtime_with_io_bound_config() {
+    let rt = Runtime.with_config(RuntimeConfig.io_bound());
+    assert_eq(rt.config.max_tasks, 100000);
+    assert(rt.config.enable_io);
+    assert(rt.config.enable_time);
+    assert_eq(rt.config.io_sq_entries, 1024);
+    assert(!rt.is_running());
+}
+
+@test
+fn test_runtime_with_custom_config() {
+    let config = RuntimeConfig.default()
+        .max_tasks(42)
+        .task_stack_size(999)
+        .work_stealing(false);
+    let rt = Runtime.with_config(config);
+    assert_eq(rt.config.max_tasks, 42);
+    assert_eq(rt.config.task_stack_size, 999);
+    assert(!rt.config.enable_work_stealing);
+}
+
+@test
+fn test_runtime_multiple_instances() {
+    let rt1 = Runtime.new();
+    let rt2 = Runtime.new();
+    let rt3 = Runtime.with_config(RuntimeConfig.cpu_bound());
+    assert_eq(rt1.task_count(), 0);
+    assert_eq(rt2.task_count(), 0);
+    assert_eq(rt3.task_count(), 0);
+    assert(!rt1.is_running());
+    assert(!rt2.is_running());
+    assert(!rt3.is_running());
+}
+
+// =============================================================================
+// Section 20: block_on with ReadyFuture (Various Return Types)
+// =============================================================================
+
+@test
+fn test_block_on_ready_int() {
+    let result: Int = block_on(ready(42));
+    assert_eq(result, 42);
+}
+
+@test
+fn test_block_on_ready_text() {
+    let result: Text = block_on(ready("hello"));
+    assert_eq(result, "hello");
+}
+
+@test
+fn test_block_on_ready_bool_true() {
+    let result: Bool = block_on(ready(true));
+    assert(result);
+}
+
+@test
+fn test_block_on_ready_bool_false() {
+    let result: Bool = block_on(ready(false));
+    assert(!result);
+}
+
+@test
+fn test_block_on_ready_float() {
+    let result: Float = block_on(ready(3.14));
+    assert(result > 3.0);
+    assert(result < 4.0);
+}
+
+@test
+fn test_block_on_ready_unit() {
+    let result: () = block_on(ready(()));
+    // Unit value returned successfully
+    assert(!false); // Runtime-only: async executor required
+}
+
+@test
+fn test_block_on_ready_negative_int() {
+    let result: Int = block_on(ready(-100));
+    assert_eq(result, -100);
+}
+
+@test
+fn test_block_on_ready_zero() {
+    let result: Int = block_on(ready(0));
+    assert_eq(result, 0);
+}
+
+@test
+fn test_block_on_ready_large_int() {
+    let result: Int = block_on(ready(999_999_999));
+    assert_eq(result, 999_999_999);
+}
+
+// =============================================================================
+// Section 21: block_on with ReadyFuture (Composite Types)
+// =============================================================================
+
+@test
+fn test_block_on_ready_maybe_some() {
+    let fut: ReadyFuture<Maybe<Int>> = ready(Some(10));
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let mut f = fut;
+    let poll = f.poll(&mut cx);
+    assert(poll.is_ready());
+}
+
+@test
+fn test_block_on_ready_maybe_none() {
+    let fut: ReadyFuture<Maybe<Int>> = ready(None);
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let mut f = fut;
+    let poll = f.poll(&mut cx);
+    assert(poll.is_ready());
+}
+
+@test
+fn test_block_on_ready_result_ok() {
+    let fut: ReadyFuture<Result<Int, Text>> = ready(Ok(42));
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let mut f = fut;
+    let poll = f.poll(&mut cx);
+    assert(poll.is_ready());
+}
+
+@test
+fn test_block_on_ready_result_err() {
+    let fut: ReadyFuture<Result<Int, Text>> = ready(Err("fail"));
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let mut f = fut;
+    let poll = f.poll(&mut cx);
+    assert(poll.is_ready());
+}
+
+@test
+fn test_block_on_ready_empty_text() {
+    let result: Text = block_on(ready(""));
+    assert_eq(result, "");
+}
+
+// =============================================================================
+// Section 22: Sleep Construction Edge Cases
+// =============================================================================
+
+@test
+fn test_sleep_ms_one() {
+    let s = sleep_ms(1);
+    assert_eq(s.deadline_ns, 1_000_000);
+    assert(!s.completed);
+}
+
+@test
+fn test_sleep_secs_zero() {
+    let s = sleep_secs(0);
+    assert_eq(s.deadline_ns, 0);
+    assert(!s.completed);
+}
+
+@test
+fn test_sleep_new_large_value() {
+    let s = Sleep.new(1_000_000_000_000);
+    assert_eq(s.deadline_ns, 1_000_000_000_000);
+    assert(!s.completed);
+    assert_eq(s.registration_id, 0);
+}
+
+@test
+fn test_sleep_future_poll_completes() {
+    // Sleep.poll currently completes immediately (simplified impl)
+    let mut s = sleep_ms(50);
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let poll = s.poll(&mut cx);
+    assert(poll.is_ready());
+    assert(s.completed);
+}
+
+// =============================================================================
+// Section 23: Timeout Result Patterns
+// =============================================================================
+
+@test
+fn test_timeout_result_ok_match_value() {
+    let result: Result<Int, TimeoutError> = Ok(7);
+    let val = match result {
+        Ok(v) => v,
+        Err(_) => -1,
+    };
+    assert_eq(val, 7);
+}
+
+@test
+fn test_timeout_result_err_match_value() {
+    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    let val = match result {
+        Ok(v) => v,
+        Err(_) => -1,
+    };
+    assert_eq(val, -1);
+}
+
+@test
+fn test_timeout_result_text_ok() {
+    let result: Result<Text, TimeoutError> = Ok("data");
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), "data");
+}
+
+@test
+fn test_timeout_result_bool_ok() {
+    let result: Result<Bool, TimeoutError> = Ok(true);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), true);
+}
+
+// =============================================================================
+// Section 24: ExecutionEnv Extended Patterns
+// =============================================================================
+
+@test
+fn test_execution_env_root() {
+    let env = ExecutionEnv { id: 0, parent_id: None };
+    assert_eq(env.id, 0);
+    assert(env.parent_id is None);
+}
+
+@test
+fn test_execution_env_chain() {
+    let root = ExecutionEnv { id: 1, parent_id: None };
+    let child = ExecutionEnv { id: 2, parent_id: Some(root.id) };
+    let grandchild = ExecutionEnv { id: 3, parent_id: Some(child.id) };
+
+    assert_eq(root.id, 1);
+    assert_eq(child.id, 2);
+    assert_eq(grandchild.id, 3);
+
+    match child.parent_id {
+        Some(pid) => assert_eq(pid, 1),
+        None => panic("expected parent"),
+    }
+    match grandchild.parent_id {
+        Some(pid) => assert_eq(pid, 2),
+        None => panic("expected parent"),
+    }
+}
+
+@test
+fn test_execution_env_large_id() {
+    let env = ExecutionEnv { id: 999_999, parent_id: Some(999_998) };
+    assert_eq(env.id, 999_999);
+    match env.parent_id {
+        Some(pid) => assert_eq(pid, 999_998),
+        None => panic("expected parent"),
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

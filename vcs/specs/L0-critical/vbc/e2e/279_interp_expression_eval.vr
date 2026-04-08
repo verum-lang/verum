@@ -1,0 +1,347 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, stack, rpn, expression
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Simple expression evaluator for postfix (RPN) expressions
+// using a stack. Support +, -, *, /. Test multi-step expressions.
+
+// =============================================================================
+// Stack using a record (up to 8 elements)
+// =============================================================================
+
+type Stack8 is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    top: Int
+};
+
+fn stack_new() -> Stack8 {
+    Stack8 { s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0, s7: 0, top: 0 }
+}
+
+fn stack_push(s: Stack8, v: Int) -> Stack8 {
+    let idx = s.top;
+    Stack8 {
+        s0: if idx == 0 { v } else { s.s0 },
+        s1: if idx == 1 { v } else { s.s1 },
+        s2: if idx == 2 { v } else { s.s2 },
+        s3: if idx == 3 { v } else { s.s3 },
+        s4: if idx == 4 { v } else { s.s4 },
+        s5: if idx == 5 { v } else { s.s5 },
+        s6: if idx == 6 { v } else { s.s6 },
+        s7: if idx == 7 { v } else { s.s7 },
+        top: s.top + 1
+    }
+}
+
+fn stack_get(s: Stack8, idx: Int) -> Int {
+    if idx == 0 { s.s0 }
+    else if idx == 1 { s.s1 }
+    else if idx == 2 { s.s2 }
+    else if idx == 3 { s.s3 }
+    else if idx == 4 { s.s4 }
+    else if idx == 5 { s.s5 }
+    else if idx == 6 { s.s6 }
+    else { s.s7 }
+}
+
+fn stack_peek(s: Stack8) -> Int {
+    stack_get(s, s.top - 1)
+}
+
+fn stack_pop(s: Stack8) -> Stack8 {
+    Stack8 {
+        s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3,
+        s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7,
+        top: s.top - 1
+    }
+}
+
+// =============================================================================
+// RPN tokens encoded as integers:
+// Positive values = operands (numbers)
+// Negative sentinels = operators:
+//   -1 = ADD (+)
+//   -2 = SUB (-)
+//   -3 = MUL (*)
+//   -4 = DIV (/)
+//   -99 = END (sentinel)
+// For negative operands, we offset: -100 - value (so -5 is encoded as -105)
+// =============================================================================
+
+fn token_add() -> Int { -1 }
+fn token_sub() -> Int { -2 }
+fn token_mul() -> Int { -3 }
+fn token_div() -> Int { -4 }
+fn token_end() -> Int { -99 }
+
+fn is_operator(tok: Int) -> Int {
+    if tok >= -4 && tok <= -1 { 1 } else { 0 }
+}
+
+fn is_end(tok: Int) -> Int {
+    if tok == -99 { 1 } else { 0 }
+}
+
+// Arr16 for expression tokens
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 }
+    else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 }
+    else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 }
+    else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 }
+    else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 }
+    else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+// =============================================================================
+// Evaluate RPN expression
+// =============================================================================
+
+fn eval_rpn(tokens: Arr16, len: Int) -> Int {
+    let mut stk = stack_new();
+    let mut i = 0;
+
+    while i < len {
+        let tok = arr16_get(tokens, i);
+
+        if is_end(tok) == 1 {
+            // Stop
+            i = len;
+        } else if is_operator(tok) == 1 {
+            // Pop two operands (b first, then a)
+            let b = stack_peek(stk);
+            stk = stack_pop(stk);
+            let a = stack_peek(stk);
+            stk = stack_pop(stk);
+
+            let val = if tok == -1 { a + b }
+                      else if tok == -2 { a - b }
+                      else if tok == -3 { a * b }
+                      else { a / b };  // tok == -4
+
+            stk = stack_push(stk, val);
+        } else {
+            // Operand — push to stack
+            stk = stack_push(stk, tok);
+        }
+
+        if i < len {
+            i = i + 1;
+        }
+    }
+
+    stack_peek(stk)
+}
+
+// =============================================================================
+// Test: simple addition — "3 4 +" = 7
+// =============================================================================
+
+fn test_simple_add() {
+    let tokens = Arr16 {
+        a0: 3, a1: 4, a2: -1, a3: -99,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 3), 7);
+}
+
+// =============================================================================
+// Test: simple subtraction — "10 3 -" = 7
+// =============================================================================
+
+fn test_simple_sub() {
+    let tokens = Arr16 {
+        a0: 10, a1: 3, a2: -2, a3: -99,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 3), 7);
+}
+
+// =============================================================================
+// Test: simple multiplication — "6 7 *" = 42
+// =============================================================================
+
+fn test_simple_mul() {
+    let tokens = Arr16 {
+        a0: 6, a1: 7, a2: -3, a3: -99,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 3), 42);
+}
+
+// =============================================================================
+// Test: simple division — "20 4 /" = 5
+// =============================================================================
+
+fn test_simple_div() {
+    let tokens = Arr16 {
+        a0: 20, a1: 4, a2: -4, a3: -99,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 3), 5);
+}
+
+// =============================================================================
+// Test: multi-step — "3 4 + 2 *" = (3+4)*2 = 14
+// =============================================================================
+
+fn test_multi_step1() {
+    let tokens = Arr16 {
+        a0: 3, a1: 4, a2: -1, a3: 2, a4: -3, a5: -99,
+        a6: 0, a7: 0, a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 5), 14);
+}
+
+// =============================================================================
+// Test: multi-step — "5 1 2 + 4 * + 3 -" = 5 + (1+2)*4 - 3 = 5+12-3 = 14
+// =============================================================================
+
+fn test_multi_step2() {
+    let tokens = Arr16 {
+        a0: 5, a1: 1, a2: 2, a3: -1, a4: 4, a5: -3, a6: -1, a7: 3, a8: -2,
+        a9: -99, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 9), 14);
+}
+
+// =============================================================================
+// Test: "(2+3)*(5-1)" in RPN: "2 3 + 5 1 - *" = 5 * 4 = 20
+// =============================================================================
+
+fn test_complex_expr() {
+    let tokens = Arr16 {
+        a0: 2, a1: 3, a2: -1, a3: 5, a4: 1, a5: -2, a6: -3,
+        a7: -99, a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 7), 20);
+}
+
+// =============================================================================
+// Test: single operand — "42" = 42
+// =============================================================================
+
+fn test_single_operand() {
+    let tokens = Arr16 {
+        a0: 42, a1: -99, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 1), 42);
+}
+
+// =============================================================================
+// Test: "10 2 / 3 * 1 +" = (10/2)*3+1 = 16
+// =============================================================================
+
+fn test_mixed_ops() {
+    let tokens = Arr16 {
+        a0: 10, a1: 2, a2: -4, a3: 3, a4: -3, a5: 1, a6: -1,
+        a7: -99, a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 7), 16);
+}
+
+// =============================================================================
+// Test: "2 3 4 * +" = 2 + (3*4) = 14
+// =============================================================================
+
+fn test_nested_ops() {
+    let tokens = Arr16 {
+        a0: 2, a1: 3, a2: 4, a3: -3, a4: -1,
+        a5: -99, a6: 0, a7: 0, a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 5), 14);
+}
+
+// =============================================================================
+// Test: "8 2 / 4 2 / +" = 4 + 2 = 6
+// =============================================================================
+
+fn test_two_divisions() {
+    let tokens = Arr16 {
+        a0: 8, a1: 2, a2: -4, a3: 4, a4: 2, a5: -4, a6: -1,
+        a7: -99, a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 7), 6);
+}
+
+// =============================================================================
+// Test: subtraction order — "3 5 -" = 3 - 5 = -2
+// =============================================================================
+
+fn test_sub_order() {
+    let tokens = Arr16 {
+        a0: 3, a1: 5, a2: -2, a3: -99,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 3), -2);
+}
+
+// =============================================================================
+// Test: longer chain — "1 2 + 3 + 4 + 5 +" = 15
+// =============================================================================
+
+fn test_chain_add() {
+    let tokens = Arr16 {
+        a0: 1, a1: 2, a2: -1, a3: 3, a4: -1, a5: 4, a6: -1, a7: 5, a8: -1,
+        a9: -99, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    assert_eq(eval_rpn(tokens, 9), 15);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_simple_add();
+    test_simple_sub();
+    test_simple_mul();
+    test_simple_div();
+    test_multi_step1();
+    test_multi_step2();
+    test_complex_expr();
+    test_single_operand();
+    test_mixed_ops();
+    test_nested_ops();
+    test_two_divisions();
+    test_sub_order();
+    test_chain_add();
+    print("[OK] 279_interp_expression_eval");
+    0
+}

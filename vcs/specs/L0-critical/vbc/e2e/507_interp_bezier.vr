@@ -1,0 +1,201 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, bezier, de_casteljau, curve_evaluation, scaled_integer
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Bezier curve evaluation using the De Casteljau algorithm with scaled
+// integer arithmetic (no floating point).
+//
+// All coordinates and parameter t are scaled by SCALE=1000:
+//   real t in [0,1] -> integer t_s in [0, 1000]
+//   real coord x    -> integer x_s = x * 1000
+//
+// De Casteljau for n+1 control points at parameter t:
+//   P_i^0 = P_i  (control points)
+//   P_i^r = (1-t)*P_i^{r-1} + t*P_{i+1}^{r-1}
+//   Result = P_0^n
+//
+// With scaled arithmetic (SCALE=1000):
+//   lerp(a, b, t_s) = (a * (1000 - t_s) + b * t_s) / 1000
+//
+// We work with integer control points (already scaled by 1000),
+// so result coordinates are also integers in the same scale.
+
+// Linear interpolation in scaled space.
+fn lerp_s(a: Int, b: Int, t_s: Int) -> Int {
+    (a * (1000 - t_s) + b * t_s) / 1000
+}
+
+// De Casteljau for quadratic Bezier (3 control points).
+// P0, P1, P2 are x-coordinates (scaled). Returns x at t_s.
+fn bezier_quadratic_x(p0: Int, p1: Int, p2: Int, t_s: Int) -> Int {
+    let q0 = lerp_s(p0, p1, t_s);
+    let q1 = lerp_s(p1, p2, t_s);
+    lerp_s(q0, q1, t_s)
+}
+
+// De Casteljau for cubic Bezier (4 control points).
+// P0..P3 are x-coordinates (scaled). Returns x at t_s.
+fn bezier_cubic_x(p0: Int, p1: Int, p2: Int, p3: Int, t_s: Int) -> Int {
+    let q0 = lerp_s(p0, p1, t_s);
+    let q1 = lerp_s(p1, p2, t_s);
+    let q2 = lerp_s(p2, p3, t_s);
+    let r0 = lerp_s(q0, q1, t_s);
+    let r1 = lerp_s(q1, q2, t_s);
+    lerp_s(r0, r1, t_s)
+}
+
+// Generic De Casteljau on an array of points (up to 8 control points).
+// pts[0..n-1] = control coordinates; result at t_s.
+fn de_casteljau(pts: [Int; 8], n: Int, t_s: Int) -> Int {
+    // We copy to a working buffer and reduce in place.
+    let mut work = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < n { work[i] = pts[i]; i = i + 1; }
+
+    let mut r = n - 1; // number of reduction steps
+    while r > 0 {
+        let mut j = 0;
+        while j < r {
+            work[j] = lerp_s(work[j], work[j + 1], t_s);
+            j = j + 1;
+        }
+        r = r - 1;
+    }
+    work[0]
+}
+
+fn test_linear_bezier() {
+    // Linear Bezier (2 points): P0=0, P1=1000 (real 0 to 1)
+    // B(t) = (1-t)*P0 + t*P1 = t*1000
+    // t=0   -> 0
+    // t=0.5 -> 500
+    // t=1   -> 1000
+    assert_eq(lerp_s(0, 1000, 0),    0);
+    assert_eq(lerp_s(0, 1000, 500),  500);
+    assert_eq(lerp_s(0, 1000, 1000), 1000);
+
+    // P0=200, P1=800 (real 0.2 to 0.8)
+    // t=0.25: 200*(750/1000) + 800*(250/1000) = 200*750/1000 + 800*250/1000
+    //       = 150000/1000 + 200000/1000 = 150 + 200 = 350
+    assert_eq(lerp_s(200, 800, 250), 350);
+
+    print("bezier_linear: ok");
+}
+
+fn test_quadratic_bezier() {
+    // Quadratic Bezier: P0=(0,0), P1=(500,1000), P2=(1000,0) (real coords *1000)
+    // x: p0x=0, p1x=500, p2x=1000
+    // At t=0: B_x = 0
+    // At t=1: B_x = 1000
+    // At t=0.5: q0=lerp(0,500,500)=250, q1=lerp(500,1000,500)=750
+    //           result=lerp(250,750,500)=500
+    assert_eq(bezier_quadratic_x(0, 500, 1000, 0),    0);
+    assert_eq(bezier_quadratic_x(0, 500, 1000, 500),  500);
+    assert_eq(bezier_quadratic_x(0, 500, 1000, 1000), 1000);
+
+    // y: p0y=0, p1y=1000, p2y=0
+    // At t=0.5: q0=lerp(0,1000,500)=500, q1=lerp(1000,0,500)=500
+    //           result=lerp(500,500,500)=500
+    assert_eq(bezier_quadratic_x(0, 1000, 0, 500), 500);
+
+    // At t=0.25: q0=lerp(0,1000,250)=250, q1=lerp(1000,0,250)=750
+    //            result=lerp(250,750,250) = 250*(750/1000)+750*(250/1000)
+    //                                    = 187500/1000 + 187500/1000 = 187+187 = 375
+    // More precisely: (250*750 + 750*250)/1000 = (187500+187500)/1000 = 375000/1000 = 375
+    assert_eq(bezier_quadratic_x(0, 1000, 0, 250), 375);
+
+    print("bezier_quadratic: ok");
+}
+
+fn test_cubic_bezier() {
+    // Cubic: P0=(0,0), P1=(333,1000), P2=(666,1000), P3=(1000,0)
+    // Symmetric -> at t=0.5 should be at midpoint x=500
+    assert_eq(bezier_cubic_x(0, 333, 666, 1000, 0),    0);
+    assert_eq(bezier_cubic_x(0, 333, 666, 1000, 1000), 1000);
+
+    // t=0.5, x: q0=lerp(0,333,500)=166, q1=lerp(333,666,500)=499, q2=lerp(666,1000,500)=833
+    //         r0=lerp(166,499,500)=332, r1=lerp(499,833,500)=666
+    //         result=lerp(332,666,500)=499
+    // (small rounding differences from integer division)
+    let mid_x = bezier_cubic_x(0, 333, 666, 1000, 500);
+    // Should be around 499-501
+    assert(mid_x >= 498);
+    assert(mid_x <= 502);
+
+    // Straight line: P0=0, P1=333, P2=666, P3=1000 on x-axis -> linear
+    // At t=0.5: should be 500 (since points are approx. evenly spaced)
+    // Exact: see computation above -> 499 (rounding from integer division)
+    let straight = bezier_cubic_x(0, 333, 666, 1000, 500);
+    assert(straight >= 498);
+    assert(straight <= 502);
+
+    // All same: P0=P1=P2=P3=500 -> always 500
+    assert_eq(bezier_cubic_x(500, 500, 500, 500, 0),   500);
+    assert_eq(bezier_cubic_x(500, 500, 500, 500, 500), 500);
+    assert_eq(bezier_cubic_x(500, 500, 500, 500, 1000),500);
+
+    print("bezier_cubic: ok");
+}
+
+fn test_de_casteljau_generic() {
+    // Degree 4 (5 control points): [0, 250, 500, 750, 1000]
+    // At t=0: 0, at t=1: 1000
+    let pts4 = [0, 250, 500, 750, 1000, 0, 0, 0];
+    assert_eq(de_casteljau(pts4, 5, 0),    0);
+    assert_eq(de_casteljau(pts4, 5, 1000), 1000);
+    // At t=0.5: all lerp by half each step -> should collapse to 500
+    assert_eq(de_casteljau(pts4, 5, 500), 500);
+
+    // Degree 2 (3 control points): matches bezier_quadratic_x
+    let pts2 = [0, 1000, 0, 0, 0, 0, 0, 0];
+    assert_eq(de_casteljau(pts2, 3, 500), bezier_quadratic_x(0, 1000, 0, 500));
+    assert_eq(de_casteljau(pts2, 3, 250), bezier_quadratic_x(0, 1000, 0, 250));
+
+    print("bezier_de_casteljau_generic: ok");
+}
+
+fn test_arc_length_approx() {
+    // Approximate arc length of quadratic Bezier by sampling.
+    // Bezier: P0=(0,0), P1=(500,1000), P2=(1000,0) (scaled *1000)
+    // We sample at t=0,0.1,0.2,...,1.0 and sum chord lengths.
+    // Chord length = sqrt((dx/1000)^2 + (dy/1000)^2) * 1000
+    // We use integer approximation: sum of manhattan distances as lower bound.
+    let ts = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,
+              0, 0, 0, 0, 0];
+    let n_samples = 11;
+    let mut prev_x = bezier_quadratic_x(0, 500, 1000, 0);
+    let mut prev_y = bezier_quadratic_x(0, 1000, 0, 0);
+    let mut arc = 0;
+    let mut i = 1;
+    while i < n_samples {
+        let cx = bezier_quadratic_x(0, 500, 1000, ts[i]);
+        let cy = bezier_quadratic_x(0, 1000, 0, ts[i]);
+        let dx = if cx > prev_x { cx - prev_x } else { prev_x - cx };
+        let dy = if cy > prev_y { cy - prev_y } else { prev_y - cy };
+        arc = arc + dx + dy; // Manhattan distance (lower bound on Euclidean)
+        prev_x = cx;
+        prev_y = cy;
+        i = i + 1;
+    }
+    // For this symmetric arch, arc > 1000 (straight-line distance from P0 to P2)
+    assert(arc > 1000);
+    // And arc < 2000 (sum of control polygon = |P0P1| + |P1P2| = 1500+1500 Manhattan = 3000 way over)
+    // Manhattan arc is > 0 and reasonable
+    assert(arc > 0);
+
+    print(f"bezier_arc_manhattan={arc}");
+    print("bezier_arc_length_approx: ok");
+}
+
+fn main() -> Int {
+    test_linear_bezier();
+    test_quadratic_bezier();
+    test_cubic_bezier();
+    test_de_casteljau_generic();
+    test_arc_length_approx();
+    print("[OK] 507_interp_bezier");
+    0
+}

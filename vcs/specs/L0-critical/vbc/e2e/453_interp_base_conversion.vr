@@ -1,0 +1,296 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, base_conversion, binary, octal, hex
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Number base conversion: decimal to binary/octal/hex as digit arrays,
+// and base-N to decimal. Digits stored MSB first (most significant digit at index 0).
+
+// Convert decimal to base-2, store digits MSB first in out[], return count.
+fn to_binary(n: Int, out: [Int; 16]) -> Int {
+    if n == 0 {
+        out[0] = 0;
+        1
+    } else {
+        let mut x = n;
+        let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut cnt = 0;
+        while x > 0 {
+            tmp[cnt] = x % 2;
+            x = x / 2;
+            cnt = cnt + 1;
+        }
+        // Reverse into out
+        let mut i = 0;
+        while i < cnt {
+            out[i] = tmp[cnt - 1 - i];
+            i = i + 1;
+        }
+        cnt
+    }
+}
+
+// Convert decimal to base-8, store digits MSB first in out[], return count.
+fn to_octal(n: Int, out: [Int; 16]) -> Int {
+    if n == 0 {
+        out[0] = 0;
+        1
+    } else {
+        let mut x = n;
+        let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut cnt = 0;
+        while x > 0 {
+            tmp[cnt] = x % 8;
+            x = x / 8;
+            cnt = cnt + 1;
+        }
+        let mut i = 0;
+        while i < cnt {
+            out[i] = tmp[cnt - 1 - i];
+            i = i + 1;
+        }
+        cnt
+    }
+}
+
+// Convert decimal to base-16, return count.
+fn to_hex(n: Int, out: [Int; 16]) -> Int {
+    if n == 0 {
+        out[0] = 0;
+        1
+    } else {
+        let mut x = n;
+        let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut cnt = 0;
+        while x > 0 {
+            tmp[cnt] = x % 16;
+            x = x / 16;
+            cnt = cnt + 1;
+        }
+        let mut i = 0;
+        while i < cnt {
+            out[i] = tmp[cnt - 1 - i];
+            i = i + 1;
+        }
+        cnt
+    }
+}
+
+// Convert from base-b digit array (MSB first, length n) to decimal.
+fn from_base(digits: [Int; 16], n: Int, base: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < n {
+        result = result * base + digits[i];
+        i = i + 1;
+    }
+    result
+}
+
+fn test_decimal_to_binary() {
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // 0 -> [0], length 1
+    let n0 = to_binary(0, buf);
+    assert_eq(n0, 1);
+    assert_eq(buf[0], 0);
+
+    // 1 -> [1], length 1
+    let n1 = to_binary(1, buf);
+    assert_eq(n1, 1);
+    assert_eq(buf[0], 1);
+
+    // 10 = 1010 in binary -> [1,0,1,0], length 4
+    let n10 = to_binary(10, buf);
+    assert_eq(n10, 4);
+    assert_eq(buf[0], 1);
+    assert_eq(buf[1], 0);
+    assert_eq(buf[2], 1);
+    assert_eq(buf[3], 0);
+
+    // 42 = 101010 -> [1,0,1,0,1,0], length 6
+    let n42 = to_binary(42, buf);
+    assert_eq(n42, 6);
+    assert_eq(buf[0], 1);
+    assert_eq(buf[1], 0);
+    assert_eq(buf[2], 1);
+    assert_eq(buf[3], 0);
+    assert_eq(buf[4], 1);
+    assert_eq(buf[5], 0);
+
+    // 255 = 11111111 -> [1,1,1,1,1,1,1,1], length 8
+    let n255 = to_binary(255, buf);
+    assert_eq(n255, 8);
+    let mut all_ones = 1;
+    let mut i = 0;
+    while i < 8 { if buf[i] != 1 { all_ones = 0; } i = i + 1; }
+    assert_eq(all_ones, 1);
+
+    // 128 = 10000000 -> length 8, buf[0]=1, rest 0
+    let n128 = to_binary(128, buf);
+    assert_eq(n128, 8);
+    assert_eq(buf[0], 1);
+    assert_eq(buf[1], 0);
+
+    print("decimal_to_binary: ok");
+}
+
+fn test_decimal_to_octal() {
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // 8 = 10 in octal -> [1, 0], length 2
+    let n8 = to_octal(8, buf);
+    assert_eq(n8, 2);
+    assert_eq(buf[0], 1);
+    assert_eq(buf[1], 0);
+
+    // 64 = 100 in octal -> [1, 0, 0], length 3
+    let n64 = to_octal(64, buf);
+    assert_eq(n64, 3);
+    assert_eq(buf[0], 1);
+    assert_eq(buf[1], 0);
+    assert_eq(buf[2], 0);
+
+    // 255 = 377 in octal -> [3, 7, 7], length 3
+    let n255 = to_octal(255, buf);
+    assert_eq(n255, 3);
+    assert_eq(buf[0], 3);
+    assert_eq(buf[1], 7);
+    assert_eq(buf[2], 7);
+
+    // 511 = 777 in octal -> [7, 7, 7], length 3
+    let n511 = to_octal(511, buf);
+    assert_eq(n511, 3);
+    assert_eq(buf[0], 7);
+    assert_eq(buf[1], 7);
+    assert_eq(buf[2], 7);
+
+    // 100 = 144 in octal -> [1, 4, 4], length 3
+    // 100 / 8 = 12 rem 4; 12 / 8 = 1 rem 4; 1 / 8 = 0 rem 1 -> [1, 4, 4]
+    let n100 = to_octal(100, buf);
+    assert_eq(n100, 3);
+    assert_eq(buf[0], 1);
+    assert_eq(buf[1], 4);
+    assert_eq(buf[2], 4);
+
+    print("decimal_to_octal: ok");
+}
+
+fn test_decimal_to_hex() {
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // 16 = 0x10 -> [1, 0], length 2
+    let n16 = to_hex(16, buf);
+    assert_eq(n16, 2);
+    assert_eq(buf[0], 1);
+    assert_eq(buf[1], 0);
+
+    // 255 = 0xFF -> [15, 15], length 2
+    let n255 = to_hex(255, buf);
+    assert_eq(n255, 2);
+    assert_eq(buf[0], 15);
+    assert_eq(buf[1], 15);
+
+    // 256 = 0x100 -> [1, 0, 0], length 3
+    let n256 = to_hex(256, buf);
+    assert_eq(n256, 3);
+    assert_eq(buf[0], 1);
+    assert_eq(buf[1], 0);
+    assert_eq(buf[2], 0);
+
+    // 4095 = 0xFFF -> [15, 15, 15], length 3
+    let n4095 = to_hex(4095, buf);
+    assert_eq(n4095, 3);
+    assert_eq(buf[0], 15);
+    assert_eq(buf[1], 15);
+    assert_eq(buf[2], 15);
+
+    // 170 = 0xAA -> [10, 10], length 2
+    let n170 = to_hex(170, buf);
+    assert_eq(n170, 2);
+    assert_eq(buf[0], 10);
+    assert_eq(buf[1], 10);
+
+    print("decimal_to_hex: ok");
+}
+
+fn test_base_n_to_decimal() {
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Binary: [1,0,1,0,1,0] = 42
+    buf[0] = 1; buf[1] = 0; buf[2] = 1; buf[3] = 0; buf[4] = 1; buf[5] = 0;
+    assert_eq(from_base(buf, 6, 2), 42);
+
+    // Octal: [1,4,4] = 1*64 + 4*8 + 4 = 64 + 32 + 4 = 100
+    buf[0] = 1; buf[1] = 4; buf[2] = 4;
+    assert_eq(from_base(buf, 3, 8), 100);
+
+    // Hex: [1,0,0] = 256
+    buf[0] = 1; buf[1] = 0; buf[2] = 0;
+    assert_eq(from_base(buf, 3, 16), 256);
+
+    // Base 3: [2, 1, 0] = 2*9 + 1*3 + 0 = 18 + 3 + 0 = 21
+    buf[0] = 2; buf[1] = 1; buf[2] = 0;
+    assert_eq(from_base(buf, 3, 3), 21);
+
+    // Base 5: [1, 3, 2] = 1*25 + 3*5 + 2 = 25 + 15 + 2 = 42
+    buf[0] = 1; buf[1] = 3; buf[2] = 2;
+    assert_eq(from_base(buf, 3, 5), 42);
+
+    // Round-trip: 137 -> hex -> decimal
+    let tmp = to_hex(137, buf);
+    let back = from_base(buf, tmp, 16);
+    assert_eq(back, 137);
+
+    // Round-trip: 200 -> binary -> decimal
+    let tmp2 = to_binary(200, buf);
+    let back2 = from_base(buf, tmp2, 2);
+    assert_eq(back2, 200);
+
+    print("base_n_to_decimal: ok");
+}
+
+fn test_digit_sum_properties() {
+    // Digit sum in base 10 simulated via repeated mod/div
+    // digit_sum(123) = 1+2+3 = 6
+    let mut x = 123;
+    let mut dsum = 0;
+    while x > 0 { dsum = dsum + x % 10; x = x / 10; }
+    assert_eq(dsum, 6);
+
+    // digit_sum(999) = 27
+    x = 999; dsum = 0;
+    while x > 0 { dsum = dsum + x % 10; x = x / 10; }
+    assert_eq(dsum, 27);
+
+    // Digital root: repeatedly sum digits until single digit
+    // digital_root(493) = 4+9+3=16 -> 1+6=7
+    x = 493; dsum = 0;
+    while x > 0 { dsum = dsum + x % 10; x = x / 10; }
+    // dsum = 16
+    assert_eq(dsum, 16);
+    let mut x2 = dsum; let mut dsum2 = 0;
+    while x2 > 0 { dsum2 = dsum2 + x2 % 10; x2 = x2 / 10; }
+    // dsum2 = 7
+    assert_eq(dsum2, 7);
+
+    // A number is divisible by 9 iff its digit sum is divisible by 9
+    // 729 = 9^3, digit sum = 7+2+9 = 18, 18%9=0
+    x = 729; dsum = 0;
+    while x > 0 { dsum = dsum + x % 10; x = x / 10; }
+    assert_eq(dsum % 9, 0);
+
+    print("digit_sum_properties: ok");
+}
+
+fn main() -> Int {
+    test_decimal_to_binary();
+    test_decimal_to_octal();
+    test_decimal_to_hex();
+    test_base_n_to_decimal();
+    test_digit_sum_properties();
+    print("[OK] 453_interp_base_conversion");
+    0
+}

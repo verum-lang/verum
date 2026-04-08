@@ -1,0 +1,111 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, codegen, integration
+// @description: Test hygiene in code generation patterns
+
+// =============================================================================
+// GENSYM FOR HYGIENIC BINDINGS
+// =============================================================================
+// Generated code uses gensym to avoid name collisions
+
+meta fn generate_with_gensym(value: Int) -> TokenStream {
+    let temp = gensym("temp");
+    let result = gensym("result");
+
+    quote {
+        fn compute() -> Int {
+            let $temp = $value;
+            let $result = $temp * 2;
+            $result
+        }
+    }
+}
+
+// =============================================================================
+// MULTIPLE GENSYMS DON'T COLLIDE
+// =============================================================================
+
+meta fn multiple_gensyms() -> TokenStream {
+    let a = gensym("x");
+    let b = gensym("x");
+    let c = gensym("x");
+
+    quote {
+        fn no_collision() -> Int {
+            let $a = 1;
+            let $b = 2;
+            let $c = 3;
+            $a + $b + $c  // 6
+        }
+    }
+}
+
+// =============================================================================
+// NESTED QUOTES MAINTAIN HYGIENE
+// =============================================================================
+
+meta fn outer_generator() -> TokenStream {
+    let outer_var = gensym("outer");
+
+    quote {
+        fn generated_outer() -> Int {
+            let $outer_var = 100;
+            $outer_var
+        }
+    }
+}
+
+// =============================================================================
+// SPLICING VALUES MAINTAINS HYGIENE
+// =============================================================================
+
+meta fn splice_value(name: Text, val: Int) -> TokenStream {
+    let ident_name = ident(name);
+
+    quote {
+        fn getter() -> Int {
+            let $ident_name = $val;
+            $ident_name
+        }
+    }
+}
+
+// =============================================================================
+// SIMPLE FIELD GENERATION
+// =============================================================================
+
+meta fn gen_simple_struct(name: Text) -> TokenStream {
+    let type_name = ident(name);
+
+    quote {
+        type $type_name is {
+            value: Int,
+        };
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_gensym_generation() {
+    @generate_with_gensym(50);
+    assert(compute() == 100);
+}
+
+fn test_multiple_gensyms() {
+    @multiple_gensyms();
+    assert(no_collision() == 6);
+}
+
+fn test_splice_value() {
+    @splice_value("my_value", 42);
+    assert(getter() == 42);
+}
+
+fn main() {
+    test_gensym_generation();
+    test_multiple_gensyms();
+    test_splice_value();
+}

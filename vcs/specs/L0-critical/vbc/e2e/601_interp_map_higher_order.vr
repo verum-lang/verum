@@ -1,0 +1,93 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, map, higher_order, for_each, filter, any, all, find, retain, map_values
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Integration test for Map higher-order methods:
+//   for_each, filter, any, all, find, retain, map_values, contains_value
+
+fn test_map_for_each() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let mut sum = [0; 1];
+    m.for_each(|k, v| { sum[0] = sum[0] + k + v; });
+    // sum = (1+10) + (2+20) + (3+30) = 66
+    assert_eq(sum[0], 66);
+    print("map_for_each: ok");
+}
+
+fn test_map_filter() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    let filtered = m.filter(|k, v| { v > 20 });
+    assert_eq(filtered.len(), 2);
+    // Should contain keys 3 and 4
+    assert_eq(filtered.contains_key(3), true);
+    assert_eq(filtered.contains_key(4), true);
+    assert_eq(filtered.contains_key(1), false);
+    print("map_filter: ok");
+}
+
+fn test_map_any_all() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    // any: at least one value > 25
+    assert_eq(m.any(|k, v| { v > 25 }), true);
+    // any: no value > 100
+    assert_eq(m.any(|k, v| { v > 100 }), false);
+    // all: all values > 5
+    assert_eq(m.all(|k, v| { v > 5 }), true);
+    // all: not all values > 15
+    assert_eq(m.all(|k, v| { v > 15 }), false);
+    print("map_any_all: ok");
+}
+
+fn test_map_retain() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    // Keep only entries where value > 20
+    m.retain(|k, v| { v > 20 });
+    assert_eq(m.len(), 2);
+    assert_eq(m.contains_key(3), true);
+    assert_eq(m.contains_key(4), true);
+    assert_eq(m.contains_key(1), false);
+    assert_eq(m.contains_key(2), false);
+    print("map_retain: ok");
+}
+
+fn test_map_contains_value() {
+    let mut m = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+
+    assert_eq(m.contains_value(100), true);
+    assert_eq(m.contains_value(200), true);
+    assert_eq(m.contains_value(300), false);
+    print("map_contains_value: ok");
+}
+
+fn main() -> Int {
+    test_map_for_each();
+    test_map_filter();
+    test_map_any_all();
+    test_map_retain();
+    test_map_contains_value();
+    print("[OK] 601_interp_map_higher_order");
+    0
+}

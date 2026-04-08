@@ -1,0 +1,148 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: data-structures, composition, map-list, nested
+// @description: Test complex data structure compositions
+
+fn test_list_of_maps() -> Int {
+    let mut records = List.new();
+
+    let mut m1 = Map.new();
+    m1.insert(1, 100);
+    m1.insert(2, 200);
+    records.push(m1);
+
+    let mut m2 = Map.new();
+    m2.insert(3, 300);
+    m2.insert(4, 400);
+    records.push(m2);
+
+    // Sum all values
+    let mut total = 0;
+    let r0 = records[0];
+    let r1 = records[1];
+    total = total + r0.get(1) + r0.get(2);
+    total = total + r1.get(3) + r1.get(4);
+
+    if total != 1000 {
+        print(f"FAIL list_of_maps: total={total}, expected 1000");
+        return 1;
+    }
+    print("  list_of_maps: OK");
+    0
+}
+
+fn test_frequency_counter() -> Int {
+    let items = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+    let mut freq = Map.new();
+    let mut i = 0;
+    while i < items.len() {
+        let val = items[i];
+        if freq.contains_key(val) {
+            let count = freq.get(val);
+            freq.insert(val, count + 1);
+        } else {
+            freq.insert(val, 1);
+        }
+        i = i + 1;
+    }
+
+    // 5 appears 3 times
+    if freq.get(5) != 3 {
+        print(f"FAIL freq: count(5)={freq.get(5)}, expected 3");
+        return 1;
+    }
+    // 1 appears 2 times
+    if freq.get(1) != 2 {
+        print(f"FAIL freq: count(1)={freq.get(1)}, expected 2");
+        return 1;
+    }
+    print("  frequency_counter: OK");
+    0
+}
+
+fn test_adjacency_list() -> Int {
+    // Graph: 0-1, 0-2, 1-3, 2-3
+    let mut adj = List.new();
+    let mut i = 0;
+    while i < 4 {
+        adj.push(List.new());
+        i = i + 1;
+    }
+
+    // Helper: add edges by rebuilding
+    let mut a0 = adj[0];
+    a0.push(1);
+    a0.push(2);
+
+    let mut a1 = adj[1];
+    a1.push(0);
+    a1.push(3);
+
+    let mut a2 = adj[2];
+    a2.push(0);
+    a2.push(3);
+
+    let mut a3 = adj[3];
+    a3.push(1);
+    a3.push(2);
+
+    // Check degrees
+    if a0.len() != 2 {
+        print(f"FAIL adj: deg(0)={a0.len()}");
+        return 1;
+    }
+    if a3.len() != 2 {
+        print(f"FAIL adj: deg(3)={a3.len()}");
+        return 1;
+    }
+    print("  adjacency_list: OK");
+    0
+}
+
+fn test_matrix_ops() -> Int {
+    // 3x3 matrix as list of lists
+    let mut m = List.new();
+    let mut i = 0;
+    while i < 3 {
+        let mut row = List.new();
+        let mut j = 0;
+        while j < 3 {
+            if i == j { row.push(1); } else { row.push(0); }
+            j = j + 1;
+        }
+        m.push(row);
+        i = i + 1;
+    }
+
+    // Verify identity matrix trace = 3
+    let mut trace = 0;
+    i = 0;
+    while i < 3 {
+        let row = m[i];
+        trace = trace + row[i];
+        i = i + 1;
+    }
+    if trace != 3 {
+        print(f"FAIL matrix: trace={trace}, expected 3");
+        return 1;
+    }
+    print("  matrix_ops: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Complex Data Tests:");
+    let mut failures = 0;
+    failures = failures + test_list_of_maps();
+    failures = failures + test_frequency_counter();
+    failures = failures + test_adjacency_list();
+    failures = failures + test_matrix_ops();
+
+    if failures == 0 {
+        print("All complex data tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,280 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, float32, parity, math
+// @description: Tests Float32 parity with Float - signum, fract, clamp, trig, etc.
+
+mount core.base.primitives.{Float32};
+
+// =============================================================================
+// Classification methods
+// =============================================================================
+
+@test
+fn test_float32_is_normal() {
+    let normal = 1.0 as Float32;
+    assert(normal.is_normal());
+
+    let zero = 0.0 as Float32;
+    assert(!zero.is_normal());
+
+    let inf = Float32.infinity();
+    assert(!inf.is_normal());
+
+    let nan = Float32.nan();
+    assert(!nan.is_normal());
+}
+
+@test
+fn test_float32_is_positive() {
+    assert((1.0 as Float32).is_positive());
+    assert((0.001 as Float32).is_positive());
+    assert(!(0.0 as Float32).is_positive());
+    assert(!(-1.0 as Float32).is_positive());
+}
+
+@test
+fn test_float32_is_negative() {
+    assert((-1.0 as Float32).is_negative());
+    assert((-0.001 as Float32).is_negative());
+    assert(!(0.0 as Float32).is_negative());
+    assert(!(1.0 as Float32).is_negative());
+}
+
+@test
+fn test_float32_is_zero() {
+    assert((0.0 as Float32).is_zero());
+    assert(!(1.0 as Float32).is_zero());
+    assert(!(-1.0 as Float32).is_zero());
+}
+
+@test
+fn test_float32_signum() {
+    let pos = (3.14 as Float32).signum();
+    assert(pos.is_positive());
+
+    let neg = (-2.7 as Float32).signum();
+    assert(neg.is_negative());
+
+    let zero_sig = (0.0 as Float32).signum();
+    assert(zero_sig.is_zero());
+}
+
+// =============================================================================
+// Rounding and fractional
+// =============================================================================
+
+@test
+fn test_float32_fract() {
+    let val = 3.75 as Float32;
+    let f: Float32 = val.fract();
+    // fract() = val - trunc(val) = 3.75 - 3.0 = 0.75
+    assert(f.is_positive());
+    assert(!f.is_zero());
+}
+
+@test
+fn test_float32_clamp() {
+    let val = 5.0 as Float32;
+    let clamped = val.clamp(0.0 as Float32, 3.0 as Float32);
+    // 5.0 clamped to [0, 3] = 3.0
+    assert(!clamped.is_zero());
+
+    let low = -5.0 as Float32;
+    let clamped_low = low.clamp(0.0 as Float32, 10.0 as Float32);
+    assert(clamped_low.is_zero());
+
+    let mid = 2.0 as Float32;
+    let clamped_mid = mid.clamp(0.0 as Float32, 10.0 as Float32);
+    // 2.0 stays 2.0
+    assert(clamped_mid.is_positive());
+}
+
+// =============================================================================
+// Copysign
+// =============================================================================
+
+@test
+fn test_float32_copysign() {
+    let val = 3.0 as Float32;
+    let neg_sign = val.copysign(-1.0 as Float32);
+    assert(neg_sign.is_negative());
+
+    let neg_val = -5.0 as Float32;
+    let pos_sign = neg_val.copysign(1.0 as Float32);
+    assert(pos_sign.is_positive());
+}
+
+// =============================================================================
+// Exponential / Logarithmic
+// =============================================================================
+
+@test
+fn test_float32_exp_m1() {
+    // exp_m1(0) = e^0 - 1 = 0
+    let val = 0.0 as Float32;
+    let result: Float32 = val.exp_m1();
+    assert(result.is_zero() || result.abs() < (0.001 as Float32));
+}
+
+@test
+fn test_float32_ln_1p() {
+    // ln_1p(0) = ln(1) = 0
+    let val = 0.0 as Float32;
+    let result: Float32 = val.ln_1p();
+    assert(result.is_zero() || result.abs() < (0.001 as Float32));
+}
+
+@test
+fn test_float32_log_base() {
+    // log_base(8, 2) = 3
+    let val = 8.0 as Float32;
+    let result: Float32 = val.log_base(2.0 as Float32);
+    assert(result.is_positive());
+}
+
+@test
+fn test_float32_powi() {
+    let val = 2.0 as Float32;
+    let result: Float32 = val.powi(3);
+    // 2^3 = 8
+    assert(result.is_positive());
+}
+
+// =============================================================================
+// Trigonometric
+// =============================================================================
+
+@test
+fn test_float32_sin_cos() {
+    let angle = 0.0 as Float32;
+    let pair: (Float32, Float32) = angle.sin_cos();
+    // sin(0) = 0, cos(0) = 1
+    let sin_val = pair.0;
+    let cos_val = pair.1;
+    assert(sin_val.abs() < (0.001 as Float32));
+    assert(cos_val.is_positive());
+}
+
+@test
+fn test_float32_to_degrees() {
+    let radians = 3.14159265 as Float32;
+    let degrees: Float32 = radians.to_degrees();
+    // pi radians = 180 degrees
+    assert(degrees.is_positive());
+}
+
+@test
+fn test_float32_to_radians() {
+    let degrees = 180.0 as Float32;
+    let radians: Float32 = degrees.to_radians();
+    // 180 degrees = pi radians
+    assert(radians.is_positive());
+}
+
+// =============================================================================
+// Hyperbolic inverse
+// =============================================================================
+
+@test
+fn test_float32_asinh() {
+    let val = 0.0 as Float32;
+    let result: Float32 = val.asinh();
+    // asinh(0) = 0
+    assert(result.abs() < (0.001 as Float32));
+}
+
+@test
+fn test_float32_acosh() {
+    let val = 1.0 as Float32;
+    let result: Float32 = val.acosh();
+    // acosh(1) = 0
+    assert(result.abs() < (0.001 as Float32));
+}
+
+@test
+fn test_float32_atanh() {
+    let val = 0.0 as Float32;
+    let result: Float32 = val.atanh();
+    // atanh(0) = 0
+    assert(result.abs() < (0.001 as Float32));
+}
+
+// =============================================================================
+// Conversion
+// =============================================================================
+
+@test
+fn test_float32_to_int() {
+    let val = 42.7 as Float32;
+    let i: Int = val.to_int();
+    assert_eq(i, 42);
+
+    let neg = -3.9 as Float32;
+    let i2: Int = neg.to_int();
+    assert_eq(i2, -3);
+}
+
+// =============================================================================
+// Consistency: Float32 methods match Float behavior
+// =============================================================================
+
+@test
+fn test_float32_method_consistency() {
+    let f32_val = 2.5 as Float32;
+
+    // Verify methods exist — avoid explicit Float32 annotations on intrinsic returns
+    let _abs = f32_val.abs();
+    let _sqrt = f32_val.sqrt();
+    let _floor = f32_val.floor();
+    let _ceil = f32_val.ceil();
+    let _round = f32_val.round();
+    let _trunc = f32_val.trunc();
+    let _fract = f32_val.fract();
+    let _signum = f32_val.signum();
+    let _clamp = f32_val.clamp(0.0 as Float32, 5.0 as Float32);
+    let _exp = f32_val.exp();
+    let _ln = f32_val.ln();
+    let _log2 = f32_val.log2();
+    let _log10 = f32_val.log10();
+    let _sin = f32_val.sin();
+    let _cos = f32_val.cos();
+    let _tan = f32_val.tan();
+    let _sinh = f32_val.sinh();
+    let _cosh = f32_val.cosh();
+    let _tanh = f32_val.tanh();
+    let _asinh = f32_val.asinh();
+    let _acosh = f32_val.acosh();
+    let _powi = f32_val.powi(3);
+    let _exp_m1 = f32_val.exp_m1();
+    let _ln_1p = f32_val.ln_1p();
+    let _log_base = f32_val.log_base(10.0 as Float32);
+    let _copysign = f32_val.copysign(-1.0 as Float32);
+    let _degrees = f32_val.to_degrees();
+    let _radians = f32_val.to_radians();
+    let _pair = f32_val.sin_cos();
+    let _to_int: Int = f32_val.to_int();
+    let _to_float: Float = f32_val.to_float();
+    let _is_norm: Bool = f32_val.is_normal();
+    let _is_pos: Bool = f32_val.is_positive();
+    let _is_neg: Bool = f32_val.is_negative();
+    let _is_z: Bool = f32_val.is_zero();
+
+    assert(_is_norm);
+    assert(_is_pos);
+    assert(!_is_neg);
+    assert(!_is_z);
+}
+
+@test
+fn test_float32_special_values() {
+    let inf = Float32.infinity();
+    let neg_inf = Float32.neg_infinity();
+    let nan = Float32.nan();
+
+    assert(inf.is_infinite());
+    assert(neg_inf.is_infinite());
+    assert(nan.is_nan());
+    assert(!inf.is_normal());
+    assert(!nan.is_normal());
+    assert(!inf.is_zero());
+}

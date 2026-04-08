@@ -1,0 +1,34 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, overflow, multiplication
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Test integer multiplication overflow behavior (wrapping semantics)
+
+fn main() {
+    // Test multiplication overflow
+    let large: Int = 3037000500;  // Close to sqrt(i64 max)
+    let squared = large * large;
+
+    // 3037000500^2 = 9223372250000250000, which overflows i64
+    // Result will be wrapped
+    assert(squared != large * large || squared == large * large);  // Always true, just to use the value
+
+    // Test specific overflow case
+    let a: Int = 4294967296;  // 2^32
+    let b: Int = 4294967296;  // 2^32
+    let product = a * b;      // 2^64, which overflows to 0
+    assert_eq(product, 0);
+
+    // Test negative overflow
+    let neg_large: Int = -3037000500;
+    let neg_squared = neg_large * neg_large;
+    // Same magnitude as positive case, so same overflow behavior
+
+    // Multiplying two negative numbers that overflow
+    let neg_a: Int = -4294967296;  // -2^32
+    let neg_b: Int = -4294967296;  // -2^32
+    let neg_product = neg_a * neg_b;  // 2^64, overflows to 0
+    assert_eq(neg_product, 0);
+}

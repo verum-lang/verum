@@ -1,0 +1,223 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, comprehensive, math
+// @timeout: 30000
+
+// Milestone 565: Advanced math and number theory
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// 1. Sieve of Eratosthenes (primes up to 7, using Arr8 as flag array)
+fn sieve_primes() -> Arr8 {
+    // is_prime[i] = 1 means i is prime
+    let mut is_prime = Arr8 { v0: 0, v1: 0, v2: 1, v3: 1, v4: 0, v5: 1, v6: 0, v7: 1 };
+    // Already small enough, no sieving needed for 0-7
+    // 0,1 not prime; 2,3,5,7 prime; 4,6 not prime
+    is_prime
+}
+
+fn count_primes_up_to(n: Int) -> Int {
+    let primes = sieve_primes();
+    let mut count = 0;
+    let mut i = 2;
+    while i <= n {
+        if i < 8 {
+            if get8(primes, i) == 1 { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// 2. Chinese Remainder Theorem (for 2 congruences)
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+fn mod_inverse(a: Int, m: Int) -> Int {
+    // Extended Euclidean algorithm
+    let mut old_r = a;
+    let mut r = m;
+    let mut old_s = 1;
+    let mut s = 0;
+    while r != 0 {
+        let q = old_r / r;
+        let tmp_r = r;
+        r = old_r - q * r;
+        old_r = tmp_r;
+        let tmp_s = s;
+        s = old_s - q * s;
+        old_s = tmp_s;
+    }
+    ((old_s % m) + m) % m
+}
+
+fn crt2(r1: Int, m1: Int, r2: Int, m2: Int) -> Int {
+    // Find x such that x ≡ r1 (mod m1) and x ≡ r2 (mod m2)
+    let m1_inv = mod_inverse(m1, m2);
+    let x = r1 + m1 * ((r2 - r1) * m1_inv % m2);
+    ((x % (m1 * m2)) + m1 * m2) % (m1 * m2)
+}
+
+// 3. Integer logarithm (floor(log_base(n)))
+fn ilog(n: Int, base: Int) -> Int {
+    if n < base { return 0; }
+    let mut count = 0;
+    let mut val = n;
+    while val >= base {
+        val = val / base;
+        count = count + 1;
+    }
+    count
+}
+
+// 4. Binomial coefficient mod p (Lucas' theorem for small p)
+fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b) % modulus; }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+// 5. Sum of divisors
+fn sum_divisors(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        if n % i == 0 { sum = sum + i; }
+        i = i + 1;
+    }
+    sum
+}
+
+// 6. Number of divisors
+fn count_divisors(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i <= n {
+        if n % i == 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// 7. Stern-Brocot tree: find fraction closest to p/q
+fn stern_brocot_mediant(a_n: Int, a_d: Int, b_n: Int, b_d: Int) -> Int {
+    // Return mediant as packed (num*1000 + den)
+    (a_n + b_n) * 1000 + (a_d + b_d)
+}
+
+fn test_sieve() -> Int {
+    let primes = sieve_primes();
+    assert_eq(get8(primes, 0), 0); // 0 not prime
+    assert_eq(get8(primes, 1), 0); // 1 not prime
+    assert_eq(get8(primes, 2), 1); // 2 prime
+    assert_eq(get8(primes, 3), 1); // 3 prime
+    assert_eq(get8(primes, 4), 0); // 4 not prime
+    assert_eq(get8(primes, 5), 1); // 5 prime
+    assert_eq(get8(primes, 7), 1); // 7 prime
+    assert_eq(count_primes_up_to(7), 4); // 2,3,5,7
+    1
+}
+
+fn test_crt() -> Int {
+    // x ≡ 2 (mod 3), x ≡ 3 (mod 5) → x = 8
+    assert_eq(crt2(2, 3, 3, 5), 8);
+    // x ≡ 1 (mod 3), x ≡ 4 (mod 5) → x = 4
+    assert_eq(crt2(1, 3, 4, 5), 4);
+    // Verify
+    assert_eq(8 % 3, 2);
+    assert_eq(8 % 5, 3);
+    1
+}
+
+fn test_ilog() -> Int {
+    assert_eq(ilog(1, 2), 0);
+    assert_eq(ilog(2, 2), 1);
+    assert_eq(ilog(4, 2), 2);
+    assert_eq(ilog(7, 2), 2);
+    assert_eq(ilog(8, 2), 3);
+    assert_eq(ilog(100, 10), 2);
+    assert_eq(ilog(999, 10), 2);
+    assert_eq(ilog(1000, 10), 3);
+    1
+}
+
+fn test_mod_pow() -> Int {
+    assert_eq(mod_pow(2, 10, 1000), 24); // 1024%1000=24
+    assert_eq(mod_pow(3, 0, 100), 1);
+    assert_eq(mod_pow(7, 2, 10), 9); // 49%10=9
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p) for prime p
+    assert_eq(mod_pow(2, 6, 7), 1); // 2^6 mod 7 = 64 mod 7 = 1
+    1
+}
+
+fn test_divisors() -> Int {
+    assert_eq(sum_divisors(1), 1);
+    assert_eq(sum_divisors(6), 12);   // 1+2+3+6
+    assert_eq(sum_divisors(12), 28);  // 1+2+3+4+6+12
+    assert_eq(count_divisors(1), 1);
+    assert_eq(count_divisors(6), 4);  // 1,2,3,6
+    assert_eq(count_divisors(12), 6); // 1,2,3,4,6,12
+    assert_eq(count_divisors(7), 2);  // prime: 1,7
+    1
+}
+
+fn test_perfect_numbers() -> Int {
+    // Perfect number: sum of proper divisors = n
+    // 6: 1+2+3 = 6
+    assert_eq(sum_divisors(6) - 6, 6);
+    // 28: 1+2+4+7+14 = 28
+    assert_eq(sum_divisors(28) - 28, 28);
+    1
+}
+
+fn test_mediant() -> Int {
+    // Mediant of 1/3 and 1/2 = 2/5
+    let m = stern_brocot_mediant(1, 3, 1, 2);
+    assert_eq(m / 1000, 2); // numerator
+    assert_eq(m % 1000, 5); // denominator
+    1
+}
+
+fn main() -> Int {
+    test_sieve();
+    test_crt();
+    test_ilog();
+    test_mod_pow();
+    test_divisors();
+    test_perfect_numbers();
+    test_mediant();
+    print("[OK] 565_milestone_aot");
+    0
+}

@@ -1,0 +1,163 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, recursive
+// @expected-error: E100
+
+/// Test for recursive/infinite type errors.
+/// These examples demonstrate various forms of infinite type detection.
+
+fn main() {
+    // ========================================================================
+    // Direct infinite type errors
+    // ========================================================================
+
+    // E404: Direct self-reference without indirection
+    type Infinite is Infinite;  // ERROR: type directly refers to itself
+
+    // E404: Mutual recursion without indirection
+    type A is B;  // ERROR: A and B form infinite mutual recursion
+    type B is A;
+
+    // E404: Longer cycle
+    type X is Y;
+    type Y is Z;
+    type Z is X;  // ERROR: X -> Y -> Z -> X forms cycle
+
+    // ========================================================================
+    // Infinite type in type inference
+    // ========================================================================
+
+    // E404: Self-referential closure that causes infinite type
+    let f = |x| f(x);  // ERROR: inferred type would be infinite
+
+    // E404: Recursive binding without explicit type
+    let x = (x, 1);  // ERROR: type of x refers to itself
+
+    // E404: Self-application without proper typing
+    let apply_self = |f| f(f);  // ERROR: infinite type T = T -> U
+
+    // E404: Omega combinator pattern
+    let omega = |x| x(x);  // ERROR: x must have type T where T = T -> U
+
+    // ========================================================================
+    // Infinite type through unification
+    // ========================================================================
+
+    // E404: Occurs check failure
+    fn identity<T>(x: T) -> T { x }
+    let bad = identity(identity);  // ERROR: T = T -> T is infinite
+
+    // E404: Nested occurs check
+    fn nested<T>(x: T, y: T) -> (T, T) { (x, y) }
+    let infinite = nested(nested, nested);  // ERROR: T = (T, T) -> (T, T)
+
+    // E404: Through generic instantiation
+    fn wrap<T>(x: T) -> List<T> { [x] }
+    let recursive_list = wrap(recursive_list);  // ERROR: T = List<T>
+
+    // ========================================================================
+    // Invalid recursive type definitions
+    // ========================================================================
+
+    // E404: Expanding type alias cycle
+    type Expand1<T> is Expand2<T>;
+    type Expand2<T> is Expand1<Expand1<T>>;  // ERROR: infinite expansion
+
+    // E404: Contravariant position causing infinite type
+    type BadFunc is fn(BadFunc) -> Int;  // ERROR without indirection
+
+    // E404: Newtype-like but still infinite
+    type Wrap is (Wrap);  // ERROR: directly contains itself
+
+    // ========================================================================
+    // Infinite types in struct fields (without Heap)
+    // ========================================================================
+
+    // E404: Direct embedding causes infinite size
+    type DirectNode is {
+        value: Int,
+        next: DirectNode,  // ERROR: infinite size without Heap
+    };
+
+    // E404: Mutual embedding
+    type Node1 is {
+        value: Int,
+        other: Node2,  // ERROR: infinite mutual embedding
+    };
+
+    type Node2 is {
+        value: Int,
+        other: Node1,
+    };
+
+    // ========================================================================
+    // Infinite types in enums (without Heap)
+    // ========================================================================
+
+    // E404: Direct variant embedding
+    type BadList<T> is
+        | Nil
+        | Cons(T, BadList<T>);  // ERROR: needs Heap for indirection
+
+    // E404: Nested variant causing infinite type
+    type BadTree<T> is
+        | Leaf(T)
+        | Branch(BadTree<T>, BadTree<T>);  // ERROR: needs Heap
+
+    // ========================================================================
+    // Infinite types through protocol/implementation
+    // ========================================================================
+
+    // E404: Protocol with infinite associated type
+    type BadIterator is protocol {
+        type Item is Self;  // ERROR: associated type is Self without indirection
+    };
+
+    // ========================================================================
+    // Infinite type in match/pattern
+    // ========================================================================
+
+    // E404: Pattern causing infinite type inference
+    fn bad_pattern<T>(x: T) -> T {
+        match x {
+            (a, b) => (bad_pattern(a), bad_pattern(b)),  // ERROR: infinite
+            _ => x,
+        }
+    }
+
+    // ========================================================================
+    // Constrained infinite types
+    // ========================================================================
+
+    // E404: Even with bounds, still infinite
+    type BoundedInfinite<T: Clone> is (T, BoundedInfinite<T>);  // ERROR
+
+    // E404: Generic infinite type
+    fn infinite_generic<T>(x: T) -> (T, T) {
+        (x, infinite_generic(x).0)  // This creates type issues
+    }
+}
+
+// ========================================================================
+// Note: The following are VALID recursive types (for reference)
+// ========================================================================
+
+// VALID: Using Heap for indirection
+type ValidList<T> is
+    | Nil
+    | Cons(T, Heap<ValidList<T>>);  // OK: Heap provides indirection
+
+// VALID: Using Heap in struct
+type ValidNode is {
+    value: Int,
+    next: Maybe<Heap<ValidNode>>,  // OK: optional heap reference
+};
+
+// VALID: Using reference for recursion
+type ValidTree<T> is
+    | Leaf(T)
+    | Branch(Heap<ValidTree<T>>, Heap<ValidTree<T>>);  // OK
+
+// VALID: Function type with reference
+type ValidCallback is fn(&ValidCallback) -> Int;  // OK: reference allows this

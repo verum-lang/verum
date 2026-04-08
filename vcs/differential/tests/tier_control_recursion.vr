@@ -1,0 +1,494 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, control-flow, recursion
+// @timeout: 20000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for recursive functions.
+/// Tests direct recursion, mutual recursion, tail recursion, and tree recursion patterns.
+
+fn main() {
+    test_simple_recursion();
+    test_fibonacci();
+    test_factorial();
+    test_list_recursion();
+    test_tree_recursion();
+    test_mutual_recursion();
+    test_tail_recursion();
+    test_accumulator_pattern();
+    test_divide_and_conquer();
+    test_memoized_recursion();
+}
+
+/// Simple recursive functions
+fn test_simple_recursion() {
+    println("=== Simple Recursion ===");
+
+    // Countdown
+    fn countdown(n: Int) {
+        if n <= 0 {
+            println("blast off!");
+        } else {
+            println(f"  {n}");
+            countdown(n - 1);
+        }
+    }
+
+    println("countdown from 5:");
+    countdown(5);
+
+    // Sum to n
+    fn sum_to(n: Int) -> Int {
+        if n <= 0 { 0 } else { n + sum_to(n - 1) }
+    }
+
+    for n in [0, 1, 5, 10] {
+        println(f"sum_to({n}): {sum_to(n)}");
+    }
+
+    // Power
+    fn power(base: Int, exp: Int) -> Int {
+        if exp == 0 { 1 } else { base * power(base, exp - 1) }
+    }
+
+    for (b, e) in [(2, 0), (2, 5), (3, 4), (10, 3)] {
+        println(f"power({b}, {e}): {power(b, e)}");
+    }
+}
+
+/// Fibonacci sequence
+fn test_fibonacci() {
+    println("\n=== Fibonacci ===");
+
+    // Simple recursive
+    fn fib(n: Int) -> Int {
+        if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+    }
+
+    println("fibonacci (simple recursive):");
+    for n in 0..=12 {
+        println(f"  fib({n}) = {fib(n)}");
+    }
+
+    // Tail recursive with accumulator
+    fn fib_tail(n: Int, a: Int, b: Int) -> Int {
+        if n == 0 { a }
+        else if n == 1 { b }
+        else { fib_tail(n - 1, b, a + b) }
+    }
+
+    println("fibonacci (tail recursive):");
+    for n in [0, 5, 10, 15, 20] {
+        println(f"  fib_tail({n}) = {fib_tail(n, 0, 1)}");
+    }
+}
+
+/// Factorial computation
+fn test_factorial() {
+    println("\n=== Factorial ===");
+
+    // Simple recursive
+    fn factorial(n: Int) -> Int {
+        if n <= 1 { 1 } else { n * factorial(n - 1) }
+    }
+
+    for n in 0..=10 {
+        println(f"factorial({n}) = {factorial(n)}");
+    }
+
+    // Double factorial (n!! = n * (n-2) * ...)
+    fn double_factorial(n: Int) -> Int {
+        if n <= 1 { 1 } else { n * double_factorial(n - 2) }
+    }
+
+    println("double factorial:");
+    for n in [1, 2, 3, 4, 5, 6, 7, 8] {
+        println(f"  {n}!! = {double_factorial(n)}");
+    }
+}
+
+/// Recursion on lists
+fn test_list_recursion() {
+    println("\n=== List Recursion ===");
+
+    // Length
+    fn length<T>(list: List<T>) -> Int {
+        match list {
+            [] => 0,
+            [_, ..rest] => 1 + length(rest),
+        }
+    }
+
+    println(f"length([]): {length([])}");
+    println(f"length([1,2,3]): {length([1, 2, 3])}");
+    println(f"length([1,2,3,4,5]): {length([1, 2, 3, 4, 5])}");
+
+    // Sum
+    fn sum(list: List<Int>) -> Int {
+        match list {
+            [] => 0,
+            [head, ..tail] => head + sum(tail),
+        }
+    }
+
+    println(f"sum([]): {sum([])}");
+    println(f"sum([1,2,3,4,5]): {sum([1, 2, 3, 4, 5])}");
+
+    // Reverse
+    fn reverse<T>(list: List<T>) -> List<T> {
+        fn go<T>(src: List<T>, acc: List<T>) -> List<T> {
+            match src {
+                [] => acc,
+                [head, ..tail] => go(tail, [head] + acc),
+            }
+        }
+        go(list, [])
+    }
+
+    println(f"reverse([1,2,3]): {reverse([1, 2, 3])}");
+    println(f"reverse(['a','b','c','d']): {reverse(['a', 'b', 'c', 'd'])}");
+
+    // Map
+    fn map_list(list: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+        match list {
+            [] => [],
+            [head, ..tail] => [f(head)] + map_list(tail, f),
+        }
+    }
+
+    let doubled = map_list([1, 2, 3, 4, 5], |x| x * 2);
+    println(f"map double [1,2,3,4,5]: {doubled}");
+
+    // Filter
+    fn filter_list(list: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+        match list {
+            [] => [],
+            [head, ..tail] => {
+                let rest = filter_list(tail, pred);
+                if pred(head) { [head] + rest } else { rest }
+            },
+        }
+    }
+
+    let evens = filter_list([1, 2, 3, 4, 5, 6], |x| x % 2 == 0);
+    println(f"filter evens [1,2,3,4,5,6]: {evens}");
+}
+
+/// Tree recursion
+fn test_tree_recursion() {
+    println("\n=== Tree Recursion ===");
+
+    // Binary tree type
+    type Tree<T> is Leaf | Node { value: T, left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+    // Tree height
+    fn height<T>(tree: &Tree<T>) -> Int {
+        match tree {
+            Leaf => 0,
+            Node { left, right, .. } => {
+                let lh = height(&*left);
+                let rh = height(&*right);
+                1 + if lh > rh { lh } else { rh }
+            },
+        }
+    }
+
+    // Tree size
+    fn size<T>(tree: &Tree<T>) -> Int {
+        match tree {
+            Leaf => 0,
+            Node { left, right, .. } => 1 + size(&*left) + size(&*right),
+        }
+    }
+
+    // Build a sample tree
+    let tree = Node {
+        value: 1,
+        left: Heap(Node {
+            value: 2,
+            left: Heap(Leaf),
+            right: Heap(Leaf),
+        }),
+        right: Heap(Node {
+            value: 3,
+            left: Heap(Node {
+                value: 4,
+                left: Heap(Leaf),
+                right: Heap(Leaf),
+            }),
+            right: Heap(Leaf),
+        }),
+    };
+
+    println(f"tree height: {height(&tree)}");
+    println(f"tree size: {size(&tree)}");
+
+    // Tree sum
+    fn tree_sum(tree: &Tree<Int>) -> Int {
+        match tree {
+            Leaf => 0,
+            Node { value, left, right } => *value + tree_sum(&*left) + tree_sum(&*right),
+        }
+    }
+
+    println(f"tree sum: {tree_sum(&tree)}");
+
+    // In-order traversal
+    fn inorder(tree: &Tree<Int>, acc: &mut List<Int>) {
+        match tree {
+            Leaf => {},
+            Node { value, left, right } => {
+                inorder(&*left, acc);
+                acc.push(*value);
+                inorder(&*right, acc);
+            },
+        }
+    }
+
+    let mut result: List<Int> = [];
+    inorder(&tree, &mut result);
+    println(f"inorder traversal: {result}");
+}
+
+/// Mutual recursion
+fn test_mutual_recursion() {
+    println("\n=== Mutual Recursion ===");
+
+    // Even/odd via mutual recursion
+    fn is_even(n: Int) -> Bool {
+        if n == 0 { true } else { is_odd(n - 1) }
+    }
+
+    fn is_odd(n: Int) -> Bool {
+        if n == 0 { false } else { is_even(n - 1) }
+    }
+
+    for n in 0..=10 {
+        println(f"is_even({n}): {is_even(n)}, is_odd({n}): {is_odd(n)}");
+    }
+
+    // Hofstadter Female and Male sequences
+    fn F(n: Int) -> Int {
+        if n == 0 { 1 } else { n - M(F(n - 1)) }
+    }
+
+    fn M(n: Int) -> Int {
+        if n == 0 { 0 } else { n - F(M(n - 1)) }
+    }
+
+    println("Hofstadter F and M:");
+    for n in 0..=10 {
+        println(f"  F({n}) = {F(n)}, M({n}) = {M(n)}");
+    }
+}
+
+/// Tail recursion patterns
+fn test_tail_recursion() {
+    println("\n=== Tail Recursion ===");
+
+    // Tail-recursive factorial
+    fn factorial_tail(n: Int, acc: Int) -> Int {
+        if n <= 1 { acc } else { factorial_tail(n - 1, n * acc) }
+    }
+
+    for n in [0, 1, 5, 10, 12] {
+        println(f"factorial_tail({n}): {factorial_tail(n, 1)}");
+    }
+
+    // Tail-recursive sum
+    fn sum_tail(n: Int, acc: Int) -> Int {
+        if n <= 0 { acc } else { sum_tail(n - 1, acc + n) }
+    }
+
+    for n in [0, 10, 100] {
+        println(f"sum_tail({n}): {sum_tail(n, 0)}");
+    }
+
+    // Tail-recursive GCD
+    fn gcd(a: Int, b: Int) -> Int {
+        if b == 0 { a } else { gcd(b, a % b) }
+    }
+
+    for (a, b) in [(12, 8), (48, 18), (100, 35), (17, 13)] {
+        println(f"gcd({a}, {b}): {gcd(a, b)}");
+    }
+
+    // Tail-recursive exponentiation
+    fn power_tail(base: Int, exp: Int, acc: Int) -> Int {
+        if exp == 0 { acc }
+        else if exp % 2 == 0 { power_tail(base * base, exp / 2, acc) }
+        else { power_tail(base, exp - 1, acc * base) }
+    }
+
+    for (b, e) in [(2, 10), (3, 5), (5, 4)] {
+        println(f"power_tail({b}, {e}): {power_tail(b, e, 1)}");
+    }
+}
+
+/// Accumulator pattern
+fn test_accumulator_pattern() {
+    println("\n=== Accumulator Pattern ===");
+
+    // List length with accumulator
+    fn length_acc<T>(list: List<T>, acc: Int) -> Int {
+        match list {
+            [] => acc,
+            [_, ..tail] => length_acc(tail, acc + 1),
+        }
+    }
+
+    println(f"length with acc: {length_acc([1, 2, 3, 4, 5], 0)}");
+
+    // Collect digits
+    fn digits(n: Int, acc: List<Int>) -> List<Int> {
+        if n == 0 { acc }
+        else { digits(n / 10, [n % 10] + acc) }
+    }
+
+    for n in [0, 5, 42, 12345] {
+        let d = if n == 0 { [0] } else { digits(n, []) };
+        println(f"digits({n}): {d}");
+    }
+
+    // String building
+    fn repeat_char(c: Char, n: Int, acc: Text) -> Text {
+        if n <= 0 { acc }
+        else { repeat_char(c, n - 1, acc + c.to_string()) }
+    }
+
+    println(f"repeat 'x' 5 times: {repeat_char('x', 5, \"\")}");
+    println(f"repeat 'ab' pattern: {repeat_char('*', 10, \"\")}");
+}
+
+/// Divide and conquer
+fn test_divide_and_conquer() {
+    println("\n=== Divide and Conquer ===");
+
+    // Binary search
+    fn binary_search(arr: &List<Int>, target: Int, low: Int, high: Int) -> Maybe<Int> {
+        if low > high {
+            None
+        } else {
+            let mid = (low + high) / 2;
+            if arr[mid] == target {
+                Some(mid)
+            } else if arr[mid] < target {
+                binary_search(arr, target, mid + 1, high)
+            } else {
+                binary_search(arr, target, low, mid - 1)
+            }
+        }
+    }
+
+    let sorted = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19];
+    for target in [1, 7, 15, 19, 6, 20] {
+        let result = binary_search(&sorted, target, 0, sorted.len() - 1);
+        println(f"binary_search for {target}: {result}");
+    }
+
+    // Merge sort (simplified)
+    fn merge(left: List<Int>, right: List<Int>) -> List<Int> {
+        match (left, right) {
+            ([], r) => r,
+            (l, []) => l,
+            ([lh, ..lt], [rh, ..rt]) => {
+                if lh <= rh {
+                    [lh] + merge(lt, [rh] + rt)
+                } else {
+                    [rh] + merge([lh] + lt, rt)
+                }
+            },
+        }
+    }
+
+    fn merge_sort(arr: List<Int>) -> List<Int> {
+        if arr.len() <= 1 {
+            arr
+        } else {
+            let mid = arr.len() / 2;
+            let left = merge_sort(arr[..mid].to_list());
+            let right = merge_sort(arr[mid..].to_list());
+            merge(left, right)
+        }
+    }
+
+    let unsorted = [3, 1, 4, 1, 5, 9, 2, 6];
+    println(f"merge_sort({unsorted}): {merge_sort(unsorted)}");
+
+    // Quick select (find kth smallest)
+    fn quick_select(arr: List<Int>, k: Int) -> Int {
+        if arr.len() == 1 {
+            arr[0]
+        } else {
+            let pivot = arr[0];
+            let less = arr[1..].filter(|x| x < pivot).to_list();
+            let greater = arr[1..].filter(|x| x >= pivot).to_list();
+
+            if k < less.len() {
+                quick_select(less, k)
+            } else if k == less.len() {
+                pivot
+            } else {
+                quick_select(greater, k - less.len() - 1)
+            }
+        }
+    }
+
+    let nums = [7, 2, 5, 3, 8, 1, 6, 4];
+    for k in 0..nums.len() {
+        println(f"quick_select(nums, {k}): {quick_select(nums, k)}");
+    }
+}
+
+/// Memoized recursion
+fn test_memoized_recursion() {
+    println("\n=== Memoized Recursion ===");
+
+    // Memoized fibonacci using a cache
+    fn fib_memo(n: Int, cache: &mut Map<Int, Int>) -> Int {
+        if let Some(cached) = cache.get(n) {
+            return cached;
+        }
+
+        let result = if n <= 1 {
+            n
+        } else {
+            fib_memo(n - 1, cache) + fib_memo(n - 2, cache)
+        };
+
+        cache.insert(n, result);
+        result
+    }
+
+    let mut cache: Map<Int, Int> = {};
+    for n in [0, 5, 10, 20, 30, 35] {
+        println(f"fib_memo({n}): {fib_memo(n, &mut cache)}");
+    }
+    println(f"cache size after calls: {cache.len()}");
+
+    // Coin change with memoization
+    fn coin_change(amount: Int, coins: &List<Int>, cache: &mut Map<Int, Int>) -> Int {
+        if amount == 0 { return 1; }
+        if amount < 0 { return 0; }
+
+        if let Some(cached) = cache.get(amount) {
+            return cached;
+        }
+
+        let mut ways = 0;
+        for coin in coins {
+            ways = ways + coin_change(amount - coin, coins, cache);
+        }
+
+        cache.insert(amount, ways);
+        ways
+    }
+
+    let coins = [1, 2, 5];
+    let mut change_cache: Map<Int, Int> = {};
+    for amount in [5, 10, 15, 20] {
+        change_cache.clear();
+        let ways = coin_change(amount, &coins, &mut change_cache);
+        println(f"ways to make {amount} cents: {ways}");
+    }
+}

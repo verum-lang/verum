@@ -1,0 +1,217 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, ring-buffer, circular, queue
+// @timeout: 30000
+
+// Ring buffer (circular buffer) implementation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Ring buffer with capacity 8
+type RingBuf is {
+    data: Arr8,
+    head: Int,   // read position
+    tail: Int,   // write position
+    count: Int,  // current count
+    cap: Int     // capacity
+};
+
+fn new_ring(cap: Int) -> RingBuf {
+    RingBuf { data: zeros(), head: 0, tail: 0, count: 0, cap: cap }
+}
+
+fn ring_is_empty(rb: RingBuf) -> Int { if rb.count == 0 { 1 } else { 0 } }
+fn ring_is_full(rb: RingBuf) -> Int { if rb.count == rb.cap { 1 } else { 0 } }
+
+fn ring_push(rb: RingBuf, val: Int) -> RingBuf {
+    if rb.count == rb.cap {
+        // Overwrite oldest (advance head)
+        let new_data = set8(rb.data, rb.tail, val);
+        RingBuf {
+            data: new_data,
+            head: (rb.head + 1) % rb.cap,
+            tail: (rb.tail + 1) % rb.cap,
+            count: rb.count,
+            cap: rb.cap
+        }
+    } else {
+        let new_data = set8(rb.data, rb.tail, val);
+        RingBuf {
+            data: new_data,
+            head: rb.head,
+            tail: (rb.tail + 1) % rb.cap,
+            count: rb.count + 1,
+            cap: rb.cap
+        }
+    }
+}
+
+// Pop from front, returns (value, new_ring)
+type PopResult is { value: Int, ring: RingBuf };
+
+fn ring_pop(rb: RingBuf) -> PopResult {
+    if rb.count == 0 {
+        return PopResult { value: -1, ring: rb };
+    }
+    let val = get8(rb.data, rb.head);
+    PopResult {
+        value: val,
+        ring: RingBuf {
+            data: rb.data,
+            head: (rb.head + 1) % rb.cap,
+            tail: rb.tail,
+            count: rb.count - 1,
+            cap: rb.cap
+        }
+    }
+}
+
+// Peek at front
+fn ring_peek(rb: RingBuf) -> Int {
+    if rb.count == 0 { return -1; }
+    get8(rb.data, rb.head)
+}
+
+// Get element at logical index i (0 = head)
+fn ring_at(rb: RingBuf, i: Int) -> Int {
+    get8(rb.data, (rb.head + i) % rb.cap)
+}
+
+fn test_basic() -> Int {
+    let mut rb = new_ring(4);
+    assert_eq(ring_is_empty(rb), 1);
+
+    rb = ring_push(rb, 10);
+    rb = ring_push(rb, 20);
+    rb = ring_push(rb, 30);
+    assert_eq(rb.count, 3);
+    assert_eq(ring_is_full(rb), 0);
+
+    assert_eq(ring_peek(rb), 10);
+    let r1 = ring_pop(rb);
+    assert_eq(r1.value, 10);
+    rb = r1.ring;
+    assert_eq(rb.count, 2);
+
+    let r2 = ring_pop(rb);
+    assert_eq(r2.value, 20);
+    rb = r2.ring;
+
+    let r3 = ring_pop(rb);
+    assert_eq(r3.value, 30);
+    rb = r3.ring;
+    assert_eq(ring_is_empty(rb), 1);
+    1
+}
+
+fn test_full_overwrite() -> Int {
+    let mut rb = new_ring(3);
+    rb = ring_push(rb, 1);
+    rb = ring_push(rb, 2);
+    rb = ring_push(rb, 3);
+    assert_eq(ring_is_full(rb), 1);
+
+    // Push again: overwrites oldest (1)
+    rb = ring_push(rb, 4);
+    assert_eq(rb.count, 3);
+    assert_eq(ring_peek(rb), 2); // 1 was overwritten, head is now 2
+    1
+}
+
+fn test_wrap_around() -> Int {
+    let mut rb = new_ring(4);
+    rb = ring_push(rb, 10);
+    rb = ring_push(rb, 20);
+    rb = ring_push(rb, 30);
+    rb = ring_push(rb, 40);
+    // Full: [10, 20, 30, 40], head=0, tail=0
+
+    // Pop 2
+    let r1 = ring_pop(rb);
+    rb = r1.ring;
+    let r2 = ring_pop(rb);
+    rb = r2.ring;
+    // [_, _, 30, 40], head=2, tail=0, count=2
+
+    // Push 2 more (wraps tail)
+    rb = ring_push(rb, 50);
+    rb = ring_push(rb, 60);
+    // [50, 60, 30, 40], head=2, tail=2, count=4
+
+    assert_eq(ring_at(rb, 0), 30);
+    assert_eq(ring_at(rb, 1), 40);
+    assert_eq(ring_at(rb, 2), 50);
+    assert_eq(ring_at(rb, 3), 60);
+    1
+}
+
+fn test_empty_pop() -> Int {
+    let rb = new_ring(4);
+    let r = ring_pop(rb);
+    assert_eq(r.value, -1);
+    assert_eq(rb.count, 0);
+    1
+}
+
+fn test_single_element() -> Int {
+    let mut rb = new_ring(1);
+    rb = ring_push(rb, 42);
+    assert_eq(ring_peek(rb), 42);
+    assert_eq(ring_is_full(rb), 1);
+
+    // Overwrite
+    rb = ring_push(rb, 99);
+    assert_eq(ring_peek(rb), 99);
+    assert_eq(rb.count, 1);
+    1
+}
+
+fn test_fifo_order() -> Int {
+    let mut rb = new_ring(8);
+    let mut i = 0;
+    while i < 5 {
+        rb = ring_push(rb, (i + 1) * 10);
+        i = i + 1;
+    }
+    // Should come out in order: 10, 20, 30, 40, 50
+    i = 0;
+    while i < 5 {
+        let r = ring_pop(rb);
+        assert_eq(r.value, (i + 1) * 10);
+        rb = r.ring;
+        i = i + 1;
+    }
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_full_overwrite();
+    test_wrap_around();
+    test_empty_pop();
+    test_single_element();
+    test_fifo_order();
+    print("[OK] 552_ring_buffer_aot");
+    0
+}

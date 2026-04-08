@@ -1,0 +1,256 @@
+// @test: run
+// @expected-stdout: Basic closure: 20\nWith capture: 15\nMove closure: captured\nHigher order: [2, 4, 6]\nNested: 100\nRecursive sum: 15
+// @tier: 0
+// @level: L2
+// @tags: async, closure, capture
+// @description: Comprehensive async closure patterns including capture semantics
+
+// Helper async functions
+async fn double(x: Int) -> Int {
+    x * 2
+}
+
+async fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Basic async closure
+async fn basic_async_closure() -> Int {
+    let closure = async |x: Int| -> Int {
+        double(x).await
+    };
+
+    closure(10).await
+}
+
+// Async closure with capture by reference
+async fn capture_by_ref() -> Int {
+    let base = 10;
+
+    let add_base = async |x: Int| -> Int {
+        x + base  // Captures 'base' by reference
+    };
+
+    add_base(5).await
+}
+
+// Async closure with move capture
+async fn capture_by_move() -> Text {
+    let owned = Text.from("captured");
+
+    // Move closure takes ownership
+    let consume = async move || -> Text {
+        owned  // 'owned' is moved into closure
+    };
+
+    consume().await
+}
+
+// Async closure with multiple captures
+async fn multiple_captures() -> Int {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+
+    let compute = async |x: Int| -> Int {
+        a + b + c + x  // Captures a, b, c
+    };
+
+    compute(40).await  // 10 + 20 + 30 + 40 = 100
+}
+
+// Async closure with mutable capture
+async fn mutable_capture() -> Int {
+    let mut counter = 0;
+
+    let increment = async || {
+        counter += 1;
+    };
+
+    increment().await;
+    increment().await;
+    increment().await;
+
+    counter  // 3
+}
+
+// Async closure as parameter (higher-order function)
+async fn map_async<T, U>(
+    items: List<T>,
+    f: async fn(T) -> U,
+) -> List<U> {
+    let mut results = [];
+    for item in items {
+        results.push(f(item).await);
+    }
+    results
+}
+
+async fn higher_order() -> List<Int> {
+    let numbers = [1, 2, 3];
+
+    map_async(numbers, async |n| {
+        double(n)
+    }).await
+}
+
+// Async closure returning async closure
+async fn closure_factory() -> async fn(Int) -> Int {
+    let multiplier = 10;
+
+    async move |x: Int| -> Int {
+        x * multiplier
+    }
+}
+
+// Nested async closures
+async fn nested_closures() -> Int {
+    let outer = async |x: Int| -> Int {
+        let inner = async |y: Int| -> Int {
+            y * 2
+        };
+
+        inner(x).await + x
+    };
+
+    outer(25).await  // (25 * 2) + 25 = 75
+}
+
+// Async closure with type inference
+async fn type_inference() -> Int {
+    // Type of closure is inferred
+    let inferred = async |x| {
+        x * 2
+    };
+
+    inferred(21).await
+}
+
+// Async closure with explicit type annotation
+async fn explicit_types() -> Int {
+    let explicit: async fn(Int, Int) -> Int = async |a: Int, b: Int| -> Int {
+        add(a, b).await
+    };
+
+    explicit(10, 20).await
+}
+
+// Async closure capturing struct field
+type Context is {
+    value: Int,
+};
+
+async fn capture_field() -> Int {
+    let ctx = Context { value: 42 };
+
+    let get_value = async || -> Int {
+        ctx.value
+    };
+
+    get_value().await
+}
+
+// Async closure with pattern matching parameter
+async fn pattern_param() -> Int {
+    let add_pair = async |(a, b): (Int, Int)| -> Int {
+        a + b
+    };
+
+    add_pair((10, 20)).await
+}
+
+// Recursive async closure (using fix-point)
+async fn recursive_closure() -> Int {
+    // Recursive closure using explicit self-reference
+    fn make_sum() -> async fn(Int) -> Int {
+        async |n: Int| -> Int {
+            if n <= 0 {
+                0
+            } else {
+                n + make_sum()(n - 1).await
+            }
+        }
+    }
+
+    let sum = make_sum();
+    sum(5).await  // 5 + 4 + 3 + 2 + 1 + 0 = 15
+}
+
+// Async closure with parameter
+async fn default_param() -> Int {
+    let greet = async |name: Text| -> Text {
+        f"Hello, {name}!"
+    };
+
+    let greeting = greet("World").await;
+    greeting.len()
+}
+
+// Async closure stored in struct
+type Handler is {
+    callback: async fn(Int) -> Int,
+};
+
+implement Handler {
+    fn new(callback: async fn(Int) -> Int) -> Self {
+        Self { callback }
+    }
+
+    async fn handle(self, value: Int) -> Int {
+        (self.callback)(value).await
+    }
+}
+
+async fn closure_in_struct() -> Int {
+    let handler = Handler.new(async |x| { async { x * 3 } });
+    handler.handle(10).await
+}
+
+// Async closure with Send bound
+async fn send_closure() -> Int {
+    // This closure can be sent across threads
+    let sendable: async fn(Int) -> Int = async |x| {
+        async { x + 1 }
+    };
+
+    sendable(41).await
+}
+
+// Async closure composition
+async fn compose_closures() -> Int {
+    let double_fn = async |x: Int| -> Int { x * 2 };
+    let add_one = async |x: Int| -> Int { x + 1 };
+
+    // Compose: add_one . double
+    let composed = async |x: Int| -> Int {
+        add_one(double_fn(x).await).await
+    };
+
+    composed(5).await  // (5 * 2) + 1 = 11
+}
+
+async fn main() {
+    // Basic async closure
+    let basic = basic_async_closure().await;
+    println(f"Basic closure: {basic}");
+
+    // Capture by reference
+    let captured = capture_by_ref().await;
+    println(f"With capture: {captured}");
+
+    // Move capture
+    let moved = capture_by_move().await;
+    println(f"Move closure: {moved}");
+
+    // Higher-order function
+    let mapped = higher_order().await;
+    println(f"Higher order: {mapped}");
+
+    // Nested closures
+    let nested = nested_closures().await;
+    println(f"Nested: {nested}");
+
+    // Recursive closure
+    let recursive = recursive_closure().await;
+    println(f"Recursive sum: {recursive}");
+}

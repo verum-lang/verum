@@ -1,0 +1,118 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, max_rectangle, histogram, stack_algorithm, largest_rectangle
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Maximum rectangle in histogram using the classic stack-based O(n) algorithm.
+// For each bar we find the span of consecutive bars of at least that height.
+// Stack stores indices; when a shorter bar is found, compute area for popped bar.
+// Histogram stored as [Int; 16]; active length n.
+
+// Stack implemented as [Int; 16] array with top pointer stored in top[0].
+fn stack_push(stk: [Int; 16], top: [Int; 8], val: Int) {
+    stk[top[0]] = val;
+    top[0] = top[0] + 1;
+}
+
+fn stack_pop(stk: [Int; 16], top: [Int; 8]) -> Int {
+    top[0] = top[0] - 1;
+    stk[top[0]]
+}
+
+fn stack_peek(stk: [Int; 16], top: [Int; 8]) -> Int {
+    stk[top[0] - 1]
+}
+
+fn stack_empty(top: [Int; 8]) -> Int {
+    if top[0] == 0 { 1 } else { 0 }
+}
+
+// Maximum rectangle area in histogram h[0..n).
+fn max_rect_histogram(h: [Int; 16], n: Int) -> Int {
+    let mut stk = [0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0];
+    let mut top = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut max_area = 0;
+    let mut i = 0;
+    while i <= n {
+        let cur_h = if i == n { 0 } else { h[i] };
+        while stack_empty(top) == 0 && h[stack_peek(stk, top)] >= cur_h {
+            let idx = stack_pop(stk, top);
+            let height = h[idx];
+            let width = if stack_empty(top) == 1 { i } else { i - stack_peek(stk, top) - 1 };
+            let area = height * width;
+            if area > max_area { max_area = area; }
+        }
+        stack_push(stk, top, i);
+        i = i + 1;
+    }
+    max_area
+}
+
+fn test_classic_histogram() {
+    // [2, 1, 5, 6, 2, 3]: max rectangle = 10 (bars at indices 2,3 of height 5: 5*2=10)
+    let mut h = [2, 1, 5, 6, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_rect_histogram(h, 6), 10);
+    print("classic_histogram: ok");
+}
+
+fn test_uniform_height() {
+    // [3, 3, 3, 3, 3]: whole bar, max = 3*5 = 15
+    let mut h = [3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_rect_histogram(h, 5), 15);
+
+    // [5]: single bar, max = 5
+    let mut h2 = [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_rect_histogram(h2, 1), 5);
+    print("uniform_height: ok");
+}
+
+fn test_ascending_bars() {
+    // [1, 2, 3, 4, 5]: max rect = ?
+    // heights: at h=1 width 5 -> 5; at h=2 width 4 -> 8; at h=3 width 3 -> 9;
+    //          at h=4 width 2 -> 8; at h=5 width 1 -> 5. Max = 9.
+    let mut h = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_rect_histogram(h, 5), 9);
+    print("ascending_bars: ok");
+}
+
+fn test_descending_bars() {
+    // [5, 4, 3, 2, 1]: max rect = ?
+    // Similar: at h=1 width 5 -> 5; h=2 width 4 -> 8; h=3 width 3 -> 9;
+    //          h=4 width 2 -> 8; h=5 width 1 -> 5. Max = 9.
+    let mut h = [5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_rect_histogram(h, 5), 9);
+    print("descending_bars: ok");
+}
+
+fn test_varied_cases() {
+    // [1, 8, 6, 2, 5, 4, 8, 3, 7]: classic water container heights as histogram
+    // Walk through: max rectangle check
+    // Let's compute manually:
+    // Pairs to check: a wide flat area.
+    // Actually let's just check a known case:
+    // [0, 0, 0, 0, 0, 10, 0, 0, 0, 0]: max = 10 (single spike)
+    let mut h1 = [0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_rect_histogram(h1, 10), 10);
+
+    // [4, 4, 4, 4, 4, 4, 4, 4]: all equal 4, width 8 -> 32
+    let mut h2 = [4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_rect_histogram(h2, 8), 32);
+
+    // [2, 4]: max = max(2*2, 4*1) = max(4, 4) = 4
+    let mut h3 = [2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_rect_histogram(h3, 2), 4);
+    print("varied_cases: ok");
+}
+
+fn main() -> Int {
+    test_classic_histogram();
+    test_uniform_height();
+    test_ascending_bars();
+    test_descending_bars();
+    test_varied_cases();
+    print("[OK] 557_interp_max_rect_histogram");
+    0
+}

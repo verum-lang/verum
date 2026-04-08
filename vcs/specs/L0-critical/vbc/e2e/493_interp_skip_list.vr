@@ -1,0 +1,254 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, skip_list, multi_level_search, probabilistic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Skip list simulation using layered arrays.
+//
+// A skip list is a probabilistic data structure providing O(log n) search on average.
+// We simulate it with fixed-size arrays:
+//   - Up to MAX_NODES = 16 nodes
+//   - Up to MAX_LEVELS = 4 levels (0 = bottom, 3 = top)
+//   - keys[i]         = key of node i (i=0 is head sentinel with key = -INF)
+//   - fwd[i * MAX_LEVELS + lvl] = forward pointer at level `lvl` for node i
+//                                  (-1 = end of list)
+//   - level_height[i] = number of levels this node participates in (1..MAX_LEVELS)
+//
+// A deterministic "coin flip" (derived from key) assigns levels.
+// Search: start from the highest level, walk forward until next key >= target.
+
+fn skip_search(
+    keys:       [Int; 16],
+    fwd:        [Int; 64],
+    max_levels: Int,
+    head:       Int,
+    target:     Int
+) -> Int {
+    // Returns index of node with key==target, or -1 if not found.
+    let mut curr = head;
+    let mut lvl = max_levels - 1;
+    while lvl >= 0 {
+        // Advance at this level while next key < target
+        let mut nxt = fwd[curr * max_levels + lvl];
+        while nxt >= 0 && keys[nxt] < target {
+            curr = nxt;
+            nxt = fwd[curr * max_levels + lvl];
+        }
+        lvl = lvl - 1;
+    }
+    // curr is now the predecessor; check if next at level 0 is target
+    let nxt0 = fwd[curr * max_levels + 0];
+    if nxt0 >= 0 && keys[nxt0] == target { nxt0 } else { 0 - 1 }
+}
+
+// Count how many nodes (excluding head sentinel) are in the level-0 list.
+fn skip_count_level0(
+    fwd:        [Int; 64],
+    max_levels: Int,
+    head:       Int
+) -> Int {
+    let mut cnt = 0;
+    let mut curr = fwd[head * max_levels + 0];
+    while curr >= 0 {
+        cnt = cnt + 1;
+        curr = fwd[curr * max_levels + 0];
+    }
+    cnt
+}
+
+// Verify sorted order at level 0.
+fn skip_sorted(
+    keys:       [Int; 16],
+    fwd:        [Int; 64],
+    max_levels: Int,
+    head:       Int
+) -> Int {
+    let mut curr = fwd[head * max_levels + 0];
+    let mut prev_key = 0 - 1000000;
+    while curr >= 0 {
+        if keys[curr] <= prev_key { return 0; }
+        prev_key = keys[curr];
+        curr = fwd[curr * max_levels + 0];
+    }
+    1
+}
+
+fn init_fwd(fwd: [Int; 64]) {
+    let mut i = 0;
+    while i < 64 { fwd[i] = 0 - 1; i = i + 1; }
+}
+
+fn test_skip_list_basic() {
+    // Build a skip list with keys [2, 5, 8, 12, 20] manually.
+    // Node layout (1-indexed; 0 = head sentinel):
+    //   0: head (key=-INF, 4 levels)
+    //   1: key=2,  2 levels
+    //   2: key=5,  3 levels
+    //   3: key=8,  1 level
+    //   4: key=12, 2 levels
+    //   5: key=20, 4 levels
+    //
+    // Level 0 (bottom): head->1->2->3->4->5->NIL
+    // Level 1:          head->1->2->4->5->NIL
+    // Level 2:          head->2->5->NIL
+    // Level 3:          head->5->NIL
+    let max_levels = 4;
+    let mut keys = [0 - 999999, 2, 5, 8, 12, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut fwd  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_fwd(fwd);
+    // Node 0 (head): fwd[0*4+0]=1, fwd[0*4+1]=1, fwd[0*4+2]=2, fwd[0*4+3]=5
+    fwd[0] = 1; fwd[1] = 1; fwd[2] = 2; fwd[3] = 5;
+    // Node 1 (key=2): fwd[1*4+0]=2, fwd[1*4+1]=2, rest=-1
+    fwd[4] = 2; fwd[5] = 2; fwd[6] = 0 - 1; fwd[7] = 0 - 1;
+    // Node 2 (key=5): fwd[2*4+0]=3, fwd[2*4+1]=4, fwd[2*4+2]=5, fwd[2*4+3]=-1
+    fwd[8] = 3; fwd[9] = 4; fwd[10] = 5; fwd[11] = 0 - 1;
+    // Node 3 (key=8): fwd[3*4+0]=4, rest=-1
+    fwd[12] = 4; fwd[13] = 0 - 1; fwd[14] = 0 - 1; fwd[15] = 0 - 1;
+    // Node 4 (key=12): fwd[4*4+0]=5, fwd[4*4+1]=5, rest=-1
+    fwd[16] = 5; fwd[17] = 5; fwd[18] = 0 - 1; fwd[19] = 0 - 1;
+    // Node 5 (key=20): all -1
+    fwd[20] = 0 - 1; fwd[21] = 0 - 1; fwd[22] = 0 - 1; fwd[23] = 0 - 1;
+
+    // Count = 5
+    assert_eq(skip_count_level0(fwd, max_levels, 0), 5);
+
+    // Sorted order at level 0
+    assert_eq(skip_sorted(keys, fwd, max_levels, 0), 1);
+
+    // Search for existing keys
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 2),  1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 5),  2);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 8),  3);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 12), 4);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 20), 5);
+
+    // Search for non-existing keys
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 1),  0 - 1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 7),  0 - 1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 15), 0 - 1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 21), 0 - 1);
+
+    print("skip_list_basic: ok");
+}
+
+fn test_skip_list_single() {
+    // Skip list with a single element.
+    let max_levels = 4;
+    let mut keys = [0 - 999999, 42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut fwd  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_fwd(fwd);
+    // head points to node 1 at all levels
+    fwd[0] = 1; fwd[1] = 1; fwd[2] = 1; fwd[3] = 1;
+    // node 1 all -1 (already init'd to -1)
+
+    assert_eq(skip_count_level0(fwd, max_levels, 0), 1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 42), 1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 41), 0 - 1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 43), 0 - 1);
+    print("skip_list_single: ok");
+}
+
+fn test_skip_list_level_bypass() {
+    // Verify that higher levels allow skipping nodes.
+    // Skip list: head->1(key=10)->2(key=30)->3(key=50)->4(key=70)->NIL
+    // Level layout:
+    //   Level 0: head->1->2->3->4->NIL
+    //   Level 1: head->2->4->NIL  (skip nodes 1 and 3)
+    //   Level 2: head->4->NIL     (skip to end directly)
+    //   Level 3: -1               (nothing)
+    let max_levels = 4;
+    let mut keys = [0 - 999999, 10, 30, 50, 70, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut fwd  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_fwd(fwd);
+    // head (node 0): L0->1, L1->2, L2->4, L3->-1
+    fwd[0] = 1; fwd[1] = 2; fwd[2] = 4; fwd[3] = 0 - 1;
+    // node 1 (key=10): L0->2, rest->-1
+    fwd[4] = 2; fwd[5] = 0 - 1; fwd[6] = 0 - 1; fwd[7] = 0 - 1;
+    // node 2 (key=30): L0->3, L1->4, rest->-1
+    fwd[8] = 3; fwd[9] = 4; fwd[10] = 0 - 1; fwd[11] = 0 - 1;
+    // node 3 (key=50): L0->4, rest->-1
+    fwd[12] = 4; fwd[13] = 0 - 1; fwd[14] = 0 - 1; fwd[15] = 0 - 1;
+    // node 4 (key=70): all -1
+
+    assert_eq(skip_count_level0(fwd, max_levels, 0), 4);
+    assert_eq(skip_sorted(keys, fwd, max_levels, 0), 1);
+
+    // All keys found
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 10), 1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 30), 2);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 50), 3);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 70), 4);
+
+    // Keys between values not found
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 20), 0 - 1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 60), 0 - 1);
+    assert_eq(skip_search(keys, fwd, max_levels, 0, 80), 0 - 1);
+
+    print("skip_list_level_bypass: ok");
+}
+
+fn test_skip_list_sequential_search() {
+    // Simulate sequential searches and verify correct nodes are returned.
+    // Build a 6-element skip list with 2 levels.
+    // Keys: [1, 3, 6, 10, 15, 21]
+    // Level 0: head->1->2->3->4->5->6->NIL
+    // Level 1: head->2->4->6->NIL  (every other)
+    let max_levels = 2;
+    // Using max_levels=2, fwd array is 16*2=32 entries
+    let mut keys2 = [0 - 999999, 1, 3, 6, 10, 15, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // We'll reuse the 64-element fwd array but treat it as max_levels=2
+    let mut fwd2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_fwd(fwd2);
+    // node*2+0 = level0, node*2+1 = level1
+    // head(0): L0->1, L1->2
+    fwd2[0] = 1; fwd2[1] = 2;
+    // node1: L0->2, L1->-1
+    fwd2[2] = 2; fwd2[3] = 0 - 1;
+    // node2: L0->3, L1->4
+    fwd2[4] = 3; fwd2[5] = 4;
+    // node3: L0->4, L1->-1
+    fwd2[6] = 4; fwd2[7] = 0 - 1;
+    // node4: L0->5, L1->6
+    fwd2[8] = 5; fwd2[9] = 6;
+    // node5: L0->6, L1->-1
+    fwd2[10] = 6; fwd2[11] = 0 - 1;
+    // node6: L0->-1, L1->-1
+    fwd2[12] = 0 - 1; fwd2[13] = 0 - 1;
+
+    assert_eq(skip_count_level0(fwd2, max_levels, 0), 6);
+    assert_eq(skip_sorted(keys2, fwd2, max_levels, 0), 1);
+
+    assert_eq(skip_search(keys2, fwd2, max_levels, 0, 1),  1);
+    assert_eq(skip_search(keys2, fwd2, max_levels, 0, 3),  2);
+    assert_eq(skip_search(keys2, fwd2, max_levels, 0, 6),  3);
+    assert_eq(skip_search(keys2, fwd2, max_levels, 0, 10), 4);
+    assert_eq(skip_search(keys2, fwd2, max_levels, 0, 15), 5);
+    assert_eq(skip_search(keys2, fwd2, max_levels, 0, 21), 6);
+    assert_eq(skip_search(keys2, fwd2, max_levels, 0, 5),  0 - 1);
+    assert_eq(skip_search(keys2, fwd2, max_levels, 0, 22), 0 - 1);
+
+    print("skip_list_sequential_search: ok");
+}
+
+fn main() -> Int {
+    test_skip_list_basic();
+    test_skip_list_single();
+    test_skip_list_level_bypass();
+    test_skip_list_sequential_search();
+    print("[OK] 493_interp_skip_list");
+    0
+}

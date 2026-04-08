@@ -1,0 +1,162 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, string, matching, search
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for string matching algorithms on integer arrays
+
+type Str8 is { c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int, c6: Int, c7: Int, len: Int };
+
+fn str8_get(s: Str8, i: Int) -> Int {
+    if i == 0 { s.c0 } else if i == 1 { s.c1 }
+    else if i == 2 { s.c2 } else if i == 3 { s.c3 }
+    else if i == 4 { s.c4 } else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 } else { s.c7 }
+}
+
+// Naive string search: find first occurrence of pattern in text
+// Returns index or -1
+fn naive_search(text: Str8, pat: Str8) -> Int {
+    if pat.len > text.len { return -1; }
+    let mut i = 0;
+    while i <= text.len - pat.len {
+        let mut j = 0;
+        let mut match_found = true;
+        while j < pat.len {
+            if str8_get(text, i + j) != str8_get(pat, j) {
+                match_found = false;
+                j = pat.len;  // Break
+            } else {
+                j = j + 1;
+            }
+        }
+        if match_found { return i; }
+        i = i + 1;
+    }
+    -1
+}
+
+// Count occurrences
+fn count_occurrences(text: Str8, pat: Str8) -> Int {
+    if pat.len > text.len { return 0; }
+    let mut count = 0;
+    let mut i = 0;
+    while i <= text.len - pat.len {
+        let mut j = 0;
+        let mut match_found = true;
+        while j < pat.len {
+            if str8_get(text, i + j) != str8_get(pat, j) {
+                match_found = false;
+                j = pat.len;
+            } else {
+                j = j + 1;
+            }
+        }
+        if match_found { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Check if text starts with prefix
+fn starts_with(text: Str8, prefix: Str8) -> Bool {
+    if prefix.len > text.len { return false; }
+    let mut i = 0;
+    while i < prefix.len {
+        if str8_get(text, i) != str8_get(prefix, i) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Check if text ends with suffix
+fn ends_with(text: Str8, suffix: Str8) -> Bool {
+    if suffix.len > text.len { return false; }
+    let offset = text.len - suffix.len;
+    let mut i = 0;
+    while i < suffix.len {
+        if str8_get(text, offset + i) != str8_get(suffix, i) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Simple hash for Rabin-Karp
+fn str_hash(s: Str8, start: Int, len: Int) -> Int {
+    let mut h = 0;
+    let mut i = 0;
+    while i < len {
+        h = h * 31 + str8_get(s, start + i);
+        i = i + 1;
+    }
+    h
+}
+
+fn test_naive_search() {
+    // text = [1,2,3,4,5,6], pat = [3,4]
+    let text = Str8 { c0: 1, c1: 2, c2: 3, c3: 4, c4: 5, c5: 6, c6: 0, c7: 0, len: 6 };
+    let pat = Str8 { c0: 3, c1: 4, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    assert_eq(naive_search(text, pat), 2);
+
+    // Pattern at start
+    let pat2 = Str8 { c0: 1, c1: 2, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    assert_eq(naive_search(text, pat2), 0);
+
+    // Pattern at end
+    let pat3 = Str8 { c0: 5, c1: 6, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    assert_eq(naive_search(text, pat3), 4);
+
+    // Pattern not found
+    let pat4 = Str8 { c0: 7, c1: 8, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    assert_eq(naive_search(text, pat4), -1);
+}
+
+fn test_count() {
+    // text = [1,2,1,2,1], pat = [1,2]
+    let text = Str8 { c0: 1, c1: 2, c2: 1, c3: 2, c4: 1, c5: 0, c6: 0, c7: 0, len: 5 };
+    let pat = Str8 { c0: 1, c1: 2, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    assert_eq(count_occurrences(text, pat), 2);
+
+    // text = [1,1,1,1], pat = [1]
+    let text2 = Str8 { c0: 1, c1: 1, c2: 1, c3: 1, c4: 0, c5: 0, c6: 0, c7: 0, len: 4 };
+    let pat2 = Str8 { c0: 1, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 1 };
+    assert_eq(count_occurrences(text2, pat2), 4);
+}
+
+fn test_prefix_suffix() {
+    let text = Str8 { c0: 1, c1: 2, c2: 3, c3: 4, c4: 5, c5: 0, c6: 0, c7: 0, len: 5 };
+    let pre = Str8 { c0: 1, c1: 2, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    let suf = Str8 { c0: 4, c1: 5, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    let not_pre = Str8 { c0: 2, c1: 3, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+
+    assert_eq(starts_with(text, pre), true);
+    assert_eq(starts_with(text, not_pre), false);
+    assert_eq(ends_with(text, suf), true);
+    assert_eq(ends_with(text, pre), false);
+}
+
+fn test_hash() {
+    let s = Str8 { c0: 1, c1: 2, c2: 3, c3: 1, c4: 2, c5: 3, c6: 0, c7: 0, len: 6 };
+    // Same subsequences should have same hash
+    let h1 = str_hash(s, 0, 3);
+    let h2 = str_hash(s, 3, 3);
+    assert_eq(h1, h2);
+
+    // Different subsequences likely different hash
+    let h3 = str_hash(s, 1, 3);
+    // h1 = 1*31^2 + 2*31 + 3 = 961 + 62 + 3 = 1026
+    // h3 = 2*31^2 + 3*31 + 1 = 1922 + 93 + 1 = 2016
+    assert_eq(h1, 1026);
+    assert_eq(h3, 2016);
+}
+
+fn main() -> Int {
+    test_naive_search();
+    test_count();
+    test_prefix_suffix();
+    test_hash();
+    print("[OK] 232_string_matching_aot");
+    0
+}

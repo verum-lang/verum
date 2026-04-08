@@ -1,0 +1,63 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @description: Test using clause syntax per grammar/verum.ebnf context_clause production
+
+// Basic using clause
+fn with_single_context() using [Logger] {
+    log("message");
+}
+
+// Multiple contexts
+fn with_multiple_contexts() using [Database, Logger, Cache] {
+    let data = query();
+    log("queried");
+    cache_result(data);
+}
+
+// Using clause with aliased contexts
+fn with_aliased_context() using [Database as db] {
+    db.query();
+}
+
+// Using clause with transformed context
+fn with_transformed_context() using [Database.transactional()] {
+    execute_in_transaction();
+}
+
+// Using clause with conditional context
+fn with_conditional_context() using [Analytics if cfg.analytics_enabled] {
+    track_event();
+}
+
+// Meta function with using clause
+meta fn meta_with_context() using [MetaTypes] {
+    let name = type_name<Int>();
+}
+
+// Async function with using clause
+async fn async_with_context() using [Network] {
+    fetch_data().await;
+}
+
+// Generic function with using clause
+fn generic_with_context<T>() using [Logger] where T: Clone {
+    log("cloning");
+}
+
+// Function with complex using clause
+fn complex_using() using [
+    Database.transactional(),
+    Logger as log,
+    Cache if cfg.caching_enabled
+] {
+    // Complex context requirements
+}
+
+// Nested function with different using
+fn outer() using [Logger] {
+    fn inner() using [Database] {
+        query();
+    }
+    log("called inner");
+}

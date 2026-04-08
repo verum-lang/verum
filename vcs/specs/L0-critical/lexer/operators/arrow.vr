@@ -1,0 +1,220 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, arrow
+
+// Arrow operators (-> and =>)
+
+// Return type arrow (->) in function signatures
+fn simple() -> Int {
+    42
+}
+
+fn with_params(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn returns_text(name: Text) -> Text {
+    f"Hello, {name}!"
+}
+
+// Generic return types
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn first<T, U>(pair: (T, U)) -> T {
+    pair.0
+}
+
+// Async function return types
+async fn fetch(url: Text) -> Result<Response, Error> {
+    http.get(url).await
+}
+
+fn test_function_type_annotations() {
+    // Function type annotations with arrow
+    let func: fn(Int) -> Int = |x| x * 2;
+    let binary: fn(Int, Int) -> Int = |a, b| a + b;
+    let no_args: fn() -> Int = || 42;
+
+    // Higher-order function types
+    let hof: fn(fn(Int) -> Int) -> fn(Int) -> Int = |f| |x| f(f(x));
+
+    // Closure return types
+    let closure = |x: Int| -> Int { x * 2 };
+    let typed_closure: fn(Int) -> Int = |x| -> Int { x + 1 };
+
+    // Nested function types
+    let nested: fn(Int) -> fn(Int) -> Int = |a| |b| a + b;
+    let curried: fn(Int) -> fn(Int) -> fn(Int) -> Int = |a| |b| |c| a + b + c;
+}
+
+// Return type with generics
+fn map<T, U>(opt: Maybe<T>, f: fn(T) -> U) -> Maybe<U> {
+    match opt {
+        Some(x) => Some(f(x))
+        None => None
+    }
+}
+
+// Method return types
+type Counter is {
+    value: Int,
+};
+
+implement Counter {
+    fn new() -> Self {
+        Counter { value: 0 }
+    }
+
+    fn increment(&mut self) -> &mut Self {
+        self.value = self.value + 1;
+        self
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+// Fat arrow (=>) in match expressions
+fn describe(n: Int) -> Text {
+    match n {
+        0 => "zero"
+        1 => "one"
+        2 => "two"
+        n if n < 0 => "negative"
+        _ => "many"
+    }
+}
+
+// Match with complex patterns
+fn process_option(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(0) => 0
+        Some(n) if n > 0 => n * 2
+        Some(n) => -n
+        None => -1
+    }
+}
+
+// Match with struct patterns
+type Point is { x: Int, y: Int };
+
+fn quadrant(p: Point) -> Text {
+    match p {
+        Point { x, y } if x > 0 && y > 0 => "first"
+        Point { x, y } if x < 0 && y > 0 => "second"
+        Point { x, y } if x < 0 && y < 0 => "third"
+        Point { x, y } if x > 0 && y < 0 => "fourth"
+        _ => "on axis"
+    }
+}
+
+// Match with enum variants
+type Result<T, E> is Ok(T) | Err(E);
+
+fn unwrap_or<T>(result: Result<T, Error>, default: T) -> T {
+    match result {
+        Ok(value) => value
+        Err(_) => default
+    }
+}
+
+fn test_fat_arrow_closures() {
+    // Closures use -> for return type, not =>
+    let double = |x| x * 2;
+    let add = |a, b| a + b;
+
+    // Fat arrow (=>) is used in match arms, not closures
+    let complex_match = match value {
+        Pattern1 => {
+            let temp = compute();
+            transform(temp)
+        }
+        Pattern2 => simple_value
+    };
+}
+
+// Arrow in type definitions
+type Callback is fn(Int) -> Int;
+type AsyncCallback is fn(Int) -> Future<Int>;
+type Predicate<T> is fn(T) -> Bool;
+type Transform<A, B> is fn(A) -> B;
+
+// Arrow in protocol definitions
+type Mappable<T> is protocol {
+    fn map<U>(self, f: fn(T) -> U) -> Self<U>;
+};
+
+type Functor is protocol {
+    type Inner;
+    fn fmap<A, B>(self, f: fn(A) -> B) -> Self;
+};
+
+// Arrow with refinement types
+fn positive_double(x: Int) -> Int {
+    x * 2
+}
+
+// Arrow in impl blocks
+implement<T> Maybe<T> {
+    fn map<U>(self, f: fn(T) -> U) -> Maybe<U> {
+        match self {
+            Some(x) => Some(f(x))
+            None => None
+        }
+    }
+
+    fn and_then<U>(self, f: fn(T) -> Maybe<U>) -> Maybe<U> {
+        match self {
+            Some(x) => f(x)
+            None => None
+        }
+    }
+}
+
+// Multiple arrows in type
+type Curried is fn(Int) -> fn(Int) -> fn(Int) -> Int;
+type ChainedResult is fn(A) -> Result<fn(B) -> Result<C, E>, E>;
+
+// Arrow with lifetime/reference annotations
+fn longest<'a>(a: &'a Text, b: &'a Text) -> &'a Text {
+    if a.len() > b.len() { a } else { b }
+}
+
+// Arrow in where clauses
+fn apply<T, U, F>(value: T, f: F) -> U
+where type F: Callable
+{
+    f(value)
+}
+
+// Match arm with multiple patterns
+fn is_weekend(day: DayOfWeek) -> Bool {
+    match day {
+        Saturday | Sunday => true
+        _ => false
+    }
+}
+
+// Nested match with arrows
+fn deep_match(opt: Maybe<Maybe<Int>>) -> Int {
+    match opt {
+        Some(Some(n)) => n
+        Some(None) => 0
+        None => -1
+    }
+}
+
+// Arrow in async contexts
+async fn async_transform<T, U>(
+    value: T,
+    f: fn(T) -> Future<U>
+) -> U {
+    f(value).await
+}
+
+// Arrow in stream types
+type StreamTransform<T, U> is fn(Stream<T>) -> Stream<U>;

@@ -1,0 +1,484 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, memory, cbgr
+// @timeout: 20000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for CBGR reference checks.
+/// Tests generation-based reference validation, three-tier references, and epoch handling.
+
+fn main() {
+    test_managed_references();
+    test_checked_references();
+    test_reference_tiers();
+    test_borrow_scopes();
+    test_mutable_borrows();
+    test_reference_in_structs();
+    test_generation_tracking();
+    test_reference_parameters();
+    test_reference_returns();
+    test_complex_lifetimes();
+}
+
+/// Managed references (Tier 0 - default)
+fn test_managed_references() {
+    println("=== Managed References (Tier 0) ===");
+
+    // Basic reference creation
+    let x = 42;
+    let ref_x = &x;
+    println(f"x: {x}");
+    println(f"*ref_x: {*ref_x}");
+
+    // Multiple references
+    let y = 100;
+    let ref1 = &y;
+    let ref2 = &y;
+    let ref3 = &y;
+    println(f"ref1: {*ref1}, ref2: {*ref2}, ref3: {*ref3}");
+
+    // Reference to array element
+    let arr = [10, 20, 30, 40, 50];
+    let ref_elem = &arr[2];
+    println(f"arr[2] via ref: {*ref_elem}");
+
+    // Reference to tuple field
+    let tuple = (1, 2, 3);
+    let ref_field = &tuple.0;
+    println(f"tuple.0 via ref: {*ref_field}");
+
+    // Reference to struct field
+    type Point is { x: Int, y: Int };
+    let point = Point { x: 10, y: 20 };
+    let ref_px = &point.x;
+    let ref_py = &point.y;
+    println(f"point via refs: ({*ref_px}, {*ref_py})");
+
+    // Nested dereferencing
+    let value = 42;
+    let r1 = &value;
+    let r2 = &*r1;  // Re-reference
+    println(f"nested deref: {*r2}");
+}
+
+/// Checked references (Tier 1 - compile-time verified)
+fn test_checked_references() {
+    println("\n=== Checked References (Tier 1) ===");
+
+    // Basic checked reference
+    let x = 42;
+    let ref_checked: &checked Int = &checked x;
+    println(f"checked ref: {*ref_checked}");
+
+    // Checked reference to heap
+    let boxed = Heap(100);
+    let ref_boxed: &checked Int = &checked *boxed;
+    println(f"checked ref to Heap: {*ref_boxed}");
+
+    // Checked mutable reference
+    let mut y = 50;
+    {
+        let ref_mut: &checked mut Int = &checked mut y;
+        *ref_mut = 75;
+    }
+    println(f"y after checked mut: {y}");
+
+    // Function with checked parameter
+    fn use_checked(r: &checked Int) -> Int {
+        *r * 2
+    }
+
+    let z = 25;
+    println(f"use_checked(&z): {use_checked(&checked z)}");
+
+    // Checked references to composite types
+    type Data is { value: Int, name: Text };
+    let data = Data { value: 42, name: "test" };
+    let ref_data: &checked Data = &checked data;
+    println(f"checked ref to struct: value={(*ref_data).value}, name={(*ref_data).name}");
+}
+
+/// Three-tier reference system
+fn test_reference_tiers() {
+    println("\n=== Reference Tiers ===");
+
+    let value = 42;
+
+    // Tier 0: Managed (default)
+    let tier0: &Int = &value;
+    println(f"Tier 0 (managed): {*tier0}");
+
+    // Tier 1: Checked
+    let tier1: &checked Int = &checked value;
+    println(f"Tier 1 (checked): {*tier1}");
+
+    // Reference in different tiers
+    let data = [1, 2, 3, 4, 5];
+
+    // Can read through any tier
+    fn read_managed(r: &List<Int>) -> Int { r[0] }
+    fn read_checked(r: &checked List<Int>) -> Int { r[0] }
+
+    println(f"read_managed: {read_managed(&data)}");
+    println(f"read_checked: {read_checked(&checked data)}");
+
+    // Tier coercion (higher tier to lower is safe)
+    let managed_ref: &Int = &value;
+    // Checked can be converted to managed
+    let from_managed = *managed_ref;
+    println(f"from_managed: {from_managed}");
+}
+
+/// Borrow scopes
+fn test_borrow_scopes() {
+    println("\n=== Borrow Scopes ===");
+
+    // Basic scope
+    let x = 42;
+    {
+        let borrowed = &x;
+        println(f"in scope: {*borrowed}");
+    }
+    println(f"after scope: {x}");
+
+    // Nested scopes
+    let y = 100;
+    {
+        let outer_ref = &y;
+        {
+            let inner_ref = &y;
+            println(f"inner: {*inner_ref}");
+        }
+        println(f"outer: {*outer_ref}");
+    }
+
+    // Scope with mutation
+    let mut z = 50;
+    {
+        let ref_z = &z;
+        println(f"borrowed z: {*ref_z}");
+    }
+    z = 75;  // Can mutate after borrow ends
+    println(f"after borrow ended: {z}");
+
+    // Sequential borrows
+    let mut value = 10;
+    {
+        let r1 = &value;
+        println(f"first borrow: {*r1}");
+    }
+    {
+        let r2 = &value;
+        println(f"second borrow: {*r2}");
+    }
+    value = 20;
+    println(f"final value: {value}");
+}
+
+/// Mutable borrows
+fn test_mutable_borrows() {
+    println("\n=== Mutable Borrows ===");
+
+    // Basic mutable borrow
+    let mut x = 42;
+    {
+        let ref_x = &mut x;
+        *ref_x = 100;
+    }
+    println(f"x after mut borrow: {x}");
+
+    // Mutable borrow of struct field
+    type Point is { x: Int, y: Int };
+    let mut point = Point { x: 10, y: 20 };
+    {
+        let ref_px = &mut point.x;
+        *ref_px = 30;
+    }
+    println(f"point after field mutation: ({point.x}, {point.y})");
+
+    // Mutable borrow of array element
+    let mut arr = [1, 2, 3, 4, 5];
+    {
+        let ref_elem = &mut arr[2];
+        *ref_elem = 100;
+    }
+    println(f"arr after element mutation: {arr}");
+
+    // Sequential mutable borrows
+    let mut value = 0;
+    for i in 1..=5 {
+        {
+            let ref_val = &mut value;
+            *ref_val = *ref_val + i;
+        }
+    }
+    println(f"accumulated value: {value}");
+
+    // Mutable borrow in function
+    fn double_in_place(r: &mut Int) {
+        *r = *r * 2;
+    }
+
+    let mut n = 10;
+    double_in_place(&mut n);
+    println(f"n after double_in_place: {n}");
+}
+
+/// References in structs
+fn test_reference_in_structs() {
+    println("\n=== References in Structs ===");
+
+    // Struct with reference field
+    type Wrapper<'a> is { value: &'a Int };
+
+    let x = 42;
+    let wrapper = Wrapper { value: &x };
+    println(f"wrapper.value: {*wrapper.value}");
+
+    // Multiple reference fields
+    type Pair<'a, 'b> is { first: &'a Int, second: &'b Int };
+
+    let a = 10;
+    let b = 20;
+    let pair = Pair { first: &a, second: &b };
+    println(f"pair: ({*pair.first}, {*pair.second})");
+
+    // Reference to struct containing reference
+    type Nested<'a> is { inner: Wrapper<'a> };
+
+    let y = 100;
+    let inner = Wrapper { value: &y };
+    let nested = Nested { inner: inner };
+    println(f"nested.inner.value: {*nested.inner.value}");
+
+    // Collection of references
+    let values = [1, 2, 3, 4, 5];
+    let refs: List<&Int> = [&values[0], &values[2], &values[4]];
+    println("refs to odd positions:");
+    for r in refs {
+        println(f"  {*r}");
+    }
+}
+
+/// Generation tracking (CBGR)
+fn test_generation_tracking() {
+    println("\n=== Generation Tracking ===");
+
+    // Create and track generations
+    let mut container: List<Int> = [1, 2, 3];
+
+    // Take reference before modification
+    let len_before = container.len();
+    println(f"len before: {len_before}");
+
+    // Modify container
+    container.push(4);
+    container.push(5);
+
+    let len_after = container.len();
+    println(f"len after: {len_after}");
+    println(f"container: {container}");
+
+    // GenRef type for explicit generation tracking
+    type GenRef<T> is { value: T, generation: Int };
+
+    fn create_genref<T>(value: T, gen: Int) -> GenRef<T> {
+        GenRef { value: value, generation: gen }
+    }
+
+    let gr = create_genref(42, 1);
+    println(f"genref value: {gr.value}, generation: {gr.generation}");
+
+    // Validate generation
+    fn is_valid_generation<T>(gr: &GenRef<T>, current_gen: Int) -> Bool {
+        gr.generation == current_gen
+    }
+
+    let current = 1;
+    println(f"is valid: {is_valid_generation(&gr, current)}");
+    println(f"is valid (wrong gen): {is_valid_generation(&gr, 2)}");
+
+    // Simulated generation-based reference safety
+    type TrackedRef<T> is { data: Heap<T>, gen: Int };
+
+    fn make_tracked<T>(value: T) -> TrackedRef<T> {
+        TrackedRef { data: Heap(value), gen: 1 }
+    }
+
+    fn deref_tracked<T>(tr: &TrackedRef<T>, expected_gen: Int) -> Maybe<&T> {
+        if tr.gen == expected_gen {
+            Some(&*tr.data)
+        } else {
+            None
+        }
+    }
+
+    let tracked = make_tracked(100);
+    match deref_tracked(&tracked, 1) {
+        Some(v) => println(f"tracked deref: {*v}"),
+        None => println("tracked deref: invalid generation"),
+    }
+}
+
+/// References as function parameters
+fn test_reference_parameters() {
+    println("\n=== Reference Parameters ===");
+
+    // Immutable reference parameter
+    fn sum_ref(list: &List<Int>) -> Int {
+        let mut total = 0;
+        for item in list {
+            total = total + item;
+        }
+        total
+    }
+
+    let nums = [1, 2, 3, 4, 5];
+    println(f"sum_ref: {sum_ref(&nums)}");
+
+    // Mutable reference parameter
+    fn append_sum(list: &mut List<Int>) {
+        let sum = sum_ref(list);
+        list.push(sum);
+    }
+
+    let mut data = [10, 20, 30];
+    append_sum(&mut data);
+    println(f"after append_sum: {data}");
+
+    // Multiple reference parameters
+    fn add_refs(a: &Int, b: &Int) -> Int {
+        *a + *b
+    }
+
+    let x = 10;
+    let y = 20;
+    println(f"add_refs: {add_refs(&x, &y)}");
+
+    // Reference to output parameter
+    fn set_to_max(out: &mut Int, a: Int, b: Int) {
+        *out = if a > b { a } else { b };
+    }
+
+    let mut result = 0;
+    set_to_max(&mut result, 42, 17);
+    println(f"max result: {result}");
+
+    // Self reference in method
+    type Counter is { count: Int };
+
+    implement Counter {
+        fn increment(&mut self) {
+            self.count = self.count + 1;
+        }
+
+        fn value(&self) -> Int {
+            self.count
+        }
+    }
+
+    let mut counter = Counter { count: 0 };
+    counter.increment();
+    counter.increment();
+    counter.increment();
+    println(f"counter value: {counter.value()}");
+}
+
+/// Returning references
+fn test_reference_returns() {
+    println("\n=== Reference Returns ===");
+
+    // Return reference to field
+    type Container is { value: Int };
+
+    fn get_value_ref(c: &Container) -> &Int {
+        &c.value
+    }
+
+    let container = Container { value: 42 };
+    let ref_val = get_value_ref(&container);
+    println(f"value via returned ref: {*ref_val}");
+
+    // Return mutable reference
+    fn get_value_mut(c: &mut Container) -> &mut Int {
+        &mut c.value
+    }
+
+    let mut mut_container = Container { value: 100 };
+    {
+        let ref_mut = get_value_mut(&mut mut_container);
+        *ref_mut = 200;
+    }
+    println(f"after mutating returned ref: {mut_container.value}");
+
+    // Return reference from collection
+    fn first<T>(list: &List<T>) -> Maybe<&T> {
+        if list.is_empty() {
+            None
+        } else {
+            Some(&list[0])
+        }
+    }
+
+    let items = [10, 20, 30];
+    match first(&items) {
+        Some(r) => println(f"first element: {*r}"),
+        None => println("empty list"),
+    }
+
+    // Return reference based on condition
+    fn max_ref(a: &Int, b: &Int) -> &Int {
+        if *a > *b { a } else { b }
+    }
+
+    let x = 42;
+    let y = 17;
+    println(f"max_ref: {*max_ref(&x, &y)}");
+}
+
+/// Complex lifetime patterns
+fn test_complex_lifetimes() {
+    println("\n=== Complex Lifetimes ===");
+
+    // Iterator yielding references
+    let data = [10, 20, 30, 40, 50];
+    println("iterating with references:");
+    for item in &data {
+        println(f"  item: {*item}");
+    }
+
+    // Reference chain
+    let x = 42;
+    let r1 = &x;
+    let r2 = r1;  // Copy of reference
+    let r3 = r2;
+    println(f"reference chain: {*r1}, {*r2}, {*r3}");
+
+    // Reference in match
+    type Maybe<T> is None | Some(T);
+
+    let opt = Some(100);
+    match &opt {
+        Some(ref v) => println(f"matched Some with ref: {*v}"),
+        None => println("matched None"),
+    }
+
+    // Reference in closure
+    let value = 42;
+    let ref_val = &value;
+    let closure = || *ref_val * 2;
+    println(f"closure result: {closure()}");
+
+    // Multiple closures borrowing
+    let data = [1, 2, 3, 4, 5];
+    let sum_closure = || data.fold(0, |a, b| a + b);
+    let len_closure = || data.len();
+    println(f"sum: {sum_closure()}, len: {len_closure()}");
+
+    // Nested borrow in closure
+    type Pair is { a: Int, b: Int };
+    let pair = Pair { a: 10, b: 20 };
+    let get_a = || pair.a;
+    let get_b = || pair.b;
+    println(f"from closures: a={get_a()}, b={get_b()}");
+}

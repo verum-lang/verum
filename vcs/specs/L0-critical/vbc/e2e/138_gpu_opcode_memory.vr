@@ -1,0 +1,194 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, gpu, memory
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU memory operations — allocate, free, memcpy, OOM detection using simulated buffers
+
+// ============================================================================
+// GpuMem: Simulated GPU memory allocator
+// ============================================================================
+
+type GpuMem is {
+    capacity: Int,
+    used: Int,
+    alloc_count: Int
+};
+
+fn gpu_mem_create(cap: Int) -> GpuMem {
+    GpuMem { capacity: cap, used: 0, alloc_count: 0 }
+}
+
+type AllocResult is { mem: GpuMem, success: Int, offset: Int };
+
+fn gpu_alloc(m: GpuMem, size: Int) -> AllocResult {
+    let new_used = m.used + size;
+    if new_used > m.capacity {
+        AllocResult { mem: m, success: 0, offset: -1 }
+    } else {
+        let offset = m.used;
+        let new_mem = GpuMem {
+            capacity: m.capacity,
+            used: new_used,
+            alloc_count: m.alloc_count + 1
+        };
+        AllocResult { mem: new_mem, success: 1, offset: offset }
+    }
+}
+
+fn gpu_free(m: GpuMem, size: Int) -> GpuMem {
+    let new_used = m.used - size;
+    let clamped = if new_used < 0 { 0 } else { new_used };
+    GpuMem {
+        capacity: m.capacity,
+        used: clamped,
+        alloc_count: m.alloc_count - 1
+    }
+}
+
+// ============================================================================
+// Buf4: Simulated buffer of 4 Ints for memcpy tests
+// ============================================================================
+
+type Buf4 is { v0: Int, v1: Int, v2: Int, v3: Int };
+
+fn buf_get(b: Buf4, i: Int) -> Int {
+    if i == 0 { b.v0 } else if i == 1 { b.v1 }
+    else if i == 2 { b.v2 } else { b.v3 }
+}
+
+fn buf_memcpy(src: Buf4) -> Buf4 {
+    Buf4 { v0: src.v0, v1: src.v1, v2: src.v2, v3: src.v3 }
+}
+
+fn buf_fill(val: Int) -> Buf4 {
+    Buf4 { v0: val, v1: val, v2: val, v3: val }
+}
+
+// ============================================================================
+// Test 1: Basic alloc/free
+// ============================================================================
+
+@test
+fn test_alloc_free() {
+    let m = gpu_mem_create(1024);
+    assert_eq(m.used, 0);
+    assert_eq(m.alloc_count, 0);
+
+    let r1 = gpu_alloc(m, 256);
+    assert_eq(r1.success, 1);
+    assert_eq(r1.offset, 0);
+    assert_eq(r1.mem.used, 256);
+    assert_eq(r1.mem.alloc_count, 1);
+
+    let r2 = gpu_alloc(r1.mem, 512);
+    assert_eq(r2.success, 1);
+    assert_eq(r2.offset, 256);
+    assert_eq(r2.mem.used, 768);
+    assert_eq(r2.mem.alloc_count, 2);
+
+    let m2 = gpu_free(r2.mem, 256);
+    assert_eq(m2.used, 512);
+    assert_eq(m2.alloc_count, 1);
+    print("  test_alloc_free: ok");
+}
+
+// ============================================================================
+// Test 2: OOM detection
+// ============================================================================
+
+@test
+fn test_oom_detection() {
+    let m = gpu_mem_create(100);
+    let r1 = gpu_alloc(m, 60);
+    assert_eq(r1.success, 1);
+
+    // Try to allocate more than remaining
+    let r2 = gpu_alloc(r1.mem, 50);
+    assert_eq(r2.success, 0);
+    assert_eq(r2.offset, -1);
+    // Memory unchanged after failed alloc
+    assert_eq(r2.mem.used, 60);
+    assert_eq(r2.mem.alloc_count, 1);
+
+    // Exact fit should succeed
+    let r3 = gpu_alloc(r1.mem, 40);
+    assert_eq(r3.success, 1);
+    assert_eq(r3.mem.used, 100);
+    print("  test_oom_detection: ok");
+}
+
+// ============================================================================
+// Test 3: Memcpy correctness
+// ============================================================================
+
+@test
+fn test_memcpy() {
+    let src = Buf4 { v0: 10, v1: 20, v2: 30, v3: 40 };
+    let dst = buf_memcpy(src);
+    assert_eq(buf_get(dst, 0), 10);
+    assert_eq(buf_get(dst, 1), 20);
+    assert_eq(buf_get(dst, 2), 30);
+    assert_eq(buf_get(dst, 3), 40);
+
+    // Copy filled buffer
+    let filled = buf_fill(99);
+    let copied = buf_memcpy(filled);
+    assert_eq(buf_get(copied, 0), 99);
+    assert_eq(buf_get(copied, 3), 99);
+    print("  test_memcpy: ok");
+}
+
+// ============================================================================
+// Test 4: Sequential allocations
+// ============================================================================
+
+@test
+fn test_sequential_alloc() {
+    let m = gpu_mem_create(400);
+    let r1 = gpu_alloc(m, 100);
+    let r2 = gpu_alloc(r1.mem, 100);
+    let r3 = gpu_alloc(r2.mem, 100);
+    let r4 = gpu_alloc(r3.mem, 100);
+
+    assert_eq(r1.offset, 0);
+    assert_eq(r2.offset, 100);
+    assert_eq(r3.offset, 200);
+    assert_eq(r4.offset, 300);
+    assert_eq(r4.mem.used, 400);
+    assert_eq(r4.mem.alloc_count, 4);
+
+    // No more room
+    let r5 = gpu_alloc(r4.mem, 1);
+    assert_eq(r5.success, 0);
+    print("  test_sequential_alloc: ok");
+}
+
+// ============================================================================
+// Test 5: Free clamp to zero
+// ============================================================================
+
+@test
+fn test_free_clamp() {
+    let m = gpu_mem_create(1000);
+    let r = gpu_alloc(m, 50);
+    // Free more than allocated
+    let m2 = gpu_free(r.mem, 200);
+    assert_eq(m2.used, 0);
+    print("  test_free_clamp: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_alloc_free();
+    test_oom_detection();
+    test_memcpy();
+    test_sequential_alloc();
+    test_free_clamp();
+    print("[OK] 138_gpu_opcode_memory");
+    0
+}

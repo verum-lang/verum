@@ -1,0 +1,147 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, pattern, match, variant
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests pattern matching on variants, nested matching, and exhaustive patterns.
+
+type Shape is Circle(Int) | Rectangle { w: Int, h: Int } | Point;
+
+type Expr is
+    Num(Int)
+  | Add { left: Int, right: Int }
+  | Mul { left: Int, right: Int }
+  | Neg(Int);
+
+fn area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,  // approximate pi*r^2 as 3*r^2
+        Rectangle { w: w, h: h } => w * h,
+        Point => 0,
+    }
+}
+
+fn eval_expr(e: Expr) -> Int {
+    match e {
+        Num(n) => n,
+        Add { left: a, right: b } => a + b,
+        Mul { left: a, right: b } => a * b,
+        Neg(n) => 0 - n,
+    }
+}
+
+fn test_shape_matching() {
+    let c = Circle(5);
+    assert_eq(area(c), 75);
+
+    let r = Rectangle { w: 4, h: 7 };
+    assert_eq(area(r), 28);
+
+    let p = Point;
+    assert_eq(area(p), 0);
+
+    print("shape_matching: ok");
+}
+
+fn test_expr_eval() {
+    let e1 = Num(42);
+    assert_eq(eval_expr(e1), 42);
+
+    let e2 = Add { left: 10, right: 20 };
+    assert_eq(eval_expr(e2), 30);
+
+    let e3 = Mul { left: 6, right: 7 };
+    assert_eq(eval_expr(e3), 42);
+
+    let e4 = Neg(15);
+    assert_eq(eval_expr(e4), -15);
+
+    print("expr_eval: ok");
+}
+
+fn test_is_operator() {
+    let s1 = Circle(3);
+    let s2 = Rectangle { w: 2, h: 3 };
+    let s3 = Point;
+
+    // Test `is` pattern matching
+    if s1 is Circle(r) {
+        assert_eq(r, 3);
+    } else {
+        panic("expected Circle");
+    }
+
+    if s2 is Rectangle { w: w, h: h } {
+        assert_eq(w, 2);
+        assert_eq(h, 3);
+    } else {
+        panic("expected Rectangle");
+    }
+
+    if s3 is Point {
+        // ok
+    } else {
+        panic("expected Point");
+    }
+
+    print("is_operator: ok");
+}
+
+fn classify(n: Int) -> Int {
+    if n > 100 {
+        3
+    } else if n > 10 {
+        2
+    } else if n > 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn test_if_chains() {
+    assert_eq(classify(200), 3);
+    assert_eq(classify(50), 2);
+    assert_eq(classify(5), 1);
+    assert_eq(classify(0), 0);
+    assert_eq(classify(-10), 0);
+    print("if_chains: ok");
+}
+
+fn test_variant_construction() {
+    // Build a sequence of shapes and compute total area
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 4 {
+        let s = Circle(i);
+        total = total + area(s);
+        i = i + 1;
+    }
+    // 3*1 + 3*4 + 3*9 + 3*16 = 3+12+27+48 = 90
+    assert_eq(total, 90);
+
+    // Build rectangles
+    let mut rect_total = 0;
+    let mut j = 1;
+    while j <= 3 {
+        let r = Rectangle { w: j, h: j + 1 };
+        rect_total = rect_total + area(r);
+        j = j + 1;
+    }
+    // 1*2 + 2*3 + 3*4 = 2+6+12 = 20
+    assert_eq(rect_total, 20);
+
+    print("variant_construction: ok");
+}
+
+fn main() -> Int {
+    test_shape_matching();
+    test_expr_eval();
+    test_is_operator();
+    test_if_chains();
+    test_variant_construction();
+    print("[OK] 396_interp_pattern_matching");
+    0
+}

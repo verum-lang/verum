@@ -1,0 +1,46 @@
+// @test: parse
+// @level: L1
+// @tags: meta, quote, lift, staged
+// @timeout: 5000
+
+/// Quote lift operator for splicing compile-time values into generated code.
+/// Grammar: quote_lift = 'lift' '(' expression ')'
+
+// Basic lift
+meta fn gen_with_lift() {
+    let n = 42;
+    let msg = "hello";
+    quote {
+        let x = lift(n);
+        let s = lift(msg);
+        $assert_eq(x, 42);
+        $assert_eq(s, "hello");
+    }
+}
+
+// Lift with computed value
+meta fn gen_computed() {
+    let base = 10;
+    let squared = base * base;
+    quote {
+        const COMPUTED: Int = lift(squared);
+    }
+}
+
+// Lift in repetition
+meta fn gen_lookup_table(entries: List<(Text, Int)>) {
+    quote {
+        fn lookup(key: Text) -> Maybe<Int> {
+            $[for (k, v) in entries {
+                if key == lift(k) {
+                    return Some(lift(v));
+                }
+            }]
+            None
+        }
+    }
+}
+
+fn main() {
+    print("Quote lift tests parsed");
+}

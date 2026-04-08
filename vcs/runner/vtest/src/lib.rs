@@ -1086,29 +1086,7 @@ fn get_current_rss_bytes() -> Option<u64> {
         }
         None
     }
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::System::ProcessStatus::{
-            GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
-        };
-        use windows_sys::Win32::System::Threading::GetCurrentProcess;
-
-        unsafe {
-            let mut pmc: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
-            pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-            if GetProcessMemoryInfo(
-                GetCurrentProcess(),
-                &mut pmc,
-                pmc.cb,
-            ) != 0
-            {
-                Some(pmc.PeakWorkingSetSize as u64)
-            } else {
-                None
-            }
-        }
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         None
     }

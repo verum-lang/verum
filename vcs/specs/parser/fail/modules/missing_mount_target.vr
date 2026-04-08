@@ -1,0 +1,7 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, modules, mount, missing-target, error
+// @description: Test invalid mount statement with trailing dot
+// @expected-error: E063
+
+mount foo.;

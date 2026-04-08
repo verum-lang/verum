@@ -1,0 +1,174 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, generics, function-calls, method-calls
+// @description: Comprehensive tests for generic function and method call syntax
+//               Covers func<T>() and method<T>() patterns critical for self-hosting
+
+// ============================================================================
+// BASIC GENERIC FUNCTION CALLS - func<T>(args)
+// ============================================================================
+
+fn test_basic_generic_call() {
+    // Single type argument
+    let result = parse<Int>();
+    let value = get_default<Text>();
+
+    // Multiple type arguments
+    let map = create<Text, Int>();
+    let triple = combine<A, B, C>();
+}
+
+fn test_generic_call_with_args() {
+    // Type argument with value argument
+    let parsed = parse<Int>("42");
+    let converted = convert<Float>(100);
+
+    // Multiple type args with multiple value args
+    let mapped = transform<Input, Output>(input, mapper);
+}
+
+fn test_nested_generic_calls() {
+    // Nested generic type in function call
+    let result = process<List<Int>>();
+    let nested = create<Maybe<List<Text>>>();
+
+    // Double nested
+    let deep = parse<Map<Text, List<Int>>>();
+}
+
+// ============================================================================
+// GENERIC METHOD CALLS - obj.method<T>(args)
+// ============================================================================
+
+fn test_basic_generic_method() {
+    let list = List.new<Int>();
+    let map = Map.new<Text, Int>();
+
+    // Method with type arg on instance
+    let collected = items.collect<List<Int>>();
+}
+
+fn test_generic_method_with_args() {
+    // Type argument with value argument
+    let result = container.get<Int>(key);
+    let casted = value.cast<Float>();
+
+    // Multiple type args with value args
+    let mapped = stream.map<Output>(func);
+}
+
+fn test_chained_generic_methods() {
+    // Chained methods with generics
+    let result = items
+        .filter(pred)
+        .map<Text>(transform)
+        .collect<List<Text>>();
+}
+
+// ============================================================================
+// GENERIC CALLS WITH CLOSING AMBIGUITY - >> vs > >
+// ============================================================================
+
+fn test_double_close_in_call() {
+    // Two levels of generics ending with >>
+    let result = process<List<Int>>();
+    let parsed = parse<Maybe<Text>>();
+}
+
+fn test_triple_close_in_call() {
+    // Three levels of generics ending with >>>
+    let deep = create<List<List<Int>>>();
+    let nested = parse<Maybe<List<Text>>>();
+}
+
+fn test_generic_comparison_context() {
+    // Generic call followed by comparison - must not confuse > with closing
+    let x = func<Int>();
+    let cmp = x > 0;
+
+    // Method call with generic followed by comparison
+    let y = list.get<Int>(0);
+    let check = y >= 5;
+}
+
+// ============================================================================
+// CONSTRUCTOR PATTERNS - Type<T>.new() and Type<T>()
+// ============================================================================
+
+fn test_generic_constructors() {
+    // Static constructor with type argument
+    let list = List<Int>.new();
+    let map = Map<Text, Int>.new();
+
+    // Direct constructor call (if supported)
+    let heap = Heap<Point>(Point { x: 0.0, y: 0.0 });
+}
+
+fn test_generic_static_method() {
+    // Static method with explicit type
+    let default = Int.default();
+    let empty = List<Int>.empty();
+    let zero = Maybe<Int>.none();
+}
+
+// ============================================================================
+// EDGE CASES
+// ============================================================================
+
+fn test_single_char_type_params() {
+    // Common single-char type parameters
+    let a = func<T>();
+    let b = func<A, B, C>();
+    let c = process<T, U, V>();
+}
+
+fn test_long_type_names() {
+    // Long type names in generic calls
+    let result = create<VeryLongTypeName>();
+    let complex = process<SomeModule.InnerType>();
+}
+
+fn test_generic_call_in_expression() {
+    // Generic call as part of larger expression
+    let sum = parse<Int>() + parse<Int>();
+    let cond = if check<Bool>() { 1 } else { 0 };
+
+    // In binary expression
+    let result = get<Int>() * 2 + get<Int>() / 2;
+}
+
+fn test_generic_call_as_argument() {
+    // Generic call passed as argument
+    process(parse<Int>());
+    combine(get<A>(), get<B>());
+}
+
+fn test_generic_in_closure() {
+    // Generic call inside closure
+    let mapper = |x| convert<Int>(x);
+    let processor = |val| {
+        let parsed = parse<Text>(val);
+        transform<Output>(parsed)
+    };
+}
+
+fn test_optional_chain_with_generic() {
+    // Optional chaining with generic method
+    let result = obj?.method<Int>();
+    let value = container?.get<Text>(key);
+}
+
+// ============================================================================
+// TYPE INFERENCE INTERACTION
+// ============================================================================
+
+fn test_explicit_type_overrides_inference() {
+    // Explicit type should override inference
+    let x: Int = parse<Int>("42");
+    let y: List<Text> = items.collect<List<Text>>();
+}
+
+fn test_partial_type_specification() {
+    // Some types explicit, others inferred
+    let mapped = items.map<Output>(|x| x.field);
+}

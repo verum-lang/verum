@@ -1,0 +1,41 @@
+// Complexity: Complex async patterns
+async fn fetch(id: Int) -> Int {
+    id * 2
+}
+
+async fn process(data: Int) -> Int {
+    data + 1
+}
+
+async fn chain() -> Int {
+    let a = fetch(1).await;
+    let b = fetch(2).await;
+    let c = process(a + b).await;
+    c
+}
+
+async fn parallel() -> (Int, Int, Int) {
+    let t1 = spawn fetch(1);
+    let t2 = spawn fetch(2);
+    let t3 = spawn fetch(3);
+
+    let a = t1.await;
+    let b = t2.await;
+    let c = t3.await;
+
+    (a, b, c)
+}
+
+async fn with_error() -> Result<Int, Text> {
+    let data = fetch(42).await;
+    if data > 100 {
+        Err("Too large")
+    } else {
+        Ok(data)
+    }
+}
+
+fn main() {
+    // Would run in async runtime
+    let _ = 0;
+}

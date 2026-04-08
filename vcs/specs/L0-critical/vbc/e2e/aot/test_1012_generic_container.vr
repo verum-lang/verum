@@ -1,0 +1,230 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, generic, container, stack, type-parameters
+// @description: Generic types and methods — critical for typed collections in compiler
+
+type Stack<T> is {
+    items: List<T>,
+};
+
+implement Stack<T> {
+    fn new() -> Stack<T> {
+        Stack { items: List.new() }
+    }
+
+    fn push(&mut self, item: T) {
+        self.items.push(item);
+    }
+
+    fn pop(&mut self) -> T {
+        let idx = self.items.len() - 1;
+        let val = self.items[idx];
+        self.items.remove(idx);
+        val
+    }
+
+    fn peek(&self) -> T {
+        self.items[self.items.len() - 1]
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.items.len() == 0
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+}
+
+fn reverse_list<T>(items: List<T>) -> List<T> {
+    let mut stack = Stack.new();
+    let mut i = 0;
+    while i < items.len() {
+        stack.push(items[i]);
+        i = i + 1;
+    }
+
+    let mut result = List.new();
+    while !stack.is_empty() {
+        result.push(stack.pop());
+    }
+    result
+}
+
+fn find_in_list(items: List<Int>, target: Int) -> Int {
+    let mut i = 0;
+    while i < items.len() {
+        if items[i] == target {
+            return i;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn test_int_stack() -> Int {
+    let mut s = Stack.new();
+    if !s.is_empty() {
+        print("FAIL int_stack: new stack should be empty");
+        return 1;
+    }
+
+    s.push(10);
+    s.push(20);
+    s.push(30);
+
+    if s.len() != 3 {
+        print(f"FAIL int_stack: expected len 3, got {s.len()}");
+        return 1;
+    }
+    if s.is_empty() {
+        print("FAIL int_stack: non-empty stack reports empty");
+        return 1;
+    }
+
+    let top = s.peek();
+    if top != 30 {
+        print(f"FAIL int_stack: peek expected 30, got {top}");
+        return 1;
+    }
+
+    let popped = s.pop();
+    if popped != 30 {
+        print(f"FAIL int_stack: pop expected 30, got {popped}");
+        return 1;
+    }
+    if s.len() != 2 {
+        print(f"FAIL int_stack: after pop expected len 2, got {s.len()}");
+        return 1;
+    }
+
+    print("  int_stack: OK");
+    0
+}
+
+fn test_text_stack() -> Int {
+    let mut s = Stack.new();
+    s.push("hello");
+    s.push("world");
+
+    if s.len() != 2 {
+        print(f"FAIL text_stack: expected len 2, got {s.len()}");
+        return 1;
+    }
+
+    let top = s.pop();
+    if top != "world" {
+        print(f"FAIL text_stack: pop expected 'world', got '{top}'");
+        return 1;
+    }
+
+    let next = s.pop();
+    if next != "hello" {
+        print(f"FAIL text_stack: pop expected 'hello', got '{next}'");
+        return 1;
+    }
+
+    if !s.is_empty() {
+        print("FAIL text_stack: should be empty after 2 pops");
+        return 1;
+    }
+    print("  text_stack: OK");
+    0
+}
+
+fn test_stack_lifo() -> Int {
+    let mut s = Stack.new();
+    let mut i = 0;
+    while i < 10 {
+        s.push(i);
+        i = i + 1;
+    }
+
+    // Pop should return 9, 8, 7, ...
+    let mut expected = 9;
+    while !s.is_empty() {
+        let val = s.pop();
+        if val != expected {
+            print(f"FAIL lifo: expected {expected}, got {val}");
+            return 1;
+        }
+        expected = expected - 1;
+    }
+    print("  stack_lifo: OK");
+    0
+}
+
+fn test_reverse_via_stack() -> Int {
+    let items = [1, 2, 3, 4, 5];
+    let rev = reverse_list(items);
+
+    if rev.len() != 5 {
+        print(f"FAIL reverse: expected len 5, got {rev.len()}");
+        return 1;
+    }
+    if rev[0] != 5 || rev[4] != 1 {
+        print(f"FAIL reverse: first={rev[0]}, last={rev[4]}");
+        return 1;
+    }
+    print("  reverse_via_stack: OK");
+    0
+}
+
+fn test_generic_function() -> Int {
+    let items = [10, 20, 30, 40, 50];
+    let idx = find_in_list(items, 30);
+    if idx != 2 {
+        print(f"FAIL generic_fn: expected index 2, got {idx}");
+        return 1;
+    }
+
+    let not_found = find_in_list(items, 99);
+    if not_found != -1 {
+        print(f"FAIL generic_fn: expected -1 for not found, got {not_found}");
+        return 1;
+    }
+    print("  generic_function: OK");
+    0
+}
+
+fn test_nested_generic_usage() -> Int {
+    // Stack of stacks pattern (e.g., scope stack in compiler)
+    let mut scope_values = List.new();
+
+    // Simulate push scope, add vars, pop scope
+    let mut current_scope = Stack.new();
+    current_scope.push(1);
+    current_scope.push(2);
+    scope_values.push(current_scope.len());
+
+    let mut next_scope = Stack.new();
+    next_scope.push(10);
+    scope_values.push(next_scope.len());
+
+    if scope_values[0] != 2 {
+        print(f"FAIL nested: scope 0 expected 2 vars, got {scope_values[0]}");
+        return 1;
+    }
+    if scope_values[1] != 1 {
+        print(f"FAIL nested: scope 1 expected 1 var, got {scope_values[1]}");
+        return 1;
+    }
+    print("  nested_generic_usage: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_int_stack();
+    failures = failures + test_text_stack();
+    failures = failures + test_stack_lifo();
+    failures = failures + test_reverse_via_stack();
+    failures = failures + test_generic_function();
+    failures = failures + test_nested_generic_usage();
+
+    if failures == 0 {
+        print("All generic container tests passed");
+    }
+    failures
+}

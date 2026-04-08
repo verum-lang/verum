@@ -1,0 +1,15 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, minimal
+// @description: Minimal test for sqrt_f64 intrinsic
+
+module test.stdlib.sys.intrinsics.sqrt_minimal_test;
+
+mount core.intrinsics.{sqrt_f64};
+
+fn main() {
+    let x: Float64 = 4.0;
+    let result = sqrt_f64(x);
+    print(f"sqrt(4.0) = {result}");
+}

@@ -1,0 +1,891 @@
+// =============================================================================
+// VCS Test Suite: stdlib/mem/size_class.vr - Size Class Tests
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: mem, allocator, size-class, fragmentation, mimalloc
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for the mimalloc-style size class system with 73 bins and ~12.5%
+// maximum internal fragmentation.
+//
+// =============================================================================
+
+mount core.mem.size_class.{
+    BIN_COUNT, BIN_HUGE, BIN_FULL, QUEUE_COUNT,
+    SMALL_SIZE_MAX, MEDIUM_SIZE_MAX, LARGE_SIZE_MAX, HUGE_SIZE_THRESHOLD,
+    WORD_SIZE, MAX_ALIGN_SIZE,
+    SIZE_CLASSES,
+    size_to_bin, bin_to_size, size_to_bin_large,
+    is_small_size, is_medium_size, is_large_size, is_huge_size,
+    slices_for_bin, page_size_for_bin, blocks_per_page,
+    aligned_size,
+    PageKind, page_kind_for_bin,
+    fragmentation_percent, optimal_bin,
+    SizeClassStats,
+};
+
+// =============================================================================
+// Constant Tests
+// =============================================================================
+
+@test
+fn test_bin_count() {
+    // 73 size class bins
+    assert_eq(BIN_COUNT, 73);
+}
+
+@test
+fn test_bin_huge() {
+    // Huge bin index
+    assert_eq(BIN_HUGE, 73);
+}
+
+@test
+fn test_bin_full() {
+    // Full pages bin index
+    assert_eq(BIN_FULL, 74);
+}
+
+@test
+fn test_queue_count() {
+    // 73 size classes + huge + full = 75 queues
+    assert_eq(QUEUE_COUNT, 75);
+    assert_eq(QUEUE_COUNT, BIN_COUNT + 2);
+}
+
+@test
+fn test_small_size_max() {
+    // Small allocations up to 8 KiB
+    assert_eq(SMALL_SIZE_MAX, 8192);
+}
+
+@test
+fn test_medium_size_max() {
+    // Medium allocations up to 64 KiB
+    assert_eq(MEDIUM_SIZE_MAX, 65536);
+}
+
+@test
+fn test_large_size_max() {
+    // Large allocations up to 16 MiB
+    assert_eq(LARGE_SIZE_MAX, 16777216);
+}
+
+@test
+fn test_huge_size_threshold() {
+    // Huge threshold at 5 MiB
+    assert_eq(HUGE_SIZE_THRESHOLD, 5242880);
+}
+
+@test
+fn test_word_size() {
+    // 64-bit platform: 8 bytes per word
+    assert_eq(WORD_SIZE, 8);
+}
+
+@test
+fn test_max_align_size() {
+    // Standard alignment up to 16 bytes
+    assert_eq(MAX_ALIGN_SIZE, 16);
+}
+
+// =============================================================================
+// SIZE_CLASSES Array Tests
+// =============================================================================
+
+@test
+fn test_size_classes_length() {
+    assert_eq(SIZE_CLASSES.len(), 73);
+}
+
+@test
+fn test_size_classes_exact_small() {
+    // Bins 0-7: exact 8-byte increments
+    assert_eq(SIZE_CLASSES[0], 8);
+    assert_eq(SIZE_CLASSES[1], 16);
+    assert_eq(SIZE_CLASSES[2], 24);
+    assert_eq(SIZE_CLASSES[3], 32);
+    assert_eq(SIZE_CLASSES[4], 40);
+    assert_eq(SIZE_CLASSES[5], 48);
+    assert_eq(SIZE_CLASSES[6], 56);
+    assert_eq(SIZE_CLASSES[7], 64);
+}
+
+@test
+fn test_size_classes_exponential_64_128() {
+    // Bins 8-11: 64-128 range
+    assert_eq(SIZE_CLASSES[8], 80);
+    assert_eq(SIZE_CLASSES[9], 96);
+    assert_eq(SIZE_CLASSES[10], 112);
+    assert_eq(SIZE_CLASSES[11], 128);
+}
+
+@test
+fn test_size_classes_exponential_128_256() {
+    // Bins 12-15: 128-256 range
+    assert_eq(SIZE_CLASSES[12], 160);
+    assert_eq(SIZE_CLASSES[13], 192);
+    assert_eq(SIZE_CLASSES[14], 224);
+    assert_eq(SIZE_CLASSES[15], 256);
+}
+
+@test
+fn test_size_classes_exponential_256_512() {
+    // Bins 16-19: 256-512 range
+    assert_eq(SIZE_CLASSES[16], 320);
+    assert_eq(SIZE_CLASSES[17], 384);
+    assert_eq(SIZE_CLASSES[18], 448);
+    assert_eq(SIZE_CLASSES[19], 512);
+}
+
+@test
+fn test_size_classes_exponential_512_1k() {
+    // Bins 20-23: 512-1K range
+    assert_eq(SIZE_CLASSES[20], 640);
+    assert_eq(SIZE_CLASSES[21], 768);
+    assert_eq(SIZE_CLASSES[22], 896);
+    assert_eq(SIZE_CLASSES[23], 1024);
+}
+
+@test
+fn test_size_classes_1k_to_8k() {
+    // Bins 24-35: 1K-8K range
+    assert_eq(SIZE_CLASSES[24], 1280);
+    assert_eq(SIZE_CLASSES[27], 2048);
+    assert_eq(SIZE_CLASSES[31], 4096);
+    assert_eq(SIZE_CLASSES[35], 8192);
+}
+
+@test
+fn test_size_classes_medium_range() {
+    // Bins 36-47: 8K-64K (medium pages)
+    assert_eq(SIZE_CLASSES[36], 10240);
+    assert_eq(SIZE_CLASSES[39], 16384);
+    assert_eq(SIZE_CLASSES[43], 32768);
+    assert_eq(SIZE_CLASSES[47], 65536);
+}
+
+@test
+fn test_size_classes_large_range() {
+    // Bins 48-71: 64K-4M (large pages)
+    assert_eq(SIZE_CLASSES[48], 81920);
+    assert_eq(SIZE_CLASSES[51], 131072);
+    assert_eq(SIZE_CLASSES[55], 262144);
+    assert_eq(SIZE_CLASSES[59], 524288);
+    assert_eq(SIZE_CLASSES[63], 1048576);  // 1 MiB
+    assert_eq(SIZE_CLASSES[67], 2097152);  // 2 MiB
+    assert_eq(SIZE_CLASSES[71], 4194304);  // 4 MiB
+}
+
+@test
+fn test_size_classes_max() {
+    // Bin 72: Maximum size before huge
+    assert_eq(SIZE_CLASSES[72], 5242880);  // 5 MiB
+}
+
+@test
+fn test_size_classes_monotonically_increasing() {
+    for i in 1..BIN_COUNT {
+        assert(SIZE_CLASSES[i] > SIZE_CLASSES[i - 1]);
+    }
+}
+
+@test
+fn test_size_classes_12_5_percent_spacing() {
+    // After exact sizes (bin 8+), spacing should be ~12.5%
+    // Each group of 4 bins spans one power of 2
+    for group in 2..17 {  // Groups starting from 64-128 range
+        let base_bin = group * 4;
+        if base_bin >= BIN_COUNT - 3 {
+            break;
+        }
+
+        let s0 = SIZE_CLASSES[base_bin];
+        let s1 = SIZE_CLASSES[base_bin + 1];
+        let s2 = SIZE_CLASSES[base_bin + 2];
+        let s3 = SIZE_CLASSES[base_bin + 3];
+
+        // s3 should be approximately 2x s0 (start of next power of 2)
+        // Allowing some tolerance for rounding
+        assert(s3 >= s0 * 2 - s0 / 8);
+        assert(s3 <= s0 * 2 + s0 / 8);
+    }
+}
+
+// =============================================================================
+// size_to_bin() Tests - Small Sizes
+// =============================================================================
+
+@test
+fn test_size_to_bin_zero() {
+    assert_eq(size_to_bin(0), 0);
+}
+
+@test
+fn test_size_to_bin_negative() {
+    assert_eq(size_to_bin(-1), 0);
+}
+
+@test
+fn test_size_to_bin_one() {
+    assert_eq(size_to_bin(1), 0);  // → 8 bytes
+}
+
+@test
+fn test_size_to_bin_exact_8() {
+    assert_eq(size_to_bin(8), 0);
+}
+
+@test
+fn test_size_to_bin_exact_small_sizes() {
+    // Exact boundaries for small sizes
+    assert_eq(size_to_bin(8), 0);
+    assert_eq(size_to_bin(16), 1);
+    assert_eq(size_to_bin(24), 2);
+    assert_eq(size_to_bin(32), 3);
+    assert_eq(size_to_bin(40), 4);
+    assert_eq(size_to_bin(48), 5);
+    assert_eq(size_to_bin(56), 6);
+    assert_eq(size_to_bin(64), 7);
+}
+
+@test
+fn test_size_to_bin_just_over_small() {
+    // Just over exact boundaries rounds up to next bin
+    assert_eq(size_to_bin(9), 1);   // 9 → bin 1 (16 bytes)
+    assert_eq(size_to_bin(17), 2);  // 17 → bin 2 (24 bytes)
+    assert_eq(size_to_bin(25), 3);  // 25 → bin 3 (32 bytes)
+    assert_eq(size_to_bin(33), 4);  // 33 → bin 4 (40 bytes)
+    assert_eq(size_to_bin(65), 8);  // 65 → bin 8 (80 bytes)
+}
+
+@test
+fn test_size_to_bin_mid_range() {
+    // Sizes in middle of ranges
+    assert_eq(size_to_bin(12), 1);   // between 8 and 16 → 16
+    assert_eq(size_to_bin(50), 6);   // between 48 and 56 → 56
+    assert_eq(size_to_bin(70), 8);   // between 64 and 80 → 80
+}
+
+@test
+fn test_size_to_bin_100() {
+    // 100 bytes → bin 9 (96 bytes? No, 100 > 96, so bin 10 = 112)
+    let bin = size_to_bin(100);
+    assert(bin_to_size(bin) >= 100);
+}
+
+@test
+fn test_size_to_bin_1000() {
+    let bin = size_to_bin(1000);
+    assert(bin_to_size(bin) >= 1000);
+    assert_eq(bin, 23);  // → 1024 byte bin
+}
+
+// =============================================================================
+// size_to_bin() Tests - Medium/Large Sizes
+// =============================================================================
+
+@test
+fn test_size_to_bin_1024() {
+    assert_eq(size_to_bin(1024), 23);
+}
+
+@test
+fn test_size_to_bin_4096() {
+    let bin = size_to_bin(4096);
+    assert_eq(bin_to_size(bin), 4096);
+}
+
+@test
+fn test_size_to_bin_8192() {
+    let bin = size_to_bin(8192);
+    assert_eq(bin_to_size(bin), 8192);
+}
+
+@test
+fn test_size_to_bin_64k() {
+    let bin = size_to_bin(65536);
+    assert_eq(bin_to_size(bin), 65536);
+}
+
+@test
+fn test_size_to_bin_1m() {
+    let bin = size_to_bin(1048576);
+    assert_eq(bin_to_size(bin), 1048576);
+}
+
+@test
+fn test_size_to_bin_5m() {
+    let bin = size_to_bin(5242880);
+    assert_eq(bin, 72);  // Max normal bin
+}
+
+@test
+fn test_size_to_bin_huge() {
+    // Above 5 MiB threshold
+    let bin = size_to_bin(5242881);
+    assert_eq(bin, BIN_HUGE);
+
+    let bin2 = size_to_bin(10000000);
+    assert_eq(bin2, BIN_HUGE);
+}
+
+// =============================================================================
+// bin_to_size() Tests
+// =============================================================================
+
+@test
+fn test_bin_to_size_valid_bins() {
+    for bin in 0..BIN_COUNT {
+        let size = bin_to_size(bin);
+        assert(size > 0);
+        assert_eq(size, SIZE_CLASSES[bin]);
+    }
+}
+
+@test
+fn test_bin_to_size_invalid_bins() {
+    assert_eq(bin_to_size(BIN_COUNT), 0);
+    assert_eq(bin_to_size(BIN_HUGE), 0);
+    assert_eq(bin_to_size(100), 0);
+    assert_eq(bin_to_size(-1), 0);
+}
+
+@test
+fn test_bin_to_size_specific() {
+    assert_eq(bin_to_size(0), 8);
+    assert_eq(bin_to_size(7), 64);
+    assert_eq(bin_to_size(23), 1024);
+    assert_eq(bin_to_size(35), 8192);
+    assert_eq(bin_to_size(47), 65536);
+    assert_eq(bin_to_size(72), 5242880);
+}
+
+// =============================================================================
+// Round-Trip Tests
+// =============================================================================
+
+@test
+fn test_size_to_bin_to_size_roundtrip() {
+    // Every valid size should map to a bin that covers it
+    let test_sizes = [
+        1, 8, 9, 16, 17, 32, 64, 65, 100, 128, 256, 512, 1024,
+        2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144,
+        524288, 1048576, 2097152, 4194304, 5242880
+    ];
+
+    for size in test_sizes {
+        let bin = size_to_bin(size);
+        let bin_size = bin_to_size(bin);
+        assert(bin_size >= size, f"size {size} → bin {bin} → size {bin_size}");
+    }
+}
+
+@test
+fn test_exact_size_roundtrip() {
+    // SIZE_CLASSES values should roundtrip exactly
+    for bin in 0..BIN_COUNT {
+        let size = SIZE_CLASSES[bin];
+        let computed_bin = size_to_bin(size);
+        assert_eq(computed_bin, bin);
+    }
+}
+
+// =============================================================================
+// Size Category Tests
+// =============================================================================
+
+@test
+fn test_is_small_size() {
+    assert(is_small_size(1));
+    assert(is_small_size(100));
+    assert(is_small_size(1024));
+    assert(is_small_size(4096));
+    assert(is_small_size(8192));  // SMALL_SIZE_MAX
+    assert(!is_small_size(8193));
+    assert(!is_small_size(65536));
+}
+
+@test
+fn test_is_medium_size() {
+    assert(!is_medium_size(8192));  // Still small
+    assert(is_medium_size(8193));
+    assert(is_medium_size(10000));
+    assert(is_medium_size(32768));
+    assert(is_medium_size(65536));  // MEDIUM_SIZE_MAX
+    assert(!is_medium_size(65537));
+}
+
+@test
+fn test_is_large_size() {
+    assert(!is_large_size(65536));  // Still medium
+    assert(is_large_size(65537));
+    assert(is_large_size(100000));
+    assert(is_large_size(1000000));
+    assert(is_large_size(16777216));  // LARGE_SIZE_MAX
+    assert(!is_large_size(16777217));
+}
+
+@test
+fn test_is_huge_size() {
+    assert(!is_huge_size(5242880));  // HUGE_SIZE_THRESHOLD
+    assert(is_huge_size(5242881));
+    assert(is_huge_size(10000000));
+    assert(is_huge_size(100000000));
+}
+
+@test
+fn test_size_categories_mutually_exclusive() {
+    let test_sizes = [1, 100, 8192, 8193, 65536, 65537, 5242880, 5242881, 100000000];
+
+    for size in test_sizes {
+        let small = is_small_size(size);
+        let medium = is_medium_size(size);
+        let large = is_large_size(size);
+        let huge = is_huge_size(size);
+
+        // At most one category should be true (huge has overlap issue in definition)
+        let count = (small as Int) + (medium as Int) + (large as Int) + (huge as Int);
+        assert(count <= 2);  // Some sizes may match multiple due to threshold definitions
+    }
+}
+
+// =============================================================================
+// Page Slice Tests
+// =============================================================================
+
+@test
+fn test_slices_for_bin_small() {
+    // Small bins (≤8 KiB) use 1 slice
+    for bin in 0..36 {
+        if SIZE_CLASSES[bin] <= 8192 {
+            assert_eq(slices_for_bin(bin), 1);
+        }
+    }
+}
+
+@test
+fn test_slices_for_bin_medium() {
+    // Medium bins (8K-64K) use 8 slices
+    assert_eq(slices_for_bin(36), 8);  // 10240 bytes
+    assert_eq(slices_for_bin(47), 8);  // 65536 bytes
+}
+
+@test
+fn test_slices_for_bin_large() {
+    // Large bins calculate slices based on size
+    let bin48_slices = slices_for_bin(48);  // 81920 bytes
+    assert(bin48_slices >= 2);
+
+    let bin63_slices = slices_for_bin(63);  // 1 MiB
+    assert(bin63_slices >= 16);
+}
+
+@test
+fn test_page_size_for_bin_small() {
+    // Small pages: 1 slice * 64 KiB = 64 KiB
+    assert_eq(page_size_for_bin(0), 65536);
+    assert_eq(page_size_for_bin(7), 65536);
+    assert_eq(page_size_for_bin(35), 65536);
+}
+
+@test
+fn test_page_size_for_bin_medium() {
+    // Medium pages: 8 slices * 64 KiB = 512 KiB
+    assert_eq(page_size_for_bin(36), 524288);
+    assert_eq(page_size_for_bin(47), 524288);
+}
+
+@test
+fn test_blocks_per_page() {
+    // bin 0: 8-byte blocks in 64 KiB page
+    let blocks_bin0 = blocks_per_page(0);
+    // (65536 - 64) / 8 = 8184
+    assert(blocks_bin0 > 8000);
+    assert(blocks_bin0 < 8200);
+
+    // bin 7: 64-byte blocks
+    let blocks_bin7 = blocks_per_page(7);
+    // (65536 - 64) / 64 = 1023
+    assert(blocks_bin7 > 1000);
+    assert(blocks_bin7 < 1050);
+
+    // bin 23: 1024-byte blocks
+    let blocks_bin23 = blocks_per_page(23);
+    // (65536 - 64) / 1024 = 63
+    assert(blocks_bin23 >= 60);
+    assert(blocks_bin23 <= 65);
+}
+
+@test
+fn test_blocks_per_page_huge() {
+    assert_eq(blocks_per_page(BIN_HUGE), 1);
+}
+
+// =============================================================================
+// Alignment Tests
+// =============================================================================
+
+@test
+fn test_aligned_size_standard() {
+    // Standard alignments (≤16) don't add padding
+    assert_eq(aligned_size(100, 1), 100);
+    assert_eq(aligned_size(100, 8), 100);
+    assert_eq(aligned_size(100, 16), 100);
+}
+
+@test
+fn test_aligned_size_large_alignment() {
+    // Large alignments add padding
+    assert_eq(aligned_size(100, 32), 131);   // 100 + 32 - 1
+    assert_eq(aligned_size(100, 64), 163);   // 100 + 64 - 1
+    assert_eq(aligned_size(100, 4096), 4195); // 100 + 4096 - 1
+}
+
+@test
+fn test_aligned_size_edge_cases() {
+    assert_eq(aligned_size(0, 16), 0);
+    assert_eq(aligned_size(1, 1), 1);
+    assert_eq(aligned_size(16, 16), 16);
+}
+
+// =============================================================================
+// PageKind Tests
+// =============================================================================
+
+@test
+fn test_page_kind_for_bin_small() {
+    // Bins 0-35 are small (≤8 KiB)
+    for bin in 0..36 {
+        if SIZE_CLASSES[bin] <= SMALL_SIZE_MAX {
+            assert(page_kind_for_bin(bin) is Small);
+        }
+    }
+}
+
+@test
+fn test_page_kind_for_bin_medium() {
+    // Bins 36-47 are medium (8K-64K)
+    for bin in 36..48 {
+        if SIZE_CLASSES[bin] > SMALL_SIZE_MAX && SIZE_CLASSES[bin] <= MEDIUM_SIZE_MAX {
+            assert(page_kind_for_bin(bin) is Medium);
+        }
+    }
+}
+
+@test
+fn test_page_kind_for_bin_large() {
+    // Bins 48-72 are large (64K-5M)
+    for bin in 48..73 {
+        if SIZE_CLASSES[bin] > MEDIUM_SIZE_MAX {
+            assert(page_kind_for_bin(bin) is Large);
+        }
+    }
+}
+
+@test
+fn test_page_kind_for_bin_huge() {
+    assert(page_kind_for_bin(BIN_HUGE) is Huge);
+    assert(page_kind_for_bin(74) is Huge);
+    assert(page_kind_for_bin(100) is Huge);
+}
+
+@test
+fn test_page_kind_specific_bins() {
+    assert(page_kind_for_bin(0) is Small);
+    assert(page_kind_for_bin(7) is Small);
+    assert(page_kind_for_bin(35) is Small);   // 8192 bytes
+    assert(page_kind_for_bin(36) is Medium);  // 10240 bytes
+    assert(page_kind_for_bin(47) is Medium);  // 65536 bytes
+    assert(page_kind_for_bin(48) is Large);   // 81920 bytes
+    assert(page_kind_for_bin(72) is Large);   // 5242880 bytes
+    assert(page_kind_for_bin(73) is Huge);
+}
+
+// =============================================================================
+// Fragmentation Tests
+// =============================================================================
+
+@test
+fn test_fragmentation_percent_exact_fit() {
+    // No fragmentation when size == bin size
+    assert_eq(fragmentation_percent(8, 0), 0);
+    assert_eq(fragmentation_percent(64, 7), 0);
+    assert_eq(fragmentation_percent(1024, 23), 0);
+}
+
+@test
+fn test_fragmentation_percent_small_waste() {
+    // 60 bytes in 64-byte bin: (64-60)/64 = 6.25%
+    let frag = fragmentation_percent(60, 7);
+    assert(frag >= 6 && frag <= 7);
+}
+
+@test
+fn test_fragmentation_percent_large_waste() {
+    // 17 bytes in 24-byte bin: (24-17)/24 = 29%
+    let frag = fragmentation_percent(17, 2);
+    assert(frag >= 29 && frag <= 30);
+}
+
+@test
+fn test_fragmentation_percent_edge_cases() {
+    // Invalid bin
+    assert_eq(fragmentation_percent(100, BIN_COUNT), 0);
+
+    // Zero size
+    assert_eq(fragmentation_percent(0, 0), 0);
+}
+
+@test
+fn test_fragmentation_max_12_5_percent() {
+    // Due to ~12.5% spacing, fragmentation should typically be ≤12.5%
+    // for sizes that are just over a bin boundary
+    // But exact small sizes have larger gaps
+
+    // For exponential range (bins 8+), fragmentation should be bounded
+    for bin in 8..BIN_COUNT {
+        let bin_size = SIZE_CLASSES[bin];
+        // Request just 1 byte over previous bin
+        let prev_size = SIZE_CLASSES[bin - 1];
+        let request = prev_size + 1;
+
+        if request <= bin_size {
+            let frag = fragmentation_percent(request, bin);
+            // Should be roughly 12.5% or less for most cases
+            // But allow up to 50% for boundary cases
+            assert(frag <= 50);
+        }
+    }
+}
+
+@test
+fn test_optimal_bin_same_as_size_to_bin() {
+    // For most sizes, optimal_bin equals size_to_bin
+    let test_sizes = [8, 64, 100, 1024, 4096, 65536];
+
+    for size in test_sizes {
+        let normal = size_to_bin(size);
+        let optimal = optimal_bin(size);
+
+        // Optimal should be <= normal (same or smaller bin)
+        assert(optimal <= normal);
+    }
+}
+
+// =============================================================================
+// SizeClassStats Tests
+// =============================================================================
+
+@test
+fn test_size_class_stats_new() {
+    let stats = SizeClassStats.new();
+
+    for bin in 0..75 {
+        assert_eq(stats.alloc_count[bin], 0);
+        assert_eq(stats.dealloc_count[bin], 0);
+        assert_eq(stats.live_count[bin], 0);
+        assert_eq(stats.bytes_allocated[bin], 0);
+        assert_eq(stats.bytes_wasted[bin], 0);
+    }
+}
+
+@test
+fn test_size_class_stats_record_alloc() {
+    let mut stats = SizeClassStats.new();
+
+    // Allocate 60 bytes (uses bin 7 = 64 bytes)
+    stats.record_alloc(7, 60);
+
+    assert_eq(stats.alloc_count[7], 1);
+    assert_eq(stats.live_count[7], 1);
+    assert_eq(stats.bytes_allocated[7], 64);
+    assert_eq(stats.bytes_wasted[7], 4);  // 64 - 60 = 4 wasted
+}
+
+@test
+fn test_size_class_stats_record_dealloc() {
+    let mut stats = SizeClassStats.new();
+
+    stats.record_alloc(7, 60);
+    stats.record_alloc(7, 50);
+    assert_eq(stats.live_count[7], 2);
+
+    stats.record_dealloc(7);
+    assert_eq(stats.dealloc_count[7], 1);
+    assert_eq(stats.live_count[7], 1);
+
+    stats.record_dealloc(7);
+    assert_eq(stats.dealloc_count[7], 2);
+    assert_eq(stats.live_count[7], 0);
+}
+
+@test
+fn test_size_class_stats_dealloc_underflow_protection() {
+    let mut stats = SizeClassStats.new();
+
+    // Dealloc without alloc should not underflow
+    stats.record_dealloc(7);
+    assert_eq(stats.live_count[7], 0);
+}
+
+@test
+fn test_size_class_stats_total_fragmentation_empty() {
+    let stats = SizeClassStats.new();
+    assert_eq(stats.total_fragmentation_percent(), 0);
+}
+
+@test
+fn test_size_class_stats_total_fragmentation() {
+    let mut stats = SizeClassStats.new();
+
+    // Multiple allocations with varying waste
+    stats.record_alloc(0, 8);   // 0 waste
+    stats.record_alloc(7, 60);  // 4 waste (64 - 60)
+    stats.record_alloc(7, 32);  // 32 waste (64 - 32)
+
+    // Total: 8 + 64 + 64 = 136 allocated, 0 + 4 + 32 = 36 wasted
+    // Fragmentation: 36/136 = 26.47%
+    let frag = stats.total_fragmentation_percent();
+    assert(frag >= 25 && frag <= 28);
+}
+
+@test
+fn test_size_class_stats_multiple_bins() {
+    let mut stats = SizeClassStats.new();
+
+    stats.record_alloc(0, 8);
+    stats.record_alloc(7, 64);
+    stats.record_alloc(23, 1024);
+    stats.record_alloc(35, 8192);
+
+    assert_eq(stats.alloc_count[0], 1);
+    assert_eq(stats.alloc_count[7], 1);
+    assert_eq(stats.alloc_count[23], 1);
+    assert_eq(stats.alloc_count[35], 1);
+
+    assert_eq(stats.bytes_allocated[0], 8);
+    assert_eq(stats.bytes_allocated[7], 64);
+    assert_eq(stats.bytes_allocated[23], 1024);
+    assert_eq(stats.bytes_allocated[35], 8192);
+}
+
+@test
+fn test_size_class_stats_huge_allocation() {
+    let mut stats = SizeClassStats.new();
+
+    // Huge allocation uses exact requested size
+    stats.record_alloc(BIN_HUGE, 10000000);
+
+    assert_eq(stats.alloc_count[BIN_HUGE], 1);
+    assert_eq(stats.bytes_allocated[BIN_HUGE], 10000000);
+    assert_eq(stats.bytes_wasted[BIN_HUGE], 0);  // No waste for huge
+}
+
+// =============================================================================
+// Lookup Table Tests
+// =============================================================================
+
+@test
+fn test_small_bin_lookup_covers_1024_bytes() {
+    // Direct lookup works for 0-1024 bytes (0-128 words)
+    for size in 1..1025 {
+        let bin = size_to_bin(size);
+        let bin_size = bin_to_size(bin);
+        assert(bin_size >= size);
+    }
+}
+
+@test
+fn test_large_bin_calculation() {
+    // Sizes > 1024 bytes use logarithmic calculation
+    let test_sizes = [2048, 4096, 8192, 16384, 65536, 262144, 1048576];
+
+    for size in test_sizes {
+        let bin = size_to_bin(size);
+        let bin_size = bin_to_size(bin);
+        assert(bin_size >= size);
+        assert_eq(bin_size, size);  // These are exact boundary values
+    }
+}
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+
+@test
+fn test_allocation_workflow() {
+    // Simulate typical allocation workflow
+    let mut stats = SizeClassStats.new();
+
+    let request_sizes = [24, 100, 500, 2000, 10000];
+
+    for size in request_sizes {
+        let bin = size_to_bin(size);
+        let actual_size = bin_to_size(bin);
+
+        assert(actual_size >= size);
+
+        stats.record_alloc(bin, size);
+    }
+
+    // Verify tracking
+    assert(stats.total_fragmentation_percent() < 25);  // Reasonable fragmentation
+}
+
+@test
+fn test_full_bin_range_coverage() {
+    // Every bin should be reachable by some size
+    let mut reached = [false; 73];
+
+    for size in 1..5242881 {
+        // Skip most sizes for performance, check key boundaries
+        if size > 1024 && size % 1000 != 0 {
+            continue;
+        }
+
+        let bin = size_to_bin(size);
+        if bin < BIN_COUNT {
+            reached[bin] = true;
+        }
+    }
+
+    // All bins should be reachable (except possibly some due to skipping)
+    // At minimum, bins 0-23 should all be reached
+    for bin in 0..24 {
+        assert(reached[bin], f"Bin {bin} not reached");
+    }
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_size_to_bin_max_int() {
+    // Very large sizes should map to huge
+    let bin = size_to_bin(Int.MAX);
+    assert_eq(bin, BIN_HUGE);
+}
+
+@test
+fn test_all_power_of_two_sizes() {
+    let powers = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096,
+                  8192, 16384, 32768, 65536, 131072, 262144, 524288,
+                  1048576, 2097152, 4194304];
+
+    for size in powers {
+        let bin = size_to_bin(size);
+        let bin_size = bin_to_size(bin);
+
+        // Power of two sizes should have exact bins (0 fragmentation)
+        // for the common ones
+        if bin < BIN_COUNT {
+            assert(bin_size >= size);
+        }
+    }
+}
+

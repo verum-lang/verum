@@ -1,0 +1,114 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, maybe, result
+
+@test
+fn test_maybe_is_some() {
+    let x: Maybe<Int> = Some(42);
+    assert(x is Some);
+    assert(!(x is None));
+}
+
+@test
+fn test_maybe_is_none() {
+    let x: Maybe<Int> = None;
+    assert(x is None);
+    assert(!(x is Some));
+}
+
+@test
+fn test_result_is_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    assert(r is Ok);
+    assert(!(r is Err));
+}
+
+@test
+fn test_result_is_err() {
+    let r: Result<Int, Text> = Err("fail");
+    assert(r is Err);
+    assert(!(r is Ok));
+}
+
+@test
+fn test_maybe_from_list_get() {
+    let xs = [10, 20, 30];
+    let val = xs.get(1);
+    assert(val is Some);
+    let missing = xs.get(99);
+    assert(missing is None);
+}
+
+@test
+fn test_maybe_from_list_find() {
+    let xs = [1, 2, 3, 4, 5];
+    let found = xs.find(|x| x > 3);
+    assert(found is Some);
+    let not_found = xs.find(|x| x > 100);
+    assert(not_found is None);
+}
+
+@test
+fn test_maybe_from_list_first() {
+    let empty: List<Int> = [];
+    assert(empty.first() is None);
+    let xs = [42];
+    assert(xs.first() is Some);
+}
+
+@test
+fn test_maybe_from_list_last() {
+    let empty: List<Int> = [];
+    assert(empty.last() is None);
+    let xs = [1, 2, 3];
+    assert(xs.last() is Some);
+}
+
+@test
+fn test_maybe_from_list_pop() {
+    let mut xs = [1, 2, 3];
+    let popped = xs.pop();
+    assert(popped is Some);
+    let mut empty: List<Int> = [];
+    let nothing = empty.pop();
+    assert(nothing is None);
+}
+
+@test
+fn test_maybe_from_list_min_max() {
+    let xs = [3, 1, 4, 1, 5];
+    assert(xs.min() is Some);
+    assert(xs.max() is Some);
+}
+
+@test
+fn test_maybe_from_list_position() {
+    let xs = [10, 20, 30];
+    let pos = xs.position(|x| x == 20);
+    assert(pos is Some);
+    let none = xs.position(|x| x == 99);
+    assert(none is None);
+}
+
+@test
+fn test_maybe_from_map_get() {
+    // Map.get returns V directly (not Maybe<V>)
+    let mut m = Map.new();
+    m.insert("key", 42);
+    let val = m.get("key");
+    assert_eq(val, 42);
+    // Use contains_key to check presence
+    assert(m.contains_key("key"));
+    assert(!m.contains_key("other"));
+}
+
+@test
+fn test_maybe_from_map_remove() {
+    // Map.remove returns V directly
+    let mut m = Map.new();
+    m.insert("a", 1);
+    let old = m.remove("a");
+    assert_eq(old, 1);
+    assert(!m.contains_key("a"));
+}

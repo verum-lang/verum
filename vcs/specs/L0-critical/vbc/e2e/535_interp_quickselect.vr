@@ -1,0 +1,144 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, quickselect, median, partition, order_statistics
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Quickselect algorithm: find the k-th smallest element in an unsorted array
+// in expected O(n) time using partition-based selection.
+// Also includes median computation for odd and even-length arrays.
+
+// Partition a[lo..hi] around pivot a[hi]. Returns final pivot index.
+fn partition(a: [Int; 16], lo: Int, hi: Int) -> Int {
+    let pivot = a[hi];
+    let mut i = lo - 1;
+    let mut j = lo;
+    while j < hi {
+        if a[j] <= pivot {
+            i = i + 1;
+            let tmp = a[i];
+            a[i] = a[j];
+            a[j] = tmp;
+        }
+        j = j + 1;
+    }
+    let tmp = a[i + 1];
+    a[i + 1] = a[hi];
+    a[hi] = tmp;
+    i + 1
+}
+
+// Quickselect: find k-th smallest (0-indexed) in a[lo..hi].
+@allow(unbounded_recursion)
+fn quickselect(a: [Int; 16], lo: Int, hi: Int, k: Int) -> Int {
+    if lo == hi { return a[lo]; }
+    let p = partition(a, lo, hi);
+    if k == p {
+        return a[p];
+    } else if k < p {
+        return quickselect(a, lo, p - 1, k);
+    } else {
+        return quickselect(a, p + 1, hi, k);
+    }
+}
+
+// Median of odd-length array of n elements (k = n/2).
+fn median_odd(a: [Int; 16], n: Int) -> Int {
+    quickselect(a, 0, n - 1, n / 2)
+}
+
+fn test_basic_select() {
+    // Array [3,1,4,1,5,9,2,6,5,3] — sorted [1,1,2,3,3,4,5,5,6,9]
+    // 0th smallest = 1, 9th = 9, 4th = 3.
+    let mut a = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 0, 0, 0, 0, 0, 0];
+    // k=0 -> min
+    let mn = quickselect(a, 0, 9, 0);
+    assert_eq(mn, 1);
+
+    let mut b = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 0, 0, 0, 0, 0, 0];
+    // k=9 -> max
+    let mx = quickselect(b, 0, 9, 9);
+    assert_eq(mx, 9);
+
+    let mut c = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 0, 0, 0, 0, 0, 0];
+    // k=4 -> 4th smallest = 3 (0-indexed rank 4 in [1,1,2,3,3,4,5,5,6,9])
+    let med = quickselect(c, 0, 9, 4);
+    assert_eq(med, 3);
+
+    print("basic_select: ok");
+}
+
+fn test_sorted_input() {
+    let mut a = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 0, 0, 0, 0, 0];
+    let k2 = quickselect(a, 0, 9, 2);
+    assert_eq(k2, 3);
+
+    let mut b = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 0, 0, 0, 0, 0];
+    let k7 = quickselect(b, 0, 9, 7);
+    assert_eq(k7, 8);
+
+    let mut c = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 0, 0, 0, 0, 0];
+    let k0 = quickselect(c, 0, 9, 0);
+    assert_eq(k0, 1);
+
+    print("sorted_input: ok");
+}
+
+fn test_reverse_input() {
+    let mut a = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0];
+    let k4 = quickselect(a, 0, 9, 4);
+    assert_eq(k4, 5);
+
+    let mut b = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0];
+    let k9 = quickselect(b, 0, 9, 9);
+    assert_eq(k9, 10);
+
+    let mut c = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0];
+    let k0 = quickselect(c, 0, 9, 0);
+    assert_eq(k0, 1);
+
+    print("reverse_input: ok");
+}
+
+fn test_median_odd() {
+    // 5 elements: [4, 2, 7, 1, 9] -> sorted [1,2,4,7,9], median = 4
+    let mut a = [4, 2, 7, 1, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(median_odd(a, 5), 4);
+
+    // 7 elements: [10, 3, 5, 8, 1, 6, 2] -> sorted [1,2,3,5,6,8,10], median = 5
+    let mut b = [10, 3, 5, 8, 1, 6, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(median_odd(b, 7), 5);
+
+    // 9 elements: [9,8,7,6,5,4,3,2,1] -> sorted, median = 5
+    let mut c = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(median_odd(c, 9), 5);
+
+    print("median_odd: ok");
+}
+
+fn test_duplicates_select() {
+    // All same: k-th = that value.
+    let mut a = [7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(quickselect(a, 0, 4, 0), 7);
+    assert_eq(quickselect(a, 0, 4, 4), 7);
+    assert_eq(quickselect(a, 0, 4, 2), 7);
+
+    // Two distinct values.
+    let mut b = [5, 1, 5, 1, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(quickselect(b, 0, 5, 0), 1);
+    let mut bb = [5, 1, 5, 1, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(quickselect(bb, 0, 5, 5), 5);
+
+    print("duplicates_select: ok");
+}
+
+fn main() -> Int {
+    test_basic_select();
+    test_sorted_input();
+    test_reverse_input();
+    test_median_odd();
+    test_duplicates_select();
+    print("[OK] 535_interp_quickselect");
+    0
+}

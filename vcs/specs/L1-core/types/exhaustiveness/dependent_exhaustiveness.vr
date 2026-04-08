@@ -1,0 +1,118 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, indexed-types, pattern-matching
+// @description: Exhaustiveness checking with indexed variant patterns
+
+// Simulated length-indexed structures using sum types
+
+type Maybe<T> is None | Some(T);
+
+// Fixed-size vector types via tuples
+type Vec1<T> is Elem1(T);
+type Vec2<T> is Elem2(T, T);
+type Vec3<T> is Elem3(T, T, T);
+
+// Exhaustive match on Vec1 - single variant
+fn head1<T>(v: Vec1<T>) -> T =
+    match v {
+        Elem1(x) => x
+    };
+
+// Exhaustive match on Vec2 - single variant
+fn head2<T>(v: Vec2<T>) -> T =
+    match v {
+        Elem2(x, _) => x
+    };
+
+fn second2<T>(v: Vec2<T>) -> T =
+    match v {
+        Elem2(_, y) => y
+    };
+
+// Exhaustive match on Vec3
+fn head3<T>(v: Vec3<T>) -> T =
+    match v {
+        Elem3(x, _, _) => x
+    };
+
+// Fin-like type for bounded indexing
+type Fin2 is FZ2 | FS2;
+type Fin3 is FZ3 | FS3a | FS3b;
+
+// Safe indexing for Vec2 - exhaustive on (Vec2, Fin2)
+fn index2<T: Clone>(v: Vec2<T>, i: Fin2) -> T =
+    match (v, i) {
+        (Elem2(x, _), FZ2) => x,
+        (Elem2(_, y), FS2) => y,
+    };
+
+// Safe indexing for Vec3 - exhaustive on (Vec3, Fin3)
+fn index3<T: Clone>(v: Vec3<T>, i: Fin3) -> T =
+    match (v, i) {
+        (Elem3(x, _, _), FZ3) => x,
+        (Elem3(_, y, _), FS3a) => y,
+        (Elem3(_, _, z), FS3b) => z,
+    };
+
+// Map preserving structure
+fn map1<T, U>(v: Vec1<T>, f: fn(T) -> U) -> Vec1<U> =
+    match v {
+        Elem1(x) => Elem1(f(x))
+    };
+
+fn map2<T, U>(v: Vec2<T>, f: fn(T) -> U) -> Vec2<U> =
+    match v {
+        Elem2(x, y) => Elem2(f(x), f(y))
+    };
+
+// Zip two Vec2s
+fn zip2<T, U>(xs: Vec2<T>, ys: Vec2<U>) -> Vec2<(T, U)> =
+    match (xs, ys) {
+        (Elem2(x1, x2), Elem2(y1, y2)) =>
+            Elem2((x1, y1), (x2, y2))
+    };
+
+// Either type for GADT-like patterns
+type TypedVal is
+    IntVal(Int) |
+    TextVal(Text) |
+    BoolVal(Bool);
+
+fn describe_typed(v: TypedVal) -> Text =
+    match v {
+        IntVal(n) => f"int: {n}",
+        TextVal(s) => f"text: {s}",
+        BoolVal(b) => f"bool: {b}",
+    };
+
+// Nested variant exhaustiveness with wildcard
+type Wrapper<T> is Wrap(T);
+
+fn unwrap_maybe_int(w: Wrapper<Maybe<Int>>) -> Int =
+    match w {
+        Wrap(Some(n)) => n,
+        Wrap(None) => 0,
+    };
+
+fn main() {
+    assert(head1(Elem1(42)) == 42);
+    assert(head2(Elem2(1, 2)) == 1);
+    assert(second2(Elem2(1, 2)) == 2);
+    assert(head3(Elem3(1, 2, 3)) == 1);
+    assert(index2(Elem2(10, 20), FZ2) == 10);
+    assert(index2(Elem2(10, 20), FS2) == 20);
+
+    let mapped = map1(Elem1(5), |x| x * 2);
+    assert(head1(mapped) == 10);
+
+    let mapped2 = map2(Elem2(3, 7), |x| x + 1);
+    assert(head2(mapped2) == 4);
+    assert(second2(mapped2) == 8);
+
+    assert(describe_typed(IntVal(42)) == "int: 42");
+    assert(describe_typed(TextVal("hi")) == "text: hi");
+    assert(describe_typed(BoolVal(true)) == "bool: true");
+
+    assert(unwrap_maybe_int(Wrap(Some(10))) == 10);
+    assert(unwrap_maybe_int(Wrap(None)) == 0);
+}

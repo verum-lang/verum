@@ -1,0 +1,51 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, shape
+// @expected-exit: 0
+
+// Tests REAL tensor shape operations through AOT pipeline.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_reshape(t: Int, shape: Int) -> Int { @intrinsic("TENSOR_RESHAPE", t, shape) }
+fn tensor_transpose(t: Int) -> Int { @intrinsic("TENSOR_TRANSPOSE", t) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    if a != b { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    let t = tensor_new(4, 1);
+    let t = tensor_set_scalar(t, 0, 10);
+    let t = tensor_set_scalar(t, 1, 20);
+    let t = tensor_set_scalar(t, 2, 30);
+    let t = tensor_set_scalar(t, 3, 40);
+
+    let tr = tensor_transpose(t);
+    errors = errors + check_val(tr, 0, 10);
+    errors = errors + check_val(tr, 3, 40);
+
+    let r = tensor_reshape(t, 4);
+    errors = errors + check_val(r, 0, 10);
+    errors = errors + check_val(r, 3, 40);
+
+    let tt = tensor_transpose(tensor_transpose(t));
+    errors = errors + check_val(tt, 0, 10);
+    errors = errors + check_val(tt, 3, 40);
+
+    let big = tensor_fill(100, 1, 1);
+    let big_r = tensor_reshape(big, 100);
+    errors = errors + check_val(big_r, 0, 1);
+    errors = errors + check_val(big_r, 99, 1);
+
+    errors
+}

@@ -1,0 +1,201 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, algorithm, graph, bfs
+// @timeout: 10000
+// @expected-exit: 0
+// @description: BFS distance computation on small graphs, verify distances
+
+fn main() -> Int {
+    test_bfs_4node();
+    test_bfs_linear();
+    test_bfs_star();
+    0
+}
+
+/// BFS on a 4-node graph: 0-1, 0-2, 1-3, 2-3
+/// Uses single combined array: [adj(16) | dist(4) | queue(4)] = 24 elements
+fn test_bfs_4node() {
+    // Layout: adj = 0..15, dist = 16..19, queue = 20..23
+    let mut m = [0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0];
+    // Explicitly zero all
+    let mut z = 0;
+    while z < 24 {
+        m[z] = 0;
+        z = z + 1;
+    }
+    let n = 4;
+    let adj_off = 0;
+    let dist_off = 16;
+    let q_off = 20;
+
+    // Set adjacency: 0-1, 0-2, 1-3, 2-3 (undirected)
+    m[adj_off + 0 * 4 + 1] = 1;
+    m[adj_off + 0 * 4 + 2] = 1;
+    m[adj_off + 1 * 4 + 0] = 1;
+    m[adj_off + 1 * 4 + 3] = 1;
+    m[adj_off + 2 * 4 + 0] = 1;
+    m[adj_off + 2 * 4 + 3] = 1;
+    m[adj_off + 3 * 4 + 1] = 1;
+    m[adj_off + 3 * 4 + 2] = 1;
+
+    // Set dist: 0=0, rest=-1
+    m[dist_off + 0] = 0;
+    m[dist_off + 1] = 0 - 1;
+    m[dist_off + 2] = 0 - 1;
+    m[dist_off + 3] = 0 - 1;
+
+    // BFS
+    let mut head = 0;
+    let mut tail = 0;
+    m[q_off + tail] = 0;
+    tail = tail + 1;
+
+    while head < tail {
+        let u = m[q_off + head];
+        head = head + 1;
+        let mut v = 0;
+        while v < n {
+            if m[adj_off + u * n + v] == 1 {
+                if m[dist_off + v] == 0 - 1 {
+                    m[dist_off + v] = m[dist_off + u] + 1;
+                    m[q_off + tail] = v;
+                    tail = tail + 1;
+                }
+            }
+            v = v + 1;
+        }
+    }
+
+    assert_eq(m[dist_off + 0], 0);
+    assert_eq(m[dist_off + 1], 1);
+    assert_eq(m[dist_off + 2], 1);
+    assert_eq(m[dist_off + 3], 2);
+    print("bfs_4node: pass\n");
+}
+
+/// BFS on a linear chain: 0-1-2-3-4
+/// Single array: [adj(25) | dist(5) | queue(5)] = 35 elements
+fn test_bfs_linear() {
+    let mut m = [0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0];
+    let mut z = 0;
+    while z < 35 {
+        m[z] = 0;
+        z = z + 1;
+    }
+    let n = 5;
+    let adj_off = 0;
+    let dist_off = 25;
+    let q_off = 30;
+
+    // 0-1
+    m[adj_off + 0 * 5 + 1] = 1;
+    m[adj_off + 1 * 5 + 0] = 1;
+    // 1-2
+    m[adj_off + 1 * 5 + 2] = 1;
+    m[adj_off + 2 * 5 + 1] = 1;
+    // 2-3
+    m[adj_off + 2 * 5 + 3] = 1;
+    m[adj_off + 3 * 5 + 2] = 1;
+    // 3-4
+    m[adj_off + 3 * 5 + 4] = 1;
+    m[adj_off + 4 * 5 + 3] = 1;
+
+    // dist
+    m[dist_off + 0] = 0;
+    m[dist_off + 1] = 0 - 1;
+    m[dist_off + 2] = 0 - 1;
+    m[dist_off + 3] = 0 - 1;
+    m[dist_off + 4] = 0 - 1;
+
+    // BFS
+    let mut head = 0;
+    let mut tail = 0;
+    m[q_off + tail] = 0;
+    tail = tail + 1;
+
+    while head < tail {
+        let u = m[q_off + head];
+        head = head + 1;
+        let mut v = 0;
+        while v < n {
+            if m[adj_off + u * n + v] == 1 {
+                if m[dist_off + v] == 0 - 1 {
+                    m[dist_off + v] = m[dist_off + u] + 1;
+                    m[q_off + tail] = v;
+                    tail = tail + 1;
+                }
+            }
+            v = v + 1;
+        }
+    }
+
+    assert_eq(m[dist_off + 0], 0);
+    assert_eq(m[dist_off + 1], 1);
+    assert_eq(m[dist_off + 2], 2);
+    assert_eq(m[dist_off + 3], 3);
+    assert_eq(m[dist_off + 4], 4);
+    print("bfs_linear: pass\n");
+}
+
+/// BFS on a star graph: center 0, spokes 1-4
+/// Single array: [adj(25) | dist(5) | queue(5)] = 35 elements
+fn test_bfs_star() {
+    let mut m = [0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0];
+    let mut z = 0;
+    while z < 35 {
+        m[z] = 0;
+        z = z + 1;
+    }
+    let n = 5;
+    let adj_off = 0;
+    let dist_off = 25;
+    let q_off = 30;
+
+    // 0 connects to 1,2,3,4
+    m[adj_off + 0 * 5 + 1] = 1;
+    m[adj_off + 0 * 5 + 2] = 1;
+    m[adj_off + 0 * 5 + 3] = 1;
+    m[adj_off + 0 * 5 + 4] = 1;
+    m[adj_off + 1 * 5 + 0] = 1;
+    m[adj_off + 2 * 5 + 0] = 1;
+    m[adj_off + 3 * 5 + 0] = 1;
+    m[adj_off + 4 * 5 + 0] = 1;
+
+    // dist
+    m[dist_off + 0] = 0;
+    m[dist_off + 1] = 0 - 1;
+    m[dist_off + 2] = 0 - 1;
+    m[dist_off + 3] = 0 - 1;
+    m[dist_off + 4] = 0 - 1;
+
+    // BFS
+    let mut head = 0;
+    let mut tail = 0;
+    m[q_off + tail] = 0;
+    tail = tail + 1;
+
+    while head < tail {
+        let u = m[q_off + head];
+        head = head + 1;
+        let mut v = 0;
+        while v < n {
+            if m[adj_off + u * n + v] == 1 {
+                if m[dist_off + v] == 0 - 1 {
+                    m[dist_off + v] = m[dist_off + u] + 1;
+                    m[q_off + tail] = v;
+                    tail = tail + 1;
+                }
+            }
+            v = v + 1;
+        }
+    }
+
+    assert_eq(m[dist_off + 0], 0);
+    assert_eq(m[dist_off + 1], 1);
+    assert_eq(m[dist_off + 2], 1);
+    assert_eq(m[dist_off + 3], 1);
+    assert_eq(m[dist_off + 4], 1);
+    print("bfs_star: pass\n");
+}

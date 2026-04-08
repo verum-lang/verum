@@ -1,0 +1,47 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, optional-chaining
+// @description: Tests safe optional chaining with ?. operator
+
+type Person is {
+    name: Text,
+    address: Maybe<Address>,
+};
+
+type Address is {
+    city: Text,
+    zip: Maybe<Text>,
+};
+
+fn main() {
+    let person_with_address = Person {
+        name: "Alice",
+        address: Maybe.Some(Address {
+            city: "Seattle",
+            zip: Maybe.Some("98101"),
+        }),
+    };
+
+    let person_without_address = Person {
+        name: "Bob",
+        address: Maybe.None,
+    };
+
+    // Safe optional chaining - returns None if any link is None
+    let city1 = person_with_address.address?.city;
+    assert(city1 == Maybe.Some("Seattle"));
+
+    let zip1 = person_with_address.address?.zip;
+    assert(zip1 == Maybe.Some("98101"));
+
+    // Returns None when address is None
+    let city2 = person_without_address.address?.city;
+    assert(city2 == Maybe.None);
+
+    // Chained optional access
+    let zip2 = person_without_address.address?.zip;
+    assert(zip2 == Maybe.None);
+
+    print("Optional chaining test passed");
+}

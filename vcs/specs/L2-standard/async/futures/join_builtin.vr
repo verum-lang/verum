@@ -1,0 +1,431 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, join, futures, builtin, parallel
+// @description: Tests the join() built-in function for parallel async execution
+//
+// The join() function is a built-in (NOT a macro!) that concurrently awaits
+// multiple futures and returns their results as a tuple. Unlike Rust's join!,
+// Verum uses regular function call syntax without the ! suffix.
+//
+// IMPORTANT: Verum built-ins use function syntax, NOT macro syntax:
+//   - CORRECT: join(future_a, future_b)
+//   - WRONG:   join!(future_a, future_b)
+
+// ============================================================================
+// Basic async tasks for testing
+// ============================================================================
+
+async fn fetch_number(id: Int) -> Int {
+    // Simulates an async computation
+    id * 10
+}
+
+async fn fetch_text(id: Int) -> Text {
+    f"item_{id}"
+}
+
+async fn fetch_bool(id: Int) -> Bool {
+    id % 2 == 0
+}
+
+async fn slow_task(id: Int) -> Int {
+    // In real code, this would have actual delay
+    id * 100
+}
+
+async fn fast_task(id: Int) -> Int {
+    id
+}
+
+// ============================================================================
+// Basic join() usage - two futures
+// ============================================================================
+
+async fn test_join_two() -> (Int, Text) {
+    // join() waits for both futures concurrently
+    // Returns a tuple of results
+    let (num, txt) = join(
+        fetch_number(5),
+        fetch_text(5),
+    ).await;
+
+    assert_eq(num, 50);
+    assert_eq(txt, "item_5");
+
+    (num, txt)
+}
+
+// ============================================================================
+// join() with three futures (join3)
+// ============================================================================
+
+async fn test_join_three() -> (Int, Text, Bool) {
+    // join() supports 2 args; use nested calls for 3
+    let (a, b) = join(fetch_number(2), fetch_text(2)).await;
+    let c = fetch_bool(2).await;
+
+    assert_eq(a, 20);
+    assert_eq(b, "item_2");
+    assert_eq(c, true);  // 2 is even
+
+    (a, b, c)
+}
+
+// ============================================================================
+// join() with heterogeneous future types
+// ============================================================================
+
+type User is {
+    id: Int,
+    name: Text,
+};
+
+type Product is {
+    id: Int,
+    price: Float,
+};
+
+async fn fetch_user(id: Int) -> User {
+    User { id, name: f"User_{id}" }
+}
+
+async fn fetch_product(id: Int) -> Product {
+    Product { id, price: 99.99 }
+}
+
+async fn test_join_heterogeneous() -> (User, Product, Int) {
+    // join() supports 2 args; use nested for 3
+    let (user, product) = join(fetch_user(1), fetch_product(100)).await;
+    let count = fetch_number(3).await;
+
+    assert_eq(user.id, 1);
+    assert_eq(product.id, 100);
+    assert_eq(count, 30);
+
+    (user, product, count)
+}
+
+// ============================================================================
+// join() with inline async blocks
+// ============================================================================
+
+async fn test_join_inline_blocks() -> (Int, Text, List<Int>) {
+    let (a, b) = join(async { 42 }, async { "hello" }).await;
+    let c = async { [1, 2, 3] }.await;
+
+    assert_eq(a, 42);
+    assert_eq(b, "hello");
+
+    (a, b, c)
+}
+
+// ============================================================================
+// join() with closures returning futures
+// ============================================================================
+
+async fn test_join_with_closures() -> (Int, Int) {
+    let multiplier = 5;
+
+    let (a, b) = join(
+        async { multiplier * 2 },
+        async { multiplier * 3 },
+    ).await;
+
+    assert_eq(a, 10);
+    assert_eq(b, 15);
+
+    (a, b)
+}
+
+// ============================================================================
+// Nested join() calls
+// ============================================================================
+
+async fn test_nested_join() -> ((Int, Int), (Text, Text)) {
+    // Join can be nested for more complex concurrency patterns
+    let result = join(
+        join(fetch_number(1), fetch_number(2)),
+        join(fetch_text(1), fetch_text(2)),
+    ).await;
+
+    assert_eq(result.0, (10, 20));
+    assert_eq(result.1, ("item_1", "item_2"));
+
+    result
+}
+
+// ============================================================================
+// join() with Result-returning futures
+// ============================================================================
+
+type ApiError is Failed(Text);
+
+async fn fallible_fetch(id: Int, should_fail: Bool) -> Result<Int, ApiError> {
+    if should_fail {
+        Err(Failed(f"Failed to fetch {id}"))
+    } else {
+        Ok(id * 10)
+    }
+}
+
+async fn test_join_with_results() -> (Result<Int, ApiError>, Result<Int, ApiError>) {
+    // Both futures run concurrently, each returns Result
+    let (a, b) = join(
+        fallible_fetch(1, false),
+        fallible_fetch(2, false),
+    ).await;
+
+    assert(a.is_ok());
+    assert(b.is_ok());
+    assert_eq(a.unwrap(), 10);
+    assert_eq(b.unwrap(), 20);
+
+    (a, b)
+}
+
+async fn test_join_with_partial_failure() -> (Result<Int, ApiError>, Result<Int, ApiError>) {
+    // One succeeds, one fails - both still complete
+    let (a, b) = join(
+        fallible_fetch(1, false),
+        fallible_fetch(2, true),
+    ).await;
+
+    assert(a.is_ok());
+    assert(b.is_err());
+
+    (a, b)
+}
+
+// ============================================================================
+// join() with Maybe-returning futures
+// ============================================================================
+
+async fn optional_fetch(id: Int) -> Maybe<Int> {
+    if id > 0 {
+        Some(id * 10)
+    } else {
+        None
+    }
+}
+
+async fn test_join_with_maybe() -> (Maybe<Int>, Maybe<Int>) {
+    let (a, b) = join(
+        optional_fetch(5),
+        optional_fetch(-1),
+    ).await;
+
+    assert_eq(a, Some(50));
+    assert_eq(b, None);
+
+    (a, b)
+}
+
+// ============================================================================
+// join() in a loop - dynamic parallel execution
+// ============================================================================
+
+async fn test_join_in_loop() -> List<(Int, Text)> {
+    let mut results: List<(Int, Text)> = [];
+
+    for i in 1..=3 {
+        let (num, txt) = join(
+            fetch_number(i),
+            fetch_text(i),
+        ).await;
+        results.push((num, txt));
+    }
+
+    assert_eq(results.len(), 3);
+    assert_eq(results[0], (10, "item_1"));
+    assert_eq(results[1], (20, "item_2"));
+    assert_eq(results[2], (30, "item_3"));
+
+    results
+}
+
+// ============================================================================
+// join() combined with other async patterns
+// ============================================================================
+
+async fn test_join_then_map() -> Int {
+    let (a, b) = join(
+        fetch_number(3),
+        fetch_number(4),
+    ).await;
+
+    // Process results after join completes
+    let sum = a + b;
+    assert_eq(sum, 70);  // 30 + 40
+
+    sum
+}
+
+async fn test_join_with_timeout() -> Result<(Int, Int), Text> {
+    // Combine join with timeout (conceptual - timeout is separate feature)
+    let result = join(
+        fast_task(1),
+        fast_task(2),
+    ).await;
+
+    Ok(result)
+}
+
+// ============================================================================
+// join() with unit-returning futures
+// ============================================================================
+
+async fn log_async(message: Text) {
+    // Side-effecting async task that returns ()
+    print(message);
+}
+
+async fn test_join_unit_futures() {
+    // join() works with unit-returning futures too
+    let (_, _) = join(
+        log_async("First log"),
+        log_async("Second log"),
+    ).await;
+
+    // Both log messages would be printed concurrently
+}
+
+// ============================================================================
+// join() vs sequential await comparison
+// ============================================================================
+
+async fn test_sequential_vs_parallel() {
+    // Sequential execution - takes sum of all times
+    let a = slow_task(1).await;
+    let b = slow_task(2).await;
+    let sequential_sum = a + b;
+
+    // Parallel execution - takes max of all times
+    let (c, d) = join(
+        slow_task(1),
+        slow_task(2),
+    ).await;
+    let parallel_sum = c + d;
+
+    // Results should be the same, but parallel is faster
+    assert_eq(sequential_sum, parallel_sum);
+}
+
+// ============================================================================
+// join() with four and five futures
+// ============================================================================
+
+// NOTE: join() currently supports only 2 arguments
+// 4-arg and 5-arg join requires nested calls
+async fn test_join_four() -> (Int, Int, Int, Int) {
+    let (a, b) = join(fetch_number(1), fetch_number(2)).await;
+    let (c, d) = join(fetch_number(3), fetch_number(4)).await;
+    (a, b, c, d)
+}
+
+async fn test_join_five() -> (Int, Int, Int, Int, Int) {
+    let (a, b) = join(fetch_number(1), fetch_number(2)).await;
+    let (c, d) = join(fetch_number(3), fetch_number(4)).await;
+    let e = fetch_number(5).await;
+    (a, b, c, d, e)
+}
+
+// ============================================================================
+// join() with captured variables
+// ============================================================================
+
+async fn test_join_with_captures() -> (Int, Int) {
+    let base = 100;
+    let multiplier = 2;
+
+    let (a, b) = join(
+        async { base + 1 },
+        async { base * multiplier },
+    ).await;
+
+    assert_eq(a, 101);
+    assert_eq(b, 200);
+
+    (a, b)
+}
+
+// ============================================================================
+// join() returning complex nested types
+// ============================================================================
+
+type NestedResult is {
+    data: List<Map<Text, Int>>,
+    metadata: Maybe<Text>,
+};
+
+async fn fetch_nested() -> NestedResult {
+    NestedResult {
+        data: [{"count": 42}],
+        metadata: Some("fetched"),
+    }
+}
+
+async fn test_join_complex_types() -> (NestedResult, List<Int>) {
+    let (nested, list) = join(
+        fetch_nested(),
+        async { [1, 2, 3, 4, 5] },
+    ).await;
+
+    assert_eq(nested.metadata, Some("fetched"));
+    assert_eq(list.len(), 5);
+
+    (nested, list)
+}
+
+// ============================================================================
+// join() with generic futures
+// ============================================================================
+
+async fn identity<T>(value: T) -> T {
+    value
+}
+
+async fn test_join_generic() -> (Int, Text, Bool) {
+    let (a, b) = join(identity(42), identity("hello")).await;
+    let c = identity(true).await;
+    (a, b, c)
+}
+
+// ============================================================================
+// Test entry point
+// ============================================================================
+
+async fn main() {
+    // Basic join tests
+    let _ = test_join_two().await;
+    let _ = test_join_three().await;
+
+    // Heterogeneous types
+    let _ = test_join_heterogeneous().await;
+    let _ = test_join_inline_blocks().await;
+
+    // With closures and nesting
+    let _ = test_join_with_closures().await;
+    let _ = test_nested_join().await;
+
+    // With Result and Maybe
+    let _ = test_join_with_results().await;
+    let _ = test_join_with_partial_failure().await;
+    let _ = test_join_with_maybe().await;
+
+    // Advanced patterns
+    let _ = test_join_in_loop().await;
+    let _ = test_join_then_map().await;
+    let _ = test_join_unit_futures().await;
+
+    // Multiple arity
+    let _ = test_join_four().await;
+    let _ = test_join_five().await;
+
+    // Complex types
+    let _ = test_join_with_captures().await;
+    let _ = test_join_complex_types().await;
+    let _ = test_join_generic().await;
+
+    print("All join() tests passed!");
+}

@@ -1,0 +1,112 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: closures, generics, higher-order, composition
+// @description: Advanced closures, generic functions, and function composition
+
+type Maybe<T> is None | Some(T);
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn apply_twice<T>(f: fn(T) -> T, x: T) -> T {
+    f(f(x))
+}
+
+fn filter_list(items: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = [];
+    let len = items.len();
+    let mut i = 0;
+    while (i < len) {
+        if (pred(items[i])) {
+            result.push(items[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn reduce(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let len = items.len();
+    let mut i = 0;
+    while (i < len) {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: function composition
+    let double = |x: Int| -> Int { x * 2 };
+    let add_one = |x: Int| -> Int { x + 1 };
+    let double_then_add = compose(add_one, double);
+    let result = double_then_add(5); // double(5)=10, add_one(10)=11
+    if (result != 11) {
+        print(f"FAIL test1: got {result}");
+        return 1;
+    }
+
+    // Test 2: apply_twice generic
+    let triple = |x: Int| -> Int { x * 3 };
+    let r2 = apply_twice(triple, 2); // triple(2)=6, triple(6)=18
+    if (r2 != 18) {
+        print(f"FAIL test2: got {r2}");
+        return 1;
+    }
+
+    // Test 3: filter + reduce (functional pipeline)
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let evens = filter_list(nums, |x: Int| -> Bool { x % 2 == 0 });
+    let sum_evens = reduce(evens, 0, |acc: Int, x: Int| -> Int { acc + x });
+    // 2+4+6+8+10 = 30
+    if (sum_evens != 30) {
+        print(f"FAIL test3: got {sum_evens}");
+        return 1;
+    }
+
+    // Test 4: closure capturing mutable state
+    let mut total = 0;
+    let accumulate = |x: Int| {
+        total = total + x;
+    };
+    accumulate(10);
+    accumulate(20);
+    accumulate(30);
+    if (total != 60) {
+        print(f"FAIL test4: got {total}");
+        return 1;
+    }
+
+    // Test 5: closures returning closures (currying)
+    let make_adder = |n: Int| -> fn(Int) -> Int {
+        |x: Int| -> Int { x + n }
+    };
+    let add_5 = make_adder(5);
+    let add_10 = make_adder(10);
+    if (add_5(3) != 8) {
+        print(f"FAIL test5a: got {add_5(3)}");
+        return 1;
+    }
+    if (add_10(3) != 13) {
+        print(f"FAIL test5b: got {add_10(3)}");
+        return 1;
+    }
+
+    // Test 6: nested closures with capture chain
+    let base = 100;
+    let outer = |x: Int| -> fn(Int) -> Int {
+        let offset = base + x;
+        |y: Int| -> Int { offset + y }
+    };
+    let f = outer(50); // offset = 150
+    if (f(7) != 157) {
+        print(f"FAIL test6: got {f(7)}");
+        return 1;
+    }
+
+    print("991_advanced_closures_generics: PASS");
+    0
+}

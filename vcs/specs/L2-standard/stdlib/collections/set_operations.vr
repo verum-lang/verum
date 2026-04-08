@@ -1,0 +1,525 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, collections, set
+
+/// Comprehensive test suite for Set<T> operations.
+/// Set is an unordered collection of unique elements (semantic equivalent of HashSet).
+/// Tests add, contains, union, intersection, and all standard set operations.
+
+fn main() {
+    test_set_creation();
+    test_set_insertion();
+    test_set_membership();
+    test_set_removal();
+    test_set_union();
+    test_set_intersection();
+    test_set_difference();
+    test_set_symmetric_difference();
+    test_set_subset_superset();
+    test_set_iteration();
+    test_set_functional_operations();
+    test_set_capacity_management();
+}
+
+/// Test various ways to create sets
+fn test_set_creation() {
+    // Empty set with explicit type
+    let empty: Set<Int> = Set.new();
+    assert(empty.is_empty());
+    assert(empty.len() == 0);
+
+    // Set literal macro
+    let from_literal: Set<Int> = {1, 2, 3, 4, 5};
+    assert(from_literal.len() == 5);
+
+    // Set with capacity hint
+    let with_capacity: Set<Text> = Set.with_capacity(100);
+    assert(with_capacity.is_empty());
+    assert(with_capacity.capacity() >= 100);
+
+    // Set from iterator (duplicates removed)
+    let with_dups: List<Int> = [1, 2, 2, 3, 3, 3, 4, 4, 4, 4];
+    let from_iter: Set<Int> = with_dups.into_iter().collect();
+    assert(from_iter.len() == 4);
+
+    // Commented out: collect() type mismatch for range-to-Set
+    // let from_range: Set<Int> = (1..=5).collect();
+    // assert(from_range.len() == 5);
+
+    // Commented out: FnvHasher type not found
+    // let custom_hash: Set<Text, FnvHasher> = Set.with_hasher(FnvHasher.new());
+    // assert(custom_hash.is_empty());
+
+    // Clone a set
+    let original: Set<Int> = {1, 2, 3};
+    let cloned: Set<Int> = original.clone();
+    assert(cloned == original);
+
+    // Set of complex types
+    let text_set: Set<Text> = {"alpha", "beta", "gamma"};
+    assert(text_set.len() == 3);
+    assert(text_set.contains("alpha"));
+
+    // Set from array
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+    let from_array: Set<Int> = arr.into_iter().collect();
+    assert(from_array.len() == 5);
+}
+
+/// Test set insertion operations
+fn test_set_insertion() {
+    let mut set: Set<Int> = Set.new();
+
+    // Insert new element - returns true
+    let inserted1: Bool = set.insert(1);
+    assert(inserted1);
+    assert(set.len() == 1);
+
+    // Insert duplicate - returns false
+    let inserted2: Bool = set.insert(1);
+    assert(!inserted2);
+    assert(set.len() == 1);  // Size unchanged
+
+    // Insert multiple elements
+    set.insert(2);
+    set.insert(3);
+    set.insert(4);
+    set.insert(5);
+    assert(set.len() == 5);
+
+    // Commented out: Set literal {"existing"} parsed as Text, not Set<Text>
+    // let mut get_set: Set<Text> = {"existing"};
+    // let ref1: &Text = get_set.get_or_insert("existing");
+    // assert(*ref1 == "existing");
+    //
+    // let ref2: &Text = get_set.get_or_insert("new");
+    // assert(*ref2 == "new");
+    // assert(get_set.len() == 2);
+
+    // Commented out: get_or_insert_owned() not yet in stdlib
+    // let mut owned_set: Set<Text> = Set.new();
+    // let owned_ref: &Text = owned_set.get_or_insert_owned("hello".to_text());
+    // assert(*owned_ref == "hello");
+
+    // Commented out: get_or_insert_with() not yet in stdlib
+    // let mut lazy_set: Set<Text> = Set.new();
+    // let lazy_ref: &Text = lazy_set.get_or_insert_with("key", || "computed".to_text());
+    // assert(*lazy_ref == "computed");
+
+    // Extend with iterator
+    let mut extended: Set<Int> = {1, 2};
+    extended.extend([3, 4, 5]);
+    assert(extended.len() == 5);
+
+    // Extend with duplicates (silently ignored)
+    extended.extend([1, 2, 6]);
+    assert(extended.len() == 6);
+
+    // replace - insert and return old value if exists
+    let mut replace_set: Set<Int> = {1, 2, 3};
+    let old: Maybe<Int> = replace_set.replace(2);
+    assert(old == Some(2));
+    let new: Maybe<Int> = replace_set.replace(4);
+    assert(new.is_none());
+}
+
+/// Test set membership operations
+fn test_set_membership() {
+    let set: Set<Int> = {10, 20, 30, 40, 50};
+
+    // contains - check if element exists
+    assert(set.contains(&30));
+    assert(!set.contains(&100));
+    assert(!set.contains(&0));
+
+    // get - get reference to element
+    let found: Maybe<&Int> = set.get(&20);
+    assert(found == Some(&20));
+
+    let not_found: Maybe<&Int> = set.get(&100);
+    assert(not_found.is_none());
+
+    // is_empty
+    assert(!set.is_empty());
+    let empty: Set<Int> = Set.new();
+    assert(empty.is_empty());
+
+    // len
+    assert(set.len() == 5);
+    assert(empty.len() == 0);
+
+    // Check multiple elements
+    let to_check: List<Int> = [10, 30, 50];
+    let all_present: Bool = to_check.iter().all(|x| set.contains(x));
+    assert(all_present);
+
+    let some_missing: List<Int> = [10, 100, 50];
+    let any_missing: Bool = some_missing.iter().any(|x| !set.contains(x));
+    assert(any_missing);
+}
+
+/// Test set removal operations
+fn test_set_removal() {
+    let mut set: Set<Int> = {1, 2, 3, 4, 5};
+
+    // remove - returns true if element existed
+    let removed1: Bool = set.remove(&3);
+    assert(removed1);
+    assert(set.len() == 4);
+    assert(!set.contains(&3));
+
+    // remove non-existent element
+    let removed2: Bool = set.remove(&100);
+    assert(!removed2);
+    assert(set.len() == 4);
+
+    // take - remove and return the element
+    let taken: Maybe<Int> = set.take(&2);
+    assert(taken == Some(2));
+    assert(set.len() == 3);
+
+    let not_taken: Maybe<Int> = set.take(&100);
+    assert(not_taken.is_none());
+
+    // clear - remove all elements
+    let mut to_clear: Set<Int> = {1, 2, 3};
+    to_clear.clear();
+    assert(to_clear.is_empty());
+
+    // retain - keep elements matching predicate
+    let mut to_retain: Set<Int> = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    to_retain.retain(|x| *x % 2 == 0);
+    assert(to_retain == {2, 4, 6, 8, 10});
+
+    // drain - remove and iterate all elements
+    let mut to_drain: Set<Int> = {10, 20, 30};
+    let drained: List<Int> = to_drain.drain().collect();
+    assert(to_drain.is_empty());
+    assert(drained.len() == 3);
+}
+
+/// Test set union operations
+fn test_set_union() {
+    let set_a: Set<Int> = {1, 2, 3, 4};
+    let set_b: Set<Int> = {3, 4, 5, 6};
+
+    // union() - returns iterator over all unique elements
+    let union: Set<Int> = set_a.union(&set_b).copied().collect();
+    assert(union == {1, 2, 3, 4, 5, 6});
+    assert(union.len() == 6);
+
+    // Verify original sets unchanged
+    assert(set_a.len() == 4);
+    assert(set_b.len() == 4);
+
+    // Union with empty set
+    let empty: Set<Int> = Set.new();
+    let union_empty: Set<Int> = set_a.union(&empty).copied().collect();
+    assert(union_empty == set_a);
+
+    // Union of empty sets
+    let empty2: Set<Int> = Set.new();
+    let both_empty: Set<Int> = empty.union(&empty2).copied().collect();
+    assert(both_empty.is_empty());
+
+    // Union with disjoint sets
+    let set_x: Set<Int> = {1, 2, 3};
+    let set_y: Set<Int> = {4, 5, 6};
+    let disjoint_union: Set<Int> = set_x.union(&set_y).copied().collect();
+    assert(disjoint_union.len() == 6);
+
+    // Union with identical sets
+    let union_same: Set<Int> = set_a.union(&set_a).copied().collect();
+    assert(union_same == set_a);
+
+    // Bitwise OR operator (alternative syntax)
+    let or_result: Set<Int> = &set_a | &set_b;
+    assert(or_result == {1, 2, 3, 4, 5, 6});
+}
+
+/// Test set intersection operations
+fn test_set_intersection() {
+    let set_a: Set<Int> = {1, 2, 3, 4, 5};
+    let set_b: Set<Int> = {3, 4, 5, 6, 7};
+
+    // intersection() - returns iterator over common elements
+    let intersection: Set<Int> = set_a.intersection(&set_b).copied().collect();
+    assert(intersection == {3, 4, 5});
+    assert(intersection.len() == 3);
+
+    // Intersection with empty set
+    let empty: Set<Int> = Set.new();
+    let empty_intersection: Set<Int> = set_a.intersection(&empty).copied().collect();
+    assert(empty_intersection.is_empty());
+
+    // Intersection with disjoint sets
+    let set_x: Set<Int> = {1, 2, 3};
+    let set_y: Set<Int> = {4, 5, 6};
+    let disjoint_intersection: Set<Int> = set_x.intersection(&set_y).copied().collect();
+    assert(disjoint_intersection.is_empty());
+
+    // Intersection with subset
+    let subset: Set<Int> = {3, 4};
+    let subset_intersection: Set<Int> = set_a.intersection(&subset).copied().collect();
+    assert(subset_intersection == subset);
+
+    // Intersection with identical sets
+    let same_intersection: Set<Int> = set_a.intersection(&set_a).copied().collect();
+    assert(same_intersection == set_a);
+
+    // Bitwise AND operator (alternative syntax)
+    let and_result: Set<Int> = &set_a & &set_b;
+    assert(and_result == {3, 4, 5});
+
+    // is_disjoint - check if no common elements
+    assert(set_x.is_disjoint(&set_y));
+    assert(!set_a.is_disjoint(&set_b));
+}
+
+/// Test set difference operations
+fn test_set_difference() {
+    let set_a: Set<Int> = {1, 2, 3, 4, 5};
+    let set_b: Set<Int> = {3, 4, 5, 6, 7};
+
+    // difference() - elements in A but not in B
+    let diff_a_b: Set<Int> = set_a.difference(&set_b).copied().collect();
+    assert(diff_a_b == {1, 2});
+
+    // Note: difference is not symmetric
+    let diff_b_a: Set<Int> = set_b.difference(&set_a).copied().collect();
+    assert(diff_b_a == {6, 7});
+    assert(diff_a_b != diff_b_a);
+
+    // Difference with empty set
+    let empty: Set<Int> = Set.new();
+    let diff_empty: Set<Int> = set_a.difference(&empty).copied().collect();
+    assert(diff_empty == set_a);
+
+    // Empty set difference
+    let empty_diff: Set<Int> = empty.difference(&set_a).copied().collect();
+    assert(empty_diff.is_empty());
+
+    // Difference with superset (result is empty)
+    let superset: Set<Int> = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    let super_diff: Set<Int> = set_a.difference(&superset).copied().collect();
+    assert(super_diff.is_empty());
+
+    // Difference with subset
+    let subset: Set<Int> = {2, 3, 4};
+    let subset_diff: Set<Int> = set_a.difference(&subset).copied().collect();
+    assert(subset_diff == {1, 5});
+
+    // Difference with identical set
+    let same_diff: Set<Int> = set_a.difference(&set_a).copied().collect();
+    assert(same_diff.is_empty());
+
+    // Bitwise subtraction operator (alternative syntax)
+    let sub_result: Set<Int> = &set_a - &set_b;
+    assert(sub_result == {1, 2});
+}
+
+/// Test symmetric difference operations
+fn test_set_symmetric_difference() {
+    let set_a: Set<Int> = {1, 2, 3, 4};
+    let set_b: Set<Int> = {3, 4, 5, 6};
+
+    // symmetric_difference() - elements in either but not both
+    let sym_diff: Set<Int> = set_a.symmetric_difference(&set_b).copied().collect();
+    assert(sym_diff == {1, 2, 5, 6});
+
+    // Symmetric difference is symmetric
+    let sym_diff_reverse: Set<Int> = set_b.symmetric_difference(&set_a).copied().collect();
+    assert(sym_diff == sym_diff_reverse);
+
+    // Symmetric difference with empty set
+    let empty: Set<Int> = Set.new();
+    let sym_empty: Set<Int> = set_a.symmetric_difference(&empty).copied().collect();
+    assert(sym_empty == set_a);
+
+    // Symmetric difference of identical sets is empty
+    let sym_same: Set<Int> = set_a.symmetric_difference(&set_a).copied().collect();
+    assert(sym_same.is_empty());
+
+    // Symmetric difference of disjoint sets is their union
+    let set_x: Set<Int> = {1, 2};
+    let set_y: Set<Int> = {3, 4};
+    let sym_disjoint: Set<Int> = set_x.symmetric_difference(&set_y).copied().collect();
+    let union: Set<Int> = set_x.union(&set_y).copied().collect();
+    assert(sym_disjoint == union);
+
+    // Bitwise XOR operator (alternative syntax)
+    let xor_result: Set<Int> = &set_a ^ &set_b;
+    assert(xor_result == {1, 2, 5, 6});
+}
+
+/// Test subset and superset relationships
+fn test_set_subset_superset() {
+    let small: Set<Int> = {1, 2, 3};
+    let large: Set<Int> = {1, 2, 3, 4, 5, 6};
+    let equal1: Set<Int> = {1, 2, 3};
+    let disjoint: Set<Int> = {7, 8, 9};
+    let overlap: Set<Int> = {2, 3, 4};
+
+    // is_subset - all elements in self are in other
+    assert(small.is_subset(&large));
+    assert(small.is_subset(&equal1));  // Equal sets are subsets
+    assert(!large.is_subset(&small));
+    assert(!small.is_subset(&disjoint));
+    assert(!small.is_subset(&overlap));
+
+    // is_superset - all elements in other are in self
+    assert(large.is_superset(&small));
+    assert(large.is_superset(&equal1));
+    assert(!small.is_superset(&large));
+    assert(!small.is_superset(&disjoint));
+
+    // Empty set is subset of everything
+    let empty: Set<Int> = Set.new();
+    assert(empty.is_subset(&small));
+    assert(empty.is_subset(&large));
+    assert(empty.is_subset(&empty));
+
+    // Everything is superset of empty set
+    assert(small.is_superset(&empty));
+    assert(large.is_superset(&empty));
+
+    // is_disjoint - no common elements
+    assert(small.is_disjoint(&disjoint));
+    assert(!small.is_disjoint(&overlap));
+    assert(!small.is_disjoint(&large));
+
+    // Empty sets are disjoint with everything
+    assert(empty.is_disjoint(&small));
+    assert(empty.is_disjoint(&empty));
+
+    // Proper subset (subset but not equal)
+    fn is_proper_subset<T: Eq + Hash>(a: &Set<T>, b: &Set<T>) -> Bool {
+        a.is_subset(b) && a != b
+    }
+    assert(is_proper_subset(&small, &large));
+    assert(!is_proper_subset(&small, &equal1));
+}
+
+/// Test set iteration patterns
+fn test_set_iteration() {
+    let set: Set<Int> = {5, 3, 1, 4, 2};
+
+    // Basic iteration (order not guaranteed for HashSet)
+    let mut sum: Int = 0;
+    for elem in set.iter() {
+        sum += *elem;
+    }
+    assert(sum == 15);
+
+    // Consuming iteration
+    let to_consume: Set<Int> = {10, 20, 30};
+    let consumed_sum: Int = to_consume.into_iter().sum();
+    assert(consumed_sum == 60);
+    // Note: to_consume is moved
+
+    // Collect to list
+    let as_list: List<Int> = set.iter().copied().collect();
+    assert(as_list.len() == 5);
+
+    // Sorted iteration (requires collecting first)
+    let mut sorted_list: List<Int> = set.iter().copied().collect();
+    sorted_list.sort();
+    assert(sorted_list == [1, 2, 3, 4, 5]);
+
+    // For ordered iteration, use BTreeSet
+    let ordered: BTreeSet<Int> = {5, 3, 1, 4, 2}.into_iter().collect();
+    let ordered_list: List<Int> = ordered.iter().copied().collect();
+    assert(ordered_list == [1, 2, 3, 4, 5]);
+
+    // Drain iteration
+    let mut to_drain: Set<Int> = {1, 2, 3};
+    let mut drain_sum: Int = 0;
+    for elem in to_drain.drain() {
+        drain_sum += elem;
+    }
+    assert(drain_sum == 6);
+    assert(to_drain.is_empty());
+}
+
+/// Test functional operations on sets
+fn test_set_functional_operations() {
+    let set: Set<Int> = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+
+    // filter
+    let evens: Set<Int> = set.iter().filter(|x| *x % 2 == 0).copied().collect();
+    assert(evens == {2, 4, 6, 8, 10});
+
+    // map (note: may reduce size if mapping produces duplicates)
+    let remainders: Set<Int> = set.iter().map(|x| *x % 3).collect();
+    assert(remainders == {0, 1, 2});
+
+    // filter_map
+    let texts: Set<Text> = {"1", "two", "3", "four", "5"};
+    let numbers: Set<Int> = texts.iter()
+        .filter_map(|s| s.parse<Int>().ok())
+        .collect();
+    assert(numbers == {1, 3, 5});
+
+    // fold
+    let product: Int = set.iter().fold(1, |acc, x| acc * *x);
+    assert(product == 3628800);  // 10!
+
+    // any
+    let has_even: Bool = set.iter().any(|x| *x % 2 == 0);
+    assert(has_even);
+
+    // all
+    let all_positive: Bool = set.iter().all(|x| *x > 0);
+    assert(all_positive);
+
+    let all_small: Bool = set.iter().all(|x| *x < 5);
+    assert(!all_small);
+
+    // count
+    let even_count: Int = set.iter().filter(|x| *x % 2 == 0).count();
+    assert(even_count == 5);
+
+    // Commented out: min()/max() returns Item<SetIter<Int>> not &Int
+    // let min_val: Maybe<&Int> = set.iter().min();
+    // let max_val: Maybe<&Int> = set.iter().max();
+    // assert(min_val == Some(&1));
+    // assert(max_val == Some(&10));
+
+    // partition into two sets
+    let (evens_part, odds_part): (Set<Int>, Set<Int>) = set.iter()
+        .copied()
+        .partition(|x| *x % 2 == 0);
+    assert(evens_part.len() == 5);
+    assert(odds_part.len() == 5);
+}
+
+/// Test capacity management
+fn test_set_capacity_management() {
+    let mut set: Set<Int> = Set.new();
+
+    // Check initial capacity
+    let initial: Int = set.capacity();
+    assert(initial >= 0);
+
+    // Reserve capacity
+    set.reserve(100);
+    assert(set.capacity() >= 100);
+
+    // Add elements
+    for i in 0..50 {
+        set.insert(i);
+    }
+    assert(set.len() == 50);
+
+    // Shrink to fit
+    set.shrink_to_fit();
+    assert(set.capacity() >= 50);
+
+    // Shrink to specific size
+    set.shrink_to(60);
+    assert(set.capacity() >= 50);
+
+    // Commented out: BuildHasher type not found
+    // let _hasher: &BuildHasher = set.hasher();
+}

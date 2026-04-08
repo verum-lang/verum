@@ -1,0 +1,47 @@
+// @test: run
+// @expected-stdout: Database connected
+// @tier: 0
+// @level: L2
+// @tags: di, injectable, singleton
+// @description: Tests singleton scope for injectable services - only one instance created
+
+@injectable(Scope.Singleton)
+type DatabaseService is {
+    connected: Bool,
+    instance_id: Int,
+};
+
+implement DatabaseService {
+    @inject
+    fn new() -> Self {
+        println("Database connected");
+        Self {
+            connected: true,
+            instance_id: random_id(),
+        }
+    }
+
+    fn is_connected(&self) -> Bool {
+        self.connected
+    }
+}
+
+fn random_id() -> Int {
+    // Simplified for testing - in real code would use proper random
+    42
+}
+
+fn main() {
+    // First injection creates the singleton
+    let db1 = inject DatabaseService;
+
+    // Second injection returns the same instance
+    let db2 = inject DatabaseService;
+
+    // Both references point to the same singleton instance
+    assert(db1.connected == db2.connected);
+    assert(db1.instance_id == db2.instance_id);
+
+    // Verify connected state
+    assert(db1.is_connected());
+}

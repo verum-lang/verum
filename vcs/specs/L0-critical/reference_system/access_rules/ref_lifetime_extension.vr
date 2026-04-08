@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @was-skip: missing stdlib methods (trim, to_string)
+// @tags: reference_system, cbgr, access_rules, lifetime, temporary
+
+/// Test temporary lifetime extension rules.
+/// Temporary values can have their lifetime extended when bound to references.
+/// This allows patterns like `let x = &temp_value;` to work safely.
+/// Spec: 04-memory-model.md#temporary-lifetimes
+
+// Helper type for testing field access on temporaries
+type Wrapper is {
+    value: Int,
+};
+
+fn make_wrapper() -> Wrapper {
+    Wrapper { value: 42 }
+}
+
+fn main() {
+    test_basic_temporary_extension();
+    test_method_chain_temporaries();
+    test_match_temporary_extension();
+    test_block_expression_temporary();
+}
+
+/// Basic temporary bound to reference
+fn test_basic_temporary_extension() {
+    // Temporary value's lifetime is extended to match reference
+    let x: &Int = &(1 + 2 + 3);  // Temporary 6 lives as long as x
+
+    assert(*x == 6);
+
+    // Works with struct temporaries too
+    let p: &Point = &Point { x: 10, y: 20 };
+    assert(p.x == 10);
+}
+
+/// Method chains produce temporaries
+fn test_method_chain_temporaries() {
+    // Each method call creates a temporary
+    // Compiler extends lifetime through the chain
+
+    let items = [1, 2, 3, 4, 5];
+
+    let sum_ref: &Int = &items.iter().sum();
+    assert(*sum_ref == 15);
+
+    // Complex chain
+    let text = Text.from("  hello world  ");
+    let trimmed: &Text = &text.trim();
+    assert(*trimmed == "hello world");
+}
+
+/// Match expression temporaries
+fn test_match_temporary_extension() {
+    let opt = Some(42);
+
+    // Reference into match result temporary
+    let result: &Text = &match opt {
+        Some(n) => Text.from("Value: ") + n.to_string(),
+        None => Text.from("No value"),
+    };
+
+    assert(*result == "Value: 42");
+}
+
+/// Block expression creates temporary
+fn test_block_expression_temporary() {
+    // Block evaluates to temporary
+    let x: &Int = &{
+        let a = 10;
+        let b = 20;
+        a + b
+    };
+
+    assert(*x == 30);
+}
+
+/// Reference to field of temporary
+fn test_field_of_temporary() {
+    // Reference to field of temporary struct
+    let v: &Int = &make_wrapper().value;
+    assert(*v == 42);
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Maybe<T> is Some(T) | None;

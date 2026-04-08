@@ -1,0 +1,377 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, protocols, bounds, generics
+// @description: Protocol bounds on generic types and functions
+
+/// Test for protocol bounds on generic types and functions.
+/// Protocol bounds constrain type parameters to types implementing specific protocols.
+/// Note: Protocol methods with extra args only work on concrete types, not generic T.
+
+// ============================================================================
+// Protocol definitions (methods with 0 extra args after &self)
+// ============================================================================
+
+type Displayable is protocol {
+    fn display(&self) -> Text;
+};
+
+type Cloneable is protocol {
+    fn clone_val(&self) -> Self;
+};
+
+type Hashable is protocol {
+    fn hash_val(&self) -> Int;
+};
+
+type Defaultable is protocol {
+    fn default_val() -> Self;
+};
+
+type Debuggable is protocol {
+    fn debug_val(&self) -> Text;
+};
+
+type Sizeable is protocol {
+    fn size_val(&self) -> Int;
+};
+
+// ============================================================================
+// Single protocol bound functions (zero-extra-arg methods only)
+// ============================================================================
+
+fn show_item<T: Displayable>(item: &T) -> Text {
+    item.display()
+}
+
+fn clone_item<T: Cloneable>(item: &T) -> T {
+    item.clone_val()
+}
+
+fn hash_item<T: Hashable>(item: &T) -> Int {
+    item.hash_val()
+}
+
+fn get_default_val<T: Defaultable>() -> T {
+    T.default_val()
+}
+
+fn debug_item<T: Debuggable>(item: &T) -> Text {
+    item.debug_val()
+}
+
+fn is_empty_item<T: Sizeable>(item: &T) -> Bool {
+    item.size_val() == 0
+}
+
+// ============================================================================
+// Multiple protocol bounds (compound constraints, zero-extra-arg methods)
+// ============================================================================
+
+fn show_and_hash<T: Displayable + Hashable>(item: &T) -> (Text, Int) {
+    (item.display(), item.hash_val())
+}
+
+fn clone_and_debug<T: Cloneable + Debuggable>(item: &T) -> (T, Text) {
+    (item.clone_val(), item.debug_val())
+}
+
+fn full_info<T: Displayable + Hashable + Debuggable>(item: &T) -> Text {
+    let d = item.display();
+    let h = item.hash_val();
+    let dbg = item.debug_val();
+    f"{d} (hash={h}, debug={dbg})"
+}
+
+// ============================================================================
+// Where clause syntax for protocol bounds
+// ============================================================================
+
+fn where_display<T>(item: &T) -> Text
+where
+    T: Displayable,
+{
+    item.display()
+}
+
+fn where_multi<T>(item: &T) -> (Text, Int)
+where
+    T: Displayable + Hashable,
+{
+    (item.display(), item.hash_val())
+}
+
+fn where_clone<T>(item: &T) -> T
+where
+    T: Cloneable,
+{
+    item.clone_val()
+}
+
+// ============================================================================
+// Protocol bounds on struct definitions
+// ============================================================================
+
+type Container<T: Displayable + Sizeable> is {
+    value: T,
+};
+
+implement<T: Displayable + Sizeable> Container<T> {
+    fn create(value: T) -> Container<T> {
+        Container { value }
+    }
+
+    fn get_display(&self) -> Text {
+        self.value.display()
+    }
+
+    fn get_size(&self) -> Int {
+        self.value.size_val()
+    }
+
+    fn is_value_empty(&self) -> Bool {
+        self.value.size_val() == 0
+    }
+}
+
+type Wrapper<T: Displayable> is {
+    inner: T,
+    label: Text,
+};
+
+implement<T: Displayable> Wrapper<T> {
+    fn create(inner: T, label: Text) -> Wrapper<T> {
+        Wrapper { inner, label }
+    }
+
+    fn labeled_display(&self) -> Text {
+        f"{self.label}: {self.inner.display()}"
+    }
+}
+
+// ============================================================================
+// Higher-order functions with protocol bounds
+// ============================================================================
+
+fn apply_display<T: Displayable, R>(item: &T, f: fn(&T) -> R) -> R {
+    f(item)
+}
+
+fn collect_displays<T: Displayable>(items: List<T>) -> List<Text> {
+    let mut result: List<Text> = [];
+    for item in items {
+        result.push(item.display());
+    }
+    result
+}
+
+fn first_non_empty_display<T: Displayable + Sizeable>(items: List<T>) -> Maybe<Text> {
+    let mut i = 0;
+    while i < items.len() {
+        if items[i].size_val() > 0 {
+            return Some(items[i].display());
+        }
+        i += 1;
+    }
+    None
+}
+
+// ============================================================================
+// Sample concrete types implementing protocols
+// ============================================================================
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+implement Displayable for Point {
+    fn display(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+implement Cloneable for Point {
+    fn clone_val(&self) -> Point {
+        Point { x: self.x, y: self.y }
+    }
+}
+
+implement Hashable for Point {
+    fn hash_val(&self) -> Int {
+        self.x * 31 + self.y
+    }
+}
+
+implement Defaultable for Point {
+    fn default_val() -> Point {
+        Point { x: 0, y: 0 }
+    }
+}
+
+implement Debuggable for Point {
+    fn debug_val(&self) -> Text {
+        f"Point{{x:{self.x},y:{self.y}}}"
+    }
+}
+
+implement Sizeable for Point {
+    fn size_val(&self) -> Int {
+        if self.x == 0 && self.y == 0 { 0 } else { 1 }
+    }
+}
+
+type Color is {
+    r: Int,
+    g: Int,
+    b: Int,
+};
+
+implement Displayable for Color {
+    fn display(&self) -> Text {
+        f"rgb({self.r},{self.g},{self.b})"
+    }
+}
+
+implement Cloneable for Color {
+    fn clone_val(&self) -> Color {
+        Color { r: self.r, g: self.g, b: self.b }
+    }
+}
+
+implement Hashable for Color {
+    fn hash_val(&self) -> Int {
+        self.r * 65536 + self.g * 256 + self.b
+    }
+}
+
+implement Defaultable for Color {
+    fn default_val() -> Color {
+        Color { r: 0, g: 0, b: 0 }
+    }
+}
+
+implement Debuggable for Color {
+    fn debug_val(&self) -> Text {
+        f"Color(r={self.r},g={self.g},b={self.b})"
+    }
+}
+
+implement Sizeable for Color {
+    fn size_val(&self) -> Int {
+        3
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 3, y: 4 };
+    let origin = Point { x: 0, y: 0 };
+
+    // Single protocol bound functions
+    let d1: Text = show_item(&p1);
+    assert(d1 == "(1, 2)");
+
+    let d2: Text = show_item(&p2);
+    assert(d2 == "(3, 4)");
+
+    let cloned = clone_item(&p1);
+    assert(cloned.x == 1 && cloned.y == 2);
+
+    let h = hash_item(&p1);
+    assert(h == 1 * 31 + 2);
+
+    let default_p: Point = get_default_val();
+    assert(default_p.x == 0 && default_p.y == 0);
+
+    let dbg = debug_item(&p1);
+    assert(dbg == "Point{x:1,y:2}");
+
+    assert(!is_empty_item(&p1));
+    assert(is_empty_item(&origin));
+
+    // Multiple protocol bounds
+    let (display, hash) = show_and_hash(&p1);
+    assert(display == "(1, 2)");
+    assert(hash == 33);
+
+    let (cloned2, debug2) = clone_and_debug(&p1);
+    assert(cloned2.x == 1);
+    assert(debug2 == "Point{x:1,y:2}");
+
+    let info = full_info(&p1);
+    assert(info == "(1, 2) (hash=33, debug=Point{x:1,y:2})");
+
+    // Where clause syntax
+    assert(where_display(&p1) == "(1, 2)");
+    let (wd, wh) = where_multi(&p1);
+    assert(wd == "(1, 2)" && wh == 33);
+    let wc = where_clone(&p1);
+    assert(wc.x == 1);
+
+    // Color type
+    let c1 = Color { r: 255, g: 0, b: 0 };
+    let c2 = Color { r: 0, g: 255, b: 0 };
+
+    assert(show_item(&c1) == "rgb(255,0,0)");
+    assert(hash_item(&c1) == 255 * 65536);
+
+    let c_clone = clone_item(&c1);
+    assert(c_clone.r == 255);
+
+    let c_default: Color = get_default_val();
+    assert(c_default.r == 0);
+
+    assert(!is_empty_item(&c1));
+
+    let (c_display, c_hash) = show_and_hash(&c1);
+    assert(c_display == "rgb(255,0,0)");
+
+    // Container with bounds on struct
+    let container = Container { value: p1 };
+    assert(container.get_display() == "(1, 2)");
+    assert(container.get_size() == 1);
+    assert(!container.is_value_empty());
+
+    let empty_container = Container { value: origin };
+    assert(empty_container.is_value_empty());
+
+    // Wrapper with bounds
+    let wrapper = Wrapper { inner: p1, label: "my-point" };
+    assert(wrapper.labeled_display() == "my-point: (1, 2)");
+
+    // Higher-order functions
+    let mapped = apply_display(&p1, |p: &Point| p.display());
+    assert(mapped == "(1, 2)");
+
+    let points: List<Point> = [
+        Point { x: 1, y: 1 },
+        Point { x: 2, y: 2 },
+        Point { x: 3, y: 3 },
+    ];
+    let displays = collect_displays(points);
+    assert(displays[0] == "(1, 1)");
+    assert(displays[1] == "(2, 2)");
+    assert(displays.len() == 3);
+
+    // first_non_empty_display
+    let mixed: List<Point> = [
+        Point { x: 0, y: 0 },  // empty
+        Point { x: 5, y: 6 },  // non-empty
+        Point { x: 7, y: 8 },
+    ];
+    let first_ne = first_non_empty_display(mixed);
+    match first_ne {
+        Some(s) => assert(s == "(5, 6)"),
+        None => assert(false),
+    }
+
+    let all_empty: List<Point> = [origin];
+    assert(first_non_empty_display(all_empty) == None);
+
+    print("Protocol bounds tests passed!");
+}

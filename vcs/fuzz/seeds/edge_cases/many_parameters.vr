@@ -1,0 +1,101 @@
+// Many parameters edge case
+// Tests function signature parsing and calling convention
+
+// Function with many parameters
+fn many_params(
+    p0: Int, p1: Int, p2: Int, p3: Int, p4: Int,
+    p5: Int, p6: Int, p7: Int, p8: Int, p9: Int,
+    p10: Int, p11: Int, p12: Int, p13: Int, p14: Int,
+    p15: Int, p16: Int, p17: Int, p18: Int, p19: Int,
+    p20: Int, p21: Int, p22: Int, p23: Int, p24: Int,
+    p25: Int, p26: Int, p27: Int, p28: Int, p29: Int,
+    p30: Int, p31: Int, p32: Int, p33: Int, p34: Int,
+    p35: Int, p36: Int, p37: Int, p38: Int, p39: Int,
+    p40: Int, p41: Int, p42: Int, p43: Int, p44: Int,
+    p45: Int, p46: Int, p47: Int, p48: Int, p49: Int
+) -> Int {
+    p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9 +
+    p10 + p11 + p12 + p13 + p14 + p15 + p16 + p17 + p18 + p19 +
+    p20 + p21 + p22 + p23 + p24 + p25 + p26 + p27 + p28 + p29 +
+    p30 + p31 + p32 + p33 + p34 + p35 + p36 + p37 + p38 + p39 +
+    p40 + p41 + p42 + p43 + p44 + p45 + p46 + p47 + p48 + p49
+}
+
+// Function with mixed types
+fn mixed_params(
+    a: Int, b: Float, c: Bool, d: Text,
+    e: Int, f: Float, g: Bool, h: Text,
+    i: Int, j: Float, k: Bool, l: Text,
+    m: Int, n: Float, o: Bool, p: Text
+) -> Bool {
+    a > 0 && e > 0 && i > 0 && m > 0 &&
+    b > 0.0 && f > 0.0 && j > 0.0 && n > 0.0 &&
+    c && g && k && o &&
+    len(d) > 0 && len(h) > 0 && len(l) > 0 && len(p) > 0
+}
+
+// Function with generic parameters
+fn generic_many<T, U, V, W, X, Y, Z>(
+    a: T, b: U, c: V, d: W, e: X, f: Y, g: Z
+) -> T {
+    a
+}
+
+// Function with default values (if supported)
+fn with_defaults(
+    required: Int,
+    optional1: Int = 1,
+    optional2: Int = 2,
+    optional3: Int = 3,
+    optional4: Int = 4,
+    optional5: Int = 5
+) -> Int {
+    required + optional1 + optional2 + optional3 + optional4 + optional5
+}
+
+// Closure with many captures
+fn test_closure() -> Int {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let g = 7;
+    let h = 8;
+    let i = 9;
+    let j = 10;
+
+    let closure = || {
+        a + b + c + d + e + f + g + h + i + j
+    };
+
+    closure()
+}
+
+fn main() {
+    // Call function with many parameters
+    let result = many_params(
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+        10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+        30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        40, 41, 42, 43, 44, 45, 46, 47, 48, 49
+    );
+
+    // Expected: 0+1+...+49 = 1225
+    assert result == 1225;
+
+    // Call mixed params
+    let mixed = mixed_params(
+        1, 1.0, true, "a",
+        2, 2.0, true, "b",
+        3, 3.0, true, "c",
+        4, 4.0, true, "d"
+    );
+    assert mixed == true;
+
+    // Test closure
+    let closure_result = test_closure();
+    assert closure_result == 55;
+}

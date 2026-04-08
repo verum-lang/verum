@@ -1,0 +1,233 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, extern-c
+// @description: Tests @extern("C") function declarations and calling conventions
+
+/// ============================================================
+/// @EXTERN("C") DECLARATIONS
+/// ============================================================
+///
+/// The @extern("C") attribute marks functions to use the C ABI,
+/// enabling interoperability with C libraries and system APIs.
+
+// ------------------------------------------------------------
+// Type Definitions (must come before use)
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_float is f32;
+type c_double is f64;
+type c_void is ();
+
+@opaque
+type FILE is ();
+
+// ------------------------------------------------------------
+// Basic @extern("C") Functions in FFI Blocks
+// ------------------------------------------------------------
+
+/// Simple extern C function declaration
+ffi libc_puts {
+    @extern("C")
+    fn puts(s: *const c_char) -> c_int;
+}
+
+/// Extern C function with explicit link name
+ffi libc_atoi {
+    @extern("C", name = "atoi")
+    fn c_atoi(s: *const c_char) -> c_int;
+}
+
+/// Multiple extern functions in single block
+ffi math {
+    @extern("C")
+    fn floor(x: c_double) -> c_double;
+
+    @extern("C")
+    fn ceil(x: c_double) -> c_double;
+
+    @extern("C")
+    fn round(x: c_double) -> c_double;
+
+    @extern("C")
+    fn fabs(x: c_double) -> c_double;
+
+    @extern("C")
+    fn fmod(x: c_double, y: c_double) -> c_double;
+}
+
+// ------------------------------------------------------------
+// Calling Conventions in FFI Blocks
+// ------------------------------------------------------------
+
+/// Stdcall convention (Windows)
+@cfg(target_os = "windows")
+ffi win_stdcall {
+    @extern("C", calling_convention = "stdcall")
+    fn stdcall_fn(a: c_int, b: c_int) -> c_int;
+}
+
+/// Fastcall convention
+@cfg(target_os = "windows")
+ffi win_fastcall {
+    @extern("C", calling_convention = "fastcall")
+    fn fastcall_fn(a: c_int, b: c_int) -> c_int;
+}
+
+/// SysV64 ABI (Unix 64-bit)
+@cfg(target_family = "unix")
+ffi unix_sysv {
+    @extern("C", calling_convention = "sysv64")
+    fn sysv64_fn(a: c_int, b: c_int, c: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Exported Functions
+// ------------------------------------------------------------
+
+/// Export Verum function with C linkage
+@export("C")
+@no_mangle
+fn verum_add(a: c_int, b: c_int) -> c_int {
+    a + b
+}
+
+/// Export with custom name
+@export("C", name = "my_multiply")
+fn multiply(a: c_int, b: c_int) -> c_int {
+    a * b
+}
+
+/// Export with visibility
+@export("C")
+fn public_api_function(x: c_int) -> c_int {
+    x * x
+}
+
+// ------------------------------------------------------------
+// Return Value Handling - FFI Declarations
+// ------------------------------------------------------------
+
+/// Never return functions
+ffi io_noreturn {
+    @extern("C")
+    fn abort();
+
+    @extern("C")
+    fn exit(status: c_int);
+}
+
+/// File operations
+ffi io_file {
+    @extern("C")
+    fn setbuf(stream: *mut FILE, buf: *mut c_char);
+}
+
+// ------------------------------------------------------------
+// Struct Types for FFI
+// ------------------------------------------------------------
+
+/// Large return value (struct return)
+@repr(C)
+type LargeStruct is {
+    a: c_int,
+    b: c_int,
+    c: c_int,
+    d: c_int,
+    e: c_int,
+};
+
+/// Small struct return (fits in registers)
+@repr(C)
+type SmallPair is {
+    x: c_int,
+    y: c_int,
+};
+
+/// Point for geometric operations
+@repr(C)
+type Point2D is {
+    x: c_double,
+    y: c_double,
+};
+
+// ------------------------------------------------------------
+// FFI with Struct Parameters
+// ------------------------------------------------------------
+
+ffi geometry {
+    @extern("C")
+    fn point_add(p1: Point2D, p2: Point2D) -> Point2D;
+}
+
+// ------------------------------------------------------------
+// Parameter Passing FFI
+// ------------------------------------------------------------
+
+/// Many parameters (some on stack)
+ffi multi_param {
+    @extern("C")
+    fn many_params(
+        a: c_int, b: c_int, c: c_int, d: c_int,
+        e: c_int, f: c_int, g: c_int, h: c_int
+    ) -> c_int;
+}
+
+/// Mixed types
+ffi mixed_types {
+    @extern("C")
+    fn mixed_params(
+        i: c_int,
+        f: c_float,
+        d: c_double,
+        p: *const c_void
+    ) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Helper Functions
+// ------------------------------------------------------------
+
+fn create_large_struct() -> LargeStruct {
+    LargeStruct { a: 1, b: 2, c: 3, d: 4, e: 5 }
+}
+
+fn create_small_pair() -> SmallPair {
+    SmallPair { x: 10, y: 20 }
+}
+
+fn create_point(x: c_double, y: c_double) -> Point2D {
+    Point2D { x, y }
+}
+
+fn point_distance(p1: Point2D, p2: Point2D) -> c_double {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    (dx * dx + dy * dy).sqrt()
+}
+
+fn main() {
+    // Test exported functions
+    let sum = verum_add(3, 4);
+    assert(sum == 7);
+
+    let product = multiply(5, 6);
+    assert(product == 30);
+
+    // Test struct creation
+    let ls = create_large_struct();
+    assert(ls.a == 1);
+
+    let sp = create_small_pair();
+    assert(sp.x == 10);
+
+    // Test point distance
+    let p1 = create_point(0.0, 0.0);
+    let p2 = create_point(3.0, 4.0);
+    let dist = point_distance(p1, p2);
+    assert(dist == 5.0);
+}

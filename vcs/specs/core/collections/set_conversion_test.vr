@@ -1,0 +1,179 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, set, to_list, into_list, conversion
+// @description: Tests for Set.to_list and Set.into_list
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+fn make_set(values: &[Int]) -> Set<Int> {
+    let mut s: Set<Int> = Set.new();
+    for i in range(0, values.len()) {
+        let val = values[i];
+        s.insert(val);
+    }
+    s
+}
+
+// =============================================================================
+// Section 1: Set.to_list
+// =============================================================================
+
+@test
+fn test_to_list_basic() {
+    let s = make_set(&[1, 2, 3]);
+    let list = s.to_list();
+    assert_eq(list.len(), 3);
+    assert(list.contains(&1));
+    assert(list.contains(&2));
+    assert(list.contains(&3));
+}
+
+@test
+fn test_to_list_empty() {
+    let s: Set<Int> = Set.new();
+    let list = s.to_list();
+    assert(list.is_empty());
+}
+
+@test
+fn test_to_list_single() {
+    let s = make_set(&[42]);
+    let list = s.to_list();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+@test
+fn test_to_list_preserves_set() {
+    let s = make_set(&[10, 20, 30]);
+    let _ = s.to_list();
+    // Set is preserved (to_list borrows, doesn't consume)
+    assert_eq(s.len(), 3);
+    assert(s.contains(&10));
+}
+
+@test
+fn test_to_list_large() {
+    let mut s: Set<Int> = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        let val = i;
+        s.insert(val);
+        i = i + 1;
+    }
+    let list = s.to_list();
+    assert_eq(list.len(), 100);
+    let mut j = 0;
+    while j < 100 {
+        let val = j;
+        assert(list.contains(&val));
+        j = j + 1;
+    }
+}
+
+@test
+fn test_to_list_sorted() {
+    let s = make_set(&[5, 3, 1, 4, 2]);
+    let mut list = s.to_list();
+    list.sort();
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+    assert_eq(list[3], 4);
+    assert_eq(list[4], 5);
+}
+
+// =============================================================================
+// Section 2: Set.into_list
+// =============================================================================
+
+@test
+fn test_into_list_basic() {
+    let s = make_set(&[1, 2, 3]);
+    let list = s.into_list();
+    assert_eq(list.len(), 3);
+    assert(list.contains(&1));
+    assert(list.contains(&2));
+    assert(list.contains(&3));
+}
+
+@test
+fn test_into_list_empty() {
+    let s: Set<Int> = Set.new();
+    let list = s.into_list();
+    assert(list.is_empty());
+}
+
+@test
+fn test_into_list_single() {
+    let s = make_set(&[99]);
+    let list = s.into_list();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 99);
+}
+
+@test
+fn test_into_list_negative() {
+    let s = make_set(&[-5, -3, -1, 0, 2, 4]);
+    let list = s.into_list();
+    assert_eq(list.len(), 6);
+    assert(list.contains(&-5));
+    assert(list.contains(&0));
+    assert(list.contains(&4));
+}
+
+// =============================================================================
+// Section 3: Integration
+// =============================================================================
+
+@test
+fn test_roundtrip_set_list_set() {
+    let original = make_set(&[10, 20, 30, 40, 50]);
+    let list = original.to_list();
+    let mut rebuilt: Set<Int> = Set.new();
+    let mut i = 0;
+    while i < list.len() {
+        let val = list[i];
+        rebuilt.insert(val);
+        i = i + 1;
+    }
+    assert_eq(rebuilt.len(), original.len());
+    for item in original.iter() {
+        assert(rebuilt.contains(item));
+    }
+}
+
+@test
+fn test_to_list_unique_elements() {
+    // Set deduplicates, verify list has correct count
+    let mut s: Set<Int> = Set.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(4);
+    s.insert(1); // duplicate
+    s.insert(5);
+    s.insert(9);
+    s.insert(2);
+    s.insert(6);
+    let mut list = s.to_list();
+    list.sort();
+    // All unique values in order
+    let mut i = 0;
+    while i < list.len() - 1 {
+        assert(list[i] < list[i + 1]);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_into_list_with_operations() {
+    let mut s = make_set(&[1, 2, 3, 4, 5]);
+    s.remove(&3);
+    s.insert(6);
+    let list = s.into_list();
+    assert_eq(list.len(), 5);
+    assert(!list.contains(&3));
+    assert(list.contains(&6));
+}

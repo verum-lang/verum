@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, dyn, empty, error
+// @description: Test detection of dyn keyword without protocol bounds
+// @expected-error: E052
+
+// dyn must have at least one protocol bound
+fn test(x: dyn) {}

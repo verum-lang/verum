@@ -1,0 +1,605 @@
+// @test: differential
+// @tier: all
+// @impl: all
+// @level: L2
+// @tags: differential, portable, semantics, cross-impl
+// @platform: any
+// @timeout: 20000
+
+/// Portable semantics tests for cross-implementation verification.
+/// These tests verify core language semantics that must be identical
+/// across all Verum implementations regardless of target platform.
+
+fn main() {
+    test_evaluation_order();
+    test_scope_rules();
+    test_type_semantics();
+    test_expression_semantics();
+    test_statement_semantics();
+    test_declaration_semantics();
+    test_pattern_semantics();
+    test_generic_semantics();
+    test_trait_semantics();
+    test_module_semantics();
+}
+
+/// Expression evaluation order
+fn test_evaluation_order() {
+    println("=== Evaluation Order ===");
+
+    // Track evaluation order with side effects
+    let mut log = [];
+
+    fn record(log: &mut List<Text>, msg: Text, value: Int) -> Int {
+        log.push(msg);
+        value
+    }
+
+    // Binary operator: left-to-right
+    log.clear();
+    let _ = record(&mut log, "left", 1) + record(&mut log, "right", 2);
+    println(f"binary op order: {log}");
+
+    // Function arguments: left-to-right
+    log.clear();
+    fn three_args(a: Int, b: Int, c: Int) -> Int { a + b + c }
+    let _ = three_args(
+        record(&mut log, "first", 1),
+        record(&mut log, "second", 2),
+        record(&mut log, "third", 3),
+    );
+    println(f"function args order: {log}");
+
+    // Array indexing: array before index
+    log.clear();
+    fn make_array(log: &mut List<Text>) -> [Int; 3] {
+        log.push("array");
+        [10, 20, 30]
+    }
+    let arr = make_array(&mut log);
+    let _ = arr[record(&mut log, "index", 1)];
+    println(f"array index order: {log}");
+
+    // Method call: receiver before arguments
+    log.clear();
+    type Obj is { value: Int };
+    implement Obj {
+        fn method(&self, x: Int) -> Int { self.value + x }
+    }
+    fn make_obj(log: &mut List<Text>) -> Obj {
+        log.push("receiver");
+        Obj { value: 100 }
+    }
+    let _ = make_obj(&mut log).method(record(&mut log, "arg", 5));
+    println(f"method call order: {log}");
+
+    // Short-circuit: respects short-circuit
+    log.clear();
+    let _ = record(&mut log, "left", 0) != 0 && record(&mut log, "right", 1) != 0;
+    println(f"short-circuit false &&: {log}");
+
+    log.clear();
+    let _ = record(&mut log, "left", 1) != 0 || record(&mut log, "right", 2) != 0;
+    println(f"short-circuit true ||: {log}");
+
+    // Compound assignment
+    log.clear();
+    let mut x = 0;
+    x += record(&mut log, "rhs", 5);
+    println(f"compound assign: x={x}, log={log}");
+}
+
+/// Scope and binding rules
+fn test_scope_rules() {
+    println("\n=== Scope Rules ===");
+
+    // Lexical scoping
+    let x = "outer";
+    {
+        let x = "inner";
+        println(f"inner scope x: {x}");
+    }
+    println(f"outer scope x: {x}");
+
+    // Shadowing
+    let y = 10;
+    let y = y + 5;
+    let y = f"y is {y}";
+    println(f"shadowed y: {y}");
+
+    // Shadowing in nested scopes
+    let z = 1;
+    {
+        let z = 2;
+        {
+            let z = 3;
+            println(f"deepest z: {z}");
+        }
+        println(f"middle z: {z}");
+    }
+    println(f"outer z: {z}");
+
+    // Pattern binding
+    let (a, b) = (1, 2);
+    println(f"pattern binding: a={a}, b={b}");
+
+    // Let-else
+    let Some(val) = Some(42) else {
+        println("unreachable");
+        return;
+    };
+    println(f"let-else val: {val}");
+
+    // If-let binding
+    if let Some(n) = Some(100) {
+        println(f"if-let n: {n}");
+    }
+
+    // Match binding
+    match (1, 2, 3) {
+        (first, second, third) => {
+            println(f"match binding: {first}, {second}, {third}");
+        }
+    }
+
+    // For loop binding
+    for i in 0..3 {
+        println(f"for binding i: {i}");
+    }
+
+    // Closure capture
+    let captured = "captured value";
+    let closure = || {
+        println(f"closure sees: {captured}");
+    };
+    closure();
+}
+
+/// Type system semantics
+fn test_type_semantics() {
+    println("\n=== Type Semantics ===");
+
+    // Type inference
+    let inferred_int = 42;
+    let inferred_float = 3.14;
+    let inferred_text = "hello";
+    let inferred_bool = true;
+    println(f"inferred: {inferred_int}, {inferred_float}, {inferred_text}, {inferred_bool}");
+
+    // Type annotations
+    let annotated: Int = 42;
+    let annotated_list: List<Int> = [1, 2, 3];
+    println(f"annotated: {annotated}, {annotated_list}");
+
+    // Type coercion (explicit)
+    let n: Int = 42;
+    let f: Float = n as Float;
+    println(f"coerced: {f}");
+
+    // Never type
+    fn returns_never(should_panic: Bool) -> ! {
+        if should_panic {
+            panic("intentional");
+        }
+        loop {}
+    }
+
+    // Unit type
+    fn returns_unit() -> () {
+        let _ = 42;
+    }
+    let unit_val = returns_unit();
+    println(f"unit type: {unit_val == ()}");
+
+    // Type aliases
+    type Pair = (Int, Int);
+    let pair: Pair = (1, 2);
+    println(f"type alias: {pair}");
+
+    // Generic type instantiation
+    type Container<T> is { value: T };
+    let int_container = Container { value: 42 };
+    let text_container = Container { value: "hello" };
+    println(f"generic: {int_container.value}, {text_container.value}");
+}
+
+/// Expression semantics
+fn test_expression_semantics() {
+    println("\n=== Expression Semantics ===");
+
+    // Block expression
+    let block_result = {
+        let a = 10;
+        let b = 20;
+        a + b  // Last expression is the value
+    };
+    println(f"block expr: {block_result}");
+
+    // If expression
+    let cond = true;
+    let if_result = if cond { 1 } else { 2 };
+    println(f"if expr: {if_result}");
+
+    // Match expression
+    let match_result = match 2 {
+        1 => "one",
+        2 => "two",
+        _ => "other",
+    };
+    println(f"match expr: {match_result}");
+
+    // Loop expression with break value
+    let mut counter = 0;
+    let loop_result = loop {
+        counter += 1;
+        if counter > 5 {
+            break counter * 10;
+        }
+    };
+    println(f"loop expr: {loop_result}");
+
+    // Try expression
+    let try_result: Result<Int, Text> = try {
+        let a = Ok<Int, Text>(10)?;
+        let b = Ok<Int, Text>(20)?;
+        a + b
+    };
+    println(f"try expr: {try_result}");
+
+    // Range expressions
+    let range = 0..5;
+    let inclusive = 0..=5;
+    let from = 5..;
+    let to = ..5;
+    let full = ..;
+    println(f"ranges: {range.collect<List<_>>()}, {inclusive.collect<List<_>>()}");
+
+    // Tuple expression
+    let tuple = (1, "two", 3.0, true);
+    println(f"tuple: ({tuple.0}, {tuple.1}, {tuple.2}, {tuple.3})");
+
+    // Array expression
+    let array = [1, 2, 3, 4, 5];
+    let repeat = [0; 5];
+    println(f"array: {array}, repeat: {repeat}");
+
+    // Struct expression
+    type Point is { x: Int, y: Int };
+    let point = Point { x: 10, y: 20 };
+    let point2 = Point { y: 30, ..point };  // Struct update
+    println(f"struct: ({point.x}, {point.y}), ({point2.x}, {point2.y})");
+
+    // Lambda expression
+    let lambda = |x, y| x + y;
+    println(f"lambda: {lambda(3, 4)}");
+
+    // Reference expressions
+    let value = 42;
+    let ref_val = &value;
+    let deref_val = *ref_val;
+    println(f"ref: {deref_val}");
+}
+
+/// Statement semantics
+fn test_statement_semantics() {
+    println("\n=== Statement Semantics ===");
+
+    // Let statement
+    let immutable = 42;
+    let mut mutable = 0;
+    mutable = 10;
+    println(f"let: {immutable}, {mutable}");
+
+    // Expression statement (semicolon discards value)
+    {
+        42;  // Value discarded
+        println("expression statement executed");
+    }
+
+    // Return statement
+    fn early_return(x: Int) -> Int {
+        if x < 0 {
+            return 0;
+        }
+        x * 2
+    }
+    println(f"return: {early_return(-5)}, {early_return(10)}");
+
+    // Break and continue
+    let mut sum = 0;
+    for i in 0..10 {
+        if i == 3 { continue; }
+        if i == 7 { break; }
+        sum += i;
+    }
+    println(f"break/continue sum: {sum}");
+
+    // Empty statement
+    ;
+    ;;
+    println("empty statements passed");
+
+    // Item statement (local function)
+    fn local_fn(x: Int) -> Int { x * 3 }
+    println(f"local fn: {local_fn(5)}");
+}
+
+/// Declaration semantics
+fn test_declaration_semantics() {
+    println("\n=== Declaration Semantics ===");
+
+    // Const declaration
+    const PI: Float = 3.14159265358979;
+    const MAX_SIZE: Int = 1024;
+    println(f"const: PI={PI}, MAX={MAX_SIZE}");
+
+    // Static declaration
+    static COUNTER: Int = 0;
+    println(f"static: {COUNTER}");
+
+    // Struct declaration
+    type Person is {
+        name: Text,
+        age: Int,
+    };
+    let person = Person { name: "Alice", age: 30 };
+    println(f"struct: {person.name}, {person.age}");
+
+    // Enum declaration
+    type Status is Active | Inactive | Pending { since: Int };
+    let status = Status.Pending { since: 2024 };
+    match status {
+        Status.Active => println("active"),
+        Status.Inactive => println("inactive"),
+        Status.Pending { since } => println(f"pending since {since}"),
+    }
+
+    // Type alias declaration
+    type Id = Int;
+    let id: Id = 12345;
+    println(f"type alias: {id}");
+
+    // Implement declaration
+    implement Person {
+        fn greet(&self) -> Text {
+            f"Hello, I'm {self.name}"
+        }
+    }
+    println(f"impl: {person.greet()}");
+}
+
+/// Pattern matching semantics
+fn test_pattern_semantics() {
+    println("\n=== Pattern Semantics ===");
+
+    // Literal patterns
+    let x = 42;
+    match x {
+        0 => println("zero"),
+        42 => println("forty-two"),
+        _ => println("other"),
+    }
+
+    // Identifier patterns
+    match 100 {
+        n => println(f"identifier pattern: {n}"),
+    }
+
+    // Wildcard pattern
+    match (1, 2, 3) {
+        (a, _, c) => println(f"wildcard: {a}, _, {c}"),
+    }
+
+    // Rest pattern
+    match [1, 2, 3, 4, 5] {
+        [first, ..rest] => println(f"rest: first={first}, rest={rest}"),
+    }
+
+    // Or pattern
+    match 3 {
+        1 | 2 | 3 => println("one, two, or three"),
+        _ => println("other"),
+    }
+
+    // Range pattern
+    match 'c' {
+        'a'..='z' => println("lowercase letter"),
+        'A'..='Z' => println("uppercase letter"),
+        _ => println("other"),
+    }
+
+    // Struct pattern
+    type Point is { x: Int, y: Int };
+    let p = Point { x: 5, y: 10 };
+    match p {
+        Point { x: 0, y: 0 } => println("origin"),
+        Point { x, y } => println(f"point: ({x}, {y})"),
+    }
+
+    // Enum pattern
+    type Maybe<T> is Some(T) | None;
+    let opt = Option.Some(42);
+    match opt {
+        Option.Some(v) => println(f"some: {v}"),
+        Option.None => println("none"),
+    }
+
+    // Guard pattern
+    match 15 {
+        n if n < 10 => println("small"),
+        n if n < 20 => println("medium"),
+        _ => println("large"),
+    }
+
+    // @ binding
+    match 42 {
+        n @ 40..=50 => println(f"in range, value: {n}"),
+        _ => println("out of range"),
+    }
+
+    // Ref pattern
+    let value = 100;
+    match value {
+        ref r => println(f"ref pattern: {*r}"),
+    }
+}
+
+/// Generic semantics
+fn test_generic_semantics() {
+    println("\n=== Generic Semantics ===");
+
+    // Generic function
+    fn identity<T>(x: T) -> T { x }
+    println(f"generic fn: {identity(42)}, {identity("hello")}");
+
+    // Generic struct
+    type Pair<A, B> is { first: A, second: B };
+    let pair = Pair { first: 1, second: "one" };
+    println(f"generic struct: ({pair.first}, {pair.second})");
+
+    // Generic enum
+    type Either<L, R> is Left(L) | Right(R);
+    let left: Either<Int, Text> = Either.Left(42);
+    let right: Either<Int, Text> = Either.Right("hello");
+    println(f"generic enum: left={left}, right={right}");
+
+    // Generic implement
+    implement<A, B> Pair<A, B> {
+        fn swap(self) -> Pair<B, A> {
+            Pair { first: self.second, second: self.first }
+        }
+    }
+    let swapped = pair.swap();
+    println(f"generic impl: ({swapped.first}, {swapped.second})");
+
+    // Type bounds
+    fn max<T: Ord>(a: T, b: T) -> T {
+        if a > b { a } else { b }
+    }
+    println(f"bounded: {max(3, 7)}, {max("apple", "banana")}");
+
+    // Where clause
+    fn process<T, U>(x: T, y: U) -> Text
+    where
+        T: Display,
+        U: Display,
+    {
+        f"{x} and {y}"
+    }
+    println(f"where clause: {process(42, "hello")}");
+
+    // Associated types
+    type Container is protocol {
+        type Item;
+        fn get(&self) -> &Self.Item;
+    };
+
+    implement Container for List<Int> {
+        type Item = Int;
+        fn get(&self) -> &Int { &self[0] }
+    }
+}
+
+/// Protocol semantics
+fn test_trait_semantics() {
+    println("\n=== Protocol Semantics ===");
+
+    // Protocol definition
+    type Greet is protocol {
+        fn greet(&self) -> Text;
+        fn farewell(&self) -> Text {
+            "Goodbye!"
+        }
+    };
+
+    type Person is { name: Text };
+    implement Greet for Person {
+        fn greet(&self) -> Text {
+            f"Hello, I'm {self.name}"
+        }
+    }
+
+    let person = Person { name: "Alice" };
+    println(f"protocol: {person.greet()}");
+    println(f"default method: {person.farewell()}");
+
+    // Protocol bounds
+    fn greet_all<T: Greet>(items: &[T]) {
+        for item in items {
+            println(item.greet());
+        }
+    }
+
+    // Protocol object
+    let greeter: &Greet = &person;
+    println(f"protocol object: {greeter.greet()}");
+
+    // Multiple protocols
+    type Speak is protocol { fn speak(&self) -> Text; };
+    implement Speak for Person {
+        fn speak(&self) -> Text { f"{self.name} speaks" }
+    }
+
+    fn both<T: Greet + Speak>(x: &T) {
+        println(f"both: {x.greet()}, {x.speak()}");
+    }
+    both(&person);
+
+    // Operator protocols
+    type Vector is { x: Int, y: Int };
+    implement Add for Vector {
+        type Output = Vector;
+        fn add(self, other: Vector) -> Vector {
+            Vector { x: self.x + other.x, y: self.y + other.y }
+        }
+    }
+    let v1 = Vector { x: 1, y: 2 };
+    let v2 = Vector { x: 3, y: 4 };
+    let v3 = v1 + v2;
+    println(f"operator protocol: ({v3.x}, {v3.y})");
+}
+
+/// Module semantics
+fn test_module_semantics() {
+    println("\n=== Module Semantics ===");
+
+    // Inline module
+    module inner {
+        pub fn public_fn() -> Text { "public" }
+        fn private_fn() -> Text { "private" }
+
+        pub mod nested {
+            pub fn nested_fn() -> Text { "nested" }
+        }
+    }
+
+    println(f"module fn: {inner.public_fn()}");
+    println(f"nested module: {inner.nested.nested_fn()}");
+
+    // Use declaration
+    use inner.nested.nested_fn;
+    println(f"use decl: {nested_fn()}");
+
+    // Visibility
+    module visibility_test {
+        pub type Public is { pub field: Int };
+        type Private is { field: Int };
+
+        pub fn create() -> Public {
+            Public { field: 42 }
+        }
+    }
+
+    let obj = visibility_test.create();
+    println(f"visibility: {obj.field}");
+
+    // Re-export
+    module outer_mod {
+        module inner_mod {
+            pub fn inner_fn() -> Int { 100 }
+        }
+        pub use inner_mod.inner_fn;
+    }
+
+    println(f"re-export: {outer_mod.inner_fn()}");
+}

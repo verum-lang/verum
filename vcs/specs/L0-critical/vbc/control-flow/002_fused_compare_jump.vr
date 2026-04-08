@@ -1,0 +1,231 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, control-flow, fused, jmp_eq, jmp_ne, jmp_lt, jmp_le, jmp_gt, jmp_ge
+// @timeout: 5000
+// @expect: pass
+//
+// Test: JMP_EQ, JMP_NE, JMP_LT, JMP_LE, JMP_GT, JMP_GE
+// Verifies fused compare-and-jump operations for optimization
+
+fn test_jmp_eq() {
+    fn check_eq(a: Int, b: Int) -> Bool {
+        if a == b { true } else { false }
+    }
+
+    assert(check_eq(0, 0));
+    assert(check_eq(42, 42));
+    assert(!check_eq(1, 2));
+    assert(!check_eq(-1, 1));
+}
+
+fn test_jmp_ne() {
+    fn check_ne(a: Int, b: Int) -> Bool {
+        if a != b { true } else { false }
+    }
+
+    assert(check_ne(1, 2));
+    assert(check_ne(-1, 1));
+    assert(!check_ne(0, 0));
+    assert(!check_ne(42, 42));
+}
+
+fn test_jmp_lt() {
+    fn check_lt(a: Int, b: Int) -> Bool {
+        if a < b { true } else { false }
+    }
+
+    assert(check_lt(0, 1));
+    assert(check_lt(-1, 0));
+    assert(check_lt(-100, 100));
+    assert(!check_lt(1, 0));
+    assert(!check_lt(0, 0));
+    assert(!check_lt(1, 1));
+}
+
+fn test_jmp_le() {
+    fn check_le(a: Int, b: Int) -> Bool {
+        if a <= b { true } else { false }
+    }
+
+    assert(check_le(0, 1));
+    assert(check_le(0, 0));
+    assert(check_le(-1, -1));
+    assert(!check_le(1, 0));
+    assert(!check_le(100, -100));
+}
+
+fn test_jmp_gt() {
+    fn check_gt(a: Int, b: Int) -> Bool {
+        if a > b { true } else { false }
+    }
+
+    assert(check_gt(1, 0));
+    assert(check_gt(0, -1));
+    assert(check_gt(100, -100));
+    assert(!check_gt(0, 1));
+    assert(!check_gt(0, 0));
+}
+
+fn test_jmp_ge() {
+    fn check_ge(a: Int, b: Int) -> Bool {
+        if a >= b { true } else { false }
+    }
+
+    assert(check_ge(1, 0));
+    assert(check_ge(0, 0));
+    assert(check_ge(-1, -1));
+    assert(!check_ge(0, 1));
+    assert(!check_ge(-100, 100));
+}
+
+fn test_chained_comparisons() {
+    // These should use fused compare-jump instructions
+    fn in_range(x: Int, lo: Int, hi: Int) -> Bool {
+        if x >= lo {
+            if x <= hi {
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
+    assert(in_range(5, 0, 10));
+    assert(in_range(0, 0, 10));
+    assert(in_range(10, 0, 10));
+    assert(!in_range(-1, 0, 10));
+    assert(!in_range(11, 0, 10));
+}
+
+fn test_comparison_in_loop_condition() {
+    // Loop conditions should use fused compare-jump
+    let mut i: Int = 0;
+    let mut sum: Int = 0;
+
+    // JMP_LT pattern
+    while i < 100 {
+        sum = sum + 1;
+        i = i + 1;
+    }
+    assert_eq(sum, 100);
+
+    // JMP_LE pattern
+    i = 0;
+    sum = 0;
+    while i <= 99 {
+        sum = sum + 1;
+        i = i + 1;
+    }
+    assert_eq(sum, 100);
+
+    // JMP_GT pattern
+    i = 100;
+    sum = 0;
+    while i > 0 {
+        sum = sum + 1;
+        i = i - 1;
+    }
+    assert_eq(sum, 100);
+
+    // JMP_GE pattern
+    i = 100;
+    sum = 0;
+    while i >= 1 {
+        sum = sum + 1;
+        i = i - 1;
+    }
+    assert_eq(sum, 100);
+}
+
+fn test_comparison_with_zero() {
+    // Comparisons with zero may have special optimizations
+    fn sign(x: Int) -> Int {
+        if x > 0 { 1 }
+        else if x < 0 { -1 }
+        else { 0 }
+    }
+
+    assert_eq(sign(100), 1);
+    assert_eq(sign(-100), -1);
+    assert_eq(sign(0), 0);
+}
+
+fn test_comparison_chaining_performance() {
+    // Multiple comparisons that could be fused
+    fn classify_age(age: Int) -> Text {
+        if age < 0 {
+            "invalid"
+        } else if age < 13 {
+            "child"
+        } else if age < 20 {
+            "teen"
+        } else if age < 65 {
+            "adult"
+        } else {
+            "senior"
+        }
+    }
+
+    assert_eq(classify_age(-5), "invalid");
+    assert_eq(classify_age(5), "child");
+    assert_eq(classify_age(15), "teen");
+    assert_eq(classify_age(30), "adult");
+    assert_eq(classify_age(70), "senior");
+}
+
+fn test_float_fused_compare() {
+    // Float comparisons should also benefit from fusing
+    fn compare_float(a: Float, b: Float) -> Int {
+        if a < b { -1 }
+        else if a > b { 1 }
+        else { 0 }
+    }
+
+    assert_eq(compare_float(1.0, 2.0), -1);
+    assert_eq(compare_float(2.0, 1.0), 1);
+    assert_eq(compare_float(1.0, 1.0), 0);
+}
+
+fn test_mixed_type_boundaries() {
+    // Test at type boundaries
+    let max_48: Int = 140737488355327;
+    let min_48: Int = -140737488355328;
+
+    // These should use fused compare-jump correctly
+    if max_48 > 0 {
+        assert(true);
+    } else {
+        assert(false);
+    }
+
+    if min_48 < 0 {
+        assert(true);
+    } else {
+        assert(false);
+    }
+
+    if max_48 >= min_48 {
+        assert(true);
+    } else {
+        assert(false);
+    }
+}
+
+fn main() {
+    test_jmp_eq();
+    test_jmp_ne();
+    test_jmp_lt();
+    test_jmp_le();
+    test_jmp_gt();
+    test_jmp_ge();
+    test_chained_comparisons();
+    test_comparison_in_loop_condition();
+    test_comparison_with_zero();
+    test_comparison_chaining_performance();
+    test_float_fused_compare();
+    test_mixed_type_boundaries();
+    print("002_fused_compare_jump: PASSED");
+}

@@ -1,0 +1,53 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, syntax, mixed
+// @description: Test mixed FFI declaration syntax (single-function and block)
+
+// Single-function syntax
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern fn ffi_add_i32(a: Int, b: Int) -> Int;
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern fn ffi_add_i64(a: Int, b: Int) -> Int;
+
+// Block syntax for multiple functions
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_mul_i32(a: Int, b: Int) -> Int;
+    fn ffi_div_i32(a: Int, b: Int) -> Int;
+}
+
+// More single-function declarations
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern fn ffi_abs_i64(x: Int) -> Int;
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern fn ffi_sqrt_f64(x: Float) -> Float;
+
+fn main() {
+    // Test single-function declarations
+    let sum = ffi_add_i32(25, 17);
+    assert_eq(sum, 42);
+
+    let sum64 = ffi_add_i64(30, 12);
+    assert_eq(sum64, 42);
+
+    // Test block-declared functions
+    let prod = ffi_mul_i32(6, 7);
+    assert_eq(prod, 42);
+
+    let quot = ffi_div_i32(84, 2);
+    assert_eq(quot, 42);
+
+    // Test more single-function declarations
+    let abs_val = ffi_abs_i64(-42);
+    assert_eq(abs_val, 42);
+
+    let sqrt_val = ffi_sqrt_f64(16.0);
+    assert(sqrt_val > 3.99 && sqrt_val < 4.01);
+
+    print("Mixed FFI syntax tests passed!\n");
+}

@@ -1,0 +1,699 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, linalg
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: linear algebra operations through VBC interpreter.
+// Matrix multiply, matrix-vector, dot product, reductions, softmax
+// approximation, and layer normalization approximation. All using
+// flat struct arrays with pure scalar arithmetic.
+
+// ============================================================================
+// Utility helpers
+// ============================================================================
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn int_min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn int_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// ============================================================================
+// 2x2 matrix (Arr4 = row-major: [a00 a01 a10 a11])
+// ============================================================================
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+fn arr4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+// 2x2 matrix multiply: C = A * B (row-major)
+// A[r,c] = arr4[r*2+c]
+fn mat2x2_mul(a: Arr4, b: Arr4) -> Arr4 {
+    Arr4 {
+        e0: a.e0 * b.e0 + a.e1 * b.e2,
+        e1: a.e0 * b.e1 + a.e1 * b.e3,
+        e2: a.e2 * b.e0 + a.e3 * b.e2,
+        e3: a.e2 * b.e1 + a.e3 * b.e3
+    }
+}
+
+fn mat2x2_add(a: Arr4, b: Arr4) -> Arr4 {
+    Arr4 {
+        e0: a.e0 + b.e0,
+        e1: a.e1 + b.e1,
+        e2: a.e2 + b.e2,
+        e3: a.e3 + b.e3
+    }
+}
+
+fn mat2x2_transpose(a: Arr4) -> Arr4 {
+    Arr4 { e0: a.e0, e1: a.e2, e2: a.e1, e3: a.e3 }
+}
+
+fn mat2x2_det(a: Arr4) -> Int {
+    a.e0 * a.e3 - a.e1 * a.e2
+}
+
+fn mat2x2_trace(a: Arr4) -> Int {
+    a.e0 + a.e3
+}
+
+// 2x2 matrix-vector multiply: result = M * v
+// v is stored as Arr4 with only e0, e1 used
+fn mat2x2_vec_mul(m: Arr4, v0: Int, v1: Int) -> Arr4 {
+    Arr4 {
+        e0: m.e0 * v0 + m.e1 * v1,
+        e1: m.e2 * v0 + m.e3 * v1,
+        e2: 0,
+        e3: 0
+    }
+}
+
+// ============================================================================
+// 3x3 matrix (Arr9 = row-major)
+// ============================================================================
+
+type Arr9 is {
+    e0: Int, e1: Int, e2: Int,
+    e3: Int, e4: Int, e5: Int,
+    e6: Int, e7: Int, e8: Int
+};
+
+fn arr9_get(a: Arr9, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else { a.e8 }
+}
+
+fn arr9_set(a: Arr9, i: Int, v: Int) -> Arr9 {
+    Arr9 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }
+    }
+}
+
+fn arr9_zeros() -> Arr9 {
+    Arr9 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0 }
+}
+
+// 3x3 matrix multiply: C = A * B (row-major)
+fn mat3x3_mul(a: Arr9, b: Arr9) -> Arr9 {
+    Arr9 {
+        e0: a.e0*b.e0 + a.e1*b.e3 + a.e2*b.e6,
+        e1: a.e0*b.e1 + a.e1*b.e4 + a.e2*b.e7,
+        e2: a.e0*b.e2 + a.e1*b.e5 + a.e2*b.e8,
+        e3: a.e3*b.e0 + a.e4*b.e3 + a.e5*b.e6,
+        e4: a.e3*b.e1 + a.e4*b.e4 + a.e5*b.e7,
+        e5: a.e3*b.e2 + a.e4*b.e5 + a.e5*b.e8,
+        e6: a.e6*b.e0 + a.e7*b.e3 + a.e8*b.e6,
+        e7: a.e6*b.e1 + a.e7*b.e4 + a.e8*b.e7,
+        e8: a.e6*b.e2 + a.e7*b.e5 + a.e8*b.e8
+    }
+}
+
+fn mat3x3_transpose(a: Arr9) -> Arr9 {
+    Arr9 {
+        e0: a.e0, e1: a.e3, e2: a.e6,
+        e3: a.e1, e4: a.e4, e5: a.e7,
+        e6: a.e2, e7: a.e5, e8: a.e8
+    }
+}
+
+fn mat3x3_det(a: Arr9) -> Int {
+    a.e0 * (a.e4 * a.e8 - a.e5 * a.e7)
+    - a.e1 * (a.e3 * a.e8 - a.e5 * a.e6)
+    + a.e2 * (a.e3 * a.e7 - a.e4 * a.e6)
+}
+
+fn mat3x3_trace(a: Arr9) -> Int {
+    a.e0 + a.e4 + a.e8
+}
+
+// 3x3 matrix-vector multiply: result[i] = sum_j A[i,j] * v[j]
+// v stored in Arr9 with only e0, e1, e2 used
+fn mat3x3_vec_mul(m: Arr9, v0: Int, v1: Int, v2: Int) -> Arr9 {
+    Arr9 {
+        e0: m.e0 * v0 + m.e1 * v1 + m.e2 * v2,
+        e1: m.e3 * v0 + m.e4 * v1 + m.e5 * v2,
+        e2: m.e6 * v0 + m.e7 * v1 + m.e8 * v2,
+        e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0
+    }
+}
+
+// ============================================================================
+// 8-element flat array for reductions
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// Dot product
+// ============================================================================
+
+fn dot4(a: Arr4, b: Arr4) -> Int {
+    a.e0 * b.e0 + a.e1 * b.e1 + a.e2 * b.e2 + a.e3 * b.e3
+}
+
+fn dot8(a: Arr8, b: Arr8, len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len {
+        s = s + arr8_get(a, i) * arr8_get(b, i);
+        i = i + 1;
+    }
+    s
+}
+
+// ============================================================================
+// Reduction operations
+// ============================================================================
+
+fn reduce_sum8(a: Arr8, len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len {
+        s = s + arr8_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn reduce_max8(a: Arr8, len: Int) -> Int {
+    let mut mx = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        mx = int_max(mx, arr8_get(a, i));
+        i = i + 1;
+    }
+    mx
+}
+
+fn reduce_min8(a: Arr8, len: Int) -> Int {
+    let mut mn = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        mn = int_min(mn, arr8_get(a, i));
+        i = i + 1;
+    }
+    mn
+}
+
+fn reduce_product8(a: Arr8, len: Int) -> Int {
+    let mut p = 1;
+    let mut i = 0;
+    while i < len {
+        p = p * arr8_get(a, i);
+        i = i + 1;
+    }
+    p
+}
+
+// ============================================================================
+// Softmax approximation (integer, scaled by 10000)
+// exp_approx(x) = max(1, 1000 + x * 100)
+// ============================================================================
+
+fn exp_approx(x: Int) -> Int {
+    let val = 1000 + x * 100;
+    if val < 1 { 1 } else { val }
+}
+
+fn softmax_arr8(input: Arr8, len: Int) -> Arr8 {
+    // Step 1: find max for numerical stability
+    let mx = reduce_max8(input, len);
+
+    // Step 2: compute shifted exp and total
+    let mut exp_total = 0;
+    let mut i = 0;
+    while i < len {
+        exp_total = exp_total + exp_approx(arr8_get(input, i) - mx);
+        i = i + 1;
+    }
+
+    // Step 3: normalize to sum = 10000
+    let mut out = arr8_zeros();
+    i = 0;
+    while i < len {
+        let exp_val = exp_approx(arr8_get(input, i) - mx);
+        out = arr8_set(out, i, exp_val * 10000 / exp_total);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Layer normalization approximation (integer arithmetic)
+// Normalize: (x - mean) * scale / sqrt(var + eps)
+// We use integer approximation: scale by 1000, sqrt via Newton's method
+// ============================================================================
+
+fn int_sqrt(x: Int) -> Int {
+    if x <= 0 { 0 }
+    else if x == 1 { 1 }
+    else {
+        let mut guess = x / 2;
+        let mut prev = 0;
+        let mut iters = 0;
+        while iters < 20 {
+            if guess != prev {
+                prev = guess;
+                guess = (guess + x / guess) / 2;
+            }
+            iters = iters + 1;
+        }
+        guess
+    }
+}
+
+fn layer_norm8(input: Arr8, len: Int, scale: Int) -> Arr8 {
+    // Step 1: compute mean (scaled by 1000)
+    let sum = reduce_sum8(input, len);
+    let mean_x1000 = sum * 1000 / len;
+
+    // Step 2: compute variance (scaled by 1000)
+    let mut var_sum = 0;
+    let mut i = 0;
+    while i < len {
+        let diff = arr8_get(input, i) * 1000 - mean_x1000;
+        var_sum = var_sum + (diff / 100) * (diff / 100);
+        i = i + 1;
+    }
+    let variance = var_sum / len;
+
+    // Step 3: compute sqrt(variance + 1) (epsilon = 1)
+    let std_dev = int_sqrt(variance + 1);
+
+    // Step 4: normalize each element
+    let mut out = arr8_zeros();
+    i = 0;
+    while i < len {
+        let centered = arr8_get(input, i) * 1000 - mean_x1000;
+        let normed = centered * scale / (std_dev * 100);
+        out = arr8_set(out, i, normed);
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Tests: 2x2 matrix multiply
+// ============================================================================
+
+fn test_mat2x2_mul_identity() {
+    let id = Arr4 { e0: 1, e1: 0, e2: 0, e3: 1 };
+    let m = Arr4 { e0: 3, e1: 7, e2: 2, e3: 5 };
+    let p = mat2x2_mul(id, m);
+    assert_eq(p.e0, 3);
+    assert_eq(p.e1, 7);
+    assert_eq(p.e2, 2);
+    assert_eq(p.e3, 5);
+
+    let q = mat2x2_mul(m, id);
+    assert_eq(q.e0, 3);
+    assert_eq(q.e1, 7);
+    assert_eq(q.e2, 2);
+    assert_eq(q.e3, 5);
+}
+
+fn test_mat2x2_mul_specific() {
+    // [1 2; 3 4] * [5 6; 7 8] = [19 22; 43 50]
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let b = Arr4 { e0: 5, e1: 6, e2: 7, e3: 8 };
+    let c = mat2x2_mul(a, b);
+    assert_eq(c.e0, 19);
+    assert_eq(c.e1, 22);
+    assert_eq(c.e2, 43);
+    assert_eq(c.e3, 50);
+}
+
+fn test_mat2x2_det_and_trace() {
+    let m = Arr4 { e0: 4, e1: 3, e2: 6, e3: 5 };
+    // det = 4*5 - 3*6 = 20 - 18 = 2
+    assert_eq(mat2x2_det(m), 2);
+    // trace = 4 + 5 = 9
+    assert_eq(mat2x2_trace(m), 9);
+
+    // Singular matrix
+    let s = Arr4 { e0: 2, e1: 4, e2: 1, e3: 2 };
+    assert_eq(mat2x2_det(s), 0);
+}
+
+fn test_mat2x2_transpose() {
+    let m = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let t = mat2x2_transpose(m);
+    assert_eq(t.e0, 1);
+    assert_eq(t.e1, 3);
+    assert_eq(t.e2, 2);
+    assert_eq(t.e3, 4);
+
+    // Double transpose = original
+    let tt = mat2x2_transpose(t);
+    assert_eq(tt.e0, 1);
+    assert_eq(tt.e1, 2);
+    assert_eq(tt.e2, 3);
+    assert_eq(tt.e3, 4);
+}
+
+// ============================================================================
+// Tests: 3x3 matrix multiply
+// ============================================================================
+
+fn test_mat3x3_mul_identity() {
+    let id = Arr9 {
+        e0: 1, e1: 0, e2: 0,
+        e3: 0, e4: 1, e5: 0,
+        e6: 0, e7: 0, e8: 1
+    };
+    let m = Arr9 {
+        e0: 2, e1: 3, e2: 5,
+        e3: 7, e4: 11, e5: 13,
+        e6: 17, e7: 19, e8: 23
+    };
+    let p = mat3x3_mul(id, m);
+    assert_eq(p.e0, 2); assert_eq(p.e1, 3); assert_eq(p.e2, 5);
+    assert_eq(p.e3, 7); assert_eq(p.e4, 11); assert_eq(p.e5, 13);
+    assert_eq(p.e6, 17); assert_eq(p.e7, 19); assert_eq(p.e8, 23);
+}
+
+fn test_mat3x3_mul_specific() {
+    // [1 2 3; 4 5 6; 7 8 9] * [9 8 7; 6 5 4; 3 2 1]
+    let a = Arr9 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8, e8: 9 };
+    let b = Arr9 { e0: 9, e1: 8, e2: 7, e3: 6, e4: 5, e5: 4, e6: 3, e7: 2, e8: 1 };
+    let c = mat3x3_mul(a, b);
+    // Row 0: [1*9+2*6+3*3, 1*8+2*5+3*2, 1*7+2*4+3*1] = [30, 24, 18]
+    assert_eq(c.e0, 30); assert_eq(c.e1, 24); assert_eq(c.e2, 18);
+    // Row 1: [4*9+5*6+6*3, 4*8+5*5+6*2, 4*7+5*4+6*1] = [84, 69, 54]
+    assert_eq(c.e3, 84); assert_eq(c.e4, 69); assert_eq(c.e5, 54);
+    // Row 2: [7*9+8*6+9*3, 7*8+8*5+9*2, 7*7+8*4+9*1] = [138, 114, 90]
+    assert_eq(c.e6, 138); assert_eq(c.e7, 114); assert_eq(c.e8, 90);
+}
+
+fn test_mat3x3_det_and_trace() {
+    // det([2 3 5; 7 11 13; 17 19 23]) = -78
+    let m = Arr9 {
+        e0: 2, e1: 3, e2: 5,
+        e3: 7, e4: 11, e5: 13,
+        e6: 17, e7: 19, e8: 23
+    };
+    assert_eq(mat3x3_det(m), -78);
+    assert_eq(mat3x3_trace(m), 36); // 2+11+23
+
+    // Singular matrix
+    let s = Arr9 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8, e8: 9 };
+    assert_eq(mat3x3_det(s), 0);
+}
+
+// ============================================================================
+// Tests: matrix-vector multiply
+// ============================================================================
+
+fn test_mat2x2_vec_mul() {
+    // [2 3; 4 5] * [1; 2] = [2+6, 4+10] = [8, 14]
+    let m = Arr4 { e0: 2, e1: 3, e2: 4, e3: 5 };
+    let r = mat2x2_vec_mul(m, 1, 2);
+    assert_eq(r.e0, 8);
+    assert_eq(r.e1, 14);
+
+    // Identity * [7; 3] = [7; 3]
+    let id = Arr4 { e0: 1, e1: 0, e2: 0, e3: 1 };
+    let r2 = mat2x2_vec_mul(id, 7, 3);
+    assert_eq(r2.e0, 7);
+    assert_eq(r2.e1, 3);
+}
+
+fn test_mat3x3_vec_mul() {
+    // Scale matrix * v
+    let scale = Arr9 {
+        e0: 2, e1: 0, e2: 0,
+        e3: 0, e4: 3, e5: 0,
+        e6: 0, e7: 0, e8: 4
+    };
+    let r = mat3x3_vec_mul(scale, 5, 7, 11);
+    assert_eq(r.e0, 10);  // 2*5
+    assert_eq(r.e1, 21);  // 3*7
+    assert_eq(r.e2, 44);  // 4*11
+
+    // General matrix * v
+    let m = Arr9 {
+        e0: 1, e1: 2, e2: 3,
+        e3: 4, e4: 5, e5: 6,
+        e6: 7, e7: 8, e8: 9
+    };
+    let r2 = mat3x3_vec_mul(m, 1, 0, 0);
+    assert_eq(r2.e0, 1); assert_eq(r2.e1, 4); assert_eq(r2.e2, 7);
+}
+
+// ============================================================================
+// Tests: dot product
+// ============================================================================
+
+fn test_dot_product_4() {
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let b = Arr4 { e0: 5, e1: 6, e2: 7, e3: 8 };
+    // 1*5 + 2*6 + 3*7 + 4*8 = 5+12+21+32 = 70
+    assert_eq(dot4(a, b), 70);
+
+    // Orthogonal-like
+    let c = Arr4 { e0: 1, e1: 0, e2: 0, e3: 0 };
+    let d = Arr4 { e0: 0, e1: 1, e2: 0, e3: 0 };
+    assert_eq(dot4(c, d), 0);
+}
+
+fn test_dot_product_8() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let b = Arr8 { e0: 8, e1: 7, e2: 6, e3: 5, e4: 4, e5: 3, e6: 2, e7: 1 };
+    // 1*8 + 2*7 + 3*6 + 4*5 + 5*4 + 6*3 + 7*2 + 8*1
+    // = 8 + 14 + 18 + 20 + 20 + 18 + 14 + 8 = 120
+    assert_eq(dot8(a, b, 8), 120);
+
+    // Partial dot product (first 4 elements)
+    assert_eq(dot8(a, b, 4), 60);
+}
+
+// ============================================================================
+// Tests: reductions
+// ============================================================================
+
+fn test_reduce_sum() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    assert_eq(reduce_sum8(a, 8), 36);
+    assert_eq(reduce_sum8(a, 4), 10);
+    assert_eq(reduce_sum8(a, 1), 1);
+}
+
+fn test_reduce_max() {
+    let a = Arr8 { e0: 3, e1: 7, e2: 1, e3: 9, e4: 2, e5: 5, e6: 8, e7: 4 };
+    assert_eq(reduce_max8(a, 8), 9);
+    assert_eq(reduce_max8(a, 4), 9);
+    assert_eq(reduce_max8(a, 2), 7);
+}
+
+fn test_reduce_min() {
+    let a = Arr8 { e0: 3, e1: 7, e2: 1, e3: 9, e4: 2, e5: 5, e6: 8, e7: 4 };
+    assert_eq(reduce_min8(a, 8), 1);
+
+    let b = Arr8 { e0: -5, e1: 3, e2: -8, e3: 1, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(reduce_min8(b, 4), -8);
+}
+
+fn test_reduce_product() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(reduce_product8(a, 4), 24); // 4!
+
+    let b = Arr8 { e0: 2, e1: 3, e2: 5, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(reduce_product8(b, 3), 30);
+}
+
+// ============================================================================
+// Tests: softmax approximation
+// ============================================================================
+
+fn test_softmax_uniform() {
+    // All equal -> each gets 10000/4 = 2500
+    let input = Arr8 { e0: 5, e1: 5, e2: 5, e3: 5, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = softmax_arr8(input, 4);
+    assert_eq(arr8_get(out, 0), 2500);
+    assert_eq(arr8_get(out, 1), 2500);
+    assert_eq(arr8_get(out, 2), 2500);
+    assert_eq(arr8_get(out, 3), 2500);
+}
+
+fn test_softmax_peaked() {
+    // One value much larger
+    let input = Arr8 { e0: 0, e1: 0, e2: 9, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = softmax_arr8(input, 4);
+    // Peak at index 2 should be largest
+    let peak = arr8_get(out, 2);
+    let other = arr8_get(out, 0);
+    assert(peak > other);
+    // Sum should be approximately 10000
+    let total = arr8_get(out, 0) + arr8_get(out, 1) + arr8_get(out, 2) + arr8_get(out, 3);
+    assert(total >= 9900);
+    assert(total <= 10100);
+}
+
+fn test_softmax_negative() {
+    // Negative inputs (shifted by max, so largest becomes 0)
+    let input = Arr8 { e0: -5, e1: -3, e2: -1, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = softmax_arr8(input, 4);
+    // Index 3 (value 0) should be largest after softmax
+    assert(arr8_get(out, 3) >= arr8_get(out, 0));
+    assert(arr8_get(out, 3) >= arr8_get(out, 1));
+    assert(arr8_get(out, 3) >= arr8_get(out, 2));
+}
+
+// ============================================================================
+// Tests: layer normalization approximation
+// ============================================================================
+
+fn test_layer_norm_uniform() {
+    // All same values -> normalized to ~0
+    let input = Arr8 { e0: 5, e1: 5, e2: 5, e3: 5, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = layer_norm8(input, 4, 100);
+    // All centered values are 0, so output should be 0
+    assert_eq(arr8_get(out, 0), 0);
+    assert_eq(arr8_get(out, 1), 0);
+    assert_eq(arr8_get(out, 2), 0);
+    assert_eq(arr8_get(out, 3), 0);
+}
+
+fn test_layer_norm_symmetric() {
+    // Symmetric around mean -> output should be symmetric around 0
+    let input = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let out = layer_norm8(input, 4, 100);
+    // Mean = 25, so values are [-15, -5, 5, 15]
+    // Output should have opposite signs at ends
+    assert(arr8_get(out, 0) < 0);
+    assert(arr8_get(out, 3) > 0);
+    // Symmetry: |out[0]| should approximate |out[3]|
+    let diff = int_abs(int_abs(arr8_get(out, 0)) - int_abs(arr8_get(out, 3)));
+    assert(diff <= 2); // allow small rounding error
+}
+
+// ============================================================================
+// Tests: integer square root
+// ============================================================================
+
+fn test_int_sqrt() {
+    assert_eq(int_sqrt(0), 0);
+    assert_eq(int_sqrt(1), 1);
+    assert_eq(int_sqrt(4), 2);
+    assert_eq(int_sqrt(9), 3);
+    assert_eq(int_sqrt(16), 4);
+    assert_eq(int_sqrt(25), 5);
+    assert_eq(int_sqrt(100), 10);
+    assert_eq(int_sqrt(10000), 100);
+    // Non-perfect squares: floor
+    assert_eq(int_sqrt(8), 2);
+    assert_eq(int_sqrt(15), 3);
+    assert_eq(int_sqrt(99), 9);
+}
+
+// ============================================================================
+// Tests: Fibonacci via 2x2 matrix power
+// ============================================================================
+
+fn test_fibonacci_via_matmul() {
+    // [1 1; 1 0]^n gives Fibonacci numbers
+    let fib_mat = Arr4 { e0: 1, e1: 1, e2: 1, e3: 0 };
+    let m2 = mat2x2_mul(fib_mat, fib_mat);
+    // [1 1;1 0]^2 = [2 1; 1 1]
+    assert_eq(m2.e0, 2); assert_eq(m2.e1, 1);
+    assert_eq(m2.e2, 1); assert_eq(m2.e3, 1);
+
+    let m3 = mat2x2_mul(m2, fib_mat);
+    assert_eq(m3.e0, 3); assert_eq(m3.e1, 2);
+
+    let m4 = mat2x2_mul(m3, fib_mat);
+    assert_eq(m4.e0, 5); // Fib(5)
+
+    let m5 = mat2x2_mul(m4, fib_mat);
+    assert_eq(m5.e0, 8); // Fib(6)
+}
+
+fn main() -> Int {
+    test_mat2x2_mul_identity();
+    test_mat2x2_mul_specific();
+    test_mat2x2_det_and_trace();
+    test_mat2x2_transpose();
+    test_mat3x3_mul_identity();
+    test_mat3x3_mul_specific();
+    test_mat3x3_det_and_trace();
+    test_mat2x2_vec_mul();
+    test_mat3x3_vec_mul();
+    test_dot_product_4();
+    test_dot_product_8();
+    test_reduce_sum();
+    test_reduce_max();
+    test_reduce_min();
+    test_reduce_product();
+    test_softmax_uniform();
+    test_softmax_peaked();
+    test_softmax_negative();
+    test_layer_norm_uniform();
+    test_layer_norm_symmetric();
+    test_int_sqrt();
+    test_fibonacci_via_matmul();
+    print("[OK] 036_tensor_intrinsic_linalg");
+    0
+}

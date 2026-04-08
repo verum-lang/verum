@@ -1,0 +1,698 @@
+// =============================================================================
+// btree_protocols_test.vr - Tests for BTreeMap/BTreeSet protocol implementations
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, btree, protocols, IntoIterator, Eq, Extend, Hash, Index, Ord, core
+// @description: Tests for IntoIterator, Eq, Extend, Hash, Index, and Ord on BTreeMap and BTreeSet
+// =============================================================================
+
+mount core.collections.btree.{BTreeMap, BTreeSet};
+mount core.collections.list.List;
+mount core.maybe.{Maybe, Some, None};
+mount core.base.protocols.{Hash, Hasher, DefaultHasher};
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// BTreeMap IntoIterator Tests
+// =============================================================================
+
+@test
+fn test_btreemap_for_loop() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(3, "three");
+    map.insert(1, "one");
+    map.insert(2, "two");
+
+    let mut keys: List<Int> = [];
+    let mut values: List<Text> = [];
+    for pair in map.iter() {
+        keys.push(*pair.0);
+        values.push(pair.1.clone());
+    }
+
+    // BTree yields in sorted key order
+    assert_eq(keys.len(), 3);
+    assert_eq(*keys.get(0).unwrap(), 1);
+    assert_eq(*keys.get(1).unwrap(), 2);
+    assert_eq(*keys.get(2).unwrap(), 3);
+}
+
+@test
+fn test_btreemap_into_iter_empty() {
+    let map: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut count = 0;
+    for pair in map.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_btreemap_into_iter_single() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(42, "answer");
+
+    let mut count = 0;
+    for pair in map.iter() {
+        assert_eq(*pair.0, 42);
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+// =============================================================================
+// BTreeSet IntoIterator Tests
+// =============================================================================
+
+@test
+fn test_btreeset_for_loop() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(5);
+    set.insert(1);
+    set.insert(3);
+
+    let mut items: List<Int> = [];
+    for x in set.iter() {
+        items.push(*x);
+    }
+
+    // BTreeSet yields in sorted order
+    assert_eq(items.len(), 3);
+    assert_eq(*items.get(0).unwrap(), 1);
+    assert_eq(*items.get(1).unwrap(), 3);
+    assert_eq(*items.get(2).unwrap(), 5);
+}
+
+@test
+fn test_btreeset_into_iter_empty() {
+    let set: BTreeSet<Int> = BTreeSet.new();
+    let mut count = 0;
+    for x in set.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// BTreeMap Eq Tests
+// =============================================================================
+
+@test
+fn test_btreemap_eq_empty() {
+    let a: BTreeMap<Int, Text> = BTreeMap.new();
+    let b: BTreeMap<Int, Text> = BTreeMap.new();
+    assert(a == b);
+}
+
+@test
+fn test_btreemap_eq_same_entries() {
+    let mut a: BTreeMap<Int, Text> = BTreeMap.new();
+    a.insert(1, "one");
+    a.insert(2, "two");
+    a.insert(3, "three");
+
+    let mut b: BTreeMap<Int, Text> = BTreeMap.new();
+    b.insert(3, "three");
+    b.insert(1, "one");
+    b.insert(2, "two");
+
+    // Same entries regardless of insertion order
+    assert(a == b);
+}
+
+@test
+fn test_btreemap_neq_different_values() {
+    let mut a: BTreeMap<Int, Text> = BTreeMap.new();
+    a.insert(1, "one");
+    a.insert(2, "two");
+
+    let mut b: BTreeMap<Int, Text> = BTreeMap.new();
+    b.insert(1, "one");
+    b.insert(2, "TWO");
+
+    assert(!(a == b));
+}
+
+@test
+fn test_btreemap_neq_different_keys() {
+    let mut a: BTreeMap<Int, Text> = BTreeMap.new();
+    a.insert(1, "one");
+
+    let mut b: BTreeMap<Int, Text> = BTreeMap.new();
+    b.insert(2, "one");
+
+    assert(!(a == b));
+}
+
+@test
+fn test_btreemap_neq_different_size() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(1, 10);
+
+    assert(!(a == b));
+}
+
+// =============================================================================
+// BTreeSet Eq Tests
+// =============================================================================
+
+@test
+fn test_btreeset_eq_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let b: BTreeSet<Int> = BTreeSet.new();
+    assert(a == b);
+}
+
+@test
+fn test_btreeset_eq_same_elements() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(3);
+    b.insert(1);
+    b.insert(2);
+
+    assert(a == b);
+}
+
+@test
+fn test_btreeset_neq_different_elements() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+    b.insert(3);
+
+    assert(!(a == b));
+}
+
+@test
+fn test_btreeset_neq_different_size() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+
+    assert(!(a == b));
+}
+
+// =============================================================================
+// BTreeMap Extend Tests
+// =============================================================================
+
+@test
+fn test_btreemap_extend() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(1, "one");
+
+    let more: List<(Int, Text)> = [(2, "two"), (3, "three")];
+    map.extend(more.iter().map(|pair| (*pair.0, pair.1.clone())));
+
+    assert_eq(map.len(), 3);
+    assert_eq(map.get(&2), Some(&"two"));
+    assert_eq(map.get(&3), Some(&"three"));
+}
+
+@test
+fn test_btreemap_extend_overwrite() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(1, "old");
+
+    let more: List<(Int, Text)> = [(1, "new")];
+    map.extend(more.iter().map(|pair| (*pair.0, pair.1.clone())));
+
+    assert_eq(map.len(), 1);
+    assert_eq(map.get(&1), Some(&"new"));
+}
+
+// =============================================================================
+// BTreeSet Extend Tests
+// =============================================================================
+
+@test
+fn test_btreeset_extend() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+
+    let items: List<Int> = [2, 3, 4];
+    set.extend(items.iter().map(|x| *x));
+
+    assert_eq(set.len(), 4);
+    assert(set.contains(&3));
+    assert(set.contains(&4));
+}
+
+@test
+fn test_btreeset_extend_duplicates() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+
+    let items: List<Int> = [2, 3];
+    set.extend(items.iter().map(|x| *x));
+
+    assert_eq(set.len(), 3);  // 2 was duplicate
+}
+
+// =============================================================================
+// Comprehensive BTreeMap iteration test
+// =============================================================================
+
+@test
+fn test_btreemap_keys_from_iter() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    for i in 0..10 {
+        map.insert(i, i * i);
+    }
+
+    let keys: List<Int> = map.keys().cloned().collect();
+    assert_eq(keys.len(), 10);
+    // Keys should be in sorted order 0..9
+    for i in 0..10 {
+        assert_eq(*keys.get(i).unwrap(), i);
+    }
+}
+
+@test
+fn test_btreemap_values_sorted() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    map.insert(10, "ten");
+    map.insert(1, "one");
+    map.insert(5, "five");
+
+    let mut values: List<Text> = [];
+    for pair in map.iter() {
+        values.push(pair.1.clone());
+    }
+
+    // Values in key-sorted order
+    assert_eq(values.len(), 3);
+    assert_eq(values.get(0).unwrap(), &"one");
+    assert_eq(values.get(1).unwrap(), &"five");
+    assert_eq(values.get(2).unwrap(), &"ten");
+}
+
+// =============================================================================
+// BTreeMap Hash Tests
+// =============================================================================
+
+@test
+fn test_btreemap_hash_empty() {
+    let a: BTreeMap<Int, Int> = BTreeMap.new();
+    let b: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    // Equal maps must have equal hashes
+    assert_eq(ha.finish(), hb.finish());
+}
+
+@test
+fn test_btreemap_hash_equal_maps() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+    a.insert(3, 30);
+
+    // Insert in different order — BTreeMap is ordered, so iteration order is same
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(3, 30);
+    b.insert(1, 10);
+    b.insert(2, 20);
+
+    assert(a == b);
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert_eq(ha.finish(), hb.finish());
+}
+
+@test
+fn test_btreemap_hash_different_values() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(1, 99);
+
+    // Different values should (likely) produce different hashes
+    assert(!(a == b));
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert(ha.finish() != hb.finish());
+}
+
+@test
+fn test_btreemap_hash_different_keys() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 100);
+
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(2, 100);
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert(ha.finish() != hb.finish());
+}
+
+@test
+fn test_btreemap_hash_different_lengths() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(1, 10);
+    b.insert(2, 20);
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert(ha.finish() != hb.finish());
+}
+
+@test
+fn test_btreemap_hash_deterministic() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(10, 100);
+    map.insert(20, 200);
+    map.insert(30, 300);
+
+    // Same map hashed twice gives same result
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    map.hash(&mut h1);
+    map.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+// =============================================================================
+// BTreeSet Hash Tests
+// =============================================================================
+
+@test
+fn test_btreeset_hash_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let b: BTreeSet<Int> = BTreeSet.new();
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert_eq(ha.finish(), hb.finish());
+}
+
+@test
+fn test_btreeset_hash_equal_sets() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(3);
+    b.insert(1);
+    b.insert(2);
+
+    assert(a == b);
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert_eq(ha.finish(), hb.finish());
+}
+
+@test
+fn test_btreeset_hash_different_elements() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+    b.insert(3);
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert(ha.finish() != hb.finish());
+}
+
+@test
+fn test_btreeset_hash_different_sizes() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+
+    let mut ha = DefaultHasher.new();
+    let mut hb = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    assert(ha.finish() != hb.finish());
+}
+
+@test
+fn test_btreeset_hash_deterministic() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    set.insert(10);
+    set.insert(20);
+    set.insert(30);
+
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    set.hash(&mut h1);
+    set.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+// =============================================================================
+// BTreeMap Index<K> Tests
+// =============================================================================
+
+@test
+fn test_btreemap_index_basic() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+
+    // Bracket indexing with key
+    assert_eq(map[1], 10);
+    assert_eq(map[2], 20);
+    assert_eq(map[3], 30);
+}
+
+@test
+fn test_btreemap_index_single_element() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(42, 100);
+
+    assert_eq(map[42], 100);
+}
+
+@test
+fn test_btreemap_index_after_update() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+    map.insert(1, 99);
+
+    // Index returns the updated value
+    assert_eq(map[1], 99);
+}
+
+@test
+fn test_btreemap_index_large_map() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut i = 0;
+    while i < 50 {
+        let val = i;
+        map.insert(val, val * val);
+        i = i + 1;
+    }
+
+    // Verify indexing at various positions
+    assert_eq(map[0], 0);
+    assert_eq(map[7], 49);
+    assert_eq(map[25], 625);
+    assert_eq(map[49], 2401);
+}
+
+// =============================================================================
+// BTreeMap Ord Tests
+// =============================================================================
+
+@test
+fn test_btreemap_ord_equal() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(2, 20);
+    b.insert(1, 10);
+
+    assert(a.cmp(&b) is Ordering.Equal);
+}
+
+@test
+fn test_btreemap_ord_less_by_key() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(2, 10);
+
+    // a has smaller first key
+    assert(a.cmp(&b) is Ordering.Less);
+}
+
+@test
+fn test_btreemap_ord_less_by_value() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(1, 20);
+
+    // Same keys, a has smaller value
+    assert(a.cmp(&b) is Ordering.Less);
+}
+
+@test
+fn test_btreemap_ord_less_by_length() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(1, 10);
+    b.insert(2, 20);
+
+    // Same prefix, a is shorter
+    assert(a.cmp(&b) is Ordering.Less);
+}
+
+@test
+fn test_btreemap_ord_greater_by_length() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(1, 10);
+
+    // Same prefix, a is longer
+    assert(a.cmp(&b) is Ordering.Greater);
+}
+
+@test
+fn test_btreemap_ord_empty_maps() {
+    let a: BTreeMap<Int, Int> = BTreeMap.new();
+    let b: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(a.cmp(&b) is Ordering.Equal);
+}
+
+@test
+fn test_btreemap_ord_empty_vs_nonempty() {
+    let a: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(1, 10);
+
+    assert(a.cmp(&b) is Ordering.Less);
+    assert(b.cmp(&a) is Ordering.Greater);
+}
+
+// =============================================================================
+// BTreeSet Ord Tests
+// =============================================================================
+
+@test
+fn test_btreeset_ord_equal() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(3);
+    b.insert(1);
+    b.insert(2);
+
+    assert(a.cmp(&b) is Ordering.Equal);
+}
+
+@test
+fn test_btreeset_ord_less_by_element() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+    b.insert(3);
+
+    // Same first element, a has smaller second element
+    assert(a.cmp(&b) is Ordering.Less);
+}
+
+@test
+fn test_btreeset_ord_less_by_length() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+
+    // Same prefix, a is shorter
+    assert(a.cmp(&b) is Ordering.Less);
+}
+
+@test
+fn test_btreeset_ord_greater() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(5);
+
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(3);
+
+    assert(a.cmp(&b) is Ordering.Greater);
+}
+
+@test
+fn test_btreeset_ord_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let b: BTreeSet<Int> = BTreeSet.new();
+    assert(a.cmp(&b) is Ordering.Equal);
+}
+
+@test
+fn test_btreeset_ord_empty_vs_nonempty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(1);
+
+    assert(a.cmp(&b) is Ordering.Less);
+    assert(b.cmp(&a) is Ordering.Greater);
+}

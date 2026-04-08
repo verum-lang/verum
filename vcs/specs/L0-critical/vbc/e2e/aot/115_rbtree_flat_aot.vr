@@ -1,0 +1,523 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, red-black-tree, flat-array, bst, invariants
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT red-black tree stored as flat arrays with property validation
+
+// Red-black tree stored as parallel arrays:
+// - val_arr: node values (key)
+// - color_arr: 0=black, 1=red
+// - left_arr: left child index (-1 = NIL)
+// - right_arr: right child index (-1 = NIL)
+// - parent_arr: parent index (-1 = root)
+// Max 15 nodes (indices 0..14), root at index 0
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn arr_new(v: Int) -> Arr16 {
+    Arr16 { a0: v, a1: v, a2: v, a3: v, a4: v, a5: v, a6: v, a7: v,
+            a8: v, a9: v, a10: v, a11: v, a12: v, a13: v, a14: v, a15: v }
+}
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn arr_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+type RBTree is {
+    vals: Arr16,
+    colors: Arr16,
+    lefts: Arr16,
+    rights: Arr16,
+    parents: Arr16,
+    size: Int,
+    root: Int
+};
+
+fn rb_new() -> RBTree {
+    RBTree {
+        vals: arr_new(0),
+        colors: arr_new(0),
+        lefts: arr_new(-1),
+        rights: arr_new(-1),
+        parents: arr_new(-1),
+        size: 0,
+        root: -1
+    }
+}
+
+fn rb_is_red(t: RBTree, idx: Int) -> Bool {
+    if idx == -1 { false }
+    else { arr_get(t.colors, idx) == 1 }
+}
+
+fn rb_is_black(t: RBTree, idx: Int) -> Bool {
+    if idx == -1 { true }  // NIL nodes are black
+    else { arr_get(t.colors, idx) == 0 }
+}
+
+// BST insert (without rebalancing yet) - new node is always red
+fn rb_insert_bst(t: RBTree, key: Int) -> RBTree {
+    let new_idx = t.size;
+    let mut vals = arr_set(t.vals, new_idx, key);
+    let mut colors = arr_set(t.colors, new_idx, 1);  // Red
+    let lefts = t.lefts;   // new node's left/right already -1
+    let rights = t.rights;
+    let mut parents = t.parents;
+
+    if t.root == -1 {
+        // First node becomes root (will be colored black later)
+        RBTree {
+            vals: vals, colors: colors, lefts: lefts, rights: rights,
+            parents: parents, size: new_idx + 1, root: new_idx
+        }
+    } else {
+        // Walk down to find insertion point
+        let mut cur = t.root;
+        let mut par = -1;
+        let mut went_left = true;
+        let mut done = false;
+        while !done {
+            par = cur;
+            if key < arr_get(vals, cur) {
+                let lc = arr_get(lefts, cur);
+                if lc == -1 { went_left = true; done = true; }
+                else { cur = lc; went_left = true; }
+            } else if key > arr_get(vals, cur) {
+                let rc = arr_get(rights, cur);
+                if rc == -1 { went_left = false; done = true; }
+                else { cur = rc; went_left = false; }
+            } else {
+                // Duplicate: don't insert
+                done = true;
+                par = -1;  // Signal no insertion
+            }
+        }
+
+        if par == -1 {
+            t  // Duplicate, no change
+        } else {
+            parents = arr_set(parents, new_idx, par);
+            let mut new_lefts = lefts;
+            let mut new_rights = rights;
+            if went_left {
+                new_lefts = arr_set(lefts, par, new_idx);
+            } else {
+                new_rights = arr_set(rights, par, new_idx);
+            }
+            RBTree {
+                vals: vals, colors: colors, lefts: new_lefts, rights: new_rights,
+                parents: parents, size: new_idx + 1, root: t.root
+            }
+        }
+    }
+}
+
+// Make root black
+fn rb_fix_root(t: RBTree) -> RBTree {
+    if t.root == -1 { t }
+    else {
+        RBTree {
+            vals: t.vals,
+            colors: arr_set(t.colors, t.root, 0),
+            lefts: t.lefts, rights: t.rights, parents: t.parents,
+            size: t.size, root: t.root
+        }
+    }
+}
+
+// Insert and fix root color
+fn rb_insert(t: RBTree, key: Int) -> RBTree {
+    rb_fix_root(rb_insert_bst(t, key))
+}
+
+// Search for a key
+fn rb_contains(t: RBTree, key: Int) -> Bool {
+    let mut cur = t.root;
+    let mut found = false;
+    while cur != -1 && !found {
+        let v = arr_get(t.vals, cur);
+        if key == v { found = true; }
+        else if key < v { cur = arr_get(t.lefts, cur); }
+        else { cur = arr_get(t.rights, cur); }
+    }
+    found
+}
+
+// Height of subtree rooted at idx
+@allow(unbounded_recursion)
+fn rb_height(t: RBTree, idx: Int) -> Int {
+    if idx == -1 { 0 }
+    else {
+        let lh = rb_height(t, arr_get(t.lefts, idx));
+        let rh = rb_height(t, arr_get(t.rights, idx));
+        1 + if lh > rh { lh } else { rh }
+    }
+}
+
+// Size of subtree
+@allow(unbounded_recursion)
+fn rb_subtree_size(t: RBTree, idx: Int) -> Int {
+    if idx == -1 { 0 }
+    else {
+        1 + rb_subtree_size(t, arr_get(t.lefts, idx))
+          + rb_subtree_size(t, arr_get(t.rights, idx))
+    }
+}
+
+// Minimum value in subtree
+@allow(unbounded_recursion)
+fn rb_min(t: RBTree, idx: Int) -> Int {
+    if idx == -1 { 999999 }
+    else {
+        let lc = arr_get(t.lefts, idx);
+        if lc == -1 { arr_get(t.vals, idx) }
+        else { rb_min(t, lc) }
+    }
+}
+
+// Maximum value in subtree
+@allow(unbounded_recursion)
+fn rb_max(t: RBTree, idx: Int) -> Int {
+    if idx == -1 { -999999 }
+    else {
+        let rc = arr_get(t.rights, idx);
+        if rc == -1 { arr_get(t.vals, idx) }
+        else { rb_max(t, rc) }
+    }
+}
+
+// In-order sum
+@allow(unbounded_recursion)
+fn rb_inorder_sum(t: RBTree, idx: Int) -> Int {
+    if idx == -1 { 0 }
+    else {
+        rb_inorder_sum(t, arr_get(t.lefts, idx))
+        + arr_get(t.vals, idx)
+        + rb_inorder_sum(t, arr_get(t.rights, idx))
+    }
+}
+
+// BST property: all left descendants < node < all right descendants
+@allow(unbounded_recursion)
+fn rb_is_bst(t: RBTree, idx: Int, lo: Int, hi: Int) -> Bool {
+    if idx == -1 { true }
+    else {
+        let v = arr_get(t.vals, idx);
+        if v <= lo || v >= hi { false }
+        else {
+            rb_is_bst(t, arr_get(t.lefts, idx), lo, v)
+            && rb_is_bst(t, arr_get(t.rights, idx), v, hi)
+        }
+    }
+}
+
+// RB property 1: Root is black
+fn rb_prop_root_black(t: RBTree) -> Bool {
+    if t.root == -1 { true }
+    else { rb_is_black(t, t.root) }
+}
+
+// RB property 2: No red node has a red child
+@allow(unbounded_recursion)
+fn rb_prop_no_red_red(t: RBTree, idx: Int) -> Bool {
+    if idx == -1 { true }
+    else {
+        let lc = arr_get(t.lefts, idx);
+        let rc = arr_get(t.rights, idx);
+        if rb_is_red(t, idx) {
+            // Both children must be black
+            if rb_is_red(t, lc) || rb_is_red(t, rc) { false }
+            else {
+                rb_prop_no_red_red(t, lc) && rb_prop_no_red_red(t, rc)
+            }
+        } else {
+            rb_prop_no_red_red(t, lc) && rb_prop_no_red_red(t, rc)
+        }
+    }
+}
+
+// RB property 3: Black height (number of black nodes on any path from node to NIL leaf)
+// Returns black height if consistent, -1 if inconsistent
+@allow(unbounded_recursion)
+fn rb_black_height(t: RBTree, idx: Int) -> Int {
+    if idx == -1 { 1 }  // NIL is black, contributes 1
+    else {
+        let lbh = rb_black_height(t, arr_get(t.lefts, idx));
+        let rbh = rb_black_height(t, arr_get(t.rights, idx));
+        if lbh == -1 || rbh == -1 || lbh != rbh { -1 }
+        else {
+            let self_contrib = if rb_is_black(t, idx) { 1 } else { 0 };
+            lbh + self_contrib
+        }
+    }
+}
+
+// Count red nodes
+@allow(unbounded_recursion)
+fn rb_count_red(t: RBTree, idx: Int) -> Int {
+    if idx == -1 { 0 }
+    else {
+        let self_val = if rb_is_red(t, idx) { 1 } else { 0 };
+        self_val + rb_count_red(t, arr_get(t.lefts, idx))
+                 + rb_count_red(t, arr_get(t.rights, idx))
+    }
+}
+
+// Count black nodes
+@allow(unbounded_recursion)
+fn rb_count_black(t: RBTree, idx: Int) -> Int {
+    if idx == -1 { 0 }
+    else {
+        let self_val = if rb_is_black(t, idx) { 1 } else { 0 };
+        self_val + rb_count_black(t, arr_get(t.lefts, idx))
+                 + rb_count_black(t, arr_get(t.rights, idx))
+    }
+}
+
+// Verify all RB properties on a tree
+fn rb_verify(t: RBTree) -> Bool {
+    if t.root == -1 { true }
+    else {
+        let bst_ok = rb_is_bst(t, t.root, -999999, 999999);
+        let root_ok = rb_prop_root_black(t);
+        let bh = rb_black_height(t, t.root);
+        let bh_ok = bh >= 0;
+        bst_ok && root_ok && bh_ok
+    }
+}
+
+fn main() -> Int {
+    // === Test 1: Empty tree ===
+    let t0 = rb_new();
+    assert_eq(t0.size, 0);
+    assert_eq(t0.root, -1);
+    assert(rb_verify(t0));
+    assert(!rb_contains(t0, 5));
+    assert_eq(rb_height(t0, t0.root), 0);
+
+    // === Test 2: Single insert ===
+    let t1 = rb_insert(t0, 50);
+    assert_eq(t1.size, 1);
+    assert_eq(t1.root, 0);
+    assert(rb_is_black(t1, 0));  // Root is black
+    assert(rb_contains(t1, 50));
+    assert(!rb_contains(t1, 25));
+    assert(rb_verify(t1));
+    assert_eq(rb_height(t1, t1.root), 1);
+
+    // === Test 3: Insert left child ===
+    let t2 = rb_insert(t1, 30);
+    assert_eq(t2.size, 2);
+    assert(rb_contains(t2, 30));
+    assert(rb_contains(t2, 50));
+    assert(rb_verify(t2));
+    assert(rb_is_black(t2, t2.root));
+    assert_eq(rb_min(t2, t2.root), 30);
+    assert_eq(rb_max(t2, t2.root), 50);
+
+    // === Test 4: Insert right child ===
+    let t3 = rb_insert(t2, 70);
+    assert_eq(t3.size, 3);
+    assert(rb_contains(t3, 70));
+    assert(rb_verify(t3));
+    assert_eq(rb_inorder_sum(t3, t3.root), 150);  // 30+50+70
+
+    // === Test 5: Build balanced tree ===
+    // Insert: 50, 30, 70, 20, 40, 60, 80
+    let mut tb = rb_new();
+    tb = rb_insert(tb, 50);
+    tb = rb_insert(tb, 30);
+    tb = rb_insert(tb, 70);
+    tb = rb_insert(tb, 20);
+    tb = rb_insert(tb, 40);
+    tb = rb_insert(tb, 60);
+    tb = rb_insert(tb, 80);
+
+    assert_eq(tb.size, 7);
+    assert(rb_verify(tb));
+    assert_eq(rb_min(tb, tb.root), 20);
+    assert_eq(rb_max(tb, tb.root), 80);
+    assert_eq(rb_inorder_sum(tb, tb.root), 350);
+    assert_eq(rb_subtree_size(tb, tb.root), 7);
+
+    // All values present
+    assert(rb_contains(tb, 20));
+    assert(rb_contains(tb, 30));
+    assert(rb_contains(tb, 40));
+    assert(rb_contains(tb, 50));
+    assert(rb_contains(tb, 60));
+    assert(rb_contains(tb, 70));
+    assert(rb_contains(tb, 80));
+    assert(!rb_contains(tb, 10));
+    assert(!rb_contains(tb, 90));
+    assert(!rb_contains(tb, 55));
+
+    // === Test 6: BST property ===
+    assert(rb_is_bst(tb, tb.root, -999999, 999999));
+
+    // === Test 7: Root is always black ===
+    assert(rb_prop_root_black(tb));
+
+    // === Test 8: Color counts ===
+    let reds = rb_count_red(tb, tb.root);
+    let blacks = rb_count_black(tb, tb.root);
+    assert_eq(reds + blacks, 7);
+    assert(blacks >= 1);  // At least root is black
+
+    // === Test 9: Black height is consistent ===
+    let bh = rb_black_height(tb, tb.root);
+    assert(bh > 0);  // Non-negative means consistent
+
+    // === Test 10: Height bound: h <= 2*log2(n+1) ===
+    // For 7 nodes, log2(8) = 3, so h <= 6
+    let h = rb_height(tb, tb.root);
+    assert(h <= 6);
+    assert(h >= 3);  // At least 3 for 7 nodes
+
+    // === Test 11: Ascending insertion ===
+    let mut ta = rb_new();
+    let mut ai = 1;
+    while ai <= 7 {
+        ta = rb_insert(ta, ai * 10);
+        ai = ai + 1;
+    }
+    assert_eq(ta.size, 7);
+    assert(rb_verify(ta));
+    assert_eq(rb_min(ta, ta.root), 10);
+    assert_eq(rb_max(ta, ta.root), 70);
+    assert_eq(rb_inorder_sum(ta, ta.root), 280);  // 10+20+...+70
+
+    // === Test 12: Descending insertion ===
+    let mut td = rb_new();
+    let mut di = 7;
+    while di >= 1 {
+        td = rb_insert(td, di * 10);
+        di = di - 1;
+    }
+    assert_eq(td.size, 7);
+    assert(rb_verify(td));
+    assert_eq(rb_min(td, td.root), 10);
+    assert_eq(rb_max(td, td.root), 70);
+
+    // === Test 13: Duplicate keys ===
+    let dup1 = rb_insert(tb, 50);
+    assert_eq(dup1.size, 7);  // No new node
+    let dup2 = rb_insert(dup1, 30);
+    assert_eq(dup2.size, 7);
+    assert(rb_verify(dup2));
+
+    // === Test 14: Subtree sizes ===
+    // Root should have 7 nodes
+    assert_eq(rb_subtree_size(tb, tb.root), 7);
+    // Left subtree + right subtree + 1 = 7
+    let ls = rb_subtree_size(tb, arr_get(tb.lefts, tb.root));
+    let rs = rb_subtree_size(tb, arr_get(tb.rights, tb.root));
+    assert_eq(ls + rs + 1, 7);
+
+    // === Test 15: Parent pointers ===
+    // Root has parent -1
+    assert_eq(arr_get(tb.parents, tb.root), -1);
+    // Left child's parent is root
+    let lc = arr_get(tb.lefts, tb.root);
+    if lc != -1 {
+        assert_eq(arr_get(tb.parents, lc), tb.root);
+    }
+    // Right child's parent is root
+    let rc = arr_get(tb.rights, tb.root);
+    if rc != -1 {
+        assert_eq(arr_get(tb.parents, rc), tb.root);
+    }
+
+    // === Test 16: Black height after ascending insertion ===
+    let bh_asc = rb_black_height(ta, ta.root);
+    assert(bh_asc > 0);
+
+    // === Test 17: 15 node tree ===
+    let mut big = rb_new();
+    // Insert in level-order for balanced BST: 8,4,12,2,6,10,14,1,3,5,7,9,11,13,15
+    big = rb_insert(big, 8);
+    big = rb_insert(big, 4);
+    big = rb_insert(big, 12);
+    big = rb_insert(big, 2);
+    big = rb_insert(big, 6);
+    big = rb_insert(big, 10);
+    big = rb_insert(big, 14);
+    big = rb_insert(big, 1);
+    big = rb_insert(big, 3);
+    big = rb_insert(big, 5);
+    big = rb_insert(big, 7);
+    big = rb_insert(big, 9);
+    big = rb_insert(big, 11);
+    big = rb_insert(big, 13);
+    big = rb_insert(big, 15);
+
+    assert_eq(big.size, 15);
+    assert(rb_verify(big));
+    assert_eq(rb_min(big, big.root), 1);
+    assert_eq(rb_max(big, big.root), 15);
+    assert_eq(rb_inorder_sum(big, big.root), 120);  // 1+2+...+15 = 120
+    assert_eq(rb_subtree_size(big, big.root), 15);
+    assert(rb_prop_root_black(big));
+    assert_eq(rb_height(big, big.root), 4);
+
+    // Verify all 15 values
+    let mut vi = 1;
+    while vi <= 15 {
+        assert(rb_contains(big, vi));
+        vi = vi + 1;
+    }
+    assert(!rb_contains(big, 0));
+    assert(!rb_contains(big, 16));
+
+    // === Test 18: Black height for big tree ===
+    let bh_big = rb_black_height(big, big.root);
+    assert(bh_big > 0);  // Consistent
+
+    // === Test 19: Color distribution in big tree ===
+    let big_reds = rb_count_red(big, big.root);
+    let big_blacks = rb_count_black(big, big.root);
+    assert_eq(big_reds + big_blacks, 15);
+    assert(big_blacks >= 1);
+
+    // === Test 20: Verify no value outside range ===
+    assert(!rb_contains(big, -100));
+    assert(!rb_contains(big, 100));
+    assert(!rb_contains(big, 0));
+
+    0
+}

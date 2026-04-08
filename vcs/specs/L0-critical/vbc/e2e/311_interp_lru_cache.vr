@@ -1,0 +1,355 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, design-patterns, lru-cache
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: LRU cache using doubly-linked list + hash map simulation
+// with record-based arrays. Supports get, put, eviction of least-recently-used.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_fill(v: Int) -> Arr8 {
+    Arr8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+
+// =============================================================================
+// LRU Cache: capacity 4
+// keys[i], vals[i]: key-value pair at node i
+// prev[i], next[i]: doubly-linked list pointers (-1 = null)
+// head: most recently used node index, tail: least recently used
+// size: current number of entries, capacity: max entries
+// =============================================================================
+
+type LRUCache is {
+    keys: Arr8,
+    vals: Arr8,
+    prev_arr: Arr8,
+    next_arr: Arr8,
+    head: Int,
+    tail: Int,
+    sz: Int,
+    cap: Int
+};
+
+fn lru_new(capacity: Int) -> LRUCache {
+    LRUCache {
+        keys: a8_fill(-1),
+        vals: a8_zeros(),
+        prev_arr: a8_fill(-1),
+        next_arr: a8_fill(-1),
+        head: -1,
+        tail: -1,
+        sz: 0,
+        cap: capacity
+    }
+}
+
+// Find node index with given key, -1 if not found
+fn lru_find(cache: LRUCache, key: Int) -> Int {
+    let mut i = 0;
+    let mut found = -1;
+    while i < cache.sz {
+        if a8_get(cache.keys, i) == key {
+            found = i;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+// Remove node at index from linked list (does not reduce size)
+fn lru_remove_node(cache: LRUCache, idx: Int) -> LRUCache {
+    let p = a8_get(cache.prev_arr, idx);
+    let n = a8_get(cache.next_arr, idx);
+    let mut pa = cache.prev_arr;
+    let mut na = cache.next_arr;
+    let mut hd = cache.head;
+    let mut tl = cache.tail;
+
+    if p != -1 {
+        na = a8_set(na, p, n);
+    } else {
+        hd = n;
+    }
+    if n != -1 {
+        pa = a8_set(pa, n, p);
+    } else {
+        tl = p;
+    }
+    pa = a8_set(pa, idx, -1);
+    na = a8_set(na, idx, -1);
+
+    LRUCache {
+        keys: cache.keys, vals: cache.vals,
+        prev_arr: pa, next_arr: na,
+        head: hd, tail: tl,
+        sz: cache.sz, cap: cache.cap
+    }
+}
+
+// Push node at index to front (most recently used)
+fn lru_push_front(cache: LRUCache, idx: Int) -> LRUCache {
+    let mut pa = cache.prev_arr;
+    let mut na = cache.next_arr;
+    let mut hd = cache.head;
+    let mut tl = cache.tail;
+
+    pa = a8_set(pa, idx, -1);
+    na = a8_set(na, idx, hd);
+
+    if hd != -1 {
+        pa = a8_set(pa, hd, idx);
+    }
+    hd = idx;
+    if tl == -1 {
+        tl = idx;
+    }
+
+    LRUCache {
+        keys: cache.keys, vals: cache.vals,
+        prev_arr: pa, next_arr: na,
+        head: hd, tail: tl,
+        sz: cache.sz, cap: cache.cap
+    }
+}
+
+// Get value for key; returns { value, hit, updated_cache }
+type LRUGetResult is { value: Int, hit: Int, cache: LRUCache };
+
+fn lru_get(cache: LRUCache, key: Int) -> LRUGetResult {
+    let idx = lru_find(cache, key);
+    if idx == -1 {
+        return LRUGetResult { value: -1, hit: 0, cache: cache };
+    }
+    // Move to front
+    let c1 = lru_remove_node(cache, idx);
+    let c2 = lru_push_front(c1, idx);
+    LRUGetResult { value: a8_get(c2.vals, idx), hit: 1, cache: c2 }
+}
+
+// Put key-value pair into cache; evicts LRU if full
+fn lru_put(cache: LRUCache, key: Int, value: Int) -> LRUCache {
+    let idx = lru_find(cache, key);
+    if idx != -1 {
+        // Update existing entry
+        let new_vals = a8_set(cache.vals, idx, value);
+        let c1 = LRUCache {
+            keys: cache.keys, vals: new_vals,
+            prev_arr: cache.prev_arr, next_arr: cache.next_arr,
+            head: cache.head, tail: cache.tail,
+            sz: cache.sz, cap: cache.cap
+        };
+        let c2 = lru_remove_node(c1, idx);
+        return lru_push_front(c2, idx);
+    }
+
+    if cache.sz < cache.cap {
+        // Use next available slot
+        let slot = cache.sz;
+        let new_keys = a8_set(cache.keys, slot, key);
+        let new_vals = a8_set(cache.vals, slot, value);
+        let c1 = LRUCache {
+            keys: new_keys, vals: new_vals,
+            prev_arr: cache.prev_arr, next_arr: cache.next_arr,
+            head: cache.head, tail: cache.tail,
+            sz: cache.sz + 1, cap: cache.cap
+        };
+        return lru_push_front(c1, slot);
+    }
+
+    // Evict the tail (LRU)
+    let evict_idx = cache.tail;
+    let c1 = lru_remove_node(cache, evict_idx);
+    let new_keys = a8_set(c1.keys, evict_idx, key);
+    let new_vals = a8_set(c1.vals, evict_idx, value);
+    let c2 = LRUCache {
+        keys: new_keys, vals: new_vals,
+        prev_arr: c1.prev_arr, next_arr: c1.next_arr,
+        head: c1.head, tail: c1.tail,
+        sz: c1.sz, cap: c1.cap
+    };
+    lru_push_front(c2, evict_idx)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_basic_put_get() {
+    let mut c = lru_new(4);
+    c = lru_put(c, 1, 100);
+    c = lru_put(c, 2, 200);
+    c = lru_put(c, 3, 300);
+
+    let r1 = lru_get(c, 1);
+    assert_eq(r1.hit, 1);
+    assert_eq(r1.value, 100);
+
+    let r2 = lru_get(r1.cache, 2);
+    assert_eq(r2.hit, 1);
+    assert_eq(r2.value, 200);
+
+    let r3 = lru_get(r2.cache, 3);
+    assert_eq(r3.hit, 1);
+    assert_eq(r3.value, 300);
+}
+
+fn test_cache_miss() {
+    let c = lru_new(4);
+    let r = lru_get(c, 42);
+    assert_eq(r.hit, 0);
+    assert_eq(r.value, -1);
+}
+
+fn test_update_value() {
+    let mut c = lru_new(4);
+    c = lru_put(c, 1, 100);
+    c = lru_put(c, 1, 999);
+
+    let r = lru_get(c, 1);
+    assert_eq(r.hit, 1);
+    assert_eq(r.value, 999);
+    // Size should still be 1
+    assert_eq(r.cache.sz, 1);
+}
+
+fn test_eviction() {
+    let mut c = lru_new(3);
+    c = lru_put(c, 1, 10);
+    c = lru_put(c, 2, 20);
+    c = lru_put(c, 3, 30);
+    // Cache is full: [3, 2, 1] (MRU to LRU)
+
+    // Add key 4 -> evicts key 1 (LRU)
+    c = lru_put(c, 4, 40);
+
+    let r1 = lru_get(c, 1);
+    assert_eq(r1.hit, 0);  // evicted
+
+    let r2 = lru_get(r1.cache, 4);
+    assert_eq(r2.hit, 1);
+    assert_eq(r2.value, 40);
+
+    let r3 = lru_get(r2.cache, 2);
+    assert_eq(r3.hit, 1);
+    assert_eq(r3.value, 20);
+}
+
+fn test_access_refreshes() {
+    let mut c = lru_new(3);
+    c = lru_put(c, 1, 10);
+    c = lru_put(c, 2, 20);
+    c = lru_put(c, 3, 30);
+    // Order: [3, 2, 1]
+
+    // Access key 1 => moves it to front
+    let r = lru_get(c, 1);
+    c = r.cache;
+    // Order: [1, 3, 2]
+
+    // Add key 4 => evicts key 2 (now LRU)
+    c = lru_put(c, 4, 40);
+
+    let r2 = lru_get(c, 2);
+    assert_eq(r2.hit, 0);  // evicted
+
+    let r3 = lru_get(r2.cache, 1);
+    assert_eq(r3.hit, 1);
+    assert_eq(r3.value, 10);
+}
+
+fn test_single_capacity() {
+    let mut c = lru_new(1);
+    c = lru_put(c, 1, 100);
+    let r1 = lru_get(c, 1);
+    assert_eq(r1.hit, 1);
+    assert_eq(r1.value, 100);
+
+    c = lru_put(r1.cache, 2, 200);
+    let r2 = lru_get(c, 1);
+    assert_eq(r2.hit, 0);
+    let r3 = lru_get(r2.cache, 2);
+    assert_eq(r3.hit, 1);
+    assert_eq(r3.value, 200);
+}
+
+fn test_overwrite_no_eviction() {
+    let mut c = lru_new(2);
+    c = lru_put(c, 1, 10);
+    c = lru_put(c, 2, 20);
+    // Overwrite existing key 1
+    c = lru_put(c, 1, 99);
+    // No eviction should happen
+    let r1 = lru_get(c, 1);
+    assert_eq(r1.hit, 1);
+    assert_eq(r1.value, 99);
+    let r2 = lru_get(r1.cache, 2);
+    assert_eq(r2.hit, 1);
+    assert_eq(r2.value, 20);
+}
+
+fn test_sequential_eviction() {
+    let mut c = lru_new(2);
+    c = lru_put(c, 1, 10);
+    c = lru_put(c, 2, 20);
+    c = lru_put(c, 3, 30);  // evicts 1
+    c = lru_put(c, 4, 40);  // evicts 2
+
+    let r1 = lru_get(c, 1);
+    assert_eq(r1.hit, 0);
+    let r2 = lru_get(r1.cache, 2);
+    assert_eq(r2.hit, 0);
+    let r3 = lru_get(r2.cache, 3);
+    assert_eq(r3.hit, 1);
+    assert_eq(r3.value, 30);
+    let r4 = lru_get(r3.cache, 4);
+    assert_eq(r4.hit, 1);
+    assert_eq(r4.value, 40);
+}
+
+fn main() -> Int {
+    test_basic_put_get();
+    test_cache_miss();
+    test_update_value();
+    test_eviction();
+    test_access_refreshes();
+    test_single_capacity();
+    test_overwrite_no_eviction();
+    test_sequential_eviction();
+    print("[OK] 311_interp_lru_cache");
+    0
+}

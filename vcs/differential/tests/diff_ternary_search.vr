@@ -1,0 +1,169 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, ternary, search, optimization
+// @timeout: 10000
+
+// Ternary search and related algorithms
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+// Ternary search for minimum in a unimodal array
+// Returns index of minimum
+fn ternary_min(arr: Arr8, lo: Int, hi: Int) -> Int {
+    let mut l = lo;
+    let mut h = hi;
+    while h - l > 2 {
+        let m1 = l + (h - l) / 3;
+        let m2 = h - (h - l) / 3;
+        if get8(arr, m1) < get8(arr, m2) {
+            h = m2;
+        } else {
+            l = m1;
+        }
+    }
+    // Find min in remaining [l..h]
+    let mut best_idx = l;
+    let mut best_val = get8(arr, l);
+    let mut i = l + 1;
+    while i <= h {
+        if get8(arr, i) < best_val {
+            best_val = get8(arr, i);
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+// Ternary search for maximum in a bitonic array
+fn ternary_max(arr: Arr8, lo: Int, hi: Int) -> Int {
+    let mut l = lo;
+    let mut h = hi;
+    while h - l > 2 {
+        let m1 = l + (h - l) / 3;
+        let m2 = h - (h - l) / 3;
+        if get8(arr, m1) > get8(arr, m2) {
+            h = m2;
+        } else {
+            l = m1;
+        }
+    }
+    let mut best_idx = l;
+    let mut best_val = get8(arr, l);
+    let mut i = l + 1;
+    while i <= h {
+        if get8(arr, i) > best_val {
+            best_val = get8(arr, i);
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+// Interpolation search in sorted array
+fn interpolation_search(arr: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi {
+        let lo_val = get8(arr, lo);
+        let hi_val = get8(arr, hi);
+        if lo_val == hi_val {
+            if lo_val == target { return lo; }
+            else { return -1; }
+        }
+        if target < lo_val { return -1; }
+        if target > hi_val { return -1; }
+        // Interpolation: estimate position
+        let pos = lo + (target - lo_val) * (hi - lo) / (hi_val - lo_val);
+        let val = get8(arr, pos);
+        if val == target { return pos; }
+        if val < target { lo = pos + 1; }
+        else { hi = pos - 1; }
+    }
+    -1
+}
+
+// Exponential search: find range, then binary search
+fn exponential_search(arr: Arr8, n: Int, target: Int) -> Int {
+    if get8(arr, 0) == target { return 0; }
+    let mut bound = 1;
+    while bound < n {
+        if get8(arr, bound) >= target {
+            // Binary search in [bound/2, min(bound, n-1)]
+            let lo = bound / 2;
+            let hi = if bound < n { bound } else { n - 1 };
+            return binary_search_range(arr, lo, hi, target);
+        }
+        bound = bound * 2;
+    }
+    binary_search_range(arr, bound / 2, n - 1, target)
+}
+
+fn binary_search_range(arr: Arr8, lo: Int, hi: Int, target: Int) -> Int {
+    let mut l = lo;
+    let mut h = hi;
+    while l <= h {
+        let mid = (l + h) / 2;
+        let val = get8(arr, mid);
+        if val == target { return mid; }
+        if val < target { l = mid + 1; }
+        else { h = mid - 1; }
+    }
+    -1
+}
+
+fn test_ternary_min() -> Int {
+    // Unimodal (decreasing then increasing): 8, 5, 3, 1, 4, 7, 9, 12
+    let arr = Arr8 { v0: 8, v1: 5, v2: 3, v3: 1, v4: 4, v5: 7, v6: 9, v7: 12 };
+    let idx = ternary_min(arr, 0, 7);
+    assert_eq(idx, 3); // minimum at index 3 (value 1)
+    1
+}
+
+fn test_ternary_max() -> Int {
+    // Bitonic (increasing then decreasing): 1, 3, 7, 12, 9, 5, 2, 0
+    let arr = Arr8 { v0: 1, v1: 3, v2: 7, v3: 12, v4: 9, v5: 5, v6: 2, v7: 0 };
+    let idx = ternary_max(arr, 0, 7);
+    assert_eq(idx, 3); // maximum at index 3 (value 12)
+    1
+}
+
+fn test_interpolation() -> Int {
+    let arr = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 60, v6: 70, v7: 80 };
+    assert_eq(interpolation_search(arr, 8, 30), 2);
+    assert_eq(interpolation_search(arr, 8, 80), 7);
+    assert_eq(interpolation_search(arr, 8, 35), -1);
+    1
+}
+
+fn test_exponential() -> Int {
+    let arr = Arr8 { v0: 2, v1: 5, v2: 8, v3: 12, v4: 16, v5: 23, v6: 38, v7: 56 };
+    assert_eq(exponential_search(arr, 8, 8), 2);
+    assert_eq(exponential_search(arr, 8, 56), 7);
+    assert_eq(exponential_search(arr, 8, 2), 0);
+    assert_eq(exponential_search(arr, 8, 99), -1);
+    1
+}
+
+fn main() -> Int {
+    test_ternary_min();
+    test_ternary_max();
+    test_interpolation();
+    test_exponential();
+    print("DIFF_OK: ternary_search");
+    0
+}

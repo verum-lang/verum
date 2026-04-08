@@ -1,0 +1,173 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, invalid, negative
+
+// Invalid operator usage - each line should fail to parse
+fn test_invalid_operators() {
+    // Triple operators (not valid)
+    let triple_eq = a === b;
+    let triple_and = a &&& b;
+    let triple_or = a ||| b;
+    let triple_plus = a +++ b;
+
+    // Invalid compound operators
+    let invalid_compound1 = a +- b;
+    let invalid_compound2 = a -+ b;
+    let invalid_compound3 = a *+ b;
+    let invalid_compound4 = a /- b;
+
+    // Malformed assignment operators
+    let malformed_assign1 = a =+ b;
+    let malformed_assign2 = a =- b;
+    let malformed_assign3 = a =* b;
+    let malformed_assign4 = a =/ b;
+
+    // Invalid comparison chains (if not supported)
+    let chain_compare = a < b < c;
+    let chain_eq = a == b == c;
+
+    // Double operators without spacing
+    let double_lt = a<<b;  // Could be shift, ambiguous
+    let double_gt = a>>b;  // Could be shift, ambiguous
+
+    // Quadruple operators
+    let quad_eq = a ==== b;
+    let quad_plus = a ++++ b;
+
+    // Operators only (no operands)
+    let only_plus = +;
+    let only_minus = -;
+    let only_mult = *;
+    let only_div = /;
+    let only_mod = %;
+
+    // Binary operators as unary (where not valid)
+    let invalid_unary_mult = *x;
+    let invalid_unary_div = /x;
+    let invalid_unary_mod = %x;
+    let invalid_unary_and = &&x;
+    let invalid_unary_or = ||x;
+
+    // Invalid arrow forms
+    let bad_arrow1 = ->>;
+    let bad_arrow2 = >->;
+    let bad_arrow3 = -->;
+    let bad_arrow4 = <-;
+
+    // Invalid pipeline operators
+    let bad_pipe1 = |>>;
+    let bad_pipe2 = >|>;
+    let bad_pipe3 = ||>;
+    let bad_pipe4 = <|;
+
+    // Invalid range operators
+    let bad_range1 = ...;
+    let bad_range2 = ..==;
+    let bad_range3 = .=;
+    let bad_range4 = =..;
+
+    // Invalid bitwise operators
+    let bad_bit1 = &&&; // Not valid
+    let bad_bit2 = |||; // Not valid
+    let bad_bit3 = ^^^; // Not valid
+
+    // Invalid shift operators
+    let bad_shift1 = <<<;
+    let bad_shift2 = >>>;
+    let bad_shift3 = <<<=;
+    let bad_shift4 = >>>=;
+
+    // Invalid optional operators
+    let bad_opt1 = ???;
+    let bad_opt2 = ?..;
+    let bad_opt3 = ..?;
+    let bad_opt4 = ?.?;
+
+    // Mixed invalid operators
+    let mixed1 = a <?> b;
+    let mixed2 = a <!> b;
+    let mixed3 = a <=> b;  // Might be valid spaceship
+    let mixed4 = a <==> b;
+
+    // Operators with wrong characters
+    let wrong_char1 = a @ b;
+    let wrong_char2 = a # b;
+    let wrong_char3 = a $ b;
+    let wrong_char4 = a ` b;
+
+    // Unicode operators (if not supported)
+    let unicode_op1 = a plus b;
+    let unicode_op2 = a times b;
+    let unicode_op3 = a div b;
+
+    // Operators adjacent to each other
+    let adjacent1 = a+-b;  // Might be a + (-b) or error
+    let adjacent2 = a*-b;  // Might be a * (-b) or error
+    let adjacent3 = a/-b;  // Might be a / (-b) or error
+
+    // Double unary in invalid position
+    let double_unary = --x;  // Might be valid decrement
+    let double_plus = ++x;   // Might be valid increment
+    let double_not = !!x;    // Might be valid double negation
+
+    // Invalid spread/rest operator positions
+    let bad_spread = ...x + y;
+    let bad_rest = x + ...y;
+
+    // Invalid exponentiation
+    let bad_exp1 = a ** ** b;
+    let bad_exp2 = ** a;
+    let bad_exp3 = a **;
+
+    // Invalid ternary (if using ? : style)
+    let bad_ternary1 = a ? b;
+    let bad_ternary2 = a : b;
+    let bad_ternary3 = a ? : b;
+    let bad_ternary4 = a ? b :;
+
+    // Dangling operators at end of expression
+    let dangling1 = a +;
+    let dangling2 = a *;
+    let dangling3 = a &&;
+    let dangling4 = a |>;
+
+    // Dangling operators at start of expression
+    let dangling5 = + a;
+    let dangling6 = && a;
+    let dangling7 = |> a;
+
+    // Invalid composition operators
+    let bad_compose1 = >>>;
+    let bad_compose2 = <<<;
+    let bad_compose3 = >>=;  // Bind operator, might be valid
+
+    // Empty operator positions
+    let empty1 = a  b;      // Missing operator
+    let empty2 = (a)(b);    // Missing operator
+}
+
+// Operators in invalid positions
+fn invalid_op_fn + () {}
+type Invalid * Type is Int;
+fn test_invalid_positions() {
+    let @name = 1;
+    let #value = 2;
+
+    // Invalid method operators
+    let invalid_method = x .+ y;
+    let invalid_dot = x .. y;  // Range, not error necessarily
+
+    // Semicolons as operators (not operators)
+    let semi_op = a ; b;  // Might be valid statement separator
+
+    // Comma misuse
+    let comma_op = a , b;  // Without tuple context
+
+    // Colon misuse (outside type annotations)
+    let colon_op = a : b;
+
+    // Invalid null-coalescing combinations
+    let bad_null1 = a ??? b;
+    let bad_null2 = a ??= ??= b;
+}

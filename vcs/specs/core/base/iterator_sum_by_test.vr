@@ -1,0 +1,171 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, iterator, sum_by, product_by
+// @description: Tests for Iterator.sum_by and Iterator.product_by
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Iterator.sum_by
+// =============================================================================
+
+@test
+fn test_sum_by_basic() {
+    let list = [1, 2, 3, 4, 5];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().sum_by(identity);
+    assert_eq(result, 15);
+}
+
+@test
+fn test_sum_by_transform() {
+    let list = [1, 2, 3, 4, 5];
+    fn double(x: &Int) -> Int { *x * 2 }
+    let result = list.iter().sum_by(double);
+    assert_eq(result, 30);
+}
+
+@test
+fn test_sum_by_empty() {
+    let list: List<Int> = [];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().sum_by(identity);
+    assert_eq(result, 0);
+}
+
+@test
+fn test_sum_by_single() {
+    let list = [42];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().sum_by(identity);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_sum_by_negatives() {
+    let list = [-5, -3, 0, 3, 5];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().sum_by(identity);
+    assert_eq(result, 0);
+}
+
+@test
+fn test_sum_by_squared() {
+    let list = [1, 2, 3];
+    fn sq(x: &Int) -> Int { *x * *x }
+    let result = list.iter().sum_by(sq);
+    assert_eq(result, 14); // 1 + 4 + 9
+}
+
+@test
+fn test_sum_by_absolute() {
+    let list = [-3, -2, -1, 0, 1, 2, 3];
+    fn abs_val(x: &Int) -> Int {
+        if *x < 0 { 0 - *x } else { *x }
+    }
+    let result = list.iter().sum_by(abs_val);
+    assert_eq(result, 12); // 3+2+1+0+1+2+3
+}
+
+@test
+fn test_sum_by_with_filter() {
+    let list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    fn is_even(x: &&Int) -> Bool { **x % 2 == 0 }
+    fn deref(x: &&Int) -> Int { **x }
+    let result = list.iter().filter(is_even).sum_by(deref);
+    assert_eq(result, 30); // 2+4+6+8+10
+}
+
+@test
+fn test_sum_by_range() {
+    fn identity(x: &Int) -> Int { *x }
+    let result = range(1, 11).sum_by(identity);
+    assert_eq(result, 55);
+}
+
+// =============================================================================
+// Section 2: Iterator.product_by
+// =============================================================================
+
+@test
+fn test_product_by_basic() {
+    let list = [1, 2, 3, 4, 5];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().product_by(identity);
+    assert_eq(result, 120);
+}
+
+@test
+fn test_product_by_transform() {
+    let list = [1, 2, 3];
+    fn double(x: &Int) -> Int { *x * 2 }
+    let result = list.iter().product_by(double);
+    assert_eq(result, 48); // 2 * 4 * 6
+}
+
+@test
+fn test_product_by_empty() {
+    let list: List<Int> = [];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().product_by(identity);
+    assert_eq(result, 1); // multiplicative identity
+}
+
+@test
+fn test_product_by_single() {
+    let list = [7];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().product_by(identity);
+    assert_eq(result, 7);
+}
+
+@test
+fn test_product_by_with_zero() {
+    let list = [1, 2, 0, 4, 5];
+    fn identity(x: &Int) -> Int { *x }
+    let result = list.iter().product_by(identity);
+    assert_eq(result, 0);
+}
+
+@test
+fn test_product_by_squares() {
+    let list = [2, 3];
+    fn sq(x: &Int) -> Int { *x * *x }
+    let result = list.iter().product_by(sq);
+    assert_eq(result, 36); // 4 * 9
+}
+
+// =============================================================================
+// Section 3: Integration with existing methods
+// =============================================================================
+
+@test
+fn test_sum_by_vs_map_sum() {
+    let list = [1, 2, 3, 4, 5];
+    fn sq(x: &Int) -> Int { *x * *x }
+    fn sq_owned(x: Int) -> Int { x * x }
+    // sum_by should produce same result as map().sum()
+    let sum1 = list.iter().sum_by(sq);
+    let sum2 = list.iter().cloned().map(sq_owned).sum();
+    assert_eq(sum1, sum2);
+}
+
+@test
+fn test_product_by_vs_map_product() {
+    let list = [1, 2, 3, 4];
+    fn identity(x: &Int) -> Int { *x }
+    fn id_owned(x: Int) -> Int { x }
+    let prod1 = list.iter().product_by(identity);
+    let prod2 = list.iter().cloned().map(id_owned).product();
+    assert_eq(prod1, prod2);
+}
+
+@test
+fn test_sum_by_large() {
+    fn identity(x: &Int) -> Int { *x }
+    // Sum 1..100 = 5050
+    let result = range(1, 101).sum_by(identity);
+    assert_eq(result, 5050);
+}

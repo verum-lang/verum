@@ -1,0 +1,291 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, try, recover, finally, error-handling
+
+// Try with pattern matching in recover
+fn test_pattern_matching() {
+    try {
+        risky_operation()?
+    } recover {
+        IoError.NotFound => handle_not_found(),
+        IoError.PermissionDenied => handle_permission(),
+        e @ IoError.Other(_) => handle_other(e),
+    }
+}
+
+// Try with complex recover patterns
+fn test_complex_recover_patterns() {
+    try {
+        parse_data(input)?
+    } recover {
+        ParseError { line, column, message } => {
+            log_error(line, column, message);
+            default_value()
+        },
+        ValidationError { field_name, reason } => {
+            mark_invalid(field_name, reason);
+            None
+        },
+    }
+}
+
+// Try with or-patterns in recover
+fn test_or_patterns() {
+    try {
+        network_request()?
+    } recover {
+        NetworkError.Timeout | NetworkError.Refused => retry(),
+        NetworkError.DnsError(e) | NetworkError.SslError(e) => log_and_fail(e),
+        _ => unknown_error(),
+    }
+}
+
+// Try with guards in recover
+fn test_guards_in_recover() {
+    try {
+        compute()?
+    } recover {
+        e if e.is_retriable() => retry(e),
+        e if e.is_fatal() => panic(e),
+        e => log_and_continue(e),
+    }
+}
+
+// Try with where clause in recover
+fn test_where_clause() {
+    try {
+        process()?
+    } recover {
+        e where e.code() == 404 => not_found(),
+        e where e.code() >= 500 => server_error(e),
+        e => client_error(e),
+    }
+}
+
+// Try with binding in recover
+fn test_binding() {
+    try {
+        fetch_user(id)?
+    } recover {
+        NotFoundError { id: user_id, .. } => create_user(user_id),
+        err @ AuthError { .. } => {
+            log(err);
+            redirect_to_login()
+        },
+    }
+}
+
+// Try with nested patterns in recover
+fn test_nested_patterns() {
+    try {
+        process_response()?
+    } recover {
+        Response { status: 200..=299, body: Some(data) } => success(data),
+        Response { status: 400..=499, body: Some(error) } => client_error(error),
+        Response { status: 500..=599, .. } => server_error(),
+        _ => unknown_response(),
+    }
+}
+
+// Try with multiple error types
+fn test_multiple_error_types() {
+    try {
+        let data = read_file(path)?;
+        let parsed = parse_json(data)?;
+        let validated = validate(parsed)?;
+        validated
+    } recover {
+        IoError(e) => handle_io(e),
+        ParseError(e) => handle_parse(e),
+        ValidationError(e) => handle_validation(e),
+    }
+}
+
+// Try finally with complex cleanup
+fn test_complex_cleanup() {
+    try {
+        let resource = acquire_resource()?;
+        use_resource(resource)?
+    } finally {
+        if resource_acquired {
+            release_resource();
+        }
+        log_completion();
+        metrics.record();
+    }
+}
+
+// Try recover finally combination
+fn test_recover_finally() {
+    try {
+        let conn = connect()?;
+        let result = query(conn, sql)?;
+        result
+    } recover {
+        ConnectionError(e) => {
+            log_connection_error(e);
+            cached_result()
+        },
+        QueryError(e) => {
+            log_query_error(e);
+            empty_result()
+        },
+    } finally {
+        disconnect();
+        cleanup();
+    }
+}
+
+// Nested try blocks with different error handling
+fn test_nested_try() {
+    try {
+        try {
+            inner_risky_op()?
+        } recover {
+            InnerError(e) => handle_inner(e),
+        }
+    } recover {
+        OuterError(e) => handle_outer(e),
+    }
+}
+
+// Try with async operations
+async fn async_try_example() {
+    try {
+        let response = fetch(url).await?;
+        let data = response.json().await?;
+        data
+    } recover {
+        FetchError(e) => {
+            log_error(e).await;
+            default_data()
+        },
+    }
+}
+
+// Try with context
+fn try_with_context() using [Database, Logger] {
+    try {
+        let user = Database.find_user(id)?;
+        Logger.info("Found user");
+        user
+    } recover {
+        DbError(e) => {
+            Logger.error("Database error");
+            None
+        },
+    }
+}
+
+// Try as expression with type annotation
+fn test_try_expr_typed() {
+    let result: Result<Int, Error> = try {
+        let a = compute_a()?;
+        let b = compute_b()?;
+        a + b
+    };
+}
+
+// Try with pattern binding in recover block
+fn test_pattern_binding() {
+    try {
+        complex_operation()?
+    } recover |e| {
+        let Error { message, code, details } = e;
+        ErrorReport { message, code, details, timestamp: now() }
+    }
+}
+
+// Try with early return in recover
+fn try_with_return() -> Result<Int, Error> {
+    try {
+        risky()?
+    } recover {
+        CriticalError(e) => Err(e),
+        RecoverableError(e) => Ok(default_value()),
+    }
+}
+
+// Try with break/continue in loop context
+fn try_in_loop() {
+    for item in items {
+        try {
+            process(item)?
+        } recover {
+            SkipError(_) => continue,
+            StopError(_) => break,
+            e => log(e),
+        }
+    }
+}
+
+// Try with spawn in recover
+fn test_spawn_in_recover() {
+    try {
+        operation()?
+    } recover {
+        AsyncError(e) => {
+            spawn log_async_error(e);
+            fallback()
+        },
+    }
+}
+
+// Try with defer interaction
+fn try_with_defer() {
+    defer cleanup();
+
+    try {
+        risky_operation()?
+    } recover |e| {
+        log_error(e);
+        // cleanup still runs
+    }
+}
+
+// Try with complex finally expressions
+fn test_complex_finally() {
+    try {
+        operation()
+    } finally {
+        // Multiple statements in finally
+        save_state();
+        flush_buffers();
+        close_connections();
+        log_completion();
+
+        // Even nested control flow
+        if needs_report {
+            generate_report();
+        }
+    }
+}
+
+// Try returning from within
+fn try_with_early_returns() -> Maybe<Int> {
+    try {
+        if condition1 {
+            return None;
+        }
+        let value = compute()?;
+        if condition2 {
+            return Some(value);
+        }
+        value
+    } recover |_| None
+}
+
+// Chain of try expressions
+fn test_chain_of_try() {
+    let result = try { op1()? }
+        .and_then(|v| try { op2(v)? })
+        .and_then(|v| try { op3(v)? });
+}
+
+// Try with map operations
+fn test_try_with_map() {
+    let mapped = try {
+        fetch()?.map(|x| x * 2)?
+    } recover |_| [];
+}

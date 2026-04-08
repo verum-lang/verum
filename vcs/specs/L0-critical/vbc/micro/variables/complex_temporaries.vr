@@ -1,0 +1,32 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: vbc, registers, temporaries
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Test with many temporary values in one expression requiring register management
+
+fn main() {
+    // Many nested operations requiring temporaries
+    // (1+2)*(3+4) = 3*7 = 21
+    // (5+6)*(7+8) = 11*15 = 165
+    // (9+10)*(11+12) = 19*23 = 437
+    // (13+14)*(15+16) = 27*31 = 837
+    // Total = 21 + 165 + 437 + 837 = 1460
+    let result = ((1 + 2) * (3 + 4)) + ((5 + 6) * (7 + 8)) +
+                 ((9 + 10) * (11 + 12)) + ((13 + 14) * (15 + 16));
+    assert_eq(result, 1460);
+
+    // Even more deeply nested to stress temporary allocation
+    let deep = (((1 + 2) + (3 + 4)) * ((5 + 6) + (7 + 8))) +
+               (((9 + 10) + (11 + 12)) * ((13 + 14) + (15 + 16)));
+    // ((3+7) * (11+15)) + ((19+23) * (27+31))
+    // (10 * 26) + (42 * 58)
+    // 260 + 2436 = 2696
+    assert_eq(deep, 2696);
+
+    // Chain of binary operations with alternating operators
+    let chain = 1 + 2 * 3 - 4 + 5 * 6 - 7 + 8 * 9 - 10;
+    // 1 + 6 - 4 + 30 - 7 + 72 - 10 = 88
+    assert_eq(chain, 88);
+}

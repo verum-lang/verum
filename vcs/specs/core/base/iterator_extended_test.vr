@@ -1,0 +1,581 @@
+// =============================================================================
+// iterator_extended_test.vr - Tests for extended iterator methods
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, iterator, extended, sorting, partitioning
+// @description: Tests for is_sorted, is_sorted_by, is_sorted_by_key,
+//               is_partitioned, try_for_each, try_find, map_while,
+//               intersperse_with, ne, ExactSizeIterator, FusedIterator
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.ordering.{Ordering};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.{List, list};
+
+// =============================================================================
+// PART 1: is_sorted
+// =============================================================================
+
+@test
+fn test_is_sorted_ascending() {
+    let v = [1, 2, 3, 4, 5];
+    assert(v.iter().is_sorted());
+}
+
+@test
+fn test_is_sorted_not_sorted() {
+    let v = [1, 3, 2, 4, 5];
+    assert(!v.iter().is_sorted());
+}
+
+@test
+fn test_is_sorted_empty() {
+    let v: List<Int> = List.new();
+    assert(v.iter().is_sorted());
+}
+
+@test
+fn test_is_sorted_single() {
+    let v = [42];
+    assert(v.iter().is_sorted());
+}
+
+@test
+fn test_is_sorted_equal_elements() {
+    let v = [3, 3, 3, 3];
+    assert(v.iter().is_sorted());
+}
+
+@test
+fn test_is_sorted_descending() {
+    let v = [5, 4, 3, 2, 1];
+    assert(!v.iter().is_sorted());
+}
+
+@test
+fn test_is_sorted_two_sorted() {
+    let v = [1, 2];
+    assert(v.iter().is_sorted());
+}
+
+@test
+fn test_is_sorted_two_unsorted() {
+    let v = [2, 1];
+    assert(!v.iter().is_sorted());
+}
+
+@test
+fn test_is_sorted_range() {
+    assert(range(0, 100).is_sorted());
+}
+
+// =============================================================================
+// PART 2: is_sorted_by
+// =============================================================================
+
+fn cmp_ascending(a: &Int, b: &Int) -> Ordering {
+    if *a < *b { Ordering.Less }
+    else if *a > *b { Ordering.Greater }
+    else { Ordering.Equal }
+}
+
+fn cmp_descending(a: &Int, b: &Int) -> Ordering {
+    if *a > *b { Ordering.Less }
+    else if *a < *b { Ordering.Greater }
+    else { Ordering.Equal }
+}
+
+@test
+fn test_is_sorted_by_ascending() {
+    let v = [1, 2, 3, 4, 5];
+    assert(v.iter().is_sorted_by(cmp_ascending));
+}
+
+@test
+fn test_is_sorted_by_descending() {
+    let v = [5, 4, 3, 2, 1];
+    assert(v.iter().is_sorted_by(cmp_descending));
+}
+
+@test
+fn test_is_sorted_by_not_sorted() {
+    let v = [1, 3, 2];
+    assert(!v.iter().is_sorted_by(cmp_ascending));
+}
+
+@test
+fn test_is_sorted_by_empty() {
+    let v: List<Int> = List.new();
+    assert(v.iter().is_sorted_by(cmp_ascending));
+}
+
+@test
+fn test_is_sorted_by_single() {
+    let v = [42];
+    assert(v.iter().is_sorted_by(cmp_ascending));
+}
+
+// =============================================================================
+// PART 3: is_sorted_by_key
+// =============================================================================
+
+fn negate(x: &Int) -> Int {
+    0 - *x
+}
+
+fn identity(x: &Int) -> Int {
+    *x
+}
+
+fn abs_val(x: &Int) -> Int {
+    if *x < 0 { 0 - *x } else { *x }
+}
+
+@test
+fn test_is_sorted_by_key_ascending() {
+    let v = [1, 2, 3, 4, 5];
+    assert(v.iter().is_sorted_by_key(identity));
+}
+
+@test
+fn test_is_sorted_by_key_negated() {
+    let v = [5, 4, 3, 2, 1];
+    assert(v.iter().is_sorted_by_key(negate));
+}
+
+@test
+fn test_is_sorted_by_key_abs() {
+    let v = [1, -2, 3, -4];
+    assert(v.iter().is_sorted_by_key(abs_val));
+}
+
+@test
+fn test_is_sorted_by_key_not_sorted() {
+    let v = [1, 3, 2];
+    assert(!v.iter().is_sorted_by_key(identity));
+}
+
+@test
+fn test_is_sorted_by_key_empty() {
+    let v: List<Int> = List.new();
+    assert(v.iter().is_sorted_by_key(identity));
+}
+
+// =============================================================================
+// PART 4: is_partitioned
+// =============================================================================
+
+fn is_positive(x: &Int) -> Bool {
+    *x > 0
+}
+
+fn is_even(x: &Int) -> Bool {
+    *x % 2 == 0
+}
+
+fn always_true(_x: &Int) -> Bool {
+    true
+}
+
+fn always_false(_x: &Int) -> Bool {
+    false
+}
+
+@test
+fn test_is_partitioned_true() {
+    // All positive elements come before all non-positive
+    let v = [3, 1, 2, 0, -1, -2];
+    assert(v.iter().is_partitioned(is_positive));
+}
+
+@test
+fn test_is_partitioned_false() {
+    // Positive, negative, then positive again
+    let v = [1, -1, 2];
+    assert(!v.iter().is_partitioned(is_positive));
+}
+
+@test
+fn test_is_partitioned_all_true() {
+    let v = [1, 2, 3, 4, 5];
+    assert(v.iter().is_partitioned(is_positive));
+}
+
+@test
+fn test_is_partitioned_all_false() {
+    let v = [-1, -2, -3];
+    assert(v.iter().is_partitioned(is_positive));
+}
+
+@test
+fn test_is_partitioned_empty() {
+    let v: List<Int> = List.new();
+    assert(v.iter().is_partitioned(is_positive));
+}
+
+@test
+fn test_is_partitioned_single_true() {
+    let v = [1];
+    assert(v.iter().is_partitioned(is_positive));
+}
+
+@test
+fn test_is_partitioned_single_false() {
+    let v = [-1];
+    assert(v.iter().is_partitioned(is_positive));
+}
+
+@test
+fn test_is_partitioned_even_odd() {
+    // Even before odd
+    let v = [2, 4, 6, 1, 3, 5];
+    assert(v.iter().is_partitioned(is_even));
+}
+
+@test
+fn test_is_partitioned_not_even_odd() {
+    // Even, odd, even — not partitioned
+    let v = [2, 1, 4];
+    assert(!v.iter().is_partitioned(is_even));
+}
+
+// =============================================================================
+// PART 5: try_for_each
+// =============================================================================
+
+fn check_positive(x: Int) -> Result<(), Text> {
+    if x > 0 {
+        Ok(())
+    } else {
+        Err("non-positive")
+    }
+}
+
+fn always_ok(x: Int) -> Result<(), Text> {
+    Ok(())
+}
+
+@test
+fn test_try_for_each_all_ok() {
+    let v = [1, 2, 3, 4, 5];
+    let mut iter = v.iter().map(|x| *x);
+    let result = iter.try_for_each(check_positive);
+    assert(result.is_ok());
+}
+
+@test
+fn test_try_for_each_short_circuit() {
+    let v = [1, 2, -1, 4, 5];
+    let mut iter = v.iter().map(|x| *x);
+    let result = iter.try_for_each(check_positive);
+    assert(result.is_err());
+}
+
+@test
+fn test_try_for_each_empty() {
+    let v: List<Int> = List.new();
+    let mut iter = v.iter().map(|x| *x);
+    let result = iter.try_for_each(check_positive);
+    assert(result.is_ok());
+}
+
+@test
+fn test_try_for_each_first_fails() {
+    let v = [-1, 2, 3];
+    let mut iter = v.iter().map(|x| *x);
+    let result = iter.try_for_each(check_positive);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// PART 6: try_find
+// =============================================================================
+
+fn find_if_positive(x: &Int) -> Result<Bool, Text> {
+    if *x < -100 {
+        Err("value too negative")
+    } else {
+        Ok(*x > 10)
+    }
+}
+
+@test
+fn test_try_find_found() {
+    let v = [1, 5, 15, 20];
+    let mut iter = v.iter().map(|x| *x);
+    let result = iter.try_find(find_if_positive);
+    match result {
+        Ok(Some(val)) => assert_eq(val, 15),
+        _ => panic("Expected Ok(Some(15))"),
+    }
+}
+
+@test
+fn test_try_find_not_found() {
+    let v = [1, 2, 3];
+    let mut iter = v.iter().map(|x| *x);
+    let result = iter.try_find(find_if_positive);
+    match result {
+        Ok(None) => {} // expected
+        _ => panic("Expected Ok(None)"),
+    }
+}
+
+@test
+fn test_try_find_error() {
+    let v = [1, -200, 15];
+    let mut iter = v.iter().map(|x| *x);
+    let result = iter.try_find(find_if_positive);
+    assert(result.is_err());
+}
+
+@test
+fn test_try_find_empty() {
+    let v: List<Int> = List.new();
+    let mut iter = v.iter().map(|x| *x);
+    let result = iter.try_find(find_if_positive);
+    match result {
+        Ok(None) => {} // expected
+        _ => panic("Expected Ok(None)"),
+    }
+}
+
+// =============================================================================
+// PART 7: map_while
+// =============================================================================
+
+fn try_parse_positive(x: Int) -> Maybe<Int> {
+    if x > 0 {
+        Some(x * 10)
+    } else {
+        None
+    }
+}
+
+@test
+fn test_map_while_basic() {
+    let v = [1, 2, 3, -1, 5];
+    let result: List<Int> = v.iter().map(|x| *x).map_while(try_parse_positive).collect();
+
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 10);
+    assert_eq(result[1], 20);
+    assert_eq(result[2], 30);
+}
+
+@test
+fn test_map_while_all_pass() {
+    let v = [1, 2, 3];
+    let result: List<Int> = v.iter().map(|x| *x).map_while(try_parse_positive).collect();
+
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 10);
+    assert_eq(result[1], 20);
+    assert_eq(result[2], 30);
+}
+
+@test
+fn test_map_while_first_fails() {
+    let v = [-1, 2, 3];
+    let result: List<Int> = v.iter().map(|x| *x).map_while(try_parse_positive).collect();
+
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_map_while_empty() {
+    let v: List<Int> = List.new();
+    let result: List<Int> = v.iter().map(|x| *x).map_while(try_parse_positive).collect();
+
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_map_while_stops_early() {
+    let v = [1, 2, 0, 3, 4];
+    let result: List<Int> = v.iter().map(|x| *x).map_while(try_parse_positive).collect();
+
+    // Should stop at 0
+    assert_eq(result.len(), 2);
+    assert_eq(result[0], 10);
+    assert_eq(result[1], 20);
+}
+
+// =============================================================================
+// PART 8: intersperse_with
+// =============================================================================
+
+fn make_separator() -> Int {
+    0
+}
+
+fn make_dash() -> Int {
+    -1
+}
+
+@test
+fn test_intersperse_with_basic() {
+    let v = [1, 2, 3];
+    let result: List<Int> = v.iter().map(|x| *x).intersperse_with(make_separator).collect();
+
+    assert_eq(result.len(), 5);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 0);
+    assert_eq(result[2], 2);
+    assert_eq(result[3], 0);
+    assert_eq(result[4], 3);
+}
+
+@test
+fn test_intersperse_with_single() {
+    let v = [42];
+    let result: List<Int> = v.iter().map(|x| *x).intersperse_with(make_separator).collect();
+
+    assert_eq(result.len(), 1);
+    assert_eq(result[0], 42);
+}
+
+@test
+fn test_intersperse_with_empty() {
+    let v: List<Int> = List.new();
+    let result: List<Int> = v.iter().map(|x| *x).intersperse_with(make_separator).collect();
+
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_intersperse_with_two() {
+    let v = [10, 20];
+    let result: List<Int> = v.iter().map(|x| *x).intersperse_with(make_dash).collect();
+
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 10);
+    assert_eq(result[1], -1);
+    assert_eq(result[2], 20);
+}
+
+// =============================================================================
+// PART 9: ne (not equal)
+// =============================================================================
+
+@test
+fn test_ne_different() {
+    let a = [1, 2, 3];
+    let b = [1, 2, 4];
+    assert(a.iter().ne(b.iter()));
+}
+
+@test
+fn test_ne_equal() {
+    let a = [1, 2, 3];
+    let b = [1, 2, 3];
+    assert(!a.iter().ne(b.iter()));
+}
+
+@test
+fn test_ne_different_lengths() {
+    let a = [1, 2, 3];
+    let b = [1, 2];
+    assert(a.iter().ne(b.iter()));
+}
+
+@test
+fn test_ne_both_empty() {
+    let a: List<Int> = List.new();
+    let b: List<Int> = List.new();
+    assert(!a.iter().ne(b.iter()));
+}
+
+// =============================================================================
+// PART 10: Integration Tests
+// =============================================================================
+
+@test
+fn test_is_sorted_after_sort() {
+    let mut v: List<Int> = list([5, 3, 1, 4, 2]);
+    v.sort();
+    assert(v.iter().is_sorted());
+}
+
+@test
+fn test_map_while_with_is_sorted() {
+    let v = [1, 2, 3, -1, 2, 3];
+    // map_while takes only the positive prefix
+    let result: List<Int> = v.iter().map(|x| *x).map_while(try_parse_positive).collect();
+
+    // [10, 20, 30] — should be sorted
+    assert(result.iter().is_sorted());
+}
+
+@test
+fn test_is_partitioned_after_partition() {
+    let v: List<Int> = list([1, -2, 3, -4, 5, -6]);
+    // Partition: positives first, then negatives
+    let mut positives: List<Int> = List.new();
+    let mut negatives: List<Int> = List.new();
+    for x in v.iter() {
+        if *x > 0 {
+            positives.push(*x);
+        } else {
+            negatives.push(*x);
+        }
+    }
+    positives.extend(negatives.iter().map(|x| *x));
+    // positives is now [1, 3, 5, -2, -4, -6]
+    assert(positives.iter().is_partitioned(is_positive));
+}
+
+@test
+fn test_chain_is_sorted() {
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    assert(a.iter().chain(b.iter()).is_sorted());
+}
+
+@test
+fn test_chain_not_sorted() {
+    let a = [1, 2, 3];
+    let b = [2, 5, 6];
+    assert(!a.iter().chain(b.iter()).is_sorted());
+}
+
+@test
+fn test_intersperse_with_then_collect() {
+    let v = [10, 20, 30, 40];
+    let result: List<Int> = v.iter().map(|x| *x).intersperse_with(make_separator).collect();
+
+    // [10, 0, 20, 0, 30, 0, 40]
+    assert_eq(result.len(), 7);
+    assert_eq(result[0], 10);
+    assert_eq(result[6], 40);
+    // All separators are 0
+    assert_eq(result[1], 0);
+    assert_eq(result[3], 0);
+    assert_eq(result[5], 0);
+}
+
+@test
+fn test_try_for_each_with_range() {
+    let mut sum = 0;
+    let mut iter = range(1, 6);
+    let result = iter.try_for_each(|x| {
+        sum = sum + x;
+        Ok(())
+    });
+    assert(result.is_ok());
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_range_is_sorted() {
+    assert(range(0, 10).is_sorted());
+    assert(range(0, 1).is_sorted());
+    assert(range(0, 0).is_sorted());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

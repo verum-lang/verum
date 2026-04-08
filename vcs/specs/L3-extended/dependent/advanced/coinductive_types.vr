@@ -1,0 +1,148 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, coinductive, streams, advanced
+
+/// Coinductive types - potentially infinite data structures
+///
+/// Using iterative approaches to avoid recursion detection issues.
+
+/// Stream interface using closures (non-recursive)
+type StreamIter<T> is {
+    state: Int,
+    generator: fn(Int) -> (T, Int),
+};
+
+/// Create a stream from a generator function
+fn make_stream<T>(init: Int, gen: fn(Int) -> (T, Int)) -> StreamIter<T> {
+    StreamIter { state: init, generator: gen }
+}
+
+/// Get current value and advance
+fn stream_next<T>(s: StreamIter<T>) -> (T, StreamIter<T>) {
+    let (val, next_state) = (s.generator)(s.state);
+    (val, StreamIter { state: next_state, generator: s.generator })
+}
+
+/// Take first n elements from stream
+fn stream_take<T>(s: StreamIter<T>, n: Int) -> List<T> {
+    let mut result: List<T> = [];
+    let mut current = s;
+    let mut i = 0;
+    while i < n {
+        let (val, next) = stream_next(current);
+        result.push(val);
+        current = next;
+        i = i + 1;
+    }
+    result
+}
+
+/// Natural numbers stream: 0, 1, 2, ...
+fn nats() -> StreamIter<Int> {
+    make_stream(0, |n| (n, n + 1))
+}
+
+/// Constant stream
+fn constant<T>(value: T) -> StreamIter<T> {
+    make_stream(0, |n| (value, n + 1))
+}
+
+/// Map over stream
+fn stream_map<A, B>(s: StreamIter<A>, f: fn(A) -> B) -> StreamIter<B> {
+    make_stream(s.state, |n| {
+        let (val, next) = (s.generator)(n);
+        (f(val), next)
+    })
+}
+
+/// Get nth element
+fn stream_nth<T>(s: StreamIter<T>, n: Int) -> T {
+    let mut current = s;
+    let mut i = 0;
+    while i < n {
+        let (_, next) = stream_next(current);
+        current = next;
+        i = i + 1;
+    }
+    let (val, _) = stream_next(current);
+    val
+}
+
+/// Fibonacci stream
+fn fibs() -> StreamIter<Int> {
+    // Use state = (a, b) encoded as a * 1000000 + b (simple encoding)
+    make_stream(1, |state| {
+        let a = state / 1000000;
+        let b = state % 1000000;
+        (a, b * 1000000 + (a + b))
+    })
+}
+
+/// Powers of 2
+fn powers_of_2() -> StreamIter<Int> {
+    make_stream(1, |n| (n, n * 2))
+}
+
+/// Arithmetic sequence
+fn arithmetic(start: Int, step: Int) -> StreamIter<Int> {
+    make_stream(start, |n| (n, n + step))
+}
+
+/// Geometric sequence
+fn geometric(start: Int, ratio: Int) -> StreamIter<Int> {
+    make_stream(start, |n| (n, n * ratio))
+}
+
+/// Zip two streams
+fn stream_zip<A, B>(a: StreamIter<A>, b: StreamIter<B>) -> List<(A, B)> {
+    // Can only zip finite portions
+    let as_list = stream_take(a, 10);
+    let bs_list = stream_take(b, 10);
+    as_list.zip(bs_list)
+}
+
+/// Scan: running accumulation (finite)
+fn stream_scan(s: StreamIter<Int>, n: Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut acc = 0;
+    let mut current = s;
+    let mut i = 0;
+    while i < n {
+        let (val, next) = stream_next(current);
+        acc = acc + val;
+        result.push(acc);
+        current = next;
+        i = i + 1;
+    }
+    result
+}
+
+fn main() {
+    // Natural numbers
+    let nums = nats();
+    assert(stream_take(nums, 5) == [0, 1, 2, 3, 4]);
+
+    // Constant stream
+    let ones = constant(1);
+    assert(stream_take(ones, 5) == [1, 1, 1, 1, 1]);
+
+    // Map
+    let doubled = stream_map(nats(), |n| n * 2);
+    assert(stream_take(doubled, 5) == [0, 2, 4, 6, 8]);
+
+    // Nth element
+    assert(stream_nth(nats(), 10) == 10);
+
+    // Powers of 2
+    let pows = powers_of_2();
+    assert(stream_take(pows, 5) == [1, 2, 4, 8, 16]);
+
+    // Arithmetic sequence
+    let arith = arithmetic(5, 3);
+    assert(stream_take(arith, 5) == [5, 8, 11, 14, 17]);
+
+    // Running sum
+    let sums = stream_scan(nats(), 5);
+    assert(sums == [0, 1, 3, 6, 10]);
+}

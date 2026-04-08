@@ -1,0 +1,149 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, huffman, encoding, compression
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+// Count frequencies of values 0..7 in data
+fn count_freqs(data: Arr8, n: Int) -> Arr8 {
+    let mut freq = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let mut i = 0;
+    while i < n {
+        let v = get(data, i);
+        freq = set(freq, v, get(freq, v) + 1);
+        i = i + 1;
+    }
+    freq
+}
+
+// Sort by frequency (selection sort on indices)
+fn sort_by_freq(freq: Arr8, n: Int) -> Arr8 {
+    // Return sorted indices (ascending frequency)
+    let mut indices = Arr8 { d0: 0, d1: 1, d2: 2, d3: 3, d4: 4, d5: 5, d6: 6, d7: 7 };
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if get(freq, get(indices, j)) < get(freq, get(indices, min_idx)) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            let tmp = get(indices, i);
+            indices = set(indices, i, get(indices, min_idx));
+            indices = set(indices, min_idx, tmp);
+        }
+        i = i + 1;
+    }
+    indices
+}
+
+// Compute weighted path length (approximation of Huffman cost)
+// For sorted frequencies, use the merge approach:
+// cost = sum of all intermediate merge frequencies
+fn weighted_cost(freq: Arr8, n: Int) -> Int {
+    // Simple approximation: assign depth based on frequency rank
+    // Most frequent = shortest code, least frequent = longest
+    // depth[i] = n - 1 - rank (simplified)
+    let sorted = sort_by_freq(freq, n);
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let sym = get(sorted, i);
+        let f = get(freq, sym);
+        if f > 0 {
+            // Approximate depth = n - 1 - i (lower freq = deeper)
+            total = total + f * (n - 1 - i + 1);
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// Shannon entropy approximation: sum of freq * ceil(log2(total/freq))
+fn entropy_bits(freq: Arr8, n: Int, total: Int) -> Int {
+    // Simple: for each symbol, bits = ceil_log2(total / freq)
+    let mut bits = 0;
+    let mut i = 0;
+    while i < n {
+        let f = get(freq, i);
+        if f > 0 {
+            // log2(total/f) approximated by bit count of (total/f)
+            let ratio = total / f;
+            let mut b = 0;
+            let mut r = ratio;
+            while r > 1 { r = r / 2; b = b + 1; }
+            bits = bits + f * b;
+        }
+        i = i + 1;
+    }
+    bits
+}
+
+fn main() -> Int {
+    // Data: [0,0,0,0,1,1,2,3] — 4 zeros, 2 ones, 1 two, 1 three
+    let data = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 1, d5: 1, d6: 2, d7: 3 };
+
+    let freq = count_freqs(data, 8);
+    assert_eq(get(freq, 0), 4);
+    assert_eq(get(freq, 1), 2);
+    assert_eq(get(freq, 2), 1);
+    assert_eq(get(freq, 3), 1);
+    assert_eq(get(freq, 4), 0);
+
+    // Sorted by frequency: [4,5,6,7, 2,3, 1, 0] → indices where freq increases
+    let sorted = sort_by_freq(freq, 8);
+    // First should be symbols with freq=0
+    assert_eq(get(freq, get(sorted, 0)), 0);
+    // Last should be symbol 0 (freq=4)
+    assert_eq(get(sorted, 7), 0);
+
+    // Total symbols
+    let mut total = 0;
+    let mut i = 0;
+    while i < 8 {
+        total = total + get(freq, i);
+        i = i + 1;
+    }
+    assert_eq(total, 8);
+
+    // Entropy bits (lower bound)
+    let eb = entropy_bits(freq, 4, total);
+    // Symbol 0: freq=4, ratio=2, bits=1, contribution=4
+    // Symbol 1: freq=2, ratio=4, bits=2, contribution=4
+    // Symbol 2: freq=1, ratio=8, bits=3, contribution=3
+    // Symbol 3: freq=1, ratio=8, bits=3, contribution=3
+    // Total = 14
+    assert_eq(eb, 14);
+
+    // Uniform distribution should have higher entropy
+    let uniform = Arr8 { d0: 2, d1: 2, d2: 2, d3: 2, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let eb_uniform = entropy_bits(uniform, 4, 8);
+    // Each: freq=2, ratio=4, bits=2, contribution=4. Total=16
+    assert_eq(eb_uniform, 16);
+
+    // Skewed should have lower entropy
+    assert_eq(eb < eb_uniform, true);
+
+    print("DIFF_OK: huffman");
+    0
+}

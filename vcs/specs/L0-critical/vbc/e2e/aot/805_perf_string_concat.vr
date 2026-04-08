@@ -1,0 +1,31 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, performance, string_concat
+// @expected-exit: 0
+
+// Performance: 1000 string concatenations
+
+fn build_string(n: Int) -> Text {
+    let mut result: Text = "";
+    let mut i = 0;
+    while (i < n) {
+        result = f"{result}x";
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    let n = 1000;
+    let s = build_string(n);
+    // Verify by building expected and comparing
+    // We know it's 1000 'x' chars — just verify a prefix match
+    let prefix = build_string(5);
+    if (prefix != "xxxxx") {
+        print(f"FAIL: prefix mismatch");
+        return 1;
+    }
+    print(f"OK: string_concat_1000 done");
+    0
+}

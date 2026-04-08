@@ -1,0 +1,110 @@
+// @test: verify-pass
+// @level: L1
+// @tags: dependent-types, invariant, loop, verification
+
+/// Loop invariants with dependent types -- using invariant and
+/// decreases clauses to verify loop correctness.
+
+type Natural is Int{>= 0};
+type Positive is Int{> 0};
+
+// Simple loop with invariant
+fn sum_to(n: Natural) -> Natural {
+    let mut total: Natural = 0;
+    let mut i: Natural = 0;
+    while i <= n
+        invariant total == i * (i - 1) / 2
+        invariant i >= 0
+        decreases n - i
+    {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+// Binary search with decreases
+fn binary_search(xs: List<Int>, target: Int) -> Maybe<Natural> {
+    let mut lo: Natural = 0;
+    let mut hi: Natural = xs.len();
+    while lo < hi
+        invariant lo >= 0
+        invariant hi <= xs.len()
+        decreases hi - lo
+    {
+        let mid = lo + (hi - lo) / 2;
+        if xs[mid] == target {
+            return Some(mid);
+        } else if xs[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    None
+}
+
+// Insertion sort with invariant
+fn insertion_sort(xs: List<Int>) -> List<Int> {
+    let mut result = xs;
+    let mut i = 1;
+    while i < result.len()
+        invariant i >= 1
+        // result[0..i] is sorted
+        decreases result.len() - i
+    {
+        let key = result[i];
+        let mut j = i - 1;
+        while j >= 0 && result[j] > key
+            decreases j + 1
+        {
+            result[j + 1] = result[j];
+            j = j - 1;
+        }
+        result[j + 1] = key;
+        i = i + 1;
+    }
+    result
+}
+
+// GCD with decreasing argument
+fn gcd(a: Positive, b: Positive) -> Positive
+    decreases b
+{
+    if a == b { a }
+    else if a > b { gcd(a - b, b) }
+    else { gcd(a, b - a) }
+}
+
+// Accumulator loop preserving invariant
+fn factorial(n: Natural) -> Positive {
+    let mut result: Positive = 1;
+    let mut i: Natural = 1;
+    while i <= n
+        invariant result > 0
+        decreases n - i + 1
+    {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+fn main() {
+    assert(sum_to(10) == 55);
+    assert(sum_to(0) == 0);
+
+    let sorted = [1, 3, 5, 7, 9, 11];
+    assert(binary_search(sorted, 7) == Some(3));
+    assert(binary_search(sorted, 4) == None);
+
+    let unsorted = [5, 2, 8, 1, 9, 3];
+    let result = insertion_sort(unsorted);
+    assert(result == [1, 2, 3, 5, 8, 9]);
+
+    assert(gcd(12, 8) == 4);
+    assert(gcd(7, 7) == 7);
+
+    assert(factorial(5) == 120);
+    assert(factorial(0) == 1);
+}

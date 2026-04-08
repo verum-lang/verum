@@ -1,0 +1,138 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: modules, visibility, pub, private
+
+/// Module visibility tests.
+/// Verifies visibility modifiers are parsed correctly.
+
+module visibility_demo {
+    // Private by default (no modifier)
+    fn private_function() -> Int {
+        42
+    }
+
+    const PRIVATE_CONST: Int = 100;
+
+    type PrivateType is {
+        value: Int
+    };
+
+    // Public - visible everywhere
+    pub fn public_function() -> Int {
+        private_function() * 2
+    }
+
+    pub const PUBLIC_CONST: Int = 200;
+
+    pub type PublicType is {
+        data: Text
+    };
+
+    // Public within cog only
+    pub(cog) fn cog_function() -> Int {
+        300
+    }
+
+    pub(cog) const COG_CONST: Int = 400;
+
+    pub(cog) type CogType is {
+        id: Int
+    };
+
+    // Public to parent module only
+    pub(super) fn super_function() -> Int {
+        500
+    }
+
+    pub(super) const SUPER_CONST: Int = 600;
+
+    pub(super) type SuperType is {
+        name: Text
+    };
+
+    // Nested module to test visibility inheritance
+    pub module nested {
+        // Can access parent's private items
+        pub fn use_parent_private() -> Int {
+            super.private_function()
+        }
+
+        // Private to this module
+        fn nested_private() -> Int {
+            1000
+        }
+
+        // Public
+        pub fn nested_public() -> Int {
+            nested_private() + super.PUBLIC_CONST
+        }
+
+        // pub(super) here means visible to visibility_demo
+        pub(super) fn nested_super() -> Int {
+            2000
+        }
+    }
+
+    // Another nested module for sibling access tests
+    pub module sibling {
+        // Can access nested's pub(super) because we're in same parent
+        pub fn use_sibling() -> Int {
+            super.nested.nested_public()
+        }
+    }
+}
+
+// Module with protocol visibility
+module protocol_visibility {
+    // Private protocol
+    type PrivateProtocol is protocol {
+        fn secret(&self) -> Int;
+    };
+
+    // Public protocol
+    pub type PublicProtocol is protocol {
+        fn visible(&self) -> Int;
+    };
+
+    // Public type implementing both
+    pub type Implementation is {
+        value: Int
+    };
+
+    implement PrivateProtocol for Implementation {
+        fn secret(&self) -> Int {
+            self.value * 2
+        }
+    }
+
+    implement PublicProtocol for Implementation {
+        fn visible(&self) -> Int {
+            self.value
+        }
+    }
+}
+
+// Module demonstrating visibility with generics
+module generic_visibility {
+    // Private generic type
+    type Container<T> is {
+        item: T
+    };
+
+    // Public generic function
+    pub fn wrap<T>(item: T) -> Container<T> {
+        Container { item: item }
+    }
+
+    pub fn unwrap<T>(container: Container<T>) -> T {
+        container.item
+    }
+}
+
+// Test visibility from outer scope
+fn main() -> Int {
+    // Note: Module visibility testing from main requires module integration.
+    // This test verifies visibility modifier syntax parsing only.
+    0
+}

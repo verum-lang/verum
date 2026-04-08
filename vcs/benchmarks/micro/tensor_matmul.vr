@@ -1,0 +1,311 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: > 100 GFLOPS (optimized), > 500 GFLOPS (with BLAS)
+// @tags: tensor, matmul, simd, performance, numerics
+
+/// Benchmark for matrix multiplication performance
+///
+/// Matrix multiplication is compute-bound and benefits from:
+/// - Cache blocking (tiling)
+/// - SIMD vectorization
+/// - Loop unrolling
+/// - External BLAS libraries
+
+module benchmarks.micro.tensor_matmul
+
+using [Benchmark, Tensor, Linalg]
+
+/// Small matrix multiplication (fits in L1)
+fn benchmark_matmul_small() {
+    let n = 64;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..10_000 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Medium matrix multiplication (fits in L2)
+fn benchmark_matmul_medium() {
+    let n = 256;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..1_000 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Large matrix multiplication (exceeds cache)
+fn benchmark_matmul_large() {
+    let n = 1024;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..10 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Very large matrix multiplication
+fn benchmark_matmul_xlarge() {
+    let n = 2048;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..5 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Non-square matrices (M x K) @ (K x N)
+fn benchmark_matmul_nonsquare() {
+    let m = 512;
+    let k = 1024;
+    let n = 256;
+
+    let a = Tensor.randn<Float>([m, k]);
+    let b = Tensor.randn<Float>([k, n]);
+
+    for _ in 0..100 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Tall-skinny matrix multiplication
+fn benchmark_matmul_tall_skinny() {
+    let a = Tensor.randn<Float>([4096, 64]);
+    let b = Tensor.randn<Float>([64, 64]);
+
+    for _ in 0..500 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Wide-short matrix multiplication
+fn benchmark_matmul_wide_short() {
+    let a = Tensor.randn<Float>([64, 64]);
+    let b = Tensor.randn<Float>([64, 4096]);
+
+    for _ in 0..500 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Float32 matrix multiplication
+fn benchmark_matmul_f32() {
+    let n = 512;
+    let a = Tensor.randn<Float32>([n, n]);
+    let b = Tensor.randn<Float32>([n, n]);
+
+    for _ in 0..100 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Batched matrix multiplication
+fn benchmark_matmul_batched() {
+    let batch = 32;
+    let n = 256;
+
+    let a = Tensor.randn<Float>([batch, n, n]);
+    let b = Tensor.randn<Float>([batch, n, n]);
+
+    for _ in 0..100 {
+        let _ = a.bmm(&b);  // Batched matmul
+    }
+}
+
+/// Batched with broadcast
+fn benchmark_matmul_batched_broadcast() {
+    let batch = 32;
+    let n = 256;
+
+    let a = Tensor.randn<Float>([batch, n, n]);
+    let b = Tensor.randn<Float>([n, n]);  // Will broadcast
+
+    for _ in 0..100 {
+        let _ = a.bmm(&b);
+    }
+}
+
+/// Transposed multiplication (A^T @ B)
+fn benchmark_matmul_transpose_a() {
+    let n = 512;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..100 {
+        let _ = a.t().matmul(&b);
+    }
+}
+
+/// Transposed multiplication (A @ B^T)
+fn benchmark_matmul_transpose_b() {
+    let n = 512;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..100 {
+        let _ = a.matmul(&b.t());
+    }
+}
+
+/// Both transposed (A^T @ B^T)
+fn benchmark_matmul_transpose_both() {
+    let n = 512;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..100 {
+        let _ = a.t().matmul(&b.t());
+    }
+}
+
+/// GEMM: alpha * A @ B + beta * C
+fn benchmark_gemm() {
+    let n = 512;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+    let c = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..100 {
+        let _ = Linalg.gemm(1.0, &a, &b, 1.0, &c);
+    }
+}
+
+/// Matrix-vector multiplication
+fn benchmark_matvec() {
+    let n = 4096;
+    let a = Tensor.randn<Float>([n, n]);
+    let x = Tensor.randn<Float>([n]);
+
+    for _ in 0..500 {
+        let _ = a.mv(&x);
+    }
+}
+
+/// Vector-matrix multiplication
+fn benchmark_vecmat() {
+    let n = 4096;
+    let x = Tensor.randn<Float>([n]);
+    let a = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..500 {
+        let _ = x.vm(&a);
+    }
+}
+
+/// Outer product
+fn benchmark_outer_product() {
+    let n = 1024;
+    let a = Tensor.randn<Float>([n]);
+    let b = Tensor.randn<Float>([n]);
+
+    for _ in 0..1_000 {
+        let _ = a.outer(&b);
+    }
+}
+
+/// Strassen algorithm (for very large matrices)
+fn benchmark_matmul_strassen() {
+    let n = 2048;  // Strassen effective for large n
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..5 {
+        let _ = a.matmul_strassen(&b);
+    }
+}
+
+/// Multi-threaded matmul
+fn benchmark_matmul_parallel() {
+    let n = 1024;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..20 {
+        let _ = a.par_matmul(&b);
+    }
+}
+
+/// Using external BLAS (if available)
+fn benchmark_matmul_blas() {
+    let n = 1024;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..20 {
+        let _ = Linalg.blas_dgemm(&a, &b);
+    }
+}
+
+/// Complex matrix multiplication
+fn benchmark_matmul_complex() {
+    let n = 256;
+    let a = Tensor.randn<Complex<Float>>([n, n]);
+    let b = Tensor.randn<Complex<Float>>([n, n]);
+
+    for _ in 0..100 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Integer matrix multiplication
+fn benchmark_matmul_int() {
+    let n = 256;
+    let a = Tensor.randint<Int32>([n, n], 0, 100);
+    let b = Tensor.randint<Int32>([n, n], 0, 100);
+
+    for _ in 0..100 {
+        let _ = a.matmul(&b);
+    }
+}
+
+/// Chain of multiplications A @ B @ C
+fn benchmark_matmul_chain() {
+    let n = 256;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+    let c = Tensor.randn<Float>([n, n]);
+
+    for _ in 0..100 {
+        // Optimal ordering computed automatically
+        let _ = Tensor.multi_matmul(&[&a, &b, &c]);
+    }
+}
+
+/// In-place GEMM
+fn benchmark_gemm_inplace() {
+    let n = 512;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+    let mut c = Tensor.zeros<Float>([n, n]);
+
+    for _ in 0..100 {
+        Linalg.gemm_inplace(1.0, &a, &b, 0.0, &mut c);
+    }
+}
+
+/// FLOPS measurement
+fn measure_matmul_flops() {
+    let n = 1024;
+    let a = Tensor.randn<Float>([n, n]);
+    let b = Tensor.randn<Float>([n, n]);
+
+    let iterations = 10;
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        let _ = a.matmul(&b);
+    }
+
+    let elapsed = start.elapsed();
+    let flops_per_matmul = 2.0 * (n as Float).powi(3);  // 2n^3 FLOPs
+    let total_flops = flops_per_matmul * (iterations as Float);
+    let gflops = total_flops / elapsed.as_secs_f64() / 1e9;
+
+    print(text("Matrix multiplication: {} GFLOPS", gflops));
+}

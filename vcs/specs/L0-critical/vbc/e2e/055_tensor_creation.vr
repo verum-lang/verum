@@ -1,0 +1,613 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, creation
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Interpreter tensor creation — zeros, ones, fill, identity, arange, linspace, eye, one_hot, from_array
+
+// ============================================================================
+// Base types: 4-element flat array, 2x2 tensor with shape metadata
+// ============================================================================
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+type Tensor2x2 is {
+    rows: Int, cols: Int,
+    d00: Int, d01: Int,
+    d10: Int, d11: Int
+};
+
+// ============================================================================
+// Arr4 helpers
+// ============================================================================
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, val: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 }
+    }
+}
+
+fn arr4_eq(a: Arr4, b: Arr4) -> Bool {
+    a.e0 == b.e0 && a.e1 == b.e1 && a.e2 == b.e2 && a.e3 == b.e3
+}
+
+// ============================================================================
+// Tensor2x2 helpers
+// ============================================================================
+
+fn tensor2x2_get(t: Tensor2x2, r: Int, c: Int) -> Int {
+    if r == 0 && c == 0 { t.d00 }
+    else if r == 0 && c == 1 { t.d01 }
+    else if r == 1 && c == 0 { t.d10 }
+    else { t.d11 }
+}
+
+fn tensor2x2_eq(a: Tensor2x2, b: Tensor2x2) -> Bool {
+    a.rows == b.rows && a.cols == b.cols
+    && a.d00 == b.d00 && a.d01 == b.d01
+    && a.d10 == b.d10 && a.d11 == b.d11
+}
+
+// ============================================================================
+// 3x3 tensor for identity / eye tests
+// ============================================================================
+
+type Tensor3x3 is {
+    rows: Int, cols: Int,
+    d00: Int, d01: Int, d02: Int,
+    d10: Int, d11: Int, d12: Int,
+    d20: Int, d21: Int, d22: Int
+};
+
+fn tensor3x3_get(t: Tensor3x3, r: Int, c: Int) -> Int {
+    if r == 0 && c == 0 { t.d00 }
+    else if r == 0 && c == 1 { t.d01 }
+    else if r == 0 && c == 2 { t.d02 }
+    else if r == 1 && c == 0 { t.d10 }
+    else if r == 1 && c == 1 { t.d11 }
+    else if r == 1 && c == 2 { t.d12 }
+    else if r == 2 && c == 0 { t.d20 }
+    else if r == 2 && c == 1 { t.d21 }
+    else { t.d22 }
+}
+
+// ============================================================================
+// 2x3 rectangular tensor for eye test
+// ============================================================================
+
+type Tensor2x3 is {
+    rows: Int, cols: Int,
+    d00: Int, d01: Int, d02: Int,
+    d10: Int, d11: Int, d12: Int
+};
+
+fn tensor2x3_get(t: Tensor2x3, r: Int, c: Int) -> Int {
+    if r == 0 && c == 0 { t.d00 }
+    else if r == 0 && c == 1 { t.d01 }
+    else if r == 0 && c == 2 { t.d02 }
+    else if r == 1 && c == 0 { t.d10 }
+    else if r == 1 && c == 1 { t.d11 }
+    else { t.d12 }
+}
+
+// ============================================================================
+// 8-element array for one_hot
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+// ============================================================================
+// Tensor creation constructors
+// ============================================================================
+
+fn tensor2x2_zeros() -> Tensor2x2 {
+    Tensor2x2 { rows: 2, cols: 2, d00: 0, d01: 0, d10: 0, d11: 0 }
+}
+
+fn tensor2x2_ones() -> Tensor2x2 {
+    Tensor2x2 { rows: 2, cols: 2, d00: 1, d01: 1, d10: 1, d11: 1 }
+}
+
+fn tensor2x2_fill(val: Int) -> Tensor2x2 {
+    Tensor2x2 { rows: 2, cols: 2, d00: val, d01: val, d10: val, d11: val }
+}
+
+fn tensor2x2_identity() -> Tensor2x2 {
+    Tensor2x2 { rows: 2, cols: 2, d00: 1, d01: 0, d10: 0, d11: 1 }
+}
+
+fn tensor3x3_zeros() -> Tensor3x3 {
+    Tensor3x3 {
+        rows: 3, cols: 3,
+        d00: 0, d01: 0, d02: 0,
+        d10: 0, d11: 0, d12: 0,
+        d20: 0, d21: 0, d22: 0
+    }
+}
+
+fn tensor3x3_identity() -> Tensor3x3 {
+    Tensor3x3 {
+        rows: 3, cols: 3,
+        d00: 1, d01: 0, d02: 0,
+        d10: 0, d11: 1, d12: 0,
+        d20: 0, d21: 0, d22: 1
+    }
+}
+
+fn tensor3x3_fill(val: Int) -> Tensor3x3 {
+    Tensor3x3 {
+        rows: 3, cols: 3,
+        d00: val, d01: val, d02: val,
+        d10: val, d11: val, d12: val,
+        d20: val, d21: val, d22: val
+    }
+}
+
+// arange: create Arr4 with [start, start+1, ..., start+3]
+fn arr4_arange(start: Int) -> Arr4 {
+    Arr4 { e0: start, e1: start + 1, e2: start + 2, e3: start + 3 }
+}
+
+// linspace: n evenly spaced integer values from lo to hi (inclusive)
+// Integer approximation: element[i] = lo + i * (hi - lo) / (n - 1)
+fn arr4_linspace(lo: Int, hi: Int) -> Arr4 {
+    // 4 elements: indices 0, 1, 2, 3 => spacing = (hi - lo) / 3
+    let span = hi - lo;
+    Arr4 {
+        e0: lo,
+        e1: lo + span / 3,
+        e2: lo + 2 * span / 3,
+        e3: hi
+    }
+}
+
+// eye: rectangular 2x3 identity-like matrix (1s on diagonal, 0s elsewhere)
+fn tensor2x3_eye() -> Tensor2x3 {
+    Tensor2x3 {
+        rows: 2, cols: 3,
+        d00: 1, d01: 0, d02: 0,
+        d10: 0, d11: 1, d12: 0
+    }
+}
+
+// one_hot: given index and length, produce array with 1 at index, 0 elsewhere
+fn arr8_one_hot(idx: Int, len: Int) -> Arr8 {
+    Arr8 {
+        e0: if idx == 0 && len > 0 { 1 } else { 0 },
+        e1: if idx == 1 && len > 1 { 1 } else { 0 },
+        e2: if idx == 2 && len > 2 { 1 } else { 0 },
+        e3: if idx == 3 && len > 3 { 1 } else { 0 },
+        e4: if idx == 4 && len > 4 { 1 } else { 0 },
+        e5: if idx == 5 && len > 5 { 1 } else { 0 },
+        e6: if idx == 6 && len > 6 { 1 } else { 0 },
+        e7: if idx == 7 && len > 7 { 1 } else { 0 }
+    }
+}
+
+// from_array: construct tensor from explicit element values
+fn tensor2x2_from(a: Int, b: Int, c: Int, d: Int) -> Tensor2x2 {
+    Tensor2x2 { rows: 2, cols: 2, d00: a, d01: b, d10: c, d11: d }
+}
+
+// Shape metadata type
+type Shape is { dims: Int, dim0: Int, dim1: Int, dim2: Int };
+
+fn shape_2d(r: Int, c: Int) -> Shape {
+    Shape { dims: 2, dim0: r, dim1: c, dim2: 0 }
+}
+
+fn shape_3d(d0: Int, d1: Int, d2: Int) -> Shape {
+    Shape { dims: 3, dim0: d0, dim1: d1, dim2: d2 }
+}
+
+fn shape_numel(s: Shape) -> Int {
+    if s.dims == 2 { s.dim0 * s.dim1 }
+    else if s.dims == 3 { s.dim0 * s.dim1 * s.dim2 }
+    else { s.dim0 }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_zeros() {
+    let z2 = tensor2x2_zeros();
+    assert_eq(z2.rows, 2);
+    assert_eq(z2.cols, 2);
+    assert_eq(z2.d00, 0);
+    assert_eq(z2.d01, 0);
+    assert_eq(z2.d10, 0);
+    assert_eq(z2.d11, 0);
+
+    // Verify via accessor
+    assert_eq(tensor2x2_get(z2, 0, 0), 0);
+    assert_eq(tensor2x2_get(z2, 0, 1), 0);
+    assert_eq(tensor2x2_get(z2, 1, 0), 0);
+    assert_eq(tensor2x2_get(z2, 1, 1), 0);
+
+    // 3x3 zeros
+    let z3 = tensor3x3_zeros();
+    assert_eq(z3.rows, 3);
+    assert_eq(z3.cols, 3);
+    assert_eq(tensor3x3_get(z3, 0, 0), 0);
+    assert_eq(tensor3x3_get(z3, 1, 1), 0);
+    assert_eq(tensor3x3_get(z3, 2, 2), 0);
+    assert_eq(tensor3x3_get(z3, 0, 2), 0);
+    assert_eq(tensor3x3_get(z3, 2, 0), 0);
+
+    print("test_zeros passed");
+}
+
+fn test_ones() {
+    let o2 = tensor2x2_ones();
+    assert_eq(o2.rows, 2);
+    assert_eq(o2.cols, 2);
+    assert_eq(o2.d00, 1);
+    assert_eq(o2.d01, 1);
+    assert_eq(o2.d10, 1);
+    assert_eq(o2.d11, 1);
+
+    // Verify all elements are 1 via accessor
+    assert_eq(tensor2x2_get(o2, 0, 0), 1);
+    assert_eq(tensor2x2_get(o2, 0, 1), 1);
+    assert_eq(tensor2x2_get(o2, 1, 0), 1);
+    assert_eq(tensor2x2_get(o2, 1, 1), 1);
+
+    // Sum of all elements in ones(2x2) = 4
+    let total = o2.d00 + o2.d01 + o2.d10 + o2.d11;
+    assert_eq(total, 4);
+
+    print("test_ones passed");
+}
+
+fn test_fill() {
+    let f7 = tensor2x2_fill(7);
+    assert_eq(f7.rows, 2);
+    assert_eq(f7.cols, 2);
+    assert_eq(f7.d00, 7);
+    assert_eq(f7.d01, 7);
+    assert_eq(f7.d10, 7);
+    assert_eq(f7.d11, 7);
+
+    // Fill with negative
+    let fn3 = tensor2x2_fill(0 - 3);
+    assert_eq(fn3.d00, 0 - 3);
+    assert_eq(fn3.d11, 0 - 3);
+
+    // Fill with zero is same as zeros
+    let fz = tensor2x2_fill(0);
+    assert(tensor2x2_eq(fz, tensor2x2_zeros()));
+
+    // Fill with 1 is same as ones
+    let fo = tensor2x2_fill(1);
+    assert(tensor2x2_eq(fo, tensor2x2_ones()));
+
+    // 3x3 fill
+    let f3 = tensor3x3_fill(42);
+    assert_eq(tensor3x3_get(f3, 0, 0), 42);
+    assert_eq(tensor3x3_get(f3, 1, 2), 42);
+    assert_eq(tensor3x3_get(f3, 2, 1), 42);
+
+    print("test_fill passed");
+}
+
+fn test_identity() {
+    // 2x2 identity
+    let id2 = tensor2x2_identity();
+    assert_eq(id2.rows, 2);
+    assert_eq(id2.cols, 2);
+    assert_eq(id2.d00, 1);
+    assert_eq(id2.d01, 0);
+    assert_eq(id2.d10, 0);
+    assert_eq(id2.d11, 1);
+
+    // Diagonal elements are 1
+    assert_eq(tensor2x2_get(id2, 0, 0), 1);
+    assert_eq(tensor2x2_get(id2, 1, 1), 1);
+
+    // Off-diagonal elements are 0
+    assert_eq(tensor2x2_get(id2, 0, 1), 0);
+    assert_eq(tensor2x2_get(id2, 1, 0), 0);
+
+    // 3x3 identity
+    let id3 = tensor3x3_identity();
+    assert_eq(id3.rows, 3);
+    assert_eq(id3.cols, 3);
+    // Diagonal
+    assert_eq(tensor3x3_get(id3, 0, 0), 1);
+    assert_eq(tensor3x3_get(id3, 1, 1), 1);
+    assert_eq(tensor3x3_get(id3, 2, 2), 1);
+    // Off-diagonal
+    assert_eq(tensor3x3_get(id3, 0, 1), 0);
+    assert_eq(tensor3x3_get(id3, 0, 2), 0);
+    assert_eq(tensor3x3_get(id3, 1, 0), 0);
+    assert_eq(tensor3x3_get(id3, 1, 2), 0);
+    assert_eq(tensor3x3_get(id3, 2, 0), 0);
+    assert_eq(tensor3x3_get(id3, 2, 1), 0);
+
+    // Trace of identity = dimension
+    let trace2 = id2.d00 + id2.d11;
+    assert_eq(trace2, 2);
+    let trace3 = id3.d00 + id3.d11 + id3.d22;
+    assert_eq(trace3, 3);
+
+    print("test_identity passed");
+}
+
+fn test_arange() {
+    // arange(0) -> [0, 1, 2, 3]
+    let a0 = arr4_arange(0);
+    assert_eq(arr4_get(a0, 0), 0);
+    assert_eq(arr4_get(a0, 1), 1);
+    assert_eq(arr4_get(a0, 2), 2);
+    assert_eq(arr4_get(a0, 3), 3);
+
+    // arange(5) -> [5, 6, 7, 8]
+    let a5 = arr4_arange(5);
+    assert_eq(arr4_get(a5, 0), 5);
+    assert_eq(arr4_get(a5, 1), 6);
+    assert_eq(arr4_get(a5, 2), 7);
+    assert_eq(arr4_get(a5, 3), 8);
+
+    // arange(-2) -> [-2, -1, 0, 1]
+    let an = arr4_arange(0 - 2);
+    assert_eq(arr4_get(an, 0), 0 - 2);
+    assert_eq(arr4_get(an, 1), 0 - 1);
+    assert_eq(arr4_get(an, 2), 0);
+    assert_eq(arr4_get(an, 3), 1);
+
+    // Sum of arange(0) = 0+1+2+3 = 6
+    let sum0 = a0.e0 + a0.e1 + a0.e2 + a0.e3;
+    assert_eq(sum0, 6);
+
+    // Consecutive differences are 1
+    assert_eq(arr4_get(a0, 1) - arr4_get(a0, 0), 1);
+    assert_eq(arr4_get(a0, 2) - arr4_get(a0, 1), 1);
+    assert_eq(arr4_get(a0, 3) - arr4_get(a0, 2), 1);
+
+    print("test_arange passed");
+}
+
+fn test_linspace() {
+    // linspace(0, 9) with 4 points -> [0, 3, 6, 9]
+    let ls1 = arr4_linspace(0, 9);
+    assert_eq(arr4_get(ls1, 0), 0);
+    assert_eq(arr4_get(ls1, 1), 3);
+    assert_eq(arr4_get(ls1, 2), 6);
+    assert_eq(arr4_get(ls1, 3), 9);
+
+    // linspace(0, 12) -> [0, 4, 8, 12]
+    let ls2 = arr4_linspace(0, 12);
+    assert_eq(arr4_get(ls2, 0), 0);
+    assert_eq(arr4_get(ls2, 1), 4);
+    assert_eq(arr4_get(ls2, 2), 8);
+    assert_eq(arr4_get(ls2, 3), 12);
+
+    // linspace(10, 40) -> [10, 20, 30, 40]
+    let ls3 = arr4_linspace(10, 40);
+    assert_eq(arr4_get(ls3, 0), 10);
+    assert_eq(arr4_get(ls3, 1), 20);
+    assert_eq(arr4_get(ls3, 2), 30);
+    assert_eq(arr4_get(ls3, 3), 40);
+
+    // First element always equals lo, last always equals hi
+    assert_eq(arr4_get(ls1, 0), 0);
+    assert_eq(arr4_get(ls1, 3), 9);
+    assert_eq(arr4_get(ls3, 0), 10);
+    assert_eq(arr4_get(ls3, 3), 40);
+
+    // linspace(0, 0) -> [0, 0, 0, 0] (degenerate case)
+    let ls0 = arr4_linspace(0, 0);
+    assert_eq(arr4_get(ls0, 0), 0);
+    assert_eq(arr4_get(ls0, 1), 0);
+    assert_eq(arr4_get(ls0, 2), 0);
+    assert_eq(arr4_get(ls0, 3), 0);
+
+    print("test_linspace passed");
+}
+
+fn test_eye() {
+    // 2x3 eye: identity-like rectangular matrix
+    // [[1, 0, 0],
+    //  [0, 1, 0]]
+    let e = tensor2x3_eye();
+    assert_eq(e.rows, 2);
+    assert_eq(e.cols, 3);
+
+    // Diagonal
+    assert_eq(tensor2x3_get(e, 0, 0), 1);
+    assert_eq(tensor2x3_get(e, 1, 1), 1);
+
+    // Off-diagonal
+    assert_eq(tensor2x3_get(e, 0, 1), 0);
+    assert_eq(tensor2x3_get(e, 0, 2), 0);
+    assert_eq(tensor2x3_get(e, 1, 0), 0);
+    assert_eq(tensor2x3_get(e, 1, 2), 0);
+
+    // Sum of all elements = 2 (two 1s on diagonal)
+    let total = e.d00 + e.d01 + e.d02 + e.d10 + e.d11 + e.d12;
+    assert_eq(total, 2);
+
+    // Square identity is also an eye
+    let id2 = tensor2x2_identity();
+    assert_eq(id2.d00, 1);
+    assert_eq(id2.d01, 0);
+    assert_eq(id2.d10, 0);
+    assert_eq(id2.d11, 1);
+
+    print("test_eye passed");
+}
+
+fn test_one_hot() {
+    // one_hot(0, 5) -> [1, 0, 0, 0, 0, 0, 0, 0] (only first 5 matter)
+    let oh0 = arr8_one_hot(0, 5);
+    assert_eq(arr8_get(oh0, 0), 1);
+    assert_eq(arr8_get(oh0, 1), 0);
+    assert_eq(arr8_get(oh0, 2), 0);
+    assert_eq(arr8_get(oh0, 3), 0);
+    assert_eq(arr8_get(oh0, 4), 0);
+
+    // one_hot(3, 5) -> [0, 0, 0, 1, 0, 0, 0, 0]
+    let oh3 = arr8_one_hot(3, 5);
+    assert_eq(arr8_get(oh3, 0), 0);
+    assert_eq(arr8_get(oh3, 1), 0);
+    assert_eq(arr8_get(oh3, 2), 0);
+    assert_eq(arr8_get(oh3, 3), 1);
+    assert_eq(arr8_get(oh3, 4), 0);
+
+    // one_hot(7, 8) -> last element is 1
+    let oh7 = arr8_one_hot(7, 8);
+    assert_eq(arr8_get(oh7, 0), 0);
+    assert_eq(arr8_get(oh7, 6), 0);
+    assert_eq(arr8_get(oh7, 7), 1);
+
+    // Sum of one_hot vector = 1
+    let sum0 = oh0.e0 + oh0.e1 + oh0.e2 + oh0.e3 + oh0.e4 + oh0.e5 + oh0.e6 + oh0.e7;
+    assert_eq(sum0, 1);
+    let sum3 = oh3.e0 + oh3.e1 + oh3.e2 + oh3.e3 + oh3.e4 + oh3.e5 + oh3.e6 + oh3.e7;
+    assert_eq(sum3, 1);
+    let sum7 = oh7.e0 + oh7.e1 + oh7.e2 + oh7.e3 + oh7.e4 + oh7.e5 + oh7.e6 + oh7.e7;
+    assert_eq(sum7, 1);
+
+    // one_hot(2, 4) -> [0, 0, 1, 0, 0, 0, 0, 0]
+    let oh2 = arr8_one_hot(2, 4);
+    assert_eq(arr8_get(oh2, 0), 0);
+    assert_eq(arr8_get(oh2, 1), 0);
+    assert_eq(arr8_get(oh2, 2), 1);
+    assert_eq(arr8_get(oh2, 3), 0);
+
+    print("test_one_hot passed");
+}
+
+fn test_from_array() {
+    // Construct from explicit values
+    let t1 = tensor2x2_from(1, 2, 3, 4);
+    assert_eq(t1.rows, 2);
+    assert_eq(t1.cols, 2);
+    assert_eq(t1.d00, 1);
+    assert_eq(t1.d01, 2);
+    assert_eq(t1.d10, 3);
+    assert_eq(t1.d11, 4);
+
+    // Verify via accessor
+    assert_eq(tensor2x2_get(t1, 0, 0), 1);
+    assert_eq(tensor2x2_get(t1, 0, 1), 2);
+    assert_eq(tensor2x2_get(t1, 1, 0), 3);
+    assert_eq(tensor2x2_get(t1, 1, 1), 4);
+
+    // Construct from zeros
+    let t0 = tensor2x2_from(0, 0, 0, 0);
+    assert(tensor2x2_eq(t0, tensor2x2_zeros()));
+
+    // Construct identity
+    let tid = tensor2x2_from(1, 0, 0, 1);
+    assert(tensor2x2_eq(tid, tensor2x2_identity()));
+
+    // Construct from negative values
+    let tn = tensor2x2_from(0 - 5, 10, 0 - 15, 20);
+    assert_eq(tn.d00, 0 - 5);
+    assert_eq(tn.d01, 10);
+    assert_eq(tn.d10, 0 - 15);
+    assert_eq(tn.d11, 20);
+
+    // Construct with Arr4 and verify same values
+    let a = Arr4 { e0: 10, e1: 20, e2: 30, e3: 40 };
+    let ta = tensor2x2_from(arr4_get(a, 0), arr4_get(a, 1), arr4_get(a, 2), arr4_get(a, 3));
+    assert_eq(ta.d00, 10);
+    assert_eq(ta.d01, 20);
+    assert_eq(ta.d10, 30);
+    assert_eq(ta.d11, 40);
+
+    print("test_from_array passed");
+}
+
+fn test_rand_shape() {
+    // Verify shape metadata for various tensor configurations
+    // (no actual randomness — just verify shape bookkeeping)
+
+    // 2D shape
+    let s1 = shape_2d(2, 2);
+    assert_eq(s1.dims, 2);
+    assert_eq(s1.dim0, 2);
+    assert_eq(s1.dim1, 2);
+    assert_eq(shape_numel(s1), 4);
+
+    let s2 = shape_2d(3, 4);
+    assert_eq(s2.dims, 2);
+    assert_eq(s2.dim0, 3);
+    assert_eq(s2.dim1, 4);
+    assert_eq(shape_numel(s2), 12);
+
+    let s3 = shape_2d(1, 8);
+    assert_eq(s3.dims, 2);
+    assert_eq(shape_numel(s3), 8);
+
+    // 3D shape
+    let s4 = shape_3d(2, 3, 4);
+    assert_eq(s4.dims, 3);
+    assert_eq(s4.dim0, 2);
+    assert_eq(s4.dim1, 3);
+    assert_eq(s4.dim2, 4);
+    assert_eq(shape_numel(s4), 24);
+
+    let s5 = shape_3d(1, 1, 1);
+    assert_eq(shape_numel(s5), 1);
+
+    let s6 = shape_3d(4, 4, 4);
+    assert_eq(shape_numel(s6), 64);
+
+    // Shape matches tensor metadata
+    let t = tensor2x2_zeros();
+    let ts = shape_2d(t.rows, t.cols);
+    assert_eq(shape_numel(ts), 4);
+
+    let t3 = tensor3x3_identity();
+    let ts3 = shape_2d(t3.rows, t3.cols);
+    assert_eq(shape_numel(ts3), 9);
+
+    let te = tensor2x3_eye();
+    let tse = shape_2d(te.rows, te.cols);
+    assert_eq(shape_numel(tse), 6);
+
+    print("test_rand_shape passed");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_zeros();
+    test_ones();
+    test_fill();
+    test_identity();
+    test_arange();
+    test_linspace();
+    test_eye();
+    test_one_hot();
+    test_from_array();
+    test_rand_shape();
+    print("[OK] 055_tensor_creation");
+    0
+}

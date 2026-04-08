@@ -1,0 +1,343 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, map
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Extended Map stdlib operations — insert, lookup, delete, iteration
+
+// ============================================================================
+// Map with 4 entry slots, each with key/val/occupied fields
+// ============================================================================
+
+type MapEntry is { key: Int, val: Int, occupied: Int };
+
+type Map4 is { e0: MapEntry, e1: MapEntry, e2: MapEntry, e3: MapEntry };
+
+fn empty_entry() -> MapEntry {
+    MapEntry { key: 0, val: 0, occupied: 0 }
+}
+
+fn map_new() -> Map4 {
+    Map4 {
+        e0: empty_entry(),
+        e1: empty_entry(),
+        e2: empty_entry(),
+        e3: empty_entry()
+    }
+}
+
+fn map_entry_at(m: Map4, i: Int) -> MapEntry {
+    if i == 0 { m.e0 }
+    else if i == 1 { m.e1 }
+    else if i == 2 { m.e2 }
+    else { m.e3 }
+}
+
+fn map_set_entry(m: Map4, i: Int, e: MapEntry) -> Map4 {
+    Map4 {
+        e0: if i == 0 { e } else { m.e0 },
+        e1: if i == 1 { e } else { m.e1 },
+        e2: if i == 2 { e } else { m.e2 },
+        e3: if i == 3 { e } else { m.e3 }
+    }
+}
+
+// Count occupied entries
+fn map_count(m: Map4) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < 4 {
+        let e = map_entry_at(m, i);
+        if e.occupied == 1 {
+            c = c + 1;
+        }
+        i = i + 1;
+    }
+    c
+}
+
+// Find slot index for key (-1 if not found)
+fn map_find(m: Map4, key: Int) -> Int {
+    let mut i = 0;
+    let mut found = -1;
+    let mut done = false;
+    while i < 4 && !done {
+        let e = map_entry_at(m, i);
+        if e.occupied == 1 && e.key == key {
+            found = i;
+            done = true;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+// Find first free slot (-1 if full)
+fn map_free_slot(m: Map4) -> Int {
+    let mut i = 0;
+    let mut slot = -1;
+    let mut done = false;
+    while i < 4 && !done {
+        let e = map_entry_at(m, i);
+        if e.occupied == 0 {
+            slot = i;
+            done = true;
+        }
+        i = i + 1;
+    }
+    slot
+}
+
+// Insert or update a key-value pair
+fn map_insert(m: Map4, key: Int, val: Int) -> Map4 {
+    let existing = map_find(m, key);
+    if existing >= 0 {
+        // Update existing entry
+        let e = map_entry_at(m, existing);
+        let updated = MapEntry { key: e.key, val: val, occupied: 1 };
+        map_set_entry(m, existing, updated)
+    } else {
+        let slot = map_free_slot(m);
+        if slot < 0 { m }
+        else {
+            let entry = MapEntry { key: key, val: val, occupied: 1 };
+            map_set_entry(m, slot, entry)
+        }
+    }
+}
+
+// Get value for key (-1 if not found)
+fn map_get(m: Map4, key: Int) -> Int {
+    let idx = map_find(m, key);
+    if idx >= 0 {
+        let e = map_entry_at(m, idx);
+        e.val
+    } else {
+        -1
+    }
+}
+
+// Check if key exists
+fn map_contains(m: Map4, key: Int) -> Bool {
+    map_find(m, key) >= 0
+}
+
+// Remove entry by key
+fn map_delete(m: Map4, key: Int) -> Map4 {
+    let idx = map_find(m, key);
+    if idx < 0 { m }
+    else {
+        let cleared = MapEntry { key: 0, val: 0, occupied: 0 };
+        map_set_entry(m, idx, cleared)
+    }
+}
+
+// Sum of all occupied keys
+fn map_sum_keys(m: Map4) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 4 {
+        let e = map_entry_at(m, i);
+        if e.occupied == 1 {
+            total = total + e.key;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// Sum of all occupied values
+fn map_sum_values(m: Map4) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 4 {
+        let e = map_entry_at(m, i);
+        if e.occupied == 1 {
+            total = total + e.val;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+// Merge two maps: entries from m2 overwrite m1 on key collision
+fn map_merge(m1: Map4, m2: Map4) -> Map4 {
+    let mut result = m1;
+    let mut i = 0;
+    while i < 4 {
+        let e = map_entry_at(m2, i);
+        if e.occupied == 1 {
+            result = map_insert(result, e.key, e.val);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_map_insert_lookup() {
+    let mut m = map_new();
+    m = map_insert(m, 10, 100);
+    m = map_insert(m, 20, 200);
+    m = map_insert(m, 30, 300);
+
+    assert_eq(map_get(m, 10), 100);
+    assert_eq(map_get(m, 20), 200);
+    assert_eq(map_get(m, 30), 300);
+    assert_eq(map_get(m, 99), -1);
+    assert_eq(map_count(m), 3);
+    print("  test_map_insert_lookup: ok");
+}
+
+fn test_map_delete() {
+    let mut m = map_new();
+    m = map_insert(m, 1, 10);
+    m = map_insert(m, 2, 20);
+    m = map_insert(m, 3, 30);
+    assert_eq(map_count(m), 3);
+
+    m = map_delete(m, 2);
+    assert_eq(map_count(m), 2);
+    assert_eq(map_get(m, 2), -1);
+    assert(map_contains(m, 1));
+    assert(map_contains(m, 3));
+
+    // Delete non-existent key — no change
+    m = map_delete(m, 99);
+    assert_eq(map_count(m), 2);
+
+    // Delete remaining entries
+    m = map_delete(m, 1);
+    m = map_delete(m, 3);
+    assert_eq(map_count(m), 0);
+    print("  test_map_delete: ok");
+}
+
+fn test_map_update() {
+    let mut m = map_new();
+    m = map_insert(m, 5, 50);
+    assert_eq(map_get(m, 5), 50);
+    assert_eq(map_count(m), 1);
+
+    // Update value for same key
+    m = map_insert(m, 5, 99);
+    assert_eq(map_get(m, 5), 99);
+    assert_eq(map_count(m), 1);
+
+    // Update again
+    m = map_insert(m, 5, 42);
+    assert_eq(map_get(m, 5), 42);
+    assert_eq(map_count(m), 1);
+    print("  test_map_update: ok");
+}
+
+fn test_map_contains() {
+    let mut m = map_new();
+    assert(!map_contains(m, 0));
+    assert(!map_contains(m, 1));
+
+    m = map_insert(m, 7, 70);
+    m = map_insert(m, 14, 140);
+
+    assert(map_contains(m, 7));
+    assert(map_contains(m, 14));
+    assert(!map_contains(m, 21));
+    assert(!map_contains(m, 0));
+    print("  test_map_contains: ok");
+}
+
+fn test_map_count() {
+    let mut m = map_new();
+    assert_eq(map_count(m), 0);
+
+    m = map_insert(m, 1, 10);
+    assert_eq(map_count(m), 1);
+
+    m = map_insert(m, 2, 20);
+    assert_eq(map_count(m), 2);
+
+    m = map_insert(m, 3, 30);
+    m = map_insert(m, 4, 40);
+    assert_eq(map_count(m), 4);
+
+    // Update does not change count
+    m = map_insert(m, 2, 99);
+    assert_eq(map_count(m), 4);
+
+    // Delete reduces count
+    m = map_delete(m, 3);
+    assert_eq(map_count(m), 3);
+    print("  test_map_count: ok");
+}
+
+fn test_map_keys_values() {
+    let mut m = map_new();
+    m = map_insert(m, 1, 100);
+    m = map_insert(m, 2, 200);
+    m = map_insert(m, 3, 300);
+
+    // keys sum: 1+2+3 = 6
+    assert_eq(map_sum_keys(m), 6);
+    // values sum: 100+200+300 = 600
+    assert_eq(map_sum_values(m), 600);
+
+    // After delete key 2, keys sum: 1+3 = 4, values sum: 100+300 = 400
+    m = map_delete(m, 2);
+    assert_eq(map_sum_keys(m), 4);
+    assert_eq(map_sum_values(m), 400);
+
+    // Empty map
+    let empty = map_new();
+    assert_eq(map_sum_keys(empty), 0);
+    assert_eq(map_sum_values(empty), 0);
+    print("  test_map_keys_values: ok");
+}
+
+fn test_map_merge() {
+    // Map A: {1->10, 2->20}
+    let mut a = map_new();
+    a = map_insert(a, 1, 10);
+    a = map_insert(a, 2, 20);
+
+    // Map B: {2->99, 3->30}
+    let mut b = map_new();
+    b = map_insert(b, 2, 99);
+    b = map_insert(b, 3, 30);
+
+    // Merge B into A — key 2 should be overwritten by B's value
+    let merged = map_merge(a, b);
+    assert_eq(map_get(merged, 1), 10);
+    assert_eq(map_get(merged, 2), 99);
+    assert_eq(map_get(merged, 3), 30);
+    assert_eq(map_count(merged), 3);
+
+    // Merge empty into non-empty
+    let empty = map_new();
+    let m2 = map_merge(a, empty);
+    assert_eq(map_get(m2, 1), 10);
+    assert_eq(map_get(m2, 2), 20);
+    assert_eq(map_count(m2), 2);
+
+    // Merge non-empty into empty
+    let m3 = map_merge(empty, a);
+    assert_eq(map_get(m3, 1), 10);
+    assert_eq(map_get(m3, 2), 20);
+    assert_eq(map_count(m3), 2);
+    print("  test_map_merge: ok");
+}
+
+fn main() -> Int {
+    test_map_insert_lookup();
+    test_map_delete();
+    test_map_update();
+    test_map_contains();
+    test_map_count();
+    test_map_keys_values();
+    test_map_merge();
+    print("[OK] 073_stdlib_map_extended");
+    0
+}

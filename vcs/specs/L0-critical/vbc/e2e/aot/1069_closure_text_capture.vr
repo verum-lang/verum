@@ -1,0 +1,42 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: closure, text, fstring
+// @expect: pass
+
+// Test: Text parameters in closures and f-strings.
+
+fn greet(name: Text) -> Text {
+    f"Hello, {name}!"
+}
+
+fn apply_to_text(f: fn(Text) -> Text, s: Text) -> Text {
+    f(s)
+}
+
+fn main() -> Int {
+    // Test 1: direct function with Text
+    let msg = greet("world");
+    print(msg);
+
+    // Test 2: closure with Text parameter (no capture)
+    let upper = |s: Text| -> Text { f"[{s}]" };
+    let result = upper("test");
+    print(result);
+
+    // Test 3: HOF with Text
+    let transformed = apply_to_text(|s: Text| -> Text { f"wrapped({s})" }, "data");
+    print(transformed);
+
+    // Test 4: Int closure capture works
+    let n = 42;
+    let adder = |x: Int| -> Int { x + n };
+    let v = adder(8);
+    if v != 50 {
+        print(f"FAIL: closure capture Int = {v}");
+        return 1;
+    }
+
+    print("PASS: closure text operations work");
+    0
+}

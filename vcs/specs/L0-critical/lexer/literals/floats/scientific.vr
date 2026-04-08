@@ -1,0 +1,157 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, floats, scientific, exponent
+
+// Scientific notation floating-point literals
+
+fn test_basic_scientific() {
+    // Basic scientific notation with lowercase e
+    let avogadro = 6.022e23;
+    let planck = 6.626e-34;
+    let speed_of_light = 2.998e8;
+    let electron_mass = 9.109e-31;
+}
+
+fn test_uppercase_e() {
+    // Scientific notation with uppercase E
+    let large_E = 1.0E10;
+    let small_E = 1.0E-10;
+    let mixed_E = 6.022E23;
+}
+
+fn test_positive_exponents() {
+    // Positive exponents
+    let e0 = 1.0e0;
+    let e1 = 1.0e1;
+    let e2 = 1.0e2;
+    let e3 = 1.0e3;
+    let e10 = 1.0e10;
+    let e20 = 1.0e20;
+    let e100 = 1.0e100;
+}
+
+fn test_negative_exponents() {
+    // Negative exponents
+    let en1 = 1.0e-1;
+    let en2 = 1.0e-2;
+    let en3 = 1.0e-3;
+    let en10 = 1.0e-10;
+    let en20 = 1.0e-20;
+    let en100 = 1.0e-100;
+}
+
+fn test_explicit_positive() {
+    // Explicit positive exponent sign
+    let explicit_pos = 1.0e+5;
+    let explicit_pos2 = 2.5e+10;
+    let explicit_pos3 = 6.022e+23;
+}
+
+fn test_various_mantissa() {
+    // Various mantissa values
+    let small_mantissa = 1.0e10;
+    let medium_mantissa = 5.5e10;
+    let large_mantissa = 9.9e10;
+    let precise_mantissa = 1.234567890e10;
+}
+
+fn test_physical_constants() {
+    // Physical constants in scientific notation
+    let boltzmann = 1.380649e-23;
+    let gravitational = 6.67430e-11;
+    let elementary_charge = 1.602176634e-19;
+    let vacuum_permittivity = 8.8541878128e-12;
+}
+
+fn test_astronomical_values() {
+    // Astronomical values
+    let earth_mass_kg = 5.972e24;
+    let sun_mass_kg = 1.989e30;
+    let light_year_m = 9.461e15;
+    let parsec_m = 3.086e16;
+    let hubble_constant = 2.2e-18;
+}
+
+fn test_very_small() {
+    // Very small values
+    let angstrom = 1.0e-10;
+    let nanometer = 1.0e-9;
+    let micrometer = 1.0e-6;
+    let millisecond = 1.0e-3;
+}
+
+fn test_very_large() {
+    // Very large values
+    let tera = 1.0e12;
+    let peta = 1.0e15;
+    let exa = 1.0e18;
+    let zetta = 1.0e21;
+}
+
+fn test_integer_mantissa() {
+    // Integer-like mantissa
+    let simple_e5 = 1e5;
+    let simple_e10 = 2e10;
+    let simple_en5 = 5e-5;
+}
+
+fn test_exponent_edge_cases() {
+    // Exponent edge cases
+    let max_exp = 1.0e308;
+    let min_exp = 1.0e-308;
+    let near_max = 1.7976931348623157e308;
+    let near_min = 2.2250738585072014e-308;
+}
+
+fn test_expressions() {
+    // In expressions
+    let product = 1.0e5 * 2.0e3;
+    let quotient = 1.0e10 / 1.0e5;
+    let sum = 1.0e5 + 2.0e5;
+}
+
+fn test_comparisons() {
+    // In comparisons
+    let is_tiny = 1.0e-100 < 1.0e-50;
+    let is_huge = 1.0e100 > 1.0e50;
+    let is_equal = 1.0e10 == 1.0e10;
+}
+
+fn test_arrays() {
+    // In arrays
+    let powers_of_ten = [1e0, 1e1, 1e2, 1e3, 1e4, 1e5];
+    let small_scales = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5];
+    let constants = [6.022e23, 6.626e-34, 2.998e8];
+}
+
+fn test_underscores() {
+    // Scientific notation with underscores in mantissa
+    let formatted_mantissa = 1.234_567e10;
+    let formatted_large = 6.022_140_76e23;
+}
+
+// Mixed notation in calculations
+fn wavelength_to_frequency(wavelength_m: Float) -> Float {
+    2.998e8 / wavelength_m
+}
+
+fn energy_from_frequency(frequency_hz: Float) -> Float {
+    6.626e-34 * frequency_hz
+}
+
+// Range expressions with scientific notation
+fn is_visible_light(wavelength_m: Float) -> Bool {
+    wavelength_m >= 3.8e-7 && wavelength_m <= 7.0e-7
+}
+
+fn is_audible(frequency_hz: Float) -> Bool {
+    frequency_hz >= 2.0e1 && frequency_hz <= 2.0e4
+}
+
+fn test_double_limits() {
+    // Double precision limits
+    let double_max = 1.7976931348623157e+308;
+    let double_min_positive = 2.2250738585072014e-308;
+    let double_min_subnormal = 5e-324;
+}

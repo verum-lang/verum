@@ -1,0 +1,401 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, sql
+
+// SQL Tagged Literals
+// Tests for sql#"""...""" syntax
+
+// ============================================================================
+// SECTION 1: Basic SQL Queries
+// ============================================================================
+
+fn test_sql_simple_select() {
+    let query = sql#"""
+SELECT * FROM users
+""";
+}
+
+fn test_sql_select_with_columns() {
+    let query = sql#"""
+SELECT id, name, email, created_at
+FROM users
+""";
+}
+
+fn test_sql_select_with_where() {
+    let query = sql#"""
+SELECT id, name, email
+FROM users
+WHERE active = true
+""";
+}
+
+fn test_sql_select_with_order() {
+    let query = sql#"""
+SELECT id, name, email
+FROM users
+ORDER BY created_at DESC
+""";
+}
+
+fn test_sql_select_with_limit() {
+    let query = sql#"""
+SELECT id, name
+FROM users
+LIMIT 10 OFFSET 20
+""";
+}
+
+// ============================================================================
+// SECTION 2: SQL Joins
+// ============================================================================
+
+fn test_sql_inner_join() {
+    let query = sql#"""
+SELECT u.name, o.order_date
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+""";
+}
+
+fn test_sql_left_join() {
+    let query = sql#"""
+SELECT u.name, COUNT(o.id) as order_count
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+GROUP BY u.id, u.name
+""";
+}
+
+fn test_sql_multiple_joins() {
+    let query = sql#"""
+SELECT
+    u.name as user_name,
+    p.name as product_name,
+    o.quantity
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+INNER JOIN products p ON o.product_id = p.id
+WHERE o.order_date > '2024-01-01'
+""";
+}
+
+// ============================================================================
+// SECTION 3: SQL Aggregations
+// ============================================================================
+
+fn test_sql_count() {
+    let query = sql#"""
+SELECT COUNT(*) as total_users
+FROM users
+""";
+}
+
+fn test_sql_group_by() {
+    let query = sql#"""
+SELECT department, COUNT(*) as employee_count
+FROM employees
+GROUP BY department
+""";
+}
+
+fn test_sql_having() {
+    let query = sql#"""
+SELECT department, AVG(salary) as avg_salary
+FROM employees
+GROUP BY department
+HAVING AVG(salary) > 50000
+""";
+}
+
+fn test_sql_aggregation_functions() {
+    let query = sql#"""
+SELECT
+    COUNT(*) as count,
+    SUM(amount) as total,
+    AVG(amount) as average,
+    MIN(amount) as minimum,
+    MAX(amount) as maximum
+FROM transactions
+WHERE transaction_date >= '2024-01-01'
+""";
+}
+
+// ============================================================================
+// SECTION 4: SQL Subqueries
+// ============================================================================
+
+fn test_sql_subquery_in_where() {
+    let query = sql#"""
+SELECT name, email
+FROM users
+WHERE id IN (
+    SELECT user_id
+    FROM orders
+    WHERE total > 100
+)
+""";
+}
+
+fn test_sql_subquery_in_from() {
+    let query = sql#"""
+SELECT avg_orders.user_id, avg_orders.avg_total
+FROM (
+    SELECT user_id, AVG(total) as avg_total
+    FROM orders
+    GROUP BY user_id
+) as avg_orders
+WHERE avg_orders.avg_total > 50
+""";
+}
+
+fn test_sql_correlated_subquery() {
+    let query = sql#"""
+SELECT u.name,
+    (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) as order_count
+FROM users u
+""";
+}
+
+// ============================================================================
+// SECTION 5: SQL INSERT/UPDATE/DELETE
+// ============================================================================
+
+fn test_sql_insert() {
+    let query = sql#"""
+INSERT INTO users (name, email, created_at)
+VALUES ('Alice', 'alice@example.com', NOW())
+""";
+}
+
+fn test_sql_insert_multiple() {
+    let query = sql#"""
+INSERT INTO users (name, email)
+VALUES
+    ('Alice', 'alice@example.com'),
+    ('Bob', 'bob@example.com'),
+    ('Charlie', 'charlie@example.com')
+""";
+}
+
+fn test_sql_update() {
+    let query = sql#"""
+UPDATE users
+SET email = 'newemail@example.com', updated_at = NOW()
+WHERE id = 123
+""";
+}
+
+fn test_sql_delete() {
+    let query = sql#"""
+DELETE FROM users
+WHERE id = 123
+""";
+}
+
+// ============================================================================
+// SECTION 6: SQL DDL (Data Definition)
+// ============================================================================
+
+fn test_sql_create_table() {
+    let query = sql#"""
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP
+)
+""";
+}
+
+fn test_sql_create_index() {
+    let query = sql#"""
+CREATE INDEX idx_users_email ON users (email)
+""";
+}
+
+fn test_sql_alter_table() {
+    let query = sql#"""
+ALTER TABLE users
+ADD COLUMN phone VARCHAR(20),
+ADD COLUMN address TEXT
+""";
+}
+
+fn test_sql_drop_table() {
+    let query = sql#"""
+DROP TABLE IF EXISTS temp_users
+""";
+}
+
+// ============================================================================
+// SECTION 7: SQL Window Functions
+// ============================================================================
+
+fn test_sql_row_number() {
+    let query = sql#"""
+SELECT
+    name,
+    department,
+    salary,
+    ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) as rank
+FROM employees
+""";
+}
+
+fn test_sql_window_aggregates() {
+    let query = sql#"""
+SELECT
+    name,
+    department,
+    salary,
+    AVG(salary) OVER (PARTITION BY department) as dept_avg,
+    SUM(salary) OVER (PARTITION BY department) as dept_total
+FROM employees
+""";
+}
+
+fn test_sql_lead_lag() {
+    let query = sql#"""
+SELECT
+    order_date,
+    amount,
+    LAG(amount, 1) OVER (ORDER BY order_date) as prev_amount,
+    LEAD(amount, 1) OVER (ORDER BY order_date) as next_amount
+FROM orders
+""";
+}
+
+// ============================================================================
+// SECTION 8: SQL CTEs (Common Table Expressions)
+// ============================================================================
+
+fn test_sql_simple_cte() {
+    let query = sql#"""
+WITH active_users AS (
+    SELECT id, name, email
+    FROM users
+    WHERE active = true
+)
+SELECT * FROM active_users
+""";
+}
+
+fn test_sql_multiple_ctes() {
+    let query = sql#"""
+WITH
+    active_users AS (
+        SELECT id, name FROM users WHERE active = true
+    ),
+    recent_orders AS (
+        SELECT user_id, SUM(total) as total_spent
+        FROM orders
+        WHERE order_date > '2024-01-01'
+        GROUP BY user_id
+    )
+SELECT u.name, COALESCE(o.total_spent, 0) as total_spent
+FROM active_users u
+LEFT JOIN recent_orders o ON u.id = o.user_id
+""";
+}
+
+fn test_sql_recursive_cte() {
+    let query = sql#"""
+WITH RECURSIVE employee_hierarchy AS (
+    SELECT id, name, manager_id, 1 as level
+    FROM employees
+    WHERE manager_id IS NULL
+
+    UNION ALL
+
+    SELECT e.id, e.name, e.manager_id, h.level + 1
+    FROM employees e
+    INNER JOIN employee_hierarchy h ON e.manager_id = h.id
+)
+SELECT * FROM employee_hierarchy
+ORDER BY level, name
+""";
+}
+
+// ============================================================================
+// SECTION 9: SQL in Expressions
+// ============================================================================
+
+fn test_sql_in_function() {
+    fn execute_query(q: SqlQuery) -> Int { 0 }
+
+    let result = execute_query(sql#"""
+SELECT * FROM users
+""");
+}
+
+fn test_sql_in_conditional() {
+    let include_inactive = false;
+
+    let query = if include_inactive {
+        sql#"""
+SELECT * FROM users
+"""
+    } else {
+        sql#"""
+SELECT * FROM users WHERE active = true
+"""
+    };
+}
+
+fn test_sql_in_array() {
+    let queries = [
+        sql#"""SELECT * FROM users""",
+        sql#"""SELECT * FROM orders""",
+        sql#"""SELECT * FROM products""",
+    ];
+}
+
+// ============================================================================
+// SECTION 10: SQL Edge Cases
+// ============================================================================
+
+fn test_sql_with_comments() {
+    let query = sql#"""
+-- Get all active users
+SELECT id, name, email
+FROM users
+WHERE active = true  -- Only active ones
+/* Multi-line
+   comment */
+ORDER BY created_at DESC
+""";
+}
+
+fn test_sql_string_literals() {
+    let query = sql#"""
+SELECT * FROM users
+WHERE name = 'O''Brien'
+  AND email LIKE '%@example.com'
+""";
+}
+
+fn test_sql_case_expression() {
+    let query = sql#"""
+SELECT
+    name,
+    CASE
+        WHEN age < 18 THEN 'minor'
+        WHEN age < 65 THEN 'adult'
+        ELSE 'senior'
+    END as age_group
+FROM users
+""";
+}
+
+fn test_sql_empty() {
+    let empty = sql#"""
+""";
+}
+
+fn test_sql_single_line() {
+    let single = sql#"""SELECT 1""";
+}
+

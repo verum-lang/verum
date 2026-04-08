@@ -1,0 +1,280 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, throws, negative
+// @expected-error: E010
+
+/// Test for throws clause violation errors.
+/// These examples demonstrate errors related to the throws clause type system.
+/// Spec: grammar/verum.ebnf Section 2.4 - throws_clause
+
+// === Error Type Definitions ===
+
+type IoError is
+    | FileNotFound(Text)
+    | PermissionDenied(Text)
+    | NetworkError(Text);
+
+type ParseError is
+    | SyntaxError { line: Int, message: Text }
+    | UnexpectedToken(Text)
+    | UnexpectedEof;
+
+type ValidationError is
+    | InvalidFormat(Text)
+    | OutOfRange { min: Int, max: Int, actual: Int }
+    | MissingField(Text);
+
+type DatabaseError is
+    | ConnectionFailed(Text)
+    | QueryFailed(Text);
+
+// ============================================================================
+// 1. UNDECLARED THROW ERRORS
+// ============================================================================
+
+// E405: Throwing error not in throws clause
+fn undeclared_throw_single() throws(IoError) -> Int {
+    throw ValidationError.InvalidFormat("bad data");  // ERROR: ValidationError not in throws(IoError)
+}
+
+// E405: Throwing error from union, but missing from union
+fn undeclared_throw_union() throws(IoError | ParseError) -> Int {
+    throw ValidationError.MissingField("name");  // ERROR: ValidationError not in throws
+}
+
+// E405: Multiple violations in same function
+fn undeclared_throw_multiple() throws(IoError) -> Int {
+    if true {
+        throw ParseError.UnexpectedEof;  // ERROR: ParseError not in throws
+    }
+    throw ValidationError.OutOfRange { min: 0, max: 100, actual: 200 };  // ERROR: ValidationError not in throws
+}
+
+// ============================================================================
+// 2. UNHANDLED THROWS ERRORS
+// ============================================================================
+
+// Helper functions for testing
+fn may_throw_io() throws(IoError) -> Int {
+    42
+}
+
+fn may_throw_parse() throws(ParseError) -> Text {
+    "result"
+}
+
+fn may_throw_validation() throws(ValidationError) -> Bool {
+    true
+}
+
+// E405: Calling throws function without handling or propagating
+fn unhandled_throws_call() -> Int {
+    let x = may_throw_io();  // ERROR: may_throw_io() throws(IoError) but not handled
+    x
+}
+
+// E405: Calling throws function with narrower throws clause
+fn unhandled_throws_narrower() throws(ParseError) -> Int {
+    let x = may_throw_io();  // ERROR: IoError not in our throws clause, not handled
+    x + 1
+}
+
+// E405: Calling multiple throwing functions without handling
+fn unhandled_throws_multiple() -> Int {
+    let a = may_throw_io();  // ERROR: IoError not handled
+    let b = may_throw_parse();  // ERROR: ParseError not handled
+    a
+}
+
+// E405: ? operator on wrong error type
+fn unhandled_throws_question() throws(ParseError) -> Int {
+    let x = may_throw_io()?;  // ERROR: IoError cannot propagate through throws(ParseError)
+    x
+}
+
+// ============================================================================
+// 3. THROWS CLAUSE MISMATCH ERRORS
+// ============================================================================
+
+type ThrowingProtocol is protocol {
+    fn process(&self, data: Text) throws(IoError) -> Int;
+};
+
+type WrongThrowsImpl is ();
+
+// E405: Implementation throws different error than protocol specifies
+implement ThrowingProtocol for WrongThrowsImpl {
+    // ERROR: throws(ParseError) doesn't match protocol's throws(IoError)
+    fn process(&self, data: Text) throws(ParseError) -> Int {
+        42
+    }
+}
+
+// E405: Implementation adds throws clause not in protocol
+type ExtraThrowsImpl is ();
+
+implement ThrowingProtocol for ExtraThrowsImpl {
+    // ERROR: throws(IoError | ParseError) is wider than protocol's throws(IoError)
+    fn process(&self, data: Text) throws(IoError | ParseError) -> Int {
+        42
+    }
+}
+
+// ============================================================================
+// 4. CLOSURE THROWS ERRORS
+// ============================================================================
+
+// E405: Closure throws but expected type doesn't allow throws
+fn closure_throws_mismatch() {
+    let f: fn(Int) -> Int = |x| {
+        throw IoError.NetworkError("unexpected");  // ERROR: fn(Int) -> Int doesn't allow throws
+        x
+    };
+}
+
+// E405: Closure throws wrong error type
+fn closure_throws_wrong_type() {
+    let f: fn(Int) throws(ParseError) -> Int = |x| {
+        throw IoError.FileNotFound("file.txt");  // ERROR: IoError not in throws(ParseError)
+        x
+    };
+}
+
+// E405: Passing throwing closure where non-throwing expected
+fn higher_order_throws_mismatch() {
+    fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+        f(x)
+    }
+
+    let throwing_closure = |x| throws(IoError) {
+        throw IoError.NetworkError("fail");
+        x
+    };
+
+    apply(throwing_closure, 42);  // ERROR: throws closure passed to non-throws parameter
+}
+
+// ============================================================================
+// 5. RECOVER BLOCK ERRORS
+// ============================================================================
+
+// E405: Recover block doesn't handle all error types
+fn recover_incomplete() -> Int {
+    try {
+        may_throw_io()?;
+        may_throw_parse()?;
+        42
+    } recover {
+        IoError.FileNotFound(_) => 0,
+        IoError.PermissionDenied(_) => 0,
+        // ERROR: Missing IoError.NetworkError handler
+        // ERROR: Missing all ParseError handlers
+    }
+}
+
+// E405: Recover pattern doesn't match error type
+fn recover_wrong_pattern() throws(ParseError) -> Int {
+    try {
+        may_throw_io()?
+    } recover {
+        ValidationError.InvalidFormat(_) => 0,  // ERROR: ValidationError not throwable here
+        _ => -1
+    }
+}
+
+// ============================================================================
+// 6. GENERIC THROWS ERRORS
+// ============================================================================
+
+fn generic_throws<E>(f: fn() throws(E) -> Int) throws(E) -> Int {
+    f()?
+}
+
+// E405: Calling generic throws with incompatible error type
+fn generic_throws_mismatch() throws(ParseError) -> Int {
+    // ERROR: may_throw_io throws IoError, not ParseError
+    generic_throws(may_throw_io)
+}
+
+// ============================================================================
+// 7. ASYNC THROWS ERRORS
+// ============================================================================
+
+async fn async_throws_io() throws(IoError) -> Int {
+    42
+}
+
+async fn async_throws_parse() throws(ParseError) -> Text {
+    "result"
+}
+
+// E405: Await on throwing async without handling
+async fn async_unhandled() -> Int {
+    let x = async_throws_io().await;  // ERROR: throws(IoError) not handled
+    x
+}
+
+// E405: Async throws wrong error in select
+async fn select_throws_mismatch() throws(ParseError) -> Int {
+    select {
+        x = async_throws_io().await => x,  // ERROR: IoError not in throws(ParseError)
+        y = async_throws_parse().await => y.len(),  // OK: ParseError matches
+    }
+}
+
+// ============================================================================
+// 8. THROWS IN EXPRESSIONS
+// ============================================================================
+
+// E405: Throw in non-throwing function via expression
+fn throw_in_expression() -> Int {
+    let x = if true {
+        42
+    } else {
+        throw IoError.NetworkError("fail")  // ERROR: enclosing function doesn't throw
+    };
+    x
+}
+
+// E405: Throw in match arm of non-throwing function
+fn throw_in_match() -> Int {
+    let value = 5;
+    match value {
+        0 => 0,
+        1 => 1,
+        _ => throw ParseError.UnexpectedEof,  // ERROR: function doesn't throw
+    }
+}
+
+// E405: Throw in closure that escapes
+fn throw_in_escaping_closure() -> fn() -> Int {
+    || {
+        throw IoError.FileNotFound("file.txt");  // ERROR: returned closure doesn't declare throws
+        42
+    }
+}
+
+// ============================================================================
+// 9. ERROR TYPE CONVERSION ERRORS
+// ============================================================================
+
+type CompositeError is
+    | Io(IoError)
+    | Parse(ParseError);
+
+// E405: Cannot implicitly convert error types
+fn implicit_error_conversion() throws(CompositeError) -> Int {
+    may_throw_io()?;  // ERROR: IoError doesn't implicitly convert to CompositeError
+    42
+}
+
+// E405: From impl missing for error conversion
+fn missing_from_impl() throws(Text) -> Int {
+    may_throw_io()?;  // ERROR: No From<IoError> for Text
+    42
+}
+
+fn main() {
+    // All examples above should produce E405 "Throws clause violation" error
+}

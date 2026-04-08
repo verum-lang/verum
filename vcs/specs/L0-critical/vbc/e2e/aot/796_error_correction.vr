@@ -1,0 +1,173 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, error_correction
+// @expected-exit: 0
+
+// Error detection and correction codes
+
+// Calculate parity bit (XOR of all bits in value, for lowest n bits)
+fn parity(val: Int, n_bits: Int) -> Int {
+    let mut p = 0;
+    let mut i = 0;
+    let mut v = val;
+    while (i < n_bits) {
+        p = p ^ (v % 2);
+        v = v / 2;
+        i = i + 1;
+    }
+    p
+}
+
+// Get bit at position pos (0-indexed from LSB)
+fn get_bit(val: Int, pos: Int) -> Int {
+    let mut v = val;
+    let mut i = 0;
+    while (i < pos) {
+        v = v / 2;
+        i = i + 1;
+    }
+    v % 2
+}
+
+// Set bit at position pos
+fn set_bit(val: Int, pos: Int, bit: Int) -> Int {
+    let current = get_bit(val, pos);
+    if (current == bit) { return val; }
+    // Need to flip the bit
+    let mut power = 1;
+    let mut i = 0;
+    while (i < pos) {
+        power = power * 2;
+        i = i + 1;
+    }
+    if (bit == 1) {
+        val + power
+    } else {
+        val - power
+    }
+}
+
+// Hamming(7,4) encoding
+// Data bits: d1, d2, d3, d4 (positions 3,5,6,7 in 1-indexed)
+// Parity bits: p1, p2, p4 (positions 1,2,4)
+// Encoded as 7-bit value: bit7 bit6 bit5 bit4 bit3 bit2 bit1
+// Position (1-indexed): p1=1, p2=2, d1=3, p4=4, d2=5, d3=6, d4=7
+fn hamming74_encode(data: Int) -> Int {
+    // Extract 4 data bits
+    let d1 = get_bit(data, 0);
+    let d2 = get_bit(data, 1);
+    let d3 = get_bit(data, 2);
+    let d4 = get_bit(data, 3);
+
+    // Place data bits: pos3=d1, pos5=d2, pos6=d3, pos7=d4 (0-indexed: 2,4,5,6)
+    let mut encoded = 0;
+    encoded = set_bit(encoded, 2, d1);  // position 3
+    encoded = set_bit(encoded, 4, d2);  // position 5
+    encoded = set_bit(encoded, 5, d3);  // position 6
+    encoded = set_bit(encoded, 6, d4);  // position 7
+
+    // p1 covers positions 1,3,5,7 (0-indexed: 0,2,4,6)
+    let p1 = d1 ^ d2 ^ d4;
+    encoded = set_bit(encoded, 0, p1);
+
+    // p2 covers positions 2,3,6,7 (0-indexed: 1,2,5,6)
+    let p2 = d1 ^ d3 ^ d4;
+    encoded = set_bit(encoded, 1, p2);
+
+    // p4 covers positions 4,5,6,7 (0-indexed: 3,4,5,6)
+    let p4 = d2 ^ d3 ^ d4;
+    encoded = set_bit(encoded, 3, p4);
+
+    encoded
+}
+
+// Hamming(7,4) syndrome calculation - returns error position (1-indexed), 0 if no error
+fn hamming74_syndrome(received: Int) -> Int {
+    // Check each parity group
+    // s1: positions 1,3,5,7 (0-indexed: 0,2,4,6)
+    let s1 = get_bit(received, 0) ^ get_bit(received, 2) ^ get_bit(received, 4) ^ get_bit(received, 6);
+    // s2: positions 2,3,6,7 (0-indexed: 1,2,5,6)
+    let s2 = get_bit(received, 1) ^ get_bit(received, 2) ^ get_bit(received, 5) ^ get_bit(received, 6);
+    // s4: positions 4,5,6,7 (0-indexed: 3,4,5,6)
+    let s4 = get_bit(received, 3) ^ get_bit(received, 4) ^ get_bit(received, 5) ^ get_bit(received, 6);
+
+    s1 + s2 * 2 + s4 * 4
+}
+
+// Decode Hamming(7,4) - correct single bit error and extract data
+fn hamming74_decode(received: Int) -> Int {
+    let syndrome = hamming74_syndrome(received);
+    let mut corrected = received;
+    if (syndrome > 0) {
+        // Flip the error bit (syndrome is 1-indexed position, convert to 0-indexed)
+        let err_bit = get_bit(corrected, syndrome - 1);
+        corrected = set_bit(corrected, syndrome - 1, 1 - err_bit);
+    }
+    // Extract data bits from positions 3,5,6,7 (0-indexed: 2,4,5,6)
+    let d1 = get_bit(corrected, 2);
+    let d2 = get_bit(corrected, 4);
+    let d3 = get_bit(corrected, 5);
+    let d4 = get_bit(corrected, 6);
+    d1 + d2 * 2 + d3 * 4 + d4 * 8
+}
+
+// Simple checksum: sum of bytes mod 256
+fn checksum(vals: List<Int>, count: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < count) {
+        sum = sum + vals[i];
+        i = i + 1;
+    }
+    sum % 256
+}
+
+fn main() -> Int {
+    // Test 1: Parity of 0b1011 (3 ones) = 1 (odd parity)
+    assert_eq(parity(11, 4), 1);
+
+    // Test 2: Parity of 0b1010 (2 ones) = 0 (even parity)
+    assert_eq(parity(10, 4), 0);
+
+    // Test 3: Hamming(7,4) encode data = 0b1011 (11)
+    // d1=1, d2=1, d3=0, d4=1
+    // p1 = d1^d2^d4 = 1^1^1 = 1
+    // p2 = d1^d3^d4 = 1^0^1 = 0
+    // p4 = d2^d3^d4 = 1^0^1 = 0
+    // Encoded (bit positions 1-7): p1=1, p2=0, d1=1, p4=0, d2=1, d3=0, d4=1
+    // Binary (pos 7..1): 1 0 1 0 1 0 1 = 0b1010101 = 85
+    let encoded = hamming74_encode(11);
+    assert_eq(encoded, 85);
+
+    // Test 4: Syndrome of valid codeword = 0
+    assert_eq(hamming74_syndrome(85), 0);
+
+    // Test 5: Decode valid codeword recovers data = 11
+    assert_eq(hamming74_decode(85), 11);
+
+    // Test 6: Inject error at bit position 3 (0-indexed: 2) - flip d1
+    // 85 = 1010101, flip bit 2: 1010001 = 81
+    let corrupted = set_bit(85, 2, 0);
+    assert_eq(corrupted, 81);
+
+    // Test 7: Syndrome detects error at position 3
+    assert_eq(hamming74_syndrome(81), 3);
+
+    // Test 8: Decode corrects single bit error
+    assert_eq(hamming74_decode(81), 11);
+
+    // Test 9: Checksum of [10, 20, 30, 40] = 100
+    let data = [10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(checksum(data, 4), 100);
+
+    // Test 10: Hamming encode/decode roundtrip for data = 5 (0b0101)
+    // d1=1, d2=0, d3=1, d4=0
+    // p1 = 1^0^0 = 1, p2 = 1^1^0 = 0, p4 = 0^1^0 = 1
+    // pos 1..7: 1,0,1,1,0,1,0 = 0b0101101 = 45
+    let enc5 = hamming74_encode(5);
+    assert_eq(hamming74_decode(enc5), 5);
+
+    print("796_error_correction: PASS");
+    0
+}

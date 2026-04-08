@@ -1,0 +1,329 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, tuples, composite
+//
+// Tests tuple patterns for destructuring and matching tuple values.
+// Tuples are ordered, fixed-size, heterogeneous collections.
+
+//------------------------------------------------------------------------------
+// Basic Tuple Pattern Destructuring
+//------------------------------------------------------------------------------
+
+/// Simple two-element tuple destructuring.
+fn destructure_pair(pair: (Int, Int)) -> Int {
+    match pair {
+        (a, b) => a + b,
+    }
+}
+
+/// Three-element tuple.
+fn destructure_triple(triple: (Int, Text, Bool)) -> Text {
+    match triple {
+        (n, s, b) => f"{s}: {n} ({b})",
+    }
+}
+
+/// Nested tuple destructuring.
+fn destructure_nested(data: ((Int, Int), (Int, Int))) -> Int {
+    match data {
+        ((a, b), (c, d)) => a + b + c + d,
+    }
+}
+
+/// Deeply nested tuples.
+fn destructure_deep(data: (((Int, Int), Int), Int)) -> Int {
+    match data {
+        (((a, b), c), d) => a * b * c * d,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tuple Patterns with Wildcards
+//------------------------------------------------------------------------------
+
+/// Ignore first element.
+fn tuple_ignore_first(pair: (Int, Int)) -> Int {
+    match pair {
+        (_, b) => b,
+    }
+}
+
+/// Ignore last element.
+fn tuple_ignore_last(pair: (Int, Int)) -> Int {
+    match pair {
+        (a, _) => a,
+    }
+}
+
+/// Ignore middle element.
+fn tuple_ignore_middle(triple: (Int, Text, Int)) -> Int {
+    match triple {
+        (a, _, c) => a + c,
+    }
+}
+
+/// Ignore multiple elements.
+fn tuple_ignore_multiple(quad: (Int, Int, Int, Int)) -> Int {
+    match quad {
+        (a, _, _, d) => a + d,
+    }
+}
+
+/// Ignore all but one.
+fn tuple_extract_one(quad: (Int, Int, Int, Int)) -> Int {
+    match quad {
+        (_, _, x, _) => x,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tuple Patterns with Rest (..)
+//------------------------------------------------------------------------------
+
+/// Rest pattern - head only.
+fn tuple_rest_head(tuple: (Int, Int, Int, Int)) -> Int {
+    match tuple {
+        (first, _, _, _) => first,
+    }
+}
+
+/// Rest pattern - tail only.
+fn tuple_rest_tail(tuple: (Int, Int, Int, Int)) -> Int {
+    match tuple {
+        (_, _, _, last) => last,
+    }
+}
+
+/// Rest pattern - both ends.
+fn tuple_rest_ends(tuple: (Int, Int, Int, Int)) -> (Int, Int) {
+    match tuple {
+        (first, _, _, last) => (first, last),
+    }
+}
+
+/// Rest with multiple bindings at start.
+fn tuple_rest_multi_start(tuple: (Int, Int, Int, Int, Int)) -> Int {
+    match tuple {
+        (a, b, _, _, _) => a + b,
+    }
+}
+
+/// Rest with multiple bindings at end.
+fn tuple_rest_multi_end(tuple: (Int, Int, Int, Int, Int)) -> Int {
+    match tuple {
+        (_, _, _, a, b) => a + b,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tuple Patterns with Literals
+//------------------------------------------------------------------------------
+
+/// Match specific tuple values.
+fn tuple_literals(pair: (Int, Int)) -> Text {
+    match pair {
+        (0, 0) => "origin",
+        (0, _) => "on y-axis",
+        (_, 0) => "on x-axis",
+        (1, 1) => "unit point",
+        _ => "general point",
+    }
+}
+
+/// Mixed literal and binding.
+fn tuple_mixed(triple: (Int, Text, Bool)) -> Text {
+    match triple {
+        (0, _, true) => "zero with true",
+        (0, _, false) => "zero with false",
+        (n, _, true) if n > 0 => "positive with true",
+        _ => "other",
+    }
+}
+
+/// Boolean tuple exhaustive.
+fn tuple_bool_exhaustive(pair: (Bool, Bool)) -> Text {
+    match pair {
+        (true, true) => "both true",
+        (true, false) => "first only",
+        (false, true) => "second only",
+        (false, false) => "neither",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tuple Patterns in Match Arms
+//------------------------------------------------------------------------------
+
+/// Point quadrant classification.
+fn classify_point(point: (Int, Int)) -> Text {
+    match point {
+        (0, 0) => "origin",
+        (x, 0) if x > 0 => "positive x-axis",
+        (x, 0) if x < 0 => "negative x-axis",
+        (0, y) if y > 0 => "positive y-axis",
+        (0, y) if y < 0 => "negative y-axis",
+        (x, y) if x > 0 && y > 0 => "quadrant 1",
+        (x, y) if x < 0 && y > 0 => "quadrant 2",
+        (x, y) if x < 0 && y < 0 => "quadrant 3",
+        (x, y) if x > 0 && y < 0 => "quadrant 4",
+        _ => "error",
+    }
+}
+
+/// HTTP response classification.
+fn classify_response(response: (Int, Text)) -> Text {
+    match response {
+        (200, _) => "OK",
+        (201, _) => "Created",
+        (204, _) => "No Content",
+        (code, _) if code >= 300 && code < 400 => "Redirect",
+        (code, _) if code >= 400 && code < 500 => "Client Error",
+        (code, _) if code >= 500 => "Server Error",
+        _ => "Unknown",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tuple Patterns with Or (|)
+//------------------------------------------------------------------------------
+
+/// Or-pattern in tuple matching.
+fn tuple_or_pattern(pair: (Int, Int)) -> Text {
+    match pair {
+        (0, _) | (_, 0) => "on axis",
+        (1, 1) | (-1, -1) | (1, -1) | (-1, 1) => "unit square corner",
+        _ => "other",
+    }
+}
+
+/// Multiple alternatives.
+fn tuple_multi_or(pair: (Int, Int)) -> Text {
+    match pair {
+        (0, 0) | (1, 1) | (2, 2) | (3, 3) => "diagonal",
+        (0, _) | (_, 0) => "axis",
+        _ => "other",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tuple Patterns with Type Annotations
+//------------------------------------------------------------------------------
+
+/// Annotated tuple destructuring in let.
+fn tuple_annotated() -> Int {
+    let pair: (Int, Int) = (10, 20);
+    let (a, b): (Int, Int) = pair;
+    a + b
+}
+
+//------------------------------------------------------------------------------
+// Tuple Patterns in Different Contexts
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+/// Tuple in if-let.
+fn tuple_if_let(maybe_pair: Maybe<(Int, Int)>) -> Int {
+    if let Some((a, b)) = maybe_pair {
+        a + b
+    } else {
+        0
+    }
+}
+
+/// Tuple in for loop.
+fn tuple_for_loop(pairs: List<(Int, Int)>) -> Int {
+    let mut sum = 0;
+    for (a, b) in pairs {
+        sum = sum + a * b;
+    }
+    sum
+}
+
+/// Tuple in function parameter.
+fn tuple_param(pair: (Int, Int)) -> Int {
+    let (x, y) = pair;
+    x + y
+}
+
+/// Tuple in closure parameter.
+fn tuple_closure() -> Int {
+    let add = |pair: (Int, Int)| pair.0 + pair.1;
+    add((3, 4))
+}
+
+//------------------------------------------------------------------------------
+// Unit and Single-Element Tuples
+//------------------------------------------------------------------------------
+
+/// Unit type matching (empty tuple).
+fn match_unit() -> Text {
+    "unit"
+}
+
+/// Single-element "tuple" - in Verum, (Int,) is Int, just double it.
+fn match_single(single: Int) -> Int {
+    single * 2
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Basic destructuring
+    assert(destructure_pair((3, 4)) == 7);
+    assert(destructure_nested(((1, 2), (3, 4))) == 10);
+
+    // Wildcards
+    assert(tuple_ignore_first((10, 20)) == 20);
+    assert(tuple_ignore_last((10, 20)) == 10);
+    assert(tuple_ignore_middle((1, "text", 3)) == 4);
+
+    // Rest patterns
+    assert(tuple_rest_head((1, 2, 3, 4)) == 1);
+    assert(tuple_rest_tail((1, 2, 3, 4)) == 4);
+    assert(tuple_rest_ends((1, 2, 3, 4)) == (1, 4));
+
+    // Literals
+    assert(tuple_literals((0, 0)) == "origin");
+    assert(tuple_literals((0, 5)) == "on y-axis");
+    assert(tuple_literals((5, 0)) == "on x-axis");
+    assert(tuple_literals((1, 1)) == "unit point");
+
+    // Boolean exhaustive
+    assert(tuple_bool_exhaustive((true, true)) == "both true");
+    assert(tuple_bool_exhaustive((false, false)) == "neither");
+
+    // Point classification
+    assert(classify_point((0, 0)) == "origin");
+    assert(classify_point((5, 5)) == "quadrant 1");
+    assert(classify_point((-5, 5)) == "quadrant 2");
+
+    // Response classification
+    assert(classify_response((200, "OK")) == "OK");
+    assert(classify_response((404, "Not Found")) == "Client Error");
+
+    // Or-patterns
+    assert(tuple_or_pattern((0, 5)) == "on axis");
+    assert(tuple_or_pattern((1, 1)) == "unit square corner");
+
+    // If-let
+    assert(tuple_if_let(Some((3, 4))) == 7);
+    assert(tuple_if_let(None) == 0);
+
+    // Function param
+    assert(tuple_param((5, 6)) == 11);
+
+    // Closure
+    assert(tuple_closure() == 7);
+
+    // Unit
+    assert(match_unit() == "unit");
+
+    // Single
+    assert(match_single(5) == 10);
+}

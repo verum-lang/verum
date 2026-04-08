@@ -1,0 +1,236 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, fenwick-tree, BIT, prefix-sum
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Fenwick tree (Binary Indexed Tree) — prefix sums and point updates
+
+// Fenwick tree with up to 16 elements (1-indexed, position 0 unused)
+type FenwickTree is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int, d12: Int, d13: Int, d14: Int, d15: Int,
+    size: Int
+};
+
+fn ft_get(ft: FenwickTree, i: Int) -> Int {
+    if i == 0 { ft.d0 } else if i == 1 { ft.d1 } else if i == 2 { ft.d2 }
+    else if i == 3 { ft.d3 } else if i == 4 { ft.d4 } else if i == 5 { ft.d5 }
+    else if i == 6 { ft.d6 } else if i == 7 { ft.d7 } else if i == 8 { ft.d8 }
+    else if i == 9 { ft.d9 } else if i == 10 { ft.d10 } else if i == 11 { ft.d11 }
+    else if i == 12 { ft.d12 } else if i == 13 { ft.d13 } else if i == 14 { ft.d14 }
+    else { ft.d15 }
+}
+
+fn ft_set(ft: FenwickTree, i: Int, v: Int) -> FenwickTree {
+    FenwickTree {
+        d0: if i == 0 { v } else { ft.d0 }, d1: if i == 1 { v } else { ft.d1 },
+        d2: if i == 2 { v } else { ft.d2 }, d3: if i == 3 { v } else { ft.d3 },
+        d4: if i == 4 { v } else { ft.d4 }, d5: if i == 5 { v } else { ft.d5 },
+        d6: if i == 6 { v } else { ft.d6 }, d7: if i == 7 { v } else { ft.d7 },
+        d8: if i == 8 { v } else { ft.d8 }, d9: if i == 9 { v } else { ft.d9 },
+        d10: if i == 10 { v } else { ft.d10 }, d11: if i == 11 { v } else { ft.d11 },
+        d12: if i == 12 { v } else { ft.d12 }, d13: if i == 13 { v } else { ft.d13 },
+        d14: if i == 14 { v } else { ft.d14 }, d15: if i == 15 { v } else { ft.d15 },
+        size: ft.size
+    }
+}
+
+fn ft_new(n: Int) -> FenwickTree {
+    FenwickTree {
+        d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0,
+        d8: 0, d9: 0, d10: 0, d11: 0, d12: 0, d13: 0, d14: 0, d15: 0,
+        size: n
+    }
+}
+
+// lowbit(x) = x & (-x) — lowest set bit
+fn lowbit(x: Int) -> Int {
+    x & (-x)
+}
+
+// Point update: add delta to position i (1-indexed)
+fn ft_update(ft: FenwickTree, pos: Int, delta: Int) -> FenwickTree {
+    let mut result = ft;
+    let mut i = pos;
+    while i <= ft.size {
+        result = ft_set(result, i, ft_get(result, i) + delta);
+        i = i + lowbit(i);
+    }
+    result
+}
+
+// Prefix sum: sum of elements from 1 to pos
+fn ft_prefix_sum(ft: FenwickTree, pos: Int) -> Int {
+    let mut sum = 0;
+    let mut i = pos;
+    while i > 0 {
+        sum = sum + ft_get(ft, i);
+        i = i - lowbit(i);
+    }
+    sum
+}
+
+// Range sum: sum of elements from left to right (inclusive, 1-indexed)
+fn ft_range_sum(ft: FenwickTree, left: Int, right: Int) -> Int {
+    if left <= 1 {
+        ft_prefix_sum(ft, right)
+    } else {
+        ft_prefix_sum(ft, right) - ft_prefix_sum(ft, left - 1)
+    }
+}
+
+// Build a Fenwick tree from an array (Arr8, 0-indexed, placed at 1-indexed positions)
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn ft_build(arr: Arr8, n: Int) -> FenwickTree {
+    let mut ft = ft_new(n);
+    let mut i = 0;
+    while i < n {
+        ft = ft_update(ft, i + 1, a8_get(arr, i));
+        i = i + 1;
+    }
+    ft
+}
+
+// Find the position of given prefix sum (find k-th smallest, 1-indexed)
+fn ft_find_kth(ft: FenwickTree, target: Int) -> Int {
+    let mut pos = 0;
+    let mut sum = 0;
+    // Binary lifting: try adding powers of 2
+    let mut step = 8;  // largest power of 2 <= 16
+    while step > 0 {
+        let next = pos + step;
+        if next <= ft.size {
+            if sum + ft_get(ft, next) < target {
+                sum = sum + ft_get(ft, next);
+                pos = next;
+            }
+        }
+        step = step / 2;
+    }
+    pos + 1
+}
+
+fn test_basic() {
+    // Array: [3, 2, 1, 4, 5, 6, 7, 8]
+    let arr = Arr8 { d0: 3, d1: 2, d2: 1, d3: 4, d4: 5, d5: 6, d6: 7, d7: 8 };
+    let ft = ft_build(arr, 8);
+
+    // Prefix sums
+    assert_eq(ft_prefix_sum(ft, 1), 3);
+    assert_eq(ft_prefix_sum(ft, 2), 5);     // 3+2
+    assert_eq(ft_prefix_sum(ft, 3), 6);     // 3+2+1
+    assert_eq(ft_prefix_sum(ft, 4), 10);    // 3+2+1+4
+    assert_eq(ft_prefix_sum(ft, 8), 36);    // sum of all
+
+    // Range sums
+    assert_eq(ft_range_sum(ft, 1, 1), 3);
+    assert_eq(ft_range_sum(ft, 2, 4), 7);   // 2+1+4
+    assert_eq(ft_range_sum(ft, 5, 8), 26);  // 5+6+7+8
+    assert_eq(ft_range_sum(ft, 3, 6), 16);  // 1+4+5+6
+    assert_eq(ft_range_sum(ft, 1, 8), 36);
+}
+
+fn test_point_update() {
+    let arr = Arr8 { d0: 1, d1: 1, d2: 1, d3: 1, d4: 1, d5: 1, d6: 1, d7: 1 };
+    let mut ft = ft_build(arr, 8);
+    assert_eq(ft_prefix_sum(ft, 8), 8);
+
+    // Add 10 to position 3
+    ft = ft_update(ft, 3, 10);
+    assert_eq(ft_prefix_sum(ft, 3), 13);    // 1+1+11
+    assert_eq(ft_prefix_sum(ft, 2), 2);     // unchanged
+    assert_eq(ft_prefix_sum(ft, 8), 18);    // 8+10
+    assert_eq(ft_range_sum(ft, 3, 3), 11);  // just position 3
+
+    // Subtract 5 from position 5
+    ft = ft_update(ft, 5, -5);
+    assert_eq(ft_range_sum(ft, 5, 5), -4);  // 1-5
+    assert_eq(ft_prefix_sum(ft, 8), 13);    // 18-5
+}
+
+fn test_all_zeros() {
+    let ft = ft_new(8);
+    assert_eq(ft_prefix_sum(ft, 1), 0);
+    assert_eq(ft_prefix_sum(ft, 8), 0);
+    assert_eq(ft_range_sum(ft, 3, 5), 0);
+}
+
+fn test_single_element() {
+    let ft = ft_new(1);
+    let ft2 = ft_update(ft, 1, 42);
+    assert_eq(ft_prefix_sum(ft2, 1), 42);
+    assert_eq(ft_range_sum(ft2, 1, 1), 42);
+}
+
+fn test_cumulative_updates() {
+    let mut ft = ft_new(8);
+    // Build up: position 1 gets +1 three times
+    ft = ft_update(ft, 1, 1);
+    ft = ft_update(ft, 1, 1);
+    ft = ft_update(ft, 1, 1);
+    assert_eq(ft_prefix_sum(ft, 1), 3);
+
+    // Position 4 gets +5, then -2
+    ft = ft_update(ft, 4, 5);
+    ft = ft_update(ft, 4, -2);
+    assert_eq(ft_range_sum(ft, 4, 4), 3);  // 5-2
+    assert_eq(ft_prefix_sum(ft, 4), 6);    // 3+0+0+3
+}
+
+fn test_kth_smallest() {
+    // Frequency array: [0, 3, 0, 2, 0, 1, 0, 0]
+    // Values 2 appears 3 times, 4 appears 2 times, 6 appears 1 time
+    let arr = Arr8 { d0: 0, d1: 3, d2: 0, d3: 2, d4: 0, d5: 1, d6: 0, d7: 0 };
+    let ft = ft_build(arr, 8);
+
+    // 1st smallest -> position 2 (first nonzero bucket)
+    assert_eq(ft_find_kth(ft, 1), 2);
+    // 3rd smallest -> still position 2 (3 copies)
+    assert_eq(ft_find_kth(ft, 3), 2);
+    // 4th smallest -> position 4
+    assert_eq(ft_find_kth(ft, 4), 4);
+    // 6th smallest -> position 6
+    assert_eq(ft_find_kth(ft, 6), 6);
+}
+
+fn test_lowbit() {
+    assert_eq(lowbit(1), 1);
+    assert_eq(lowbit(2), 2);
+    assert_eq(lowbit(3), 1);
+    assert_eq(lowbit(4), 4);
+    assert_eq(lowbit(6), 2);
+    assert_eq(lowbit(8), 8);
+    assert_eq(lowbit(12), 4);
+}
+
+fn test_powers_of_two() {
+    // Build with powers of 2: [1, 2, 4, 8, 16, 32, 64, 128]
+    let arr = Arr8 { d0: 1, d1: 2, d2: 4, d3: 8, d4: 16, d5: 32, d6: 64, d7: 128 };
+    let ft = ft_build(arr, 8);
+    assert_eq(ft_prefix_sum(ft, 8), 255);     // 2^8 - 1
+    assert_eq(ft_prefix_sum(ft, 4), 15);      // 2^4 - 1
+    assert_eq(ft_range_sum(ft, 5, 8), 240);   // 255 - 15
+    assert_eq(ft_range_sum(ft, 3, 5), 28);    // 4+8+16
+}
+
+fn main() -> Int {
+    test_basic();
+    test_point_update();
+    test_all_zeros();
+    test_single_element();
+    test_cumulative_updates();
+    test_kth_smallest();
+    test_lowbit();
+    test_powers_of_two();
+    print("[OK] 303_fenwick_tree_aot");
+    0
+}

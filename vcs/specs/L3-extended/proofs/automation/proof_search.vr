@@ -1,0 +1,177 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, automation, search
+// @description: Automated proof search strategies
+
+/// Automated proof search uses tactics and heuristics to find proofs.
+
+/// Type class for automatic proof synthesis
+type Auto<P> is protocol {
+    fn solve() -> P;
+};
+
+/// Trivial truth
+type True is { unit: () };
+
+/// Conjunction
+type And<P, Q> is { left: P, right: Q };
+
+/// Disjunction
+type Or<P, Q> is
+    | Left(P)
+    | Right(Q);
+
+/// Proof placeholder
+type Proof is ();
+
+/// Negation
+type Not<P> is { refute: Bool };
+type Void is ();
+type Either<A, B> is
+    | Left(A)
+    | Right(B);
+
+/// Proof search with depth limit
+fn search_with_depth<P>(depth: Int) -> Maybe<P> {
+    if depth <= 0 {
+        return None;
+    }
+
+    // Try reflexivity
+    if let Some(proof) = try_refl() {
+        return Some(proof);
+    }
+
+    // Try assumptions
+    if let Some(proof) = try_assumption() {
+        return Some(proof);
+    }
+
+    // Try introduction rules
+    if let Some(proof) = try_intro(depth - 1) {
+        return Some(proof);
+    }
+
+    // Try elimination rules
+    if let Some(proof) = try_elim(depth - 1) {
+        return Some(proof);
+    }
+
+    None
+}
+
+/// Hint database for proof automation
+type HintDb is {
+    lemmas: List<Lemma>,
+    instances: List<Instance>,
+};
+
+type Lemma is {
+    name: Text,
+    priority: Int,
+};
+
+type Instance is {
+    head: Text,
+    solver_name: Text,
+};
+
+/// Auto tactic with hints
+fn auto_with_hints<P>(db: &HintDb, depth: Int) -> Maybe<P> {
+    // Try direct lemma application
+    for hint in &db.lemmas {
+        if let Some(proof) = try_apply_lemma(hint) {
+            return Some(proof);
+        }
+    }
+
+    // Fall back to search
+    search_with_depth(depth)
+}
+
+/// Backtracking search
+fn backtrack_search<P>(
+    tactics: List<fn() -> Maybe<P>>,
+    fuel: Int
+) -> Maybe<P> {
+    if fuel <= 0 {
+        return None;
+    }
+
+    for tactic in &tactics {
+        if let Some(proof) = tactic() {
+            return Some(proof);
+        }
+    }
+
+    None
+}
+
+/// Decidable protocol
+type Decidable is protocol {
+    fn decide(self) -> Bool;
+};
+
+/// Omega decision procedure for linear arithmetic
+fn omega_decide(formula: LinearFormula) -> Bool {
+    // Decision procedure for Presburger arithmetic
+    match formula {
+        LinearFormula.Eq(lhs, rhs) => {
+            // Check if lhs = rhs is satisfiable
+            solve_linear_eq(lhs, rhs)
+        }
+        LinearFormula.Lt(lhs, rhs) => {
+            solve_linear_ineq(lhs, rhs, false)
+        }
+        LinearFormula.Le(lhs, rhs) => {
+            solve_linear_ineq(lhs, rhs, true)
+        }
+        LinearFormula.And(p, q) => {
+            omega_decide(p) && omega_decide(q)
+        }
+        LinearFormula.Or(p, q) => {
+            omega_decide(p) || omega_decide(q)
+        }
+        LinearFormula.Not(p) => {
+            !omega_decide(p)
+        }
+        LinearFormula.Exists(var, p) => {
+            eliminate_exists(var, p)
+        }
+        LinearFormula.Forall(var, p) => {
+            omega_decide(LinearFormula.Not(
+                LinearFormula.Exists(var, LinearFormula.Not(p))
+            ))
+        }
+    }
+}
+
+type LinearExpr is {
+    constant: Int,
+    terms: Map<Text, Int>,
+};
+
+type LinearFormula is
+    | Eq(LinearExpr, LinearExpr)
+    | Lt(LinearExpr, LinearExpr)
+    | Le(LinearExpr, LinearExpr)
+    | And(LinearFormula, LinearFormula)
+    | Or(LinearFormula, LinearFormula)
+    | Not(LinearFormula)
+    | Exists(Text, LinearFormula)
+    | Forall(Text, LinearFormula);
+
+fn solve_linear_eq(lhs: LinearExpr, rhs: LinearExpr) -> Bool { false }
+fn solve_linear_ineq(lhs: LinearExpr, rhs: LinearExpr, inclusive: Bool) -> Bool { false }
+fn eliminate_exists(var: Text, formula: LinearFormula) -> Bool { false }
+
+fn try_refl<P>() -> Maybe<P> { None }
+fn try_assumption<P>() -> Maybe<P> { None }
+fn try_intro<P>(depth: Int) -> Maybe<P> { None }
+fn try_elim<P>(depth: Int) -> Maybe<P> { None }
+fn try_apply_lemma<P>(lemma: &Lemma) -> Maybe<P> { None }
+
+fn main() {
+    // Proof automation
+}

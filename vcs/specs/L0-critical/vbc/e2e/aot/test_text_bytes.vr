@@ -1,0 +1,11 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "AB";
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    print(f"bytes_len={n}");
+    0
+}

@@ -1,0 +1,187 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, range-pattern, overlap, pattern-matching
+// @description: Range pattern overlap detection with improved diagnostics
+
+// ============================================================
+// RANGE PATTERN OVERLAP DETECTION
+// ============================================================
+// Tests for detecting and warning about overlapping range patterns.
+// While overlaps don't cause errors, they may indicate redundant code.
+
+// ============================================================
+// BASIC RANGE PATTERNS (NO OVERLAP)
+// ============================================================
+
+fn classify_age(age: Int) -> Text =
+    match age {
+        0..=12 => "child",
+        13..=19 => "teenager",
+        20..=64 => "adult",
+        65.. => "senior",
+        _ => "invalid"
+    };
+
+fn classify_score(score: Int) -> Text =
+    match score {
+        0..=59 => "F",
+        60..=69 => "D",
+        70..=79 => "C",
+        80..=89 => "B",
+        90..=100 => "A",
+        _ => "invalid"
+    };
+
+// ============================================================
+// INTENTIONAL OVERLAP (PRIORITY ORDER)
+// ============================================================
+// When ranges intentionally overlap, earlier patterns take priority.
+// The compiler may warn about redundancy.
+
+fn classify_with_overlap(n: Int) -> Text =
+    match n {
+        0 => "zero",           // Most specific first
+        1..=10 => "small",
+        5..=15 => "medium",    // WARNING: 5..=10 overlaps with previous
+        10..=20 => "large",    // WARNING: 10 overlaps with previous
+        _ => "other"
+    };
+
+// ============================================================
+// RANGE WITH LITERALS
+// ============================================================
+
+fn classify_http_status(code: Int) -> Text =
+    match code {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        200..=299 => "Success (other)",  // 200, 201, 204 handled above
+        301 => "Moved Permanently",
+        302 => "Found",
+        300..=399 => "Redirect (other)",
+        400 => "Bad Request",
+        404 => "Not Found",
+        400..=499 => "Client Error (other)",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        500..=599 => "Server Error (other)",
+        _ => "Unknown"
+    };
+
+// ============================================================
+// EXHAUSTIVE RANGES
+// ============================================================
+
+fn bool_to_int(b: Bool) -> Int =
+    match b {
+        true => 1,
+        false => 0
+    };
+
+fn char_category(c: Char) -> Text =
+    match c {
+        'a'..='z' => "lowercase",
+        'A'..='Z' => "uppercase",
+        '0'..='9' => "digit",
+        ' ' | '\t' | '\n' | '\r' => "whitespace",
+        _ => "other"
+    };
+
+// ============================================================
+// ADJACENT RANGES (NO GAP)
+// ============================================================
+
+fn temperature_zone(celsius: Int) -> Text =
+    match celsius {
+        ..=-1 => "freezing",
+        0..=15 => "cold",
+        16..=25 => "comfortable",
+        26..=35 => "warm",
+        36.. => "hot"
+    };
+
+// ============================================================
+// GUARD COMBINATIONS WITH RANGES
+// ============================================================
+
+fn special_numbers(n: Int) -> Text =
+    match n {
+        1..=100 if n % 2 == 0 => "even in 1-100",
+        1..=100 if n % 2 == 1 => "odd in 1-100",
+        101..=1000 => "in hundreds",
+        _ => "other"
+    };
+
+// ============================================================
+// NESTED RANGE MATCHING
+// ============================================================
+
+fn classify_point(x: Int, y: Int) -> Text =
+    match (x, y) {
+        (0, 0) => "origin",
+        (0, _) => "on y-axis",
+        (_, 0) => "on x-axis",
+        (1..=10, 1..=10) => "first quadrant, small",
+        _ => "far from origin"
+    };
+
+// ============================================================
+// OPEN-ENDED RANGES
+// ============================================================
+
+fn sign(n: Int) -> Text =
+    match n {
+        ..=-1 => "negative",
+        0 => "zero",
+        1.. => "positive"
+    };
+
+fn magnitude(n: Int) -> Text =
+    match n {
+        -10..=10 => "small",
+        -100..=100 => "medium",
+        _ => "large"
+    };
+
+// ============================================================
+// MAIN
+// ============================================================
+
+fn main() {
+    // Age classification
+    assert(classify_age(5) == "child");
+    assert(classify_age(16) == "teenager");
+    assert(classify_age(35) == "adult");
+    assert(classify_age(70) == "senior");
+
+    // Score classification
+    assert(classify_score(55) == "F");
+    assert(classify_score(75) == "C");
+    assert(classify_score(95) == "A");
+
+    // HTTP status
+    assert(classify_http_status(200) == "OK");
+    assert(classify_http_status(201) == "Created");
+    assert(classify_http_status(250) == "Success (other)");
+    assert(classify_http_status(404) == "Not Found");
+
+    // Bool conversion
+    assert(bool_to_int(true) == 1);
+    assert(bool_to_int(false) == 0);
+
+    // Temperature
+    assert(temperature_zone(-10) == "freezing");
+    assert(temperature_zone(20) == "comfortable");
+    assert(temperature_zone(40) == "hot");
+
+    // Sign
+    assert(sign(-5) == "negative");
+    assert(sign(0) == "zero");
+    assert(sign(5) == "positive");
+
+    // Point classification
+    assert(classify_point(0, 0) == "origin");
+    assert(classify_point(5, 5) == "first quadrant, small");
+    assert(classify_point(-5, 5) == "far from origin");
+}

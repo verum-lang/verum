@@ -1,0 +1,179 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: iterator, protocol, user-defined, struct
+// @description: User-defined iterator pattern with functional-style state
+
+type RangeState is { current: Int, end_val: Int, step: Int };
+
+fn range_new(start: Int, end_val: Int) -> RangeState {
+    RangeState { current: start, end_val: end_val, step: 1 }
+}
+
+fn range_step(start: Int, end_val: Int, step: Int) -> RangeState {
+    RangeState { current: start, end_val: end_val, step: step }
+}
+
+fn test_basic_iter() -> Int {
+    let mut current = 0;
+    let end_val = 5;
+    let mut sum = 0;
+    while current < end_val {
+        sum = sum + current;
+        current = current + 1;
+    }
+    if sum != 10 {
+        print(f"FAIL basic_iter: expected 10, got {sum}");
+        return 1;
+    }
+    print("  basic_iter: OK");
+    0
+}
+
+fn test_step_iter() -> Int {
+    let mut current = 0;
+    let end_val = 10;
+    let step = 2;
+    let mut sum = 0;
+    while current < end_val {
+        sum = sum + current;
+        current = current + step;
+    }
+    if sum != 20 {
+        print(f"FAIL step_iter: expected 20, got {sum}");
+        return 1;
+    }
+    print("  step_iter: OK");
+    0
+}
+
+fn test_fib_iter() -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut count = 0;
+    let limit = 8;
+    let mut values = List.new();
+    while count < limit {
+        values.push(a);
+        let new_b = a + b;
+        a = b;
+        b = new_b;
+        count = count + 1;
+    }
+    if values.len() != 8 {
+        print(f"FAIL fib_iter: expected 8, got {values.len()}");
+        return 1;
+    }
+    let last = values[7];
+    if last != 13 {
+        print(f"FAIL fib_iter: expected last=13, got {last}");
+        return 1;
+    }
+    print("  fib_iter: OK");
+    0
+}
+
+fn collect_range(start: Int, end_val: Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = start;
+    while i < end_val {
+        result.push(i);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_collect() -> Int {
+    let items = collect_range(1, 6);
+    if items.len() != 5 {
+        print(f"FAIL collect: expected 5, got {items.len()}");
+        return 1;
+    }
+    let mut sum = 0;
+    let mut i = 0;
+    while i < items.len() {
+        sum = sum + items[i];
+        i = i + 1;
+    }
+    if sum != 15 {
+        print(f"FAIL collect: expected sum 15, got {sum}");
+        return 1;
+    }
+    print("  collect: OK");
+    0
+}
+
+fn test_transform() -> Int {
+    let mut i = 1;
+    let mut squares = List.new();
+    while i < 5 {
+        squares.push(i * i);
+        i = i + 1;
+    }
+    let mut sum = 0;
+    let mut j = 0;
+    while j < squares.len() {
+        sum = sum + squares[j];
+        j = j + 1;
+    }
+    if sum != 30 {
+        print(f"FAIL transform: expected 30, got {sum}");
+        return 1;
+    }
+    print("  transform: OK");
+    0
+}
+
+// Struct-based iterator: create range, consume with separate function
+type Counter is { val: Int, max_val: Int };
+
+implement Counter {
+    fn new(max_val: Int) -> Counter {
+        Counter { val: 0, max_val: max_val }
+    }
+
+    fn is_done(&self) -> Bool {
+        self.val >= self.max_val
+    }
+
+    fn value(&self) -> Int {
+        self.val
+    }
+}
+
+fn counter_next(c: Counter) -> Counter {
+    Counter { val: c.val + 1, max_val: c.max_val }
+}
+
+fn test_counter() -> Int {
+    let mut c = Counter.new(5);
+    let mut sum = 0;
+    while !c.is_done() {
+        sum = sum + c.value();
+        c = counter_next(c);
+    }
+    if sum != 10 {
+        print(f"FAIL counter: expected 10, got {sum}");
+        return 1;
+    }
+    print("  counter: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Iterator Protocol Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_iter();
+    failures = failures + test_step_iter();
+    failures = failures + test_fib_iter();
+    failures = failures + test_collect();
+    failures = failures + test_transform();
+    failures = failures + test_counter();
+
+    if failures == 0 {
+        print("All iterator protocol tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

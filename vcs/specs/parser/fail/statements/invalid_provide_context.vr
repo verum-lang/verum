@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, provide, context, invalid, error
+// @description: Test provide statement with invalid context expression
+// @expected-error: E044
+
+fn test() {
+    provide 123 = value;
+}

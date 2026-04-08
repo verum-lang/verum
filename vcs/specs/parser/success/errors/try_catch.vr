@@ -1,0 +1,163 @@
+// @test: parse-pass
+// @tier: 0
+// @category: errors
+// @description: Test try/recover expression parsing with match arms
+
+fn test_basic_try_recover() {
+    // Try with recover using match arms
+    try {
+        risky_operation();
+    } recover {
+        Error.NotFound => handle_not_found(),
+        Error.Timeout => handle_timeout(),
+        _ => handle_unknown()
+    }
+
+    // Single arm recover
+    try {
+        parse_data(input);
+    } recover {
+        ParseError(msg) => {
+            log_error(msg);
+            default_value()
+        }
+    }
+
+    // Multiple specific errors
+    try {
+        connect_and_fetch();
+    } recover {
+        NetworkError.ConnectionRefused => retry_with_backoff(),
+        NetworkError.Timeout => { return cached_response(); },
+        NetworkError.DnsError(host) => report_dns_issue(host),
+        AuthError.Unauthorized => refresh_and_retry(),
+        AuthError.Forbidden => report_forbidden(),
+        _ => Err(e)
+    }
+}
+
+fn test_recover_with_guards() {
+    // Guards in match arms
+    try {
+        process(data);
+    } recover {
+        Error.Retryable(count) if count < 3 => retry(),
+        Error.Retryable(_) => give_up(),
+        Error.Fatal(msg) => panic(msg),
+        _ => log_and_continue()
+    }
+
+    // Complex guard expressions
+    try {
+        operation();
+    } recover {
+        HttpError(code) if code >= 500 && code < 600 => retry_server_error(),
+        HttpError(code) if code >= 400 && code < 500 => handle_client_error(),
+        HttpError(code) => handle_other_http(code),
+        _ => handle_other()
+    }
+}
+
+fn test_recover_nested_patterns() {
+    // Nested pattern matching
+    try {
+        complex_operation();
+    } recover {
+        Error.Wrapped(inner) => match inner {
+            InnerError.A => handle_a(),
+            InnerError.B(x) => handle_b(x),
+            _ => handle_other()
+        },
+        Error.Simple => handle_simple(),
+        other => propagate(other)
+    }
+
+    // Tuple patterns
+    try {
+        dual_operation();
+    } recover {
+        (ErrorA, ErrorB) => handle_both(),
+        (ErrorA, _) => handle_a_only(),
+        (_, ErrorB) => handle_b_only(),
+        _ => handle_neither()
+    }
+}
+
+fn test_recover_with_binding() {
+    // Binding error to variable
+    try {
+        operation();
+    } recover {
+        e @ Error.Retryable(_) => {
+            log_error(e);
+            retry()
+        },
+        e @ Error.Fatal(_) => {
+            report_fatal(e);
+            panic(e.message())
+        },
+        e => handle_generic(e)
+    }
+
+    // Destructuring with binding
+    try {
+        fetch();
+    } recover {
+        e @ NetworkError { code, message } => {
+            log_network_error(e, code, message);
+            fallback()
+        },
+        _ => default()
+    }
+}
+
+fn test_recover_expressions() {
+    // Recover as expression
+    let result = try {
+        parse(input)
+    } recover {
+        ParseError.Empty => default_result(),
+        ParseError.Invalid(pos) => partial_result(pos),
+        _ => error_result()
+    };
+
+    // In assignment
+    let value = try {
+        compute_value()
+    } recover {
+        _ => 0
+    };
+
+    // Return the result directly
+    result
+}
+
+fn test_multiple_recover_arms() {
+    // Many arms with different patterns
+    try {
+        database_operation();
+    } recover {
+        DbError.ConnectionLost => reconnect_and_retry(),
+        DbError.QueryTimeout => optimize_and_retry(),
+        DbError.DeadLock => wait_and_retry(),
+        DbError.ConstraintViolation(c) => handle_constraint(c),
+        DbError.SyntaxError(sql) => fix_sql(sql),
+        DbError.PermissionDenied(table) => request_access(table),
+        DbError.TableNotFound(name) => create_table(name),
+        DbError.ColumnNotFound(col) => add_column(col),
+        e if e.is_transient() => retry_transient(e),
+        e => log_and_fail(e)
+    }
+}
+
+fn test_recover_with_type_patterns() {
+    // Type-based recovery
+    try {
+        polymorphic_operation();
+    } recover {
+        e if e is IoError => handle_io(e),
+        e if e is NetworkError => handle_network(e),
+        e if e is DatabaseError => handle_database(e),
+        e => handle_unknown(e)
+    }
+}

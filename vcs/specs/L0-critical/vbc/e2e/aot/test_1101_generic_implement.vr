@@ -1,0 +1,131 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, implement, type-params
+// @description: Test generic implement blocks with type parameters
+
+type Pair<A, B> is { first: A, second: B };
+
+implement Pair<Int, Int> {
+    fn sum(&self) -> Int {
+        self.first + self.second
+    }
+
+    fn max(&self) -> Int {
+        if self.first > self.second { self.first } else { self.second }
+    }
+}
+
+fn test_pair_int() -> Int {
+    let p = Pair { first: 10, second: 20 };
+    if p.sum() != 30 {
+        print(f"FAIL pair sum: {p.sum()}");
+        return 1;
+    }
+    if p.max() != 20 {
+        print(f"FAIL pair max: {p.max()}");
+        return 1;
+    }
+    print("  pair_int: OK");
+    0
+}
+
+type Container<T> is { items: List<T>, count: Int };
+
+implement Container<Int> {
+    fn new() -> Container<Int> {
+        Container { items: List.new(), count: 0 }
+    }
+
+    fn add(&mut self, val: Int) {
+        self.items.push(val);
+        self.count = self.count + 1;
+    }
+
+    fn total(&self) -> Int {
+        let mut sum = 0;
+        let mut i = 0;
+        while i < self.count {
+            sum = sum + self.items[i];
+            i = i + 1;
+        }
+        sum
+    }
+
+    fn size(&self) -> Int {
+        self.count
+    }
+}
+
+fn test_container() -> Int {
+    let mut c = Container.new();
+    c.add(10);
+    c.add(20);
+    c.add(30);
+    if c.size() != 3 {
+        print(f"FAIL container size: {c.size()}");
+        return 1;
+    }
+    if c.total() != 60 {
+        print(f"FAIL container total: {c.total()}");
+        return 1;
+    }
+    print("  container: OK");
+    0
+}
+
+type Matrix2x2 is { a: Int, b: Int, c: Int, d: Int };
+
+implement Matrix2x2 {
+    fn identity() -> Matrix2x2 {
+        Matrix2x2 { a: 1, b: 0, c: 0, d: 1 }
+    }
+
+    fn det(&self) -> Int {
+        self.a * self.d - self.b * self.c
+    }
+
+    fn multiply(&self, other: Matrix2x2) -> Matrix2x2 {
+        Matrix2x2 {
+            a: self.a * other.a + self.b * other.c,
+            b: self.a * other.b + self.b * other.d,
+            c: self.c * other.a + self.d * other.c,
+            d: self.c * other.b + self.d * other.d,
+        }
+    }
+}
+
+fn test_matrix() -> Int {
+    let id = Matrix2x2.identity();
+    if id.det() != 1 {
+        print(f"FAIL matrix det(I): {id.det()}");
+        return 1;
+    }
+    let m = Matrix2x2 { a: 2, b: 3, c: 1, d: 4 };
+    if m.det() != 5 {
+        print(f"FAIL matrix det: {m.det()}");
+        return 1;
+    }
+    let prod = m.multiply(id);
+    if prod.a != 2 || prod.d != 4 {
+        print("FAIL matrix multiply by identity");
+        return 1;
+    }
+    print("  matrix: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Generic Implement Tests:");
+    let mut failures = 0;
+    failures = failures + test_pair_int();
+    failures = failures + test_container();
+    failures = failures + test_matrix();
+
+    if failures == 0 {
+        print("All generic implement tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

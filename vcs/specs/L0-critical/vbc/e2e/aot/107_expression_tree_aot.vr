@@ -1,0 +1,405 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, expression-tree, constant-folding, optimization, ast
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT expression tree with evaluate, constant folding, tree comparison, depth calculation
+
+// Expression tree: using 5 variants to avoid potential issues
+type Expr is
+    EConst(Int)
+  | EVar(Int)
+  | EAdd { left: Expr, right: Expr }
+  | ESub { left: Expr, right: Expr }
+  | EMul { left: Expr, right: Expr };
+
+// Environment: flat array mapping variable indices to values (up to 8 vars)
+type Env is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn env_new() -> Env {
+    Env { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn env_get(e: Env, i: Int) -> Int {
+    if i == 0 { e.v0 } else if i == 1 { e.v1 }
+    else if i == 2 { e.v2 } else if i == 3 { e.v3 }
+    else if i == 4 { e.v4 } else if i == 5 { e.v5 }
+    else if i == 6 { e.v6 } else { e.v7 }
+}
+
+fn env_set(e: Env, i: Int, val: Int) -> Env {
+    Env {
+        v0: if i == 0 { val } else { e.v0 },
+        v1: if i == 1 { val } else { e.v1 },
+        v2: if i == 2 { val } else { e.v2 },
+        v3: if i == 3 { val } else { e.v3 },
+        v4: if i == 4 { val } else { e.v4 },
+        v5: if i == 5 { val } else { e.v5 },
+        v6: if i == 6 { val } else { e.v6 },
+        v7: if i == 7 { val } else { e.v7 }
+    }
+}
+
+// Evaluate an expression given an environment
+fn eval_expr(expr: Expr, env: Env) -> Int {
+    match expr {
+        EConst(c) => c,
+        EVar(i) => env_get(env, i),
+        EAdd { left, right } => eval_expr(left, env) + eval_expr(right, env),
+        ESub { left, right } => eval_expr(left, env) - eval_expr(right, env),
+        EMul { left, right } => eval_expr(left, env) * eval_expr(right, env),
+    }
+}
+
+// Check if an expression is a constant
+fn is_const(expr: Expr) -> Bool {
+    expr is EConst(_)
+}
+
+fn get_const(expr: Expr) -> Int {
+    match expr {
+        EConst(c) => c,
+        _ => 0,
+    }
+}
+
+// Constant folding optimization (one pass)
+fn fold_expr(expr: Expr) -> Expr {
+    match expr {
+        EConst(c) => EConst(c),
+        EVar(i) => EVar(i),
+        EAdd { left, right } => {
+            let fl = fold_expr(left);
+            let fr = fold_expr(right);
+            if is_const(fl) && is_const(fr) {
+                EConst(get_const(fl) + get_const(fr))
+            } else if is_const(fl) && get_const(fl) == 0 {
+                fr
+            } else if is_const(fr) && get_const(fr) == 0 {
+                fl
+            } else {
+                EAdd { left: fl, right: fr }
+            }
+        },
+        ESub { left, right } => {
+            let fl = fold_expr(left);
+            let fr = fold_expr(right);
+            if is_const(fl) && is_const(fr) {
+                EConst(get_const(fl) - get_const(fr))
+            } else if is_const(fr) && get_const(fr) == 0 {
+                fl
+            } else {
+                ESub { left: fl, right: fr }
+            }
+        },
+        EMul { left, right } => {
+            let fl = fold_expr(left);
+            let fr = fold_expr(right);
+            if is_const(fl) && is_const(fr) {
+                EConst(get_const(fl) * get_const(fr))
+            } else if is_const(fl) && get_const(fl) == 0 {
+                EConst(0)
+            } else if is_const(fr) && get_const(fr) == 0 {
+                EConst(0)
+            } else if is_const(fl) && get_const(fl) == 1 {
+                fr
+            } else if is_const(fr) && get_const(fr) == 1 {
+                fl
+            } else {
+                EMul { left: fl, right: fr }
+            }
+        },
+    }
+}
+
+// Multi-pass folding
+fn fold_n(expr: Expr, n: Int) -> Expr {
+    let mut result = expr;
+    let mut i = 0;
+    while i < n {
+        result = fold_expr(result);
+        i = i + 1;
+    }
+    result
+}
+
+// Count nodes in expression tree
+fn node_count(expr: Expr) -> Int {
+    match expr {
+        EConst(_) => 1,
+        EVar(_) => 1,
+        EAdd { left, right } => 1 + node_count(left) + node_count(right),
+        ESub { left, right } => 1 + node_count(left) + node_count(right),
+        EMul { left, right } => 1 + node_count(left) + node_count(right),
+    }
+}
+
+// Depth of expression tree
+fn tree_depth(expr: Expr) -> Int {
+    match expr {
+        EConst(_) => 1,
+        EVar(_) => 1,
+        EAdd { left, right } => {
+            let dl = tree_depth(left);
+            let dr = tree_depth(right);
+            1 + if dl > dr { dl } else { dr }
+        },
+        ESub { left, right } => {
+            let dl = tree_depth(left);
+            let dr = tree_depth(right);
+            1 + if dl > dr { dl } else { dr }
+        },
+        EMul { left, right } => {
+            let dl = tree_depth(left);
+            let dr = tree_depth(right);
+            1 + if dl > dr { dl } else { dr }
+        },
+    }
+}
+
+// Count number of leaves (EConst or EVar)
+fn leaf_count(expr: Expr) -> Int {
+    match expr {
+        EConst(_) => 1,
+        EVar(_) => 1,
+        EAdd { left, right } => leaf_count(left) + leaf_count(right),
+        ESub { left, right } => leaf_count(left) + leaf_count(right),
+        EMul { left, right } => leaf_count(left) + leaf_count(right),
+    }
+}
+
+// Count variable references
+fn var_count(expr: Expr) -> Int {
+    match expr {
+        EConst(_) => 0,
+        EVar(_) => 1,
+        EAdd { left, right } => var_count(left) + var_count(right),
+        ESub { left, right } => var_count(left) + var_count(right),
+        EMul { left, right } => var_count(left) + var_count(right),
+    }
+}
+
+// Negation: 0 - expr
+fn negate(e: Expr) -> Expr { ESub { left: EConst(0), right: e } }
+
+// Integer division via repeated subtraction (for constant folding)
+fn int_div(a: Int, b: Int) -> Int {
+    if b == 0 { 0 }
+    else { a / b }
+}
+
+// Helper constructors
+fn ec(v: Int) -> Expr { EConst(v) }
+fn ev(i: Int) -> Expr { EVar(i) }
+fn eadd(a: Expr, b: Expr) -> Expr { EAdd { left: a, right: b } }
+fn esub(a: Expr, b: Expr) -> Expr { ESub { left: a, right: b } }
+fn emul(a: Expr, b: Expr) -> Expr { EMul { left: a, right: b } }
+
+fn main() -> Int {
+    let env0 = env_new();
+    let env1 = env_set(env_set(env_set(env0, 0, 5), 1, 3), 2, 7);
+
+    // === Test 1: Constant evaluation ===
+    assert_eq(eval_expr(ec(42), env0), 42);
+    assert_eq(eval_expr(ec(0), env0), 0);
+    assert_eq(eval_expr(ec(0 - 10), env0), 0 - 10);
+
+    // === Test 2: Variable evaluation ===
+    assert_eq(eval_expr(ev(0), env1), 5);
+    assert_eq(eval_expr(ev(1), env1), 3);
+    assert_eq(eval_expr(ev(2), env1), 7);
+
+    // === Test 3: Simple arithmetic ===
+    // 5 + 3 = 8
+    assert_eq(eval_expr(eadd(ev(0), ev(1)), env1), 8);
+    // 5 - 3 = 2
+    assert_eq(eval_expr(esub(ev(0), ev(1)), env1), 2);
+    // 5 * 3 = 15
+    assert_eq(eval_expr(emul(ev(0), ev(1)), env1), 15);
+
+    // === Test 4: Negation via subtraction ===
+    assert_eq(eval_expr(negate(ec(5)), env0), 0 - 5);
+    assert_eq(eval_expr(negate(negate(ec(5))), env0), 5);
+    assert_eq(eval_expr(negate(ev(0)), env1), 0 - 5);
+
+    // === Test 5: Complex expression: (x0 + x1) * x2 - 4 ===
+    // (5 + 3) * 7 - 4 = 56 - 4 = 52
+    let complex1 = esub(emul(eadd(ev(0), ev(1)), ev(2)), ec(4));
+    assert_eq(eval_expr(complex1, env1), 52);
+
+    // === Test 6: Constant folding - pure constants ===
+    let cf1 = eadd(ec(3), ec(7));
+    let folded1 = fold_expr(cf1);
+    assert(is_const(folded1));
+    assert_eq(get_const(folded1), 10);
+
+    let cf2 = emul(ec(4), ec(5));
+    let folded2 = fold_expr(cf2);
+    assert(is_const(folded2));
+    assert_eq(get_const(folded2), 20);
+
+    let cf3 = esub(ec(10), ec(3));
+    let folded3 = fold_expr(cf3);
+    assert(is_const(folded3));
+    assert_eq(get_const(folded3), 7);
+
+    // === Test 7: Folding identity rules - Add ===
+    // 0 + x -> x
+    let fi1 = fold_expr(eadd(ec(0), ev(0)));
+    assert(fi1 is EVar(_));
+
+    // x + 0 -> x
+    let fi2 = fold_expr(eadd(ev(0), ec(0)));
+    assert(fi2 is EVar(_));
+
+    // x - 0 -> x
+    let fi3 = fold_expr(esub(ev(0), ec(0)));
+    assert(fi3 is EVar(_));
+
+    // === Test 8: Folding identity rules - Mul ===
+    // 1 * x -> x
+    let fi4 = fold_expr(emul(ec(1), ev(0)));
+    assert(fi4 is EVar(_));
+
+    // x * 1 -> x
+    let fi5 = fold_expr(emul(ev(0), ec(1)));
+    assert(fi5 is EVar(_));
+
+    // 0 * x -> 0
+    let fi6 = fold_expr(emul(ec(0), ev(0)));
+    assert(is_const(fi6));
+    assert_eq(get_const(fi6), 0);
+
+    // x * 0 -> 0
+    let fi7 = fold_expr(emul(ev(0), ec(0)));
+    assert(is_const(fi7));
+    assert_eq(get_const(fi7), 0);
+
+    // === Test 9: Deep folding ===
+    // (2 + 3) * (4 - 1) = 5 * 3 = 15
+    let deep1 = emul(eadd(ec(2), ec(3)), esub(ec(4), ec(1)));
+    let fd1 = fold_expr(deep1);
+    assert(is_const(fd1));
+    assert_eq(get_const(fd1), 15);
+
+    // === Test 10: Partial folding preserves correctness ===
+    // (x + 0) * (2 + 3)  -> x * 5
+    let partial = emul(eadd(ev(0), ec(0)), eadd(ec(2), ec(3)));
+    let fp = fold_expr(partial);
+    // Should evaluate the same
+    assert_eq(eval_expr(fp, env1), eval_expr(partial, env1));
+    assert_eq(eval_expr(fp, env1), 25);  // 5 * 5
+
+    // === Test 11: Node count ===
+    assert_eq(node_count(ec(1)), 1);
+    assert_eq(node_count(ev(0)), 1);
+    assert_eq(node_count(eadd(ec(1), ec(2))), 3);
+    assert_eq(node_count(complex1), 7);  // esub(emul(eadd(v0,v1),v2),4)
+
+    // === Test 12: Folding reduces node count ===
+    let big_expr = eadd(emul(ec(2), ec(3)), esub(ec(10), ec(4)));
+    assert_eq(node_count(big_expr), 7);
+    let folded_big = fold_expr(big_expr);
+    assert_eq(node_count(folded_big), 1);  // becomes EConst(12)
+    assert_eq(get_const(folded_big), 12);
+
+    // === Test 13: Depth calculation ===
+    assert_eq(tree_depth(ec(1)), 1);
+    assert_eq(tree_depth(eadd(ec(1), ec(2))), 2);
+    assert_eq(tree_depth(eadd(eadd(ec(1), ec(2)), ec(3))), 3);
+
+    // === Test 14: Leaf count ===
+    assert_eq(leaf_count(ec(1)), 1);
+    assert_eq(leaf_count(eadd(ec(1), ec(2))), 2);
+    assert_eq(leaf_count(complex1), 4);  // v0, v1, v2, 4
+
+    // === Test 15: Variable count ===
+    assert_eq(var_count(ec(1)), 0);
+    assert_eq(var_count(ev(0)), 1);
+    assert_eq(var_count(eadd(ev(0), ev(1))), 2);
+    assert_eq(var_count(complex1), 3);  // v0, v1, v2
+
+    // === Test 16: Multi-pass folding ===
+    // ((0 + x) + 0): fold(eadd(ec(0), ev(0))) = ev(0), then fold(eadd(ev(0), ec(0))) = ev(0)
+    let nested_identity = eadd(eadd(ec(0), ev(0)), ec(0));
+    let folded_once = fold_expr(nested_identity);
+    assert_eq(eval_expr(folded_once, env1), 5);
+    let folded_multi = fold_n(nested_identity, 3);
+    assert_eq(eval_expr(folded_multi, env1), 5);
+
+    // === Test 17: Polynomial expression x^2 + 2x + 1 at x=5 ===
+    // (x*x) + (2*x) + 1 = 25 + 10 + 1 = 36
+    let poly = eadd(eadd(emul(ev(0), ev(0)), emul(ec(2), ev(0))), ec(1));
+    assert_eq(eval_expr(poly, env1), 36);
+
+    // At x=0: 0 + 0 + 1 = 1
+    assert_eq(eval_expr(poly, env0), 1);
+
+    // At x=3 (env with v0=3): 9 + 6 + 1 = 16
+    let env_3 = env_set(env_new(), 0, 3);
+    assert_eq(eval_expr(poly, env_3), 16);
+
+    // === Test 18: Folding of nested multiplication ===
+    // 2 * 3 * 4 = 24
+    let nested_mul = emul(emul(ec(2), ec(3)), ec(4));
+    let folded_mul = fold_expr(nested_mul);
+    assert(is_const(folded_mul));
+    assert_eq(get_const(folded_mul), 24);
+
+    // === Test 19: Evaluate with different environments ===
+    let expr_xy = eadd(ev(0), ev(1));
+    let env_a = env_set(env_set(env_new(), 0, 10), 1, 20);
+    let env_b = env_set(env_set(env_new(), 0, 100), 1, 200);
+    assert_eq(eval_expr(expr_xy, env_a), 30);
+    assert_eq(eval_expr(expr_xy, env_b), 300);
+
+    // === Test 20: Subtraction folding with equal constants ===
+    let sub_eq = esub(ec(7), ec(7));
+    let folded_sub = fold_expr(sub_eq);
+    assert(is_const(folded_sub));
+    assert_eq(get_const(folded_sub), 0);
+
+    // === Test 21: Complex folding sequence ===
+    // ((3 * 2) + (1 * x)) * (5 - 5)  -> should fold to 0 (anything * 0)
+    let complex_fold = emul(eadd(emul(ec(3), ec(2)), emul(ec(1), ev(0))), esub(ec(5), ec(5)));
+    let cf_result = fold_expr(complex_fold);
+    // After one fold: emul(eadd(ec(6), ev(0)), ec(0)) -> ec(0) (right is 0)
+    assert(is_const(cf_result));
+    assert_eq(get_const(cf_result), 0);
+
+    // === Test 22: Tree properties after folding ===
+    // (1 + 2) + (3 + 4) = 10
+    let tree_expr = eadd(eadd(ec(1), ec(2)), eadd(ec(3), ec(4)));
+    assert_eq(node_count(tree_expr), 7);
+    assert_eq(tree_depth(tree_expr), 3);
+    assert_eq(leaf_count(tree_expr), 4);
+    assert_eq(var_count(tree_expr), 0);
+    let folded_tree = fold_expr(tree_expr);
+    assert_eq(node_count(folded_tree), 1);
+    assert_eq(tree_depth(folded_tree), 1);
+    assert_eq(get_const(folded_tree), 10);
+
+    // === Test 23: Nested subtraction ===
+    // 100 - (50 - (25 - 10)) = 100 - (50 - 15) = 100 - 35 = 65
+    let nested_sub = esub(ec(100), esub(ec(50), esub(ec(25), ec(10))));
+    assert_eq(eval_expr(nested_sub, env0), 65);
+    let folded_ns = fold_expr(nested_sub);
+    assert(is_const(folded_ns));
+    assert_eq(get_const(folded_ns), 65);
+
+    // === Test 24: Associativity check via evaluation ===
+    // (a + b) + c == a + (b + c) for variables
+    let lassoc = eadd(eadd(ev(0), ev(1)), ev(2));
+    let rassoc = eadd(ev(0), eadd(ev(1), ev(2)));
+    assert_eq(eval_expr(lassoc, env1), eval_expr(rassoc, env1));
+    assert_eq(eval_expr(lassoc, env1), 15);  // 5+3+7
+
+    // === Test 25: Distributivity: a*(b+c) = a*b + a*c ===
+    let distrib_left = emul(ev(0), eadd(ev(1), ev(2)));
+    let distrib_right = eadd(emul(ev(0), ev(1)), emul(ev(0), ev(2)));
+    assert_eq(eval_expr(distrib_left, env1), eval_expr(distrib_right, env1));
+    assert_eq(eval_expr(distrib_left, env1), 50);  // 5*(3+7)
+
+    0
+}

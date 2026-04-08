@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, attributes, invalid-args, error
+// @description: Test invalid attribute arguments with leading comma
+// @expected-error: E012
+
+@derive(,)
+type Foo is { x: Int };

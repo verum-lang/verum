@@ -1,0 +1,265 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 30ns uncontended write
+// @tags: synchronization, rwlock, performance
+
+/// Benchmark for RwLock write acquisition
+///
+/// Write locks are exclusive - no other readers or writers allowed.
+/// Tests write performance under various conditions.
+
+module benchmarks.micro.rwlock_write
+
+using [Benchmark, Sync]
+
+/// Uncontended write (single thread)
+fn benchmark_rwlock_write_uncontended() {
+    let rwlock = RwLock.new(0);
+
+    for _ in 0..1_000_000 {
+        let mut guard = rwlock.write();
+        *guard += 1;
+    }
+}
+
+/// Try write (non-blocking)
+fn benchmark_rwlock_try_write() {
+    let rwlock = RwLock.new(0);
+
+    for _ in 0..1_000_000 {
+        if let Some(mut guard) = rwlock.try_write() {
+            *guard += 1;
+        }
+    }
+}
+
+/// Write lock/unlock cycle
+fn benchmark_rwlock_write_cycle() {
+    let rwlock = RwLock.new(0);
+
+    for _ in 0..1_000_000 {
+        let guard = rwlock.write();
+        drop(guard);
+    }
+}
+
+/// Contended writes (2 writers)
+fn benchmark_rwlock_write_2_writers() {
+    let rwlock = Shared.new(RwLock.new(0));
+    let iterations = 500_000;
+
+    let handles = (0..2).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..iterations {
+                let mut guard = rwlock.write();
+                *guard += 1;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Contended writes (4 writers)
+fn benchmark_rwlock_write_4_writers() {
+    let rwlock = Shared.new(RwLock.new(0));
+    let iterations = 250_000;
+
+    let handles = (0..4).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..iterations {
+                let mut guard = rwlock.write();
+                *guard += 1;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Write with active readers
+fn benchmark_rwlock_write_with_readers() {
+    let rwlock = Shared.new(RwLock.new(0));
+    let running = Shared.new(AtomicBool.new(true));
+
+    // Reader threads
+    let readers: List<_> = (0..4).map(|_| {
+        let rwlock = rwlock.clone();
+        let running = running.clone();
+        spawn_thread(|| {
+            while running.load(Ordering.Relaxed) {
+                let guard = rwlock.read();
+                let _ = *guard;
+            }
+        })
+    }).collect();
+
+    // Writer - measure this
+    for _ in 0..100_000 {
+        let mut guard = rwlock.write();
+        *guard += 1;
+    }
+
+    running.store(false, Ordering.Relaxed);
+    for reader in readers {
+        reader.join();
+    }
+}
+
+/// Write with work inside
+fn benchmark_rwlock_write_with_work() {
+    let rwlock = Shared.new(RwLock.new(list![0; 1000]));
+
+    let handles = (0..4).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..5_000 {
+                let mut guard = rwlock.write();
+                // Modify data
+                for i in 0..guard.len() {
+                    guard[i] += 1;
+                }
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Write timeout
+fn benchmark_rwlock_write_timeout() {
+    let rwlock = Shared.new(RwLock.new(0));
+
+    // Another writer holds lock
+    let holder = {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            let _guard = rwlock.write();
+            sleep(Duration.from_millis(100));
+        })
+    };
+
+    sleep(Duration.from_millis(10));
+
+    for _ in 0..1_000 {
+        let _ = rwlock.try_write_for(Duration.from_micros(10));
+    }
+
+    holder.join();
+}
+
+/// Fair RwLock write (prevents writer starvation)
+fn benchmark_rwlock_fair_write() {
+    let rwlock = Shared.new(FairRwLock.new(0));
+
+    // Many readers could starve writers without fairness
+    let readers: List<_> = (0..8).map(|_| {
+        let rwlock = rwlock.clone();
+        spawn_thread(|| {
+            for _ in 0..100_000 {
+                let guard = rwlock.read();
+                let _ = *guard;
+            }
+        })
+    }).collect();
+
+    // Writer - should get fair access
+    for _ in 0..10_000 {
+        let mut guard = rwlock.write();
+        *guard += 1;
+    }
+
+    for reader in readers {
+        reader.join();
+    }
+}
+
+/// Upgrade from read to write
+fn benchmark_rwlock_upgrade() {
+    let rwlock = RwLock.new(0);
+
+    for _ in 0..500_000 {
+        let read_guard = rwlock.read();
+        // Upgrade atomically to write
+        if let Some(mut write_guard) = read_guard.try_upgrade() {
+            *write_guard += 1;
+        }
+    }
+}
+
+/// Async write lock
+fn benchmark_rwlock_async_write() async {
+    let rwlock = AsyncRwLock.new(0);
+
+    for _ in 0..500_000 {
+        let mut guard = rwlock.write().await;
+        *guard += 1;
+    }
+}
+
+/// Mixed read-write workload
+fn benchmark_rwlock_mixed_workload() {
+    let rwlock = Shared.new(RwLock.new(0));
+
+    // 80% readers, 20% writers
+    let handles: List<_> = (0..10).map(|i| {
+        let rwlock = rwlock.clone();
+        spawn_thread(move || {
+            if i < 8 {
+                // Reader
+                for _ in 0..200_000 {
+                    let guard = rwlock.read();
+                    let _ = *guard;
+                }
+            } else {
+                // Writer
+                for _ in 0..50_000 {
+                    let mut guard = rwlock.write();
+                    *guard += 1;
+                }
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Write batching (amortize lock overhead)
+fn benchmark_rwlock_write_batch() {
+    let rwlock = RwLock.new(list![0; 1000]);
+
+    // Without batching
+    for i in 0..10_000 {
+        let mut guard = rwlock.write();
+        guard[i % 1000] += 1;
+    }
+
+    // With batching
+    for batch in 0..100 {
+        let mut guard = rwlock.write();
+        for i in 0..100 {
+            guard[(batch * 100 + i) % 1000] += 1;
+        }
+    }
+}
+
+/// Spin write lock
+fn benchmark_rwlock_spin_write() {
+    let rwlock = SpinRwLock.new(0);
+
+    for _ in 0..1_000_000 {
+        let mut guard = rwlock.write();
+        *guard += 1;
+    }
+}

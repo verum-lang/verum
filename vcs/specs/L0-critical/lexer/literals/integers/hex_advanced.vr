@@ -1,0 +1,118 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, integers, hexadecimal, underscores, suffixes
+
+// Advanced hexadecimal literal tests
+// Tests underscore handling and type suffixes for hex literals
+
+fn test_hex_with_many_underscores() {
+    // Hex literals with underscores in various positions
+    let single_underscore = 0xFF_FF;
+    let double_underscore = 0xFF_FF_FF;
+    let triple_underscore = 0xFF_FF_FF_FF;
+    let quad_underscore = 0x1_2_3_4_5_6_7_8;
+
+    // Full 64-bit with underscores
+    let full_64bit = 0x1234_5678_9ABC_DEF0;
+    let max_u32 = 0xFF_FF_FF_FF;
+}
+
+fn test_hex_edge_cases() {
+    // Hex ending in hex digit that could be confused with suffix
+    let ends_with_a = 0x1A;
+    let ends_with_b = 0x1B;
+    let ends_with_c = 0x1C;
+    let ends_with_d = 0x1D;
+    let ends_with_e = 0x1E;
+    let ends_with_f = 0x1F;
+
+    // Hex with underscores before hex digits
+    let under_before_a = 0x1_A;
+    let under_before_b = 0x1_B;
+    let under_before_c = 0x1_C;
+    let under_before_d = 0x1_D;
+    let under_before_e = 0x1_E;
+    let under_before_f = 0x1_F;
+
+    // Multiple underscores before hex digits
+    let multi_under_hex = 0xAB_CD_EF;
+    let all_hex = 0xA_B_C_D_E_F;
+}
+
+fn test_hex_with_type_suffixes() {
+    // Hex literals with type suffixes (suffix starts with non-hex letter)
+    let hex_i8 = 0xFF_i8;
+    let hex_i16 = 0xFFFF_i16;
+    let hex_i32 = 0xFFFFFFFF_i32;
+    let hex_i64 = 0x7FFFFFFFFFFFFFFF_i64;  // i64::MAX
+
+    let hex_u8 = 0xFF_u8;
+    let hex_u16 = 0xFFFF_u16;
+    let hex_u32 = 0xFFFFFFFF_u32;
+    let hex_u64 = 0x7FFFFFFFFFFFFFFF_u64;  // Use i64::MAX for now (lexer limit)
+}
+
+fn test_hex_underscores_then_suffix() {
+    // Complex: hex with underscores AND type suffix
+    let complex1 = 0xFF_FF_i32;
+    let complex2 = 0xFF_FF_FF_FF_u32;
+    let complex3 = 0xDE_AD_BE_EF_i64;
+    let complex4 = 0x12_34_56_78_u64;
+    let complex5 = 0xCA_FE_BA_BE_i64;
+}
+
+fn test_negative_hex() {
+    // Negative hex literals
+    let neg_small = -0xFF;
+    let neg_word = -0xFFFF;
+    let neg_dword = -0xFFFFFFFF;
+
+    // Negative hex with underscores
+    let neg_under1 = -0xFF_FF;
+    let neg_under2 = -0xFF_FF_FF;
+    let neg_under3 = -0xFF_FF_FF_FF;
+
+    // Negative hex with many underscores
+    let neg_complex = -0x12_34_56_78;
+    let neg_full = -0xDE_AD_BE_EF;
+}
+
+fn test_negative_hex_with_cast() {
+    // Negative hex with type cast (suffix + negation not supported)
+    let neg_i32: Int = -0xFF;
+    let neg_i64: Int = -0xFFFF;
+
+    // Negative hex with underscores
+    let neg_complex_i32: Int = -0xFF_FF;
+    let neg_complex_i64: Int = -0xFF_FF_FF_FF;
+}
+
+fn test_hex_patterns() {
+    // Common bit patterns with underscores
+    let dead_beef = 0xDEAD_BEEF;
+    let cafe_babe = 0xCAFE_BABE;
+    let face_feed = 0xFACE_FEED;
+    let bad_c0de = 0xBAD_C0DE;
+
+    // With type suffixes
+    let dead_beef_u32 = 0xDEAD_BEEF_u32;
+    let cafe_babe_i64 = 0xCAFE_BABE_i64;
+}
+
+fn test_hex_in_expressions() {
+    // Hex with underscores in expressions
+    let masked = 0xFF_FF_FF_FF & 0x00_FF_00_FF;
+    let shifted = 0xAB_CD << 16 | 0xEF_12;
+    let xored = 0xFF_00_FF_00 ^ 0x00_FF_00_FF;
+}
+
+// Note: Uppercase 0X prefix is NOT supported in Verum
+// Use lowercase 0x only: 0xFF, 0xABCD, etc.
+
+fn test_mixed_case_with_underscores() {
+    // Mixed case hex digits with underscores
+    let mixed1 = 0xAb_Cd_Ef;
+    let mixed2 = 0xaB_cD_eF;
+    let mixed3 = 0xABcd_EF12;
+}

@@ -1,0 +1,80 @@
+// @test: run
+// @level: L0
+// @description: Test process spawn with pipe fd propagation + ptr intrinsics
+// @expected-exit: 0
+
+fn __process_spawn_raw(program: Text, args: List<Text>, capture_stdout: Int, capture_stderr: Int) -> Int {
+    -1
+}
+
+fn __process_wait_raw(pid: Int) -> Int {
+    -1
+}
+
+fn __fd_close_raw(fd: Int) -> Int {
+    0
+}
+
+fn __ptr_read_i64(ptr: Int, index: Int) -> Int {
+    0
+}
+
+fn __ptr_free(ptr: Int) -> Int {
+    0
+}
+
+fn main() -> Int {
+    // Test 1: Spawn echo with piped stdout
+    let args: List<Text> = ["-c", "echo hello_verum"];
+    let result_ptr = __process_spawn_raw("/bin/sh", args, 1, 0);
+
+    if (result_ptr == 0) {
+        print("FAIL: spawn returned null");
+        return 1;
+    }
+
+    let pid = __ptr_read_i64(result_ptr, 0);
+    let stdout_fd = __ptr_read_i64(result_ptr, 1);
+    __ptr_free(result_ptr);
+
+    if (pid <= 0) {
+        print(f"FAIL: invalid pid = {pid}");
+        return 1;
+    }
+
+    if (stdout_fd < 0) {
+        print(f"FAIL: stdout_fd = {stdout_fd}");
+        return 1;
+    }
+
+    // Close the pipe and wait
+    __fd_close_raw(stdout_fd);
+    let raw_status = __process_wait_raw(pid);
+    let exit_code = (raw_status / 256);
+
+    if (exit_code != 0) {
+        print(f"FAIL: exit code = {exit_code}");
+        return 1;
+    }
+    print("Test 1 PASS: spawn + pipe fd extraction works");
+
+    // Test 2: Spawn false, expect non-zero exit
+    let args2: List<Text> = [];
+    let result_ptr2 = __process_spawn_raw("false", args2, 0, 0);
+    if (result_ptr2 == 0) {
+        print("FAIL: false spawn returned null");
+        return 1;
+    }
+    let pid2 = __ptr_read_i64(result_ptr2, 0);
+    __ptr_free(result_ptr2);
+    let status2 = __process_wait_raw(pid2);
+    let code2 = (status2 / 256);
+    if (code2 == 0) {
+        print("FAIL: false should exit non-zero");
+        return 1;
+    }
+    print(f"Test 2 PASS: false exit code = {code2}");
+
+    print("All process pipe tests passed");
+    0
+}

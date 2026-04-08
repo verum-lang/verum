@@ -1,0 +1,31 @@
+// @test: run-interpreter-panic
+// @expected-panic: CBGR use-after-free detected
+// @tier: 0
+// @level: L0
+
+// @tags: reference_system, cbgr, reference-tiers, managed, runtime-check, negative-test
+
+/// Test Tier 0 managed reference runtime safety check.
+/// When a reference is used after its target is invalidated,
+/// the CBGR generation check catches the error at runtime.
+/// This is the safety net when compile-time analysis cannot prove safety.
+/// Spec: 26-cbgr-implementation.md#runtime-checks
+
+fn main() {
+    // Demonstrate runtime CBGR check catching use-after-free
+    demonstrate_cbgr_runtime_check();
+}
+
+fn demonstrate_cbgr_runtime_check() {
+    unsafe {
+        // This bypasses compile-time checks to demonstrate runtime safety
+        let value = Heap.new(42);
+        let ref_val: &Int = &*value;
+
+        // Force deallocation
+        drop(value);
+
+        // CBGR runtime check catches this
+        let _ = *ref_val;  // PANIC: CBGR violation: generation mismatch
+    }
+}

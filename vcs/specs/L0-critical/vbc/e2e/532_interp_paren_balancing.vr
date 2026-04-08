@@ -1,0 +1,165 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, paren_balancing, stack, bracket_matching, parsing
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Parenthesis/bracket balancing using a stack (encoded as an array).
+// Supports three bracket types: '(' / ')' = 1/2, '[' / ']' = 3/4, '{' / '}' = 5/6.
+// An input is encoded as an array of these integer codes.
+// Returns 1 if balanced, 0 otherwise.
+
+// Stack helpers (max depth 16).
+fn stack_push(stk: [Int; 16], top: [Int; 1], val: Int) {
+    stk[top[0]] = val;
+    top[0] = top[0] + 1;
+}
+
+fn stack_pop(stk: [Int; 16], top: [Int; 1]) -> Int {
+    if top[0] == 0 { return -1; }
+    top[0] = top[0] - 1;
+    stk[top[0]]
+}
+
+fn stack_empty(top: [Int; 1]) -> Int {
+    if top[0] == 0 { 1 } else { 0 }
+}
+
+// Return matching open bracket for a close bracket code.
+fn matching_open(close: Int) -> Int {
+    if close == 2 { return 1; }   // ) -> (
+    if close == 4 { return 3; }   // ] -> [
+    if close == 6 { return 5; }   // } -> {
+    -1
+}
+
+fn is_close(c: Int) -> Int {
+    if c == 2 { return 1; }
+    if c == 4 { return 1; }
+    if c == 6 { return 1; }
+    0
+}
+
+fn is_open(c: Int) -> Int {
+    if c == 1 { return 1; }
+    if c == 3 { return 1; }
+    if c == 5 { return 1; }
+    0
+}
+
+// Check if a sequence of n bracket codes is balanced.
+fn is_balanced(seq: [Int; 16], n: Int) -> Int {
+    let mut stk = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut top = [0];
+    let mut i = 0;
+    while i < n {
+        let c = seq[i];
+        if is_open(c) == 1 {
+            stack_push(stk, top, c);
+        } else if is_close(c) == 1 {
+            let expected = matching_open(c);
+            let got = stack_pop(stk, top);
+            if got != expected { return 0; }
+        }
+        i = i + 1;
+    }
+    stack_empty(top)
+}
+
+// Count total bracket pairs in a balanced expression.
+fn count_pairs(seq: [Int; 16], n: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n {
+        if is_open(seq[i]) == 1 { cnt = cnt + 1; }
+        i = i + 1;
+    }
+    cnt
+}
+
+fn test_simple_balanced() {
+    // () -> codes [1, 2]
+    let mut s1 = [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s1, 2), 1);
+
+    // [] -> [3, 4]
+    let mut s2 = [3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s2, 2), 1);
+
+    // {} -> [5, 6]
+    let mut s3 = [5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s3, 2), 1);
+
+    print("simple_balanced: ok");
+}
+
+fn test_nested_balanced() {
+    // ({[]}) -> [1, 5, 3, 4, 6, 2]
+    let mut s = [1, 5, 3, 4, 6, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s, 6), 1);
+    assert_eq(count_pairs(s, 6), 3);
+
+    // ()[]{}  -> [1,2, 3,4, 5,6]
+    let mut s2 = [1, 2, 3, 4, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s2, 6), 1);
+    assert_eq(count_pairs(s2, 6), 3);
+
+    print("nested_balanced: ok");
+}
+
+fn test_unbalanced() {
+    // (] -> mismatch: [1, 4]
+    let mut s1 = [1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s1, 2), 0);
+
+    // ( unclosed -> [1]
+    let mut s2 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s2, 1), 0);
+
+    // ) extra close -> [2]
+    let mut s3 = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s3, 1), 0);
+
+    // ([)] cross: [1,3,2,4]
+    let mut s4 = [1, 3, 2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s4, 4), 0);
+
+    print("unbalanced: ok");
+}
+
+fn test_empty_and_long() {
+    // Empty sequence is balanced.
+    let mut se = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(se, 0), 1);
+
+    // ((())) -> [1,1,1,2,2,2], depth 3
+    let mut deep = [1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(deep, 6), 1);
+    assert_eq(count_pairs(deep, 6), 3);
+
+    // Longer valid: ({[()]}[]) -> [1,5,3,1,2,4,6,2,3,4]
+    let mut long = [1, 5, 3, 1, 2, 4, 6, 2, 3, 4, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(long, 10), 1);
+    assert_eq(count_pairs(long, 10), 5);
+
+    print("empty_and_long: ok");
+}
+
+fn test_count_pairs() {
+    // ({[]()}) -> [1,5,3,4,1,2,6,2] — 4 pairs
+    let mut s = [1, 5, 3, 4, 1, 2, 6, 2, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(is_balanced(s, 8), 1);
+    assert_eq(count_pairs(s, 8), 4);
+    print("count_pairs: ok");
+}
+
+fn main() -> Int {
+    test_simple_balanced();
+    test_nested_balanced();
+    test_unbalanced();
+    test_empty_and_long();
+    test_count_pairs();
+    print("[OK] 532_interp_paren_balancing");
+    0
+}

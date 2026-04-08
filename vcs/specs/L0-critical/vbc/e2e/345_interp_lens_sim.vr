@@ -1,0 +1,323 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, lens, optics, nested-records, get, set, modify
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Lens simulation — get/set/modify for nested records.
+// Lenses are simulated using explicit getter/setter functions that compose
+// to access deeply nested fields.
+
+// =============================================================================
+// Nested record types
+// =============================================================================
+
+type Address is { street_num: Int, zip: Int, city_code: Int };
+
+type Person is { name_code: Int, age: Int, addr: Address };
+
+type Company is { ceo: Person, size: Int, revenue: Int };
+
+// =============================================================================
+// Lens for Address fields
+// =============================================================================
+
+fn addr_get_street(a: Address) -> Int { a.street_num }
+fn addr_set_street(a: Address, v: Int) -> Address {
+    Address { street_num: v, zip: a.zip, city_code: a.city_code }
+}
+fn addr_modify_street(a: Address, f: fn(Int) -> Int) -> Address {
+    addr_set_street(a, f(a.street_num))
+}
+
+fn addr_get_zip(a: Address) -> Int { a.zip }
+fn addr_set_zip(a: Address, v: Int) -> Address {
+    Address { street_num: a.street_num, zip: v, city_code: a.city_code }
+}
+fn addr_modify_zip(a: Address, f: fn(Int) -> Int) -> Address {
+    addr_set_zip(a, f(a.zip))
+}
+
+fn addr_get_city(a: Address) -> Int { a.city_code }
+fn addr_set_city(a: Address, v: Int) -> Address {
+    Address { street_num: a.street_num, zip: a.zip, city_code: v }
+}
+
+// =============================================================================
+// Lens for Person fields
+// =============================================================================
+
+fn person_get_name(p: Person) -> Int { p.name_code }
+fn person_set_name(p: Person, v: Int) -> Person {
+    Person { name_code: v, age: p.age, addr: p.addr }
+}
+
+fn person_get_age(p: Person) -> Int { p.age }
+fn person_set_age(p: Person, v: Int) -> Person {
+    Person { name_code: p.name_code, age: v, addr: p.addr }
+}
+fn person_modify_age(p: Person, f: fn(Int) -> Int) -> Person {
+    person_set_age(p, f(p.age))
+}
+
+fn person_get_addr(p: Person) -> Address { p.addr }
+fn person_set_addr(p: Person, a: Address) -> Person {
+    Person { name_code: p.name_code, age: p.age, addr: a }
+}
+
+// =============================================================================
+// Composed lenses: Person -> Address -> field
+// =============================================================================
+
+fn person_get_zip(p: Person) -> Int {
+    addr_get_zip(person_get_addr(p))
+}
+
+fn person_set_zip(p: Person, v: Int) -> Person {
+    person_set_addr(p, addr_set_zip(person_get_addr(p), v))
+}
+
+fn person_modify_zip(p: Person, f: fn(Int) -> Int) -> Person {
+    person_set_addr(p, addr_modify_zip(person_get_addr(p), f))
+}
+
+fn person_get_street(p: Person) -> Int {
+    addr_get_street(person_get_addr(p))
+}
+
+fn person_set_street(p: Person, v: Int) -> Person {
+    person_set_addr(p, addr_set_street(person_get_addr(p), v))
+}
+
+fn person_get_city(p: Person) -> Int {
+    addr_get_city(person_get_addr(p))
+}
+
+fn person_set_city(p: Person, v: Int) -> Person {
+    person_set_addr(p, addr_set_city(person_get_addr(p), v))
+}
+
+// =============================================================================
+// Lens for Company fields
+// =============================================================================
+
+fn company_get_ceo(c: Company) -> Person { c.ceo }
+fn company_set_ceo(c: Company, p: Person) -> Company {
+    Company { ceo: p, size: c.size, revenue: c.revenue }
+}
+
+fn company_get_size(c: Company) -> Int { c.size }
+fn company_set_size(c: Company, v: Int) -> Company {
+    Company { ceo: c.ceo, size: v, revenue: c.revenue }
+}
+
+fn company_get_revenue(c: Company) -> Int { c.revenue }
+fn company_set_revenue(c: Company, v: Int) -> Company {
+    Company { ceo: c.ceo, size: c.size, revenue: v }
+}
+
+// =============================================================================
+// Deeply composed: Company -> CEO -> Address -> field
+// =============================================================================
+
+fn company_get_ceo_zip(c: Company) -> Int {
+    person_get_zip(company_get_ceo(c))
+}
+
+fn company_set_ceo_zip(c: Company, v: Int) -> Company {
+    company_set_ceo(c, person_set_zip(company_get_ceo(c), v))
+}
+
+fn company_modify_ceo_zip(c: Company, f: fn(Int) -> Int) -> Company {
+    company_set_ceo(c, person_modify_zip(company_get_ceo(c), f))
+}
+
+fn company_get_ceo_age(c: Company) -> Int {
+    person_get_age(company_get_ceo(c))
+}
+
+fn company_set_ceo_age(c: Company, v: Int) -> Company {
+    company_set_ceo(c, person_set_age(company_get_ceo(c), v))
+}
+
+fn company_modify_ceo_age(c: Company, f: fn(Int) -> Int) -> Company {
+    company_set_ceo(c, person_modify_age(company_get_ceo(c), f))
+}
+
+fn company_get_ceo_street(c: Company) -> Int {
+    person_get_street(company_get_ceo(c))
+}
+
+fn company_set_ceo_street(c: Company, v: Int) -> Company {
+    company_set_ceo(c, person_set_street(company_get_ceo(c), v))
+}
+
+// =============================================================================
+// Transform functions
+// =============================================================================
+
+fn inc(x: Int) -> Int { x + 1 }
+fn dbl(x: Int) -> Int { x * 2 }
+fn add_1000(x: Int) -> Int { x + 1000 }
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn make_addr(st: Int, z: Int, city: Int) -> Address {
+    Address { street_num: st, zip: z, city_code: city }
+}
+
+fn make_person(name: Int, age: Int, st: Int, z: Int, city: Int) -> Person {
+    Person { name_code: name, age: age, addr: make_addr(st, z, city) }
+}
+
+fn test_address_lens() {
+    let a = make_addr(42, 10001, 7);
+    assert_eq(addr_get_street(a), 42);
+    assert_eq(addr_get_zip(a), 10001);
+    assert_eq(addr_get_city(a), 7);
+
+    let a2 = addr_set_street(a, 100);
+    assert_eq(addr_get_street(a2), 100);
+    assert_eq(addr_get_zip(a2), 10001);  // unchanged
+
+    let a3 = addr_modify_zip(a, dbl);
+    assert_eq(addr_get_zip(a3), 20002);
+}
+
+fn test_person_lens() {
+    let p = make_person(1, 30, 42, 10001, 7);
+    assert_eq(person_get_name(p), 1);
+    assert_eq(person_get_age(p), 30);
+
+    let p2 = person_set_age(p, 31);
+    assert_eq(person_get_age(p2), 31);
+    assert_eq(person_get_name(p2), 1);  // unchanged
+
+    let p3 = person_modify_age(p, inc);
+    assert_eq(person_get_age(p3), 31);
+}
+
+fn test_composed_person_address() {
+    let p = make_person(1, 30, 42, 10001, 7);
+
+    // Get through composed lens
+    assert_eq(person_get_zip(p), 10001);
+    assert_eq(person_get_street(p), 42);
+    assert_eq(person_get_city(p), 7);
+
+    // Set through composed lens
+    let p2 = person_set_zip(p, 90210);
+    assert_eq(person_get_zip(p2), 90210);
+    assert_eq(person_get_street(p2), 42);  // other fields unchanged
+    assert_eq(person_get_age(p2), 30);
+
+    // Modify through composed lens
+    let p3 = person_modify_zip(p, add_1000);
+    assert_eq(person_get_zip(p3), 11001);
+}
+
+fn test_company_lens() {
+    let ceo = make_person(1, 45, 100, 94102, 5);
+    let co = Company { ceo: ceo, size: 500, revenue: 1000000 };
+
+    assert_eq(company_get_size(co), 500);
+    assert_eq(company_get_revenue(co), 1000000);
+
+    let co2 = company_set_size(co, 600);
+    assert_eq(company_get_size(co2), 600);
+    assert_eq(company_get_revenue(co2), 1000000);
+}
+
+fn test_deep_composed_lens() {
+    let ceo = make_person(1, 45, 100, 94102, 5);
+    let co = Company { ceo: ceo, size: 500, revenue: 1000000 };
+
+    // Three levels deep: Company -> CEO -> Address -> zip
+    assert_eq(company_get_ceo_zip(co), 94102);
+    assert_eq(company_get_ceo_age(co), 45);
+    assert_eq(company_get_ceo_street(co), 100);
+
+    // Set three levels deep
+    let co2 = company_set_ceo_zip(co, 10001);
+    assert_eq(company_get_ceo_zip(co2), 10001);
+    assert_eq(company_get_size(co2), 500);  // unchanged
+
+    // Modify three levels deep
+    let co3 = company_modify_ceo_age(co, inc);
+    assert_eq(company_get_ceo_age(co3), 46);
+
+    let co4 = company_modify_ceo_zip(co, dbl);
+    assert_eq(company_get_ceo_zip(co4), 188204);
+}
+
+fn test_set_preserves_other_fields() {
+    let ceo = make_person(1, 45, 100, 94102, 5);
+    let co = Company { ceo: ceo, size: 500, revenue: 1000000 };
+
+    // Setting CEO zip shouldn't affect anything else
+    let co2 = company_set_ceo_zip(co, 99999);
+    assert_eq(company_get_ceo_age(co2), 45);
+    assert_eq(company_get_ceo_street(co2), 100);
+    assert_eq(company_get_size(co2), 500);
+    assert_eq(company_get_revenue(co2), 1000000);
+}
+
+fn test_lens_laws_get_set() {
+    // Law: get (set s v) == v
+    let p = make_person(1, 30, 42, 10001, 7);
+    let p2 = person_set_zip(p, 55555);
+    assert_eq(person_get_zip(p2), 55555);
+}
+
+fn test_lens_laws_set_get() {
+    // Law: set s (get s) == s
+    let p = make_person(1, 30, 42, 10001, 7);
+    let z = person_get_zip(p);
+    let p2 = person_set_zip(p, z);
+    assert_eq(person_get_zip(p2), person_get_zip(p));
+    assert_eq(person_get_age(p2), person_get_age(p));
+    assert_eq(person_get_street(p2), person_get_street(p));
+}
+
+fn test_lens_laws_set_set() {
+    // Law: set (set s v1) v2 == set s v2
+    let p = make_person(1, 30, 42, 10001, 7);
+    let p2 = person_set_zip(person_set_zip(p, 11111), 22222);
+    let p3 = person_set_zip(p, 22222);
+    assert_eq(person_get_zip(p2), person_get_zip(p3));
+}
+
+fn test_multiple_modifications() {
+    let ceo = make_person(1, 45, 100, 94102, 5);
+    let co = Company { ceo: ceo, size: 500, revenue: 1000000 };
+
+    // Chain: change age, zip, street, size
+    let co2 = company_set_ceo_age(co, 50);
+    let co3 = company_set_ceo_zip(co2, 10001);
+    let co4 = company_set_ceo_street(co3, 200);
+    let co5 = company_set_size(co4, 1000);
+
+    assert_eq(company_get_ceo_age(co5), 50);
+    assert_eq(company_get_ceo_zip(co5), 10001);
+    assert_eq(company_get_ceo_street(co5), 200);
+    assert_eq(company_get_size(co5), 1000);
+    assert_eq(company_get_revenue(co5), 1000000);  // untouched
+}
+
+fn main() -> Int {
+    test_address_lens();
+    test_person_lens();
+    test_composed_person_address();
+    test_company_lens();
+    test_deep_composed_lens();
+    test_set_preserves_other_fields();
+    test_lens_laws_get_set();
+    test_lens_laws_set_get();
+    test_lens_laws_set_set();
+    test_multiple_modifications();
+    print("[OK] 345_interp_lens_sim");
+    0
+}

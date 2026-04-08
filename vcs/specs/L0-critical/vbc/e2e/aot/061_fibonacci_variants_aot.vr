@@ -1,0 +1,201 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, variants, recursion, fibonacci, peano
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT Fibonacci using Peano natural numbers (variant-based Nat type)
+
+// Peano natural numbers
+type Nat is Zero | Succ(Nat);
+
+// Convert a Nat to an Int
+fn nat_to_int(n: Nat) -> Int {
+    match n {
+        Zero => 0,
+        Succ(pred) => 1 + nat_to_int(pred),
+    }
+}
+
+// Convert an Int to a Nat (assumes non-negative)
+fn int_to_nat(i: Int) -> Nat {
+    if i <= 0 { Zero }
+    else { Succ(int_to_nat(i - 1)) }
+}
+
+// Add two Nats: a + b
+fn nat_add(a: Nat, b: Nat) -> Nat {
+    match a {
+        Zero => b,
+        Succ(pred_a) => Succ(nat_add(pred_a, b)),
+    }
+}
+
+// Multiply two Nats: a * b
+fn nat_mul(a: Nat, b: Nat) -> Nat {
+    match a {
+        Zero => Zero,
+        Succ(pred_a) => nat_add(b, nat_mul(pred_a, b)),
+    }
+}
+
+// Check if a Nat is zero
+fn nat_is_zero(n: Nat) -> Bool {
+    n is Zero
+}
+
+// Predecessor: pred(0) = 0, pred(n+1) = n
+fn nat_pred(n: Nat) -> Nat {
+    match n {
+        Zero => Zero,
+        Succ(pred) => pred,
+    }
+}
+
+// Fibonacci on Nat: fib(0) = 0, fib(1) = 1, fib(n) = fib(n-1) + fib(n-2)
+// Iterative version to avoid E321 recursion limit
+fn nat_fib(n: Nat) -> Nat {
+    let count = nat_to_int(n);
+    if count == 0 { Zero }
+    else if count == 1 { Succ(Zero) }
+    else {
+        let mut a = Zero;
+        let mut b = Succ(Zero);
+        let mut i = 2;
+        while i <= count {
+            let next = nat_add(a, b);
+            a = b;
+            b = next;
+            i = i + 1;
+        }
+        b
+    }
+}
+
+// Equality check for Nats
+fn nat_eq(a: Nat, b: Nat) -> Bool {
+    nat_to_int(a) == nat_to_int(b)
+}
+
+// Less-than for Nats
+fn nat_lt(a: Nat, b: Nat) -> Bool {
+    nat_to_int(a) < nat_to_int(b)
+}
+
+// Subtraction (saturating): a - b, returns Zero if b > a
+fn nat_sub(a: Nat, b: Nat) -> Nat {
+    match b {
+        Zero => a,
+        Succ(pred_b) => {
+            match a {
+                Zero => Zero,
+                Succ(pred_a) => nat_sub(pred_a, pred_b),
+            }
+        },
+    }
+}
+
+// Double a Nat
+fn nat_double(n: Nat) -> Nat {
+    nat_add(n, n)
+}
+
+fn main() -> Int {
+    // === Basic Nat construction and conversion ===
+    let zero = Zero;
+    let one = Succ(Zero);
+    let two = Succ(Succ(Zero));
+    let three = int_to_nat(3);
+
+    assert_eq(nat_to_int(zero), 0);
+    assert_eq(nat_to_int(one), 1);
+    assert_eq(nat_to_int(two), 2);
+    assert_eq(nat_to_int(three), 3);
+
+    // === Roundtrip conversion ===
+    assert_eq(nat_to_int(int_to_nat(0)), 0);
+    assert_eq(nat_to_int(int_to_nat(5)), 5);
+    assert_eq(nat_to_int(int_to_nat(7)), 7);
+
+    // === Is-zero checks ===
+    assert(nat_is_zero(zero));
+    assert(!nat_is_zero(one));
+    assert(!nat_is_zero(three));
+
+    // === Predecessor ===
+    assert_eq(nat_to_int(nat_pred(zero)), 0);
+    assert_eq(nat_to_int(nat_pred(one)), 0);
+    assert_eq(nat_to_int(nat_pred(three)), 2);
+
+    // === Addition ===
+    assert_eq(nat_to_int(nat_add(zero, zero)), 0);
+    assert_eq(nat_to_int(nat_add(one, zero)), 1);
+    assert_eq(nat_to_int(nat_add(zero, two)), 2);
+    assert_eq(nat_to_int(nat_add(two, three)), 5);
+    assert_eq(nat_to_int(nat_add(three, three)), 6);
+
+    // === Subtraction (saturating) ===
+    assert_eq(nat_to_int(nat_sub(three, one)), 2);
+    assert_eq(nat_to_int(nat_sub(three, three)), 0);
+    assert_eq(nat_to_int(nat_sub(one, three)), 0);  // saturates at zero
+    assert_eq(nat_to_int(nat_sub(int_to_nat(5), two)), 3);
+
+    // === Multiplication ===
+    assert_eq(nat_to_int(nat_mul(zero, three)), 0);
+    assert_eq(nat_to_int(nat_mul(one, three)), 3);
+    assert_eq(nat_to_int(nat_mul(two, three)), 6);
+    assert_eq(nat_to_int(nat_mul(three, three)), 9);
+
+    // === Double ===
+    assert_eq(nat_to_int(nat_double(zero)), 0);
+    assert_eq(nat_to_int(nat_double(one)), 2);
+    assert_eq(nat_to_int(nat_double(three)), 6);
+
+    // === Fibonacci via Nat ===
+    // fib(0) = 0
+    assert_eq(nat_to_int(nat_fib(int_to_nat(0))), 0);
+    // fib(1) = 1
+    assert_eq(nat_to_int(nat_fib(int_to_nat(1))), 1);
+    // fib(2) = 1
+    assert_eq(nat_to_int(nat_fib(int_to_nat(2))), 1);
+    // fib(3) = 2
+    assert_eq(nat_to_int(nat_fib(int_to_nat(3))), 2);
+    // fib(4) = 3
+    assert_eq(nat_to_int(nat_fib(int_to_nat(4))), 3);
+    // fib(5) = 5
+    assert_eq(nat_to_int(nat_fib(int_to_nat(5))), 5);
+    // fib(6) = 8
+    assert_eq(nat_to_int(nat_fib(int_to_nat(6))), 8);
+    // fib(7) = 13
+    assert_eq(nat_to_int(nat_fib(int_to_nat(7))), 13);
+
+    // === Nat equality and comparison ===
+    assert(nat_eq(int_to_nat(3), three));
+    assert(!nat_eq(one, two));
+    assert(nat_lt(one, three));
+    assert(!nat_lt(three, one));
+    assert(!nat_lt(two, two));
+
+    // === Fibonacci property: fib(n) + fib(n+1) == fib(n+2) ===
+    let fib0 = nat_to_int(nat_fib(int_to_nat(0)));
+    let fib1 = nat_to_int(nat_fib(int_to_nat(1)));
+    let fib2 = nat_to_int(nat_fib(int_to_nat(2)));
+    let fib3 = nat_to_int(nat_fib(int_to_nat(3)));
+    let fib4 = nat_to_int(nat_fib(int_to_nat(4)));
+    let fib5 = nat_to_int(nat_fib(int_to_nat(5)));
+    let fib6 = nat_to_int(nat_fib(int_to_nat(6)));
+    let fib7 = nat_to_int(nat_fib(int_to_nat(7)));
+
+    assert_eq(fib0 + fib1, fib2);  // 0 + 1 = 1
+    assert_eq(fib1 + fib2, fib3);  // 1 + 1 = 2
+    assert_eq(fib2 + fib3, fib4);  // 1 + 2 = 3
+    assert_eq(fib3 + fib4, fib5);  // 2 + 3 = 5
+    assert_eq(fib4 + fib5, fib6);  // 3 + 5 = 8
+    assert_eq(fib5 + fib6, fib7);  // 5 + 8 = 13
+
+    // === Sum of first 8 Fibonacci numbers ===
+    let fib_sum = fib0 + fib1 + fib2 + fib3 + fib4 + fib5 + fib6 + fib7;
+    assert_eq(fib_sum, 33);  // 0+1+1+2+3+5+8+13 = 33
+
+    0
+}

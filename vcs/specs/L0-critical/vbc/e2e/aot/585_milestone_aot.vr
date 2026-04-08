@@ -1,0 +1,229 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, comprehensive, combinatorics
+// @timeout: 30000
+
+// Milestone 585: Combinatorics and counting
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Factorial
+fn factorial(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 2;
+    while i <= n { r = r * i; i = i + 1; }
+    r
+}
+
+// Binomial coefficient C(n,k)
+fn choose(n: Int, k: Int) -> Int {
+    if k > n { return 0; }
+    if k == 0 { return 1; }
+    if k == n { return 1; }
+    // Use multiplicative formula to avoid overflow
+    let k2 = if k > n - k { n - k } else { k };
+    let mut r = 1;
+    let mut i = 0;
+    while i < k2 {
+        r = r * (n - i);
+        r = r / (i + 1);
+        i = i + 1;
+    }
+    r
+}
+
+// Catalan number C_n = C(2n,n)/(n+1)
+fn catalan(n: Int) -> Int {
+    choose(2 * n, n) / (n + 1)
+}
+
+// Stirling numbers of second kind S(n,k) — number of ways to partition
+// n elements into k non-empty subsets
+// S(n,k) = k*S(n-1,k) + S(n-1,k-1), S(0,0)=1, S(n,0)=0 for n>0
+fn stirling2(n: Int, k: Int) -> Int {
+    if n == 0 {
+        if k == 0 { return 1; }
+        return 0;
+    }
+    if k == 0 { return 0; }
+    if k > n { return 0; }
+    if k == 1 { return 1; }
+    if k == n { return 1; }
+    // DP using row array
+    let mut dp = zeros(); // dp[j] = S(i, j)
+    dp = set8(dp, 0, 1); // S(0,0) = 1
+    let mut i = 1;
+    while i <= n {
+        // Process right to left to use previous row values
+        let mut j = if i < k { i } else { k };
+        while j >= 1 {
+            let val = j * get8(dp, j) + get8(dp, j - 1);
+            dp = set8(dp, j, val);
+            j = j - 1;
+        }
+        dp = set8(dp, 0, 0); // S(i,0) = 0 for i > 0
+        i = i + 1;
+    }
+    get8(dp, k)
+}
+
+// Bell number B_n = sum of S(n,k) for k=0..n
+fn bell(n: Int) -> Int {
+    let mut total = 0;
+    let mut k = 0;
+    while k <= n {
+        total = total + stirling2(n, k);
+        k = k + 1;
+    }
+    total
+}
+
+// Derangements D(n) = n! * sum_{i=0}^{n} (-1)^i / i!
+// D(n) = (n-1) * (D(n-1) + D(n-2))
+fn derangements(n: Int) -> Int {
+    if n == 0 { return 1; }
+    if n == 1 { return 0; }
+    let mut d_prev2 = 1; // D(0)
+    let mut d_prev1 = 0; // D(1)
+    let mut i = 2;
+    while i <= n {
+        let d_cur = (i - 1) * (d_prev1 + d_prev2);
+        d_prev2 = d_prev1;
+        d_prev1 = d_cur;
+        i = i + 1;
+    }
+    d_prev1
+}
+
+// Pascal's triangle row
+fn pascal_row(n: Int) -> Arr8 {
+    let mut row = zeros();
+    row = set8(row, 0, 1);
+    let mut i = 1;
+    while i <= n {
+        // Process right to left
+        let mut j = i;
+        while j >= 1 {
+            row = set8(row, j, get8(row, j) + get8(row, j - 1));
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+    row
+}
+
+fn test_factorial() -> Int {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(7), 5040);
+    1
+}
+
+fn test_choose() -> Int {
+    assert_eq(choose(5, 0), 1);
+    assert_eq(choose(5, 1), 5);
+    assert_eq(choose(5, 2), 10);
+    assert_eq(choose(5, 3), 10);
+    assert_eq(choose(5, 5), 1);
+    assert_eq(choose(10, 3), 120);
+    // Symmetry: C(n,k) = C(n,n-k)
+    assert_eq(choose(7, 2), choose(7, 5));
+    1
+}
+
+fn test_catalan() -> Int {
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+    1
+}
+
+fn test_stirling() -> Int {
+    // S(4,2) = 7
+    assert_eq(stirling2(4, 2), 7);
+    // S(4,1) = 1
+    assert_eq(stirling2(4, 1), 1);
+    // S(4,4) = 1
+    assert_eq(stirling2(4, 4), 1);
+    // S(4,3) = 6
+    assert_eq(stirling2(4, 3), 6);
+    // S(5,2) = 15
+    assert_eq(stirling2(5, 2), 15);
+    1
+}
+
+fn test_bell() -> Int {
+    // B_0=1, B_1=1, B_2=2, B_3=5, B_4=15, B_5=52
+    assert_eq(bell(0), 1);
+    assert_eq(bell(1), 1);
+    assert_eq(bell(2), 2);
+    assert_eq(bell(3), 5);
+    assert_eq(bell(4), 15);
+    assert_eq(bell(5), 52);
+    1
+}
+
+fn test_derangements() -> Int {
+    // D(0)=1, D(1)=0, D(2)=1, D(3)=2, D(4)=9, D(5)=44
+    assert_eq(derangements(0), 1);
+    assert_eq(derangements(1), 0);
+    assert_eq(derangements(2), 1);
+    assert_eq(derangements(3), 2);
+    assert_eq(derangements(4), 9);
+    assert_eq(derangements(5), 44);
+    1
+}
+
+fn test_pascal() -> Int {
+    let row5 = pascal_row(5);
+    // Row 5: 1, 5, 10, 10, 5, 1
+    assert_eq(get8(row5, 0), 1);
+    assert_eq(get8(row5, 1), 5);
+    assert_eq(get8(row5, 2), 10);
+    assert_eq(get8(row5, 3), 10);
+    assert_eq(get8(row5, 4), 5);
+    assert_eq(get8(row5, 5), 1);
+
+    // Sum of row = 2^n
+    let sum = get8(row5, 0) + get8(row5, 1) + get8(row5, 2) +
+              get8(row5, 3) + get8(row5, 4) + get8(row5, 5);
+    assert_eq(sum, 32);
+    1
+}
+
+fn main() -> Int {
+    test_factorial();
+    test_choose();
+    test_catalan();
+    test_stirling();
+    test_bell();
+    test_derangements();
+    test_pascal();
+    print("[OK] 585_milestone_aot");
+    0
+}

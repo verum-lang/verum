@@ -1,0 +1,46 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: debug, uint64, method
+
+module test.debug.uint64_method;
+
+fn main() {
+    // Test UInt64 method directly
+    let a: UInt64 = 0xFFFFFFFFFFFFFFFF;  // UInt64::MAX
+    let b: UInt64 = 1;
+
+    print(f"Testing UInt64.checked_add method");
+    print(f"a = {a as Int}");
+    print(f"b = {b as Int}");
+
+    let result = a.checked_add(b);
+
+    match result {
+        Some(v) => {
+            print(f"Got Some({v as Int}) - UNEXPECTED, should overflow!");
+            assert(false);
+        }
+        None => {
+            print("Got None - CORRECT, overflow detected!");
+        }
+    }
+
+    // Test non-overflow case
+    let c: UInt64 = 100;
+    let d: UInt64 = 200;
+
+    let result2 = c.checked_add(d);
+    match result2 {
+        Some(v) => {
+            print(f"100 + 200 = {v as Int} - CORRECT");
+            assert(v == 300);
+        }
+        None => {
+            print("Got None for 100 + 200 - UNEXPECTED!");
+            assert(false);
+        }
+    }
+
+    print("All UInt64 method tests passed!");
+}

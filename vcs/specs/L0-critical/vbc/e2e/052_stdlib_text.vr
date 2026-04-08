@@ -1,0 +1,356 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, stdlib, text
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: Text-like operations via integer arrays representing characters.
+// Tests length, char_at, concat, slice, compare, find, replace_char, is_palindrome.
+
+// ============================================================================
+// Text: 16 character codes + length
+// ============================================================================
+
+type Txt16 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int,
+    c12: Int, c13: Int, c14: Int, c15: Int,
+    len: Int
+};
+
+fn txt_empty() -> Txt16 {
+    Txt16 {
+        c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 0
+    }
+}
+
+fn txt_get(t: Txt16, i: Int) -> Int {
+    if i == 0 { t.c0 } else if i == 1 { t.c1 }
+    else if i == 2 { t.c2 } else if i == 3 { t.c3 }
+    else if i == 4 { t.c4 } else if i == 5 { t.c5 }
+    else if i == 6 { t.c6 } else if i == 7 { t.c7 }
+    else if i == 8 { t.c8 } else if i == 9 { t.c9 }
+    else if i == 10 { t.c10 } else if i == 11 { t.c11 }
+    else if i == 12 { t.c12 } else if i == 13 { t.c13 }
+    else if i == 14 { t.c14 } else { t.c15 }
+}
+
+fn txt_set(t: Txt16, i: Int, v: Int) -> Txt16 {
+    Txt16 {
+        c0: if i == 0 { v } else { t.c0 },
+        c1: if i == 1 { v } else { t.c1 },
+        c2: if i == 2 { v } else { t.c2 },
+        c3: if i == 3 { v } else { t.c3 },
+        c4: if i == 4 { v } else { t.c4 },
+        c5: if i == 5 { v } else { t.c5 },
+        c6: if i == 6 { v } else { t.c6 },
+        c7: if i == 7 { v } else { t.c7 },
+        c8: if i == 8 { v } else { t.c8 },
+        c9: if i == 9 { v } else { t.c9 },
+        c10: if i == 10 { v } else { t.c10 },
+        c11: if i == 11 { v } else { t.c11 },
+        c12: if i == 12 { v } else { t.c12 },
+        c13: if i == 13 { v } else { t.c13 },
+        c14: if i == 14 { v } else { t.c14 },
+        c15: if i == 15 { v } else { t.c15 },
+        len: t.len
+    }
+}
+
+fn txt_with_len(t: Txt16, n: Int) -> Txt16 {
+    Txt16 {
+        c0: t.c0, c1: t.c1, c2: t.c2, c3: t.c3,
+        c4: t.c4, c5: t.c5, c6: t.c6, c7: t.c7,
+        c8: t.c8, c9: t.c9, c10: t.c10, c11: t.c11,
+        c12: t.c12, c13: t.c13, c14: t.c14, c15: t.c15,
+        len: n
+    }
+}
+
+// Build text from up to 8 char codes
+fn txt_from8(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, n: Int) -> Txt16 {
+    let mut t = txt_empty();
+    t = txt_set(t, 0, a);
+    t = txt_set(t, 1, b);
+    t = txt_set(t, 2, c);
+    t = txt_set(t, 3, d);
+    t = txt_set(t, 4, e);
+    t = txt_set(t, 5, f);
+    t = txt_set(t, 6, g);
+    t = txt_set(t, 7, h);
+    txt_with_len(t, n)
+}
+
+// ============================================================================
+// Text operations
+// ============================================================================
+
+fn txt_equal(a: Txt16, b: Txt16) -> Bool {
+    if a.len != b.len { false }
+    else {
+        let mut i = 0;
+        let mut eq = true;
+        while i < a.len {
+            if txt_get(a, i) != txt_get(b, i) { eq = false; }
+            i = i + 1;
+        }
+        eq
+    }
+}
+
+fn txt_compare(a: Txt16, b: Txt16) -> Int {
+    let min_len = if a.len < b.len { a.len } else { b.len };
+    let mut i = 0;
+    let mut result = 0;
+    let mut done = false;
+    while i < min_len && !done {
+        let ca = txt_get(a, i);
+        let cb = txt_get(b, i);
+        if ca < cb { result = -1; done = true; }
+        else if ca > cb { result = 1; done = true; }
+        i = i + 1;
+    }
+    if !done {
+        if a.len < b.len { -1 }
+        else if a.len > b.len { 1 }
+        else { 0 }
+    } else {
+        result
+    }
+}
+
+fn txt_concat(a: Txt16, b: Txt16) -> Txt16 {
+    let new_len = a.len + b.len;
+    let mut result = a;
+    let mut i = 0;
+    while i < b.len {
+        result = txt_set(result, a.len + i, txt_get(b, i));
+        i = i + 1;
+    }
+    txt_with_len(result, new_len)
+}
+
+fn txt_slice(t: Txt16, from: Int, to_excl: Int) -> Txt16 {
+    let new_len = to_excl - from;
+    let mut result = txt_empty();
+    let mut i = 0;
+    while i < new_len {
+        result = txt_set(result, i, txt_get(t, from + i));
+        i = i + 1;
+    }
+    txt_with_len(result, new_len)
+}
+
+fn txt_find(haystack: Txt16, needle: Txt16) -> Int {
+    if needle.len == 0 { 0 }
+    else if needle.len > haystack.len { -1 }
+    else {
+        let mut pos = -1;
+        let mut i = 0;
+        let mut done = false;
+        while i <= haystack.len - needle.len && !done {
+            let mut match_found = true;
+            let mut j = 0;
+            while j < needle.len {
+                if txt_get(haystack, i + j) != txt_get(needle, j) {
+                    match_found = false;
+                }
+                j = j + 1;
+            }
+            if match_found {
+                pos = i;
+                done = true;
+            }
+            i = i + 1;
+        }
+        pos
+    }
+}
+
+fn txt_reverse(t: Txt16) -> Txt16 {
+    let mut result = txt_empty();
+    let mut i = 0;
+    while i < t.len {
+        result = txt_set(result, i, txt_get(t, t.len - 1 - i));
+        i = i + 1;
+    }
+    txt_with_len(result, t.len)
+}
+
+fn txt_is_palindrome(t: Txt16) -> Bool {
+    let rev = txt_reverse(t);
+    txt_equal(t, rev)
+}
+
+fn txt_replace_char(t: Txt16, old_ch: Int, new_ch: Int) -> Txt16 {
+    let mut result = t;
+    let mut i = 0;
+    while i < t.len {
+        if txt_get(t, i) == old_ch {
+            result = txt_set(result, i, new_ch);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn txt_count_char(t: Txt16, ch: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < t.len {
+        if txt_get(t, i) == ch { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_basic_ops() {
+    // "HELLO" = [72, 69, 76, 76, 79]
+    let hello = txt_from8(72, 69, 76, 76, 79, 0, 0, 0, 5);
+    assert_eq(hello.len, 5);
+    assert_eq(txt_get(hello, 0), 72);
+    assert_eq(txt_get(hello, 4), 79);
+
+    let empty = txt_empty();
+    assert_eq(empty.len, 0);
+}
+
+fn test_equality() {
+    let a = txt_from8(65, 66, 67, 0, 0, 0, 0, 0, 3);  // "ABC"
+    let b = txt_from8(65, 66, 67, 0, 0, 0, 0, 0, 3);  // "ABC"
+    let c = txt_from8(65, 66, 68, 0, 0, 0, 0, 0, 3);  // "ABD"
+
+    assert(txt_equal(a, b));
+    assert(!txt_equal(a, c));
+
+    // Different lengths
+    let d = txt_from8(65, 66, 0, 0, 0, 0, 0, 0, 2);   // "AB"
+    assert(!txt_equal(a, d));
+}
+
+fn test_compare() {
+    let abc = txt_from8(65, 66, 67, 0, 0, 0, 0, 0, 3);
+    let abd = txt_from8(65, 66, 68, 0, 0, 0, 0, 0, 3);
+    let ab = txt_from8(65, 66, 0, 0, 0, 0, 0, 0, 2);
+
+    assert_eq(txt_compare(abc, abd), -1);
+    assert_eq(txt_compare(abd, abc), 1);
+    assert_eq(txt_compare(abc, abc), 0);
+    assert_eq(txt_compare(ab, abc), -1);
+    assert_eq(txt_compare(abc, ab), 1);
+}
+
+fn test_concat() {
+    let hello = txt_from8(72, 69, 76, 76, 79, 0, 0, 0, 5);  // "HELLO"
+    let world = txt_from8(87, 79, 82, 76, 68, 0, 0, 0, 5);   // "WORLD"
+    let joined = txt_concat(hello, world);
+
+    assert_eq(joined.len, 10);
+    assert_eq(txt_get(joined, 0), 72);  // H
+    assert_eq(txt_get(joined, 4), 79);  // O
+    assert_eq(txt_get(joined, 5), 87);  // W
+    assert_eq(txt_get(joined, 9), 68);  // D
+
+    // Concat with empty
+    let empty = txt_empty();
+    let r1 = txt_concat(hello, empty);
+    assert(txt_equal(r1, hello));
+    let r2 = txt_concat(empty, hello);
+    assert_eq(r2.len, hello.len);
+}
+
+fn test_slice() {
+    let hello = txt_from8(72, 69, 76, 76, 79, 0, 0, 0, 5);
+    // Slice [1..4) = "ELL"
+    let sl = txt_slice(hello, 1, 4);
+    assert_eq(sl.len, 3);
+    assert_eq(txt_get(sl, 0), 69);  // E
+    assert_eq(txt_get(sl, 1), 76);  // L
+    assert_eq(txt_get(sl, 2), 76);  // L
+
+    // Slice [0..5) = full string
+    let full = txt_slice(hello, 0, 5);
+    assert(txt_equal(full, hello));
+
+    // Slice [0..1) = "H"
+    let single = txt_slice(hello, 0, 1);
+    assert_eq(single.len, 1);
+    assert_eq(txt_get(single, 0), 72);
+}
+
+fn test_find() {
+    let haystack = txt_from8(65, 66, 67, 68, 69, 70, 71, 72, 8);  // "ABCDEFGH"
+    let needle1 = txt_from8(67, 68, 69, 0, 0, 0, 0, 0, 3);         // "CDE"
+    let needle2 = txt_from8(65, 66, 0, 0, 0, 0, 0, 0, 2);           // "AB"
+    let needle3 = txt_from8(88, 89, 0, 0, 0, 0, 0, 0, 2);           // "XY"
+    let needle4 = txt_from8(71, 72, 0, 0, 0, 0, 0, 0, 2);           // "GH"
+
+    assert_eq(txt_find(haystack, needle1), 2);
+    assert_eq(txt_find(haystack, needle2), 0);
+    assert_eq(txt_find(haystack, needle3), -1);
+    assert_eq(txt_find(haystack, needle4), 6);
+
+    // Empty needle
+    let empty = txt_empty();
+    assert_eq(txt_find(haystack, empty), 0);
+}
+
+fn test_reverse_palindrome() {
+    // "ABCBA" = [65, 66, 67, 66, 65]
+    let palindrome = txt_from8(65, 66, 67, 66, 65, 0, 0, 0, 5);
+    assert(txt_is_palindrome(palindrome));
+
+    let not_palindrome = txt_from8(65, 66, 67, 68, 69, 0, 0, 0, 5);
+    assert(!txt_is_palindrome(not_palindrome));
+
+    // Single char is palindrome
+    let single = txt_from8(65, 0, 0, 0, 0, 0, 0, 0, 1);
+    assert(txt_is_palindrome(single));
+
+    // Two same chars
+    let pair = txt_from8(65, 65, 0, 0, 0, 0, 0, 0, 2);
+    assert(txt_is_palindrome(pair));
+
+    // Reverse
+    let abc = txt_from8(65, 66, 67, 0, 0, 0, 0, 0, 3);
+    let cba = txt_reverse(abc);
+    assert_eq(txt_get(cba, 0), 67);
+    assert_eq(txt_get(cba, 1), 66);
+    assert_eq(txt_get(cba, 2), 65);
+}
+
+fn test_replace_and_count() {
+    // "AABACA" = [65, 65, 66, 65, 67, 65]
+    let t = txt_from8(65, 65, 66, 65, 67, 65, 0, 0, 6);
+    assert_eq(txt_count_char(t, 65), 4);  // 4 A's
+    assert_eq(txt_count_char(t, 66), 1);  // 1 B
+    assert_eq(txt_count_char(t, 67), 1);  // 1 C
+    assert_eq(txt_count_char(t, 68), 0);  // 0 D's
+
+    // Replace A (65) with X (88)
+    let replaced = txt_replace_char(t, 65, 88);
+    assert_eq(txt_count_char(replaced, 65), 0);
+    assert_eq(txt_count_char(replaced, 88), 4);
+    assert_eq(txt_get(replaced, 2), 66);  // B unchanged
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_equality();
+    test_compare();
+    test_concat();
+    test_slice();
+    test_find();
+    test_reverse_palindrome();
+    test_replace_and_count();
+    print("[OK] 052_stdlib_text");
+    0
+}

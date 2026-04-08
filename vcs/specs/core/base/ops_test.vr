@@ -1,0 +1,620 @@
+// =============================================================================
+// ops_test.vr - Tests for ControlFlow, Try, FromResidual, Never
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, ops, control-flow, try, core
+// @description: Comprehensive tests for operator protocols and control flow types
+// =============================================================================
+
+mount core.base.ops.*;
+
+// =============================================================================
+// Section 1: ControlFlow Construction
+// =============================================================================
+
+@test
+fn test_controlflow_continue() {
+    let cf: ControlFlow<Text, Int> = Continue(42);
+    assert(cf.is_continue());
+    assert(!cf.is_break());
+}
+
+@test
+fn test_controlflow_break() {
+    let cf: ControlFlow<Text, Int> = Break("stopped");
+    assert(cf.is_break());
+    assert(!cf.is_continue());
+}
+
+@test
+fn test_controlflow_continue_various_types() {
+    let cf_int: ControlFlow<Text, Int> = Continue(100);
+    assert(cf_int.is_continue());
+
+    let cf_bool: ControlFlow<Int, Bool> = Continue(true);
+    assert(cf_bool.is_continue());
+
+    let cf_text: ControlFlow<Bool, Text> = Continue("hello");
+    assert(cf_text.is_continue());
+}
+
+@test
+fn test_controlflow_break_various_types() {
+    let cf_text: ControlFlow<Text, Int> = Break("error");
+    assert(cf_text.is_break());
+
+    let cf_int: ControlFlow<Int, Bool> = Break(404);
+    assert(cf_int.is_break());
+}
+
+// =============================================================================
+// Section 2: ControlFlow Value Extraction
+// =============================================================================
+
+@test
+fn test_controlflow_continue_value() {
+    let cf: ControlFlow<Text, Int> = Continue(42);
+    assert_eq(cf.continue_value(), 42);
+}
+
+@test
+fn test_controlflow_break_value() {
+    let cf: ControlFlow<Text, Int> = Break("error");
+    assert_eq(cf.break_value(), "error");
+}
+
+@test
+fn test_controlflow_continue_value_text() {
+    let cf: ControlFlow<Int, Text> = Continue("hello");
+    assert_eq(cf.continue_value(), "hello");
+}
+
+@test
+fn test_controlflow_break_value_int() {
+    let cf: ControlFlow<Int, Text> = Break(42);
+    assert_eq(cf.break_value(), 42);
+}
+
+// =============================================================================
+// Section 3: ControlFlow Mapping
+// =============================================================================
+
+@test
+fn test_controlflow_map_continue_on_continue() {
+    let cf: ControlFlow<Text, Int> = Continue(21);
+    let mapped = cf.map_continue(|x| x * 2);
+    assert(mapped.is_continue());
+    assert_eq(mapped.continue_value(), 42);
+}
+
+@test
+fn test_controlflow_map_continue_on_break() {
+    let cf: ControlFlow<Text, Int> = Break("error");
+    let mapped = cf.map_continue(|x| x * 2);
+    assert(mapped.is_break());
+    assert_eq(mapped.break_value(), "error");
+}
+
+@test
+fn test_controlflow_map_break_on_break() {
+    let cf: ControlFlow<Int, Text> = Break(21);
+    let mapped = cf.map_break(|x| x * 2);
+    assert(mapped.is_break());
+    assert_eq(mapped.break_value(), 42);
+}
+
+@test
+fn test_controlflow_map_break_on_continue() {
+    let cf: ControlFlow<Int, Text> = Continue("ok");
+    let mapped = cf.map_break(|x| x * 2);
+    assert(mapped.is_continue());
+    assert_eq(mapped.continue_value(), "ok");
+}
+
+fn int_to_text(x: Int) -> Text {
+    f"{x}"
+}
+
+fn int_to_error_text(x: Int) -> Text {
+    f"error_{x}"
+}
+
+@test
+fn test_controlflow_map_continue_type_change() {
+    let cf: ControlFlow<Text, Int> = Continue(42);
+    let mapped = cf.map_continue(int_to_text);
+    assert(mapped.is_continue());
+    assert_eq(mapped.continue_value(), "42");
+}
+
+@test
+fn test_controlflow_map_break_type_change() {
+    let cf: ControlFlow<Int, Text> = Break(42);
+    let mapped = cf.map_break(int_to_error_text);
+    assert(mapped.is_break());
+    assert_eq(mapped.break_value(), "error_42");
+}
+
+fn add_five(x: Int) -> Int { x + 5 }
+fn double(x: Int) -> Int { x * 2 }
+
+@test
+fn test_controlflow_chained_maps() {
+    let cf: ControlFlow<Text, Int> = Continue(10);
+    let step1 = cf.map_continue(add_five);
+    let result = step1.map_continue(double);
+    assert_eq(result.continue_value(), 30);
+}
+
+// =============================================================================
+// Section 4: ControlFlow Pattern Matching
+// =============================================================================
+
+@test
+fn test_controlflow_match_continue() {
+    let cf: ControlFlow<Text, Int> = Continue(42);
+    let result = match cf {
+        Continue(v) => v,
+        Break(_) => 0,
+    };
+    assert_eq(result, 42);
+}
+
+@test
+fn test_controlflow_match_break() {
+    let cf: ControlFlow<Text, Int> = Break("error");
+    let result = match cf {
+        Continue(_) => "",
+        Break(e) => e,
+    };
+    assert_eq(result, "error");
+}
+
+@test
+fn test_controlflow_match_exhaustive() {
+    let values: List<ControlFlow<Text, Int>> = List.from([Continue(1), Break("a"), Continue(2)]);
+    let mut sum = 0;
+    let mut errors = 0;
+    for cf in values.iter() {
+        match cf {
+            Continue(v) => { sum = sum + v; }
+            Break(_) => { errors = errors + 1; }
+        }
+    }
+    assert_eq(sum, 3);
+    assert_eq(errors, 1);
+}
+
+// =============================================================================
+// Section 5: ControlFlow with Complex Types
+// =============================================================================
+
+@test
+fn test_controlflow_with_maybe() {
+    let cf: ControlFlow<Text, Maybe<Int>> = Continue(Some(42));
+    assert(cf.is_continue());
+
+    let inner = cf.continue_value();
+    assert(inner.is_some());
+    assert_eq(inner.unwrap(), 42);
+}
+
+@test
+fn test_controlflow_with_result() {
+    let cf: ControlFlow<Text, Result<Int, Text>> = Continue(Ok(42));
+    assert(cf.is_continue());
+
+    let inner = cf.continue_value();
+    assert(inner.is_ok());
+}
+
+@test
+fn test_controlflow_nested() {
+    let cf: ControlFlow<Text, ControlFlow<Int, Bool>> = Continue(Continue(true));
+    assert(cf.is_continue());
+
+    let inner = cf.continue_value();
+    assert(inner.is_continue());
+    assert_eq(inner.continue_value(), true);
+}
+
+// =============================================================================
+// Section 6: Try Protocol (structural tests)
+// =============================================================================
+
+@test
+fn test_try_maybe_branch_some() {
+    let val: Maybe<Int> = Some(42);
+    let result = val.branch();
+    assert(result.is_continue());
+    assert_eq(result.continue_value(), 42);
+}
+
+@test
+fn test_try_maybe_branch_none() {
+    let val: Maybe<Int> = None;
+    let result = val.branch();
+    assert(result.is_break());
+}
+
+@test
+fn test_try_maybe_from_output() {
+    let val = Maybe.from_output(42);
+    assert(val.is_some());
+    assert_eq(val.unwrap(), 42);
+}
+
+@test
+fn test_try_result_branch_ok() {
+    let val: Result<Int, Text> = Ok(42);
+    let result = val.branch();
+    assert(result.is_continue());
+    assert_eq(result.continue_value(), 42);
+}
+
+@test
+fn test_try_result_branch_err() {
+    let val: Result<Int, Text> = Err("fail");
+    let result = val.branch();
+    assert(result.is_break());
+}
+
+@test
+fn test_try_result_from_output() {
+    let val: Result<Int, Text> = Result.from_output(42);
+    assert(val.is_ok());
+    assert_eq(val.unwrap(), 42);
+}
+
+// =============================================================================
+// Section 7: ControlFlow as Iterator Control
+// =============================================================================
+
+@test
+fn test_controlflow_simulate_iteration() {
+    // Simulate how ControlFlow is used in iterator-like loops
+    let items = List.from([1, 2, 3, 4, 5]);
+    let mut result = 0;
+
+    for item in items.iter() {
+        let cf: ControlFlow<Int, Int> = if item > 3 {
+            Break(result)
+        } else {
+            result = result + item;
+            Continue(item)
+        };
+
+        if cf.is_break() {
+            break;
+        }
+    }
+
+    assert_eq(result, 6);  // 1 + 2 + 3
+}
+
+// =============================================================================
+// Section 8: ControlFlow is Pattern
+// =============================================================================
+
+@test
+fn test_controlflow_is_continue_pattern() {
+    let cf: ControlFlow<Text, Int> = Continue(42);
+    assert(cf is Continue);
+    assert(!(cf is Break));
+}
+
+@test
+fn test_controlflow_is_break_pattern() {
+    let cf: ControlFlow<Text, Int> = Break("error");
+    assert(cf is Break);
+    assert(!(cf is Continue));
+}
+
+// =============================================================================
+// Section 9: ControlFlow with Unit Types
+// =============================================================================
+
+@test
+fn test_controlflow_continue_unit() {
+    let cf: ControlFlow<Text, ()> = Continue(());
+    assert(cf.is_continue());
+}
+
+@test
+fn test_controlflow_break_unit() {
+    let cf: ControlFlow<(), Int> = Break(());
+    assert(cf.is_break());
+}
+
+// =============================================================================
+// Section 10: Double Map
+// =============================================================================
+
+@test
+fn test_controlflow_map_both_continue() {
+    let cf: ControlFlow<Int, Int> = Continue(10);
+    let result = cf.map_continue(|x| x + 5).map_break(|x| x * 2);
+    assert(result.is_continue());
+    assert_eq(result.continue_value(), 15);
+}
+
+@test
+fn test_controlflow_map_both_break() {
+    let cf: ControlFlow<Int, Int> = Break(10);
+    let result = cf.map_continue(|x| x + 5).map_break(|x| x * 2);
+    assert(result.is_break());
+    assert_eq(result.break_value(), 20);
+}
+
+// =============================================================================
+// Section 11: Try Protocol Additional Tests
+// =============================================================================
+
+@test
+fn test_try_maybe_from_output_text() {
+    let val = Maybe.from_output("hello");
+    assert(val.is_some());
+    assert_eq(val.unwrap(), "hello");
+}
+
+@test
+fn test_try_result_from_output_text() {
+    let val: Result<Text, Int> = Result.from_output("hello");
+    assert(val.is_ok());
+    assert_eq(val.unwrap(), "hello");
+}
+
+@test
+fn test_try_maybe_branch_some_with_text() {
+    let val: Maybe<Text> = Some("hello");
+    let result = val.branch();
+    assert(result.is_continue());
+    assert_eq(result.continue_value(), "hello");
+}
+
+@test
+fn test_try_result_branch_err_text() {
+    let val: Result<Int, Text> = Err("broken");
+    let result = val.branch();
+    assert(result.is_break());
+}
+
+// =============================================================================
+// Section 12: ControlFlow with Bool Types
+// =============================================================================
+
+@test
+fn test_controlflow_continue_bool() {
+    let cf: ControlFlow<Text, Bool> = Continue(true);
+    assert(cf.is_continue());
+    assert_eq(cf.continue_value(), true);
+}
+
+@test
+fn test_controlflow_break_bool() {
+    let cf: ControlFlow<Bool, Int> = Break(false);
+    assert(cf.is_break());
+    assert_eq(cf.break_value(), false);
+}
+
+// =============================================================================
+// Section 13: ControlFlow Map with Identity
+// =============================================================================
+
+fn identity_int(x: Int) -> Int { x }
+
+@test
+fn test_controlflow_map_continue_identity() {
+    let cf: ControlFlow<Text, Int> = Continue(42);
+    let mapped = cf.map_continue(identity_int);
+    assert(mapped.is_continue());
+    assert_eq(mapped.continue_value(), 42);
+}
+
+@test
+fn test_controlflow_map_break_identity() {
+    let cf: ControlFlow<Int, Text> = Break(99);
+    let mapped = cf.map_break(identity_int);
+    assert(mapped.is_break());
+    assert_eq(mapped.break_value(), 99);
+}
+
+// =============================================================================
+// Section 14: Try Protocol with Nested Types
+// =============================================================================
+
+@test
+fn test_try_maybe_branch_some_zero() {
+    let val: Maybe<Int> = Some(0);
+    let result = val.branch();
+    assert(result.is_continue());
+    assert_eq(result.continue_value(), 0);
+}
+
+@test
+fn test_try_maybe_from_output_bool() {
+    let val = Maybe.from_output(false);
+    assert(val.is_some());
+    assert_eq(val.unwrap(), false);
+}
+
+@test
+fn test_try_result_branch_ok_zero() {
+    let val: Result<Int, Text> = Ok(0);
+    let result = val.branch();
+    assert(result.is_continue());
+    assert_eq(result.continue_value(), 0);
+}
+
+@test
+fn test_try_result_from_output_bool() {
+    let val: Result<Bool, Text> = Result.from_output(true);
+    assert(val.is_ok());
+    assert_eq(val.unwrap(), true);
+}
+
+// =============================================================================
+// Section 15: ControlFlow List Accumulation
+// =============================================================================
+
+@test
+fn test_controlflow_accumulate_continues() {
+    let items: List<ControlFlow<Text, Int>> = List.from([
+        Continue(1), Continue(2), Continue(3)
+    ]);
+    let mut sum = 0;
+    for cf in items.iter() {
+        if cf.is_continue() {
+            sum = sum + cf.continue_value();
+        }
+    }
+    assert_eq(sum, 6);
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+// =============================================================================
+// Section 16: ControlFlow Symmetry Tests
+// =============================================================================
+
+@test
+fn test_controlflow_continue_ne_break() {
+    let cf1: ControlFlow<Int, Int> = Continue(42);
+    let cf2: ControlFlow<Int, Int> = Break(42);
+    // Same value but different variants
+    assert(cf1.is_continue());
+    assert(cf2.is_break());
+    assert(!cf1.is_break());
+    assert(!cf2.is_continue());
+}
+
+@test
+fn test_controlflow_map_continue_preserves_break_value() {
+    let cf: ControlFlow<Text, Int> = Break("preserved");
+    let mapped = cf.map_continue(|x| x + 100);
+    assert_eq(mapped.break_value(), "preserved");
+}
+
+@test
+fn test_controlflow_map_break_preserves_continue_value() {
+    let cf: ControlFlow<Int, Text> = Continue("preserved");
+    let mapped = cf.map_break(|x| x + 100);
+    assert_eq(mapped.continue_value(), "preserved");
+}
+
+@test
+fn test_controlflow_triple_map_chain() {
+    let cf: ControlFlow<Text, Int> = Continue(1);
+    let result = cf
+        .map_continue(|x| x + 1)
+        .map_continue(|x| x + 1)
+        .map_continue(|x| x + 1);
+    assert_eq(result.continue_value(), 4);
+}
+
+@test
+fn test_controlflow_break_triple_map_chain() {
+    let cf: ControlFlow<Int, Text> = Break(1);
+    let result = cf
+        .map_break(|x| x + 10)
+        .map_break(|x| x + 10)
+        .map_break(|x| x + 10);
+    assert_eq(result.break_value(), 31);
+}
+
+// =============================================================================
+// Section 17: Try Protocol Edge Cases
+// =============================================================================
+
+@test
+fn test_try_maybe_branch_some_negative() {
+    let val: Maybe<Int> = Some(-100);
+    let result = val.branch();
+    assert(result.is_continue());
+    assert_eq(result.continue_value(), -100);
+}
+
+@test
+fn test_try_result_branch_ok_negative() {
+    let val: Result<Int, Text> = Ok(-42);
+    let result = val.branch();
+    assert(result.is_continue());
+    assert_eq(result.continue_value(), -42);
+}
+
+@test
+fn test_try_maybe_from_output_zero() {
+    let val = Maybe.from_output(0);
+    assert(val.is_some());
+    assert_eq(val.unwrap(), 0);
+}
+
+@test
+fn test_try_result_from_output_empty_text() {
+    let val: Result<Text, Int> = Result.from_output("");
+    assert(val.is_ok());
+    assert_eq(val.unwrap(), "");
+}
+
+@test
+fn test_controlflow_continue_float() {
+    let cf: ControlFlow<Text, Float> = Continue(3.14);
+    assert(cf.is_continue());
+    assert_eq(cf.continue_value(), 3.14);
+}
+
+// =============================================================================
+// Section: ControlFlow Clone, Eq, Debug
+// =============================================================================
+
+@test
+fn test_controlflow_clone_continue() {
+    let cf: ControlFlow<Text, Int> = Continue(42);
+    let cf2 = cf.clone();
+    assert(cf2.is_continue());
+    assert_eq(cf2.continue_value(), 42);
+}
+
+@test
+fn test_controlflow_clone_break() {
+    let cf: ControlFlow<Int, Text> = Break(99);
+    let cf2 = cf.clone();
+    assert(cf2.is_break());
+    assert_eq(cf2.break_value(), 99);
+}
+
+@test
+fn test_controlflow_eq_continue() {
+    let a: ControlFlow<Text, Int> = Continue(42);
+    let b: ControlFlow<Text, Int> = Continue(42);
+    assert(a == b);
+}
+
+@test
+fn test_controlflow_eq_break() {
+    let a: ControlFlow<Int, Text> = Break(10);
+    let b: ControlFlow<Int, Text> = Break(10);
+    assert(a == b);
+}
+
+@test
+fn test_controlflow_neq_different_variants() {
+    let a: ControlFlow<Int, Int> = Continue(42);
+    let b: ControlFlow<Int, Int> = Break(42);
+    assert(a != b);
+}
+
+@test
+fn test_controlflow_neq_different_values() {
+    let a: ControlFlow<Text, Int> = Continue(1);
+    let b: ControlFlow<Text, Int> = Continue(2);
+    assert(a != b);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

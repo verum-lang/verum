@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, array, element, error
+// @description: Malformed array element with missing expression
+// @expected-error: E018
+
+fn test() {
+    let x = [1, , 3];  // Missing element between commas
+    let y = [1, 2, ];  // Trailing comma is valid in Verum
+    let z = [, 1, 2];  // Leading comma - missing first element
+}

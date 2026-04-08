@@ -1,0 +1,26 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, libsystem
+// @description: Test getpagesize() FFI call
+
+@ffi("libSystem.B.dylib")
+extern {
+    fn getpagesize() -> Int;
+}
+
+fn main() {
+    // getpagesize() returns system page size
+    // On Intel macOS: 4096 bytes
+    // On Apple Silicon: 16384 bytes
+    let page_size = getpagesize();
+
+    // Page size must be power of 2 and reasonable
+    assert(page_size >= 4096);
+    assert(page_size <= 65536);
+
+    // Check it's a power of 2: (n & (n-1)) == 0
+    assert((page_size & (page_size - 1)) == 0);
+}

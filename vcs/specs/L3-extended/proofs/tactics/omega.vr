@@ -1,0 +1,43 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, omega
+// @timeout: 15000
+
+/// Omega tactic for linear arithmetic
+
+theorem omega_simple(x: Int) requires x > 0 ensures x >= 1 { proof by omega }
+theorem omega_add(x: Int, y: Int) requires x > 0 requires y > 0 ensures x + y > 1 { proof by omega }
+theorem omega_sub(x: Int, y: Int) requires x > y ensures x - y > 0 { proof by omega }
+theorem omega_mul_const(x: Int) requires x > 0 ensures 2 * x > x { proof by omega }
+theorem omega_div(x: Int) requires x >= 10 ensures x / 2 >= 5 { proof by omega }
+theorem omega_mod(x: Int) requires x % 2 == 0 ensures x == 2 * (x / 2) { proof by omega }
+theorem omega_abs(x: Int): abs(x) >= 0 { proof by omega }
+
+theorem omega_transitivity(a: Int, b: Int, c: Int)
+    requires a <= b requires b <= c ensures a <= c
+{ proof by omega }
+
+theorem omega_trichotomy(x: Int, y: Int): x < y || x == y || x > y { proof by omega }
+
+theorem omega_conjunction(x: Int) requires x > 0 requires x < 10 ensures x >= 1 && x <= 9 { proof by omega }
+
+theorem omega_disjunction(x: Int) requires x > 5 || x < -5 ensures abs(x) > 5 { proof by omega }
+
+theorem omega_negation(x: Int) requires !(x > 0) ensures x <= 0 { proof by omega }
+
+theorem omega_multiple_vars(a: Int, b: Int, c: Int, d: Int)
+    requires a + b <= c requires c <= d ensures a + b <= d
+{ proof by omega }
+
+theorem omega_bounds(x: Int) requires 0 <= x requires x < 100 ensures x * x < 10000 { proof by omega }
+
+theorem omega_divisibility(n: Int) requires n % 6 == 0 ensures n % 2 == 0 && n % 3 == 0 { proof by omega }
+
+theorem omega_system(x: Int, y: Int)
+    requires x + y == 10
+    requires x - y == 4
+    ensures x == 7 && y == 3
+{ proof by omega }
+
+fn main() {}

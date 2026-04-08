@@ -1,0 +1,197 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, automata
+// @expected-exit: 0
+
+// Finite automata simulation
+// States represented as integers, symbols as integers
+// Transition table: trans[state * num_symbols + symbol] = next_state
+
+// --- DFA simulation ---
+// Returns 1 if input accepted, 0 if rejected
+// accept_states: array where accept_states[s] = 1 if s is accepting
+fn dfa_run(trans: List<Int>, num_symbols: Int, accept: List<Int>,
+           input_arr: List<Int>, input_len: Int, start: Int) -> Int {
+    let mut current = start;
+    let mut i = 0;
+    while i < input_len {
+        let sym = input_arr[i];
+        current = trans[current * num_symbols + sym];
+        i = i + 1;
+    }
+    accept[current]
+}
+
+// --- NFA simulation with state sets ---
+// State set represented as bitmask (up to 16 states)
+// trans_nfa: for each (state, symbol) -> bitmask of next states
+fn nfa_step(trans_nfa: List<Int>, num_symbols: Int, state_set: Int, sym: Int) -> Int {
+    let mut next_set = 0;
+    let mut s = 0;
+    while s < 16 {
+        // Check if state s is in state_set
+        let mut mask = 1;
+        let mut k = 0;
+        while k < s {
+            mask = mask * 2;
+            k = k + 1;
+        }
+        if (state_set / mask) % 2 == 1 {
+            // State s is active, look up transition
+            let next = trans_nfa[s * num_symbols + sym];
+            next_set = next_set + next;
+            // Remove duplicates by OR (addition works if no overlap)
+            // Use bitmask OR: need to handle this carefully
+        }
+        s = s + 1;
+    }
+    next_set
+}
+
+fn nfa_run(trans_nfa: List<Int>, num_symbols: Int, accept_mask: Int,
+           input_arr: List<Int>, input_len: Int, start_mask: Int) -> Int {
+    let mut current_set = start_mask;
+    let mut i = 0;
+    while i < input_len {
+        let sym = input_arr[i];
+        current_set = nfa_step(trans_nfa, num_symbols, current_set, sym);
+        i = i + 1;
+    }
+    // Check if any accepting state is in current_set
+    // accept_mask has bits set for accepting states
+    // Check overlap: (current_set AND accept_mask) != 0
+    let mut found = 0;
+    let mut s = 0;
+    while s < 16 {
+        let mut mask = 1;
+        let mut k = 0;
+        while k < s {
+            mask = mask * 2;
+            k = k + 1;
+        }
+        if (current_set / mask) % 2 == 1 {
+            if (accept_mask / mask) % 2 == 1 {
+                found = 1;
+            }
+        }
+        s = s + 1;
+    }
+    found
+}
+
+// --- Simple pattern matching: a*b (zero or more a's followed by one b) ---
+// Alphabet: 0=a, 1=b, 2=c
+// DFA: state 0 = start (accept a's), state 1 = saw b (accept), state 2 = dead
+fn match_a_star_b(input_arr: List<Int>, input_len: Int) -> Int {
+    // Transition table: 3 states x 3 symbols
+    // State 0: a->0, b->1, c->2
+    // State 1: a->2, b->2, c->2  (after b, anything else rejects)
+    // State 2: a->2, b->2, c->2  (dead state)
+    let trans = [0, 1, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0];
+    // Accept states: only state 1
+    let accept = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dfa_run(trans, 3, accept, input_arr, input_len, 0)
+}
+
+// --- Simple pattern matching: ab*c (one a, zero or more b's, one c) ---
+fn match_ab_star_c(input_arr: List<Int>, input_len: Int) -> Int {
+    // DFA: state 0 = start, state 1 = saw a, state 2 = saw c (accept), state 3 = dead
+    // State 0: a->1, b->3, c->3
+    // State 1: a->3, b->1, c->2
+    // State 2: a->3, b->3, c->3
+    // State 3: a->3, b->3, c->3
+    let trans = [1, 3, 3, 3, 1, 2, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0];
+    let accept = [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dfa_run(trans, 3, accept, input_arr, input_len, 0)
+}
+
+// --- State counting: count reachable states from start ---
+fn count_reachable(trans: List<Int>, num_symbols: Int, num_states: Int, start: Int) -> Int {
+    let mut visited = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut queue = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut front = 0;
+    let mut back_ptr = 0;
+
+    visited[start] = 1;
+    queue[back_ptr] = start;
+    back_ptr = back_ptr + 1;
+
+    while front < back_ptr {
+        let state = queue[front];
+        front = front + 1;
+
+        let mut sym = 0;
+        while sym < num_symbols {
+            let next = trans[state * num_symbols + sym];
+            if visited[next] == 0 {
+                visited[next] = 1;
+                queue[back_ptr] = next;
+                back_ptr = back_ptr + 1;
+            }
+            sym = sym + 1;
+        }
+    }
+
+    let mut count = 0;
+    let mut i = 0;
+    while i < num_states {
+        count = count + visited[i];
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Test 1: DFA for a*b: "aaab" (0,0,0,1) -> accept
+    let inp1 = [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let r1 = match_a_star_b(inp1, 4);
+    assert_eq(r1, 1);
+
+    // Test 2: DFA for a*b: "b" (1) -> accept
+    let inp2 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let r2 = match_a_star_b(inp2, 1);
+    assert_eq(r2, 1);
+
+    // Test 3: DFA for a*b: "aaa" (0,0,0) -> reject (no b)
+    let inp3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let r3 = match_a_star_b(inp3, 3);
+    assert_eq(r3, 0);
+
+    // Test 4: DFA for a*b: "ba" (1,0) -> reject (a after b)
+    let inp4 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let r4 = match_a_star_b(inp4, 2);
+    assert_eq(r4, 0);
+
+    // Test 5: DFA for ab*c: "abbc" (0,1,1,2) -> accept
+    let inp5 = [0, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let r5 = match_ab_star_c(inp5, 4);
+    assert_eq(r5, 1);
+
+    // Test 6: DFA for ab*c: "ac" (0,2) -> accept
+    let inp6 = [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let r6 = match_ab_star_c(inp6, 2);
+    assert_eq(r6, 1);
+
+    // Test 7: DFA for ab*c: "abc" (0,1,2) -> accept
+    let inp7 = [0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let r7 = match_ab_star_c(inp7, 3);
+    assert_eq(r7, 1);
+
+    // Test 8: DFA for ab*c: "bc" (1,2) -> reject (no leading a)
+    let inp8 = [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let r8 = match_ab_star_c(inp8, 2);
+    assert_eq(r8, 0);
+
+    // Test 9: Reachable states in a*b DFA: all 3 states reachable from 0
+    let trans_ab = [0, 1, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0];
+    let reach = count_reachable(trans_ab, 3, 3, 0);
+    assert_eq(reach, 3);
+
+    // Test 10: Reachable states from dead state 2: only state 2 (self-loops)
+    let reach2 = count_reachable(trans_ab, 3, 3, 2);
+    assert_eq(reach2, 1);
+
+    print("788_automata_simulation: PASS");
+    0
+}

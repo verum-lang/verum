@@ -1,0 +1,88 @@
+fn main() -> Int {
+    let mut d = Deque.new();
+
+    // Test push_front + push_back
+    d.push_back(10);
+    d.push_back(20);
+    d.push_front(5);
+    // Should be: [5, 10, 20]
+
+    let len = d.len();
+    if (len != 3) {
+        print(f"FAIL: len={len}, expected 3");
+        return 1;
+    }
+
+    // Test pop_front order
+    let v1 = match d.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (v1 != 5) {
+        print(f"FAIL: pop_front={v1}, expected 5");
+        return 1;
+    }
+
+    let v2 = match d.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (v2 != 10) {
+        print(f"FAIL: pop_front={v2}, expected 10");
+        return 1;
+    }
+
+    let v3 = match d.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (v3 != 20) {
+        print(f"FAIL: pop_front={v3}, expected 20");
+        return 1;
+    }
+
+    // Test empty pop returns None
+    let v4 = match d.pop_front() {
+        Some(v) => v,
+        None => -999,
+    };
+    if (v4 != -999) {
+        print(f"FAIL: empty pop_front={v4}, expected -999 (None)");
+        return 1;
+    }
+
+    // Test grow (capacity doubling)
+    let mut d2 = Deque.new();
+    let mut i = 0;
+    while (i < 10) {
+        d2.push_back(i * 100);
+        i = i + 1;
+    }
+    let len2 = d2.len();
+    if (len2 != 10) {
+        print(f"FAIL: len after 10 pushes={len2}, expected 10");
+        return 1;
+    }
+
+    // Verify order after growth
+    let first = match d2.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (first != 0) {
+        print(f"FAIL: first after grow={first}, expected 0");
+        return 1;
+    }
+
+    let last = match d2.pop_back() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (last != 900) {
+        print(f"FAIL: last after grow={last}, expected 900");
+        return 1;
+    }
+
+    print("974_deque_operations: PASS");
+    0
+}

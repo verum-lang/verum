@@ -1,0 +1,65 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, boolean
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT boolean operations, short-circuit, comparisons
+
+fn both(a: Bool, b: Bool) -> Bool { a && b }
+fn either(a: Bool, b: Bool) -> Bool { a || b }
+fn negate(a: Bool) -> Bool { !a }
+
+fn in_range(x: Int, lo: Int, hi: Int) -> Bool {
+    x >= lo && x <= hi
+}
+
+fn is_leap_year(year: Int) -> Bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+fn classify_bmi(bmi_x10: Int) -> Int {
+    // bmi * 10 to avoid floats
+    if bmi_x10 < 185 { 0 }       // underweight
+    else if bmi_x10 < 250 { 1 }  // normal
+    else if bmi_x10 < 300 { 2 }  // overweight
+    else { 3 }                     // obese
+}
+
+fn main() -> Int {
+    // Basic boolean
+    assert(both(true, true));
+    assert(!both(true, false));
+    assert(!both(false, true));
+    assert(!both(false, false));
+
+    assert(either(true, true));
+    assert(either(true, false));
+    assert(either(false, true));
+    assert(!either(false, false));
+
+    assert(negate(false));
+    assert(!negate(true));
+
+    // in_range
+    assert(in_range(5, 0, 10));
+    assert(in_range(0, 0, 10));
+    assert(in_range(10, 0, 10));
+    assert(!in_range(-1, 0, 10));
+    assert(!in_range(11, 0, 10));
+
+    // leap year
+    assert(is_leap_year(2000));
+    assert(is_leap_year(2024));
+    assert(!is_leap_year(1900));
+    assert(!is_leap_year(2023));
+    assert(is_leap_year(2400));
+
+    // classify
+    assert_eq(classify_bmi(170), 0);
+    assert_eq(classify_bmi(220), 1);
+    assert_eq(classify_bmi(270), 2);
+    assert_eq(classify_bmi(350), 3);
+
+    0
+}

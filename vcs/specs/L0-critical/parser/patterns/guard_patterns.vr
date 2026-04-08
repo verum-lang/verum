@@ -1,0 +1,219 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, guard, if, conditional
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Point is { x: Int, y: Int };
+type Error is { retryable: Bool };
+
+// Helper functions
+fn is_valid<T>(x: T) -> Bool { true }
+fn is_recoverable<T>(x: T) -> Bool { true }
+fn process<T>(x: T) { }
+fn handle_recovery<T>(x: T) { }
+fn reject() { }
+fn skip() { }
+fn unreachable() { }
+fn handle_zero() { }
+fn handle_overflow() { }
+fn retry() { }
+fn fail<E>(e: E) { }
+
+fn test_simple_guard_with_comparison() {
+    let x = 5;
+
+    // Simple guard with comparison
+    match x {
+        n if n > 0 => "positive",
+        n if n < 0 => "negative",
+        _ => "zero",
+    };
+}
+
+fn test_guard_with_equality_check() {
+    let value = 42;
+    let target = 42;
+
+    // Guard with equality check
+    match value {
+        x if x == target => "found",
+        _ => "not found",
+    };
+}
+
+fn test_guard_with_complex_boolean_expression() {
+    let pair = (5, 10);
+
+    // Guard with complex boolean expression
+    match pair {
+        (x, y) if x > 0 && y > 0 => "first quadrant",
+        (x, y) if x < 0 && y > 0 => "second quadrant",
+        (x, y) if x < 0 && y < 0 => "third quadrant",
+        (x, y) if x > 0 && y < 0 => "fourth quadrant",
+        _ => "on axis or origin",
+    };
+}
+
+fn test_guard_with_function_call() {
+    let item = 42;
+
+    // Guard with function call
+    match item {
+        x if is_valid(x) => process(x),
+        x if is_recoverable(x) => handle_recovery(x),
+        _ => reject(),
+    };
+}
+
+fn test_guard_with_method_call() {
+    let object = Point { x: 10, y: 20 };
+
+    // Guard with method call
+    match object {
+        obj if obj.x > 0 => process(obj),
+        _ => skip(),
+    };
+}
+
+fn test_guard_with_captured_variable() {
+    let threshold = 100;
+    let value = 50;
+
+    // Guard with captured variable
+    match value {
+        n if n > threshold => "above",
+        n if n < threshold => "below",
+        _ => "equal",
+    };
+}
+
+fn test_guard_with_arithmetic() {
+    let number = 7;
+
+    // Guard with arithmetic
+    match number {
+        n if n % 2 == 0 => "even",
+        n if n % 2 != 0 => "odd",
+        _ => unreachable(),
+    };
+}
+
+fn test_guard_on_enum_variant() {
+    let option: Maybe<Int> = Some(5);
+
+    // Guard on enum variant
+    match option {
+        Some(x) if x > 0 => "positive some",
+        Some(x) if x == 0 => "zero some",
+        Some(_) => "negative some",
+        None => "none",
+    };
+}
+
+fn test_guard_on_struct_pattern() {
+    let point = Point { x: 10, y: 10 };
+
+    // Guard on struct pattern
+    match point {
+        Point { x, y } if x == y => "on diagonal",
+        Point { x, y } if x == -y => "on anti-diagonal",
+        Point { x, .. } if x == 0 => "on y-axis",
+        Point { y, .. } if y == 0 => "on x-axis",
+        _ => "general position",
+    };
+}
+
+fn test_guard_with_range_binding() {
+    let value = 5;
+
+    // Guard with range binding
+    match value {
+        n @ 1..=10 if n % 2 == 0 => "small even",
+        n @ 1..=10 => "small odd",
+        n @ 11..=100 if n % 2 == 0 => "medium even",
+        _ => "other",
+    };
+}
+
+fn test_guard_with_or_pattern() {
+    let char_val = 'A';
+
+    // Guard with or-pattern
+    match char_val {
+        c @ ('a' | 'e' | 'i' | 'o' | 'u') if c == 'A' => "upper vowel",
+        'a' | 'e' | 'i' | 'o' | 'u' => "lower vowel",
+        _ => "other",
+    };
+}
+
+fn test_guard_with_multiple_bindings() {
+    let pair = (60, 50);
+
+    // Guard with multiple bindings
+    match pair {
+        (a, b) if a + b > 100 => "large sum",
+        (a, b) if a * b > 50 => "large product",
+        _ => "small",
+    };
+}
+
+fn test_guard_with_logical_or() {
+    let value = 150;
+
+    // Guard with logical or
+    match value {
+        x if x < 0 || x > 100 => "out of range",
+        x => "in range",
+    };
+}
+
+fn test_guard_with_logical_not() {
+    let flag = false;
+
+    // Guard with logical not
+    match flag {
+        f if !f => "false",
+        _ => "true",
+    };
+}
+
+fn test_guard_with_string_methods() {
+    let text = "hello";
+
+    // Guard with string methods
+    match text {
+        s if s == "" => "empty",
+        s if s == "http" => "url",
+        s if s == "@" => "email-like",
+        _ => "plain text",
+    };
+}
+
+fn test_guard_with_collection_methods() {
+    let list = [1, 2, 3];
+
+    // Guard with collection methods
+    match list {
+        l if l.len() == 0 => "empty list",
+        l if l.len() == 1 => "singleton",
+        l if l.len() > 100 => "large list",
+        _ => "normal list",
+    };
+}
+
+fn test_guard_in_complex_match() {
+    let result: Result<Int, Error> = Ok(50);
+    let max = 100;
+
+    // Guard in complex match
+    match result {
+        Ok(n) if n > 0 && n < max => process(n),
+        Ok(n) if n == 0 => handle_zero(),
+        Ok(_) => handle_overflow(),
+        Err(e) if e.retryable => retry(),
+        Err(e) => fail(e),
+    };
+}

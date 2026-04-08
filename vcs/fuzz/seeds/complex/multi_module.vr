@@ -1,0 +1,160 @@
+// Complex: Multi-module program structure
+// Tests module system and visibility rules
+
+module math {
+    pub fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    pub fn multiply(a: Int, b: Int) -> Int {
+        a * b
+    }
+
+    fn internal_helper(x: Int) -> Int {
+        x * 2
+    }
+
+    pub mod advanced {
+        use super.internal_helper;
+
+        pub fn power(base: Int, exp: Int) -> Int {
+            if exp == 0 {
+                1
+            } else if exp == 1 {
+                base
+            } else {
+                base * power(base, exp - 1)
+            }
+        }
+
+        pub fn factorial(n: Int) -> Int {
+            if n <= 1 { 1 } else { n * factorial(n - 1) }
+        }
+    }
+}
+
+module collections {
+    use verum_core.base.{List, Maybe}
+
+    pub type Stack<T> is {
+        items: List<T>,
+    };
+
+    implement<T> Stack<T> {
+        pub fn new() -> Self {
+            Stack { items: [] }
+        }
+
+        pub fn push(self: &mut Self, item: T) {
+            self.items.push(item);
+        }
+
+        pub fn pop(self: &mut Self) -> Maybe<T> {
+            if self.items.is_empty() {
+                None
+            } else {
+                Some(self.items.pop())
+            }
+        }
+
+        pub fn peek(self: &Self) -> Maybe<&T> {
+            if self.items.is_empty() {
+                None
+            } else {
+                Some(&self.items[self.items.len() - 1])
+            }
+        }
+
+        pub fn len(self: &Self) -> Int {
+            self.items.len()
+        }
+    }
+
+    pub mod queue {
+        use verum_core.base.{List, Maybe}
+
+        pub type Queue<T> is {
+            items: List<T>,
+        };
+
+        implement<T> Queue<T> {
+            pub fn new() -> Self {
+                Queue { items: [] }
+            }
+
+            pub fn enqueue(self: &mut Self, item: T) {
+                self.items.push(item);
+            }
+
+            pub fn dequeue(self: &mut Self) -> Maybe<T> {
+                if self.items.is_empty() {
+                    None
+                } else {
+                    Some(self.items.remove(0))
+                }
+            }
+        }
+    }
+}
+
+module utils {
+    pub fn range(start: Int, end: Int) -> List<Int> {
+        let mut result = [];
+        for i in start..end {
+            result.push(i);
+        }
+        result
+    }
+
+    pub fn sum(items: &List<Int>) -> Int {
+        let mut total = 0;
+        for item in items {
+            total = total + *item;
+        }
+        total
+    }
+}
+
+// Use items from modules
+use math.{add, multiply};
+use math.advanced.{power, factorial};
+use collections.Stack;
+use collections.queue.Queue;
+use utils.{range, sum};
+
+fn main() {
+    // Basic math
+    let x = add(10, 20);
+    let y = multiply(x, 2);
+    assert y == 60;
+
+    // Advanced math
+    let p = power(2, 10);
+    assert p == 1024;
+
+    let f = factorial(5);
+    assert f == 120;
+
+    // Stack usage
+    let mut stack: Stack<Int> = Stack.new();
+    stack.push(1);
+    stack.push(2);
+    stack.push(3);
+
+    assert stack.len() == 3;
+    let top = stack.pop();
+    assert top == Some(3);
+
+    // Queue usage
+    let mut queue: Queue<Text> = Queue.new();
+    queue.enqueue("first");
+    queue.enqueue("second");
+
+    let first = queue.dequeue();
+    assert first == Some("first");
+
+    // Utils
+    let nums = range(1, 11);
+    let total = sum(&nums);
+    assert total == 55;
+}

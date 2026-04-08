@@ -1,0 +1,184 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, hash-table, data-structure
+// @timeout: 30000
+
+// Simple open-addressing hash table
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Hash table with capacity 8, open addressing (linear probing)
+// keys[i] = key (-1 = empty slot)
+// vals[i] = value
+type HT is { keys: Arr8, vals: Arr8, size: Int };
+
+fn ht_new() -> HT {
+    let empty = Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    HT { keys: empty, vals: zeros(), size: 0 }
+}
+
+fn hash(key: Int) -> Int {
+    // Simple hash for positive keys
+    let mut h = key * 2654435761 / 65536;
+    if h < 0 { h = 0 - h; }
+    h % 8
+}
+
+fn ht_put(ht: HT, key: Int, val: Int) -> HT {
+    let mut idx = hash(key);
+    let mut probes = 0;
+    while probes < 8 {
+        let k = get8(ht.keys, idx);
+        if k == -1 {
+            // Empty slot: insert
+            return HT {
+                keys: set8(ht.keys, idx, key),
+                vals: set8(ht.vals, idx, val),
+                size: ht.size + 1
+            };
+        }
+        if k == key {
+            // Key exists: update
+            return HT {
+                keys: ht.keys,
+                vals: set8(ht.vals, idx, val),
+                size: ht.size
+            };
+        }
+        idx = (idx + 1) % 8;
+        probes = probes + 1;
+    }
+    ht // Table full, no change
+}
+
+fn ht_get(ht: HT, key: Int) -> Int {
+    let mut idx = hash(key);
+    let mut probes = 0;
+    while probes < 8 {
+        let k = get8(ht.keys, idx);
+        if k == -1 { return -1; } // Not found
+        if k == key { return get8(ht.vals, idx); }
+        idx = (idx + 1) % 8;
+        probes = probes + 1;
+    }
+    -1 // Not found
+}
+
+fn ht_contains(ht: HT, key: Int) -> Int {
+    let mut idx = hash(key);
+    let mut probes = 0;
+    while probes < 8 {
+        let k = get8(ht.keys, idx);
+        if k == -1 { return 0; }
+        if k == key { return 1; }
+        idx = (idx + 1) % 8;
+        probes = probes + 1;
+    }
+    0
+}
+
+fn test_basic() -> Int {
+    let mut ht = ht_new();
+    ht = ht_put(ht, 10, 100);
+    ht = ht_put(ht, 20, 200);
+    ht = ht_put(ht, 30, 300);
+
+    assert_eq(ht_get(ht, 10), 100);
+    assert_eq(ht_get(ht, 20), 200);
+    assert_eq(ht_get(ht, 30), 300);
+    assert_eq(ht_get(ht, 40), -1);
+    assert_eq(ht.size, 3);
+    1
+}
+
+fn test_update() -> Int {
+    let mut ht = ht_new();
+    ht = ht_put(ht, 5, 50);
+    assert_eq(ht_get(ht, 5), 50);
+    ht = ht_put(ht, 5, 99);
+    assert_eq(ht_get(ht, 5), 99);
+    assert_eq(ht.size, 1); // No size increase
+    1
+}
+
+fn test_contains() -> Int {
+    let mut ht = ht_new();
+    ht = ht_put(ht, 1, 10);
+    ht = ht_put(ht, 2, 20);
+    assert_eq(ht_contains(ht, 1), 1);
+    assert_eq(ht_contains(ht, 2), 1);
+    assert_eq(ht_contains(ht, 3), 0);
+    1
+}
+
+fn test_collision() -> Int {
+    // Insert multiple keys that might hash to same bucket
+    let mut ht = ht_new();
+    ht = ht_put(ht, 1, 10);
+    ht = ht_put(ht, 9, 90);
+    ht = ht_put(ht, 17, 170);
+    ht = ht_put(ht, 25, 250);
+
+    assert_eq(ht_get(ht, 1), 10);
+    assert_eq(ht_get(ht, 9), 90);
+    assert_eq(ht_get(ht, 17), 170);
+    assert_eq(ht_get(ht, 25), 250);
+    assert_eq(ht.size, 4);
+    1
+}
+
+fn test_many_entries() -> Int {
+    let mut ht = ht_new();
+    ht = ht_put(ht, 100, 1);
+    ht = ht_put(ht, 200, 2);
+    ht = ht_put(ht, 300, 3);
+    ht = ht_put(ht, 400, 4);
+    ht = ht_put(ht, 500, 5);
+    ht = ht_put(ht, 600, 6);
+
+    assert_eq(ht.size, 6);
+    assert_eq(ht_get(ht, 100), 1);
+    assert_eq(ht_get(ht, 600), 6);
+    1
+}
+
+fn test_zero_key() -> Int {
+    // Key 0 should work (different from -1 = empty)
+    let mut ht = ht_new();
+    ht = ht_put(ht, 0, 42);
+    assert_eq(ht_get(ht, 0), 42);
+    assert_eq(ht_contains(ht, 0), 1);
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_update();
+    test_contains();
+    test_collision();
+    test_many_entries();
+    test_zero_key();
+    print("[OK] 527_hash_table_aot");
+    0
+}

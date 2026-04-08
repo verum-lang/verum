@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: meta, repr, errors
+// @expected-error: E400
+// @timeout: 5000
+
+/// Tests type errors in contexts where repr attributes are used.
+
+@repr(C)
+type CStruct is {
+    x: Int,
+    y: Float,
+};
+
+fn takes_int(n: Int) -> Int { n }
+
+fn main() {
+    let s = CStruct { x: 1, y: 2.0 };
+    // ERROR E400: Cannot pass CStruct where Int is expected
+    let result = takes_int(s);
+}

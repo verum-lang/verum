@@ -1,0 +1,659 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, text
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Extended Text stdlib operations — manipulation, search, conversion
+
+// ============================================================================
+// Array8: flat 8-element integer array used for character codes and digits
+// ============================================================================
+
+type Array8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn arr_new() -> Array8 {
+    Array8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn arr_get(a: Array8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr_set(a: Array8, i: Int, val: Int) -> Array8 {
+    Array8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        len: a.len
+    }
+}
+
+fn arr_push(a: Array8, val: Int) -> Array8 {
+    let updated = arr_set(a, a.len, val);
+    Array8 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        len: a.len + 1
+    }
+}
+
+fn arr_with_len(a: Array8, n: Int) -> Array8 {
+    Array8 {
+        e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3,
+        e4: a.e4, e5: a.e5, e6: a.e6, e7: a.e7,
+        len: n
+    }
+}
+
+fn arr_equal(a: Array8, b: Array8) -> Bool {
+    if a.len != b.len { false }
+    else {
+        let mut i = 0;
+        let mut eq = true;
+        while i < a.len {
+            if arr_get(a, i) != arr_get(b, i) { eq = false; }
+            i = i + 1;
+        }
+        eq
+    }
+}
+
+fn arr_reverse(a: Array8) -> Array8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < a.len {
+        result = arr_set(result, i, arr_get(a, a.len - 1 - i));
+        i = i + 1;
+    }
+    arr_with_len(result, a.len)
+}
+
+// ============================================================================
+// RunPair for run-length encoding
+// ============================================================================
+
+type RunPair is { value: Int, count: Int };
+
+// Store up to 8 RunPairs in a flat struct
+type RunList is {
+    r0v: Int, r0c: Int,
+    r1v: Int, r1c: Int,
+    r2v: Int, r2c: Int,
+    r3v: Int, r3c: Int,
+    r4v: Int, r4c: Int,
+    r5v: Int, r5c: Int,
+    r6v: Int, r6c: Int,
+    r7v: Int, r7c: Int,
+    len: Int
+};
+
+fn runlist_new() -> RunList {
+    RunList {
+        r0v: 0, r0c: 0, r1v: 0, r1c: 0, r2v: 0, r2c: 0, r3v: 0, r3c: 0,
+        r4v: 0, r4c: 0, r5v: 0, r5c: 0, r6v: 0, r6c: 0, r7v: 0, r7c: 0,
+        len: 0
+    }
+}
+
+fn runlist_get_value(r: RunList, i: Int) -> Int {
+    if i == 0 { r.r0v } else if i == 1 { r.r1v }
+    else if i == 2 { r.r2v } else if i == 3 { r.r3v }
+    else if i == 4 { r.r4v } else if i == 5 { r.r5v }
+    else if i == 6 { r.r6v } else { r.r7v }
+}
+
+fn runlist_get_count(r: RunList, i: Int) -> Int {
+    if i == 0 { r.r0c } else if i == 1 { r.r1c }
+    else if i == 2 { r.r2c } else if i == 3 { r.r3c }
+    else if i == 4 { r.r4c } else if i == 5 { r.r5c }
+    else if i == 6 { r.r6c } else { r.r7c }
+}
+
+fn runlist_set(r: RunList, i: Int, val: Int, cnt: Int) -> RunList {
+    RunList {
+        r0v: if i == 0 { val } else { r.r0v },
+        r0c: if i == 0 { cnt } else { r.r0c },
+        r1v: if i == 1 { val } else { r.r1v },
+        r1c: if i == 1 { cnt } else { r.r1c },
+        r2v: if i == 2 { val } else { r.r2v },
+        r2c: if i == 2 { cnt } else { r.r2c },
+        r3v: if i == 3 { val } else { r.r3v },
+        r3c: if i == 3 { cnt } else { r.r3c },
+        r4v: if i == 4 { val } else { r.r4v },
+        r4c: if i == 4 { cnt } else { r.r4c },
+        r5v: if i == 5 { val } else { r.r5v },
+        r5c: if i == 5 { cnt } else { r.r5c },
+        r6v: if i == 6 { val } else { r.r6v },
+        r6c: if i == 6 { cnt } else { r.r6c },
+        r7v: if i == 7 { val } else { r.r7v },
+        r7c: if i == 7 { cnt } else { r.r7c },
+        len: r.len
+    }
+}
+
+fn runlist_with_len(r: RunList, n: Int) -> RunList {
+    RunList {
+        r0v: r.r0v, r0c: r.r0c, r1v: r.r1v, r1c: r.r1c,
+        r2v: r.r2v, r2c: r.r2c, r3v: r.r3v, r3c: r.r3c,
+        r4v: r.r4v, r4c: r.r4c, r5v: r.r5v, r5c: r.r5c,
+        r6v: r.r6v, r6c: r.r6c, r7v: r.r7v, r7c: r.r7c,
+        len: n
+    }
+}
+
+fn runlist_push(r: RunList, val: Int, cnt: Int) -> RunList {
+    let updated = runlist_set(r, r.len, val, cnt);
+    runlist_with_len(updated, r.len + 1)
+}
+
+// ============================================================================
+// Character classification helpers (ASCII)
+// ============================================================================
+
+fn is_digit(ch: Int) -> Bool {
+    ch >= 48 && ch <= 57
+}
+
+fn is_upper(ch: Int) -> Bool {
+    ch >= 65 && ch <= 90
+}
+
+fn is_lower(ch: Int) -> Bool {
+    ch >= 97 && ch <= 122
+}
+
+fn is_alpha(ch: Int) -> Bool {
+    is_upper(ch) || is_lower(ch)
+}
+
+fn to_upper(ch: Int) -> Int {
+    if is_lower(ch) { ch - 32 } else { ch }
+}
+
+fn to_lower(ch: Int) -> Int {
+    if is_upper(ch) { ch + 32 } else { ch }
+}
+
+fn digit_value(ch: Int) -> Int {
+    ch - 48
+}
+
+fn digit_char(val: Int) -> Int {
+    val + 48
+}
+
+// ============================================================================
+// Algorithms
+// ============================================================================
+
+// Caesar cipher: shift each letter by n positions (wrapping within A-Z / a-z)
+fn caesar_shift_char(ch: Int, n: Int) -> Int {
+    if is_upper(ch) {
+        let shifted = (ch - 65 + n) % 26;
+        // Handle negative modulo
+        let fixed = if shifted < 0 { shifted + 26 } else { shifted };
+        fixed + 65
+    } else if is_lower(ch) {
+        let shifted = (ch - 97 + n) % 26;
+        let fixed = if shifted < 0 { shifted + 26 } else { shifted };
+        fixed + 97
+    } else {
+        ch
+    }
+}
+
+fn caesar_cipher(a: Array8, n: Int) -> Array8 {
+    let mut result = arr_new();
+    let mut i = 0;
+    while i < a.len {
+        result = arr_set(result, i, caesar_shift_char(arr_get(a, i), n));
+        i = i + 1;
+    }
+    arr_with_len(result, a.len)
+}
+
+// Run-length encode an Array8
+fn run_length_encode(a: Array8) -> RunList {
+    if a.len == 0 { runlist_new() }
+    else {
+        let mut result = runlist_new();
+        let mut cur_val = arr_get(a, 0);
+        let mut cur_count = 1;
+        let mut i = 1;
+        while i < a.len {
+            let v = arr_get(a, i);
+            if v == cur_val {
+                cur_count = cur_count + 1;
+            } else {
+                result = runlist_push(result, cur_val, cur_count);
+                cur_val = v;
+                cur_count = 1;
+            }
+            i = i + 1;
+        }
+        // Push last run
+        runlist_push(result, cur_val, cur_count)
+    }
+}
+
+// Check if array is palindrome
+fn is_palindrome(a: Array8) -> Bool {
+    let rev = arr_reverse(a);
+    arr_equal(a, rev)
+}
+
+// Convert integer to base-N digits (stored in Array8, least significant first)
+fn int_to_base(num: Int, base: Int) -> Array8 {
+    if num == 0 {
+        let mut r = arr_new();
+        r = arr_push(r, 0);
+        r
+    } else {
+        let mut r = arr_new();
+        let mut n = num;
+        while n > 0 {
+            let digit = n % base;
+            r = arr_push(r, digit);
+            n = n / base;
+        }
+        r
+    }
+}
+
+// Convert base-N digits (least significant first) back to integer
+fn base_to_int(digits: Array8, base: Int) -> Int {
+    let mut result = 0;
+    let mut multiplier = 1;
+    let mut i = 0;
+    while i < digits.len {
+        result = result + arr_get(digits, i) * multiplier;
+        multiplier = multiplier * base;
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_char_code_conversion() {
+    // ASCII code points
+    assert_eq(digit_char(0), 48);   // '0'
+    assert_eq(digit_char(9), 57);   // '9'
+    assert_eq(digit_value(48), 0);  // '0' -> 0
+    assert_eq(digit_value(57), 9);  // '9' -> 9
+
+    // Round-trip: digit -> char -> digit
+    let mut d = 0;
+    while d < 10 {
+        assert_eq(digit_value(digit_char(d)), d);
+        d = d + 1;
+    }
+
+    // ASCII properties
+    assert_eq(to_upper(97), 65);    // 'a' -> 'A'
+    assert_eq(to_lower(65), 97);    // 'A' -> 'a'
+    assert_eq(to_upper(65), 65);    // 'A' stays 'A'
+    assert_eq(to_lower(97), 97);    // 'a' stays 'a'
+    assert_eq(to_upper(48), 48);    // '0' unchanged by to_upper
+    assert_eq(to_lower(48), 48);    // '0' unchanged by to_lower
+
+    print("  test_char_code_conversion: ok");
+}
+
+@test
+fn test_is_digit() {
+    // Codes 48-57 are digits ('0'-'9')
+    let mut ch = 48;
+    while ch <= 57 {
+        assert(is_digit(ch));
+        ch = ch + 1;
+    }
+
+    // Non-digit codes
+    assert(!is_digit(47));   // '/' just before '0'
+    assert(!is_digit(58));   // ':' just after '9'
+    assert(!is_digit(65));   // 'A'
+    assert(!is_digit(97));   // 'a'
+    assert(!is_digit(0));    // NUL
+    assert(!is_digit(32));   // space
+
+    print("  test_is_digit: ok");
+}
+
+@test
+fn test_is_alpha() {
+    // Uppercase A-Z (65-90)
+    let mut ch = 65;
+    while ch <= 90 {
+        assert(is_alpha(ch));
+        assert(is_upper(ch));
+        assert(!is_lower(ch));
+        ch = ch + 1;
+    }
+
+    // Lowercase a-z (97-122)
+    ch = 97;
+    while ch <= 122 {
+        assert(is_alpha(ch));
+        assert(is_lower(ch));
+        assert(!is_upper(ch));
+        ch = ch + 1;
+    }
+
+    // Non-alpha
+    assert(!is_alpha(48));   // '0'
+    assert(!is_alpha(64));   // '@' just before 'A'
+    assert(!is_alpha(91));   // '[' just after 'Z'
+    assert(!is_alpha(96));   // '`' just before 'a'
+    assert(!is_alpha(123));  // '{' just after 'z'
+    assert(!is_alpha(32));   // space
+
+    print("  test_is_alpha: ok");
+}
+
+@test
+fn test_to_upper_lower() {
+    // Convert all lowercase to uppercase
+    let mut ch = 97;
+    while ch <= 122 {
+        let upper = to_upper(ch);
+        assert_eq(upper, ch - 32);
+        assert(is_upper(upper));
+        ch = ch + 1;
+    }
+
+    // Convert all uppercase to lowercase
+    ch = 65;
+    while ch <= 90 {
+        let lower = to_lower(ch);
+        assert_eq(lower, ch + 32);
+        assert(is_lower(lower));
+        ch = ch + 1;
+    }
+
+    // Double conversion round-trip
+    ch = 65;
+    while ch <= 90 {
+        assert_eq(to_upper(to_lower(ch)), ch);
+        ch = ch + 1;
+    }
+    ch = 97;
+    while ch <= 122 {
+        assert_eq(to_lower(to_upper(ch)), ch);
+        ch = ch + 1;
+    }
+
+    // Non-alpha chars unchanged
+    assert_eq(to_upper(32), 32);   // space
+    assert_eq(to_lower(32), 32);
+    assert_eq(to_upper(48), 48);   // '0'
+    assert_eq(to_lower(57), 57);   // '9'
+
+    print("  test_to_upper_lower: ok");
+}
+
+@test
+fn test_caesar_cipher() {
+    // "ABC" = [65, 66, 67], shift by 3 => "DEF" = [68, 69, 70]
+    let mut abc = arr_new();
+    abc = arr_push(abc, 65);
+    abc = arr_push(abc, 66);
+    abc = arr_push(abc, 67);
+
+    let shifted = caesar_cipher(abc, 3);
+    assert_eq(arr_get(shifted, 0), 68);  // D
+    assert_eq(arr_get(shifted, 1), 69);  // E
+    assert_eq(arr_get(shifted, 2), 70);  // F
+
+    // Shift back by -3 should restore
+    let restored = caesar_cipher(shifted, -3);
+    assert(arr_equal(restored, abc));
+
+    // Shift by 26 should be identity
+    let same = caesar_cipher(abc, 26);
+    assert(arr_equal(same, abc));
+
+    // Wrapping: "XYZ" = [88, 89, 90], shift by 3 => "ABC" = [65, 66, 67]
+    let mut xyz = arr_new();
+    xyz = arr_push(xyz, 88);
+    xyz = arr_push(xyz, 89);
+    xyz = arr_push(xyz, 90);
+
+    let wrapped = caesar_cipher(xyz, 3);
+    assert_eq(arr_get(wrapped, 0), 65);  // A
+    assert_eq(arr_get(wrapped, 1), 66);  // B
+    assert_eq(arr_get(wrapped, 2), 67);  // C
+
+    // Lowercase: "abc" = [97, 98, 99], shift by 1 => "bcd" = [98, 99, 100]
+    let mut lower_abc = arr_new();
+    lower_abc = arr_push(lower_abc, 97);
+    lower_abc = arr_push(lower_abc, 98);
+    lower_abc = arr_push(lower_abc, 99);
+
+    let lower_shifted = caesar_cipher(lower_abc, 1);
+    assert_eq(arr_get(lower_shifted, 0), 98);   // b
+    assert_eq(arr_get(lower_shifted, 1), 99);   // c
+    assert_eq(arr_get(lower_shifted, 2), 100);  // d
+
+    // Non-alpha chars unchanged: space (32) stays space
+    let mut with_space = arr_new();
+    with_space = arr_push(with_space, 65);
+    with_space = arr_push(with_space, 32);
+    with_space = arr_push(with_space, 66);
+
+    let space_shifted = caesar_cipher(with_space, 5);
+    assert_eq(arr_get(space_shifted, 0), 70);  // F
+    assert_eq(arr_get(space_shifted, 1), 32);  // space unchanged
+    assert_eq(arr_get(space_shifted, 2), 71);  // G
+
+    print("  test_caesar_cipher: ok");
+}
+
+@test
+fn test_run_length_encode() {
+    // [1,1,1,2,2,3] => [(1,3),(2,2),(3,1)]
+    let mut a = arr_new();
+    a = arr_push(a, 1);
+    a = arr_push(a, 1);
+    a = arr_push(a, 1);
+    a = arr_push(a, 2);
+    a = arr_push(a, 2);
+    a = arr_push(a, 3);
+
+    let encoded = run_length_encode(a);
+    assert_eq(encoded.len, 3);
+    assert_eq(runlist_get_value(encoded, 0), 1);
+    assert_eq(runlist_get_count(encoded, 0), 3);
+    assert_eq(runlist_get_value(encoded, 1), 2);
+    assert_eq(runlist_get_count(encoded, 1), 2);
+    assert_eq(runlist_get_value(encoded, 2), 3);
+    assert_eq(runlist_get_count(encoded, 2), 1);
+
+    // All same: [5,5,5,5] => [(5,4)]
+    let mut b = arr_new();
+    b = arr_push(b, 5);
+    b = arr_push(b, 5);
+    b = arr_push(b, 5);
+    b = arr_push(b, 5);
+
+    let enc2 = run_length_encode(b);
+    assert_eq(enc2.len, 1);
+    assert_eq(runlist_get_value(enc2, 0), 5);
+    assert_eq(runlist_get_count(enc2, 0), 4);
+
+    // All different: [1,2,3,4] => [(1,1),(2,1),(3,1),(4,1)]
+    let mut c = arr_new();
+    c = arr_push(c, 1);
+    c = arr_push(c, 2);
+    c = arr_push(c, 3);
+    c = arr_push(c, 4);
+
+    let enc3 = run_length_encode(c);
+    assert_eq(enc3.len, 4);
+    let mut i = 0;
+    while i < 4 {
+        assert_eq(runlist_get_value(enc3, i), i + 1);
+        assert_eq(runlist_get_count(enc3, i), 1);
+        i = i + 1;
+    }
+
+    // Single element: [7] => [(7,1)]
+    let mut d = arr_new();
+    d = arr_push(d, 7);
+
+    let enc4 = run_length_encode(d);
+    assert_eq(enc4.len, 1);
+    assert_eq(runlist_get_value(enc4, 0), 7);
+    assert_eq(runlist_get_count(enc4, 0), 1);
+
+    // Empty array
+    let empty = arr_new();
+    let enc5 = run_length_encode(empty);
+    assert_eq(enc5.len, 0);
+
+    print("  test_run_length_encode: ok");
+}
+
+@test
+fn test_palindrome_check() {
+    // [1, 2, 3, 2, 1] is palindrome
+    let mut a = arr_new();
+    a = arr_push(a, 1);
+    a = arr_push(a, 2);
+    a = arr_push(a, 3);
+    a = arr_push(a, 2);
+    a = arr_push(a, 1);
+    assert(is_palindrome(a));
+
+    // [1, 2, 3, 4, 5] is not palindrome
+    let mut b = arr_new();
+    b = arr_push(b, 1);
+    b = arr_push(b, 2);
+    b = arr_push(b, 3);
+    b = arr_push(b, 4);
+    b = arr_push(b, 5);
+    assert(!is_palindrome(b));
+
+    // Single element is palindrome
+    let mut c = arr_new();
+    c = arr_push(c, 42);
+    assert(is_palindrome(c));
+
+    // Two same elements
+    let mut d = arr_new();
+    d = arr_push(d, 7);
+    d = arr_push(d, 7);
+    assert(is_palindrome(d));
+
+    // Two different elements
+    let mut e = arr_new();
+    e = arr_push(e, 7);
+    e = arr_push(e, 8);
+    assert(!is_palindrome(e));
+
+    // Even-length palindrome [1, 2, 2, 1]
+    let mut f = arr_new();
+    f = arr_push(f, 1);
+    f = arr_push(f, 2);
+    f = arr_push(f, 2);
+    f = arr_push(f, 1);
+    assert(is_palindrome(f));
+
+    // Empty is palindrome
+    let g = arr_new();
+    assert(is_palindrome(g));
+
+    print("  test_palindrome_check: ok");
+}
+
+@test
+fn test_base_conversion() {
+    // 42 in base 2 = [0,1,0,1,0,1] (LSB first) = 101010 in binary
+    let digits_b2 = int_to_base(42, 2);
+    assert_eq(digits_b2.len, 6);
+    assert_eq(arr_get(digits_b2, 0), 0);  // 2^0 = 0
+    assert_eq(arr_get(digits_b2, 1), 1);  // 2^1 = 2
+    assert_eq(arr_get(digits_b2, 2), 0);  // 2^2 = 0
+    assert_eq(arr_get(digits_b2, 3), 1);  // 2^3 = 8
+    assert_eq(arr_get(digits_b2, 4), 0);  // 2^4 = 0
+    assert_eq(arr_get(digits_b2, 5), 1);  // 2^5 = 32
+    // Round-trip
+    assert_eq(base_to_int(digits_b2, 2), 42);
+
+    // 255 in base 16 = [15, 15] (LSB first) = FF in hex
+    let digits_hex = int_to_base(255, 16);
+    assert_eq(digits_hex.len, 2);
+    assert_eq(arr_get(digits_hex, 0), 15);
+    assert_eq(arr_get(digits_hex, 1), 15);
+    assert_eq(base_to_int(digits_hex, 16), 255);
+
+    // 100 in base 10 = [0, 0, 1] (LSB first)
+    let digits_10 = int_to_base(100, 10);
+    assert_eq(digits_10.len, 3);
+    assert_eq(arr_get(digits_10, 0), 0);
+    assert_eq(arr_get(digits_10, 1), 0);
+    assert_eq(arr_get(digits_10, 2), 1);
+    assert_eq(base_to_int(digits_10, 10), 100);
+
+    // 7 in base 8 = [7] (LSB first)
+    let digits_oct = int_to_base(7, 8);
+    assert_eq(digits_oct.len, 1);
+    assert_eq(arr_get(digits_oct, 0), 7);
+    assert_eq(base_to_int(digits_oct, 8), 7);
+
+    // 8 in base 8 = [0, 1] (LSB first) = 10 in octal
+    let digits_oct2 = int_to_base(8, 8);
+    assert_eq(digits_oct2.len, 2);
+    assert_eq(arr_get(digits_oct2, 0), 0);
+    assert_eq(arr_get(digits_oct2, 1), 1);
+    assert_eq(base_to_int(digits_oct2, 8), 8);
+
+    // 0 special case
+    let digits_zero = int_to_base(0, 2);
+    assert_eq(digits_zero.len, 1);
+    assert_eq(arr_get(digits_zero, 0), 0);
+    assert_eq(base_to_int(digits_zero, 2), 0);
+
+    // Round-trip for various bases
+    let mut base = 2;
+    while base <= 8 {
+        let mut num = 1;
+        while num <= 100 {
+            let digits = int_to_base(num, base);
+            assert_eq(base_to_int(digits, base), num);
+            num = num + 25;
+        }
+        base = base + 2;
+    }
+
+    print("  test_base_conversion: ok");
+}
+
+fn main() -> Int {
+    test_char_code_conversion();
+    test_is_digit();
+    test_is_alpha();
+    test_to_upper_lower();
+    test_caesar_cipher();
+    test_run_length_encode();
+    test_palindrome_check();
+    test_base_conversion();
+    print("[OK] 074_stdlib_text_extended");
+    0
+}

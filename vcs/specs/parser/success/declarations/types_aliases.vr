@@ -1,0 +1,179 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, types, aliases
+// @description: Test type alias definition parsing
+
+// Simple type alias
+type UserId is Int;
+
+type Name is Text;
+
+type Timestamp is Int;
+
+// Alias to generic type
+type IntList is List<Int>;
+
+type StringMap is Map<Text, Text>;
+
+type IntSet is Set<Int>;
+
+// Alias to tuple
+type Point2D is (Float, Float);
+
+type Point3D is (Float, Float, Float);
+
+type Pair<T> is (T, T);
+
+// Alias to function type
+type Predicate<T> is fn(T) -> Bool;
+
+type Transformer<A, B> is fn(A) -> B;
+
+type Consumer<T> is fn(T) -> ();
+
+type Producer<T> is fn() -> T;
+
+// Alias to function type (sync versions for async patterns)
+type Fetcher is fn(Text) -> Response;
+
+type Handler<T> is fn(T) -> Result<(), Error>;
+
+// Alias to function with context
+type DbQuery is fn(Text) -> List<Row> using [Database];
+
+type LoggingTransform<T, U> is fn(T) -> U using [Logger];
+
+// Generic alias
+type Container<T> is List<T>;
+
+type Nullable<T> is Maybe<T>;
+
+type Outcome<T, E> is Result<T, E>;
+
+// Generic alias with bounds
+type OrderedList<T: Ord> is List<T>;
+
+type HashableSet<T: Hash + Eq> is Set<T>;
+
+// Type alias with where clause
+type BoundedContainer<T> is List<T>
+    where type T: Clone + Debug;
+
+// Nested generic alias
+type NestedMap<K, V> is Map<K, List<V>>;
+
+type DeepNesting<A, B, C> is Map<A, List<Maybe<Pair<B, C>>>>;
+
+// Alias to reference types
+type Ref<T> is &T;
+
+type MutRef<T> is &mut T;
+
+type CheckedRef<T> is &checked T;
+
+type UnsafeRef<T> is &unsafe T;
+
+// Alias to pointer types
+type ConstPtr<T> is *const T;
+
+type MutPtr<T> is *mut T;
+
+// Alias to array/slice
+type ByteArray is [u8; 256];
+
+type Buffer is [u8];
+
+type Matrix<const N: Int, const M: Int> is [[Float; M]; N];
+
+// Newtype pattern (single-element tuple)
+type Email is (Text);
+
+type UserIdNewtype is (Int);
+
+type Password is (Text);
+
+// Complex nested aliases
+type Callback<T, R> is fn(T) -> Result<R, Error>;
+
+type EventHandler<E> is fn(E) -> Bool using [Logger];
+
+// Type-level function alias
+type Apply<F<_>, A> is F<A>;
+
+type Compose<F<_>, G<_>, A> is F<G<A>>;
+
+// Existential type alias
+type SomeIterator is some I: Iterator<Item = Int>;
+
+type SomeCollection<T> is some C: Collection<Element = T>;
+
+// Higher-kinded type alias
+type Mappable<F<_>> is F<_>;
+
+// Alias with context requirement in function type
+type TransactionalOp<T> is fn() -> T using [Database.transactional()];
+
+// Alias with result type for fallible operations
+type FallibleFn<T, E> is fn() -> Result<T, E>;
+
+type ParseFn<T> is fn(Text) -> Result<T, ParseError>;
+
+// Public type alias
+pub type PublicAlias is Int;
+
+// Internal type alias
+internal type InternalAlias is Text;
+
+// Protected type alias
+protected type ProtectedAlias is Float;
+
+// Alias with attributes
+@derive(Clone, Debug)
+type CloneableWrapper<T: Clone> is (T);
+
+// Self-referential through Heap (newtype)
+type TreeRef<T> is Heap<Tree<T>>;
+
+type NodeRef<T> is Maybe<Heap<Node<T>>>;
+
+// Rank-2 function type alias
+type Reducer<A, R> is fn(R, A) -> R;
+
+type TransducerFn<A, B> is fn<R>(Reducer<B, R>) -> Reducer<A, R>;
+
+// Complex rank-2 alias
+type StatefulTransducerFn<A, B, S> is fn<R>(Reducer<B, R>, &mut S) -> Reducer<A, R>;
+
+// Alias with multiple constraints
+type ConstrainedMap<K, V> is Map<K, V>
+    where type K: Hash + Eq + Clone,
+          type V: Clone + Default;
+
+// Alias to capability-restricted type
+type ReadOnlyDb is Database with [Read];
+
+type FullAccessDb is Database with [Read, Write, Admin];
+
+// Alias chain (alias to alias)
+type MyList<T> is List<T>;
+
+type MyIntList is MyList<Int>;
+
+// Dynamic type alias
+type DynDisplay is dyn Display;
+
+type DynIterator<T> is dyn Iterator<Item = T>;
+
+type DynMulti is dyn Display + Debug + Clone;
+
+// Bottom type alias (never type uses Never keyword)
+type Bottom is Never;
+
+// Unit type alias
+type Void is ();
+
+// Any type alias
+type Any is dyn Object;
+
+// Inferred type alias (partial)
+type Inferred is _;

@@ -1,0 +1,116 @@
+// @test: differential
+
+// @level: L0
+// @tags: differential, rational, arithmetic, fractions
+// @timeout: 30000
+
+// Differential test: Rational number arithmetic using offset encoding
+
+fn abs_val(a: Int) -> Int { if a < 0 { 0 - a } else { a } }
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+fn rat_new(num: Int, den: Int) -> Int {
+    let g = gcd(abs_val(num), abs_val(den));
+    let mut n = num / g;
+    let mut d = den / g;
+    if d < 0 { n = 0 - n; d = 0 - d; }
+    (n + 5000) + d * 10000
+}
+
+fn rat_num(r: Int) -> Int { r % 10000 - 5000 }
+fn rat_den(r: Int) -> Int { r / 10000 }
+
+fn rat_add(a: Int, b: Int) -> Int {
+    rat_new(rat_num(a) * rat_den(b) + rat_num(b) * rat_den(a), rat_den(a) * rat_den(b))
+}
+
+fn rat_sub(a: Int, b: Int) -> Int {
+    rat_new(rat_num(a) * rat_den(b) - rat_num(b) * rat_den(a), rat_den(a) * rat_den(b))
+}
+
+fn rat_mul(a: Int, b: Int) -> Int {
+    rat_new(rat_num(a) * rat_num(b), rat_den(a) * rat_den(b))
+}
+
+fn rat_div(a: Int, b: Int) -> Int {
+    rat_new(rat_num(a) * rat_den(b), rat_den(a) * rat_num(b))
+}
+
+fn rat_eq(a: Int, b: Int) -> Int {
+    if rat_num(a) == rat_num(b) {
+        if rat_den(a) == rat_den(b) { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn main() -> Int {
+    let half = rat_new(1, 2);
+    let third = rat_new(1, 3);
+    let quarter = rat_new(1, 4);
+
+    // Basic extraction
+    assert_eq(rat_num(half), 1);
+    assert_eq(rat_den(half), 2);
+
+    // Normalization
+    assert_eq(rat_num(rat_new(2, 4)), 1);
+    assert_eq(rat_den(rat_new(2, 4)), 2);
+    assert_eq(rat_num(rat_new(6, 3)), 2);
+    assert_eq(rat_den(rat_new(6, 3)), 1);
+
+    // Addition: 1/2 + 1/3 = 5/6
+    let sum = rat_add(half, third);
+    assert_eq(rat_num(sum), 5);
+    assert_eq(rat_den(sum), 6);
+
+    // Subtraction: 1/2 - 1/3 = 1/6
+    let diff = rat_sub(half, third);
+    assert_eq(rat_num(diff), 1);
+    assert_eq(rat_den(diff), 6);
+
+    // Multiplication: 1/2 * 1/3 = 1/6
+    let prod = rat_mul(half, third);
+    assert_eq(rat_num(prod), 1);
+    assert_eq(rat_den(prod), 6);
+
+    // Division: 1/2 / 1/3 = 3/2
+    let quot = rat_div(half, third);
+    assert_eq(rat_num(quot), 3);
+    assert_eq(rat_den(quot), 2);
+
+    // Commutativity
+    assert_eq(rat_eq(rat_add(half, third), rat_add(third, half)), 1);
+    assert_eq(rat_eq(rat_mul(half, third), rat_mul(third, half)), 1);
+
+    // Identity: a - a = 0
+    let zero = rat_sub(half, half);
+    assert_eq(rat_num(zero), 0);
+
+    // Inverse: a * (1/a) = 1
+    let inv = rat_div(rat_new(1, 1), half);
+    let one = rat_mul(half, inv);
+    assert_eq(rat_num(one), 1);
+    assert_eq(rat_den(one), 1);
+
+    // Egyptian fraction: 1/2 + 1/3 + 1/6 = 1
+    let ef = rat_add(rat_add(half, third), rat_new(1, 6));
+    assert_eq(rat_num(ef), 1);
+    assert_eq(rat_den(ef), 1);
+
+    // Negative numbers
+    let neg = rat_new(-3, 4);
+    assert_eq(rat_num(neg), -3);
+    assert_eq(rat_den(neg), 4);
+
+    print("[OK] diff_rational_arith");
+    0
+}

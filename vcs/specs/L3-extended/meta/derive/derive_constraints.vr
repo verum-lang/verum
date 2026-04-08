@@ -1,0 +1,210 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, constraints
+
+/// Ограничения при использовании derive
+///
+/// Derive-макросы автоматически добавляют необходимые
+/// ограничения на generic параметры.
+/// Тест использует только базовые возможности языка без stdlib.
+
+// ============================================================
+// CLONE ТРЕБУЕТ CLONE ДЛЯ ВСЕХ ПОЛЕЙ
+// ============================================================
+
+@derive(Clone)
+type Wrapper<T: Clone> is {
+    value: T,
+};
+
+@derive(Clone)
+type Container<T: Clone> is {
+    items: [T; 4],
+};
+
+// ============================================================
+// EQ ТРЕБУЕТ EQ ДЛЯ ВСЕХ ПОЛЕЙ
+// ============================================================
+
+@derive(Eq)
+type Pair<A: Eq, B: Eq> is {
+    first: A,
+    second: B,
+};
+
+@derive(Eq)
+type Triple<T: Eq> is {
+    a: T,
+    b: T,
+    c: T,
+};
+
+// ============================================================
+// ORD ТРЕБУЕТ ORD ДЛЯ ВСЕХ ПОЛЕЙ
+// ============================================================
+
+@derive(Ord)
+type Version is {
+    major: Int,
+    minor: Int,
+    patch: Int,
+};
+
+@derive(Ord)
+type Range<T: Ord> is {
+    min: T,
+    max: T,
+};
+
+// ============================================================
+// МНОЖЕСТВЕННЫЕ DERIVE
+// ============================================================
+
+@derive(Clone, Eq)
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+@derive(Clone, Eq, Ord)
+type Coordinate is {
+    latitude: Int,
+    longitude: Int,
+};
+
+// ============================================================
+// ВЛОЖЕННЫЕ DERIVE
+// ============================================================
+
+@derive(Clone)
+type Inner<T: Clone> is {
+    value: T,
+};
+
+@derive(Clone)
+type Outer<T: Clone> is {
+    inner: Inner<T>,  // Inner<T> также должен быть Clone
+    count: Int,
+};
+
+// ============================================================
+// DERIVE ДЛЯ SUM TYPES
+// ============================================================
+
+@derive(Clone, Eq)
+type Maybe<T: Clone + Eq> is
+    | Some(T)
+    | None;
+
+@derive(Clone, Eq)
+type Either<L: Clone + Eq, R: Clone + Eq> is
+    | Left(L)
+    | Right(R);
+
+@derive(Clone, Eq)
+type Status is
+    | Active
+    | Inactive
+    | Pending { code: Int };
+
+// ============================================================
+// DEFAULT С ОГРАНИЧЕНИЯМИ
+// ============================================================
+
+@derive(Default)
+type Config is {
+    value: Int,
+    enabled: Bool,
+};
+
+@derive(Default)
+type Settings<T: Default> is {
+    data: T,
+    count: Int,
+};
+
+// ============================================================
+// COPY ТРЕБУЕТ CLONE
+// ============================================================
+
+@derive(Copy, Clone)
+type SmallData is {
+    a: Int,
+    b: Int,
+};
+
+@derive(Copy, Clone, Eq)
+type Flags is {
+    read: Bool,
+    write: Bool,
+    execute: Bool,
+};
+
+// ============================================================
+// АВТОМАТИЧЕСКОЕ ВЫВЕДЕНИЕ BOUNDS
+// ============================================================
+
+// Компилятор определяет, что T должен быть Clone
+@derive(Clone)
+type AutoBounds<T> is {
+    value: T,
+    // Компилятор добавит: where T: Clone
+};
+
+// ============================================================
+// GENERIC С НЕСКОЛЬКИМИ ПАРАМЕТРАМИ
+// ============================================================
+
+@derive(Clone, Eq)
+type KeyValue<K: Clone + Eq, V: Clone + Eq> is {
+    key: K,
+    value: V,
+};
+
+@derive(Clone)
+type Tuple3<A: Clone, B: Clone, C: Clone> is {
+    first: A,
+    second: B,
+    third: C,
+};
+
+// ============================================================
+// NEWTYPE С DERIVE
+// ============================================================
+
+@derive(Clone, Eq, Ord)
+type Id is (Int);
+
+@derive(Clone, Eq)
+type Score is (Int);
+
+// ============================================================
+// ПРОВЕРКА ИСПОЛЬЗОВАНИЯ (без вызова derived методов)
+// ============================================================
+
+fn test_constraints() {
+    // Создание экземпляров с Clone constraint
+    let wrapper = Wrapper { value: 42 };
+
+    // Создание экземпляров с Eq constraint
+    let pair1 = Pair { first: 1, second: 2 };
+    let pair2 = Pair { first: 1, second: 2 };
+
+    // Multiple constraints
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 10, y: 20 };
+
+    // Nested derive
+    let outer = Outer {
+        inner: Inner { value: 100 },
+        count: 5,
+    };
+
+    // Sum type constraints
+    let maybe: Maybe<Int> = Maybe.Some(42);
+}
+
+fn main() {
+    test_constraints();
+}

@@ -1,0 +1,205 @@
+// @test: differential
+
+// @level: L0
+// @tags: differential, graph, bfs, shortest-path
+// @timeout: 30000
+
+// BFS on adjacency-bitmask graph (max 8 nodes)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn get_bit(v: Int, pos: Int) -> Int {
+    let mut mask = 1;
+    let mut i = 0;
+    while i < pos { mask = mask * 2; i = i + 1; }
+    if (v / mask) % 2 == 1 { 1 } else { 0 }
+}
+
+fn set_bit(v: Int, pos: Int) -> Int {
+    let mut mask = 1;
+    let mut i = 0;
+    while i < pos { mask = mask * 2; i = i + 1; }
+    if get_bit(v, pos) == 1 { v } else { v + mask }
+}
+
+// BFS from source, returns distance array (-1 = unreachable)
+fn bfs(adj: Arr8, n: Int, src: Int) -> Arr8 {
+    let mut dist = Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    dist = set8(dist, src, 0);
+
+    // Queue simulated with array and front/back pointers
+    let mut queue = new_arr8();
+    queue = set8(queue, 0, src);
+    let mut front = 0;
+    let mut back = 1;
+
+    while front < back {
+        let u = get8(queue, front);
+        front = front + 1;
+        let edges = get8(adj, u);
+        let mut v = 0;
+        while v < n {
+            if get_bit(edges, v) == 1 {
+                if get8(dist, v) == -1 {
+                    dist = set8(dist, v, get8(dist, u) + 1);
+                    queue = set8(queue, back, v);
+                    back = back + 1;
+                }
+            }
+            v = v + 1;
+        }
+    }
+    dist
+}
+
+// Count connected components
+fn count_components(adj: Arr8, n: Int) -> Int {
+    let mut visited = 0; // bitmask
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get_bit(visited, i) == 0 {
+            count = count + 1;
+            // BFS from i to mark all reachable
+            let dist = bfs(adj, n, i);
+            let mut j = 0;
+            while j < n {
+                if get8(dist, j) >= 0 {
+                    visited = set_bit(visited, j);
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Check if graph is bipartite (2-colorable)
+fn is_bipartite(adj: Arr8, n: Int) -> Int {
+    // BFS coloring from node 0
+    let dist = bfs(adj, n, 0);
+    // Check: no edge connects same-parity nodes
+    let mut u = 0;
+    while u < n {
+        let edges = get8(adj, u);
+        let mut v = 0;
+        while v < n {
+            if get_bit(edges, v) == 1 {
+                let du = get8(dist, u);
+                let dv = get8(dist, v);
+                if du >= 0 {
+                    if dv >= 0 {
+                        if du % 2 == dv % 2 { return 0; } // odd cycle
+                    }
+                }
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    1
+}
+
+fn test_linear_graph() -> Int {
+    // 0-1-2-3 (undirected)
+    let mut adj = new_arr8();
+    adj = set8(adj, 0, set_bit(0, 1));
+    adj = set8(adj, 1, set_bit(set_bit(0, 0), 2));
+    adj = set8(adj, 2, set_bit(set_bit(0, 1), 3));
+    adj = set8(adj, 3, set_bit(0, 2));
+
+    let dist = bfs(adj, 4, 0);
+    assert_eq(get8(dist, 0), 0);
+    assert_eq(get8(dist, 1), 1);
+    assert_eq(get8(dist, 2), 2);
+    assert_eq(get8(dist, 3), 3);
+    1
+}
+
+fn test_star_graph() -> Int {
+    // Star: 0 connected to 1,2,3,4 (undirected)
+    let mut adj = new_arr8();
+    adj = set8(adj, 0, set_bit(set_bit(set_bit(set_bit(0, 1), 2), 3), 4));
+    adj = set8(adj, 1, set_bit(0, 0));
+    adj = set8(adj, 2, set_bit(0, 0));
+    adj = set8(adj, 3, set_bit(0, 0));
+    adj = set8(adj, 4, set_bit(0, 0));
+
+    let dist = bfs(adj, 5, 0);
+    assert_eq(get8(dist, 0), 0);
+    assert_eq(get8(dist, 1), 1);
+    assert_eq(get8(dist, 2), 1);
+    assert_eq(get8(dist, 3), 1);
+    assert_eq(get8(dist, 4), 1);
+
+    // From leaf to leaf: distance 2
+    let dist2 = bfs(adj, 5, 1);
+    assert_eq(get8(dist2, 2), 2);
+    1
+}
+
+fn test_components() -> Int {
+    // Two disconnected components: {0,1} and {2,3}
+    let mut adj = new_arr8();
+    adj = set8(adj, 0, set_bit(0, 1));
+    adj = set8(adj, 1, set_bit(0, 0));
+    adj = set8(adj, 2, set_bit(0, 3));
+    adj = set8(adj, 3, set_bit(0, 2));
+
+    assert_eq(count_components(adj, 4), 2);
+
+    let dist = bfs(adj, 4, 0);
+    assert_eq(get8(dist, 2), -1); // unreachable
+    1
+}
+
+fn test_bipartite() -> Int {
+    // Square (bipartite): 0-1-2-3-0
+    let mut adj = new_arr8();
+    adj = set8(adj, 0, set_bit(set_bit(0, 1), 3));
+    adj = set8(adj, 1, set_bit(set_bit(0, 0), 2));
+    adj = set8(adj, 2, set_bit(set_bit(0, 1), 3));
+    adj = set8(adj, 3, set_bit(set_bit(0, 2), 0));
+    assert_eq(is_bipartite(adj, 4), 1);
+
+    // Triangle (not bipartite): 0-1-2-0
+    let mut adj2 = new_arr8();
+    adj2 = set8(adj2, 0, set_bit(set_bit(0, 1), 2));
+    adj2 = set8(adj2, 1, set_bit(set_bit(0, 0), 2));
+    adj2 = set8(adj2, 2, set_bit(set_bit(0, 0), 1));
+    assert_eq(is_bipartite(adj2, 3), 0);
+    1
+}
+
+fn main() -> Int {
+    test_linear_graph();
+    test_star_graph();
+    test_components();
+    test_bipartite();
+    print("[OK] diff_graph_bfs");
+    0
+}

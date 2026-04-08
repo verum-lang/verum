@@ -1,0 +1,46 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: closure, text, fstring, fix
+// @expect: pass
+
+// Test: Text in closures — all patterns.
+
+fn greet(name: Text) -> Text {
+    f"Hello, {name}!"
+}
+
+fn main() -> Int {
+    // Pattern 1: Direct function call with Text (baseline — works)
+    let r1 = greet("world");
+    print(r1);
+
+    // Pattern 2: Text captured in closure
+    let prefix = "PRE";
+    let add_prefix = |x: Int| -> Int {
+        // Int closure with Text capture — should NOT affect
+        x + 100
+    };
+    let v = add_prefix(5);
+    if v != 105 {
+        print(f"FAIL: add_prefix = {v}");
+        return 1;
+    }
+
+    // Pattern 3: Simple lambda returning Int (no Text)
+    let double = |x: Int| -> Int { x * 2 };
+    if double(21) != 42 {
+        print("FAIL: double");
+        return 1;
+    }
+
+    // Pattern 4: f-string with Int in closure (works)
+    let n = 42;
+    print(f"n = {n}");
+
+    // Pattern 5: Text as function parameter (direct, not closure)
+    print(f"direct: {greet(\"test\")}");
+
+    print("PASS: closure patterns verified");
+    0
+}

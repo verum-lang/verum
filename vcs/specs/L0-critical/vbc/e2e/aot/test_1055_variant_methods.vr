@@ -1,0 +1,166 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: variants, methods, implement, sum-types
+// @description: Methods on sum types / variant types
+
+type Shape is
+    Circle(Int)
+    | Rectangle { width: Int, height: Int }
+    | Triangle { base: Int, height: Int };
+
+implement Shape {
+    fn area(&self) -> Int {
+        match self {
+            Circle(r) => 3 * r * r,
+            Rectangle { width, height } => width * height,
+            Triangle { base, height } => base * height / 2,
+        }
+    }
+
+    fn name(&self) -> Text {
+        match self {
+            Circle(_) => "circle",
+            Rectangle { width: _, height: _ } => "rectangle",
+            Triangle { base: _, height: _ } => "triangle",
+        }
+    }
+
+    fn is_large(&self) -> Bool {
+        self.area() > 100
+    }
+}
+
+fn test_shape_area() -> Int {
+    let c = Circle(5);
+    if c.area() != 75 {
+        print(f"FAIL circle area: expected 75, got {c.area()}");
+        return 1;
+    }
+    let r = Rectangle { width: 10, height: 5 };
+    if r.area() != 50 {
+        print(f"FAIL rect area: expected 50, got {r.area()}");
+        return 1;
+    }
+    let t = Triangle { base: 8, height: 6 };
+    if t.area() != 24 {
+        print(f"FAIL tri area: expected 24, got {t.area()}");
+        return 1;
+    }
+    print("  shape_area: OK");
+    0
+}
+
+fn test_shape_name() -> Int {
+    let c = Circle(3);
+    if c.name() != "circle" {
+        print(f"FAIL name: expected circle, got {c.name()}");
+        return 1;
+    }
+    let r = Rectangle { width: 1, height: 1 };
+    if r.name() != "rectangle" {
+        print(f"FAIL name: expected rectangle, got {r.name()}");
+        return 1;
+    }
+    print("  shape_name: OK");
+    0
+}
+
+fn test_shape_large() -> Int {
+    let small = Circle(3);
+    let large = Circle(10);
+    if small.is_large() {
+        print("FAIL: small circle should not be large");
+        return 1;
+    }
+    if !large.is_large() {
+        print("FAIL: large circle should be large");
+        return 1;
+    }
+    print("  shape_large: OK");
+    0
+}
+
+type Result is Ok(Int) | Err(Text);
+
+implement Result {
+    fn is_ok(&self) -> Bool {
+        match self {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    fn unwrap_or(&self, default: Int) -> Int {
+        match self {
+            Ok(v) => v,
+            Err(_) => default,
+        }
+    }
+
+    fn map(&self, f: fn(Int) -> Int) -> Result {
+        match self {
+            Ok(v) => Ok(f(v)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+fn test_result_methods() -> Int {
+    let ok = Ok(42);
+    let err = Err("something failed");
+
+    if !ok.is_ok() {
+        print("FAIL: Ok should be ok");
+        return 1;
+    }
+    if err.is_ok() {
+        print("FAIL: Err should not be ok");
+        return 1;
+    }
+    if ok.unwrap_or(0) != 42 {
+        print(f"FAIL unwrap_or ok: expected 42, got {ok.unwrap_or(0)}");
+        return 1;
+    }
+    if err.unwrap_or(0) != 0 {
+        print(f"FAIL unwrap_or err: expected 0, got {err.unwrap_or(0)}");
+        return 1;
+    }
+    print("  result_methods: OK");
+    0
+}
+
+fn test_result_map() -> Int {
+    let ok = Ok(10);
+    let doubled = ok.map(|x: Int| -> Int { x * 2 });
+    if doubled.unwrap_or(0) != 20 {
+        print(f"FAIL map: expected 20, got {doubled.unwrap_or(0)}");
+        return 1;
+    }
+
+    let err = Err("fail");
+    let mapped = err.map(|x: Int| -> Int { x * 2 });
+    if mapped.is_ok() {
+        print("FAIL: mapped Err should still be Err");
+        return 1;
+    }
+    print("  result_map: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Variant Methods Tests:");
+    let mut failures = 0;
+    failures = failures + test_shape_area();
+    failures = failures + test_shape_name();
+    failures = failures + test_shape_large();
+    failures = failures + test_result_methods();
+    failures = failures + test_result_map();
+
+    if failures == 0 {
+        print("All variant method tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

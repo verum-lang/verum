@@ -1,0 +1,310 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, string, encoding, operations
+// @timeout: 30000
+
+// Integer-encoded string operations.
+// Each "character" is an Int (1-26 for a-z, 0 = null terminator).
+// Strings stored in Arr8 (max length 8).
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// String length (0-terminated)
+fn slen(s: Arr8) -> Int {
+    let mut result = 8; // default: all 8 slots used
+    let mut i = 0;
+    while i < 8 {
+        if result == 8 {
+            if get8(s, i) == 0 { result = i; }
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Reverse string of known length
+fn str_reverse(s: Arr8, len: Int) -> Arr8 {
+    let mut r = zeros();
+    let mut i = 0;
+    while i < len {
+        r = set8(r, i, get8(s, len - 1 - i));
+        i = i + 1;
+    }
+    r
+}
+
+// Check if palindrome
+fn is_palindrome(s: Arr8, len: Int) -> Int {
+    let mut i = 0;
+    let half = len / 2;
+    let mut ok = 1;
+    while i < half {
+        if ok == 1 {
+            if get8(s, i) != get8(s, len - 1 - i) { ok = 0; }
+        }
+        i = i + 1;
+    }
+    ok
+}
+
+// Count occurrences of character ch in string
+fn count_char(s: Arr8, len: Int, ch: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < len {
+        if get8(s, i) == ch { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Find first occurrence of ch, return index or -1
+fn find_first(s: Arr8, len: Int, ch: Int) -> Int {
+    let mut i = 0;
+    let mut result = 0 - 1;
+    while i < len {
+        if result < 0 {
+            if get8(s, i) == ch { result = i; }
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Check if s starts with prefix (of given length)
+fn starts_with(s: Arr8, slen_v: Int, pfx: Arr8, plen: Int) -> Int {
+    if plen > slen_v { 0 }
+    else {
+        let mut i = 0;
+        let mut ok = 1;
+        while i < plen {
+            if ok == 1 {
+                if get8(s, i) != get8(pfx, i) { ok = 0; }
+            }
+            i = i + 1;
+        }
+        ok
+    }
+}
+
+// Check if s ends with suffix (of given length)
+fn ends_with(s: Arr8, slen_v: Int, sfx: Arr8, sfxlen: Int) -> Int {
+    if sfxlen > slen_v { 0 }
+    else {
+        let offset = slen_v - sfxlen;
+        let mut i = 0;
+        let mut ok = 1;
+        while i < sfxlen {
+            if ok == 1 {
+                if get8(s, offset + i) != get8(sfx, i) { ok = 0; }
+            }
+            i = i + 1;
+        }
+        ok
+    }
+}
+
+// Check substring equality: s[start..start+len] == t[0..len]
+fn substr_eq(s: Arr8, start: Int, t: Arr8, len: Int) -> Int {
+    let mut i = 0;
+    let mut ok = 1;
+    while i < len {
+        if ok == 1 {
+            if get8(s, start + i) != get8(t, i) { ok = 0; }
+        }
+        i = i + 1;
+    }
+    ok
+}
+
+// Find substring t (of tlen) in s (of slen_v), return first index or -1
+fn find_substr(s: Arr8, slen_v: Int, t: Arr8, tlen: Int) -> Int {
+    if tlen > slen_v { 0 - 1 }
+    else {
+        let mut i = 0;
+        let limit = slen_v - tlen + 1;
+        let mut result = 0 - 1;
+        while i < limit {
+            if result < 0 {
+                if substr_eq(s, i, t, tlen) == 1 { result = i; }
+            }
+            i = i + 1;
+        }
+        result
+    }
+}
+
+fn test_slen_basic() -> Int {
+    let empty = zeros();
+    assert_eq(slen(empty), 0);
+    // "abc" = [1,2,3,0,...]
+    let abc = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(slen(abc), 3);
+    // Full 8 chars: "abcdefgh"
+    let full = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    assert_eq(slen(full), 8);
+    1
+}
+
+fn test_reverse() -> Int {
+    // "abc" -> "cba"
+    let abc = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let rev = str_reverse(abc, 3);
+    assert_eq(get8(rev, 0), 3);
+    assert_eq(get8(rev, 1), 2);
+    assert_eq(get8(rev, 2), 1);
+    // Single char reversal
+    let single = Arr8 { v0: 5, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let rev1 = str_reverse(single, 1);
+    assert_eq(get8(rev1, 0), 5);
+    // "abcba" reversed is itself
+    let pal = Arr8 { v0: 1, v1: 2, v2: 3, v3: 2, v4: 1, v5: 0, v6: 0, v7: 0 };
+    let revp = str_reverse(pal, 5);
+    assert_eq(get8(revp, 0), 1);
+    assert_eq(get8(revp, 2), 3);
+    assert_eq(get8(revp, 4), 1);
+    1
+}
+
+fn test_palindrome() -> Int {
+    // "aba" is palindrome
+    let aba = Arr8 { v0: 1, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_palindrome(aba, 3), 1);
+    // "abba" is palindrome
+    let abba = Arr8 { v0: 1, v1: 2, v2: 2, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_palindrome(abba, 4), 1);
+    // "abc" is not
+    let abc = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_palindrome(abc, 3), 0);
+    // "a" is palindrome
+    let a = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_palindrome(a, 1), 1);
+    // empty is palindrome
+    assert_eq(is_palindrome(zeros(), 0), 1);
+    // "abcba" is palindrome
+    let abcba = Arr8 { v0: 1, v1: 2, v2: 3, v3: 2, v4: 1, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_palindrome(abcba, 5), 1);
+    1
+}
+
+fn test_count_char() -> Int {
+    // "abacaba" = [1,2,1,3,1,2,1,0]
+    let s = Arr8 { v0: 1, v1: 2, v2: 1, v3: 3, v4: 1, v5: 2, v6: 1, v7: 0 };
+    assert_eq(count_char(s, 7, 1), 4); // 'a' appears 4 times
+    assert_eq(count_char(s, 7, 2), 2); // 'b' appears 2 times
+    assert_eq(count_char(s, 7, 3), 1); // 'c' appears 1 time
+    assert_eq(count_char(s, 7, 4), 0); // 'd' not present
+    1
+}
+
+fn test_find_first() -> Int {
+    // "abcabc" = [1,2,3,1,2,3,0,0]
+    let s = Arr8 { v0: 1, v1: 2, v2: 3, v3: 1, v4: 2, v5: 3, v6: 0, v7: 0 };
+    assert_eq(find_first(s, 6, 1), 0); // 'a' first at 0
+    assert_eq(find_first(s, 6, 2), 1); // 'b' first at 1
+    assert_eq(find_first(s, 6, 3), 2); // 'c' first at 2
+    assert_eq(find_first(s, 6, 4), 0 - 1); // 'd' not found
+    1
+}
+
+fn test_starts_with() -> Int {
+    // "abcdef" = [1,2,3,4,5,6,0,0]
+    let s = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 0, v7: 0 };
+    // starts with "abc"
+    let pfx1 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(starts_with(s, 6, pfx1, 3), 1);
+    // starts with "a"
+    let pfx2 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(starts_with(s, 6, pfx2, 1), 1);
+    // does NOT start with "bc"
+    let pfx3 = Arr8 { v0: 2, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(starts_with(s, 6, pfx3, 2), 0);
+    // prefix longer than string
+    let pfx4 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    assert_eq(starts_with(s, 6, pfx4, 8), 0);
+    1
+}
+
+fn test_ends_with() -> Int {
+    // "abcdef" = [1,2,3,4,5,6,0,0]
+    let s = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 0, v7: 0 };
+    // ends with "def" = [4,5,6]
+    let sfx1 = Arr8 { v0: 4, v1: 5, v2: 6, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(ends_with(s, 6, sfx1, 3), 1);
+    // ends with "f" = [6]
+    let sfx2 = Arr8 { v0: 6, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(ends_with(s, 6, sfx2, 1), 1);
+    // does NOT end with "de" = [4,5]
+    let sfx3 = Arr8 { v0: 4, v1: 5, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(ends_with(s, 6, sfx3, 2), 0);
+    // ends with entire string
+    assert_eq(ends_with(s, 6, s, 6), 1);
+    1
+}
+
+fn test_substr_eq() -> Int {
+    // "abcdef" = [1,2,3,4,5,6,0,0]
+    let s = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 0, v7: 0 };
+    // s[1..3] == "bc" = [2,3]
+    let bc = Arr8 { v0: 2, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(substr_eq(s, 1, bc, 2), 1);
+    // s[3..5] == "de" = [4,5]
+    let de = Arr8 { v0: 4, v1: 5, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(substr_eq(s, 3, de, 2), 1);
+    // s[0..2] != "bc"
+    assert_eq(substr_eq(s, 0, bc, 2), 0);
+    1
+}
+
+fn test_find_substr() -> Int {
+    // "abcabc" = [1,2,3,1,2,3,0,0]
+    let s = Arr8 { v0: 1, v1: 2, v2: 3, v3: 1, v4: 2, v5: 3, v6: 0, v7: 0 };
+    // find "bc" = [2,3] -> index 1
+    let bc = Arr8 { v0: 2, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_substr(s, 6, bc, 2), 1);
+    // find "cab" = [3,1,2] -> index 2
+    let cab = Arr8 { v0: 3, v1: 1, v2: 2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_substr(s, 6, cab, 3), 2);
+    // find "xyz" = [24,25,26] -> not found
+    let xyz = Arr8 { v0: 24, v1: 25, v2: 26, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_substr(s, 6, xyz, 3), 0 - 1);
+    // find "a" -> index 0
+    let a = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_substr(s, 6, a, 1), 0);
+    1
+}
+
+fn main() -> Int {
+    test_slen_basic();
+    test_reverse();
+    test_palindrome();
+    test_count_char();
+    test_find_first();
+    test_starts_with();
+    test_ends_with();
+    test_substr_eq();
+    test_find_substr();
+    print("[OK] 614_string_ops_aot");
+    0
+}

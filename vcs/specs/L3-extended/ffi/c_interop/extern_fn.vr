@@ -1,0 +1,353 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, extern
+// @description: Tests FFI function declarations and extern block syntax
+
+/// ============================================================
+/// EXTERN FUNCTION DECLARATIONS
+/// ============================================================
+///
+/// FFI allows calling C functions from Verum code. Extern functions
+/// are declared with contracts specifying safety requirements.
+
+// ------------------------------------------------------------
+// Type Stubs
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_char is i8;
+type c_size is usize;
+type c_void is ();
+
+type IoError is
+    | PermissionDenied
+    | NotFound
+    | Failed(Text);
+
+implement IoError {
+    fn from_errno() -> IoError {
+        IoError.Failed(f"errno")
+    }
+}
+
+type FormatError is
+    | OutputFailed;
+
+type EventFd is
+    | Epoll(c_int)
+    | Kqueue(c_int);
+
+type OpenFlags is { raw: c_int };
+implement OpenFlags {
+    fn to_c_int(&self) -> c_int { self.raw }
+}
+
+type FileDescriptor is { raw: c_int };
+implement FileDescriptor {
+    fn from_raw(fd: c_int) -> FileDescriptor {
+        FileDescriptor { raw: fd }
+    }
+}
+
+type PrintArg is
+    | IntArg(c_int)
+    | StrArg(Text);
+
+// ------------------------------------------------------------
+// Basic Extern Functions
+// ------------------------------------------------------------
+
+/// Simple extern function declaration
+ffi libc {
+    @extern("C")
+    fn abs(n: c_int) -> c_int;
+}
+
+/// Extern function with explicit name
+ffi libc {
+    @extern("C", name = "strlen")
+    fn c_strlen(s: *const c_char) -> c_size;
+}
+
+/// Multiple functions in one block
+ffi libc {
+    @extern("C")
+    fn sqrt(x: c_double) -> c_double;
+
+    @extern("C")
+    fn sin(x: c_double) -> c_double;
+
+    @extern("C")
+    fn cos(x: c_double) -> c_double;
+
+    @extern("C")
+    fn pow(base: c_double, exp: c_double) -> c_double;
+}
+
+// ------------------------------------------------------------
+// Extern Functions with Contracts
+// ------------------------------------------------------------
+
+/// Extern function with precondition
+ffi libc {
+    @extern("C")
+    fn open(path: *const c_char, flags: c_int) -> c_int;
+        // requires path != null;
+        // requires is_valid_cstring(path);
+}
+
+/// Extern function with postcondition
+ffi libc {
+    @extern("C")
+    fn malloc(size: c_size) -> *mut c_void;
+        // ensures result == null || is_valid_heap_ptr(result, size);
+}
+
+/// Extern function with full contract
+ffi libc {
+    @extern("C")
+    fn memcpy(
+        dest: *mut c_void,
+        src: *const c_void,
+        n: c_size
+    ) -> *mut c_void;
+        // requires dest != null;
+        // requires src != null;
+        // requires !overlaps(dest, src, n);
+        // requires is_valid_ptr(dest, n);
+        // requires is_valid_ptr(src, n);
+        // ensures result == dest;
+}
+
+// ------------------------------------------------------------
+// Memory Effect Annotations
+// ------------------------------------------------------------
+
+/// Read-only function
+ffi libc {
+    @extern("C")
+    fn strcmp(s1: *const c_char, s2: *const c_char) -> c_int;
+        // requires s1 != null && s2 != null;
+        // memory_effects = Reads(s1, s2);
+}
+
+/// Writing function
+ffi libc {
+    @extern("C")
+    fn strcpy(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+        // requires dest != null && src != null;
+        // requires is_valid_cstring(src);
+        // requires buffer_size(dest) >= strlen(src) + 1;
+        // memory_effects = Writes(dest), Reads(src);
+}
+
+/// Allocating function
+ffi libc {
+    @extern("C")
+    fn calloc(nmemb: c_size, size: c_size) -> *mut c_void;
+        // ensures result == null || (
+        //     is_valid_heap_ptr(result, nmemb * size) &&
+        //     is_zeroed(result, nmemb * size)
+        // )
+        // memory_effects = Allocates;
+}
+
+/// Deallocating function
+ffi libc {
+    @extern("C")
+    fn free(ptr: *mut c_void)
+        // requires: ptr == null || is_valid_heap_ptr(ptr, _);
+        // memory_effects = Deallocates(ptr);
+}
+
+// ------------------------------------------------------------
+// Thread Safety Annotations
+// ------------------------------------------------------------
+
+/// Thread-safe function
+ffi pthread {
+    @extern("C")
+    fn pthread_mutex_lock(mutex: *mut pthread_mutex_t) -> c_int;
+        // requires mutex != null;
+        // thread_safe = true;
+}
+
+/// Thread-unsafe function (not reentrant)
+ffi libc {
+    @extern("C")
+    fn strtok(s: *mut c_char, delim: *const c_char) -> *mut c_char;
+        // thread_safe = false;  // Uses static internal state;
+}
+
+/// Thread-local function
+ffi libc {
+    @extern("C")
+    fn strtok_r(
+        s: *mut c_char,
+        delim: *const c_char,
+        saveptr: *mut *mut c_char
+    ) -> *mut c_char;
+        // requires saveptr != null;
+        // thread_safe = true;  // Reentrant version;
+}
+
+// ------------------------------------------------------------
+// Error Handling Protocols
+// ------------------------------------------------------------
+
+/// Errno-based error handling
+ffi libc {
+    @extern("C")
+    fn fopen(path: *const c_char, mode: *const c_char) -> *mut FILE;
+        // requires path != null && mode != null;
+        // errors_via = Errno;
+        // ensures result != null || errno != 0;
+}
+
+/// Return code error handling
+ffi libc {
+    @extern("C")
+    fn fclose(stream: *mut FILE) -> c_int;
+        // requires stream != null;
+        // errors_via = ReturnCode(== 0);
+}
+
+/// Sentinel value error handling
+ffi libc {
+    @extern("C")
+    fn getchar() -> c_int;
+        // errors_via = ReturnValue(EOF);
+}
+
+/// Combined error protocol
+ffi posix {
+    @extern("C")
+    fn read(fd: c_int, buf: *mut c_void, count: c_size) -> c_ssize;
+        // requires buf != null;
+        // requires is_valid_fd(fd);
+        // requires is_valid_ptr(buf, count);
+        // errors_via = ReturnValue(-1) with Errno;
+}
+
+// ------------------------------------------------------------
+// Variadic Functions
+// ------------------------------------------------------------
+
+/// Variadic function declaration
+ffi libc {
+    @extern("C")
+    @variadic
+    fn printf(format: *const c_char, ...) -> c_int
+        // requires: format != null;
+        // requires: is_valid_format_string(format, args);
+}
+
+/// Safe printf wrapper
+fn safe_printf(format: Text) -> Result<Int, FormatError> {
+    // Validate format string at compile time if possible
+    let c_format = format.to_cstring();
+    let result = unsafe { libc.printf(c_format.as_ptr()) };
+    if result < 0 {
+        Err(FormatError.OutputFailed)
+    } else {
+        Ok(result)
+    }
+}
+
+// ------------------------------------------------------------
+// Platform-Specific Declarations
+// ------------------------------------------------------------
+
+/// Platform-conditional extern
+@cfg(target_os = "linux")
+ffi linux {
+    @extern("C")
+    fn epoll_create1(flags: c_int) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+}
+
+@cfg(target_os = "macos")
+ffi macos {
+    @extern("C")
+    fn kqueue() -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+}
+
+/// Platform abstraction
+fn create_event_fd() -> Result<EventFd, IoError> {
+    // Platform-specific: uses epoll on Linux, kqueue on macOS
+    let fd = unsafe { macos.kqueue() };
+    if fd < 0 { Err(IoError.from_errno()) }
+    else { Ok(EventFd.Kqueue(fd)) }
+}
+
+// ------------------------------------------------------------
+// Library Linking
+// ------------------------------------------------------------
+
+/// Specify library to link
+@link(name = "ssl")
+ffi openssl {
+    @extern("C")
+    fn SSL_library_init() -> c_int;
+
+    @extern("C")
+    fn SSL_CTX_new(method: *const SSL_METHOD) -> *mut SSL_CTX;
+        // ensures result == null || is_valid_ssl_ctx(result);
+}
+
+/// Static library linking
+@link(name = "mylib", kind = "static")
+ffi mylib {
+    @extern("C")
+    fn my_function(x: c_int) -> c_int;
+}
+
+/// Framework linking (macOS)
+@cfg(target_os = "macos")
+@link(name = "CoreFoundation", kind = "framework")
+ffi core_foundation {
+    @extern("C")
+    fn CFRelease(cf: CFTypeRef);
+}
+
+// ------------------------------------------------------------
+// Safe Wrappers
+// ------------------------------------------------------------
+
+/// Creating safe wrapper for unsafe extern
+fn safe_strlen(s: &str) -> usize {
+    let c_str = s.to_cstring();
+    // Safety: c_str is guaranteed to be null-terminated
+    unsafe { libc.c_strlen(c_str.as_ptr()) as usize }
+}
+
+/// Wrapper with error handling
+fn safe_open(path: &str, flags: OpenFlags) -> Result<FileDescriptor, IoError> {
+    let c_path = path.to_cstring();
+    let fd = unsafe {
+        // Safety: c_path is valid null-terminated string
+        libc.open(c_path.as_ptr(), flags.to_c_int())
+    };
+
+    if fd < 0 {
+        Err(IoError.from_errno())
+    } else {
+        Ok(FileDescriptor.from_raw(fd))
+    }
+}
+
+/// RAII wrapper
+type File is {
+    fd: c_int,
+    invariant fd >= 0,
+};
+
+implement Drop for File {
+    fn drop(&mut self) {
+        unsafe {
+            libc.close(self.fd);
+        }
+    }
+}

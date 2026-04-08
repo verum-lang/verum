@@ -1,0 +1,181 @@
+// =============================================================================
+// list_flat_map_test.vr - Tests for List.flat_map and retain order
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, list, flat_map, retain, core
+// @description: Tests for List.flat_map and retain order preservation
+// =============================================================================
+
+mount core.collections.list.List;
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// flat_map Tests
+// =============================================================================
+
+@test
+fn test_flat_map_basic() {
+    let list: List<Int> = [1, 2, 3];
+    let result = list.flat_map(|x| {
+        let v = *x;
+        let mut inner: List<Int> = [];
+        inner.push(v);
+        inner.push(v * 10);
+        inner
+    });
+
+    assert_eq(result.len(), 6);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 10);
+    assert_eq(result[2], 2);
+    assert_eq(result[3], 20);
+    assert_eq(result[4], 3);
+    assert_eq(result[5], 30);
+}
+
+@test
+fn test_flat_map_empty() {
+    let list: List<Int> = [];
+    let result = list.flat_map(|x| {
+        let mut inner: List<Int> = [];
+        inner.push(*x);
+        inner
+    });
+    assert(result.is_empty());
+}
+
+@test
+fn test_flat_map_empty_results() {
+    let list: List<Int> = [1, 2, 3];
+    let result: List<Int> = list.flat_map(|_| {
+        let empty: List<Int> = [];
+        empty
+    });
+    assert(result.is_empty());
+}
+
+@test
+fn test_flat_map_mixed_lengths() {
+    let list: List<Int> = [1, 2, 3];
+    let result = list.flat_map(|x| {
+        let v = *x;
+        let mut inner: List<Int> = [];
+        for i in 0..v {
+            inner.push(v);
+        }
+        inner
+    });
+    // 1 produces [1], 2 produces [2,2], 3 produces [3,3,3]
+    assert_eq(result.len(), 6);
+    assert_eq(result[0], 1);
+    assert_eq(result[1], 2);
+    assert_eq(result[2], 2);
+    assert_eq(result[3], 3);
+    assert_eq(result[4], 3);
+    assert_eq(result[5], 3);
+}
+
+@test
+fn test_flat_map_single_element_lists() {
+    let list: List<Int> = [10, 20, 30];
+    let result = list.flat_map(|x| {
+        let mut inner: List<Int> = [];
+        inner.push(*x + 1);
+        inner
+    });
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 11);
+    assert_eq(result[1], 21);
+    assert_eq(result[2], 31);
+}
+
+// =============================================================================
+// Retain order preservation tests
+// =============================================================================
+
+@test
+fn test_retain_preserves_order() {
+    let mut list: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    list.retain(|x| *x % 2 == 0);
+
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 2);
+    assert_eq(list[1], 4);
+    assert_eq(list[2], 6);
+    assert_eq(list[3], 8);
+    assert_eq(list[4], 10);
+}
+
+@test
+fn test_retain_order_removing_front() {
+    let mut list: List<Int> = [1, 2, 3, 4, 5];
+    list.retain(|x| *x > 2);
+
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 3);
+    assert_eq(list[1], 4);
+    assert_eq(list[2], 5);
+}
+
+@test
+fn test_retain_order_removing_back() {
+    let mut list: List<Int> = [1, 2, 3, 4, 5];
+    list.retain(|x| *x < 4);
+
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_retain_alternating() {
+    let mut list: List<Int> = [1, 2, 3, 4, 5, 6];
+    list.retain(|x| *x % 2 != 0);  // Keep odd
+
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 3);
+    assert_eq(list[2], 5);
+}
+
+@test
+fn test_retain_all() {
+    let mut list: List<Int> = [1, 2, 3];
+    list.retain(|_| true);
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_retain_none() {
+    let mut list: List<Int> = [1, 2, 3];
+    list.retain(|_| false);
+    assert(list.is_empty());
+}
+
+@test
+fn test_retain_empty() {
+    let mut list: List<Int> = [];
+    list.retain(|_| true);
+    assert(list.is_empty());
+}
+
+@test
+fn test_retain_single_keep() {
+    let mut list: List<Int> = [42];
+    list.retain(|_| true);
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+@test
+fn test_retain_single_remove() {
+    let mut list: List<Int> = [42];
+    list.retain(|_| false);
+    assert(list.is_empty());
+}

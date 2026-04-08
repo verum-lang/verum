@@ -1,0 +1,194 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, interpolated, url, safe
+
+// URL-safe interpolated strings (url"...")
+// Automatically URL-encodes interpolated values
+
+fn test_basic_url_interpolation() {
+    // Basic URL interpolation
+    let user_id = 42;
+    let basic_url = url"https://api.example.com/users/{user_id}";
+}
+
+fn test_path_parameters() {
+    // Path parameters
+    let category = "electronics";
+    let product_id = 12345;
+    let product_url = url"https://store.com/category/{category}/product/{product_id}";
+}
+
+fn test_query_parameters() {
+    // Query parameters with special characters
+    let search_term = "hello world";
+    let search_url = url"https://search.com/q={search_term}";
+    // Produces: https://search.com/q=hello%20world
+}
+
+fn test_dangerous_characters() {
+    // Dangerous characters safely encoded
+    let unsafe_input = "test&value=1";
+    let safe_url = url"https://api.com/search?q={unsafe_input}";
+    // Produces: https://api.com/search?q=test%26value%3D1
+}
+
+fn test_multiple_parameters() {
+    // Multiple parameters
+    let page = 1;
+    let limit = 20;
+    let sort = "date";
+    let paginated = url"https://api.com/items?page={page}&limit={limit}&sort={sort}";
+}
+
+fn test_fragment() {
+    // Hash/fragment
+    let section = "about";
+    let fragment_url = url"https://example.com/page#{section}";
+}
+
+fn test_username_with_special_chars() {
+    // Username and path with special chars
+    let username = "john+doe@example";
+    let profile_url = url"https://social.com/user/{username}/profile";
+}
+
+fn test_numeric_types() {
+    // Numeric types in URL
+    let lat = 40.7128;
+    let lng = -74.0060;
+    let location_url = url"https://maps.com/locate?lat={lat}&lng={lng}";
+}
+
+fn test_boolean_parameters() {
+    // Boolean parameters
+    let include_deleted = false;
+    let filter_url = url"https://api.com/items?include_deleted={include_deleted}";
+}
+
+fn test_array_parameters() {
+    // Array as repeated parameters
+    let tags = ["rust", "programming", "web"];
+    // Individual access
+    let tag_url = url"https://api.com/search?tag={tags[0]}&tag={tags[1]}";
+}
+
+fn test_date_in_url() {
+    // Date in URL
+    let date_str = "2025-01-15";
+    let date_url = url"https://api.com/events?date={date_str}";
+}
+
+fn test_uuid_in_url() {
+    // UUID in URL
+    let uuid_val = "550e8400-e29b-41d4-a716-446655440000";
+    let uuid_url = url"https://api.com/resources/{uuid_val}";
+}
+
+fn test_reserved_characters() {
+    // Encoding reserved characters
+    let reserved_chars = ":/?#[]@!$&'()*+,;=";
+    let encoded_url = url"https://example.com/test?chars={reserved_chars}";
+}
+
+fn test_international_characters() {
+    // International characters
+    let unicode_text = "cafe";
+    let intl_url = url"https://example.com/search?q={unicode_text}";
+}
+
+fn test_emoji_in_url() {
+    // Emoji in URL
+    let emoji_text = "hello [thumbs up]";
+    let emoji_url = url"https://api.com/message?text={emoji_text}";
+}
+
+fn test_complex_urls() {
+    let user_id = 42;
+    // Building complex URLs
+    let scheme = "https";
+    let host = "api.example.com";
+    let port = 8080;
+    let path = "/v1/users";
+    let complex_url = url"{scheme}://{host}:{port}{path}/{user_id}";
+}
+
+fn test_api_versioning() {
+    let product_id = 12345;
+    // API versioning
+    let api_version = "v2";
+    let endpoint = "orders";
+    let versioned_url = url"https://api.com/{api_version}/{endpoint}/{product_id}";
+}
+
+fn test_oauth_callback() {
+    // OAuth callback URL
+    let redirect_uri = "https://myapp.com/callback";
+    let state = "abc123xyz";
+    let oauth_url = url"https://auth.provider.com/authorize?redirect_uri={redirect_uri}&state={state}";
+}
+
+fn test_authenticated_url() {
+    // Combining with raw parts
+    let api_key = "secret_key_123";
+    let authenticated = url"https://api.com/data?api_key={api_key}&format=json";
+}
+
+// In function
+fn build_api_url(resource: Text, id: Int) -> Text {
+    url"https://api.example.com/{resource}/{id}"
+}
+
+fn test_function_url() {
+    let resource_url = build_api_url("products", 42);
+}
+
+// Struct with URL building
+type ApiRequest is {
+    base_url: Text,
+    endpoint: Text,
+    resource_id: Int,
+};
+
+fn build_full_url(req: ApiRequest) -> Text {
+    url"{req.base_url}/{req.endpoint}/{req.resource_id}"
+}
+
+fn test_optional_parameters() {
+    // Optional parameters
+    let optional_filter: Maybe<Text> = Some("active");
+    let filter_val = optional_filter.unwrap_or("all");
+    let optional_url = url"https://api.com/items?filter={filter_val}";
+}
+
+fn test_auth_url() {
+    // URL with credentials (be careful!)
+    let username_auth = "user";
+    let password = "pass";
+    let auth_url = url"https://{username_auth}:{password}@api.com/secure";
+}
+
+fn test_s3_url() {
+    // S3-style URLs
+    let bucket = "my-bucket";
+    let key = "path/to/file.txt";
+    let s3_url = url"s3://{bucket}/{key}";
+}
+
+fn test_custom_protocol() {
+    let product_id = 12345;
+    // Custom protocol
+    let proto = "myapp";
+    let action = "open";
+    let deeplink = url"{proto}://{action}?id={product_id}";
+}
+
+// Template for multiple uses
+fn user_endpoint(id: Int, action: Text) -> Text {
+    url"https://api.com/users/{id}/{action}"
+}
+
+fn test_template() {
+    let user_profile = user_endpoint(42, "profile");
+    let user_settings = user_endpoint(42, "settings");
+}

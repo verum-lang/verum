@@ -1,0 +1,432 @@
+// @test: run
+// @expected-stdout: All Validated error accumulation tests passed!
+// @tier: 0
+// @level: L2
+// @tags: errors, validated, accumulation, validation, applicative
+// @description: Tests for Validated<E, A> error accumulation
+//
+// Spec: docs/detailed/20-error-handling.md Section 2.5.8 - Error Accumulation (Validated Type)
+// Unlike Result which short-circuits on first error, Validated collects ALL errors.
+
+// ============================================================================
+// Validated Type Definition
+// ============================================================================
+
+/// Validated type for accumulating errors
+/// Unlike Result, collects ALL errors instead of short-circuiting
+type Validated<E, A> is
+    | Invalid(List<E>)
+    | Valid(A);
+
+implement<E, A> Validated<E, A> {
+    /// Create valid value
+    fn valid(a: A) -> Self {
+        Validated.Valid(a)
+    }
+
+    /// Create single invalid error
+    fn invalid(e: E) -> Self {
+        Validated.Invalid([e])
+    }
+
+    /// Create from multiple errors
+    fn invalid_all(errors: List<E>) -> Self {
+        Validated.Invalid(errors)
+    }
+
+    /// Check if valid
+    fn is_valid(&self) -> Bool {
+        match self {
+            Validated.Valid(_) => true,
+            Validated.Invalid(_) => false,
+        }
+    }
+
+    /// Check if invalid
+    fn is_invalid(&self) -> Bool {
+        !self.is_valid()
+    }
+
+    /// Get errors (empty if valid)
+    fn errors(&self) -> List<E> where E: Clone {
+        match self {
+            Validated.Valid(_) => List.new(),
+            Validated.Invalid(errors) => errors.clone(),
+        }
+    }
+
+    /// Map over valid value
+    fn map<B>(self, f: fn(A) -> B) -> Validated<E, B> {
+        match self {
+            Validated.Valid(a) => Validated.Valid(f(a)),
+            Validated.Invalid(errors) => Validated.Invalid(errors),
+        }
+    }
+
+    /// Convert from Result
+    fn from_result(result: Result<A, E>) -> Self {
+        match result {
+            Ok(a) => Validated.Valid(a),
+            Err(e) => Validated.Invalid([e]),
+        }
+    }
+
+    /// Convert to Result (loses accumulated errors beyond first)
+    fn to_result(self) -> Result<A, List<E>> {
+        match self {
+            Validated.Valid(a) => Ok(a),
+            Validated.Invalid(errors) => Err(errors),
+        }
+    }
+}
+
+/// Combine two Validated values, accumulating errors
+fn validated_and<E: Clone, A: Clone, B: Clone>(
+    v1: Validated<E, A>,
+    v2: Validated<E, B>
+) -> Validated<E, (A, B)> {
+    match (v1, v2) {
+        (Validated.Valid(a), Validated.Valid(b)) =>
+            Validated.Valid((a, b)),
+        (Validated.Invalid(e1), Validated.Valid(_)) =>
+            Validated.Invalid(e1),
+        (Validated.Valid(_), Validated.Invalid(e2)) =>
+            Validated.Invalid(e2),
+        (Validated.Invalid(e1), Validated.Invalid(e2)) => {
+            let mut errors = e1.clone();
+            errors.extend(e2);
+            Validated.Invalid(errors)
+        }
+    }
+}
+
+/// Combine all validations, accumulating all errors
+fn validate_all<E: Clone, A: Clone>(
+    validations: List<Validated<E, A>>
+) -> Validated<E, List<A>> {
+    let mut results = List.new();
+    let mut all_errors = List.new();
+    let mut has_invalid = false;
+
+    for v in validations {
+        match v {
+            Validated.Valid(a) => results.push(a),
+            Validated.Invalid(errors) => {
+                has_invalid = true;
+                all_errors.extend(errors);
+            }
+        }
+    }
+
+    if has_invalid {
+        Validated.Invalid(all_errors)
+    } else {
+        Validated.Valid(results)
+    }
+}
+
+// ============================================================================
+// Validation Error Type
+// ============================================================================
+
+type ValidationError is {
+    field: Text,
+    message: Text,
+};
+
+implement ValidationError {
+    fn new(field: Text, message: Text) -> Self {
+        ValidationError { field, message }
+    }
+}
+
+// ============================================================================
+// Helper: Validate a single field
+// ============================================================================
+
+fn validate_field<T: Clone>(
+    value: T,
+    predicate: fn(&T) -> Bool,
+    error: ValidationError
+) -> Validated<ValidationError, T> {
+    if predicate(&value) {
+        Validated.valid(value)
+    } else {
+        Validated.invalid(error)
+    }
+}
+
+// ============================================================================
+// Test: Basic Validated operations
+// ============================================================================
+
+fn test_basic_validated() {
+    let valid: Validated<Text, Int> = Validated.valid(42);
+    assert(valid.is_valid());
+    assert(!valid.is_invalid());
+
+    let invalid: Validated<Text, Int> = Validated.invalid("error");
+    assert(!invalid.is_valid());
+    assert(invalid.is_invalid());
+
+    let multi_invalid: Validated<Text, Int> = Validated.invalid_all(["e1", "e2", "e3"]);
+    match multi_invalid {
+        Validated.Invalid(errors) => assert_eq(errors.len(), 3),
+        _ => panic("Expected Invalid"),
+    }
+}
+
+// ============================================================================
+// Test: Error accumulation (the key feature)
+// ============================================================================
+
+fn test_error_accumulation() {
+    // Three validations, all failing
+    let v1: Validated<Text, Int> = Validated.invalid("error 1");
+    let v2: Validated<Text, Int> = Validated.invalid("error 2");
+    let v3: Validated<Text, Int> = Validated.invalid("error 3");
+
+    // Combine v1 and v2
+    let combined = validated_and(v1, v2);
+    match combined {
+        Validated.Invalid(errors) => {
+            assert_eq(errors.len(), 2);
+            assert_eq(errors[0], "error 1");
+            assert_eq(errors[1], "error 2");
+        }
+        _ => panic("Expected Invalid"),
+    }
+
+    // Use validate_all for multiple
+    let all_validations = [
+        Validated.invalid("a"),
+        Validated.invalid("b"),
+        Validated.valid(1),
+        Validated.invalid("c"),
+    ];
+
+    let result = validate_all(all_validations);
+    match result {
+        Validated.Invalid(errors) => {
+            assert_eq(errors.len(), 3);  // a, b, c
+        }
+        _ => panic("Expected Invalid with accumulated errors"),
+    }
+}
+
+// ============================================================================
+// Test: Mixed valid and invalid
+// ============================================================================
+
+fn test_mixed_validation() {
+    let v1: Validated<Text, Int> = Validated.valid(1);
+    let v2: Validated<Text, Int> = Validated.valid(2);
+
+    // Both valid - should combine to valid tuple
+    let combined = validated_and(v1, v2);
+    match combined {
+        Validated.Valid((a, b)) => {
+            assert_eq(a, 1);
+            assert_eq(b, 2);
+        }
+        _ => panic("Expected Valid tuple"),
+    }
+
+    // One valid, one invalid - should be invalid
+    let v3: Validated<Text, Int> = Validated.valid(3);
+    let v4: Validated<Text, Int> = Validated.invalid("oops");
+
+    let combined2 = validated_and(v3, v4);
+    assert(combined2.is_invalid());
+}
+
+// ============================================================================
+// Test: Real-world user validation example
+// ============================================================================
+
+type UserInput is {
+    name: Text,
+    email: Text,
+    age: Int,
+};
+
+type ValidatedUser is {
+    name: Text,
+    email: Text,
+    age: Int,
+};
+
+fn validate_name(name: Text) -> Validated<ValidationError, Text> {
+    let mut errors = List.new();
+
+    if name.is_empty() {
+        errors.push(ValidationError.new("name", "Name is required"));
+    }
+
+    if name.len() > 100 {
+        errors.push(ValidationError.new("name", "Name must be at most 100 characters"));
+    }
+
+    if errors.is_empty() {
+        Validated.valid(name)
+    } else {
+        Validated.invalid_all(errors)
+    }
+}
+
+fn validate_email(email: Text) -> Validated<ValidationError, Text> {
+    if email.contains("@") && email.contains(".") {
+        Validated.valid(email)
+    } else {
+        Validated.invalid(ValidationError.new("email", "Invalid email format"))
+    }
+}
+
+fn validate_age(age: Int) -> Validated<ValidationError, Int> {
+    if age >= 0 && age <= 150 {
+        Validated.valid(age)
+    } else {
+        Validated.invalid(ValidationError.new("age", "Age must be 0-150"))
+    }
+}
+
+fn validate_user(input: UserInput) -> Validated<ValidationError, ValidatedUser> {
+    let name_v = validate_name(input.name.clone());
+    let email_v = validate_email(input.email.clone());
+    let age_v = validate_age(input.age);
+
+    // Combine all validations, accumulating ALL errors
+    let name_email = validated_and(name_v, email_v);
+    let all = validated_and(name_email, age_v);
+
+    all.map(|((n, e), a)| ValidatedUser { name: n, email: e, age: a })
+}
+
+fn test_user_validation() {
+    // Valid user
+    let valid_input = UserInput {
+        name: "Alice",
+        email: "alice@example.com",
+        age: 30,
+    };
+
+    let valid_result = validate_user(valid_input);
+    assert(valid_result.is_valid());
+
+    // Invalid user with multiple errors
+    let invalid_input = UserInput {
+        name: "",  // Invalid: empty
+        email: "not-an-email",  // Invalid: no @ or .
+        age: 200,  // Invalid: > 150
+    };
+
+    let invalid_result = validate_user(invalid_input);
+    assert(invalid_result.is_invalid());
+
+    // Should have collected ALL errors, not just the first one
+    let errors = invalid_result.errors();
+    assert(errors.len() >= 3);  // At least 3 errors
+}
+
+// ============================================================================
+// Test: Validated map
+// ============================================================================
+
+fn test_validated_map() {
+    let valid: Validated<Text, Int> = Validated.valid(42);
+    let mapped = valid.map(|x| x * 2);
+
+    match mapped {
+        Validated.Valid(v) => assert_eq(v, 84),
+        _ => panic("Expected Valid"),
+    }
+
+    let invalid: Validated<Text, Int> = Validated.invalid("error");
+    let mapped_invalid = invalid.map(|x| x * 2);
+
+    match mapped_invalid {
+        Validated.Invalid(errors) => assert_eq(errors[0], "error"),
+        _ => panic("Expected Invalid"),
+    }
+}
+
+// ============================================================================
+// Test: Conversion to/from Result
+// ============================================================================
+
+fn test_result_conversion() {
+    // Result -> Validated
+    let ok_result: Result<Int, Text> = Ok(42);
+    let err_result: Result<Int, Text> = Err("oops");
+
+    let from_ok = Validated.from_result(ok_result);
+    assert(from_ok.is_valid());
+
+    let from_err = Validated.from_result(err_result);
+    assert(from_err.is_invalid());
+
+    // Validated -> Result
+    let valid: Validated<Text, Int> = Validated.valid(42);
+    let to_result = valid.to_result();
+    assert_eq(to_result, Ok(42));
+
+    let invalid: Validated<Text, Int> = Validated.invalid_all(["e1", "e2"]);
+    let to_result_err = invalid.to_result();
+    match to_result_err {
+        Err(errors) => assert_eq(errors.len(), 2),
+        _ => panic("Expected Err"),
+    }
+}
+
+// ============================================================================
+// Test: Comparison with Result (short-circuit vs accumulation)
+// ============================================================================
+
+fn test_result_vs_validated() {
+    // With Result, we stop at first error
+    fn validate_with_result(name: Text, email: Text, age: Int) -> Result<ValidatedUser, Text> {
+        if name.is_empty() {
+            return Err("Name is required");
+        }
+        if !email.contains("@") {
+            return Err("Invalid email");
+        }
+        if age < 0 || age > 150 {
+            return Err("Invalid age");
+        }
+        Ok(ValidatedUser { name, email, age })
+    }
+
+    // Result gives only first error
+    let result_err = validate_with_result("", "bad", 200);
+    match result_err {
+        Err(e) => assert_eq(e, "Name is required"),  // Only first error
+        _ => panic("Expected Err"),
+    }
+
+    // With Validated, we get ALL errors
+    let input = UserInput {
+        name: "",
+        email: "bad",
+        age: 200,
+    };
+    let validated_err = validate_user(input);
+    let all_errors = validated_err.errors();
+    assert(all_errors.len() >= 3);  // All errors collected!
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    test_basic_validated();
+    test_error_accumulation();
+    test_mixed_validation();
+    test_user_validation();
+    test_validated_map();
+    test_result_conversion();
+    test_result_vs_validated();
+
+    print("All Validated error accumulation tests passed!");
+}

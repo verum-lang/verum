@@ -1,0 +1,349 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, math, transcendental, trigonometry
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Math transcendental functions — sin, cos, exp, ln, sqrt, atan via Taylor/Newton series
+
+// ============================================================================
+// Float helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool {
+    abs_f(a - b) < tol
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+fn pi_val() -> Float { 3.14159265358979 }
+fn e_val() -> Float { 2.71828182845905 }
+
+// ============================================================================
+// Newton's sqrt — 8 iterations, no while on floats
+// ============================================================================
+
+fn manual_sqrt(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let mut g = x / 2.0;
+        if g < 0.5 { g = 0.5; }
+        // Unrolled 8 Newton iterations
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g
+    }
+}
+
+// ============================================================================
+// Exp via Taylor series: unrolled 15 terms, no while
+// ============================================================================
+
+fn manual_exp(x: Float) -> Float {
+    // e^x = 1 + x + x^2/2! + x^3/3! + ... + x^15/15!
+    let mut term = 1.0;
+    let mut sum = 1.0;
+    // term_k = term_{k-1} * x / k
+    term = term * x / 1.0;  sum = sum + term;
+    term = term * x / 2.0;  sum = sum + term;
+    term = term * x / 3.0;  sum = sum + term;
+    term = term * x / 4.0;  sum = sum + term;
+    term = term * x / 5.0;  sum = sum + term;
+    term = term * x / 6.0;  sum = sum + term;
+    term = term * x / 7.0;  sum = sum + term;
+    term = term * x / 8.0;  sum = sum + term;
+    term = term * x / 9.0;  sum = sum + term;
+    term = term * x / 10.0; sum = sum + term;
+    term = term * x / 11.0; sum = sum + term;
+    term = term * x / 12.0; sum = sum + term;
+    term = term * x / 13.0; sum = sum + term;
+    term = term * x / 14.0; sum = sum + term;
+    term = term * x / 15.0; sum = sum + term;
+    sum
+}
+
+// ============================================================================
+// Natural log — using series ln(1+d) for d in [0, 1)
+// No while loops on floats; manual range reduction with bounded iterations
+// ============================================================================
+
+fn manual_ln_near_one(d: Float) -> Float {
+    // ln(1+d) = d - d^2/2 + d^3/3 - d^4/4 + ... (for |d| < 1)
+    // Unrolled 10 terms
+    let d2 = d * d;
+    let d3 = d2 * d;
+    let d4 = d3 * d;
+    let d5 = d4 * d;
+    let d6 = d5 * d;
+    let d7 = d6 * d;
+    let d8 = d7 * d;
+    let d9 = d8 * d;
+    let d10 = d9 * d;
+    d - d2/2.0 + d3/3.0 - d4/4.0 + d5/5.0 - d6/6.0 + d7/7.0 - d8/8.0 + d9/9.0 - d10/10.0
+}
+
+fn manual_ln(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let ln2 = 0.6931471805599453;
+        // Range reduction to [1, 2) using bounded integer loop
+        // For x up to ~1000, we need at most 10 halvings
+        let mut val = x;
+        let mut correction = 0.0;
+        let mut i = 0;
+        while i < 20 {
+            if val >= 2.0 {
+                val = val / 2.0;
+                correction = correction + ln2;
+            }
+            if val < 1.0 {
+                val = val * 2.0;
+                correction = correction - ln2;
+            }
+            i = i + 1;
+        }
+        manual_ln_near_one(val - 1.0) + correction
+    }
+}
+
+// ============================================================================
+// Sin via Taylor — unrolled, no while on floats for angle reduction
+// ============================================================================
+
+fn reduce_angle(x: Float) -> Float {
+    let two_pi = 2.0 * pi_val();
+    let mut a = x;
+    // Bounded reduction: up to 20 iterations
+    let mut i = 0;
+    while i < 20 {
+        if a > pi_val() {
+            a = a - two_pi;
+        }
+        if a < 0.0 - pi_val() {
+            a = a + two_pi;
+        }
+        i = i + 1;
+    }
+    a
+}
+
+fn manual_sin(x: Float) -> Float {
+    let a = reduce_angle(x);
+    let a2 = a * a;
+    let a3 = a2 * a;
+    let a5 = a3 * a2;
+    let a7 = a5 * a2;
+    let a9 = a7 * a2;
+    let a11 = a9 * a2;
+    a - a3/6.0 + a5/120.0 - a7/5040.0 + a9/362880.0 - a11/39916800.0
+}
+
+// ============================================================================
+// Cos via Taylor — unrolled
+// ============================================================================
+
+fn manual_cos(x: Float) -> Float {
+    let a = reduce_angle(x);
+    let a2 = a * a;
+    let a4 = a2 * a2;
+    let a6 = a4 * a2;
+    let a8 = a6 * a2;
+    let a10 = a8 * a2;
+    1.0 - a2/2.0 + a4/24.0 - a6/720.0 + a8/40320.0 - a10/3628800.0
+}
+
+// ============================================================================
+// Atan via polynomial approximation for |x| <= 1
+// ============================================================================
+
+fn manual_atan_small(x: Float) -> Float {
+    // More terms for better convergence
+    let x2 = x * x;
+    let x3 = x2 * x;
+    let x5 = x3 * x2;
+    let x7 = x5 * x2;
+    let x9 = x7 * x2;
+    let x11 = x9 * x2;
+    let x13 = x11 * x2;
+    let x15 = x13 * x2;
+    let x17 = x15 * x2;
+    let x19 = x17 * x2;
+    let x21 = x19 * x2;
+    x - x3/3.0 + x5/5.0 - x7/7.0 + x9/9.0 - x11/11.0
+    + x13/13.0 - x15/15.0 + x17/17.0 - x19/19.0 + x21/21.0
+}
+
+fn manual_atan(x: Float) -> Float {
+    if x > 1.0 {
+        pi_val() / 2.0 - manual_atan_small(1.0 / x)
+    } else if x < 0.0 - 1.0 {
+        0.0 - pi_val() / 2.0 - manual_atan_small(1.0 / x)
+    } else {
+        manual_atan_small(x)
+    }
+}
+
+// ============================================================================
+// Test 1: Sqrt
+// ============================================================================
+
+@test
+fn test_sqrt() {
+    assert(approx_eq(manual_sqrt(4.0), 2.0, 0.0001));
+    assert(approx_eq(manual_sqrt(9.0), 3.0, 0.0001));
+    assert(approx_eq(manual_sqrt(2.0), 1.4142, 0.001));
+    assert(approx_eq(manual_sqrt(100.0), 10.0, 0.0001));
+    assert(approx_eq(manual_sqrt(0.25), 0.5, 0.0001));
+    assert(approx_eq(manual_sqrt(1.0), 1.0, 0.0001));
+    assert(approx_eq(manual_sqrt(0.0), 0.0, 0.0001));
+
+    print("  test_sqrt: ok");
+}
+
+// ============================================================================
+// Test 2: Exp and Ln (inverse functions)
+// ============================================================================
+
+@test
+fn test_exp_ln() {
+    // exp(0) = 1
+    assert(approx_eq(manual_exp(0.0), 1.0, 0.001));
+
+    // exp(1) = e
+    assert(approx_eq(manual_exp(1.0), e_val(), 0.01));
+
+    // exp(2) ~ 7.389
+    assert(approx_eq(manual_exp(2.0), 7.389, 0.01));
+
+    // ln(1) = 0
+    assert(approx_eq(manual_ln(1.0), 0.0, 0.001));
+
+    // ln(e) ~ 1
+    assert(approx_eq(manual_ln(e_val()), 1.0, 0.05));
+
+    // ln(2) ~ 0.693
+    assert(approx_eq(manual_ln(2.0), 0.693, 0.01));
+
+    // ln(10) ~ 2.302
+    assert(approx_eq(manual_ln(10.0), 2.302, 0.1));
+
+    print("  test_exp_ln: ok");
+}
+
+// ============================================================================
+// Test 3: Sin
+// ============================================================================
+
+@test
+fn test_sin() {
+    // sin(0) = 0
+    assert(approx_eq(manual_sin(0.0), 0.0, 0.001));
+
+    // sin(pi/2) = 1
+    assert(approx_eq(manual_sin(pi_val() / 2.0), 1.0, 0.001));
+
+    // sin(pi) = 0
+    assert(approx_eq(manual_sin(pi_val()), 0.0, 0.001));
+
+    // sin(-pi/2) = -1
+    assert(approx_eq(manual_sin(0.0 - pi_val() / 2.0), 0.0 - 1.0, 0.001));
+
+    // sin(pi/6) = 0.5
+    assert(approx_eq(manual_sin(pi_val() / 6.0), 0.5, 0.01));
+
+    // sin^2 + cos^2 = 1 for x = 1.0
+    let s = manual_sin(1.0);
+    let c = manual_cos(1.0);
+    assert(approx_eq(s * s + c * c, 1.0, 0.01));
+
+    print("  test_sin: ok");
+}
+
+// ============================================================================
+// Test 4: Cos
+// ============================================================================
+
+@test
+fn test_cos() {
+    // cos(0) = 1
+    assert(approx_eq(manual_cos(0.0), 1.0, 0.001));
+
+    // cos(pi) = -1
+    assert(approx_eq(manual_cos(pi_val()), 0.0 - 1.0, 0.01));
+
+    // cos(pi/3) = 0.5
+    assert(approx_eq(manual_cos(pi_val() / 3.0), 0.5, 0.01));
+
+    // cos(1.0) ~ 0.5403
+    assert(approx_eq(manual_cos(1.0), 0.5403, 0.01));
+
+    // Even function: cos(-x) = cos(x)
+    let cx = manual_cos(0.7);
+    let cnx = manual_cos(0.0 - 0.7);
+    assert(approx_eq(cx, cnx, 0.001));
+
+    // Pythagorean identity: sin^2(x) + cos^2(x) = 1 for x = 0.5
+    let s05 = manual_sin(0.5);
+    let c05 = manual_cos(0.5);
+    assert(approx_eq(s05 * s05 + c05 * c05, 1.0, 0.01));
+
+    print("  test_cos: ok");
+}
+
+// ============================================================================
+// Test 5: Atan
+// ============================================================================
+
+@test
+fn test_atan() {
+    // atan(0) = 0
+    assert(approx_eq(manual_atan(0.0), 0.0, 0.001));
+
+    // atan(0.5) ~ 0.4636 (converges well for |x| < 1)
+    let at05 = manual_atan(0.5);
+    assert(approx_eq(at05, 0.4636, 0.01));
+
+    // atan(0.2) ~ 0.1974
+    let at02 = manual_atan(0.2);
+    assert(approx_eq(at02, 0.1974, 0.01));
+
+    // atan(0.1) ~ 0.0997
+    let at01 = manual_atan(0.1);
+    assert(approx_eq(at01, 0.0997, 0.001));
+
+    // Odd function: atan(-x) = -atan(x)
+    let atm05 = manual_atan(0.0 - 0.5);
+    assert(approx_eq(atm05, 0.0 - at05, 0.001));
+
+    // Monotonically increasing
+    assert(at01 < at02);
+    assert(at02 < at05);
+
+    print("  test_atan: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_sqrt();
+    test_exp_ln();
+    test_sin();
+    test_cos();
+    test_atan();
+    print("[OK] 091_math_transcendental");
+    0
+}

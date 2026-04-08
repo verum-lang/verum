@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, generics, constraint, error
+// @description: Test invalid generic constraint syntax detection
+// @expected-error: E050
+
+type Container<T:> is { value: T };
+
+type Bad<T: +> is { value: T };
+
+type Wrong<T: Clone +> is { value: T };
+
+type Incomplete<T: Clone, U:> is { a: T, b: U };

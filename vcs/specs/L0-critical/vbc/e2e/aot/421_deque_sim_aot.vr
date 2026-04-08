@@ -1,0 +1,136 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, deque, simulation, data-structure
+// @timeout: 30000
+
+// Double-ended queue simulation using circular buffer
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Deque: data array, front pointer, back pointer, size
+type Deque is { data: Arr8, front: Int, back: Int, sz: Int };
+
+fn deque_new() -> Deque {
+    Deque { data: new_arr8(), front: 0, back: 0, sz: 0 }
+}
+
+fn deque_push_back(dq: Deque, val: Int) -> Deque {
+    let new_data = set8(dq.data, dq.back, val);
+    Deque { data: new_data, front: dq.front, back: (dq.back + 1) % 8, sz: dq.sz + 1 }
+}
+
+fn deque_push_front(dq: Deque, val: Int) -> Deque {
+    let new_front = (dq.front - 1 + 8) % 8;
+    let new_data = set8(dq.data, new_front, val);
+    Deque { data: new_data, front: new_front, back: dq.back, sz: dq.sz + 1 }
+}
+
+fn deque_pop_front(dq: Deque) -> Deque {
+    Deque { data: dq.data, front: (dq.front + 1) % 8, back: dq.back, sz: dq.sz - 1 }
+}
+
+fn deque_pop_back(dq: Deque) -> Deque {
+    Deque { data: dq.data, front: dq.front, back: (dq.back - 1 + 8) % 8, sz: dq.sz - 1 }
+}
+
+fn deque_front(dq: Deque) -> Int {
+    get8(dq.data, dq.front)
+}
+
+fn deque_back(dq: Deque) -> Int {
+    get8(dq.data, (dq.back - 1 + 8) % 8)
+}
+
+fn test_push_pop() -> Int {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 10);
+    dq = deque_push_back(dq, 20);
+    dq = deque_push_back(dq, 30);
+    assert_eq(dq.sz, 3);
+    assert_eq(deque_front(dq), 10);
+    assert_eq(deque_back(dq), 30);
+
+    dq = deque_pop_front(dq);
+    assert_eq(deque_front(dq), 20);
+    assert_eq(dq.sz, 2);
+
+    dq = deque_pop_back(dq);
+    assert_eq(deque_back(dq), 20);
+    assert_eq(dq.sz, 1);
+    1
+}
+
+fn test_push_front() -> Int {
+    let mut dq = deque_new();
+    dq = deque_push_front(dq, 30);
+    dq = deque_push_front(dq, 20);
+    dq = deque_push_front(dq, 10);
+    assert_eq(deque_front(dq), 10);
+    assert_eq(deque_back(dq), 30);
+    assert_eq(dq.sz, 3);
+    1
+}
+
+fn test_mixed() -> Int {
+    let mut dq = deque_new();
+    // push_back 1, push_front 2, push_back 3, push_front 4
+    // Result: [4, 2, 1, 3]
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_front(dq, 2);
+    dq = deque_push_back(dq, 3);
+    dq = deque_push_front(dq, 4);
+    assert_eq(dq.sz, 4);
+    assert_eq(deque_front(dq), 4);
+    assert_eq(deque_back(dq), 3);
+
+    // Pop all from front: 4, 2, 1, 3
+    let v1 = deque_front(dq);
+    dq = deque_pop_front(dq);
+    let v2 = deque_front(dq);
+    dq = deque_pop_front(dq);
+    let v3 = deque_front(dq);
+    dq = deque_pop_front(dq);
+    let v4 = deque_front(dq);
+
+    assert_eq(v1, 4);
+    assert_eq(v2, 2);
+    assert_eq(v3, 1);
+    assert_eq(v4, 3);
+    1
+}
+
+fn main() -> Int {
+    test_push_pop();
+    test_push_front();
+    test_mixed();
+    print("[OK] 421_deque_sim_aot");
+    0
+}

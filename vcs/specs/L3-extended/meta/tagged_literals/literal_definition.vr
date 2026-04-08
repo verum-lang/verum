@@ -1,0 +1,264 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, tagged-literals, literal-definition
+
+/// Определение и использование tagged literals
+///
+/// Tagged literals используют синтаксис tag#"content" для
+/// форматно-специфичного контента с compile-time валидацией.
+/// Тест использует только базовые возможности языка без stdlib.
+
+// ============================================================
+// ТИПЫ ДЛЯ ХРАНЕНИЯ TAGGED LITERAL ДАННЫХ
+// ============================================================
+
+/// JSON data container
+type JsonData is {
+    raw: Text,
+};
+
+/// SQL query container
+type SqlQuery is {
+    query: Text,
+};
+
+/// Regex pattern container
+type RegexPattern is {
+    pattern: Text,
+};
+
+/// URL container
+type UrlData is {
+    url: Text,
+};
+
+/// XML data container
+type XmlData is {
+    content: Text,
+};
+
+/// YAML config container
+type YamlConfig is {
+    content: Text,
+};
+
+// ============================================================
+// BUILT-IN TAGGED LITERALS
+// ============================================================
+
+/// JSON tagged literals - validated JSON syntax at compile time
+fn test_json_definition() {
+    // Simple JSON object (escaped quotes)
+    let simple_obj = json#"{\"key\": \"value\"}";
+
+    // JSON with numbers
+    let with_numbers = json#"{\"count\": 42, \"price\": 19.99}";
+
+    // JSON array
+    let array = json#"[1, 2, 3, 4, 5]";
+
+    // JSON with boolean and null
+    let with_types = json#"{\"active\": true, \"deleted\": false, \"meta\": null}";
+
+    // Nested JSON
+    let nested = json#"{\"outer\": {\"inner\": {\"deep\": \"value\"}}}";
+}
+
+/// SQL tagged literals - validated SQL syntax at compile time
+fn test_sql_definition() {
+    // Simple SELECT
+    let select_all = sql#"SELECT * FROM users";
+
+    // SELECT with columns
+    let select_cols = sql#"SELECT id, name, email FROM users";
+
+    // SELECT with WHERE
+    let select_where = sql#"SELECT * FROM users WHERE active = true";
+
+    // INSERT statement
+    let insert = sql#"INSERT INTO users (name, email) VALUES ('Johnp, 'john@example.comp)";
+
+    // UPDATE statement
+    let update = sql#"UPDATE users SET active = false WHERE id = 1";
+
+    // DELETE statement
+    let delete = sql#"DELETE FROM users WHERE id = 1";
+}
+
+/// Regex tagged literals - validated regex pattern at compile time
+fn test_regex_definition() {
+    // Simple pattern
+    let word = rx#"\w+";
+
+    // Email pattern
+    let email = rx#"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}";
+
+    // Phone pattern (international)
+    let phone = rx#"\+?[1-9]\d{1,14}";
+
+    // Date pattern (ISO 8601)
+    let date = rx#"\d{4}-\d{2}-\d{2}";
+
+    // Time pattern
+    let time = rx#"\d{2}:\d{2}(:\d{2})?";
+
+    // IP address pattern (simplified)
+    let ip = rx#"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}";
+}
+
+/// URL tagged literals - validated URL format at compile time
+fn test_url_definition() {
+    // HTTP URL
+    let http = url#"http://example.com";
+
+    // HTTPS URL
+    let https = url#"https://example.com";
+
+    // URL with path
+    let with_path = url#"https://example.com/api/v1/users";
+
+    // URL with query params
+    let with_query = url#"https://example.com/search?q=test&limit=10";
+
+    // URL with fragment
+    let with_fragment = url#"https://example.com/docs#section-1";
+
+    // File URL
+    let file = url#"file:///home/user/document.txt";
+}
+
+/// XML tagged literals - validated XML syntax at compile time
+fn test_xml_definition() {
+    // Simple element
+    let simple = xml#"<item>value</item>";
+
+    // Element with attributes (escaped quotes)
+    let with_attrs = xml#"<user id=\"1\" active=\"true\">John</user>";
+
+    // Self-closing element
+    let self_closing = xml#"<br/>";
+
+    // Nested elements
+    let nested = xml#"<root><child><value>data</value></child></root>";
+
+    // Element with namespace
+    let namespaced = xml#"<ns:element xmlns:ns=\"http://example.com\">content</ns:element>";
+}
+
+/// YAML tagged literals - validated YAML syntax at compile time
+fn test_yaml_definition() {
+    // Simple key-value
+    let simple = yaml#"key: value";
+
+    // Multiple keys (escaped newline)
+    let multiple = yaml#"name: test\nversion: 1.0";
+}
+
+// ============================================================
+// MULTILINE TAGGED LITERALS
+// ============================================================
+
+fn test_multiline_definition() {
+    // Multiline JSON (no escaping needed with triple quotes)
+    let json_obj = json#"""
+    {
+        "name": "Test Application",
+        "version": "1.0.0",
+        "dependencies": {
+            "core": "2.0.0",
+            "utils": "1.5.0"
+        },
+        "features": ["async", "logging", "metrics"]
+    }
+    """;
+
+    // Multiline SQL
+    let sql_query = sql#"""
+    SELECT
+        u.id,
+        u.name,
+        u.email,
+        COUNT(o.id) as order_count,
+        SUM(o.total) as total_spent
+    FROM users u
+    LEFT JOIN orders o ON u.id = o.user_id
+    WHERE u.created_at >= '2024-01-01'
+    GROUP BY u.id, u.name, u.email
+    HAVING COUNT(o.id) > 0
+    ORDER BY total_spent DESC
+    LIMIT 100
+    """;
+
+    // Multiline XML
+    let xml_doc = xml#"""
+    <configuration>
+        <database>
+            <host>localhost</host>
+            <port>5432</port>
+            <name>myapp</name>
+        </database>
+        <server>
+            <host>0.0.0.0</host>
+            <port>8080</port>
+        </server>
+    </configuration>
+    """;
+
+    // Multiline YAML
+    let yaml_config = yaml#"""
+    database:
+      host: localhost
+      port: 5432
+      name: myapp
+      pool_size: 10
+
+    server:
+      host: 0.0.0.0
+      port: 8080
+      workers: 4
+
+    logging:
+      level: info
+      format: json
+    """;
+}
+
+// ============================================================
+// TAGGED LITERALS IN FUNCTIONS (type inferred)
+// ============================================================
+
+fn example_tagged_literals() {
+    // Tagged literals infer their types
+    let config_json = json#"{\"debug\": false, \"timeout\": 30}";
+    let select_users = sql#"SELECT * FROM users WHERE active = true";
+    let email_pattern = rx#"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+    let api_endpoint = url#"https://api.example.com/v1";
+}
+
+// ============================================================
+// COMPILE-TIME VALIDATION EXAMPLES
+// ============================================================
+
+// These tagged literals are validated at compile time:
+// - json#"..." validates JSON syntax
+// - sql#"..." validates SQL syntax
+// - rx#"..." validates regex pattern syntax
+// - url#"..." validates URL format
+// - xml#"..." validates XML syntax
+// - yaml#"..." validates YAML syntax
+
+// Invalid content would cause compile-time errors:
+// let invalid_json = json#"{invalid}";  // Compile error: invalid JSON
+// let invalid_sql = sql#"SELEC * FORM"; // Compile error: invalid SQL
+// let invalid_url = url#"not-a-url";    // Compile error: invalid URL format
+
+fn main() {
+    test_json_definition();
+    test_sql_definition();
+    test_regex_definition();
+    test_url_definition();
+    test_xml_definition();
+    test_yaml_definition();
+    test_multiline_definition();
+}

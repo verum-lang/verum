@@ -1,0 +1,46 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, struct, constrained
+// @description: Struct with protocol constraint test
+
+module specs.core.math.constrained_struct_test;
+
+type Number is protocol {
+    fn zero_val() -> Self;
+};
+
+implement Number for Float {
+    fn zero_val() -> Self { 0.0 }
+}
+
+type MyVec<T: Number> is {
+    data: List<T>,
+    size: Int,
+};
+
+implement<T: Number> MyVec<T> {
+    public fn zeros(n: Int) -> MyVec<T> {
+        let data = List.with_capacity(n);
+        for _ in 0..n {
+            data.push(T.zero_val());
+        }
+        MyVec { data, size: n }
+    }
+
+    public fn get_size(&self) -> Int {
+        self.size
+    }
+}
+
+fn main() {
+    print("Creating MyVec<Float>.zeros(3)...");
+    let v: MyVec<Float> = MyVec.zeros(3);
+    print("MyVec created!");
+
+    print("Getting size...");
+    let s = v.get_size();
+    print(f"size = {s}");
+
+    print("Test done!");
+}

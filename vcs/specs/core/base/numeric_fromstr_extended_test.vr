@@ -1,0 +1,257 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, fromstr, parsing, int64, int128, uint128, isize, usize, float32, float64
+// @description: Tests for FromStr protocol on Int64, Int128, UInt128, ISize, USize, Float32, Float64
+
+mount core.base.primitives.{Int64, Int128, UInt128, ISize, USize, Float32, Float64};
+mount core.base.protocols.{FromStr};
+
+// =============================================================================
+// Int64 FromStr
+// =============================================================================
+
+@test
+fn test_int64_fromstr_valid() {
+    let s = "42";
+    let result = Int64.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_int64_fromstr_negative() {
+    let s = "-100";
+    let result = Int64.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_int64_fromstr_zero() {
+    let s = "0";
+    let result = Int64.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_int64_fromstr_invalid() {
+    let s = "abc";
+    let result = Int64.from_str(&s);
+    assert(result is Err);
+}
+
+// =============================================================================
+// Int128 FromStr
+// =============================================================================
+
+@test
+fn test_int128_fromstr_valid() {
+    let s = "42";
+    let result = Int128.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_int128_fromstr_negative() {
+    let s = "-999";
+    let result = Int128.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_int128_fromstr_invalid() {
+    let s = "not_a_number";
+    let result = Int128.from_str(&s);
+    assert(result is Err);
+}
+
+// =============================================================================
+// UInt128 FromStr
+// =============================================================================
+
+@test
+fn test_uint128_fromstr_valid() {
+    let s = "42";
+    let result = UInt128.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_uint128_fromstr_zero() {
+    let s = "0";
+    let result = UInt128.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_uint128_fromstr_negative_fails() {
+    let s = "-1";
+    let result = UInt128.from_str(&s);
+    assert(result is Err);
+}
+
+@test
+fn test_uint128_fromstr_invalid() {
+    let s = "xyz";
+    let result = UInt128.from_str(&s);
+    assert(result is Err);
+}
+
+// =============================================================================
+// ISize FromStr
+// =============================================================================
+
+@test
+fn test_isize_fromstr_valid() {
+    let s = "42";
+    let result = ISize.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_isize_fromstr_negative() {
+    let s = "-42";
+    let result = ISize.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_isize_fromstr_invalid() {
+    let s = "hello";
+    let result = ISize.from_str(&s);
+    assert(result is Err);
+}
+
+// =============================================================================
+// USize FromStr
+// =============================================================================
+
+@test
+fn test_usize_fromstr_valid() {
+    let s = "100";
+    let result = USize.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_usize_fromstr_zero() {
+    let s = "0";
+    let result = USize.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_usize_fromstr_negative_fails() {
+    let s = "-1";
+    let result = USize.from_str(&s);
+    assert(result is Err);
+}
+
+@test
+fn test_usize_fromstr_invalid() {
+    let s = "abc";
+    let result = USize.from_str(&s);
+    assert(result is Err);
+}
+
+// =============================================================================
+// Float32 FromStr
+// =============================================================================
+
+@test
+fn test_float32_fromstr_integer() {
+    let s = "42";
+    let result = Float32.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_float32_fromstr_decimal() {
+    let s = "3.14";
+    let result = Float32.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_float32_fromstr_negative() {
+    let s = "-2.5";
+    let result = Float32.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_float32_fromstr_invalid() {
+    let s = "not_float";
+    let result = Float32.from_str(&s);
+    assert(result is Err);
+}
+
+// =============================================================================
+// Float64 FromStr
+// =============================================================================
+
+@test
+fn test_float64_fromstr_integer() {
+    let s = "42";
+    let result = Float64.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_float64_fromstr_decimal() {
+    let s = "3.14159";
+    let result = Float64.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_float64_fromstr_negative() {
+    let s = "-100.5";
+    let result = Float64.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_float64_fromstr_scientific() {
+    let s = "1.5e10";
+    let result = Float64.from_str(&s);
+    assert(result is Ok);
+}
+
+@test
+fn test_float64_fromstr_invalid() {
+    let s = "xyz";
+    let result = Float64.from_str(&s);
+    assert(result is Err);
+}
+
+// =============================================================================
+// Cross-type consistency
+// =============================================================================
+
+@test
+fn test_all_integer_fromstr_parse_42() {
+    let s = "42";
+    assert(Int64.from_str(&s) is Ok);
+    assert(Int128.from_str(&s) is Ok);
+    assert(UInt128.from_str(&s) is Ok);
+    assert(ISize.from_str(&s) is Ok);
+    assert(USize.from_str(&s) is Ok);
+}
+
+@test
+fn test_all_float_fromstr_parse_pi() {
+    let s = "3.14";
+    assert(Float32.from_str(&s) is Ok);
+    assert(Float64.from_str(&s) is Ok);
+}
+
+@test
+fn test_empty_string_all_types() {
+    let s = "";
+    assert(Int64.from_str(&s) is Err);
+    assert(Int128.from_str(&s) is Err);
+    assert(UInt128.from_str(&s) is Err);
+    assert(ISize.from_str(&s) is Err);
+    assert(USize.from_str(&s) is Err);
+    assert(Float32.from_str(&s) is Err);
+    assert(Float64.from_str(&s) is Err);
+}

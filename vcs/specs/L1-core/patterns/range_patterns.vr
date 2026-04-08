@@ -1,0 +1,360 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, ranges
+//
+// Tests range patterns: `0..10` (exclusive), `'a'..='z'` (inclusive),
+// negative ranges, open-ended ranges, and range bindings.
+
+// Exclusive range pattern: 0..10 matches 0-9
+fn is_digit(n: Int) -> Bool {
+    match n {
+        0..10 => true,
+        _ => false,
+    }
+}
+
+// Inclusive range pattern: 'a'..='z' matches a-z
+fn is_lowercase(c: Char) -> Bool {
+    match c {
+        'a'..='z' => true,
+        _ => false,
+    }
+}
+
+fn is_uppercase(c: Char) -> Bool {
+    match c {
+        'A'..='Z' => true,
+        _ => false,
+    }
+}
+
+fn is_alpha(c: Char) -> Bool {
+    match c {
+        'a'..='z' | 'A'..='Z' => true,
+        _ => false,
+    }
+}
+
+fn is_alphanumeric(c: Char) -> Bool {
+    match c {
+        'a'..='z' | 'A'..='Z' | '0'..='9' => true,
+        _ => false,
+    }
+}
+
+// Multiple range patterns for ASCII classification
+fn classify_ascii(c: Char) -> Text {
+    match c {
+        '\x00'..='\x1f' => "control",
+        ' ' => "space",
+        '!'..='/' => "punctuation 1",
+        '0'..='9' => "digit",
+        ':'..='@' => "punctuation 2",
+        'A'..='Z' => "uppercase",
+        '['..='`' => "punctuation 3",
+        'a'..='z' => "lowercase",
+        '{'..='~' => "punctuation 4",
+        '\x7f' => "delete",
+        _ => "extended",
+    }
+}
+
+// Integer ranges for classification
+fn grade_percentage(score: Int) -> Text {
+    match score {
+        90..=100 => "A",
+        80..90 => "B",
+        70..80 => "C",
+        60..70 => "D",
+        0..60 => "F",
+        _ => "invalid",
+    }
+}
+
+// Negative ranges
+fn classify_temperature(temp: Int) -> Text {
+    match temp {
+        ..-20 => "extreme cold",       // ..end = negative infinity to end (exclusive)
+        -20..0 => "freezing",
+        0 => "freezing point",
+        1..15 => "cold",
+        15..25 => "comfortable",
+        25..35 => "warm",
+        35.. => "hot",                 // start.. = start to positive infinity
+    }
+}
+
+// Range with binding
+fn categorize_number(n: Int) -> Text {
+    match n {
+        x @ 0..10 => f"single digit: {x}",
+        x @ 10..100 => f"two digits: {x}",
+        x @ 100..1000 => f"three digits: {x}",
+        x => f"large: {x}",
+    }
+}
+
+// Char range with binding
+fn char_info(c: Char) -> Text {
+    match c {
+        ch @ 'a'..='z' => f"lowercase letter: {ch}",
+        ch @ 'A'..='Z' => f"uppercase letter: {ch}",
+        ch @ '0'..='9' => f"digit: {ch}",
+        ch => f"other: {ch}",
+    }
+}
+
+// Hex digit check
+fn is_hex_digit(c: Char) -> Bool {
+    match c {
+        '0'..='9' | 'a'..='f' | 'A'..='F' => true,
+        _ => false,
+    }
+}
+
+// Octal digit check
+fn is_octal_digit(c: Char) -> Bool {
+    match c {
+        '0'..='7' => true,
+        _ => false,
+    }
+}
+
+// Binary digit check
+fn is_binary_digit(c: Char) -> Bool {
+    match c {
+        '0' | '1' => true,
+        _ => false,
+    }
+}
+
+// Unicode ranges
+fn is_basic_latin(c: Char) -> Bool {
+    match c {
+        '\u{0000}'..='\u{007F}' => true,
+        _ => false,
+    }
+}
+
+fn is_latin_supplement(c: Char) -> Bool {
+    match c {
+        '\u{0080}'..='\u{00FF}' => true,
+        _ => false,
+    }
+}
+
+// HTTP status code classification
+fn http_status_class(code: Int) -> Text {
+    match code {
+        100..200 => "Informational",
+        200..300 => "Success",
+        300..400 => "Redirection",
+        400..500 => "Client Error",
+        500..600 => "Server Error",
+        _ => "Unknown",
+    }
+}
+
+// Age classification
+fn life_stage(age: Int) -> Text {
+    match age {
+        0..=2 => "infant",
+        3..=12 => "child",
+        13..=19 => "teenager",
+        20..=39 => "young adult",
+        40..=59 => "middle aged",
+        60..=79 => "senior",
+        80.. => "elderly",
+        _ => "invalid age",
+    }
+}
+
+// Float probability classification via guards (float literals not supported in range patterns)
+fn classify_probability(p: Float) -> Text {
+    match p {
+        x if x < 0.0 || x > 1.0 => "invalid",
+        x if x == 0.0 => "impossible",
+        x if x < 0.25 => "unlikely",
+        x if x < 0.5 => "possible",
+        x if x == 0.5 => "even",
+        x if x < 0.75 => "likely",
+        x if x < 1.0 => "very likely",
+        _ => "certain",
+    }
+}
+
+// Combined range and literal patterns
+fn describe_byte(b: Int) -> Text {
+    match b {
+        0 => "null",
+        1..32 => "control character",
+        32 => "space",
+        33..127 => "printable",
+        127 => "delete",
+        128..256 => "extended",
+        _ => "out of range",
+    }
+}
+
+// Port number classification
+fn port_type(port: Int) -> Text {
+    match port {
+        0 => "reserved",
+        1..1024 => "well-known",
+        1024..49152 => "registered",
+        49152..65536 => "dynamic/private",
+        _ => "invalid",
+    }
+}
+
+// IPv4 class (first octet)
+fn ipv4_class(first_octet: Int) -> Text {
+    match first_octet {
+        0..128 => "Class A",
+        128..192 => "Class B",
+        192..224 => "Class C",
+        224..240 => "Class D (Multicast)",
+        240..256 => "Class E (Reserved)",
+        _ => "Invalid",
+    }
+}
+
+// Range in tuple pattern
+fn classify_point(x: Int, y: Int) -> Text {
+    match (x, y) {
+        (0..10, 0..10) => "first quadrant near origin",
+        (-10..0, 0..10) => "second quadrant near origin",
+        (-10..0, -10..0) => "third quadrant near origin",
+        (0..10, -10..0) => "fourth quadrant near origin",
+        _ => "far from origin",
+    }
+}
+
+// Open-ended ranges
+fn is_positive(n: Int) -> Bool {
+    match n {
+        1.. => true,    // 1 to infinity
+        _ => false,
+    }
+}
+
+fn is_non_positive(n: Int) -> Bool {
+    match n {
+        ..=0 => true,   // negative infinity to 0 inclusive
+        _ => false,
+    }
+}
+
+// Even digit check via or-pattern
+fn even_digit(n: Int) -> Bool {
+    match n {
+        0 | 2 | 4 | 6 | 8 => true,
+        _ => false,
+    }
+}
+
+// Overlapping ranges (handled by order — later arms unreachable for 0-5 and 0-10)
+fn priority_range(n: Int) -> Text {
+    match n {
+        0..=5 => "high priority",
+        0..=10 => "medium priority",
+        0..=100 => "low priority",
+        _ => "no priority",
+    }
+}
+
+fn main() {
+    // Digit check
+    assert(is_digit(0) == true);
+    assert(is_digit(9) == true);
+    assert(is_digit(10) == false);
+    assert(is_digit(-1) == false);
+
+    // Char classification
+    assert(is_lowercase('a') == true);
+    assert(is_lowercase('z') == true);
+    assert(is_lowercase('A') == false);
+    assert(is_uppercase('A') == true);
+    assert(is_uppercase('Z') == true);
+    assert(is_alpha('x') == true);
+    assert(is_alpha('5') == false);
+    assert(is_alphanumeric('5') == true);
+
+    // ASCII classification
+    assert(classify_ascii('0') == "digit");
+    assert(classify_ascii('a') == "lowercase");
+    assert(classify_ascii('Z') == "uppercase");
+    assert(classify_ascii(' ') == "space");
+    assert(classify_ascii('!') == "punctuation 1");
+
+    // Grade percentage
+    assert(grade_percentage(95) == "A");
+    assert(grade_percentage(85) == "B");
+    assert(grade_percentage(75) == "C");
+    assert(grade_percentage(65) == "D");
+    assert(grade_percentage(55) == "F");
+    assert(grade_percentage(-5) == "invalid");
+    assert(grade_percentage(105) == "invalid");
+
+    // Temperature
+    assert(classify_temperature(-30) == "extreme cold");
+    assert(classify_temperature(-10) == "freezing");
+    assert(classify_temperature(0) == "freezing point");
+    assert(classify_temperature(10) == "cold");
+    assert(classify_temperature(20) == "comfortable");
+    assert(classify_temperature(30) == "warm");
+    assert(classify_temperature(40) == "hot");
+
+    // Number categorization with binding
+    assert(categorize_number(5) == "single digit: 5");
+    assert(categorize_number(42) == "two digits: 42");
+    assert(categorize_number(256) == "three digits: 256");
+
+    // Hex digit
+    assert(is_hex_digit('0') == true);
+    assert(is_hex_digit('f') == true);
+    assert(is_hex_digit('F') == true);
+    assert(is_hex_digit('g') == false);
+
+    // HTTP status
+    assert(http_status_class(200) == "Success");
+    assert(http_status_class(404) == "Client Error");
+    assert(http_status_class(500) == "Server Error");
+
+    // Life stage
+    assert(life_stage(1) == "infant");
+    assert(life_stage(10) == "child");
+    assert(life_stage(15) == "teenager");
+    assert(life_stage(30) == "young adult");
+    assert(life_stage(50) == "middle aged");
+    assert(life_stage(70) == "senior");
+    assert(life_stage(90) == "elderly");
+
+    // Byte description
+    assert(describe_byte(0) == "null");
+    assert(describe_byte(10) == "control character");
+    assert(describe_byte(65) == "printable");
+    assert(describe_byte(127) == "delete");
+
+    // Port type
+    assert(port_type(80) == "well-known");
+    assert(port_type(8080) == "registered");
+    assert(port_type(50000) == "dynamic/private");
+
+    // IPv4 class
+    assert(ipv4_class(10) == "Class A");
+    assert(ipv4_class(172) == "Class B");
+    assert(ipv4_class(192) == "Class C");
+
+    // Point classification
+    assert(classify_point(5, 5) == "first quadrant near origin");
+    assert(classify_point(-5, 5) == "second quadrant near origin");
+    assert(classify_point(100, 100) == "far from origin");
+
+    // Open-ended ranges
+    assert(is_positive(5) == true);
+    assert(is_positive(0) == false);
+    assert(is_non_positive(0) == true);
+    assert(is_non_positive(-5) == true);
+}

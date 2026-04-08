@@ -1,0 +1,123 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: match, expression, nested, complex
+// @description: Test match as expression in various contexts
+
+type Direction is North | South | East | West;
+
+fn direction_dx(dir: Direction) -> Int {
+    match dir {
+        East => 1,
+        West => -1,
+        _ => 0,
+    }
+}
+
+fn direction_dy(dir: Direction) -> Int {
+    match dir {
+        North => 1,
+        South => -1,
+        _ => 0,
+    }
+}
+
+fn test_match_expr() -> Int {
+    if direction_dx(East) != 1 {
+        print("FAIL dx East");
+        return 1;
+    }
+    if direction_dx(West) != -1 {
+        print("FAIL dx West");
+        return 1;
+    }
+    if direction_dx(North) != 0 {
+        print("FAIL dx North");
+        return 1;
+    }
+    if direction_dy(South) != -1 {
+        print("FAIL dy South");
+        return 1;
+    }
+    print("  match_expr: OK");
+    0
+}
+
+fn test_match_in_assignment() -> Int {
+    let x = 15;
+    let category = match x {
+        _ if x < 0 => "negative",
+        _ if x == 0 => "zero",
+        _ if x < 10 => "small",
+        _ if x < 100 => "medium",
+        _ => "large",
+    };
+    if category != "medium" {
+        print(f"FAIL match_assign: {category}");
+        return 1;
+    }
+    print("  match_in_assignment: OK");
+    0
+}
+
+fn test_match_nested_maybe() -> Int {
+    let outer: Maybe<Int> = Some(42);
+    let result = match outer {
+        Some(v) => {
+            if v > 0 {
+                v * 2
+            } else {
+                0
+            }
+        },
+        None => -1,
+    };
+    if result != 84 {
+        print(f"FAIL nested_maybe: {result}, expected 84");
+        return 1;
+    }
+    print("  match_nested_maybe: OK");
+    0
+}
+
+type Expr3 is Num(Int) | Neg(Heap<Expr3>) | Add3(Heap<Expr3>, Heap<Expr3>);
+
+@allow(unbounded_recursion)
+fn eval3(e: Expr3) -> Int {
+    match e {
+        Num(n) => n,
+        Neg(inner) => 0 - eval3(*inner),
+        Add3(left, right) => eval3(*left) + eval3(*right),
+    }
+}
+
+fn test_match_recursive() -> Int {
+    // (3 + (-2)) = 1
+    let expr = Add3(
+        Heap(Num(3)),
+        Heap(Neg(Heap(Num(2)))),
+    );
+    let result = eval3(expr);
+    if result != 1 {
+        print(f"FAIL recursive: {result}, expected 1");
+        return 1;
+    }
+    print("  match_recursive: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Complex Match Tests:");
+    let mut failures = 0;
+    failures = failures + test_match_expr();
+    failures = failures + test_match_in_assignment();
+    failures = failures + test_match_nested_maybe();
+    failures = failures + test_match_recursive();
+
+    if failures == 0 {
+        print("All complex match tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

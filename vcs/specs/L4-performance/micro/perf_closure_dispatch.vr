@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: micro, closure, dispatch, performance, indirect-call
+// @description: Closure indirect call dispatch overhead benchmarks (1M calls)
+
+/// Closure Dispatch Throughput Benchmark
+
+fn direct_add(x: Int) -> Int { x + 1 }
+
+fn bench_direct_call(iters: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + direct_add(i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_non_capturing_closure(iters: Int) -> Int {
+    let f = |x: Int| -> Int { x + 1 };
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + f(i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_capturing_closure(iters: Int) -> Int {
+    let offset = 1;
+    let f = |x: Int| -> Int { x + offset };
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + f(i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+
+fn bench_closure_as_arg(iters: Int) -> Int {
+    let f = |x: Int| -> Int { x + 1 };
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + apply(f, i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_closure_compose(iters: Int) -> Int {
+    let f = |x: Int| -> Int { x * 2 };
+    let g = |x: Int| -> Int { x + 1 };
+    let composed = |x: Int| -> Int { f(g(x)) };
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + composed(i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    let iters = 1000000;
+    print("=== Closure Dispatch Benchmarks ===");
+    print(f"Iterations: {iters}");
+
+    let r1 = bench_direct_call(iters);
+    print(f"  direct_call: done (sum={r1})");
+
+    let r2 = bench_non_capturing_closure(iters);
+    print(f"  non_capturing: done (sum={r2})");
+
+    let r3 = bench_capturing_closure(iters);
+    print(f"  capturing: done (sum={r3})");
+
+    let r4 = bench_closure_as_arg(iters);
+    print(f"  closure_as_arg: done (sum={r4})");
+
+    let r5 = bench_closure_compose(iters);
+    print(f"  closure_compose: done (sum={r5})");
+
+    // Verify consistency: all should add 1 per iteration
+    if r1 != r2 || r2 != r3 || r3 != r4 {
+        print("FAIL: results inconsistent");
+        return 1;
+    }
+
+    print("All closure dispatch benchmarks completed");
+    0
+}

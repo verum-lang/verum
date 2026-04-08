@@ -1,0 +1,101 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, structs, methods, lists, integration
+// @expected-exit: 0
+
+// Mini RPN calculator using a stack
+
+type CalcStack is { values: List<Int> };
+
+implement CalcStack {
+    public fn new() -> CalcStack {
+        CalcStack { values: [] }
+    }
+
+    public fn push_val(&mut self, v: Int) {
+        self.values.push(v);
+    }
+
+    public fn pop_val(&mut self) -> Int {
+        let idx = self.values.len() - 1;
+        let v = self.values[idx];
+        self.values.remove(idx);
+        v
+    }
+
+    public fn depth(&self) -> Int {
+        self.values.len()
+    }
+
+    public fn top(&self) -> Int {
+        self.values[self.values.len() - 1]
+    }
+}
+
+fn execute_rpn(tokens: List<Int>) -> Int {
+    // Tokens: positive = push value, negative = operation
+    // -1 = add, -2 = sub, -3 = mul, -4 = div
+    let mut stack = CalcStack.new();
+    let mut i = 0;
+    while (i < tokens.len()) {
+        let tok = tokens[i];
+        if (tok >= 0) {
+            stack.push_val(tok);
+        } else {
+            let b = stack.pop_val();
+            let a = stack.pop_val();
+            if (tok == -1) {
+                stack.push_val(a + b);
+            } else if (tok == -2) {
+                stack.push_val(a - b);
+            } else if (tok == -3) {
+                stack.push_val(a * b);
+            } else if (tok == -4) {
+                stack.push_val(a / b);
+            }
+        }
+        i = i + 1;
+    }
+    stack.top()
+}
+
+fn main() -> Int {
+    // Test 1: 3 4 + = 7
+    let r1 = execute_rpn([3, 4, -1]);
+    if (r1 != 7) {
+        print(f"FAIL test1: {r1}");
+        return 1;
+    }
+
+    // Test 2: 10 3 - = 7
+    let r2 = execute_rpn([10, 3, -2]);
+    if (r2 != 7) {
+        print(f"FAIL test2: {r2}");
+        return 1;
+    }
+
+    // Test 3: 5 6 * = 30
+    let r3 = execute_rpn([5, 6, -3]);
+    if (r3 != 30) {
+        print(f"FAIL test3: {r3}");
+        return 1;
+    }
+
+    // Test 4: (3 + 4) * 5 = 35
+    let r4 = execute_rpn([3, 4, -1, 5, -3]);
+    if (r4 != 35) {
+        print(f"FAIL test4: {r4}");
+        return 1;
+    }
+
+    // Test 5: 2 3 + 4 5 + * = (2+3)*(4+5) = 45
+    let r5 = execute_rpn([2, 3, -1, 4, 5, -1, -3]);
+    if (r5 != 45) {
+        print(f"FAIL test5: {r5}");
+        return 1;
+    }
+
+    print("924_mini_calculator: PASS");
+    0
+}

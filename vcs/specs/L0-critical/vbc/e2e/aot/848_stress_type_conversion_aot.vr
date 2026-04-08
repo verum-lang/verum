@@ -1,0 +1,240 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, pattern-match
+// @timeout: 60000
+// @expected-exit: 0
+
+// Pattern matching stress: deeply nested match, multiple variant types, cross-type operations
+
+type Animal is Cat(Int) | Dog(Int) | Fish(Int) | Bird(Int) | Snake(Int);
+type Mood is Happy | Sad | Angry | Calm | Excited;
+type Weather is Sunny | Rainy | Cloudy | Snowy | Windy | Foggy | Stormy;
+type Season is Spring | Summer | Autumn | Winter;
+
+type Token is TkNum(Int) | TkOp(Int) | TkParen(Int) | TkEnd;
+type Expr is Lit(Int) | BinAdd(Int, Int) | BinSub(Int, Int) | BinMul(Int, Int) | BinDiv(Int, Int) | UnNeg(Int);
+
+fn animal_weight(a: Animal) -> Int {
+    match a { Cat(w) => w, Dog(w) => w, Fish(w) => w, Bird(w) => w, Snake(w) => w }
+}
+
+fn animal_legs(a: Animal) -> Int {
+    match a { Cat(_) => 4, Dog(_) => 4, Fish(_) => 0, Bird(_) => 2, Snake(_) => 0 }
+}
+
+fn animal_tag(a: Animal) -> Int {
+    if (a is Cat) { return 0; }
+    if (a is Dog) { return 1; }
+    if (a is Fish) { return 2; }
+    if (a is Bird) { return 3; }
+    4
+}
+
+fn animal_is_pet(a: Animal) -> Int {
+    match a { Cat(_) => 1, Dog(_) => 1, Fish(_) => 1, Bird(_) => 1, Snake(_) => 0 }
+}
+
+fn mood_value(m: Mood) -> Int {
+    match m { Happy => 10, Sad => -5, Angry => -10, Calm => 5, Excited => 8 }
+}
+
+fn mood_is_positive(m: Mood) -> Int {
+    match m { Happy => 1, Excited => 1, Calm => 1, _ => 0 }
+}
+
+fn weather_comfort(w: Weather) -> Int {
+    match w {
+        Sunny => 10, Cloudy => 7, Rainy => 3, Windy => 5,
+        Snowy => 2, Foggy => 4, Stormy => 1
+    }
+}
+
+fn season_to_int(s: Season) -> Int {
+    match s { Spring => 1, Summer => 2, Autumn => 3, Winter => 4 }
+}
+
+fn eval_expr(e: Expr) -> Int {
+    match e {
+        Lit(n) => n,
+        BinAdd(a, b) => a + b,
+        BinSub(a, b) => a - b,
+        BinMul(a, b) => a * b,
+        BinDiv(a, b) => if (b != 0) { a / b } else { 0 },
+        UnNeg(n) => 0 - n,
+    }
+}
+
+fn expr_tag(e: Expr) -> Int {
+    if (e is Lit) { return 0; }
+    if (e is BinAdd) { return 1; }
+    if (e is BinSub) { return 2; }
+    if (e is BinMul) { return 3; }
+    if (e is BinDiv) { return 4; }
+    5
+}
+
+fn token_priority(t: Token) -> Int {
+    match t {
+        TkNum(_) => 0,
+        TkOp(op) => {
+            if (op == 0) { return 1; }  // add
+            if (op == 1) { return 1; }  // sub
+            if (op == 2) { return 2; }  // mul
+            3  // div
+        },
+        TkParen(_) => 4,
+        TkEnd => -1,
+    }
+}
+
+// Cross-type matching: combine weather and mood
+fn comfort_score(w: Weather, m: Mood) -> Int {
+    let wc = weather_comfort(w);
+    let mv = mood_value(m);
+    wc + mv
+}
+
+// Complex nested match with guards
+fn classify_animal_mood(a: Animal, m: Mood) -> Int {
+    let weight = animal_weight(a);
+    let legs = animal_legs(a);
+    let mv = mood_value(m);
+
+    if (legs == 4) {
+        if (mv > 0) {
+            if (weight > 10) { return 100; }
+            return 50;
+        }
+        if (weight > 20) { return -100; }
+        return -50;
+    }
+    if (legs == 2) {
+        if (mv > 0) { return 30; }
+        return -30;
+    }
+    // 0 legs (fish, snake)
+    if (mv > 0) { return 10; }
+    -10
+}
+
+// Season-weather compatibility
+fn season_weather_score(s: Season, w: Weather) -> Int {
+    let si = season_to_int(s);
+    let wc = weather_comfort(w);
+
+    // Summer + Sunny = best
+    if (si == 2) {
+        match w { Sunny => 20, Cloudy => 12, Rainy => 5, _ => 3 }
+    } else {
+        if (si == 4) {
+            match w { Snowy => 15, Cloudy => 8, Sunny => 10, _ => 4 }
+        } else {
+            wc
+        }
+    }
+}
+
+fn main() -> Int {
+    // Animal tests
+    assert_eq(animal_weight(Cat(5)), 5);
+    assert_eq(animal_weight(Dog(20)), 20);
+    assert_eq(animal_legs(Cat(5)), 4);
+    assert_eq(animal_legs(Fish(1)), 0);
+    assert_eq(animal_legs(Bird(2)), 2);
+    assert_eq(animal_legs(Snake(3)), 0);
+    assert_eq(animal_tag(Cat(1)), 0);
+    assert_eq(animal_tag(Dog(1)), 1);
+    assert_eq(animal_tag(Snake(1)), 4);
+    assert_eq(animal_is_pet(Cat(1)), 1);
+    assert_eq(animal_is_pet(Snake(1)), 0);
+
+    // Mood tests
+    assert_eq(mood_value(Happy), 10);
+    assert_eq(mood_value(Angry), -10);
+    assert_eq(mood_is_positive(Happy), 1);
+    assert_eq(mood_is_positive(Sad), 0);
+    assert_eq(mood_is_positive(Calm), 1);
+
+    // Weather tests
+    assert_eq(weather_comfort(Sunny), 10);
+    assert_eq(weather_comfort(Stormy), 1);
+    assert_eq(weather_comfort(Rainy), 3);
+
+    // Season tests
+    assert_eq(season_to_int(Spring), 1);
+    assert_eq(season_to_int(Winter), 4);
+
+    // Expression evaluation
+    assert_eq(eval_expr(Lit(42)), 42);
+    assert_eq(eval_expr(BinAdd(10, 20)), 30);
+    assert_eq(eval_expr(BinSub(50, 30)), 20);
+    assert_eq(eval_expr(BinMul(6, 7)), 42);
+    assert_eq(eval_expr(BinDiv(100, 4)), 25);
+    assert_eq(eval_expr(BinDiv(10, 0)), 0);
+    assert_eq(eval_expr(UnNeg(42)), -42);
+
+    // Expression tags
+    assert_eq(expr_tag(Lit(0)), 0);
+    assert_eq(expr_tag(BinAdd(0, 0)), 1);
+    assert_eq(expr_tag(BinMul(0, 0)), 3);
+    assert_eq(expr_tag(UnNeg(0)), 5);
+
+    // Token priority
+    assert_eq(token_priority(TkNum(5)), 0);
+    assert_eq(token_priority(TkOp(0)), 1);  // add
+    assert_eq(token_priority(TkOp(2)), 2);  // mul
+    assert_eq(token_priority(TkEnd), -1);
+
+    // Cross-type: comfort score
+    assert_eq(comfort_score(Sunny, Happy), 20);   // 10+10
+    assert_eq(comfort_score(Stormy, Angry), -9);   // 1+(-10)
+    assert_eq(comfort_score(Cloudy, Calm), 12);     // 7+5
+
+    // Complex nested: animal + mood classification
+    assert_eq(classify_animal_mood(Dog(25), Happy), 100);    // 4 legs, positive, weight>10
+    assert_eq(classify_animal_mood(Cat(5), Happy), 50);      // 4 legs, positive, weight<=10
+    assert_eq(classify_animal_mood(Dog(25), Angry), -100);   // 4 legs, negative, weight>20
+    assert_eq(classify_animal_mood(Cat(5), Sad), -50);       // 4 legs, negative, weight<=20
+    assert_eq(classify_animal_mood(Bird(2), Happy), 30);     // 2 legs, positive
+    assert_eq(classify_animal_mood(Bird(2), Angry), -30);    // 2 legs, negative
+    assert_eq(classify_animal_mood(Fish(1), Calm), 10);      // 0 legs, positive
+    assert_eq(classify_animal_mood(Snake(3), Sad), -10);     // 0 legs, negative
+
+    // Season-weather
+    assert_eq(season_weather_score(Summer, Sunny), 20);
+    assert_eq(season_weather_score(Summer, Rainy), 5);
+    assert_eq(season_weather_score(Winter, Snowy), 15);
+    assert_eq(season_weather_score(Spring, Sunny), 10);
+
+    // Stress: iterate over many combinations
+    let mut total_score = 0;
+    let mut wi = 0;
+    while (wi < 7) {
+        let w = if (wi == 0) { Sunny }
+                else { if (wi == 1) { Rainy }
+                else { if (wi == 2) { Cloudy }
+                else { if (wi == 3) { Snowy }
+                else { if (wi == 4) { Windy }
+                else { if (wi == 5) { Foggy }
+                else { Stormy } } } } } };
+        let mut mi = 0;
+        while (mi < 5) {
+            let m = if (mi == 0) { Happy }
+                    else { if (mi == 1) { Sad }
+                    else { if (mi == 2) { Angry }
+                    else { if (mi == 3) { Calm }
+                    else { Excited } } } };
+            total_score = total_score + comfort_score(w, m);
+            mi = mi + 1;
+        }
+        wi = wi + 1;
+    }
+    // weather comforts: 10+3+7+2+5+4+1 = 32, each * 5 = 160
+    // mood values: 10+(-5)+(-10)+5+8 = 8, each * 7 = 56
+    // total = 160 + 56 = 216
+    assert_eq(total_score, 216);
+
+    print("848_stress_pattern_match: PASS");
+    0
+}

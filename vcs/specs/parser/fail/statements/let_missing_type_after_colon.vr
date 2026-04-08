@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, let, type, error
+// @description: Test let statement with colon but missing type
+// @expected-error: E043
+
+fn test() {
+    let x: = 5;
+}

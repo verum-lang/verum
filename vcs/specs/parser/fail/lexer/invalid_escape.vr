@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, strings, escape, error
+// @description: Test invalid escape sequence detection
+// @expected-error: E002
+
+fn test_invalid_escape() {
+    let s = "hello\qworld";
+}

@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, nursery, error
+// @description: Test nursery without body block
+// @expected-error: E0D4
+
+async fn test() {
+    // nursery requires |n| { ... } syntax
+    nursery spawn_task();
+}

@@ -1,0 +1,230 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, permutations, next_permutation, rank, inversion
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Permutation operations:
+//   - next_permutation: find lexicographically next permutation in-place
+//   - permutation_rank: compute 0-based rank of a permutation among all n! permutations
+//   - inversion_count: count inversions in a permutation array
+
+// Copy array of length n.
+fn arr_copy(src: [Int; 8], dst: [Int; 8], n: Int) {
+    let mut i = 0;
+    while i < n { dst[i] = src[i]; i = i + 1; }
+}
+
+// Swap elements at i and j.
+fn arr_swap(arr: [Int; 8], i: Int, j: Int) {
+    let tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+}
+
+// Reverse subarray arr[l..r] (inclusive).
+fn arr_reverse(arr: [Int; 8], l: Int, r: Int) {
+    let mut lo = l;
+    let mut hi = r;
+    while lo < hi {
+        arr_swap(arr, lo, hi);
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+}
+
+// Compute next permutation of arr[0..n-1] in lexicographic order.
+// Returns 1 if a next permutation exists, 0 if arr was the last permutation.
+fn next_permutation(arr: [Int; 8], n: Int) -> Int {
+    // Find largest index i such that arr[i] < arr[i+1]
+    let mut i = n - 2;
+    while i >= 0 && arr[i] >= arr[i + 1] {
+        i = i - 1;
+    }
+    if i < 0 {
+        // Already the last permutation; reverse to get first
+        arr_reverse(arr, 0, n - 1);
+        return 0;
+    }
+    // Find largest j > i such that arr[i] < arr[j]
+    let mut j = n - 1;
+    while arr[j] <= arr[i] {
+        j = j - 1;
+    }
+    arr_swap(arr, i, j);
+    arr_reverse(arr, i + 1, n - 1);
+    1
+}
+
+// Compute 0-based rank of permutation arr[0..n-1] among all permutations of 1..n.
+// Uses factoriadic: rank = sum over i of (count of arr[j]<arr[i] for j>i) * (n-1-i)!
+fn factorial(n: Int) -> Int {
+    let mut f = 1;
+    let mut i = 2;
+    while i <= n { f = f * i; i = i + 1; }
+    f
+}
+
+fn perm_rank(arr: [Int; 8], n: Int) -> Int {
+    let mut rank = 0;
+    let mut i = 0;
+    while i < n - 1 {
+        // Count elements arr[i+1..n-1] that are less than arr[i]
+        let mut cnt = 0;
+        let mut j = i + 1;
+        while j < n {
+            if arr[j] < arr[i] { cnt = cnt + 1; }
+            j = j + 1;
+        }
+        rank = rank + cnt * factorial(n - 1 - i);
+        i = i + 1;
+    }
+    rank
+}
+
+// Count inversions in arr[0..n-1]: pairs (i,j) with i<j and arr[i]>arr[j].
+fn inversion_count(arr: [Int; 8], n: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if arr[i] > arr[j] { cnt = cnt + 1; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+fn test_next_permutation() {
+    // [1,2,3] -> [1,3,2] -> [2,1,3] -> [2,3,1] -> [3,1,2] -> [3,2,1] -> wraps to [1,2,3]
+    let mut arr = [1, 2, 3, 0, 0, 0, 0, 0];
+    let n = 3;
+
+    assert_eq(next_permutation(arr, n), 1);
+    assert_eq(arr[0], 1); assert_eq(arr[1], 3); assert_eq(arr[2], 2);
+
+    assert_eq(next_permutation(arr, n), 1);
+    assert_eq(arr[0], 2); assert_eq(arr[1], 1); assert_eq(arr[2], 3);
+
+    assert_eq(next_permutation(arr, n), 1);
+    assert_eq(arr[0], 2); assert_eq(arr[1], 3); assert_eq(arr[2], 1);
+
+    assert_eq(next_permutation(arr, n), 1);
+    assert_eq(arr[0], 3); assert_eq(arr[1], 1); assert_eq(arr[2], 2);
+
+    assert_eq(next_permutation(arr, n), 1);
+    assert_eq(arr[0], 3); assert_eq(arr[1], 2); assert_eq(arr[2], 1);
+
+    // [3,2,1] is last: next_permutation returns 0 and wraps to [1,2,3]
+    assert_eq(next_permutation(arr, n), 0);
+    assert_eq(arr[0], 1); assert_eq(arr[1], 2); assert_eq(arr[2], 3);
+
+    print("next_permutation: ok");
+}
+
+fn test_all_permutations_count() {
+    // Iterate through all permutations of [1,2,3,4] and count them = 24.
+    let mut arr = [1, 2, 3, 4, 0, 0, 0, 0];
+    let n = 4;
+    let mut count = 1; // start with the first permutation already
+    while next_permutation(arr, n) == 1 {
+        count = count + 1;
+    }
+    assert_eq(count, 24);
+
+    // Back to first after full cycle
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[3], 4);
+
+    print("all_permutations_count: ok");
+}
+
+fn test_permutation_rank() {
+    // Permutations of [1,2,3] and their ranks (0-based lexicographic):
+    // [1,2,3]=0, [1,3,2]=1, [2,1,3]=2, [2,3,1]=3, [3,1,2]=4, [3,2,1]=5
+    let p0 = [1, 2, 3, 0, 0, 0, 0, 0]; assert_eq(perm_rank(p0, 3), 0);
+    let p1 = [1, 3, 2, 0, 0, 0, 0, 0]; assert_eq(perm_rank(p1, 3), 1);
+    let p2 = [2, 1, 3, 0, 0, 0, 0, 0]; assert_eq(perm_rank(p2, 3), 2);
+    let p3 = [2, 3, 1, 0, 0, 0, 0, 0]; assert_eq(perm_rank(p3, 3), 3);
+    let p4 = [3, 1, 2, 0, 0, 0, 0, 0]; assert_eq(perm_rank(p4, 3), 4);
+    let p5 = [3, 2, 1, 0, 0, 0, 0, 0]; assert_eq(perm_rank(p5, 3), 5);
+
+    // For n=4: [4,3,2,1] = last = rank 23
+    let last4 = [4, 3, 2, 1, 0, 0, 0, 0]; assert_eq(perm_rank(last4, 4), 23);
+    // [1,2,3,4] = first = rank 0
+    let first4 = [1, 2, 3, 4, 0, 0, 0, 0]; assert_eq(perm_rank(first4, 4), 0);
+
+    print("permutation_rank: ok");
+}
+
+fn test_inversion_count() {
+    // [1,2,3]: 0 inversions (sorted)
+    let s = [1, 2, 3, 0, 0, 0, 0, 0]; assert_eq(inversion_count(s, 3), 0);
+
+    // [3,2,1]: 3 inversions (all pairs)
+    let r = [3, 2, 1, 0, 0, 0, 0, 0]; assert_eq(inversion_count(r, 3), 3);
+
+    // [2,1,3]: 1 inversion (2>1)
+    let t1 = [2, 1, 3, 0, 0, 0, 0, 0]; assert_eq(inversion_count(t1, 3), 1);
+
+    // [1,3,2]: 1 inversion (3>2)
+    let t2 = [1, 3, 2, 0, 0, 0, 0, 0]; assert_eq(inversion_count(t2, 3), 1);
+
+    // [4,3,1,2]: inversions: (4,3),(4,1),(4,2),(3,1),(3,2) = 5
+    let t3 = [4, 3, 1, 2, 0, 0, 0, 0]; assert_eq(inversion_count(t3, 4), 5);
+
+    // [2,4,1,3]: (2,1),(4,1),(4,3) = 3 inversions
+    let t4 = [2, 4, 1, 3, 0, 0, 0, 0]; assert_eq(inversion_count(t4, 4), 3);
+
+    // Property: inversion_count(perm) == rank for n=3 permutations when
+    // the permutation is a "simple" one (not always true in general).
+    // But for [1,2,3]: rank=0, inversions=0. True.
+    // For [3,2,1]: rank=5, inversions=3. Not always equal to rank.
+    // Just verify inversion is >= 0 and <= n*(n-1)/2
+    assert(inversion_count(t3, 4) <= 6); // max for n=4 is 4*3/2=6
+
+    print("inversion_count: ok");
+}
+
+fn test_permutation_properties() {
+    // Property: rank 0 = identity permutation, rank n!-1 = reversed
+    // For n=4: [1,2,3,4] rank=0, [4,3,2,1] rank=23
+    let id4  = [1, 2, 3, 4, 0, 0, 0, 0]; assert_eq(perm_rank(id4,  4), 0);
+    let rev4 = [4, 3, 2, 1, 0, 0, 0, 0]; assert_eq(perm_rank(rev4, 4), 23);
+
+    // Sum of ranks for all permutations of [1,2,3] = 0+1+2+3+4+5 = 15
+    let mut arr = [1, 2, 3, 0, 0, 0, 0, 0];
+    let mut rank_sum = 0;
+    rank_sum = rank_sum + perm_rank(arr, 3);
+    let mut cont = 1;
+    while cont == 1 {
+        cont = next_permutation(arr, 3);
+        rank_sum = rank_sum + perm_rank(arr, 3);
+        if cont == 0 { cont = 0; }
+    }
+    // After full cycle we've visited all 6 perms: ranks 0..5, sum=15
+    assert_eq(rank_sum, 15);
+
+    // Inversion count of identity = 0, of reverse = n*(n-1)/2
+    let id3  = [1, 2, 3, 0, 0, 0, 0, 0]; assert_eq(inversion_count(id3,  3), 0);
+    let rev3 = [3, 2, 1, 0, 0, 0, 0, 0]; assert_eq(inversion_count(rev3, 3), 3);
+    // n=4 reverse = 4*3/2 = 6
+    assert_eq(inversion_count(rev4, 4), 6);
+
+    print("permutation_properties: ok");
+}
+
+fn main() -> Int {
+    test_next_permutation();
+    test_all_permutations_count();
+    test_permutation_rank();
+    test_inversion_count();
+    test_permutation_properties();
+    print("[OK] 477_interp_permutations");
+    0
+}
